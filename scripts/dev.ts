@@ -16,7 +16,8 @@ const mainEntry = path.join(repoRoot, 'packages', 'main', 'src', 'index.ts');
 const preloadEntry = path.join(repoRoot, 'packages', 'preload', 'src', 'index.ts');
 const distDir = path.join(repoRoot, 'packages', 'main', 'dist');
 const rendererRoot = path.join(repoRoot, 'packages', 'renderer');
-const cdpPort = process.env.AUTO_CC_CDP_PORT ?? '9222';
+/** CDP 端口按项目约定用 10222，不使用 Chrome/Electron 默认的 9222。 */
+const cdpPort = process.env.AUTO_CC_CDP_PORT ?? '10222';
 const rendererUrl = process.env.ELECTRON_RENDERER_URL ?? 'http://127.0.0.1:5173';
 
 let electron: ChildProcess | undefined;

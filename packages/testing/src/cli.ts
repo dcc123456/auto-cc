@@ -7,7 +7,7 @@
  *   pnpm harness click --text "变更一次本地状态"
  *   pnpm harness shot --out docs/acceptance/1.2/1.2-02-after.png --url 127.0.0.1:5173
  *   pnpm harness eval --expr "typeof window.require"
- * 所有命令都对 Electron 的 CDP 端口操作，默认 9222，可用 --port 覆盖。
+ * 所有命令都对 Electron 的 CDP 端口操作，默认 10222，可用 --port 覆盖。
  */
 import path from 'node:path';
 import process from 'node:process';
@@ -25,7 +25,7 @@ function flag(name: string, fallback = ''): string {
   return index >= 0 ? (args[index + 1] ?? fallback) : fallback;
 }
 
-const port = Number(flag('port', '9222'));
+const port = Number(flag('port', '10222'));
 const urlFilter = flag('url') || undefined;
 
 async function attach(): Promise<CdpSession> {
@@ -35,7 +35,7 @@ async function attach(): Promise<CdpSession> {
 function help(): never {
   console.log(
     [
-      'harness <command> [--port 9222] [--url <target 子串>]',
+      'harness <command> [--port 10222] [--url <target 子串>]',
       '',
       '  targets            列出可连接的页面 target',
       '  wait --text <str>  等页面出现该文本（--timeout 毫秒）',
