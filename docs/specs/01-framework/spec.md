@@ -15,7 +15,7 @@ C 类附命令输出，U 类附测试报告）。无证据视为未验收。
 | ID     | 验收标准                                                                                                                                                                                                                                     | 方式 | 验证操作                                                                                                                                                                                                                                    | 状态 |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
 | 1.1-01 | `pnpm install` 一步成功，无 peer 冲突                                                                                                                                                                                                        | C    | `pnpm install` → `Done in 31.8s`，无 peer 错误                                                                                                                                                                                              | [x]  |
-| 1.1-02 | Electron 二进制在 install 后自动就位（不需手动补救）                                                                                                                                                                                         | C    | 归属 1.2（1.1 时尚未引入 electron）；实测结论见 1.2-11：Electron 44 无 install 脚本，靠根 `postinstall` 钩子                                                                                                                                | [ ]  |
+| 1.1-02 | Electron 二进制在 install 后自动就位（不需手动补救）                                                                                                                                                                                         | C    | 归属 1.2（1.1 时尚未引入 electron）；实测结论见 1.2-11：Electron 44 无 install 脚本，靠根 `postinstall` 钩子 —— 1.2-11 因沙箱无法端到端验而 BLOCKED，本条随其一同 BLOCKED，不重复计分                                                       | [!]  |
 | 1.1-03 | 全仓统一 ESM，`"type":"module"` 覆盖 root 与所有 `packages/*`                                                                                                                                                                                | C    | core / shared / root 均为 `"type": "module"`                                                                                                                                                                                                | [x]  |
 | 1.1-04 | `typecheck` 零错误且 `strict:true` 生效（故意写错能报错）                                                                                                                                                                                    | C    | 干净树通过；注入 `const bad: number='str'` → 命中 1 条 TS2322                                                                                                                                                                               | [x]  |
 | 1.1-05 | ESLint 对跨包 `src/internal/**` import 报错                                                                                                                                                                                                  | C    | probe `import '../core/src/internal/secret.js'` → `no-restricted-imports` error                                                                                                                                                             | [x]  |
@@ -677,13 +677,58 @@ isIdentical: true`（`1.10-01-10-11-before-1.png`、`1.10-01-10-11-wf-2.png`、
 
 | ID     | 验收标准                                                                                      | 状态 |
 | ------ | --------------------------------------------------------------------------------------------- | ---- |
-| M1-01  | 三端安装包可安装可启动，空 React 界面可见（本机受限时明确 BLOCKED 范围）                      | [ ]  |
-| M2-01  | agent 能自主完成「打开 app → 截图 → 点击 → 断言 → 复述结果」闭环，过程不需人工代跑            | [ ]  |
-| M2b-01 | 全新机器只装 app（无 Node / 无系统 Chrome）即可运行，重启后 fixture 站点登录态仍在            | [ ]  |
-| P1-01  | 上述所有条目为 PASS 或有记录在案的 BLOCKED                                                    | [ ]  |
-| P1-02  | `docs/research/source-repos-analysis.md` 完成（P2/P3/P4 抽取决策依据到位）                    | [ ]  |
-| P1-03  | 无任何 P2/P3/P4 业务代码泄漏进骨架                                                            | [ ]  |
+| M1-01  | 三端安装包可安装可启动，空 React 界面可见（本机受限时明确 BLOCKED 范围）                      | [!]  |
+| M2-01  | agent 能自主完成「打开 app → 截图 → 点击 → 断言 → 复述结果」闭环，过程不需人工代跑            | [x]  |
+| M2b-01 | 全新机器只装 app（无 Node / 无系统 Chrome）即可运行，重启后 fixture 站点登录态仍在            | [x]  |
+| P1-01  | 上述所有条目为 PASS 或有记录在案的 BLOCKED                                                    | [x]  |
+| P1-02  | `docs/research/source-repos-analysis.md` 完成（P2/P3/P4 抽取决策依据到位）                    | [x]  |
+| P1-03  | 无任何 P2/P3/P4 业务代码泄漏进骨架                                                            | [x]  |
 | P1-04  | 计划文档中每条被否决的技术路线（Playwright/better-sqlite3/husky）都在 spec 有对应反向验证条目 | [x]  |
+
+### P1 门禁收尾结论（2026-09-30 复核）
+
+**状态汇总**：本 spec 的表格条目共 138 行 = **132 `[x]` + 6 `[!]` + 0 `[ ]`**，
+所以 P1-01（「所有条目为 PASS 或有记录在案的 BLOCKED」）判 PASS。六条 `[!]` 按原因分三组：
+
+| 组                  | 条目                    | 阻塞原因（都已写在行内）                                                                                                                                                                                                                                                                     |
+| ------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 宿主平台缺二进制    | 1.7-09 / 1.7-10 / M1-01 | 本机 Windows：macOS 的 dmg 需要 hdiutil + codesign + Xcode 许可；Linux 的 deb 需要 `fpm`、AppImage 需要 `mksquashfs`（`linux-unpacked` 已真实产出）。M1-01 的**Windows 半边已 PASS**（1.7-03 安装版界面 + 1.7-04 无 dev server + 本轮 M2b-01 的新产物运行），只有 mac / linux 两栏记 BLOCKED |
+| 沙箱网络            | 1.2-11 / 1.1-02         | `install.js` 拉 SHASUMS 在本沙箱失败，`postinstall` 的端到端自动就位待有网环境复验；1.1-02 是同一件事在 1.1 的占位行，随其一同 BLOCKED，不重复计分                                                                                                                                           |
+| 原生区不可 CDP 驱动 | 1.2-08                  | 托盘图标的**鼠标点击**唤出无法自动化（CDP 只覆盖 web 内容），隐藏/唤回两条分支已由 `WM_CLOSE` 与 `window.close()` 实测，剩人工一眼确认                                                                                                                                                       |
+
+- **M2-01 → `[x]`**：`docs/acceptance/P1-gate/M2-01-self-driven-loop.txt`。九步 harness 调用（targets → shot →
+  click 工作流 → assert → shot → click 对话 → assert → eval 读数 → 退出码）全部由 agent 自己发起，
+  两次断言 `isPassed:true`，读数 `{"view":true,"msgs":2,"autonomy":"建议模式","tabs":3}`，
+  并对截图做了像素级复述（工作流卡片六步「待执行」、导航选中态在内核视图占位文本之上）。
+- **M2b-01 → `[x]`**：`docs/acceptance/P1-gate/M2b-01-packaged-login-survival.txt`。用 **00:54 重新打包**的
+  `dist/win-unpacked/auto-cc.exe`（不是 1.7 那份过期产物），以剥离 PATH（`node`/`chrome`/`npx` 均不存在）+
+  隔离 `--user-data-dir` 启动，渲染层 URL 是 `file://…app.asar/renderer/index.html`；真实点击「诊断 → 打开站点」
+  进 `persist:fixture` 分区写标记，CDP `Browser.close` 干净退出，同目录重启后
+  `lsMarker` 与 `idbMarker` **都读回 `p1-04-2026-09-29T16:58:02.965Z`**。全程只打本地 fixture（§7.2）。
+- **P1-03 → `[x]`**：`docs/acceptance/P1-gate/P1-03-no-business-leak.txt`。19 个包全是框架层、
+  第三方运行时依赖只有 9 个（PDF / 知识库 / 浏览器驱动相关的一个都没有）、
+  `packages/*/src` 里除 127.0.0.1 外零 URL、三源仓库标识符零命中、仓库内无 vendor 副本，
+  另有 3 条单测把「调不到外发能力」钉住。
+- **P1-02 → `[x]`，但它的**结论**尚未生效**：取证文档已具备判据要求的四件套（`[实测]` 标记的许可表、
+  三条由许可推导的硬约束、逐仓库能力内核、抽取决策映射表 + 对既有计划的修订）。
+  唯一悬空项是文档 §1.2 写明的**版权方身份确认**（三个仓库都是 `dcc123456`）：
+  若即用户本人，PolyForm 非商用条款可自行改授；若不是，P2 只能 clean-room 重写且不得复用其 prompt 与 UI 资产。
+  这一条不由我代答，P2 开工前必须先落定。
+
+**两条必须带走的环境事实**：
+
+1. `pnpm dist` 本轮在**图标资源**步骤连续失败两次（`icon-tool.js` 先报 `WebAssembly.Memory(): could not
+allocate memory`，再报子进程退出码 134 / EINVAL），失败点位于 `asar integrity` 之后，所以 exe 与 app.asar
+   完整、只是最后一次 rcedit 的图标/版本元数据没写进去。M2b-01 验的是运行期行为，不受影响；
+   但**下一次出安装包前要在内存正常的环境重跑 `pnpm dist`**，否则 1.7-11 的图标结论对新产物不成立。
+2. 1.6-08 的口径要在文档里说准：**app 自己不会开 CDP**（打包态 `resolveCdpPort → null`、
+   `devtools.status()` 报 `isCdpEnabled=false`、`cdpPort=null`），但**外部追加** `--remote-debugging-port`
+   时 Chromium 照样监听 10222（本轮 `curl /json/version` 返回 `Chrome/152.0.7977.130`，UA 含 `auto-cc/0.1.0`）。
+   这是所有 Chromium 产品的固有行为，不是闸门漏了；`packages/devtools/src/cdp-port.ts` 里那句
+   「产物里就算被塞进开关也不会开出端口」的注释与事实不符，本轮已改成准确表述。
+
+**有意留给后续计划的两处**（1.11 收尾时已记，不属于 P1 阻塞）：自治档位三个按钮缺 `aria-pressed`；
+主进程错误原文（如 `TOOL_NOT_REGISTERED`）在英文界面仍是中文。
 
 ### P1-04 收尾结论（AGENTS.md §6.5 反向验证总表）
 

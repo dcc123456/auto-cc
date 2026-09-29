@@ -1,0 +1,56 @@
+=== P1-03 骨架未泄漏 P2/P3/P4 业务代码（静态审计） ===
+采集时间：2026-09-30 00:54（+08:00），HEAD = 8a6be9e。
+审计口径：P2=浏览器自动化抓 JD / 打招呼 / 投递，P3=简历 PDF 编辑，P4=简历知识库。
+判定标准不是「字面量里有没有出现这些词」，而是三件事：有没有对应的包、有没有对应的依赖、
+有没有真实站点的访问面。下面按这三条给读数。
+
+-- 1. 包清单（19 个，全部为框架层，无业务域包） --
+agent config core devtools entitlement ipc kernel logger main outbound
+plugins preload renderer sessions shared shell store testing workflow
+说明：没有 resume / kb / pdf / browser / crawler / scraper 这类包名。
+`outbound` 是外发**记账与闸门**（1.9），不是外发**执行**；`workflow` 是状态机 + runner 骨架。
+
+-- 2. 第三方运行时依赖全集（跨 19 个包去重，共 9 个） --
+@standard-schema/spec, cordis, i18next, lucide-react, react, react-dom, react-i18next, yaml, zod
+根 package.json 的 dependencies 为空对象，只有 12 项 devDependencies（构建/测试工具链）。
+命中数（应为 0，实测 0）：
+  pdfkit / pdf-lib / pdf.js / canvas-editor / turndown / cheerio / axios / got / node-fetch
+  playwright / puppeteer / selenium / chromium / tough-cookie
+  better-sqlite3 / sqlite3 / level / lowdb
+结论：P3（PDF）与 P4（知识库解析）所需的能力库一个都没有引入；P2 的浏览器驱动走 Electron
+自带内核（1.8），因此不需要外部依赖，这一点与 1.7-12 的产物审计（asar 内无 node_modules）一致。
+
+-- 3. 外网访问面 --
+`grep -rInE "https?://" packages/*/src` 中，除 127.0.0.1 / localhost 之外的命中数 = 0。
+真实招聘平台域名（liepin|lagou|zhaopin|51job|boss.com|kanzhun|linkedin）在 packages/*/src 命中 2 处，
+两处都不是访问面：
+  packages/sessions/src/index.ts:29  —— 注释：「P1 只有本地 fixture，P2 起在此加 boss / liepin」
+  packages/workflow/src/runner.test.ts:221 —— 测试里把 'liepin' 当任意平台字符串用
+'boss' 作为词命中 7 处，全部在测试字面量 / 注释 / 分区名映射（partitionFor('boss') → 'persist:boss'）里，
+无 URL、无选择器、无请求代码。
+本地 fixture 站点：scripts/fixture-server.ts，端口 10233（FIXTURE_PORT 可覆盖），只监听 127.0.0.1。
+
+-- 4. 三源仓库代码是否被搬运 --
+`grep -rInE "browser-copilot|ai-resume|canva-pdf|canvas-editor|CopilotPlugin|resumeParser|factCheckService"
+ packages/*/src *.ts *.json *.yml` 命中数 = 0。
+`git ls-files | grep -iE "research|vendor|canva|copilot|ai-resume"` 只有
+docs/research/source-repos-analysis.md（结论文档），没有 vendor 目录、没有源码副本 —— 符合 AGENTS.md §6.4。
+
+-- 5. 业务词汇只以「契约名」存在，不以「实现」存在 --
+packages/core/src/events.ts:60 `WORKFLOW_STEP_IDS = ['search','profile','pitch','greet','tune','deliver']`
+是步骤 id 枚举；packages/agent/src/tools.ts 只有工具登记表（域.动作 命名约定）；
+packages/renderer/src/UsagePanel.tsx:11 `OUTBOUND_ACTIONS = ['greet','deliver']` 是额度面板的两个动作名。
+这三处都不含任何页面操作。对话骨架的兜底回复文案（agent/src/session.ts:383）显式写明
+「不接 LLM、不发网络请求，也调不到任何外发能力」。
+
+-- 6. 机检闸门（不是人工看一眼） --
+packages/agent/src/agent.test.ts:279 describe('对话骨架的业务边界（1.11-14 / 1.11-15）')
+packages/agent/src/agent.test.ts:304 it('agent.* 不 import 任何平台 / 简历 / 外发 / 闸门模块（1.11-14）')
+packages/agent/src/agent.test.ts:95  it('外发类工具名一律调不到：打招呼 / 投递 / 发送简历都不在表里（1.11-09）')
+packages/agent/src/session.ts:25 是 agent 包里唯一一条跨包 import（`@auto-cc/plugin-store` 的类型），
+属于 L0 存储，不在被禁的 平台/简历/外发/闸门 四类里。
+另有 eslint 边界规则（AGENTS.md §4.1 boundaries、§2.7 no-restricted-imports）与
+`pnpm lint`（1.11-11/14 收尾时实测零告警）在 CI 侧持续把关。
+
+结论：P1 骨架里没有任何 P2/P3/P4 的业务实现、依赖或访问面；业务词汇仅以契约枚举/命名约定出现，
+且有 3 条单测把「调不到」钉住。P1-03 判 PASS。

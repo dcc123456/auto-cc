@@ -1,0 +1,48 @@
+=== M2-01 agent 自主闭环：打开 app → 截图 → 点击 → 断言 → 复述结果 ===
+执行时间：2026-09-30 00:2x（+08:00）。全程由 agent（我）用 `pnpm harness <子命令>` 驱动，
+人工没有点过一次鼠标、没有打开过 DevTools、没有手工截图。原始逐条输出留在
+`tmp/m2-loop.log`（9 步，含每步命令与退出码），本文件是它的读数复述与判定。
+被测对象：dev 态 app（vite 5173 + Electron 主进程 + CDP 10222），fixture 站点 10233 在场但本轮未访问。
+
+STEP1 targets —— `harness targets` 列出真实可连目标，2 个 page：
+  page  auto-cc 会话实验台 · 分区 A   http://127.0.0.1:10233/
+  page  auto-cc                        http://127.0.0.1:5173/
+说明：这一步等价于「agent 知道自己面对的是哪个窗口」，端口是 10222（项目约定，非 9222）。
+
+STEP2 shot(app-open) —— `harness shot --url 127.0.0.1:5173 --out tmp/m2-loop-1-app-open.png`
+产物：tmp/m2-loop-1-app-open.png（按 §7.5 留在被忽略的 tmp/，不入库）。
+
+STEP3 click(工作流) —— `harness click --url 127.0.0.1:5173 --text 工作流`
+返回：`已点击 <button>（原生鼠标事件）` —— 走 CDP Input.dispatchMouseEvent，不是 el.click() 绕过。
+
+STEP4 assert(workflow-panel) —— `harness assert --expr-file tmp/m2-assert-workflow.js --equals true`
+返回：{"isPassed": true, "actual": true}
+
+STEP5 shot(workflow) —— 同 STEP2，产物 tmp/m2-loop-2-workflow.png。
+
+STEP6 click(对话) —— `harness click --text 对话` → `已点击 <button>（原生鼠标事件）`
+
+STEP7 assert(chat-panel) —— {"isPassed": true, "actual": true}
+
+STEP8 readings —— `harness eval` 取界面读数：
+  {"view":true,"msgs":2,"autonomy":"建议模式","tabs":3}
+  view = 对话滚动容器存在；msgs = 会话里 2 条消息；autonomy = 自治档位当前值；tabs = 三个视图入口。
+
+STEP9 —— 九步退出码全为 0。
+
+-- agent 亲眼看到的页面（对 tmp/m2-loop-2-workflow.png 的复述，收口时重新读图核对） --
+顶栏：左「auto-cc 桌面工作台」+ 副标题「计划一 · 搭建主体框架」；右导航「对话 / 工作流 / 诊断 / English」，
+其中「工作流」处于选中态（描边高亮），证明 STEP3 的点击在像素上生效，不只是 DOM 状态变了。
+左卡片：标题「求职工作流（P1 六步占位流水线）」+ 右上「重新读取工作流状态」按钮；
+按钮行「开始」（蓝色描边，可用）、「暂停」「续跑」（灰置）；状态行「未开始 · 0c4ec328-be42-41e7-a36f-da883e460a89」。
+六步列表全部右侧标「待执行」：1·搜索合适的 JD / 2·岗位与简历匹配 / 3·生成打招呼话术 /
+4·打招呼 / 5·按 JD 优化简历 / 6·发送简历。
+右栏：「内嵌内核视图槽位」+「此区域由主进程的 WebContentsView 覆盖渲染」+「38%」
+—— 这是内核视图未覆盖时露出的渲染层占位，与 1.8 的槽位实现一致。
+
+-- 判定 --
+「打开 app → 截图 → 点击 → 断言 → 复述结果」五段全部由 agent 独立完成，且点击前后各有一次断言、
+断言两侧各有一张截图，闭环成立。M2-01 判 PASS。
+证据形态说明：本门禁条目的 ID 不是数字式（P1/M2 前缀），§7.5 的 pre-commit 钩子只放行
+`docs/acceptance/<子计划>/<数字ID>-*.png`，所以这里的入库证据是 DOM 断言 + 读数逐字记录，
+截图按规则留在 tmp/ 不入库；像素级证据在 1.6～1.11 各子计划的编号截图里已经按条目存过。

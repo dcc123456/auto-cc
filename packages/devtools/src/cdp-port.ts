@@ -16,7 +16,9 @@ const MAX_PORT = 65_535;
  * @returns 生效端口，未开启为 null
  */
 export function resolveCdpPort(switchValue: string, isPackaged: boolean): number | null {
-  // 打包闸门排在解析之前：这是结构性保证，产物里就算被塞进开关也不会开出端口。
+  // 闸门只管 app 自己：打包态永不主动加这个开关，`isCdpEnabled` 据此如实报 false。
+  // 外部追加 `--remote-debugging-port` 时 Chromium 仍会开出端口（1.7-06 / M2b-01 实测），那是所有
+  // Chromium 产品的固有行为，不由本函数负责——本函数只回答「app 有没有自己开调试入口」。
   if (isPackaged) return null;
   const port = Number(switchValue);
   if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) return null;

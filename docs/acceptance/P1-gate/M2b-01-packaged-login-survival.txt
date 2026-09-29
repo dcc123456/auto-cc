@@ -1,0 +1,65 @@
+=== M2b-01 打包版 app 独立运行 + fixture 登录态跨重启 ===
+被测产物：`dist/win-unpacked/auto-cc.exe`（246,032,896 B）+ `resources/app.asar`（1,543,358 B），
+构建时间 2026-09-30 00:54，即 1.11 之后的代码重新打包（1.7 那份 19:03 的产物已过期，不能用它验 1.11 的行为）。
+构建过程如实记录：`pnpm dist` 在**图标资源**这一步失败两次（第一次 `icon-tool.js` 报
+`WebAssembly.Memory(): could not allocate memory`，第二次同一子进程退出码 134 / EINVAL），
+失败点排在 `updating asar integrity executable resource` **之后**，所以 exe 与 app.asar 是完整的、
+只是 exe 的图标/版本资源没被最后一次 rcedit 写入。本轮验的是运行期行为，与图标无关；
+图标与版本元数据由 1.7-11 在 19:03 那次成功构建上另行取证，两者不互相冒充。
+原始逐条输出：`tmp/m2b-loop.log`（第一轮）、`tmp/m2b-loop2.log`（第二轮回读）、
+`tmp/m2b-loop3.log` / `tmp/m2b-loop4.log`（自述读数），截图 `tmp/m2b-1-before-restart.png`、
+`tmp/m2b-2-after-restart.png` —— 按 §7.5 全部留在被忽略的 tmp/，不入库。
+
+-- 1. 「只装这一个 app」：宿主没有 Node、没有系统 Chrome --
+以 `PATH` 只保留 Windows 系统目录的方式启动 exe（`env PATH="C:/Windows/System32;C:/Windows" ./dist/win-unpacked/auto-cc.exe …`）。
+在同一份剥离过的 PATH 上探测：
+  node: PATH 上不存在 / chrome: PATH 上不存在 / npx: PATH 上不存在
+（这条与 1.7-05 同一手法，是**代理证明**而不是真的干净虚拟机，强度弱于原始意图，如实记在这里。）
+启动后 `harness targets` 看到的渲染层 URL 是
+  file:///D:/works/deep-seek-workspace/auto-cc/dist/win-unpacked/resources/app.asar/renderer/index.html
+即资源全部来自包内，5173 上没有 dev server（当时 vite 进程已停）。
+
+-- 2. 隔离的 userData：模拟「第一次装」 --
+`--user-data-dir=D:/works/deep-seek-workspace/auto-cc/tmp/m2b-userdata`，启动前 `rm -rf` 过，
+所以 profile 是全新的。跑起来后目录里由 app 自己长出：
+  Local Storage/leveldb/            （主窗口）
+  Partitions/app/Local Storage/leveldb/
+  Partitions/fixture/…              ← 本轮的登录态落点
+  Partitions/fixture-alt/…
+`Partitions/fixture` 内部（第一轮退出后采集）：
+  Local Storage/leveldb/000003.log  206 B（mtime 00:58，即写入标记之后）
+  Local Storage/leveldb/{CURRENT,MANIFEST-000001,LOCK,LOG}
+  IndexedDB/http_127.0.0.1_10233.indexeddb.leveldb/
+  Cache/Cache_Data、Code Cache/{js,wasm}、DawnGraphiteCache、GPUCache 等 Chromium 常规目录
+
+-- 3. 登录态写入 → 干净退出 → 重启读回（同一条 UI 路径，非注入） --
+第一轮（PID 2329）：`harness click --text 诊断` → `harness click --selector '[data-session-id="fixture"] [data-action="open"]'`
+两次都返回「已点击 <button>（原生鼠标事件）」，内核视图被 `persist:fixture` 分区加载到
+`http://127.0.0.1:10233/`（本地 fixture 站点，未碰真实招聘平台，符合 §7.2）。
+在 fixture 页求值写入标记，返回：
+  marker = p1-04-2026-09-29T16:58:02.965Z
+  lsKeys = ["p1-04-marker"]，cookieCount = 0
+  bridgeExposed = "undefined"，ipcRendererExposed = "undefined"，preloadGlobals = []
+  （外部视图不挂 preload，这三条正是 §8.1 的底线在打包版上成立）
+退出方式：CDP `Browser.close`（`tmp/m2b-close.mjs`），端口随后释放 —— leveldb 靠正常关闭流程落盘，
+不用 taskkill 强杀，避免把「没落盘」误当成「没持久化」。
+第二轮（PID 2374，同一 --user-data-dir 重新启动）：同样两次真实点击重开 fixture 视图，读回：
+  lsMarker  = "p1-04-2026-09-29T16:58:02.965Z"   ← 与第一轮逐字相同
+  idbMarker = "p1-04-2026-09-29T16:58:02.965Z"   ← IndexedDB 同样跨重启
+  origin = http://127.0.0.1:10233，isSecureContext = true，readyState = complete
+localStorage 与 IndexedDB 两条存储都活过一次进程重启，且是在**打包产物**上发生的。
+
+-- 4. 顺手复验了 1.6-08 留给打包态的那半条 --
+同一轮取 `devtools.status()`：`isPackaged=true`、`isCdpEnabled=false`、`cdpPort=null`、`targetCount=2`，
+而 `curl http://127.0.0.1:10222/json/version` 同时返回
+`{"Browser":"Chrome/152.0.7977.130", … UA 含 auto-cc/0.1.0}`。
+两个读数不矛盾，且必须写清楚它们的差别：**app 自己不会开 CDP**（打包闸门 `resolveCdpPort(…, true) → null`，
+产物不带这个开关），但由启动者**从外部追加** `--remote-debugging-port` 时，Chromium 仍会照命令行开出端口 ——
+这是所有 Chromium 产品的固有行为，不是本项目的闸门漏了。本轮正是靠外部追加的开关才观测到第 3 节的过程；
+1.7-06 早先记录过同样的组合（isCdpEnabled=false + 端口可用），本次是在 1.11 之后的新产物上复现。
+
+-- 5. 判定 --
+「全新机器只装 app（无 Node / 无系统 Chrome）即可运行」：PASS（剥离 PATH + 包内 file:// 资源 + 窗口可见
+`windowVisible=true`、`kernelViewVisible=true`、内核视图摆位 451x737）。
+「重启后 fixture 站点登录态仍在」：PASS（打包产物上 localStorage + IndexedDB 双存储同值跨重启）。
+macOS / Linux 的同一验证在本机无法完成，与 1.7-09 / 1.7-10 一起记为 BLOCKED。
