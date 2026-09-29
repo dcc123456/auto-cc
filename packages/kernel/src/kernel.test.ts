@@ -6,6 +6,7 @@
  * 长出来的行为，用 mock 就只剩自说自话。
  */
 import { Context, Service } from '@auto-cc/core';
+import { ConfigService } from '@auto-cc/plugin-config';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,6 +122,25 @@ plugins:
       registry: REGISTRY,
     });
     expect(seen).toEqual(['runtime/info']);
+  });
+
+  it('清单里有 `config` 时，文件层与运行时层照样落到插件（spec 1.3-02 的服务路径）', async () => {
+    manifest(`
+plugins:
+  - id: config
+  - id: demo
+    config:
+      greeting: 来自清单
+`);
+    const ctx = new Context();
+    await ctx.plugin(KernelService, {
+      manifest: 'cordis.yml',
+      rootDir,
+      runtime: { demo: { level: 'debug' } },
+      registry: { ...REGISTRY, config: ConfigService },
+    });
+    // 一次性灌层曾在装配开始时落空——那时 `config` 还没挂上，两层于是全丢，只剩 schema 默认值。
+    expect(seen).toEqual(['来自清单/debug']);
   });
 
   it('依赖缺席时是 PENDING 而不是装配失败，兄弟插件照常 ACTIVE（spec 1.3-09）', async () => {

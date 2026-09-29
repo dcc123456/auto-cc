@@ -132,7 +132,7 @@ export class KernelService extends Service {
    *
    * 为什么要自己留一份：`config` 服务也是可卸载的插件，一旦被 stop/start（或被依赖它的
    * 插件重启），它内部那张表就没了；面板保存的配置不能因为重启而悄悄失效。所以真相存在
-   * 内核里，每次挂载 `config` 之后重放一遍（`seedConfig`）。
+   * 内核里，每次解析配置前重放一遍（`seedConfig`）。
    */
   private readonly runtimePatches = new Map<string, Record<string, unknown>>();
   private entries: ManifestEntry[] = [];
@@ -226,8 +226,6 @@ export class KernelService extends Service {
       }
       this.fibers.delete(id);
     }
-    // `config` 可能刚被重启过（它自己也是插件），运行时层要从内核这份副本重放。
-    this.seedConfig();
     return this.attach(entry, this.implOf(id), this.configuration(entry, this.implOf(id)));
   }
 
@@ -247,7 +245,6 @@ export class KernelService extends Service {
     // 存进运行时层，否则之后每一次解析都会跟着失败，界面再也修不回来。
     this.validateCandidate(entry, impl, patch);
     this.patchRuntime(id, patch);
-    this.seedConfig();
     const value = this.configuration(entry, impl);
     const fiber = this.fibers.get(id);
     if (!fiber) return this.requireNode(entry, 'pending', Object.keys(value));
@@ -310,8 +307,7 @@ export class KernelService extends Service {
       return;
     }
 
-    this.seedConfig();
-
+    // 不在这里灌配置层：`config` 自己也是清单里的插件，装配开始时它还不存在（见 `configuration`）。
     for (const entry of this.entries) {
       const impl = this.registry()[entry.id];
       if (!impl) {
@@ -357,8 +353,12 @@ export class KernelService extends Service {
     const request = { schema: this.schemaOf(impl), envMap: impl.envMap };
     // `config` 服务可能尚未挂上（清单里注掉了它，或它正被调试面板停着），此时退回纯函数分层解析。
     const config = this.ctx.get('config') as ConfigService | undefined;
-    if (config) return config.resolve(entry.id, request);
-    return resolveConfig(entry.id, { ...request, file: entry.config, runtime: this.runtimePatches.get(entry.id) });
+    if (!config)
+      return resolveConfig(entry.id, { ...request, file: entry.config, runtime: this.runtimePatches.get(entry.id) });
+    // 解析前重放镜像：`config` 是在装配循环里逐个挂上的，早于它的重放点都会落空，
+    // 而它自己也可被 stop/start（表就空了）。内核这两张表才是真相，缺了就永远只拿到 schema 默认值。
+    this.seedConfig(config);
+    return config.resolve(entry.id, request);
   }
 
   /**
@@ -440,10 +440,8 @@ export class KernelService extends Service {
     this.runtimePatches.set(id, { ...this.runtimePatches.get(id), ...patch });
   }
 
-  /** 把文件层与运行时层重放进 `config` 服务；每次挂载 `config` 之后都要调，否则面板保存的配置会丢。 */
-  private seedConfig(): void {
-    const config = this.ctx.get('config') as ConfigService | undefined;
-    if (!config) return;
+  /** 把内核这两张表（清单文件层 + 运行时层）重放进 `config` 服务，幂等，所以每次解析前都灌。 */
+  private seedConfig(config: ConfigService): void {
     for (const entry of this.entries) config.setFile(entry.id, entry.config);
     for (const [id, patch] of this.runtimePatches) config.setRuntime(id, patch);
   }
