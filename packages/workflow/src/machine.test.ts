@@ -131,6 +131,49 @@ describe('合法迁移（1.10-02 / 03 / 05 / 06）', () => {
   });
 });
 
+describe('接管点（spec 2.1-08）', () => {
+  /** 一个「运行中、停在 search 这一步」的状态，接管相关断言都从它出发。 */
+  const running = () => applyAll(idleRun(), [{ type: 'start' }, { type: 'step-started', stepId: 'search', at: 2000 }]);
+
+  it('未开始的 run 没有接管点，界面不会凭空挂出「等待你接管」', () => {
+    expect(idleRun().requiresHuman).toBeNull();
+  });
+
+  it('普通暂停只是用户按了停止，不写接管点', () => {
+    expect(applyAll(running(), [{ type: 'pause' }]).requiresHuman).toBeNull();
+    expect(applyAll(running(), [{ type: 'pause', takeover: null }]).requiresHuman).toBeNull();
+  });
+
+  it('带接管原因的暂停把「平台 + 原因 + 卡在哪一步」原样留在 run 上', () => {
+    const takeover = { platform: 'boss', reason: 'expired', stepId: 'search', at: 2500 } as const;
+    const paused = applyAll(running(), [{ type: 'pause', takeover }]);
+    expect(paused.status).toBe('paused');
+    // 断言的是**数据**而不是句子：文案由渲染层按语言组织（AGENTS.md §5.5），主进程不参与组句。
+    expect(paused.requiresHuman).toEqual(takeover);
+  });
+
+  it('续跑即宣告接管完成，横幅跟着消失', () => {
+    const paused = applyAll(running(), [
+      {
+        type: 'pause',
+        takeover: { platform: 'boss', reason: 'missing', stepId: 'search', at: 2500 },
+      },
+    ]);
+    expect(applyAll(paused, [{ type: 'resume' }]).requiresHuman).toBeNull();
+  });
+
+  it('重新起一个 run 不会把上一个的接管点带过来', () => {
+    const paused = applyAll(running(), [
+      {
+        type: 'pause',
+        takeover: { platform: 'boss', reason: 'missing', stepId: 'search', at: 2500 },
+      },
+    ]);
+    const restarted = applyAll({ ...paused, status: 'idle' }, [{ type: 'start' }]);
+    expect(restarted.requiresHuman).toBeNull();
+  });
+});
+
 describe('非法迁移一律拒绝且不抛异常（1.10-09）', () => {
   const search = WORKFLOW_STEP_IDS[0];
   const cases: { label: string; run: WorkflowRunView; event: RunnerEvent }[] = [

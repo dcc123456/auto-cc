@@ -61,6 +61,31 @@ importers:
         specifier: workspace:*
         version: link:../config
 
+  packages/browser:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-sessions':
+        specifier: workspace:*
+        version: link:../sessions
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@auto-cc/shell':
+        specifier: workspace:*
+        version: link:../shell
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      electron:
+        specifier: ^44.4.5
+        version: 44.4.5
+
   packages/config:
     dependencies:
       '@auto-cc/core':
@@ -186,6 +211,9 @@ importers:
       '@auto-cc/plugin-agent':
         specifier: workspace:*
         version: link:../agent
+      '@auto-cc/plugin-browser':
+        specifier: workspace:*
+        version: link:../browser
       '@auto-cc/plugin-config':
         specifier: workspace:*
         version: link:../config

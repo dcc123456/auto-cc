@@ -6,6 +6,7 @@
  * 新增插件时同时改两处——清单漏了它就不装，注册表漏了它在插件树里显示 failed。
  */
 import { AgentToolsService, ChatSessionService } from '@auto-cc/plugin-agent';
+import { BrowserPageService } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
@@ -33,6 +34,8 @@ export const REGISTRY: Registry = {
   plugins: PluginsService,
   devtools: DevtoolsService,
   sessions: SessionsService,
+  // 页面操作入口（spec 2.1）：服务名是 `browser.page`，清单 id 用短名 `browser`（同 1.9 的 usage/entitlement 关系）。
+  browser: BrowserPageService,
   // 工作流执行器骨架（spec 1.10）：六步占位流水线，真实步骤在 P2 换进来。
   workflow: WorkflowRunnerService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——

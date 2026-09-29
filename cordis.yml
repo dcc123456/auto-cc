@@ -65,8 +65,9 @@ plugins:
 
   # 内置内核会话（spec 1.8）：每个平台一份 `persist:<id>` 分区，登录态落 userData。
   # 排在 shell 之后：它要请 shell 按指定分区重建内嵌视图（视图宿主唯一，见 plan §8.3 决策 1）。
-  # 这里只配本地 fixture —— 两个分区指向同一个服务的两条路径，用来证明 cookie 互不共享；
-  # 真实招聘平台到 P2 才登记，且必须先满足 AGENTS.md §7.2「自动化测试不碰真实平台」。
+  # 这里只配本地 fixture —— 三个分区指向同一个服务的三条路径，用来证明 cookie 互不共享；
+  # `boss` 的起始地址是**本地仿站**（`/boss`），不是 zhipin.com：AGENTS.md §7.2 规定自动化一律打本地站点，
+  # 真实平台只在用户在场时手动验证（spec 2.3-10），届时改这一行 startUrl 即可，代码路径不变。
   - id: sessions
     dependsOn: [shell]
     config:
@@ -77,6 +78,18 @@ plugins:
         - id: fixture-alt
           startUrl: http://127.0.0.1:10233/alt
           sessionCookieName: autocc_session
+        - id: boss
+          startUrl: http://127.0.0.1:10233/boss
+          sessionCookieName: autocc_session
+
+  # 页面操作入口（spec 2.1）：导航与快照，2.2 起在同一条注入通道上加点击/输入/定位。
+  # 排在 sessions 之后：它不拥有分区，只在「会话已经打开」的那块视图上做事（未打开时结构化失败）。
+  # 服务名是 `browser.page`（`域.能力` 约定），清单 id 用短名 `browser`——与 usage/entitlement 同一种关系。
+  - id: browser
+    dependsOn: [sessions]
+    config:
+      navigateTimeoutMs: 10000
+      snapshotTextLimit: 4000
 
   # 工作流执行器骨架（spec 1.10）：六步占位流水线，把「状态是数据、界面是镜像」这条契约立起来。
   # 只依赖 ipc——处理器要在界面能发起调用之前就位。**不**依赖 entitlement：P1 的六步里没有任何

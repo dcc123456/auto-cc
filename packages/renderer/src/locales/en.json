@@ -77,7 +77,19 @@
       "storagePath": "Storage path {{path}}",
       "cookieNames": "Cookie names {{names}}",
       "expiresAt": "Expires {{time}}",
-      "noExpiry": "no expiry"
+      "noExpiry": "no expiry",
+      "close": "Close kernel view",
+      "actionClose": "Kernel view released (partition and sign-in kept)",
+      "pageHeading": "Kernel page",
+      "snapshot": "Read page snapshot",
+      "actionSnapshot": "Page snapshot read",
+      "snapshotIdle": "No site is mounted in the kernel view yet, so there is no page to read",
+      "snapshotReading": "Title \"{{title}}\" · loading {{readyState}} · {{elements}} elements · {{textLength}} characters (kept {{bodyLength}}) · {{headings}} headings",
+      "snapshotUrl": "Page URL {{url}} · partition {{partition}}",
+      "snapshotHeadings": "Headings: {{items}}",
+      "navigate": "Navigate",
+      "actionNavigate": "navigate to that URL",
+      "navigatePlaceholder": "URL on a registered platform origin, e.g. http://127.0.0.1:10233/boss"
     },
     "assembly": {
       "heading": "Plugin assembly (cordis.yml)",
@@ -193,7 +205,9 @@
         "greet": "Send greeting",
         "tune": "Tailor resume to the JD",
         "deliver": "Send resume"
-      }
+      },
+      "takeoverTitle": "Waiting for you",
+      "takeoverBody": "Sign-in for {{platform}} has expired ({{reason}}); the run stopped at \"{{step}}\". Finish logging in inside the embedded view, then continue."
     },
     "chat": {
       "heading": "Chat",

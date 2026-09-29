@@ -24,7 +24,7 @@ import { judgeAuth, summarizeCookies, type AuthVerdict } from './probe.js';
  * 用 `Pick` 收成两个方法而不是直接用 `ShellService`，是为了让「领域层反过来能驱动壳层做什么」
  * 这件事在类型上就有限集——将来想加能力，得先改这里，改动就会被看见（AGENTS.md §4.1 的分层方向）。
  */
-type KernelHost = Pick<ShellService, 'mountKernelSite' | 'getStatus'>;
+type KernelHost = Pick<ShellService, 'mountKernelSite' | 'unmountKernelSite' | 'getStatus'>;
 
 /** 一个平台的会话配置：P1 只有本地 fixture，P2 起在此加 boss / liepin。 */
 const platformSchema = z.strictObject({
@@ -90,6 +90,19 @@ export class SessionsService extends Service {
     const partition = partitionFor(config.id);
     this.host.mountKernelSite(partition, config.startUrl);
     this.ctx.logger.info(`内核视图已挂载会话：平台 ${config.id} · 分区 ${partition}`);
+    return this.status();
+  };
+
+  /**
+   * 收回内核视图里的站点页面，退回占位页（spec 2.1-11 的「关」）。
+   *
+   * 与 `logout` 的区别是这条路径的全部意义：`close` 只关页面，分区里那份 cookie 一条都不动，
+   * 重新打开还是登录态；`logout` 才清 cookie。把两件事混成一个按钮，用户关掉窗口就等于退出登录。
+   * @returns 关闭之后的会话快照，`activePlatform` 为 null
+   */
+  close = async (): Promise<SessionsStatusView> => {
+    this.host.unmountKernelSite();
+    this.ctx.logger.info('内核视图已收回（分区与登录态保留）');
     return this.status();
   };
 

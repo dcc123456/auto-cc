@@ -1,7 +1,8 @@
-import { KeyRound, LogOut, Radar, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Compass, KeyRound, LogOut, Radar, RefreshCw, ScanText, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
+  KernelPageSnapshotView,
   KernelViewLoadError,
   SessionExpiredEvent,
   SessionPlatformView,
@@ -24,11 +25,12 @@ const formatExpiry = (ms: number | null, noneLabel: string): string =>
   ms === null ? noneLabel : new Date(ms).toLocaleString();
 
 /**
- * 会话面板：内置内核的分区、落盘位置、cookie 名与登录判定（spec 1.8）。
+ * 会话面板：内置内核的分区、落盘位置、cookie 名与登录判定（spec 1.8），以及内核页面的一次读取（spec 2.1-03）。
  *
- * 它是 `sessions.*` 四个能力的界面化身，也是仓库里第一个订阅**领域事件**的面板：
+ * 它是 `sessions.*` 五个能力的界面化身，也是仓库里第一个订阅**领域事件**的面板：
  * 失效横幅来自 `session/expired` 推送，不是轮询出来的（spec 1.8-06）。
  * 每次动作之后都重读快照，所以界面上永远是主进程当下的真相。
+ * 「内核页面」那一段只把主进程读回的串画出来，不在这里解析 DOM——页面语义属于服务层。
  */
 export function SessionPanel() {
   const { t } = useTranslation();
@@ -36,6 +38,8 @@ export function SessionPanel() {
   const [shell, setShell] = useState<ShellStatus>();
   const [expired, setExpired] = useState<SessionExpiredEvent[]>();
   const [viewError, setViewError] = useState<KernelViewLoadError | null>(null);
+  const [page, setPage] = useState<KernelPageSnapshotView | null>(null);
+  const [urlDraft, setUrlDraft] = useState('');
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
@@ -89,6 +93,26 @@ export function SessionPanel() {
   const logout = (platform: string) =>
     void run(t('session.actionLogout', { id: platform }), () => bridge?.sessions.logout(platform), {
       apply: mergePlatform,
+    });
+
+  /** 收回站点页面：分区读数归快照，页面读数则当场作废——视图里已经换回占位页了。 */
+  const closeView = () =>
+    void run(t('session.actionClose'), () => bridge?.sessions.close(), {
+      apply: (value) => {
+        setSnapshot(value);
+        setPage(null);
+      },
+    });
+
+  const readPage = () =>
+    void run(t('session.actionSnapshot'), () => bridge?.browser['page.snapshot'](), {
+      apply: setPage,
+    });
+
+  /** 导航成功后返回的就是落地页的快照，直接落进本面板，省掉一次「点了但看不见」的等待。 */
+  const navigate = () =>
+    void run(t('session.actionNavigate'), () => bridge?.browser['page.navigate'](urlDraft.trim()), {
+      apply: setPage,
     });
 
   return (
@@ -222,6 +246,94 @@ export function SessionPanel() {
           ))}
           {(snapshot?.platforms.length ?? 0) === 0 && <li className="text-xs text-slate-500">{t('session.empty')}</li>}
         </ul>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            data-action="close-view"
+            disabled={!!busy}
+            onClick={closeView}
+            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          >
+            <LogOut size={12} />
+            {t('session.close')}
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4" data-testid="kernel-page">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+            <ScanText size={16} />
+            {t('session.pageHeading')}
+          </h2>
+          <button
+            type="button"
+            data-action="snapshot"
+            disabled={!!busy}
+            onClick={readPage}
+            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          >
+            <RefreshCw size={14} />
+            {t('session.snapshot')}
+          </button>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="text"
+            data-testid="navigate-url"
+            value={urlDraft}
+            onChange={(event) => setUrlDraft(event.target.value)}
+            placeholder={t('session.navigatePlaceholder')}
+            className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+          />
+          <button
+            type="button"
+            data-action="navigate"
+            disabled={!!busy || urlDraft.trim() === ''}
+            onClick={navigate}
+            className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+          >
+            <Compass size={12} />
+            {t('session.navigate')}
+          </button>
+        </div>
+
+        {page ? (
+          <div className="mt-3 flex flex-col gap-1">
+            <p className="text-[11px] text-slate-300" data-testid="page-snapshot">
+              {t('session.snapshotReading', {
+                title: page.title,
+                readyState: page.readyState,
+                elements: page.elementCount,
+                textLength: page.textLength,
+                bodyLength: page.bodyText.length,
+                headings: page.headings.length,
+              })}
+            </p>
+            <p
+              className="break-all text-[11px] text-slate-500"
+              data-page-url={page.url}
+              data-page-partition={page.partition}
+            >
+              {t('session.snapshotUrl', { url: page.url, partition: page.partition || t('session.viewIdle') })}
+            </p>
+            {page.headings.length > 0 && (
+              <p className="break-all text-[11px] text-slate-400" data-testid="page-headings">
+                {t('session.snapshotHeadings', { items: page.headings.join(' / ') })}
+              </p>
+            )}
+            <pre
+              className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-800 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-400"
+              data-page-body={String(page.bodyText.length)}
+            >
+              {page.bodyText}
+            </pre>
+          </div>
+        ) : (
+          <p className="mt-3 text-[11px] text-slate-500">{t('session.snapshotIdle')}</p>
+        )}
       </section>
     </div>
   );

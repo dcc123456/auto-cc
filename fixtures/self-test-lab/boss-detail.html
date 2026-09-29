@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>求职仿站 · 职位详情（本地 fixture）</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      h2 {
+        margin: 18px 0 8px;
+        font-size: 14px;
+        color: #94a3b8;
+      }
+      .notice {
+        margin: 10px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: #cbd5e1;
+      }
+      .auth {
+        font-weight: 600;
+        color: #7dd3fc;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        color: #94a3b8;
+      }
+      .salary {
+        color: #f59e0b;
+      }
+      a {
+        color: #7dd3fc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 data-field="title">桌面端前端工程师（Electron）</h1>
+    <p class="meta">
+      <span data-field="company">星桥科技</span>
+      <span class="salary" data-field="salary">25-40K·14薪</span>
+      <span data-field="city">上海 · 浦东新区</span>
+      <span data-field="experience">3-5 年</span>
+      <span data-field="education">本科</span>
+    </p>
+    <p class="notice" id="auth-banner" data-logged-in="{{loggedIn}}">
+      当前登录状态：<span class="auth">{{authLabel}}</span>
+    </p>
+    <p><a id="back-link" href="/boss">返回搜索结果</a></p>
+
+    <h2>岗位职责</h2>
+    <p data-field="description">
+      负责桌面端应用的渲染层与主进程功能开发；参与浏览器自动化、会话管理与打包发布链路；
+      与算法同学联调插件框架。示例文本，虚构内容。
+    </p>
+    <h2>任职要求</h2>
+    <p data-field="requirement">三年及以上 TypeScript 经验，熟悉 Electron 与自动化测试。示例文本，虚构内容。</p>
+  </body>
+</html>

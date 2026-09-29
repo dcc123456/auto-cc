@@ -13,6 +13,12 @@ export type AppErrorCode =
   // 界面按码决定是「提示一句状态不允许」还是「这一步标红并可重试」。
   | 'WORKFLOW_INVALID_STATE'
   | 'WORKFLOW_STEP_FAILED'
+  // 内核页面（spec 2.1）：导航地址过不了许可判定，与视图里根本没有已挂载的页面。
+  // 两者界面表现不同——前者是「你给的地址不让去」，后者是「先点开门」，所以不合并成一个码。
+  | 'NAVIGATE_URL_REJECTED'
+  | 'NO_KERNEL_SESSION'
+  // 注入脚本本身在页面里抛了（页面被销毁、脚本被 CSP 拦下），与「读到了但内容为空」是两回事。
+  | 'PAGE_SCRIPT_FAILED'
   // 对话骨架（spec 1.11）：入参边界（空 / 超长）、并发（上一条还在流式）、档位枚举、注册表重复登记。
   // 界面按码决定是「把原因显示成一行提示」还是「什么都不改」。
   | 'CHAT_EMPTY_INPUT'

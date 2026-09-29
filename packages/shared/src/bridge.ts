@@ -53,6 +53,7 @@ export type {
   WorkflowStepId,
   WorkflowStepStatus,
   WorkflowStepView,
+  WorkflowTakeoverView,
 } from '@auto-cc/core';
 
 /** 渲染层可调用的 `service.method` 全限定名白名单（spec 1.4-07 的唯一依据）。 */
@@ -80,6 +81,10 @@ export const RENDERER_ALLOWLIST = [
   'sessions.open',
   'sessions.probe',
   'sessions.logout',
+  'sessions.close',
+  // 2.1 的页面操作：只允许导航到已登记平台的同源地址，快照是只读。
+  'browser.page.navigate',
+  'browser.page.snapshot',
   // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
   // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
   'entitlement.gate.check',
@@ -165,6 +170,31 @@ export type SessionPlatformView = {
 
 /** 会话总览：所有已配置平台 + 内核视图当前承载的是哪一个。 */
 export type SessionsStatusView = { platforms: SessionPlatformView[]; activePlatform: string | null };
+
+/**
+ * 内核视图所在页面的一次读取（spec 2.1-03）。
+ *
+ * 正文是**截断后的节选**，同时给出截断前的长度：验收要的是「snapshot 与渲染页一致」，
+ * 只给截断串不给出总长度，就分不清「页面就这么点字」和「被切了」。
+ */
+export type KernelPageSnapshotView = {
+  /** 页面 `document.title`。 */
+  title: string;
+  /** 页面当前地址（装载中可能是上一个）。 */
+  url: string;
+  /** 装载态：`loading` / `interactive` / `complete`。 */
+  readyState: 'loading' | 'interactive' | 'complete';
+  /** 元素总数，用来和截图对照「页面确实渲染了东西」。 */
+  elementCount: number;
+  /** 截断前的正文长度（字符）。 */
+  textLength: number;
+  /** 正文节选。 */
+  bodyText: string;
+  /** 页面主要标题文本（h1/h2/h3，最多 12 条）。 */
+  headings: string[];
+  /** 该页面所在的会话分区；空串表示还没挂任何平台。 */
+  partition: string;
+};
 
 /**
  * 闸门一次判定的结果（spec 1.9-01）。
@@ -355,6 +385,12 @@ export interface BridgeSignatures {
   'sessions.probe': { args: [platform: string]; returns: SessionPlatformView };
   /** 清掉该平台分区的 cookie，用于验收「退出登录即清除」（spec 1.8-04）。 */
   'sessions.logout': { args: [platform: string]; returns: SessionPlatformView };
+  /** 收回内核视图里的站点页面；分区与登录态一条都不动（spec 2.1-11 的「关」）。 */
+  'sessions.close': { args: []; returns: SessionsStatusView };
+  /** 导航到已登记平台的同源地址，装载落定后回一份页面快照（spec 2.1-03）。 */
+  'browser.page.navigate': { args: [url: string]; returns: KernelPageSnapshotView };
+  /** 读取当前页面快照；可选参数是本次正文上限（字符），上限受服务配置钳制。 */
+  'browser.page.snapshot': { args: [maxChars?: number]; returns: KernelPageSnapshotView };
   /**
    * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
    * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。

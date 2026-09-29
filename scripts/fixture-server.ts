@@ -4,11 +4,13 @@
  * 只绑 `127.0.0.1`，且拒绝任何其他 host 的绑定请求 —— 它模拟的是「已登录的招聘站」，
  * 暴露到局域网就没有「不碰真实平台」这条保证了。
  *
- * 能力覆盖 1.8 与 1.9 的验收：
+ * 能力覆盖 1.8 / 1.9 / 2.1 的验收：
  * - `/login` 写一份 **带 Max-Age 的持久 cookie**（会话型 cookie 不会被 Chromium 落盘，
- *   用它验 1.8-03 的「跨重启保持」会测到假阴性）；
+ *   用它验 1.8-03 的「跨重启保持」会测到假阴性）；`?next=` 决定登录完回到哪一页；
  * - `/` 与 `/alt` 是同一个站点、同一个 cookie 名的两条路径，用来证明隔离发生在**分区**
  *   而不是域名上（spec 1.8-01）；
+ * - `/boss` 与 `/boss/detail` 是**本地仿招聘站**（列表 + 详情），DOM 结构刻意模仿但不含任何
+ *   真实平台代码与数据，登录横幅按请求 cookie 现判（spec 2.1-03 / 2.1-05）；
  * - `POST /api/outbound` 与 `GET /api/outbox` 是 1.9 的**样例收件箱**：外发是否真的发生，
  *   由这里的计数说，而不是由 app 自述（spec 1.9-03 / 1.9-04）；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
@@ -20,9 +22,22 @@ import process from 'node:process';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const labPage = path.join(repoRoot, 'fixtures', 'self-test-lab', 'session-lab.html');
+const bossSearchPage = path.join(repoRoot, 'fixtures', 'self-test-lab', 'boss-search.html');
+const bossDetailPage = path.join(repoRoot, 'fixtures', 'self-test-lab', 'boss-detail.html');
 const host = '127.0.0.1';
 const port = Number(process.env.FIXTURE_PORT ?? 10233);
 const cookieName = 'autocc_session';
+
+/**
+ * 登录后允许回跳的目标（spec 2.1-05 需要在仿站里「登录 → 回到原页」）。
+ * 只认这几个已知页面：`next` 直接来自查询串，放开成任意值就是本站自己的开放式跳转。
+ */
+const loginTargets: Record<string, string> = {
+  '/': '/',
+  '/alt': '/alt',
+  '/boss': '/boss',
+  '/boss/detail': '/boss/detail',
+};
 
 /** 解析请求头里的 cookie，只回名字 —— 证据文件里也不该出现值。 */
 function cookieNames(header: string | undefined): string[] {
@@ -85,7 +100,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     const isLogin = url.pathname === '/login';
     // Max-Age=0 让 Chromium 立刻丢掉这条 cookie，等价于站点自己的「退出登录」。
     response.setHeader('Set-Cookie', `${cookieName}=fixture-token; Path=/; Max-Age=${isLogin ? '86400' : '0'}`);
-    response.writeHead(302, { Location: '/' });
+    // 回跳到发起登录的那一页：登录态要能在**同一张页面**上前后对照（spec 2.1-05 的截图判据）。
+    response.writeHead(302, { Location: loginTargets[url.searchParams.get('next') ?? '/'] ?? '/' });
     response.end();
     return;
   }
@@ -122,6 +138,19 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     // 分区标签由路径决定，界面上肉眼可分：两张截图长得一样就没法证明隔离真的发生了。
     response.end(readFileSync(labPage, 'utf8').replaceAll('{{partitionLabel}}', url.pathname === '/alt' ? 'B' : 'A'));
+    return;
+  }
+
+  if (url.pathname === '/boss' || url.pathname === '/boss/detail') {
+    const page = url.pathname === '/boss' ? bossSearchPage : bossDetailPage;
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    // 登录横幅由服务端按请求里的 cookie 现判：让页面自己声明登录态就成了自述，
+    // 而 2.1-05 要的恰恰是「分区里那份 cookie 真的还带着」——它必须是对端的读数。
+    response.end(
+      readFileSync(page, 'utf8')
+        .replaceAll('{{loggedIn}}', loggedIn ? 'true' : 'false')
+        .replaceAll('{{authLabel}}', loggedIn ? '已登录' : '未登录'),
+    );
     return;
   }
 

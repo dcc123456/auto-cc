@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView, type WebContents } from 'electron';
 import { Service, type Context } from '@auto-cc/core';
 import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
@@ -89,6 +89,32 @@ export class ShellService extends Service {
    */
   mountKernelSite = (partition: string, url: string): void => {
     this.createKernelView(partition, url);
+  };
+
+  /**
+   * 收回内嵌内核视图里的站点页面，退回占位页（spec 2.1-11 的「关」）。
+   *
+   * 用「重建为占位页」而不是「摘掉视图」：视图槽位是界面布局的一部分（1.2-12），
+   * 摘掉之后 resize 就无处摆位，重新打开还得再走一遍创建逻辑。
+   */
+  unmountKernelSite = (): void => {
+    this.createKernelView();
+  };
+
+  /**
+   * 交回内嵌内核视图的页面句柄，供领域层（`browser.page`）读写页面。
+   *
+   * 视图的**所有权**仍在壳层：壳层负责创建、摆位、销毁，这里只是把句柄借出去。
+   * 之所以借句柄而不是在壳层加一堆 `readPage()/click()` 方法：抓取、注入、生成类能力
+   * 一律不属于壳（见本文件头注释），而借出去之后它们只可能有一个归属地。
+   * @returns 当前视图的 `WebContents`；视图未创建或已销毁时为 null（调用方据此结构化失败，不猜）
+   */
+  kernelContents = (): WebContents | null => {
+    // 占位页也占一个视图，但它不是任何平台的会话：把它当句柄交出去，
+    // 上层就分不清「没开会话」和「开了会话但页面还没装载」。
+    if (this.kernelViewPartition === '') return null;
+    const contents = this.kernelView?.webContents;
+    return contents && !contents.isDestroyed() ? contents : null;
   };
 
   /**

@@ -174,13 +174,13 @@ describe('失败步与单独重试（1.10-06）', () => {
   });
 });
 
-describe('会话失效停在可恢复点（1.8-07）', () => {
+describe('会话失效停在可恢复点（1.8-07 / 2.1-08）', () => {
   /** 向全局事件总线推一次登录态失效，等同于 `sessions.probe` 判出失效。 */
   function expire(ctx: Context, platform = 'boss', reason: 'missing' | 'expired' = 'expired'): void {
     ctx.emit('session/expired', { platform, reason, at: Date.now() });
   }
 
-  it('运行中收到失效：停在当前步、带原因播报，且不再推进；续跑从这一步接着跑完', async () => {
+  it('运行中收到失效：停在当前步、写下接管点，且不再推进；续跑从这一步接着跑完', async () => {
     const { ctx, runner, events } = await boot({ stepDelayMs: 400 });
     runner.start();
     await waitFor(() => runner.current().steps[1]?.status === 'running');
@@ -193,9 +193,11 @@ describe('会话失效停在可恢复点（1.8-07）', () => {
     expect(paused.stepIndex).toBe(1);
     expect(paused.steps[0]?.status).toBe('done');
     expect(paused.steps[1]).toMatchObject({ status: 'pending', durationMs: null });
-    expect(events.at(-1)).toMatchObject({
-      message: 'boss 登录态失效（expired），已停在 profile，重新登录后从当前步续跑',
-    });
+    // 接管点是**数据**（平台 / 原因 / 卡住的步），界面按语言组织成句子；主进程不再拼中文文案。
+    expect(paused.requiresHuman).toMatchObject({ platform: 'boss', reason: 'expired', stepId: 'profile' });
+    expect(typeof paused.requiresHuman?.at).toBe('number');
+    // 这一次暂停是失效引起的，不是用户点了停止，所以不占用「进度播报」那条消息位。
+    expect(events.at(-1)).toMatchObject({ message: null, run: { status: 'paused' } });
 
     // 协作式取消：让出之后这一步不许被记成 done，也不许再推事件。
     const countAtPause = events.length;
@@ -206,6 +208,7 @@ describe('会话失效停在可恢复点（1.8-07）', () => {
     await waitFor(() => runner.current().status === 'done', 4000);
     const done = runner.current();
     expect(done.steps.map((step) => step.status)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
+    expect(done.requiresHuman).toBeNull();
     expect(events.filter((event) => event.message === '开始 profile').length).toBe(2);
   });
 

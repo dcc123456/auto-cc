@@ -77,7 +77,19 @@
       "storagePath": "落盘路径 {{path}}",
       "cookieNames": "cookie 名 {{names}}",
       "expiresAt": "过期时间 {{time}}",
-      "noExpiry": "无期限"
+      "noExpiry": "无期限",
+      "close": "关闭内核视图",
+      "actionClose": "已收回内核视图（分区与登录态保留）",
+      "pageHeading": "内核页面",
+      "snapshot": "读取页面快照",
+      "actionSnapshot": "已读取页面快照",
+      "snapshotIdle": "内核视图还没挂载任何站点，读不到页面",
+      "snapshotReading": "标题「{{title}}」· 装载 {{readyState}} · 元素 {{elements}} 个 · 正文 {{textLength}} 字（取回 {{bodyLength}}）· 标题节点 {{headings}} 条",
+      "snapshotUrl": "页面地址 {{url}} · 分区 {{partition}}",
+      "snapshotHeadings": "页面标题：{{items}}",
+      "navigate": "导航",
+      "actionNavigate": "导航到该地址",
+      "navigatePlaceholder": "已登记平台同源地址，如 http://127.0.0.1:10233/boss"
     },
     "assembly": {
       "heading": "插件装配（cordis.yml）",
@@ -193,7 +205,9 @@
         "greet": "打招呼",
         "tune": "按 JD 优化简历",
         "deliver": "发送简历"
-      }
+      },
+      "takeoverTitle": "等待你接管",
+      "takeoverBody": "{{platform}} 登录态失效（{{reason}}），已停在「{{step}}」这一步；请在内嵌视图里完成登录后继续。"
     },
     "chat": {
       "heading": "对话",

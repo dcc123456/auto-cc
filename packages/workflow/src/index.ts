@@ -18,6 +18,7 @@ import {
   type SessionExpiredEvent,
   type WorkflowRunView,
   type WorkflowStepId,
+  type WorkflowTakeoverView,
 } from '@auto-cc/core';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -96,9 +97,7 @@ export class WorkflowRunnerService extends Service {
    * @throws 不在运行中时结构化失败
    */
   pause(message: string | null = null): WorkflowRunView {
-    const paused = this.apply({ type: 'pause' }, message);
-    this.controller?.abort();
-    return paused;
+    return this.stop(message, null);
   }
 
   /**
@@ -142,15 +141,31 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 登录态失效时停在可恢复点并明确提示（spec 1.8-07）：不能让它继续往外发一个必然失败的请求，
-   * 也不能静默停在半路——用户必须看见"卡在哪一步、为什么"。
+   * 停在可恢复点并写出接管点（`pause` 与人工接管共用的那条路）。
+   * @param message 日志用的一句话说明（不进界面文案：界面按 `takeover` 自己组织 i18n 句子）
+   * @param takeover 接管点数据；null = 普通暂停（用户自己按了暂停）
+   * @returns 进入 `paused` 的状态
+   */
+  private stop(message: string | null, takeover: WorkflowTakeoverView | null): WorkflowRunView {
+    const paused = this.apply({ type: 'pause', takeover }, message);
+    this.controller?.abort();
+    return paused;
+  }
+
+  /**
+   * 登录态失效时停在可恢复点并**留下结构化接管点**（spec 1.8-07 / 2.1-08）：
+   * 不能让它继续往外发一个必然失败的请求，也不能静默停在半路——用户必须看见「卡在哪一步、为什么」。
+   *
+   * 2.1 之前这里直接拼了一句中文给界面显示，界面因此拿到的是主进程的字符串而不是语言包；
+   * 现在只把 `平台 / 原因 / 停在第几步` 作为数据推过去，句子由渲染层按当前语言组（AGENTS.md §5.5 / §5.7）。
    * @param event `sessions` 推的失效事件（只有平台名与判定原因，无 cookie）
    */
   private handleSessionExpired(event: SessionExpiredEvent): void {
     if (this.run.status !== 'running') return;
     const currentStep = this.run.steps[this.run.stepIndex];
     if (!currentStep) return;
-    this.pause(`${event.platform} 登录态失效（${event.reason}），已停在 ${currentStep.id}，重新登录后从当前步续跑`);
+    this.ctx.logger.warn(`${event.platform} 登录态失效（${event.reason}），已停在 ${currentStep.id}，等待用户接管`);
+    this.stop(null, { platform: event.platform, reason: event.reason, stepId: currentStep.id, at: event.at });
   }
 
   /**

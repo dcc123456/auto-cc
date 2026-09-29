@@ -5,7 +5,13 @@
  * 状态是普通可序列化对象而不是某个解释器的内部态，所以「从当前步续跑」就是把 `stepIndex`
  * 指回去，「非法迁移被拒而不崩」就是返回一句 reason 由调用方转成结构化错误（plan §8.5 选型）。
  */
-import { WORKFLOW_STEP_IDS, type WorkflowRunView, type WorkflowStepId, type WorkflowStepView } from '@auto-cc/core';
+import {
+  WORKFLOW_STEP_IDS,
+  type WorkflowRunView,
+  type WorkflowStepId,
+  type WorkflowStepView,
+  type WorkflowTakeoverView,
+} from '@auto-cc/core';
 
 /** runner 认得的迁移事件；`at` 一律是毫秒时间戳，由调用方给（测试据此造出确定耗时）。 */
 export type RunnerEvent =
@@ -13,7 +19,7 @@ export type RunnerEvent =
   | { type: 'step-started'; stepId: WorkflowStepId; at: number }
   | { type: 'step-finished'; stepId: WorkflowStepId; at: number }
   | { type: 'step-failed'; stepId: WorkflowStepId; at: number; error: string }
-  | { type: 'pause' }
+  | { type: 'pause'; takeover?: WorkflowTakeoverView | null }
   | { type: 'resume' }
   | { type: 'retry-step'; stepId: WorkflowStepId };
 
@@ -35,7 +41,7 @@ export function createRun(runId: string, at: number): WorkflowRunView {
     durationMs: null,
     error: null,
   }));
-  return { runId, status: 'idle', stepIndex: 0, steps, startedAt: at };
+  return { runId, status: 'idle', stepIndex: 0, steps, startedAt: at, requiresHuman: null };
 }
 
 /** 替换某个下标处的步骤读数（其余字段原样带着走，避免逐字段手抄漏一个）。 */
@@ -55,7 +61,7 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
   switch (event.type) {
     case 'start':
       if (run.status !== 'idle') return { ok: false, reason: `只有未开始的 run 可以启动，当前是 ${run.status}` };
-      return { ok: true, run: { ...run, status: 'running' } };
+      return { ok: true, run: { ...run, status: 'running', requiresHuman: null } };
 
     case 'step-started': {
       if (run.status !== 'running') return { ok: false, reason: `run 不在运行中，当前是 ${run.status}` };
@@ -105,12 +111,14 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
       if (!current) return { ok: false, reason: '已经没有进行中的步骤可暂停' };
       // 当前步回到 pending：它没有跑完，续跑时要从头再来这一步（spec 1.10-05）。
       const paused = withStep(run, run.stepIndex, { status: 'pending', startedAt: null, durationMs: null });
-      return { ok: true, run: { ...paused, status: 'paused' } };
+      // 接管点跟着暂停写进去：它是「为什么停」的数据，界面据此组织文案（spec 2.1-08）。
+      return { ok: true, run: { ...paused, status: 'paused', requiresHuman: event.takeover ?? null } };
     }
 
     case 'resume':
       if (run.status !== 'paused') return { ok: false, reason: `只有暂停中的 run 可以续跑，当前是 ${run.status}` };
-      return { ok: true, run: { ...run, status: 'running' } };
+      // 续跑即宣告接管完成：接管标记不清掉的话，界面会一直挂着「等待用户」的横幅。
+      return { ok: true, run: { ...run, status: 'running', requiresHuman: null } };
 
     case 'retry-step': {
       if (run.status !== 'failed') return { ok: false, reason: `只有失败的 run 可以重试单步，当前是 ${run.status}` };

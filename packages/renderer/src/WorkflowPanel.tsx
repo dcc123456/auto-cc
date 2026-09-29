@@ -1,4 +1,4 @@
-import { AlertCircle, Pause, Play, RefreshCw, RotateCw, Workflow as WorkflowIcon } from 'lucide-react';
+import { AlertCircle, Pause, Play, RefreshCw, RotateCw, ShieldAlert, Workflow as WorkflowIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
@@ -18,6 +18,8 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
  * 这里**没有**任何业务判断：六个步骤、状态、耗时全部来自主进程返回的 `run`，
  * 进度靠 `workflow/progress` 事件推送（1.10-08）。占位步骤里什么都没有，
  * P2 换成真实的搜 JD / 生成话术 / 打招呼 / 投递时，本组件一行不用改。
+ * 接管点（spec 2.1-08）也只是把 `run.requiresHuman` 这份**数据**翻译成一句话：
+ * 主进程不再拼中文句子，所以换语言时界面不会漏出中文硬编码。
  */
 export function WorkflowPanel() {
   const { t } = useTranslation();
@@ -111,6 +113,27 @@ export function WorkflowPanel() {
         >
           {notice}
         </p>
+      )}
+
+      {current?.requiresHuman && (
+        <div
+          className="mt-2 rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-[11px] text-amber-200"
+          data-testid="workflow-takeover"
+          data-takeover-platform={current.requiresHuman.platform}
+          data-takeover-step={current.requiresHuman.stepId}
+        >
+          <p className="flex items-center gap-1 font-semibold">
+            <ShieldAlert size={12} />
+            {t('workflow.takeoverTitle')}
+          </p>
+          <p className="mt-1 break-all">
+            {t('workflow.takeoverBody', {
+              platform: current.requiresHuman.platform,
+              reason: t(`session.reason.${current.requiresHuman.reason}`),
+              step: t(`workflow.step.${current.requiresHuman.stepId}`),
+            })}
+          </p>
+        </div>
       )}
 
       {live?.message && (

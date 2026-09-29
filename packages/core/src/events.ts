@@ -82,6 +82,23 @@ export type WorkflowStepView = {
 };
 
 /**
+ * 人工接管点（spec 2.1-08）。
+ *
+ * 刻意是**结构化数据而不是一句话**：主进程拼好的中文文案进不了 i18n（AGENTS.md §5.5 要求
+ * 页面每条文案都走语言包），而「哪个平台、因为什么、停在第几步」这三项才是界面组织句子需要的。
+ */
+export type WorkflowTakeoverView = {
+  /** 需要接管的平台标识。 */
+  platform: string;
+  /** 判定依据，与 `SessionExpiredEvent.reason` 同集合。 */
+  reason: 'missing' | 'expired';
+  /** 停在哪个步骤上等待接管。 */
+  stepId: WorkflowStepId;
+  /** 记下接管的时间戳（毫秒）。 */
+  at: number;
+};
+
+/**
  * 一次 run 的完整可序列化状态（spec 1.10-03 / 1.10-05）。
  *
  * 刻意做成普通数据而不是解释器内部状态：界面读数、事件载荷、P2 落库共用同一形状，
@@ -95,6 +112,11 @@ export type WorkflowRunView = {
   steps: WorkflowStepView[];
   /** run 创建时间戳（毫秒）。 */
   startedAt: number;
+  /**
+   * 人工接管点（spec 2.1-08）；null 表示当前没有等待用户的事。
+   * 它与 `status: 'paused'` 是两件事：暂停可以是用户自己点的，接管一定是机器被要求停手。
+   */
+  requiresHuman: WorkflowTakeoverView | null;
 };
 
 /**
