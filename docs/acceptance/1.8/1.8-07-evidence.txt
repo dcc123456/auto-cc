@@ -1,0 +1,62 @@
+spec 1.8-07 补验读数（真实窗口 · CDP 127.0.0.1:10222 · vite 127.0.0.1:5173 · 2026-09-29）
+
+触发路径（全程本地，不碰真实招聘平台，AGENTS.md §7.2）：
+  渲染层 window.autoCC.sessions.probe('fixture')
+  → 主进程 sessions 只读 persist:fixture 分区的 cookie，判出 auth=expired / reason=missing
+  → ctx.emit('session/expired', …)
+  → workflow.runner 若在 running 则停在当前步并播报原因
+dev 态 cordis.yml 只登记 fixture / fixture-alt 两个本地平台，所以这里没有 boss 可探：
+  { "code": "PLATFORM_NOT_CONFIGURED", "message": "未配置的平台：boss", "details": { "known": ["fixture","fixture-alt"] } }
+
+为了留出探测窗口，先用 plugins.saveConfig('workflow', { stepDelayMs: 2000 }) 热改单步耗时（运行期生效，不落 cordis.yml）。
+
+────────────────────────────────────────────────────────────────────────
+① 运行中打探测：run 停在正在跑的那一步，已完成步不丢
+
+  window.autoCC.workflow['runner.current']()（探测返回的同一批读数里）
+  {
+    "probe": { "id": "fixture", "auth": "expired", "cookieNames": [], "partition": "persist:fixture" },
+    "run": {
+      "status": "paused",
+      "stepIndex": 1,
+      "runId": "cd2ecfdc-6578-4097-9f98-c578fe52fd5f",
+      "steps": ["search=done","profile=pending","pitch=pending","greet=pending","tune=pending","deliver=pending"]
+    }
+  }
+
+② 界面上看得见「停在哪一步 + 为什么」（DOM 读数，非单测）
+
+  [data-testid="workflow-live"]  →  最近播报：fixture 登录态失效（missing），已停在 profile，重新登录后从当前步续跑
+  [data-testid="workflow-state"] →  已暂停 · cd2ecfdc-6578-4097-9f98-c578fe52fd5f
+  截图 1.8-07-expired.png：第 1 步「搜索合适的 JD」保留 2002 毫秒已完成，第 2–6 步待执行，「续跑」按钮可点。
+
+③ 不静默失败、也不再推进（MutationObserver 逐次快照，间隔 4 秒读两次，count 一动不动）
+
+  {
+    "count": 6,
+    "lines": [
+      "    0ms s=done p=done p=done g=done t=done d=done | 最近播报：deliver 完成",
+      " 1079ms s=pending p=pending p=pending g=pending t=pending d=pending | ",
+      " 1081ms s=running p=pending p=pending g=pending t=pending d=pending | 最近播报：开始 search",
+      " 3087ms s=done p=pending p=pending g=pending t=pending d=pending | 最近播报：search 完成",
+      " 3088ms s=done p=running p=pending g=pending t=pending d=pending | 最近播报：开始 profile",
+      " 3685ms s=done p=pending p=pending g=pending t=pending d=pending | 最近播报：fixture 登录态失效（missing），已停在 profile，重新登录后从当前步续跑"
+    ]
+  }
+  3685ms 那一条是失效引起的最后一次改动；此后 4 秒内 trace 没有第 7 条，
+  说明 profile 既没被记成 done（协作式让出），也没有继续往下跑第三步。
+
+④ 停在的是可恢复点：点「续跑」从 profile 重来，不回到 search
+
+  暂停时：1 · 搜索合适的 JD 2002 毫秒已完成 / 2 · 岗位与简历匹配 待执行
+  续跑后：1 · 搜索合适的 JD 2002 毫秒已完成 / 2 · 岗位与简历匹配 2014 毫秒已完成
+          3 · 生成打招呼话术 2002 / 4 · 打招呼 2003 / 5 · 按 JD 优化简历 2009 / 6 · 发送简历 2007（全部已完成）
+  runId 仍是 cd2ecfdc-6578-4097-9f98-c578fe52fd5f（同一个 run，没有另起一轮），
+  search 的耗时 2002 毫秒一字未变（没有被重跑）。截图 1.8-07-resumed.png。
+
+⑤ 不在运行中收到失效：什么都不做（这一条同时被单测覆盖）
+
+  上一个 run 已 done 时再打探测：sessions 照常推 session/expired，
+  runner.current() 仍是 { "status": "done", "stepIndex": 6 }，没有异常、也没被拽成 paused。
+
+单测：packages/workflow/src/runner.test.ts「会话失效停在可恢复点（1.8-07）」两条用例（25 passed）。

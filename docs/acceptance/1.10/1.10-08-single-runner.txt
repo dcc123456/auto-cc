@@ -1,0 +1,27 @@
+spec 1.10-08 面板与对话界面驱动「同一个」workflow.runner，不各自持有运行状态
+==============================================================================
+
+本条目要等 1.11 的对话界面落地后才能完整打分。这里先固化「静态查引用」那一半，
+1.11 收口时按同一命令复跑，并补上「两侧镜像一致」的动态断言。
+
+[A] provider 只有一个（全仓搜索 `static provide = 'workflow.runner'`）
+    packages/workflow/src/index.ts:60:  static provide = 'workflow.runner';
+    → 命中 1 处。没有第二个执行器实现。
+
+[B] 渲染层持有 run 状态的地方只有一处（grep 'useState<WorkflowRunView' packages/renderer/src）
+    packages/renderer/src/WorkflowPanel.tsx:27:  const [current, setCurrent] = useState<WorkflowRunView>();
+    → 命中 1 处。App.tsx / 诊断面板都不复制这份状态。
+
+[C] 界面动作全部经白名单打到同一个 service（grep "workflow\['runner\." packages/renderer/src）
+    WorkflowPanel.tsx:32  runner.current
+    WorkflowPanel.tsx:91  runner.start
+    WorkflowPanel.tsx:101 runner.pause
+    WorkflowPanel.tsx:111 runner.resume
+    WorkflowPanel.tsx:181 runner.retryStep
+    → 五个口都在 packages/shared/src/bridge.ts 的 RENDERER_ALLOWLIST 里（`workflow.runner.*`），
+      界面侧没有任何本地推进逻辑：状态只来自 `runner.current()` 与 `workflow/progress` 事件。
+
+[D] 事件是唯一写入源（实测缺陷与修法）
+    `act()` 刻意不把 IPC 返回值写回镜像：主进程在 `start()` 返回之前就把 `step-started` 推了出去，
+    返回值必然比已收到的事件旧一帧，写回去会让界面闪回「全部待执行」（DOM 轨迹抓到过 2ms 的回退）。
+    这条约束是 1.11 复用同一个 runner 时必须保持的前提：界面不自己算进度。

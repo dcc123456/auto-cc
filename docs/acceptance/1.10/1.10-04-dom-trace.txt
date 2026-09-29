@@ -1,0 +1,35 @@
+spec 1.10-04 界面进度是真实流式更新 —— 主窗口 DOM 变更轨迹
+==========================================================
+
+采集方式：CDP 10222 连主窗口，在 `main` 上挂 MutationObserver，
+每次工作流步骤行（`[data-step-id]`）的 `data-step-status` 或「最近播报」文本变化就记一行；
+相邻两行内容相同则去重。配置：stepDelayMs=2000、failStep=none。
+ms 是相对探针安装时刻的毫秒数。
+
+结论：六个步骤严格按 search → profile → pitch → greet → tune → deliver 顺序
+各自经历 pending → running → done，共 13 个快照、12 次播报，
+不是跑完一次性刷新（那只会有一行）。
+
+    0ms s=done    p=done    p=done    g=done    t=done    d=done    | 最近播报：deliver 完成
+ 1025ms s=running p=pending p=pending g=pending t=pending d=pending | 最近播报：开始 search
+ 3040ms s=done    p=pending p=pending g=pending t=pending d=pending | 最近播报：search 完成
+ 3042ms s=done    p=running p=pending g=pending t=pending d=pending | 最近播报：开始 profile
+ 5043ms s=done    p=done    p=pending g=pending t=pending d=pending | 最近播报：profile 完成
+ 5047ms s=done    p=done    p=running g=pending t=pending d=pending | 最近播报：开始 pitch
+ 7050ms s=done    p=done    p=done    g=pending t=pending d=pending | 最近播报：pitch 完成
+ 7051ms s=done    p=done    p=done    g=running t=pending d=pending | 最近播报：开始 greet
+ 9057ms s=done    p=done    p=done    g=done    t=pending d=pending | 最近播报：greet 完成
+ 9059ms s=done    p=done    p=done    g=done    t=running d=pending | 最近播报：开始 tune
+11060ms s=done    p=done    p=done    g=done    t=done    d=pending | 最近播报：tune 完成
+11063ms s=done    p=done    p=done    g=done    t=done    d=running | 最近播报：开始 deliver
+13072ms s=done    p=done    p=done    g=done    t=done    d=done    | 最近播报：deliver 完成
+
+列名对照：s=search p=profile p=pitch g=greet t=tune d=deliver（第 2/3 列都是 p 开头，按位置区分）。
+第 1 行是探针安装瞬间的上一轮残留快照，之后才是本次 run。
+
+配套截图（同一轮 run，runId a3981cf1，间隔约 4 秒）：
+- 1.10-04-mid1.png  第一步执行中、其余五步待执行（播报：开始 search）
+- 1.10-04-mid2.png  前三步已完成、第四步执行中（播报：开始 greet）
+- 1.10-04-done.png  六步全部完成、每步耗时约 2000 毫秒
+`harness diff` 逐对比较：idle↔mid1 = 239731 px、mid1↔mid2 = 200248 px、mid2↔done = 155406 px，
+三对全部 isIdentical=false。

@@ -1,0 +1,33 @@
+spec 1.10-03 `workflow.runner` 挂载点与状态机骨架（idle/running/paused/failed/done 可迁移）
+===========================================================================================
+
+挂载点（唯一 provider）：packages/workflow/src/index.ts:61  `static provide = 'workflow.runner';`
+
+命令：pnpm --filter @auto-cc/plugin-workflow vitest run --reporter=verbose
+结果：Test Files 2 passed (2) / Tests 25 passed (25)
+
+machine.test.ts（纯迁移表，16 条）
+  ✓ createRun 的初始形状 > 六个槽位按主线顺序排好，全部 pending 且没有耗时
+  ✓ 合法迁移 > start 把 idle 变 running，且只此一次
+  ✓ 合法迁移 > 逐步推进：stepIndex 单调递增，耗时由起止时间戳算出
+  ✓ 合法迁移 > 最后一步结束把整个 run 置为 done，stepIndex 停在越界位
+  ✓ 合法迁移 > 暂停把当前步退回 pending 但不动 stepIndex，续跑接着这一步
+  ✓ 合法迁移 > 失败步单独重试时把 stepIndex 指回去并清掉错误
+  ✓ 非法迁移（it.each 矩阵，10 条，全部「拒绝并给出原因」而非抛异常）
+    未开始就暂停 / 未开始就续跑 / 未开始就重试 / 运行中再 start / 启动非当前步 /
+    没启动就结束 / 暂停中推进 / 已完成的 run 再重试 / 重试一个不存在的步 id /
+    全部结束后没有可启动的步骤
+
+runner.test.ts（服务侧行为，9 条）
+  ✓ 六步按顺序跑完，每一步都先 started 后 finished
+  ✓ 挂载即有一个 idle run：六个槽位全部待执行，界面任何时候都有东西可画
+  ✓ 暂停等到当前步让出，stepIndex 不动；续跑从这一步重来并跑完
+  ✓ 没在运行时暂停 / 暂停中另起 run / 没暂停时续跑，都是结构化失败
+  ✓ 注入失败后停在失败步；重试这一步会跑完整个 run
+  ✓ 重试不认识的步 id、或重试没失败的步，都结构化失败
+  ✓ 运行中收到失效：停在当前步、带原因播报，且不再推进；续跑从这一步接着跑完    ← 1.8-07 补验
+  ✓ 没在运行时收到失效：什么都不做，不报错也不把 idle 拽成 paused                ← 1.8-07 补验
+  ✓ dispose 之后不再有进度事件
+
+> 这份读数是 1.8-07 补验之后重跑的（原先记的是 23 条 / runner 7 条），
+> 两条新增用例来自 `session/expired` → `workflow.runner` 的接线，见 1.8 收尾结论同一条。

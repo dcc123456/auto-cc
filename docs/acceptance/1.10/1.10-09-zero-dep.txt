@@ -1,0 +1,38 @@
+spec 1.10-09 反向验证：不引入 XState / 任何状态机库，没有造成 P1 能力缺口（AGENTS.md §6.5）
+==============================================================================================
+
+[A] 零新增依赖（命令 + 真实退出码）
+
+    $ grep -rn "xstate" package.json pnpm-lock.yaml packages/*/package.json
+    （无输出）
+    exit=1   ← grep 没有任何命中
+
+    对照：`packages/workflow/package.json` 的 dependencies 只有 `@auto-cc/core` / `cordis` / `zod`
+    （框架与校验层，全仓共用），状态机本身是本包的 `src/machine.ts`（132 行纯函数迁移表 + 类型），
+    没有任何状态机运行时依赖。
+
+[B] 「非法迁移被拒而不崩」这条能力没有缺口
+
+    `machine.test.ts` 的非法迁移矩阵用 `it.each` 穷举 10 条，每条都断言：
+      ① 返回 `{ ok: false, reason }` 而不是抛异常；
+      ② reason 是一句可读中文（界面直接显示）；
+      ③ 入参 run 对象没有被就地改动（防止污染界面正在读的快照）。
+    覆盖：未开始就暂停/续跑/重试、运行中再 start、启动非当前步、没启动就结束、
+          暂停中推进、已完成的 run 再重试、重试不存在的步 id、全部结束后没有可启动的步骤。
+    详见 1.10-03-runner-tests.txt 的 16 条 machine 用例清单。
+
+[C] 服务侧同样不抛裸异常
+
+    `runner.test.ts` 断言非法调用抛的是 `AppError`，code 为 `WORKFLOW_INVALID_STATE`
+    （经 IPC 网关变成结构化 `AppErrorPayload`，渲染层拿到的是错误对象而不是崩溃）。
+
+[D] 被否决路线留下的能力清单（将来若要引库，先回答这四条）
+
+    1. 六步是**线性**流水线：没有并行区域、没有历史态回溯、没有跨 run 的 fork/join，
+       自研表 132 行覆盖全部迁移；XState 的核心增益（并行/历史/actor）在这里都用不上。
+    2. 取消语义靠 `AbortController` + 协作让出实现（`dispose 之后不再有进度事件` 一条在守），
+       与状态机库的 invoke/cancel 无耦合，换库也不会简化这一步。
+    3. Cordis 本身是 `4.0.0-rc.*`、API 未稳定（AGENTS.md §9），再叠一个未稳定的状态机抽象层
+       会把两处漂移耦合在一起。
+    4. 代价：若 P2 之后出现「多平台并行抓取 + 汇合」这类真并行需求，自研表要重写成并行模型，
+       届时再评估引库，而不是现在为假想需求预付复杂度（AGENTS.md §2.6）。
