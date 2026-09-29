@@ -79,10 +79,11 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 ### 1.2 期间固化的环境与设计事实
 
-1. **cordis 服务类的构造签名必须是 `(ctx: Context, name = 'x')`**，不能写成 `Context & AppServices`：
-   窄化后的第一个参数会让 `Plugin.Constructor` 的条件类型推不出单参重载，`ctx.plugin(ShellService)`
-   直接报 `Expected 2 arguments, but got 1`。类型通过 `declare module '@auto-cc/core'` 的
-   `AppServices` 增补来提供，而不是靠构造参数收窄。
+1. ~~**cordis 服务类的构造签名必须是 `(ctx: Context, name = 'x')`**~~ —— **1.2 时的这条结论已被
+   1.3 推翻**：真正的原因是第一个参数不能收窄成 `Context & AppServices`（会让条件类型推不出重载），
+   而配置**必须**作为第二个参数声明；只写 `(ctx, name?)` 会让 `ctx.plugin(X, {…})` 报 TS2345。
+   正确签名见 §1.3 固化事实第 1 条。类型仍由 `declare module '@auto-cc/core'` 的 `AppServices`
+   增补提供，不靠构造参数收窄。
 2. **`Context` 没有 `start()` / `stop()`**；对象式插件写 `provide:'x'` 后直接赋值会抛
    `cannot set property "x" without provide`，要用 `ctx.provide(name, value)`。
 3. **新建的 `WebContentsView` bounds 默认 `0x0`**，不显式 `setBounds` 就永远看不见——只在 `resize`
@@ -94,19 +95,42 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 ## 1.3 L0 内核插件（config / logger / store / kernel）
 
-| ID     | 验收标准                                                                                  | 方式 | 验证操作                                             | 状态 |
-| ------ | ----------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------- | ---- |
-| 1.3-01 | `cordis.yml` 是插件装配的唯一入口，改它即改启用的插件集                                   | V    | 注掉一个插件 → 重启 → 界面插件树里确实不在           | [ ]  |
-| 1.3-02 | `config` 提供分层合并（默认 < 文件 < 环境变量 < 运行时覆盖）                              | U+C  | 三层同名 key 覆盖顺序可断言                          | [ ]  |
-| 1.3-03 | 非法配置在**挂载期**失败并指出具体字段，而非运行时空指针                                  | V    | 写坏一个字段 → 界面显示校验错误 + 字段路径           | [ ]  |
-| 1.3-04 | `logger` 提供结构化日志、级别过滤、环形缓冲（内存内可取最近 N 条）                        | C    | 取 buffer 断言条数与级别                             | [ ]  |
-| 1.3-05 | 日志同时落盘到平台规范目录（由 1.1-11 的解析函数决定）                                    | V    | 界面日志页看到实时滚动；磁盘上文件存在               | [ ]  |
-| 1.3-06 | `store.db` 用 **`node:sqlite`（Electron 内）**打开数据库，无原生编译、无 electron-rebuild | C    | 主进程日志打印 sqlite 驱动与版本；无 native 加载错误 | [ ]  |
-| 1.3-07 | migration 机制：新增一条 migration 后旧库自动升级，版本号可查                             | C    | 建 v0 库 → 升 v1 → `PRAGMA user_version` 断言        | [ ]  |
-| 1.3-08 | 重复启动不开第二个 DB 连接；退出时连接被 effect 回收                                      | C    | 断言关闭钩子被调用 / WAL 正常收敛                    | [ ]  |
-| 1.3-09 | 任一 L0 service 未挂载时，依赖它的插件进入 PENDING 而非崩溃                               | V    | 注掉 `store` → 依赖插件显示 waiting 状态             | [ ]  |
-| 1.3-10 | 插件挂载失败不阻塞其他插件启动（错误隔离）                                                | V    | 故意让一个插件抛错 → 其余插件仍 ACTIVE               | [ ]  |
-| 1.3-11 | 日志与诊断输出对 token/cookie/密码字段**脱敏**                                            | U+C  | 写一条含 `token=xxx` 的日志，落盘内容被掩码          | [ ]  |
+| ID     | 验收标准                                                                                  | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                                    | 状态 |
+| ------ | ----------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1.3-01 | `cordis.yml` 是插件装配的唯一入口，改它即改启用的插件集                                   | V    | `1.3-01-plugin-tree-baseline.png`：清单四行 → 界面插件树 config/logger/store/shell 全已就绪；`1.3-01-store-commented-out.png`：注掉 `store` 一行 → 重启 → 树里只剩 3 个。**未从其它位置硬编码插件**（装配只读清单，见 `packages/main/src/registry.ts` 提供 id→实现）                                                                        | [x]  |
+| 1.3-02 | `config` 提供分层合并（默认 < 文件 < 环境变量 < 运行时覆盖）                              | U+C  | `packages/config/src/config.test.ts`「按 default < file < env < runtime 的顺序记录来源」「白名单外的环境变量一律忽略」「运行时覆盖是补丁而不是整层替换」；`packages/kernel/src/kernel.test.ts`「运行时层覆盖文件层」                                                                                                                        | [x]  |
+| 1.3-03 | 非法配置在**挂载期**失败并指出具体字段，而非运行时空指针                                  | V    | `1.3-03-config-field-error.png`：清单里 `level: verbose`（枚举外值）→ 界面插件树 logger 显示「失败 / 配置校验失败 [logger] level: Invalid option: expected one of "error"│"warn"│"info"│"debug"」，含字段路径；config/kernel 两侧单测各断言一次点名字段                                                                                     | [x]  |
+| 1.3-04 | `logger` 提供结构化日志、级别过滤、环形缓冲（内存内可取最近 N 条）                        | C    | `packages/logger/src/logger.test.ts`「级别过滤生效：info 以下不进缓冲」「内存缓冲只保留最近 N 条（`buffer: 3` 写 5 条只剩后 3 条）」                                                                                                                                                                                                        | [x]  |
+| 1.3-05 | 日志同时落盘到平台规范目录（由 1.1-11 的解析函数决定）                                    | V    | `1.3-05-log-tail-and-file.png` + `1.3-05-log-scroll-live.png`：界面日志区实时滚动，磁盘 `%LOCALAPPDATA%\auto-cc\logs\auto-cc.log` 存在且行内容与界面一致；单测断言缺省目录走 config 的平台规范目录                                                                                                                                          | [x]  |
+| 1.3-06 | `store.db` 用 **`node:sqlite`（Electron 内）**打开数据库，无原生编译、无 electron-rebuild | C    | `1.3-06-node-sqlite-in-electron.txt`：Electron 44.4.5 内 `require('node:sqlite')` 直用，sqlite 3.53.4、WAL 生效、`user_version` 可读写；store 单测「驱动与版本如实上报」；`pnpm install` 无 rebuild 步骤                                                                                                                                    | [x]  |
+| 1.3-07 | migration 机制：新增一条 migration 后旧库自动升级，版本号可查                             | C    | `packages/store/src/store.test.ts`「迁移把 user_version 推上去，重复 upgrade 不再执行」「关库重开：schema 版本与数据都在」「迁移失败时版本不动、半成品表不存在（回滚）」；WAL 侧车文件实测出现                                                                                                                                              | [x]  |
+| 1.3-08 | 重复启动不开第二个 DB 连接；退出时连接被 effect 回收                                      | C    | `packages/store/src/store.test.ts`「卸载后连接句柄被 effect 释放，WAL 侧文件收回主库」（dispose 后 `-wal`/`-shm` 消失 = 句柄真的还掉了）+「关库重开：schema 版本与数据都在，迁移不会重复跑」；连接只在 `[Service.init]` 里 `new DatabaseSync` 一次                                                                                          | [x]  |
+| 1.3-09 | 任一 L0 service 未挂载时，依赖它的插件进入 PENDING 而非崩溃                               | V    | `1.3-09-dependency-pending.png`：界面显示 logger/store「等待依赖」、shell 仍「已就绪」、进程存活。**说明**：1.3 阶段还没有插件 `inject` store，故这里禁用的是 `config`（logger/store 同时依赖它）而非 spec 原写的 `store`；单测「依赖缺席时是 PENDING 而不是装配失败」直接断言 store 缺席场景。待 1.9 出现注入 store 的插件后按真实依赖复验 | [x]  |
+| 1.3-10 | 插件挂载失败不阻塞其他插件启动（错误隔离）                                                | V    | `1.3-10-plugin-fail-isolation.png`：清单里把 store 的库路径指向不存在的目录（`file: missing/dir/store.db`）→ 该插件「失败 / unable to open database file」，config/logger/shell 仍全部已就绪；kernel 单测「单个插件抛错只让它自己 FAILED」                                                                                                  | [x]  |
+| 1.3-11 | 日志与诊断输出对 token/cookie/密码字段**脱敏**                                            | U+C  | `1.3-11-redact-at-sink.png`：写入含 `token=…`/手机号/邮箱的日志后，界面与落盘内容均为 `token=*** / 138****1111 / z***@qq.com`；logger 单测「free text 与结构化字段一起脱敏」「Error 堆栈同样脱敏」「关闭脱敏时原样写出」                                                                                                                    | [x]  |
+
+### 1.3 期间新增固化的环境与设计事实
+
+1. **cordis 插件的配置来自构造器第二个参数，调用点类型也从它推导**（`registry.d.ts` 的
+   `GetPluginConfig` 取 `ctx` 之后的实参）。因此单参构造器会让 `ctx.plugin(X, {…})` 直接 TS2345，
+   而两参构造器必须传**校验后的输出类型**（`.default()` 已生效的形状），直连调用点要把带默认值的
+   键写全。内核注册表把实现擦成 `new (ctx, config: any)`——写成具体类型会因参数逆变让整个
+   `Registry` 不再兼容。各包统一导出 `XxxConfig = z.infer<typeof xxxSchema>` 供调用点与测试引用。
+2. **配置校验发生在挂载期、且失败可恢复**：`index.js` 在 fiber 的 effect 内跑
+   `resolveConfig`，抛错只把该 fiber 置为 FAILED；`fiber.update(config)` 会重跑校验并**清掉
+   `_error`** 再重启，所以「修好配置后点重试」必须走 update，不能重新 `ctx.plugin`。
+   `update()` 返回 `Awaitable<void>`，不 `Promise.resolve(...).catch(...)` 就是未处理的拒绝。
+3. **`Fiber.uid` 是 `number | null`**（只有根 fiber 为 null），用 uid 建索引要先判空。
+4. **`await fiber` 在 FAILED 时拒绝，但 `fiber.error` 仍是 undefined**——快照要读 `fiber.state`，
+   不要靠 catch 到的错误对象判断插件状态。
+
+### 1.3 遗留（后续子计划处理）
+
+1. 开发态 `store.db` 落在 `%APPDATA%\Electron\`（Electron 未设产品名时的默认 `userData`），而日志
+   已正确落在 `%LOCALAPPDATA%\auto-cc\logs\`。打包态由 electron-builder 写产品名后自然收敛；开发态
+   需在 1.4 前补 `app.setName('auto-cc')` / `setPath('userData', …)`，否则两目录长期不一致。
+2. 插件树与日志尾当前通过 `shell.getPluginTree` / `shell.getLogTail` 两个开发态桥接方法暴露，只为
+   验收可见性存在；1.4 IPC 网关落地后必须迁到 `kernel.*` / `log.*` 并从白名单里删掉 shell 的这两项。
 
 ## 1.4 IPC 网关
 
@@ -135,19 +159,19 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 ## 1.6 可视化自测通道（agent 自测能力）
 
-| ID     | 验收标准                                                                 | 方式 | 验证操作                                         | 状态 |
-| ------ | ------------------------------------------------------------------------ | ---- | ------------------------------------------------ | ---- |
-| 1.6-01 | dev 模式自动开启 CDP 端口，`/json` 能列出 app 的 page target             | C    | `curl 127.0.0.1:9222/json` 含本项目 title        | [ ]  |
-| 1.6-02 | agent 能通过 harness 打开 app 并**看到页面**（截图回传为图）             | V    | harness 截图 → agent 读图并描述界面内容          | [ ]  |
-| 1.6-03 | agent 能读到真实渲染后的 DOM 快照（含 React 挂载后的节点）               | V    | 断言存在某动态 id 文本                           | [ ]  |
-| 1.6-04 | agent 能真实点击与输入（派发原生事件，非只改 state）                     | V    | 点击后界面变化被再次截图确认                     | [ ]  |
-| 1.6-05 | agent 能在页面上下文执行 JS 断言并取回结果                               | V    | 求值 `document.title` / store 状态               | [ ]  |
-| 1.6-06 | harness 能同时读到主进程侧状态（fiber 树、日志尾部）与界面状态，两者一致 | V    | 同一时刻对照 registry 与面板显示                 | [ ]  |
-| 1.6-07 | 存在稳定入口 `pnpm harness <action>`，agent 无需手搓 CDP                 | C    | `pnpm harness shot` 出图                         | [ ]  |
-| 1.6-08 | 生产模式（打包后）**不**开启 CDP，dev harness 不进入产物                 | C    | builder files 排除 devtools；产物内 grep 无 9222 | [ ]  |
-| 1.6-09 | harness 能同时驱动**内嵌内核视图**（它是独立 target）                    | V    | 对 fixture 站点 target 截图 + 读 DOM             | [ ]  |
-| 1.6-10 | 视觉回归基线：同一场景两张截图可比对，差异可量化报告                     | V    | 故意改样式 → diff 报告标记差异区域               | [ ]  |
-| 1.6-11 | 验收证据可自动归档到 `docs/acceptance/<spec-id>/`                        | C    | 跑归档命令，目录内出现截图+日志                  | [ ]  |
+| ID     | 验收标准                                                                 | 方式 | 验证操作                                          | 状态 |
+| ------ | ------------------------------------------------------------------------ | ---- | ------------------------------------------------- | ---- |
+| 1.6-01 | dev 模式自动开启 CDP 端口，`/json` 能列出 app 的 page target             | C    | `curl 127.0.0.1:10222/json` 含本项目 title        | [ ]  |
+| 1.6-02 | agent 能通过 harness 打开 app 并**看到页面**（截图回传为图）             | V    | harness 截图 → agent 读图并描述界面内容           | [ ]  |
+| 1.6-03 | agent 能读到真实渲染后的 DOM 快照（含 React 挂载后的节点）               | V    | 断言存在某动态 id 文本                            | [ ]  |
+| 1.6-04 | agent 能真实点击与输入（派发原生事件，非只改 state）                     | V    | 点击后界面变化被再次截图确认                      | [ ]  |
+| 1.6-05 | agent 能在页面上下文执行 JS 断言并取回结果                               | V    | 求值 `document.title` / store 状态                | [ ]  |
+| 1.6-06 | harness 能同时读到主进程侧状态（fiber 树、日志尾部）与界面状态，两者一致 | V    | 同一时刻对照 registry 与面板显示                  | [ ]  |
+| 1.6-07 | 存在稳定入口 `pnpm harness <action>`，agent 无需手搓 CDP                 | C    | `pnpm harness shot` 出图                          | [ ]  |
+| 1.6-08 | 生产模式（打包后）**不**开启 CDP，dev harness 不进入产物                 | C    | builder files 排除 devtools；产物内 grep 无 10222 | [ ]  |
+| 1.6-09 | harness 能同时驱动**内嵌内核视图**（它是独立 target）                    | V    | 对 fixture 站点 target 截图 + 读 DOM              | [ ]  |
+| 1.6-10 | 视觉回归基线：同一场景两张截图可比对，差异可量化报告                     | V    | 故意改样式 → diff 报告标记差异区域                | [ ]  |
+| 1.6-11 | 验收证据可自动归档到 `docs/acceptance/<spec-id>/`                        | C    | 跑归档命令，目录内出现截图+日志                   | [ ]  |
 
 ## 1.7 零依赖三端打包与安装
 

@@ -151,7 +151,7 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 
 | #   | 规则                                                                                                                                                                                                                                                                               | 强制                                         |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| 7.1 | 任何标 `V`（可视）的验收项**必须有截图/DOM 断言证据**，通过 CDP harness（`pnpm harness`）驱动真实窗口，不允许用单测替代。                                                                                                                                                          | `[验收]`                                     |
+| 7.1 | 任何标 `V`（可视）的验收项**必须有截图/DOM 断言证据**，通过 CDP harness（`pnpm harness`）驱动真实窗口，不允许用单测替代。CDP 端口按项目约定用 **10222**（`pnpm dev` 与 harness 默认值），不使用 Chrome/Electron 默认的 9222。                                                      | `[验收]`                                     |
 | 7.2 | 自动化测试**不得访问真实招聘平台**。登录态、抓取、打招呼、投递一律先打本地 fixture 站点；真实平台只在用户在场时手动验证。                                                                                                                                                          | `[机检·1.6]`（测试 URL allowlist）+ `[纪律]` |
 | 7.3 | 所有外发动作（打招呼、发送简历、投递）必须经 `entitlement.gate`；绕过 gate 的调用必须有测试使其失败。                                                                                                                                                                              | `[机检·1.9]` 骨架测试                        |
 | 7.5 | **测试过程中产生的图片/临时文件一律不得进入 git 仓库**。探针输出、中间态截图、一次性素材只能写到被忽略的 `tmp/` 目录；入库的图片只允许两种路径：`docs/acceptance/<子计划>/<验收条目ID>-*.png`（正式验收证据，文件名必须对应 spec 条目）与 `resources/**`（应用素材，非测试产物）。 | `[机检]` `.githooks/pre-commit`              |
@@ -197,8 +197,15 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `PRAGMA user_version`），见 `docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`。
 - Cordis 是 `4.0.0-rc.*`，**API 未稳定**：只在 `packages/core` 一处 `import 'cordis'`，
   其余包经复导出使用。已知坑：`FiberState` 是 const enum，在 `verbatimModuleSyntax` 下不可再导出
-  （用 `fiberState(state: number)` 映射函数代替）；Service 子类构造签名必须是 `(ctx: Context, name?)`，
-  收窄成 `Context & AppServices` 会让 `Plugin.Constructor` 推断失败；`Context` 上没有 `start()/stop()`。
+  （用 `fiberState(state: number)` 映射函数代替）；`Context` 上没有 `start()/stop()`。
+- **实测（1.3）插件配置一律走构造器第二个参数**：cordis 用 `static Config` 校验后把结果作为
+  第二个实参传入（`Plugin.Constructor<T>` 即 `new (ctx, config: T)`），而 `ctx.plugin()` 调用点的
+  配置类型正是从该参数**反推**的（`GetPluginConfig`）。写成单参数构造器 + 读 `ctx.fiber.config`
+  会让调用方传任何配置都被判成 `undefined` 而报 TS2345。参数类型取 schema 的**输出**，所以带
+  `.default()` 的键在直接调用点必须显式给出（`cordis.yml` 里可以省略，由 schema 补）。
+  内核按 `Registry` 挂载时配置是运行期合并结果，因此 `PluginConstructor` 的该参数只能是 `any`。
+- **实测（1.3）`ctx.effect(fn)` 会立刻执行 `fn` 取回收器**：`fn` 必须「返回一个函数」，
+  单层箭头就是刚挂载就执行清理（store 的连接因此在 init 之前被 close，表现为「尚未完成挂载」）。
 - 仓库**已有 git 远端**（`origin` → `dcc123456/auto-cc`），§1.6 的"提交 + 推送"按原文执行。
 
 ---
