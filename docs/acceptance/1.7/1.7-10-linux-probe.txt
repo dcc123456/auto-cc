@@ -1,0 +1,19 @@
+=== 1.7-10 Linux AppImage + deb：逐目标结论 ===
+本次实测新增配置：electronDownload.mirror = https://registry.npmmirror.com/-/binary/electron/
+原因：跨平台构建必须下载目标平台的 electron 发行包，默认源 GitHub release 在本网络 ETIMEDOUT 20.205.243.166:443。
+
+[已验证通的部分] pnpm exec electron-builder --linux：
+  • downloaded electron zip extracted successfully  output=D:\works\deep-seek-workspace\auto-cc\dist\linux-unpacked
+  -> dist/linux-unpacked 产出，说明配置、staging、electron 版本与镜像链路是通的。
+
+[BLOCKED: AppImage] downloaded label=appimage-12.0.1.7z 之后 "failed to build AppImage"（空 RequestError + AggregateError）。
+  排查：%LOCALAPPDATA%/electron-builder/Cache/appimage-12.0.1/ 是 0 字节空目录（下载中断留下的残缺缓存）。
+  即便清掉缓存重下，appimagetool / mksquashfs 是 Linux 二进制，Windows 主机无法执行 -> 本机不可完成。
+  镜像里有没有：有。registry.npmmirror.com/-/binary/electron-builder-binaries/ 下存在 appimage-12.0.1/、appimage-13.0.1/ 等条目。
+
+[BLOCKED: deb] pnpm exec electron-builder --linux deb -> exit 1，报错 "fpm process failed ENOENT / spawn fpm ENOENT"。
+  即 electron-builder 26 的 Linux 目标直接 spawn 系统 fpm 而不自动下载；本机 PATH 无 fpm（which fpm -> 无）。
+  镜像里有没有：有 fpm 条目，但只有 Linux 构建（fpm-1.9.3-2.3.1-linux-x86_64/），Windows 上用不了。
+
+结论：Linux 两个目标都卡在 Linux 主机工具链（fpm、appimagetool + mksquashfs），本机（Windows）如实标 BLOCKED；
+缺的是构建机，不是配置。

@@ -1,0 +1,10 @@
+=== 1.7-09 macOS dmg 构建：BLOCKED ===
+命令：pnpm exec electron-builder --config electron-builder.yml --mac --publish never  ->  exit 1
+真实报错：
+  ⨯ Build for macOS is supported only on macOS, please see https://electron.build/multi-platform-build
+
+配置侧已声明、等有 mac 主机即可直接构建的目标：dmg(arm64) + dmg(x64) + zip(arm64) + zip(x64)，icon 与 category 齐备；
+未配置签名与公证（plan §8.2 决策 4，公证归 P5 发布计划）。
+
+缺什么：一台 macOS 主机。electron-builder 硬性拒绝在非 mac 平台产 dmg/zip，且公证需要 Xcode 工具链与 Apple 证书。
+本条不得声称已构建。

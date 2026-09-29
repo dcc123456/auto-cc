@@ -20,20 +20,25 @@
     "format:check": "prettier --check .",
     "harness": "pnpm --filter @auto-cc/testing harness",
     "status:check": "tsx scripts/check-status.ts",
-    "dist": "pnpm --filter @auto-cc/main dist",
+    "app:build": "tsx scripts/build.ts",
+    "dist": "pnpm app:build && electron-builder --config electron-builder.yml --dir --publish never",
+    "dist:win": "pnpm app:build && electron-builder --config electron-builder.yml --win --publish never",
+    "dist:mac": "pnpm app:build && electron-builder --config electron-builder.yml --mac --publish never",
+    "dist:linux": "pnpm app:build && electron-builder --config electron-builder.yml --linux --publish never",
     "postinstall": "node packages/main/node_modules/electron/install.js",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0",
-    "esbuild": "^0.25.0",
     "vite": "^7.0.0",
-    "@types/react": "^19.0.0"
+    "vitest": "^3.0.0"
   }
 }

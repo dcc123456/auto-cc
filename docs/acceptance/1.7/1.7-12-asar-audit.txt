@@ -1,0 +1,44 @@
+=== 1.7-12 产物内容审计（win-unpacked + app.asar） ===
+构建时间线：pnpm app:build -> electron-builder --win（nsis）；本文件在最后一次 --dir 干跑之后重新采集。
+
+-- dist/win-unpacked 顶层 --
+  auto-cc.exe
+  chrome_100_percent.pak
+  chrome_200_percent.pak
+  d3dcompiler_47.dll
+  dxcompiler.dll
+  dxil.dll
+  ffmpeg.dll
+  icudtl.dat
+  LICENSE.electron.txt
+  LICENSES.chromium.html
+  locales
+  resources
+  resources.pak
+  snapshot_blob.bin
+  v8_context_snapshot.bin
+  vk_swiftshader.dll
+  vk_swiftshader_icd.json
+  vulkan-1.dll
+
+-- dist/win-unpacked/resources --
+  app.asar  (1454750 B)
+  cordis.yml  (1912 B)
+  icon.png  (794492 B)
+
+win-unpacked 解包总体积 = 387,469,699 字节（含 Electron 44.4.5 内核本体）
+
+-- app.asar 完整清单（8 项，1454750 字节） --
+  \main.cjs
+  \package.json
+  \preload.cjs
+  \renderer
+  \renderer\assets
+  \renderer\assets\index-BLVGB1cI.js
+  \renderer\assets\index-IfVcZhl9.css
+  \renderer\index.html
+
+asar 内命中 node_modules/playwright/puppeteer/chromium 的条目数 = 0
+win-unpacked 顶层/resources 命中第二内核的条目 = LICENSES.chromium.html
+说明：resources/default_app.asar 与 ffmpeg.dll / icudtl.dat / *.pak 属于 Electron 44.4.5 官方发行包本体，不是第二套内核；
+     resources/app-update.yml 是 electron-builder 对 nsis 目标的默认产物，主进程未调用 autoUpdater，因此不产生任何更新行为（更新器归 P5）。

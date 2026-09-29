@@ -1,0 +1,7 @@
+=== 1.7-14 CSP 生效后界面照常渲染 ===
+document.querySelectorAll("[data-row-id]").length = 7（期望 7，与 dev 的插件数一致）
+行 id 集合 = ["config","logger","store","ipc","plugins","devtools","shell"]
+document.styleSheets.length = 1（外链 CSS 被 style-src 'self' 放行，未被挡）
+首行计算样式 backgroundColor = oklab(0.129 -0.0038832 -0.0418201 / 0.6)（Tailwind 的 oklab 深色底，说明样式真的生效）
+首行 fontSize = 16px，body 可见文本长度 = 2096
+截图见 17-14 的 png。结论：既不是白屏，也不是无样式渲染。

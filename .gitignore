@@ -1,6 +1,8 @@
 node_modules/
 dist/
 out/
+# electron-builder 的 staging 目录：每次构建全量重建，入库只会让产物与源码不一致。
+build/app/
 *.log
 .DS_Store
 coverage/

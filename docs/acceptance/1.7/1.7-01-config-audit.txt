@@ -1,0 +1,22 @@
+=== 1.7-01 配置审查 + 干跑 ===
+electron-builder 26.15.3；electron-builder.yml 声明 win(nsis) / mac(dmg+zip, arm64+x64) / linux(AppImage+deb)。
+命令：pnpm exec electron-builder --config electron-builder.yml --dir --publish never  ->  exit 0，无 schema 报错。
+
+grep -rn "TODO" electron-builder.yml scripts/build.ts  ->  0 命中（grep exit 1）。
+根 package.json 的 dist 脚本已改为 `pnpm app:build && electron-builder --config electron-builder.yml --dir --publish never`；
+原占位 `pnpm --filter @auto-cc/main dist` 指向一个并不存在的脚本，已删除。
+
+构建期版本守卫 scripts/build.ts#assertElectronVersion()：比对 electron-builder.yml 的 electronVersion 与
+packages/main/node_modules/electron 的实际版本，不一致直接构建失败。当前值 44.4.5。
+
+实测踩坑（已写进 plan §8.2 决策 8）：%LOCALAPPDATA%/electron-builder/Cache 的子目录在下载中断后会留下
+空/残缺目录并被后续构建复用，表现为 icons-bundle 阶段的空 RequestError、icon-tool.js 的 EINVAL 与 exit 134；
+删除 icons@1.1.0 / appimage-12.0.1 缓存目录后重跑即通过。
+
+--- 干跑日志尾部 ---
+  • searching for node modules  pm=traversal searchDir=D:\works\deep-seek-workspace\auto-cc
+  • using manual traversal of node_modules to build dependency tree
+  • no node modules returned while searching directories  searchDirectories=["build\\app",""]
+  • updating asar integrity executable resource  executablePath=dist\win-unpacked\auto-cc.exe
+  • using cached artifact  label=icons-bundle.tar.gz
+  • signing with signtool.exe  path=dist\win-unpacked\auto-cc.exe

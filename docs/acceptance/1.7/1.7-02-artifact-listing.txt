@@ -1,0 +1,5 @@
+=== 1.7-02 Windows 产物清单 ===
+dist/auto-cc-0.1.0-win-x64.exe            112,802,483 字节
+dist/auto-cc-0.1.0-win-x64.exe.blockmap   119,629 字节
+dist/win-unpacked/                        --dir 干跑的解包目录
+文件名含版本号 0.1.0 与架构 x64，来自 win.artifactName = auto-cc-${version}-win-${arch}.${ext}。

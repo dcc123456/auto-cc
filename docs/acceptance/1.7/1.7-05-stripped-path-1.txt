@@ -1,0 +1,7 @@
+=== 1.7-05 零前置依赖（本机代理证明） ===
+启动方式：PowerShell 内先把 $env:PATH 覆写为 "C:\Windows\System32;C:\Windows"，再 Start-Process 安装版。
+子进程继承的 PATH 不含任何 node / npm / nvm 目录；同一环境内 where.exe node -> 「找不到文件」，exit 1。
+安装版进程可执行路径 = C:\Users\ragfl\AppData\Local\Programs\auto-cc\auto-cc.exe
+结果：界面正常渲染（见截图），location.href = file:///C:/Users/ragfl/AppData/Local/Programs/auto-cc/resources/app.asar/renderer/index.html
+      插件行 7 条，外链 CSS 生效（styleSheetCount=1）。
+BLOCKED：macOS / Linux 的干净虚拟机本机不具备，未做真实干净环境验证。

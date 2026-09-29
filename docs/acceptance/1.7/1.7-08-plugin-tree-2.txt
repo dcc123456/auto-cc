@@ -1,0 +1,9 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "app.asar" "--expr-file" "tmp/17-readouts.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "app.asar" "--expr-file" "tmp/17-readouts.js"
+
+"{\n \"appVersion\": \"0.1.0\",\n \"electronVersion\": \"44.4.5\",\n \"nodeVersion\": \"24.21.0\",\n \"windowVisible\": true,\n \"plugins\": [\n  \"config=active\",\n  \"logger=active\",\n  \"store=active\",\n  \"ipc=active\",\n  \"plugins=active\",\n  \"devtools=active\",\n  \"shell=active\"\n ],\n \"isPackaged\": true,\n \"isCdpEnabled\": false,\n \"cdpPort\": null,\n \"targetCount\": 2,\n \"targets\": [\n  {\n   \"url\": \"file:///C:/Users/ragfl/AppData/Local/Programs/auto-cc/resources/app.asar/renderer/index.html\"\n  },\n  {\n   \"url\": \"data:text/html;charset=utf-8,%3Cbody%20style%3D%22margin%3A0%3Bfont%3A13px%2F1.6%20system-ui%3Bcolor%3A%2364748b%3Bbackground%3A%230f172a%22%3E%3Cp%20style%3D%22padding%3A12px%22%3EEmbedded%20kernel%20view%20placeholder%20(WebContentsView)%3C%2Fp%3E%3C%2Fbody%3E\"\n  }\n ]\n}"

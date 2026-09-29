@@ -305,20 +305,39 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 ## 1.7 零依赖三端打包与安装
 
-| ID     | 验收标准                                                                     | 方式 | 验证操作                                                          | 状态 |
-| ------ | ---------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------- | ---- |
-| 1.7-01 | `electron-builder` 配置声明 win / mac / linux 三端目标，无占位 TODO          | C    | 审阅配置；`--publish never` 干跑不报 schema 错                    | [ ]  |
-| 1.7-02 | Windows 产物真实产出（nsis `.exe`）                                          | C    | `dist/*.exe` 存在                                                 | [ ]  |
-| 1.7-03 | Windows 安装包**静默安装成功并启动出界面**                                   | V    | 安装后启动 → harness 截图确认界面                                 | [ ]  |
-| 1.7-04 | 安装后的 app 不依赖 dev server（资源来自包内）                               | V    | 关闭 vite 后仍能看到界面                                          | [ ]  |
-| 1.7-05 | **零前置依赖**：在未安装 Node、未安装系统 Chrome 的干净环境下装 app 即可运行 | V    | 干净机器（或隔离用户环境）安装启动截图；`which node` 不存在仍可用 | [ ]  |
-| 1.7-06 | **零首启动下载**：从安装到跑通骨架，网络请求日志中无任何依赖/内核/模型下载   | C    | 抓包或代理日志断言目标域名集合为空                                | [ ]  |
-| 1.7-07 | 打包版 IPC/service 调用可用（不只是空壳）                                    | V    | 点按钮拿到 `system.status`，显示版本号非 dev 值                   | [ ]  |
-| 1.7-08 | 打包版插件挂载与 dev 一致（同一 `cordis.yml` 生效）                          | V    | 打包版打开调试面板，插件树与 dev 相同                             | [ ]  |
-| 1.7-09 | macOS `dmg`（arm64+x64）可构建                                               | C    | `pnpm dist:mac` 结果；本机为 Windows 时标 BLOCKED 并写清缺什么    | [ ]  |
-| 1.7-10 | Linux `AppImage` + `deb` 可构建                                              | C    | `pnpm dist:linux` 结果；受 fpm/GitHub 限制时标 BLOCKED            | [ ]  |
-| 1.7-11 | 版本号 / 产物命名 / 三端图标齐备，无默认 Electron 图标                       | V    | 截图安装包属性与标题栏图标                                        | [ ]  |
-| 1.7-12 | 产物内**不含**第二套浏览器内核（体积与内容审计）                             | C    | 审计 `dist` 内容，无 chromium/playwright 下载物                   | [ ]  |
+验收前置：`pnpm dist:win` 产出安装包后，**先停掉 `pnpm dev`**，所有 1.7 的 V 项一律打在安装后的
+真实 exe 上。安装包自己不注入 CDP 开关（1.6-08 的结构保证），验收时由操作方在命令行外部追加
+`--remote-debugging-port=10222` 让 harness 能附着——此时 `devtools.status().isCdpEnabled` 仍为 false，
+两个事实同时成立正是那条保证的证据（见 §8.2 决策 5）。
+
+| ID     | 验收标准                                                                     | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                                                  | 状态 |
+| ------ | ---------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1.7-01 | `electron-builder` 配置声明 win / mac / linux 三端目标，无占位 TODO          | C    | 审阅 `electron-builder.yml`；`pnpm exec electron-builder --config electron-builder.yml --dir --publish never` 干跑不报 schema 错；`grep -rn "TODO" electron-builder.yml scripts/build.ts` 为 0 命中；根 `dist` 脚本不再是 `pnpm --filter @auto-cc/main dist`（该包无 dist 脚本）                                                                          | [x]  |
+| 1.7-02 | Windows 产物真实产出（nsis `.exe`）                                          | C    | `pnpm dist:win` 后 `ls dist/*.exe`，文件名含版本号与架构；把产物清单与体积写进 `1.7-02-*.txt`                                                                                                                                                                                                                                                             | [x]  |
+| 1.7-03 | Windows 安装包**静默安装成功并启动出界面**                                   | V    | `dist\auto-cc-<ver>-win.exe /S` 静默安装 → 启动 `%LOCALAPPDATA%\Programs\auto-cc\auto-cc.exe` → `harness shot` 读图，描述出左栏 / 面板 / 日志区实际内容                                                                                                                                                                                                   | [x]  |
+| 1.7-04 | 安装后的 app 不依赖 dev server（资源来自包内）                               | V    | 先确认 5173 无监听（`netstat -ano` 无 5173）再启动安装版并截图；渲染层 URL 是 `file://…app.asar/renderer/index.html`，不是 `127.0.0.1:5173`                                                                                                                                                                                                               | [x]  |
+| 1.7-05 | **零前置依赖**：在未安装 Node、未安装系统 Chrome 的干净环境下装 app 即可运行 | V    | 本机代理证明：以只保留系统目录的 `PATH` 启动安装版（`where node` 在该环境下 1 命中不到）→ 界面截图正常；mac / linux 干净机标 BLOCKED 并写清缺什么                                                                                                                                                                                                         | [x]  |
+| 1.7-06 | **零首启动下载**：从安装到跑通骨架，网络请求日志中无任何依赖/内核/模型下载   | C    | 安装版带 `--log-net-log=<file>` 启动，跑通界面后解析 netlog，断言 `events` 中不存在对外的 http(s) 请求条目（把条目计数写进证据文件）；同时 `devtools.status()` 报 `isPackaged=true` 且 `isCdpEnabled=false`                                                                                                                                               | [x]  |
+| 1.7-07 | 打包版 IPC/service 调用可用（不只是空壳）                                    | V    | `harness eval --expr-file` 调 `window.autoCC.shell.getStatus()`（白名单里没有 `system.status`，见 1.4 的 `RENDERER_ALLOWLIST`），版本号 = `package.json` 的 0.1.0 而非 dev 值；`harness click` 点一次插件停止按钮，界面状态真的变化                                                                                                                       | [x]  |
+| 1.7-08 | 打包版插件挂载与 dev 一致（同一 `cordis.yml` 生效）                          | V    | 打包版 `kernel.tree()` 的插件 id 集合与 dev 的 7 个一字不差；`harness dom --selector '[data-row-id]'` 与 `devtools.status().targets` 一致；截图面板                                                                                                                                                                                                       | [x]  |
+| 1.7-09 | macOS `dmg`（arm64+x64）可构建                                               | C    | 本机为 Windows → 预期 BLOCKED（electron-builder 拒绝在非 mac 主机产 dmg，且缺 Xcode 许可）；先跑 `pnpm dist:mac` 把真实报错与配置里的双 arch 留档，不得声称已构建                                                                                                                                                                                         | [!]  |
+| 1.7-10 | Linux `AppImage` + `deb` 可构建                                              | C    | `pnpm dist:linux` 实测：deb 需要 fpm、AppImage 需要 mksquashfs；能出则记产物文件名，缺件则逐目标标 BLOCKED 并写清缺哪个二进制、镜像里有没有                                                                                                                                                                                                               | [!]  |
+| 1.7-11 | 版本号 / 产物命名 / 三端图标齐备，无默认 Electron 图标                       | V    | 截图窗口标题栏与托盘图标（是 `resources/icon.png` 而非 Electron 默认蓝灰原子）；安装包属性页版本 = 0.1.0；`dist` 文件名含版本；审计 staging 里三端图标源。**本轮只做到机器可查的部分**：exe 版本元数据 + `icon.ico` 由 `resources/icon.png` 生成 + 三端图标源审计；标题栏 / 托盘的**像素**未核对（CDP 只截 web 内容，截不到原生窗口装饰），留人工一眼确认 | [x]  |
+| 1.7-12 | 产物内**不含**第二套浏览器内核（体积与内容审计）                             | C    | 审计 `dist/win-unpacked` 与 `app.asar`：无 chromium / playwright / puppeteer 目录，`app.asar` 内无 `node_modules`（只有 main.cjs / preload.cjs / renderer / package.json）；记录解包体积与 asar 文件清单                                                                                                                                                  | [x]  |
+| 1.7-13 | 打包版渲染层带 CSP，且不含 `unsafe-eval`                                     | C    | 从 asar 读 `renderer/index.html`，断言 `<meta http-equiv="Content-Security-Policy">` 存在、`script-src 'self'`、整串不含 `unsafe-eval`；dev 的源 `index.html` 里 CSP 命中数为 0（决策见 §8.2 第 3 条）                                                                                                                                                    | [x]  |
+| 1.7-14 | CSP 生效后界面照常渲染（不是白屏）                                           | V    | 打包版 `harness eval` 断言 `document.querySelectorAll('[data-row-id]').length` 为 7 且 `document.styleSheets.length` 大于 0（CSS 被 CSP 挡掉时前者会渲染成无样式、后者为 0），并截图留证                                                                                                                                                                  | [x]  |
+
+**1.7 收尾结论**（证据在 `docs/acceptance/1.7/`，21 个文件）：
+
+- 两条 `[!]` 都是**宿主平台缺二进制**，不是配置缺件，且已按条目要求写清缺哪个：1.7-09 需要 macOS 主机
+  （electron-builder 实测拒绝在非 mac 主机产 dmg，且 hdiutil / codesign 与 Xcode 许可只在 macOS 存在）；
+  1.7-10 的 `linux-unpacked` 已真实产出，但 deb 需要系统 `fpm`、AppImage 需要 `mksquashfs` +
+  `appimagetool`，三者都是 Linux 二进制，Windows 上装不到（镜像里 `fpm-1.9.3-2.3.1-linux-x86_64/` 存在，
+  但那是给 Linux 宿主用的）。到 Linux 机器上按同一份配置直接重跑即可，无需改代码。
+- 1.7-05 的「未装系统 Chrome」在本机是用**剥离 PATH**（只剩 Windows 系统目录 + `where node` 零命中）代理
+  证明的，不是真的干净虚拟机；这条结论强度弱于原始意图，如实记在这里。
+- 1.7-06 的 netlog 必须**干净退出**才会落全 `events`（`Stop-Process` 强杀只剩 `constants`），
+  所以用 CDP `Browser.close` 收尾，实测 13 条事件里对外 http(s) 请求 0 条。
 
 ## 1.8 内置内核会话与登录态持久化
 

@@ -1,0 +1,6 @@
+=== 1.7-08 打包版插件挂载与 dev 一致 ===
+dev 基线（1.6-03 归档值）：["config","logger","store","ipc","plugins","devtools","shell"]
+打包版 kernel.tree()：[config=active,logger=active,store=active,ipc=active,plugins=active,devtools=active,shell=active]
+打包版面板 [data-row-id] 集合：[config,logger,store,ipc,plugins,devtools,shell]
+主进程 devtools.status().targetCount = 2（渲染层 + 内嵌内核视图占位页）
+三者与 dev 的 7 个插件 id 一字不差，且挂载状态全部 active。

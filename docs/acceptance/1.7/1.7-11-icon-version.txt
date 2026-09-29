@@ -1,0 +1,15 @@
+=== 1.7-11 版本号 / 产物命名 / 三端图标 ===
+dist/win-unpacked/auto-cc.exe 的版本信息（PowerShell VersionInfo）：
+  ProductName=auto-cc  FileVersion=0.1.0  ProductVersion=0.1.0.0  CompanyName=auto-cc  FileDescription=auto-cc
+  LegalCopyright=Copyright © 2026 auto-cc
+安装包文件名 auto-cc-0.1.0-win-x64.exe（含版本与架构）。
+
+图标来源审计：
+  win.icon / mac.icon / linux.icon 全部指向同一张 resources/icon.png（794,492 字节）；
+  electron-builder 由它生成 dist/.icon-ico/icon.ico（122,817 字节）并写进 auto-cc.exe 的资源段，
+  所以 exe / 快捷方式 / 任务栏图标是项目自己的图标，不是 Electron 默认蓝灰原子；
+  extraResources 又把 resources/icon.png 原样送到安装目录（794,492 字节，与源文件同尺寸），
+  packages/shell 在打包态按 process.resourcesPath/icon.png 读取托盘与窗口图标。
+
+未做机检的部分（如实记录）：标题栏与托盘图标的像素级比对。CDP 的 Page.captureScreenshot 只覆盖网页内容，
+拍不到 OS 绘制的标题栏与托盘，因此这两处只有「源文件 + 生成产物 + 运行期读取路径」三级审计，没有像素证据。

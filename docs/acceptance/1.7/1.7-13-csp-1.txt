@@ -1,0 +1,9 @@
+=== 1.7-13 打包版渲染层 CSP ===
+读数来源：运行中的打包页面 DOM（不是磁盘上的 HTML），location.href = file:///C:/Users/ragfl/AppData/Local/Programs/auto-cc/resources/app.asar/renderer/index.html
+meta[http-equiv="Content-Security-Policy"] 存在 = true
+content = default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+含 unsafe-eval = false
+内联 style 属性节点数 = 0（style-src 不给 unsafe-inline，违规会在这里暴露）
+
+注入点：scripts/build.ts 的 injectCsp() 只改 staging 里的构建产物 build/app/renderer/index.html；
+开发态源文件 packages/renderer/index.html 的 CSP 命中数 = 0（vite 需要内联 preamble 与 HMR，见 spec §1.2 事实第 5 条）。

@@ -1,0 +1,7 @@
+=== 1.7-07 打包版 IPC/service 调用可用 ===
+window.autoCC.shell.getStatus() -> appVersion=0.1.0（= package.json 的 0.1.0，不是 dev 占位值）
+                                    electronVersion=44.4.5  nodeVersion=24.21.0
+真实点击 [data-row-id="devtools"] [data-action="stop"] 后，面板行文本变成「devtools 已卸载」，
+按钮集合从 [config, stop, cycle] 变成 [config, start]（见 after-stop 截图）。
+再点 [data-action="start"] 后恢复「已就绪」，按钮集合回到 [config, stop, cycle]（见 after-start 截图）。
+结论：渲染层 → preload → IPC 网关 → cordis service 的往返在打包版完整可用，界面状态由主进程真实驱动。

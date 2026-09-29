@@ -52,6 +52,8 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/out/**',
+      // staging 与安装包产物是构建输出，不是源码；esbuild 的注释排版交给构建器而不是 lint。
+      'build/**',
       'docs/acceptance/**',
       'tmp/**',
       'packages/renderer/**/generated/**',

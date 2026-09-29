@@ -4,10 +4,19 @@ import { Service, type Context } from '@auto-cc/core';
 import { KERNEL_VIEW_WIDTH_RATIO, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
 
-/** 仓库根目录（开发态）；打包态由 1.7 换成 resourcesPath。 */
+/** 仓库根目录（开发态）。 */
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
-/** 托盘与窗口图标路径；缺失时退化为空图标，不阻塞启动。 */
-const iconPath = path.join(repoRoot, 'resources', 'icon.png');
+/**
+ * 托盘与窗口图标路径；缺失时退化为空图标，不阻塞启动。
+ * 打包态图标随 extraResources 落到 `process.resourcesPath/icon.png`（spec §8.2 决策 2）。
+ */
+const iconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(repoRoot, 'resources', 'icon.png');
+/** 渲染层入口：打包态与 `main.cjs` 同在 asar 根，开发态用 vite 的构建产物目录。 */
+const rendererIndexPath = app.isPackaged
+  ? path.join(__dirname, 'renderer', 'index.html')
+  : path.join(repoRoot, 'packages', 'renderer', 'dist', 'index.html');
 /** 内核视图占位页：P1 用一行说明文字，P2 起替换为真实站点视图。 */
 const kernelViewPlaceholder =
   'data:text/html;charset=utf-8,' +
@@ -179,7 +188,7 @@ export class ShellService extends Service {
 
     const devUrl = process.env.ELECTRON_RENDERER_URL;
     if (devUrl) void win.loadURL(devUrl);
-    else void win.loadFile(path.join(repoRoot, 'packages', 'renderer', 'dist', 'index.html'));
+    else void win.loadFile(rendererIndexPath);
   }
 
   /** 按固定比例给内核视图摆位，与渲染层槽位共用 `KERNEL_VIEW_WIDTH_RATIO`。 */

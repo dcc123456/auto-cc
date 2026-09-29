@@ -1,0 +1,9 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "app.asar" "--expr-file" "tmp/17-csp-render.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "app.asar" "--expr-file" "tmp/17-csp-render.js"
+
+"{\n \"href\": \"file:///C:/Users/ragfl/AppData/Local/Programs/auto-cc/resources/app.asar/renderer/index.html\",\n \"cspPresent\": true,\n \"cspContent\": \"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\",\n \"hasUnsafeEval\": false,\n \"styleSheetCount\": 1,\n \"inlineStyleAttrCount\": 0,\n \"rowIds\": [\n  \"config\",\n  \"logger\",\n  \"store\",\n  \"ipc\",\n  \"plugins\",\n  \"devtools\",\n  \"shell\"\n ],\n \"rowCount\": 7,\n \"firstRowBackground\": \"oklab(0.129 -0.0038832 -0.0418201 / 0.6)\",\n \"firstRowFontSize\": \"16px\",\n \"bodyTextLength\": 2096\n}"

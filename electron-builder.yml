@@ -1,0 +1,82 @@
+# electron-builder 配置：一份声明出 win / mac / linux 三端（spec 1.7-01）。
+# 输入是 scripts/build.ts 组装的 staging 目录，里面没有 node_modules，所以产物零依赖（spec §8.2 决策 1）。
+appId: com.autocc.desktop
+productName: auto-cc
+copyright: Copyright © 2026 auto-cc
+
+directories:
+  app: build/app
+  output: dist
+  buildResources: build/assets
+
+# staging 目录里没有 electron，electron-builder 的自动发现（从 app 目录往上找 node_modules）会失败，
+# 所以版本号必须显式声明。值由 scripts/build.ts 与 packages/main 实际安装的 electron 版本对比校验，
+# 防止升级依赖后静默打出另一个内核（spec §8.2 决策 8）。
+electronVersion: 44.4.5
+
+# 跨平台构建时 electron 发行包必须下载（同平台的 win 构建会直接复用 node_modules 里已装好的 dist）。
+# 默认源是 GitHub release，本网络环境不可达（实测 ETIMEDOUT 20.205.243.166:443），
+# 所以与 `.npmrc` 的 `electron_mirror` 保持同一个镜像；校验和从同目录的 SHASUMS256.txt 取。
+electronDownload:
+  mirror: https://registry.npmmirror.com/-/binary/electron/
+
+# staging 已是最终形态，不需要再解析依赖或跑 native rebuild。
+npmRebuild: false
+asar: true
+
+files:
+  - '**/*'
+
+# 主进程清单与托盘图标按 `process.resourcesPath` 下的文件名读取（spec §8.2 决策 2）。
+extraResources:
+  - from: cordis.yml
+    to: cordis.yml
+  - from: resources/icon.png
+    to: icon.png
+
+win:
+  icon: resources/icon.png
+  target:
+    - nsis
+  # 骨架阶段不接签名链：本机无证书，签名与公证归 P5 发布计划（spec §8.2 决策 4）。
+  artifactName: auto-cc-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  # 卸载不清 userData：登录态与知识库从 P2 起是用户资产，删掉不可恢复。
+  deleteAppDataOnUninstall: false
+
+mac:
+  icon: resources/icon.png
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: auto-cc-${version}-mac-${arch}.${ext}
+
+dmg:
+  artifactName: auto-cc-${version}-mac-${arch}.${ext}
+
+linux:
+  icon: resources/icon.png
+  maintainer: auto-cc <auto-cc@example.com>
+  synopsis: Desktop job-hunting copilot
+  category: Utility
+  target:
+    - AppImage
+    - deb
+
+appImage:
+  artifactName: auto-cc-${version}-linux-${arch}.${ext}
+
+deb:
+  artifactName: auto-cc-${version}-linux-${arch}.${ext}

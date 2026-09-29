@@ -256,6 +256,69 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 **验收结论**：1.6-01 … 1.6-14 全部通过，逐项证据在 `docs/acceptance/1.6/`；1.6-08 的安装包复验、
 以及打包态截图是否同样需要遮挡开关，移交 1.7。
 
+### 8.2 子计划 1.7 的落地方案（零依赖三端打包 + CSP）
+
+**目标**：一条 `pnpm dist:<os>` 出可安装产物，用户只装这一个 app 就能跑通骨架 —— 不装 Node、不装 Chrome、
+首启动不下载任何东西；同时把 1.2 起刻意推迟的 CSP 在**打包态**补上。
+
+**落地形态**：
+
+- `scripts/build.ts`：esbuild 产 `main.cjs` / `preload.cjs`（与 dev 同一套 bundle 选项，去掉 watch 与 sourcemap）
+  - `vite build` 产渲染层，然后组装 staging 目录 `build/app/`：`package.json`(`main: main.cjs`) +
+    两份 cjs + `renderer/`。
+- `electron-builder.yml`（仓库根）：`directories.app = build/app`、`directories.output = dist`，
+  win = nsis、mac = dmg+zip（arm64/x64）、linux = AppImage + deb；`extraResources` 把 `cordis.yml`
+  与 `resources/icon.png` 落到 `resources/` 根。
+
+**关键决策**：
+
+1. **产物从 staging 目录构建，不直接吃 workspace**：esbuild 的 `external` 只留 `electron`，cordis 与全部
+   `@auto-cc/*` 已内联进 `main.cjs`，所以 `build/app/` 里天然没有 `node_modules`。这比「让 electron-builder
+   去遍历 pnpm 符号链接再过滤」可靠得多 —— 1.7-12 的零依赖是**结构事实**，不是事后清理。
+2. **打包态资源路径只在两处收口**：主进程清单根 = `process.resourcesPath`（`manifestRoot()` 已实现）；
+   壳层的渲染层入口与图标改判 `app.isPackaged`，分别是 asar 内的 `__dirname/renderer/index.html` 与
+   `process.resourcesPath/icon.png`。dev 分支保持原样，避免打包逻辑污染开发态。
+3. **CSP 只写进构建产物**：dev 里 vite 注入内联 preamble 并开 HMR，此时加 CSP 只会逼出一份专为 dev 放宽的规则
+   （spec §1.2 事实第 5 条）。所以 CSP 由 `scripts/build.ts` 在 vite 产出之后改写 `renderer/index.html`
+   插入 `<meta http-equiv="Content-Security-Policy">`；内容按「先最严、违规再定位」的顺序取，
+   `script-src 'self'`、不含 `unsafe-eval`，`connect-src 'self'`（骨架阶段渲染层不发网络请求）。
+   打包版必须截图证明界面照常渲染 —— CSP 让 app 白屏也算不合格。
+4. **不引入签名链**：本机无证书，骨架阶段也不该把 Apple 公证 / EV 证书塞进来。nsis 走未签名产物，
+   exe 的图标与版本元数据由 electron-builder 的 resedit 路径写入（不下载 winCodeSign）；
+   签名与公证归 P5 发布计划。
+5. **安装包冒烟仍用 harness，但 CDP 开关由操作方在命令行外部追加**：1.6-08 保证的是「app 自己不注入开关」，
+   不是「这台机器上的 Chromium 不能被别人加开关」。验收时给安装后的 exe 传 `--remote-debugging-port=10222`，
+   此时 `devtools.status().isCdpEnabled` 仍为 false —— 两个事实同时成立，正是那条结构性保证最直接的证据。
+6. **零首启动下载用 netlog 判，而不是「看起来没下载」**：安装后的 app 带 `--log-net-log=<file>` 启动，
+   解析 JSON 断言不存在对外的 http(s) 请求事件。这条同时也是 1.6 移交的打包态 CDP 复验入口。
+7. **干净环境用「剥离 PATH」启动做代理证明**：本机是唯一可用的 Windows，拿不到未装 Node 的干净机器。
+   改以只保留系统目录的 `PATH` 启动安装包并截图出界面，证明运行时不需要外部 node / 系统 Chrome；
+   mac 与 linux 的真实干净机验收按 §7 规则标 BLOCKED 并写清缺什么，不降级为「配置正确即 PASS」。
+8. **镜像目录名是错的，已修**：`.npmrc` 里 `electron_builder_binaries_mirror` 原指向
+   `registry.npmmirror.com/-/binary/electron-builder/`（实测 404），npmmirror 的实际目录是
+   `electron-builder-binaries/`。同时确认本机 **GitHub HTTPS 仍不可达**（`000`），但 **SSH 推送可用** ——
+   这个区分要记下，否则下次会把「能 push」误读成「能下载 release 资产」。
+9. **两个镜像是两个开关，不能只配一个**（1.7 实测）：`electron_builder_binaries_mirror` 只管 builder
+   自己的工具链（nsis / icons / appimage / fpm），**electron 发行包**走 `electronDownload.mirror`。
+   `--linux` 首次构建实测 `ETIMEDOUT 20.205.243.166:443`（GitHub release 资产），在
+   `electron-builder.yml` 里补 `electronDownload.mirror = registry.npmmirror.com/-/binary/electron/`
+   （校验和从同目录 `SHASUMS256.txt` 取）之后 `linux-unpacked` 真实产出。
+   顺带两个坑：`electronVersion` 必须显式声明（staging 里没有 electron，自动发现不到，
+   `scripts/build.ts` 的 `assertElectronVersion()` 因此宁可构建失败也不静默换内核）；
+   `electronDist` 是**顶层**选项、不能按平台分段，本想用它复用本地已装好的 electron 二进制，
+   结果会同时污染 win/mac/linux 三条链路，遂放弃、改用镜像下载。
+10. **electron-builder 的中断缓存会伪装成各种无关错误**（1.7 实测三次）：上一次构建被取消后
+    `%LOCALAPPDATA%\electron-builder\Cache\` 里留下的 0 字节 / 半截目录会被直接复用，
+    表现分别是 `icon-tool.js` 抛空 `RequestError`、`EINVAL`、以及 exit 134。
+    排查方向不是配置也不是网络，而是 `rm -rf` 掉 `Cache/icons@1.1.0` 与 `Cache/appimage-12.0.1`
+    （以及 `dist/*.tmp`），同一份配置随即 exit 0。
+
+**验收结论**：1.7-01 … 1.7-08、1.7-11 … 1.7-14 通过在 Windows 安装后的真实 exe 上，逐项证据在
+`docs/acceptance/1.7/`；1.7-09（需 macOS 主机）、1.7-10（需 Linux 侧的 fpm / mksquashfs + appimagetool）
+按 §7 规则标 `[!]` 并写清缺哪个二进制，配置本身已产出 `linux-unpacked`，到对应宿主重跑即可补齐。
+安装包侧复验：「app 自己不注入 CDP 开关」在打包版上成立（操作方外部追加后 `isCdpEnabled` 仍为 false）；
+打包态截图沿用同一个遮挡开关即可，本轮**没有**做「不加遮挡开关」的反向对照，所以只记录了「加了就正常」。
+
 ## 9. P1 明确不做
 
 - 不接招聘平台、不写 JD 模型、不做 PDF、不做知识库 —— 提前做这些会让骨架被业务细节绑架。

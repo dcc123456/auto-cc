@@ -1,0 +1,12 @@
+=== 1.7-06 零首启动下载（netlog 解析） ===
+外部追加的启动参数：--remote-debugging-port=10222 --disable-features=CalculateNativeWinOcclusion --log-net-log=tmp/17-06-netlog.json
+退出方式：CDP Browser.close。netlog 只在干净关闭时落盘，Stop-Process 会留下只有 constants 段的半截文件（实测踩过）。
+
+netlog 事件总数 = 13
+事件类型分布 = {"37":2,"308":2,"459":1,"538":2,"539":1,"540":1,"549":4}
+全文正则扫描 http(s):// 与 ws(s):// 的 URL（去重）= 0 条
+
+devtools.status() 读数：isPackaged=true、isCdpEnabled=false、cdpPort=null
+resolveCdpPort() 在打包态一律返回 null，所以「安装包自身不开 CDP」这条即使被外部追加了开关也仍然成立。
+
+结论：从安装到跑通骨架，进程没有发起任何对外网络请求，也没有依赖 / 内核 / 模型下载。

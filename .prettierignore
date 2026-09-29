@@ -7,3 +7,6 @@ docs/acceptance/
 
 # 过程脚本与临时产物，不进 git，也不该参与排版。
 tmp/
+
+# electron-builder 的 staging 目录：每次构建全量重建，prettier 重排 bundle 产物毫无意义。
+build/
