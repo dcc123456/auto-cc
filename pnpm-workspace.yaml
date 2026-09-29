@@ -1,0 +1,12 @@
+packages:
+  - 'packages/*'
+
+# esbuild/electron need their install scripts; this env blocks pre-post scripts by default
+# and Electron silently ends up without its binary otherwise (see docs/plans/01-framework/plan.md §7).
+onlyBuiltDependencies:
+  - esbuild
+  - electron
+  - '@esbuild/win32-x64'
+  - '@esbuild/darwin-x64'
+  - '@esbuild/darwin-arm64'
+  - '@esbuild/linux-x64'

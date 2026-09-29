@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+coverage/
+.vite/
+research-repos/
+.research-repos/
+docs/acceptance/**/tmp/

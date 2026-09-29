@@ -1,0 +1,22 @@
+#!/bin/sh
+# Conventional Commits gate (docs/02-conventions.md). Dependency-free on purpose:
+# this env blocks npm postinstall scripts, so commitlint/husky are not viable.
+regex='^(feat|fix|chore|docs|refactor|test|perf|build|ci|style)(\([a-z0-9._-]+\))?(!)?: .{1,120}$'
+msg=$(sed -n '1p' "$1")
+
+case "$msg" in
+  "Merge "*|"Revert "*|"fixup!"*|"amend!"*) exit 0 ;;
+esac
+
+if ! echo "$msg" | grep -Eq "$regex"; then
+  cat >&2 <<EOF
+✖ commit message does not follow Conventional Commits
+
+  got: $msg
+  expected: <type>(<scope>): <subject>
+  types:  feat fix chore docs refactor test perf build ci style
+  scope:  optional, kebab-case (package or area name)
+  '!' marks a breaking change, e.g. feat(ipc)!: ...
+EOF
+  exit 1
+fi
