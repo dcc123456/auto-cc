@@ -83,6 +83,15 @@ export class KernelService extends Service {
     return [...this.nodes.values()];
   }
 
+  /**
+   * IPC 网关入口（spec 1.4-07）：装配树直接由内核给出。
+   * 1.3 时它挂在 `shell.getPluginTree` 上，那是网关尚未存在的过渡形态。
+   */
+  tree = (): { nodes: PluginNode[]; manifestError?: string } => ({
+    nodes: this.snapshot(),
+    manifestError: this.manifestError,
+  });
+
   get manifestPath(): string {
     const name = this.options.manifest;
     if (isAbsolute(name)) return name;

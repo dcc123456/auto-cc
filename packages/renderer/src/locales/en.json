@@ -1,7 +1,7 @@
 {
   "shell": {
     "title": "auto-cc desktop workspace",
-    "subtitle": "Plan 1 · 1.3 L0 kernel plugins",
+    "subtitle": "Plan 1 · 1.4 IPC gateway",
     "language": {
       "switchTo": "中文"
     },
@@ -24,7 +24,7 @@
       "count": "Local state changed {{count}} times",
       "bridgeMethods": "{{visible}} methods visible · allowlist {{allowlist}}",
       "requireUndefined": "require undefined in renderer: {{value}}",
-      "illegalCall": "Call an unlisted capability",
+      "illegalCall": "Ask main process to reject an unlisted call",
       "mainCrash": "Trigger a main process error",
       "kernelShow": "Show kernel view",
       "kernelHide": "Hide kernel view",
@@ -50,10 +50,11 @@
       "root": "no dependencies",
       "configKeys": "config keys {{names}}",
       "configNone": "no config keys",
-      "logHeading": "Recent main process logs (redacted at the sink)",
+      "logHeading": "Main process logs (live events, redacted at the sink)",
       "logFile": "written to {{path}}",
       "logNoFile": "logs not written to a file",
       "logLevel": "level {{level}}",
+      "logPushed": "{{count}} events pushed in this session",
       "logEmpty": "No logs yet",
       "probeRedact": "Emit one log with sensitive fields"
     },

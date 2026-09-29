@@ -87,6 +87,9 @@ export class LogService extends Service {
     return this.ring.toArray().slice(-Math.max(0, limit));
   }
 
+  /** IPC 网关入口（spec 1.4-07）：日志出口状态，界面用它显示落盘路径与生效级别。 */
+  status = (): { file: string | undefined; level: string } => ({ file: this.logFile, level: this.options.level });
+
   [Service.init](): void {
     const dir = this.options.dir ?? asApp(this.ctx).config.paths().logDir;
     mkdirSync(dir, { recursive: true });
@@ -147,13 +150,6 @@ export class LogService extends Service {
       // 出口本身绝不能再抛：否则一条坏日志会把调用方整个流程带崩。
       console.error('[log] 写出失败：', error);
     }
-  }
-}
-
-declare module 'cordis' {
-  interface Events {
-    /** 一条已脱敏日志的外发事件，1.4 IPC 网关节据此推给渲染层。 */
-    'log/line'(line: LogLine): void;
   }
 }
 

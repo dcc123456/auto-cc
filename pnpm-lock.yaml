@@ -59,6 +59,25 @@ importers:
         specifier: 4.0.0-rc.10
         version: 4.0.0-rc.10
 
+  packages/ipc:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      electron:
+        specifier: ^44.4.5
+        version: 44.4.5
+
   packages/kernel:
     dependencies:
       '@auto-cc/core':
@@ -103,6 +122,9 @@ importers:
       '@auto-cc/plugin-config':
         specifier: workspace:*
         version: link:../config
+      '@auto-cc/plugin-ipc':
+        specifier: workspace:*
+        version: link:../ipc
       '@auto-cc/plugin-kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -182,7 +204,11 @@ importers:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@24.19.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/shell:
     dependencies:

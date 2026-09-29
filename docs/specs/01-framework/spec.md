@@ -131,18 +131,49 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
    需在 1.4 前补 `app.setName('auto-cc')` / `setPath('userData', …)`，否则两目录长期不一致。
 2. 插件树与日志尾当前通过 `shell.getPluginTree` / `shell.getLogTail` 两个开发态桥接方法暴露，只为
    验收可见性存在；1.4 IPC 网关落地后必须迁到 `kernel.*` / `log.*` 并从白名单里删掉 shell 的这两项。
+   （**1.4 已完成迁移**，见下面「1.4 遗留」第 1 条。）
 
 ## 1.4 IPC 网关
 
-| ID     | 验收标准                                                          | 方式 | 验证操作                                                  | 状态 |
-| ------ | ----------------------------------------------------------------- | ---- | --------------------------------------------------------- | ---- |
-| 1.4-01 | 渲染层通过**类型化 client** 调用主进程 service 并拿到返回值       | V    | 点按钮 → 显示 `system.status()` 的平台/Electron/Node 版本 | [ ]  |
-| 1.4-02 | 只有 `cordis:call` 与 `cordis:event` 两个通道，无插件私自注册 ipc | C    | `grep -rn "ipcMain.handle" packages/` 仅出现在 plugin-ipc | [ ]  |
-| 1.4-03 | 主进程事件能流到渲染层并驱动界面更新（推，不是轮询）              | V    | 触发一次日志写入 → 界面日志条数**无刷新**自增             | [ ]  |
-| 1.4-04 | 调用不存在的 service/方法返回结构化错误（含 path 与原因）         | V/C  | 断言错误对象 shape，界面显示可读文案                      | [ ]  |
-| 1.4-05 | 不可序列化的返回值被明确拒绝，而非静默丢字段                      | C    | 返回含函数值的 service，得到可诊断错误                    | [ ]  |
-| 1.4-06 | 并发调用不错乱（含同一 service 的并发写）                         | C    | 20 个并发 call，结果一一对应                              | [ ]  |
-| 1.4-07 | 白名单外 service 无法被渲染层访问（含直接 `ipcRenderer` 尝试）    | V    | CDP 注入尝试访问 `logger` 私有方法被拒                    | [ ]  |
+| ID     | 验收标准                                                          | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                                                                                                        | 状态 |
+| ------ | ----------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1.4-01 | 渲染层通过**类型化 client** 调用主进程 service 并拿到返回值       | V    | `1.4-01-typed-client-status.png`：点「读取主进程状态」→ 应用版本 44.4.5 / Electron 44.4.5 / Node 24.21.0 / 平台 win32 / 窗口可见 true / 内核视图 451x737，全部来自 `shell.getStatus` 的一次跨进程调用；CDP 里 `window.autoCC.shell.probeRedact()` 返回 `{ok:true,value:{written:true}}`。界面自检行「渲染层可见方法 8 个 · 白名单 8 个」= preload 生成的代理数与网关允许的能力数同源                            | [x]  |
+| 1.4-02 | 只有 `cordis:call` 与 `cordis:event` 两个通道，无插件私自注册 ipc | C    | `grep -rn "ipcMain.handle" packages/` 唯一命中 `packages/ipc/src/index.ts:49`；通道名只在 `packages/shared/src/ipc.ts` 定义一次。启动日志实测 `IPC 网关就绪：cordis:call / cordis:event（能力 8 项，事件 1 项）`（见 `1.4-03-event-push-no-refresh.png` 日志区）                                                                                                                                                | [x]  |
+| 1.4-03 | 主进程事件能流到渲染层并驱动界面更新（推，不是轮询）              | V    | `1.4-03-event-push-no-refresh.png`：点「写入一条含敏感字段的日志」后，`log/line` 把 15:44:27 那条推进列表末尾，「本次会话收到事件」从 4 → 5 → 6 自增，期间页面**没有刷新**（同一实例的 `performance.now()` 已走到 774s 仍在继续计数）。事件是订阅来的：面板里没有针对日志的定时器                                                                                                                               | [x]  |
+| 1.4-04 | 调用不存在的 service/方法返回结构化错误（含 path 与原因）         | V/C  | `1.4-04-not-in-allowlist-structured-error.png`：界面显示「主进程已拒绝：NOT_IN_ALLOWLIST · shell.readFile · 能力未在白名单中：shell.readFile」，code/path/message 三段齐全。`packages/ipc/src/resolve.test.ts`「服务没挂载与服务在但方法不存在分别报错」断言 `SERVICE_NOT_FOUND` / `METHOD_NOT_FOUND` 两条不同结论；`gateway.test.ts` 断言 Error 的 message 跨进程不丢                                          | [x]  |
+| 1.4-05 | 不可序列化的返回值被明确拒绝，而非静默丢字段                      | C    | `packages/ipc/src/gateway.test.ts`「返回值无法序列化时点名 path 与原因」：service 返回含函数的对象 → `NOT_SERIALIZABLE`，错误里带 `path`，界面上能直接指出是哪个能力炸了。网关用 `structuredClone` 探一次而不是等 Electron 自己丢字段                                                                                                                                                                           | [x]  |
+| 1.4-06 | 并发调用不错乱（含同一 service 的并发写）                         | C    | `packages/ipc/src/gateway.test.ts`「并发调用结果一一对应」：3 个耗时不同的调用同时在途，各自拿到自己的参数与返回值，`stats.inFlight` 峰值 = 3、结束后归零。实测在同一窗口并发 20 个 `log.tail(1..20)`：20 个全 `ok:true`，串位 0（limit 1/2/3 分别回 1/2/3 条），5ms 内完成                                                                                                                                     | [x]  |
+| 1.4-07 | 白名单外 service 无法被渲染层访问（含直接 `ipcRenderer` 尝试）    | V    | `1.4-07-bridge-surface-audit.png` + CDP 注入审计：`Object.keys(window.autoCC)` 只有 `shell/kernel/log/ipc/on`；`log.write`、`ipc.gateway`、`ipc.lookupService`、`shell.dispatch`、`ipc.stats` 在桥接对象上全是 undefined（私有成员不出构造器）；`require`/`module`/`process` 在渲染层均为 undefined，sandbox 下拿不到 `ipcRenderer`，也就绕不过白名单；请主进程代调 `ipc.lookupService` 得到 `NOT_IN_ALLOWLIST` | [x]  |
+
+### 1.4 期间新增固化的环境与设计事实
+
+1. **跨进程只能有一层错误信封**。开发过程中真实踩过：`ipc.probeReject` 原先把 `gateway.invoke()` 的
+   `BridgeReply` 当作业务返回值返回，于是渲染层收到 `{ok:true, value:{ok:false, error}}`——界面读的是
+   外层，把「网关拒了」显示成「白名单失守」（spec 1.4-04 首次验收就是红的）。现在的写法是探针**抛
+   `AppError`**，由外层网关收成唯一一层信封；`BridgeSignatures['ipc.probeReject'].returns` 也从
+   `BridgeReply<unknown>` 改成 `unknown`，类型上不再允许套娃。
+2. **preload 拆 `service.method` 只能按第一个点**，而网关解析必须按**最长服务名前缀**：两者方向相反。
+   服务名本身可带点（`store.db`），网关若按第一个点切就会把「方法找不到」误报成「服务不存在」；
+   反过来 preload 若按最后一个点切，`store.db.prepare` 就生成了错误的代理键。`pathCandidates` 单测锁住这一点。
+3. **事件白名单是结构性的**：网关只遍历 `RENDERER_EVENTS` 去 `ctx.on`，没登记的名字根本不会被订阅，
+   所以「未登记事件不出进程」不依赖运行期过滤；preload 侧再对渲染层传入的字符串做一次真实校验
+   （`isAllowedEvent`），因为运行时没有类型可兜底。
+4. **通道注册放在构造器、摘除放在 effect disposer**：窗口由后装的 `shell` 创建（`inject:['ipc']`），
+   所以渲染层能发起调用时处理器必然已在位；1.5 做启停时也不会撞「重复注册」。
+5. **harness 的多 target 陷阱**：Electron 的 CDP 端口同时暴露主窗口和内嵌 `WebContentsView` 两个 page，
+   不带 `--url` 时选中哪个不确定，会出现「明明按钮在页面上却 click 不到」。验收命令一律加
+   `--url 127.0.0.1:5173`。
+6. **左栏是内部滚动容器**（`overflow-y-auto`），`window.scrollY` 恒为 0，`scrollIntoView` 截不到下半屏；
+   要给日志区取证得先把那个容器的 `scrollTop` 推下去。
+
+### 1.4 遗留（后续子计划处理）
+
+1. 1.3 遗留第 2 条（`shell.getPluginTree` / `shell.getLogTail` 两个开发态桥接方法）已在本计划清掉：
+   插件树走 `kernel.tree`，日志走 `log.tail` + `log.status` + `log/line` 事件，白名单里不再有 shell 的代理项。
+2. 1.3 遗留第 1 条仍未处理：开发态 `store.db` 落在 `%APPDATA%\Roaming\Electron\`（本轮实测日志行
+   `store 就绪：C:\Users\ragfl\AppData\Roaming\Electron\store.db`），而日志在 `%LOCALAPPDATA%\auto-cc\logs\`。
+   与本计划的 IPC 无关，改到 1.5 一并补 `app.setName('auto-cc')` / `setPath('userData', …)`。
+3. `ipc.stats`（在途/已完成计数）目前只在主进程可读，没有进白名单；1.5 调试面板要展示网关指标时再登记。
 
 ## 1.5 插件运行时管理 + 调试面板
 

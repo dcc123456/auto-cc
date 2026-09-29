@@ -47,4 +47,5 @@ export function asApp(ctx: Context): AppContext {
 export type ServiceName = string & {};
 
 export * from './errors.js';
+export * from './events.js';
 export * from './paths.js';

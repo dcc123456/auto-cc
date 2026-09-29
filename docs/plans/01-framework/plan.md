@@ -177,7 +177,9 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 - [x] `pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 放行 `esbuild` 及其平台包（`electron` 一项为防御性保留，实测空转）。
 - [x] 根 `package.json` 的 `postinstall` 显式调用 `packages/main/node_modules/electron/install.js`，补上 Electron 44 删掉的自动下载。
 - [x] 提交钩子不依赖 postinstall（自研 sh 脚本 + `git config core.hooksPath`）。
-- [ ] 探测 `node:sqlite` 在 **Electron 44 主进程内**是否可用（宿主 Node 24 已确认可用，Electron 待测）→ 1.3-06。
+- [x] 探测 `node:sqlite` 在 **Electron 44 主进程内**是否可用（宿主 Node 24 已确认可用，Electron 待测）→ 1.3-06。
+      实测可用：Electron 44.4.5 主进程 `require('node:sqlite')` 直开 `DatabaseSync`，sqlite 3.53.4、WAL 生效，
+      无原生编译（见 `docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`）。
 - [ ] 探测 electron-builder 在本机能否产出 AppImage/deb（需 fpm）→ 决定 1.7-08 是否 BLOCKED。
 
 ## 8. 子计划顺序与产出（一次一个，逐个验收）

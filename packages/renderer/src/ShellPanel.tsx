@@ -1,13 +1,18 @@
 import { Bug, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RENDERER_ALLOWLIST, type BridgeReply, type RendererBridge, type ShellStatus } from '@auto-cc/shared';
+import { RENDERER_ALLOWLIST, type AppErrorPayload, type RendererBridge, type ShellStatus } from '@auto-cc/shared';
 
 /** 统计 `window.autoCC` 上真实存在的函数数量，用于对照白名单长度。 */
 const countBridgeMethods = (bridge: RendererBridge): number =>
   Object.values(bridge as unknown as Record<string, Record<string, unknown>>)
+    // 顶层只有命名空间对象与 `on`；对函数取 `Object.values` 得空数组，因此 `on` 不计数。
     .flatMap((group) => Object.values(group))
     .filter((value) => typeof value === 'function').length;
+
+/** 结构化错误 → 一行可读文本：code 与 path 是 ASCII，message 由主进程给出。 */
+const describeError = (error: AppErrorPayload): string =>
+  [error.code, error.path, error.message].filter(Boolean).join(' · ');
 
 const requireIsUndefined = (): boolean => typeof (globalThis as { require?: unknown }).require === 'undefined';
 
@@ -15,7 +20,7 @@ type Reply = { kind: 'rejected' | 'captured' | 'escaped'; message: string };
 
 /**
  * 桥接自检面板：状态读取、本地 state 变更、非法调用拒绝、主进程错误捕获、内核视图显隐。
- * 这些按钮同时是 1.2 的验收入口，自动化 harness 直接点击它们取证据。
+ * 这些按钮同时是 1.2 / 1.4 的验收入口，自动化 harness 直接点击它们取证据。
  */
 export function ShellPanel() {
   const { t } = useTranslation();
@@ -30,17 +35,27 @@ export function ShellPanel() {
     if (result?.ok) setStatus(result.value);
   };
 
+  /**
+   * 让主进程按一个未登记的 path 走一遍网关（spec 1.4-04 / 1.4-07）。
+   *
+   * 白名单外的能力在界面上根本不存在，所以只能请主进程演示它自己的拒绝。
+   * 选一个「服务在、但这个能力从来没有过」的名字，避免误调到真实方法。
+   */
   const callIllegal = async () => {
-    const outer = await bridge?.shell.probeIllegalCall();
-    const inner = outer?.ok ? (outer.value as BridgeReply<unknown>) : undefined;
-    if (inner && !inner.ok) setReply({ kind: 'rejected', message: inner.error });
-    else if (outer && !outer.ok) setReply({ kind: 'rejected', message: outer.error });
-    else setReply({ kind: 'escaped', message: t('result.idle') });
+    const result = await bridge?.ipc.probeReject('shell.readFile');
+    // 没有桥接（不在 Electron 宿主里）时这次调用根本没发生，不记结果。
+    if (!result) return;
+    // 正常结论是 ok:false + NOT_IN_ALLOWLIST；若网关放行了未登记的能力，就是白名单失守。
+    setReply(
+      result.ok
+        ? { kind: 'escaped', message: `${result.value === undefined ? 'undefined' : JSON.stringify(result.value)}` }
+        : { kind: 'rejected', message: describeError(result.error) },
+    );
   };
 
   const crashMain = async () => {
     const result = await bridge?.shell.probeMainCrash();
-    if (result && !result.ok) setReply({ kind: 'captured', message: result.error });
+    if (result && !result.ok) setReply({ kind: 'captured', message: describeError(result.error) });
     await readStatus();
   };
 

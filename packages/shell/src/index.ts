@@ -1,16 +1,7 @@
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray, WebContentsView } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView } from 'electron';
 import { Service, type Context } from '@auto-cc/core';
-import {
-  IPC_CHANNELS,
-  isAllowedCall,
-  KERNEL_VIEW_WIDTH_RATIO,
-  type BridgeReply,
-  type BridgeRequest,
-  type LogLineView,
-  type PluginNodeView,
-  type ShellStatus,
-} from '@auto-cc/shared';
+import { KERNEL_VIEW_WIDTH_RATIO, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
 
 /** 仓库根目录（开发态）；打包态由 1.7 换成 resourcesPath。 */
@@ -29,31 +20,18 @@ const kernelViewPlaceholder =
 export const shellSchema = z.strictObject({});
 
 /**
- * L0 服务的最小读取视图。
- *
- * 这里刻意不 import `@auto-cc/plugin-*`：1.4 的 IPC 网关才是跨层读取的正式通道，
- * 在那之前 shell 只需要「读到状态、渲染出来」，用结构类型足够，也不会把 L1 焊死在 L0 上。
- */
-interface KernelReader {
-  snapshot(): PluginNodeView[];
-  manifestError?: string;
-}
-
-interface LogReader {
-  tail(limit?: number): LogLineView[];
-  readonly level: string;
-  readonly filePath?: string;
-}
-
-/**
- * L1 壳层服务：窗口、托盘、生命周期、内嵌内核视图，以及渲染层桥接的入站校验。
+ * L1 壳层服务：窗口、托盘、生命周期与内嵌内核视图。
  *
  * 这里是「薄壳」与「业务」的分界：本服务只做窗口/进程级的事，任何抓取、发送、
  * 生成类能力都不允许写进来（那属于 L2/L3 插件）。
+ *
+ * 渲染层的入站校验自 1.4 起归 `ipc` 网关，shell 不再注册通道，因此声明 `inject: ['ipc']`：
+ * 网关的处理器必须在主窗口创建之前就在位，否则首屏调用会撞上「No handler registered」。
  */
 export class ShellService extends Service {
   static provide = 'shell';
   static Config = shellSchema;
+  static inject = ['ipc'];
 
   private mainWindow: BrowserWindow | undefined;
   private kernelView: WebContentsView | undefined;
@@ -62,12 +40,7 @@ export class ShellService extends Service {
   private quitting = false;
   private lastError: string | undefined;
 
-  /**
-   * 装配入口：注册桥接通道并启动窗口。
-   *
-   * 构造器只接 `ctx`：cordis 挂载 Service 时会把**配置对象**作为第二个实参传进来
-   * （`new callback(ctx, config)`），若沿用 `(ctx, name = 'shell')` 就会把配置当服务名注册。
-   */
+  /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(ctx: Context) {
     super(ctx, 'shell');
     void this.launch();
@@ -125,11 +98,10 @@ export class ShellService extends Service {
     console.error('[shell] main-process error:', this.lastError);
   };
 
-  /** 等待 app ready 后建立窗口、视图、托盘与桥接通道。 */
+  /** 等待 app ready 后建立窗口、视图与托盘。 */
   private async launch() {
     process.on('uncaughtException', this.noteError);
     process.on('unhandledRejection', this.noteError);
-    this.registerBridge();
     await app.whenReady();
     this.createWindow();
     this.createTray();
@@ -142,69 +114,19 @@ export class ShellService extends Service {
     app.on('window-all-closed', () => {});
   }
 
-  /** 仅开发态可用：用一个不在白名单里的调用名走一遍主进程校验，
-   * 用来在界面上验收 1.2-05（渲染层拿不到的能力，主进程同样拒绝，且给出可读原因）。
-   */
-  probeIllegalCall = (): Promise<BridgeReply<unknown>> =>
-    this.dispatch({ id: 'shell.thisCapabilityDoesNotExist', args: [] } as unknown as BridgeRequest);
-
   /**
-   * 插件树快照（spec 1.3-01 / 1.3-09 / 1.3-10 的界面证据）。
-   * 内核缺席时返回空树并说明原因，而不是让渲染层拿到一个异常。
-   */
-  getPluginTree = (): { nodes: PluginNodeView[]; manifestError?: string } => {
-    const kernel = this.ctx.get('kernel') as KernelReader | undefined;
-    if (!kernel) return { nodes: [], manifestError: '内核未挂载（cordis.yml 里没有 kernel 实现或被禁用）' };
-    return { nodes: kernel.snapshot(), manifestError: kernel.manifestError };
-  };
-
-  /** 最近 N 条已脱敏日志 + 落盘路径（spec 1.3-04 / 1.3-05 / 1.3-11 的界面证据）。 */
-  getLogTail = (limit = 50): { lines: LogLineView[]; file?: string; level: string } => {
-    const log = this.ctx.get('log') as LogReader | undefined;
-    if (!log) return { lines: [], level: 'none' };
-    return { lines: log.tail(limit), file: log.filePath, level: log.level };
-  };
-
-  /**
-   * 仅开发态可用：写一条带敏感字段的日志，然后立刻回读，
+   * 仅开发态可用：写一条带敏感字段的日志，回读与实时展示分别走 `log.tail` 与 `log/line` 事件，
    * 用来在界面上验收 1.3-11（出口脱敏对结构化字段与自由文本都生效）。
    */
-  probeRedact = (): { lines: LogLineView[] } => {
+  probeRedact = (): { written: true } => {
     if (app.isPackaged) throw new Error('probeRedact 只在开发态开放');
     this.ctx.logger.warn('登录失败 token=abc123 状态 500', {
       authorization: 'Bearer x.y.z',
       phone: '13800001111',
       email: 'zhangsan@qq.com',
     });
-    return { lines: this.getLogTail(5).lines };
+    return { written: true };
   };
-
-  /** 把一次桥接请求路由到本服务的实例方法；白名单外一律拒绝。 */
-  private dispatch = async (request: BridgeRequest): Promise<BridgeReply<unknown>> => {
-    if (!request || typeof request.id !== 'string') {
-      return { ok: false, error: '调用载荷不合法：缺少 id' };
-    }
-    if (!isAllowedCall(request.id)) {
-      return { ok: false, error: `能力未在白名单中：${String(request.id)}` };
-    }
-    const [, method] = request.id.split('.');
-    const methods = this as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
-    const handler = methods[method ?? ''];
-    if (typeof handler !== 'function') {
-      return { ok: false, error: `白名单指向的方法不存在：${request.id}` };
-    }
-    return { ok: true, value: await handler(...(request.args ?? [])) };
-  };
-
-  /** 注册 `cordis:call` 入站处理：白名单外一律拒绝，异常转成可读回复而不是崩溃。 */
-  private registerBridge() {
-    ipcMain.handle(IPC_CHANNELS.call, (_event, request: BridgeRequest) =>
-      this.dispatch(request).catch((error: unknown) => {
-        this.noteError(error);
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }),
-    );
-  }
 
   /** 创建主窗口并挂载内嵌内核视图。 */
   private createWindow() {

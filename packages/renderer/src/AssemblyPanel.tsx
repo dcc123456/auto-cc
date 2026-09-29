@@ -1,7 +1,7 @@
 import { Boxes, RefreshCw, ScrollText, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { LogLineView, PluginNodeView } from '@auto-cc/shared';
+import type { LogLineView, LogStatusView, PluginNodeView } from '@auto-cc/shared';
 
 /** 状态 → 颜色：只有 Tailwind 静态类名，避免运行期拼类名导致样式缺失。 */
 const STATE_CLASS: Record<PluginNodeView['state'], string> = {
@@ -13,39 +13,54 @@ const STATE_CLASS: Record<PluginNodeView['state'], string> = {
   unloading: 'bg-slate-800 text-slate-400 border-slate-700',
 };
 
+/** 日志区最多显示的行数，事件推送时按此截断。 */
+const LOG_LIMIT = 30;
+
 interface Tree {
   nodes: PluginNodeView[];
   manifestError?: string;
 }
 
-interface LogTail {
-  lines: LogLineView[];
-  file?: string;
-  level: string;
-}
-
 /**
- * 装配面板：把 `cordis.yml` 实际装出来的插件树与主进程日志尾巴摆到界面上。
+ * 装配面板：把 `cordis.yml` 实际装出来的插件树与主进程日志摆到界面上。
  *
  * 1.3 的验收要求「注掉一行，界面上就少一个节点」「依赖缺席显示等待而不是整屏报错」，
  * 这些都只能从进程内读出来，所以这里是只读观察窗，不提供任何写操作。
+ *
+ * 1.4 起数据走网关直连：树来自 `kernel.tree`，日志来自 `log.tail` / `log.status`，
+ * 并且订阅 `log/line` 事件实时追加——不再轮询，也不再由 shell 代理。
  */
 export function AssemblyPanel() {
   const { t } = useTranslation();
   const [tree, setTree] = useState<Tree | undefined>();
-  const [log, setLog] = useState<LogTail | undefined>();
+  const [lines, setLines] = useState<LogLineView[] | undefined>();
+  const [logStatus, setLogStatus] = useState<LogStatusView | undefined>();
+  /** 本次会话里由 `log/line` 事件推进来的条数，是 1.4-03 的界面证据。 */
+  const [pushed, setPushed] = useState(0);
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
-    const treeReply = await bridge?.shell.getPluginTree();
+    const [treeReply, tailReply, statusReply] = await Promise.all([
+      bridge?.kernel.tree(),
+      bridge?.log.tail(LOG_LIMIT),
+      bridge?.log.status(),
+    ]);
     if (treeReply?.ok) setTree(treeReply.value);
-    const logReply = await bridge?.shell.getLogTail(30);
-    if (logReply?.ok) setLog(logReply.value);
+    if (tailReply?.ok) setLines(tailReply.value);
+    if (statusReply?.ok) setLogStatus(statusReply.value);
   }, [bridge]);
 
   useEffect(() => {
     void read();
   }, [read]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.on('log/line', (line) => {
+      setPushed((count) => count + 1);
+      setLines((current) => [...(current ?? []), line].slice(-LOG_LIMIT));
+    });
+  }, [bridge]);
 
   const probeRedact = async () => {
     await bridge?.shell.probeRedact();
@@ -117,19 +132,21 @@ export function AssemblyPanel() {
           </button>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
-          {log?.file ? t('assembly.logFile', { path: log.file }) : t('assembly.logNoFile')}
+          {logStatus?.file ? t('assembly.logFile', { path: logStatus.file }) : t('assembly.logNoFile')}
           {' · '}
-          {t('assembly.logLevel', { level: log?.level ?? 'none' })}
+          {t('assembly.logLevel', { level: logStatus?.level ?? 'none' })}
+          {' · '}
+          {t('assembly.logPushed', { count: pushed })}
         </p>
         <ul className="mt-2 flex max-h-64 flex-col gap-1 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-400">
-          {(log?.lines ?? []).map((line, index) => (
+          {(lines ?? []).map((line, index) => (
             <li key={`${String(line.ts)}-${String(index)}`} className="break-all">
               <span className="text-slate-600">{new Date(line.ts).toLocaleTimeString()}</span>{' '}
               <span className="text-slate-500">{line.level.toUpperCase()}</span>{' '}
               <span className="text-slate-300">[{line.name}]</span> {line.text}
             </li>
           ))}
-          {(log?.lines.length ?? 0) === 0 && <li className="text-slate-500">{t('assembly.logEmpty')}</li>}
+          {(lines?.length ?? 0) === 0 && <li className="text-slate-500">{t('assembly.logEmpty')}</li>}
         </ul>
       </section>
     </div>
