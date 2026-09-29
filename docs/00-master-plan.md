@@ -404,8 +404,8 @@ P1 搭建主体框架 ─┬─> P2 集成浏览器自动化 ──> P5(后续) 
 **实施阶段：**
 
 - [x] **P1 实施完成**：1.1 → 1.11 全部落地，里程碑门禁收口为 132 `[x]` + 6 `[!]`（原因记录在案）+ 0 `[ ]`，
-  见 `docs/specs/01-framework/spec.md` 的「P1 门禁收尾结论」与 `docs/acceptance/P1-gate/`（提交 `dba4cf0`）。
-  6 条 `[!]` 全是本机 Windows 环境或沙箱网络所致：macOS dmg、Linux deb/AppImage、Electron 二进制端到端安装、
-  托盘鼠标点击，需相应宿主环境后复验。
+      见 `docs/specs/01-framework/spec.md` 的「P1 门禁收尾结论」与 `docs/acceptance/P1-gate/`（提交 `dba4cf0`）。
+      6 条 `[!]` 全是本机 Windows 环境或沙箱网络所致：macOS dmg、Linux deb/AppImage、Electron 二进制端到端安装、
+      托盘鼠标点击，需相应宿主环境后复验。
 - [ ] **P2 集成浏览器自动化**（当前推进中）：计划与 spec 已定稿，按 2.1 → 2.8 逐个实施，一次只做一个。
 - [ ] P3 / P4 / P5 实施，按各自 spec 逐项验收并归档证据
