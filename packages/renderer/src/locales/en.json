@@ -1,0 +1,45 @@
+{
+  "shell": {
+    "title": "auto-cc desktop workspace",
+    "subtitle": "Plan 1 · 1.2 Electron shell skeleton",
+    "language": {
+      "switchTo": "中文"
+    },
+    "status": {
+      "heading": "Main process status",
+      "refresh": "Read main process status",
+      "app": "App version",
+      "electron": "Electron",
+      "node": "Node",
+      "platform": "Platform",
+      "windowVisible": "Window visible",
+      "kernelView": "Kernel view bounds",
+      "lastError": "Last main error",
+      "none": "None",
+      "idle": "Not read yet"
+    },
+    "probe": {
+      "heading": "Bridge and mount self-check",
+      "increment": "Change local state once",
+      "count": "Local state changed {{count}} times",
+      "bridgeMethods": "{{visible}} methods visible · allowlist {{allowlist}}",
+      "requireUndefined": "require undefined in renderer: {{value}}",
+      "illegalCall": "Call an unlisted capability",
+      "mainCrash": "Trigger a main process error",
+      "kernelShow": "Show kernel view",
+      "kernelHide": "Hide kernel view",
+      "bridgeMissing": "Not running inside the Electron host, bridge unavailable"
+    },
+    "result": {
+      "heading": "Last call result",
+      "idle": "No call recorded",
+      "rejected": "Rejected by main process: {{message}}",
+      "captured": "Main process error captured, window still alive: {{message}}",
+      "escaped": "The allowlist did not block this call and must be fixed"
+    },
+    "kernel": {
+      "heading": "Embedded kernel view slot",
+      "hint": "This region is covered by the main process WebContentsView"
+    }
+  }
+}

@@ -1,8 +1,10 @@
 packages:
   - 'packages/*'
 
-# esbuild/electron need their install scripts; this env blocks pre-post scripts by default
-# and Electron silently ends up without its binary otherwise (see docs/plans/01-framework/plan.md §7).
+# esbuild 的 postinstall 是真实存在的，本环境默认拦构建脚本，不列出就会缺平台二进制。
+# electron 这一项是防御性保留：实测 Electron 44 已不再自带 install 脚本（改为暴露
+# `install-electron` bin），所以 onlyBuiltDependencies 对它其实是空转，二进制由根
+# package.json 的 postinstall 钩子显式调 install.js 拉取（见 docs/acceptance/1.2/1.2-11）。
 onlyBuiltDependencies:
   - esbuild
   - electron

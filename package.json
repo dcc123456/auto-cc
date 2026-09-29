@@ -10,17 +10,18 @@
   },
   "packageManager": "pnpm@10.12.1",
   "scripts": {
-    "dev": "pnpm --filter @auto-cc/main dev",
+    "dev": "tsx scripts/dev.ts",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "lint": "eslint .",
+    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "harness": "pnpm --filter @auto-cc/testing harness",
     "status:check": "tsx scripts/check-status.ts",
     "dist": "pnpm --filter @auto-cc/main dist",
+    "postinstall": "node packages/main/node_modules/electron/install.js",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
@@ -30,6 +31,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "vite": "^7.0.0",
+    "@types/react": "^19.0.0"
   }
 }

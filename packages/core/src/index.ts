@@ -29,7 +29,8 @@ export function definePlugin<T>(plugin: Plugin.Object<T>): Plugin.Object<T> {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AppServices {}
 
-export type AppContext = Context;
+/** Context plus every service a plugin has provided, so `ctx.<name>` is typed. */
+export type AppContext = Context & AppServices;
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */
 export type ServiceName = string & {};

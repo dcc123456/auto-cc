@@ -1,0 +1,45 @@
+{
+  "shell": {
+    "title": "auto-cc 桌面工作台",
+    "subtitle": "计划一 · 1.2 Electron 壳骨架",
+    "language": {
+      "switchTo": "English"
+    },
+    "status": {
+      "heading": "主进程状态",
+      "refresh": "读取主进程状态",
+      "app": "应用版本",
+      "electron": "Electron",
+      "node": "Node",
+      "platform": "平台",
+      "windowVisible": "窗口可见",
+      "kernelView": "内核视图尺寸",
+      "lastError": "最近主进程错误",
+      "none": "无",
+      "idle": "尚未读取"
+    },
+    "probe": {
+      "heading": "桥接与挂载自检",
+      "increment": "变更一次本地状态",
+      "count": "本地状态已变更 {{count}} 次",
+      "bridgeMethods": "渲染层可见方法 {{visible}} 个 · 白名单 {{allowlist}} 个",
+      "requireUndefined": "渲染层 require 未定义：{{value}}",
+      "illegalCall": "调用未登记的能力",
+      "mainCrash": "触发主进程错误",
+      "kernelShow": "显示内核视图",
+      "kernelHide": "隐藏内核视图",
+      "bridgeMissing": "当前不在 Electron 宿主内，桥接不可用"
+    },
+    "result": {
+      "heading": "最近一次调用结果",
+      "idle": "尚无调用记录",
+      "rejected": "主进程已拒绝：{{message}}",
+      "captured": "主进程错误已捕获，窗口仍然存活：{{message}}",
+      "escaped": "白名单校验未拦住这次调用，需要修复"
+    },
+    "kernel": {
+      "heading": "内嵌内核视图槽位",
+      "hint": "此区域由主进程的 WebContentsView 覆盖渲染"
+    }
+  }
+}

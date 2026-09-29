@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+:root {
+  /* 与主进程 KERNEL_VIEW_WIDTH_RATIO 同源；scripts/check-renderer-conventions.ts 会校验一致性 */
+  --kernel-view-width: 38%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  @apply bg-slate-950 text-slate-100 antialiased;
+}
