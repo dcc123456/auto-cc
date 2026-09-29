@@ -20,6 +20,7 @@
     "@auto-cc/plugin-plugins": "workspace:*",
     "@auto-cc/plugin-sessions": "workspace:*",
     "@auto-cc/plugin-store": "workspace:*",
+    "@auto-cc/plugin-workflow": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "@auto-cc/shell": "workspace:*",
     "cordis": "4.0.0-rc.10",

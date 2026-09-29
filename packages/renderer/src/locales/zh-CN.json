@@ -1,9 +1,13 @@
 {
   "shell": {
     "title": "auto-cc 桌面工作台",
-    "subtitle": "计划一 · 1.6 可视化自测通道",
+    "subtitle": "计划一 · 搭建主体框架",
     "language": {
       "switchTo": "English"
+    },
+    "nav": {
+      "workflow": "工作流",
+      "diagnostics": "诊断"
     },
     "status": {
       "heading": "主进程状态",
@@ -152,6 +156,43 @@
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
       "empty": "账本为空：还没有一次外发通过闸门",
       "none": "无对象"
+    },
+    "workflow": {
+      "heading": "求职工作流（P1 六步占位流水线）",
+      "refresh": "重新读取工作流状态",
+      "loading": "正在读取主进程的工作流状态…",
+      "start": "开始",
+      "pause": "暂停",
+      "resume": "续跑",
+      "retry": "重试",
+      "actionStart": "开始工作流",
+      "actionPause": "暂停工作流",
+      "actionResume": "续跑工作流",
+      "actionRetry": "重试 {{step}}",
+      "nowStatus": "本次动作返回：{{status}}",
+      "live": "最近播报：{{message}}",
+      "duration": "{{ms}} 毫秒",
+      "status": {
+        "idle": "未开始",
+        "running": "运行中",
+        "paused": "已暂停",
+        "failed": "失败",
+        "done": "已完成"
+      },
+      "stepStatus": {
+        "pending": "待执行",
+        "running": "执行中",
+        "done": "已完成",
+        "failed": "失败"
+      },
+      "step": {
+        "search": "搜索合适的 JD",
+        "profile": "岗位与简历匹配",
+        "pitch": "生成打招呼话术",
+        "greet": "打招呼",
+        "tune": "按 JD 优化简历",
+        "deliver": "发送简历"
+      }
     },
     "state": {
       "pending": "等待依赖",

@@ -194,6 +194,9 @@ importers:
       '@auto-cc/plugin-store':
         specifier: workspace:*
         version: link:../store
+      '@auto-cc/plugin-workflow':
+        specifier: workspace:*
+        version: link:../workflow
       '@auto-cc/shared':
         specifier: workspace:*
         version: link:../shared
@@ -371,6 +374,18 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.0
+
+  packages/workflow:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
 
 packages:
 

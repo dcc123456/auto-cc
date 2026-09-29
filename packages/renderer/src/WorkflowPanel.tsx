@@ -1,0 +1,201 @@
+import { AlertCircle, Pause, Play, RefreshCw, RotateCw, Workflow as WorkflowIcon } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
+import { useBridgeAction } from './useBridgeAction';
+
+/** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
+const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
+  pending: 'border-slate-800 text-slate-500',
+  running: 'border-sky-800 bg-sky-950/40 text-sky-200',
+  done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
+  failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
+};
+
+/** 最近一条播报（步骤 id + 那句话），用来证明进度是推来的而不是轮询来的。 */
+type LiveReading = { stepId: string | null; message: string | null };
+
+/**
+ * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10）。
+ *
+ * 这里**没有**任何业务判断：六个步骤、状态、耗时全部来自主进程返回的 `run`，
+ * 进度靠 `workflow/progress` 事件推送（1.10-08）。占位步骤里什么都没有，
+ * P2 换成真实的搜 JD / 生成话术 / 打招呼 / 投递时，本组件一行不用改。
+ */
+export function WorkflowPanel() {
+  const { t } = useTranslation();
+  const [current, setCurrent] = useState<WorkflowRunView>();
+  const [live, setLive] = useState<LiveReading>();
+  const bridge = window.autoCC;
+
+  const read = useCallback(async () => {
+    const reply = await bridge?.workflow['runner.current']();
+    if (reply?.ok) setCurrent(reply.value);
+  }, [bridge]);
+
+  useEffect(() => {
+    void read();
+  }, [read]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.on('workflow/progress', (event) => {
+      setCurrent(event.run);
+      setLive({ stepId: event.stepId, message: event.message });
+    });
+  }, [bridge]);
+
+  const { busy, notice, run: call } = useBridgeAction(read);
+
+  /**
+   * 触发一个 runner 动作。
+   *
+   * 刻意**不**把接口返回值写进镜像：主进程是在 `start()` 返回之前就把 `step-started` 推出去了，
+   * 所以返回值必然比已经收到的事件旧一帧，写回去会让界面闪回「全部待执行」（实测抓到过）。
+   * 状态只由事件流与 `useBridgeAction` 收尾的那次重读决定。
+   * @param label 动作标签（禁用态凭据 + 提示文案）
+   * @param invoke 实际调用
+   */
+  const act = (label: string, invoke: () => Promise<BridgeReply<WorkflowRunView>> | undefined) =>
+    void call(label, invoke, {
+      describe: (view) => t('workflow.nowStatus', { status: t(`workflow.status.${view.status}`) }),
+    });
+
+  const status = current?.status;
+  // idle（挂载后还没跑过）和 done（跑完一轮）都允许再起一次；中间态必须先暂停/重试。
+  const canStart = !current || status === 'idle' || status === 'done';
+
+  return (
+    <section data-testid="workflow-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <WorkflowIcon size={16} />
+          {t('workflow.heading')}
+        </h2>
+        <button
+          type="button"
+          data-action="refresh"
+          onClick={() => void read()}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+        >
+          <RefreshCw size={14} />
+          {t('workflow.refresh')}
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-action="start"
+          disabled={busy !== undefined || !canStart}
+          onClick={() => act(t('workflow.actionStart'), () => bridge?.workflow['runner.start']())}
+          className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+        >
+          <Play size={12} />
+          {t('workflow.start')}
+        </button>
+        <button
+          type="button"
+          data-action="pause"
+          disabled={busy !== undefined || status !== 'running'}
+          onClick={() => act(t('workflow.actionPause'), () => bridge?.workflow['runner.pause']())}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <Pause size={12} />
+          {t('workflow.pause')}
+        </button>
+        <button
+          type="button"
+          data-action="resume"
+          disabled={busy !== undefined || status !== 'paused'}
+          onClick={() => act(t('workflow.actionResume'), () => bridge?.workflow['runner.resume']())}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <Play size={12} />
+          {t('workflow.resume')}
+        </button>
+        {current ? (
+          <span className="ml-auto text-[11px] text-slate-500" data-testid="workflow-state">
+            {t(`workflow.status.${current.status}`)}
+            {' · '}
+            <span className="break-all font-mono" data-testid="workflow-run-id">
+              {current.runId}
+            </span>
+          </span>
+        ) : null}
+      </div>
+
+      {notice && (
+        <p
+          className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          data-testid="workflow-notice"
+        >
+          {notice}
+        </p>
+      )}
+
+      {live?.message && (
+        <p className="mt-2 text-[11px] text-slate-400" data-testid="workflow-live">
+          {t('workflow.live', { message: live.message })}
+        </p>
+      )}
+
+      {current ? (
+        <ul className="mt-3 flex flex-col gap-1.5" data-testid="workflow-steps">
+          {current.steps.map((step, index) => (
+            <li
+              key={step.id}
+              data-step-id={step.id}
+              data-step-status={step.status}
+              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px] ${STEP_STATUS_STYLE[step.status]}`}
+            >
+              <span className="break-all">
+                <span className="font-mono text-xs">{String(index + 1)}</span>
+                {' · '}
+                {t(`workflow.step.${step.id}`)}
+                {step.error ? (
+                  <span
+                    className="ml-1 inline-flex items-center gap-1 break-all text-rose-300"
+                    data-step-error={step.error}
+                  >
+                    <AlertCircle size={12} />
+                    {step.error}
+                  </span>
+                ) : null}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                {step.durationMs !== null ? (
+                  <span data-step-duration={String(step.durationMs)}>
+                    {t('workflow.duration', { ms: step.durationMs })}
+                  </span>
+                ) : null}
+                <span>{t(`workflow.stepStatus.${step.status}`)}</span>
+                {step.status === 'failed' ? (
+                  <button
+                    type="button"
+                    data-action="retry"
+                    data-step={step.id}
+                    disabled={busy !== undefined}
+                    onClick={() =>
+                      act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`) }), () =>
+                        bridge?.workflow['runner.retryStep'](step.id),
+                      )
+                    }
+                    className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-0.5 text-rose-200 hover:bg-rose-950 disabled:opacity-40"
+                  >
+                    <RotateCw size={12} />
+                    {t('workflow.retry')}
+                  </button>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-[11px] text-slate-500" data-testid="workflow-loading">
+          {t('workflow.loading')}
+        </p>
+      )}
+    </section>
+  );
+}

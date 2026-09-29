@@ -1,9 +1,13 @@
 {
   "shell": {
     "title": "auto-cc desktop workspace",
-    "subtitle": "Plan 1 · 1.6 visual self-test channel",
+    "subtitle": "Plan 1 · core framework",
     "language": {
       "switchTo": "中文"
+    },
+    "nav": {
+      "workflow": "Workflow",
+      "diagnostics": "Diagnostics"
     },
     "status": {
       "heading": "Main process status",
@@ -152,6 +156,43 @@
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
       "empty": "Ledger is empty: no outbound has passed the gate yet",
       "none": "no target"
+    },
+    "workflow": {
+      "heading": "Job-hunting workflow (P1 six-step placeholder)",
+      "refresh": "Reload workflow state",
+      "loading": "Reading the workflow state from the main process…",
+      "start": "Start",
+      "pause": "Pause",
+      "resume": "Resume",
+      "retry": "Retry",
+      "actionStart": "start workflow",
+      "actionPause": "pause workflow",
+      "actionResume": "resume workflow",
+      "actionRetry": "retry {{step}}",
+      "nowStatus": "This action returned: {{status}}",
+      "live": "Latest progress: {{message}}",
+      "duration": "{{ms}} ms",
+      "status": {
+        "idle": "not started",
+        "running": "running",
+        "paused": "paused",
+        "failed": "failed",
+        "done": "done"
+      },
+      "stepStatus": {
+        "pending": "pending",
+        "running": "running",
+        "done": "done",
+        "failed": "failed"
+      },
+      "step": {
+        "search": "Search matching JDs",
+        "profile": "Match role against resume",
+        "pitch": "Draft outreach message",
+        "greet": "Send greeting",
+        "tune": "Tailor resume to the JD",
+        "deliver": "Send resume"
+      }
     },
     "state": {
       "pending": "waiting for deps",

@@ -50,6 +50,67 @@ export interface KernelViewLoadError {
   url: string;
 }
 
+/**
+ * 六个主线步骤的 id 与顺序（`docs/00-master-plan.md` §31 的概念表：搜索 / 建档 / 话术 /
+ * 打招呼 / 按 JD 优化简历 / 择机投递）。
+ *
+ * 全仓库只在这里定义一次：runner 按它执行、界面按返回的 `steps` 渲染槽位。
+ * 渲染层拿不到这个常量（也不该拿，见 `shared/bridge.ts` 的转出注释），所以它没有第二份步骤清单。
+ */
+export const WORKFLOW_STEP_IDS = ['search', 'profile', 'pitch', 'greet', 'tune', 'deliver'] as const;
+
+export type WorkflowStepId = (typeof WORKFLOW_STEP_IDS)[number];
+
+/** run 的整体状态（spec 1.10-03 点名的五个态）。 */
+export type WorkflowRunStatus = 'idle' | 'running' | 'paused' | 'failed' | 'done';
+
+/** 单个步骤的状态；`pending` 也要出现在视图里，因为界面得显示"还没轮到"的槽位。 */
+export type WorkflowStepStatus = 'pending' | 'running' | 'done' | 'failed';
+
+/** 一个步骤槽位的读数（spec 1.10-06：状态 + 耗时）。 */
+export type WorkflowStepView = {
+  id: WorkflowStepId;
+  status: WorkflowStepStatus;
+  /** 开始时间戳（毫秒）；未开始为 null。 */
+  startedAt: number | null;
+  /** 结束时间戳（毫秒）；未结束为 null。 */
+  finishedAt: number | null;
+  /** 耗时毫秒；未结束为 null——不用 0 冒充「耗时为零」。 */
+  durationMs: number | null;
+  /** 失败原因文案，仅 `failed` 时非空。 */
+  error: string | null;
+};
+
+/**
+ * 一次 run 的完整可序列化状态（spec 1.10-03 / 1.10-05）。
+ *
+ * 刻意做成普通数据而不是解释器内部状态：界面读数、事件载荷、P2 落库共用同一形状，
+ * 于是「续跑」就是把 `stepIndex` 指回去，不需要快照/还原那一层机制（plan §8.5 选型）。
+ */
+export type WorkflowRunView = {
+  runId: string;
+  status: WorkflowRunStatus;
+  /** 当前步下标；`done` 时等于步数（越界一位），`idle`/`paused` 时指向要跑的那一步。 */
+  stepIndex: number;
+  steps: WorkflowStepView[];
+  /** run 创建时间戳（毫秒）。 */
+  startedAt: number;
+};
+
+/**
+ * 一次进度推进的事件载荷（spec 1.10-04：界面进度是流式推送，不是轮询出来的）。
+ *
+ * 带整份 `run` 而不是增量：渲染层因此不自己推导状态，
+ * 「面板与对话镜像同一个 runner」（1.10-08）就退化成同一段 JSON 渲染两次。
+ */
+export type WorkflowProgressEvent = {
+  run: WorkflowRunView;
+  /** 触发本次推送的步骤；run 级迁移（start / pause / resume）时为 null。 */
+  stepId: WorkflowStepId | null;
+  /** 面向用户的一句话说明，P2 换成真实进度文案；纯状态迁移时为 null。 */
+  message: string | null;
+};
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -70,5 +131,10 @@ declare module 'cordis' {
      * 那次读数里错误位还是空的，所以错误态必须由事件推进来。
      */
     'shell/view-error'(error: KernelViewLoadError): void;
+    /**
+     * 工作流每推进一次（起步 / 步骤开始 / 步骤结束 / 暂停 / 续跑）由 `workflow.runner` 发出
+     * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
+     */
+    'workflow/progress'(event: WorkflowProgressEvent): void;
   }
 }

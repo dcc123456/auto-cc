@@ -9,6 +9,10 @@ export type AppErrorCode =
   | 'INVALID_ARGUMENT'
   | 'QUOTA_EXCEEDED'
   | 'OUTBOUND_FAILED'
+  // 工作流状态机（spec 1.10）：非法迁移（含「还没有 run」）与占位步失败注入共用两个码，
+  // 界面按码决定是「提示一句状态不允许」还是「这一步标红并可重试」。
+  | 'WORKFLOW_INVALID_STATE'
+  | 'WORKFLOW_STEP_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

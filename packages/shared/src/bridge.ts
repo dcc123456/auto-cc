@@ -10,11 +10,16 @@ import type {
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
+  WorkflowProgressEvent,
+  WorkflowRunView,
 } from '@auto-cc/core';
 
 /**
- * 错误载荷、日志行、插件失败与会话/视图事件定义在 `@auto-cc/core`（那里是跨进程契约与
- * cordis 事件声明的归属地），这里原样转出，渲染层继续只认 `@auto-cc/shared` 一个入口。
+ * 错误载荷、日志行、插件失败、会话/视图事件与工作流 run 数据模型都定义在 `@auto-cc/core`
+ * （那里是跨进程契约与 cordis 事件声明的归属地），这里原样转出，渲染层只认 `@auto-cc/shared`
+ * 一个入口。转出**只用 `export type`**：core 会带进 cordis，而渲染层的 bundle 里不该出现它。
+ * 步骤 id 常量 `WORKFLOW_STEP_IDS` 只有主进程执行器需要（界面渲染服务返回的 `run.steps`），
+ * 所以不在此转出。
  */
 export type {
   AppErrorPayload,
@@ -22,6 +27,12 @@ export type {
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
+  WorkflowProgressEvent,
+  WorkflowRunStatus,
+  WorkflowRunView,
+  WorkflowStepId,
+  WorkflowStepStatus,
+  WorkflowStepView,
 } from '@auto-cc/core';
 
 /** 渲染层可调用的 `service.method` 全限定名白名单（spec 1.4-07 的唯一依据）。 */
@@ -54,6 +65,12 @@ export const RENDERER_ALLOWLIST = [
   'entitlement.gate.check',
   'usage.ledger.summary',
   'outbound.sample.send',
+  // 1.10 的工作流 runner：五个动作口 + 一个只读快照。
+  'workflow.runner.current',
+  'workflow.runner.start',
+  'workflow.runner.pause',
+  'workflow.runner.resume',
+  'workflow.runner.retryStep',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -319,6 +336,19 @@ export interface BridgeSignatures {
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
+  /**
+   * 当前 run 的快照（spec 1.10-04）；挂载即是 `idle` 的六步快照，所以永不为 null，界面不必为空态另写一套。
+   * P1 只有一个「当前 run」，所以四个动作口都不带 runId（plan §8.5「不做 run 历史列表」）。
+   */
+  'workflow.runner.current': { args: []; returns: WorkflowRunView };
+  /** 起一个占位工作流（六步空转），返回初始状态。 */
+  'workflow.runner.start': { args: []; returns: WorkflowRunView };
+  /** 请求暂停：等当前步协作让出，不强杀（spec 1.10-05）。 */
+  'workflow.runner.pause': { args: []; returns: WorkflowRunView };
+  /** 从当前步续跑，不重置已完成步（spec 1.10-05）。 */
+  'workflow.runner.resume': { args: []; returns: WorkflowRunView };
+  /** 单独重试某一个失败步（spec 1.10-06）；步 id 来自界面，越界即结构化失败。 */
+  'workflow.runner.retryStep': { args: [stepId: string]; returns: WorkflowRunView };
 }
 
 /**
@@ -348,7 +378,7 @@ export type BridgeNamespaces = {
  * 主进程→渲染层的事件白名单（spec 1.4-03）：没登记的事件在网关处就不出进程。
  * 事件是「推」的，界面靠它自增，不轮询。
  */
-export const RENDERER_EVENTS = ['log/line', 'session/expired', 'shell/view-error'] as const;
+export const RENDERER_EVENTS = ['log/line', 'session/expired', 'shell/view-error', 'workflow/progress'] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
 
@@ -357,6 +387,7 @@ export interface RendererEventSignatures {
   'log/line': LogLineView;
   'session/expired': SessionExpiredEvent;
   'shell/view-error': KernelViewLoadError;
+  'workflow/progress': WorkflowProgressEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

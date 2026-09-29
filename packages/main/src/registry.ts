@@ -15,6 +15,7 @@ import { OutboundSampleService } from '@auto-cc/plugin-outbound';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
+import { WorkflowRunnerService } from '@auto-cc/plugin-workflow';
 import { ShellService } from '@auto-cc/shell';
 
 export const REGISTRY: Registry = {
@@ -31,5 +32,7 @@ export const REGISTRY: Registry = {
   plugins: PluginsService,
   devtools: DevtoolsService,
   sessions: SessionsService,
+  // 工作流执行器骨架（spec 1.10）：六步占位流水线，真实步骤在 P2 换进来。
+  workflow: WorkflowRunnerService,
   shell: ShellService,
 };

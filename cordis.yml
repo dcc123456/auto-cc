@@ -77,3 +77,14 @@ plugins:
         - id: fixture-alt
           startUrl: http://127.0.0.1:10233/alt
           sessionCookieName: autocc_session
+
+  # 工作流执行器骨架（spec 1.10）：六步占位流水线，把「状态是数据、界面是镜像」这条契约立起来。
+  # 只依赖 ipc——处理器要在界面能发起调用之前就位。**不**依赖 entitlement：P1 的六步里没有任何
+  # 真实外发（AGENTS.md §7.3 的约束在 P2 换成真步骤时接上），届时 greet/deliver 两步会走闸门。
+  # 演示失败注入：在装配面板把 failStep 改成某个步 id（如 "profile"），该步首次执行必然失败，
+  # 界面上点「重试」即通过并跑完剩下的步（注入只作用一次，否则永远演示不到「重试→成功」）。
+  - id: workflow
+    dependsOn: [ipc]
+    config:
+      stepDelayMs: 600
+      failStep: none
