@@ -1,0 +1,20 @@
+# 1.2-07 单实例锁：第二次启动不开双窗
+
+命令：
+
+```
+cd packages/main && node -p "require('electron')"     # -> .../electron/dist/electron.exe
+<electron.exe> packages/main/dist/main.cjs            # 第二次启动，不经过 dev.ts
+```
+
+观测：
+
+```
+second-instance exit=0                                # 第二个进程 requestSingleInstanceLock() 失败后自行退出
+pnpm harness targets | grep -c '^page'   -> 2          # 仍是 2 个 page target（渲染层 + 内核视图），没有新窗口
+pnpm harness eval --expr "...getStatus().then(r=>'windowVisible='+r.value.windowVisible)"
+   -> "windowVisible=true"                             # 第一个实例存活且窗口正常
+```
+
+`second-instance` 事件在 `ShellService.launch()` 里绑定到 `focusMainWindow()`；
+该唤回路径的实际生效证据见 1.2-08（关窗后第二次启动把窗口重新显示出来）。

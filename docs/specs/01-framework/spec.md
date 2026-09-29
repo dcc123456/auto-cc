@@ -15,7 +15,7 @@ C 类附命令输出，U 类附测试报告）。无证据视为未验收。
 | ID     | 验收标准                                                                                      | 方式 | 验证操作                                                                                                                      | 状态 |
 | ------ | --------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------- | ---- |
 | 1.1-01 | `pnpm install` 一步成功，无 peer 冲突                                                         | C    | `pnpm install` → `Done in 31.8s`，无 peer 错误                                                                                | [x]  |
-| 1.1-02 | Electron 二进制在 install 后自动就位（不需手动补救）                                          | C    | 归属 1.2（1.1 时尚未引入 electron）；`.npmrc` + `onlyBuiltDependencies` 已就位                                                | [ ]  |
+| 1.1-02 | Electron 二进制在 install 后自动就位（不需手动补救）                                          | C    | 归属 1.2（1.1 时尚未引入 electron）；实测结论见 1.2-11：Electron 44 无 install 脚本，靠根 `postinstall` 钩子                  | [ ]  |
 | 1.1-03 | 全仓统一 ESM，`"type":"module"` 覆盖 root 与所有 `packages/*`                                 | C    | core / shared / root 均为 `"type": "module"`                                                                                  | [x]  |
 | 1.1-04 | `typecheck` 零错误且 `strict:true` 生效（故意写错能报错）                                     | C    | 干净树通过；注入 `const bad: number='str'` → 命中 1 条 TS2322                                                                 | [x]  |
 | 1.1-05 | ESLint 对跨包 `src/internal/**` import 报错                                                   | C    | probe `import '../core/src/internal/secret.js'` → `no-restricted-imports` error                                               | [x]  |
@@ -49,29 +49,48 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
    下无法复导出（TS2748）。已在 `@auto-cc/core` 用 `fiberState(state: number): PluginState` 自行映射；
    插件层禁止直接依赖该枚举。这是「cordis 变动只改 core 一处」设计的第一次兑现。
 2. pnpm 在本环境跳过 `esbuild` 的 build script，但 vitest / tsx 实测可用（esbuild 走平台专属可选包，
-   不依赖 postinstall）。`onlyBuiltDependencies` 仍显式列出 `esbuild` / `electron`，
-   防止 Electron 二进制静默缺失（该问题在验证阶段真实发生过）。
+   不依赖 postinstall），故 `onlyBuiltDependencies` 保留 `esbuild` 与平台包。
+   **Electron 那一行是 1.2 期间才发现的空转**：Electron 44 已删除 install 脚本，改为暴露
+   `install-electron` bin，构建脚本白名单对它不起作用，二进制改由根 `postinstall` 钩子显式
+   调用 `install.js`（详见 `docs/acceptance/1.2/1.2-11-electron-binary.txt`）。
 
 ## 1.2 Electron 壳
 
-| ID     | 验收标准                                                                                                    | 方式 | 验证操作                                                                         | 状态 |
-| ------ | ----------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------- | ---- |
-| 1.2-01 | `pnpm dev` 启动后**窗口真实出现**，显示 React 首屏（非白屏）                                                | V    | 截图，界面含可见标题文字与一个可交互元素                                         | [ ]  |
-| 1.2-02 | React 是真实挂载（非静态 HTML）：state 变化能在界面上看到                                                   | V    | 点击按钮，截图前后值变化                                                         | [ ]  |
-| 1.2-03 | HMR 生效：改 renderer 源码后窗口自动更新，无需重启                                                          | V    | 改文案 → 截图确认新文案                                                          | [ ]  |
-| 1.2-04 | `contextIsolation:true` + `sandbox:true` + `nodeIntegration:false` 实际生效                                 | V/C  | 渲染层 `typeof require === 'undefined'`；`window.autoCC` 方法数 = 白名单数       | [ ]  |
-| 1.2-05 | 渲染层调用未在白名单中的 service 被拒绝并给出可读错误                                                       | V    | 界面点「非法调用」，看到拒绝提示而非崩溃                                         | [ ]  |
-| 1.2-06 | 主进程抛错不导致窗口静默死掉，有可见错误态                                                                  | V    | 注入抛错插件，界面显示失败态                                                     | [ ]  |
-| 1.2-07 | 单实例锁：第二次启动聚焦已有窗口而非开双窗                                                                  | V    | 启动两次，截图确认仍只有一个窗口                                                 | [ ]  |
-| 1.2-08 | 关闭主窗口不退出应用（收进托盘），托盘可再唤出                                                              | V    | 关窗 → 托盘 → 点回 → 截图                                                        | [ ]  |
-| 1.2-09 | 外链与 `window.open` 被默认拒绝（安全底线）                                                                 | C    | `setWindowOpenHandler` 返回 deny 且日志有记录                                    | [ ]  |
-| 1.2-10 | `pnpm build` 产出可加载的 dist 资源，无 Vite 报错                                                           | C    | `pnpm build` exit 0                                                              | [ ]  |
-| 1.2-11 | Electron 二进制由 install 自动就位（不需手动 `node install.js`）                                            | C    | 删 `node_modules/electron/dist` → `pnpm i` → dist 重现                           | [ ]  |
-| 1.2-12 | 内嵌内核视图容器存在且可挂载（P1 用空白/fixture 页占位）                                                    | V    | 界面能看到该视图区域渲染出来并截图                                               | [ ]  |
-| 1.2-13 | 渲染层样式**只用 Tailwind CSS**：无 `.module.css`、无 CSS-in-JS、布局不靠内联 style（AGENTS.md §5.1）       | C    | `grep -rL` 审计 renderer 包内除入口 `globals.css` 外无样式文件；eslint 拦 import | [ ]  |
-| 1.2-14 | 图标**只用 lucide-react 现有图标**，无自绘 SVG、无 emoji 当图标（AGENTS.md §5.3）                           | C    | eslint 拦 JSX 内 `<svg`/`dangerouslySetInnerHTML`；截图复核界面无自制图标        | [ ]  |
-| 1.2-15 | 页面**全部文案走 i18n**（至少 `zh-CN` + `en`，本地 JSON，不依赖网络）；JSX 无裸中文字符串（AGENTS.md §5.5） | C/V  | eslint 裸文案规则 0 命中；切换语言后截图界面随之改变                             | [ ]  |
-| 1.2-16 | 缺失翻译即构建失败：新增 key 未补齐所有 locale 时 `pnpm lint` 报错（AGENTS.md §5.6）                        | C    | 临时删掉一个 key 的 `en` 值 → `pnpm lint` 必须 error，恢复后通过                 | [ ]  |
+证据目录：`docs/acceptance/1.2/`（截图由 `pnpm harness` 通过 CDP 自采，命令输出存同名 `.txt`）。
+
+| ID     | 验收标准                                                                                                    | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                           | 状态 |
+| ------ | ----------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1.2-01 | `pnpm dev` 启动后**窗口真实出现**，显示 React 首屏（非白屏）                                                | V    | `1.2-01-first-screen.png`：标题 + 三张卡片 + 可点按钮                                                                                                                                                                                                                                                                              | [x]  |
+| 1.2-02 | React 是真实挂载（非静态 HTML）：state 变化能在界面上看到                                                   | V    | `1.2-02-after-state-and-status.png`：本地状态 0 次 → 1 次，并读到 44.4.5/24.21.0                                                                                                                                                                                                                                                   | [x]  |
+| 1.2-03 | HMR 生效：改 renderer 源码后窗口自动更新，无需重启                                                          | V    | 改 `subtitle` → `1.2-03-hmr-updated-copy.png`；`.tsx` 走 `hmr update`，`.json` 走 page reload，Electron 未重启                                                                                                                                                                                                                     | [x]  |
+| 1.2-04 | `contextIsolation:true` + `sandbox:true` + `nodeIntegration:false` 实际生效                                 | V/C  | `1.2-04-renderer-isolation.txt`：`require/process/module` 全 undefined，方法数 4 = 白名单 4                                                                                                                                                                                                                                        | [x]  |
+| 1.2-05 | 渲染层调用未在白名单中的 service 被拒绝并给出可读错误                                                       | V    | `1.2-05-illegal-call-rejected.png`：「能力未在白名单中：shell.thisCapabilityDoesNotExist」                                                                                                                                                                                                                                         | [x]  |
+| 1.2-06 | 主进程抛错不导致窗口静默死掉，有可见错误态                                                                  | V    | `1.2-06-main-error-captured.png`：开发态探针 `shell.probeMainCrash` 抛错 → 界面显示错误、`windowVisible=true`、`lastError` 同步展示                                                                                                                                                                                                | [x]  |
+| 1.2-07 | 单实例锁：第二次启动聚焦已有窗口而非开双窗                                                                  | V    | `1.2-07-single-instance.txt`：第二实例 exit 0，page target 仍为 2，第一实例窗口未变多                                                                                                                                                                                                                                              | [x]  |
+| 1.2-08 | 关闭主窗口不退出应用（收进托盘），托盘可再唤出                                                              | V    | `1.2-08-tray-notes.txt` + `1.2-08-reopened-after-tray.png`：`WM_CLOSE` → `windowVisible=false` 且进程存活 → 二次启动唤回；`1.2-08b-window-recreated-after-close.png`：`window.close()` 销毁后由 `closed` 分支重建（`windowVisible=true`、内核视图 bounds 正常）。**托盘图标的鼠标点击未自动化**（原生区不在 CDP 范围），需人工补验 | [!]  |
+| 1.2-09 | 外链与 `window.open` 被默认拒绝（安全底线）                                                                 | C    | `1.2-09-window-open-deny.txt`：`window.open` 返回 null、target 数不变、主进程留 deny 日志                                                                                                                                                                                                                                          | [x]  |
+| 1.2-10 | `pnpm build` 产出可加载的 dist 资源，无 Vite 报错                                                           | C    | `1.2-10-built-dist.txt` + `1.2-10-built-dist-loaded.png`：`file://` 直装 dist 后界面完整                                                                                                                                                                                                                                           | [x]  |
+| 1.2-11 | Electron 二进制由 install 自动就位（不需手动 `node install.js`）                                            | C    | `1.2-11-electron-binary.txt`：**Electron 44 已删除 install 脚本**，改为 `install-electron` bin（`onlyBuiltDependencies` 对它空转）；已补根 `postinstall` 钩子显式跑 `install.js` 达成同等自动就位，但本沙箱无法端到端验（SHASUMS 拉取失败），待有网环境复验                                                                        | [!]  |
+| 1.2-12 | 内嵌内核视图容器存在且可挂载（P1 用空白/fixture 页占位）                                                    | V    | `1.2-12-kernel-view-notes.txt` + `1.2-12-kernel-view-rendered.png`：bounds `451x737`（=38.0%），占位页文本可读                                                                                                                                                                                                                     | [x]  |
+| 1.2-13 | 渲染层样式**只用 Tailwind CSS**：无 `.module.css`、无 CSS-in-JS、布局不靠内联 style（AGENTS.md §5.1）       | C    | `1.2-13-14-15-16-lint-gates.txt`：探针文件触发「不允许内联 style」+「样式文件只允许 globals.css」                                                                                                                                                                                                                                  | [x]  |
+| 1.2-14 | 图标**只用 lucide-react 现有图标**，无自绘 SVG、无 emoji 当图标（AGENTS.md §5.3）                           | C    | 同上：探针 `<svg />` 被拦；首屏截图复核图标均来自 lucide                                                                                                                                                                                                                                                                           | [x]  |
+| 1.2-15 | 页面**全部文案走 i18n**（至少 `zh-CN` + `en`，本地 JSON，不依赖网络）；JSX 无裸中文字符串（AGENTS.md §5.5） | C/V  | 同上：探针裸中文被拦；`1.2-15-english-locale.png` 整站切到英文                                                                                                                                                                                                                                                                     | [x]  |
+| 1.2-16 | 缺失翻译即构建失败：新增 key 未补齐所有 locale 时 `pnpm lint` 报错（AGENTS.md §5.6）                        | C    | 同上：删 `en.shell.status.none` → `pnpm lint` exit 1「en.json 缺少 key」，恢复后通过                                                                                                                                                                                                                                               | [x]  |
+
+### 1.2 期间固化的环境与设计事实
+
+1. **cordis 服务类的构造签名必须是 `(ctx: Context, name = 'x')`**，不能写成 `Context & AppServices`：
+   窄化后的第一个参数会让 `Plugin.Constructor` 的条件类型推不出单参重载，`ctx.plugin(ShellService)`
+   直接报 `Expected 2 arguments, but got 1`。类型通过 `declare module '@auto-cc/core'` 的
+   `AppServices` 增补来提供，而不是靠构造参数收窄。
+2. **`Context` 没有 `start()` / `stop()`**；对象式插件写 `provide:'x'` 后直接赋值会抛
+   `cannot set property "x" without provide`，要用 `ctx.provide(name, value)`。
+3. **新建的 `WebContentsView` bounds 默认 `0x0`**，不显式 `setBounds` 就永远看不见——只在 `resize`
+   里摆位的写法会让内核视图在启动后静默消失（实测 `getStatus` 报 `0x0`）。
+4. **渲染层 `window.close()` 不受 `close` 事件 `preventDefault()` 约束**，窗口会被真销毁；
+   「关窗收进托盘」必须再加 `closed` 重建分支，否则 X 按钮路径与页面自关闭路径行为不一致。
+5. CSP 有意推迟到 1.7：开发态 `@vitejs/plugin-react` 注入内联 preamble，先加 CSP 会逼出一份只服务
+   开发态的放宽策略，等打包态（`loadFile` + 无 dev server）一次配到位。
 
 ## 1.3 L0 内核插件（config / logger / store / kernel）
 

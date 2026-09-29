@@ -1,0 +1,33 @@
+# 1.2-12 内嵌内核视图容器存在且可挂载
+
+## 摆位事实（主进程侧）
+
+```
+pnpm harness eval --expr "window.autoCC.shell.getStatus().then(r=>JSON.stringify(r.value.kernelViewBounds)+' visible='+r.value.kernelViewVisible)"
+{"x":735,"y":0,"width":451,"height":737} visible=true
+```
+
+`451 / 1186 = 38.0%`，与 `KERNEL_VIEW_WIDTH_RATIO`（`packages/shared/src/bridge.ts`）一致；
+渲染层槽位用同一个比例（`--kernel-view-width: 38%`），两侧同源由
+`scripts/check-renderer-conventions.ts` 机检。
+
+## 视图自身在渲染
+
+```
+pnpm harness eval --expr "document.body.innerText" --url kernel
+"Embedded kernel view placeholder (WebContentsView)"
+```
+
+截图 `1.2-12-kernel-view-rendered.png`（对该 `WebContentsView` 的 CDP target 单独截图）。
+
+## 采集方式说明（避免误读证据）
+
+`Page.captureScreenshot` 只能拍到某个 webContents 自身，拍不到「窗口里叠加了哪块子视图」，
+所以主窗口截图（1.2-01/02/06）里右侧看到的是渲染层预留的槽位文案，而不是内核视图的覆盖效果。
+叠加是否真的对齐，由上面两组事实共同确定：视图有非零且比例正确的 bounds + 视图内容在渲染 +
+两侧宽度同源。像素级叠加核验留到 1.7（打包态）或人工目视一次。
+
+## 修掉的缺陷
+
+新建的 `WebContentsView` 默认 bounds 是 `0x0`，原实现只在 `resize` 时摆位，
+所以启动后视图一直不可见（`getStatus` 报 `0x0`）。现在创建后立即摆位，并在 `ready-to-show` 再摆一次。

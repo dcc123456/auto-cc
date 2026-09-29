@@ -1,0 +1,16 @@
+
+> auto-cc@0.1.0 lint D:\works\deep-seek-workspace\auto-cc
+> eslint . && tsx scripts/check-renderer-conventions.ts
+
+
+D:\works\deep-seek-workspace\auto-cc\packages\renderer\src\__lint_probe.tsx
+  3:10  error  布局必须用 Tailwind 类，不允许内联 style（AGENTS.md §5.1）   no-restricted-syntax
+  4:8   error  图标只能来自 lucide-react，不允许自绘 SVG（AGENTS.md §5.3）  no-restricted-syntax
+  5:8   error  页面文案必须走 i18n（AGENTS.md §5.5）                   no-restricted-syntax
+
+✖ 3 problems (3 errors, 0 warnings)
+
+ ELIFECYCLE  Command failed with exit code 1.
+✖ 渲染层规范检查未通过：
+  - 样式文件只允许入口 globals.css，发现 packages\renderer\src\bad.module.css
+  - en.json 缺少 key：shell.status.none

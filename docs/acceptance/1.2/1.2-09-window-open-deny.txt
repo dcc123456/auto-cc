@@ -1,0 +1,20 @@
+# 1.2-09 外链与 window.open 默认拒绝
+
+命令：
+
+```
+pnpm harness eval --expr "String(window.open('https://example.com','_blank'))" --url 127.0.0.1:5173
+pnpm harness targets | grep -c '^page'
+tail -1 <dev 日志>
+```
+
+输出：
+
+```
+"null"                                                # 新窗口没被创建，window.open 直接返回 null
+2                                                     # page target 数量不变
+[shell] 已拒绝窗口打开请求：https://example.com/       # setWindowOpenHandler 的 deny 分支留了日志
+```
+
+实现位置：`packages/shell/src/index.ts` → `win.webContents.setWindowOpenHandler(({ url }) => { console.warn(...); return { action: 'deny' }; })`。
+内核视图（`WebContentsView`）的同类拦截要在 P2 挂载真实站点时补，届时同样只记日志不放开。

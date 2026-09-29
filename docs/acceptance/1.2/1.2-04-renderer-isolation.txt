@@ -1,0 +1,24 @@
+# 1.2-04 渲染层隔离实际生效（contextIsolation / sandbox / 无 nodeIntegration）
+
+命令（dev 态，窗口已加载 http://127.0.0.1:5173）：
+
+```
+pnpm harness eval --expr "JSON.stringify({require:typeof window.require,process:typeof window.process,module:typeof window.module,bridge:typeof window.autoCC,methods:Object.keys(window.autoCC.shell).length,allowlist:4})" --url 127.0.0.1:5173
+```
+
+输出：
+
+```
+{"require":"undefined","process":"undefined","module":"undefined","bridge":"object","methods":4,"allowlist":4}
+```
+
+界面内同一事实（截图 1.2-01-first-screen.png / 1.2-02-after-state-and-status.png）：
+
+```
+渲染层可见方法 4 个 · 白名单 4 个
+渲染层 require 未定义：true
+```
+
+结论：`window.require/process/module` 全部 undefined（无 Node 注入），`window.autoCC` 存在且
+可调用方法数 == `RENDERER_ALLOWLIST.length` == 4。白名单外能力在渲染层根本不存在（preload 不生成），
+主进程侧 `dispatch()` 再独立校验一次（见 1.2-05）。

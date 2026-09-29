@@ -12,15 +12,15 @@
 
 以下不是假设，是 2026-09-29 在本机实测通过的结果（脚本：`.research-repos/cordis-spike/`）：
 
-| 验证项                                                          | 结果                                                                                                              | 对本计划的约束                              |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| Cordis v4 服务发布 / 跨插件 inject / effect 回收 / 依赖联动卸载 | 通过                                                                                                              | 采用 §4 插件写法为强制规范                  |
-| Cordis 运行于 Electron 主进程（内嵌 Node 24.21）                | 通过 `fiber.state=2 registry=1`                                                                                   | 后端 = 主进程，无独立 Node 服务             |
-| Electron 主进程 ESM（`"type":"module"` + `.mjs`）               | 通过                                                                                                              | 全仓 ESM，不出 CJS 双轨                     |
-| `--remote-debugging-port=9222` + CDP `/json` + 读实时 DOM       | 通过（读到 `SPIKE-RENDER-OK`）                                                                                    | P1.6 可视自测通道走 CDP，不需额外 HTTP 服务 |
-| `node:sqlite` 在宿主 Node 24 可 require                         | 通过                                                                                                              | 持久层走内置 sqlite，不引原生依赖           |
-| Electron 二进制下载                                             | GitHub/electronjs.org **不可达**，仅 `registry.npmmirror.com/-/binary/electron/` 可用；postinstall 被拦截需手动跑 | 见 §7 环境前置                              |
-| 版本基线                                                        | cordis 4.0.0-rc.10 / electron 44.4.5 / node 24.18（宿主）/ esbuild 0.28.2                                         | 锁定这些为起点                              |
+| 验证项                                                          | 结果                                                                                                                                                                          | 对本计划的约束                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Cordis v4 服务发布 / 跨插件 inject / effect 回收 / 依赖联动卸载 | 通过                                                                                                                                                                          | 采用 §4 插件写法为强制规范                                        |
+| Cordis 运行于 Electron 主进程（内嵌 Node 24.21）                | 通过 `fiber.state=2 registry=1`                                                                                                                                               | 后端 = 主进程，无独立 Node 服务                                   |
+| Electron 主进程 ESM（`"type":"module"` + `.mjs`）               | 通过                                                                                                                                                                          | 全仓 ESM，不出 CJS 双轨                                           |
+| `--remote-debugging-port=9222` + CDP `/json` + 读实时 DOM       | 通过（读到 `SPIKE-RENDER-OK`）                                                                                                                                                | P1.6 可视自测通道走 CDP，不需额外 HTTP 服务                       |
+| `node:sqlite` 在宿主 Node 24 可 require                         | 通过                                                                                                                                                                          | 持久层走内置 sqlite，不引原生依赖                                 |
+| Electron 二进制下载                                             | GitHub/electronjs.org **不可达**，仅 `registry.npmmirror.com/-/binary/electron/` 可用；1.2 实测 Electron 44 **已删除 install 脚本**，改由根 `postinstall` 显式跑 `install.js` | 见 §7 环境前置 + `docs/acceptance/1.2/1.2-11-electron-binary.txt` |
+| 版本基线                                                        | cordis 4.0.0-rc.10 / electron 44.4.5 / node 24.18（宿主）/ esbuild 0.28.2                                                                                                     | 锁定这些为起点                                                    |
 
 ## 1. 语言与技术选型（决策 + 理由）
 
@@ -71,7 +71,7 @@ auto-cc/
    ├─ devtools/       @auto-cc/plugin-devtools # L4 可视自测驱动（CDP harness），dev-only
    ├─ main/           @auto-cc/main           # Electron 主进程入口（薄：只做生命周期）
    ├─ preload/        @auto-cc/preload        # contextBridge 白名单（唯一渲染层出口）
-   ├─ renderer/       @auto-cc/renderer       # React 应用（首页 = 工作流面板）
+   ├─ renderer/       @auto-cc/renderer       # React 应用（首页 = 对话界面，工作流为第二视图）
    └─ testing/        @auto-cc/testing        # harness 客户端、断言、fixture 站点
 ```
 
@@ -174,7 +174,8 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 > 本节只列 P1 的**环境**前置项。
 
 - [x] `.npmrc` 配 `electron_mirror` / `electron_builder_binaries_mirror` 指向 npmmirror。
-- [x] `pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 显式放行 `esbuild` / `electron`。
+- [x] `pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 放行 `esbuild` 及其平台包（`electron` 一项为防御性保留，实测空转）。
+- [x] 根 `package.json` 的 `postinstall` 显式调用 `packages/main/node_modules/electron/install.js`，补上 Electron 44 删掉的自动下载。
 - [x] 提交钩子不依赖 postinstall（自研 sh 脚本 + `git config core.hooksPath`）。
 - [ ] 探测 `node:sqlite` 在 **Electron 44 主进程内**是否可用（宿主 Node 24 已确认可用，Electron 待测）→ 1.3-06。
 - [ ] 探测 electron-builder 在本机能否产出 AppImage/deb（需 fpm）→ 决定 1.7-08 是否 BLOCKED。

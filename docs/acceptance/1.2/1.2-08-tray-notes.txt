@@ -1,0 +1,56 @@
+# 1.2-08 关闭主窗口不退出应用 + 可再唤出
+
+## 用真实关闭路径验证（不是 `window.close()`）
+
+`CloseMainWindow()` 向窗口发 `WM_CLOSE`，与用户点标题栏 X 是同一条系统路径：
+
+```
+powershell -Command 'Get-Process electron | ? { $_.MainWindowTitle -like "*auto-cc*" } | % { "pid=$($_.Id) closing=$($_.CloseMainWindow())" }'
+  pid=34660 closing=True
+pnpm harness eval --expr "...getStatus().then(r=>'visible='+r.value.windowVisible)"
+  "visible=false"
+tasklist /FI "IMAGENAME eq electron.exe" | grep -c electron
+  5            # 主进程与渲染进程仍在，应用没退出
+```
+
+随后第二次启动实例（走 `second-instance` → `focusMainWindow()`）：
+
+```
+<electron.exe> packages/main/dist/main.cjs   -> exit=0（第二实例自己退出）
+getStatus -> "visible=true"
+```
+
+截图 `1.2-08-reopened-after-tray.png` 为唤回后的界面。
+
+## 未自动化覆盖的部分（如实记录）
+
+- **托盘图标的鼠标点击**没有自动化：原生托盘不在 CDP 可及范围内。已验证的是 `focusMainWindow()`
+  这条被唤回的代码路径本身（托盘菜单项与托盘单击都调它），以及 `Tray` 构造未抛异常
+  （`resources/icon.png` 1024x1024 → `resize({width:16,height:16})`）。
+- 人工补验方式：点托盘图标 / 托盘菜单「显示主窗口」，窗口应重新出现。
+
+## 顺带修掉的两个真实缺陷
+
+1. 渲染层 `window.close()` **不吃** `close` 事件的 `preventDefault()`，窗口会被真销毁
+   （现象：page target 从 2 掉到 1，`getStatus` 报 `Object has been destroyed`）。
+   现在 `win.on('closed')` 在非退出态重建窗口，两条关闭路径都不再让应用失去界面。
+2. `focusMainWindow()` 原先对已销毁窗口直接调 `show()/focus()`；现在先 `isDestroyed()` 判定并重建。
+
+## 修复后的复验（本轮实测，截图 `1.2-08b-window-recreated-after-close.png`）
+
+```
+pnpm harness eval --url 127.0.0.1:5173 --expr "window.close(), 'closing'"
+  "closing"
+pnpm harness targets | grep -c '^page'      # 销毁瞬间
+  3                                        # 旧内核视图 target 短暂残留 + 重建出来的一对
+pnpm harness targets | grep -c '^page'      # 等 4s 后收敛
+  2
+pnpm harness eval --expr "window.autoCC.shell.getStatus()..."
+  windowVisible=true, kernelViewVisible=true,
+  kernelViewBounds={x:735,y:0,width:451,height:737}
+```
+
+即：`window.close()` 仍会销毁窗口（Electron 44 语义，改不了），但应用自己把窗口和内核视图
+补了回来，且新视图的 bounds 在创建时就摆好（不再需要 resize 事件才可见）。截图显示重建后的
+界面状态归零（本地状态 0 次 / 尚未读取），确认是全新 webContents 而不是残留。
+

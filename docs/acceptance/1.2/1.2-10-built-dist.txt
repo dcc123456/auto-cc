@@ -1,0 +1,26 @@
+# 1.2-10 `pnpm build` 产物可加载
+
+命令与输出：
+
+```
+pnpm build
+packages/renderer build: vite v7.3.6 building client environment for production...
+packages/renderer build: ✓ 1697 modules transformed.
+packages/renderer build: dist/index.html                   0.40 kB │ gzip:  0.27 kB
+packages/renderer build: dist/assets/index-DDPsbCgR.css    9.63 kB │ gzip:  2.90 kB
+packages/renderer build: dist/assets/index-HDugmZ8O.js   282.50 kB │ gzip: 89.27 kB
+packages/renderer build: ✓ built in 2.98s
+build exit=0
+```
+
+加载验证（不起 Vite，直接让主进程走 `loadFile` 分支）：
+
+```
+unset ELECTRON_RENDERER_URL
+<electron.exe> packages/main/dist/main.cjs --remote-debugging-port=9223
+pnpm harness targets --port 9223
+  page  auto-cc  file:///D:/works/deep-seek-workspace/auto-cc/packages/renderer/dist/index.html
+```
+
+截图 `1.2-10-built-dist-loaded.png`：`file://` 下 Tailwind 样式、React 挂载、桥接自检面板全部正常，
+说明 `base: './'` 的相对资源路径在无 http 服务的打包态同样可用（1.7 打包时直接复用这条路径）。
