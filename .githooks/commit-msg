@@ -1,22 +1,40 @@
 #!/bin/sh
-# Conventional Commits gate (docs/02-conventions.md). Dependency-free on purpose:
-# this env blocks npm postinstall scripts, so commitlint/husky are not viable.
-regex='^(feat|fix|chore|docs|refactor|test|perf|build|ci|style)(\([a-z0-9._-]+\))?(!)?: .{1,120}$'
+# Conventional Commits gate + Chinese subject requirement (AGENTS.md §1).
+# Dependency-free on purpose: this env blocks npm postinstall scripts, so
+# commitlint/husky are not viable.
+#
+# Rule: `type(scope)!: 中文描述` — type/scope stay lowercase ASCII (machine-parsed
+# enums), the description must contain at least one Chinese character.
+
+types='feat|fix|chore|docs|refactor|test|perf|build|ci|style'
+struct_regex="^($types)(\([a-z0-9][a-z0-9._-]*\))?(!)?: .{1,120}$"
+# U+4E00–U+9FFF covers CJK ideographs; full-width punctuation alone does not count.
+cjk_regex='[一-鿿]'
 msg=$(sed -n '1p' "$1")
 
 case "$msg" in
   "Merge "*|"Revert "*|"fixup!"*|"amend!"*) exit 0 ;;
 esac
 
-if ! echo "$msg" | grep -Eq "$regex"; then
+if ! echo "$msg" | grep -Eq "$struct_regex"; then
   cat >&2 <<EOF
 ✖ commit message does not follow Conventional Commits
 
   got: $msg
-  expected: <type>(<scope>): <subject>
+  expected: <type>(<scope>): <中文描述>
   types:  feat fix chore docs refactor test perf build ci style
   scope:  optional, kebab-case (package or area name)
   '!' marks a breaking change, e.g. feat(ipc)!: ...
+EOF
+  exit 1
+fi
+
+if ! echo "$msg" | sed 's/^[a-z]*\(([a-z0-9._-]*)\)*!\?: //' | grep -Eq "$cjk_regex"; then
+  cat >&2 <<EOF
+✖ commit description must be written in Chinese (AGENTS.md §1.1)
+
+  got: $msg
+  e.g. feat(browser): 增加会话分区以保留登录态
 EOF
   exit 1
 fi

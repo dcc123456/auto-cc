@@ -19,6 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "harness": "pnpm --filter @auto-cc/testing harness",
+    "status:check": "tsx scripts/check-status.ts",
     "dist": "pnpm --filter @auto-cc/main dist",
     "prepare": "git config core.hooksPath .githooks"
   },

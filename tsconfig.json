@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/src/**/*", "packages/*/test/**/*", "eslint.config.js"],
+  "include": ["packages/*/src/**/*", "packages/*/test/**/*", "scripts/**/*", "eslint.config.js"],
   "compilerOptions": {
     "noEmit": true,
     "types": ["node"],
