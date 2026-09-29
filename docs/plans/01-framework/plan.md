@@ -4,7 +4,7 @@
 > 验收文档：`docs/specs/01-framework/spec.md`
 > 范围：**只做骨架**，不含任何招聘业务逻辑。P2/P3/P4 的全部依赖都必须在 P1 内闭环。
 > 骨架必须包含四类"以后改不动"的接线面：内置内核与会话分区（1.8）、外发额度闸门（1.9）、
-> 工作流优先的界面形态（1.10）、零前置依赖的打包方式（1.7）。
+> 对话式主界面（1.11）与工作流面板（1.10）的界面形态、零前置依赖的打包方式（1.7）。
 
 ---
 
@@ -181,18 +181,19 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 
 ## 8. 子计划顺序与产出（一次一个，逐个验收）
 
-| #    | 子计划           | 产出                                                                                          | 依赖      |
-| ---- | ---------------- | --------------------------------------------------------------------------------------------- | --------- |
-| 1.1  | 工程基线         | root 配置、workspace、tsconfig、eslint/prettier、`.npmrc`、提交规范、`packages/core`+`shared` | —         |
-| 1.2  | Electron 壳      | main/preload/renderer 三通，React 页面在窗口内可见，安全策略生效                              | 1.1       |
-| 1.3  | L0 内核插件      | `plugin-config` / `plugin-logger` / `plugin-store` / `plugin-kernel` + `cordis.yml` 装配      | 1.1       |
-| 1.4  | IPC 网关         | `plugin-ipc` + 白名单 + 类型化 client；React 调 service 并订阅事件流                          | 1.2 + 1.3 |
-| 1.5  | 插件运行时管理   | `plugin-plugins` 启停/热重载/状态树/错误隔离 + 调试面板页                                     | 1.4       |
-| 1.6  | 可视自测通道     | `plugin-devtools` + `@auto-cc/testing` harness；agent 完成「开页面→截图→点击→断言」闭环       | 1.5       |
-| 1.7  | 零依赖三端打包   | electron-builder 配置、图标、安装冒烟脚本；**产物自包含、零首启动下载**                       | 1.6       |
-| 1.8  | 内置内核会话骨架 | `plugin-sessions`：persist partition 抽象、登录态跨重启保持、失效探测事件                     | 1.3 + 1.4 |
-| 1.9  | 外发额度骨架     | `plugin-entitlement`：`gate.check()` + `usage.ledger` 落库 + 本地无限实现 + 可切断额度        | 1.3 + 1.4 |
-| 1.10 | 工作流优先界面   | renderer 首页 = workflow 面板（空 runner 占位 + 步骤槽位 + 进度区），确立为第一入口           | 1.4       |
+| #    | 子计划                 | 产出                                                                                                                     | 依赖       |
+| ---- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| 1.1  | 工程基线               | root 配置、workspace、tsconfig、eslint/prettier、`.npmrc`、提交规范、`packages/core`+`shared`                            | —          |
+| 1.2  | Electron 壳            | main/preload/renderer 三通，React 页面在窗口内可见，安全策略生效                                                         | 1.1        |
+| 1.3  | L0 内核插件            | `plugin-config` / `plugin-logger` / `plugin-store` / `plugin-kernel` + `cordis.yml` 装配                                 | 1.1        |
+| 1.4  | IPC 网关               | `plugin-ipc` + 白名单 + 类型化 client；React 调 service 并订阅事件流                                                     | 1.2 + 1.3  |
+| 1.5  | 插件运行时管理         | `plugin-plugins` 启停/热重载/状态树/错误隔离 + 调试面板页                                                                | 1.4        |
+| 1.6  | 可视自测通道           | `plugin-devtools` + `@auto-cc/testing` harness；agent 完成「开页面→截图→点击→断言」闭环                                  | 1.5        |
+| 1.7  | 零依赖三端打包         | electron-builder 配置、图标、安装冒烟脚本；**产物自包含、零首启动下载**                                                  | 1.6        |
+| 1.8  | 内置内核会话骨架       | `plugin-sessions`：persist partition 抽象、登录态跨重启保持、失效探测事件                                                | 1.3 + 1.4  |
+| 1.9  | 外发额度骨架           | `plugin-entitlement`：`gate.check()` + `usage.ledger` 落库 + 本地无限实现 + 可切断额度                                   | 1.3 + 1.4  |
+| 1.10 | 工作流面板（第二视图） | renderer 工作流视图（空 runner 占位 + 步骤槽位 + 进度区），与对话共用同一 runner                                         | 1.4        |
+| 1.11 | 对话式主界面骨架       | renderer 首页 = chat（消息流 + 输入区 + 工具卡片占位 + 自治档位指示 + 会话持久化）+ `agent.tools` 空注册表与调用协议定型 | 1.4 + 1.10 |
 
 **P1 完成定义**：`docs/specs/01-framework/spec.md` 中每条标准为 PASS 或有明确理由的 BLOCKED
 （不得静默跳过），且 M1 / M2 / M2b 三个里程碑由 agent 可视化验证达成。
