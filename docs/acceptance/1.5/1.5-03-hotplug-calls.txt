@@ -1,0 +1,25 @@
+{
+  "before": {
+    "ok": true,
+    "value": {
+      "file": "C:\\Users\\ragfl\\AppData\\Local\\auto-cc\\logs\\auto-cc.log",
+      "level": "info"
+    }
+  },
+  "during": {
+    "ok": false,
+    "error": {
+      "code": "SERVICE_NOT_FOUND",
+      "message": "服务未挂载：log",
+      "path": "log.status",
+      "stack": "AppError: 服务未挂载：log\n    at Gateway.invoke (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:29391:29)\n    at D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:29420:89\n    at Session.<anonymous> (node:electron/js2c/browser_init:1:118190)\n    at Session.emit (node:events:514:28)"
+    }
+  },
+  "after": {
+    "ok": true,
+    "value": {
+      "file": "C:\\Users\\ragfl\\AppData\\Local\\auto-cc\\logs\\auto-cc.log",
+      "level": "info"
+    }
+  }
+}

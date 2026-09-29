@@ -196,7 +196,9 @@ export class KernelService extends Service {
     node.state = 'disposed';
     node.error = undefined;
     node.stack = undefined;
-    this.ctx.logger.info(`插件 ${id} 已卸载：回收 ${String(before)} 项 effect，剩余 ${String(countEffects(fiber.getEffects()))} 项`);
+    this.ctx.logger.info(
+      `插件 ${id} 已卸载：回收 ${String(before)} 项 effect，剩余 ${String(countEffects(fiber.getEffects()))} 项`,
+    );
     return node;
   }
 
@@ -282,7 +284,15 @@ export class KernelService extends Service {
     const off = this.ctx.on('internal/status', (fiber) => {
       const id = fiber.uid === null ? undefined : this.idByUid.get(fiber.uid);
       const node = id ? this.nodes.get(id) : undefined;
-      if (node) node.state = fiberState(fiber.state);
+      if (!node) return;
+      const state = fiberState(fiber.state);
+      node.state = state;
+      if (state === 'active') {
+        // 修好配置后 fiber 会自己重跑，此时快照里还挂着上一次的 message，界面就会显示
+        // 一个「已就绪但在报错」的插件。历史留在 `plugin/error` 事件里，当前状态不再背它。
+        node.error = undefined;
+        node.stack = undefined;
+      }
     });
     this.ctx.effect(() => off, 'kernel.status');
     await this.assemble();
@@ -321,7 +331,11 @@ export class KernelService extends Service {
   }
 
   /** 挂载一个插件并把它落定的状态写进快照。 */
-  private async attach(entry: ManifestEntry, impl: PluginConstructor, value: Record<string, unknown>): Promise<PluginNode> {
+  private async attach(
+    entry: ManifestEntry,
+    impl: PluginConstructor,
+    value: Record<string, unknown>,
+  ): Promise<PluginNode> {
     const fiber = this.ctx.plugin(impl, value);
     this.fibers.set(entry.id, fiber);
     // 只有根 fiber 的 uid 是 null，挂载出来的插件一定有数字 uid；映射不上就跳过状态回调。

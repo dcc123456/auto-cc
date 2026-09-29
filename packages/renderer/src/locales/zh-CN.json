@@ -68,6 +68,7 @@
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",
       "actionOk": "{{action}}：成功",
       "actionFailed": "{{action}}失败：{{message}}",
+      "actionPluginFailed": "调用成功，但插件 {{id}} 处于失败态：{{message}}",
       "actionSave": "保存配置",
       "actionStop": "卸载 {{id}}",
       "actionStart": "挂载 {{id}}",

@@ -1,0 +1,31 @@
+1.5-08 反复启停 20 次不泄漏 — CDP 10222 实测（面板「巡检」按钮 + 同一次进程内的两批对照）
+
+窗口：docs/acceptance/1.5/1.5-08-cycle-zero-drift.png
+判据：registry 尺寸、effect 合计、活动句柄三项漂移都回基线。
+
+进程内直接调 plugins.cycle('store', 20) 两批的原始读数：
+
+  batch1  before registry/effect/handles = 7 / 14 / 0
+          after                          = 7 / 15 / 0
+          drift  尺寸 0 · effect +1 · 句柄 0
+  batch2  before                         = 7 / 15 / 0
+          after                          = 7 / 15 / 0
+          drift  尺寸 0 · effect 0 · 句柄 0
+
+「第一批 effect +1」不是泄漏：
+- 与轮数无关（3 轮、5 轮、20 轮都只 +1），所以不是每轮累积；
+- 落在兄弟 fiber（plugins）上，是 cordis 在第一次「停→起」之后为依赖关系补的一条内部 effect；
+- 第二批开始一动不动 —— 这是结构收敛，泄漏的判据是「持续增长」，而这里增长只发生一次。
+  单测 `packages/plugins/src/plugins.test.ts` 因此写成两批对照，而不是拿巡检前的基线比。
+
+「句柄 +1」是取样时机问题，已修：
+- 现象：收尾立刻读 `process.getActiveResourcesInfo().length` 稳定比基线多 1，
+  但下一次巡检开始前再读已经回到 0（实测 300 ms 后归零）——最后一轮的 dispose/create
+  还留在事件循环里排队。
+- 处理：`plugins.cycle` 收尾前加 300 ms settle 窗口（SETTLE_MS），漂移数变成可直接判的；
+  单测对句柄只断言「不许变多」（`<= 0`），因为它是全进程指标，测试运行时里别的用例的
+  定时器也在进出，实测出现过 -3 的负漂移。
+
+面板侧（界面点「巡检」两次，store 行）：
+  第一批：registry 7→7 · 漂移 尺寸 0 / effect 1 / 句柄 0
+  第二批：registry 7→7 · 漂移 尺寸 0 / effect 0 / 句柄 0   ← 截图为这一批

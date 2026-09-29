@@ -177,16 +177,58 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 ## 1.5 插件运行时管理 + 调试面板
 
-| ID     | 验收标准                                                            | 方式 | 验证操作                                             | 状态 |
-| ------ | ------------------------------------------------------------------- | ---- | ---------------------------------------------------- | ---- |
-| 1.5-01 | 调试面板显示完整插件树（名称/层级/状态/依赖），与实际 registry 一致 | V    | 截图对比 `ctx.registry.size`                         | [ ]  |
-| 1.5-02 | 单个插件可从界面 Stop → 变 DISPOSED，其 effect 清理被执行           | V    | 停掉带定时器的插件，日志确认 dispose 且定时器停止    | [ ]  |
-| 1.5-03 | Stop 后可 Start 回来，service 重新可调用（热插拔闭环）              | V    | 操作前后各调一次同一方法，均成功                     | [ ]  |
-| 1.5-04 | 卸载提供方时依赖方自动降级为 PENDING，恢复后自动重建                | V    | 停 store → 上层状态随之变化 → 恢复 → 上层自动 ACTIVE | [ ]  |
-| 1.5-05 | 插件抛错只显示为该插件 FAILED，主进程与其他插件继续工作             | V    | 触发错误插件 → 面板红色态 + app 仍可点               | [ ]  |
-| 1.5-06 | 面板可查看并保存任一插件配置，新配置即时生效（不重启 app）          | V    | 改日志级别 → 立刻反映到日志输出                      | [ ]  |
-| 1.5-07 | 错误计数/最近错误列表在面板可见，可展开栈                           | V    | 截图错误详情展开                                     | [ ]  |
-| 1.5-08 | 反复启停 20 次不泄漏（registry/监听器数量回归基线）                 | C+V  | 循环启停后断言 `registry.size` 与 listener 数回原值  | [ ]  |
+| ID     | 验收标准                                                            | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 状态 |
+| ------ | ------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1.5-01 | 调试面板显示完整插件树（名称/层级/状态/依赖），与实际 registry 一致 | V    | `1.5-01-tree-vs-registry.png`：面板 6 行（config/logger/store/ipc/plugins/shell）逐行带状态徽章、依赖、配置键、每插件 effect 数；指标行 `registry 7 项 · 挂载序号 30 · effect 合计 15 项 · 活动句柄 0 个 · 卸载闸门 kernel, ipc, plugins`。**7 = 清单 6 个插件 + 内核自己**，与 `kernel.metrics().registrySize` 同源；`packages/plugins/src/plugins.test.ts` 断言面板拿到的 `guarded` 恰为 `kernel/ipc/plugins`                                                                       | [x]  |
+| 1.5-02 | 单个插件可从界面 Stop → 变 DISPOSED，其 effect 清理被执行           | V    | `1.5-02-store-disposed.png`：点 store 行「卸载」→ 徽章变「已卸载」、按钮换成「挂载」，主进程日志落下 `插件 store 已卸载：回收 2 项 effect，剩余 0 项`，指标 `registrySize 7→6`、`effectTotal` 同步减。内核侧 `packages/kernel/src/lifecycle.test.ts`「Stop → DISPOSED，effect 回收器被调用且定时器停走」用可观察的 tick 计数证明旧定时器真的停了（卸载后 ticks 不再增长）                                                                                                             | [x]  |
+| 1.5-03 | Stop 后可 Start 回来，service 重新可调用（热插拔闭环）              | V    | `1.5-03-store-remounted.png` + `1.5-03-hotplug-calls.txt`：对 logger 做闭环——操作前 `log.status` 返回 ok，卸载后同一调用得到 `SERVICE_NOT_FOUND · 服务未挂载：log`，重新「挂载」后再次 ok，且 `ctx.get('logger')` 拿到的是**新实例**（单测断言 `second !== first`）。面板每轮动作后都会重读快照，界面显示的是主进程的真实状态而不是猜测                                                                                                                                               | [x]  |
+| 1.5-04 | 卸载提供方时依赖方自动降级为 PENDING，恢复后自动重建                | V    | `1.5-04-provider-stopped.png`：停掉 config（提供方）→ 树里 `logger:pending`、`store:pending`，而无依赖关系的 ipc/plugins/shell 不受牵连；`1.5-04-provider-restored.png`：重新挂载 config → 两个下级由 cordis 自动回到 active，`registrySize` 回基线。单测「停掉提供方 → 依赖方 PENDING；恢复后自动 ACTIVE」以轮询 `waitFor` 锁定同一条链路                                                                                                                                            | [x]  |
+| 1.5-05 | 插件抛错只显示为该插件 FAILED，主进程与其他插件继续工作             | V    | `1.5-05-store-failed-isolated.png`：面板把 store 的 `dir` 改成 `bad:name` 并保存 → store 行红色「失败」+ 行内 `ENOENT: no such file or directory, mkdir '…\bad:name'`，其余 5 行仍「已就绪」，提示行如实写「调用成功，但插件 store 处于失败态：…」；同一时刻 `shell.getStatus().windowVisible === true`、点日志探针按钮仍能推进日志（脱敏照常）。`1.5-05-store-recovered.png`：把 `dir` 改回合法值 → 行回到绿色且**不再挂着上一条红字**，提示回到「保存配置：成功」                   | [x]  |
+| 1.5-06 | 面板可查看并保存任一插件配置，新配置即时生效（不重启 app）          | V    | `1.5-06-config-level-applied.png` + `1.5-06-hot-config.txt`：面板「配置」预填当前生效值（`{level:info,buffer:500,file:auto-cc.log,redact:true}`），改成 `level:"error"` 保存后 `log.status().level` 立刻是 `error`，此时 `shell.probeRedact()`（写一条 warn）在 `log.tail(500)` 里**一条都不增加**（0 → 0）；再存 `level:"debug"` 后同一探针立刻产出日志行。全程没有重启进程，也没有改 cordis.yml。非法字段走另一条分支：预校验抛 `CONFIG_INVALID` 并点名是哪个键，坏值不会进运行时层 | [x]  |
+| 1.5-07 | 错误计数/最近错误列表在面板可见，可展开栈                           | V    | `1.5-07-error-history-expanded.png`：「插件错误历史（1 条）」展开后是完整 14 行栈（`at mkdirSync (node:fs:1410:26)` → `[cordis.init]` → `Fiber.execute` → `Gateway.invoke`），带时间戳 16:40:05；同一错误在日志区以 ERROR 级别出现但只带 message，栈不污染可读日志（栈走 `plugin/error` 事件单独送达）。历史上限由配置 `history`（默认 20，最大 200）控制，单测断言新记录排在最前且不越界                                                                                             | [x]  |
+| 1.5-08 | 反复启停 20 次不泄漏（registry/监听器数量回归基线）                 | C+V  | `1.5-08-cycle-zero-drift.png` + `1.5-08-cycle-report.txt`：面板点 store 行「巡检」（20 轮）两批。第一批 `registry 7→7 · 漂移 尺寸 0 / effect 1 / 句柄 0`，第二批 `漂移 尺寸 0 / effect 0 / 句柄 0`。effect 的 +1 与轮数无关（3/5/20 轮都只 +1）且第二批起一动不动，判定为 cordis 的结构收敛而非泄漏；判据因此写成**两批对照**（`packages/plugins/src/plugins.test.ts`），而不是拿巡检前的基线比                                                                                       | [x]  |
+
+### 1.5 期间新增固化的环境与设计事实
+
+1. **DISPOSED 的 fiber 是永久死的**：在它上面 `restart()` / `update()` 都会在创建 effect 时抛
+   `INACTIVE_EFFECT`（读 cordis 源码 + 实测一致）。所以「重新启动」一律是再挂一次 `ctx.plugin`，
+   拿到的是**新 fiber**；`kernel.start()` 因此不试图复活旧实例，而是先 dispose 残留再重挂。
+2. **`fiber.update(config)` 是唯一会清 `_error` 的重启方式**，并且会把新配置存进 fiber——之后依赖变化
+   引发的自动重建用的是新值而不是挂载时的旧值。改配置顺带重试失败插件就靠这一点，所以
+   `applyConfig` 走 `update` 而不是 `restart`。
+3. **构造失败不是异常，是状态**。`applyConfig` 只在**预校验**失败时抛 `CONFIG_INVALID`；插件构造器
+   自己炸了会被 catch 成 `FAILED` 节点 + `plugin/error` 事件，IPC 调用本身仍然 `ok:true`。
+   面板因此不能只看信封：`run()` 加了 `describe` 回调，读返回节点的 `state`，否则会出现
+   「保存配置：成功」配一行红色 FAILED 的自相矛盾画面（本轮实测就是这么发现的）。
+4. **恢复成功后必须清掉快照里的旧 error**：cordis 的状态回调只更新 `state`，`node.error` 会留在原地，
+   界面就显示成一个「已就绪但在报错」的插件。现在 `internal/status` 观察到 `active` 时把
+   `error`/`stack` 置空，错误只留在历史列表里。
+5. **巡检的句柄读数要留 settle 窗口**：`process.getActiveResourcesInfo()` 在最后一轮 dispose/create
+   之后会稳定多 1，几百毫秒后自己归零——那是还在事件循环排队的句柄，不是泄漏。`plugins.cycle`
+   收尾前加 300 ms（`SETTLE_MS`）。单测对句柄只断言「不许变多」（实测出现过 -3 的负漂移，
+   因为它是全进程指标，别的用例的定时器也在进出）。
+6. **第一批启停会让兄弟 fiber 补一条内部 effect**（实测 plugins 3→4，之后不再增长）。判泄漏要看
+   第二批，不能拿巡检前的基线比——否则每次都会误报 +1。
+7. **运行时配置补丁不落盘**：`runtimePatches` 只在主进程内存里，`@auto-cc/plugin-config` 不会写回
+   cordis.yml。这既是好事（验收实验随进程消失，不污染仓库与用户配置），也意味着**重启即回滚**——
+   真正要持久化的配置得等 1.9 之后的用户配置层。
+8. **`dev` 脚本的主进程重启有竞态**：改 `packages/*/src` 会让 esbuild 重打 `main.cjs` 并重启 Electron，
+   但旧实例还占着单例锁与 10222 端口，新实例报 `Lock file can not be created` / `bind() … 只允许使用
+一次` 后退出，`pnpm dev` 整个结束。本轮验收撞上两次，只能手工重启。归到 1.6 自测通道处理。
+
+### 1.5 遗留（后续子计划处理）
+
+1. 1.4 遗留第 2 条（开发态 `store.db` 落在 `%APPDATA%\Roaming\Electron\`）**已在本计划修掉**：
+   主进程装配时把 `app.getPath('userData')` 作为运行时层覆盖写进 `store.dir`
+   （`packages/main/src/index.ts`），本轮实测 store 落在 `C:\Users\ragfl\AppData\Roaming\auto-cc\store.db`
+   （Electron 的应用名已是 auto-cc，不再是 Electron），与日志目录 `%LOCALAPPDATA%\auto-cc\logs\` 同前缀。
+   注意这条覆盖只在主进程装配时发生：直接用 `pnpm vitest` 跑 store 单测时仍是 `config` 插件自己算的路径。
+2. 1.4 遗留第 3 条仍未处理：`ipc.stats`（在途/已完成计数）没进白名单，面板看不到网关指标。
+   1.6 自测通道要把「调用成功率」当核心读数，届时一并登记。
+3. 面板的插件行**没有稳定的测试选择器**，本轮验收靠可见文本（`store` + 按钮「配置/卸载/挂载/巡检」）
+   在 DOM 里定位，改文案就会打断脚本。1.6 需要 `data-row-id` 一类机读锚点。
+4. 巡检目前只覆盖「启停」这一种反复动作。1.8 内置内核会话上线后要把「反复开/关会话」也纳入同一
+   个漂移判据，因为那才是真正会漏句柄的地方。
 
 ## 1.6 可视化自测通道（agent 自测能力）
 

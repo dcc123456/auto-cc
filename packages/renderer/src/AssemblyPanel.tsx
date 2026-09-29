@@ -1,13 +1,4 @@
-import {
-  Boxes,
-  Play,
-  RefreshCw,
-  Repeat,
-  ScrollText,
-  ShieldCheck,
-  SlidersHorizontal,
-  Square,
-} from 'lucide-react';
+import { Boxes, Play, RefreshCw, Repeat, ScrollText, ShieldCheck, SlidersHorizontal, Square } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -91,16 +82,25 @@ export function AssemblyPanel() {
    *
    * 面板是自测工具，不弹窗：失败原因（含字段级的配置错误）留在界面上，截图才能当验收证据。
    * 无论成败都重读快照——失败的插件状态是主进程改的，界面不该自己猜。
+   * `describe` 用来覆盖提示：调用成功但插件重建失败时，「保存配置：成功」是句假话。
    */
-  const run = async <T,>(label: string, call: () => Promise<BridgeReply<T>> | undefined) => {
+  const run = async <T,>(
+    label: string,
+    call: () => Promise<BridgeReply<T>> | undefined,
+    describe?: (value: T) => string | undefined,
+  ) => {
     setBusy(label);
     const reply = await call();
     setBusy(undefined);
     if (!reply) setNotice(t('assembly.noBridge'));
-    else if (reply.ok) setNotice(t('assembly.actionOk', { action: label }));
+    else if (reply.ok) setNotice(describe?.(reply.value) ?? t('assembly.actionOk', { action: label }));
     else setNotice(t('assembly.actionFailed', { message: reply.error.message }));
     await read();
   };
+
+  /** 插件没起来时把它的错误抬到提示行，而不是让用户去树里找那行红字。 */
+  const failedNotice = (node: PluginNodeView) =>
+    node.state === 'failed' ? t('assembly.actionPluginFailed', { id: node.id, message: node.error ?? '' }) : undefined;
 
   const probeRedact = async () => {
     await bridge?.shell.probeRedact();
@@ -109,7 +109,12 @@ export function AssemblyPanel() {
 
   const openEditor = async (id: string) => {
     const reply = await bridge?.plugins.readConfig(id);
-    if (reply?.ok) setEditing({ id: reply.value.id, text: JSON.stringify(reply.value.values, null, 2), mounted: reply.value.mounted });
+    if (reply?.ok)
+      setEditing({
+        id: reply.value.id,
+        text: JSON.stringify(reply.value.values, null, 2),
+        mounted: reply.value.mounted,
+      });
   };
 
   /**
@@ -143,7 +148,11 @@ export function AssemblyPanel() {
       setNotice(t('assembly.jsonInvalid', { message: t('assembly.jsonRootObject') }));
       return;
     }
-    await run(t('assembly.actionSave'), () => bridge?.plugins.saveConfig(editing.id, parsed as Record<string, unknown>));
+    await run(
+      t('assembly.actionSave'),
+      () => bridge?.plugins.saveConfig(editing.id, parsed as Record<string, unknown>),
+      failedNotice,
+    );
   };
 
   const metrics = status?.metrics;
@@ -173,14 +182,19 @@ export function AssemblyPanel() {
         )}
 
         <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-          <span>{t('assembly.metricRegistry', { size: metrics?.registrySize ?? 0, counter: metrics?.registryCounter ?? 0 })}</span>
+          <span>
+            {t('assembly.metricRegistry', { size: metrics?.registrySize ?? 0, counter: metrics?.registryCounter ?? 0 })}
+          </span>
           <span>{t('assembly.metricEffects', { total: metrics?.effectTotal ?? 0 })}</span>
           <span>{t('assembly.metricResources', { num: metrics?.activeResources ?? 0 })}</span>
           <span>{t('assembly.metricGuarded', { names: (status?.guarded ?? []).join(', ') })}</span>
         </p>
 
         {notice && (
-          <p className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300" data-testid="action-notice">
+          <p
+            className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            data-testid="action-notice"
+          >
             {notice}
           </p>
         )}
@@ -218,7 +232,9 @@ export function AssemblyPanel() {
                       <button
                         type="button"
                         disabled={!!busy}
-                        onClick={() => void run(t('assembly.actionStop', { id: node.id }), () => bridge?.plugins.stop(node.id))}
+                        onClick={() =>
+                          void run(t('assembly.actionStop', { id: node.id }), () => bridge?.plugins.stop(node.id))
+                        }
                         className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                       >
                         <Square size={12} />
@@ -229,7 +245,13 @@ export function AssemblyPanel() {
                       <button
                         type="button"
                         disabled={!!busy}
-                        onClick={() => void run(t('assembly.actionStart', { id: node.id }), () => bridge?.plugins.start(node.id))}
+                        onClick={() =>
+                          void run(
+                            t('assembly.actionStart', { id: node.id }),
+                            () => bridge?.plugins.start(node.id),
+                            failedNotice,
+                          )
+                        }
                         className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                       >
                         <Play size={12} />
@@ -304,7 +326,10 @@ export function AssemblyPanel() {
         )}
 
         {cycle && (
-          <p className="mt-3 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300" data-testid="cycle-report">
+          <p
+            className="mt-3 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            data-testid="cycle-report"
+          >
             {t('assembly.cycleReport', {
               id: cycle.id,
               rounds: cycle.rounds,
@@ -335,7 +360,9 @@ export function AssemblyPanel() {
               </details>
             </li>
           ))}
-          {(status?.errors.length ?? 0) === 0 && <li className="text-[11px] text-slate-500">{t('assembly.errorEmpty')}</li>}
+          {(status?.errors.length ?? 0) === 0 && (
+            <li className="text-[11px] text-slate-500">{t('assembly.errorEmpty')}</li>
+          )}
         </ul>
       </section>
 

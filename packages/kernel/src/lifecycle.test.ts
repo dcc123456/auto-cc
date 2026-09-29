@@ -9,7 +9,8 @@ import { Context, Service, type PluginState } from '@auto-cc/core';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';import { z } from 'zod';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { z } from 'zod';
 import { KernelService, type PluginNode, type Registry } from './index.js';
 
 /** 记录 effect 回收器被调用时的实例配置，用来证明「旧实例的定时器真的被清掉了」。 */
@@ -59,7 +60,26 @@ class BoomService extends Service {
   }
 }
 
-const REGISTRY: Registry = { timer: TimerService, watch: WatchService, boom: BoomService };
+/** 只有 dir 合法才构造得起来：用来验收「把配置改对之后 FAILED 会自动回到 ACTIVE」。 */
+class FragileService extends Service {
+  static provide = 'fragile';
+  static Config = z.strictObject({ dir: z.string().min(1) });
+
+  readonly dir: string;
+
+  constructor(ctx: Context, options: { dir: string }) {
+    super(ctx, 'fragile');
+    if (options.dir === 'bad') throw new Error('目录不可用：bad');
+    this.dir = options.dir;
+  }
+}
+
+const REGISTRY: Registry = {
+  timer: TimerService,
+  watch: WatchService,
+  boom: BoomService,
+  fragile: FragileService,
+};
 
 const rootDir = mkdtempSync(join(tmpdir(), 'auto-cc-lifecycle-'));
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -160,6 +180,25 @@ plugins:
     await kernel.start('boom');
     expect(kernel.snapshot().find((item) => item.id === 'boom')?.state).toBe('failed');
     expect((ctx.get('timer') as TimerService).interval).toBe(5);
+  });
+
+  it('把配置改对之后 FAILED 自动回到 ACTIVE，快照不再挂着上一次的错误（spec 1.5-05 的恢复分支）', async () => {
+    const { ctx, kernel } = await mount(`
+plugins:
+  - id: fragile
+    config:
+      dir: bad
+`);
+    const failed = await waitFor(kernel, 'fragile', 'failed');
+    expect(failed.error).toContain('目录不可用');
+
+    await kernel.applyConfig('fragile', { dir: 'ok' });
+
+    const active = await waitFor(kernel, 'fragile', 'active');
+    // 绿色态却又显示一段红色错误，是界面最容易骗人的组合：当前状态必须干净。
+    expect(active.error).toBeUndefined();
+    expect(active.stack).toBeUndefined();
+    expect((ctx.get('fragile') as FragileService).dir).toBe('ok');
   });
 
   it('保存配置即时生效：update 会重新构造实例并送去新值（spec 1.5-06）', async () => {

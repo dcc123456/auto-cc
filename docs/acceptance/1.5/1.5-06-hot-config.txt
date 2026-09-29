@@ -1,0 +1,27 @@
+1.5-06 面板保存配置即时生效（不重启 app）— CDP 10222 实测
+
+窗口：docs/acceptance/1.5/1.5-06-config-level-applied.png
+
+步骤与读数（全部通过界面按钮 + window.autoCC 桥，进程未重启）：
+
+1) 初始 effective 配置：logger = { level: "info", buffer: 500, file: "auto-cc.log", redact: true }
+   log.status() -> { level: "info" }
+
+2) 界面：logger 行「配置」→ textarea 改为 level:"error" → 「保存并生效」
+   plugins.saveConfig('logger', {...}) 返回后：
+   - log.status().level = "error"
+   - plugins.readConfig('logger').values.level = "error"
+   探针 shell.probeRedact()（写一条 warn）：
+   - tail(500) 长度 before = 0 / after = 0  →  grewAtError = 0
+   即 error 级别下 warn 被过滤，日志输出确实随配置变化。
+
+3) 再次保存 level:"debug"（同样不重启）：
+   - log.status().level = "debug"
+   - 同一探针 shell.probeRedact()：afterDebug - before = 2（warn 探针 + 重建时的 info 行都出来了）
+   - tail(500) 末两条 level = ["info", "warn"]
+
+结论：配置从面板写入 → kernel.applyConfig → fiber.update 重建实例 → 新级别立刻生效，
+无需重启；旧实例 effect 已回收（缓冲区随重建清零，说明是全新实例）。
+
+注：本实验的 runtime patch 不落盘（@auto-cc/plugin-config 只在启动时读 cordis.yml），
+进程退出即消失，不会污染仓库或用户配置。

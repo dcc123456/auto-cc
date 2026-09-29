@@ -124,9 +124,14 @@ describe('插件管理策略层', () => {
     const report = await plugins.cycle('demo', 5);
 
     expect(warm.sizeDrift).toBe(0);
+    // 句柄数只看「不许变多」：它是整个进程的 `getActiveResourcesInfo()`，测试运行时里
+    // 别的用例的定时器也在进出，绝对值会负漂移（实测 -3），那同样不是泄漏。
+    expect(warm.resourceDrift).toBeLessThanOrEqual(0);
     expect(report.rounds).toBe(5);
     expect(report.sizeDrift).toBe(0);
     expect(report.effectDrift).toBe(0);
+    // 最后一轮的定时器还在事件循环里排队，所以 cycle 收尾前留了 settle 窗口。
+    expect(report.resourceDrift).toBeLessThanOrEqual(0);
     expect(report.before.effectTotal).toBe(warm.after.effectTotal);
     expect(report.after.effectTotal).toBe(warm.after.effectTotal);
     expect(report.after.registrySize).toBe(warm.after.registrySize);
@@ -137,7 +142,11 @@ describe('插件管理策略层', () => {
 
   it('配置读写透传到内核，保存后新实例拿到新值（spec 1.5-06）', async () => {
     const { ctx, plugins } = await mount();
-    expect(plugins.readConfig('demo')).toEqual({ id: 'demo', values: { greeting: 'hi', level: 'info' }, mounted: true });
+    expect(plugins.readConfig('demo')).toEqual({
+      id: 'demo',
+      values: { greeting: 'hi', level: 'info' },
+      mounted: true,
+    });
 
     await plugins.saveConfig('demo', { greeting: 'yo' });
     expect(plugins.readConfig('demo').values).toEqual({ greeting: 'yo', level: 'info' });

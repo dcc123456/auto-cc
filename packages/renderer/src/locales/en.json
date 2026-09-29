@@ -68,6 +68,7 @@
       "noBridge": "Bridge unavailable: not running inside the Electron host",
       "actionOk": "{{action}}: done",
       "actionFailed": "{{action}} failed: {{message}}",
+      "actionPluginFailed": "Call succeeded but plugin {{id}} is in failed state: {{message}}",
       "actionSave": "Save config",
       "actionStop": "Stop {{id}}",
       "actionStart": "Start {{id}}",

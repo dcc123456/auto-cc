@@ -58,6 +58,9 @@ export const pluginsSchema = z.strictObject({
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
 export type PluginsConfig = z.infer<typeof pluginsSchema>;
 
+/** 巡检收尾前的 settle 窗口，留给事件循环里正在落地的句柄。 */
+const SETTLE_MS = 300;
+
 export class PluginsService extends Service {
   static provide = 'plugins';
   static Config = pluginsSchema;
@@ -113,6 +116,8 @@ export class PluginsService extends Service {
    *
    * 泄漏检测做成面板上一个能点的动作，而不只活在单测里：基线与收尾各取一次指标，
    * 判据是 `registrySize` 与 `effectTotal` 都回到基线。
+   * 收尾前留一个短暂 settle 窗口：最后一轮的 dispose/create 会在事件循环里留下一个还在
+   * 落地的句柄（SQLite / 文件），立刻取样会把它读成「泄漏 +1」，而这个数其实几百毫秒后自己就归零。
    */
   cycle = async (id: string, rounds = 20): Promise<PluginCycleReport> => {
     this.assertStoppable(id, 'plugins.cycle');
@@ -122,6 +127,7 @@ export class PluginsService extends Service {
       await this.kernel.stop(id);
       await this.kernel.start(id);
     }
+    await new Promise<void>((resolve) => setTimeout(resolve, SETTLE_MS));
     const after = this.metrics();
     return {
       id,
