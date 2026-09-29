@@ -1,5 +1,5 @@
 {
-  "name": "@auto-cc/shell",
+  "name": "@auto-cc/plugin-kernel",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,15 +9,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
-    "@auto-cc/shared": "workspace:*",
+    "@auto-cc/plugin-config": "workspace:*",
+    "@standard-schema/spec": "^1.1.0",
     "cordis": "4.0.0-rc.10",
+    "yaml": "^2.7.0",
     "zod": "^4.0.0"
-  },
-  "devDependencies": {
-    "electron": "^44.4.5"
   }
 }

@@ -2,6 +2,7 @@ import { Languages } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
+import { AssemblyPanel } from './AssemblyPanel';
 import { ShellPanel } from './ShellPanel';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
@@ -29,7 +30,10 @@ export function App() {
 
       <main className="flex min-h-0 flex-1">
         <section className="min-w-0 flex-1 overflow-y-auto p-6">
-          <ShellPanel />
+          <div className="flex flex-col gap-4">
+            <ShellPanel />
+            <AssemblyPanel />
+          </div>
         </section>
         {/* 槽位宽度与主进程摆位同源：`--kernel-view-width` 必须等于 KERNEL_VIEW_WIDTH_RATIO（1.2-12） */}
         <aside className="w-(--kernel-view-width) border-l border-slate-800 bg-slate-900/40 p-6">

@@ -11,6 +11,9 @@ export const RENDERER_ALLOWLIST = [
   'shell.setKernelViewVisible',
   'shell.probeMainCrash',
   'shell.probeIllegalCall',
+  'shell.getPluginTree',
+  'shell.getLogTail',
+  'shell.probeRedact',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -46,12 +49,32 @@ export type ShellStatus = {
  */
 export const KERNEL_VIEW_WIDTH_RATIO = 0.38;
 
+/**
+ * 插件树节点（spec 1.3-01 / 1.3-09 / 1.3-10 的界面证据）。
+ *
+ * 1.3 只有 `shell` 一个白名单命名空间，所以内核与日志的状态先由 shell 代理读出；
+ * 1.4 的 IPC 网关上线后改为 `kernel.*` / `log.*` 直连，这两个视图类型继续复用。
+ */
+export type PluginNodeView = {
+  id: string;
+  state: 'pending' | 'loading' | 'active' | 'failed' | 'disposed' | 'unloading';
+  dependsOn: string[];
+  keys: string[];
+  error?: string;
+};
+
+/** 一条已脱敏日志（spec 1.3-04 / 1.3-05 / 1.3-11 的界面证据）。 */
+export type LogLineView = { ts: number; level: string; name: string; text: string };
+
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
   'shell.probeMainCrash': { args: []; returns: never };
   'shell.probeIllegalCall': { args: []; returns: BridgeReply<unknown> };
+  'shell.getPluginTree': { args: []; returns: { nodes: PluginNodeView[]; manifestError?: string } };
+  'shell.getLogTail': { args: [limit?: number]; returns: { lines: LogLineView[]; file?: string; level: string } };
+  'shell.probeRedact': { args: []; returns: { lines: LogLineView[] } };
 }
 
 /**
@@ -67,5 +90,8 @@ export interface RendererBridge {
     setKernelViewVisible: (visible: boolean) => Promise<BridgeReply<{ kernelViewVisible: boolean }>>;
     probeMainCrash: () => Promise<BridgeReply<never>>;
     probeIllegalCall: () => Promise<BridgeReply<unknown>>;
+    getPluginTree: () => Promise<BridgeReply<{ nodes: PluginNodeView[]; manifestError?: string }>>;
+    getLogTail: (limit?: number) => Promise<BridgeReply<{ lines: LogLineView[]; file?: string; level: string }>>;
+    probeRedact: () => Promise<BridgeReply<{ lines: LogLineView[] }>>;
   };
 }

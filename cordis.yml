@@ -1,0 +1,28 @@
+# 插件装配清单（spec 1.3-01）
+#
+# 这里是「装哪些插件、以什么顺序、带什么配置」的唯一入口：注掉一行，重启后界面插件树里
+# 就确实没有它。清单只写 id，不写模块路径——主进程是 esbuild 打成单文件的，运行时按路径
+# 动态 import 拿不到实现，实现由 `packages/main/src/registry.ts` 的注册表提供。
+#
+# `dependsOn` 决定挂载顺序；运行期的依赖等待由插件自身的 `inject` 声明负责
+# （依赖缺席时 cordis 把插件留在 PENDING，见 spec 1.3-09）。
+plugins:
+  - id: config
+    config:
+      appName: auto-cc
+
+  - id: logger
+    dependsOn: [config]
+    config:
+      level: info
+      buffer: 500
+      file: auto-cc.log
+
+  - id: store
+    dependsOn: [config]
+    config:
+      file: store.db
+      journal: wal
+
+  - id: shell
+    dependsOn: [logger]

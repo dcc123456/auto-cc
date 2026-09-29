@@ -10,9 +10,14 @@
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
+    "@auto-cc/plugin-config": "workspace:*",
+    "@auto-cc/plugin-kernel": "workspace:*",
+    "@auto-cc/plugin-logger": "workspace:*",
+    "@auto-cc/plugin-store": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "@auto-cc/shell": "workspace:*",
-    "cordis": "4.0.0-rc.10"
+    "cordis": "4.0.0-rc.10",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "electron": "^44.4.5"

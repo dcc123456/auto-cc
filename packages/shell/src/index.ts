@@ -7,8 +7,11 @@ import {
   KERNEL_VIEW_WIDTH_RATIO,
   type BridgeReply,
   type BridgeRequest,
+  type LogLineView,
+  type PluginNodeView,
   type ShellStatus,
 } from '@auto-cc/shared';
+import { z } from 'zod';
 
 /** 仓库根目录（开发态）；打包态由 1.7 换成 resourcesPath。 */
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -22,6 +25,26 @@ const kernelViewPlaceholder =
       '<p style="padding:12px">Embedded kernel view placeholder (WebContentsView)</p></body>',
   );
 
+/** 壳层暂无可选项；strict 让 cordis.yml 里给 shell 写错的键在挂载期就报错。 */
+export const shellSchema = z.strictObject({});
+
+/**
+ * L0 服务的最小读取视图。
+ *
+ * 这里刻意不 import `@auto-cc/plugin-*`：1.4 的 IPC 网关才是跨层读取的正式通道，
+ * 在那之前 shell 只需要「读到状态、渲染出来」，用结构类型足够，也不会把 L1 焊死在 L0 上。
+ */
+interface KernelReader {
+  snapshot(): PluginNodeView[];
+  manifestError?: string;
+}
+
+interface LogReader {
+  tail(limit?: number): LogLineView[];
+  readonly level: string;
+  readonly filePath?: string;
+}
+
 /**
  * L1 壳层服务：窗口、托盘、生命周期、内嵌内核视图，以及渲染层桥接的入站校验。
  *
@@ -30,6 +53,7 @@ const kernelViewPlaceholder =
  */
 export class ShellService extends Service {
   static provide = 'shell';
+  static Config = shellSchema;
 
   private mainWindow: BrowserWindow | undefined;
   private kernelView: WebContentsView | undefined;
@@ -40,11 +64,12 @@ export class ShellService extends Service {
 
   /**
    * 装配入口：注册桥接通道并启动窗口。
-   * @param ctx cordis 上下文
-   * @param name 服务名；缺省与 `static provide` 一致，这样 `ctx.plugin(ShellService)` 可省略参数
+   *
+   * 构造器只接 `ctx`：cordis 挂载 Service 时会把**配置对象**作为第二个实参传进来
+   * （`new callback(ctx, config)`），若沿用 `(ctx, name = 'shell')` 就会把配置当服务名注册。
    */
-  constructor(ctx: Context, name = 'shell') {
-    super(ctx, name);
+  constructor(ctx: Context) {
+    super(ctx, 'shell');
     void this.launch();
   }
 
@@ -117,12 +142,42 @@ export class ShellService extends Service {
     app.on('window-all-closed', () => {});
   }
 
-  /**
-   * 仅开发态可用：用一个不在白名单里的调用名走一遍主进程校验，
+  /** 仅开发态可用：用一个不在白名单里的调用名走一遍主进程校验，
    * 用来在界面上验收 1.2-05（渲染层拿不到的能力，主进程同样拒绝，且给出可读原因）。
    */
   probeIllegalCall = (): Promise<BridgeReply<unknown>> =>
     this.dispatch({ id: 'shell.thisCapabilityDoesNotExist', args: [] } as unknown as BridgeRequest);
+
+  /**
+   * 插件树快照（spec 1.3-01 / 1.3-09 / 1.3-10 的界面证据）。
+   * 内核缺席时返回空树并说明原因，而不是让渲染层拿到一个异常。
+   */
+  getPluginTree = (): { nodes: PluginNodeView[]; manifestError?: string } => {
+    const kernel = this.ctx.get('kernel') as KernelReader | undefined;
+    if (!kernel) return { nodes: [], manifestError: '内核未挂载（cordis.yml 里没有 kernel 实现或被禁用）' };
+    return { nodes: kernel.snapshot(), manifestError: kernel.manifestError };
+  };
+
+  /** 最近 N 条已脱敏日志 + 落盘路径（spec 1.3-04 / 1.3-05 / 1.3-11 的界面证据）。 */
+  getLogTail = (limit = 50): { lines: LogLineView[]; file?: string; level: string } => {
+    const log = this.ctx.get('log') as LogReader | undefined;
+    if (!log) return { lines: [], level: 'none' };
+    return { lines: log.tail(limit), file: log.filePath, level: log.level };
+  };
+
+  /**
+   * 仅开发态可用：写一条带敏感字段的日志，然后立刻回读，
+   * 用来在界面上验收 1.3-11（出口脱敏对结构化字段与自由文本都生效）。
+   */
+  probeRedact = (): { lines: LogLineView[] } => {
+    if (app.isPackaged) throw new Error('probeRedact 只在开发态开放');
+    this.ctx.logger.warn('登录失败 token=abc123 状态 500', {
+      authorization: 'Bearer x.y.z',
+      phone: '13800001111',
+      email: 'zhangsan@qq.com',
+    });
+    return { lines: this.getLogTail(5).lines };
+  };
 
   /** 把一次桥接请求路由到本服务的实例方法；白名单外一律拒绝。 */
   private dispatch = async (request: BridgeRequest): Promise<BridgeReply<unknown>> => {

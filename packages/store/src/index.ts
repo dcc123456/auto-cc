@@ -1,0 +1,102 @@
+/**
+ * `store` 服务（spec 1.3-06 / 1.3-07 / 1.3-08）。
+ *
+ * 数据库用 `node:sqlite`（Electron 44 主进程内实测可用，见
+ * `docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`），因此**没有原生编译依赖**，
+ * 也就不需要 electron-rebuild——这是「用户只下载这一个 app」的前提。
+ */
+import { asApp, Service, type Context } from '@auto-cc/core';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
+import { readVersion, runMigrations, type Migration, type MigrationResult } from './migrate.js';
+
+export const storeSchema = z.strictObject({
+  /** 库文件目录；缺省用 `config.paths().userDataDir`（主进程会覆盖成 `app.getPath('userData')`）。 */
+  dir: z.string().min(1).optional(),
+  file: z.string().min(1).default('store.db'),
+  journal: z.enum(['wal', 'delete']).default('wal'),
+});
+
+/** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
+export type StoreConfig = z.infer<typeof storeSchema>;
+
+export class StoreService extends Service {
+  static provide = 'store';
+  static Config = storeSchema;
+  static inject = ['config'];
+  static envMap = { dir: 'AUTOCC_STORE_DIR' };
+
+  /** cordis 把 `static Config` 校验后的配置作为构造器第二个实参传入，类型也从这里推导出调用点。 */
+  private readonly options: StoreConfig;
+  private database: DatabaseSync | undefined;
+  private lastResult: MigrationResult = { from: 0, to: 0, applied: [] };
+
+  /** 迁移清单：P1 阶段为空，1.9 的 `usage.ledger` 由业务插件 push 进来后再 `upgrade()`。 */
+  readonly migrations: Migration[] = [];
+
+  constructor(ctx: Context, options: StoreConfig) {
+    super(ctx, 'store');
+    this.options = options;
+  }
+
+  get db(): DatabaseSync {
+    if (!this.database) throw new Error('store 尚未完成挂载');
+    return this.database;
+  }
+
+  get isOpen(): boolean {
+    return this.database !== undefined;
+  }
+
+  /** 当前 schema 版本（`PRAGMA user_version`，spec 1.3-07）。 */
+  get version(): number {
+    return readVersion(this.db);
+  }
+
+  get migrationResult(): MigrationResult {
+    return this.lastResult;
+  }
+
+  /** 驱动与版本信息，供 1.3-06 的「主进程日志打印 sqlite 驱动与版本」断言。 */
+  driverInfo(): string {
+    const row = this.db.prepare('select sqlite_version() as v').get() as { v?: string };
+    return `node:sqlite / sqlite ${row?.v ?? 'unknown'}`;
+  }
+
+  /** 执行未应用的迁移；重复调用是安全的（版本已到的一律跳过）。 */
+  upgrade(): MigrationResult {
+    this.lastResult = runMigrations(this.db, this.migrations);
+    return this.lastResult;
+  }
+
+  [Service.init](): void {
+    const dir = this.options.dir ?? asApp(this.ctx).config.paths().userDataDir;
+    mkdirSync(dir, { recursive: true });
+    const db = new DatabaseSync(join(dir, this.options.file));
+    db.exec(`PRAGMA journal_mode = ${this.options.journal}`);
+    this.database = db;
+    // 连接由 effect 回收：依赖失效、restart、退出都走这里，只 close 不删文件。
+    // 注意 `ctx.effect(fn)` 会**立刻执行 fn 拿回收器**，所以必须是「返回函数」的函数，
+    // 写成单层箭头就是刚挂载就把连接关掉了。
+    this.ctx.effect(
+      () => () => {
+        db.close();
+        if (this.database === db) this.database = undefined;
+      },
+      'store.db',
+    );
+
+    const result = this.upgrade();
+    this.ctx.logger.info(
+      `store 就绪：${join(dir, this.options.file)}｜${this.driverInfo()}｜schema ${String(result.from)}→${String(result.to)}`,
+    );
+  }
+}
+
+declare module '@auto-cc/core' {
+  interface AppServices {
+    store: StoreService;
+  }
+}
