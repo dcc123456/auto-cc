@@ -1,0 +1,9 @@
+1.11-10 切到 en 后无缺 key（tmp/11-i18n-check.js 实读页面）：
+  heading="Chat"  autonomyWords=["Suggest","Semi-auto","Full-auto"]  current="Suggest"
+  placeholder="What do you want to do? Enter sends, Shift+Enter adds a line"
+  chatMirror="Same runner: paused"
+  unresolvedPlaceholders=[]（没有 {{...}} 漏到界面）
+  keyLeaks=[]（没有 chat.* / agent.* / shell.* 原样画出来）
+机检：pnpm lint → ✔ 渲染层规范检查通过（2 个语言包，12 个源文件）——两侧 key 完全对齐，
+      且代码里每个 t('...') 的字面 key 都存在、每个 {{占位符}} 都有实参。
+附带修掉的缺陷：切语言后 <html lang> 仍写死 zh-CN，现由 i18n 单一入口同步（en → lang="en"）。

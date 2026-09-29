@@ -1,0 +1,20 @@
+1.10-01 补拍（1.11 收口时执行）：chat → 工作流 → chat 真实往返，CDP 10222 / url 127.0.0.1:5173
+
+会话里有 2 条消息（用户 739 字 + 助手 834 字），消息流因此真正可滚：
+  [data-testid="chat-scroll"]  scrollHeight=647  clientHeight=389  max=258
+（外层 [data-view-scroll="chat"] 的 scrollHeight 与 clientHeight 都停在 673 ——
+  里面那个 section 是 h-full，永不溢出；滚动位置实际挂在 ChatPanel 内层这一节，
+  首拍时读错了节点，读数记在这里以免后来的人再踩。）
+
+采样：置 scrollTop=142 → visibleViews=["chat"]
+  → 点导航「工作流」→ 拍 tmp/10-11-wf.png
+  → 点导航「对话」→ 重读 scrollTop=142（未被重置，也没被 ChatPanel 的自动贴底 effect 抢走，
+     该 effect 只订 [snapshot, liveStream]，切视图不触发）
+  → visibleViews 两次都只有 ["chat"]（另一视图是 display 切换，不卸载）
+
+像素：harness diff --base tmp/10-11-before.png --head tmp/10-11-after.png
+  diffPixels=0 / totalPixels=1967574 / ratio=0 / isIdentical=true / exit 0
+
+结论：一次点击可达（导航「工作流」与「对话」各一次点击，无中间页）＋ 保留上次滚动位置，
+两半判据都在**对话界面本身**上测得。原 1.10 收口时用诊断视图代拍，只算滚动那一半过了，
+判据里写的往返路径没走到，所以那两条记 [!]；本轮用 chat 重跑后置 [x]。

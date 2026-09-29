@@ -1,0 +1,8 @@
+1.11-09 P1 对话链路调不到任何外发能力（打招呼 / 投递 / 发送简历）
+
+live 原始返回（tmp/11-registry2.js）：
+  agent.tools.call('boss.greet', { note: '打招呼' }) →
+    { ok: true, value: { ok: false, code: 'TOOL_NOT_REGISTERED',
+      message: '工具 boss.greet 未注册（P1 的 agent 工具面是空表）' } }
+界面侧：/tool 开头的那条消息渲染成失败态卡片（1.11-06 截图），错误文本即 TOOL_NOT_REGISTERED。
+静态侧：packages/agent/src 里没有任何 platform.*/resume.*/outbound/entitlement 的 import（1.11-14 审计）。

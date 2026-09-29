@@ -1,0 +1,29 @@
+{
+ "sessions": [
+  {
+   "id": "ebd81d70-9b15-420d-95d5-f8521c5763c5",
+   "autonomy": "auto",
+   "created_at": 1790696751107
+  },
+  {
+   "id": "b91e3ea7-1eb1-4a7a-bd11-5db3e1b24c68",
+   "autonomy": "suggest",
+   "created_at": 1790698038820
+  }
+ ],
+ "messageCounts": [
+  {
+   "session_id": "ebd81d70-9b15-420d-95d5-f8521c5763c5",
+   "n": 8
+  }
+ ],
+ "userVersion": {
+  "user_version": 2
+ }
+}
+
+1.11-08 读法：node --input-type=module + node:sqlite，readOnly:true 打开
+  %APPDATA%/auto-cc/store.db（应用仍在运行，WAL 允许并发只读）
+结论：重启后旧会话 ebd81d70（autonomy=auto，非默认档）与它的 8 行消息原样还在；
+  「新建会话」写出的 b91e3ea7 是独立的一行，chat_message 里没有任何一行挂在它下面，
+  旧会话的行数没有变化 → 新建会话不影响旧会话。user_version=2（chat 两张表的号段，见 plan §8.4 决策 6）。

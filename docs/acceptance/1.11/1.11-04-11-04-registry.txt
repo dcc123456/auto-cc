@@ -1,0 +1,9 @@
+1.11-04 agent.tools 是空表且只在白名单里（不含业务实现）
+
+live（pnpm harness eval --url 127.0.0.1:5173，tmp/11-registry.js）：
+  toolsListOk=true  registeredCount=0  registeredIds=[]
+
+单测（pnpm --filter @auto-cc/plugin-agent test → 19 passed）：
+  agent.tools 注册表 > 列举空表 / 调用未注册工具返回 TOOL_NOT_REGISTERED 等
+
+装配（cordis.yml:97-98）：`- id: agent / dependsOn: [ipc]`，没有任何 platform/resume/outbound 依赖。

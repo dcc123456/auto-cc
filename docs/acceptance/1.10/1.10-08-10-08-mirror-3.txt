@@ -1,0 +1,15 @@
+1.10-08 两个视图镜像同一个 runner（CDP 10222，一次采样同时读两侧 DOM + 桥接读数）
+表达式 tmp/10-pause-sample.js：start → 1.3s 后 pause → 读三处
+
+  bridgeRunId    "5d48d8e5"        ← window.autoCC.workflow['runner.current']()
+  panelRunId     "5d48d8e5"        ← [data-testid="workflow-run-id"]
+  bridgeStatus   "paused"
+  panelState     "已暂停 · 5d48d8e5-f7a2-44ec-a714-b7ceabcb21d8"
+  chatMirror     "同一个 runner：已暂停"  ← 聊天面板头部徽章（该视图当时是 hidden 的，仍收到推送）
+  bridgeSteps    search:done,profile:done,pitch:pending,greet:pending,tune:pending,deliver:pending
+  panelSteps     search:done,profile:done,pitch:pending,greet:pending,tune:pending,deliver:pending
+
+运行中（未暂停）的同形采样：bridgeStatus=running、panelSteps 与 bridgeSteps 逐位相同
+（pitch:running，其余 done/pending），chatMirror="同一个 runner：运行中"。
+两处读数都来自同一个 hook（packages/renderer/src/useWorkflowRun.ts：订阅 workflow/progress +
+挂载时 runner.current()），WorkflowPanel 与 ChatPanel 各调一次，没有第二份状态。

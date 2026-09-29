@@ -1,0 +1,6 @@
+1.11-02 三块最小结构（截图 tmp/11-02-input-filled.png / tmp/11-13-typing-while-running.png）：
+  消息流   [data-testid="chat-messages"] + 每条 [data-message-id][data-message-role]
+  输入区   [data-testid="chat-input"]（textarea）+ [data-action="send"]
+           回车发送、Shift+Enter 换行在 ChatPanel 的 onKeyDown 里（packages/renderer/src/ChatPanel.tsx）
+  运行中   [data-testid="chat-running"]（LoaderCircle 旋转）+ [data-testid="chat-streaming-message"]
+           实测在流式期间 runningIndicator=true，按「停止」后为 false

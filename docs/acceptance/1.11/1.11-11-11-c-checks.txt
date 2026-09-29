@@ -1,0 +1,23 @@
+### 1.11-11 pnpm lint
+
+> auto-cc@0.1.0 lint D:\works\deep-seek-workspace\auto-cc
+> eslint . && tsx scripts/check-renderer-conventions.ts
+
+✔ 渲染层规范检查通过（2 个语言包，12 个源文件）
+
+### 1.11-14 agent 包的跨层 import 审计
+  packages/agent/src/index.ts:10:export { AgentToolsService, agentToolsConfigSchema } from './tools.js';
+  packages/agent/src/index.ts:11:export type { AgentTool } from './tools.js';
+  packages/agent/src/index.ts:12:export { CHAT_MIGRATION_VERSION, ChatSessionService, chatConfigSchema } from './session.js';
+  packages/agent/src/index.ts:13:export type { ChatConfig } from './session.js';
+  packages/agent/src/session.ts:24:} from '@auto-cc/core';
+  packages/agent/src/session.ts:25:import type { StoreService } from '@auto-cc/plugin-store';
+  packages/agent/src/session.ts:26:import { randomUUID } from 'node:crypto';
+  packages/agent/src/session.ts:27:import type { DatabaseSync } from 'node:sqlite';
+  packages/agent/src/session.ts:28:import { z } from 'zod';
+  packages/agent/src/session.ts:29:import type { AgentToolsService } from './tools.js';
+  packages/agent/src/tools.ts:19:} from '@auto-cc/core';
+  packages/agent/src/tools.ts:20:import { z, type ZodType } from 'zod';
+
+--- 是否出现 platform/resume/outbound/entitlement/browser ---
+  packages/agent/src/index.ts:4: * 两个服务、两个清单 id（与 1.9 的 `usage` / `entitlement` 同形，可被单独摘掉）：

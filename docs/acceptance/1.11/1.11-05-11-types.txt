@@ -1,0 +1,29 @@
+### 1.11-05 / 1.11-15 协议字段（带行号）
+--- ToolDescriptorView / AgentTool（effect + requiresConfirmation）---
+packages/core/src/events.ts:151:  toolCallId: string;
+packages/core/src/events.ts:224:  effect: ToolEffect;
+packages/core/src/events.ts:225:  requiresConfirmation: boolean;
+packages/core/src/events.ts:234:export type ToolCallReply =
+packages/agent/src/tools.ts:9: * 与主流协议的关系见 plan §8.6：`input` 用 zod（与全仓一致），`effect` / `requiresConfirmation`
+packages/agent/src/tools.ts:16:  type ToolCallReply,
+packages/agent/src/tools.ts:26: * 副作用分级（`ToolEffect`）、元数据视图（`ToolDescriptorView`）与结果联合（`ToolCallReply`）
+packages/agent/src/tools.ts:37:  readonly effect: ToolEffect;
+packages/agent/src/tools.ts:42:  readonly requiresConfirmation: boolean;
+packages/agent/src/tools.ts:59:  effect: ToolEffect;
+packages/agent/src/tools.ts:60:  requiresConfirmation: boolean;
+packages/agent/src/tools.ts:102:      effect: tool.effect,
+packages/agent/src/tools.ts:103:      requiresConfirmation: tool.requiresConfirmation,
+packages/agent/src/tools.ts:126:      effect: tool.effect,
+packages/agent/src/tools.ts:127:      requiresConfirmation: tool.requiresConfirmation,
+packages/agent/src/tools.ts:138:  async call(toolId: string, rawInput: unknown, signal?: AbortSignal): Promise<ToolCallReply> {
+--- ChatPart 判别联合 + parts[].state ---
+135:export type ChatToolPartState = 'running' | 'done' | 'failed';
+138:export type ChatTextPart = { kind: 'text'; text: string };
+148:export type ChatToolPart = {
+149:  kind: 'tool';
+154:  state: ChatToolPartState;
+164:export type ChatPart = ChatTextPart | ChatToolPart;
+--- chat/delta 事件三处登记 ---
+packages/core/src/events.ts:267:    'chat/delta'(event: ChatDeltaEvent): void;
+packages/shared/src/bridge.ts:434:  'chat/delta',
+packages/shared/src/bridge.ts:445:  'chat/delta': ChatDeltaEvent;

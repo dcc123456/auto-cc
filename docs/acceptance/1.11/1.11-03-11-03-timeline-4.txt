@@ -1,0 +1,11 @@
+1.11-03 流式增量：同一条助手消息在页面上的可见字数（CDP 10222 / url 127.0.0.1:5173）
+采样表达式 tmp/11-len.js，输入 1760 字 → 回复约 1850 字，chunk 6 字 / 120ms
+
+16:00:00.390  streamingChars=720   runningIndicator=true   → tmp/11-03-t1.png
+16:00:02.714  streamingChars=828   runningIndicator=true   → tmp/11-03-t2.png
+16:00:05.003  streamingChars=930   runningIndicator=true   → tmp/11-03-t3.png
+16:00:17.059  streamingChars=1494  runningIndicator=true  inputChars=3（「停一下」已输入）→ tmp/11-13-typing-while-running.png
+16:00:19.133  streamingChars=null  runningIndicator=false （按「停止」之后）
+
+结论：字数在 720→828→930→1494 单调递增，且 [data-testid="chat-streaming-message"] 一直存在，
+      界面不是整块跳出；停止后流式气泡消失（部分回复照常落库，见下）。

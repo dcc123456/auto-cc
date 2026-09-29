@@ -1,0 +1,12 @@
+1.11-01 冷启动首屏即聊天（两次真实重启，都是 taskkill 掉旧 dev 树后 `pnpm dev` 重新拉起主进程）
+
+第一次重启（旧会话里有 8 条消息、档位是被改成过的 auto）：
+  visible=["chat"]  sessionId=ebd81d70-9b15-420d-95d5-f8521c5763c5  autonomy=auto
+  dbMessageCount=8  domBubbles=8  autonomyCaption="全自动"
+  workflowMirror="同一个 runner：未开始"（runner 是内存态，重启后归零，符合 1.10 设计）
+第二次重启（当前会话是新建的空会话）：
+  visible=["chat"]  sessionId=b91e3ea7-1eb1-4a7a-bd11-5db3e1b24c68  autonomy=suggest
+  dbMessageCount=0  domBubbles=0  autonomyCaption="建议模式"  htmlLang=zh-CN
+两次首屏都只有 [data-view-scroll="chat"] 没被 hidden —— 不是设置页、不是功能目录、不是工作流面板。
+截图 11-01-cold-start.png 是第二次；第一次那张最初截成了纯色帧（窗口还没出第一帧，文件只有 8KB），
+已按「等到文本出现再截 + 校验体积」重取，这条也记在这里以免被误读成凑数。

@@ -476,26 +476,33 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 | ID      | 验收标准                                                                                                                                                   | 方式 | 验证操作                                                                              | 状态 |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------- | ---- |
-| 1.10-01 | 工作流面板作为**第二视图**存在，从对话主界面一次点击即可切换到达，且保留上次滚动位置                                                                       | V    | chat → 面板 → chat 往返截图                                                           | [!]  |
+| 1.10-01 | 工作流面板作为**第二视图**存在，从对话主界面一次点击即可切换到达，且保留上次滚动位置                                                                       | V    | chat → 面板 → chat 往返截图                                                           | [x]  |
 | 1.10-02 | 面板呈现六个主线步骤槽位（搜索/建档/话术/打招呼/定制简历/投递）                                                                                            | V    | 截图并逐个读出步骤名                                                                  | [x]  |
 | 1.10-03 | 存在 `workflow.runner` 挂载点与状态机骨架（idle/running/paused/failed/done 可迁移）                                                                        | U+C  | 空 runner 走完一轮状态迁移                                                            | [x]  |
 | 1.10-04 | 「运行」在 P1 可跑一个占位工作流（无业务），但界面进度是真实的流式更新                                                                                     | V    | 点运行 → 连续截图看到进度推进                                                         | [x]  |
 | 1.10-05 | 可中断、可从当前步续跑（不从头再来）                                                                                                                       | V    | 运行中暂停 → 恢复 → 截图确认步骤号继续                                                | [x]  |
 | 1.10-06 | 每个步骤槽位能显示状态与耗时；失败步可单独重试                                                                                                             | V    | 注入失败步 → 截图 → 点重试 → 成功                                                     | [x]  |
 | 1.10-07 | 调试面板与插件树是**次级入口**，层级低于对话与工作流                                                                                                       | V    | 截图导航层级                                                                          | [x]  |
-| 1.10-08 | 面板与 1.11 的对话界面驱动**同一个** `workflow.runner` 实例，不各自持有运行状态                                                                            | C+U  | 静态查引用 + 断言两侧状态镜像一致                                                     | [!]  |
+| 1.10-08 | 面板与 1.11 的对话界面驱动**同一个** `workflow.runner` 实例，不各自持有运行状态                                                                            | C+U  | 静态查引用 + 断言两侧状态镜像一致                                                     | [x]  |
 | 1.10-09 | 反向验证（AGENTS.md §6.5）：**不引入 XState / 不引入任何状态机库**没有造成 P1 能力缺口——六步线性流水线的全部迁移都可由自研迁移表表达，且非法迁移被拒而不崩 | U+C  | 迁移表单测穷举合法/非法迁移；`grep xstate package.json pnpm-lock.yaml` 确认零新增依赖 | [x]  |
 
-**1.10 收尾结论**（证据在 `docs/acceptance/1.10/`，17 个文件：12 张 CDP 截图 + 5 份机读文本；
+**1.10 收尾结论**（证据在 `docs/acceptance/1.10/`，23 个文件：18 张 CDP 截图 + 5 份机读文本；
+其中 6 个文件是 1.11 收口时补拍的往返/镜像证据，见下面两条；
 全程走 CDP **10222** 驱动真实窗口，占位步骤不含任何网络请求，未触碰真实招聘平台，见 AGENTS.md §7.2）：
 
-- **1.10-01 `[!]`**：滚动位置与一次点击可达两半都过了——诊断视图滚到底
+- **1.10-01 `[x]`（1.11 收口时补拍才过）**：滚动位置与一次点击可达两半都过了——诊断视图滚到底
   （`scrollTop = 2067.333251953125`）→ 切到工作流 → 再切回来，读数一字不差，
   两张截图 `harness diff` 得 `diffPixels: 0 / isIdentical: true`
   （`1.10-01-scroll-before.png`、`1.10-01-scroll-after-return.png`）。
   实现方式是两个视图各自成一个 `[data-view-scroll]` 滚动容器、切换只改 `display` 不卸载。
-  **但 spec 写的判据是「chat → 面板 → chat 往返」**，对话界面要到 1.11 才存在，
-  所以这条只能记 `[!]`：1.11 收口时必须用 chat ↔ 工作流的真实往返重拍一遍，而不是现在拿诊断视图顶替。
+  但 spec 写的判据是「chat → 面板 → chat 往返」，对话界面要到 1.11 才存在，所以本轮先记 `[!]`；
+  1.11 收口时用**真实对话界面**重跑了一遍才置 `[x]`：会话里两条长消息（739 + 834 字）把
+  `[data-testid="chat-scroll"]` 撑到 `scrollHeight 647 / clientHeight 389`，置 `scrollTop = 142`
+  → 点「工作流」→ 点「对话」→ 仍是 142，往返两张截图 `diffPixels = 0 / totalPixels = 1967574 /
+isIdentical: true`（`1.10-01-10-11-before-1.png`、`1.10-01-10-11-wf-2.png`、
+  `1.10-01-10-11-after-3.png`、读数与一次读错节点的坑记在 `1.10-01-10-11-roundtrip-4.txt`）。
+  顺带确认：切视图**不会**触发 `ChatPanel` 的自动贴底 effect（它只订 `[snapshot, liveStream]`），
+  所以用户往上翻历史时被弹回底部这件事，在切视图这条路径上不存在。
 - **1.10-02**：挂载即有六个槽位，逐个可读（`1 · 搜索合适的 JD`…`6 · 发送简历`），
   全部「待执行」且状态徽标是 `未开始 · <runId>`（`1.10-02-slots-idle.png`）。
   这一条在实现上改过一版：原先 `current()` 在没有跑过时返回 `null`，界面首轮什么都画不出来，
@@ -526,9 +533,18 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 - **1.10-07**：导航两档——主视图是带边框的 `text-xs text-slate-100`，诊断入口是
   `text-[11px] text-slate-500` + 一条左分隔线，两种选中态下都低一档
   （`1.10-07-nav-workflow-view.png`、`1.10-07-nav-diagnostics-view.png`）。
-- **1.10-08 `[!]`**：静态那一半已固化（`1.10-08-single-runner.txt`）：provider 1 处、
-  渲染层 `useState<WorkflowRunView>` 1 处、五个动作口全在白名单里，界面没有任何本地推进逻辑。
-  **「两侧镜像一致」这一半要等 1.11 的对话界面存在才能测**，不拿「只有一个视图」冒充通过。
+- **1.10-08 `[x]`（同上，1.11 收口时补齐后半句）**：静态那一半已固化（`1.10-08-single-runner.txt`）：
+  provider 1 处、渲染层 `useState<WorkflowRunView>` 1 处、五个动作口全在白名单里，界面没有任何本地推进逻辑。
+  「两侧镜像一致」这一半等对话界面存在后测：一次采样同时读三处
+  （`start` → 1.3s 后 `pause`，表达式与读数在 `1.10-08-10-08-mirror-3.txt`）——
+  `bridgeRunId = panelRunId = 5d48d8e5…`、`bridgeStatus = paused`、
+  `panelState = 已暂停 · 5d48d8e5-…`、`chatMirror = 同一个 runner：已暂停`，
+  六步向量 `search:done,profile:done,pitch:pending,greet:pending,tune:pending,deliver:pending`
+  在 bridge / panel 两侧逐位相同；运行中（未暂停）的同形采样也逐位相同（`pitch:running`）。
+  聊天视图当时是 `hidden` 的那一侧照样收到 `workflow/progress` 并更新了徽章，
+  证明它不是"切过去才拉一次"的第二份状态。两侧共用 `packages/renderer/src/useWorkflowRun.ts`
+  （订阅 `workflow/progress` + 挂载时 `runner.current()`），`WorkflowPanel` 与 `ChatPanel` 各调一次；
+  像素侧 `1.10-08-10-08-1-chat-mirror-paused-1.png` 与 `1.10-08-10-08-2-workflow-paused-2.png` 是同一 run。
 - **1.10-09**：`grep -rn "xstate" package.json pnpm-lock.yaml packages/*/package.json` 无输出、exit=1，
   状态机是 `packages/workflow/src/machine.ts` 的 132 行纯函数；非法迁移 10 条矩阵断言
   「返回 reason、不抛异常、不就地改动入参」。被否决路线的代价与再评估条件写在
@@ -549,21 +565,96 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 | ID      | 验收标准                                                                                                                                                                                                           | 方式 | 验证操作                                                        | 状态 |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- | --------------------------------------------------------------- | ---- |
-| 1.11-01 | app 冷启动**首屏即聊天窗口**，不是设置页、功能目录页或工作流面板                                                                                                                                                   | V    | 冷启动截图                                                      | [ ]  |
-| 1.11-02 | 聊天界面具备三块最小结构：消息流、输入区（可回车发送/Shift+Enter 换行）、运行中指示                                                                                                                                | V    | 发一条消息 → 截图三块区域                                       | [ ]  |
-| 1.11-03 | 消息流区分用户/助手两类气泡，助手回复**流式增量**渲染而非整块跳出                                                                                                                                                  | V    | 长回复过程中连续截图，可见字数递增                              | [ ]  |
-| 1.11-04 | 存在 `agent.tools` 注册表且 P1 为**空表**；注册表是 service 白名单，不含任何业务实现                                                                                                                               | C+U  | 单测：注册空工具 → 列举 → 调用不存在工具被拒                    | [ ]  |
-| 1.11-05 | 工具调用协议定型（`toolId` + zod 入参 schema + 结果/错误联合类型），P5 只注册工具不改协议                                                                                                                          | C    | 读 `agent.tools` 类型定义并断言 schema 校验生效                 | [ ]  |
-| 1.11-06 | 工具卡片以**占位组件**形式渲染（标题/参数摘要/状态），图标取自 lucide-react                                                                                                                                        | V    | 触发占位调用 → 截图卡片                                         | [ ]  |
-| 1.11-07 | 自治档位（建议/半自动/全自动）在界面上可见可切换，P1 仅存档位、不产生行为差异                                                                                                                                      | V    | 切换三档 → 三张截图显示当前档位文案                             | [ ]  |
-| 1.11-08 | 会话持久化：重启 app 后历史消息与档位保留；新建会话不影响旧会话                                                                                                                                                    | V    | 发消息 → 重启 → 截图仍在 → 新建会话 → 截图为空                  | [ ]  |
-| 1.11-09 | P1 的对话链路**不得**触达任何外发能力（打招呼/投递/发送简历），调不到的工具即报错                                                                                                                                  | U    | 断言在 P1 调用外发类工具返回「未注册」                          | [ ]  |
-| 1.11-10 | 聊天界面全部文案走 i18n（`chat.*` / `agent.*`），`zh-CN` 与 `en` 同时齐全，切换后无缺 key                                                                                                                          | C+V  | 切到 en → 截图；缺翻译校验脚本通过                              | [ ]  |
-| 1.11-11 | 样式仅 Tailwind、图标仅 lucide-react，无裸 JSX 中文文案，通过 eslint 机检                                                                                                                                          | C    | `pnpm lint` 在 renderer 包零告警                                | [ ]  |
-| 1.11-12 | 渲染层经 `window.autoCC` 白名单访问主进程，未开 `nodeIntegration`，`contextIsolation` 为 true                                                                                                                      | C+U  | 复用 1.2-04 类断言                                              | [ ]  |
-| 1.11-13 | 输入区在 agent 运行中仍可用（可输入"停一下"），不因执行阻塞而冻结界面                                                                                                                                              | V    | 运行占位任务时输入并截图显示已接受                              | [ ]  |
-| 1.11-14 | 骨架不含任何抓取/发送/简历业务逻辑，P2~P4 能力只能作为工具注册进来                                                                                                                                                 | C    | 静态检查：`agent.*` 模块无 import `platform.*`/`resume.*`       | [ ]  |
-| 1.11-15 | 反向验证：否决 `@ai-sdk/react`（plan §8.6）未造成能力缺口——流式增量、工具卡片状态、批准前执行三件事在自研协议里各有承载位（`chat/delta` 事件、`parts[].state`、`requiresConfirmation`），P5 换真模型时不改界面结构 | C    | 读消息模型与 `agent.tools` 类型定义，逐条指出这三个字段确实存在 | [ ]  |
+| 1.11-01 | app 冷启动**首屏即聊天窗口**，不是设置页、功能目录页或工作流面板                                                                                                                                                   | V    | 冷启动截图                                                      | [x]  |
+| 1.11-02 | 聊天界面具备三块最小结构：消息流、输入区（可回车发送/Shift+Enter 换行）、运行中指示                                                                                                                                | V    | 发一条消息 → 截图三块区域                                       | [x]  |
+| 1.11-03 | 消息流区分用户/助手两类气泡，助手回复**流式增量**渲染而非整块跳出                                                                                                                                                  | V    | 长回复过程中连续截图，可见字数递增                              | [x]  |
+| 1.11-04 | 存在 `agent.tools` 注册表且 P1 为**空表**；注册表是 service 白名单，不含任何业务实现                                                                                                                               | C+U  | 单测：注册空工具 → 列举 → 调用不存在工具被拒                    | [x]  |
+| 1.11-05 | 工具调用协议定型（`toolId` + zod 入参 schema + 结果/错误联合类型），P5 只注册工具不改协议                                                                                                                          | C    | 读 `agent.tools` 类型定义并断言 schema 校验生效                 | [x]  |
+| 1.11-06 | 工具卡片以**占位组件**形式渲染（标题/参数摘要/状态），图标取自 lucide-react                                                                                                                                        | V    | 触发占位调用 → 截图卡片                                         | [x]  |
+| 1.11-07 | 自治档位（建议/半自动/全自动）在界面上可见可切换，P1 仅存档位、不产生行为差异                                                                                                                                      | V    | 切换三档 → 三张截图显示当前档位文案                             | [x]  |
+| 1.11-08 | 会话持久化：重启 app 后历史消息与档位保留；新建会话不影响旧会话                                                                                                                                                    | V    | 发消息 → 重启 → 截图仍在 → 新建会话 → 截图为空                  | [x]  |
+| 1.11-09 | P1 的对话链路**不得**触达任何外发能力（打招呼/投递/发送简历），调不到的工具即报错                                                                                                                                  | U    | 断言在 P1 调用外发类工具返回「未注册」                          | [x]  |
+| 1.11-10 | 聊天界面全部文案走 i18n（`chat.*` / `agent.*`），`zh-CN` 与 `en` 同时齐全，切换后无缺 key                                                                                                                          | C+V  | 切到 en → 截图；缺翻译校验脚本通过                              | [x]  |
+| 1.11-11 | 样式仅 Tailwind、图标仅 lucide-react，无裸 JSX 中文文案，通过 eslint 机检                                                                                                                                          | C    | `pnpm lint` 在 renderer 包零告警                                | [x]  |
+| 1.11-12 | 渲染层经 `window.autoCC` 白名单访问主进程，未开 `nodeIntegration`，`contextIsolation` 为 true                                                                                                                      | C+U  | 复用 1.2-04 类断言                                              | [x]  |
+| 1.11-13 | 输入区在 agent 运行中仍可用（可输入"停一下"），不因执行阻塞而冻结界面                                                                                                                                              | V    | 运行占位任务时输入并截图显示已接受                              | [x]  |
+| 1.11-14 | 骨架不含任何抓取/发送/简历业务逻辑，P2~P4 能力只能作为工具注册进来                                                                                                                                                 | C    | 静态检查：`agent.*` 模块无 import `platform.*`/`resume.*`       | [x]  |
+| 1.11-15 | 反向验证：否决 `@ai-sdk/react`（plan §8.6）未造成能力缺口——流式增量、工具卡片状态、批准前执行三件事在自研协议里各有承载位（`chat/delta` 事件、`parts[].state`、`requiresConfirmation`），P5 换真模型时不改界面结构 | C    | 读消息模型与 `agent.tools` 类型定义，逐条指出这三个字段确实存在 | [x]  |
+
+**1.11 收尾结论**（证据在 `docs/acceptance/1.11/`，24 个文件：12 张 CDP 截图 + 12 份机读文本；
+全程走 CDP **10222** 驱动真实窗口。助手回复是主进程里的确定性模板、工具卡片走 `/tool` 前缀的本地短路，
+**零网络请求**，未触碰真实招聘平台，见 AGENTS.md §7.2）：
+
+- **1.11-01**：冷启动首屏只有 `[data-view-scroll="chat"]` 可见（`visibleViews=["chat"]`），
+  两次真实重启（`taskkill` 掉旧 dev 树 → `pnpm dev` 重新拉起主进程）都是聊天，
+  不是设置页/功能目录/工作流面板。第一次落在旧会话（`ebd81d70`，8 条消息、档位 `auto`），
+  第二次落在新建空会话（`b91e3ea7`，0 条）——两张都是聊天。
+  **一次凑数风险如实记在这里**：首张截图截在第一次绘制之前（纯色帧，文件只有 8 KB），
+  已改成「先 `harness wait --text 对话` 再截、并校验体积 >50 KB」重取（`1.11-01-11-01-cold-start-2.txt`）。
+- **1.11-02**：三块各有稳定抓手——消息流 `[data-testid="chat-messages"]` + 每条
+  `[data-message-id][data-message-role]`；输入区 `[data-testid="chat-input"]`（textarea）+
+  `[data-action="send"]`，回车发送 / Shift+Enter 换行在 `ChatPanel.onKeyDown` 里；
+  运行中指示 `[data-testid="chat-running"]` + `[data-testid="chat-streaming-message"]`
+  （`1.11-02-11-02-structure-2.txt`）。验收中途补了一个 `[data-testid="chat-scroll"]`：
+  真正会滚的是消息流外面那层 `overflow-y-auto`，外层 `[data-view-scroll]` 因为 section 是 `h-full`
+  永不溢出——首拍读错了节点、把「不能滚」当成了缺陷，补 testid 是为了让这条路可被再次点名。
+- **1.11-03**：同一条助手消息的可见字数单调递增 **720 → 828 → 930 → 1494**
+  （输入 1760 字，分片 6 字 / 120ms；采样表达式与时间戳在 `1.11-03-11-03-timeline-4.txt`），
+  三张连拍 `1.11-03-11-03-t{1,2,3}-*.png` 里第二张的句子停在「…验证片段」中间，
+  不是整块跳出；`[data-testid="chat-streaming-message"]` 全程存在，按「停止」后为 `null`、
+  部分回复照常落库。
+- **1.11-04**：live 读数 `toolsListOk=true / registeredCount=0 / registeredIds=[]`
+  （`1.11-04-11-04-registry.txt`）；装配上 `cordis.yml:97-98` 的 `agent` 只 `dependsOn: [ipc]`，
+  注册表是纯白名单、不含业务实现。
+- **1.11-05**：协议字段带行号点名（`1.11-05-11-types.txt`）——`packages/core/src/events.ts:224`
+  `effect: ToolEffect`、`:225` `requiresConfirmation: boolean`、`:234` `ToolCallReply` 联合，
+  `packages/agent/src/tools.ts:138` `call(toolId, rawInput, signal)` 用 zod 校验入参。
+- **1.11-06**：`/tool` 前缀触发一次调用，卡片画出标题、`toolId`、参数摘要、状态、1 毫秒耗时与错误原文
+  （`1.11-06-11-06-tool-card.png`，失败态 `border-rose-900`），图标是 `Wrench`（lucide）。
+  **抓到一条 envelope 语义**：`agent.tools.call` 的返回是
+  `{ok:true, value:{ok:false, code:'TOOL_NOT_REGISTERED', …}}`——Bridge 信封把工具结果联合包了一层，
+  探针按 `greet.error.code` 读是 null，必须读 `value`。首拍因此差点误判成"没有结构化错误码"。
+- **1.11-07**：三档逐个点过去，`[data-testid="chat-autonomy-current"]` 的文案跟变成
+  建议模式 / 半自动 / 全自动（三张截图 `1.11-07-11-07-autonomy-{suggest,semi,auto}-*.png`），
+  P1 只存档位不改行为——行为差异是 P5 的事。
+- **1.11-08**：真重启后 `ebd81d70` 与它的 8 条消息、非默认档位 `auto` 都还在（DOM 侧 `domBubbles=8`），
+  点「新建会话」切到 `b91e3ea7` 是 0 条；用 `node:sqlite` **只读**打开
+  `%APPDATA%/auto-cc/store.db` 复核：两条 session 行、`chat_message` 只有 `ebd81d70` 挂 8 行、
+  `PRAGMA user_version = 2`（`1.11-08-11-08-sqlite-2.txt`）。新建会话没有动旧会话的行数。
+- **1.11-09**：`tools.call('boss.greet', …)` 返回
+  `{ok:false, code:'TOOL_NOT_REGISTERED', message:'工具 boss.greet 未注册（P1 的 agent 工具面是空表）'}`
+  （原始返回在 `1.11-09-11-09-outbound-unreachable.txt`）；单测同断言。P1 的对话链路调不到外发能力。
+- **1.11-10**：切到 en 后 `unresolvedPlaceholders=[]`、`keyLeaks=[]`，页面上
+  `heading="Chat"`、三档 `["Suggest","Semi-auto","Full-auto"]`、徽章 `Same runner: paused`
+  （`1.11-10-11-10-i18n-2.txt` + `1.11-10-11-10-en-1.png`）。
+  **这一条抓到一个真缺陷**：`index.html` 里的 `<html lang>` 写死 `zh-CN`，而实际语种由
+  `detectLanguage()` 决定、切语言也不动它——读屏软件与翻译插件都以这个属性判断页面语种。
+  已修在 `packages/renderer/src/i18n.ts`（初始化后同步 + 订阅 `languageChanged`），
+  实测 `en` 下 `lang="en"`、切回 `zh-CN` 也跟着回。
+- **1.11-11 / 1.11-14**：`pnpm lint` 零告警且 `✔ 渲染层规范检查通过（2 个语言包，12 个源文件）`
+  （Tailwind-only / lucide-only / 裸文案 / 语言包键对齐四项都在这一条里）；
+  import 审计显示 `packages/agent/src` 只引 `@auto-cc/core`、`@auto-cc/plugin-store`、
+  `node:crypto`、`node:sqlite`、`zod`（逐行清单在 `1.11-11-11-c-checks.txt`）。
+- **1.11-12**：live 探针 `require/process/ipcRenderer` 全 undefined、**没有万能 `invoke`**
+  （`genericInvoke="undefined"`），`window.autoCC` 上 14 个命名空间里相对 1.10 只多了 `agent`/`chat`
+  （`1.11-12-11-12-isolation.txt`）；主进程侧 `packages/shell/src/index.ts:169-171` 与 `:230-232`
+  两处窗口创建都是 `contextIsolation:true / sandbox:true / nodeIntegration:false`，复用 1.2-04 的断言。
+- **1.11-13**：流式进行中（`streamingChars=1494`）输入区照样接受 3 个字「停一下」，
+  截图 `1.11-13-11-13-typing-while-running.png` 里输入框有内容、`停止` 可点、`发送` 禁用——
+  界面没有因为执行而冻结。
+- **1.11-15**：三件事各有承载位且都在源码里点名了：流式增量 → `chat/delta`（`events.ts:267` +
+  `bridge.ts:434` 事件白名单 + `:445` 签名表，三处齐全）；工具卡片状态 → `ChatToolPart.state`
+  （`events.ts:135` `'running' | 'done' | 'failed'`，`:154`）；批准前执行 → `requiresConfirmation`
+  （`events.ts:225`）。P5 换真模型改的是主进程的生成函数与工具注册，界面结构不动。
+- **本轮有意不修的两处**（越界，留给后续子计划决定）：① 档位三个按钮没有 `aria-pressed`，
+  读数 `active: []`——选中态只靠配色传达，是无障碍缺口，但它属于「档位」这一控件本身，
+  1.11 的判据只要求"可见可切换"；② 主进程来的错误原文（`TOOL_NOT_REGISTERED：工具 … 未注册`）
+  在英文界面上仍是中文。它是 `agent` 侧的边界消息、不是 JSX 里的裸文案（§5.5 拦不到），
+  要修得先在 core 里给错误码配 key，属于 P5 接真模型时一起做。
+- **一条环境坑（会咬人，记在这里省后来的人）**：Git Bash 会把以 `/` 开头的实参当路径转换，
+  `harness type --value "/tool …"` 实际送到页面的是 `D:/daiwenchi/Git/tool …`，
+  于是 `startsWith('/tool')` 永不命中、卡片一张不画（`dom` 返回空数组、`wait` 超时）。
+  解法是在同一条命令里 `export MSYS2_ARG_CONV_EXCL='*'`（shell 状态不跨调用，每次都得带上）。
 
 ## 1.X 里程碑门禁（P1 收口）
 

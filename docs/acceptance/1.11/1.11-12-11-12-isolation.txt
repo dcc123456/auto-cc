@@ -1,0 +1,10 @@
+1.11-12 渲染层隔离与白名单（live，tmp/11-isolation.js）：
+  hasAutoCC=true  requireUndefined=true  processUndefined=true  ipcRendererLeak="undefined"
+  genericInvoke="undefined"（没有万能 invoke 透传）
+  bridgeKeys=["agent","chat","devtools","entitlement","ipc","kernel","log","on","outbound",
+              "plugins","sessions","shell","usage","workflow"] —— 新增的只有 agent / chat
+源码：packages/shell/src/index.ts:169-171 与 :230-232 都是
+  contextIsolation:true / sandbox:true / nodeIntegration:false
+白名单：packages/shared/src/bridge.ts 的 RENDERER_ALLOWLIST + BridgeSignatures，
+  编译期保险丝 BridgeSignaturesCovered / RendererEventSignaturesCovered（缺登记即 typecheck 失败）。
+复用 1.2-04 的同类断言（docs/acceptance/1.2/1.2-04-renderer-isolation.txt）。
