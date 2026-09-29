@@ -39,6 +39,30 @@ const RECT_SOURCE = `function (spec) {
   };
 }`;
 
+/**
+ * 目标元素当前的位置与尺寸（视口坐标，CSS 像素）。
+ *
+ * `inner` 是视口高度，用来判断元素是不是已经整个装进了画面。
+ */
+const SCROLL_STATE = `function (sel) {
+  const target = document.querySelector(sel);
+  if (!target) throw new Error('页面上没有匹配 ' + sel + ' 的元素');
+  const rect = target.getBoundingClientRect();
+  return { top: Math.round(rect.top), height: Math.round(rect.height), inner: window.innerHeight };
+}`;
+
+/** 滚动收敛的轮数上限：到不了就报错，不拍一张拍错的东西当证据。 */
+const SCROLL_MAX_ROUNDS = 40;
+
+/** 单轮滚轮事件允许的最大位移（CSS 像素）——一次派发整段距离会被平滑动画放大，实测会直接冲到底。 */
+const SCROLL_STEP = 300;
+
+/** 判断「元素已完整进画面」时允许的像素误差（滚动位置带小数，取整后会差 1px）。 */
+const SCROLL_TOLERANCE = 2;
+
+/** 一轮滚动之后留给平滑动画的时间（毫秒）——只等两帧会被动画截胡。 */
+const SCROLL_SETTLE_MS = 100;
+
 /** 聚焦目标元素，回读它的标签与当前值（输入前后的对照）。 */
 const FOCUS_SOURCE = `function (spec) {
   const el = (${MATCH_SOURCE})(spec);
@@ -229,17 +253,59 @@ export class CdpSession {
   /**
    * 截图并落盘。
    * @param file 输出 png 路径
+   * @param reveal 可选 CSS 选择器：截图前把该元素滚进画面（长页面里目标面板常在折叠线以下）
    * @returns 写入的绝对路径
    */
-  async screenshot(file: string): Promise<string> {
+  async screenshot(file: string, reveal?: string): Promise<string> {
     // 窗口被别的应用挡住时 Chrome 不再产出新帧，`captureScreenshot` 会一直等下去（实测挂满 60s）；
     // 先把这个 target 带到前台，截图才有确定的帧可取。
     await this.send('Page.bringToFront');
+    if (reveal) await this.scrollTo(reveal);
     const { data } = await this.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
     const target = path.resolve(file);
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, Buffer.from(data, 'base64'));
     return target;
+  }
+
+  /**
+   * 把目标元素滚到视口上部。
+   *
+   * 不用 `scrollIntoView` / 写 `scrollTop`：实测那样只改 DOM，合成器画面仍然停在折叠线以上
+   * （截图与未滚动时逐字节相同）。滚轮事件走浏览器真实的滚动路径，画面才会跟着动。
+   * 一次滚轮会被当成一个手势平滑消化（要求滚 900 像素实测只走了 50），所以分多轮派发、每轮重量差值。
+   * @param selector 目标元素的 CSS 选择器
+   */
+  private async scrollTo(selector: string): Promise<void> {
+    let lastTop: number | undefined;
+    for (let round = 0; round < SCROLL_MAX_ROUNDS; round += 1) {
+      const { top, height, inner } = await this.callOn<{ top: number; height: number; inner: number }>(SCROLL_STATE, [
+        selector,
+      ]);
+      // 整个元素都在画面里（允许 2px 舍入）、或它比视口还高（上下都溢出）都算到位，再滚只会把内容推过头。
+      if ((top >= 0 && top + height <= inner + SCROLL_TOLERANCE) || (top <= 0 && top + height >= inner)) return;
+      if (lastTop !== undefined && Math.abs(top - lastTop) < 1) {
+        throw new Error(`已经滚到边界但 ${selector} 仍不在视口内，不拍错的东西`);
+      }
+      lastTop = top;
+      await this.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: 500,
+        y: 400,
+        deltaX: 0,
+        deltaY: Math.max(-SCROLL_STEP, Math.min(SCROLL_STEP, top - 24)),
+      });
+      await this.settle();
+    }
+    throw new Error(`滚动 ${String(SCROLL_MAX_ROUNDS)} 轮后 ${selector} 仍未到位`);
+  }
+
+  /** 等平滑滚动动画落定（先给时间再等两帧），否则下一轮量到的是动画中途的位置。 */
+  private async settle(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, SCROLL_SETTLE_MS));
+    await this.callOn(
+      'function () { return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))); }',
+    );
   }
 
   /** 页面上是否出现了给定文本（用于断言渲染结果）。 */

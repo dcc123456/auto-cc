@@ -1,0 +1,16 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mD:/works/deep-seek-workspace/auto-cc/packages/outbound[39m
+
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m闸门在场：外发成功、回执带账本行，对端确实收到一条（1.9-04）[32m 21[2mms[22m[39m
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m闸门缺席：外发服务根本不挂载，一次网络请求都没发出（1.9-05）[32m 7[2mms[22m[39m
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m额度用尽：外发以 QUOTA_EXCEEDED 失败、不落账、不打到对端（1.9-03 + 决策 1）[32m 10[2mms[22m[39m
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m对端返回 5xx：以 OUTBOUND_FAILED 失败且不落账（决策 1 的另一半）[32m 8[2mms[22m[39m
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m对端连不上：以 OUTBOUND_FAILED 结构化失败且不落账（spec 1.9-09）[32m 7[2mms[22m[39m
+ [32m✓[39m src/outbound.test.ts[2m > [22moutbound.sample 只认闸门（spec 1.9-03 / 04 / 05）[2m > [22m入站参数不合法时结构化失败，不发网络（渲染层是不可信来源）[32m 7[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 21:55:10
+[2m   Duration [22m 632ms[2m (transform 104ms, setup 0ms, collect 205ms, tests 62ms, environment 0ms, prepare 142ms)[22m
+

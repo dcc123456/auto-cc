@@ -6,6 +6,7 @@
  * 也就不需要 electron-rebuild——这是「用户只下载这一个 app」的前提。
  */
 import { asApp, Service, type Context } from '@auto-cc/core';
+import type { ConfigService } from '@auto-cc/plugin-config';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -71,8 +72,19 @@ export class StoreService extends Service {
     return this.lastResult;
   }
 
+  /**
+   * `config` 服务句柄（库文件目录的来源）。
+   *
+   * 为什么要显式写这个类型：`asApp(ctx).config` 能读全靠 `plugin-config` 对 `AppServices` 的增补，
+   * 而那份增补只有在它的模块被类型图看见时才存在。本包过去只在自己的测试里 import 它，
+   * 于是任何把 `store/src` 拉进编译的生产包（1.9 的 entitlement 是第一个）都会报「config 不存在」。
+   */
+  private get configService(): ConfigService {
+    return asApp(this.ctx).config;
+  }
+
   [Service.init](): void {
-    const dir = this.options.dir ?? asApp(this.ctx).config.paths().userDataDir;
+    const dir = this.options.dir ?? this.configService.paths().userDataDir;
     mkdirSync(dir, { recursive: true });
     const db = new DatabaseSync(join(dir, this.options.file));
     db.exec(`PRAGMA journal_mode = ${this.options.journal}`);

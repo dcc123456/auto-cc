@@ -1,0 +1,9 @@
+$ grep -rn "fetch|http|axios|socket|net\." packages/entitlement/src/
+
+packages/entitlement/src/entitlement.test.ts:59: * 把 `globalThis.fetch` 换成计数存根，用来证明闸门路径上一个网络调用都没发生。
+packages/entitlement/src/entitlement.test.ts:63:  const original = globalThis.fetch;
+packages/entitlement/src/entitlement.test.ts:65:  globalThis.fetch = () => {
+packages/entitlement/src/entitlement.test.ts:69:  return { calls: () => calls, restore: () => (globalThis.fetch = original) };
+
+结论：闸门与账本包内唯一的 fetch 出现在测试文件里，且那个 fetch 是用来计数的存根——
+生产代码零网络调用，因此 1.9-09 的「断网不阻塞」是结构保证而非一次快照。

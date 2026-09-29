@@ -398,15 +398,69 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 | ID     | 验收标准                                                                             | 方式 | 验证操作                                                         | 状态 |
 | ------ | ------------------------------------------------------------------------------------ | ---- | ---------------------------------------------------------------- | ---- |
-| 1.9-01 | `entitlement.gate.check(action, ctx)` 存在，返回 `{allowed, remaining, reason}`      | U    | 契约与返回 shape 断言                                            | [ ]  |
-| 1.9-02 | 默认本地实现返回无限（当前产品阶段不花钱、不登录）                                   | U+C  | 断言 `allowed=true`、`remaining=null`                            | [ ]  |
-| 1.9-03 | gate 可被配置切成「每动作每天 N 次」，超限后 `allowed=false` 且 reason 可读          | V    | 界面设 N=1，第二次外发被拒并显示原因                             | [ ]  |
-| 1.9-04 | 每次通过 gate 的外发在 `usage.ledger` 落一行 `(action, targetId, workflowRunId, ts)` | C+U  | 断言行数与字段完整                                               | [ ]  |
-| 1.9-05 | **绕过 gate 的外发在骨架测试里失败**（gate 缺席即报错，不允许静默放行）              | U    | 移除 entitlement 插件后跑外发样例 → 报错而非成功                 | [ ]  |
-| 1.9-06 | 上层业务代码不含「是否付费」的分支，只看 gate 结果                                   | C    | `grep -rn "quota\|entitlement\|paid" packages/` 无业务层分支判断 | [ ]  |
-| 1.9-07 | 账本可在界面回看（次数、按天分组、按动作分组）                                       | V    | 触发若干次后截图用量页                                           | [ ]  |
-| 1.9-08 | 未来接 SaaS 不需要改表：数据模型含可空 `source` / `remoteRef` 字段                   | U    | schema 断言字段存在且可空                                        | [ ]  |
-| 1.9-09 | 断网时 gate 走本地实现且**不阻塞**已有能力（联网校验可选、失败可降级）               | V    | 断网运行外发 → 成功                                              | [ ]  |
+| 1.9-01 | `entitlement.gate.check(action, ctx)` 存在，返回 `{allowed, remaining, reason}`      | U    | 契约与返回 shape 断言                                            | [x]  |
+| 1.9-02 | 默认本地实现返回无限（当前产品阶段不花钱、不登录）                                   | U+C  | 断言 `allowed=true`、`remaining=null`                            | [x]  |
+| 1.9-03 | gate 可被配置切成「每动作每天 N 次」，超限后 `allowed=false` 且 reason 可读          | V    | 界面设 N=1，第二次外发被拒并显示原因                             | [x]  |
+| 1.9-04 | 每次通过 gate 的外发在 `usage.ledger` 落一行 `(action, targetId, workflowRunId, ts)` | C+U  | 断言行数与字段完整                                               | [x]  |
+| 1.9-05 | **绕过 gate 的外发在骨架测试里失败**（gate 缺席即报错，不允许静默放行）              | U    | 移除 entitlement 插件后跑外发样例 → 报错而非成功                 | [x]  |
+| 1.9-06 | 上层业务代码不含「是否付费」的分支，只看 gate 结果                                   | C    | `grep -rn "quota\|entitlement\|paid" packages/` 无业务层分支判断 | [x]  |
+| 1.9-07 | 账本可在界面回看（次数、按天分组、按动作分组）                                       | V    | 触发若干次后截图用量页                                           | [x]  |
+| 1.9-08 | 未来接 SaaS 不需要改表：数据模型含可空 `source` / `remoteRef` 字段                   | U    | schema 断言字段存在且可空                                        | [x]  |
+| 1.9-09 | 断网时 gate 走本地实现且**不阻塞**已有能力（联网校验可选、失败可降级）               | V    | 断网运行外发 → 成功                                              | [x]  |
+
+**1.9 收尾结论**（证据在 `docs/acceptance/1.9/`，11 个文件：7 张 CDP 截图 + 2 份单测报告 + 2 份
+命令行输出；外发对端一律是本地 fixture
+`http://127.0.0.1:10233/api/outbound`，未触碰真实招聘平台，见 AGENTS.md §7.2）：
+
+- **1.9-01**：`packages/entitlement/src/entitlement.test.ts` 断言 `check()` 的返回**恰好**是
+  `allowed` / `remaining` / `reason` 三个键（用 `Object.keys` 排序比对，多一个键也算失败）——
+  这个 shape 就是将来接 SaaS 时要替换的唯一契约面。
+- **1.9-02**：默认实现是 `mode: 'local-unlimited'`，单测断言 `allowed=true`、`remaining=null`；
+  真机侧用量面板两行都显示「本地无限额度（当前阶段不花钱）」（`1.9-02-unlimited.png`）。
+- **1.9-03**：在装配面板把 `entitlement` 的配置改成 `greet` 每天 1 次并保存（`plugins.saveConfig`
+  → `fiber.update` 热更新，不重启进程），第一次外发成功、第二次界面显示
+  `外发 greet 失败：动作 greet 今日 1 次额度已用完`；同一时刻 fixture 收件箱仍是 1 条、
+  账本累计没变——**被拒既不花钱也不落账**（`1.9-03-quota-denied.png`）。
+  额度是**按动作**算的：`greet` 用满后 `deliver` 仍可发。
+- **1.9-04**：单测断言 `perform()` 成功后账本恰好多一行且四个字段齐（`action`、`targetId`、
+  `workflowRunId`、`ts`）；真机回执 `已送达：账本行 4 · 对端累计收到 2 条`，界面 recent 列表
+  逐行显示 `#4 deliver → job-2 · 21:49:35` 等四行（`1.9-04-ledger-row.png`）。
+  这四次记录在随后一次 Electron 重启（改 `outbound` 触发 esbuild watch）之后依然在——落盘是真的。
+- **1.9-05**：停掉 `entitlement` 插件后，`outbound` 因为 `inject: ['entitlement.gate']` 依赖缺席而
+  停在 PENDING（装配面板显示「等待依赖 … 依赖 entitlement」），点发送得到
+  `服务未挂载：outbound`；用量面板两行显示「闸门未挂载：装配里缺 entitlement 插件」，账本数字不变
+  （`1.9-05-outbound-pending.png`、`1.9-05-gate-removed.png`）。单测那一半更硬：闸门缺席时外发服务
+  **根本不挂载**，一次网络请求都没发出。恢复挂载后同一次点击即回到「已送达」。
+- **1.9-06**：`grep -rn "quota\|entitlement\|paid" packages/`（排除测试）的命中全部落在
+  闸门与账本自身（`entitlement/src/gate.ts`、`index.ts`）、主进程装配表（`main/src/registry.ts`）、
+  外发侧的一行 `inject` 与一次 `perform` 调用、IPC 白名单与只读面板。
+  **没有任何一处 `if (付费) … else …` 形态的分支**——上层只看 `allowed`，这正是未来接付费时
+  只需要换 `entitlement` 一个包的原因。
+- **1.9-07**：用量面板显示 `账本累计 4 次 / 今日 4 次`，下面按本地自然日分组
+  `2026-09-29 · 4 次 · greet × 2 · deliver × 2`（`1.9-07-ledger-groups.png`）。
+  日界按本机时区而非 SQLite 的 UTC `date()`，单测用「昨天一条、今天一条」两侧都构造过。
+- **1.9-08**：单测直接查 `PRAGMA table_info(usage_ledger)`，断言 `target_id`、`workflow_run_id`、
+  `source`、`remote_ref` 四列存在且 `notnull=0`；不写 `source`/`remoteRef` 能插入（读回为 `null`），
+  写 `source:'remote'`、`remoteRef:'bill-9'` 也能插入并原样读回——接 SaaS 时不改表。
+- **1.9-09**：这条的判据是「闸门不依赖联网、失败不阻塞其他能力」，用两步证明，没有做整机断网
+  （改用户机网卡属于影响共享状态的动作，不该为验收做）：
+  ① **静态**——`grep -rn "fetch\|http\|axios\|socket" packages/entitlement/src/` 只命中测试文件里
+  那个用来计数的 `fetch` 存根，闸门与账本**一行网络代码都没有**，所以断网不可能改变它的判定；
+  ② **实测**——停掉 fixture 进程后点发送，界面得到结构化错误
+  `外发 greet 失败：对端不可达：fetch failed`，同一时刻额度读数照常、装配面板 11 行照常枚举、
+  账本不增长，应用不崩（`1.9-09-peer-down.png`）。
+- **验收过程中挖出并修掉的三个真缺陷**（都是"脚本绿了但页面是错的"那一类，正是 §7.1 要防的）：
+  ① fixture 的请求体解析用 `Buffer.from(缓冲数组)`，Node 按字节数组解释，分片全变 `0x00`，
+  于是**每一次外发都被 400 拒回**，界面上只有一句"失败"；改成 `Buffer.concat` 后通。
+  ② `t('action.failed')` 漏传 `{{action}}` 实参，界面把占位符原样显示出来；
+  已把这类错误变成 `[机检]`——`scripts/check-renderer-conventions.ts` 现在会比对 zh-CN 文案里的
+  `{{x}}` 与调用点实参名，缺一个就 `pnpm lint` 失败（先确认渲染层既有的全部 `t()` 调用点都在新校验下
+  全绿，再把 ② 改回去，确认它确实精确报出这一条，而不是靠放宽规则蒙过去）。
+  ③ 内核视图地址是 percent-encoded 长串且无断行点，把整页撑出横向滚动条，**此后每张截图都被裁**；
+  补 `break-all` 后重拍。
+- 顺带记一条 harness 口径：`shot --reveal <css>` 用真实 `mouseWheel` 事件把目标滚进视口
+  （每步 ≤300px、等 100ms + 2 帧），判据是"元素完整落在视口内 ±2px"，滚到边界仍不满足就直接抛错——
+  宁可拍不到也不拍一张裁错的证据。1.9 的 5 张可视证据全部走的这条路。
 
 ## 1.10 工作流面板（第二视图）
 

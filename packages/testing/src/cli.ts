@@ -12,6 +12,7 @@
  *   pnpm harness assert --expr "document.title" --equals '"auto-cc"'
  *   pnpm harness navigate --to file:///…/fixtures/self-test-lab/index.html --url data:text/html
  *   pnpm harness shot --out /tmp/shot.png --url 127.0.0.1:5173
+ *   pnpm harness shot --out /tmp/panel.png --url 127.0.0.1:5173 --reveal '[data-testid=usage-panel]'
  *   pnpm harness diff --base /tmp/a.png --head /tmp/b.png
  *   pnpm harness archive --id 1.6-02 --in /tmp/shot.png --slug sees-panel
  *
@@ -82,7 +83,7 @@ const COMMANDS = [
   'eval [--expr <js> | --expr-file <path>]  在页面里求值并打印结果',
   'assert [--expr <js> | --expr-file <path>] [--equals <json>]  断言，失败 exit 1',
   'navigate --to <url>  导航当前 target 并等 load 事件',
-  'shot --out <file>  截图落盘',
+  'shot --out <file> [--reveal <css>]  截图落盘（--reveal 先把该元素滚进画面）',
   'diff --base <a.png> --head <b.png> [--threshold n]  像素比对，有差异 exit 1',
   'archive --id <spec-id> --in <file[,file]> [--slug <s>]  证据归档到 docs/acceptance/',
 ];
@@ -165,7 +166,7 @@ try {
       const out = flag('out');
       if (!out) help();
       const session = await attach();
-      const file = await session.screenshot(evidenceFile(out));
+      const file = await session.screenshot(evidenceFile(out), flag('reveal') || undefined);
       session.close();
       console.log(file);
       break;

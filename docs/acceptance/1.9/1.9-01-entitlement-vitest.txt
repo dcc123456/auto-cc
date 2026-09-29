@@ -1,0 +1,20 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mD:/works/deep-seek-workspace/auto-cc/packages/entitlement[39m
+
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22mcheck 的返回契约正是 spec 写的三个键，不多不少（1.9-01）[32m 14[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22m默认是本地无限实现：allowed=true、remaining=null、且不花一分钱（1.9-02）[32m 7[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22m配置切成「每动作每天 1 次」后，第二次判定被拒且 reason 说清原因（1.9-03）[32m 10[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22mperform 成功后落一行，四个字段都在（1.9-04）[32m 8[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22m被拒不落账、task 也不执行；task 抛错同样不落账（plan §8.4 决策 1）[32m 10[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22m判定与落账全程不碰网络，所以断网不会阻塞外发（1.9-09）[32m 8[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22mentitlement.gate（spec 1.9-01…04）[2m > [22m账本被停掉再重新挂载，不会把同一份迁移 push 两遍（plan §8.4 决策 5）[32m 9[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22musage.ledger 的读数（spec 1.9-07 / 1.9-08）[2m > [22m按本地自然日分组：昨天一条、今天一条（1.9-07，日界见决策 3）[32m 11[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22musage.ledger 的读数（spec 1.9-07 / 1.9-08）[2m > [22msource / remoteRef 存在且可空，不写也能插入（1.9-08 的「接 SaaS 不改表」）[32m 8[2mms[22m[39m
+ [32m✓[39m src/entitlement.test.ts[2m > [22musage.ledger 的读数（spec 1.9-07 / 1.9-08）[2m > [22m日界与日键都按本机时区，而不是 SQLite 的 UTC date()（决策 3）[32m 0[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 21:54:57
+[2m   Duration [22m 662ms[2m (transform 96ms, setup 0ms, collect 194ms, tests 89ms, environment 0ms, prepare 157ms)[22m
+

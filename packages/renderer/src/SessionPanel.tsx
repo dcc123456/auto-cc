@@ -2,13 +2,13 @@ import { KeyRound, LogOut, Radar, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  BridgeReply,
   KernelViewLoadError,
   SessionExpiredEvent,
   SessionPlatformView,
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
+import { useBridgeAction } from './useBridgeAction';
 
 /** 失效事件最多留几条：面板是验收入口，不是历史库。 */
 const EXPIRED_LIMIT = 3;
@@ -36,8 +36,6 @@ export function SessionPanel() {
   const [shell, setShell] = useState<ShellStatus>();
   const [expired, setExpired] = useState<SessionExpiredEvent[]>();
   const [viewError, setViewError] = useState<KernelViewLoadError | null>(null);
-  const [notice, setNotice] = useState<string>();
-  const [busy, setBusy] = useState<string>();
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
@@ -48,6 +46,8 @@ export function SessionPanel() {
       setViewError(shellReply.value.kernelViewLoadError);
     }
   }, [bridge]);
+
+  const { busy, notice, run } = useBridgeAction(read);
 
   useEffect(() => {
     void read();
@@ -76,32 +76,20 @@ export function SessionPanel() {
       activePlatform: current?.activePlatform ?? null,
     }));
 
-  /**
-   * 跑一个会话动作：成功就写入返回值，失败把原因留在界面上，然后一律重读快照。
-   * @param label 动作标签（禁用按钮的凭据，也是提示文案的一部分）
-   * @param call 实际调用；没有桥接（不在 Electron 宿主里）时返回 undefined，不记结果
-   * @param apply 成功后如何落到 state
-   */
-  const run = async <T,>(label: string, call: () => Promise<BridgeReply<T>> | undefined, apply: (value: T) => void) => {
-    setBusy(label);
-    const reply = await call();
-    setBusy(undefined);
-    if (!reply) setNotice(t('assembly.noBridge'));
-    else if (reply.ok) {
-      apply(reply.value);
-      setNotice(t('session.actionOk', { action: label }));
-    } else setNotice(t('assembly.actionFailed', { message: reply.error.message }));
-    await read();
-  };
-
   const open = (platform: string) =>
-    void run(t('session.actionOpen', { id: platform }), () => bridge?.sessions.open(platform), setSnapshot);
+    void run(t('session.actionOpen', { id: platform }), () => bridge?.sessions.open(platform), {
+      apply: setSnapshot,
+    });
 
   const probe = (platform: string) =>
-    void run(t('session.actionProbe', { id: platform }), () => bridge?.sessions.probe(platform), mergePlatform);
+    void run(t('session.actionProbe', { id: platform }), () => bridge?.sessions.probe(platform), {
+      apply: mergePlatform,
+    });
 
   const logout = (platform: string) =>
-    void run(t('session.actionLogout', { id: platform }), () => bridge?.sessions.logout(platform), mergePlatform);
+    void run(t('session.actionLogout', { id: platform }), () => bridge?.sessions.logout(platform), {
+      apply: mergePlatform,
+    });
 
   return (
     <div className="flex flex-col gap-4">
@@ -122,7 +110,8 @@ export function SessionPanel() {
           </button>
         </div>
 
-        <p className="mt-2 text-[11px] text-slate-500" data-stat="kernel-view">
+        {/* 内核视图地址是 percent-encoded 的长串，没有断行点：不 break-all 就会把整页撑出横向滚动条。 */}
+        <p className="mt-2 break-all text-[11px] text-slate-500" data-stat="kernel-view">
           {t('session.viewUrl', { url: shell?.kernelViewUrl || t('session.viewIdle') })}
           {' · '}
           {t('session.viewPartition', { partition: shell?.kernelViewPartition || t('session.viewIdle') })}
@@ -132,7 +121,7 @@ export function SessionPanel() {
 
         {viewError && (
           <p
-            className="mt-2 rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-[11px] text-rose-300"
+            className="mt-2 break-all rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-[11px] text-rose-300"
             data-stat="view-error"
           >
             {t('session.viewError', { code: viewError.code, description: viewError.description, url: viewError.url })}

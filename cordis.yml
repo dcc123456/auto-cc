@@ -24,6 +24,22 @@ plugins:
       file: store.db
       journal: wal
 
+  # 外发额度骨架（spec 1.9）：账本与闸门各占一条，因为 1.9-05 要能**只摘掉闸门**而账本还活着。
+  # `mode: unlimited` 是当前产品阶段的 shipped 默认——不收费、不登录、不联网校验（1.9-02 / 1.9-09）。
+  # 想演示超限就在调试面板把该插件配置改成 `mode: daily` + `dailyLimit: 1`（1.9-03，不重启 app）。
+  - id: usage
+    dependsOn: [store]
+
+  - id: entitlement
+    dependsOn: [usage]
+    config:
+      mode: unlimited
+
+  # 闸门之外的最薄外发消费者：它只把闭包交给 `gate.perform()`，所以清单里注掉 `entitlement`
+  # 之后，这条也会跟着进 PENDING —— 界面点「外发样例」得到的是结构化错误，而不是静默成功。
+  - id: outbound
+    dependsOn: [entitlement]
+
   # IPC 网关（spec 1.4-01）：全应用唯一的跨进程通道，所以排在 shell 之前——
   # 窗口由 shell 创建，界面能发起调用时处理器必须已经在位。
   - id: ipc

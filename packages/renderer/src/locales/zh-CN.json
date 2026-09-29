@@ -65,7 +65,6 @@
       "open": "打开站点",
       "probe": "探测登录态",
       "logout": "退出登录",
-      "actionOk": "{{action}}：完成",
       "actionOpen": "打开平台 {{id}}",
       "actionProbe": "探测平台 {{id}}",
       "actionLogout": "退出平台 {{id}}",
@@ -111,9 +110,6 @@
       "targetKindView": "内嵌视图",
       "targetFocused": "持有焦点",
       "targetUnfocused": "无焦点",
-      "noBridge": "桥接不可用：当前不在 Electron 宿主内",
-      "actionOk": "{{action}}：成功",
-      "actionFailed": "{{action}}失败：{{message}}",
       "actionPluginFailed": "调用成功，但插件 {{id}} 处于失败态：{{message}}",
       "actionSave": "保存配置",
       "actionStop": "卸载 {{id}}",
@@ -132,6 +128,30 @@
       "logPushed": "本次会话收到事件 {{count}} 条",
       "logEmpty": "暂无日志",
       "probeRedact": "写入一条含敏感字段的日志"
+    },
+    "action": {
+      "noBridge": "桥接不可用：当前不在 Electron 宿主内",
+      "ok": "{{action}}：成功",
+      "failed": "{{action}} 失败：{{message}}"
+    },
+    "usage": {
+      "heading": "外发额度与用量账本",
+      "refresh": "重新读取用量",
+      "send": "发一条样例外发",
+      "actionSend": "外发 {{action}}",
+      "sampleMessage": "来自 auto-cc 用量面板的样例外发（{{action}}）",
+      "receipt": "已送达：账本行 {{id}} · 对端累计收到 {{count}} 条",
+      "unlimited": "本地无限额度（当前阶段不花钱）",
+      "remaining": "今日剩余 {{count}} 次",
+      "denied": "已拒绝：{{reason}}",
+      "gateUnknown": "闸门未挂载：装配里缺 entitlement 插件",
+      "total": "账本累计 {{count}} 次",
+      "today": "今日 {{count}} 次",
+      "dayRow": "{{day}} · {{count}} 次",
+      "actionRow": "{{action}} × {{count}}",
+      "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
+      "empty": "账本为空：还没有一次外发通过闸门",
+      "none": "无对象"
     },
     "state": {
       "pending": "等待依赖",

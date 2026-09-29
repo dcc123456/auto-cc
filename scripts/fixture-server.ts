@@ -1,17 +1,19 @@
 /**
- * 1.8 验收用的本地 fixture HTTP 服务（AGENTS.md §7.2：自动化测试一律打本地站点）。
+ * 验收用的本地 fixture HTTP 服务（AGENTS.md §7.2：自动化测试一律打本地站点）。
  *
  * 只绑 `127.0.0.1`，且拒绝任何其他 host 的绑定请求 —— 它模拟的是「已登录的招聘站」，
  * 暴露到局域网就没有「不碰真实平台」这条保证了。
  *
- * 三条能力刚好覆盖 1.8 的三条验收：
+ * 能力覆盖 1.8 与 1.9 的验收：
  * - `/login` 写一份 **带 Max-Age 的持久 cookie**（会话型 cookie 不会被 Chromium 落盘，
  *   用它验 1.8-03 的「跨重启保持」会测到假阴性）；
  * - `/` 与 `/alt` 是同一个站点、同一个 cookie 名的两条路径，用来证明隔离发生在**分区**
  *   而不是域名上（spec 1.8-01）；
+ * - `POST /api/outbound` 与 `GET /api/outbox` 是 1.9 的**样例收件箱**：外发是否真的发生，
+ *   由这里的计数说，而不是由 app 自述（spec 1.9-03 / 1.9-04）；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
  */
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -31,7 +33,51 @@ function cookieNames(header: string | undefined): string[] {
     .sort();
 }
 
-const server = createServer((request, response) => {
+/**
+ * 样例收件箱（1.9 用）。
+ * 「消息真的出去了」由对端计数证明，app 自述不算（plan §8.4）。
+ */
+const outbox: unknown[] = [];
+
+/**
+ * 读完请求体再回调；上限 64 KB，避免样例端点被当成缓冲区滥用。
+ * @returns 解析后的对象；体不是合法 JSON 时 `undefined`，超限并已就地回了 413 时 `null`
+ */
+function readJson(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<Record<string, unknown> | undefined | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 64 * 1024) {
+        response.writeHead(413).end();
+        request.destroy();
+        // destroy 之后不会再有 end，必须在这里定下来，否则调用方永远悬着。
+        resolve(null);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      try {
+        // 只能 Buffer.concat：Buffer.from(缓冲数组) 按字节数组解释，会把每个分片变成 0x00。
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>);
+      } catch {
+        resolve(undefined);
+      }
+    });
+  });
+}
+
+/**
+ * 处理一次实验台请求。
+ * @param request 进来的请求（`/api/outbound` 需要先读完请求体，所以是 async）
+ * @param response 待写的响应
+ */
+async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${host}:${String(port)}`);
   const loggedIn = cookieNames(request.headers.cookie).includes(cookieName);
 
@@ -41,6 +87,28 @@ const server = createServer((request, response) => {
     response.setHeader('Set-Cookie', `${cookieName}=fixture-token; Path=/; Max-Age=${isLogin ? '86400' : '0'}`);
     response.writeHead(302, { Location: '/' });
     response.end();
+    return;
+  }
+
+  // 1.9 的样例收件端点：记下这一条，并回「我是第几条收到的」。
+  if (url.pathname === '/api/outbound' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    if (!body || typeof body['action'] !== 'string' || typeof body['targetId'] !== 'string') {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '缺少 action / targetId' }));
+      return;
+    }
+    outbox.push({ ...body, receivedAt: Date.now() });
+    console.log(`[fixture] 收到第 ${String(outbox.length)} 条外发：${body['action']} → ${body['targetId']}`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, received: outbox.length }));
+    return;
+  }
+
+  if (url.pathname === '/api/outbox') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ count: outbox.length, items: outbox }));
     return;
   }
 
@@ -59,6 +127,11 @@ const server = createServer((request, response) => {
 
   response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
   response.end('not found');
+}
+
+/** `createServer` 的回调只能同步返回，异步的处理函数交给 `void` 转交。 */
+const server = createServer((request, response) => {
+  void handle(request, response);
 });
 
 server.listen(port, host, () => {

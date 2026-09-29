@@ -386,6 +386,65 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
    `dom-ready` 与 `did-finish-load`，且那一刻 `getURL()` 还不是 `chrome-error://`，任何判据都会把
    刚记下的错误抹掉；所以错误位的生命周期就是「本次挂载」，`createKernelView` 开头清零。
 
+### 8.4 子计划 1.9 的落地方案（外发额度闸门）
+
+**目标**：把「外发必须先过闸门、过了闸门必须落账」做成 P1 的**结构事实**，而不是 P2 各自实现时的口头约定。
+当前产品阶段不收费、不登录，所以默认实现就是「无限」；将来接 SaaS（P5）替换的是闸门的**实现**，
+不是它的调用点——这是 `docs/00-master-plan.md` 决策 10「额度以 service 边界预埋，不以 UI 或 if 分支预埋」的落地。
+
+**选型与证据**（§6.1；一手来源与实测为准）：
+
+| 问题                                   | 结论                                                        | 证据 / 否决理由                                                                                                                                                         |
+| -------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 三个源仓库里有现成的额度闸门吗         | **自建**                                                    | `docs/research/source-repos-analysis.md:177`：「额度计量与付费闸门 → 自建，`entitlement.gate` + `usage.ledger`」。三个仓库都没有跨进程的服务边界，抄过来就是抄一套 if。 |
+| 额度状态存哪                           | `node:sqlite`，经 `store` 服务                              | 1.3 已实测主进程内可用（`docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`）。内存 Map 会让「重启 app」等于免费刷额度，而「今天用了几个」必须是跨重启真相。       |
+| 表结构谁建                             | 业务插件把迁移 push 进 `store.migrations` 再 `upgrade()`    | `packages/store/src/index.ts:37` 的注释就是为此留的（P1 阶段为空，1.9 由业务插件填入）。连接池仍只有一处，符合 §2.7「禁止第二个 SQLite 连接」。                         |
+| 服务名要不要带点（`entitlement.gate`） | **带点**                                                    | `packages/core/src/index.ts:46` 的约定正是 `域.能力`；`packages/ipc/src/resolve.ts` 从**最长前缀**开始试，点号名在网关侧解析正确。代价见决策 4。                        |
+| 一个包还是两个包                       | 两个：`entitlement`（闸门+账本）与 `outbound`（闸门消费者） | 1.9-06 要 grep「上层业务代码不含付费分支」。如果调用方就住在闸门包里，这条断言是空的——被检查的代码与被检查的机制必须是两拨（§4.3 记录的新建包理由）。                   |
+| 外发打到哪                             | 本地 fixture 的新路由 `POST /api/outbound`                  | AGENTS.md §7.2：自动化测试不得访问真实招聘平台。fixture 只绑 `127.0.0.1`，收到几条就在响应里回几条，「消息真的出去了」由对端计数证明，不靠 app 自述。                   |
+| 「联网校验」怎么做                     | **P1 不做**：闸门是纯本地实现                               | 1.9-09 要的是「断网不阻塞」。没有网络调用就是最强的不阻塞保证；等 P5 真接远端时再加，且失败必须降级到本地（`docs/00-master-plan.md` §1.5）。                            |
+
+**落地形态**：
+
+- 新增 `packages/entitlement`（`@auto-cc/plugin-entitlement`，L2 领域层），一个包两个 service：
+  - `usage.ledger`（清单 id `usage`）：`inject: ['store']`；挂载时把 `usage_ledger` 迁移 push 进
+    `store.migrations` 并 `upgrade()`；对外 `record()` 与 `summary()`（按天、按动作分组 + 总数）。
+  - `entitlement.gate`（清单 id `entitlement`）：`inject: ['usage.ledger']`；配置
+    `{ mode: 'unlimited' | 'daily', dailyLimit }`；`check(action, ctx)` 返回
+    `{allowed, remaining, reason}`，`perform(action, ctx, task)` 是**唯一放行口**（先 check，不过就抛
+    `QUOTA_EXCEEDED`，过后落账）。
+- 新增 `packages/outbound`（`@auto-cc/plugin-outbound`，L3 流水线层的最薄一样东西）：service
+  `outbound.sample`，`inject: ['entitlement.gate']`，`send({action, targetId, message})` 只经
+  `gate.perform(...)` 里的那段 task 发 `fetch` 到 fixture。**没有第二个入口**，这是 1.9-05 能被演示的前提。
+- `cordis.yml` 加 `usage` / `entitlement` / `outbound` 三条（排在 `store` 之后、`sessions` 之前），
+  `packages/main/src/registry.ts` 与 `package.json` 同步登记（清单与注册表两处都要改，见 registry 头注）。
+- `packages/shared/src/bridge.ts`：新增 `entitlement.gate.check`、`usage.ledger.summary`、
+  `outbound.sample.send` 三条白名单 + 三个签名 + 三个视图类型（`GateDecisionView` / `UsageSummaryView` /
+  `SendReceiptView`）；编译期保险丝 `BridgeSignaturesCovered` 会强制签名与名单同步。
+- `scripts/fixture-server.ts`：新增 `POST /api/outbound`（记录进内存 outbox，回 `{ok, received}`）与
+  `GET /api/outbox`（把收到的内容原样给出，作为「对端确实收到」的证据）。
+- 渲染层新增「用量」面板：显示额度模式与剩余、用量分组、外发样例按钮与被拒原因。设 N=1 走
+  1.5 已有的插件配置表单（`plugins.saveConfig('entitlement', …)`），不再造第二个配置编辑器（§2.2）。
+
+**关键决策**：
+
+1. **落账只在 task 成功之后**。被拒的动作不记账（它没消耗平台侧任何东西）；task 抛错也不记账
+   （发送没发生）。P5 若要把失败也计入防滥用，改的是这一处，不是各调用点。
+2. **`perform()` 是唯一的放行口**，`check()` 只用于展示剩余额度。业务若直接调 `check()` 再自己发，
+   就是 1.9-05 要拦的那类绕过——所以 `outbound.sample` 里没有任何 `check()` 调用，测试也不需要。
+3. **日额度按本地日零点算**，天数由 JS 算出后作为 `ts >=` 边界传参，不用 `date('now')`：SQLite 的
+   日期函数按 UTC，用它做「今天」会让中国用户在早 8 点前读到「昨天」。
+4. **点号服务名换来的是调用点的别扭**：`preload` 按**第一个点**切命名空间（`packages/preload/src/index.ts`），
+   所以界面侧是 `bridge.entitlement['gate.check']()` / `bridge.outbound['sample.send']()`。这是网关
+   最长前缀解析的对价，不为此改 preload 的切分规则——改了就会和 `service.method` 的主进程语义分叉。
+5. **迁移 push 必须幂等**：`store.migrations` 是共享数组，而 `plugins.start('entitlement')` 会重新挂载
+   ledger；重复 push 同一个 `version` 会让 `runMigrations` 直接抛「迁移版本重复」（`migrate.ts:38`）。
+   所以 push 前按 version 查重，并把「cycle 重启三次仍能落账」写成测试（1.9-05 的姊妹项）。
+6. **迁移号段在此登记**：`usage_ledger` 用 `version: 1`。P2/P3/P4 的表依次取 2、3…，谁建表谁在同一段
+   落一行注释——否则两个插件各自从 1 开始，撞车发生在运行期而不是编译期，排查成本极高。
+7. **P1 的传输用 `fetch`，不用内核视图**：真投递要走 `WebContentsView`（P2），但闸门与账本与传输方式无关；
+   现在就接视图会把 1.9 变成 1.8 的重复验收。这条边界的代价写在这里，P2 换实现时调用点不动。
+
 ## 9. P1 明确不做
 
 - 不接招聘平台、不写 JD 模型、不做 PDF、不做知识库 —— 提前做这些会让骨架被业务细节绑架。

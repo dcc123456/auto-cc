@@ -82,6 +82,28 @@ importers:
         specifier: ^44.4.5
         version: 44.4.5
 
+  packages/entitlement:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
+
   packages/ipc:
     dependencies:
       '@auto-cc/core':
@@ -148,6 +170,9 @@ importers:
       '@auto-cc/plugin-devtools':
         specifier: workspace:*
         version: link:../devtools
+      '@auto-cc/plugin-entitlement':
+        specifier: workspace:*
+        version: link:../entitlement
       '@auto-cc/plugin-ipc':
         specifier: workspace:*
         version: link:../ipc
@@ -157,6 +182,9 @@ importers:
       '@auto-cc/plugin-logger':
         specifier: workspace:*
         version: link:../logger
+      '@auto-cc/plugin-outbound':
+        specifier: workspace:*
+        version: link:../outbound
       '@auto-cc/plugin-plugins':
         specifier: workspace:*
         version: link:../plugins
@@ -182,6 +210,31 @@ importers:
       electron:
         specifier: ^44.4.5
         version: 44.4.5
+
+  packages/outbound:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-entitlement':
+        specifier: workspace:*
+        version: link:../entitlement
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/plugins:
     dependencies:

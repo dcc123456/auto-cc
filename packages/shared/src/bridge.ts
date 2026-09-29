@@ -49,6 +49,11 @@ export const RENDERER_ALLOWLIST = [
   'sessions.open',
   'sessions.probe',
   'sessions.logout',
+  // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
+  // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
+  'entitlement.gate.check',
+  'usage.ledger.summary',
+  'outbound.sample.send',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -115,6 +120,58 @@ export type SessionPlatformView = {
 
 /** 会话总览：所有已配置平台 + 内核视图当前承载的是哪一个。 */
 export type SessionsStatusView = { platforms: SessionPlatformView[]; activePlatform: string | null };
+
+/**
+ * 闸门一次判定的结果（spec 1.9-01）。
+ *
+ * `remaining` 用 `null` 表示「无限」而不是 `Infinity`：后者过不了 `structuredClone` 的语义期待，
+ * 而且界面读到「剩余 ∞」和「剩余 0」的区别会被一个数字糊过去。
+ * `reason` 只在被拒时非空，它是要**显示给用户看**的一句话，不是调试信息。
+ */
+export type GateDecisionView = { allowed: boolean; remaining: number | null; reason: string | null };
+
+/** 账本里的一行（spec 1.9-04 / 1.9-08）。 */
+export type LedgerRowView = {
+  id: number;
+  action: string;
+  targetId: string | null;
+  /** P1 还没有工作流执行器，所以这一列多为 null；列存在本身就是接线面的证据。 */
+  workflowRunId: string | null;
+  /** 毫秒时间戳，本地时区。 */
+  ts: number;
+  /** 可空：未来接 SaaS 后区分「本地记账」与「远端授权」。 */
+  source: string | null;
+  /** 可空：远端账单/流水的外部 id。 */
+  remoteRef: string | null;
+};
+
+/** 用量回看的聚合读数（spec 1.9-07）：总数、按天分组、按动作分组，外加最近几行。 */
+export type UsageSummaryView = {
+  total: number;
+  /** 本地「今天」的条数，与闸门日额度用的是同一个日界。 */
+  today: number;
+  byDay: { day: string; count: number; actions: { action: string; count: number }[] }[];
+  byAction: { action: string; count: number }[];
+  recent: LedgerRowView[];
+};
+
+/** 一次外发样例的入参（spec 1.9-03 / 1.9-04）。 */
+export type SendSampleRequest = {
+  action: string;
+  targetId: string;
+  message: string;
+  workflowRunId?: string | null;
+};
+
+/** 外发成功后的回执：账本行 + 对端计数（P1 的「确实发出去了」由 fixture 的收件数证明）。 */
+export type SendReceiptView = {
+  action: string;
+  targetId: string;
+  /** 本次落账的账本行 id；被拒时根本走不到回执（决策 1：被拒不记账）。 */
+  ledgerId: number;
+  /** fixture 侧累计收到的条数。 */
+  delivered: number;
+};
 
 /**
  * 内嵌内核视图占位区宽度占客户区宽度的比例。
@@ -253,6 +310,15 @@ export interface BridgeSignatures {
   'sessions.probe': { args: [platform: string]; returns: SessionPlatformView };
   /** 清掉该平台分区的 cookie，用于验收「退出登录即清除」（spec 1.8-04）。 */
   'sessions.logout': { args: [platform: string]; returns: SessionPlatformView };
+  /**
+   * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
+   * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
+   */
+  'entitlement.gate.check': { args: [action: string]; returns: GateDecisionView };
+  /** 账本回看：总数、按天、按动作，外加最近几行（spec 1.9-07 / 1.9-08）。 */
+  'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
+  /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
+  'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
 }
 
 /**

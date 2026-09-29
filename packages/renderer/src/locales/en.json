@@ -65,7 +65,6 @@
       "open": "Open site",
       "probe": "Probe login state",
       "logout": "Log out",
-      "actionOk": "{{action}}: done",
       "actionOpen": "Open platform {{id}}",
       "actionProbe": "Probe platform {{id}}",
       "actionLogout": "Log out of platform {{id}}",
@@ -111,9 +110,6 @@
       "targetKindView": "embedded view",
       "targetFocused": "focused",
       "targetUnfocused": "no focus",
-      "noBridge": "Bridge unavailable: not running inside the Electron host",
-      "actionOk": "{{action}}: done",
-      "actionFailed": "{{action}} failed: {{message}}",
       "actionPluginFailed": "Call succeeded but plugin {{id}} is in failed state: {{message}}",
       "actionSave": "Save config",
       "actionStop": "Stop {{id}}",
@@ -132,6 +128,30 @@
       "logPushed": "{{count}} events pushed in this session",
       "logEmpty": "No logs yet",
       "probeRedact": "Emit one log with sensitive fields"
+    },
+    "action": {
+      "noBridge": "Bridge unavailable: not running inside the Electron host",
+      "ok": "{{action}}: done",
+      "failed": "{{action}} failed: {{message}}"
+    },
+    "usage": {
+      "heading": "Outbound quota & usage ledger",
+      "refresh": "Reload usage",
+      "send": "Send a sample",
+      "actionSend": "Send {{action}}",
+      "sampleMessage": "Sample outbound from the usage panel ({{action}})",
+      "receipt": "Delivered: ledger row {{id}} · peer holds {{count}} in total",
+      "unlimited": "Local unlimited quota (no cost at this stage)",
+      "remaining": "{{count}} left today",
+      "denied": "Denied: {{reason}}",
+      "gateUnknown": "Gate not mounted: the assembly is missing entitlement",
+      "total": "{{count}} rows in total",
+      "today": "{{count}} today",
+      "dayRow": "{{day}} · {{count}}",
+      "actionRow": "{{action}} × {{count}}",
+      "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
+      "empty": "Ledger is empty: no outbound has passed the gate yet",
+      "none": "no target"
     },
     "state": {
       "pending": "waiting for deps",

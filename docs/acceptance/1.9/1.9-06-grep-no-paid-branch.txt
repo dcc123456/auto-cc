@@ -1,0 +1,23 @@
+$ grep -rn "quota|entitlement|paid" packages/ --include=*.ts --include=*.tsx | grep -v '\.test\.ts'
+
+packages/entitlement/src/gate.ts:2: * `entitlement.gate` 服务（spec 1.9-01 / 1.9-02 / 1.9-03）：所有外发动作的唯一必经口。
+packages/entitlement/src/gate.ts:31:  static provide = 'entitlement.gate';
+packages/entitlement/src/gate.ts:41:    super(ctx, 'entitlement.gate');
+packages/entitlement/src/gate.ts:77:      throw new AppError('QUOTA_EXCEEDED', decision.reason ?? '额度已用完', 'entitlement.gate', {
+packages/entitlement/src/gate.ts:97:    'entitlement.gate': EntitlementGateService;
+packages/entitlement/src/index.ts:2: * `@auto-cc/plugin-entitlement`（spec 1.9）：外发额度闸门与用量账本。
+packages/entitlement/src/index.ts:4: * 一个包两个 service（plan §8.4 决策「闸门与账本同包」）：`entitlement.gate` 负责判定与放行，
+packages/main/src/registry.ts:10:import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
+packages/main/src/registry.ts:27:  entitlement: EntitlementGateService,
+packages/outbound/src/index.ts:35:  static inject = ['entitlement.gate'];
+packages/outbound/src/index.ts:59:    const gate = asApp(this.ctx)['entitlement.gate'];
+packages/renderer/src/UsagePanel.tsx:22: * 额度怎么改不在这里：配置项在装配面板的 `entitlement` 那一行，热更新即时生效。
+packages/renderer/src/UsagePanel.tsx:35:      ...OUTBOUND_ACTIONS.map((action) => bridge?.entitlement['gate.check'](action)),
+packages/shared/src/bridge.ts:53:  // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
+packages/shared/src/bridge.ts:54:  'entitlement.gate.check',
+packages/shared/src/bridge.ts:315:   * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
+packages/shared/src/bridge.ts:317:  'entitlement.gate.check': { args: [action: string]; returns: GateDecisionView };
+packages/store/src/index.ts:80:   * 于是任何把 `store/src` 拉进编译的生产包（1.9 的 entitlement 是第一个）都会报「config 不存在」。
+
+结论：命中全部位于闸门/账本自身、主进程装配表、外发侧的一行 inject 与一次 perform、IPC 白名单、只读面板说明文字。
+没有任何 if(付费)/else 形态的业务分支——上层只看 gate 的 allowed/remaining/reason。

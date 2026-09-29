@@ -5,6 +5,7 @@ import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
+import { UsagePanel } from './UsagePanel';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
 
@@ -34,6 +35,7 @@ export function App() {
           <div className="flex flex-col gap-4">
             <ShellPanel />
             <SessionPanel />
+            <UsagePanel />
             <AssemblyPanel />
           </div>
         </section>

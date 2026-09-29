@@ -2,7 +2,6 @@ import { Boxes, Play, RefreshCw, Repeat, ScrollText, ShieldCheck, SlidersHorizon
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  BridgeReply,
   DevtoolsStatusView,
   IpcStatsView,
   LogLineView,
@@ -12,6 +11,7 @@ import type {
   PluginStatusView,
   PluginTreeSnapshot,
 } from '@auto-cc/shared';
+import { useBridgeAction } from './useBridgeAction';
 
 /** 状态 → 颜色：只有 Tailwind 静态类名，避免运行期拼类名导致样式缺失。 */
 const STATE_CLASS: Record<PluginNodeView['state'], string> = {
@@ -49,9 +49,7 @@ export function AssemblyPanel() {
   const [logStatus, setLogStatus] = useState<LogStatusView>();
   /** 本次会话里由 `log/line` 事件推进来的条数，是 1.4-03 的界面证据。 */
   const [pushed, setPushed] = useState(0);
-  /** 正在执行的动作标签，用来禁用按钮——重复点 Stop 会在同一个插件上叠两次卸载。 */
-  const [busy, setBusy] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  /** 泄漏巡检的读数，跑完一轮就摊在界面上（spec 1.5-08）。 */
   const [cycle, setCycle] = useState<PluginCycleView>();
   /** 网关入站统计（spec 1.6-12）：harness 的成功率断言读界面上这三项，而不是猜时序。 */
   const [ipcStats, setIpcStats] = useState<IpcStatsView>();
@@ -78,6 +76,8 @@ export function AssemblyPanel() {
     if (devtoolsReply?.ok) setDevtools(devtoolsReply.value);
   }, [bridge]);
 
+  const { busy, notice, run, setNotice } = useBridgeAction(read);
+
   /** 面板读数要随调用变化（spec 1.6-12）：harness 发完调用得能在界面上读到新值，所以按固定间隔重读。 */
   useEffect(() => {
     void read();
@@ -92,27 +92,6 @@ export function AssemblyPanel() {
       setLines((current) => [...(current ?? []), line].slice(-LOG_LIMIT));
     });
   }, [bridge]);
-
-  /**
-   * 跑一个动作并把结果写成一行提示。
-   *
-   * 面板是自测工具，不弹窗：失败原因（含字段级的配置错误）留在界面上，截图才能当验收证据。
-   * 无论成败都重读快照——失败的插件状态是主进程改的，界面不该自己猜。
-   * `describe` 用来覆盖提示：调用成功但插件重建失败时，「保存配置：成功」是句假话。
-   */
-  const run = async <T,>(
-    label: string,
-    call: () => Promise<BridgeReply<T>> | undefined,
-    describe?: (value: T) => string | undefined,
-  ) => {
-    setBusy(label);
-    const reply = await call();
-    setBusy(undefined);
-    if (!reply) setNotice(t('assembly.noBridge'));
-    else if (reply.ok) setNotice(describe?.(reply.value) ?? t('assembly.actionOk', { action: label }));
-    else setNotice(t('assembly.actionFailed', { message: reply.error.message }));
-    await read();
-  };
 
   /** 插件没起来时把它的错误抬到提示行，而不是让用户去树里找那行红字。 */
   const failedNotice = (node: PluginNodeView) =>
@@ -133,22 +112,12 @@ export function AssemblyPanel() {
       });
   };
 
-  /**
-   * 反复启停巡检（spec 1.5-08）：结果不止「跑完了」，而是把三项漂移摊在界面上，
-   * 截图本身就能当验收证据。
-   */
-  const runCycle = async (id: string) => {
-    setBusy(t('assembly.actionCycle', { id }));
-    const reply = await bridge?.plugins.cycle(id, CYCLE_ROUNDS);
-    setBusy(undefined);
-    if (reply?.ok) {
-      setCycle(reply.value);
-      setNotice(t('assembly.cycleOk', { id: reply.value.id, rounds: reply.value.rounds }));
-    } else if (reply) {
-      setNotice(t('assembly.actionFailed', { message: reply.error.message }));
-    }
-    await read();
-  };
+  /** 反复启停巡检（spec 1.5-08）：结果不止「跑完了」，而是把三项漂移摊在界面上，截图本身就能当验收证据。 */
+  const runCycle = (id: string) =>
+    void run(t('assembly.actionCycle', { id }), () => bridge?.plugins.cycle(id, CYCLE_ROUNDS), {
+      apply: setCycle,
+      describe: (report) => t('assembly.cycleOk', { id: report.id, rounds: report.rounds }),
+    });
 
   const saveConfig = async () => {
     if (!editing) return;
@@ -167,7 +136,9 @@ export function AssemblyPanel() {
     await run(
       t('assembly.actionSave'),
       () => bridge?.plugins.saveConfig(editing.id, parsed as Record<string, unknown>),
-      failedNotice,
+      {
+        describe: failedNotice,
+      },
     );
   };
 
@@ -307,11 +278,9 @@ export function AssemblyPanel() {
                         data-action="start"
                         disabled={!!busy}
                         onClick={() =>
-                          void run(
-                            t('assembly.actionStart', { id: node.id }),
-                            () => bridge?.plugins.start(node.id),
-                            failedNotice,
-                          )
+                          void run(t('assembly.actionStart', { id: node.id }), () => bridge?.plugins.start(node.id), {
+                            describe: failedNotice,
+                          })
                         }
                         className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                       >

@@ -3,7 +3,7 @@
  *
  * eslint 负责逐文件拦截（内联 style、自制 svg、裸中文、非入口样式），
  * 这个脚本负责跨文件一致性的四类事实：样式文件白名单、语言包 key 对齐、
- * 代码里用到的 i18n key 是否真的存在、内核视图宽度两侧是否同源。
+ * 代码里用到的 i18n key 是否真的存在（含占位符实参齐不齐）、内核视图宽度两侧是否同源。
  * 任一不符即 exit 1，因此挂在 `pnpm lint` 上是硬门禁而不是提示。
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -22,6 +22,15 @@ function flatten(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return prefix ? [prefix] : [];
   return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
     flatten(child, prefix ? `${prefix}.${key}` : key),
+  );
+}
+
+/** 把嵌套 JSON 展平成 `[key, 文案]`；只收字符串叶子，占位符要按文案原文比对。 */
+function flattenValues(value: unknown, prefix = ''): [string, string][] {
+  if (typeof value === 'string') return prefix ? [[prefix, value]] : [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+    flattenValues(child, prefix ? `${prefix}.${key}` : key),
   );
 }
 
@@ -62,21 +71,41 @@ for (const name of localeNames) {
   if (extra.length) failures.push(`${name} 多出 key：${extra.join(', ')}`);
 }
 
-// 3) 代码里引用的 i18n key 必须在语言包里存在（防拼写漂移）
+// 3) 代码里引用的 i18n key 必须在语言包里存在（防拼写漂移），
+//    且文案里的每个 `{{占位符}}` 都必须有调用点实参 —— 漏一个就把 `{{action}}` 原样画到界面上。
 //    i18next 的 `t('title')` 在 defaultNS 下解析为 `shell.title`，因此允许两种写法。
 const zhKeys = new Set(localeKeys.get('zh-CN.json') ?? []);
 const resolvableKeys = new Set<string>(zhKeys);
-for (const key of zhKeys) {
+const zhValues = JSON.parse(await readFile(path.join(localesDir, 'zh-CN.json'), 'utf8')) as unknown;
+const valuesByKey = new Map<string, string>();
+for (const [key, value] of flattenValues(zhValues)) {
+  valuesByKey.set(key, value);
   const [, ...rest] = key.split('.');
+  if (rest.length) valuesByKey.set(rest.join('.'), value);
   if (rest.length) resolvableKeys.add(rest.join('.'));
 }
 const tsxFiles = await files(rendererRoot, (name) => /\.(tsx|ts)$/.test(name));
 for (const file of tsxFiles) {
   const source = await readFile(file, 'utf8');
-  for (const match of source.matchAll(/\bt\(\s*'([^']+)'/g)) {
-    const key = match[1];
-    if (key && !resolvableKeys.has(key)) {
+  for (const match of source.matchAll(/\bt\(\s*'([^']+)'((?:[^()]|\([^()]*\))*)\)/g)) {
+    const key = match[1] ?? '';
+    if (!resolvableKeys.has(key)) {
       failures.push(`${path.relative(repoRoot, file)} 引用了不存在的 i18n key：${key}`);
+      continue;
+    }
+    // 实参名从第二个实参的对象字面量里取：既认 `action: x`，也认 `{ action }` 这种简写。
+    const argObject = (match[2] ?? '').replace(/^\s*,\s*/, '').trim();
+    const objectBody = argObject.startsWith('{') ? argObject.slice(1, -1) : '';
+    const argNames = new Set(
+      objectBody
+        .split(',')
+        .map((entry) => /^\s*([A-Za-z_$][\w$]*)\s*(:|$)/.exec(entry)?.[1])
+        .filter((name): name is string => Boolean(name)),
+    );
+    for (const placeholder of valuesByKey.get(key)?.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g) ?? []) {
+      if (placeholder && !argNames.has(placeholder[1] ?? '')) {
+        failures.push(`${path.relative(repoRoot, file)} 调用 t('${key}') 未传占位符 {{${placeholder[1]}}}`);
+      }
     }
   }
 }

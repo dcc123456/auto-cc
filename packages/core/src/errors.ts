@@ -6,6 +6,9 @@ export type AppErrorCode =
   | 'PLUGIN_FAILED'
   | 'CONFIG_INVALID'
   | 'PLATFORM_NOT_CONFIGURED'
+  | 'INVALID_ARGUMENT'
+  | 'QUOTA_EXCEEDED'
+  | 'OUTBOUND_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
