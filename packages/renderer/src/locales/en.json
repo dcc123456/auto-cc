@@ -6,6 +6,7 @@
       "switchTo": "中文"
     },
     "nav": {
+      "chat": "Chat",
       "workflow": "Workflow",
       "diagnostics": "Diagnostics"
     },
@@ -192,6 +193,41 @@
         "greet": "Send greeting",
         "tune": "Tailor resume to the JD",
         "deliver": "Send resume"
+      }
+    },
+    "chat": {
+      "heading": "Chat",
+      "empty": "No messages yet. Tell the agent what kind of role you are looking for.",
+      "loading": "Reading the session from the main process…",
+      "inputPlaceholder": "What do you want to do? Enter sends, Shift+Enter adds a line",
+      "send": "Send",
+      "stop": "Stop",
+      "newSession": "New session",
+      "streaming": "Reply is being generated…",
+      "toolHint": "P1 skeleton: local deterministic reply, no LLM and no network call",
+      "workflowMirror": "Same runner: {{status}}",
+      "actionSend": "send message",
+      "actionStop": "stop reply",
+      "actionNewSession": "start a new session",
+      "actionAutonomy": "switch autonomy to {{level}}"
+    },
+    "agent": {
+      "autonomy": {
+        "heading": "Autonomy",
+        "suggest": "Suggest",
+        "semi": "Semi-auto",
+        "auto": "Full-auto"
+      },
+      "tool": {
+        "echo": "Demo echo tool",
+        "unregistered": "Unregistered tool",
+        "input": "Input: {{input}}",
+        "duration": "{{ms}} ms",
+        "state": {
+          "running": "running",
+          "done": "done",
+          "failed": "failed"
+        }
       }
     },
     "state": {

@@ -6,6 +6,7 @@
       "switchTo": "English"
     },
     "nav": {
+      "chat": "对话",
       "workflow": "工作流",
       "diagnostics": "诊断"
     },
@@ -192,6 +193,41 @@
         "greet": "打招呼",
         "tune": "按 JD 优化简历",
         "deliver": "发送简历"
+      }
+    },
+    "chat": {
+      "heading": "对话",
+      "empty": "还没有消息：说说你想找什么样的岗位，agent 会把每一步做在这条对话里。",
+      "loading": "正在读取主进程的会话…",
+      "inputPlaceholder": "想聊什么？回车发送，Shift+Enter 换行",
+      "send": "发送",
+      "stop": "停止",
+      "newSession": "新建会话",
+      "streaming": "回复生成中…",
+      "toolHint": "P1 骨架：本地确定性回复，不接 LLM、不发网络请求",
+      "workflowMirror": "同一个 runner：{{status}}",
+      "actionSend": "发送消息",
+      "actionStop": "停止回复",
+      "actionNewSession": "新建会话",
+      "actionAutonomy": "切换档位为 {{level}}"
+    },
+    "agent": {
+      "autonomy": {
+        "heading": "自治档位",
+        "suggest": "建议模式",
+        "semi": "半自动",
+        "auto": "全自动"
+      },
+      "tool": {
+        "echo": "演示用回显工具",
+        "unregistered": "未登记的工具",
+        "input": "参数 {{input}}",
+        "duration": "{{ms}} 毫秒",
+        "state": {
+          "running": "执行中",
+          "done": "已完成",
+          "failed": "失败"
+        }
       }
     },
     "state": {

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
+import { ChatPanel } from './ChatPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 import { UsagePanel } from './UsagePanel';
@@ -12,15 +13,15 @@ import { WorkflowPanel } from './WorkflowPanel';
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
 
 /**
- * 顶层视图。1.10 先立「工作流是独立视图」这条结构，1.11 的对话式主界面再来争第一入口
- * （AGENTS.md §5.9）——所以现在只有两档，且诊断面板不会跟工作流挤在同一条滚动里。
+ * 顶层视图。AGENTS.md §5.9 定的顺序：对话是第一入口，工作流第二，诊断面板再低一档。
+ * 三个视图都常驻挂载，切换只改 display，所以来回切不丢滚动位置也不丢状态（spec 1.10-01）。
  */
-type TopView = 'workflow' | 'diagnostics';
+type TopView = 'chat' | 'workflow' | 'diagnostics';
 
-/** 首页第一入口：1.2 阶段是壳自检面板，1.10 起工作流独立成视图。 */
+/** 首页第一入口：1.11 起是对话面板，工作流退居第二视图。 */
 export function App() {
   const { t, i18n } = useTranslation();
-  const [view, setView] = useState<TopView>('workflow');
+  const [view, setView] = useState<TopView>('chat');
 
   /**
    * 视图按钮的样式，按层级分两档。
@@ -49,6 +50,9 @@ export function App() {
         </div>
         <div className="flex items-center gap-2">
           <nav className="flex items-center gap-1" data-testid="view-tabs">
+            <button type="button" data-view="chat" className={tabClass('chat')} onClick={() => setView('chat')}>
+              {t('nav.chat')}
+            </button>
             <button
               type="button"
               data-view="workflow"
@@ -78,7 +82,13 @@ export function App() {
       </header>
 
       <main className="flex min-h-0 flex-1">
-        {/* 两个视图各自是一个滚动容器，切换只改 display 不卸载，所以回来时滚动位置还在（1.10-01）。 */}
+        {/* 三个视图各自是一个容器，切换只改 display 不卸载，所以回来时滚动位置还在（1.10-01）。 */}
+        <section
+          data-view-scroll="chat"
+          className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-6`}
+        >
+          <ChatPanel />
+        </section>
         <section
           data-view-scroll="workflow"
           className={`${view === 'workflow' ? 'block' : 'hidden'} min-w-0 flex-1 overflow-y-auto p-6`}

@@ -1,8 +1,8 @@
 import { AlertCircle, Pause, Play, RefreshCw, RotateCw, Workflow as WorkflowIcon } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { useWorkflowRun } from './useWorkflowRun';
 
 /** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
 const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
@@ -11,9 +11,6 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
   done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
   failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
 };
-
-/** 最近一条播报（步骤 id + 那句话），用来证明进度是推来的而不是轮询来的。 */
-type LiveReading = { stepId: string | null; message: string | null };
 
 /**
  * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10）。
@@ -24,26 +21,8 @@ type LiveReading = { stepId: string | null; message: string | null };
  */
 export function WorkflowPanel() {
   const { t } = useTranslation();
-  const [current, setCurrent] = useState<WorkflowRunView>();
-  const [live, setLive] = useState<LiveReading>();
+  const { run: current, live, refresh: read } = useWorkflowRun();
   const bridge = window.autoCC;
-
-  const read = useCallback(async () => {
-    const reply = await bridge?.workflow['runner.current']();
-    if (reply?.ok) setCurrent(reply.value);
-  }, [bridge]);
-
-  useEffect(() => {
-    void read();
-  }, [read]);
-
-  useEffect(() => {
-    if (!bridge) return;
-    return bridge.on('workflow/progress', (event) => {
-      setCurrent(event.run);
-      setLive({ stepId: event.stepId, message: event.message });
-    });
-  }, [bridge]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
 

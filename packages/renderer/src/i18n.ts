@@ -31,6 +31,12 @@ export function setupI18n() {
     fallbackLng: 'zh-CN',
     interpolation: { escapeValue: false },
   });
+  // `index.html` 里的 `lang` 是写死的 zh-CN，而实际语种由 detectLanguage() 决定，
+  // 切语言也不动它——读屏软件与翻译插件都以这个属性判断页面语种，所以必须跟着 i18n 走。
+  document.documentElement.lang = i18n.language;
+  i18n.on('languageChanged', (lng) => {
+    document.documentElement.lang = lng;
+  });
   return i18n;
 }
 
