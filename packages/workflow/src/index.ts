@@ -13,6 +13,7 @@ import {
   AppError,
   Service,
   WORKFLOW_STEP_IDS,
+  sleep,
   type Context,
   type SessionExpiredEvent,
   type WorkflowRunView,
@@ -34,27 +35,6 @@ export const workflowConfigSchema = z.object({
 });
 
 export type WorkflowConfig = z.output<typeof workflowConfigSchema>;
-
-/**
- * 可取消的等待。
- * @param ms 时长（毫秒）；0 时立刻返回，不留下一个空转的定时器
- * @param signal 取消信号；abort 时**正常 resolve** 而不是 reject——暂停不是失败，
- *               让出之后由 `pump()` 检查状态决定要不要继续推进
- */
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort(): void {
-      clearTimeout(timer);
-      resolve();
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
 
 /** 工作流执行器：全应用唯一一份 run 状态，界面只是它的镜像（spec 1.10-08）。 */
 export class WorkflowRunnerService extends Service {

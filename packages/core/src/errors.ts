@@ -13,6 +13,13 @@ export type AppErrorCode =
   // 界面按码决定是「提示一句状态不允许」还是「这一步标红并可重试」。
   | 'WORKFLOW_INVALID_STATE'
   | 'WORKFLOW_STEP_FAILED'
+  // 对话骨架（spec 1.11）：入参边界（空 / 超长）、并发（上一条还在流式）、档位枚举、注册表重复登记。
+  // 界面按码决定是「把原因显示成一行提示」还是「什么都不改」。
+  | 'CHAT_EMPTY_INPUT'
+  | 'CHAT_INPUT_TOO_LONG'
+  | 'CHAT_BUSY'
+  | 'CHAT_AUTONOMY_INVALID'
+  | 'TOOL_DUPLICATE'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

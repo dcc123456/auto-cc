@@ -6,10 +6,17 @@
  */
 import type {
   AppErrorPayload,
+  AutonomyLevel,
+  ChatDeltaEvent,
+  ChatMessageView,
+  ChatSessionView,
+  ChatSnapshotView,
   KernelViewLoadError,
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
+  ToolCallReply,
+  ToolDescriptorView,
   WorkflowProgressEvent,
   WorkflowRunView,
 } from '@auto-cc/core';
@@ -23,10 +30,23 @@ import type {
  */
 export type {
   AppErrorPayload,
+  AutonomyLevel,
+  ChatDeltaEvent,
+  ChatMessageView,
+  ChatPart,
+  ChatSessionView,
+  ChatSnapshotView,
+  ChatRole,
+  ChatTextPart,
+  ChatToolPart,
+  ChatToolPartState,
   KernelViewLoadError,
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
+  ToolCallReply,
+  ToolDescriptorView,
+  ToolEffect,
   WorkflowProgressEvent,
   WorkflowRunStatus,
   WorkflowRunView,
@@ -71,6 +91,14 @@ export const RENDERER_ALLOWLIST = [
   'workflow.runner.pause',
   'workflow.runner.resume',
   'workflow.runner.retryStep',
+  // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
+  'agent.tools.list',
+  'agent.tools.call',
+  'chat.session.current',
+  'chat.session.send',
+  'chat.session.stop',
+  'chat.session.setAutonomy',
+  'chat.session.startSession',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -349,6 +377,26 @@ export interface BridgeSignatures {
   'workflow.runner.resume': { args: []; returns: WorkflowRunView };
   /** 单独重试某一个失败步（spec 1.10-06）；步 id 来自界面，越界即结构化失败。 */
   'workflow.runner.retryStep': { args: [stepId: string]; returns: WorkflowRunView };
+  /**
+   * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，
+   * 界面把它摆在档位旁边，「工具面是空表」这件事本身就看得见。
+   */
+  'agent.tools.list': { args: []; returns: ToolDescriptorView[] };
+  /**
+   * 调用一个工具（spec 1.11-09）。返回值是**协议内的结果联合**而不是抛错：
+   * 工具失败要变成卡片上的一条内容，不能让整条消息消失。
+   */
+  'agent.tools.call': { args: [toolId: string, input: unknown]; returns: ToolCallReply };
+  /** 当前会话的整份快照（spec 1.11-08）；首次访问就地建会话，永不为 null。 */
+  'chat.session.current': { args: []; returns: ChatSnapshotView };
+  /** 发一条用户消息并起一次流式回复，返回刚进入流式态的助手消息（spec 1.11-02 / 03）。 */
+  'chat.session.send': { args: [text: string]; returns: ChatMessageView };
+  /** 中止正在流式的回复并把已产出的部分如实落库（spec 1.11-13）。 */
+  'chat.session.stop': { args: []; returns: ChatMessageView | null };
+  /** 切换自治档位（spec 1.11-07）；P1 只写这一列，不产生行为差异。 */
+  'chat.session.setAutonomy': { args: [level: AutonomyLevel]; returns: ChatSessionView };
+  /** 另起一个新会话，旧会话的行一条都不动（spec 1.11-08）。 */
+  'chat.session.startSession': { args: []; returns: ChatSnapshotView };
 }
 
 /**
@@ -378,7 +426,13 @@ export type BridgeNamespaces = {
  * 主进程→渲染层的事件白名单（spec 1.4-03）：没登记的事件在网关处就不出进程。
  * 事件是「推」的，界面靠它自增，不轮询。
  */
-export const RENDERER_EVENTS = ['log/line', 'session/expired', 'shell/view-error', 'workflow/progress'] as const;
+export const RENDERER_EVENTS = [
+  'log/line',
+  'session/expired',
+  'shell/view-error',
+  'workflow/progress',
+  'chat/delta',
+] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
 
@@ -388,6 +442,7 @@ export interface RendererEventSignatures {
   'session/expired': SessionExpiredEvent;
   'shell/view-error': KernelViewLoadError;
   'workflow/progress': WorkflowProgressEvent;
+  'chat/delta': ChatDeltaEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

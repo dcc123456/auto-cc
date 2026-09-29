@@ -42,6 +42,25 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
 
+  packages/agent:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
+
   packages/config:
     dependencies:
       '@auto-cc/core':
@@ -164,6 +183,9 @@ importers:
       '@auto-cc/core':
         specifier: workspace:*
         version: link:../core
+      '@auto-cc/plugin-agent':
+        specifier: workspace:*
+        version: link:../agent
       '@auto-cc/plugin-config':
         specifier: workspace:*
         version: link:../config

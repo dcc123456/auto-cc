@@ -1,0 +1,318 @@
+/**
+ * `agent.tools` 与 `chat.session` 的行为测试（spec 1.11-04 / 05 / 08 / 09 / 13 / 14）。
+ *
+ * 这里刻意**不**测界面：1.11 的可视判据（首屏即聊天、气泡、卡片、档位可见）由 CDP harness
+ * 驱动真实窗口验收（AGENTS.md §7.1）。单测负责的是结构事实：空表就是空表、调不到就是未注册、
+ * 落库的只有已完成的消息、重启后历史还在、以及本包没有偷偷 import 任何业务能力。
+ */
+import { ConfigService } from '@auto-cc/plugin-config';
+import { StoreService } from '@auto-cc/plugin-store';
+import { asApp, Context, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { CHAT_MIGRATION_VERSION, ChatSessionService, type ChatConfig } from './session.js';
+import { AgentToolsService, type AgentTool } from './tools.js';
+
+const opened: { dispose(): Promise<unknown> }[] = [];
+const dirs: string[] = [];
+
+afterEach(async () => {
+  while (opened.length) await opened.pop()?.dispose();
+  while (dirs.length) rmSync(dirs.shift() ?? '', { recursive: true, force: true });
+});
+
+/**
+ * 装一套 store + 注册表 + 会话。
+ * @param config 会话配置覆盖（默认单片 40 字、无间隔，让用例不必等真计时器）
+ * @returns 上下文、两个服务句柄、采集到的 delta 事件数组，以及本次用的临时库目录
+ */
+async function boot(config: Partial<ChatConfig> = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'auto-cc-agent-'));
+  dirs.push(dir);
+  const ctx = new Context();
+  await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+  const storeFiber = ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
+  await storeFiber;
+  const toolsFiber = ctx.plugin(AgentToolsService, {});
+  await toolsFiber;
+  // 先订阅再挂载：流式一旦跑起来，晚一行订阅就漏掉前面几片，"字数递增"就断言不出来了。
+  const deltas: ChatDeltaEvent[] = [];
+  ctx.on('chat/delta', (event) => deltas.push(event));
+  const chatFiber = ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, ...config });
+  await chatFiber;
+  opened.push(chatFiber, toolsFiber, storeFiber);
+  const app = asApp(ctx);
+  return { ctx, tools: app['agent.tools'], chat: app['chat.session'], deltas, dir, chatFiber };
+}
+
+/** 等一小段时间，用来确认「没有再发生任何事」。 */
+async function settle(ms = 60): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 轮询等待条件成立，用来替代"猜一个 settle 时长"。
+ * @param until 判定函数，每 10 毫秒调一次
+ * @param timeoutMs 最长等待（毫秒），超时就失败，不让用例挂住
+ * @param reason 超时信息里要说的话（写清在等什么，失败时才看得懂）
+ */
+async function waitUntil(until: () => boolean, timeoutMs: number, reason: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!until()) {
+    if (Date.now() > deadline) throw new Error(`等待超时：${reason}`);
+    await settle(10);
+  }
+}
+
+/** 一个合规的假工具：只用来验证协议字段与 schema 校验，不碰任何真实能力。 */
+function makeEchoTool(): AgentTool<{ text: string }> {
+  return {
+    id: 'demo.echo',
+    description: '把入参原样返回',
+    input: z.object({ text: z.string().min(1) }),
+    effect: 'read',
+    requiresConfirmation: false,
+    run: (params) => Promise.resolve({ echoed: params.text }),
+  };
+}
+
+describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
+  it('P1 的注册表是空表，列举得到空数组（1.11-04）', async () => {
+    const { tools } = await boot();
+    expect(tools.list()).toEqual([]);
+  });
+
+  it('调用不存在的工具返回未注册，而不是抛异常把整条消息抹掉（1.11-04 / 09）', async () => {
+    const { tools } = await boot();
+    const reply = await tools.call('demo.echo', { text: 'hi' });
+    expect(reply).toMatchObject({ ok: false, code: 'TOOL_NOT_REGISTERED' });
+  });
+
+  it('外发类工具名一律调不到：打招呼 / 投递 / 发送简历都不在表里（1.11-09）', async () => {
+    const { tools } = await boot();
+    for (const toolId of ['greet.send', 'job.deliver', 'resume.send']) {
+      const reply = await tools.call(toolId, {});
+      expect(reply.ok).toBe(false);
+      if (!reply.ok) expect(reply.code).toBe('TOOL_NOT_REGISTERED');
+    }
+    expect(tools.list()).toEqual([]);
+  });
+
+  it('注册后元数据带齐协议四个字段，入参不合法被 schema 拦下（1.11-05）', async () => {
+    const { tools } = await boot();
+    tools.register(makeEchoTool());
+    const view: ToolDescriptorView[] = tools.list();
+    expect(view).toEqual([
+      { id: 'demo.echo', description: '把入参原样返回', effect: 'read', requiresConfirmation: false },
+    ]);
+    const invalid = await tools.call('demo.echo', { text: '' });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.code).toBe('TOOL_INPUT_INVALID');
+    const ok = await tools.call('demo.echo', { text: 'hi' });
+    expect(ok).toEqual({ ok: true, value: { echoed: 'hi' } });
+  });
+
+  it('工具自己抛错时原样回报为 TOOL_FAILED，不改口成「已完成」（§1.7 第 8 条）', async () => {
+    const { tools } = await boot();
+    tools.register({
+      ...makeEchoTool(),
+      run: () => Promise.reject(new Error('站点返回验证码')),
+    });
+    const reply = await tools.call('demo.echo', { text: 'hi' });
+    expect(reply.ok).toBe(false);
+    if (!reply.ok) expect(reply.message).toContain('站点返回验证码');
+  });
+
+  it('同 id 重复登记被拒：两个同 id 的工具会让白名单失去意义', async () => {
+    const { tools } = await boot();
+    tools.register(makeEchoTool());
+    expect(() => tools.register(makeEchoTool())).toThrowError(/已注册/);
+  });
+});
+
+describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
+  it('首次读取就地建会话：默认档位 suggest、消息为空', async () => {
+    const { chat } = await boot();
+    const snapshot = chat.current();
+    expect(snapshot.session.autonomy).toBe('suggest');
+    expect(snapshot.messages).toEqual([]);
+    expect(snapshot.session.messageCount).toBe(0);
+  });
+
+  it('发消息得到分片增量，字数一片比一片多（1.11-03）', async () => {
+    const { chat, deltas } = await boot({ chunkChars: 8, chunkIntervalMs: 5 });
+    const started = chat.send('你好');
+    expect(started.isStreaming).toBe(true);
+    await settle(300);
+    const pieces = deltas.filter((delta) => !delta.done);
+    expect(pieces.length).toBeGreaterThan(2);
+    const cumulative: number[] = [];
+    let seen = 0;
+    for (const piece of pieces) {
+      seen += piece.text.length;
+      cumulative.push(seen);
+    }
+    const monotonic = cumulative.every((length, index) => index === 0 || length > (cumulative[index - 1] ?? -1));
+    expect(monotonic).toBe(true);
+    expect(deltas.at(-1)?.done).toBe(true);
+  });
+
+  it('落库的只有已完成的消息：流式中读快照能看见内存里那一条', async () => {
+    const { chat } = await boot({ chunkChars: 1, chunkIntervalMs: 10 });
+    chat.send('慢慢说');
+    const during = chat.current();
+    expect(during.messages).toHaveLength(2);
+    expect(during.messages.filter((message) => message.isStreaming)).toHaveLength(1);
+    // 单片 1 字 × 约 85 片的回复跑完之后，内存里那条必须换成落库的那条（isStreaming 为 false）。
+    await waitUntil(() => !chat.current().messages.some((message) => message.isStreaming), 6000, '分片回复没有收尾');
+    expect(chat.current().messages.filter((message) => message.isStreaming)).toHaveLength(0);
+  });
+
+  it('跑完之后用户与助手各一行，助手文本是完整的模板回复（1.11-02）', async () => {
+    const { chat } = await boot();
+    chat.send('帮我看看这个岗位');
+    await settle(120);
+    const snapshot = chat.current();
+    expect(snapshot.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(snapshot.messages.every((message) => !message.isStreaming)).toBe(true);
+    expect(snapshot.session.messageCount).toBe(2);
+    const first = snapshot.messages[1]?.parts[0];
+    expect(first?.kind === 'text' && first.text).toContain('帮我看看这个岗位');
+  });
+
+  it('/tool 前缀得到一张失败态工具卡片，原因写着未注册（1.11-06 + 09）', async () => {
+    const { chat } = await boot();
+    chat.send('/tool 打个招呼');
+    await settle(120);
+    const assistant = chat.current().messages.at(-1);
+    const part = assistant?.parts.find((candidate) => candidate.kind === 'tool');
+    expect(part?.kind === 'tool' ? part.state : null).toBe('failed');
+    expect(part?.kind === 'tool' ? part.errorText : '').toContain('TOOL_NOT_REGISTERED');
+    expect(part?.kind === 'tool' ? part.toolId : '').toBe('demo.echo');
+  });
+
+  it('流式途中停止：已产出的部分如实落库，不留下「永远在流式」的行（1.11-13）', async () => {
+    const { chat, deltas } = await boot({ chunkChars: 4, chunkIntervalMs: 20 });
+    chat.send('这是一段比较长的输入，用来确保停止时还有内容没吐完');
+    await settle(50);
+    const stopped = chat.stop();
+    expect(stopped).not.toBeNull();
+    expect(stopped?.isStreaming).toBe(false);
+    const partial = stopped?.parts[0];
+    const text = partial?.kind === 'text' ? partial.text : '';
+    expect(text.length).toBeGreaterThan(0);
+    await settle(120);
+    // 停止之后再推一片就是「假装还在说」，正是 1.11-13 要防的形态。
+    expect(deltas.filter((delta) => !delta.done).every((delta) => delta.messageId === stopped?.id)).toBe(true);
+    const after = chat.current().messages;
+    expect(after.filter((message) => message.isStreaming)).toHaveLength(0);
+    expect(chat.stop()).toBeNull();
+  });
+
+  it('上一条还在流式时再发：结构化失败而不是把两条回复搅在一起', async () => {
+    const { chat } = await boot({ chunkChars: 2, chunkIntervalMs: 20 });
+    chat.send('第一条');
+    expect(() => chat.send('第二条')).toThrowError(/上一条回复还在生成中/);
+    chat.stop();
+    expect(() => chat.send('第二条')).not.toThrow();
+  });
+
+  it('空输入与超长输入被边界校验拦下', async () => {
+    const { chat } = await boot();
+    expect(() => chat.send('   ')).toThrowError(/内容为空/);
+    expect(() => chat.send('x'.repeat(2001))).toThrowError(/最长/);
+    expect(chat.current().messages).toEqual([]);
+  });
+
+  it('档位可切三态、非法值结构化失败（1.11-07）', async () => {
+    const { chat } = await boot();
+    for (const level of ['suggest', 'semi', 'auto']) {
+      expect(chat.setAutonomy(level).autonomy).toBe(level);
+    }
+    expect(() => chat.setAutonomy('yolo')).toThrowError(/未知自治档位/);
+  });
+
+  it('新建会话不清空旧会话：旧行按 id 仍可回看（1.11-08）', async () => {
+    const { chat, ctx } = await boot();
+    chat.send('旧会话的消息');
+    await settle(120);
+    const oldId = chat.current().session.id;
+    chat.setAutonomy('semi');
+    const fresh = chat.startSession();
+    expect(fresh.messages).toEqual([]);
+    expect(fresh.session.id).not.toBe(oldId);
+    // 直接查库确认旧行一条都没动——界面只看当前会话，所以这里必须由数据层说话。
+    const store = asApp(ctx).store;
+    const rows = store.db
+      .prepare('SELECT parts FROM chat_message WHERE session_id = ? ORDER BY created_at ASC')
+      .all(oldId) as { parts: string }[];
+    expect(rows).toHaveLength(2);
+    expect(JSON.parse(rows[0]?.parts ?? '[]')[0]).toMatchObject({ kind: 'text', text: '旧会话的消息' });
+  });
+
+  it('停掉再重新挂载：迁移不被 push 两遍，历史与档位仍在（plan §8.4 决策 5 的姊妹项）', async () => {
+    const { chat, ctx, chatFiber } = await boot();
+    chat.send('重启前说的话');
+    await settle(120);
+    chat.setAutonomy('auto');
+    const sessionId = chat.current().session.id;
+    const chatVersions = () =>
+      asApp(ctx).store.migrations.filter((migration) => migration.version === CHAT_MIGRATION_VERSION).length;
+    expect(chatVersions()).toBe(1);
+
+    await chatFiber.dispose();
+    const remounted = ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0 });
+    await remounted;
+    expect(chatVersions()).toBe(1);
+    // 版本没重复只是一半，另一半是「重新挂载之后读到的还是那两份表」——upgrade() 在已到版本的库上是空转。
+    const snapshot = asApp(ctx)['chat.session'].current();
+    expect(snapshot.session.id).toBe(sessionId);
+    expect(snapshot.session.autonomy).toBe('auto');
+    expect(snapshot.messages).toHaveLength(2);
+  });
+});
+
+describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
+  /**
+   * 读本包 src 下所有实现文件的 import 行，断言没有触达任何业务能力。
+   * @returns 命中的违规行数组（空即通过）
+   */
+  function forbiddenImportLines(): string[] {
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    const banned = [
+      'plugin-platform',
+      'plugin-browser',
+      'plugin-resume',
+      'plugin-kb',
+      'plugin-outbound',
+      'plugin-entitlement',
+      'plugin-sessions',
+    ];
+    return readdirSync(here)
+      .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+      .flatMap((name) =>
+        readFileSync(join(here, name), 'utf8')
+          .split(/\r?\n/)
+          .filter((line) => line.includes('import') && banned.some((token) => line.includes(token))),
+      );
+  }
+
+  it('agent.* 不 import 任何平台 / 简历 / 外发 / 闸门模块（1.11-14）', async () => {
+    await boot();
+    expect(forbiddenImportLines()).toEqual([]);
+  });
+
+  it('协议里流式、卡片状态、批准位三件事各有承载字段（1.11-15 的反向验证）', async () => {
+    const { tools } = await boot();
+    const tool = makeEchoTool();
+    tools.register(tool);
+    // `requiresConfirmation` 在元数据里可见（批准前执行的策略位）；
+    // 卡片状态见 `ChatToolPart.state`，流式见 `chat/delta` 事件——三者都不依赖任何外部库。
+    expect(tools.list()[0]).toHaveProperty('requiresConfirmation');
+    expect(tool.effect).toBe('read');
+  });
+});

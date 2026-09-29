@@ -88,3 +88,17 @@ plugins:
     config:
       stepDelayMs: 600
       failStep: none
+
+  # 对话式主界面的接线面（spec 1.11）：工具注册表与会话 / 消息 / 档位，两个 id 而不是一个。
+  # 摘掉 `agent` 之后发消息照旧逐片流式，只是任何工具调用都得到 `TOOL_NOT_REGISTERED` ——
+  # 「P1 的对话链路触达不到外发能力」（1.11-09）因此是一条能在界面上演示的事实，而不是配置约定。
+  # `chat` 依赖 store：会话与消息必须重启后还在（1.11-08），两张表的迁移号段取 2（plan §8.4 决策 6 更正）。
+  # 演示流式速度：在装配面板改 chunkChars / chunkIntervalMs（不重启 app）。
+  - id: agent
+    dependsOn: [ipc]
+
+  - id: chat
+    dependsOn: [agent, store]
+    config:
+      chunkChars: 6
+      chunkIntervalMs: 120

@@ -111,6 +111,130 @@ export type WorkflowProgressEvent = {
   message: string | null;
 };
 
+/**
+ * 会话自治档位（master plan §1.7 第 3 条）。
+ *
+ * 三态取自 Claude Code 权限模式的保守子集（plan §8.6）：`suggest` = 只给计划不执行、
+ * `semi` = 逐步确认、`auto` = 仅白名单动作 + 频控。P1 **只存档位不产生行为差异**（spec 1.11-07），
+ * 但界面必须读得出当前档位——档位不可见就等于隐性全自动，那正是 §1.7 第 3 条禁止的形态。
+ */
+export type AutonomyLevel = 'suggest' | 'semi' | 'auto';
+
+/** 自治档位的合法值；渲染层拿不到注册表，只能靠这份常量校验。 */
+export const AUTONOMY_LEVELS = ['suggest', 'semi', 'auto'] as const;
+
+/** 消息作者。P1 没有第三方/系统消息，两态够用。 */
+export type ChatRole = 'user' | 'assistant';
+
+/**
+ * 工具卡片的一次执行状态（spec 1.11-06）。
+ *
+ * 命名与 AI SDK 的 `ToolUIPart` 状态对齐（`input-available` ≈ `running`、`output-error` ≈ `failed`），
+ * 但不照抄它的全集：P1 没有「入参正在流式生成」这件事，也不做批准态（那是 P5 的策略层）。
+ */
+export type ChatToolPartState = 'running' | 'done' | 'failed';
+
+/** 一条消息里的文本片段。 */
+export type ChatTextPart = { kind: 'text'; text: string };
+
+/**
+ * 一条消息里的工具调用片段（master plan §1.7 第 4 条：卡片属于那次回复的一部分）。
+ *
+ * `input` / `output` / `errorText` 三个字段名对齐上游（AI SDK 的 `ToolUIPart` 与 LangChain 的
+ * `ToolMessage` 用的就是这三个），`state` 取它们的公共子集——见 plan §8.6。
+ * 1.11-05 要求"P5 只注册工具、不改协议"，所以 `output` 现在就位：否则真工具回来时
+ * 结果无处安放，协议就得加字段，"定型"那句话便不成立。
+ */
+export type ChatToolPart = {
+  kind: 'tool';
+  /** 本次调用的 id，P5 用它把结果与调用对上；P1 每次新生成。 */
+  toolCallId: string;
+  toolId: string;
+  input: unknown;
+  state: ChatToolPartState;
+  /** 成功后的结果值；未结束与失败时为 null。 */
+  output: unknown;
+  /** 耗时毫秒；未结束为 null（不用 0 冒充「零耗时」）。 */
+  durationMs: number | null;
+  /** 失败原因（含 `TOOL_NOT_REGISTERED` 这类结构化 code 文案），成功时为 null。 */
+  errorText: string | null;
+};
+
+/** 消息内容的一段：文本或工具卡片，顺序即渲染顺序。 */
+export type ChatPart = ChatTextPart | ChatToolPart;
+
+/** 一条已落库（或正在流式追加）的消息（spec 1.11-02 / 03 / 06 / 08）。 */
+export type ChatMessageView = {
+  id: string;
+  sessionId: string;
+  role: ChatRole;
+  parts: ChatPart[];
+  /** 毫秒时间戳，排序依据。 */
+  createdAt: number;
+  /** 助手消息是否还在吐字；1.11-02 的「运行中指示」直接读它。 */
+  isStreaming: boolean;
+};
+
+/**
+ * 一个会话的读数（含档位）。
+ *
+ * 没有 title 字段：会话标题要么来自模型总结（P1 没有模型），要么是界面文案（必须走 i18n，
+ * 不能由主进程造一句中文塞进数据库）。P1 界面显示会话 id 短码与消息数就够 1.11-08 判定。
+ */
+export type ChatSessionView = {
+  id: string;
+  autonomy: AutonomyLevel;
+  createdAt: number;
+  messageCount: number;
+};
+
+/** 界面首屏与重读时拿到的整份快照：当前会话 + 它的消息。 */
+export type ChatSnapshotView = { session: ChatSessionView; messages: ChatMessageView[] };
+
+/**
+ * 流式增量事件载荷（spec 1.11-03）。
+ *
+ * 只带一个片段与两个 id：整份历史由 `chat.session.current()` 一次给全，事件只负责"字数在涨"。
+ * 载荷刻意不传 parts 数组——那会让每片都带上整条消息，等于把流式退化成轮询的变体。
+ */
+export type ChatDeltaEvent = {
+  sessionId: string;
+  messageId: string;
+  /** 本次新增的片段文本；`done` 时为空串。 */
+  text: string;
+  /** 该消息是否已结束；界面见到 true 才去重读快照，把工具卡片补上。 */
+  done: boolean;
+};
+
+/**
+ * 工具副作用分级（master plan §1.7 第 2 条）。
+ *
+ * `read` = 搜索 / 读 JD / 查库；`local-write` = 建档或生成内容；`outbound` = 打招呼 / 投递 / 发消息。
+ * 只有 `outbound` 必须逐级确认并经过 `entitlement.gate`（AGENTS.md §7.3）。这一位是**必填字段**而不是
+ * 注释：MCP 的 annotation 规范自己写明客户端必须视其为不可信，所以它当不了闸门（plan §8.6）。
+ */
+export const TOOL_EFFECTS = ['read', 'local-write', 'outbound'] as const;
+
+export type ToolEffect = (typeof TOOL_EFFECTS)[number];
+
+/** 工具注册表对外可见的元数据（`run` 与 schema 实例过不了 IPC，也不该过）。 */
+export type ToolDescriptorView = {
+  id: string;
+  description: string;
+  effect: ToolEffect;
+  requiresConfirmation: boolean;
+};
+
+/**
+ * 一次工具调用的结果联合（spec 1.11-09：调不到的工具即报错，禁止用「已完成」的措辞掩盖）。
+ *
+ * 三类失败都**不抛异常**而走返回值：工具失败是对话流里要显示的一条内容（卡片红态 + 原因），
+ * 不是要把整条消息抹掉的进程错误。
+ */
+export type ToolCallReply =
+  | { ok: true; value: unknown }
+  | { ok: false; code: 'TOOL_NOT_REGISTERED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED'; message: string };
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -136,5 +260,10 @@ declare module 'cordis' {
      * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
      */
     'workflow/progress'(event: WorkflowProgressEvent): void;
+    /**
+     * 助手回复每吐出一片由 `chat.session` 发出（spec 1.11-03）。
+     * 载荷只有增量片段与两个 id，界面不靠它重建整份历史。
+     */
+    'chat/delta'(event: ChatDeltaEvent): void;
   }
 }

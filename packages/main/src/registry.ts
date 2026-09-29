@@ -5,6 +5,7 @@
  * `import(变量)` 在运行时拿不到路径。因此清单负责「装哪些」，这里负责「用哪个类装」。
  * 新增插件时同时改两处——清单漏了它就不装，注册表漏了它在插件树里显示 failed。
  */
+import { AgentToolsService, ChatSessionService } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
@@ -34,5 +35,9 @@ export const REGISTRY: Registry = {
   sessions: SessionsService,
   // 工作流执行器骨架（spec 1.10）：六步占位流水线，真实步骤在 P2 换进来。
   workflow: WorkflowRunnerService,
+  // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
+  // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
+  agent: AgentToolsService,
+  chat: ChatSessionService,
   shell: ShellService,
 };

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
+    "@auto-cc/plugin-agent": "workspace:*",
     "@auto-cc/plugin-config": "workspace:*",
     "@auto-cc/plugin-devtools": "workspace:*",
     "@auto-cc/plugin-entitlement": "workspace:*",
