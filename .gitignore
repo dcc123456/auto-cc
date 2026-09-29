@@ -8,3 +8,5 @@ coverage/
 research-repos/
 .research-repos/
 docs/acceptance/**/tmp/
+# 测试临时产物一律不得入库（AGENTS.md §7.5，机检见 .githooks/pre-commit）
+tmp/

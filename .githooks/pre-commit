@@ -1,0 +1,44 @@
+#!/bin/sh
+# AGENTS.md §7.5 gate: throwaway test images must never enter the repository.
+# Dependency-free on purpose (same reason as commit-msg: npm install scripts are
+# unreliable in this environment).
+#
+# Allowed image paths:
+#   docs/acceptance/<sub-plan>/<spec-id>-*.{png,jpg,jpeg,webp,gif}  formal evidence
+#   resources/**                                                    app assets, not test output
+# Anything else that is an image, plus anything under a tmp/ directory, is rejected.
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+images=$(printf '%s\n' "$staged" | grep -Ei '\.(png|jpe?g|webp|gif|bmp|tiff)$' || true)
+if [ -n "$images" ]; then
+  bad=$(printf '%s\n' "$images" | grep -Ev '^docs/acceptance/[^/]+/[0-9][0-9.]*-[0-9]+[a-z]?[A-Za-z0-9._-]*\.(png|jpe?g|webp|gif|bmp|tiff)$|^resources/[A-Za-z0-9._/-]*$' || true)
+  if [ -n "$bad" ]; then
+    cat >&2 <<EOF
+✖ test/throwaway images must not be committed (AGENTS.md §7.5)
+
+  $(printf '%s\n' "$bad" | sed 's/^/    /')
+
+  allowed:
+    docs/acceptance/<sub-plan>/<spec-id>-*.png   (evidence named after a spec row)
+    resources/**                                 (app assets, not test output)
+  write scratch screenshots into a tmp/ directory instead (gitignored).
+EOF
+    fail=1
+  fi
+fi
+
+temps=$(printf '%s\n' "$staged" | grep -E '(^|/)tmp/' || true)
+if [ -n "$temps" ]; then
+  cat >&2 <<EOF
+✖ files under a tmp/ directory must not be committed (AGENTS.md §7.5)
+
+  $(printf '%s\n' "$temps" | sed 's/^/    /')
+EOF
+  fail=1
+fi
+
+exit $fail

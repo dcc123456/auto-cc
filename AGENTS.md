@@ -149,19 +149,21 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 
 **禁止"脚本绿了就宣称做完"。** 本项目的测试标准是**能看到页面**：
 
-| #   | 规则                                                                                                                      | 强制                                         |
-| --- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| 7.1 | 任何标 `V`（可视）的验收项**必须有截图/DOM 断言证据**，通过 CDP harness（`pnpm harness`）驱动真实窗口，不允许用单测替代。 | `[验收]`                                     |
-| 7.2 | 自动化测试**不得访问真实招聘平台**。登录态、抓取、打招呼、投递一律先打本地 fixture 站点；真实平台只在用户在场时手动验证。 | `[机检·1.6]`（测试 URL allowlist）+ `[纪律]` |
-| 7.3 | 所有外发动作（打招呼、发送简历、投递）必须经 `entitlement.gate`；绕过 gate 的调用必须有测试使其失败。                     | `[机检·1.9]` 骨架测试                        |
-| 7.4 | **收尾自检清单**（每次改完必须逐条回答，任一不过不得提交/不得声称完成）：                                                 |                                              |
-|     | ① `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿，贴实际命令与输出                               | `[机检]`                                     |
-|     | ② V 类条目附截图路径或 DOM 断言输出，逐条对应 spec ID                                                                     | `[验收]`                                     |
-|     | ③ spec 状态位更新（`[x]` 通过 / `[!]` 受阻并写原因 / `[ ]` 未做），不留下"看起来过了"的模糊项                             | `[验收]`                                     |
-|     | ④ 复用检查：新写的逻辑搜过同能力实现吗？出现第二处复制了吗？（对应 §2）                                                   | `[纪律]`                                     |
-|     | ⑤ 死代码检查：有没有未被调用的导出、被替换的旧实现、注释掉的代码块（对应 §2.4）                                           | `[纪律]`                                     |
-|     | ⑥ 前端改动：Tailwind、lucide、i18n 三项是否都满足（§5）                                                                   | `[机检]`                                     |
-|     | ⑦ 提交与推送是否完成（§1.6），commit message 是否符合 §1                                                                  | `[机检]`                                     |
+| #   | 规则                                                                                                                                                                                                                                                                               | 强制                                         |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 7.1 | 任何标 `V`（可视）的验收项**必须有截图/DOM 断言证据**，通过 CDP harness（`pnpm harness`）驱动真实窗口，不允许用单测替代。                                                                                                                                                          | `[验收]`                                     |
+| 7.2 | 自动化测试**不得访问真实招聘平台**。登录态、抓取、打招呼、投递一律先打本地 fixture 站点；真实平台只在用户在场时手动验证。                                                                                                                                                          | `[机检·1.6]`（测试 URL allowlist）+ `[纪律]` |
+| 7.3 | 所有外发动作（打招呼、发送简历、投递）必须经 `entitlement.gate`；绕过 gate 的调用必须有测试使其失败。                                                                                                                                                                              | `[机检·1.9]` 骨架测试                        |
+| 7.5 | **测试过程中产生的图片/临时文件一律不得进入 git 仓库**。探针输出、中间态截图、一次性素材只能写到被忽略的 `tmp/` 目录；入库的图片只允许两种路径：`docs/acceptance/<子计划>/<验收条目ID>-*.png`（正式验收证据，文件名必须对应 spec 条目）与 `resources/**`（应用素材，非测试产物）。 | `[机检]` `.githooks/pre-commit`              |
+| 7.4 | **收尾自检清单**（每次改完必须逐条回答，任一不过不得提交/不得声称完成）：                                                                                                                                                                                                          |                                              |
+|     | ① `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿，贴实际命令与输出                                                                                                                                                                                        | `[机检]`                                     |
+|     | ② V 类条目附截图路径或 DOM 断言输出，逐条对应 spec ID                                                                                                                                                                                                                              | `[验收]`                                     |
+|     | ③ spec 状态位更新（`[x]` 通过 / `[!]` 受阻并写原因 / `[ ]` 未做），不留下"看起来过了"的模糊项                                                                                                                                                                                      | `[验收]`                                     |
+|     | ④ 复用检查：新写的逻辑搜过同能力实现吗？出现第二处复制了吗？（对应 §2）                                                                                                                                                                                                            | `[纪律]`                                     |
+|     | ⑤ 死代码检查：有没有未被调用的导出、被替换的旧实现、注释掉的代码块（对应 §2.4）                                                                                                                                                                                                    | `[纪律]`                                     |
+|     | ⑥ 前端改动：Tailwind、lucide、i18n 三项是否都满足（§5）                                                                                                                                                                                                                            | `[机检]`                                     |
+|     | ⑦ 提交与推送是否完成（§1.6），commit message 是否符合 §1                                                                                                                                                                                                                           | `[机检]`                                     |
+|     | ⑧ 暂存区里有没有测试临时产物（截图、探针输出、一次性素材）？只允许 §7.5 的两类路径                                                                                                                                                                                                 | `[机检]`                                     |
 
 `[!]` 是合法状态——环境不具备（例如本机为 Windows、无法验证 macOS 运行期）时**如实标 BLOCKED**，
 禁止用推测写成 `[x]`。诚实的空项比虚假的全绿有用。
@@ -183,16 +185,21 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 ## 9. 环境事实（已实测，勿重复试错）
 
 - 本机 **Windows**，Git Bash。**macOS / Linux 的运行期验证在本机无法完成**，相关条目一律标 BLOCKED，不做推测。
-- 网络对 GitHub 直连与 `git clone` 不稳定；npm 走镜像；Electron 二进制需
-  `ELECTRON_MIRROR=https://registry.npmmirror.com/-/binary/electron/`（已固化在 `.npmrc` +
-  `pnpm-workspace.yaml` 的 `onlyBuiltDependencies`），否则 Electron 静默无 dist。
+- 网络对 GitHub 直连与 `git clone` 不稳定；npm 走镜像；Electron 二进制镜像走 `.npmrc` 的
+  `electron_mirror`。**实测更正（1.2）**：Electron 44 起包内**没有 install 脚本**，只暴露
+  `install-electron` bin，`pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 对它空转；
+  二进制由根 `package.json` 的 `postinstall` 显式调用 `install.js` 拉取。
 - npm 生命周期脚本在本环境**可能被禁用**：不要依赖 husky/commitlint 安装期钩子，钩子用
-  `core.hooksPath` + 纯 shell 实现（已在 `.githooks/`）。
+  `core.hooksPath` + 纯 shell 实现（已在 `.githooks/`）。根 `prepare` 在非 git 目录里会失败，
+  临时目录装依赖时要先 `git init`。
 - Node 24 内置 `node:sqlite` 可用 → **禁止 `better-sqlite3`**（原生编译会破坏"用户只装一个 app"）。
+  **实测（1.3）**：Electron 44 主进程内 `node:sqlite` 直接可用（sqlite 3.53.4 / WAL /
+  `PRAGMA user_version`），见 `docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`。
 - Cordis 是 `4.0.0-rc.*`，**API 未稳定**：只在 `packages/core` 一处 `import 'cordis'`，
   其余包经复导出使用。已知坑：`FiberState` 是 const enum，在 `verbatimModuleSyntax` 下不可再导出
-  （用 `fiberState(state: number)` 映射函数代替）。
-- 仓库**尚无 git 远端**；§1.6 的推送要求在此之前降级为"提交 + 报告未推送"。
+  （用 `fiberState(state: number)` 映射函数代替）；Service 子类构造签名必须是 `(ctx: Context, name?)`，
+  收窄成 `Context & AppServices` 会让 `Plugin.Constructor` 推断失败；`Context` 上没有 `start()/stop()`。
+- 仓库**已有 git 远端**（`origin` → `dcc123456/auto-cc`），§1.6 的"提交 + 推送"按原文执行。
 
 ---
 
@@ -201,19 +208,20 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 本文件里的 `[机检]` 分三类。**已落地**的可以立刻依赖；**待落地**的在对应子计划实现之前，
 仍然只是 `[纪律]`，执行者必须靠 §7.4 的自检清单人工核对，不得声称"工具会拦"。
 
-| 规则                  | 手段                                        | 状态               | 落地位置                                     |
-| --------------------- | ------------------------------------------- | ------------------ | -------------------------------------------- |
-| §1.1/1.2 提交格式     | `commit-msg` 正则 + 汉字校验                | **已落地**         | `.githooks/commit-msg`（实测：英文描述被拒） |
-| §1.6 改动即提交       | `pnpm status:check`                         | **已落地**         | `scripts/check-status.ts`（脏区 exit 1）     |
-| §2.7 禁跨包 internal  | eslint `no-restricted-imports`              | **已落地**         | `eslint.config.js`                           |
-| §2.7 禁直连 cordis    | eslint `no-restricted-imports`              | **已落地**         | `eslint.config.js`                           |
-| §2.4 死代码           | eslint no-unused-vars（`--max-warnings 0`） | **已落地（部分）** | 未覆盖"未被外部调用的导出"，需 1.5 补        |
-| §3.5 命名规范         | eslint naming-convention                    | 待落地 1.2         | `eslint.config.js` renderer override         |
-| §5.1 Tailwind only    | eslint 禁非入口样式 import + 目录审计       | 待落地 1.2         | spec 1.2-13                                  |
-| §5.3 lucide only      | eslint 拦 `<svg>` / 内联 SVG                | 待落地 1.2         | spec 1.2-14                                  |
-| §5.5/5.6 i18n         | eslint 裸文案检测 + 缺翻译即失败            | 待落地 1.2         | spec 1.2-15 / 1.2-16                         |
-| §7.2 测试不碰真实平台 | 测试内 URL allowlist                        | 待落地 1.6         | harness 配置                                 |
-| §7.3 外发必经 gate    | 骨架测试断言绕过即失败                      | 待落地 1.9         | spec 1.9-05                                  |
+| 规则                  | 手段                                          | 状态               | 落地位置                                                      |
+| --------------------- | --------------------------------------------- | ------------------ | ------------------------------------------------------------- |
+| §1.1/1.2 提交格式     | `commit-msg` 正则 + 汉字校验                  | **已落地**         | `.githooks/commit-msg`（实测：英文描述被拒）                  |
+| §1.6 改动即提交       | `pnpm status:check`                           | **已落地**         | `scripts/check-status.ts`（脏区 exit 1）                      |
+| §2.7 禁跨包 internal  | eslint `no-restricted-imports`                | **已落地**         | `eslint.config.js`                                            |
+| §2.7 禁直连 cordis    | eslint `no-restricted-imports`                | **已落地**         | `eslint.config.js`                                            |
+| §2.4 死代码           | eslint no-unused-vars                         | **已落地（部分）** | 未覆盖"未被外部调用的导出"，需 1.5 补                         |
+| §3.5 命名规范         | eslint naming-convention                      | 待落地             | 尚未写进 `eslint.config.js`，仍靠人工                         |
+| §5.1 Tailwind only    | eslint 禁非入口样式 import + 目录审计         | **已落地（1.2）**  | `eslint.config.js` + `scripts/check-renderer-conventions.ts`  |
+| §5.3 lucide only      | eslint 拦 `<svg>` / `dangerouslySetInnerHTML` | **已落地（1.2）**  | `eslint.config.js`                                            |
+| §5.5/5.6 i18n         | eslint 裸文案检测 + 缺翻译即失败              | **已落地（1.2）**  | `eslint.config.js` + `pnpm lint`（语言包键对齐）              |
+| §7.5 测试产物不入库   | `pre-commit` 图片路径白名单 + tmp 拦截        | **已落地**         | `.githooks/pre-commit`（实测：散图被拒、`1.3-99-*.png` 放行） |
+| §7.2 测试不碰真实平台 | 测试内 URL allowlist                          | 待落地 1.6         | harness 配置                                                  |
+| §7.3 外发必经 gate    | 骨架测试断言绕过即失败                        | 待落地 1.9         | spec 1.9-05                                                   |
 
 > 待落地项都有对应的 spec 验收 ID。**在它们变成 `[机检]` 之前，AGENTS.md 是唯一防线**，
 > 所以 §7.4 的自检清单里 ④⑤⑥ 三条不许跳过。
