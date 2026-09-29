@@ -39,5 +39,10 @@ plugins:
       guarded: [kernel, ipc, plugins]
       history: 20
 
+  # 可视自测通道的主进程侧读数（spec 1.6-01 / 1.6-06）：只读，不导航、不注入，
+  # 因此不需要窗口先建好——它读的是 `webContents.getAllWebContents()`，界面首屏调用时已有目标。
+  - id: devtools
+    dependsOn: [ipc]
+
   - id: shell
     dependsOn: [plugins]

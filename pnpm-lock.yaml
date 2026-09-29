@@ -60,6 +60,25 @@ importers:
         specifier: 4.0.0-rc.10
         version: 4.0.0-rc.10
 
+  packages/devtools:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      electron:
+        specifier: ^44.4.5
+        version: 44.4.5
+
   packages/ipc:
     dependencies:
       '@auto-cc/core':
@@ -123,6 +142,9 @@ importers:
       '@auto-cc/plugin-config':
         specifier: workspace:*
         version: link:../config
+      '@auto-cc/plugin-devtools':
+        specifier: workspace:*
+        version: link:../devtools
       '@auto-cc/plugin-ipc':
         specifier: workspace:*
         version: link:../ipc

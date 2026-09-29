@@ -16,6 +16,7 @@ import {
   RENDERER_ALLOWLIST,
   RENDERER_EVENTS,
   type BridgeRequest,
+  type IpcStatsView,
   type RendererEvent,
 } from '@auto-cc/shared';
 import { z } from 'zod';
@@ -48,10 +49,13 @@ export class IpcGatewayService extends Service {
     ipcMain.handle(IPC_CHANNELS.call, (_event, request: BridgeRequest) => this.gateway.invoke(request));
   }
 
-  /** 入站统计（在途 / 已完成），spec 1.4-06 的并发断言读这个而不是猜时序。 */
-  get stats(): { inFlight: number; completed: number } {
-    return this.gateway.stats;
-  }
+  /**
+   * 入站统计（在途 / 已完成 / 白名单拒绝），渲染层面板与 harness 读它（spec 1.4-06 / 1.6-12）。
+   *
+   * 刻意是**方法**而不是 getter：网关只允许调用可调用成员（`pickMethod`），
+   * 属性读数会被判定成 `METHOD_NOT_FOUND`——那是设计上的收紧，不是遗漏。
+   */
+  stats = (): IpcStatsView => this.gateway.stats;
 
   /**
    * 仅开发态可用：按给定 path 走一遍网关，把网关的拒绝**原样抛出**。

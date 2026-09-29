@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   BridgeReply,
+  DevtoolsStatusView,
+  IpcStatsView,
   LogLineView,
   LogStatusView,
   PluginCycleView,
@@ -31,7 +33,8 @@ const CYCLE_ROUNDS = 20;
  * 装配面板：插件树、运行指标、错误历史与启停 / 热更新入口。
  *
  * 1.3 时它是只读观察窗；1.4 起数据走网关直连；1.5 起它变成**可操作**的调试器——
- * 停一个插件、把它挂回来、改它的配置并立刻生效，全部不重启进程（spec 1.5-02 … 1.5-08）。
+ * 停一个插件、把它挂回来、改它的配置并立刻生效，全部不重启进程（spec 1.5-02 … 1.5-08）；
+ * 1.6 起它是**可被脚本定位**的面板：行与动作带机读锚点，网关与 CDP 读数显示在顶部（spec 1.6-12 / 1.6-13）。
  *
  * 所有动作都只调白名单里的 `plugins.*` 能力，面板自己不知道也不需要知道主进程的内部结构；
  * 每次动作之后统一 `read()` 重读快照，所以界面显示的永远是主进程当下的真相而不是乐观猜测。
@@ -48,21 +51,29 @@ export function AssemblyPanel() {
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [cycle, setCycle] = useState<PluginCycleView>();
+  /** 网关入站统计（spec 1.6-12）：harness 的成功率断言读界面上这三项，而不是猜时序。 */
+  const [ipcStats, setIpcStats] = useState<IpcStatsView>();
+  /** 主进程侧的自测通道读数（spec 1.6-01 / 1.6-06），与 CDP `/json/list` 三方对照。 */
+  const [devtools, setDevtools] = useState<DevtoolsStatusView>();
   /** 配置编辑器：打开时先把当前生效值读进来，保存走 JSON 补丁。 */
   const [editing, setEditing] = useState<{ id: string; text: string; mounted: boolean }>();
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
-    const [treeReply, statusReply, tailReply, logStatusReply] = await Promise.all([
+    const [treeReply, statusReply, tailReply, logStatusReply, ipcReply, devtoolsReply] = await Promise.all([
       bridge?.kernel.tree(),
       bridge?.plugins.status(),
       bridge?.log.tail(LOG_LIMIT),
       bridge?.log.status(),
+      bridge?.ipc.stats(),
+      bridge?.devtools.status(),
     ]);
     if (treeReply?.ok) setTree(treeReply.value);
     if (statusReply?.ok) setStatus(statusReply.value);
     if (tailReply?.ok) setLines(tailReply.value);
     if (logStatusReply?.ok) setLogStatus(logStatusReply.value);
+    if (ipcReply?.ok) setIpcStats(ipcReply.value);
+    if (devtoolsReply?.ok) setDevtools(devtoolsReply.value);
   }, [bridge]);
 
   useEffect(() => {
@@ -190,6 +201,42 @@ export function AssemblyPanel() {
           <span>{t('assembly.metricGuarded', { names: (status?.guarded ?? []).join(', ') })}</span>
         </p>
 
+        {/* 自测通道读数（spec 1.6-01 / 1.6-06 / 1.6-12）：harness 用 data-stat 锚点读它，
+            因此这里刻意不用 data-row-id——那个选择器必须只命中插件行。 */}
+        <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+          <p className="text-[11px] font-semibold text-slate-300">{t('assembly.channelHeading')}</p>
+          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500" data-stat="ipc">
+            <span>
+              {t('assembly.metricIpc', {
+                inFlight: ipcStats?.inFlight ?? 0,
+                completed: ipcStats?.completed ?? 0,
+                denied: ipcStats?.denied ?? 0,
+              })}
+            </span>
+          </p>
+          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500" data-stat="devtools">
+            <span>
+              {devtools?.isCdpEnabled
+                ? t('assembly.metricCdpOn', { port: devtools.cdpPort ?? 0 })
+                : t('assembly.metricCdpOff')}
+            </span>
+            <span>{t('assembly.metricTargets', { num: devtools?.targetCount ?? 0 })}</span>
+            <span>{devtools?.isPackaged ? t('assembly.metricPackaged') : t('assembly.metricDev')}</span>
+          </p>
+          <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[11px] text-slate-500" data-stat="targets">
+            {(devtools?.targets ?? []).map((target) => (
+              <li key={String(target.id)} data-target-id={String(target.id)}>
+                {t('assembly.targetRow', {
+                  id: target.id,
+                  title: target.title,
+                  kind: target.isMainWindow ? t('assembly.targetKindWindow') : t('assembly.targetKindView'),
+                  focus: target.isFocused ? t('assembly.targetFocused') : t('assembly.targetUnfocused'),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+
         {notice && (
           <p
             className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
@@ -203,8 +250,14 @@ export function AssemblyPanel() {
           {(tree?.nodes ?? []).map((node) => {
             const guarded = status?.guarded.includes(node.id) ?? false;
             const mounted = node.state === 'active' || node.state === 'loading' || node.state === 'unloading';
+            // data-row-id / data-action 是给 harness 的机读锚点：脚本按插件 id 与动作定位，
+            // 不依赖可见文案，所以切到英文界面后同一套命令仍然命中（spec 1.6-13）。
             return (
-              <li key={node.id} className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+              <li
+                key={node.id}
+                data-row-id={node.id}
+                className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+              >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-slate-200">{node.id}</span>
@@ -221,6 +274,7 @@ export function AssemblyPanel() {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
+                      data-action="config"
                       disabled={!!busy}
                       onClick={() => void openEditor(node.id)}
                       className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
@@ -231,6 +285,7 @@ export function AssemblyPanel() {
                     {mounted && !guarded && (
                       <button
                         type="button"
+                        data-action="stop"
                         disabled={!!busy}
                         onClick={() =>
                           void run(t('assembly.actionStop', { id: node.id }), () => bridge?.plugins.stop(node.id))
@@ -244,6 +299,7 @@ export function AssemblyPanel() {
                     {(node.state === 'disposed' || node.state === 'failed') && (
                       <button
                         type="button"
+                        data-action="start"
                         disabled={!!busy}
                         onClick={() =>
                           void run(
@@ -261,6 +317,7 @@ export function AssemblyPanel() {
                     {mounted && !guarded && (
                       <button
                         type="button"
+                        data-action="cycle"
                         disabled={!!busy}
                         onClick={() => void runCycle(node.id)}
                         className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
@@ -299,6 +356,7 @@ export function AssemblyPanel() {
               {editing.mounted ? t('assembly.editorMounted') : t('assembly.editorUnmounted')}
             </p>
             <textarea
+              data-editor="config"
               className="mt-2 h-32 w-full rounded-md border border-slate-700 bg-slate-900 p-2 font-mono text-[11px] text-slate-200"
               value={editing.text}
               onChange={(event) => setEditing({ ...editing, text: event.target.value })}
@@ -307,6 +365,7 @@ export function AssemblyPanel() {
             <div className="mt-2 flex items-center gap-2">
               <button
                 type="button"
+                data-action="save"
                 disabled={!!busy}
                 onClick={() => void saveConfig()}
                 className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
@@ -316,6 +375,7 @@ export function AssemblyPanel() {
               </button>
               <button
                 type="button"
+                data-action="cancel"
                 onClick={() => setEditing(undefined)}
                 className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
               >

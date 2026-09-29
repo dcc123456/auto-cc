@@ -29,6 +29,9 @@ export const RENDERER_ALLOWLIST = [
   'plugins.readConfig',
   'plugins.saveConfig',
   'plugins.cycle',
+  // 1.6 的自测通道：网关入站统计（1.6-12）与主进程侧目标对照（1.6-01 / 1.6-06）。
+  'ipc.stats',
+  'devtools.status',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -127,6 +130,32 @@ export type PluginConfigView = { id: string; values: Record<string, unknown>; mo
 /** 日志出口状态：落盘路径与生效级别。 */
 export type LogStatusView = { file?: string; level: string };
 
+/**
+ * 网关入站统计（spec 1.6-12）：面板与 harness 的「调用成功率」同源。
+ * `denied` 只数白名单拒绝，不含服务内部抛出的业务错误——那类失败在错误历史里看。
+ */
+export type IpcStatsView = { inFlight: number; completed: number; denied: number };
+
+/** 主进程侧看到的一个页面目标（spec 1.6-06 的对照项）。 */
+export type DevtoolsTargetView = {
+  id: number;
+  title: string;
+  url: string;
+  /** 是否主窗口的 webContents；剩下的就是内嵌内核视图等兄弟目标。 */
+  isMainWindow: boolean;
+  /** 当前是否持有键盘焦点：harness 点完一下就靠它确认焦点真的落到了这个目标上。 */
+  isFocused: boolean;
+};
+
+/** 自测通道读数（spec 1.6-01 / 1.6-08）：CDP 开在哪个端口、主进程有几个目标。 */
+export type DevtoolsStatusView = {
+  isPackaged: boolean;
+  isCdpEnabled: boolean;
+  cdpPort: number | null;
+  targetCount: number;
+  targets: DevtoolsTargetView[];
+};
+
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
@@ -151,6 +180,10 @@ export interface BridgeSignatures {
   'plugins.saveConfig': { args: [id: string, patch: Record<string, unknown>]; returns: PluginNodeView };
   /** 反复启停做泄漏巡检（spec 1.5-08）。 */
   'plugins.cycle': { args: [id: string, rounds?: number]; returns: PluginCycleView };
+  /** 网关入站统计（spec 1.6-12）：在途 / 已完成 / 白名单拒绝。 */
+  'ipc.stats': { args: []; returns: IpcStatsView };
+  /** 主进程侧的自测通道读数（spec 1.6-01 / 1.6-06），与 CDP `/json/list` 交叉核对。 */
+  'devtools.status': { args: []; returns: DevtoolsStatusView };
 }
 
 /**

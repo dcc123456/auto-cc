@@ -122,6 +122,28 @@ describe('IPC 网关（spec 1.4-04 / 1.4-05 / 1.4-06 / 1.4-07）', () => {
     expect(fast).toEqual({ ok: true, value: ['line-7'] });
     expect(toggled).toEqual({ ok: true, value: { kernelViewVisible: true } });
     expect(peak).toBe(3);
-    expect(gateway.stats).toEqual({ inFlight: 0, completed: 3 });
+    expect(gateway.stats).toEqual({ inFlight: 0, completed: 3, denied: 0 });
+  });
+
+  it('拒绝计数只统计白名单外的调用（spec 1.6-12 的口径）', async () => {
+    const counting = new Gateway({
+      lookup: (name) => {
+        if (name === 'shell') return { getStatus: () => ({}) };
+        if (name === 'kernel')
+          return {
+            // 白名单内、服务也在，只是方法自己抛错：那是业务失败，不是「越权被拒」。
+            tree: () => {
+              throw new Error('boom in kernel');
+            },
+          };
+        return undefined;
+      },
+    });
+    await counting.invoke({ path: 'shell.getStatus', args: [] });
+    await counting.invoke({ path: 'kernel.tree', args: [] });
+    // 服务在、方法不在：`METHOD_NOT_FOUND` 同样是白名单内的调用，不计入拒绝。
+    await counting.invoke({ path: 'shell.probeRedact', args: [] });
+    await counting.invoke({ path: 'shell.readFile', args: [] });
+    expect(counting.stats).toEqual({ inFlight: 0, completed: 4, denied: 1 });
   });
 });

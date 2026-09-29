@@ -1,7 +1,7 @@
 {
   "shell": {
     "title": "auto-cc 桌面工作台",
-    "subtitle": "计划一 · 1.5 插件运行时管理",
+    "subtitle": "计划一 · 1.6 可视化自测通道",
     "language": {
       "switchTo": "English"
     },
@@ -65,6 +65,18 @@
       "metricEffects": "effect 合计 {{total}} 项",
       "metricResources": "活动句柄 {{num}} 个",
       "metricGuarded": "卸载闸门 {{names}}",
+      "channelHeading": "自测通道（网关与 CDP）",
+      "metricIpc": "网关 在途 {{inFlight}} · 已完成 {{completed}} · 拒绝 {{denied}}",
+      "metricCdpOn": "CDP 已开启 · 端口 {{port}}",
+      "metricCdpOff": "CDP 未开启",
+      "metricTargets": "页面目标 {{num}} 个",
+      "metricPackaged": "打包态",
+      "metricDev": "开发态",
+      "targetRow": "#{{id}} {{title}} · {{kind}} · {{focus}}",
+      "targetKindWindow": "主窗口",
+      "targetKindView": "内嵌视图",
+      "targetFocused": "持有焦点",
+      "targetUnfocused": "无焦点",
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",
       "actionOk": "{{action}}：成功",
       "actionFailed": "{{action}}失败：{{message}}",

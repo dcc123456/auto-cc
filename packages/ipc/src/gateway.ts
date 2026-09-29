@@ -34,16 +34,17 @@ function assertSerializable<T>(value: T, path: string): T {
 export class Gateway {
   private readonly deps: GatewayDeps;
 
-  /** 在途 / 已完成计数：并发正确性（spec 1.4-06）的可观测面。 */
+  /** 在途 / 已完成 / 白名单拒绝计数：并发正确性（spec 1.4-06）与调用成功率（spec 1.6-12）的可观测面。 */
   private inFlight = 0;
   private completed = 0;
+  private denied = 0;
 
   constructor(deps: GatewayDeps) {
     this.deps = deps;
   }
 
-  get stats(): { inFlight: number; completed: number } {
-    return { inFlight: this.inFlight, completed: this.completed };
+  get stats(): { inFlight: number; completed: number; denied: number } {
+    return { inFlight: this.inFlight, completed: this.completed, denied: this.denied };
   }
 
   /**
@@ -68,7 +69,11 @@ export class Gateway {
       return { ok: true, value: assertSerializable(value, path) };
     } catch (error) {
       const payload = AppError.from(error, 'UNKNOWN');
-      if (payload.code === 'NOT_IN_ALLOWLIST') this.deps.onDenied?.(path, payload);
+      if (payload.code === 'NOT_IN_ALLOWLIST') {
+        // 只数白名单拒绝：服务内部的业务错误不算「越权」，混进来会让面板的拒绝数失去意义。
+        this.denied += 1;
+        this.deps.onDenied?.(path, payload);
+      }
       return { ok: false, error: { ...payload, path: payload.path ?? path } };
     } finally {
       this.inFlight -= 1;

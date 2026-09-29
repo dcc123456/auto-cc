@@ -22,6 +22,14 @@ const rendererUrl = process.env.ELECTRON_RENDERER_URL ?? 'http://127.0.0.1:5173'
 
 let electron: ChildProcess | undefined;
 let restartTimer: NodeJS.Timeout | undefined;
+/** 重启串行化：等旧进程退出的窗口里又来了一轮构建，就排队补一次，而不是并发拉起两个实例。 */
+let isRestarting = false;
+let restartQueued = false;
+
+/** esbuild 每轮结束后的防抖间隔，合并主进程与 preload 两条产物的连续触发。 */
+const RESTART_DEBOUNCE_MS = 300;
+/** 等旧进程退出的上限：超时也要拉起新实例，否则一次挂死的 kill 会把 dev 会话永久卡住。 */
+const EXIT_GRACE_MS = 5000;
 
 /** Electron 只属于 packages/main 的 devDependencies，因此从该包解析二进制路径。 */
 function resolveElectron(): string {
@@ -40,14 +48,46 @@ function launchElectron() {
   });
 }
 
-function restartElectron() {
-  if (restartTimer) clearTimeout(restartTimer);
-  restartTimer = setTimeout(() => {
-    // 先摘掉 exit 监听：否则被我们主动 kill 的旧进程会触发 process.exit(0)，把整个 dev 会话带走。
-    electron?.removeAllListeners('exit');
-    electron?.kill();
+/** 等子进程真正退出（已经退出的立刻返回）。 */
+async function waitExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function runRestart(): Promise<void> {
+  if (isRestarting) {
+    restartQueued = true;
+    return;
+  }
+  isRestarting = true;
+  try {
+    const old = electron;
+    if (old) {
+      // 先摘掉 exit 监听：否则被我们主动 kill 的旧进程会触发 process.exit(0)，把整个 dev 会话带走。
+      old.removeAllListeners('exit');
+      old.kill();
+      // 端口随进程释放：抢在旧实例退出前 bind CDP 端口会失败，harness 就会连到一个半死的会话。
+      await waitExit(old, EXIT_GRACE_MS);
+    }
     launchElectron();
-  }, 300);
+  } finally {
+    isRestarting = false;
+    if (restartQueued) {
+      restartQueued = false;
+      scheduleRestart();
+    }
+  }
+}
+
+function scheduleRestart() {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => void runRestart(), RESTART_DEBOUNCE_MS);
 }
 
 /** esbuild 每轮成功产出后拉起或重启 Electron；首次的两个入口产物由同一轮防抖合并成一次启动。 */
@@ -56,7 +96,7 @@ const restartPlugin: Plugin = {
   setup(build) {
     build.onEnd((result) => {
       if (result.errors.length > 0) return;
-      restartElectron();
+      scheduleRestart();
     });
   },
 };

@@ -1,7 +1,7 @@
 {
   "shell": {
     "title": "auto-cc desktop workspace",
-    "subtitle": "Plan 1 · 1.5 plugin runtime management",
+    "subtitle": "Plan 1 · 1.6 visual self-test channel",
     "language": {
       "switchTo": "中文"
     },
@@ -65,6 +65,18 @@
       "metricEffects": "{{total}} effects in total",
       "metricResources": "{{num}} active resources",
       "metricGuarded": "unmount guard {{names}}",
+      "channelHeading": "Self-test channel (gateway and CDP)",
+      "metricIpc": "gateway in flight {{inFlight}} · completed {{completed}} · denied {{denied}}",
+      "metricCdpOn": "CDP on · port {{port}}",
+      "metricCdpOff": "CDP off",
+      "metricTargets": "{{num}} page targets",
+      "metricPackaged": "packaged",
+      "metricDev": "development",
+      "targetRow": "#{{id}} {{title}} · {{kind}} · {{focus}}",
+      "targetKindWindow": "main window",
+      "targetKindView": "embedded view",
+      "targetFocused": "focused",
+      "targetUnfocused": "no focus",
       "noBridge": "Bridge unavailable: not running inside the Electron host",
       "actionOk": "{{action}}: done",
       "actionFailed": "{{action}} failed: {{message}}",

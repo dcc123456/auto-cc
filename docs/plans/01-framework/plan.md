@@ -201,6 +201,45 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 **P1 完成定义**：`docs/specs/01-framework/spec.md` 中每条标准为 PASS 或有明确理由的 BLOCKED
 （不得静默跳过），且 M1 / M2 / M2b 三个里程碑由 agent 可视化验证达成。
 
+### 8.1 子计划 1.6 的落地方案（可视化自测通道）
+
+**目标**：agent 在不引第三方测试框架的前提下跑通「列 target → 看界面 → 点击/输入 → 断言 → 截图归档」，
+并且这条通道本身逐项可验收（用户硬性要求：能自己看到页面并直接测，而不是只跑脚本）。
+
+**分工边界**：
+
+- **端口**：CDP 由 `scripts/dev.ts` 拉起 Electron 时注入 `--remote-debugging-port=10222`，
+  主进程/preload/渲染层源码里不出现这个开关——所以「打包版不开 CDP」是结构性的，不是运行期判断。
+- **harness**（`@auto-cc/testing`）：只用 Node 内置 `fetch` + `WebSocket`，不引 puppeteer/playwright。
+  命令补齐为 `targets / wait / click / type / text / dom / eval / assert / shot / navigate / diff / archive`。
+- **devtools**（新增 `@auto-cc/plugin-devtools`，L1）：主进程侧对照组读数。`devtools.status()` 回
+  `{ isPackaged, isCdpEnabled, cdpPort, targetCount, targets[] }`，targets 取自 `webContents.getAllWebContents()`。
+  它存在的意义是与 CDP `/json/list` **交叉核对**：两边数量与 URL 一致，才说明「agent 看到的」等于
+  「主进程真实有的」（1.6-06）。只读，不做任何导航或注入。
+
+**关键决策（含 1.5 遗留的收口）**：
+
+1. **像素 diff 放 Node 侧**：Chromium `Page.captureScreenshot` 的输出固定是 8bit RGBA、非隔行 PNG，
+   用 `node:zlib.inflateSync` + 五种 filter 反变换即可解出像素，不需要解码依赖（引第三方包会污染
+   1.7 的零依赖产物审计）。差异以「不同像素数 / 占比 / 包围盒」三项报告，包围盒能指出差异区域。
+2. **内核视图是独立 target，驱动它不需要新的 IPC 面**：harness 直接对那个 target 发 `Page.navigate`
+   （1.6-09）。被测页面是仓库内 `fixtures/` 静态页，以 `file://` 加载——**不访问真实招聘平台**
+   （`AGENTS.md` §7.2），P2 复用同一批页面做选择器与登录态实验。
+3. **面板加机读锚点**（1.5 遗留第 3 条）：插件行 `data-row-id="<插件 id>"`、按钮
+   `data-action="config|stop|start|cycle"`（配置编辑器再补 `save|cancel` 与 `data-editor="config"`），
+   脚本不再靠可见文案定位；文案继续走 i18n，两者解耦。`data-row-id` 只出现在插件行上，
+   网关与 CDP 读数用 `data-stat` 锚点，这样 `dom --selector '[data-row-id]'` 恰好等于插件 id 集合。
+4. **网关指标进界面**（1.5 遗留第 2 条）：`ipc.stats`（在途 / 已完成 / 拒绝）登记进白名单并在面板顶部展示，
+   harness 的「调用成功率」以它为数据源。`devtools.status()` 的 target 里带 `isFocused`，
+   点击之后焦点是否真落到该目标上就有主进程侧的证据（`isVisible()` 在 Electron 44 的 `WebContents`
+   类型上不存在，所以取焦点而不是取可见性）。
+5. **dev 重启竞态**（1.5 固化事实第 8 条）：`scripts/dev.ts` 的重启拆成 `scheduleRestart()`（防抖）+
+   `runRestart()`（等旧进程真正 `exit` 再拉起，带兜底超时），退出等待期间又来一轮构建则排队补一次，
+   否则新旧进程同时 bind 10222，`pnpm dev` 整个会话被带走。
+6. **证据归档**（1.6-11）：`shot --out` 只写临时目录；`archive --id <spec-id> --in <files…>` 才搬进
+   `docs/acceptance/1.6/` 并把文件名规范成 `<spec-id>-<slug>.png`。这与 `AGENTS.md` §7.5 的机检钩子同向：
+   过程图不入库，入库的必须是命名合规的验收证据。
+
 ## 9. P1 明确不做
 
 - 不接招聘平台、不写 JD 模型、不做 PDF、不做知识库 —— 提前做这些会让骨架被业务细节绑架。

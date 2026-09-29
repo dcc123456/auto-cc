@@ -6,6 +6,7 @@
  * 新增插件时同时改两处——清单漏了它就不装，注册表漏了它在插件树里显示 failed。
  */
 import { ConfigService } from '@auto-cc/plugin-config';
+import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
 import { LogService } from '@auto-cc/plugin-logger';
@@ -19,5 +20,6 @@ export const REGISTRY: Registry = {
   store: StoreService,
   ipc: IpcGatewayService,
   plugins: PluginsService,
+  devtools: DevtoolsService,
   shell: ShellService,
 };

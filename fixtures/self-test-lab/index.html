@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+  自测实验室 fixture（spec 1.6-09 / 1.6-10 的被测页面）。
+
+  这不是产品界面，所以不适用 AGENTS.md §5.5 的 Tailwind / lucide / i18n 约束——
+  它要的是「行为可预测、离线可用、能被脚本精确断言」，因此样式全部内联、零外部请求。
+  P2 的浏览器自动化会复用这批页面做选择器与登录态实验（一律本地，不碰真实招聘平台）。
+
+  约定：
+  - `?tint=<css color>` 改背景色，给视觉回归一个确定的被试差异；
+  - `[data-row-id]` 与 `[data-action]` 跟 app 面板同一套机读锚点约定，脚本可以共用定位逻辑；
+  - 「生成动态节点」按钮产出的 id 每次不同，用来证明读到的是真实渲染后的 DOM。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>自测实验室 fixture</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.6 system-ui;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      input {
+        padding: 6px 8px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #111827;
+        color: inherit;
+      }
+      button {
+        padding: 6px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: inherit;
+        cursor: pointer;
+      }
+      [data-row-id] {
+        margin-top: 8px;
+        padding: 6px 8px;
+        border: 1px dashed #334155;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 data-row-id="fixture-heading">自测实验室</h1>
+
+    <section data-row-id="fixture-input">
+      <input id="note" aria-label="备注输入" placeholder="输入备注" />
+      <button type="button" data-action="echo">回显</button>
+      <output id="echoed" aria-label="回显结果"></output>
+    </section>
+
+    <section data-row-id="fixture-counter">
+      <button type="button" data-action="increase">计数 +1</button>
+      <span aria-label="计数值" id="counter">0</span>
+    </section>
+
+    <section data-row-id="fixture-dynamic">
+      <button type="button" data-action="generate">生成动态节点</button>
+      <div id="dynamic-host"></div>
+    </section>
+
+    <script>
+      // 背景色只由查询参数决定，同一 URL 永远同一画面——视觉回归的基线必须可复现。
+      const tint = new URLSearchParams(location.search).get('tint');
+      if (tint) document.body.style.background = tint;
+
+      let count = 0;
+      const counter = document.getElementById('counter');
+      const note = document.getElementById('note');
+      const echoed = document.getElementById('echoed');
+
+      document.querySelector('[data-action="increase"]').addEventListener('click', () => {
+        count += 1;
+        counter.textContent = String(count);
+        counter.setAttribute('data-count', String(count));
+      });
+
+      // 回显走 input 事件提交后的值：真实输入路径（Input.insertText）没生效时这里就是空的。
+      document.querySelector('[data-action="echo"]').addEventListener('click', () => {
+        echoed.textContent = note.value;
+      });
+
+      document.querySelector('[data-action="generate"]').addEventListener('click', () => {
+        const node = document.createElement('p');
+        // id 带时间戳：断言「DOM 里出现了这个 id」等价于「脚本真的驱动了页面渲染」。
+        node.id = `dyn-${String(Date.now())}`;
+        node.textContent = `动态节点 ${node.id}`;
+        document.getElementById('dynamic-host').append(node);
+      });
+    </script>
+  </body>
+</html>
