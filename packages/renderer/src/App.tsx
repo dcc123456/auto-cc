@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
+import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
@@ -32,6 +33,7 @@ export function App() {
         <section className="min-w-0 flex-1 overflow-y-auto p-6">
           <div className="flex flex-col gap-4">
             <ShellPanel />
+            <SessionPanel />
             <AssemblyPanel />
           </div>
         </section>

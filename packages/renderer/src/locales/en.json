@@ -41,6 +41,40 @@
       "heading": "Embedded kernel view slot",
       "hint": "This region is covered by the main process WebContentsView"
     },
+    "session": {
+      "heading": "Embedded kernel sessions (partition & login state)",
+      "refresh": "Reload session state",
+      "empty": "No sessions listed: cordis.yml registers no platform, or the sessions plugin is not mounted",
+      "none": "none",
+      "viewIdle": "not read yet",
+      "viewUrl": "Kernel view URL {{url}}",
+      "viewPartition": "View partition {{partition}}",
+      "active": "Active platform {{id}}",
+      "viewError": "Kernel view failed to load: {{code}} {{description}} ({{url}})",
+      "expiredBanner": "Login for {{id}} is no longer valid ({{reason}}), sign in again · {{at}}",
+      "reason": {
+        "missing": "session cookie absent",
+        "expired": "session cookie expired"
+      },
+      "auth": {
+        "active": "signed in",
+        "expired": "signed out"
+      },
+      "persistent": "persistent partition",
+      "inMemory": "in-memory partition",
+      "open": "Open site",
+      "probe": "Probe login state",
+      "logout": "Log out",
+      "actionOk": "{{action}}: done",
+      "actionOpen": "Open platform {{id}}",
+      "actionProbe": "Probe platform {{id}}",
+      "actionLogout": "Log out of platform {{id}}",
+      "partition": "Partition {{name}}",
+      "storagePath": "Storage path {{path}}",
+      "cookieNames": "Cookie names {{names}}",
+      "expiresAt": "Expires {{time}}",
+      "noExpiry": "no expiry"
+    },
     "assembly": {
       "heading": "Plugin assembly (cordis.yml)",
       "refresh": "Re-read assembly state",

@@ -129,7 +129,9 @@ export default definePlugin({
 ```
 
 - 命名：service 名 `域.能力`（`config`、`logger`、`store.db`、`sessions`、`entitlement.gate`、`jd.store`）；
-  事件名 `域.动作`（`plugin.state.changed`、`log.entry`、`session.auth.expired`）。
+  事件名落地为 `域/动作`（`log/line`、`plugin/error`、`session/expired`、`shell/view-error`）——
+  1.4 定下划线改斜杠，因为事件名要和 IPC 通道、`RENDERER_EVENTS` 白名单字面量一一对应，
+  而点号已经留给「服务.方法」的调用名（`shell.getStatus`），两种点号会混在一张名单里。
 - 资源（浏览器会话、DB 句柄、定时器、子进程）**只能**在 `ctx.effect` 里分配。
 - 插件不得抛裸错到主进程；`kernel` 统一捕获并置 fiber 为 FAILED（P1.5）。
 - 已知坑：cordis 的 `FiberState` 是 ambient const enum，`verbatimModuleSyntax` 下不可复导出（TS2748），
@@ -318,6 +320,71 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 按 §7 规则标 `[!]` 并写清缺哪个二进制，配置本身已产出 `linux-unpacked`，到对应宿主重跑即可补齐。
 安装包侧复验：「app 自己不注入 CDP 开关」在打包版上成立（操作方外部追加后 `isCdpEnabled` 仍为 false）；
 打包态截图沿用同一个遮挡开关即可，本轮**没有**做「不加遮挡开关」的反向对照，所以只记录了「加了就正常」。
+
+### 8.3 子计划 1.8 的落地方案（内置内核会话与登录态持久化）
+
+**目标**：把 1.2 起就挂在壳层里的空壳内核视图变成**真正承载站点的会话容器** —— 每个平台一份
+`persist:<platform>` 分区、分区之间与 app 界面互相读不到 cookie、登录态跨重启保持、失效可探测并
+在界面上说清楚，并且用户能亲眼看到自动化在做什么、随时用键盘鼠标接管。
+
+**选型与证据**（AGENTS §6.1 / §6.2：API 形态一律以本机安装的 `.d.ts` 为准，不看博客转述）：
+
+| 候选                                                                          | 结论     | 证据                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Electron 内置 `WebContentsView` + `webPreferences.partition = 'persist:<id>'` | **采用** | `packages/main/node_modules/electron/electron.d.ts:24607` `WebContentsViewConstructorOptions.webPreferences`；`:19573` `partition?: string`（注释明确：`persist:` 前缀即持久、同分区共享会话）；`:12523` `Session.fromPartition` |
+| `BrowserView`                                                                 | 否决     | Electron 44 已弃用，官方指引迁到 `WebContentsView`；本仓库 1.2 起用的就是后者，换回去是倒退                                                                                                                                      |
+| 给内核视图注入 `preload` 跑自动化脚本                                         | 否决     | 内核视图加载的是外部站点，注入即等于把 app 的能力交给别人的页面；自动化一律走 CDP（1.6 已建通道），主进程只提供 session                                                                                                          |
+| 引入 Playwright / Puppeteer 自带内核                                          | 否决     | 直接违反「用户只装一个 app」（1.7-12 刚证明产物里没有第二内核），而 1.8 要的就是 Electron 自己的分区                                                                                                                             |
+| 自己维护 cookie 存储（`tough-cookie` 一类）                                   | 否决     | 绕开 Chromium 持久化就丢掉了 localStorage / IndexedDB / service worker，真实站点根本登不进；且构成第二套状态存储（§2.7）                                                                                                         |
+
+配套 API 同样实测过：`Session.clearStorageData({storages:['cookies']})`（`:13173` + `:20996`
+`ClearStorageDataOptions`，`origin` 可按 `scheme://host:port` 收窄）、`Session.getStoragePath()`
+（`:13323`，in-memory 会话返回 `null` —— 正好是「分区真的落盘了」的判据）、`Session.isPersistent()`
+（`:13334`）、`Session.cookies`（`:13617`）、`WebContents.on('did-fail-load')`（`:16733`）。
+`node:sqlite` / `store` 不参与登录态：cookie 归 Chromium 自己的磁盘存储。
+
+**落地形态**：
+
+- 新增 L2 域包 `packages/sessions`（`@auto-cc/plugin-sessions`，id `sessions`，spec.md:43 已预留）：
+  只有它碰 `session`，只有它决定分区名与登录判定；`cordis.yml` 配平台清单
+  （`id` / `startUrl` / `sessionCookieName`），P1 只配本地 fixture 平台。
+- `packages/shell`：内核视图的**创建权仍在 shell**（它是唯一的窗口/视图宿主），新增
+  `mountKernelSite(partition, url)` —— 按给定分区重建视图、把 `did-fail-load` 记进自己的状态；
+  主窗口 `webPreferences` 补 `partition: 'persist:app'`。
+- 新增本地 fixture HTTP 服务 `pnpm fixture`（`scripts/fixture-server.ts`，只绑 `127.0.0.1:10233`）：
+  登录页（点一下写 `Max-Age` 持久 cookie）、`/api/state`（按 cookie 头判登录态）、登出路由。
+  1.8-09「停掉 fixture 服务」需要先有一个可停的服务 —— 现在只有 `file://` 的 lab 页。
+- 渲染层新增「会话」面板：读 `sessions.status()`、打开站点、探测、登出，并第一次订阅**领域事件**
+  （`window.autoCC.on('session/expired', ...)`，失效时把「需重新登录」显示出来）。
+  1.4 起 `log/line` 就已在装配面板里推送过，所以「用上 `on`」不是第一次，「订阅业务事件」才是。
+
+**关键决策**：
+
+1. **一个分区 = 一个视图生命周期**：`WebContentsView` 的 partition 构造后不可改，所以「切换平台」
+   就是销毁旧视图、按新分区重建。不做「一个视图挂多份 session」的假象。
+2. **app 界面自己也要有分区**（`persist:app`）：否则 1.8-02 的隔离只是「恰好没共享」；给了显式
+   分区之后，「界面读不到站点 cookie」是结构事实，能被 `document.cookie` 直接证明。
+3. **登录态落盘先不额外 flush**：`persist:` 分区由 Chromium 在正常退出时自己写盘，本计划按
+   「干净退出」验收 1.8-03；只有实测复现「重启掉登录」才引入 `flushStorageData()`（§2.6）。
+   **实测结论（1.8-03）**：连 `taskkill //IM electron.exe //F` 强杀都不掉登录态，
+   cookie 在登出前就已落到 `Partitions/<平台>/Network/Cookies`，所以没有引入 flush。
+4. **失效探测只读 cookie，不请求站点**：`session.cookies.get({name})` + `expirationDate` 判定，
+   不发探测请求 —— 真实平台上一发请求就是风控流量，而骨架阶段要的是「不静默失败」。
+   平台特异的选择器判定留给 P2 的站点知识包。
+5. **`session/expired` 走既有事件白名单**，不新增通道：`RENDERER_EVENTS` 与 `RendererEventSignatures`
+   漏一处即编译期报错（`bridge.ts:226` 的保险丝）；事件名沿用仓库的 `scope/name` 形式，
+   spec 条目写的 `session.auth.expired` 落到实现是 `session/expired`（改名在 spec 里注明）。
+6. **1.8-07 依赖 1.10 的工作流执行器**：P1 还没有 `workflow.runner`，「停在可恢复点」没有可停的对象。
+   本轮只交付「事件 + 界面提示」这一半，另一项如实标 BLOCKED，不用假执行器凑数。
+7. **脱敏只测「值不出现在日志里」**：sessions 侧日志刻意只打 cookie 名与数量；同时补
+   `Set-Cookie:` 自由文本的缺口（`redact.ts` 的 `INLINE` 要求 `key=value` 形式，头块没分隔符就漏）。
+8. **加载失败态由事件推，不靠快照轮询**（1.8-09 收口时补的决策）：`sessions.open` 在 `loadURL` 之后
+   立刻返回，而 `did-fail-load` 晚到几十毫秒，所以动作返回时读到的快照里错误位是空的。原计划让面板
+   「动作后重读一次」就够，实测不够——错误态永远慢一拍，必须再点一次刷新。改成 `shell` 在
+   `did-fail-load` 里同时 `ctx.emit('shell/view-error', ...)`，走 1.4 的事件白名单出进程。
+   同一轮实测还否掉了「用加载成功事件复位错误位」：Chromium 在主文档加载失败时**照样**触发
+   `dom-ready` 与 `did-finish-load`，且那一刻 `getURL()` 还不是 `chrome-error://`，任何判据都会把
+   刚记下的错误抹掉；所以错误位的生命周期就是「本次挂载」，`createKernelView` 开头清零。
 
 ## 9. P1 明确不做
 

@@ -41,6 +41,40 @@
       "heading": "内嵌内核视图槽位",
       "hint": "此区域由主进程的 WebContentsView 覆盖渲染"
     },
+    "session": {
+      "heading": "内置内核会话（分区与登录态）",
+      "refresh": "重新读取会话状态",
+      "empty": "会话列表为空：cordis.yml 里没有登记平台，或 sessions 插件未挂载",
+      "none": "无",
+      "viewIdle": "尚未读取",
+      "viewUrl": "内核视图地址 {{url}}",
+      "viewPartition": "视图分区 {{partition}}",
+      "active": "当前平台 {{id}}",
+      "viewError": "内核视图加载失败：{{code}} {{description}}（{{url}}）",
+      "expiredBanner": "平台 {{id}} 的登录态已失效（{{reason}}），需重新登录 · {{at}}",
+      "reason": {
+        "missing": "会话 cookie 不存在",
+        "expired": "会话 cookie 已过期"
+      },
+      "auth": {
+        "active": "已登录",
+        "expired": "未登录"
+      },
+      "persistent": "持久分区",
+      "inMemory": "内存分区",
+      "open": "打开站点",
+      "probe": "探测登录态",
+      "logout": "退出登录",
+      "actionOk": "{{action}}：完成",
+      "actionOpen": "打开平台 {{id}}",
+      "actionProbe": "探测平台 {{id}}",
+      "actionLogout": "退出平台 {{id}}",
+      "partition": "分区 {{name}}",
+      "storagePath": "落盘路径 {{path}}",
+      "cookieNames": "cookie 名 {{names}}",
+      "expiresAt": "过期时间 {{time}}",
+      "noExpiry": "无期限"
+    },
     "assembly": {
       "heading": "插件装配（cordis.yml）",
       "refresh": "重新读取装配状态",

@@ -4,13 +4,25 @@
  * preload 依据 `RENDERER_ALLOWLIST` 生成代理对象，IPC 网关依据同一份名单校验入站调用，
  * 因此「渲染层能调什么」与「主进程允许什么」永远是同一个常量，不会漂移。
  */
-import type { AppErrorPayload, LogLineView, PluginErrorView } from '@auto-cc/core';
+import type {
+  AppErrorPayload,
+  KernelViewLoadError,
+  LogLineView,
+  PluginErrorView,
+  SessionExpiredEvent,
+} from '@auto-cc/core';
 
 /**
- * 错误载荷、日志行与插件失败事件定义在 `@auto-cc/core`（那里是跨进程契约与 cordis 事件
- * 声明的归属地），这里原样转出，渲染层继续只认 `@auto-cc/shared` 一个入口。
+ * 错误载荷、日志行、插件失败与会话/视图事件定义在 `@auto-cc/core`（那里是跨进程契约与
+ * cordis 事件声明的归属地），这里原样转出，渲染层继续只认 `@auto-cc/shared` 一个入口。
  */
-export type { AppErrorPayload, LogLineView, PluginErrorView } from '@auto-cc/core';
+export type {
+  AppErrorPayload,
+  KernelViewLoadError,
+  LogLineView,
+  PluginErrorView,
+  SessionExpiredEvent,
+} from '@auto-cc/core';
 
 /** 渲染层可调用的 `service.method` 全限定名白名单（spec 1.4-07 的唯一依据）。 */
 export const RENDERER_ALLOWLIST = [
@@ -32,6 +44,11 @@ export const RENDERER_ALLOWLIST = [
   // 1.6 的自测通道：网关入站统计（1.6-12）与主进程侧目标对照（1.6-01 / 1.6-06）。
   'ipc.stats',
   'devtools.status',
+  // 1.8 的内置内核会话：分区清单与登录态读数、打开站点、探测、登出。
+  'sessions.status',
+  'sessions.open',
+  'sessions.probe',
+  'sessions.logout',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -66,14 +83,58 @@ export type ShellStatus = {
   windowVisible: boolean;
   kernelViewVisible: boolean;
   kernelViewBounds: { x: number; y: number; width: number; height: number };
+  /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
+  kernelViewPartition: string;
+  /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
+  kernelViewUrl: string;
+  /** 最近一次加载失败；成功加载后为 null，因此它总是「关于当前这个 URL」的。 */
+  kernelViewLoadError: KernelViewLoadError | null;
   lastError: string | undefined;
 };
+
+/**
+ * 一个平台的会话读数（spec 1.8-01 / 1.8-04 / 1.8-06）。
+ *
+ * 只带 cookie 的**名字**与过期时间，绝不含取值：这条快照会被渲染层显示、也会被 harness
+ * 原样写进证据文件，一旦带上值就等于把登录凭证抄进日志与截图（AGENTS.md §8.5）。
+ */
+export type SessionPlatformView = {
+  id: string;
+  partition: string;
+  startUrl: string;
+  isPersistent: boolean;
+  /** 分区在磁盘上的实际目录；in-memory 会话为 null，用于证明「落盘了」。 */
+  storagePath: string | null;
+  cookieNames: string[];
+  /** 判定登录态所依据的 cookie 名。 */
+  sessionCookieName: string;
+  auth: 'active' | 'expired';
+  /** 该 cookie 的过期时间戳（毫秒）；会话型 cookie 与缺席时为 null。 */
+  expiresAt: number | null;
+};
+
+/** 会话总览：所有已配置平台 + 内核视图当前承载的是哪一个。 */
+export type SessionsStatusView = { platforms: SessionPlatformView[]; activePlatform: string | null };
 
 /**
  * 内嵌内核视图占位区宽度占客户区宽度的比例。
  * 主进程用它摆 `WebContentsView`，渲染层用它摆对应的 Tailwind 槽位，两侧必须同源。
  */
 export const KERNEL_VIEW_WIDTH_RATIO = 0.38;
+
+/**
+ * app 界面自己占的会话分区。
+ * 主窗口刻意不用 default session：给了显式分区之后，「界面读不到站点 cookie」是分区名不同
+ * 带来的结构事实，而不是恰好没共享（spec 1.8-02）。
+ */
+export const APP_PARTITION = 'persist:app';
+
+/**
+ * 平台站点分区名的唯一生成处（spec 1.8-01）。
+ * @param platform 平台标识（如 `fixture` / `boss`），必须是 ASCII 短名
+ * @returns `persist:` 前缀的分区名 —— Chromium 据此把该会话的 cookie/storage 落盘
+ */
+export const partitionFor = (platform: string): string => `persist:${platform}`;
 
 /**
  * 插件树节点（spec 1.3-01 / 1.3-09 / 1.3-10 的界面证据）。
@@ -184,6 +245,14 @@ export interface BridgeSignatures {
   'ipc.stats': { args: []; returns: IpcStatsView };
   /** 主进程侧的自测通道读数（spec 1.6-01 / 1.6-06），与 CDP `/json/list` 交叉核对。 */
   'devtools.status': { args: []; returns: DevtoolsStatusView };
+  /** 会话总览：分区、落盘路径、cookie 名与登录判定（spec 1.8-01 / 1.8-04）。 */
+  'sessions.status': { args: []; returns: SessionsStatusView };
+  /** 让内核视图按该平台的分区打开起始地址（spec 1.8-02 / 1.8-08）。 */
+  'sessions.open': { args: [platform: string]; returns: SessionsStatusView };
+  /** 只读 cookie 判登录态，不发站点请求；失效时顺带推 `session/expired`（spec 1.8-06）。 */
+  'sessions.probe': { args: [platform: string]; returns: SessionPlatformView };
+  /** 清掉该平台分区的 cookie，用于验收「退出登录即清除」（spec 1.8-04）。 */
+  'sessions.logout': { args: [platform: string]; returns: SessionPlatformView };
 }
 
 /**
@@ -213,13 +282,15 @@ export type BridgeNamespaces = {
  * 主进程→渲染层的事件白名单（spec 1.4-03）：没登记的事件在网关处就不出进程。
  * 事件是「推」的，界面靠它自增，不轮询。
  */
-export const RENDERER_EVENTS = ['log/line'] as const;
+export const RENDERER_EVENTS = ['log/line', 'session/expired', 'shell/view-error'] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
 
 /** 每个事件的载荷形状，preload 的 `on` 据此收窄类型。 */
 export interface RendererEventSignatures {
   'log/line': LogLineView;
+  'session/expired': SessionExpiredEvent;
+  'shell/view-error': KernelViewLoadError;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

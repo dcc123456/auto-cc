@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 会话实验台 · 分区 {{partitionLabel}}</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 15px;
+      }
+      .tag {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: #1d4ed8;
+        color: #fff;
+      }
+      p {
+        margin: 10px 0;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      button,
+      input {
+        font: inherit;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+      }
+      input {
+        width: 220px;
+        background: #020617;
+      }
+      ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>会话实验台 <span class="tag" data-partition>{{partitionLabel}}</span></h1>
+    <p>这是本地 fixture 站点，不是真实招聘平台（AGENTS.md §7.2）。登录态只存在浏览器分区里。</p>
+    <p>
+      登录态：<strong data-fixture="state">检测中</strong>
+      <span data-fixture="expires"></span>
+    </p>
+    <p>
+      <button type="button" data-fixture="login">登录（写持久 cookie）</button>
+      <button type="button" data-fixture="logout">退出登录（清除 cookie）</button>
+    </p>
+    <p>页面侧 document.cookie：<code data-fixture="cookies">（空）</code></p>
+    <p>服务端按请求 cookie 判定：<code data-fixture="server-state">（未取到）</code></p>
+    <p>键盘接管验证（spec 1.8-08）：<input data-fixture="query" placeholder="在此输入搜索词" /></p>
+    <ul>
+      <li>分区 A 与分区 B 指向同一台 127.0.0.1、同一个 cookie 名</li>
+      <li>如果 B 读到了 A 的登录态，说明分区隔离失效</li>
+    </ul>
+    <script>
+      const SESSION_COOKIE = 'autocc_session';
+
+      /** 重新渲染页面自己能看到的状态；服务端那一路走 fetch，两路对不上就是隔离出了问题。 */
+      function refresh() {
+        const hasSession = document.cookie
+          .split(';')
+          .map((pair) => pair.trim().split('=')[0])
+          .includes(SESSION_COOKIE);
+        document.querySelector('[data-fixture="state"]').textContent = hasSession ? '已登录' : '未登录';
+        document.querySelector('[data-fixture="cookies"]').textContent = document.cookie || '（空）';
+        fetch('/api/state')
+          .then((response) => response.json())
+          .then((state) => {
+            document.querySelector('[data-fixture="server-state"]').textContent = JSON.stringify(state);
+          })
+          .catch((error) => {
+            document.querySelector('[data-fixture="server-state"]').textContent = `fetch 失败：${String(error)}`;
+          });
+      }
+
+      document.querySelector('[data-fixture="login"]').addEventListener('click', () => {
+        window.location.href = '/login';
+      });
+      document.querySelector('[data-fixture="logout"]').addEventListener('click', () => {
+        window.location.href = '/logout';
+      });
+      refresh();
+    </script>
+  </body>
+</html>

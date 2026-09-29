@@ -16,6 +16,7 @@
     "@auto-cc/plugin-kernel": "workspace:*",
     "@auto-cc/plugin-logger": "workspace:*",
     "@auto-cc/plugin-plugins": "workspace:*",
+    "@auto-cc/plugin-sessions": "workspace:*",
     "@auto-cc/plugin-store": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "@auto-cc/shell": "workspace:*",

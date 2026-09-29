@@ -5,6 +5,7 @@ export type AppErrorCode =
   | 'NOT_SERIALIZABLE'
   | 'PLUGIN_FAILED'
   | 'CONFIG_INVALID'
+  | 'PLATFORM_NOT_CONFIGURED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

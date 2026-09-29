@@ -46,3 +46,18 @@ plugins:
 
   - id: shell
     dependsOn: [plugins]
+
+  # 内置内核会话（spec 1.8）：每个平台一份 `persist:<id>` 分区，登录态落 userData。
+  # 排在 shell 之后：它要请 shell 按指定分区重建内嵌视图（视图宿主唯一，见 plan §8.3 决策 1）。
+  # 这里只配本地 fixture —— 两个分区指向同一个服务的两条路径，用来证明 cookie 互不共享；
+  # 真实招聘平台到 P2 才登记，且必须先满足 AGENTS.md §7.2「自动化测试不碰真实平台」。
+  - id: sessions
+    dependsOn: [shell]
+    config:
+      platforms:
+        - id: fixture
+          startUrl: http://127.0.0.1:10233/
+          sessionCookieName: autocc_session
+        - id: fixture-alt
+          startUrl: http://127.0.0.1:10233/alt
+          sessionCookieName: autocc_session

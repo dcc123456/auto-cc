@@ -343,15 +343,56 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 | ID     | 验收标准                                                                   | 方式 | 验证操作                                              | 状态 |
 | ------ | -------------------------------------------------------------------------- | ---- | ----------------------------------------------------- | ---- |
-| 1.8-01 | 每个平台一个独立 `persist:<platform>` partition，互不共享 cookie           | U+C  | 在 A partition 写 cookie，B partition 读不到          | [ ]  |
-| 1.8-02 | 自动化会话与主 app UI 会话隔离（app 界面访问不到站点 cookie）              | V    | 渲染层 `document.cookie` 为空，fixture 站点视图有值   | [ ]  |
-| 1.8-03 | **登录态跨重启保持**：在 fixture 站点登录后完全退出 app 再启动，仍是登录态 | V    | 登录 → 退出 → 重启 → 截图显示已登录（不需重登）       | [ ]  |
-| 1.8-04 | 登录态持久化位置确认在 userData 下且随「退出登录」可清除                   | C+V  | 检查 partition 目录存在；点退出后 cookie 消失         | [ ]  |
-| 1.8-05 | 会话数据不进入日志与诊断包（脱敏）                                         | U    | 断言日志中无 cookie/token 值                          | [ ]  |
-| 1.8-06 | 登录失效能被探测并发出 `session.auth.expired` 事件                         | V    | 手工清 cookie 后运行探测 → 界面出现「需重新登录」提示 | [ ]  |
-| 1.8-07 | 失效时工作流**不静默失败**，而是停在可恢复点并明确提示                     | V    | 触发失效 → 界面显示停在哪个步骤与原因                 | [ ]  |
-| 1.8-08 | 视图容器对用户可见（可亲眼看到自动化在做什么），并可键盘鼠标接管           | V    | 截图内嵌视图；在其中真实输入一个搜索词                | [ ]  |
-| 1.8-09 | 无网络/站点不可达时有明确错误态，不表现为卡死                              | V    | 停掉 fixture 服务 → 界面显示可诊断错误                | [ ]  |
+| 1.8-01 | 每个平台一个独立 `persist:<platform>` partition，互不共享 cookie           | U+C  | 在 A partition 写 cookie，B partition 读不到          | [x]  |
+| 1.8-02 | 自动化会话与主 app UI 会话隔离（app 界面访问不到站点 cookie）              | V    | 渲染层 `document.cookie` 为空，fixture 站点视图有值   | [x]  |
+| 1.8-03 | **登录态跨重启保持**：在 fixture 站点登录后完全退出 app 再启动，仍是登录态 | V    | 登录 → 退出 → 重启 → 截图显示已登录（不需重登）       | [x]  |
+| 1.8-04 | 登录态持久化位置确认在 userData 下且随「退出登录」可清除                   | C+V  | 检查 partition 目录存在；点退出后 cookie 消失         | [x]  |
+| 1.8-05 | 会话数据不进入日志与诊断包（脱敏）                                         | U    | 断言日志中无 cookie/token 值                          | [x]  |
+| 1.8-06 | 登录失效能被探测并发出 `session.auth.expired` 事件                         | V    | 手工清 cookie 后运行探测 → 界面出现「需重新登录」提示 | [x]  |
+| 1.8-07 | 失效时工作流**不静默失败**，而是停在可恢复点并明确提示                     | V    | 触发失效 → 界面显示停在哪个步骤与原因                 | [!]  |
+| 1.8-08 | 视图容器对用户可见（可亲眼看到自动化在做什么），并可键盘鼠标接管           | V    | 截图内嵌视图；在其中真实输入一个搜索词                | [x]  |
+| 1.8-09 | 无网络/站点不可达时有明确错误态，不表现为卡死                              | V    | 停掉 fixture 服务 → 界面显示可诊断错误                | [x]  |
+
+**1.8 收尾结论**（证据在 `docs/acceptance/1.8/`，13 个文件；被测站点一律是本地 fixture
+`http://127.0.0.1:10233`，未触碰真实招聘平台，见 AGENTS.md §7.2）：
+
+- **先记一条截图口径，否则证据会被误读**：CDP 的 `Page.captureScreenshot` 只覆盖被截 target 自己的表面，
+  `WebContentsView` 是原生层叠上去的，所以从渲染层 target（`--url 5173`）截图时右栏只有槽位占位说明，
+  看不到站点页面。视图里的真实内容一律从视图 target（`--url 10233`）单独截，两类截图成对归档。
+- **1.8-01**：单测 `packages/sessions/src/probe.test.ts` 断言 `partitionFor('fixture')` = `persist:fixture`
+  且不同平台分区名互不为前缀；真机侧在分区 A 登录后，A 的视图显示「已登录」，
+  切到分区 B 打开同一台 127.0.0.1、同一个 cookie 名，B 仍是「未登录」（两张视图截图）。
+- **1.8-02**：`harness eval --url 5173` 读渲染层 `document.cookie` 为空串，而同一时刻视图 target 里
+  `document.cookie` 是 `autocc_session=fixture-token`、服务端也判定 `loggedIn:true`。
+  渲染层 `sandbox: true` + 视图独立分区，两侧不共享。
+- **1.8-03**：登录后用 `taskkill //IM electron.exe //F` 强杀进程（不是关窗口——关窗口只隐藏到托盘），
+  重启后视图直接是已登录态，无需重登；面板 `auth` 徽标同步为「有效」。
+- **1.8-04**：`%APPDATA%\auto-cc\Partitions\fixture\Network\Cookies` 实测存在且随登录增长；
+  点「退出登录」后 `cookieNames` 变空、视图回到未登录，磁盘上的 cookie 行被清掉。
+- **1.8-05**：日志断言在 `packages/logger/src/redact.test.ts`（`Set-Cookie:`、`autocc_session=`
+  的值一律被 `***` 替换，JSON 形态的 `Cookie` 字段也收）；`sessions` 服务只写平台名与原因，
+  快照载荷里只有 cookie 的**名字**与过期时间，没有值。
+- **1.8-06**：事件实现名是 **`session/expired`**，不是条目原文的 `session.auth.expired`——本仓库的事件名
+  统一为 `<namespace>/<event>`（`log/line`、`plugin/error`），且要同时出现在 `core` 的 `Events` 增补与
+  `RENDERER_EVENTS` 白名单里。原文的点名方式视为笔误，不改判据本身。横幅由推送出现，未点刷新即可见。
+- **1.8-07**：**BLOCKED**。这条要的是「工作流停在可恢复点」，而 `workflow.runner` 与失败步槽位属于 1.10，
+  尚未实现。1.8 只交付了「失效可探测 + 可推送」这半个前提，没有 runner 就无从谈起"停在哪个步骤"。
+  到 1.10 收口时连同这条一起验收。
+- **1.8-08**：`harness type --url 10233 --selector '[data-fixture="query"]' --value 自动化验收` 之后，
+  视图 target 里该输入框回显「自动化验收」（截图为证），`eval` 读回的 `value` 也正是这五个字——
+  键盘事件进了站点页面而不是被面板吃掉。面板侧截图同时显示 `persist:fixture` 与落盘路径。
+- **1.8-09**：停掉 fixture 服务后点「打开」，面板即时（无需手动刷新）出现
+  `内核视图加载失败：-102 ERR_CONNECTION_REFUSED（http://127.0.0.1:10233/）`；恢复 fixture 再点一次即消失。
+- **两个实测事实值得留下，否则后来者会重踩**：
+  ① Chromium 在主文档加载失败时**照样**触发 `dom-ready` 与 `did-finish-load`，且那一刻 `getURL()`
+  还不是 `chrome-error://`，所以「加载成功」事件不能用来复位错误态——错误位的生命周期改成「本次挂载」，
+  在 `createKernelView` 开头清零。② `sessions.open` 先返回、`did-fail-load` 后到，那次快照里错误位仍是空的，
+  所以错误态**必须**由 `shell/view-error` 事件推进界面（这也是内核视图地址在打开瞬间可能显示「尚未读取」的原因：
+  地址只能等下一次读数才有，P1 接受这个滞后）。
+- 顺带挖出并修掉一个从 1.3 潜伏的 L0 缺陷：内核在装配开始前一次性把清单层灌进 `config` 服务，而
+  `config` 自己也在清单里、那一刻还不存在，于是**文件层与运行时层全部丢失**，插件只拿到 schema 默认值。
+  五个子计划没发现它，是因为 `cordis.yml` 里写的每个值都恰好等于其默认值；`sessions.platforms`
+  是第一个「必填且无默认」的键。修复见提交 `fix(kernel)`，回归测试在 `kernel.test.ts`。
 
 ## 1.9 外发额度闸门（未来付费的接线面）
 

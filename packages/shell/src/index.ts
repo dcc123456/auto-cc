@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView } from 'electron';
 import { Service, type Context } from '@auto-cc/core';
-import { KERNEL_VIEW_WIDTH_RATIO, type ShellStatus } from '@auto-cc/shared';
+import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
 
 /** 仓库根目录（开发态）。 */
@@ -46,6 +46,9 @@ export class ShellService extends Service {
   private kernelView: WebContentsView | undefined;
   private tray: Tray | undefined;
   private kernelViewVisible = true;
+  /** 内核视图当前所用的会话分区；占位页用默认会话，此处为空串。 */
+  private kernelViewPartition = '';
+  private kernelViewError: KernelViewLoadError | null = null;
   private quitting = false;
   private lastError: string | undefined;
 
@@ -58,6 +61,7 @@ export class ShellService extends Service {
   /** 渲染层 `shell.getStatus` 的实现：返回当前窗口与内核视图状态。 */
   getStatus = (): ShellStatus => {
     const win = this.mainWindow;
+    const contents = this.kernelView?.webContents;
     const bounds = this.kernelView?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 };
     return {
       appVersion: app.getVersion(),
@@ -67,8 +71,24 @@ export class ShellService extends Service {
       windowVisible: win?.isVisible() ?? false,
       kernelViewVisible: this.kernelViewVisible,
       kernelViewBounds: bounds,
+      // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
+      kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
+      kernelViewUrl: contents?.getURL() ?? '',
+      kernelViewLoadError: this.kernelViewError,
       lastError: this.lastError,
     };
+  };
+
+  /**
+   * 让内嵌内核视图按指定会话分区加载站点（spec 1.8-02 / 1.8-08）。
+   *
+   * 分区在 `WebContentsView` 构造后不可改，所以「换平台」= 销毁旧视图 + 按新分区重建，
+   * 这也是 `sessions` 只调这一个方法、不自己碰 electron 的原因（视图宿主唯一，见 §8.3 决策 1）。
+   * @param partition 会话分区名（`persist:<platform>`）
+   * @param url 站点起始地址
+   */
+  mountKernelSite = (partition: string, url: string): void => {
+    this.createKernelView(partition, url);
   };
 
   /**
@@ -149,16 +169,13 @@ export class ShellService extends Service {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
+        // app 界面独占一个分区：站点 cookie 与界面 cookie 从此在两套磁盘存储里（spec 1.8-02）。
+        partition: APP_PARTITION,
       },
     });
     this.mainWindow = win;
 
-    this.kernelView = new WebContentsView();
-    win.contentView.addChildView(this.kernelView);
-    this.kernelView.setVisible(this.kernelViewVisible);
-    // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，只有 resize 才会救回来。
-    this.layoutKernelView();
-    void this.kernelView.webContents.loadURL(kernelViewPlaceholder);
+    this.createKernelView();
 
     win.once('ready-to-show', () => {
       win.show();
@@ -189,6 +206,51 @@ export class ShellService extends Service {
     const devUrl = process.env.ELECTRON_RENDERER_URL;
     if (devUrl) void win.loadURL(devUrl);
     else void win.loadFile(rendererIndexPath);
+  }
+
+  /**
+   * 建立或重建内嵌内核视图。
+   * @param partition 会话分区名；省略则用非持久会话（占位页不需要落盘）
+   * @param url 要加载的地址，默认还是 1.2 的占位页
+   */
+  private createKernelView(partition?: string, url = kernelViewPlaceholder) {
+    const win = this.mainWindow;
+    if (!win) return;
+    const previous = this.kernelView;
+    if (previous && !previous.webContents.isDestroyed()) {
+      win.contentView.removeChildView(previous);
+      // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
+      // harness 与 devtools.status() 就会数到一个看不见的僵尸目标（1.6-06 的对照会错位）。
+      previous.webContents.close();
+    }
+    const view = new WebContentsView({
+      webPreferences: {
+        ...(partition === undefined ? {} : { partition }),
+        // 视图里跑的是外部站点，三条安全底线必须显式成立，不能指望默认值（AGENTS.md §8.1）。
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+      },
+    });
+    this.kernelView = view;
+    // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
+    // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
+    this.kernelViewPartition = partition ?? '';
+    this.kernelViewError = null;
+    win.contentView.addChildView(view);
+    view.setVisible(this.kernelViewVisible);
+    // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，只有 resize 才会救回来。
+    this.layoutKernelView();
+    // 失败读数不在「加载成功」事件里复位：实测 `dom-ready` / `did-finish-load` 在失败那一轮也会触发，
+    // 任何判据都会把刚记下的错误抹掉，所以它的生命周期就是本次挂载（开头清零，重新打开即复位）。
+    view.webContents.on('did-fail-load', (_event, code, description, failedUrl, isMainFrame) => {
+      if (!isMainFrame) return;
+      this.kernelViewError = { code, description, url: failedUrl };
+      // 界面不能靠 `sessions.open` 的返回值看到它：那次调用先返回、失败事件后到，读数还是空的。
+      this.ctx.emit('shell/view-error', this.kernelViewError);
+      this.noteError(`内核视图加载失败 ${code} ${description} @ ${failedUrl}`);
+    });
+    void view.webContents.loadURL(url);
   }
 
   /** 按固定比例给内核视图摆位，与渲染层槽位共用 `KERNEL_VIEW_WIDTH_RATIO`。 */

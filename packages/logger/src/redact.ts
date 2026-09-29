@@ -11,9 +11,15 @@ const PHONE_KEY = /(?:phone|mobile|tel)/i;
 const ID_CARD_KEY = /(?:idcard|id_card|identity|national_id)/i;
 const EMAIL_KEY = /email|mail/i;
 
-/** 键名可能带引号（`"Authorization": "..."`），分隔符前的闭合引号必须一起吃掉，否则 JSON 形式的整行日志漏脱敏。 */
+/**
+ * 键名可能带引号（`"Authorization": "..."`），分隔符前的闭合引号必须一起吃掉，否则 JSON 形式的整行日志漏脱敏。
+ *
+ * 关键词两侧允许 `[_-]` 拼接的前后缀：cookie 名本来就是 `autocc_session` 这种带下划线的整串，
+ * 用 `\b` 卡词边界会一个都不命中（`\b` 把下划线当词字符）。1.8-05 要求会话值不出现在日志里，
+ * 所以除了 `session_key`，光秃秃的 `session` 也算敏感键。
+ */
 const INLINE =
-  /\b(token|cookie|password|passwd|secret|authorization|api[_-]?key|access[_-]?key|session[_-]?key|phone|mobile|tel|id[_-]?card|email)\b(\s*["']?\s*[:=]\s*)(?:"([^"]*)"|'([^']*)'|([^\s,;}\]]+))/gi;
+  /(\w*[_-]?)?(token|cookie|password|passwd|secret|authorization|api[_-]?key|access[_-]?key|session[_-]?key|session|phone|mobile|tel|id[_-]?card|email)([_-]?\w*)?(\s*["']?\s*[:=]\s*)(?:"([^"]*)"|'([^']*)'|([^\s,;}\]]+))/gi;
 
 /** 手机号只留前三后四，身份证只留后四，邮箱只留首字母与域名——够定位问题，不够冒用身份。 */
 function maskByKind(kind: 'secret' | 'phone' | 'id' | 'email', value: string): string {
@@ -36,12 +42,25 @@ function classifyKey(key: string): 'secret' | 'phone' | 'id' | 'email' | undefin
 }
 
 export function redactText(text: string): string {
-  return text.replace(INLINE, (_match, key: string, sep: string, dq?: string, sq?: string, bare?: string) => {
-    const kind = classifyKey(key) ?? 'secret';
-    if (dq !== undefined) return `${key}${sep}"${maskByKind(kind, dq)}"`;
-    if (sq !== undefined) return `${key}${sep}'${maskByKind(kind, sq)}'`;
-    return `${key}${sep}${maskByKind(kind, bare ?? '')}`;
-  });
+  return text.replace(
+    INLINE,
+    (
+      _match,
+      prefix: string | undefined,
+      keyword: string,
+      suffix: string | undefined,
+      sep: string,
+      dq?: string,
+      sq?: string,
+      bare?: string,
+    ) => {
+      const key = `${prefix ?? ''}${keyword}${suffix ?? ''}`;
+      const kind = classifyKey(key) ?? 'secret';
+      if (dq !== undefined) return `${key}${sep}"${maskByKind(kind, dq)}"`;
+      if (sq !== undefined) return `${key}${sep}'${maskByKind(kind, sq)}'`;
+      return `${key}${sep}${maskByKind(kind, bare ?? '')}`;
+    },
+  );
 }
 
 /** 深拷贝式脱敏：只改需要改的分支，返回值与入参同构。 */

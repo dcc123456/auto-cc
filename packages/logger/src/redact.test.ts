@@ -30,3 +30,20 @@ describe('日志脱敏（spec 1.3-11）', () => {
     expect(redactValue(error)).toBe(error);
   });
 });
+
+describe('会话 cookie 值脱敏（spec 1.8-05）', () => {
+  it('Set-Cookie 表头整行只留属性，值不进日志', () => {
+    expect(redactText('Set-Cookie: autocc_session=fixture-token; Path=/; Max-Age=86400')).toBe(
+      'Set-Cookie: ***; Path=/; Max-Age=86400',
+    );
+  });
+
+  it('下划线拼接的 cookie 名也算敏感键（\\b 会把下划线当词字符，所以不能用词边界）', () => {
+    expect(redactText('写入 autocc_session=SECRET123 完成')).toBe('写入 autocc_session=*** 完成');
+    expect(redactText('登录 cookie autocc_session=SECRET123 已失效')).toBe('登录 cookie autocc_session=*** 已失效');
+  });
+
+  it('JSON 形态的 cookie 字段同样收成掩码', () => {
+    expect(redactText('header {"Cookie":"autocc_session=SECRET123"}')).toBe('header {"Cookie":"***"}');
+  });
+});

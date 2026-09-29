@@ -10,7 +10,7 @@
  * 3. 生命周期：卸载时摘掉处理器与监听，restart 后重新注册，不会撞「重复注册」。
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { AppError, Service, type Context, type LogLineView } from '@auto-cc/core';
+import { AppError, Service, type Context } from '@auto-cc/core';
 import {
   IPC_CHANNELS,
   RENDERER_ALLOWLIST,
@@ -18,6 +18,7 @@ import {
   type BridgeRequest,
   type IpcStatsView,
   type RendererEvent,
+  type RendererEventSignatures,
 } from '@auto-cc/shared';
 import { z } from 'zod';
 import { Gateway } from './gateway.js';
@@ -94,7 +95,11 @@ export class IpcGatewayService extends Service {
     // 只订阅 `RENDERER_EVENTS` 登记过的事件：没登记的名字在这里根本不会被接上，
     // 因此「未登记事件不出进程」是结构上成立的，而不是靠运行期过滤。
     for (const name of RENDERER_EVENTS) {
-      const off = this.ctx.on(name, (line: LogLineView) => this.push({ event: name, payload: line }));
+      const off = this.ctx.on(name, (payload: RendererEventSignatures[typeof name]) =>
+        // `RendererEvent` 是「按事件名分发」的联合，TS 在循环里推不出 event 与 payload 同源，
+        // 所以在成对构造的这一步收口；名单本身仍是唯一的出口（漏登记就进不来）。
+        this.push({ event: name, payload } as RendererEvent),
+      );
       this.unbind.push(off);
     }
     // 单层箭头会在挂载瞬间就被回收，所以 effect 必须「返回函数」。
