@@ -1,0 +1,91 @@
+反向验证 1.8-11 —— 否决「自己维护 cookie 存储（tough-cookie 一类）」这条路线是否留下能力缺口
+================================================================================
+被否决的路线（docs/plans/01-framework/plan.md 选型表）：
+  「自己维护 cookie 存储（`tough-cookie` 一类）」→ 否决理由：绕开 Chromium 持久化就丢掉了
+   localStorage / IndexedDB / service worker。
+反向验证要回答的问题：这条否决**没有**造成能力缺口 —— 即项目实际用的方案（Electron
+`session.fromPartition('persist:<platform>')`）确实把 localStorage / IndexedDB 带进来了，
+并且**跨进程重启**仍然读得回来。
+
+命令与实测读数（CDP 10222，Windows，2026-09-30 00:35–00:39 本地时间）
+--------------------------------------------------------------------
+前提：自动化测试不访问真实招聘平台（AGENTS.md §7.2），目标站点是本地 fixture
+`http://127.0.0.1:10233/`（`scripts/fixture-server.ts`，标题「auto-cc 会话实验台 · 分区 A」）。
+
+[1] 重启前（主进程 PID 9812）——写入标记
+    harness click --url 127.0.0.1:5173 --selector '[data-session-id="fixture"] [data-action="open"]'
+      → 已点击 <button>（原生鼠标事件）
+    CDP /json/list 出现新 target：{"id":"159F856109425F504034FDB1DD543CA3","url":"http://127.0.0.1:10233/"}
+    harness eval --url 127.0.0.1:10233 --expr-file tmp/1x-fixture-probe.js
+      {
+        "url": "http://127.0.0.1:10233/",
+        "documentTitle": "auto-cc 会话实验台 · 分区 A",
+        "lsKeys": ["p1-04-marker"],
+        "marker": "p1-04-2026-09-29T16:35:54.971Z",
+        "cookieCount": 0
+      }
+    写入内容：localStorage['p1-04-marker'] + IndexedDB('p1-04-db'/objectStore 'marks'/key 'marker')，
+    两处写同一个值，值本身是写入时刻的 ISO 时间戳，因此「读回来等于它」即可判定跨越了进程边界。
+
+[2] 重启前落盘确认（分区目录，非内存）
+    %APPDATA%/auto-cc/Partitions/ 下并列三个分区：app / fixture / fixture-alt（分区隔离，见 1.8-03）
+    Partitions/fixture/Local Storage/leveldb/000003.log   795 B  mtime 2026-09-30 00:35:59.977
+    Partitions/fixture/IndexedDB/http_127.0.0.1_10233.indexeddb.leveldb/000003.log
+                                                           1358 B  mtime 2026-09-30 00:35:55.036
+    → 两个 storage 都落在**按分区命名**的磁盘目录里，不在 app 主分区（app/Local Storage 只有渲染层自己那份）。
+
+[3] 应用重启（真实进程重启，不是刷新页面）
+    taskkill /F /IM electron.exe        → 成功终止 electron.exe（含主进程 9812）
+    netstat 检查 10222/5173/10233       → 全部释放（确认旧进程真的没了）
+    pnpm dev（新实例）                  → DevTools listening on ws://127.0.0.1:10222/...
+    netstat :10222 LISTENING 属主 PID   → 25336（与 9812 不同，证明是另一个进程）
+
+[4] 重启后读回（新进程 25336）
+    诊断视图 → [data-session-id="fixture"] [data-action="open"]
+    harness eval --url 127.0.0.1:10233 --expr-file tmp/1x-fixture-read.js（只读，不写）
+      {
+        "url": "http://127.0.0.1:10233/",
+        "title": "auto-cc 会话实验台 · 分区 A",
+        "readyState": "complete",
+        "origin": "http://127.0.0.1:10233",
+        "isSecureContext": true,
+        "lsMarker": "p1-04-2026-09-29T16:35:54.971Z",
+        "lsKeys": ["p1-04-marker"],
+        "idbMarker": "p1-04-2026-09-29T16:35:54.971Z",
+        "cookieCount": 0
+      }
+    lsMarker === idbMarker === 重启前写入值 → **localStorage 与 IndexedDB 双双跨进程重启存活**。
+
+[5] 视觉确认
+    截图 tmp/1.8-11-before-restart.png（重启前）与 tmp/1.8-11-after-restart.png（重启后）
+    harness diff --base …before --head …after
+      { "isSizeMismatch": false, "diffPixels": 0, "totalPixels": 748762, "ratio": 0, "isIdentical": true }
+    → 两张图逐像素一致（0/748762），说明重启后加载的是同一个 fixture 页面、同一个分区；
+      标记本身存在 storage 里而不是 DOM 上，所以视觉一致是「同一个视图」的证据，
+      存活性的证据是 [4] 的两条读数，不靠截图。
+
+过程中的一次真实失败（如实记录，不掩盖）
+------------------------------------------
+第 [3] 步我把 fixture-server 一起 kill 了，重启后第一次点开视图时：
+  [shell] main-process error: 内核视图加载失败 -102 ERR_CONNECTION_REFUSED @ http://127.0.0.1:10233/
+  （node:25336）electron: Failed to load URL: http://127.0.0.1:10233/ with error: ERR_CONNECTION_REFUSED
+此时对该 target 求值拿到的是
+  {"href":"chrome-error://chromewebdata/","opaque":true,"proto":"chrome-error:"}
+  SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.
+  SecurityError: Failed to execute 'open' on 'IDBFactory': access to the Indexed Database API is denied in this context.
+→ 这不是持久化缺陷：错误页是不透明源（origin=null），Chromium 本来就不给它 storage；
+  主进程把加载失败结构化地上报（1.8-05 的行为）反而是对的。
+  把 `pnpm fixture` 起回来后（curl 10233 → http_code=200）再点开，才得到第 [4] 步的读数。
+  这条读数同时说明：**harness 的 --url 只匹配 target 的请求 URL，不代表文档已提交成功**，
+  后续凡是要读 storage 的先看 location.href 是不是 chrome-error。
+
+结论
+----
+[x] 否决 tough-cookie 式自维护 cookie 存储**没有**造成能力缺口：项目走 Chromium 原生
+    persist 分区，localStorage 与 IndexedDB 都实测跨进程重启存活（同值、按分区落盘），
+    这正是被否决方案会丢掉的东西。
+    已知未覆盖项：service worker 未在本机实测（fixture 站点没有注册 SW），
+    该项只作为「Chromium 持久化范围」的推定收益记录，不作为验收依据。
+证据文件：docs/acceptance/1.8/1.8-11-1x-reverse-storage.txt（本文件）、
+         docs/acceptance/1.8/1.8-11-before-restart-1.png、
+         docs/acceptance/1.8/1.8-11-after-restart-2.png

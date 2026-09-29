@@ -1,0 +1,30 @@
+P1-04 反向验证 · 路线「better-sqlite3」被否决（AGENTS.md §6.5）
+
+否决原因（plan §8 与 AGENTS.md §9）：原生编译依赖会破坏"用户只装一个 app"这条硬要求
+  （三端都要预置二进制或让用户装编译链），而 Node 24 / Electron 44 内置 `node:sqlite` 已实测可用
+  （1.3-06：Electron 44.4.5 内 `require('node:sqlite')` 直用，sqlite 3.53.4、WAL 生效、`user_version` 可读写）。
+
+P1 对数据库的全部用法逐条列出来，确认 `node:sqlite` 一条不落地覆盖（右侧是已归档的实测证据 ID）：
+
+  能力                              承载位置                        证据
+  打开/关闭 userData 下的库          packages/store                  1.3-06、1.3-08
+  PRAGMA user_version 读写与迁移      store.migrations + upgrade()     1.3-07（含"迁移失败版本不动、半成品表不存在"）
+  WAL 与并发读                       默认开 WAL                      1.3-07（侧车文件出现）、1.3-08（dispose 后 -wal/-shm 收回）
+  事务与回滚                         store 的 upgrade 事务            1.3-07
+  连接只开一次、退出经 effect 回收     [Service.init] + ctx.effect     1.3-08
+  额度账本写入（外发计数）             entitlement/ledger.ts           1.9 系列
+  会话两张表（号段 2）落库与重启读回    agent/chat_session             1.11-08
+  从 app 进程外只读并发读库            node:sqlite readOnly:true       1.11-08（应用运行中读到 8 行消息、user_version=2）
+
+零依赖确认（本轮实测）：
+  grep -ci "better-sqlite3" pnpm-lock.yaml                 → 0
+  grep -rl "better-sqlite3" packages/*/package.json        → 无输出
+  pnpm install 全程无 rebuild 步骤                          → 1.3-06 同条
+
+代价与再评估条件：
+  `node:sqlite` 目前没有 better-sqlite3 的**在线备份 API**（`db.backup()`）与
+  自定义函数/聚合（`function()`/`aggregate()`）的完整封装。P1 两者都用不到：
+  备份策略是"整目录拷贝 userData"（未进 P1 范围），自定义函数一条都没写。
+  若 P3 简历知识库要做 FTS5 分词自定义函数或热备份，届时二选一：
+  用 `db.exec` 直接写 SQL（FTS5 本身在内置 sqlite 里可用），或那时再单列一个子计划评估原生依赖的成本。
+  这条留给 P3 的门在文档里，不在代码里——本轮没有为它加任何分支。

@@ -1,0 +1,36 @@
+P1-04 反向验证 · 路线「husky + @commitlint + lint-staged」被否决（AGENTS.md §6.5）
+
+否决原因（plan §8 选型与 AGENTS.md §9 环境事实）：
+  本环境 npm 生命周期脚本在装依赖期被拦截/不稳定，husky 的 `prepare` 安装钩子正是靠它落地；
+  一旦 prepare 不跑，`.git/hooks` 就不会被指向规则文件，规约在"看起来装了"的状态下静默失效。
+  替代实现：`core.hooksPath=.githooks` + 两个纯 shell 钩子（不依赖 Node 是否在 PATH）。
+
+P1 需要的三项机检，逐项确认没有缺口（本轮实测，不是引用旧结论）：
+
+1) 提交信息必须含中文描述（AGENTS.md §1.1/§1.2）
+   已在 1.1-13 实测：`chore: update` 拒 / `docs(core): add path resolver` 拒 /
+   `fix(ipc): 修复崩溃` 过。本轮三个 1.11 提交（348b226 / 32fe013 / 891cb6b）全部经该钩子通过。
+
+2) 测试散图不得入库（AGENTS.md §7.5）——本轮补做一次真实的负向测试：
+     cp docs/acceptance/1.11/1.11-06-11-06-tool-card.png tmp-stray-probe.png
+     git add tmp-stray-probe.png
+     git commit -m "chore(hooks): 探针测试散图是否被拦截"
+   实际返回（原始输出见本文件末尾）：
+     ✖ test/throwaway images must not be committed (AGENTS.md §7.5)
+         tmp-stray-probe.png
+       allowed: docs/acceptance/<sub-plan>/<spec-id>-*.png / resources/**
+     COMMIT_EXIT=1
+   HEAD 停在 891cb6b 未推进，说明是被 pre-commit 拦下而非提交成功后回滚；
+   探针文件随后 `git reset` + 删除，工作区回到干净（`pnpm status:check` 通过）。
+
+3) 钩子确实装配（不靠 npm 生命周期）
+     git config core.hooksPath            → .githooks
+     ls .githooks/                        → commit-msg*  pre-commit*（两个可执行脚本）
+     grep -n "husky|lint-staged|@commitlint" package.json → 无输出（exit 1）
+
+代价与再评估条件：
+  纯 shell 版没有 commitlint 的 type/scope 枚举校验与 body-max-line-length 等细粒度规则，
+  正则只保证「格式形状 + 描述含汉字 + 长度上限」。
+  若将来要按 scope 自动路由 CI 或生成 changelog，再引入 commitlint 的**离线调用**
+  （在 CI 里 `commitlint --from/--to`），仍不恢复它的安装期钩子。
+  本轮没有为此改任何代码——P1 只要求这三项被拦住，而它们已被拦住。

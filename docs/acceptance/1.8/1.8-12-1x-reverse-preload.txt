@@ -1,0 +1,66 @@
+反向验证 1.8-12 —— 否决「给内核视图注入 preload 跑自动化脚本」是否留下能力缺口
+================================================================================
+被否决的路线（docs/plans/01-framework/plan.md 选型表）：
+  「给内核视图注入 `preload` 跑自动化脚本」→ 否决理由：内核视图加载的是外部站点，
+   注入即等于把 app 的能力交给别人的页面。
+反向验证要回答的问题：这条否决**没有**造成能力缺口 —— 外发/抓取能力不靠注入页面，
+而是靠主进程侧的 webContents 驱动（CDP harness 与 sessions service），
+并且当前实现里外部页面**确实**拿不到 app 的能力面。
+
+代码事实（同源对照，包 = @auto-cc/shell）
+-----------------------------------------
+主窗口（我们自己的页面）带 preload：
+  packages/shell/src/index.ts:168   `preload: path.join(__dirname, 'preload.cjs')`
+内核视图（外部站点）**没有** preload 这一项，只有分区与三条安全底线：
+  packages/shell/src/index.ts:226-234
+    new WebContentsView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false } })
+事件面也不通向内核视图：
+  packages/ipc/src/index.ts:9   「目标是 BrowserWindow，不含内嵌内核视图（WebContentsView）——招聘站页面拿不到 app 的事件流」
+  packages/ipc/src/index.ts:87  「把事件推给所有主窗口。内嵌内核视图不在目标里」
+
+运行期实测读数（CDP 10222，Windows，2026-09-30 00:40 本地时间，主进程 PID 25336）
+--------------------------------------------------------------------------------
+对照 A —— app 自己的渲染层（http://127.0.0.1:5173/）：
+  harness eval --url 127.0.0.1:5173 --expr "typeof window.autoCC / keys"
+    {
+      "href": "http://127.0.0.1:5173/",
+      "autoCC": "object",
+      "namespaces": ["shell","kernel","log","ipc","plugins","devtools","sessions",
+                     "entitlement","usage","outbound","workflow","agent","chat","on"],
+      "require": "undefined"
+    }
+对照 B —— 内核视图里的外部页面（本地 fixture http://127.0.0.1:10233/，替身招聘站，AGENTS.md §7.2）：
+  harness eval --url 127.0.0.1:10233 --expr "typeof window.autoCC / require / process / keys"
+    {
+      "href": "http://127.0.0.1:10233/",
+      "autoCC": "undefined",
+      "require": "undefined",
+      "process": "undefined",
+      "topKeysMatched": []        // /autoCC|cordis|electron|ipc/i 在 window 自有键上零命中
+    }
+同一个读数在**重启前的旧进程（PID 9812）**里也取过一次，结论一致：
+  { "bridgeExposed": "undefined", "ipcRendererExposed": "undefined", "preloadGlobals": [] }
+即：注入面缺失是设计事实，不是某一次启动的偶然。
+
+能力缺口检查（否决之后，自动化仍然做得到什么）
+----------------------------------------------
+外部页面上的操作全部在**主进程侧**完成，不需要页面里有机会：
+  1. 真实鼠标/键盘事件：CDP `Input.dispatchMouseEvent` / `Input.insertText`
+     （packages/testing/src/cdp.ts），本轮的 `[data-session-id="fixture"] [data-action="open"]`
+     点击、以及 1.10/1.11 全部可视验收都是这条路走的；
+  2. 页面求值与断言：CDP `Runtime.evaluate` / `Runtime.callFunctionOn`（同一文件），
+     本文件的对照 B 读数本身就是通过这条通道在**没有 preload** 的页面里取到的；
+  3. 截图：CDP `Page.captureScreenshot`（1.8-11 的两张图即出自内核视图）；
+  4. 外发动作：不经过页面里的 JS，而是主进程 service + `entitlement.gate`（1.9），
+     因此「页面拿不到能力」不会让闸门被绕过，反而少了绕过面。
+所以被否决路线原本承诺的收益（在页面里跑脚本驱动自动化）已由 CDP 通道覆盖，
+没有留下不可补齐的能力缺口；它省掉的恰恰是风险：**能力面不外泄给第三方站点**。
+
+结论
+----
+[x] 否决「给内核视图注入 preload」没有造成能力缺口：外部页面的 window 上
+    `autoCC` / `require` / `process` 全部 undefined、无 cordis/electron/ipc 相关自有键；
+    app 自己的渲染层同时刻 14 个命名空间齐备（13 service + `on`），说明注入路径本身是通的、
+    只是**刻意**没有给内核视图用。
+    自动化能力（点击/输入/求值/截图）经 CDP 在主进程侧驱动，实测在同一个无 preload 视图上取回读数。
+证据文件：docs/acceptance/1.8/1.8-12-1x-reverse-preload.txt（本文件）

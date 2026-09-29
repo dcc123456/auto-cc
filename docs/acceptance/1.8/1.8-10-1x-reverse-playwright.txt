@@ -1,0 +1,45 @@
+P1-04 反向验证 · 路线「Playwright（含 puppeteer / selenium）」被否决（AGENTS.md §6.5）
+
+否决原因（plan §8 与 1.6/1.8 的选型）：
+  本项目要驱动的是**app 自己内置的 Chromium**（Electron `WebContentsView` + `session.fromPartition`），
+  不是外部浏览器。Playwright 的价值在"管理一个浏览器进程 + 跨浏览器抽象"，这两条在本项目都是空的：
+  进程由 app 自己起，内核由 Electron 版本锁死。剩下真正会被用到的只有它的 locator/等待层，
+  而那层要用 CDP 直连 Electron 只能走 `connectOverCDP`，等于为了等待层再引一个传输假设。
+  实际采用的实现：`packages/testing/src/cdp.ts` 用 Node 24 内置 `fetch` + 全局 `WebSocket`
+  直连 CDP **10222**（项目约定端口，不用默认 9222），零依赖。
+
+P1 用到的浏览器自动化能力逐条点名（右侧为已归档实测 ID）：
+
+  能力                                          现有实现                            证据
+  选择/附着页面 target                          targets 列表 + url 子串匹配          1.6 系列；本轮 `harness targets --port 10222`
+                                                                                     同时列出 kernel-view 占位页与 127.0.0.1:5173 主窗口
+  页面求值 / 带实参调用函数                      Runtime.evaluate、Runtime.callFunctionOn   1.11-02/03/12（本轮 12 份机读文本全靠它取数）
+  真实鼠标事件（不是 JS 合成 click）             Input.dispatchMouseEvent             1.11-07 三档切换、1.10-01 往返点击；
+                                                                                     滚动也走它（mouseWheel），因为实测写 scrollTop
+                                                                                     只改 DOM、合成器画面不动，截图会拍错位置
+  真实键盘输入进受控组件                         Input.insertText                     1.11-02、1.11-13（流式中打「停一下」）
+  截图 + 把窗口带到前台                          Page.bringToFront、Page.captureScreenshot  1.11 的 12 张截图
+  等待条件（文本出现/消失）                       事件等待器 + 轮询，`wait --text`      1.6；本轮冷启动重取即用它先等「对话」
+  平台会话分区与登录态持久化                      session.fromPartition('persist:<platform>')
+                                               packages/sessions/src/index.ts:125/149   1.8-01/03/04；分区名映射有单测（probe.test.ts:14-15）
+  网络访问控制（测试不碰真实平台）                 本地 fixture 站点 + URL allowlist    §7.2；1.8 全部条目都在 fixture 上跑
+
+Playwright 特有、而 P1 一次都没用到的：跨浏览器驱动、`expect` 断言族、trace viewer、
+  网络 route 拦截/伪造、自动下载管理。P1 的断言由 vitest（单测）+ harness assert/DOM 读数（可视）承担，
+  不需要伪造网络——因为测试面本身就是本地 fixture 站点。
+
+代价与再评估条件（这条是留给 P2 的门）：
+  真正的风险在 **P2 的站点自动化**：自研等待层要覆盖"元素出现、可点击、离开 loading、
+  弹层遮挡"这类条件，而 Playwright 的 locator 自动等待是十几年打磨过的。
+  若 P2 出现下面任一情况，就应当回头评估（评估对象是 `connectOverCDP` 只做 locator 层，
+  不是把浏览器换成外部 Chrome）：
+    ① 同一站点连续出现 3 类以上时序 flake，且自研等待条件已经长成第二套调度器；
+    ② 站点知识包需要表达式级选择器组合（`:has()` / 可见性 / 稳定性联合判断）才能定位；
+    ③ 需要 trace 才能复盘线上抓取失败。
+  反向验证的结论：**否决没有造成 P1 能力缺口**——上表九条能力都有承载位且都有读数。
+
+零依赖确认（本轮实测）：
+  grep -ci "playwright" pnpm-lock.yaml  → 0
+  grep -ci "puppeteer"  pnpm-lock.yaml  → 0
+  grep -ci "selenium"   pnpm-lock.yaml  → 0
+  packages/testing/src/cdp.ts:5 注释即写明「只用 Node 24 内置的 fetch 与全局 WebSocket，不引 puppeteer / playwright」
