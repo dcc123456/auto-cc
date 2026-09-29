@@ -1,0 +1,39 @@
+# 2.1-02 不引入第二套浏览器内核（C）
+
+## pnpm why playwright puppeteer chromium（无输出 = 依赖树里三者都不存在）
+(空)
+
+## pnpm-lock.yaml 内含 chromium 字样的包（均为构建期元数据，非浏览器下载物）
+1541:  chromium-pickle-js@0.2.0:
+1696:  electron-to-chromium@1.5.440:
+3961:  chromium-pickle-js@0.2.0: {}
+4127:  electron-to-chromium@1.5.440: {}
+
+  - chromium-pickle-js：electron-builder 打 asar 用的序列化库，无浏览器二进制
+  - electron-to-chromium：browserslist 的版本对照表，纯 JSON
+
+## node_modules 顶层有无 playwright/puppeteer/chromium 下载目录
+(空)
+
+## 1.7 打包产物 dist/win-unpacked 顶层（无 chrome-*/playwright-* 之类的第二内核目录）
+LICENSE.electron.txt
+LICENSES.chromium.html
+auto-cc.exe*
+chrome_100_percent.pak
+chrome_200_percent.pak
+d3dcompiler_47.dll*
+dxcompiler.dll*
+dxil.dll*
+ffmpeg.dll*
+icudtl.dat
+locales/
+resources/
+resources.pak
+snapshot_blob.bin
+v8_context_snapshot.bin
+vk_swiftshader.dll*
+vk_swiftshader_icd.json
+vulkan-1.dll*
+
+## 产物内检索第二内核
+(空；LICENSES.chromium.html 是 Electron 自带的许可文本，不是浏览器二进制)

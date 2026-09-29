@@ -1,0 +1,21 @@
+# 2.1-11 视图销毁/重建不泄漏 session 与监听器（C）
+
+## 计数口径：CDP 的 page target 表。被 close() 的 webContents 会从表里消失，
+##   泄漏的（例如只 forceUnload 不 close）会一直挂在表上——所以这是对端读数，不是 app 自述。
+
+## 基线（挂载前）
+  page  data:text/html;... Embedded kernel view placeholder (WebContentsView)
+  page  auto-cc http://127.0.0.1:5173/
+  => 2
+
+## 10 次开合（sessions.open(boss) → sessions.close()，每轮都回读 activePlatform）
+  {"startActive":"boss","cycles":10,"lastOpenedActive":"boss","lastClosedActive":null,"endActive":null}
+  每一轮：open 后 activePlatform=boss，close 后 activePlatform=null（10/10 一致，见 tmp/2.1-11-cycles.js）
+
+## 10 轮之后的 targets
+  page  data:text/html;... Embedded kernel view placeholder (WebContentsView)
+  page  auto-cc http://127.0.0.1:5173/
+  => 2（与基线相同，未随开合次数累积）
+
+## 另附 UI 点击路径的 10 轮逐轮计数（每轮 close 之后取样）
+  cycle 1..10 → 全部为 2，无增长

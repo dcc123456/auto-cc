@@ -394,6 +394,11 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
   证据：`1.8-07-expired.png`、`1.8-07-resumed.png`、`1.8-07-evidence.txt`（含读数与复现口径）。
   **一处口径**：播报里出现的是步骤 id（`profile`）而不是界面上的中文名「岗位与简历匹配」——
   这句话由主进程生成，P1 的六条占位播报（`开始 search`…）全是同一口径，P2 换成真实进度文案时一起解决。
+  **2.1 已解决（2026-09-30）**：失效提示改由 `run.requiresHuman`（`{platform,reason,stepId,at}` 纯数据）
+  驱动，界面用 `workflow.takeoverBody` + 复用 `session.reason.*` / `workflow.step.*` 组句，
+  所以界面上显示的是「已停在「生成打招呼话术」这一步」这类中文步名，主进程不再拼句子。
+  判据本身未变（停在可恢复点 + 明确提示），但**机制换了**，故 2.1-08 用新证据重跑一遍：
+  `docs/acceptance/2.1/2.1-08-takeover-zh.png`。上面三件 `1.8-07-*` 记录的是被替换掉的旧机制，保留不删。
 - **1.8-08**：`harness type --url 10233 --selector '[data-fixture="query"]' --value 自动化验收` 之后，
   视图 target 里该输入框回显「自动化验收」（截图为证），`eval` 读回的 `value` 也正是这五个字——
   键盘事件进了站点页面而不是被面板吃掉。面板侧截图同时显示 `persist:fixture` 与落盘路径。

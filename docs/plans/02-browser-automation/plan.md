@@ -41,13 +41,33 @@ packages/
 
 | service             | 归属包        | 职责（只列对外方法签名意图，不含实现）                                                              |
 | ------------------- | ------------- | --------------------------------------------------------------------------------------------------- |
-| `browser.session`   | browser       | `open(platform)` / `close` / `navigate(url)` / `snapshot()` / `partitionOf(platform)`               |
+| `browser.page`      | browser       | `navigate(url)` / `snapshot()` —— 只在「会话已打开」的那块视图上做页面原语，不拥有分区              |
 | `browser.act`       | browser       | `click(locator)` / `type(locator, text)` / `select(locator, value)` / `waitFor(predicate)`          |
 | `browser.locate`    | browser       | `find(spec, opts)` → 候选评分结果；`refind(lastKnown)` → 自愈重定位                                 |
 | `platform.registry` | browser(契约) | `list()` / `get(platform)` → `PlatformAdapter`                                                      |
 | `platform.boss`     | platform-boss | `search(criteria)` / `detail(id)` / `chat(id, text)` / `sendResume(id)` / `readReplies(id)`         |
 | `jd.store`          | platform-boss | JD 实体读写（表结构在 1.3 store 之上建 migration）                                                  |
 | `workflow.runner`   | workflow      | `run(plan, ctx)` / `pause(runId)` / `resume(runId)` / `stepState(runId)`，节点事件走 `cordis:event` |
+
+**2.1 实施时定下的两处命名/归属决策（写在这里，后续子计划不得各走一套）**：
+
+1. 原表第一行写的是 `browser.session`（`open/close/navigate/snapshot/partitionOf`）。
+   **`open` / `close` / `partitionOf` 三项不进 browser 包**：P1 的 1.8 已经把「挂载视图 + 分区 +
+   登录态判定」收在 `sessions.open` / `sessions.close` / `partitionFor` 上，再开一个 `browser.session`
+   就是同一能力两个入口（AGENTS.md §2.5 明令禁止）。所以 `browser` 包只拿 `navigate` / `snapshot`，
+   service id 叫 `browser.page`；spec 2.1-01 字面上的 `browser.session.open('boss')` 按
+   `sessions.open('boss')` 打分，判据（在主窗口内挂载、不新开窗口）不变。
+   归属因此是三方而不是两方：`shell` 拥有视图（借出 `kernelContents()` / `mountKernelSite()`）、
+   `sessions` 拥有分区与登录态、`browser` 只拥有页面。
+2. **`browser.page` 的两个系统边界守卫**（不是防御性编程，是真实入口）：
+   `navigate` 只允许落在**已登记平台 startUrl 的 origin** 上（`NAVIGATE_URL_REJECTED`），
+   `snapshot` 对页面回读的一切值做钳制（长度截断、非字符串归空、未知 readyState 归 `complete`）——
+   外部页面的读数不可信，直接进界面文案会把面板变成页面想说什么都行。
+
+**验收前置（2.1 踩过，写死）**：`pnpm dev` **不**拉起 fixture 服务。任何 2.x 的 V 类条目开工前，
+先确认 `127.0.0.1:10233` 上站着的是**当前**这份 `scripts/fixture-server.ts`
+（`curl http://127.0.0.1:10233/boss` 返 200 而不是 404），否则内核视图会渲染成一个真实的
+「not found」，拍出来的证据是假的。2.1 第一次开视图就撞上了上一轮会话遗留的旧服务。
 
 **复用优先的具体体现**（AGENTS.md §2.1，写代码前先核对）：配置读取用 1.3 的 `config`，日志用 `logger`，
 持久化用 `store`，外发计量用 `entitlement`，错误用 `core` 的 `AppErrorPayload`，

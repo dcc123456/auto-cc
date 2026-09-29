@@ -17,18 +17,88 @@
 
 | ID     | 验收标准                                                                                        | 方式 | 验证操作                                                                | 状态                                                |
 | ------ | ----------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------- | --------------------------------------------------- |
-| 2.1-01 | `browser.session.open('boss')` 在主窗口内挂载 `WebContentsView`，可见且可截图，未新开第二层窗口 | V    | 面板点「打开内核」→ 截图显示视图区域渲染了页面                          | [ ]                                                 |
-| 2.1-02 | 不引入第二套浏览器内核：依赖树里无 `playwright*` / `puppeteer*` / `chromium` 下载物             | C    | `pnpm why playwright puppeteer` 均无结果；打包产物内无额外 browser 目录 | [ ]                                                 |
-| 2.1-03 | `navigate(url)` 后 `snapshot()` 返回可读 DOM 文本与标题，且与实际渲染页一致                     | V+C  | 导航到 fixture 搜索页 → 断言 snapshot 含页面标题文本 → 截图对照         | [ ]                                                 |
-| 2.1-04 | 每个平台使用独立 `persist:<platform>` 分区，互不串味                                            | C    | 平台 A 写 cookie 后平台 B 读不到（fixture 站验证）                      | [ ]                                                 |
-| 2.1-05 | **重启 app 后登录态仍在**：fixture 站「已登录」标记在退出并重启后依然显示                       | V    | 登录 fixture → 退出进程 → 重启 → 截图显示已登录（无需再登录）           | [ ]                                                 |
-| 2.1-06 | 分区数据落在用户数据目录内，卸载/清理路径可预期（不写系统临时目录）                             | C    | `resolveUserDataDir()` 下存在分区目录；无 `os.tmpdir()` 写入            | [ ]                                                 |
-| 2.1-07 | 失效探测：cookie 过期或被清除后，`session.status()` 返回 `expired`，不抛异常                    | U+C  | 单测覆盖过期判定 + 实测清 cookie 后状态翻转                             | [ ]                                                 |
-| 2.1-08 | 探测到 `expired` 时，工作流停在 `requiresHuman` 接管点并在面板给出可读提示（文案走 i18n）       | V    | 手动使会话失效 → 截图显示接管提示而非静默失败或英文硬编码               | [ ]                                                 |
-| 2.1-09 | 登录/接管期间，自动化不读取也不存储用户凭据；界面无「保存密码」类自实现                         | C    | grep 无密码采集；分区内无我们自写的凭据文件                             | [ ]                                                 |
-| 2.1-10 | 内核视图随窗口尺寸变化正确重排，无空白/错位                                                     | V    | 拖小窗口 → 截图                                                         | [ ]                                                 |
-| 2.1-11 | 视图销毁/重建不泄漏 session 与监听器（重复开合 10 次后句柄数不涨）                              | C    | 计数断言（`process._getActiveHandles` 或自维护注册表）                  | [ ]                                                 |
+| 2.1-01 | `browser.session.open('boss')` 在主窗口内挂载 `WebContentsView`，可见且可截图，未新开第二层窗口 | V    | 面板点「打开内核」→ 截图显示视图区域渲染了页面                          | [x]                                                 |
+| 2.1-02 | 不引入第二套浏览器内核：依赖树里无 `playwright*` / `puppeteer*` / `chromium` 下载物             | C    | `pnpm why playwright puppeteer` 均无结果；打包产物内无额外 browser 目录 | [x]                                                 |
+| 2.1-03 | `navigate(url)` 后 `snapshot()` 返回可读 DOM 文本与标题，且与实际渲染页一致                     | V+C  | 导航到 fixture 搜索页 → 断言 snapshot 含页面标题文本 → 截图对照         | [x]                                                 |
+| 2.1-04 | 每个平台使用独立 `persist:<platform>` 分区，互不串味                                            | C    | 平台 A 写 cookie 后平台 B 读不到（fixture 站验证）                      | [x]                                                 |
+| 2.1-05 | **重启 app 后登录态仍在**：fixture 站「已登录」标记在退出并重启后依然显示                       | V    | 登录 fixture → 退出进程 → 重启 → 截图显示已登录（无需再登录）           | [x]                                                 |
+| 2.1-06 | 分区数据落在用户数据目录内，卸载/清理路径可预期（不写系统临时目录）                             | C    | `resolveUserDataDir()` 下存在分区目录；无 `os.tmpdir()` 写入            | [x]                                                 |
+| 2.1-07 | 失效探测：cookie 过期或被清除后，`session.status()` 返回 `expired`，不抛异常                    | U+C  | 单测覆盖过期判定 + 实测清 cookie 后状态翻转                             | [x]                                                 |
+| 2.1-08 | 探测到 `expired` 时，工作流停在 `requiresHuman` 接管点并在面板给出可读提示（文案走 i18n）       | V    | 手动使会话失效 → 截图显示接管提示而非静默失败或英文硬编码               | [x]                                                 |
+| 2.1-09 | 登录/接管期间，自动化不读取也不存储用户凭据；界面无「保存密码」类自实现                         | C    | grep 无密码采集；分区内无我们自写的凭据文件                             | [x]                                                 |
+| 2.1-10 | 内核视图随窗口尺寸变化正确重排，无空白/错位                                                     | V    | 拖小窗口 → 截图                                                         | [x]                                                 |
+| 2.1-11 | 视图销毁/重建不泄漏 session 与监听器（重复开合 10 次后句柄数不涨）                              | C    | 计数断言（`process._getActiveHandles` 或自维护注册表）                  | [x]                                                 |
 | 2.1-12 | macOS / Linux 运行期同表现                                                                      | C    | 本机 Windows 无法验证                                                   | [!] BLOCKED：本机无 mac/Linux，1.7 产物装机验证时补 |
+
+**2.1 收尾结论**（证据在 `docs/acceptance/2.1/`，21 个文件：15 张截图 + 6 份机读文本。
+驱动方式全部是 `pnpm harness`（CDP **10222**）打真实窗口，站点侧一律本地 fixture
+`127.0.0.1:10233`（AGENTS.md §7.2）。**判据一律取对端读数**：登录态由仿站按请求 cookie
+服务端现判，泄漏与否由 CDP 的 target 表数，都不采信 app 自述）：
+
+- **2.1-01**：`[data-session-id="boss"] [data-action="open"]` 之后，`targets` 里出现
+  `page 求职仿站 · 职位搜索 http://127.0.0.1:10233/boss`，且**总数仍是 2**（渲染层 + 视图）——
+  没有新窗口 target，视图是主窗口内的一块 `WebContentsView`。
+  证据：`2.1-01-kernel-view-1.png`（视图里渲染的仿站列表页）、`2.1-01-panel-open-2.png`。
+  **口径更正**：本条字面写的是 `browser.session.open('boss')`，但 P1 已经把「挂载 + 分区 + 登录态」
+  收在 `sessions.open` 上，2.1 不再开第二个入口（AGENTS.md §2.5）；`browser` 包只提供页面原语
+  `browser.page.*`。`boss` 平台的 `startUrl` 指向本地仿站，所以这条不碰真实平台也能打分。
+- **2.1-02**：`pnpm why playwright puppeteer chromium` 空；lock 内只有 `chromium-pickle-js`
+  （electron-builder 的 asar 序列化库）与 `electron-to-chromium`（browserslist 版本表），
+  两者都不含浏览器二进制；`dist/win-unpacked/` 顶层只有 Electron 自带文件，无 `chrome-*` /
+  `playwright-*` 目录。证据：`2.1-02-no-second-kernel.txt`。
+  遗留：这份产物是 1.7 那次构建的，`pnpm dist` 因图标步骤 OOM 尚未重跑（挂在 1.7-11），
+  重跑后按同口径复核一次；本条判据的主体（依赖树）与产物版本无关。
+- **2.1-03**：面板输入 `http://127.0.0.1:10233/boss/detail` → 点导航，读数变成
+  `标题「求职仿站 · 职位详情（本地 fixture）」· 装载 complete · 元素 21 个 · 正文 203 字（取回 203）
+· 标题节点 3 条`，`data-page-url` 与 `data-page-partition` 分别是详情页地址与 `persist:boss`；
+  同一时刻在视图 target 里直接读 `document.title` 得到同一个串——两侧对得上。
+  证据：`2.1-03-snapshot-readout-1.png`、`2.1-03-kernel-page-2.png`。
+  C 侧：`packages/browser/src/page-script.test.ts`（8 条，含截断与脏值钳制）、
+  `navigate-policy.test.ts`（7 条，含跨源/`javascript:`/`data:`/异端口拒绝）。
+- **2.1-04**：**隔离发生在分区而不是域名**——三个平台的 `startUrl` 同属 `http://127.0.0.1:10233`、
+  cookie 名同为 `autocc_session`，所以在 `persist:boss` 登录后，换 `persist:fixture-alt` 打开
+  **同一个 URL** 仍是「未登录」，`sessions.status()` 逐平台读数只有 boss 一行带 cookie 名。
+  证据：`2.1-04-partition-isolation-1.txt`（完整读数）、三张截图。
+- **2.1-05**：`taskkill` 掉整个 dev/Electron 进程树 → 重新 `pnpm dev`（fixture 服务全程独立存活）→
+  新进程里**没有任何登录动作**，`probe` 就报「已登录」，仿站服务端横幅同为「已登录」。
+  这条用的是带 `Max-Age` 的持久 cookie：会话型 cookie 不落盘，拿它验「跨重启」会测到假阴性。
+  证据：`2.1-05-after-restart-logged-in-1.png`、`2.1-05-panel-after-restart-2.png`。
+- **2.1-06**：分区目录是 `%APPDATA%/auto-cc/Partitions/{fixture,fixture-alt,boss}`，
+  与面板 `storagePath` 读数逐字一致；全仓无 `os.tmpdir()` 写入。清理路径就是 userData 下那一个目录。
+  证据：`2.1-06-user-data-dir.txt`。
+- **2.1-07**：点「退出登录」（`clearStorageData({storages:['cookies'], origin})`）之后，
+  面板行翻成「未登录 · cookie 名 无 · 过期时间 无」，**没有抛异常**，视图重载后对端横幅也翻成
+  「未登录」。U 侧由 `packages/sessions` 的判定单测覆盖（missing / expired 两种原因）。
+  证据：`2.1-07-panel-expired-1.png`、`2.1-07-after-logout-view-2.png`。
+- **2.1-08**：跑起来之后 `probe` 判出失效 → `runner.current()` 返回
+  `{status:'paused', stepIndex:2, requiresHuman:{platform:'boss',reason:'missing',stepId:'pitch',at:…}}`，
+  面板 `[data-testid="workflow-takeover"]` 显示
+  「等待你接管 / boss 登录态失效（会话 cookie 不存在），已停在「生成打招呼话术」这一步；请在内嵌视图里完成登录后继续。」
+  主进程只发**数据**（platform/reason/stepId），句子由 `workflow.takeoverBody` + 复用
+  `session.reason.*`、`workflow.step.*` 组装，界面没有一处裸中文。证据：`2.1-08-takeover-zh.png`。
+  **这条同时替换了 1.8-07 的提示机制**（原来是主进程拼好中文串推给界面），判据未变、机制已换，
+  故 1.8 收尾结论里补记一行指向这里。
+- **2.1-09**：全仓检索 `password/passwd/credential/captcha` 只剩 logger 的脱敏规则与测试样例串；
+  渲染层无 `type="password"` 控件；boss 分区目录里只有 Chromium 自管的存储
+  （`Network/Cookies`、`Local Storage`、`Session Storage` 等），没有我们自写的凭据文件。
+  我们读到的只有 cookie **名**（面板读数 `cookie 名 autocc_session`），值不出 electron 边界。
+  证据：`2.1-09-no-credential-capture.txt`。
+- **2.1-10**：用 `user32!SetWindowPos` 走真实原生 resize（Electron 的 CDP 端点没有 `Browser` 域，
+  所以不能像浏览器那样改窗口尺寸）：900×600 → 视图 `{x:549,y:0,width:337,height:537}`，
+  1200×800 → `{x:735,y:0,width:451,height:737}`，`x+width` 与 `height` 都正好等于内容区尺寸，
+  无空白无错位；最小化→还原后布局保持。证据：四张截图（两种尺寸 × 渲染层/视图）。
+- **2.1-11**：**计数口径换成 CDP 的 page target 表**（对端读数），而不是 `process._getActiveHandles`：
+  只 `forceUnload()` 不 `close()` 的 webContents 会一直挂在 target 表上，所以这张表数得比自述可信。
+  10 轮 `open('boss') → close()`（每轮回读 `activePlatform`，10/10 都是 boss→null）之后
+  表里仍是 2 个 target，与挂载前基线逐字相同；UI 点击路径另跑 10 轮，每轮取样也都是 2。
+  证据：`2.1-11-target-count.txt`。
+- **2.1-12**：BLOCKED——本机 Windows，mac/Linux 运行期无法验证，随 1.7 产物装机验证补。
+
+**过程中发现并就地修掉的偏差**：验收开始时 `10233` 上站着上一轮会话遗留的旧 fixture 服务
+（有 `/api/outbox`、无 `/boss` 路由），内核视图被导航过去渲染成了 `not found`。
+这不是 app 的缺陷（`did-fail-load` 与 404 页都如实反映在视图里），但会让 2.1-01 拍到假证据，
+所以先重启 fixture 再打分。**遗留动作**：`pnpm dev` 不拉起 fixture 服务，验收前必须自己
+`pnpm fixture`，这条写进 2.2 的验收前置。
 
 ## 2.2 locator 层与 PlatformAdapter SPI
 

@@ -1,0 +1,18 @@
+# 2.1-06 分区数据落在用户数据目录内（C）
+
+## userData 根（Electron app.getPath("userData")，dev 态为 %APPDATA%/auto-cc）
+C:\Users\ragfl\AppData\Roaming/auto-cc
+
+## Partitions 目录：每个平台一个子目录，目录名 = persist:<id> 去掉前缀
+app/
+boss/
+fixture/
+fixture-alt/
+
+## 面板上的落盘路径读数（sessions.status 的 storagePath，与磁盘一致）
+  fixture     → C:\Users\ragfl\AppData\Roaming\auto-cc\Partitions\fixture
+  fixture-alt → C:\Users\ragfl\AppData\Roaming\auto-cc\Partitions\fixture-alt
+  boss        → C:\Users\ragfl\AppData\Roaming\auto-cc\Partitions\boss
+
+## 代码里有无系统临时目录写入
+(空 = 无 os.tmpdir() 写入，清理路径就是 userData 下的分区目录)

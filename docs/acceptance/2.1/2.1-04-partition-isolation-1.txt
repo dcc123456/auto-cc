@@ -1,0 +1,18 @@
+# 2.1-04 每个平台独立 persist:<platform> 分区（C）
+
+## 判定要点：三个平台的 startUrl 同属一个 origin（http://127.0.0.1:10233）、cookie 名同为 autocc_session，
+##   所以「A 登录、B 读不到」只能由分区隔离解释——不是域名隔离，也不是路径隔离。
+
+## 1) 在 persist:boss 里登录（fixture /login?next=/boss 写带 Max-Age 的持久 cookie）
+    对端页面读数 .auth = 已登录（服务端按请求 cookie 现判）
+
+## 2) 换 persist:fixture-alt 打开同一个 URL http://127.0.0.1:10233/boss
+    对端页面读数 .auth = 未登录
+    面板读数 data-page-partition = persist:fixture-alt · data-page-url = http://127.0.0.1:10233/boss
+
+## 3) sessions.status() 的逐平台读数（面板 [data-session-id] 行）
+    fixture      未登录 · 分区 persist:fixture      · cookie 名 无
+    fixture-alt  未登录 · 分区 persist:fixture-alt · cookie 名 无
+    boss         已登录 · 分区 persist:boss        · cookie 名 autocc_session
+
+## 4) 单测侧（U）：packages/sessions/src/*.test.ts 覆盖 partitionFor 与判定；packages/browser/src/navigate-policy.test.ts 覆盖跨源拒绝。
