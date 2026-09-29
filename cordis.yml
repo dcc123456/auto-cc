@@ -29,5 +29,15 @@ plugins:
   - id: ipc
     dependsOn: [logger]
 
-  - id: shell
+  # 插件运行时管理（spec 1.5-01…08）：启停、热重载、错误历史、泄漏巡检。
+  # 这里**不写** `dependsOn: [kernel]`——清单拓扑只认清单内的 id，而 `kernel` 是主进程直接
+  # 挂的装配器；运行期依赖由插件自身的 `inject = ['kernel']` 负责。也不依赖 `config`：
+  # 1.5-04 要演示「停掉 config → log/store 降级」，管理器必须活得比被停的对象久。
+  - id: plugins
     dependsOn: [ipc]
+    config:
+      guarded: [kernel, ipc, plugins]
+      history: 20
+
+  - id: shell
+    dependsOn: [plugins]

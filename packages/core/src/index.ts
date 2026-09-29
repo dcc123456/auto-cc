@@ -6,7 +6,7 @@
  * is absorbed in one file instead of across the plugin tree.
  */
 export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
-export type { Effect, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
+export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
 

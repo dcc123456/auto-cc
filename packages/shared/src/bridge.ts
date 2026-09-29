@@ -4,13 +4,13 @@
  * preload 依据 `RENDERER_ALLOWLIST` 生成代理对象，IPC 网关依据同一份名单校验入站调用，
  * 因此「渲染层能调什么」与「主进程允许什么」永远是同一个常量，不会漂移。
  */
-import type { AppErrorPayload, LogLineView } from '@auto-cc/core';
+import type { AppErrorPayload, LogLineView, PluginErrorView } from '@auto-cc/core';
 
 /**
- * 错误载荷与日志行定义在 `@auto-cc/core`（那里是跨进程契约与 cordis 事件声明的归属地），
- * 这里原样转出，渲染层继续只认 `@auto-cc/shared` 一个入口。
+ * 错误载荷、日志行与插件失败事件定义在 `@auto-cc/core`（那里是跨进程契约与 cordis 事件
+ * 声明的归属地），这里原样转出，渲染层继续只认 `@auto-cc/shared` 一个入口。
  */
-export type { AppErrorPayload, LogLineView } from '@auto-cc/core';
+export type { AppErrorPayload, LogLineView, PluginErrorView } from '@auto-cc/core';
 
 /** 渲染层可调用的 `service.method` 全限定名白名单（spec 1.4-07 的唯一依据）。 */
 export const RENDERER_ALLOWLIST = [
@@ -22,6 +22,13 @@ export const RENDERER_ALLOWLIST = [
   'log.tail',
   'log.status',
   'ipc.probeReject',
+  // 1.5 的运行时管理：一次快照 + 启停 + 配置读写 + 泄漏巡检。
+  'plugins.status',
+  'plugins.stop',
+  'plugins.start',
+  'plugins.readConfig',
+  'plugins.saveConfig',
+  'plugins.cycle',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -68,6 +75,7 @@ export const KERNEL_VIEW_WIDTH_RATIO = 0.38;
 /**
  * 插件树节点（spec 1.3-01 / 1.3-09 / 1.3-10 的界面证据）。
  * 1.4 起由 `kernel.tree` 直连给出，不再经 shell 代理。
+ * 1.5 起带 `stack`：面板折叠显示完整调用栈（spec 1.5-07）。
  */
 export type PluginNodeView = {
   id: string;
@@ -75,10 +83,46 @@ export type PluginNodeView = {
   dependsOn: string[];
   keys: string[];
   error?: string;
+  stack?: string;
 };
 
 /** 内核快照：树 + 清单自身的错误（清单写坏时树可能是空的）。 */
 export type PluginTreeSnapshot = { nodes: PluginNodeView[]; manifestError?: string };
+
+/**
+ * 运行时指标（spec 1.5-01 / 1.5-08）。
+ * `registrySize` 回基线是「不泄漏」的判据；`registryCounter` 是单调挂载序号，只用于展示。
+ */
+export type PluginMetricsView = {
+  registrySize: number;
+  registryCounter: number;
+  effectTotal: number;
+  effects: { id: string; effects: number }[];
+  activeResources: number;
+};
+
+/** 调试面板的一次性快照：指标 + 卸载闸门 + 错误历史。 */
+export type PluginStatusView = {
+  metrics: PluginMetricsView;
+  /** 不允许从界面卸载的插件 id；面板据此决定要不要给某一行摆 Stop 按钮。 */
+  guarded: string[];
+  errorCount: number;
+  errors: PluginErrorView[];
+};
+
+/** 反复启停后的对照（spec 1.5-08）：三个漂移都为 0 才算没泄漏。 */
+export type PluginCycleView = {
+  id: string;
+  rounds: number;
+  before: PluginMetricsView;
+  after: PluginMetricsView;
+  sizeDrift: number;
+  effectDrift: number;
+  resourceDrift: number;
+};
+
+/** 面板配置编辑器的读取结果（spec 1.5-06）：`mounted` 为 false 时新配置要等 Start 才生效。 */
+export type PluginConfigView = { id: string; values: Record<string, unknown>; mounted: boolean };
 
 /** 日志出口状态：落盘路径与生效级别。 */
 export type LogStatusView = { file?: string; level: string };
@@ -98,6 +142,15 @@ export interface BridgeSignatures {
    * （1.4-04 / 1.4-07）。返回值刻意是 `unknown` 而不是 `BridgeReply`——信封只有一层。
    */
   'ipc.probeReject': { args: [path: string]; returns: unknown };
+  /** 运行时快照：指标 + 卸载闸门 + 错误历史（spec 1.5-01 / 1.5-07）。 */
+  'plugins.status': { args: []; returns: PluginStatusView };
+  'plugins.stop': { args: [id: string]; returns: PluginNodeView };
+  'plugins.start': { args: [id: string]; returns: PluginNodeView };
+  'plugins.readConfig': { args: [id: string]; returns: PluginConfigView };
+  /** 保存并即时生效（spec 1.5-06）；非法字段以 `CONFIG_INVALID` 结构化错误失败。 */
+  'plugins.saveConfig': { args: [id: string, patch: Record<string, unknown>]; returns: PluginNodeView };
+  /** 反复启停做泄漏巡检（spec 1.5-08）。 */
+  'plugins.cycle': { args: [id: string, rounds?: number]; returns: PluginCycleView };
 }
 
 /**

@@ -9,6 +9,7 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
 import { LogService } from '@auto-cc/plugin-logger';
+import { PluginsService } from '@auto-cc/plugin-plugins';
 import { StoreService } from '@auto-cc/plugin-store';
 import { ShellService } from '@auto-cc/shell';
 
@@ -17,5 +18,6 @@ export const REGISTRY: Registry = {
   logger: LogService,
   store: StoreService,
   ipc: IpcGatewayService,
+  plugins: PluginsService,
   shell: ShellService,
 };
