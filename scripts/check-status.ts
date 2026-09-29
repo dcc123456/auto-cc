@@ -25,10 +25,11 @@ if (status) {
 }
 
 if (!remotes) {
-  console.warn('⚠ 未配置 git 远端，无法推送。提交已完成，推送步骤跳过。');
-} else if (ahead) {
+  console.warn('⚠ 未配置 git 远端，无法推送。提交已完成，推送步骤跳过（AGENTS.md §1.6 例外）。');
+  process.exit(0);
+}
+if (ahead) {
   console.error(`✖ 本地有 ${ahead} 个提交未推送，请 git push。`);
   process.exit(1);
 }
-
 console.log('✔ 工作区干净，提交已推送');
