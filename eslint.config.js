@@ -53,6 +53,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/out/**',
       'docs/acceptance/**',
+      'tmp/**',
       'packages/renderer/**/generated/**',
     ],
   },

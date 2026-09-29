@@ -4,7 +4,7 @@
  * 命名不是格式问题：`.githooks/pre-commit` 只放行 `docs/acceptance/<子计划>/<spec-id>-*.png`，
  * 名字错了证据就进不了库，验收记录会缺一块。所以把钩子的形状钉在测试里。
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -55,6 +55,23 @@ describe('archiveEvidence', () => {
 
   it('源文件不存在时点名', () => {
     expect(() => archiveEvidence(tmpdir(), '1.6-01', ['/definitely/missing.png'])).toThrow(/不存在/);
+  });
+
+  it('一次归档多张图时各自占一个文件名，不互相覆盖', () => {
+    const repoRoot = path.join(tmpdir(), `auto-cc-evidence-multi-${String(Date.now())}`);
+    mkdirSync(repoRoot, { recursive: true });
+    const before = path.join(repoRoot, 'before.png');
+    const after = path.join(repoRoot, 'after.png');
+    writeFileSync(before, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(after, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+    const archived = archiveEvidence(repoRoot, '1.6-04', [before, after], 'click-and-type');
+    const names = archived.files.map((file) => path.basename(file.target));
+    expect(names).toEqual(['1.6-04-click-and-type-1.png', '1.6-04-click-and-type-2.png']);
+    // 逐个比对内容：共用一个文件名时后一张会把前一张盖掉，验收记录就只剩一张图。
+    expect(readFileSync(archived.files[0]?.target as string)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    expect(readFileSync(archived.files[1]?.target as string)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]),
+    );
   });
 
   it('条目号形状与钩子一致（1.10-11a 这类也要能吃下）', () => {

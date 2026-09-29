@@ -58,8 +58,8 @@ export class Gateway {
     this.inFlight += 1;
     const path = typeof request?.path === 'string' ? request.path : '';
     try {
-      if (path === '') throw new AppError('NOT_IN_ALLOWLIST', '调用载荷不合法：缺少 path');
-      if (!isAllowedCall(path)) throw new AppError('NOT_IN_ALLOWLIST', `能力未在白名单中：${path}`, path);
+      if (path === '') throw this.deny(path, '调用载荷不合法：缺少 path');
+      if (!isAllowedCall(path)) throw this.deny(path, `能力未在白名单中：${path}`);
 
       const target = resolveCall(path, this.deps.lookup);
       if (!target.ok) throw new AppError(target.code, target.message, path);
@@ -69,15 +69,23 @@ export class Gateway {
       return { ok: true, value: assertSerializable(value, path) };
     } catch (error) {
       const payload = AppError.from(error, 'UNKNOWN');
-      if (payload.code === 'NOT_IN_ALLOWLIST') {
-        // 只数白名单拒绝：服务内部的业务错误不算「越权」，混进来会让面板的拒绝数失去意义。
-        this.denied += 1;
-        this.deps.onDenied?.(path, payload);
-      }
       return { ok: false, error: { ...payload, path: payload.path ?? path } };
     } finally {
       this.inFlight -= 1;
       this.completed += 1;
     }
+  }
+
+  /**
+   * 白名单拒绝的唯一出口：计数、留一条主进程日志、造出错误对象。
+   *
+   * 计数必须钉在这里而不是 catch 分支：`ipc.probeReject` 这类白名单内的方法会把内部的
+   * `NOT_IN_ALLOWLIST` 原样抛出，按错误码数就会「点一次越权、面板 +2」。
+   */
+  private deny(path: string, message: string): AppError {
+    const error = new AppError('NOT_IN_ALLOWLIST', message, path);
+    this.denied += 1;
+    this.deps.onDenied?.(path, error);
+    return error;
   }
 }

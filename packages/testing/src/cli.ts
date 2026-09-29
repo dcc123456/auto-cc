@@ -8,6 +8,7 @@
  *   pnpm harness type --text "日志级别" --value debug
  *   pnpm harness dom --selector '[data-row-id]' --attrs data-row-id
  *   pnpm harness eval --expr "await window.autoCC.kernel.tree()"
+ *   pnpm harness eval --expr-file tmp/probe.js   # 多行脚本走文件，见 expression() 的说明
  *   pnpm harness assert --expr "document.title" --equals '"auto-cc"'
  *   pnpm harness navigate --to file:///…/fixtures/self-test-lab/index.html --url data:text/html
  *   pnpm harness shot --out /tmp/shot.png --url 127.0.0.1:5173
@@ -18,7 +19,7 @@
  * Electron 会同时暴露主窗口与内嵌内核视图两个 page target，所以用 --url 子串选边。
  * `assert` 与 `diff` 判定不通过时以 exit 1 结束，让脚本能串成真断言而不是读日志。
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { CdpSession, listTargets, type TargetSpec } from './cdp.js';
@@ -60,6 +61,17 @@ async function attach(): Promise<CdpSession> {
   return CdpSession.attach(port, urlFilter);
 }
 
+/**
+ * 取要执行的 JS 源码：`--expr` 给字面量，`--expr-file` 给仓库内文件路径。
+ *
+ * Windows 上 `pnpm harness` 经 `.cmd` 转发实参，命令行里的换行会被截断（实测多行表达式
+ * 只剩第一行，报 `Unexpected end of input`），所以成段的断言脚本必须能从文件读入。
+ */
+function expression(fallback: string): string {
+  const file = flag('expr-file');
+  return file ? readFileSync(evidenceFile(file), 'utf8') : flag('expr', fallback);
+}
+
 const COMMANDS = [
   'targets            列出可连接的页面 target',
   'wait --text <str>  等页面出现该文本（--timeout 毫秒）',
@@ -67,8 +79,8 @@ const COMMANDS = [
   'type [--selector <css>] [--text <str>] --value <str>  聚焦后走 Input.insertText',
   'text               打印页面可见文本',
   'dom --selector <css> [--attrs a,b]  打印匹配节点的机读快照',
-  'eval --expr <js>   在页面里求值并打印结果',
-  'assert --expr <js> [--equals <json>]  断言，失败 exit 1',
+  'eval [--expr <js> | --expr-file <path>]  在页面里求值并打印结果',
+  'assert [--expr <js> | --expr-file <path>] [--equals <json>]  断言，失败 exit 1',
   'navigate --to <url>  导航当前 target 并等 load 事件',
   'shot --out <file>  截图落盘',
   'diff --base <a.png> --head <b.png> [--threshold n]  像素比对，有差异 exit 1',
@@ -135,13 +147,13 @@ try {
     }
     case 'eval': {
       const session = await attach();
-      console.log(JSON.stringify(await session.evaluate(flag('expr', '1')), null, 2));
+      console.log(JSON.stringify(await session.evaluate(expression('1')), null, 2));
       session.close();
       break;
     }
     case 'assert': {
       const session = await attach();
-      const actual = await session.evaluate(flag('expr', 'false'));
+      const actual = await session.evaluate(expression('false'));
       session.close();
       const expected = flag('equals');
       const isPassed = expected ? sameJson(actual, JSON.parse(expected) as unknown) : Boolean(actual);

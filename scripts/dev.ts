@@ -38,10 +38,21 @@ function resolveElectron(): string {
 }
 
 function launchElectron() {
-  electron = spawn(resolveElectron(), [path.join(distDir, 'main.cjs'), `--remote-debugging-port=${cdpPort}`], {
-    stdio: 'inherit',
-    env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl },
-  });
+  // Windows 上 Chrome 会判定被别的窗口盖住的主窗口「不可见」并停止产帧，
+  // `Page.captureScreenshot` 就永远等不到那一帧（harness 实测挂死）；自测通道要求窗口
+  // 被挡住也能截图，所以开发态关掉这个遮挡计算。
+  electron = spawn(
+    resolveElectron(),
+    [
+      path.join(distDir, 'main.cjs'),
+      `--remote-debugging-port=${cdpPort}`,
+      '--disable-features=CalculateNativeWinOcclusion',
+    ],
+    {
+      stdio: 'inherit',
+      env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl },
+    },
+  );
   electron.on('exit', (code) => {
     console.log(`[dev] electron exited (${String(code)})`);
     process.exit(0);
@@ -75,6 +86,9 @@ async function runRestart(): Promise<void> {
       // 端口随进程释放：抢在旧实例退出前 bind CDP 端口会失败，harness 就会连到一个半死的会话。
       await waitExit(old, EXIT_GRACE_MS);
     }
+    // 主动重启会摘掉 exit 监听（见上），所以 `[dev]` 日志里不会留下退出痕迹；
+    // spec 1.6-14 要求「观察 [dev] 日志重启成功」，这一行就是那条可 grep 的重启痕迹。
+    console.log('[dev] 主进程重启');
     launchElectron();
   } finally {
     isRestarting = false;

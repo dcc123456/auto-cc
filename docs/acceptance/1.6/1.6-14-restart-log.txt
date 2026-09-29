@@ -1,0 +1,8 @@
+5:[dev] renderer at http://127.0.0.1:5173/
+6:[dev] 主进程重启
+9:DevTools listening on ws://127.0.0.1:10222/devtools/browser/6047bf25-5a78-44ab-a0b7-b844f1d71a68
+10:[dev] 主进程重启
+13:DevTools listening on ws://127.0.0.1:10222/devtools/browser/943f086c-0aff-462e-87a1-ccae71a6c0b9
+14:[dev] 主进程重启
+17:DevTools listening on ws://127.0.0.1:10222/devtools/browser/bda7ed21-88c9-4492-8c8f-ae1f359e17c5
+bind-error hits: 0

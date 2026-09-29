@@ -1,0 +1,70 @@
+{
+  "before": {
+    "inFlight": 1,
+    "completed": 1288,
+    "denied": 1
+  },
+  "after": {
+    "inFlight": 1,
+    "completed": 1295,
+    "denied": 2
+  },
+  "tree": [
+    "config=active",
+    "logger=active",
+    "store=active",
+    "ipc=active",
+    "plugins=active",
+    "devtools=active",
+    "shell=active"
+  ],
+  "logTailCount": 12,
+  "logStatus": {
+    "file": "C:\\Users\\ragfl\\AppData\\Local\\auto-cc\\logs\\auto-cc.log",
+    "level": "info"
+  },
+  "devtools": {
+    "isPackaged": false,
+    "isCdpEnabled": true,
+    "cdpPort": 10222,
+    "targetCount": 2,
+    "targets": [
+      {
+        "id": 1,
+        "title": "auto-cc",
+        "url": "http://127.0.0.1:5173/",
+        "isMainWindow": true,
+        "isFocused": true
+      },
+      {
+        "id": 2,
+        "title": "自测实验室 fixture",
+        "url": "file:///D:/works/deep-seek-workspace/auto-cc/fixtures/self-test-lab/index.html?tint=%237f1d1d",
+        "isMainWindow": false,
+        "isFocused": false
+      }
+    ]
+  },
+  "panelIpc": "网关 在途 1 · 已完成 1286 · 拒绝 1",
+  "panelDevtools": "CDP 已开启 · 端口 10222页面目标 2 个开发态",
+  "panelTargets": "#1 auto-cc · 主窗口 · 持有焦点#2 自测实验室 fixture · 内嵌视图 · 无焦点",
+  "panelRows": [
+    "config",
+    "logger",
+    "store",
+    "ipc",
+    "plugins",
+    "devtools",
+    "shell"
+  ],
+  "panelLogLines": 12,
+  "probeReply": {
+    "ok": false,
+    "error": {
+      "code": "NOT_IN_ALLOWLIST",
+      "message": "能力未在白名单中：shell.readFile",
+      "path": "shell.readFile",
+      "stack": "AppError: 能力未在白名单中：shell.readFile\n    at Proxy.probeReject (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:29517:11)\n    at async Gateway.invoke (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:29456:21)\n    at async Session.<anonymous> (node:electron/js2c/browser_init:1:118174)"
+    }
+  }
+}

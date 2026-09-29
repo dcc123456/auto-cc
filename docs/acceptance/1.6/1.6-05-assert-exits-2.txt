@@ -1,0 +1,4 @@
+{
+  "isPassed": false,
+  "actual": "auto-cc"
+}

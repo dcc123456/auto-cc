@@ -234,20 +234,74 @@ plan §2 的 16 个包中，1.1 只创建 `core` 与 `shared`。其余包**由�
 
 | ID     | 验收标准                                                                     | 方式 | 验证操作                                                                                                                                                                                                                                                                                                      | 状态 |
 | ------ | ---------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| 1.6-01 | dev 模式自动开启 CDP 端口，`/json` 能列出 app 的 page target                 | C    | `curl -s 127.0.0.1:10222/json/list` 输出含 `"title": "auto-cc"` 与 `http://127.0.0.1:5173/`；`devtools.status()` 的 `isCdpEnabled` 为 true、`cdpPort` 为 10222                                                                                                                                                | [ ]  |
-| 1.6-02 | agent 能通过 harness 打开 app 并**看到页面**（截图回传为图）                 | V    | `pnpm harness shot --out /tmp/…png --url 127.0.0.1:5173` 后用 Read 读图，能描述出左栏/面板/日志区实际内容（不是「期待内容」）                                                                                                                                                                                 | [ ]  |
-| 1.6-03 | agent 能读到真实渲染后的 DOM 快照（含 React 挂载后的节点）                   | V    | `pnpm harness dom --selector '[data-row-id]'` 列出全部插件行的 `data-row-id` 值，与主进程 registry 的 id 集合一致                                                                                                                                                                                             | [ ]  |
-| 1.6-04 | agent 能真实点击与输入（派发原生事件，非只改 state）                         | V    | `harness click --selector '[data-row-id="store"] [data-action="stop"]'` → 该行状态变「已卸载」；`harness click --selector '[data-row-id="logger"] [data-action="config"]'` 打开编辑器 → `harness type --selector '[data-editor="config"]' --value '{"level":"debug"}'` → 回读为新值；两次操作后各截一张图对比 | [ ]  |
-| 1.6-05 | agent 能在页面上下文执行 JS 断言并取回结果                                   | V    | `harness eval --expr "window.autoCC.kernel.tree()"` 取值；`harness assert --expr … --equals …` 命中时 exit 0、不命中时 exit 1（两种都要跑一次）                                                                                                                                                               | [ ]  |
-| 1.6-06 | harness 能同时读到主进程侧状态（fiber 树、日志尾部）与界面状态，两者一致     | V    | 同一时刻取 `devtools.status().targets` / `kernel.tree()` / `log.tail` 与 CDP `/json/list`、界面面板文本做三方对照，数量与状态一字不差                                                                                                                                                                         | [ ]  |
-| 1.6-07 | 存在稳定入口 `pnpm harness <action>`，agent 无需手搓 CDP                     | C    | 根目录 `pnpm harness shot` 直接出图；`pnpm harness`（无参）打印命令清单并 exit 1；命令集覆盖 §8.1 列的 12 个 action                                                                                                                                                                                           | [ ]  |
-| 1.6-08 | 生产模式（打包后）**不**开启 CDP，dev harness 不进入产物                     | C    | 源码审计：`grep -rn "remote-debugging\|10222" packages/` 只允许出现在 `packages/testing/`（harness 客户端）与 devtools 的只读展示里，main/preload/renderer 源码为 0 命中；`resolveCdpPort()` 纯函数单测断言 `packaged → null`；真实安装包上的复验归 1.7-06/1.7-12                                             | [ ]  |
-| 1.6-09 | harness 能同时驱动**内嵌内核视图**（它是独立 target）                        | V    | `harness navigate --url data: --to file:///…/fixtures/self-test-lab/index.html`（`--url` 是按 URL 子串选 target，`data:` 只会命中内核视图的占位页）→ 对该 target `shot` + `dom`，读到 fixture 里的动态节点                                                                                                    | [ ]  |
-| 1.6-10 | 视觉回归基线：同一场景两张截图可比对，差异可量化报告                         | V    | 先 `shot` 基线，改一处样式（fixture 背景色）再 `shot`，`harness diff --base … --head …` 报告像素差数/占比/包围盒；同一张图自比差为 0                                                                                                                                                                          | [ ]  |
-| 1.6-11 | 验收证据可自动归档到 `docs/acceptance/<子计划>/`                             | C    | `harness archive --id 1.6-02 --in /tmp/….png` → 出现在 `docs/acceptance/1.6/1.6-02-*.png`；文件名不合规/目标目录不在白名单时拒绝，且 `/tmp` 过程图不进 git（`git status` 干净）                                                                                                                               | [ ]  |
-| 1.6-12 | 网关指标（在途/已完成/拒绝）在面板可见并随调用变化（1.5 遗留第 2 条）        | V    | 面板顶部显示 `ipc.stats` 三项；连续发起 N 次调用 + 1 次白名单外调用后，已完成 +N、拒绝 +1，截图取证                                                                                                                                                                                                           | [ ]  |
-| 1.6-13 | 面板行与按钮有机读锚点，脚本不依赖可见文案（1.5 遗留第 3 条）                | C+V  | `data-row-id` / `data-action` 覆盖每一行每个动作；切到英文界面后同一套锚点脚本仍全部命中                                                                                                                                                                                                                      | [ ]  |
-| 1.6-14 | 改主进程代码触发 dev 重启，不出现端口占用或会话被带走（1.5 固化事实第 8 条） | V    | 保存一次 `packages/main/src/index.ts` 的无害改动 → 观察 `[dev]` 日志重启成功、`/json/list` 仍是同一个 app，`pnpm dev` 进程存活；重启期间无 `bind … 只允许使用一次`                                                                                                                                            | [ ]  |
+| 1.6-01 | dev 模式自动开启 CDP 端口，`/json` 能列出 app 的 page target                 | C    | `curl -s 127.0.0.1:10222/json/list` 输出含 `"title": "auto-cc"` 与 `http://127.0.0.1:5173/`；`devtools.status()` 的 `isCdpEnabled` 为 true、`cdpPort` 为 10222                                                                                                                                                | [x]  |
+| 1.6-02 | agent 能通过 harness 打开 app 并**看到页面**（截图回传为图）                 | V    | `pnpm harness shot --out /tmp/…png --url 127.0.0.1:5173` 后用 Read 读图，能描述出左栏/面板/日志区实际内容（不是「期待内容」）                                                                                                                                                                                 | [x]  |
+| 1.6-03 | agent 能读到真实渲染后的 DOM 快照（含 React 挂载后的节点）                   | V    | `pnpm harness dom --selector '[data-row-id]'` 列出全部插件行的 `data-row-id` 值，与主进程 registry 的 id 集合一致                                                                                                                                                                                             | [x]  |
+| 1.6-04 | agent 能真实点击与输入（派发原生事件，非只改 state）                         | V    | `harness click --selector '[data-row-id="store"] [data-action="stop"]'` → 该行状态变「已卸载」；`harness click --selector '[data-row-id="logger"] [data-action="config"]'` 打开编辑器 → `harness type --selector '[data-editor="config"]' --value '{"level":"debug"}'` → 回读为新值；两次操作后各截一张图对比 | [x]  |
+| 1.6-05 | agent 能在页面上下文执行 JS 断言并取回结果                                   | V    | `harness eval --expr "window.autoCC.kernel.tree()"` 取值；`harness assert --expr … --equals …` 命中时 exit 0、不命中时 exit 1（两种都要跑一次）                                                                                                                                                               | [x]  |
+| 1.6-06 | harness 能同时读到主进程侧状态（fiber 树、日志尾部）与界面状态，两者一致     | V    | 同一时刻取 `devtools.status().targets` / `kernel.tree()` / `log.tail` 与 CDP `/json/list`、界面面板文本做三方对照，数量与状态一字不差                                                                                                                                                                         | [x]  |
+| 1.6-07 | 存在稳定入口 `pnpm harness <action>`，agent 无需手搓 CDP                     | C    | 根目录 `pnpm harness shot` 直接出图；`pnpm harness`（无参）打印命令清单并 exit 1；命令集覆盖 §8.1 列的 12 个 action                                                                                                                                                                                           | [x]  |
+| 1.6-08 | 生产模式（打包后）**不**开启 CDP，dev harness 不进入产物                     | C    | 源码审计：`grep -rn "remote-debugging\|10222" packages/` 只允许出现在 `packages/testing/`（harness 客户端）与 devtools 的只读展示里，main/preload/renderer 源码为 0 命中；`resolveCdpPort()` 纯函数单测断言 `packaged → null`；真实安装包上的复验归 1.7-06/1.7-12                                             | [x]  |
+| 1.6-09 | harness 能同时驱动**内嵌内核视图**（它是独立 target）                        | V    | `harness navigate --url data: --to file:///…/fixtures/self-test-lab/index.html`（`--url` 是按 URL 子串选 target，`data:` 只会命中内核视图的占位页）→ 对该 target `shot` + `dom`，读到 fixture 里的动态节点                                                                                                    | [x]  |
+| 1.6-10 | 视觉回归基线：同一场景两张截图可比对，差异可量化报告                         | V    | 先 `shot` 基线，改一处样式（fixture 背景色）再 `shot`，`harness diff --base … --head …` 报告像素差数/占比/包围盒；同一张图自比差为 0                                                                                                                                                                          | [x]  |
+| 1.6-11 | 验收证据可自动归档到 `docs/acceptance/<子计划>/`                             | C    | `harness archive --id 1.6-02 --in /tmp/….png` → 出现在 `docs/acceptance/1.6/1.6-02-*.png`；文件名不合规/目标目录不在白名单时拒绝，且 `/tmp` 过程图不进 git（`git status` 干净）                                                                                                                               | [x]  |
+| 1.6-12 | 网关指标（在途/已完成/拒绝）在面板可见并随调用变化（1.5 遗留第 2 条）        | V    | 面板顶部显示 `ipc.stats` 三项；连续发起 N 次调用 + 1 次白名单外调用后，已完成 +N、拒绝 +1，截图取证                                                                                                                                                                                                           | [x]  |
+| 1.6-13 | 面板行与按钮有机读锚点，脚本不依赖可见文案（1.5 遗留第 3 条）                | C+V  | `data-row-id` / `data-action` 覆盖每一行每个动作；切到英文界面后同一套锚点脚本仍全部命中                                                                                                                                                                                                                      | [x]  |
+| 1.6-14 | 改主进程代码触发 dev 重启，不出现端口占用或会话被带走（1.5 固化事实第 8 条） | V    | 保存一次 `packages/main/src/index.ts` 的无害改动 → 观察 `[dev]` 日志重启成功、`/json/list` 仍是同一个 app，`pnpm dev` 进程存活；重启期间无 `bind … 只允许使用一次`                                                                                                                                            | [x]  |
+
+### 1.6 期间新增固化的环境与设计事实
+
+1. **`Runtime.callFunctionOn` 必须有宿主对象**：Chrome 不接受裸函数声明，缺 `objectId` 时
+   `harness dom/click/type` 全线报 `Either objectId or executionContextId …`（本轮之前那三条
+   其实从未跑通过）。现在 `cdp.ts` 缓存 `globalThis` 的 objectId 复用，并在 `navigate()` 之后
+   作废——导航会销毁执行上下文，留着旧 id 会拿到 `Cannot find context`。
+2. **Windows 上「窗口被挡住」等于「截不到图」**：Chrome 的 `CalculateNativeWinOcclusion` 把被
+   别的窗口覆盖的主窗口判为不可见后停止产帧，`Page.captureScreenshot` 就永远等不到那一帧
+   （实测挂满 60s）。两道措施一起用：`screenshot()` 先 `Page.bringToFront`，dev 启动加
+   `--disable-features=CalculateNativeWinOcclusion`。只加前者仍会在窗口最小化时卡死。
+3. **多行 JS 不能经 `pnpm harness --expr` 传**：pnpm 在 Windows 走 `.cmd` 转发实参，换行处直接
+   截断（实测只剩首行，报 `Unexpected end of input`）。所以 `eval`/`assert` 加了 `--expr-file`，
+   成段脚本从文件读；绕过 pnpm 用 `node node_modules/tsx/dist/cli.mjs packages/testing/src/cli.ts`
+   也能跑多行，但那条路不该写进验收步骤（它绕开了 spec 里的稳定入口）。
+4. **页面求值失败必须把原因带回来**：`exceptionDetails.text` 恒为 `Uncaught`，真正的原因在
+   `exception.description`。`cdp.ts` 统一走 `describeException()`（附行号），否则 agent 只能靠
+   二分注释脚本猜哪一行坏了。
+5. **白名单拒绝只在入口计数**：`ipc.probeReject` 这类「白名单内、内部再越权」的方法会把
+   `NOT_IN_ALLOWLIST` 原样抛出，在 catch 分支按错误码数就是「点一次越权、面板 +2」。现在
+   `Gateway.deny()` 是唯一计数出口，只在两处入站白名单检查调用，回归用例见
+   `gateway.test.ts` 的「嵌套调用不会把同一次越权数两遍」。
+6. **渲染层拿到的是信封，不是异常**：`window.autoCC.*` 不抛错，拒绝藏在 `{ok:false, error}` 里。
+   写页面断言脚本时 try/catch 永远抓不到越权，必须读 reply（本轮实测踩过一次，误判成
+   「网关没拒」）。
+7. **一次归档多张图要各自占名**：`archive --in a,b` 以前后一张盖掉前一张。现在多图补
+   `-1/-2` 后缀，单图仍是 `<id>-<slug>.<ext>`，与 spec 里书写的文件名一致。
+8. **面板 2s 轮询会让 `completed` 被自家读数刷高**：`READ_INTERVAL_MS = 2000`（1.6-12 要求面板
+   随调用变化，就得周期性重读）。实测「6 次合法调用 + 1 次越权 → completed +7」，其中含被拒
+   那次内层调用，且被拒调用同样计入 completed（它是「完成」不是「成功」）。所以 `completed`
+   只能按区间读，精确断言只能落在 `denied` 上；面板显示值比主进程实时值最多滞后一个周期。
+9. **`data-editor-for` 刻意不复用 `data-row-id`**：编辑框渲染在 `<li>` 之外，复用会让
+   `[data-row-id]` 多命中一行，与主进程 registry 的 id 集合不再相等——那正是 1.6-03/1.6-13
+   的对照前提。日志行同理用 `data-log-level` 而不是行锚点。
+10. **dev 主动重启不留 `[dev] electron exited` 痕迹**：`runRestart()` 先摘掉 exit 监听（否则被
+    我们 kill 的旧进程会触发 `process.exit(0)`，把整个 dev 会话带走），所以日志里只剩重复的
+    `DevTools listening`。1.6-14 要求「观察 `[dev]` 日志重启成功」，因此补了一行 `[dev] 主进程重启`
+    作为可 grep 的痕迹。附带事实：冷启动时 esbuild watch 会立刻触发一次重启，首启动的
+    `DevTools listening` 会被吞掉，属已知噪声。
+11. **英文态锚点与中文态一字不差**：切到 en 后 `[data-row-id]`(7) / `[data-action]`(16) /
+    `[data-stat]`(3) 三个集合与 zh 完全相同，只有 `h1` 文案变了。唯一需要按文案定位的是 header
+    里的语言切换按钮本身（`--text English`）——它不在面板锚点体系内，且它的用途就是改文案。
+12. **`tmp/` 与 `docs/acceptance/` 不参与 lint 与排版**：前者是过程脚本（AGENTS.md §7.5 规定不进
+    git），后者是 harness 输出的字节副本，prettier 重排会让「当时读到的值」变成「prettier 喜欢
+    的样子」。
+
+### 1.6 遗留（后续子计划处理）
+
+| 项                                                                                     | 归属              |
+| -------------------------------------------------------------------------------------- | ----------------- |
+| 安装包上「CDP 未开启」的真实复验（本轮只做了源码审计 + `resolveCdpPort()` 单测）       | 1.7-06 / 1.7-12   |
+| 打包态截图是否同样需要 `--disable-features=CalculateNativeWinOcclusion`                | 1.7（截图验收时） |
+| harness 尚无读 console / 网络请求的能力，页面报错只能靠 `eval` 主动取                  | P2 浏览器自动化   |
+| `ipc.stats` 若要精确断言调用次数，需要给统计加「按来源」维度（区分面板轮询与人工调用） | P2 之前不阻塞     |
 
 ## 1.7 零依赖三端打包与安装
 

@@ -25,6 +25,8 @@ const STATE_CLASS: Record<PluginNodeView['state'], string> = {
 
 /** 日志区最多显示的行数，事件推送时按此截断。 */
 const LOG_LIMIT = 30;
+/** 面板自读间隔：太短会让网关统计被自家轮询刷满，太长则截图读不到刚发生的调用。 */
+const READ_INTERVAL_MS = 2000;
 
 /** 泄漏巡检的默认轮次（spec 1.5-08 要求 20 次）。 */
 const CYCLE_ROUNDS = 20;
@@ -76,8 +78,11 @@ export function AssemblyPanel() {
     if (devtoolsReply?.ok) setDevtools(devtoolsReply.value);
   }, [bridge]);
 
+  /** 面板读数要随调用变化（spec 1.6-12）：harness 发完调用得能在界面上读到新值，所以按固定间隔重读。 */
   useEffect(() => {
     void read();
+    const timer = setInterval(() => void read(), READ_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [read]);
 
   useEffect(() => {
@@ -349,7 +354,9 @@ export function AssemblyPanel() {
         </ul>
 
         {editing && (
-          <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/80 p-3">
+          // 编辑框在行之外，所以给它自己的锚点 data-editor-for 来标明归属；
+          // 刻意不复用 data-row-id，否则 `dom --selector '[data-row-id]'` 会多出一行、与主进程 id 集合不再相等（spec 1.6-03 / 1.6-13）。
+          <div data-editor-for={editing.id} className="mt-3 rounded-lg border border-slate-700 bg-slate-950/80 p-3">
             <p className="text-[11px] text-slate-400">
               {t('assembly.editorHeading', { id: editing.id })}
               {' · '}
@@ -450,7 +457,7 @@ export function AssemblyPanel() {
         </p>
         <ul className="mt-2 flex max-h-64 flex-col gap-1 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-400">
           {(lines ?? []).map((line, index) => (
-            <li key={`${String(line.ts)}-${String(index)}`} className="break-all">
+            <li key={`${String(line.ts)}-${String(index)}`} data-log-level={line.level} className="break-all">
               <span className="text-slate-600">{new Date(line.ts).toLocaleTimeString()}</span>{' '}
               <span className="text-slate-500">{line.level.toUpperCase()}</span>{' '}
               <span className="text-slate-300">[{line.name}]</span> {line.text}

@@ -1,2 +1,9 @@
 # 锁文件由 pnpm 自己排版，prettier 一改就是上千行无意义 diff。
 pnpm-lock.yaml
+
+# 验收证据是 harness 输出的字节副本（AGENTS.md §7.5）。重排版会让「当时读到的值」
+# 变成「prettier 喜欢的样子」，截图与 json 必须保持归档时的原样。
+docs/acceptance/
+
+# 过程脚本与临时产物，不进 git，也不该参与排版。
+tmp/

@@ -85,6 +85,25 @@ export async function listTargets(port: number): Promise<CdpTarget[]> {
 
 type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void };
 
+/** CDP 抛回页面异常时能拿到的字段（不同 Chrome 版本给的不全）。 */
+type ExceptionDetails = {
+  text: string;
+  lineNumber?: number;
+  exception?: { description?: string };
+};
+
+/**
+ * 把页面异常拼成一句能直接读的原因。
+ *
+ * `text` 单独用几乎等于没报——求值失败时它固定是 `Uncaught`，真正的原因在
+ * `exception.description`（含类型与消息）里。自测通道要求「失败原因留在输出里」，
+ * 所以这里必须把两层都带上。
+ */
+function describeException(details: ExceptionDetails): string {
+  const line = typeof details.lineNumber === 'number' ? ` @ 第 ${String(details.lineNumber + 1)} 行` : '';
+  return `${details.exception?.description ?? details.text}${line}`;
+}
+
 /** 一个已连上某个 target 的 CDP 会话。 */
 export class CdpSession {
   private readonly socket: WebSocket;
@@ -92,6 +111,11 @@ export class CdpSession {
   /** CDP 事件等待队列（事件没有 id，只能按方法名匹配）。 */
   private readonly eventWaiters = new Map<string, Array<() => void>>();
   private nextId = 1;
+  /**
+   * `callFunctionOn` 必须绑定到某个对象/执行上下文，Chrome 不接受裸函数声明。
+   * 这里缓存 globalThis 的 objectId 复用；页面导航会销毁上下文，所以 navigate 之后要重取。
+   */
+  private globalObjectId?: string;
 
   private constructor(socket: WebSocket) {
     this.socket = socket;
@@ -157,12 +181,28 @@ export class CdpSession {
 
   /** 在页面上下文里求值，返回可序列化结果。 */
   async evaluate<T = unknown>(expression: string): Promise<T> {
-    const result = await this.send<{ result?: { value?: T }; exceptionDetails?: { text: string } }>(
+    const result = await this.send<{ result?: { value?: T }; exceptionDetails?: ExceptionDetails }>(
       'Runtime.evaluate',
       { expression, returnByValue: true, awaitPromise: true },
     );
-    if (result.exceptionDetails) throw new Error(`页面求值失败：${result.exceptionDetails.text}`);
+    if (result.exceptionDetails) throw new Error(`页面求值失败：${describeException(result.exceptionDetails)}`);
     return result.result?.value as T;
+  }
+
+  /**
+   * 取得（并缓存）页面全局对象的 objectId，作为 `callFunctionOn` 的宿主上下文。
+   * @returns 可用的 objectId
+   * @throws 页面没有可供绑定的全局对象
+   */
+  private async ensureGlobal(): Promise<string> {
+    if (this.globalObjectId) return this.globalObjectId;
+    const { result } = await this.send<{ result: { objectId?: string } }>('Runtime.evaluate', {
+      expression: 'globalThis',
+      returnByValue: false,
+    });
+    if (!result.objectId) throw new Error('页面未返回 globalThis 的 objectId');
+    this.globalObjectId = result.objectId;
+    return this.globalObjectId;
   }
 
   /**
@@ -171,9 +211,10 @@ export class CdpSession {
    * @param args 可序列化实参
    */
   async callOn<T = unknown>(functionDeclaration: string, args: unknown[] = []): Promise<T> {
-    const result = await this.send<{ result?: { value?: T }; exceptionDetails?: { text: string } }>(
+    const result = await this.send<{ result?: { value?: T }; exceptionDetails?: ExceptionDetails }>(
       'Runtime.callFunctionOn',
       {
+        objectId: await this.ensureGlobal(),
         functionDeclaration,
         arguments: args.map((value) => ({ value })),
         declaration: true,
@@ -181,7 +222,7 @@ export class CdpSession {
         awaitPromise: true,
       },
     );
-    if (result.exceptionDetails) throw new Error(`页面函数执行失败：${result.exceptionDetails.text}`);
+    if (result.exceptionDetails) throw new Error(`页面函数执行失败：${describeException(result.exceptionDetails)}`);
     return result.result?.value as T;
   }
 
@@ -191,6 +232,9 @@ export class CdpSession {
    * @returns 写入的绝对路径
    */
   async screenshot(file: string): Promise<string> {
+    // 窗口被别的应用挡住时 Chrome 不再产出新帧，`captureScreenshot` 会一直等下去（实测挂满 60s）；
+    // 先把这个 target 带到前台，截图才有确定的帧可取。
+    await this.send('Page.bringToFront');
     const { data } = await this.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
     const target = path.resolve(file);
     await mkdir(path.dirname(target), { recursive: true });
@@ -253,6 +297,8 @@ export class CdpSession {
     const loaded = this.waitForEvent('Page.loadEventFired');
     await this.send('Page.navigate', { url });
     await loaded;
+    // 导航会销毁旧的执行上下文，缓存的 objectId 随之失效，下一次调用要重取。
+    this.globalObjectId = undefined;
   }
 
   /** DOM 快照：匹配节点的机读结构（属性 + 截断文本）。 */

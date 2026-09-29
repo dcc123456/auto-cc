@@ -17,7 +17,7 @@
 | Cordis v4 服务发布 / 跨插件 inject / effect 回收 / 依赖联动卸载 | 通过                                                                                                                                                                          | 采用 §4 插件写法为强制规范                                        |
 | Cordis 运行于 Electron 主进程（内嵌 Node 24.21）                | 通过 `fiber.state=2 registry=1`                                                                                                                                               | 后端 = 主进程，无独立 Node 服务                                   |
 | Electron 主进程 ESM（`"type":"module"` + `.mjs`）               | 通过                                                                                                                                                                          | 全仓 ESM，不出 CJS 双轨                                           |
-| `--remote-debugging-port=9222` + CDP `/json` + 读实时 DOM       | 通过（读到 `SPIKE-RENDER-OK`）                                                                                                                                                | P1.6 可视自测通道走 CDP，不需额外 HTTP 服务                       |
+| `--remote-debugging-port=9222` + CDP `/json` + 读实时 DOM       | 通过（读到 `SPIKE-RENDER-OK`）；9222 仅为该次 spike 的实测值，正式端口按用户要求固定 **10222**（见 §8.1）                                                                     | P1.6 可视自测通道走 CDP，不需额外 HTTP 服务                       |
 | `node:sqlite` 在宿主 Node 24 可 require                         | 通过                                                                                                                                                                          | 持久层走内置 sqlite，不引原生依赖                                 |
 | Electron 二进制下载                                             | GitHub/electronjs.org **不可达**，仅 `registry.npmmirror.com/-/binary/electron/` 可用；1.2 实测 Electron 44 **已删除 install 脚本**，改由根 `postinstall` 显式跑 `install.js` | 见 §7 环境前置 + `docs/acceptance/1.2/1.2-11-electron-binary.txt` |
 | 版本基线                                                        | cordis 4.0.0-rc.10 / electron 44.4.5 / node 24.18（宿主）/ esbuild 0.28.2                                                                                                     | 锁定这些为起点                                                    |
@@ -239,6 +239,22 @@ macOS/Linux 的**运行期**验证无法在本机完成。这类条目一律标 
 6. **证据归档**（1.6-11）：`shot --out` 只写临时目录；`archive --id <spec-id> --in <files…>` 才搬进
    `docs/acceptance/1.6/` 并把文件名规范成 `<spec-id>-<slug>.png`。这与 `AGENTS.md` §7.5 的机检钩子同向：
    过程图不入库，入库的必须是命名合规的验收证据。
+
+**验收期追加的决策**（1.6 逐项跑下来才暴露，原方案里没有）：
+
+7. **`eval`/`assert` 支持 `--expr-file`**：Windows 上 pnpm 经 `.cmd` 转发实参会在换行处截断，
+   多行断言脚本根本传不进去。成段 JS 从文件读，是这条通道在 Windows 上可用的前提。
+8. **截图前 `Page.bringToFront` + dev 关掉遮挡计算**：Chrome 判定窗口被覆盖后停止产帧，
+   `Page.captureScreenshot` 会无限等。「agent 自己看页面」不能要求人把窗口腾到前台。
+9. **面板定时重读（`READ_INTERVAL_MS = 2000`）**：1.6-12 要的是「读数随调用变化」，只读一次就冻结。
+   代价是 `completed` 被自家轮询刷高，所以精确断言只落在 `denied` 上（详见 spec §1.6 事实第 8 条）。
+10. **白名单拒绝计数收敛到 `Gateway.deny()`**：入站检查是唯一计数点，catch 分支不再按错误码补数，
+    否则 `ipc.probeReject` 一次越权会让面板 +2。
+11. **`tmp/` 与 `docs/acceptance/` 退出 lint / prettier 管辖**：前者是过程脚本（不入库），
+    后者是 harness 输出的字节副本，重排等于篡改证据。
+
+**验收结论**：1.6-01 … 1.6-14 全部通过，逐项证据在 `docs/acceptance/1.6/`；1.6-08 的安装包复验、
+以及打包态截图是否同样需要遮挡开关，移交 1.7。
 
 ## 9. P1 明确不做
 

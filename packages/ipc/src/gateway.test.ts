@@ -1,4 +1,4 @@
-import type { AppErrorPayload } from '@auto-cc/core';
+import { AppError, type AppErrorPayload } from '@auto-cc/core';
 import { describe, expect, it } from 'vitest';
 import { Gateway, type GatewayDeps } from './gateway.js';
 
@@ -145,5 +145,28 @@ describe('IPC 网关（spec 1.4-04 / 1.4-05 / 1.4-06 / 1.4-07）', () => {
     await counting.invoke({ path: 'shell.probeRedact', args: [] });
     await counting.invoke({ path: 'shell.readFile', args: [] });
     expect(counting.stats).toEqual({ inFlight: 0, completed: 4, denied: 1 });
+  });
+
+  it('嵌套调用不会把同一次越权数两遍（面板的拒绝数要能对上操作次数）', async () => {
+    // 场景取自真实装配：`ipc.probeReject` 在白名单内，它内部再走一次网关去调白名单外的 path，
+    // 并把网关的 NOT_IN_ALLOWLIST 原样抛出来。外层若只看错误码再数一次，界面上就是「点一下 +2」。
+    const inner = new Gateway({ lookup: (name) => (name === 'shell' ? { getStatus: () => ({}) } : undefined) });
+    const outer = new Gateway({
+      lookup: (name) =>
+        name === 'ipc'
+          ? {
+              probeReject: (path: string) =>
+                inner.invoke({ path, args: [] }).then((reply) => {
+                  if (reply.ok) return reply.value;
+                  throw new AppError(reply.error.code, reply.error.message, reply.error.path);
+                }),
+            }
+          : undefined,
+    });
+    const reply = await outer.invoke({ path: 'ipc.probeReject', args: ['shell.readFile'] });
+    expect(reply.ok).toBe(false);
+    expect(inner.stats.denied).toBe(1);
+    // 外层这次调用本身登记过，它只是转述内部的拒绝，不该再算一次越权。
+    expect(outer.stats).toEqual({ inFlight: 0, completed: 1, denied: 0 });
   });
 });

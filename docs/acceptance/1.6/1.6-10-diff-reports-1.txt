@@ -1,0 +1,19 @@
+{
+  "base": {
+    "file": "D:\\works\\deep-seek-workspace\\auto-cc\\tmp\\16-10-r1.png",
+    "width": 677,
+    "height": 1106
+  },
+  "head": {
+    "file": "D:\\works\\deep-seek-workspace\\auto-cc\\tmp\\16-10-r2.png",
+    "width": 677,
+    "height": 1106
+  },
+  "threshold": 0,
+  "isSizeMismatch": false,
+  "diffPixels": 0,
+  "totalPixels": 748762,
+  "ratio": 0,
+  "box": null,
+  "isIdentical": true
+}

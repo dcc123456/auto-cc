@@ -1,0 +1,14 @@
+harness <command> [--port 10222] [--url <target 子串>]
+
+targets            列出可连接的页面 target
+wait --text <str>  等页面出现该文本（--timeout 毫秒）
+click [--selector <css>] [--text <str>]  中心点派发原生鼠标事件
+type [--selector <css>] [--text <str>] --value <str>  聚焦后走 Input.insertText
+text               打印页面可见文本
+dom --selector <css> [--attrs a,b]  打印匹配节点的机读快照
+eval [--expr <js> | --expr-file <path>]  在页面里求值并打印结果
+assert [--expr <js> | --expr-file <path>] [--equals <json>]  断言，失败 exit 1
+navigate --to <url>  导航当前 target 并等 load 事件
+shot --out <file>  截图落盘
+diff --base <a.png> --head <b.png> [--threshold n]  像素比对，有差异 exit 1
+archive --id <spec-id> --in <file[,file]> [--slug <s>]  证据归档到 docs/acceptance/

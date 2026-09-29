@@ -1,0 +1,58 @@
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "config"
+    },
+    "text": "config已就绪配置卸载巡检无依赖 · 配置项 appName · effect 1 项"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "logger"
+    },
+    "text": "logger已就绪配置卸载巡检依赖 config · 配置项 level, buffer, file, redact · effect 4 项"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "store"
+    },
+    "text": "store已就绪配置卸载巡检依赖 config · 配置项 file, journal · effect 2 项"
+  },
+  {
+    "index": 3,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "ipc"
+    },
+    "text": "ipc已就绪受保护配置依赖 logger · 无配置项 · effect 3 项"
+  },
+  {
+    "index": 4,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "plugins"
+    },
+    "text": "plugins已就绪受保护配置依赖 ipc · 配置项 guarded, history · effect 3 项"
+  },
+  {
+    "index": 5,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "devtools"
+    },
+    "text": "devtools已就绪配置卸载巡检依赖 ipc · 无配置项 · effect 1 项"
+  },
+  {
+    "index": 6,
+    "tag": "li",
+    "attrs": {
+      "data-row-id": "shell"
+    },
+    "text": "shell已就绪配置卸载巡检依赖 plugins · 无配置项 · effect 1 项"
+  }
+]

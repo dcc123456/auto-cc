@@ -63,11 +63,18 @@ export function archiveEvidence(
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return {
     dir,
-    files: sources.map((source) => {
+    files: sources.map((source, index) => {
       const resolved = path.resolve(source);
       if (!existsSync(resolved)) throw new Error(`证据文件不存在：${source}`);
       if (statSync(resolved).isDirectory()) throw new Error(`证据必须是文件，不接受目录：${source}`);
-      const target = path.join(dir, evidenceName(specId, resolved, slug));
+      const name = evidenceName(specId, resolved, slug);
+      // 一次归档多份证据时，光靠 slug 分不出谁是谁，后一张会把前一张盖掉；序号只在多图时补，
+      // 单图仍叫 `<id>-<slug>.png`，与 spec 里书写的名字一致。
+      const fileName =
+        sources.length > 1
+          ? `${path.basename(name, path.extname(name))}-${String(index + 1)}${path.extname(name)}`
+          : name;
+      const target = path.join(dir, fileName);
       // 钩子按路径族放行，所以目标越出 `docs/acceptance` 之前必须先挡掉，而不是等提交时才发现。
       if (!target.startsWith(path.join(repoRoot, 'docs', 'acceptance') + path.sep)) {
         throw new Error(`归档目标越出证据目录：${target}`);
