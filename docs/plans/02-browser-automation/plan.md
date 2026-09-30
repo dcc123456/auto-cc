@@ -1359,13 +1359,28 @@ userData 下的 JSON，一行 redact 都没过。截图侧：`browser.page.scree
 所以"用户确认过"这件事不能存进配置。渲染层也没有通用弹窗组件，最接近的形状是
 `JobLabPanel.tsx:74-119,247-258` 的确认卡片（现读 `pending()` + 事件驱动刷新 + 两个按钮各带 busy 态）。
 
-**H. 待跑的本机 spike（写调用代码之前完成，结论回填本节）**：
-spike-1 用 `tmp/` 下一次性 Electron 脚本 + 一次性本地 HTTP（返回 403/429 各一次），
-断言 `onResponseStarted({types:['mainFrame']})` 在 `persist:` 分区上确实推来 `statusCode`，
-并且**同一 filter 下 XHR/子框架不产生噪声**；
-spike-2 断言该 listener 在视图销毁/会话重建后不残留（`removeListener` 的句柄从哪来）；
-spike-3 在 fixture 页上试"截图前用绝对定位黑块盖住命中脱敏正则的文本节点"这条做法：
-只加 overlay 元素、不改文本内容，截完移除，回读 `document` 确认页面自述文本未被我们改坏。
+**H. 本机 spike 已跑完（2026-10-01，`tmp/spike-27c/main.cjs` + 一次性本地 HTTP，Electron 44.4.5 真实二进制）**：
+spike-1 用 `session.fromPartition('persist:spike-27c')` 上挂
+`webRequest.onResponseStarted({urls:['http://127.0.0.1:10299/*'], types:['mainFrame']}, listener)`，
+依次导航 `/ok`、`/forbidden`、`/too-many`：三条**都**推来 `statusCode` 200/403/429、`statusLine`、
+`resourceType:'mainFrame'`、`webContentsId`。把 `types` 去掉再导航一张带 XHR + iframe 的页面，
+`resourceType` 变成 `mainFrame`/`xhr`/`subFrame` 三条——**所以 `types:['mainFrame']` 是必需的**，
+否则每次页面内请求都进来一条噪声。另一条同样重要的实测：
+**同一个 session 的同一个 webRequest 事件只有一个 handler**——第二次注册直接把第一个**覆盖**掉
+（前一个数组此后不再增长，计数停在 0），所以 `browser.risk` 是这个槽位的**独占者**，
+装配时必须幂等、卸载时必须摘除，别指望"再多挂一个监听器"这条路存在。
+还有一个对产品语义有用的读数：403/429 的主框架导航照样触发 `did-finish-load`（不是 `did-fail-load`），
+**风控页的正文是读得到的**，所以知识包 `riskPattern` 那条文本信号不是纸面能力。
+spike-2 断言生命周期：listener 装在会话上，把装着它的那张窗口 `destroy()` 掉之后，
+**它不会残留成坏状态、也不会消失**——同分区新建的窗口继续被记到（计数 3 → 4，`webContentsId` 从 1 变 2），
+说明归属判定只能靠 `details.webContentsId` 去会话的视图表里反查平台；
+摘除用 `onResponseStarted(filter, null)`，不抛错且此后新导航零记录（增长 0）；
+摘完再重挂照样生效（重挂后 `/forbidden` 立刻记到 403）。顺带一条环境事实：
+Windows 上最后一个窗口关掉会直接结束进程，spike 必须挂 `window-all-closed` 空处理器才跑得完后半段
+（真实 app 有主窗口，不受影响，但脚本型验证会踩）。
+C 表第二行的取舍据此**定稿为第二条取路**：只读、拿得到状态码、事件量按导航计、且不需要新的 CDP 通道。
+spike-3（截图遮罩：只加 overlay 元素、不改文本内容，截完移除，回读 `document` 确认页面自述文本没被我们改坏）
+**仍未跑**，它服务的是 2.7-d 的 2.7-07，不属本片。
 
 ### 14.3 落点设计（定稿 2026-10-01，实现照此执行）
 
