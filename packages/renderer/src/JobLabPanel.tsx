@@ -1,13 +1,15 @@
-import { Briefcase, Database, RefreshCw, ScrollText, Search, SearchX } from 'lucide-react';
+import { Briefcase, Database, MessageSquare, RefreshCw, ScrollText, Search, SearchX, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
   CaptureRunView,
   CaptureStatusView,
+  GreetReceiptView,
   JdProgressEvent,
   JdStoreStatusView,
   JobListResultView,
+  JobRowView,
   SalaryView,
 } from '@auto-cc/shared';
 import { formatClock } from './format';
@@ -26,6 +28,10 @@ const ROW_DISPLAY_LIMIT = 12;
  * 界面**只转述服务读数**：停止原因、跳过条数、账本前后行数都来自 `jd.capture.run` 的返回，
  * 一行都不自己判断——抓取逻辑在 `platform-boss`，这里再算一遍就成了第二套实现（AGENTS.md §2.5）。
  * 进度行来自 `jd/progress` 推送而不是轮询（spec 2.3-07）。
+ *
+ * 2.5-f 起这里也是**打招呼的界面入口**（spec 2.5-02）：每行一个按钮直接打 `outbound.greet.perform`，
+ * 成功就摆回执、失败就摆错误码——闸门拒人不落账，所以界面上那行 `QUOTA_EXCEEDED` 是唯一留痕。
+ * 「已回复」标记与排序都来自 `jd.store.list` 的读数（spec 2.5-08 / 2.5-14），界面不参与判定。
  */
 export function JobLabPanel() {
   const { t } = useTranslation();
@@ -40,15 +46,21 @@ export function JobLabPanel() {
   const [experienceDraft, setExperienceDraft] = useState('');
   /** 本次目标条数（`criteria.limit`）：填了就压过配置的 `targetCount`，让 2.3-06 的「达目标即停」能在界面上演示。 */
   const [limitDraft, setLimitDraft] = useState('');
+  /** 最近一次打招呼的回执（`GreetReceiptView`）：闸门拒了就没有回执，界面上只剩结构化错误（spec 2.5-02）。 */
+  const [lastGreet, setLastGreet] = useState<GreetReceiptView>();
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
-    const [captureReply, storeReply] = await Promise.all([
+    const [captureReply, storeReply, listReply] = await Promise.all([
       bridge?.jd['capture.status'](),
       bridge?.jd['store.status'](),
+      bridge?.jd['store.list'](ROW_DISPLAY_LIMIT),
     ]);
     if (captureReply?.ok) setCaptureStatus(captureReply.value);
     if (storeReply?.ok) setStoreStatus(storeReply.value);
+    // 清单只在**已经点开过**的时候跟着刷新：动作后重读就是「读数跟着库走」的证据，
+    // 而没点过的会话不该凭空长出一步 `jd.store.list`（界面仍然只转述，不替用户决定看什么）。
+    if (listReply?.ok) setJobList((current) => (current ? listReply.value : current));
   }, [bridge]);
 
   const { busy, notice, run } = useBridgeAction(read);
@@ -128,6 +140,35 @@ export function JobLabPanel() {
       describe: (value) => t('jd.noticeList', { shown: value.rows.length, total: value.total }),
       onError: setBridgeError,
     });
+  };
+
+  /**
+   * 对库内一行打一次招呼（spec 2.5-02 的界面入口）：只递生成入参，文案由 `outbound.script` 出。
+   *
+   * 走的是白名单里那条 `outbound.greet.perform`，编排（幂等 → 文案 → 黑名单 → 额度 → 频控 → 落账）
+   * 全在服务侧，这里只把回执与结构化错误原样摆出来——闸门拒人不记账，界面上的错误码是唯一留痕。
+   * @param row 库内的一行 JD（`jobId` 是会话目标，`id` 只用来当话术生成的 JD 标识）
+   */
+  const greet = (row: JobRowView) => {
+    return void run(
+      t('jd.actionGreet', { title: row.title }),
+      () =>
+        bridge?.outbound['greet.perform']({
+          platform: row.platform,
+          jobId: row.jobId,
+          script: { jdId: String(row.id), title: row.title, company: row.company },
+        }),
+      {
+        apply: (receipt) => {
+          setBridgeError(undefined);
+          setLastGreet(receipt);
+        },
+        onError: (error) => {
+          setLastGreet(undefined);
+          setBridgeError(error);
+        },
+      },
+    );
   };
 
   const okLabel = (flag: boolean): string => (flag ? t('jd.yes') : t('jd.no'));
@@ -243,6 +284,29 @@ export function JobLabPanel() {
           >
             {notice}
           </p>
+        )}
+
+        {lastGreet && (
+          <div
+            className="mt-2 rounded-md border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-[11px] text-emerald-200"
+            data-testid="jd-greet-receipt"
+            data-origin={lastGreet.origin}
+          >
+            <p className="flex items-center gap-1 font-semibold">
+              <Send size={12} />
+              {t('jd.greetReceiptHeading')}
+            </p>
+            <p className="mt-1 break-all">
+              {t('jd.greetReceiptRow', {
+                jobId: lastGreet.jobId,
+                ledgerId: lastGreet.ledgerId,
+                waitedMs: lastGreet.waitedMs,
+                source: lastGreet.source,
+                origin: t(`jd.origin.${lastGreet.origin}`),
+                reason: lastGreet.reason,
+              })}
+            </p>
+          </div>
         )}
 
         {bridgeError && (
@@ -363,7 +427,11 @@ export function JobLabPanel() {
         ) : (
           <ul className="mt-1 flex flex-col gap-1" data-testid="jd-rows">
             {jobList.rows.map((row) => (
-              <li key={row.jobId} className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-1.5">
+              <li
+                key={`${row.platform}-${String(row.id)}`}
+                className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-1.5"
+                data-replied={row.replied ? 'true' : 'false'}
+              >
                 <p className="break-all text-[11px] text-slate-200">
                   {t('jd.rowMain', {
                     id: row.id,
@@ -384,6 +452,30 @@ export function JobLabPanel() {
                     descriptionLength: row.description.length,
                   })}
                 </p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <span
+                    className={
+                      row.replied
+                        ? 'flex items-center gap-1 text-[11px] text-emerald-300'
+                        : 'flex items-center gap-1 text-[11px] text-slate-500'
+                    }
+                    data-testid={`jd-row-replied-${row.jobId}`}
+                    data-inbound={row.inboundCount}
+                  >
+                    <MessageSquare size={12} />
+                    {row.replied ? t('jd.rowReplied', { inbound: row.inboundCount }) : t('jd.rowNotReplied')}
+                  </span>
+                  <button
+                    type="button"
+                    data-action={`greet-${row.jobId}`}
+                    disabled={!!busy}
+                    onClick={() => greet(row)}
+                    className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+                  >
+                    <Send size={12} />
+                    {t('jd.greetButton')}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

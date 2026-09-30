@@ -154,8 +154,12 @@
       "listButton": "读库内清单",
       "actionRun": "抓取「{{keyword}}」",
       "actionList": "读取库内清单",
+      "actionGreet": "向「{{title}}」打招呼",
       "noticeRun": "入库 {{stored}} 条 · 跳过 {{skipped}} 条 · 停止原因：{{stoppedBy}}",
       "noticeList": "画出最近 {{shown}} 行 · 库内共 {{total}} 条",
+      "greetButton": "打招呼",
+      "greetReceiptHeading": "最近一次打招呼回执（outbound.greet.perform）",
+      "greetReceiptRow": "目标 {{jobId}} · 账本行 #{{ledgerId}} · 频控等待 {{waitedMs}} 毫秒 · 来源 {{source}}（{{origin}}）· 页面回读：{{reason}}",
       "errorHeading": "桥接返回的结构化错误",
       "errorRow": "{{code}}：{{message}}",
       "errNoSession": "还没有打开会话：先在上方会话面板「打开站点」，再回来跑抓取",
@@ -173,6 +177,8 @@
       "listIdle": "尚未读取库内清单",
       "rowMain": "#{{id}} {{title}} · {{company}} · {{salary}}（原文「{{salaryText}}」）",
       "rowMeta": "{{city}} / {{experience}} / {{education}} · 发布 {{postedAt}} · 摘要入库 {{capturedAt}} · 详情 {{detailCapturedAt}} · 正文 {{descriptionLength}} 字",
+      "rowReplied": "对方已回 {{inbound}} 条",
+      "rowNotReplied": "还没有人回复",
       "salaryUnparsed": "未归一化",
       "salaryNegotiable": "面议",
       "salaryUnknown": "认不出数字",
@@ -199,6 +205,11 @@
         "listing": "列表读取",
         "detail": "详情读取",
         "done": "整轮结束"
+      },
+      "origin": {
+        "model": "模型产出",
+        "template": "模板回落",
+        "manual": "用户手改"
       },
       "yes": "是",
       "no": "否",

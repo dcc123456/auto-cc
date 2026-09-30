@@ -154,8 +154,12 @@
       "listButton": "Read stored list",
       "actionRun": "Capture \"{{keyword}}\"",
       "actionList": "Read stored list",
+      "actionGreet": "Greet \"{{title}}\"",
       "noticeRun": "Stored {{stored}} · skipped {{skipped}} · stopped by: {{stoppedBy}}",
       "noticeList": "Showing last {{shown}} rows · {{total}} rows in store",
+      "greetButton": "Greet",
+      "greetReceiptHeading": "Last greet receipt (outbound.greet.perform)",
+      "greetReceiptRow": "Target {{jobId}} · ledger row #{{ledgerId}} · throttled {{waitedMs}} ms · source {{source}} ({{origin}}) · page readback: {{reason}}",
       "errorHeading": "Structured bridge error",
       "errorRow": "{{code}}: {{message}}",
       "errNoSession": "No session open yet: use \"Open site\" in the session panel above, then run a capture",
@@ -173,6 +177,8 @@
       "listIdle": "Stored list not read yet",
       "rowMain": "#{{id}} {{title}} · {{company}} · {{salary}} (raw \"{{salaryText}}\")",
       "rowMeta": "{{city}} / {{experience}} / {{education}} · posted {{postedAt}} · summary at {{capturedAt}} · detail {{detailCapturedAt}} · body {{descriptionLength}} chars",
+      "rowReplied": "{{inbound}} replies from recruiter",
+      "rowNotReplied": "no reply yet",
       "salaryUnparsed": "not normalized",
       "salaryNegotiable": "negotiable",
       "salaryUnknown": "no number recognized",
@@ -199,6 +205,11 @@
         "listing": "listing read",
         "detail": "detail read",
         "done": "round finished"
+      },
+      "origin": {
+        "model": "model output",
+        "template": "template fallback",
+        "manual": "edited by user"
       },
       "yes": "yes",
       "no": "no",
