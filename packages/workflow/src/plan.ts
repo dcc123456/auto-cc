@@ -171,13 +171,50 @@ export const BOSS_BASIC_PLAN: PlanInput = {
 };
 
 /**
+ * 投递主线计划（spec 2.6-01 / 03 / 07 的节点路径）：两个连续的 `resume.deliver` 节点。
+ *
+ * 目标 id 用本地仿站的 1001 / 1002，是**刻意配的一对**：仿站对 1002 一律回「该岗位已下架」，
+ * 于是同一次 run 里既有「确认之后递成功」的节点行（`status: done`），也有「页面说不再收」的
+ * 节点行（`error: DELIVER_TARGET_OFFLINE`）——2.6-03 要的「失败不落账、结果状态在 `workflow_nodes`
+ * 行里」和 2.6-07 要的「已下架不重试」由此一次取到，而不是靠 mock。
+ * 两个节点都写 `file`？都不写：路径来自 `outbound.deliver` 配置的 `resumeFile`（P3 之前的临时入口），
+ * 把某台机器上的绝对路径钉进仓库文件就是把演示数据当计划数据。
+ */
+export const BOSS_DELIVER_PLAN: PlanInput = {
+  id: 'boss-deliver',
+  nodes: [
+    {
+      id: 'deliver-1001',
+      kind: 'resume.deliver',
+      // target 参与幂等键 `runId+nodeId+target`：换目标就是换一件事，同目标重放才算重复。
+      target: 'deliver://1001',
+      params: { platform: 'boss', job: '1001' },
+      // 副作用分级取 `outbound`：这一步会真的往页面上发东西，界面与 runner 都按这个级别播报。
+      effect: 'outbound',
+      // 0 次重试是 2.6-07「已下架就不再试」的落地口径——简历递不出去多半是页面不收，重放只是再撞一次。
+      retryTimes: 0,
+    },
+    {
+      id: 'deliver-1002',
+      kind: 'resume.deliver',
+      target: 'deliver://1002',
+      params: { platform: 'boss', job: '1002' },
+      effect: 'outbound',
+      retryTimes: 0,
+    },
+  ],
+};
+
+/**
  * P2 的内置计划清单：`planId` → 声明。
  *
- * 只有这一条，是因为 2.4 只要一条能演示「顺序推进 / 失败重试 / 断点续跑」的线性主线
- * （plan §11.8：不做分支、并行与画布）。配置键 `planId` 从这张表里选一条，选不到就装配期失败。
+ * `boss-basic` 是 2.4 的「顺序推进 / 失败重试 / 断点续跑」主线，`boss-deliver` 是 2.6 的投递主线
+ * （节点路径要能落到库里那两张表，才取得到 `workflow_nodes.error` 这类读数）。
+ * 配置键 `planId` 从这张表里选一条，选不到就装配期失败。
  */
 export const WORKFLOW_PLANS: Readonly<Record<string, PlanInput>> = {
   'boss-basic': BOSS_BASIC_PLAN,
+  'boss-deliver': BOSS_DELIVER_PLAN,
 };
 
 /**

@@ -409,7 +409,7 @@ describe('平台解耦（2.4-08）', () => {
     } finally {
       delete plans['five-mock'];
     }
-    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic']);
+    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic', 'boss-deliver']);
   });
 });
 

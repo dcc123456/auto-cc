@@ -6,7 +6,7 @@
  * 指纹若受键序影响，从库里读回来的计划会永远对不上，续跑就永远被拒绝。
  */
 import { describe, expect, it } from 'vitest';
-import { BOSS_BASIC_PLAN, buildPlan, workflowPlanSchema } from './plan.js';
+import { BOSS_BASIC_PLAN, BOSS_DELIVER_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchema } from './plan.js';
 
 describe('计划声明的解析与补全（spec 2.4-01）', () => {
   it('把省略的键补成确定形状，节点顺序即执行顺序', () => {
@@ -84,5 +84,24 @@ describe('计划声明的解析与补全（spec 2.4-01）', () => {
     ).toBe(false);
     const many = Array.from({ length: 65 }, (_, index) => ({ id: `n${String(index)}`, kind: 'k', effect: 'read' }));
     expect(workflowPlanSchema.safeParse({ id: 'x', nodes: many }).success).toBe(false);
+  });
+});
+
+describe('投递主线计划（spec 2.6-01 / 03 / 07 的节点半边）', () => {
+  it('两个投递节点都是外发副作用且零重试，路径不写进计划（取自 `outbound.deliver` 配置）', () => {
+    const plan = buildPlan(BOSS_DELIVER_PLAN);
+    expect(plan.nodes.map((node) => node.kind)).toEqual(['resume.deliver', 'resume.deliver']);
+    // `retryTimes: 0` 是「已下架就不再试」的落库口径：默认值是 null（= 跟全局 2 次），必须显式写死才叫不重试。
+    expect(plan.nodes.map((node) => node.retryTimes)).toEqual([0, 0]);
+    expect(plan.nodes.every((node) => node.effect === 'outbound')).toBe(true);
+    // target 各按目标分开：幂等键是 `runId+nodeId+target`，两个节点若共用空 target 就退化成「按节点去重」。
+    expect(plan.nodes.map((node) => node.target)).toEqual(['deliver://1001', 'deliver://1002']);
+    expect(plan.nodes.every((node) => !('file' in node.params))).toBe(true);
+  });
+
+  it('内置清单按 id 取得到两条计划，取不到时点名可用项', () => {
+    expect(planById('boss-deliver').nodes).toHaveLength(2);
+    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic', 'boss-deliver']);
+    expect(() => planById('boss-none')).toThrowError(/可选/);
   });
 });
