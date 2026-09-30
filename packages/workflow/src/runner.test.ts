@@ -30,7 +30,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WorkflowExecutorRegistryService } from './executors.js';
 import { WorkflowRunnerService, type WorkflowConfig } from './index.js';
-import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
+import { BOSS_BASIC_PLAN, buildPlan, WORKFLOW_PLANS, type PlanInput } from './plan.js';
 import { WorkflowRunStoreService } from './run-store.js';
 
 /** 计划里三个节点的执行器名，假登记按它逐个覆盖（不与 `plan.ts` 各说一份）。 */
@@ -224,6 +224,14 @@ async function settle(ms = 120): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * 本线程当前挂着的定时器句柄数（2.4-09 的机读判据）。
+ * @returns 活跃的 `Timeout` 资源个数；退避中的 `sleep()` 会让它 +1，被 abort 后应回到原值
+ */
+function pendingTimers(): number {
+  return process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
+}
+
 /** 相位序列读数（`节点:相位`），比逐条 `toMatchObject` 更能看出「顺序对不对」。 */
 function phases(events: WorkflowProgressEvent[]): string[] {
   return events
@@ -341,6 +349,67 @@ describe('计划驱动的顺序推进（2.4-01 / 02，回补 1.10-02 / 07）', (
     // 拒绝必须是不动的：不能留下一个跑不动的 run 行。
     expect(runner.current().status).toBe('idle');
     expect(runner.state()).toBeNull();
+  });
+});
+
+describe('平台解耦（2.4-08）', () => {
+  /**
+   * 一条 5 节点的计划，只为本用例存在。
+   *
+   * spec 2.4-08 写的是「mock 跑 5 节点」，而产品计划表里只有那条 3 节点主线（plan §11.8：不做分支与并行），
+   * 所以这里往计划表临时塞一条、`finally` 里立刻摘掉——要证的是「节点数与 kind 都不写死在 runner 里」，
+   * 不是给产品新增一条用不上的计划。
+   */
+  const FIVE_NODE_PLAN: PlanInput = {
+    id: 'five-mock',
+    nodes: [
+      { id: 'n-1', kind: 'mock.one', effect: 'read' },
+      { id: 'n-2', kind: 'mock.two', effect: 'read' },
+      { id: 'n-3', kind: 'mock.three', target: 'mock://three', effect: 'local-write' },
+      { id: 'n-4', kind: 'mock.four', effect: 'read' },
+      { id: 'n-5', kind: 'mock.five', effect: 'read' },
+    ],
+  };
+
+  it('换一条 5 节点计划 + 五个 mock 执行器就能跑完整条链：不挂页面通道、不发一次网络请求', async () => {
+    const plans = WORKFLOW_PLANS as Record<string, PlanInput>;
+    plans['five-mock'] = FIVE_NODE_PLAN;
+    try {
+      const booted = await boot({ config: { planId: 'five-mock' } });
+      // 执行器按 kind 现登记：runner 从头到尾没问过「这是哪个平台」。
+      for (const node of FIVE_NODE_PLAN.nodes) {
+        booted.registry.register(node.kind, ({ spec, attempt }) => {
+          booted.calls.push(`${spec.id}#${String(attempt)}`);
+          return Promise.resolve();
+        });
+      }
+      expect(booted.page).toBeNull();
+
+      booted.runner.start();
+      await waitFor(() => booted.runner.current().status === 'done');
+      expect(booted.calls).toEqual(['n-1#1', 'n-2#1', 'n-3#1', 'n-4#1', 'n-5#1']);
+      expect(phases(booted.events)).toEqual([
+        'n-1:started',
+        'n-1:finished',
+        'n-2:started',
+        'n-2:finished',
+        'n-3:started',
+        'n-3:finished',
+        'n-4:started',
+        'n-4:finished',
+        'n-5:started',
+        'n-5:finished',
+      ]);
+
+      const stored = booted.runner.state();
+      expect(stored).toMatchObject({ status: 'done', nodeIndex: 5, totalNodes: 5, lastError: null });
+      expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'done', 'done', 'done']);
+      // 槽位数量来自计划，界面因此不用为「这条计划有几个节点」写任何判断（回补 1.10-02/03）。
+      expect(booted.runner.current().steps.map((step) => step.id)).toEqual(['n-1', 'n-2', 'n-3', 'n-4', 'n-5']);
+    } finally {
+      delete plans['five-mock'];
+    }
+    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic']);
   });
 });
 
@@ -673,7 +742,7 @@ describe('会话失效停在可恢复点（1.8-07 / 2.1-08）', () => {
   });
 });
 
-describe('卸载让出（1.10-04 / 2.4-07）', () => {
+describe('卸载让出（1.10-04 / 2.4-07 / 2.4-09）', () => {
   it('卸载在跑的执行器会收到 abort，之后不再有任何进度事件', async () => {
     const { runner, runnerFiber, events } = await boot({ behavior: { 'jd.capture': hangUntilAbort() } });
     runner.start();
@@ -687,6 +756,27 @@ describe('卸载让出（1.10-04 / 2.4-07）', () => {
     // 卸载只让出，不写结局：这条 run 留在库里的 `running` 行由下次开机的扫描判成中断（2.4-05 那一组）。
     expect(events.length).toBe(countAtDispose);
     expect(events.at(-1)?.phase).toBe('started');
+  });
+
+  it('卸载把退避定时器一起带走：句柄数回到基线，且不等到退避睡满才返回（2.4-09 的「无悬挂句柄」）', async () => {
+    const { runner, runnerFiber, events } = await boot({
+      config: { retryTimes: 2, retryBackoffMs: 1_200, retryBackoffCapMs: 1_200 },
+      behavior: { 'jd.capture': failThenSucceed(9, '对端不可达') },
+    });
+    const baseline = pendingTimers();
+    runner.start();
+    await waitFor(() => events.some((event) => event.phase === 'retrying'));
+    // 先确认「此刻真有一个在途定时器」，否则下面那句「回到基线」就是句空话。
+    expect(pendingTimers()).toBeGreaterThan(baseline);
+
+    const startedAt = Date.now();
+    await runnerFiber.dispose();
+    fibers.splice(fibers.indexOf(runnerFiber), 1);
+    await settle(30);
+    expect(pendingTimers()).toBe(baseline);
+    // 等满 1.2s 才返回是悬挂句柄的另一种表现：卸载必须立刻让出，`plugins.stop` 不能变成「等这条 run 睡完」。
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(events.at(-1)?.phase).toBe('retrying');
   });
 });
 
