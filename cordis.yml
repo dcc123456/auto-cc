@@ -129,6 +129,20 @@ plugins:
   - id: platform-boss
     dependsOn: [platform-registry, browser]
 
+  # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
+  # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，
+  # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有 `demo.flaky`。
+  # **必须排在 `jd-store` / `jd-capture` 之前**：装配是「按清单顺序逐个 await 挂载」（kernel `assemble()`），
+  # 那两个服务在自己的 `[Service.init]` 里取登记处来登记节点，取不到就没人登记 `jd.capture`。
+  # 反过来不给它们加硬 `inject`——工作流没装时抓取本身不该跟着启动失败，只是「节点没人能跑」。
+  - id: workflow-executors
+
+  # 工作流落库（spec 2.4-05 / 2.4-10）：`workflow_runs` / `workflow_nodes` 两张表由本服务自己把迁移
+  # push 进 `store.migrations`，号段取 4（`usage_ledger` 1、`chat` 2、`jobs` 3 —— 号段全局，撞号在运行期才炸）。
+  # 摘掉这一行，`workflow` 连同进 PENDING：界面上读不到任何 run 状态，而不是「跑完了但没记录」。
+  - id: workflow-store
+    dependsOn: [store]
+
   # JD 库（spec 2.3-02 / 2.3-04 / 2.3-05）：`jobs` 表由本服务自己把迁移 push 进 `store.migrations`，
   # 号段取 3（`usage_ledger` 1、`chat` 2 —— 号段是全局的，撞号在运行期才炸）。
   # 摘掉这一行，`jd-capture` 连同进 PENDING：界面点「搜索并入库」得到结构化错误而不是静默不入库。
@@ -145,16 +159,25 @@ plugins:
       maxRounds: 8
       roundPauseMs: 300
 
-  # 工作流执行器骨架（spec 1.10）：六步占位流水线，把「状态是数据、界面是镜像」这条契约立起来。
-  # 只依赖 ipc——处理器要在界面能发起调用之前就位。**不**依赖 entitlement：P1 的六步里没有任何
-  # 真实外发（AGENTS.md §7.3 的约束在 P2 换成真步骤时接上），届时 greet/deliver 两步会走闸门。
-  # 演示失败注入：在装配面板把 failStep 改成某个步 id（如 "profile"），该步首次执行必然失败，
-  # 界面上点「重试」即通过并跑完剩下的步（注入只作用一次，否则永远演示不到「重试→成功」）。
+  # 工作流执行器（spec 1.10 → 2.4-01/02/05/06/10）：槽位来自**计划**（`planId` 选 `WORKFLOW_PLANS` 里的一条），
+  # 执行函数来自 `workflow-executors` 登记处，每一步的开始/结束/失败同时写进 `workflow-store` 的两张表。
+  # 依赖里带 store：run 状态必须是重启后还在的真相，而不是一次性的内存镜像。
+  # **不**依赖 entitlement：`boss-basic` 的三个节点是 read / read / local-write，没有真实外发（§7.3 的约束
+  # 在 2.5 打招呼、2.6 投递接进来时生效，届时那两类的 `effect: outbound` 节点会走闸门）。
+  # 演示退避与续跑：在装配面板改 `retryTimes` / `retryBackoffMs`（不重启 app），或注掉 `workflow-executors`
+  # 让 `jd.capture` 无人登记——界面得到的是「执行器未登记」的结构化失败，而不是静默空转。
   - id: workflow
-    dependsOn: [ipc]
+    dependsOn: [ipc, workflow-store, workflow-executors]
     config:
-      stepDelayMs: 600
-      failStep: none
+      planId: boss-basic
+      retryTimes: 2
+      retryBackoffMs: 500
+      retryBackoffCapMs: 5000
+      maxNodesPerRun: 20
+      evidenceDomChars: 800
+      evidenceTextChars: 300
+      evidenceDir: evidence
+      retentionRuns: 20
 
   # 对话式主界面的接线面（spec 1.11）：工具注册表与会话 / 消息 / 档位，两个 id 而不是一个。
   # 摘掉 `agent` 之后发消息照旧逐片流式，只是任何工具调用都得到 `TOOL_NOT_REGISTERED` ——

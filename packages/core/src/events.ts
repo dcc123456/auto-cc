@@ -184,6 +184,60 @@ export type WorkflowNodeSpec = {
   requiresHuman: boolean;
 };
 
+/**
+ * 一次节点执行的输入（spec 2.4-01 / 2.4-07）。
+ *
+ * 契约放在 `core` 而不是 `workflow` 包：登记这个动作发生在**被登记的那一侧**——
+ * 各能力包（L2 领域）在自己的 init 里把 `jd.capture` 这类节点交给登记处，而登记处属于 L3 流水线。
+ * 让 L2 去 import L3 就是反向依赖（AGENTS.md §4.1），所以这里只放形状，实现留在
+ * `packages/workflow/src/executors.ts`。这与上面 `WorkflowNodeSpec.kind` 是 `string` 同一个理由。
+ */
+export type WorkflowNodeInvocation = {
+  /** 本次 run 的 id，用于把外部动作与库里的行对上。 */
+  runId: string;
+  /** 计划里的节点声明（含参数）。 */
+  spec: WorkflowNodeSpec;
+  /** 第几次尝试，含首次，从 1 起；上限是 `1 + retryTimes`（spec 2.4-03）。 */
+  attempt: number;
+  /** 协作让出信号：暂停/卸载时它是 aborted，长任务必须在中途检查它。 */
+  signal: AbortSignal;
+};
+
+/** 一个节点的执行函数；失败就抛，runner 据此走退避或判失败。 */
+export type WorkflowNodeExecutor = (invocation: WorkflowNodeInvocation) => Promise<void>;
+
+/**
+ * `workflow.executors` 服务对能力包露出的最小形状（同 `PlatformRegistry` 之于平台包）。
+ *
+ * 登记是「最后写入者说话」而不是拒绝重复：插件可以被单独重启（1.5），若第二次登记就报错，
+ * 被重启的那一侧将永远拿不回自己的节点。
+ */
+export interface WorkflowExecutorRegistry {
+  /**
+   * 登记一个执行器。
+   * @param kind 节点声明里的执行器名（约定 `域.能力`，如 `jd.capture`）
+   * @param executor 执行函数；同名重复登记以最后一次为准
+   */
+  register(kind: string, executor: WorkflowNodeExecutor): void;
+  /**
+   * 注销某个 `kind` 的执行器（能力包被卸载时调用，避免留下指向已销毁实例的函数）。
+   * @param kind 执行器名
+   * @returns 是否真的删掉了一条登记
+   */
+  unregister(kind: string): boolean;
+  /**
+   * 查一个执行器。
+   * @param kind 执行器名
+   * @returns 已登记的执行函数；没登记过则为 null（由调用方判「这条计划现在跑不了」）
+   */
+  resolve(kind: string): WorkflowNodeExecutor | null;
+  /**
+   * 当前登记了哪些执行器（诊断面板读它，用来回答「这条计划能不能跑」）。
+   * @returns 按登记顺序的执行器名列表
+   */
+  list(): string[];
+}
+
 /** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
 export type WorkflowPlanView = {
   id: string;

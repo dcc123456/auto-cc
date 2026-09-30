@@ -11,7 +11,15 @@
  * 全程只读：一行 `entitlement.gate` 都不进（AGENTS.md §7.3 管的是外发），并且把本轮前后的账本行数
  * 一起带回读数（spec 2.3-11）——抓取若哪天不小心记了账，界面会直接显示两个数不相等。
  */
-import { Service, asApp, sleep, type Context } from '@auto-cc/core';
+import {
+  AppError,
+  Service,
+  asApp,
+  executorRegistryOf,
+  sleep,
+  type Context,
+  type WorkflowNodeExecutor,
+} from '@auto-cc/core';
 import type { CaptureFailureView, CaptureRunView, CaptureStatusView, JobSearchCriteriaView } from '@auto-cc/shared';
 import type { BrowserPageService, JobDetail, JobSummary, PlatformRegistryService } from '@auto-cc/plugin-browser';
 import type { UsageLedgerService } from '@auto-cc/plugin-entitlement';
@@ -32,6 +40,12 @@ export const jdCaptureSchema = z.strictObject({
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
 export type JdCaptureConfig = z.output<typeof jdCaptureSchema>;
+
+/**
+ * 本服务向 `workflow.executors` 登记时用的节点 `kind`（spec 2.4-01）。
+ * 写在这里而不是 `workflow` 包：登记由有能力的一侧发起，`boss-basic` 计划里的 `jd.capture` 就靠这一行对上号。
+ */
+const JD_CAPTURE_KIND = 'jd.capture';
 
 /** 本服务对 `platform.registry` 的诉求：按名字拿到适配器。 */
 type RegistryGet = Pick<PlatformRegistryService, 'get'>;
@@ -147,15 +161,26 @@ export class JdCaptureService extends Service {
   }
 
   /**
+   * 协作让出检查点：信号已经 aborted 就抛，让下面两个循环在中途停下（spec 2.4-07）。
+   * @param signal 执行器传下来的让出信号；undefined 表示这次是界面直接点的抓取，不需要让出
+   */
+  private checkYield = (signal?: AbortSignal): void => {
+    if (!signal?.aborted) return;
+    throw new AppError('WORKFLOW_STEP_FAILED', '工作流让出，抓取在中途收手', 'jd.capture');
+  };
+
+  /**
    * 跑一轮抓取：搜索 → 滚动收集列表 → 逐条读详情 → 全部落库。
    *
    * 单条详情读失败只记进 `skipped`（spec 2.3-08），整轮继续；列表整页读不到不报错，
    * 它在阶段 A 就表现为「本轮零新增」，于是第二圈的无新内容判定把它停下来，不会空转到上限。
    * @param criteria 搜索条件（关键词必填，`limit` 在配置目标之内覆盖本次目标条数）
+   * @param signal 协作让出信号（spec 2.4-07）：工作流暂停或被卸载时在中途收手；不传则一路跑完
    * @returns 本轮结局：轮数、入库行数、跳过明细、停止原因，外加本轮前后的账本行数
-   * @throws 目标平台未登记时由 `platform.registry` 抛 `PLATFORM_NOT_REGISTERED`；关键词为空由适配器抛 `INVALID_ARGUMENT`
+   * @throws 目标平台未登记时由 `platform.registry` 抛 `PLATFORM_NOT_REGISTERED`；关键词为空由适配器抛 `INVALID_ARGUMENT`；
+   *         让出时抛 `WORKFLOW_STEP_FAILED`——runner 先看信号，因此这一条记为让出而不是节点失败（spec 2.4-09）
    */
-  run = async (criteria: JobSearchCriteriaView): Promise<CaptureRunView> => {
+  run = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
     const adapter = this.registry.get(this.config.platform);
     const target =
       criteria.limit && criteria.limit > 0
@@ -172,6 +197,7 @@ export class JdCaptureService extends Service {
 
     await adapter.openSearch(criteria);
     while (rounds < this.config.maxRounds) {
+      this.checkYield(signal);
       rounds += 1;
       const sizeBefore = collected.size;
       for (const summary of await adapter.readListing()) {
@@ -195,10 +221,11 @@ export class JdCaptureService extends Service {
       }
       // 滚动是加载的扳机：无限滚动站点靠它长出下一屏，翻页站点靠它触发「加载更多」。
       await this.page.scroll();
-      await sleep(this.config.roundPauseMs);
+      await sleep(this.config.roundPauseMs, signal);
     }
 
     for (const summary of needsDetail) {
+      this.checkYield(signal);
       this.progress('detail', rounds, containers, touched.size, target, summary.title);
       try {
         const detail = await adapter.detail(summary.jobId);
@@ -208,7 +235,7 @@ export class JdCaptureService extends Service {
         skipped.push({ title: summary.title, sourceUrl: summary.detailUrl, reason: reasonOf(error) });
         continue;
       }
-      await sleep(this.config.roundPauseMs);
+      await sleep(this.config.roundPauseMs, signal);
     }
 
     const run: CaptureRunView = {
@@ -244,9 +271,37 @@ export class JdCaptureService extends Service {
     lastRun: this.lastRun,
   });
 
+  /**
+   * 作为工作流节点（`kind: jd.capture`）时的执行函数（spec 2.4-01）。
+   *
+   * 参数名按**计划的口径**读（`query`/`city`/`target`），不强迫计划作者记住本服务的内部字段名；
+   * 翻译只在这一处发生，`run()` 的形状与界面入口共用同一份，没有第二条路径（AGENTS.md §2.5）。
+   * @param invocation 节点执行输入：参数从 `spec.params` 来，让出信号从 `signal` 来
+   * @throws 缺 `query` 时 `INVALID_ARGUMENT`；抓取自身的失败照 `run()` 的语义向上抛，由 runner 判退避还是判失败
+   */
+  private executor: WorkflowNodeExecutor = async ({ spec, signal }) => {
+    const query = spec.params.query;
+    if (typeof query !== 'string' || query === '') {
+      throw new AppError('INVALID_ARGUMENT', `节点 ${spec.id} 缺少参数 query，不知道要搜什么`, JD_CAPTURE_KIND, {
+        nodeId: spec.id,
+      });
+    }
+    const criteria: JobSearchCriteriaView = { keyword: query };
+    if (typeof spec.params.city === 'string') criteria.city = spec.params.city;
+    if (typeof spec.params.target === 'number') criteria.limit = spec.params.target;
+    await this.run(criteria, signal);
+  };
+
   [Service.init](): void {
+    // 登记处是可选依赖：工作流没装时抓取本身照常能用（界面「搜索并入库」不经过它），只是没有节点可跑。
+    const registry = executorRegistryOf(this.ctx);
+    if (registry) {
+      registry.register(JD_CAPTURE_KIND, this.executor);
+      // 卸载时摘回登记：留下一个指向已销毁实例的函数，下一次点「跑一遍」得到的会是无法解释的错误。
+      this.ctx.effect(() => () => registry.unregister(JD_CAPTURE_KIND));
+    }
     this.ctx.logger.info(
-      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 间隔 ${String(this.config.roundPauseMs)}ms`,
+      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 间隔 ${String(this.config.roundPauseMs)}ms · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'}`,
     );
   }
 }

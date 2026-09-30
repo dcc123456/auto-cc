@@ -5,7 +5,7 @@
  * 「页面读数怎么变成库里的行」，所以把 `browser.page` 收成可编排的假手，登记处 / 库 / 账本一律用
  * 真实服务——把 sqlite mock 掉就等于没测幂等。
  */
-import { Service, type Context } from '@auto-cc/core';
+import { Service, type Context, type WorkflowExecutorRegistry, type WorkflowNodeExecutor } from '@auto-cc/core';
 import type {
   ExtractFieldReading,
   ExtractRequest,
@@ -265,4 +265,39 @@ export class StubBrowserPageService extends Service {
     this.options.fake.scrolls += 1;
     return Promise.resolve(this.options.scroll ?? { scrollY: 0, scrollHeight: 0, atBottom: true });
   }
+}
+
+/** 假登记处的配置形状：无键，但构造器仍要接住 cordis 递来的第二个实参。 */
+const fakeRegistrySchema = z.strictObject({});
+
+/** 假登记处的配置形状（用例引用它，不重复推断一遍 zod）。 */
+export type FakeRegistryConfig = z.output<typeof fakeRegistrySchema>;
+
+/**
+ * 假的执行器登记处（spec 2.4-01 的登记口）。
+ *
+ * 平台包不能 import `plugin-workflow`（AGENTS.md §4.1：L2 领域不依赖 L3 流水线），所以这里按
+ * `core` 的契约形状自带一张表。它只回答两个问题：服务挂起来时有没有真的把节点登记进来，
+ * 以及被卸载时有没有摘掉——留在表里的那个函数指向已销毁的实例，下一次点「跑一遍」会给出无法解释的错误。
+ */
+export class FakeExecutorRegistryService extends Service implements WorkflowExecutorRegistry {
+  static provide = 'workflow.executors';
+  static Config = fakeRegistrySchema;
+
+  constructor(ctx: Context, _options: FakeRegistryConfig) {
+    super(ctx, 'workflow.executors');
+  }
+
+  /** kind → 执行函数。 */
+  private readonly table = new Map<string, WorkflowNodeExecutor>();
+
+  register = (kind: string, executor: WorkflowNodeExecutor): void => {
+    this.table.set(kind, executor);
+  };
+
+  unregister = (kind: string): boolean => this.table.delete(kind);
+
+  resolve = (kind: string): WorkflowNodeExecutor | null => this.table.get(kind) ?? null;
+
+  list = (): string[] => [...this.table.keys()];
 }

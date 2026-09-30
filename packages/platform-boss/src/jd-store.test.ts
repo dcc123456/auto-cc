@@ -1,11 +1,19 @@
 /**
- * `jd.store` 的落库用例（spec 2.3-02 / 2.3-04 / 2.3-05）。
+ * `jd.store` 的落库用例（spec 2.3-02 / 2.3-04 / 2.3-05）与登记口用例（spec 2.4-01 / 2.4-08）。
  *
  * 一律打**真的 `node:sqlite`**（临时目录，不进仓库）：幂等、合并方向、`RETURNING` 拿回的 id、
  * 迁移回滚这四件事 mock 掉就等于没测。库内一行的坏值也要能读出来（库里可能躺着别的程序写进来的
- * 东西），所以最后一组用例直接手写列值。
+ * 东西），所以最后一组用例直接手写列值。登记处用替身（`test-doubles.ts`）：平台包不能 import
+ * L3 的 `plugin-workflow`，而这里要验收的只是「init 有没有把节点交出去、卸载有没有摘回来」。
  */
-import { asApp, Context, type Fiber } from '@auto-cc/core';
+import {
+  asApp,
+  Context,
+  executorRegistryOf,
+  type Fiber,
+  type WorkflowNodeInvocation,
+  type WorkflowNodeSpec,
+} from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -14,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { JD_MIGRATION_VERSION, JdStoreService, type JobDraft } from './jd-store.js';
+import { FakeExecutorRegistryService } from './test-doubles.js';
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
@@ -26,18 +35,50 @@ function tempDir(): string {
 }
 
 /**
- * 挂起一套 config + store + jd.store。
+ * 挂起一套 config + store +（可选）登记处 + jd.store。
  * @param dir 库文件目录（省略则新开一个临时目录）
- * @returns 上下文、`store` 与 `jd.store` 服务、裸连接，以及 `jd.store` 的 fiber（重启用例要先停掉它）
+ * @param withRegistry 是否装登记处替身（spec 2.4-01 的登记口；不装就是「工作流缺席」的形状）
+ * @returns 上下文、`store` 与 `jd.store` 服务、裸连接、`jd.store` 的 fiber（重启用例要先停掉它），以及登记处（没装则 undefined）
  */
-async function boot(dir = tempDir()) {
+async function boot(dir = tempDir(), withRegistry = false) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  if (withRegistry) {
+    // 必须比 `jd.store` 先装：装配是「按顺序逐个 await 挂载」，init 里的 `maybeService` 才取得到登记处。
+    fibers.push(await ctx.plugin(FakeExecutorRegistryService, {}));
+  }
   const jdFiber = await ctx.plugin(JdStoreService, {});
   fibers.push(jdFiber);
   const app = asApp(ctx);
-  return { ctx, jdFiber, store: app.store, jd: app['jd.store'], db: app.store.db };
+  return {
+    ctx,
+    jdFiber,
+    store: app.store,
+    jd: app['jd.store'],
+    db: app.store.db,
+    executors: executorRegistryOf(ctx),
+  };
+}
+
+/**
+ * 造一个节点声明，用来直接调用登记处里的那个执行函数。
+ * @param id 节点标识（出现在报错与日志里）
+ * @param params 计划作者写的那份参数（本节点只认 `limit`）
+ * @returns runner 会递给执行器的完整声明（其余字段按 `boss-basic` 的形状给齐）
+ */
+function nodeSpec(id: string, params: WorkflowNodeSpec['params']): WorkflowNodeSpec {
+  return { id, kind: 'jd.list', target: '', params, effect: 'read', retryTimes: null, requiresHuman: false };
+}
+
+/**
+ * 造一次执行输入。
+ * @param spec 节点声明
+ * @param signal 让出信号（省略就是不取消的第一次尝试）
+ * @returns 执行器的入参
+ */
+function invocationOf(spec: WorkflowNodeSpec, signal = new AbortController().signal): WorkflowNodeInvocation {
+  return { runId: 'run-unit', spec, attempt: 1, signal };
 }
 
 /** 一条最小可用的入库草稿（幂等键齐全）。 */
@@ -268,5 +309,43 @@ describe('只读接口（spec 2.3-09 的界面读数）', () => {
     expect(row?.salary).toBeNull();
     // 原文照存：界面仍然看得到「我们读到了什么」。
     expect(row?.salaryText).toBe('25-40K·15薪');
+  });
+});
+
+describe('节点执行器登记（spec 2.4-01 / 2.4-08）', () => {
+  it('挂载即把 jd.list 交给登记处，卸载后摘回来——不留指向已销毁实例的函数', async () => {
+    const { jdFiber, executors } = await boot(tempDir(), true);
+    expect(executors?.list()).toEqual(['jd.list']);
+    expect(executors?.resolve('jd.list')).toBeTypeOf('function');
+    // 卸载必须同时把登记抹掉：留在表里的那个闭包抓着的是一只已销毁的 `jd.store`。
+    await jdFiber.dispose();
+    expect(executors?.list()).toEqual([]);
+    expect(executors?.resolve('jd.list')).toBeNull();
+  });
+
+  it('登记处缺席时本服务照常就绪，只是没有节点可跑', async () => {
+    const { jd, executors } = await boot();
+    expect(executors).toBeUndefined();
+    // 「照常就绪」得用能力本身证明：库照样读得动，界面那条「搜索并入库」的路不经过工作流。
+    expect(jd.upsert(draft()).created).toBe(true);
+    expect(jd.count()).toBe(1);
+  });
+
+  it('登记的执行函数读计划口径的 limit，回库而不改库', async () => {
+    const { jd, executors } = await boot(tempDir(), true);
+    jd.upsert(draft({ jobId: 'A', title: '岗位 A' }));
+    jd.upsert(draft({ jobId: 'B', title: '岗位 B', sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=B' }));
+    const executor = executors?.resolve('jd.list');
+    expect(executor).toBeTypeOf('function');
+    await executor?.(invocationOf(nodeSpec('jd-list', { limit: 1 })));
+    // 只读节点：跑完之后库里的行数与跑之前一致。
+    expect(jd.count()).toBe(2);
+  });
+
+  it('重启（先停再装）之后节点又被登记回来', async () => {
+    const { ctx, jdFiber, executors } = await boot(tempDir(), true);
+    await jdFiber.dispose();
+    fibers.push(await ctx.plugin(JdStoreService, {}));
+    expect(executors?.list()).toEqual(['jd.list']);
   });
 });

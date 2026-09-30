@@ -27,6 +27,9 @@
  * - `/trusted` 把 `mousedown/click/input` 的 `{type,isTrusted,inputType,value}` 记进
  *   `window.__autoCcTrustReadings` 并 POST 到 `/api/trust`（`GET /api/trust` 读回同一份），
  *   受通道是否产出受信事件、中文与 emoji 有没有乱码，都由这份对端读数说（spec 2.2-12 / 2.2-13）；
+ * - `/api/fail-counter` 是**失败注入计数器**（POST 计一次并回 `{hits}`，GET 只读，DELETE 归零）：
+ *   `boss-basic` 计划的 `demo.flaky` 节点打它，于是「前两次必失败、第三次成功」这条退避重试的路径
+ *   在 app 被真的 kill 掉之后仍然接得上（spec 2.4-03 / 2.4-05 —— 计数放在进程外才有跨重启的证据）；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -78,6 +81,13 @@ const outbox: unknown[] = [];
 
 /** 受信事件读数（2.2-12 / 2.2-13 用）：由 `/trusted` 整份上报，GET 读回的就是页面上那张表。 */
 let trustReadings: unknown[] = [];
+
+/**
+ * 失败注入计数器（2.4-03 / 2.4-05 用）：`demo.flaky` 节点每尝试一次就加一。
+ * 放在 fixture 而不是 app 进程里，是因为 2.4-05 要**真的把 app kill 掉再重启**：
+ * 计数若在主进程内存里，那一刻会被清零，「第 3 次才成功」这条完整路径就拍不到证据了。
+ */
+let failCounterHits = 0;
 
 /** 仿站的一条虚构岗位。字段与知识包 `capture.list.fields` 一一对应，正文两条对应 `capture.detail`。 */
 type FixtureJob = {
@@ -541,6 +551,31 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  // 失败注入计数器（spec 2.4-03 / 2.4-05）：`demo.flaky` 每尝试一次 POST 一下，命中次数不超过 failTimes 就失败。
+  if (url.pathname === '/api/fail-counter' && request.method === 'POST') {
+    failCounterHits += 1;
+    console.log(`[fixture] 失败计数器命中第 ${String(failCounterHits)} 次`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ hits: failCounterHits }));
+    return;
+  }
+
+  // DELETE 归零：验收要能重复拍「两次失败、第三次成功」这条路径，否则第二次就没有内容可拍。
+  if (url.pathname === '/api/fail-counter' && request.method === 'DELETE') {
+    failCounterHits = 0;
+    console.log('[fixture] 失败计数器归零');
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ hits: 0 }));
+    return;
+  }
+
+  if (url.pathname === '/api/fail-counter') {
+    // GET 只读不计数：面板与验收脚本要能在不推进注入进度的前提下看清现在是第几次。
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ hits: failCounterHits }));
+    return;
+  }
+
   // 2.2-12 / 2.2-13 的对端读数：页面把 isTrusted / inputType / value 整份报上来。
   if (url.pathname === '/api/trust' && request.method === 'POST') {
     const body = await readJson(request, response);
@@ -684,7 +719,7 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   // 路由清单打在启动日志里：验收脚本按这份列表逐条 curl，不用回头翻代码。
   console.log(
-    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted（cookie ${cookieName}）`,
+    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /api/fail-counter（cookie ${cookieName}）`,
   );
 });
 

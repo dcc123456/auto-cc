@@ -20,6 +20,7 @@ import {
   type SessionExpiredEvent,
   type ToolEffect,
   type WorkflowNodeSpec,
+  type WorkflowNodeExecutor,
   type WorkflowNodePhase,
   type WorkflowPlanView,
   type WorkflowRunStateView,
@@ -33,12 +34,13 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createRun, transition, type RunnerEvent } from './machine.js';
-import type { WorkflowExecutorRegistryService, WorkflowNodeExecutor } from './executors.js';
+import type { WorkflowExecutorRegistryService } from './executors.js';
 import { planById } from './plan.js';
 import type { WorkflowRunStoreService } from './run-store.js';
 
 // 登记处与落库服务从包出口露出去：装配清单要为它们各占一个 id（main/registry.ts）。
-export { WorkflowExecutorRegistryService, executorRegistryOf, type WorkflowNodeExecutor } from './executors.js';
+// 执行器的**契约**（`WorkflowNodeExecutor` 等）在 `@auto-cc/core`，能力包从那里取，不 import 本包。
+export { WorkflowExecutorRegistryService } from './executors.js';
 export { WorkflowRunStoreService } from './run-store.js';
 export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema } from './plan.js';
 

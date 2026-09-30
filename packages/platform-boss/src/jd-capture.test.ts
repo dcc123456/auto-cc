@@ -1,12 +1,23 @@
 /**
- * `jd.capture` 的编排用例（spec 2.3-01 / 2.3-04 / 2.3-06 / 2.3-07 / 2.3-08 / 2.3-11）。
+ * `jd.capture` 的编排用例（spec 2.3-01 / 2.3-04 / 2.3-06 / 2.3-07 / 2.3-08 / 2.3-11）
+ * 与节点执行器用例（spec 2.4-01 / 2.4-07 / 2.4-09）。
  *
- * 这条链路挂**真实**的登记处、平台适配器、库与账本，只替一只读页面的手：
+ * 这条链路挂**真实**的平台适配器、库与账本，只替一只读页面的手和一张登记处的表：
  * 「停止条件」「阶段先后」「单条失败隔离」「抓取不记账」都是这几位协作的行为，
  * 任何一位被 mock 掉都会让对应的那条验收变成自证。页面读数来自 `test-doubles.ts` 的脚本，
- * 全程不访问真实平台（AGENTS.md §7.2）。
+ * 全程不访问真实平台（AGENTS.md §7.2）。登记处之所以能用替身：平台包不能 import L3 的
+ * `plugin-workflow`（AGENTS.md §4.1），而这里要验收的是「init 有没有交出去、让出有没有中途收手」，
+ * 登记处那张表本身由 `packages/workflow/src/runner.test.ts` 用真服务覆盖。
  */
-import { asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
+import {
+  asApp,
+  Context,
+  executorRegistryOf,
+  NO_CONFIG,
+  type Fiber,
+  type WorkflowNodeInvocation,
+  type WorkflowNodeSpec,
+} from '@auto-cc/core';
 import { PlatformRegistryService } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { UsageLedgerService } from '@auto-cc/plugin-entitlement';
@@ -24,6 +35,7 @@ import {
   DETAIL_BASE,
   detailRow,
   extractOf,
+  FakeExecutorRegistryService,
   LIST_URL,
   StubBrowserPageService,
   type PageScript,
@@ -57,7 +69,8 @@ const captureConfig = (overrides: Partial<JdCaptureConfig> = {}): JdCaptureConfi
  * 挂起一整条抓取链路。
  * @param script 页面读数脚本
  * @param config 抓取配置覆盖项
- * @returns 上下文、`jd.capture` / `jd.store` 服务、假手记账与进度事件列表
+ * @returns 上下文、`jd.capture` / `jd.store` 服务、执行器登记处替身、`jd.capture` 的 fiber（卸载用例要先停它）、
+ *          假手记账与进度事件列表
  */
 async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
@@ -69,16 +82,55 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
 
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 登记处排在最前：装配是顺序 await 的，`jd.store` / `jd.capture` 的 init 才拿得到它（spec 2.4-01）。
+  fibers.push(await ctx.plugin(FakeExecutorRegistryService, {}));
   fibers.push(await ctx.plugin(StubBrowserPageService, { fake }));
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   fibers.push(await ctx.plugin(JdStoreService, {}));
   // 真实适配器：`browser.page` 那一步取到的是上面那只替身。
   fibers.push(await ctx.plugin(BossPlatformService, {}));
-  fibers.push(await ctx.plugin(JdCaptureService, captureConfig(config)));
+  const captureFiber = await ctx.plugin(JdCaptureService, captureConfig(config));
+  fibers.push(captureFiber);
 
   const app = asApp(ctx);
-  return { ctx, capture: app['jd.capture'], jd: app['jd.store'], ledger: app['usage.ledger'], fake, events };
+  return {
+    ctx,
+    capture: app['jd.capture'],
+    jd: app['jd.store'],
+    ledger: app['usage.ledger'],
+    executors: executorRegistryOf(ctx),
+    captureFiber,
+    fake,
+    events,
+  };
+}
+
+/**
+ * 造一个 `jd.capture` 的节点声明，用来直接调用登记处里那个执行函数。
+ * @param params 计划作者写的参数（`query` / `city` / `target`）
+ * @returns runner 会递给执行器的完整声明
+ */
+function captureNodeSpec(params: WorkflowNodeSpec['params']): WorkflowNodeSpec {
+  return {
+    id: 'jd-capture',
+    kind: 'jd.capture',
+    target: '',
+    params,
+    effect: 'read',
+    retryTimes: null,
+    requiresHuman: false,
+  };
+}
+
+/**
+ * 造一次执行输入。
+ * @param spec 节点声明
+ * @param signal 让出信号（省略就是不取消的第一次尝试）
+ * @returns 执行器的入参
+ */
+function invocationOf(spec: WorkflowNodeSpec, signal = new AbortController().signal): WorkflowNodeInvocation {
+  return { runId: 'run-unit', spec, attempt: 1, signal };
 }
 
 /** 两屏列表：第二屏把第一屏的卡片留在 DOM 里，另外长出新的（无限滚动的常态）。 */
@@ -346,5 +398,65 @@ describe('入库草稿的形状（spec 2.3-02 / 2.3-03）', () => {
       detailCapturedAt: 1_700_000_000_000,
       salary: { min: null, max: null, unit: 'unknown', period: 'unknown', isNegotiable: true },
     });
+  });
+});
+
+describe('作为工作流节点（spec 2.4-01 / 2.4-07 / 2.4-09）', () => {
+  it('登记处同时收到 jd.capture 与 jd.list，卸载抓取只摘掉自己那一条', async () => {
+    const { executors, captureFiber } = await boot(twoScreenScript(['1001']), { targetCount: 1 });
+    // 顺序即挂载顺序：`jd.store` 在 `jd.capture` 之前，登记表因此是这两条。
+    expect(executors?.list()).toEqual(['jd.list', 'jd.capture']);
+    await captureFiber.dispose();
+    // 摘回来只摘自己：库那条还在，否则卸载一个能力包会连带把工作流的另一半弄瞎。
+    expect(executors?.list()).toEqual(['jd.list']);
+  });
+
+  it('执行函数按计划的参数名跑通整条链路（query/city/target → keyword/city/limit）', async () => {
+    const { executors, capture, jd } = await boot(twoScreenScript(['1001', '1002', '1003']));
+    const executor = executors?.resolve('jd.capture');
+    expect(executor).toBeTypeOf('function');
+    await executor?.(invocationOf(captureNodeSpec({ query: '前端工程师', city: '上海', target: 3 })));
+    // 翻译只发生在执行器这一处：计划作者不需要认识本服务的内部字段名，而界面入口与共用的 `run()` 形状不变。
+    expect(capture.status().lastRun).toMatchObject({ keyword: '前端工程师', city: '上海', stored: 3 });
+    expect(jd.status()).toMatchObject({ total: 3, withDetail: 3 });
+  });
+
+  it('缺 query 的节点结构化报错，不猜要搜什么', async () => {
+    const { executors, jd } = await boot(twoScreenScript(['1001']));
+    await expect(
+      executors?.resolve('jd.capture')?.(invocationOf(captureNodeSpec({ city: '上海' }))),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', path: 'jd.capture' });
+    expect(jd.count()).toBe(0);
+  });
+
+  it('让出信号已 aborted 时中途收手：抛出的是让出，且一条都不入库', async () => {
+    const { executors, jd, fake } = await boot(twoScreenScript(['1001', '1002', '1003']), { targetCount: 3 });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      executors?.resolve('jd.capture')?.(invocationOf(captureNodeSpec({ query: '前端' }), controller.signal)),
+    ).rejects.toThrowError(/工作流让出/);
+    // 让出发生在列表循环的第一圈检查点：库里干净，runner 那侧据信号把它记成让出而非节点失败。
+    expect(jd.count()).toBe(0);
+    expect(fake.kinds).toEqual([]);
+  });
+
+  it('跑到一半才 aborted 时停在下一次检查点，已入库的行留在库里', async () => {
+    // 轮间间隔给到 2s：取消一定落在「列表阶段之后的那次等待」里，而不是落进还没开始的空档。
+    const { executors, jd, fake } = await boot(twoScreenScript(['1001', '1002', '1003']), {
+      targetCount: 3,
+      maxRounds: 1,
+      roundPauseMs: 2_000,
+    });
+    const controller = new AbortController();
+    const pending = executors?.resolve('jd.capture')?.(
+      invocationOf(captureNodeSpec({ query: '前端', target: 3 }), controller.signal),
+    );
+    setTimeout(() => controller.abort(), 20);
+    await expect(pending).rejects.toThrowError(/工作流让出/);
+    // 第一屏的两条已经落了库（让出不回滚已完成的行），而详情阶段一条都没碰过。
+    expect(jd.count()).toBe(2);
+    expect(fake.kinds).toEqual(['list']);
+    expect(fake.navigated).toHaveLength(1);
   });
 });

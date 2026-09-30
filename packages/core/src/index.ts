@@ -9,6 +9,7 @@ export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
 export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
+import type { WorkflowExecutorRegistry } from './events.js';
 
 /**
  * cordis declares FiberState as an ambient const enum, which cannot be re-exported
@@ -70,6 +71,18 @@ export function maybeService<T>(ctx: Context, id: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 取工作流节点执行器的登记处（spec 2.4-01 的登记口）。
+ *
+ * 这只手放在 `core` 而不是 `plugin-workflow`：登记由各能力包（L2 领域）在自己的 init 里发起，
+ * 而登记处属于 L3 流水线，让下层 import 上层会打破 AGENTS.md §4.1 的依赖方向。
+ * @param ctx 调用方的上下文
+ * @returns 登记处实例；工作流没装时为 undefined，此时能力包只是没有节点可登记，自身照常启动
+ */
+export function executorRegistryOf(ctx: Context): WorkflowExecutorRegistry | undefined {
+  return maybeService<WorkflowExecutorRegistry>(ctx, 'workflow.executors');
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

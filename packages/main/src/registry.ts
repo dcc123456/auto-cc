@@ -23,7 +23,11 @@ import { BossPlatformService, JdCaptureService, JdStoreService } from '@auto-cc/
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
-import { WorkflowRunnerService } from '@auto-cc/plugin-workflow';
+import {
+  WorkflowExecutorRegistryService,
+  WorkflowRunnerService,
+  WorkflowRunStoreService,
+} from '@auto-cc/plugin-workflow';
 import { ShellService } from '@auto-cc/shell';
 
 export const REGISTRY: Registry = {
@@ -54,7 +58,12 @@ export const REGISTRY: Registry = {
   'jd-store': JdStoreService,
   // 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：只读，不经 `entitlement.gate`，所以账本行数本轮不该变动。
   'jd-capture': JdCaptureService,
-  // 工作流执行器骨架（spec 1.10）：六步占位流水线，真实步骤在 P2 换进来。
+  // 工作流三件套（spec 2.4）：登记处、落库、执行器各占一个清单 id，所以每一条都能被单独摘掉。
+  // 摘掉 `workflow-executors` 之后 `jd.capture` 无人登记，界面得到「执行器未登记」的结构化失败；
+  // 摘掉 `workflow-store` 之后 `workflow` 连同进 PENDING，界面上读不到任何 run 状态（而不是「跑完但没记录」）。
+  'workflow-executors': WorkflowExecutorRegistryService,
+  'workflow-store': WorkflowRunStoreService,
+  // 2.4 起槽位来自计划、进度同时落库；1.10 的六步占位流水线已被节点模型替换。
   workflow: WorkflowRunnerService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。

@@ -7,7 +7,15 @@
  * 幂等靠**唯一索引 + UPSERT**，不靠「先查再插」：后者在两步之间页面又跳一次就会插出两行，
  * 而且每条都要多一次读（spec 2.3-04 要的「同一岗位在库里只有一行」必须由数据库来说）。
  */
-import { AppError, asApp, asSqlInt, Service, type Context } from '@auto-cc/core';
+import {
+  AppError,
+  asApp,
+  asSqlInt,
+  executorRegistryOf,
+  Service,
+  type Context,
+  type WorkflowNodeExecutor,
+} from '@auto-cc/core';
 import type { JobListResultView, JobRowView, JdStoreStatusView, SalaryView } from '@auto-cc/shared';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
@@ -18,6 +26,12 @@ import { z } from 'zod';
  * 撞号不是编译期错误而是运行期抛「迁移版本重复」——所以它只能写在这里并说明前两级是谁占的（plan §8.4 决策 6）。
  */
 export const JD_MIGRATION_VERSION = 3;
+
+/**
+ * 本服务向 `workflow.executors` 登记时用的节点 `kind`（spec 2.4-01 的第二个节点）。
+ * 与 `jd.capture` 一样由有能力的一侧发起：`workflow` 包不认识本包，只按这个字符串查表。
+ */
+const JD_LIST_KIND = 'jd.list';
 
 /**
  * 建表与回滚。
@@ -338,10 +352,34 @@ export class JdStoreService extends Service {
     };
   };
 
+  /**
+   * 作为工作流节点（`kind: jd.list`）时的执行函数（spec 2.4-01 的第二个节点）。
+   *
+   * 它的用途是**回读**：确认上一条 `jd.capture` 真的落了库，并把读数写进日志，
+   * 于是 2.4-02 的「界面看得出计划真的走了三个节点」有第二手证据，而不是只有 runner 自己说完成。
+   * @param invocation 节点执行输入；只取 `spec.params.limit`（省略时按 `list()` 的默认条数）
+   * @throws 不主动抛——只读节点没有「参数不合法就跑不了」的形态，库读失败由 `store` 那侧照实抛出
+   */
+  private executor: WorkflowNodeExecutor = ({ spec }) => {
+    const limit = typeof spec.params.limit === 'number' ? spec.params.limit : undefined;
+    const result = this.list(limit);
+    this.ctx.logger.info(
+      `节点 ${spec.id} 回读 JD 库：共 ${String(result.total)} 行，本次带回 ${String(result.rows.length)} 行`,
+    );
+    // 读库是同步的（node:sqlite），但执行器契约要求返回 Promise——runner 的退避与让出都按异步编排。
+    return Promise.resolve();
+  };
+
   [Service.init](): void {
     this.ensureSchema();
+    // 登记处缺席时本服务照常就绪：抓取的界面入口不经过工作流，只是这条计划少了第二个节点的实现。
+    const registry = executorRegistryOf(this.ctx);
+    if (registry) {
+      registry.register(JD_LIST_KIND, this.executor);
+      this.ctx.effect(() => () => registry.unregister(JD_LIST_KIND));
+    }
     this.ctx.logger.info(
-      `JD 库就绪：表 jobs（schema v${String(JD_MIGRATION_VERSION)}）· 现有 ${String(this.count())} 行`,
+      `JD 库就绪：表 jobs（schema v${String(JD_MIGRATION_VERSION)}）· 现有 ${String(this.count())} 行 · 节点执行器${registry ? `已登记 ${JD_LIST_KIND}` : '未登记（工作流未挂载）'}`,
     );
   }
 }

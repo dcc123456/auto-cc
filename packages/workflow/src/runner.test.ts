@@ -11,7 +11,16 @@
  * 被 kill 的那一次用 `dispose` 模拟进程死亡——真正的 kill + 重启是 2.4-05 的可视验收项，压在这里
  * 只是把「读库→判中断→续跑」这条逻辑先钉住。
  */
-import { AppError, asApp, Context, Service, type Fiber, type WorkflowProgressEvent } from '@auto-cc/core';
+import {
+  AppError,
+  asApp,
+  Context,
+  Service,
+  type Fiber,
+  type WorkflowNodeExecutor,
+  type WorkflowNodeInvocation,
+  type WorkflowProgressEvent,
+} from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -19,11 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import {
-  WorkflowExecutorRegistryService,
-  type WorkflowNodeExecutor,
-  type WorkflowNodeInvocation,
-} from './executors.js';
+import { WorkflowExecutorRegistryService } from './executors.js';
 import { WorkflowRunnerService, type WorkflowConfig } from './index.js';
 import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
 import { WorkflowRunStoreService } from './run-store.js';
