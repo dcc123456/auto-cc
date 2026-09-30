@@ -22,6 +22,8 @@
  *   tagName / role / 可读名 / 祖先结构全部不变，正是 2.2-05 指纹自愈的输入；
  * - `/chat` 把聊天区放进**同源 iframe**（`/chat/frame`），帧内输入框与发送按钮把消息
  *   POST 到 `/api/outbound`，主页面显示帧内 postMessage 与服务端收件计数两路读数（spec 2.2-10 / 2.2-13）；
+ *   2.5 起帧内还按 1.2s 轮询 `GET /api/threads?targetId=&after=` 增量画会话（出站与对方回复同一条时间线，
+ *   节点带 `data-message-id`），`POST /api/reply` 就是「对方回了一条」的注入开关（spec 2.5-07）；
  * - `/newtab` 有 `target=_blank` 链接与 `window.open()` 按钮两个入口，`/newtab/target`
  *   回显自身 location 与 `document.cookie` —— 新标签有没有被接管进同一分区，看它读不读得到会话 cookie（spec 2.2-11）；
  * - `/trusted` 把 `mousedown/click/input` 的 `{type,isTrusted,inputType,value}` 记进
@@ -81,6 +83,40 @@ const outbox: unknown[] = [];
 
 /** 受信事件读数（2.2-12 / 2.2-13 用）：由 `/trusted` 整份上报，GET 读回的就是页面上那张表。 */
 let trustReadings: unknown[] = [];
+
+/** 会话里的一条消息。`id` 全局单调递增，页面把它写进 `data-message-id`，app 侧靠它去重（spec 2.5-07）。 */
+type ThreadMessage = {
+  id: number;
+  direction: 'outbound' | 'inbound';
+  text: string;
+  ts: number;
+};
+
+/**
+ * 按 targetId 分组的对话（2.5 用）。
+ * 出站与入站放在**同一条时间线**上：真实聊天页就是这么摆的，适配器读 DOM 时不需要区分来源，
+ * 「哪些是我方已入库的」由 app 侧 `conversation_messages` 的 externalId 去重决定，而不是由 fixture 决定。
+ */
+const threads = new Map<string, ThreadMessage[]>();
+
+/** 消息 id 发号器（全局而不是每会话一份）：跨会话也唯一，去重键因此可以是单列而不是复合。 */
+let threadSeq = 0;
+
+/**
+ * 往某个会话追加一条消息。
+ * @param targetId 会话对端标识（fixture 里就是打招呼目标）
+ * @param direction 出站（我方发的）还是入站（对方回的）
+ * @param text 正文，按字面存，不做任何转义（中文与 emoji 要原样到达 DOM）
+ * @returns 刚落库的那条消息（带发号器给的 id）
+ */
+function appendThreadMessage(targetId: string, direction: ThreadMessage['direction'], text: string): ThreadMessage {
+  threadSeq += 1;
+  const message: ThreadMessage = { id: threadSeq, direction, text, ts: Date.now() };
+  const history = threads.get(targetId) ?? [];
+  history.push(message);
+  threads.set(targetId, history);
+  return message;
+}
 
 /**
  * 失败注入计数器（2.4-03 / 2.4-05 用）：`demo.flaky` 节点每尝试一次就加一。
@@ -335,8 +371,9 @@ function renderDetailPage(job: FixtureJob | undefined, loggedIn: boolean, authLa
 }
 
 /**
- * 聊天帧内外发时写的目标 id。
- * 帧内 DOM、外发体、父页断言三处必须同一个值，所以在这里定一次，不给它第二个副本（§2.5）。
+ * 没带 `?targetId=` 时页面默认聊的那个目标。
+ * 会话按目标分线程（spec 2.5-08 要「有的已回复、有的未回复」），所以目标 id 从地址上来，
+ * 不再由页面写死——写死会让 app 侧无论传哪个 jobId 都读到同一个线程，那条验收就成了假证据。
  */
 const chatTargetId = 'fixture-job-1001';
 
@@ -381,36 +418,69 @@ const chatFramePageHtml = `<!doctype html>
   </head>
   <body data-fixture-page="chat-frame">
     <p>聊天区在帧内：<code>/chat/frame</code>（同源 iframe）—— 帧外的自动化必须换算坐标才点得到这里。</p>
-    <p>打招呼目标：<code data-testid="chat-target">${chatTargetId}</code></p>
+    <p>打招呼目标：<code data-testid="chat-target">（脚本未运行）</code></p>
     <p><textarea data-testid="chat-input" rows="3" placeholder="输入打招呼文案（含中文与 emoji）"></textarea></p>
     <p><button type="button" data-testid="chat-send">发送打招呼</button></p>
     <p>帧内状态：<strong data-testid="chat-frame-status">待发送</strong></p>
+    <p>会话消息（出站与对方回复同一条时间线，节点带 <code>data-message-id</code> 供 app 侧去重）：</p>
     <ul data-testid="chat-log"></ul>
     <script>
       const chatInput = document.querySelector('[data-testid="chat-input"]');
       const chatLog = document.querySelector('[data-testid="chat-log"]');
       const frameStatus = document.querySelector('[data-testid="chat-frame-status"]');
+      // 目标 id 从地址栏取：同一张帧页要能演「三个目标、两个已回、一个未回」（spec 2.5-08）。
+      const chatTarget = new URLSearchParams(location.search).get('targetId') || '${chatTargetId}';
+      /** 已渲染到的消息 id：轮询只取比它新的，所以重复轮询不会画出重复节点。 */
+      let cursor = 0;
 
-      /** 发出一次打招呼：先落帧内 DOM（截图看得见），再走 /api/outbound（对端数得清）。 */
+      /**
+       * 把一条服务端消息画进帧内列表。
+       * @param message 服务端读数（id / direction / text）
+       */
+      function renderMessage(message) {
+        const line = document.createElement('li');
+        line.dataset.testid = 'chat-log-item';
+        line.dataset.messageId = String(message.id);
+        line.dataset.direction = message.direction;
+        // 用 textContent 而不是拼 HTML：中文与 emoji 要按字面出现在帧内（spec 2.2-13）。
+        line.textContent = (message.direction === 'inbound' ? '对方：' : '我：') + message.text;
+        chatLog.append(line);
+      }
+
+      /** 增量拉一次会话：对方回复只有走这条路才会出现在页面上（spec 2.5-07 的 observable 面）。 */
+      function pullThread() {
+        fetch('/api/threads?targetId=' + encodeURIComponent(chatTarget) + '&after=' + String(cursor))
+          .then((response) => response.json())
+          .then((payload) => {
+            for (const message of payload.messages ?? []) renderMessage(message);
+            cursor = payload.cursor ?? cursor;
+            // 目标与「线程总条数」一起报出来：截图里要能证明这一页读的是这个 jobId 的线程，
+            // 而不是一个写死的常量；条数取服务端总数，增量批次的大小会把「已注入几条」说小。
+            document.querySelector('[data-testid="chat-target"]').textContent =
+              chatTarget + '（线程内 ' + String(payload.total ?? 0) + ' 条）';
+          })
+          .catch(() => {
+            frameStatus.textContent = '会话拉取失败：服务端不可达';
+          });
+      }
+
+      /** 发出一次打招呼：交给 /api/outbound（对端数得清），画到页面上由上面的轮询负责（同一个来源）。 */
       function sendGreeting() {
         const text = chatInput.value;
         // action 与 targetId 是 /api/outbound 的必填字符串字段，缺一个就被 400 拒掉，验收会当场暴露。
         fetch('/api/outbound', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'greet', targetId: '${chatTargetId}', text, frameUrl: location.pathname }),
+          body: JSON.stringify({ action: 'greet', targetId: chatTarget, text, frameUrl: location.pathname }),
         })
           .then((response) => response.json())
           .then((payload) => {
-            const line = document.createElement('li');
-            line.dataset.testid = 'chat-log-item';
-            // 用 textContent 而不是拼 HTML：中文与 emoji 要按字面出现在帧内（spec 2.2-13）。
-            line.textContent = text;
-            chatLog.append(line);
             frameStatus.textContent = '第 ' + String(payload.received) + ' 条已送达服务端';
             chatInput.value = '';
             // 状态由帧内报给父页：父页显示的每一条都追溯到「iframe 里确实点过」。
             window.parent.postMessage({ type: 'chat-outbound', received: payload.received, text }, window.location.origin);
+            // 立刻补拉一次：等下一个轮询周期才出现会让「发出去 → 看得见」这条判据在截图里对不上。
+            pullThread();
           })
           .catch((error) => {
             frameStatus.textContent = '发送失败：' + String(error);
@@ -418,6 +488,8 @@ const chatFramePageHtml = `<!doctype html>
       }
 
       document.querySelector('[data-testid="chat-send"]').addEventListener('click', sendGreeting);
+      pullThread();
+      setInterval(pullThread, 1200);
     </script>
   </body>
 </html>
@@ -539,6 +611,11 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     outbox.push({ ...body, receivedAt: Date.now() });
+    // 同一条外发也进会话时间线：正文在 1.9 叫 `message`、在聊天帧里叫 `text`，两种都是这条验收的输入。
+    const outboundText = body['message'] ?? body['text'];
+    if (typeof outboundText === 'string') {
+      appendThreadMessage(body['targetId'], 'outbound', outboundText);
+    }
     console.log(`[fixture] 收到第 ${String(outbox.length)} 条外发：${body['action']} → ${body['targetId']}`);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ ok: true, received: outbox.length }));
@@ -548,6 +625,36 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   if (url.pathname === '/api/outbox') {
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ count: outbox.length, items: outbox }));
+    return;
+  }
+
+  // 注入一条「对方回复」（spec 2.5-07 的靶子）：验收脚本调它，页面下一次轮询就会把这条渲染进帧内 DOM。
+  if (url.pathname === '/api/reply' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    if (typeof body['targetId'] !== 'string' || typeof body['text'] !== 'string' || body.text.length === 0) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '缺少 targetId / text' }));
+      return;
+    }
+    const message = appendThreadMessage(body['targetId'], 'inbound', body['text']);
+    console.log(`[fixture] 注入回复 #${String(message.id)} → ${body['targetId']}`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, message }));
+    return;
+  }
+
+  // 会话读数：`?after=<id>` 只要比它新的那几条，页面据此增量渲染（不是整表重画，所以节点 id 能当去重键）。
+  if (url.pathname === '/api/threads') {
+    const targetId = url.searchParams.get('targetId') ?? chatTargetId;
+    const after = Number(url.searchParams.get('after') ?? '0');
+    const history = threads.get(targetId) ?? [];
+    const fresh = Number.isFinite(after) && after > 0 ? history.filter((item) => item.id > after) : history;
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    // `total` 是该线程的总条数（`messages` 只是这一批增量的），帧内读数要报前者。
+    response.end(
+      JSON.stringify({ targetId, messages: fresh, total: history.length, cursor: history.at(-1)?.id ?? after }),
+    );
     return;
   }
 

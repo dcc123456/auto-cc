@@ -57,11 +57,16 @@
       两路读数必须同时成立：状态行来自<strong>帧内</strong>的 postMessage（证明动作确实由 iframe 触发）， 收件计数来自
       <code>/api/outbox</code>（证明消息真的出了网络，而不是页面自己改了文案）。
     </p>
-    <iframe data-testid="chat-frame" src="/chat/frame" title="打招呼聊天区（同源 iframe）"></iframe>
+    <iframe data-testid="chat-frame" title="打招呼聊天区（同源 iframe）"></iframe>
 
     <script>
       const statusLine = document.querySelector('[data-testid="chat-status"]');
       const outboxCount = document.querySelector('[data-testid="outbox-count"]');
+      // 帧的 src 由脚本拼：地址里的 targetId 要原样带进子帧，父子两边读同一个线程。
+      // 写在 HTML 里会先按默认目标加载一次，那一次的消息会画进当前目标的会话里（spec 2.5-08 要的正是分线程）。
+      const chatTarget = new URLSearchParams(location.search).get('targetId');
+      document.querySelector('[data-testid="chat-frame"]').src =
+        '/chat/frame' + (chatTarget ? '?targetId=' + encodeURIComponent(chatTarget) : '');
 
       /** 向服务端要一次收件总数 —— 外发是否发生由对端计数说，app 自述不算。 */
       function refreshOutboxCount() {
