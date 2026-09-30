@@ -118,3 +118,6 @@ declare module '@auto-cc/core' {
     'outbound.sample': OutboundSampleService;
   }
 }
+
+// 话术生成是同一个域（"要发出去的内容从哪来"）的第二个服务，所以同包不同 provider 名。
+export * from './script.js';

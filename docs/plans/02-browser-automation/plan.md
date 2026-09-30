@@ -636,3 +636,25 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
 | 2.5-d | 适配器 `chat` + `readReplies` + `conversation_messages` 表 + fixture 两块新靶子             | S1/S2 实测通过 + 2.5-06/07                     |
 | 2.5-e | `outbound.greet` 编排：`gate.perform` → throttle → adapter → 记账；`greeting.send` 节点登记 | 2.5-02/03/13                                   |
 | 2.5-f | 界面（已回复标记与优先级排序）+ 逐项 V 类可视验收 + spec 收口                               | 2.5-01(V)/02(V)/06/08 + 2.5-11 保持 `[!]`      |
+
+#### 12.9.1 2.5-b 收口记录（`outbound.script`，2026-09-30）
+
+实现落在**已有的 `packages/outbound`** 里加第二个 provider（`outbound-script`），没有新建平行包。
+三条判据的实际结果与计划表略有出入，按实测写：
+
+1. **2.5-01 打勾，且两半都过了**（计划原本只要求 U 半边）。行的验证操作写的是"无 key → 界面提示回落
+   （截图）+ 生成内容含岗位关键词"，这两条现在都有：诊断面板日志播报
+   `话术生成就绪：版本 v1 · 上限 200 字 · 模型 不可用（走模板回落）`
+   （`docs/acceptance/2.5/2.5-01-script-logline-2.png`、`2.5-01-script-row-1.png`），
+   关键词断言在 `script.test.ts`。2.5-f 要做的**不是**这条，而是把文案摆进对话/工作流界面。
+2. **2.5-09 保持 `[ ]`**：`ScriptDraftView` 已经带 `scriptVersion` + `jdId`（单测覆盖），
+   但这条判据是"查库断言字段非空"，落库动作在 2.5-e 写 `usage_ledger.source` 时才存在。
+3. **2.5-10 保持 `[ ]`**：黑名单是**唯一出口** `assertSendable`（模型产出与模板产出两条路都过，
+   命中即 `OUTBOUND_FORBIDDEN_CONTENT` 而不是重试），但这条说的是"不发送到页面"——
+   当前还没有任何发送路径可验。2.5-e 必须补一条"绕过 `assertSendable` 直接发即测试失败"再打勾。
+
+顺带记一个**会被误读成泄漏的读数**：面板"巡检"按钮是 `CYCLE_ROUNDS = 20` 轮启停，
+第一轮报 `漂移 尺寸 0 / effect 1 / 句柄 0`，看着像 `outbound-script` 漏了一个 effect。
+逐插件比对后它的 effect 数仍是 1（`registry 26→26`），**再跑一轮报 `effect 0`** ——
+那 +1 是 `plugins/src/index.ts` cycle 注释里说的 settle 窗口没吃掉的瞬时值。
+判据：一次漂移不结论，连跑两轮看是否增长。

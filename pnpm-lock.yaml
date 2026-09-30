@@ -297,6 +297,9 @@ importers:
       '@auto-cc/plugin-entitlement':
         specifier: workspace:*
         version: link:../entitlement
+      '@auto-cc/plugin-llm':
+        specifier: workspace:*
+        version: link:../llm
       '@auto-cc/shared':
         specifier: workspace:*
         version: link:../shared

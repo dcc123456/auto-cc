@@ -19,7 +19,7 @@ import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
 import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
-import { OutboundSampleService } from '@auto-cc/plugin-outbound';
+import { OutboundSampleService, OutboundScriptService } from '@auto-cc/plugin-outbound';
 import { BossPlatformService, JdCaptureService, JdStoreService } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { SessionsService } from '@auto-cc/plugin-sessions';
@@ -45,6 +45,8 @@ export const REGISTRY: Registry = {
   entitlement: EntitlementGateService,
   // 闸门之外的最薄消费者：它存在是为了让 1.9-06 的 grep 有对象可查（plan §8.4）。
   outbound: OutboundSampleService,
+  // 话术生成（spec 2.5-01）：内容侧入口，依赖 `llm.chat`；模型未配置时它仍挂载，只是每次都走模板回落。
+  'outbound-script': OutboundScriptService,
   ipc: IpcGatewayService,
   plugins: PluginsService,
   devtools: DevtoolsService,

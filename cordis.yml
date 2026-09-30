@@ -49,6 +49,12 @@ plugins:
   - id: outbound
     dependsOn: [entitlement]
 
+  # 话术生成（spec 2.5-01 / 09 / 10）：外发域的"内容侧"，与上面那条"传输侧"分开，
+  # 因为它依赖的是模型出口而不是闸门。摘掉 `llm` 时这条进 PENDING、外发样例照旧能发；
+  # 模型未配置时它照样挂载，只是每次生成都以模板回落并在结果里带上回落原因（界面据此播报）。
+  - id: outbound-script
+    dependsOn: [llm]
+
   # IPC 网关（spec 1.4-01）：全应用唯一的跨进程通道，所以排在 shell 之前——
   # 窗口由 shell 创建，界面能发起调用时处理器必须已经在位。
   - id: ipc
