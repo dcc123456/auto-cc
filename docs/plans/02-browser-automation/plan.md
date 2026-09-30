@@ -1298,3 +1298,225 @@ spec 相应条目保持 `[ ]`，逻辑半边已覆盖，不因单测全绿写成
   `b.usage['ledger.summary']`，不存在 `b.outbound.deliver.pending()` 这种三层形状；写错就 `is not a function`。
 - `plugins.readConfig` 复读得到的是**校验后**的值：喂 `mode:'limited'` 这种非法枚举时写入被 `static Config`
   挡回、读数仍是 `unlimited`，这本身就是闸门配置面的证据，别把它当成「保存失败」去排查。
+
+## 14. 子计划 2.7 的选型与证据（开工前定稿，实现照此执行）
+
+### 14.1 这一条到底在做什么
+
+七条验收里**没有一条是"让自动化更强"**，全部是给自动化装刹车与行车记录仪：
+撞见风控就停（2.7-01）、根本不装绕过件（2.7-02）、三个动作各有日上限（2.7-03）、
+节奏参数不许散在代码里（2.7-04）、做过什么能回看（2.7-05）、首次启用要先签字（2.7-06）、
+落盘的个人信息要糊掉（2.7-07）。所以这一片的判据是**反向的**：
+验收通过的标志是"某件事没有发生"（没发出去、没绕过、没落明文），
+这决定了它的实现重心在**观测点 + 结构化失败 + 机检扫描**，而不在新能力。
+
+### 14.2 前置取证（本机现状勘察 2026-10-01 + `electron.d.ts` 实测，AGENTS.md §6.2）
+
+**A. 现状：风控检测今天是零。** 全仓 `packages/**` 检索 `captcha|验证码|风控|403|429|checkpoint`，
+运行期命中为零：`platform-contract.ts:291` 只是 `OutboundResult.reason` 的自由文本注释；
+`sessions/probe.ts:6` 是"探测不发请求"的策略注释；`platform-registry.test.ts:107,219` 与
+`agent.test.ts:123,127` 都是**测试假件**在扮演验证码。唯一的"验证码→停"路径是
+`plan.ts:37` 声明的 `requiresHuman` 节点，而它只在**节点已经失败之后**才生效
+（`workflow/index.ts:578-585`）。也就是说：页面真的跳出验证码时，app 现在会把它当成
+一次普通失败去重试，或者当成空结果继续往下走——这正是 2.7-01 要堵的洞。
+
+**B. 现状：HTTP 状态码在装载路径上被丢掉。** `browser.page.settleLoad`（`index.ts:269-283`）
+只把 `did-fail-load` / `did-finish-load` 收敛成 `'loaded' | 'failed' | 'timeout'` 三个字符串，
+而 403/429 是**成功装载**（`did-finish-load`），连失败码都不带。
+`readSnapshot`（`index.ts:241-259`）里有 `url/title/bodyText`——页面文本拿得到，状态码拿不到。
+
+**C. `electron.d.ts`（装机版 44.4.5）实测的三条取路，逐条比对后选第二条**：
+
+| 取路                                                     | 事实（行号对 `node_modules/.pnpm/electron@44.4.5/.../electron.d.ts` 有效）                                                                                                                                                                                                                         | 取舍                                                                                                                                                                                                                   |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CDP `Network.enable` + `Network.responseReceived`        | `input-channel.ts:110-121` 是全仓唯一的 `debugger.attach`，`:152-156` 只做**请求/应答一次性** `sendCommand`；全仓**没有任何 `debugger.on('message')` 监听**，`Page.enable`/`Runtime.enable` 之外没启用过别的域                                                                                     | **否决**：要先把事件路由这层从零搭起来（谁订阅、如何按 sessionId 分发、视图销毁后怎么退订），为一个读数引入常驻事件通道，代价与 §2.6 的简洁要求不成比例；且 method 名是自由字符串（§13.2 第 1 条的同一个坑），拼错静默 |
+| `session.webRequest.onResponseStarted(filter, listener)` | `:19757/:19763` 签名里 listener 是 `(details) => void`——**没有 callback**，纯观测；`OnResponseStartedListenerDetails`（`:23118-23150`）带 `statusCode`、`statusLine`、`resourceType`、`url`、`webContentsId`、`frame`；`WebRequestFilter`（`:19778-19799`）`types:['mainFrame']` + `urls:string[]` | **采纳**：只读、拿得到状态码、不会卡住请求，过滤到主框架后每次导航一条，事件量可控。观测点挂在**已存在**的会话与视图边界上，不需要新的 CDP 通道                                                                        |
+| `session.webRequest.onHeadersReceived(..., callback)`    | `:19744/:19751` 是**改写型**钩子，details 同样带 `statusCode:23114` 与 `resourceType:23110`，但必须调用 `callback(HeadersReceivedResponse)`；不调用则该请求挂住                                                                                                                                    | **否决**：一个"看一眼"的需求却要求我们交出响应控制权，写错就是整页卡死，比状态码丢掉的故障更难查                                                                                                                       |
+
+**D. 现状：额度只有"一个数管三个动作"，且抓取完全不进闸门。**
+`gateSchema`（`entitlement/gate.ts:20-25`）是 `{ mode: unlimited|daily, dailyLimit: 1..1000 默认 5 }`，
+`countToday(action)`（`ledger.ts:160-165`）按动作分计数器但共用同一个上限——
+2.7-03 要的"各自独立"今天只做到了一半（计数独立、额度不独立）。
+`jd-capture.ts:11-12` 明写"全程只读：一行 `entitlement.gate` 都不进（AGENTS.md §7.3 管的是外发）"，
+并被 spec 2.3-11 验收过——**与 2.7-03 正面冲突**，处置见 §14.4 第 1 条。
+
+**E. 现状：`pacing` 是一套没人读的第二额度系统。**
+`platform-contract.ts:162-169` 定义了 `pacing: { minActionGapMs 默认 3000, maxDailyActions 默认 20 }`，
+`boss.json:244-247` 给了 `5000 / 20`。全仓检索 `.pacing` 的运行期消费者：**零**
+（只有 `platform-boss/src/index.test.ts:55` 断言它 > 0）。它和 `entitlement.gate` 的日上限、
+`outbound.throttle` 的随机间隔是同一件事的第二份声明——按 §2「禁止第二套同类基础设施」必须处理，见 §14.4 第 2 条。
+
+**F. 现状：脱敏只做了日志这一半。** `log/redact.ts` 有 phone/id-card/email/secret 四类掩码，
+`LogService` 在出口处 `redactText`（`logger/src/index.ts:131-153`，`redact` 默认 true）；
+但工作流失败证据 `workflow/index.ts:698-732` 写盘时把 `page.bodyText`（`evidenceTextChars` 默认 300 字）**原文**落进
+userData 下的 JSON，一行 redact 都没过。截图侧：`browser.page.screenshot`（`index.ts:191-217`）只回字节，
+落盘只发生在 `writeScreenshot`（`:758-771`），像素层面今天没有任何脱敏。
+
+**G. 现状：没有"首次启用"这道签字，也没有能存住这件事的地方。**
+`onboarding|consent|firstRun|协议` 全仓零命中。持久层只有 `store.db`（`packages/store`，
+迁移号已被占到 5：ledger/chat/jobs/workflow/conversation），而**插件配置活不过重启**——
+`plugins.saveConfig` 只写 `kernel.runtimePatches`（`kernel/src/index.ts:137,375,440`，全仓无 `writeFileSync`），
+所以"用户确认过"这件事不能存进配置。渲染层也没有通用弹窗组件，最接近的形状是
+`JobLabPanel.tsx:74-119,247-258` 的确认卡片（现读 `pending()` + 事件驱动刷新 + 两个按钮各带 busy 态）。
+
+**H. 待跑的本机 spike（写调用代码之前完成，结论回填本节）**：
+spike-1 用 `tmp/` 下一次性 Electron 脚本 + 一次性本地 HTTP（返回 403/429 各一次），
+断言 `onResponseStarted({types:['mainFrame']})` 在 `persist:` 分区上确实推来 `statusCode`，
+并且**同一 filter 下 XHR/子框架不产生噪声**；
+spike-2 断言该 listener 在视图销毁/会话重建后不残留（`removeListener` 的句柄从哪来）；
+spike-3 在 fixture 页上试"截图前用绝对定位黑块盖住命中脱敏正则的文本节点"这条做法：
+只加 overlay 元素、不改文本内容，截完移除，回读 `document` 确认页面自述文本未被我们改坏。
+
+### 14.3 落点设计（定稿 2026-10-01，实现照此执行）
+
+**1）检测归 `browser.risk`，暂停归 `workflow.runner`，中间只有一个事件（2.7-01）。**
+
+- 新增服务 `packages/browser/src/risk-service.ts`，provide `browser.risk`，注入 `platform.registry` + `sessions`。
+  理由与边界：观测点在**页面装载**这一层（C 表第二行），而分区/视图生命周期在 `sessions`/`shell`，
+  判定标准（哪些字样算风控）在知识包里——三样凑齐的最小落点就在 browser 域，
+  放进 `outbound` 会让打招呼与投递各自盯一遍页面（两个入口必然漏一套，同 §13.3 第 2 条的理由）；
+  放进 `runner` 会让 L3 反过来教 L2 怎么读页面。不新建包。
+- 两个信号源，一个出口：`onResponseStarted` 的主框架 `statusCode ∈ riskStatusCodes` → 一类；
+  知识包新增**可选** `risk` 段（`riskPattern`：状态行/标题/正文任一命中即算）→ 另一类。
+  `risk` 段用可选而不是必填，因为 2.6 的 `deliver` 段必填换来的那条纪律在这里不适用：
+  没有风控字样的平台照样要能跑，缺段只是"这一类信号不检"，不是能力缺失。
+- 命中即 `ctx.emit('browser/risk-signal', {platform, kind, detail, url, at})` 并进 `RENDERER_EVENTS`
+  与 `RendererEventSignatures`（那条保险丝会盯住），载荷是结构化数据、句子由渲染层按 i18n 组——2.1-08 口径。
+- 暂停走**已有的那条一模一样的路**：runner 订阅 `session/expired` 后 `stop(takeover)`
+  （`workflow/index.ts:392-399`），这里加一个同形状的 `browser/risk-signal` 订阅 →
+  `stop({reason:'risk-control', subject:platform, stepId:当前步, at})`。
+  `WorkflowTakeoverReason`（`core/events.ts:89`）加 `'risk-control'` 一个值，
+  `zh-CN/en` 两份语言包各加一条 `workflow.takeoverBody.risk-control`。
+  面板横幅、重试按钮、i18n 命名全部复用 `WorkflowPanel.tsx:118-137` 现有形状，界面侧零新组件。
+- "立即"的含义钉死为三件事：run 状态转 `paused`（不再起下一步）、当前节点收到的 `signal` 被 abort
+  （因此 greet/deliver 的 `assertNotYielded` 会在下一个检查点抛，不发送、不落账——与 2.4-07/2.6 已验语义逐字一致）、
+  界面拿到横幅。**不做**：不重试、不降级、不"等一会儿再看一眼"，任何一条都是绕过风控。
+
+**2）红线只用心智 + 机检守，不做成运行期开关（2.7-02）。**
+
+- 新增 `scripts/check-compliance-redlines.ts`，形态照抄 `check-llm-single-entry.ts`（一条规则一个脚本，root `pnpm lint` 串上），
+  扫 `packages/*/src/**` 生产代码（测试与 harness 另列 allowlist）：
+  UA/请求头伪装（`overrideUserAgent|appendUserAgent|userAgent:` 赋值、`webRequest.onBeforeSendHeaders`）、
+  指纹与自动化痕迹（`navigator.webdriver`、`addInteractiveScripts`、`addScriptToEvaluateOnNewDocument`、
+  对 `navigator.plugins|languages|platform` 赋值）、验证码识别外部服务（`2captcha|anticaptcha|capmonster|scratch` 域名）、
+  多账号池（`partitionFor(` 的调用点唯一且入参是平台名，分区名不许带序号）。
+- 扫描器是**防漂移**，不是防有意为之：真要接码或伪装，人一定写得出来，所以同一条验收的另一半是 §8 那条禁令的
+  持续存在（spec 2.7-02 要求 plan §8 记录，见 §14.5）。
+- 现状有利：E3 勘察确认今天**一处都没有**（`userAgent`/`appendUserAgent`/`addInteractiveScripts`/
+  `evaluateOnNewDocument`/`extraHeaders` 全零命中），所以这条规则落地即绿，不需要"先豁免再收敛"的过渡名单。
+  唯一需要写明的是 `browser.act` 的 DOM 兜底路径会**诚实报告 `trusted:false`**（`act-service.ts:351-361`），
+  这是取证不是伪装，扫描器不得把它算作命中。
+
+**3）日上限改成三键，抓取纳入同一个闸门（2.7-03）。**
+
+- `gateSchema` 改为 `{ mode, dailyLimits: { search, greet, deliver } }`（各自 `.int().min(1).max(1000)`，
+  默认给保守值并在 cordis.yml 里显式写一遍——照 throttle 那次的既有做法，为的是装配面板能现场改宽改窄），
+  **删掉** `dailyLimit` 而不是留着当兜底（§2.6 不做兼容垫片）。`check()` 的取数从 `dailyLimit` 换成
+  `dailyLimits[action]`，未知动作名仍然结构化失败而不是"当作 0"或"当作无限"。
+- `jd.capture.run` 用 `gate.perform('search', {targetId: keyword, source})` 包住一次抓取 run：
+  成功才落账（闸门语义一行没改），超限抛 `QUOTA_EXCEEDED`，节点侧表现为一次可回看的失败而非静默少抓。
+  这条与 spec 2.3-11 的原文冲突，处置写在 §14.4 第 1 条，不允许悄悄改。
+- 三个计数器**互不占用**由 `countToday(action)` 天然保证（`ledger.ts:160-165` 已按 action 过滤），
+  所以本片只动配置形状与消费点，账本表结构、迁移号、日界（本地自然日 `setHours(0,0,0,0)`）一律不碰。
+
+**4）节奏参数归位 + 一条扫描规则（2.7-04）。**
+
+- 把 `browser.act.upload` 的读回等待从 `locator-script.ts:669` 的默认实参（`timeoutMs=1500, stepMs=50`）
+  改成由 `browser.act` 的配置传入（`act-service.ts:192` 现在是不带实参调用）。
+  `nodeScanCap:4000`、`extract-script.ts:82` 的 `200` 是**注入脚本内部的上限护栏**，
+  属于"页面内跑的那段 JS 的自保护"，配置化它没有意义（注入脚本拿不到主进程配置），
+  处置是集中到一个 `packages/browser/src/inpage-limits.ts` 常量模块 + 扫描器把它列进 allowlist，
+  而不是散在两个脚本文件里各写一遍。
+- `jd-capture` 的轮间停顿 `roundPauseMs` 保留（它已是配置项），但**改走 `outbound.throttle` 的随机间隔**：
+  固定 300ms 的轮询节奏就是 `throttle.ts:7` 自己注释的"机器行为"。为此 `throttleSchema` 扩成
+  `{ minGapMs, maxGapMs, scrollGapMs }`（新增滚动节奏一档），消费点从 greet/deliver 两处变三处，
+  不新增第二个节流服务。
+- 扫描规则并进同一个脚本的第二条（`check-compliance-redlines.ts` 里两条规则、两段输出）：
+  `packages/{browser,outbound,platform-boss,workflow}/src/**` 生产代码里，
+  出现在 `sleep(`/`setTimeout(`/`setInterval(` 实参位置的数字字面量，除显式 allowlist（如 `SETTLE_MS`、`SCROLL_*` 这类非节奏用途）外一律失败。
+  这条规则的判据是"数值得从配置来"，不是"不许有数字"。
+
+**5）审计视图是两份既有事实的并置，不是第三套存储（2.7-05）。**
+
+- 事实源已经齐了：成功侧 `usage_ledger`（时间/动作/目标/来源，`LedgerRowView` 已在 `bridge.ts:265-277`），
+  结果与失败侧 `workflow_nodes`（`status/attempts/error/evidence`，2.4 落库、2.6 已验收过读数）。
+  所以 2.7-05 要做的只是**一个界面**：新增 `packages/renderer/src/AuditSection.tsx`，
+  并进现有 `UsagePanel`（同页不同段，不新开视图），上半段列账本行（含新的 `search` 行），
+  下半段列最近若干 run 的节点行 + 结果；两个读数都走已在白名单里的 `usage['ledger.summary']` 与
+  `workflow['runner.nodes']`，**不加新表、不加新 service、不加新白名单键**。
+- 「结果」这一列的诚实口径：账本行存在 = 该次动作成功（1.9 决策 1：失败不记账，写了就是假用量）；
+  节点行的 `status` 给出 success/failed/待接管。两处并置时不伪造统一时间线，
+  每条都注明它来自哪份事实——这样 2.7-05 的"回看"不会变成"看起来什么都有其实只有一半"。
+- 抓取动作进入账本后，`byAction` 那一列第一次有三个值，`UsagePanel` 现在**没渲染 `byAction`**
+  （只渲染 byDay/recent），本片顺手补上，因为它正是"三个动作各自独立"的可见证据。
+
+**6）首次签字存进 sqlite，释放路径硬拦（2.7-06）。**
+
+- 新增迁移 v6 表 `automation_consents(scope TEXT PRIMARY KEY, acknowledged_at INTEGER NOT NULL)`，
+  scope 取值 `automation:<platform>`。放 `packages/sessions`（它已经是"平台级、跨重启的状态"这件事的唯一归属：
+  分区、登录态快照、平台清单都在这），注入 `store`；服务面 `sessions.consentStatus(platform)` /
+  `sessions.grantConsent(platform)`，两个都进白名单（后者只接受平台名，不接受任意 key，避免变成万能 KV 写入口）。
+- 拦截点两处，缺一处都算假护栏：
+  ① 界面：点「开始工作流 / 打招呼 / 投递 / 抓取」前读 `consentStatus`，未签则先弹确认（复用 G 条那个卡片形状，
+  新 i18n 命名空间 `consent.*`），确认后才发原动作；
+  ② **释放路径**：`outbound.greet`/`outbound.deliver` 的 commit 段与 `jd.capture.run` 在过闸门**之前**
+  调用 `ensureConsent(platform)`，未签即结构化失败 `CONSENT_REQUIRED`。
+  只做 ① 的话，工作流节点与 agent 工具这两条入口会静默绕过——这正是 §13.3 第 2 条踩过的那类漏。
+- "出现一次"的判据是 per-platform 的 scope 已存在，不是前端记过一次弹窗；重启、reload、换面板都不该再弹（V 类要验的就是这条）。
+
+**7）脱敏补齐：文本落盘过 `redactText`，截图加遮罩（2.7-07）。**
+
+- 文本侧一行改动：`workflow/index.ts` 的 `writeEvidence` 在写 `page.bodyText`/`url`/`error.details` 之前过
+  `redactText`（`log/redact.ts` 已是唯一实现，直接复用，不再写第二份正则——§2.1）。
+- 截图侧做**遮罩而不是改内容**：`browser.page.screenshot` 前注入一段页面脚本，
+  按 `redact.ts` 同一批正则找到命中的文本节点、在其 `getClientRects()` 上盖绝对定位实心块、
+  截完立即移除。为什么不是"把文本换成 `***`"：那会改站点 DOM，站点自己的校验/预览可能因此改变行为，
+  我们在做的事就说不清了。像素遮罩的边界也要写进 spec：它盖得住手机号/邮箱/身份证这类**页面上以文本出现的**信息，
+  盖不住图片里的、PDF 预览里的——这条不许在验收时被说成"截图全脱敏"。
+- 遮罩默认开启，开关放 `browser.page` 配置（`maskSensitiveInShots`，默认 true），
+  关掉它只应该发生在调试现场，装配面板上那行配置就是这条默认的证据。
+
+### 14.4 与已验收条目的冲突，逐条写明处置
+
+1. **spec 2.3-11「抓取全程只读，一行 `entitlement.gate` 都不进」被 2.7-03 更正。**
+   2.3-11 的原意是"抓取不消耗外发额度"，这条意思保留（`search` 与 `greet`/`deliver` 各数各的，
+   抓 20 次不会吃掉打招呼的额度）；被更正的是"完全不进闸门"——把每日抓取量纳进同一个闸门是唯一
+   合规的落点，另建一套抓取计数会同时违反 §2 与 2.6-08 已经验收过的"无第二套计数"。
+   验收时 2.3-11 的旧读数不改写，spec 里补一条更正说明指向 2.7-03。
+2. **知识包 `pacing` 段删除**（`platform-contract.ts:162-169` + `boss.json:244-247` +
+   `platform-boss/index.test.ts:55` 那条断言）。运行期零消费者（E 条实测）= §2.4 的死代码；
+   而它声明的两件事已经分别由 `entitlement.gate`（额度）与 `outbound.throttle`（节奏）在做，
+   留着就是第二套同类基础设施的**声明**。2.2 当年验收的是"pacing 作为数据存在"，
+   这一条随本片的更正一并回写进 spec，不假装它从来没写过。
+3. **`gateSchema.dailyLimit` 消失**，1.9（spec 1.9-0x）与 2.6-02 的验收读数里凡出现 `dailyLimit` 的
+   配置文件与测试都要跟着改；这是配置形状变化，不是额度语义变化，账本表与"成功才落账"一条不动。
+4. **`outbound.sample` 那个"界面传任意 action 字符串"的口子要收窄**（`outbound/src/index.ts:59-64`
+   把渲染层给的字符串原样送进 `gate.perform`）。改成三键枚举：日上限变成按动作取值之后，
+   任意字符串意味着任意人可以从渲染层**发明新的免限额度动作名**，把 `dailyLimits` 绕成摆设。
+
+### 14.5 明确不做（2.7 阶段）
+
+- 不做任何验证码/风控的**识别与规避**：不接码、不破解、不重试撞开、不替换 UA、不改指纹、不分摊多账号
+  （§8 第 2 条禁令在本片落成机检扫描器 2.7-02；这是它第一次有工具兜着，不再只是文档里一行字）。
+- 不做站点级风控知识库的**众包/在线更新**：风控字样只能来自仓库里的知识包 JSON（2.2-08 那条纪律），
+  本片不引入任何"从远端拉选择器"的通道。
+- 不做 IP 代理池、不做请求签名算法还原、不做对站点私有接口的直连（这三条比 UA 伪装更越界，
+  且都不属于"用户在自己电脑上用自己的账号操作"这件事）。
+- 不做审计日志的导出/上报（本地回看即 2.7-05 的全部要求；任何把求职数据送出本机的通道属 P5 之后另立子计划）。
+- 不做 ToS 文本的法律审校：弹窗里的文案是风险提示 + 用户自担声明，不是合同条款；
+  真要正式协议文本必须来自法务（源仓库许可状态至今未确认，见项目记忆与 §12.7 同类口径）。
+- 不接管 macOS/Linux 的运行期验证（AGENTS.md §9：本机 Windows，相关项一律 `[!]`）。
+
+### 14.6 拆分与顺序（一片一次提交，一片一收口）
+
+| 片    | 内容                                                                                                                  | 覆盖条目                       |
+| ----- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 2.7-a | 红线扫描脚本（两条规则）+ `pacing` 段删除 + 注入脚本常量归位 + 节奏参数配置化                                         | 2.7-02、2.7-04                 |
+| 2.7-b | `dailyLimits` 三键 + 抓取入闸门 + `outbound.sample` 动作名收窄 + 单测与配置更正                                       | 2.7-03（含 §14.4 第 1/3/4 条） |
+| 2.7-c | `browser.risk` 服务 + 知识包 `risk` 段 + `browser/risk-signal` 事件 + runner 订阅转暂停 + fixture 风控靶页 + 截图验收 | 2.7-01                         |
+| 2.7-d | 证据文本脱敏 + 截图遮罩（spike-3 之后）+ 断言落盘内容已掩码                                                           | 2.7-07                         |
+| 2.7-e | `automation_consents` 迁移 + `sessions.consent*` + 界面确认卡片 + 释放路径硬拦 + 审计视图段落                         | 2.7-06、2.7-05                 |
+
+顺序的理由：a/b 是纯静态与配置面，失败不影响运行期；c 是唯一需要新观测通道的（先跑 spike-1/2）；
+d 的截图遮罩依赖 spike-3；e 排最后是它要同时改界面与两处释放路径，牵面最广，且它的审计视图
+需要 b 落地的 `search` 账本行才有东西可看。
