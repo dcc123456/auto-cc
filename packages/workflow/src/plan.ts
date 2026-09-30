@@ -5,7 +5,7 @@
  * 也不含任何选择器或 URL。于是 2.4-08 的「mock 适配器跑完整条链」不需要改计划，
  * 而 P5 想加一条「只做择机投递」的计划也只是多一个数据文件。
  */
-import { TOOL_EFFECTS, type WorkflowNodeSpec, type WorkflowPlanView } from '@auto-cc/core';
+import { AppError, TOOL_EFFECTS, type WorkflowNodeSpec, type WorkflowPlanView } from '@auto-cc/core';
 import { z } from 'zod';
 
 /** 节点参数值：计划要能整体 JSON 序列化进库，所以不接受嵌套对象（嵌套就得再设计一层模板引擎）。 */
@@ -137,7 +137,7 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
  * 三个节点都是**线性**的，且第三个故意是「前两次必失败」的演示节点：
  * 断点续跑要看得见「从第 3 个节点继续」，重试退避要看得见「第 3 次才成功」，
  * 前两个真实节点因此只需承担「已完成不重放」的角色。
- * 执行器实现在 `workflow.runner` 里按 `kind` 注册，本常量不含任何平台细节。
+ * 执行器按 `kind` 从登记处取（见 `executors.ts`），本常量不含任何平台细节。
  */
 export const BOSS_BASIC_PLAN: PlanInput = {
   id: 'boss-basic',
@@ -161,9 +161,40 @@ export const BOSS_BASIC_PLAN: PlanInput = {
       // 失败注入节点没有真实外发，但它必须**有 target**：2.4-06 要的「重复执行同节点不重复外发」
       // 只有幂等键真的写进库才算被测到。
       target: 'demo://flaky',
-      params: { failTimes: 2 },
+      // 计数放在本地 fixture 而不是进程内存：真 kill 之后重启仍要能看见「第 3 次才成功」
+      // （spec 2.4-05 的验收要求进程死过一次，内存计数在那一刻会被清零，验收就拍不到这条路径）。
+      params: { url: 'http://127.0.0.1:10233/api/fail-counter', failTimes: 2 },
       effect: 'local-write',
       retryTimes: 2,
     },
   ],
 };
+
+/**
+ * P2 的内置计划清单：`planId` → 声明。
+ *
+ * 只有这一条，是因为 2.4 只要一条能演示「顺序推进 / 失败重试 / 断点续跑」的线性主线
+ * （plan §11.8：不做分支、并行与画布）。配置键 `planId` 从这张表里选一条，选不到就装配期失败。
+ */
+export const WORKFLOW_PLANS: Readonly<Record<string, PlanInput>> = {
+  'boss-basic': BOSS_BASIC_PLAN,
+};
+
+/**
+ * 按 id 取计划。
+ * @param id 配置键 `planId` 的值
+ * @returns 补全默认值并算好指纹的计划视图
+ * @throws 表里没有这个 id 时以 `INVALID_ARGUMENT` 失败并列出可用 id——
+ *         「配置写错了一个字母」必须一眼能看出来，而不是表现为工作流起不来
+ */
+export function planById(id: string): WorkflowPlanView {
+  const input = WORKFLOW_PLANS[id];
+  if (!input) {
+    const available = Object.keys(WORKFLOW_PLANS);
+    throw new AppError('INVALID_ARGUMENT', `未知的工作流计划 ${id}，可选：${available.join('、')}`, 'workflow.plan', {
+      planId: id,
+      available,
+    });
+  }
+  return buildPlan(input);
+}

@@ -51,15 +51,13 @@ export interface KernelViewLoadError {
 }
 
 /**
- * 六个主线步骤的 id 与顺序（`docs/00-master-plan.md` §31 的概念表：搜索 / 建档 / 话术 /
- * 打招呼 / 按 JD 优化简历 / 择机投递）。
+ * 步骤槽位的 id。
  *
- * 全仓库只在这里定义一次：runner 按它执行、界面按返回的 `steps` 渲染槽位。
- * 渲染层拿不到这个常量（也不该拿，见 `shared/bridge.ts` 的转出注释），所以它没有第二份步骤清单。
+ * 2.4 起它是**计划里的节点 id**（`WorkflowNodeSpec.id`），不再是固定的一份六步清单：
+ * 换一条计划就换一批槽位，界面按返回的 `steps` 画，仓库里因此不存在第二份步骤列表。
+ * 曾经的 `WORKFLOW_STEP_IDS` 常量随 1.10 的六步占位流水线一起退场（plan §11.3 第 2 条）。
  */
-export const WORKFLOW_STEP_IDS = ['search', 'profile', 'pitch', 'greet', 'tune', 'deliver'] as const;
-
-export type WorkflowStepId = (typeof WORKFLOW_STEP_IDS)[number];
+export type WorkflowStepId = string;
 
 /** run 的整体状态（spec 1.10-03 点名的五个态）。 */
 export type WorkflowRunStatus = 'idle' | 'running' | 'paused' | 'failed' | 'done';
@@ -82,16 +80,28 @@ export type WorkflowStepView = {
 };
 
 /**
- * 人工接管点（spec 2.1-08）。
+ * 停下来的原因（spec 2.1-08 / 2.4-06）。
+ *
+ * `missing` / `expired` 来自会话探测；`unobserved-side-effect` 是「上一次外发开始了但没观察到完成」，
+ * 此时自动重放有发两遍的风险，只能等人确认（plan §11.3 第 5 条）；`manual-takeover` 是节点自己
+ * 声明的接管点（验证码/风控一类，plan §11.8 的「不做识别与规避」）。
+ */
+export type WorkflowTakeoverReason = 'missing' | 'expired' | 'unobserved-side-effect' | 'manual-takeover';
+
+/**
+ * 人工接管点（spec 2.1-08 / 2.4-06）。
  *
  * 刻意是**结构化数据而不是一句话**：主进程拼好的中文文案进不了 i18n（AGENTS.md §5.5 要求
- * 页面每条文案都走语言包），而「哪个平台、因为什么、停在第几步」这三项才是界面组织句子需要的。
+ * 页面每条文案都走语言包），而「卡在哪个对象、因为什么、停在第几步」才是界面组织句子需要的。
  */
 export type WorkflowTakeoverView = {
-  /** 需要接管的平台标识。 */
-  platform: string;
-  /** 判定依据，与 `SessionExpiredEvent.reason` 同集合。 */
-  reason: 'missing' | 'expired';
+  /**
+   * 接管对象的归属名：会话失效时是平台名（`boss`），未观察外发时是执行器名（`jd.greet`）。
+   * 它不是翻译键也不是句子——界面只把它当参数插进文案，所以两种接管共用同一个字段。
+   */
+  subject: string;
+  /** 判定依据；见 `WorkflowTakeoverReason`。 */
+  reason: WorkflowTakeoverReason;
   /** 停在哪个步骤上等待接管。 */
   stepId: WorkflowStepId;
   /** 记下接管的时间戳（毫秒）。 */
@@ -120,6 +130,15 @@ export type WorkflowRunView = {
 };
 
 /**
+ * 节点迁移的相位（spec 2.4-02 字面要的 `node.started/finished/failed`）。
+ *
+ * 刻意做成**字段而不是新事件名**：`workflow/progress` 已经被 1.10 的工作流面板与 1.11 的工具卡片
+ * 订阅，再开一条频道就会出现「两个界面各拿到一半进度」（AGENTS.md §2.5 / plan §11.3 第 1 条）。
+ * `retrying` 是 2.4-03 退避重试的那一次播报，不在 spec 字面里但缺了它界面只能显示「失败」。
+ */
+export type WorkflowNodePhase = 'started' | 'finished' | 'failed' | 'retrying';
+
+/**
  * 一次进度推进的事件载荷（spec 1.10-04：界面进度是流式推送，不是轮询出来的）。
  *
  * 带整份 `run` 而不是增量：渲染层因此不自己推导状态，
@@ -129,7 +148,9 @@ export type WorkflowProgressEvent = {
   run: WorkflowRunView;
   /** 触发本次推送的步骤；run 级迁移（start / pause / resume）时为 null。 */
   stepId: WorkflowStepId | null;
-  /** 面向用户的一句话说明，P2 换成真实进度文案；纯状态迁移时为 null。 */
+  /** 节点迁移相位；run 级迁移时为 null（spec 2.4-02）。 */
+  phase: WorkflowNodePhase | null;
+  /** 面向用户的一句话说明，纯状态迁移时为 null。 */
   message: string | null;
 };
 
@@ -211,8 +232,8 @@ export type WorkflowRunStateStatus = WorkflowRunStatus | 'interrupted';
 /**
  * 一次 run 的**可持久化**状态（spec 2.4-01 / 2.4-05）。
  *
- * 与 1.10 的 `WorkflowRunView` 分开的理由：那份是「界面画六个槽位」的镜像，这份是「进程没了也能
- * 接着跑」的真相。字段形状可以像，但生命周期不同——前者随事件推，后者随节点状态落库。
+ * 与 1.10 的 `WorkflowRunView` 分开的理由：那份是「界面按计划节点数画槽位」的镜像，这份是「进程没了
+ * 也能接着跑」的真相。字段形状可以像，但生命周期不同——前者随事件推，后者随节点状态落库。
  */
 export type WorkflowRunStateView = {
   runId: string;

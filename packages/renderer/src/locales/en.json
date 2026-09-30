@@ -285,7 +285,7 @@
       "none": "no target"
     },
     "workflow": {
-      "heading": "Job-hunting workflow (P1 six-step placeholder)",
+      "heading": "Job-hunting workflow (plan-driven node pipeline)",
       "refresh": "Reload workflow state",
       "loading": "Reading the workflow state from the main process…",
       "start": "Start",
@@ -313,15 +313,17 @@
         "failed": "failed"
       },
       "step": {
-        "search": "Search matching JDs",
-        "profile": "Match role against resume",
-        "pitch": "Draft outreach message",
-        "greet": "Send greeting",
-        "tune": "Tailor resume to the JD",
-        "deliver": "Send resume"
+        "jd-capture": "Capture JDs into the store",
+        "jd-list": "Read stored JDs",
+        "flaky": "Retry backoff demo"
       },
       "takeoverTitle": "Waiting for you",
-      "takeoverBody": "Sign-in for {{platform}} has expired ({{reason}}); the run stopped at \"{{step}}\". Finish logging in inside the embedded view, then continue."
+      "takeoverBody": {
+        "missing": "{{subject}} is not signed in (no cookie in the session), the run stopped at \"{{step}}\". Sign in inside the embedded view, then continue.",
+        "expired": "The sign-in for {{subject}} has expired, the run stopped at \"{{step}}\". Sign in again inside the embedded view, then continue.",
+        "unobserved-side-effect": "The outbound action of {{subject}} at \"{{step}}\" was not observed (it may already have been sent). Check the embedded view first, then retry this step.",
+        "manual-takeover": "\"{{step}}\" is declared as a manual takeover point by {{subject}} (captcha / risk control), the run is paused. Finish it yourself, then retry this step."
+      }
     },
     "chat": {
       "heading": "Chat",

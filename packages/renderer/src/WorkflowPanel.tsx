@@ -13,12 +13,12 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
 };
 
 /**
- * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10）。
+ * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10 / 2.4-02）。
  *
- * 这里**没有**任何业务判断：六个步骤、状态、耗时全部来自主进程返回的 `run`，
- * 进度靠 `workflow/progress` 事件推送（1.10-08）。占位步骤里什么都没有，
+ * 这里**没有**任何业务判断：槽位、状态、耗时全部来自主进程返回的 `run`（槽位数就是当前计划的
+ * 节点数，换一条计划就换一批格子），进度靠 `workflow/progress` 事件推送（1.10-08）。
  * P2 换成真实的搜 JD / 生成话术 / 打招呼 / 投递时，本组件一行不用改。
- * 接管点（spec 2.1-08）也只是把 `run.requiresHuman` 这份**数据**翻译成一句话：
+ * 接管点（spec 2.1-08 / 2.4-06）也只是把 `run.requiresHuman` 这份**数据**按 `reason` 翻译成一句话：
  * 主进程不再拼中文句子，所以换语言时界面不会漏出中文硬编码。
  */
 export function WorkflowPanel() {
@@ -119,7 +119,8 @@ export function WorkflowPanel() {
         <div
           className="mt-2 rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-[11px] text-amber-200"
           data-testid="workflow-takeover"
-          data-takeover-platform={current.requiresHuman.platform}
+          data-takeover-subject={current.requiresHuman.subject}
+          data-takeover-reason={current.requiresHuman.reason}
           data-takeover-step={current.requiresHuman.stepId}
         >
           <p className="flex items-center gap-1 font-semibold">
@@ -127,10 +128,10 @@ export function WorkflowPanel() {
             {t('workflow.takeoverTitle')}
           </p>
           <p className="mt-1 break-all">
-            {t('workflow.takeoverBody', {
-              platform: current.requiresHuman.platform,
-              reason: t(`session.reason.${current.requiresHuman.reason}`),
-              step: t(`workflow.step.${current.requiresHuman.stepId}`),
+            {/* 接管原因有会话类与节点类两种，句子形状不同，所以按 reason 取条目而不是拼一句通用模板。 */}
+            {t(`workflow.takeoverBody.${current.requiresHuman.reason}`, {
+              subject: current.requiresHuman.subject,
+              step: t(`workflow.step.${current.requiresHuman.stepId}`, current.requiresHuman.stepId),
             })}
           </p>
         </div>
@@ -154,7 +155,8 @@ export function WorkflowPanel() {
               <span className="break-all">
                 <span className="font-mono text-xs">{String(index + 1)}</span>
                 {' · '}
-                {t(`workflow.step.${step.id}`)}
+                {/* 节点 id 是计划数据（外部输入）：语言包缺条目时退回显示 id 本身，而不是漏出 `workflow.step.xxx` 这种键名。 */}
+                {t(`workflow.step.${step.id}`, step.id)}
                 {step.error ? (
                   <span
                     className="ml-1 inline-flex items-center gap-1 break-all text-rose-300"
@@ -172,14 +174,16 @@ export function WorkflowPanel() {
                   </span>
                 ) : null}
                 <span>{t(`workflow.stepStatus.${step.status}`)}</span>
-                {step.status === 'failed' ? (
+                {/* 两种「停在这一步」都要能从这一步出去：普通失败，以及挂着接管点的暂停
+                    （spec 2.4-06 的未观察外发只有从这里走，否则用户在界面上只剩重新开跑一条路）。 */}
+                {step.status === 'failed' || current.requiresHuman?.stepId === step.id ? (
                   <button
                     type="button"
                     data-action="retry"
                     data-step={step.id}
                     disabled={busy !== undefined}
                     onClick={() =>
-                      act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`) }), () =>
+                      act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`, step.id) }), () =>
                         bridge?.workflow['runner.retryStep'](step.id),
                       )
                     }

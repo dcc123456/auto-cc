@@ -238,14 +238,21 @@ export class WorkflowRunStoreService extends Service {
    * @param index 节点下标（计划数组的顺序）
    * @param spec 节点声明
    * @param at 本次尝试的开始时间戳（毫秒）
+   * @param force 人工确认后的重放：`needs-human` 的那道拒绝只为「没人看过」而设，
+   *   用户在接管点上按下重试之后继续重放才是 2.4-05 要的路径；默认 false，绝不能由执行器自己传 true
    * @returns `granted`（可以跑）/ `already-done`（跳过）/ `needs-human`（拒绝盲重放，转接管）
    * @throws run 行不存在时 `INVALID_ARGUMENT`——没有 run 就没有 `node_index` 的归属，静默插一行会变成孤儿
    */
-  claimNode = (runId: string, index: number, spec: WorkflowNodeSpec, at: number): NodeClaim => {
+  claimNode = (runId: string, index: number, spec: WorkflowNodeSpec, at: number, force = false): NodeClaim => {
     const existing = this.nodeRow(runId, index);
     if (existing) {
       if (existing.status === 'done' || existing.status === 'skipped') return 'already-done';
-      if (existing.side_effect === 'started' || existing.side_effect === 'done') return 'needs-human';
+      if ((existing.side_effect === 'started' || existing.side_effect === 'done') && !force) return 'needs-human';
+      if (force && existing.side_effect) {
+        this.ctx.logger.warn(
+          `第 ${String(index)} 个节点的外发未被观察到完成，人工确认后重放（幂等键 ${existing.idempotency_key ?? '（无）'}）`,
+        );
+      }
       // 失败留的行沿用到底：`attempts` 自增、上一轮的耗时/错误/证据清空（重试是一次新的尝试，但仍是同一个节点）。
       this.db
         .prepare(
@@ -306,13 +313,14 @@ export class WorkflowRunStoreService extends Service {
   recordNode = (runId: string, index: number, outcome: NodeOutcome): void => {
     this.db
       .prepare(
-        `UPDATE workflow_nodes SET status = ?, attempts = ?, finished_at = ?, duration_ms = ?,
+        `UPDATE workflow_nodes SET status = ?, attempts = ?, started_at = ?, finished_at = ?, duration_ms = ?,
            error = ?, evidence_ref = ?, side_effect = ?
          WHERE run_id = ? AND node_index = ?`,
       )
       .run(
         outcome.status,
         outcome.attempts,
+        outcome.startedAt,
         outcome.finishedAt,
         outcome.durationMs,
         outcome.error,

@@ -285,7 +285,7 @@
       "none": "无对象"
     },
     "workflow": {
-      "heading": "求职工作流（P1 六步占位流水线）",
+      "heading": "求职工作流（计划驱动的节点流水线）",
       "refresh": "重新读取工作流状态",
       "loading": "正在读取主进程的工作流状态…",
       "start": "开始",
@@ -313,15 +313,17 @@
         "failed": "失败"
       },
       "step": {
-        "search": "搜索合适的 JD",
-        "profile": "岗位与简历匹配",
-        "pitch": "生成打招呼话术",
-        "greet": "打招呼",
-        "tune": "按 JD 优化简历",
-        "deliver": "发送简历"
+        "jd-capture": "抓取 JD 入库",
+        "jd-list": "读取已入库的 JD",
+        "flaky": "退避重试演示"
       },
       "takeoverTitle": "等待你接管",
-      "takeoverBody": "{{platform}} 登录态失效（{{reason}}），已停在「{{step}}」这一步；请在内嵌视图里完成登录后继续。"
+      "takeoverBody": {
+        "missing": "{{subject}} 还没登录（会话里没有 cookie），工作流停在「{{step}}」；请在内嵌视图里登录后继续。",
+        "expired": "{{subject}} 的登录态已失效，工作流停在「{{step}}」；请在内嵌视图里重新登录后继续。",
+        "unobserved-side-effect": "{{subject}} 这一步的外发结果没被观察到（可能已经发出去了），工作流停在「{{step}}」；请先在内嵌视图里确认实际情况，再重试这一步。",
+        "manual-takeover": "「{{step}}」被 {{subject}} 声明为人工接管点（验证码 / 风控一类），工作流已停住；请人工完成后重试这一步。"
+      }
     },
     "chat": {
       "heading": "对话",

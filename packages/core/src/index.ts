@@ -53,6 +53,25 @@ export function asApp(ctx: Context): AppContext {
   return ctx as unknown as AppContext;
 }
 
+/**
+ * 按服务名**可选**地取实例：未挂载（或上下文已销毁）一律收成 undefined，不抛。
+ *
+ * 与 `asApp` 的分工是「必需依赖 vs 可选增强」：必需依赖写进 `static inject`，由装配层
+ * 保证存在，取不到就是 bug；可选依赖（如执行器登记、失败证据的页面通道）不能让整个服务
+ * 因为对方没装而拒绝启动，只能就地降级。cordis 的 `ctx.get` 对未知名会抛，所以 try 是必要的，
+ * 这不是「为假想场景加异常处理」（AGENTS.md §2.6）——它是这条口的既有行为（1.4 网关同款）。
+ * @param ctx 当前服务的上下文
+ * @param id 服务名（`域.能力` 约定）
+ * @returns 已挂载的实例，未挂载为 undefined
+ */
+export function maybeService<T>(ctx: Context, id: string): T | undefined {
+  try {
+    return ctx.get(id) as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */
 export type ServiceName = string & {};
 

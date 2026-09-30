@@ -462,17 +462,18 @@ export interface BridgeSignatures {
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
   /**
-   * 当前 run 的快照（spec 1.10-04）；挂载即是 `idle` 的六步快照，所以永不为 null，界面不必为空态另写一套。
-   * P1 只有一个「当前 run」，所以四个动作口都不带 runId（plan §8.5「不做 run 历史列表」）。
+   * 当前 run 的快照（spec 1.10-04）；挂载即是 `idle` 快照，槽位数等于当前计划的节点数（spec 2.4-02），
+   * 所以永不为 null，界面不必为空态另写一套。
+   * P1 只有一个「当前 run」，所以这几个动作口都不带 runId（plan §8.5「不做 run 历史列表」）。
    */
   'workflow.runner.current': { args: []; returns: WorkflowRunView };
-  /** 起一个占位工作流（六步空转），返回初始状态。 */
+  /** 起一次真实计划驱动的 run（2.4 之后不再是「六步空转」），返回初始状态。 */
   'workflow.runner.start': { args: []; returns: WorkflowRunView };
-  /** 请求暂停：等当前步协作让出，不强杀（spec 1.10-05）。 */
+  /** 请求暂停：等当前步协作让出，不强杀（spec 1.10-05 / 2.4-07）。 */
   'workflow.runner.pause': { args: []; returns: WorkflowRunView };
   /** 从当前步续跑，不重置已完成步（spec 1.10-05）。 */
   'workflow.runner.resume': { args: []; returns: WorkflowRunView };
-  /** 单独重试某一个失败步（spec 1.10-06）；步 id 来自界面，越界即结构化失败。 */
+  /** 单独重试某一个失败步或接管步（spec 1.10-06 / 2.4-06）；步 id 来自界面，越界即结构化失败。 */
   'workflow.runner.retryStep': { args: [stepId: string]; returns: WorkflowRunView };
   /**
    * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，

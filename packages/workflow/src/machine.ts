@@ -6,7 +6,6 @@
  * 指回去，「非法迁移被拒而不崩」就是返回一句 reason 由调用方转成结构化错误（plan §8.5 选型）。
  */
 import {
-  WORKFLOW_STEP_IDS,
   type WorkflowRunView,
   type WorkflowStepId,
   type WorkflowStepView,
@@ -19,21 +18,31 @@ export type RunnerEvent =
   | { type: 'step-started'; stepId: WorkflowStepId; at: number }
   | { type: 'step-finished'; stepId: WorkflowStepId; at: number }
   | { type: 'step-failed'; stepId: WorkflowStepId; at: number; error: string }
+  | { type: 'step-skipped'; stepId: WorkflowStepId; at: number }
   | { type: 'pause'; takeover?: WorkflowTakeoverView | null }
   | { type: 'resume' }
-  | { type: 'retry-step'; stepId: WorkflowStepId };
+  | { type: 'retry-step'; stepId: WorkflowStepId }
+  /**
+   * 编排层自己出意外（读回的计划与登记的指纹不符、状态迁移被拒……）时的落点。
+   * 它必须存在：推进循环是 `void` 出去的，异常若不对应一次合法迁移，界面就会永远挂着「运行中」。
+   */
+  | { type: 'run-failed'; error: string; at: number };
 
 /** 一次迁移的结果：合法就给新状态，非法就给一句能显示给用户的原因。 */
 export type TransitionResult = { ok: true; run: WorkflowRunView } | { ok: false; reason: string };
 
 /**
- * 造一个还没开始的 run：六个槽位全部 `pending`，耗时与时间戳都是 null。
+ * 造一个还没开始的 run：按计划的节点数排出槽位，耗时与时间戳都是 null。
+ *
+ * 槽位数来自计划而不是常量清单（plan §11.3 第 2 条）：换一条计划就换一批格子，
+ * 而 1.10 的界面只读 `steps`，因此「换实现不动界面」是结构上成立的。
  * @param runId 本次 run 的 id（由服务侧生成，界面只回显）
  * @param at 创建时间戳（毫秒）
+ * @param nodeIds 计划的节点 id，顺序即执行顺序；长度就是界面要画的槽位数
  * @returns 状态为 `idle`、`stepIndex` 为 0 的 run
  */
-export function createRun(runId: string, at: number): WorkflowRunView {
-  const steps: WorkflowStepView[] = WORKFLOW_STEP_IDS.map((id) => ({
+export function createRun(runId: string, at: number, nodeIds: readonly string[]): WorkflowRunView {
+  const steps: WorkflowStepView[] = nodeIds.map((id) => ({
     id,
     status: 'pending',
     startedAt: null,
@@ -105,6 +114,20 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
       return { ok: true, run: { ...failed, status: 'failed' } };
     }
 
+    case 'step-skipped': {
+      if (run.status !== 'running') return { ok: false, reason: `run 不在运行中，当前是 ${run.status}` };
+      const current = run.steps[run.stepIndex];
+      if (!current || current.id !== event.stepId) {
+        return { ok: false, reason: `只能跳过当前步 ${current?.id ?? '（无）'}` };
+      }
+      // 库里说这个位置已经有了结局（已完成过、或同一幂等键已被别处做过）：执行器一次都不该被调到。
+      // 镜像只标「这一步已结算」，耗时留空——把库里的真实耗时编成 0ms 是撒谎，界面宁可不显示耗时。
+      const stepIndex = run.stepIndex + 1;
+      const skipped = withStep(run, run.stepIndex, { status: 'done', finishedAt: event.at });
+      const status = stepIndex >= run.steps.length ? 'done' : skipped.status;
+      return { ok: true, run: { ...skipped, stepIndex, status } };
+    }
+
     case 'pause': {
       if (run.status !== 'running') return { ok: false, reason: `只有运行中的 run 可以暂停，当前是 ${run.status}` };
       const current = run.steps[run.stepIndex];
@@ -119,6 +142,24 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
       if (run.status !== 'paused') return { ok: false, reason: `只有暂停中的 run 可以续跑，当前是 ${run.status}` };
       // 续跑即宣告接管完成：接管标记不清掉的话，界面会一直挂着「等待用户」的横幅。
       return { ok: true, run: { ...run, status: 'running', requiresHuman: null } };
+
+    case 'run-failed': {
+      if (run.status !== 'running')
+        return { ok: false, reason: `只有运行中的 run 可以整体判失败，当前是 ${run.status}` };
+      const current = run.steps[run.stepIndex];
+      // 已经完成的位置不能因为后面的意外被改写成失败，所以只在当前步还没结算时写它。
+      // 耗时留 null：这一步没有跑完，编一个耗时出来就是给统计里掺假数（spec 2.4-10 的读数必须可信）。
+      const failed =
+        current && current.status !== 'done'
+          ? withStep(run, run.stepIndex, {
+              status: 'failed',
+              finishedAt: event.at,
+              durationMs: null,
+              error: event.error,
+            })
+          : run;
+      return { ok: true, run: { ...failed, status: 'failed' } };
+    }
 
     case 'retry-step': {
       if (run.status !== 'failed') return { ok: false, reason: `只有失败的 run 可以重试单步，当前是 ${run.status}` };

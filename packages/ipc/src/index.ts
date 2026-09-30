@@ -10,7 +10,7 @@
  * 3. 生命周期：卸载时摘掉处理器与监听，restart 后重新注册，不会撞「重复注册」。
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { AppError, Service, type Context } from '@auto-cc/core';
+import { AppError, maybeService, Service, type Context } from '@auto-cc/core';
 import {
   IPC_CHANNELS,
   RENDERER_ALLOWLIST,
@@ -75,13 +75,9 @@ export class IpcGatewayService extends Service {
     throw new AppError(reply.error.code, reply.error.message, reply.error.path, reply.error.details);
   };
 
-  /** 服务名 → 实例；cordis 对未注册的名可能抛错，一律收成 undefined 交给解析层判断。 */
+  /** 服务名 → 实例；未挂载与上下文已销毁都收成 undefined，交给解析层区分两种失败。 */
   private lookupService(name: string): object | undefined {
-    try {
-      return this.ctx.get(name) as object | undefined;
-    } catch {
-      return undefined;
-    }
+    return maybeService<object>(this.ctx, name);
   }
 
   /** 把事件推给所有主窗口。内嵌内核视图（`WebContentsView`）不在目标里，招聘站页面拿不到 app 事件流。 */

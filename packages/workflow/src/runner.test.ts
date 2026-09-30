@@ -1,33 +1,186 @@
 /**
- * `workflow.runner` 服务侧的行为测试（spec 1.10-02 / 04 / 05 / 06 / 07）。
+ * `workflow.runner` 的服务侧行为测试（spec 1.10-02 / 04 / 05 / 06 / 07 / 09 → 2.4-01…2.4-10）。
  *
- * 迁移表由 `machine.test.ts` 穷举，这里只测**跑起来之后**的四件事：
- * 推进顺序与事件流对得上、暂停是协作让出而不是强杀、失败步能被重新执行、
- * 卸载插件后定时器链真的停了（否则 `plugins.stop('workflow')` 之后还有一个人在推进状态）。
- * 非法调用一律要求结构化错误，不要求抛裸异常（1.10-09 的服务侧那一半）。
+ * 2.4 之后这里测的不再是「六个占位步骤空转」，而是四件事：
+ * ① 槽位来自计划且每一次推进同时落库（2.4-01/02）；② 退避重试的次数与时长（2.4-03）；
+ * ③ 失败现场的证据（2.4-04）；④ 进程死过一次以后怎么续、以及外发为什么不敢盲重放（2.4-05/06）。
+ *
+ * **一律打假执行器 + 真 sqlite**：登记处（`workflow.executors`）存在的意义就是让 runner 不认识
+ * 任何平台包，所以整条链在这里用三个假函数跑通本身就是 2.4-08 的证据；而「已完成节点不重放」
+ * 是数据库语义，mock 掉存储等于没测（AGENTS.md §7.2 也不允许这里碰真实平台）。
+ * 被 kill 的那一次用 `dispose` 模拟进程死亡——真正的 kill + 重启是 2.4-05 的可视验收项，压在这里
+ * 只是把「读库→判中断→续跑」这条逻辑先钉住。
  */
-import { asApp, AppError, Context, type WorkflowProgressEvent } from '@auto-cc/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { AppError, asApp, Context, Service, type Fiber, type WorkflowProgressEvent } from '@auto-cc/core';
+import { ConfigService } from '@auto-cc/plugin-config';
+import { StoreService } from '@auto-cc/plugin-store';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import {
+  WorkflowExecutorRegistryService,
+  type WorkflowNodeExecutor,
+  type WorkflowNodeInvocation,
+} from './executors.js';
 import { WorkflowRunnerService, type WorkflowConfig } from './index.js';
+import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
+import { WorkflowRunStoreService } from './run-store.js';
 
-const fibers: { dispose(): Promise<unknown> }[] = [];
+/** 计划里三个节点的执行器名，假登记按它逐个覆盖（不与 `plan.ts` 各说一份）。 */
+const PLAN_KINDS = buildPlan(BOSS_BASIC_PLAN).nodes.map((node) => node.kind);
 
-afterEach(async () => {
-  // 倒序回收：先卸掉的可能已被后卸的依赖，正序 dispose 会撞 PENDING 警告。
-  while (fibers.length) await fibers.pop()?.dispose();
-});
+/** 节点 id 顺序即槽位顺序，断言里直接用而不重排。 */
+const NODE_IDS = ['jd-capture', 'jd-list', 'flaky'];
 
-/** 装一个执行器并挂上进度事件采集；fiber 交给 afterEach 回收，避免定时器链活过用例。 */
-async function boot(config: Partial<WorkflowConfig> = {}) {
+/**
+ * 直接调用点必须给全所有带默认值的键（AGENTS.md §9 的 1.3 实测条）。
+ * 退避基数取小值：单位测试要的是次数与顺序，不是等满 500ms。
+ */
+const BASE_CONFIG: WorkflowConfig = {
+  planId: 'boss-basic',
+  retryTimes: 2,
+  retryBackoffMs: 20,
+  retryBackoffCapMs: 40,
+  maxNodesPerRun: 200,
+  evidenceDomChars: 800,
+  evidenceTextChars: 300,
+  evidenceDir: 'evidence',
+  retentionRuns: 20,
+};
+
+/** 某个 kind 在一次用例里的行为：正常返回即成功，抛错即失败。 */
+type FakeBehavior = (invocation: WorkflowNodeInvocation) => void | Promise<void>;
+
+/** 证据文件的形状（`index.ts` 里的 `NodeEvidence` 是包内私有类型，测试按读数断言）。 */
+type EvidenceFile = {
+  runId: string;
+  nodeId: string;
+  kind: string;
+  effect: string;
+  target: string;
+  attempt: number;
+  at: number;
+  error: { code: string; message: string; details?: unknown };
+  page: { url: string; title: string; bodyText: string } | null;
+};
+
+const sandboxes: string[] = [];
+const fibers: Fiber[] = [];
+
+/** 开一个系统临时目录并记账（用例结束后统一删除，AGENTS.md §7.5）。 */
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'auto-cc-runner-'));
+  sandboxes.push(dir);
+  return dir;
+}
+
+/**
+ * 假的 `browser.page`：只提供证据要用的那一只手。
+ * 挂它不是为了测浏览器，而是为了证明证据里的页面读数**来自可选依赖**（2.4-04 与 2.4-08 的分界）。
+ */
+class FakePageService extends Service {
+  static provide = 'browser.page';
+  static Config = z.strictObject({});
+
+  constructor(ctx: Context, _options: Record<string, never>) {
+    super(ctx, 'browser.page');
+  }
+
+  /**
+   * 固定的一帧现场读数。
+   * @param _maxChars 调用方要的 DOM 上限（本假实现不设限，截断由 runner 负责）
+   * @returns 超长正文，用于断言证据按 `evidenceTextChars` 截断而不是全文入库
+   */
+  snapshot(_maxChars?: number): Promise<{ url: string; title: string; bodyText: string }> {
+    return Promise.resolve({
+      url: 'https://fixture.invalid/search',
+      title: '职位列表 - 测试夹具',
+      bodyText: '前端工程师'.repeat(200),
+    });
+  }
+}
+
+interface BootOptions {
+  /** 库与 userData 的根；省略则新开临时目录（续跑用例要传同一个）。 */
+  dir?: string;
+  config?: Partial<WorkflowConfig>;
+  /** 按 kind 覆盖执行行为；未覆盖的 kind 立刻成功。 */
+  behavior?: Record<string, FakeBehavior>;
+  /** 是否额外挂一个假 `browser.page`。 */
+  withPage?: boolean;
+}
+
+/**
+ * 装一套完整的执行器依赖：config + store + workflow.store + 登记处 + runner。
+ *
+ * 顺序是硬的：runner `static inject` 那三个服务，cordis 要求挂载前就位。
+ * 假执行器在登记处**自己登记之后**覆盖，所以 `demo.flaky` 那个打真 HTTP 的内置实现永远不会被调到
+ * （登记是最后写入者说话，见 `executors.ts`）。
+ * @param options 见 `BootOptions`
+ * @returns 上下文、runner、原始 `workflow.store`、执行器登记处，以及进度事件与调用序列两份账
+ */
+async function boot(options: BootOptions = {}) {
+  const dir = options.dir ?? tempDir();
   const ctx = new Context();
+  fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
+  // 证据写在 userData 下面，所以把 userData 一起拐进临时目录，测试产物不进仓库（§7.5）。
+  asApp(ctx).config.setPathsOverride({ userDataDir: dir });
+  fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
+  fibers.push(await ctx.plugin(WorkflowExecutorRegistryService, {}));
+
+  const registry = asApp(ctx)['workflow.executors'];
+  const calls: string[] = [];
+  for (const kind of PLAN_KINDS) {
+    const executor: WorkflowNodeExecutor = async (invocation) => {
+      calls.push(`${invocation.spec.id}#${String(invocation.attempt)}`);
+      await options.behavior?.[kind]?.(invocation);
+    };
+    registry.register(kind, executor);
+  }
+  if (options.withPage) fibers.push(await ctx.plugin(FakePageService, {}));
+
   const events: WorkflowProgressEvent[] = [];
   // 先订阅再挂载：`[Service.init]` 会推一次 idle 快照，晚一行就漏掉它。
   ctx.on('workflow/progress', (event) => events.push(event));
-  const fiber = ctx.plugin(WorkflowRunnerService, { stepDelayMs: 20, failStep: 'none', ...config });
-  await fiber;
-  fibers.push(fiber);
-  return { ctx, runner: asApp(ctx)['workflow.runner'], events };
+  const runnerFiber = await ctx.plugin(WorkflowRunnerService, { ...BASE_CONFIG, ...options.config });
+  fibers.push(runnerFiber);
+
+  const app = asApp(ctx);
+  return {
+    ctx,
+    dir,
+    runner: app['workflow.runner'],
+    runs: app['workflow.store'],
+    db: app.store.db,
+    registry,
+    events,
+    calls,
+    // 单独卸 runner 用（等价于 `plugins.stop('workflow')`：进程没死，库与登记处都还在）。
+    runnerFiber,
+  };
 }
+
+/** 倒序回收全部 fiber（模拟进程死亡时也用它）。 */
+async function shutDown(): Promise<void> {
+  // 倒序：先卸掉的可能已被后卸的依赖，正序 dispose 会撞 PENDING 警告。
+  while (fibers.length) await fibers.pop()?.dispose();
+}
+
+afterEach(shutDown);
+
+afterAll(() => {
+  // 先释放 fiber（关连接）再删目录：Windows 上句柄延迟释放会挡住删除。
+  for (const dir of sandboxes) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清理失败不该把一次通过的验收判成失败。
+    }
+  }
+});
 
 /**
  * 轮询等待条件成立。
@@ -47,60 +200,303 @@ async function settle(ms = 120): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe('workflow.runner 推进与事件流（1.10-02 / 07）', () => {
-  it('六步按顺序跑完，每一步都先 started 后 finished', async () => {
-    const { runner, events } = await boot();
-    const initial = runner.start();
-    expect(initial.status).toBe('running');
-    expect(initial.steps.every((step) => step.status === 'pending')).toBe(true);
+/** 相位序列读数（`节点:相位`），比逐条 `toMatchObject` 更能看出「顺序对不对」。 */
+function phases(events: WorkflowProgressEvent[]): string[] {
+  return events
+    .filter((event) => event.phase !== null && event.stepId !== null)
+    .map((event) => `${String(event.stepId)}:${String(event.phase)}`);
+}
 
-    await waitFor(() => runner.current().status === 'done');
-    const run = runner.current();
-    expect(run.steps.map((step) => step.status)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
-    expect(run.steps.every((step) => (step.durationMs ?? -1) >= 0)).toBe(true);
+/**
+ * 取某个 kind 的执行行为：前 `failTimes` 次抛错，之后成功。
+ * @param failTimes 前几次失败
+ * @param message 抛出的错误文案
+ * @returns 可塞进 `BootOptions.behavior` 的行为
+ */
+function failThenSucceed(failTimes: number, message = '对端不可达'): FakeBehavior {
+  return ({ attempt }) => {
+    if (attempt <= failTimes) throw new AppError('WORKFLOW_STEP_FAILED', message, 'workflow.executors');
+  };
+}
 
-    const messages = events.map((event) => event.message);
-    // 前两条是纯状态迁移：挂载时推的 idle 快照，和 `start` 本身，都不面向用户播报。
-    expect(messages.slice(0, 2)).toEqual([null, null]);
-    expect(messages.slice(2)).toEqual([
-      '开始 search',
-      'search 完成',
-      '开始 profile',
-      'profile 完成',
-      '开始 pitch',
-      'pitch 完成',
-      '开始 greet',
-      'greet 完成',
-      '开始 tune',
-      'tune 完成',
-      '开始 deliver',
-      'deliver 完成',
-    ]);
-    // 事件里的 run 是迁移后的快照，界面直接镜像即可，不需要自己再拼状态。
-    expect(events.at(-1)?.run.steps.every((step) => step.status === 'done')).toBe(true);
-  });
+/**
+ * 协作式让出的执行器：收到 abort 才收手（2.4-07 的「暂停时正在跑的那一步自己停下」）。
+ * @returns 可塞进 `BootOptions.behavior` 的行为
+ */
+function hangUntilAbort(): FakeBehavior {
+  return ({ signal }) =>
+    new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+}
 
-  it('挂载即有一个 idle run：六个槽位全部待执行，界面任何时候都有东西可画', async () => {
+/**
+ * 只让第一次调用挂住，之后立刻成功——用来演「暂停之后续跑把同一步重跑一遍」。
+ * @returns 可塞进 `BootOptions.behavior` 的行为
+ */
+function hangOnceThenSucceed(): FakeBehavior {
+  let hung = false;
+  return ({ signal }) => {
+    if (hung) return;
+    hung = true;
+    return new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+  };
+}
+
+describe('计划驱动的顺序推进（2.4-01 / 02，回补 1.10-02 / 07）', () => {
+  it('挂载即有一个 idle run：槽位数等于计划的节点数，而库里还没有任何行', async () => {
     const { runner, events } = await boot();
     const idle = runner.current();
     expect(idle.status).toBe('idle');
     expect(idle.stepIndex).toBe(0);
-    expect(idle.steps.map((step) => step.status)).toEqual([
-      'pending',
-      'pending',
-      'pending',
-      'pending',
-      'pending',
-      'pending',
+    expect(idle.steps.map((step) => step.id)).toEqual(NODE_IDS);
+    expect(idle.steps.every((step) => step.status === 'pending')).toBe(true);
+    // 这个初始 run 只是给界面的空格子：它不在库里，所以「真相读数」必须是 null。
+    expect(runner.state()).toBeNull();
+    expect(runner.nodes().map((node) => node.id)).toEqual(NODE_IDS);
+    expect(events[0]).toMatchObject({ run: { status: 'idle' }, stepId: null, phase: null, message: null });
+  });
+
+  it('三个节点按顺序跑完，每一次迁移都带 phase，并同时写进两张表', async () => {
+    const { runner, events } = await boot();
+    const initial = runner.start();
+    expect(initial.status).toBe('running');
+
+    await waitFor(() => runner.current().status === 'done');
+    // 开跑那一句带计划 id：2.4 之后界面要能看出「跑的是哪条计划」，而不只是「在动」。
+    expect(events.map((event) => event.message)).toEqual([
+      null,
+      '计划 boss-basic 开跑',
+      '开始 jd-capture',
+      'jd-capture 完成',
+      '开始 jd-list',
+      'jd-list 完成',
+      '开始 flaky',
+      'flaky 完成',
     ]);
-    // 挂载时就推一次快照：改配置重建实例后，界面不会继续挂着上一个已被销毁的 run。
-    expect(events[0]).toMatchObject({ run: { status: 'idle' }, stepId: null, message: null });
+    expect(phases(events)).toEqual([
+      'jd-capture:started',
+      'jd-capture:finished',
+      'jd-list:started',
+      'jd-list:finished',
+      'flaky:started',
+      'flaky:finished',
+    ]);
+    // 事件里带的是整份 run 快照，界面直接镜像即可（2.4-02 要的就是这条频道，不是新频道）。
+    expect(events.at(-1)?.run.runId).toBe(runner.current().runId);
+
+    const stored = runner.state();
+    expect(stored).not.toBeNull();
+    expect(stored).toMatchObject({ status: 'done', nodeIndex: 3, totalNodes: 3, lastError: null });
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'done']);
+    expect(stored?.nodes.every((node) => node.attempts === 1)).toBe(true);
+    expect(stored?.nodes.every((node) => (node.durationMs ?? -1) >= 0)).toBe(true);
+    // 只读节点不占副作用位，会动外面世界的那个收成 done（spec 2.4-06 的判据）。
+    expect(stored?.nodes[0]?.sideEffect).toBeNull();
+    expect(stored?.nodes[2]?.sideEffect).toBe('done');
+  });
+
+  it('执行器没登记时 start 直接拒绝，并一次报全缺的 kind（2.4-08 的装配期判据）', async () => {
+    const { runner, registry } = await boot();
+    for (const kind of ['jd.capture', 'jd.list']) registry.unregister(kind);
+    expect(() => runner.start()).toThrow(/这条计划现在跑不了/);
+    try {
+      runner.start();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).code).toBe('INVALID_ARGUMENT');
+      expect((error as AppError).message).toContain('jd.capture');
+      expect((error as AppError).message).toContain('jd.list');
+    }
+    // 拒绝必须是不动的：不能留下一个跑不动的 run 行。
+    expect(runner.current().status).toBe('idle');
+    expect(runner.state()).toBeNull();
   });
 });
 
-describe('暂停与续跑（1.10-05）', () => {
-  it('暂停等到当前步让出，stepIndex 不动；续跑从这一步重来并跑完', async () => {
-    const { runner, events } = await boot({ stepDelayMs: 400 });
+describe('退避重试（2.4-03）', () => {
+  it('第 3 次才成功：两次 retrying 播报、退避 20ms 再 40ms，库里 attempts 记总次数', async () => {
+    const { runner, events, calls } = await boot({ behavior: { 'demo.flaky': failThenSucceed(2) } });
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'flaky#1', 'flaky#2', 'flaky#3']);
+    expect(phases(events)).toContain('flaky:retrying');
+    expect(events.map((event) => event.message)).toEqual(
+      expect.arrayContaining(['flaky 第 1 次失败，20ms 后重试', 'flaky 第 2 次失败，40ms 后重试']),
+    );
+    expect(runner.state()?.nodes[2]).toMatchObject({ status: 'done', attempts: 3 });
+  });
+
+  it('全局 retryTimes 为 0 时不重试，第一次失败就判失败', async () => {
+    const { runner, calls } = await boot({ config: { retryTimes: 0 }, behavior: { 'jd.capture': failThenSucceed(9) } });
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+    expect(calls).toEqual(['jd-capture#1']);
+    expect(runner.current().stepIndex).toBe(0);
+    expect(runner.state()).toMatchObject({ status: 'failed', nodeIndex: 0, lastError: '对端不可达' });
+  });
+
+  it('节点声明的 retryTimes 覆盖全局：全局 0 也照样退避到第 3 次', async () => {
+    const { runner, calls } = await boot({ config: { retryTimes: 0 }, behavior: { 'demo.flaky': failThenSucceed(2) } });
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+    // `flaky` 在计划里写了 `retryTimes: 2`，所以它有自己的三次机会，前面的读节点仍然一次过。
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'flaky#1', 'flaky#2', 'flaky#3']);
+    expect(runner.state()?.nodes[2]?.attempts).toBe(3);
+  });
+
+  it('重试上限用尽才判失败，且退避睡在取消信号上——暂停不会等满退避（2.4-09）', async () => {
+    const { runner, calls } = await boot({
+      config: { retryBackoffMs: 2000, retryBackoffCapMs: 2000 },
+      behavior: { 'demo.flaky': failThenSucceed(9) },
+    });
+    runner.start();
+    await waitFor(() => calls.includes('flaky#1'));
+
+    const countAtPause = runner.pause();
+    expect(countAtPause.status).toBe('paused');
+    // 退避睡 2000ms，而暂停必须在几十毫秒内生效：让出之后不许再动执行器。
+    await settle(80);
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'flaky#1']);
+    expect(runner.current().status).toBe('paused');
+  });
+});
+
+describe('失败证据（2.4-04）', () => {
+  it('判失败时把错误 payload 写成文件，库里只存相对路径；没挂页面通道时页面位为 null', async () => {
+    const { runner, dir } = await boot({
+      config: { retryTimes: 0 },
+      behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
+    });
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+
+    const stored = runner.state();
+    const runId = String(stored?.runId);
+    expect(stored?.nodes[0]?.evidenceRef).toBe(`evidence/${runId}-jd-capture.json`);
+    const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8')) as EvidenceFile;
+    expect(file).toMatchObject({
+      runId,
+      nodeId: 'jd-capture',
+      kind: 'jd.capture',
+      effect: 'read',
+      attempt: 1,
+      error: { code: 'WORKFLOW_STEP_FAILED', message: '选择器没命中' },
+    });
+    // 这一条同时是 2.4-08 的反证：整条链没有 `browser` 也能跑完并留下证据。
+    expect(file.page).toBeNull();
+    expect(typeof file.at).toBe('number');
+  });
+
+  it('挂了页面通道时证据带上现场读数，并按 evidenceTextChars 截断（不谎称是全文）', async () => {
+    const { runner, dir } = await boot({
+      config: { retryTimes: 0, evidenceTextChars: 50 },
+      behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
+      withPage: true,
+    });
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+
+    const runId = String(runner.state()?.runId);
+    const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8')) as EvidenceFile;
+    expect(file.page?.url).toBe('https://fixture.invalid/search');
+    expect(file.page?.bodyText).toHaveLength(50 + '…（已截断）'.length);
+    expect(file.page?.bodyText.endsWith('…（已截断）')).toBe(true);
+  });
+});
+
+describe('断点续跑与幂等闸门（2.4-05 / 06）', () => {
+  /**
+   * 跑到第 3 个节点时把进程「杀掉」：前两个节点已完成，第三个外发起过却没观察到完成。
+   * @returns 临时目录、第一次的调用序列，以及被留下的 run 读数
+   */
+  async function killAtThirdNode() {
+    const dir = tempDir();
+    const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
+    first.runner.start();
+    await waitFor(() => first.calls.includes('flaky#1'));
+    const runId = first.runner.current().runId;
+    // 「进程死亡」= 倒序卸载全部 fiber，库里最后一行 `running` 就此成为孤儿。
+    await shutDown();
+    return { dir, first, runId };
+  }
+
+  it('重启后先判中断，已完成节点一次都不重放，未观察完成的外发停在接管点', async () => {
+    const { dir, first, runId } = await killAtThirdNode();
+    expect(first.calls).toEqual(['jd-capture#1', 'jd-list#1', 'flaky#1']);
+
+    const second = await boot({ dir });
+    // 开机扫描：那个「运行中」属于一个已经不存在的进程，必须在第一次读数之前就改成中断。
+    const stored = second.runs.state(runId);
+    expect(stored).toMatchObject({ status: 'interrupted', nodeIndex: 2, lastError: 'RUN_INTERRUPTED' });
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'running']);
+    expect(stored?.nodes[2]).toMatchObject({ attempts: 1, sideEffect: 'started' });
+
+    second.runner.resumeRun();
+    await waitFor(() => second.runner.current().status === 'paused');
+    // 前两个位置在库里已有结局：闸门判 `already-done`，连执行器都不许调（2.4-05 的「不重放」）。
+    expect(second.calls).toEqual([]);
+    // 第三个位置是「外发开始了却没看到完成」——重放一遍就是做两次，只能转人工（2.4-06）。
+    expect(second.runner.current().requiresHuman).toMatchObject({
+      subject: 'demo.flaky',
+      reason: 'unobserved-side-effect',
+      stepId: 'flaky',
+    });
+    expect(second.runs.state(runId)?.nodes[2]?.attempts).toBe(1);
+  });
+
+  it('接管点上的一次重试只放行一次重放：闸门仍写这笔账，跑完这次 run', async () => {
+    const { dir, runId } = await killAtThirdNode();
+    const second = await boot({ dir });
+    second.runner.resumeRun();
+    await waitFor(() => second.runner.current().status === 'paused');
+
+    second.runner.retryStep('flaky');
+    await waitFor(() => second.runner.current().status === 'done');
+    // 只有第三个节点被执行，且尝试次数接的是上一个进程用掉的那一次（跨进程的账是连着的）。
+    expect(second.calls).toEqual(['flaky#2']);
+    const stored = second.runs.state(runId);
+    expect(stored).toMatchObject({ status: 'done', nodeIndex: 3 });
+    expect(stored?.nodes[2]).toMatchObject({ status: 'done', attempts: 2, sideEffect: 'done' });
+  });
+
+  it('计划指纹对不上就拒绝续跑，内存态原样停住（串档判据）', async () => {
+    const { dir, runId } = await killAtThirdNode();
+    const second = await boot({ dir });
+    // 手工把 run 行的指纹列改掉：等价于「计划文本被换过，而库里还写着旧指纹」。
+    second.db.prepare("UPDATE workflow_runs SET plan_fingerprint = 'deadbeef' WHERE run_id = ?").run(runId);
+
+    // 不带 id 时按当前计划找候选：指纹不符，因此根本找不到。
+    expect(() => second.runner.resumeRun()).toThrow(/库里没有按当前计划/);
+    // 指定 id 时读数自身要重算指纹并拒绝，绝不按一个没人核对过的下标走下去。
+    expect(() => second.runner.resumeRun(runId)).toThrow(/指纹/);
+    expect(second.runner.current().status).toBe('idle');
+    expect(second.calls).toEqual([]);
+  });
+
+  it('已经跑完的 run 再点续跑：原样返回并播一句，不重跑任何节点', async () => {
+    const { runner, calls, events } = await boot();
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+    const before = calls.length;
+
+    const again = runner.resumeRun(runner.current().runId);
+    expect(again.status).toBe('done');
+    expect(calls).toHaveLength(before);
+    expect(events.at(-1)?.message).toBe('这次 run 已经跑完，无需续跑');
+  });
+});
+
+describe('暂停与续跑（1.10-05 / 2.4-07）', () => {
+  it('暂停等到当前步让出，stepIndex 不动；续跑把这一步重跑并跑完，库里不出现假的 done', async () => {
+    const { runner, runs, calls } = await boot({ behavior: { 'jd.capture': hangOnceThenSucceed() } });
     runner.start();
     await waitFor(() => runner.current().steps[0]?.status === 'running');
 
@@ -108,69 +504,61 @@ describe('暂停与续跑（1.10-05）', () => {
     expect(paused.status).toBe('paused');
     expect(paused.stepIndex).toBe(0);
     expect(paused.steps[0]).toMatchObject({ status: 'pending', startedAt: null });
+    // 让出不是完成：这一步在库里必须还是 running，否则续跑会跳过它（2.4-07 的核心）。
+    const runId = paused.runId;
+    expect(runs.state(runId)?.nodes[0]?.status).toBe('running');
 
-    // 协作式取消：abort 之后那一步不许被记成 done，也不许再推任何事件。
-    const countAtPause = events.length;
-    await settle(300);
-    expect(events.length).toBe(countAtPause);
-    expect(runner.current().status).toBe('paused');
+    const countAtPause = calls.length;
+    await settle(120);
+    expect(calls).toHaveLength(countAtPause);
 
     runner.resume();
-    await waitFor(() => runner.current().status === 'done', 4000);
-    const run = runner.current();
-    expect(run.steps.map((step) => step.status)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
-    // 第一步被重跑了一遍：出现了两次「开始 search」，且第二次之后的续跑没有跳过任何步。
-    expect(events.filter((event) => event.message === '开始 search').length).toBe(2);
-    expect(events.filter((event) => event.message === 'search 完成').length).toBe(1);
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-capture#2', 'jd-list#1', 'flaky#1']);
+    const stored = runner.state();
+    expect(stored?.nodes[0]).toMatchObject({ status: 'done', attempts: 2 });
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'done']);
   });
 
-  it('没在运行时暂停 / 暂停中另起 run / 没暂停时续跑，都是结构化失败', async () => {
+  it('同进程内的重试不占用幂等闸门：读节点暂停后续跑照常重跑', async () => {
+    const { runner, calls } = await boot({ behavior: { 'jd.list': hangOnceThenSucceed() } });
+    runner.start();
+    await waitFor(() => calls.includes('jd-list#1'));
+    runner.pause();
+    // 暂停前 `jd-capture` 已经在本进程声明过：`claimedPositions` 让续跑直接放行，
+    // 而不是把它当成「跨进程的外发」转接管（那会把 1.10-05 这条路打断）。
+    expect(runner.current().requiresHuman).toBeNull();
+    runner.resume();
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
+  });
+
+  it('没在运行时暂停 / 暂停中另起 run / 重复续跑，都是结构化失败（1.10-09）', async () => {
     const { runner } = await boot();
-    expect(() => runner.pause()).toThrow(AppError);
+    let idlePause: unknown;
     try {
       runner.pause();
     } catch (error) {
-      expect((error as AppError).code).toBe('WORKFLOW_INVALID_STATE');
+      idlePause = error;
     }
+    expect(idlePause).toBeInstanceOf(AppError);
+    expect((idlePause as AppError | undefined)?.code).toBe('WORKFLOW_INVALID_STATE');
+
     runner.start();
     runner.pause();
-    // 暂停态既不能另起一个 run（会变成两条流水线抢一份状态），也不能重复续跑。
     expect(() => runner.start()).toThrow(/已有 run 处于 paused 态/);
     expect(runner.resume().status).toBe('running');
     expect(() => runner.resume()).toThrow(/只有暂停中的 run 可以续跑/);
   });
-});
 
-describe('失败步与单独重试（1.10-06）', () => {
-  it('注入失败后停在失败步；重试这一步会跑完整个 run', async () => {
-    const { runner } = await boot({ failStep: 'profile' });
+  it('重试不认识的步 id、或重试一个既没失败也没挂接管的步，都结构化失败', async () => {
+    const { runner } = await boot();
+    expect(() => runner.retryStep('nope')).toThrow(/当前计划里没有步骤 nope/);
     runner.start();
-    await waitFor(() => runner.current().status === 'failed');
-
-    const failed = runner.current();
-    expect(failed.stepIndex).toBe(1);
-    expect(failed.steps[0]?.status).toBe('done');
-    expect(failed.steps[1]).toMatchObject({ status: 'failed' });
-    expect(failed.steps[1]?.error).toContain('failStep');
-    expect(failed.steps.slice(2).every((step) => step.status === 'pending')).toBe(true);
-
-    // 注入只作用一次：重试之后这一步必须真的重跑并放行，后面的步接着走完。
-    expect(runner.retryStep('profile').status).toBe('running');
     await waitFor(() => runner.current().status === 'done');
-    const done = runner.current();
-    expect(done.stepIndex).toBe(6);
-    expect(done.steps[1]).toMatchObject({ status: 'done', error: null });
-    expect(done.steps.every((step) => step.status === 'done')).toBe(true);
-  });
-
-  it('重试不认识的步 id、或重试没失败的步，都结构化失败', async () => {
-    const { runner } = await boot({ failStep: 'greet' });
-    expect(() => runner.retryStep('nope')).toThrow(/未知步骤 nope/);
-    runner.start();
-    await waitFor(() => runner.current().status === 'failed');
-    // search 已经 done，对它重试没有意义，必须被拒而不是把 run 拽回 running。
-    expect(() => runner.retryStep('search')).toThrow(/不处于失败态/);
-    expect(runner.current().status).toBe('failed');
+    // 已经 done 的位置上没有可重试的东西：必须被拒，而不是把它重跑一遍（幂等的界面侧）。
+    expect(() => runner.retryStep('jd-capture')).toThrow(AppError);
+    expect(runner.current().status).toBe('done');
   });
 });
 
@@ -180,36 +568,29 @@ describe('会话失效停在可恢复点（1.8-07 / 2.1-08）', () => {
     ctx.emit('session/expired', { platform, reason, at: Date.now() });
   }
 
-  it('运行中收到失效：停在当前步、写下接管点，且不再推进；续跑从这一步接着跑完', async () => {
-    const { ctx, runner, events } = await boot({ stepDelayMs: 400 });
+  it('运行中收到失效：停在当前步、接管点带平台名与原因，续跑把这一步重跑并跑完', async () => {
+    const { ctx, runner, calls, events } = await boot({ behavior: { 'jd.list': hangOnceThenSucceed() } });
     runner.start();
-    await waitFor(() => runner.current().steps[1]?.status === 'running');
+    await waitFor(() => calls.includes('jd-list#1'));
 
     expire(ctx);
-
     const paused = runner.current();
     expect(paused.status).toBe('paused');
-    // 停在的是当时正在跑的那一步：stepIndex 不动，该步退回 pending 等着被重跑。
     expect(paused.stepIndex).toBe(1);
     expect(paused.steps[0]?.status).toBe('done');
     expect(paused.steps[1]).toMatchObject({ status: 'pending', durationMs: null });
-    // 接管点是**数据**（平台 / 原因 / 卡住的步），界面按语言组织成句子；主进程不再拼中文文案。
-    expect(paused.requiresHuman).toMatchObject({ platform: 'boss', reason: 'expired', stepId: 'profile' });
-    expect(typeof paused.requiresHuman?.at).toBe('number');
-    // 这一次暂停是失效引起的，不是用户点了停止，所以不占用「进度播报」那条消息位。
+    // 接管点是**数据**：会话类原因时 `subject` 装平台名，界面按语言组织句子（AGENTS.md §5.5）。
+    expect(paused.requiresHuman).toMatchObject({ subject: 'boss', reason: 'expired', stepId: 'jd-list' });
     expect(events.at(-1)).toMatchObject({ message: null, run: { status: 'paused' } });
 
-    // 协作式取消：让出之后这一步不许被记成 done，也不许再推事件。
-    const countAtPause = events.length;
-    await settle(300);
-    expect(events.length).toBe(countAtPause);
+    const countAtPause = calls.length;
+    await settle(120);
+    expect(calls).toHaveLength(countAtPause);
 
     runner.resume();
-    await waitFor(() => runner.current().status === 'done', 4000);
-    const done = runner.current();
-    expect(done.steps.map((step) => step.status)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
-    expect(done.requiresHuman).toBeNull();
-    expect(events.filter((event) => event.message === '开始 profile').length).toBe(2);
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
+    expect(runner.current().requiresHuman).toBeNull();
   });
 
   it('没在运行时收到失效：什么都不做，不报错也不把 idle 拽成 paused', async () => {
@@ -228,19 +609,64 @@ describe('会话失效停在可恢复点（1.8-07 / 2.1-08）', () => {
   });
 });
 
-describe('卸载即让出（1.10-04 的回收侧）', () => {
-  it('dispose 之后不再有进度事件', async () => {
-    const ctx = new Context();
-    const fiber = ctx.plugin(WorkflowRunnerService, { stepDelayMs: 400, failStep: 'none' });
-    await fiber;
-    const events: WorkflowProgressEvent[] = [];
-    ctx.on('workflow/progress', (event) => events.push(event));
-    asApp(ctx)['workflow.runner'].start();
-    await waitFor(() => events.length > 1);
+describe('卸载让出（1.10-04 / 2.4-07）', () => {
+  it('卸载在跑的执行器会收到 abort，之后不再有任何进度事件', async () => {
+    const { runner, runnerFiber, events } = await boot({ behavior: { 'jd.capture': hangUntilAbort() } });
+    runner.start();
+    await waitFor(() => events.some((event) => event.phase === 'started'));
 
     const countAtDispose = events.length;
-    await fiber.dispose();
-    await settle(300);
+    await runnerFiber.dispose();
+    // 已经卸掉的那条从记账里摘掉，免得 afterEach 再卸一次。
+    fibers.splice(fibers.indexOf(runnerFiber), 1);
+    await settle(150);
+    // 卸载只让出，不写结局：这条 run 留在库里的 `running` 行由下次开机的扫描判成中断（2.4-05 那一组）。
     expect(events.length).toBe(countAtDispose);
+    expect(events.at(-1)?.phase).toBe('started');
+  });
+});
+
+describe('保留上限（2.4-10 的清理侧）', () => {
+  it('超出 retentionRuns 的旧 run 连它的证据文件一起清掉', async () => {
+    let shouldFail = true;
+    const { runner, dir, db } = await boot({
+      config: { retryTimes: 0, retentionRuns: 1 },
+      behavior: {
+        'jd.capture': () => {
+          if (shouldFail) throw new AppError('WORKFLOW_STEP_FAILED', '站点改版', 'workflow.executors');
+        },
+      },
+    });
+
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+    const firstRunId = runner.current().runId;
+    const evidenceFile = join(dir, 'evidence', `${firstRunId}-jd-capture.json`);
+    expect(existsSync(evidenceFile)).toBe(true);
+
+    // 第一次 run 修好再跑完它，然后连起两次新 run：第三次起步时保留上限才会真的丢东西。
+    shouldFail = false;
+    runner.retryStep('jd-capture');
+    await waitFor(() => runner.current().status === 'done');
+
+    await settle(5);
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+
+    await settle(5);
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+
+    expect(existsSync(evidenceFile)).toBe(false);
+    expect(readdirSync(join(dir, 'evidence'))).toEqual([]);
+    // 保留 1 次：第三次起步时最旧的那次（run 1）连同节点行一起被丢，库里只剩后两次。
+    const remaining = db.prepare('SELECT run_id FROM workflow_runs ORDER BY started_at DESC').all() as {
+      run_id: string;
+    }[];
+    expect(remaining).toHaveLength(2);
+    expect(remaining.some((row) => row.run_id === firstRunId)).toBe(false);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM workflow_nodes WHERE run_id = ?').get(firstRunId)).toMatchObject({
+      n: 0,
+    });
   });
 });
