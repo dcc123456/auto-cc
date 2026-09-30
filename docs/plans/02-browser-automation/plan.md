@@ -964,3 +964,59 @@ AND reply.job_id = jobs.job_id`。
   `--data-binary @file` + `charset=utf-8` 头，中文正文先落文件。
 - 复用检查（§2.4/2.5）：本轮没有新写判定逻辑上界面——徽标只转述 `JobRowView.replied/inboundCount`，
   回执只转述 `GreetReceiptView`，拒绝只转述 `bridgeError.code + message`；排序只在 SQL 里做一次。
+
+## 13. 子计划 2.6 的选型与证据（开工前定稿，实现照此执行）
+
+### 13.1 这一条到底在做什么
+
+投递 = 把一份简历文件交到「已经聊上」的目标手里，并且在按下发送之前插一道人。
+五件事：上传通道（2.6-04）、投递动作过闸门与落账（2.6-02/03）、人工审批与「仅辅助」档位
+（2.6-01/06）、投递前二次校验目标仍在招（2.6-07）、所用简历版本可追溯（2.6-05）。
+
+### 13.2 前置取证：文件上传通道（本机实测 2026-09-30，AGENTS.md §6.2）
+
+**这一节的存在理由**：spec 2.6-04 的原文写着「Electron 侧 `startUpload` 而非 DOM 伪造」，
+而这条 API 根本不存在。如果不先做取证，实现会在一个假名字上打转。
+
+1. **`startUpload` 是不存在的 API**（本项目的第三次同类事故，见 §9 已记两次）。
+   在装机版本 `electron@44.4.5` 的 `electron.d.ts` 全文里做大小写不敏感检索，
+   `startUpload` / `FileChooser` / `fileChooser` 事件 / `setFilePaths` / `setFileInputFiles`
+   **一个都没有**。真实存在的相关表面只有三处：
+   `WebContents.debugger`（`electron.d.ts:18833`）、`Debugger.attach/sendCommand`
+   （`:7646` / `:7670`）、`WebContents.startDrag(item)`（`:18765`，那是把文件**拖出**给系统，
+   方向相反，不是上传通道）。
+   其中关键的一条约束：`sendCommand(method: string, commandParams?: any, sessionId?: string)`
+   —— **method 是自由字符串，没有任何命令名联合类型**，编译器不会替我们挡下拼错的 CDP 命令，
+   所以命令名与参数形状必须由单测钉住（复用 `input-channel` 现有的假 session 断言形状）。
+2. **`DOM.setFileInputFiles` 在这个 Electron 构建里实测可用，而且是真上传**。
+   靶页（一次性，写在 `tmp/`，不进仓库）的 `<input id="resume" type="file">` 上走
+   `DOM.getDocument → DOM.querySelector → DOM.describeNode`（取 `backendNodeId`）
+   `→ DOM.setFileInputFiles{files:[绝对路径], backendNodeId}`，之后页面回读：
+   `文件数 1`、`名字 26-spike-resume.pdf`、`字节 226`、`类型 application/pdf`，
+   并且**`change` 事件真的触发了**（页面自己的回显段落变成「已选择：26-spike-resume.pdf（226 字节，
+   类型 application/pdf）」）。`change` 触发是这条取路的命门：真实站点的校验/预览/进度全挂在
+   `change`/`input` 上，只塞 `files` 不发事件就是「DOM 伪造」，会在下游静默失败。
+3. **Playwright 式的「点按钮弹系统框再交文件」这条路径本轮没有结论**，不当设计依据。
+   `Page.setInterceptFileChooserDialog{enabled:true}` 本身返回成功（`{}`），但随后的
+   `Input.dispatchMouseEvent` 三连**一个页面事件都没落下来**（在 input 上挂的
+   click/mousedown/mouseup 计数器读回 `[]`），所以 `Page.fileChooserOpened` 从未推过来。
+   排查中先撞到一个真坑：**`Input.dispatchMouseEvent` 的 `buttons` 是 int32 位掩码**，
+   传 `'left'` 会被 Chromium 以 `Invalid parameters ... int32 value expected` 拒掉，
+   而远程 CDP 客户端不会把这条错误报到控制台，只表现为「点击静默不发生」
+   （我们自己的 `input-channel.ts:60-80` 一直传数字，所以这坑只坑了 spike）。
+   改成 `buttons: 1` 后点击仍不落页，最可能的解释是**当时那个 `WebContentsView` 不可见/被遮挡**
+   （远程输入对不可见视图不做命中测试），而不是命令不支持。
+   留到实现期在「内核视图确实可见」的前提下重测；主路径按第 2 条定——
+   真实站点即便把 input 藏起来只留一个开框按钮，第 2 条照样能塞，因为它不需要点击。
+
+推论（写进实现约束）：上传原语走**已有的 `contents.debugger` 通道**（`input-channel.ts:103`
+是全仓唯一的 `debugger.attach`），不引入第二个 CDP 客户端、不引入 Playwright；
+节点引用（`backendNodeId`）的解析与「定位层用 JS 选节点、上传用 CDP 选节点」两套寻址怎么对齐，
+是 §13.3 必须先定的一件事——定不齐就会出现「定位到 A、文件塞进 B」。
+
+### 13.3 落点设计（**尚未定稿**：本轮只完成取证）
+
+待补的四项：归属与命名（`outbound.deliver` 扩展现有编排还是新 service）、
+审批状态机（等人这件事放在主进程还是界面，超时按拒绝）、`stage / commit` 两段怎么切
+（「仅辅助」档只 stage）、CDP 节点引用与 locator 寻址的对齐口径。
+**这四项没写完之前，2.6 一行实现代码都不写**（AGENTS.md §0：先 plan 再 code）。
