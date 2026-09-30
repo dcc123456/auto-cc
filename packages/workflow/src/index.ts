@@ -24,6 +24,9 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createRun, transition, type RunnerEvent } from './machine.js';
 
+// run 落库是独立服务，装配清单要单独决定装不装它（它只依赖 store，不依赖执行器）。
+export { WorkflowRunStoreService } from './run-store.js';
+
 /** 执行器配置（在调试面板里可热改，走 1.5 的 `plugins.saveConfig`）。 */
 export const workflowConfigSchema = z.object({
   /** 每个占位步骤的模拟耗时（毫秒）。上限卡在 5 秒：验收要连拍进度，太慢就拍不完。 */

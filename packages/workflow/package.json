@@ -14,7 +14,11 @@
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
+    "@auto-cc/plugin-store": "workspace:*",
     "cordis": "4.0.0-rc.10",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@auto-cc/plugin-config": "workspace:*"
   }
 }

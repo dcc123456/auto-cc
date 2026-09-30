@@ -134,6 +134,126 @@ export type WorkflowProgressEvent = {
 };
 
 /**
+ * 一个节点的**声明**（spec 2.4-01）——计划里写死的东西，不是跑到一半的读数。
+ *
+ * `kind` 是 `string` 而不是联合类型，理由与 `LocatorRelocatedEvent.strategy` 同一条：
+ * 合法的 kind 由 `workflow` 包的执行器注册表决定，而 `core` 在它之下，不能反向依赖。
+ * 注册表里没有的 kind 在计划装配期就被拒绝（`INVALID_ARGUMENT`），不会跑到一半才发现。
+ * @see docs/plans/02-browser-automation/plan.md §11.3 第 1 条
+ */
+export type WorkflowNodeSpec = {
+  id: string;
+  /** 执行器名：runner 按它分派，不认识任何平台（plan §3 规则 2）。 */
+  kind: string;
+  /**
+   * 目标标识，参与幂等键 `runId + nodeId + target`（spec 2.4-06）。
+   * 只读节点没有目标可去重，用空串——空串是「本节点不按目标去重」的唯一合法表示。
+   */
+  target: string;
+  /** 节点参数：只允许声明值（数字/字符串/布尔），P2 不做 `{{var}}` 模板插值（plan §11.8）。 */
+  params: Record<string, string | number | boolean>;
+  /**
+   * 危险性分级，直接复用工具的 `ToolEffect`（AGENTS.md §2.1：同一能力只有一个入口）。
+   * `outbound` = 有外部副作用（打招呼/投递），执行前必须先声明、失败后禁止盲重放。
+   */
+  effect: ToolEffect;
+  /** 本节点失败后额外尝试的次数；null = 用 `workflow.runner` 的全局 `retryTimes`。 */
+  retryTimes: number | null;
+  /** 声明为人工接管点：跑到这里就停住等用户，不做自动重试（spec 2.4-03 的例外分支）。 */
+  requiresHuman: boolean;
+};
+
+/** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
+export type WorkflowPlanView = {
+  id: string;
+  nodes: WorkflowNodeSpec[];
+  /**
+   * 计划内容的稳定哈希（FNV-1a 口径，见 plan §11.2「跨计划串档」一行）。
+   * 续跑时指纹不符就拒绝——计划改过之后从第 i 个节点瞎续比重新跑更糟。
+   */
+  fingerprint: string;
+};
+
+/** 单个节点的运行态；比步骤视图多出的几项正是 2.4-03/04/06 需要的读数。 */
+export type WorkflowNodeStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+export type WorkflowNodeRunView = {
+  index: number;
+  nodeId: string;
+  kind: string;
+  effect: ToolEffect;
+  status: WorkflowNodeStatus;
+  /** 已尝试次数（含首次）；`1 + retryTimes` 是它的上限（spec 2.4-03）。 */
+  attempts: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  /** 耗时毫秒（最后一次尝试的）；未结束为 null。 */
+  durationMs: number | null;
+  error: string | null;
+  /** 失败证据的**相对路径**（userData 下）；没有证据文件时为 null（spec 2.4-04）。 */
+  evidenceRef: string | null;
+  /**
+   * 外部副作用的声明位：`null` 没开始、`started` 已开始但没观察到完成、`done` 已完成。
+   * `started` 是「拒绝自动重放」的唯一依据（plan §11.3 第 5 条）——它意味着可能已经发出去了。
+   */
+  sideEffect: null | 'started' | 'done';
+};
+
+/**
+ * 落库视图专用的一次 run 状态。
+ *
+ * `interrupted` **不属于** 1.10 的 `WorkflowRunStatus`（那份状态集是界面在画的，不变），
+ * 它是「进程被 kill 之后库里留下的孤儿 `running` 行」被启动扫描判出来的结果（plan §11.3 第 6 条）。
+ * runner 把一个 interrupted 的 run 加载回来时映射成 `paused` + 接管点，界面因此不需要新增一个态。
+ */
+export type WorkflowRunStateStatus = WorkflowRunStatus | 'interrupted';
+
+/**
+ * 一次 run 的**可持久化**状态（spec 2.4-01 / 2.4-05）。
+ *
+ * 与 1.10 的 `WorkflowRunView` 分开的理由：那份是「界面画六个槽位」的镜像，这份是「进程没了也能
+ * 接着跑」的真相。字段形状可以像，但生命周期不同——前者随事件推，后者随节点状态落库。
+ */
+export type WorkflowRunStateView = {
+  runId: string;
+  planId: string;
+  planFingerprint: string;
+  status: WorkflowRunStateStatus;
+  /** 下一个要跑的节点下标；`done` 时等于节点数（越界一位，与 1.10 的 stepIndex 同口径）。 */
+  nodeIndex: number;
+  totalNodes: number;
+  startedAt: number;
+  finishedAt: number | null;
+  lastError: string | null;
+  nodes: WorkflowNodeRunView[];
+};
+
+/**
+ * 某个执行器的历史聚合（spec 2.4-10，供 P5 看板与「选择器腐化率」同源使用）。
+ *
+ * 只从 `workflow_nodes` 一张表聚合出来（plan §11.3 第 4 条：不建第三张统计表）——
+ * 一张表既是断点续跑的真相又是统计的原料，就不会出现「看板说的和续跑用的不是一回事」。
+ */
+export type WorkflowNodeStatsView = {
+  /** 执行器名（`WorkflowNodeSpec.kind`）。 */
+  kind: string;
+  /** 该执行器留下读数的节点行数。 */
+  nodes: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  /**
+   * 结束节点里「成功」的占比（0..1）；一个都没结束过时为 null——
+   * 用 0 冒充「还没跑过」会让看板把「冷启动」显示成「全失败」。
+   */
+  successRate: number | null;
+  /** 已结束节点的平均耗时（毫秒）；无样本为 null。 */
+  avgDurationMs: number | null;
+  /** 平均尝试次数（含首次）；重试率的直接读数。 */
+  avgAttempts: number;
+};
+
+/**
  * 会话自治档位（master plan §1.7 第 3 条）。
  *
  * 三态取自 Claude Code 权限模式的保守子集（plan §8.6）：`suggest` = 只给计划不执行、

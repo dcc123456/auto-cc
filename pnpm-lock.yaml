@@ -461,12 +461,19 @@ importers:
       '@auto-cc/core':
         specifier: workspace:*
         version: link:../core
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
       cordis:
         specifier: 4.0.0-rc.10
         version: 4.0.0-rc.10
       zod:
         specifier: ^4.0.0
         version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
 
 packages:
 
