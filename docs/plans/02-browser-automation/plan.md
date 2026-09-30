@@ -1014,9 +1014,129 @@ AND reply.job_id = jobs.job_id`。
 节点引用（`backendNodeId`）的解析与「定位层用 JS 选节点、上传用 CDP 选节点」两套寻址怎么对齐，
 是 §13.3 必须先定的一件事——定不齐就会出现「定位到 A、文件塞进 B」。
 
-### 13.3 落点设计（**尚未定稿**：本轮只完成取证）
+### 13.3 落点设计（定稿，2026-09-30；四项逐个定，实现照此执行）
 
-待补的四项：归属与命名（`outbound.deliver` 扩展现有编排还是新 service）、
-审批状态机（等人这件事放在主进程还是界面，超时按拒绝）、`stage / commit` 两段怎么切
-（「仅辅助」档只 stage）、CDP 节点引用与 locator 寻址的对齐口径。
-**这四项没写完之前，2.6 一行实现代码都不写**（AGENTS.md §0：先 plan 再 code）。
+**1）归属与命名：`packages/outbound` 加 `deliver.ts`，服务名 `outbound.deliver`，闸门键 `deliver`，节点 kind `resume.deliver`。**
+
+- 不新建包：投递与打招呼是同一件事的上下游（先聊上，再递简历），要复用的东西已经在同包里——
+  `outbound.script.assertSendable`（黑名单唯一出口）、`outbound.throttle.nextGapMs`（节奏）、
+  `entitlement.gate` + `usage.ledger`（判定与落账）。另起一个包就是把这四项依赖再声明一遍（AGENTS.md §2.3）。
+- 闸门键沿用 `gate.ts` 注释里已经写好的 `deliver`，与账本 `action`、幂等键同一个字符串——
+  §12.13 第 3 条定下的口径（三者不许拆开）不在这里动摇。
+- 适配器契约把 `sendResume(jobId)` 扩成 `sendResume(jobId, attachment)`，
+  `ResumeAttachment = { path, fileName, sizeBytes, sha256 }`。为什么传结构而不是只传路径：
+  渠道要在回执里说清「塞进去的就是这几个字节」，只给路径就得让回读侧再算一次 hash——
+  同一份算术做两处（§2.2）。`adapter.ts:69` 那个 `UnimplementedMethod = 'sendResume'`
+  （`sendResume: '2.6'`）在本片删掉，这是它第一次有真实现。
+- 知识包加**可选段** `deliver`（与 `chat` 同形，缺段即结构化失败，不拿猜的选择器打真实站点）：
+  `uploadInput / sendButton / statusLine / sentPattern / offlinePattern`。
+  `uploadInput` 直指 `<input type=file>` 的定位名——站点通常把它藏在一个「发送简历」按钮背后，
+  但注入不需要点击（§13.2 第 3 条），所以「定位到那个隐藏的 input」就是最短路径。
+
+**2）审批状态机放在 `outbound.deliver`，界面只是它的一个投影加一个 resolve 入口。**
+
+- 为什么不放界面那一侧：投递有两个入口（工作流节点、界面单发）。把「等人」做在界面里，
+  两个入口就各长一套「谁在等确认」，而第二个入口必然漏（§2.5）。
+- 形状：`pendingApprovals: Map<approvalId, { platform, jobId, fileName, sizeBytes, sha256, requestedAt, settle, timer }>`，
+  三个方法：`request()`（内部，等待方）、`resolveApproval(id, approved)`（界面上那两个按钮打到这里）、
+  `pending()`（界面重渲染时现读「当前在等什么」，不靠订阅补齐状态，因此刷新/重开面板不会丢卡片）。
+- 事件加一条 `outbound/approval-requested`，进 `RENDERER_EVENTS` 与 `RendererEventSignatures`
+  （那条「新增事件名必须补载荷类型」的保险丝会替我们盯住）。载荷是结构化数据
+  （approvalId + 目标 + 文件三要素），句子由渲染层按 i18n 组——与 2.1-08 定下的口径同一条。
+- **超时按拒绝**，`approveTimeoutMs` 默认 120000。「没人表态」永远不等于「同意」。
+  这条同时是热改配置重建的兜底：服务被重建后 Map 是空的，老那次 `await` 等不到 settle，
+  由超时判死；而新实例查不到这个 id 返回 `APPROVAL_NOT_FOUND` 结构化失败，不是静默通过。
+  §12.13 的教训在这里第二次生效，改写成一句话：**内存里悬着的等待必须自带到期出口**，否则重建即悬挂。
+- 为什么不复用 runner 的 `requiresHuman` 接管点：接管是在 executor **抛错之后**才记的
+  （`workflow/index.ts:579`），「这一步要不要问人」和「这一步失败了」走同一个入口，
+  于是区分不了「还没问」与「问了且被拒」；而拒绝之后界面上只剩「重试这一步」一个按钮，
+  语义正好反了。接管点留给它本来的用途（验证码/风控，2.7-01）。
+  代价是投递等待期这一步在面板里是 `running` 而不是「待接管」，确认信息改由确认卡片承载——
+  这条取舍写进 spec 2.6-01 的验证操作列，不留「看起来本该用接管」的悬念。
+- 让出：等待挂在节点的 `invocation.signal` 上（复用 `sleep(ms, signal)` + `assertNotYielded`），
+  暂停能立刻打断等待，且不发送、不落账——与 greet 的让出语义逐字一致。
+
+**3）`stage / commit` 两段切，档位直接取现成的 `AutonomyLevel`。**
+
+- `stage(request)`：校验文件（存在、pdf、大小上限）、算 sha256、查目标 JD 行、现问渠道、
+  带文案时过黑名单 → 产出 `StagedDelivery`。**不发、不落账、不进闸门**。
+- `commit(staged)`：才走 greet 那条顺序——额度先查后等 → 频控（以账本最近一条 `deliver` 为钟）→
+  审批（按档位）→ 渠道发送 → 页面回读 → `gate.perform('deliver', …)`。
+- 不新造枚举：`AutonomyLevel`（core `events.ts:390`，`suggest | semi | auto`）就是 master plan §1.7
+  第 3 条定的那三态，2.6 是**第一次让它产生行为差异**的一片（1.11-07 当时明确只存档位）。映射：
+  `suggest` = 只 stage（2.6-06 仅辅助）；`semi` = stage + 确认后 commit（2.6-01 的默认，档位默认值就是它）；
+  `auto` = 免审批直接 commit，频控与额度照旧。
+- 当前档位的**唯一来源是 `outbound.deliver` 的配置**（装配面板可热改，正是已经有把握演示的那条路）。
+  不读 `chat.session` 的 `autonomy` 列：那是 L3 对话层的状态，L2 领域反过头问 L3 就是 §4.1 禁的方向；
+  等 2.8 把投递做成 agent 工具时由**调用侧把档位当参数传进来**，方向自然顺。这条现在不做，见 §13.5。
+- 2.6-05 的可追溯：`usage_ledger.source` 写 `resume:<sha256 前 12 位>@<文件名>`，
+  不加列、不加迁移（复用 2.5-09 已经钉过的那一列）。
+- 2.6-03 的「结果状态」按 §13.4 第 2 条更正后的口径落，账本维持「成功才有行」。
+
+**4）CDP 节点引用与 locator 寻址对齐：一条链，两边都不各自选节点。**
+
+第二轮 spike（`tmp/26-spike-handle2.mjs`，靶页由脚本自带的临时 http 服务提供，同源，不进仓库）实测：
+
+- `DOM.setFileInputFiles{files, selector}` **这条取路不存在**——回包原文
+  `Either nodeId, backendNodeId or objectId must be specified`，`selector` 被当未知参数忽略。
+  若照 CDP 文档转述去写它，就是一次标准的 §6.2 事故。
+- `DOM.requestNode{objectId}` 在**没有先 `DOM.getDocument`** 时回 `{nodeId: 0}`：不报错，
+  但那个 0 是无效引用；补一次 `getDocument` 之后同一调用回 `{nodeId: 11}`。
+  「静默给你一个 0」这种形状绝不能进我们的代码路径——它就是「看着成功、实则什么都没发生」。
+- `DOM.querySelector` 在这份构建里只回 `{nodeId}`，**不带 `backendNodeId`**，
+  所以 `setFileInputFiles{backendNodeId}` 也不通（除非再多一次 `DOM.describeNode`）。
+- 可用的最短链：`Runtime.evaluate{expression, returnByValue:false}` 的 `objectId`
+  → `DOM.setFileInputFiles{files, objectId}`。主帧实测文件只落在 `#first`
+  （另两处仍是「未触发」），`change` 触发，名字与字节都对。
+- 子帧：`Page.getFrameTree` 按 URL 取 frameId → `Page.createIsolatedWorld{frameId}` →
+  在该 `executionContextId` 里 evaluate → 同一个 objectId 直接注入成功。
+  子帧回读 `change#1 文件名=26-spike-resume.pdf 字节=226 / data-which=in-frame`，
+  主帧两处仍「未触发」：**跨帧不串味**；而隔离世界拿到的就是页面上那个真节点
+  （主帧注册的 `change` 监听器被触发了）。
+
+据此定下 `browser.act.upload(spec, filePath)`，形状与 `click` 逐字对齐：先 `waitSatisfied('clickable')`、
+再 `browser.locate.find(spec)` 得到 `chosen{candidateIndex, nodeIndex, frameUrl}`，
+**「哪个节点」只由 locator 这一处决定**；CDP 侧不做第二次选择——在 `chosen.frameUrl` 对应的帧上下文里
+跑**同一份候选打分脚本**，但返回**节点本身**（`returnByValue:false`）而不是 JSON 读数，
+于是打分的胜出者与注入用的 objectId 是同一个节点。新增的是 `locator-script.ts` 里一个
+`buildNodeHandleScript(candidates, identity)`，与既有 `buildDomActionScript` 共用打分与身份逻辑。
+取到 objectId 后注入，**随后必须回读校验**：在同一上下文读 `files[0].name` 与 `size` 跟请求的文件比对，
+不符即 `ACT_FAILED`（带 spec 与快照引用）。这条回读既是「定位到 A、文件塞进 B」的机器防线，
+也正好是 2.6-04 的 V 证据本身。
+命令名与参数形状由单测钉死（`sendCommand(method: string, …)` 没有联合类型，编译器不挡），
+复用 `input-channel.ts:141` 已有的 `sendCommands(contents, CdpCommand[])` 接缝与它的假 session 断法。
+**四条被实测否决的路都不进代码**：`requestNode` / `nodeId` / `backendNodeId` / `selector`，
+每条上面都有一句理由。OOPIF（跨进程子帧）不在本片——`sendCommand` 有 `sessionId` 位，
+真要接是加一个参数的事，而 fixture 与 BOSS 的会话页都在同进程（记进 §13.5）。
+
+### 13.4 随本片更正的四条 spec 文案（条目 ID 不变，文案改了要留原因）
+
+1. **2.6-04**：原文的 `startUpload` 是不存在的 API（§13.2 第 1 条）。改成实测那条——
+   `DOM.setFileInputFiles{files, objectId}`、`change` 真触发、注入后回读文件名与字节与请求一致，
+   并把这条回读升级成验收动作的一部分（不接受「调用没报错」当证据）。
+2. **2.6-03**：原文「投递成功/失败均落 `usage.ledger` 且带结果状态」与本项目既有不变量冲突——
+   `gate.perform` 只在 task 成功后落账（`gate.ts` 注释 + 2.5-03 已测「失败一律不落账」），
+   而 `countToday()` 数的就是行数，失败也落行会把额度算错（超限拒的是不存在的用量）。
+   改成：成功落 `usage_ledger` 一行（`action=deliver`、`source` 带简历 hash）；
+   失败**不落账**，结果状态在 `workflow_nodes` 行（`error` / `attempts`）与日志里可查，额度不扣。
+3. **2.6-07**：`jobs` 表没有任何在招状态列（`jd-store.ts:45-63`），「二次校验」只能现问页面——
+   知识包 `deliver.offlinePattern` 一份数据 + 一次重读，而不是给 JD 行加一列再往里写。
+   「跳过」落为「这一步不再尝试、不发送、不落账」：节点 `retryTimes: 0` + 结构化失败
+   `DELIVER_TARGET_OFFLINE`。runner 里由 executor 驱动的 `step-skipped` 目前只服务断点续跑
+   （`workflow/index.ts:476`），那种「按条件跳过」的图语义属于 5.10 画布切片，不在本片造。
+4. **2.6-05**：原文「记录简历快照 id + 内容 hash」里的前半个凭据现在不存在——P3（简历 PDF 生成）
+   还没做，库里没有简历快照表，为它建表就是为一个占位符加迁移。改成本片能真做到的那半条：
+   `source` 记 `resume:<sha256 前 12 位>@<文件名>`，快照 id 等 P3 建表后补进同一个字符串，
+   3.7 的 diff 拿 hash 就能对上。
+
+### 13.5 本片不做 / 明确欠着的
+
+- **fixture 侧要新增两样**：一个上传靶页（带隐藏 input 与 `change` 回显，作为 2.6-04 的截图对象），
+  一个收得到文件的接收端。现有 `readJson` 只吃 JSON 且有 64KB 上限（`fixture-server.ts:553`），
+  multipart 要新写 body 解析——所以用 **base64-in-JSON** 提交，把解析成本留在主线之外。
+- **简历文件从哪来**：P3（简历 PDF 生成与编辑）还没做，本片接收的是「请求里带的路径 /
+  配置里的默认路径」。`resume:<hash>` 这个 source 形状就是将来与简历快照表对上的钩子，
+  现在不建表。
+- **档位与 `chat.session` 的接线**：见 §13.3 第 3 条末，留给 2.8 的 agent 工具入口。
+- **OOPIF 子帧上传**：`sessionId` 参数留白，等真实站点证明需要再接。
+- 界面确认卡片要新文案，全部进 `deliver.*` 命名空间并一次补齐 zh-CN / en（AGENTS.md §5.5/5.6）。
