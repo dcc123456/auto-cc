@@ -220,6 +220,17 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   入口写 CJS：`app.whenReady().then(() => import('./spike.mjs'))`。
   同一运行时里 `ELECTRON_RUN_AS_NODE=1` 起的是纯 Node（本机实测 node 24.21.0 / sqlite 3.53.4），
   要验数据库行为（WAL 崩溃恢复等）用这条路，不需要 GUI。
+- **实测（2.5）热改配置会连带重建下游插件**：`plugins.saveConfig('A', …)` 之后，凡是 `inject` 了 A 的
+  服务都会被重新实例化并重跑 `[Service.init]`。因此"由别的包在 init 时推给我、我存进内存 Map"的
+  注册表会在改配置后静默变空（本项目在 2.5-e 撞上过：打招呼渠道表被清空，从此 `OUTBOUND_CHANNEL_MISSING`
+  到重启为止）。跨包能力一律改成**用的时候按名字现问**，不要在本地存第二份事实（§2.7）。
+- **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
+  `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
+  打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe
+  （fixture 聊天页）里的内容要在帧内 `eval --url 10233` 调 `scrollIntoView` 后再 `shot`。
+- **实测（2.5）页面上的浏览器动作前必须先 `sessions.open`**：内核视图未打开时页面操作以
+  `NO_KERNEL_SESSION` 失败，而改一次配置就会关掉已打开的会话视图（与上面第一条同源），
+  顺序必须是「改配置 → 重开会话 → 跑」。
 - 仓库**已有 git 远端**（`origin` → `dcc123456/auto-cc`），§1.6 的"提交 + 推送"按原文执行。
 
 ---
