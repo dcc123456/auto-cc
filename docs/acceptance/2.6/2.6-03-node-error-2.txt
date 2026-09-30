@@ -1,0 +1,11 @@
+2.6-03 投递节点失败落 workflow_nodes（错误文本 + 证据路径 + 尝试次数）
+
+配置：plugins.saveConfig('workflow', { planId:'boss-deliver' }) → 内置两条 resume.deliver 节点（1001 在售 / 1002 已下架），
+     autonomy=auto · 频控 minGap/maxGap=0 · 额度恢复 unlimited
+界面点 [data-action="run-once"] 后 workflow.runner.state()（库里的行）：
+  runId=def617f6-b47f-4314-b9e3-ddd2a301617f · planId=boss-deliver · status=failed
+  节点 1 deliver-1001 · resume.deliver · done · attempts=1（重试 0）· 160 毫秒
+  节点 2 deliver-1002 · resume.deliver · failed · attempts=1（重试 0）· 22 毫秒
+    error：目标岗位已下架：状态行回读到「岗位已下架」
+    证据：evidence/def617f6-b47f-4314-b9e3-ddd2a301617…（面板上可见相对路径）
+账本 deliver 计数由 2 → 3：只有节点 1 真正发送成功落了账，失败的节点 2 没有行（外发成功才落账，失败只进节点行 + 日志）。

@@ -1,0 +1,31 @@
+2.6-01 默认档位确认卡片上屏 + 点确认才发送（CDP 10222，真实窗口，fixture 127.0.0.1:10233）
+
+档位读数（plugins.readConfig('outbound-deliver')）：
+  autonomy=semi  approveTimeoutMs=120000  maxResumeBytes=5242880  resumeFile=tmp/26c-resume.pdf
+
+点击 [data-action="deliver-1001"] 后 outbound.deliver.perform 挂在主进程等待，pending() 读数：
+  approvalId=e8b83aef-a35c-4928-a195-88a5006e2d10 · platform=boss · jobId=1001
+  title=桌面端前端工程师（Electron） · company=星桥科技
+  attachment=26c-resume.pdf / 193 字节 / sha256 e5a636ac00ea3c175d3193c5d05df60ded156dd466043c70d254507ec277e4c2
+  requestedAt=1790789926174 · expiresAt=1790790046174（到点即拒）
+卡片 DOM 文本：目标 1001 · …（Electron）/ 星桥科技 · 文件 26c-resume.pdf（193 字节 · sha256 e5a636ac00ea）· 申请于 2026/10/1 01:38:46 · 到点即拒 2026/10/1 01:39:46 · 确认投递 / 拒绝
+按钮：approve-e8b83aef… / deny-e8b83aef…
+
+刷新面板不丢（渲染层 location.reload() 之后重新点 [data-action="refresh"]）：
+  同一 approvalId=6f64b69d-519b-4de8-a157-bfc739450a7a 仍在 pending()，卡片按现读重建 → 等待状态在主进程，不在界面
+
+点确认（approve-…）之后的回执（data-testid="deliver-receipt"，data-committed="true"）：
+  目标 1001 · 文件 26c-resume.pdf（193 字节 · sha256 e5a636ac00ea）· 已发送 · 账本行 2 · 频控等待 0 毫秒
+  · 来源 resume:e5a636ac00ea@26c-resume.pdf · 页面回读：状态行回读到成功样式「简历已送达」：简历已送达：目标 1001 · 附件 #1（服务端第 1 次收讫）
+账本行：{ id:2, action:"deliver", targetId:"1001", workflowRunId:null, ts:1790789926173, source:"resume:e5a636ac00ea@26c-resume.pdf" }
+
+超时按拒绝（approveTimeoutMs 热改为 3000，点 deliver-1003，无人表态）：
+  jd-error data-error-code=OUTBOUND_APPROVAL_DENIED
+  文案：桥接返回的结构化错误 OUTBOUND_APPROVAL_DENIED：未投递：等待确认超过 3000ms，按拒绝处理
+  定局后 pending()=0 条 · 账本 deliver 计数仍为 1（探针实测 deliverCount=1，未发送、未落账）
+
+让出打断：本条 V 半未在真实窗口重放（第二次 run-once 未起新 run，见 §13.8 偏差 4）；
+  由 packages/outbound/src/deliver.test.ts:352 / :625 覆盖（abort → WORKFLOW_STEP_FAILED，不发送不落账，卡片收掉），
+  2.4-07 的让出语义已在真实窗口验过。
+
+截图对应：-1 确认卡片上屏（档位 semi）｜-2 渲染层 reload 之后由 pending() 重建的同一张卡片｜-3 点确认之后的回执（data-committed=true、账本行 2）｜-4 超时按拒绝的 jd-error｜-5 本读数

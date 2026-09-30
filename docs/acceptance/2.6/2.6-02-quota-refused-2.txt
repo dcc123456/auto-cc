@@ -1,0 +1,10 @@
+2.6-02 日额度到量后第二次投递被拒（额度键 deliver）
+
+entitlement 配置：mode=unlimited 时 gate.check('deliver') = { allowed:true, remaining:null }（放行，前 2 次投递各落一行）
+热改为 mode=daily / dailyLimit=2 之后（非法值 mode='limited' 被 static Config 校验挡回，读数不变）：
+  gate.check('deliver') = { allowed:false, remaining:0, reason:"动作 deliver 今日 2 次额度已用完" }
+点击 [data-action="deliver-1005"]：
+  jd-error data-error-code=QUOTA_EXCEEDED
+  文案：桥接返回的结构化错误 QUOTA_EXCEEDED：动作 deliver 今日 2 次额度已用完
+  账本 deliver 计数仍为 2 · 内核视图未导航到 /deliver · fixture /api/deliveries 仍为 count=1（未上传、未点击、未落账）
+顺序证据：到量即在 stage 之后、页面动作之前止步（commit 里 gate.check 早于 sleep/审批/send）。

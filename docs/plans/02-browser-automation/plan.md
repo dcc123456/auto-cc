@@ -1253,3 +1253,48 @@ fail-closed、空 jobId、定位失败原样透传）；`platform-contract.test.
 
 **2.6-01 / 02 / 06 / 07 的 V 半边不打勾**——确认卡片、待发送态与 fixture 上传靶页排在 2.6-c，
 spec 相应条目保持 `[ ]`，逻辑半边已覆盖，不因单测全绿写成 `[x]`。
+
+### 13.8 2.6-c 收口记录（审批状态机上屏 + fixture 靶页 + 逐项验收，2026-10-01）
+
+**这一片交出的东西**（三处提交，各做一件事，按 §1.4 分开）：`ec9fb78` 把 `outbound/approval-requested`
+事件、`deliver.pending` / `deliver.resolveApproval` 两个桥接方法并进白名单并画出确认卡片；
+`670b285` 给 fixture 加 `/deliver` 靶页（`display:none` 的上传控件 + 服务端按原始字节算 sha256 的
+`POST /api/deliver-upload`）；`67d858c` 补 `boss-deliver` 内置计划，让投递节点有一条能落到库里读数的入口。
+等待状态机本身留在 `outbound.deliver`（§13.3 第 2 条的理由不变：投递有两个入口，做在界面侧必然漏一套）。
+
+**逐条打到的证据**（`docs/acceptance/2.6/`，每条一个 `.txt` 读数 + 对应截图）：
+`2.6-01` 卡片上屏 / reload 后重建 / 点确认才发送 / 到点即拒四张；`2.6-02` 到量即拒；
+`2.6-03` 节点行 `failed · attempts=1 · error`；`2.6-04` 靶页与 `files[0]` 机读同源、整串 sha256 与 app 侧相等；
+`2.6-06` 待发送态且账本零增；`2.6-07` 下架目标零上传零点击；`2.6-08` 用量面板与闸门同一份计数。
+全程只打 `127.0.0.1:10233`（`platform.registry` 的 `startUrl` 就指着它），每一次外发都经 `gate.perform`。
+
+**与计划的偏离，逐条写明**：
+
+1. **计划里不带简历路径**：`BOSS_DELIVER_PLAN` 的两个节点只给 `platform` / `job`，`file` 参数缺席——
+   把 `D:/…/tmp/26c-resume.pdf` 这种机器绝对路径写进仓库里的计划，等于让每次 clone 都要先改计划。
+   路径改从 `outbound.deliver` 的 `resumeFile` 取（`plugins.saveConfig` 热改，测试期用 `tmp/` 下 193 字节的占位 PDF）。
+   计划是纯数据、参数只允许标量这条约束因此没有松动（plan §11.8）。
+2. **额度演示用的是 `dailyLimit=2` 而不是原文的 1**：跑第 3 次投递时账本里已经有两行 deliver，
+   「切到 1 就必然立刻拒」这条性质没变，只是被拒的是第 3 发而不是第 2 发；`gate.check` 的读数
+   （`remaining:0` + 可读原因）与截图都按实际数字归档，spec 那条的验证操作在 `2.6-02-*.txt` 里更正过。
+3. **频控是演示期配置而不是代码**：`outbound-throttle` 的 `minGapMs` / `maxGapMs` 临时热改成 0，
+   否则七次外发要挂十几分钟；默认 45–150s 那套随机间隔一行没动，`2.6-*` 的截图里也没有拿 0 间隔冒充真实节奏。
+4. **「等待中暂停可打断」这一小半没在窗口里重放**：第二次点 `run-once` 时 runner 没有起新 run
+   （上一发 `boss-deliver` 的 run 还停在 `failed` 且库里可续），于是拿不到「审批等待中按暂停」的画面。
+   这条语义只由 `deliver.test.ts:352` / `:625`（abort → `WORKFLOW_STEP_FAILED`，不发送不落账、卡片收掉）
+   与 2.4-07 已验过的让出路径支撑，spec 2.6-01 因此带一条明示的 weaker 半条，不打成无损的 `[x]`。
+5. **`2.6-04` 没消掉 §13.6 记下的 weaker 防线**：靶页的上传控件与真实站点一样是 `display:none`，
+   rect 全 0 使注入后的形状复核退化，这一条只能靠「服务端独立算出的整串 sha256 与 app 侧一致」对账；
+   真站点上的最终判定仍欠真人验证（§7.2 不许自动化打真实平台）。
+
+**驱动真实窗口时撞到的四条操作事实**（下次跑 V 类条目直接照做，别再试错）：
+
+- 面板所在的 tab 是 `hidden` 时，里面按钮的 `getBoundingClientRect()` 全是 0，而 harness 的 `click`
+  是按中心点派发原生鼠标事件的——落在 `(0,0)` 上，点不到。所以**先点「诊断」tab 再操作 job-lab**，
+  并用 `harness dom --attrs` 读一次 rect 确认它真的有尺寸。第一次 `deliver-1001` 点击失败就是这条。
+- 渲染层有 CSP（1.7 的产物），页面里 `fetch('http://127.0.0.1:10233/…')` 直接 `Failed to fetch`。
+  fixture 侧的读数（`/api/deliveries`）从 shell 取，页面侧的读数用 `--url 10233` 连内核视图那个 target。
+- 桥接的键是「域名 + 点号余段」：`b.outbound['deliver.pending']`、`b.jd['store.list']`、
+  `b.usage['ledger.summary']`，不存在 `b.outbound.deliver.pending()` 这种三层形状；写错就 `is not a function`。
+- `plugins.readConfig` 复读得到的是**校验后**的值：喂 `mode:'limited'` 这种非法枚举时写入被 `static Config`
+  挡回、读数仍是 `unlimited`，这本身就是闸门配置面的证据，别把它当成「保存失败」去排查。

@@ -1,0 +1,11 @@
+2.6-07 已下架目标：页面二次校验拦住，零次上传/点击、retryTimes=0 不再试
+
+配置：autonomy=auto（免审批，排除人是唯一变量）· 频控 0 · 额度 unlimited
+界面点 [data-action="deliver-1002"]（库里 1002 是抓取那一刻的快照，页面才回答现在还在不在收）：
+  jd-error data-error-code=DELIVER_TARGET_OFFLINE
+  文案：桥接返回的结构化错误 DELIVER_TARGET_OFFLINE：目标岗位已下架：状态行回读到「岗位已下架」
+  内核视图停在 http://127.0.0.1:10233/deliver?targetId=1002，状态行由页面自己写「岗位已下架」
+  账本 deliver 计数保持 1（未落账）· GET /api/deliveries 仍 count=1 / attachments 仍只有 #1（1001 那次）
+    → 下架判定发生在上传与「发送简历」点击之前，页面动作次数为零
+节点路径（同一条 1002 在 boss-deliver 计划里）：attempts=1（重试 0）、status=failed、error 落 workflow_nodes，
+  节点声明 effect=outbound + retryTimes=0 就是「已下架就不再试」的字面落点。

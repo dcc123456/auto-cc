@@ -1,0 +1,16 @@
+2.6-04 投递打到 fixture 上传靶页（隐藏 input + 服务端回读 hash）
+
+内核视图 target（--url 10233）读数：
+  url=http://127.0.0.1:10233/deliver?targetId=1001 · title=简历投递页 · 本地 fixture
+  input[type=file] 是 display:none（藏在标签背后），app 走 CDP 注入而非坐标
+  页面对 change 的自述：收到 1 次 · isTrusted true · 文件 26c-resume.pdf · 字节 193 · 类型 application/pdf
+  服务端已登记附件 #1：26c-resume.pdf / 193 字节 · sha256 前 12 位 e5a636ac00ea
+  状态行（sentPattern 回读源）：简历已送达：目标 1001 · 附件 #1（服务端第 1 次收讫）
+机读回读（DOM files[0]）：{ fileCount:1, fileName:"26c-resume.pdf", fileSize:193, fileType:"application/pdf" } —— 与 app 侧 stage 的附件三要素逐字相等
+服务端 GET /api/deliveries：
+  { count:1,
+    receipts:[{ id:2, targetId:"1001", attachmentId:1, fileName:"26c-resume.pdf", sizeBytes:193,
+                sha256:"e5a636ac00ea3c175d3193c5d05df60ded156dd466043c70d254507ec277e4c2", deliveredAt:1790789935556 }],
+    attachments:[{ id:1, targetId:"1001", fileName:"26c-resume.pdf", sizeBytes:193,
+                   sha256:"e5a636ac00ea3c175d3193c5d05df60ded156dd466043c70d254507ec277e4c2", receivedAt:1790789935446 }] }
+  服务端独立算出的 sha256 == app 侧 createHash('sha256') 的读数（全 64 位一致），账本 source 用它的前 12 位。

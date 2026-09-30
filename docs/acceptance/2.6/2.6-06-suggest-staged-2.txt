@@ -1,0 +1,10 @@
+2.6-06 仅辅助档：只准备不发送，界面摆出待发送态
+
+配置：plugins.saveConfig('outbound-deliver', { autonomy:'suggest' })（热改，readConfig 复读 autonomy=suggest）
+点击 [data-action="deliver-1005"] 后的回执（data-testid="deliver-receipt"，data-committed="false"）：
+  目标 1005 · 文件 26c-resume.pdf（193 字节 · sha256 e5a636ac00ea）· 待发送（未离开 app） · 账本行 不落账 · 频控等待 0 毫秒
+  · 来源 resume:e5a636ac00ea@26c-resume.pdf · 页面回读：档位 suggest：已备好 26c-resume.pdf，未发送
+账本：deliver 计数保持 1（未增行）· fixture GET /api/deliveries 仍是 count=1 / 附件 1 个（未上传、未导航投递页）
+pending()：0 条（suggest 档不进审批，也就没有卡片可点）
+节点侧同档不放过：deliver.executeNode 在 committed=false 时抛 OUTBOUND_APPROVAL_DENIED，
+  免得「只准备」被工作流读成「已投递」而断点续跑不再回来跑这一步。
