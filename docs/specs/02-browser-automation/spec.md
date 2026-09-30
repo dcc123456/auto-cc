@@ -278,8 +278,8 @@ Chromium 不再产帧，于是 `IntersectionObserver` 回调与 `scroll` 事件*
 | 2.5-09 | 打招呼文案含可追溯的生成来源记录（prompt 版本 + JD id），便于复盘                 | C    | 查库断言字段非空                                                  | [ ]            |
 | 2.5-10 | 自动化不发送任何个人凭据/密码/手机验证码到页面                                    | C    | 发送内容过校验规则（黑名单字段）                                  | [ ]            |
 | 2.5-11 | 真实账号打招呼（M4 判据）并留回复监听记录                                         | V    | 用户在场时手动验证                                                | [!] 待用户在场 |
-| 2.5-12 | LLM 调用有唯一入口 `llm.chat`（`packages/llm`）：其他包出现模型端点 URL 或        | C    | 全仓 grep 端点/请求体；往任一非 llm 包塞一条假端点应 lint 失败    | [ ]            |
-|        | chat completion 请求即 lint 失败（AGENTS.md §2.7 第二个 LLM 客户端禁令落地）      |      |                                                                   |                |
+| 2.5-12 | LLM 调用有唯一入口 `llm.chat`（`packages/llm`）：其他包出现模型端点 URL 或        | C    | `pnpm lint` 末道 `check-llm-single-entry.ts`（塞假端点即红）；    | [x]            |
+|        | chat completion 请求即 lint 失败（AGENTS.md §2.7 第二个 LLM 客户端禁令落地）      |      | 页面插件树 `llm` 行 + 未就绪日志见证据图                          |                |
 | 2.5-13 | 不新建配额系统：打招呼日上限复用 `entitlement.gate`，重复发送防护 = 幂等键 +      | C    | grep 无 sentSet / 第二张配额表；断言同 run 同 target 二次发送被拒 | [ ]            |
 |        | `usage_ledger` 按 target 计数，代码里不存在「已发送集合」                         |      |                                                                   |                |
 | 2.5-14 | 「已回复」状态由 `conversation_messages` join 导出，不写回 JD 行（单一事实来源）  | C    | 查库断言 `jd_records` 无 replied 列；列表查询含 join              | [ ]            |
