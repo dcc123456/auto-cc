@@ -1,9 +1,10 @@
 /**
- * 2.3 用例的替身（`adapter.test.ts` 与 `jd-capture.test.ts` 共用）。
+ * 2.3 与 2.5 用例的替身（`adapter.test.ts` / `jd-capture.test.ts` / `conversation-store.test.ts` 共用）。
  *
- * 只替一只「读页面的手」：真实站点在自动化测试里不可用（AGENTS.md §7.2），而这两份用例要验收的是
- * 「页面读数怎么变成库里的行」，所以把 `browser.page` 收成可编排的假手，登记处 / 库 / 账本一律用
- * 真实服务——把 sqlite mock 掉就等于没测幂等。
+ * 只替两只手：`createFakePage` 替「读页面的手」、`createFakeAct` 替「敲字与点击的手」。
+ * 真实站点在自动化测试里不可用（AGENTS.md §7.2），而这几份用例要验收的是
+ * 「页面读数怎么变成库里的行」「sent 是不是由页面回读说了算」，所以把页面与动作收成可编排的假手，
+ * 登记处 / 库 / 账本一律用真实服务——把 sqlite mock 掉就等于没测幂等。
  */
 import { Service, type Context, type WorkflowExecutorRegistry, type WorkflowNodeExecutor } from '@auto-cc/core';
 import type {
@@ -16,7 +17,8 @@ import type {
   PageScrollReading,
 } from '@auto-cc/shared';
 import { z } from 'zod';
-import type { BossPageHand } from './adapter.js';
+import type { KnowledgePack } from '@auto-cc/plugin-browser';
+import type { ActReadback, BossActionHand, BossPageHand } from './adapter.js';
 
 /** 仿站的列表页地址（抽取行的 `frameUrl` 就是它，相对 href 按它折算）。 */
 export const LIST_URL = 'http://127.0.0.1:10233/boss';
@@ -131,7 +133,24 @@ export function snapshotOf(url: string): KernelPageSnapshotView {
 }
 
 /** 假手某一次抽取服务的是哪一类页面（用例靠它断言阶段先后，不必自己辨认容器）。 */
-export type PageKind = 'list' | 'detail';
+export type PageKind = 'list' | 'detail' | 'status' | 'messages';
+
+/**
+ * 会话页的读数脚本（spec 2.5-06 / 2.5-07）。
+ *
+ * 状态行与消息条各自用自己的容器身份来路由：适配器对两者都发「scope 为 self」的抽取，
+ * 靠请求里的容器区分是唯一不掺代码 guess 的判法（同 `listContainer` 的判法）。
+ */
+export type ChatScript = {
+  /** 状态行的定位声明：与请求容器内容相同即判为读状态行 */
+  statusContainer?: LocateSpec;
+  /** 状态行的读数（一行一字段 `status`） */
+  status?: ExtractResultView;
+  /** 消息条的定位声明 */
+  messageContainer?: LocateSpec;
+  /** 消息条的读数（每次读都是页面的全量可见消息） */
+  messages?: ExtractResultView;
+};
 
 /** 假手的脚本：列表容器的身份 + 依次回传的读数。 */
 export type PageScript = {
@@ -143,6 +162,8 @@ export type PageScript = {
   detail: ExtractResultView[];
   /** 每次滚动的回读；省略表示页面到底了 */
   scroll?: PageScrollReading;
+  /** 会话页读数（打招呼的状态行与消息列表）；省略表示这一页什么都读不到 */
+  chat?: ChatScript;
 };
 
 /** 带调用记账的假手。 */
@@ -184,6 +205,21 @@ export function createFakePage(script: PageScript): FakePage {
   // 而「跳过已读详情」「单条失败隔离」这些用例本就会打乱次序，用次序回话等于替用例排序。
   const detailFor = (url: string): ExtractResultView =>
     script.detail.find((entry) => entry.frames.some((frame) => frame.url === url)) ?? extractOf(url, []);
+  // 会话页的两种读数各按自己的容器身份回话；没脚本到的那一类一律读成「一行都没有」，
+  // 因为「读不到」在 2.5 的用例里是常态而不是异常（状态行读不到必须判 sent:false）。
+  const chatFor = (request: ExtractRequest): ExtractResultView | null => {
+    const chat = script.chat;
+    if (!chat) return null;
+    if (chat.statusContainer && sameLocator(request.container, chat.statusContainer)) {
+      kinds.push('status');
+      return chat.status ?? extractOf(navigated.at(-1) ?? LIST_URL, []);
+    }
+    if (chat.messageContainer && sameLocator(request.container, chat.messageContainer)) {
+      kinds.push('messages');
+      return chat.messages ?? extractOf(navigated.at(-1) ?? LIST_URL, []);
+    }
+    return null;
+  };
   return {
     navigated,
     requests,
@@ -197,6 +233,8 @@ export function createFakePage(script: PageScript): FakePage {
       requests.push(request);
       // `platform.boss` 挂载时会自己再解析一遍知识包，请求里的容器与脚本里那条是「内容相同而非同一对象」；
       // 用 `===` 判会把整条挂载链路的列表读成详情，于是一条岗位都攒不出来。
+      const chat = chatFor(request);
+      if (chat) return Promise.resolve(chat);
       const isListing = sameLocator(request.container, script.listContainer);
       kinds.push(isListing ? 'list' : 'detail');
       return Promise.resolve(isListing ? nextScreen() : detailFor(navigated.at(-1) ?? LIST_URL));
@@ -274,8 +312,7 @@ const fakeRegistrySchema = z.strictObject({});
 export type FakeRegistryConfig = z.output<typeof fakeRegistrySchema>;
 
 /**
- * 假的执行器登记处（spec 2.4-01 的登记口）。
- *
+ * 假的执行器登记处（spec 2.4-01 的登记口）。 *
  * 平台包不能 import `plugin-workflow`（AGENTS.md §4.1：L2 领域不依赖 L3 流水线），所以这里按
  * `core` 的契约形状自带一张表。它只回答两个问题：服务挂起来时有没有真的把节点登记进来，
  * 以及被卸载时有没有摘掉——留在表里的那个函数指向已销毁的实例，下一次点「跑一遍」会给出无法解释的错误。
@@ -300,4 +337,181 @@ export class FakeExecutorRegistryService extends Service implements WorkflowExec
   resolve = (kind: string): WorkflowNodeExecutor | null => this.table.get(kind) ?? null;
 
   list = (): string[] => [...this.table.keys()];
+}
+
+/** 假动作手的脚本：三只手各自回什么。 */
+export type ActScript = {
+  /** 敲字之后页面的回读值（`valueAfter`）；省略表示「与发出文本逐字一致」，即正常输入的样子 */
+  typedValue?: string | null;
+  /** 状态行等待的结局；省略表示「文本确实变了」 */
+  waitStatus?: 'done' | 'timeout';
+  /** 等待判为超时时的已等毫秒 */
+  waitedMs?: number;
+  /** 点击要不要失败（真实动作手在定位失配时是抛出而不是返回 false） */
+  clickError?: Error;
+};
+
+/** 带调用记账的假动作手。 */
+export type FakeAct = BossActionHand & {
+  /** 按顺序记录敲过哪些（定位声明，文本） */
+  typed: { spec: LocateSpec; text: string }[];
+  /** 按顺序记录点过哪些定位声明 */
+  clicked: LocateSpec[];
+  /** 等待起过几次，以及**第几次点击之前**已经起好（2.5-06 的时序判据） */
+  waitsStarted: number;
+  /** 点击发生时的等待已起次数：等于 `waitsStarted` 才说明等待起在点击之前 */
+  waitsAtClick: number[];
+  /** 按顺序记录起过哪些等待谓词（用例断言等的确实是知识包那条状态行） */
+  waitedFor: { kind: 'textChanges'; spec: LocateSpec }[];
+};
+
+/**
+ * 按脚本造一只假动作手（spec 2.5-06）。
+ *
+ * 它只替 `browser.act` 的三只手，并且**如实记账等待与点击的先后**：适配器把 `textChanges`
+ * 起在点击之前是这条契约的硬要求（基线晚于点击就永远读不到变化），所以用例要能查这个顺序。
+ * @param script 动作脚本
+ * @returns 记录调用的 `BossActionHand`
+ */
+export function createFakeAct(script: ActScript = {}): FakeAct {
+  const typed: { spec: LocateSpec; text: string }[] = [];
+  const clicked: LocateSpec[] = [];
+  const waitsAtClick: number[] = [];
+  const waitedFor: { kind: 'textChanges'; spec: LocateSpec }[] = [];
+  let waitsStarted = 0;
+  return {
+    typed,
+    clicked,
+    waitsAtClick,
+    waitedFor,
+    get waitsStarted() {
+      return waitsStarted;
+    },
+    type: (spec: LocateSpec, text: string) => {
+      typed.push({ spec, text });
+      return Promise.resolve({
+        status: 'done' as const,
+        waitedMs: 0,
+        valueAfter: 'typedValue' in script ? (script.typedValue ?? '') : text,
+      });
+    },
+    click: (spec: LocateSpec) => {
+      if (script.clickError) return Promise.reject(script.clickError);
+      clicked.push(spec);
+      waitsAtClick.push(waitsStarted);
+      return Promise.resolve({ status: 'done' as const, waitedMs: 0, valueAfter: null });
+    },
+    waitFor: (predicate) => {
+      waitsStarted += 1;
+      waitedFor.push(predicate);
+      return Promise.resolve({
+        status: script.waitStatus ?? 'done',
+        waitedMs: script.waitedMs ?? 120,
+        valueAfter: null,
+      });
+    },
+  };
+}
+
+/** 替身 `browser.act` 的配置：把假动作手递进来（形状校验同 `stubPageSchema`）。 */
+const stubActSchema = z.strictObject({
+  fake: z.custom<FakeAct>(
+    (value) => typeof value === 'object' && value !== null && 'type' in value && 'click' in value && 'waitFor' in value,
+    'fake 必须是 createFakeAct 造出来的假动作手',
+  ),
+});
+
+/** 校验后的替身配置形状。 */
+export type StubActConfig = z.output<typeof stubActSchema>;
+
+/**
+ * `browser.act` 的测试替身：只交出适配器用到的三只手。
+ *
+ * 存在理由与 `StubBrowserPageService` 同一条：`platform.boss` 从 2.5-d 起 `inject` 了 `browser.act`，
+ * 测试装配里没有它，这个插件会停在 PENDING 而 init 不跑。
+ */
+export class StubBrowserActService extends Service {
+  static provide = 'browser.act';
+  static Config = stubActSchema;
+
+  constructor(
+    ctx: Context,
+    private readonly options: StubActConfig,
+  ) {
+    super(ctx, 'browser.act');
+  }
+
+  /**
+   * 记一次敲字并回传脚本里的输入框回读值。
+   * @param spec 输入框定位声明
+   * @param text 要打进框的文本
+   * @returns 动作回读（`valueAfter` 由脚本决定，缺省等于 `text`）
+   */
+  type(spec: LocateSpec, text: string): Promise<ActReadback> {
+    return this.options.fake.type(spec, text);
+  }
+
+  /**
+   * 记一次点击；脚本给了 `clickError` 时按原样失败。
+   * @param spec 按钮定位声明
+   * @returns 动作回读
+   */
+  click(spec: LocateSpec): Promise<ActReadback> {
+    return this.options.fake.click(spec);
+  }
+
+  /**
+   * 记一次等待并回传脚本里的结局。
+   * @param predicate 等待谓词（本用例只出现 `textChanges` 一种）
+   * @returns 等待结局（`done` 或 `timeout`）
+   */
+  waitFor(predicate: Parameters<BossActionHand['waitFor']>[0]): Promise<ActReadback> {
+    return this.options.fake.waitFor(predicate);
+  }
+}
+
+/** 仿站的会话页地址：与知识包 `chat.entryPath` + `chat.targetParam` 的拼法一致。 */
+export const chatUrlOf = (jobId: string): string => `http://127.0.0.1:10233/chat?targetId=${jobId}`;
+
+/**
+ * 造一条消息的抽取行（正文、稳定 id、方向三个字段都是「读容器自身」）。
+ * @param index 容器序号
+ * @param overrides 需要改动的字段：给 `null` 表示该字段读不到
+ * @returns 一行抽取读数（帧地址固定为 `chatUrlOf('1001')`，会话侧用例不看它）
+ */
+export function messageRow(
+  index: number,
+  overrides: Partial<Record<'text' | 'externalId' | 'direction', string | null>> = {},
+): ExtractRowReading {
+  const url = chatUrlOf('1001');
+  const text = overrides.text === null ? fieldMiss('text') : fieldHit('text', overrides.text ?? '对方：方便聊聊吗');
+  const externalId =
+    overrides.externalId === null
+      ? fieldMiss('externalId')
+      : fieldHit('externalId', '', overrides.externalId ?? `reply-${String(index)}`);
+  const direction =
+    overrides.direction === null ? fieldMiss('direction') : fieldHit('direction', '', overrides.direction ?? 'inbound');
+  return rowOf(index, url, [text, externalId, direction]);
+}
+
+/**
+ * 造一份会话页脚本（状态行与消息条各按自己的容器身份回话）。
+ * @param pack 知识包（三条定位声明都从它取，用例因此仍然「代码里没有选择器」）
+ * @param status 状态行正文；给 `null` 表示这一行读不到（页面没渲染或定位失配）
+ * @param messages 消息条的行
+ * @returns 只服务会话页的假手脚本
+ */
+export function chatScript(pack: KnowledgePack, status: string | null, messages: ExtractRowReading[] = []): PageScript {
+  const url = chatUrlOf('1001');
+  return {
+    listContainer: pack.locators.jobCard!,
+    list: [],
+    detail: [],
+    chat: {
+      statusContainer: pack.locators.chatStatus!,
+      status: extractOf(url, status === null ? [] : [rowOf(0, url, [fieldHit('status', status)])]),
+      messageContainer: pack.locators.replyItem!,
+      messages: extractOf(url, messages),
+    },
+  };
 }

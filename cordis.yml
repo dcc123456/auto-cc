@@ -149,8 +149,19 @@ plugins:
   # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。
   # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`。
   # 想用外部知识文件验证「改数据不改代码」：给 `packFile` 填一个绝对路径（2.6 走这条口）。
+  # 2.5-d 起它还要 `browser.act` 那三只手（敲字 / 点击 / 等文本变化）才打得招呼，只读定位不再够用。
   - id: platform-boss
-    dependsOn: [platform-registry, browser]
+    dependsOn: [platform-registry, browser, browser-act]
+
+  # 会话消息库（spec 2.5-07）：`conversation_messages` 表由本服务自己把迁移 push 进 `store.migrations`，
+  # 号段取 5（账本 1、agent 会话 2、jobs 3、workflow run 4）。表形状是通用的，读它的那只手是平台的，
+  # 所以它和 `jd-store` 一样待在平台包里（plan §12.10 第 1 条）。
+  # **不**依赖 `platform-boss`：摘掉适配器时本服务照样挂载（`list` / `status` 读的是已落库的真相），
+  # 只有 `syncFrom` 会得到 `PLATFORM_NOT_REGISTERED` 的结构化失败——「读不到页面」与「库里没有会话」是两件事。
+  - id: conversation-store
+    dependsOn: [store, platform-registry]
+    config:
+      platform: boss
 
   # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
   # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，

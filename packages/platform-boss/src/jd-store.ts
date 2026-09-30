@@ -190,7 +190,7 @@ function toRowView(row: JobRow): JobRowView {
 }
 
 /** 列表条数的钳制区间：界面不需要一万行，SQL 注入面也不在 `?` 参数上，但上限能防一次误传。 */
-const LIST_LIMIT = { min: 1, max: 500, fallback: 50 };
+export const LIST_LIMIT = { min: 1, max: 500, fallback: 50 };
 
 export const jdStoreSchema = z.strictObject({});
 

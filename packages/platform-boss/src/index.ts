@@ -13,6 +13,7 @@ import path from 'node:path';
 import { AppError, Service, asApp, type Context } from '@auto-cc/core';
 import {
   parseKnowledgePack,
+  type BrowserActService,
   type BrowserPageService,
   type KnowledgePack,
   type PlatformRegistryService,
@@ -26,6 +27,9 @@ type RegistryHost = Pick<PlatformRegistryService, 'register'>;
 
 /** 本包对 `browser.page` 的全部诉求：适配器只需要导航与批量抽取这两只手（见 `BossPageHand`）。 */
 type PageHand = Pick<BrowserPageService, 'navigate' | 'extract'>;
+
+/** 本包对 `browser.act` 的全部诉求：打招呼那一下要用的敲字、点击与等待（见 `BossActionHand`）。 */
+type ActionHand = Pick<BrowserActService, 'type' | 'click' | 'waitFor'>;
 
 export const bossPlatformSchema = z.strictObject({
   /**
@@ -63,7 +67,7 @@ export function loadBossKnowledgePack(packFile?: string): KnowledgePack {
 export class BossPlatformService extends Service {
   static provide = 'platform.boss';
   static Config = bossPlatformSchema;
-  static inject = ['platform.registry', 'browser.page'];
+  static inject = ['platform.registry', 'browser.page', 'browser.act'];
 
   constructor(
     ctx: Context,
@@ -89,9 +93,17 @@ export class BossPlatformService extends Service {
     return asApp(this.ctx)['browser.page'];
   }
 
+  /**
+   * 动作通道句柄：打招呼靠它敲字与点击，本包同样不碰 `webContents`。
+   * @returns `browser.act` 的 `type` / `click` / `waitFor`
+   */
+  private get act(): ActionHand {
+    return asApp(this.ctx)['browser.act'];
+  }
+
   [Service.init](): void {
     const pack = loadBossKnowledgePack(this.config.packFile);
-    this.registry.register(createBossAdapter(pack, this.page));
+    this.registry.register(createBossAdapter(pack, this.page, this.act));
     this.ctx.logger.info(
       `BOSS 适配器已登记：知识包 ${String(Object.keys(pack.locators).length)} 条定位声明 · 动作 ${pack.capabilities.join(' / ')}`,
     );
@@ -104,7 +116,12 @@ declare module '@auto-cc/core' {
   }
 }
 
-export { createBossAdapter, type BossPageHand, resolveDetailUrl } from './adapter.js';
+export { createBossAdapter, type BossActionHand, type BossPageHand, resolveDetailUrl } from './adapter.js';
 export { cleanText, parsePostedAt, parseSalary, splitRequirements } from './normalize.js';
-export { JdStoreService, JD_MIGRATION_VERSION, type JobDraft, type JobUpsertResult } from './jd-store.js';
+export { JdStoreService, JD_MIGRATION_VERSION, LIST_LIMIT, type JobDraft, type JobUpsertResult } from './jd-store.js';
 export { JdCaptureService, draftFromDetail, draftFromSummary, type JdCaptureConfig } from './jd-capture.js';
+export {
+  ConversationStoreService,
+  CONVERSATION_MIGRATION_VERSION,
+  type ConversationStoreConfig,
+} from './conversation-store.js';

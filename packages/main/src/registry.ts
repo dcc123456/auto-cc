@@ -20,7 +20,12 @@ import type { Registry } from '@auto-cc/plugin-kernel';
 import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import { OutboundSampleService, OutboundScriptService, OutboundThrottleService } from '@auto-cc/plugin-outbound';
-import { BossPlatformService, JdCaptureService, JdStoreService } from '@auto-cc/plugin-platform-boss';
+import {
+  BossPlatformService,
+  ConversationStoreService,
+  JdCaptureService,
+  JdStoreService,
+} from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -66,6 +71,9 @@ export const REGISTRY: Registry = {
   'platform-boss': BossPlatformService,
   // JD 库（spec 2.3-02 / 2.3-04）：`jobs` 表的唯一落点，迁移号段 3。摘掉它，`jd-capture` 连同进 PENDING。
   'jd-store': JdStoreService,
+  // 会话消息库（spec 2.5-07）：`conversation_messages` 的唯一落点，迁移号段 5。
+  // 摘掉它，界面读会话得到「服务未挂载」的结构化失败，而适配器那侧读页面照旧——「读到」与「记住」分属两条。
+  'conversation-store': ConversationStoreService,
   // 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：只读，不经 `entitlement.gate`，所以账本行数本轮不该变动。
   'jd-capture': JdCaptureService,
   // 工作流三件套（spec 2.4）：登记处、落库、执行器各占一个清单 id，所以每一条都能被单独摘掉。

@@ -31,12 +31,14 @@ import { JdCaptureService, draftFromDetail, draftFromSummary, type JdCaptureConf
 import { JdStoreService } from './jd-store.js';
 import {
   cardRow,
+  createFakeAct,
   createFakePage,
   DETAIL_BASE,
   detailRow,
   extractOf,
   FakeExecutorRegistryService,
   LIST_URL,
+  StubBrowserActService,
   StubBrowserPageService,
   type PageScript,
 } from './test-doubles.js';
@@ -85,6 +87,9 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
   // 登记处排在最前：装配是顺序 await 的，`jd.store` / `jd.capture` 的 init 才拿得到它（spec 2.4-01）。
   fibers.push(await ctx.plugin(FakeExecutorRegistryService, {}));
   fibers.push(await ctx.plugin(StubBrowserPageService, { fake }));
+  // `platform.boss` 从 2.5-d 起还 inject 了 `browser.act`：这只替身必须一起装，否则适配器停在 PENDING、
+  // 下面的抓取链路一步都走不动（本用例只读页面，那只假动作手一次也不会被用到）。
+  fibers.push(await ctx.plugin(StubBrowserActService, { fake: createFakeAct() }));
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   fibers.push(await ctx.plugin(JdStoreService, {}));
