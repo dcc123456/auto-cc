@@ -1863,12 +1863,16 @@ reload 后两个面板各自重新读库、只显示已确认时刻。证据五�
 不是针对单个 runId 的按钮，用它等于误伤别的在途 run）。
 新增的只有白名单一个口 `workflow.runner.abort`。
 
-**决策 3：证据读取开一个新服务口，文本进渲染层前必须过 `core/redact` 唯一权威。**
-`workflow.evidence.read(runId, stepId)` 返回 `{errorText, domSnippet, screenshotDataUrl}`：
-`.json` 里的文本经 `redact()` 后返回，`.png` 读成 base64 data URL（超过配置上限就返回「太大未取」而不是硬塞）。
-这条同时把 2.7-d 欠的那格补上：卡片可以显示「已按 <规则数> 处掩码」——因为读的是主进程**实际掩码之后的**内容，
-界面不猜。被否决：`protocol.registerFileProtocol` 暴露 userData 目录（把整个证据目录变成可读 URL 面，
-等于给脱敏开后门）；`<img src="file://…">`（被 CSP 的 `img-src 'self' data:` 直接挡掉，且违反 §8 的默认拒绝）。
+**决策 3：证据读取开一个新服务口，正文直接取主进程落盘时已统一脱敏的那一份。**
+`workflow.evidence.read(runId, stepId)` 返回 `{errorCode, errorMessage, page, screenshot}`：
+`.json` 是 `writeEvidence` 在唯一写盘点过完 `redactValue` 之后的正文（`index.ts:750`，实测不是推断），
+读侧只按 `runId`/`stepId` 从库里核对这次 run 与这个节点确实存在、再取那条 `evidenceRef` 指向的文件——
+**入参来自渲染层，必须当不可信输入处理**（id 只认 `[A-Za-z0-9_-]`，且必须能在 `workflow_nodes` 里查到，
+否则就是拿路径拼接当后门）；`.png` 读成 base64 data URL，超过 `evidenceShotBytes` 就返回「太大未取」而不是硬塞。
+这条同时把 2.7-d 欠的那格补上：卡片可以显示「正文来自主进程落盘时统一脱敏过的证据文件」——
+报的是管道事实，不是界面自己判断。被否决：① 读侧再掩一次（同一约束做两遍，且会让人以为写侧没掩）；
+② `protocol.registerFileProtocol` 暴露 userData 目录（把整个证据目录变成可读 URL 面，等于给脱敏开后门）；
+③ `<img src="file://…">`（被 CSP 的 `img-src 'self' data:` 直接挡掉，且违反 §8 的默认拒绝）。
 
 **决策 4：2.8 只登记工具，不做批准流；外发的闸门仍在服务实现内部，工具层不套第二道。**
 `register()` 已具备，注册点放在各能力包自己的插件挂载时（`browser`/`platform-boss`/`outbound` 各自登记自己
@@ -1895,12 +1899,17 @@ reload 后两个面板各自重新读库、只显示已确认时刻。证据五�
 
 ### 15.3 参数进配置（`cordis.yml`），代码里不写魔法数
 
-| 键                                     | 含义                                                   | 默认      |
-| -------------------------------------- | ------------------------------------------------------ | --------- |
-| `workflow.evidence.maxScreenshotBytes` | 证据截图读进渲染层的字节上限，超限只报「未取（太大）」 | 2_000_000 |
-| `workflow.evidence.maxSnippetChars`    | DOM 片段进 IPC 的字符上限（脱敏之后再截）              | 4_000     |
+写侧的上限**已经有了**（实测：`workflowConfigSchema` 里 `evidenceDomChars` 默认 800、`evidenceTextChars` 默认 300、
+`evidenceDir` 默认 `evidence`，`index.ts:96-101`），正文的截断与掩码都在落盘那一次做完（`:750` 的 `redactValue`）。
+所以本片**只补读侧一个键**，不再造第二份 DOM/文本上限——同一个约束有两处真值就是 §2.2 要拦的事：
+
+| 键                           | 含义                                                   | 默认      |
+| ---------------------------- | ------------------------------------------------------ | --------- |
+| `workflow.evidenceShotBytes` | 证据截图读进渲染层的字节上限，超限只报「未取（太大）」 | 2_000_000 |
 
 上限值必须实测校准（截图是整窗 PNG，真实大小要在 10222 窗口里量一次再定默认），不是拍一个数。
+由此带出一条对决策 3 的修正：**证据正文不在读侧二次脱敏**。落盘前已经过唯一权威，
+读侧再掩一次是重复处理，界面显示的应是「正文来自主进程落盘时统一脱敏过的证据文件」这句可核对的话。
 
 ### 15.4 fixture 靶子与全链路（2.8-07 / M6 的落点）
 

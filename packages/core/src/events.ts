@@ -488,6 +488,37 @@ export type WorkflowRunStateView = {
 };
 
 /**
+ * 一次失败节点的证据读数（spec 2.8-04）。
+ *
+ * 它是 `writeEvidence` 落盘那份 JSON 的**读侧投影**，不是第二份事实：字段只从文件里取，
+ * 主进程不在这里补任何判断。正文的脱敏发生在**写盘那一次**（唯一权威 `redactValue`），
+ * 所以读侧不再掩第二遍——再掩一次会让人以为写侧没掩。
+ * 截图走 data URL 而不是文件 URL：打包版 CSP 放行的是 `img-src 'self' data:`，`file:` 一律挡掉。
+ */
+export type WorkflowEvidenceView = {
+  runId: string;
+  nodeId: string;
+  /** 判失败那一次是第几回尝试（与库里的 `attempts` 同源）。 */
+  attempt: number;
+  /** 判定时间戳（毫秒）。 */
+  at: number;
+  /** 错误码与截断过的一句话（`details` 不进这条：它是执行器原样塞的对象，形状不可信）。 */
+  error: { code: string; message: string };
+  /** 失败当时的页面读数；抓取时没有内核会话则为 null。 */
+  page: { url: string; title: string; bodyText: string } | null;
+  /**
+   * 现场截图：取到了就是 data URL（打包版的 CSP 已放开 `img-src 'self' data:`，
+   * 因此不需要为看一张图去开 `file:` 或自定义协议），取不到就只说原因。
+   * 两个分支互斥写在类型里，界面不需要为「既没图也没原因」编一句话。
+   */
+  screenshot:
+    | { dataUrl: string; width: number; height: number; bytes: number }
+    | { omitted: 'missing' | 'unreadable' | 'too-large' };
+  /** 证据文件的 userData 相对路径（审计段显示的那一串就是它）。 */
+  ref: string;
+};
+
+/**
  * 某个执行器的历史聚合（spec 2.4-10，供 P5 看板与「选择器腐化率」同源使用）。
  *
  * 只从 `workflow_nodes` 一张表聚合出来（plan §11.3 第 4 条：不建第三张统计表）——

@@ -1,4 +1,13 @@
-import { AlertCircle, Pause, Play, RefreshCw, RotateCw, ShieldAlert, Workflow as WorkflowIcon } from 'lucide-react';
+import {
+  AlertCircle,
+  Ban,
+  Pause,
+  Play,
+  RefreshCw,
+  RotateCw,
+  ShieldAlert,
+  Workflow as WorkflowIcon,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
@@ -6,6 +15,7 @@ import { ConsentCard, ConsentStatusRow } from './ConsentCard';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
+import { NodeEvidenceSection } from './WorkflowEvidence';
 
 /** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
 const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
@@ -14,6 +24,15 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
   done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
   failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
 };
+
+/**
+ * 「待接管」叠加态的描边。
+ *
+ * 用 `ring` 而不是改 `border-*`（spec 2.8-01）：叠加态不是第五种步骤状态——它就是「这一步停住了、
+ * 等人来做一次人工动作」，底下的四种状态一个都没变。改 border 会和状态自己的颜色打架（Tailwind
+ * 两条 border-color 谁生效取决于样式表顺序），ring 是另一层，永远画得出来。
+ */
+const TAKEOVER_OVERLAY = 'ring-1 ring-inset ring-amber-500/70';
 
 /**
  * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10 / 2.4-02）。
@@ -27,6 +46,10 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
  * 2.7-e 起「开始工作流」先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①）：要问哪个平台的签字
  * 不写在界面里，而是从 `runner.nodes()` 的计划参数里数出来——runner 不认识平台，所以节点参数是
  * 唯一能对上事实的源头；数不出平台时放行，交给释放路径上的硬拦（拦截点 ②）。
+ *
+ * 2.8-a 加了三样，都不新增判定：「中止」调 `runner.abort`（停推进 + 库里记 `USER_ABORT`，读回仍是
+ * `paused` + 接管位，见 spec 2.8-03）；「待接管」是画在停住那一格上的叠加态而不是第五种步骤状态
+ * （spec 2.8-01）；失败那一格可以展开证据，内容整份来自 `runner.readEvidence`（spec 2.8-04）。
  */
 export function WorkflowPanel() {
   const { t } = useTranslation();
@@ -130,6 +153,16 @@ export function WorkflowPanel() {
           <Play size={12} />
           {t('workflow.resume')}
         </button>
+        <button
+          type="button"
+          data-action="abort"
+          disabled={busy !== undefined || (status !== 'running' && status !== 'paused')}
+          onClick={() => act(t('workflow.actionAbort'), () => bridge?.workflow['runner.abort']())}
+          className="flex items-center gap-1 rounded-md border border-rose-900 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
+        >
+          <Ban size={12} />
+          {t('workflow.abort')}
+        </button>
         {current ? (
           <span className="ml-auto text-[11px] text-slate-500" data-testid="workflow-state">
             {t(`workflow.status.${current.status}`)}
@@ -194,57 +227,75 @@ export function WorkflowPanel() {
 
       {current ? (
         <ul className="mt-3 flex flex-col gap-1.5" data-testid="workflow-steps">
-          {current.steps.map((step, index) => (
-            <li
-              key={step.id}
-              data-step-id={step.id}
-              data-step-status={step.status}
-              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px] ${STEP_STATUS_STYLE[step.status]}`}
-            >
-              <span className="break-all">
-                <span className="font-mono text-xs">{String(index + 1)}</span>
-                {' · '}
-                {/* 节点 id 是计划数据（外部输入）：语言包缺条目时退回显示 id 本身，而不是漏出 `workflow.step.xxx` 这种键名。 */}
-                {t(`workflow.step.${step.id}`, step.id)}
-                {step.error ? (
-                  <span
-                    className="ml-1 inline-flex items-center gap-1 break-all text-rose-300"
-                    data-step-error={step.error}
-                  >
-                    <AlertCircle size={12} />
-                    {step.error}
+          {current.steps.map((step, index) => {
+            /** 这一步是不是那个「run 级待接管」的落点：只有停住的那一步该被描出来，别的格子不加戏。 */
+            const isTakeoverStep = current.requiresHuman?.stepId === step.id;
+            return (
+              <li
+                key={step.id}
+                data-step-id={step.id}
+                data-step-status={step.status}
+                data-step-takeover={isTakeoverStep ? 'true' : undefined}
+                className={`rounded-lg border px-3 py-2 text-[11px] ${STEP_STATUS_STYLE[step.status]} ${isTakeoverStep ? TAKEOVER_OVERLAY : ''}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="break-all">
+                    <span className="font-mono text-xs">{String(index + 1)}</span>
+                    {' · '}
+                    {/* 节点 id 是计划数据（外部输入）：语言包缺条目时退回显示 id 本身，而不是漏出 `workflow.step.xxx` 这种键名。 */}
+                    {t(`workflow.step.${step.id}`, step.id)}
+                    {step.error ? (
+                      <span
+                        className="ml-1 inline-flex items-center gap-1 break-all text-rose-300"
+                        data-step-error={step.error}
+                      >
+                        <AlertCircle size={12} />
+                        {step.error}
+                      </span>
+                    ) : null}
+                    {isTakeoverStep ? (
+                      <span
+                        className="ml-1 inline-flex items-center gap-1 text-amber-300"
+                        data-testid="workflow-step-takeover-badge"
+                      >
+                        <ShieldAlert size={12} />
+                        {t('workflow.takeoverTitle')}
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-              </span>
-              <span className="flex shrink-0 items-center gap-2">
-                {step.durationMs !== null ? (
-                  <span data-step-duration={String(step.durationMs)}>
-                    {t('workflow.duration', { ms: step.durationMs })}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {step.durationMs !== null ? (
+                      <span data-step-duration={String(step.durationMs)}>
+                        {t('workflow.duration', { ms: step.durationMs })}
+                      </span>
+                    ) : null}
+                    <span>{t(`workflow.stepStatus.${step.status}`)}</span>
+                    {/* 两种「停在这一步」都要能从这一步出去：普通失败，以及挂着接管点的暂停
+                        （spec 2.4-06 的未观察外发只有从这里走，否则用户在界面上只剩重新开跑一条路）。 */}
+                    {step.status === 'failed' || isTakeoverStep ? (
+                      <button
+                        type="button"
+                        data-action="retry"
+                        data-step={step.id}
+                        disabled={busy !== undefined}
+                        onClick={() =>
+                          act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`, step.id) }), () =>
+                            bridge?.workflow['runner.retryStep'](step.id),
+                          )
+                        }
+                        className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-0.5 text-rose-200 hover:bg-rose-950 disabled:opacity-40"
+                      >
+                        <RotateCw size={12} />
+                        {t('workflow.retry')}
+                      </button>
+                    ) : null}
                   </span>
-                ) : null}
-                <span>{t(`workflow.stepStatus.${step.status}`)}</span>
-                {/* 两种「停在这一步」都要能从这一步出去：普通失败，以及挂着接管点的暂停
-                    （spec 2.4-06 的未观察外发只有从这里走，否则用户在界面上只剩重新开跑一条路）。 */}
-                {step.status === 'failed' || current.requiresHuman?.stepId === step.id ? (
-                  <button
-                    type="button"
-                    data-action="retry"
-                    data-step={step.id}
-                    disabled={busy !== undefined}
-                    onClick={() =>
-                      act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`, step.id) }), () =>
-                        bridge?.workflow['runner.retryStep'](step.id),
-                      )
-                    }
-                    className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-0.5 text-rose-200 hover:bg-rose-950 disabled:opacity-40"
-                  >
-                    <RotateCw size={12} />
-                    {t('workflow.retry')}
-                  </button>
-                ) : null}
-              </span>
-            </li>
-          ))}
+                </div>
+                {/* 失败证据是「这一步为什么停」的真相，只在真的失败过的那一格按需读一次（spec 2.8-04）。 */}
+                {step.status === 'failed' ? <NodeEvidenceSection runId={current.runId} nodeId={step.id} /> : null}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="mt-3 text-[11px] text-slate-500" data-testid="workflow-loading">

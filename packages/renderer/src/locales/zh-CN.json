@@ -373,10 +373,12 @@
       "pause": "暂停",
       "resume": "续跑",
       "retry": "重试",
+      "abort": "中止",
       "actionStart": "开始工作流",
       "actionPause": "暂停工作流",
       "actionResume": "续跑工作流",
       "actionRetry": "重试 {{step}}",
+      "actionAbort": "中止本次运行",
       "nowStatus": "本次动作返回：{{status}}",
       "live": "最近播报：{{message}}",
       "duration": "{{ms}} 毫秒",
@@ -407,6 +409,22 @@
         "unobserved-side-effect": "{{subject}} 这一步的外发结果没被观察到（可能已经发出去了），工作流停在「{{step}}」；请先在内嵌视图里确认实际情况，再重试这一步。",
         "manual-takeover": "「{{step}}」被 {{subject}} 声明为人工接管点（验证码 / 风控一类），工作流已停住；请人工完成后重试这一步。",
         "risk-control": "{{subject}} 的页面出现了风控拦截（验证码 / 访问受限一类），工作流已停在「{{step}}」；请在内嵌视图里人工完成后继续。"
+      },
+      "evidence": {
+        "toggle": "查看失败证据",
+        "actionRead": "读取失败证据",
+        "loading": "正在从主进程读这一步的证据…",
+        "none": "—",
+        "attempt": "第 {{attempt}} 次尝试 · 判于 {{at}}",
+        "pageNone": "这一步没有留下页面读数（当时没有可用的内核会话）",
+        "shotAlt": "失败现场的页面截图",
+        "shotMeta": "现场截图 {{width}}×{{height}} · {{bytes}} 字节",
+        "ref": "证据文件：{{ref}}",
+        "omitted": {
+          "missing": "这一步没有现场截图（抓取时没取到画面）",
+          "unreadable": "现场截图读不出来（文件不在了或被清理）",
+          "too-large": "现场截图超过读取上限，没有加载到界面（原因仍写在上面那条错误里）"
+        }
       },
       "lab": {
         "heading": "工作流执行器（落库真相）",

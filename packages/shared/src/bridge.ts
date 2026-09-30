@@ -22,6 +22,7 @@ import type {
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
+  WorkflowEvidenceView,
   WorkflowNodeSpec,
   WorkflowProgressEvent,
   WorkflowRunStateView,
@@ -59,6 +60,7 @@ export type {
   ToolCallReply,
   ToolDescriptorView,
   ToolEffect,
+  WorkflowEvidenceView,
   WorkflowNodeRunView,
   WorkflowNodeSpec,
   WorkflowProgressEvent,
@@ -151,6 +153,9 @@ export const RENDERER_ALLOWLIST = [
   'workflow.runner.state',
   'workflow.runner.resumable',
   'workflow.runner.resumeRun',
+  // 2.8-a：中止（停在可恢复点上并落库 interrupted）与失败证据的读回。
+  'workflow.runner.abort',
+  'workflow.runner.readEvidence',
   // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
   'agent.tools.list',
   'agent.tools.call',
@@ -690,6 +695,16 @@ export interface BridgeSignatures {
    * 省略 `runId` 时按当前计划指纹取最近一次；计划改过就结构化失败，不会按老下标瞎跑。
    */
   'workflow.runner.resumeRun': { args: [runId?: string]; returns: WorkflowRunView };
+  /**
+   * 中止本次 run（spec 2.8-03）：停在可恢复点上，并把库里这一行判成 `interrupted` + `USER_ABORT`。
+   * 与 `pause` 的区别只有一句：中止会在落库上留下「是用户按的」这个码，且之后靠 `resumeRun` 而不是 `resume` 续。
+   */
+  'workflow.runner.abort': { args: []; returns: WorkflowRunView };
+  /**
+   * 读回一个失败节点的证据（spec 2.8-04）：错误码 + 已脱敏的正文 + 现场截图（data URL）。
+   * 两个 id 都来自界面读数而不是用户输入，主进程仍然按不可信输入处理（查不到就不读盘）。
+   */
+  'workflow.runner.readEvidence': { args: [runId: string, nodeId: string]; returns: WorkflowEvidenceView };
   /**
    * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，
    * 界面把它摆在档位旁边，「工具面是空表」这件事本身就看得见。

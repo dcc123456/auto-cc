@@ -23,7 +23,7 @@ import {
 } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -52,6 +52,7 @@ const BASE_CONFIG: WorkflowConfig = {
   evidenceDomChars: 800,
   evidenceTextChars: 300,
   evidenceDir: 'evidence',
+  evidenceShotBytes: 2_000_000,
   retentionRuns: 20,
 };
 
@@ -571,6 +572,164 @@ describe('失败证据（2.4-04）', () => {
     const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8')) as EvidenceFile;
     expect(file.page?.bodyText).toBe(`${'y'.repeat(11)}138****80…（已截断）`);
     expect(file.page?.bodyText).not.toMatch(/\d{4,}/);
+  });
+});
+
+describe('证据读回（spec 2.8-04）', () => {
+  /** `boot` 的返回类型（用例要在开跑之前改假页面服务的开关，所以先把这份读数命名出来）。 */
+  type Booted = Awaited<ReturnType<typeof boot>>;
+
+  /**
+   * 起一次「第一个节点必失败」的 run 并等到判失败，返回读证据要用的那一套读数。
+   * @param tweak 在 `start()` **之前**执行的改动（截图取不到、正文改写这类开关只能在下场前拨）
+   * @param config 覆盖 runner 配置（`retryTimes` 固定为 0：这一组用例要的是「一次就判失败」）
+   * @returns `boot` 的读数再加这次失败的 run id
+   */
+  async function failedOnce(tweak: (booted: Booted) => void = () => {}, config: Partial<WorkflowConfig> = {}) {
+    const booted = await boot({
+      config: { retryTimes: 0, ...config },
+      behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
+      withPage: true,
+    });
+    tweak(booted);
+    booted.runner.start();
+    await waitFor(() => booted.runner.current().status === 'failed');
+    return { ...booted, runId: String(booted.runner.state()?.runId) };
+  }
+
+  it('失败节点能读回整份证据：错误码、现场读数、同名截图转成 data URL', async () => {
+    const { runner, runId } = await failedOnce(() => {}, { evidenceTextChars: 40 });
+
+    const view = runner.readEvidence(runId, 'jd-capture');
+    expect(view).toMatchObject({
+      runId,
+      nodeId: 'jd-capture',
+      attempt: 1,
+      error: { code: 'WORKFLOW_STEP_FAILED', message: '选择器没命中' },
+      page: { url: 'https://fixture.invalid/search', title: '职位列表 - 测试夹具' },
+      ref: `evidence/${runId}-jd-capture.json`,
+    });
+    expect(view.page?.bodyText).toHaveLength(40 + '…（已截断）'.length);
+    expect(view.screenshot).not.toHaveProperty('omitted');
+    if ('dataUrl' in view.screenshot) {
+      // 断的是「base64 解开就是当初写盘那 8 个字节」，而不只是前缀像 data URL。
+      expect(view.screenshot.dataUrl).toBe(`data:image/png;base64,${FAKE_PNG.toString('base64')}`);
+      expect(view.screenshot).toMatchObject({ width: 1_280, height: 720, bytes: FAKE_PNG.byteLength });
+    }
+  });
+
+  it('读回不再掩第二遍：磁盘上是什么就交什么（脱敏的唯一权威在写盘那一次）', async () => {
+    const { runner, dir, runId } = await failedOnce();
+
+    // 手工把落盘正文换成「没掩过」的号码：读侧若自作聪明再掩一遍，这里就会看到 138****8000。
+    const file = join(dir, 'evidence', `${runId}-jd-capture.json`);
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as EvidenceFile;
+    raw.page = { url: 'https://fixture.invalid/search', title: '夹具', bodyText: '手机号 13800138000' };
+    writeFileSync(file, JSON.stringify(raw), 'utf8');
+
+    expect(runner.readEvidence(runId, 'jd-capture').page?.bodyText).toBe('手机号 13800138000');
+  });
+
+  it('写盘时没取到画面 → 读回说 missing；截图文件被清了 → 说 unreadable；超过上限 → 说 too-large', async () => {
+    const missing = await failedOnce((booted) => {
+      booted.page!.screenshotFails = true;
+    });
+    expect(missing.runner.readEvidence(missing.runId, 'jd-capture').screenshot).toEqual({ omitted: 'missing' });
+
+    const gone = await failedOnce();
+    rmSync(join(gone.dir, 'evidence', `${gone.runId}-jd-capture.png`));
+    expect(gone.runner.readEvidence(gone.runId, 'jd-capture').screenshot).toEqual({ omitted: 'unreadable' });
+
+    const capped = await failedOnce(() => {}, { evidenceShotBytes: 4 });
+    expect(capped.runner.readEvidence(capped.runId, 'jd-capture').screenshot).toEqual({ omitted: 'too-large' });
+    // 上限只管截图这一位：错误与现场读数照常给出，用户不会因为图大就连原因都看不见。
+    const reading = capped.runner.readEvidence(capped.runId, 'jd-capture');
+    expect(reading.error.code).toBe('WORKFLOW_STEP_FAILED');
+    expect(reading.page?.url).toBe('https://fixture.invalid/search');
+  });
+
+  it('id 只认库里的：查不到的 run / 查不到的节点，一律结构化拒绝而不是去拼路径', async () => {
+    const { runner, runId } = await failedOnce();
+
+    expect(() => runner.readEvidence('run-does-not-exist', 'jd-capture')).toThrow(/库里查不到这次 run/);
+    // 界面可以把「../」当节点 id 递进来：库里没有这一行，因此根本走不到拼路径那一步（2.8-04 的越权判据）。
+    expect(() => runner.readEvidence(runId, '../../cordis')).toThrow(/库里查不到这次 run 的这个节点/);
+    let code = 'no-throw';
+    try {
+      runner.readEvidence(runId, '../../cordis');
+    } catch (error) {
+      code = (error as AppError).code;
+    }
+    expect(code).toBe('INVALID_ARGUMENT');
+  });
+
+  it('成功的节点没有证据文件：拒绝读取并说明这一步不是失败结算的', async () => {
+    const { runner } = await boot();
+    runner.start();
+    await waitFor(() => runner.current().status === 'done');
+    const runId = String(runner.state()?.runId);
+    expect(() => runner.readEvidence(runId, 'jd-list')).toThrow(/没有登记证据文件/);
+  });
+});
+
+describe('中止（spec 2.8-03）', () => {
+  it('运行中中止：停在可恢复点上，库里记 interrupted + USER_ABORT，且能被续跑接回去', async () => {
+    const { runner, runs, calls } = await boot({ behavior: { 'jd.list': hangOnceThenSucceed() } });
+    runner.start();
+    await waitFor(() => runner.current().steps[1]?.status === 'running');
+
+    const aborted = runner.abort();
+    // 读回复用既有的 `paused` 镜像：中止不给界面加第六个状态（plan §15.1 决策 2）。
+    expect(aborted.status).toBe('paused');
+    expect(aborted.stepIndex).toBe(1);
+    expect(aborted.steps[1]).toMatchObject({ status: 'pending' });
+    expect(aborted.requiresHuman).toBeNull();
+
+    const runId = aborted.runId;
+    expect(runs.state(runId)).toMatchObject({ status: 'interrupted', nodeIndex: 1, lastError: 'USER_ABORT' });
+    expect(runs.state(runId)?.finishedAt).not.toBeNull();
+    // 界面先显示的进度与点下去真正续上的进度必然是同一条（与 2.4-05 的 resumable 同一判据）。
+    expect(runner.resumable()).toMatchObject({ runId, status: 'interrupted', nodeIndex: 1 });
+
+    const callsAtAbort = calls.length;
+    await settle(120);
+    expect(calls).toHaveLength(callsAtAbort);
+
+    runner.resumeRun();
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
+    expect(runs.state(runId)).toMatchObject({ status: 'done', nodeIndex: 3 });
+  });
+
+  it('已经暂停的 run 也能中止：同样落到 interrupted，续跑口不变', async () => {
+    const { runner, runs } = await boot({ behavior: { 'jd.capture': hangUntilAbort() } });
+    runner.start();
+    await waitFor(() => runner.current().steps[0]?.status === 'running');
+    const runId = runner.current().runId;
+    runner.pause();
+    expect(runs.state(runId)?.status).not.toBe('interrupted');
+
+    expect(runner.abort().status).toBe('paused');
+    expect(runs.state(runId)).toMatchObject({ status: 'interrupted', nodeIndex: 0, lastError: 'USER_ABORT' });
+  });
+
+  it('没跑过或已经跑完的 run 没有可中止的东西：结构化失败而不是把库里的行改掉', async () => {
+    const idle = await boot();
+    let code = 'no-throw';
+    try {
+      idle.runner.abort();
+    } catch (error) {
+      code = (error as AppError).code;
+    }
+    expect(code).toBe('WORKFLOW_INVALID_STATE');
+    // 被拒的中止不许在库里留下一行：idle 的 run 本来就没有落库，读回因此还是 null。
+    expect(idle.runner.state()).toBeNull();
+
+    const finished = await boot();
+    finished.runner.start();
+    await waitFor(() => finished.runner.current().status === 'done');
+    expect(() => finished.runner.abort()).toThrow(/没有可中止的 run/);
+    expect(finished.runs.state(finished.runner.current().runId)?.status).toBe('done');
   });
 });
 

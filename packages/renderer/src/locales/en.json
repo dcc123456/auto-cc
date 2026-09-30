@@ -373,10 +373,12 @@
       "pause": "Pause",
       "resume": "Resume",
       "retry": "Retry",
+      "abort": "Abort",
       "actionStart": "start workflow",
       "actionPause": "pause workflow",
       "actionResume": "resume workflow",
       "actionRetry": "retry {{step}}",
+      "actionAbort": "abort this run",
       "nowStatus": "This action returned: {{status}}",
       "live": "Latest progress: {{message}}",
       "duration": "{{ms}} ms",
@@ -407,6 +409,22 @@
         "unobserved-side-effect": "The outbound action of {{subject}} at \"{{step}}\" was not observed (it may already have been sent). Check the embedded view first, then retry this step.",
         "manual-takeover": "\"{{step}}\" is declared as a manual takeover point by {{subject}} (captcha / risk control), the run is paused. Finish it yourself, then retry this step.",
         "risk-control": "{{subject}} served a risk-control page (captcha / access blocked), the run stopped at \"{{step}}\". Finish the check inside the embedded view, then continue."
+      },
+      "evidence": {
+        "toggle": "Show failure evidence",
+        "actionRead": "read failure evidence",
+        "loading": "Reading this step's evidence from the main process…",
+        "none": "—",
+        "attempt": "attempt {{attempt}} · decided at {{at}}",
+        "pageNone": "This step left no page reading (no kernel session was available)",
+        "shotAlt": "Screenshot of the page when this step failed",
+        "shotMeta": "on-site screenshot {{width}}×{{height}} · {{bytes}} bytes",
+        "ref": "evidence file: {{ref}}",
+        "omitted": {
+          "missing": "No screenshot for this step (the capture never got a frame)",
+          "unreadable": "The screenshot could not be read (file gone or cleaned up)",
+          "too-large": "The screenshot is above the read cap, so it was not loaded (the reason is still above)"
+        }
       },
       "lab": {
         "heading": "Workflow runner (store truth)",

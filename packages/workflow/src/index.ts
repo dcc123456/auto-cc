@@ -25,6 +25,7 @@ import {
   type WorkflowNodeSpec,
   type WorkflowNodeExecutor,
   type WorkflowNodePhase,
+  type WorkflowEvidenceView,
   type WorkflowPlanView,
   type WorkflowRunStateView,
   type WorkflowRunView,
@@ -32,7 +33,7 @@ import {
   type WorkflowStepView,
   type WorkflowTakeoverView,
 } from '@auto-cc/core';
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -99,6 +100,13 @@ export const workflowConfigSchema = z.object({
   evidenceTextChars: z.number().int().min(0).max(20000).default(300),
   /** userData 下的证据子目录名；文件名是 `<runId>-<nodeId>.json`，现场截图同名换成 `.png`。 */
   evidenceDir: z.string().min(1).max(64).default('evidence'),
+  /**
+   * 读侧上限：一张现场截图经 IPC 交给渲染层最多个头（字节）。
+   *
+   * 它和上面两个写侧上限不是一回事（那两条管的是「正文里留多少字」，这条管的是「一次 IPC 能塞多大」），
+   * 所以必须存在：整窗 PNG 在真实站点上可以到几 MB，超限就不给图而不是截半张。
+   */
+  evidenceShotBytes: z.number().int().min(0).max(20_000_000).default(2_000_000),
   /** 旧 run 的保留个数，超出清 `workflow_*` 行并连带删掉它们的证据文件。 */
   retentionRuns: z.number().int().min(1).max(500).default(20),
 });
@@ -200,6 +208,102 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
+   * 读回一个失败节点的证据（spec 2.8-04）：错误码与正文 + 现场截图，全部取自主进程自己写下的那份文件。
+   *
+   * 入参来自渲染层，按不可信输入处理（AGENTS.md §2.6）：**不拿这两个字符串拼路径**，
+   * 而是先查库——只有 `workflow_nodes` 里确实登记过这条 (runId, nodeId) 且它的 `evidence_ref`
+   * 与按配置算出来的文件名完全一致时才去读盘。于是「报一个别人的 runId」和
+   * 「用 `../` 够到证据目录外面」两条路都在库里撞墙，而不是靠字符白名单侥幸。
+   *
+   * 正文不在这里二次脱敏：`writeEvidence` 落盘前整份过了 `redactValue`（spec 2.7-07 的唯一写盘点）。
+   * @param runIdRaw 界面给的 run id（来自 `state()` / `resumable()` 的读数，不是用户输入）
+   * @param nodeIdRaw 界面给的节点 id
+   * @returns 证据读数；库里没有这条 run / 这个节点、或这一位根本没有证据时结构化失败而不是返回半份
+   * @throws `INVALID_ARGUMENT`（id 不属于任何落库节点，或那次节点没有证据文件）
+   */
+  readEvidence(runIdRaw: string, nodeIdRaw: string): WorkflowEvidenceView {
+    const stored = this.store.state(runIdRaw);
+    const node = stored?.nodes.find((item) => item.nodeId === nodeIdRaw);
+    if (!stored || !node) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `库里查不到这次 run 的这个节点（${runIdRaw} / ${nodeIdRaw}），拒绝读证据`,
+        'workflow.runner',
+        { runId: runIdRaw, nodeId: nodeIdRaw },
+      );
+    }
+    const json = this.evidenceFile(stored.runId, node.nodeId, 'json');
+    if (node.evidenceRef === null || node.evidenceRef !== json.relative) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        node.evidenceRef === null
+          ? `节点 ${node.nodeId} 没有登记证据文件（这一步不是失败结算的），无证据可读`
+          : `这个节点登记的证据不是这条路径（库里 ${node.evidenceRef}），拒绝读`,
+        'workflow.runner',
+        { runId: stored.runId, nodeId: node.nodeId, ref: node.evidenceRef },
+      );
+    }
+    const evidence = this.readEvidenceFile(json.absolute);
+    const screenshot = this.readEvidenceScreenshot(stored.runId, node.nodeId, evidence?.screenshot ?? null);
+    return {
+      runId: stored.runId,
+      nodeId: node.nodeId,
+      attempt: evidence?.attempt ?? node.attempts,
+      at: evidence?.at ?? node.finishedAt ?? stored.startedAt,
+      error: {
+        code: evidence?.error.code ?? 'UNKNOWN',
+        message: evidence?.error.message ?? node.error ?? '这次失败没有留下证据正文',
+      },
+      page: evidence?.page ?? null,
+      screenshot,
+      ref: json.relative,
+    };
+  }
+
+  /**
+   * 读并解析证据 JSON。
+   * @param absolute 由 `evidenceFile` 算出的磁盘路径（不接受外部拼好的路径）
+   * @returns 解析出来的证据本体；文件不存在或读不出/解析不了时 null（读数面自己决定怎么报错）
+   */
+  private readEvidenceFile(absolute: string): NodeEvidence | null {
+    try {
+      return JSON.parse(readFileSync(absolute, 'utf8')) as NodeEvidence;
+    } catch {
+      // 保留期清理之后再来点展开、或磁盘问题：这一格空着比编一份出来诚实。
+      return null;
+    }
+  }
+
+  /**
+   * 读现场截图并转成 data URL（渲染层拿到的就是这个，`file:` 路径一律不给）。
+   * @param runId 已核对过的 run id
+   * @param nodeId 已核对过的节点 id
+   * @param shot 证据本体里的截图位（写盘时没取到画面就是 null）
+   * @returns 取到了给 `dataUrl` 那份，取不到给 `{ omitted }` 说明为什么没给
+   */
+  private readEvidenceScreenshot(
+    runId: string,
+    nodeId: string,
+    shot: NodeEvidence['screenshot'],
+  ): WorkflowEvidenceView['screenshot'] {
+    if (!shot) return { omitted: 'missing' };
+    const png = this.evidenceFile(runId, nodeId, 'png');
+    try {
+      const bytes = statSync(png.absolute).size;
+      if (bytes > this.config.evidenceShotBytes) return { omitted: 'too-large' };
+      const buffer = readFileSync(png.absolute);
+      return {
+        dataUrl: `data:image/png;base64,${buffer.toString('base64')}`,
+        width: shot.width,
+        height: shot.height,
+        bytes,
+      };
+    } catch {
+      return { omitted: 'unreadable' };
+    }
+  }
+
+  /**
    * 起一个新的 run 并开始推进。
    * @returns 刚进入 `running` 的状态
    * @throws 上一个 run 还没走完时以 `WORKFLOW_INVALID_STATE` 失败（先暂停/重试，别并行两个 run）；
@@ -254,6 +358,36 @@ export class WorkflowRunnerService extends Service {
     this.controller = new AbortController();
     void this.pump();
     return resumed;
+  }
+
+  /**
+   * 中止本次 run（spec 2.8-03）：停下来，并把库里这一行判成 `interrupted` + `USER_ABORT`。
+   *
+   * 刻意**不给状态机加新终态、也不给界面加第六个状态**（plan §15.1 决策 2）：中止与「进程被 kill」
+   * 要的是同一条语义——都停在可恢复点上、都能被 `resumeRun()` 按原下标续上。既有不变量
+   * （`interrupted` 读回成 `paused` + 接管位，见 `toMirror`）因此直接复用，中止只是「用户自己按的 interrupted」。
+   *
+   * 也不写接管标记：`manual-takeover` 那个原因按定义是「节点自己声明的接管点」（验证码一类），
+   * 中止不是被拦下来的，挂上它就会让界面说一句不对的话。中止的原因走库里的 `lastError`（机器码，界面按码组句）。
+   * @returns 停在可恢复点上的 `paused` 镜像
+   * @throws 没有在跑也没有停着的 run（`idle` / `done`）时 `WORKFLOW_INVALID_STATE`
+   */
+  abort(): WorkflowRunView {
+    if (this.run.status === 'running') {
+      // 走与暂停同一条路：当前步退回 pending、发出取消信号，等它自己让出（spec 2.4-07）。
+      this.stop(null, '已中止');
+    } else if (this.run.status !== 'paused') {
+      throw new AppError('WORKFLOW_INVALID_STATE', `没有可中止的 run，当前是 ${this.run.status}`, 'workflow.runner', {
+        status: this.run.status,
+      });
+    }
+    this.store.updateRun(this.run.runId, {
+      status: 'interrupted',
+      nodeIndex: this.run.stepIndex,
+      finishedAt: Date.now(),
+      lastError: 'USER_ABORT',
+    });
+    return this.run;
   }
 
   /**
