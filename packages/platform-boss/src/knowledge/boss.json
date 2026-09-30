@@ -113,7 +113,7 @@
       ]
     },
     "applyButton": {
-      "description": "投递按钮【未实测】本地仿站尚无投递控件，待子计划 2.6 的仿站页面落地后按真实 DOM 校准",
+      "description": "投递按钮【未实测】真实站点的投递入口，仿站里对应的是 /deliver 上的 resumeSendButton（2.6-c 已落地），本条留给真实站点在场校准时用",
       "cardinality": "single",
       "candidates": [
         { "strategy": "testId", "attribute": "data-testid", "value": "jd-apply" },
@@ -164,7 +164,7 @@
       ]
     },
     "resumeUploadInput": {
-      "description": "简历上传控件【未实测】本地仿站的投递页尚未落地（2.6-c 补），待真实 DOM 校准；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉",
+      "description": "简历上传控件【仿站已就位·真实站点未实测】本地仿站 /deliver?targetId= 的隐藏 input[type=file]（display:none，人的入口做在 label 上）已按这两条候选落地，并页面实测过「注入 → change 回读文件名与字节数」；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉",
       "cardinality": "single",
       "requireActionable": false,
       "candidates": [
@@ -173,7 +173,7 @@
       ]
     },
     "resumeSendButton": {
-      "description": "确认投递按钮【未实测】同上，待 2.6-c 的仿站投递页落地后按真实 DOM 校准",
+      "description": "确认投递按钮【仿站已就位·真实站点未实测】仿站 /deliver 上是 button[data-testid=resume-send]，文案「发送简历」，所以 role+可读名那条候选同源可用；那一行「已送达」只在服务端收讫这份字节之后才画出来，点按钮本身不构成成功",
       "cardinality": "single",
       "candidates": [
         { "strategy": "testId", "attribute": "data-testid", "value": "resume-send" },
@@ -181,7 +181,7 @@
       ]
     },
     "resumeDeliverStatus": {
-      "description": "投递状态行【未实测】同上：sent 与「岗位已下架」两种结局都从这一行回读，所以它既是成功判据也是二次校验的读数来源",
+      "description": "投递状态行【仿站已就位·真实站点未实测】仿站 /deliver 上同一条 p 同时带 data-testid 与 data-role=deliver-status，两条候选指向同一节点；sentPattern 与「岗位已下架」两种结局都从这一行回读，所以它既是成功判据也是二次校验的读数来源",
       "cardinality": "single",
       "candidates": [
         { "strategy": "testId", "attribute": "data-testid", "value": "resume-deliver-status" },

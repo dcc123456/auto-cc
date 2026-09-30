@@ -29,12 +29,19 @@
  * - `/trusted` 把 `mousedown/click/input` 的 `{type,isTrusted,inputType,value}` 记进
  *   `window.__autoCcTrustReadings` 并 POST 到 `/api/trust`（`GET /api/trust` 读回同一份），
  *   受通道是否产出受信事件、中文与 emoji 有没有乱码，都由这份对端读数说（spec 2.2-12 / 2.2-13）；
+ * - `/deliver` 是**简历投递靶页**（spec 2.6-04 / 06 / 07）：`input[type=file]` 刻意做成 `display:none`
+ *   （真实站点把入口藏在「选择文件」背后，按默认可点判据永远定位不到），页面对那一次 `change` 自报
+ *   `{changeCount,isTrusted,name,size,type}`，选中后把**文件字节原样** POST 到 `/api/deliver-upload`，
+ *   服务端算 sha256 登记成附件，`POST /api/deliver` 才让状态行变成「简历已送达」——
+ *   于是「简历真的到了站点」由 `GET /api/deliveries` 说，而不是由 app 自述。
+ *   `?targetId=1002` 这一条的状态行开局就是「该岗位已下架」，是 2.6-07 的二次校验靶子；
  * - `/api/fail-counter` 是**失败注入计数器**（POST 计一次并回 `{hits}`，GET 只读，DELETE 归零）：
  *   `boss-basic` 计划的 `demo.flaky` 节点打它，于是「前两次必失败、第三次成功」这条退避重试的路径
  *   在 app 被真的 kill 掉之后仍然接得上（spec 2.4-03 / 2.4-05 —— 计数放在进程外才有跨重启的证据）；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -64,6 +71,7 @@ const loginTargets: Record<string, string> = {
   '/chat': '/chat',
   '/newtab': '/newtab',
   '/trusted': '/trusted',
+  '/deliver': '/deliver',
 };
 
 /** 解析请求头里的 cookie，只回名字 —— 证据文件里也不该出现值。 */
@@ -124,6 +132,50 @@ function appendThreadMessage(targetId: string, direction: ThreadMessage['directi
  * 计数若在主进程内存里，那一刻会被清零，「第 3 次才成功」这条完整路径就拍不到证据了。
  */
 let failCounterHits = 0;
+
+/**
+ * 投递靶页的状态（2.6 用）。
+ *
+ * `offlineJobIds` 里的那些岗位**在 `/boss` 列表里照常出现**（能被抓到、能进库），只有投递页说它下架了
+ * ——这正是 spec 2.6-07 要演的场景：库里那条 JD 是抓取那一刻的快照，只有页面能回答「现在还在不在招」。
+ * `1002`（React 前端工程师）是刻意挑的：它是一条正常数据，不是什么坏数据，所以「下架」这个结局
+ * 只能来自页面的回答，不会与 2.3-08 的坏数据靶子（`1005` 缺正文）混在一起。
+ */
+const offlineJobIds = new Set(['1002']);
+
+/** 服务端登记过的一份附件（字节到了站点这一步的证据；sha256 在这里算，不信任页面报的任何摘要）。 */
+type DeliverAttachment = {
+  id: number;
+  targetId: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  receivedAt: number;
+};
+
+/** 一次「点发送」的收讫记录：`GET /api/deliveries` 回的就是它，投递是否真发生由这里说。 */
+type DeliverReceipt = {
+  id: number;
+  targetId: string;
+  attachmentId: number;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  deliveredAt: number;
+};
+
+const deliverAttachments: DeliverAttachment[] = [];
+const deliverReceipts: DeliverReceipt[] = [];
+
+/** 附件与收讫记录共用一个发号器：截图里的「#7」在两张表里指向同一份东西，对账不用换算。 */
+let deliverSeq = 0;
+
+/**
+ * 原始体的上限（字节）。
+ * 简历上限是 5 MB（`outbound.deliver.maxResumeBytes` 的默认值），这里留到 8 MB：
+ * 让「超限」由被测代码判，而不是被 fixture 抢先回一个 413 冒充成功路径。
+ */
+const MAX_DELIVER_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /** 仿站的一条虚构岗位。字段与知识包 `capture.list.fields` 一一对应，正文两条对应 `capture.detail`。 */
 type FixtureJob = {
@@ -580,6 +632,215 @@ function readJson(
 }
 
 /**
+ * `/deliver` 的内容：简历投递靶页（spec 2.6-04 / 06 / 07 的截图对象）。
+ *
+ * 三处刻意复刻真实站点，而不是做一张「好点」的页：
+ * ① 上传控件 `display:none`（站点把入口藏在「选择文件」背后）——所以知识包那条定位声明必须带
+ *    `requireActionable:false`，也所以 2.6-a 把等待判据换成 `appear`；人用的入口是一个 `<label>`，
+ *    点标签照样能唤起隐藏控件，DOM 里只有那一个 `input[type=file]`；
+ * ② 状态行开局文本由服务端按 `targetId` 现填（下架岗位一进来就写「该岗位已下架」），
+ *    「在不在架」是页面的读数，不是 app 能猜的（spec 2.6-07）；
+ * ③ 「已送达」这句话只在**服务端收讫那份字节之后**才画出来——点了按钮不等于站点收了简历。
+ * 页面对那一次 `change` 的自述（`changeCount` / `isTrusted` / 文件名 / 字节数）按 `data-testid` 逐条摆开，
+ * 机读判据要的就是这几行（spec 2.6-04）。
+ */
+const deliverPageHtml = `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>简历投递页 · 本地 fixture</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 13px/1.7 system-ui, sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      .upload-input {
+        display: none;
+      }
+      .pick,
+      button {
+        display: inline-block;
+        font: inherit;
+        padding: 4px 12px;
+        border-radius: 6px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+        cursor: pointer;
+      }
+      .card {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        background: #111c31;
+      }
+      .status {
+        font-weight: 700;
+        color: #fbbf24;
+      }
+      b {
+        color: #f8fafc;
+      }
+    </style>
+  </head>
+  <body data-fixture-page="deliver">
+    <h1>简历投递页（本地仿站）</h1>
+    <p>投递目标：<code data-testid="deliver-target">（脚本未运行）</code></p>
+    <p>登录态：<code data-testid="deliver-auth">（脚本未运行）</code></p>
+
+    <div class="card">
+      <p>上传控件与真实站点一样藏在按钮背后（<code>display:none</code>）：按默认可点判据它永远定位不到，注入走的是 CDP 而不是坐标。</p>
+      <p>
+        <label class="pick" for="resume-file">选择简历文件</label>
+        <span data-testid="deliver-note">（人点这个标签；app 用 <code>browser.act.upload</code> 直接注进控件）</span>
+      </p>
+      <input id="resume-file" class="upload-input" type="file" name="resume" accept="application/pdf" data-testid="resume-upload-input" />
+      <p>
+        页面对 <code>change</code> 的自述：收到 <b data-testid="upload-change-count">0</b> 次 ·
+        isTrusted <b data-testid="upload-is-trusted">（无）</b> · 文件 <b data-testid="upload-file-name">（空）</b> ·
+        字节 <b data-testid="upload-file-size">0</b> · 类型 <b data-testid="upload-file-type">（空）</b>
+      </p>
+      <p data-testid="deliver-server-readout">服务端登记：（尚未上传）</p>
+    </div>
+
+    <p><button type="button" data-testid="resume-send">发送简历</button></p>
+    <p>投递状态行（<code>sentPattern</code> 与 <code>offlinePattern</code> 都从这里回读）：</p>
+    <p class="status" data-testid="resume-deliver-status" data-role="deliver-status">{{initialStatus}}</p>
+    <script>
+      const uploadInput = document.querySelector('[data-testid="resume-upload-input"]');
+      const serverReadout = document.querySelector('[data-testid="deliver-server-readout"]');
+      const statusLine = document.querySelector('[data-testid="resume-deliver-status"]');
+      // 目标 id 由页面自己从地址栏读并画出来（不服务端插值）：截图里那一行就是「这一页演的是哪个 jobId」的证据，
+      // 也顺带保证「targetId 里带任何字符」都不会变成这页里的 HTML。
+      const deliverTarget = new URLSearchParams(location.search).get('targetId') || '';
+      document.querySelector('[data-testid="deliver-target"]').textContent = deliverTarget || '（地址里没有 targetId）';
+      let changeCount = 0;
+      let attachmentId = null;
+
+      /**
+       * 写一行页面读数。
+       * @param selector 目标节点的 <code>data-testid</code> 选择器
+       * @param text 要落的文本（按字面写，中文与文件名原样出现在 DOM 里）
+       */
+      function fill(selector, text) {
+        document.querySelector(selector).textContent = text;
+      }
+
+      /** 把选中的那份文件原样 POST 给服务端：字节到了站点这一步，才算「附件登记上了」。 */
+      function registerUpload(file) {
+        const query = new URLSearchParams({ targetId: deliverTarget, fileName: file.name });
+        fetch('/api/deliver-upload?' + query.toString(), { method: 'POST', body: file })
+          .then((response) => response.json())
+          .then((payload) => {
+            if (!payload.ok) {
+              serverReadout.textContent = '服务端登记失败：' + payload.error;
+              attachmentId = null;
+              return;
+            }
+            attachmentId = payload.attachmentId;
+            // 摘要只报前 12 位：与账本 <code>source</code> 里 <code>resume:&lt;sha256 前 12 位&gt;</code> 同一形状，截图里能直接对（spec 2.6-05）。
+            serverReadout.textContent =
+              '服务端已登记附件 #' + String(payload.attachmentId) + '：' + payload.fileName +
+              ' / ' + String(payload.sizeBytes) + ' 字节 · sha256 前 12 位 ' + payload.sha256.slice(0, 12);
+          })
+          .catch((error) => {
+            serverReadout.textContent = '服务端登记失败：' + String(error);
+            attachmentId = null;
+          });
+      }
+
+      uploadInput.addEventListener('change', (event) => {
+        changeCount += 1;
+        // 注入不带用户手势，isTrusted 就必须报 false——这一行是页面自己答的，不由我们替它宣称（spec 2.2-12 延伸到 2.6）。
+        fill('[data-testid="upload-change-count"]', String(changeCount));
+        fill('[data-testid="upload-is-trusted"]', String(event.isTrusted));
+        const file = uploadInput.files && uploadInput.files.length ? uploadInput.files[0] : null;
+        fill('[data-testid="upload-file-name"]', file ? file.name : '（空）');
+        fill('[data-testid="upload-file-size"]', file ? String(file.size) : '0');
+        fill('[data-testid="upload-file-type"]', file ? file.type || '（空）' : '（空）');
+        if (file) registerUpload(file);
+      });
+
+      /** 点「发送简历」：只有服务端收讫过的那份附件才允许状态行变成已送达。 */
+      function sendResume() {
+        if (attachmentId === null) {
+          statusLine.textContent = '页面未登记任何附件，简历不会送达';
+          return;
+        }
+        fetch('/api/deliver', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ targetId: deliverTarget, attachmentId }),
+        })
+          .then((response) => response.json())
+          .then((payload) => {
+            statusLine.textContent = payload.ok
+              ? '简历已送达：目标 ' + payload.targetId + ' · 附件 #' + String(payload.attachmentId) +
+                '（服务端第 ' + String(payload.received) + ' 次收讫）'
+              : '投递未成功：' + payload.error;
+          })
+          .catch((error) => {
+            statusLine.textContent = '投递失败：服务端不可达（' + String(error) + '）';
+          });
+      }
+
+      document.querySelector('[data-testid="resume-send"]').addEventListener('click', sendResume);
+      fetch('/api/state')
+        .then((response) => response.json())
+        .then((payload) => {
+          document.querySelector('[data-testid="deliver-auth"]').textContent = payload.loggedIn
+            ? '已登录（读得到 autocc_session）'
+            : '未登录';
+        })
+        .catch(() => {
+          document.querySelector('[data-testid="deliver-auth"]').textContent = '服务端不可达';
+        });
+    </script>
+  </body>
+</html>
+`;
+
+/**
+ * 读完一段**原始**请求体（不是 JSON）——上传靶页把文件字节原样 POST 上来，摘要必须由服务端自己算。
+ *
+ * 为什么不复用 `readJson`：它的 64 KB 上限装不进一份真简历，而 base64-in-JSON（plan §13.5 的原始打算）
+ * 会把体积再抬 4/3 并让「服务端收到的字节」变成「解码出来的字节」，中间多一道换算就多一分不实。
+ * @param request 进来的请求
+ * @param response 待写的响应（超限时就地回 413）
+ * @param limitBytes 上限（字节）
+ * @returns 原始字节；超限且已回 413 时为 `null`（调用方必须立刻返回，体已被销毁不会再有 end）
+ */
+async function readRawBody(
+  request: IncomingMessage,
+  response: ServerResponse,
+  limitBytes: number,
+): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limitBytes) {
+        response.writeHead(413).end();
+        request.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
+
+/**
  * 回一份静态 HTML。
  * @param response 待写的响应
  * @param html 页面内容（已做过占位替换或本身就是静态子视图）
@@ -633,6 +894,105 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   if (url.pathname === '/api/outbox') {
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ count: outbox.length, items: outbox }));
+    return;
+  }
+
+  // 上传靶页把文件**字节原样**POST 上来（2.6-04 / 05 的对端读数）：名字来自页面，字节与摘要只信这里。
+  if (url.pathname === '/api/deliver-upload' && request.method === 'POST') {
+    const bytes = await readRawBody(request, response, MAX_DELIVER_UPLOAD_BYTES);
+    if (bytes === null) return;
+    const targetId = url.searchParams.get('targetId') ?? '';
+    const fileName = url.searchParams.get('fileName') ?? '';
+    if (!targetId || !fileName) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '缺少 targetId / fileName' }));
+      return;
+    }
+    if (bytes.length === 0) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '空附件' }));
+      return;
+    }
+    deliverSeq += 1;
+    const attachment: DeliverAttachment = {
+      id: deliverSeq,
+      targetId,
+      fileName,
+      sizeBytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      receivedAt: Date.now(),
+    };
+    deliverAttachments.push(attachment);
+    console.log(
+      `[fixture] 登记附件 #${String(attachment.id)}：${fileName}（${String(bytes.length)} 字节）→ ${targetId}`,
+    );
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        attachmentId: attachment.id,
+        targetId: attachment.targetId,
+        fileName: attachment.fileName,
+        sizeBytes: attachment.sizeBytes,
+        sha256: attachment.sha256,
+      }),
+    );
+    return;
+  }
+
+  // 「点发送」的收讫端点（spec 2.6-03 / 07）：在架才收，且只认已登记的附件——状态行那句「已送达」由这里的答复撑着。
+  if (url.pathname === '/api/deliver' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    if (typeof body['targetId'] !== 'string' || typeof body['attachmentId'] !== 'number') {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '缺少 targetId / attachmentId' }));
+      return;
+    }
+    const attachment = deliverAttachments.find((item) => item.id === body['attachmentId']);
+    if (!attachment) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: `服务端没有登记过附件 #${String(body['attachmentId'])}` }));
+      return;
+    }
+    if (offlineJobIds.has(body['targetId'])) {
+      // 409 而不是 200：下架岗位不该收到「发送成功」这句话，页面上那句失败文案就是这么来的。
+      response.writeHead(409, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: '岗位已下架，站点不收这份简历' }));
+      return;
+    }
+    deliverSeq += 1;
+    const receipt: DeliverReceipt = {
+      id: deliverSeq,
+      targetId: body['targetId'],
+      attachmentId: attachment.id,
+      fileName: attachment.fileName,
+      sizeBytes: attachment.sizeBytes,
+      sha256: attachment.sha256,
+      deliveredAt: Date.now(),
+    };
+    deliverReceipts.push(receipt);
+    console.log(
+      `[fixture] 第 ${String(deliverReceipts.length)} 次投递收讫：附件 #${String(receipt.id)} → ${receipt.targetId}`,
+    );
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        targetId: receipt.targetId,
+        receiptId: receipt.id,
+        attachmentId: receipt.attachmentId,
+        received: deliverReceipts.length,
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === '/api/deliveries') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({ count: deliverReceipts.length, receipts: deliverReceipts, attachments: deliverAttachments }),
+    );
     return;
   }
 
@@ -822,6 +1182,15 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  if (url.pathname === '/deliver') {
+    // 开局状态行由服务端按 `targetId` 现填：页面上那句「已下架」是站点说的，不是 app 能猜的（spec 2.6-07）。
+    const initialStatus = offlineJobIds.has(url.searchParams.get('targetId') ?? '')
+      ? '该岗位已下架，简历不会送达'
+      : '等待投递';
+    sendHtml(response, deliverPageHtml.replaceAll('{{initialStatus}}', initialStatus));
+    return;
+  }
+
   response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
   response.end('not found');
 }
@@ -834,7 +1203,7 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   // 路由清单打在启动日志里：验收脚本按这份列表逐条 curl，不用回头翻代码。
   console.log(
-    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /api/fail-counter（cookie ${cookieName}）`,
+    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/deliveries（cookie ${cookieName}）`,
   );
 });
 
