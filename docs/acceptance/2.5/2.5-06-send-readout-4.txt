@@ -1,0 +1,100 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/2.5d-send.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/2.5d-send.js"
+
+{
+  "clicked": {
+    "status": "done",
+    "channel": "cdp",
+    "trusted": true,
+    "frameUrl": "http://127.0.0.1:10233/chat/frame?targetId=2002"
+  },
+  "statusText": "",
+  "statusReading": {
+    "status": "matched",
+    "spec": {
+      "description": "帧内发送状态行：外发要「回读到成功态才算 sent」，读的就是它（data-testid=chat-frame-status）",
+      "cardinality": "single",
+      "candidates": [
+        {
+          "strategy": "testId",
+          "attribute": "data-testid",
+          "value": "chat-frame-status"
+        },
+        {
+          "strategy": "xpath",
+          "value": "//strong[@data-testid='chat-frame-status']"
+        }
+      ]
+    },
+    "chosen": {
+      "frameUrl": "http://127.0.0.1:10233/chat/frame?targetId=2002",
+      "candidateIndex": 0,
+      "strategy": "testId",
+      "siblingCount": 1,
+      "nodeIndex": 3,
+      "visible": true,
+      "enabled": true,
+      "unobstructed": true,
+      "tagName": "strong",
+      "role": "",
+      "accessibleName": "",
+      "text": "第 2 条已送达服务端",
+      "attributes": {
+        "data-testid": "chat-frame-status"
+      },
+      "ancestorRoles": [],
+      "nearbyTexts": [],
+      "rect": {
+        "x": 77,
+        "y": 260.41668701171875,
+        "width": 119.77083587646484,
+        "height": 16.666667938232422
+      },
+      "score": 100,
+      "reasons": [
+        "testId 基线 100"
+      ]
+    },
+    "ranked": [
+      {
+        "frameUrl": "http://127.0.0.1:10233/chat/frame?targetId=2002",
+        "candidateIndex": 0,
+        "strategy": "testId",
+        "siblingCount": 1,
+        "nodeIndex": 3,
+        "visible": true,
+        "enabled": true,
+        "unobstructed": true,
+        "tagName": "strong",
+        "role": "",
+        "accessibleName": "",
+        "text": "第 2 条已送达服务端",
+        "attributes": {
+          "data-testid": "chat-frame-status"
+        },
+        "ancestorRoles": [],
+        "nearbyTexts": [],
+        "rect": {
+          "x": 77,
+          "y": 260.41668701171875,
+          "width": 119.77083587646484,
+          "height": 16.666667938232422
+        },
+        "score": 100,
+        "reasons": [
+          "testId 基线 100"
+        ]
+      }
+    ],
+    "reason": "胜出候选 100 分（testId）",
+    "relocated": false,
+    "snapshotRef": "http://127.0.0.1:10233/chat/frame?targetId=2002@1790771451863",
+    "snapshot": null,
+    "at": 1790771451863
+  }
+}

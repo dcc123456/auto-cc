@@ -1,0 +1,63 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/2.5d-reply.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/2.5d-reply.js"
+
+{
+  "statusBefore": {
+    "total": 2,
+    "recruiterMessages": 1,
+    "jobs": 1,
+    "schemaVersion": 5,
+    "newestJobId": "1001"
+  },
+  "synced": {
+    "platform": "boss",
+    "jobId": "2002",
+    "read": 2,
+    "inserted": 2,
+    "duplicate": 0,
+    "at": 1790771468524
+  },
+  "listed": {
+    "total": 2,
+    "rows": [
+      {
+        "id": 5,
+        "platform": "boss",
+        "jobId": "2002",
+        "from": "self",
+        "text": "我：你好！我对贵司「高级前端工程师」岗位很感兴趣：3 年 React + TypeScript 经验，做过 monorepo 与自动化测试基建，也写过中文文案的 i18n。方便聊聊吗？🙂",
+        "externalId": "3",
+        "at": 1790771468519
+      },
+      {
+        "id": 6,
+        "platform": "boss",
+        "jobId": "2002",
+        "from": "recruiter",
+        "text": "对方：方便的话把简历发我看看，我们下周可以安排面试。🙂",
+        "externalId": "4",
+        "at": 1790771468519
+      }
+    ]
+  },
+  "statusAfter": {
+    "total": 4,
+    "recruiterMessages": 2,
+    "jobs": 2,
+    "schemaVersion": 5,
+    "newestJobId": "2002"
+  },
+  "again": {
+    "platform": "boss",
+    "jobId": "2002",
+    "read": 2,
+    "inserted": 0,
+    "duplicate": 2,
+    "at": 1790771468578
+  }
+}

@@ -1,0 +1,25 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:10233" "--expr-file" "tmp/2.5d-frame.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:10233" "--expr-file" "tmp/2.5d-frame.js"
+
+{
+  "frameUrl": "/chat/frame?targetId=2002",
+  "status": "第 2 条已送达服务端",
+  "target": "2002（线程内 2 条）",
+  "items": [
+    {
+      "messageId": "3",
+      "direction": "outbound",
+      "text": "我：你好！我对贵司「高级前端工程师」岗位很感兴趣：3 年 React + TypeScript 经验，做过 monorepo 与自动化测试基建，也写过中文文案的 i18n。方便聊聊吗？🙂"
+    },
+    {
+      "messageId": "4",
+      "direction": "inbound",
+      "text": "对方：方便的话把简历发我看看，我们下周可以安排面试。🙂"
+    }
+  ]
+}

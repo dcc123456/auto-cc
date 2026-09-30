@@ -604,6 +604,35 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
    证据图 `docs/acceptance/2.5/2.5-12-llm-row-1.png` / `2.5-12-llm-log-2.png`。
    注意这里只证明了"挂载 + 如实播报未就绪"，真正的**话术模板回落**要等 2.5-b 的 `outbound.script`。
 
+#### 12.6.2 S1 / S2 实测结论（2.5-d，2026-09-30）
+
+两条都在真实 Electron 页面（CDP 10222）+ 本地 fixture（127.0.0.1:10233）上跑完，不是读文档得出的。
+
+1. **S1 不再重跑**：它问的"中文 + emoji 能不能落进同源 iframe 的 textarea"，
+   已由已验收的 2.2-10（帧内元素可定位与操作）与 2.2-13（中文/emoji 走 `Input.insertText` 不乱码）覆盖，
+   证据图在 `docs/acceptance/2.2/`。本轮只补了一次读数确认：`harness type --value '你好，BOSS！😊'` 打进
+   `/chat/frame` 后，页面内回读码点为 `4f60 597d ff0c 42 4f 53 53 ff01 1f60a`、长度 9 —— 无乱码、无多余字符，
+   且 harness 的命令行参数（argv → CDP）不引入编码损伤。
+2. **UTF-8 的唯一坑在客户端，不在服务端**：先用 `curl -d` 注入回复时，落库文本变成 `fffd` 串
+   （Git Bash 按控制台代码页 GBK 编码请求体）；改用 Node `fetch` 发同一段中文 + emoji 后逐码点相等。
+   因此 2.5-06 的"不乱码"判据必须由**页面内码点比较**说了算，终端回显的乱码不能当证据 —— 它测的是自己的控制台。
+3. **S2 的结论与 §12.6 表里写的不一样，需要更正设计**：fixture 侧确实支持游标
+   （注入 1 条 → `after=0` 读到 1 条、游标 2；再注入 2 条 → `after=2` 只回这 2 条、游标 4；不注入 → 回 0 条），
+   但**真实平台不会给游标**。于是 `readReplies` 的形状不能是"取 >cursor 的增量"，只能是
+   **全量读页面上可见的消息项 + 按页面自带稳定 id 去重落库**；游标降级成本地台账的最大值（少写几次插入），
+   而不是正确性的依据。页面稳定 id 的来源：fixture 每条 `li` 带 `data-message-id`（真实平台是 DOM 里的
+   消息序号/`data-id` 类属性，2.6 校准知识包时替换）。
+4. **帧内轮询渲染已验证**：页面从 0 条起 → 注入 1 条 → 帧内多出且只多出 1 个 `li[data-message-id]`
+   → 再等一个轮询周期仍只有 1 个。即"重复轮询不画重复节点"这条在 fixture 页成立，
+   app 侧去重因此有可对照的现场。
+5. **harness 的两条新雷（写进 1.6 的口径里，别再踩）**：
+   ① `eval` 是页面**顶层**求值，脚本里的 `const` 会留在执行上下文里，第二次跑同一个文件就报
+   `Identifier 'x' has already been declared` —— 探针脚本一律用 IIFE 包裹后 `return`。
+   ② 不带 `--url` 的页面命令会连到 `candidates[0]`，而内嵌内核视图（0×0、`visibilityState:'hidden'`）
+   常常排在第一位：`click` 会对它的坐标派发真实鼠标事件而**什么都不发生**（本例：状态行停在"待发送"、
+   `/api/outbox` 计数不动）。定位到"点了没反应"时，先读 `window.innerWidth` 与 `document.visibilityState`，
+   再决定是不是换 target。这条与 §12.9.2 的"隐藏视图的行点不到"是同一个坑的两个尺度。
+
 ### 12.7 许可状态对本子计划的影响
 
 授权文件仍未落地（P1-02 记录的豁免承诺还没变成仓库内文件），而这次**它真的管得住我们**：
@@ -688,3 +717,77 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
   只对**页面滚动**成立；日志框自己是 `max-h-64 overflow-y-auto`，对它写 `ul.scrollTop = ul.scrollHeight` 是会重绘的。
   所以拍最新日志的固定动作是：先 `eval` 滚内部框，再 `shot --reveal 'li[data-log-level]:last-child'`
   （reveal 这时只需要把框带进视口，否则它会以「已滚到边界但目标仍不在视口内」拒绝拍错的东西）。
+
+### 12.10 2.5-d 的落点设计（写代码前定稿）
+
+**这一片只做「页面 ↔ 会话表」这条通道**：适配器把 `chat` / `readReplies` 两个插槽实现成真实页面动作，
+`conversation_messages` 表把读到的消息落进库。额度闸门、频控、账本仍留给 2.5-e ——
+适配器**一次 `entitlement.gate` 都不进**（AGENTS.md §7.3 的必经口在编排层，1.9-06 的 grep 才有对象可查）。
+
+1. **归属：`conversation_messages` 放 `packages/platform-boss`，不放 `outbound`**。
+   理由不是"顺手"，是依赖方向：`outbound` 的现有依赖里没有 `browser`，让它去调
+   `platform.registry.readReplies()` 就要新开一条 `outbound → browser` 的横向边（AGENTS.md §4.1 禁止）。
+   而 `platform-boss` 已经有这条边并且是同一个形态的先例——通用的 `jobs` 表就住在它里面（`jd-store.ts`）。
+   本轮沿这条先例走，等第二个平台真的落地时再讨论抽包，不提前抽（§2.7）。
+2. **`chat()` 的「sent」必须由页面回读说了算**，不是「点完了就算发出去」：
+   输入回读相等（`act.type` 的 `valueAfter`）→ 状态行文本变化（`act.waitFor` 的 `textChanges`）→
+   文本里含知识包声明的成功样式。任一环不成立就返回 `sent:false` + 原因，绝不返回 true。
+   `textChanges` 要在点击**之前**起好（基线在脚本启动时取），点击与等待并发进行；
+   这是现有原语里唯一不需要再造一套轮询的做法（§2.2）。
+3. **`readReplies()` 只读页面，不读服务端的会话 API**：真实平台上 app 唯一能观察到的面就是 DOM，
+   所以读的是 `messageItem` 声明的那批节点，`from`（对方/自己）由页面上的方向标记判定。
+   游标不是页面给的（§12.6.2 第 3 条），去重靠页面自带的稳定 id → `conversation_messages` 的唯一索引。
+4. **需要给 `extract` 补一个能力**：字段现在只在容器**子树**里找（`extract-script.ts:124` 走
+   `scope.querySelectorAll`），而一条消息的 id / 方向 / 正文都挂在容器本身。
+   补法是给 `ExtractFieldSpec` 加 `scope?: 'subtree' | 'self'`（默认 `subtree`，现有调用点一行都不用改），
+   `self` 就读容器自身。这是扩展现有模块的接口，不是新造第二条读页面的路（§2.3）。
+5. **页面结构事实全进知识包的新 `chat` 段**：`entryPath` / `input` / `sendButton` / `statusLine` /
+   `sentPattern` / `messageItem` / `messageIdAttribute` / `directionAttribute` / `inboundValue`。
+   `adapter.ts` 里出现一条属性名字符串就会被 `scripts/check-knowledge-pack.ts` 的选择器扫描拦下，
+   所以这些只能来自 `pack.chat`。`knowledgePackSchema` 是 `z.strictObject`，多写的键会被拒 ——
+   这一条正好保证「加了段就必须加校验」。
+
+### 12.11 2.5-d 收口记录（页面 ↔ 会话表这条通道，2026-09-30）
+
+**落点与 12.10 的设计一致，逐条对上了**：`ExtractFieldSpec.scope?: 'subtree' | 'self'`（默认 `subtree`，
+老调用点零改动）、知识包新增 `chat` 段、`conversation_messages` 住在 `packages/platform-boss`
+（迁移段 5，唯一索引 `(platform, job_id, dedupe_key)`），适配器没有进 `entitlement.gate`。
+
+**2.5-06「输入中文不乱码、发送后页面出现该消息」是看到页面了的**，不是单测推的：
+`browser.act.type` 走 CDP 受信通道（`channel:'cdp'` / `trusted:true`），92 个字符的中文+emoji 文案
+回读 `valueExact:true`、`valueLength` 与 `expectedLength` 逐字符相等（含「」与 🙂）；
+`browser.act.click` 之后**同源 iframe 内**的状态行真的翻成「第 2 条已送达服务端」，
+父页的 postMessage 读数与独立出口 `/api/outbox` 的计数一起动。证据：
+`docs/acceptance/2.5/2.5-06-typed-1.png`、`2.5-06-sent-2.png`、
+`2.5-06-typed-readout-3.txt`、`2.5-06-send-readout-4.txt`、`2.5-06-frame-readout-5.txt`。
+
+**2.5-07「回复监听入库、带时间戳」同样有页面证据**：向 fixture 注入一条对方回复后，
+它先出现在帧内时间线（`2.5-07-reply-on-page-1.png`，`data-direction="inbound"`），
+再由 `conversation.store.syncFrom` 落库——`read 2 / inserted 2 / duplicate 0`，
+二次同步 `inserted 0 / duplicate 2`（去重键在唯一索引里，不在内存集合里，对应 §2.5-13 的方向），
+行带 `read_at` 与 `external_id`，且按 jobId 分线程（`statusBefore.jobs:1` → `statusAfter.jobs:2`，
+`newestJobId` 从 `1001` 变 `2002`）。证据：`2.5-07-frame-readout-2.txt`、`2.5-07-sync-readout-3.txt`。
+
+**一条诚实的边界**：适配器层面的 `sent:true` 判定只有单测覆盖，没有页面验收截图——
+因为 `platform.boss.chat` 刻意**不在**渲染层白名单里（外发必须经 2.5-e 的额度闸门）。
+页面这条路上能看到的是「输入回读一致 + 状态行变化 + 出箱计数」，
+`sent` 的三环节判定逻辑本身在 `adapter.test.ts` 里断言。这不是回避，是把 §7.3 的必经口留在正确的位置。
+
+**本轮踩到并记下来的三条环境事实**（都是实测，不是推断）：
+
+1. 装机版 app（userData 在 `%APPDATA%\auto-cc`）在跑时，`pnpm dev` 会因单实例锁**静默退出 0**、
+   CDP 端口根本不监听。不要用杀用户进程来解决——`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata-25d" pnpm dev`
+   换一份 userData 即可（`scripts/dev.ts` 已支持）。
+2. fixture 服务是长驻进程，而 `/chat/frame` 的 HTML **内联在 `scripts/fixture-server.ts` 里**，
+   父页 `chat-lab.html` 却是每次请求读磁盘——改了帧内模板不重启 `pnpm fixture`，
+   会得到「半新半旧」的页面，表现为帧绑定到写死的 `fixture-job-1001` 而不是请求参数 `1001`。
+3. CDP `Input.insertText` 是**在光标处插入**，不清空原有内容。所以"无多余字符"这类断言
+   必须每轮先 `browser.page.navigate` 重置页面再输入，否则上一次留下的字会拼进回读值里。
+
+**顺带修掉的一处读数说谎**：帧内「已注入 N 条」原来显示的是**这一批增量**的条数，
+把线程里的消息数说小了。`/api/threads` 增加 `total`（该线程总条数），标签改「线程内 N 条」，
+截图里的数字才与库里行数对得上。
+
+**留给 2.5-08 / 2.5-e 的前置**（本轮不夹带，见 §1.4）：入库正文带着 fixture 的「我：/对方：」前缀，
+因为方向标记和正文在同一个文本节点里、用 `scope:'self'` 一次读全。
+要干净，得同时动 fixture 模板、知识包 `chat` 段声明和适配器解析三处——放到 2.5-08 做已回复标记时一并处理。
