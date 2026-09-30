@@ -123,3 +123,5 @@ declare module '@auto-cc/core' {
 export * from './script.js';
 // 频控间隔是第三个：它是外发的性质不是平台的性质（plan §12.3），所以不放适配器里。
 export * from './throttle.js';
+// 打招呼编排是第四个：把上面三个加上闸门串成唯一的外发入口（plan §12.3 的「发送编排」那一行）。
+export * from './greet.js';

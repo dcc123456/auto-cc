@@ -145,9 +145,30 @@ plugins:
   - id: platform-registry
     dependsOn: [ipc]
 
+  # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
+  # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，
+  # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有 `demo.flaky`。
+  # **必须排在一切登记方之前**（2.5-e 起有两个：`jd-capture` 与 `outbound-greet`）：装配是「按清单顺序
+  # 逐个 await 挂载」（kernel `assemble()`），那两个服务在自己的 `[Service.init]` 里取登记处来登记节点，
+  # 取不到就没人登记 `jd.capture` / `greeting.send`。它自己没有任何依赖，所以放多早都不会 PENDING。
+  # 反过来不给登记方加硬 `inject`——工作流没装时抓取/打招呼本身不该跟着启动失败，只是「节点没人能跑」。
+  - id: workflow-executors
+
+  # 打招呼编排（spec 2.5-02 / 03 / 04 / 09 / 10 / 13）：幂等 → 内容 → 黑名单 → 额度 → 频控 → 发送 → 落账，
+  # 全应用唯一的外发口（AGENTS.md §7.3），界面与工作流节点都汇到这一个 `perform`。
+  # 它自己不认识任何平台，也不保存平台的手：每次外发都向 `platform.registry` 现问一条渠道（契约
+  # `GreetChannelSource` 在 core，plan §12.12 第 1 条 / §12.13）。因此它只排在**登记处**之后，
+  # 不再需要排在 `platform-boss` 之前——适配器晚一点登记进来也立刻可用，这是换成问法买到的性质。
+  # 摘掉这一行：`platform-boss` 照常挂载（它不再向本服务登记东西），而 `greeting.send` 节点
+  # 得到「执行器未登记」的结构化失败——而不是静默少发一条。
+  # 注掉 `platform-registry`：本服务连同进 PENDING（它的 `inject` 里有），界面上的外发口给出结构化错误。
+  - id: outbound-greet
+    dependsOn: [entitlement, outbound-script, outbound-throttle, platform-registry]
+
   # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/boss.json`，
   # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。
-  # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`。
+  # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`，
+  # 打招呼那一路也同时失去渠道（`outbound.greet` 现问现取，返回 `OUTBOUND_CHANNEL_MISSING`）。
   # 想用外部知识文件验证「改数据不改代码」：给 `packFile` 填一个绝对路径（2.6 走这条口）。
   # 2.5-d 起它还要 `browser.act` 那三只手（敲字 / 点击 / 等文本变化）才打得招呼，只读定位不再够用。
   - id: platform-boss
@@ -162,14 +183,6 @@ plugins:
     dependsOn: [store, platform-registry]
     config:
       platform: boss
-
-  # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
-  # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，
-  # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有 `demo.flaky`。
-  # **必须排在 `jd-store` / `jd-capture` 之前**：装配是「按清单顺序逐个 await 挂载」（kernel `assemble()`），
-  # 那两个服务在自己的 `[Service.init]` 里取登记处来登记节点，取不到就没人登记 `jd.capture`。
-  # 反过来不给它们加硬 `inject`——工作流没装时抓取本身不该跟着启动失败，只是「节点没人能跑」。
-  - id: workflow-executors
 
   # 工作流落库（spec 2.4-05 / 2.4-10）：`workflow_runs` / `workflow_nodes` 两张表由本服务自己把迁移
   # push 进 `store.migrations`，号段取 4（`usage_ledger` 1、`chat` 2、`jobs` 3 —— 号段全局，撞号在运行期才炸）。

@@ -46,6 +46,12 @@ export const outboundScriptSchema = z.strictObject({
 /** 校验后的配置形状。 */
 export type OutboundScriptConfig = z.infer<typeof outboundScriptSchema>;
 
+/**
+ * 文案的来路（spec 2.5-10）：模型产出、模板回落、用户在界面上手改。
+ * 黑名单对三路一视同仁——手改的那一路恰恰是最容易漏进去手机号的一路。
+ */
+export type ScriptOrigin = 'model' | 'template' | 'manual';
+
 /** 生成入参的推断类型。 */
 export type ScriptRequest = z.infer<typeof scriptRequestSchema>;
 
@@ -53,7 +59,7 @@ export type ScriptRequest = z.infer<typeof scriptRequestSchema>;
 export interface ScriptDraftView {
   /** 最终可发送的文案（已过黑名单与长度校验） */
   text: string;
-  /** 内容来源：模型产出，或本地模板回落 */
+  /** 内容来源：模型产出，或本地模板回落。`generate` 不会产出 manual，所以这里比 `ScriptOrigin` 窄。 */
   origin: 'model' | 'template';
   /** `origin` 为 template 时必填：模型为什么没用上，界面按它播报 */
   fallbackReason?: string;
@@ -122,7 +128,7 @@ export class OutboundScriptService extends Service {
    * @param origin 内容来源，只用于报错时说得清是哪一路
    * @throws 命中黑名单时以 `OUTBOUND_FORBIDDEN_CONTENT` 失败（detail 带第几条规则）；超长同理
    */
-  assertSendable = (text: string, origin: ScriptDraftView['origin']): void => {
+  assertSendable = (text: string, origin: ScriptOrigin): void => {
     const hitIndex = this.forbidden.findIndex((pattern) => pattern.test(text));
     if (hitIndex >= 0) {
       throw new AppError(

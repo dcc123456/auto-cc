@@ -113,8 +113,8 @@ export const RENDERER_ALLOWLIST = [
   'jd.capture.status',
   'jd.store.list',
   'jd.store.status',
-  // 2.5 的会话面：三条都是**读**（读页面、读库、读概况），打招呼那条外发口不在这里——
-  // 它必须经 `entitlement.gate`，而闸门在编排层（2.5-e），界面直连适配器就是 1.9-05 要拦的形态。
+  // 2.5 的会话面：三条都是**读**（读页面、读库、读概况）。打招呼走 `outbound.greet.perform`
+  // 而不是直连适配器——界面能调的那一口必须已经在闸门里（1.9-05 要拦的就是绕过闸门的外发口）。
   'conversation.store.syncFrom',
   'conversation.store.list',
   'conversation.store.status',
@@ -123,6 +123,8 @@ export const RENDERER_ALLOWLIST = [
   'entitlement.gate.check',
   'usage.ledger.summary',
   'outbound.sample.send',
+  // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
+  'outbound.greet.perform',
   // 1.10 的工作流 runner：五个动作口 + 一个只读快照。
   'workflow.runner.current',
   'workflow.runner.start',
@@ -291,6 +293,47 @@ export type SendReceiptView = {
   ledgerId: number;
   /** fixture 侧累计收到的条数。 */
   delivered: number;
+};
+
+/**
+ * 打一次招呼的入参（spec 2.5-02 / 2.5-13）。
+ *
+ * `text` 与 `script` 二选一：前者是用户在界面上改过的现成文案，后者交给 `outbound.script` 生成。
+ * 两个都给时以 `text` 为准——改过的就是要发出去的。
+ */
+export type GreetRequestView = {
+  /** 平台标识，决定向 `platform.registry` 问哪个平台的打招呼渠道（问不到即 `OUTBOUND_CHANNEL_MISSING`） */
+  platform: string;
+  /** 会话目标（P2 起是平台侧 jobid） */
+  jobId: string;
+  /** 现成文案（用户改过的）；省略时按 `script` 生成 */
+  text?: string;
+  /** 话术生成入参的最小必需集：岗位名与公司名缺一即拒，不生成空话术 */
+  script?: { jdId: string; title: string; company: string; keywords?: string[]; evidence?: { fact: string }[] };
+  /** 属于哪一次工作流运行；界面单次触发时为空 */
+  workflowRunId?: string | null;
+  /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚发过一次」，不必真等一个频控周期） */
+  nowMs?: number;
+};
+
+/**
+ * 打招呼的成功回执（spec 2.5-03）：任何字段缺失都到不了这里，失败一律以结构化错误上浮。
+ *
+ * 有回执 = 页面回读确认发出去了 = 账本上有行了，三件事同源，所以这里不再重复一个 `sent: true`。
+ */
+export type GreetReceiptView = {
+  platform: string;
+  jobId: string;
+  /** 页面是怎么确认这条发送的（状态行回读到的原文） */
+  reason: string;
+  /** 本次落账的账本行 id */
+  ledgerId: number;
+  /** 为满足频控实际等待的毫秒数；第一次发送为 0 */
+  waitedMs: number;
+  /** 可追溯来源：`模板版本:JD id`，用户手改的文案写成 `manual:JD id`（spec 2.5-09） */
+  source: string;
+  /** 内容来源：模型产出 / 模板回落 / 用户手改 */
+  origin: 'model' | 'template' | 'manual';
 };
 
 /**
@@ -485,6 +528,11 @@ export interface BridgeSignatures {
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
+  /**
+   * 打招呼编排入口（spec 2.5-02 / 03 / 04 / 09 / 10 / 13）：幂等 → 内容 → 黑名单 → 额度 → 频控 → 发送 → 落账，
+   * 全在主进程一侧完成，界面拿到的是回执或被拒的结构化错误，没有绕过闸门的第二条口。
+   */
+  'outbound.greet.perform': { args: [request: GreetRequestView]; returns: GreetReceiptView };
   /**
    * 当前 run 的快照（spec 1.10-04）；挂载即是 `idle` 快照，槽位数等于当前计划的节点数（spec 2.4-02），
    * 所以永不为 null，界面不必为空态另写一套。

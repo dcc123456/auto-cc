@@ -1,8 +1,9 @@
 /**
- * `platform.registry` 用例（spec 2.2-06 / 2.2-07）。
+ * `platform.registry` 用例（spec 2.2-06 / 2.2-07 → 2.5-02）。
  *
- * 这里验的是**依赖方向的守门员**：登记处只认契约，不认站点。三条关键行为是
- * 「按名取回」「未登记给出可读错误（带当前装着的平台清单）」「重复登记替换并留痕」，
+ * 这里验的是**依赖方向的守门员**：登记处只认契约，不认站点。四条关键行为是
+ * 「按名取回」「未登记给出可读错误（带当前装着的平台清单）」「重复登记替换并留痕」
+ * 「外发侧现问渠道、答案永远跟着当前活着的那份适配器」，
  * 再加一条白名单断言——适配器实例能被渲染层拿到的话，就等于把主进程能力递出了进程边界。
  */
 import type { AppError } from '@auto-cc/core';
@@ -85,8 +86,9 @@ function fakeAdapter(
         postedText: '3 天前',
       } satisfies JobDetail);
     },
-    chat: (jobId: string) => {
-      calls.push(`chat:${jobId}`);
+    chat: (jobId: string, text: string) => {
+      // 连要发的文字一起记账：外发侧的投影有没有把 text 原样递到适配器手上，只有这里能看出来。
+      calls.push(`chat:${jobId} ${text}`);
       return Promise.resolve({ sent: true, reason: '回读到成功态', ledgerKey: `${id}:chat` } satisfies OutboundResult);
     },
     sendResume: (jobId: string) => {
@@ -125,7 +127,7 @@ describe('平台登记处（spec 2.2-07）', () => {
     await expect(adapter.search({ keyword: '前端' })).resolves.toHaveLength(1);
     await expect(adapter.chat('job-1', '你好')).resolves.toMatchObject({ sent: true, ledgerKey: 'boss:chat' });
     await expect(adapter.sendResume('job-1')).resolves.toMatchObject({ sent: false, ledgerKey: null });
-    expect(adapter.calls).toEqual(['search:前端', 'chat:job-1', 'sendResume:job-1']);
+    expect(adapter.calls).toEqual(['search:前端', 'chat:job-1 你好', 'sendResume:job-1']);
   });
 
   it('只读清单原样回显适配器的自我声明，不含任何定位信息', async () => {
@@ -160,6 +162,34 @@ describe('平台登记处（spec 2.2-07）', () => {
     const platforms = registry.list().platforms;
     expect(platforms).toHaveLength(1);
     expect(platforms[0]!.displayName).toBe('BOSS 直聘 v2');
+  });
+
+  it('打招呼渠道是现问出来的投影：跟着当前活着的适配器，且不把计量凭证漏给外发侧（spec 2.5-02）', async () => {
+    const registry = await boot();
+    const boss = fakeAdapter('boss');
+    registry.register(boss);
+    registry.register(fakeAdapter('liepin', { capabilities: ['search'] }));
+
+    // 只有声明了 chat 能力的平台算「现在能打招呼」。
+    expect(registry.greetablePlatforms()).toEqual(['boss']);
+    const channel = registry.greetChannel('boss');
+    expect(channel).not.toBeNull();
+    // `ledgerKey` 被有意丢掉：额度凭证由 `entitlement.gate` 落账时生成，适配器那份不算数。
+    await expect(channel?.send('job-9', '您好')).resolves.toEqual({ sent: true, reason: '回读到成功态' });
+    expect(boss.calls).toEqual(['chat:job-9 您好']);
+
+    // 没 chat 能力 / 不认识的平台上问到 null 而不是抛——缺渠道是外发侧能处置的失败。
+    expect(registry.greetChannel('liepin')).toBeNull();
+    expect(registry.greetChannel('lagou')).toBeNull();
+
+    // 适配器换人之后，下一次问到的就是新那份：编排层缓存不了旧的。
+    const replaced = fakeAdapter('boss', { displayName: 'BOSS 直聘 v2' });
+    registry.register(replaced);
+    await expect(registry.greetChannel('boss')?.send('job-9', '换人之后的一条')).resolves.toMatchObject({
+      sent: true,
+    });
+    expect(replaced.calls).toEqual(['chat:job-9 换人之后的一条']);
+    expect(boss.calls).toHaveLength(1);
   });
 });
 

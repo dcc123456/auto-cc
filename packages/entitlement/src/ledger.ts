@@ -4,7 +4,8 @@
  * 表由本服务把迁移 push 进 `store.migrations` 再 `upgrade()`（`store/src/index.ts:37` 为此留的口子），
  * 因此连接池仍然只有一处（AGENTS.md §2.7），而「哪张表属于哪个域」由建表的一方自己说清楚。
  *
- * `source` / `remoteRef` 两列现在恒为 null：它们是 P5 接 SaaS 时「不改表就能对上账」的预留，
+ * `source` 列从 2.5-e 起有真实消费方（打招呼写 `${scriptVersion}:${jdId}`，spec 2.5-09），
+ * `remoteRef` 仍是 null：那是 P5 接 SaaS 时「不改表就能对上账」的第二条预留，
  * 空列比空接口便宜得多，也改不动已有数据（spec 1.9-08）。
  */
 import { asApp, Service, type Context } from '@auto-cc/core';
@@ -161,6 +162,38 @@ export class UsageLedgerService extends Service {
       .prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE action = ? AND ts >= ?')
       .get(action, startOfDay(nowMs)) as { n?: number | bigint };
     return Number(row?.n ?? 0);
+  };
+
+  /**
+   * 某动作在指定目标（可选指定运行）上已经落过几条账（spec 2.5-13 的重复发送防护）。
+   *
+   * 用 `IS` 而不是 `=`：`workflowRunId` 为 null 时 `= NULL` 恒不成立，
+   * 「界面直接点的那几次」（runId 为空）就永远查不到历史行，重复发送防护会假绿。
+   * @param action 动作名
+   * @param targetId 目标标识
+   * @param workflowRunId 运行标识；省略或 null 表示「非工作流发起的那一批」
+   * @returns 已落账的行数，0 表示这个目标还没发过
+   */
+  countFor = (action: string, targetId: string, workflowRunId?: string | null): number => {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE action = ? AND target_id IS ? AND workflow_run_id IS ?')
+      .get(action, targetId, workflowRunId ?? null) as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /**
+   * 某动作最近一次落账的时刻（频控用的钟，spec 2.5-04）。
+   *
+   * 频控不自建「上次发送时间」这份内存态：账本里的行就是「确实发出去过」的唯一真相，
+   * 读它既不用第二套状态存储（AGENTS.md §2.7），也天然跨重启生效。
+   * @param action 动作名
+   * @returns 最近一行的 `ts`（毫秒）；从未落过账时为 null（第一次发送不需要等）
+   */
+  latestActionTs = (action: string): number | null => {
+    const row = this.store.db.prepare('SELECT MAX(ts) AS ts FROM usage_ledger WHERE action = ?').get(action) as {
+      ts?: number | bigint | null;
+    };
+    return row?.ts === null || row?.ts === undefined ? null : Number(row.ts);
   };
 
   /**

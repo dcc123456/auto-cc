@@ -103,7 +103,11 @@ export class BossPlatformService extends Service {
 
   [Service.init](): void {
     const pack = loadBossKnowledgePack(this.config.packFile);
-    this.registry.register(createBossAdapter(pack, this.page, this.act));
+    const adapter = createBossAdapter(pack, this.page, this.act);
+    this.registry.register(adapter);
+    // 本包不再把手登记给编排层：打招呼那一下手由 `platform.registry` 在编排层每次外发时按名字
+    // 从**当前活着的**适配器上取（spec 2.5-02）。曾经这里有一段 `channels.register(...)`，
+    // 它把同一份事实存了两处，于是上游改一次配置就会把编排层的那张表清空 —— 详见 plan §12.13。
     this.ctx.logger.info(
       `BOSS 适配器已登记：知识包 ${String(Object.keys(pack.locators).length)} 条定位声明 · 动作 ${pack.capabilities.join(' / ')}`,
     );

@@ -238,6 +238,58 @@ export interface WorkflowExecutorRegistry {
   list(): string[];
 }
 
+/**
+ * 一次打招呼落到页面上的结局（由平台侧的渠道实现给出）。
+ *
+ * 只有两个字段是有意为之：编排层需要的全部信息就是「页面认不认这次发送」和「一句话说明卡在哪」，
+ * 平台侧的其余细节（哪一步回读、状态行原文）都收在 `reason` 里，不许长进 core 的形状。
+ */
+export type GreetOutcome = {
+  /** 页面是否真的把这条发出去了（适配器按回读判定，不是「点过了就算」） */
+  sent: boolean;
+  /** 结局说明：成功时说清是哪一段回读确认的，失败时说清卡在哪一段 */
+  reason: string;
+};
+
+/**
+ * 平台侧的打招呼渠道：编排层只需要「把这个目标发这段文字」。
+ *
+ * 它是 `PlatformAdapter.chat` 的**窄化投影**，不是第二套外发接口 —— core 是 L0，
+ * 不该认识「岗位」「会话页」这些领域概念，所以只搬打招呼需要的这一个方法（plan §12.12 第 1 条）。
+ */
+export type GreetChannel = {
+  /**
+   * 往指定目标的会话里发一条文本。
+   * @param targetId 会话对象标识（P2 是平台侧 jobid）
+   * @param text 将要离开 app 的文本（编排层已在外面过过黑名单）
+   * @returns 页面回读出的结局；传输层异常由实现方抛结构化错误，不用 `sent:false` 表达
+   */
+  send(targetId: string, text: string): Promise<GreetOutcome>;
+};
+
+/**
+ * 「哪个平台现在能打招呼」的询问面，由 `platform.registry` 实现。
+ *
+ * 为什么是**问**而不是**登记**：渠道的真相就是适配器，另开一张渠道表等于把同一份事实存两处，
+ * 而且新实例读不到旧实例的登记（实测：改一次上游插件配置会连带重建 `outbound.greet`，
+ * 那张表当场清空，打招呼从此静默失败到重启为止）。每次外发现问一次，就没有这份状态要养。
+ * 名字用 `platform.registry` 这个服务名索引，形状由 core 声明——outbound 与 browser 同级，
+ * 让它们互相 import 会新开一条横向依赖（AGENTS.md §4.1）。
+ */
+export interface GreetChannelSource {
+  /**
+   * 按平台名要一个打招呼渠道。
+   * @param platform 平台标识（与适配器 `meta.id` 同源）
+   * @returns 渠道的窄投影；未登记该平台、或它没声明 `chat` 能力时为 null（不抛，由外发侧决定报什么码）
+   */
+  greetChannel(platform: string): GreetChannel | null;
+  /**
+   * 当前能打招呼的平台清单，用来回答「发不出去是因为没装平台包，还是因为适配器不支持」。
+   * @returns 登记了适配器且声明 `chat` 能力的平台标识，按登记顺序
+   */
+  greetablePlatforms(): string[];
+}
+
 /** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
 export type WorkflowPlanView = {
   id: string;

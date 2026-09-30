@@ -9,7 +9,7 @@ export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
 export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
-import type { WorkflowExecutorRegistry } from './events.js';
+import type { GreetChannelSource, WorkflowExecutorRegistry } from './events.js';
 
 /**
  * cordis declares FiberState as an ambient const enum, which cannot be re-exported
@@ -83,6 +83,18 @@ export function maybeService<T>(ctx: Context, id: string): T | undefined {
  */
 export function executorRegistryOf(ctx: Context): WorkflowExecutorRegistry | undefined {
   return maybeService<WorkflowExecutorRegistry>(ctx, 'workflow.executors');
+}
+
+/**
+ * 取打招呼渠道的询问面（spec 2.5-02 的外发口），实现方是 `platform.registry`。
+ *
+ * 为什么按服务名要而不是 `asApp`：outbound 与 browser 同级，import 包会新开一条横向依赖
+ * （AGENTS.md §4.1），所以形状留在 L0、由 core 露手；`platform.registry` 结构上满足它即可。
+ * @param ctx 调用方的上下文
+ * @returns 询问面实例；浏览器层没装时为 undefined，此时打招呼一律以缺渠道失败
+ */
+export function greetChannelsOf(ctx: Context): GreetChannelSource | undefined {
+  return maybeService<GreetChannelSource>(ctx, 'platform.registry');
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

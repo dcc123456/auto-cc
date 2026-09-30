@@ -12,6 +12,12 @@ export type AppErrorCode =
   // 话术生成（spec 2.5-10）：将要发往页面的文本命中禁发规则（手机号/身份证/验证码类）或超长。
   // 与 `OUTBOUND_FAILED` 分开，是因为前者根本不该产生网络请求，界面上也不该给"重试"按钮。
   | 'OUTBOUND_FORBIDDEN_CONTENT'
+  // 打招呼编排（spec 2.5-02 / 13）。三个码各对应一种「发不出去」，界面处置不同，所以不合并：
+  // 渠道缺失=装配没装平台包（改清单），重复发送=幂等键已落账（别再点），未送达=页面回读没确认（可重试）。
+  // 后两者都**不落账**，所以额度不会被一次没发生的发送吃掉。
+  | 'OUTBOUND_CHANNEL_MISSING'
+  | 'OUTBOUND_ALREADY_SENT'
+  | 'OUTBOUND_NOT_DELIVERED'
   // 工作流状态机（spec 1.10）：非法迁移（含「还没有 run」）与占位步失败注入共用两个码，
   // 界面按码决定是「提示一句状态不允许」还是「这一步标红并可重试」。
   | 'WORKFLOW_INVALID_STATE'

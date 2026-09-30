@@ -19,7 +19,12 @@ import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
 import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
-import { OutboundSampleService, OutboundScriptService, OutboundThrottleService } from '@auto-cc/plugin-outbound';
+import {
+  OutboundGreetService,
+  OutboundSampleService,
+  OutboundScriptService,
+  OutboundThrottleService,
+} from '@auto-cc/plugin-outbound';
 import {
   BossPlatformService,
   ConversationStoreService,
@@ -55,6 +60,9 @@ export const REGISTRY: Registry = {
   // 频控间隔（spec 2.5-04 / 05）：纯抽样服务，无依赖。它单独占一行是为了让「节奏策略」能在装配面板里
   // 被单独摘掉/改区间——摘掉后 2.5-e 的打招呼编排连同进 PENDING，缺节奏时宁可装不上也不要发得一模一样。
   'outbound-throttle': OutboundThrottleService,
+  // 打招呼编排（spec 2.5-02…13）：把上面三条加上闸门串成唯一外发口，也是 `greeting.send` 节点的登记方。
+  // 单独一个 id 是为了在装配面板上把它单独摘掉——摘掉后界面与工作流都得到结构化失败，而不是「发出去了但没计量」。
+  'outbound-greet': OutboundGreetService,
   ipc: IpcGatewayService,
   plugins: PluginsService,
   devtools: DevtoolsService,

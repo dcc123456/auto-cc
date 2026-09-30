@@ -13,6 +13,7 @@
  */
 import {
   AppError,
+  assertNotYielded,
   Service,
   asApp,
   executorRegistryOf,
@@ -161,15 +162,6 @@ export class JdCaptureService extends Service {
   }
 
   /**
-   * 协作让出检查点：信号已经 aborted 就抛，让下面两个循环在中途停下（spec 2.4-07）。
-   * @param signal 执行器传下来的让出信号；undefined 表示这次是界面直接点的抓取，不需要让出
-   */
-  private checkYield = (signal?: AbortSignal): void => {
-    if (!signal?.aborted) return;
-    throw new AppError('WORKFLOW_STEP_FAILED', '工作流让出，抓取在中途收手', 'jd.capture');
-  };
-
-  /**
    * 跑一轮抓取：搜索 → 滚动收集列表 → 逐条读详情 → 全部落库。
    *
    * 单条详情读失败只记进 `skipped`（spec 2.3-08），整轮继续；列表整页读不到不报错，
@@ -197,7 +189,7 @@ export class JdCaptureService extends Service {
 
     await adapter.openSearch(criteria);
     while (rounds < this.config.maxRounds) {
-      this.checkYield(signal);
+      assertNotYielded(signal, JD_CAPTURE_KIND, '抓取');
       rounds += 1;
       const sizeBefore = collected.size;
       for (const summary of await adapter.readListing()) {
@@ -225,7 +217,7 @@ export class JdCaptureService extends Service {
     }
 
     for (const summary of needsDetail) {
-      this.checkYield(signal);
+      assertNotYielded(signal, JD_CAPTURE_KIND, '抓取');
       this.progress('detail', rounds, containers, touched.size, target, summary.title);
       try {
         const detail = await adapter.detail(summary.jobId);
