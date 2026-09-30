@@ -1,0 +1,67 @@
+2.7-03 按动作日额度：可配置 + 生效 + 到量即停（U+C+V）
+
+== 1. 配置形状（唯一权威：packages/shared/src/bridge.ts 的动作词表）==
+QUOTA_ACTIONS        = search / greet / deliver        （闸门认的三个动作）
+OUTBOUND_SAMPLE_ACTIONS = greet / deliver              （样例外发只认这两条，search 不在其中）
+entitlement 配置：{ mode: 'unlimited' | 'daily', dailyLimits: { search, greet, deliver } }
+默认 40 / 20 / 10（DEFAULT_DAILY_LIMITS），三键都必填、都各自独立计。
+
+== 2. 单测侧（U）==
+packages/entitlement/src/entitlement.test.ts（12 条全绿）
+  · 「三条动作各自计数、互不占用：抓满一轮不吃打招呼与投递的额度（2.7-03）」
+  · 「闸门不认的动作名一律结构化失败，且在 unlimited 模式下也一样（2.7-03 的收窄）」
+    —— 两种 mode 下都断言 code=INVALID_ARGUMENT、reason 点名 search / greet / deliver、
+       task 未执行、账本 0 行。
+packages/outbound/src/outbound.test.ts（7 条全绿）
+  · 「动作名收窄到样例子集：search 与任意字符串都在入口被拒，不碰闸门也不碰网络（2.7-03）」
+  · 入站参数不合法那一条改查空 targetId / 空 message（动作名那一维交给上一条，不重复覆盖）
+packages/platform-boss/src/jd-capture.test.ts（25 条全绿）
+  describe「抓取占的是 search 那一条额度（spec 2.7-03，并更正 2.3-11 的原判据）」
+  · 一轮 run 只落一条 search 账，且抓取期间没有别的动作记过账
+  · 第 N+1 轮在开始之前就被拒：不导航（fake.navigated 不变）、不滚动（fake.scrolls 不变）、不落账
+  · 抓满 search 之后，greet / deliver 的剩余额度一条没少
+  · 摘掉闸门后 jd.capture 停在 PENDING、service 取不到（不是静默少判）
+全仓 `pnpm test`：18 个包全绿；`pnpm typecheck` / `pnpm lint` / `pnpm format:check` 全绿。
+
+== 3. 运行期读数（C，真实窗口 + CDP 10222，全程只打本地 fixture 127.0.0.1:10233）==
+3.1 出厂配置读数（装配面板 entitlement 行 → 配置编辑器，见 2.7-03-daily-limits-editor.png 同一入口）
+  { "mode": "unlimited", "dailyLimits": { "search": 40, "greet": 20, "deliver": 10 } }
+  用量面板三行（2.7-03-usage-three-actions.png）：
+    search · 本地无限额度（当前阶段不花钱）·「由抓取编排消费（面板不代发搜索）」——这一行没有外发按钮
+    greet  · 本地无限额度 · 发一条样例外发
+    deliver· 本地无限额度 · 发一条样例外发
+
+3.2 热改为 { mode: 'daily', dailyLimits: { search: 1, greet: 20, deliver: 10 } } → 「保存配置：成功」
+  抓取之前（2.7-03-daily-counters-before-run.png）：
+    search · 今日剩余 1 次 | greet · 今日剩余 20 次 | deliver · 今日剩余 7 次
+    （deliver 的 7 = 10 − 今日已有的 3 条投递；三条计数互不影响）
+
+3.3 点「搜索并入库」（关键词 前端）→ 成功：
+  boss「前端」· 4 轮 · 容器 37 个 · 入库 11 条 · 库内 11 条 · 页面无新增
+  闸门内账本行数 抓取前 4 → 抓取后 4 · 本轮未记其他动作 是
+  抓取之后（2.7-03-search-quota-spent.png）：
+    search · 已拒绝：动作 search 今日 1 次额度已用完
+    greet  · 今日剩余 20 次        ← 抓满 search 一条没吃它
+    deliver· 今日剩余 7 次         ← 同上
+    账本累计 5 次 · 今日 4 次；最近流水 #5 search → 前端 · 03:12:24
+    按日分组：2026-10-01 · 4 次 · deliver × 3 · search × 1 ／ 2026-09-30 · 1 次 · greet × 1
+
+3.4 再点一次「搜索并入库」（第 2 轮，额度已尽）→ 到量即停：
+  抓取「前端」失败：动作 search 今日 1 次额度已用完
+  桥接返回的结构化错误 QUOTA_EXCEEDED：动作 search 今日 1 次额度已用完
+  （2.7-03-capture-refused.png）
+  页面侧没动过：内嵌视图前后两次 `harness targets` 读数逐字相同——
+    page 求职仿站 · 职位详情（本地 fixture） http://127.0.0.1:10233/boss/detail?jobId=1012
+    page auto-cc http://127.0.0.1:5173/
+  账本仍 5 行（被拒不落账）；库内仍 11 条。
+
+3.5 验收完把配置改回 unlimited，三行读数回到「本地无限额度（当前阶段不花钱）」。
+
+== 4. 对 2.3-11 的更正（同一处读数的口径变了，写清楚不留暗账）==
+2.3-11 原文判据是「抓取前后 usage.ledger 零新增行」。2.7-03 之后一轮抓取**本身要占一条 search 额度**，
+所以那条判据按字面已经不成立。仍然成立的、也仍然被断言的是：
+  闸门任务**内部**前后各读一次行数，两值必须相等 —— 本轮那条 search 是任务返回之后才落的账。
+它证明的是「抓取没有顺手把打招呼/投递记进账」，不是「抓取不入账」。
+界面文案随之从「用量账本行数 抓取前 → 抓取后 · 只读动作 是」改成
+「闸门内账本行数 抓取前 → 抓取后 · 本轮未记其他动作 是」，
+改口的三处：JobLabPanel.tsx（注释 + 插值参数名）、zh-CN/en 语言包、ledger.count 与 bridge 的注释。

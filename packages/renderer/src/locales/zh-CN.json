@@ -169,7 +169,7 @@
       "outcomeHeading": "最近一次运行结局",
       "outcomeIdle": "还没有跑过抓取",
       "outcomeRow": "{{platform}}「{{keyword}}」· 城市 {{city}} · {{rounds}} 轮 · 容器 {{containers}} 个 · 入库 {{stored}} 条 · 库内 {{total}} 条 · {{stoppedBy}}",
-      "ledger": "用量账本行数 抓取前 {{before}} → 抓取后 {{after}} · 只读动作 {{readOnly}}",
+      "ledger": "闸门内账本行数 抓取前 {{before}} → 抓取后 {{after}} · 本轮未记其他动作 {{noOtherAction}}",
       "skippedHeading": "本轮跳过 {{count}} 条（单条失败不中断整轮）",
       "skippedEmpty": "本轮没有跳过任何条目",
       "skippedRow": "{{title}} · {{reason}} · {{sourceUrl}}",
@@ -296,7 +296,7 @@
       "failed": "{{action}} 失败：{{message}}"
     },
     "usage": {
-      "heading": "外发额度与用量账本",
+      "heading": "额度闸门与用量账本",
       "refresh": "重新读取用量",
       "send": "发一条样例外发",
       "actionSend": "外发 {{action}}",
@@ -306,12 +306,13 @@
       "remaining": "今日剩余 {{count}} 次",
       "denied": "已拒绝：{{reason}}",
       "gateUnknown": "闸门未挂载：装配里缺 entitlement 插件",
+      "consumedByCapture": "由抓取编排消费（面板不代发搜索）",
       "total": "账本累计 {{count}} 次",
       "today": "今日 {{count}} 次",
       "dayRow": "{{day}} · {{count}} 次",
       "actionRow": "{{action}} × {{count}}",
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
-      "empty": "账本为空：还没有一次外发通过闸门",
+      "empty": "账本为空：还没有任何动作通过闸门",
       "none": "无对象"
     },
     "workflow": {

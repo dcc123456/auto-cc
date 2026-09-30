@@ -1,5 +1,5 @@
 /**
- * 闸门与账本的装配测试（spec 1.9-01 / 02 / 03 / 04 / 07 / 08 / 09）。
+ * 闸门与账本的装配测试（spec 1.9-01 / 02 / 03 / 04 / 07 / 08 / 09 / 2.7-03）。
  *
  * 一律用真的 `node:sqlite` 落临时库：额度这件事的语义就是「跨调用、跨重启的计数」，
  * mock 掉数据库等于把被验证的东西换成一个假计数。临时目录在 `os.tmpdir`，不进仓库（AGENTS.md §7.5）。
@@ -11,13 +11,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import type { QuotaAction } from '@auto-cc/shared';
 import {
   LEDGER_MIGRATION_VERSION,
+  DEFAULT_DAILY_LIMITS,
   EntitlementGateService,
   UsageLedgerService,
   dayKey,
   startOfDay,
   type GateConfig,
+  type GateDailyLimits,
 } from './index.js';
 
 const sandboxes: string[] = [];
@@ -41,8 +44,18 @@ afterAll(async () => {
   }
 });
 
+/**
+ * 把 shipped 默认额度按动作收紧，用于「切成每日模式」的用例。
+ * @param tighten 只覆盖在意的那一条（其余留默认，这样「抓 40 轮不吃打招呼额度」在同一个用例里就是现成的证据）
+ * @returns 一条 `daily` 模式的闸门配置
+ */
+const daily = (tighten: Partial<GateDailyLimits> = {}): GateConfig => ({
+  mode: 'daily',
+  dailyLimits: { ...DEFAULT_DAILY_LIMITS, ...tighten },
+});
+
 /** 起一套 config + store + ledger + gate，返回两个服务实例与账本的 fiber（重启用例要它）。 */
-async function boot(gateConfig: GateConfig = { mode: 'unlimited', dailyLimit: 5 }) {
+async function boot(gateConfig: GateConfig = { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS }) {
   const ctx = new Context();
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir: tempDir(), file: 'store.db', journal: 'delete' });
@@ -82,14 +95,53 @@ describe('entitlement.gate（spec 1.9-01…04）', () => {
     expect(gate.check('greet')).toEqual({ allowed: true, remaining: null, reason: null });
   });
 
-  it('配置切成「每动作每天 1 次」后，第二次判定被拒且 reason 说清原因（1.9-03）', async () => {
-    const { gate } = await boot({ mode: 'daily', dailyLimit: 1 });
+  it('配置切成「打招呼每天 1 次」后，第二次判定被拒且 reason 说清原因（1.9-03）', async () => {
+    const { gate } = await boot(daily({ greet: 1 }));
     expect(gate.check('greet')).toMatchObject({ allowed: true, remaining: 1 });
     await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('sent'));
     const after = gate.check('greet');
     expect(after).toMatchObject({ allowed: false, remaining: 0 });
     expect(after.reason).toContain('greet');
     expect(after.reason).toContain('1');
+  });
+
+  it('三条动作各自计数、互不占用：抓满一轮不吃打招呼与投递的额度（2.7-03）', async () => {
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
+    await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('sent'));
+    await gate.perform('search', { targetId: '前端工程师' }, () => Promise.resolve('run'));
+
+    expect(gate.check('greet')).toMatchObject({ allowed: false, remaining: 0 });
+    // 默认值取自 `DEFAULT_DAILY_LIMITS` 而不是抄数字：配置面与用例读同一个数。
+    expect(gate.check('search')).toMatchObject({ allowed: true, remaining: DEFAULT_DAILY_LIMITS.search - 1 });
+    expect(gate.check('deliver')).toMatchObject({ allowed: true, remaining: DEFAULT_DAILY_LIMITS.deliver });
+    expect(ledger.summary().byAction).toEqual(
+      expect.arrayContaining([
+        { action: 'greet', count: 1 },
+        { action: 'search', count: 1 },
+      ]),
+    );
+  });
+
+  it('闸门不认的动作名一律结构化失败，且在 unlimited 模式下也一样（2.7-03 的收窄）', async () => {
+    // 跨 IPC 边界的字符串没有运行期保证：认不出的名字若当 0 就是静默拒绝，当无限就是日上限形同虚设。
+    const configs: GateConfig[] = [{ mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS }, daily({ greet: 1 })];
+    const unknown = 'download-resume' as QuotaAction;
+    for (const config of configs) {
+      const { gate, ledger } = await boot(config);
+      let taskRan = false;
+      await expect(
+        gate.perform(unknown, { targetId: 'job-1' }, () => {
+          taskRan = true;
+          return Promise.resolve('不该被执行');
+        }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        // reason 里点名三个合法动作：只说「不合法」的报错让调用方永远猜不到该传什么。
+        message: expect.stringContaining('search / greet / deliver'),
+      });
+      expect(taskRan).toBe(false);
+      expect(ledger.summary().total).toBe(0);
+    }
   });
 
   it('perform 成功后落一行，四个字段都在（1.9-04）', async () => {
@@ -108,7 +160,7 @@ describe('entitlement.gate（spec 1.9-01…04）', () => {
   });
 
   it('被拒不落账、task 也不执行；task 抛错同样不落账（plan §8.4 决策 1）', async () => {
-    const { gate, ledger } = await boot({ mode: 'daily', dailyLimit: 1 });
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
     await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('first'));
 
     let taskRan = false;
@@ -131,7 +183,7 @@ describe('entitlement.gate（spec 1.9-01…04）', () => {
   it('判定与落账全程不碰网络，所以断网不会阻塞外发（1.9-09）', async () => {
     const spy = stubFetchWithoutNetwork();
     try {
-      const { gate } = await boot({ mode: 'daily', dailyLimit: 2 });
+      const { gate } = await boot(daily({ greet: 2 }));
       expect(gate.check('greet').allowed).toBe(true);
       expect((await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('value'))).value).toBe('value');
     } finally {

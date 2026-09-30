@@ -35,7 +35,10 @@ plugins:
 
   # 外发额度骨架（spec 1.9）：账本与闸门各占一条，因为 1.9-05 要能**只摘掉闸门**而账本还活着。
   # `mode: unlimited` 是当前产品阶段的 shipped 默认——不收费、不登录、不联网校验（1.9-02 / 1.9-09）。
-  # 想演示超限就在调试面板把该插件配置改成 `mode: daily` + `dailyLimit: 1`（1.9-03，不重启 app）。
+  # 上限是**按动作**的三条（spec 2.7-03）：抓取（一轮 run 记一条）、打招呼、投递各自计数、互不占用，
+  # 所以 `search: 40` 不会因为抓了 40 轮就把打招呼饿死。想演示超限就在调试面板把该插件配置改成
+  # `mode: daily` + 对应动作 `1`（1.9-03，不重启 app）；三个键都写在这里而不是藏进代码默认值，
+  # 是为了让「今天还能搜几次」在现场读得到。
   - id: usage
     dependsOn: [store]
 
@@ -43,6 +46,10 @@ plugins:
     dependsOn: [usage]
     config:
       mode: unlimited
+      dailyLimits:
+        search: 40
+        greet: 20
+        deliver: 10
 
   # 闸门之外的最薄外发消费者：它只把闭包交给 `gate.perform()`，所以清单里注掉 `entitlement`
   # 之后，这条也会跟着进 PENDING —— 界面点「外发样例」得到的是结构化错误，而不是静默成功。
@@ -217,8 +224,11 @@ plugins:
   # 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：滚动收集 → 逐条读详情 → 落库。
   # `targetCount` 是「抓够就停」的判据、`maxRounds` 是不死循环的硬上限，两者都写进清单而不是代码里（§2.7）。
   # 轮间停顿**不在这里**：节奏唯一出口是 `outbound.throttle`（spec 2.7-04），所以依赖里带上它。
+  # 依赖里还带 `entitlement`（spec 2.7-03）：一次抓取 run 现在过闸门并占一条 `search` 额度。
+  # 注掉 `entitlement` 这一行：本服务连同进 PENDING，界面点「搜索并入库」得到结构化错误，
+  # 而不是「额度体系塌了但抓取照跑」——那正是 §7.3 要防的绕过。
   - id: jd-capture
-    dependsOn: [platform-boss, browser, jd-store, usage, outbound-throttle]
+    dependsOn: [platform-boss, browser, jd-store, usage, outbound-throttle, entitlement]
     config:
       platform: boss
       targetCount: 20

@@ -36,7 +36,7 @@ const PROGRESS_LIMIT = 4;
 const ROW_DISPLAY_LIMIT = 12;
 
 /**
- * JD 抓取实验台：把「搜索 → 滚动收集 → 逐条读详情 → 落库」这条只读链路的结局画到界面上
+ * JD 抓取实验台：把「搜索 → 滚动收集 → 逐条读详情 → 落库」这条不碰外发的链路的结局画到界面上
  * （spec 2.3-01 / 2.3-06…2.3-11）。
  *
  * 界面**只转述服务读数**：停止原因、跳过条数、账本前后行数都来自 `jd.capture.run` 的返回，
@@ -139,7 +139,8 @@ export function JobLabPanel() {
   };
 
   /**
-   * 跑一轮抓取：滚动收集列表 + 逐条读详情 + 幂等入库，全程只读、不经闸门。
+   * 跑一轮抓取：滚动收集列表 + 逐条读详情 + 幂等入库，页面侧不点打招呼也不投简历，
+   * 但**这一整轮本身占 `search` 那一条日额度**（spec 2.7-03），到量会直接被闸门拒掉。
    * 搜索条件取界面上的关键词（必填）与城市 / 经验 / 本次目标条数（均可空）。
    */
   const capture = () => {
@@ -563,12 +564,13 @@ export function JobLabPanel() {
                 stoppedBy: t(`jd.stopped.${lastRun.stoppedBy}`),
               })}
             </p>
-            {/* 抓取是只读动作：账本行数前后必须相等，不等就说明抓取被计成了一次外发（spec 2.3-11）。 */}
+            {/* 这两个读数取自闸门任务内部，因此不含本轮那条 search：相等只证明抓取没顺手记别的动作
+                （spec 2.3-11 原判据「抓取不入账」已按 2.7-03 更正）。 */}
             <p className="text-[11px] text-slate-400" data-testid="jd-ledger-check">
               {t('jd.ledger', {
                 before: lastRun.ledgerRowsBefore,
                 after: lastRun.ledgerRowsAfter,
-                readOnly: okLabel(lastRun.ledgerRowsBefore === lastRun.ledgerRowsAfter),
+                noOtherAction: okLabel(lastRun.ledgerRowsBefore === lastRun.ledgerRowsAfter),
               })}
             </p>
             <h4 className="mt-2 text-[11px] font-semibold text-slate-300">

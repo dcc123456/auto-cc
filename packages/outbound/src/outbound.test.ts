@@ -7,12 +7,18 @@
  */
 import { asApp, Context, fiberState } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { EntitlementGateService, UsageLedgerService, type GateConfig } from '@auto-cc/plugin-entitlement';
+import {
+  DEFAULT_DAILY_LIMITS,
+  EntitlementGateService,
+  UsageLedgerService,
+  type GateConfig,
+} from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import type { OutboundSampleAction } from '@auto-cc/shared';
 import { OutboundSampleService } from './index.js';
 
 const FIXTURE_ENDPOINT = 'http://127.0.0.1:10233/api/outbound';
@@ -61,7 +67,8 @@ async function boot(options: { withGate: boolean; gate?: GateConfig }) {
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   const ledgerFiber = ctx.plugin(UsageLedgerService, {});
   await ledgerFiber;
-  if (options.withGate) await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimit: 5 });
+  if (options.withGate)
+    await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS });
   const outboundFiber = ctx.plugin(OutboundSampleService, { endpoint: FIXTURE_ENDPOINT });
   await outboundFiber;
   return { ctx, outboundFiber, ledger: asApp(ctx)['usage.ledger'] };
@@ -102,7 +109,10 @@ describe('outbound.sample 只认闸门（spec 1.9-03 / 04 / 05）', () => {
   it('额度用尽：外发以 QUOTA_EXCEEDED 失败、不落账、不打到对端（1.9-03 + 决策 1）', async () => {
     const fixture = stubFixture();
     try {
-      const { ctx, ledger } = await boot({ withGate: true, gate: { mode: 'daily', dailyLimit: 1 } });
+      const { ctx, ledger } = await boot({
+        withGate: true,
+        gate: { mode: 'daily', dailyLimits: { ...DEFAULT_DAILY_LIMITS, greet: 1 } },
+      });
       const sample = asApp(ctx)['outbound.sample'];
       await sample.send({ action: 'greet', targetId: 'job-1', message: '第一条' });
       await expect(sample.send({ action: 'greet', targetId: 'job-2', message: '第二条' })).rejects.toMatchObject({
@@ -110,6 +120,25 @@ describe('outbound.sample 只认闸门（spec 1.9-03 / 04 / 05）', () => {
       });
       expect(fixture.calls).toHaveLength(1);
       expect(ledger.summary().total).toBe(1);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('动作名收窄到样例子集：`search` 与任意字符串都在入口被拒，不碰闸门也不碰网络（2.7-03）', async () => {
+    const fixture = stubFixture();
+    try {
+      const { ctx, ledger } = await boot({ withGate: true });
+      const sample = asApp(ctx)['outbound.sample'];
+      // `search` 是合法的**额度**动作，但不是样例外发的动作：抓取那一条账只能由 `jd.capture` 记，
+      // 界面或调用方能拿 `sample.send` 发一个 'search' 就等于凭空造出一条假的外发用量。
+      for (const action of ['search', 'download-resume']) {
+        await expect(
+          sample.send({ action: action as OutboundSampleAction, targetId: 'job-1', message: '伪造的动作' }),
+        ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      }
+      expect(fixture.calls).toHaveLength(0);
+      expect(ledger.summary().total).toBe(0);
     } finally {
       fixture.restore();
     }
@@ -148,9 +177,11 @@ describe('outbound.sample 只认闸门（spec 1.9-03 / 04 / 05）', () => {
     const fixture = stubFixture();
     try {
       const { ctx } = await boot({ withGate: true });
-      await expect(
-        asApp(ctx)['outbound.sample'].send({ action: '', targetId: 'job-1', message: '缺动作名' }),
-      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      const sample = asApp(ctx)['outbound.sample'];
+      // 动作名那一维交给上一条用例，这里只查另外两个必填字段：空串在类型上合法，只有 schema 拦得住。
+      const base = { action: 'greet' as const, targetId: 'job-1', message: '正文' };
+      await expect(sample.send({ ...base, targetId: '' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      await expect(sample.send({ ...base, message: '' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
       expect(fixture.calls).toHaveLength(0);
     } finally {
       fixture.restore();

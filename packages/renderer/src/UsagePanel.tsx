@@ -1,24 +1,32 @@
 import { Gauge, RefreshCw, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { GateDecisionView, UsageSummaryView } from '@auto-cc/shared';
+import {
+  OUTBOUND_SAMPLE_ACTIONS,
+  QUOTA_ACTIONS,
+  type GateDecisionView,
+  type OutboundSampleAction,
+  type QuotaAction,
+  type UsageSummaryView,
+} from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 
-/**
- * 面板里演示的外发动作名。
- * 额度是**按动作**计的，所以至少要两个名字才能看出「greet 用尽而 deliver 仍可」这件事。
- */
-const OUTBOUND_ACTIONS = ['greet', 'deliver'] as const;
+/** 这个动作能不能从面板代发（`search` 的账由 `jd.capture` 记，面板没有「发一次搜索」这种口）。 */
+const isSampleAction = (action: QuotaAction): action is OutboundSampleAction =>
+  (OUTBOUND_SAMPLE_ACTIONS as readonly string[]).includes(action);
 
 /** 最近流水的显示条数：用量页是验收入口，不是历史库。 */
 const RECENT_LIMIT = 5;
 
 /**
- * 用量面板：外发额度闸门与 `usage.ledger` 的界面化身（spec 1.9）。
+ * 用量面板：外发额度闸门与 `usage.ledger` 的界面化身（spec 1.9 / 2.7-03）。
  *
  * 它是「闸门 + 账本」这条链路唯一能被眼睛检查的地方：上半部分读闸门判定（只展示，不放行），
  * 下半部分读账本分组，中间那个按钮走 `outbound.sample.send`——一次点击就把
  * 判定、外发、落账、回看四件事在同一张截图里连起来（spec 1.9-03 / 1.9-07）。
+ * 判定行是**三条动作各一行**（`search` / `greet` / `deliver`）：额度按动作独立，所以「抓 40 轮
+ * 不打招呼」与「打招呼用尽而投递照旧」都得在这一屏看得见，而不是靠测试用例自证。
+ * `search` 那行没有代发按钮——它的消费者是抓取编排，面板伪造一次搜索只会让账本说谎。
  * 额度怎么改不在这里：配置项在装配面板的 `entitlement` 那一行，热更新即时生效。
  */
 export function UsagePanel() {
@@ -32,11 +40,11 @@ export function UsagePanel() {
   const read = useCallback(async () => {
     const [summaryReply, ...gateReplies] = await Promise.all([
       bridge?.usage['ledger.summary'](RECENT_LIMIT),
-      ...OUTBOUND_ACTIONS.map((action) => bridge?.entitlement['gate.check'](action)),
+      ...QUOTA_ACTIONS.map((action) => bridge?.entitlement['gate.check'](action)),
     ]);
     if (summaryReply?.ok) setSummary(summaryReply.value);
     const decisions: Record<string, GateDecisionView> = {};
-    for (const [index, action] of OUTBOUND_ACTIONS.entries()) {
+    for (const [index, action] of QUOTA_ACTIONS.entries()) {
       const reply = gateReplies[index];
       // 一个动作读不到就整组丢掉：半屏额度数字比空白更容易骗人。
       if (!reply?.ok) {
@@ -58,7 +66,7 @@ export function UsagePanel() {
    * 走一次真实外发样例：过闸门、打本地 fixture、落账，然后重读判定与账本。
    * @param action 动作名（额度按它单独计）
    */
-  const send = (action: string) =>
+  const send = (action: OutboundSampleAction) =>
     void run(
       t('usage.actionSend', { action }),
       () =>
@@ -101,8 +109,9 @@ export function UsagePanel() {
       )}
 
       <ul className="mt-3 flex flex-col gap-2">
-        {OUTBOUND_ACTIONS.map((action) => {
+        {QUOTA_ACTIONS.map((action) => {
           const decision = decisions?.[action];
+          const canSend = isSampleAction(action);
           return (
             <li
               key={action}
@@ -128,17 +137,23 @@ export function UsagePanel() {
                       ? t('usage.unlimited')
                       : t('usage.remaining', { count: decision.remaining })}
               </span>
-              <button
-                type="button"
-                data-action="send"
-                data-send-action={action}
-                disabled={!!busy}
-                onClick={() => send(action)}
-                className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
-              >
-                <Send size={12} />
-                {t('usage.send')}
-              </button>
+              {canSend ? (
+                <button
+                  type="button"
+                  data-action="send"
+                  data-send-action={action}
+                  disabled={!!busy}
+                  onClick={() => send(action)}
+                  className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+                >
+                  <Send size={12} />
+                  {t('usage.send')}
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500" data-gate-note={action}>
+                  {t('usage.consumedByCapture')}
+                </span>
+              )}
             </li>
           );
         })}

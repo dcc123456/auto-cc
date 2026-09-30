@@ -1564,3 +1564,62 @@ d 的截图遮罩依赖 spike-3；e 排最后是它要同时改界面与两处�
 
 **本片欠着的**：`PagePacer` 目前只露 `nextScrollGapMs()` 一格。滚动不是外发，不该占用外发的节流区间，
 所以没有把 `nextGapMs()` 一起投影过去；将来 2.7-b 把抓取纳入 `entitlement.gate` 之后再评估要不要加第二格。
+
+### 14.8 2.7-b 收口记录（按动作日额度 + 抓取入闸门，2026-10-01）
+
+**做了什么**：`gateSchema` 的单值 `dailyLimit` 换成 `dailyLimits: { search, greet, deliver }`
+（`z.strictObject` + 每键 `.int().min(1).max(1000)`，默认 40/20/10 并导出 `DEFAULT_DAILY_LIMITS`，
+`dailyLimit` 直接删掉、不留兜底）；`check()` 先 `requireLimit(action)` 再分模式，未知动作名返回
+`INVALID_ARGUMENT` 并在 message 里回显 `search / greet / deliver`；`jd.capture.run` 整轮包进
+`gate.perform('search', …)` 并 `static inject` 上 `entitlement.gate`；`outbound.sample` 的 action 从
+`z.string()` 收成 `z.enum(OUTBOUND_SAMPLE_ACTIONS)`；动作词表落在 `shared/src/bridge.ts`
+（`QUOTA_ACTIONS` / `OUTBOUND_SAMPLE_ACTIONS`），闸门、`UsagePanel`、`outbound` 三处一起改读它；
+`cordis.yml` 的 `entitlement` 段显式写三键、`jd-capture` 的 `dependsOn` 补 `entitlement`；
+`CaptureRunResult.ledgerRowsBefore/After` 的口径与界面文案按 §14.4 第 1 条更正。
+
+**验收读数**：2.7-03 转 `[x]`，证据 `docs/acceptance/2.7/2.7-03-per-action-quota.txt`（配置形状 / 单测 /
+运行期读数 / 对 2.3-11 的更正四节）+ 五张真实窗口截图（用量面板三行、装配面板配置编辑器、抓取前计数、
+抓满之后、被拒那一轮）。spec 侧同步改了 2.3-11 那一行与它的验收记录——按 §14.4 第 1 条"旧读数不改写"，
+原始截图 `2.3-01-full-run.png` 保留当时的文案，改口只写在读数说明里。
+
+**与 §14.3 第 3 条 / §14.4 第 4 条的偏差，逐条写明**：
+
+1. **`outbound.sample` 收成两键而不是三键**（§14.4 第 4 条原文是"改成三键枚举"）。
+   样例外发那个按钮做的事就是"从界面真的发一条出去"，`search` 不在它的能力里；让它接受 `search`
+   等于开一个"记一条 `search` 账但什么都没搜"的入口——那是伪造用量，而 2.7-e 的审计视图正是靠这一列说话。
+   配套读数：用量面板上 `search` 那一行没有外发按钮，只写「由抓取编排消费（面板不代发搜索）」（证据 3.1）。
+   收窄没有削弱 §14.4 第 4 条要防的那件事：渲染层仍然发明不出新的动作名，`QUOTA_ACTIONS` 与
+   `OUTBOUND_SAMPLE_ACTIONS` 的差集由 `bridge.ts` 一处声明，不是两处各写一遍（§2.5）。
+2. **`perform('search', …)` 没带 `source`**（§14.3 第 3 条写的是 `{targetId, source}`）。
+   `source` 列的既定语义是 2.5-09 的文案可追溯来源（`v1:1001`、`manual:1001`），抓取没有这条链——
+   关键词已经在 `targetId` 上，再编一个字符串塞进 `source` 会让审计视图里同一列有两种含义，
+   那比少一个字段贵得多。要补也是补进 `targetId` 的表述，不动 `source`。
+3. **多导出了 `DEFAULT_DAILY_LIMITS` 与 `GateDailyLimits`**（plan 未要求）。
+   不是为假想留的口子：带 `.default()` 的键在每个直接调用点都必须显式给出（AGENTS.md §9 的 cordis 实测），
+   所以 `cordis.yml` 与 `entitlement` / `outbound` / `greet` / `deliver` / `jd-capture` 五个测试文件的构造点
+   都要写全三键；用例要"只收紧 `search`、另两条保持出厂值"时必须从同一个数展开
+   （`{ ...DEFAULT_DAILY_LIMITS, search: 1 }`），各自抄一遍数字就是第二套真相（§2.1）。
+4. **词表放 `shared/src/bridge.ts`，不放 `plugin-entitlement`**（plan 未写落点）。
+   读它的是 L3 的 `outbound`、L4 的 `UsagePanel` 和 L2 的闸门三处；若权威定义在 `entitlement` 包里，
+   渲染层要拿到动作词表就得反向依赖领域包内部（§4.1 禁止），而 `bridge.ts` 已经是这个类型的唯一出处。
+
+**三条计数互不占用为什么是免费的，也钉住**：`countToday(action, nowMs)` 早就按 action 过滤、
+按本地自然日取界（`ledger.ts`），所以本片没碰账本表结构、迁移号、日界算法——
+本片的全部账本侧改动只有配置形状与消费点（§14.3 第 3 条末段的原话，实测成立）。
+
+**活体验收踩到的操作事实（写进纪律，防止下次重演）**：`pnpm dev` 的 esbuild watch 会把 workspace 包的
+源码**内联**进 `main.cjs`，因此**任何主进程侧源码改动都会重启 Electron**，连带丢掉热配置、把视图复位到
+chat、并关掉内核会话。第一次"输入没生效"的读数就是这么来的（`type` 之后 `after: ""`，
+`eval` 查出目标元素 `rect` 全 0、`offsetParent: null`——诊断视图根本没挂载）。结论：
+**V/C 类活体验收必须排在全部主进程侧改动之后**，且重启后要重新点「打开平台 fixture」再跑抓取。
+另：闸门只在成功时落账，所以那次失败的抓取没有留下账本行——这条不是运气，正是 1.9 定的语义，
+`entitlement.test.ts` 里锁着。
+
+**收尾自检（AGENTS.md §7.4）读数**：`pnpm typecheck` 全绿；`pnpm lint` 全绿（含渲染层规范检查
+「2 个语言包，16 个源文件」与合规扫描「145 个源码文件 0 命中」）；`pnpm format:check` 全绿；
+`pnpm test` exit 0、18 个包全绿（entitlement 12 / outbound 58 / platform-boss 119 / browser 187，其余包全 Done）。
+
+**本片欠着的**：① `PagePacer` 的第二格经评估**仍不加**——抓取纳入闸门后它要的仍然是滚动节奏，
+把外发的 `nextGapMs()` 露给 L2 只会让页面动作去占外发区间（`core/events.ts:397` 那条注释就是判据）；
+② 账本 `summary().byAction` 已有数据、界面仍未渲染（§14.3 第 5 条末尾说的"顺手补"），
+它属于 2.7-e 的审计视图，留到那片一起做，不在这里空半截界面。

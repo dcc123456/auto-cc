@@ -1,9 +1,9 @@
 /**
- * `jd.capture` 的编排用例（spec 2.3-01 / 2.3-04 / 2.3-06 / 2.3-07 / 2.3-08 / 2.3-11）
+ * `jd.capture` 的编排用例（spec 2.3-01 / 2.3-04 / 2.3-06 / 2.3-07 / 2.3-08 / 2.3-11 / 2.7-03）
  * 与节点执行器用例（spec 2.4-01 / 2.4-07 / 2.4-09）。
  *
- * 这条链路挂**真实**的平台适配器、库与账本，只替一只读页面的手和一张登记处的表：
- * 「停止条件」「阶段先后」「单条失败隔离」「抓取不记账」都是这几位协作的行为，
+ * 这条链路挂**真实**的平台适配器、库、账本与闸门，只替一只读页面的手和一张登记处的表：
+ * 「停止条件」「阶段先后」「单条失败隔离」「抓取占哪一条额度」都是这几位协作的行为，
  * 任何一位被 mock 掉都会让对应的那条验收变成自证。页面读数来自 `test-doubles.ts` 的脚本，
  * 全程不访问真实平台（AGENTS.md §7.2）。登记处之所以能用替身：平台包不能 import L3 的
  * `plugin-workflow`（AGENTS.md §4.1），而这里要验收的是「init 有没有交出去、让出有没有中途收手」，
@@ -13,6 +13,7 @@ import {
   asApp,
   Context,
   executorRegistryOf,
+  fiberState,
   NO_CONFIG,
   type Fiber,
   type WorkflowNodeInvocation,
@@ -20,7 +21,12 @@ import {
 } from '@auto-cc/core';
 import { PlatformRegistryService } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { UsageLedgerService } from '@auto-cc/plugin-entitlement';
+import {
+  DEFAULT_DAILY_LIMITS,
+  EntitlementGateService,
+  UsageLedgerService,
+  type GateConfig,
+} from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,10 +85,17 @@ const captureConfig = (overrides: Partial<JdCaptureConfig> = {}): JdCaptureConfi
  * @param script 页面读数脚本
  * @param config 抓取配置覆盖项
  * @param pacer 节奏替身的滚动间隔（毫秒）；默认 0 让用例不等，取消类用例才拉大
+ * @param gate 闸门配置；默认 `unlimited`（抓取现在过闸门，spec 2.7-03：不装闸门这条链路根本挂不起来，
+ *        而无限模式既放行也照样落账，正好用来观察「一轮 run 记一条 search」）
  * @returns 上下文、`jd.capture` / `jd.store` 服务、执行器登记处替身、`jd.capture` 的 fiber（卸载用例要先停它）、
  *          假手记账与进度事件列表，以及节奏替身（`draws` 是「取了几次节奏」的读数）
  */
-async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}, pacerGapMs = 0) {
+async function boot(
+  script: PageScript,
+  config: Partial<JdCaptureConfig> = {},
+  pacerGapMs = 0,
+  gate: GateConfig = { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS },
+) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
   sandboxes.push(dir);
   const ctx = new Context();
@@ -101,6 +114,8 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}, p
   fibers.push(await ctx.plugin(StubOutboundThrottleService, { scrollGapMs: pacerGapMs }));
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
+  // 真实闸门（不是替身）：2.7-03 要验收的正是「抓取走的是那个唯一的判定 + 落账口」，mock 掉它等于自证。
+  fibers.push(await ctx.plugin(EntitlementGateService, gate));
   fibers.push(await ctx.plugin(JdStoreService, {}));
   // 真实适配器：`browser.page` 那一步取到的是上面那只替身。
   fibers.push(await ctx.plugin(BossPlatformService, {}));
@@ -116,6 +131,7 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}, p
     capture: app['jd.capture'],
     jd: app['jd.store'],
     ledger: app['usage.ledger'],
+    gate: app['entitlement.gate'],
     executors: executorRegistryOf(ctx),
     captureFiber,
     fake,
@@ -328,13 +344,74 @@ describe('单条失败隔离（spec 2.3-08）', () => {
   });
 });
 
-describe('抓取是只读动作（spec 2.3-11）', () => {
-  it('本轮前后的账本行数相同，一行都没多', async () => {
+describe('抓取占的是 search 那一条额度（spec 2.7-03，并更正 2.3-11 的原判据）', () => {
+  it('一轮 run 只落一条 `search` 账，且抓取期间没有别的动作记过账', async () => {
     const { capture, ledger } = await boot(twoScreenScript(['1001', '1002', '1003']), { targetCount: 3 });
     expect(ledger.count()).toBe(0);
     const run = await capture.run({ keyword: '前端' });
+    // 2.3-11 的原读数理所应当保留：这两个数取样于 `perform` 落账**之前**，相等就证明
+    // 「滚读与逐条详情」这条只读链路上没有任何动作记过账 —— 它证明的从来不是「抓取不入账」。
     expect(run).toMatchObject({ ledgerRowsBefore: 0, ledgerRowsAfter: 0 });
-    expect(ledger.count()).toBe(0);
+    // 而整轮 run 自己占一条 `search`：一次成功抓取 = 一条账，失败或被拒都没有。
+    expect(ledger.count()).toBe(1);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: 'search', targetId: '前端' });
+  });
+
+  it('第 N+1 轮在开始之前就被拒：不导航、不滚动、不落账（2.7-03 的「超限即停」）', async () => {
+    const { capture, fake, ledger, events } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3 },
+      0,
+      { mode: 'daily', dailyLimits: { ...DEFAULT_DAILY_LIMITS, search: 1 } },
+    );
+    await capture.run({ keyword: '前端' });
+    const navigated = fake.navigated.length;
+    const scrolls = fake.scrolls;
+    const progressed = events.length;
+
+    await expect(capture.run({ keyword: '后端' })).rejects.toMatchObject({
+      code: 'QUOTA_EXCEEDED',
+      details: { action: 'search' },
+    });
+    // 判定在编排之前（`gate.perform` 里 check 先跑），所以第二个工作轮连一次页面调用都没留下；
+    // 若这里读到了新增，就说明抓取是「先跑完再说额度不够」，那正是 §7.3 要防的形态。
+    expect(fake.navigated).toHaveLength(navigated);
+    expect(fake.scrolls).toBe(scrolls);
+    expect(events).toHaveLength(progressed);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('抓满 search 之后，打招呼与投递的额度一条没少（三条互不占用）', async () => {
+    const { capture, gate } = await boot(twoScreenScript(['1001', '1002', '1003']), { targetCount: 3 }, 0, {
+      mode: 'daily',
+      dailyLimits: { ...DEFAULT_DAILY_LIMITS, search: 1 },
+    });
+    await capture.run({ keyword: '前端' });
+    expect(gate.check('search')).toMatchObject({ allowed: false, remaining: 0 });
+    expect(gate.check('greet')).toMatchObject({ allowed: true, remaining: DEFAULT_DAILY_LIMITS.greet });
+    expect(gate.check('deliver')).toMatchObject({ allowed: true, remaining: DEFAULT_DAILY_LIMITS.deliver });
+  });
+
+  it('摘掉闸门后抓取服务根本不挂载（外发必经闸门的另一半：PENDING 而不是静默少判）', async () => {
+    // 这一条是 1.9-05 的结构在 `jd.capture` 上的对应物：`inject` 里有 `entitlement.gate`，
+    // 依赖缺席时 cordis 把 fiber 留在 PENDING，界面点「搜索并入库」得到的是未挂载而不是「照跑但没记账」。
+    const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
+    sandboxes.push(dir);
+    const ctx = new Context();
+    await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+    await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
+    await ctx.plugin(FakeExecutorRegistryService, {});
+    await ctx.plugin(StubBrowserPageService, { fake: createFakePage(twoScreenScript(['1001'])) });
+    await ctx.plugin(StubBrowserActService, { fake: createFakeAct() });
+    await ctx.plugin(StubOutboundThrottleService, { scrollGapMs: 0 });
+    await ctx.plugin(PlatformRegistryService, NO_CONFIG);
+    await ctx.plugin(UsageLedgerService, {});
+    await ctx.plugin(JdStoreService, {});
+    await ctx.plugin(BossPlatformService, {});
+    const captureFiber = await ctx.plugin(JdCaptureService, captureConfig());
+    fibers.push(captureFiber);
+    expect(fiberState(captureFiber.state)).toBe('pending');
+    expect(asApp(ctx).get('jd.capture')).toBeUndefined();
   });
 });
 

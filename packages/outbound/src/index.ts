@@ -9,12 +9,19 @@
  * 被拒时拿到的是 `QUOTA_EXCEEDED` 结构化错误，原样上浮给界面（AGENTS.md §7.3）。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import type { SendReceiptView, SendSampleRequest } from '@auto-cc/shared';
+import { OUTBOUND_SAMPLE_ACTIONS, type SendReceiptView, type SendSampleRequest } from '@auto-cc/shared';
 import { z } from 'zod';
 
-/** 入站参数校验（渲染层是不可信来源，AGENTS.md §2.6「边界校验只在系统边界做」）。 */
+/**
+ * 入站参数校验（渲染层是不可信来源，AGENTS.md §2.6「边界校验只在系统边界做」）。
+ *
+ * `action` 从任意非空字符串收窄成枚举（spec 2.7-03 / plan §14.4 第 4 条）：日上限改成按动作取值之后，
+ * 任意字符串就等于让渲染层**发明新的免限动作名**——传一个 `dailyLimits` 里没有的名字，
+ * 闸门要么不认识（报错）要么得为未知动作现编一条兜底，两条都是把额度绕成摆设。
+ * 这里连 `search` 都不收：抓取那一条账由 `jd.capture` 跑完一轮后自己经闸门落，界面没有「发一次搜索」。
+ */
 const sendRequestSchema = z.strictObject({
-  action: z.string().min(1),
+  action: z.enum(OUTBOUND_SAMPLE_ACTIONS),
   targetId: z.string().min(1),
   message: z.string().min(1),
   workflowRunId: z.string().min(1).nullish(),

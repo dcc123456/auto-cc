@@ -22,7 +22,12 @@ import {
   type WorkflowNodeSpec,
 } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { EntitlementGateService, UsageLedgerService, type GateConfig } from '@auto-cc/plugin-entitlement';
+import {
+  DEFAULT_DAILY_LIMITS,
+  EntitlementGateService,
+  UsageLedgerService,
+  type GateConfig,
+} from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -35,6 +40,12 @@ import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle
 
 /** 判定基准：一个真实的当下毫秒数，所有 `nowMs` 都在它附近，避免与本地日界打架。 */
 const T0 = 1_760_000_000_000;
+
+/** 投递每天只许 1 次的闸门配置；另两条留 shipped 默认，避免用例里抄一份额度数字。 */
+const GATE_ONE_DELIVER: GateConfig = {
+  mode: 'daily',
+  dailyLimits: { ...DEFAULT_DAILY_LIMITS, deliver: 1 },
+};
 
 const sandboxes: string[] = [];
 
@@ -135,7 +146,7 @@ async function boot(options: BootOptions = {}) {
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   await ctx.plugin(UsageLedgerService, {});
-  await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimit: 5 });
+  await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS });
   const gap = options.gapMs ?? 0;
   const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
   await ctx.plugin(OutboundThrottleService, throttleConfig);
@@ -449,7 +460,7 @@ describe('投递的账本、额度与频控（spec 2.6-02 / 03 / 05）', () => {
     const hand = fakeChannel();
     const gapMs = 3_000;
     const { dir, deliver, ledger } = await boot({
-      gate: { mode: 'daily', dailyLimit: 1 },
+      gate: GATE_ONE_DELIVER,
       gapMs,
       autonomy: 'auto',
       channel: hand.channel,
@@ -663,7 +674,7 @@ describe('投递前的文件校验与渠道现问（spec 2.6-06 / plan §12.13�
     const { ctx, dir, deliver } = await boot({
       channel: hand.channel,
       autonomy: 'auto',
-      gate: { mode: 'daily', dailyLimit: 1 },
+      gate: GATE_ONE_DELIVER,
     });
     const filePath = writeResume(dir);
     await expect(deliver.perform({ platform: 'boss', filePath, nowMs: T0 })).rejects.toMatchObject({

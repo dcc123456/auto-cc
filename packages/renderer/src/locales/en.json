@@ -169,7 +169,7 @@
       "outcomeHeading": "Last run outcome",
       "outcomeIdle": "No capture run yet",
       "outcomeRow": "{{platform}} \"{{keyword}}\" · city {{city}} · {{rounds}} rounds · {{containers}} containers · {{stored}} stored · {{total}} rows total · {{stoppedBy}}",
-      "ledger": "Usage ledger rows before {{before}} → after {{after}} · read-only action {{readOnly}}",
+      "ledger": "Ledger rows inside the gate: before {{before}} → after {{after}} · no other action booked {{noOtherAction}}",
       "skippedHeading": "{{count}} jobs skipped this round (one failure never aborts the round)",
       "skippedEmpty": "Nothing was skipped this round",
       "skippedRow": "{{title}} · {{reason}} · {{sourceUrl}}",
@@ -296,7 +296,7 @@
       "failed": "{{action}} failed: {{message}}"
     },
     "usage": {
-      "heading": "Outbound quota & usage ledger",
+      "heading": "Quota gate & usage ledger",
       "refresh": "Reload usage",
       "send": "Send a sample",
       "actionSend": "Send {{action}}",
@@ -306,12 +306,13 @@
       "remaining": "{{count}} left today",
       "denied": "Denied: {{reason}}",
       "gateUnknown": "Gate not mounted: the assembly is missing entitlement",
+      "consumedByCapture": "Consumed by the capture pipeline (the panel never fakes a search)",
       "total": "{{count}} rows in total",
       "today": "{{count}} today",
       "dayRow": "{{day}} · {{count}}",
       "actionRow": "{{action}} × {{count}}",
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
-      "empty": "Ledger is empty: no outbound has passed the gate yet",
+      "empty": "Ledger is empty: no action has passed the gate yet",
       "none": "no target"
     },
     "workflow": {

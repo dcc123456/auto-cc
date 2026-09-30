@@ -253,6 +253,29 @@ export type KernelPageSnapshotView = {
 };
 
 /**
+ * 有独立日上限的动作名（spec 2.7-03）——**闸门配置、渲染层入参、界面行三处共用的唯一来源**。
+ *
+ * 为什么这份表在 `shared` 而不是 `entitlement`：`outbound.sample` 的入参校验、`UsagePanel` 的循环、
+ * 闸门的 `dailyLimits` 键都要引用同一批名字，任何一处自己抄一遍，就会出现
+ * 「界面能发明一个闸门没有配额条目的动作名」——那正是 2.7-03 要堵的口子（plan §14.4 第 4 条）。
+ * `search` 与另两个的差别：它是**只读**动作，额度管的是「今天允许发起几轮抓取」，不消耗任何外发机会。
+ */
+export const QUOTA_ACTIONS = ['search', 'greet', 'deliver'] as const;
+
+/** 闸门认得的额度动作名。 */
+export type QuotaAction = (typeof QUOTA_ACTIONS)[number];
+
+/**
+ * 渲染层可以**主动发起**的外发动作（spec 1.9-03 / 2.7-03）。
+ *
+ * 少了 `search`：抓取那一条账由 `jd.capture` 在跑完一轮后自己经闸门落，界面没有「发一次搜索」这张按钮。
+ */
+export const OUTBOUND_SAMPLE_ACTIONS = ['greet', 'deliver'] as const;
+
+/** 样例/编排外发入口允许的动作名。 */
+export type OutboundSampleAction = (typeof OUTBOUND_SAMPLE_ACTIONS)[number];
+
+/**
  * 闸门一次判定的结果（spec 1.9-01）。
  *
  * `remaining` 用 `null` 表示「无限」而不是 `Infinity`：后者过不了 `structuredClone` 的语义期待，
@@ -286,9 +309,9 @@ export type UsageSummaryView = {
   recent: LedgerRowView[];
 };
 
-/** 一次外发样例的入参（spec 1.9-03 / 1.9-04）。 */
+/** 一次外发样例的入参（spec 1.9-03 / 1.9-04 / 2.7-03：动作名是枚举，不是任意字符串）。 */
 export type SendSampleRequest = {
-  action: string;
+  action: OutboundSampleAction;
   targetId: string;
   message: string;
   workflowRunId?: string | null;
@@ -296,7 +319,7 @@ export type SendSampleRequest = {
 
 /** 外发成功后的回执：账本行 + 对端计数（P1 的「确实发出去了」由 fixture 的收件数证明）。 */
 export type SendReceiptView = {
-  action: string;
+  action: OutboundSampleAction;
   targetId: string;
   /** 本次落账的账本行 id；被拒时根本走不到回执（决策 1：被拒不记账）。 */
   ledgerId: number;
@@ -576,10 +599,11 @@ export interface BridgeSignatures {
   /** 会话库概况与 schema 版本。 */
   'conversation.store.status': { args: []; returns: ConversationStatusView };
   /**
-   * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
+   * 闸门判定（spec 1.9-01 / 1.9-02 / 2.7-03）。界面只用它显示剩余额度，
    * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
+   * 入参是 `QuotaAction` 而不是任意字符串：日上限按动作取值之后，任意字符串就等于从渲染层发明免限的动作名。
    */
-  'entitlement.gate.check': { args: [action: string]; returns: GateDecisionView };
+  'entitlement.gate.check': { args: [action: QuotaAction]; returns: GateDecisionView };
   /** 账本回看：总数、按天、按动作，外加最近几行（spec 1.9-07 / 1.9-08）。 */
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
@@ -1090,7 +1114,7 @@ export interface CaptureRunView {
   /** 运行结束后的库内总行数 */
   total: number;
   finishedAt: number;
-  /** 本轮前后的账本行数（spec 2.3-11：抓取是只读动作，两值必须相等） */
+  /** 本轮前后的账本行数（spec 2.3-11：两值必须相等；它证明的是「抓取没记别的动作」，不是「抓取不入账」，见 2.7-03） */
   ledgerRowsBefore: number;
   ledgerRowsAfter: number;
 }

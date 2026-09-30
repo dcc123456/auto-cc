@@ -15,7 +15,12 @@ import {
   type WorkflowNodeSpec,
 } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { EntitlementGateService, UsageLedgerService, type GateConfig } from '@auto-cc/plugin-entitlement';
+import {
+  DEFAULT_DAILY_LIMITS,
+  EntitlementGateService,
+  UsageLedgerService,
+  type GateConfig,
+} from '@auto-cc/plugin-entitlement';
 import { LlmChatService, type LlmConfig } from '@auto-cc/plugin-llm';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -29,6 +34,12 @@ import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle
 
 /** 判定基准：一个真实的当下毫秒数，测试里所有 `nowMs` 都在它附近，避免与本地日界打架。 */
 const T0 = 1_760_000_000_000;
+
+/** 打招呼每天只许 1 次的闸门配置；另两条留 shipped 默认，避免用例里抄一份额度数字。 */
+const GATE_ONE_GREET: GateConfig = {
+  mode: 'daily',
+  dailyLimits: { ...DEFAULT_DAILY_LIMITS, greet: 1 },
+};
 
 const sandboxes: string[] = [];
 
@@ -110,7 +121,7 @@ async function boot(options: { gate?: GateConfig; gapMs?: number; channel?: Gree
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   await ctx.plugin(UsageLedgerService, {});
-  await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimit: 5 });
+  await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS });
   await ctx.plugin(LlmChatService, LLM_BASE);
   await ctx.plugin(OutboundScriptService, SCRIPT_BASE);
   const gap = options.gapMs ?? 0;
@@ -232,7 +243,7 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
 
   it('额度到量：第 N+1 次以 QUOTA_EXCEEDED 被拒、渠道没被调、账本不增（2.5-02）', async () => {
     const hand = fakeChannel();
-    const { greet, ledger } = await boot({ gate: { mode: 'daily', dailyLimit: 1 }, channel: hand.channel });
+    const { greet, ledger } = await boot({ gate: GATE_ONE_GREET, channel: hand.channel });
     await greet.perform(request({ jobId: 'job-1001' }));
     await expect(greet.perform(request({ jobId: 'job-2002' }))).rejects.toMatchObject({
       code: 'QUOTA_EXCEEDED',
@@ -366,7 +377,7 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
 
   it('入参既没文案也没生成入参：INVALID_ARGUMENT，且不消耗任何额度', async () => {
     const hand = fakeChannel();
-    const { ctx, greet } = await boot({ gate: { mode: 'daily', dailyLimit: 1 }, channel: hand.channel });
+    const { ctx, greet } = await boot({ gate: GATE_ONE_GREET, channel: hand.channel });
     await expect(greet.perform({ platform: 'boss', jobId: 'job-1001', nowMs: T0 })).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
     });

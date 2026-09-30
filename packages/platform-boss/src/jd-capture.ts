@@ -8,8 +8,11 @@
  * 两阶段是**必需**的，不是风格：`detail()` 会把视图导航到详情页，列表页就没了，所以滚动收集（阶段 A）
  * 必须整体先于逐条读详情（阶段 B）。顺序反了会在一半的位置重新打开搜索页，前功尽弃。
  *
- * 全程只读：一行 `entitlement.gate` 都不进（AGENTS.md §7.3 管的是外发），并且把本轮前后的账本行数
- * 一起带回读数（spec 2.3-11）——抓取若哪天不小心记了账，界面会直接显示两个数不相等。
+ * 全程只读：不点打招呼、不投简历，而**「这一轮抓取」本身现在过闸门**（spec 2.7-03）——
+ * `run()` 的整段编排包在 `gate.perform('search', …)` 里，超限即在开始之前被 `QUOTA_EXCEEDED` 拒掉，
+ * 成功跑完才落那一行账。被抓取消耗的额度只有 `search` 这一条，`greet` / `deliver` 各自计数（§14.4 第 1 条）。
+ * 读数仍带本轮前后的账本行数（spec 2.3-11）：这两个数在 `perform` 落账**之前**取样，
+ * 所以它们证明的是「抓取期间没有别的动作记过账」，而不是「抓取不入账」——两个含义别再混着说。
  */
 import {
   AppError,
@@ -113,7 +116,14 @@ type StoppedBy = CaptureRunView['stoppedBy'];
 export class JdCaptureService extends Service {
   static provide = 'jd.capture';
   static Config = jdCaptureSchema;
-  static inject = ['platform.registry', 'browser.page', 'jd.store', 'usage.ledger', 'outbound.throttle'];
+  static inject = [
+    'platform.registry',
+    'browser.page',
+    'jd.store',
+    'usage.ledger',
+    'outbound.throttle',
+    'entitlement.gate',
+  ];
 
   private lastRun: CaptureRunView | null = null;
 
@@ -169,7 +179,26 @@ export class JdCaptureService extends Service {
   }
 
   /**
-   * 跑一轮抓取：搜索 → 滚动收集列表 → 逐条读详情 → 全部落库。
+   * 跑一轮抓取，但**先在闸门里问过额度**（spec 2.7-03）。
+   *
+   * 这是 `search` 这一条额度的唯一消费者：整段编排（含滚读与详情页）是 `gate.perform` 的任务闭包，
+   * 所以判定在开始之前，超限直接以 `QUOTA_EXCEEDED` 失败，一个页面都不碰；跑完才落账，
+   * 半途失败或让出不记账 —— 与打招呼 / 投递同一条语义，闸门不需要为抓取开特例。
+   * @param criteria 搜索条件（关键词必填；它同时作为账本的 `targetId`，界面按词看得清今天搜了什么）
+   * @param signal 协作让出信号，原样透传给 `runOnce`
+   * @returns 本轮结局，同 `runOnce`
+   * @throws 今日 `search` 额度用尽时 `QUOTA_EXCEEDED`（不静默少抓一轮，界面拿到的是一次可回看的失败）
+   */
+  run = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
+    const gate = asApp(this.ctx)['entitlement.gate'];
+    const { value } = await gate.perform('search', { targetId: criteria.keyword }, () =>
+      this.runOnce(criteria, signal),
+    );
+    return value;
+  };
+
+  /**
+   * 一轮抓取的编排本体（滚读 + 逐条详情 + 落库），**不含额度判定**。
    *
    * 单条详情读失败只记进 `skipped`（spec 2.3-08），整轮继续；列表整页读不到不报错，
    * 它在阶段 A 就表现为「本轮零新增」，于是第二圈的无新内容判定把它停下来，不会空转到上限。
@@ -179,7 +208,7 @@ export class JdCaptureService extends Service {
    * @throws 目标平台未登记时由 `platform.registry` 抛 `PLATFORM_NOT_REGISTERED`；关键词为空由适配器抛 `INVALID_ARGUMENT`；
    *         让出时抛 `WORKFLOW_STEP_FAILED`——runner 先看信号，因此这一条记为让出而不是节点失败（spec 2.4-09）
    */
-  run = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
+  private runOnce = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
     const adapter = this.registry.get(this.config.platform);
     const target =
       criteria.limit && criteria.limit > 0
