@@ -33,7 +33,7 @@ async function boot(): Promise<PlatformRegistryService> {
 }
 
 /**
- * 造一个只做记账的空壳适配器：五个动作各返回固定值，用来验证「契约可被实现」。
+ * 造一个只做记账的空壳适配器：契约的每个动作各返回固定值，用来验证「契约可被实现」。
  * @param id 平台标识
  * @param overrides 需要改动的自我声明项（displayName / capabilities）
  * @returns 满足 `PlatformAdapter` 的替身，带调用计数
@@ -50,6 +50,8 @@ function fakeAdapter(
     company: '示例公司',
     salaryText: '25-40K·15薪',
     city: '杭州',
+    experience: '3-5 年',
+    education: '本科',
     detailUrl: 'https://example.com/job/1',
     capturedAt: 1,
   };
@@ -62,13 +64,26 @@ function fakeAdapter(
       capabilities: ['search', 'detail', 'chat', 'sendResume', 'readReplies'],
       ...overrides,
     },
+    openSearch: (criteria: JobSearchCriteria) => {
+      calls.push(`openSearch:${criteria.keyword}`);
+      return Promise.resolve();
+    },
+    readListing: () => {
+      calls.push('readListing');
+      return Promise.resolve([summary]);
+    },
     search: (criteria: JobSearchCriteria) => {
       calls.push(`search:${criteria.keyword}`);
       return Promise.resolve([summary]);
     },
     detail: (jobId: string) => {
       calls.push(`detail:${jobId}`);
-      return Promise.resolve({ summary, description: '负责前端架构', requirements: ['五年经验'] } satisfies JobDetail);
+      return Promise.resolve({
+        summary,
+        description: '负责前端架构',
+        requirements: ['五年经验'],
+        postedText: '3 天前',
+      } satisfies JobDetail);
     },
     chat: (jobId: string) => {
       calls.push(`chat:${jobId}`);

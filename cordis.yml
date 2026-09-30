@@ -90,6 +90,10 @@ plugins:
     config:
       navigateTimeoutMs: 10000
       snapshotTextLimit: 4000
+      # 批量抽取的两道上限（spec 2.3-01）：一屏回传多少张卡、每个字段带回多少字。
+      # 写成配置是为了在装配面板上把 `extractRowLimit` 调到 3，看界面如何如实报告「被截断」。
+      extractRowLimit: 12
+      extractTextLimit: 4000
 
   # 定位层（spec 2.2-01…05）：页面只回读候选，打分、去重、判歧义、指纹自愈全在这条服务里。
   # 阈值写成配置而不是常量：2.2-02 要能在装配面板上把 `minScore` 调到 100 看界面如何拒绝猜测。
@@ -124,6 +128,22 @@ plugins:
   # 想用外部知识文件验证「改数据不改代码」：给 `packFile` 填一个绝对路径（2.6 走这条口）。
   - id: platform-boss
     dependsOn: [platform-registry, browser]
+
+  # JD 库（spec 2.3-02 / 2.3-04 / 2.3-05）：`jobs` 表由本服务自己把迁移 push 进 `store.migrations`，
+  # 号段取 3（`usage_ledger` 1、`chat` 2 —— 号段是全局的，撞号在运行期才炸）。
+  # 摘掉这一行，`jd-capture` 连同进 PENDING：界面点「搜索并入库」得到结构化错误而不是静默不入库。
+  - id: jd-store
+    dependsOn: [store]
+
+  # 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：滚动收集 → 逐条读详情 → 落库，全程只读，不经 `entitlement.gate`。
+  # `targetCount` 是「抓够就停」的判据、`maxRounds` 是不死循环的硬上限，两者都写进清单而不是代码里（§2.7）。
+  - id: jd-capture
+    dependsOn: [platform-boss, browser, jd-store, usage]
+    config:
+      platform: boss
+      targetCount: 20
+      maxRounds: 8
+      roundPauseMs: 300
 
   # 工作流执行器骨架（spec 1.10）：六步占位流水线，把「状态是数据、界面是镜像」这条契约立起来。
   # 只依赖 ipc——处理器要在界面能发起调用之前就位。**不**依赖 entitlement：P1 的六步里没有任何

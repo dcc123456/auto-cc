@@ -19,6 +19,13 @@ const rendererRoot = path.join(repoRoot, 'packages', 'renderer');
 /** CDP 端口按项目约定用 10222，不使用 Chrome/Electron 默认的 9222。 */
 const cdpPort = process.env.AUTO_CC_CDP_PORT ?? '10222';
 const rendererUrl = process.env.ELECTRON_RENDERER_URL ?? 'http://127.0.0.1:5173';
+/**
+ * 开发态独立的 userData 目录（绝对路径）。
+ *
+ * 单实例锁是按 userData 目录判定的，所以已安装的 packaged app 一旦在跑，开发态实例就会拿不到锁、
+ * 立刻退出（实测：`electron exited (0)`，且 CDP 端口从未监听）。给了这个目录，两套实例才能并存。
+ */
+const userDataDir = process.env.AUTO_CC_USER_DATA_DIR ?? '';
 
 let electron: ChildProcess | undefined;
 let restartTimer: NodeJS.Timeout | undefined;
@@ -47,6 +54,7 @@ function launchElectron() {
       path.join(distDir, 'main.cjs'),
       `--remote-debugging-port=${cdpPort}`,
       '--disable-features=CalculateNativeWinOcclusion',
+      ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : []),
     ],
     {
       stdio: 'inherit',

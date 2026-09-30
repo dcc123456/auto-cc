@@ -10,6 +10,7 @@ import type {
   ShellStatus,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { formatClock } from './format';
 
 /** 失效事件最多留几条：面板是验收入口，不是历史库。 */
 const EXPIRED_LIMIT = 3;
@@ -19,10 +20,6 @@ const AUTH_CLASS: Record<SessionPlatformView['auth'], string> = {
   active: 'bg-emerald-950 text-emerald-300 border-emerald-800',
   expired: 'bg-amber-950 text-amber-300 border-amber-800',
 };
-
-/** 时间戳 → 本地可读时间；null（会话型 cookie）显示「无期限」。 */
-const formatExpiry = (ms: number | null, noneLabel: string): string =>
-  ms === null ? noneLabel : new Date(ms).toLocaleString();
 
 /**
  * 会话面板：内置内核的分区、落盘位置、cookie 名与登录判定（spec 1.8），以及内核页面的一次读取（spec 2.1-03）。
@@ -239,7 +236,7 @@ export function SessionPanel() {
                 {t('session.cookieNames', { names: platform.cookieNames.join(', ') || t('session.none') })}
                 {' · '}
                 {t('session.expiresAt', {
-                  time: formatExpiry(platform.expiresAt, t('session.noExpiry')),
+                  time: formatClock(platform.expiresAt, t('session.noExpiry')),
                 })}
               </p>
             </li>

@@ -17,11 +17,6 @@
         margin: 0 0 4px;
         font-size: 16px;
       }
-      h2 {
-        margin: 18px 0 8px;
-        font-size: 14px;
-        color: #94a3b8;
-      }
       .notice {
         margin: 10px 0;
         padding: 8px 10px;
@@ -37,10 +32,12 @@
       .card {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px 14px;
+        gap: 6px 14px;
         align-items: baseline;
-        margin: 0 0 8px;
-        padding: 10px 12px;
+        margin: 0 0 10px;
+        padding: 14px 16px;
+        min-height: 96px;
+        align-content: flex-start;
         border: 1px solid #1e293b;
         border-radius: 8px;
         background: #111c31;
@@ -59,19 +56,24 @@
       a {
         color: #7dd3fc;
       }
-      button {
-        font: inherit;
-        padding: 4px 10px;
-        border-radius: 6px;
-        border: 1px solid #334155;
-        background: #1e293b;
-        color: #e2e8f0;
-        cursor: pointer;
+      .footer-space {
+        min-height: 45vh;
+        margin-top: 16px;
+        padding-top: 8px;
+        border-top: 1px dashed #1e293b;
+        color: #475569;
+      }
+      /* 哨兵要有可见高度才谈得上「进入视口」，见下方 HTML 注释里的实测结论。 */
+      .sentinel {
+        min-height: 28px;
+        padding-top: 8px;
+        color: #475569;
+        text-align: center;
       }
     </style>
   </head>
   <body>
-    <h1>职位搜索 · 前端工程师 / 上海</h1>
+    <h1>职位搜索</h1>
     <p class="notice">
       本地仿站（fixture）：DOM 结构刻意模仿招聘列表页，<strong>数据全为虚构</strong>，与任何真实公司、真实职位无关。
       自动化验收一律打这一页，不碰真实平台（AGENTS.md §7.2）。
@@ -85,56 +87,116 @@
       <a id="logout-link" href="/logout?next=%2Fboss">在仿站退出</a>
     </p>
 
-    <h2>搜索结果（6 条）</h2>
-    <ul style="list-style: none; margin: 0; padding: 0">
-      <li class="card" data-testid="jd-card" data-job-id="1001">
-        <a class="title" data-field="title" href="/boss/detail">桌面端前端工程师（Electron）</a>
-        <span class="muted" data-field="company">星桥科技</span>
-        <span class="salary" data-field="salary">25-40K·14薪</span>
-        <span class="muted" data-field="city">上海 · 浦东新区</span>
-        <span class="muted" data-field="experience">3-5 年</span>
-        <span class="muted" data-field="education">本科</span>
-      </li>
-      <li class="card" data-testid="jd-card" data-job-id="1002">
-        <a class="title" data-field="title" href="/boss/detail">React 前端工程师</a>
-        <span class="muted" data-field="company">云栖数据</span>
-        <span class="salary" data-field="salary">30-45K</span>
-        <span class="muted" data-field="city">上海 · 徐汇区</span>
-        <span class="muted" data-field="experience">5-10 年</span>
-        <span class="muted" data-field="education">本科</span>
-      </li>
-      <li class="card" data-testid="jd-card" data-job-id="1003">
-        <a class="title" data-field="title" href="/boss/detail">全栈工程师（Node + React）</a>
-        <span class="muted" data-field="company">灯塔智能</span>
-        <span class="salary" data-field="salary">面议</span>
-        <span class="muted" data-field="city">杭州 · 滨江区</span>
-        <span class="muted" data-field="experience">经验不限</span>
-        <span class="muted" data-field="education">大专</span>
-      </li>
-      <li class="card" data-testid="jd-card" data-job-id="1004">
-        <a class="title" data-field="title" href="/boss/detail">客户端工程师（桌面应用方向）</a>
-        <span class="muted" data-field="company">北岸软件</span>
-        <span class="salary" data-field="salary">1.8-2.5万·15薪</span>
-        <span class="muted" data-field="city">北京 · 海淀区</span>
-        <span class="muted" data-field="experience">3-5 年</span>
-        <span class="muted" data-field="education">硕士</span>
-      </li>
-      <li class="card" data-testid="jd-card" data-job-id="1005">
-        <a class="title" data-field="title" href="/boss/detail">前端负责人</a>
-        <span class="muted" data-field="company">汇流网络</span>
-        <span class="salary" data-field="salary">40-60K·16薪</span>
-        <span class="muted" data-field="city">深圳 · 南山区</span>
-        <span class="muted" data-field="experience">5-10 年</span>
-        <span class="muted" data-field="education">本科</span>
-      </li>
-      <li class="card" data-testid="jd-card" data-job-id="1006">
-        <a class="title" data-field="title" href="/boss/detail">自动化测试开发工程师</a>
-        <span class="muted" data-field="company">原野科技</span>
-        <span class="salary" data-field="salary">20-30K</span>
-        <span class="muted" data-field="city">成都 · 高新区</span>
-        <span class="muted" data-field="experience">1-3 年</span>
-        <span class="muted" data-field="education">本科</span>
-      </li>
-    </ul>
+    <p data-testid="list-filter">当前筛选：（读取中）</p>
+    <p data-testid="list-status">状态：（加载中）</p>
+
+    <ul style="list-style: none; margin: 0; padding: 0" data-testid="jd-list"></ul>
+    <div class="sentinel" data-testid="list-sentinel" aria-hidden="true">滚动加载更多岗位…</div>
+    <!-- 页脚留白是刻意加的：无限滚动的靶页必须「不滚动就看不到哨兵」，否则首屏就把全部岗位长出来，
+         spec 2.3-06 要的「靠滚动加载、抓够就停」会在截图里退化成一屏读满。
+         哨兵自己必须**有面积**：实测零高度的空 div 滚到视口里也不会被判为 intersecting，
+         于是第二屏永远长不出来（抓取会在第一轮就以「页面无新增」停下）。 -->
+    <div class="footer-space">页脚广告位（本地仿站留白）</div>
+
+    <script>
+      const list = document.querySelector('[data-testid="jd-list"]');
+      const statusLine = document.querySelector('[data-testid="list-status"]');
+      const filterLine = document.querySelector('[data-testid="list-filter"]');
+      const sentinel = document.querySelector('[data-testid="list-sentinel"]');
+      /** 条件名与站点知识包 `search.params` 一致：抓取端拼出来的地址，由这里原样读回并生效。 */
+      const conditions = new URLSearchParams(window.location.search);
+      let page = 0;
+      let total = 0;
+      let hasMore = true;
+      let loading = false;
+
+      filterLine.textContent =
+        '当前筛选：' +
+        ['query', 'city', 'experience'].map((name) => name + '=' + (conditions.get(name) || '（不限）')).join(' · ');
+
+      /**
+       * 追加一张职位卡片。
+       * @param job `/api/jobs` 回的一条岗位
+       */
+      function appendCard(job) {
+        const card = document.createElement('li');
+        card.className = 'card';
+        card.dataset.testid = 'jd-card';
+        card.dataset.jobId = job.id;
+        // 结构必须与知识包的候选声明对齐：容器 `li.card[data-testid=jd-card]`，
+        // 卡片内 `a[data-field=title]` 的 href 就是详情页地址，其后五个 span 依次是公司/薪资/城市/经验/学历。
+        const title = document.createElement('a');
+        title.className = 'title';
+        title.dataset.field = 'title';
+        title.href = job.detailUrl;
+        title.textContent = job.title;
+        card.append(title);
+        for (const [field, value, extraClass] of [
+          ['company', job.company, 'muted'],
+          ['salary', job.salary, 'salary'],
+          ['city', job.city, 'muted'],
+          ['experience', job.experience, 'muted'],
+          ['education', job.education, 'muted'],
+        ]) {
+          const span = document.createElement('span');
+          span.className = extraClass;
+          span.dataset.field = field;
+          span.textContent = value;
+          card.append(span);
+        }
+        list.append(card);
+      }
+
+      /** 将当前卡片数与服务端读数写进状态行：截图里要能同时看到「页面长了几张卡」和「还有没有更多」。 */
+      function reportState() {
+        statusLine.textContent =
+          '状态：已渲染 ' +
+          String(list.children.length) +
+          ' 张卡 · 命中 ' +
+          String(total) +
+          ' 条 · ' +
+          (hasMore ? '继续滚动可加载更多' : '没有更多了');
+      }
+
+      /**
+       * 拉取下一页并追加卡片（真实无限滚动的形态：地址不变，内容靠滚动长出来）。
+       * @returns 本次拉取完成信号；失败时只把原因写进状态行，不抛给页面
+       */
+      async function loadNextPage() {
+        if (loading || !hasMore) return;
+        loading = true;
+        page += 1;
+        const query = new URLSearchParams({
+          query: conditions.get('query') || '',
+          city: conditions.get('city') || '',
+          experience: conditions.get('experience') || '',
+          page: String(page),
+        });
+        try {
+          const response = await fetch('/api/jobs?' + query.toString());
+          const payload = await response.json();
+          for (const job of payload.items) appendCard(job);
+          total = payload.total;
+          hasMore = payload.hasMore;
+          reportState();
+        } catch (error) {
+          page -= 1;
+          statusLine.textContent = '状态：加载失败 · ' + String(error);
+        } finally {
+          loading = false;
+        }
+      }
+
+      // 首屏自己加载一次；之后的每一屏都要求「滚动过且哨兵进入视口」，
+      // 否则视口够高的时候观察器会在首屏就把全部岗位一口气长出来，滚动加载这条路径就演示不到了。
+      void loadNextPage();
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting) && window.scrollY > 0) void loadNextPage();
+        },
+        { root: null, rootMargin: '0px', threshold: 0 },
+      );
+      observer.observe(sentinel);
+    </script>
   </body>
 </html>

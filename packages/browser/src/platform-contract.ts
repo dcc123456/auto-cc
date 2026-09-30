@@ -30,6 +30,41 @@ const locateSpecSchema = z.strictObject({
   candidates: z.array(locateCandidateSchema).min(1),
 });
 
+/**
+ * 抓取字段声明：语义名 → 从哪个定位取，取正文还是取属性。
+ *
+ * 这里只放**定位名的引用**，不放选择器字面量（AGENTS.md §6.5 的机检 2.2-08 依赖这一点：
+ * 选择器全部留在 `locators` 里，改版改的还是一份数据）。字段名与必填性也在这里，
+ * 于是 2.6 换一个平台时新增的是 JSON，不是代码。
+ */
+const captureFieldSchema = z.strictObject({
+  /** 字段名（适配器按名取用，如 `title` / `salary` / `description`） */
+  name: z.string().min(1),
+  /** 引用 `locators` 里的语义名；引用不存在的名字在加载时就报错 */
+  locator: z.string().min(1),
+  /** 要读的属性名（如 `href`）；省略则读元素正文 */
+  attribute: z.string().min(1).optional(),
+  /** 必填声明：抽取阶段原样带回命中与否，完整率判定归适配器 */
+  required: z.boolean().optional(),
+});
+
+/** 一处页面（列表或详情）的批量抽取声明。 */
+const captureSectionSchema = z.strictObject({
+  /** 容器定位名（列表页是卡片，详情页是正文根节点） */
+  container: z.string().min(1),
+  fields: z.array(captureFieldSchema).min(1),
+});
+
+/** 搜索条件 → URL 查询参数名（2.3-01：三个维度都是平台的筛选参数，不是事后过滤）。 */
+const searchParamsSchema = z.strictObject({
+  /** 关键词参数名（如 `query`） */
+  keyword: z.string().min(1),
+  /** 城市参数名（如 `city`） */
+  city: z.string().min(1),
+  /** 经验筛选参数名（如 `experience`） */
+  experience: z.string().min(1),
+});
+
 /** 站点知识包：平台自己声明的「页面长什么样、动作怎么打、节奏怎么控」。 */
 export const knowledgePackSchema = z.strictObject({
   platform: z.string().regex(/^[a-z][a-z0-9-]*$/, '平台标识要用小写字母开头的短名'),
@@ -38,6 +73,15 @@ export const knowledgePackSchema = z.strictObject({
   capabilities: z.array(z.enum(['search', 'detail', 'chat', 'sendResume', 'readReplies'])).min(1),
   /** 语义名 → 定位声明。适配器只按语义名取用，源码里不出现任何选择器。 */
   locators: z.record(z.string().min(1), locateSpecSchema),
+  /** 抓取声明（2.3）：列表与详情各一处「容器 + 字段」。 */
+  capture: z.strictObject({
+    list: captureSectionSchema,
+    detail: captureSectionSchema,
+  }),
+  /** 搜索 URL 的参数名（2.3-01）。拼 URL 的代码是通用的，参数名是站点知识。 */
+  search: z.strictObject({
+    params: searchParamsSchema,
+  }),
   /** 抓取字段的声明顺序：列表页字段顺序变了也只改这份数据。 */
   fieldOrder: z.array(z.string().min(1)).default([]),
   pacing: z
@@ -54,10 +98,10 @@ export const knowledgePackSchema = z.strictObject({
 export type KnowledgePack = z.output<typeof knowledgePackSchema>;
 
 /**
- * 校验一份知识包：结构过 zod，再逐条跑定位声明的语义校验。
+ * 校验一份知识包：结构过 zod，再逐条跑定位声明的语义校验，最后查抓取声明引用的定位名是否存在。
  * @param raw 从 JSON 读出来的未知值（外部数据，一律视为不可信）
  * @returns 校验通过的知识包
- * @throws 结构或声明非法时 `KNOWLEDGE_PACK_INVALID`，`details.problems` 逐条指出是哪一层的哪一条
+ * @throws 结构、声明或引用非法时 `KNOWLEDGE_PACK_INVALID`，`details.problems` 逐条指出是哪一层的哪一条
  */
 export function parseKnowledgePack(raw: unknown): KnowledgePack {
   const parsed = knowledgePackSchema.safeParse(raw);
@@ -69,6 +113,19 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   const problems: string[] = [];
   for (const [name, spec] of Object.entries(parsed.data.locators)) {
     for (const problem of validateSpec(spec)) problems.push(`${name}：${problem}`);
+  }
+  // 抓取声明只引用定位名，所以名字拼错必须在加载时发现——否则要到抓取时才表现为「某字段永远读不到」，
+  // 那种错误界面上一句「没抓到」就盖过去了。
+  const locatorNames = new Set(Object.keys(parsed.data.locators));
+  for (const [section, part] of Object.entries(parsed.data.capture)) {
+    if (!locatorNames.has(part.container)) {
+      problems.push(`capture.${section}.container：引用了不存在的定位名「${part.container}」`);
+    }
+    for (const field of part.fields) {
+      if (!locatorNames.has(field.locator)) {
+        problems.push(`capture.${section}.${field.name}：引用了不存在的定位名「${field.locator}」`);
+      }
+    }
   }
   if (problems.length > 0) {
     throw new AppError(
@@ -89,6 +146,8 @@ export type JobSearchCriteria = {
   keyword: string;
   /** 城市名；省略表示用平台的默认定位 */
   city?: string;
+  /** 经验要求（如「3-5年」）；省略表示不限。列表页把它当筛选条件而不是事后过滤（spec 2.3-01） */
+  experience?: string;
   /** 本次最多取回几条（适配器内部仍受知识包 `pacing` 与额度闸门约束） */
   limit?: number;
 };
@@ -100,9 +159,13 @@ export type JobSummary = {
   jobId: string;
   title: string;
   company: string;
-  /** 薪资原文（「15-25K·14薪」），归一化留给 2.3，不在这里丢信息 */
+  /** 薪资原文（「15-25K·14薪」），归一化留给调用方，不在这里丢信息 */
   salaryText: string;
   city: string;
+  /** 经验要求原文（「3-5年」「经验不限」） */
+  experience: string;
+  /** 学历要求原文（「本科」「学历不限」） */
+  education: string;
   detailUrl: string;
   capturedAt: number;
 };
@@ -112,6 +175,8 @@ export type JobDetail = {
   summary: JobSummary;
   description: string;
   requirements: string[];
+  /** 发布时间原文（「3 天前」「刚刚发布」），归一化后另存 */
+  postedText: string;
 };
 
 /** 一次外发（打招呼 / 发简历）的结局。 */
@@ -135,14 +200,32 @@ export type ReplyMessage = {
 };
 
 /**
- * 平台适配器契约：五个动作 + 一份自我声明。
+ * 平台适配器契约：五个动作 + 两个列表页原语 + 一份自我声明。
  *
  * 契约里**没有任何选择器**，也没有 `webContents`：适配器只会说「我要点 `greetButton`」，
  * 具体在页面哪个位置、用哪条通道，全由 `browser.locate` / `browser.act` 决定（plan §3 规则 3）。
+ *
+ * 为什么把 `openSearch` / `readListing` 也放进契约（而不是只留 `search`）：滚动加载的**编排**在
+ * `jd.capture`（要按目标条数与「无新内容」判定停止，还要发进度事件），而「怎么打开搜索页」「一屏
+ * 卡片怎么读成摘要」是站点知识，只能留在适配器里。拆开之后 `search` 仍是「一次调用拿到列表」的
+ * 简单动作（工作流节点用它），`jd.capture` 用细粒度那两个。
  */
 export interface PlatformAdapter {
   /** 平台自我声明（界面与 `platform.registry.list` 都读这份） */
   readonly meta: PlatformMetaView;
+  /**
+   * 把浏览器带到条件对应的搜索结果页（不读列表，翻页/滚动由调用方驱动）。
+   * @param criteria 搜索条件；`keyword` 为空时结构化失败而不是打开默认页
+   * @returns 无返回值：成功即表示搜索页已加载完成
+   */
+  openSearch(criteria: JobSearchCriteria): Promise<void>;
+  /**
+   * 读**当前**列表页上已渲染的卡片，按页面顺序返回摘要。
+   *
+   * 重复调用是预期用法（滚动加载后读新一屏），因此实现必须对「同一岗位读到两次」去重。
+   * @returns 摘要列表；本屏一张卡都没读到是空数组，不是错误
+   */
+  readListing(): Promise<JobSummary[]>;
   /**
    * 按条件搜索岗位列表。
    * @param criteria 搜索条件

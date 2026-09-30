@@ -10,7 +10,10 @@
  * - `/` 与 `/alt` 是同一个站点、同一个 cookie 名的两条路径，用来证明隔离发生在**分区**
  *   而不是域名上（spec 1.8-01）；
  * - `/boss` 与 `/boss/detail` 是**本地仿招聘站**（列表 + 详情），DOM 结构刻意模仿但不含任何
- *   真实平台代码与数据，登录横幅按请求 cookie 现判（spec 2.1-03 / 2.1-05）；
+ *   真实平台代码与数据，登录横幅按请求 cookie 现判（spec 2.1-03 / 2.1-05）。2.3 起列表是**无限滚动**：
+ *   页面只有一个空 `<ul>`，卡片由 `/api/jobs?query=&city=&experience=&page=` 一屏五张地长出来，
+ *   `hasMore:false` 之后不再长（这就是 spec 2.3-06 要的「无新内容」），详情页按 `?jobId=` 现渲，
+ *   其中 `1005` 刻意不渲染岗位职责那一段（spec 2.3-08 的坏数据靶子）；
  * - `POST /api/outbound` 与 `GET /api/outbox` 是 1.9 的**样例收件箱**：外发是否真的发生，
  *   由这里的计数说，而不是由 app 自述（spec 1.9-03 / 1.9-04）；
  * - `/locator` 是**定位策略靶页**（testid / role+可读名 / 可见文本 / CSS / XPath 各一块），
@@ -75,6 +78,251 @@ const outbox: unknown[] = [];
 
 /** 受信事件读数（2.2-12 / 2.2-13 用）：由 `/trusted` 整份上报，GET 读回的就是页面上那张表。 */
 let trustReadings: unknown[] = [];
+
+/** 仿站的一条虚构岗位。字段与知识包 `capture.list.fields` 一一对应，正文两条对应 `capture.detail`。 */
+type FixtureJob = {
+  /** 平台侧岗位标识（详情页地址的 `jobId`，也是抓取去重用的 jobId） */
+  id: string;
+  title: string;
+  company: string;
+  /** 薪资原文，不做任何归一化——归一化是被测代码的活（spec 2.3-03） */
+  salary: string;
+  city: string;
+  experience: string;
+  education: string;
+  /** 发布时间原文（相对写法），折算同样归被测代码（spec 2.3-03） */
+  posted: string;
+  /**
+   * 岗位职责正文；`null` 时详情页**不渲染**这一段（1005 就是这条靶子）：
+   * 真实站点确实有这种页面，而 spec 2.3-08 要看的正是「一条读不到只进 skipped，整轮继续」。
+   */
+  description: string | null;
+  requirement: string;
+};
+
+/**
+ * 仿站的岗位库（spec 2.3-09：fixture 上要能抓到 ≥10 条）。
+ *
+ * 全部为虚构数据，与任何真实公司、真实职位无关。条数、城市分布与经验档位是刻意配的：
+ * 关键词「前端」命中 11 条（`1006` 那条不命中，用来证明筛选真的在筛），
+ * 城市「上海」4 条、「经验不限」2 条，五屏一页正好把「滚动加载」跑出来。
+ */
+const fixtureJobs: FixtureJob[] = [
+  {
+    id: '1001',
+    title: '桌面端前端工程师（Electron）',
+    company: '星桥科技',
+    salary: '25-40K·14薪',
+    city: '上海 · 浦东新区',
+    experience: '3-5 年',
+    education: '本科',
+    posted: '刚刚发布',
+    description:
+      '负责桌面端应用的渲染层与主进程功能开发；参与浏览器自动化、会话管理与打包发布链路。示例文本，虚构内容。',
+    requirement: '三年及以上 TypeScript 经验；熟悉 Electron 主进程与渲染进程通信；能独立排查打包问题',
+  },
+  {
+    id: '1002',
+    title: 'React 前端工程师',
+    company: '云栖数据',
+    salary: '30-45K',
+    city: '上海 · 徐汇区',
+    experience: '5-10 年',
+    education: '本科',
+    posted: '1 小时前',
+    description: '负责数据可视化控制台的组件库与图表交互；与后端约定接口形状并推动前端工程化。示例文本，虚构内容。',
+    requirement: '五年及以上 React 经验；熟悉 TypeScript 与状态管理；带过两人以上小团队',
+  },
+  {
+    id: '1003',
+    title: '全栈工程师（Node + React）',
+    company: '灯塔智能',
+    salary: '面议',
+    city: '杭州 · 滨江区',
+    experience: '经验不限',
+    education: '大专',
+    posted: '3 天前',
+    description: '从前端页面到 Node 服务端接口一起负责，参与内部工具的设计与实现。示例文本，虚构内容。',
+    requirement: '熟悉 Node.js 与关系型数据库；能独立交付一个完整功能；有前端页面经验优先',
+  },
+  {
+    id: '1004',
+    title: '客户端工程师（桌面应用方向）',
+    company: '北岸软件',
+    salary: '1.8-2.5万·15薪',
+    city: '北京 · 海淀区',
+    experience: '3-5 年',
+    education: '硕士',
+    posted: '2 天前',
+    description: '负责桌面客户端的前端界面与本地存储；参与跨平台打包与自动更新方案。示例文本，虚构内容。',
+    requirement: '熟悉 TypeScript 与桌面端渲染层；了解跨平台构建；有 Electron 项目经验优先',
+  },
+  {
+    id: '1005',
+    title: '前端工程师（支付方向）',
+    company: '星海科技',
+    salary: '28-38K·13薪',
+    city: '深圳 · 福田区',
+    experience: '3-5 年',
+    education: '本科',
+    posted: '5 小时前',
+    // 刻意缺正文：详情页只渲染任职要求与发布时间（spec 2.3-08 的坏数据靶子，放在第一屏才好演示）。
+    description: null,
+    requirement: '三年及以上前端经验；熟悉支付流程的表单校验与埋点；细心、能配合安全评审',
+  },
+  {
+    id: '1006',
+    title: '自动化测试开发工程师',
+    company: '原野科技',
+    salary: '20-30K',
+    city: '成都 · 高新区',
+    experience: '1-3 年',
+    education: '本科',
+    posted: '5 天前',
+    description: '负责测试平台的服务端与用例执行调度，维护 CI 流水线。示例文本，虚构内容。',
+    requirement: '熟悉 Python 或 Node；了解持续集成与用例分层；能编写稳定的自动化脚本',
+  },
+  {
+    id: '1007',
+    title: '高级前端工程师（可视化方向）',
+    company: '星桥科技',
+    salary: '35-50K·15薪',
+    city: '上海 · 杨浦区',
+    experience: '3-5 年',
+    education: '本科',
+    posted: '4 小时前',
+    description: '负责大屏与图表渲染性能，制定团队的前端规范并评审设计稿。示例文本，虚构内容。',
+    requirement: '三年及以上 TypeScript 经验；熟悉 Canvas 或 WebGL；关注帧率与内存指标',
+  },
+  {
+    id: '1008',
+    title: '前端架构师',
+    company: '长江智算',
+    salary: '50-70K·14薪',
+    city: '上海 · 静安区',
+    experience: '5-10 年',
+    education: '硕士',
+    posted: '6 天前',
+    description: '负责前端整体技术选型与基础设施建设，推动构建、发布与监控链路。示例文本，虚构内容。',
+    requirement: '五年及以上前端经验；主导过大型项目的工程化改造；能带教团队成员',
+  },
+  {
+    id: '1009',
+    title: '前端工程师（移动端 Web）',
+    company: '南岭信息',
+    salary: '22-32K',
+    city: '杭州 · 西湖区',
+    experience: '1-3 年',
+    education: '本科',
+    posted: '2 小时前',
+    description: '负责移动端页面与小程序的界面实现，配合设计完成交互细节。示例文本，虚构内容。',
+    requirement: '一到三年前端经验；熟悉响应式布局与移动端调试；能读懂设计标注',
+  },
+  {
+    id: '1010',
+    title: '前端工程师（应届 / 实习）',
+    company: '海豚开放平台',
+    salary: '4-6K',
+    city: '北京 · 朝阳区',
+    experience: '经验不限',
+    education: '本科',
+    posted: '7 天前',
+    description: '参与开放平台控制台的页面开发，由导师带教完成需求交付。示例文本，虚构内容。',
+    requirement: '计算机相关专业；熟悉 HTML 与 JavaScript 基础；有开源或个人项目经历优先',
+  },
+  {
+    id: '1011',
+    title: '全栈工程师（Go + React）',
+    company: '海豚开放平台',
+    salary: '30-40K·13薪',
+    city: '深圳 · 南山区',
+    experience: '3-5 年',
+    education: '本科',
+    posted: '3 小时前',
+    description: '负责开放平台的服务端接口与前端页面，参与数据库建模。示例文本，虚构内容。',
+    requirement: '熟悉 Go 与 React；能独立完成从接口到页面的交付；了解容器化部署优先',
+  },
+  {
+    id: '1012',
+    title: '前端负责人',
+    company: '汇流网络',
+    salary: '40-60K·16薪',
+    city: '成都 · 天府新区',
+    experience: '5-10 年',
+    education: '大专',
+    posted: '昨天',
+    description: '负责前端团队的目标拆解与排期，亲自承担关键模块的实现。示例文本，虚构内容。',
+    requirement: '五年及以上前端经验；带过五人团队；能在业务与技术之间做取舍',
+  },
+];
+
+/** 一页给几张卡：五张 × 若干屏正好把「滚动加载」这条路径跑出来，也让 12 行的抽取上限不越界。 */
+const JOBS_PER_PAGE = 5;
+
+/**
+ * 按搜索条件筛仿站的岗位（条件名与知识包 `search.params` 一致：`query` / `city` / `experience`）。
+ *
+ * 匹配刻意做得宽松（子串、大小写无关）：真实站点的筛选逻辑我们不想知道，
+ * 这里只需要「条件变了、结果真的变了」这一件事可观察。
+ * @param query 关键词，命中标题、公司或正文
+ * @param city 城市，命中城市字段前缀（「上海」命「上海 · 徐汇区」）
+ * @param experience 经验档位，子串命中（「3-5」命「3-5 年」）
+ * @returns 命中的岗位，按库里声明的顺序
+ */
+function filterJobs(query: string, city: string, experience: string): FixtureJob[] {
+  const keyword = query.trim().toLowerCase();
+  return fixtureJobs.filter((job) => {
+    if (city && !job.city.startsWith(city.trim())) return false;
+    if (experience && !job.experience.includes(experience.trim())) return false;
+    if (!keyword) return true;
+    return [job.title, job.company, job.description ?? '', job.requirement].some((text) =>
+      text.toLowerCase().includes(keyword),
+    );
+  });
+}
+
+/**
+ * 渲染仿站的详情页。
+ * @param job 要渲染的岗位；`undefined` 时回一份「岗位不存在」的页面
+ * @param loggedIn 请求里有没有会话 cookie（2.1-05 的横幅读数）
+ * @param authLabel 横幅文案（已登录 / 未登录）
+ * @returns 完整 HTML
+ */
+function renderDetailPage(job: FixtureJob | undefined, loggedIn: boolean, authLabel: string): string {
+  const base = readFileSync(bossDetailPage, 'utf8');
+  if (!job) {
+    return base
+      .replaceAll('{{loggedIn}}', loggedIn ? 'true' : 'false')
+      .replaceAll('{{authLabel}}', authLabel)
+      .replaceAll('{{jobId}}', '（未知）')
+      .replaceAll('{{title}}', '岗位不存在或已下线')
+      .replaceAll('{{company}}', '—')
+      .replaceAll('{{salary}}', '—')
+      .replaceAll('{{city}}', '—')
+      .replaceAll('{{experience}}', '—')
+      .replaceAll('{{education}}', '—')
+      .replaceAll('{{requirementSection}}', '')
+      .replace('{{descriptionSection}}', '')
+      .replace('{{posted}}', '—');
+  }
+  // `{{descriptionSection}}` / `{{requirementSection}}` 是**整块**占位：正文缺失时连标题一起不渲染，
+  // 这样「页面确实没有这一段」是 DOM 事实，而不是页面上写了一句话让我们自己判断。
+  const descriptionSection =
+    job.description === null ? '' : `<h2>岗位职责</h2>\n    <p data-field="description">${job.description}</p>`;
+  return base
+    .replaceAll('{{loggedIn}}', loggedIn ? 'true' : 'false')
+    .replaceAll('{{authLabel}}', authLabel)
+    .replaceAll('{{jobId}}', job.id)
+    .replaceAll('{{title}}', job.title)
+    .replaceAll('{{company}}', job.company)
+    .replaceAll('{{salary}}', job.salary)
+    .replaceAll('{{city}}', job.city)
+    .replaceAll('{{experience}}', job.experience)
+    .replaceAll('{{education}}', job.education)
+    .replace('{{descriptionSection}}', descriptionSection)
+    .replace('{{requirementSection}}', `<h2>任职要求</h2>\n    <p data-field="requirement">${job.requirement}</p>`)
+    .replace('{{posted}}', job.posted);
+}
 
 /**
  * 聊天帧内外发时写的目标 id。
@@ -332,16 +580,63 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
-  if (url.pathname === '/boss' || url.pathname === '/boss/detail') {
-    const page = url.pathname === '/boss' ? bossSearchPage : bossDetailPage;
-    // 登录横幅由服务端按请求里的 cookie 现判：让页面自己声明登录态就成了自述，
-    // 而 2.1-05 要的恰恰是「分区里那份 cookie 真的还带着」——它必须是对端的读数。
+  if (url.pathname === '/api/jobs') {
+    // 分页读数由服务端说了算：`hasMore` 为 false 时页面不再长出新卡片，
+    // 抓取编排因此能观察到「无新内容」这个停止条件（spec 2.3-06）。
+    const matched = filterJobs(
+      url.searchParams.get('query') ?? '',
+      url.searchParams.get('city') ?? '',
+      url.searchParams.get('experience') ?? '',
+    );
+    const rawPage = Number(url.searchParams.get('page') ?? '1');
+    const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+    const start = (page - 1) * JOBS_PER_PAGE;
+    const items = matched.slice(start, start + JOBS_PER_PAGE).map((job) => ({
+      id: job.id,
+      title: job.title,
+      company: job.company,
+      salary: job.salary,
+      city: job.city,
+      experience: job.experience,
+      education: job.education,
+      detailUrl: `/boss/detail?jobId=${job.id}`,
+    }));
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({
+        page,
+        pageSize: JOBS_PER_PAGE,
+        total: matched.length,
+        hasMore: start + items.length < matched.length,
+        items,
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === '/boss') {
     sendHtml(
       response,
-      readFileSync(page, 'utf8')
+      readFileSync(bossSearchPage, 'utf8')
         .replaceAll('{{loggedIn}}', loggedIn ? 'true' : 'false')
         .replaceAll('{{authLabel}}', loggedIn ? '已登录' : '未登录'),
     );
+    return;
+  }
+
+  if (url.pathname === '/boss/detail') {
+    // 详情页按 `jobId` 现渲（2.3-02 要求逐条读详情）：一条岗位一个地址，抓取跳一次读一次。
+    const jobId = url.searchParams.get('jobId') ?? '';
+    const job = fixtureJobs.find((item) => item.id === jobId);
+    const authLabel = loggedIn ? '已登录' : '未登录';
+    if (!job) {
+      // 「岗位不存在」也要回一份能渲染的页面（不是 404 空文档）：界面上要看得出是站点说没有，
+      // 而不是我们的服务挂了；抓取侧看到的是「详情页没有读到任何容器」这条结构化失败。
+      response.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(renderDetailPage(undefined, loggedIn, authLabel));
+      return;
+    }
+    sendHtml(response, renderDetailPage(job, loggedIn, authLabel));
     return;
   }
 

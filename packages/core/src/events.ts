@@ -277,6 +277,24 @@ export interface LocatorRelocatedEvent {
   at: number;
 }
 
+/** `jd/progress` 事件载荷：抓取面板实时显示「第 N 轮 · 已入库 M 条」（spec 2.3-07）。 */
+export interface JdProgressEvent {
+  /** 当前阶段：列表抽取 / 详情读取 / 整轮结束 */
+  phase: 'listing' | 'detail' | 'done';
+  /** 第几轮（从 1 开始）；`done` 阶段沿用最后一轮的值 */
+  round: number;
+  /** 本轮在页面上看到的容器数 */
+  containers: number;
+  /** 到本次推送为止已入库的条数 */
+  stored: number;
+  /** 本次运行的目标条数 */
+  target: number;
+  /** 当前正在处理的岗位标题；列表阶段为空串 */
+  currentTitle: string;
+  /** 推送时间戳（毫秒） */
+  at: number;
+}
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -312,5 +330,10 @@ declare module 'cordis' {
      * 2.7 的选择器腐化率只统计这一条来源，漏发就等于宣称站点没有改版。
      */
     'locator/relocated'(event: LocatorRelocatedEvent): void;
+    /**
+     * JD 抓取每推进一次（一轮列表抽取结束 / 一条详情读完 / 整次运行收尾）由 `jd.capture` 发出
+     * （spec 2.3-07）。面板不轮询 `jd.capture.status` 来「感觉进度」，进度只由事件推进来。
+     */
+    'jd/progress'(event: JdProgressEvent): void;
   }
 }

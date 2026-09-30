@@ -11,6 +11,7 @@ import type {
   ChatMessageView,
   ChatSessionView,
   ChatSnapshotView,
+  JdProgressEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
   LogLineView,
@@ -41,6 +42,7 @@ export type {
   ChatTextPart,
   ChatToolPart,
   ChatToolPartState,
+  JdProgressEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
   LogLineView,
@@ -87,6 +89,9 @@ export const RENDERER_ALLOWLIST = [
   // 2.1 的页面操作：只允许导航到已登记平台的同源地址，快照是只读。
   'browser.page.navigate',
   'browser.page.snapshot',
+  // 2.3 的批量抽取与滚动：只读页面内容，不产生任何外发（spec 2.3-11）。
+  'browser.page.extract',
+  'browser.page.scroll',
   // 2.2 的定位层：一次打分定位 + 一次指纹自愈。
   'browser.locate.find',
   'browser.locate.refind',
@@ -98,6 +103,11 @@ export const RENDERER_ALLOWLIST = [
   'browser.act.waitFor',
   // 2.2 的平台登记面：只读清单（适配器本身不给渲染层，外发口在 2.5/2.6 另接闸门）。
   'platform.registry.list',
+  // 2.3 的抓取入口与 JD 库读数：抓取只有读动作，外发一行都不产生。
+  'jd.capture.run',
+  'jd.capture.status',
+  'jd.store.list',
+  'jd.store.status',
   // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
   // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
   'entitlement.gate.check',
@@ -411,6 +421,10 @@ export interface BridgeSignatures {
   'browser.page.navigate': { args: [url: string]; returns: KernelPageSnapshotView };
   /** 读取当前页面快照；可选参数是本次正文上限（字符），上限受服务配置钳制。 */
   'browser.page.snapshot': { args: [maxChars?: number]; returns: KernelPageSnapshotView };
+  /** 2.3-01：按「容器 + 字段声明」批量读一页，一次调用读完 N 个容器 × M 个字段。 */
+  'browser.page.extract': { args: [request: ExtractRequest]; returns: ExtractResultView };
+  /** 2.3-06：滚到页底触发无限滚动，回读滚动位置与是否到底。 */
+  'browser.page.scroll': { args: []; returns: PageScrollReading };
   /**
    * 按声明顺序尝试多策略候选并打分（spec 2.2-01 / 2.2-02）。
    * `lastKnown` 是上一次成功定位留下的指纹：候选全部失配时用它做自愈重定位（spec 2.2-05）。
@@ -430,6 +444,14 @@ export interface BridgeSignatures {
   'browser.act.waitFor': { args: [predicate: WaitPredicate]; returns: ActResultView };
   /** 已登记平台清单（spec 2.2-07）：内核侧只读，不返回适配器本身。 */
   'platform.registry.list': { args: []; returns: PlatformRegistryView };
+  /** 2.3-01 / 2.3-09：跑一轮抓取（列表滚动 + 详情读取 + 入库），回传本轮结局。 */
+  'jd.capture.run': { args: [criteria: JobSearchCriteriaView]; returns: CaptureRunView };
+  /** 抓取层的当期配置与最近一次运行（面板解释「上次抓到哪」用）。 */
+  'jd.capture.status': { args: []; returns: CaptureStatusView };
+  /** JD 库只读清单（默认最近 20 条）。 */
+  'jd.store.list': { args: [limit?: number]; returns: JobListResultView };
+  /** JD 库概况与 schema 版本（spec 2.3-05 的实测读数）。 */
+  'jd.store.status': { args: []; returns: JdStoreStatusView };
   /**
    * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
    * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
@@ -509,6 +531,8 @@ export const RENDERER_EVENTS = [
   'chat/delta',
   // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
   'locator/relocated',
+  // 抓取进度（spec 2.3-07）：面板实时显示「第 N 轮 · 已入库 M 条」，不靠轮询。
+  'jd/progress',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -521,6 +545,7 @@ export interface RendererEventSignatures {
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;
+  'jd/progress': JdProgressEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */
@@ -672,6 +697,167 @@ export interface PlatformMetaView {
 export interface PlatformRegistryView {
   platforms: PlatformMetaView[];
 }
+
+/* ------------------------------------------------------------------ *
+ * 2.3 页面批量抽取与 JD 库的数据形状
+ * ------------------------------------------------------------------ */
+
+/**
+ * 抽取请求里的一个字段：定位候选 + 可选属性名。
+ *
+ * 抽取**不打分也不自愈**（plan §10.3 规则 2）：按声明顺序取第一条能匹配的候选，
+ * 命不中就把 `matched:false` 如实报出来。字段读错一条只是少一条数据，
+ * 把整轮抓取卡住才是更糟的失败——所以这里没有 fail-closed。
+ */
+export interface ExtractFieldSpec {
+  /** 字段名（由站点知识包定义，适配器按名取用） */
+  name: string;
+  /** 该字段在**容器子树内**的定位候选，声明顺序即优先级 */
+  candidates: LocateCandidate[];
+  /** 要读的属性名（如 `href`）；省略则读元素正文 */
+  attribute?: string;
+  /** 必填声明：抽取阶段只原样带回，完整率判定归调用方（spec 2.3-01） */
+  required?: boolean;
+}
+
+/** 一次批量抽取的请求：一个容器声明 + 若干字段声明。 */
+export interface ExtractRequest {
+  container: LocateSpec;
+  fields: ExtractFieldSpec[];
+}
+
+/** 一个字段在一个容器里的读数。 */
+export interface ExtractFieldReading {
+  name: string;
+  /** 该字段的候选是否有任一命中容器子树 */
+  matched: boolean;
+  /** 归一并钳制后的正文文本；未命中为空串 */
+  text: string;
+  /** 请求了属性时回读的属性值；未请求或未命中为 null */
+  attribute: string | null;
+}
+
+/** 一个容器抽出来的一行（`frameUrl` 用来把相对 href 解析成绝对地址）。 */
+export interface ExtractRowReading {
+  containerIndex: number;
+  frameUrl: string;
+  fields: ExtractFieldReading[];
+}
+
+/** 一次抽取的结局。 */
+export interface ExtractResultView {
+  rows: ExtractRowReading[];
+  /** 本帧里容器候选实际匹配到的元素总数（可能大于 `rows.length`，被上限截断） */
+  containers: number;
+  /** 是否因 `extractRowLimit` 截断过容器数量 */
+  truncated: boolean;
+  /** 逐帧读数摘要，解释「哪一帧没读到」 */
+  frames: { url: string; ok: boolean; error: string | null }[];
+}
+
+/** 一次页面滚动的回读（无限滚动站点的加载扳机）。 */
+export interface PageScrollReading {
+  scrollY: number;
+  scrollHeight: number;
+  atBottom: boolean;
+}
+
+/** 归一化后的薪资（spec 2.3-03）。原文始终另存一列，归一化不做「猜不出来就编」的事。 */
+export interface SalaryView {
+  min: number | null;
+  max: number | null;
+  unit: 'k' | 'wan' | 'yuan' | 'unknown';
+  period: 'month' | 'year' | 'unknown';
+  /** 「·15薪」的年薪月数；没有该后缀为 null */
+  salaryMonths: number | null;
+  /** 面议 / 读不懂时为 true，此时上面几个字段都是中性值 */
+  isNegotiable: boolean;
+}
+
+/** JD 库的一行（spec 2.3-02 的字段集 + 抓取时间与来源）。 */
+export interface JobRowView {
+  id: number;
+  platform: string;
+  jobId: string;
+  title: string;
+  company: string;
+  salaryText: string;
+  salary: SalaryView | null;
+  city: string;
+  experience: string;
+  education: string;
+  description: string;
+  requirements: string[];
+  postedText: string;
+  /** 发布时间折算的时间戳（毫秒）；原文认不出来时为 null（spec 2.3-03：归一化不猜） */
+  postedAt: number | null;
+  /** 详情页地址，幂等键的一半（spec 2.3-04：来源 URL + 标题） */
+  sourceUrl: string;
+  /** 列表页读到摘要的时间戳（毫秒） */
+  capturedAt: number;
+  /** 详情读成功的时间戳；只抓到摘要时为 null */
+  detailCapturedAt: number | null;
+}
+
+/** `jd.store.list` 的返回值。 */
+export interface JobListResultView {
+  total: number;
+  rows: JobRowView[];
+}
+
+/** `jd.store.status` 的读数：库内概况 + schema 版本（2.3-05 的实测依据）。 */
+export interface JdStoreStatusView {
+  total: number;
+  withDetail: number;
+  schemaVersion: number;
+  newestSourceUrl: string | null;
+}
+
+/** 一条被跳过的抓取（spec 2.3-08：单条失败不中断整轮）。 */
+export interface CaptureFailureView {
+  title: string;
+  sourceUrl: string;
+  reason: string;
+}
+
+/** 一次抓取运行的结局。 */
+export interface CaptureRunView {
+  platform: string;
+  keyword: string;
+  city: string | null;
+  rounds: number;
+  /** 列表里读到过的容器数 */
+  containers: number;
+  /** 本轮新入库 + 更新的行数 */
+  stored: number;
+  skipped: CaptureFailureView[];
+  /** 停止原因（spec 2.3-06 的「停止条件明确」） */
+  stoppedBy: 'target-count' | 'no-new-content' | 'max-rounds';
+  /** 运行结束后的库内总行数 */
+  total: number;
+  finishedAt: number;
+  /** 本轮前后的账本行数（spec 2.3-11：抓取是只读动作，两值必须相等） */
+  ledgerRowsBefore: number;
+  ledgerRowsAfter: number;
+}
+
+/** `jd.capture.status` 的读数：当期配置 + 最近一次运行。 */
+export interface CaptureStatusView {
+  targetCount: number;
+  maxRounds: number;
+  roundPauseMs: number;
+  lastRun: CaptureRunView | null;
+}
+
+/** 搜索条件的界面视图（spec 2.3-01 的三个维度）。 */
+export interface JobSearchCriteriaView {
+  keyword: string;
+  city?: string;
+  experience?: string;
+  limit?: number;
+}
+
+/** `jd/progress` 事件载荷定义在 `@auto-cc/core`（同 `locator/relocated`：cordis 的事件声明在下面那层）。 */
 
 /** 定位层读数：当期阈值配置 + 最近几次判定摘要（界面解释「为什么这条不确定」用）。 */
 export interface LocateStatusView {

@@ -14,12 +14,20 @@
  * 2. 页面内容只在页面里读（注入脚本），主进程不解析 HTML 字符串，因此不引入第二套 DOM 实现。
  */
 import { Service, asApp, AppError, type Context } from '@auto-cc/core';
-import type { KernelPageSnapshotView } from '@auto-cc/shared';
+import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScrollReading } from '@auto-cc/shared';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
 import type { WebContents } from 'electron';
 import { z } from 'zod';
-import { requireKernelContents, type KernelHost } from './frame-channel.js';
-import { buildSnapshotScript, SNAPSHOT_HEADING_LIMIT, SNAPSHOT_TEXT_LIMIT, toSnapshotReading } from './page-script.js';
+import { evaluateInFrames, requireKernelContents, usableEvaluations, type KernelHost } from './frame-channel.js';
+import { buildExtractScript, toExtractFrameReading } from './extract-script.js';
+import {
+  buildScrollScript,
+  buildSnapshotScript,
+  SNAPSHOT_HEADING_LIMIT,
+  SNAPSHOT_TEXT_LIMIT,
+  toScrollReading,
+  toSnapshotReading,
+} from './page-script.js';
 import { resolveNavigableUrl } from './navigate-policy.js';
 
 /**
@@ -35,6 +43,10 @@ export const browserPageSchema = z.strictObject({
   navigateTimeoutMs: z.number().int().min(500).max(30_000).default(10_000),
   /** 单次快照取回的正文上限（字符）。 */
   snapshotTextLimit: z.number().int().min(200).max(50_000).default(SNAPSHOT_TEXT_LIMIT),
+  /** 一次批量抽取最多回传多少个容器（条）。 */
+  extractRowLimit: z.number().int().min(1).max(100).default(12),
+  /** 抽取时单个字段正文的上限（字符）。 */
+  extractTextLimit: z.number().int().min(50).max(20_000).default(4000),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -79,6 +91,76 @@ export class BrowserPageService extends Service {
     const contents = requireKernelContents(this.host, 'browser.page');
     const limit = maxChars ?? this.config.snapshotTextLimit;
     return this.readSnapshot(contents, limit);
+  };
+
+  /**
+   * 在整棵帧树里做一次「容器 × 字段」批量抽取（spec 2.3-01）。
+   *
+   * 一次跨进程求值读回所有卡片，而不是逐字段调 `browser.locate`：后者在一页 12 张卡 × 6 个字段
+   * 的情况下是 72 次求值，每次重扫一遍 DOM。抽取**不打分、不自愈、不 fail-closed**（plan §10.3）：
+   * 命不中的字段带回 `matched:false`，整轮抓取不会因为一个字段缺席而中止。
+   * @param request 容器声明 + 字段声明（候选顺序即优先级；字段在容器子树内解析）
+   * @returns 合并后的行（跨帧按「顶层帧在前」的全局序号重编）、容器总数、是否被上限截断、逐帧结局
+   * @throws 字段声明为空时 `INVALID_ARGUMENT`；没有已挂载会话时 `NO_KERNEL_SESSION`；所有帧都读失败时 `PAGE_SCRIPT_FAILED`
+   */
+  extract = async (request: ExtractRequest): Promise<ExtractResultView> => {
+    const contents = requireKernelContents(this.host, 'browser.page');
+    const fields = Array.isArray(request.fields) ? request.fields : [];
+    if (fields.length === 0) {
+      throw new AppError('INVALID_ARGUMENT', '批量抽取至少要声明一个字段', 'browser.page', {
+        container: request.container?.description ?? '（未声明）',
+      });
+    }
+    const source = buildExtractScript(request.container, fields, {
+      textLimit: this.config.extractTextLimit,
+      rowLimit: this.config.extractRowLimit,
+    });
+    const evaluations = await evaluateInFrames(contents, source, true);
+    const usable = usableEvaluations(evaluations, 'browser.page');
+    const rows: ExtractResultView['rows'] = [];
+    let containers = 0;
+    let truncated = false;
+    for (const evaluation of usable) {
+      const reading = toExtractFrameReading(evaluation.value);
+      containers += reading.containers;
+      truncated ||= reading.truncated;
+      for (const row of reading.rows) {
+        rows.push({ ...row, containerIndex: rows.length, frameUrl: evaluation.frameUrl });
+      }
+    }
+    this.ctx.logger.info(
+      `批量抽取完成：容器 ${String(containers)} 个 · 回传 ${String(rows.length)} 行 · 帧 ${String(usable.length)}/${String(evaluations.length)}`,
+    );
+    return {
+      rows,
+      containers,
+      truncated,
+      frames: evaluations.map((item) => ({ url: item.frameUrl, ok: item.error === null, error: item.error })),
+    };
+  };
+
+  /**
+   * 把当前页面滚到底部并回读滚动位置（spec 2.3-06 的无限滚动扳机）。
+   *
+   * 只对顶层文档生效：列表在 iframe 里的站点需要的是「那个帧的窗口」滚到底，本方法不做这件事，
+   * 这一缺口在 spec 的验收记录里如实挂着（同 2.2-09 的处理方式）。
+   * @returns 滚动后的 `scrollY` / `scrollHeight` / 是否已到底
+   * @throws 没有已挂载会话时 `NO_KERNEL_SESSION`；页面注入失败时 `PAGE_SCRIPT_FAILED`
+   */
+  scroll = async (): Promise<PageScrollReading> => {
+    const contents = requireKernelContents(this.host, 'browser.page');
+    let raw: unknown;
+    try {
+      raw = await contents.executeJavaScript(buildScrollScript(), true);
+    } catch (error) {
+      throw new AppError(
+        'PAGE_SCRIPT_FAILED',
+        `页面滚动失败：${error instanceof Error ? error.message : String(error)}`,
+        'browser.page',
+        { url: contents.getURL() },
+      );
+    }
+    return toScrollReading(raw);
   };
 
   /**
@@ -151,7 +233,7 @@ export class BrowserPageService extends Service {
     this.ctx.logger.info(
       `页面操作服务就绪：导航超时 ${String(this.config.navigateTimeoutMs)}ms · 快照正文上限 ${String(
         this.config.snapshotTextLimit,
-      )} 字`,
+      )} 字 · 抽取上限 ${String(this.config.extractRowLimit)} 条 × ${String(this.config.extractTextLimit)} 字`,
     );
   }
 }
@@ -163,7 +245,19 @@ declare module '@auto-cc/core' {
 }
 
 export { resolveNavigableUrl } from './navigate-policy.js';
-export { buildSnapshotScript, toSnapshotReading } from './page-script.js';
+export {
+  buildScrollScript,
+  buildSnapshotScript,
+  toScrollReading,
+  toSnapshotReading,
+  type PageSnapshotReading,
+} from './page-script.js';
+export {
+  buildExtractScript,
+  toExtractFrameReading,
+  type ExtractFrameReading,
+  type ExtractLimits,
+} from './extract-script.js';
 export { BrowserLocateService, browserLocateSchema, type BrowserLocateConfig } from './locate-service.js';
 export { BrowserActService, browserActSchema, type BrowserActConfig } from './act-service.js';
 export { PlatformRegistryService } from './platform-registry.js';

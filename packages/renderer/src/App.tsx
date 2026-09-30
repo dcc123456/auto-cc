@@ -5,6 +5,7 @@ import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
+import { JobLabPanel } from './JobLabPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
@@ -104,6 +105,7 @@ export function App() {
             <ShellPanel />
             <SessionPanel />
             <LocatorLabPanel />
+            <JobLabPanel />
             <UsagePanel />
             <AssemblyPanel />
           </div>

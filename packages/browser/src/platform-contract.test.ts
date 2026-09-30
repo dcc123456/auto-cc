@@ -11,9 +11,16 @@ import { describe, expect, it } from 'vitest';
 import { parseKnowledgePack } from './platform-contract.js';
 import { errorDetails } from './test-doubles.js';
 
-/** 一份「什么都能过」的最小知识包，用例只改动自己关心的那一项。 */
+/**
+ * 一份「什么都能过」的最小知识包，用例只改动自己关心的那一项。
+ *
+ * `capture` 与 `search` 是 2.3 起必填的两节，但它们是**跟随定位表**生成的：用例替换整个
+ * `locators` 时不必同时改抓取声明，否则每条报错用例都要重复写一遍引用关系（噪音会盖掉被检的那一项）。
+ * @param overrides 覆盖项（未知键会被 zod 拒收，所以这里保持宽松）
+ * @returns 可以直接交给 `parseKnowledgePack` 的未知值
+ */
 function minimalPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
+  const merged: Record<string, unknown> = {
     platform: 'boss',
     displayName: 'BOSS 直聘',
     startUrl: 'https://www.zhipin.com',
@@ -29,30 +36,67 @@ function minimalPack(overrides: Record<string, unknown> = {}): Record<string, un
     pacing: { minActionGapMs: 3_000, maxDailyActions: 20 },
     ...overrides,
   };
+  const [firstName] = Object.keys(merged.locators ?? {});
+  const container = String(firstName);
+  merged.capture ??= {
+    list: { container, fields: [{ name: 'title', locator: container }] },
+    detail: { container, fields: [{ name: 'description', locator: container }] },
+  };
+  merged.search ??= { params: { keyword: 'query', city: 'city', experience: 'experience' } };
+  return merged;
 }
 
 describe('知识包通过校验（spec 2.2-08）', () => {
   it('一份合规的知识包原样落地，缺省的节奏参数由 schema 补齐', () => {
-    const pack = parseKnowledgePack({
-      platform: 'boss',
-      displayName: 'BOSS 直聘',
-      startUrl: 'https://www.zhipin.com',
-      capabilities: ['search'],
-      locators: {
-        greetButton: {
-          description: '打招呼按钮',
-          cardinality: 'single',
-          candidates: [{ strategy: 'role', role: 'button', name: '打招呼' }],
+    const pack = parseKnowledgePack(
+      minimalPack({
+        capabilities: ['search'],
+        fieldOrder: [],
+        locators: {
+          greetButton: {
+            description: '打招呼按钮',
+            cardinality: 'single',
+            candidates: [{ strategy: 'role', role: 'button', name: '打招呼' }],
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(pack).toMatchObject({
       platform: 'boss',
       fieldOrder: [],
       pacing: { minActionGapMs: 3_000, maxDailyActions: 20 },
+      search: { params: { keyword: 'query', city: 'city', experience: 'experience' } },
     });
     expect(pack.locators.greetButton!.candidates[0]).toMatchObject({ strategy: 'role', role: 'button' });
+  });
+
+  it('抓取声明引用了不存在的定位名时在加载时就报错，而不是等到抓取时「某字段永远读不到」（spec 2.3-02）', () => {
+    try {
+      parseKnowledgePack(
+        minimalPack({
+          // 只把 list 这一处写坏：detail 仍指向真实存在的定位名，好证明报错落在「哪一处」。
+          capture: {
+            list: { container: 'ghostCard', fields: [{ name: 'title', locator: 'ghostTitle' }] },
+            detail: { container: 'searchInput', fields: [{ name: 'description', locator: 'searchInput' }] },
+          },
+        }),
+      );
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
+      expect(errorDetails(error).problems).toEqual([
+        'capture.list.container：引用了不存在的定位名「ghostCard」',
+        'capture.list.title：引用了不存在的定位名「ghostTitle」',
+      ]);
+    }
+  });
+
+  it('缺 capture 或 search 任一节都不算一份可用的知识包（2.3 起是必填项）', () => {
+    const withoutCapture = { ...minimalPack(), capture: undefined };
+    const withoutSearch = { ...minimalPack(), search: undefined };
+    expect((errorOf(() => parseKnowledgePack(withoutCapture)) as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
+    expect((errorOf(() => parseKnowledgePack(withoutSearch)) as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
   });
 
   it('多种定位策略混在一条 spec 里是合法的（候选顺序就是优先级）', () => {
@@ -105,6 +149,16 @@ describe('知识包通过校验（spec 2.2-08）', () => {
     }
   });
 });
+
+/** 取出一次调用抛出的错误：报错用例断言的是错误本身，而不是「它有没有抛」。 */
+function errorOf(call: () => unknown): unknown {
+  try {
+    call();
+    return new Error('未抛出错误');
+  } catch (error) {
+    return error;
+  }
+}
 
 describe('结构与语义分层报错（spec 2.2-08）', () => {
   it('平台标识写成大写或带空格时，报的是 path 而不是整包静默失败', () => {

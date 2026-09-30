@@ -5,6 +5,7 @@
  * 主进程拿到 HTML 字符串再解析就是第二套 DOM 实现（plan §8 明确禁止，且要引 cheerio/jsdom）。
  * 也因此这段源码可以被单测直接 `new Function` 跑起来——不需要真开一个 Electron 窗口。
  */
+import type { PageScrollReading } from '@auto-cc/shared';
 
 /** 正文文本的默认取回上限（字符）。整站内存里 `innerText` 可能是几百 KB，证据文件装不下也不该装。 */
 export const SNAPSHOT_TEXT_LIMIT = 4000;
@@ -70,5 +71,48 @@ export function toSnapshotReading(raw: unknown): PageSnapshotReading {
     headings: Array.isArray(value.headings)
       ? value.headings.filter((item): item is string => typeof item === 'string')
       : [],
+  };
+}
+
+/** 滚动回读结果（形状即 `shared` 的 `PageScrollReading`，spec 2.3-06：无限滚动站点靠「滚到底 + 数量是否增长」判断还有没有货）。 */
+
+/**
+ * 生成「把文档滚到底部」的表达式源码。
+ *
+ * 滚动必须发生在页面里：主进程既没有布局也没有滚动条，用 `window.scrollTo` 触发的是
+ * 站点自建的 IntersectionObserver 加载器——这正是真实站点的无限滚动触发方式（plan §10.2）。
+ * @returns 单个表达式字符串，求值得到 `PageScrollReading`
+ */
+export function buildScrollScript(): string {
+  return `(() => {
+    const documentHeight = Math.max(
+      document.body ? document.body.scrollHeight : 0,
+      document.documentElement ? document.documentElement.scrollHeight : 0,
+    );
+    window.scrollTo(0, documentHeight);
+    const scrollY = Math.round(window.scrollY || (document.documentElement && document.documentElement.scrollTop) || 0);
+    const viewportHeight = window.innerHeight || 0;
+    return {
+      scrollY,
+      scrollHeight: documentHeight,
+      atBottom: scrollY + viewportHeight >= documentHeight - 4,
+    };
+  })()`;
+}
+
+/**
+ * 把滚动脚本的返回值钳成视图形状（同 `toSnapshotReading`：页面值不可信，缺字段用中性值补）。
+ * @param raw `executeJavaScript` 的返回值
+ * @returns 字段齐全的滚动读数；读不出滚动位置时视为「在顶部且没到底」
+ */
+export function toScrollReading(raw: unknown): PageScrollReading {
+  const value = (raw ?? {}) as Partial<PageScrollReading>;
+  const scrollY = typeof value.scrollY === 'number' && Number.isFinite(value.scrollY) ? value.scrollY : 0;
+  const scrollHeight =
+    typeof value.scrollHeight === 'number' && Number.isFinite(value.scrollHeight) ? value.scrollHeight : 0;
+  return {
+    scrollY,
+    scrollHeight,
+    atBottom: value.atBottom === true,
   };
 }

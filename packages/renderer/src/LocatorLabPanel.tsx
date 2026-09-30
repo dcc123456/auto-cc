@@ -12,6 +12,7 @@ import type {
   LocatorRelocatedEvent,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { formatClock } from './format';
 
 /** 自愈播报最多留几条：面板是验收入口，不是历史库（与会话面板的失效横幅同一形状）。 */
 const RELOCATED_LIMIT = 3;
@@ -76,13 +77,6 @@ const STATUS_CLASS: Record<LocateResultView['status'], string> = {
   'below-score': 'bg-amber-950 text-amber-300 border-amber-800',
   'not-found': 'bg-rose-950 text-rose-300 border-rose-800',
 };
-
-/**
- * 时间戳 → 本地可读时间（毫秒，与主进程同一台机器所以直接 toLocale）。
- * @param ms 毫秒时间戳
- * @returns 本地化后的日期时间串
- */
-const formatClock = (ms: number): string => new Date(ms).toLocaleString();
 
 /**
  * 定位实验台：把定位/动作层的结构化失败画到界面上（spec 2.2-04），
@@ -224,7 +218,7 @@ export function LocatorLabPanel() {
                   description: t(failure.description),
                   status: t(`locator.status.${failure.status}`),
                   reason: failure.reason,
-                  time: formatClock(failure.at),
+                  time: formatClock(failure.at, t('locator.none')),
                 })}
               </li>
             ))}
@@ -413,7 +407,7 @@ export function LocatorLabPanel() {
                   score: event.score,
                   frameUrl: event.frameUrl,
                   because: event.because,
-                  time: formatClock(event.at),
+                  time: formatClock(event.at, t('locator.none')),
                 })}
               </li>
             ))}

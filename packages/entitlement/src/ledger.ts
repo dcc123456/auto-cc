@@ -164,6 +164,18 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 账本总行数（spec 2.3-11 的对照读数：抓取是只读动作，一轮前后两值必须相等）。
+   *
+   * 单独一个 `COUNT` 而不是复用 `summary().total`：后者为了分组把整张表读进 JS，
+   * 每次抓取跑两遍纯属浪费，而这里要的就是一个整数。
+   * @returns 已落账的行数；空账本为 0
+   */
+  count = (): number => {
+    const row = this.store.db.prepare('SELECT COUNT(*) AS n FROM usage_ledger').get() as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /**
    * 用量回看（spec 1.9-07）：总数、今日、按天分组、按动作分组，外加最近几行。
    *
    * 分组在 JS 里做而不是在 SQL 里 `GROUP BY`：日界必须按本地时区（见 `dayKey`），

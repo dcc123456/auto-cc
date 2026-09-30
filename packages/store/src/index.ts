@@ -11,7 +11,14 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { readVersion, runMigrations, type Migration, type MigrationResult } from './migrate.js';
+import {
+  readVersion,
+  rollback,
+  runMigrations,
+  type Migration,
+  type MigrationResult,
+  type RollbackResult,
+} from './migrate.js';
 
 export const storeSchema = z.strictObject({
   /** 库文件目录；缺省用 `config.paths().userDataDir`（主进程会覆盖成 `app.getPath('userData')`）。 */
@@ -70,6 +77,20 @@ export class StoreService extends Service {
   upgrade(): MigrationResult {
     this.lastResult = runMigrations(this.db, this.migrations);
     return this.lastResult;
+  }
+
+  /**
+   * 把 schema 倒回指定版本（spec 2.3-05 的「migration 可回滚」实测入口）。
+   * @param toVersion 回到的版本号，0 表示回到一张表都没有
+   * @returns 实际倒回去的版本列表；途中遇到缺 `down` 的迁移会抛出且版本不动
+   * @throws 目标版本非法、高于当前版本，或迁移没有 `down`
+   */
+  rollback(toVersion: number): RollbackResult {
+    const result = rollback(this.db, this.migrations, toVersion);
+    this.ctx.logger.info(
+      `schema 已回滚：${String(result.from)}→${String(result.to)}（倒回 ${String(result.reverted.length)} 版）`,
+    );
+    return result;
   }
 
   /**

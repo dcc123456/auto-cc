@@ -28,7 +28,8 @@ const SELECTOR_PATTERNS: readonly (readonly [RegExp, string])[] = [
   [/\[@/, 'XPath 的属性谓词（[@…]）'],
   [/#[\w-]+/, 'id 选择器（#…）'],
   [/>/, '选择器组合符（>）'],
-  [/\[[^\]]+\]/, '属性选择器（[…]）'],
+  // 方括号里必须先是一个标识符或 `@` 才算属性选择器：`["五年经验"]` 这类 JSON 数组文本不是页面结构。
+  [/\[\s*[@\w-]/, '属性选择器（[…]）'],
   [/:(?:nth-|first-|last-|eq|not|empty|hover|contains)/, '伪类（:nth-… 等）'],
   [/(^|\s)\.[a-zA-Z_-]/, 'class 选择器（.name）'],
 ];
@@ -36,13 +37,18 @@ const SELECTOR_PATTERNS: readonly (readonly [RegExp, string])[] = [
 /** 地址与模块说明符不是选择器：`http://…` 里的 `//`、`from './x.js'` 里的 `./` 都是误报源。 */
 const URL_LIKE = /^[a-z][a-z0-9+.-]*:\/\//i;
 
+/** SQL 语句不是选择器：`<>` 里的 `>`、`excluded.company` 前的点都属于存储层（spec 2.3-02）。 */
+const SQL_LIKE = /(?:^|\s)(?:SELECT|INSERT\s+INTO|UPDATE\s+SET|DELETE\s+FROM|CREATE\s+TABLE|DROP\s+TABLE|PRAGMA)\b/i;
+
 /**
  * 判断一个字符串字面量像不像选择器。
  * @param text 字符串的内容（已去掉引号，不含模板插值）
  * @returns 命中的特征描述；不像选择器时返回 null
  */
 function selectorShapeOf(text: string): string | null {
-  if (!text.trim() || URL_LIKE.test(text)) return null;
+  if (!text.trim() || URL_LIKE.test(text) || SQL_LIKE.test(text)) return null;
+  // 选择器一律写在同一行里：跨行的字面量是 SQL 语句或多行文案，不是页面结构。
+  if (text.includes('\n')) return null;
   // 形如 `a.b` / `platform.boss` / `./adapter.js` 这种**不含空格、方括号、井号、尖括号**的点号串
   // 是 service 名、模块路径或小数，不是选择器（选择器要么有组合结构，要么有 .name 前导点）。
   if (!/[[\]#>/:]/.test(text) && !text.startsWith('.')) return null;

@@ -19,7 +19,7 @@ import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
 import { LogService } from '@auto-cc/plugin-logger';
 import { OutboundSampleService } from '@auto-cc/plugin-outbound';
-import { BossPlatformService } from '@auto-cc/plugin-platform-boss';
+import { BossPlatformService, JdCaptureService, JdStoreService } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -50,6 +50,10 @@ export const REGISTRY: Registry = {
   'platform-registry': PlatformRegistryService,
   // BOSS 适配器（spec 2.2-06）：它在自己的 init 里把自己登记进上一行，`browser` 一行都不认识它。
   'platform-boss': BossPlatformService,
+  // JD 库（spec 2.3-02 / 2.3-04）：`jobs` 表的唯一落点，迁移号段 3。摘掉它，`jd-capture` 连同进 PENDING。
+  'jd-store': JdStoreService,
+  // 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：只读，不经 `entitlement.gate`，所以账本行数本轮不该变动。
+  'jd-capture': JdCaptureService,
   // 工作流执行器骨架（spec 1.10）：六步占位流水线，真实步骤在 P2 换进来。
   workflow: WorkflowRunnerService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——

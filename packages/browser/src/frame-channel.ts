@@ -95,6 +95,27 @@ export async function evaluateInFrames(
 }
 
 /**
+ * 取出求值成功的帧；一个都没成功就是页面级的事故，而不是「读了但没命中」。
+ *
+ * `readingsFromFrames` 与 `browser.page.extract` 都要做这件判定（后者还要保留帧归属，
+ * 所以不能直接复用拍平函数），抽成一处以免两份错误消息各说一套（AGENTS.md §2.2）。
+ * @param evaluations `evaluateInFrames` 的结果
+ * @param scope 报错归属的服务名
+ * @returns 成功帧的求值结果
+ * @throws 所有帧都失败时 `PAGE_SCRIPT_FAILED`
+ */
+export function usableEvaluations(evaluations: FrameEvaluation[], scope: string): FrameEvaluation[] {
+  const usable = evaluations.filter((item) => item.error === null);
+  if (evaluations.length > 0 && usable.length === 0) {
+    const reasons = evaluations.map((item) => `${item.frameUrl || '（无地址）'}：${item.error}`).join(' / ');
+    throw new AppError('PAGE_SCRIPT_FAILED', `所有帧都读取失败（${reasons}）`, scope, {
+      frames: evaluations.length,
+    });
+  }
+  return usable;
+}
+
+/**
  * 把逐帧读数拍平成一份页面侧读数集合。
  * @param evaluations `evaluateInFrames` 的结果
  * @param clamp 单帧读数的钳制函数（页面值一律是不可信输入）
@@ -102,14 +123,7 @@ export async function evaluateInFrames(
  * @throws 所有帧都失败时 `PAGE_SCRIPT_FAILED`——一帧都没读成功，与「读了但没命中」是两回事
  */
 export function readingsFromFrames<T>(evaluations: FrameEvaluation[], clamp: (raw: unknown) => T[]): T[] {
-  const usable = evaluations.filter((item) => item.error === null);
-  if (evaluations.length > 0 && usable.length === 0) {
-    const reasons = evaluations.map((item) => `${item.frameUrl || '（无地址）'}：${item.error}`).join(' / ');
-    throw new AppError('PAGE_SCRIPT_FAILED', `所有帧都读取失败（${reasons}）`, 'browser.frame', {
-      frames: evaluations.length,
-    });
-  }
-  return usable.flatMap((item) => clamp(item.value));
+  return usableEvaluations(evaluations, 'browser.frame').flatMap((item) => clamp(item.value));
 }
 
 /**

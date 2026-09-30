@@ -70,6 +70,23 @@
         { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/following-sibling::p[1]" }
       ]
     },
+    "detailRoot": {
+      "description": "详情页正文根节点：详情字段都在它子树里抽，避免把页头页脚读成岗位描述",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "jd-detail" },
+        { "strategy": "css", "value": "article.detail" },
+        { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/parent::section" }
+      ]
+    },
+    "detailPosted": {
+      "description": "详情页的发布时间原文（「3 天前」「刚刚发布」），归一化属 2.3-03",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "posted" },
+        { "strategy": "css", "value": "span.posted" }
+      ]
+    },
     "detailRequirement": {
       "description": "详情页的任职要求正文，`JobDetail.requirements` 的原文来源",
       "cardinality": "single",
@@ -137,6 +154,35 @@
         { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-item" },
         { "strategy": "xpath", "value": "//ul[@data-testid='chat-log']/li" }
       ]
+    }
+  },
+  "capture": {
+    "list": {
+      "container": "jobCard",
+      "fields": [
+        { "name": "title", "locator": "jobTitle", "required": true },
+        { "name": "company", "locator": "jobCompany" },
+        { "name": "salary", "locator": "jobSalary" },
+        { "name": "city", "locator": "jobCity" },
+        { "name": "experience", "locator": "jobExperience" },
+        { "name": "education", "locator": "jobEducation" },
+        { "name": "detailHref", "locator": "jobTitle", "attribute": "href", "required": true }
+      ]
+    },
+    "detail": {
+      "container": "detailRoot",
+      "fields": [
+        { "name": "description", "locator": "detailDescription", "required": true },
+        { "name": "requirement", "locator": "detailRequirement" },
+        { "name": "posted", "locator": "detailPosted" }
+      ]
+    }
+  },
+  "search": {
+    "params": {
+      "keyword": "query",
+      "city": "city",
+      "experience": "experience"
     }
   },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"],
