@@ -18,6 +18,7 @@
     "@auto-cc/plugin-ipc": "workspace:*",
     "@auto-cc/plugin-kernel": "workspace:*",
     "@auto-cc/plugin-logger": "workspace:*",
+    "@auto-cc/plugin-llm": "workspace:*",
     "@auto-cc/plugin-outbound": "workspace:*",
     "@auto-cc/plugin-platform-boss": "workspace:*",
     "@auto-cc/plugin-plugins": "workspace:*",

@@ -38,6 +38,11 @@ export type AppErrorCode =
   | 'CHAT_BUSY'
   | 'CHAT_AUTONOMY_INVALID'
   | 'TOOL_DUPLICATE'
+  // 模型出口（spec 2.5-01 / 2.5-12）：两个码必须分开，因为处置不同——
+  // `LLM_UNAVAILABLE` 是「根本没配」，调用方应当回落模板并在界面播报；`LLM_REQUEST_FAILED` 是「配了但这次没成」，
+  // 由调用方决定是否重试。合成一个码会让界面对两者说同一句谎话。
+  | 'LLM_UNAVAILABLE'
+  | 'LLM_REQUEST_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

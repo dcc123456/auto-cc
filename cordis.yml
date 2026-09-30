@@ -24,6 +24,15 @@ plugins:
       file: store.db
       journal: wal
 
+  # 模型出口（spec 2.5-12）：全仓**唯一**的 LLM 请求通道，`pnpm lint` 里的 `check-llm-single-entry` 守这条。
+  # 默认留空 = 「未配置」：`complete()` 以 `LLM_UNAVAILABLE` 结构化失败，且一次网络都不发，
+  # 所以话术生成的模板回落是**可测的**（spec 2.5-01），不是碰运气。
+  # 这里不写 key：清单是入库文件，AGENTS.md §8.6 禁止把密钥写进仓库。key 只从环境变量读。
+  # 要真跑模型就补两行（并导出 `AUTO_CC_LLM_API_KEY`）：
+  #   baseUrl: https://api.deepseek.com
+  #   model: deepseek-chat
+  - id: llm
+
   # 外发额度骨架（spec 1.9）：账本与闸门各占一条，因为 1.9-05 要能**只摘掉闸门**而账本还活着。
   # `mode: unlimited` 是当前产品阶段的 shipped 默认——不收费、不登录、不联网校验（1.9-02 / 1.9-09）。
   # 想演示超限就在调试面板把该插件配置改成 `mode: daily` + `dailyLimit: 1`（1.9-03，不重启 app）。

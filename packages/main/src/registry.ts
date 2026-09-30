@@ -17,6 +17,7 @@ import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
+import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import { OutboundSampleService } from '@auto-cc/plugin-outbound';
 import { BossPlatformService, JdCaptureService, JdStoreService } from '@auto-cc/plugin-platform-boss';
@@ -34,6 +35,10 @@ export const REGISTRY: Registry = {
   config: ConfigService,
   logger: LogService,
   store: StoreService,
+  // 模型出口（spec 2.5-12）：全仓唯一的 LLM 入口，`scripts/check-llm-single-entry.ts` 机器守住这一条。
+  // 未配置（缺 baseUrl / model / 环境变量里的 key）时它照样挂载，只是 `complete()` 以 `LLM_UNAVAILABLE`
+  // 结构化失败且一次网络都不发 —— 话术生成因此能走模板回落并在界面播报，而不是静默空串。
+  llm: LlmChatService,
   // 账本与闸门是同一个域的两个服务，所以各占一个清单 id：`gate` 能单独被摘掉，
   // 1.9-05 的「闸门缺席即拦不住就不许装」才有可演示的形态（摘掉闸门时账本还活着）。
   usage: UsageLedgerService,

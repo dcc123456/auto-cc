@@ -188,6 +188,25 @@ importers:
         specifier: ^4.0.0
         version: 4.6.5
 
+  packages/llm:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
+
   packages/logger:
     dependencies:
       '@auto-cc/core':
@@ -229,6 +248,9 @@ importers:
       '@auto-cc/plugin-kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@auto-cc/plugin-llm':
+        specifier: workspace:*
+        version: link:../llm
       '@auto-cc/plugin-logger':
         specifier: workspace:*
         version: link:../logger
