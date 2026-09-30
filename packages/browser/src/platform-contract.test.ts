@@ -35,7 +35,6 @@ function minimalPack(overrides: Record<string, unknown> = {}): Record<string, un
       },
     },
     fieldOrder: ['title', 'company', 'salaryText'],
-    pacing: { minActionGapMs: 3_000, maxDailyActions: 20 },
     ...overrides,
   };
   const [firstName] = Object.keys(merged.locators ?? {});
@@ -49,7 +48,7 @@ function minimalPack(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 describe('知识包通过校验（spec 2.2-08）', () => {
-  it('一份合规的知识包原样落地，缺省的节奏参数由 schema 补齐', () => {
+  it('一份合规的知识包原样落地，缺省字段由 schema 补齐', () => {
     const pack = parseKnowledgePack(
       minimalPack({
         fieldOrder: [],
@@ -66,10 +65,18 @@ describe('知识包通过校验（spec 2.2-08）', () => {
     expect(pack).toMatchObject({
       platform: 'boss',
       fieldOrder: [],
-      pacing: { minActionGapMs: 3_000, maxDailyActions: 20 },
       search: { params: { keyword: 'query', city: 'city', experience: 'experience' } },
     });
     expect(pack.locators.greetButton!.candidates[0]).toMatchObject({ strategy: 'role', role: 'button' });
+  });
+
+  it('知识包再声明 pacing 段会被拒收（spec 2.7-04：节奏的唯一归属是 outbound.throttle）', () => {
+    // 删掉一段数据不等于删掉了诱因：旧知识包（或照旧抄的一份）里还写着 pacing 时，
+    // 必须在加载当场报错，而不是"读到了但没人用"——那正是 2.7-a 判死的那套第二节奏声明。
+    const error = errorOf(() => parseKnowledgePack(minimalPack({ pacing: { minActionGapMs: 5_000 } }))) as AppError;
+    expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
+    // 顶层未知键的 path 是空数组（zod 把键名放在 message 里），所以读数长成「：Unrecognized key: "pacing"」。
+    expect(errorDetails(error).problems).toEqual(['：Unrecognized key: "pacing"']);
   });
 
   it('抓取声明引用了不存在的定位名时在加载时就报错，而不是等到抓取时「某字段永远读不到」（spec 2.3-02）', () => {

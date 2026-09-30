@@ -9,7 +9,7 @@ export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
 export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
-import type { GreetChannelSource, ResumeChannelSource, WorkflowExecutorRegistry } from './events.js';
+import type { GreetChannelSource, PagePacer, ResumeChannelSource, WorkflowExecutorRegistry } from './events.js';
 
 /**
  * cordis declares FiberState as an ambient const enum, which cannot be re-exported
@@ -108,6 +108,20 @@ export function greetChannelsOf(ctx: Context): GreetChannelSource | undefined {
  */
 export function deliverChannelsOf(ctx: Context): ResumeChannelSource | undefined {
   return maybeService<ResumeChannelSource>(ctx, 'platform.registry');
+}
+
+/**
+ * 取页面动作的节奏（spec 2.7-04），实现方是 `outbound.throttle`。
+ *
+ * 与上面两问不同，这里**不做可选降级**：调用方把 `outbound.throttle` 写进了 `static inject`，
+ * 依赖没满足时它根本不会 init，所以取不到就是装配被改坏了，让 cordis 的 `ctx.get` 直接抛。
+ * 降级成「没有节流就立刻动手」才是真正危险的——那等于给抓取开了一个绕过唯一节奏归属的默认分支。
+ * @param ctx 调用方的上下文
+ * @returns 节奏服务的窄投影（只有 `nextScrollGapMs`）
+ */
+export function pagePacerOf(ctx: Context): PagePacer {
+  const pacer = ctx.get('outbound.throttle') as PagePacer;
+  return pacer;
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

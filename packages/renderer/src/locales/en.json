@@ -141,7 +141,7 @@
     "jd": {
       "heading": "JD capture & storage lab (local fixture only)",
       "refresh": "Re-read capture and store readings",
-      "config": "Target {{targetCount}} jobs · up to {{maxRounds}} rounds · {{roundPauseMs}} ms between rounds",
+      "config": "Target {{targetCount}} jobs · up to {{maxRounds}} rounds · randomized pause between rounds",
       "storeStatus": "{{total}} rows in store · {{withDetail}} with detail · schema v{{schemaVersion}}",
       "storeIdle": "No store reading returned: the jd-store plugin may be missing from the assembly",
       "newestSource": "Newest source URL {{url}}",

@@ -283,7 +283,6 @@ export function JobLabPanel() {
           {t('jd.config', {
             targetCount: captureStatus?.targetCount ?? '-',
             maxRounds: captureStatus?.maxRounds ?? '-',
-            roundPauseMs: captureStatus?.roundPauseMs ?? '-',
           })}
         </p>
         <p className="mt-1 text-[11px] text-slate-400" data-testid="jd-store-status">

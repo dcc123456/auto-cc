@@ -1,0 +1,52 @@
+子计划 2.7-a 机检证据（spec 2.7-02 红线扫描 / 2.7-04 节奏数归位）
+命令环境：Windows / Git Bash / Node 24.18.0，2026-10-01
+
+== 1. 绿：`pnpm lint` 的最后一道机检 ==
+
+$ npx tsx scripts/check-compliance-redlines.ts
+✔ 合规护栏机检通过（扫描 145 个源码文件：无 UA/指纹/打码/自定义分区痕迹，
+  browser/outbound/platform-boss/workflow/agent 的节奏数值全部来自配置）
+
+规则 1（2.7-02）：拦截 overrideUserAgent/appendUserAgent/setUserAgent、
+webRequest.onBeforeSendHeaders/onBeforeRequest/onBeforeResponse、extraHeaders、
+navigator.webdriver、Page.addScriptToEvaluateOnNewDocument、
+Object.defineProperty(navigator、验证码打码服务域名，以及 `persist:` 字面量
+（只允许 shared 的桥接类型、测试与测试替身里出现）。
+规则 2（2.7-04）：拦截 sleep/setTimeout/setInterval 实参里出现的裸数字，
+白名单只有 `*.default(` 与 `MAX_*MS` 两类，插值 `${...}` 先中和再判。
+
+== 2. 红：证明这两条规则真的会咬人（临时文件，跑完即删） ==
+
+$ cat > packages/browser/src/tmp-red-probe.ts
+export const probe = { ua: 'overrideUserAgent("Mozilla/9")', gap: 1200 };
+export function waitProbe(): void {
+  const t = setTimeout(() => undefined, 1200);
+  void t;
+}
+
+$ npx tsx scripts/check-compliance-redlines.ts   # exit=1
+✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数）：
+  - packages/browser/src/tmp-red-probe.ts:1 出现改写 User-Agent（指纹伪装）：检测到风控信号只能**停下来**，
+    不做识别与规避（spec 2.7-02 / AGENTS.md §8.3）
+  - packages/browser/src/tmp-red-probe.ts:3 把节奏数值写成了字面量：停顿毫秒数必须从配置或节流服务来，
+    写死就等于放弃随机化（spec 2.7-04）
+
+$ rm packages/browser/src/tmp-red-probe.ts
+$ npx tsx scripts/check-compliance-redlines.ts   # exit=0（回到绿）
+
+== 3. 装配面实测（真实 app 进程，CDP 10222 / harness eval） ==
+
+29 个插件节点全部 active，`notActive` 为空——`jd-capture` 新增的 `outbound.throttle`
+依赖在真实装配里成立（依赖没满足时 cordis 会让插件停在 pending，这里没有）。
+
+plugins.readConfig('outbound-throttle') → { minGapMs: 45000, maxGapMs: 150000, scrollMinGapMs: 300, scrollMaxGapMs: 900 }
+plugins.readConfig('jd-capture')        → { platform: 'boss', targetCount: 20, maxRounds: 8 }   # 已无 roundPauseMs
+plugins.readConfig('browser-act')       → { ..., uploadReadbackMs: 1500, uploadReadbackStepMs: 50 }
+
+主进程 init 日志：
+[outbound-throttle-service] 节奏节流就绪：外发间隔 45.0s – 150.0s · 页面动作间隔 0.30s – 0.90s（均为区间随机，非固定节奏）
+[jd-capture-service] JD 抓取编排就绪：平台 boss · 目标 20 条 · 上限 8 轮 · 轮间停顿由 outbound.throttle 随机给出 · 节点执行器已登记 jd.capture
+
+界面读数（诊断视图 · JD 抓取与入库实验台，见 2.7-04-pacing-config.png）：
+  目标 20 条 · 轮次上限 8 轮 · 轮间停顿随机（由 outbound.throttle 给）
+—— 固定间隔不再出现在界面上：随机化之后报一个定值就是说谎。

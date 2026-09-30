@@ -1095,11 +1095,10 @@ export interface CaptureRunView {
   ledgerRowsAfter: number;
 }
 
-/** `jd.capture.status` 的读数：当期配置 + 最近一次运行。 */
+/** `jd.capture.status` 的读数：当期配置 + 最近一次运行（间隔不在此列，节奏归 `outbound.throttle`，spec 2.7-04）。 */
 export interface CaptureStatusView {
   targetCount: number;
   maxRounds: number;
-  roundPauseMs: number;
   lastRun: CaptureRunView | null;
 }
 

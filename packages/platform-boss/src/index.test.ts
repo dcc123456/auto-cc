@@ -52,7 +52,6 @@ describe('站点知识包装载（spec 2.2-08）', () => {
     expect(pack.capabilities).toEqual(['search', 'detail', 'chat', 'sendResume', 'readReplies']);
     expect(Object.keys(pack.locators).length).toBeGreaterThanOrEqual(10);
     expect(pack.fieldOrder).toEqual(['title', 'company', 'salary', 'city', 'experience', 'education']);
-    expect(pack.pacing.minActionGapMs).toBeGreaterThan(0);
   });
 
   it('每条定位声明都有 2 条以上候选，且首条是稳定性最高的 testId 或 id', () => {

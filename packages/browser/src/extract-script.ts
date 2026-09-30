@@ -28,6 +28,14 @@ export type ExtractFrameReading = {
   rows: ExtractRowReading[];
 };
 
+/**
+ * XPath 迭代器在一次候选解析里最多走多少个节点（页面自保护的上限，不是可调参数）。
+ *
+ * 为什么不进配置：注入脚本拿不到主进程的配置，写进 `ExtractLimits` 只会多一个没人调的键；
+ * 但散在 `while` 条件里就是个说不清来历的魔法数（spec 2.7-04），所以收成有名字的常量。
+ */
+const XPATH_SCAN_CAP = 200;
+
 /** 把候选列表序列化成脚本里的字面量（数据进脚本的唯一通道，不做字符串拼接）。 */
 const literals = (value: unknown): string => JSON.stringify(value ?? null);
 
@@ -79,7 +87,7 @@ export function buildExtractScript(
             const result = document.evaluate(expression, root, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
             const hit = [];
             let node = result.iterateNext();
-            while (node && hit.length < 200) {
+            while (node && hit.length < ${XPATH_SCAN_CAP}) {
               hit.push(node);
               node = result.iterateNext();
             }

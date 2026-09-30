@@ -137,7 +137,7 @@ async function boot(options: BootOptions = {}) {
   await ctx.plugin(UsageLedgerService, {});
   await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimit: 5 });
   const gap = options.gapMs ?? 0;
-  const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap };
+  const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
   // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例才改得动它的登记表（同 greet 用例的先例）。

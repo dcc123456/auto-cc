@@ -662,11 +662,11 @@ export type UploadReading = {
  * 它读的是**注入时拿到的那一个 objectId**，所以不重新选节点——回读与注入指向同一个对象，
  * 才是「文件确实进了我们选中的控件」的证据。轮询是因为 `setFileInputFiles` 回包时
  * `change` 未必已经派发完（spike 里要等几百毫秒才看到回显，plan §13.2 第 3 条）。
- * @param timeoutMs 回读上限（毫秒），超时就把当时的读数如实交出去
- * @param stepMs 轮询间隔（毫秒）
+ * @param timeoutMs 回读上限（毫秒），超时就把当时的读数如实交出去；由 `browser.act` 的配置给，不写死在这里（spec 2.7-04）
+ * @param stepMs 轮询间隔（毫秒），同样来自配置
  * @returns `function` 声明源码，求值结果兑现为一个 Promise
  */
-export function buildUploadReadbackFunction(timeoutMs = 1500, stepMs = 50): string {
+export function buildUploadReadbackFunction(timeoutMs: number, stepMs: number): string {
   return `function () {
     const limitMs = ${String(timeoutMs)};
     const stepMs = ${String(stepMs)};

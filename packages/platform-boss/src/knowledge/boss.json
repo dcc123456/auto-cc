@@ -240,9 +240,5 @@
     "sentPattern": "简历已送达",
     "offlinePattern": "岗位已下架"
   },
-  "fieldOrder": ["title", "company", "salary", "city", "experience", "education"],
-  "pacing": {
-    "minActionGapMs": 5000,
-    "maxDailyActions": 20
-  }
+  "fieldOrder": ["title", "company", "salary", "city", "experience", "education"]
 }

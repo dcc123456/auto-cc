@@ -17,6 +17,7 @@ import {
   Service,
   asApp,
   executorRegistryOf,
+  pagePacerOf,
   sleep,
   type Context,
   type WorkflowNodeExecutor,
@@ -28,15 +29,13 @@ import { z } from 'zod';
 import { parsePostedAt, parseSalary } from './normalize.js';
 import type { JdStoreService, JobDraft } from './jd-store.js';
 
-/** 抓取用的目标平台与节奏：默认 BOSS，换平台只改 `cordis.yml`，本服务不写死。 */
+/** 抓取用的目标平台与量级：默认 BOSS，换平台只改 `cordis.yml`，本服务不写死。 */
 export const jdCaptureSchema = z.strictObject({
   platform: z.string().min(1).default('boss'),
   /** 一次运行攒够多少条就停（spec 2.3-06 的「达目标条数」）。 */
   targetCount: z.number().int().min(1).max(200).default(20),
   /** 最多滚读几轮（「不死循环」的硬上限）。 */
   maxRounds: z.number().int().min(1).max(50).default(8),
-  /** 每轮之间、每条详情之间的停顿（毫秒），给页面装载留时间，也是人类化节流的第一层。 */
-  roundPauseMs: z.number().int().min(0).max(30_000).default(300),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -114,7 +113,7 @@ type StoppedBy = CaptureRunView['stoppedBy'];
 export class JdCaptureService extends Service {
   static provide = 'jd.capture';
   static Config = jdCaptureSchema;
-  static inject = ['platform.registry', 'browser.page', 'jd.store', 'usage.ledger'];
+  static inject = ['platform.registry', 'browser.page', 'jd.store', 'usage.ledger', 'outbound.throttle'];
 
   private lastRun: CaptureRunView | null = null;
 
@@ -139,6 +138,14 @@ export class JdCaptureService extends Service {
 
   private get ledger(): Pick<UsageLedgerService, 'count'> {
     return asApp(this.ctx)['usage.ledger'];
+  }
+
+  /**
+   * 页面动作之间的停顿（spec 2.7-04）：抽样自 `outbound.throttle` 的滚动区间，不在这里写字面量。
+   * @returns 本轮该停的毫秒数；区间随机，所以每轮都不一样
+   */
+  private scrollGapMs(): number {
+    return pagePacerOf(this.ctx).nextScrollGapMs();
   }
 
   /**
@@ -213,7 +220,7 @@ export class JdCaptureService extends Service {
       }
       // 滚动是加载的扳机：无限滚动站点靠它长出下一屏，翻页站点靠它触发「加载更多」。
       await this.page.scroll();
-      await sleep(this.config.roundPauseMs, signal);
+      await sleep(this.scrollGapMs(), signal);
     }
 
     for (const summary of needsDetail) {
@@ -227,7 +234,7 @@ export class JdCaptureService extends Service {
         skipped.push({ title: summary.title, sourceUrl: summary.detailUrl, reason: reasonOf(error) });
         continue;
       }
-      await sleep(this.config.roundPauseMs, signal);
+      await sleep(this.scrollGapMs(), signal);
     }
 
     const run: CaptureRunView = {
@@ -254,12 +261,13 @@ export class JdCaptureService extends Service {
 
   /**
    * 当期配置 + 最近一次运行（面板与验收脚本共用的一份读数）。
-   * @returns 目标条数、轮数上限、间隔，以及最近一次运行；还没跑过时 `lastRun` 为 null
+   *
+   * 这里**不再报间隔**：节奏已归 `outbound.throttle` 按区间抽样，写一个定值回界面就是说谎（spec 2.7-04）。
+   * @returns 目标条数、轮数上限，以及最近一次运行；还没跑过时 `lastRun` 为 null
    */
   status = (): CaptureStatusView => ({
     targetCount: this.config.targetCount,
     maxRounds: this.config.maxRounds,
-    roundPauseMs: this.config.roundPauseMs,
     lastRun: this.lastRun,
   });
 
@@ -293,7 +301,7 @@ export class JdCaptureService extends Service {
       this.ctx.effect(() => () => registry.unregister(JD_CAPTURE_KIND));
     }
     this.ctx.logger.info(
-      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 间隔 ${String(this.config.roundPauseMs)}ms · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'}`,
+      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 轮间停顿由 outbound.throttle 随机给出 · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'}`,
     );
   }
 }

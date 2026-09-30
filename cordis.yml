@@ -55,13 +55,16 @@ plugins:
   - id: outbound-script
     dependsOn: [llm]
 
-  # 频控间隔（spec 2.5-04 / 2.5-05）：只回答「隔多久」，不持有计时器也不计数——
+  # 节奏节流（spec 2.5-04 / 2.5-05 / 2.7-04）：只回答「隔多久」，不持有计时器也不计数——
   # 日上限仍归 `entitlement`，真正 await 由调用方用 core 的 `sleep` 做（plan §12.3 要避免的是第二套配额与第二套调度器）。
-  # 区间显式写在这里而不是藏在代码默认值里：演示「非固定节奏」要能在装配面板现场改宽改窄，不重启 app。
+  # 两组区间：外发之间（打招呼/投递）与页面动作之间（抓取滚一轮、读一条详情）。
+  # 显式写在这里而不是藏在代码默认值里：演示「非固定节奏」要能在装配面板现场改宽改窄，不重启 app。
   - id: outbound-throttle
     config:
       minGapMs: 45000
       maxGapMs: 150000
+      scrollMinGapMs: 300
+      scrollMaxGapMs: 900
 
   # IPC 网关（spec 1.4-01）：全应用唯一的跨进程通道，所以排在 shell 之前——
   # 窗口由 shell 创建，界面能发起调用时处理器必须已经在位。
@@ -139,6 +142,9 @@ plugins:
       stableCheckSamples: 2
       waitCheckMs: 100
       cdpInputEnabled: true
+      # 文件注入后的回读窗口（spec 2.6-04）：这两个数原来是注入脚本的默认实参，2.7-04 把它们搬到配置面。
+      uploadReadbackMs: 1500
+      uploadReadbackStepMs: 50
 
   # 平台登记处（spec 2.2-07）：内核唯一认识站点的入口，本身不含任何站点知识。
   # 渲染层只拿得到只读清单 `platform.registry.list`，`get()` 回来的适配器实例不过进程边界。
@@ -208,15 +214,15 @@ plugins:
   - id: jd-store
     dependsOn: [store]
 
-  # 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：滚动收集 → 逐条读详情 → 落库，全程只读，不经 `entitlement.gate`。
+  # 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：滚动收集 → 逐条读详情 → 落库。
   # `targetCount` 是「抓够就停」的判据、`maxRounds` 是不死循环的硬上限，两者都写进清单而不是代码里（§2.7）。
+  # 轮间停顿**不在这里**：节奏唯一出口是 `outbound.throttle`（spec 2.7-04），所以依赖里带上它。
   - id: jd-capture
-    dependsOn: [platform-boss, browser, jd-store, usage]
+    dependsOn: [platform-boss, browser, jd-store, usage, outbound-throttle]
     config:
       platform: boss
       targetCount: 20
       maxRounds: 8
-      roundPauseMs: 300
 
   # 工作流执行器（spec 1.10 → 2.4-01/02/05/06/10）：槽位来自**计划**（`planId` 选 `WORKFLOW_PLANS` 里的一条），
   # 执行函数来自 `workflow-executors` 登记处，每一步的开始/结束/失败同时写进 `workflow-store` 的两张表。

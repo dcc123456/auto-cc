@@ -141,7 +141,7 @@
     "jd": {
       "heading": "JD 抓取与入库实验台（只打本地仿站）",
       "refresh": "重新读取抓取与库内读数",
-      "config": "目标 {{targetCount}} 条 · 轮次上限 {{maxRounds}} 轮 · 轮间歇 {{roundPauseMs}} 毫秒",
+      "config": "目标 {{targetCount}} 条 · 轮次上限 {{maxRounds}} 轮 · 轮间停顿随机（由 outbound.throttle 给）",
       "storeStatus": "库内 {{total}} 条 · 含详情 {{withDetail}} 条 · schema v{{schemaVersion}}",
       "storeIdle": "库内读数未返回：装配里可能没有 jd-store 插件",
       "newestSource": "最新一条来源 {{url}}",

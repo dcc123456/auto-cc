@@ -1,7 +1,8 @@
 /**
  * 2.3 与 2.5 用例的替身（`adapter.test.ts` / `jd-capture.test.ts` / `conversation-store.test.ts` 共用）。
  *
- * 只替两只手：`createFakePage` 替「读页面的手」、`createFakeAct` 替「敲字与点击的手」。
+ * 只替三只手：`createFakePage` 替「读页面的手」、`createFakeAct` 替「敲字与点击的手」、
+ * `StubOutboundThrottleService` 替「给节奏的手」（真身在 L3 外发层，本包不 import 它）。
  * 真实站点在自动化测试里不可用（AGENTS.md §7.2），而这几份用例要验收的是
  * 「页面读数怎么变成库里的行」「sent 是不是由页面回读说了算」，所以把页面与动作收成可编排的假手，
  * 登记处 / 库 / 账本一律用真实服务——把 sqlite mock 掉就等于没测幂等。
@@ -527,6 +528,45 @@ export class StubBrowserActService extends Service {
    */
   upload(spec: LocateSpec, filePath: string): Promise<ActReadback> {
     return this.options.fake.upload(spec, filePath);
+  }
+}
+
+/** 替身 `outbound.throttle` 的配置：滚动间隔给成定值，用例不必赌随机数。 */
+const stubThrottleSchema = z.strictObject({
+  scrollGapMs: z.number().int().min(0).default(0),
+});
+
+/** 校验后的替身配置形状。 */
+export type StubThrottleConfig = z.output<typeof stubThrottleSchema>;
+
+/**
+ * `outbound.throttle` 的测试替身：只交出 `PagePacer` 那一个方法。
+ *
+ * 存在理由同 `StubBrowserPageService`：`jd.capture` 从 2.7-a 起 `inject` 了 `outbound.throttle`，
+ * 装配清单里没有它整条链路停在 PENDING。真身不能直接挂——它在 L3 外发层，本包 import 过去就
+ * 多开一条下层→上层的依赖（AGENTS.md §4.1），而这里要验收的只是「间隔由节奏服务给、每轮取一次」。
+ */
+export class StubOutboundThrottleService extends Service {
+  static provide = 'outbound.throttle';
+  static Config = stubThrottleSchema;
+
+  /** 被抓取层取过多少次节奏（spec 2.7-04 的读数：每滚一轮必须取一次，取不到就说明还在用定值） */
+  draws = 0;
+
+  constructor(
+    ctx: Context,
+    private readonly options: StubThrottleConfig,
+  ) {
+    super(ctx, 'outbound.throttle');
+  }
+
+  /**
+   * 回传配置里写死的滚动间隔。
+   * @returns 毫秒数；同时把 `draws` 加一，供用例断言「间隔确实是问出来的」
+   */
+  nextScrollGapMs(): number {
+    this.draws += 1;
+    return this.options.scrollGapMs;
   }
 }
 

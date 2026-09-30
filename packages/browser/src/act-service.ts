@@ -50,6 +50,10 @@ export const browserActSchema = z.strictObject({
   waitCheckMs: z.number().int().min(16).max(2_000).default(100),
   /** 关掉即显式降级到 DOM 通道（结果里 `channel` 与 `trusted` 会如实变成 dom / false）。 */
   cdpInputEnabled: z.boolean().default(true),
+  /** 文件注入后回读 `files[0]` 与 `change` 的上限（毫秒）；超时把当时的读数如实交出去（spec 2.6-04 / 2.7-04）。 */
+  uploadReadbackMs: z.number().int().min(100).max(30_000).default(1500),
+  /** 回读的轮询步长（毫秒）。`setFileInputFiles` 回包时 change 未必已派发完，只能轮（plan §13.2 第 2 条）。 */
+  uploadReadbackStepMs: z.number().int().min(10).max(2_000).default(50),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -189,7 +193,7 @@ export class BrowserActService extends Service {
       result.chosen.frameUrl,
       buildNodeHandleScript(spec.candidates, address, expected, DEFAULT_SCRIPT_LIMITS),
       file.path,
-      buildUploadReadbackFunction(),
+      buildUploadReadbackFunction(this.config.uploadReadbackMs, this.config.uploadReadbackStepMs),
     );
     if (!injection.ok) throw await this.uploadFailed(injection.error, spec, file, contents);
     const reading = injection.reading;

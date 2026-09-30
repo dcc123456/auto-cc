@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { throttleSchema, OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 与 schema 的 default 一致（带 `.default()` 的键在直接调用点必须显式给出，AGENTS.md §9）。 */
-const BASE: OutboundThrottleConfig = { minGapMs: 45000, maxGapMs: 150000 };
+const BASE: OutboundThrottleConfig = { minGapMs: 45000, maxGapMs: 150000, scrollMinGapMs: 300, scrollMaxGapMs: 900 };
 
 /** 装到 `outbound.throttle` 为止；`overrides` 覆盖区间。 */
 async function ready(overrides: Partial<OutboundThrottleConfig> = {}) {
@@ -35,6 +35,22 @@ describe('outbound.throttle 的间隔抽样（spec 2.5-04 / 2.5-05）', () => {
     const throttle = await ready({ minGapMs: 60000, maxGapMs: 60000 });
     expect(throttle.nextGapMs()).toBe(60000);
     expect(throttle.nextGapMs(() => 0.7)).toBe(60000);
+  });
+
+  it('页面动作间隔（滚动）走自己的区间，不借用外发区间（2.7-04 归位）', async () => {
+    const throttle = await ready();
+    expect(throttle.nextScrollGapMs(() => 0)).toBe(300);
+    expect(throttle.nextScrollGapMs(() => 0.5)).toBe(600);
+    expect(throttle.nextScrollGapMs(() => 0.9999999999)).toBe(900);
+    // 两根区间各自独立：把外发区间拉到 1 秒级也不该动到页面动作的间隔。
+    const tight = await ready({ minGapMs: 1000, maxGapMs: 1000 });
+    expect(tight.nextScrollGapMs(() => 0)).toBe(300);
+  });
+
+  it('scrollMinGapMs > scrollMaxGapMs 同样在配置边界被拒（区间翻转就是假读数）', () => {
+    const parsed = throttleSchema.safeParse({ scrollMinGapMs: 900, scrollMaxGapMs: 300 });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) expect(parsed.error.issues[0]?.message).toContain('不能大于');
   });
 
   it('自定义区间生效：毫秒数不写死在代码里（plan §12.4）', async () => {

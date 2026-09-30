@@ -1520,3 +1520,47 @@ spike-3 在 fixture 页上试"截图前用绝对定位黑块盖住命中脱敏�
 顺序的理由：a/b 是纯静态与配置面，失败不影响运行期；c 是唯一需要新观测通道的（先跑 spike-1/2）；
 d 的截图遮罩依赖 spike-3；e 排最后是它要同时改界面与两处释放路径，牵面最广，且它的审计视图
 需要 b 落地的 `search` 账本行才有东西可看。
+
+### 14.7 2.7-a 收口记录（红线扫描 + 节奏归位这条机检面，2026-10-01）
+
+**做了什么**：新增 `scripts/check-compliance-redlines.ts`（两条规则、并进 `pnpm lint` 末道）；
+知识包 `pacing` 段连同 `platform-contract.ts` 的 schema 一起删除；`outbound.throttle` 从一档区间变两档
+（`scrollMinGapMs/scrollMaxGapMs`）；`jd.capture` 的轮间停顿改为向节奏服务要（`PagePacer` 声明在
+`core/events.ts`、`pagePacerOf()` 取用）；`browser.act` 新增 `uploadReadbackMs/uploadReadbackStepMs`
+两个配置项，注入脚本的默认实参消失；`extract-script.ts` 的 `200` 收成 `XPATH_SCAN_CAP`。
+界面那行同步更正为「轮间停顿随机（由 outbound.throttle 给）」，`CaptureStatusView` 去掉 `roundPauseMs`。
+
+**验收读数**：2.7-02、2.7-04 转 `[x]`，证据 `docs/acceptance/2.7/2.7-02-redline-scan.txt`（绿/红/回绿三段
+逐字输出 + 装配面读数）与 `2.7-04-pacing-config.png`（诊断视图截图）。真实 app 里 29 个插件节点全 active、
+`notActive` 为空——`jd-capture` 新加的 `outbound.throttle` 依赖在真实装配里成立（缺依赖时 cordis 会把插件
+停在 pending，而不是报错，所以这条读数是必需的，不能只靠单测）。
+
+**与 §14.3 / §14.4 的四条偏差，逐条写明**：
+
+1. **`throttleSchema` 新增的是区间而不是单点**（§14.3 第 4 条写的是 `{scrollGapMs}`）。
+   单点就是固定节奏，与 2.5-05 已经验收过的「非等间隔」判据自相矛盾；两组区间共用同一条 `drawInclusive()`，
+   没有第二套抽样实现（§2.5）。
+2. **`roundPauseMs` 彻底删除，没有按 §14.4 第 2 条的"保留但改走 throttle"处理**。
+   留这个名字就是留一份「抓取侧自己也有间隔」的声明（§2.5 一个入口），而界面上把它报成定值在随机化之后
+   是假读数。配套：`jd-capture.test.ts` 用 `toEqual`（不是 `toMatchObject`）锁 `status()` 形状，
+   再加一条 `jdCaptureSchema.safeParse({roundPauseMs:300}).success === false`，
+   使"偷偷加回固定间隔"直接让测试变红。
+3. **没有新建 `packages/browser/src/inpage-limits.ts`**（§14.3 第 4 条的处置）。
+   实际剩余的两个页面内常量各只有一个消费者：`nodeScanCap` 已在 `DEFAULT_SCRIPT_LIMITS` 里，
+   `XPATH_SCAN_CAP = 200` 就近声明在 `extract-script.ts`；`uploadReadback*` 搬进配置后注入脚本里
+   不再有别的定值。为一条常量新建一个模块是搬家不是归位（§2.3 不新增平行文件）。
+   扫描器的 allowlist 因此没有加条目：规则二只在 `sleep|setTimeout|setInterval` 的调用点命中，
+   页面内的循环上限不在射程内（实测绿，且注入红探针时报的是 timer 那条）。
+4. **`packages/testing/src/cdp.ts:321` 的 `setTimeout(…, 200)` 未动**。
+   harness 不在规则二的五个包之内，且它是本机 CDP 客户端的重试节拍，不是站点侧看到的操作节奏（§7.2 的边界）。
+
+**额外补的一条**：`platform-contract.test.ts` 新增「知识包里再写 `pacing` 会被 `strictObject` 当场拒收」
+（§14.4 第 2 条只要求回写 spec）。锁住这个读数是为了让这次删除不可回滚——否则下一份抄来的知识包
+把节奏声明带回来时，运行期只会表现为"读到了但没人用"，正是本片判死的那件事。
+
+**收尾自检（AGENTS.md §7.4）读数**：`pnpm typecheck` 全绿；`pnpm lint` 全绿（含新扫描器：
+「扫描 145 个源码文件：无 UA/指纹/打码/自定义分区痕迹，browser/outbound/platform-boss/workflow/agent 的节奏数值全部来自配置」）；
+`pnpm format:check` 全绿；`pnpm test` exit 0（browser 187 / outbound 57 / platform-boss 116，其余包全 Done）。
+
+**本片欠着的**：`PagePacer` 目前只露 `nextScrollGapMs()` 一格。滚动不是外发，不该占用外发的节流区间，
+所以没有把 `nextGapMs()` 一起投影过去；将来 2.7-b 把抓取纳入 `entitlement.gate` 之后再评估要不要加第二格。

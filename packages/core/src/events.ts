@@ -389,6 +389,23 @@ export type WorkflowNodeRunView = {
 };
 
 /**
+ * 页面动作节奏的询问面（spec 2.7-04），实现方是 `outbound.throttle`。
+ *
+ * 为什么形状声明在 L0：`jd.capture`（L2 领域）要在两轮滚动之间停一停，而节奏的**唯一归属**
+ * 是外发节流服务（L3）。让下层 import 上层会打破 AGENTS.md §4.1 的依赖方向，所以 core 只声明
+ * 「取一次间隔」这一个方法，由 `outbound.throttle` 结构上满足——与 `GreetChannelSource` 同一套路。
+ * 只露滚动这一格：把 `nextGapMs`（外发间隔）也露出来，L2 就能拿外发节奏去排页面动作，
+ * 而滚动不是外发，不该占用外发的节流区间。
+ */
+export interface PagePacer {
+  /**
+   * 取下一次页面动作（滚动 / 换页）之前的停顿时长。
+   * @returns 区间随机的整数毫秒；抽不到定值，所以界面不显示「固定间隔」（同条理由见 spec 2.7-04）
+   */
+  nextScrollGapMs(): number;
+}
+
+/**
  * 落库视图专用的一次 run 状态。
  *
  * `interrupted` **不属于** 1.10 的 `WorkflowRunStatus`（那份状态集是界面在画的，不变），

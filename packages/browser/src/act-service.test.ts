@@ -34,6 +34,8 @@ const DEFAULT_ACT_CONFIG: BrowserActConfig = {
   stableCheckSamples: 2,
   waitCheckMs: 100,
   cdpInputEnabled: true,
+  uploadReadbackMs: 1500,
+  uploadReadbackStepMs: 50,
 };
 
 const fibers: Fiber[] = [];

@@ -28,7 +28,13 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { conversationMigration } from './conversation-store.js';
 import { BossPlatformService, loadBossKnowledgePack } from './index.js';
-import { JdCaptureService, draftFromDetail, draftFromSummary, type JdCaptureConfig } from './jd-capture.js';
+import {
+  JdCaptureService,
+  jdCaptureSchema,
+  draftFromDetail,
+  draftFromSummary,
+  type JdCaptureConfig,
+} from './jd-capture.js';
 import { JdStoreService } from './jd-store.js';
 import {
   cardRow,
@@ -41,6 +47,7 @@ import {
   LIST_URL,
   StubBrowserActService,
   StubBrowserPageService,
+  StubOutboundThrottleService,
   type PageScript,
 } from './test-doubles.js';
 
@@ -64,7 +71,6 @@ const captureConfig = (overrides: Partial<JdCaptureConfig> = {}): JdCaptureConfi
   platform: 'boss',
   targetCount: 20,
   maxRounds: 8,
-  roundPauseMs: 0,
   ...overrides,
 });
 
@@ -72,10 +78,11 @@ const captureConfig = (overrides: Partial<JdCaptureConfig> = {}): JdCaptureConfi
  * 挂起一整条抓取链路。
  * @param script 页面读数脚本
  * @param config 抓取配置覆盖项
+ * @param pacer 节奏替身的滚动间隔（毫秒）；默认 0 让用例不等，取消类用例才拉大
  * @returns 上下文、`jd.capture` / `jd.store` 服务、执行器登记处替身、`jd.capture` 的 fiber（卸载用例要先停它）、
- *          假手记账与进度事件列表
+ *          假手记账与进度事件列表，以及节奏替身（`draws` 是「取了几次节奏」的读数）
  */
-async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
+async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}, pacerGapMs = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
   sandboxes.push(dir);
   const ctx = new Context();
@@ -91,6 +98,7 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
   // `platform.boss` 从 2.5-d 起还 inject 了 `browser.act`：这只替身必须一起装，否则适配器停在 PENDING、
   // 下面的抓取链路一步都走不动（本用例只读页面，那只假动作手一次也不会被用到）。
   fibers.push(await ctx.plugin(StubBrowserActService, { fake: createFakeAct() }));
+  fibers.push(await ctx.plugin(StubOutboundThrottleService, { scrollGapMs: pacerGapMs }));
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   fibers.push(await ctx.plugin(JdStoreService, {}));
@@ -111,6 +119,7 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
     executors: executorRegistryOf(ctx),
     captureFiber,
     fake,
+    pacer: ctx.get('outbound.throttle') as StubOutboundThrottleService,
     events,
   };
 }
@@ -343,9 +352,26 @@ describe('进度事件（spec 2.3-07）', () => {
 
   it('status 回显当期配置，并在跑过之后带回最近一次运行', async () => {
     const { capture } = await boot(twoScreenScript(['1001', '1002', '1003']), { targetCount: 3, maxRounds: 4 });
-    expect(capture.status()).toMatchObject({ targetCount: 3, maxRounds: 4, roundPauseMs: 0, lastRun: null });
+    // 用 `toEqual` 而不是 `toMatchObject`：节奏归位到 `outbound.throttle` 之后，这里多出一个
+    // 「固定间隔」字段就是假读数（spec 2.7-04），逐字对齐才咬得住。
+    expect(capture.status()).toEqual({ targetCount: 3, maxRounds: 4, lastRun: null });
     const run = await capture.run({ keyword: '前端' });
     expect(capture.status().lastRun).toEqual(run);
+  });
+
+  it('滚动与逐条详情的停顿都向节奏服务要，本服务不养自己的计时器（spec 2.7-04）', async () => {
+    const { capture, pacer, fake } = await boot(twoScreenScript(['1001', '1002', '1003']), {
+      targetCount: 3,
+      maxRounds: 4,
+    });
+    await capture.run({ keyword: '前端' });
+    // 取次数 ≥ 滚动次数（阶段 B 每条详情也要一次）：只要抽过水，间隔就不是写死在代码里的。
+    expect(fake.scrolls).toBeGreaterThan(0);
+    expect(pacer.draws).toBeGreaterThanOrEqual(fake.scrolls);
+  });
+
+  it('roundPauseMs 这类抓取侧的间隔配置已被拒（第二套节奏声明不留）', () => {
+    expect(jdCaptureSchema.safeParse({ roundPauseMs: 300 }).success).toBe(false);
   });
 });
 
@@ -451,12 +477,12 @@ describe('作为工作流节点（spec 2.4-01 / 2.4-07 / 2.4-09）', () => {
   });
 
   it('跑到一半才 aborted 时停在下一次检查点，已入库的行留在库里', async () => {
-    // 轮间间隔给到 2s：取消一定落在「列表阶段之后的那次等待」里，而不是落进还没开始的空档。
-    const { executors, jd, fake } = await boot(twoScreenScript(['1001', '1002', '1003']), {
-      targetCount: 3,
-      maxRounds: 1,
-      roundPauseMs: 2_000,
-    });
+    // 轮间间隔给到 2s（由节奏替身给出）：取消一定落在「列表阶段之后的那次等待」里，而不是落进还没开始的空档。
+    const { executors, jd, fake } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3, maxRounds: 1 },
+      2_000,
+    );
     const controller = new AbortController();
     const pending = executors?.resolve('jd.capture')?.(
       invocationOf(captureNodeSpec({ query: '前端', target: 3 }), controller.signal),

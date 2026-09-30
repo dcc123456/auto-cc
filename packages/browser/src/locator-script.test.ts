@@ -726,7 +726,7 @@ describe('文件注入脚本（spec 2.6-04 / plan §13.3 第 4 条）', () => {
 
   it('探针键只有一个名字：取节点与回读两段脚本共用同一个 globalThis 挂点', () => {
     expect(UPLOAD_PROBE_KEY).toBe('__autoCcUploadProbe');
-    expect(buildUploadReadbackFunction()).toContain(UPLOAD_PROBE_KEY);
+    expect(buildUploadReadbackFunction(1500, 50)).toContain(UPLOAD_PROBE_KEY);
   });
 
   it('回读读数的字段一律钳齐：页面给什么形状的垃圾都不影响类型', () => {

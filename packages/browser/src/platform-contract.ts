@@ -159,14 +159,6 @@ export const knowledgePackSchema = z.strictObject({
     .optional(),
   /** 抓取字段的声明顺序：列表页字段顺序变了也只改这份数据。 */
   fieldOrder: z.array(z.string().min(1)).default([]),
-  pacing: z
-    .strictObject({
-      /** 两次外发动作之间的最小间隔（毫秒），2.5 的节流读这里。 */
-      minActionGapMs: z.number().int().min(0).max(600_000).default(3_000),
-      /** 单个平台每日外发上限，与 `entitlement.gate` 的额度是两套独立限制。 */
-      maxDailyActions: z.number().int().min(1).max(1_000).default(20),
-    })
-    .default({ minActionGapMs: 3_000, maxDailyActions: 20 }),
 });
 
 /** 校验后的知识包形状。 */
@@ -253,7 +245,7 @@ export type JobSearchCriteria = {
   city?: string;
   /** 经验要求（如「3-5年」）；省略表示不限。列表页把它当筛选条件而不是事后过滤（spec 2.3-01） */
   experience?: string;
-  /** 本次最多取回几条（适配器内部仍受知识包 `pacing` 与额度闸门约束） */
+  /** 本次最多取回几条（节奏与额度都在编排侧：`outbound.throttle` 与 `entitlement.gate`，知识包不声明） */
   limit?: number;
 };
 
