@@ -43,8 +43,7 @@ interface LoggerOptions {
 async function mounted(options: LoggerOptions = {}) {
   const dir = tempDir('auto-cc-log-');
   const ctx = new Context();
-  await ctx.plugin(ConfigService, { appName: 'auto-cc' });
-  asApp(ctx).config.setPathsOverride({ logDir: dir });
+  await ctx.plugin(ConfigService, { appName: 'auto-cc', paths: { logDir: dir } });
   const fiber = ctx.plugin(LogService, {
     level: options.level ?? 'info',
     buffer: options.buffer ?? 500,
@@ -120,8 +119,7 @@ describe('log 服务（出口接管）', () => {
   it('缺省目录走 config 的平台规范目录（spec 1.3-05 / 1.1-11）', async () => {
     const dir = tempDir('auto-cc-log-root-');
     const ctx = new Context();
-    await ctx.plugin(ConfigService, { appName: 'auto-cc' });
-    asApp(ctx).config.setPathsOverride({ logDir: dir });
+    await ctx.plugin(ConfigService, { appName: 'auto-cc', paths: { logDir: dir } });
     await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'default-dir.log', redact: true });
     expect(asApp(ctx).log.filePath).toBe(join(dir, 'default-dir.log'));
   });

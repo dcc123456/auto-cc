@@ -56,9 +56,14 @@ export function resolveConfig<T>(serviceName: string, input: ConfigRequest<T>): 
   return validateConfig(serviceName, input.schema, traceConfig(input).value);
 }
 
-/** `config` 插件只关心应用名——它决定平台规范目录的落点（spec 1.1-11）。 */
+/** `config` 插件关心两件事：应用名（决定平台规范目录的落点，spec 1.1-11）与主进程给出的权威目录。 */
 export const configSchema = z.strictObject({
   appName: z.string().min(1).default('auto-cc'),
+  /**
+   * 主进程用 Electron `app.getPath()` 结果给出的覆盖；缺失时 `paths()` 退回纯解析函数。
+   * 走配置层而不是一个 setter：这样它和其它运行时覆盖同层、能在来源追溯里看见，且只有装配那一次有机会写它。
+   */
+  paths: z.strictObject({ userDataDir: z.string().min(1).optional(), logDir: z.string().min(1).optional() }).optional(),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -76,7 +81,6 @@ export class ConfigService extends Service {
 
   private readonly fileLayers = new Map<string, unknown>();
   private readonly runtimeLayers = new Map<string, unknown>();
-  private pathsOverride: Partial<DataPaths> = {};
 
   /** cordis 把 `static Config` 校验后的配置作为构造器第二个实参传入，类型也从这里推导出调用点。 */
   private readonly options: ConfigOutput;
@@ -84,11 +88,6 @@ export class ConfigService extends Service {
   constructor(ctx: Context, options: ConfigOutput) {
     super(ctx, 'config');
     this.options = options;
-  }
-
-  /** 主进程用 `app.getPath()` 结果覆盖平台目录；缺失时 `paths()` 退回纯解析函数。 */
-  setPathsOverride(paths: Partial<DataPaths>): void {
-    this.pathsOverride = { ...this.pathsOverride, ...paths };
   }
 
   /** 装载 cordis.yml 里某插件的 `config` 段。 */
@@ -117,13 +116,14 @@ export class ConfigService extends Service {
     return validateConfig(id, request.schema, this.trace(id, request).value);
   }
 
-  /** 平台规范目录。Electron 主进程应通过 `setPathsOverride` 给出权威值。 */
+  /** 平台规范目录：主进程给过 `paths` 就以它为准，否则按 appName 纯解析（Electron 缺席的单测走这条）。 */
   paths(): DataPaths {
     const input = { platform: process.platform, env: this.env, homedir: homedir() };
     const appName = this.options.appName;
+    const override = this.options.paths;
     return {
-      userDataDir: this.pathsOverride.userDataDir ?? resolveUserDataDir(appName, input),
-      logDir: this.pathsOverride.logDir ?? resolveLogDir(appName, input),
+      userDataDir: override?.userDataDir ?? resolveUserDataDir(appName, input),
+      logDir: override?.logDir ?? resolveLogDir(appName, input),
     };
   }
 }

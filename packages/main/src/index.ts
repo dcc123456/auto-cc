@@ -33,7 +33,9 @@ async function mount() {
   await ctx.plugin(KernelService, {
     manifest: 'cordis.yml',
     rootDir: manifestRoot(),
-    runtime: { store: { dir: app.getPath('userData') } },
+    // Electron 的 userData 是唯一权威根：开发态用 AUTO_CC_USER_DATA_DIR 换目录时，库、会话分区与
+    // 失败证据必须一起跟过去（此前只覆盖 store.dir，证据落到了平台默认目录，两处不是一个地方）。
+    runtime: { config: { paths: { userDataDir: app.getPath('userData') } } },
     registry: REGISTRY,
   });
 }

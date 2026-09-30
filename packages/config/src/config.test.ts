@@ -17,9 +17,12 @@ const LoggerConfig = z.strictObject({
 
 const ENV_MAP = { level: 'AUTOCC_LOG_LEVEL' };
 
-async function mounted(env: Record<string, string | undefined> = {}): Promise<ConfigService> {
+async function mounted(
+  env: Record<string, string | undefined> = {},
+  paths?: Partial<DataPaths>,
+): Promise<ConfigService> {
   const ctx = new Context();
-  await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+  await ctx.plugin(ConfigService, { appName: 'auto-cc', ...(paths ? { paths } : {}) });
   const config = ctx.get('config') as unknown as ConfigService;
   config.env = env;
   return config;
@@ -62,16 +65,15 @@ describe('config 服务（四层配置）', () => {
     }
   });
 
-  it('目录解析：显式覆盖优先，否则按 appName 走平台规范目录', async () => {
+  it('目录解析：主进程给过 paths 就以它为准，否则按 appName 走平台规范目录', async () => {
     // 这条断言要看的是真实环境变量下的解析结果，所以不能像上面几个用例那样替换 env 快照。
     const config = await mounted(process.env);
     const platform = config.paths();
     expect(platform.userDataDir.replaceAll('\\', '/')).toContain('auto-cc');
     expect(platform.logDir.replaceAll('\\', '/')).toContain('auto-cc');
 
-    const override: Partial<DataPaths> = { userDataDir: '/tmp/x', logDir: '/tmp/x/logs' };
-    config.setPathsOverride(override);
-    expect(config.paths()).toEqual(override);
+    const override: DataPaths = { userDataDir: '/tmp/x', logDir: '/tmp/x/logs' };
+    expect((await mounted(process.env, override)).paths()).toEqual(override);
   });
 
   it('config 自身的 schema 也走同一套严格校验', async () => {

@@ -146,9 +146,8 @@ interface BootOptions {
 async function boot(options: BootOptions = {}) {
   const dir = options.dir ?? tempDir();
   const ctx = new Context();
-  fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   // 证据写在 userData 下面，所以把 userData 一起拐进临时目录，测试产物不进仓库（§7.5）。
-  asApp(ctx).config.setPathsOverride({ userDataDir: dir });
+  fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc', paths: { userDataDir: dir } }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
   fibers.push(await ctx.plugin(WorkflowExecutorRegistryService, {}));
