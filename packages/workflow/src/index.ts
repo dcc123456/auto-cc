@@ -183,6 +183,20 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
+   * 库里最近一次可续的 run 的完整读数（spec 2.4-05 的界面入口）。
+   *
+   * 与 `state()` 不是一回事：那份读的是**内存里这次** run，进程刚重启时它在库里还没有行，
+   * 于是 plan §11.3 第 6 条要求的「上次中断在第 i 个节点」永远显示不出来。这里读的是
+   * `resumeRun()` 不带参数时将要挑中的同一条（同一个 `resumeCandidate` 判据），
+   * 所以界面先显示的进度与点下去真正续上的进度必然一致——不会出现「显示第 2 个、续到第 1 个」。
+   * @returns 可续 run 的落库状态；库里没有同指纹的中断/暂停/失败 run 时为 null（不是抛错）
+   */
+  resumable(): WorkflowRunStateView | null {
+    const candidate = this.store.resumeCandidate(this.plan.fingerprint);
+    return candidate ? this.store.state(candidate.runId) : null;
+  }
+
+  /**
    * 起一个新的 run 并开始推进。
    * @returns 刚进入 `running` 的状态
    * @throws 上一个 run 还没走完时以 `WORKFLOW_INVALID_STATE` 失败（先暂停/重试，别并行两个 run）；

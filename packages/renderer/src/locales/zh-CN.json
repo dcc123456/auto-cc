@@ -304,13 +304,15 @@
         "running": "运行中",
         "paused": "已暂停",
         "failed": "失败",
-        "done": "已完成"
+        "done": "已完成",
+        "interrupted": "已中断"
       },
       "stepStatus": {
         "pending": "待执行",
         "running": "执行中",
         "done": "已完成",
-        "failed": "失败"
+        "failed": "失败",
+        "skipped": "已跳过（幂等）"
       },
       "step": {
         "jd-capture": "抓取 JD 入库",
@@ -323,6 +325,20 @@
         "expired": "{{subject}} 的登录态已失效，工作流停在「{{step}}」；请在内嵌视图里重新登录后继续。",
         "unobserved-side-effect": "{{subject}} 这一步的外发结果没被观察到（可能已经发出去了），工作流停在「{{step}}」；请先在内嵌视图里确认实际情况，再重试这一步。",
         "manual-takeover": "「{{step}}」被 {{subject}} 声明为人工接管点（验证码 / 风控一类），工作流已停住；请人工完成后重试这一步。"
+      },
+      "lab": {
+        "heading": "工作流执行器（落库真相）",
+        "runOnce": "跑一遍",
+        "resumeRun": "从失败节点续跑",
+        "actionRunOnce": "跑一遍整条计划",
+        "actionResumeRun": "从库里那次中断续跑",
+        "planNodes": "当前计划 {{count}} 个节点：{{chain}}",
+        "storeHeading": "库里的 run 与逐节点读数",
+        "storeIdle": "库里还没有这条计划的 run：点「跑一遍」起一次",
+        "progress": "第 {{index}}/{{total}} 个节点 · 已重试 {{retries}} 次 · {{status}}",
+        "runRow": "计划 {{planId}} · run {{runId}} · 指纹 {{fingerprint}}",
+        "attempts": "尝试 {{num}} 次（重试 {{retries}}）",
+        "evidence": "证据：{{ref}}"
       }
     },
     "chat": {

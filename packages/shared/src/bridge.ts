@@ -19,7 +19,9 @@ import type {
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
+  WorkflowNodeSpec,
   WorkflowProgressEvent,
+  WorkflowRunStateView,
   WorkflowRunView,
 } from '@auto-cc/core';
 
@@ -51,7 +53,10 @@ export type {
   ToolCallReply,
   ToolDescriptorView,
   ToolEffect,
+  WorkflowNodeRunView,
+  WorkflowNodeSpec,
   WorkflowProgressEvent,
+  WorkflowRunStateView,
   WorkflowRunStatus,
   WorkflowRunView,
   WorkflowStepId,
@@ -119,6 +124,11 @@ export const RENDERER_ALLOWLIST = [
   'workflow.runner.pause',
   'workflow.runner.resume',
   'workflow.runner.retryStep',
+  // 2.4 的节点化 runner：计划声明、落库真相、以及「从库里那次中断续上」。
+  'workflow.runner.nodes',
+  'workflow.runner.state',
+  'workflow.runner.resumable',
+  'workflow.runner.resumeRun',
   // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
   'agent.tools.list',
   'agent.tools.call',
@@ -475,6 +485,17 @@ export interface BridgeSignatures {
   'workflow.runner.resume': { args: []; returns: WorkflowRunView };
   /** 单独重试某一个失败步或接管步（spec 1.10-06 / 2.4-06）；步 id 来自界面，越界即结构化失败。 */
   'workflow.runner.retryStep': { args: [stepId: string]; returns: WorkflowRunView };
+  /** 当前计划的节点声明（spec 2.4-01）：面板与 2.8 的工具卡片用它列节点，只读。 */
+  'workflow.runner.nodes': { args: []; returns: WorkflowNodeSpec[] };
+  /** **内存里这次** run 的落库真相（spec 2.4-04 的 `evidenceRef`、2.4-03 的 `attempts` 从这里读）。 */
+  'workflow.runner.state': { args: []; returns: WorkflowRunStateView | null };
+  /** 库里最近一次可续的 run（spec 2.4-05）：重启后 `state()` 还没有行，界面靠这条显示「上次中断在第 i 个节点」。 */
+  'workflow.runner.resumable': { args: []; returns: WorkflowRunStateView | null };
+  /**
+   * 从库里续上一次的 run（spec 2.4-05），与 `resume`（本次运行内的续跑）不是一回事。
+   * 省略 `runId` 时按当前计划指纹取最近一次；计划改过就结构化失败，不会按老下标瞎跑。
+   */
+  'workflow.runner.resumeRun': { args: [runId?: string]; returns: WorkflowRunView };
   /**
    * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，
    * 界面把它摆在档位旁边，「工具面是空表」这件事本身就看得见。

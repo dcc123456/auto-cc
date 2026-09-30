@@ -10,6 +10,7 @@ import { LocatorLabPanel } from './LocatorLabPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 import { UsagePanel } from './UsagePanel';
+import { WorkflowLabPanel } from './WorkflowLabPanel';
 import { WorkflowPanel } from './WorkflowPanel';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
@@ -106,6 +107,7 @@ export function App() {
             <SessionPanel />
             <LocatorLabPanel />
             <JobLabPanel />
+            <WorkflowLabPanel />
             <UsagePanel />
             <AssemblyPanel />
           </div>

@@ -304,13 +304,15 @@
         "running": "running",
         "paused": "paused",
         "failed": "failed",
-        "done": "done"
+        "done": "done",
+        "interrupted": "interrupted"
       },
       "stepStatus": {
         "pending": "pending",
         "running": "running",
         "done": "done",
-        "failed": "failed"
+        "failed": "failed",
+        "skipped": "skipped (idempotent)"
       },
       "step": {
         "jd-capture": "Capture JDs into the store",
@@ -323,6 +325,20 @@
         "expired": "The sign-in for {{subject}} has expired, the run stopped at \"{{step}}\". Sign in again inside the embedded view, then continue.",
         "unobserved-side-effect": "The outbound action of {{subject}} at \"{{step}}\" was not observed (it may already have been sent). Check the embedded view first, then retry this step.",
         "manual-takeover": "\"{{step}}\" is declared as a manual takeover point by {{subject}} (captcha / risk control), the run is paused. Finish it yourself, then retry this step."
+      },
+      "lab": {
+        "heading": "Workflow runner (store truth)",
+        "runOnce": "Run once",
+        "resumeRun": "Resume from failed node",
+        "actionRunOnce": "Run the whole plan once",
+        "actionResumeRun": "Resume the interrupted run from the store",
+        "planNodes": "Current plan has {{count}} nodes: {{chain}}",
+        "storeHeading": "Run and per-node rows in the store",
+        "storeIdle": "No run for this plan in the store yet: press Run once to start one",
+        "progress": "node {{index}}/{{total}} · retried {{retries}} times · {{status}}",
+        "runRow": "plan {{planId}} · run {{runId}} · fingerprint {{fingerprint}}",
+        "attempts": "{{num}} attempts ({{retries}} retries)",
+        "evidence": "evidence: {{ref}}"
       }
     },
     "chat": {

@@ -499,6 +499,23 @@ describe('断点续跑与幂等闸门（2.4-05 / 06）', () => {
     expect(second.runs.state(runId)?.nodes[2]?.attempts).toBe(1);
   });
 
+  it('resumable() 给的是「续跑将要挑中的那条」：刚重启时 state() 为 null，它却能报出中断在第几个节点', async () => {
+    const { dir, runId } = await killAtThirdNode();
+    const second = await boot({ dir });
+    // 初始镜像在库里没有行：界面只看 `state()` 的话，重启后永远是「未开始」，续跑按钮也就永远点不亮。
+    expect(second.runner.state()).toBeNull();
+    expect(second.runner.resumable()).toMatchObject({ runId, status: 'interrupted', nodeIndex: 2 });
+
+    // 两只手共用同一个 `resumeCandidate` 判据：显示的第 i 个节点与点下去真正续上的那次 run 必然同一条。
+    expect(second.runner.resumeRun().runId).toBe(runId);
+    expect(second.runner.state()?.runId).toBe(runId);
+  });
+
+  it('库里没有可续的 run 时 resumable() 返回 null 而不是抛错（界面据此把续跑按钮置灰）', async () => {
+    const { runner } = await boot();
+    expect(runner.resumable()).toBeNull();
+  });
+
   it('接管点上的一次重试只放行一次重放：闸门仍写这笔账，跑完这次 run', async () => {
     const { dir, runId } = await killAtThirdNode();
     const second = await boot({ dir });
