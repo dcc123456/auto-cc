@@ -1,0 +1,282 @@
+===== 00 靶页状态 =====
+{"mode":"blocked"}
+===== 01 切到诊断视图并打开 boss 会话 =====
+已点击 <button>（原生鼠标事件）
+"416x388"
+已点击 <button>（原生鼠标事件）
+{
+  "partition": "persist:boss",
+  "url": "http://127.0.0.1:10233/boss"
+}
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/07-session-opened.png" "--reveal" "[data-session-id=boss]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/07-session-opened.png" "--reveal" "[data-session-id=boss]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\07-session-opened.png
+===== 02 回工作流视图，重试失败节点（会话已挂载 + 靶页 blocked） =====
+已点击 <button>（原生鼠标事件）
+"627x255"
+{
+  "ok": true,
+  "value": {
+    "inFlight": 1,
+    "completed": 3294,
+    "denied": 0
+  }
+}
+已点击 <button>（原生鼠标事件）
+文本已出现
+===== 03 待接管叠加态读数 =====
+{
+  "ok": true,
+  "value": {
+    "runId": "455ce384-1ed4-4f34-ad0a-9dd1d2181c5e",
+    "status": "paused",
+    "stepIndex": 0,
+    "steps": [
+      {
+        "id": "jd-capture",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      },
+      {
+        "id": "jd-list",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      },
+      {
+        "id": "flaky",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      }
+    ],
+    "startedAt": 1790807485449,
+    "requiresHuman": {
+      "subject": "boss",
+      "reason": "risk-control",
+      "stepId": "jd-capture",
+      "at": 1790807803144
+    }
+  }
+}
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-capture",
+      "data-step-status": "pending",
+      "data-step-takeover": "true"
+    },
+    "text": "1 · 抓取 JD 入库等待你接管待执行重试"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-list",
+      "data-step-status": "pending"
+    },
+    "text": "2 · 读取已入库的 JD待执行"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "flaky",
+      "data-step-status": "pending"
+    },
+    "text": "3 · 退避重试演示待执行"
+  }
+]
+[
+  {
+    "index": 0,
+    "tag": "div",
+    "attrs": {
+      "data-testid": "workflow-takeover"
+    },
+    "text": "等待你接管boss 的页面出现了风控拦截（验证码 / 访问受限一类），工作流已停在「抓取 JD 入库」；请在内嵌视图里人工完成后继续。"
+  },
+  {
+    "index": 1,
+    "tag": "span",
+    "attrs": {
+      "data-testid": "workflow-step-takeover-badge"
+    },
+    "text": "等待你接管"
+  }
+]
+"start:disabled pause:disabled resume:enabled abort:enabled pause:disabled"
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/05-takeover-overlay.png" "--reveal" "[data-step-id=jd-capture]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/05-takeover-overlay.png" "--reveal" "[data-step-id=jd-capture]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\05-takeover-overlay.png
+===== 04 点「中止」并读回 =====
+{
+  "ok": true,
+  "value": {
+    "inFlight": 1,
+    "completed": 3337,
+    "denied": 0
+  }
+}
+已点击 <button>（原生鼠标事件）
+{
+  "ok": true,
+  "value": {
+    "runId": "455ce384-1ed4-4f34-ad0a-9dd1d2181c5e",
+    "status": "paused",
+    "stepIndex": 0,
+    "steps": [
+      {
+        "id": "jd-capture",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      },
+      {
+        "id": "jd-list",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      },
+      {
+        "id": "flaky",
+        "status": "pending",
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null
+      }
+    ],
+    "startedAt": 1790807485449,
+    "requiresHuman": {
+      "subject": "boss",
+      "reason": "risk-control",
+      "stepId": "jd-capture",
+      "at": 1790807803144
+    }
+  }
+}
+{
+  "ok": true,
+  "value": {
+    "runId": "455ce384-1ed4-4f34-ad0a-9dd1d2181c5e",
+    "planId": "boss-basic",
+    "planFingerprint": "28e12a28",
+    "status": "interrupted",
+    "nodeIndex": 0,
+    "totalNodes": 3,
+    "startedAt": 1790807485449,
+    "finishedAt": 1790807811847,
+    "lastError": "USER_ABORT",
+    "nodes": [
+      {
+        "index": 0,
+        "nodeId": "jd-capture",
+        "kind": "jd.capture",
+        "effect": "read",
+        "status": "running",
+        "attempts": 7,
+        "startedAt": 1790807615957,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null,
+        "evidenceRef": null,
+        "sideEffect": null
+      },
+      {
+        "index": 1,
+        "nodeId": "jd-list",
+        "kind": "jd.list",
+        "effect": "read",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null,
+        "evidenceRef": null,
+        "sideEffect": null
+      },
+      {
+        "index": 2,
+        "nodeId": "flaky",
+        "kind": "demo.flaky",
+        "effect": "local-write",
+        "status": "pending",
+        "attempts": 0,
+        "startedAt": null,
+        "finishedAt": null,
+        "durationMs": null,
+        "error": null,
+        "evidenceRef": null,
+        "sideEffect": null
+      }
+    ]
+  }
+}
+"start:disabled pause:disabled resume:enabled abort:enabled retry:enabled pause:disabled"
+"求职工作流（计划驱动的节点流水线）\n重新读取工作流状态\n开始\n暂停\n续跑\n中止\n已暂停 · 455ce384-1ed4-4f34-ad0a-9dd1d2181c5e\n\n本次动作返回：已暂停\n\n等待你接管\n\nboss 的页面出现了风控拦截（验证码 / 访问受限一类），工作流已停在「抓取 JD 入库」；请在内嵌视图里人工完成后继续。\n\n1 · 抓取 JD 入库\n等待你接管\n待执行\n重试\n2 · 读取已入库的 JD\n待执行\n3 · 退避重试演示\n待执行"
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-capture",
+      "data-step-status": "pending",
+      "data-step-takeover": "true"
+    },
+    "text": "1 · 抓取 JD 入库等待你接管待执行重试"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-list",
+      "data-step-status": "pending"
+    },
+    "text": "2 · 读取已入库的 JD待执行"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "flaky",
+      "data-step-status": "pending"
+    },
+    "text": "3 · 退避重试演示待执行"
+  }
+]
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/06-after-abort.png" "--reveal" "[data-testid=workflow-panel]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/06-after-abort.png" "--reveal" "[data-testid=workflow-panel]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\06-after-abort.png

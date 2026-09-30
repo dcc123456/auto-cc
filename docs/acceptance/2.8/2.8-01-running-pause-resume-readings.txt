@@ -1,0 +1,126 @@
+
+##### 00 确认退避现值 + 当前 run 状态
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr" "Promise.all([window.autoCC.plugins.readConfig('workflow'),window.autoCC.workflow['runner.current'](),window.autoCC.workflow['runner.resumable']()]).then(a=>JSON.stringify({backoff:a[0].value.values.retryBackoffMs,cap:a[0].value.values.retryBackoffCapMs,current:{id:a[1].value&&a[1].value.runId,status:a[1].value&&a[1].value.status},resumable:{id:a[2].value&&a[2].value.runId,status:a[2].value&&a[2].value.status}}))"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr" "Promise.all([window.autoCC.plugins.readConfig('workflow'),window.autoCC.workflow['runner.current'](),window.autoCC.workflow['runner.resumable']()]).then(a=>JSON.stringify({backoff:a[0].value.values.retryBackoffMs,cap:a[0].value.values.retryBackoffCapMs,current:{id:a[1].value&&a[1].value.runId,status:a[1].value&&a[1].value.status},resumable:{id:a[2].value&&a[2].value.runId,status:a[2].value&&a[2].value.status}}))"
+
+"{\"backoff\":5000,\"cap\":5000,\"current\":{\"id\":\"pending\",\"status\":\"idle\"},\"resumable\":{\"id\":\"468e06d3-a97f-4f06-8737-d0719ef9e011\",\"status\":\"failed\"}}"
+
+##### 01 靶页 off + 后台归零计数
+not found
+##### 02 切工作流视图 + 入口驱动到 running
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "click" "--url" "5173" "--selector" "button[data-view=workflow]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "click" "--url" "5173" "--selector" "button[data-view=workflow]"
+
+已点击 <button>（原生鼠标事件）
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-retry-running.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-retry-running.js"
+
+"{\"sawRunning\":true,\"marks\":[\"128ms jd-capture=done,jd-list=done,flaky=running\"],\"atRetry\":\"128ms jd-capture=done,jd-list=done,flaky=running\",\"waitedMs\":540,\"runStatus\":\"running\",\"slots\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=running\"],\"buttons\":\"pause:enabled resume:disabled abort:enabled\"}"
+
+##### 03 进行中截图
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/10-running-slot.png" "--reveal" "[data-testid=workflow-panel]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/10-running-slot.png" "--reveal" "[data-testid=workflow-panel]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\10-running-slot.png
+
+##### 04 暂停
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-pause.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-pause.js"
+
+"{\"before\":{\"runStatus\":\"running\",\"slots\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=running\"]},\"afterStatus\":\"paused\",\"afterSteps\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=pending\"],\"domSlots\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=pending\"],\"buttons\":\"pause:disabled resume:enabled abort:enabled\",\"panelText\":\"求职工作流（计划驱动的节点流水线） | 重新读取工作流状态 | 开始 | 暂停 | 续跑 | 中止 | 已暂停 · 285d7b3d-59dc-48ed-92c0-924c6e359419 | 本次动作返回：已暂停 | 1 · 抓取 JD 入库 | 27 毫秒 | 已完成 | 2 · 读取已入库的 JD | 1 毫秒 | 已完成 | 3 · 退避重试演示 | 待执行\"}"
+
+##### 05 暂停截图
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/11-paused.png" "--reveal" "[data-testid=workflow-panel]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/11-paused.png" "--reveal" "[data-testid=workflow-panel]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\11-paused.png
+
+##### 06 继续
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-resume.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-resume.js"
+
+"{\"sawRunning\":true,\"waitedMs\":106,\"runStatus\":\"running\",\"steps\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=running\"],\"domSlots\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=running\"],\"buttons\":\"pause:enabled resume:disabled abort:enabled\"}"
+
+##### 07 继续后进行中的截图
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/12-resumed-running.png" "--reveal" "[data-testid=workflow-panel]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/12-resumed-running.png" "--reveal" "[data-testid=workflow-panel]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\12-resumed-running.png
+
+##### 08 终态 + 证据展开
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-final.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/2.8/ex-final.js"
+
+"{\"terminalStatus\":\"failed\",\"waitedMs\":9252,\"slots\":[\"jd-capture=done\",\"jd-list=done\",\"flaky=failed\"],\"steps\":[\"jd-capture=done:27\",\"jd-list=done:1\",\"flaky=failed:4\"],\"hadEvidence\":true,\"img\":{\"naturalWidth\":677,\"naturalHeight\":1106,\"srcHead\":\"data:image/png;base64,iVBORw0K\",\"alt\":\"失败现场的页面截图\"},\"evidenceTestids\":[\"evidence-flaky\",\"evidence-attempt\",\"evidence-reason\",\"evidence-code\",\"evidence-message\",\"evidence-page\",\"evidence-url\",\"evidence-title\",\"evidence-text\",\"evidence-shot\",\"evidence-ref\"],\"shotMeta\":\"现场截图 677×1106 · 74945 字节\",\"urlLine\":\"http://127.0.0.1:10233/boss?query=%E5%89%8D%E7%AB%AF%E5%B7%A5%E7%A8%8B%E5%B8%88&city=%E4%B8%8A%E6%B5%B7\",\"textSnippet\":\"职位搜索\\n\\n本地仿站（fixture）：DOM 结构刻意模仿招聘列表页，数据全为虚构，与任何真实公司、真实职位无关。 自动化验收一律打这一页，不碰真实平台（AGENTS.md §7.2）。\\n\\n当前登录状态：未登录 · 会话 cookie：autocc_session\\n\\n在仿站登录 · 在仿站退出\\n\\n当前筛选：query\"}"
+
+##### 09 终态截图
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/15-final-done-done-failed-evidence.png" "--reveal" "[data-testid=workflow-panel]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/15-final-done-done-failed-evidence.png" "--reveal" "[data-testid=workflow-panel]"
+
+[harness] 滚动 40 轮后 [data-testid=workflow-panel] 仍未到位
+D:\works\deep-seek-workspace\auto-cc\packages\testing:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @auto-cc/testing@0.1.0 harness: `tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/15-final-done-done-failed-evidence.png" "--reveal" "[data-testid=workflow-panel]"`
+Exit status 1
+ ELIFECYCLE  Command failed with exit code 1.
+
+##### 10 复原退避 500
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr" "window.autoCC.plugins.saveConfig('workflow',{retryBackoffMs:500,retryBackoffCapMs:5000}).then(()=>window.autoCC.plugins.readConfig('workflow')).then(r=>JSON.stringify({backoff:r.value.values.retryBackoffMs}))"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr" "window.autoCC.plugins.saveConfig('workflow',{retryBackoffMs:500,retryBackoffCapMs:5000}).then(()=>window.autoCC.plugins.readConfig('workflow')).then(r=>JSON.stringify({backoff:r.value.values.retryBackoffMs}))"
+
+"{\"backoff\":500}"
+{"hits":0}DONE

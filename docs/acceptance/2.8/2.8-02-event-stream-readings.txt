@@ -1,0 +1,190 @@
+===== 00 靶页归零（off）+ 计数初值 =====
+{"ok":true,"mode":"off"}
+{"hits":0}
+===== 01 装 DOM 变化/事件计数器（不做任何轮询） =====
+"installed"
+===== 02 静默窗口起点：ipc 已完成调用数 S0 =====
+{
+  "ok": true,
+  "value": {
+    "inFlight": 1,
+    "completed": 3564,
+    "denied": 0
+  }
+}
+===== 03 点「续跑」（从中止处，主进程 resume()） =====
+已点击 <button>（原生鼠标事件）
+===== 04 进行中读数（连续两次，间隔 1.5s） =====
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-capture",
+      "data-step-status": "done"
+    },
+    "text": "1 · 抓取 JD 入库95 毫秒已完成"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-list",
+      "data-step-status": "done"
+    },
+    "text": "2 · 读取已入库的 JD1 毫秒已完成"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "flaky",
+      "data-step-status": "done"
+    },
+    "text": "3 · 退避重试演示2 毫秒已完成"
+  }
+]
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/08-running-step.png" "--reveal" "[data-step-id=jd-capture]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/08-running-step.png" "--reveal" "[data-step-id=jd-capture]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\08-running-step.png
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-capture",
+      "data-step-status": "done"
+    },
+    "text": "1 · 抓取 JD 入库95 毫秒已完成"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-list",
+      "data-step-status": "done"
+    },
+    "text": "2 · 读取已入库的 JD1 毫秒已完成"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "flaky",
+      "data-step-status": "done"
+    },
+    "text": "3 · 退避重试演示2 毫秒已完成"
+  }
+]
+===== 05 让 demo.flaky 三次都落在注入失败上（后台每 120ms 归零计数） =====
+===== 06 静默窗口终点：ipc 已完成调用数 S1 与计数器读数 =====
+{
+  "ok": true,
+  "value": {
+    "inFlight": 1,
+    "completed": 3696,
+    "denied": 0
+  }
+}
+{
+  "elapsedMs": 34397,
+  "progressEvents": 11,
+  "domMutations": 7,
+  "sequence": [
+    "3519ms jd-capture=running,jd-list=pending,flaky=pending",
+    "3658ms jd-capture=done,jd-list=done,flaky=running",
+    "5240ms jd-capture=done,jd-list=done,flaky=done"
+  ]
+}
+===== 07 失败态读数（成功 + 成功 + 失败） =====
+{
+  "ok": true,
+  "value": {
+    "runId": "455ce384-1ed4-4f34-ad0a-9dd1d2181c5e",
+    "status": "done",
+    "stepIndex": 3,
+    "steps": [
+      {
+        "id": "jd-capture",
+        "status": "done",
+        "startedAt": 1790807888794,
+        "finishedAt": 1790807888889,
+        "durationMs": 95,
+        "error": null
+      },
+      {
+        "id": "jd-list",
+        "status": "done",
+        "startedAt": 1790807888893,
+        "finishedAt": 1790807888894,
+        "durationMs": 1,
+        "error": null
+      },
+      {
+        "id": "flaky",
+        "status": "done",
+        "startedAt": 1790807890513,
+        "finishedAt": 1790807890515,
+        "durationMs": 2,
+        "error": null
+      }
+    ],
+    "startedAt": 1790807485449,
+    "requiresHuman": null
+  }
+}
+[
+  {
+    "index": 0,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-capture",
+      "data-step-status": "done"
+    },
+    "text": "1 · 抓取 JD 入库95 毫秒已完成"
+  },
+  {
+    "index": 1,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "jd-list",
+      "data-step-status": "done"
+    },
+    "text": "2 · 读取已入库的 JD1 毫秒已完成"
+  },
+  {
+    "index": 2,
+    "tag": "li",
+    "attrs": {
+      "data-step-id": "flaky",
+      "data-step-status": "done"
+    },
+    "text": "3 · 退避重试演示2 毫秒已完成"
+  }
+]
+"已完成 · 455ce384-1ed4-4f34-ad0a-9dd1d2181c5e"
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "shot" "--url" "5173" "--out" "tmp/2.8/09-failed-three-status.png" "--reveal" "[data-step-id=flaky]"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "shot" "--url" "5173" "--out" "tmp/2.8/09-failed-three-status.png" "--reveal" "[data-step-id=flaky]"
+
+D:\works\deep-seek-workspace\auto-cc\tmp\2.8\09-failed-three-status.png
+{
+  "status": "failed",
+  "nodeIndex": 2,
+  "lastError": "第 1 次命中，按注入计划失败（failTimes=2）",
+  "nodes": [
+    "jd-capture:done:4",
+    "jd-list:done:1",
+    "flaky:failed:3"
+  ]
+}
