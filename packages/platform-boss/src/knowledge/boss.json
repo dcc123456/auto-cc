@@ -162,6 +162,31 @@
         { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-body" },
         { "strategy": "css", "value": "[data-message-body]" }
       ]
+    },
+    "resumeUploadInput": {
+      "description": "简历上传控件【未实测】本地仿站的投递页尚未落地（2.6-c 补），待真实 DOM 校准；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉",
+      "cardinality": "single",
+      "requireActionable": false,
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-upload-input" },
+        { "strategy": "css", "value": "input[type=file][name=resume]" }
+      ]
+    },
+    "resumeSendButton": {
+      "description": "确认投递按钮【未实测】同上，待 2.6-c 的仿站投递页落地后按真实 DOM 校准",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-send" },
+        { "strategy": "role", "role": "button", "name": "发送简历", "exact": false }
+      ]
+    },
+    "resumeDeliverStatus": {
+      "description": "投递状态行【未实测】同上：sent 与「岗位已下架」两种结局都从这一行回读，所以它既是成功判据也是二次校验的读数来源",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-deliver-status" },
+        { "strategy": "css", "value": "p[data-role=deliver-status]" }
+      ]
     }
   },
   "capture": {
@@ -205,6 +230,15 @@
     "messageIdAttribute": "data-message-id",
     "directionAttribute": "data-direction",
     "inboundValue": "inbound"
+  },
+  "deliver": {
+    "entryPath": "/deliver",
+    "targetParam": "targetId",
+    "uploadInput": "resumeUploadInput",
+    "sendButton": "resumeSendButton",
+    "statusLine": "resumeDeliverStatus",
+    "sentPattern": "简历已送达",
+    "offlinePattern": "岗位已下架"
   },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"],
   "pacing": {

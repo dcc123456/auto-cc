@@ -366,3 +366,96 @@ describe('会话页知识（spec 2.5-05）', () => {
     }
   });
 });
+
+/** 一份配齐的投递页声明，用例只在要写坏某一项时替换它。 */
+const deliverSection = {
+  entryPath: '/deliver',
+  targetParam: 'targetId',
+  uploadInput: 'resumeUploadInput',
+  sendButton: 'resumeSend',
+  statusLine: 'deliverStatus',
+  sentPattern: '简历已送达',
+  offlinePattern: '岗位已下架',
+};
+
+describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
+  /**
+   * 造一份带完整投递页知识的知识包：三处被 `deliver` 段引用的定位名与那一段本身。
+   * @param overrides 覆盖项（用于把其中一处写坏）
+   * @returns 交给 `parseKnowledgePack` 的未知值
+   */
+  function deliverPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    /**
+     * 造一条只写 css 的定位声明（上传控件的候选顺序不是本条验收的对象）。
+     * @param actionable 是否需要「可被指点」判据（隐藏 input 必须豁免，plan §13.6 第 3 条）
+     * @returns 合法的定位声明
+     */
+    const pageLocator = (actionable: boolean) => ({
+      description: '投递页节点',
+      cardinality: 'single',
+      ...(actionable ? {} : { requireActionable: false }),
+      candidates: [{ strategy: 'css', value: '.node' }],
+    });
+    return minimalPack({
+      capabilities: ['search', 'sendResume'],
+      locators: {
+        searchInput: pageLocator(true),
+        resumeUploadInput: pageLocator(false),
+        resumeSend: pageLocator(true),
+        deliverStatus: pageLocator(true),
+      },
+      deliver: deliverSection,
+      ...overrides,
+    });
+  }
+
+  it('投递页知识配齐时原样落地，隐藏的上传控件带着豁免一起过校验', () => {
+    const pack = parseKnowledgePack(deliverPack());
+    expect(pack.deliver).toMatchObject({
+      targetParam: 'targetId',
+      uploadInput: 'resumeUploadInput',
+      statusLine: 'deliverStatus',
+      sentPattern: '简历已送达',
+      offlinePattern: '岗位已下架',
+    });
+    // 隐藏 input 读不到盒模型：这条声明若按默认可点判据，注入类动作在定位阶段就必失败。
+    expect(pack.locators.resumeUploadInput!.requireActionable).toBe(false);
+    expect(pack.locators.resumeSend!.requireActionable).toBeUndefined();
+  });
+
+  it('声明了 sendResume 却没有 deliver 段：加载时就报错，适配器拿不到猜出来的选择器', () => {
+    try {
+      parseKnowledgePack(minimalPack({ capabilities: ['search', 'sendResume'] }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'deliver：capabilities 含 sendResume，但知识包没有 deliver 段（页面知识不能靠猜）',
+      ]);
+    }
+  });
+
+  it('deliver 段引用了不存在的定位名时逐条点名是哪一处', () => {
+    try {
+      parseKnowledgePack(
+        deliverPack({ deliver: { ...deliverSection, statusLine: 'ghostStatus', uploadInput: 'ghostInput' } }),
+      );
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'deliver.uploadInput：引用了不存在的定位名「ghostInput」',
+        'deliver.statusLine：引用了不存在的定位名「ghostStatus」',
+      ]);
+    }
+  });
+
+  it('缺 offlinePattern 直接判非法：「还在不在招」只能由页面数据回答，不给代码留默认值', () => {
+    try {
+      parseKnowledgePack(deliverPack({ deliver: { ...deliverSection, offlinePattern: undefined } }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'deliver.offlinePattern：Invalid input: expected string, received undefined',
+      ]);
+    }
+  });
+});

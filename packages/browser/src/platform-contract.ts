@@ -9,7 +9,7 @@
  * 频控参数**全部是数据**。站点改版改的是数据，适配器代码不动——这也是 2.2-08 能被机检的原因
  * （`scripts/check-knowledge-pack.ts` 扫的就是「适配器源码里不许出现选择器字面量」）。
  */
-import { AppError } from '@auto-cc/core';
+import { AppError, type ResumeAttachment } from '@auto-cc/core';
 import type { PlatformMetaView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { validateSpec } from './locator-spec.js';
@@ -125,6 +125,38 @@ export const knowledgePackSchema = z.strictObject({
       inboundValue: z.string().min(1),
     })
     .optional(),
+  /**
+   * 简历投递的页面声明（spec 2.6-04 / 07，2.6-b）。缺段即「这个平台还没有上传页知识」，
+   * 适配器据此以结构化失败退出，而不是拿一套猜出来的选择器去点真实站点——与 `chat` 段同一条纪律。
+   */
+  deliver: z
+    .strictObject({
+      /** 上传页相对路径（按 `startUrl` 折算）；省略就在当前已打开的页面上动手（真实站点从会话里点「发送简历」） */
+      entryPath: z.string().min(1).optional(),
+      /** 上传页地址上表示「递给谁」的查询参数名；没有它就只能对当前这一个会话动手 */
+      targetParam: z.string().min(1).optional(),
+      /**
+       * 上传控件（`input[type=file]`）的定位名。
+       *
+       * 站点普遍把它藏在「选择文件」按钮背后，所以这条声明**应当带 `requireActionable: false`**：
+       * 隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被 fail-closed 打掉（plan §13.6 第 1 条）。
+       */
+      uploadInput: z.string().min(1),
+      /** 确认投递的按钮定位名 */
+      sendButton: z.string().min(1),
+      /** 投递状态行定位名：`sent` 由它回读；同一行也是「目标已下架」的读数来源 */
+      statusLine: z.string().min(1),
+      /** 状态行里表示「简历已递出」的字样（各站点文案不同，所以是数据不是代码） */
+      sentPattern: z.string().min(1),
+      /**
+       * 状态行里表示「这个岗位已经不收了」的字样（spec 2.6-07 的二次校验依据）。
+       *
+       * 为什么不是 jobs 表上的一列：抓取那一刻的「在招」到投递这一刻早已过期，而库里没有状态列
+       * （plan §13.4 第 3 条）——只有现问页面才是当时的真相，所以这份数据必须留在知识包里。
+       */
+      offlinePattern: z.string().min(1),
+    })
+    .optional(),
   /** 抓取字段的声明顺序：列表页字段顺序变了也只改这份数据。 */
   fieldOrder: z.array(z.string().min(1)).default([]),
   pacing: z
@@ -185,6 +217,20 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   } else if (parsed.data.capabilities.some((item) => item === 'chat' || item === 'readReplies')) {
     // 声明了会话能力却没有会话知识 = 到了真实页面上只能靠猜，所以这里就判包不合法。
     problems.push('chat：capabilities 含 chat / readReplies，但知识包没有 chat 段（页面知识不能靠猜）');
+  }
+  // 投递页的三处定位名同上一条纪律：拼错的名字要在加载时发现，而不是等简历注进一个不存在的控件。
+  const deliver = parsed.data.deliver;
+  if (deliver) {
+    for (const [key, name] of [
+      ['uploadInput', deliver.uploadInput],
+      ['sendButton', deliver.sendButton],
+      ['statusLine', deliver.statusLine],
+    ] as const) {
+      if (!locatorNames.has(name)) problems.push(`deliver.${key}：引用了不存在的定位名「${name}」`);
+    }
+  } else if (parsed.data.capabilities.includes('sendResume')) {
+    // 与 chat 段同一处判据：声明了投递能力却没有上传页知识，真到页面上只能靠猜，那就别让这份包上线。
+    problems.push('deliver：capabilities 含 sendResume，但知识包没有 deliver 段（页面知识不能靠猜）');
   }
   if (problems.length > 0) {
     throw new AppError(
@@ -314,11 +360,13 @@ export interface PlatformAdapter {
    */
   chat(jobId: string, text: string): Promise<OutboundResult>;
   /**
-   * 发送简历附件（外发动作，必经额度闸门）。
+   * 发送简历附件（外发动作，必经额度闸门——但闸门在编排层，适配器一次都不进）。
    * @param jobId 目标岗位
-   * @returns 外发结局
+   * @param attachment 编排层已校验并算好 hash 的简历文件；传结构而不是只传路径，
+   *        是为了让回读侧能直接比对「塞进控件的就是这几个字节」，不必再算一次（plan §13.3 第 1 条 / §2.2）
+   * @returns 外发结局；目标已下架时抛 `DELIVER_TARGET_OFFLINE` 而不是回 `sent:false`（两者界面处置不同，spec 2.6-07）
    */
-  sendResume(jobId: string): Promise<OutboundResult>;
+  sendResume(jobId: string, attachment: ResumeAttachment): Promise<OutboundResult>;
   /**
    * 读取会话里的新回复。
    * @param jobId 目标岗位

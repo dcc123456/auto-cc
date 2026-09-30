@@ -337,6 +337,84 @@ export type GreetReceiptView = {
 };
 
 /**
+ * 一份简历附件摆在界面上的三要素（spec 2.6-01 / 05）。
+ *
+ * 刻意**不含绝对路径**：`ResumeAttachment.path` 里有用户名目录，而「递的是哪份文件」靠
+ * 文件名 + 字节数 + hash 就够了（AGENTS.md §8 第 5 条：个人数据默认脱敏）。
+ */
+export type DeliverAttachmentView = {
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+};
+
+/**
+ * 投递请求（spec 2.6-01 / 06）：一次「把这份简历递给这个岗位」的意图。
+ *
+ * 与打招呼不同，这里没有文案字段——2.6-b 只递文件，随信正文留给 P3 之后（plan §13.7 第 2 条）。
+ */
+export type DeliverRequestView = {
+  /** 平台标识，决定向 `platform.registry` 问哪个平台的投递渠道（问不到即 `OUTBOUND_CHANNEL_MISSING`） */
+  platform: string;
+  /** 目标岗位（P2 起是平台侧 jobid），也是幂等键里的 target */
+  jobId: string;
+  /** 简历文件绝对路径；省略时用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口） */
+  filePath?: string;
+  /** 岗位名：只用于确认卡片与回执展示，不参与任何判据（JD 行的查询面还没接，见 plan §13.7 第 1 条） */
+  title?: string;
+  /** 公司名：同上，纯展示 */
+  company?: string;
+  /** 属于哪一次工作流运行；界面单次触发时为空 */
+  workflowRunId?: string | null;
+  /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚递过一次」，不必真等一个频控周期） */
+  nowMs?: number;
+};
+
+/**
+ * 投递回执（spec 2.6-01 / 03 / 06）。
+ *
+ * `committed` 是唯一一个「有没有离开 app」的读数：`suggest` 档只 stage，因此没有账本行也不该有。
+ * 真的发出去了但页面没确认，那一路是抛 `OUTBOUND_NOT_DELIVERED` 而不是回一个 `committed:false`——
+ * 与打招呼同一条口径（失败以结构化错误上浮，回执只描述成功）。
+ */
+export type DeliverReceiptView = {
+  platform: string;
+  jobId: string;
+  title: string;
+  company: string;
+  attachment: DeliverAttachmentView;
+  /** 页面怎么确认这次投递的；只准备未发送时是「为什么没发」的说明 */
+  reason: string;
+  /** 本次落账的账本行 id；`suggest` 档没发出去因此为 null */
+  ledgerId: number | null;
+  /** 为满足频控实际等待的毫秒数；第一次发送为 0 */
+  waitedMs: number;
+  /** 可追溯来源：`resume:<sha256 前 12 位>@<文件名>`（spec 2.6-05，复用账本已有的 `source` 列） */
+  source: string;
+  /** 这次有没有真的离开 app */
+  committed: boolean;
+};
+
+/**
+ * 一张待确认的投递单（spec 2.6-01）：`outbound.deliver.pending()` 现读出来的形状。
+ *
+ * 界面**刷新时要能重画**这张卡片，所以它是服务里的一份可读状态，不是只飘过一次的事件——
+ * 事件只负责「此刻提醒一下」，`pending()` 负责「错过了也还在」。
+ */
+export type DeliverApprovalView = {
+  approvalId: string;
+  platform: string;
+  jobId: string;
+  title: string;
+  company: string;
+  attachment: DeliverAttachmentView;
+  /** 什么时候开始等人（毫秒时间戳） */
+  requestedAt: number;
+  /** 到点即拒（`requestedAt + approveTimeoutMs`）：没人表态永远不等于同意 */
+  expiresAt: number;
+};
+
+/**
  * 内嵌内核视图占位区宽度占客户区宽度的比例。
  * 主进程用它摆 `WebContentsView`，渲染层用它摆对应的 Tailwind 槽位，两侧必须同源。
  */

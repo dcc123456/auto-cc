@@ -9,7 +9,7 @@ export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
 export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
-import type { GreetChannelSource, WorkflowExecutorRegistry } from './events.js';
+import type { GreetChannelSource, ResumeChannelSource, WorkflowExecutorRegistry } from './events.js';
 
 /**
  * cordis declares FiberState as an ambient const enum, which cannot be re-exported
@@ -95,6 +95,19 @@ export function executorRegistryOf(ctx: Context): WorkflowExecutorRegistry | und
  */
 export function greetChannelsOf(ctx: Context): GreetChannelSource | undefined {
   return maybeService<GreetChannelSource>(ctx, 'platform.registry');
+}
+
+/**
+ * 取简历投递渠道的询问面（spec 2.6-01 / 02 的外发口），实现方同样是 `platform.registry`。
+ *
+ * 与 `greetChannelsOf` 分两个函数而不是并成一个接口：两个能力的**判据不同**
+ * （`chat` 能力 vs `sendResume` 能力），合并会让「装了会话页但还没有上传靶页」这种中间态
+ * 在类型上无法表达。名字仍按服务名要，理由同上一条（AGENTS.md §4.1）。
+ * @param ctx 调用方的上下文
+ * @returns 询问面实例；浏览器层没装时为 undefined，此时投递一律以缺渠道失败
+ */
+export function deliverChannelsOf(ctx: Context): ResumeChannelSource | undefined {
+  return maybeService<ResumeChannelSource>(ctx, 'platform.registry');
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

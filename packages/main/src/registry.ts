@@ -20,6 +20,7 @@ import type { Registry } from '@auto-cc/plugin-kernel';
 import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
+  OutboundDeliverService,
   OutboundGreetService,
   OutboundSampleService,
   OutboundScriptService,
@@ -63,6 +64,8 @@ export const REGISTRY: Registry = {
   // 打招呼编排（spec 2.5-02…13）：把上面三条加上闸门串成唯一外发口，也是 `greeting.send` 节点的登记方。
   // 单独一个 id 是为了在装配面板上把它单独摘掉——摘掉后界面与工作流都得到结构化失败，而不是「发出去了但没计量」。
   'outbound-greet': OutboundGreetService,
+  // 投递编排（spec 2.6-01…07）：`resume.deliver` 节点的登记方，也是待确认单（`pending()`）的持有者。
+  'outbound-deliver': OutboundDeliverService,
   ipc: IpcGatewayService,
   plugins: PluginsService,
   devtools: DevtoolsService,

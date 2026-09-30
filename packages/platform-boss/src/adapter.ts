@@ -1,5 +1,5 @@
 /**
- * BOSS 平台适配器（spec 2.2-06 → 2.3 的 `search` / `detail` → 2.5 的 `chat` / `readReplies`）。
+ * BOSS 平台适配器（spec 2.2-06 → 2.3 的 `search` / `detail` → 2.5 的 `chat` / `readReplies` → 2.6 的 `sendResume`）。
  *
  * 这里**不出现任何选择器**：页面结构一律经 `@auto-cc/plugin-browser` 的抓取声明按语义名取用，
  * 于是 2.2-08 的机检（`scripts/check-knowledge-pack.ts`）能把「选择器只许待在知识包里」钉住。
@@ -10,7 +10,7 @@
  * 编排层（2.5-e 的 `outbound.greet`），适配器只管「把这段文字打进这个会话并按页面回读判定结果」。
  * 把闸门写在这里会让「从界面点一次发送」与「从工作流跑一次发送」走两条不同的计量路（AGENTS.md §7.3）。
  */
-import { AppError } from '@auto-cc/core';
+import { AppError, type ResumeAttachment } from '@auto-cc/core';
 import type {
   ExtractFieldReading,
   ExtractRequest,
@@ -44,10 +44,10 @@ export type BossPageHand = {
 };
 
 /**
- * 适配器用到的那只「动页面的手」（spec 2.5-06）。
+ * 适配器用到的那只「动页面的手」（spec 2.5-06 / 2.6-04）。
  *
- * 只取 `type` / `click` / `waitFor` 三个方法：敲字与点击的通道选择（CDP 还是 DOM）、事件是否受信，
- * 全由 `browser.act` 决定，适配器一侧不出现 `webContents`，也不猜坐标（plan §3 规则 3）。
+ * 只取 `type` / `click` / `waitFor` / `upload` 四个方法：敲字、点击、等待与文件注入的通道选择
+ * （CDP 还是 DOM、事件是否受信）全由 `browser.act` 决定，适配器一侧不出现 `webContents`，也不猜坐标（plan §3 规则 3）。
  */
 export type BossActionHand = {
   /** 往定位声明指向的控件里写文本，回读页面里的当前值 */
@@ -56,6 +56,11 @@ export type BossActionHand = {
   click(spec: LocateSpec): Promise<ActReadback>;
   /** 只等不动手：超时是结局（`status:'timeout'`），不是异常 */
   waitFor(predicate: { kind: 'textChanges'; spec: LocateSpec }): Promise<ActReadback>;
+  /**
+   * 把一份本地文件注入 `input[type=file]`（隐藏控件的声明必须带 `requireActionable: false`）。
+   * `valueAfter` 是**那个 input 自己报上来的** `files[0].name`，不是请求路径的文件名——投递的回读判据就取它。
+   */
+  upload(spec: LocateSpec, filePath: string): Promise<ActReadback>;
 };
 
 /** 一次动作的回读：只取适配器判据需要的三个字段（`ActResultView` 的窄化）。 */
@@ -64,32 +69,6 @@ export type ActReadback = {
   waitedMs: number;
   valueAfter: string | null;
 };
-
-/** 尚未实现的动作（外发类，等自己的子计划）。 */
-export type UnimplementedMethod = 'sendResume';
-
-/** 每个动作由哪个子计划补齐：界面据此显示待办。 */
-const DELIVERED_BY: Record<UnimplementedMethod, string> = {
-  sendResume: '2.6',
-};
-
-/**
- * 统一的「还没实现」失败：说清等哪个子计划。
- *
- * 用 `METHOD_NOT_FOUND`（现有码里唯一的「能力不存在」语义）而不是 `OUTBOUND_FAILED`：
- * 后者意味着「真的发过但失败了」，会污染 2.7 的失败率统计，也会让账本看起来记过账。
- * @param method 被调用的契约方法名，同时是归因键
- * @returns 永不完成的 Promise：以 `METHOD_NOT_FOUND` 拒绝，`details.deliveredBy` 给出补齐它的子计划号
- */
-const notImplemented = (method: UnimplementedMethod): Promise<never> =>
-  Promise.reject(
-    new AppError(
-      'METHOD_NOT_FOUND',
-      `BOSS 适配器的 ${method} 尚未实现，由子计划 ${DELIVERED_BY[method]} 交付`,
-      'platform.boss',
-      { method, deliveredBy: DELIVERED_BY[method] },
-    ),
-  );
 
 /** 一行的字段读数按名索引，省得每处都 `find`。 */
 type FieldReadings = Map<string, ExtractFieldReading>;
@@ -147,8 +126,8 @@ export function resolveDetailUrl(href: string, baseUrl: string): { url: string; 
  * 2.6 换一版知识包就换一个实例，不需要子类；而 `platform.registry` 要的是「一个实现了契约的对象」。
  * @param pack 经 `parseKnowledgePack` 校验过的知识包（结构已由 zod 保证，这里不再判空）
  * @param page 页面通道（见 `BossPageHand`）
- * @param act 动作通道（见 `BossActionHand`）；只有 `chat` 用它，抓取一侧一行都不碰
- * @returns 契约完整、`search` / `detail` / `chat` / `readReplies` 已实现、`sendResume` 以结构化错误失败的平台适配器
+ * @param act 动作通道（见 `BossActionHand`）；只有外发一侧（`chat` / `sendResume`）用它，抓取一行都不碰
+ * @returns 契约完整、六个动作全部有真实现的平台适配器
  */
 export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: BossActionHand): PlatformAdapter {
   const meta: PlatformMetaView = {
@@ -280,6 +259,14 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   };
 
   /**
+   * 一处「可以用相对路径直接打开」的页面声明里最小的公共形状。
+   *
+   * `chat` 段与 `deliver` 段各自都带 `entryPath` / `targetParam` 两个键，而拼地址这件事与
+   * 「这是会话页还是上传页」无关（AGENTS.md §2.2：同一逻辑出现第二次就抽公共层）。
+   */
+  type PageEntry = { entryPath?: string; targetParam?: string };
+
+  /**
    * 取会话那一段站点知识（`chat` / `readReplies` 用到的全部页面事实都在里面）。
    * @returns 知识包的 `chat` 段
    * @throws 缺段时 `KNOWLEDGE_PACK_INVALID`。`parseKnowledgePack` 已经把过「声明了 chat 能力就必须带 chat 段」，
@@ -299,28 +286,47 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   };
 
   /**
-   * 拼某个目标的会话页地址。
-   * @param knowledge 知识包会话段
-   * @param jobId 目标岗位标识
-   * @returns 绝对地址；知识包没声明 `entryPath` 时为 null，表示「当前页就是会话页」
-   *          （真实平台从岗位卡点进会话，不给可直接拼的地址，那种站点由调用方先打开再动作）
+   * 取投递那一段站点知识（上传控件、确认按钮、状态行与两种文案都在里面）。
+   * @returns 知识包的 `deliver` 段
+   * @throws 缺段时 `KNOWLEDGE_PACK_INVALID`——与 `chatKnowledge` 同一条纪律：
+   *         没有上传页知识就绝不拿猜出来的选择器去点页面（简历是外发，撤不回来）
    */
-  const chatUrlFor = (knowledge: NonNullable<KnowledgePack['chat']>, jobId: string): string | null => {
-    if (!knowledge.entryPath) return null;
-    const target = new URL(knowledge.entryPath, pack.startUrl);
-    // 参数名是站点知识：换平台只改 `chat.targetParam`，这一段代码不用动。
-    if (knowledge.targetParam) target.searchParams.set(knowledge.targetParam, jobId);
+  const deliverKnowledge = (): NonNullable<KnowledgePack['deliver']> => {
+    const knowledge = pack.deliver;
+    if (!knowledge) {
+      throw new AppError(
+        'KNOWLEDGE_PACK_INVALID',
+        '知识包缺少 deliver 段，上传页的文件控件与状态行无从取用',
+        'platform.boss',
+        { platform: pack.platform },
+      );
+    }
+    return knowledge;
+  };
+
+  /**
+   * 拼某个目标页面的地址。
+   * @param entry 该段知识里的入口声明（`chat` 或 `deliver` 的 `entryPath` / `targetParam`）
+   * @param jobId 目标岗位标识
+   * @returns 绝对地址；知识包没声明 `entryPath` 时为 null，表示「当前页就是那页」
+   *          （真实平台从岗位卡点进会话/上传，不给可直接拼的地址，那种站点由调用方先打开再动作）
+   */
+  const pageUrlFor = (entry: PageEntry, jobId: string): string | null => {
+    if (!entry.entryPath) return null;
+    const target = new URL(entry.entryPath, pack.startUrl);
+    // 参数名是站点知识：换平台只改 `targetParam`，这一段代码不用动。
+    if (entry.targetParam) target.searchParams.set(entry.targetParam, jobId);
     return target.href;
   };
 
   /**
    * 回读发送状态行的文本——`sent` 的唯一依据。
-   * @param knowledge 知识包会话段
+   * @param statusLineName 状态行的定位名（会话页与上传页各用各的那一行）
    * @returns 状态行正文；一行都没读到是空串（调用方按「没读到成功样式」处理，绝不猜成成功）
    */
-  const readStatusLine = async (knowledge: NonNullable<KnowledgePack['chat']>): Promise<string> => {
+  const readStatusLine = async (statusLineName: string): Promise<string> => {
     const result = await page.extract({
-      container: locatorFor(knowledge.statusLine),
+      container: locatorFor(statusLineName),
       fields: [{ name: 'status', candidates: [], scope: 'self' }],
     });
     const reading = fieldsByName(result.rows[0]?.fields ?? []).get('status');
@@ -348,7 +354,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     if (!text.trim()) {
       throw new AppError('INVALID_ARGUMENT', '打招呼正文为空，不向页面发出任何动作', 'platform.boss', { jobId });
     }
-    const url = chatUrlFor(knowledge, jobId);
+    const url = pageUrlFor(knowledge, jobId);
     if (url) await page.navigate(url);
     const typed = await act.type(locatorFor(knowledge.input), text);
     if (typed.valueAfter !== text) {
@@ -362,7 +368,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
     await act.click(locatorFor(knowledge.sendButton));
     const wait = await changed;
-    const status = await readStatusLine(knowledge);
+    const status = await readStatusLine(knowledge.statusLine);
     if (status.includes(knowledge.sentPattern)) {
       return { sent: true, reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}`, ledgerKey: null };
     }
@@ -373,6 +379,70 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         wait.status === 'done'
           ? `状态行文本变了但不含成功样式：${detail}`
           : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化：${detail}`,
+      ledgerKey: null,
+    };
+  };
+
+  /**
+   * 把一份简历注进目标岗位的上传页，并按**页面回读**判定有没有递出去（spec 2.6-04 / 07）。
+   *
+   * 四段判据，顺序不能换：
+   * ① 先看状态行有没有「已下架」样式——岗位不收了就**一个动作都不做**，直接抛错。这一步放在最前面，
+   *    是因为库里那条 JD 是抓取那一刻的快照，只有页面能回答「现在还在不在招」（plan §13.4 第 3 条）；
+   * ② 文件注入后由**那个 input 自己报上来**的文件名必须等于附件名——这证明「塞进控件的就是这份字节」，
+   *    不是「我们请求塞了个文件」；
+   * ③ 点击前起 `textChanges` 等待，点击后状态行必须真的变过；
+   * ④ 变化后的文本里含知识包声明的成功样式。
+   * ②③④ 任何一段不成立就返回 `sent:false`（编排层据此不落账）；①是抛错，因为它意味着
+   *    「这个目标别再试了」，与「这条没发出去但目标还在」在界面上是两种处置（spec 2.6-07）。
+   * @param jobId 目标岗位标识
+   * @param attachment 编排层已校验（存在 / pdf / 大小上限）并算好 sha256 的简历文件
+   * @returns 外发结局；`ledgerKey` 恒为 null，理由与 `chat` 同一条——计量归编排层
+   * @throws 目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮）；jobId 为空 `INVALID_ARGUMENT`；
+   *         缺投递段 `KNOWLEDGE_PACK_INVALID`；定位/注入自身的失败照 `browser.act` 原样抛出
+   */
+  const sendResume = async (jobId: string, attachment: ResumeAttachment): Promise<OutboundResult> => {
+    const knowledge = deliverKnowledge();
+    if (!jobId.trim()) {
+      throw new AppError('INVALID_ARGUMENT', '投递必须给出目标岗位', 'platform.boss', { platform: pack.platform });
+    }
+    const url = pageUrlFor(knowledge, jobId);
+    if (url) await page.navigate(url);
+    const before = await readStatusLine(knowledge.statusLine);
+    if (before.includes(knowledge.offlinePattern)) {
+      throw new AppError(
+        'DELIVER_TARGET_OFFLINE',
+        `目标岗位已下架：状态行回读到「${knowledge.offlinePattern}」`,
+        'platform.boss',
+        {
+          jobId,
+          status: before,
+        },
+      );
+    }
+    const injected = await act.upload(locatorFor(knowledge.uploadInput), attachment.path);
+    if (injected.valueAfter !== attachment.fileName) {
+      return {
+        sent: false,
+        reason: `文件控件回读到的文件名与附件不一致：页面「${String(injected.valueAfter)}」/ 附件「${attachment.fileName}」`,
+        ledgerKey: null,
+      };
+    }
+    // 与打招呼同一条时序：等待在点击之前起，否则基线就是点击后的文本，永远等不到变化。
+    const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
+    await act.click(locatorFor(knowledge.sendButton));
+    const wait = await changed;
+    const status = await readStatusLine(knowledge.statusLine);
+    if (status.includes(knowledge.sentPattern)) {
+      return { sent: true, reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}`, ledgerKey: null };
+    }
+    const reading = status || '（读不到状态行）';
+    return {
+      sent: false,
+      reason:
+        wait.status === 'done'
+          ? `状态行文本变了但不含成功样式：${reading}`
+          : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化：${reading}`,
       ledgerKey: null,
     };
   };
@@ -393,7 +463,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     if (!jobId.trim()) {
       throw new AppError('INVALID_ARGUMENT', '读会话必须给出目标岗位', 'platform.boss', { platform: pack.platform });
     }
-    const url = chatUrlFor(knowledge, jobId);
+    const url = pageUrlFor(knowledge, jobId);
     if (url) await page.navigate(url);
     const result = await page.extract({
       container: locatorFor(knowledge.messageItem),
@@ -432,7 +502,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     },
     detail,
     chat,
-    sendResume: () => notImplemented('sendResume'),
+    sendResume,
     readReplies,
   };
 }

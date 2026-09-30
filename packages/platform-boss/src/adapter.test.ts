@@ -7,7 +7,9 @@
  * 2. **页面读数按「不可信」处理**：缺标题或缺详情页地址的行不进列表，相对 href 按那一行的帧地址折算；
  * 3. **打招呼的 `sent` 由页面回读说了算**（spec 2.5-06）：三段判据少任何一段都返回 `sent:false`，
  *    而等待必须起在点击之前——基线晚于点击就永远读不到文本变化；
- * 4. **读回复是页面全量**（spec 2.5-07）：稳定 id 原样带回、正文为空的行不算消息；`sendResume` 仍是结构化失败。
+ * 4. **读回复是页面全量**（spec 2.5-07）：稳定 id 原样带回、正文为空的行不算消息；
+ * 5. **投递的四段判据都在页面回读上**（spec 2.6-04 / 2.6-07）：已下架先抛错且一个动作都不做，
+ *    文件名回读不符就不点确认按钮，成功样式由知识包声明——任何一段不成立都不是 `sent:true`。
  * 假手替身见 `test-doubles.ts`；测试不访问真实平台（AGENTS.md §7.2）。
  */
 import { AppError, asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
@@ -23,6 +25,8 @@ import {
   chatUrlOf,
   createFakeAct,
   createFakePage,
+  deliverScript,
+  deliverUrlOf,
   detailRow,
   extractOf,
   fieldHit,
@@ -416,16 +420,116 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
   });
 });
 
-describe('sendResume 仍未实现（spec 2.2-06 的归因表）', () => {
-  const { adapter } = withScript(standardScript());
+describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07）', () => {
+  // 附件是编排层（`outbound.deliver`）已经算好的四要素；适配器不重复校验，只照它注入。
+  const RESUME = {
+    path: '/tmp/resume-2026.pdf',
+    fileName: 'resume-2026.pdf',
+    sizeBytes: 204800,
+    sha256: 'a'.repeat(64),
+  };
 
-  it('sendResume 以 METHOD_NOT_FOUND 失败并说明由子计划 2.6 交付', async () => {
-    const error = asErr(await adapter.sendResume('1001').catch((reason: unknown) => reason));
+  it('成功那条：导航到投递页 → 注文件 → 点击前先起等待 → 状态行回读到成功样式', async () => {
+    // 两次读状态行：第一次是「还在不在招」，第二次是「点完以后变成了什么」。
+    const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递', '简历已送达，等待回复']));
+    const outcome = await adapter.sendResume('1001', RESUME);
+    expect(outcome).toEqual({
+      sent: true,
+      reason: '状态行回读到成功样式「简历已送达」：简历已送达，等待回复',
+      ledgerKey: null,
+    });
+    expect(page.navigated).toEqual([deliverUrlOf('1001')]);
+    // 定位声明全部来自知识包：代码里出现一条写死的选择器，这里的 `toBe` 就对不上。
+    expect(act.uploaded).toEqual([{ spec: pack.locators.resumeUploadInput, filePath: RESUME.path }]);
+    expect(act.uploaded[0]!.spec).toBe(pack.locators.resumeUploadInput);
+    expect(act.waitedFor).toEqual([{ kind: 'textChanges', spec: pack.locators.resumeDeliverStatus }]);
+    expect(act.clicked).toEqual([pack.locators.resumeSendButton]);
+    // 时序判据（与打招呼同一条）：等待必须起在点击之前，否则基线就是点击后的文本，永远等不到变化。
+    expect(act.waitsAtClick).toEqual([act.waitsStarted]);
+  });
+
+  it('文件控件回读到的文件名与附件不一致 → sent:false 且不再点确认（防「定位到 A、文件塞进 B」）', async () => {
+    const { adapter, act } = withScript(deliverScript(pack, ['等待投递']), { uploadedName: 'other-candidate.pdf' });
+    const outcome = await adapter.sendResume('1001', RESUME);
+    expect(outcome).toMatchObject({
+      sent: false,
+      reason: '文件控件回读到的文件名与附件不一致：页面「other-candidate.pdf」/ 附件「resume-2026.pdf」',
+    });
+    expect(act.clicked).toEqual([]);
+    expect(act.waitsStarted).toBe(0);
+  });
+
+  it('页面根本没收到文件（回读空名）同样判 sent:false，不猜成成功', async () => {
+    const { adapter } = withScript(deliverScript(pack, ['等待投递']), { uploadedName: '' });
+    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({ sent: false });
+  });
+
+  it('状态行回读到「已下架」→ DELIVER_TARGET_OFFLINE，且一个动作都不做（spec 2.6-07）', async () => {
+    const { adapter, page, act } = withScript(deliverScript(pack, ['该岗位已下架，简历不会送达']));
+    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
     expect(error).toBeInstanceOf(AppError);
-    expect(error.code).toBe('METHOD_NOT_FOUND');
+    expect(error.code).toBe('DELIVER_TARGET_OFFLINE');
     expect(error.path).toBe('platform.boss');
-    expect(error.message).toContain('2.6');
-    expect(error.details).toEqual({ method: 'sendResume', deliveredBy: '2.6' });
+    expect(error.details).toEqual({ jobId: '1001', status: '该岗位已下架，简历不会送达' });
+    // 只有「导航 + 读一次状态行」：下架的页面不该被注文件、也不该被点按钮。
+    expect(page.navigated).toEqual([deliverUrlOf('1001')]);
+    expect(page.kinds).toEqual(['deliver-status']);
+    expect(act.uploaded).toEqual([]);
+    expect(act.clicked).toEqual([]);
+  });
+
+  it('状态行变了但不含成功样式 → sent:false 并写明读到的是哪句', async () => {
+    const { adapter } = withScript(deliverScript(pack, ['等待投递', '请先与招聘者沟通']));
+    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+      sent: false,
+      reason: '状态行文本变了但不含成功样式：请先与招聘者沟通',
+    });
+  });
+
+  it('点击后状态行没变化（等待超时）→ sent:false 并带上等待毫秒', async () => {
+    const { adapter } = withScript(deliverScript(pack, ['等待投递', '等待投递']), {
+      waitStatus: 'timeout',
+      waitedMs: 8000,
+    });
+    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+      sent: false,
+      reason: '点击后 8000ms 内状态行没有变化：等待投递',
+    });
+  });
+
+  it('状态行读不到（一行都没有）→ sent:false，写成「读不到状态行」而不是猜', async () => {
+    const { adapter } = withScript(deliverScript(pack, ['等待投递', null]));
+    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+      sent: false,
+      reason: '状态行文本变了但不含成功样式：（读不到状态行）',
+    });
+  });
+
+  it('知识包缺 deliver 段 → KNOWLEDGE_PACK_INVALID，页面一次都不碰', async () => {
+    const page = createFakePage(deliverScript(pack, ['等待投递']));
+    const act = createFakeAct();
+    const bare = createBossAdapter({ ...pack, deliver: undefined }, page, act);
+    const error = asErr(await bare.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
+    expect(error.details).toEqual({ platform: 'boss' });
+    expect(page.navigated).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+  });
+
+  it('缺 jobId → INVALID_ARGUMENT，不导航也不注文件', async () => {
+    const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递']));
+    const error = asErr(await adapter.sendResume('   ', RESUME).catch((reason: unknown) => reason));
+    expect(error.code).toBe('INVALID_ARGUMENT');
+    expect(page.navigated).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+  });
+
+  it('注入自身的失败（定位失配 / 回读不符）原样上浮，不吞成 sent:false', async () => {
+    const { adapter } = withScript(deliverScript(pack, ['等待投递']), {
+      uploadError: new AppError('LOCATE_FAILED', '候选打分全部低于阈值', 'browser.act', { name: 'resumeUploadInput' }),
+    });
+    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    expect(error.code).toBe('LOCATE_FAILED');
   });
 });
 

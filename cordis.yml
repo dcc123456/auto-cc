@@ -165,6 +165,18 @@ plugins:
   - id: outbound-greet
     dependsOn: [entitlement, outbound-script, outbound-throttle, platform-registry]
 
+  # 简历投递编排（spec 2.6-01…07）：打招呼的下游，复用同一条闸门/账本/频控，只多「等人确认」这一段。
+  # 档位显式写在这里而不是藏在代码默认值里：2.6-01 的验收要在装配面板现场改 `suggest / semi / auto`
+  # 并看着行为变，而默认值必须是 `semi`——默认 `auto` 等于装好 app 就往真实站点上自动递简历。
+  # 摘掉这一行：`resume.deliver` 节点得到「执行器未登记」的结构化失败；上一行摘掉则投递照旧、打招呼没了。
+  # `resumeFile` 是 P3（简历 PDF 生成）之前的临时默认路径，请求里带 `filePath` 时以请求为准（plan §13.5）。
+  - id: outbound-deliver
+    dependsOn: [entitlement, outbound-throttle, platform-registry]
+    config:
+      autonomy: semi
+      approveTimeoutMs: 120000
+      maxResumeBytes: 5242880
+
   # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/boss.json`，
   # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。
   # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`，

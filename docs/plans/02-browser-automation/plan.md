@@ -1192,3 +1192,64 @@ Runtime.evaluate → DOM.setFileInputFiles → Runtime.callFunctionOn`），
 `locator-script.test.ts` 37、`input-channel.test.ts` 22、`locator-spec.test.ts` 19。
 **2.6-04 的 V 半边不打勾**——截图对象是 fixture 的上传靶页，它排在 2.6-c（§13.5 第一条），
 所以这一片只有逻辑层证据，spec 里 2.6-04 保持 `[ ]`，不因单测全绿写成 `[x]`。
+
+### 13.7 2.6-b 收口记录（`outbound.deliver` 编排 + 适配器 `sendResume`，2026-09-30）
+
+四处与 §13.3 的偏差，都属于「照原文写下去就会失败或写歪」那一类，逐条记清楚：
+
+1. **`stage` 不查目标 JD 行**。§13.3 第 3 条把「查目标 JD 行」列进了准备步骤，用途是替确认卡片
+   凑出「递给谁」那句话。落地的口径改成：`title` / `company` 由调用方（界面或节点参数）带进来，
+   缺省就是空串。两条理由：`jd.store` 的读取面只有 `list(limit)` / `count` / `status`，
+   没有按 jobId 取一行的方法；而补这个方法并把 `outbound.deliver` 接到 JD 存储上，
+   就是 §4.1 明令禁止的同级横向引用（L2 领域包互不 import，平台知识只经 `platform.registry` 那条 SPI 进来）。
+   为卡片上两句文案开这条口子不值——界面入口本来就知道用户点的是哪张 JD 卡。
+2. **没有随信正文，所以不挂 `outbound.script`**。§13.3 第 3 条那句「带文案时过黑名单」管的是随信文案，
+   而 2.6 的条目里没有一处要求投递带文案（黑名单在 2.5 管的是话术）。本片只递那份 PDF，
+   因此 `static inject` 里没有 `outbound.script`；将来做「随信一句话」时把它加回来，
+   那道唯一出口（`assertSendable`）已经在那儿了，不必现在为它留一个空依赖。
+3. **下架二次校验落在适配器的第一道闸，spec 2.6-07 原文的「渠道没被调」按字面不成立**。
+   「现在还收不收」只有页面能回答，而读页面本身就是渠道在做的事：`sendResume` 的顺序是
+   （按知识包必要时导航到上传页）→ 读一次状态行 → 命中 `offlinePattern` 即抛 `DELIVER_TARGET_OFFLINE`，
+   之后才碰文件。所以断言的口径改成「**在架闸门之后零外发动作**」：假页面上 upload 调用数 0、
+   click 调用数 0，读数只有那一发（`page.kinds === ['deliver-status']`），账本不增。
+   spec 那条文案随本片更正，条目 ID 不动（先例见 §13.4）。
+4. **审批状态机从 2.6-c 提前到本片**。它是 `commit` 序列里的一环（额度 → 频控 → 审批 → 发送 → 回读 → 落账），
+   留在下一片，这一片就演示不出 2.6-01 / 06 的档位差异；而把「等人」做成后补的插件，
+   等于允许中间那段时间里两个入口一个等、一个不等——正是 §13.3 第 2 条要避免的形状。
+   2.6-c 剩下的仍是界面那半：`outbound/approval-requested` 事件、桥接与 IPC 白名单、确认卡片与待发送态。
+
+另两条按原计划落地但值得点名：**`stage` 是同步的**（读文件与算 hash 都是同步 API，`commit` 才异步），
+原先照 §13.3 的措辞写成 `async` 被 eslint 的 `require-await` 拦下——这一段没有一处 await，
+返回一个 Promise 只会让调用方误以为它能 await 出什么；**档位 `suggest` 跑工作流节点时是抛错**而不是
+「成功但什么都没做」：`executeNode` 检查 `receipt.committed`，否则以 `OUTBOUND_APPROVAL_DENIED`
+上浮，因为记成完成会让断点续跑认为这一步已经过了，那正是 2.6-06 最坏的一种误读。
+
+三份测试面（逻辑层证据）：`adapter.test.ts` 新增投递 describe 9 条（四段判据各一支、缺 `deliver` 段
+fail-closed、空 jobId、定位失败原样透传）；`platform-contract.test.ts` 新增投递页知识 4 条
+（隐藏的上传控件带着 `requireActionable: false` 一起过校验、声明了 `sendResume` 却没有 `deliver` 段、
+`deliver` 引用不存在的定位名时逐条点名、缺 `offlinePattern` 直接非法）；`deliver.test.ts` 新文件 21 条
+（三档行为各一支、确认卡片不含路径、拒绝 / 超时 / 单一 settle / 未知 id / 等待中让出 / 服务重建六种定局
+都不发不落账、账本行与 `source` 形状、额度**先查后等**（用实测墙钟差小于频控间隔断言）、
+频控以账本最近一条 `deliver` 为钟、幂等换进程重挂同一份库照样成立、渠道在 stage 与 commit 各现问一次、
+文件校验五支、节点路径三支）。
+
+证据现状：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿（`pnpm test` 退出码 0），
+`packages/outbound` 5 个测试文件 53 条、`packages/platform-boss` 6 个 114 条、`packages/browser` 12 个 186 条全过。
+
+**运行时装配半边（真实 app 的「诊断」视图，CDP 10222 + harness，截图 `tmp/26b-assembly-deliver.png`）**：
+装配面板上 `outbound-deliver` 一行是「已就绪」，读数 `依赖 entitlement, outbound-throttle, platform-registry ·
+配置项 autonomy, approveTimeoutMs, maxResumeBytes · effect 3 项`，位置正好在 `outbound-greet` 与 `platform-boss`
+之间（清单顺序即挂载顺序）；主进程日志同刻三行连起来是本次要看的因果链——
+
+```
+00:46:15 INFO [outbound-deliver-service] 投递编排就绪：额度键 deliver · 档位 semi · 确认超时 120000ms
+           · 当前可投递平台 （平台层尚未登记带 sendResume 的适配器） · 节点执行器已登记 resume.deliver
+00:46:15 INFO [kernel-service] 插件 outbound-deliver → active
+00:46:15 INFO [platform-registry-service] 平台适配器已登记：boss（能力 search / detail / chat / sendResume / readReplies）
+```
+
+「就绪时还没有渠道、渠道在之后才登记」正是 §12.13 那条拉模型要在真实进程里成立的样子（单测里对应
+「挂载时登记表为空不影响后来」那一条）。这条只是**装配证据**，不是 2.6-01 的 V 半边——那要的是确认卡片上屏。
+
+**2.6-01 / 02 / 06 / 07 的 V 半边不打勾**——确认卡片、待发送态与 fixture 上传靶页排在 2.6-c，
+spec 相应条目保持 `[ ]`，逻辑半边已覆盖，不因单测全绿写成 `[x]`。

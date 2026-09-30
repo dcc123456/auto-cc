@@ -6,7 +6,7 @@
  * 「外发侧现问渠道、答案永远跟着当前活着的那份适配器」，
  * 再加一条白名单断言——适配器实例能被渲染层拿到的话，就等于把主进程能力递出了进程边界。
  */
-import type { AppError } from '@auto-cc/core';
+import type { AppError, ResumeAttachment } from '@auto-cc/core';
 import { Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import { RENDERER_ALLOWLIST, isAllowedCall } from '@auto-cc/shared';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -22,6 +22,14 @@ import { PlatformRegistryService } from './platform-registry.js';
 import { errorDetails } from './test-doubles.js';
 
 const fibers: Fiber[] = [];
+
+/** 一份假的简历附件：登记处不读它的内容，只把它原样递给适配器。 */
+const RESUME: ResumeAttachment = {
+  path: '/tmp/resume.pdf',
+  fileName: 'resume.pdf',
+  sizeBytes: 204800,
+  sha256: 'a'.repeat(64),
+};
 
 /**
  * 起一个空的登记处。
@@ -91,8 +99,9 @@ function fakeAdapter(
       calls.push(`chat:${jobId} ${text}`);
       return Promise.resolve({ sent: true, reason: '回读到成功态', ledgerKey: `${id}:chat` } satisfies OutboundResult);
     },
-    sendResume: (jobId: string) => {
-      calls.push(`sendResume:${jobId}`);
+    sendResume: (jobId: string, attachment: ResumeAttachment) => {
+      // 附件整份记账：投递渠道的投影只递「这个文件」，编排层给的字节信息有没有原样到适配器手上，只有这里能看出来。
+      calls.push(`sendResume:${jobId}:${attachment.fileName}:${String(attachment.sizeBytes)}`);
       return Promise.resolve({
         sent: false,
         reason: '页面出现验证码，已暂停',
@@ -126,8 +135,8 @@ describe('平台登记处（spec 2.2-07）', () => {
     expect(registry.get('boss')).toBe(adapter);
     await expect(adapter.search({ keyword: '前端' })).resolves.toHaveLength(1);
     await expect(adapter.chat('job-1', '你好')).resolves.toMatchObject({ sent: true, ledgerKey: 'boss:chat' });
-    await expect(adapter.sendResume('job-1')).resolves.toMatchObject({ sent: false, ledgerKey: null });
-    expect(adapter.calls).toEqual(['search:前端', 'chat:job-1 你好', 'sendResume:job-1']);
+    await expect(adapter.sendResume('job-1', RESUME)).resolves.toMatchObject({ sent: false, ledgerKey: null });
+    expect(adapter.calls).toEqual(['search:前端', 'chat:job-1 你好', 'sendResume:job-1:resume.pdf:204800']);
   });
 
   it('只读清单原样回显适配器的自我声明，不含任何定位信息', async () => {
@@ -190,6 +199,29 @@ describe('平台登记处（spec 2.2-07）', () => {
     });
     expect(replaced.calls).toEqual(['chat:job-9 换人之后的一条']);
     expect(boss.calls).toHaveLength(1);
+  });
+
+  it('投递渠道问的是 sendResume 能力，与打招呼那条是两份清单（spec 2.6-05）', async () => {
+    const registry = await boot();
+    // 一只有 chat 没有 sendResume，一只有 sendResume 没有 chat：两份清单必须各自独立，
+    // 否则「会打招呼但不会递简历」的站点会被编排层当成能投递，然后在页面上找一个不存在的上传控件。
+    registry.register(fakeAdapter('liepin', { capabilities: ['search', 'chat'] }));
+    const boss = fakeAdapter('boss', { capabilities: ['search', 'sendResume'] });
+    registry.register(boss);
+
+    expect(registry.greetablePlatforms()).toEqual(['liepin']);
+    expect(registry.deliverablePlatforms()).toEqual(['boss']);
+
+    const channel = registry.deliverChannel('boss');
+    expect(channel).not.toBeNull();
+    await expect(channel?.send('job-9', RESUME)).resolves.toEqual({
+      sent: false,
+      reason: '页面出现验证码，已暂停',
+    });
+    expect(boss.calls).toEqual(['sendResume:job-9:resume.pdf:204800']);
+
+    expect(registry.deliverChannel('liepin')).toBeNull();
+    expect(registry.deliverChannel('lagou')).toBeNull();
   });
 });
 

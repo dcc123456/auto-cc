@@ -28,8 +28,8 @@ type RegistryHost = Pick<PlatformRegistryService, 'register'>;
 /** 本包对 `browser.page` 的全部诉求：适配器只需要导航与批量抽取这两只手（见 `BossPageHand`）。 */
 type PageHand = Pick<BrowserPageService, 'navigate' | 'extract'>;
 
-/** 本包对 `browser.act` 的全部诉求：打招呼那一下要用的敲字、点击与等待（见 `BossActionHand`）。 */
-type ActionHand = Pick<BrowserActService, 'type' | 'click' | 'waitFor'>;
+/** 本包对 `browser.act` 的全部诉求：外发那两下手要用的敲字、点击、等待与文件注入（见 `BossActionHand`）。 */
+type ActionHand = Pick<BrowserActService, 'type' | 'click' | 'waitFor' | 'upload'>;
 
 export const bossPlatformSchema = z.strictObject({
   /**
@@ -94,8 +94,8 @@ export class BossPlatformService extends Service {
   }
 
   /**
-   * 动作通道句柄：打招呼靠它敲字与点击，本包同样不碰 `webContents`。
-   * @returns `browser.act` 的 `type` / `click` / `waitFor`
+   * 动作通道句柄：打招呼与投递那两下手靠它，本包同样不碰 `webContents`。
+   * @returns `browser.act` 的 `type` / `click` / `waitFor` / `upload`
    */
   private get act(): ActionHand {
     return asApp(this.ctx)['browser.act'];

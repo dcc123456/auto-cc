@@ -8,10 +8,18 @@
  * 只读面 `list()` 进渲染层白名单；`get()` 返回的是**活的适配器**，因此不对白名单开放——
  * 界面拿到对象就等于拿到主进程能力（AGENTS.md §8.2）。
  *
- * 另面对外发域露一件事：`GreetChannelSource`（spec 2.5-02）。渠道的真相就是适配器，
- * 所以这里按名字现问现取，不再另存一张渠道表——那张表在适配器被重建时就成了过期读数。
+ * 另面对外发域露两件事：`GreetChannelSource`（spec 2.5-02）与 `ResumeChannelSource`（spec 2.6-01 / 02）。
+ * 渠道的真相就是适配器，所以这里按名字现问现取，不再另存一张渠道表——那张表在适配器被重建时就成了过期读数。
  */
-import { AppError, Service, type Context, type GreetChannel, type GreetChannelSource } from '@auto-cc/core';
+import {
+  AppError,
+  Service,
+  type Context,
+  type GreetChannel,
+  type GreetChannelSource,
+  type ResumeChannelSource,
+  type ResumeDeliveryChannel,
+} from '@auto-cc/core';
 import type { PlatformMetaView, PlatformRegistryView } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { PlatformAdapter } from './platform-contract.js';
@@ -25,7 +33,7 @@ import type { PlatformAdapter } from './platform-contract.js';
  */
 export const platformRegistrySchema = z.strictObject({});
 
-export class PlatformRegistryService extends Service implements GreetChannelSource {
+export class PlatformRegistryService extends Service implements GreetChannelSource, ResumeChannelSource {
   static provide = 'platform.registry';
   static Config = platformRegistrySchema;
 
@@ -100,6 +108,35 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
   greetablePlatforms = (): string[] =>
     [...this.adapters.values()]
       .filter((adapter) => adapter.meta.capabilities.includes('chat'))
+      .map((adapter) => adapter.meta.id);
+
+  /**
+   * 按平台名要一个简历投递渠道（`ResumeChannelSource` 的实现，spec 2.6-01 / 02）。
+   *
+   * 与 `greetChannel` 同一手法：现问现取、只投影 `sendResume` 这一个方法，
+   * 判据换成 `sendResume` 能力——装了会话页不等于装了上传页，两者可以一个有一个没有。
+   * @param platform 平台标识
+   * @returns 渠道的窄投影；没这个平台或它没声明 `sendResume` 能力时为 null（不抛——缺渠道是外发侧的可处置失败）
+   */
+  deliverChannel = (platform: string): ResumeDeliveryChannel | null => {
+    const adapter = this.adapters.get(platform);
+    if (!adapter?.meta.capabilities.includes('sendResume')) return null;
+    return {
+      send: async (targetId, attachment) => {
+        // `ledgerKey` 同样被有意丢掉：计量凭证由 `entitlement.gate` 落账时生成，适配器不算数。
+        const outcome = await adapter.sendResume(targetId, attachment);
+        return { sent: outcome.sent, reason: outcome.reason };
+      },
+    };
+  };
+
+  /**
+   * 当前能递简历的平台清单（供投递编排把「递不出去」说清楚）。
+   * @returns 登记了适配器且声明 `sendResume` 能力的平台标识，按登记顺序；一个都没有时是空数组
+   */
+  deliverablePlatforms = (): string[] =>
+    [...this.adapters.values()]
+      .filter((adapter) => adapter.meta.capabilities.includes('sendResume'))
       .map((adapter) => adapter.meta.id);
 
   [Service.init](): void {

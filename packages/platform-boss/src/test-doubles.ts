@@ -7,6 +7,7 @@
  * 登记处 / 库 / 账本一律用真实服务——把 sqlite mock 掉就等于没测幂等。
  */
 import { Service, type Context, type WorkflowExecutorRegistry, type WorkflowNodeExecutor } from '@auto-cc/core';
+import path from 'node:path';
 import type {
   ExtractFieldReading,
   ExtractRequest,
@@ -133,7 +134,7 @@ export function snapshotOf(url: string): KernelPageSnapshotView {
 }
 
 /** 假手某一次抽取服务的是哪一类页面（用例靠它断言阶段先后，不必自己辨认容器）。 */
-export type PageKind = 'list' | 'detail' | 'status' | 'messages';
+export type PageKind = 'list' | 'detail' | 'status' | 'messages' | 'deliver-status';
 
 /**
  * 会话页的读数脚本（spec 2.5-06 / 2.5-07）。
@@ -152,6 +153,19 @@ export type ChatScript = {
   messages?: ExtractResultView;
 };
 
+/**
+ * 投递页的读数脚本（spec 2.6-04 / 07）。
+ *
+ * 状态行是一串**依次**回传的读数，而不是一份固定值：`sendResume` 要在动手前读一次（判目标还在不在）、
+ * 点击后再读一次（判有没有递出去）。做成一份就表达不了「变了」，而「变了没有」正是这条契约的判据。
+ */
+export type DeliverScript = {
+  /** 投递状态行的定位声明：与请求容器内容相同即判为读投递状态行 */
+  statusContainer?: LocateSpec;
+  /** 依次回传的状态行正文；`null` 表示这一行读不到，用尽后重复最后一份 */
+  statuses?: (string | null)[];
+};
+
 /** 假手的脚本：列表容器的身份 + 依次回传的读数。 */
 export type PageScript = {
   /** 列表容器的定位声明：请求里的容器与它**内容相同**即判为读列表（见 `createFakePage`） */
@@ -164,6 +178,8 @@ export type PageScript = {
   scroll?: PageScrollReading;
   /** 会话页读数（打招呼的状态行与消息列表）；省略表示这一页什么都读不到 */
   chat?: ChatScript;
+  /** 投递页读数（上传后的状态行，按次回传）；省略表示这一页什么都读不到 */
+  deliver?: DeliverScript;
 };
 
 /** 带调用记账的假手。 */
@@ -220,6 +236,19 @@ export function createFakePage(script: PageScript): FakePage {
     }
     return null;
   };
+  // 投递状态行按次序回话：动手前那次读到「已下架」与点击后那次读到「已送达」必须是两份读数。
+  let deliverReads = 0;
+  const deliverFor = (request: ExtractRequest): ExtractResultView | null => {
+    const deliver = script.deliver;
+    if (!deliver?.statusContainer || !sameLocator(request.container, deliver.statusContainer)) return null;
+    kinds.push('deliver-status');
+    const statuses = deliver.statuses ?? [];
+    const text = statuses.length === 0 ? null : statuses[Math.min(deliverReads++, statuses.length - 1)]!;
+    return extractOf(
+      navigated.at(-1) ?? LIST_URL,
+      text === null ? [] : [rowOf(0, navigated.at(-1) ?? LIST_URL, [fieldHit('status', text)])],
+    );
+  };
   return {
     navigated,
     requests,
@@ -233,6 +262,8 @@ export function createFakePage(script: PageScript): FakePage {
       requests.push(request);
       // `platform.boss` 挂载时会自己再解析一遍知识包，请求里的容器与脚本里那条是「内容相同而非同一对象」；
       // 用 `===` 判会把整条挂载链路的列表读成详情，于是一条岗位都攒不出来。
+      const deliver = deliverFor(request);
+      if (deliver) return Promise.resolve(deliver);
       const chat = chatFor(request);
       if (chat) return Promise.resolve(chat);
       const isListing = sameLocator(request.container, script.listContainer);
@@ -339,7 +370,7 @@ export class FakeExecutorRegistryService extends Service implements WorkflowExec
   list = (): string[] => [...this.table.keys()];
 }
 
-/** 假动作手的脚本：三只手各自回什么。 */
+/** 假动作手的脚本：四只手各自回什么。 */
 export type ActScript = {
   /** 敲字之后页面的回读值（`valueAfter`）；省略表示「与发出文本逐字一致」，即正常输入的样子 */
   typedValue?: string | null;
@@ -349,6 +380,10 @@ export type ActScript = {
   waitedMs?: number;
   /** 点击要不要失败（真实动作手在定位失配时是抛出而不是返回 false） */
   clickError?: Error;
+  /** 文件注入后 input 自己报上来的文件名；省略表示「就是请求那个路径的文件名」（正常注入的样子） */
+  uploadedName?: string | null;
+  /** 注入要不要失败（真实动作手在回读不符时抛 `ACT_FAILED`） */
+  uploadError?: Error;
 };
 
 /** 带调用记账的假动作手。 */
@@ -357,6 +392,8 @@ export type FakeAct = BossActionHand & {
   typed: { spec: LocateSpec; text: string }[];
   /** 按顺序记录点过哪些定位声明 */
   clicked: LocateSpec[];
+  /** 按顺序记录往哪些声明注过哪个文件（投递的回读判据从这里取） */
+  uploaded: { spec: LocateSpec; filePath: string }[];
   /** 等待起过几次，以及**第几次点击之前**已经起好（2.5-06 的时序判据） */
   waitsStarted: number;
   /** 点击发生时的等待已起次数：等于 `waitsStarted` 才说明等待起在点击之前 */
@@ -366,9 +403,9 @@ export type FakeAct = BossActionHand & {
 };
 
 /**
- * 按脚本造一只假动作手（spec 2.5-06）。
+ * 按脚本造一只假动作手（spec 2.5-06 / 2.6-04）。
  *
- * 它只替 `browser.act` 的三只手，并且**如实记账等待与点击的先后**：适配器把 `textChanges`
+ * 它只替 `browser.act` 的四只手，并且**如实记账等待与点击的先后**：适配器把 `textChanges`
  * 起在点击之前是这条契约的硬要求（基线晚于点击就永远读不到变化），所以用例要能查这个顺序。
  * @param script 动作脚本
  * @returns 记录调用的 `BossActionHand`
@@ -376,12 +413,14 @@ export type FakeAct = BossActionHand & {
 export function createFakeAct(script: ActScript = {}): FakeAct {
   const typed: { spec: LocateSpec; text: string }[] = [];
   const clicked: LocateSpec[] = [];
+  const uploaded: { spec: LocateSpec; filePath: string }[] = [];
   const waitsAtClick: number[] = [];
   const waitedFor: { kind: 'textChanges'; spec: LocateSpec }[] = [];
   let waitsStarted = 0;
   return {
     typed,
     clicked,
+    uploaded,
     waitsAtClick,
     waitedFor,
     get waitsStarted() {
@@ -400,6 +439,17 @@ export function createFakeAct(script: ActScript = {}): FakeAct {
       clicked.push(spec);
       waitsAtClick.push(waitsStarted);
       return Promise.resolve({ status: 'done' as const, waitedMs: 0, valueAfter: null });
+    },
+    // 回读的是「那个 input 自己报上来的文件名」，不是请求里的路径：注入到另一个控件上时这里就对不上，
+    // 而适配器判的正是这个不一致（spec 2.6-04 的「定位到 A、文件塞进 B」防线）。
+    upload: (spec: LocateSpec, filePath: string) => {
+      if (script.uploadError) return Promise.reject(script.uploadError);
+      uploaded.push({ spec, filePath });
+      return Promise.resolve({
+        status: 'done' as const,
+        waitedMs: 0,
+        valueAfter: 'uploadedName' in script ? (script.uploadedName ?? '') : path.basename(filePath),
+      });
     },
     waitFor: (predicate) => {
       waitsStarted += 1;
@@ -468,10 +518,23 @@ export class StubBrowserActService extends Service {
   waitFor(predicate: Parameters<BossActionHand['waitFor']>[0]): Promise<ActReadback> {
     return this.options.fake.waitFor(predicate);
   }
+
+  /**
+   * 记一次文件注入并回传脚本里的「控件自己报上来的文件名」。
+   * @param spec 上传控件定位声明
+   * @param filePath 要注入的本地文件路径
+   * @returns 动作回读（`valueAfter` 由脚本决定，缺省等于路径的文件名）
+   */
+  upload(spec: LocateSpec, filePath: string): Promise<ActReadback> {
+    return this.options.fake.upload(spec, filePath);
+  }
 }
 
 /** 仿站的会话页地址：与知识包 `chat.entryPath` + `chat.targetParam` 的拼法一致。 */
 export const chatUrlOf = (jobId: string): string => `http://127.0.0.1:10233/chat?targetId=${jobId}`;
+
+/** 仿站的投递页地址：与知识包 `deliver.entryPath` + `deliver.targetParam` 的拼法一致。 */
+export const deliverUrlOf = (jobId: string): string => `http://127.0.0.1:10233/deliver?targetId=${jobId}`;
 
 /**
  * 造一条消息的抽取行（正文读容器里的正文节点，稳定 id 与方向读容器自身）。
@@ -516,5 +579,20 @@ export function chatScript(pack: KnowledgePack, status: string | null, messages:
       messageContainer: pack.locators.replyItem!,
       messages: extractOf(url, messages),
     },
+  };
+}
+
+/**
+ * 造一份投递页脚本（只有状态行这一处读数，按次序回传）。
+ * @param pack 知识包（投递段的定位名从它取，用例里仍然不出现选择器）
+ * @param statuses 依次回传的状态行正文；`null` 表示那一行读不到
+ * @returns 只服务投递页的假手脚本
+ */
+export function deliverScript(pack: KnowledgePack, statuses: (string | null)[]): PageScript {
+  return {
+    listContainer: pack.locators.jobCard!,
+    list: [],
+    detail: [],
+    deliver: { statusContainer: pack.locators.resumeDeliverStatus!, statuses },
   };
 }

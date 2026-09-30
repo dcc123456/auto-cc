@@ -18,6 +18,12 @@ export type AppErrorCode =
   | 'OUTBOUND_CHANNEL_MISSING'
   | 'OUTBOUND_ALREADY_SENT'
   | 'OUTBOUND_NOT_DELIVERED'
+  // 简历投递（spec 2.6-01 / 07）。三个码的处置互不相同，所以不合并：
+  // 目标已下架=这一步别再尝试（节点 `retryTimes: 0`），审批被拒或超时=人没点头所以什么都没发生，
+  // 审批单查无=界面按下的是一张陈旧卡片（服务被重建过），三者都不落账、都不扣额度。
+  | 'DELIVER_TARGET_OFFLINE'
+  | 'OUTBOUND_APPROVAL_DENIED'
+  | 'APPROVAL_NOT_FOUND'
   // 工作流状态机（spec 1.10）：非法迁移（含「还没有 run」）与占位步失败注入共用两个码，
   // 界面按码决定是「提示一句状态不允许」还是「这一步标红并可重试」。
   | 'WORKFLOW_INVALID_STATE'

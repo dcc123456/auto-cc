@@ -290,6 +290,68 @@ export interface GreetChannelSource {
   greetablePlatforms(): string[];
 }
 
+/**
+ * 一份将要递出去的简历文件（spec 2.6-05）。
+ *
+ * 形状声明在 `core` 而不是 `shared`：适配器契约（`browser`）、投递编排（`outbound`）、
+ * 界面视图（`shared`）三方都要用它，而 `core` 是这三者唯一的公共下层——放 `shared` 会让 L0 反向依赖，
+ * 放 `browser` 会让 `outbound` 与 `browser` 横向 import（AGENTS.md §4.1）。
+ * 四个字段全是原语，core 因此仍然不认识「岗位」「会话页」这些领域概念。
+ */
+export type ResumeAttachment = {
+  /** 本机绝对路径：动作层按它把文件交给 CDP，编排层按它算 hash */
+  path: string;
+  /** 文件名（页面回读的要跟它比对，账本 `source` 也要带它） */
+  fileName: string;
+  /** 字节数：配置上限的判据，也是「塞进去的就是这几个字节」的读数 */
+  sizeBytes: number;
+  /** 整份文件的 sha256 十六进制小写；`source` 取前 12 位，将来 3.7 的简历 diff 按它对齐 */
+  sha256: string;
+};
+
+/**
+ * 投递的页面结局与打招呼的结局同形（页面认不认 + 一句说明），按 §2.2 复用而不是复制第二份。
+ *
+ * 独立命名是为了读得通：`sendResume` 返回一个 `GreetOutcome` 会让人以为发的是文字。
+ */
+export type DeliverOutcome = GreetOutcome;
+
+/**
+ * 平台侧的简历投递渠道：编排层只需要「把这个目标递这份文件」。
+ *
+ * 同 `GreetChannel`，是 `PlatformAdapter.sendResume` 的**窄化投影**而不是第二套外发接口
+ * （plan §12.12 第 1 条的同一条理由：core 是 L0，不让它认识领域概念）。
+ */
+export type ResumeDeliveryChannel = {
+  /**
+   * 往指定目标递一份简历文件。
+   * @param targetId 会话对象标识（P2 是平台侧 jobid）
+   * @param attachment 编排层已经校验过（存在、是 pdf、在大小上限内）并算好 hash 的文件
+   * @returns 页面回读出的结局；「目标已下架」这类结构性失败由实现方抛 `DELIVER_TARGET_OFFLINE`，不用 `sent:false` 表达
+   */
+  send(targetId: string, attachment: ResumeAttachment): Promise<DeliverOutcome>;
+};
+
+/**
+ * 「哪个平台现在能递简历」的询问面，由 `platform.registry` 实现。
+ *
+ * 与 `GreetChannelSource` 同一条理由：渠道的真相就是适配器，另存一张表就会在适配器被重建时
+ * 留下过期读数（plan §12.13），所以每次外发现问一次。
+ */
+export interface ResumeChannelSource {
+  /**
+   * 按平台名要一个投递渠道。
+   * @param platform 平台标识（与适配器 `meta.id` 同源）
+   * @returns 渠道的窄投影；未登记该平台、或它没声明 `sendResume` 能力时为 null（不抛，由外发侧决定报什么码）
+   */
+  deliverChannel(platform: string): ResumeDeliveryChannel | null;
+  /**
+   * 当前能递简历的平台清单，用来把「递不出去」说成是装配缺包还是适配器不支持。
+   * @returns 登记了适配器且声明 `sendResume` 能力的平台标识，按登记顺序
+   */
+  deliverablePlatforms(): string[];
+}
+
 /** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
 export type WorkflowPlanView = {
   id: string;

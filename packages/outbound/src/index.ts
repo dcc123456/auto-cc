@@ -125,3 +125,6 @@ export * from './script.js';
 export * from './throttle.js';
 // 打招呼编排是第四个：把上面三个加上闸门串成唯一的外发入口（plan §12.3 的「发送编排」那一行）。
 export * from './greet.js';
+// 投递编排是第五个：与打招呼共用闸门/账本/频控，多出「等人确认」这一段（plan §13.3 第 1 条）。
+// 同包不新建包的理由写在那一节：投递与打招呼是同一件事的上下游，复用的四项已经在包里。
+export * from './deliver.js';
