@@ -194,6 +194,13 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 - npm 生命周期脚本在本环境**可能被禁用**：不要依赖 husky/commitlint 安装期钩子，钩子用
   `core.hooksPath` + 纯 shell 实现（已在 `.githooks/`）。根 `prepare` 在非 git 目录里会失败，
   临时目录装依赖时要先 `git init`。
+- **实测（2.5-d）单实例锁按 userData 目录算**：装机版 app 在跑（默认 userData
+  `%APPDATA%\auto-cc`）时，`pnpm dev` 会**静默退出 0**、CDP 端口根本不监听——不是崩溃，别按报错找。
+  正确做法是给 dev 换一份 userData（`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`，
+  `scripts/dev.ts` 已支持），**不要为了跑测试去杀用户正在用的 app**。
+- **实测（2.5-d）fixture 服务是长驻进程且模板内联在代码里**：`/chat/frame` 的 HTML 写在
+  `scripts/fixture-server.ts` 里（父页 `chat-lab.html` 每次请求读磁盘），改了帧模板不重启
+  `pnpm fixture` 会得到"半新半旧"的页面，表现为帧绑定到写死的默认 jobId 而不是 URL 参数。
 - Node 24 内置 `node:sqlite` 可用 → **禁止 `better-sqlite3`**（原生编译会破坏"用户只装一个 app"）。
   **实测（1.3）**：Electron 44 主进程内 `node:sqlite` 直接可用（sqlite 3.53.4 / WAL /
   `PRAGMA user_version`），见 `docs/acceptance/1.3/1.3-06-node-sqlite-in-electron.txt`。
