@@ -20,6 +20,7 @@ import {
   AppError,
   asApp,
   assertNotYielded,
+  consentGateOf,
   deliverChannelsOf,
   executorRegistryOf,
   Service,
@@ -134,7 +135,7 @@ export class OutboundDeliverService extends Service {
   static Config = deliverSchema;
   // 闸门/账本/频控与打招呼同源；`platform.registry` 是硬依赖——没有平台层就没有递简历的手。
   // 与打招呼的差别是不需要 `outbound.script`：2.6-b 只递文件，不随信正文（plan §13.7 第 2 条）。
-  static inject = ['entitlement.gate', 'usage.ledger', 'outbound.throttle', 'platform.registry'];
+  static inject = ['entitlement.gate', 'usage.ledger', 'outbound.throttle', 'platform.registry', 'sessions'];
 
   /**
    * 在等的确认单。
@@ -292,7 +293,8 @@ export class OutboundDeliverService extends Service {
    * @param staged `stage` 的产物
    * @param signal 让出信号，工作流节点路径用它响应暂停；界面路径传 undefined
    * @returns 投递回执（`committed` 恒为 true——没发出去一律以错误上浮）
-   * @throws `QUOTA_EXCEEDED`（日额度到量，带剩余额度）、`OUTBOUND_APPROVAL_DENIED`（被拒或超时，
+   * @throws `QUOTA_EXCEEDED`（日额度到量，带剩余额度）、`CONSENT_REQUIRED`（该平台还没签过风险确认，
+   *         此时不进审批、不碰页面、不落账）、`OUTBOUND_APPROVAL_DENIED`（被拒或超时，
    *         此时页面动作次数为零、不落账不扣额度）、`DELIVER_TARGET_OFFLINE`（页面说这个岗位不收了）、
    *         `OUTBOUND_NOT_DELIVERED`（页面回读没确认，此时不落账）、
    *         `WORKFLOW_STEP_FAILED`（等待期间工作流让出）、
@@ -300,6 +302,10 @@ export class OutboundDeliverService extends Service {
    */
   commit = async (staged: StagedDelivery, signal?: AbortSignal): Promise<DeliverReceiptView> => {
     const { platform, jobId, workflowRunId, nowMs, source, attachment } = staged;
+
+    // 风险确认在闸门之前（spec 2.7-06）：没签过字的人不该先看到「额度不足」，
+    // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
+    consentGateOf(this.ctx).ensureConsent(platform);
 
     const decision = this.gate.check(DELIVER_ACTION, { nowMs });
     if (!decision.allowed) {

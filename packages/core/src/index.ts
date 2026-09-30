@@ -9,7 +9,13 @@ export { Context, CordisError, Fiber, Inject, Logger, Service } from 'cordis';
 export type { Effect, EffectMeta, Exporter, LoggerType, Message as LoggerMessage, Plugin } from 'cordis';
 
 import type { Context, Plugin } from 'cordis';
-import type { GreetChannelSource, PagePacer, ResumeChannelSource, WorkflowExecutorRegistry } from './events.js';
+import type {
+  ConsentGate,
+  GreetChannelSource,
+  PagePacer,
+  ResumeChannelSource,
+  WorkflowExecutorRegistry,
+} from './events.js';
 
 /**
  * cordis declares FiberState as an ambient const enum, which cannot be re-exported
@@ -122,6 +128,19 @@ export function deliverChannelsOf(ctx: Context): ResumeChannelSource | undefined
 export function pagePacerOf(ctx: Context): PagePacer {
   const pacer = ctx.get('outbound.throttle') as PagePacer;
   return pacer;
+}
+
+/**
+ * 取首次风险签字的询问面（spec 2.7-06 的释放路径硬拦），实现方是 `sessions`。
+ *
+ * 与 `pagePacerOf` 同一条理由做**硬依赖**（不做 undefined 降级）：签字记录读不到就等于没签过，
+ * 降级成「拿不到判据就放行」正是这条护栏要防的那件事。调用方（`outbound.greet` / `outbound.deliver` /
+ * `jd.capture`）都把 `sessions` 写进了 `static inject`，依赖没满足时它们根本不会 init。
+ * @param ctx 调用方的上下文
+ * @returns 签字询问面的窄投影（`hasConsent` / `ensureConsent`）
+ */
+export function consentGateOf(ctx: Context): ConsentGate {
+  return ctx.get('sessions') as ConsentGate;
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

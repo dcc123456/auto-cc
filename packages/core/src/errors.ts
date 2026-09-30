@@ -18,6 +18,10 @@ export type AppErrorCode =
   | 'OUTBOUND_CHANNEL_MISSING'
   | 'OUTBOUND_ALREADY_SENT'
   | 'OUTBOUND_NOT_DELIVERED'
+  // 首次启用自动化的风险确认（spec 2.7-06）：这个平台还没有一份签字记录。
+  // 与 `QUOTA_EXCEEDED` 分开，是因为额度到量是「今天别再发了」，而这一条是「你还没承认风险」——
+  // 前者等一天自己就好，后者必须由用户点一次确认，界面给的按钮完全不同。
+  | 'CONSENT_REQUIRED'
   // 简历投递（spec 2.6-01 / 07）。三个码的处置互不相同，所以不合并：
   // 目标已下架=这一步别再尝试（节点 `retryTimes: 0`），审批被拒或超时=人没点头所以什么都没发生，
   // 审批单查无=界面按下的是一张陈旧卡片（服务被重建过），三者都不落账、都不扣额度。

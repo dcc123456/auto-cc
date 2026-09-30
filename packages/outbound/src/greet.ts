@@ -2,6 +2,7 @@
  * `outbound.greet` 服务（spec 2.5-02 / 03 / 04 / 09 / 10 / 13）：打招呼的唯一编排入口。
  *
  * 顺序是硬的，每一步都有对应的验收条目，不能换也不能省：
+ * 风险确认（该平台签过字吗，spec 2.7-06）→ 渠道 →
  * 幂等（同 run 同 target 不重发）→ 内容（现成文案或 `outbound.script` 生成）→ 黑名单 →
  * 额度**先查后等**（到量即停，不该白等一个频控间隔）→ 频控（以账本最近一条为钟）→
  * `gate.perform`（判定→执行→落账）→ 页面回读说「没发出去」时抛错，**不落账**。
@@ -17,6 +18,7 @@ import {
   AppError,
   asApp,
   assertNotYielded,
+  consentGateOf,
   executorRegistryOf,
   greetChannelsOf,
   Service,
@@ -70,7 +72,15 @@ export class OutboundGreetService extends Service {
   // 闸门与账本来自 `entitlement`，话术与频控是同包的兄弟服务：本服务自己不碰网络、不碰 DOM。
   // `platform.registry` 是硬依赖（同 `conversation.store` 的先例）：没有平台层就没有任何发送的手，
   // 此时本服务留在 PENDING，界面上的外发口得到结构化错误，而不是「点了没反应」。
-  static inject = ['entitlement.gate', 'usage.ledger', 'outbound.script', 'outbound.throttle', 'platform.registry'];
+  static inject = [
+    'entitlement.gate',
+    'usage.ledger',
+    'outbound.script',
+    'outbound.throttle',
+    'platform.registry',
+    // 首次风险确认的判据（spec 2.7-06）：硬依赖，理由见 `consentGateOf`——读不到签字就是没签过。
+    'sessions',
+  ];
 
   constructor(ctx: Context, _options: GreetConfig) {
     // 无配置项也要接住第二个实参：cordis 递的是校验后的配置对象（AGENTS.md §9 实测 1.3）。
@@ -82,7 +92,8 @@ export class OutboundGreetService extends Service {
    * @param raw 请求（见 `greetRequestSchema`）；平台、目标、文案/生成入参
    * @param signal 让出信号，工作流节点路径用它响应暂停；界面路径传 undefined
    * @returns 回执（账本行 id、实际等待时长、来源标识、内容来源）
-   * @throws `INVALID_ARGUMENT`（入参不合法或文案与生成入参都缺）、`OUTBOUND_CHANNEL_MISSING`、
+   * @throws `INVALID_ARGUMENT`（入参不合法或文案与生成入参都缺）、`CONSENT_REQUIRED`（该平台还没签过风险确认，
+   *         此时一个页面都不碰、一次话术都不生成）、`OUTBOUND_CHANNEL_MISSING`、
    *         `OUTBOUND_ALREADY_SENT`（同 run 同 target 重发）、`OUTBOUND_FORBIDDEN_CONTENT`（黑名单/超长）、
    *         `QUOTA_EXCEEDED`（日额度到量）、`OUTBOUND_NOT_DELIVERED`（页面回读说没发出去，此时不落账）、
    *         `WORKFLOW_STEP_FAILED`（频控等待期间工作流让出，此时既不发送也不落账）
@@ -99,6 +110,10 @@ export class OutboundGreetService extends Service {
     const { platform, jobId, text, script, workflowRunId } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = workflowRunId ?? null;
+
+    // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
+    // 界面那条确认卡片只是第一道，工作流节点与 agent 工具这两条入口都从这里出去，漏了就是静默绕过。
+    consentGateOf(this.ctx).ensureConsent(platform);
 
     // 渠道放在第一步问（不是发送前才问）：平台名写错时要在**花钱生成话术之前**就失败，
     // 而不是等 LLM 写完一段发不出去的文案。现问现取，所以本服务不持有任何平台状态。

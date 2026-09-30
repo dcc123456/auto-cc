@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { DELIVER_ACTION, DELIVER_NODE_KIND, OutboundDeliverService, type DeliverConfig } from './deliver.js';
+import { FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -151,8 +152,13 @@ async function boot(options: BootOptions = {}) {
   const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
+  await ctx.plugin(FakeSessionsService, {});
   // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例才改得动它的登记表（同 greet 用例的先例）。
   const registry = ctx.get('platform.registry') as unknown as FakePlatformRegistryService;
+  const sessions = ctx.get('sessions') as unknown as FakeSessionsService;
+  // 默认当作「已经点过风险确认」（同 greet 用例）：本文件测的是投递的九种失败分支，
+  // 要演「没签过字」的用例自己 `sessions.revoke('boss')`。
+  sessions.grant('boss');
   if (options.channel) registry.add('boss', options.channel);
   const deliverConfig: DeliverConfig = {
     autonomy: options.autonomy ?? 'semi',
@@ -166,6 +172,7 @@ async function boot(options: BootOptions = {}) {
     dir,
     deliver: asApp(ctx)['outbound.deliver'],
     registry,
+    sessions,
     ledger: asApp(ctx)['usage.ledger'],
     deliverFiber,
   };
@@ -688,5 +695,51 @@ describe('投递前的文件校验与渠道现问（spec 2.6-06 / plan §12.13�
       allowed: true,
       remaining: 1,
     });
+  });
+});
+
+describe('首次启用自动化的风险确认（spec 2.7-06 的投递侧）', () => {
+  it('没签过字：CONSENT_REQUIRED，且 semi 档那张确认卡片一张都不出现', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, sessions, ledger } = await boot({ channel: hand.channel });
+    const filePath = writeResume(dir);
+    sessions.revoke('boss');
+    await expect(deliver.perform(request({ filePath }))).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+      details: { platform: 'boss' },
+    });
+    // 确认卡片问的是「这一份要不要递」，风险确认问的是「要不要承担自动化风险」——
+    // 后者没过就不该把用户拉进前者（界面会同时出现两张语义不同的卡片）。
+    expect(deliver.pending()).toEqual([]);
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('签字判据排在额度之前：额度已见底的库，未签字给出的仍是 CONSENT_REQUIRED', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, sessions } = await boot({ channel: hand.channel, autonomy: 'auto', gate: GATE_ONE_DELIVER });
+    const filePath = writeResume(dir);
+    await deliver.perform(request({ filePath, jobId: 'job-1001' }));
+    // 此时额度已用完：顺序反了就会拿到 QUOTA_EXCEEDED，而那是「明天再来」，不是「先点确认」。
+    sessions.revoke('boss');
+    await expect(deliver.perform(request({ filePath, jobId: 'job-2002' }))).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    expect(hand.calls).toHaveLength(1);
+  });
+
+  it('补上签字之后同一条路径走得通：确认是开门的那一下，不是永久禁用', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, sessions, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    sessions.revoke('boss');
+    await expect(deliver.perform(request({ filePath, jobId: 'job-1001' }))).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    sessions.grant('boss');
+    const receipt = await deliver.perform(request({ filePath, jobId: 'job-2002' }));
+    expect(receipt).toMatchObject({ committed: true, jobId: 'job-2002' });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
   });
 });

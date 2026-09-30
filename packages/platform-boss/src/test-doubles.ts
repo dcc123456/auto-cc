@@ -7,7 +7,14 @@
  * 「页面读数怎么变成库里的行」「sent 是不是由页面回读说了算」，所以把页面与动作收成可编排的假手，
  * 登记处 / 库 / 账本一律用真实服务——把 sqlite mock 掉就等于没测幂等。
  */
-import { Service, type Context, type WorkflowExecutorRegistry, type WorkflowNodeExecutor } from '@auto-cc/core';
+import {
+  AppError,
+  Service,
+  type ConsentGate,
+  type Context,
+  type WorkflowExecutorRegistry,
+  type WorkflowNodeExecutor,
+} from '@auto-cc/core';
 import path from 'node:path';
 import type {
   ExtractFieldReading,
@@ -568,6 +575,59 @@ export class StubOutboundThrottleService extends Service {
     this.draws += 1;
     return this.options.scrollGapMs;
   }
+}
+
+/**
+ * 假的 `sessions`：只回答「这个平台签过自动化风险确认吗」（spec 2.7-06 的抓取侧）。
+ *
+ * 存在理由：`jd.capture` 从 2.7-e 起把 `sessions` 列为硬依赖（`consentGateOf` 读不到就抛），
+ * 装配清单里没有它整条链路停在 PENDING。真身挂不进来——它 `inject` 了 Electron 外壳。
+ * 与 `packages/outbound/src/test-doubles.ts` 里那份同形是**有意为之**的重复：替身跨不了包
+ * （L2 不能 import L3 的用例文件，反之亦然），而为两份各 30 行的替身新开一个 workspace 包
+ * 违反 AGENTS.md §4.3（新包要在 plan 里记边界与理由），所以按包各留一份、形状保持一致。
+ */
+export class StubSessionsService extends Service implements ConsentGate {
+  static provide = 'sessions';
+  // 无配置项，直接复用上面那只空 schema（构造器仍要接住 cordis 递来的第二个实参）。
+  static Config = fakeRegistrySchema;
+
+  /** 已签字的平台标识。 */
+  private readonly granted = new Set<string>();
+
+  /** 被问了多少次（断言「一次 run 只问一次」的读数）。 */
+  asks = 0;
+
+  constructor(ctx: Context, _options: FakeRegistryConfig) {
+    super(ctx, 'sessions');
+  }
+
+  /**
+   * 往签字表里写一个平台（真实现里这一步是用户在确认卡片上点「我承担」）。
+   * @param platform 平台标识
+   */
+  grant(platform: string): void {
+    this.granted.add(platform);
+  }
+
+  /**
+   * 从签字表里抹掉一个平台（演「这个平台还没签过」）。
+   * @param platform 平台标识
+   */
+  revoke(platform: string): void {
+    this.granted.delete(platform);
+  }
+
+  /** 契约见 `ConsentGate.hasConsent`。 */
+  hasConsent = (platform: string): boolean => {
+    this.asks += 1;
+    return this.granted.has(platform);
+  };
+
+  /** 契约见 `ConsentGate.ensureConsent`：未签即抛 `CONSENT_REQUIRED`。 */
+  ensureConsent = (platform: string): void => {
+    if (this.hasConsent(platform)) return;
+    throw new AppError('CONSENT_REQUIRED', `平台 ${platform} 还没有一份自动化风险确认记录`, 'sessions', { platform });
+  };
 }
 
 /** 仿站的会话页地址：与知识包 `chat.entryPath` + `chat.targetParam` 的拼法一致。 */

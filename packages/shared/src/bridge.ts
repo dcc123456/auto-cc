@@ -97,6 +97,10 @@ export const RENDERER_ALLOWLIST = [
   'sessions.probe',
   'sessions.logout',
   'sessions.close',
+  // 2.7-06 的首次风险确认：读签字状态 + 写一次签字。写入口**只接受平台名**，
+  // 不接受任意 scope，否则这条口就变成万能 KV 写入口（plan §14.3 第 6 条）。
+  'sessions.consentStatus',
+  'sessions.grantConsent',
   // 2.1 的页面操作：只允许导航到已登记平台的同源地址，快照是只读。
   'browser.page.navigate',
   'browser.page.snapshot',
@@ -228,6 +232,22 @@ export type SessionPlatformView = {
 
 /** 会话总览：所有已配置平台 + 内核视图当前承载的是哪一个。 */
 export type SessionsStatusView = { platforms: SessionPlatformView[]; activePlatform: string | null };
+
+/**
+ * 一个平台的首次自动化风险签字读数（spec 2.7-06）。
+ *
+ * `scope` 是库里的主键原文（`automation:<platform>`），把它一起交出去是为了让界面与证据文件
+ * 能指认「这条读数读的是哪一行」，而不用靠平台名反推拼接规则——拼接规则只有一个实现，
+ * 但证据里写着你不必信这句话，直接写值。
+ */
+export type SessionConsentView = {
+  platform: string;
+  scope: string;
+  /** 库里是否已有这一行；false 时界面必须先拿到用户点头，动作才发出去。 */
+  granted: boolean;
+  /** 首次确认的毫秒时间戳；未签为 null（不用 0 冒充「1970 年签过」）。 */
+  acknowledgedAt: number | null;
+};
 
 /**
  * 内核视图所在页面的一次读取（spec 2.1-03）。
@@ -556,6 +576,16 @@ export interface BridgeSignatures {
   'sessions.logout': { args: [platform: string]; returns: SessionPlatformView };
   /** 收回内核视图里的站点页面；分区与登录态一条都不动（spec 2.1-11 的「关」）。 */
   'sessions.close': { args: []; returns: SessionsStatusView };
+  /**
+   * 读一个平台的首次自动化风险签字状态（spec 2.7-06）：界面在发起抓取/打招呼/投递/工作流**之前**问这一句。
+   * 未登记的平台以 `PLATFORM_NOT_CONFIGURED` 结构化失败，不静默回「没签」。
+   */
+  'sessions.consentStatus': { args: [platform: string]; returns: SessionConsentView };
+  /**
+   * 写一次签字（spec 2.7-06）：只接受平台名，scope 由主进程拼，界面传不进任意键。
+   * 重复调用不刷新首次时刻——审计问的是「风险从哪一刻被承担」。
+   */
+  'sessions.grantConsent': { args: [platform: string]; returns: SessionConsentView };
   /** 导航到已登记平台的同源地址，装载落定后回一份页面快照（spec 2.1-03）。 */
   'browser.page.navigate': { args: [url: string]; returns: KernelPageSnapshotView };
   /** 读取当前页面快照；可选参数是本次正文上限（字符），上限受服务配置钳制。 */
@@ -1126,6 +1156,12 @@ export interface CaptureRunView {
 
 /** `jd.capture.status` 的读数：当期配置 + 最近一次运行（间隔不在此列，节奏归 `outbound.throttle`，spec 2.7-04）。 */
 export interface CaptureStatusView {
+  /**
+   * 本服务抓取的那个平台标识（`jd-capture` 配置的 `platform`）。
+   * 界面拦截点要问「抓取的这次动作属于哪个平台」（spec 2.7-06 ①），
+   * 只能由持有配置的一方交出来——让界面自己猜平台名就是第二套判定。
+   */
+  platform: string;
   targetCount: number;
   maxRounds: number;
   lastRun: CaptureRunView | null;

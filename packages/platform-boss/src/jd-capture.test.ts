@@ -54,6 +54,7 @@ import {
   StubBrowserActService,
   StubBrowserPageService,
   StubOutboundThrottleService,
+  StubSessionsService,
   type PageScript,
 } from './test-doubles.js';
 
@@ -112,6 +113,11 @@ async function boot(
   // 下面的抓取链路一步都走不动（本用例只读页面，那只假动作手一次也不会被用到）。
   fibers.push(await ctx.plugin(StubBrowserActService, { fake: createFakeAct() }));
   fibers.push(await ctx.plugin(StubOutboundThrottleService, { scrollGapMs: pacerGapMs }));
+  // 风险确认替身：`jd.capture` 从 2.7-e 起 inject 了 `sessions`（spec 2.7-06 的抓取侧硬拦）。
+  // 默认让它「已签过 boss」，本文件的用例才继续测抓取本身；没签那一支在文末单独演。
+  fibers.push(await ctx.plugin(StubSessionsService, {}));
+  const sessions = ctx.get('sessions') as unknown as StubSessionsService;
+  sessions.grant('boss');
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   // 真实闸门（不是替身）：2.7-03 要验收的正是「抓取走的是那个唯一的判定 + 落账口」，mock 掉它等于自证。
@@ -135,6 +141,7 @@ async function boot(
     executors: executorRegistryOf(ctx),
     captureFiber,
     fake,
+    sessions,
     pacer: ctx.get('outbound.throttle') as StubOutboundThrottleService,
     events,
   };
@@ -404,6 +411,8 @@ describe('抓取占的是 search 那一条额度（spec 2.7-03，并更正 2.3-1
     await ctx.plugin(StubBrowserPageService, { fake: createFakePage(twoScreenScript(['1001'])) });
     await ctx.plugin(StubBrowserActService, { fake: createFakeAct() });
     await ctx.plugin(StubOutboundThrottleService, { scrollGapMs: 0 });
+    // 风险确认替身照样挂：这一条要验收的是「缺闸门」这一种缺席，别让它和「缺 sessions」混在一起。
+    await ctx.plugin(StubSessionsService, {});
     await ctx.plugin(PlatformRegistryService, NO_CONFIG);
     await ctx.plugin(UsageLedgerService, {});
     await ctx.plugin(JdStoreService, {});
@@ -431,7 +440,8 @@ describe('进度事件（spec 2.3-07）', () => {
     const { capture } = await boot(twoScreenScript(['1001', '1002', '1003']), { targetCount: 3, maxRounds: 4 });
     // 用 `toEqual` 而不是 `toMatchObject`：节奏归位到 `outbound.throttle` 之后，这里多出一个
     // 「固定间隔」字段就是假读数（spec 2.7-04），逐字对齐才咬得住。
-    expect(capture.status()).toEqual({ targetCount: 3, maxRounds: 4, lastRun: null });
+    // `platform` 是 2.7-06 界面拦截点要的那一项：抓取属于哪个平台只能由持有配置的一方说出。
+    expect(capture.status()).toEqual({ platform: 'boss', targetCount: 3, maxRounds: 4, lastRun: null });
     const run = await capture.run({ keyword: '前端' });
     expect(capture.status().lastRun).toEqual(run);
   });
@@ -570,5 +580,53 @@ describe('作为工作流节点（spec 2.4-01 / 2.4-07 / 2.4-09）', () => {
     expect(jd.count()).toBe(2);
     expect(fake.kinds).toEqual(['list']);
     expect(fake.navigated).toHaveLength(1);
+  });
+});
+
+describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', () => {
+  it('没签过字：CONSENT_REQUIRED，一次页面调用都不发、一条额度也不扣', async () => {
+    const { capture, sessions, gate, fake, ledger, events } = await boot(twoScreenScript(['1001', '1002']));
+    sessions.revoke('boss');
+    await expect(capture.run({ keyword: '前端' })).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+      details: { platform: 'boss' },
+    });
+    // 抓取也是「启用自动化」：没认下风险之前不许先产生站点流量（AGENTS.md §8 第 3 条）。
+    expect(fake.navigated).toEqual([]);
+    expect(fake.requests).toEqual([]);
+    expect(events).toEqual([]);
+    expect(ledger.count()).toBe(0);
+    expect(gate.check('search')).toMatchObject({ allowed: true });
+  });
+
+  it('签字判据排在闸门之前：额度已见底的库，未签字给出的仍是 CONSENT_REQUIRED', async () => {
+    const gateConfig: GateConfig = { mode: 'daily', dailyLimits: { ...DEFAULT_DAILY_LIMITS, search: 1 } };
+    const { capture, sessions, gate, fake } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3 },
+      0,
+      gateConfig,
+    );
+    await capture.run({ keyword: '前端' });
+    expect(gate.check('search')).toMatchObject({ allowed: false, remaining: 0 });
+    sessions.revoke('boss');
+    const navigated = fake.navigated.length;
+    await expect(capture.run({ keyword: '后端' })).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    // 若是先过闸门，这里拿到的是 QUOTA_EXCEEDED（「明天再来」），而正确答案是「先点确认」。
+    expect(fake.navigated).toHaveLength(navigated);
+  });
+
+  it('补上签字之后同一条链路走得通：一次 run 只问一次签字', async () => {
+    const { capture, sessions, fake, ledger } = await boot(twoScreenScript(['1001', '1002', '1003']), {
+      targetCount: 3,
+    });
+    sessions.revoke('boss');
+    await expect(capture.run({ keyword: '前端' })).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    sessions.grant('boss');
+    const before = sessions.asks;
+    await capture.run({ keyword: '前端' });
+    expect(fake.navigated.length).toBeGreaterThan(0);
+    expect(ledger.count()).toBe(1);
+    expect(sessions.asks - before).toBe(1);
   });
 });

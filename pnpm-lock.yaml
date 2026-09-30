@@ -418,6 +418,9 @@ importers:
       '@auto-cc/core':
         specifier: workspace:*
         version: link:../core
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
       '@auto-cc/shared':
         specifier: workspace:*
         version: link:../shared
@@ -431,6 +434,9 @@ importers:
         specifier: ^4.0.0
         version: 4.6.5
     devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
       electron:
         specifier: ^44.4.5
         version: 44.4.5

@@ -19,6 +19,7 @@ import {
   assertNotYielded,
   Service,
   asApp,
+  consentGateOf,
   executorRegistryOf,
   pagePacerOf,
   sleep,
@@ -52,6 +53,9 @@ const JD_CAPTURE_KIND = 'jd.capture';
 
 /** 本服务对 `platform.registry` 的诉求：按名字拿到适配器。 */
 type RegistryGet = Pick<PlatformRegistryService, 'get'>;
+
+/** 登记处交出来的那个平台适配器（`run` 问一次，带着它进编排，不再重复查表）。 */
+type CaptureAdapter = ReturnType<RegistryGet['get']>;
 
 /** 本服务对 `browser.page` 的诉求：只需要那一下滚动。 */
 type PageScroll = Pick<BrowserPageService, 'scroll'>;
@@ -123,6 +127,9 @@ export class JdCaptureService extends Service {
     'usage.ledger',
     'outbound.throttle',
     'entitlement.gate',
+    // 抓取也是「启用自动化」（spec 2.7-06）：签字判据归 `sessions`，经 core 的 `ConsentGate` 窄投影来问，
+    // 本包因此不 import `@auto-cc/plugin-sessions`（同级横向依赖，AGENTS.md §4.1）。
+    'sessions',
   ];
 
   private lastRun: CaptureRunView | null = null;
@@ -184,15 +191,22 @@ export class JdCaptureService extends Service {
    * 这是 `search` 这一条额度的唯一消费者：整段编排（含滚读与详情页）是 `gate.perform` 的任务闭包，
    * 所以判定在开始之前，超限直接以 `QUOTA_EXCEEDED` 失败，一个页面都不碰；跑完才落账，
    * 半途失败或让出不记账 —— 与打招呼 / 投递同一条语义，闸门不需要为抓取开特例。
+   *
+   * 两道前置的先后是定过的：**先确认平台真的装着，再问签没签字**。对没登记的平台回
+   * 「你还没承担风险」会把一个配置错误说成用户的待办事项（界面会画出一张永远签不成的卡片）。
    * @param criteria 搜索条件（关键词必填；它同时作为账本的 `targetId`，界面按词看得清今天搜了什么）
    * @param signal 协作让出信号，原样透传给 `runOnce`
    * @returns 本轮结局，同 `runOnce`
-   * @throws 今日 `search` 额度用尽时 `QUOTA_EXCEEDED`（不静默少抓一轮，界面拿到的是一次可回看的失败）
+   * @throws 目标平台未登记时 `PLATFORM_NOT_REGISTERED`（带当前装着的清单）、
+   *         该平台还没签过风险确认时 `CONSENT_REQUIRED`（spec 2.7-06：判定在闸门之前，一个页面都不碰）、
+   *         今日 `search` 额度用尽时 `QUOTA_EXCEEDED`（不静默少抓一轮，界面拿到的是一次可回看的失败）
    */
   run = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
+    const adapter = this.registry.get(this.config.platform);
+    consentGateOf(this.ctx).ensureConsent(this.config.platform);
     const gate = asApp(this.ctx)['entitlement.gate'];
     const { value } = await gate.perform('search', { targetId: criteria.keyword }, () =>
-      this.runOnce(criteria, signal),
+      this.runOnce(criteria, signal, adapter),
     );
     return value;
   };
@@ -204,12 +218,17 @@ export class JdCaptureService extends Service {
    * 它在阶段 A 就表现为「本轮零新增」，于是第二圈的无新内容判定把它停下来，不会空转到上限。
    * @param criteria 搜索条件（关键词必填，`limit` 在配置目标之内覆盖本次目标条数）
    * @param signal 协作让出信号（spec 2.4-07）：工作流暂停或被卸载时在中途收手；不传则一路跑完
+   * @param adapter `run` 已经问过登记处的那个平台的适配器；在这里传进来而不是再查一次，
+   *        是为了让「平台在不在」这个判定全局只有一处（§2.5）
    * @returns 本轮结局：轮数、入库行数、跳过明细、停止原因，外加本轮前后的账本行数
-   * @throws 目标平台未登记时由 `platform.registry` 抛 `PLATFORM_NOT_REGISTERED`；关键词为空由适配器抛 `INVALID_ARGUMENT`；
+   * @throws 关键词为空由适配器抛 `INVALID_ARGUMENT`；
    *         让出时抛 `WORKFLOW_STEP_FAILED`——runner 先看信号，因此这一条记为让出而不是节点失败（spec 2.4-09）
    */
-  private runOnce = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
-    const adapter = this.registry.get(this.config.platform);
+  private runOnce = async (
+    criteria: JobSearchCriteriaView,
+    signal: AbortSignal | undefined,
+    adapter: CaptureAdapter,
+  ): Promise<CaptureRunView> => {
     const target =
       criteria.limit && criteria.limit > 0
         ? Math.min(criteria.limit, this.config.targetCount)
@@ -292,9 +311,10 @@ export class JdCaptureService extends Service {
    * 当期配置 + 最近一次运行（面板与验收脚本共用的一份读数）。
    *
    * 这里**不再报间隔**：节奏已归 `outbound.throttle` 按区间抽样，写一个定值回界面就是说谎（spec 2.7-04）。
-   * @returns 目标条数、轮数上限，以及最近一次运行；还没跑过时 `lastRun` 为 null
+   * @returns 抓取的平台标识、目标条数、轮数上限，以及最近一次运行；还没跑过时 `lastRun` 为 null
    */
   status = (): CaptureStatusView => ({
+    platform: this.config.platform,
     targetCount: this.config.targetCount,
     maxRounds: this.config.maxRounds,
     lastRun: this.lastRun,

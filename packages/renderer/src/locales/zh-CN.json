@@ -216,6 +216,22 @@
       "none": "—",
       "detailMissing": "只有摘要"
     },
+    "consent": {
+      "heading": "首次启用 {{platform}} 的自动化：先确认风险",
+      "riskSearch": "本应用会代你在 {{platform}} 上搜索岗位并逐条读取详情",
+      "riskGreet": "会代你自动生成话术并打招呼",
+      "riskDeliver": "会在你确认之后自动投递简历附件",
+      "riskAccount": "这些动作由脚本发起，平台风控可能把它判成异常行为，后果（警告、限流、封号）由这个账号自己承担。",
+      "once": "确认之后不会每次重复询问：签字写进本地库的那一行，重启也还在。",
+      "scopeRow": "写入的是库里这一行：{{scope}}",
+      "readUnknown": "读不到签字状态（不在 Electron 宿主里？），本次不会放行动作。",
+      "errorRow": "确认没能写入：{{code}} · {{message}}",
+      "grant": "我已了解，承担风险并继续",
+      "deny": "先不启用",
+      "statusGranted": "{{platform}} 已确认自动化风险（{{time}}）",
+      "statusUnsigned": "{{platform}} 尚未确认自动化风险，动作会先等你点头",
+      "never": "无时刻"
+    },
     "deliver": {
       "heading": "简历投递（outbound.deliver：额度 → 频控 → 确认 → 页面 → 落账）",
       "hint": "在下方库内清单点「投递简历」触发：semi 档会挂在主进程里等这张卡片上的表态，suggest 档只准备不发送",
@@ -294,6 +310,40 @@
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",
       "ok": "{{action}}：成功",
       "failed": "{{action}} 失败：{{message}}"
+    },
+    "audit": {
+      "heading": "审计回看",
+      "refresh": "重读",
+      "ledgerHeading": "动作账本（累计 {{count}} 行）",
+      "sourceLedger": "事实源：usage_ledger",
+      "ledgerRule": "账本里有这一行 = 那一次动作成功了（失败不记账）",
+      "actionCount": "{{action}} {{count}} 次",
+      "ledgerRow": "{{time}} · {{action}} · 目标 {{target}} · {{result}} · 来源 {{source}} · run {{run}}",
+      "resultStored": "已落账",
+      "nodesHeading": "工作流节点",
+      "sourceNodes": "事实源：workflow_nodes",
+      "nodesFromState": "本次进程的 run {{runId}} · 状态 {{status}}",
+      "nodesFromResumable": "库里最近一次可续的 run {{runId}} · 状态 {{status}}",
+      "nodesIdle": "本次进程还没跑过 run，库里也没有可续的 run",
+      "nodeRow": "#{{index}} {{kind}} · {{status}} · 尝试 {{attempts}} 次 · 错误 {{error}}",
+      "nodeEvidence": "证据 {{ref}}",
+      "empty": "还没有记录",
+      "none": "—",
+      "runStatus": {
+        "idle": "待命",
+        "running": "进行中",
+        "paused": "已暂停",
+        "failed": "已失败",
+        "done": "已完成",
+        "interrupted": "被中断"
+      },
+      "nodeStatus": {
+        "pending": "待执行",
+        "running": "进行中",
+        "done": "完成",
+        "failed": "失败",
+        "skipped": "跳过"
+      }
     },
     "usage": {
       "heading": "额度闸门与用量账本",

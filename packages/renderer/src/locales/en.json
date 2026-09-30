@@ -216,6 +216,22 @@
       "none": "n/a",
       "detailMissing": "summary only"
     },
+    "consent": {
+      "heading": "First time automating {{platform}}: acknowledge the risk",
+      "riskSearch": "This app will search jobs on {{platform}} for you and open each one to read its details",
+      "riskGreet": "It will generate chat scripts and send greetings on your behalf",
+      "riskDeliver": "After you confirm, it will attach and deliver your resume file automatically",
+      "riskAccount": "These actions come from a script, so the platform may flag them as abnormal behaviour. The consequences (warnings, throttling, account bans) fall on this account.",
+      "once": "Confirming does not ask again on every run: the signature is one row in the local database and survives a restart.",
+      "scopeRow": "The row it writes: {{scope}}",
+      "readUnknown": "Consent status could not be read (not inside the Electron host?), so this action stays blocked.",
+      "errorRow": "Consent was not recorded: {{code}} · {{message}}",
+      "grant": "I understand and accept the risk, continue",
+      "deny": "Not yet",
+      "statusGranted": "{{platform}} automation risk acknowledged ({{time}})",
+      "statusUnsigned": "{{platform}} automation risk not acknowledged; actions wait for your confirmation",
+      "never": "no timestamp"
+    },
     "deliver": {
       "heading": "Resume delivery (outbound.deliver: quota -> throttle -> approval -> page -> ledger)",
       "hint": "Trigger it with the deliver button on a stored row: semi blocks in the main process until this card is answered, suggest only stages without sending",
@@ -294,6 +310,40 @@
       "noBridge": "Bridge unavailable: not running inside the Electron host",
       "ok": "{{action}}: done",
       "failed": "{{action}} failed: {{message}}"
+    },
+    "audit": {
+      "heading": "Audit review",
+      "refresh": "Reload",
+      "ledgerHeading": "Action ledger ({{count}} rows total)",
+      "sourceLedger": "fact source: usage_ledger",
+      "ledgerRule": "A row here = that action succeeded (failures are never booked)",
+      "actionCount": "{{action}} × {{count}}",
+      "ledgerRow": "{{time}} · {{action}} · target {{target}} · {{result}} · source {{source}} · run {{run}}",
+      "resultStored": "booked",
+      "nodesHeading": "Workflow nodes",
+      "sourceNodes": "fact source: workflow_nodes",
+      "nodesFromState": "Run {{runId}} of this process · status {{status}}",
+      "nodesFromResumable": "Most recent resumable run {{runId}} in the database · status {{status}}",
+      "nodesIdle": "No run in this process, and no resumable run in the database",
+      "nodeRow": "#{{index}} {{kind}} · {{status}} · {{attempts}} attempts · error {{error}}",
+      "nodeEvidence": "evidence {{ref}}",
+      "empty": "Nothing recorded yet",
+      "none": "n/a",
+      "runStatus": {
+        "idle": "idle",
+        "running": "running",
+        "paused": "paused",
+        "failed": "failed",
+        "done": "done",
+        "interrupted": "interrupted"
+      },
+      "nodeStatus": {
+        "pending": "pending",
+        "running": "running",
+        "done": "done",
+        "failed": "failed",
+        "skipped": "skipped"
+      }
     },
     "usage": {
       "heading": "Quota gate & usage ledger",

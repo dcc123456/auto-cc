@@ -1,7 +1,10 @@
 import { AlertCircle, Pause, Play, RefreshCw, RotateCw, ShieldAlert, Workflow as WorkflowIcon } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
+import { ConsentCard, ConsentStatusRow } from './ConsentCard';
 import { useBridgeAction } from './useBridgeAction';
+import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
 
 /** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
@@ -20,6 +23,10 @@ const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
  * P2 换成真实的搜 JD / 生成话术 / 打招呼 / 投递时，本组件一行不用改。
  * 接管点（spec 2.1-08 / 2.4-06）也只是把 `run.requiresHuman` 这份**数据**按 `reason` 翻译成一句话：
  * 主进程不再拼中文句子，所以换语言时界面不会漏出中文硬编码。
+ *
+ * 2.7-e 起「开始工作流」先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①）：要问哪个平台的签字
+ * 不写在界面里，而是从 `runner.nodes()` 的计划参数里数出来——runner 不认识平台，所以节点参数是
+ * 唯一能对上事实的源头；数不出平台时放行，交给释放路径上的硬拦（拦截点 ②）。
  */
 export function WorkflowPanel() {
   const { t } = useTranslation();
@@ -27,6 +34,30 @@ export function WorkflowPanel() {
   const bridge = window.autoCC;
 
   const { busy, notice, run: call } = useBridgeAction(read);
+  const { refresh: refreshConsent, ...consent } = useConsent();
+  /**
+   * 当前计划要动的平台（从 `runner.nodes()` 的 `params.platform` 里数出来）。
+   *
+   * 「开始工作流」这一口的拦截点要知道该问哪个平台的签字（spec 2.7-06 ①），而 runner 本身
+   * 不认识平台（plan §11.3 第 5 条），所以唯一诚实的事实源就是计划里每个节点自己带的参数。
+   * 读不到就是空列表：界面不猜平台名，放行动作后由释放路径上的硬拦（拦截点 ②）说话。
+   */
+  const [planPlatforms, setPlanPlatforms] = useState<string[]>([]);
+
+  const readPlan = useCallback(async () => {
+    const reply = await bridge?.workflow['runner.nodes']();
+    if (!reply?.ok) return;
+    const platforms = reply.value
+      .map((spec) => spec.params['platform'])
+      .filter((value): value is string => typeof value === 'string');
+    const unique = [...new Set(platforms)];
+    setPlanPlatforms(unique);
+    await refreshConsent(unique);
+  }, [bridge, refreshConsent]);
+
+  useEffect(() => {
+    void readPlan();
+  }, [readPlan]);
 
   /**
    * 触发一个 runner 动作。
@@ -69,7 +100,11 @@ export function WorkflowPanel() {
           type="button"
           data-action="start"
           disabled={busy !== undefined || !canStart}
-          onClick={() => act(t('workflow.actionStart'), () => bridge?.workflow['runner.start']())}
+          onClick={() =>
+            void consent.ensure(planPlatforms, () =>
+              act(t('workflow.actionStart'), () => bridge?.workflow['runner.start']()),
+            )
+          }
           className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
         >
           <Play size={12} />
@@ -105,6 +140,20 @@ export function WorkflowPanel() {
           </span>
         ) : null}
       </div>
+
+      {consent.request && (
+        <ConsentCard
+          platform={consent.request.platform}
+          view={consent.request.view}
+          busy={consent.busy}
+          error={consent.error}
+          onGrant={() => void consent.grant()}
+          onDeny={consent.deny}
+        />
+      )}
+      {planPlatforms.map((platform) => (
+        <ConsentStatusRow key={platform} view={consent.views[platform]} />
+      ))}
 
       {notice && (
         <p

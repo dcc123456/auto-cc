@@ -1764,3 +1764,58 @@ run `3343f1fb…` 的 `demo.flaky` 终态失败 → 证据正文三类掩码齐�
 **本片欠着的**：日志这一路只做了"值形状"三类，`resume.kb`（P4）里简历正文级别的自由文本
 （姓名、公司名、学校名）还没有判据——那需要真简历样本作靶，属于知识库那一片；界面侧目前没有任何
 地方展示"这条证据已被脱敏"，用户看到的只是文件名，这一格与 2.7-e 的审计视图一起做。
+
+### 14.11 2.7-e 收口记录（首次风险确认 + 审计回看，2026-10-01）
+
+**落点与 §14.3 第 5/6 条一致的部分**：迁移 v6 的 `automation_consents(scope PRIMARY KEY, acknowledged_at)`
+落在 `packages/sessions`（写入口只有 `grantConsent(platform)`，scope 由服务侧拼成 `automation:<platform>`，
+不给渲染层任意 key 的写能力）；`ConsentGate` 只有读与抛两个方法，`ensureConsent` 是释放路径上那道硬拦，
+`jd.capture.run` / `outbound.greet.perform` / `outbound.deliver.perform` 三处都在**过闸门之前**调它；
+界面确认卡片复用 2.6-c 那张的形状（现读读数 + 两个按钮各带忙碌态），i18n 新开 `consent.*` 与 `audit.*`
+两个命名空间，zh-CN / en 同步补齐（`pnpm lint` 的键对齐检查是它的机检）。
+审计段没有加表、没有加 service、没有加白名单键，`AuditSection` 挂在 `UsagePanel` 底部（同页不同段）。
+
+**与 §14.3 的五条偏差，逐条写明**：
+
+1. **审计下半段的事实源从 `runner.nodes` 换成 `runner.state()` / `runner.resumable()`**。
+   §14.3 第 5 条写的是 `workflow['runner.nodes']`，但那只回**静态计划**（`WorkflowNodeSpec[]`，
+   没有 status/attempts/error/evidence），拿它做「结果」这一列等于把计划表当执行表读。
+   改成先读在跑的 run、读不到再退到库里最近一次可续的 run，并把**用的是哪一份**写在界面上
+   （`data-node-source` + 一句「库里最近一次可续的 run …」）。
+2. **`byAction` 渲染在审计段，不在用量表头**。§14.3 第 5 条只说「顺手补上」，没说补在哪；
+   补在表头会让同面板出现两份动作计数（表头一份、审计段一份），所以只在审计段摆一次。
+3. **`CaptureStatusView` 新增 `platform` 字段**（§14.3 未列）。界面拦截点要知道「这次抓取属于哪个平台」，
+   而唯一知道这件事的是持有 `jd-capture` 配置的那一方；界面自己写死 `'boss'` 就是第二套判定。
+   读数由服务说出，`jd-capture.test.ts` 里那条 `status()` 断言把它钉住。
+4. **空平台列表时界面放行**。§14.3 第 6 条只写了「未签则弹」，没写「界面读不出平台怎么办」。
+   处置是**不在这里猜平台名**：直接放行原动作，让释放路径的硬拦给出 `CONSENT_REQUIRED`。
+   少弹一次卡不等于少一道栏——② 才是权威。
+5. **默认装配下「开始工作流」这一口读不出平台**。内置的 `boss-basic` 计划三个节点的 `params` 里
+   **没有** `platform`（`{query,city,target}` / `{limit}` / `{url,failTimes}`），
+   所以按第 4 条它走的是「空列表 → 交给 ②」那一路，界面上不会弹卡。
+   运行期是把 `planId` 热切成带 `platform: 'boss'` 的 `boss-deliver` 才让这一口的读数显形
+   （reload 后工作流视图那一行「boss 已确认自动化风险（时刻）」），验完已还原成 `boss-basic`。
+   **这条不能读成「开始工作流已验过弹卡」**：验到的是「计划声明了平台 → 界面就拦」这条推导成立，
+   默认计划要不要补 `platform` 参数属于计划数据形状，留给 2.8（工作流与对话双入口）一并定。
+
+**界面侧刻意没有做的事**：`useConsent` 不拼 scope 字符串、不新造错误码（`AppErrorCode` 是闭合联合，
+渲染层没有造码权），读不到签字状态时按「没签」处理但只在真拿到结构化错误时才显示错误行——
+纯浏览器调试态里 `reply` 是 undefined，那不是「主进程拒了」，编一个码进界面就是说谎。
+
+**收尾自检（AGENTS.md §7.4）读数**：`pnpm typecheck` 全绿；`pnpm lint` 全绿（含渲染层规范检查
+「2 个语言包、19 个源文件」与合规红线扫描）；`pnpm format:check` 全绿；`pnpm test` 全绿
+（outbound 65 / browser 223 / platform-boss 124 / 其余包全 Done，exit 0）。
+运行期验收全程 CDP 10222 + 本地仿站 10233，未接触真实平台：未签时直接打服务口得到
+`CONSENT_REQUIRED` 且账本 9→9；界面弹卡→点「先不启用」后 `lastRun` 仍为 null；
+点「我已了解」后签字落库并立刻重放挂起的抓取；再点同一入口不再弹卡（stored 5 / 账本 9→10）；
+reload 后两个面板各自重新读库、只显示已确认时刻。证据五件：`2.7-06-first-run-card.png`、
+`2.7-06-signed-run-no-card.png`、`2.7-06-reload-persisted.png`、`2.7-06-deny-and-hard-block.txt`、
+`2.7-05-ledger-and-nodes.png` + `2.7-05-workflow-nodes.png`。
+验收过程中为让工作流那一口显形而热改过 `workflow` 的 `planId`，收尾已还原为 `boss-basic`
+（运行期补丁不落盘，重启即回清单值）。
+
+**本片欠着的**：① 2.7-d 收口时留给这一片的那一格——界面上展示「这条证据已脱敏」——**没做**，
+审计段现在只报证据文件名（`证据 evidence/…json`），不替主进程宣称掩码状态，因为证据文件里
+盖住了什么、按哪条规则盖的，读数面（`WorkflowNodeView.evidenceRef`）今天不支持，硬要显示就是界面自己判断；
+② 签字只有 `automation:<platform>` 一档，没有「只允许搜索、不允许打招呼」这种细 scope，
+也没有撤销入口（表是审计用的，只进不出）——真要撤销得先决定撤销后旧账本行怎么解释，那是产品决策不是收尾活。

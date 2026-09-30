@@ -431,6 +431,34 @@ export interface PagePacer {
 }
 
 /**
+ * 首次启用自动化的风险签字（spec 2.7-06）的询问面，实现方是 `sessions`。
+ *
+ * 为什么形状声明在 L0：要问「这个平台签过字没有」的三方分别在外发编排（L3 `outbound.greet` /
+ * `outbound.deliver`）与抓取编排（L2 `jd.capture`），而签字记录的归属是「平台级、跨重启的状态」
+ * 那一层（L2 `sessions`，与分区、登录态同源）。让 L3 直接 import L2 的包、或让 `platform-boss`
+ * 横向 import `sessions`，都会新开一条 AGENTS.md §4.1 禁止的依赖边——与 `GreetChannelSource`、
+ * `PagePacer` 完全同一套路：core 只声明两个方法，实现方结构上满足即可。
+ *
+ * 只有两个方法也是有意为之：**不给写入口**。渲染层要签字只能调 `sessions.grantConsent`
+ * （只接受平台名），这里露的是「读」和「不接受就抛」，于是释放路径的判据只有一条事实源。
+ */
+export interface ConsentGate {
+  /**
+   * 查一个平台是否已有签字记录。
+   * @param platform 平台标识（与 `sessions.platforms` 同源）
+   * @returns 已签为 true；没签、或该平台未登记时为 false（不抛，界面据此决定弹不弹确认）
+   */
+  hasConsent(platform: string): boolean;
+  /**
+   * 释放路径上的硬拦：没签过字就抛。
+   * @param platform 平台标识
+   * @throws 平台未登记时 `PLATFORM_NOT_CONFIGURED`（对一个不存在的平台谈「承担风险」没有意义）、
+   *         该平台未签字时 `CONSENT_REQUIRED`（带平台名，界面按名字插进文案）；已签时静默返回
+   */
+  ensureConsent(platform: string): void;
+}
+
+/**
  * 落库视图专用的一次 run 状态。
  *
  * `interrupted` **不属于** 1.10 的 `WorkflowRunStatus`（那份状态集是界面在画的，不变），

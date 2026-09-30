@@ -30,6 +30,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { GREET_ACTION, GREET_NODE_KIND, OutboundGreetService, type GreetConfig } from './greet.js';
 import { DEFAULT_FORBIDDEN_PATTERNS, OutboundScriptService, type OutboundScriptConfig } from './script.js';
+import { FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，测试里所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -128,14 +129,19 @@ async function boot(options: { gate?: GateConfig; gapMs?: number; channel?: Gree
   const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
+  await ctx.plugin(FakeSessionsService, {});
   // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例才改得动它的登记表（同 runner 用例的先例）。
   const registry = ctx.get('platform.registry') as unknown as FakePlatformRegistryService;
+  const sessions = ctx.get('sessions') as unknown as FakeSessionsService;
+  // 默认当作「已经点过风险确认」：本文件的用例测的是编排的十种失败分支，不该被 2.7-06 的判据挡住。
+  // 要演「没签过字」那一支的用例自己 `sessions.revoke('boss')`（见文末的 2.7-06 段落）。
+  sessions.grant('boss');
   // 渠道默认就登记好；要演「挂载时登记表是空的」那一支，用例自己 remove。
   if (options.channel) registry.add('boss', options.channel);
   const greetConfig: GreetConfig = {};
   await ctx.plugin(OutboundGreetService, greetConfig);
   const greet = asApp(ctx)['outbound.greet'];
-  return { ctx, dir, greet, registry, ledger: asApp(ctx)['usage.ledger'] };
+  return { ctx, dir, greet, registry, sessions, ledger: asApp(ctx)['usage.ledger'] };
 }
 
 /**
@@ -384,5 +390,63 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     expect(hand.calls).toHaveLength(0);
     const decision = asApp(ctx)['entitlement.gate'].check(GREET_ACTION, { nowMs: T0 });
     expect(decision.remaining).toBe(1);
+  });
+});
+
+describe('首次启用自动化的风险确认（spec 2.7-06 的释放路径）', () => {
+  it('没签过字：CONSENT_REQUIRED，且它排在「有没有渠道」之前', async () => {
+    // 故意不登记渠道：如果判据顺序反了，这里会拿到 OUTBOUND_CHANNEL_MISSING，
+    // 于是「先问签字」这条顺序就成了断言的内容而不是一句注释。
+    const { greet, sessions, ledger } = await boot();
+    sessions.revoke('boss');
+    await expect(greet.perform(request())).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+      details: { platform: 'boss' },
+    });
+    expect(sessions.asks).toBe(1);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('签过字之后同一条请求成功：确认是唯一的拦路石，不是永久禁用', async () => {
+    const hand = fakeChannel();
+    const { greet, sessions, ledger } = await boot({ channel: hand.channel });
+    sessions.revoke('boss');
+    await expect(greet.perform(request())).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    sessions.grant('boss');
+    const receipt = await greet.perform(request());
+    expect(receipt).toMatchObject({ platform: 'boss', jobId: 'job-1001' });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('被签字拦下不扣额度：拦五次仍有一次额度，签字后那一次正好用掉', async () => {
+    const hand = fakeChannel();
+    const { ctx, greet, sessions } = await boot({ gate: GATE_ONE_GREET, channel: hand.channel });
+    sessions.revoke('boss');
+    for (const jobId of ['job-1001', 'job-2002', 'job-3003']) {
+      await expect(greet.perform(request({ jobId }))).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    }
+    expect(hand.calls).toHaveLength(0);
+    const gate = asApp(ctx)['entitlement.gate'];
+    expect(gate.check(GREET_ACTION, { nowMs: T0 })).toMatchObject({ allowed: true, remaining: 1 });
+    sessions.grant('boss');
+    await greet.perform(request());
+    expect(gate.check(GREET_ACTION, { nowMs: T0 })).toMatchObject({ allowed: false, remaining: 0 });
+  });
+
+  it('工作流节点这一入口同样绕不过去（否则 runner 与 agent 工具会静默外发）', async () => {
+    const hand = fakeChannel();
+    const { greet, sessions, ledger } = await boot({ channel: hand.channel });
+    sessions.revoke('boss');
+    await expect(
+      greet.executeNode({
+        runId: 'run-20',
+        spec: nodeSpec({ platform: 'boss', job: 'job-1001', text: '没签过字就想发出去的一条' }),
+        attempt: 1,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
   });
 });

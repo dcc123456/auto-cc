@@ -9,6 +9,7 @@ import {
   type QuotaAction,
   type UsageSummaryView,
 } from '@auto-cc/shared';
+import { AuditSection } from './AuditSection';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 这个动作能不能从面板代发（`search` 的账由 `jd.capture` 记，面板没有「发一次搜索」这种口）。 */
@@ -28,6 +29,9 @@ const RECENT_LIMIT = 5;
  * 不打招呼」与「打招呼用尽而投递照旧」都得在这一屏看得见，而不是靠测试用例自证。
  * `search` 那行没有代发按钮——它的消费者是抓取编排，面板伪造一次搜索只会让账本说谎。
  * 额度怎么改不在这里：配置项在装配面板的 `entitlement` 那一行，热更新即时生效。
+ *
+ * 2.7-e 起面板底部还挂了一段 `AuditSection`（spec 2.7-05 的审计回看）：账本的 `byAction` 那列
+ * 在抓取进账之后第一次有三个值，只有摆出来才算得上「三个动作各自独立」的可见证据。
  */
 export function UsagePanel() {
   const { t } = useTranslation();
@@ -192,6 +196,8 @@ export function UsagePanel() {
           ))}
         </ul>
       )}
+
+      <AuditSection />
     </section>
   );
 }

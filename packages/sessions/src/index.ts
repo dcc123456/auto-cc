@@ -8,6 +8,9 @@
  * 2.7-01 起这里还多一个**同源**的口子：`observeMainFrameResponses` 观测的是分区里主文档的响应，
  * 与 cookie 同属「分区」这一层，所以观测口的归属跟着分区走；而「哪些状态码 / 哪些字样算风控」
  * 是页面判定，留在 `browser.risk`，这条边界一寸不越。
+ * 2.7-06 起这里还是**首次风险签字**的归属：`automation_consents` 表（迁移 v6）与
+ * `consentStatus` / `grantConsent` 两只服务口都在这，因为它同样是「这个平台现在是什么状况」的一部分。
+ * 释放路径（打招呼 / 投递 / 抓取）经 `core` 声明的 `ConsentGate` 窄投影来问，不 import 本包（§4.1）。
  *
  * 两条硬约束：
  * 1. 判定只看 cookie 的存在与过期时间，**不向站点发探测请求**——真实平台上一发请求就是风控流量；
@@ -16,10 +19,23 @@
  *    响应观测同一条纪律：只交出状态码、状态行与地址，不交出请求/响应头。
  */
 import { app, session, type WebRequestFilter } from 'electron';
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import { partitionFor, type SessionPlatformView, type SessionsStatusView } from '@auto-cc/shared';
+import { AppError, asApp, Service, type ConsentGate, type Context } from '@auto-cc/core';
+import {
+  partitionFor,
+  type SessionConsentView,
+  type SessionPlatformView,
+  type SessionsStatusView,
+} from '@auto-cc/shared';
 import type { ShellService } from '@auto-cc/shell';
+import type { StoreService } from '@auto-cc/plugin-store';
 import { z } from 'zod';
+import {
+  consentMigration,
+  CONSENT_MIGRATION_VERSION,
+  consentScope,
+  readConsentAt,
+  writeConsent,
+} from './consent-store.js';
 import { judgeAuth, summarizeCookies, type AuthVerdict } from './probe.js';
 
 /**
@@ -70,10 +86,13 @@ export type MainFrameResponseReading = {
  */
 const MAIN_FRAME_FILTER: WebRequestFilter = { urls: ['http://*/*', 'https://*/*'], types: ['mainFrame'] };
 
-export class SessionsService extends Service {
+export class SessionsService extends Service implements ConsentGate {
   static provide = 'sessions';
   static Config = sessionsSchema;
-  static inject = ['shell'];
+  // `store` 是 2.7-06 之后加上的：首次启用的风险签字必须跨重启，而「平台级、跨重启的状态」
+  // 这一归属就是本服务（分区、登录态、平台清单都在这）。把它写成硬依赖而不是可选依赖，
+  // 是因为签字记录存不下来时，释放路径必须停在「读不到」而不是默认「签过」。
+  static inject = ['shell', 'store'];
 
   private readonly platforms: SessionsConfig['platforms'];
 
@@ -91,6 +110,77 @@ export class SessionsService extends Service {
    */
   private get host(): KernelHost {
     return asApp(this.ctx).shell;
+  }
+
+  /** store 服务句柄（签字表的落点）；连接尚未打开时由 `store.db` 的 getter 抛「尚未完成挂载」。 */
+  private get store(): StoreService {
+    return asApp(this.ctx).store;
+  }
+
+  /**
+   * 读一个平台的首次风险确认状态（spec 2.7-06 的界面入口）。
+   * @param platform 平台标识，必须在 `sessions.platforms` 里
+   * @returns 签字读数；未签时 `granted:false`、`acknowledgedAt:null`，界面据此画确认卡片
+   * @throws `PLATFORM_NOT_CONFIGURED`（未登记的平台，不静默回「没签」）
+   */
+  consentStatus = (platform: string): SessionConsentView => {
+    return this.consentView(this.platformOrThrow(platform).id);
+  };
+
+  /**
+   * 登记一次风险确认（spec 2.7-06）：用户在确认卡片上点「我承担」之后调这一句。
+   *
+   * 只接受平台名 —— scope 由主进程按 `automation:<platform>` 拼，渲染层传不进任意键，
+   * 这张表因此不可能长出一个没登记过的主体来冒充「用户签过字」（plan §14.3 第 6 条）。
+   * @param platform 平台标识
+   * @returns 登记后的读数（首次时刻不会被第二次确认刷新，见 `writeConsent`）
+   * @throws `PLATFORM_NOT_CONFIGURED`（未登记的平台）
+   */
+  grantConsent = (platform: string): SessionConsentView => {
+    const config = this.platformOrThrow(platform);
+    writeConsent(this.store.db, config.id, Date.now());
+    const view = this.consentView(config.id);
+    this.ctx.logger.info(`自动化风险确认已登记：平台 ${config.id} · 首次时刻 ${String(view.acknowledgedAt)}`);
+    return view;
+  };
+
+  /**
+   * 契约见 `ConsentGate.hasConsent`（spec 2.7-06 的释放路径判据）。
+   * @param platform 平台标识
+   * @returns 库里有这一行签字记录为 true；没签过、或该平台未登记，都为 false（不抛）
+   */
+  hasConsent = (platform: string): boolean => {
+    return readConsentAt(this.store.db, platform) !== null;
+  };
+
+  /**
+   * 契约见 `ConsentGate.ensureConsent`：释放路径上的硬拦。
+   *
+   * 放在 `sessions` 而不是每个调用方各写一句「查不到就抛」，是因为「什么算没签」只该有一处定义
+   * （AGENTS.md §2.5）；打招呼、投递、抓取三条入口拿到的必须是同一个判据。
+   * @param platform 平台标识
+   * @throws 平台未登记时 `PLATFORM_NOT_CONFIGURED`（对一个不存在的平台谈「承担风险」没有意义，
+   *         界面会画出一张永远签不成的卡片）、该平台没有签字记录时 `CONSENT_REQUIRED`（带平台名，界面按名字插进文案）
+   */
+  ensureConsent = (platform: string): void => {
+    const config = this.platformOrThrow(platform);
+    if (this.hasConsent(config.id)) return;
+    throw new AppError(
+      'CONSENT_REQUIRED',
+      `平台 ${config.id} 还没有一份自动化风险确认记录，先确认承担该风险`,
+      'sessions',
+      { platform: config.id, scope: consentScope(config.id) },
+    );
+  };
+
+  /**
+   * 组装一条签字读数（库里的原始时刻 → 界面视图）。
+   * @param platform 已校验过登记的平台标识
+   * @returns `SessionConsentView`
+   */
+  private consentView(platform: string): SessionConsentView {
+    const acknowledgedAt = readConsentAt(this.store.db, platform);
+    return { platform, scope: consentScope(platform), granted: acknowledgedAt !== null, acknowledgedAt };
   }
 
   /**
@@ -245,9 +335,25 @@ export class SessionsService extends Service {
     };
   }
 
+  /**
+   * 把签字表的迁移登记进 `store.migrations` 并把表建出来（同 `usage.ledger` / `jd.store` 那条路）。
+   *
+   * 幂等是硬要求：`plugins.start('sessions')` 会重新构造本服务，无条件 push 会在共享清单里
+   * 留下两个 `version: 6`，之后任何一次 `upgrade()` 都直接抛错（plan §8.4 决策 5）。
+   */
+  private ensureSchema(): void {
+    const { migrations } = this.store;
+    if (!migrations.some((item) => item.version === CONSENT_MIGRATION_VERSION)) {
+      migrations.push(consentMigration);
+    }
+    this.store.upgrade();
+  }
+
   [Service.init](): void {
+    this.ensureSchema();
+    const signed = this.platforms.filter((platform) => this.hasConsent(platform.id)).map((platform) => platform.id);
     this.ctx.logger.info(
-      `会话服务就绪：${this.platforms.length} 个平台（${this.platforms.map((item) => item.id).join(' / ')}）`,
+      `会话服务就绪：${String(this.platforms.length)} 个平台（${this.platforms.map((item) => item.id).join(' / ')}）· 已确认自动化风险 ${signed.join(' / ') || '（尚无平台签过字，外发与抓取会被硬拦）'}`,
     );
   }
 }

@@ -1,0 +1,36 @@
+2.7-06 界面拦截点 ① / 释放路径拦截点 ② 的 DOM 与桥接读数（CDP 10222，本地仿站 10233，未接触真实平台）
+
+签字前（automation_consents 表为空）
+  eval  window.autoCC.sessions.consentStatus('boss')
+    -> {"ok":true,"value":{"platform":"boss","scope":"automation:boss","granted":false,"acknowledgedAt":null}}
+
+  ② 绕过界面直接打服务口（jd.capture.run，keyword=前端 limit=1）
+    -> {"replyCode":"CONSENT_REQUIRED","replyMessage":"平台 boss 还没有一份自动化风险确认记录，先确认承担该风险",
+        "totalBefore":9,"totalAfter":9}
+    闸门额度与账本都没被这次「没发生」的抓取吃掉：拦截发生在过闸门之前。
+
+  ① 界面点「搜索并入库」后卡片出现
+    eval  document.querySelector('[data-testid="consent-card"]')
+    -> {"platform":"boss","scope":"写入的是库里这一行：automation:boss","buttons":["consent-grant","consent-deny"]}
+    截图：2.7-06-first-run-card.png
+
+  点「先不启用」（consent-deny）
+    -> {"cardGone":true,"lastRun":null,"ledgerTotal":9,"noticeText":"NO NOTICE"}
+    挂起的动作被丢弃：一个页面都没碰，账本行数不变。
+
+点「我已了解，承担风险并继续」（consent-grant）
+  -> 签字落库 {"platform":"boss","scope":"automation:boss","granted":true,"acknowledgedAt":1790804778941}
+  -> 挂起的抓取随即重放：本次因内核视图未挂载而给出 NO_KERNEL_SESSION（与签字无关的前置条件），
+     说明「确认之后才发原动作」这一句是真的发了。
+  打开 boss 会话后再点一次「搜索并入库」
+    -> 卡片不再出现（NO CARD），run 正常跑完：
+       lastRun={"platform":"boss","keyword":"前端工程师","rounds":1,"stored":5,"stoppedBy":"target-count",
+                "ledgerRowsBefore":9,"ledgerRowsAfter":9}，账本 total 9→10、search 5→6
+    截图：2.7-06-signed-run-no-card.png
+
+reload 之后（渲染层整个重建，useConsent 的两份实例各自重新读库）
+  eval  两个面板各自的 [data-testid="consent-status-boss"]
+    -> {"jobLab":"true","workflow":"true","workflowCard":false,"anyCard":false}
+    「出现一次」的判据是库里的 scope，不是前端记忆；工作流面板那一行是从 runner.nodes() 的
+    params.platform 数出来的平台（当时 planId 热切成 boss-deliver 以带出该参数，读数后已还原为 boss-basic）。
+    截图：2.7-06-reload-persisted.png

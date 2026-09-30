@@ -27,7 +27,9 @@ import type {
   SalaryView,
 } from '@auto-cc/shared';
 import { formatClock } from './format';
+import { ConsentCard, ConsentStatusRow } from './ConsentCard';
 import { useBridgeAction } from './useBridgeAction';
+import { useConsent } from './useConsent';
 
 /** 进度播报最多留几条：面板是验收入口，不是历史库（与定位实验台的自愈播报同一形状）。 */
 const PROGRESS_LIMIT = 4;
@@ -50,6 +52,10 @@ const ROW_DISPLAY_LIMIT = 12;
  * 2.6-c 起这里也是**投递确认卡片**（spec 2.6-01 / 06）：`semi` 档的那一次 `deliver.perform` 会挂在
  * 主进程里等表态，所以确认/拒绝两个按钮走的是**另一份忙碌态**——若它们也被 `busy` 禁用，
  * 界面就把自己锁死在「等一个永远点不到的按钮」上，到点自动拒绝（fail-closed 的那一路）。
+ *
+ * 2.7-e 起这三个动作（抓取 / 打招呼 / 投递）都先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①）：
+ * 那个平台还没签过风险确认时卡片先亮出来、原动作挂起，点「我承担」把签字写进库之后才重放。
+ * 这一层只是**提前拦**——真正的护栏在释放路径上（拦截点 ②），所以界面漏了也不会真发出去。
  */
 export function JobLabPanel() {
   const { t } = useTranslation();
@@ -73,6 +79,7 @@ export function JobLabPanel() {
   /** 此刻在等的投递单（spec 2.6-01）：只由 `outbound.deliver.pending()` 的读数填，界面不自造。 */
   const [pendingApprovals, setPendingApprovals] = useState<DeliverApprovalView[]>([]);
   const bridge = window.autoCC;
+  const { refresh: refreshConsent, ...consent } = useConsent();
 
   const read = useCallback(async () => {
     const [captureReply, storeReply, listReply, pendingReply] = await Promise.all([
@@ -88,7 +95,15 @@ export function JobLabPanel() {
     if (listReply?.ok) setJobList((current) => (current ? listReply.value : current));
     // 待确认单**每次都读**：它是「此刻有没有人在等」的状态，漏读就等于把用户晾在那里。
     if (pendingReply?.ok) setPendingApprovals(pendingReply.value);
-  }, [bridge]);
+    // 签字状态跟着这一遍一起刷：界面每重读一次快照就把「这个平台签过没有」再取一遍原文，
+    // 「重启 / reload 之后仍然显示已确认、且不再弹卡片」（spec 2.7-06 的「出现一次」）靠这行才有证据。
+    const platforms = new Set<string>();
+    if (captureReply?.ok) platforms.add(captureReply.value.platform);
+    if (listReply?.ok) {
+      for (const row of listReply.value.rows) platforms.add(row.platform);
+    }
+    await refreshConsent([...platforms]);
+  }, [bridge, refreshConsent]);
 
   const { busy, notice, run } = useBridgeAction(read);
   /**
@@ -142,34 +157,40 @@ export function JobLabPanel() {
    * 跑一轮抓取：滚动收集列表 + 逐条读详情 + 幂等入库，页面侧不点打招呼也不投简历，
    * 但**这一整轮本身占 `search` 那一条日额度**（spec 2.7-03），到量会直接被闸门拒掉。
    * 搜索条件取界面上的关键词（必填）与城市 / 经验 / 本次目标条数（均可空）。
+   *
+   * 动作先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①）：抓取属于哪个平台只由
+   * `jd.capture.status` 的 `platform` 说出，界面不猜；还没读到配置时交空列表，
+   * 由释放路径上那道硬拦（拦截点 ②）给出结构化错误。
    */
   const capture = () => {
     const keyword = keywordDraft.trim();
     const limit = Number(limitDraft);
-    return void run(
-      t('jd.actionRun', { keyword }),
-      () =>
-        bridge?.jd['capture.run']({
-          keyword,
-          city: cityDraft.trim() || undefined,
-          experience: experienceDraft.trim() || undefined,
-          limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
-        }),
-      {
-        apply: (value) => {
-          setBridgeError(undefined);
-          setLastRun(value);
-        },
-        // 提示行说的是**结局**：抓了几条、跳了几条、为什么停，而不是「调用成功」。
-        describe: (value) =>
-          t('jd.noticeRun', {
-            stored: value.stored,
-            skipped: value.skipped.length,
-            stoppedBy: t(`jd.stopped.${value.stoppedBy}`),
+    return void consent.ensure(captureStatus ? [captureStatus.platform] : [], () => {
+      void run(
+        t('jd.actionRun', { keyword }),
+        () =>
+          bridge?.jd['capture.run']({
+            keyword,
+            city: cityDraft.trim() || undefined,
+            experience: experienceDraft.trim() || undefined,
+            limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
           }),
-        onError: setBridgeError,
-      },
-    );
+        {
+          apply: (value) => {
+            setBridgeError(undefined);
+            setLastRun(value);
+          },
+          // 提示行说的是**结局**：抓了几条、跳了几条、为什么停，而不是「调用成功」。
+          describe: (value) =>
+            t('jd.noticeRun', {
+              stored: value.stored,
+              skipped: value.skipped.length,
+              stoppedBy: t(`jd.stopped.${value.stoppedBy}`),
+            }),
+          onError: setBridgeError,
+        },
+      );
+    });
   };
 
   /** 读库内清单（`jd.store.list`），用来证明重启后行还在、幂等没有翻倍（spec 2.3-04）。 */
@@ -192,25 +213,27 @@ export function JobLabPanel() {
    * @param row 库内的一行 JD（`jobId` 是会话目标，`id` 只用来当话术生成的 JD 标识）
    */
   const greet = (row: JobRowView) => {
-    return void run(
-      t('jd.actionGreet', { title: row.title }),
-      () =>
-        bridge?.outbound['greet.perform']({
-          platform: row.platform,
-          jobId: row.jobId,
-          script: { jdId: String(row.id), title: row.title, company: row.company },
-        }),
-      {
-        apply: (receipt) => {
-          setBridgeError(undefined);
-          setLastGreet(receipt);
+    return void consent.ensure([row.platform], () => {
+      void run(
+        t('jd.actionGreet', { title: row.title }),
+        () =>
+          bridge?.outbound['greet.perform']({
+            platform: row.platform,
+            jobId: row.jobId,
+            script: { jdId: String(row.id), title: row.title, company: row.company },
+          }),
+        {
+          apply: (receipt) => {
+            setBridgeError(undefined);
+            setLastGreet(receipt);
+          },
+          onError: (error) => {
+            setLastGreet(undefined);
+            setBridgeError(error);
+          },
         },
-        onError: (error) => {
-          setLastGreet(undefined);
-          setBridgeError(error);
-        },
-      },
-    );
+      );
+    });
   };
 
   /**
@@ -221,27 +244,29 @@ export function JobLabPanel() {
    * @param row 库内的一行 JD（`jobId` 是投递目标，`title` / `company` 只进确认卡片与回执）
    */
   const deliver = (row: JobRowView) => {
-    return void run(
-      t('deliver.action', { title: row.title }),
-      () =>
-        bridge?.outbound['deliver.perform']({
-          platform: row.platform,
-          jobId: row.jobId,
-          title: row.title,
-          company: row.company,
-          filePath: resumePathDraft.trim() || undefined,
-        }),
-      {
-        apply: (receipt) => {
-          setBridgeError(undefined);
-          setLastDeliver(receipt);
+    return void consent.ensure([row.platform], () => {
+      void run(
+        t('deliver.action', { title: row.title }),
+        () =>
+          bridge?.outbound['deliver.perform']({
+            platform: row.platform,
+            jobId: row.jobId,
+            title: row.title,
+            company: row.company,
+            filePath: resumePathDraft.trim() || undefined,
+          }),
+        {
+          apply: (receipt) => {
+            setBridgeError(undefined);
+            setLastDeliver(receipt);
+          },
+          onError: (error) => {
+            setLastDeliver(undefined);
+            setBridgeError(error);
+          },
         },
-        onError: (error) => {
-          setLastDeliver(undefined);
-          setBridgeError(error);
-        },
-      },
-    );
+      );
+    });
   };
 
   /**
@@ -300,7 +325,19 @@ export function JobLabPanel() {
             {t('jd.newestSource', { url: storeStatus.newestSourceUrl })}
           </p>
         )}
+        {captureStatus && <ConsentStatusRow view={consent.views[captureStatus.platform]} />}
       </section>
+
+      {consent.request && (
+        <ConsentCard
+          platform={consent.request.platform}
+          view={consent.request.view}
+          busy={consent.busy}
+          error={consent.error}
+          onGrant={() => void consent.grant()}
+          onDeny={consent.deny}
+        />
+      )}
 
       <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
