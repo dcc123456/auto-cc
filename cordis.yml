@@ -91,6 +91,40 @@ plugins:
       navigateTimeoutMs: 10000
       snapshotTextLimit: 4000
 
+  # 定位层（spec 2.2-01…05）：页面只回读候选，打分、去重、判歧义、指纹自愈全在这条服务里。
+  # 阈值写成配置而不是常量：2.2-02 要能在装配面板上把 `minScore` 调到 100 看界面如何拒绝猜测。
+  # 注掉这一行后，`browser-act` 连同进 PENDING（它的 `inject` 里有 `browser.locate`）。
+  - id: browser-locate
+    dependsOn: [browser]
+    config:
+      minScore: 70
+      minMargin: 12
+      candidateLimit: 5
+      textNormalizationLimit: 80
+
+  # 动作层（spec 2.2-03 / 2.2-10 / 2.2-12 / 2.2-13）：等待 → 定位 → 折算坐标 → 下发 → 回读。
+  # `cdpInputEnabled: false` 是显式降级开关——界面与日志会一起改口成 dom / trusted:false，
+  # 而不是静默地用不受信事件冒充真实点击。
+  - id: browser-act
+    dependsOn: [browser-locate]
+    config:
+      waitForTimeoutMs: 5000
+      stableCheckSamples: 2
+      waitCheckMs: 100
+      cdpInputEnabled: true
+
+  # 平台登记处（spec 2.2-07）：内核唯一认识站点的入口，本身不含任何站点知识。
+  # 渲染层只拿得到只读清单 `platform.registry.list`，`get()` 回来的适配器实例不过进程边界。
+  - id: platform-registry
+    dependsOn: [ipc]
+
+  # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/boss.json`，
+  # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。
+  # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`。
+  # 想用外部知识文件验证「改数据不改代码」：给 `packFile` 填一个绝对路径（2.6 走这条口）。
+  - id: platform-boss
+    dependsOn: [platform-registry, browser]
+
   # 工作流执行器骨架（spec 1.10）：六步占位流水线，把「状态是数据、界面是镜像」这条契约立起来。
   # 只依赖 ipc——处理器要在界面能发起调用之前就位。**不**依赖 entitlement：P1 的六步里没有任何
   # 真实外发（AGENTS.md §7.3 的约束在 P2 换成真步骤时接上），届时 greet/deliver 两步会走闸门。

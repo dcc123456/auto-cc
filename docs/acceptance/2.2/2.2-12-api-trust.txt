@@ -1,0 +1,2 @@
+GET /api/trust ->
+{"count":5,"readings":[{"type":"mousedown","isTrusted":true,"inputType":null,"value":""},{"type":"click","isTrusted":true,"inputType":null,"value":""},{"type":"input","isTrusted":true,"inputType":"insertText","value":"你好👋 想聊聊"},{"type":"mousedown","isTrusted":true,"inputType":null,"value":"你好👋 想聊聊"},{"type":"click","isTrusted":true,"inputType":null,"value":"你好👋 想聊聊"}]}

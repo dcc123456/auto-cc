@@ -1,0 +1,20 @@
+$ grep -rn "setTimeout\|sleep\|delay(" packages/browser/src --include=*.ts --exclude=*.test.ts
+packages/browser/src/index.ts:144:      const timer = setTimeout(() => finish('timeout'), this.config.navigateTimeoutMs);
+packages/browser/src/locator-script.ts:496:        timer = setTimeout(check, ${String(checkMs)});
+
+$ grep -rn "waitForTimeout\|new Promise" packages/browser/src/locator-script.ts packages/browser/src/act-service.ts | head
+packages/browser/src/locator-script.ts:431: * 走 MutationObserver 而不是纯轮询：页面上线时 DOM 变更才是「等到了」的时机，
+packages/browser/src/locator-script.ts:478:    return new Promise((resolve) => {
+packages/browser/src/locator-script.ts:498:      if (typeof MutationObserver === 'function') {
+packages/browser/src/locator-script.ts:499:        observer = new MutationObserver(() => {
+packages/browser/src/act-service.ts:38:  waitForTimeoutMs: z.number().int().min(200).max(30_000).default(5000),
+packages/browser/src/act-service.ts:175:      this.config.waitForTimeoutMs,
+packages/browser/src/act-service.ts:297:      `等待可点击超时（${String(this.config.waitForTimeoutMs)}ms 内未满足）`,
+packages/browser/src/act-service.ts:325:      `动作服务就绪：等待上限 ${String(this.config.waitForTimeoutMs)}ms · 稳定采样 ${String(
+
+判读：整包里只有两处 setTimeout，都不是「裸 sleep 等一下」——
+ 1) index.ts:144 是导航的**超时闸门**（到点判失败），不是等待条件成立；
+ 2) locator-script.ts:496 是注入脚本里的兜底轮询节拍，同文件 498-499 行
+    先装 MutationObserver，DOM 一变更立刻 check()，setTimeout 只是观察者
+    收不到通知时（属性/文本原地变化）的补票，节拍由 waitCheckMs 配置（默认 100ms）。
+没有任何 `await sleep(N)` / `setTimeout(..., N)` 形式的固定等待。

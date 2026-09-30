@@ -235,6 +235,9 @@ importers:
       '@auto-cc/plugin-outbound':
         specifier: workspace:*
         version: link:../outbound
+      '@auto-cc/plugin-platform-boss':
+        specifier: workspace:*
+        version: link:../platform-boss
       '@auto-cc/plugin-plugins':
         specifier: workspace:*
         version: link:../plugins
@@ -288,6 +291,24 @@ importers:
       '@auto-cc/plugin-store':
         specifier: workspace:*
         version: link:../store
+
+  packages/platform-boss:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-browser':
+        specifier: workspace:*
+        version: link:../browser
+      '@auto-cc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      cordis:
+        specifier: 4.0.0-rc.10
+        version: 4.0.0-rc.10
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
 
   packages/plugins:
     dependencies:

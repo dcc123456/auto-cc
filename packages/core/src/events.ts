@@ -257,6 +257,26 @@ export type ToolCallReply =
   | { ok: true; value: unknown }
   | { ok: false; code: 'TOOL_NOT_REGISTERED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED'; message: string };
 
+/**
+ * 定位层「由指纹自愈重找到元素」的事件载荷（spec 2.2-05）。
+ *
+ * `strategy` 这里是 `string` 而不是那八个策略名的联合：联合定义在 `@auto-cc/shared`，
+ * 而 `core` 在它之下（不能反向依赖），所以这条契约只承诺「一个策略名」。
+ * 发送方（`browser.locate`）传的一定是联合里的成员，界面只把它当文本显示。
+ */
+export interface LocatorRelocatedEvent {
+  /** 定位声明的描述，界面据此说明是哪个控件被重找了 */
+  description: string;
+  strategy: string;
+  /** 自愈候选的最终得分 */
+  score: number;
+  /** 命中的那一帧地址；跨源帧也照原样带回 */
+  frameUrl: string;
+  /** 原始候选的失败原因，便于对照「改版改掉了什么」 */
+  because: string;
+  at: number;
+}
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -287,5 +307,10 @@ declare module 'cordis' {
      * 载荷只有增量片段与两个 id，界面不靠它重建整份历史。
      */
     'chat/delta'(event: ChatDeltaEvent): void;
+    /**
+     * 一次定位由「上一次成功留下的指纹」自愈重找到元素时由 `browser.locate` 发出（spec 2.2-05）。
+     * 2.7 的选择器腐化率只统计这一条来源，漏发就等于宣称站点没有改版。
+     */
+    'locator/relocated'(event: LocatorRelocatedEvent): void;
   }
 }

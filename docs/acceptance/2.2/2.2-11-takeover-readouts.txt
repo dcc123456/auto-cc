@@ -1,0 +1,30 @@
+spec 2.2-11 新标签接管（本地 fixture http://127.0.0.1:10233/newtab，两条入口）
+
+前提：先在仿站登录（/login?next=%2Fnewtab 写持久 cookie autocc_session=fixture-token），
+      内核视图分区 = persist:boss。
+
+1) window.open 入口 —— browser.act.click(newtab-open-button)
+   { "ok": true, "trusted": true }
+   CDP 目标表新增：page  新标签目标页 · 本地 fixture  http://127.0.0.1:10233/newtab/target
+
+2) <a target="_blank"> 入口 —— browser.act.click(newtab-link)
+   { "ok": true, "trusted": true, "frame": "http://127.0.0.1:10233/newtab" }
+
+3) shell.getStatus()（两条入口各接管一个子视图之后的读数）
+   {
+     "partition": "persist:boss",
+     "kernelViewUrl": "http://127.0.0.1:10233/newtab",
+     "activeKernelViewUrl": "http://127.0.0.1:10233/newtab/target",
+     "kernelViewTakeoverCount": 2
+   }
+   —— 栈顶是接管进来的子视图（用户看到的就是它），分区仍是父视图那一份 persist:boss。
+
+4) 被接管页自己回显的 document.cookie（证明分区一致，不是只挂了个视图）
+   {
+     "url": "http://127.0.0.1:10233/newtab/target",
+     "cookie": "autocc_session=fixture-token",
+     "names": "autocc_session"
+   }
+
+判据对照：新页面出现在我们自己的 CDP 目标表里（不是系统浏览器的窗口）、
+kernelViewTakeoverCount 随入口数增长、子视图读得到父分区的会话 cookie。

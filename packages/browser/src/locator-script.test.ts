@@ -1,0 +1,543 @@
+import { describe, expect, it } from 'vitest';
+import type { ElementRect, LocateCandidate, LocatedReading } from '@auto-cc/shared';
+import {
+  DEFAULT_SCRIPT_LIMITS,
+  buildDomActionScript,
+  buildFingerprintScanScript,
+  buildIframeRectsScript,
+  buildLocateScript,
+  buildWaitScript,
+  toDomActionReading,
+  toIframeRects,
+  toLocatedReading,
+  toLocatedReadings,
+  toWaitReading,
+  type ScriptLimits,
+} from './locator-script.js';
+
+/** 这份替身只实现注入脚本真正碰到的那几个 DOM 面，多一个都不写。 */
+type FakeNode = {
+  tagName: string;
+  attrs: Record<string, string>;
+  dataset: Record<string, string>;
+  kids: FakeNode[];
+  parent?: FakeNode;
+  ownText?: string;
+  value?: string;
+  disabled?: boolean;
+  labels?: FakeNode[];
+  box: ElementRect;
+  clickCalls: number;
+  dispatched: string[];
+  getAttribute: (name: string) => string | null;
+  getBoundingClientRect: () => ElementRect;
+  matches: (selector: string) => boolean;
+  contains: (other: FakeNode) => boolean;
+  click: () => void;
+  dispatchEvent: (event: { type: string }) => boolean;
+  textContent: string;
+};
+
+/** 造一个替身节点，并把子节点的父亲指回来。 */
+function fakeNode(tagName: string, init: Partial<FakeNode> = {}): FakeNode {
+  const node = {
+    tagName,
+    attrs: init.attrs ?? {},
+    dataset: init.dataset ?? {},
+    kids: init.kids ?? [],
+    parent: init.parent,
+    ownText: init.ownText,
+    value: init.value,
+    disabled: init.disabled,
+    labels: init.labels,
+    box: init.box ?? { x: 0, y: 0, width: 100, height: 30 },
+    clickCalls: 0,
+    dispatched: [],
+    getAttribute: (name: string) => node.attrs[name] ?? null,
+    getBoundingClientRect: () => node.box,
+    matches: (selector: string) => matchesSelector(node, selector),
+    contains: (other: FakeNode) => other === node || node.kids.some((kid) => kid.contains(other)),
+    click: () => {
+      node.clickCalls += 1;
+    },
+    dispatchEvent: (event: { type: string }) => {
+      node.dispatched.push(event.type);
+      return true;
+    },
+    textContent: '',
+  } as unknown as FakeNode;
+  node.kids.forEach((kid) => {
+    kid.parent = node;
+  });
+  return node;
+}
+
+/** 极简选择器匹配：只认 `tag` / `#id` / `.class` / `[attr]` / `[attr="v"]` 的串联，遇到组合器就抛错。 */
+function matchesSelector(node: FakeNode, selector: string): boolean {
+  if (/[\s>]/.test(selector) || selector.includes(':')) throw new Error(`替身选择器引擎不支持：${selector}`);
+  const parts = selector.match(/^[a-zA-Z0-9]+|[.#][a-zA-Z0-9_-]+|\[[^\]]+\]/g) ?? [];
+  return parts.every((part) => {
+    if (part.startsWith('#')) return node.attrs.id === part.slice(1);
+    if (part.startsWith('.')) return (node.attrs.class ?? '').split(/\s+/).includes(part.slice(1));
+    if (part.startsWith('[')) {
+      const body = part.slice(1, -1);
+      const eq = body.indexOf('=');
+      if (eq < 0) return node.getAttribute(body) !== null;
+      return node.getAttribute(body.slice(0, eq)) === body.slice(eq + 1).replaceAll('"', '');
+    }
+    return node.tagName.toLowerCase() === part.toLowerCase();
+  });
+}
+
+/** 深度优先展开，顺序与真实 DOM 文档序一致——`nodeIndex` 的稳定性依赖这一点。 */
+function flattenTree(root: FakeNode): FakeNode[] {
+  const out: FakeNode[] = [root];
+  root.kids.forEach((kid) => out.push(...flattenTree(kid)));
+  return out;
+}
+
+/** 拼出子孙正文：脚本读 `textContent`，替身没有真实文本树就按当前结构现算。 */
+function textContentOf(node: FakeNode): string {
+  if (typeof node.ownText === 'string') return node.ownText;
+  return node.kids.map(textContentOf).join(' ');
+}
+
+/** 页面替身：注入脚本用到的每个 document 面都在这里。 */
+type FakePage = {
+  body: FakeNode;
+  documentElement: FakeNode;
+  querySelectorAll: (selector: string) => FakeNode[];
+  getElementById: (id: string) => FakeNode | null;
+  elementFromPoint: (x: number, y: number) => FakeNode | null;
+};
+
+/**
+ * 把结构派生出来的那几个面挂成 getter。
+ *
+ * 用 getter 而不是直接赋字段，是因为测试里会往 `kids` 里追加节点（歧义命中、后来才出现的元素），
+ * 缓存下来的父亲与兄弟就成了过期快照——真实 DOM 的这几个属性永远是现算的。
+ * @param node 目标节点
+ */
+function defineStructuralGetters(node: FakeNode): void {
+  const siblings = node.parent?.kids ?? [];
+  const position = siblings.indexOf(node);
+  Object.defineProperties(node, {
+    textContent: { get: () => textContentOf(node), configurable: true, enumerable: false },
+    parentElement: { get: () => node.parent, configurable: true, enumerable: false },
+    // `children` 在真实 DOM 里是**自己的**子节点；脚本读的 `parentElement.children` 才是兄弟表，
+    // 这里若返回兄弟，父级文本会被当成锚点混进指纹里。
+    children: { get: () => node.kids, configurable: true, enumerable: false },
+    previousElementSibling: {
+      get: () => (position > 0 ? siblings[position - 1] : undefined),
+      configurable: true,
+      enumerable: false,
+    },
+    nextElementSibling: {
+      get: () => (position >= 0 && position < siblings.length - 1 ? siblings[position + 1] : undefined),
+      configurable: true,
+      enumerable: false,
+    },
+  });
+}
+
+/**
+ * 造页面替身。
+ *
+ * `querySelectorAll` 每次调用都重新展开树，而不是把结果缓存下来——等待脚本会反复扫描，
+ * 而「后来才出现的元素」正是它要等到的东西。
+ * @param root 文档根节点
+ * @returns 可直接喂给注入脚本的 document 替身
+ */
+function fakePage(root: FakeNode): FakePage {
+  const live = () => {
+    const all = flattenTree(root);
+    all.forEach(defineStructuralGetters);
+    return all;
+  };
+  return {
+    body: root,
+    documentElement: root,
+    querySelectorAll: (selector) =>
+      selector === '*'
+        ? live()
+        : live().filter((node) =>
+            selector
+              .split(',')
+              .map((part) => part.trim().toLowerCase())
+              .includes(node.tagName.toLowerCase()),
+          ),
+    getElementById: (id) => live().find((node) => node.attrs.id === id) ?? null,
+    elementFromPoint: (x, y) => {
+      // 文档序里越靠后越在上层（后画的盖住先画的），所以命中的是最后一个包住该点的节点。
+      const hits = live().filter(
+        (node) =>
+          node.box.x <= x && x <= node.box.x + node.box.width && node.box.y <= y && y <= node.box.y + node.box.height,
+      );
+      return hits.at(-1) ?? null;
+    },
+  };
+}
+
+/**
+ * 在替身页面上求值注入脚本——与 `executeJavaScript` 跑的是同一段源码。
+ *
+ * 只断言字符串里出现了 `roleOf` 证明不了脚本读得对，所以这里必须真的求值。
+ * @param source 某个 builder 产出的表达式源码
+ * @param page 页面替身
+ * @returns 脚本返回值（等待类脚本返回 Promise）
+ */
+function run(source: string, page: FakePage): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- 被测对象本身就是一段注入脚本，绕开求值就只剩断言字符串
+  return new Function('document', 'location', `return ${source}`)(page, {
+    href: 'http://127.0.0.1:10233/locator',
+  });
+}
+
+/** 「职位卡片」树：搜索框 + 列表 + 卡片（标题与打招呼按钮）+ 盖在按钮上的浮层。 */
+function jobCardTree(): { root: FakeNode; apply: FakeNode; keyword: FakeNode; title: FakeNode } {
+  const overlay = fakeNode('div', { attrs: { class: 'mask' }, box: { x: 0, y: 300, width: 500, height: 40 } });
+  const apply = fakeNode('button', {
+    attrs: { 'data-testid': 'apply-btn', class: 'btn btn-primary', id: 'apply-1', type: 'button' },
+    dataset: { testid: 'apply-btn' },
+    ownText: '打招呼',
+    box: { x: 0, y: 300, width: 120, height: 40 },
+  });
+  const keyword = fakeNode('input', {
+    attrs: { name: 'query', placeholder: '搜索职位、公司', type: 'text' },
+    value: '前端',
+    box: { x: 0, y: 10, width: 300, height: 32 },
+  });
+  const headingRef = fakeNode('span', { attrs: { id: 'job-title' }, ownText: '资深前端工程师' });
+  const title = fakeNode('div', {
+    attrs: { role: 'heading', 'aria-labelledby': 'job-title', 'aria-label': '自报的名字' },
+    kids: [headingRef],
+    box: { x: 0, y: 60, width: 300, height: 24 },
+  });
+  const card = fakeNode('div', {
+    attrs: { class: 'card' },
+    kids: [title, apply],
+    box: { x: 0, y: 50, width: 400, height: 300 },
+  });
+  const list = fakeNode('div', {
+    attrs: { role: 'list' },
+    kids: [card, overlay],
+    box: { x: 0, y: 40, width: 400, height: 400 },
+  });
+  const root = fakeNode('body', { kids: [keyword, list], box: { x: 0, y: 0, width: 500, height: 800 } });
+  return { root, apply, keyword, title };
+}
+
+/** 按上限跑一次定位扫描。 */
+function scan(
+  candidates: LocateCandidate[],
+  limits: ScriptLimits = DEFAULT_SCRIPT_LIMITS,
+  page: FakePage = fakePage(jobCardTree().root),
+): LocatedReading[] {
+  return toLocatedReadings(run(buildLocateScript(candidates, limits), page));
+}
+
+describe('定位读取脚本（spec 2.2-01）', () => {
+  it('testId 命中读出的是一条完整指纹：帧地址、角色、可读名、位置都在，class 却一条都不留', () => {
+    const readings = scan([{ strategy: 'testId', attribute: 'data-testid', value: 'apply-btn' }]);
+    expect(readings).toHaveLength(1);
+    expect(readings[0]).toMatchObject({
+      frameUrl: 'http://127.0.0.1:10233/locator',
+      candidateIndex: 0,
+      strategy: 'testId',
+      siblingCount: 1,
+      tagName: 'button',
+      role: 'button',
+      accessibleName: '打招呼',
+      text: '打招呼',
+      visible: true,
+      enabled: true,
+      rect: { x: 0, y: 300, width: 120, height: 40 },
+    });
+    expect(readings[0]!.attributes).toEqual({ id: 'apply-1', type: 'button', 'data-testid': 'apply-btn' });
+    expect(readings[0]!.ancestorRoles).toEqual(['list']);
+    expect(readings[0]!.nearbyTexts).toEqual(['资深前端工程师']);
+  });
+
+  it('id / name 候选按属性全等命中；placeholder 是输入框可读名的兜底来源', () => {
+    expect(scan([{ strategy: 'id', value: 'apply-1' }])[0]?.strategy).toBe('id');
+    const byName = scan([{ strategy: 'name', value: 'query' }]);
+    expect(byName[0]).toMatchObject({ role: 'textbox', accessibleName: '搜索职位、公司', text: '前端' });
+  });
+
+  it('role 候选要角色和可读名都对上才算命中，包含匹配与 exact 全等分开', () => {
+    const contains = scan([{ strategy: 'role', role: 'heading', name: '前端' }]);
+    expect(contains).toHaveLength(1);
+    expect(contains[0]).toMatchObject({ tagName: 'div', role: 'heading' });
+    expect(scan([{ strategy: 'role', role: 'heading', name: '资深前端工程师', exact: true }])).toHaveLength(1);
+    expect(scan([{ strategy: 'role', role: 'heading', name: '不存在的名字' }])).toHaveLength(0);
+    expect(scan([{ strategy: 'role', role: 'button', name: '打招呼' }])).toHaveLength(1);
+  });
+
+  it('可读名的级联次序：aria-labelledby 压过 aria-label，引用到的节点文本才是名字', () => {
+    const reading = scan([{ strategy: 'css', value: 'div' }]).find((item) => item.role === 'heading');
+    expect(reading!.accessibleName).toBe('资深前端工程师');
+  });
+
+  it('文本候选只留最深的一层命中，容器不参与；hitsPerCandidate 截断不改 siblingCount', () => {
+    const readings = scan([{ strategy: 'text', value: '打招呼' }], DEFAULT_SCRIPT_LIMITS, fakePage(jobCardTree().root));
+    expect(readings).toHaveLength(1);
+    expect(readings[0]).toMatchObject({ tagName: 'button', siblingCount: 1, strategy: 'text' });
+  });
+
+  it('歧义命中把总数带回来，界面才看得出「一条条件中了几个」', () => {
+    const tree = jobCardTree();
+    const duplicate = fakeNode('button', { attrs: { 'data-testid': 'apply-btn' }, ownText: '打招呼' });
+    tree.apply.parent!.kids.push(duplicate);
+    const readings = scan(
+      [{ strategy: 'testId', attribute: 'data-testid', value: 'apply-btn' }],
+      DEFAULT_SCRIPT_LIMITS,
+      fakePage(tree.root),
+    );
+    expect(readings).toHaveLength(2);
+    expect(readings.map((item) => item.siblingCount)).toEqual([2, 2]);
+    expect(readings[0]!.nodeIndex).not.toBe(readings[1]!.nodeIndex);
+  });
+
+  it('一条候选命中过多时按上限截断回读，但总数仍是真实总数', () => {
+    const tree = jobCardTree();
+    for (let index = 0; index < 6; index += 1) {
+      tree.apply.parent!.kids.push(fakeNode('button', { attrs: { 'data-testid': 'apply-btn' }, ownText: '打招呼' }));
+    }
+    const readings = scan(
+      [{ strategy: 'testId', attribute: 'data-testid', value: 'apply-btn' }],
+      { ...DEFAULT_SCRIPT_LIMITS, hitsPerCandidate: 2 },
+      fakePage(tree.root),
+    );
+    expect(readings).toHaveLength(2);
+    expect(readings[0]!.siblingCount).toBe(7);
+  });
+
+  it('动作前置判据如实读出：disabled 关掉 enabled，被浮层盖住关掉 unobstructed，零尺寸关掉 visible', () => {
+    expect(scan([{ strategy: 'css', value: 'button' }])[0]).toMatchObject({
+      visible: true,
+      enabled: true,
+      unobstructed: false,
+    });
+    const disabled = fakeNode('button', { attrs: { id: 'apply-1' }, disabled: true });
+    expect(
+      scan(
+        [{ strategy: 'id', value: 'apply-1' }],
+        DEFAULT_SCRIPT_LIMITS,
+        fakePage(fakeNode('body', { kids: [disabled] })),
+      )[0],
+    ).toMatchObject({
+      enabled: false,
+      visible: true,
+    });
+    const collapsed = fakeNode('button', { attrs: { id: 'apply-1' }, box: { x: 0, y: 0, width: 0, height: 0 } });
+    expect(
+      scan(
+        [{ strategy: 'id', value: 'apply-1' }],
+        DEFAULT_SCRIPT_LIMITS,
+        fakePage(fakeNode('body', { kids: [collapsed] })),
+      )[0],
+    ).toMatchObject({ visible: false, unobstructed: false });
+  });
+
+  it('像机器生成的属性值进不了指纹：下次构建它就变了，留着只会把自愈带偏', () => {
+    const generated = fakeNode('button', {
+      attrs: { id: 'btn-4711' },
+      dataset: { render: 'a1b2c3d4', stable: 'apply-entry' },
+      ownText: '打招呼',
+    });
+    const reading = scan(
+      [{ strategy: 'css', value: 'button' }],
+      DEFAULT_SCRIPT_LIMITS,
+      fakePage(fakeNode('body', { kids: [generated] })),
+    )[0]!;
+    expect(reading.attributes).toEqual({ 'data-stable': 'apply-entry' });
+  });
+
+  it('css 候选交给 matches；非法选择器只让这条候选零命中，不掀翻整次扫描', () => {
+    expect(scan([{ strategy: 'css', value: 'button' }])).toHaveLength(1);
+    expect(scan([{ strategy: 'css', value: 'div button' }])).toHaveLength(0);
+    const readings = scan([
+      { strategy: 'css', value: 'div button' },
+      { strategy: 'id', value: 'apply-1' },
+    ]);
+    expect(readings).toHaveLength(1);
+    expect(readings[0]!.candidateIndex).toBe(1);
+  });
+
+  it('没有 document.evaluate 时 xpath 候选安静地零命中，而不是抛错拖垮整帧', () => {
+    expect(scan([{ strategy: 'xpath', value: '//button' }])).toHaveLength(0);
+  });
+
+  it('非法属性名的 testId 候选被拒收，选择器语法进不了页面', () => {
+    expect(scan([{ strategy: 'testId', attribute: 'data-x"]', value: 'apply-btn' }])).toHaveLength(0);
+  });
+
+  it('nodeIndex 在同一帧的多次求值之间稳定，所以「定位到某节点」和「对它下动作」接得上', () => {
+    const page = fakePage(jobCardTree().root);
+    const first = scan([{ strategy: 'id', value: 'apply-1' }], DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    const second = scan([{ strategy: 'css', value: 'button' }], DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    expect(second.nodeIndex).toBe(first.nodeIndex);
+    expect(first.nodeIndex).toBeGreaterThan(0);
+  });
+
+  it('指纹扫描按标签名预筛，读出的 strategy 一律是 fingerprint 且 candidateIndex 为 -1', () => {
+    const readings = toLocatedReadings(run(buildFingerprintScanScript('button'), fakePage(jobCardTree().root)));
+    expect(readings).toHaveLength(1);
+    expect(readings[0]).toMatchObject({
+      strategy: 'fingerprint',
+      candidateIndex: -1,
+      siblingCount: 1,
+      tagName: 'button',
+    });
+  });
+
+  it('子 iframe 的位置与身份读得出来，坐标折算才有依据（spec 2.2-09）', () => {
+    const inner = fakeNode('iframe', {
+      attrs: { src: '/chat-frame', name: 'chat-box' },
+      box: { x: 200, y: 100, width: 300, height: 200 },
+    });
+    const rects = toIframeRects(run(buildIframeRectsScript(), fakePage(fakeNode('body', { kids: [inner] }))));
+    expect(rects).toEqual([{ x: 200, y: 100, width: 300, height: 200, src: '/chat-frame', name: 'chat-box' }]);
+    expect(toIframeRects(null)).toEqual([]);
+  });
+});
+
+describe('DOM 兜底与等待脚本（spec 2.2-03 / 2.2-12）', () => {
+  /** 先定位，再按胜出的候选下标 + 身份号下动作——与真实调用顺序一致。 */
+  const actOn = (
+    action: 'click' | 'type' | 'select',
+    candidates: LocateCandidate[],
+    chosen: LocatedReading,
+    page: FakePage,
+    payload?: string,
+  ): ReturnType<typeof toDomActionReading> =>
+    toDomActionReading(
+      run(
+        buildDomActionScript(
+          action,
+          candidates,
+          { candidateIndex: chosen.candidateIndex, nodeIndex: chosen.nodeIndex },
+          payload,
+        ),
+        page,
+      ),
+    );
+
+  it('click 走 DOM 通道时节点真的收到了点击', () => {
+    const tree = jobCardTree();
+    const page = fakePage(tree.root);
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'apply-1' }];
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    expect(actOn('click', candidates, chosen, page)).toMatchObject({ ok: true, error: '' });
+    expect(tree.apply.clickCalls).toBe(1);
+  });
+
+  it('type 写入 value 并补 input / change，回读的 valueAfter 就是页面里的当前值', () => {
+    const tree = jobCardTree();
+    const page = fakePage(tree.root);
+    const candidates: LocateCandidate[] = [{ strategy: 'name', value: 'query' }];
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    expect(actOn('type', candidates, chosen, page, '资深前端 3年经验')).toMatchObject({
+      ok: true,
+      valueAfter: '资深前端 3年经验',
+    });
+    expect(tree.keyword.dispatched).toEqual(['input', 'change']);
+    expect(tree.keyword.value).toBe('资深前端 3年经验');
+  });
+
+  it('select 把值写进目标并补 change', () => {
+    const picker = fakeNode('select', { attrs: { id: 'salary' }, value: '' });
+    const page = fakePage(fakeNode('body', { kids: [picker] }));
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'salary' }];
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    expect(actOn('select', candidates, chosen, page, '10k-20k')).toMatchObject({ ok: true, valueAfter: '10k-20k' });
+    expect(picker.dispatched).toEqual(['change']);
+  });
+
+  it('目标节点被移走时返回结构化失败并说明要重新定位，不抛异常', () => {
+    const tree = jobCardTree();
+    const page = fakePage(tree.root);
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'apply-1' }];
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page)[0]!;
+    tree.root.kids.length = 0;
+    expect(actOn('click', candidates, chosen, page)).toMatchObject({
+      ok: false,
+      error: '目标节点已不在当前帧里，需要重新定位',
+    });
+  });
+
+  it('appear 等到元素出现即兑现，waitedMs 不超过上限', async () => {
+    const root = fakeNode('body', { kids: [] });
+    const page = fakePage(root);
+    setTimeout(() => {
+      root.kids.push(fakeNode('button', { attrs: { id: 'late' }, ownText: '打招呼' }));
+    }, 10);
+    const reading = toWaitReading(
+      await run(buildWaitScript('appear', [{ strategy: 'id', value: 'late' }], 500, 5), page),
+    );
+    expect(reading.satisfied).toBe(true);
+    expect(reading.waitedMs).toBeLessThanOrEqual(500);
+    expect(reading.readings[0]).toMatchObject({ tagName: 'button' });
+  });
+
+  it('disappear 等不到就如实报未满足并带上仍在的元素——超时是结局，不是异常', async () => {
+    const page = fakePage(jobCardTree().root);
+    const reading = toWaitReading(
+      await run(buildWaitScript('disappear', [{ strategy: 'id', value: 'apply-1' }], 30, 5), page),
+    );
+    expect(reading.satisfied).toBe(false);
+    expect(reading.readings).toHaveLength(1);
+  });
+
+  it('clickable 要求可见 + 启用 + 未被遮挡三者齐备，被浮层盖住时不满足', async () => {
+    const reading = toWaitReading(
+      await run(
+        buildWaitScript('clickable', [{ strategy: 'css', value: 'button' }], 30, 5),
+        fakePage(jobCardTree().root),
+      ),
+    );
+    expect(reading.satisfied).toBe(false);
+  });
+
+  it('textChanges 以脚本自己取的基线为准，页面文本没变就不算等到', async () => {
+    const reading = toWaitReading(
+      await run(
+        buildWaitScript('textChanges', [{ strategy: 'id', value: 'apply-1' }], 20, 5),
+        fakePage(jobCardTree().root),
+      ),
+    );
+    expect(reading.satisfied).toBe(false);
+  });
+});
+
+describe('页面读数钳制（外部页面是不可信输入）', () => {
+  it('非数组的返回值钳成空表，null 与非对象项被剔除', () => {
+    expect(toLocatedReadings(null)).toEqual([]);
+    expect(toLocatedReadings('nope')).toEqual([]);
+    expect(toLocatedReadings([null, 1, undefined])).toEqual([]);
+  });
+
+  it('字段类型不对时用中性值补齐，siblingCount 至少是 1', () => {
+    const reading = toLocatedReading({ siblingCount: 'many', rect: 'none', attributes: 'x', nearbyTexts: ['a', 1] })!;
+    expect(reading.siblingCount).toBe(1);
+    expect(reading.nodeIndex).toBe(0);
+    expect(reading.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    expect(reading.attributes).toEqual({});
+    expect(reading.nearbyTexts).toEqual(['a']);
+    expect(reading.visible).toBe(false);
+  });
+
+  it('等待读数与动作读数各自钳齐字段', () => {
+    expect(toWaitReading(null)).toEqual({ satisfied: false, waitedMs: 0, readings: [] });
+    expect(toWaitReading({ satisfied: true, waitedMs: 12, readings: [{ nodeIndex: 3 }] })).toMatchObject({
+      satisfied: true,
+      waitedMs: 12,
+    });
+    expect(toDomActionReading(null)).toEqual({ ok: false, valueAfter: '', error: '' });
+    expect(toDomActionReading({ ok: true, valueAfter: 5, error: null })).toEqual({
+      ok: true,
+      valueAfter: '',
+      error: '',
+    });
+  });
+});

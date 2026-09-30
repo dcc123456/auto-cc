@@ -5,6 +5,7 @@ import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
+import { LocatorLabPanel } from './LocatorLabPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 import { UsagePanel } from './UsagePanel';
@@ -102,6 +103,7 @@ export function App() {
           <div className="flex flex-col gap-4">
             <ShellPanel />
             <SessionPanel />
+            <LocatorLabPanel />
             <UsagePanel />
             <AssemblyPanel />
           </div>

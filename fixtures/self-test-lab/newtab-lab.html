@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 新标签实验台 · 本地 fixture</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      .notice {
+        margin: 10px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: #cbd5e1;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      button,
+      a {
+        font: inherit;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+        cursor: pointer;
+      }
+      a {
+        color: #7dd3fc;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body data-fixture-page="newtab">
+    <h1>新标签实验台</h1>
+    <p class="notice">
+      本地 fixture 站点（AGENTS.md §7.2）。两条入口分别覆盖 <code>target=_blank</code> 链接与
+      <code>window.open()</code> 按钮 —— spec 2.2-11 要求两者都被接管进<strong>同一会话分区</strong>，
+      不许逃逸到系统浏览器。
+    </p>
+    <p class="notice">
+      先在仿站登录（写一份 <code>autocc_session</code> 持久 cookie），再点入口。 打开的目标页会把自身的
+      <code>document.cookie</code> 回显到 DOM：读得到会话 cookie 才说明新页面落在同一个分区里。
+    </p>
+    <p class="row">
+      <a id="newtab-link" data-testid="newtab-link" href="/newtab/target" target="_blank">在新标签打开目标页（链接）</a>
+      <button type="button" id="newtab-open" data-testid="newtab-open-button">在新标签打开目标页（window.open）</button>
+    </p>
+    <p>
+      登录入口：<a data-testid="login-link" href="/login?next=%2Fnewtab">在仿站登录</a> · 本页 cookie：<code
+        data-testid="newtab-page-cookie"
+        >（脚本未运行）</code
+      >
+    </p>
+
+    <script>
+      document.querySelector('[data-testid="newtab-page-cookie"]').textContent = document.cookie || '（空）';
+      // 走 window.open 才与真实站点里「JS 唤出新页」的形态一致，光有 <a target=_blank> 会漏掉一半入口。
+      document.querySelector('[data-testid="newtab-open-button"]').addEventListener('click', () => {
+        window.open('/newtab/target', '_blank');
+      });
+    </script>
+  </body>
+</html>

@@ -3,6 +3,7 @@ import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView, type WebC
 import { Service, type Context } from '@auto-cc/core';
 import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
+import { decideTakeover, topmostAlive } from './view-takeover.js';
 
 /** 仓库根目录（开发态）。 */
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -44,6 +45,11 @@ export class ShellService extends Service {
 
   private mainWindow: BrowserWindow | undefined;
   private kernelView: WebContentsView | undefined;
+  /**
+   * 被 `window.open` / target=_blank 接管进来的子视图，按创建顺序排列，**末尾叠在最上层**（spec 2.2-11）。
+   * 它们与内核视图同分区、同槽位；关闭与收回必须一起清，否则 CDP 目标表里留下看不见的新标签（2.1-11）。
+   */
+  private takeoverViews: WebContentsView[] = [];
   private tray: Tray | undefined;
   private kernelViewVisible = true;
   /** 内核视图当前所用的会话分区；占位页用默认会话，此处为空串。 */
@@ -72,8 +78,13 @@ export class ShellService extends Service {
       kernelViewVisible: this.kernelViewVisible,
       kernelViewBounds: bounds,
       // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
+      // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
       kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
       kernelViewUrl: contents?.getURL() ?? '',
+      // 用户实际看到的是栈顶那一个：harness 用它证明接管发生（此时 `kernelViewUrl` 仍停在被盖住的父页）。
+      activeKernelViewUrl: this.activeKernelContents()?.getURL() ?? '',
+      // 接管子视图的个数：与 `devtools.status().targetCount` 的增量对照，就是 2.1-11 的泄漏判据。
+      kernelViewTakeoverCount: this.takeoverViews.length,
       kernelViewLoadError: this.kernelViewError,
       lastError: this.lastError,
     };
@@ -96,35 +107,40 @@ export class ShellService extends Service {
    *
    * 用「重建为占位页」而不是「摘掉视图」：视图槽位是界面布局的一部分（1.2-12），
    * 摘掉之后 resize 就无处摆位，重新打开还得再走一遍创建逻辑。
+   * 接管进来的新标签属于这个站点页面，一并关掉——否则「关」之后它们还是活的视图目标。
    */
   unmountKernelSite = (): void => {
     this.createKernelView();
   };
 
   /**
-   * 交回内嵌内核视图的页面句柄，供领域层（`browser.page`）读写页面。
+   * 交回内嵌内核视图里**当前活动页面**的句柄，供领域层（`browser.page`）读写页面。
    *
    * 视图的**所有权**仍在壳层：壳层负责创建、摆位、销毁，这里只是把句柄借出去。
    * 之所以借句柄而不是在壳层加一堆 `readPage()/click()` 方法：抓取、注入、生成类能力
    * 一律不属于壳（见本文件头注释），而借出去之后它们只可能有一个归属地。
-   * @returns 当前视图的 `WebContents`；视图未创建或已销毁时为 null（调用方据此结构化失败，不猜）
+   *
+   * 活动页面 = 最上层还活着的接管子视图，没有子视图时才是内核视图本身（spec 2.2-11）：
+   * 定位层与动作层必须打在用户真正看到的那一页上，否则会对着被盖住的旧页面点击。
+   * @returns 当前活动页面的 `WebContents`；未挂载站点、视图未创建或已全部销毁时为 null（调用方据此结构化失败，不猜）
    */
   kernelContents = (): WebContents | null => {
     // 占位页也占一个视图，但它不是任何平台的会话：把它当句柄交出去，
     // 上层就分不清「没开会话」和「开了会话但页面还没装载」。
     if (this.kernelViewPartition === '') return null;
-    const contents = this.kernelView?.webContents;
-    return contents && !contents.isDestroyed() ? contents : null;
+    return this.activeKernelContents();
   };
 
   /**
-   * 显示/隐藏内嵌内核视图。
+   * 显示/隐藏内嵌内核视图（连同其上的接管子视图，它们是同一块槽位里的页面）。
    * @param visible 目标可见性
    * @returns 生效后的可见性
    */
   setKernelViewVisible = (visible: boolean): { kernelViewVisible: boolean } => {
     this.kernelViewVisible = Boolean(visible);
     this.kernelView?.setVisible(this.kernelViewVisible);
+    // 子视图不跟着隐藏的话，隐藏内核视图后新标签还浮在界面上，等于一个关不掉的浮层。
+    this.takeoverViews.forEach((view) => view.setVisible(this.kernelViewVisible));
     this.layoutKernelView();
     return { kernelViewVisible: this.kernelViewVisible };
   };
@@ -220,6 +236,8 @@ export class ShellService extends Service {
       if (this.mainWindow !== win) return;
       this.mainWindow = undefined;
       this.kernelView = undefined;
+      // 子视图随窗口的 contentView 一起没了：表不清空的话 `kernelViewTakeoverCount` 会停在旧值上。
+      this.takeoverViews = [];
       if (!this.quitting) this.createWindow();
     });
     // 安全底线：应用内一律不开新窗口，外链交出去也要显式放行。
@@ -242,6 +260,8 @@ export class ShellService extends Service {
   private createKernelView(partition?: string, url = kernelViewPlaceholder) {
     const win = this.mainWindow;
     if (!win) return;
+    // 接管子视图挂在旧页面之上：旧页面一换，它们就无处可依，必须一起收掉（2.1-11 的泄漏口径）。
+    [...this.takeoverViews].forEach((view) => this.detachTakeoverView(view));
     const previous = this.kernelView;
     if (previous && !previous.webContents.isDestroyed()) {
       win.contentView.removeChildView(previous);
@@ -267,25 +287,128 @@ export class ShellService extends Service {
     view.setVisible(this.kernelViewVisible);
     // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，只有 resize 才会救回来。
     this.layoutKernelView();
-    // 失败读数不在「加载成功」事件里复位：实测 `dom-ready` / `did-finish-load` 在失败那一轮也会触发，
-    // 任何判据都会把刚记下的错误抹掉，所以它的生命周期就是本次挂载（开头清零，重新打开即复位）。
-    view.webContents.on('did-fail-load', (_event, code, description, failedUrl, isMainFrame) => {
+    // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
+    this.observeLoadFailure(view.webContents);
+    view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
+    void view.webContents.loadURL(url);
+  }
+
+  /**
+   * 监听一个视图主帧的装载失败，记进当前挂载的失败读数并推 `shell/view-error`。
+   *
+   * 读数不在「加载成功」事件里复位：实测 `dom-ready` / `did-finish-load` 在失败那一轮也会触发，
+   * 任何判据都会把刚记下的错误抹掉，所以它的生命周期就是本次挂载（创建视图时清零，重新打开即复位）。
+   * @param contents 要监听的页面句柄（内核视图本身或接管子视图）
+   */
+  private observeLoadFailure(contents: WebContents): void {
+    contents.on('did-fail-load', (_event, code, description, failedUrl, isMainFrame) => {
       if (!isMainFrame) return;
       this.kernelViewError = { code, description, url: failedUrl };
       // 界面不能靠 `sessions.open` 的返回值看到它：那次调用先返回、失败事件后到，读数还是空的。
       this.ctx.emit('shell/view-error', this.kernelViewError);
       this.noteError(`内核视图加载失败 ${code} ${description} @ ${failedUrl}`);
     });
-    void view.webContents.loadURL(url);
   }
 
-  /** 按固定比例给内核视图摆位，与渲染层槽位共用 `KERNEL_VIEW_WIDTH_RATIO`。 */
+  /**
+   * 处理内核视图（及其接管子视图）里的 `window.open` / target=_blank。
+   *
+   * 一律 deny（AGENTS.md §8.1：外部页面不许自己开窗口），同源的那一个改由同分区子视图承载——
+   * 新标签于是既留在我们的视图里、又共用同一份登录态（spec 2.2-11，plan §9.4 Q4 本机实测）。
+   * 与主窗口那条 handler 的分工是刻意的：主窗口装的是 app 界面（分区 `persist:app`），
+   * 它的弹窗一页都不该进站点视图，所以那边保持无条件 deny（1.2-09 的证据依赖那条日志）。
+   * @param source 发起弹窗的页面句柄，同源判定以它**当下**的地址为准
+   * @param rawUrl `HandlerDetails.url`，Chromium 已解析成绝对地址，但对壳层仍是不可信输入
+   * @returns 恒为 `{ action: 'deny' }`——本方法从不向 Electron 申请创建窗口
+   */
+  private handleWindowOpen(source: WebContents, rawUrl: string): { action: 'deny' } {
+    const decision = decideTakeover(rawUrl, source.getURL());
+    if (decision.isAccepted) {
+      this.attachTakeoverView(decision.targetUrl.href);
+      this.ctx.logger.info(`新标签已接管进会话分区 ${this.kernelViewPartition}：${decision.targetUrl.href}`);
+    } else {
+      console.warn(`[shell] 已拒绝新窗口：${rawUrl}（${decision.reason}）`);
+    }
+    return { action: 'deny' };
+  }
+
+  /**
+   * 把已通过同源准入的地址挂成内核视图之上的子视图（spec 2.2-11）。
+   * @param targetUrl `decideTakeover` 放行后的绝对地址（同源、http(s)）
+   */
+  private attachTakeoverView(targetUrl: string): void {
+    const win = this.mainWindow;
+    // 没有分区就没有「同一份登录态」这回事：占位页阶段一条接管都不挂，宁可什么都不做。
+    if (!win || this.kernelViewPartition === '') return;
+    const view = new WebContentsView({
+      webPreferences: {
+        // 分区沿用父视图那一份：spike 实测同分区子视图直接读到页面的 cookie（plan §9.4 Q4）。
+        partition: this.kernelViewPartition,
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+      },
+    });
+    // 先入表再上窗口：表是「有几个接管视图」的唯一读数来源（getStatus.kernelViewTakeoverCount）。
+    this.takeoverViews.push(view);
+    // 追加到 contentView 末尾 = 叠在内核视图之上，正好是「新标签在前台」的语义。
+    win.contentView.addChildView(view);
+    view.setVisible(this.kernelViewVisible);
+    this.layoutKernelView();
+    this.observeLoadFailure(view.webContents);
+    // 接管页自己再开新标签也走同一条口：不装 handler 的话那一路就没人管，等于允许逃逸。
+    view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
+    // 页面 `window.close()` 时也必须从表和窗口里摘掉，否则 2.1-11 的泄漏计数会一直涨。
+    view.webContents.on('destroyed', () => this.detachTakeoverView(view));
+    void view.webContents.loadURL(targetUrl);
+  }
+
+  /**
+   * 摘掉一个接管子视图：移出窗口的子视图列表与内部表，并关掉页面。
+   *
+   * 主动关闭（换平台 / 收回站点）与页面自杀（`destroyed` 回调）都汇聚到这里，所以必须可重入：
+   * 已不在表里的那一个直接返回，免得对同一个视图动手两次。销毁顺序按 plan §9.4 Q5：
+   * `removeChildView` + `webContents.close()` 之后该页面才从 CDP 目标表里消失。
+   * @param view 要摘掉的接管子视图
+   */
+  private detachTakeoverView(view: WebContentsView): void {
+    const index = this.takeoverViews.indexOf(view);
+    if (index < 0) return;
+    this.takeoverViews.splice(index, 1);
+    this.mainWindow?.contentView.removeChildView(view);
+    // destroyed 路径里页面已经没了，再 close() 就是对死句柄动手；只有主动关闭这一条还需要它。
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
+
+  /**
+   * 当前叠在最上层、页面还活着的接管子视图。
+   * @returns 活动子视图；无接管视图或全部已销毁时为 null（调用方回落到内核视图本身）
+   */
+  private activeTakeoverView(): WebContentsView | null {
+    return topmostAlive(this.takeoverViews, (view) => !view.webContents.isDestroyed());
+  }
+
+  /**
+   * 当前活动页面的句柄：栈顶还活着的接管子视图，没有则回落内核视图本身（spec 2.2-11）。
+   *
+   * `kernelContents()` 与 `getStatus()` 都要这一份"看的是哪一页"的判断，出现两次就收进一处（§2.2）。
+   * @returns 活动页面的 `WebContents`；两个候选都不可用（视图未创建或已销毁）时为 null
+   */
+  private activeKernelContents(): WebContents | null {
+    const candidate = this.activeTakeoverView()?.webContents ?? this.kernelView?.webContents;
+    return candidate && !candidate.isDestroyed() ? candidate : null;
+  }
+
+  /** 按固定比例给内核视图摆位，与渲染层槽位共用 `KERNEL_VIEW_WIDTH_RATIO`；接管子视图铺同一块槽位。 */
   private layoutKernelView = () => {
     const win = this.mainWindow;
     if (!win || !this.kernelView) return;
     const { width, height } = win.getContentBounds();
     const viewWidth = Math.round(width * KERNEL_VIEW_WIDTH_RATIO);
-    this.kernelView.setBounds({ x: width - viewWidth, y: 0, width: viewWidth, height });
+    const bounds = { x: width - viewWidth, y: 0, width: viewWidth, height };
+    this.kernelView.setBounds(bounds);
+    // 接管的子视图是「同一个槽位里的新标签」：不跟着摆位的话，resize 后它就停在旧尺寸上露馅。
+    this.takeoverViews.forEach((view) => view.setBounds(bounds));
   };
 
   /**

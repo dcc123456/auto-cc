@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 定位实验台 · 多策略靶页（本地 fixture）</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      h2 {
+        margin: 18px 0 8px;
+        font-size: 14px;
+        color: #94a3b8;
+      }
+      .notice {
+        margin: 10px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: #cbd5e1;
+      }
+      .block {
+        margin: 0 0 8px;
+        padding: 10px 12px;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        background: #111c31;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      button,
+      a,
+      .clickable {
+        font: inherit;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+        cursor: pointer;
+      }
+      .btn {
+        border: 1px solid #334155;
+      }
+      .btn--primary {
+        border-color: #1d4ed8;
+        background: #1d4ed8;
+        color: #fff;
+      }
+      .list > div {
+        display: inline-block;
+        margin-right: 6px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        min-height: 22px;
+      }
+      ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body data-fixture-page="locator">
+    <h1>定位实验台 · 同一个「打招呼」按钮的五种命中方式</h1>
+    <p class="notice">
+      本地 fixture 站点，不是真实招聘平台（AGENTS.md §7.2）。每块刻意<strong>只留一条可用的定位通道</strong>： 去掉
+      testid 就只剩 role+可读名，去掉 role 就只剩 CSS 或位置，逼着 `browser.locate` 依次回退候选。
+      「打招呼」这段文案在块 1 / 4 / 5 里<strong>故意重复出现</strong> —— 可见文本策略在这里必然歧义， 这正是 2.2-02
+      阈值 + margin + fail closed 判定的靶子。
+    </p>
+    <p class="notice">
+      当前 DOM 版本：<code data-testid="variant-flag">（脚本未运行）</code> · 改版前的 class 与 testid 由本页脚本按
+      <code>?variant=before|after</code> 重写（spec 2.2-05 自愈比对的输入）。
+    </p>
+
+    <h2>块 1 · data-testid（同时是 2.2-05 的自愈靶子）</h2>
+    <section class="block" data-locate-case="testid">
+      <div class="row">
+        <button type="button" class="btn btn--primary" data-testid="greet-button" data-heal-target="true">
+          打招呼
+        </button>
+      </div>
+      <p>
+        可用通道：<code>data-testid="greet-button"</code>。<code>after</code> 版把 testid 换成
+        <code>greet-button-v2</code> 并去掉 <code>btn--primary</code>，但 tagName、role、可读名、祖先结构全部不变 ——
+        指纹重找必须仍然命中这一颗按钮。
+      </p>
+    </section>
+
+    <h2>块 2 · role="button" + 可读名（没有 testid）</h2>
+    <section class="block" data-locate-case="role">
+      <div class="row">
+        <span class="clickable" role="button" tabindex="0" aria-label="打招呼">打招呼</span>
+      </div>
+      <p>可用通道：<code>role=button</code> 配可读名「打招呼」（取自 <code>aria-label</code>，不是自身文本）。</p>
+    </section>
+
+    <h2>块 3 · 只能靠可见文本（无 testid、无 role、无稳定类名）</h2>
+    <section class="block" data-locate-case="text">
+      <div class="row">
+        <a class="clickable" href="#block-3" data-plain-link="true">向 HR 打招呼</a>
+      </div>
+      <p>可用通道：精确可见文本「向 HR 打招呼」——全页唯一，所以文本策略在这里才是唯一的解。</p>
+    </section>
+
+    <h2>块 4 · 只能靠 CSS 选择器 <code>.job-card__apply</code></h2>
+    <section class="block" data-locate-case="css">
+      <div class="job-card" data-job-id="2001">
+        <a class="clickable job-card__apply" href="#block-4">打招呼</a>
+      </div>
+      <p>
+        可用通道：<code>.job-card__apply</code>。文案与块 1 相同、既没有 testid 也没有 role，
+        文本策略到这儿歧义，只有类名能唯一定位。
+      </p>
+    </section>
+
+    <h2>块 5 · 只能靠 XPath（三个子节点完全等价，只有位置不同）</h2>
+    <section class="block" data-locate-case="xpath">
+      <div class="list">
+        <div class="clickable">打招呼</div>
+        <div class="clickable">打招呼</div>
+        <div class="clickable">打招呼</div>
+      </div>
+      <p>可用通道：<code>//div[@class='list']/div[3]</code>。子节点没有属性差别，位置是唯一区分度。</p>
+    </section>
+
+    <h2>块 6 · 延迟插入（spec 2.2-03 的观察器等待靶子）</h2>
+    <section class="block" data-locate-case="delay">
+      <div class="row">
+        <button type="button" class="btn" data-testid="delay-insert-button">延迟插入节点</button>
+      </div>
+      <div class="row" data-testid="delay-slot"></div>
+      <p>
+        点击后 <strong>800ms</strong> 才出现 <code>data-testid="delayed-node"</code>。间隔取 800ms 是为了把
+        「MutationObserver 当场拿到 mutation」和「靠 120ms 轮询碰运气」区分开：等待实现若退化成裸
+        sleep，这里的时序证据就对不上。
+      </p>
+    </section>
+
+    <h2>命中回执（截图判据：点中了哪一块）</h2>
+    <ul data-testid="hit-log">
+      <li data-testid="hit-placeholder">（尚无点击）</li>
+    </ul>
+
+    <script>
+      const VARIANT_KEY = 'variant';
+      const HEAL_TESTID_BEFORE = 'greet-button';
+      const HEAL_TESTID_AFTER = 'greet-button-v2';
+      const DELAY_MS = 800;
+
+      /**
+       * 按查询串决定 DOM 版本，只改「改版会动的两样东西」：类名与 data-testid。
+       * @param variant 'before' 或 'after'，缺省视为 before（不带参数的旧截图仍可对账）
+       */
+      function applyVariant(variant) {
+        const healTarget = document.querySelector('[data-heal-target]');
+        healTarget.dataset.testid = variant === 'after' ? HEAL_TESTID_AFTER : HEAL_TESTID_BEFORE;
+        // after 版丢掉 btn--primary：指纹字段里 stableAttributes/ancestorClasses 会变，
+        // 而 tagName / role / 可读名 / 祖先层级不变，自愈只能靠后者。
+        healTarget.className = variant === 'after' ? 'btn' : 'btn btn--primary';
+        document.body.dataset.variant = variant;
+        document.querySelector('[data-testid="variant-flag"]').textContent = variant;
+      }
+
+      /** 把一次点击记到页面可见的回执列表里，让 V 类截图能自证「命中的是哪块」。 */
+      function recordHit(caseName) {
+        const log = document.querySelector('[data-testid="hit-log"]');
+        document.querySelector('[data-testid="hit-placeholder"]')?.remove();
+        const line = document.createElement('li');
+        line.dataset.testid = 'hit-item';
+        line.textContent = `命中：${caseName}`;
+        log.append(line);
+      }
+
+      applyVariant(new URLSearchParams(window.location.search).get(VARIANT_KEY) ?? 'before');
+
+      for (const section of document.querySelectorAll('[data-locate-case]')) {
+        for (const control of section.querySelectorAll('button, a, [role="button"], .clickable')) {
+          control.addEventListener('click', () => {
+            recordHit(section.dataset.locateCase ?? 'unknown');
+          });
+        }
+      }
+
+      document.querySelector('[data-testid="delay-insert-button"]').addEventListener('click', () => {
+        const slot = document.querySelector('[data-testid="delay-slot"]');
+        slot.textContent = `已排队，${String(DELAY_MS)}ms 后出现`;
+        // 观察器要看到的就是 mutation 本身；这里的延时属于靶页，不是被测实现的 sleep。
+        window.setTimeout(() => {
+          const node = document.createElement('span');
+          node.className = 'clickable';
+          node.dataset.testid = 'delayed-node';
+          node.textContent = '延迟出现的打招呼';
+          node.addEventListener('click', () => {
+            recordHit('delay');
+          });
+          slot.replaceChildren(node);
+        }, DELAY_MS);
+        recordHit('delay-insert');
+      });
+    </script>
+  </body>
+</html>

@@ -12,6 +12,7 @@ import type {
   ChatSessionView,
   ChatSnapshotView,
   KernelViewLoadError,
+  LocatorRelocatedEvent,
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
@@ -41,6 +42,7 @@ export type {
   ChatToolPart,
   ChatToolPartState,
   KernelViewLoadError,
+  LocatorRelocatedEvent,
   LogLineView,
   PluginErrorView,
   SessionExpiredEvent,
@@ -85,6 +87,17 @@ export const RENDERER_ALLOWLIST = [
   // 2.1 的页面操作：只允许导航到已登记平台的同源地址，快照是只读。
   'browser.page.navigate',
   'browser.page.snapshot',
+  // 2.2 的定位层：一次打分定位 + 一次指纹自愈。
+  'browser.locate.find',
+  'browser.locate.refind',
+  'browser.locate.status',
+  // 2.2 的动作层：点击/输入走 CDP 受信通道，等待走页面内观察器。
+  'browser.act.click',
+  'browser.act.type',
+  'browser.act.select',
+  'browser.act.waitFor',
+  // 2.2 的平台登记面：只读清单（适配器本身不给渲染层，外发口在 2.5/2.6 另接闸门）。
+  'platform.registry.list',
   // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
   // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
   'entitlement.gate.check',
@@ -142,6 +155,13 @@ export type ShellStatus = {
   kernelViewPartition: string;
   /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
   kernelViewUrl: string;
+  /**
+   * 用户当前实际看到的页面地址：有 `window.open` / target=_blank 接管子视图时是栈顶那一个，
+   * 否则就是 `kernelViewUrl`（spec 2.2-11：接管不逃逸、且与父视图同分区，所以分区仍读 `kernelViewPartition`）。
+   */
+  activeKernelViewUrl: string;
+  /** 接管进来的子视图个数（0 = 只有内核视图本身）；与 `devtools.status().targetCount` 的增量互为对照。 */
+  kernelViewTakeoverCount: number;
   /** 最近一次加载失败；成功加载后为 null，因此它总是「关于当前这个 URL」的。 */
   kernelViewLoadError: KernelViewLoadError | null;
   lastError: string | undefined;
@@ -392,6 +412,25 @@ export interface BridgeSignatures {
   /** 读取当前页面快照；可选参数是本次正文上限（字符），上限受服务配置钳制。 */
   'browser.page.snapshot': { args: [maxChars?: number]; returns: KernelPageSnapshotView };
   /**
+   * 按声明顺序尝试多策略候选并打分（spec 2.2-01 / 2.2-02）。
+   * `lastKnown` 是上一次成功定位留下的指纹：候选全部失配时用它做自愈重定位（spec 2.2-05）。
+   */
+  'browser.locate.find': { args: [spec: LocateSpec, lastKnown?: ElementFingerprint]; returns: LocateResultView };
+  /** 只用指纹在当前页面重找（改版后的显式自愈口，spec 2.2-05）。 */
+  'browser.locate.refind': { args: [fingerprint: ElementFingerprint]; returns: LocateResultView };
+  /** 定位层的当期读数：阈值配置与最近几次失败，供界面解释「为什么这条不确定」。 */
+  'browser.locate.status': { args: []; returns: LocateStatusView };
+  /** 真实点击：定位 → 算视口坐标 → CDP `Input.dispatchMouseEvent`（spec 2.2-12）。 */
+  'browser.act.click': { args: [spec: LocateSpec]; returns: ActResultView };
+  /** 文本输入：定位 → 聚焦 → CDP `Input.insertText`（中文/emoji 不乱码，spec 2.2-13）。 */
+  'browser.act.type': { args: [spec: LocateSpec, text: string]; returns: ActResultView };
+  /** 下拉选择：定位 → 页面内设值并派发 change。通道在结果里如实标注为 `dom`。 */
+  'browser.act.select': { args: [spec: LocateSpec, value: string]; returns: ActResultView };
+  /** 谓词等待：页面内 MutationObserver 触发，超时是结构化失败而不是抛错（spec 2.2-03 / 2.2-04）。 */
+  'browser.act.waitFor': { args: [predicate: WaitPredicate]; returns: ActResultView };
+  /** 已登记平台清单（spec 2.2-07）：内核侧只读，不返回适配器本身。 */
+  'platform.registry.list': { args: []; returns: PlatformRegistryView };
+  /**
    * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
    * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
    */
@@ -468,6 +507,8 @@ export const RENDERER_EVENTS = [
   'shell/view-error',
   'workflow/progress',
   'chat/delta',
+  // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
+  'locator/relocated',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -479,6 +520,7 @@ export interface RendererEventSignatures {
   'shell/view-error': KernelViewLoadError;
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
+  'locator/relocated': LocatorRelocatedEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */
@@ -486,6 +528,160 @@ export type RendererEventSignaturesCovered = { [K in RendererEventName]: Rendere
 
 export const isAllowedEvent = (name: string): name is RendererEventName =>
   (RENDERER_EVENTS as readonly string[]).includes(name);
+
+/* ------------------------------------------------------------------ *
+ * 2.2 locator 层与平台登记面的数据形状
+ * ------------------------------------------------------------------ */
+
+/**
+ * 候选策略。顺序不代表优先级——**优先级由 spec 里的声明顺序决定**（spec 2.2-01），
+ * 这里只决定「这类候选满分上限是多少」，即稳定性来源的权重。
+ */
+export type LocateStrategy = 'testId' | 'id' | 'name' | 'role' | 'text' | 'css' | 'xpath' | 'fingerprint';
+
+/** 一条候选：策略 + 该策略所需的那几个字段（多余的字段被忽略，不报错，方便知识包共用一个形状）。 */
+export interface LocateCandidate {
+  strategy: LocateStrategy;
+  /** testId / id / name / css / xpath 的取值 */
+  value?: string;
+  /** testId 用的属性名（如 `data-testid`），必须是合法 HTML 属性名，否则整条候选被判非法 */
+  attribute?: string;
+  /** role 策略：期望的 ARIA 角色（button / link / textbox …） */
+  role?: string;
+  /** role 策略：期望的可读名（accessible name） */
+  name?: string;
+  /** text 策略：是否要求全等（默认 false，即归一化后的包含匹配） */
+  exact?: boolean;
+}
+
+/** 一个「要定位的东西」的完整声明，语义描述用于日志与界面，不参与匹配。 */
+export interface LocateSpec {
+  description: string;
+  cardinality: 'single' | 'many';
+  candidates: LocateCandidate[];
+}
+
+/** 元素在所属帧视口里的位置（CSS 像素，与 CDP 输入同一坐标系）。 */
+export interface ElementRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 元素指纹（spec 2.2-05 的自愈依据）。
+ *
+ * 只收**稳定**的东西：`attributes` 是白名单内的键值，class 永不入选（改版最常改的就是 class），
+ * 值像机器生成的也会被丢掉。`nearbyTexts` 是周围文本锚点，用来在结构变化后仍能认出现场。
+ */
+export interface ElementFingerprint {
+  tagName: string;
+  role: string;
+  accessibleName: string;
+  text: string;
+  attributes: Record<string, string>;
+  ancestorRoles: string[];
+  nearbyTexts: string[];
+  rect: ElementRect;
+}
+
+/** 页面回读的一条候选命中（尚未打分）。 */
+export interface LocatedReading extends ElementFingerprint {
+  /** 命中元素所在帧的地址 */
+  frameUrl: string;
+  /** 该元素在 spec 里对应的候选下标（声明顺序） */
+  candidateIndex: number;
+  strategy: LocateStrategy;
+  /** 同一条候选在本帧内命中的元素个数——大于 1 就是歧义，要扣分（spec 2.2-02） */
+  siblingCount: number;
+  /**
+   * 帧内的元素身份号（由注入脚本用 WeakMap 现场编号）。
+   * 两条候选命中**同一个元素**时靠它去重，否则「testId 和 css 都中了同一个按钮」会被误判成歧义。
+   */
+  nodeIndex: number;
+  /** 是否可见 / 可点：动作前置判据，与 `siblingCount` 一起决定分数 */
+  visible: boolean;
+  enabled: boolean;
+  unobstructed: boolean;
+}
+
+/** 打分后的候选，`reasons` 让「为什么它赢」可解释（spec 2.2-02）。 */
+export interface LocatedView extends LocatedReading {
+  score: number;
+  reasons: string[];
+}
+
+/** 一次定位的结局。`ambiguous` 与 `below-score` 都是**拒绝猜测**，不是失败重试的理由。 */
+export type LocateStatus = 'matched' | 'ambiguous' | 'below-score' | 'not-found';
+
+/** `browser.locate.find` 的返回值。 */
+export interface LocateResultView {
+  status: LocateStatus;
+  spec: LocateSpec;
+  /** 胜出候选；非 `matched` 时为 null */
+  chosen: LocatedView | null;
+  /** 排序稳定的 top-N（N 由服务配置 `candidateLimit` 决定） */
+  ranked: LocatedView[];
+  /** 人类可读的判定理由（`below minScore 70` 这类，界面直接显示） */
+  reason: string;
+  /** 是否由指纹自愈命中（spec 2.2-05） */
+  relocated: boolean;
+  /**
+   * 最后一次页面读数的引用（`<帧地址>@<时间戳>`）。
+   * 失败时同一份响应里带着 `snapshot`，这个串是给 2.4 留证据用的指针，不是可解引用的水地址。
+   */
+  snapshotRef: string;
+  /** 失败时随行的最后一次 DOM 快照；成功时为 null（spec 2.2-04） */
+  snapshot: KernelPageSnapshotView | null;
+  at: number;
+}
+
+/** 等待谓词（spec 2.2-03 的五类）。 */
+export type WaitPredicate =
+  | { kind: 'appear'; spec: LocateSpec }
+  | { kind: 'disappear'; spec: LocateSpec }
+  | { kind: 'visible'; spec: LocateSpec }
+  | { kind: 'clickable'; spec: LocateSpec }
+  | { kind: 'textChanges'; spec: LocateSpec };
+
+/** 一次页面动作的结局，`channel` 与 `trusted` 如实说明事件是怎么产生的（spec 2.2-12）。 */
+export interface ActResultView {
+  action: 'click' | 'type' | 'select' | 'wait';
+  status: 'done' | 'timeout';
+  waitedMs: number;
+  channel: 'cdp' | 'dom';
+  trusted: boolean;
+  located: LocatedView | null;
+  /** 输入/选择之后页面回读到的值；点击与等待为 null */
+  valueAfter: string | null;
+  /** 等待类动作的结局读数；其他动作为 null */
+  predicate: { kind: WaitPredicate['kind']; satisfied: boolean } | null;
+}
+
+/** 平台元信息（适配器自我声明，不含选择器）。 */
+export interface PlatformMetaView {
+  id: string;
+  displayName: string;
+  startUrl: string;
+  /** 该适配器声明支持的能力名（`search` / `detail` / `chat` / `sendResume` / `readReplies`） */
+  capabilities: string[];
+}
+
+/** `platform.registry` 的只读清单。 */
+export interface PlatformRegistryView {
+  platforms: PlatformMetaView[];
+}
+
+/** 定位层读数：当期阈值配置 + 最近几次判定摘要（界面解释「为什么这条不确定」用）。 */
+export interface LocateStatusView {
+  minScore: number;
+  minMargin: number;
+  candidateLimit: number;
+  recentFailures: { description: string; status: LocateStatus; reason: string; at: number }[];
+}
+
+/** `locator/relocated` 事件载荷定义在 `@auto-cc/core`（见上面的转出说明）。 */
 
 /** 一次事件推送的线格式。 */
 export type RendererEvent = {

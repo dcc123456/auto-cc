@@ -19,6 +19,15 @@ export type AppErrorCode =
   | 'NO_KERNEL_SESSION'
   // 注入脚本本身在页面里抛了（页面被销毁、脚本被 CSP 拦下），与「读到了但内容为空」是两回事。
   | 'PAGE_SCRIPT_FAILED'
+  // 定位与动作层（spec 2.2）。三个动作错误按「停在哪一步」分码，界面据此决定给不给重试按钮：
+  // 声明本身不可用（改数据）、等不到可点（可重试）、未过线（要看候选）、下发被拒（可重试）。
+  | 'LOCATE_SPEC_INVALID'
+  | 'WAIT_TIMEOUT'
+  | 'LOCATE_FAILED'
+  | 'ACT_FAILED'
+  // 站点知识包（spec 2.2-08）与适配器登记（spec 2.2-07）：前者是数据不合法，后者是装配缺包。
+  | 'KNOWLEDGE_PACK_INVALID'
+  | 'PLATFORM_NOT_REGISTERED'
   // 对话骨架（spec 1.11）：入参边界（空 / 超长）、并发（上一条还在流式）、档位枚举、注册表重复登记。
   // 界面按码决定是「把原因显示成一行提示」还是「什么都不改」。
   | 'CHAT_EMPTY_INPUT'

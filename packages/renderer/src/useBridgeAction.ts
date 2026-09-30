@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { BridgeReply } from '@auto-cc/shared';
+import type { AppErrorPayload, BridgeReply } from '@auto-cc/shared';
 
 /** `run` 拿到成功返回值之后的两个可选挂钩。 */
 export interface BridgeActionHooks<T> {
@@ -8,6 +8,12 @@ export interface BridgeActionHooks<T> {
   apply?: (value: T) => void;
   /** 覆盖默认成功提示：调用成功但结果不对时，「成功」是句假话。 */
   describe?: (value: T) => string | undefined;
+  /**
+   * 桥接返回结构化错误（`ok:false`）时的挂钩：面板要按 `code` 区分「还没有打开会话」
+   * 与「定位未过线」这类语义完全不同的失败，一行提示装不下这个差别（spec 2.2-04）。
+   * 提示行照旧设置，挂钩只负责把错误载荷落到面板 state。
+   */
+  onError?: (error: AppErrorPayload) => void;
 }
 
 /**
@@ -27,7 +33,7 @@ export function useBridgeAction(read: () => Promise<unknown>) {
    * 跑一次白名单调用并把结果写成一行提示。
    * @param label 动作标签（禁用按钮的凭据，也拼进提示文案）
    * @param call 实际调用；不在 Electron 宿主里时返回 undefined，此时提示桥接不可用
-   * @param hooks 成功后的落值与文案覆盖
+   * @param hooks 成功后的落值、文案覆盖，与结构化错误的落点
    */
   const run = useCallback(
     async <T>(
@@ -42,7 +48,10 @@ export function useBridgeAction(read: () => Promise<unknown>) {
       else if (reply.ok) {
         hooks.apply?.(reply.value);
         setNotice(hooks.describe?.(reply.value) ?? t('action.ok', { action: label }));
-      } else setNotice(t('action.failed', { action: label, message: reply.error.message }));
+      } else {
+        hooks.onError?.(reply.error);
+        setNotice(t('action.failed', { action: label, message: reply.error.message }));
+      }
       await read();
     },
     [read, t],

@@ -14,7 +14,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts",
+    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

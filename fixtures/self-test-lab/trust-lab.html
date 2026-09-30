@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 受信事件实验台 · 本地 fixture</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      .notice {
+        margin: 10px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: #cbd5e1;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      button,
+      input {
+        font: inherit;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+      }
+      input {
+        width: 280px;
+        background: #020617;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      caption {
+        text-align: left;
+        color: #94a3b8;
+        padding-bottom: 6px;
+      }
+      th,
+      td {
+        padding: 3px 8px;
+        border: 1px solid #1e293b;
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body data-fixture-page="trusted">
+    <h1>受信事件实验台</h1>
+    <p class="notice">
+      本地 fixture 站点（AGENTS.md §7.2）。页面只做一件事：<strong>把事件的事实记下来</strong> ——
+      <code>event.isTrusted</code>、<code>event.inputType</code>、以及事件发生时输入框里的值。 CDP
+      受通道是否真的产出了浏览器认可的交互，看这里的读数，不看 app 自述（spec 2.2-12）。
+    </p>
+    <p class="notice">
+      中文与 emoji 一起打进来（例：<code>自动化验收🎯</code>），回显值原样落进 <code>value</code> 才算通过（spec
+      2.2-13）；<code>.value</code> 直塞会让 <code>inputType</code> 缺失，这里同样看得出来。
+    </p>
+    <p class="row">
+      <input type="text" data-testid="trust-input" placeholder="输入中文与 emoji" />
+      <button type="button" data-testid="trust-button">打招呼</button>
+      <button type="button" data-testid="trust-report">上报到 /api/trust</button>
+    </p>
+    <p>上报状态：<strong data-testid="trust-status">未上报</strong></p>
+    <table data-testid="trust-table">
+      <caption>
+        页内记录（同时挂在
+        <code>window.__autoCcTrustReadings</code
+        >，供 CDP 侧
+        <code>Runtime.evaluate</code>
+        直接读）
+      </caption>
+      <thead>
+        <tr>
+          <th>type</th>
+          <th>isTrusted</th>
+          <th>inputType</th>
+          <th>value</th>
+        </tr>
+      </thead>
+      <tbody data-testid="trust-log"></tbody>
+    </table>
+
+    <script>
+      // 挂到 window 而不是只留在闭包里：验收时可能只读页面、不走上报，两条通道必须给同一份事实。
+      window.__autoCcTrustReadings = [];
+
+      const trustInput = document.querySelector('[data-testid="trust-input"]');
+      const trustButton = document.querySelector('[data-testid="trust-button"]');
+      const trustLog = document.querySelector('[data-testid="trust-log"]');
+      const trustStatus = document.querySelector('[data-testid="trust-status"]');
+
+      /**
+       * 记下一条事件读数：既进数组（对端可读），也进表格（截图可读）。
+       * @param event 原生事件（mousedown / click / input）
+       */
+      function record(event) {
+        const reading = {
+          type: event.type,
+          isTrusted: event.isTrusted,
+          // 非 input 事件没有 inputType，用 null 而不是空串：上报后要靠它区分「键入」与「点击」。
+          inputType: event instanceof InputEvent ? event.inputType : null,
+          value: trustInput.value,
+        };
+        window.__autoCcTrustReadings.push(reading);
+        const row = document.createElement('tr');
+        row.dataset.testid = 'trust-reading';
+        // 逐格 textContent 而不是拼 innerHTML：中文、emoji、尖括号都要按字面显示，截图才可信。
+        for (const cellText of [reading.type, String(reading.isTrusted), String(reading.inputType), reading.value]) {
+          const cell = document.createElement('td');
+          cell.textContent = cellText;
+          row.append(cell);
+        }
+        trustLog.append(row);
+      }
+
+      // 输入框记三类（input 才有 inputType），按钮只记交互两类：给不会发生的事件挂监听是噪声。
+      for (const [target, types] of [
+        [trustInput, ['mousedown', 'click', 'input']],
+        [trustButton, ['mousedown', 'click']],
+      ]) {
+        for (const type of types) {
+          target.addEventListener(type, record);
+        }
+      }
+
+      document.querySelector('[data-testid="trust-report"]').addEventListener('click', () => {
+        // 上报整份数组，不是增量：GET /api/trust 的返回因此总能和页面表格逐行对得上。
+        fetch('/api/trust', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ readings: window.__autoCcTrustReadings }),
+        })
+          .then((response) => response.json())
+          .then((payload) => {
+            trustStatus.textContent = `已上报 ${String(payload.count)} 条`;
+          })
+          .catch((error) => {
+            trustStatus.textContent = `上报失败：${String(error)}`;
+          });
+      });
+    </script>
+  </body>
+</html>

@@ -16,14 +16,11 @@
 import { Service, asApp, AppError, type Context } from '@auto-cc/core';
 import type { KernelPageSnapshotView } from '@auto-cc/shared';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
-import type { ShellService } from '@auto-cc/shell';
 import type { WebContents } from 'electron';
 import { z } from 'zod';
+import { requireKernelContents, type KernelHost } from './frame-channel.js';
 import { buildSnapshotScript, SNAPSHOT_HEADING_LIMIT, SNAPSHOT_TEXT_LIMIT, toSnapshotReading } from './page-script.js';
 import { resolveNavigableUrl } from './navigate-policy.js';
-
-/** 本包对 `shell` 的全部诉求：拿到内核视图的句柄 + 读它当前所在分区。 */
-type KernelHost = Pick<ShellService, 'kernelContents' | 'getStatus'>;
 
 /**
  * 本包对 `sessions` 的全部诉求：读已登记平台的起始地址（导航许可名单的唯一来源）。
@@ -62,7 +59,7 @@ export class BrowserPageService extends Service {
    * @throws 目标被许可判定拒绝时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
    */
   navigate = async (url: string): Promise<KernelPageSnapshotView> => {
-    const contents = this.requireContents();
+    const contents = requireKernelContents(this.host, 'browser.page');
     const startUrls = (await this.sessions.status()).platforms.map((platform) => platform.startUrl);
     const target = resolveNavigableUrl(url, startUrls);
     const settled = this.settleLoad(contents);
@@ -79,7 +76,7 @@ export class BrowserPageService extends Service {
    * @throws 没有已挂载会话时 `NO_KERNEL_SESSION`；页面注入失败时 `PAGE_SCRIPT_FAILED`
    */
   snapshot = async (maxChars?: number): Promise<KernelPageSnapshotView> => {
-    const contents = this.requireContents();
+    const contents = requireKernelContents(this.host, 'browser.page');
     const limit = maxChars ?? this.config.snapshotTextLimit;
     return this.readSnapshot(contents, limit);
   };
@@ -98,21 +95,6 @@ export class BrowserPageService extends Service {
    */
   private get sessions(): SessionRegistry {
     return asApp(this.ctx).sessions;
-  }
-
-  /**
-   * 取当前可用的内核视图句柄。
-   * @returns 未销毁的 `WebContents`
-   * @throws 视图不存在或已销毁时 `NO_KERNEL_SESSION`——先 `sessions.open(platform)` 再说页面
-   */
-  private requireContents(): WebContents {
-    const contents = this.host.kernelContents();
-    if (!contents) {
-      throw new AppError('NO_KERNEL_SESSION', '内核视图尚未挂载任何平台，先打开一个会话再操作页面', 'browser.page', {
-        partition: this.host.getStatus().kernelViewPartition,
-      });
-    }
-    return contents;
   }
 
   /**
@@ -182,3 +164,28 @@ declare module '@auto-cc/core' {
 
 export { resolveNavigableUrl } from './navigate-policy.js';
 export { buildSnapshotScript, toSnapshotReading } from './page-script.js';
+export { BrowserLocateService, browserLocateSchema, type BrowserLocateConfig } from './locate-service.js';
+export { BrowserActService, browserActSchema, type BrowserActConfig } from './act-service.js';
+export { PlatformRegistryService } from './platform-registry.js';
+export {
+  knowledgePackSchema,
+  parseKnowledgePack,
+  type JobDetail,
+  type JobSearchCriteria,
+  type JobSummary,
+  type KnowledgePack,
+  type OutboundResult,
+  type PlatformAdapter,
+  type ReplyMessage,
+} from './platform-contract.js';
+export {
+  buildFingerprintScanScript,
+  buildLocateScript,
+  buildWaitScript,
+  buildDomActionScript,
+  buildValueReadScript,
+  toLocatedReadings,
+  toWaitReading,
+  toDomActionReading,
+} from './locator-script.js';
+export { validateSpec, decideLocate, scoreByFingerprint, toRankedCandidates } from './locator-spec.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@auto-cc/shell",
+  "name": "@auto-cc/plugin-platform-boss",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,11 +14,9 @@
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
+    "@auto-cc/plugin-browser": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "cordis": "4.0.0-rc.10",
     "zod": "^4.0.0"
-  },
-  "devDependencies": {
-    "electron": "^44.4.5"
   }
 }

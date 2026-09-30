@@ -25,6 +25,16 @@ export function definePlugin<T>(plugin: Plugin.Object<T>): Plugin.Object<T> {
   return plugin;
 }
 
+/**
+ * 「确实没有可调项」的插件在直接挂载点的空配置实参。
+ *
+ * cordis 从构造器第二个参数反推 `ctx.plugin()` 调用点的配置类型，无键 schema 因此被推成
+ * `undefined`（AGENTS.md §9 的 1.3 实测条），而运行期仍会拿 schema 解析一次实参：
+ * 传 `undefined` 会被 strictObject 判成「期望对象却收到 undefined」，挂载当场就抛。
+ * 放在这里而不是各包自己写一遍，是因为这是 cordis 的类型坑、不是某个包的私事。
+ */
+export const NO_CONFIG = Object.freeze({}) as unknown as undefined;
+
 /** Augmentable map of app services; plugins add entries via module augmentation. */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AppServices {}

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 聊天实验台 · 同源 iframe（本地 fixture）</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font:
+          13px/1.7 system-ui,
+          sans-serif;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      .notice {
+        margin: 10px 0;
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #1e293b;
+        color: #cbd5e1;
+      }
+      code {
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      iframe {
+        width: 100%;
+        height: 320px;
+        margin-top: 10px;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        background: #111c31;
+      }
+      .status {
+        font-weight: 600;
+        color: #7dd3fc;
+      }
+    </style>
+  </head>
+  <body data-fixture-page="chat">
+    <h1>聊天实验台 · 输入框与发送按钮都在同源 iframe 里</h1>
+    <p class="notice">
+      本地 fixture 站点（AGENTS.md §7.2）。帧内元素<strong>必须靠帧内求值 + 坐标换算</strong>才能点到手， 这是 spec
+      2.2-10 的靶子；中文与 emoji 是否原样到达则由帧内的消息记录自证（spec 2.2-13）。
+    </p>
+    <p class="notice">
+      发送状态：<strong class="status" data-testid="chat-status">待发送</strong> · 服务端收件计数：
+      <code data-testid="outbox-count">（未取到）</code>
+    </p>
+    <p class="notice">
+      两路读数必须同时成立：状态行来自<strong>帧内</strong>的 postMessage（证明动作确实由 iframe 触发）， 收件计数来自
+      <code>/api/outbox</code>（证明消息真的出了网络，而不是页面自己改了文案）。
+    </p>
+    <iframe data-testid="chat-frame" src="/chat/frame" title="打招呼聊天区（同源 iframe）"></iframe>
+
+    <script>
+      const statusLine = document.querySelector('[data-testid="chat-status"]');
+      const outboxCount = document.querySelector('[data-testid="outbox-count"]');
+
+      /** 向服务端要一次收件总数 —— 外发是否发生由对端计数说，app 自述不算。 */
+      function refreshOutboxCount() {
+        fetch('/api/outbox')
+          .then((response) => response.json())
+          .then((payload) => {
+            outboxCount.textContent = String(payload.count);
+          })
+          .catch((error) => {
+            outboxCount.textContent = `fetch 失败：${String(error)}`;
+          });
+      }
+
+      // 只认同源、且带约定 type 的消息：这张页面也是给人手点用的，不能被别的来源伪造状态行。
+      window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) return;
+        const payload = event.data;
+        if (!payload || payload.type !== 'chat-outbound') return;
+        statusLine.textContent = `已从 iframe 内发出第 ${String(payload.received)} 条：${String(payload.text)}`;
+        refreshOutboxCount();
+      });
+
+      refreshOutboxCount();
+    </script>
+  </body>
+</html>
