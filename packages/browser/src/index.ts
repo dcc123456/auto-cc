@@ -4,7 +4,8 @@
  * 分工是刻意切开的，也是本包存在的全部理由：
  * - `shell`（L1）拥有视图：创建、摆位、销毁。它不知道 BOSS 是什么。
  * - `sessions`（L2）拥有会话：用哪个分区、开哪个地址、登录态还在不在。
- * - 本包（L2）拥有**页面**：在这个已经打开的页面里导航、读快照，2.2 起加点击/输入/定位。
+ * - 本包（L2）拥有**页面**：在这个已经打开的页面里导航、读快照，2.2 起加点击/输入/定位，
+ *   2.4 起加截图（只交 PNG 字节，落盘与保留期归调用方的证据目录）。
  *
  * 挂载与分区为什么不在这里：那两处已经有唯一入口（1.2-12 / 1.8），本包重复一遍就是
  * 第二套同类基础设施（AGENTS.md §2.5）。所以本包只**取用** shell 交出来的视图句柄。
@@ -16,7 +17,7 @@
 import { Service, asApp, AppError, type Context } from '@auto-cc/core';
 import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScrollReading } from '@auto-cc/shared';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
-import type { WebContents } from 'electron';
+import type { NativeImage, WebContents } from 'electron';
 import { z } from 'zod';
 import { evaluateInFrames, requireKernelContents, usableEvaluations, type KernelHost } from './frame-channel.js';
 import { buildExtractScript, toExtractFrameReading } from './extract-script.js';
@@ -51,6 +52,21 @@ export const browserPageSchema = z.strictObject({
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
 export type BrowserPageConfig = z.output<typeof browserPageSchema>;
+
+/**
+ * 一帧像素现场（spec 2.4-04 的失败截图）。
+ *
+ * 这里**只交字节，不交路径**：写到哪儿、留多久是调用方的事（工作流的证据目录归 `workflow.runner`
+ * 管，含保留与清理），页面服务一旦知道自己要落盘就多了一份状态，也就有了第二套文件管理（AGENTS.md §2.5）。
+ */
+export type PageScreenshotView = {
+  /** 图片宽度（像素，按视图的 DIP 尺寸） */
+  width: number;
+  /** 图片高度（像素） */
+  height: number;
+  /** 编码后的 PNG 字节 */
+  png: Buffer;
+};
 
 export class BrowserPageService extends Service {
   static provide = 'browser.page';
@@ -161,6 +177,43 @@ export class BrowserPageService extends Service {
       );
     }
     return toScrollReading(raw);
+  };
+
+  /**
+   * 抓一帧当前内核视图的像素（spec 2.4-04 的失败现场截图）。
+   *
+   * 走视图自己的 `webContents.capturePage()` 而不是窗口级截图：失败证据恰恰常在「主窗口被别的窗口
+   * 挡住 / 内核视图是隐藏的那一个」时取，而窗口级截图在那种情况下回的是空图（1.6 spike 实测）。
+   * 本方法**不落盘**，字节交给调用方决定写到哪（见 `PageScreenshotView`）。
+   * @returns PNG 字节与像素尺寸
+   * @throws 没有已挂载会话时 `NO_KERNEL_SESSION`；截图抛错或回空图（视图还没绘制出内容）时 `PAGE_SCREENSHOT_FAILED`
+   */
+  screenshot = async (): Promise<PageScreenshotView> => {
+    const contents = requireKernelContents(this.host, 'browser.page');
+    let image: NativeImage;
+    try {
+      image = await contents.capturePage();
+    } catch (error) {
+      throw new AppError(
+        'PAGE_SCREENSHOT_FAILED',
+        `内核视图截图失败：${error instanceof Error ? error.message : String(error)}`,
+        'browser.page',
+        { url: contents.getURL() },
+      );
+    }
+    if (image.isEmpty()) {
+      // 空图不是「截图这件事没做成」而是「这一帧根本没有画面」：留个 null 位比塞一张白图有用。
+      throw new AppError(
+        'PAGE_SCREENSHOT_FAILED',
+        '内核视图当前没有可截取的画面（页面尚未绘制或视图已隐藏）',
+        'browser.page',
+        {
+          url: contents.getURL(),
+        },
+      );
+    }
+    const { width, height } = image.getSize();
+    return { width, height, png: image.toPNG() };
   };
 
   /**

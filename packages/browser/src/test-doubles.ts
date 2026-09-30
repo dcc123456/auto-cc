@@ -11,8 +11,8 @@
  */
 import type { AppError } from '@auto-cc/core';
 import { Service, type Context } from '@auto-cc/core';
-import type { LocateResultView, LocatedReading } from '@auto-cc/shared';
-import type { WebContents, WebFrameMain } from 'electron';
+import type { LocateResultView, LocatedReading, SessionsStatusView } from '@auto-cc/shared';
+import type { NativeImage, WebContents, WebFrameMain } from 'electron';
 import { z } from 'zod';
 import type { CdpCommand } from './input-channel.js';
 
@@ -117,20 +117,64 @@ export function fakeViewLog(): FakeViewLog {
 }
 
 /**
+ * `capturePage()` 的三种预设结局（spec 2.4-04 的截图分支）。
+ *
+ * 默认（不给这个字段）回一张有内容的图：截图失败的两种形态——抛错与空图——才是要断言的分支，
+ * 让「成功」成为不写参数时的自然结果，用例里就只写它真正要演的那一件事。
+ */
+export type FakeCapture = {
+  /** true 时 `capturePage()` 抛错（视图已销毁 / 渲染进程没响应）。 */
+  fails?: boolean;
+  /** true 时回一张空图（页面还没绘制，或视图是隐藏的那一个）。 */
+  empty?: boolean;
+  /** 非空图的尺寸（像素）。 */
+  width?: number;
+  /** 图片高度（像素）。 */
+  height?: number;
+};
+
+/** 一张「有内容」的假 PNG：只带文件签名，够断言「字节原样交出去了」。 */
+export const FAKE_PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * 按预设结局造一个 `NativeImage` 替身。
+ * @param capture 截图结局；不给就当这一帧有画面（800×600）
+ * @returns 只被 `browser.page` 的截图分支读到的三个方法（`capturePage()` 的返回形状）
+ */
+function fakeNativeImage(capture: FakeCapture | undefined): NativeImage {
+  const isEmpty = capture?.empty === true;
+  return {
+    isEmpty: () => isEmpty,
+    getSize: () => ({ width: isEmpty ? 0 : (capture?.width ?? 800), height: isEmpty ? 0 : (capture?.height ?? 600) }),
+    toPNG: () => FAKE_PNG_BYTES,
+  } as unknown as NativeImage;
+}
+
+/**
  * 造视图替身。
  * @param main 顶层帧（null 表示还没有文档）
  * @param subtree `framesInSubtree` 的内容，含顶层；省略表示只有顶层
- * @param options `url` 是当前地址（失败快照的 `snapshotRef` 要用）；`log` 给了就附上调试器门面
+ * @param options `url` 是当前地址（失败快照的 `snapshotRef` 要用）；`log` 给了就附上调试器门面；
+ *  `capture` 决定 `capturePage()` 的结局
  * @returns 替身句柄，可直接传给本包的取句柄 / 求值 / 输入函数
  */
 export function fakeView(
   main: WebFrameMain | null,
   subtree: WebFrameMain[] = [],
-  options: { url?: string; log?: FakeViewLog } = {},
+  options: { url?: string; log?: FakeViewLog; capture?: FakeCapture } = {},
 ): WebContents {
   if (main) writeFrame(main, { framesInSubtree: subtree.length > 0 ? subtree : [main] });
   const url = options.url ?? 'http://127.0.0.1:10233/boss';
-  const base = { mainFrame: main, isDestroyed: () => options.log?.isDestroyed === true, getURL: () => url };
+  const base = {
+    mainFrame: main,
+    isDestroyed: () => options.log?.isDestroyed === true,
+    getURL: () => url,
+    // 与真实 API 同形：`capturePage()` 返回 Promise，取不到画面是拒绝而不是同步抛出。
+    capturePage: () => {
+      if (options.capture?.fails) return Promise.reject(new Error('渲染进程没有响应截图请求'));
+      return Promise.resolve(fakeNativeImage(options.capture));
+    },
+  };
   const log = options.log;
   if (!log) return base as unknown as WebContents;
   let attached = false;
@@ -239,6 +283,40 @@ export class FakeShellService extends Service {
   getStatus = (): { kernelViewPartition: string } => ({
     kernelViewPartition: this.contents ? 'persist:fixture' : '',
   });
+}
+
+/**
+ * `sessions` 替身：只为凑齐 `browser.page` 的 `static inject`。
+ *
+ * 页面服务只经它读「已登记平台的起始地址」（导航许可名单的唯一来源），所以这里就给一条
+ * fixture 平台的地址——测试用不到登录判定，而 `ctx.plugin` 会按 inject 名单要求服务先就位。
+ */
+export class FakeSessionsService extends Service {
+  static provide = 'sessions';
+  static Config = emptyConfig;
+
+  constructor(ctx: Context) {
+    super(ctx, 'sessions');
+  }
+
+  /** @returns 只有 fixture 一条平台的会话读数（其余字段按界面要的形状给固定值） */
+  status = (): Promise<SessionsStatusView> =>
+    Promise.resolve({
+      platforms: [
+        {
+          id: 'fixture',
+          partition: 'persist:fixture',
+          startUrl: 'http://127.0.0.1:10233/boss',
+          isPersistent: true,
+          storagePath: null,
+          cookieNames: [],
+          sessionCookieName: 'fixture_session',
+          auth: 'active' as const,
+          expiresAt: null,
+        },
+      ],
+      activePlatform: 'fixture',
+    });
 }
 
 /**

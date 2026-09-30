@@ -69,10 +69,14 @@ type EvidenceFile = {
   at: number;
   error: { code: string; message: string; details?: unknown };
   page: { url: string; title: string; bodyText: string } | null;
+  screenshot: { ref: string; width: number; height: number } | null;
 };
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
+
+/** 假页面服务交出的那帧像素（只带 PNG 文件签名，够断言「写到磁盘的就是通道给回来的那份」）。 */
+const FAKE_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** 开一个系统临时目录并记账（用例结束后统一删除，AGENTS.md §7.5）。 */
 function tempDir(): string {
@@ -82,12 +86,15 @@ function tempDir(): string {
 }
 
 /**
- * 假的 `browser.page`：只提供证据要用的那一只手。
- * 挂它不是为了测浏览器，而是为了证明证据里的页面读数**来自可选依赖**（2.4-04 与 2.4-08 的分界）。
+ * 假的 `browser.page`：只提供证据要用的那两只手（快照与截图）。
+ * 挂它不是为了测浏览器，而是为了证明证据里的现场读数**来自可选依赖**（2.4-04 与 2.4-08 的分界）。
  */
 class FakePageService extends Service {
   static provide = 'browser.page';
   static Config = z.strictObject({});
+
+  /** 用例把它置 true 就演「取不到画面」那条分支（视图隐藏 / 页面还没绘制）。 */
+  screenshotFails = false;
 
   constructor(ctx: Context, _options: Record<string, never>) {
     super(ctx, 'browser.page');
@@ -104,6 +111,16 @@ class FakePageService extends Service {
       title: '职位列表 - 测试夹具',
       bodyText: '前端工程师'.repeat(200),
     });
+  }
+
+  /**
+   * 固定的一帧像素。
+   * @returns 尺寸与 PNG 字节；`screenshotFails` 为真时以拒绝的 Promise 失败，与真实页面服务同形
+   */
+  screenshot(): Promise<{ width: number; height: number; png: Uint8Array }> {
+    return this.screenshotFails
+      ? Promise.reject(new Error('内核视图当前没有可截取的画面'))
+      : Promise.resolve({ width: 1_280, height: 720, png: FAKE_PNG });
   }
 }
 
@@ -124,7 +141,7 @@ interface BootOptions {
  * 假执行器在登记处**自己登记之后**覆盖，所以 `demo.flaky` 那个打真 HTTP 的内置实现永远不会被调到
  * （登记是最后写入者说话，见 `executors.ts`）。
  * @param options 见 `BootOptions`
- * @returns 上下文、runner、原始 `workflow.store`、执行器登记处，以及进度事件与调用序列两份账
+ * @returns 上下文、runner、原始 `workflow.store`、执行器登记处、页面替身（没挂就是 null），以及进度事件与调用序列两份账
  */
 async function boot(options: BootOptions = {}) {
   const dir = options.dir ?? tempDir();
@@ -146,6 +163,8 @@ async function boot(options: BootOptions = {}) {
     registry.register(kind, executor);
   }
   if (options.withPage) fibers.push(await ctx.plugin(FakePageService, {}));
+  // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例才改得动它的开关。
+  const page = options.withPage ? (ctx.get('browser.page') as unknown as FakePageService) : null;
 
   const events: WorkflowProgressEvent[] = [];
   // 先订阅再挂载：`[Service.init]` 会推一次 idle 快照，晚一行就漏掉它。
@@ -161,6 +180,7 @@ async function boot(options: BootOptions = {}) {
     runs: app['workflow.store'],
     db: app.store.db,
     registry,
+    page,
     events,
     calls,
     // 单独卸 runner 用（等价于 `plugins.stop('workflow')`：进程没死，库与登记处都还在）。
@@ -375,7 +395,7 @@ describe('退避重试（2.4-03）', () => {
 });
 
 describe('失败证据（2.4-04）', () => {
-  it('判失败时把错误 payload 写成文件，库里只存相对路径；没挂页面通道时页面位为 null', async () => {
+  it('判失败时把错误 payload 写成文件，库里只存相对路径；没挂页面通道时现场两位都是 null', async () => {
     const { runner, dir } = await boot({
       config: { retryTimes: 0 },
       behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
@@ -397,10 +417,12 @@ describe('失败证据（2.4-04）', () => {
     });
     // 这一条同时是 2.4-08 的反证：整条链没有 `browser` 也能跑完并留下证据。
     expect(file.page).toBeNull();
+    expect(file.screenshot).toBeNull();
+    expect(existsSync(join(dir, 'evidence', `${runId}-jd-capture.png`))).toBe(false);
     expect(typeof file.at).toBe('number');
   });
 
-  it('挂了页面通道时证据带上现场读数，并按 evidenceTextChars 截断（不谎称是全文）', async () => {
+  it('挂了页面通道时证据带上现场读数与同名截图，正文按 evidenceTextChars 截断（不谎称是全文）', async () => {
     const { runner, dir } = await boot({
       config: { retryTimes: 0, evidenceTextChars: 50 },
       behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
@@ -414,6 +436,27 @@ describe('失败证据（2.4-04）', () => {
     expect(file.page?.url).toBe('https://fixture.invalid/search');
     expect(file.page?.bodyText).toHaveLength(50 + '…（已截断）'.length);
     expect(file.page?.bodyText.endsWith('…（已截断）')).toBe(true);
+    // 截图与证据 JSON 同名同目录：库里存的就是这个相对路径，人翻文件时一眼对得上。
+    expect(file.screenshot).toEqual({ ref: `evidence/${runId}-jd-capture.png`, width: 1_280, height: 720 });
+    expect(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.png`))).toEqual(FAKE_PNG);
+  });
+
+  it('页面服务取不到画面时截图位记 null，错误 payload 与读数仍然落盘', async () => {
+    const { runner, dir, page } = await boot({
+      config: { retryTimes: 0 },
+      behavior: { 'jd.capture': failThenSucceed(9, '站点改版') },
+      withPage: true,
+    });
+    page!.screenshotFails = true;
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+
+    const runId = String(runner.state()?.runId);
+    const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8')) as EvidenceFile;
+    expect(file.screenshot).toBeNull();
+    expect(file.page?.title).toBe('职位列表 - 测试夹具');
+    expect(file.error.message).toBe('站点改版');
+    expect(existsSync(join(dir, 'evidence', `${runId}-jd-capture.png`))).toBe(false);
   });
 });
 
@@ -632,7 +675,7 @@ describe('卸载让出（1.10-04 / 2.4-07）', () => {
 });
 
 describe('保留上限（2.4-10 的清理侧）', () => {
-  it('超出 retentionRuns 的旧 run 连它的证据文件一起清掉', async () => {
+  it('超出 retentionRuns 的旧 run 连它的证据文件（含截图）一起清掉', async () => {
     let shouldFail = true;
     const { runner, dir, db } = await boot({
       config: { retryTimes: 0, retentionRuns: 1 },
@@ -641,6 +684,8 @@ describe('保留上限（2.4-10 的清理侧）', () => {
           if (shouldFail) throw new AppError('WORKFLOW_STEP_FAILED', '站点改版', 'workflow.executors');
         },
       },
+      // 挂上页面通道才会产生 .png：这条要证的正是「截图也跟着 run 一起清」，而不是只清 JSON。
+      withPage: true,
     });
 
     runner.start();
@@ -648,6 +693,7 @@ describe('保留上限（2.4-10 的清理侧）', () => {
     const firstRunId = runner.current().runId;
     const evidenceFile = join(dir, 'evidence', `${firstRunId}-jd-capture.json`);
     expect(existsSync(evidenceFile)).toBe(true);
+    expect(existsSync(join(dir, 'evidence', `${firstRunId}-jd-capture.png`))).toBe(true);
 
     // 第一次 run 修好再跑完它，然后连起两次新 run：第三次起步时保留上限才会真的丢东西。
     shouldFail = false;

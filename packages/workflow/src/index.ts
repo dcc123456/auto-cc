@@ -58,14 +58,24 @@ type NodeEvidence = {
   error: { code: string; message: string; details?: unknown };
   /** 失败当时的页面读数；没有已挂载的内核会话时为 null（证据仍然要落盘）。 */
   page: { url: string; title: string; bodyText: string } | null;
+  /**
+   * 失败当时的现场截图（spec 2.4-04）；`ref` 是相对 userData 的证据目录路径。
+   * 取不到画面（页面服务没装 / 视图隐藏 / 写盘失败）时为 null——**错误 payload 比一张图重要**，
+   * 所以截图失败不会把整份证据丢掉。
+   */
+  screenshot: { ref: string; width: number; height: number } | null;
 };
 
 /**
- * `browser.page` 里证据只需要的那一个方法（按结构取，不引包依赖：
+ * `browser.page` 里证据只需要的那两个方法（按结构取，不引包依赖：
  * workflow 不 import browser，否则 2.4-08「无浏览器纯 mock 跑通整条链」就破了）。
+ *
+ * `screenshot` 是**可选**的：装的页面服务可以只给快照不给截图（1.6 那套 harness 通道就是这样），
+ * 这时证据记 null，工作流的行为与没有 browser 时一致。
  */
 type PageSnapshotReader = {
   snapshot: (maxChars?: number) => Promise<{ url: string; title: string; bodyText: string }>;
+  screenshot?: () => Promise<{ width: number; height: number; png: Uint8Array }>;
 };
 
 /** 执行器配置（在调试面板里可热改，走 1.5 的 `plugins.saveConfig`；§11.4 的键表）。 */
@@ -84,7 +94,7 @@ export const workflowConfigSchema = z.object({
   evidenceDomChars: z.number().int().min(0).max(20000).default(800),
   /** 证据文件里单个文本字段的上限（字符），超出截断并标注。 */
   evidenceTextChars: z.number().int().min(0).max(20000).default(300),
-  /** userData 下的证据子目录名；文件名是 `<runId>-<nodeId>.json`。 */
+  /** userData 下的证据子目录名；文件名是 `<runId>-<nodeId>.json`，现场截图同名换成 `.png`。 */
   evidenceDir: z.string().min(1).max(64).default('evidence'),
   /** 旧 run 的保留个数，超出清 `workflow_*` 行并连带删掉它们的证据文件。 */
   retentionRuns: z.number().int().min(1).max(500).default(20),
@@ -681,23 +691,23 @@ export class WorkflowRunnerService extends Service {
   ): Promise<string | null> {
     const code = error instanceof AppError ? error.code : error instanceof Error ? error.name : 'UNKNOWN';
     const details = error instanceof AppError ? error.details : undefined;
-    const evidence: NodeEvidence = {
-      runId,
-      nodeId: spec.id,
-      kind: spec.kind,
-      effect: spec.effect,
-      target: spec.target,
-      attempt,
-      at,
-      error: { code, message: this.cap(error instanceof Error ? error.message : String(error)), details },
-      page: await this.readPage(),
-    };
-    const relative = join(this.config.evidenceDir, `${runId}-${spec.id}.json`);
+    const json = this.evidenceFile(runId, spec.id, 'json');
     try {
-      const dir = join(this.userDataDir, this.config.evidenceDir);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(this.userDataDir, relative), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
-      return relative.split(/[\\/]/).join('/');
+      mkdirSync(join(this.userDataDir, this.config.evidenceDir), { recursive: true });
+      const evidence: NodeEvidence = {
+        runId,
+        nodeId: spec.id,
+        kind: spec.kind,
+        effect: spec.effect,
+        target: spec.target,
+        attempt,
+        at,
+        error: { code, message: this.cap(error instanceof Error ? error.message : String(error)), details },
+        page: await this.readPage(),
+        screenshot: await this.writeScreenshot(runId, spec.id),
+      };
+      writeFileSync(json.absolute, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+      return json.relative;
     } catch (error_) {
       // 证据丢了不能把整条 run 判成别的结局：落库的失败读数比一份附件重要。
       this.ctx.logger.warn(
@@ -708,14 +718,63 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
+   * 拼一份证据文件的落点（两种证据共用，AGENTS.md §2.2）。
+   * @param runId 本次 run
+   * @param nodeId 节点 id
+   * @param ext 扩展名，不含点：`json` 是证据本体，`png` 是现场截图
+   * @returns `relative` 写进库与证据正文（userData 相对、正斜杠），`absolute` 是要真写的磁盘路径
+   */
+  private evidenceFile(runId: string, nodeId: string, ext: 'json' | 'png'): { relative: string; absolute: string } {
+    const name = `${runId}-${nodeId}.${ext}`;
+    return {
+      relative: join(this.config.evidenceDir, name).split(/[\\/]/).join('/'),
+      absolute: join(this.userDataDir, this.config.evidenceDir, name),
+    };
+  }
+
+  /**
+   * 抓一帧失败现场并写成 PNG（spec 2.4-04）。
+   *
+   * 字节由 `browser.page` 交出、由这里落盘：页面服务不知道自己会被谁调用，所以它不碰路径；
+   * 而保留期是 run 的事，故截图与证据 JSON 同名同目录，`applyRetention` 按 `<runId>-` 前缀一起清掉。
+   * @param runId 本次 run
+   * @param nodeId 节点 id
+   * @returns 证据里的截图位；页面服务没装、不给截图、取不到画面或写盘失败时为 null
+   */
+  private async writeScreenshot(runId: string, nodeId: string): Promise<NodeEvidence['screenshot']> {
+    const page = this.pageChannel();
+    if (!page?.screenshot) return null;
+    try {
+      const shot = await page.screenshot();
+      const png = this.evidenceFile(runId, nodeId, 'png');
+      writeFileSync(png.absolute, shot.png);
+      return { ref: png.relative, width: shot.width, height: shot.height };
+    } catch (error) {
+      // 视图隐藏 / 还没绘制 / 磁盘问题：三种都只让截图这一位空掉，正文证据照旧落盘。
+      this.ctx.logger.debug(`证据未取得现场截图：${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * 取证据要用的页面通道。
+   *
+   * 页面通道是**可选**依赖（`browser.page` 没装时节点照样要判失败），所以走 `maybeService` 而不是 inject
+   * ——这也是 2.4-08「纯 mock 跑通整条链」在类型上成立的前提。
+   * @returns 装了的页面服务（只取证据用得上的两个方法）；没装时 undefined（`maybeService` 的读数形状）
+   */
+  private pageChannel(): PageSnapshotReader | undefined {
+    return maybeService<PageSnapshotReader>(this.ctx, 'browser.page');
+  }
+
+  /**
    * 取一帧失败现场的页面读数。
    *
-   * 页面通道是**可选**依赖（`browser.page` 没装时节点照样要判失败），所以走 `maybeService` 而不是 inject；
    * 取不到就记 null，绝不因为「没页面」而把证据整体丢掉（spec 2.4-04 要求的是错误 payload + 现场读数）。
    * @returns URL / 标题 / 正文节选；无内核会话或求值失败时为 null
    */
   private async readPage(): Promise<NodeEvidence['page']> {
-    const page = maybeService<PageSnapshotReader>(this.ctx, 'browser.page');
+    const page = this.pageChannel();
     if (!page) return null;
     try {
       const snapshot = await page.snapshot(this.config.evidenceDomChars);

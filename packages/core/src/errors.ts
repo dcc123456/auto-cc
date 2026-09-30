@@ -19,6 +19,9 @@ export type AppErrorCode =
   | 'NO_KERNEL_SESSION'
   // 注入脚本本身在页面里抛了（页面被销毁、脚本被 CSP 拦下），与「读到了但内容为空」是两回事。
   | 'PAGE_SCRIPT_FAILED'
+  // 内核视图取像素失败（spec 2.4-04 的失败截图）：`capturePage()` 抛错与回了一张空图共用一个码，
+  // 因为调用方（工作流证据）对两者的处置相同——证据里记 null，而不是把整条 run 判成别的结局。
+  | 'PAGE_SCREENSHOT_FAILED'
   // 定位与动作层（spec 2.2）。三个动作错误按「停在哪一步」分码，界面据此决定给不给重试按钮：
   // 声明本身不可用（改数据）、等不到可点（可重试）、未过线（要看候选）、下发被拒（可重试）。
   | 'LOCATE_SPEC_INVALID'
