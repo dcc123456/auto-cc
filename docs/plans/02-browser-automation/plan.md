@@ -1819,3 +1819,110 @@ reload 后两个面板各自重新读库、只显示已确认时刻。证据五�
 盖住了什么、按哪条规则盖的，读数面（`WorkflowNodeView.evidenceRef`）今天不支持，硬要显示就是界面自己判断；
 ② 签字只有 `automation:<platform>` 一档，没有「只允许搜索、不允许打招呼」这种细 scope，
 也没有撤销入口（表是审计用的，只进不出）——真要撤销得先决定撤销后旧账本行怎么解释，那是产品决策不是收尾活。
+
+---
+
+## 15. 子计划 2.8 的选型与证据（开工前定稿，实现照此执行）
+
+### 15.0 先记实测：这一片面对的代码现状与 spec 文案有七处对不上
+
+写这一节的判据全部来自当前工作区读数（不是 spec 的想象），列出来是因为 2.8 的十二条里有四条
+**今天已经满足**、三条**按字面判据无法达成**，不先说清就会出现「重做一遍已完成的事 + 验收一条不存在的能力」。
+
+| #   | 实测事实（文件:行）                                                                                                                                                                           | 对 spec 2.8 的影响                                                                                                                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | runner 只发一个事件 `workflow/progress`，`useWorkflowRun.ts:31-37` 订阅它并在开头取一次快照，**没有轮询**                                                                                     | **2.8-02 已满足**，本片只补回归断言，不重做                                                                                          |
+| 2   | `ChatPanel` 与 `WorkflowPanel` 都经同一个 `useWorkflowRun`（`ChatPanel.tsx:124`、`WorkflowPanel` 同源），状态只有一个来源                                                                     | **2.8-12 已满足**，只需静态查引用 + 双侧镜像断言                                                                                     |
+| 3   | 步骤状态只有 `pending/running/done/failed`（`events.ts:88`），「待接管」是 run 级 `requiresHuman`（`WorkflowTakeoverView`），`skipped` 在读回映射里被折成 `done`（`index.ts:916-918`）        | **2.8-01 的「五态齐全」按字面做不到**，见 §15.1 决策 1                                                                               |
+| 4   | 迁移表（`machine.ts:17-31`）**没有 abort 事件**，白名单也没有中止口，界面只有 开始/暂停/继续 + 单步重试                                                                                       | **2.8-03 的「中止」今天不存在**，见 §15.1 决策 2                                                                                     |
+| 5   | 失败证据**每次失败都写**（`index.ts:725-798`，`evidence/<runId>-<stepId>.json` + 同名 `.png`），但渲染层一处都不读，审计段只显示文件名（`AuditSection.tsx:157-158`）                          | 2.8-04 缺的是**读取与展示通道**，不是采集能力，别在采集上再加一套                                                                    |
+| 6   | `agent.tools` 注册协议完整（`tools.ts:30-42`：`effect` 三档 + `requiresConfirmation`），`list/call/register/unregister` 与错误码都在，但**生产注册表是空的**——只有 `agent.test.ts` 注册过工具 | 2.8-08 的工作量=登记实现，不是设计契约。`requiresConfirmation` 今天**不被强制**（`tools.ts:39-40` 写明批准流属 P5）→ 见 §15.1 决策 4 |
+| 7   | `ChatPanel` 的 `ToolCard`（`:42-75`）能画 工具名/入参 JSON/状态/耗时/错误，但 `/tool` 前缀走的是**故意不注册**的 `demo.echo`（`session.ts:43-44, 336-360`）→ 卡片永远 `TOOL_NOT_REGISTERED`   | 2.8-09 是「把壳接到真执行」，卡片组件本身不用重写                                                                                    |
+
+另有一条为 2.8-04 铺路的实测：打包版 CSP（`scripts/build.ts:22-26` 注入，读 `build/app/renderer/index.html:4` 印证）
+里 **`img-src 'self' data:` 已经在**——这是 1.7-13 落下来的，不是为了 2.8 现加。
+所以截图走 IPC 返回 data URL 进 `<img>` 不放宽任何策略，不需要自定义协议、不需要 `registerFileProtocol`（本仓库至今没有一处，grep 无命中）。
+
+### 15.1 五个决策（含被否决方案）
+
+**决策 1：待接管不伪装成第六个步骤状态，界面画「run 级叠加态」。**
+`requiresHuman` 已经是带原因的枚举（`missing|expired|unobserved-side-effect|manual-takeover|risk-control`，
+`events.ts:113-134`），而 `paused` 已经是 run 状态。给步骤塞一个 `takeover` 值要同时改迁移表、落库集合
+（`run-store.ts:124` 的 `RUN_STATUSES`）、读回映射三处，只为让一张截图多一格——否决。
+做法：面板在 `status='paused' && requiresHuman` 时，把接管标记画在**当前步槽位**上（`stepIndex` 指的那格），
+文案取 `workflow.takeoverBody.<reason>` 现有 i18n。2.8-01 的判据据此更正为
+「四类步骤状态 + 一个 run 级待接管叠加态同图可见」，`skipped` 明确不进判据（它在计划里就不出现）。
+
+**决策 2：中止 = 停推进循环 + 用现有 `updateRun` 定向落 `interrupted`，不新增终态、不加第二个落库通道。**
+现成事实：`RunOutcome`（`run-store.ts:153-160`）允许 `status: WorkflowRunStateStatus`（含 `interrupted`）
+与机器码 `lastError`，而 `index.ts:926` 已把 `interrupted` 读回成 `paused` + 接管点，`resumeRun` 因此天然能从中止处续。
+所以中止只需两步：停止推进、`updateRun(runId, {status:'interrupted', nodeIndex: 当前, lastError:'USER_ABORT'})`，
+界面随后按既有映射显示——**用户看到的「中止」和「进程被杀」走的是同一条读回语义**，这正是可续跑的要求。
+被否决：① 给迁移表加 `abort` + 新状态 `aborted`（制造第二套终态语义，AGENTS.md §2.5）；
+② 把中止实现成 `markInterrupted`（`run-store.ts:406` 是按 `status='running'` 的**全表启动清扫**，
+不是针对单个 runId 的按钮，用它等于误伤别的在途 run）。
+新增的只有白名单一个口 `workflow.runner.abort`。
+
+**决策 3：证据读取开一个新服务口，文本进渲染层前必须过 `core/redact` 唯一权威。**
+`workflow.evidence.read(runId, stepId)` 返回 `{errorText, domSnippet, screenshotDataUrl}`：
+`.json` 里的文本经 `redact()` 后返回，`.png` 读成 base64 data URL（超过配置上限就返回「太大未取」而不是硬塞）。
+这条同时把 2.7-d 欠的那格补上：卡片可以显示「已按 <规则数> 处掩码」——因为读的是主进程**实际掩码之后的**内容，
+界面不猜。被否决：`protocol.registerFileProtocol` 暴露 userData 目录（把整个证据目录变成可读 URL 面，
+等于给脱敏开后门）；`<img src="file://…">`（被 CSP 的 `img-src 'self' data:` 直接挡掉，且违反 §8 的默认拒绝）。
+
+**决策 4：2.8 只登记工具，不做批准流；外发的闸门仍在服务实现内部，工具层不套第二道。**
+`register()` 已具备，注册点放在各能力包自己的插件挂载时（`browser`/`platform-boss`/`outbound` 各自登记自己
+对外那几个方法），而不是集中写一个 `tools-seed.ts`——集中清单必然和服务漂移（新增一个 service 方法忘了登记）。
+`effect` 取值照 `ToolEffect` 现有三档，外发工具（`outbound.greet.perform`、`outbound.deliver.perform`、
+`jd.capture.run`）标 `outbound`，且因为 `ensureConsent` + `entitlement.gate` 已经在这些服务内部（2.7-a/b/e 落的），
+2.8-10 的断言写法是「**从对话入口调外发工具** → 被 gate 判定 + 账本有行」，不是「工具层自己判额度」。
+`requiresConfirmation` 继续只登记不强制，spec 2.8-10 不把它算作已交付（属 P5）。
+
+**决策 5：工具 id 沿用服务口名，不新造命名空间。**
+注册表约定是「域.动作」（`tools.ts:31`），现有服务口已经是 `browser.page.navigate`、`jd.capture.run`、
+`outbound.greet.perform` 这个形状，工具 id 与之一致才能一眼对上；
+写 `platform-boss.jd.capture` 这类带包名的 id 会把实现细节漏进界面文案（审计段与工具卡片都要显示它）。
+
+### 15.2 归属与命名（延续 2.1–2.7 的口径）
+
+- 中止口、证据读口都加在 **`workflow.runner` 同一个 service** 上（`packages/workflow/src/index.ts`），
+  不新开 `workflow.evidence` 服务——证据文件的目录与命名规则已经是 runner 的私有知识（`config.evidenceDir`），
+  另开服务就要么复制这套规则、要么把 runner 的内部再导出一次，两条都违反 §2.3。
+- 渲染层新增：面板证据展开（`WorkflowPanel` 内部，复用现有槽位组件）、`ChatPanel` 的真调用路径。
+  不新增视图、不新增面板段（2.7-e 的 `AuditSection` 保持原样，它读的是账本与节点，不是证据正文）。
+- 白名单新增四个 key：`workflow.runner.abort`、`workflow.evidence.read`（实际方法名随 service 走）、
+  `agent.tools.list`/`agent.tools.call` **已在**（`bridge.ts:155-156`）不动。
+
+### 15.3 参数进配置（`cordis.yml`），代码里不写魔法数
+
+| 键                                     | 含义                                                   | 默认      |
+| -------------------------------------- | ------------------------------------------------------ | --------- |
+| `workflow.evidence.maxScreenshotBytes` | 证据截图读进渲染层的字节上限，超限只报「未取（太大）」 | 2_000_000 |
+| `workflow.evidence.maxSnippetChars`    | DOM 片段进 IPC 的字符上限（脱敏之后再截）              | 4_000     |
+
+上限值必须实测校准（截图是整窗 PNG，真实大小要在 10222 窗口里量一次再定默认），不是拍一个数。
+
+### 15.4 fixture 靶子与全链路（2.8-07 / M6 的落点）
+
+`boss-basic` 与 `boss-deliver` 都不足以当 M6 判据：前者没有投递/打招呼节点，后者从「已入库的 JD」起步。
+新增内置计划 **`boss-e2e`**：`jd.capture → script.generate → greet → deliver`（简历定制一格在 P2 只放**占位**——
+读知识库里既有经历拼一份附件路径，生成轨属 P3，不能在这里偷做），
+`startUrl` 全指本地仿站 10233。2.8-07 的验收是**在 app 首页面板里**跑完这条链、中途暂停再续跑，
+关键节点各一张截图；「占位」那一格在截图与验收记录里都要显式写成占位，不得算作 P3 完成。
+
+### 15.5 拆片（一次一片，顺序串行）
+
+| 片    | 覆盖条目     | 内容                                                                                                          | 收口判据                                                            |
+| ----- | ------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 2.8-a | 2.8-01/03/04 | 面板五态叠加、`abort` 口（含 `updateRun` 定向落库与续跑回归）、`evidence.read` 口（脱敏 + 上限）、证据展开 UI | 三条 V 各有截图；abort 后 `resumable()` 读数与 `resumeRun` 续跑成立 |
+| 2.8-b | 2.8-08/10/06 | 各能力包登记工具（打开/导航/定位/读取/点击/输入/外发）、逐工具单测调用、白名单断言复跑                        | 工具清单可读出来 + 从工具路径调外发被 gate 判定且落账               |
+| 2.8-c | 2.8-09/02/12 | `ChatPanel` 走真 `agent.tools.call`、卡片字段（名/参/状态/耗时）、与面板同源的镜像断言                        | 从对话发起一次搜索 → 卡片与面板同步截图                             |
+| 2.8-d | 2.8-11/07/05 | 接管后恢复时重读 DOM（不复用旧快照）、`boss-e2e` 全链路可中断可续跑、前端规范复核                             | M6 门禁：全链路截图组 + 重读断言                                    |
+
+### 15.6 明确不做（2.8 阶段）
+
+- 不做 agent 规划循环、不做对话编排（§8 原有红线，2.8 只登记工具与让两个入口都能看到同一次执行）。
+- 不做批准流 UI（`requiresConfirmation` 属 P5）。
+- 不做简历生成/定制的真实实现（2.8-07 那一格是占位）。
+- 不做画布编辑器（5.10，P5）。
+- 不为「待接管」新增步骤状态，不为「中止」新增 run 终态（见决策 1/2）。
