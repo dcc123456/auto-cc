@@ -2,6 +2,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { readVersion, rollback, runMigrations, type Migration } from './migrate.js';
 
+/** 某张表在不在这库里（迁移的两类判据都只看这个）。 */
+function tableExists(db: DatabaseSync, name: string): boolean {
+  return db.prepare('SELECT name FROM sqlite_master WHERE name = ?').get(name) !== undefined;
+}
+
+/** 台账里记了哪几版。 */
+function ledgerVersions(db: DatabaseSync): number[] {
+  return (db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as { version: number }[]).map(
+    (row) => Number(row.version),
+  );
+}
+
 describe('migration 机制（spec 1.3-07）', () => {
   it('按版本递增应用并把版本号写进 user_version', () => {
     const db = new DatabaseSync(':memory:');
@@ -45,6 +57,59 @@ describe('migration 机制（spec 1.3-07）', () => {
     db.close();
   });
 
+  it('低号迁移晚于高号 push 时仍然要跑（新装机不再漏表）', () => {
+    const db = new DatabaseSync(':memory:');
+    // 装配顺序 = push 顺序：`workflow-store`(4) 排在 `jd-store`(3) 之前，水位因此先到了 4。
+    // 旧设计按 `version <= 水位` 跳过，于是 `jobs` 在一份全新用户目录里永远建不出来。
+    const high: Migration = {
+      version: 4,
+      up: (handle) => handle.exec('CREATE TABLE IF NOT EXISTS workflow_runs (id TEXT PRIMARY KEY)'),
+    };
+    const low: Migration = {
+      version: 3,
+      up: (handle) => handle.exec('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY)'),
+    };
+    expect(runMigrations(db, [high])).toEqual({ from: 0, to: 4, applied: [4] });
+    expect(runMigrations(db, [high, low])).toEqual({ from: 4, to: 4, applied: [3] });
+    expect(tableExists(db, 'jobs')).toBe(true);
+    expect(ledgerVersions(db)).toEqual([3, 4]);
+    db.close();
+  });
+
+  it('只有水位没有台账的老库：幂等 DDL 重跑一次并把账补齐', () => {
+    const db = new DatabaseSync(':memory:');
+    const migrations: Migration[] = [
+      { version: 1, up: (handle) => handle.exec('CREATE TABLE IF NOT EXISTS usage_ledger (id INTEGER PRIMARY KEY)') },
+      { version: 2, up: (handle) => handle.exec('CREATE TABLE IF NOT EXISTS chat_session (id TEXT PRIMARY KEY)') },
+    ];
+    runMigrations(db, migrations);
+    // 老库的真实形态：`schema_migrations` 还不存在，但 `user_version` 已经被旧设计推到 2。
+    db.exec('DROP TABLE schema_migrations');
+    expect(runMigrations(db, migrations)).toEqual({ from: 2, to: 2, applied: [1, 2] });
+    expect(readVersion(db)).toBe(2);
+    expect(ledgerVersions(db)).toEqual([1, 2]);
+    db.close();
+  });
+
+  it('迁移失败时不记账，下次启动会重试而不是永久跳过', () => {
+    const db = new DatabaseSync(':memory:');
+    const broken: Migration = {
+      version: 1,
+      up: (handle) => {
+        handle.exec('CREATE TABLE probe (a INTEGER)');
+        handle.exec('INSERT INTO ghost VALUES (1)');
+      },
+    };
+    expect(() => runMigrations(db, [broken])).toThrow(/迁移 1 失败/);
+    expect(ledgerVersions(db)).toEqual([]);
+    expect(readVersion(db)).toBe(0);
+    // 同一版修好后再来一次：这一次真的要建出来，而不是因为「水位到过」被跳过。
+    const fixed: Migration = { version: 1, up: (handle) => handle.exec('CREATE TABLE probe (a INTEGER)') };
+    expect(runMigrations(db, [fixed])).toEqual({ from: 0, to: 1, applied: [1] });
+    expect(ledgerVersions(db)).toEqual([1]);
+    db.close();
+  });
+
   it('版本重复或非正整数在动手前就报错', () => {
     const db = new DatabaseSync(':memory:');
     const noop: Migration = { version: 1, up: () => {} };
@@ -68,9 +133,6 @@ describe('migration 回滚（spec 2.3-05）', () => {
       down: (handle) => handle.exec('DROP TABLE jobs'),
     },
   ];
-
-  const tableExists = (db: DatabaseSync, name: string): boolean =>
-    db.prepare('SELECT name FROM sqlite_master WHERE name = ?').get(name) !== undefined;
 
   it('逐版倒序执行 down 并把版本号一起退回去', () => {
     const db = new DatabaseSync(':memory:');

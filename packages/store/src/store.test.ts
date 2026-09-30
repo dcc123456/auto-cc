@@ -48,9 +48,10 @@ async function open(dir: string, options: { file?: string; journal?: 'wal' | 'de
   return { ctx, fiber, store: asApp(ctx).store };
 }
 
+/** 被测结构清单：`schema_migrations` 是迁移器自己的台账，不属于任何一条断言里的「业务表」。 */
 function tables(db: DatabaseSync): string[] {
   return db
-    .prepare("select name from sqlite_master where type = 'table' order by name")
+    .prepare("select name from sqlite_master where type = 'table' and name != 'schema_migrations' order by name")
     .all()
     .map((row) => String(row['name']));
 }
