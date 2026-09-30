@@ -64,6 +64,13 @@ export type FakeFrameOptions = {
   error?: string;
   /** 按脚本类别分别给返回值；优先级高于 `value`，缺的类别回落到 `value`。 */
   scripts?: Partial<Record<ScriptKind, unknown>>;
+  /**
+   * 传进来就逐次记下送到的脚本源码原文。
+   *
+   * 与 `fakeView` 的同名参数共用一个数组时，就能断言「先盖遮罩 → 再取像素 → 最后摘掉」这种
+   * 跨对象的先后——分开记就只看得到各自发了几次，顺序信息会丢。
+   */
+  calls?: string[];
 };
 
 /**
@@ -90,9 +97,11 @@ export function fakeFrame(url: string, options: FakeFrameOptions = {}): WebFrame
     frames: [],
     framesInSubtree: [],
     executeJavaScript: (source?: unknown) => {
+      const script = typeof source === 'string' ? source : '';
+      options.calls?.push(script);
       if (options.error !== undefined) return Promise.reject(new Error(options.error));
       if (options.scripts) {
-        return Promise.resolve(options.scripts[scriptKindOf(typeof source === 'string' ? source : '')]);
+        return Promise.resolve(options.scripts[scriptKindOf(script)]);
       }
       return Promise.resolve(options.value);
     },
@@ -183,7 +192,7 @@ const viewEvents = new WeakMap<WebContents, ViewEventTable>();
 export function fakeView(
   main: WebFrameMain | null,
   subtree: WebFrameMain[] = [],
-  options: { url?: string; log?: FakeViewLog; capture?: FakeCapture } = {},
+  options: { url?: string; log?: FakeViewLog; capture?: FakeCapture; calls?: string[] } = {},
 ): WebContents {
   if (main) writeFrame(main, { framesInSubtree: subtree.length > 0 ? subtree : [main] });
   const url = options.url ?? 'http://127.0.0.1:10233/boss';
@@ -193,7 +202,9 @@ export function fakeView(
     isDestroyed: () => options.log?.isDestroyed === true,
     getURL: () => url,
     // 与真实 API 同形：`capturePage()` 返回 Promise，取不到画面是拒绝而不是同步抛出。
+    // `calls` 与帧替身共用同一个数组时记的是「取像素」这一步本身，用例据此判先后。
     capturePage: () => {
+      options.calls?.push('capturePage');
       if (options.capture?.fails) return Promise.reject(new Error('渲染进程没有响应截图请求'));
       return Promise.resolve(fakeNativeImage(options.capture));
     },

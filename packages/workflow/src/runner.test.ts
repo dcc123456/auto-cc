@@ -96,20 +96,28 @@ class FakePageService extends Service {
   /** 用例把它置 true 就演「取不到画面」那条分支（视图隐藏 / 页面还没绘制）。 */
   screenshotFails = false;
 
+  /**
+   * 现场正文。
+   *
+   * 做成可改写而不是写死：2.7-07 那条用例要把「页面上有裸手机号」这一帧喂进证据链，
+   * 而断言的对象是**落盘之后的文件**，正文从哪儿来不重要，改完之后的掩码才重要。
+   */
+  bodyText = '前端工程师'.repeat(200);
+
   constructor(ctx: Context, _options: Record<string, never>) {
     super(ctx, 'browser.page');
   }
 
   /**
-   * 固定的一帧现场读数。
+   * 一帧现场读数。
    * @param _maxChars 调用方要的 DOM 上限（本假实现不设限，截断由 runner 负责）
-   * @returns 超长正文，用于断言证据按 `evidenceTextChars` 截断而不是全文入库
+   * @returns `bodyText` 当前值，用于断言证据按 `evidenceTextChars` 截断而不是全文入库
    */
   snapshot(_maxChars?: number): Promise<{ url: string; title: string; bodyText: string }> {
     return Promise.resolve({
       url: 'https://fixture.invalid/search',
       title: '职位列表 - 测试夹具',
-      bodyText: '前端工程师'.repeat(200),
+      bodyText: this.bodyText,
     });
   }
 
@@ -525,6 +533,44 @@ describe('失败证据（2.4-04）', () => {
     expect(file.page?.title).toBe('职位列表 - 测试夹具');
     expect(file.error.message).toBe('站点改版');
     expect(existsSync(join(dir, 'evidence', `${runId}-jd-capture.png`))).toBe(false);
+  });
+
+  it('证据落盘前先把个人信息掩码（2.7-07）', async () => {
+    const { runner, dir, page } = await boot({
+      config: { retryTimes: 0 },
+      behavior: { 'jd.capture': failThenSucceed(9, 'HR 手机 13800138000 未响应') },
+      withPage: true,
+    });
+    page!.bodyText = '联系人手机：13800138000 邮箱：zhaopin.huang@example.com.cn 证号：330106199001011234';
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+
+    const runId = String(runner.state()?.runId);
+    const raw = readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8');
+    // 断的是**文件字节**而不是内存里的对象：脱敏发生在写盘这一步，看对象等于没测。
+    expect(raw).not.toContain('13800138000');
+    expect(raw).not.toContain('zhaopin.huang');
+    expect(raw).not.toContain('330106199001011234');
+    const file = JSON.parse(raw) as EvidenceFile;
+    expect(file.error.message).toBe('HR 手机 138****8000 未响应');
+    expect(file.page?.bodyText).toBe('联系人手机：138****8000 邮箱：z***@example.com.cn 证号：**********1234');
+  });
+
+  it('截断点落在号码中间时也不留整串数字：先脱敏、后截断（2.7-07）', async () => {
+    const { runner, dir, page } = await boot({
+      config: { retryTimes: 0, evidenceTextChars: 20 },
+      behavior: { 'jd.capture': failThenSucceed(9, '选择器没命中') },
+      withPage: true,
+    });
+    // 11 个字的前缀 + 号码：顺序若是「先截断」，落盘的正好是 `1380013800` 这十个裸数字。
+    page!.bodyText = `${'y'.repeat(11)}13800138000`;
+    runner.start();
+    await waitFor(() => runner.current().status === 'failed');
+
+    const runId = String(runner.state()?.runId);
+    const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-jd-capture.json`), 'utf8')) as EvidenceFile;
+    expect(file.page?.bodyText).toBe(`${'y'.repeat(11)}138****80…（已截断）`);
+    expect(file.page?.bodyText).not.toMatch(/\d{4,}/);
   });
 });
 

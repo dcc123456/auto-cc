@@ -9,6 +9,8 @@
 import {
   asApp,
   Logger,
+  redactText,
+  redactValue,
   Service,
   type Context,
   type Exporter,
@@ -19,7 +21,6 @@ import { createWriteStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WriteStream } from 'node:fs';
 import { z } from 'zod';
-import { redactText, redactValue } from './redact.js';
 import { RingBuffer } from './ring.js';
 
 export interface LogLine {

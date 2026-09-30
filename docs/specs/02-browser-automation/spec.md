@@ -407,13 +407,15 @@ Chromium 不再产帧，于是 `IntersectionObserver` 回调与 `scroll` 事件*
 | 2.7-04 | 操作节奏随机化参数集中在配置，不在代码里写魔法数（AGENTS.md §2 魔法数）              | C    | 同一扫描器规则二（browser/outbound/platform-boss/workflow/agent 生产代码的间隔字面量 0 命中）+ 运行期配置读数，见 `2.7-04-pacing-config.png` | [x]  |
 | 2.7-05 | 所有外发与抓取动作有审计记录，界面可回看（时间/动作/目标/结果）                      | V    | 截图审计列表                                                                                                                                 | [ ]  |
 | 2.7-06 | 平台 ToS 提示在首次启用自动化时出现一次，用户须显式确认承担风险                      | V    | 截图确认弹窗                                                                                                                                 | [ ]  |
-| 2.7-07 | 日志与截图中的个人信息（手机/邮箱/简历正文）默认脱敏                                 | C    | 断言落盘内容已掩码                                                                                                                           | [ ]  |
+| 2.7-07 | 日志与截图中的个人信息（手机/邮箱/简历正文）默认脱敏                                 | V+C  | 断言落盘内容已掩码 + 真实窗口截图盖住 4 处、清罩后残留 0，见 `2.7-07-live-readings.txt` 与两张对照图                                         | [x]  |
 
 ### 2.7 验收记录
 
 **证据位置**：`docs/acceptance/2.7/`（2.7-02-redline-scan.txt 机检与运行期读数 / 2.7-04-pacing-config.png 界面读数 /
 2.7-03-per-action-quota.txt 配置形状·单测·运行期读数 / `2.7-03-*.png` 五张真实窗口截图 /
-2.7-01-risk-signal-6.txt 靶页开关·日志·DOM·事件载荷逐字读数 + `2.7-01-*.png` 五张真实窗口截图）。
+2.7-01-risk-signal-6.txt 靶页开关·日志·DOM·事件载荷逐字读数 + `2.7-01-*.png` 五张真实窗口截图 /
+2.7-07-live-readings.txt 证据正文·遮罩盖住与没盖住·清罩读数逐字记录 + `2.7-07-masked-evidence-shot.png`
+与 `2.7-07-unmasked-baseline.png` 两张同页对照图）。
 
 - **2.7-02** `[x]`：`scripts/check-compliance-redlines.ts`（挂在 `pnpm lint`
   末道）扫 145 个源码文件 0 命中。规则一拦 UA 改写、`webRequest.onBefore*`、`extraHeaders`、
@@ -481,7 +483,34 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
   `session.fromPartition` 在 `app.whenReady()` 之前直接抛「Session can only be received when app is ready」，
   而内核装配发生在 ready 之前——首帧运行期 `browser-risk` 就是这样挂在 `failed` 的，故观测口改成异步、
   调用方在 `[Service.init]` 里 await；同一会话的同一 webRequest 事件只有一个 handler（第二次注册直接覆盖第一个）。
-- **2.7-05 / 06 / 07** `[ ]`：分别挂在 2.7-e / 2.7-e / 2.7-d，这三片未动；2.7-01 已在 2.7-c 收口（见上一条）。
+- **2.7-07** `[x]`：脱敏只有**一个权威**（`packages/core/src/redact.ts`，从 `packages/logger` 上收到 L0，
+  因为 L2/L3 的消费方按 §4.1 不能反向依赖 logger），两条落盘面都从它取数。
+  ① **文本这一路**：`redactText` 在原来的「键名形状」（`token=xxx`、`密码: xxx`，1.3 就有）之外补上
+  **「值形状」三类**（身份证 → 手机 → 邮箱，长的先跑，掩码复用 `maskByKind`）；`workflow.runner` 的
+  `cap()` 改成**先脱敏、后截断**（截断点落在号码中间时不能把整串数字留在证据里），`writeEvidence`
+  整份过 `redactValue` 再落盘（`error.details` 是执行器原样塞进来的对象，这是它的唯一收口点）。
+  ② **截图这一路**：`browser.page.screenshot()` 在 `capturePage` 前注入 `mask-script.ts`（按单个文本节点
+  跑同一份 `PII_VALUE_PATTERNS` 的**源码**、用 `Range.getClientRects()` 取每一段命中、盖绝对定位的深色块），
+  `finally` 里按 `data-auto-cc-mask` 属性清罩；新增两个配置键 `maskSensitiveInShots`（默认 true）与
+  `maskPaintTimeoutMs`（默认 120，喂给「双 rAF 等绘制」那条超时，代码里不留魔法数，对应 2.7-04）。
+  **失败即不出图**：所有帧都注入失败时 `screenshot()` 抛 `PAGE_SCRIPT_FAILED`，交回一张没遮罩的原图
+  比交回一张空图更糟；runner 那边原本就会把它降级成 `screenshot: null`。
+  ③ **单测**（U）：`redact.test.ts` 断言三类掩码形状、对照数字（薪资/编号/年份）一位不动、两轮跑完
+  结果不变（幂等）、`PII_VALUE_PATTERNS` 三条各自可编译；`mask-script.test.ts` 8 条用手写假 DOM 断言
+  命中数/盖块数、跨行两处 rect 都要盖、零尺寸 rect 不盖、跑两遍只有一层块、对照数字零命中、
+  以及**站点文本没被改写**；`page-service.test.ts` 用共享 `calls` 数组锁住 `mask → capture → unmask`
+  的顺序（截图抛错也要走完清罩）、全帧失败时不出现 `capturePage`、开关关掉时只剩 `capture`；
+  `runner.test.ts` 2 条断言证据文件里搜不到原始手机/邮箱/身份证、且截断口径是「先脱敏后截断」。
+  ④ **运行期读数**（V+C，CDP 10222，全程本地仿站 `/pii` 靶页）：真实 run `3343f1fb…` 的
+  `demo.flaky` 终态失败 → 证据正文里 `138****8000` / `z***@example.com.cn` / `**********1234` 三类齐备、
+  `grep -c` 三个原始值 = 0、对照数字清晰可读；截图盖住 4 处（含 `<a href="tel:…">` 的可见文本），
+  清罩后 `[data-auto-cc-mask]` 计数 0 且 `bodyHasRawPhone: true`（证明只盖一层、绝不改写站点 DOM）。
+  ⑤ **这一条没有做到什么**（防止被读成「截图全脱敏」）：号码被站点拆进**多个文本节点**时像素层盖不住
+  （遮罩按单节点跑正则，节点里只有半串数字）——同一次读数里它**在文本层被盖住了**（正文是拼接后整体过
+  正则的），两张图与逐字读数都在 `2.7-07-live-readings.txt`；图片、PDF 预览、canvas 里画出来的个人信息
+  一律盖不住；`hotel: xxx` 这类英文键名仍会被键形状规则误吞（已写进 `redact.ts` 头注释，是宁可误吞
+  不可漏放的取向）。
+- **2.7-05 / 06** `[ ]`：分别挂在 2.7-e / 2.7-e，这两片未动；2.7-01 在 2.7-c 收口、2.7-07 在 2.7-d 收口（见上两条）。
 
 ## 2.8 工作流与对话双入口接通
 

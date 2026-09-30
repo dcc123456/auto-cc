@@ -14,6 +14,8 @@ import {
   AppError,
   asApp,
   maybeService,
+  redactText,
+  redactValue,
   Service,
   sleep,
   type Context,
@@ -708,6 +710,10 @@ export class WorkflowRunnerService extends Service {
    *
    * 写在 run 行旁边（userData 下的 `evidenceDir`）而不是写进库里一个 BLOB：截图是给人翻文件看的，
    * 而库里只留**相对路径**（`workflow_nodes.evidence_ref`），于是「库能被拷走看」这件事没坏。
+   *
+   * 落盘前整份过一遍 `redactValue`（spec 2.7-07）：证据里除了截断过的正文，还有 `error.details`
+   * 这一位——它是执行器原样塞进来的对象（可能含页面 URL、选择器、甚至抓取到的字段值），
+   * 逐字段包不如在唯一的写盘点上统一掩码。文本字段另外在 `cap` 里先脱敏后截断，两处共用同一份判据。
    * @param runId 本次 run
    * @param index 节点下标（只用于日志）
    * @param spec 节点声明
@@ -741,7 +747,7 @@ export class WorkflowRunnerService extends Service {
         page: await this.readPage(),
         screenshot: await this.writeScreenshot(runId, spec.id),
       };
-      writeFileSync(json.absolute, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+      writeFileSync(json.absolute, `${JSON.stringify(redactValue(evidence), null, 2)}\n`, 'utf8');
       return json.relative;
     } catch (error_) {
       // 证据丢了不能把整条 run 判成别的结局：落库的失败读数比一份附件重要。
@@ -827,12 +833,16 @@ export class WorkflowRunnerService extends Service {
 
   /**
    * 按配置的字段上限截断文本。
+   *
+   * 先脱敏再截断，顺序反了会漏：`13800138000` 若在第 300 个字被切剩 `1380013`，
+   * 落盘时的整串判据就认不出来了，等于把半个手机号留在证据里（spec 2.7-07）。
    * @param text 原始文本
-   * @returns 不超过 `evidenceTextChars` 的文本；被截断时尾部带标记（不谎称是全文）
+   * @returns 掩码后不超过 `evidenceTextChars` 的文本；被截断时尾部带标记（不谎称是全文）
    */
   private cap(text: string): string {
     const limit = this.config.evidenceTextChars;
-    return text.length <= limit ? text : `${text.slice(0, limit)}…（已截断）`;
+    const safe = redactText(text);
+    return safe.length <= limit ? safe : `${safe.slice(0, limit)}…（已截断）`;
   }
 
   /**

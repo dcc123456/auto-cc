@@ -27,6 +27,7 @@ import {
   type KernelHost,
 } from './frame-channel.js';
 import { buildExtractScript, toExtractFrameReading } from './extract-script.js';
+import { buildMaskScript, buildUnmaskScript, type MaskScriptResult } from './mask-script.js';
 import {
   buildScrollScript,
   buildSnapshotScript,
@@ -54,6 +55,20 @@ export const browserPageSchema = z.strictObject({
   extractRowLimit: z.number().int().min(1).max(100).default(12),
   /** 抽取时单个字段正文的上限（字符）。 */
   extractTextLimit: z.number().int().min(50).max(20_000).default(4000),
+  /**
+   * 截图前是否盖住页面上以文本出现的个人信息（spec 2.7-07，AGENTS.md §8.5 的「默认脱敏」）。
+   *
+   * 默认开：截图是往证据目录里落的东西，脱敏必须是缺省行为而不是调用方记得做的事。
+   * 关掉它只有一个正当理由——开发者自己要看不脱敏的现场，所以它是配置项而不是代码常量。
+   */
+  maskSensitiveInShots: z.boolean().default(true),
+  /**
+   * 等遮罩那一帧真的画出来的上限（毫秒）。
+   *
+   * 视图可以在后台，隐藏时合成器不保证按帧回调，所以「等绘制」和这个时限赛跑；
+   * 数值放配置而不是写在脚本里，同 spec 2.7-04 的节奏参数（AGENTS.md §2 魔法数）。
+   */
+  maskPaintTimeoutMs: z.number().int().min(16).max(2_000).default(120),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -186,16 +201,22 @@ export class BrowserPageService extends Service {
   };
 
   /**
-   * 抓一帧当前内核视图的像素（spec 2.4-04 的失败现场截图）。
+   * 抓一帧当前内核视图的像素（spec 2.4-04 的失败现场截图 / 2.7-07 的脱敏侧）。
    *
    * 走视图自己的 `webContents.capturePage()` 而不是窗口级截图：失败证据恰恰常在「主窗口被别的窗口
    * 挡住 / 内核视图是隐藏的那一个」时取，而窗口级截图在那种情况下回的是空图（1.6 spike 实测）。
    * 本方法**不落盘**，字节交给调用方决定写到哪（见 `PageScreenshotView`）。
+   *
+   * 默认先盖后截（`maskSensitiveInShots`）：手机 / 邮箱 / 证件号在页面上是文本，盖一块实心 div 就遮住了，
+   * 站点 DOM 一个字不改；摘除放在 `finally`，取图失败也要把现场还原，不给页面留下我们的痕迹。
    * @returns PNG 字节与像素尺寸
-   * @throws 没有已挂载会话时 `NO_KERNEL_SESSION`；截图抛错或回空图（视图还没绘制出内容）时 `PAGE_SCREENSHOT_FAILED`
+   * @throws 没有已挂载会话时 `NO_KERNEL_SESSION`；遮罩在所有帧都失败时 `PAGE_SCRIPT_FAILED`（宁可不截，
+   *   也不能留下一张「看着像脱敏过」的原图）；截图抛错或回空图（视图还没绘制出内容）时 `PAGE_SCREENSHOT_FAILED`
    */
   screenshot = async (): Promise<PageScreenshotView> => {
     const contents = requireKernelContents(this.host, 'browser.page');
+    const shouldMask = this.config.maskSensitiveInShots;
+    if (shouldMask) await this.applyPiiMask(contents);
     let image: NativeImage;
     try {
       image = await contents.capturePage();
@@ -206,6 +227,8 @@ export class BrowserPageService extends Service {
         'browser.page',
         { url: contents.getURL() },
       );
+    } finally {
+      if (shouldMask) await this.removePiiMask(contents);
     }
     if (image.isEmpty()) {
       // 空图不是「截图这件事没做成」而是「这一帧根本没有画面」：留个 null 位比塞一张白图有用。
@@ -221,6 +244,39 @@ export class BrowserPageService extends Service {
     const { width, height } = image.getSize();
     return { width, height, png: image.toPNG() };
   };
+
+  /**
+   * 截图前在每一帧里盖住命中的个人信息文本（spec 2.7-07）。
+   *
+   * 逐帧而不是只盖顶层：简历预览、聊天浮层这些恰好带联系方式的对象常在 iframe 里，
+   * 只盖顶层等于「截图已脱敏」这句承诺是假的。单帧拒绝脚本沿用 2.2-08 的宽容（那一帧没盖住，
+   * 别的帧照盖），但**所有帧都失败**就是另一回事了——那时截出来的是原图，必须失败。
+   * @param contents 目标视图句柄
+   * @throws 所有帧都读失败时 `PAGE_SCRIPT_FAILED`
+   */
+  private async applyPiiMask(contents: WebContents): Promise<void> {
+    const evaluations = await evaluateInFrames(contents, buildMaskScript(this.config.maskPaintTimeoutMs), true);
+    const usable = usableEvaluations(evaluations, 'browser.page');
+    let covers = 0;
+    for (const evaluation of usable) {
+      const reading = evaluation.value as Partial<MaskScriptResult> | null;
+      if (typeof reading?.covers === 'number') covers += reading.covers;
+    }
+    this.ctx.logger.debug(
+      `截图前遮罩：盖了 ${String(covers)} 块（帧 ${String(usable.length)}/${String(evaluations.length)}）`,
+    );
+  }
+
+  /**
+   * 摘掉自己盖的那些遮罩块，把页面还原回截之前的样子。
+   *
+   * 只按 `data-auto-cc-mask` 找节点，不碰站点自己的 DOM；摘除失败不升级成错误——那时页面顶多
+   * 留着几块黑色 div，比让整条证据链断掉轻，且下一次进页面就没了。
+   * @param contents 目标视图句柄
+   */
+  private async removePiiMask(contents: WebContents): Promise<void> {
+    await evaluateInFrames(contents, buildUnmaskScript());
+  }
 
   /**
    * 壳层的视图宿主句柄（见 `KernelHost` 注释：这里刻意只取两个方法）。

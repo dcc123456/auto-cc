@@ -11,7 +11,7 @@ import { Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import type { WebContents } from 'electron';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserPageService, type BrowserPageConfig } from './index.js';
-import { FAKE_PNG_BYTES, FakeSessionsService, FakeShellService, fakeView } from './test-doubles.js';
+import { FAKE_PNG_BYTES, FakeSessionsService, FakeShellService, fakeFrame, fakeView } from './test-doubles.js';
 
 /**
  * 页面服务配置的默认值。
@@ -23,6 +23,8 @@ const DEFAULT_PAGE_CONFIG: BrowserPageConfig = {
   snapshotTextLimit: 4_000,
   extractRowLimit: 12,
   extractTextLimit: 4_000,
+  maskSensitiveInShots: true,
+  maskPaintTimeoutMs: 60,
 };
 
 const fibers: Fiber[] = [];
@@ -30,14 +32,15 @@ const fibers: Fiber[] = [];
 /**
  * 起一套「shell / sessions 替身 + 真页面服务」。
  * @param view 内核视图替身；null 表示还没有挂载会话
+ * @param overrides 只覆盖要测的那一两个配置项，其余用默认值
  * @returns 真的 `browser.page` 实例（三条依赖里只有它是真的，视图与登记面都是替身）
  */
-async function boot(view: WebContents | null = null) {
+async function boot(view: WebContents | null = null, overrides: Partial<BrowserPageConfig> = {}) {
   const ctx = new Context();
   fibers.push(
     await ctx.plugin(FakeShellService, NO_CONFIG),
     await ctx.plugin(FakeSessionsService, NO_CONFIG),
-    await ctx.plugin(BrowserPageService, DEFAULT_PAGE_CONFIG),
+    await ctx.plugin(BrowserPageService, { ...DEFAULT_PAGE_CONFIG, ...overrides }),
   );
   (ctx.get('shell') as unknown as FakeShellService).contents = view;
   return ctx.get('browser.page') as BrowserPageService;
@@ -78,5 +81,56 @@ describe('失败现场截图（spec 2.4-04）', () => {
       message: expect.stringContaining('没有可截取的画面'),
       details: { url: 'http://127.0.0.1:10233/boss' },
     });
+  });
+});
+
+/**
+ * 遮罩与取像素的先后（spec 2.7-07）。
+ *
+ * 帧替身与视图替身共用同一个 `calls` 数组，为的就是这条顺序能断出来：分开记只看得到
+ * 「发了两次脚本、取了一次像素」，而「盖在取之前、摘在取之后」才是这件事的全部内容。
+ */
+describe('截图前遮罩（spec 2.7-07）', () => {
+  /** 把记下来的调用序列折成可读的步骤名。 */
+  const steps = (calls: string[]): string[] =>
+    calls.map((call) => (call === 'capturePage' ? 'capture' : call.includes('createRange') ? 'mask' : 'unmask'));
+
+  const piiView = (calls: string[], capture: { width?: number; height?: number; fails?: boolean } = {}) =>
+    fakeView(fakeFrame('http://127.0.0.1:10233/pii', { value: { hits: 3, covers: 3 }, calls }), [], {
+      capture: { width: 800, height: 600, ...capture },
+      calls,
+    });
+
+  it('默认配置下按「盖 → 截 → 摘」三步走', async () => {
+    const calls: string[] = [];
+    const page = await boot(piiView(calls));
+    await expect(page.screenshot()).resolves.toMatchObject({ width: 800, height: 600, png: FAKE_PNG_BYTES });
+    expect(steps(calls)).toEqual(['mask', 'capture', 'unmask']);
+  });
+
+  it('取像素失败时也要摘掉，不给站点留下我们盖的黑块', async () => {
+    const calls: string[] = [];
+    const page = await boot(piiView(calls, { fails: true }));
+    await expect(page.screenshot()).rejects.toMatchObject({ code: 'PAGE_SCREENSHOT_FAILED' });
+    expect(steps(calls)).toEqual(['mask', 'capture', 'unmask']);
+  });
+
+  it('所有帧都拒绝遮罩时以 PAGE_SCRIPT_FAILED 失败，绝不交出没脱敏的原图', async () => {
+    const calls: string[] = [];
+    const page = await boot(
+      fakeView(fakeFrame('http://127.0.0.1:10233/pii', { error: '这一帧拒绝脚本', calls }), [], {
+        capture: { width: 800, height: 600 },
+        calls,
+      }),
+    );
+    await expect(page.screenshot()).rejects.toMatchObject({ code: 'PAGE_SCRIPT_FAILED' });
+    expect(calls).not.toContain('capturePage');
+  });
+
+  it('关掉开关时一个脚本都不发（开发者要看原图的唯一出口）', async () => {
+    const calls: string[] = [];
+    const page = await boot(piiView(calls), { maskSensitiveInShots: false });
+    await expect(page.screenshot()).resolves.toMatchObject({ width: 800, height: 600 });
+    expect(steps(calls)).toEqual(['capture']);
   });
 });

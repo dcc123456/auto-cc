@@ -1,0 +1,40 @@
+spec 2.7-07 真实窗口验收读数（2026-10-01，Windows / Electron 44.4.5 / CDP 10222 / 本地仿站 10233）
+
+路径：主窗口 `pnpm harness eval --url 5173` 起工作流 → `workflow.runner` 的 `demo.flaky` 节点终态失败
+→ `browser.page.screenshot()` 在截图前后各注入一次遮罩/清罩脚本 → 证据落盘。
+执行器不碰截图这条链，因此这份 PNG 与这份 JSON 全部由 app 自己的代码写出。
+
+一、run 读数（harness eval 返回值）
+  runId        3343f1fb-9ed9-4c6d-a487-d731be854817
+  finalStatus  failed
+  steps        jd-capture:done / jd-list:done / flaky:failed（第 1 次命中，按注入计划失败（failTimes=2））
+  截图时页面    http://127.0.0.1:10233/pii（候选人联系方式 - 本地仿站）
+
+二、证据文件里的正文脱敏（tmp/dev-userdata-25f/evidence/<runId>-flaky.json 的 page.bodyText 原文）
+  联系人手机：138****8000（工作日 9-19 点可联系）
+  投递邮箱：z***@example.com.cn
+  证件号码：**********1234
+  电话直达：138****8000
+  薪资 15000-25000，经验 3-5 年，编号 123456，成立于 2019，共 20 个项目
+  跨标签的号码：138****8000
+  → 手机号 / 邮箱 / 身份证三类都掩码；对照数字（薪资区间、年限、编号、年份、计数）一位未动；
+    跨标签拆开的号码在**文本**这一路仍然被抓到（文本是拼接后整体过正则的）。
+  机检：grep -c "13800138000\|zhaopin.huang@example\|330106199001011234" 该文件 = 0
+
+三、截图遮罩（2.7-07-masked-evidence-shot.png 与 2.7-07-unmasked-baseline.png 对照）
+  盖住 4 处：手机号、邮箱、证件号、`<a href="tel:…">` 的可见文本；
+  没盖住 1 处：**跨标签拆成三个文本节点的号码**（遮罩按单个文本节点跑正则，节点内只有半串数字，
+  所以判不出命中）——这是像素遮罩与文本脱敏的口径差，不是遮罩脚本没跑；
+  刻意不盖：薪资 15000-25000 / 3-5 年 / 编号 123456 / 2019 / 20 个项目，画面里清晰可读。
+
+四、清罩与「不改站」的读数（截图结束后在同一个视图 target 上求值）
+  { url: 'http://127.0.0.1:10233/pii', leftoverMaskNodes: 0, bodyHasRawPhone: true }
+  → 遮罩层已全部移除（`[data-auto-cc-mask]` 计数 0）；
+  → 页面 DOM 里的原始号码仍在（bodyHasRawPhone true），证明遮罩只在截图那一瞬盖一层绝对定位的块，
+    绝不改写站点文本，也不留残留节点。
+
+五、这一条没有覆盖到什么（写清楚，不留「截图全脱敏」的错觉）
+  · 图片、PDF 预览、canvas 里画出来的个人信息：遮罩只认文本节点，一律盖不住；
+  · 被拆进多个文本节点的号码：像素层盖不住（见三），文本层盖得住（见二）；
+  · 视口外的长内容：capturePage 只截当前视口，所以遮罩也只需覆盖当前视口里能看到的命中；
+  · macOS / Linux 的运行期表现本机无法验证，按 AGENTS.md §9 记 BLOCKED。

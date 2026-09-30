@@ -42,6 +42,9 @@
  *   `off` 让 `/boss` 照常出列表页，`captcha` 出 200 的「安全验证」页（正文判据的靶子），
  *   `blocked` 出 403 的「访问受限」页（状态码判据的靶子）。开关在 fixture 进程里，所以能在
  *   工作流正跑着的时候切，把「运行中突然被拦 → 立即暂停」这条时序演出来（spec 2.7-01）；
+ * - `/pii` 是**脱敏靶页**（spec 2.7-07）：裸写的手机号 / 邮箱 / 身份证 + 一组刻意留下的对照数字
+ *   （薪资区间、编号、年份）+ 一个把号码拆成三个文本节点的块，遮罩到底盖住了什么、盖不住什么，
+ *   由这一页的截图与正文读数说，不由实现自述；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -160,6 +163,43 @@ const RISK_BLOCKED_HTML =
   '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>访问受限 - 本地仿站</title></head>' +
   '<body><h1 data-testid="risk-heading">访问受限</h1>' +
   '<p data-testid="risk-body">您的请求过于频繁，请稍后再试。</p></body></html>';
+
+/**
+ * 脱敏靶页（spec 2.7-07）。
+ *
+ * 每一块都是刻意的形状，不是随手写的假数据：
+ * - **裸值**（中文标签 + 冒号 + 号码）而不是 `phone=13800138000`，因为页面正文里 PII 就是这个长相，
+ *   而既有 `redactText` 的键值判据在这里一个都不命中——这条正是本片要补的那一半；
+ * - `pii-control` 是**反向靶子**：`15000-25000` / `123456` / `2019` 这些数字必须原样留在截图与正文里，
+ *   否则「脱敏」就变成了把页面涂黑，验收时用它证明判据没有过界；
+ * - `pii-split` 是**能力边界**：号码被站点的样式标签切成三个文本节点，任何按文本节点匹配的方案都抓不到它，
+ *   验收记录必须写明这一条没被盖住，不许说成「截图全脱敏」；
+ * - `pii-link` 的可见文字要盖住，而 `href="tel:…"` 里的号码不在页面上渲染，遮罩按定义不管属性。
+ */
+const PII_PAGE_HTML = `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>候选人联系方式 - 本地仿站</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        font-size: 15px;
+        line-height: 1.9;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 data-testid="pii-heading">简历正文靶页</h1>
+    <p data-testid="pii-phone">联系人手机：13800138000（工作日 9-19 点可联系）</p>
+    <p data-testid="pii-email">投递邮箱：zhaopin.huang@example.com.cn</p>
+    <p data-testid="pii-id">证件号码：330106199001011234</p>
+    <p data-testid="pii-anchor">电话直达：<a href="tel:13800138000" data-testid="pii-link">13800138000</a></p>
+    <p data-testid="pii-control">薪资 15000-25000，经验 3-5 年，编号 123456，成立于 2019，共 20 个项目</p>
+    <p data-testid="pii-split">跨标签的号码：<span>138</span><span>0013</span><span>8000</span></p>
+  </body>
+</html>`;
 
 /**
  * 投递靶页的状态（2.6 用）。
@@ -1253,6 +1293,12 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
 
   if (url.pathname === '/trusted') {
     sendHtml(response, readFileSync(trustPage, 'utf8'));
+    return;
+  }
+
+  if (url.pathname === '/pii') {
+    // 脱敏靶页：裸值 + 一组必须原样留下的对照数字，遮罩与正文脱敏都拿这一页判「盖住了什么、没盖住什么」。
+    sendHtml(response, PII_PAGE_HTML);
     return;
   }
 
