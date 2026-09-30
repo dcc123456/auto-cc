@@ -10,3 +10,6 @@ tmp/
 
 # electron-builder 的 staging 目录：每次构建全量重建，prettier 重排 bundle 产物毫无意义。
 build/
+
+# 幻彩工坊技能的设计草稿：不是项目源码，重排它只会把设计稿的排版改成 prettier 喜欢的样子。
+.chromatic/
