@@ -13,6 +13,7 @@ import {
   asApp,
   Context,
   Service,
+  type DeliverApprovalView,
   type DeliverOutcome,
   type Fiber,
   type ResumeAttachment,
@@ -266,6 +267,46 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
     expect(receipt.reason).toBe('状态行回读到成功样式：简历已送达');
     expect(hand.calls).toHaveLength(1);
     expect(deliver.pending()).toEqual([]);
+  });
+
+  it('等人表态是一次事件推送：载荷与 pending() 的读数逐字相同，定局后不再补发（spec 2.6-01）', async () => {
+    const hand = fakeChannel();
+    const { ctx, dir, deliver } = await boot({ channel: hand.channel });
+    const emitted: DeliverApprovalView[] = [];
+    const off = ctx.on('outbound/approval-requested', (event) => {
+      emitted.push(event);
+    });
+    const pending = deliver.perform(request({ filePath: writeResume(dir) }));
+    await nap();
+
+    // 事件的用途只有「此刻提醒一下」，所以它必须与现读的那张单子**一模一样**：界面两条路画出同一张卡片。
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toEqual(deliver.pending()[0]);
+    expect(emitted[0]!.attachment).not.toHaveProperty('path');
+
+    deliver.resolveApproval(emitted[0]!.approvalId, true);
+    await pending;
+    // 定局（批准/拒绝/超时）都以「单子在 pending() 里消失」表达，不是一条新事件：
+    // 补发会让错过推送的界面永远留着那张卡片，而它其实只该信读数。
+    expect(emitted).toHaveLength(1);
+    off();
+  });
+
+  it('免审批的 auto 与只准备的 suggest 都不发确认事件：没人该被叫来看一张不存在的卡片', async () => {
+    const hand = fakeChannel();
+    const emitted: DeliverApprovalView[] = [];
+    for (const autonomy of ['auto', 'suggest'] as const) {
+      const { ctx, dir, deliver } = await boot({ channel: hand.channel, autonomy });
+      const off = ctx.on('outbound/approval-requested', (event) => {
+        emitted.push(event);
+      });
+      await deliver.perform(request({ filePath: writeResume(dir) }));
+      expect(deliver.pending()).toEqual([]);
+      off();
+    }
+    expect(emitted).toEqual([]);
+    // `auto` 直接发出去了，`suggest` 只准备——两者都不经过「等人」这一步。
+    expect(hand.calls).toHaveLength(1);
   });
 
   it('用户在卡片上点拒绝：OUTBOUND_APPROVAL_DENIED，不发送不落账', async () => {

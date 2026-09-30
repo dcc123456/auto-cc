@@ -216,6 +216,25 @@
       "none": "n/a",
       "detailMissing": "summary only"
     },
+    "deliver": {
+      "heading": "Resume delivery (outbound.deliver: quota -> throttle -> approval -> page -> ledger)",
+      "hint": "Trigger it with the deliver button on a stored row: semi blocks in the main process until this card is answered, suggest only stages without sending",
+      "resumePathPlaceholder": "Absolute path of the resume PDF (blank falls back to resumeFile in config)",
+      "rowButton": "Deliver resume",
+      "action": "Deliver resume to \"{{title}}\"",
+      "pendingHeading": "Deliveries waiting for approval (outbound/approval-requested)",
+      "pendingEmpty": "No delivery is waiting for approval right now",
+      "pendingRow": "target {{jobId}} - {{title}} / {{company}} - file {{fileName}} ({{sizeBytes}} bytes, sha256 {{sha}}) - requested {{requestedAt}} - auto-deny at {{expiresAt}}",
+      "approve": "Approve",
+      "deny": "Deny",
+      "approveAction": "Approve delivery {{jobId}}",
+      "denyAction": "Deny delivery {{jobId}}",
+      "receiptHeading": "Latest delivery receipt (outbound.deliver.perform)",
+      "receiptRow": "target {{jobId}} - file {{fileName}} ({{sizeBytes}} bytes, sha256 {{sha}}) - {{state}} - ledger row {{ledgerId}} - throttled for {{waitedMs}} ms - source {{source}} - page read-back: {{reason}}",
+      "stateCommitted": "sent",
+      "stateStaged": "staged, never left the app",
+      "noLedger": "not booked"
+    },
     "assembly": {
       "heading": "Plugin assembly (cordis.yml)",
       "refresh": "Re-read assembly state",

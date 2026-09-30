@@ -11,6 +11,8 @@ import type {
   ChatMessageView,
   ChatSessionView,
   ChatSnapshotView,
+  DeliverApprovalView,
+  DeliverAttachmentView,
   JdProgressEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
@@ -44,6 +46,8 @@ export type {
   ChatTextPart,
   ChatToolPart,
   ChatToolPartState,
+  DeliverApprovalView,
+  DeliverAttachmentView,
   JdProgressEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
@@ -125,6 +129,11 @@ export const RENDERER_ALLOWLIST = [
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
   'outbound.greet.perform',
+  // 2.6-c 的投递编排：确认卡片要能把「现在有哪些单子等人表态」读出来，并把表态送回去。
+  // 外发口只有 `perform` 一条，且它在主进程一侧必经闸门（AGENTS.md §7.3）。
+  'outbound.deliver.perform',
+  'outbound.deliver.pending',
+  'outbound.deliver.resolveApproval',
   // 1.10 的工作流 runner：五个动作口 + 一个只读快照。
   'workflow.runner.current',
   'workflow.runner.start',
@@ -337,18 +346,6 @@ export type GreetReceiptView = {
 };
 
 /**
- * 一份简历附件摆在界面上的三要素（spec 2.6-01 / 05）。
- *
- * 刻意**不含绝对路径**：`ResumeAttachment.path` 里有用户名目录，而「递的是哪份文件」靠
- * 文件名 + 字节数 + hash 就够了（AGENTS.md §8 第 5 条：个人数据默认脱敏）。
- */
-export type DeliverAttachmentView = {
-  fileName: string;
-  sizeBytes: number;
-  sha256: string;
-};
-
-/**
  * 投递请求（spec 2.6-01 / 06）：一次「把这份简历递给这个岗位」的意图。
  *
  * 与打招呼不同，这里没有文案字段——2.6-b 只递文件，随信正文留给 P3 之后（plan §13.7 第 2 条）。
@@ -393,25 +390,6 @@ export type DeliverReceiptView = {
   source: string;
   /** 这次有没有真的离开 app */
   committed: boolean;
-};
-
-/**
- * 一张待确认的投递单（spec 2.6-01）：`outbound.deliver.pending()` 现读出来的形状。
- *
- * 界面**刷新时要能重画**这张卡片，所以它是服务里的一份可读状态，不是只飘过一次的事件——
- * 事件只负责「此刻提醒一下」，`pending()` 负责「错过了也还在」。
- */
-export type DeliverApprovalView = {
-  approvalId: string;
-  platform: string;
-  jobId: string;
-  title: string;
-  company: string;
-  attachment: DeliverAttachmentView;
-  /** 什么时候开始等人（毫秒时间戳） */
-  requestedAt: number;
-  /** 到点即拒（`requestedAt + approveTimeoutMs`）：没人表态永远不等于同意 */
-  expiresAt: number;
 };
 
 /**
@@ -612,6 +590,26 @@ export interface BridgeSignatures {
    */
   'outbound.greet.perform': { args: [request: GreetRequestView]; returns: GreetReceiptView };
   /**
+   * 投递编排入口（spec 2.6-01 / 02 / 03 / 05 / 06）：stage → 闸门 → 频控 → 审批 → 现问渠道
+   * 二次校验 → 页面投递 → 落账，全在主进程一侧。`semi` 档会在这里挂起等 `resolveApproval`，
+   * 所以界面的那一次调用是「按下发送键并等用户表态」，不是「立刻发出去」。
+   */
+  'outbound.deliver.perform': { args: [request: DeliverRequestView]; returns: DeliverReceiptView };
+  /**
+   * 此刻有哪些投递单在等人表态（spec 2.6-01 的「待发送态」）：界面刷新/重进视图时靠它**重画**卡片，
+   * 而不是只接住那一次 `outbound/approval-requested` 事件。
+   */
+  'outbound.deliver.pending': { args: []; returns: DeliverApprovalView[] };
+  /**
+   * 用户对某张单子表态（spec 2.6-01 / 08）：`approved:false` 与「超时没人点」走同一条拒绝路径。
+   * 单子已经不存在（已结算，或配置热重载把服务重建了）以 `APPROVAL_NOT_FOUND` 结构化失败上浮——
+   * 查不到就绝不放行任何一次投递，界面按「这张卡片已经没了」提示。
+   */
+  'outbound.deliver.resolveApproval': {
+    args: [approvalId: string, approved: boolean];
+    returns: DeliverApprovalView;
+  };
+  /**
    * 当前 run 的快照（spec 1.10-04）；挂载即是 `idle` 快照，槽位数等于当前计划的节点数（spec 2.4-02），
    * 所以永不为 null，界面不必为空态另写一套。
    * P1 只有一个「当前 run」，所以这几个动作口都不带 runId（plan §8.5「不做 run 历史列表」）。
@@ -695,6 +693,8 @@ export const RENDERER_EVENTS = [
   'locator/relocated',
   // 抓取进度（spec 2.3-07）：面板实时显示「第 N 轮 · 已入库 M 条」，不靠轮询。
   'jd/progress',
+  // 投递单等人表态（spec 2.6-01）：确认卡片由它弹出，`outbound.deliver.pending()` 保证错过也补得回。
+  'outbound/approval-requested',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -708,6 +708,7 @@ export interface RendererEventSignatures {
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;
   'jd/progress': JdProgressEvent;
+  'outbound/approval-requested': DeliverApprovalView;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

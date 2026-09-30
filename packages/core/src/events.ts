@@ -604,6 +604,36 @@ export interface JdProgressEvent {
   at: number;
 }
 
+/**
+ * 一份简历附件摆在界面上的三要素（spec 2.6-01 / 05）。
+ *
+ * 刻意**不含绝对路径**：`ResumeAttachment.path` 里有用户名目录，而「递的是哪份文件」靠
+ * 文件名 + 字节数 + hash 就够了（AGENTS.md §8 第 5 条：个人数据默认脱敏）。
+ */
+export interface DeliverAttachmentView {
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/**
+ * 一张待确认的投递单（spec 2.6-01）：既是 `outbound/approval-requested` 的载荷，也是
+ * `outbound.deliver.pending()` 现读出来的形状——两者必须是同一个类型，否则刷新后重画的卡片
+ * 与飘过一次的事件会长成两副样子。
+ */
+export interface DeliverApprovalView {
+  approvalId: string;
+  platform: string;
+  jobId: string;
+  title: string;
+  company: string;
+  attachment: DeliverAttachmentView;
+  /** 什么时候开始等人（毫秒时间戳） */
+  requestedAt: number;
+  /** 到点即拒（`requestedAt + approveTimeoutMs`）：没人表态永远不等于同意 */
+  expiresAt: number;
+}
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -644,5 +674,11 @@ declare module 'cordis' {
      * （spec 2.3-07）。面板不轮询 `jd.capture.status` 来「感觉进度」，进度只由事件推进来。
      */
     'jd/progress'(event: JdProgressEvent): void;
+    /**
+     * `semi` 档的投递在闸门之后、真正点发送之前挂起等人确认时由 `outbound.deliver` 发出
+     * （spec 2.6-01）。载荷就是 `pending()` 能现读出来的那张单子，界面两条路都要能画出同一张卡片：
+     * **事件负责「此刻提醒一下」，`pending()` 负责「错过了也还在」**。
+     */
+    'outbound/approval-requested'(event: DeliverApprovalView): void;
   }
 }

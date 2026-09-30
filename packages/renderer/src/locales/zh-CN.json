@@ -216,6 +216,25 @@
       "none": "—",
       "detailMissing": "只有摘要"
     },
+    "deliver": {
+      "heading": "简历投递（outbound.deliver：额度 → 频控 → 确认 → 页面 → 落账）",
+      "hint": "在下方库内清单点「投递简历」触发：semi 档会挂在主进程里等这张卡片上的表态，suggest 档只准备不发送",
+      "resumePathPlaceholder": "简历 PDF 的绝对路径（留空则用配置里的 resumeFile）",
+      "rowButton": "投递简历",
+      "action": "向「{{title}}」投递简历",
+      "pendingHeading": "等待确认的投递单（outbound/approval-requested）",
+      "pendingEmpty": "此刻没有等待确认的投递单",
+      "pendingRow": "目标 {{jobId}} · {{title}} / {{company}} · 文件 {{fileName}}（{{sizeBytes}} 字节 · sha256 {{sha}}）· 申请于 {{requestedAt}} · 到点即拒 {{expiresAt}}",
+      "approve": "确认投递",
+      "deny": "拒绝",
+      "approveAction": "确认投递 {{jobId}}",
+      "denyAction": "拒绝投递 {{jobId}}",
+      "receiptHeading": "最近一次投递回执（outbound.deliver.perform）",
+      "receiptRow": "目标 {{jobId}} · 文件 {{fileName}}（{{sizeBytes}} 字节 · sha256 {{sha}}）· {{state}} · 账本行 {{ledgerId}} · 频控等待 {{waitedMs}} 毫秒 · 来源 {{source}} · 页面回读：{{reason}}",
+      "stateCommitted": "已发送",
+      "stateStaged": "待发送（未离开 app）",
+      "noLedger": "不落账"
+    },
     "assembly": {
       "heading": "插件装配（cordis.yml）",
       "refresh": "重新读取装配状态",

@@ -412,7 +412,7 @@ export class OutboundDeliverService extends Service {
    * @throws `APPROVAL_NOT_FOUND`——单子不存在（已定局、已超时，或服务在等待期间被重建过）。
    *         这里是 fail-closed：查不到就报结构化失败，绝不因为「找不到对应的那份」而放行任何一次投递
    */
-  resolveApproval = (approvalId: string, approved: boolean): DeliverApprovalView | null => {
+  resolveApproval = (approvalId: string, approved: boolean): DeliverApprovalView => {
     const entry = this.approvals.get(approvalId);
     if (!entry) {
       throw new AppError('APPROVAL_NOT_FOUND', `确认单 ${approvalId} 已经不在等待中`, 'outbound.deliver', {
@@ -462,17 +462,18 @@ export class OutboundDeliverService extends Service {
         );
       };
       const onAbort = (): void => settle({ kind: 'aborted' });
+      const view: DeliverApprovalView = {
+        approvalId,
+        platform: staged.platform,
+        jobId: staged.jobId,
+        title: staged.title,
+        company: staged.company,
+        attachment: attachmentView(staged.attachment),
+        requestedAt,
+        expiresAt: requestedAt + timeoutMs,
+      };
       this.approvals.set(approvalId, {
-        view: {
-          approvalId,
-          platform: staged.platform,
-          jobId: staged.jobId,
-          title: staged.title,
-          company: staged.company,
-          attachment: attachmentView(staged.attachment),
-          requestedAt,
-          expiresAt: requestedAt + timeoutMs,
-        },
+        view,
         // 界面那句「批 / 不批」定成什么；等待方不看界面，只看这个布尔。
         settle: (approved: boolean) =>
           settle(
@@ -481,6 +482,8 @@ export class OutboundDeliverService extends Service {
               : { kind: 'denied', reason: `用户在确认卡片上点了拒绝（目标 ${staged.jobId}）` },
           ),
       });
+      // 先登记再发事件：界面收到提醒后立刻 `pending()` 也必须能读回这张单子（spec 2.6-01）。
+      this.ctx.emit('outbound/approval-requested', view);
       // 定时器与 `settle` 互相引用，但都不在定义时求值：超时回调只可能在下面这几行跑完之后才 fire。
       const timer = setTimeout(() => {
         settle({ kind: 'denied', reason: `等待确认超过 ${String(timeoutMs)}ms，按拒绝处理` });
