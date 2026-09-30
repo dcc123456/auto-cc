@@ -338,3 +338,140 @@ spike 落在仓库外 `.research-repos\locator-spike\spike.mjs`（运行：仓�
 - 不做工作流节点化（2.4）：本轮循环写成 `jd.capture` 的一个方法，2.4 的节点**调它**，不复制循环。
 - 不做关键词匹配、岗位打分、去重语义判断（那是 P4 知识库与 P5 推荐的事）；幂等键就按 spec 字面：`来源 URL + 标题`。
 - 不做 LLM 补全缺失字段（AGENTS.md §8 事实锁定：抓不到就是抓不到，不许编）。
+
+## 11. 子计划 2.4 的选型与证据（开工前定稿，实现照此执行）
+
+### 11.1 这一条到底在做什么
+
+1.10 交出的是「六个写死步骤按迁移表依次推进的空转流水线」，2.4 要交出的是「一个能声明、能失败、
+能重启续跑、能留证据的执行器」。中间差四件事，而且每件都有人做过错的样子：
+
+| 缺的东西                   | 为什么不能用 1.10 的现成物顶                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| 计划与运行态的**数据形态** | `WorkflowRunView.steps` 来自常量 `WORKFLOW_STEP_IDS`，不是来自声明；「计划」根本还不存在这个概念 |
+| **重试**（次数 + 退避）    | 1.10 只有「失败后人工 `retryStep`」，没有「自己先试两次」这一层                                  |
+| **断点续跑**               | 状态只在内存（1.10 的刻意为之，见 `packages/workflow/src/index.ts` 头注释），进程没了就全丢      |
+| **失败证据**               | 只有一个 `error: string`；页面上当时长什么样、截图在哪，无处可查                                 |
+
+切面与归属（先切开再写，否则会写成「runner 里既拼 SQL 又截图又调适配器」）：
+
+| 切面                     | 归属                                                                 | 为什么是它                                                                                                             |
+| ------------------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 计划/节点/运行态**类型** | `packages/core`（`WorkflowRunView` 现在就在那儿）                    | 渲染层要画它、IPC 要校验它、workflow 要执行它；放 workflow 包会让 L4 界面反向依赖 L2（plan §3 依赖方向）               |
+| 节点循环与重试           | `packages/workflow`：`nodes.ts` + `retry.ts`                         | `machine.ts` 是全应用唯一状态机，2.4 只把「常量六步」换成「计划里的 N 个节点」，**不再开第二台状态机**                 |
+| 运行态持久化             | `packages/workflow`：`run-store.ts` + migration **v4**               | 沿用 1.3 的 `store`；表属于域（`usage_ledger`=1、`chat_session`=2、`jobs`=3，workflow 取 4）                           |
+| 失败证据里的**截图**     | `packages/browser`：`browser.page.screenshot()`（挂在现有 `page`）   | 截图是「页面读数」的一种，与 `snapshot`/`extract` 同族；新建 `browser.evidence` 就是同一能力两个入口（AGENTS.md §2.5） |
+| 节点事件                 | 复用 1.10 的 `workflow/progress` 频道（payload 加 `phase`/`nodeId`） | 见 11.3 第 1 条：两个界面已经订了这一条，分叉成两个事件名会让它们各订阅一半                                            |
+
+### 11.2 一手取证（读概念与数值，不搬代码）
+
+副本 = `D:\works\deep-seek-workspace\browser-copilot`（git clone，HEAD `984cf3d`；行号只对该副本有效）。
+它的引擎是**节点图解释器**，我们的对照物是同一层的抽象，所以逐条记「采纳/否决」：
+
+| 主题       | 该仓库的做法（概念，已核对到行）                                                                                                                                                                                                                                                                                                                                         | 我们的取舍                                                                                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 解释器形态 | `runWorkflow`/`runCore`（`src/background/workflow-engine/engine.ts:394`）按边推进，执行函数挂在 `EXECUTORS` 注册表上、以 `data.blockId` 分派（`engine.ts:290-294`、`executors.ts:3170-3223`）                                                                                                                                                                            | **采纳注册表分派**：节点 `kind` → 执行函数，`workflow` 包不认识 BOSS（plan §3 规则 2）；否决它的图/画布坐标字段                                                                                 |
+| 节点声明   | `WorkflowNode{id,label,position,data}` + `WorkflowEdge{source,target,sourceHandle}`（`src/lib/workflow/types.ts:53-68`）                                                                                                                                                                                                                                                 | 只取 `id`/`kind`/`params`；`position` 是画布遗留（P5 再说），`label` 属界面不属计划                                                                                                             |
+| 参数与变量 | `ParamDefinition{name,type,required,default}`（`types.ts:29-39`）+ `{{var}}` 插值写进 `ctx.variables`（`engine.ts:302-308`）                                                                                                                                                                                                                                             | **不采纳**：建模板引擎就是第二个字符串基础设施，且 P2 的参数来自声明与上一步结构化输出（见 11.8）                                                                                               |
+| 重试       | `onError{toDo:'retry'\|'fallback'\|'error'\|'continue', retryTimes, retryInterval}`，`maxAttempts = 1 + retryTimes`（`engine.ts:706-709`）；默认间隔**固定 1000ms、无退避无抖动**（`engine.ts:795`）；界面上 <60 当秒（`engine.ts:273`）                                                                                                                                 | **采纳 `1 + retryTimes` 口径**；**否决固定间隔**——站点抖动期固定 1s 重放等于自我 DoS，改指数退避 + 上限 + 抖动（数值进配置，见 11.4）；不采纳「<60 当秒」的单位歧义，配置一律毫秒               |
+| 重放前置   | 每次重试前把变量深快照还原（`engine.ts:719-729`）                                                                                                                                                                                                                                                                                                                        | 无自由变量池 ⇒ 不需要；但**采纳它的动机**：重放必须在干净上下文里跑，所以节点执行不读上一次的可变残留                                                                                           |
+| 全局护栏   | `MAX_STEPS = 2000`（`engine.ts:222`）、`MAX_WHILE_ITERATIONS = 1000`（`engine.ts:225`）                                                                                                                                                                                                                                                                                  | 线性计划没有 while，取等价物 `maxNodesPerRun`（防计划写错把主进程钉死，2.4-03 的兜底）                                                                                                          |
+| 失败分类   | 可重试类 `PAGE_NOT_READY/FRAME_NOT_READY/NETWORK_ERROR/WAIT_CONDITION_UNMET` vs 必须人工类 `AUTH_REQUIRED/CAPTCHA_REQUIRED`（`repair/failure-analyzer.ts:50-58`）                                                                                                                                                                                                        | **采纳二分**：分类是「重试次数」的上游判断；`CAPTCHA_REQUIRED` 一律转 `requiresHuman` 接管点，绝不重试（AGENTS.md §8 第 3 条）                                                                  |
+| 运行态落盘 | **完全没有 SQLite**：在跑的任务表在内存（`running-tasks.ts:10-15`），跑完写 `chrome.storage`（`running-tasks.ts:117`）                                                                                                                                                                                                                                                   | **否决**：扩展环境只能用它那套存储。我们的等价物是 `workflow_runs` + `workflow_nodes` 两张表                                                                                                    |
+| 断点       | 检查点是 JSON 文件 `checkpoints/checkpoint-<runId>.json`，字段 `runId/workflowId/stepIndex/nodeId/status/variables/pageState/phase/workflowFingerprint/snapshotAvailable/at`（`src/lib/workflow/checkpoints.ts:30-58`）；保留 50 个/run、20 个 run（`background/checkpoint-store.ts:21-24`）；续跑靠**倒序扫**最近可用检查点 `resumePointOf`（`checkpoints.ts:212-258`） | **采纳三件事**：`stepIndex/nodeId/status/at` 的字段形状、保留上限进配置、启动时扫库找断点。**否决文件形态**：JSON 文件与库表两份真相正是 1.10 当年避开的问题，断点就写进 `workflow_runs` 行本身 |
+| 跨计划串档 | 用 FNV-1a 给计划图算**指纹**，指纹不符拒绝续跑（`checkpoints.ts:162-189`）                                                                                                                                                                                                                                                                                               | **采纳**：`planFingerprint` 存进 `workflow_runs`，续跑时计划改过就明确报「这不是同一个计划」，而不是从第 5 个节点瞎续                                                                           |
+| 幂等       | 按块分类判危险性 `idempotencyOf(...) === 'unsafe'`（提交/登录/付款/发送，`lib/workflow/reliability.ts:323-331`）+ 四阶段检查点 `nodeStarted/sideEffectStarted/sideEffectObserved/nodeCommitted`（`engine.ts:680-681`、`checkpoints.ts:24-28`）；终态已满足就跳过（`engine.ts:687-700`）；「启动了但没观察到副作用」时**拒绝盲目重放**（`checkpoints.ts:244-247`）        | **采纳危险性分类 + 拒绝盲重放**（这是 2.4-06 的真正内容，不是「跑两次看看」）；四阶段压缩成两列：`side_effect` 记「已开始」，唯一索引记「已做过」，见 11.3 第 5 条                              |
+| 证据       | `ExecutionEvidence{url,selector,locator,readback,variables,stepTail}`，掩码 + 上限 300/800 字符、10 行（`lib/workflow/execution-evidence.ts:17-58`）；`FailureSnapshot` 由 trace + 最新检查点拼出但**只在内存**（`auto-repair/failure-snapshot.ts:81-125`）                                                                                                              | **采纳字段集与上限口径**（上限进配置，见 11.4）；**内存态正是它的洞**——重启即丢，我们的 `evidence_ref` 指向 userData 下的文件并把路径落表                                                       |
+| 暂停/续跑  | `AbortController` 取消（`running-tasks.ts:74`）+ `resumeFrom`（`run-workflow.ts:155`）                                                                                                                                                                                                                                                                                   | 已经在用同一个手法（1.10 的 `controller`），2.4 只把「安全点」从步骤边界改成节点边界                                                                                                            |
+| 事件面     | `EmitKind = 'tool'\|'status'\|'result'\|'error'\|'info'`（`engine.ts:38`），两个界面经同一个 `onStep` 订阅（`running-tasks.ts:59`）；统计雏形 `takeover-stats.ts:97,205`（successRate、durationMs）                                                                                                                                                                      | **采纳「一份事件流喂两个界面」**——这就是 AGENTS.md §5.9 的形态；统计不另建表，由 `workflow_nodes` 聚合（2.4-10）                                                                                |
+
+### 11.3 归属与命名（延续 2.1/2.2/2.3 的口径）
+
+1. **spec 2.4-02 字面的 `node.started/finished/failed` 落在 `workflow/progress` 的 `phase` 字段上**
+   （取值恰为 `started`/`finished`/`failed`，外加 `retrying`），不新造事件名。理由：1.10 的工作流面板
+   与 1.11 的工具卡片已经订阅这一条频道，再开一条就会有两个界面各拿一半（AGENTS.md §2.5）。
+2. **`machine.ts` 仍是唯一状态机**：run 的状态集合不变（`idle/running/paused/failed/done`）。
+   `WorkflowRunView.steps` 改为**由计划的节点数组生成**，节点 id 就是 step id——所以 1.10 的界面
+   一行不改就能画 N 个节点，这是「换实现不动界面」的兑现点。
+3. **service id 保持 `workflow.runner`**，方法面在现有 `current/start/pause/resume/retryStep` 上扩两个：
+   `nodes()` 读当前计划的节点声明（面板与工具卡片用它列节点），`resumeRun(runId)` 从库里续上一次的 run
+   （`resume()` 是本次运行内的续跑，两者语义不同，注释里必须写清，否则后来的人会当成一个）。
+4. **两张表**：`workflow_runs`（`run_id`/`plan_id`/`plan_fingerprint`/`status`/`node_index`/`started_at`/`finished_at`/`last_error`）
+   与 `workflow_nodes`（`run_id`/`node_index`/`node_id`/`status`/`attempts`/`started_at`/`finished_at`/`duration_ms`/
+   `idempotency_key`/`side_effect`/`evidence_ref`/`error`）。2.4-10 的耗时与成功率**由这张表聚合**，不建第三张统计表。
+   两版一起进 migration v4，`down` 各自 `DROP TABLE`（2.3 已把 `down` 补进迁移执行器）。
+5. **幂等键 `runId+nodeId+targetId` 做成 `workflow_nodes.idempotency_key` 上的唯一索引**：
+   危险性节点（`unsafe`）执行前先 `INSERT ... ON CONFLICT DO NOTHING`，插入 0 行即「这个目标已经做过」→ 直接跳过（2.4-06）。
+   与 2.3-04 同一手法，且比它多一层：**已开始但没观察到完成**（`side_effect='started'`）时拒绝自动重放，
+   转成接管点报给用户——源仓库 `checkpoints.ts:244-247` 那条「拒绝盲重放」是我们照抄的判据，不是可选优化。
+6. **启动时把 `status='running'` 的孤儿 run 判成 `interrupted`**（进程被 kill 后库里必然留着 running 行）：
+   界面据此才能显示「上次中断在第 i 个节点」，2.4-05 的续跑也才有起点。不清孤儿行的话，
+   「重启后能看到上次卡在哪」这条永远做不到。
+
+### 11.4 参数全部进配置（`cordis.yml`），代码里不写魔法数
+
+| 配置键              | 归属              | 默认         | 含义 / 出处                                                                     |
+| ------------------- | ----------------- | ------------ | ------------------------------------------------------------------------------- |
+| `retryTimes`        | `workflow.runner` | 2            | 失败后的额外尝试次数；`maxAttempts = 1 + retryTimes`（源仓库口径，2.4-03）      |
+| `retryBackoffMs`    | `workflow.runner` | 500          | 指数退避基数：第 k 次重试前等 `backoff × 2^(k-1)`（否决源仓库的固定 1000ms）    |
+| `retryBackoffCapMs` | `workflow.runner` | 5000         | 退避上限，防止长计划卡在一条指数尾巴上                                          |
+| `maxNodesPerRun`    | `workflow.runner` | 200          | 单次 run 的节点上限（对应源仓库 `MAX_STEPS` 的角色，防死循环）                  |
+| `evidenceDomChars`  | `workflow.runner` | 800          | DOM 片段上限（源仓库 `ExecutionEvidence` 的上限口径）                           |
+| `evidenceTextChars` | `workflow.runner` | 300          | 单字段文本上限，超出截断并标注                                                  |
+| `evidenceDir`       | `workflow.runner` | `evidence`   | userData 下的证据子目录；文件名 = `<runId>-<nodeId>`，**路径落表**（2.4-04）    |
+| `retentionRuns`     | `workflow.runner` | 20           | 旧 run 的保留个数，超出清 `workflow_*` 行（源仓库 checkpoint 保留上限的等价物） |
+| `planId`            | `workflow.runner` | `boss-basic` | P2 只有一条线性主线；计划内容在代码里声明，`planId` 只是它的名字与指纹来源      |
+
+`browser.page.screenshot()` 的归属参数（同一服务已有 `extractRowLimit`/`extractTextLimit` 那一组）：
+截图不做裁剪、不落库，只回传 `{ width, height, filePath }`；写盘目录由 `workflow.runner` 给（谁产生证据谁管生命周期）。
+
+### 11.5 fixture 靶子与界面（V 类条目的判据落点）
+
+- **3 节点线性计划**（`boss-basic`）：`jd-capture`（调 `jd.capture`，只读）→ `jd-list`（调 `jd.store.list`）→
+  `flaky`（fixture 侧计数节点：前两次必失败、第三次成功，`/api/fail-counter` 提供计数）——2.4-02/03 的靶子。
+- 诊断视图新增「工作流执行器」区（与定位实验台、JD 实验台同区，**文案全走 `workflow.*` 命名空间**，zh-CN + en）：
+  按钮 `跑一遍` / `暂停` / `从失败节点续跑`；进度行 `第 i/N 个节点 · 已重试 k 次`；失败行 `证据：<相对路径>`。
+  面板不自己写循环，只调 `workflow.runner` 的方法（AGENTS.md §5.9）。—— 2.4-02/04/07 的截图靶子。
+- **2.4-05 断点续跑**只能真 kill：dev 实例由外部脚本 kill（harness 没有 kill 能力），重启 `pnpm dev` 后
+  截图必须同时显示「从库里读回的 run」「停在第 i 个节点」「第 1 个节点没有重放行」。
+  kill/重启的过程与读数写进 `docs/acceptance/2.4/`，不接受只用单测冒充。
+- **2.4-08 mock 适配器**：单测注入假 `PlatformAdapter`，整条链跑通且**完全不碰 `browser`**——
+  这条同时反向验证 plan §3 规则 2（workflow 不认识平台包）不是空话。
+- **2.4-09 卸载清理**：`plugins.stop('workflow')` 后断言在途节点让出、退避定时器清空、无残留句柄
+  （沿用 1.10 那条 `ctx.effect(() => () => controller?.abort())` 的写法，退避定时器必须进同一个 effect）。
+
+### 11.6 本机实测前置（AGENTS.md §6.2，**已跑完**，写调用代码之前）
+
+spike 落在仓库外 `.research-repos\workflow-spike\`（AGENTS.md §6.4，代码不进主干）。两组问题：
+
+| 问题                         | 实测结论（Electron 44.4.5 / Windows / DSF 1.5）                                                                                                                                                                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1 主进程能不能截视图的图    | **能**：`view.webContents.capturePage()` → 24–36ms、1350×1050、13505 字节 PNG、`isEmpty:false`。截图通道今天不存在（全仓 `capturePage` 零命中），2.4-04 要新加的就是这一个方法                                                                                             |
+| Q1b 截窗口自身的 webContents | **空**：同一时刻 `win.webContents.capturePage()` 返回 0ms / 0×0 / `isEmpty:true` / 0 字节。⇒ 证据必须截**内核视图**那块 `WebContents`，不是窗口                                                                                                                            |
+| Q2 最小化时截图              | 窗口最小化（页面 `visibilityState==='hidden'`）时截图**仍成功**，字节与可见时一致                                                                                                                                                                                          |
+| Q2b 隐藏态截的是不是新帧     | **是新帧**：隐藏态改 DOM 后再截，字节数变 12665、哈希变，说明产出的是变化后的帧。⇒ 2.3 发现的「隐藏窗口连 scroll 事件都不发」卡的是**事件投递**，不是绘制；截图这条证据通道不受影响                                                                                        |
+| Q3 从未 `show()` 的窗口      | 截得到：18ms / 579×356 / 2376 字节 / 非空 ⇒ 后台视图可作证据来源                                                                                                                                                                                                           |
+| Q4 WAL 跨真 kill             | 用 **Electron 自带 node**（`ELECTRON_RUN_AS_NODE=1`，node 24.21.0 / sqlite 3.53.4）连写 2262 行并逐行记账，然后在**未提交事务中途 `SIGKILL`**：新进程打开同一库读回 **2262 行**（零丢失）、`integrity_check = ok`、未提交的幽灵行 **0**、4.12MB 的 `-wal` 由该进程自动恢复 |
+
+由这两组结论直接定下实现形态：**截图走 `WebContents.capturePage()` 并截内核视图那块 `webContents`（隐藏态可用，不需要窗口可见）**；
+**`RunState` 与节点行就写 SQLite（WAL 的崩溃恢复成立）**，「已完成节点不重放」靠库里的行而不是靠内存运气。
+
+spike 过程里撞到的一个环境坑，记在这里省后来人的时间：
+**把 `.mjs` 文件直接当参数交给 `electron.exe` 会走 `default_app`**，而它在「加载应用包」期间不发出 `ready`，
+于是模块顶层的 `await app.whenReady()` 永不 resolve（第一次 spike 就这么静默卡死 30 秒，且没有产任何子进程）。
+入口必须是 CJS：`app.whenReady().then(() => import('./spike.mjs'))`。
+
+### 11.7 许可状态对本子计划的影响
+
+2.4 的节点模型 / 重试 / 断点 / 证据全是本项目自定设计，§11.2 只取**概念与数值**并标了行号供审计，
+**不搬运任何源仓库代码**，因此不受「书面授权文件尚未落地」的前置阻塞（那道闸门管的是 2.5 的话术文本与 2.6 的站点知识搬运）。
+
+### 11.8 明确不做（2.4 阶段）
+
+- 不做分支、并行、条件跳转与可视化画布编辑（P5）：计划是线性的，`edges` 只允许「下一个节点」这一种。
+- 不做 cron / 无人值守定时跑（P5）。
+- 不做 agent 规划循环：2.8 才把节点登记成 `agent.tools` 工具，本阶段任何「在 runner 里判断该调哪个节点」都算越界。
+- 不做 `{{var}}` 模板插值与自由变量池（源仓库形态）：节点参数来自计划声明 + 上一步的结构化输出，
+  真要跨节点传值时在 2.5 定形状，现在不建第二套字符串基础设施。
+- 不做节点级 LLM 自动修复（`auto-repair` 属 P5）；失败只有三种下场：自动重试、转人工接管、判失败。
+- 不做截图的图像分析 / OCR（AGENTS.md §8：不做识别与规避）；截图只作为**给人看的证据**存文件。

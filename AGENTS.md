@@ -206,6 +206,11 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   内核按 `Registry` 挂载时配置是运行期合并结果，因此 `PluginConstructor` 的该参数只能是 `any`。
 - **实测（1.3）`ctx.effect(fn)` 会立刻执行 `fn` 取回收器**：`fn` 必须「返回一个函数」，
   单层箭头就是刚挂载就执行清理（store 的连接因此在 init 之前被 close，表现为「尚未完成挂载」）。
+- **实测（2.4 spike）spike 的入口不能是 `.mjs` 直接交给 `electron.exe`**：那样走 `default_app`，它在
+  「加载应用包」期间不发出 `ready`，模块顶层 `await app.whenReady()` 永不 resolve（静默卡死、不产子进程）。
+  入口写 CJS：`app.whenReady().then(() => import('./spike.mjs'))`。
+  同一运行时里 `ELECTRON_RUN_AS_NODE=1` 起的是纯 Node（本机实测 node 24.21.0 / sqlite 3.53.4），
+  要验数据库行为（WAL 崩溃恢复等）用这条路，不需要 GUI。
 - 仓库**已有 git 远端**（`origin` → `dcc123456/auto-cc`），§1.6 的"提交 + 推送"按原文执行。
 
 ---
