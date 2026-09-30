@@ -868,3 +868,53 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
 本机关验时踩到的环境事实（已同步进 AGENTS.md §9）：热改配置会重建下游并重跑 `[Service.init]`；
 页面操作前必须先 `sessions.open`；harness 的 eval 不支持顶层 await；选应用页要显式 `--url 5173`；
 `shot --reveal` 只查顶层文档，iframe 里的内容得在帧内 `scrollIntoView`。
+
+### 12.14 2.5-f 的落点设计（写代码前定稿）
+
+这一片交 2.5-08 / 2.5-14（join 半边）/ 2.5-02 的 V 半边，并把 §12.11 欠的「我：/对方：」前缀一次还清。
+四处落点都在写代码前定死，避免边写边改判据。
+
+1. **打招呼按钮长在 JD 列表行上，不长在 chat 里**。`outbound.greet.perform` 已在渲染层白名单里
+   （`bridge.ts:127`），界面入口只是**多一个调用方**，不新增 IPC 口、不新增 service（§2.3）。
+   为什么选 JD 列表而不是对话气泡：2.5-08 的判据是「已回复的 JD 在界面标记」，标记和动作必须在同一行，
+   用户看到的是一列「这个目标回复了没有 / 还没打招呼的下一个发它」；而 chat 入口要的是
+   agent 工具面（同一入口、不同触发者），那是 2.8「双入口接通」的活，本轮往 chat 里塞第二个按钮
+   就是提前长出两套入口代码（§5.9 禁止的正是这个）。
+   **界面一行都不自己判断**：回执只转述 `GreetReceiptView`（waitedMs / source / origin / ledgerId），
+   拒绝只转述 `bridgeError.code + message`——`entitlement.gate` 在被拒时不落日志（`gate.ts:74-92` 只在放行侧 log），
+   所以 2.5-02 的「界面显示原因」只能靠 `QUOTA_EXCEEDED` 的 error payload 上屏，这也就顺手补了 §12.13
+   留的「闸门拒绝不可见」那条尾巴。
+
+2. **「已回复」由查询导出，不写回 `jobs`**（2.5-14 的原句）。具体形状是给 `jd.store.list` 的 SQL
+   挂一个**分组派生表左连**，而不是直接 join 明细：
+   `LEFT JOIN (SELECT platform, job_id, COUNT(*) AS inbound FROM conversation_messages
+   WHERE direction = 'recruiter' GROUP BY platform, job_id) reply ON reply.platform = jobs.platform
+   AND reply.job_id = jobs.job_id`。
+   两个细节不能省：
+   - **库里方向存的是 `'recruiter'` / `'self'`**，不是页面上的 `inbound`——页面属性值由知识包
+     `chat.inboundValue` 声明，适配器 `readReplies` 已经把它翻译过一次（`adapter.ts:414`），
+     查询侧再认 `inbound` 就会永远数到 0。
+   - **必须走派生表**：`jobs` 的唯一键是 `(source_url, title)`，`(platform, job_id)` 不唯一，
+     直接 join 明细会让一条 JD 长出 N 行、列表行数与 `total` 当场对不上。
+   `JobRowView` 因此加 `replied: boolean` + `inboundCount: number`（不叫 `hasReply`，名字要对上 spec 的「已回复」）。
+   排序改成 **已回复优先，其余仍按 `captured_at DESC, id DESC`**——这一条同时兑现 2.5-08 后半句
+   「后续步骤优先这些目标」（投递在 2.6，本轮先把「谁该先做」这件事在列表顺序上说清楚）。
+   `jd-store.test.ts:268` 那条倒序断言不受影响（两行都未回复），新增一例钉住「旧但已回复」在「新而未回复」之前。
+
+3. **前缀三处一起动**（fixture 模板、知识包、适配器），少动一处就是半新半旧的页面（§12.11 环境事实 2）：
+   - `scripts/fixture-server.ts:446` 不再把方向拼进正文，改为渲染一个 `<span data-message-body>` 只装正文，
+     视觉上的「对方：」由独立的标记节点给；
+   - `boss.json` 的 `chat` 段新增 `messageBody` 定位符（`schemaVersion` 不动，`knowledgePackSchema` 是
+     strictObject，多写键会被拒 ⇒ 加了字段就必须加校验）；
+   - `adapter.ts` 读正文改成按 `messageBody` 在容器**子树**里取（默认 `scope:'subtree'`），
+     id / direction 仍从容器自身读。
+   连带要改的测试：`adapter.test.ts:374-392`、`conversation-store.test.ts:80/97/135`、
+   `test-doubles.ts:487` 的默认行 `'对方：方便聊聊吗'`。
+   **不写迁移去改历史正文**：dev 库里那几行带前缀的文本是 2.5-d 期间从旧模板读来的页面事实，
+   删它要在应用代码里写死前缀，那正是 §12.10 说过的「把站点知识写进适配器」。验收以重新同步的新行为准。
+   去重键不受影响：fixture 每条消息带 `data-message-id`，`dedupeKeyOf` 走 `id:<externalId>` 分支，
+   只有「页面不给 id」的站点才会因正文变短而换掉 `t:sha1(...)` 键——这一点写进测试注释，别让它变成惊喜。
+
+4. **新增文案全走 `jd.*` 命名空间并补齐 en**：打招呼按钮、已回复标记、回执行、拒绝原因提示。
+   `scripts/check-renderer-conventions.ts`（已挂在 `pnpm lint` 末道）会做两语言包键对齐与插值参数校验，
+   所以这里没有「先写中文回头补」的余地（§5.5/5.6）。
