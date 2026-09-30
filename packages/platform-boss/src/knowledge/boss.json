@@ -154,6 +154,14 @@
         { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-item" },
         { "strategy": "xpath", "value": "//ul[@data-testid='chat-log']/li" }
       ]
+    },
+    "chatMessageBody": {
+      "description": "一条消息里只装正文的那个节点：方向标记（对方：/我：）在兄弟节点里，读回来的文本因此不带标记（2.5-08）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-body" },
+        { "strategy": "css", "value": "[data-message-body]" }
+      ]
     }
   },
   "capture": {
@@ -193,6 +201,7 @@
     "statusLine": "chatStatus",
     "sentPattern": "已送达服务端",
     "messageItem": "replyItem",
+    "messageBody": "chatMessageBody",
     "messageIdAttribute": "data-message-id",
     "directionAttribute": "data-direction",
     "inboundValue": "inbound"

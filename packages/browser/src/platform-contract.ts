@@ -107,6 +107,14 @@ export const knowledgePackSchema = z.strictObject({
       sentPattern: z.string().min(1),
       /** 一条消息项的定位名（读回复时的容器） */
       messageItem: z.string().min(1),
+      /**
+       * 消息正文在容器**里面**的定位名。
+       *
+       * 必须是数据而不是代码里的一句 `textContent`：页面上的方向标记（「对方：」这类）与正文常在同一个
+       * 文本节点里，把整个容器读回来就会连标记一起存进会话表；而标记长什么样、单独装在哪个节点里，
+       * 逐站点不同（spec 2.5-08 要的是正文干净）。
+       */
+      messageBody: z.string().min(1),
       /** 消息项上携带平台侧稳定标识的属性名，落库时按它去重 */
       messageIdAttribute: z.string().min(1),
       /** 消息项上区分方向的属性名 */
@@ -160,7 +168,7 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
       }
     }
   }
-  // 会话页的四处定位名同理：拼错的名字必须在加载时发现，而不是等打招呼时点到一个不存在的按钮。
+  // 会话页的五处定位名同理：拼错的名字必须在加载时发现，而不是等打招呼时点到一个不存在的按钮。
   const chat = parsed.data.chat;
   if (chat) {
     for (const [key, name] of [
@@ -168,6 +176,7 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
       ['sendButton', chat.sendButton],
       ['statusLine', chat.statusLine],
       ['messageItem', chat.messageItem],
+      ['messageBody', chat.messageBody],
     ] as const) {
       if (!locatorNames.has(name)) problems.push(`chat.${key}：引用了不存在的定位名「${name}」`);
     }

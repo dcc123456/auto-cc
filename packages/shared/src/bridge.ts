@@ -888,9 +888,18 @@ export interface JobRowView {
   capturedAt: number;
   /** 详情读成功的时间戳；只抓到摘要时为 null */
   detailCapturedAt: number | null;
+  /** 对方回过话没有——由 `conversation_messages` 里方向为招聘者的行数算出，`jobs` 表没有这一列（spec 2.5-14） */
+  replied: boolean;
+  /** 对方发来的消息条数；一行会话都没入库时为 0（不是「未知」，未知在 2.5-f 里就是查询失败） */
+  inboundCount: number;
 }
 
-/** `jd.store.list` 的返回值。 */
+/**
+ * `jd.store.list` 的返回值。
+ *
+ * 行序是「已回复优先，其余按抓取时间倒序」（spec 2.5-08 的『后续步骤优先这些目标』落在这里，
+ * 不在界面里再排一遍）。
+ */
 export interface JobListResultView {
   total: number;
   rows: JobRowView[];
@@ -911,8 +920,9 @@ export interface JdStoreStatusView {
 /**
  * 会话里的一行消息（spec 2.5-07）。
  *
- * `text` 是页面原样读到的正文：本地仿站在每条前面加了「对方：/我：」，那也是页面事实，
- * 入库不替它删——删它要在代码里写死前缀，那是站点知识（AGENTS.md §6 的边界）。
+ * `text` 是**正文本身**，不含页面上的方向标记：标记从哪个节点读由站点知识包声明
+ * （`chat.messageBody`），所以这里既不需要、也不应该在代码里写死一句「去掉『对方：』」。
+ * 谁说的另有 `from` 字段。
  */
 export interface ConversationRowView {
   id: number;

@@ -120,6 +120,8 @@ type JobRow = {
   source_url: string;
   captured_at: number | bigint;
   detail_captured_at: number | bigint | null;
+  /** 左连出来的「对方发来几条」；没连上行时为 null（不是 0，0 留给「有会话线程但一条回复都没有」） */
+  inbound_count: number | bigint | null;
 };
 
 /**
@@ -186,6 +188,8 @@ function toRowView(row: JobRow): JobRowView {
     sourceUrl: row.source_url,
     capturedAt: Number(row.captured_at),
     detailCapturedAt: asSqlInt(row.detail_captured_at),
+    inboundCount: Number(row.inbound_count ?? 0),
+    replied: Number(row.inbound_count ?? 0) > 0,
   };
 }
 
@@ -310,16 +314,32 @@ export class JdStoreService extends Service {
   }
 
   /**
-   * 列出库里最近的 JD。
+   * 列出库里最近的 JD，并带上「对方回了几条」。
+   *
+   * 已回复是**算出来的**，不是 jobs 表上的一列（spec 2.5-14：单一事实来源在 `conversation_messages`）。
+   * 排序把已回复的排在前面，因为 2.5-08 要的就是「下一步先做谁」这件事在列表顺序上说清楚。
    * @param limit 条数（钳到 1～500，省略用 50）
-   * @returns 总数（不受 limit 影响）与按 `captured_at` 倒序的行
+   * @returns 总数（不受 limit 影响）与按「已回复优先、再按 captured_at 倒序」的行
+   * @throws 会话库没挂载时失败在 sqlite 层的 `no such table: conversation_messages`——
+   *         与 `jobs` 表被回滚后 `count()` 的失败同一种形状，宁可报错也不把「不知道有没有人回复」写成 `false`
    */
   list = (limit?: number): JobListResultView => {
     const requested = typeof limit === 'number' && Number.isFinite(limit) ? Math.trunc(limit) : LIST_LIMIT.fallback;
     const capped = Math.min(Math.max(requested, LIST_LIMIT.min), LIST_LIMIT.max);
     const total = this.count();
     const rows = this.store.db
-      .prepare('SELECT * FROM jobs ORDER BY captured_at DESC, id DESC LIMIT ?')
+      .prepare(
+        `SELECT jobs.*, reply.inbound AS inbound_count
+         FROM jobs
+         LEFT JOIN (
+           SELECT platform, job_id, COUNT(*) AS inbound
+           FROM conversation_messages
+           WHERE direction = 'recruiter'
+           GROUP BY platform, job_id
+         ) reply ON reply.platform = jobs.platform AND reply.job_id = jobs.job_id
+         ORDER BY CASE WHEN reply.inbound IS NULL THEN 0 ELSE 1 END DESC, jobs.captured_at DESC, jobs.id DESC
+         LIMIT ?`,
+      )
       .all(capped) as unknown as JobRow[];
     return { total, rows: rows.map(toRowView) };
   };

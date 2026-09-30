@@ -358,14 +358,18 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
   });
 });
 
-describe('读回复：页面全量读 + 稳定 id（spec 2.5-07）', () => {
+describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', () => {
   it('抽取请求的容器、属性名与「读自身」全部来自知识包', async () => {
     const { adapter, page } = withScript(chatScript(pack, null, [messageRow(0)]));
     await adapter.readReplies('1001');
     const request = page.requests.at(-1)!;
     expect(request.container).toBe(pack.locators.replyItem);
     expect(request.fields.map((field) => field.name)).toEqual(['text', 'externalId', 'direction']);
-    expect(request.fields.every((field) => field.scope === 'self')).toBe(true);
+    // 正文是「读容器里面的正文节点」（scope 缺省即 subtree），候选来自知识包声明的定位名；
+    // id 与方向是容器自身的属性，所以三者三种读法。
+    expect(request.fields[0]!.candidates).toBe(pack.locators.chatMessageBody!.candidates);
+    expect(request.fields[0]!.scope).toBeUndefined();
+    expect(request.fields.slice(1).every((field) => field.scope === 'self')).toBe(true);
     expect(request.fields[1]!.attribute).toBe('data-message-id');
     expect(request.fields[2]!.attribute).toBe('data-direction');
   });
@@ -375,18 +379,18 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07）', () => {
       chatScript(pack, null, [
         messageRow(0),
         messageRow(1, { direction: 'outbound' }),
-        messageRow(2, { text: '我：方便，请问期望薪资？' }),
+        messageRow(2, { text: '方便，请问期望薪资？', direction: 'outbound' }),
       ]),
     );
     const messages = await adapter.readReplies('1001');
-    expect(messages.map((message) => message.from)).toEqual(['recruiter', 'self', 'recruiter']);
+    expect(messages.map((message) => message.from)).toEqual(['recruiter', 'self', 'self']);
     expect(messages[0]).toMatchObject({
       platform: 'boss',
       jobId: '1001',
-      text: '对方：方便聊聊吗',
+      text: '方便聊聊吗',
       externalId: 'reply-0',
     });
-    expect(messages[2]!.text).toBe('我：方便，请问期望薪资？');
+    expect(messages[2]!.text).toBe('方便，请问期望薪资？');
     // 全量读：页面上有几条就回几条，不做「只回新消息」的裁剪（裁剪是会话库的去重职责）。
     expect(messages).toHaveLength(3);
   });

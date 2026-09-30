@@ -422,7 +422,7 @@ const chatFramePageHtml = `<!doctype html>
     <p><textarea data-testid="chat-input" rows="3" placeholder="输入打招呼文案（含中文与 emoji）"></textarea></p>
     <p><button type="button" data-testid="chat-send">发送打招呼</button></p>
     <p>帧内状态：<strong data-testid="chat-frame-status">待发送</strong></p>
-    <p>会话消息（出站与对方回复同一条时间线，节点带 <code>data-message-id</code> 供 app 侧去重）：</p>
+    <p>会话消息（出站与对方回复同一条时间线，<code>li</code> 带 <code>data-message-id</code> 供 app 侧去重，正文只装在 <code>[data-testid=chat-log-body]</code> 里）：</p>
     <ul data-testid="chat-log"></ul>
     <script>
       const chatInput = document.querySelector('[data-testid="chat-input"]');
@@ -442,8 +442,16 @@ const chatFramePageHtml = `<!doctype html>
         line.dataset.testid = 'chat-log-item';
         line.dataset.messageId = String(message.id);
         line.dataset.direction = message.direction;
+        // 方向标记与正文分成两个节点：真人看得出是谁说的，app 读正文时也不会把「对方：」一起读进库（spec 2.5-08）。
+        const marker = document.createElement('span');
+        marker.dataset.messageMarker = message.direction;
+        marker.textContent = message.direction === 'inbound' ? '对方：' : '我：';
+        const body = document.createElement('span');
         // 用 textContent 而不是拼 HTML：中文与 emoji 要按字面出现在帧内（spec 2.2-13）。
-        line.textContent = (message.direction === 'inbound' ? '对方：' : '我：') + message.text;
+        body.dataset.testid = 'chat-log-body';
+        body.dataset.messageBody = 'true';
+        body.textContent = message.text;
+        line.append(marker, body);
         chatLog.append(line);
       }
 

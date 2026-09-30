@@ -5,6 +5,9 @@
  * 迁移回滚这四件事 mock 掉就等于没测。库内一行的坏值也要能读出来（库里可能躺着别的程序写进来的
  * 东西），所以最后一组用例直接手写列值。登记处用替身（`test-doubles.ts`）：平台包不能 import
  * L3 的 `plugin-workflow`，而这里要验收的只是「init 有没有把节点交出去、卸载有没有摘回来」。
+ *
+ * 「已回复」是左连 `conversation_messages` 算出来的（spec 2.5-08 / 2.5-14），所以本文件的装配把那张表的
+ * DDL 直接执行一遍——测连接不需要整条会话链路，也不需要把迁移台账推到号段 5。
  */
 import {
   asApp,
@@ -20,7 +23,9 @@ import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
+import { conversationMigration } from './conversation-store.js';
 import { JD_MIGRATION_VERSION, JdStoreService, type JobDraft } from './jd-store.js';
 import { FakeExecutorRegistryService } from './test-doubles.js';
 
@@ -35,7 +40,11 @@ function tempDir(): string {
 }
 
 /**
- * 挂起一套 config + store +（可选）登记处 + jd.store。
+ * 挂起一套 config + store +（可选）登记处 + jd.store，并把会话表建出来。
+ *
+ * 会话表是**直接执行 DDL**（`conversationMigration.up`）而不是挂 `conversation.store` 插件：
+ * 真实装配里两者同库、`jd.store.list` 因此总能连上（spec 2.5-08 的左连），而这里只需要那张表存在，
+ * 不需要整条会话链路（登记处 + 适配器 + 页面手），也不需要把迁移台账推到号段 5。
  * @param dir 库文件目录（省略则新开一个临时目录）
  * @param withRegistry 是否装登记处替身（spec 2.4-01 的登记口；不装就是「工作流缺席」的形状）
  * @returns 上下文、`store` 与 `jd.store` 服务、裸连接、`jd.store` 的 fiber（重启用例要先停掉它），以及登记处（没装则 undefined）
@@ -51,6 +60,7 @@ async function boot(dir = tempDir(), withRegistry = false) {
   const jdFiber = await ctx.plugin(JdStoreService, {});
   fibers.push(jdFiber);
   const app = asApp(ctx);
+  conversationMigration.up(app.store.db);
   return {
     ctx,
     jdFiber,
@@ -59,6 +69,21 @@ async function boot(dir = tempDir(), withRegistry = false) {
     db: app.store.db,
     executors: executorRegistryOf(ctx),
   };
+}
+
+/**
+ * 往会话表手写一行（只测 `jd.store.list` 的左连，不绕道整条同步链路）。
+ * @param db 裸连接
+ * @param jobId 会话归属的目标
+ * @param direction 存进去的方向列（库里的取值是 `recruiter` / `self`，不是页面上的 `inbound`）
+ * @param text 正文，同时充当去重键的一部分
+ * @returns 无
+ */
+function seedMessage(db: DatabaseSync, jobId: string, direction: 'recruiter' | 'self', text: string): void {
+  db.prepare(
+    `INSERT INTO conversation_messages (platform, job_id, direction, text, external_id, dedupe_key, read_at)
+     VALUES ('boss', ?, ?, ?, NULL, ?, 1)`,
+  ).run(jobId, direction, text, `${direction}:${text}`);
 }
 
 /**
@@ -309,6 +334,66 @@ describe('只读接口（spec 2.3-09 的界面读数）', () => {
     expect(row?.salary).toBeNull();
     // 原文照存：界面仍然看得到「我们读到了什么」。
     expect(row?.salaryText).toBe('25-40K·15薪');
+  });
+});
+
+describe('已回复标记的左连（spec 2.5-08 / 2.5-14）', () => {
+  it('只有招聘者方向的消息算「已回复」，自己发出去的不算', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft({ jobId: 'A', title: '有人回了的岗位' }));
+    jd.upsert(
+      draft({ jobId: 'B', title: '只我说过话的岗位', sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=B' }),
+    );
+    seedMessage(db, 'A', 'recruiter', '方便聊聊吗');
+    seedMessage(db, 'B', 'self', '你好，我对这个岗位很感兴趣');
+    const rows = jd.list().rows;
+    expect(rows.find((row) => row.jobId === 'A')).toMatchObject({ replied: true, inboundCount: 1 });
+    expect(rows.find((row) => row.jobId === 'B')).toMatchObject({ replied: false, inboundCount: 0 });
+  });
+
+  it('已回复的排前面，组内仍按抓取时间倒序（界面把「该跟进的」顶到第一屏）', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft({ jobId: 'old-replied', title: '早抓到但有人回', capturedAt: 1 }));
+    jd.upsert(
+      draft({
+        jobId: 'new-quiet',
+        title: '刚抓到没人回',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=new-quiet',
+        capturedAt: 999,
+      }),
+    );
+    seedMessage(db, 'old-replied', 'recruiter', '方便聊聊吗');
+    expect(jd.list().rows.map((row) => row.title)).toEqual(['早抓到但有人回', '刚抓到没人回']);
+    // 排序只影响行的先后：`limit` 之外的总数照旧是全库计数。
+    expect(jd.list(1).total).toBe(2);
+  });
+
+  it('一个目标回三条不放大行数，同一 jobId 的两行岗位各自拿到同一个计数', async () => {
+    const { jd, db } = await boot();
+    // `(platform, job_id)` 在 `jobs` 上不唯一（幂等键是来源地址 + 标题），所以两条回复连两张 detail 表
+    // 会把 2 行撑成 6 行——聚合派生表就是为了让行数与 `total` 同口径。
+    jd.upsert(draft({ jobId: 'shared', title: '同一个 jobId 的第一行' }));
+    jd.upsert(
+      draft({
+        jobId: 'shared',
+        title: '同一个 jobId 的第二行',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=shared-other',
+      }),
+    );
+    seedMessage(db, 'shared', 'recruiter', '方便聊聊吗');
+    seedMessage(db, 'shared', 'recruiter', '在哪个城市');
+    seedMessage(db, 'shared', 'self', '上海');
+    const listed = jd.list();
+    expect(listed.total).toBe(2);
+    expect(listed.rows).toHaveLength(2);
+    expect(listed.rows.map((row) => row.inboundCount)).toEqual([2, 2]);
+  });
+
+  it('会话表没建时失败在 sqlite 层，不把「不知道有没有人回复」写成 false', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft());
+    db.exec('DROP TABLE conversation_messages');
+    expect(() => jd.list()).toThrowError(/no such table: conversation_messages/);
   });
 });
 

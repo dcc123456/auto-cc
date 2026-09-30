@@ -380,9 +380,10 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   /**
    * 读目标会话里页面上可见的全部消息（spec 2.5-07）。
    *
-   * 是**全量读**而不是读增量：真实平台的会话页不给游标 API，页面上有什么就读什么，
+   * 是**全量读**而不是读增量：真实平台会话页不给游标 API，页面上有什么就读什么，
    * 「这条见过没有」交给 `conversation_messages` 的唯一索引按 `externalId` 判（§12.6.2 第 3 条）。
-   * 消息正文按页面原样返回（本地仿站给每条加了「对方：/我：」前缀，那也是页面事实，不替它删）。
+   * 正文取知识包 `chat.messageBody` 声明的那个节点，所以页面上的方向标记（本地仿站的「对方：/我：」）
+   * 不会混进正文（spec 2.5-08）——标记本身仍然画在页面上给人看，只是不入库。
    * @param jobId 目标岗位标识
    * @returns 按页面顺序的消息列表；正文为空的行不算消息（分割线与引导气泡），一条都没有是空数组
    * @throws 缺会话段 `KNOWLEDGE_PACK_INVALID`；jobId 为空 `INVALID_ARGUMENT`
@@ -397,7 +398,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const result = await page.extract({
       container: locatorFor(knowledge.messageItem),
       fields: [
-        { name: 'text', candidates: [], scope: 'self' },
+        // 正文只认知识包声明的那个节点（scope 默认 subtree），id 与方向仍在容器自身上，所以三条不同源。
+        { name: 'text', candidates: locatorFor(knowledge.messageBody).candidates },
         { name: 'externalId', candidates: [], scope: 'self', attribute: knowledge.messageIdAttribute },
         { name: 'direction', candidates: [], scope: 'self', attribute: knowledge.directionAttribute },
       ],

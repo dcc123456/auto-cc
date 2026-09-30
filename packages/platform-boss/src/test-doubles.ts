@@ -474,7 +474,10 @@ export class StubBrowserActService extends Service {
 export const chatUrlOf = (jobId: string): string => `http://127.0.0.1:10233/chat?targetId=${jobId}`;
 
 /**
- * 造一条消息的抽取行（正文、稳定 id、方向三个字段都是「读容器自身」）。
+ * 造一条消息的抽取行（正文读容器里的正文节点，稳定 id 与方向读容器自身）。
+ *
+ * 正文默认不带「对方：」这类方向标记——真实页面把标记装在兄弟节点里，正文节点只装话（见知识包
+ * `chatMessageBody`），用例若把标记写进正文，就等于替适配器承认「前缀会入库」，2.5-08 的断言会当场失效。
  * @param index 容器序号
  * @param overrides 需要改动的字段：给 `null` 表示该字段读不到
  * @returns 一行抽取读数（帧地址固定为 `chatUrlOf('1001')`，会话侧用例不看它）
@@ -484,7 +487,7 @@ export function messageRow(
   overrides: Partial<Record<'text' | 'externalId' | 'direction', string | null>> = {},
 ): ExtractRowReading {
   const url = chatUrlOf('1001');
-  const text = overrides.text === null ? fieldMiss('text') : fieldHit('text', overrides.text ?? '对方：方便聊聊吗');
+  const text = overrides.text === null ? fieldMiss('text') : fieldHit('text', overrides.text ?? '方便聊聊吗');
   const externalId =
     overrides.externalId === null
       ? fieldMiss('externalId')

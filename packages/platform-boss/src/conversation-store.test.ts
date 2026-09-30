@@ -77,7 +77,7 @@ describe('同步一轮会话（spec 2.5-07）', () => {
     expect(list.total).toBe(2);
     // 顺序是页面的时间线方向，不是插入的倒序：界面画时间线靠它。
     expect(list.rows.map((row) => row.from)).toEqual(['recruiter', 'self']);
-    expect(list.rows[0]).toMatchObject({ jobId: '1001', externalId: 'reply-0', text: '对方：方便聊聊吗' });
+    expect(list.rows[0]).toMatchObject({ jobId: '1001', externalId: 'reply-0', text: '方便聊聊吗' });
   });
 
   it('再同步一次一条都不新增——全量读页面是预期用法，不是异常', async () => {
@@ -94,7 +94,7 @@ describe('同步一轮会话（spec 2.5-07）', () => {
       chatScript(pack, null, [
         messageRow(0, { externalId: null }),
         messageRow(1, { externalId: null }),
-        messageRow(2, { externalId: null, text: '我：方便，请问期望薪资？' }),
+        messageRow(2, { externalId: null, text: '方便，请问期望薪资？' }),
       ]),
     );
     const result = await conversation.syncFrom('1001');
@@ -132,7 +132,7 @@ describe('同步一轮会话（spec 2.5-07）', () => {
 describe('读数与钳制（spec 2.5-07）', () => {
   it('limit 钳到区间内，总数不受 limit 影响', async () => {
     const { conversation } = await boot(
-      chatScript(pack, null, [messageRow(0), messageRow(1), messageRow(2, { text: '我：方便' })]),
+      chatScript(pack, null, [messageRow(0), messageRow(1), messageRow(2, { text: '方便' })]),
     );
     await conversation.syncFrom('1001');
     const capped = conversation.list('1001', 2);

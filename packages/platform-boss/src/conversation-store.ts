@@ -34,8 +34,11 @@ export const CONVERSATION_MIGRATION_VERSION = 5;
  * 唯一索引建在 `(platform, job_id, dedupe_key)` 而不是 `external_id` 上：页面不带稳定 id 时
  * `dedupe_key` 退到「方向 + 正文摘要」（见 `dedupeKeyOf`），那种站点也不该每轮都长出重复行；
  * 两种键共用一条索引，去重规则就只有一条（AGENTS.md §2.5）。
+ *
+ * 导出给用例装配用：`jd.store.list` 要左连这张表（spec 2.5-08），测那张表的行为时只需要 DDL 本身，
+ * 不需要整条会话链路（登记处 + 适配器 + 页面手），也不需要动迁移台账。
  */
-const conversationMigration = {
+export const conversationMigration = {
   version: CONVERSATION_MIGRATION_VERSION,
   up: (db: DatabaseSync) => {
     db.exec(`CREATE TABLE IF NOT EXISTS conversation_messages (

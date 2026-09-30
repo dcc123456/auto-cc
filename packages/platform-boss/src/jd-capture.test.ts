@@ -26,6 +26,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { conversationMigration } from './conversation-store.js';
 import { BossPlatformService, loadBossKnowledgePack } from './index.js';
 import { JdCaptureService, draftFromDetail, draftFromSummary, type JdCaptureConfig } from './jd-capture.js';
 import { JdStoreService } from './jd-store.js';
@@ -99,6 +100,9 @@ async function boot(script: PageScript, config: Partial<JdCaptureConfig> = {}) {
   fibers.push(captureFiber);
 
   const app = asApp(ctx);
+  // `jd.store.list` 现在左连会话表算「已回复」（spec 2.5-08），真实装配里那张表由 `conversation.store` 建，
+  // 这里只补 DDL：本用例测的是抓取，不需要整条会话链路，也不该把迁移台账推到号段 5。
+  conversationMigration.up(app.store.db);
   return {
     ctx,
     capture: app['jd.capture'],

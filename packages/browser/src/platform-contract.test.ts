@@ -282,6 +282,7 @@ const chatSection = {
   statusLine: 'chatStatus',
   sentPattern: '已送达服务端',
   messageItem: 'chatMessage',
+  messageBody: 'chatMessageBody',
   messageIdAttribute: 'data-message-id',
   directionAttribute: 'data-direction',
   inboundValue: 'inbound',
@@ -289,7 +290,7 @@ const chatSection = {
 
 describe('会话页知识（spec 2.5-05）', () => {
   /**
-   * 造一份带完整会话页知识的知识包：四个被 `chat` 段引用的定位名与那一段本身。
+   * 造一份带完整会话页知识的知识包：五个被 `chat` 段引用的定位名与那一段本身。
    * @param overrides 覆盖项（用于把其中一处写坏）
    * @returns 交给 `parseKnowledgePack` 的未知值
    */
@@ -312,6 +313,7 @@ describe('会话页知识（spec 2.5-05）', () => {
         chatSend: pageLocator(false),
         chatStatus: pageLocator(false),
         chatMessage: pageLocator(true),
+        chatMessageBody: pageLocator(false),
       },
       chat: chatSection,
       ...overrides,
@@ -325,8 +327,20 @@ describe('会话页知识（spec 2.5-05）', () => {
       statusLine: 'chatStatus',
       sentPattern: '已送达服务端',
       messageItem: 'chatMessage',
+      messageBody: 'chatMessageBody',
       inboundValue: 'inbound',
     });
+  });
+
+  it('没有 messageBody 的包在加载时就拒绝：正文读哪个节点不能由代码猜', () => {
+    try {
+      parseKnowledgePack(chatPack({ chat: { ...chatSection, messageBody: undefined } }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'chat.messageBody：Invalid input: expected string, received undefined',
+      ]);
+    }
   });
 
   it('声明了 chat / readReplies 却没有 chat 段：加载时就报错，适配器拿不到猜出来的选择器', () => {
