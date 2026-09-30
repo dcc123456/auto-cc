@@ -121,3 +121,5 @@ declare module '@auto-cc/core' {
 
 // 话术生成是同一个域（"要发出去的内容从哪来"）的第二个服务，所以同包不同 provider 名。
 export * from './script.js';
+// 频控间隔是第三个：它是外发的性质不是平台的性质（plan §12.3），所以不放适配器里。
+export * from './throttle.js';

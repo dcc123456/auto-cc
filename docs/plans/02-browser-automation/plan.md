@@ -658,3 +658,33 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
 逐插件比对后它的 effect 数仍是 1（`registry 26→26`），**再跑一轮报 `effect 0`** ——
 那 +1 是 `plugins/src/index.ts` cycle 注释里说的 settle 窗口没吃掉的瞬时值。
 判据：一次漂移不结论，连跑两轮看是否增长。
+
+#### 12.9.2 2.5-c 收口记录（`outbound.throttle`，2026-09-30）
+
+实现落在 `packages/outbound/src/throttle.ts`（同包第三个 provider，不新建包，见 §12.3），
+`registry.ts` 里 id 为 `outbound-throttle`，`cordis.yml` 显式写 `minGapMs: 45000 / maxGapMs: 150000`。
+
+- **它只做一件事**：回答「下一次外发之前隔多久」。计时（`sleep`）由调用方用 `@auto-cc/core` 的现成实现做，
+  日上限归 `entitlement.gate`（`mode:'daily'`）——两处都不在本服务里再造一份，
+  否则就是 §2.7 禁的第二套状态存储。因此本服务是纯抽样函数，能在单测里被穷举而不拖慢测试。
+- **2.5-05 打勾，但实际断言与 spec 原句不同，所以按实测口径改写了 spec**：原句写「方差 > 阈值」，
+  实现里断的是「10 次抽样全部落在闭区间内 + 极差 > 区间长度 30% + 互异值 ≥8」。
+  方差对样本量敏感（10 个样本的方差估计本身就抖），极差与互异数在同样样本量下更稳定，
+  且 30% 阈值对应的失败概率约 1e-4（推导写在测试注释里），不会变成 flaky。
+- **2.5-04 保持 `[ ]`**：它的 U 半边（间隔落在配置区间内、随机化）已随 2.5-05 一起验掉，
+  但 C 半边「日上限到量即停、实测第 N+1 次被拦」需要真实外发路径，那是 2.5-e `outbound.greet` 的判据。
+- 页面证据 `docs/acceptance/2.5/2.5-05-throttle-1.png`（插件行：`无依赖 · 配置项 minGapMs, maxGapMs · effect 1 项`）
+  与 `2.5-05-throttle-2.png`（巡检报告 `registry 27→27 · 漂移 尺寸 0 / effect 0 / 句柄 0` +
+  日志 `外发节流就绪：间隔在 45.0s – 150.0s 之间随机（非固定节奏）`）。
+- **§12.9.1 的漂移判据在本片原样复现**：首轮巡检报 `effect 1`，第二轮报 `effect 0`，
+  期间每一轮卸载都是「回收 1 项 effect，剩余 0 项」。这不是节流服务的问题，
+  是 `plugins.cycle` 的 `SETTLE_MS` 窗口量到了尚未落定的计数——所以「看第二轮、不看第一轮」从经验升级为固定动作。
+- **配置区间是活的**：装配面板里把 `outbound-throttle` 的配置改成 `{"minGapMs":5000,"maxGapMs":9000}` 并保存，
+  点一次「巡检」后日志播报变成 `间隔在 5.0s – 9.0s 之间随机（非固定节奏）`（证据 `2.5-05-throttle-live-config.png`），
+  **app 没有重启**，而 `cordis.yml` 在磁盘上仍是 45000/150000——`kernel.applyConfig` 只写运行期补丁层（1.5 已定），
+  所以这条演示不会污染入库文件。节流服务的 `options` 是构造期快照，因此改配置要经一次重挂载才生效，
+  这也是 `2.5-e` 的打招呼编排不能"改了立刻变慢/变快"的原因（届时要么显式重挂载，要么把区间读成 getter）。
+- 截图过程中确认的一条 harness 事实：`cdp.ts` 的 `scrollTo` 注释所说「写 DOM `scrollTop` 只改 DOM、合成器画面不动」
+  只对**页面滚动**成立；日志框自己是 `max-h-64 overflow-y-auto`，对它写 `ul.scrollTop = ul.scrollHeight` 是会重绘的。
+  所以拍最新日志的固定动作是：先 `eval` 滚内部框，再 `shot --reveal 'li[data-log-level]:last-child'`
+  （reveal 这时只需要把框带进视口，否则它会以「已滚到边界但目标仍不在视口内」拒绝拍错的东西）。

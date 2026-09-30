@@ -55,6 +55,14 @@ plugins:
   - id: outbound-script
     dependsOn: [llm]
 
+  # 频控间隔（spec 2.5-04 / 2.5-05）：只回答「隔多久」，不持有计时器也不计数——
+  # 日上限仍归 `entitlement`，真正 await 由调用方用 core 的 `sleep` 做（plan §12.3 要避免的是第二套配额与第二套调度器）。
+  # 区间显式写在这里而不是藏在代码默认值里：演示「非固定节奏」要能在装配面板现场改宽改窄，不重启 app。
+  - id: outbound-throttle
+    config:
+      minGapMs: 45000
+      maxGapMs: 150000
+
   # IPC 网关（spec 1.4-01）：全应用唯一的跨进程通道，所以排在 shell 之前——
   # 窗口由 shell 创建，界面能发起调用时处理器必须已经在位。
   - id: ipc
