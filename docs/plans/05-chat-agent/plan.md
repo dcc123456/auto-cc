@@ -148,6 +148,90 @@ AgentTool = {
 调度器只触发**已保存的工作流**，不触发自由对话任务（无人值守下不允许临场规划外发动作）。
 触发结果一律记账，且受同一 `entitlement.gate` 约束。
 
+### 5.10 工作流画布编辑器（算子图）
+
+用户 2026-09-30 明确方向：**工作流由一个个算子节点组成，用 react-flow 画布，参考 browser-copilot
+的工作流编辑器**。这推翻了 P2 计划里「`@xyflow` 画布属 P5、2.4 不做分支/并行/画布」的推迟口径
+（`docs/plans/02-browser-automation/plan.md` §11.8），本小节是它落地的地方。
+
+#### 5.10.1 取证与选型（AGENTS.md §6.1）
+
+| 取证对象         | 一手来源                                                                                                                                                                                                                                                                                                                                                                  | 取到的事实                                                                                                                                                                                                                                                                                                                                 | 结论与约束                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| 画布库本体       | 本机 `npm view @xyflow/react`（2026-09-30）                                                                                                                                                                                                                                                                                                                               | 最新 `12.12.0`、**MIT**、peer `react>=17`                                                                                                                                                                                                                                                                                                  | 与我们的 React 19 + Vite 7 兼容，可商用。包名是 `@xyflow/react`（v12 官方名），旧名 `react-flow-renderer` 已停更，不用        |
+| 参考实现位置     | `browser-copilot/package.json:66`、`src/workflow-editor/`（App.tsx 919 行、`flow/BlockNode.tsx`、`blocks/batchA-D/`）                                                                                                                                                                                                                                                     | 用的正是 `@xyflow/react ^12.11.5`                                                                                                                                                                                                                                                                                                          | 借鉴**交互面与数据格式**，不借鉴代码，见下条                                                                                  |
+| **许可边界**     | `browser-copilot/LICENSE:3-7` = PolyForm-Noncommercial-1.0.0（仓库自定）；用户在 2026-09-30 答复「是我本人，可自由改授」并已记入 `docs/specs/01-framework/spec.md` P1-02 的**许可豁免记录**；同时 `App.tsx:2` 自述 "React port of Automa's editor"、`EditForms.tsx:6` "ported from Automa's Edit*.vue"，而 `automa/LICENSE.txt` = **AGPL v3**（第三方版权，用户无权豁免） | 编辑器代码分两类：①**用户原创**部分——豁免可用，但按 P1-02 的既定条件，**书面授权文件未落进仓库前搬运动作不开始**；②**Automa 移植**部分（约 55 个 `Edit*.tsx`、drawflow 数据格式）——豁免覆盖不到，只能 **clean-room 重写语义**。5.10 的表单本来就是 schema 生成（不复制那些文件），故实际不受 ① 的进度阻塞，但 5.10-15 仍要把这条边界机检住 |
+| 它的算子登记     | `lib/workflow/blocks/catalog.ts`（64 块）、`palette.ts:18-26`、`workflow-editor/blocks/EditForms.tsx:57`、`executors.ts:3170`                                                                                                                                                                                                                                             | 四张表按字符串约定联动，**新增一个算子要改 3–4 处**                                                                                                                                                                                                                                                                                        | **否决照抄**（AGENTS.md §2.2/2.5）：改成单一 `OperatorDescriptor`，调色板、节点渲染、参数表单、执行器分派四处全部由它派生     |
+| 它的参数表单     | `blocks/batchA-D/` 约 55 个手写 `Edit*.tsx`；无表单的块回落通用 key/value（`EditForms.tsx:9-10`）                                                                                                                                                                                                                                                                         | 表单是逐算子手写的                                                                                                                                                                                                                                                                                                                         | **否决**：参数表单从算子自带的 zod schema 生成，新增算子零表单代码                                                            |
+| 画布与运行时同步 | 编辑器 `sendCommand('workflows.run')` 同步 await 整轮（`App.tsx:520-554`），运行态靠 LogsModal **1200ms 轮询**（`LogsModal.tsx:94-106`）                                                                                                                                                                                                                                  | 没有事件通道，`BlockNode` 的 `runState` 字段预留了但没被回写                                                                                                                                                                                                                                                                               | **否决**：2.4 的 runner 已经在发 `node.started/finished/failed`，画布订阅 `cordis:event` 即可；引轮询就是第二个状态源（§2.3） |
+| 它的图数据形状   | `lib/workflow/types.ts:53-68`：`WorkflowNode{id,label,position,data}` + `WorkflowEdge{id,source,target,sourceHandle,targetHandle}`，分支靠 handle 后缀 `-output-1/-output-fallback/-loop`（`engine.ts:572-584`）                                                                                                                                                          | 边即控制流，多出口靠命名句柄                                                                                                                                                                                                                                                                                                               | **采纳形状**（不是采纳代码）：`edges` + 命名 sourceHandle 足以表达条件分支；`position` 必须与计划语义分离，见 5.10.2          |
+| 断点续跑与图指纹 | `lib/workflow/checkpoints.ts:43-50`：`workflowFingerprint` 不符即拒绝恢复                                                                                                                                                                                                                                                                                                 | 与我们 2.4 已实现的 `fingerprint` 同构                                                                                                                                                                                                                                                                                                     | 采纳同一立场：**位置拖动绝不能改变指纹**，否则用户挪一下节点就续跑不了                                                        |
+
+#### 5.10.2 数据模型：graph 与 plan 分两层
+
+```ts
+// 视图层：只有画布关心，不参与指纹计算
+WorkflowNodeView = { nodeId: string; position: { x: number; y: number } };
+// 语义层：扩现有 workflowNodeSpecSchema，加出口声明
+WorkflowNodeSpec = { ...现有字段, outputs: Array<'default' | string> };  // 条件节点才有第二、三出口
+WorkflowEdge = { id: string; source: string; sourceHandle: string; target: string };
+WorkflowGraph = { id, revision, nodes: WorkflowNodeSpec[], edges: WorkflowEdge[], views: WorkflowNodeView[] };
+```
+
+`fingerprint` 只覆盖 `nodes + edges`（键有序的 canonicalJson 已有实现），**views 不进指纹**。
+线性计划是「每条边都是 `default` 出口、且每个节点至多一个入边」的特例，
+现有 `BOSS_BASIC_PLAN` 必须能原样升级成 graph 而不需要重写（5.10-02 的验收点）。
+
+#### 5.10.3 DAG 语义解锁到哪一步
+
+- **做**：条件分支（一个节点多个命名出口，runner 按出口选边）、并行扇出 + 汇聚（join 等所有入边到达）、
+  失败专用边（`onError: fallback` 指向的边）。
+- **不做**：循环与回边。理由：`workflow_nodes.attempts` 现在既是重试计数又是 2.4-10 统计的原料，
+  循环会让「第几次执行」二义；且 loop 需要 `MAX_STEPS` 一类失控护栏，属新基础设施（§2.6 不做未来抽象）。
+  这条以反向验证条目（5.10-14）留在 spec，不许 silently 变成"以后再说"。
+- `runner.advance()` 从「数组顺序 +1」改为「按当前节点出口查边」；`node_index` 不再能定位 DAG 位置，
+  改为按 `(run_id, node_id)` 定位——**这是对 2.4 已验收面的改动**，于是 2.4-05（断点续跑）与
+  2.4-06（幂等不重放）必须在 DAG 下重跑一遍并留新证据（5.10-13），不得沿用旧结论。
+
+#### 5.10.4 算子（operator）是唯一登记处
+
+`OperatorDescriptor = { kind, category, titleKey, effect, params: ZodType, outputs[], icon }`。
+画布左侧调色板按 `category` 分组列出、节点卡片渲染、右侧参数表单、runner 的 `registry.register`
+分派四处**都从这一张表派生**；`kind` 与 2.4 的执行器名、5.1 的 `AgentTool.id` 对齐
+（同一能力在对话里是工具、在画布上是算子，不接受两套名字，见 AGENTS.md §2.5/§5.9）。
+`titleKey`/表单标签/校验文案全部走 `workflow.operator.*` 与 `workflow.canvas.*`，zh-CN 与 en 齐备才有 lint 通过。
+
+#### 5.10.5 运行态与编辑态是同一张图
+
+编辑态可拖可连线可改参数；点「运行」后画布切只读并叠加状态色（pending/running/done/failed/skipped），
+状态来源就是 `workflow/progress` 事件，不轮询；点节点弹出该节点的参数、attempts、耗时与 2.4 的证据文件。
+接管点（`requiresHuman` / 外发未观察完成）在图上必须显眼——这是 2.4 遗留的「接管点只在工作流视图可见」
+的正面回应，画布成为该真相的唯一渲染面之一，而不是再造一条横幅。
+
+#### 5.10.6 持久化与校验
+
+自定义计划落 SQLite 新表 `workflow_plans(id, revision, graph_json, fingerprint, updated_at)`，
+经 `@auto-cc/core` 的既有单一连接（不新建第二套存储，§2.7）；内置 `boss-basic` 仍来自代码。
+保存前在**系统边界**校验（§2.6）：未知 kind、必填参数缺失、边指向不存在的节点或句柄、
+有环、多个源点、外发节点缺 target 或未登记 gate 策略——逐条报「第几个节点为什么不行」，
+不得只回"图不合法"。撤销重做是画布级命令栈（react-flow 不提供，自建）。
+
+#### 5.10.7 与前端规范的三处硬约束
+
+1. **样式**：`@xyflow/react/dist/style.css` 必须整体引入，否则画布不渲染。这是 AGENTS.md §5.2 的
+   第三方库样式例外，需在全局入口引一次并在 spec 记录；节点内部样式一律 Tailwind utility，
+   禁止再写 `.css`。
+2. **图标**：算子图标只从 lucide-react 选（§5.3）；选不到合适图标时按 §5.4 列 2–3 个候选并询问，
+   不自绘 SVG。
+3. **不碰 Node**：画布在渲染层，只经 `window.autoCC` 白名单读写计划与订阅事件（§5.8），
+   新增的 `workflow.graph.*` service 方法必须进 `shared/bridge.ts` 白名单，不开万能透传。
+
+#### 5.10.8 本片明确不做
+
+不做录制→自动生成工作流；不做子工作流/嵌套图；不做循环与回边；不做云端共享与多人协同编辑；
+不做画布上的拖拽数据映射（变量插值 `{{node.output}}` 属 P5 之后的独立决策，理由同 5.10.3 的
+「不建第二套字符串基础设施」）。
+
 ---
 
 ## 6. 测试策略
@@ -178,7 +262,7 @@ AgentTool = {
 | 5.6 | 会话持久化与压缩：关键事实白名单、PII 脱敏                               | spec 5.6 全绿                                       | 5.2               |
 | 5.7 | 全链路串联与调度：①→⑥ 端到端 + 定时触发 + 重试策略                       | spec 5.7 全绿（fixture 端到端截图；真实平台 `[!]`） | 5.1~5.6 / P3 / P4 |
 | 5.8 | 指标看板：漏斗与额度消耗可视化                                           | spec 5.8 全绿                                       | 5.7 / 1.9         |
-| 5.9 | 发布与升级通道：三端产物、更新检查不违反零首启动下载、`LICENSES.md` 收口 | spec 5.9 全绿                                       | 5.7 / 1.7         |
+| 5.9 | 发布与升级通道：三端产物、更新检查不违反零首启动下载、`LICENSES.md` 收口 | spec 5.9 全绿                                       | 5.7 / 1.7         |     | 5.10 | 工作流画布编辑器：@xyflow 算子图、单一算子注册表、DAG 分支/汇聚、编辑态与运行态同图 | spec 5.10 全绿（画布截图）**且 2.4-05/06 在 DAG 下重验通过** | 5.4 / 2.4 / 1.10 |
 
 **P5 完成定义**：M6 / M6b 达成（对话主界面内跑通全链路，额度闸门可演示），且 spec 每条为 PASS
 或有记录在案的 BLOCKED。
@@ -190,5 +274,7 @@ AgentTool = {
 - 不做无人值守下的自由对话任务（调度只跑已保存工作流）。
 - 不做自动登录、验证码识别、指纹/UA 伪装、多账号池（主计划 §8 一贯立场）。
 - 不做对外 MCP server / 开放 API。
-- 不引入外部编排框架与重型图表库。
+- 不引入外部编排框架与重型图表库（D3/ECharts/AntV 一类）。**已按 5.10 开这一条例外**：
+  `@xyflow/react`（MIT，纯画布交互层，非数据可视化图表库）因用户明确要求算子图编辑器而引入，
+  除此之外不引第二个图库。
 - 不做云端会话同步 / 多设备续聊（SaaS 化时另立计划）。
