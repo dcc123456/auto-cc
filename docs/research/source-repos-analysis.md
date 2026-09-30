@@ -8,11 +8,16 @@
 网络前提：本机 `git clone` GitHub 与 GitHub Releases 直连不可用（`Recv failure: Connection was reset`）。
 改用 codeload 拉取默认分支源码 tarball 并解包，得到三份可完整读取的工作副本 `[实测]`：
 
-| 仓库                        | 默认分支 | 本地路径（取证副本）                                              |
-| --------------------------- | -------- | ----------------------------------------------------------------- |
-| `dcc123456/canva-pdf`       | `main`   | `D:\works\deep-seek-workspace\.research-repos\src\canva-pdf-main` |
-| `dcc123456/browser-copilot` | `main`   | `...\src\browser-copilot-main`                                    |
-| `dcc123456/ai-resume`       | `master` | `...\src\ai-resume-master`                                        |
+| 仓库                        | 默认分支 | 本地路径（取证副本）                                                    |
+| --------------------------- | -------- | ----------------------------------------------------------------------- |
+| `dcc123456/canva-pdf`       | `main`   | `D:\works\deep-seek-workspace\.research-repos\src\canva-pdf-main`       |
+| `dcc123456/browser-copilot` | `main`   | `D:\works\deep-seek-workspace\.research-repos\src\browser-copilot-main` |
+| `dcc123456/ai-resume`       | `master` | `D:\works\deep-seek-workspace\.research-repos\src\ai-resume-master`     |
+
+**`browser-copilot` 后续多了一份副本** `[实测 2026-09-30]`：`D:\works\deep-seek-workspace\browser-copilot`
+是 `git clone`（HEAD `984cf3d`，含 `.git` 与 `node_modules`），比上表的 tarball 解包副本更新。
+两份内容会漂移，**下文引用的 `文件:行` 只对 git clone 那一份有效**；引用时必须写清是哪一份，
+不要用一份的行号去解释另一份。
 
 这三份副本是**只读参考**，永不作为依赖引入 auto-cc，也不参与 auto-cc 的构建。
 `docs/research/` 之下不复制其源码；引用时只写路径与行号。
