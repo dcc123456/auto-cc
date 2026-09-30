@@ -7,7 +7,7 @@
  * 幂等靠**唯一索引 + UPSERT**，不靠「先查再插」：后者在两步之间页面又跳一次就会插出两行，
  * 而且每条都要多一次读（spec 2.3-04 要的「同一岗位在库里只有一行」必须由数据库来说）。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, asApp, asSqlInt, Service, type Context } from '@auto-cc/core';
 import type { JobListResultView, JobRowView, JdStoreStatusView, SalaryView } from '@auto-cc/shared';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
@@ -152,10 +152,6 @@ function parseRequirementsJson(raw: string): string[] {
   }
 }
 
-/** node:sqlite 读出的整数可能是 `bigint`，在出口处统一收成 number。 */
-const asInt = (value: number | bigint | null): number | null =>
-  value === null || value === undefined ? null : Number(value);
-
 /** 把数据库行转成跨进程视图。 */
 function toRowView(row: JobRow): JobRowView {
   return {
@@ -172,10 +168,10 @@ function toRowView(row: JobRow): JobRowView {
     description: row.description,
     requirements: parseRequirementsJson(row.requirements_json),
     postedText: row.posted_text,
-    postedAt: asInt(row.posted_at),
+    postedAt: asSqlInt(row.posted_at),
     sourceUrl: row.source_url,
     capturedAt: Number(row.captured_at),
-    detailCapturedAt: asInt(row.detail_captured_at),
+    detailCapturedAt: asSqlInt(row.detail_captured_at),
   };
 }
 
