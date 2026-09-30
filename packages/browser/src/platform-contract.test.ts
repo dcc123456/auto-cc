@@ -16,6 +16,8 @@ import { errorDetails } from './test-doubles.js';
  *
  * `capture` 与 `search` 是 2.3 起必填的两节，但它们是**跟随定位表**生成的：用例替换整个
  * `locators` 时不必同时改抓取声明，否则每条报错用例都要重复写一遍引用关系（噪音会盖掉被检的那一项）。
+ * `capabilities` 默认只声明 `search` 同理——挂了 `chat` 就必须同时挂出 `chat` 段（2.5-05 的一致性检查），
+ * 那些与它无关的报错用例不该被这条问题污染。
  * @param overrides 覆盖项（未知键会被 zod 拒收，所以这里保持宽松）
  * @returns 可以直接交给 `parseKnowledgePack` 的未知值
  */
@@ -24,7 +26,7 @@ function minimalPack(overrides: Record<string, unknown> = {}): Record<string, un
     platform: 'boss',
     displayName: 'BOSS 直聘',
     startUrl: 'https://www.zhipin.com',
-    capabilities: ['search', 'chat'],
+    capabilities: ['search'],
     locators: {
       searchInput: {
         description: '关键词输入框',
@@ -50,7 +52,6 @@ describe('知识包通过校验（spec 2.2-08）', () => {
   it('一份合规的知识包原样落地，缺省的节奏参数由 schema 补齐', () => {
     const pack = parseKnowledgePack(
       minimalPack({
-        capabilities: ['search'],
         fieldOrder: [],
         locators: {
           greetButton: {
@@ -267,6 +268,86 @@ describe('结构与语义分层报错（spec 2.2-08）', () => {
       expect(errorDetails(error).problems).toEqual([
         'zebraLocator：候选 0（testId）：属性名非法（空）',
         'alphaLocator：候选 0（css）：缺少 value',
+      ]);
+    }
+  });
+});
+
+/** 一份配齐的会话页声明，用例只在要写坏某一项时替换它。 */
+const chatSection = {
+  entryPath: '/chat',
+  targetParam: 'targetId',
+  input: 'chatInput',
+  sendButton: 'chatSend',
+  statusLine: 'chatStatus',
+  sentPattern: '已送达服务端',
+  messageItem: 'chatMessage',
+  messageIdAttribute: 'data-message-id',
+  directionAttribute: 'data-direction',
+  inboundValue: 'inbound',
+};
+
+describe('会话页知识（spec 2.5-05）', () => {
+  /**
+   * 造一份带完整会话页知识的知识包：四个被 `chat` 段引用的定位名与那一段本身。
+   * @param overrides 覆盖项（用于把其中一处写坏）
+   * @returns 交给 `parseKnowledgePack` 的未知值
+   */
+  function chatPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    /**
+     * 造一条只写 css 的定位声明（会话页控件的候选顺序不是本条验收的对象）。
+     * @param many 页面里有多个这样的节点（消息项）还是只有一个
+     * @returns 合法的定位声明
+     */
+    const pageLocator = (many: boolean) => ({
+      description: '会话页节点',
+      cardinality: many ? 'many' : 'single',
+      candidates: [{ strategy: 'css', value: '.node' }],
+    });
+    return minimalPack({
+      capabilities: ['search', 'chat', 'readReplies'],
+      locators: {
+        searchInput: pageLocator(false),
+        chatInput: pageLocator(false),
+        chatSend: pageLocator(false),
+        chatStatus: pageLocator(false),
+        chatMessage: pageLocator(true),
+      },
+      chat: chatSection,
+      ...overrides,
+    });
+  }
+
+  it('会话页知识配齐时原样落地，适配器读到的就是知识包写的', () => {
+    const pack = chatPack();
+    expect(pack.chat).toMatchObject({
+      targetParam: 'targetId',
+      statusLine: 'chatStatus',
+      sentPattern: '已送达服务端',
+      messageItem: 'chatMessage',
+      inboundValue: 'inbound',
+    });
+  });
+
+  it('声明了 chat / readReplies 却没有 chat 段：加载时就报错，适配器拿不到猜出来的选择器', () => {
+    try {
+      parseKnowledgePack(minimalPack({ capabilities: ['search', 'chat'] }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'chat：capabilities 含 chat / readReplies，但知识包没有 chat 段（页面知识不能靠猜）',
+      ]);
+    }
+  });
+
+  it('chat 段引用了不存在的定位名时逐条点名是哪一处', () => {
+    try {
+      parseKnowledgePack(chatPack({ chat: { ...chatSection, statusLine: 'ghostStatus', input: 'ghostInput' } }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'chat.input：引用了不存在的定位名「ghostInput」',
+        'chat.statusLine：引用了不存在的定位名「ghostStatus」',
       ]);
     }
   });

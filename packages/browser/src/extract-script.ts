@@ -121,7 +121,9 @@ export function buildExtractScript(
       const scope = keep[index];
       const readings = [];
       for (const field of fields) {
-        const match = scan(scope, field.candidates)[0] || null;
+        // scope 为 self 时读容器自身：一条消息的 id / 方向 / 正文就挂在那个节点上，
+        // 而子树查找永远不会返回容器本身（spec 2.5-07 的读法）。
+        const match = field.scope === 'self' ? scope : scan(scope, field.candidates)[0] || null;
         if (!match) {
           readings.push({ name: String(field.name), matched: false, text: '', attribute: null });
           continue;

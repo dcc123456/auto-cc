@@ -185,6 +185,18 @@
       "experience": "experience"
     }
   },
+  "chat": {
+    "entryPath": "/chat",
+    "targetParam": "targetId",
+    "input": "chatInput",
+    "sendButton": "chatSendButton",
+    "statusLine": "chatStatus",
+    "sentPattern": "已送达服务端",
+    "messageItem": "replyItem",
+    "messageIdAttribute": "data-message-id",
+    "directionAttribute": "data-direction",
+    "inboundValue": "inbound"
+  },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"],
   "pacing": {
     "minActionGapMs": 5000,

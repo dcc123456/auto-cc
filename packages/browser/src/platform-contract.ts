@@ -82,6 +82,39 @@ export const knowledgePackSchema = z.strictObject({
   search: z.strictObject({
     params: searchParamsSchema,
   }),
+  /**
+   * 打招呼与对话的页面声明（2.5-d）。缺段即「这个平台还没有会话页知识」，
+   * 适配器据此以结构化失败退出，而不是拿一套猜出来的选择器去点真实站点。
+   */
+  chat: z
+    .strictObject({
+      /** 会话页相对路径（按 `startUrl` 折算）；省略就在当前已打开的页面上动手（真实平台从岗位卡进会话） */
+      entryPath: z.string().min(1).optional(),
+      /**
+       * 会话页地址上表示「和谁聊」的查询参数名。
+       *
+       * 有了它，`chat(jobId)` / `readReplies(jobId)` 才是按目标切换会话；没有它就只能整页读同一个线程，
+       * 那时把读数写成传入的 jobId 就是假证据——所以适配器在缺这个键时只许在「当前页就是该会话」时用。
+       */
+      targetParam: z.string().min(1).optional(),
+      /** 输入框定位名 */
+      input: z.string().min(1),
+      /** 发送按钮定位名 */
+      sendButton: z.string().min(1),
+      /** 发送状态行定位名：`sent` 由它回读，不是由「点过了」推断 */
+      statusLine: z.string().min(1),
+      /** 状态行里表示「已送达」的字样（各站点文案不同，所以是数据不是代码） */
+      sentPattern: z.string().min(1),
+      /** 一条消息项的定位名（读回复时的容器） */
+      messageItem: z.string().min(1),
+      /** 消息项上携带平台侧稳定标识的属性名，落库时按它去重 */
+      messageIdAttribute: z.string().min(1),
+      /** 消息项上区分方向的属性名 */
+      directionAttribute: z.string().min(1),
+      /** `directionAttribute` 里表示「对方发的」那个值，其余值都算自己发的 */
+      inboundValue: z.string().min(1),
+    })
+    .optional(),
   /** 抓取字段的声明顺序：列表页字段顺序变了也只改这份数据。 */
   fieldOrder: z.array(z.string().min(1)).default([]),
   pacing: z
@@ -126,6 +159,21 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
         problems.push(`capture.${section}.${field.name}：引用了不存在的定位名「${field.locator}」`);
       }
     }
+  }
+  // 会话页的四处定位名同理：拼错的名字必须在加载时发现，而不是等打招呼时点到一个不存在的按钮。
+  const chat = parsed.data.chat;
+  if (chat) {
+    for (const [key, name] of [
+      ['input', chat.input],
+      ['sendButton', chat.sendButton],
+      ['statusLine', chat.statusLine],
+      ['messageItem', chat.messageItem],
+    ] as const) {
+      if (!locatorNames.has(name)) problems.push(`chat.${key}：引用了不存在的定位名「${name}」`);
+    }
+  } else if (parsed.data.capabilities.some((item) => item === 'chat' || item === 'readReplies')) {
+    // 声明了会话能力却没有会话知识 = 到了真实页面上只能靠猜，所以这里就判包不合法。
+    problems.push('chat：capabilities 含 chat / readReplies，但知识包没有 chat 段（页面知识不能靠猜）');
   }
   if (problems.length > 0) {
     throw new AppError(
@@ -196,7 +244,16 @@ export type ReplyMessage = {
   /** 发送方角色：招聘者或求职者自己 */
   from: 'recruiter' | 'self';
   text: string;
+  /** 读到这行的时刻（毫秒）：页面通常不给精确时间，落库用它而不是猜一个 */
   at: number;
+  /**
+   * 页面自带的稳定标识（`chat.messageIdAttribute` 读出来的属性值）。
+   *
+   * 它是 2.5-07 去重的唯一依据：真实平台不给游标，app 每次都是全量读可见的消息，
+   * 只有这个 id 能区分「同一条又看见一次」与「对方又发了一条」。页面上没带就为 null
+   * （那种行每次都会重新插入，所以知识包必须把属性名配对）。
+   */
+  externalId: string | null;
 };
 
 /**

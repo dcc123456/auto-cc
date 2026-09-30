@@ -113,6 +113,11 @@ export const RENDERER_ALLOWLIST = [
   'jd.capture.status',
   'jd.store.list',
   'jd.store.status',
+  // 2.5 的会话面：三条都是**读**（读页面、读库、读概况），打招呼那条外发口不在这里——
+  // 它必须经 `entitlement.gate`，而闸门在编排层（2.5-e），界面直连适配器就是 1.9-05 要拦的形态。
+  'conversation.store.syncFrom',
+  'conversation.store.list',
+  'conversation.store.status',
   // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
   // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
   'entitlement.gate.check',
@@ -463,6 +468,15 @@ export interface BridgeSignatures {
   /** JD 库概况与 schema 版本（spec 2.3-05 的实测读数）。 */
   'jd.store.status': { args: []; returns: JdStoreStatusView };
   /**
+   * 读某个目标的会话页并落库（spec 2.5-07）。只读动作：不点发送、不进额度闸门，
+   * 所以它可以摆在界面上反复按——第二遍全是 `duplicate` 正是这条验收要的读数。
+   */
+  'conversation.store.syncFrom': { args: [jobId: string, platform?: string]; returns: ConversationSyncView };
+  /** 某个目标已落库的消息，按读取时间升序（默认最近 50 条）。 */
+  'conversation.store.list': { args: [jobId: string, limit?: number]; returns: ConversationListResultView };
+  /** 会话库概况与 schema 版本。 */
+  'conversation.store.status': { args: []; returns: ConversationStatusView };
+  /**
    * 闸门判定（spec 1.9-01 / 1.9-02）。界面只用它显示剩余额度，
    * **放行口是 `entitlement.gate.perform`**，它不在白名单里也不该在：越过账本的外发正是 1.9-05 要拦的形态。
    */
@@ -734,8 +748,15 @@ export interface PlatformRegistryView {
 export interface ExtractFieldSpec {
   /** 字段名（由站点知识包定义，适配器按名取用） */
   name: string;
-  /** 该字段在**容器子树内**的定位候选，声明顺序即优先级 */
+  /** 该字段的定位候选，声明顺序即优先级；`scope:'self'` 时不参与查找，只保留声明形状 */
   candidates: LocateCandidate[];
+  /**
+   * 取值范围（默认 `subtree`）：`subtree` 在容器子树里找，`self` 直接读容器自身。
+   *
+   * `self` 是给「一条消息的 id / 方向 / 正文都挂在那个节点上」的页面用的（spec 2.5-07）——
+   * 容器本身永远不会出现在子树查找的结果里，没有这条路就只能再造一套读页面的实现。
+   */
+  scope?: 'subtree' | 'self';
   /** 要读的属性名（如 `href`）；省略则读元素正文 */
   attribute?: string;
   /** 必填声明：抽取阶段只原样带回，完整率判定归调用方（spec 2.3-01） */
@@ -833,6 +854,58 @@ export interface JdStoreStatusView {
   withDetail: number;
   schemaVersion: number;
   newestSourceUrl: string | null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 2.5 会话消息落库的数据形状
+ * ------------------------------------------------------------------ */
+
+/**
+ * 会话里的一行消息（spec 2.5-07）。
+ *
+ * `text` 是页面原样读到的正文：本地仿站在每条前面加了「对方：/我：」，那也是页面事实，
+ * 入库不替它删——删它要在代码里写死前缀，那是站点知识（AGENTS.md §6 的边界）。
+ */
+export interface ConversationRowView {
+  id: number;
+  platform: string;
+  jobId: string;
+  /** 这条是谁说的：招聘者 / 求职者自己 */
+  from: 'recruiter' | 'self';
+  text: string;
+  /** 页面自带的稳定标识；页面上没有则 null，此时这一行的去重键退到「方向 + 正文摘要」 */
+  externalId: string | null;
+  /** 读到这行的时间戳（毫秒），不是页面给的发送时间 */
+  at: number;
+}
+
+/** `conversation.store.list` 的返回值。 */
+export interface ConversationListResultView {
+  total: number;
+  rows: ConversationRowView[];
+}
+
+/** 一次「读页面 → 落库」的结局（spec 2.5-07 的判据就落在这三个数上）。 */
+export interface ConversationSyncView {
+  platform: string;
+  jobId: string;
+  /** 页面上读到多少行消息 */
+  read: number;
+  /** 本次新增多少行 */
+  inserted: number;
+  /** 本次因为「已经见过」而跳过的行数——第二遍轮询必须全是这个，否则去重没生效 */
+  duplicate: number;
+  at: number;
+}
+
+/** 会话库概况。 */
+export interface ConversationStatusView {
+  total: number;
+  recruiterMessages: number;
+  jobs: number;
+  schemaVersion: number;
+  /** 最近一次读到消息的那个目标；空库为 null */
+  newestJobId: string | null;
 }
 
 /** 一条被跳过的抓取（spec 2.3-08：单条失败不中断整轮）。 */

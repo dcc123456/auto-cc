@@ -100,7 +100,7 @@ function fakeAdapter(
     readReplies: (jobId: string) => {
       calls.push(`readReplies:${jobId}`);
       return Promise.resolve([
-        { platform: id, jobId, from: 'recruiter', text: '方便聊聊吗', at: 2 },
+        { platform: id, jobId, from: 'recruiter', text: '方便聊聊吗', at: 2, externalId: 'reply-1' },
       ] satisfies ReplyMessage[]);
     },
   };
