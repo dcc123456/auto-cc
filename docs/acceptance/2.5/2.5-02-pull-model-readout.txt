@@ -1,0 +1,36 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-7.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-7.js"
+
+{
+  "nodes": [
+    "entitlement=active",
+    "platform-registry=active",
+    "workflow-executors=active",
+    "outbound-greet=active",
+    "platform-boss=active"
+  ],
+  "ent": {
+    "id": "entitlement",
+    "values": {
+      "mode": "unlimited",
+      "dailyLimit": 5
+    },
+    "mounted": true
+  },
+  "logs": [
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 （平台层尚未登记带 chat 的适配器） · 节点执行器已登记 greeting.send",
+    "platform-registry-service | 平台适配器已登记：boss（能力 search / detail / chat / sendResume / readReplies）",
+    "boss-platform-service | BOSS 适配器已登记：知识包 18 条定位声明 · 动作 search / detail / chat / sendResume / readReplies",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "outbound-greet-service | 打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send"
+  ]
+}

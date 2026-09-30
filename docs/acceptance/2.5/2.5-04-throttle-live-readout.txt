@@ -1,0 +1,31 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-10.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-10.js"
+
+{
+  "widened": "throttle 30000/30000",
+  "firstWaitedMs": 0,
+  "secondWaitedMs": 19496,
+  "secondReason": "状态行回读到成功样式「已送达服务端」：第 8 条已送达服务端",
+  "真实耗时ms": 40481,
+  "tsGap": 30000,
+  "rows": [
+    {
+      "id": 6,
+      "target": "3202",
+      "source": "manual:3202",
+      "ts": 1790775674541
+    },
+    {
+      "id": 5,
+      "target": "3201",
+      "source": "manual:3201",
+      "ts": 1790775644541
+    }
+  ],
+  "restored": "restored 45000/150000"
+}

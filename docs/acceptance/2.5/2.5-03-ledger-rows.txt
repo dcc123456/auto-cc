@@ -1,0 +1,80 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-8.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-8.js"
+
+{
+  "opened": "sessions.open(boss) ok",
+  "first": {
+    "ok": true,
+    "value": {
+      "platform": "boss",
+      "jobId": "3001",
+      "reason": "状态行回读到成功样式「已送达服务端」：第 5 条已送达服务端",
+      "ledgerId": 3,
+      "waitedMs": 0,
+      "source": "v1:3001",
+      "origin": "template"
+    }
+  },
+  "retuned": "saveConfig(outbound-throttle 3000/3000) ok",
+  "second": {
+    "ok": true,
+    "value": {
+      "platform": "boss",
+      "jobId": "3002",
+      "reason": "状态行回读到成功样式「已送达服务端」：第 6 条已送达服务端",
+      "ledgerId": 4,
+      "waitedMs": 0,
+      "source": "manual:3002",
+      "origin": "manual"
+    }
+  },
+  "restored": "restored 45000/150000",
+  "ledger": {
+    "total": 4,
+    "rows": [
+      {
+        "id": 4,
+        "action": "greet",
+        "target": "3002",
+        "source": "manual:3002",
+        "run": "harness-25f-1",
+        "ts": 1790775502732
+      },
+      {
+        "id": 3,
+        "action": "greet",
+        "target": "3001",
+        "source": "v1:3001",
+        "run": "harness-25f-1",
+        "ts": 1790775491937
+      },
+      {
+        "id": 2,
+        "action": "greet",
+        "target": "2002",
+        "source": "v1:2002",
+        "run": "harness-25e-2",
+        "ts": 1790774350161
+      },
+      {
+        "id": 1,
+        "action": "greet",
+        "target": "1001",
+        "source": "manual:1001",
+        "run": "harness-25e-1",
+        "ts": 1790774278538
+      }
+    ]
+  },
+  "greetLogs": [
+    "打招呼编排就绪：额度键 greet · 当前可打招呼平台 （平台层尚未登记带 chat 的适配器） · 节点执行器已登记 greeting.send",
+    "打招呼已发出并落账：目标 3001 · 等待 0ms · 来源 v1:3001 · 账本行 3",
+    "打招呼编排就绪：额度键 greet · 当前可打招呼平台 boss · 节点执行器已登记 greeting.send",
+    "打招呼已发出并落账：目标 3002 · 等待 0ms · 来源 manual:3002 · 账本行 4"
+  ]
+}

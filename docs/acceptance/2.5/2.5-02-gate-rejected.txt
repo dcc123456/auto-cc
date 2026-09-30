@@ -1,0 +1,60 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-9.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-9.js"
+
+{
+  "tuned": "saveConfig(entitlement daily/2) ok",
+  "quota": {
+    "ok": false,
+    "error": {
+      "code": "QUOTA_EXCEEDED",
+      "message": "动作 greet 今日 2 次额度已用完",
+      "path": "outbound.greet",
+      "details": {
+        "action": "greet",
+        "remaining": 0
+      },
+      "stack": "AppError: 动作 greet 今日 2 次额度已用完\n    at Proxy.perform (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32850:13)\n    at Object.apply (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:7685:40)\n    at Gateway.invoke (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32127:34)\n    at D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32165:90\n    at Session.<anonymous> (node:electron/js2c/browser_init:1:118190)\n    at Session.emit (node:events:514:28)"
+    }
+  },
+  "blacklist": {
+    "ok": false,
+    "error": {
+      "code": "OUTBOUND_FORBIDDEN_CONTENT",
+      "message": "文案命中禁发内容（第 1 条规则），已阻止发送",
+      "path": "outbound.script",
+      "details": {
+        "rule": 1,
+        "origin": "manual"
+      },
+      "stack": "AppError: 文案命中禁发内容（第 1 条规则），已阻止发送\n    at Proxy.assertSendable (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32642:13)\n    at Object.apply (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:7685:40)\n    at Proxy.perform (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32846:19)\n    at Object.apply (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:7685:40)\n    at Gateway.invoke (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32127:34)\n    at D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32165:90\n    at Session.<anonymous> (node:electron/js2c/browser_init:1:118190)\n    at Session.emit (node:events:514:28)"
+    }
+  },
+  "repeat": {
+    "ok": false,
+    "error": {
+      "code": "OUTBOUND_ALREADY_SENT",
+      "message": "目标 3001 在本次运行里已经打过招呼，不再重复发送",
+      "path": "outbound.greet",
+      "details": {
+        "jobId": "3001",
+        "workflowRunId": "harness-25f-1"
+      },
+      "stack": "AppError: 目标 3001 在本次运行里已经打过招呼，不再重复发送\n    at Proxy.perform (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32815:13)\n    at Object.apply (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:7685:40)\n    at Gateway.invoke (D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32127:34)\n    at D:\\works\\deep-seek-workspace\\auto-cc\\packages\\main\\dist\\main.cjs:32165:90\n    at Session.<anonymous> (node:electron/js2c/browser_init:1:118190)\n    at Session.emit (node:events:514:28)"
+    }
+  },
+  "gateDecision": {
+    "allowed": false,
+    "remaining": 0,
+    "reason": "动作 greet 今日 2 次额度已用完"
+  },
+  "total": {
+    "before": 4,
+    "after": 4
+  },
+  "restored": "restored unlimited/5"
+}

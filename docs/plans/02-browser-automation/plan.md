@@ -791,3 +791,80 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
 **留给 2.5-08 / 2.5-e 的前置**（本轮不夹带，见 §1.4）：入库正文带着 fixture 的「我：/对方：」前缀，
 因为方向标记和正文在同一个文本节点里、用 `scope:'self'` 一次读全。
 要干净，得同时动 fixture 模板、知识包 `chat` 段声明和适配器解析三处——放到 2.5-08 做已回复标记时一并处理。
+
+### 12.12 2.5-e 的落点设计（写代码前定稿）
+
+这一片把 §12.3 表里「发送编排（闸门→节流→发送→记账）」那一行落地成 `outbound.greet`，
+并一次补齐 2.5-02/03/04/09/10/13 的 C 半边。
+
+1. **依赖方向这条必须先解决，否则第一行代码就是错的**。
+   `outbound.greet` 要调平台适配器，而适配器在 `platform.registry` 后面（`packages/browser`）；
+   让 outbound 去 import `@auto-cc/plugin-browser` 就新开一条 L2→L2 横向边（§4.1），
+   正是 §12.10 第 1 条用来否决「会话表放 outbound」的同一个理由。
+   本仓对这个问题**已有解法**：`workflow.executors` 的契约面住在 `@auto-cc/core`
+   （`WorkflowExecutorRegistry` + `executorRegistryOf(ctx)`），能力包只 import core 就能往 L3 的登记处挂东西，
+   `core/src/index.ts:78-86` 的注释把理由写得很清楚。
+   所以打招呼渠道照同一个形状办：core 里声明 `GreetChannel` / `GreetChannelRegistry`，
+   登记处由 `outbound.greet` 自己实现，`platform-boss` 在 init 里 `register('boss', …)`。
+   **否决的替代方案**：(a) 编排放 platform-boss —— 那是把平台无关的计量逻辑复制给第二个平台做准备（§2.2）；
+   (b) outbound 直接依赖 browser —— 打破 §4.1；(c) 把 `PlatformAdapter` 整份契约搬进 core ——
+   core 是 L0，不该认识「岗位」「会话页」这些领域概念，只搬打招呼需要的那一个方法。
+2. **账本同时是「幂等表」和「节流用的钟」，不新增任何状态存储**（§2.7 第二套状态存储禁令）。
+   2.5-13 要的「同 run 同 target 不重发」= `usage_ledger` 上按 `(action, target_id, workflow_run_id)` 数一行；
+   2.5-04 要的「连续间隔」= 拿 `MAX(ts) WHERE action='greet'` 与 `throttle.nextGapMs()` 比，不足就 `sleep` 差值。
+   两条都是给 `UsageLedgerService` **加只读查询**（`countFor` / `latestActionTs`），
+   不建表、不加列、不在内存里留「已发送集合」——spec 2.5-13 的 grep 判据要的是「代码里没有那个集合」，
+   不是「没有查询」。
+3. **`sent:false` 不能落账**：适配器返回 false 时编排层在 `gate.perform` 的 task 里抛
+   `OUTBOUND_NOT_DELIVERED`，于是闸门那侧「只有 task 成功才记账」（`gate.ts:66-68`）自动成立——
+   页面上没发出去的东西不算用户额度。同理黑名单在校验阶段就拒，连 task 都不进。
+4. **2.5-09 的来源写进已有两列**（§12.3 最后一行）：`source` 记 `${scriptVersion}:${jdId}`。
+   `gate.perform` 现在是 `record({action, ...context})`，所以给 `ActionContext` 补一个可选 `source`
+   就能透传到 `LedgerDraft`（那两列早就在表里，spec 1.9-08 预留的），不改建表、不加迁移。
+5. **`greeting.send` 由 `outbound.greet` 自己登记**，和 `jd.capture` 同一个手法
+   （init 里 `executorRegistryOf(ctx)?.register(...)` + `ctx.effect` 注销）。
+   这样「界面点一次发送」和「工作流跑一次发送」是同一个入口（§5.9 禁止两处各长一套），
+   区别只在 `workflowRunId` 有没有值。
+6. **注册表用「最后写入者说话」**：插件能被单独重启（1.5），第二次 `register('boss')` 必须覆盖而不是报错，
+   否则重启后的平台包永远拿不回自己的渠道——这条抄 `WorkflowExecutorRegistry` 的既定决策。
+7. **配置**：`outbound.greet` 自己只有 `enabledAction`（默认 `greet`）这种真开关；
+   区间、日上限、黑名单、模板版本继续留在各自服务里（§12.4），本编排一层不复制参数。
+8. **V 半边不在这一片**：2.5-02 的「界面显示拒绝原因」要有 UI 才算，那是 2.5-f 的活；
+   这一片交的是「拒绝发生在发送之前 + 不落账 + 对端计数不动」这条能从 IPC 层看到页面的部分。
+
+### 12.13 2.5-e 收口记录（发送编排这条通道，2026-09-30）
+
+实现与 §12.12 有四处不同，前两处是**设计被实测推翻**，不是执行偏差。
+
+1. **第 1、6 条的「`outbound.greet` 自己存一张渠道表、平台包 init 时推进来」作废，改成现问现取的拉模型。**
+   起因是第一次活体跑就撞上：页面 `plugins.saveConfig('entitlement', …)` 之后，
+   打招呼从此一律 `OUTBOUND_CHANNEL_MISSING { registered: [] }`，直到重启才恢复。
+   根因不在配置，而在装配生命周期——**上游任一插件改配置会连带重建它的下游**，
+   `outbound.greet` 的 `[Service.init]` 重跑、构造器里的 `Map` 被换成空表，
+   而 `platform-boss` 的 init 不会因此再跑一遍，所以没人往表里补登记。
+   现在的形状：core 声明 `GreetChannelSource`（`greetChannel(platform)` / `greetablePlatforms()`），
+   由 `platform.registry` 实现——适配器是唯一事实来源，`chat` 能力就是渠道，
+   编排层每次外发按名字现问，**不持有任何平台状态**。
+   这条同时修掉一处骗人的读数：就绪日志从前读自己那张表，改配置后就在装配面板上播报
+   「已登记渠道（暂无）」；现在每次挂载都重新问登记处，`2.5-02-pull-model-readout.txt`
+   里那七行「当前可打招呼平台 boss」就是重建前后各读一遍的结果，
+   紧接着的第二条外发成功并落账（`2.5-03-ledger-rows.txt`）。
+   推论留给后面所有切片：**任何"由别的包在 init 时推给我"的注册表都有这个坑**，
+   要推就得同时能重放，否则一律改成拉。
+2. **`GreetChannel.send` 丢掉了适配器返回的 `ledgerKey`。** 计量凭证由 `entitlement.gate` 落账时生成，
+   适配器不参与算数；留着它只会让人以为外发侧要自己配对账（`platform-registry.test.ts` 有一条
+   断言投影出的渠道只回 `{sent, reason}`）。
+3. **第 7 条的 `enabledAction` 没做**：动作名 `greet` 与额度键、账本 `action`、幂等键是同一个字符串，
+   做成可配置等于允许三者不一致——那是给自己造对不上账的机会。`outbound.greet` 的配置因此是空 schema。
+4. **`cordis.yml` 里 `workflow-executors` 挪到 `outbound-greet` 之前**，否则节点执行器登记不上
+   （`greeting.send` 会在跑工作流时报未登记 kind）。另外两处小改动：`OutboundGreetService.executeNode`
+   得是 public（测试要直接打节点路径），`assertNotYielded` 从 runner 提到 core（greet 与 runner 共用，
+   §2.2 第二次出现就抽）。
+
+实测口径记录：2.5-02 原文写「把额度切成 0 次」，但 `gateSchema` 的 `dailyLimit.min(1)` 让 0 在界面上不可达，
+等价做法是切成 2 次、打到第 3 次（`2.5-02-gate-rejected.txt`）。频控那条把区间收成 30s 单点才好断言，
+实测 `waitedMs=19496`（第一条发送自身耗掉约 10s）、账本 ts 差恰好 30000。
+
+本机关验时踩到的环境事实（已同步进 AGENTS.md §9）：热改配置会重建下游并重跑 `[Service.init]`；
+页面操作前必须先 `sessions.open`；harness 的 eval 不支持顶层 await；选应用页要显式 `--url 5173`；
+`shot --reveal` 只查顶层文档，iframe 里的内容得在帧内 `scrollIntoView`。

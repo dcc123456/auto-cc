@@ -1,0 +1,77 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-13.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/probe-25e-13.js"
+
+{
+  "views": [
+    "chat",
+    "workflow",
+    "diagnostics"
+  ],
+  "greetRowCount": 6,
+  "greetRows": [
+    {
+      "id": 6,
+      "action": "greet",
+      "targetId": "3202",
+      "workflowRunId": "harness-25f-3",
+      "ts": 1790775674541,
+      "source": "manual:3202",
+      "remoteRef": null
+    },
+    {
+      "id": 5,
+      "action": "greet",
+      "targetId": "3201",
+      "workflowRunId": "harness-25f-3",
+      "ts": 1790775644541,
+      "source": "manual:3201",
+      "remoteRef": null
+    },
+    {
+      "id": 4,
+      "action": "greet",
+      "targetId": "3002",
+      "workflowRunId": "harness-25f-1",
+      "ts": 1790775502732,
+      "source": "manual:3002",
+      "remoteRef": null
+    },
+    {
+      "id": 3,
+      "action": "greet",
+      "targetId": "3001",
+      "workflowRunId": "harness-25f-1",
+      "ts": 1790775491937,
+      "source": "v1:3001",
+      "remoteRef": null
+    },
+    {
+      "id": 2,
+      "action": "greet",
+      "targetId": "2002",
+      "workflowRunId": "harness-25e-2",
+      "ts": 1790774350161,
+      "source": "v1:2002",
+      "remoteRef": null
+    },
+    {
+      "id": 1,
+      "action": "greet",
+      "targetId": "1001",
+      "workflowRunId": "harness-25e-1",
+      "ts": 1790774278538,
+      "source": "manual:1001",
+      "remoteRef": null
+    }
+  ],
+  "gate": {
+    "allowed": true,
+    "remaining": null,
+    "reason": null
+  }
+}
