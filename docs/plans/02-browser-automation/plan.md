@@ -888,18 +888,18 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
 2. **「已回复」由查询导出，不写回 `jobs`**（2.5-14 的原句）。具体形状是给 `jd.store.list` 的 SQL
    挂一个**分组派生表左连**，而不是直接 join 明细：
    `LEFT JOIN (SELECT platform, job_id, COUNT(*) AS inbound FROM conversation_messages
-   WHERE direction = 'recruiter' GROUP BY platform, job_id) reply ON reply.platform = jobs.platform
-   AND reply.job_id = jobs.job_id`。
+WHERE direction = 'recruiter' GROUP BY platform, job_id) reply ON reply.platform = jobs.platform
+AND reply.job_id = jobs.job_id`。
    两个细节不能省：
    - **库里方向存的是 `'recruiter'` / `'self'`**，不是页面上的 `inbound`——页面属性值由知识包
      `chat.inboundValue` 声明，适配器 `readReplies` 已经把它翻译过一次（`adapter.ts:414`），
      查询侧再认 `inbound` 就会永远数到 0。
    - **必须走派生表**：`jobs` 的唯一键是 `(source_url, title)`，`(platform, job_id)` 不唯一，
      直接 join 明细会让一条 JD 长出 N 行、列表行数与 `total` 当场对不上。
-   `JobRowView` 因此加 `replied: boolean` + `inboundCount: number`（不叫 `hasReply`，名字要对上 spec 的「已回复」）。
-   排序改成 **已回复优先，其余仍按 `captured_at DESC, id DESC`**——这一条同时兑现 2.5-08 后半句
-   「后续步骤优先这些目标」（投递在 2.6，本轮先把「谁该先做」这件事在列表顺序上说清楚）。
-   `jd-store.test.ts:268` 那条倒序断言不受影响（两行都未回复），新增一例钉住「旧但已回复」在「新而未回复」之前。
+     `JobRowView` 因此加 `replied: boolean` + `inboundCount: number`（不叫 `hasReply`，名字要对上 spec 的「已回复」）。
+     排序改成 **已回复优先，其余仍按 `captured_at DESC, id DESC`**——这一条同时兑现 2.5-08 后半句
+     「后续步骤优先这些目标」（投递在 2.6，本轮先把「谁该先做」这件事在列表顺序上说清楚）。
+     `jd-store.test.ts:268` 那条倒序断言不受影响（两行都未回复），新增一例钉住「旧但已回复」在「新而未回复」之前。
 
 3. **前缀三处一起动**（fixture 模板、知识包、适配器），少动一处就是半新半旧的页面（§12.11 环境事实 2）：
    - `scripts/fixture-server.ts:446` 不再把方向拼进正文，改为渲染一个 `<span data-message-body>` 只装正文，
@@ -908,13 +908,59 @@ P5 的 agent 规划再发一个，届时谁都不是那"一套"。所以本子�
      strictObject，多写键会被拒 ⇒ 加了字段就必须加校验）；
    - `adapter.ts` 读正文改成按 `messageBody` 在容器**子树**里取（默认 `scope:'subtree'`），
      id / direction 仍从容器自身读。
-   连带要改的测试：`adapter.test.ts:374-392`、`conversation-store.test.ts:80/97/135`、
-   `test-doubles.ts:487` 的默认行 `'对方：方便聊聊吗'`。
-   **不写迁移去改历史正文**：dev 库里那几行带前缀的文本是 2.5-d 期间从旧模板读来的页面事实，
-   删它要在应用代码里写死前缀，那正是 §12.10 说过的「把站点知识写进适配器」。验收以重新同步的新行为准。
-   去重键不受影响：fixture 每条消息带 `data-message-id`，`dedupeKeyOf` 走 `id:<externalId>` 分支，
-   只有「页面不给 id」的站点才会因正文变短而换掉 `t:sha1(...)` 键——这一点写进测试注释，别让它变成惊喜。
+     连带要改的测试：`adapter.test.ts:374-392`、`conversation-store.test.ts:80/97/135`、
+     `test-doubles.ts:487` 的默认行 `'对方：方便聊聊吗'`。
+     **不写迁移去改历史正文**：dev 库里那几行带前缀的文本是 2.5-d 期间从旧模板读来的页面事实，
+     删它要在应用代码里写死前缀，那正是 §12.10 说过的「把站点知识写进适配器」。验收以重新同步的新行为准。
+     去重键不受影响：fixture 每条消息带 `data-message-id`，`dedupeKeyOf` 走 `id:<externalId>` 分支，
+     只有「页面不给 id」的站点才会因正文变短而换掉 `t:sha1(...)` 键——这一点写进测试注释，别让它变成惊喜。
 
 4. **新增文案全走 `jd.*` 命名空间并补齐 en**：打招呼按钮、已回复标记、回执行、拒绝原因提示。
    `scripts/check-renderer-conventions.ts`（已挂在 `pnpm lint` 末道）会做两语言包键对齐与插值参数校验，
    所以这里没有「先写中文回头补」的余地（§5.5/5.6）。
+
+### 12.15 2.5-f 收口记录（界面打招呼入口与已回复标记这条通道，2026-09-30）
+
+实现与 §12.14 没有偏差，四条落点原样落地：入口挂在 JD 行上（`[data-action="greet-<jobId>"]`）、
+「已回复」由分组派生表左连导出、前缀三处一起改、新文案全在 `jd.*`。**未新增 service、未加迁移、
+未动 `schemaVersion`**——`boss.json` 多出的 `messageBody` 定位符由 `knowledgePackSchema` 的
+`strictObject` 同步补了校验，所以「加了字段就必须加校验」这条没有留死角。
+
+页面实测拿到的三条读数（都是活体窗口，不是单测）：
+
+1. **2.5-02 V 半边**：先在 unlimited 下点 #1 行的打招呼 → 回执块上屏
+   （`账本行 #1 · 频控等待 0 毫秒 · 来源 v1:1（模板回落）· 页面回读：状态行回读到成功样式「已送达服务端」`，
+   `2.5-02-greet-receipt.png`）；再在装配面板把 entitlement 现改成 `daily/1`（不重启）→ 点 #3 行 →
+   界面红块 `QUOTA_EXCEEDED：动作 greet 今日 1 次额度已用完`（`2.5-02-quota-rejected.png`）。
+   同一时刻 fixture `/api/outbox` 仍是 2 条、`usage.ledger.summary` 的 total 仍是 1：
+   **被拒的那条既没出门也没落账**，这正是 §7.3「外发必经闸门」在界面上的可见面。验完把配置改回
+   unlimited（`remaining` 回到 `null` 即为已恢复），不留一个明天让人困惑的日限额。
+2. **2.5-08**：同步前 5 行全「还没有人回复」（`2.5-08-baseline-unreplied.png`），
+   `conversation.store.syncFrom` 后 #2「对方已回 1 条」、#1「对方已回 2 条」置顶，
+   其余三行沉后（`2.5-08-replied-first.png`）。
+3. **2.5-14 + 前缀**：`2.5-14-joined-readout.txt` 里 1002 线程内 2 条只计 1 → 自己发的行不进计数；
+   二次同步 `duplicate 2` → 去重判据在唯一索引里。三条存储正文 `带方向前缀: false`，
+   帧内 `[data-message-marker]`（「对方：」/「我：」）与 `[data-testid=chat-log-body]`（纯正文）
+   拆分断言见 `2.5-14-frame-dom-assert.txt`。**「投递优先」只兑现到列表取序这一层**，
+   2.6 的投递节点必须消费同一份顺序、不得自己再排一次——spec 里把这句话写进 2.5-08 的验证操作列，
+   不让它变成一个已经打勾的错觉。
+
+本轮新增的环境事实（后面所有 V 类验收都会再撞上，记在这里）：
+
+- **闸门动作名是 `greet`，不是 `outbound.greet`**。`check()` 对未知动作不报错，只会永远返回
+  「一次都没用过」，所以判断「daily 配置是否真的生效」要看 `remaining` 从 `null` 变成数字，
+  而不是看 `allowed`。传错键的 `check` 会给出 `allowed:true, remaining:1` 这种看着像通过、
+  实则什么都没测到的读数。
+- **`shot --reveal` 对比视口还高的元素会直接拒绝截图**（`cdp.ts:286` 只接受「完整可见」或
+  「上下都溢出」两种落位，长面板两头都不沾）。要拍长面板里的一块，reveal 那一块本身
+  （`[data-testid=jd-rows]`、`[data-testid=jd-error]`），别 reveal 整个面板。
+- **reveal 之后布局还会变**：错误块/回执块出现会把内容顶下去，第一张图常常把目标切在上边缘外。
+  读数稳定后再拍一次，别拿第一张当证据。
+- **同源 iframe 的帧内 DOM 从父 target 就能读**（`iframe.contentDocument`），不需要额外的 target
+  或帧定位能力；父页面自身 `querySelectorAll('[data-testid=chat-log-item]')` 是空数组，
+  拿它当「页面没消息」的证据会读出一个假失败。
+- **fixture 的线程与收件箱都在内存里**，重启即清空；而 Git Bash 里 `curl -d '中文'` 发出去的是
+  非 UTF-8 字节，会把整条线程污染成乱码（`/api/reply` 当场回显乱码）。验收脚本一律
+  `--data-binary @file` + `charset=utf-8` 头，中文正文先落文件。
+- 复用检查（§2.4/2.5）：本轮没有新写判定逻辑上界面——徽标只转述 `JobRowView.replied/inboundCount`，
+  回执只转述 `GreetReceiptView`，拒绝只转述 `bridgeError.code + message`；排序只在 SQL 里做一次。
