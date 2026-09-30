@@ -9,11 +9,22 @@
  *
  * 坐标是帧内的 CSS 像素，所以要按祖先帧的 iframe 位置逐层折算成视图坐标才能点准。
  * 认不出某一层时**不猜**：直接宣告折算失败，让调用方退回 DOM 通道并如实标注 `channel: 'dom'`。
+ *
+ * 文件注入走的是另一条 CDP 路（`DOM.setFileInputFiles`）：它不需要坐标，也就不受 iframe 偏移
+ * 折算成败的影响，但必须拿到「节点引用」——四条看着都能用的取路（`selector` / `nodeId` /
+ * `backendNodeId` / `requestNode`）都被本机 spike 否决过，理由写在 plan §13.3 第 4 条，
+ * 只留下 `Runtime.evaluate → objectId → setFileInputFiles` 这一条被实测通过的那一条。
  */
 import type { ElementRect } from '@auto-cc/shared';
 import type { WebContents, WebFrameMain } from 'electron';
 import { ordinalInParent } from './frame-channel.js';
-import { buildIframeRectsScript, toIframeRects, type IframeRect } from './locator-script.js';
+import {
+  buildIframeRectsScript,
+  toIframeRects,
+  toUploadReading,
+  type IframeRect,
+  type UploadReading,
+} from './locator-script.js';
 
 /** 视图坐标里的一个点（CSS 像素，与 CDP 输入同一坐标系）。 */
 export type ViewportPoint = { x: number; y: number };
@@ -235,4 +246,214 @@ export async function viewportPointOf(
 ): Promise<{ point: ViewportPoint; resolved: boolean }> {
   const offset = await frameOffsetsOf(frame);
   return { point: foldFrameOffsets(centerOf(rect), offset.rects), resolved: offset.resolved };
+}
+
+/** 注入文件用的隔离世界名：同一帧重复注入复用同一个世界，探针也留在同一个 `globalThis` 上。 */
+const UPLOAD_WORLD = 'auto-cc-upload';
+
+/** 帧树里的一帧：CDP 只给 id 与地址，后面的取节点都要靠这两个。 */
+export type FrameEntry = { frameId: string; url: string };
+
+/** 一次 CDP 文件注入的结局。 */
+export type UploadInjection = {
+  /** 命令是否一条不落地走通了；至于文件有没有真进控件，看 `reading` */
+  ok: boolean;
+  /** 失败落在哪一步（含被拒的命令原文摘要）；成功时为空串 */
+  error: string;
+  /** 页面自己报上来的读数，`ok` 为 false 时是全零 */
+  reading: UploadReading;
+};
+
+/**
+ * 依次发送 CDP 命令并回传**第一条的响应体**。
+ * @param contents 内核视图句柄
+ * @param command 单条命令
+ * @returns 该命令的回包（CDP 的空回包是 `{}`）
+ * @throws 视图不可用或命令被拒时抛出，由调用方翻成结构化失败
+ */
+async function sendRequest(contents: WebContents, command: CdpCommand): Promise<unknown> {
+  return contents.debugger.sendCommand(command.method, command.params);
+}
+
+/**
+ * 生成文件注入前要开的三个 CDP 域。
+ * @returns `Page` / `Runtime` / `DOM` 三条 enable 命令（取帧树、求值、注入各依赖其一）
+ */
+export function uploadDomainEnableCommands(): CdpCommand[] {
+  return [
+    { method: 'Page.enable', params: {} },
+    { method: 'Runtime.enable', params: {} },
+    { method: 'DOM.enable', params: {} },
+  ];
+}
+
+/**
+ * 生成读整棵帧树的命令。
+ * @returns `Page.getFrameTree` 命令
+ */
+export function frameTreeCommand(): CdpCommand {
+  return { method: 'Page.getFrameTree', params: {} };
+}
+
+/**
+ * 生成「为目标帧建一个我们的执行上下文」的命令。
+ *
+ * `Runtime.evaluate` 不带 `contextId` 只会落在顶层主世界，所以子帧里的控件必须先建隔离世界才取到引用；
+ * spike 实测隔离世界拿到的 objectId 就是页面上那个真节点，站点自己注册的 `change` 监听器照样被触发。
+ * @param frameId 目标帧 id（来自 `frameTreeCommand()` 的回包）
+ * @returns `Page.createIsolatedWorld` 命令
+ */
+export function isolatedWorldCommand(frameId: string): CdpCommand {
+  return { method: 'Page.createIsolatedWorld', params: { frameId, worldName: UPLOAD_WORLD } };
+}
+
+/**
+ * 生成「求值并把结果留成远端对象」的命令（`returnByValue:false` 才有 objectId）。
+ * @param expression 节点引用脚本源码
+ * @param contextId 隔离世界的执行上下文 id
+ * @returns `Runtime.evaluate` 命令
+ */
+export function nodeHandleCommand(expression: string, contextId: number): CdpCommand {
+  return { method: 'Runtime.evaluate', params: { expression, returnByValue: false, contextId } };
+}
+
+/**
+ * 生成把文件塞进某个 `input[type=file]` 的命令。
+ *
+ * 只用 `objectId` 寻址：`selector` 会被当未知参数忽略（回包原文见 plan §13.2 第 2 条），
+ * `nodeId` / `backendNodeId` 需要先 `DOM.getDocument` 才不是无效的 0，四条路里只有这一条实测可用。
+ * @param files 待注入的**绝对路径**数组（一次只有一个，站点多为单选）
+ * @param objectId 目标节点的远端引用
+ * @returns `DOM.setFileInputFiles` 命令
+ */
+export function setFileInputFilesCommand(files: string[], objectId: string): CdpCommand {
+  return { method: 'DOM.setFileInputFiles', params: { files, objectId } };
+}
+
+/**
+ * 生成「在注入时那一个节点上回读文件」的命令。
+ *
+ * 走 `Runtime.callFunctionOn` 而不是重新求值一段脚本：函数体里的 `this` 就是当初那个 objectId，
+ * 于是「注入的控件」与「回读的控件」在类型上就是同一个对象，不可能一个进了 A、另一个读的是 B。
+ * @param objectId 注入时用的远端引用
+ * @param functionDeclaration `buildUploadReadbackFunction()` 产出的函数声明源码
+ * @returns `Runtime.callFunctionOn` 命令
+ */
+export function uploadReadbackCommand(objectId: string, functionDeclaration: string): CdpCommand {
+  return {
+    method: 'Runtime.callFunctionOn',
+    params: { objectId, functionDeclaration, returnByValue: true, awaitPromise: true },
+  };
+}
+
+/**
+ * 钳制 `Runtime.callFunctionOn(returnByValue:true)` 的回包里的函数返回值。
+ *
+ * CDP 把兑现后的值放在 `result.value`，而 `result` 可能因为异常或跨上下文兑现失败而缺席；
+ * 这里只做搬运，字段级的钳制仍归 `toUploadReading`，避免同一个读数被两处各校验一遍。
+ * @param raw CDP 回包
+ * @returns 页面函数 resolve 出来的那个对象；拿不到时为 `{}`（于是读数全零）
+ */
+export function toCallFunctionValue(raw: unknown): unknown {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const result = (value.result ?? {}) as Record<string, unknown>;
+  return result.value ?? {};
+}
+
+/**
+ * 钳制 `Page.getFrameTree` 回包：拍平成「帧 id + 地址」的表，含所有子帧。
+ * @param raw CDP 回包
+ * @returns 由外到内的帧条目；回包畸形时为空数组
+ */
+export function toFrameEntries(raw: unknown): FrameEntry[] {
+  const entries: FrameEntry[] = [];
+  const walk = (node: unknown): void => {
+    const value = (node ?? {}) as Record<string, unknown>;
+    const frame = (value.frame ?? {}) as Record<string, unknown>;
+    if (typeof frame.id === 'string' && typeof frame.url === 'string') {
+      entries.push({ frameId: frame.id, url: frame.url });
+    }
+    if (Array.isArray(value.childFrames)) value.childFrames.forEach(walk);
+  };
+  const tree = ((raw ?? {}) as Record<string, unknown>).frameTree;
+  walk(tree);
+  return entries;
+}
+
+/**
+ * 钳制 `Page.createIsolatedWorld` 回包里的执行上下文 id。
+ * @param raw CDP 回包
+ * @returns 上下文 id；没有就返回 null（建世界失败）
+ */
+export function toIsolatedContextId(raw: unknown): number | null {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  return typeof value.executionContextId === 'number' && isFinite(value.executionContextId)
+    ? value.executionContextId
+    : null;
+}
+
+/**
+ * 钳制节点引用求值的回包。
+ *
+ * 三种「看着像成功、其实什么都能往下走」的形状都判为失败：脚本抛异常、求值结果是 null
+ * （locator 选中的节点已经不在了）、结果不是节点。只有 `subtype === 'node'` 才配拿到 objectId。
+ * @param raw `Runtime.evaluate` 回包
+ * @returns 节点引用，以及拿不到时的一句原因
+ */
+export function toNodeObjectId(raw: unknown): { objectId: string | null; error: string } {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  if (value.exceptionDetails) return { objectId: null, error: '取节点引用的脚本在本帧里抛了异常' };
+  const result = (value.result ?? {}) as Record<string, unknown>;
+  if (result.subtype === 'null') {
+    return {
+      objectId: null,
+      error: '页面里已经没有「定位时选中的那一个」节点（被移除、几何已变，或它不是 input[type=file]）',
+    };
+  }
+  if (result.type !== 'object' || result.subtype !== 'node' || typeof result.objectId !== 'string') {
+    // 回包里的类型字段来自页面，拼进原因之前先各自钳成字符串，免得把对象原样印进日志。
+    const typeName = typeof result.type === 'string' ? result.type : '未知';
+    const subtypeName = typeof result.subtype === 'string' ? result.subtype : '无子类型';
+    return { objectId: null, error: `求值结果不是一个节点（${typeName} / ${subtypeName}）` };
+  }
+  return { objectId: result.objectId, error: '' };
+}
+
+/**
+ * 沿「取帧树 → 建隔离世界 → 取节点引用 → 注入 → 回读」走完一次文件注入（spec 2.6-04）。
+ *
+ * 每一步的失败都翻成读数而不是抛出：这条链上没有任何一步可以降级到 DOM 通道
+ * （`input.files` 是只读的，脚本伪造不出一个真文件），所以调用方拿到的只有「成功 + 页面回读」
+ * 与「失败 + 一句原因」两种结果。
+ * @param contents 内核视图句柄
+ * @param frameUrl 定位读数所在帧的地址（用它去帧树里对号）
+ * @param handleScript `buildNodeHandleScript` 产出的表达式源码
+ * @param filePath 待注入文件的绝对路径
+ * @param readbackFunction `buildUploadReadbackFunction` 产出的函数声明源码
+ * @returns 注入结局与页面回读；不抛异常
+ */
+export async function dispatchUpload(
+  contents: WebContents,
+  frameUrl: string,
+  handleScript: string,
+  filePath: string,
+  readbackFunction: string,
+): Promise<UploadInjection> {
+  const failed = (error: string): UploadInjection => ({ ok: false, error, reading: toUploadReading(null) });
+  if (!ensureAttached(contents)) return failed('调试器挂不上（视图已销毁，或已被别的客户端占用）');
+  try {
+    for (const command of uploadDomainEnableCommands()) await sendRequest(contents, command);
+    const frames = toFrameEntries(await sendRequest(contents, frameTreeCommand()));
+    const frame = frames.find((item) => item.url === frameUrl);
+    if (!frame) return failed(`帧树里已经没有这一帧：${frameUrl || '（无地址）'}`);
+    const contextId = toIsolatedContextId(await sendRequest(contents, isolatedWorldCommand(frame.frameId)));
+    if (contextId === null) return failed(`为帧 ${frame.frameId} 创建隔离世界失败`);
+    const handle = toNodeObjectId(await sendRequest(contents, nodeHandleCommand(handleScript, contextId)));
+    if (!handle.objectId) return failed(handle.error);
+    await sendRequest(contents, setFileInputFilesCommand([filePath], handle.objectId));
+    const readback = await sendRequest(contents, uploadReadbackCommand(handle.objectId, readbackFunction));
+    return { ok: true, error: '', reading: toUploadReading(toCallFunctionValue(readback)) };
+  } catch (error) {
+    return failed(error instanceof Error ? error.message : String(error));
+  }
 }

@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 import type { ElementRect, LocateCandidate, LocatedReading } from '@auto-cc/shared';
 import {
   DEFAULT_SCRIPT_LIMITS,
+  UPLOAD_PROBE_KEY,
   buildDomActionScript,
   buildFingerprintScanScript,
   buildIframeRectsScript,
   buildLocateScript,
+  buildNodeHandleScript,
+  buildUploadReadbackFunction,
+  buildValueReadScript,
   buildWaitScript,
   toDomActionReading,
   toIframeRects,
   toLocatedReading,
   toLocatedReadings,
+  toUploadReading,
   toWaitReading,
   type ScriptLimits,
 } from './locator-script.js';
@@ -29,12 +34,17 @@ type FakeNode = {
   box: ElementRect;
   clickCalls: number;
   dispatched: string[];
+  /** 按事件类型记下的监听器；`dispatchEvent` 会真的回调它们，注入探针那条断言才不是自说自话。 */
+  listeners: Record<string, ((event: { type: string; isTrusted?: boolean }) => void)[]>;
+  /** `input[type=file]` 的文件列表（只读的那个数，脚本伪造不了，测试里手工放进）。 */
+  files?: { name: string; size: number; type: string }[];
   getAttribute: (name: string) => string | null;
   getBoundingClientRect: () => ElementRect;
   matches: (selector: string) => boolean;
   contains: (other: FakeNode) => boolean;
   click: () => void;
-  dispatchEvent: (event: { type: string }) => boolean;
+  dispatchEvent: (event: { type: string; isTrusted?: boolean }) => boolean;
+  addEventListener: (type: string, handler: (event: { type: string; isTrusted?: boolean }) => void) => void;
   textContent: string;
 };
 
@@ -53,6 +63,8 @@ function fakeNode(tagName: string, init: Partial<FakeNode> = {}): FakeNode {
     box: init.box ?? { x: 0, y: 0, width: 100, height: 30 },
     clickCalls: 0,
     dispatched: [],
+    listeners: init.listeners ?? {},
+    files: init.files,
     getAttribute: (name: string) => node.attrs[name] ?? null,
     getBoundingClientRect: () => node.box,
     matches: (selector: string) => matchesSelector(node, selector),
@@ -60,9 +72,13 @@ function fakeNode(tagName: string, init: Partial<FakeNode> = {}): FakeNode {
     click: () => {
       node.clickCalls += 1;
     },
-    dispatchEvent: (event: { type: string }) => {
+    dispatchEvent: (event: { type: string; isTrusted?: boolean }) => {
       node.dispatched.push(event.type);
+      (node.listeners[event.type] ?? []).forEach((handler) => handler(event));
       return true;
+    },
+    addEventListener: (type: string, handler: (event: { type: string; isTrusted?: boolean }) => void) => {
+      (node.listeners[type] ??= []).push(handler);
     },
     textContent: '',
   } as unknown as FakeNode;
@@ -179,18 +195,45 @@ function fakePage(root: FakeNode): FakePage {
 }
 
 /**
+ * 一个「JS world」：注入脚本把 `nodeIndex` 注册表与上传探针都挂在它的 `globalThis` 上，
+ * 所以换一个对象就等于换一个新的隔离世界——跨 world 寻址那条断言靠这个演。
+ */
+const DEFAULT_WORLD: Record<string, unknown> = {};
+
+/**
  * 在替身页面上求值注入脚本——与 `executeJavaScript` 跑的是同一段源码。
  *
  * 只断言字符串里出现了 `roleOf` 证明不了脚本读得对，所以这里必须真的求值。
  * @param source 某个 builder 产出的表达式源码
  * @param page 页面替身
+ * @param world 这一轮的 `globalThis` 替身；默认全文件共用一个（`nodeIndex` 跨多次求值要稳定）
  * @returns 脚本返回值（等待类脚本返回 Promise）
  */
-function run(source: string, page: FakePage): unknown {
+function run(source: string, page: FakePage, world: Record<string, unknown> = DEFAULT_WORLD): unknown {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval -- 被测对象本身就是一段注入脚本，绕开求值就只剩断言字符串
-  return new Function('document', 'location', `return ${source}`)(page, {
-    href: 'http://127.0.0.1:10233/locator',
-  });
+  return new Function('document', 'location', 'globalThis', `return ${source}`)(
+    page,
+    {
+      href: 'http://127.0.0.1:10233/locator',
+    },
+    world,
+  );
+}
+
+/**
+ * 求值 `buildUploadReadbackFunction` 产出的**函数声明**，并以指定对象为 `this` 调用它。
+ *
+ * 真实调用走 `Runtime.callFunctionOn`，那里的 `this` 就是当初那个 objectId；
+ * 这里用 `call` 复现同一件事，才能断言「回读的就是注入的那一个节点」。
+ * @param declaration 函数声明源码
+ * @param self 调用对象（通常是那个 input 替身）
+ * @param world 与取节点那一步同一个 `globalThis` 替身（探针留在里面）
+ * @returns 该函数兑现的 Promise
+ */
+function runReadback(declaration: string, self: unknown, world: Record<string, unknown>): Promise<unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- 同上：被测对象是一段注入函数体
+  const readback = new Function('globalThis', `return (${declaration})`)(world) as (this: unknown) => Promise<unknown>;
+  return readback.call(self);
 }
 
 /** 「职位卡片」树：搜索框 + 列表 + 卡片（标题与打招呼按钮）+ 盖在按钮上的浮层。 */
@@ -232,8 +275,9 @@ function scan(
   candidates: LocateCandidate[],
   limits: ScriptLimits = DEFAULT_SCRIPT_LIMITS,
   page: FakePage = fakePage(jobCardTree().root),
+  world: Record<string, unknown> = DEFAULT_WORLD,
 ): LocatedReading[] {
-  return toLocatedReadings(run(buildLocateScript(candidates, limits), page));
+  return toLocatedReadings(run(buildLocateScript(candidates, limits), page, world));
 }
 
 describe('定位读取脚本（spec 2.2-01）', () => {
@@ -507,6 +551,195 @@ describe('DOM 兜底与等待脚本（spec 2.2-03 / 2.2-12）', () => {
       ),
     );
     expect(reading.satisfied).toBe(false);
+  });
+});
+
+describe('文件注入脚本（spec 2.6-04 / plan §13.3 第 4 条）', () => {
+  const idCandidate: LocateCandidate[] = [{ strategy: 'id', value: 'resume-file' }];
+
+  /** 站点常见的上传现场：一个隐藏的 `input[type=file]` + 一个真的按钮。 */
+  function uploadTree(): { page: FakePage; file: FakeNode; button: FakeNode } {
+    const file = fakeNode('input', {
+      attrs: { id: 'resume-file', type: 'file', 'data-testid': 'resume-upload' },
+      box: { x: 0, y: 0, width: 0, height: 0 },
+    });
+    const button = fakeNode('button', { attrs: { id: 'send-resume' }, ownText: '投递简历' });
+    const root = fakeNode('body', { kids: [file, button], box: { x: 0, y: 0, width: 500, height: 800 } });
+    return { page: fakePage(root), file, button };
+  }
+
+  /**
+   * 先定位、再把胜出读数交给取节点脚本——与 `browser.act.upload` 的调用顺序一致。
+   * @param candidates 声明候选（定位与取节点共用同一份）
+   * @param page 页面替身
+   * @param world 定位那一轮的 `globalThis`
+   * @param hit 取第几条读数（默认第一条）
+   * @returns 取节点脚本的求值结果与那条读数
+   */
+  function locateThenHandle(
+    candidates: LocateCandidate[],
+    page: FakePage,
+    world: Record<string, unknown>,
+    hit = 0,
+    handleWorld: Record<string, unknown> = world,
+  ): { chosen: LocatedReading; node: unknown } {
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page, world)[hit]!;
+    return {
+      chosen,
+      node: run(
+        buildNodeHandleScript(
+          candidates,
+          { candidateIndex: chosen.candidateIndex, hitIndex: chosen.hitIndex },
+          { tagName: chosen.tagName, rect: chosen.rect },
+          DEFAULT_SCRIPT_LIMITS,
+        ),
+        page,
+        handleWorld,
+      ),
+    };
+  }
+
+  it('每条命中带自己的序号：hitIndex 是候选命中列表里的第几个，与帧内身份号无关', () => {
+    const twinA = fakeNode('input', { attrs: { class: 'up', type: 'file' } });
+    const twinB = fakeNode('input', { attrs: { class: 'up', type: 'file' } });
+    const page = fakePage(fakeNode('body', { kids: [twinA, twinB] }));
+    const readings = scan([{ strategy: 'css', value: '.up' }], DEFAULT_SCRIPT_LIMITS, page);
+    expect(readings.map((item) => item.hitIndex)).toEqual([0, 1]);
+    expect(readings.map((item) => item.siblingCount)).toEqual([2, 2]);
+  });
+
+  it('取节点脚本交出的是那一个节点本身，并顺手在它上面装好 change 探针', () => {
+    const { page, file } = uploadTree();
+    const world: Record<string, unknown> = {};
+    expect(locateThenHandle(idCandidate, page, world).node).toBe(file);
+    expect(file.listeners.change).toHaveLength(1);
+  });
+
+  it('跨 world 只认序号：身份号在新 world 里是另发的号，按它找回的是空气', () => {
+    const twin = fakeNode('input', { attrs: { class: 'up', type: 'file' } });
+    const file = fakeNode('input', { attrs: { class: 'up', id: 'resume-file', type: 'file' } });
+    const page = fakePage(fakeNode('body', { kids: [twin, file] }));
+    const candidates: LocateCandidate[] = [
+      { strategy: 'css', value: '.up' },
+      { strategy: 'id', value: 'resume-file' },
+    ];
+    // 第一条候选先给两个输入框发了 1、2 号，于是 id 候选的读数带着 nodeIndex=2。
+    const located = scan(candidates, DEFAULT_SCRIPT_LIMITS, page, {})[2]!;
+    expect(located).toMatchObject({ candidateIndex: 1, hitIndex: 0, nodeIndex: 2 });
+    // 换一个新的 world（CDP 的隔离世界）：按序号仍找回同一个节点……
+    const isolated: Record<string, unknown> = {};
+    expect(locateThenHandle(candidates, page, {}, 2, isolated).node).toBe(file);
+    // ……而按身份号找回（DOM 兜底那条路）只能报「节点不在了」。
+    const readBack = toDomActionReading(
+      run(
+        buildValueReadScript(candidates, { candidateIndex: located.candidateIndex, nodeIndex: located.nodeIndex }),
+        page,
+        isolated,
+      ),
+    );
+    expect(readBack).toMatchObject({ ok: false });
+  });
+
+  it('标签名不是 input、或 type 不是 file 时返回 null——不把简历注进一个按钮', () => {
+    const { page, button } = uploadTree();
+    const world: Record<string, unknown> = {};
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'send-resume' }];
+    expect(locateThenHandle(candidates, page, world).node).toBeNull();
+    expect(button.listeners.change).toBeUndefined();
+  });
+
+  it('几何一变就返回 null：宁可不注入，也不把文件塞进恰好排在旧位置上别的控件', () => {
+    const { page, file } = uploadTree();
+    const world: Record<string, unknown> = {};
+    const chosen = scan(idCandidate, DEFAULT_SCRIPT_LIMITS, page, world)[0]!;
+    file.box = { x: 0, y: 120, width: 0, height: 0 };
+    expect(
+      run(
+        buildNodeHandleScript(
+          idCandidate,
+          { candidateIndex: chosen.candidateIndex, hitIndex: chosen.hitIndex },
+          { tagName: chosen.tagName, rect: chosen.rect },
+        ),
+        page,
+        world,
+      ),
+    ).toBeNull();
+  });
+
+  it('序号越界（DOM 中途少了一个同类节点）同样返回 null，不退回「就近找一个」', () => {
+    const { page, file } = uploadTree();
+    const world: Record<string, unknown> = {};
+    const chosen = scan(idCandidate, DEFAULT_SCRIPT_LIMITS, page, world)[0]!;
+    expect(
+      run(
+        buildNodeHandleScript(
+          idCandidate,
+          { candidateIndex: chosen.candidateIndex, hitIndex: chosen.hitIndex + 1 },
+          { tagName: chosen.tagName, rect: chosen.rect },
+        ),
+        page,
+        world,
+      ),
+    ).toBeNull();
+    expect(file.listeners.change).toBeUndefined();
+  });
+
+  it('注入后页面真的收到过 change：回读把文件与 isTrusted 一起交出来', async () => {
+    const { page, file } = uploadTree();
+    const world: Record<string, unknown> = {};
+    expect(locateThenHandle(idCandidate, page, world).node).toBe(file);
+    file.files = [{ name: '资深前端-简历.pdf', size: 226, type: 'application/pdf' }];
+    file.dispatchEvent({ type: 'change', isTrusted: true });
+    const reading = toUploadReading(await runReadback(buildUploadReadbackFunction(50, 5), file, world));
+    expect(reading).toEqual({
+      changeCount: 1,
+      isTrusted: true,
+      filesCount: 1,
+      fileName: '资深前端-简历.pdf',
+      fileSize: 226,
+      fileType: 'application/pdf',
+    });
+  });
+
+  it('每取一次节点都把计数清零：上一轮的 change 不能替这一轮作保', async () => {
+    const { page, file } = uploadTree();
+    const world: Record<string, unknown> = {};
+    locateThenHandle(idCandidate, page, world);
+    file.dispatchEvent({ type: 'change', isTrusted: false });
+    expect(toUploadReading(await runReadback(buildUploadReadbackFunction(30, 5), file, world)).changeCount).toBe(1);
+    locateThenHandle(idCandidate, page, world);
+    expect(toUploadReading(await runReadback(buildUploadReadbackFunction(30, 5), file, world)).changeCount).toBe(0);
+  });
+
+  it('站点没派发 change 时回读带着全零兑现，不会永远悬在那儿', async () => {
+    const file = fakeNode('input', { attrs: { id: 'resume-file', type: 'file' } });
+    const reading = toUploadReading(await runReadback(buildUploadReadbackFunction(30, 5), file, {}));
+    expect(reading).toEqual({
+      changeCount: 0,
+      isTrusted: false,
+      filesCount: 0,
+      fileName: '',
+      fileSize: 0,
+      fileType: '',
+    });
+  });
+
+  it('探针键只有一个名字：取节点与回读两段脚本共用同一个 globalThis 挂点', () => {
+    expect(UPLOAD_PROBE_KEY).toBe('__autoCcUploadProbe');
+    expect(buildUploadReadbackFunction()).toContain(UPLOAD_PROBE_KEY);
+  });
+
+  it('回读读数的字段一律钳齐：页面给什么形状的垃圾都不影响类型', () => {
+    expect(toUploadReading(null)).toMatchObject({ changeCount: 0, isTrusted: false, fileName: '' });
+    expect(toUploadReading({ changeCount: -3, isTrusted: 'true', fileName: 42, fileSize: Number.NaN })).toEqual({
+      changeCount: 0,
+      isTrusted: false,
+      filesCount: 0,
+      fileName: '',
+      fileSize: 0,
+      fileType: '',
+    });
+    expect(toUploadReading('不是对象').filesCount).toBe(0);
   });
 });
 

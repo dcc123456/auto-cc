@@ -104,6 +104,13 @@ export type FakeViewLog = {
   attachFails?: boolean;
   /** true 时 `sendCommand` 抛错（命令被拒）。 */
   sendFails?: boolean;
+  /**
+   * 按 CDP 方法名给出的回包；没给的方法回 `{}`（与真实的空回包同形）。
+   * 文件注入那条链要逐条喂回包（帧树、隔离世界 id、objectId、页面读数），
+   * 而它的命令方法名互不重复，所以按方法名给值就够，不需要按第几次给。
+   * 值给成 `Error` 表示**这条**方法被拒（只让某一步失败才断言得出「失败落在哪一步」）。
+   */
+  responses?: Record<string, unknown>;
   /** true 时视图已销毁。 */
   isDestroyed?: boolean;
 };
@@ -194,7 +201,9 @@ export function fakeView(
       sendCommand: (method: string, params: Record<string, unknown>) => {
         if (log.sendFails) throw new Error('命令被拒');
         log.commands.push({ method, params });
-        return Promise.resolve({});
+        const response = log.responses?.[method] ?? {};
+        // 值给成 Error 就是「这一条被拒」——与真实 debugger 一样走拒绝，而不是同步抛出。
+        return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
       },
     },
   } as unknown as WebContents;
@@ -214,6 +223,7 @@ export function fakeDebuggerView(
     attachFails?: boolean;
     sendFails?: boolean;
     isDestroyed?: boolean;
+    responses?: Record<string, unknown>;
   } = {},
 ): { contents: WebContents; log: FakeViewLog } {
   const log: FakeViewLog = {
@@ -222,6 +232,7 @@ export function fakeDebuggerView(
     detachCalls: 0,
     attachFails: options.attachFails,
     sendFails: options.sendFails,
+    responses: options.responses,
     isDestroyed: options.isDestroyed,
   };
   return { contents: fakeView(options.main ?? null, options.subtree ?? [], { url: options.url, log }), log };
@@ -243,6 +254,7 @@ export function fakeReading(frameUrl: string, overrides: Partial<LocatedReading>
     strategy: 'testId',
     siblingCount: 1,
     nodeIndex: 0,
+    hitIndex: 0,
     visible: true,
     enabled: true,
     unobstructed: true,

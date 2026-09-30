@@ -28,6 +28,8 @@ const locateSpecSchema = z.strictObject({
   description: z.string().min(1),
   cardinality: z.enum(['single', 'many']),
   candidates: z.array(locateCandidateSchema).min(1),
+  /** 注入类定位（如隐藏的 `input[type=file]`）设 false，见 `LocateSpec.requireActionable`。 */
+  requireActionable: z.boolean().optional(),
 });
 
 /**

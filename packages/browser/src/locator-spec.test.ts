@@ -5,7 +5,9 @@ import {
   CONTAINS_DISCOUNT,
   FINGERPRINT_BASE_SCORE,
   GENERATED_VALUE,
+  NOT_ENABLED_PENALTY,
   NOT_VISIBLE_PENALTY,
+  OBSTRUCTED_PENALTY,
   STRATEGY_WEIGHT,
   decideLocate,
   isSafeAttributeName,
@@ -32,6 +34,7 @@ function reading(overrides: Partial<LocatedReading> = {}): LocatedReading {
     strategy: 'testId',
     siblingCount: 1,
     nodeIndex: 1,
+    hitIndex: 0,
     visible: true,
     enabled: true,
     unobstructed: true,
@@ -138,6 +141,48 @@ describe('打分与排序（spec 2.2-02）', () => {
     const first = rankScored(tied);
     expect(first.map((item) => item.candidateIndex)).toEqual([0, 1, 2]);
     expect(rankScored([...tied].reverse()).map((item) => item.candidateIndex)).toEqual([0, 1, 2]);
+  });
+
+  it('注入类声明豁免「可被指点」三条判据——隐藏的 input[type=file] 本来就读不到几何', () => {
+    const uploadCandidate: LocateCandidate = {
+      strategy: 'testId',
+      attribute: 'data-testid',
+      value: 'resume-upload',
+    };
+    const hiddenUpload = reading({
+      tagName: 'input',
+      accessibleName: '',
+      text: '',
+      visible: false,
+      enabled: false,
+      unobstructed: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    });
+    const waived = scoreReading(hiddenUpload, uploadCandidate, false);
+    expect(waived.score).toBe(STRATEGY_WEIGHT.testId);
+    expect(waived.reasons.join('/')).toContain('不检查可见/启用/遮挡');
+    expect(scoreReading(hiddenUpload, uploadCandidate).score).toBe(
+      STRATEGY_WEIGHT.testId - NOT_VISIBLE_PENALTY - NOT_ENABLED_PENALTY - OBSTRUCTED_PENALTY,
+    );
+  });
+
+  it('缺省口径下同一个隐藏控件过不了 70 分线，豁免后才 matched——上传靠这条才不发疯', () => {
+    const readings = [
+      reading({
+        tagName: 'input',
+        accessibleName: '',
+        text: '',
+        visible: false,
+        enabled: false,
+        unobstructed: false,
+        rect: { x: 0, y: 0, width: 0, height: 0 },
+      }),
+    ];
+    const candidates: LocateCandidate[] = [{ strategy: 'testId', attribute: 'data-testid', value: 'resume-upload' }];
+    const strict = toRankedCandidates(readings, candidates);
+    expect(decideLocate(strict, THRESHOLDS)).toMatchObject({ status: 'below-score', chosen: null });
+    const waived = toRankedCandidates(readings, candidates, false);
+    expect(decideLocate(waived, THRESHOLDS)).toMatchObject({ status: 'matched' });
   });
 });
 

@@ -119,9 +119,16 @@ const matchValueOf = (candidate: LocateCandidate): string =>
  * 给一条页面回读打分。
  * @param reading 页面里读出的一条候选命中（还没分数）
  * @param candidate 它对应的声明项（用来判断是否精确文本匹配）
+ * @param requireActionable 这条声明的用法是否需要元素**可被指点**（注入类设 false：
+ *   隐藏的 `<input type=file>` 永远读不到几何，三条前置判据对它没有意义，
+ *   见 plan §13.3 第 4 条）。省略即需要，按老口径扣分。
  * @returns 带 `score` 与逐条 `reasons` 的可解释结果
  */
-export function scoreReading(reading: LocatedReading, candidate: LocateCandidate): LocatedView {
+export function scoreReading(
+  reading: LocatedReading,
+  candidate: LocateCandidate,
+  requireActionable = true,
+): LocatedView {
   const reasons: string[] = [`${reading.strategy} 基线 ${String(STRATEGY_WEIGHT[reading.strategy])}`];
   let score = STRATEGY_WEIGHT[reading.strategy];
 
@@ -138,17 +145,21 @@ export function scoreReading(reading: LocatedReading, candidate: LocateCandidate
     score -= AMBIGUOUS_HIT_PENALTY;
     reasons.push(`同条件命中 ${String(reading.siblingCount)} 个 -${String(AMBIGUOUS_HIT_PENALTY)}`);
   }
-  if (!reading.visible) {
-    score -= NOT_VISIBLE_PENALTY;
-    reasons.push(`不可见 -${String(NOT_VISIBLE_PENALTY)}`);
-  }
-  if (!reading.enabled) {
-    score -= NOT_ENABLED_PENALTY;
-    reasons.push(`未启用 -${String(NOT_ENABLED_PENALTY)}`);
-  }
-  if (!reading.unobstructed) {
-    score -= OBSTRUCTED_PENALTY;
-    reasons.push(`被遮挡 -${String(OBSTRUCTED_PENALTY)}`);
+  if (requireActionable) {
+    if (!reading.visible) {
+      score -= NOT_VISIBLE_PENALTY;
+      reasons.push(`不可见 -${String(NOT_VISIBLE_PENALTY)}`);
+    }
+    if (!reading.enabled) {
+      score -= NOT_ENABLED_PENALTY;
+      reasons.push(`未启用 -${String(NOT_ENABLED_PENALTY)}`);
+    }
+    if (!reading.unobstructed) {
+      score -= OBSTRUCTED_PENALTY;
+      reasons.push(`被遮挡 -${String(OBSTRUCTED_PENALTY)}`);
+    }
+  } else {
+    reasons.push('注入类声明：不检查可见/启用/遮挡');
   }
   return { ...reading, score, reasons };
 }
@@ -176,9 +187,14 @@ export function rankScored(views: LocatedView[]): LocatedView[] {
  * 再排序。
  * @param readings 各帧各候选的命中
  * @param candidates 声明里的候选数组（用来取 `exact` 等判定字段）
+ * @param requireActionable 是否按「可被指点」扣分（来自 `LocateSpec.requireActionable`）
  * @returns 排好序、带分数的候选列表
  */
-export function toRankedCandidates(readings: LocatedReading[], candidates: LocateCandidate[]): LocatedView[] {
+export function toRankedCandidates(
+  readings: LocatedReading[],
+  candidates: LocateCandidate[],
+  requireActionable = true,
+): LocatedView[] {
   const byIdentity = new Map<string, LocatedReading>();
   for (const reading of readings) {
     const key = `${reading.frameUrl}#${String(reading.nodeIndex)}`;
@@ -187,7 +203,7 @@ export function toRankedCandidates(readings: LocatedReading[], candidates: Locat
   }
   return rankScored(
     [...byIdentity.values()].map((reading) =>
-      scoreReading(reading, candidates[reading.candidateIndex] ?? { strategy: reading.strategy }),
+      scoreReading(reading, candidates[reading.candidateIndex] ?? { strategy: reading.strategy }, requireActionable),
     ),
   );
 }

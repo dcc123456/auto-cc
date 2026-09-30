@@ -668,6 +668,15 @@ export interface LocateSpec {
   description: string;
   cardinality: 'single' | 'many';
   candidates: LocateCandidate[];
+  /**
+   * 是否要求元素**可被指点**（可见、启用、中心点不被遮挡），默认 true。
+   *
+   * 设 false 的场景只有一种：注入类动作（`browser.act.upload`）。站点普遍把
+   * `<input type=file>` 藏成 `display:none`，那三条前置判据对注入毫无意义——
+   * 不关掉就会永远判 `below-score`，而关掉之后仍然要靠声明的策略权重过线，
+   * 所以这条不是「放松定位」，是「按用途取用对应的判据」（见 plan §13.3 第 4 条）。
+   */
+  requireActionable?: boolean;
 }
 
 /** 元素在所属帧视口里的位置（CSS 像素，与 CDP 输入同一坐标系）。 */
@@ -707,8 +716,18 @@ export interface LocatedReading extends ElementFingerprint {
   /**
    * 帧内的元素身份号（由注入脚本用 WeakMap 现场编号）。
    * 两条候选命中**同一个元素**时靠它去重，否则「testId 和 css 都中了同一个按钮」会被误判成歧义。
+   *
+   * 它是**某个 JS world 内部的编号**，跨 world 不通用：隔离世界（CDP 取节点引用用的那一个）里
+   * 的注册表是另一张表，所以 CDP 那条路改用 `hitIndex` 寻址，不用这个字段。
    */
   nodeIndex: number;
+  /**
+   * 该元素在「这条候选在本帧里命中的元素列表」里的下标，从 0 起。
+   *
+   * 与 `nodeIndex` 的区别是它只依赖文档顺序，因此在主帧世界与隔离世界里算出的是同一个数——
+   * `browser.act.upload` 要靠它把「定位胜出的那一个」交给 CDP（spec 2.6-04 / plan §13.3 第 4 条）。
+   */
+  hitIndex: number;
   /** 是否可见 / 可点：动作前置判据，与 `siblingCount` 一起决定分数 */
   visible: boolean;
   enabled: boolean;
@@ -756,13 +775,16 @@ export type WaitPredicate =
 
 /** 一次页面动作的结局，`channel` 与 `trusted` 如实说明事件是怎么产生的（spec 2.2-12）。 */
 export interface ActResultView {
-  action: 'click' | 'type' | 'select' | 'wait';
+  action: 'click' | 'type' | 'select' | 'wait' | 'upload';
   status: 'done' | 'timeout';
   waitedMs: number;
   channel: 'cdp' | 'dom';
   trusted: boolean;
   located: LocatedView | null;
-  /** 输入/选择之后页面回读到的值；点击与等待为 null */
+  /**
+   * 输入/选择/注入之后页面回读到的值；点击与等待为 null。
+   * `upload` 时是**那个 input 自己报上来的** `files[0].name`，不是请求路径的文件名（spec 2.6-04）。
+   */
   valueAfter: string | null;
   /** 等待类动作的结局读数；其他动作为 null */
   predicate: { kind: WaitPredicate['kind']; satisfied: boolean } | null;

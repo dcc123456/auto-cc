@@ -82,7 +82,7 @@ export class BrowserLocateService extends Service {
       await evaluateInFrames(contents, buildLocateScript(spec.candidates, this.limits)),
       toLocatedReadings,
     );
-    const ranked = toRankedCandidates(readings, spec.candidates);
+    const ranked = toRankedCandidates(readings, spec.candidates, spec.requireActionable !== false);
     const decision = decideLocate(ranked, this.thresholds);
     if (decision.status === 'matched' || !lastKnown) {
       return this.finish(spec, ranked, decision, false, null, contents.getURL());

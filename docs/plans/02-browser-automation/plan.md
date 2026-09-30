@@ -1140,3 +1140,55 @@ AND reply.job_id = jobs.job_id`。
 - **档位与 `chat.session` 的接线**：见 §13.3 第 3 条末，留给 2.8 的 agent 工具入口。
 - **OOPIF 子帧上传**：`sessionId` 参数留白，等真实站点证明需要再接。
 - 界面确认卡片要新文案，全部进 `deliver.*` 命名空间并一次补齐 zh-CN / en（AGENTS.md §5.5/5.6）。
+
+### 13.6 2.6-a 收口记录（文件注入这条原语，2026-09-30）
+
+与 §13.3 第 4 条有四处偏差，都是「照原文写下去就会失败」那类，逐条记清楚：
+
+1. **等待判据是 `appear`，不是 `clickable`**。原文照 `click` 抄了 `waitSatisfied('clickable')`，
+   而隐藏的 `input[type=file]`（`display:none`，站点把入口做在按钮背后）永远读不到盒模型，
+   那条等待在真实站点上只会等满超时。上传不经坐标，几何稳定对它没有意义，
+   所以 `appear` 就是它的全部前置——这也是为什么 `upload` 不能沿用 `perform` 那条等待路径。
+2. **跨世界寻址用 `hitIndex`，不用 `nodeIndex`**。`nodeIndex` 是脚本注册表
+   （隔离世界 `globalThis` 上的 WeakMap 计数器）在**某一个 JS world 内部**发的号，
+   而注入必须在 `Page.createIsolatedWorld` 新建的上下文里跑：新世界重新扫一遍就重新编一次号，
+   同一个节点在两边的号可以不同（前面有条候选先消耗过号即是）。`hitIndex`（同一条候选过滤祖先之后
+   的第几个命中，文档序）与世界无关，所以取节点引用的脚本按它取。
+   单测里那条跨世界用例就是这个失败模式的靶子：同一份声明在旧世界按 `nodeIndex` 找回、
+   在新世界编号已变，而按 `hitIndex` 找回的是同一个节点。
+3. **新增 `LocateSpec.requireActionable`（缺省 true）**。隐藏 input 在打分层要吃
+   `NOT_VISIBLE 30` 与 `OBSTRUCTED 20`（`enabled` 读不到时再多扣 `NOT_ENABLED`），
+   testId 的 100 分会掉到 `minScore 70` 以下判 `below-score`——「定位到那个隐藏的框」
+   在本片第一个真实场景里就必然失败。豁免只免掉「可被指点」三条判据，策略权重、包含匹配折价、
+   生成串封顶照旧；注入类声明必须在知识包里显式写 `requireActionable: false`（进 2.6-b 的 `boss.json`）。
+   落地方式是**给既有的 `scoreReading` / `toRankedCandidates` 加一个参数**，不是再写一套打分器（§2.3/2.5）。
+4. **回读绑在同一个 objectId 上，`change` / `isTrusted` 由页面自己答**。`input.files` 只读，
+   主进程伪造不出真附件，所以「有没有真的收到」只能问页面：取节点引用的脚本顺手在隔离世界装一个
+   `change` 探针（WeakMap 以节点为键，键名常量 `UPLOAD_PROBE_KEY = '__autoCcUploadProbe'`），
+   记 `changeCount` 与 `event.isTrusted`，每次取句柄都清零；回读用 `Runtime.callFunctionOn`
+   而不是再 evaluate 一次，于是 `this` **就是**注入的那个节点，不存在「回读到另一个同名 input」的空间。
+   附带一条实测事实：`callFunctionOn{returnByValue:true}` 的值在 `result.value` 里，
+   把整个回包喂给读数钳制函数会得到 `changeCount:0` 这种「什么都没发生」——
+   这个形状是照代码读出来的，不是文档转述（§6.2），`toCallFunctionValue` 就是为它加的。
+
+一条**已经知道 weaker 的防线，写在这里免得将来误当成强防线**：取节点时复核的是
+「`tagOf === 'input'` + `type === 'file'` + tagName 与 rect 四项等值」，但隐藏控件的 rect 全是 0，
+等值比对退化成恒真，实际挡漂移的只有「序号 + 是不是 file input」两道。真站点的隐藏框是否会让序号漂到
+邻居身上，只有 2.6-c 的 fixture 靶页与 2.6-d 的真人验证能答，届时如实记。
+
+另两条按原计划落地但值得点名：**上传没有 DOM 兜底**（`cdpInputEnabled:false` 即 `ACT_FAILED`，
+不像点击那样降级成 `trusted:false` 的脚本点击——降级在这条路上等于宣称附件进去了而并没有）；
+**四条被否决的 CDP 取路不进代码**，且有断言钉着：注入链的命令序列逐条比对
+（`Page.enable → Runtime.enable → DOM.enable → Page.getFrameTree → Page.createIsolatedWorld →
+Runtime.evaluate → DOM.setFileInputFiles → Runtime.callFunctionOn`），
+再把 `selector` / `nodeId` / `requestNode` 三个字面在序列化后的命令表里查一遍，出现即失败。
+
+三条机器防线合起来回答的是同一个问题：不接受「调用没报错」当成功——节点按序号找回并复核形状、
+注入与回读共用一个 objectId、`changeCount === 0` 或文件名/字节数与请求不符即 `ACT_FAILED`
+（带 spec、`filePath` 与页面快照）。
+
+证据现状：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿（`pnpm test` 退出码 0），
+`packages/browser` 12 个测试文件 181 条全过；本轮相关的四份是 `act-service.test.ts` 22、
+`locator-script.test.ts` 37、`input-channel.test.ts` 22、`locator-spec.test.ts` 19。
+**2.6-04 的 V 半边不打勾**——截图对象是 fixture 的上传靶页，它排在 2.6-c（§13.5 第一条），
+所以这一片只有逻辑层证据，spec 里 2.6-04 保持 `[ ]`，不因单测全绿写成 `[x]`。

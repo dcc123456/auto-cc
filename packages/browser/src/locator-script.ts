@@ -253,7 +253,7 @@ function buildPrelude(limits: ScriptLimits): string {
       if (!point) return false;
       return point === node || node.contains(point);
     };
-    const readingOf = (node, candidateIndex, strategy, siblingCount) => {
+    const readingOf = (node, candidateIndex, strategy, siblingCount, hitIndex) => {
       const rect = rectOf(node);
       return {
         frameUrl: location.href,
@@ -261,6 +261,7 @@ function buildPrelude(limits: ScriptLimits): string {
         strategy: strategy,
         siblingCount: siblingCount,
         nodeIndex: nodeIdOf(node),
+        hitIndex: hitIndex,
         visible: visibleOf(node, rect),
         enabled: enabledOf(node),
         unobstructed: unobstructedOf(node, rect),
@@ -359,15 +360,22 @@ function buildPrelude(limits: ScriptLimits): string {
       }
       return hits;
     };
+    /**
+     * 一条候选在本帧里的命中列表，**与读数的顺序完全一致**：文本类先去祖先，再按文档顺序排。
+     * 扫描读数与「按序号找回节点」两条路径共用它，否则序号会对不上。
+     */
+    const hitsOf = (candidate, nodes) => {
+      const hits = collectHits(candidate, nodes);
+      return candidate.strategy === 'text' ? withoutMatchedAncestors(hits) : hits;
+    };
     const scanCandidates = (candidates) => {
       const nodes = baseNodes();
       const readings = [];
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[index];
-        let hits = collectHits(candidate, nodes);
-        if (candidate.strategy === 'text') hits = withoutMatchedAncestors(hits);
+        const hits = hitsOf(candidate, nodes);
         for (let hit = 0; hit < hits.length && hit < LIMITS.hitsPerCandidate; hit += 1) {
-          readings.push(readingOf(hits[hit], index, candidate.strategy, hits.length));
+          readings.push(readingOf(hits[hit], index, candidate.strategy, hits.length, hit));
         }
       }
       return readings;
@@ -419,7 +427,7 @@ ${buildPrelude(limits)}
     for (let index = 0; index < found.length && nodes.length < LIMITS.nodeScanCap; index += 1) nodes.push(found[index]);
     const readings = [];
     for (let index = 0; index < nodes.length && readings.length < LIMITS.hitsPerCandidate * 4; index += 1) {
-      readings.push(readingOf(nodes[index], -1, 'fingerprint', 1));
+      readings.push(readingOf(nodes[index], -1, 'fingerprint', 1, index));
     }
     return readings;
   })()`;
@@ -579,6 +587,132 @@ ${buildPrelude(limits)}
   })()`;
 }
 
+/** 注入探针挂在隔离世界 `globalThis` 上的键（取节点与回读两段脚本共用，必须只有一个名字）。 */
+export const UPLOAD_PROBE_KEY = '__autoCcUploadProbe';
+
+/**
+ * 生成「把定位胜出的那一个节点**本身**交出来」的脚本源码（spec 2.6-04 / plan §13.3 第 4 条）。
+ *
+ * 与 `buildLocateScript` 用的是同一份候选、同一个 `hitsOf`，所以「打分选出的那一个」与
+ * 「CDP 拿到的那一个」不会是两个节点。寻址用 `hitIndex` 而不是 `nodeIndex`：后者是 WeakMap
+ * 在**单个 JS world 内部**发的号，而这段脚本跑在 CDP 新建的隔离世界里，那张表是空的。
+ * 序号只依赖文档顺序，两个 world 里算出来是同一个数；DOM 中途变化会让它漂到邻居身上，
+ * 所以再比对一次定位时看到的标签名与几何——对不上就返回 null，让上层拒绝动手，
+ * 而不是把文件塞进一个只是恰好排在上次的位子上的控件。
+ * @param candidates 定位时的候选数组（与 `locate.find` 那一次同一份）
+ * @param address 胜出候选的 `candidateIndex` 与 `hitIndex`
+ * @param expected 定位时看到的形状：标签名 + 帧内矩形（CSS 像素），用作漂移校验的基准
+ * @param limits 取回上限
+ * @returns 单个表达式源码；求值结果为该节点（`returnByValue:false` 时即 CDP 的 objectId），认不出来时为 null
+ */
+export function buildNodeHandleScript(
+  candidates: unknown[],
+  address: { candidateIndex: number; hitIndex: number },
+  expected: { tagName: string; rect: ElementRect },
+  limits: ScriptLimits = DEFAULT_SCRIPT_LIMITS,
+): string {
+  return `(() => {
+${buildPrelude(limits)}
+    const address = ${JSON.stringify(address)};
+    const expected = ${JSON.stringify(expected)};
+    const candidate = ${JSON.stringify(candidates)}[address.candidateIndex];
+    if (!candidate) return null;
+    const target = hitsOf(candidate, baseNodes())[address.hitIndex];
+    if (!target) return null;
+    if (tagOf(target) !== 'input') return null;
+    if (flatten(target.getAttribute('type')).toLowerCase() !== 'file') return null;
+    const shape = rectOf(target);
+    if (tagOf(target) !== expected.tagName) return null;
+    if (shape.x !== expected.rect.x || shape.y !== expected.rect.y) return null;
+    if (shape.width !== expected.rect.width || shape.height !== expected.rect.height) return null;
+    // 探针记「页面真的收到过 change」以及它受不受信：这两条只能问页面，不能由我们代替它宣称。
+    const probe = (globalThis.${UPLOAD_PROBE_KEY} = globalThis.${UPLOAD_PROBE_KEY} || new WeakMap());
+    let record = probe.get(target);
+    if (!record) {
+      record = { changeCount: 0, isTrusted: false };
+      probe.set(target, record);
+      target.addEventListener('change', (event) => {
+        record.changeCount += 1;
+        record.isTrusted = event && event.isTrusted === true;
+      });
+    }
+    record.changeCount = 0;
+    record.isTrusted = false;
+    return target;
+  })()`;
+}
+
+/** 一次文件注入之后，页面自己报上来的读数。 */
+export type UploadReading = {
+  /** 注入之后这个控件收到过几次 `change`；0 表示文件根本没进控件（spec 2.6-04 不接受「调用没报错」） */
+  changeCount: number;
+  /** 那一次 `change` 的 `isTrusted`，由页面自己回答，不在这里猜（spec 2.2-12 的口径延伸到 2.6） */
+  isTrusted: boolean;
+  /** 控件里当前的文件个数 */
+  filesCount: number;
+  fileName: string;
+  /** 文件大小（字节） */
+  fileSize: number;
+  fileType: string;
+};
+
+/**
+ * 生成「回读这个控件里到底进了什么文件」的函数声明源码，交给 `Runtime.callFunctionOn` 执行。
+ *
+ * 它读的是**注入时拿到的那一个 objectId**，所以不重新选节点——回读与注入指向同一个对象，
+ * 才是「文件确实进了我们选中的控件」的证据。轮询是因为 `setFileInputFiles` 回包时
+ * `change` 未必已经派发完（spike 里要等几百毫秒才看到回显，plan §13.2 第 3 条）。
+ * @param timeoutMs 回读上限（毫秒），超时就把当时的读数如实交出去
+ * @param stepMs 轮询间隔（毫秒）
+ * @returns `function` 声明源码，求值结果兑现为一个 Promise
+ */
+export function buildUploadReadbackFunction(timeoutMs = 1500, stepMs = 50): string {
+  return `function () {
+    const limitMs = ${String(timeoutMs)};
+    const stepMs = ${String(stepMs)};
+    const startedAt = Date.now();
+    const probe = globalThis.${UPLOAD_PROBE_KEY};
+    const record = probe ? probe.get(this) : null;
+    const ready = () => record !== null && record !== undefined && record.changeCount > 0 && this.files && this.files.length > 0;
+    return new Promise((resolve) => {
+      const poll = () => {
+        const first = this.files && this.files.length ? this.files[0] : null;
+        if (ready() || Date.now() - startedAt >= limitMs) {
+          resolve({
+            changeCount: record ? record.changeCount : 0,
+            isTrusted: record ? record.isTrusted === true : false,
+            filesCount: this.files ? this.files.length : 0,
+            fileName: first ? String(first.name) : '',
+            fileSize: first ? Number(first.size) : 0,
+            fileType: first ? String(first.type) : '',
+          });
+          return;
+        }
+        setTimeout(poll, stepMs);
+      };
+      poll();
+    });
+  }`;
+}
+
+/**
+ * 钳制文件注入的回读读数（页面值一律是不可信输入）。
+ * @param raw `Runtime.callFunctionOn` 的 `result.value`
+ * @returns 字段齐全与类型确定的读数；拿不到时全为 0 / false / 空串
+ */
+export function toUploadReading(raw: unknown): UploadReading {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const number = (key: string): number => (typeof value[key] === 'number' && isFinite(value[key]) ? value[key] : 0);
+  return {
+    changeCount: Math.max(0, number('changeCount')),
+    isTrusted: value.isTrusted === true,
+    filesCount: Math.max(0, number('filesCount')),
+    fileName: typeof value.fileName === 'string' ? value.fileName : '',
+    fileSize: Math.max(0, number('fileSize')),
+    fileType: typeof value.fileType === 'string' ? value.fileType : '',
+  };
+}
+
 /**
  * 一个直接子 iframe 元素的位置与身份。
  * `src` 是解析后的绝对地址（跨源帧只能靠它对上 `WebFrameMain.url`）。
@@ -671,6 +805,7 @@ export function toLocatedReading(raw: unknown): LocatedReading | null {
     strategy,
     siblingCount: Math.max(1, number('siblingCount', 1)),
     nodeIndex: number('nodeIndex', 0),
+    hitIndex: Math.max(0, number('hitIndex', 0)),
     visible: flag('visible'),
     enabled: flag('enabled'),
     unobstructed: flag('unobstructed'),

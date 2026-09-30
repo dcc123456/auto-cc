@@ -1,5 +1,5 @@
 /**
- * `browser.act` 服务用例（spec 2.2-03 / 2.2-10 / 2.2-12 / 2.2-13）。
+ * `browser.act` 服务用例（spec 2.2-03 / 2.2-10 / 2.2-12 / 2.2-13 / 2.6-04）。
  *
  * 定位本身由 `locate-service.test.ts` 覆盖，这里挂的是**定位替身**，于是每条用例都只回答一个问题：
  * 动作的先后顺序对不对、通道与 `trusted` 有没有如实报告、失败是不是结构化的。
@@ -8,6 +8,9 @@
 import { AppError, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import type { ActResultView, LocateResultView, LocateSpec, LocatedView } from '@auto-cc/shared';
 import type { WebContents } from 'electron';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserActService, type BrowserActConfig } from './act-service.js';
 import {
@@ -277,5 +280,208 @@ describe('等待类结局（spec 2.2-03）', () => {
     const { act, page } = await boot({}, null);
     await expect(act.click(spec)).rejects.toBeInstanceOf(AppError);
     expect(page.snapshotCalls).toBe(0);
+  });
+});
+
+/** 站点常见的上传声明：隐藏的 `input[type=file]`，靠「出现」而不是「可点」判就绪。 */
+const uploadSpec: LocateSpec = {
+  description: '附件上传框',
+  cardinality: 'single',
+  requireActionable: false,
+  candidates: [{ strategy: 'testId', attribute: 'data-testid', value: 'resume-upload' }],
+};
+
+const resumeName = '资深前端-简历.pdf';
+/** 真文件放在系统临时目录：注入要的是绝对路径与字节数，替身编不出一个合法的文件大小。 */
+const uploadDir = mkdtempSync(join(tmpdir(), 'auto-cc-upload-'));
+const resumeFile = join(uploadDir, resumeName);
+writeFileSync(resumeFile, 'PDF'.padEnd(226, '.'));
+
+/** 页面「收到了」的那次回读：文件名与字节数都和请求一致。 */
+const delivered = {
+  changeCount: 1,
+  isTrusted: true,
+  filesCount: 1,
+  fileName: resumeName,
+  fileSize: 226,
+  fileType: 'application/pdf',
+};
+
+/**
+ * 造一条「每一步都给得出回包」的注入链。
+ * @param value `Runtime.callFunctionOn` 回包里页面报上来的读数
+ * @param overrides 覆盖某条命令的回包（值给成 Error 即该条被拒）
+ * @returns 按 CDP 方法名组织的回包表
+ */
+function cdpResponses(value: Record<string, unknown> = delivered, overrides: Record<string, unknown> = {}) {
+  return {
+    'Page.getFrameTree': { frameTree: { frame: { id: 'F1', url: frameUrl }, childFrames: [] } },
+    'Page.createIsolatedWorld': { executionContextId: 7 },
+    'Runtime.evaluate': { result: { type: 'object', subtype: 'node', objectId: 'NODE-1' } },
+    'Runtime.callFunctionOn': { result: { value } },
+    ...overrides,
+  };
+}
+
+/**
+ * 起一块「等待、定位、注入都走得通」的上传实验室视图。
+ * @param scripts 各脚本类别的返回值（默认全通过）
+ * @param responses 注入链的 CDP 回包表
+ * @returns 视图替身（带命令日志）
+ */
+function uploadLab(
+  scripts: Partial<Record<ScriptKind, unknown>> = readyScripts,
+  responses: Record<string, unknown> = cdpResponses(),
+) {
+  const main = fakeFrame(frameUrl, { scripts });
+  return fakeDebuggerView({ main, subtree: [main], url: frameUrl, responses });
+}
+
+const uploadChain = [
+  'Page.enable',
+  'Runtime.enable',
+  'DOM.enable',
+  'Page.getFrameTree',
+  'Page.createIsolatedWorld',
+  'Runtime.evaluate',
+  'DOM.setFileInputFiles',
+  'Runtime.callFunctionOn',
+];
+
+describe('文件注入动作（spec 2.6-04）', () => {
+  afterAll(() => {
+    rmSync(uploadDir, { recursive: true, force: true });
+  });
+
+  it('先等出现、再按 objectId 注入，回读到的是那个 input 自己报上来的文件名', async () => {
+    const view = uploadLab();
+    const { act, locate, page } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false, accessibleName: '' });
+    const result = await act.upload(uploadSpec, resumeFile);
+    expect(result).toMatchObject({
+      action: 'upload',
+      status: 'done',
+      channel: 'cdp',
+      trusted: true,
+      valueAfter: resumeName,
+      located: { strategy: 'testId' },
+    });
+    expect(view.log.commands.map((item) => item.method)).toEqual(uploadChain);
+    // 取节点的脚本里带的就是定位用的那份候选——「选哪一个」只由 locator 决定，CDP 侧不做第二次选择。
+    expect(view.log.commands[5]!.params.expression).toContain('resume-upload');
+    expect(view.log.commands[6]!.params).toEqual({ files: [resumeFile], objectId: 'NODE-1' });
+    expect(page.snapshotCalls).toBe(0);
+  });
+
+  it('隐藏控件用 appear 判就绪：等不到的文案说的是 appear，不是「可点击」', async () => {
+    const view = uploadLab({ ...readyScripts, wait: { satisfied: false, waitedMs: 5000, readings: [] } });
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('WAIT_TIMEOUT');
+      expect((error as AppError).message).toContain('appear');
+    }
+    expect(view.log.commands).toHaveLength(0);
+  });
+
+  it('路径不是绝对路径、或那个文件根本不存在时在动手之前就失败，一个脚本都不下发', async () => {
+    const view = uploadLab();
+    const { act, locate, page } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    for (const bad of ['relative/简历.pdf', join(uploadDir, '没有这个文件.pdf')]) {
+      try {
+        await act.upload(uploadSpec, bad);
+        expect.unreachable(`应当拒绝 ${bad}`);
+      } catch (error) {
+        expect((error as AppError).code).toBe('INVALID_ARGUMENT');
+      }
+    }
+    expect(view.log.commands).toHaveLength(0);
+    expect(page.snapshotCalls).toBe(0);
+  });
+
+  it('定位没过线时上传一步都不发——注入用的地址只能来自定位', async () => {
+    const view = uploadLab();
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = { ...matched(), status: 'below-score', chosen: null, reason: '最优候选 50 分低于最低可用分 70' };
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('LOCATE_FAILED');
+    }
+    expect(view.log.commands).toHaveLength(0);
+  });
+
+  it('命令都没报错但页面没收到 change 也算失败：不接受「调用没抛异常」当成功', async () => {
+    const view = uploadLab(
+      readyScripts,
+      cdpResponses({ ...delivered, changeCount: 0, isTrusted: false, filesCount: 0, fileName: '', fileSize: 0 }),
+    );
+    const { act, locate, page } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('ACT_FAILED');
+      expect((error as AppError).message).toContain('change');
+      expect(errorDetails(error).filePath).toBe(resumeFile);
+    }
+    expect(view.log.commands).toHaveLength(8);
+    expect(page.snapshotCalls).toBe(1);
+  });
+
+  it('回读的附件与请求不符时判失败，并把页面报的那个名字原样带回来', async () => {
+    const view = uploadLab(readyScripts, cdpResponses({ ...delivered, fileName: '别人的简历.pdf', fileSize: 999 }));
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('ACT_FAILED');
+      expect((error as AppError).message).toContain('别人的简历.pdf');
+      expect((error as AppError).message).toContain('999');
+    }
+  });
+
+  it('调试通道挂不上时上传直接失败——这条路没有 DOM 兜底，绝不能假装附件已经进去了', async () => {
+    const main = fakeFrame(frameUrl, { scripts: readyScripts });
+    const view = fakeDebuggerView({ main, subtree: [main], url: frameUrl, attachFails: true });
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('ACT_FAILED');
+      expect((error as AppError).message).toContain('调试器挂不上');
+    }
+  });
+
+  it('显式关掉 CDP 输入时上传报错，而不是像点击那样降级做成', async () => {
+    const view = uploadLab();
+    const { act, locate } = await boot({ cdpInputEnabled: false }, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    try {
+      await act.upload(uploadSpec, resumeFile);
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('ACT_FAILED');
+      expect((error as AppError).message).toContain('没有 DOM 兜底');
+    }
+    expect(view.log.commands).toHaveLength(0);
+  });
+
+  it('页面答 isTrusted:false 时就如实报 false——注入是不是可信事件只有页面说得清', async () => {
+    const view = uploadLab(readyScripts, cdpResponses({ ...delivered, isTrusted: false }));
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched({ tagName: 'input', visible: false });
+    const result = await act.upload(uploadSpec, resumeFile);
+    expect(result).toMatchObject({ status: 'done', channel: 'cdp', trusted: false, valueAfter: resumeName });
   });
 });
