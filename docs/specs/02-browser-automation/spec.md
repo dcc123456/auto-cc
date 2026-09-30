@@ -265,50 +265,65 @@ Chromium 不再产帧，于是 `IntersectionObserver` 回调与 `scroll` 事件*
 
 ## 2.5 打招呼与对话
 
-| ID     | 验收标准                                                                          | 方式 | 验证操作                                                                              | 状态           |
-| ------ | --------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------- | -------------- |
-| 2.5-01 | 话术生成器输入 JD 实体 + 知识库证据，输出开场白；LLM 不可用时回落模板且不静默失败 | U+V  | `script.test.ts` 9 例（无 key/500/缺字段/模型产出不合规 → 均回落且带原因）；          | [x]            |
-|        |                                                                                   |      | 界面播报「模型 不可用（走模板回落）」见 `2.5-01-script-logline-2.png`                 |                |
-| 2.5-02 | 打招呼前必须经 `entitlement.gate.check('greet')`；被拒时不发送且界面显示原因      | C+V  | 页面把额度切成 `daily/2`（`gateSchema.min(1)` 让「切成 0 次」在界面上不可达，         | [!] C 半边已过 |
-|        |                                                                                   |      | 等价做法是打到 2 次再发第 3 次）→ `QUOTA_EXCEEDED`、渠道没被调、账本 4→4，            |                |
-|        |                                                                                   |      | 见 `2.5-02-gate-rejected.txt`；装配与「渠道现问现取」读数见 `2.5-02-pull-model-*.txt  |                |
-|        |                                                                                   |      | /2.5-02-plugin-tree.png`。V 半边「界面显示拒绝原因」要有打招呼按钮的界面入口，        |                |
-|        |                                                                                   |      | 随 2.5-f 补，不在此打勾                                                               |                |
-| 2.5-03 | 每次实际发送在 `usage.ledger` 落一行（action/targetId/workflowRunId/ts）          | C    | 页面外发两条 → 回执 `ledgerId` 3/4 与账本行逐字段对齐（action=greet、targetId、       | [x]            |
-|        |                                                                                   |      | workflowRunId、ts、source），见 `2.5-03-ledger-rows.txt`；用量面板 6 条 greet 行见    |                |
-|        |                                                                                   |      | `2.5-03-usage-panel.png`；失败一律不落账由 `greet.test.ts` 四例（被拒/黑名单/         |                |
-|        |                                                                                   |      | 未送达/让出）钉住                                                                     |                |
-| 2.5-04 | 频控：连续打招呼间隔在配置区间内随机化，且日上限生效（到量即停）                  | U+C  | 单测频控计算（`throttle.test.ts` 5 例，区间端点取到）；日上限到量即停在页面实测       | [x]            |
-|        |                                                                                   |      | 第 3 次被 `QUOTA_EXCEEDED` 拦（`2.5-02-gate-rejected.txt`）；间隔把区间收成 30s 单点  |                |
-|        |                                                                                   |      | 实测：第二条 `waitedMs=19496`、真实墙钟 40481ms、账本两条 ts 差恰为 30000，           |                |
-|        |                                                                                   |      | 见 `2.5-04-throttle-live-readout.txt`、日志行 `2.5-04-throttle-log-line.png`、        |                |
-|        |                                                                                   |      | 帧内送达 `2.5-04-throttled-msg-on-page.png`                                           |                |
-| 2.5-05 | 人类化节流不产生固定节奏（避免可预测的等间隔）                                    | U    | 单测 10 次抽样：全部落在闭区间内、极差 > 区间长度 30%、互异值 ≥8；                    | [x]            |
-|        |                                                                                   |      | 界面行显示配置项 + 日志播报随机区间 + 改配置后区间跟着变，见 `2.5-05-throttle-*.png`  |                |
-| 2.5-06 | 消息输入框输入中文不乱码、无多余字符，发送后页面出现该消息                        | V    | fixture 聊天页截图：`browser.act.type` 走 CDP 受信通道，回读 `valueAfter` 与原文      | [x]            |
-|        |                                                                                   |      | 逐字符相等（92/92，含「」与 🙂）；`browser.act.click` 后帧内状态行变「第 N 条已送达   |
-|        |                                                                                   |      | 服务端」、该条进会话时间线，见 `2.5-06-*.png` 与 `2.5-06-*-readout-*.txt`             |                |
-| 2.5-07 | 回复监听：轮询/观察对方新消息并入库（会话 thread 表），带时间戳                   | C    | 在 fixture 注入回复 → 断言入库：`conversation.store.syncFrom` 回读 read 2/inserted 2  | [x]            |
-|        |                                                                                   |      | /duplicate 0，二次同步 duplicate 2（去重键在唯一索引里，不在内存）；行带 `read_at`    |
-|        |                                                                                   |      | 与 `external_id`，按 jobId 分线程，见 `2.5-07-*`                                      |                |
-| 2.5-08 | 已回复的 JD 在界面标记，且后续步骤（投递）优先这些目标                            | V    | 截图列表状态                                                                          | [ ]            |
-| 2.5-09 | 打招呼文案含可追溯的生成来源记录（prompt 版本 + JD id），便于复盘                 | C    | 查库断言 `usage_ledger.source` 非空：模板回落那条为 `v1:<jdId>`、手改文案那条为       | [x]            |
-|        |                                                                                   |      | `manual:<jobId>`，两条同屏见 `2.5-09-source-column.txt`；`ScriptDraftView` 带         |                |
-|        |                                                                                   |      | `scriptVersion`+`jdId` 由 `script.test.ts` 钉住                                       |                |
-| 2.5-10 | 自动化不发送任何个人凭据/密码/手机验证码到页面                                    | C    | 黑名单已落在唯一出口 `outbound.script.assertSendable`（模型/模板两条产出都过，        | [x]            |
-|        |                                                                                   |      | 命中即 `OUTBOUND_FORBIDDEN_CONTENT`）；页面发带手机号的文案 → 渠道没被调、账本不增    |                |
-|        |                                                                                   |      | （`2.5-10-blacklist-rejected.txt`），单测同形一例在 `greet.test.ts`                   |                |
-| 2.5-11 | 真实账号打招呼（M4 判据）并留回复监听记录                                         | V    | 用户在场时手动验证                                                                    | [!] 待用户在场 |
-| 2.5-12 | LLM 调用有唯一入口 `llm.chat`（`packages/llm`）：其他包出现模型端点 URL 或        | C    | `pnpm lint` 末道 `check-llm-single-entry.ts`（塞假端点即红）；                        | [x]            |
-|        | chat completion 请求即 lint 失败（AGENTS.md §2.7 第二个 LLM 客户端禁令落地）      |      | 页面插件树 `llm` 行 + 未就绪日志见证据图                                              |                |
-| 2.5-13 | 不新建配额系统：打招呼日上限复用 `entitlement.gate`，重复发送防护 = 幂等键 +      | C    | 全仓 grep 无 `sentSet`/`alreadySent`/`sentTargets`；建表语句只有 7 张（`usage_ledger` | [x]            |
-|        | `usage_ledger` 按 target 计数，代码里不存在「已发送集合」                         |      | /`jobs`/`conversation_messages`/`workflow_runs`/`workflow_nodes`/`chat_session`/      |                |
-|        |                                                                                   |      | `chat_message`），无第二张配额表、本切片未加迁移；页面同 run 同 target 二次发送被     |                |
-|        |                                                                                   |      | `OUTBOUND_ALREADY_SENT` 拒（`2.5-13-repeat-rejected.txt`），换 run / 换目标仍可发，   |                |
-|        |                                                                                   |      | 且「换个进程重挂同一份库仍拦得住」在 `greet.test.ts` 里断言（判据在库里不在内存）     |                |
-| 2.5-14 | 「已回复」状态由 `conversation_messages` join 导出，不写回 JD 行（单一事实来源）  | C    | 全仓 `replied` 零命中 → JD 行确实没有这一列（半条已成立）；列表查询含 join 待 2.5-f   | [ ]            |
-| 2.5-15 | 反向验证：否决 browser-copilot 的验证码 OCR 识别链（`recognize_image`）未造成主线 | C+V  | plan §12.2/§12.8 对照表 + fixture 注入验证码页 → 截图显示已暂停                       | [ ]            |
-|        | 能力缺口，风控出现只「暂停 + 通知用户」，不做识别与规避                           |      | （与 2.7-01 联验）                                                                    |                |
+| ID     | 验收标准                                                                          | 方式 | 验证操作                                                                                | 状态           |
+| ------ | --------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------- | -------------- |
+| 2.5-01 | 话术生成器输入 JD 实体 + 知识库证据，输出开场白；LLM 不可用时回落模板且不静默失败 | U+V  | `script.test.ts` 9 例（无 key/500/缺字段/模型产出不合规 → 均回落且带原因）；            | [x]            |
+|        |                                                                                   |      | 界面播报「模型 不可用（走模板回落）」见 `2.5-01-script-logline-2.png`                   |                |
+| 2.5-02 | 打招呼前必须经 `entitlement.gate.check('greet')`；被拒时不发送且界面显示原因      | C+V  | 页面把额度切成 `daily/2`（`gateSchema.min(1)` 让「切成 0 次」在界面上不可达，           | [x]            |
+|        |                                                                                   |      | 等价做法是打到 2 次再发第 3 次）→ `QUOTA_EXCEEDED`、渠道没被调、账本 4→4，              |                |
+|        |                                                                                   |      | 见 `2.5-02-gate-rejected.txt`；装配与「渠道现问现取」读数见 `2.5-02-pull-model-*.txt    |                |
+|        |                                                                                   |      | /2.5-02-plugin-tree.png`。V 半边随 2.5-f 补齐：JD 行「打招呼」按钮实发回执见            |                |
+|        |                                                                                   |      | `2.5-02-greet-receipt.png`（账本行 #1 + 页面回读「已送达服务端」）；在装配面板把        |                |
+|        |                                                                                   |      | entitlement 现改成 `daily/1` 后点第三个目标 → 界面红块                                  |                |
+|        |                                                                                   |      | `QUOTA_EXCEEDED：动作 greet 今日 1 次额度已用完`（`2.5-02-quota-rejected.png`），       |                |
+|        |                                                                                   |      | 同刻 fixture `/api/outbox` 仍 2 条、账本 total 仍 1 —— 被拒既没出门也没落账             |                |
+| 2.5-03 | 每次实际发送在 `usage.ledger` 落一行（action/targetId/workflowRunId/ts）          | C    | 页面外发两条 → 回执 `ledgerId` 3/4 与账本行逐字段对齐（action=greet、targetId、         | [x]            |
+|        |                                                                                   |      | workflowRunId、ts、source），见 `2.5-03-ledger-rows.txt`；用量面板 6 条 greet 行见      |                |
+|        |                                                                                   |      | `2.5-03-usage-panel.png`；失败一律不落账由 `greet.test.ts` 四例（被拒/黑名单/           |                |
+|        |                                                                                   |      | 未送达/让出）钉住                                                                       |                |
+| 2.5-04 | 频控：连续打招呼间隔在配置区间内随机化，且日上限生效（到量即停）                  | U+C  | 单测频控计算（`throttle.test.ts` 5 例，区间端点取到）；日上限到量即停在页面实测         | [x]            |
+|        |                                                                                   |      | 第 3 次被 `QUOTA_EXCEEDED` 拦（`2.5-02-gate-rejected.txt`）；间隔把区间收成 30s 单点    |                |
+|        |                                                                                   |      | 实测：第二条 `waitedMs=19496`、真实墙钟 40481ms、账本两条 ts 差恰为 30000，             |                |
+|        |                                                                                   |      | 见 `2.5-04-throttle-live-readout.txt`、日志行 `2.5-04-throttle-log-line.png`、          |                |
+|        |                                                                                   |      | 帧内送达 `2.5-04-throttled-msg-on-page.png`                                             |                |
+| 2.5-05 | 人类化节流不产生固定节奏（避免可预测的等间隔）                                    | U    | 单测 10 次抽样：全部落在闭区间内、极差 > 区间长度 30%、互异值 ≥8；                      | [x]            |
+|        |                                                                                   |      | 界面行显示配置项 + 日志播报随机区间 + 改配置后区间跟着变，见 `2.5-05-throttle-*.png`    |                |
+| 2.5-06 | 消息输入框输入中文不乱码、无多余字符，发送后页面出现该消息                        | V    | fixture 聊天页截图：`browser.act.type` 走 CDP 受信通道，回读 `valueAfter` 与原文        | [x]            |
+|        |                                                                                   |      | 逐字符相等（92/92，含「」与 🙂）；`browser.act.click` 后帧内状态行变「第 N 条已送达     |
+|        |                                                                                   |      | 服务端」、该条进会话时间线，见 `2.5-06-*.png` 与 `2.5-06-*-readout-*.txt`               |                |
+| 2.5-07 | 回复监听：轮询/观察对方新消息并入库（会话 thread 表），带时间戳                   | C    | 在 fixture 注入回复 → 断言入库：`conversation.store.syncFrom` 回读 read 2/inserted 2    | [x]            |
+|        |                                                                                   |      | /duplicate 0，二次同步 duplicate 2（去重键在唯一索引里，不在内存）；行带 `read_at`      |
+|        |                                                                                   |      | 与 `external_id`，按 jobId 分线程，见 `2.5-07-*`                                        |                |
+| 2.5-08 | 已回复的 JD 在界面标记，且后续步骤（投递）优先这些目标                            | V    | 诊断视图「库内清单」5 行：同步前全是「还没有人回复」（`2.5-08-baseline-unreplied.png    | [x]            |
+|        |                                                                                   |      | `）；`conversation.store.syncFrom` 后 #2「对方已回 1 条」、#1「对方已回 2 条」置顶，    |                |
+|        |                                                                                   |      | 其余三行沉到后面 —— 排序改成已回复优先、同级仍按 `captured_at DESC, id DESC`，          |                |
+|        |                                                                                   |      | 见 `2.5-08-replied-first.png`。后半句「投递优先」在本片只兑现到「同一个 `jd.store.list` |                |
+|        |                                                                                   |      | 读数已把已回复的排在前面 + 带 `inboundCount`」，2.6 的投递节点必须消费这份顺序，        |                |
+|        |                                                                                   |      | 不得自己再排一次（届时回补 2.6 的取序证据）                                             |                |
+| 2.5-09 | 打招呼文案含可追溯的生成来源记录（prompt 版本 + JD id），便于复盘                 | C    | 查库断言 `usage_ledger.source` 非空：模板回落那条为 `v1:<jdId>`、手改文案那条为         | [x]            |
+|        |                                                                                   |      | `manual:<jobId>`，两条同屏见 `2.5-09-source-column.txt`；`ScriptDraftView` 带           |                |
+|        |                                                                                   |      | `scriptVersion`+`jdId` 由 `script.test.ts` 钉住                                         |                |
+| 2.5-10 | 自动化不发送任何个人凭据/密码/手机验证码到页面                                    | C    | 黑名单已落在唯一出口 `outbound.script.assertSendable`（模型/模板两条产出都过，          | [x]            |
+|        |                                                                                   |      | 命中即 `OUTBOUND_FORBIDDEN_CONTENT`）；页面发带手机号的文案 → 渠道没被调、账本不增      |                |
+|        |                                                                                   |      | （`2.5-10-blacklist-rejected.txt`），单测同形一例在 `greet.test.ts`                     |                |
+| 2.5-11 | 真实账号打招呼（M4 判据）并留回复监听记录                                         | V    | 用户在场时手动验证                                                                      | [!] 待用户在场 |
+| 2.5-12 | LLM 调用有唯一入口 `llm.chat`（`packages/llm`）：其他包出现模型端点 URL 或        | C    | `pnpm lint` 末道 `check-llm-single-entry.ts`（塞假端点即红）；                          | [x]            |
+|        | chat completion 请求即 lint 失败（AGENTS.md §2.7 第二个 LLM 客户端禁令落地）      |      | 页面插件树 `llm` 行 + 未就绪日志见证据图                                                |                |
+| 2.5-13 | 不新建配额系统：打招呼日上限复用 `entitlement.gate`，重复发送防护 = 幂等键 +      | C    | 全仓 grep 无 `sentSet`/`alreadySent`/`sentTargets`；建表语句只有 7 张（`usage_ledger`   | [x]            |
+|        | `usage_ledger` 按 target 计数，代码里不存在「已发送集合」                         |      | /`jobs`/`conversation_messages`/`workflow_runs`/`workflow_nodes`/`chat_session`/        |                |
+|        |                                                                                   |      | `chat_message`），无第二张配额表、本切片未加迁移；页面同 run 同 target 二次发送被       |                |
+|        |                                                                                   |      | `OUTBOUND_ALREADY_SENT` 拒（`2.5-13-repeat-rejected.txt`），换 run / 换目标仍可发，     |                |
+|        |                                                                                   |      | 且「换个进程重挂同一份库仍拦得住」在 `greet.test.ts` 里断言（判据在库里不在内存）       |                |
+| 2.5-14 | 「已回复」状态由 `conversation_messages` join 导出，不写回 JD 行（单一事实来源）  | C    | 全仓 grep：`jobs` 建表语句仍无 `replied` 列、本片未加迁移；`jd.store.list` 的查询改成   | [x]            |
+|        |                                                                                   |      | 对 `conversation_messages` 按 `(platform, job_id)` 分组、只数 `direction='recruiter'`   |                |
+|        |                                                                                   |      | LEFT JOIN，视图上带出 `replied` / `inboundCount`。页面读数 `2.5-14-joined-readout.txt`  |                |
+|        |                                                                                   |      | ：1002 线程内 2 条（含自己发的那条）只计 1 → 自己发的行不进计数；二次同步 `duplicate 2` |                |
+|        |                                                                                   |      | → 判据在唯一索引里不在内存。同片把「方向前缀」从正文里剥掉（落库、回读、帧内三处一次    |                |
+|        |                                                                                   |      | 改齐）：三条存储正文 `带方向前缀: false`，帧内 `[data-message-marker]` 与               |                |
+|        |                                                                                   |      | `[data-testid=chat-log-body]` 拆分断言见 `2.5-14-frame-dom-assert.txt`、                |                |
+|        |                                                                                   |      | `2.5-14-frame-marker-body.png`                                                          |                |
+| 2.5-15 | 反向验证：否决 browser-copilot 的验证码 OCR 识别链（`recognize_image`）未造成主线 | C+V  | plan §12.2/§12.8 对照表 + fixture 注入验证码页 → 截图显示已暂停                         | [ ]            |
+|        | 能力缺口，风控出现只「暂停 + 通知用户」，不做识别与规避                           |      | （与 2.7-01 联验）                                                                      |                |
 
 **2.5-e（发送编排）收口记录**：
 
