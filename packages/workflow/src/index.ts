@@ -17,6 +17,7 @@ import {
   Service,
   sleep,
   type Context,
+  type RiskSignalEvent,
   type SessionExpiredEvent,
   type ToolEffect,
   type WorkflowNodeSpec,
@@ -343,6 +344,9 @@ export class WorkflowRunnerService extends Service {
     // 会话失效是 `sessions` 探测出来的，runner 只在运行中接它：不在运行中就没有可停的地方。
     const offSessionExpired = this.ctx.on('session/expired', (event) => this.handleSessionExpired(event));
     this.ctx.effect(() => offSessionExpired, 'workflow.session-expired');
+    // 风控信号与登录态失效同一条处置：运行中才停，停的方式是同一个 `stop()`（spec 2.7-01）。
+    const offRiskSignal = this.ctx.on('browser/risk-signal', (event) => this.handleRiskSignal(event));
+    this.ctx.effect(() => offRiskSignal, 'workflow.risk-signal');
 
     // 开机第一件事是把上次进程死亡留下的孤儿 run 判成中断（plan §11.3 第 6 条）：
     // 晚一步，界面上第一次读数就会显示「仍在运行」，而那个「运行中」属于一个已经不存在的进程。
@@ -396,6 +400,23 @@ export class WorkflowRunnerService extends Service {
     this.ctx.logger.warn(`${event.platform} 登录态失效（${event.reason}），已停在 ${currentStep.id}，等待用户接管`);
     // 播报位留 null：这一句由渲染层按 `requiresHuman` 组织（2.1-08 定下的口径），主进程不参与组句。
     this.stop({ subject: event.platform, reason: event.reason, stepId: currentStep.id, at: event.at }, null);
+  }
+
+  /**
+   * 撞上网页自己的风控拦截时停在可恢复点并**留下结构化接管点**（spec 2.7-01）。
+   *
+   * 与 `handleSessionExpired` 走的是同一条 `stop()`：停下来的方式只有一种，区别只在界面按 `reason`
+   * 说的这句话——登录失效要重新扫码，风控拦停下来是「等一等、人来点」，两者不能混成一个文案。
+   * @param event `browser.risk` 推的信号（平台 / 判据类别 / 命中的那句原文 / 地址）
+   */
+  private handleRiskSignal(event: RiskSignalEvent): void {
+    if (this.run.status !== 'running') return;
+    const currentStep = this.run.steps[this.run.stepIndex];
+    if (!currentStep) return;
+    this.ctx.logger.warn(
+      `${event.platform} 触发风控信号（${event.kind}：${event.detail}），已停在 ${currentStep.id}，等待用户接管`,
+    );
+    this.stop({ subject: event.platform, reason: 'risk-control', stepId: currentStep.id, at: event.at }, null);
   }
 
   /**

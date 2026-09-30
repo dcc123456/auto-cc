@@ -38,6 +38,10 @@
  * - `/api/fail-counter` 是**失败注入计数器**（POST 计一次并回 `{hits}`，GET 只读，DELETE 归零）：
  *   `boss-basic` 计划的 `demo.flaky` 节点打它，于是「前两次必失败、第三次成功」这条退避重试的路径
  *   在 app 被真的 kill 掉之后仍然接得上（spec 2.4-03 / 2.4-05 —— 计数放在进程外才有跨重启的证据）；
+ * - `/api/risk-mode` 是**风控靶页开关**（POST `{mode}`，GET 只读，DELETE 归回 `off`）：
+ *   `off` 让 `/boss` 照常出列表页，`captcha` 出 200 的「安全验证」页（正文判据的靶子），
+ *   `blocked` 出 403 的「访问受限」页（状态码判据的靶子）。开关在 fixture 进程里，所以能在
+ *   工作流正跑着的时候切，把「运行中突然被拦 → 立即暂停」这条时序演出来（spec 2.7-01）；
  * - 进程可以被独立停掉，这就是 1.8-09「站点不可达要有明确错误态」的开关。
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -132,6 +136,30 @@ function appendThreadMessage(targetId: string, direction: ThreadMessage['directi
  * 计数若在主进程内存里，那一刻会被清零，「第 3 次才成功」这条完整路径就拍不到证据了。
  */
 let failCounterHits = 0;
+
+/**
+ * 风控靶页的开关（spec 2.7-01 用）：`off` 照常出列表页，`captcha` 出 200 的验证页，`blocked` 出 403。
+ *
+ * 三种而不是两种，是因为 `browser.risk` 有两条独立的判据：文案判据只在 200 的验证页上命中
+ * （状态码是 200，光看响应头判不出来），状态码判据要靠 403 才有东西可判。
+ * 开关放在 fixture 进程里、由验收脚本按条目现调，是为了让「工作流正在跑 → 页面突然变验证页」
+ * 这条真实时序能被演出来，而不是靠事先把站点改成坏样子（那种靶子测不到运行中的暂停）。
+ */
+type RiskMode = 'off' | 'captcha' | 'blocked';
+
+let riskMode: RiskMode = 'off';
+
+/** 一张最朴素的人机验证页：标题与正文都带「安全验证」，正好落进知识包 `risk.riskPattern` 的判据里。 */
+const RISK_CAPTCHA_HTML =
+  '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>安全验证 - 本地仿站</title></head>' +
+  '<body><h1 data-testid="risk-heading">请完成安全验证</h1>' +
+  '<p data-testid="risk-body">检测到异常访问，请输入下方验证码后继续。</p></body></html>';
+
+/** 403 那一档的响应体：真实站点的拦下页也带一句人话，正文为空会让「页面照样装载完成」这条实测失去靶子。 */
+const RISK_BLOCKED_HTML =
+  '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>访问受限 - 本地仿站</title></head>' +
+  '<body><h1 data-testid="risk-heading">访问受限</h1>' +
+  '<p data-testid="risk-body">您的请求过于频繁，请稍后再试。</p></body></html>';
 
 /**
  * 投递靶页的状态（2.6 用）。
@@ -844,10 +872,11 @@ async function readRawBody(
  * 回一份静态 HTML。
  * @param response 待写的响应
  * @param html 页面内容（已做过占位替换或本身就是静态子视图）
+ * @param status 状态码；默认 200，风控靶页那一档要的是 403（spec 2.7-01 的状态码判据）
  */
-function sendHtml(response: ServerResponse, html: string): void {
+function sendHtml(response: ServerResponse, html: string, status = 200): void {
   // no-store 是必需的：验收截图一旦拿到缓存里的旧 DOM，判据就跟当前实现错位了。
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   response.end(html);
 }
 
@@ -1051,6 +1080,40 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  // 风控靶页开关（spec 2.7-01）：POST 只认 off / captcha / blocked 三个值，别的以 400 拒绝而不是默默当 off 处理
+  // ——「靶子没立起来」必须是一次可看见的失败，否则截图里那张正常列表页会被当成「风控没触发」的证据。
+  if (url.pathname === '/api/risk-mode' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    const next = body['mode'];
+    if (next !== 'off' && next !== 'captcha' && next !== 'blocked') {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'mode 只接受 off / captcha / blocked' }));
+      return;
+    }
+    riskMode = next;
+    console.log(`[fixture] 风控靶页切换为 ${next}`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, mode: riskMode }));
+    return;
+  }
+
+  // DELETE 归到 off：验收要能重复拍同一条暂停路径，而停在 blocked 档时后续每一轮导航都会立刻 403，
+  // 第二次拍不到「正常列表页 → 突然变验证页」的对比。
+  if (url.pathname === '/api/risk-mode' && request.method === 'DELETE') {
+    riskMode = 'off';
+    console.log('[fixture] 风控靶页归零（off）');
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, mode: riskMode }));
+    return;
+  }
+
+  if (url.pathname === '/api/risk-mode') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ mode: riskMode }));
+    return;
+  }
+
   // 2.2-12 / 2.2-13 的对端读数：页面把 isTrusted / inputType / value 整份报上来。
   if (url.pathname === '/api/trust' && request.method === 'POST') {
     const body = await readJson(request, response);
@@ -1125,6 +1188,17 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   if (url.pathname === '/boss') {
+    // 风控靶页（spec 2.7-01）：抓取的第一次导航就落在这里，所以两种拦下形态都能在工作流运行中被撞见。
+    if (riskMode === 'blocked') {
+      console.log('[fixture] 风控靶页：403 访问受限');
+      sendHtml(response, RISK_BLOCKED_HTML, 403);
+      return;
+    }
+    if (riskMode === 'captcha') {
+      console.log('[fixture] 风控靶页：200 安全验证');
+      sendHtml(response, RISK_CAPTCHA_HTML);
+      return;
+    }
     sendHtml(
       response,
       readFileSync(bossSearchPage, 'utf8')
@@ -1203,7 +1277,7 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   // 路由清单打在启动日志里：验收脚本按这份列表逐条 curl，不用回头翻代码。
   console.log(
-    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/deliveries（cookie ${cookieName}）`,
+    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/risk-mode · /api/deliveries（cookie ${cookieName}）`,
   );
 });
 

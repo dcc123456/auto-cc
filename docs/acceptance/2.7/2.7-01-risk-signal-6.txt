@@ -1,0 +1,62 @@
+2.7-01 风控信号 → 立即暂停工作流并通知 —— 真实 app 运行期读数（2026-10-01，Windows / CDP 10222）
+
+环境
+  pnpm dev（Electron 44.4.5，userData=tmp/dev-userdata-25f）· pnpm fixture（127.0.0.1:10233）
+  平台：boss → http://127.0.0.1:10233/boss（本地仿站，AGENTS.md §7.2 一律不碰真实平台）
+  配置：cordis.yml browser-risk { riskStatusCodes: [403,429], pageSettleTimeoutMs: 10000 }
+        workflow { planId: boss-basic }（节点：jd-capture → jd-list → flaky）
+
+靶页开关（本轮新增的 fixture 控制面）
+  GET    /api/risk-mode            -> {"mode":"off"}
+  POST   /api/risk-mode {"mode":"blocked"}  -> {"ok":true,"mode":"blocked"}   随后 curl /boss 得 403
+  POST   /api/risk-mode {"mode":"captcha"}  -> {"ok":true,"mode":"captcha"}   随后 /boss 得 200 + 「安全验证」页
+  DELETE /api/risk-mode            -> {"ok":true,"mode":"off"}（验收结束已归零，末次读数为 {"mode":"off"}）
+
+装配面读数（harness eval → window.autoCC.kernel.tree()）
+  browser-risk=active（`kernel.tree()` 共 30 个节点全 active，notActive 为空）
+
+日志读数（harness eval → window.autoCC.log.tail(500)，只留含「风控/观测」的行）
+  2026-09-30T20:08:36.910Z info  sessions-service: 主框架响应观测已挂载：3 个分区
+  2026-09-30T20:08:36.910Z info  browser-risk-service: 风控观测就绪：状态码 403 / 429 · 正文等待上限 10000ms
+  2026-09-30T20:10:22.026Z warn  browser-risk-service: 风控信号：boss 的 http://127.0.0.1:10233/boss?query=前端工程师&city=上海（http-status：HTTP 403）
+  2026-09-30T20:10:22.027Z warn  workflow-runner-service: boss 触发风控信号（http-status：HTTP 403），已停在 jd-capture，等待用户接管
+  2026-09-30T20:12:11.653Z warn  browser-risk-service: 风控信号：boss 的 ...（page-text：安全验证）
+  2026-09-30T20:12:11.654Z warn  workflow-runner-service: boss 触发风控信号（page-text：安全验证），已停在 jd-capture，等待用户接管
+  2026-09-30T20:12:50.907Z warn  同上两条（带着风控页点「续跑」→ 再次停在同一步，不是跳过去）
+
+第一次暂停（HTTP 403 那一类判据）—— 界面 DOM 读数
+  [data-testid="workflow-state"]      : 已暂停 · b4a466ca-e0c4-4f27-9385-cfc33d5a7a8e
+  [data-testid="workflow-takeover"]   : subject=boss reason=risk-control step=jd-capture
+  横幅文案（zh-CN）：等待你接管 / boss 的页面出现了风控拦截（验证码 / 访问受限一类），工作流已停在「抓取 JD 入库」；请在内嵌视图里人工完成后继续。
+  节点表：jd-capture / jd-list / flaky 全为 pending（停在可恢复点，未起下一步）
+  workflow.runner.current(): {status:"paused", requiresHuman:{subject:"boss",reason:"risk-control",stepId:"jd-capture",at:1790799022026}}
+  截图：2.7-01-http403-paused-panel.png（主窗口）+ 2.7-01-http403-page.png（内嵌视图里的「访问受限」页）
+
+续跑跑通（同一 run，靶页改回 off）
+  点「续跑」→ 三个节点依次 done → [data-testid="workflow-state"] = 已完成 · b4a466ca…，requiresHuman=null
+  内嵌视图读数：正常职位列表页（3 张卡），见 2.7-01-normal-list-page.png
+
+第二次暂停（页面文案那一类判据，判据来自知识包 boss.json 的 risk.riskPattern）
+  靶页切 captcha → 点「开始」→ 新 run 3f573127… 在 ~3s 内 paused，reason=risk-control、step=jd-capture
+  截图：2.7-01-captcha-paused-panel.png + 2.7-01-captcha-page.png（内嵌视图里的「请完成安全验证」页）
+
+渲染层确实收到了这条推送（bridge.on('browser/risk-signal')，载荷逐字）
+  {"platform":"boss","kind":"page-text","detail":"安全验证",
+   "url":"http://127.0.0.1:10233/boss?query=%E5%89%8D%E7%AB%AF%E5%B7%A5%E7%A8%8B%E5%B8%88&city=%E4%B8%8A%E6%B5%B7",
+   "at":1790799170907}
+  —— 只有这五个键：没有页面正文节选、没有 cookie、没有响应头（AGENTS.md §8.5）
+
+反向验证：观测层是唯一让它停下来的东西（spec 2.7-01 的另一半）
+  plugins.stop('browser-risk') → 靶页仍是 captcha → 点「续跑」→ run 3f573127… 跑到「已完成」，
+    渲染层监听器整段零新信号（__riskSignals 停在 1 条）→ 归还槽位后确实不再有任何回调
+  plugins.start('browser-risk') → tree 读数 browser-risk=active → 点「开始」→ 新 run 79716061… 又停在 jd-capture，
+    渲染层收到第 2 条 page-text 信号 → 重新挂载确实重新拿到那个唯一的 webRequest 槽位
+  收尾：靶页 DELETE 归零 + 点「续跑」→ 79716061… 已完成，app 回到无接管点状态
+
+收尾自检后的复读（主进程侧只做格式化改动 → esbuild watch 自动重启 Electron 之后）
+  kernel.tree() → browser-risk=active、30 个节点全 active、notActive 为空
+  workflow.runner.current() → {status:"idle", requiresHuman:null}（无遗留接管点）
+  GET /api/risk-mode → {"mode":"off"}
+
+结论：两类判据（HTTP 状态码 / 页面文案）都在真实窗口里把整条工作流停在当前步并给出可续跑的接管横幅；
+     摘掉观测服务则同样的风控页不再产生任何暂停——因果链只经过 `browser/risk-signal` 这一个事件。

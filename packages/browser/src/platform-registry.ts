@@ -10,6 +10,7 @@
  *
  * 另面对外发域露两件事：`GreetChannelSource`（spec 2.5-02）与 `ResumeChannelSource`（spec 2.6-01 / 02）。
  * 渠道的真相就是适配器，所以这里按名字现问现取，不再另存一张渠道表——那张表在适配器被重建时就成了过期读数。
+ * 第三个口子是给风控观测层的 `riskPatternOf`（spec 2.7-01）：判据同样只存在适配器声明里，理由与上两句相同。
  */
 import {
   AppError,
@@ -138,6 +139,16 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
     [...this.adapters.values()]
       .filter((adapter) => adapter.meta.capabilities.includes('sendResume'))
       .map((adapter) => adapter.meta.id);
+
+  /**
+   * 按平台名要它的风控页文字判据（`browser.risk` 用，spec 2.7-01）。
+   *
+   * 不抛而是回 null：知识包没有 `risk` 段是合法状态（那个平台只按 HTTP 状态判风控），
+   * 观测层不该因为「这个站点的文案判据还没摸清」就整条链路失败。
+   * @param platform 平台标识（来自会话分区归属，不是页面地址猜的）
+   * @returns 正则源码；未登记或该平台未声明时为 null
+   */
+  riskPatternOf = (platform: string): string | null => this.adapters.get(platform)?.risk?.pattern ?? null;
 
   [Service.init](): void {
     this.ctx.logger.info('平台登记表就绪：当前为空，等待平台包登记');

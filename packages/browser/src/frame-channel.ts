@@ -7,6 +7,9 @@
  *
  * 另一条刻意的设计：**单帧失败不掀翻整次扫描**。站点自造的浮层帧常常拒绝脚本，
  * 但那一帧读不到不代表别的帧读不到；把失败收集进结果里报告，才是可诊断的形态。
+ *
+ * 这里同时放着「拿视图」和「等装载落定」两个小工具：页面操作和风控观测都要它们，
+ * 前者在 spec 2.1 就已经收过一轮，后者是同一份等待逻辑的第二个使用者（AGENTS.md §2.2）。
  */
 import { AppError } from '@auto-cc/core';
 import type { WebContents, WebFrameMain } from 'electron';
@@ -92,6 +95,33 @@ export async function evaluateInFrames(
     }
   }
   return evaluations;
+}
+
+/**
+ * 等一次导航装载落定。
+ *
+ * 监听器必须在三条出口（成功 / 失败 / 超时）里都摘掉：`once` 只保证触发过一次，
+ * 而超时那条永远不会触发，留着就是每次导航泄漏一对监听（spec 2.1-11 数的正是这个）。
+ *
+ * 页面层与风控观测层都要「等到正文可读再读一次」，所以这段收在这里（AGENTS.md §2.2）。
+ * @param contents 目标视图句柄
+ * @param timeoutMs 等待上限（毫秒）
+ * @returns 落定方式；`timeout` 不是错误，页面仍会继续装载，由读数反映真实进度
+ */
+export function settleLoad(contents: WebContents, timeoutMs: number): Promise<'loaded' | 'failed' | 'timeout'> {
+  return new Promise((resolve) => {
+    const finish = (outcome: 'loaded' | 'failed' | 'timeout'): void => {
+      clearTimeout(timer);
+      contents.removeListener('did-finish-load', onLoaded);
+      contents.removeListener('did-fail-load', onFailed);
+      resolve(outcome);
+    };
+    const onLoaded = (): void => finish('loaded');
+    const onFailed = (): void => finish('failed');
+    const timer = setTimeout(() => finish('timeout'), timeoutMs);
+    contents.once('did-finish-load', onLoaded);
+    contents.once('did-fail-load', onFailed);
+  });
 }
 
 /**

@@ -401,7 +401,7 @@ Chromium 不再产帧，于是 `IntersectionObserver` 回调与 `scroll` 事件*
 
 | ID     | 验收标准                                                                             | 方式 | 验证操作                                                                                                                                     | 状态 |
 | ------ | ------------------------------------------------------------------------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| 2.7-01 | 检测到风控信号（验证码页、账号异常提示、HTTP 403/429）时**立即暂停整条工作流**并通知 | V+C  | fixture 注入验证码页 → 截图显示已暂停                                                                                                        | [ ]  |
+| 2.7-01 | 检测到风控信号（验证码页、账号异常提示、HTTP 403/429）时**立即暂停整条工作流**并通知 | V+C  | fixture 注入验证码页 → 截图显示已暂停，见 `2.7-01-risk-signal-6.txt` 与五张 `2.7-01-*.png`                                                   | [x]  |
 | 2.7-02 | 不做任何验证码识别/绕过、不做 UA 与指纹伪装、不做多账号池                            | C    | `scripts/check-compliance-redlines.ts` 规则一扫描 145 个源码文件 0 命中 + 注入违规必红，见 `2.7-02-redline-scan.txt`                         | [x]  |
 | 2.7-03 | 全局日上限（搜索/打招呼/投递各自独立）可配置且生效                                   | U+C  | 到量断言停止 + 三动作互不占用，见 `2.7-03-per-action-quota.txt` 与五张 `2.7-03-*.png`                                                        | [x]  |
 | 2.7-04 | 操作节奏随机化参数集中在配置，不在代码里写魔法数（AGENTS.md §2 魔法数）              | C    | 同一扫描器规则二（browser/outbound/platform-boss/workflow/agent 生产代码的间隔字面量 0 命中）+ 运行期配置读数，见 `2.7-04-pacing-config.png` | [x]  |
@@ -412,7 +412,8 @@ Chromium 不再产帧，于是 `IntersectionObserver` 回调与 `scroll` 事件*
 ### 2.7 验收记录
 
 **证据位置**：`docs/acceptance/2.7/`（2.7-02-redline-scan.txt 机检与运行期读数 / 2.7-04-pacing-config.png 界面读数 /
-2.7-03-per-action-quota.txt 配置形状·单测·运行期读数 / 2.7-03-*.png 五张真实窗口截图）。
+2.7-03-per-action-quota.txt 配置形状·单测·运行期读数 / `2.7-03-*.png` 五张真实窗口截图 /
+2.7-01-risk-signal-6.txt 靶页开关·日志·DOM·事件载荷逐字读数 + `2.7-01-*.png` 五张真实窗口截图）。
 
 - **2.7-02** `[x]`：`scripts/check-compliance-redlines.ts`（挂在 `pnpm lint`
   末道）扫 145 个源码文件 0 命中。规则一拦 UA 改写、`webRequest.onBefore*`、`extraHeaders`、
@@ -454,7 +455,33 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
   被拒那一轮内嵌视图前后两次 `harness targets` 读数逐字相同（真的没导航）、账本仍 5 行（被拒不落账）。
   截图 `2.7-03-usage-three-actions.png`、`2.7-03-daily-limits-editor.png`、`2.7-03-daily-counters-before-run.png`、
   `2.7-03-search-quota-spent.png`、`2.7-03-capture-refused.png`；验收后配置已改回 `unlimited`。
-- **2.7-01 / 05 / 06 / 07** `[ ]`：分别挂在 2.7-c / 2.7-e / 2.7-e / 2.7-d，这几片未动。
+- **2.7-01** `[x]`：两类判据都在真实窗口里把整条工作流停在当前步，且**摘掉观测服务就不停了**（因果只经
+  `browser/risk-signal` 这一个事件）。
+  ① **归属**：观测口 `sessions.observeMainFrameResponses` 在分区那一层（`onResponseStarted` 只读、
+  不改写任何请求），判据分两处——状态码口径在配置（`riskStatusCodes: [403,429]`），页面文案在知识包
+  `boss.json` 的 `risk.riskPattern`，经 `platform.registry.riskPatternOf` 现问现取；`browser.risk` 只做
+  「命中→发一条事件」，暂停由 `workflow.runner` 订阅后走它已有的 `stop()`（与 `session/expired` 同形）。
+  ② **单测**（U）：`risk-service.test.ts` 14 条含「挂载占住那个唯一的 webRequest 槽位、卸载归还」「403 只发
+  一条 `http-status` 且一次正文都不读」「配置换口径就换行为」「`page-text` 事件用 `toEqual` 锁死形状——多一个键
+  （正文节选、cookie）即红」「分区对不上不读正文」「等不到装载事件不判没风控」「正文读不到时不静默判安全」；
+  `frame-channel.test.ts` 补 4 条 `settleLoad`；`platform-contract/registry` 与 `adapter.test.ts` 补 8 条
+  锁住「`risk` 段是站点知识、缺段回 null、代码不猜文案」。
+  ③ **运行期读数**（V+C，CDP 10222，全程本地仿站）：fixture 新增 `/api/risk-mode` 靶页开关
+  （`off / captcha / blocked`，非法值 400 而不是默默当 off）。`blocked` → 新 run `b4a466ca…` 在
+  `jd-capture` 之前停在 `paused`，横幅 `reason=risk-control`、三个节点全 `pending`，内嵌视图里是真实的
+  「访问受限」403 页；改回 `off` 点续跑 → 同一 run 三个节点依次 `done`。`captcha` → 新 run `3f573127…`
+  约 3 秒停在同步，`kind=page-text`、`detail=安全验证`，渲染层 `bridge.on('browser/risk-signal')` 收到的载荷
+  逐字只有 `{platform,kind,detail,url,at}` 五个键（§8.5 脱敏）。**反向验证**：`plugins.stop('browser-risk')`
+  后对着同一张风控页续跑 → run 跑到「已完成」且监听器零新信号（归还槽位是真的归还了）；
+  `plugins.start('browser-risk')` 后新 run `79716061…` 又停在 `jd-capture`。
+  截图 `2.7-01-http403-paused-panel-1.png`、`2.7-01-http403-page-2.png`、`2.7-01-captcha-paused-panel-3.png`、
+  `2.7-01-captcha-page-4.png`、`2.7-01-normal-list-page-5.png`；日志与 DOM 逐字读数见
+  `2.7-01-risk-signal-6.txt`。验收结束靶页已 `DELETE` 归零、app 回到无接管点状态。
+  ④ **本片实测到的两条框架事实**（已写进代码注释，见 `sessions/src/index.ts` 与 `browser/src/risk-service.ts`）：
+  `session.fromPartition` 在 `app.whenReady()` 之前直接抛「Session can only be received when app is ready」，
+  而内核装配发生在 ready 之前——首帧运行期 `browser-risk` 就是这样挂在 `failed` 的，故观测口改成异步、
+  调用方在 `[Service.init]` 里 await；同一会话的同一 webRequest 事件只有一个 handler（第二次注册直接覆盖第一个）。
+- **2.7-05 / 06 / 07** `[ ]`：分别挂在 2.7-e / 2.7-e / 2.7-d，这三片未动；2.7-01 已在 2.7-c 收口（见上一条）。
 
 ## 2.8 工作流与对话双入口接通
 

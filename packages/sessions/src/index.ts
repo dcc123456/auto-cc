@@ -5,13 +5,17 @@
  * 这里只决定「用哪个分区打开哪个地址」，以及从这个分区里读出来的登录态。
  * 因此本服务是仓库里第二处（也是领域层唯一一处）碰 `electron.session` 的地方，
  * 第三处出现就说明分区语义开始漂移（§2.7）。
+ * 2.7-01 起这里还多一个**同源**的口子：`observeMainFrameResponses` 观测的是分区里主文档的响应，
+ * 与 cookie 同属「分区」这一层，所以观测口的归属跟着分区走；而「哪些状态码 / 哪些字样算风控」
+ * 是页面判定，留在 `browser.risk`，这条边界一寸不越。
  *
  * 两条硬约束：
  * 1. 判定只看 cookie 的存在与过期时间，**不向站点发探测请求**——真实平台上一发请求就是风控流量；
  * 2. cookie 的**值**从不离开 electron 边界（`summarizeCookies` 只留名字与过期时间），
  *    所以它既进不了日志，也进不了 harness 写出的证据文件（AGENTS.md §8.5）。
+ *    响应观测同一条纪律：只交出状态码、状态行与地址，不交出请求/响应头。
  */
-import { session } from 'electron';
+import { app, session, type WebRequestFilter } from 'electron';
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import { partitionFor, type SessionPlatformView, type SessionsStatusView } from '@auto-cc/shared';
 import type { ShellService } from '@auto-cc/shell';
@@ -42,6 +46,29 @@ export type SessionsConfig = z.infer<typeof sessionsSchema>;
 
 /** 一个平台一次读取的结果：界面读数 + 判定依据（`reason` 只用于事件，不进快照）。 */
 type PlatformReading = { view: SessionPlatformView; verdict: AuthVerdict };
+
+/**
+ * 分区里一次**主文档**响应的读数（spec 2.7-01）。
+ *
+ * 只有判定要用的四个数：地址、状态码、状态行、时刻。响应头里可能带着会话票据，
+ * 所以它和 cookie 一样不许离开 electron 边界（AGENTS.md §8.5）。
+ */
+export type MainFrameResponseReading = {
+  /** 这条响应来自哪个平台的分区（按分区名对号，因此同站多平台也不会认错） */
+  platform: string;
+  url: string;
+  statusCode: number;
+  statusLine: string;
+  at: number;
+};
+
+/**
+ * 观测用的过滤器：只要主文档。
+ *
+ * `types: ['mainFrame']` 是实测出来的必需项（plan §14.2 H 的 spike-1）：不带 `types` 时
+ * 页面内的 XHR 与子帧都会各来一条，风控判定就会被自己的噪声淹掉。
+ */
+const MAIN_FRAME_FILTER: WebRequestFilter = { urls: ['http://*/*', 'https://*/*'], types: ['mainFrame'] };
 
 export class SessionsService extends Service {
   static provide = 'sessions';
@@ -139,6 +166,46 @@ export class SessionsService extends Service {
       .clearStorageData({ storages: ['cookies'], origin: new URL(config.startUrl).origin });
     this.ctx.logger.info(`已清除会话 cookie：平台 ${config.id}`);
     return (await this.read(config)).view;
+  };
+
+  /**
+   * 观测每个已登记平台分区里**主文档**的响应（spec 2.7-01 的取路，plan §14.2 H 的 spike 实测）。
+   *
+   * 为什么这条口在 `sessions` 而不是调用方自己 `session.fromPartition`：分区语义的唯一归属就是本服务，
+   * 观测点必须挂在同一个归属上；而「403/429 算不算风控」是页面判定，调用方（`browser.risk`）说了算。
+   * 观测是**只读**的（`onResponseStarted` 的 listener 没有 callback），所以不存在「看一眼就把请求卡住」的形态。
+   *
+   * 一条必须记住的实测：**同一个会话的同一个 webRequest 事件只有一个 handler**，第二次注册直接覆盖第一个。
+   * 因此这个槽位的独占者就是唯一的调用方，重复调用不会「多一个监听」，只会让前一个失效——
+   * 所以返回摘除函数，由调用方在自己的 effect 里归还。
+   *
+   * 另一条同为实测的约束（2.7-c 运行期第一次挂载就是栽在这里）：`session.fromPartition` 在
+   * `app.whenReady()` 之前直接抛「Session can only be received when app is ready」，而内核装配
+   * 发生在 ready 之前（`shell` 也是自己在 launch 里等 ready）。所以本口是**异步**的：先等 ready，
+   * 再把监听逐个分区挂上；调用方（`browser.risk`）在 init 里 await 它，摘除函数照旧归还。
+   * @param listener 每条主框架响应调用一次；参数是只含判定数据的读数（不含响应头与 cookie）
+   * @returns 摘除函数：调用后各分区不再回调，视图销毁与否都不影响（监听本来装在分区上）
+   */
+  observeMainFrameResponses = async (listener: (reading: MainFrameResponseReading) => void): Promise<() => void> => {
+    await app.whenReady();
+    const unbinds = this.platforms.map((platform) => {
+      const platformSession = session.fromPartition(partitionFor(platform.id));
+      platformSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, (details) => {
+        listener({
+          platform: platform.id,
+          url: details.url,
+          statusCode: details.statusCode,
+          statusLine: details.statusLine,
+          at: Date.now(),
+        });
+      });
+      // 摘除用的还是同一个 filter 对象：`onResponseStarted(filter, null)` 实测不抛错且此后零回调。
+      return () => platformSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, null);
+    });
+    this.ctx.logger.info(`主框架响应观测已挂载：${String(unbinds.length)} 个分区`);
+    return () => {
+      for (const unbind of unbinds) unbind();
+    };
   };
 
   /** @param platform 平台标识 @returns 配置；未登记的平台以结构化错误失败，不静默返回空快照 */

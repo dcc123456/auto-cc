@@ -10,6 +10,7 @@ import {
   BrowserActService,
   BrowserLocateService,
   BrowserPageService,
+  BrowserRiskService,
   PlatformRegistryService,
 } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
@@ -76,6 +77,9 @@ export const REGISTRY: Registry = {
   // `browser-act` 会连同进 PENDING（它的 `inject` 里有它），界面上点定位得到结构化错误。
   'browser-locate': BrowserLocateService,
   'browser-act': BrowserActService,
+  // 风控观测（spec 2.7-01）：它是每个分区 `onResponseStarted` 那个**唯一槽位**的独占者，
+  // 所以单独占一个清单 id 是可演示的——摘掉它之后验证码页会被照常翻页，而暂停只能由它触发。
+  'browser-risk': BrowserRiskService,
   // 平台登记处（spec 2.2-07）：适配器实例只在这里流通，渲染层只拿得到 `platform.registry.list`。
   'platform-registry': PlatformRegistryService,
   // BOSS 适配器（spec 2.2-06）：它在自己的 init 里把自己登记进上一行，`browser` 一行都不认识它。
@@ -85,7 +89,8 @@ export const REGISTRY: Registry = {
   // 会话消息库（spec 2.5-07）：`conversation_messages` 的唯一落点，迁移号段 5。
   // 摘掉它，界面读会话得到「服务未挂载」的结构化失败，而适配器那侧读页面照旧——「读到」与「记住」分属两条。
   'conversation-store': ConversationStoreService,
-  // 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：只读，不经 `entitlement.gate`，所以账本行数本轮不该变动。
+  // 抓取编排（spec 2.3-01 / 2.3-06…2.3-11）：从 2.7-b 起它也过闸门与频控——搜索额度按 `search` 记账，
+  // 轮间停顿由 `outbound.throttle` 抽样给出，所以「只读动作不占额度」这句旧话已经不成立。
   'jd-capture': JdCaptureService,
   // 工作流三件套（spec 2.4）：登记处、落库、执行器各占一个清单 id，所以每一条都能被单独摘掉。
   // 摘掉 `workflow-executors` 之后 `jd.capture` 无人登记，界面得到「执行器未登记」的结构化失败；

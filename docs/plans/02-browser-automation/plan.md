@@ -1638,3 +1638,66 @@ chat、并关掉内核会话。第一次"输入没生效"的读数就是这么�
 把外发的 `nextGapMs()` 露给 L2 只会让页面动作去占外发区间（`core/events.ts:397` 那条注释就是判据）；
 ② 账本 `summary().byAction` 已有数据、界面仍未渲染（§14.3 第 5 条末尾说的"顺手补"），
 它属于 2.7-e 的审计视图，留到那片一起做，不在这里空半截界面。
+
+### 14.9 2.7-c 收口记录（风控信号观测 + 工作流停在接管点，2026-10-01）
+
+**做了什么**：新增服务 `packages/browser/src/risk-service.ts`（provide `browser.risk`，注入
+`shell`/`sessions`/`browser.page`/`platform.registry`，配置 `{riskStatusCodes:[403,429], pageSettleTimeoutMs:10000}`，
+在 `main/registry.ts` 单独占一个清单 id `browser-risk`、`cordis.yml` 里带 dependsOn 与配置）；
+`sessions` 新增同源观测口 `observeMainFrameResponses`（每分区一条 `onResponseStarted({types:['mainFrame']}, …)`，
+只交出 `{platform,url,statusCode,statusLine,at}`，返回摘除函数）；知识包新增**可选** `risk` 段
+（`platform-contract.ts` schema + `boss.json` 的 `riskPattern: 安全验证|访问验证|人机验证|访问受限|操作频繁`，
+适配器回 `risk:{pattern}|null`，`PlatformRegistryService.riskPatternOf` 现问现取）；
+`core/events.ts` 加 `RiskSignalEvent` 与 takeover 理由 `'risk-control'`，`bridge.ts` 把
+`browser/risk-signal` 加进 `RENDERER_EVENTS` + `RendererEventSignatures`（那条保险丝盯着），
+两份语言包各加一条 `workflow.takeoverBody.risk-control`；`workflow.runner` 加一条与
+`session/expired` 同形的订阅 → `handleRiskSignal` → 既有的 `stop()`；`browser.page.settleLoad` 从私有方法
+提到 `frame-channel.ts`（第二个使用者出现，§2.2 抽公共层），页面导航与风控正文判定同读一份等待逻辑；
+`scripts/fixture-server.ts` 加 `/api/risk-mode`（`off|captcha|blocked`，非法值 400）作为两类判据的靶页开关。
+
+**验收读数**：2.7-01 转 `[x]`，证据 `docs/acceptance/2.7/2.7-01-risk-signal-6.txt`（环境·靶页开关·装配读数·
+日志逐字·界面 DOM·事件载荷·反向验证七节）+ 五张真实窗口截图（403 暂停面板 / 403 内嵌页 / 验证码暂停面板 /
+验证码内嵌页 / 恢复正常后的列表页）。三条要点都取到运行期证据：`blocked` 下 run `b4a466ca…` 在 `jd-capture`
+之前变 `paused`、`[data-testid="workflow-takeover"]` 上 `reason=risk-control`、三个节点全 `pending`；
+`captcha` 下新 run `3f573127…` 约 3 秒停在同步，渲染层探针订阅拿到的载荷逐字只有五个键；
+`plugins.stop('browser-risk')` 之后**同一张风控页照常跑完**（监听器零新信号），`plugins.start` 之后
+新 run `79716061…` 又停在 `jd-capture` ——暂停的因果只经这一个事件，不是巧合。
+
+**与 §14.3 第 1 条的偏差，逐条写明**：
+
+1. **观测口做成异步，plan 未写**。运行期第一次挂载 `browser-risk` 就落在 `failed`：
+   `session.fromPartition` 在 `app.whenReady()` 之前直接抛「Session can only be received when app is ready」，
+   而内核装配发生在 ready 之前（`main/src/index.ts` 是 `void mount()`，只有 `shell` 自己在 launch 里等 ready）。
+   改成 `[Service.init]` 里 `await app.whenReady()` 之后再逐分区挂，`browser.risk` 在 init 里 await 这个口。
+   **这条是 211 条单测抓不到的**：`test-doubles.ts` 的假 `sessions` 不碰 Electron 的 ready 门，
+   只有真实窗口 + `kernel.tree()` 才看得见——正好是 §7.1 要求 V 类必须"看到页面"的理由。
+2. **归属靠闭包而不是 `webContentsId` 反查**（§14.2 H 的 spike-2 写的是"只能靠反查"）。
+   实现是 `platforms.map(...)` 逐分区各挂一条、把平台名关进回调里，所以读数天生带正确归属，
+   不需要视图表反查，也就不依赖"当前视图恰好属于这个平台"这件事。
+3. **多了一道视图归属核对（`currentViewFor`），plan 未写**。观测 listener 装在**分区**上（视图销毁也还在），
+   而正文只能从当前那块视图读；用户已把视图切去别的平台时，读回来的正文属于别人——拿它判风控就是
+   拿别的站点的文案给这个平台定罪。所以只有 `kernelViewPartition === partitionFor(platform)` 才读正文，
+   对不上就这一趟不读（状态码那条判据不受影响，它本来就带在响应里）。
+4. **一趟导航只发一条信号**：状态码命中即发 `http-status` 并**不再读正文**。
+   plan 只写了"两个信号源，一个出口"，没说两源可否同时命中；403 页几乎必然也带风控字样，
+   两条都发会让 runner 停两次、界面说两遍同一件事，而 runner 的 `stop()` 本来就以第一条为准。
+5. **"通知"落在既有横幅，界面侧零新组件**（这条是照 plan 执行，不是偏差，但要说清它做到了哪一步）：
+   `browser/risk-signal` 进白名单是为了界面**能**订阅，本片没有任何常驻界面订阅它——
+   用户看到的"通知"是 runner 写进 run 的接管点，由 `WorkflowPanel.tsx:118-137` 的横幅 +
+   `workflow.takeoverBody.risk-control` 说出来。证据里的载荷是 harness 在渲染层临时挂探针订阅取到的。
+   把它做成独立的 toast/通知中心是 P2 之后的事，本片不发明第二个界面形状。
+
+**合规边界自查（§8.3 / §8.5）**：`onResponseStarted` 是只读 listener（没有 callback，不看也不改请求），
+红线扫描器扫 147 个源码文件 0 命中；响应头一个字都不交出（可能带会话票据）；
+事件 `detail` 只放判定依据（`HTTP 403` 或命中的那几个字样），不放正文节选——
+`risk-service.test.ts` 用 `toEqual` 锁住载荷形状，多一个键即红。观测层不重试、不识别、不规避：
+判据命中之后它做的事只有一次 `ctx.emit`。
+
+**收尾自检（AGENTS.md §7.4）读数**：`pnpm typecheck` 全绿；`pnpm lint` 全绿（含渲染层规范检查
+「2 个语言包，16 个源文件」、知识包检查「选择器只在知识包目录里」、合规扫描「147 个源码文件 0 命中」）；
+`pnpm format:check` 全绿；`pnpm test` exit 0、18 个包全绿（browser 211 / workflow 83 / platform-boss 121 /
+outbound 58，其余包全 Done）。验收结束靶页已 `DELETE` 归 `off`、app 回到无接管点状态、配置未改动。
+
+**本片欠着的**：`browser/risk-signal` 目前只有 runner 一个消费者，界面的独立通知（通知中心/toast）
+与"风控信号也进审计视图"这两件事都没做——它们分别属于 2.7-e 的界面与之后的通知子计划，
+不在这里预先长出一半的界面。

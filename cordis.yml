@@ -158,6 +158,15 @@ plugins:
   - id: platform-registry
     dependsOn: [ipc]
 
+  # 风控观测（spec 2.7-01）：主文档响应命中判据就发一条 `browser/risk-signal`，本身不停任何东西。
+  # 状态码口径在这里（换站点要改的是数），页面文案判据在知识包的 `risk` 段里（那是站点知识）。
+  # 注掉这一行 = 那个唯一的 webRequest 槽位空出来：验证码页会被照常翻页，工作流不再因风控而停。
+  - id: browser-risk
+    dependsOn: [browser, platform-registry]
+    config:
+      riskStatusCodes: [403, 429]
+      pageSettleTimeoutMs: 10000
+
   # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
   # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，
   # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有 `demo.flaky`。

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppError } from '@auto-cc/core';
 import type { LocatedReading } from '@auto-cc/shared';
-import { fakeFrame, fakeReading, fakeView, writeFrame } from './test-doubles.js';
+import { fakeFrame, fakeReading, fakeView, fireViewEvent, viewListenerChannels, writeFrame } from './test-doubles.js';
 import {
   ancestorChain,
   evaluateInFrames,
@@ -10,6 +10,7 @@ import {
   framesOf,
   ordinalInParent,
   readingsFromFrames,
+  settleLoad,
 } from './frame-channel.js';
 
 /**
@@ -123,5 +124,56 @@ describe('帧身份与链（spec 2.2-09 的坐标折算依据）', () => {
     writeFrame(kept, { parent: top });
     writeFrame(top, { frames: [kept] });
     expect(ordinalInParent(top, ghost)).toBe(0);
+  });
+});
+
+describe('等装载落定（spec 2.7-01 的正文可读时机）', () => {
+  /**
+   * 造一块只有顶层帧的视图。
+   * @returns 视图替身（`once` / `removeListener` 由替身的事件表实现）
+   */
+  const viewOf = (): ReturnType<typeof fakeView> => fakeView(fakeFrame('http://127.0.0.1:10233/boss', { value: [] }));
+
+  it('注册是同步发生的：调用返回那一刻两条监听就已经挂上，事件随后到达也不会丢', () => {
+    const contents = viewOf();
+    const pending = settleLoad(contents, 1_000);
+    expect(viewListenerChannels(contents)).toEqual(['did-fail-load', 'did-finish-load']);
+    fireViewEvent(contents, 'did-finish-load');
+    return expect(pending).resolves.toBe('loaded');
+  });
+
+  it('装载失败与装载完成是两个不同的结局，不能都当成「可以读正文了」', () => {
+    const contents = viewOf();
+    const pending = settleLoad(contents, 1_000);
+    fireViewEvent(contents, 'did-fail-load');
+    return expect(pending).resolves.toBe('failed');
+  });
+
+  it('落定之后两条监听都摘干净：一次导航挂一对、挂十次就是在攒泄漏', async () => {
+    const contents = viewOf();
+    const pending = settleLoad(contents, 1_000);
+    fireViewEvent(contents, 'did-finish-load');
+    await expect(pending).resolves.toBe('loaded');
+    // `once` 只保证发出那一条自己被摘掉，另一条要靠 `finish` 里的 removeListener 主动收。
+    expect(viewListenerChannels(contents)).toEqual([]);
+  });
+
+  it('等不到事件就是 timeout，句柄与监听一起收掉（用假计时器，不真等）', async () => {
+    const contents = viewOf();
+    vi.useFakeTimers();
+    try {
+      let outcome = '未落定';
+      const pending = settleLoad(contents, 1_000).then((value) => {
+        outcome = value;
+      });
+      expect(viewListenerChannels(contents)).toEqual(['did-fail-load', 'did-finish-load']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await pending;
+      expect(outcome).toBe('timeout');
+      // 计时器到点同样要走 `finish`：两条监听都得在表上消失，否则下一次装载会读到这一对的残留。
+      expect(viewListenerChannels(contents)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

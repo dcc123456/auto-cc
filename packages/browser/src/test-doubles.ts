@@ -5,13 +5,17 @@
  * 与假读数（AGENTS.md §2.2 的「第二次就得抽」），而且 Electron 把 `WebFrameMain.parent` / `.frames`
  * 声明成**只读 getter**，用例里直接赋值会撞 TS2540——所以「怎么写一帧」必须只有一个出口。
  *
- * 服务替身存在的原因相同：`browser.locate` / `browser.act` 只经 `asApp(ctx)` 取三样东西
- * （shell 的视图句柄、页面服务的快照、定位服务的结局），用真的 `Context` 挂这几个替身，
- * 服务层用例就不必装 Electron 窗口，同时 `ctx.emit` / `ctx.logger` 都是真的。
+ * 服务替身存在的原因相同：`browser.locate` / `browser.act` / `browser.risk` 只经 `asApp(ctx)` 取几样东西
+ * （shell 的视图句柄、页面服务的快照、定位服务的结局、会话的响应观测口、登记处的风控判据），
+ * 用真的 `Context` 挂这几个替身，服务层用例就不必装 Electron 窗口，同时 `ctx.emit` / `ctx.logger` 都是真的。
+ *
+ * 视图替身还带一张最小的事件表（`once` / `removeListener` + `fireViewEvent`）：`settleLoad` 那类
+ * 「等装载落定」的逻辑必须在摘干净监听这件事上被断言，而断言的前提是能把事件喂进去。
  */
 import type { AppError } from '@auto-cc/core';
 import { Service, type Context } from '@auto-cc/core';
-import type { LocateResultView, LocatedReading, SessionsStatusView } from '@auto-cc/shared';
+import type { LocateResultView, LocatedReading, KernelPageSnapshotView, SessionsStatusView } from '@auto-cc/shared';
+import type { MainFrameResponseReading } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents, WebFrameMain } from 'electron';
 import { z } from 'zod';
 import type { CdpCommand } from './input-channel.js';
@@ -157,6 +161,17 @@ function fakeNativeImage(capture: FakeCapture | undefined): NativeImage {
   } as unknown as NativeImage;
 }
 
+/** 一张视图事件表：事件名 → 当前挂着的一次性回调集合。 */
+type ViewEventTable = Map<string, Set<() => void>>;
+
+/**
+ * 视图替身的事件表（按对象身份索引，用例不经过它就看不到）。
+ *
+ * 真实 `WebContents` 继承自 EventEmitter，`settleLoad` 只用到 `once` / `removeListener` 两个方法，
+ * 所以这里也只装这两个——装多了会把「页面服务其实只依赖这两个」这件事糊掉。
+ */
+const viewEvents = new WeakMap<WebContents, ViewEventTable>();
+
 /**
  * 造视图替身。
  * @param main 顶层帧（null 表示还没有文档）
@@ -172,6 +187,7 @@ export function fakeView(
 ): WebContents {
   if (main) writeFrame(main, { framesInSubtree: subtree.length > 0 ? subtree : [main] });
   const url = options.url ?? 'http://127.0.0.1:10233/boss';
+  const table: ViewEventTable = new Map();
   const base = {
     mainFrame: main,
     isDestroyed: () => options.log?.isDestroyed === true,
@@ -181,32 +197,76 @@ export function fakeView(
       if (options.capture?.fails) return Promise.reject(new Error('渲染进程没有响应截图请求'));
       return Promise.resolve(fakeNativeImage(options.capture));
     },
+    once: (channel: string, handler: () => void) => {
+      const handlers = table.get(channel) ?? new Set<() => void>();
+      handlers.add(handler);
+      table.set(channel, handlers);
+    },
+    removeListener: (channel: string, handler: () => void) => {
+      table.get(channel)?.delete(handler);
+    },
   };
   const log = options.log;
-  if (!log) return base as unknown as WebContents;
   let attached = false;
-  return {
-    ...base,
-    debugger: {
-      attach: () => {
-        log.attachCalls += 1;
-        if (log.attachFails) throw new Error('另一个调试器已连接');
-        attached = true;
-      },
-      isAttached: () => attached,
-      detach: () => {
-        log.detachCalls += 1;
-        attached = false;
-      },
-      sendCommand: (method: string, params: Record<string, unknown>) => {
-        if (log.sendFails) throw new Error('命令被拒');
-        log.commands.push({ method, params });
-        const response = log.responses?.[method] ?? {};
-        // 值给成 Error 就是「这一条被拒」——与真实 debugger 一样走拒绝，而不是同步抛出。
-        return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
-      },
-    },
-  } as unknown as WebContents;
+  const view = (log
+    ? {
+        ...base,
+        debugger: {
+          attach: () => {
+            log.attachCalls += 1;
+            if (log.attachFails) throw new Error('另一个调试器已连接');
+            attached = true;
+          },
+          isAttached: () => attached,
+          detach: () => {
+            log.detachCalls += 1;
+            attached = false;
+          },
+          sendCommand: (method: string, params: Record<string, unknown>) => {
+            if (log.sendFails) throw new Error('命令被拒');
+            log.commands.push({ method, params });
+            const response = log.responses?.[method] ?? {};
+            // 值给成 Error 就是「这一条被拒」——与真实 debugger 一样走拒绝，而不是同步抛出。
+            return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
+          },
+        },
+      }
+    : base) as unknown as WebContents;
+  viewEvents.set(view, table);
+  return view;
+}
+
+/**
+ * 让视图替身发出一个装载事件（`settleLoad` 的两条成功/失败出口）。
+ * @param contents `fakeView` 造出的替身
+ * @param channel 事件名（`did-finish-load` / `did-fail-load`）
+ * @throws 传进来的不是 `fakeView` 造的视图时抛错——静默返回会让用例「等不到事件」而误判成超时分支
+ */
+export function fireViewEvent(contents: WebContents, channel: string): void {
+  const table = viewEvents.get(contents);
+  if (!table) throw new Error('fireViewEvent 只认 fakeView 造出的视图');
+  const handlers = [...(table.get(channel) ?? [])];
+  // 与 EventEmitter 的 `once` 同形：触发一次就从表里摘掉。
+  table.delete(channel);
+  for (const handler of handlers) handler();
+}
+
+/**
+ * 读出视图上**还挂着**回调的事件名（按字典序）。
+ *
+ * 存在的唯一理由：`settleLoad` 承诺「落定就把两条监听摘干净」，而不留监听这件事从外面看不见——
+ * 一次导航挂一对、导航十次就攒二十个回调，Electron 只会.warn 一句，用例必须能直接数出来。
+ * @param contents `fakeView` 造出的替身
+ * @returns 仍有至少一个回调的事件名；`fireViewEvent` 造出的空表不计（表壳留下不算泄漏）
+ * @throws 传进来的不是 `fakeView` 造的视图时抛错（同 `fireViewEvent`，静默回空数组会把「没监听」看成通过）
+ */
+export function viewListenerChannels(contents: WebContents): string[] {
+  const table = viewEvents.get(contents);
+  if (!table) throw new Error('viewListenerChannels 只认 fakeView 造出的视图');
+  return [...table.entries()]
+    .filter(([, handlers]) => handlers.size > 0)
+    .map(([channel]) => channel)
+    .sort();
 }
 
 /**
@@ -298,14 +358,23 @@ export class FakeShellService extends Service {
 }
 
 /**
- * `sessions` 替身：只为凑齐 `browser.page` 的 `static inject`。
+ * `sessions` 替身：凑齐 `browser.page` 的 `static inject`，并替 `browser.risk` 演「分区里来了一条响应」。
  *
  * 页面服务只经它读「已登记平台的起始地址」（导航许可名单的唯一来源），所以这里就给一条
  * fixture 平台的地址——测试用不到登录判定，而 `ctx.plugin` 会按 inject 名单要求服务先就位。
+ * 观测那条口子在真实现里挂在 Electron 分区上，替身把它降级成「记下来，等用例手动喂一条读数」，
+ * 于是风控用例不需要 Electron 也能演完整条「响应 → 判据 → 事件」。
  */
 export class FakeSessionsService extends Service {
   static provide = 'sessions';
   static Config = emptyConfig;
+
+  /** 观测挂载的次数（同一时刻只应有一个独占者，spec 2.7-01）。 */
+  observeCalls = 0;
+  /** 摘除函数被调用的次数。 */
+  unobserveCalls = 0;
+
+  private listener: ((reading: MainFrameResponseReading) => void) | null = null;
 
   constructor(ctx: Context) {
     super(ctx, 'sessions');
@@ -329,10 +398,61 @@ export class FakeSessionsService extends Service {
       ],
       activePlatform: 'fixture',
     });
+
+  /**
+   * 与真实现同形的观测口：只留最后一次挂进来的 listener，摘除时清空。
+   * @param listener 主框架响应读数回调
+   * @returns 摘除函数（真实现要等 app ready 才交出来，所以两边都是 Promise）
+   */
+  observeMainFrameResponses = (listener: (reading: MainFrameResponseReading) => void): Promise<() => void> => {
+    this.observeCalls += 1;
+    this.listener = listener;
+    return Promise.resolve(() => {
+      this.unobserveCalls += 1;
+      if (this.listener === listener) this.listener = null;
+    });
+  };
+
+  /**
+   * 用例用的「分区里来了一条主框架响应」。
+   * @param reading 响应读数；`platform` 缺省为 `fixture`（替身只登记了这一个平台）
+   */
+  fireMainFrameResponse = (reading: Partial<MainFrameResponseReading> & { url: string; statusCode: number }): void => {
+    this.listener?.({
+      platform: 'fixture',
+      statusLine: '',
+      at: 1,
+      ...reading,
+    });
+  };
 }
 
 /**
- * `browser.page` 替身：只关心快照被读了几次——按 spec 2.2-04，成功时一次都不该读。
+ * `platform.registry` 替身：风控观测层只经它取「这个平台的风控文案判据」（spec 2.7-01）。
+ *
+ * 真登记处的规则与渠道投影由 `platform-registry.test.ts` 覆盖，这里只给一个可写的判据，
+ * 让风控用例能演「有判据 → 读页面」与「没判据 → 只按状态码判」两条分支。
+ */
+export class FakePlatformRegistryService extends Service {
+  static provide = 'platform.registry';
+  static Config = emptyConfig;
+
+  /** 可写的风控判据；null 表示「这个平台没声明文案判据」。 */
+  riskPattern: string | null = null;
+
+  constructor(ctx: Context) {
+    super(ctx, 'platform.registry');
+  }
+
+  /** @param platform 平台标识 @returns 替身预设的判据（不区分平台） */
+  riskPatternOf = (): string | null => this.riskPattern;
+}
+
+/**
+ * `browser.page` 替身：计数 + 可预设的快照读数。
+ *
+ * 定位与动作用例只关心快照被读了几次（spec 2.2-04 的「成功时一次都不该读」），
+ * 风控用例则要喂一份「页面上写着安全验证」的正文，所以快照内容做成可覆盖的。
  */
 export class FakePageService extends Service {
   static provide = 'browser.page';
@@ -340,22 +460,35 @@ export class FakePageService extends Service {
 
   snapshotCalls = 0;
 
+  /** 覆盖快照里的任意字段（风控用例改 `bodyText` / `title`，其余保持默认的空页面）。 */
+  snapshotOverride: Partial<KernelPageSnapshotView> = {};
+
+  /** true 时 `snapshot()` 以拒绝失败：风控用例要演「正文读不到」这一支，而不是假设它永远读得到。 */
+  snapshotFails = false;
+
   constructor(ctx: Context) {
     super(ctx, 'browser.page');
   }
 
-  /** @returns 一份固定快照摘要（真实快照的形状由 page-script 的用例覆盖） */
-  snapshot = (): Promise<Record<string, unknown>> => {
+  /**
+   * 与真实页面服务同形：交出一个 Promise，读不到正文是**拒绝**而不是同步抛出。
+   * @returns 一份字段齐全的页面快照，按 `snapshotOverride` 覆盖后交出
+   */
+  snapshot = (): Promise<KernelPageSnapshotView> => {
     this.snapshotCalls += 1;
-    return Promise.resolve({
+    if (this.snapshotFails) return Promise.reject(new Error('替身按用例拒绝读取正文'));
+    const snapshot: KernelPageSnapshotView = {
       title: '仿站',
       url: 'http://127.0.0.1:10233/boss',
       readyState: 'complete',
-      elements: 1,
-      text: '',
+      elementCount: 1,
+      textLength: 0,
+      bodyText: '',
       headings: [],
       partition: 'persist:fixture',
-    });
+      ...this.snapshotOverride,
+    };
+    return Promise.resolve(snapshot);
   };
 }
 

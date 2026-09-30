@@ -742,6 +742,54 @@ describe('会话失效停在可恢复点（1.8-07 / 2.1-08）', () => {
   });
 });
 
+describe('风控信号停在可恢复点（spec 2.7-01）', () => {
+  /**
+   * 向全局事件总线推一次风控信号，等同于 `browser.risk` 判出「这一页被拦下来了」。
+   * @param ctx 用例的插件上下文
+   * @param platform 被拦下的平台
+   * @param kind 判据类别（状态码 / 页面文案）
+   */
+  function signal(ctx: Context, platform = 'boss', kind: 'http-status' | 'page-text' = 'http-status'): void {
+    ctx.emit('browser/risk-signal', {
+      platform,
+      kind,
+      detail: kind === 'http-status' ? 'HTTP 403' : '安全验证',
+      url: 'http://127.0.0.1:10233/boss',
+      at: Date.now(),
+    });
+  }
+
+  it('运行中撞上风控：停在当前步、接管点说 risk-control，续跑把这一步重跑并跑完', async () => {
+    const { ctx, runner, calls, events } = await boot({ behavior: { 'jd.list': hangOnceThenSucceed() } });
+    runner.start();
+    await waitFor(() => calls.includes('jd-list#1'));
+
+    signal(ctx);
+    const paused = runner.current();
+    expect(paused.status).toBe('paused');
+    expect(paused.stepIndex).toBe(1);
+    // 与登录态失效共用同一个 `stop()`：接管点的形状一模一样，只有 `reason` 不同，界面因此能说清是不同的两件事。
+    expect(paused.requiresHuman).toMatchObject({ subject: 'boss', reason: 'risk-control', stepId: 'jd-list' });
+    expect(events.at(-1)).toMatchObject({ message: null, run: { status: 'paused' } });
+
+    const countAtPause = calls.length;
+    await settle(120);
+    expect(calls).toHaveLength(countAtPause);
+
+    runner.resume();
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
+    expect(runner.current().requiresHuman).toBeNull();
+  });
+
+  it('没在运行时收到信号：什么都不做，不报错也不把 idle 拽成 paused', async () => {
+    const { ctx, runner, events } = await boot();
+    signal(ctx, 'fixture', 'page-text');
+    expect(runner.current().status).toBe('idle');
+    expect(events.length).toBe(1);
+  });
+});
+
 describe('卸载让出（1.10-04 / 2.4-07 / 2.4-09）', () => {
   it('卸载在跑的执行器会收到 abort，之后不再有任何进度事件', async () => {
     const { runner, runnerFiber, events } = await boot({ behavior: { 'jd.capture': hangUntilAbort() } });

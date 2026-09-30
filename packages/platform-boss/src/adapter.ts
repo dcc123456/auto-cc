@@ -494,6 +494,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
 
   return {
     meta,
+    // 风控页文字判据取自知识包那一段；缺段回 null，观测层据此「只按 HTTP 状态判风控」，不猜文案。
+    risk: pack.risk ? { pattern: pack.risk.riskPattern } : null,
     openSearch,
     readListing,
     search: async (criteria: JobSearchCriteria): Promise<JobSummary[]> => {

@@ -73,6 +73,8 @@ function fakeAdapter(
       capabilities: ['search', 'detail', 'chat', 'sendResume', 'readReplies'],
       ...overrides,
     },
+    // 空壳适配器声明「这条站没有文案判据」：`risk` 是必填项，缺段的语义要靠 null 说，不能靠不写这个键。
+    risk: null,
     openSearch: (criteria: JobSearchCriteria) => {
       calls.push(`openSearch:${criteria.keyword}`);
       return Promise.resolve();
@@ -222,6 +224,18 @@ describe('平台登记处（spec 2.2-07）', () => {
 
     expect(registry.deliverChannel('liepin')).toBeNull();
     expect(registry.deliverChannel('lagou')).toBeNull();
+  });
+
+  it('风控文案判据也是现问的投影：缺段与未登记都回 null，绝不回一个猜出来的正则（spec 2.7-01）', async () => {
+    const registry = await boot();
+    registry.register(fakeAdapter('liepin'));
+    // 用 spread 换掉那一份判据：适配器的 `risk` 是只读声明，测试替身也不该在运行时偷偷改它。
+    registry.register({ ...fakeAdapter('boss'), risk: { pattern: '安全验证|访问验证' } });
+
+    expect(registry.riskPatternOf('boss')).toBe('安全验证|访问验证');
+    // 空壳适配器（知识包没这段）与不认识的平台上都回 null：观测层据此只按 HTTP 状态判风控。
+    expect(registry.riskPatternOf('liepin')).toBeNull();
+    expect(registry.riskPatternOf('lagou')).toBeNull();
   });
 });
 

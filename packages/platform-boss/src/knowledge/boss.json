@@ -240,5 +240,8 @@
     "sentPattern": "简历已送达",
     "offlinePattern": "岗位已下架"
   },
+  "risk": {
+    "riskPattern": "安全验证|访问验证|人机验证|访问受限|操作频繁"
+  },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"]
 }

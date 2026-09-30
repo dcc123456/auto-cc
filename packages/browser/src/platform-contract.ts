@@ -157,6 +157,19 @@ export const knowledgePackSchema = z.strictObject({
       offlinePattern: z.string().min(1),
     })
     .optional(),
+  /**
+   * 风控页的文字判据（spec 2.7-01）。缺段即「这个平台只按 HTTP 状态判风控」，
+   * 而不是「拿一套猜出来的文案去真实页面上撞」。
+   *
+   * 为什么是正则而不是文案数组：站点把「安全验证 / 请稍后重试 / 访问受限」放在标题、状态行
+   * 或正文任意一处，而且各家措辞不同——这是页面知识，必须留在数据里（同 `sentPattern` 的理由）。
+   */
+  risk: z
+    .strictObject({
+      /** 命中即视为风控的源码（按 `new RegExp(source)` 解释，加载时先验证能否编译） */
+      riskPattern: z.string().min(1),
+    })
+    .optional(),
   /** 抓取字段的声明顺序：列表页字段顺序变了也只改这份数据。 */
   fieldOrder: z.array(z.string().min(1)).default([]),
 });
@@ -165,7 +178,8 @@ export const knowledgePackSchema = z.strictObject({
 export type KnowledgePack = z.output<typeof knowledgePackSchema>;
 
 /**
- * 校验一份知识包：结构过 zod，再逐条跑定位声明的语义校验，最后查抓取声明引用的定位名是否存在。
+ * 校验一份知识包：结构过 zod，再逐条跑定位声明的语义校验，然后查抓取/会话/投递引用的定位名是否存在，
+ * 最后编译一次风控正则。
  * @param raw 从 JSON 读出来的未知值（外部数据，一律视为不可信）
  * @returns 校验通过的知识包
  * @throws 结构、声明或引用非法时 `KNOWLEDGE_PACK_INVALID`，`details.problems` 逐条指出是哪一层的哪一条
@@ -223,6 +237,18 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   } else if (parsed.data.capabilities.includes('sendResume')) {
     // 与 chat 段同一处判据：声明了投递能力却没有上传页知识，真到页面上只能靠猜，那就别让这份包上线。
     problems.push('deliver：capabilities 含 sendResume，但知识包没有 deliver 段（页面知识不能靠猜）');
+  }
+  // 风控判据是页面文字正则：写坏了不会报错，只会「永远不命中」，于是风控页被当成正常页面继续跑。
+  // 那种失败静默且危险，所以必须在加载时就编译一次确认它至少是个合法正则。
+  const risk = parsed.data.risk;
+  if (risk) {
+    try {
+      new RegExp(risk.riskPattern);
+    } catch (error) {
+      problems.push(
+        `risk.riskPattern：不是合法的正则源码（${error instanceof Error ? error.message : String(error)}）`,
+      );
+    }
   }
   if (problems.length > 0) {
     throw new AppError(
@@ -306,7 +332,7 @@ export type ReplyMessage = {
 };
 
 /**
- * 平台适配器契约：五个动作 + 两个列表页原语 + 一份自我声明。
+ * 平台适配器契约：五个动作 + 两个列表页原语 + 一份自我声明 + 一份风控判据。
  *
  * 契约里**没有任何选择器**，也没有 `webContents`：适配器只会说「我要点 `greetButton`」，
  * 具体在页面哪个位置、用哪条通道，全由 `browser.locate` / `browser.act` 决定（plan §3 规则 3）。
@@ -319,6 +345,14 @@ export type ReplyMessage = {
 export interface PlatformAdapter {
   /** 平台自我声明（界面与 `platform.registry.list` 都读这份） */
   readonly meta: PlatformMetaView;
+  /**
+   * 风控页的文字判据（来自知识包的 `risk` 段）；缺段为 null，表示这个平台只按 HTTP 状态判风控。
+   *
+   * 为什么挂在适配器上而不是让 `browser.risk` 直接读知识包 JSON：风控判据是「这个平台长什么样」
+   * 的一部分，取用路径必须和定位声明一样经过适配器这一层，否则内核侧又要自己找一份 JSON 读
+   * （AGENTS.md §2.5 的第二套知识来源）。
+   */
+  readonly risk: { pattern: string } | null;
   /**
    * 把浏览器带到条件对应的搜索结果页（不读列表，翻页/滚动由调用方驱动）。
    * @param criteria 搜索条件；`keyword` 为空时结构化失败而不是打开默认页

@@ -50,6 +50,28 @@ export interface KernelViewLoadError {
   url: string;
 }
 
+/** 风控信号的来源类别（spec 2.7-01）：两条独立取路，一个出口。 */
+export type RiskSignalKind = 'http-status' | 'page-text';
+
+/**
+ * 一次风控信号（spec 2.7-01，由 `browser.risk` 发出）。
+ *
+ * 与 `SessionExpiredEvent` 同一条纪律：**只带判定数据，不带正文与 cookie**。
+ * `detail` 是命中的那一条依据（状态码或知识包登记的风控字样本身），
+ * 不是从页面上摘下来的一整句——页面正文里可能带着用户的手机号（AGENTS.md §8.5）。
+ */
+export interface RiskSignalEvent {
+  platform: string;
+  /** `http-status` = 主框架响应状态码命中；`page-text` = 状态行/标题/正文命中知识包 `risk.riskPattern`。 */
+  kind: RiskSignalKind;
+  /** 判定依据原文（如 `HTTP 403` 或命中的字样），界面把它当参数插进文案，不当句子拼。 */
+  detail: string;
+  /** 触发信号的那个地址。 */
+  url: string;
+  /** 判定时刻（毫秒）。 */
+  at: number;
+}
+
 /**
  * 步骤槽位的 id。
  *
@@ -84,9 +106,12 @@ export type WorkflowStepView = {
  *
  * `missing` / `expired` 来自会话探测；`unobserved-side-effect` 是「上一次外发开始了但没观察到完成」，
  * 此时自动重放有发两遍的风险，只能等人确认（plan §11.3 第 5 条）；`manual-takeover` 是节点自己
- * 声明的接管点（验证码/风控一类，plan §11.8 的「不做识别与规避」）。
+ * 声明的接管点（验证码/风控一类，plan §11.8 的「不做识别与规避」）；`risk-control` 是**页面自己**
+ * 露出风控迹象（HTTP 403/429 或知识包登记的风控字样）时被 `browser.risk` 打掉的那一次（spec 2.7-01）
+ * ——与 `manual-takeover` 的区别是后者来自节点声明，前者来自现场观测，界面上要说的是不同的话。
  */
-export type WorkflowTakeoverReason = 'missing' | 'expired' | 'unobserved-side-effect' | 'manual-takeover';
+export type WorkflowTakeoverReason =
+  'missing' | 'expired' | 'unobserved-side-effect' | 'manual-takeover' | 'risk-control';
 
 /**
  * 人工接管点（spec 2.1-08 / 2.4-06）。
@@ -665,6 +690,12 @@ declare module 'cordis' {
      * 载荷刻意只有平台名与原因，没有任何 cookie 值（AGENTS.md §8.5）。
      */
     'session/expired'(event: SessionExpiredEvent): void;
+    /**
+     * 主框架响应状态码或页面字样命中风控判据时由 `browser.risk` 发出（spec 2.7-01）。
+     * 这条是**唯一的出口**：状态码一路与文本一路都收敛到同一个事件名，
+     * 于是「暂停」只需要在一处订阅（plan §14.3 第 1 条），而界面只拿到判定数据、自己组句子。
+     */
+    'browser/risk-signal'(event: RiskSignalEvent): void;
     /**
      * 内嵌内核视图的主文档加载失败时由 `shell` 发出（spec 1.8-09）。
      * 界面不能靠轮询 `shell.getStatus` 看到它：`sessions.open` 先返回、失败事件后到，

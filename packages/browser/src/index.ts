@@ -19,7 +19,13 @@ import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScr
 import type { SessionsService } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents } from 'electron';
 import { z } from 'zod';
-import { evaluateInFrames, requireKernelContents, usableEvaluations, type KernelHost } from './frame-channel.js';
+import {
+  evaluateInFrames,
+  requireKernelContents,
+  settleLoad,
+  usableEvaluations,
+  type KernelHost,
+} from './frame-channel.js';
 import { buildExtractScript, toExtractFrameReading } from './extract-script.js';
 import {
   buildScrollScript,
@@ -90,7 +96,7 @@ export class BrowserPageService extends Service {
     const contents = requireKernelContents(this.host, 'browser.page');
     const startUrls = (await this.sessions.status()).platforms.map((platform) => platform.startUrl);
     const target = resolveNavigableUrl(url, startUrls);
-    const settled = this.settleLoad(contents);
+    const settled = settleLoad(contents, this.config.navigateTimeoutMs);
     await contents.loadURL(target.href);
     const outcome = await settled;
     this.ctx.logger.info(`内核视图已导航：${target.href}（装载 ${outcome}）`);
@@ -258,30 +264,6 @@ export class BrowserPageService extends Service {
     return { ...reading, partition: this.host.getStatus().kernelViewPartition };
   }
 
-  /**
-   * 等这一次导航装载落定。
-   *
-   * 监听器必须在三条出口（成功 / 失败 / 超时）里都摘掉：`once` 只保证触发过一次，
-   * 而超时那条永远不会触发，留着就是每次导航泄漏一对监听（spec 2.1-11 数的正是这个）。
-   * @param contents 目标视图句柄
-   * @returns 落定方式；`timeout` 不是错误，页面仍会继续装载，由快照读数反映真实进度
-   */
-  private settleLoad(contents: WebContents): Promise<'loaded' | 'failed' | 'timeout'> {
-    return new Promise((resolve) => {
-      const finish = (outcome: 'loaded' | 'failed' | 'timeout'): void => {
-        clearTimeout(timer);
-        contents.removeListener('did-finish-load', onLoaded);
-        contents.removeListener('did-fail-load', onFailed);
-        resolve(outcome);
-      };
-      const onLoaded = (): void => finish('loaded');
-      const onFailed = (): void => finish('failed');
-      const timer = setTimeout(() => finish('timeout'), this.config.navigateTimeoutMs);
-      contents.once('did-finish-load', onLoaded);
-      contents.once('did-fail-load', onFailed);
-    });
-  }
-
   [Service.init](): void {
     this.ctx.logger.info(
       `页面操作服务就绪：导航超时 ${String(this.config.navigateTimeoutMs)}ms · 快照正文上限 ${String(
@@ -313,6 +295,7 @@ export {
 } from './extract-script.js';
 export { BrowserLocateService, browserLocateSchema, type BrowserLocateConfig } from './locate-service.js';
 export { BrowserActService, browserActSchema, type BrowserActConfig } from './act-service.js';
+export { BrowserRiskService, browserRiskSchema, type BrowserRiskConfig } from './risk-service.js';
 export { PlatformRegistryService } from './platform-registry.js';
 export {
   knowledgePackSchema,

@@ -91,6 +91,16 @@ describe('BOSS 适配器的自我声明（spec 2.2-06）', () => {
     expect(adapter.meta.capabilities).toHaveLength(5);
     pack.capabilities.pop();
   });
+
+  it('风控文案判据从知识包那一段原样带出（spec 2.7-01：这句话在 JSON 里，不在代码里）', () => {
+    // 直接对着 JSON 断言：站点把拦下页那句话改了措辞，改的应该是 `boss.json` 而不是这里。
+    expect(adapter.risk).toEqual({ pattern: pack.risk!.riskPattern });
+  });
+
+  it('知识包缺 risk 段时如实回 null：观测层据此只按状态码判，代码不猜文案', () => {
+    const bare = createBossAdapter({ ...pack, risk: undefined }, createFakePage(standardScript()), createFakeAct({}));
+    expect(bare.risk).toBeNull();
+  });
 });
 
 describe('搜索与列表读取（spec 2.3-01 / 2.3-02）', () => {

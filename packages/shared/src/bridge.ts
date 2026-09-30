@@ -18,6 +18,7 @@ import type {
   LocatorRelocatedEvent,
   LogLineView,
   PluginErrorView,
+  RiskSignalEvent,
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
@@ -53,6 +54,7 @@ export type {
   LocatorRelocatedEvent,
   LogLineView,
   PluginErrorView,
+  RiskSignalEvent,
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
@@ -719,6 +721,8 @@ export const RENDERER_EVENTS = [
   'jd/progress',
   // 投递单等人表态（spec 2.6-01）：确认卡片由它弹出，`outbound.deliver.pending()` 保证错过也补得回。
   'outbound/approval-requested',
+  // 风控信号（spec 2.7-01）：暂停由 `workflow.runner` 在主进程做，界面只负责把「卡在哪、为什么」说出来。
+  'browser/risk-signal',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -733,6 +737,7 @@ export interface RendererEventSignatures {
   'locator/relocated': LocatorRelocatedEvent;
   'jd/progress': JdProgressEvent;
   'outbound/approval-requested': DeliverApprovalView;
+  'browser/risk-signal': RiskSignalEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

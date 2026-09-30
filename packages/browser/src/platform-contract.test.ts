@@ -466,3 +466,40 @@ describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
     }
   });
 });
+
+describe('风控文案判据段（spec 2.7-01：那句拦下页的话是站点知识，不是代码）', () => {
+  it('配了 risk 段时原样落地，观测层拿到的就是这份源码', () => {
+    const pack = parseKnowledgePack(minimalPack({ risk: { riskPattern: '安全验证|访问验证' } }));
+    expect(pack.risk).toEqual({ riskPattern: '安全验证|访问验证' });
+  });
+
+  it('没有 risk 段是合法的知识包：这条站只按 HTTP 状态码判，正文判据不靠代码猜', () => {
+    expect(parseKnowledgePack(minimalPack()).risk).toBeUndefined();
+  });
+
+  it('riskPattern 编译不过就在加载当场报错，而不是等到真撞风控时静默不命中', () => {
+    // 报错消息里的 V8 原文随引擎变，所以只钉「哪一处、为什么」这一段，不钉它后面那句。
+    try {
+      parseKnowledgePack(minimalPack({ risk: { riskPattern: '[未闭合' } }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
+      expect(String(errorDetails(error).problems)).toMatch(/^risk\.riskPattern：不是合法的正则源码（/);
+    }
+  });
+
+  it('空串同样非法：空判据匹配一切，那等于把每一页都判成被风控拦下', () => {
+    const error = errorOf(() => parseKnowledgePack(minimalPack({ risk: { riskPattern: '' } }))) as AppError;
+    expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
+  });
+
+  it('risk 段里的未知键被拒收：判据只有这一条口径，不留第二种写法', () => {
+    try {
+      parseKnowledgePack(minimalPack({ risk: { riskPattern: '安全验证', flags: 'i' } }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
+      expect(String(errorDetails(error).problems)).toContain('Unrecognized key: "flags"');
+    }
+  });
+});
