@@ -1,13 +1,15 @@
 /**
- * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08）：
- * 四类知识库实体的建表、派生入库、查询、证据反查、删除与备份。
+ * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08 + 4.3-11）：
+ * 四类知识库实体的建表、派生入库、查询、证据反查、删除、备份，以及检索切片的派生索引表。
  *
- * 这一层只做七件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
- * 按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）要用的读接口、
- * 把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、本地备份文件的读写（4.2-08，
- * 格式在 `backup.ts`）、以及 4.2-05 / 06 需要的两条装配腿：写入后发 `kb/entities-changed` 事件、
- * 把读口 `list` 登记成 agent 工具（裁定三——界面与 agent 走同一个 service，不许各长一套）。
- * 「文本 → 实体」的判定全在 `entities.ts`（纯函数，离线逐条断言），本文件不重复任何解析规则。
+ * 这一层只做八件事：把迁移 11 的 `kb_entities` 与迁移 12 的 `kb_chunks` 建出来、从 `resume_docs` 的
+ * **当前工作副本**派生实体、按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）
+ * 要用的读接口、把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、本地备份文件的读写
+ * （4.2-08，格式在 `backup.ts`）、4.2-05 / 06 需要的两条装配腿（写入后发 `kb/entities-changed` 事件、
+ * 把读口 `list` 登记成 agent 工具——裁定三，界面与 agent 走同一个 service，不许各长一套），
+ * 以及 4.3-a 的切片收敛：**每一条实体写删都在同一事务里带上它的切片**（4.3-11 的「无孤儿索引行」）。
+ * 「文本 → 实体」的判定全在 `entities.ts`，「文本 → 切片」的判定全在 `chunks.ts`（两者都是纯函数，
+ * 离线逐条断言），本文件不重复任何解析规则。
  *
  * 为什么读文档要经 `resume.doc` 而不是自己查 `resume_docs` 表：plan §1.4 裁定一把 `resume_docs` 定成
  * 可编辑工作副本的**唯一真相源**，而它的 `load()` 顺带做了 Schema 重新校验——绕过它就是用裸 SQL
@@ -17,6 +19,7 @@ import { AppError, asApp, Service, agentTool, registerAgentTools, type Context }
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
+import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import {
   KB_ENTITY_KINDS,
   type KbEntityDraft,
@@ -27,11 +30,15 @@ import {
 } from './entities.js';
 import { type EvidenceOptions, type EvidenceRef, evidenceTextOf, rankEvidence } from './evidence.js';
 import { decodeBackup, encodeBackup } from './backup.js';
+import { type KbChunkDraft, type KbChunkView, chunkViewOf, deriveSectionChunks, entityChunkOf } from './chunks.js';
 
-/** 迁移号段：**11**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
- *  resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10）。
+/** 迁移号段：**11 / 12**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
+ *  resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10 / kb_entities 11 / kb_chunks 12）。
  *  撞号的表现是「见号已存在就跳过建表」——表根本没建，读写得到 `no such table`，所以号段必须在注释里列全并被单测断言。 */
 export const KB_PROFILE_MIGRATION_VERSION = 11;
+
+/** 检索切片表的迁移号段（spec 4.3-11，plan §4.3 切片拆分的 4.3-a）。 */
+export const KB_CHUNKS_MIGRATION_VERSION = 12;
 
 const kbEntitiesMigration = {
   version: KB_PROFILE_MIGRATION_VERSION,
@@ -54,6 +61,31 @@ const kbEntitiesMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS kb_entities');
+  },
+};
+
+const kbChunksMigration = {
+  version: KB_CHUNKS_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    // 派生索引表，不是第二套真相（plan §4.3 口径 3）：内容全部由 `kb_entities` / 工作副本现算，
+    // 任何一次写入都必须在**同一事务**里把它改掉或删除——留一份「重建一下就一致」的余地就够了，
+    // 但 4.3-11 的验收判据是「删实体后索引无孤儿行」，所以这里给的是同事务而不是后台修补。
+    db.exec(`CREATE TABLE IF NOT EXISTS kb_chunks (
+      seq INTEGER PRIMARY KEY,
+      chunk_id TEXT NOT NULL UNIQUE,
+      chunk_kind TEXT NOT NULL CHECK (chunk_kind IN ('entity', 'section')),
+      source_doc_id TEXT,
+      section_kind TEXT,
+      text TEXT NOT NULL,
+      tokens TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`);
+    // 4.3-b 的 FTS5 虚表按 `seq` 对齐 rowid，所以 `seq` 必须是显式列（隐式 rowid 会被 VACUUM 重排，
+    // 那会让倒排索引指向错误的行——spike 轮次一 Q6 / 轮次三 A 实测过这条维护路径）。
+    db.exec('CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks (source_doc_id, chunk_kind)');
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP TABLE IF EXISTS kb_chunks');
   },
 };
 
@@ -174,6 +206,9 @@ export class KbProfileService extends Service {
   static Config = kbProfileSchema;
   static inject = ['store', 'resume.doc'];
 
+  /** `withTransaction` 的嵌套深度：>0 表示已经在事务里，内层不再开新事务（SQLite 不允许嵌套 BEGIN）。 */
+  private txDepth = 0;
+
   constructor(
     ctx: Context,
     private readonly options: KbProfileConfig,
@@ -190,15 +225,27 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 幂等地把本表迁移推进共享迁移列表并升级到最新。
+   * 幂等地把本表的两条迁移推进共享迁移列表并升级到最新。
+   *
+   * 迁移 12 是「新加的一张派生表」，老库里在它建出来时 `kb_entities` 已经有数据了，
+   * 所以只在**这一版真的被应用过**时做一次全量补建（`applied` 里有没有 12 就是判据，
+   * 不用水位猜——台账与水位不互为换算关系，见 `store/migrate.ts` 的开头）。
    * @returns 无返回值
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    if (!migrations.some((item) => item.version === KB_PROFILE_MIGRATION_VERSION)) {
-      migrations.push(kbEntitiesMigration);
+    for (const migration of [kbEntitiesMigration, kbChunksMigration]) {
+      if (!migrations.some((item) => item.version === migration.version)) {
+        migrations.push(migration);
+      }
     }
-    this.store.upgrade();
+    const result = this.store.upgrade();
+    if (result.applied.includes(KB_CHUNKS_MIGRATION_VERSION)) {
+      const backfilled = this.reindexAllChunks();
+      this.ctx.logger.info(
+        `[kb-profile] 迁移 ${String(KB_CHUNKS_MIGRATION_VERSION)} 落地，全量补建检索切片 ${String(backfilled)} 条`,
+      );
+    }
   }
 
   [Service.init](): void {
@@ -220,7 +267,7 @@ export class KbProfileService extends Service {
       }),
     ]);
     this.ctx.logger.info(
-      `[kb-profile] kb_entities 表就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+      `[kb-profile] kb_entities / kb_chunks 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 
@@ -237,6 +284,41 @@ export class KbProfileService extends Service {
     changed: number,
   ): void {
     this.ctx.emit('kb/entities-changed', { action, docId, changed, at: Date.now() });
+  }
+
+  /**
+   * 把一段写操作包进一个事务，嵌套调用只开一层。
+   *
+   * 4.3-a 需要的正是这一层：一条实体的写删现在必然带动 `kb_chunks` 的一行，
+   * 「实体写成功、切片没跟上」是比整体失败更坏的状态（检索会返回已经不存在的内容），
+   * 所以五条写路径（sync / create / update / remove / importBackup）统一走这里而不是各自 `BEGIN`。
+   * 深度计数的嵌套守卫是必要的：`importBackup` 已经在一个事务里调用 `upsert`，
+   * 而 SQLite 不支持事务套事务，内层再 `BEGIN` 会直接抛「cannot start a transaction within a transaction」。
+   * @param fn 事务内的操作
+   * @returns `fn` 的返回值；中途抛出时整批回滚，库里保持调用前的原状
+   */
+  private withTransaction<T>(fn: () => T): T {
+    if (this.txDepth > 0) {
+      this.txDepth += 1;
+      try {
+        return fn();
+      } finally {
+        this.txDepth -= 1;
+      }
+    }
+    const db = this.store.db;
+    db.exec('BEGIN');
+    this.txDepth = 1;
+    try {
+      const result = fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    } finally {
+      this.txDepth = 0;
+    }
   }
 
   /**
@@ -263,22 +345,29 @@ export class KbProfileService extends Service {
       );
     }
     const drafts = deriveEntities(loaded.document);
-    const outcomes = drafts.map((draft) => this.upsert(draft, nowMs));
-    const created = outcomes.filter((outcome) => outcome === 'created').length;
-    const updated = outcomes.filter((outcome) => outcome === 'updated').length;
-    const removed = this.prune(docId, drafts);
-    // 派生行删完再收敛归属：手工实体可以把 `parentId` 挂在一条简历经历上，而那条经历可能在
-    // 工作副本里被删了。不同步这一步，库里就会留下「父已经不存在」的悬空引用（4.2-04 明令不留的行态）。
-    const detached = this.detachOrphanParents(nowMs);
-    if (detached > 0) {
-      this.ctx.logger.info(`[kb-profile] 同步 ${docId} 后解除悬空归属 ${String(detached)} 条`);
+    const outcome = this.withTransaction(() => {
+      const outcomes = drafts.map((draft) => this.upsert(draft, nowMs));
+      const removed = this.prune(docId, drafts);
+      // 派生行删完再收敛归属：手工实体可以把 `parentId` 挂在一条简历经历上，而那条经历可能在
+      // 工作副本里被删了。不同步这一步，库里就会留下「父已经不存在」的悬空引用（4.2-04 明令不留的行态）。
+      const detached = this.detachOrphanParents(nowMs);
+      return {
+        created: outcomes.filter((item) => item === 'created').length,
+        updated: outcomes.filter((item) => item === 'updated').length,
+        removed,
+        detached,
+        sections: this.reindexSectionChunks(loaded.document, nowMs),
+      };
+    });
+    if (outcome.detached > 0) {
+      this.ctx.logger.info(`[kb-profile] 同步 ${docId} 后解除悬空归属 ${String(outcome.detached)} 条`);
     }
 
     this.ctx.logger.info(
-      `[kb-profile] 同步 ${docId}：派生 ${String(drafts.length)} 条（新建 ${String(created)} / 更新 ${String(updated)} / 清理 ${String(removed)}）`,
+      `[kb-profile] 同步 ${docId}：派生 ${String(drafts.length)} 条（新建 ${String(outcome.created)} / 更新 ${String(outcome.updated)} / 清理 ${String(outcome.removed)}）· 区块级切片 ${String(outcome.sections)} 条`,
     );
-    this.announce('sync', docId, created + updated + removed);
-    return { docId, created, updated, removed };
+    this.announce('sync', docId, outcome.created + outcome.updated + outcome.removed);
+    return { docId, created: outcome.created, updated: outcome.updated, removed: outcome.removed };
   }
 
   /**
@@ -367,7 +456,9 @@ export class KbProfileService extends Service {
       payload,
       normalizedHash: payloadHashOf(input.kind, payload),
     };
-    this.insert(draft, nowMs);
+    this.withTransaction(() => {
+      this.insert(draft, nowMs);
+    });
     this.announce('create', null, 1);
     this.ctx.logger.info(`[kb-profile] 手工新建 ${draft.entityId}（${draft.kind}）`);
     const view = this.get(draft.entityId);
@@ -392,9 +483,14 @@ export class KbProfileService extends Service {
     const nextPayload = nonEmptyPayload(payload);
     const hash = payloadHashOf(existing.kind, nextPayload);
     if (hash === existing.normalizedHash) return existing;
-    this.store.db
-      .prepare('UPDATE kb_entities SET payload_json = ?, normalized_hash = ?, updated_at = ? WHERE entity_id = ?')
-      .run(JSON.stringify(nextPayload), hash, nowMs, entityId);
+    this.withTransaction(() => {
+      this.store.db
+        .prepare('UPDATE kb_entities SET payload_json = ?, normalized_hash = ?, updated_at = ? WHERE entity_id = ?')
+        .run(JSON.stringify(nextPayload), hash, nowMs, entityId);
+      // 载荷变了，切片必须跟着变：`kb_chunks.text` 是切片展示与排序的正文来源，
+      // 留着旧文本就等于让检索返回一句已经被用户改掉的话（4.3-11 的「派生索引」义务）。
+      this.upsertChunk(entityChunkOf({ entityId, sourceDocId: existing.sourceDocId, payload: nextPayload }), nowMs);
+    });
     const view = this.get(entityId);
     if (view === null) throw new AppError('KB_ENTITY_NOT_FOUND', `更新后的实体 ${entityId} 读不回来`);
     this.announce('update', existing.sourceDocId, 1);
@@ -428,12 +524,20 @@ export class KbProfileService extends Service {
         { entityId, sourceDocId: existing.sourceDocId },
       );
     }
-    const detached = Number(
-      this.store.db
-        .prepare('UPDATE kb_entities SET parent_id = NULL, updated_at = ? WHERE parent_id = ?')
-        .run(nowMs, entityId).changes,
-    );
-    const removed = Number(this.store.db.prepare('DELETE FROM kb_entities WHERE entity_id = ?').run(entityId).changes);
+    const { detached, removed } = this.withTransaction(() => {
+      const changed = Number(
+        this.store.db
+          .prepare('UPDATE kb_entities SET parent_id = NULL, updated_at = ? WHERE parent_id = ?')
+          .run(nowMs, entityId).changes,
+      );
+      const deleted = Number(
+        this.store.db.prepare('DELETE FROM kb_entities WHERE entity_id = ?').run(entityId).changes,
+      );
+      // 实体删了切片必须跟着删（4.3-a 的收口判据：删实体后索引无孤儿行）。
+      // 归属被解除的下属不用重算切片——它们的载荷没变，变的只是 `parent_id`。
+      this.deleteChunk(entityId);
+      return { detached: changed, removed: deleted };
+    });
     this.ctx.logger.info(`[kb-profile] 删除手工实体 ${entityId}（连带解除归属 ${String(detached)} 条）`);
     this.announce('remove', null, removed + detached);
     return { entityId, removed, detached };
@@ -505,9 +609,7 @@ export class KbProfileService extends Service {
     let skipped = 0;
     let danglingParents = 0;
 
-    const db = this.store.db;
-    db.exec('BEGIN');
-    try {
+    this.withTransaction(() => {
       for (const entry of backup.entities) {
         const existedBefore = libraryIds.has(entry.entityId);
         if (existedBefore && mode === 'skip') {
@@ -530,11 +632,7 @@ export class KbProfileService extends Service {
         if (existedBefore) overwritten += 1;
         else created += 1;
       }
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+    });
     this.ctx.logger.info(
       `[kb-profile] 导入备份 ${filePath}（策略 ${mode}）：新建 ${String(created)} / 覆盖 ${String(overwritten)} / 跳过 ${String(skipped)} / 解除悬空归属 ${String(danglingParents)}`,
     );
@@ -557,6 +655,8 @@ export class KbProfileService extends Service {
    *                  因为文件里带着记录原本的出生时间
    * @returns `created`（新行）/ `updated`（内容变了）/ `unchanged`（内容一样，`updated_at` 也不动，
    *          免得重复同步把界面排序搅乱）
+   * @remarks 三条出路都会让 `kb_chunks` 里对应切片处于「与当前载荷一致」的状态：
+   *          新行与改动行重写切片，`unchanged` 行不动它（切片的 1:1 由建表补建与每条写路径共同保证）。
    */
   private upsert(draft: KbEntityDraft, nowMs: number, createdAt = nowMs): 'created' | 'updated' | 'unchanged' {
     const db = this.store.db;
@@ -577,11 +677,12 @@ export class KbProfileService extends Service {
           SET kind = ?, parent_id = ?, source_doc_id = ?, payload_json = ?, normalized_hash = ?, updated_at = ?
         WHERE entity_id = ?`,
     ).run(draft.kind, draft.parentId, draft.sourceDocId, payloadJson, draft.normalizedHash, nowMs, draft.entityId);
+    this.upsertChunk(entityChunkOf(draft), nowMs);
     return 'updated';
   }
 
   /**
-   * 插入一条实体行。
+   * 插入一条实体行，并带上它的检索切片（4.3-11 的 1:1 不变量在这里落地）。
    * @param draft 实体
    * @param nowMs 本行的 `updated_at`（毫秒）
    * @param createdAt 本行的 `created_at`（毫秒）；派生同步与手工新建时与 `nowMs` 相同
@@ -603,29 +704,154 @@ export class KbProfileService extends Service {
         createdAt,
         nowMs,
       );
+    this.upsertChunk(entityChunkOf(draft), nowMs);
   }
 
   /**
-   * 删掉「属于这份文档、但已不在本次派生结果里」的实体行。
+   * 写或刷新一条切片（`chunk_id` 冲突时整行覆盖）。
+   *
+   * 切片没有「不变就不写」的分支：它的 `text` / `tokens` 完全由载荷现算，
+   * 多写一行的代价远低于「比对逻辑写错导致索引停在旧文本」的代价。
+   * @param draft 切片草案
+   * @param nowMs 本行的 `updated_at`（毫秒），与所属实体同一时间戳
+   * @returns 无返回值
+   */
+  private upsertChunk(draft: KbChunkDraft, nowMs: number): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO kb_chunks (chunk_id, chunk_kind, source_doc_id, section_kind, text, tokens, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (chunk_id) DO UPDATE SET
+           chunk_kind = excluded.chunk_kind,
+           source_doc_id = excluded.source_doc_id,
+           section_kind = excluded.section_kind,
+           text = excluded.text,
+           tokens = excluded.tokens,
+           updated_at = excluded.updated_at`,
+      )
+      .run(draft.chunkId, draft.chunkKind, draft.sourceDocId, draft.sectionKind, draft.text, draft.tokens, nowMs);
+  }
+
+  /**
+   * 删掉一条切片。
+   * @param chunkId 切片 id（实体级即实体 id）
+   * @returns 无返回值；行本来就不存在不算失败——调用点的语义是「让它不存在」，不是「删掉一行」
+   */
+  private deleteChunk(chunkId: string): void {
+    this.store.db.prepare('DELETE FROM kb_chunks WHERE chunk_id = ?').run(chunkId);
+  }
+
+  /**
+   * 重建一份文档的区块级切片（`summary / education / campus`，spec 4.3-11 的另一半）。
+   *
+   * 语义与实体同步一致：按稳定 id upsert，再清掉这份文档名下已不在派生结果里的切片
+   * （用户把「校园经历」整块删掉，检索侧就不该再命中它）。
+   * @param document 已读回的工作副本
+   * @param nowMs 写入时间戳（毫秒）
+   * @returns 本次落库的区块级切片条数（进同步日志，界面不读它）
+   */
+  private reindexSectionChunks(document: ResumeDocument, nowMs: number): number {
+    const drafts = deriveSectionChunks(document);
+    for (const draft of drafts) this.upsertChunk(draft, nowMs);
+    const db = this.store.db;
+    if (drafts.length === 0) {
+      db.prepare(`DELETE FROM kb_chunks WHERE chunk_kind = 'section' AND source_doc_id = ?`).run(document.id);
+      return 0;
+    }
+    // `NOT IN ()` 的空列表在 SQLite 里是语法错误，所以空派生结果走上一个分支单独处理（同 `prune`）。
+    const placeholders = drafts.map(() => '?').join(', ');
+    db.prepare(
+      `DELETE FROM kb_chunks WHERE chunk_kind = 'section' AND source_doc_id = ? AND chunk_id NOT IN (${placeholders})`,
+    ).run(document.id, ...drafts.map((draft) => draft.chunkId));
+    return drafts.length;
+  }
+
+  /**
+   * 全量补建切片：迁移 12 刚落地时把已有的实体与文档都算一遍。
+   *
+   * 只在「这一版迁移真的被应用过」时调用一次（见 `ensureSchema`）——它遍历全库，
+   * 放在每次启动上就是无谓的冷启动开销，而增量写路径已经维护了 1:1。
+   * @returns 补建后的切片总数（用于日志）
+   */
+  private reindexAllChunks(): number {
+    const db = this.store.db;
+    const entities = db
+      .prepare('SELECT entity_id, source_doc_id, payload_json FROM kb_entities')
+      .all() as unknown as readonly {
+      entity_id: string;
+      source_doc_id: string | null;
+      payload_json: string;
+    }[];
+    const nowMs = Date.now();
+    for (const row of entities) {
+      this.upsertChunk(
+        entityChunkOf({
+          entityId: row.entity_id,
+          sourceDocId: row.source_doc_id,
+          payload: JSON.parse(row.payload_json) as Record<string, string>,
+        }),
+        nowMs,
+      );
+    }
+    for (const docId of this.docStore.listIds()) {
+      const loaded = this.docStore.load(docId);
+      // 读不回合法文档的副本跳过而不是让整次补建失败：切片是派生索引，
+      // 一份坏文档不该拖垮其余文档的索引重建（下一次 `sync()` 会明确报 `KB_SOURCE_MISSING`）。
+      if (loaded.status !== 'found') continue;
+      this.reindexSectionChunks(loaded.document, nowMs);
+    }
+    return Number(db.prepare('SELECT count(*) AS n FROM kb_chunks').get()?.n ?? 0);
+  }
+
+  /**
+   * 列出全部检索切片（spec 4.3-11 的验证入口，也是 4.3-b 检索的候选集来源）。
+   * @returns 按 `chunk_id` 升序的切片读数；空库返回空数组
+   * @remarks 排序取 id 而不是 `updated_at`：切片是派生索引，界面不展示它，
+   *          而 4.3-b 的打分断言要的是「两次调用同一顺序」的可复现性。
+   */
+  listChunks(): readonly KbChunkView[] {
+    const rows = this.store.db
+      .prepare(
+        'SELECT chunk_id, chunk_kind, source_doc_id, section_kind, text, tokens, updated_at FROM kb_chunks ORDER BY chunk_id',
+      )
+      .all() as unknown as readonly {
+      chunk_id: string;
+      chunk_kind: string;
+      source_doc_id: string | null;
+      section_kind: string | null;
+      text: string;
+      tokens: string;
+      updated_at: number | bigint;
+    }[];
+    return rows.map(chunkViewOf);
+  }
+
+  /**
+   * 删掉「属于这份文档、但已不在本次派生结果里」的实体行，并连带删掉它们的切片。
    *
    * 派生结果为空时必须走 `NOT IN ()` 之外的写法——空列表的 `IN ()` 在 SQLite 里是语法错误，
    * 而「用户把这份简历的经历全删光了」是一条正常路径。
    * @param docId 来源文档 id
    * @param drafts 本次派生出的实体
-   * @returns 被清理的行数
+   * @returns 被清理的实体行数
    */
   private prune(docId: string, drafts: readonly KbEntityDraft[]): number {
     const db = this.store.db;
-    if (drafts.length === 0) {
-      return Number(db.prepare('DELETE FROM kb_entities WHERE source_doc_id = ?').run(docId).changes);
-    }
-    const placeholders = drafts.map(() => '?').join(', ');
+    // 「本次派生结果里没有了」这个条件只写一遍：切片与实体按同一个判定删，
+    // 分成两份表达式迟早会在空列表那一支上走散，走散的表现就是检索侧留孤儿行（4.3-11）。
     const ids = drafts.map((draft) => draft.entityId);
-    return Number(
-      db
-        .prepare(`DELETE FROM kb_entities WHERE source_doc_id = ? AND entity_id NOT IN (${placeholders})`)
-        .run(docId, ...ids).changes,
-    );
+    const stale =
+      drafts.length === 0
+        ? { where: 'source_doc_id = ?', args: [docId] as (string | null)[] }
+        : {
+            where: `source_doc_id = ? AND entity_id NOT IN (${ids.map(() => '?').join(', ')})`,
+            args: [docId, ...ids] as (string | null)[],
+          };
+    // 先删切片再删实体：那句子查询要从 `kb_entities` 里读待删 id，反过来就先没了参照对象。
+    db.prepare(
+      `DELETE FROM kb_chunks WHERE chunk_kind = 'entity' AND chunk_id IN (SELECT entity_id FROM kb_entities WHERE ${stale.where})`,
+    ).run(...stale.args);
+    return Number(db.prepare(`DELETE FROM kb_entities WHERE ${stale.where}`).run(...stale.args).changes);
   }
 
   /**

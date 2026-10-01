@@ -7,6 +7,8 @@
  * `source.ts` / `sections.ts` / `period.ts` **不认识 cordis、也不打开自己的 SQLite 连接**——解析规则要能离线、
  * 逐字段断言；`parse-service.ts` 是本包唯一接触装配与入库（4.1-06 / 4.1-07 / 4.1-09 / 4.1-10）的文件，
  * 且入库只经 1.3 的共享 `store` 连接，判定的那三个纯函数文件不因装配而变脏。
+ * 4.2 带来 `entities.ts`（实体派生）与 `evidence.ts`（反查打分），4.3-a 带来 `chunks.ts`（检索切片派生）——
+ * 同一个规矩：切分与派生是纯函数，落库与事务只在 `profile-service.ts`。
  */
 export { extractPeriod, parsePeriod, type ParsedPeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
 export {
@@ -53,7 +55,11 @@ export {
 // 所以只导出形状；`rankEvidence` / `evidenceTextOf` 属包内纯函数，不对外（§2.4 不导出无人调用的入口）。
 // 备份编解码（`backup.ts`，4.2-08）同样只在包内被 `exportBackup` / `importBackup` 调用，格式对外只以
 // 「服务方法的入参出参」呈现，不把 JSON Schema 变成第二个公开面。
+// 切片的**形状**（`KbChunkView`）跟着 `listChunks()` 的返回值一起对外；`chunks.ts` 里的派生函数
+// （`entityChunkOf` / `deriveSectionChunks` / `indexTokens`）不外露——切片只能由本包的写入路径产生，
+// 让外面自己算一份就是开第二条写路径（§2.5）。
 export { type EvidenceReason, type EvidenceRef } from './evidence.js';
+export { type KbChunkKind, type KbChunkView } from './chunks.js';
 export {
   detectFormat,
   extractSourceText,

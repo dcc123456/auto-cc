@@ -1,9 +1,13 @@
 /**
- * `kb.profile` 的装配用例（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08）。
+ * `kb.profile` 的装配用例（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08 / 4.3-11）。
  *
  * 打**真的 `node:sqlite` + 真临时目录**（AGENTS.md §7.5，产物不进仓库）：这一层要证明的是
  * 「派生出来的实体真的落了库、重复同步不裂行、工作副本改了之后库跟着收敛、删除与备份的计数对得上」，
  * 这些只有在真库里才成立。派生规则本身在 `entities.test.ts` 里逐条断言过，这里不重复。
+ *
+ * 4.3-a 的切片用例也放这里（而不是另开一份装配文件）：它要判的是「每一条实体的写删都带着它的切片」，
+ * 而这件事只在真实事务路径上才成立——`sync` / `create` / `update` / `remove` / `importBackup` 五条写路径
+ * 各自都要过一遍库里，换一份文件就得把这套装配脚手架（含真库与老库升级）重抄一遍（§2.2）。
  *
  * 语料仍是自造虚构简历；手机号写成明显编造的号段，用于顺带复验实体表里不落 PII 原文（对齐 4.1-09 / §8.5）。
  */
@@ -29,7 +33,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { KB_BACKUP_SCHEMA_VERSION } from './backup.js';
-import { KB_PROFILE_MIGRATION_VERSION, KbProfileService } from './profile-service.js';
+import { deriveSectionChunks, entityChunkOf, indexTokens } from './chunks.js';
+import { KB_CHUNKS_MIGRATION_VERSION, KB_PROFILE_MIGRATION_VERSION, KbProfileService } from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
 import { parseResumeText } from './sections.js';
 
@@ -71,6 +76,33 @@ const RESUME_MD_SKILLS_ONLY = [
   '## 技能',
   '- TypeScript、Node.js、Go、Kubernetes、Docker、gRPC、PostgreSQL、Redis、Kafka、Prometheus',
   '- 分布式一致性、性能剖析、容量规划、链路追踪、灰度发布、成本治理',
+].join('\n');
+
+/**
+ * 带「个人简介 / 教育经历 / 校园经历」三段区块的语料（4.3-a 的区块级切片用例用）。
+ *
+ * 这三类在裁定二里**不建实体行**（`entities.ts` 只派生经历 / 项目 / 技能 / 成果），
+ * 于是它们进检索的唯一出路就是区块级切片——语料必须真的把这三段写出来，
+ * 否则用例会退化成「断言空数组相等」，什么也没验到。
+ */
+const RESUME_MD_WITH_SECTIONS = [
+  '张三',
+  '电话：13800001111',
+  '',
+  '## 个人简介',
+  '五年后端开发经验，长期负责高并发订单链路的稳定性治理与发布流水线提速。',
+  '',
+  '## 教育经历',
+  '江海大学｜软件工程 2017.09-2021.06',
+  '辅修分布式系统，在校完成过一次性处理千万级日志的课程设计。',
+  '',
+  '## 工作经历',
+  '星桥科技｜后端工程师 2021.03-2024.06',
+  '- 主导订单服务重构，P99 延迟下降 40%。',
+  '',
+  '## 校园经历',
+  '校编程社｜社长 2018.09-2019.06',
+  '- 组织过三十人规模的校内算法竞赛，负责赛题与判题机。',
 ].join('\n');
 
 /**
@@ -150,6 +182,28 @@ function entityCount(db: DatabaseSync): number {
   return Number(row.total);
 }
 
+/** `kb_chunks` 的全部行数。 */
+function chunkCount(db: DatabaseSync): number {
+  const row = db.prepare('SELECT COUNT(*) AS total FROM kb_chunks').get() as { total: number | bigint };
+  return Number(row.total);
+}
+
+/**
+ * 「实体级切片找不到对应实体行」的行数——spec 4.3-11 收口判据「删实体后索引无孤儿行」的机检形式。
+ * @param db 裸连接
+ * @returns 孤儿切片行数；正常路径下任何时刻都应为 0
+ */
+function orphanChunkCount(db: DatabaseSync): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS total FROM kb_chunks
+        WHERE chunk_kind = 'entity'
+          AND chunk_id NOT IN (SELECT entity_id FROM kb_entities)`,
+    )
+    .get() as { total: number | bigint };
+  return Number(row.total);
+}
+
 /** 表是否存在（回滚用例的判据）。 */
 function tableExists(db: DatabaseSync, name: string): boolean {
   const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name) as
@@ -171,17 +225,20 @@ afterAll(async () => {
 });
 
 describe('建表与迁移', () => {
-  it('挂载即建 kb_entities 表，迁移号段为 11', async () => {
+  it('挂载即建 kb_entities / kb_chunks 表，迁移号段为 11 / 12', async () => {
     const { db } = await boot();
     expect(tableExists(db, 'kb_entities')).toBe(true);
+    expect(tableExists(db, 'kb_chunks')).toBe(true);
     expect(KB_PROFILE_MIGRATION_VERSION).toBe(11);
+    expect(KB_CHUNKS_MIGRATION_VERSION).toBe(12);
   });
 
   it('迁移号段不复用任何已分配号段（撞号的表现是「见号已存在就跳过建表」，表根本没建）', () => {
     // 已分配：账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
-    // resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10。
+    // resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10 / kb_entities 11。
     const taken = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(taken.has(KB_PROFILE_MIGRATION_VERSION)).toBe(false);
+    expect(new Set([...taken, KB_PROFILE_MIGRATION_VERSION]).has(KB_CHUNKS_MIGRATION_VERSION)).toBe(false);
   });
 
   it('带 `down` 的迁移可以倒回去：回滚到 10 之后 kb_entities 表消失（spec 4.2-01 的 migration up/down 半边）', async () => {
@@ -193,6 +250,22 @@ describe('建表与迁移', () => {
     // 只倒回本表：出处表（号段 10）与文档表（号段 7）都还在，回滚不该波及别人的表。
     expect(tableExists(db, 'resume_imports')).toBe(true);
     expect(tableExists(db, 'resume_docs')).toBe(true);
+  });
+
+  it('切片表能单独倒回去：回滚 12 只删 `kb_chunks`，实体表与它的数据原样留着（spec 4.3-11 的 down 半边）', async () => {
+    const { kb, doc, store, db } = await boot();
+    const parsed = parseResumeText(RESUME_MD, 'resume-rollback-chunks', NOW_MS);
+    if (parsed.status !== 'ok') throw new Error('样例简历解析失败');
+    doc.save(parsed.document);
+    kb.sync('resume-rollback-chunks', NOW_MS);
+    expect(chunkCount(db)).toBeGreaterThan(0);
+
+    const result = store.rollback(KB_PROFILE_MIGRATION_VERSION);
+    expect(result.reverted).toEqual([KB_CHUNKS_MIGRATION_VERSION]);
+    expect(tableExists(db, 'kb_chunks')).toBe(false);
+    // 派生索引删掉了，真相还在：实体表一行不少，重新挂载就能按实体补建回来（下面有用例判这条）。
+    expect(tableExists(db, 'kb_entities')).toBe(true);
+    expect(entityCount(db)).toBe(7);
   });
 });
 
@@ -366,6 +439,26 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
 });
 
 /**
+ * 挂一份新库，把给定语料解析成工作副本并同步出实体。
+ *
+ * 反查（4.2-03）与切片（4.3-a）两组接线用例都要「一份同步好的库」这个前置，
+ * 差别只在语料与阈值上，所以收成一处（AGENTS.md §2.2：同一逻辑出现第二次就抽公共层）。
+ * @param dir 本次用的临时目录（每个用例独立一份库）
+ * @param corpus 简历正文
+ * @param docId 存进 `resume_docs` 时用的文档 id
+ * @param evidence 反查阈值；省略时用装配默认值
+ * @returns 装配好的服务与裸连接
+ */
+async function syncedKb(dir: string, corpus: string, docId: string, evidence?: { topK: number; minScore: number }) {
+  const booted = await boot(dir, evidence);
+  const parsed = parseResumeText(corpus, docId, NOW_MS);
+  if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
+  booted.doc.save(parsed.document);
+  booted.kb.sync(docId, NOW_MS);
+  return booted;
+}
+
+/**
  * 反查的接线用例（spec 4.2-03）。
  *
  * 算法本身在 `evidence.test.ts` 里逐条断言过，这里只验三件**只有装配起来才成立**的事：
@@ -375,12 +468,7 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
  * @returns 已同步好实体的 `kb.profile` 与文档存储服务
  */
 async function seededKb(dir: string, evidence?: { topK: number; minScore: number }) {
-  const booted = await boot(dir, evidence);
-  const parsed = parseResumeText(RESUME_MD, 'resume-evidence', NOW_MS);
-  if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
-  booted.doc.save(parsed.document);
-  booted.kb.sync('resume-evidence', NOW_MS);
-  return booted;
+  return syncedKb(dir, RESUME_MD, 'resume-evidence', evidence);
 }
 
 describe('证据反查 evidenceFor（4.2-03）', () => {
@@ -654,6 +742,8 @@ describe('备份导出 / 导入（4.2-08）', () => {
   it('中途一条载荷不合法就整批回滚：库里维持导入前的原状', async () => {
     const dir = tempDir();
     const { kb, db } = await boot();
+    // 先落一条已有的手工实体：回滚要判的是「回到导入前」，库里原本就是空的就判不出「回到」。
+    const keeper = kb.create({ kind: 'skill', payload: { text: '导入前就有的那条' } }, NOW_MS);
     const goodId = 'kb-rollback-good';
     const filePath = writeBackup(dir, 'broken.json', {
       schemaVersion: KB_BACKUP_SCHEMA_VERSION,
@@ -682,8 +772,12 @@ describe('备份导出 / 导入（4.2-08）', () => {
     });
 
     expectAppError('INVALID_ARGUMENT', () => kb.importBackup(filePath, 'skip'));
-    expect(entityCount(db)).toBe(0);
+    expect(entityCount(db)).toBe(1);
     expect(kb.get(goodId)).toBeNull();
+    // 4.3-a：实体回滚了，切片也必须跟着回滚——「实体写成功而切片留下」会让检索返回库里没有的内容。
+    expect(chunkCount(db)).toBe(1);
+    expect(kb.listChunks()[0]?.chunkId).toBe(keeper.entityId);
+    expect(kb.listChunks()[0]?.text).toBe('导入前就有的那条');
   });
 
   it('不是合法 JSON、格式版本不认识、文件内部 id 重复，都在动库之前被拒', async () => {
@@ -794,6 +888,185 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     expect(await tool.run({})).toEqual(kb.list());
     // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
     expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
+  });
+});
+
+/**
+ * 检索切片的收敛用例（spec 4.3-11，plan §4.3 切片拆分的 4.3-a）。
+ *
+ * 派生规则本身在 `chunks.test.ts` 里逐条断言过，这里只判**只有装配起来才成立**的那件事：
+ * `kb_chunks` 是派生索引，不是第二套真相——所以每一条会改 `kb_entities` 的路径
+ * （sync / create / update / remove / importBackup）都必须在同一个事务里把切片一起改掉，
+ * 任何一条路走漏，表现都是「检索返回一句库里已经没有的内容」。
+ * 收口判据两句：**chunk 边界 = 实体边界**（下面的 id 集合双向相等）、
+ * **删实体后索引无孤儿行**（`orphanChunkCount` 恒为 0）。
+ */
+describe('检索切片收敛（4.3-a / spec 4.3-11）', () => {
+  it('实体级切片与实体一一对应：两边 id 集合双向相等，且切片正文就是那条实体的反查文本', async () => {
+    const { kb } = await syncedKb(tempDir(), RESUME_MD, 'resume-chunk-align');
+    const entityIds = kb.list().map((entity) => entity.entityId);
+    const chunks = kb.listChunks();
+    const entityChunkIds = chunks.filter((chunk) => chunk.chunkKind === 'entity').map((chunk) => chunk.chunkId);
+
+    // 双向相等：既不允许「实体没有切片」（检索漏召回），也不允许「切片没有实体」（返回幽灵内容）。
+    expect([...entityChunkIds].sort()).toEqual([...entityIds].sort());
+    // 整行相等而不只是 id 相等：切片的内容必须逐字段等于纯派生结果（`entityChunkOf`），
+    // 装配层自己不再算一遍文本，否则「键排序后拼接」那条口径就有第二份实现（§2.5）。
+    for (const entity of kb.list()) {
+      const chunk = chunks.find((item) => item.chunkId === entity.entityId);
+      expect(chunk).toEqual({ ...entityChunkOf(entity), updatedAt: NOW_MS });
+    }
+  });
+
+  it('区块级切片只覆盖不建实体行的三类区块，id 与 `deriveSectionChunks` 逐条相等', async () => {
+    const { kb, doc } = await syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-chunk-sections');
+    const loaded = doc.load('resume-chunk-sections');
+    if (loaded.status !== 'found') throw new Error('工作副本读不回来');
+    const derived = deriveSectionChunks(loaded.document);
+
+    const sectionChunks = kb.listChunks().filter((chunk) => chunk.chunkKind === 'section');
+    expect(sectionChunks.map((chunk) => chunk.chunkId).sort()).toEqual(derived.map((draft) => draft.chunkId).sort());
+    // 区块级切片带 sectionKind，实体级不带——检索结果的「来自哪个区块」全靠这一列。
+    expect(new Set(sectionChunks.map((chunk) => chunk.sectionKind))).toEqual(
+      new Set(['summary', 'education', 'campus']),
+    );
+    expect(sectionChunks.every((chunk) => chunk.sourceDocId === 'resume-chunk-sections')).toBe(true);
+    expect(kb.listChunks().filter((chunk) => chunk.sectionKind !== null)).toHaveLength(sectionChunks.length);
+  });
+
+  it('三类区块与实体不重叠：既不会出现「同一段文字两条切片」，也不会三段都没进索引', async () => {
+    const { kb } = await syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-chunk-no-overlap');
+    const chunks = kb.listChunks();
+    const entityChunkIds = new Set(
+      chunks.filter((chunk) => chunk.chunkKind === 'entity').map((chunk) => chunk.chunkId),
+    );
+    const sectionChunkIds = new Set(
+      chunks.filter((chunk) => chunk.chunkKind === 'section').map((chunk) => chunk.chunkId),
+    );
+    for (const id of sectionChunkIds) expect(entityChunkIds.has(id)).toBe(false);
+    expect(sectionChunkIds.size).toBeGreaterThan(0);
+    // `chunk_id` 上有 UNIQUE，重复派生同一段文字会得到同一个 id；集合大小与总行数相等说明没有一条切片白占着。
+    expect(entityChunkIds.size + sectionChunkIds.size).toBe(chunks.length);
+  });
+
+  it('改一条实体的载荷：切片正文与 token 一起换，旧词从索引里消失（不留「搜到已被改掉的话」）', async () => {
+    const { kb, db } = await boot();
+    const created = kb.create({ kind: 'skill', payload: { text: 'Rust 异步运行时' } }, NOW_MS);
+    const before = kb.listChunks().find((chunk) => chunk.chunkId === created.entityId);
+    expect(before?.tokens).toContain('运行');
+
+    kb.update(created.entityId, { text: 'Go 微服务' }, LATER_MS);
+    const after = kb.listChunks().find((chunk) => chunk.chunkId === created.entityId);
+    expect(after?.text).toBe('Go 微服务');
+    expect(after?.tokens).toBe(indexTokens('Go 微服务'));
+    expect(after?.updatedAt).toBe(LATER_MS);
+    // 全表扫一遍旧 token：`update` 只写自己那一行，别处本来就不该有；这里判的是「没有第二条切片留着旧文本」。
+    const staleRows = db.prepare("SELECT COUNT(*) AS total FROM kb_chunks WHERE tokens LIKE '%运行%'").get() as {
+      total: number | bigint;
+    };
+    expect(Number(staleRows.total)).toBe(0);
+  });
+
+  it('删一条手工实体：切片同删，索引里无孤儿行', async () => {
+    const { kb, db } = await boot();
+    const created = kb.create({ kind: 'project', payload: { name: '订单中台' } }, NOW_MS);
+    kb.create({ kind: 'skill', payload: { text: 'Rust' } }, NOW_MS);
+    expect(orphanChunkCount(db)).toBe(0);
+
+    kb.remove(created.entityId, LATER_MS);
+    expect(kb.listChunks().some((chunk) => chunk.chunkId === created.entityId)).toBe(false);
+    expect(orphanChunkCount(db)).toBe(0);
+  });
+
+  it('同步清理派生实体时切片同删：工作副本删光经历再同步，实体级与区块级都不留旧行', async () => {
+    const dir = tempDir();
+    const { kb, doc, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-chunk-sync');
+    const before = kb.listChunks().length;
+    expect(before).toBeGreaterThan(0);
+
+    // 把整份工作副本换成「只有技能」：三类区块全没了，经历实体也没了。
+    const parsed = parseResumeText(RESUME_MD_SKILLS_ONLY, 'resume-chunk-sync', LATER_MS);
+    if (parsed.status !== 'ok') throw new Error('样例简历解析失败');
+    doc.save(parsed.document);
+    kb.sync('resume-chunk-sync', LATER_MS);
+
+    const after = kb.listChunks();
+    expect(orphanChunkCount(db)).toBe(0);
+    expect(after.filter((chunk) => chunk.chunkKind === 'section')).toEqual([]);
+    expect(after.map((chunk) => chunk.chunkId).sort()).toEqual(
+      kb
+        .list()
+        .map((entity) => entity.entityId)
+        .sort(),
+    );
+    expect(after.every((chunk) => chunk.sourceDocId === 'resume-chunk-sync')).toBe(true);
+  });
+
+  it('重复同步不重复建行：两次同步后切片条数与 id 集合都不动', async () => {
+    const dir = tempDir();
+    const { kb, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-chunk-idem');
+    const first = kb.listChunks();
+    kb.sync('resume-chunk-idem', LATER_MS);
+    const second = kb.listChunks();
+    expect(second.map((chunk) => chunk.chunkId)).toEqual(first.map((chunk) => chunk.chunkId));
+    expect(chunkCount(db)).toBe(first.length);
+  });
+
+  it('导入备份成功：切片跟着恢复出的实体一起回来，时间戳取文件里的值而不是「刚刚」', async () => {
+    const dir = tempDir();
+    const { kb, db } = await boot(dir);
+    const restoredAt = NOW_MS - 1_000;
+    const entity: HandwrittenEntity = {
+      entityId: 'kb-chunk-restored',
+      kind: 'skill',
+      parentId: null,
+      sourceDocId: null,
+      payload: { text: '备份里的一条' },
+      createdAt: restoredAt,
+      updatedAt: restoredAt,
+    };
+    const filePath = writeBackup(dir, 'restored.json', backupOf([entity]));
+
+    kb.importBackup(filePath, 'skip');
+    const chunk = kb.listChunks().find((item) => item.chunkId === entity.entityId);
+    // 实体在事务里逐条 upsert，切片是同一条路径带出来的——这里判的是「四条写路径都收口到 `upsert` / `insert`」
+    // 这条接线真的成立，而不只是「切片表能写」。
+    expect(chunk).toEqual({ ...entityChunkOf(entity), updatedAt: restoredAt });
+    expect(orphanChunkCount(db)).toBe(0);
+  });
+
+  it('老库升级补建：回滚掉切片表后重新挂载，按现有实体与工作副本把索引补齐', async () => {
+    const dir = tempDir();
+    const { kb, store, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-chunk-upgrade');
+    const before = kb.listChunks().map((chunk) => chunk.chunkId);
+    expect(before.length).toBeGreaterThan(0);
+
+    // 模拟「带着 kb_entities 但没有 kb_chunks 的老库」：倒回迁移 12 会把表删掉，实体一行不少地留着。
+    // 走回滚而不是 `DROP TABLE`，是因为台账里的第 12 版也必须一起删掉——补建只在「这一版真的被应用过」时发生。
+    store.rollback(KB_CHUNKS_MIGRATION_VERSION - 1);
+    expect(tableExists(db, 'kb_chunks')).toBe(false);
+
+    const again = await boot(dir);
+    expect(tableExists(again.db, 'kb_chunks')).toBe(true);
+    // 实体级与区块级都补齐：前者按 `kb_entities` 现算，后者要遍历 `resume_docs` 才有，漏掉任何一边
+    // 表现都是「升级完搜不到老数据」。
+    expect(
+      again.kb
+        .listChunks()
+        .map((chunk) => chunk.chunkId)
+        .sort(),
+    ).toEqual([...before].sort());
+    expect(orphanChunkCount(again.db)).toBe(0);
+  });
+
+  it('全表不变量：每一条切片的 token 都是其正文按 `indexTokens` 现算的结果', async () => {
+    const { kb } = await syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-chunk-invariant');
+    kb.create({ kind: 'achievement', payload: { text: 'P99 延迟下降 40%' } }, NOW_MS);
+    for (const chunk of kb.listChunks()) {
+      expect(chunk.tokens).toBe(indexTokens(chunk.text));
+    }
+    // 空正文是合法形态（切不出 token 就存空串），但绝不能存成 `undefined` 或别的字面。
+    expect(kb.listChunks().every((chunk) => typeof chunk.tokens === 'string')).toBe(true);
   });
 });
 

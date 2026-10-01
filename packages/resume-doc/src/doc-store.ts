@@ -157,6 +157,22 @@ export class ResumeDocService extends Service {
     return row !== undefined;
   };
 
+  /**
+   * 列出库里所有**有正文**的文档 id（升序）。
+   *
+   * 只回 id 不回正文：全量重建派生索引（4.3-a 的 `kb_chunks` 补建）要遍历一遍库，
+   * 但每份正文仍必须逐条经 `load()` 读——那才是带 Schema 复验的唯一通道（plan §1.4 裁定一），
+   * 这里开一个「一次把所有 doc_json 捞出来」的口子就等于造了第二条读取通道。
+   * `doc_json IS NULL` 的行没有正文，与 `load()` 返回 missing 同一口径，一并跳过。
+   * @returns 文档 id 列表；空库返回空数组，不抛错
+   */
+  listIds = (): readonly string[] => {
+    const rows = this.db
+      .prepare('SELECT id FROM resume_docs WHERE doc_json IS NOT NULL ORDER BY id')
+      .all() as unknown as readonly { id: string }[];
+    return rows.map((row) => row.id);
+  };
+
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info('[resume-doc] resume_docs 表就绪，迁移号段 ' + String(RESUME_DOC_MIGRATION_VERSION));
