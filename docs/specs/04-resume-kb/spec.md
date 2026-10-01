@@ -134,6 +134,23 @@
   判定口径与失败语义都不同，合并只会让两边长出开关参数）；脱敏仍然只有 `redactText` 一处；
   简历数据结构仍然只有 `@auto-cc/plugin-resume-doc` 一份，本切片未新增第二份。
 
+**4.2 开工前置：plan §1.4 裁定一（导入即建可编辑工作副本）已落地（2026-10-01）**
+
+- 修的是 4.1-c 留下的**真实产品缺口**，不是重构：`resume.parse` 此前只把文档写进 `resume_imports.doc_json`，
+  而 3.x 的编辑 / 快照 / PDF 导出只认 `resume_docs`——「根据 JD 优化简历」这条主链在入口就断了。
+  现在 `persist()` 在写完出处之后调用 `resume.doc.save(document)`，工作副本由**已有的 service** 写，
+  本包不往 `resume_docs` 落裸 SQL（§2.5 一处真相源，`AppError` 与 Schema 校验因此自动继承）。
+- **不覆盖用户改动**是这一刀的语义核心：写入前先看 `resume.doc.load(docId).status`，只有 `missing` 才建，
+  重复导入按 4.1-07 只刷新出处与时间。单测第 2 例把这条打死——导入→改工作副本→再导入，
+  断言 `isNew === false`、`resume_docs` 行数仍为 1、且库里 JSON 与**改过之后**的那份逐字相等。
+- 派生的接线改动三处，都是这一条依赖的必然结果：`static inject = ['store', 'resume.doc']`、
+  `cordis.yml` 里 `resume-parse` 的 `dependsOn: [store, resume-doc]`（`inject` 缺席即 PENDING，
+  装配顺序必须显式声明）、4.1-10 的依赖声明断言随之改为新字符串。扫描件（`status: 'scanned'`）
+  不产生工作副本——没有文档可存，第 3 例断言 `resume_docs` 行数为 0。
+- 顺手纠出两处**文档与常量对不上**的陈旧注释（`cordis.yml` 与 `packages/main/src/registry.ts`
+  把 `resume-doc` 的迁移号段写成 6，实际常量是 7）：号段是防撞车的唯一依据，写错的号段比没有注释更坏。
+- 本条不改动 4.2 任何一行的状态位：4.2-01/02/11 的判据还要等 `kb_entities`（迁移 11）与实体派生落地。
+
 ## 4.2 知识库建模与管理界面
 
 | ID     | 验收标准                                                              | 方式 | 验证操作                           | 状态 |

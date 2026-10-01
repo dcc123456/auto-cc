@@ -134,6 +134,11 @@ optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 
 - `resume_imports`：降级为**不可变的原始解析出处**（保留 `doc_json` 作为「当初解析成什么样」的证据，
   与 `resume_snapshots` 同类语义，4.2-08 的导入冲突与 4.5 的可复盘都靠它）。
 - 界面、检索（4.3）、生成（4.5）一律只从 `resume_docs` 读当前态。
+- **落地状态（2026-10-01）**：这一条已实现，落点是 `parse-service.ts` 的 `persist()` 在写完出处后经
+  `resume.doc.save` 建工作副本，且**仅在 `load(docId).status === 'missing'` 时**建（重复导入不许冲掉用户改动）；
+  连带 `inject` / `dependsOn` 加上 `resume-doc`，号段 6→7 的两处陈旧注释同步纠偏。
+  落点细节与单测三条（建副本 / 不冲掉改动 / 扫描件不建）见 spec「4.2 开工前置」一节。
+  所以 4.2-a 剩下的只是 `kb_entities`（迁移 11）+ 实体派生 + `kb.profile` CRUD。
 
 **裁定二：四类实体用单表 `kb_entities` + `kind` 判别，不建四张表。**
 
