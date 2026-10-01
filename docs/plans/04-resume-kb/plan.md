@@ -235,6 +235,25 @@ spec「4.2-b 落地记录」，这里只记两条**属本计划**的决定：
   不允许做出「只有工程师知道怎么串起来」的孤岛。所以 4.2-d 的收尾判据包含一次 agent 侧实测：
   对话里问「库里有哪些和高并发相关的经历」，走的必须是同一个 `kb.profile`（禁止界面与工具各长一套）。
 
+**4.2-d 开工前置（2026-10-01 实测接线面，来自 1.4/1.5/2.x 已落地的同一套桥）**
+
+- **白名单只有一处**：`packages/shared/src/bridge.ts` 的 `RENDERER_ALLOWLIST` 是 `'service.method'`
+  全限定名的唯一依据，`packages/preload` 与 `packages/ipc` 都从它推导（preload 自动按服务名建命名空间，
+  网关在 `packages/ipc/src/gateway.ts` 用 `isAllowedCall` 拒绝未登记口）。所以本片的进程边界改动
+  **只碰 `bridge.ts` 一个文件**，不要再去 preload 里加一层。
+- **编译期保险丝是 `BridgeSignaturesCovered`**：白名单加一项而 `BridgeSignatures` 忘了补签名，`typecheck`
+  立刻报错，不会出现「主进程允许、渲染层无类型」的漂移——这条是 4.2-09 的机检依据之一，别用 `any` 绕过。
+- **服务名按 `provide` 匹配**：解析器取最长服务名前缀，且 `pickMethod` 只接函数，所以界面侧的调用名是
+  `kb.profile.list`（`provide` 名），而不是 `REGISTRY` 里的装配 id `kb-profile`。
+- **共享层不能依赖 L2**：`shared` 里放的是**镜像形状**（同 `PendingImportRowView` 之于 `PendingImportView`
+  的既有做法），不是从 `@auto-cc/plugin-resume-kb` import 类型。镜像必须一字段一字段对着 service 的返回体写。
+- **事件要三处同时登记**：`packages/core/src/events.ts` 的 `declare module 'cordis' { interface Events }`、
+  `bridge.ts` 的 `RENDERER_EVENTS`、`RendererEventSignatures`。少第一处发不出去，少后两出不了进程 / 渲染层无类型。
+  4.2-06 的「即时生效、不重启不手动刷新」就靠这条事件链，界面收到信号后**重读 `list()`** 而不是自己改本地态（§2.5）。
+- **面板不是路由**：`App.tsx` 的 diagnostics 视图是一列 JSX 子元素，新增 `KbPanel` 只在栈里加一项。
+- **i18n 键在单一命名空间 `shell` 下按功能分组的**，本片新增 `kb` 分组；中英键对齐由
+  `scripts/check-renderer-conventions.ts` 机检，缺一个键就是 lint 失败。
+
 **切片顺序（一次只做一个，每片自带验收）**
 
 | 切片  | 内容                                                                                                                                                                        | 覆盖条目           | 前置            |

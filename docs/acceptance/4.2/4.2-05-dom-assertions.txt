@@ -1,0 +1,35 @@
+4.2-05 / 4.2-06 真实窗口 DOM 断言（CDP 10222，Electron 主窗口 target 127.0.0.1:5173）
+数据来源：诊断视图 → ResumePanel「载入演示内容」→ docId=resume-demo → KbPanel「从简历同步」
+
+[1] 同步回执（主进程 → 事件 → 界面重读，无手动刷新）
+    profile.sync('resume-demo') => { docId: 'resume-demo', created: 6, updated: 0, removed: 0 }
+    提示行：「同步：6 行已变更，列表已重读」
+
+[2] 实体树按来源给两套处置（data-kb-row / data-kb-source / 是否存在编辑与删除按钮）
+    kb-5e6392e2-4c93-498e-9484-e792ff30986a  source=manual       hasEdit=true  hasDelete=true   高并发容量评估与压测
+    kb-5ad3fe29f55dbb0c  source=resume-demo  hasEdit=false hasDelete=false  TypeScript
+    kb-77e1c4fce5896253  source=resume-demo  hasEdit=false hasDelete=false  Node.js
+    kb-8278fa7d2a72fe70  source=resume-demo  hasEdit=false hasDelete=false  后端工程师
+    kb-d504429b6c051c4c  source=resume-demo  hasEdit=false hasDelete=false  主导订单服务重构，P99 延迟下降 40%。
+    kb-d6dbfff5463bc5e0  source=resume-demo  hasEdit=false hasDelete=false  PostgreSQL
+    kb-e74b1f2fd204643e  source=resume-demo  hasEdit=false hasDelete=false  Electron
+    => 6 条派生行全部不挂编辑/删除按钮（4.2-04 的删除策略在界面上成立：挂上去就是一个必然失败的按钮）
+
+[3] 展开证据链（点 kb-d504429b6c051c4c 的「证据链」= 拿它自己的正文去 profile.evidenceFor）
+    经历 · kb-8278fa7d2a72fe70 · 完全覆盖 · 1.00 · 40 / p99 / 下降 / 主导 / 务重 / 单服 / 导订 / 延迟 / 服务 / 订单 / 迟下 / 重构
+    成果 · kb-d504429b6c051c4c · 完全覆盖 · 1.00 · 40 / p99 / 下降 / 主导 / 务重 / 单服 / 导订 / 延迟 / 服务 / 订单 / 迟下 / 重构
+    最后更新：2026-10-01T13:42:08.994Z      提示行：「命中 2 条实体」
+    => 理由码（完全覆盖=contains）、分数、命中词全部来自主进程 evidence.ts，界面未重算
+
+[4] 4.2-06 即时生效：新建 → 保存 → 树里立刻出现新行（不重启、不手动刷新）
+    新建手工实体 payload `title=高并发容量评估与压测` => 提示行「已创建 kb-5e6392e2-...」，行内出现「手工创建（不会被同步清理）」
+    再编辑为 `title=高并发容量评估与压测（补充：全链路）` => 提示行「已更新 kb-5e6392e2-...」，同一行的正文立刻变成新值
+
+[5] 裁定三（同一个入口既被界面调用也被 agent 调用）——真实进程内的工具面读数
+    agent.tools.list() 的 id 列表：sessions.open, browser.page.navigate, browser.page.snapshot, browser.locate.find,
+      browser.act.click, browser.act.type, outbound.greet.perform, outbound.deliver.perform, jd.capture.run, kb.profile.list
+    kb.profile.list 描述：「列出本地知识库里的经历 / 项目 / 技能 / 成果实体，可按种类过滤；sourceDocId 传 null 时只取用户手工创建的实体」
+      effect=read  requiresConfirmation=false
+    agent.tools.call('kb.profile.list', { kind: 'experience' }) => 2 行，与界面 [2] 的 experience 行逐字段一致
+      （含刚在界面上改过标题的那条手工实体，以及 sourceDocId=resume-demo 的派生行）
+    => 工具面与服务面读的是同一张 kb_entities 表，没有第二条数据通道

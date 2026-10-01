@@ -161,8 +161,8 @@
 | 4.2-02 | 每条实体有稳定 id，供 `evidenceRefs` 反查引用（4.5/4.6 依赖）         | C    | 引用完整性断言                     | [x]  |
 | 4.2-03 | `evidenceFor(claim)` 能由一句简历描述反查到支撑实体                   | U    | 单测：给定句子命中正确项目         | [x]  |
 | 4.2-04 | 删除经历时其下属项目/成果级联处理策略明确（不留孤儿行）               | U+C  | 断言外键/级联结果                  | [x]  |
-| 4.2-05 | 管理界面展示实体树与关系，条目可展开查看证据链                        | V    | 截图（列表 + 展开态）              | [ ]  |
-| 4.2-06 | 界面新增/编辑实体即时生效（事件流驱动，不需重启或手动刷新）           | V    | 编辑后截图显示新值                 | [ ]  |
+| 4.2-05 | 管理界面展示实体树与关系，条目可展开查看证据链                        | V    | 截图（列表 + 展开态）              | [x]  |
+| 4.2-06 | 界面新增/编辑实体即时生效（事件流驱动，不需重启或手动刷新）           | V    | 编辑后截图显示新值                 | [x]  |
 | 4.2-07 | 知识库数据全本地，无任何上行请求（除用户显式配置的 LLM 网关）         | C    | 网络审计：除 llm 外零外部请求      | [ ]  |
 | 4.2-08 | 支持导出/导入知识库备份（本地文件），导入冲突有明确策略               | C    | round-trip + 冲突用例              | [x]  |
 | 4.2-09 | 界面文案全部 i18n、样式全部 Tailwind、图标全部 lucide                 | C    | 1.2-13~16 规则复跑 0 违规          | [ ]  |
@@ -295,6 +295,43 @@
   （逐字节导出稳定、round-trip 逐条等值、skip 与 overwrite 两种冲突、悬空归属、事务回滚、
   三种非法文件在动库之前被拒、fs 边界两条、出处 `source_doc_id` 原样恢复且重复导入不重复写）。
   该包 7 文件 / **123** 用例全绿；根 `pnpm typecheck` / `lint` / `format:check` / `test` 全绿。
+
+### 4.2-d 落地记录（4.2-05 / 06 的界面与工具面，2026-10-01）
+
+- **即时生效走的是事件，不是轮询**：`kb/entities-changed`（`action / docId / changed / at`）由 `profile-service`
+  在 `sync / create / update / remove / importBackup` 五条写路径末尾发出，界面订阅后重读 `list()`。
+  载荷**刻意不带实体内容**——带了就等于渲染层自己养一份状态，与「主进程是唯一真相源」冲突（AGENTS.md §2.5）。
+  两处**不发光标**：载荷哈希未变（内容没动）与同步失败都不发事件，所以提示行不会把「什么都没发生」说成「已更新」。
+- **按来源给两套处置**（4.2-04 的界面兑现）：派生行只标「来自简历 <docId>（改内容请在简历工作副本里改后同步）」
+  并只留「证据链」按钮；手工行标「手工创建（不会被同步清理）」并给编辑/删除。给派生行挂删除按钮
+  等于挂一个必然失败的按钮，这条策略在 DOM 断言 [2] 里逐行打死（6 条派生行 `hasEdit=false / hasDelete=false`）。
+- **证据链不是装饰**：展开一行 = 拿这一行自己的正文去 `profile.evidenceFor`，界面显示理由码（完全覆盖 / 词面重合）、
+  分数、命中词、`updatedAt`。分数与理由全部由 `evidence.ts` 给出，渲染层不重算（§2.5）；空命中是正常态，
+  提示行说「查无支撑」而不是报错。
+- **视图形状在 `shared` 里做镜像**（不是 import L2 类型）：`shared` 是 L1，反向依赖 L2 会破 §4.1 的分层，
+  所以 `KbEntityRowView` 等九个视图类型与 `bridge.ts` 的签名条目一起声明，由 `BridgeSignaturesCovered`
+  在编译期保证「白名单里每一条都有签名」——加一条漏一条签名的表现是 `pnpm typecheck` 直接失败，不是运行期 undefined。
+- **裁定三兑现到工具面**：`kb.profile.list` 在 service 自己的 `[Service.init]` 里经 `registerAgentTools` 登记
+  （`effect: 'read'`、`requiresConfirmation: false`），真实进程内 `agent.tools.list()` 能看到它，
+  `agent.tools.call('kb.profile.list', { kind: 'experience' })` 返回的行与界面树逐字段一致
+  ——**同一个入口**，界面与 agent 读同一张 `kb_entities`，没有第二条数据通道（证据 [5]）。
+  单测侧沿用 L2 各自留一份薄 `FakeAgentToolsService` 的先例（`packages/browser/src/test-doubles.ts`），
+  零键配置必须用 `NO_CONFIG` 挂载——直接传 `{}` 会被 cordis 的 schema 校验判成非法配置。
+- **harness 实测到一个通用坑（写进 1.6 的经验）**：诊断视图是 `hidden`/`block` 切换的三个容器之一，
+  未激活时元素存在但 `getBoundingClientRect()` 宽高为 0，此时 CDP 的原生坐标点击**静默落空**（回执仍是「已点击」）。
+  所以驱动任何非默认视图前必须先点 `[data-view="diagnostics"]` 激活，再 `type`/`click`。
+- **本片未收口的部分（不粉饰）**：
+  ① 4.2-05 / 06 的 V 证据只覆盖到「工具面读数与界面一致」，**没有覆盖自然语言对话入口**——
+  在 chat 里问「库里有哪些和高并发相关的经历」、确认它确实挑中 `kb.profile.list` 这条真链路，
+  需要 LLM 网关在场，与 2.8-c 的对话真工具卡片属同一类验证，留作 4.2 收口时补；
+  ② 「导入派生行后原简历已被删」这一 4.2-c 遗留边界，界面只在派生行文案里指了「去简历工作副本改后同步」，
+  没有做「源文档已不存在」的显式提示；
+  ③ 备份导出/导入的路径是用户手填绝对路径（渲染层不读文件，§5.8），未接原生文件对话框。
+- **单测覆盖**：`profile-service.test.ts` 新增「变更事件与 agent 工具面」3 例
+  （动作序列 `create/update/remove/import/sync` 且失败同步不发事件、载荷未变不发事件、工具元数据与委派等价于 `list()`）。
+  该包 7 文件 / **126** 用例全绿；根 `pnpm typecheck` / `lint`（含渲染层规范：2 个语言包 22 个源文件键对齐）/
+  `format:check` / `test` 全绿。V 证据：`docs/acceptance/4.2/4.2-05-tree-evidence.png`、
+  `4.2-06-manual-created.png`、`4.2-06-instant-update.png`、`4.2-05-dom-assertions.txt`。
 
 ## 4.3 本地检索（BM25 默认，向量可选）
 
