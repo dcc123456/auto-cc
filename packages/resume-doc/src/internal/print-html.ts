@@ -27,6 +27,12 @@ const EMBEDDED_FONTS = [
 ] as const;
 
 /**
+ * 内嵌字体集的稳定标识（族名 + 逐档文件名）——快照（3.7-01）据此记录「这份 PDF 由哪套字体产出」。
+ * 与 `@font-face` 声明同源于本文件，于是「产物的字体」与「快照里的字体集」永远指同一份清单，不会各写各的。
+ */
+export const FONT_SET_ID = `${FONT_FAMILY}:${EMBEDDED_FONTS.map((f) => f.file).join(',')}`;
+
+/**
  * 把简历文档渲染成「可独立打印的完整 HTML 文档」。
  * 纸张/页边距/字号/行距全部取自 `doc.layout`（3.3-03「配置集中于模型、不散落魔法数」），
  * 并声明随包内嵌字体（3.3-05）；正文来自 `resumeTemplate.render`（沿用 3.2 的模板与 i18n）。

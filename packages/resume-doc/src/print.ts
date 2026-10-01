@@ -7,7 +7,7 @@
  * 以及对 printToPDF 返回 Buffer 的**字节级结构读数**（页数 / 是否内嵌字体 / 是否有可搜索文本层）。
  * 真正调用内核打印、落 userData、拼字体目录 URL 的执行器落在 shell，经依赖注入消费本层产物。
  */
-import { buildPrintHtml, toPrintRequest } from './internal/print-html.js';
+import { buildPrintHtml, FONT_SET_ID, toPrintRequest } from './internal/print-html.js';
 
 export type { ResumePrintOptions, ResumePrintRequest } from '@auto-cc/shared';
 
@@ -46,4 +46,10 @@ export function inspectPdf(pdf: Uint8Array): PdfInspection {
 }
 
 /** 生成轨打印装配的单一门面（与 `resumeTemplate` 同款收敛，避免平铺别名造成 §2.5「两处都能用」）。 */
-export const resumePrint = { buildHtml: buildPrintHtml, toRequest: toPrintRequest, inspectPdf };
+export const resumePrint = {
+  buildHtml: buildPrintHtml,
+  toRequest: toPrintRequest,
+  inspectPdf,
+  /** 产物所用字体集的稳定标识——供快照（3.7-01）记录「这份 PDF 由哪套字体产出」。 */
+  fontSet: FONT_SET_ID,
+};

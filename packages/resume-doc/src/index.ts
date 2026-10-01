@@ -51,4 +51,12 @@ export {
   type TemplateOrigin,
 } from './template.js';
 export { resumePrint, type PdfInspection, type ResumePrintOptions, type ResumePrintRequest } from './print.js';
+export {
+  ResumeSnapshotService,
+  RESUME_SNAPSHOT_MIGRATION_VERSION,
+  type RestoreResult,
+  type ResumeSnapshotConfig,
+  type SnapshotMeta,
+  type SnapshotReceipt,
+} from './snapshot-store.js';
 export { ResumeExportService, type ExportReceipt, type ResumeExportConfig } from './export-service.js';

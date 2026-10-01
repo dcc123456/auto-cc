@@ -34,7 +34,7 @@ import {
   JdStoreService,
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
-import { ResumeDocService, ResumeExportService } from '@auto-cc/plugin-resume-doc';
+import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -109,6 +109,10 @@ export const REGISTRY: Registry = {
   // 导出编排（spec 3.3-11）：把「读合法文档 → 装配打印请求 → 交给打印轨 → 落盘 + 回写页数」串成 `resume.export` 服务，
   // 自身不认识 Electron，只经 `resume.print` 端口消费打印能力（ports-and-adapters，见 plan §3.3 分层落点）。
   'resume-export': ResumeExportService,
+  // 导出快照（spec 3.7-01）：`resume_snapshots` 表的唯一落点，迁移号段 8。每次 `resume.export` 成功后记一行不可变快照，
+  // 供 3.7-04 的按 id 还原与后续 3.7-02 的投递追溯读取。摘掉它，`resume-export` 连同进 PENDING（它的 `inject` 里有它），
+  // 界面点「导出 PDF」给出结构化错误——「导出」与「导出即留档」因此是可分别摘除的两件事，而不是悄悄少记一份历史。
+  'resume-snapshot': ResumeSnapshotService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,

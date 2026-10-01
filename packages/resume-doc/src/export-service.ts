@@ -1,5 +1,6 @@
 /**
- * `resume.export` 服务（spec 3.3-02 / 05 / 07 / 09 / 11 / 12 的编排半边）：文档 → 打印 HTML → 内核产 PDF → 落盘 → 回写页数。
+ * `resume.export` 服务（spec 3.3-02 / 05 / 07 / 09 / 11 / 12 的编排半边 + 3.7-01 的「每次导出记快照」）：
+ * 文档 → 打印 HTML → 内核产 PDF → 落盘 → 回写页数 → 记不可变快照。
  *
  * 分层：本服务在 L2 `resume-doc`，**不认识 Electron**——唯一碰 `WebContents.printToPDF` 的动作经依赖注入的
  * `resume.print` 端口（由 L1 shell 实现）完成。落盘目录取自 L0 `config` 的 `userDataDir`（与 1.3 的库、2.4 的失败证据同一个根），
@@ -16,6 +17,7 @@ import { join } from 'node:path';
 import type { ResumeDocService } from './doc-store.js';
 import { createEmptyDocument, makeField, type ResumeDocument } from './model.js';
 import { resumePrint } from './print.js';
+import type { ResumeSnapshotService } from './snapshot-store.js';
 import type { TemplateLocale } from './template.js';
 
 /** 导出产物落盘的子目录名（在 `userDataDir` 之下，与库、会话分区同根）。 */
@@ -43,7 +45,7 @@ export interface ExportReceipt {
 export class ResumeExportService extends Service {
   static provide = 'resume.export';
   static Config = resumeExportSchema;
-  static inject = ['resume.doc', 'resume.print', 'config'];
+  static inject = ['resume.doc', 'resume.print', 'resume.snapshot', 'config'];
 
   constructor(ctx: Context, _options: ResumeExportConfig) {
     super(ctx, 'resume.export');
@@ -55,6 +57,10 @@ export class ResumeExportService extends Service {
 
   private get printPort(): ResumePrintPort {
     return asApp(this.ctx)['resume.print'];
+  }
+
+  private get snapshotStore(): ResumeSnapshotService {
+    return asApp(this.ctx)['resume.snapshot'];
   }
 
   private get config(): ConfigService {
@@ -178,8 +184,12 @@ export class ResumeExportService extends Service {
       );
     }
 
-    // 页数回写（3.3-09）：以打印侧真实读数为准，供编辑器与后续快照（3.7）使用。
-    const saved = this.docStore.save({ ...doc, metrics: { ...doc.metrics, pages: inspection.pageCount } });
+    // 页数回写（3.3-09）：以打印侧真实读数为准，供编辑器与快照（3.7）使用。
+    const finalDoc: ResumeDocument = { ...doc, metrics: { ...doc.metrics, pages: inspection.pageCount } };
+    const saved = this.docStore.save(finalDoc);
+    // 导出瞬间记一份不可变快照（3.7-01）：与上面那次 save 用的是同一份 `finalDoc`，
+    // 所以快照 hash 与回执 hash 必然同源一致——「投出去的到底是哪一版」因此在库里留了不可变的一行。
+    this.snapshotStore.record(finalDoc, templateId, resumePrint.fontSet, Date.now());
 
     return { docId, path: target, pages: inspection.pageCount, bytes: inspection.byteLength, hash: saved.hash };
   };
