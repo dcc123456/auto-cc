@@ -43,6 +43,7 @@ import {
   OutboundDeliverService,
   type DeliverConfig,
 } from './deliver.js';
+import { DeliveryRecordService } from './delivery-record-store.js';
 import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
@@ -157,6 +158,8 @@ async function boot(options: BootOptions = {}) {
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   await ctx.plugin(UsageLedgerService, {});
+  // 投递记录（spec 3.7-02）先挂：`outbound.deliver` 把它列为硬依赖，摘掉它投递连同进不了装配。
+  await ctx.plugin(DeliveryRecordService, {});
   await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS });
   const gap = options.gapMs ?? 0;
   const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
@@ -184,6 +187,7 @@ async function boot(options: BootOptions = {}) {
     registry,
     sessions,
     ledger: asApp(ctx)['usage.ledger'],
+    records: asApp(ctx)['outbound.deliveries'],
     deliverFiber,
     tools: options.agentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
@@ -212,16 +216,20 @@ function fakeChannel(outcome: DeliverOutcome | Error = { sent: true, reason: '�
 
 /**
  * 一份合法的投递请求。
- * @param over 覆盖项（目标、文件路径、所属运行）
+ * @param over 覆盖项（目标、文件路径、所属运行、快照引用）
  * @returns 交给 `perform` / `stage` 的未知值
  */
-function request(over: Partial<{ jobId: string; filePath: string | undefined; workflowRunId: string | null }> = {}) {
+function request(
+  over: Partial<{ jobId: string; filePath: string | undefined; workflowRunId: string | null; snapshotId: string }> = {},
+) {
   return {
     platform: 'boss',
     jobId: over.jobId ?? 'job-1001',
     filePath: 'filePath' in over ? over.filePath : join('unused', 'resume.pdf'),
     title: '资深前端工程师',
     company: '示例科技',
+    // 不带就不进请求：用来演「只给了文件路径」那一支，记录里的引用该是 null 而不是编一个。
+    ...(over.snapshotId === undefined ? {} : { snapshotId: over.snapshotId }),
     workflowRunId: over.workflowRunId ?? null,
     nowMs: T0,
   };
@@ -938,5 +946,82 @@ describe('简历定制占位格（spec 2.8-07 的 `resume.customize` / plan §15
         signal: new AbortController().signal,
       }),
     ).toThrowError(/缺平台/);
+  });
+});
+
+/**
+ * 投递经过与快照引用的联动（spec 3.7-02 的投递侧）。
+ *
+ * 判据是「账本有行的地方经过才有行，账本没行的地方经过一行都不许有」：
+ * 两张表各管一件事（额度 / 追溯），但它们必须同生同灭，否则「投出去了却说不清递的是哪一版」
+ * 就会以一种谁都没报错的形态发生。
+ */
+describe('投递记录与账本同生同灭（spec 3.7-02）', () => {
+  it('成功那一路：账本一行 + 经过一行，两条以 ledgerId 对齐，字段与请求一一对上', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger, records } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir), snapshotId: 'snap-abc' }));
+    expect(receipt.snapshotId).toBe('snap-abc');
+    expect(records.get(receipt.ledgerId!)).toEqual({
+      ledgerId: receipt.ledgerId,
+      platform: 'boss',
+      jobId: 'job-1001',
+      snapshotId: 'snap-abc',
+      // 与账本行同一个基准毫秒（`stage` 冻结的 nowMs + 频控实际等待），两张表的时间才认得出是同一次。
+      ts: T0 + receipt.waitedMs,
+    });
+    expect(ledger.summary().recent[0]?.id).toBe(receipt.ledgerId);
+  });
+
+  it('请求没带快照引用：记录里的引用是 null，而不是替调用方编一个', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, records } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir) }));
+    expect(receipt.snapshotId).toBeNull();
+    expect(records.get(receipt.ledgerId!)?.snapshotId).toBeNull();
+  });
+
+  it('suggest 档只准备：committed:false，账本与经过两张表都一行不增（2.6-06 的「到此为止」）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger, records } = await boot({ channel: hand.channel, autonomy: 'suggest' });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir), snapshotId: 'snap-abc' }));
+    expect(receipt).toMatchObject({ committed: false, ledgerId: null, snapshotId: 'snap-abc' });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    expect(records.listFor('job-1001')).toEqual([]);
+  });
+
+  it('点了拒绝与页面没确认那两路：账本缺行的地方经过也不会凭空多一行', async () => {
+    const denied = fakeChannel();
+    const semi = await boot({ channel: denied.channel });
+    const deniedPath = writeResume(semi.dir);
+    const pendingPerform = semi.deliver.perform(request({ filePath: deniedPath, snapshotId: 'snap-abc' }));
+    await nap();
+    semi.deliver.resolveApproval(semi.deliver.pending()[0]!.approvalId, false);
+    await expect(pendingPerform).rejects.toMatchObject({ code: 'OUTBOUND_APPROVAL_DENIED' });
+    expect(semi.ledger.count()).toBe(0);
+    expect(semi.records.listFor('job-1001')).toEqual([]);
+
+    const notDelivered = fakeChannel({ sent: false, reason: '状态行未变化，页面没有确认送达' });
+    const auto = await boot({ channel: notDelivered.channel, autonomy: 'auto' });
+    await expect(
+      auto.deliver.perform(request({ filePath: writeResume(auto.dir), snapshotId: 'snap-abc' })),
+    ).rejects.toMatchObject({
+      code: 'OUTBOUND_NOT_DELIVERED',
+    });
+    expect(auto.ledger.count()).toBe(0);
+    expect(auto.records.listFor('job-1001')).toEqual([]);
+  });
+
+  it('节点路径的 `snapshot` 参数进得来：工作流入口与界面入口记的是同一条经过', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, records } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    await deliver.executeNode({
+      runId: 'run-12',
+      spec: nodeSpec({ platform: 'boss', job: 'job-4004', file: writeResume(dir), snapshot: 'snap-node' }),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    expect(records.listFor('job-4004').map((item) => item.snapshotId)).toEqual(['snap-node']);
   });
 });
