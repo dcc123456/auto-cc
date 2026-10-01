@@ -1935,3 +1935,103 @@ reload 后两个面板各自重新读库、只显示已确认时刻。证据五�
 - 不做简历生成/定制的真实实现（2.8-07 那一格是占位）。
 - 不做画布编辑器（5.10，P5）。
 - 不为「待接管」新增步骤状态，不为「中止」新增 run 终态（见决策 1/2）。
+
+### 15.7 2.8-b 的落点设计（写代码前定稿，覆盖 2.8-08 / 2.8-10 / 2.8-06）
+
+**先量一遍现状**（实测，不是推断）：`AgentToolsService`（`packages/agent/src/tools.ts:72`）的 `register()` 在
+生产代码里**一个调用方都没有** —— 全仓 `register(` 命中只有 `agent.test.ts:107/121/132/312` 与
+`platform.registry.register(adapter)`（另一个同名方法）。所以 2.8-08 的工作量确实是决策 4 说的「登记实现」，
+而注册表本身的语义（`TOOL_DUPLICATE` / `safeParse` / 三类失败返回值）已经定稿并测过，本片一个字不改它的行为。
+
+**落点 1：契约形状下移到 core，注册点留在各能力包。**
+`browser`(L2) / `sessions`(L2) / `outbound`(L2) / `platform-boss`(L2) 都不允许 import `agent`(L3)——AGENTS.md §4.1
+的依赖方向只能向下，而 `agent/src/index.ts:8` 那条「本包不 import 任何平台 / 简历 / 外发能力」是 1.11-14 守着的反向约束。
+所以照 `executorRegistryOf`（`core/src/index.ts:90`，注释里写的就是同一个理由）的形状，在 core 里补：
+
+- `AgentToolDeclaration<I>`：与 `AgentTool` 同字段（`id` / `description` / `input` / `effect` / `requiresConfirmation` / `run`）；
+- `AgentToolRegistry`：`{ register<I>(tool): void; unregister(id): boolean }` 的窄面，注册表实现它；
+- `agentToolsOf(ctx)`：`maybeService(ctx, 'agent.tools')`，取不到就是对话插件没装，能力包自身照常跑。
+
+`agent/src/tools.ts` 的 `AgentTool` 改成对 core 的再导出（`export type AgentTool<I> = AgentToolDeclaration<I>`），
+**不留第二份定义**（§2.5）。代价写清楚：core 的 `package.json` 要加 `zod`——全仓 8 个包早就在用 zod，
+`core` 是第一个需要把 schema 类型写进跨包契约的 L0 包，这不是引入新依赖（§6.3），是把已有依赖接到位。
+
+**落点 2：软取（不写 `static inject`），并把「重建即失忆」这一条量出来而不是猜。**
+`agent.tools` 的表是实例私有 `Map`，而 1.5-04 的语义是「改配置会重建该插件、并连带重建**依赖它的**插件」
+（`kernel/src/index.ts:17`）。§12.13 第 1 条记过同型的坑：`outbound.greet` 被上游连带重建后
+读到的是自己那张被换掉的空表，于是界面上写着「已登记渠道（暂无）」骗人。
+本片**不**给各能力包加 `static inject: ['agent.tools']`，理由不是省事：那会把浏览器层 / 会话层 / 外发层
+绑成对话插件的下游，「在调试面板里单独摘掉 agent」就会连带把 L2 全部降为 PENDING，
+而插件可单独摘正是 1.5-03/04 已验收过的行为，不能在本片悄悄改掉。
+于是残留一个已知风险：**只重建 `agent.tools` 自己时表会空**。它只有一条触发路径
+（`plugins.saveConfig('agent', …)`，而 `agentToolsConfigSchema` 是 strict 空对象，存 `{}` 也算一次重建）。
+所以 2.8-b 的活体收口里必须**实打这一点**：存一次 agent 配置 → 读 `agent.tools.list()` 的条数。
+
+**实测结果（2.8-b 收口，2026-10-01）：真的为空——9 条 → 0 条，且全程无一处报错。**
+日志里能看到 `agent-tools-service` 重新 init 了一次（新实例的私有 `Map` 是空的），
+而九个工具的主人（四个 L2 能力包）没有被连带重建，因此没有任何一方重新登记。
+证据 `docs/acceptance/2.8/2.8-08-hot-config-keeps-table.txt`。
+
+**补偿落在哪一层的取舍（与原计划的建议不同，在此记录理由）**：原本写的是
+「登记方在注册表 init 时重推」，实现时换成**把声明表从服务实例搬到 app 级**（`core` 新增
+`agentToolTable(ctx.root)`，一个 `WeakMap<Context, Map<…>>`；`AgentToolsService` 退化成这张表的读面，
+实例字段与 `StoredTool` 一并删掉）。理由是重推方案要求每个登记方**额外留一份自己的声明副本**，
+并要注册表广播「我被重建了」——那是把同一张表存五份（四处登记方 + 一处注册表）再想办法对齐，
+而 §2.5 要的是「一个入口」。搬表之后数据只有一份，重建次数与清单内容彻底解耦，
+`registerAgentTools` 挂的清理仍然从这张表里删，所以「摘掉某个能力包 → 它的工具消失」这条
+1.5-03/04 已验收的语义没有变。软取（不写 `static inject`）保持原样，未向 §12.13 那条妥协。
+
+**第二个实测结论（同一条补偿的必要修正）**：`agentToolTable` 的键最初取 `ctx` 本身，单测立刻红
+（8 条失败：同一个实例上 register 之后 list 读不到）。读 cordis 编译产物证实
+每次 `ctx.plugin` 都执行 `this.ctx = this.context = parent.extend({ fiber: this })`
+（`cordis/lib/index.js:706`），方法经代理层调用时 `this.ctx` 还会指向 caller 侧的影子上下文
+（`createShadow` / `getTraceable`，`:96-160`）——按 `ctx` 存会让登记表随调用点裂成好几张。
+`Context.root` 则在构造时就冻结（`this.root = self`，`:1410`），spike 实测
+`rootSameAcrossRebuild / rootEqualsAppCtx / rootStableRead` 三条全真，故键定为 `ctx.root`。
+修后重打同一条活体测量：`registryMountCount 4 → 5`（证明确实重建过）而清单 `9 → 9`、`idsIdentical true`。
+
+**落点 3：工具入参照服务签名原样传，不在这片开「语义定位名」查询口。**
+`browser.act.click` 今天**已经**在 IPC 白名单里，参数就是 `LocateSpec`（`shared/bridge.ts:612`），
+`browser.locate.find` 同理（`:606`）。所以工具面 `{spec: LocateSpec}` **不新增任何暴露面**；
+反过来要做成 `{platform, locator}` 的语义名形态，就得给适配器开一个 locators 查询口——
+现在 `locators` 是适配器私有的（`platform-boss/adapter.ts:158` 的 `locatorFor` 只服务适配器自己），
+开这个口是新能力，服务对象是 P5 的 planner（让模型自己挑控件），不是 2.8-08 要的「能力可被调用」。
+
+**落点 4：`effect` 分档与那条机检不变式。**
+`read` = 打开 / 导航 / 读取 / 定位；`outbound` = 点击 / 输入 / 抓取 / 打招呼 / 投递。
+把**点击与输入也归 `outbound`**（它们不发消息，看着像 `local-write` 都不算），理由是
+`ToolEffect` 的分界是「出了本机没有」而不是「是不是发消息」：一次 `click` 就能在真实页面上按下「发送」，
+它是唯一能对站点产生外部副作用的原语。于是补一条现在就有机检的不变式（2.8-10 的第二半）：
+**`effect === 'outbound'` 的工具必须 `requiresConfirmation === true`**，单测逐个断言。
+这一条不是装饰：P5 的批准流是按 `requiresConfirmation` 一刀切的，原语被标错档就会成为
+绕过 `entitlement.gate` 的后门（AGENTS.md §7.3 要的正是「绕过 gate 的调用必须有测试使其失败」）。
+
+**落点 5：工具层不设第二道闸。**
+`outbound.greet.perform` 内部已有 `ensureConsent`（`greet.ts:116`）与 `gate.perform`（`:170`/`:195`），
+`deliver`（`deliver.ts:308`/`:310`/`:348`）与 `jd.capture`（`jd-capture.ts:206`/`:207`）同形。
+工具的 `run` 只做「转发 + 把服务自己的错误交给注册表的 `TOOL_FAILED` 包装」，
+2.8-10 的判据因此是「**从工具路径**调外发 → 被 gate 判超限 + `usage.ledger` 有行」，
+外加一条 grep 型断言：能力包里新增的工具实现中不得出现 `entitlement` / `gate.check`。
+
+**本片交付的工具清单**（9 个，登记方与被包服务同名，id 沿用服务口名见决策 5）：
+
+| 工具 id                    | 登记方（服务）     | 入参                   | effect   | requiresConfirmation |
+| -------------------------- | ------------------ | ---------------------- | -------- | -------------------- |
+| `sessions.open`            | `sessions`         | `{ platform }`         | read     | false                |
+| `browser.page.navigate`    | `browser.page`     | `{ url }`              | read     | false                |
+| `browser.page.snapshot`    | `browser.page`     | `{ maxChars? }`        | read     | false                |
+| `browser.locate.find`      | `browser.locate`   | `{ spec, lastKnown? }` | read     | false                |
+| `browser.act.click`        | `browser.act`      | `{ spec }`             | outbound | true                 |
+| `browser.act.type`         | `browser.act`      | `{ spec, text }`       | outbound | true                 |
+| `jd.capture.run`           | `jd.capture`       | `{ criteria }`         | outbound | true                 |
+| `outbound.greet.perform`   | `outbound.greet`   | `{ request }`          | outbound | true                 |
+| `outbound.deliver.perform` | `outbound.deliver` | `{ request }`          | outbound | true                 |
+
+`browser.page.extract` / `scroll` / `browser.act.select` / `waitFor` / `upload` **不在本片的清单里**：
+前两个是抓取编排的私用步骤（`jd.capture` 已经把「滚动 + 抽取」包在里面并计了额度），
+后三个今天连渲染层白名单都没全开（`upload` 不在白名单，见 `shared/bridge.ts` 的 `browser.act.*` 四行）；
+把它们登记成工具是给 planner 铺路，属 P5，且每个都要重新回答「谁为它的副作用记账」——不在这里欠账。
+
+**2.8-06 在这一片的复跑口径**：本片**不新增任何白名单键**（`agent.tools.list` / `agent.tools.call` 已在
+`shared/bridge.ts:155-156`；工具执行全在主进程内，渲染层只列清单）。所以复跑判据 = 1.2-04/05 那组断言 +
+一条新断言：`git diff` 引入的九个工具没有出现在 `shared/bridge.ts` 的新键里。

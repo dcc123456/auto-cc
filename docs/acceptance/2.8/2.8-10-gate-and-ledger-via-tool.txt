@@ -1,0 +1,40 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-outbound.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-outbound.js"
+
+{
+  "ledgerBefore": {
+    "total": 15,
+    "byAction": "greet=1,deliver=3,search=11"
+  },
+  "fixtureConsent": {
+    "platform": "fixture",
+    "scope": "automation:fixture",
+    "granted": false,
+    "acknowledgedAt": null
+  },
+  "unsignedPlatformRefused": {
+    "ok": false,
+    "code": "TOOL_FAILED",
+    "message": "工具 outbound.greet.perform 执行失败：平台 fixture 还没有一份自动化风险确认记录，先确认承担该风险"
+  },
+  "greetedTarget": "1001",
+  "repeatedGreetRefused": {
+    "ok": false,
+    "code": "TOOL_FAILED",
+    "message": "工具 outbound.greet.perform 执行失败：目标 1001 在本次运行里已经打过招呼，不再重复发送"
+  },
+  "captureViaTool": {
+    "ok": true,
+    "source": null,
+    "error": null
+  },
+  "ledgerAfter": {
+    "total": 16,
+    "byAction": "greet=1,deliver=3,search=12"
+  }
+}

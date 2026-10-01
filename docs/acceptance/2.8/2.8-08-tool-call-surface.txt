@@ -1,0 +1,57 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-reads.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-reads.js"
+
+{
+  "consentBefore": {
+    "platform": "boss",
+    "scope": "automation:boss",
+    "granted": true,
+    "acknowledgedAt": 1790804778941
+  },
+  "sessionsOpen": {
+    "ok": true,
+    "activePlatform": "boss",
+    "platforms": [
+      "fixture",
+      "fixture-alt",
+      "boss"
+    ]
+  },
+  "navigate": {
+    "ok": true,
+    "url": "http://127.0.0.1:10233/boss",
+    "title": "求职仿站 · 职位搜索（本地 fixture）",
+    "elementCount": 56
+  },
+  "realPlatformRejected": {
+    "ok": false,
+    "code": "TOOL_FAILED",
+    "message": "工具 browser.page.navigate 执行失败：目标源 https://www.zhipin.com 不属于任何已登记平台"
+  },
+  "snapshot": {
+    "ok": true,
+    "url": "http://127.0.0.1:10233/boss",
+    "textHead": ""
+  },
+  "locateFind": {
+    "ok": true,
+    "status": "matched",
+    "strategy": "testId",
+    "score": 100
+  },
+  "invalidInputRejected": {
+    "ok": false,
+    "code": "TOOL_INPUT_INVALID",
+    "message": "工具 browser.locate.find 入参不合法：spec.description Invalid input: expected string, received undefined；spec.cardinality Invalid option: expected one of \"single\"|\"many\"；spec.candidates Invalid input: expected array, received undefined；- Unrecognized key: \"extra\""
+  },
+  "unregisteredRejected": {
+    "ok": false,
+    "code": "TOOL_NOT_REGISTERED",
+    "message": "工具 browser.page.scroll 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）"
+  }
+}

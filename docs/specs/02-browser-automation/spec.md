@@ -550,9 +550,9 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
 | 2.8-05 | 面板文案全部 i18n、样式全部 Tailwind、图标全部 lucide（AGENTS.md §5）                                                                               | C    | eslint 裸文案/样式/SVG 规则 0 命中（依赖 1.2-13~16 已 `[x]`）              | [x]  |
 | 2.8-06 | 渲染层不直接调 Node 能力，全部经 `window.autoCC` 白名单                                                                                             | C    | 1.2-04/1.2-05 类断言复跑                                                   | [x]  |
 | 2.8-07 | 端到端：在 app 内完成 搜索→读JD→生成话术→打招呼→（定制简历占位）→择机投递 全链路，可中断可续跑；「定制简历」那一格在 P2 是占位                      | V    | 新增内置计划 `boss-e2e` 在 fixture 站跑完整链，关键节点各留一张截图（M6）  | [ ]  |
-| 2.8-08 | 浏览器侧每个能力都以 `agent.tools` 工具形式可被调用（打开/导航/定位/读取/点击/输入/外发），P2 交付工具实现而非对话逻辑；登记点在各能力包挂载时      | C+U  | 列举注册工具清单 + 单测逐个调用通过                                        | [ ]  |
+| 2.8-08 | 浏览器侧每个能力都以 `agent.tools` 工具形式可被调用（打开/导航/定位/读取/点击/输入/外发），P2 交付工具实现而非对话逻辑；登记点在各能力包挂载时      | C+U  | 列举注册工具清单 + 单测逐个调用通过                                        | [x]  |
 | 2.8-09 | 对话主界面能看到工具卡片：工具名、关键参数摘要、状态、耗时；与 2.8-01 的面板状态一致；现在的 `/tool`→`demo.echo` 壳必须换成真调用                   | V    | 从对话发起一次搜索 → 截图卡片与面板同步                                    | [ ]  |
-| 2.8-10 | 外发类工具（打招呼/投递）在**任何入口**都必须过 `entitlement.gate`，且调用后 `usage.ledger` 有账；`requiresConfirmation` 的强制属 P5，不计入本条    | C+U  | 从对话入口调用外发工具 → 断言被 gate 判定且记账                            | [ ]  |
+| 2.8-10 | 外发类工具（打招呼/投递）在**任何入口**都必须过 `entitlement.gate`，且调用后 `usage.ledger` 有账；`requiresConfirmation` 的强制属 P5，不计入本条    | C+U  | 从对话入口调用外发工具 → 断言被 gate 判定且记账                            | [x]  |
 | 2.8-11 | agent 驱动执行中用户可接管：接管后界面明确显示"已人工接管"，恢复时**重新读取 DOM** 而非复用旧快照                                                   | V+C  | 接管→手动改页面→恢复 → 截图 + 断言重读发生                                 | [ ]  |
 | 2.8-12 | 工作流面板与对话界面共用同一个 `workflow.runner` 实例，无第二套运行状态来源——实测**今天已满足**，本片只补断言                                       | C    | 静态查引用 + 断言两侧状态镜像一致（同 1.10-08）                            | [ ]  |
 
@@ -616,6 +616,54 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
 
 本片未覆盖、留给后续子片的：2.8-07（`boss-e2e` 全链路）、2.8-08/09/10/11（agent 工具面与对话侧）、
 2.8-12（双入口共用同一个 runner 的断言）。
+
+---
+
+### 2.8 验收记录（2026-10-01，本片 2.8-b：工具面登记 / 外发必经闸门）
+
+环境：本机 Windows，`pnpm dev`（CDP 10222）+ fixture 127.0.0.1:10233，渲染进程 `127.0.0.1:5173`。
+全部读数经 `window.autoCC` 白名单口取得（`agent.tools.list` / `agent.tools.call` /
+`usage.ledger.summary` / `sessions.consentStatus` / `entitlement.gate.check` / `log.tail` /
+`plugins.saveConfig`），未新增任何白名单键。证据目录 `docs/acceptance/2.8/`。
+
+- **2.8-08 `[x]`（清单 + 逐个调用）**：`agent.tools.list()` 返回 **9 只**工具，覆盖条目要求的全部七类
+  能力——打开 `sessions.open`、导航 `browser.page.navigate`、定位 `browser.locate.find`、
+  读取 `browser.page.snapshot`、点击 `browser.act.click`、输入 `browser.act.type`、
+  外发 `outbound.greet.perform` / `outbound.deliver.perform` / `jd.capture.run`
+  （`2.8-08-tool-list-and-tiers.txt`）。登记点确实在各能力包挂载时：九只分属四个包，
+  对话插件只出一张读面（单测 `tool-surface.test.ts` 里摘掉某包后它的工具立刻消失）。
+  不变量按读数核对：`effect=outbound` 的四只全部 `requiresConfirmation=true`，
+  四只 `read` 全部 `false`，`outboundWithoutConfirm` 与 `readWithConfirm` 两个反例集合都是空数组。
+  逐个调用（`2.8-08-tool-call-surface.txt`，全部只打本地 fixture）：打开读到三个平台
+  （`fixture`/`fixture-alt`/`boss`，activePlatform 切到 boss）、导航到 `127.0.0.1:10233/boss`
+  得到标题「求职仿站 · 职位搜索（本地 fixture）」与 `elementCount:56`、定位
+  `data-testid=jd-list` 得 `status:matched`/`strategy:testId`/`score:100`。三条失败路径都是**结构化返回**
+  而不是把整条链路打断：真实站点 `https://www.zhipin.com` 被 `TOOL_FAILED`（「目标源不属于任何已登记平台」，
+  在 `loadURL` 之前）挡下（§7.2）；缺字段的入参被 `TOOL_INPUT_INVALID` 挡下并列出四条 zod 原因，
+  实现没被调用（§2.6）；未登记的 id 被 `TOOL_NOT_REGISTERED` 挡下且明说「该能力包当前未挂载，或它没有把这只手登记进工具面」。
+  单测：`pnpm --filter @auto-cc/plugin-agent test` 23/23 通过（`2.8-08-unit-tests.txt`）。
+- **2.8-08 的活体补偿（plan §15.7 落点 2 要求实打的那一条）**：`plugins.saveConfig('agent', {})`
+  第一次实测把清单从 **9 打成 0**——cordis 把 `agent` 这一组 fiber 整个重建，新实例带着空实例字段上岗，
+  而九个工具的主人（L2 能力包）没有被重建，且全程无一处报错。据此把声明表从服务实例搬到
+  app 级 `WeakMap`（`core` 的 `agentToolTable(ctx.root)`，服务实例退化成一张读面）。
+  修后同一实测（`2.8-08-hot-config-keeps-table.txt`）：`registryMountCount 4 → 5` 证明注册表**确实被重建**
+  （不是"没触发"造成的假通过），新实例自己的 init 日志读到「当前已登记 9 个工具」，
+  `countBefore 9 / countAfter 9 / idsIdentical true`。键取 `ctx.root` 而非 `ctx` 也是实测出来的：
+  cordis 每次 `ctx.plugin` 都 `parent.extend({ fiber })` 造作用域上下文，按 `ctx` 存会让表随调用点裂成好几张。
+- **2.8-10 `[x]`（外发必经闸门 + 落账）**：走工具口而不是工作流口（`2.8-10-gate-and-ledger-via-tool.txt`）。
+  未签风险确认的 `fixture`（`consentStatus.granted:false`）在 `outbound.greet.perform` 上直接吃
+  `TOOL_FAILED`「平台 fixture 还没有一份自动化风险确认记录」——闸门挡在选渠道/花 LLM/碰页面之前；
+  账本里已打过招呼的 `boss/1001` 再调一次被幂等键挡回（「在本次运行里已经打过招呼，不再重复发送」），
+  期间 `usage.ledger` 总数 `15→15`、`greet` 计数仍为 1（`2.8-10-repeat-greet-refused.txt`），
+  即**挡回不落账**；`jd.capture.run`（同样标 `outbound`）经工具口过闸门并**恰好落一条** `search`
+  账：`total 15→16`、`search 11→12`，`greet`/`deliver` 不变。工具层没有第二套闸门——
+  同意、额度、账本都在 `perform`/`run` 内部，工具只转发（plan §15.7 落点 5），
+  因此对话入口与工作流入口读的是同一份判定。
+- **2.8-06 复核 `[x]`**：本切片**没有新增白名单键**（`agent.tools.list` / `agent.tools.call` 是 1.4 就有的口），
+  渲染层拿到的仍是 `{ok,value}` 信封；eslint + `check-renderer-conventions.ts` 随 `pnpm lint` 0 命中。
+
+本片未覆盖、留给后续子片的：2.8-07（`boss-e2e` 全链路）、2.8-09（对话主界面的真工具卡片，
+现在还是 `/tool`→`demo.echo` 壳）、2.8-11（接管后重读 DOM）、2.8-12（双入口同一个 runner 的断言）。
 
 ## 里程碑对账（P2 结束时）
 

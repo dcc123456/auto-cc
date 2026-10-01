@@ -1,0 +1,24 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-list.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-list.js"
+
+{
+  "count": 9,
+  "tier": [
+    "browser.act.click  effect=outbound  confirm=true",
+    "browser.act.type  effect=outbound  confirm=true",
+    "browser.locate.find  effect=read  confirm=false",
+    "browser.page.navigate  effect=read  confirm=false",
+    "browser.page.snapshot  effect=read  confirm=false",
+    "jd.capture.run  effect=outbound  confirm=true",
+    "outbound.deliver.perform  effect=outbound  confirm=true",
+    "outbound.greet.perform  effect=outbound  confirm=true",
+    "sessions.open  effect=read  confirm=false"
+  ],
+  "outboundWithoutConfirm": [],
+  "readWithConfirm": []
+}

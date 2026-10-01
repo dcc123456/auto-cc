@@ -1,0 +1,38 @@
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-repeat.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "127.0.0.1:5173" "--expr-file" "tmp/probe-28b-repeat.js"
+
+{
+  "greetedRow": {
+    "id": 1,
+    "action": "greet",
+    "targetId": "1001",
+    "workflowRunId": null,
+    "ts": 1790779221990,
+    "source": "v1:1",
+    "remoteRef": null
+  },
+  "gateCheckForGreet": {
+    "ok": true,
+    "value": {
+      "allowed": true,
+      "remaining": null,
+      "reason": null
+    }
+  },
+  "repeat": {
+    "ok": true,
+    "value": {
+      "ok": false,
+      "code": "TOOL_FAILED",
+      "message": "工具 outbound.greet.perform 执行失败：目标 1001 在本次运行里已经打过招呼，不再重复发送"
+    }
+  },
+  "totalBefore": 15,
+  "totalAfter": 15,
+  "greetCountAfter": 1
+}
