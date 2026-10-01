@@ -441,6 +441,15 @@ importers:
         specifier: workspace:*
         version: link:../config
 
+  packages/resume-kb:
+    dependencies:
+      '@auto-cc/core':
+        specifier: workspace:*
+        version: link:../core
+      '@auto-cc/plugin-resume-doc':
+        specifier: workspace:*
+        version: link:../resume-doc
+
   packages/sessions:
     dependencies:
       '@auto-cc/core':
