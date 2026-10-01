@@ -29,6 +29,23 @@ export {
   type ResumeParseConfig,
 } from './parse-service.js';
 export {
+  KB_ENTITY_KINDS,
+  deriveEntities,
+  manualEntityId,
+  payloadHashOf,
+  type KbEntityDraft,
+  type KbEntityKind,
+} from './entities.js';
+export {
+  KB_PROFILE_MIGRATION_VERSION,
+  KbProfileService,
+  kbProfileSchema,
+  type KbCreateInput,
+  type KbEntityView,
+  type KbProfileConfig,
+  type KbSyncResult,
+} from './profile-service.js';
+export {
   detectFormat,
   extractSourceText,
   parseResumeSource,

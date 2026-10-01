@@ -36,7 +36,7 @@ import {
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
-import { ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import { KbProfileService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -123,6 +123,11 @@ export const REGISTRY: Registry = {
   // Markdown 三条输入腿在桌面端的唯一入口（pdf.js 与 mammoth 是外置依赖，见 plan §1.2 与 1.7-15）。
   // 摘掉它，界面的「导入简历」得到「服务未挂载」的结构化失败，而导出轨照旧——「读进来」与「排出去」分属两条。
   'resume-parse': ResumeParseService,
+  // 知识库实体（spec 4.2-01 / 02）：`kb_entities` 表的唯一落点，迁移号段 11。四类实体从 `resume_docs`
+  // 的当前工作副本派生（plan §1.4 裁定一/二），因此它依赖文档存储而不是出处表。
+  // 摘掉它，4.2-d 的实体面板与 4.3 的检索都失去数据源；本切片（4.2-a）它还没有界面调用方，这是刻意留下的
+  // 可见缺口——表先在真实 app 里建好，界面与 agent 工具在 4.2-d 接，两侧都不许对着内存假数据验收。
+  'kb-profile': KbProfileService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,
