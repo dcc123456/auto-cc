@@ -289,7 +289,7 @@ plugins:
       evidenceDir: evidence
       retentionRuns: 20
 
-  # 简历文档存储（spec 3.1-08 / P3 生成轨地基）：`resume_docs` 表由本服务自己把迁移推进（号段 6）。
+  # 简历文档存储（spec 3.1-08 / P3 生成轨地基）：`resume_docs` 表由本服务自己把迁移推进（号段 7）。
   # 只落库、不渲染：3.2 模板与 3.3 打印轨都从这张表读同一份合法文档。依赖里带 store 即可，
   # 无运行期配置（Schema 是空 strictObject）。摘掉它，后续任何按 id 读简历文档的入口得到结构化失败。
   - id: resume-doc
@@ -315,10 +315,12 @@ plugins:
   # delivery_records 是 9），也是 PDF / DOCX / Markdown 三条输入腿在桌面端的唯一入口。
   # `maxBytes` 是单次导入的字节上限（防误选大文件把主进程吃掉），显式写在这里而不是藏在代码默认值里，
   # 演示「选了一份 20 MB 的文件」能在装配面板现场改小、不重启 app。
-  # 依赖只有 store：抽取与判定全在 `@auto-cc/plugin-resume-kb` 内部（pdf.js / mammoth 是外置依赖，见 1.7-15），
-  # 不认识导出轨——摘掉这一行，界面「导入简历」得到「服务未挂载」的结构化失败，导出照旧。
+  # 抽取与判定全在 `@auto-cc/plugin-resume-kb` 内部（pdf.js / mammoth 是外置依赖，见 1.7-15），不认识导出轨。
+  # `dependsOn: resume-doc` 是 plan §1.4 裁定一：解析出的文档要经 `resume.doc` 落成可编辑工作副本，
+  # 否则 3.x 的编辑与 PDF 导出读不到导入的内容。摘掉 `resume-doc` 这一头，本服务连同 PENDING（不是崩在运行期）；
+  # 摘掉本行，界面「导入简历」得到「服务未挂载」的结构化失败，导出照旧。
   - id: resume-parse
-    dependsOn: [store]
+    dependsOn: [store, resume-doc]
     config:
       maxBytes: 5242880
 

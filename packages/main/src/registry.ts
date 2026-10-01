@@ -106,7 +106,7 @@ export const REGISTRY: Registry = {
   'workflow-store': WorkflowRunStoreService,
   // 2.4 起槽位来自计划、进度同时落库；1.10 的六步占位流水线已被节点模型替换。
   workflow: WorkflowRunnerService,
-  // 简历文档存储（spec 3.1-08）：`resume_docs` 表的唯一落点，迁移号段 6。P3 生成轨的地基，
+  // 简历文档存储（spec 3.1-08）：`resume_docs` 表的唯一落点，迁移号段 7。P3 生成轨的地基，
   // 只落库不做渲染——3.2 的模板、3.3 的打印轨都从这张表读同一份合法文档，故它是 P3 的第一块积木。
   'resume-doc': ResumeDocService,
   // 打印执行器（spec 3.3）：全仓唯一调 `webContents.printToPDF` 的地方，落在 L1 shell（它才认识 Electron）。

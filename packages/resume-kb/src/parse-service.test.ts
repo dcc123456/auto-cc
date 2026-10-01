@@ -11,6 +11,7 @@
 import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
+import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdirSync, readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,10 +73,10 @@ function writeFile(dir: string, name: string, content: string | Uint8Array): str
 }
 
 /**
- * 挂起 config + log + store + resume.parse。
+ * 挂起 config + log + store + resume.doc + resume.parse。
  * @param dir 复用哪个目录（演「换个进程重挂同一份库」时传同一个）
  * @param maxBytes 单次导入字节上限，用于测「超大文件」这条失败腿
- * @returns 解析服务、日志出口与裸连接
+ * @returns 解析服务、文档存储服务、日志出口与裸连接
  */
 async function boot(dir = tempDir(), maxBytes = 5_242_880) {
   const ctx = new Context();
@@ -83,9 +84,11 @@ async function boot(dir = tempDir(), maxBytes = 5_242_880) {
   // `redact: false`：见文件头说明，为了让 4.1-09 的日志半边断言到「根本没落原文」而不是「出口遮掉了」。
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 工作副本的落点（plan §1.4 裁定一）：`resume.parse` 现在 inject 了 `resume.doc`，不挂它整个服务会 PENDING。
+  fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes }));
   const app = asApp(ctx);
-  return { parse: app['resume.parse'], log: app.log, db: app.store.db };
+  return { parse: app['resume.parse'], doc: app['resume.doc'], log: app.log, db: app.store.db };
 }
 
 /** `resume_imports` 的全部行数。 */
@@ -333,7 +336,7 @@ describe('4.1-10 只用共享连接', () => {
       .map((name) => readFileSync(join(import.meta.dirname, name), 'utf8'))
       .join('\n');
     expect(sources).not.toContain('new DatabaseSync(');
-    expect(sources).toContain("static inject = ['store']");
+    expect(sources).toContain("static inject = ['store', 'resume.doc']");
   });
 
   it('回执不带文档正文：过进程边界的只有区块计数（整份 JSON 留在库里）', async () => {
@@ -343,5 +346,63 @@ describe('4.1-10 只用共享连接', () => {
     expect(receipt.sections.map((section) => section.kind)).toEqual(['summary', 'experience', 'education', 'skills']);
     expect(Object.keys(receipt)).not.toContain('document');
     expect(JSON.stringify(receipt)).not.toContain('星桥科技');
+  });
+});
+
+describe('导入即建可编辑工作副本（plan §1.4 裁定一）', () => {
+  /** `resume_docs` 的行数——工作副本是不是真的落到了 P3 那张表上。 */
+  const workCopyCount = (db: DatabaseSync): number => {
+    const row = db.prepare('SELECT COUNT(*) AS total FROM resume_docs').get() as { total: number | bigint };
+    return Number(row.total);
+  };
+
+  it('导入后同一 docId 在 resume_docs 有行，且能被 resume.doc 合法读回（编辑与 PDF 导出从此有内容可读）', async () => {
+    const dir = tempDir();
+    const { parse, doc, db } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, 'resume.md', RESUME_MD), NOW_MS);
+    expect(workCopyCount(db)).toBe(1);
+    const loaded = doc.load(receipt.docId);
+    expect(loaded.status).toBe('found');
+    if (loaded.status !== 'found') return;
+    expect(loaded.document.sections.map((section) => section.kind)).toEqual([
+      'summary',
+      'experience',
+      'education',
+      'skills',
+    ]);
+  });
+
+  it('重复导入只刷新出处，不覆盖用户已经改过的工作副本', async () => {
+    const dir = tempDir();
+    const { parse, doc, db } = await boot(dir);
+    const filePath = writeFile(dir, 'resume.md', RESUME_MD);
+    const receipt = await parse.fromFile(filePath, NOW_MS);
+    const loaded = doc.load(receipt.docId);
+    if (loaded.status !== 'found') throw new Error('工作副本没建起来');
+    // 把每个 entry 的第一个字段改成显眼的值，模拟用户在 3.x 里编辑过这份简历。
+    doc.save({
+      ...loaded.document,
+      sections: loaded.document.sections.map((section) => ({
+        ...section,
+        entries: section.entries.map((entry) => ({
+          ...entry,
+          fields: entry.fields.map((field, index) => (index === 0 ? { ...field, value: '我改过的简历内容' } : field)),
+        })),
+      })),
+    });
+    const edited = JSON.stringify(doc.load(receipt.docId));
+
+    const again = await parse.fromFile(filePath, LATER_MS);
+    expect(again.isNew).toBe(false);
+    expect(workCopyCount(db)).toBe(1);
+    expect(JSON.stringify(doc.load(receipt.docId))).toBe(edited);
+  });
+
+  it('扫描件不建工作副本：没有可编辑文档，只留一条待人工补录的出处', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, 'tiny.md', '张三\n电话：13800001111'), NOW_MS);
+    expect(receipt.status).toBe('scanned');
+    expect(workCopyCount(db)).toBe(0);
   });
 });

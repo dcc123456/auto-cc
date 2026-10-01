@@ -3,8 +3,9 @@
  * 已入库的 P3.1 文档 + 待确认清单，是 4.1 三条输入腿在桌面端的唯一落点。
  *
  * 分工刻意窄：判定与抽取全在 `source.ts` / `sections.ts`（纯函数，离线可断言），这一层只做
- * 只有服务才该做的三件事——按上限读用户给的路径、在把字节交给 pdf.js **之前**算来源哈希
- * （`getDocument` 会 detach ArrayBuffer，顺序反了幂等键就废了）、以及经共享连接幂等入库。
+ * 只有服务才该做的四件事——按上限读用户给的路径、在把字节交给 pdf.js **之前**算来源哈希
+ * （`getDocument` 会 detach ArrayBuffer，顺序反了幂等键就废了）、经共享连接幂等入库、以及把解析结果
+ * 交给 `resume.doc` 落成**可编辑工作副本**（plan §1.4 裁定一：不进这张表，3.x 的编辑与导出就读不到它）。
  *
  * 与 `outbound.deliver` 的 `readAttachment` 不合并：那条是「取投递附件并先验 `.pdf` 扩展名」，
  * 这一条是「取简历源文件并让解析层按魔数判格式」（4.1-01 要 pdf / docx / md / txt 四种），
@@ -107,7 +108,9 @@ function docIdOf(sourceHash: string): string {
 export class ResumeParseService extends Service {
   static provide = 'resume.parse';
   static Config = resumeParseSchema;
-  static inject = ['store'];
+  // `resume.doc` 是导入结果的**可编辑工作副本**唯一落点（plan §1.4 裁定一）：解析出的文档若只躺在
+  // `resume_imports` 里，3.x 的编辑、快照、PDF 导出一条都读不到它——「按 JD 优化简历」会在入口就断。
+  static inject = ['store', 'resume.doc'];
 
   constructor(
     ctx: Context,
@@ -118,6 +121,11 @@ export class ResumeParseService extends Service {
 
   private get store() {
     return asApp(this.ctx).store;
+  }
+
+  /** P3 的文档存储服务——工作副本由它写，本包**不往 `resume_docs` 写裸 SQL**（AGENTS.md §2.5 一处真相源）。 */
+  private get docStore() {
+    return asApp(this.ctx)['resume.doc'];
   }
 
   /**
@@ -271,6 +279,11 @@ export class ResumeParseService extends Service {
       input.nowMs,
       input.nowMs,
     );
+    // 工作副本只在「还没有」时建：重复导入按 4.1-07 的语义只刷新出处与时间，绝不能把用户已经改过的
+    // 简历冲掉——那份改动属于 `resume_docs`，本表只是出处。
+    if (input.document !== null && this.docStore.load(input.docId).status === 'missing') {
+      this.docStore.save(input.document);
+    }
     this.ctx.logger.info(
       `[resume-parse] ${existing === undefined ? '新建' : '覆盖'} ${input.docId}（来源 ${input.sourceHash.slice(0, 12)}，` +
         `${input.format} / ${String(input.textLength)} 字 / ${String(input.issues.length)} 条待确认）`,
