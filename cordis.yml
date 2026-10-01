@@ -205,13 +205,21 @@ plugins:
   - id: outbound-greet
     dependsOn: [entitlement, outbound-script, outbound-throttle, platform-registry]
 
+  # 投递记录（spec 3.7-02）：`delivery_records` 表的唯一落点，迁移号段 9。一次确认送达的投递一行，
+  # 记「递给哪个 JD、用的是哪一版快照」，与号段 1 的 `usage_ledger` 以 `ledger_id` 一对一相连——
+  # 额度与经过分列两表：账本永远只回答「今天用掉几个」，投递域不必把计数背成第二套状态（AGENTS.md §2.7）。
+  # 摘掉这一行，下面的 `outbound-deliver` 连同进 PENDING（它的 `inject` 里有它）：
+  # 宁可递不出去，也不要「递出去了但事后说不清递的是哪一版」。
+  - id: outbound-delivery-records
+    dependsOn: [store]
+
   # 简历投递编排（spec 2.6-01…07）：打招呼的下游，复用同一条闸门/账本/频控，只多「等人确认」这一段。
   # 档位显式写在这里而不是藏在代码默认值里：2.6-01 的验收要在装配面板现场改 `suggest / semi / auto`
   # 并看着行为变，而默认值必须是 `semi`——默认 `auto` 等于装好 app 就往真实站点上自动递简历。
   # 摘掉这一行：`resume.deliver` 节点得到「执行器未登记」的结构化失败；上一行摘掉则投递照旧、打招呼没了。
   # `resumeFile` 是 P3（简历 PDF 生成）之前的临时默认路径，请求里带 `filePath` 时以请求为准（plan §13.5）。
   - id: outbound-deliver
-    dependsOn: [entitlement, outbound-throttle, platform-registry]
+    dependsOn: [entitlement, outbound-throttle, outbound-delivery-records, platform-registry]
     config:
       autonomy: semi
       approveTimeoutMs: 120000

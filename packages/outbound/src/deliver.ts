@@ -110,6 +110,8 @@ const deliverRequestSchema = z.strictObject({
   filePath: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
   company: z.string().min(1).optional(),
+  /** 这次用的是哪一版导出产物（`resume_snapshots.snapshot_id`）；省略表示只给了文件、没有导出上下文（spec 3.7-02） */
+  snapshotId: z.string().min(1).optional(),
   workflowRunId: z.string().min(1).nullish(),
   nowMs: z.number().int().positive().optional(),
 });
@@ -131,6 +133,8 @@ export type StagedDelivery = {
   nowMs: number;
   /** 账本 `source`：`resume:<sha256 前 12 位>@<文件名>`（spec 2.6-05，复用已有的 `source` 列） */
   source: string;
+  /** 这一版简历的快照 id（spec 3.7-02）；只给了文件路径、没有导出上下文时为 null */
+  snapshotId: string | null;
 };
 
 /** 一张在等的确认单。`settle` 由界面按钮、超时或让出三方之一调用，且只生效一次。 */
@@ -165,7 +169,16 @@ export class OutboundDeliverService extends Service {
   static Config = deliverSchema;
   // 闸门/账本/频控与打招呼同源；`platform.registry` 是硬依赖——没有平台层就没有递简历的手。
   // 与打招呼的差别是不需要 `outbound.script`：2.6-b 只递文件，不随信正文（plan §13.7 第 2 条）。
-  static inject = ['entitlement.gate', 'usage.ledger', 'outbound.throttle', 'platform.registry', 'sessions'];
+  // `outbound.deliveries`（spec 3.7-02）也是硬依赖：摘掉它投递连同进 PENDING，而不是「递出去了但没留下可追溯的经过」——
+  // 与 `resume.export` 硬依赖 `resume.snapshot`（导出即留档，不许只出 PDF）同一条取向。
+  static inject = [
+    'entitlement.gate',
+    'usage.ledger',
+    'outbound.throttle',
+    'outbound.deliveries',
+    'platform.registry',
+    'sessions',
+  ];
 
   /**
    * 在等的确认单。
@@ -197,6 +210,14 @@ export class OutboundDeliverService extends Service {
    */
   private get ledger() {
     return asApp(this.ctx)['usage.ledger'];
+  }
+
+  /**
+   * 投递记录句柄：账本数额度，这里记经过（spec 3.7-02）——两条读路径各查各的表，没有第二套计数。
+   * @returns 投递记录服务实例
+   */
+  private get deliveryRecords() {
+    return asApp(this.ctx)['outbound.deliveries'];
   }
 
   /**
@@ -276,6 +297,7 @@ export class OutboundDeliverService extends Service {
       nowMs,
       // spec 2.6-05：hash 取前 12 位就够对上了——完整的 64 位串在账本里没人读，而 3.7 的 diff 按前缀能join。
       source: `resume:${attachment.sha256.slice(0, 12)}@${attachment.fileName}`,
+      snapshotId: parsed.data.snapshotId ?? null,
     };
   };
 
@@ -335,10 +357,10 @@ export class OutboundDeliverService extends Service {
    * 把一次已备好的投递真正发出去（spec 2.6-01 / 02 / 03 / 07 的落地半边）。
    *
    * 顺序与打招呼逐字对齐，中间只多一步审批：额度**先查后等**（到量即停，不该白等一个频控间隔）→
-   * 频控 → 审批（按档位）→ 发送 → 页面回读 → `gate.perform` 落账。
+   * 频控 → 审批（按档位）→ 发送 → 页面回读 → `gate.perform` 落账 → `outbound.deliveries` 记一条经过（spec 3.7-02）。
    * @param staged `stage` 的产物
    * @param signal 让出信号，工作流节点路径用它响应暂停；界面路径传 undefined
-   * @returns 投递回执（`committed` 恒为 true——没发出去一律以错误上浮）
+   * @returns 投递回执（`committed` 恒为 true——没发出去一律以错误上浮；`snapshotId` 是这次递出去的哪一版）
    * @throws `QUOTA_EXCEEDED`（日额度到量，带剩余额度）、`CONSENT_REQUIRED`（该平台还没签过风险确认，
    *         此时不进审批、不碰页面、不落账）、`OUTBOUND_APPROVAL_DENIED`（被拒或超时，
    *         此时页面动作次数为零、不落账不扣额度）、`DELIVER_TARGET_OFFLINE`（页面说这个岗位不收了）、
@@ -347,7 +369,7 @@ export class OutboundDeliverService extends Service {
    *         `OUTBOUND_CHANNEL_MISSING`（stage 之后适配器被摘掉）
    */
   commit = async (staged: StagedDelivery, signal?: AbortSignal): Promise<DeliverReceiptView> => {
-    const { platform, jobId, workflowRunId, nowMs, source, attachment } = staged;
+    const { platform, jobId, workflowRunId, nowMs, source, snapshotId, attachment } = staged;
 
     // 风险确认在闸门之前（spec 2.7-06）：没签过字的人不该先看到「额度不足」，
     // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
@@ -403,8 +425,11 @@ export class OutboundDeliverService extends Service {
         return outcome.reason;
       },
     );
+    // 落账之后立刻记一条经过（spec 3.7-02）：与账本行同一个 `ts` 基准、以 `ledgerId` 为主键一一对齐，
+    // 于是「这份简历投给了哪个 JD、当时是哪一版」在库里问得出，而账本仍然只数额度。
+    this.deliveryRecords.record({ ledgerId, platform, jobId, snapshotId, ts: nowMs + waitedMs });
     this.ctx.logger.info(
-      `简历已投递并落账：目标 ${jobId} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)}`,
+      `简历已投递并落账：目标 ${jobId} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)} · 快照 ${snapshotId ?? '（请求未带快照引用）'}`,
     );
     return {
       platform,
@@ -416,6 +441,7 @@ export class OutboundDeliverService extends Service {
       ledgerId,
       waitedMs,
       source,
+      snapshotId,
       committed: true,
     };
   };
@@ -441,6 +467,7 @@ export class OutboundDeliverService extends Service {
         ledgerId: null,
         waitedMs: 0,
         source: staged.source,
+        snapshotId: staged.snapshotId,
         committed: false,
       };
     }
@@ -553,7 +580,8 @@ export class OutboundDeliverService extends Service {
    * 作为工作流节点（`kind: resume.deliver`）时的执行函数。
    *
    * 参数名按计划口径读：`platform`/`job` 定位目标，`file` 是简历路径（省略则用配置的 `resumeFile`），
-   * `title`/`company` 只进确认卡片。节点声明要 `effect: 'outbound'` + `retryTimes: 0`
+   * `title`/`company` 只进确认卡片，`snapshot` 是这一版简历的快照 id（省略则经过里不记引用）。
+   * 节点声明要 `effect: 'outbound'` + `retryTimes: 0`
    * （spec 2.6-07 的「已下架就不再试」正是靠后者落的，plan §13.4 第 3 条）。
    * @param invocation 节点执行输入：`runId` 参与幂等键，参数从 `spec.params` 来，让出信号从 `signal` 来
    * @throws 缺 `platform` 或 `job` 时 `INVALID_ARGUMENT`；其余失败语义同 `perform`
@@ -575,6 +603,8 @@ export class OutboundDeliverService extends Service {
       filePath: paramString(spec.params.file) ?? undefined,
       title: paramString(spec.params.title) ?? undefined,
       company: paramString(spec.params.company) ?? undefined,
+      // 快照引用与界面入口同口径（spec 3.7-02）：节点不带给经过就是 null，两个入口不会各记一半。
+      snapshotId: paramString(spec.params.snapshot) ?? undefined,
       workflowRunId: runId,
     };
     const receipt = await this.perform(request, signal);

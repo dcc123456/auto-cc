@@ -135,3 +135,6 @@ export * from './greet.js';
 // 投递编排是第五个：与打招呼共用闸门/账本/频控，多出「等人确认」这一段（plan §13.3 第 1 条）。
 // 同包不新建包的理由写在那一节：投递与打招呼是同一件事的上下游，复用的四项已经在包里。
 export * from './deliver.js';
+// 投递记录（spec 3.7-02）是第六个：账本数额度，这张表记经过（递给哪个 JD、用的哪一版快照）。
+// 它同包是因为只有 `outbound.deliver` 会写它，而它谁都不认识——只认 `store` 那一条连接。
+export * from './delivery-record-store.js';

@@ -416,6 +416,11 @@ export type DeliverRequestView = {
   title?: string;
   /** 公司名：同上，纯展示 */
   company?: string;
+  /**
+   * 这一版简历的快照 id（`resume_snapshots.snapshot_id`，来自 `resume.export` 的回执）。
+   * 省略时投递记录里的引用为 null——「只给了一个文件路径」这种投递没有可还原的当时内容（spec 3.7-02）。
+   */
+  snapshotId?: string;
   /** 属于哪一次工作流运行；界面单次触发时为空 */
   workflowRunId?: string | null;
   /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚递过一次」，不必真等一个频控周期） */
@@ -443,6 +448,11 @@ export type DeliverReceiptView = {
   waitedMs: number;
   /** 可追溯来源：`resume:<sha256 前 12 位>@<文件名>`（spec 2.6-05，复用账本已有的 `source` 列） */
   source: string;
+  /**
+   * 这次递出去的是哪一版（`delivery_records.snapshot_id`，spec 3.7-02）。
+   * null 是实话：请求本来就只带了文件路径，没有可还原的当时内容。
+   */
+  snapshotId: string | null;
   /** 这次有没有真的离开 app */
   committed: boolean;
 };
@@ -567,6 +577,11 @@ export interface ExportReceiptView {
   pages: number;
   bytes: number;
   hash: string;
+  /**
+   * 这次导出留下的快照 id（spec 3.7-01）：投递要引用它才答得出「当时内容是什么」（spec 3.7-02）。
+   * 界面把它接住再交给 `outbound.deliver.perform`，一条可追溯链因此在两个域之间接通。
+   */
+  snapshotId: string;
 }
 
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */

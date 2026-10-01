@@ -30,13 +30,18 @@ const DEMO_DOC_ID = 'resume-demo';
 export const resumeExportSchema = z.strictObject({});
 export type ResumeExportConfig = z.infer<typeof resumeExportSchema>;
 
-/** 一次导出的回执：产物绝对路径、页数、字节数与回写后的文档内容 hash。 */
+/** 一次导出的回执：产物绝对路径、页数、字节数、回写后的文档内容 hash，以及这次留下的快照 id。 */
 export interface ExportReceipt {
   docId: string;
   path: string;
   pages: number;
   bytes: number;
   hash: string;
+  /**
+   * 这次导出的不可变快照 id（spec 3.7-01 的产物标识）。
+   * 回执里没有它就等于「留了档但没人知道档在哪」：投递要引用这个 id 才答得出当时内容（spec 3.7-02）。
+   */
+  snapshotId: string;
 }
 
 /**
@@ -189,9 +194,16 @@ export class ResumeExportService extends Service {
     const saved = this.docStore.save(finalDoc);
     // 导出瞬间记一份不可变快照（3.7-01）：与上面那次 save 用的是同一份 `finalDoc`，
     // 所以快照 hash 与回执 hash 必然同源一致——「投出去的到底是哪一版」因此在库里留了不可变的一行。
-    this.snapshotStore.record(finalDoc, templateId, resumePrint.fontSet, Date.now());
+    const snapshot = this.snapshotStore.record(finalDoc, templateId, resumePrint.fontSet, Date.now());
 
-    return { docId, path: target, pages: inspection.pageCount, bytes: inspection.byteLength, hash: saved.hash };
+    return {
+      docId,
+      path: target,
+      pages: inspection.pageCount,
+      bytes: inspection.byteLength,
+      hash: saved.hash,
+      snapshotId: snapshot.snapshotId,
+    };
   };
 }
 

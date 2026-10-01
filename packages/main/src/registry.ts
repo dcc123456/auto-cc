@@ -21,6 +21,7 @@ import type { Registry } from '@auto-cc/plugin-kernel';
 import { LlmChatService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
+  DeliveryRecordService,
   OutboundDeliverService,
   OutboundGreetService,
   OutboundSampleService,
@@ -66,6 +67,10 @@ export const REGISTRY: Registry = {
   // 打招呼编排（spec 2.5-02…13）：把上面三条加上闸门串成唯一外发口，也是 `greeting.send` 节点的登记方。
   // 单独一个 id 是为了在装配面板上把它单独摘掉——摘掉后界面与工作流都得到结构化失败，而不是「发出去了但没计量」。
   'outbound-greet': OutboundGreetService,
+  // 投递记录（spec 3.7-02）：`delivery_records` 表的唯一落点，迁移号段 9。账本数额度、这张表记经过，
+  // 一次成功投递一行并以 `ledger_id` 与账本对齐；摘掉它 `outbound-deliver` 连同进 PENDING——
+  // 「递出去但没留下可追溯的经过」不是一种可接受的半成功。
+  'outbound-delivery-records': DeliveryRecordService,
   // 投递编排（spec 2.6-01…07）：`resume.deliver` 节点的登记方，也是待确认单（`pending()`）的持有者。
   'outbound-deliver': OutboundDeliverService,
   ipc: IpcGatewayService,
