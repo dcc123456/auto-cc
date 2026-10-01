@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { ResumeDocService } from './doc-store.js';
 import { ResumeExportService } from './export-service.js';
 import { DEFAULT_LAYOUT, makeField, RESUME_SCHEMA_VERSION, type ResumeDocument } from './model.js';
+import { ResumeSnapshotService } from './snapshot-store.js';
 
 /** 假端口认这份「PDF」为 2 页，用来断言页数回写把文档里的 1 改成了 2。 */
 const TWO_PAGE_PDF = Buffer.from('%PDF-1.4 /Type /Page /Type /Page', 'latin1');
@@ -56,7 +57,7 @@ class FakePrintService extends Service implements ResumePrintPort {
   }
 }
 
-/** 挂起 config(带 userDataDir 覆盖) + store + resume.doc + 假 resume.print + resume.export。 */
+/** 挂起 config(带 userDataDir 覆盖) + store + resume.doc + 假 resume.print + resume.snapshot + resume.export。 */
 async function boot() {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-export-'));
   sandboxes.push(dir);
@@ -65,12 +66,14 @@ async function boot() {
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(await ctx.plugin(FakePrintService, {}));
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
   fibers.push(await ctx.plugin(ResumeExportService, {}));
   const app = asApp(ctx);
   return {
     dir,
     store: app.store,
     docs: app['resume.doc'],
+    snapshots: app['resume.snapshot'],
     exporter: app['resume.export'],
     print: app['resume.print'] as unknown as FakePrintService,
   };
@@ -229,5 +232,34 @@ describe('3.3-10 seedDemo 喂固定内容做端到端种子', () => {
     expect(docs.load('resume-demo').status).toBe('found');
     const row = store.db.prepare('SELECT COUNT(*) AS n FROM resume_docs').get() as { n: number };
     expect(row.n).toBe(1);
+  });
+});
+
+describe('3.7-01 每次导出产生一条不可变快照', () => {
+  it('toPdf 成功后按 docId 列出一条快照，其 hash 与回执同源、还原结果一致', async () => {
+    const { docs, exporter, snapshots } = await boot();
+    docs.save(sampleDoc());
+    const receipt = await exporter.toPdf('resume-1', 'classic');
+
+    const listed = snapshots.list('resume-1');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.hash).toBe(receipt.hash);
+    expect(listed[0]?.templateId).toBe('classic');
+    // fontSet 由打印门面同源提供（不是快照服务自己拼的字符串）。
+    expect(listed[0]?.fontSet).toContain('Noto Sans SC');
+    // 3.7-04 round-trip：按快照 id 还原，hash 与导出回执一致、内容能重新校验成合法文档。
+    const restored = snapshots.restore(listed[0]?.snapshotId ?? '');
+    expect(restored.status).toBe('restored');
+    if (restored.status === 'restored') expect(restored.hash).toBe(receipt.hash);
+  });
+
+  it('两次导出留两行快照（快照不可变、不随 resume_docs 的 UPSERT 被覆盖）', async () => {
+    const { docs, exporter, snapshots } = await boot();
+    docs.save(sampleDoc());
+    await exporter.toPdf('resume-1', 'classic');
+    await exporter.toPdf('resume-1', 'modern');
+    const listed = snapshots.list('resume-1');
+    expect(listed).toHaveLength(2);
+    expect(new Set(listed.map((item) => item.templateId))).toEqual(new Set(['classic', 'modern']));
   });
 });
