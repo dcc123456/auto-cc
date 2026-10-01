@@ -113,6 +113,88 @@ optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 
    注入同一实例。这是 4.1-10「无自建连接」在 pnpm 严格 node_modules 下唯一能同时满足类型与装配的形态，
    4.2/4.3 的新包照抄。
 
+### 1.4 4.2「知识库建模与管理界面」切片分解与三条裁定（写代码之前定死）
+
+取证一手来源：本节结论建立在**本仓库现状实测**（下表每条都带文件:行号）与 §0 的 `ai-resume` 评估、
+`docs/research/source-repos-analysis.md:142`（它的 `base_resume / custom_resume / jd` 只能当数据模型骨架看）
+之上。**注意**：`.research-repos/` 目录里现在只剩 `pagination-spike`，三个源仓库的取证副本已不在本机，
+若需逐行核对 `ai-resume` 的表定义必须重新 clone（§9：GitHub 直连不稳定），因此本节不引用其行号。
+
+**裁定一：导入的简历必须进 `resume_docs`，`resume_imports` 只留出处——这一条是 4.1-c 留下的真实缺口。**
+
+现状实测：`resume_docs(id, schema_version, content_hash, doc_json, updated_at)`
+（`packages/resume-doc/src/doc-store.ts:30-36`，写入点 `:114`）与
+`resume_imports(doc_id, source_hash, ..., doc_json, issues_json, ...)`
+（`packages/resume-kb/src/parse-service.ts:31-42`）**各存一份 `doc_json`**，而 3.x 的编辑、快照、PDF 导出
+只认 `resume_docs`。后果：用户导进来的简历在库里躺着一份永远编辑不到、也导不出 PDF 的 JSON——
+「根据 JD 优化简历」这条主链在入口就断了。收口沿用**本仓库已经确立的「当前态 + 历史」双表模式**
+（`resume_docs` 号段 7 是当前可编辑态，`resume_snapshots` 号段 8 是不可变历史），而不是新发明第三套：
+
+- `resume_docs`：可编辑工作副本的**唯一真相源**；导入时按 `docId` upsert（幂等语义与 4.1-07 一致）。
+- `resume_imports`：降级为**不可变的原始解析出处**（保留 `doc_json` 作为「当初解析成什么样」的证据，
+  与 `resume_snapshots` 同类语义，4.2-08 的导入冲突与 4.5 的可复盘都靠它）。
+- 界面、检索（4.3）、生成（4.5）一律只从 `resume_docs` 读当前态。
+
+**裁定二：四类实体用单表 `kb_entities` + `kind` 判别，不建四张表。**
+
+- 列（迁移号段取 **11**，紧随 4.1-c 的 10）：`entity_id`、`kind`、`parent_id`（经历 → 项目的一层归属）、
+  `source_doc_id`、`payload_json`（该 kind 的字段）、`normalized_hash`（幂等与去重键）、
+  `created_at` / `updated_at`。
+- **四类实体与 `SectionKind` 不是一一对应**（实测 `packages/resume-doc/src/model.ts:66`：
+  `summary | experience | education | skills | project | campus`），派生映射必须写死，否则 4.2-a 会现场发明：
+
+  | KB kind       | 派生来源                                                                   | 说明                                           |
+  | ------------- | -------------------------------------------------------------------------- | ---------------------------------------------- |
+  | `experience`  | `experience` 区块的 entry                                                  | 字段键 `company / role / period / achievement` |
+  | `project`     | `project` 区块的 entry（`parent_id` 指向同文档内时间重叠的经历，可有可无） | 同字段键                                       |
+  | `skill`       | `skills` 区块的 `text` 字段按行 / 顿号 / 逗号切分                          | 库里技能只有自由文本，切分规则属确定性代码     |
+  | `achievement` | **不是区块**：任何 entry 里 `factKey === 'achievement'` 的字段             | 会与所属经历文本重复，去重靠 `normalized_hash` |
+
+  未纳入实体的区块：`summary / education / campus`。显式记为已知后果而不是留给 4.3 现场发现：
+  4.3-11 要求「chunk 粒度 = 可引用粒度」，这三块没有实体行，检索侧只能按**区块级 chunk**索引它们
+  （`education` 尤其要紧——4.4 的学历比对必须有据可依），届时由 4.3 切片把这条落进 spec 说明。
+
+- 理由：个人库的量级是数十至数百条（§1 检索一节的规模判断），查询永远按 `kind` 过滤；
+  四张表会把 4.2-04 的级联删除变成四种外键组合各写一遍，并把 4.3 的「chunk 粒度 = 实体粒度」
+  拆成四种 chunk 来源。实体由 `resume_docs.doc_json` 的 entries **规范化派生**
+  （幂等键 `source_doc_id + kind + normalized_hash`），不在本包新建简历数据结构（§2 基础设施唯一性、
+  plan §3.5 只用 P3.1 文档模型）。
+- 否决 `ai-resume` 的 `base_resume` 宽表（整份简历塞一行）：那种形态无法由一句简历陈述反查到支撑实体，
+  4.2-03 / 4.5-06 的 `evidenceRefs` 在宽表上没有落点。
+- **命名冲突预警**：`evidenceRefs` 目前全仓零命中，但 `workflow_nodes.evidence_ref`（`run-store.ts:72`）
+  已经占用了「evidence」这个词，指的是**工作流失败截图的相对路径**。两者语义无关，KB 侧统一用复数
+  `evidence_refs` / `evidenceRefs` 并在注释里点明区别，防止后来者把两套 readings 混为一谈。
+
+**裁定三：管理界面挂在 diagnostics 里与 `ResumePanel` 并列（新增 `KbPanel`），但同一切片必须把
+`kb.profile` 登记为 agent 工具。**
+
+- §5.9 只固定「chat 是第一入口、workflow 是第二视图」的次序，并未禁止工程向的 diagnostics 继续放面板；
+  KB 管理是低频编辑面，先在 diagnostics 落地，将来若提升为一级入口是纯 UI 改动，不动 service。
+- 但 §5.9 的后半句是硬要求：新功能页**必须既能被工作流节点调用，也能被 agent 当作工具调用**，
+  不允许做出「只有工程师知道怎么串起来」的孤岛。所以 4.2-d 的收尾判据包含一次 agent 侧实测：
+  对话里问「库里有哪些和高并发相关的经历」，走的必须是同一个 `kb.profile`（禁止界面与工具各长一套）。
+
+**切片顺序（一次只做一个，每片自带验收）**
+
+| 切片  | 内容                                                                             | 覆盖条目           | 前置            |
+| ----- | -------------------------------------------------------------------------------- | ------------------ | --------------- |
+| 4.2-a | 迁移 11 `kb_entities` + 导入→`resume_docs` upsert + 实体派生 + `kb.profile` CRUD | 4.2-01 / 02 / 11   | 裁定一、二      |
+| 4.2-b | `evidenceFor(claim)` 确定性反查（归一化包含 + token 重叠，不靠 LLM 自评）        | 4.2-03             | 4.2-a           |
+| 4.2-c | 级联删除策略（删经历时下属项目/成果的去留显式化）+ 知识库备份导出/导入与冲突策略 | 4.2-04 / 08        | 4.2-a           |
+| 4.2-d | `KbPanel`（实体树 + 展开证据链 + 编辑即时生效）+ `kb.profile` 的 agent 工具登记  | 4.2-05 / 06 + §5.9 | 4.2-a / 02 / 03 |
+| 4.2-e | 收尾机检：网络审计（除 llm 网关外零上行）+ 1.2 三项前端规约复跑 + 命名抽样       | 4.2-07 / 09 / 10   | 4.2-d           |
+
+- 4.2-07 的「无上行」判据落点：本切片不新增任何 `fetch` / `http` 调用点，审计以**扫描 + 真实窗口内跑一遍
+  全链路**留证，而不是引用文档转述（§6.2）。
+- 迁移号段沿用 4.1-c 立的反撞号写法：单测里手抄已分配号段集合断言 11 未被占用
+  （`packages/resume-kb/src/parse-service.test.ts:128` 的同一条模式）；store 仍按 devDependency 形态接入（§1.3-4）。
+- **4.2-11 的三计划表清单对账结果**（逐张 `CREATE TABLE` 枚举过，非引用文档转述）：P1/P2 侧
+  `usage_ledger`(1) / `chat_session`+`chat_message`(2) / `jobs`(3) / `workflow_runs`+`workflow_nodes`(4) /
+  `conversation_messages`(5) / `automation_consents`(6)；P3 侧 `resume_docs`(7) / `resume_snapshots`(8) /
+  `delivery_records`(9)；本计划 `resume_imports`(10)。`jobs.experience` 是 **JD 要求串**不是简历经历，
+  与 KB 实体无重叠。**唯一真实重复就是裁定一 的三份 `doc_json`**，其余无重复定义；
+  迁移执行器自身还有一张 `schema_migrations`（`packages/store/src/migrate.ts:54-62`），不属于业务表。
+
 ## 2. 包与 service
 
 ```
