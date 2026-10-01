@@ -169,6 +169,10 @@ export const RENDERER_ALLOWLIST = [
   'resume.export.seedDemo',
   'resume.export.preview',
   'resume.export.toPdf',
+  // 3.7 快照的只读面（spec 3.7-03）：列历史 + 比对两份快照。正文不过进程边界，
+  // 界面拿到的是「哪个快照、模板与时刻」与「条目级 / 字段级差异」两种读数。
+  'resume.snapshot.list',
+  'resume.snapshot.diff',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -564,6 +568,12 @@ export type DevtoolsStatusView = {
  */
 export type ResumeLocaleView = 'zh-CN' | 'en';
 
+/**
+ * 演示种子的版本（镜像 resume-doc 的 `ResumeSeedVariant`）。
+ * `edited` 只为在编辑轨（3.5）落地前给 3.7-03 的 diff 界面造出第二版内容；真实编辑入口上线后它就该退场。
+ */
+export type ResumeSeedVariantView = 'base' | 'edited';
+
 /** 演示种子的回执（镜像 `resume.export.seedDemo` 的返回）。 */
 export interface ResumeSeedView {
   docId: string;
@@ -582,6 +592,57 @@ export interface ExportReceiptView {
    * 界面把它接住再交给 `outbound.deliver.perform`，一条可追溯链因此在两个域之间接通。
    */
   snapshotId: string;
+}
+
+/** 一条快照的摘要（镜像 resume-doc 的 `SnapshotMeta`，spec 3.7-03 列表要摆的那几行读数）。 */
+export interface SnapshotMetaView {
+  snapshotId: string;
+  docId: string;
+  templateId: string;
+  fontSet: string;
+  /** 内容 hash（3.1-05 那一条），界面用它指认「这两版其实一模一样」 */
+  hash: string;
+  /** 快照时刻（毫秒），由主进程格式化前原样递出，界面按 locale 显示 */
+  createdAt: number;
+}
+
+/** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
+export type ResumeSectionKindView = 'summary' | 'experience' | 'education' | 'skills' | 'project' | 'campus';
+
+/** 变更类型（镜像 resume-doc 的 `ChangeType`）。 */
+export type SnapshotChangeTypeView = 'added' | 'removed' | 'modified';
+
+/**
+ * 字段级变化（镜像 `FieldChange`）。
+ * `locked` 为真表示这个字段是事实锁定字段——它的变化在界面上要标成「待确认」而不是普通改动（spec 3.1-03）。
+ */
+export interface SnapshotFieldChangeView {
+  key: string;
+  change: SnapshotChangeTypeView;
+  before: string | null;
+  after: string | null;
+  locked: boolean;
+}
+
+/** 条目级变化（镜像 `EntryChange`）：整条增删时 `fields` 里全部按同一类型标出。 */
+export interface SnapshotEntryChangeView {
+  entryId: string;
+  change: SnapshotChangeTypeView;
+  fields: SnapshotFieldChangeView[];
+}
+
+/** 区块级变化（镜像 `SectionChange`）：只出现在真的有条目变动的区块上。 */
+export interface SnapshotSectionChangeView {
+  sectionId: string;
+  kind: ResumeSectionKindView;
+  change: SnapshotChangeTypeView;
+  entries: SnapshotEntryChangeView[];
+}
+
+/** 两份快照的差异（镜像 resume-doc 的 `DocDiff`，spec 3.7-03 的界面读数；无变化时 `isEmpty` 为真）。 */
+export interface SnapshotDiffView {
+  sections: SnapshotSectionChangeView[];
+  isEmpty: boolean;
 }
 
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
@@ -768,9 +829,10 @@ export interface BridgeSignatures {
   'chat.session.startSession': { args: []; returns: ChatSnapshotView };
   /**
    * 落一份固定内容演示简历（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 之前导出链的唯一文档来源）；
-   * 返回种子 id 与落库 hash，界面据此再去预览/导出。
+   * 返回种子 id 与落库 hash，界面据此再去预览/导出。`variant='edited'` 会在同一 docId 上落一份内容不同的第二版
+   * （3.7-03 的 diff 界面在没有录入入口时的唯一来源）。
    */
-  'resume.export.seedDemo': { args: []; returns: ResumeSeedView };
+  'resume.export.seedDemo': { args: [variant?: ResumeSeedVariantView]; returns: ResumeSeedView };
   /**
    * 渲染预览 HTML（spec 3.3-01「预览即导出所见」）：返回与 `toPdf` **同一份**打印 HTML 字符串，
    * 界面塞进 iframe 即可所见即所得。文档内容不过进程边界，只传 docId + 模板 + 语言。
@@ -784,6 +846,15 @@ export interface BridgeSignatures {
     args: [docId: string, templateId: string, locale?: ResumeLocaleView];
     returns: ExportReceiptView;
   };
+  /**
+   * 列出某文档的导出快照历史（spec 3.7-01 的读数，界面「比哪两版」的选择器数据源）：最新的在前，只回摘要不回正文。
+   */
+  'resume.snapshot.list': { args: [docId: string]; returns: SnapshotMetaView[] };
+  /**
+   * 比对两份快照（spec 3.7-03）：主进程把两侧各自 `restore` 成合法文档后交 3.1-06 的 `diff()`，
+   * 界面拿到的是条目级 + 字段级差异；任一侧查无此快照或内容已损坏以 `INVALID_ARGUMENT` 结构化失败上浮。
+   */
+  'resume.snapshot.diff': { args: [fromSnapshotId: string, toSnapshotId: string]; returns: SnapshotDiffView };
 }
 
 /**

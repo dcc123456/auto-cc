@@ -375,7 +375,29 @@
       "seedReceipt": "Loaded demo document {{docId}}",
       "previewDone": "Preview refreshed",
       "previewEmpty": "No preview yet: load demo content, then press Preview",
-      "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes"
+      "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes",
+      "seedEdited": "Load revised demo content",
+      "snapshots": "Snapshot history",
+      "snapshotCount": "Read {{count}} snapshots",
+      "snapshotOption": "{{template}} · {{time}} · {{hash}}",
+      "diff": "Compare snapshots",
+      "diffFrom": "From",
+      "diffTo": "To",
+      "diffEmpty": "Both snapshots hold identical content",
+      "diffSections": "{{count}} sections changed",
+      "valueAbsent": "(none)",
+      "fieldLocked": "fact-locked",
+      "changeAdded": "added",
+      "changeRemoved": "removed",
+      "changeModified": "modified",
+      "kind": {
+        "summary": "Summary",
+        "experience": "Experience",
+        "education": "Education",
+        "skills": "Skills",
+        "project": "Projects",
+        "campus": "Campus activities"
+      }
     },
     "workflow": {
       "heading": "Job-hunting workflow (plan-driven node pipeline)",

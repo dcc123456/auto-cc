@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResumeDocService } from './doc-store.js';
-import { createEmptyDocument, makeField, type ResumeDocument } from './model.js';
+import { createEmptyDocument, makeField, type ResumeDocument, type Section } from './model.js';
 import { resumePrint } from './print.js';
 import type { ResumeSnapshotService } from './snapshot-store.js';
 import type { TemplateLocale } from './template.js';
@@ -25,6 +25,18 @@ const EXPORTS_SUBDIR = 'exports';
 
 /** 演示种子文档 id（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 落地后由用户文档取代）。 */
 const DEMO_DOC_ID = 'resume-demo';
+
+/**
+ * 演示种子的两个版本：`base` 是首次载入的样子，`edited` 在它之上改两处自由文本并追加一个项目区块。
+ * 只为 3.7-03 的 diff 界面在「编辑轨还没落地」时能拿到两份内容真的不同的快照（见 `demoDocument`）。
+ */
+export type ResumeSeedVariant = 'base' | 'edited';
+
+/** `edited` 变体改写的个人简介（虚构内容，与非锁定字段 `summary.text` 对应）。 */
+const EDITED_SUMMARY_TEXT = '五年后端工程师，近两年专注桌面端与内核自动化。';
+
+/** `edited` 变体改写的技能行（虚构内容，与非锁定字段 `skills.text` 对应）。 */
+const EDITED_SKILLS_TEXT = 'TypeScript / Node.js / Electron / PDF 打印管线';
 
 /** 无配置服务：目录来自 `config`，打印来自注入端口，本服务自身没有运行期可调项。 */
 export const resumeExportSchema = z.strictObject({});
@@ -77,10 +89,26 @@ export class ResumeExportService extends Service {
    *
    * 编辑轨（3.5）之前界面没有「录入文档」的入口，导出管线的端到端自测需要先有一份合法文档做种子；
    * 内容全为虚构、不含真实个人信息，只用来把「文档 → 打印 HTML → PDF」这条链在真实内核上跑通。
+   * @param variant `base`（默认）或 `edited`（给 3.7-03 的 diff 界面准备的第二版内容）
    * @returns 种子文档的 id 与落库后的内容 hash
    */
-  seedDemo = (): { docId: string; hash: string } => {
-    const seeded: ResumeDocument = {
+  seedDemo = (variant: ResumeSeedVariant = 'base'): { docId: string; hash: string } => {
+    const saved = this.docStore.save(this.demoDocument(variant));
+    return { docId: DEMO_DOC_ID, hash: saved.hash };
+  };
+
+  /**
+   * 造一份虚构的演示文档（内容不含任何真实个人信息，只为把导出链与快照链喂通）。
+   *
+   * `edited` 变体存在的理由只有一个：**编辑轨（3.5）之前界面没有录入入口**，而 3.7-03 的 diff 界面
+   * 需要两份内容真的不同的快照才能摆出「条目级 + 字段级」。它在 `base` 之上改两处自由文本、
+   * 追加一个项目区块（条目级新增），不动任何事实锁定字段——于是 diff 里既有普通改动，
+   * 也有整块新增的事实字段可打上「待确认」标（3.1-03 的口径）。编辑轨落地后这个变体就该由真实编辑取代。
+   * @param variant `base` 首次载入的样子；`edited` 在其之上的两处文本改动 + 一个新项目区块
+   * @returns 可直接交给 `resume.doc.save` 的合法文档
+   */
+  private demoDocument(variant: ResumeSeedVariant): ResumeDocument {
+    const base: ResumeDocument = {
       ...createEmptyDocument(DEMO_DOC_ID, Date.now()),
       profile: { name: '张三', contact: { email: 'zhangsan@example.com', phone: '13800000000', location: '上海' } },
       sections: [
@@ -116,9 +144,39 @@ export class ResumeExportService extends Service {
         },
       ],
     };
-    const saved = this.docStore.save(seeded);
-    return { docId: DEMO_DOC_ID, hash: saved.hash };
-  };
+    if (variant === 'base') return base;
+    const project: Section = {
+      id: 'project',
+      kind: 'project',
+      title: '项目经历',
+      entries: [
+        {
+          id: 'p1',
+          fields: [
+            makeField('project', 'company', '未名开源社区'),
+            makeField('project', 'role', '维护者'),
+            makeField('project', 'period', '2023 - 至今'),
+            makeField('project', 'achievement', '发布 PDF 打印工具链，月下载 2 万次。'),
+          ],
+        },
+      ],
+    };
+    return {
+      ...base,
+      sections: [
+        ...base.sections.map((section) => {
+          if (section.id === 'summary') {
+            return { ...section, entries: [{ id: 's1', fields: [makeField('summary', 'text', EDITED_SUMMARY_TEXT)] }] };
+          }
+          if (section.id === 'skills') {
+            return { ...section, entries: [{ id: 'k1', fields: [makeField('skills', 'text', EDITED_SKILLS_TEXT)] }] };
+          }
+          return section;
+        }),
+        project,
+      ],
+    };
+  }
 
   /**
    * 载入一份合法文档；缺失或库里存坏了都以 `RESUME_EXPORT_FAILED` 结构化失败上浮（3.3-11 的「文档非法」腿）。

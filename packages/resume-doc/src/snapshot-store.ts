@@ -9,14 +9,17 @@
  * 读回时对 doc_json 重新校验再算一次 hash——于是「这份快照还能不能还原成当初那份合法文档」是被读路径主动确认的事实。
  * hash 复用 3.1-05 那一条，不再造第二个摘要算法（§2.7 禁第二套）。
  *
- * 本服务不认识「投递引用快照」（3.7-02）与「快照 diff 界面」（3.7-03）：前者是投递域的关联、后者是渲染层的呈现，
+ * 本服务不认识「投递引用快照」（3.7-02）与「快照 diff 界面」（3.7-03 的渲染部分）：前者是投递域的关联、后者是渲染层的呈现，
  * 都从这张表读，但不该由这张表来做（保持「只管这一张表的读写 + 保留上限」）。
+ * 3.7-03 只在本服务加了一个 `diff(from, to)`：它把两份快照各自 `restore` 之后交给 3.1-06 的 `diff()`——
+ * 比对算法不在这里重写一遍（§2.2），界面拿到的是同一形状的条目级 + 字段级读数。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { diff as documentDiff, type DocDiff } from './diff.js';
 import type { ResumeDocument } from './model.js';
 import { contentHash, normalizeDocument } from './normalize.js';
 import { validateDocument } from './schema.js';
@@ -202,6 +205,35 @@ export class ResumeSnapshotService extends Service {
     }
     return { status: 'restored', document: validated.document, hash: contentHash(validated.document) };
   };
+
+  /**
+   * 比对两份快照的内容差异（spec 3.7-03 的数据半边，界面直接摆这个读数）。
+   *
+   * 不重写比对：两侧各走一次已有的 `restore`（含权威校验），再交给 3.1-06 的 `diff()`——
+   * 于是「条目级 + 字段级」的口径与 3.1-06 完全一致，界面不存在第二套判据（§2.2 / §2.7）。
+   * @param fromSnapshotId 基线快照 id（界面上的「起点」）
+   * @param toSnapshotId 对照快照 id（界面上的「终点」）
+   * @returns 结构化差异（只列有变化的区块 / 条目 / 字段；两版一致时 `isEmpty` 为 true）
+   * @throws AppError(`INVALID_ARGUMENT`) 任一侧查无此快照，或快照行存在但内容已损坏（附原因）
+   */
+  diff = (fromSnapshotId: string, toSnapshotId: string): DocDiff =>
+    documentDiff(this.requireRestorable(fromSnapshotId, '起点'), this.requireRestorable(toSnapshotId, '终点'));
+
+  /**
+   * 取回某快照指向的合法文档，取不回来就说得出一句人话（`diff` 的前置，不改变 `restore` 的三态语义）。
+   * @param snapshotId 快照 id
+   * @param role 出现在错误文案里的角色名（「起点」/「终点」），让界面能指出是哪一侧失败了
+   * @returns 可继续比对的文档
+   * @throws AppError(`INVALID_ARGUMENT`) 快照不存在或已损坏
+   */
+  private requireRestorable(snapshotId: string, role: '起点' | '终点'): ResumeDocument {
+    const result = this.restore(snapshotId);
+    if (result.status === 'restored') return result.document;
+    throw new AppError(
+      'INVALID_ARGUMENT',
+      `快照${role}读不回合法文档：${snapshotId}${result.status === 'corrupt' ? `（${result.reason}）` : '（查无此快照）'}`,
+    );
+  }
 
   /**
    * 列出某文档的历史快照（最新的在前），只回摘要不回正文。

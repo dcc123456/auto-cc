@@ -1,7 +1,13 @@
-import { Ban, Eye, FileDown, FileText, RefreshCw } from 'lucide-react';
+import { Ban, Eye, FileDown, FileText, GitCompareArrows, History, RefreshCw } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ExportReceiptView, ResumeLocaleView, ResumeSeedView } from '@auto-cc/shared';
+import type {
+  ExportReceiptView,
+  ResumeLocaleView,
+  ResumeSeedView,
+  SnapshotDiffView,
+  SnapshotMetaView,
+} from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -9,6 +15,13 @@ const TEMPLATE_ID = 'classic';
 
 /** 故意不存在的文档 id：供「注入失败导出」按钮触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
 const FAILURE_DOC_ID = 'resume-fail-injected';
+
+/** 变更类型 → 文案键（`added`/`removed`/`modified` 三种在界面上的说法不同，颜色也不同）。 */
+const CHANGE_LABEL_KEY = {
+  added: 'resume.changeAdded',
+  removed: 'resume.changeRemoved',
+  modified: 'resume.changeModified',
+} as const;
 
 /**
  * 简历生成轨自测面板（spec 3.3-01 / 04 / 05 / 09 / 10 的界面化身）：
@@ -25,6 +38,10 @@ export function ResumePanel() {
   const [locale, setLocale] = useState<ResumeLocaleView>('zh-CN');
   const [previewHtml, setPreviewHtml] = useState<string>();
   const [receipt, setReceipt] = useState<ExportReceiptView>();
+  const [snapshots, setSnapshots] = useState<SnapshotMetaView[]>([]);
+  const [fromId, setFromId] = useState('');
+  const [toId, setToId] = useState('');
+  const [diff, setDiff] = useState<SnapshotDiffView>();
   const bridge = window.autoCC;
 
   // 本面板无持久快照要回读，动作后不需要额外刷新主进程状态。
@@ -32,16 +49,21 @@ export function ResumePanel() {
   const { busy, notice, run } = useBridgeAction(read);
 
   /**
-   * 落一份固定内容演示文档，成功后立刻按当前语言渲一次预览（种子与预览一次点到位）。
+   * 落一份演示文档（`base` 或 `edited`），成功后立刻按当前语言渲一次预览（种子与预览一次点到位）。
+   * @param variant 种子的版本——`edited` 用来在同一 docId 上落第二版内容，好让 3.7-03 的 diff 有得比
    */
-  const loadDemo = () =>
-    void run(t('resume.seed'), () => bridge?.resume['export.seedDemo'](), {
-      apply: (value) => {
-        setSeed(value);
-        setReceipt(undefined);
+  const loadDemo = (variant: 'base' | 'edited') =>
+    void run(
+      t(variant === 'base' ? 'resume.seed' : 'resume.seedEdited'),
+      () => bridge?.resume['export.seedDemo'](variant),
+      {
+        apply: (value) => {
+          setSeed(value);
+          setReceipt(undefined);
+        },
+        describe: (value) => t('resume.seedReceipt', { docId: value.docId }),
       },
-      describe: (value) => t('resume.seedReceipt', { docId: value.docId }),
-    });
+    );
 
   /**
    * 拉取预览 HTML 并塞进 iframe——与导出走的是同一份打印 HTML 源（3.3-01）。
@@ -70,6 +92,46 @@ export function ResumePanel() {
   const injectFailure = () =>
     void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, TEMPLATE_ID, locale));
 
+  /**
+   * 读回该文档的快照历史（spec 3.7-01 的列表），并把起点/终点预置成「最旧 ↔ 最新」——
+   * 于是界面与 harness 都只需再点一次「比对」就能看到差异落在哪几行（3.7-03）。
+   * @param docId 已落库的文档 id
+   */
+  const loadSnapshots = (docId: string) =>
+    void run(t('resume.snapshots'), () => bridge?.resume['snapshot.list'](docId), {
+      apply: (items) => {
+        setSnapshots(items);
+        setDiff(undefined);
+        const oldest = items[items.length - 1];
+        const newest = items[0];
+        setFromId(oldest ? oldest.snapshotId : '');
+        setToId(items.length > 1 && newest ? newest.snapshotId : '');
+      },
+      describe: (items) => t('resume.snapshotCount', { count: items.length }),
+    });
+
+  /**
+   * 比对选中的两份快照（spec 3.7-03）：差异由主进程算，界面只摆读数，不在渲染层重算一遍（§2.5）。
+   */
+  const compareSnapshots = () =>
+    void run(t('resume.diff'), () => bridge?.resume['snapshot.diff'](fromId, toId), {
+      apply: (value) => setDiff(value),
+      describe: (value) =>
+        t(value.isEmpty ? 'resume.diffEmpty' : 'resume.diffSections', { count: value.sections.length }),
+    });
+
+  /**
+   * 把一条快照摘要拼成选择器里的一行文字。
+   * 模板 id / 时刻 / hash 前缀全部作插值参数交给 i18n，界面不自己拼句子（§5.7）。
+   * @param item `snapshot.list` 返回的一条快照摘要
+   */
+  const snapshotLabel = (item: SnapshotMetaView) =>
+    t('resume.snapshotOption', {
+      template: item.templateId,
+      time: new Date(item.createdAt).toLocaleTimeString(),
+      hash: item.hash.slice(0, 8),
+    });
+
   return (
     <section data-testid="resume-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
       <div className="flex items-center justify-between">
@@ -96,11 +158,21 @@ export function ResumePanel() {
           type="button"
           data-action="seed"
           disabled={!!busy}
-          onClick={loadDemo}
+          onClick={() => loadDemo('base')}
           className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <RefreshCw size={12} />
           {t('resume.seed')}
+        </button>
+        <button
+          type="button"
+          data-action="seed-edited"
+          disabled={!!busy}
+          onClick={() => loadDemo('edited')}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <FileText size={12} />
+          {t('resume.seedEdited')}
         </button>
         <button
           type="button"
@@ -161,6 +233,125 @@ export function ResumePanel() {
         <p className="mt-3 text-[11px] text-slate-500" data-testid="resume-preview-empty">
           {t('resume.previewEmpty')}
         </p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-action="snapshots"
+          disabled={!seed || !!busy}
+          onClick={() => seed && loadSnapshots(seed.docId)}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <History size={12} />
+          {t('resume.snapshots')}
+        </button>
+        <button
+          type="button"
+          data-action="diff"
+          disabled={!fromId || !toId || fromId === toId || !!busy}
+          onClick={compareSnapshots}
+          className="flex items-center gap-1 rounded-md border border-violet-800 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-950 disabled:opacity-40"
+        >
+          <GitCompareArrows size={12} />
+          {t('resume.diff')}
+        </button>
+      </div>
+
+      {snapshots.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-3" data-testid="snapshot-list">
+          <label className="flex items-center gap-1 text-[11px] text-slate-400">
+            {t('resume.diffFrom')}
+            <select
+              data-testid="snapshot-diff-from"
+              value={fromId}
+              onChange={(event) => {
+                setFromId(event.target.value);
+                setDiff(undefined);
+              }}
+              className="max-w-[260px] rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+            >
+              {snapshots.map((item) => (
+                <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
+                  {snapshotLabel(item)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 text-[11px] text-slate-400">
+            {t('resume.diffTo')}
+            <select
+              data-testid="snapshot-diff-to"
+              value={toId}
+              onChange={(event) => {
+                setToId(event.target.value);
+                setDiff(undefined);
+              }}
+              className="max-w-[260px] rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+            >
+              {snapshots.map((item) => (
+                <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
+                  {snapshotLabel(item)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {diff && (
+        <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/60 p-3" data-testid="snapshot-diff">
+          {diff.isEmpty ? (
+            <p className="text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
+              {t('resume.diffEmpty')}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {diff.sections.map((section) => (
+                <li key={section.sectionId} data-testid="diff-section">
+                  <p className="text-[11px] font-semibold text-slate-300" data-testid="diff-section-heading">
+                    {t(`resume.kind.${section.kind}`)} · {t(CHANGE_LABEL_KEY[section.change])}
+                  </p>
+                  <ul className="mt-1 space-y-1 pl-3">
+                    {section.entries.map((entry) => (
+                      <li key={entry.entryId} data-testid="diff-entry">
+                        <p className="text-[11px] text-slate-500">
+                          {entry.entryId} · {t(CHANGE_LABEL_KEY[entry.change])}
+                        </p>
+                        <ul className="mt-0.5 space-y-0.5 pl-3">
+                          {entry.fields.map((field) => (
+                            <li
+                              key={field.key}
+                              data-testid="diff-field"
+                              className="flex flex-wrap items-baseline gap-1 text-[11px]"
+                            >
+                              <span className="text-slate-500">{field.key}</span>
+                              <span className="break-all text-slate-400 line-through">
+                                {field.before ?? t('resume.valueAbsent')}
+                              </span>
+                              <span className="text-slate-600">→</span>
+                              <span className="break-all text-emerald-300">
+                                {field.after ?? t('resume.valueAbsent')}
+                              </span>
+                              {field.locked && (
+                                <span
+                                  data-testid="diff-field-locked"
+                                  className="rounded border border-amber-800 px-1 text-amber-300"
+                                >
+                                  {t('resume.fieldLocked')}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   );
