@@ -40,7 +40,19 @@
   L2 `resume-doc` **禁止反向依赖 L1**。故打印执行器落在 shell/main，`resume-doc` 只交出「渲染 HTML + 打印选项 + 字体 @font-face 源」，经依赖注入被 shell 调用；`resume.export.toPdf` 的 service 门面在 resume-doc，实际 `printToPDF` 由注入的打印端口完成。
 - **中文字体已选定并内嵌**：取 `Noto Sans SC`（Google，SIL OFL 1.1，允许内嵌 + 子集化）的 `chinese-simplified` + `latin` 两档字重 woff2（合计约 2.3 MB），
   落 `resources/fonts/**`，许可证全文随附 `resources/fonts/OFL.txt` 并记入 `LICENSES.md`。打印 HTML 经 `@font-face` 声明该字体，Chromium 打印时按用到的字形**自动子集内嵌**，产物字形三端一致（服务于 3.3-05/06/07）——**无需另引 fontkit 之类的子集化依赖**。
-- **仍待本机实跑收口（V / C 腿）**：真实 `printToPDF` 产物的「文本层逐字符全等、字形数量级、并发两份不串、隐藏视图无闪窗、逐页截图」需拉起真实 Electron 窗口 + CDP harness 取证（§7.1），是 3.3 实现阶段的工作，本结论只坐实「可行且路径已定」，不提前判任何 V/C 条目通过。
+- **本机实跑已通过（spike：隐藏窗口 `loadURL(file://)` → `document.fonts.ready` → `printToPDF({preferCSSPageSize:true, printBackground:true, margins:0})`）**，对产物做字节级读数（不引第三方 PDF 解析，避开 3.4 的 AGPL/pdf-lib 依赖）：
+
+  | 用例             | 结果                                                                                     | 对应机制腿                                                        |
+  | ---------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+  | 单页简历         | `%PDF-1.4` / 1 页 / 24,916 B / `FontFile`=真 / `ToUnicode`=真 / 命中原名 `NotoSansSC`=真 | 3.3-02 无 Puppeteer、3.3-05 字体随包内嵌、3.3-07 文字可搜索非位图 |
+  | 26 段长文        | `%PDF-1.4` / 2 页 / 27,049 B（页数随内容增长、未腰斩丢字）                               | 3.3-03 A4+mm 边距经 `@page` 生效、3.3-09 页数可从产物回读         |
+  | 两份不同文档并发 | 各自 hash 不同（`81f636…` vs `e02ac8…`），互不串内容                                     | 3.3-12 并发导出安全                                               |
+
+  产物体积在「单份简历 PDF」合理阈值内（3.3-06 体积腿达标；字形数精确子集比对待实现期用真实字体度量核）。
+
+- **仍待 CDP harness + 你在场取证的纯 V 腿**：3.3-01（预览 DOM 与导出位图逐页比对）、3.3-04（连续 5 次导出无窗口闪现截图）、3.3-08（跨页条目不被腰斩的截图）、3.3-10（给定 JD 内容→PDF→截图）、3.3-11（注入失败的错误态界面截图）——这些是「看得见」的判据，须由真实渲染层 + harness 出图（§7.1），机制已在 spike 里跑通但截图腿不提前判过。
+
+> spike 代码在 `.research-repos/print-spike/`（工作区外，§6.4 不入主干），结论进本节。落码阶段据此把「渲染 HTML + 打印选项 + 字体源 + 产物结构读数」放在 resume-doc（纯、可单测），把唯一碰 `WebContents` 的打印执行器放 shell（经注入）。
 
 ## 2. 包与 service
 
