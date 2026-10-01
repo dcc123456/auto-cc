@@ -56,6 +56,8 @@ export default tseslint.config(
       'build/**',
       'docs/acceptance/**',
       'tmp/**',
+      // §6.4 的一次性 spike 副本（结论进文档、代码不进主干），不参与主干 lint。
+      '.research-repos/**',
       'packages/renderer/**/generated/**',
     ],
   },
