@@ -6,7 +6,15 @@
  * 「没签过字就一步都不许走」这条**判定顺序**，所以签字表必须能被用例拨到「没签」那一侧，
  * 闸门 / 账本 / 频控 / 话术一律用真实服务——把账本 mock 掉就等于没测「被拦下时没扣额度」。
  */
-import { AppError, type ConsentGate, type Context, Service } from '@auto-cc/core';
+import {
+  AppError,
+  type AgentToolDeclaration,
+  type AgentToolRegistry,
+  type ConsentGate,
+  type Context,
+  Service,
+  type ToolEffect,
+} from '@auto-cc/core';
 import { z } from 'zod';
 
 /** 替身的配置形状：无键，但构造器仍要接住 cordis 递来的第二个实参。 */
@@ -65,4 +73,67 @@ export class FakeSessionsService extends Service implements ConsentGate {
     if (this.hasConsent(platform)) return;
     throw new AppError('CONSENT_REQUIRED', `平台 ${platform} 还没有一份自动化风险确认记录`, 'sessions', { platform });
   };
+}
+
+/**
+ * 假的 `agent.tools`：只做「往里放、往外摘」这两只手（spec 2.8-08 的登记表替身）。
+ *
+ * 不复用真 `AgentToolsService` 的原因是依赖方向：注册表属于 L3 对话插件，本包（L2）连测试都不该
+ * import 它，而跨包共享一个测试替身要新建一个包（§4.3 得先在 plan 里记理由）。三个 L2 包各留一份
+ * 这样的薄替身，与 `FakeSessionsService` 在 browser / outbound 各有一份是同一条先例。
+ * 它只替「登记处」，闸门 / 账本 / 频控 / 话术仍然全是真身——否则 2.8-10 的「被 gate 判定且记账」就没测到。
+ */
+export class FakeAgentToolsService extends Service implements AgentToolRegistry {
+  static provide = 'agent.tools';
+  static Config = z.strictObject({});
+
+  /** 收到的声明，`Map` 的迭代序即登记顺序。 */
+  readonly declarations = new Map<string, AgentToolDeclaration>();
+
+  /** 被摘回的 id，按摘除顺序（销毁那条用例的读数）。 */
+  readonly removed: string[] = [];
+
+  constructor(ctx: Context) {
+    super(ctx, 'agent.tools');
+  }
+
+  /** 契约见 `AgentToolRegistry.register`。 */
+  register<I>(tool: AgentToolDeclaration<I>): void {
+    this.declarations.set(tool.id, tool);
+  }
+
+  /** 契约见 `AgentToolRegistry.unregister`。 */
+  unregister(id: string): boolean {
+    this.removed.push(id);
+    return this.declarations.delete(id);
+  }
+
+  /**
+   * 清单读数：id + 副作用分级 + 批准位，正是 2.8-08 判据要逐条核对的三样。
+   * @returns 按登记顺序排列的元数据
+   */
+  list(): { id: string; effect: ToolEffect; requiresConfirmation: boolean }[] {
+    return [...this.declarations.values()].map((tool) => ({
+      id: tool.id,
+      effect: tool.effect,
+      requiresConfirmation: tool.requiresConfirmation,
+    }));
+  }
+
+  /**
+   * 复现真注册表的调用两步：先过声明自己的 schema，再打实现。
+   *
+   * 实现抛错时**原样上抛**（真注册表把它收成 `TOOL_FAILED`，那一步由 `agent` 包的用例断言）——
+   * 本包的用例要断言的是 `CONSENT_REQUIRED` / `QUOTA_EXCEEDED` 这些闸门自己的错误码。
+   * @param id 工具 id
+   * @param rawInput 未收窄的入参（来自模型或界面，按不可信输入处理）
+   * @returns schema 通过时是实现返回值；不通过时带回 `INPUT_INVALID`，id 没登记带回 `NOT_REGISTERED`
+   */
+  async call(id: string, rawInput: unknown): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
+    const tool = this.declarations.get(id);
+    if (!tool) return { ok: false, reason: 'NOT_REGISTERED' };
+    const parsed = tool.input.safeParse(rawInput);
+    if (!parsed.success) return { ok: false, reason: 'INPUT_INVALID' };
+    return { ok: true, value: await tool.run(parsed.data) };
+  }
 }

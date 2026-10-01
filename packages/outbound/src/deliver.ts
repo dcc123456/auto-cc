@@ -29,6 +29,8 @@ import {
   type ResumeAttachment,
   type ResumeDeliveryChannel,
   type WorkflowNodeExecutor,
+  agentTool,
+  registerAgentTools,
 } from '@auto-cc/core';
 import type {
   DeliverApprovalView,
@@ -555,9 +557,29 @@ export class OutboundDeliverService extends Service {
     // 服务被重建（改配置热改）时，上一份 Map 里悬着的等待必须自己收掉：那些 await 的调用方
     // 已经跟着旧实例一起没了，让它们带着 timer 悬在事件循环里就是「重建即悬挂」（plan §13.3 第 2 条）。
     this.ctx.effect(() => () => this.disposeApprovals());
+    // 投递的闸门、审批与落账都在 `perform` 内部（`deliver.ts:308` / `:310` / `:348`），工具层只转发。
+    // 入参不含 `workflowRunId`：那是工作流侧的归属字段，从对话入口发起的一次投递本就不属于任何 run。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'outbound.deliver.perform',
+        description: '向指定岗位投递简历附件，经闸门判定并按审批档位落一条 deliver 账',
+        input: z.strictObject({
+          request: z.strictObject({
+            platform: z.string().min(1),
+            jobId: z.string().min(1),
+            filePath: z.string().min(1).optional(),
+            title: z.string().min(1).optional(),
+            company: z.string().min(1).optional(),
+          }),
+        }),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: ({ request }) => this.perform(request),
+      }),
+    ]);
     const deliverable = deliverChannelsOf(this.ctx)?.deliverablePlatforms() ?? [];
     this.ctx.logger.info(
-      `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND}` : '未登记（工作流未挂载）'}`,
+      `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 

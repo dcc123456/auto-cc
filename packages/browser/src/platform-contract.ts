@@ -24,7 +24,7 @@ const locateCandidateSchema = z.strictObject({
   exact: z.boolean().optional(),
 });
 
-const locateSpecSchema = z.strictObject({
+export const locateSpecSchema = z.strictObject({
   description: z.string().min(1),
   cardinality: z.enum(['single', 'many']),
   candidates: z.array(locateCandidateSchema).min(1),

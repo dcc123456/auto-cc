@@ -25,6 +25,8 @@ import {
   sleep,
   type WorkflowNodeExecutor,
   type Context,
+  agentTool,
+  registerAgentTools,
 } from '@auto-cc/core';
 import type { GreetReceiptView, GreetRequestView } from '@auto-cc/shared';
 import { z } from 'zod';
@@ -252,9 +254,28 @@ export class OutboundGreetService extends Service {
     }
     // 这一句读数每次挂载都重新问一遍 `platform.registry`：改配置重建本服务时，这里就是证据——
     // 早先它读的是自己那张被重建清空的表，于是「已登记渠道（暂无）」骗过了装配面板（plan §12.13）。
+    // 打招呼的 consent 硬拦与额度闸门都在 `perform` 内部（`greet.ts:116` / `:170`），工具层只转发：
+    // 两处判据是同一处判据，工具面因此不可能成为绕过 `entitlement.gate` 的后门（plan §15.7 落点 5）。
+    // 入参只收 `text` 这条现成文案：话术生成（`script`）属知识库轨（P3），不在这里欠账。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'outbound.greet.perform',
+        description: '向指定岗位的目标发送一句打招呼文案，经闸门判定并落一条 greet 账',
+        input: z.strictObject({
+          request: z.strictObject({
+            platform: z.string().min(1),
+            jobId: z.string().min(1),
+            text: z.string().min(1),
+          }),
+        }),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: ({ request }) => this.perform(request),
+      }),
+    ]);
     const greetable = greetChannelsOf(this.ctx)?.greetablePlatforms() ?? [];
     this.ctx.logger.info(
-      `打招呼编排就绪：额度键 ${GREET_ACTION} · 当前可打招呼平台 ${greetable.join(' / ') || '（平台层尚未登记带 chat 的适配器）'} · 节点执行器${registry ? `已登记 ${GREET_NODE_KIND}` : '未登记（工作流未挂载）'}`,
+      `打招呼编排就绪：额度键 ${GREET_ACTION} · 当前可打招呼平台 ${greetable.join(' / ') || '（平台层尚未登记带 chat 的适配器）'} · 节点执行器${registry ? `已登记 ${GREET_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

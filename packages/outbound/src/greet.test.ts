@@ -9,7 +9,9 @@
 import {
   asApp,
   Context,
+  NO_CONFIG,
   Service,
+  type Fiber,
   type GreetChannel,
   type GreetChannelSource,
   type WorkflowNodeSpec,
@@ -30,7 +32,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { GREET_ACTION, GREET_NODE_KIND, OutboundGreetService, type GreetConfig } from './greet.js';
 import { DEFAULT_FORBIDDEN_PATTERNS, OutboundScriptService, type OutboundScriptConfig } from './script.js';
-import { FakeSessionsService } from './test-doubles.js';
+import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，测试里所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -114,11 +116,15 @@ class FakePlatformRegistryService extends Service implements GreetChannelSource 
 }
 
 /** 装配到 `outbound.greet` 为止的整套真实服务（闸门/账本/话术/频控都不用替身，只有平台层是）。 */
-async function boot(options: { gate?: GateConfig; gapMs?: number; channel?: GreetChannel; dir?: string } = {}) {
+async function boot(
+  options: { gate?: GateConfig; gapMs?: number; channel?: GreetChannel; dir?: string; agentTools?: boolean } = {},
+) {
   // 传 dir 是演「换个进程重挂同一份库」：库是那份库，实例是全新的一轮挂载。
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'auto-cc-greet-'));
   if (!options.dir) sandboxes.push(dir);
   const ctx = new Context();
+  // 注册表先挂：登记发生在后挂的能力包里，顺序反了就是「界面上有工具、清单是空的」（plan §15.7 落点 2）。
+  if (options.agentTools) await ctx.plugin(FakeAgentToolsService, NO_CONFIG);
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   await ctx.plugin(UsageLedgerService, {});
@@ -139,9 +145,18 @@ async function boot(options: { gate?: GateConfig; gapMs?: number; channel?: Gree
   // 渠道默认就登记好；要演「挂载时登记表是空的」那一支，用例自己 remove。
   if (options.channel) registry.add('boss', options.channel);
   const greetConfig: GreetConfig = {};
-  await ctx.plugin(OutboundGreetService, greetConfig);
+  const greetFiber: Fiber = await ctx.plugin(OutboundGreetService, greetConfig);
   const greet = asApp(ctx)['outbound.greet'];
-  return { ctx, dir, greet, registry, sessions, ledger: asApp(ctx)['usage.ledger'] };
+  return {
+    ctx,
+    dir,
+    greet,
+    registry,
+    sessions,
+    greetFiber,
+    ledger: asApp(ctx)['usage.ledger'],
+    tools: options.agentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
+  };
 }
 
 /**
@@ -448,5 +463,68 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的释放路径）'
     ).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
     expect(hand.calls).toHaveLength(0);
     expect(ledger.count()).toBe(0);
+  });
+});
+
+describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', () => {
+  /** 工具入参的形状：只带声明里有的那三样（`nowMs` / `workflowRunId` 是编排内部字段）。 */
+  const toolRequest = (over: { jobId?: string; text?: string } = {}) => ({
+    platform: 'boss',
+    jobId: over.jobId ?? 'job-1001',
+    text: over.text ?? '您好，看到贵司在招前端工程师，想进一步沟通。',
+  });
+
+  it('挂载即在注册表里登记一只外发工具，id 与服务口名一致且带「需批准」', async () => {
+    const { tools } = await boot({ agentTools: true });
+    expect(tools?.list()).toEqual([{ id: 'outbound.greet.perform', effect: 'outbound', requiresConfirmation: true }]);
+  });
+
+  it('对话入口调外发：没签过字被 CONSENT_REQUIRED 拦下，渠道没被调也不落账（2.8-10）', async () => {
+    const hand = fakeChannel();
+    const { tools, sessions, ledger } = await boot({ channel: hand.channel, agentTools: true });
+    sessions.revoke('boss');
+    await expect(tools?.call('outbound.greet.perform', { request: toolRequest() })).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('签过字后同一条经工具路径发出去，并落一条 greet 账（2.8-10 的另一半）', async () => {
+    const hand = fakeChannel();
+    const { tools, ledger } = await boot({ channel: hand.channel, agentTools: true });
+    const reply = await tools?.call('outbound.greet.perform', { request: toolRequest() });
+    expect(reply).toMatchObject({ ok: true });
+    expect(hand.calls).toEqual([{ targetId: 'job-1001', text: toolRequest().text }]);
+    expect(ledger.count()).toBe(1);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: GREET_ACTION, targetId: 'job-1001' });
+  });
+
+  it('额度用尽时工具路径同样被闸门拦下：工具层没有第二套判据', async () => {
+    const hand = fakeChannel();
+    const { tools, ledger } = await boot({ channel: hand.channel, agentTools: true, gate: GATE_ONE_GREET });
+    await tools?.call('outbound.greet.perform', { request: toolRequest({ jobId: 'job-1001' }) });
+    await expect(
+      tools?.call('outbound.greet.perform', { request: toolRequest({ jobId: 'job-2002' }) }),
+    ).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('入参缺文案被声明自己的 schema 拦下：不进实现、也不落账', async () => {
+    const hand = fakeChannel();
+    const { tools, ledger } = await boot({ channel: hand.channel, agentTools: true });
+    const missing = await tools?.call('outbound.greet.perform', { request: { platform: 'boss', jobId: 'job-1001' } });
+    expect(missing).toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('打招呼服务卸载时工具一起摘回：清单不会留着指向旧实例的入口', async () => {
+    const { tools, greetFiber } = await boot({ agentTools: true });
+    expect(tools?.declarations.size).toBe(1);
+    await greetFiber.dispose();
+    expect(tools?.removed).toEqual(['outbound.greet.perform']);
+    expect(tools?.list()).toEqual([]);
   });
 });

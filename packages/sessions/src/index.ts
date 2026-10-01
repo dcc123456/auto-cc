@@ -19,7 +19,7 @@
  *    响应观测同一条纪律：只交出状态码、状态行与地址，不交出请求/响应头。
  */
 import { app, session, type WebRequestFilter } from 'electron';
-import { AppError, asApp, Service, type ConsentGate, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, type ConsentGate, type Context } from '@auto-cc/core';
 import {
   partitionFor,
   type SessionConsentView,
@@ -352,8 +352,18 @@ export class SessionsService extends Service implements ConsentGate {
   [Service.init](): void {
     this.ensureSchema();
     const signed = this.platforms.filter((platform) => this.hasConsent(platform.id)).map((platform) => platform.id);
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'sessions.open',
+        description: '在指定平台的会话分区里打开内嵌视图（重启后沿用同一份登录态）',
+        input: z.strictObject({ platform: z.string().min(1) }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ platform }) => this.open(platform),
+      }),
+    ]);
     this.ctx.logger.info(
-      `会话服务就绪：${String(this.platforms.length)} 个平台（${this.platforms.map((item) => item.id).join(' / ')}）· 已确认自动化风险 ${signed.join(' / ') || '（尚无平台签过字，外发与抓取会被硬拦）'}`,
+      `会话服务就绪：${String(this.platforms.length)} 个平台（${this.platforms.map((item) => item.id).join(' / ')}）· 已确认自动化风险 ${signed.join(' / ') || '（尚无平台签过字，外发与抓取会被硬拦）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

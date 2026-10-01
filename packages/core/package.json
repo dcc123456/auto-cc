@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "cordis": "4.0.0-rc.10"
+    "cordis": "4.0.0-rc.10",
+    "zod": "^4.0.0"
   }
 }

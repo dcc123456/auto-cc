@@ -6,6 +6,8 @@
  * 网关侧另有 `RENDERER_EVENTS` 白名单，两者一起构成事件出口的双层收口。
  */
 
+import type { ZodType } from 'zod';
+
 /**
  * 一条已脱敏日志的线格式；渲染层视图与主进程事件载荷共用同一形状。
  */
@@ -666,6 +668,45 @@ export type ToolDescriptorView = {
 export type ToolCallReply =
   | { ok: true; value: unknown }
   | { ok: false; code: 'TOOL_NOT_REGISTERED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED'; message: string };
+
+/**
+ * 一个工具的声明式契约（spec 2.8-08）。
+ *
+ * 形状放在 `core` 而不是 `agent`：登记方是 L2 的能力包（浏览器 / 会话 / 外发 / 平台），
+ * 它们不允许 import L3 的对话插件（AGENTS.md §4.1），而「工具长什么样」必须两侧共认，
+ * 否则就是两份定义（§2.5）。`input` 用 zod 不是为了好看：工具入参来自模型或渲染层，
+ * 是系统边界上的不可信输入，必须在递给实现之前收一次窄（§2.6）。
+ * @template I schema 解析后的入参类型（默认 `unknown`，注册处收窄）
+ */
+export interface AgentToolDeclaration<I = unknown> {
+  /** 全限定 id，约定 `域.动作` 且与服务口名一致（plan §15.1 决策 5） */
+  readonly id: string;
+  /** 给模型与界面看的一句话说明，工具卡片标题读它 */
+  readonly description: string;
+  /** 入参 schema：调用前 `safeParse`，不过就以 `TOOL_INPUT_INVALID` 返回，绝不把脏值递给 `run` */
+  readonly input: ZodType<I>;
+  /** 副作用分级；`outbound` 必须同时 `requiresConfirmation: true`（plan §15.7 落点 4） */
+  readonly effect: ToolEffect;
+  /** 是否需要用户先批准再执行；P2 只登记值，强制属 P5 */
+  readonly requiresConfirmation: boolean;
+  /**
+   * 实际执行。
+   * @param params 已过 schema 的入参
+   * @param signal 取消信号，实现必须协作式让出（与 runner 同一语义）
+   * @returns 结果值，必须可 JSON 序列化（要落进消息 parts 并过 IPC）
+   */
+  run(params: I, signal?: AbortSignal): Promise<unknown>;
+}
+
+/**
+ * 工具注册表对**登记方**暴露的窄面（`agentToolsOf` 的返回类型）。
+ *
+ * 刻意不含 `list` / `call`：那两个是给对话入口与界面读的，能力包只该往里放东西。
+ */
+export interface AgentToolRegistry {
+  register<I>(tool: AgentToolDeclaration<I>): void;
+  unregister(id: string): boolean;
+}
 
 /**
  * 定位层「由指纹自愈重找到元素」的事件载荷（spec 2.2-05）。

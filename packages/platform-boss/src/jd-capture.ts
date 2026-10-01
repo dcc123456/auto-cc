@@ -25,6 +25,8 @@ import {
   sleep,
   type Context,
   type WorkflowNodeExecutor,
+  agentTool,
+  registerAgentTools,
 } from '@auto-cc/core';
 import type { CaptureFailureView, CaptureRunView, CaptureStatusView, JobSearchCriteriaView } from '@auto-cc/shared';
 import type { BrowserPageService, JobDetail, JobSummary, PlatformRegistryService } from '@auto-cc/plugin-browser';
@@ -349,8 +351,27 @@ export class JdCaptureService extends Service {
       // 卸载时摘回登记：留下一个指向已销毁实例的函数，下一次点「跑一遍」得到的会是无法解释的错误。
       this.ctx.effect(() => () => registry.unregister(JD_CAPTURE_KIND));
     }
+    // 抓取标 `outbound`：它已经在 `entitlement.gate` 里占一条 `search` 额度（2.7-b），
+    // 工具层不重复设闸，只是把同一个入口交给对话侧（plan §15.7 落点 5）。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'jd.capture.run',
+        description: '按搜索条件在平台列表页滚动收集 JD 并读详情入库，占一条 search 额度',
+        input: z.strictObject({
+          criteria: z.strictObject({
+            keyword: z.string().min(1),
+            city: z.string().min(1).optional(),
+            experience: z.string().min(1).optional(),
+            limit: z.number().int().min(1).max(100).optional(),
+          }),
+        }),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: ({ criteria }) => this.run(criteria),
+      }),
+    ]);
     this.ctx.logger.info(
-      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 轮间停顿由 outbound.throttle 随机给出 · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'}`,
+      `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 轮间停顿由 outbound.throttle 随机给出 · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

@@ -14,7 +14,7 @@
  * CDP 走不通就直接结构化失败（spec 2.6-04）。它也不看坐标——隐藏的上传控件照样能注，
  * 于是等待用 `appear`、并且不受 iframe 偏移折算成败的影响。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
 import type { ActResultView, LocatedView, LocateSpec, WaitPredicate } from '@auto-cc/shared';
 import type { WebContents } from 'electron';
 import { basename, isAbsolute } from 'node:path';
@@ -38,6 +38,7 @@ import {
   toDomActionReading,
   toWaitReading,
 } from './locator-script.js';
+import { locateSpecSchema } from './platform-contract.js';
 import type { BrowserLocateService } from './locate-service.js';
 import type { BrowserPageService } from './index.js';
 
@@ -472,10 +473,31 @@ export class BrowserActService extends Service {
   }
 
   [Service.init](): void {
+    // 点击与输入标 `outbound` 而不是 `local-write`：它们不发消息，但一次 `click` 就能在真实页面上
+    // 按下「发送」——分界是「出了本机没有」，不是「是不是发消息」（plan §15.7 落点 4）。
+    // 闸门不在这里重复：`outbound.greet` / `outbound.deliver` 内部已有 consent + 额度（落点 5）。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'browser.act.click',
+        description: '点击定位声明指向的控件（真实页面上的外部副作用，需先经批准流）',
+        input: z.strictObject({ spec: locateSpecSchema }),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: ({ spec }) => this.click(spec),
+      }),
+      agentTool({
+        id: 'browser.act.type',
+        description: '往定位声明指向的输入控件写文本（中文与 emoji 原样送入）',
+        input: z.strictObject({ spec: locateSpecSchema, text: z.string().min(1) }),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: ({ spec, text }) => this.type(spec, text),
+      }),
+    ]);
     this.ctx.logger.info(
       `动作服务就绪：等待上限 ${String(this.config.waitForTimeoutMs)}ms · 稳定采样 ${String(
         this.config.stableCheckSamples,
-      )} 帧 · CDP 输入 ${this.config.cdpInputEnabled ? '开' : '关（退回 DOM，事件不受信）'}`,
+      )} 帧 · CDP 输入 ${this.config.cdpInputEnabled ? '开' : '关（退回 DOM，事件不受信）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

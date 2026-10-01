@@ -12,6 +12,7 @@ import {
   AppError,
   asApp,
   Context,
+  NO_CONFIG,
   Service,
   type DeliverApprovalView,
   type DeliverOutcome,
@@ -36,7 +37,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { DELIVER_ACTION, DELIVER_NODE_KIND, OutboundDeliverService, type DeliverConfig } from './deliver.js';
-import { FakeSessionsService } from './test-doubles.js';
+import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -122,7 +123,7 @@ class FakePlatformRegistryService extends Service implements ResumeChannelSource
   deliverablePlatforms = (): string[] => [...this.channels.keys()];
 }
 
-/** `boot` 的装配项：额度、频控间隔、渠道、档位、确认超时、大小上限、默认简历、复用目录。 */
+/** `boot` 的装配项：额度、频控间隔、渠道、档位、确认超时、大小上限、默认简历、复用目录、注册表替身。 */
 type BootOptions = {
   gate?: GateConfig;
   gapMs?: number;
@@ -132,6 +133,7 @@ type BootOptions = {
   approveTimeoutMs?: number;
   maxResumeBytes?: number;
   resumeFile?: string;
+  agentTools?: boolean;
 };
 
 /**
@@ -144,6 +146,8 @@ async function boot(options: BootOptions = {}) {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'auto-cc-deliver-'));
   if (!options.dir) sandboxes.push(dir);
   const ctx = new Context();
+  // 注册表先挂：登记发生在后挂的能力包里，顺序反了就是「界面上有工具、清单是空的」（plan §15.7 落点 2）。
+  if (options.agentTools) await ctx.plugin(FakeAgentToolsService, NO_CONFIG);
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   await ctx.plugin(UsageLedgerService, {});
@@ -175,6 +179,7 @@ async function boot(options: BootOptions = {}) {
     sessions,
     ledger: asApp(ctx)['usage.ledger'],
     deliverFiber,
+    tools: options.agentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
 
@@ -741,5 +746,88 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的投递侧）', (
     expect(receipt).toMatchObject({ committed: true, jobId: 'job-2002' });
     expect(hand.calls).toHaveLength(1);
     expect(ledger.count()).toBe(1);
+  });
+});
+
+/**
+ * agent 工具面这一侧的投递（spec 2.8-08 / 2.8-10）。
+ *
+ * 判据仍然是那两件事：渠道有没有被调、账本有没有多一行。工具层不该有第二套判据
+ * （plan §15.7 落点 5），所以「从对话入口调」与「从工作流节点调」必须给出**同样**的读数——
+ * 这组用例演的是签字、额度、落账这三道关口在工具路径上同样拦得住、同样只记一次。
+ */
+describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', () => {
+  /** 工具入参的形状：只带声明里有的那几样（`nowMs` / `workflowRunId` 是编排内部字段）。 */
+  const toolRequest = (over: { jobId?: string; filePath?: string } = {}) => ({
+    platform: 'boss',
+    jobId: over.jobId ?? 'job-1001',
+    filePath: over.filePath,
+    title: '资深前端工程师',
+    company: '示例科技',
+  });
+
+  it('挂载即在注册表里登记一只外发工具，id 与服务口名一致且带「需批准」', async () => {
+    const { tools } = await boot({ agentTools: true });
+    expect(tools?.list()).toEqual([{ id: 'outbound.deliver.perform', effect: 'outbound', requiresConfirmation: true }]);
+  });
+
+  it('对话入口调投递：没签过字被 CONSENT_REQUIRED 拦下，渠道没被调也不落账（2.8-10）', async () => {
+    const hand = fakeChannel();
+    const { dir, tools, sessions, ledger } = await boot({ channel: hand.channel, agentTools: true, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    sessions.revoke('boss');
+    await expect(tools?.call('outbound.deliver.perform', { request: toolRequest({ filePath }) })).rejects.toMatchObject(
+      { code: 'CONSENT_REQUIRED' },
+    );
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('签过字后同一条经工具路径发出去，并落一条 deliver 账（2.8-10 的另一半）', async () => {
+    const hand = fakeChannel();
+    const { dir, tools, ledger } = await boot({ channel: hand.channel, agentTools: true, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    const reply = await tools?.call('outbound.deliver.perform', { request: toolRequest({ filePath }) });
+    expect(reply).toMatchObject({ ok: true, value: { committed: true, jobId: 'job-1001' } });
+    expect(hand.calls.map((call) => call.targetId)).toEqual(['job-1001']);
+    expect(ledger.count()).toBe(1);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: 'job-1001' });
+  });
+
+  it('额度用尽时工具路径同样被闸门拦下：一次投递只记一条账，不会因为换了入口多扣', async () => {
+    const hand = fakeChannel();
+    const { dir, tools, ledger } = await boot({
+      channel: hand.channel,
+      agentTools: true,
+      autonomy: 'auto',
+      gate: GATE_ONE_DELIVER,
+    });
+    const filePath = writeResume(dir);
+    await tools?.call('outbound.deliver.perform', { request: toolRequest({ filePath, jobId: 'job-1001' }) });
+    await expect(
+      tools?.call('outbound.deliver.perform', { request: toolRequest({ filePath, jobId: 'job-2002' }) }),
+    ).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('入参不合法时被声明自己的 schema 拦下：不进实现、不落账，内部字段也不许从界面递进来', async () => {
+    const hand = fakeChannel();
+    const { tools, ledger } = await boot({ channel: hand.channel, agentTools: true, autonomy: 'auto' });
+    const missingPlatform = await tools?.call('outbound.deliver.perform', { request: { jobId: 'job-1001' } });
+    expect(missingPlatform).toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    // `nowMs` 是编排的判定基准，工具声明里没有它：能塞进来就等于让渲染层伪造「今天还没用额度」。
+    const withNowMs = await tools?.call('outbound.deliver.perform', { request: { ...toolRequest(), nowMs: T0 } });
+    expect(withNowMs).toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('投递服务卸载时工具一起摘回：清单不会留着指向旧实例的入口', async () => {
+    const { tools, deliverFiber } = await boot({ agentTools: true });
+    expect(tools?.declarations.size).toBe(1);
+    await deliverFiber.dispose();
+    expect(tools?.removed).toEqual(['outbound.deliver.perform']);
+    expect(tools?.list()).toEqual([]);
   });
 });

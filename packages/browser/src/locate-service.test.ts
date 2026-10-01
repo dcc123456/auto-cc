@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserLocateService, type BrowserLocateConfig } from './locate-service.js';
 import {
   errorDetails,
+  FakeAgentToolsService,
   FakePageService,
   FakeShellService,
   fakeFrame,
@@ -58,10 +59,13 @@ const greetFingerprint = (overrides: Partial<ElementFingerprint> = {}): ElementF
  * 起一套「shell 替身 + page 替身 + 真定位服务」。
  * @param config 覆盖默认阈值的项（默认值由服务自己的 schema 补，这里只写差异）
  * @param view 内核视图替身；null 表示还没有挂载会话
- * @returns 服务实例、页面替身（数快照次数）与视图替身所在的 shell 替身
+ * @param withTools 是否先挂注册表替身（spec 2.8-08 的登记用例要它，其余用例不需要）
+ * @returns 服务实例、页面替身（数快照次数）、视图替身所在的 shell 替身、注册表替身与定位服务的 fiber
  */
-async function boot(config: Partial<BrowserLocateConfig> = {}, view: WebContents | null = null) {
+async function boot(config: Partial<BrowserLocateConfig> = {}, view: WebContents | null = null, withTools = false) {
   const ctx = new Context();
+  // 注册表排在最前：登记发生在后挂的能力包里（plan §15.7 落点 2）。
+  if (withTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   const shellFiber = await ctx.plugin(FakeShellService, NO_CONFIG);
   const pageFiber = await ctx.plugin(FakePageService, NO_CONFIG);
   const locateFiber = await ctx.plugin(BrowserLocateService, { ...DEFAULT_LOCATE_CONFIG, ...config });
@@ -73,6 +77,8 @@ async function boot(config: Partial<BrowserLocateConfig> = {}, view: WebContents
     locate: ctx.get('browser.locate') as BrowserLocateService,
     page: ctx.get('browser.page') as unknown as FakePageService,
     shell,
+    locateFiber,
+    tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
 
@@ -319,5 +325,48 @@ describe('定位层读数（spec 2.2-04 的可解释性）', () => {
     const { locate } = await boot({}, labView({ locate: [fakeReading(frameUrl)] }));
     await locate.find(testIdSpec);
     expect(locate.status().recentFailures).toEqual([]);
+  });
+});
+
+/**
+ * agent 工具登记（spec 2.8-08 / plan §15.7 落点 3）。
+ *
+ * 定位标 `read`：它只把「哪一只控件、几分、什么指纹」读出来交给对话侧，点下去的是动作层那两只。
+ * 这里额外钉死一件顺序：入参不合法时注册表的 schema 先拦，连视图都不会被问一次
+ * （视图是 null，走到页面那步就是 NO_KERNEL_SESSION，看得见是两个错误码的区别）。
+ */
+describe('agent 工具登记（spec 2.8-08）', () => {
+  it('挂载即把 find 交给注册表，标 read 且不需批准', async () => {
+    const { tools } = await boot({}, null, true);
+    expect(tools?.list()).toEqual([{ id: 'browser.locate.find', effect: 'read', requiresConfirmation: false }]);
+  });
+
+  it('从工具路径定位与直调得到同一个结局：命中、100 分、不背快照', async () => {
+    const view = labView({ locate: [fakeReading(frameUrl)] });
+    const { locate, page, tools } = await boot({}, view, true);
+    const throughTool = await tools?.call('browser.locate.find', { spec: testIdSpec });
+    expect(throughTool).toMatchObject({
+      ok: true,
+      value: { status: 'matched', chosen: { strategy: 'testId', score: 100, frameUrl } },
+    });
+    expect((await locate.find(testIdSpec)).status).toBe('matched');
+    expect(page.snapshotCalls).toBe(0);
+  });
+
+  it('候选列表为空或整只缺字段时被 schema 拦下，一次也没碰到页面', async () => {
+    const { tools, page } = await boot({}, null, true);
+    await expect(tools?.call('browser.locate.find', { spec: specOf('没有候选', []) })).resolves.toEqual({
+      ok: false,
+      reason: 'INPUT_INVALID',
+    });
+    await expect(tools?.call('browser.locate.find', {})).resolves.toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    expect(page.snapshotCalls).toBe(0);
+  });
+
+  it('定位服务卸载时把 find 摘回', async () => {
+    const { tools, locateFiber } = await boot({}, null, true);
+    await locateFiber.dispose();
+    expect(tools?.removed).toEqual(['browser.locate.find']);
+    expect(tools?.list()).toEqual([]);
   });
 });

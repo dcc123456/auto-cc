@@ -49,6 +49,7 @@ import {
   DETAIL_BASE,
   detailRow,
   extractOf,
+  FakeAgentToolsService,
   FakeExecutorRegistryService,
   LIST_URL,
   StubBrowserActService,
@@ -88,6 +89,7 @@ const captureConfig = (overrides: Partial<JdCaptureConfig> = {}): JdCaptureConfi
  * @param pacer 节奏替身的滚动间隔（毫秒）；默认 0 让用例不等，取消类用例才拉大
  * @param gate 闸门配置；默认 `unlimited`（抓取现在过闸门，spec 2.7-03：不装闸门这条链路根本挂不起来，
  *        而无限模式既放行也照样落账，正好用来观察「一轮 run 记一条 search」）
+ * @param agentTools 是否先挂注册表替身（spec 2.8-08 的登记用例要它，其余用例不需要）
  * @returns 上下文、`jd.capture` / `jd.store` 服务、执行器登记处替身、`jd.capture` 的 fiber（卸载用例要先停它）、
  *          假手记账与进度事件列表，以及节奏替身（`draws` 是「取了几次节奏」的读数）
  */
@@ -96,10 +98,13 @@ async function boot(
   config: Partial<JdCaptureConfig> = {},
   pacerGapMs = 0,
   gate: GateConfig = { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS },
+  agentTools = false,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
   sandboxes.push(dir);
   const ctx = new Context();
+  // 注册表排在最前：登记发生在后挂的能力包里，顺序反了就是「界面上有工具、清单是空的」（plan §15.7 落点 2）。
+  if (agentTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   const events: ProgressEvent[] = [];
   ctx.on('jd/progress', (event: ProgressEvent) => events.push(event));
   const fake = createFakePage(script);
@@ -144,6 +149,7 @@ async function boot(
     sessions,
     pacer: ctx.get('outbound.throttle') as StubOutboundThrottleService,
     events,
+    tools: agentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
 
@@ -628,5 +634,70 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', (
     expect(fake.navigated.length).toBeGreaterThan(0);
     expect(ledger.count()).toBe(1);
     expect(sessions.asks - before).toBe(1);
+  });
+});
+
+/**
+ * agent 工具面这一侧的抓取（spec 2.8-08 / 2.8-10）。
+ *
+ * 抓取标 `outbound` 不是因为它往站点点东西，而是它已经在 `entitlement.gate` 里占一条 `search` 额度
+ * （plan §15.7 落点 4）。工具层不重复设闸（落点 5），所以这组用例判的还是那两件事：
+ * 一次工具调用只落一条账，且没签字时连一次导航都不发。
+ */
+describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10）', () => {
+  it('挂载即在注册表里登记一只外发工具，id 与服务口名一致且带「需批准」', async () => {
+    const { tools } = await boot(twoScreenScript(['1001']), { targetCount: 1 }, 0, undefined, true);
+    expect(tools?.list()).toEqual([{ id: 'jd.capture.run', effect: 'outbound', requiresConfirmation: true }]);
+  });
+
+  it('从工具路径跑一轮：入库读数与直调一致，且只落一条 search 账', async () => {
+    const { tools, ledger } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3 },
+      0,
+      undefined,
+      true,
+    );
+    const reply = await tools?.call('jd.capture.run', { criteria: { keyword: '前端', city: '上海' } });
+    expect(reply).toMatchObject({
+      ok: true,
+      value: { platform: 'boss', keyword: '前端', city: '上海', stored: 3, total: 3 },
+    });
+    expect(ledger.count()).toBe(1);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: 'search', targetId: '前端' });
+  });
+
+  it('对话入口调抓取：没签过字被 CONSENT_REQUIRED 拦下，一次导航都不发也不落账（2.8-10）', async () => {
+    const { tools, sessions, fake, ledger } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3 },
+      0,
+      undefined,
+      true,
+    );
+    sessions.revoke('boss');
+    await expect(tools?.call('jd.capture.run', { criteria: { keyword: '前端' } })).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    expect(fake.navigated).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('入参不合法时被声明自己的 schema 拦下：不进实现、不落账', async () => {
+    const { tools, fake, ledger } = await boot(twoScreenScript(['1001']), { targetCount: 1 }, 0, undefined, true);
+    await expect(tools?.call('jd.capture.run', {})).resolves.toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    await expect(tools?.call('jd.capture.run', { criteria: { keyword: '前端', limit: 0 } })).resolves.toEqual({
+      ok: false,
+      reason: 'INPUT_INVALID',
+    });
+    expect(fake.navigated).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('抓取服务卸载时工具一起摘回：清单不会留着指向旧实例的入口', async () => {
+    const { tools, captureFiber } = await boot(twoScreenScript(['1001']), { targetCount: 1 }, 0, undefined, true);
+    await captureFiber.dispose();
+    expect(tools?.removed).toEqual(['jd.capture.run']);
+    expect(tools?.list()).toEqual([]);
   });
 });

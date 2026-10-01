@@ -14,7 +14,7 @@
  * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（只允许已登记平台的同源地址）；
  * 2. 页面内容只在页面里读（注入脚本），主进程不解析 HTML 字符串，因此不引入第二套 DOM 实现。
  */
-import { Service, asApp, AppError, type Context } from '@auto-cc/core';
+import { Service, asApp, AppError, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
 import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScrollReading } from '@auto-cc/shared';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents } from 'electron';
@@ -321,10 +321,28 @@ export class BrowserPageService extends Service {
   }
 
   [Service.init](): void {
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'browser.page.navigate',
+        description: '让内嵌内核视图导航到已登记平台的同源地址，并回一份页面快照',
+        input: z.strictObject({ url: z.url() }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ url }) => this.navigate(url),
+      }),
+      agentTool({
+        id: 'browser.page.snapshot',
+        description: '读取当前内核视图所在页面的快照（标题 / 地址 / 装载态 / 正文节选）',
+        input: z.strictObject({ maxChars: z.number().int().min(1).max(50_000).optional() }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ maxChars }) => this.snapshot(maxChars),
+      }),
+    ]);
     this.ctx.logger.info(
       `页面操作服务就绪：导航超时 ${String(this.config.navigateTimeoutMs)}ms · 快照正文上限 ${String(
         this.config.snapshotTextLimit,
-      )} 字 · 抽取上限 ${String(this.config.extractRowLimit)} 条 × ${String(this.config.extractTextLimit)} 字`,
+      )} 字 · 抽取上限 ${String(this.config.extractRowLimit)} 条 × ${String(this.config.extractTextLimit)} 字 · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

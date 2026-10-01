@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserActService, type BrowserActConfig } from './act-service.js';
 import {
+  FakeAgentToolsService,
   FakeLocateService,
   FakePageService,
   FakeShellService,
@@ -75,16 +76,19 @@ function matched(overrides: Partial<LocatedView> = {}): LocateResultView {
  * 起一套「shell / page / locate 替身 + 真动作服务」。
  * @param config 覆盖默认动作配置的项
  * @param view 内核视图替身；null 表示还没有挂载会话
- * @returns 动作服务、定位与页面替身，以及 shell 替身（换视图用）
+ * @param withTools 是否先挂上 `agent.tools` 替身（2.8-08 的登记用例；默认不挂，此时登记数应为 0）
+ * @returns 动作服务、定位与页面替身、shell 替身（换视图用），以及注册表替身（未挂时为 null）
  */
-async function boot(config: Partial<BrowserActConfig> = {}, view: WebContents | null = null) {
+async function boot(config: Partial<BrowserActConfig> = {}, view: WebContents | null = null, withTools = false) {
   const ctx = new Context();
+  if (withTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   fibers.push(
     await ctx.plugin(FakeShellService, NO_CONFIG),
     await ctx.plugin(FakePageService, NO_CONFIG),
     await ctx.plugin(FakeLocateService, NO_CONFIG),
-    await ctx.plugin(BrowserActService, { ...DEFAULT_ACT_CONFIG, ...config }),
   );
+  const actFiber = await ctx.plugin(BrowserActService, { ...DEFAULT_ACT_CONFIG, ...config });
+  fibers.push(actFiber);
   const shell = ctx.get('shell') as unknown as FakeShellService;
   shell.contents = view;
   return {
@@ -92,6 +96,8 @@ async function boot(config: Partial<BrowserActConfig> = {}, view: WebContents | 
     locate: ctx.get('browser.locate') as unknown as FakeLocateService,
     page: ctx.get('browser.page') as unknown as FakePageService,
     shell,
+    actFiber,
+    tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
 
@@ -485,5 +491,49 @@ describe('文件注入动作（spec 2.6-04）', () => {
     locate.result = matched({ tagName: 'input', visible: false });
     const result = await act.upload(uploadSpec, resumeFile);
     expect(result).toMatchObject({ status: 'done', channel: 'cdp', trusted: false, valueAfter: resumeName });
+  });
+});
+
+describe('agent 工具登记（spec 2.8-08 / plan §15.7 落点 4）', () => {
+  it('挂载即登记两只工具，且 `outbound` 一定带「需批准」', async () => {
+    const { tools } = await boot({}, null, true);
+    const listed = tools?.list() ?? [];
+    expect(listed.map((item) => item.id)).toEqual(['browser.act.click', 'browser.act.type']);
+    for (const item of listed) {
+      // 这条不变式是 §7.3「外发必经闸门」在工具面的替身：一次 click 就能在真实页面上按下「发送」，
+      // 所以它不许出现在免批准那一档（plan §15.7 落点 4）。
+      if (item.effect === 'outbound') expect(item.requiresConfirmation).toBe(true);
+    }
+  });
+
+  it('从工具路径点下去与直接调 `click` 是同一条路：CDP 事件序列与读数一致', async () => {
+    const view = labView(readyScripts);
+    const { act, locate, tools } = await boot({}, view.contents, true);
+    locate.result = matched();
+    const direct = await act.click(spec);
+    const throughTool = await tools?.call('browser.act.click', { spec });
+    // 逐字段比对而不是整对象相等：`located` 里带帧地址等读数，两次调用的先后本身不是被测点。
+    expect(throughTool).toMatchObject({
+      ok: true,
+      value: { action: direct.action, channel: direct.channel, trusted: direct.trusted },
+    });
+  });
+
+  it('入参不过声明里的 schema 时被拦在实现之前：一次脚本都不发', async () => {
+    const view = labView(readyScripts);
+    const { tools } = await boot({}, view.contents, true);
+    const sentBefore = view.log.commands.length;
+    await expect(tools?.call('browser.act.click', {})).resolves.toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    expect(view.log.commands).toHaveLength(sentBefore);
+  });
+
+  it('动作服务卸载时两只工具一起摘回：不留指向已销毁实例的入口', async () => {
+    const { tools, actFiber } = await boot({}, null, true);
+    expect(tools?.declarations.size).toBe(2);
+    const index = fibers.indexOf(actFiber);
+    if (index >= 0) fibers.splice(index, 1);
+    await actFiber.dispose();
+    expect(tools?.removed).toEqual(['browser.act.click', 'browser.act.type']);
+    expect(tools?.list()).toEqual([]);
   });
 });

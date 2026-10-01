@@ -9,7 +9,7 @@
  * 与 `browser.page` 的分工：页面服务只读「整页长什么样」，这里读「我要的那个东西在哪」。
  * 两者共用 `frame-channel`（同一块视图、同一条多帧求值通道），不存在第二套取句柄逻辑。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
 import type { ElementFingerprint, LocateResultView, LocateSpec, LocateStatusView, LocatedView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { evaluateInFrames, readingsFromFrames, requireKernelContents, type KernelHost } from './frame-channel.js';
@@ -28,6 +28,7 @@ import {
   validateSpec,
   type LocateDecision,
 } from './locator-spec.js';
+import { locateSpecSchema } from './platform-contract.js';
 import type { BrowserPageService } from './index.js';
 
 /** `status()` 里 retained 的失败摘要条数：够解释「刚才为什么不确定」，又不会变成运行日志。 */
@@ -240,10 +241,22 @@ export class BrowserLocateService extends Service {
   }
 
   [Service.init](): void {
+    // `lastKnown` 不进工具入参：那是上一次 `find` 带回的读数，交给调用方自己拼等于把自愈路径
+    // 摊给模型；工具入口只留「声明 → 结果」这一步（plan §15.7 落点 3）。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'browser.locate.find',
+        description: '按定位声明在当前内核页面找控件，带回打分与指纹；找不到就失败，不猜',
+        input: z.strictObject({ spec: locateSpecSchema }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ spec }) => this.find(spec),
+      }),
+    ]);
     this.ctx.logger.info(
       `定位服务就绪：最低可用分 ${String(this.config.minScore)} · 最小分差 ${String(this.config.minMargin)} · top-${String(
         this.config.candidateLimit,
-      )}`,
+      )} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

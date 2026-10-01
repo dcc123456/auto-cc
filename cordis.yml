@@ -93,6 +93,17 @@ plugins:
   - id: devtools
     dependsOn: [ipc]
 
+  # 工具注册表与对话接线面（spec 1.11 / 2.8-08）：`agent.tools` 是**登记处**，登记由各能力包
+  # （`sessions` / `browser` / `platform-boss` / `outbound`）在自己的 init 里发起，所以本行必须排在
+  # 它们**之前**——清单顺序即挂载顺序，晚挂载的注册表会让每一次登记都打在「注册表未挂载」上，
+  # 界面上得到的是空清单，而不是一句 `TOOL_NOT_REGISTERED`（各服务的就绪日志会显式报 0 个）。
+  # 为什么用顺序而不是 `dependsOn: [agent]`：那会把浏览器层 / 会话层 / 外发层绑成对话插件的下游，
+  # 「在装配面板里单独摘掉 agent」就会连带把 L2 全部降为 PENDING，而插件可单独摘是 1.5-03/04
+  # 已经验收过的行为，本片不悄悄改掉它（代价与补偿见 plan §15.7 落点 2）。
+  # `chat` 依赖 store：会话与消息必须重启后还在（1.11-08），两张表的迁移号段取 2（plan §8.4 决策 6 更正）。
+  - id: agent
+    dependsOn: [ipc]
+
   - id: shell
     dependsOn: [plugins]
 
@@ -263,14 +274,9 @@ plugins:
       evidenceDir: evidence
       retentionRuns: 20
 
-  # 对话式主界面的接线面（spec 1.11）：工具注册表与会话 / 消息 / 档位，两个 id 而不是一个。
-  # 摘掉 `agent` 之后发消息照旧逐片流式，只是任何工具调用都得到 `TOOL_NOT_REGISTERED` ——
-  # 「P1 的对话链路触达不到外发能力」（1.11-09）因此是一条能在界面上演示的事实，而不是配置约定。
-  # `chat` 依赖 store：会话与消息必须重启后还在（1.11-08），两张表的迁移号段取 2（plan §8.4 决策 6 更正）。
+  # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
+  # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。
   # 演示流式速度：在装配面板改 chunkChars / chunkIntervalMs（不重启 app）。
-  - id: agent
-    dependsOn: [ipc]
-
   - id: chat
     dependsOn: [agent, store]
     config:
