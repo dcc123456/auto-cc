@@ -148,13 +148,17 @@ U/C 可现在兑现的六条：
 
 ## 3.7 版本与快照
 
-| ID     | 验收标准                                                                                     | 方式 | 验证操作                   | 状态 |
-| ------ | -------------------------------------------------------------------------------------------- | ---- | -------------------------- | ---- |
-| 3.7-01 | 每次导出产生快照：`{snapshotId, docJson, templateId, fontSet, hash, createdAt}`              | C    | 查库断言字段完整           | [ ]  |
-| 3.7-02 | 投递记录引用 `snapshotId`（与 2.6-05 对齐），可回答「这份简历投给了哪个 JD、当时内容是什么」 | C    | 关联查询断言               | [ ]  |
-| 3.7-03 | 任意两个快照可 diff（条目级 + 字段级），界面呈现                                             | V    | 截图 diff 视图             | [ ]  |
-| 3.7-04 | 快照可按 id 还原为新工作副本，还原结果与原产物 hash 一致                                     | U+C  | round-trip 断言            | [ ]  |
-| 3.7-05 | 快照存储有上限与清理策略（可配置），不会无限膨胀                                             | C    | 超上限写入后断言按策略清理 | [ ]  |
+| ID     | 验收标准                                                                                     | 方式 | 验证操作                                                     | 状态 |
+| ------ | -------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------ | ---- |
+| 3.7-01 | 每次导出产生快照：`{snapshotId, docJson, templateId, fontSet, hash, createdAt}`              | C    | 查库断言字段完整（真 `node:sqlite`）                         | [x]  |
+| 3.7-02 | 投递记录引用 `snapshotId`（与 2.6-05 对齐），可回答「这份简历投给了哪个 JD、当时内容是什么」 | C    | 关联查询断言                                                 | [ ]  |
+| 3.7-03 | 任意两个快照可 diff（条目级 + 字段级），界面呈现                                             | V    | 截图 diff 视图                                               | [ ]  |
+| 3.7-04 | 快照可按 id 还原为新工作副本，还原结果与原产物 hash 一致                                     | U+C  | round-trip 断言（restore 重算 hash == 记录时 + == 导出回执） | [x]  |
+| 3.7-05 | 快照存储有上限与清理策略（可配置），不会无限膨胀                                             | C    | 超上限写入后断言按策略清理（留最新 `maxSnapshots`，裁最旧）  | [x]  |
+
+- **落点**：新增 `resume.snapshot` 服务（`packages/resume-doc/src/snapshot-store.ts`），迁移号段 **8**、表 `resume_snapshots`，复用 1.3 的 `store` 与 3.1-05 的 `contentHash`/`normalizeDocument`（不新建连接、不重造摘要）。`resume.export.toPdf` 在页数回写之后调 `record(finalDoc, templateId, resumePrint.fontSet, Date.now())`——快照与那次 `resume_docs.save` 用同一份 `finalDoc`，故快照 hash 与导出回执 hash 同源一致。`fontSet` 由打印门面 `resumePrint.fontSet`（`internal/print-html.ts` 的 `FONT_SET_ID`）同源提供，快照服务不自己拼字体串。
+- **3.7-01 / 04 / 05**：`snapshot-store.test.ts`（真 `node:sqlite`）——record 落库后逐列断言六字段齐备、hash==`contentHash(源)`；restore round-trip 得合法文档且 hash 等于记录时、未知 id 得 missing、坏 JSON 得 corrupt；`maxSnapshots=3` 写 5 份只留 `created_at` 最新的 3 份，且同毫秒批量写入按 `rowid` 兜底裁最旧。`export-service.test.ts` 的 3.7-01 两条打通「导出即留档」端到端（toPdf 后 `list(docId)` 命中、hash 与回执一致；两次导出留两行不可变快照）。
+- **仍 `[ ]`**：3.7-02（投递记录引用 snapshotId，跨 outbound-deliver 域，本片不越界接线）与 3.7-03（两快照 diff 的界面呈现，V 类，依赖 3.1-06 的 `diff` 已在、但界面视图属渲染层后续片）——按 §4.4 诚实留未做，不做半接线。
 
 ---
 

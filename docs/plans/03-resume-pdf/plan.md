@@ -88,6 +88,7 @@ packages/
    绝不能出现「看起来涂掉了但文本还在」的假脱敏（这是 `canva-pdf` 已验证的行为，必须原样保住）。
 6. **版本快照**：每次导出产生 `{snapshotId, docJson, templateId, fontSet, hash, createdAt}`；
    投递记录引用 `snapshotId`（2.6-05），可 diff 两份简历差异。
+   - **落点（3.7-01 / 04 / 05）**：新增 `resume.snapshot` 服务（`packages/resume-doc/src/snapshot-store.ts`，迁移号段 8，表 `resume_snapshots` 一导出一次行、永不覆盖），复用 `store.db` 与 `contentHash`/`normalizeDocument`（不新建连接、不重造摘要，§2.7）。它与 `resume_docs` 分表：后者是「当前工作副本」（UPSERT 覆盖），快照是「导出瞬间的不可变事实」，读写语义相反故不合表。`resume.export.toPdf` 在页数回写后 `record(finalDoc, …)`，与那次 `resume_docs.save` 吃同一份 `finalDoc`，于是快照 hash 与导出回执 hash 同源一致；`fontSet` 取自打印门面 `resumePrint.fontSet`（`FONT_SET_ID`），字体集与产物字体同源。保留上限 `maxSnapshots`（配置项，默认 20）在每次 `record` 后按 `created_at DESC, rowid DESC` 裁最旧。3.7-02（投递引用 snapshotId）与 3.7-03（diff 界面）留待后续片，不在本片越界接线。
 
 ## 4. 测试策略
 
