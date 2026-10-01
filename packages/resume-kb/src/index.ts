@@ -42,11 +42,17 @@ export {
   kbProfileSchema,
   type KbCreateInput,
   type KbEntityView,
+  type KbExportResult,
+  type KbImportMode,
+  type KbImportResult,
   type KbProfileConfig,
+  type KbRemoveResult,
   type KbSyncResult,
 } from './profile-service.js';
 // 反查结果的形状（4.2-03）：`EvidenceRef` 是将来 `kb.profile.evidenceFor` 过 IPC 的返回体，
 // 所以只导出形状；`rankEvidence` / `evidenceTextOf` 属包内纯函数，不对外（§2.4 不导出无人调用的入口）。
+// 备份编解码（`backup.ts`，4.2-08）同样只在包内被 `exportBackup` / `importBackup` 调用，格式对外只以
+// 「服务方法的入参出参」呈现，不把 JSON Schema 变成第二个公开面。
 export { type EvidenceReason, type EvidenceRef } from './evidence.js';
 export {
   detectFormat,

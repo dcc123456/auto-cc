@@ -1,22 +1,23 @@
 /**
- * `kb.profile` 的装配用例（spec 4.2-01 / 4.2-02）。
+ * `kb.profile` 的装配用例（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08）。
  *
  * 打**真的 `node:sqlite` + 真临时目录**（AGENTS.md §7.5，产物不进仓库）：这一层要证明的是
- * 「派生出来的实体真的落了库、重复同步不裂行、工作副本改了之后库跟着收敛」，
+ * 「派生出来的实体真的落了库、重复同步不裂行、工作副本改了之后库跟着收敛、删除与备份的计数对得上」，
  * 这些只有在真库里才成立。派生规则本身在 `entities.test.ts` 里逐条断言过，这里不重复。
  *
  * 语料仍是自造虚构简历；手机号写成明显编造的号段，用于顺带复验实体表里不落 PII 原文（对齐 4.1-09 / §8.5）。
  */
-import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
+import { AppError, asApp, type AppErrorCode, Context, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
+import { KB_BACKUP_SCHEMA_VERSION } from './backup.js';
 import { KB_PROFILE_MIGRATION_VERSION, KbProfileService } from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
 import { parseResumeText } from './sections.js';
@@ -44,6 +45,21 @@ const RESUME_MD = [
   '## 技能',
   '- TypeScript、Node.js',
   '- Go',
+].join('\n');
+
+/**
+ * 「把工作副本里的经历删光」的那份语料（4.2-04 的同步侧用例用）。
+ *
+ * 技能行写得比语料 A 长是有意的：`sections.ts` 有 100 字的正文下限（4.1-03 的拒空判定），
+ * 只留两行技能会被判成「文本太短」而根本进不到派生这一步，用例就会验到错的东西。
+ */
+const RESUME_MD_SKILLS_ONLY = [
+  '张三',
+  '电话：13800001111',
+  '',
+  '## 技能',
+  '- TypeScript、Node.js、Go、Kubernetes、Docker、gRPC、PostgreSQL、Redis、Kafka、Prometheus',
+  '- 分布式一致性、性能剖析、容量规划、链路追踪、灰度发布、成本治理',
 ].join('\n');
 
 const sandboxes: string[] = [];
@@ -376,5 +392,306 @@ describe('证据反查 evidenceFor（4.2-03）', () => {
     const { kb } = await seededKb(tempDir());
     expect(kb.evidenceFor('会做棉花糖')).toEqual([]);
     expect(kb.evidenceFor('')).toEqual([]);
+  });
+});
+
+/**
+ * 断言一段同步调用抛出指定码的 `AppError`。
+ *
+ * 这一片要判的码有三种（`KB_ENTITY_NOT_FOUND` / `KB_ENTITY_DERIVED` / `INVALID_ARGUMENT`），
+ * 每个都要顺手把 error 交回调用方读消息文本，所以抽成一个函数而不是抄五遍 try/catch（§2.2）。
+ * @param code 期望的错误码
+ * @param action 要执行的调用
+ * @returns 捕获到的 `AppError`
+ */
+function expectAppError(code: AppErrorCode, action: () => unknown): AppError {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof AppError) {
+      expect(error.code).toBe(code);
+      return error;
+    }
+    throw error;
+  }
+  throw new Error(`应该抛 ${code} 却没有抛错`);
+}
+
+/** 全库「父引用不存在」的行数——4.2-04「不留孤儿行」的机检判据。 */
+function orphanParentCount(db: DatabaseSync): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS total FROM kb_entities
+        WHERE parent_id IS NOT NULL AND parent_id NOT IN (SELECT entity_id FROM kb_entities)`,
+    )
+    .get() as { total: number | bigint };
+  return Number(row.total);
+}
+
+/** 备份文件里一条实体的手写形状（用于构造库里从来没有过的输入）。 */
+interface HandwrittenEntity {
+  readonly entityId: string;
+  readonly kind: string;
+  readonly parentId: string | null;
+  readonly sourceDocId: string | null;
+  readonly payload: Readonly<Record<string, string>>;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/**
+ * 把一份（可能故意不合法的）备份正文写到磁盘。
+ * @param dir 落在哪个临时目录
+ * @param name 文件名
+ * @param body 备份正文；传字符串就原样写盘（「不是合法 JSON」那条用例靠它）
+ * @returns 文件路径
+ */
+function writeBackup(dir: string, name: string, body: unknown): string {
+  const filePath = join(dir, name);
+  writeFileSync(filePath, typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+  return filePath;
+}
+
+/** 只含一条实体的合法备份正文。 */
+function backupOf(entities: readonly HandwrittenEntity[]): Record<string, unknown> {
+  return { schemaVersion: KB_BACKUP_SCHEMA_VERSION, exportedAt: NOW_MS, entities };
+}
+
+describe('删除与归属级联（4.2-04）', () => {
+  it('删除手工实体：下属解除归属而不是被连带删掉，全库不留悬空引用', async () => {
+    const { kb, db } = await boot();
+    const owner = kb.create({ kind: 'experience', payload: { company: '手工雇主', role: '工程师' } }, NOW_MS);
+    const child = kb.create(
+      { kind: 'project', payload: { text: '挂在手工雇主下的项目' }, parentId: owner.entityId },
+      NOW_MS,
+    );
+
+    expect(kb.remove(owner.entityId, LATER_MS)).toEqual({ entityId: owner.entityId, removed: 1, detached: 1 });
+    expect(kb.get(owner.entityId)).toBeNull();
+    // 有内容的那条不该跟着消失：4.2-04 定的是 detach，不是 cascade delete。
+    expect(kb.get(child.entityId)?.parentId).toBeNull();
+    expect(orphanParentCount(db)).toBe(0);
+  });
+
+  it('简历派生的实体拒绝在知识库删除：给 KB_ENTITY_DERIVED，且原行一条不少地留着', async () => {
+    const { kb, db } = await seededKb(tempDir());
+    const before = entityCount(db);
+    const derived = kb.list({ kind: 'experience' })[0];
+    if (derived === undefined) throw new Error('语料应该派生出经历实体');
+
+    const error = expectAppError('KB_ENTITY_DERIVED', () => kb.remove(derived.entityId, NOW_MS));
+    expect(error.message).toContain('工作副本');
+    expect(error.details).toMatchObject({ sourceDocId: 'resume-evidence' });
+    expect(entityCount(db)).toBe(before);
+    expect(kb.get(derived.entityId)).not.toBeNull();
+  });
+
+  it('删除不存在的实体给 KB_ENTITY_NOT_FOUND，而不是静默返回成功', async () => {
+    const { kb } = await boot();
+    expectAppError('KB_ENTITY_NOT_FOUND', () => kb.remove('kb-not-there', NOW_MS));
+  });
+
+  it('在工作副本里删光经历再同步：派生经历消失，挂在它下面的手工实体被解除归属而不是留下悬空引用', async () => {
+    const dir = tempDir();
+    const { kb, doc, db } = await seededKb(dir);
+    const derivedExperience = kb.list({ kind: 'experience' })[0];
+    if (derivedExperience === undefined) throw new Error('语料应该派生出经历实体');
+    const manual = kb.create(
+      { kind: 'achievement', payload: { text: '记在那段经历下的补充成果' }, parentId: derivedExperience.entityId },
+      NOW_MS,
+    );
+
+    // 只剩技能区块的一份工作副本：经历条目全没了，派生的经历与成果应当被清理掉。
+    const skillsOnly = parseResumeText(RESUME_MD_SKILLS_ONLY, 'resume-evidence', LATER_MS);
+    if (skillsOnly.status !== 'ok') throw new Error(`语料解析失败：${skillsOnly.status}`);
+    doc.save(skillsOnly.document);
+    kb.sync('resume-evidence', LATER_MS);
+
+    expect(kb.list({ kind: 'experience' })).toEqual([]);
+    expect(kb.get(manual.entityId)?.parentId).toBeNull();
+    expect(orphanParentCount(db)).toBe(0);
+  });
+});
+
+describe('备份导出 / 导入（4.2-08）', () => {
+  it('导出的文件不带派生哈希，且同一份库同样时间的两次导出逐字节相同', async () => {
+    const dir = tempDir();
+    const { kb } = await seededKb(dir);
+    const firstPath = join(dir, 'backup-a.json');
+    const secondPath = join(dir, 'backup-b.json');
+    kb.exportBackup(firstPath, NOW_MS);
+    kb.exportBackup(secondPath, NOW_MS);
+
+    const content = readFileSync(firstPath, 'utf8');
+    expect(content).toBe(readFileSync(secondPath, 'utf8'));
+    expect(content).not.toContain('normalizedHash');
+    expect(content).not.toContain('normalized_hash');
+    expect(JSON.parse(content).schemaVersion).toBe(KB_BACKUP_SCHEMA_VERSION);
+  });
+
+  it('round-trip：新库导入后备份里的每条都原样回来，时间戳保持导出前的值', async () => {
+    const sourceDir = tempDir();
+    const source = await seededKb(sourceDir);
+    source.kb.create({ kind: 'skill', payload: { text: '手工记录的 Kubernetes' } }, LATER_MS);
+    const original = source.kb.list();
+    const filePath = join(sourceDir, 'kb.json');
+    source.kb.exportBackup(filePath, NOW_MS);
+
+    const fresh = await boot(tempDir());
+    expect(fresh.kb.importBackup(filePath, 'skip')).toEqual({
+      filePath,
+      total: original.length,
+      created: original.length,
+      overwritten: 0,
+      skipped: 0,
+      danglingParents: 0,
+    });
+    // 逐条等值（含 createdAt/updatedAt）：恢复备份不该把全部记录的时间戳刷成「刚刚」。
+    expect(fresh.kb.list()).toEqual(original);
+    expect(orphanParentCount(fresh.db)).toBe(0);
+  });
+
+  it('冲突默认 skip：库里改过的那条不被旧备份盖掉', async () => {
+    const dir = tempDir();
+    const { kb, db } = await seededKb(dir);
+    const filePath = join(dir, 'kb.json');
+    kb.exportBackup(filePath, NOW_MS);
+
+    const experience = kb.list({ kind: 'experience' })[0];
+    if (experience === undefined) throw new Error('语料应该派生出经历实体');
+    kb.update(experience.entityId, { ...experience.payload, company: '用户改过的公司' }, LATER_MS);
+
+    const result = kb.importBackup(filePath);
+    expect(result).toMatchObject({ created: 0, overwritten: 0, skipped: result.total });
+    expect(kb.get(experience.entityId)?.payload.company).toBe('用户改过的公司');
+    expect(entityCount(db)).toBe(result.total);
+  });
+
+  it('冲突选 overwrite 时以文件为准，并把覆盖条数报出来', async () => {
+    const dir = tempDir();
+    const { kb } = await seededKb(dir);
+    const filePath = join(dir, 'kb.json');
+    kb.exportBackup(filePath, NOW_MS);
+
+    const experience = kb.list({ kind: 'experience' })[0];
+    if (experience === undefined) throw new Error('语料应该派生出经历实体');
+    kb.update(experience.entityId, { ...experience.payload, company: '导入前要被盖掉的公司' }, LATER_MS);
+
+    const result = kb.importBackup(filePath, 'overwrite');
+    expect(result.overwritten).toBe(result.total);
+    expect(result.created).toBe(0);
+    expect(kb.get(experience.entityId)?.payload.company).toBe(experience.payload.company);
+  });
+
+  it('备份里指向库外的归属被置空并计数，不会写出悬空行', async () => {
+    const dir = tempDir();
+    const { kb, db } = await boot();
+    const filePath = writeBackup(
+      dir,
+      'dangling.json',
+      backupOf([
+        {
+          entityId: 'kb-mine-1',
+          kind: 'skill',
+          parentId: 'kb-parent-never-exists',
+          sourceDocId: null,
+          payload: { text: '引用了一个不存在的父' },
+          createdAt: NOW_MS,
+          updatedAt: NOW_MS,
+        },
+      ]),
+    );
+
+    const result = kb.importBackup(filePath, 'skip');
+    expect(result).toMatchObject({ total: 1, created: 1, danglingParents: 1 });
+    expect(kb.get('kb-mine-1')?.parentId).toBeNull();
+    expect(orphanParentCount(db)).toBe(0);
+  });
+
+  it('中途一条载荷不合法就整批回滚：库里维持导入前的原状', async () => {
+    const dir = tempDir();
+    const { kb, db } = await boot();
+    const goodId = 'kb-rollback-good';
+    const filePath = writeBackup(dir, 'broken.json', {
+      schemaVersion: KB_BACKUP_SCHEMA_VERSION,
+      exportedAt: NOW_MS,
+      entities: [
+        {
+          entityId: goodId,
+          kind: 'skill',
+          parentId: null,
+          sourceDocId: null,
+          payload: { text: '这条是好的' },
+          createdAt: NOW_MS,
+          updatedAt: NOW_MS,
+        },
+        {
+          entityId: 'kb-rollback-bad',
+          kind: 'skill',
+          parentId: null,
+          sourceDocId: null,
+          // 全空载荷：写库前必须被拒，而且不能把前一条留下成半个库。
+          payload: { text: '   ' },
+          createdAt: NOW_MS,
+          updatedAt: NOW_MS,
+        },
+      ],
+    });
+
+    expectAppError('INVALID_ARGUMENT', () => kb.importBackup(filePath, 'skip'));
+    expect(entityCount(db)).toBe(0);
+    expect(kb.get(goodId)).toBeNull();
+  });
+
+  it('不是合法 JSON、格式版本不认识、文件内部 id 重复，都在动库之前被拒', async () => {
+    const dir = tempDir();
+    const { kb, db } = await boot();
+    const entity: HandwrittenEntity = {
+      entityId: 'kb-dup',
+      kind: 'skill',
+      parentId: null,
+      sourceDocId: null,
+      payload: { text: '同一条出现两次' },
+      createdAt: NOW_MS,
+      updatedAt: NOW_MS,
+    };
+
+    expectAppError('INVALID_ARGUMENT', () => kb.importBackup(writeBackup(dir, 'not-json.json', '{oops'), 'skip'));
+    expectAppError('INVALID_ARGUMENT', () =>
+      kb.importBackup(
+        writeBackup(dir, 'old-version.json', { schemaVersion: 99, exportedAt: NOW_MS, entities: [] }),
+        'skip',
+      ),
+    );
+    expectAppError('INVALID_ARGUMENT', () =>
+      kb.importBackup(writeBackup(dir, 'duplicated.json', backupOf([entity, entity])), 'skip'),
+    );
+    expect(entityCount(db)).toBe(0);
+  });
+
+  it('文件读不到与目标目录不存在都给 INVALID_ARGUMENT，不往外抛裸 fs 错误', async () => {
+    const dir = tempDir();
+    const { kb } = await boot(dir);
+    const unreachable = join(dir, 'no-such-dir', 'kb.json');
+
+    const readError = expectAppError('INVALID_ARGUMENT', () => kb.importBackup(unreachable, 'skip'));
+    expect(readError.message).toContain('读不到');
+    const writeError = expectAppError('INVALID_ARGUMENT', () => kb.exportBackup(unreachable, NOW_MS));
+    expect(writeError.message).toContain('写不出去');
+  });
+
+  it('备份带着出处：派生行的 source_doc_id 原样恢复，重复导入同一份文件一条也不会多写', async () => {
+    const sourceDir = tempDir();
+    const source = await seededKb(sourceDir);
+    const filePath = join(sourceDir, 'kb.json');
+    source.kb.exportBackup(filePath, NOW_MS);
+
+    const fresh = await boot(tempDir());
+    const total = fresh.kb.importBackup(filePath, 'skip').total;
+    const derived = fresh.kb.list({ kind: 'experience' })[0];
+    if (derived === undefined) throw new Error('备份里应该带着派生经历');
+    expect(derived.sourceDocId).toBe('resume-evidence');
+    // 同一份文件再导一次（默认 skip）：库里已经有这些 id，一条都不该重复写。
+    expect(fresh.kb.importBackup(filePath)).toMatchObject({ created: 0, overwritten: 0, skipped: total });
   });
 });

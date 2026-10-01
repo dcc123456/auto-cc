@@ -1,9 +1,11 @@
 /**
- * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03）：四类知识库实体的建表、派生入库、查询与证据反查。
+ * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08）：
+ * 四类知识库实体的建表、派生入库、查询、证据反查、删除与备份。
  *
- * 这一层只做五件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
+ * 这一层只做六件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
  * 按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）要用的读接口、
- * 以及把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`，本文件只负责取候选与套配置）。
+ * 把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、以及本地备份文件的读写（4.2-08，
+ * 格式在 `backup.ts`）。
  * 「文本 → 实体」的判定全在 `entities.ts`（纯函数，离线逐条断言），本文件不重复任何解析规则。
  *
  * 为什么读文档要经 `resume.doc` 而不是自己查 `resume_docs` 表：plan §1.4 裁定一把 `resume_docs` 定成
@@ -12,6 +14,7 @@
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { DatabaseSync } from 'node:sqlite';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import {
   KB_ENTITY_KINDS,
@@ -22,6 +25,7 @@ import {
   payloadHashOf,
 } from './entities.js';
 import { type EvidenceOptions, type EvidenceRef, evidenceTextOf, rankEvidence } from './evidence.js';
+import { decodeBackup, encodeBackup } from './backup.js';
 
 /** 迁移号段：**11**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
  *  resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10）。
@@ -93,6 +97,44 @@ export interface KbCreateInput {
   readonly parentId?: string | null;
 }
 
+/** 一次删除的读数（4.2-04 的断言点：删一条要同时知道有多少下属被解除归属）。 */
+export interface KbRemoveResult {
+  readonly entityId: string;
+  /** 被删掉的行数——本方法只删手工实体，恒为 1，保留计数是为了让断言不依赖「应该是一条」。 */
+  readonly removed: number;
+  /** 被解除归属（`parent_id` 置空）的下属行数。 */
+  readonly detached: number;
+}
+
+/** 一次备份导出的读数。 */
+export interface KbExportResult {
+  readonly filePath: string;
+  /** 写进文件的实体条数。 */
+  readonly exported: number;
+}
+
+/**
+ * 导入时的冲突策略（4.2-08）。
+ * - `skip`：库里已有同 id 就保留库内的那条（默认——恢复备份不该静默盖掉用户这几周的手工修改）
+ * - `overwrite`：以文件为准覆盖
+ */
+export type KbImportMode = 'skip' | 'overwrite';
+
+/** 一次导入的读数。 */
+export interface KbImportResult {
+  readonly filePath: string;
+  /** 文件里的总条数。 */
+  readonly total: number;
+  /** 库里原本没有、这次新建的条数。 */
+  readonly created: number;
+  /** `overwrite` 模式下被文件覆盖掉的条数。 */
+  readonly overwritten: number;
+  /** `skip` 模式下保留库内原值、没有写入的条数。 */
+  readonly skipped: number;
+  /** 归属指向库外且不在这份文件里的条数——按 4.2-04 的策略解除归属而不是留下悬空引用。 */
+  readonly danglingParents: number;
+}
+
 interface KbEntityRow {
   readonly entity_id: string;
   readonly kind: string;
@@ -122,8 +164,9 @@ function viewOf(row: KbEntityRow): KbEntityView {
  * 知识库实体服务。
  *
  * 失败一律抛 `AppError`：`KB_SOURCE_MISSING`（工作副本不存在或已损坏，先重新导入）、
- * `KB_ENTITY_NOT_FOUND`（界面按下的是一张陈旧卡片）、`INVALID_ARGUMENT`（种类不在四类内、
- * 载荷为空、`parentId` 指向不存在的实体——引用完整性必须在写入前成立，见 4.2-02）。
+ * `KB_ENTITY_NOT_FOUND`（界面按下的是一张陈旧卡片）、`KB_ENTITY_DERIVED`（删除简历派生实体——
+ * 它的真相在工作副本里，见 4.2-04）、`INVALID_ARGUMENT`（种类不在四类内、载荷为空、
+ * `parentId` 指向不存在的实体——引用完整性必须在写入前成立，见 4.2-02；备份文件不合法，见 4.2-08）。
  */
 export class KbProfileService extends Service {
   static provide = 'kb.profile';
@@ -192,6 +235,12 @@ export class KbProfileService extends Service {
     const created = outcomes.filter((outcome) => outcome === 'created').length;
     const updated = outcomes.filter((outcome) => outcome === 'updated').length;
     const removed = this.prune(docId, drafts);
+    // 派生行删完再收敛归属：手工实体可以把 `parentId` 挂在一条简历经历上，而那条经历可能在
+    // 工作副本里被删了。不同步这一步，库里就会留下「父已经不存在」的悬空引用（4.2-04 明令不留的行态）。
+    const detached = this.detachOrphanParents(nowMs);
+    if (detached > 0) {
+      this.ctx.logger.info(`[kb-profile] 同步 ${docId} 后解除悬空归属 ${String(detached)} 条`);
+    }
 
     this.ctx.logger.info(
       `[kb-profile] 同步 ${docId}：派生 ${String(drafts.length)} 条（新建 ${String(created)} / 更新 ${String(updated)} / 清理 ${String(removed)}）`,
@@ -318,20 +367,168 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 按稳定 id upsert 一条派生实体。
-   * @param draft 派生出的实体
-   * @param nowMs 写入时间戳（毫秒）
+   * 删除一条**手工**实体，并按 4.2-04 的策略处理它的下属。
+   *
+   * 策略是「解除归属」而不是「连带删除」：项目与成果可能是用户手写的、只是恰好挂在一条被删的
+   * 经历下，连带删除会把还有内容的记录一起抹掉；置空 `parent_id` 同样满足「不留孤儿行」——
+   * 孤儿指的是引用一个不存在的父，而不是没有父。**派生实体不走这里**：它们的真相在简历工作副本，
+   * 直接删库里的行只会在下一次 `sync()` 时被原样写回来，用户会看到「删了又活过来」，
+   * 所以这条路给的是明确失败 + 去简历里删的指引（`KB_ENTITY_DERIVED`）。
+   * @param entityId 实体 id
+   * @param nowMs 写入时间戳（毫秒）——下属的 `updated_at` 会被刷新，因为它们的归属真的变了
+   * @returns 删除计数与解除归属计数
+   * @throws `AppError('KB_ENTITY_NOT_FOUND')` 行不存在（界面点了张陈旧卡片，或已被同步清理）
+   * @throws `AppError('KB_ENTITY_DERIVED')` 该行由简历派生，请在简历工作副本里删除后重新同步
+   */
+  remove(entityId: string, nowMs = Date.now()): KbRemoveResult {
+    const existing = this.get(entityId);
+    if (existing === null) {
+      throw new AppError('KB_ENTITY_NOT_FOUND', `知识库实体 ${entityId} 不存在，可能已被同步清理`);
+    }
+    if (existing.sourceDocId !== null) {
+      throw new AppError(
+        'KB_ENTITY_DERIVED',
+        `实体 ${entityId} 来自简历 ${existing.sourceDocId}，在知识库删除会在下次同步时被写回；请在简历工作副本里删掉它再同步`,
+        undefined,
+        { entityId, sourceDocId: existing.sourceDocId },
+      );
+    }
+    const detached = Number(
+      this.store.db
+        .prepare('UPDATE kb_entities SET parent_id = NULL, updated_at = ? WHERE parent_id = ?')
+        .run(nowMs, entityId).changes,
+    );
+    const removed = Number(this.store.db.prepare('DELETE FROM kb_entities WHERE entity_id = ?').run(entityId).changes);
+    this.ctx.logger.info(`[kb-profile] 删除手工实体 ${entityId}（连带解除归属 ${String(detached)} 条）`);
+    return { entityId, removed, detached };
+  }
+
+  /**
+   * 把整个知识库导出为本地 JSON 备份文件（spec 4.2-08）。
+   *
+   * 导出的是**全库**（派生 + 手工）：只导手工那半在恢复时会得到「有实体树但没有简历出处」的库，
+   * 而派生行反正会在下一次 `sync()` 里被幂等收敛，导出它们不会造成双份真相。
+   * @param filePath 目标文件路径（父目录必须已存在——路径是界面与用户决定的，不在这里替它建目录）
+   * @param nowMs 导出时间戳（毫秒），写进文件的 `exportedAt`
+   * @returns 文件路径与写出的条数
+   * @throws `AppError('INVALID_ARGUMENT')` 文件写不出去（路径不存在、权限不足等），原因拼在消息里
+   */
+  exportBackup(filePath: string, nowMs = Date.now()): KbExportResult {
+    const entities = this.list();
+    const content = encodeBackup(entities, nowMs);
+    try {
+      writeFileSync(filePath, content, 'utf8');
+    } catch (error) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `备份文件写不出去：${filePath}（${error instanceof Error ? error.message : String(error)}）`,
+      );
+    }
+    this.ctx.logger.info(`[kb-profile] 导出备份 ${filePath}：${String(entities.length)} 条实体`);
+    return { filePath, exported: entities.length };
+  }
+
+  /**
+   * 从本地 JSON 备份文件恢复知识库（spec 4.2-08）。
+   *
+   * 三条不变量：
+   * 1. **哈希重算**，不信任文件里的内容派生量——载荷才是真相，`normalized_hash` 由 `payloadHashOf` 现算，
+   *    否则用户手改载荷而留着旧哈希时，同步的幂等比对会判成「没变」而不重写。
+   * 2. **一个事务**：中途一条不合法就整批回滚，留下导入前的原状。半个库比失败更坏。
+   * 3. **归属不悬空**：`parent_id` 既不在库里也不在这份文件里时置空并计数（同 4.2-04 的策略），
+   *    而不是写出一条引用不存在父实体的行。
+   * @param filePath 备份文件路径
+   * @param mode 冲突策略，见 `KbImportMode`（默认 `skip`：默认值必须是「不动用户已有的数据」）
+   * @returns 总数与各处置计数
+   * @remarks 本方法**没有 `nowMs` 入参**：时间戳一律取文件里的原值，恢复备份不该把全部记录的
+   *          `created_at`/`updated_at` 刷成「刚刚」——那会让界面的「最近改动」排序在每次恢复后失真。
+   * @throws `AppError('INVALID_ARGUMENT')` 文件读不到、不是合法备份、格式版本不认识、内部 id 重复、载荷为空
+   */
+  importBackup(filePath: string, mode: KbImportMode = 'skip'): KbImportResult {
+    let text: string;
+    try {
+      text = readFileSync(filePath, 'utf8');
+    } catch (error) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `备份文件读不到：${filePath}（${error instanceof Error ? error.message : String(error)}）`,
+      );
+    }
+    const backup = decodeBackup(text);
+    const libraryIds = new Set(
+      (
+        this.store.db.prepare('SELECT entity_id FROM kb_entities').all() as unknown as readonly { entity_id: string }[]
+      ).map((row) => row.entity_id),
+    );
+    // 导入结束后库里会存在的 id 全集：原有的 + 这份文件里的。归属只要落在这个集合里就不算悬空
+    // （文件内部「父排在子后面」是完全正常的写法，不能按遍历顺序判）。
+    const knownIds = new Set<string>([...libraryIds, ...backup.entities.map((entry) => entry.entityId)]);
+
+    let created = 0;
+    let overwritten = 0;
+    let skipped = 0;
+    let danglingParents = 0;
+
+    const db = this.store.db;
+    db.exec('BEGIN');
+    try {
+      for (const entry of backup.entities) {
+        const existedBefore = libraryIds.has(entry.entityId);
+        if (existedBefore && mode === 'skip') {
+          skipped += 1;
+          continue;
+        }
+        const isParentDangling = entry.parentId !== null && !knownIds.has(entry.parentId);
+        if (isParentDangling) danglingParents += 1;
+        const payload = nonEmptyPayload(entry.payload);
+        const draft: KbEntityDraft = {
+          entityId: entry.entityId,
+          kind: entry.kind,
+          parentId: isParentDangling ? null : entry.parentId,
+          sourceDocId: entry.sourceDocId,
+          payload,
+          normalizedHash: payloadHashOf(entry.kind, payload),
+        };
+        // 时间戳取自文件而不是 `nowMs`：恢复备份是把过去的记录放回库里，不是「刚刚新建」。
+        this.upsert(draft, entry.updatedAt, entry.createdAt);
+        if (existedBefore) overwritten += 1;
+        else created += 1;
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    this.ctx.logger.info(
+      `[kb-profile] 导入备份 ${filePath}（策略 ${mode}）：新建 ${String(created)} / 覆盖 ${String(overwritten)} / 跳过 ${String(skipped)} / 解除悬空归属 ${String(danglingParents)}`,
+    );
+    return {
+      filePath,
+      total: backup.entities.length,
+      created,
+      overwritten,
+      skipped,
+      danglingParents,
+    };
+  }
+
+  /**
+   * 按稳定 id upsert 一条实体（派生同步与备份导入共用）。
+   * @param draft 待写入的实体
+   * @param nowMs 本行的 `updated_at`（毫秒）
+   * @param createdAt 新行的 `created_at`（毫秒）；省略时与 `nowMs` 相同——只有备份导入需要分开传，
+   *                  因为文件里带着记录原本的出生时间
    * @returns `created`（新行）/ `updated`（内容变了）/ `unchanged`（内容一样，`updated_at` 也不动，
    *          免得重复同步把界面排序搅乱）
    */
-  private upsert(draft: KbEntityDraft, nowMs: number): 'created' | 'updated' | 'unchanged' {
+  private upsert(draft: KbEntityDraft, nowMs: number, createdAt = nowMs): 'created' | 'updated' | 'unchanged' {
     const db = this.store.db;
     const existing = db
       .prepare('SELECT normalized_hash, payload_json FROM kb_entities WHERE entity_id = ?')
       .get(draft.entityId) as { normalized_hash: string; payload_json: string } | undefined;
     const payloadJson = JSON.stringify(draft.payload);
     if (existing === undefined) {
-      this.insert(draft, nowMs);
+      this.insert(draft, nowMs, createdAt);
       return 'created';
     }
     // 哈希相同但键名换了（例如手工把 `role` 改成别的键）也要重写：所以比对 JSON 而不只比对哈希。
@@ -347,12 +544,13 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 插入一条实体行（`created_at` 与 `updated_at` 同为写入时间）。
+   * 插入一条实体行。
    * @param draft 实体
-   * @param nowMs 写入时间戳（毫秒）
+   * @param nowMs 本行的 `updated_at`（毫秒）
+   * @param createdAt 本行的 `created_at`（毫秒）；派生同步与手工新建时与 `nowMs` 相同
    * @returns 无返回值
    */
-  private insert(draft: KbEntityDraft, nowMs: number): void {
+  private insert(draft: KbEntityDraft, nowMs: number, createdAt = nowMs): void {
     this.store.db
       .prepare(
         `INSERT INTO kb_entities (entity_id, kind, parent_id, source_doc_id, payload_json, normalized_hash, created_at, updated_at)
@@ -365,7 +563,7 @@ export class KbProfileService extends Service {
         draft.sourceDocId,
         JSON.stringify(draft.payload),
         draft.normalizedHash,
-        nowMs,
+        createdAt,
         nowMs,
       );
   }
@@ -390,6 +588,27 @@ export class KbProfileService extends Service {
       db
         .prepare(`DELETE FROM kb_entities WHERE source_doc_id = ? AND entity_id NOT IN (${placeholders})`)
         .run(docId, ...ids).changes,
+    );
+  }
+
+  /**
+   * 把「父已经不在库里」的行解除归属（`parent_id` 置空），保证库里不存在悬空引用。
+   *
+   * 一条 SQL 覆盖所有方向：不区分父是被同步清理的派生行还是被 `remove()` 删掉的手工行，
+   * 也不区分 child 是派生还是手工——「不留孤儿行」（4.2-04）说的是引用关系，不是某种行的专属义务。
+   * @param nowMs 刷新这些行的 `updated_at`（毫秒）——归属确实变了，界面排序跟着变是对的
+   * @returns 被解除归属的行数
+   */
+  private detachOrphanParents(nowMs: number): number {
+    return Number(
+      this.store.db
+        .prepare(
+          `UPDATE kb_entities
+              SET parent_id = NULL, updated_at = ?
+            WHERE parent_id IS NOT NULL
+              AND parent_id NOT IN (SELECT entity_id FROM kb_entities)`,
+        )
+        .run(nowMs).changes,
     );
   }
 }

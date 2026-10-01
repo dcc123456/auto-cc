@@ -73,6 +73,9 @@ export type AppErrorCode =
   // 前者是「还没有可派生的简历」（引导用户先导入），后者是「界面按下的卡片已经过期」（重读列表即可）。
   | 'KB_SOURCE_MISSING'
   | 'KB_ENTITY_NOT_FOUND'
+  // 派生实体的删除入口不在知识库（spec 4.2-04 的级联策略）：它在简历工作副本里，删完同步即可。
+  // 单独一个码是因为界面的处置不同——这一条要给「去简历里删」的跳转，而不是给一句删除失败的提示。
+  | 'KB_ENTITY_DERIVED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
