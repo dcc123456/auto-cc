@@ -371,7 +371,7 @@
 | 4.3-07 | 向量检索为**可选增强**：可用时与 BM25 做 RRF 融合，结果优于纯 BM25（固定评测集上） | U    | 评测集 topK 命中率对比断言                                 | [ ]  |
 | 4.3-08 | embedding 不可用时返回 `unavailable` 并自动降级纯 BM25，**绝不产生伪向量**         | U+C  | 断言 `llm.embed` 失败路径无 BLOB 写入；grep 无哈希冒充向量 | [ ]  |
 | 4.3-09 | 检索延迟可接受：千级 chunk 下 P95 在配置阈值内                                     | C    | 基准脚本输出记录                                           | [ ]  |
-| 4.3-10 | 检索为空时给出确定态（界面提示 + 可行动建议），不返回随机结果                      | V+C  | 冷门查询截图                                               | [ ]  |
+| 4.3-10 | 检索为空时给出确定态（界面提示 + 可行动建议），不返回随机结果                      | V+C  | 冷门查询截图                                               | [x]  |
 | 4.3-11 | chunk 粒度 = 可引用粒度（按实体自然分层），无任意滑窗切碎语义                      | U    | 断言 chunk 边界与实体边界一致                              | [x]  |
 | 4.3-12 | 检索日志不记录简历正文原文（只记查询与命中 id），防日志侧泄露                      | C    | 断言日志内容已脱敏                                         | [ ]  |
 
@@ -466,6 +466,40 @@ bm25B / bm25Weight / lexicalWeight / substringFloorScore` 必须真的在 `kb-pr
   证据：`docs/acceptance/4.3/4.3-b-fts5-scoring-node.txt`、`4.3-b-fts5-scoring-electron.txt`
   （spike6 §S1–S7 + spike7 §A–F，双 runtime 逐行 diff 去掉抬头后唯一差异是 sqlite 版本号 3.53.1 / 3.53.4，
   两份末尾各附 DIFF 结论；spike 代码按 §6.4 留在 `.research-repos/`，只有结论入档）。
+
+### 4.3-c 落地记录（4.3-10，2026-10-02）
+
+- **一个 `search()`，两个入口（裁定三 / §5.9 的第三次兑现）**：`kb.profile.search` 与 `kb.profile.list` 一样，
+  在 service 自己的 `[Service.init]` 里经 `registerAgentTools` 登记（`effect: 'read'`、`requiresConfirmation: false`），
+  IPC 侧走 `RENDERER_ALLOWLIST` 的 `kb.profile.search`。活体实测 `agent.tools.list()` 11 只里含它，
+  且 `window.autoCC.kb['profile.search']('订单')` 与 `agent.tools.call('kb.profile.search', {query})` 的整段 JSON
+  **逐字段相等**（`uiAndToolIdentical=true`）——界面检索框、agent 工具、4.5 的事实锁定读的是同一条通道，
+  没有第二套查询。
+- **空态是返回值，不是入参错误（4.3-10 的关键取舍）**：工具入参用 `z.strictObject({ query: z.string() })`，
+  **刻意不设 `.min(1)`**。注册表的 `call` 在 `safeParse` 失败时回 `TOOL_INPUT_INVALID`，若把「切不出词」交给 schema，
+  两种态会被吃成同一个错误码，agent 就分不清「换个词再问」和「这只工具坏了」。
+  现在两条码各自独立：`no_query_tokens`（查询侧无效）与 `ok` + `hits: []`（库里确实没有），
+  界面各自一屏文案（`data-kb-search="no_tokens"` / `"empty"`），且都带**可行动建议**而不是「无结果」了事。
+- **「不返回随机结果」做成了可复跑判据**：排序键是分数，分数由库内统计量（N / df / avgdl）决定，算式里无随机项；
+  同一份库同一查询连打两次整段 JSON 相等。顺带记下一条容易被误读成抖动的性质：**分数随语料变化**——
+  中途新建一条实体后「订单」的首条分数从 0.6585 变 0.6829，这是 BM25 定义的一部分，不是不稳定（证据 [5]）。
+- **界面侧两条既有纪律，不新长一套**：出处标签复用 `resume.kind.*` 的既有词条（§2.5，区块切片的段名不再翻第二遍），
+  理由码新增 `kb.searchReason{Bm25,Lexical,Substring}` 三键并同补中英双语（缺翻译即 lint 失败）；
+  收到 `kb/entities-changed` 时**清空上一批检索结果**（`data-kb-search*` 归 0），避免库改了、命中清单还是旧的——
+  输入框文本保留，原样再打一次即可。
+- **倒排维护在真实写入路径上复验了一次**：界面上新建的手工实体立刻可被检索到（「离线检索失效验证」命中 1 条，
+  命中词是它的二字组集合），不需要重启或重新同步（证据 [7]）。
+- **本片的已知边界**：检索区只到「给出命中与分数」，**没有做分页/翻页**（`searchTopK` 默认 8 条，超出即截断，
+  与 4.3-b 的口径一致）；命中行不可点进实体树（`chunkId` 对实体切片就是 `entityId`，对区块切片则不是，
+  跳转会指到不存在的行——等 4.4/4.5 需要「从命中回到上下文」时再一起定这层的形状）。
+- **单测覆盖**：`profile-service.test.ts` 新增「工具面登记与 service 直调逐字段相等 + 空态是值不是错误」1 例
+  （沿用 4.2-d 的 `FakeAgentToolsService` 替身，零键配置用 `NO_CONFIG` 挂载）；该包 **9 文件 / 189** 用例全绿，
+  根 `pnpm typecheck` / `lint`（渲染层规范：2 语言包 / 22 源文件键对齐）/ `format:check` / `test` 全绿。
+  V 证据：`docs/acceptance/4.3/4.3-10-search-hits.png`、`4.3-10-search-no-tokens.png`、`4.3-10-search-empty.png`、
+  `4.3-10-search-hits-en.png` 与 `4.3-10-dom-assertions.txt`（八段读数，含活体工具面与英文态）。
+  **harness 实测补一条**：`window.autoCC.*` 的返回是 `{ ok, value }` 信封，而渲染层拿到的 `bridge` 已解包一次；
+  `agent.tools.call` 的 `value` 里还套一层 `{ ok, value }`——在页面里做等价性断言要**解两层**，
+  只解一层会得到 `uiAndToolIdentical=false` 的假阴性。
 
 ## 4.4 JD → 能力要求拆解与缺口比对
 
