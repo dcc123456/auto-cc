@@ -789,6 +789,22 @@ export interface DeliverApprovalView {
   expiresAt: number;
 }
 
+/**
+ * 知识库实体表被写入时由 `kb.profile` 发出（spec 4.2-06）。
+ * 载荷刻意**不含实体内容**：界面拿到信号就重读 `kb.profile.list`，而不是在渲染层拼一份库的副本——
+ * 两边都能算就等于两套真相（AGENTS.md §2.5）。
+ */
+export interface KbEntitiesChangedEvent {
+  /** 触发这次变更的动作，界面按它取一句人话 */
+  readonly action: 'create' | 'update' | 'remove' | 'sync' | 'import';
+  /** 关联的简历文档 id；手工实体的增删不隶属任何文档，此时为 `null` */
+  readonly docId: string | null;
+  /** 受影响的行数，只进提示文案，不作为界面数据来源 */
+  readonly changed: number;
+  /** 变更发生的毫秒时间戳 */
+  readonly at: number;
+}
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -841,5 +857,10 @@ declare module 'cordis' {
      * **事件负责「此刻提醒一下」，`pending()` 负责「错过了也还在」**。
      */
     'outbound/approval-requested'(event: DeliverApprovalView): void;
+    /**
+     * 知识库实体表发生任何写入（新建 / 编辑 / 删除 / 同步 / 导入备份）时由 `kb.profile` 发出
+     * （spec 4.2-06）：编辑要即时生效，界面不靠用户重启或手动刷新，也不靠轮询 `list()`。
+     */
+    'kb/entities-changed'(event: KbEntitiesChangedEvent): void;
   }
 }

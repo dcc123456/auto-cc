@@ -7,7 +7,17 @@
  *
  * 语料仍是自造虚构简历；手机号写成明显编造的号段，用于顺带复验实体表里不落 PII 原文（对齐 4.1-09 / §8.5）。
  */
-import { AppError, asApp, type AppErrorCode, Context, type Fiber } from '@auto-cc/core';
+import {
+  AppError,
+  NO_CONFIG,
+  Service,
+  asApp,
+  type AgentToolDeclaration,
+  type AppErrorCode,
+  type KbEntitiesChangedEvent,
+  Context,
+  type Fiber,
+} from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
@@ -17,6 +27,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { KB_BACKUP_SCHEMA_VERSION } from './backup.js';
 import { KB_PROFILE_MIGRATION_VERSION, KbProfileService } from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
@@ -62,6 +73,34 @@ const RESUME_MD_SKILLS_ONLY = [
   '- 分布式一致性、性能剖析、容量规划、链路追踪、灰度发布、成本治理',
 ].join('\n');
 
+/**
+ * 假的 `agent.tools`（裁定三的单测替身）。
+ *
+ * 与 `packages/browser/src/test-doubles.ts` 里那份同款，理由也一样：注册表属于 L3 对话插件，
+ * 本包（L2）连测试都不该 import 它，而跨包共享一个替身要新建一个包（§4.3 得先在 plan 里记理由）。
+ */
+class FakeAgentToolsService extends Service {
+  static provide = 'agent.tools';
+  static Config = z.strictObject({});
+
+  /** 收到的声明，迭代序即登记顺序。 */
+  readonly declarations = new Map<string, AgentToolDeclaration>();
+
+  constructor(ctx: Context) {
+    super(ctx, 'agent.tools');
+  }
+
+  /** 契约见 `AgentToolRegistry.register`。 */
+  register<I>(tool: AgentToolDeclaration<I>): void {
+    this.declarations.set(tool.id, tool);
+  }
+
+  /** 契约见 `AgentToolRegistry.unregister`。 */
+  unregister(id: string): boolean {
+    return this.declarations.delete(id);
+  }
+}
+
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
 
@@ -83,6 +122,8 @@ async function boot(dir = tempDir(), evidence: { topK: number; minScore: number 
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 注册表先于本包上岗：`registerAgentTools` 是软取，晚挂载就只能登记出 0 个工具。
+  fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(
     await ctx.plugin(KbProfileService, {
@@ -93,6 +134,8 @@ async function boot(dir = tempDir(), evidence: { topK: number; minScore: number 
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   const app = asApp(ctx);
   return {
+    ctx,
+    tools: ctx.get('agent.tools') as unknown as FakeAgentToolsService,
     kb: app['kb.profile'],
     doc: app['resume.doc'],
     parse: app['resume.parse'],
@@ -693,5 +736,63 @@ describe('备份导出 / 导入（4.2-08）', () => {
     expect(derived.sourceDocId).toBe('resume-evidence');
     // 同一份文件再导一次（默认 skip）：库里已经有这些 id，一条都不该重复写。
     expect(fresh.kb.importBackup(filePath)).toMatchObject({ created: 0, overwritten: 0, skipped: total });
+  });
+});
+
+describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
+  it('新建 / 编辑 / 删除 / 导入 / 同步各推一条 kb/entities-changed，同步失败的写入不推', async () => {
+    const { kb, doc, ctx } = await boot(tempDir());
+    const events: KbEntitiesChangedEvent[] = [];
+    ctx.on('kb/entities-changed', (event) => events.push(event));
+
+    const created = kb.create({ kind: 'skill', payload: { name: 'Redis 缓存' } }, NOW_MS);
+    kb.update(created.entityId, { name: 'Redis 缓存与失效策略' }, LATER_MS);
+    kb.remove(created.entityId, LATER_MS);
+    // 工作副本不存在时同步整笔失败：失败没有改过任何行，界面不该为此白跑一次重读。
+    try {
+      kb.sync('resume-not-there', NOW_MS);
+    } catch (error) {
+      expect((error as AppError).code).toBe('KB_SOURCE_MISSING');
+    }
+
+    const dir = tempDir();
+    const filePath = join(dir, 'kb.json');
+    kb.exportBackup(filePath, NOW_MS);
+    kb.importBackup(filePath, 'skip');
+
+    const parsed = parseResumeText(RESUME_MD, 'resume-events', NOW_MS);
+    if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
+    doc.save(parsed.document);
+    kb.sync('resume-events', NOW_MS);
+
+    expect(events.map((event) => event.action)).toEqual(['create', 'update', 'remove', 'import', 'sync']);
+    expect(events[0]).toMatchObject({ action: 'create', docId: null, changed: 1 });
+    expect(events[3]).toMatchObject({ action: 'import', docId: null });
+    expect(events[4]).toMatchObject({ action: 'sync', docId: 'resume-events' });
+    expect(events[4]?.changed ?? 0).toBeGreaterThan(0);
+    // 载荷只有动作与计数：实体内容由界面重读 `list()` 拿，事件里不塞副本（§2.5 不做两套真相）。
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['action', 'at', 'changed', 'docId']);
+  });
+
+  it('载荷没变的编辑不推事件（没写库就没有即时生效要证明）', async () => {
+    const { kb, ctx } = await boot(tempDir());
+    const events: KbEntitiesChangedEvent[] = [];
+    ctx.on('kb/entities-changed', (event) => events.push(event));
+
+    const created = kb.create({ kind: 'achievement', payload: { title: '开源贡献' } }, NOW_MS);
+    kb.update(created.entityId, { title: '开源贡献' }, LATER_MS);
+    expect(events.map((event) => event.action)).toEqual(['create']);
+  });
+
+  it('agent 工具面登记的是同一个 `list`：跑工具与直接调 service 逐行相等（裁定三禁止的两套查询）', async () => {
+    const { kb, tools } = await seededKb(tempDir());
+    const tool = tools.declarations.get('kb.profile.list');
+    if (tool === undefined) throw new Error('kb.profile.list 未登记进 agent 工具面');
+    expect(tool.effect).toBe('read');
+    expect(tool.requiresConfirmation).toBe(false);
+    expect(await tool.run({ kind: 'experience' })).toEqual(kb.list({ kind: 'experience' }));
+    expect(await tool.run({})).toEqual(kb.list());
+    // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
+    expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
   });
 });

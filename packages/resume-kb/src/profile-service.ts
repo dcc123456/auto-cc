@@ -2,17 +2,18 @@
  * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08）：
  * 四类知识库实体的建表、派生入库、查询、证据反查、删除与备份。
  *
- * 这一层只做六件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
+ * 这一层只做七件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
  * 按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）要用的读接口、
- * 把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、以及本地备份文件的读写（4.2-08，
- * 格式在 `backup.ts`）。
+ * 把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、本地备份文件的读写（4.2-08，
+ * 格式在 `backup.ts`）、以及 4.2-05 / 06 需要的两条装配腿：写入后发 `kb/entities-changed` 事件、
+ * 把读口 `list` 登记成 agent 工具（裁定三——界面与 agent 走同一个 service，不许各长一套）。
  * 「文本 → 实体」的判定全在 `entities.ts`（纯函数，离线逐条断言），本文件不重复任何解析规则。
  *
  * 为什么读文档要经 `resume.doc` 而不是自己查 `resume_docs` 表：plan §1.4 裁定一把 `resume_docs` 定成
  * 可编辑工作副本的**唯一真相源**，而它的 `load()` 顺带做了 Schema 重新校验——绕过它就是用裸 SQL
  * 造第二条读取通道（AGENTS.md §2.5），库里被改坏的文档将不再被发现。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -202,9 +203,40 @@ export class KbProfileService extends Service {
 
   [Service.init](): void {
     this.ensureSchema();
+    // 裁定三：读口同时是 agent 工具。对话里问「库里有哪些和高并发相关的经历」必须走同一个 `list()`，
+    // 界面与工具各长一套查询就是 §5.9 明确禁止的孤岛。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'kb.profile.list',
+        description:
+          '列出本地知识库里的经历 / 项目 / 技能 / 成果实体，可按种类过滤；sourceDocId 传 null 时只取用户手工创建的实体',
+        input: z.strictObject({
+          kind: z.enum(KB_ENTITY_KINDS).optional(),
+          sourceDocId: z.string().min(1).nullable().optional(),
+        }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: (filter) => Promise.resolve(this.list(filter)),
+      }),
+    ]);
     this.ctx.logger.info(
-      `[kb-profile] kb_entities 表就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}`,
+      `[kb-profile] kb_entities 表就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
+  }
+
+  /**
+   * 把「实体表被写过」推给渲染层（spec 4.2-06 的即时生效）。
+   * @param action 触发变更的动作，界面按它取一句人话
+   * @param docId 关联的简历文档 id；手工实体的增删不属于任何文档时传 `null`
+   * @param changed 受影响的行数，只进提示文案——界面收到信号后重读 `list()`，不在渲染层改本地态（§2.5）
+   * @returns 无返回值；事件是「推」的，没人订阅也不该让已经成功的写入因此失败
+   */
+  private announce(
+    action: 'create' | 'update' | 'remove' | 'sync' | 'import',
+    docId: string | null,
+    changed: number,
+  ): void {
+    this.ctx.emit('kb/entities-changed', { action, docId, changed, at: Date.now() });
   }
 
   /**
@@ -245,6 +277,7 @@ export class KbProfileService extends Service {
     this.ctx.logger.info(
       `[kb-profile] 同步 ${docId}：派生 ${String(drafts.length)} 条（新建 ${String(created)} / 更新 ${String(updated)} / 清理 ${String(removed)}）`,
     );
+    this.announce('sync', docId, created + updated + removed);
     return { docId, created, updated, removed };
   }
 
@@ -335,6 +368,7 @@ export class KbProfileService extends Service {
       normalizedHash: payloadHashOf(input.kind, payload),
     };
     this.insert(draft, nowMs);
+    this.announce('create', null, 1);
     this.ctx.logger.info(`[kb-profile] 手工新建 ${draft.entityId}（${draft.kind}）`);
     const view = this.get(draft.entityId);
     // 刚写完就读不到只可能是库被外部破坏，这里不做兜底：让异常暴露而不是返回一份假读数。
@@ -363,6 +397,7 @@ export class KbProfileService extends Service {
       .run(JSON.stringify(nextPayload), hash, nowMs, entityId);
     const view = this.get(entityId);
     if (view === null) throw new AppError('KB_ENTITY_NOT_FOUND', `更新后的实体 ${entityId} 读不回来`);
+    this.announce('update', existing.sourceDocId, 1);
     return view;
   }
 
@@ -400,6 +435,7 @@ export class KbProfileService extends Service {
     );
     const removed = Number(this.store.db.prepare('DELETE FROM kb_entities WHERE entity_id = ?').run(entityId).changes);
     this.ctx.logger.info(`[kb-profile] 删除手工实体 ${entityId}（连带解除归属 ${String(detached)} 条）`);
+    this.announce('remove', null, removed + detached);
     return { entityId, removed, detached };
   }
 
@@ -502,6 +538,7 @@ export class KbProfileService extends Service {
     this.ctx.logger.info(
       `[kb-profile] 导入备份 ${filePath}（策略 ${mode}）：新建 ${String(created)} / 覆盖 ${String(overwritten)} / 跳过 ${String(skipped)} / 解除悬空归属 ${String(danglingParents)}`,
     );
+    this.announce('import', null, created + overwritten);
     return {
       filePath,
       total: backup.entities.length,

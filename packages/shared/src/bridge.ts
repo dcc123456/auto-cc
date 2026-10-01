@@ -14,6 +14,7 @@ import type {
   DeliverApprovalView,
   DeliverAttachmentView,
   JdProgressEvent,
+  KbEntitiesChangedEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
   LogLineView,
@@ -178,6 +179,17 @@ export const RENDERER_ALLOWLIST = [
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
   'resume.parse.fromFile',
   'resume.parse.pending',
+  // 4.2-d 的知识库管理面（spec 4.2-05 / 06）：读库、反查证据、手工实体的增删改、按简历工作副本重新同步，
+  // 以及 4.2-08 的备份导出 / 导入。渲染层没有 SQL 通道，也没有读文件的通道——备份路径同样是绝对路径口径。
+  // `remove` 对派生实体必然以 `KB_ENTITY_DERIVED` 失败（4.2-04），界面据 `sourceDocId` 分两套处置而不是挂个必失败的按钮。
+  'kb.profile.list',
+  'kb.profile.evidenceFor',
+  'kb.profile.create',
+  'kb.profile.update',
+  'kb.profile.remove',
+  'kb.profile.sync',
+  'kb.profile.exportBackup',
+  'kb.profile.importBackup',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -706,6 +718,82 @@ export interface SnapshotDiffView {
 }
 
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
+/**
+ * 知识库实体过进程边界的形状（4.2-05 的实体树数据源）。
+ *
+ * 这是 `@auto-cc/plugin-resume-kb` 里 `KbEntityView` 的**镜像**而不是 import：`shared` 在 L1，
+ * 不允许依赖 L2 的能力包（AGENTS.md §4.1），同 `PendingImportRowView` 之于 `PendingImportView` 的做法。
+ * `normalizedHash` 在界面上没有用处，但它是 4.2-06「改完确实落库」的可比读数，所以照样带过来。
+ */
+export interface KbEntityRowView {
+  readonly entityId: string;
+  readonly kind: KbEntityKindView;
+  readonly parentId: string | null;
+  /** 来源简历文档 id；`null` 表示用户手工建的实体（永远不会被同步清理，见 4.2-04） */
+  readonly sourceDocId: string | null;
+  readonly payload: Readonly<Record<string, string>>;
+  readonly normalizedHash: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/** 实体种类（镜像 `KbEntityKind`；界面按它取 i18n 文案，英文串不直接上界面，对齐 §5.5）。 */
+export type KbEntityKindView = 'experience' | 'project' | 'skill' | 'achievement';
+
+/**
+ * 一次证据反查的命中项（镜像 `EvidenceRef`，4.2-05 展开态的数据源）。
+ * `reason` 是判定码（`contains` = 一侧完全覆盖另一侧，`overlap` = 部分词重合），文案由界面按码取。
+ */
+export interface KbEvidenceRowView {
+  readonly entityId: string;
+  readonly kind: KbEntityKindView;
+  /** 0～1 的匹配强度，主进程已按 4 位小数取整 */
+  readonly score: number;
+  readonly reason: 'contains' | 'overlap';
+  readonly matchedTokens: readonly string[];
+}
+
+/** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
+export interface KbCreateRowInput {
+  readonly kind: KbEntityKindView;
+  readonly payload: Readonly<Record<string, string>>;
+  readonly parentId?: string | null;
+}
+
+/** 一次同步的读数（镜像 `KbSyncResult`）。 */
+export interface KbSyncRowResult {
+  readonly docId: string;
+  readonly created: number;
+  readonly updated: number;
+  readonly removed: number;
+}
+
+/** 一次删除的读数（镜像 `KbRemoveResult`：删了几条 + 解除归属几条）。 */
+export interface KbRemoveRowResult {
+  readonly entityId: string;
+  readonly removed: number;
+  readonly detached: number;
+}
+
+/** 一次备份导出的回执（镜像 `KbExportResult`）。 */
+export interface KbExportRowResult {
+  readonly filePath: string;
+  readonly exported: number;
+}
+
+/** 备份导入的冲突策略（镜像 `KbImportMode`，默认 `skip`）。 */
+export type KbImportModeView = 'skip' | 'overwrite';
+
+/** 一次备份导入的读数（镜像 `KbImportResult`）。 */
+export interface KbImportRowResult {
+  readonly filePath: string;
+  readonly total: number;
+  readonly created: number;
+  readonly overwritten: number;
+  readonly skipped: number;
+  readonly danglingParents: number;
+}
+
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
@@ -926,6 +1014,49 @@ export interface BridgeSignatures {
    * issues 已清空的历史记录不出现。
    */
   'resume.parse.pending': { args: []; returns: PendingImportRowView[] };
+  /**
+   * 列出知识库实体（spec 4.2-05）：可按种类与来源文档过滤，按更新时间倒序。
+   * 界面拿到的是整棵树的平铺读数，父子关系靠 `parentId` 在渲染层组织——关系是库里的真相，不另存一份。
+   */
+  'kb.profile.list': {
+    args: [filter?: { kind?: KbEntityKindView; sourceDocId?: string | null }];
+    returns: KbEntityRowView[];
+  };
+  /**
+   * 由一句陈述反查支撑它的实体（spec 4.2-03 / 05 的展开态）：分数与判定全在主进程的纯函数里算，
+   * **不经过模型**；查无支撑返回空数组而不是失败（4.5 要靠它区分「有证据」与「模型编的」）。
+   */
+  'kb.profile.evidenceFor': {
+    args: [claim: string, filter?: { kind?: KbEntityKindView; sourceDocId?: string | null }];
+    returns: KbEvidenceRowView[];
+  };
+  /**
+   * 手工新建一条实体（spec 4.2-02）：`sourceDocId` 在服务侧恒为 `null`，
+   * 因此这条永远不会被下一次同步当成「已不在简历里」而清掉。
+   */
+  'kb.profile.create': { args: [input: KbCreateRowInput]; returns: KbEntityRowView };
+  /**
+   * 更新一条实体的载荷（spec 4.2-06 的编辑口）：整体覆盖，归属与来源不变。
+   * 派生实体在这里仍可编辑，但界面不给出这个入口——它的下一次 `sync()` 会按简历工作副本重写。
+   */
+  'kb.profile.update': {
+    args: [entityId: string, payload: Readonly<Record<string, string>>];
+    returns: KbEntityRowView;
+  };
+  /**
+   * 删除一条**手工**实体（spec 4.2-04）：下属解除归属而不是连带删除。
+   * 派生实体以 `KB_ENTITY_DERIVED` 结构化失败上浮，界面据此给「去简历里删」的指引。
+   */
+  'kb.profile.remove': { args: [entityId: string]; returns: KbRemoveRowResult };
+  /**
+   * 从简历工作副本重新派生实体（spec 4.2-01 的幂等同步）：界面「导入后建库」与 4.2-04 的
+   * 「在简历里删掉再同步」都走这一口，工作副本不存在时以 `KB_SOURCE_MISSING` 失败。
+   */
+  'kb.profile.sync': { args: [docId: string]; returns: KbSyncRowResult };
+  /** 导出全库为本地 JSON 备份（spec 4.2-08）：路径由用户给，父目录必须已存在。 */
+  'kb.profile.exportBackup': { args: [filePath: string]; returns: KbExportRowResult };
+  /** 从本地 JSON 备份导入（spec 4.2-08）：单事务，中途失败整批回滚；默认策略 `skip` 不动用户已有数据。 */
+  'kb.profile.importBackup': { args: [filePath: string, mode?: KbImportModeView]; returns: KbImportRowResult };
 }
 
 /**
@@ -969,6 +1100,8 @@ export const RENDERER_EVENTS = [
   'outbound/approval-requested',
   // 风控信号（spec 2.7-01）：暂停由 `workflow.runner` 在主进程做，界面只负责把「卡在哪、为什么」说出来。
   'browser/risk-signal',
+  // 知识库实体表被写过（spec 4.2-06）：编辑即时生效靠它，界面不轮询也不靠用户手动刷新。
+  'kb/entities-changed',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -984,6 +1117,7 @@ export interface RendererEventSignatures {
   'jd/progress': JdProgressEvent;
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
+  'kb/entities-changed': KbEntitiesChangedEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */
