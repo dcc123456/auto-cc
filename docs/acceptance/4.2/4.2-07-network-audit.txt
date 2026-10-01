@@ -1,0 +1,26 @@
+4.2-07 网络审计：知识库数据全本地，除用户显式配置的 LLM 网关外零上行
+执行时间：2026-10-01（Windows / Node 24.18 / Electron 44.4.5 真实进程）
+
+[1] 结构面（永久机检，写进单测而不是靠一次 grep）
+    packages/resume-kb/src/profile-service.test.ts > 「零上行审计」> 包内没有任何网络模块入口
+    对 src/ 下每个非 *.test.ts 文件断言不命中：
+      node:(http|https|net|dns|tls|dgram)、fetch( 、WebSocket、XMLHttpRequest、undici|axios|got|superagent|node-fetch
+    => 违例即红。这一条取代「跑一次看日志」的快照式审计：Node 内置模块的 ESM 命名空间只读
+       （实测 `http.request = stub` 抛 `TypeError: Cannot redefine property: request`），
+       所以运行期无法覆盖全部通道，把「根本不 import」变成断言才是真保证。
+
+[2] 运行面（同一条单测的第二例）
+    把 globalThis.fetch / WebSocket / XMLHttpRequest 换成计数存根后，依次跑：
+      list → evidenceFor → create → update → sync → exportBackup → importBackup → remove → agent 工具面 kb.profile.list
+    断言 uplink 计数为 []（零调用）。
+
+[3] 渲染层侧（KbPanel 不碰网络，§5.8）
+    $ grep -nE "style={|<svg|dangerouslySetInnerHTML|.css'|fetch(|WebSocket|XMLHttpRequest" packages/renderer/src/KbPanel.tsx
+    无命中 => 界面所有读数只经 window.autoCC 白名单调用主进程 service。
+
+[4] 唯一的上行入口仍然只有 LLM 网关（既有 1.x 机检，本轮复跑）
+    $ pnpm lint
+    ✔ LLM 入口唯一性检查通过（扫描 258 个文件，llm.chat 声明者唯一，模型端点只在 packages/llm）
+
+结论：4.2-07 通过。知识库这条链（解析 → 派生 → 实体表 → 证据反查 → 备份文件）不产生任何上行；
+      全仓唯一能出网的入口是 packages/llm，且由机检守住。

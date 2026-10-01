@@ -163,10 +163,10 @@
 | 4.2-04 | 删除经历时其下属项目/成果级联处理策略明确（不留孤儿行）               | U+C  | 断言外键/级联结果                  | [x]  |
 | 4.2-05 | 管理界面展示实体树与关系，条目可展开查看证据链                        | V    | 截图（列表 + 展开态）              | [x]  |
 | 4.2-06 | 界面新增/编辑实体即时生效（事件流驱动，不需重启或手动刷新）           | V    | 编辑后截图显示新值                 | [x]  |
-| 4.2-07 | 知识库数据全本地，无任何上行请求（除用户显式配置的 LLM 网关）         | C    | 网络审计：除 llm 外零外部请求      | [ ]  |
+| 4.2-07 | 知识库数据全本地，无任何上行请求（除用户显式配置的 LLM 网关）         | C    | 网络审计：除 llm 外零外部请求      | [x]  |
 | 4.2-08 | 支持导出/导入知识库备份（本地文件），导入冲突有明确策略               | C    | round-trip + 冲突用例              | [x]  |
-| 4.2-09 | 界面文案全部 i18n、样式全部 Tailwind、图标全部 lucide                 | C    | 1.2-13~16 规则复跑 0 违规          | [ ]  |
-| 4.2-10 | 变量与函数命名有含义，无 `data/res/temp/flag` 类命名                  | C    | AGENTS.md §3.4 抽样核对            | [ ]  |
+| 4.2-09 | 界面文案全部 i18n、样式全部 Tailwind、图标全部 lucide                 | C    | 1.2-13~16 规则复跑 0 违规          | [x]  |
+| 4.2-10 | 变量与函数命名有含义，无 `data/res/temp/flag` 类命名                  | C    | AGENTS.md §3.4 抽样核对            | [x]  |
 | 4.2-11 | 表结构与 P2 的 JD 表、P3 的文档表无重复定义（同一实体只有一处真相源） | C    | 三计划表清单对账，重复项必须已合并 | [x]  |
 
 **4.2-a 落地记录（2026-10-01）**——迁移 11 `kb_entities` + 实体派生 + `kb.profile` CRUD
@@ -332,6 +332,31 @@
   该包 7 文件 / **126** 用例全绿；根 `pnpm typecheck` / `lint`（含渲染层规范：2 个语言包 22 个源文件键对齐）/
   `format:check` / `test` 全绿。V 证据：`docs/acceptance/4.2/4.2-05-tree-evidence.png`、
   `4.2-06-manual-created.png`、`4.2-06-instant-update.png`、`4.2-05-dom-assertions.txt`。
+
+### 4.2-e 落地记录（4.2-07 / 09 / 10 的收口，2026-10-01）
+
+- **4.2-07 用「结构断言」而不是「一次快照」**：先按 1.9-09 的先例做 grep 审计，随后把它升级成单测——
+  对 `packages/resume-kb/src` 每个非测试文件断言不命中 `node:(http|https|net|dns|tls|dgram)`、`fetch(`、
+  `WebSocket`、`XMLHttpRequest`、`undici|axios|got|superagent|node-fetch`。动机是实测撞到的环境事实：
+  **Node 内置模块的 ESM 命名空间只读**，`http.request = stub` 直接抛
+  `TypeError: Cannot redefine property: request`，所以"运行期打桩覆盖全部通道"在这台机器上做不到，
+  只留 `globalThis.fetch`（可写）+ `WebSocket` + `XMLHttpRequest` 三个存根跑完
+  `list → evidenceFor → create → update → sync → exportBackup → importBackup → remove → agent 工具面`
+  并断言零调用，其余靠 import 面守住。两条都是永久机检，比一次性日志审计强。
+- **4.2-09 复跑的是 1.2 那套机检本身**，不另写一套：`pnpm lint` = eslint（样式只 Tailwind、图标只 lucide、
+  JSX 裸中文硬拦）+ `check-renderer-conventions.ts`（zh-CN / en 键逐条对齐）。对 `KbPanel.tsx` 另做定向 grep
+  复核：无 `style={}`、无 `<svg>`、无 `dangerouslySetInnerHTML`、无非入口样式 import；
+  中文只剩注释，41 条文案全在 `shell.kb` 下且动态值走插值。
+- **4.2-10 抽样口径**：按 §3.4 的禁用名做标识符级 grep（不是全文 grep，避免误伤正文），
+  `KbPanel.tsx` 与 `resume-kb` 四个新文件 0 命中；同时列出承担语义的新名字
+  （`deriveEntities` / `payloadHashOf` / `rankEvidence` / `linesToPayload` / `primaryTextOf` / `isDerived` …）
+  供人工复核，布尔量用 `is` 前缀。
+- **本片的已知边界**：4.2-07 的审计范围是**知识库这条链**（解析 → 派生 → 实体表 → 证据反查 → 备份文件）
+  与"全仓唯一出网入口是 `packages/llm`"这条既有不变量；它**不等于**整个 app 的运行时抓包审计——
+  后者要等 2.x 的浏览器内核与真实平台链路一起看，届时按 §7.2 只能在 fixture 上做。
+- **单测覆盖**：`profile-service.test.ts` 新增「零上行审计」2 例，该包 7 文件 / **128** 用例全绿；
+  根 `pnpm typecheck`（0 error）/ `lint`（四项检查全过）/ `format:check` / `test` 全绿。
+  证据：`docs/acceptance/4.2/4.2-07-network-audit.txt`、`4.2-09-10-ui-conventions-naming.txt`。
 
 ## 4.3 本地检索（BM25 默认，向量可选）
 

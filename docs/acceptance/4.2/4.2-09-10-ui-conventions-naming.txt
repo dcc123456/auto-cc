@@ -1,0 +1,26 @@
+4.2-09 界面规范复跑（1.2-13~16 同一套机检）+ 4.2-10 命名抽样
+执行时间：2026-10-01
+
+[4.2-09] $ pnpm lint
+  > eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts
+           && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts
+  ✔ 渲染层规范检查通过（2 个语言包，22 个源文件）   <- 含 KbPanel.tsx；zh-CN / en 键逐条对齐，缺翻译即失败
+  eslint 侧对 §5.1（非入口样式 import）/ §5.3（<svg> 字面量、dangerouslySetInnerHTML）/
+  §5.5（JSX 裸中文文案）三条是硬拦，本轮 0 违规。
+  定向复核 KbPanel.tsx：
+    $ grep -nE "style=\{|<svg|dangerouslySetInnerHTML|\.css'" packages/renderer/src/KbPanel.tsx   → 无命中
+    $ grep -nP "[\x{4e00}-\x{9fff}]" packages/renderer/src/KbPanel.tsx | 排除注释与 t() 行        → 仅剩 1 处 JSX 注释（401 行），非用户可见文案
+  图标：KbPanel 只用 lucide-react 的 Database / Download / Pencil / Plus / RefreshCw / Search / Trash2 / Upload。
+  文案：41 个键全在 shell.kb 命名空间下，zh-CN 与 en 同步落地（动态值走 i18next 插值 {{count}} / {{docId}}，不做字符串拼接）。
+
+[4.2-10] 命名抽样（AGENTS.md §3.4）
+  $ grep -nE "\b(const|let|function|param)\s+(data|res|temp|flag|obj2|item)\b" \
+      packages/renderer/src/KbPanel.tsx packages/resume-kb/src/{profile-service,entities,evidence,backup}.ts
+  无命中。
+  新代码里承担语义的名字（读名字即可知装什么、属哪个阶段）：
+    deriveEntities / payloadHashOf / manualEntityId / evidenceTextOf / rankEvidence
+    encodeBackup / decodeBackup / kbBackupSchema / KbEntityDraft / EvidenceReason / KbBackupEntry
+    KB_PROFILE_MIGRATION_VERSION / EditingDraft / KIND_LABEL_KEY / REASON_LABEL_KEY / ACTION_LABEL_KEY
+    payloadToLines / linesToPayload / primaryTextOf / lookUpEvidence / syncFromDoc / openEditor / saveDraft
+  布尔量前缀：isDerived（派生行判定）。
+  文档 ID 常量：KB_PROFILE_MIGRATION_VERSION = 11，号段在注释里列全并被单测断言（防撞号跳过建表）。
