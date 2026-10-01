@@ -1,8 +1,8 @@
 /**
  * `@auto-cc/plugin-resume-doc` 对外出口（AGENTS.md §4.2：`src/index.ts` 是唯一门面）。
  *
- * P3 生成轨的地基包：简历文档模型 + Schema + 归一化/hash + diff + 容错导入 + 落库服务。
- * 本包**不认识**渲染 / 打印 / 模板（那是 3.2 / 3.3 的活），只交出「一份合法简历长什么样、怎么存怎么比」。
+ * P3 生成轨的地基包：简历文档模型 + Schema + 归一化/hash + diff + 容错导入 + 落库服务 + 模板渲染（纯函数）。
+ * 本包**不认识**打印 / 导出（那是 3.3 的活）——模板只交出「一份合法简历渲染成什么 HTML」，不碰 printToPDF、不落地字体子集。
  */
 export {
   createEmptyDocument,
@@ -41,3 +41,11 @@ export {
   type ResumeDocConfig,
   type SaveResult,
 } from './doc-store.js';
+export {
+  resumeTemplate,
+  TemplateBindingError,
+  type Template,
+  type TemplateContext,
+  type TemplateLocale,
+  type TemplateOrigin,
+} from './template.js';
