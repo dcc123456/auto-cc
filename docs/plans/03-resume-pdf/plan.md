@@ -29,6 +29,19 @@
 | WASM 引擎      | 随包内嵌（不首启动下载），经自定义协议/`file` + CSP 白名单加载                 | `mupdf` 与 `pdfjs-dist` 为 **AGPL-3.0**：作为未修改库消费，分发须附 NOTICE；`canva-pdf` README 自述 MIT 但**无 LICENSE 文件**，抽取前须补授权 |
 | 存储           | `store`（node:sqlite）存文档 JSON + 版本快照；PDF 文件落 userData 目录         | 复用 1.3，不新建存储层                                                                                                                        |
 
+### 1.1 生成轨打印管线可行性结论（本机 Windows / Electron 44.4.5 实测）
+
+3.3 是 M5 判据主体，落码前按 §6.2 先读 `electron.d.ts` 坐实 API，并解决「中文字体随包内嵌」这一头号跨端风险：
+
+- **`printToPDF` 可用且够用于 A4**：`webContents.printToPDF(options: PrintToPDFOptions): Promise<Buffer>`（d.ts:18535），
+  `PrintToPDFOptions` 原生含 `pageSize: 'A4'`、`margins`、`printBackground`、`preferCSSPageSize`、`scale`、`displayHeaderFooter`、`pageRanges`。
+  → 模型 `DEFAULT_LAYOUT`（A4 + mm 边距）可 1:1 映射到打印选项（兑现 3.3-03「配置集中、无散落魔法数」），产物是 Buffer 直接落 userData（无需 Puppeteer，兑现 3.3-02）。
+- **分层落点（AGENTS.md §4.1）**：`printToPDF` 依赖 `WebContents`，而视图/窗口归 L1 `shell`（见 `packages/shell/src/view-takeover.ts`），
+  L2 `resume-doc` **禁止反向依赖 L1**。故打印执行器落在 shell/main，`resume-doc` 只交出「渲染 HTML + 打印选项 + 字体 @font-face 源」，经依赖注入被 shell 调用；`resume.export.toPdf` 的 service 门面在 resume-doc，实际 `printToPDF` 由注入的打印端口完成。
+- **中文字体已选定并内嵌**：取 `Noto Sans SC`（Google，SIL OFL 1.1，允许内嵌 + 子集化）的 `chinese-simplified` + `latin` 两档字重 woff2（合计约 2.3 MB），
+  落 `resources/fonts/**`，许可证全文随附 `resources/fonts/OFL.txt` 并记入 `LICENSES.md`。打印 HTML 经 `@font-face` 声明该字体，Chromium 打印时按用到的字形**自动子集内嵌**，产物字形三端一致（服务于 3.3-05/06/07）——**无需另引 fontkit 之类的子集化依赖**。
+- **仍待本机实跑收口（V / C 腿）**：真实 `printToPDF` 产物的「文本层逐字符全等、字形数量级、并发两份不串、隐藏视图无闪窗、逐页截图」需拉起真实 Electron 窗口 + CDP harness 取证（§7.1），是 3.3 实现阶段的工作，本结论只坐实「可行且路径已定」，不提前判任何 V/C 条目通过。
+
 ## 2. 包与 service
 
 ```
