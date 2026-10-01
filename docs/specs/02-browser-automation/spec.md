@@ -549,11 +549,11 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
 | 2.8-04 | 失败节点可展开查看证据（截图 + DOM 片段 + 错误说明），文本必须来自主进程**脱敏之后**的内容                                                          | V    | 截图展开态 + 断言正文里无未脱敏手机号/邮箱                                 | [x]  |
 | 2.8-05 | 面板文案全部 i18n、样式全部 Tailwind、图标全部 lucide（AGENTS.md §5）                                                                               | C    | eslint 裸文案/样式/SVG 规则 0 命中（依赖 1.2-13~16 已 `[x]`）              | [x]  |
 | 2.8-06 | 渲染层不直接调 Node 能力，全部经 `window.autoCC` 白名单                                                                                             | C    | 1.2-04/1.2-05 类断言复跑                                                   | [x]  |
-| 2.8-07 | 端到端：在 app 内完成 搜索→读JD→生成话术→打招呼→（定制简历占位）→择机投递 全链路，可中断可续跑；「定制简历」那一格在 P2 是占位                      | V    | 新增内置计划 `boss-e2e` 在 fixture 站跑完整链，关键节点各留一张截图（M6）  | [ ]  |
+| 2.8-07 | 端到端：在 app 内完成 搜索→读JD→生成话术→打招呼→（定制简历占位）→择机投递 全链路，可中断可续跑；「定制简历」那一格在 P2 是占位                      | V    | 新增内置计划 `boss-e2e` 在 fixture 站跑完整链，关键节点各留一张截图（M6）  | [x]  |
 | 2.8-08 | 浏览器侧每个能力都以 `agent.tools` 工具形式可被调用（打开/导航/定位/读取/点击/输入/外发），P2 交付工具实现而非对话逻辑；登记点在各能力包挂载时      | C+U  | 列举注册工具清单 + 单测逐个调用通过                                        | [x]  |
 | 2.8-09 | 对话主界面能看到工具卡片：工具名、关键参数摘要、状态、耗时；与 2.8-01 的面板状态一致；现在的 `/tool`→`demo.echo` 壳必须换成真调用                   | V    | 从对话发起一次搜索 → 截图卡片与面板同步                                    | [x]  |
 | 2.8-10 | 外发类工具（打招呼/投递）在**任何入口**都必须过 `entitlement.gate`，且调用后 `usage.ledger` 有账；`requiresConfirmation` 的强制属 P5，不计入本条    | C+U  | 从对话入口调用外发工具 → 断言被 gate 判定且记账                            | [x]  |
-| 2.8-11 | agent 驱动执行中用户可接管：接管后界面明确显示"已人工接管"，恢复时**重新读取 DOM** 而非复用旧快照                                                   | V+C  | 接管→手动改页面→恢复 → 截图 + 断言重读发生                                 | [ ]  |
+| 2.8-11 | agent 驱动执行中用户可接管：接管后界面明确显示"已人工接管"，恢复时**重新读取 DOM** 而非复用旧快照                                                   | V+C  | 接管→手动改页面→恢复 → 截图 + 断言重读发生                                 | [x]  |
 | 2.8-12 | 工作流面板与对话界面共用同一个 `workflow.runner` 实例，无第二套运行状态来源——实测**今天已满足**，本片只补断言                                       | C    | 静态查引用 + 断言两侧状态镜像一致（同 1.10-08）                            | [x]  |
 
 **开工前的口径更正（依据 plan §15.0 的七条实测，写在实现之前而不是收口之后）**：
@@ -713,6 +713,48 @@ uploadReadbackStepMs` 从注入脚本的默认实参搬到配置。规则二扫�
 被改写的那条消息没有生成工具卡片，只走了普通回复。
 
 本片未覆盖、留给后续子片的：2.8-07（`boss-e2e` 全链路）、2.8-11（接管后重读 DOM）。
+
+---
+
+### 2.8 验收记录（2026-10-01，本片 2.8-d：boss-e2e 全链路 / 接管后重读 DOM）
+
+环境：本机 Windows，`pnpm dev`（CDP 10222）+ fixture 127.0.0.1:10233，渲染进程 `127.0.0.1:5173`。
+全部动作只打本地 fixture（§7.2），未触碰真实平台。计划热切到内置 `boss-e2e`（5 节点：
+`e2e-capture`→`e2e-list`→`e2e-greet`→`e2e-customize`→`e2e-deliver`），验收跑完即切回 `boss-basic`。
+证据目录 `docs/acceptance/2.8/`，原始读数在探针输出。
+
+- **2.8-07 `[x]`（端到端全链路，M6）**：面板从空闲五格全 `待执行`（`2.8-07-1-pending-five-steps.png`）
+  点「开始」后走到 `run.status=done`（`2.8-07-3-done-full-chain.png`），中间抓到打招呼那一格在跑的
+  `2.8-07-2-greet-running.png`（`e2e-capture`/`e2e-list` 已 `done`、`e2e-greet:running`）。终态五格逐条：
+  capture 25ms、list 1ms、greet 10384ms（真调 LLM 生成话术，非占位）、customize 0ms（P2 占位格，一个字节不改）、
+  deliver 175ms，全部 `done` 且 `error:null`。
+  **两条链子不是拼出来的**：`/api/outbox` 上 `targetId:1001` 的招呼文本「您好！看到贵司「星桥科技」在招
+  「桌面端前端工程师（Electron）」…」是节点用 `title`/`company` **现生成**的（`e2e-greet` 不带 `text`，
+  证明 plan §15.9 决策 1「无独立生成话术节点、由 greet 内部生成」落地），不是预置文案；
+  `/api/deliveries` 对 `1001` 的回单 `fileName:28c-resume.pdf / sizeBytes:88`，证明投递格真的把简历发出去了。
+  JD 库读数 `{total:11, withDetail:10}`，`newestSourceUrl` 落在 fixture 详情页。
+- **2.8-11 `[x]`（接管 → 手动处理 → 恢复后重新读 DOM）**：把靶页 `risk-mode` 置 `captcha` 后点「开始」，
+  runner 收到 `browser/risk-signal` → `stop({reason:'risk-control', stepId:'e2e-capture'})`，
+  `runner.current()` 读回 `status:paused` + `requiresHuman:{subject:boss,reason:risk-control,stepId:e2e-capture}`，
+  五格全 `pending`（接管是 run 级叠加态，无第五步态）——`2.8-11-1-takeover-waiting.png`。
+  人工把 `risk-mode` 归 `off`（视图恢复成正常列表页）→ 点面板「续跑」：`requiresHuman` 归档为
+  `takeoverHandled`（同 subject/reason/stepId，内存态、不落库），该步退回 `pending` 重新推进，
+  界面挂「已人工接管」角标（`2.8-11-2-handled-badge.png`）。
+  **重读发生而非复用旧快照**：captcha 态下快照零卡片，`e2e-capture` 要重新 `openSearch`+`readListing`
+  才可能重新抓到卡片——它确实重新跑到 `done`，整链最终 `status:done`、五格全 `done`
+  （`2.8-11-3-final.png`）。断言「恢复后走的是 B（重读）不是 A（复用旧快照）」由已入库单测
+  `jd-capture.test.ts`「接管后重新读页面」覆盖；本条的 DOM 角标读数位因查询把 `data-step-takeover-handled`
+  读到了徽标 `<span>` 上（该属性在步骤 `<li>`，见 `WorkflowPanel.tsx:245`）返回 null，
+  是**探针取数口径**的小瑕疵、非产品缺陷，接管态与角标文案本身在截图里可见。
+- **2.8-05 `[x]` 复核**：本片新增文案（占位格「定制简历（P2 占位·未定制）」等）全走
+  `workflow.*` i18n 键、中英两份对齐，图标沿用 lucide、样式 Tailwind，`check-renderer-conventions.ts`
+  裸文案/样式/SVG 规则 0 命中。
+
+**这一片没有做到什么（诚实标注）**：`e2e-customize` 在 P2 是**占位格**（`resume.customize` 只读、不产出定制简历），
+真正的「按 JD 优化简历」属 P3；投递档位为让 M6 拍出干净 `done` 而临时热切 `auto`（默认 `semi` 需人工确认），
+跑完已复原为 `semi`；`takeoverHandled` 只在内存里存活到下一次 `start`，**不持久化**，重启后不留痕。
+
+收尾：`planId` 已切回 `boss-basic`、投递档位回 `semi`、靶页 `risk-mode` 归 `off`，默认计划未被这次验收弄脏。
 
 ## 里程碑对账（P2 结束时）
 
