@@ -22,6 +22,35 @@
 | 内容真实性           | **事实校验闭环**为强制关卡：LLM 输出必须过 `facts.locked` 比对，命中篡改即重试，仍不过则拒绝产出并标记「需人工确认」 | 简历造假是产品级风险，不是质量问题；`factCheck` 思路可抽（MIT 声明 + 零依赖纯函数）                                                                                                                                                        |
 | 部署形态             | 全部本地；无账号体系                                                                                                 | `ai-resume` 的 Express 路由 / JWT 多用户 auth 整体丢弃                                                                                                                                                                                     |
 
+### 1.1 4.1「简历导入与解析」选型与证据（一次取证，写死结论）
+
+依赖许可**必须以发布产物内的 LICENSE 文件为准**，不接受 README 致谢的转述——
+本仓库 `docs/research/source-repos-analysis.md` §1 记录 `pdfjs-dist` 为 AGPL-3.0，
+其来源是 `canva-pdf` 的 README 致谢，属二手信息。实测推翻了它：
+
+| 候选                         | 版本                                     | 许可（实测来源）                                                          | 判定                                                                                                         |
+| ---------------------------- | ---------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `pdfjs-dist`                 | 6.3.289 / 2.16.105（两个时点都拉了产物） | **Apache-2.0**，读自 jsdelivr 上发布包内 `LICENSE`（两份一致）            | **可用作 PDF 抽文本**。原「AGPL-3.0」结论作废；无需 AGPL NOTICE。`mupdf` 仍是 AGPL-3.0，不在本计划引入范围   |
+| `mammoth`                    | 1.13.0                                   | **BSD-2-Clause**（包内 `LICENSE`，Copyright (c) 2013 Michael Williamson） | **可用作 DOCX 抽文本**（它的定位就是 docx→html/text，不做版式）。`ai-resume` 用的也是它                      |
+| `unpdf`                      | 1.8.1                                    | MIT                                                                       | 备选（更薄的 pdfjs 封装）。当前不引入，等 4.1 真跑通后再评估是否替换                                         |
+| OCR（tesseract.js / paddle） | —                                        | Apache-2.0 / Apache-2.0                                                   | **不引入**（spec 4.1-05 明确「不做 OCR」，模型体积与「用户只装一个 app」冲突）；扫描件只判定、只提示人工补录 |
+| ChromaDB / sqlite-vec        | —                                        | Apache-2.0 / MIT                                                          | **不引入**（见 §1「检索（关键改判）」）                                                                      |
+
+解析层的三条复用强制项（AGENTS.md §2.1/§2.5，出现第二份实现即视为缺陷）：
+
+1. **脱敏只有 `@auto-cc/core` 的 `redactText`**：手机号 / 邮箱 / 18 位证件号的值形态与键值形态判据
+   已经在 `packages/core/src/redact.ts` 落地（spec 2.7-07 的产物），4.1-09 直接复用，
+   **禁止在 resume-kb 内再写一份正则**。
+2. **解析产物只有 P3.1 文档模型**：解析输出必须是 `ResumeDocument`（`createEmptyDocument` + `makeField`），
+   不新建「简历 JSON 第二真相源」。事实锁定字段（company / role / period / achievement）由 `makeField`
+   自动带上 `locked`/`factKey`，正好是 §3-6 不可编造清单的落点。
+3. **落库只有一个连接**：经 `asApp(ctx).store`，包内禁止 `new DatabaseSync`（与 1.3/3.x 同口径）。
+
+包名与目录：新增 `packages/resume-kb`，包名沿用本仓库 cordis 插件前缀写成
+**`@auto-cc/plugin-resume-kb`**（§2 代码块里的 `@auto-cc/resume-kb` 是早期写法，以本条为准）。
+它必须能独立测试，因此**纯解析函数（时间归一化、区块识别）放在不依赖 cordis 的模块里**，
+service 只做装配——这样 4.1-03 的 ≥8 例参数化单测不需要起 store。
+
 ## 2. 包与 service
 
 ```

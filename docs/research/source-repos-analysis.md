@@ -26,11 +26,11 @@
 
 ## 1. 许可证红线（先于一切设计决策）
 
-| 仓库              | 自身代码许可                                                                                                      | 运行时依赖许可                                                                                | 结论：可否搬代码                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `canva-pdf`       | README §许可证 声明 **MIT**；**但仓库无 `LICENSE` 文件、`package.json` 无 `license` 字段** `[实测]`               | `pdfjs-dist` **AGPL-3.0**、`mupdf` **AGPL-3.0**、`pdf-lib`/`fontkit` MIT `[实测 README 致谢]` | **可搬**，但必须：①要求作者补 LICENSE 文件；②分发附完整 NOTICE |
-| `browser-copilot` | **PolyForm Noncommercial 1.0.0**，`LICENSE` 文件与 `package.json` 双处明示，Copyright (c) 2026 dcc123456 `[实测]` | Playwright / tesseract.js / @xyflow/react 等                                                  | **不可搬**（在商用前提下）。只能做**行为与架构移植**，逐行重写 |
-| `ai-resume`       | README §License 声明 **MIT**；`server/package.json` 写 `ISC`；**同样无 `LICENSE` 文件** `[实测]`                  | ChromaDB、Puppeteer、mysql2、pdfkit、mammoth                                                  | **可搬**（纯逻辑模块），但注意其依赖不要一起带进来             |
+| 仓库              | 自身代码许可                                                                                                      | 运行时依赖许可                                                                                                          | 结论：可否搬代码                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `canva-pdf`       | README §许可证 声明 **MIT**；**但仓库无 `LICENSE` 文件、`package.json` 无 `license` 字段** `[实测]`               | `pdfjs-dist` **Apache-2.0** `[实测更正 2026-10-01]`、`mupdf` **AGPL-3.0**、`pdf-lib`/`fontkit` MIT `[实测 README 致谢]` | **可搬**，但必须：①要求作者补 LICENSE 文件；②分发附完整 NOTICE |
+| `browser-copilot` | **PolyForm Noncommercial 1.0.0**，`LICENSE` 文件与 `package.json` 双处明示，Copyright (c) 2026 dcc123456 `[实测]` | Playwright / tesseract.js / @xyflow/react 等                                                                            | **不可搬**（在商用前提下）。只能做**行为与架构移植**，逐行重写 |
+| `ai-resume`       | README §License 声明 **MIT**；`server/package.json` 写 `ISC`；**同样无 `LICENSE` 文件** `[实测]`                  | ChromaDB、Puppeteer、mysql2、pdfkit、mammoth                                                                            | **可搬**（纯逻辑模块），但注意其依赖不要一起带进来             |
 
 ### 1.1 由许可证推导的三条硬约束
 
@@ -38,8 +38,12 @@
    `browser-copilot` 是 PolyForm 非商用授权，因此 auto-cc 中**不得出现该仓库的任何代码、任何字面复制的
    prompt 文本、任何复制的图标/UI 资源**。允许保留的是**概念**（snapshot→ref→act→observation 协议、
    IR→compile 单向编译、失败分类自愈的环路设计），概念不受版权保护。
-2. **AGPL 依赖必须显式记账**。`pdfjs-dist` 与 `mupdf` 均为 AGPL-3.0。作为未修改库消费不传染源代码，
+2. **AGPL 依赖必须显式记账**。`mupdf` 是 AGPL-3.0。作为未修改库消费不传染源代码，
    但**分发即触发 NOTICE 义务**，且若我们对 WASM 产物做任何修改则传染。P3 必须先做「依赖许可清单」验收项。
+   **实测更正（2026-10-01，写本节时它是二手转述）**：`pdfjs-dist` **不是** AGPL-3.0——
+   本行原先的「AGPL-3.0」来自 `canva-pdf` README 的致谢段，而拉取发布产物（6.3.289 与 2.16.105 两个时点）
+   内的 `LICENSE` 文件读到的都是 **Apache-2.0**。结论：P4 4.1 抽 PDF 文本可以消费 `pdfjs-dist` 而**不触发 AGPL NOTICE**；
+   `mupdf` 仍按 AGPL 记账。证据与推导写在 `docs/plans/04-resume-kb/plan.md` §1.1。
 3. **MIT 声明缺 LICENSE 文件 = 授权不完整**。`canva-pdf` 与 `ai-resume` 都只在 README 里写了许可，
    仓库里无 LICENSE 文件、`canva-pdf` 的 package.json 还缺 `license` 字段。在把它们当作抽取来源之前，
    需要补齐（或从作者取得书面授权）。
