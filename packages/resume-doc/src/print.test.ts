@@ -95,6 +95,19 @@ describe('3.3-05 随包内嵌字体在打印 HTML 里被声明', () => {
   });
 });
 
+describe('3.3-08 分页护栏：条目整体不跨页、区块标题不成孤儿', () => {
+  it('打印 HTML 里带 break-inside:avoid（护条目）与 h2 的 break-after:avoid（护标题）', () => {
+    const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
+    expect(html).toContain('.resume-entry{break-inside:avoid;}');
+    expect(html).toContain('h2{break-after:avoid;}');
+  });
+
+  it('每个条目的包裹 div 都带 resume-entry 类（护栏规则命中的选择器）', () => {
+    const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
+    expect(html).toContain('class="resume-entry');
+  });
+});
+
 describe('模板正文与语言贯穿到打印文档（服务 3.2 顺延的 en 导出腿）', () => {
   it('zh-CN 下 html lang 为 zh-CN，正文出现中文区块标签与数据', () => {
     const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
