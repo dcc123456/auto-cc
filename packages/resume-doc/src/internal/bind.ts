@@ -231,11 +231,15 @@ export function toEntryView(templateId: string, section: Section, entry: Entry, 
     pushOptionalLine('degree');
     pushOptionalLine('major');
   } else {
-    // summary / skills：无必选槽，逐字段平铺为「标签:值」。
+    // summary / skills：无必选槽，逐字段平铺。自由正文键 `text` 不配标签（否则会把键名 "text" 印进 PDF），
+    // 其余仍走 fieldLabel——未登记键名照旧露出，与 `fieldLabel` 的「绝不渲染空白」口径一致。
     heading = '';
     for (const field of entry.fields) {
       if (field.value === '') continue;
-      lines.push({ label: fieldLabel(field.key, locale), value: escapeHtml(field.value) });
+      lines.push({
+        label: field.key === 'text' ? '' : fieldLabel(field.key, locale),
+        value: escapeHtml(field.value),
+      });
     }
   }
   return { heading, meta, lines };
