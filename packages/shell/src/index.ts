@@ -436,3 +436,5 @@ declare module '@auto-cc/core' {
     shell: ShellService;
   }
 }
+
+export { ResumePrintService } from './print-executor.js';

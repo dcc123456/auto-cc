@@ -50,4 +50,5 @@ export {
   type TemplateLocale,
   type TemplateOrigin,
 } from './template.js';
-export { resumePrint, type PdfInspection, type PrintRequest, type PrintRequestOptions } from './print.js';
+export { resumePrint, type PdfInspection, type ResumePrintOptions, type ResumePrintRequest } from './print.js';
+export { ResumeExportService, type ExportReceipt, type ResumeExportConfig } from './export-service.js';

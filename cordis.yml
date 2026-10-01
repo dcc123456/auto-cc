@@ -107,6 +107,13 @@ plugins:
   - id: shell
     dependsOn: [plugins]
 
+  # 打印执行器（spec 3.3）：全仓**唯一**调 `webContents.printToPDF` 的地方，落在 L1 shell 包（它是唯一认识 Electron 的层）。
+  # 排在 shell 之后：它挂的是 shell 服务的进程，与 Electron app ready 同期就位。摘掉这一行，
+  # 下面的 `resume-export` 连同进 PENDING（它的 `inject` 里有 `resume.print`），界面点「导出 PDF」给出结构化错误——
+  # 「渲染层无 electron」这条边界因此是可演示的：L2 的 resume-doc 永远拿不到 BrowserWindow，只能通过这个端口要一次渲染。
+  - id: resume-print
+    dependsOn: [shell]
+
   # 内置内核会话（spec 1.8）：每个平台一份 `persist:<id>` 分区，登录态落 userData。
   # 排在 shell 之后：它要请 shell 按指定分区重建内嵌视图（视图宿主唯一，见 plan §8.3 决策 1）。
   # 这里只配本地 fixture —— 三个分区指向同一个服务的三条路径，用来证明 cookie 互不共享；
@@ -279,6 +286,13 @@ plugins:
   # 无运行期配置（Schema 是空 strictObject）。摘掉它，后续任何按 id 读简历文档的入口得到结构化失败。
   - id: resume-doc
     dependsOn: [store]
+
+  # 导出编排（spec 3.3-11）：读合法文档 → 装配打印请求 → 交给 `resume.print` 端口渲染 → 落盘 + 回写页数，
+  # 收敛成 `resume.export` 服务。它自己**不认识 Electron**（L2 领域包），只经端口消费打印能力（ports-and-adapters，plan §3.3）。
+  # 三条 `dependsOn` 各对应一种「装不上就报结构化错误」的演示：摘 `resume-doc` 读不到文档、摘 `resume-print` 无人渲染、
+  # 摘 `config` 拿不到 userData 落盘目录——三者都让本服务连同 PENDING，而不是崩在运行期。
+  - id: resume-export
+    dependsOn: [resume-doc, resume-print, config]
 
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。

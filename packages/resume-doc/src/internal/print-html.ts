@@ -10,6 +10,7 @@
  */
 import { resumeTemplate, type TemplateLocale } from '../template.js';
 import type { ResumeDocument } from '../model.js';
+import type { ResumePrintRequest } from '@auto-cc/shared';
 
 /** 随包内嵌的简历正文字体族名（打印 HTML 与 CSS `font-family` 必须一致）。 */
 const FONT_FAMILY = 'Noto Sans SC';
@@ -24,24 +25,6 @@ const EMBEDDED_FONTS = [
   { file: 'noto-sans-sc-latin-400-normal.woff2', weight: 400, unicodeRange: 'U+0000-00FF' },
   { file: 'noto-sans-sc-latin-700-normal.woff2', weight: 700, unicodeRange: 'U+0000-00FF' },
 ] as const;
-
-/**
- * `printToPDF` 的调用选项（本地结构类型，刻意不 import electron：本包不认识 Electron）。
- * 只声明我们真正会传给内核的字段；`preferCSSPageSize` 为真时 `pageSize`/`margins` 由 `@page` 覆盖，
- * 这里仍显式给出 A4 + 边距归零，与 plan「页边距归零 + A4 + preferCSSPageSize」口径一致，避免双份边距。
- */
-export interface PrintRequestOptions {
-  pageSize: 'A4';
-  printBackground: boolean;
-  preferCSSPageSize: boolean;
-  margins: { top: number; bottom: number; left: number; right: number };
-}
-
-/** 一份可被 shell 打印执行器直接消费的请求：完整 HTML 文本 + 打印选项。 */
-export interface PrintRequest {
-  html: string;
-  options: PrintRequestOptions;
-}
 
 /**
  * 把简历文档渲染成「可独立打印的完整 HTML 文档」。
@@ -84,7 +67,7 @@ export function toPrintRequest(
   templateId: string,
   locale: TemplateLocale,
   fontBaseUrl: string,
-): PrintRequest {
+): ResumePrintRequest {
   return {
     html: buildPrintHtml(doc, templateId, locale, fontBaseUrl),
     options: {

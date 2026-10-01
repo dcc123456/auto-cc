@@ -9,7 +9,7 @@
  */
 import { buildPrintHtml, toPrintRequest } from './internal/print-html.js';
 
-export type { PrintRequest, PrintRequestOptions } from './internal/print-html.js';
+export type { ResumePrintOptions, ResumePrintRequest } from '@auto-cc/shared';
 
 /** printToPDF 返回 Buffer 的字节级结构读数（供页数回写与产物完整性断言）。 */
 export interface PdfInspection {

@@ -34,7 +34,7 @@ import {
   JdStoreService,
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { ResumeDocService, ResumeExportService } from '@auto-cc/plugin-resume-doc';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -42,7 +42,7 @@ import {
   WorkflowRunnerService,
   WorkflowRunStoreService,
 } from '@auto-cc/plugin-workflow';
-import { ShellService } from '@auto-cc/shell';
+import { ResumePrintService, ShellService } from '@auto-cc/shell';
 
 export const REGISTRY: Registry = {
   config: ConfigService,
@@ -103,6 +103,12 @@ export const REGISTRY: Registry = {
   // 简历文档存储（spec 3.1-08）：`resume_docs` 表的唯一落点，迁移号段 6。P3 生成轨的地基，
   // 只落库不做渲染——3.2 的模板、3.3 的打印轨都从这张表读同一份合法文档，故它是 P3 的第一块积木。
   'resume-doc': ResumeDocService,
+  // 打印执行器（spec 3.3）：全仓唯一调 `webContents.printToPDF` 的地方，落在 L1 shell（它才认识 Electron）。
+  // 单独一个 id 是为了让「渲染层无 electron」这条边界可视化——摘掉它，`resume-export` 连同进 PENDING。
+  'resume-print': ResumePrintService,
+  // 导出编排（spec 3.3-11）：把「读合法文档 → 装配打印请求 → 交给打印轨 → 落盘 + 回写页数」串成 `resume.export` 服务，
+  // 自身不认识 Electron，只经 `resume.print` 端口消费打印能力（ports-and-adapters，见 plan §3.3 分层落点）。
+  'resume-export': ResumeExportService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,

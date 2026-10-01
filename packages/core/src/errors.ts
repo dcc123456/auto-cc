@@ -62,6 +62,9 @@ export type AppErrorCode =
   // 由调用方决定是否重试。合成一个码会让界面对两者说同一句谎话。
   | 'LLM_UNAVAILABLE'
   | 'LLM_REQUEST_FAILED'
+  // 简历导出（spec 3.3-11）：文档缺失 / 非法、内核打印失败（字体缺失、printToPDF 抛错）、落盘不可写
+  // 都归这一个码——三者在界面上的处置相同（一句可读中文提示 + 可重试），所以不拆成三个码让界面重复劳动。
+  | 'RESUME_EXPORT_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
