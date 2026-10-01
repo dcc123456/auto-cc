@@ -36,6 +36,7 @@ import {
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
+import { ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -118,6 +119,10 @@ export const REGISTRY: Registry = {
   // 供 3.7-04 的按 id 还原与后续 3.7-02 的投递追溯读取。摘掉它，`resume-export` 连同进 PENDING（它的 `inject` 里有它），
   // 界面点「导出 PDF」给出结构化错误——「导出」与「导出即留档」因此是可分别摘除的两件事，而不是悄悄少记一份历史。
   'resume-snapshot': ResumeSnapshotService,
+  // 简历导入（spec 4.1-06 / 07 / 09 / 10）：`resume_imports` 表的唯一落点，迁移号段 10，也是 PDF / DOCX /
+  // Markdown 三条输入腿在桌面端的唯一入口（pdf.js 与 mammoth 是外置依赖，见 plan §1.2 与 1.7-15）。
+  // 摘掉它，界面的「导入简历」得到「服务未挂载」的结构化失败，而导出轨照旧——「读进来」与「排出去」分属两条。
+  'resume-parse': ResumeParseService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,

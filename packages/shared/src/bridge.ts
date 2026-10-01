@@ -173,6 +173,11 @@ export const RENDERER_ALLOWLIST = [
   // 界面拿到的是「哪个快照、模板与时刻」与「条目级 / 字段级差异」两种读数。
   'resume.snapshot.list',
   'resume.snapshot.diff',
+  // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
+  // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
+  // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
+  'resume.parse.fromFile',
+  'resume.parse.pending',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -580,6 +585,61 @@ export interface ResumeSeedView {
   hash: string;
 }
 
+/**
+ * 导入源格式（镜像 resume-kb 的 `ResumeSourceFormat`）：按魔数判定，与文件扩展名无关。
+ * shared 不认识领域包（依赖方向 + 不让 cordis 泄进渲染层产物），故线格式在此独立声明。
+ */
+export type ResumeSourceFormatView = 'pdf' | 'docx' | 'markdown' | 'text';
+
+/** 一次导入的结论（镜像 resume-kb 的 `ImportStatus`）。`scanned` 是「疑似扫描件」这条**正常结论**，不是异常（spec 4.1-05）。 */
+export type ImportStatusView = 'imported' | 'scanned';
+
+/** 解析不确定标记的种类（镜像 resume-kb 的 `ParseIssueCode`，spec 4.1-04 的清单按它归类）。 */
+export type ParseIssueCodeView =
+  'text-too-short' | 'missing-field' | 'unparsable-field' | 'sensitive-redacted' | 'unknown-section';
+
+/** 一条待确认记录（镜像 resume-kb 的 `ParseIssue`）：`excerpt` 主进程侧已脱敏，界面直接显示、不再二次加工。 */
+export interface ParseIssueView {
+  code: ParseIssueCodeView;
+  /** 出问题的区块种类；文档级问题（过短、姓名缺失）为 null。 */
+  sectionKind: string | null;
+  entryId: string | null;
+  fieldKey: string | null;
+  excerpt: string;
+}
+
+/** 一个区块的条目计数（导入回执的片段）：正文不过进程边界，界面只拿到「读到了哪几块、各几条」。 */
+export interface ImportSectionView {
+  kind: string;
+  title: string;
+  entries: number;
+}
+
+/** 一次导入的回执（镜像 resume-kb 的 `ImportReceipt`）。 */
+export interface ImportReceiptView {
+  status: ImportStatusView;
+  docId: string;
+  /** 来源哈希（spec 4.1-07 的幂等键），界面用它指认「这份文件已经导过」。 */
+  sourceHash: string;
+  format: ResumeSourceFormatView;
+  /** false 表示同哈希的二次导入：库里的行数不变。 */
+  isNew: boolean;
+  textLength: number;
+  sections: ImportSectionView[];
+  issues: ParseIssueView[];
+}
+
+/** 待确认清单的一行（镜像 resume-kb 的 `PendingImportView`，spec 4.1-04 界面的数据源）。 */
+export interface PendingImportRowView {
+  docId: string;
+  sourceHash: string;
+  format: ResumeSourceFormatView;
+  status: ImportStatusView;
+  textLength: number;
+  updatedAt: number;
+  issues: ParseIssueView[];
+}
+
 /** 一次导出的回执（镜像 resume-doc 的 `ExportReceipt`）。 */
 export interface ExportReceiptView {
   docId: string;
@@ -855,6 +915,17 @@ export interface BridgeSignatures {
    * 界面拿到的是条目级 + 字段级差异；任一侧查无此快照或内容已损坏以 `INVALID_ARGUMENT` 结构化失败上浮。
    */
   'resume.snapshot.diff': { args: [fromSnapshotId: string, toSnapshotId: string]; returns: SnapshotDiffView };
+  /**
+   * 导入一份简历文件（spec 4.1-01 / 06 / 07）：主进程按绝对路径读字节、判格式、抽文本、幂等入库。
+   * 失败以 `AppErrorPayload`（`RESUME_IMPORT_FAILED`）上浮，界面给一句中文；疑似扫描件不算失败，
+   * 而是 `status: 'scanned'` 的正常回执（spec 4.1-05）。
+   */
+  'resume.parse.fromFile': { args: [filePath: string]; returns: ImportReceiptView };
+  /**
+   * 列出还带着未处理条目的导入记录（spec 4.1-04 的待确认清单）：按更新时间倒序，
+   * issues 已清空的历史记录不出现。
+   */
+  'resume.parse.pending': { args: []; returns: PendingImportRowView[] };
 }
 
 /**

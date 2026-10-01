@@ -311,6 +311,17 @@ plugins:
   - id: resume-export
     dependsOn: [resume-doc, resume-print, resume-snapshot, config]
 
+  # 简历导入（spec 4.1-06 / 07 / 09 / 10）：`resume_imports` 表由本服务自己把迁移推进（号段 10，
+  # delivery_records 是 9），也是 PDF / DOCX / Markdown 三条输入腿在桌面端的唯一入口。
+  # `maxBytes` 是单次导入的字节上限（防误选大文件把主进程吃掉），显式写在这里而不是藏在代码默认值里，
+  # 演示「选了一份 20 MB 的文件」能在装配面板现场改小、不重启 app。
+  # 依赖只有 store：抽取与判定全在 `@auto-cc/plugin-resume-kb` 内部（pdf.js / mammoth 是外置依赖，见 1.7-15），
+  # 不认识导出轨——摘掉这一行，界面「导入简历」得到「服务未挂载」的结构化失败，导出照旧。
+  - id: resume-parse
+    dependsOn: [store]
+    config:
+      maxBytes: 5242880
+
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。
   # 演示流式速度：在装配面板改 chunkChars / chunkIntervalMs（不重启 app）。

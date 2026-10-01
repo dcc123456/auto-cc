@@ -65,6 +65,10 @@ export type AppErrorCode =
   // 简历导出（spec 3.3-11）：文档缺失 / 非法、内核打印失败（字体缺失、printToPDF 抛错）、落盘不可写
   // 都归这一个码——三者在界面上的处置相同（一句可读中文提示 + 可重试），所以不拆成三个码让界面重复劳动。
   | 'RESUME_EXPORT_FAILED'
+  // 简历导入（spec 4.1-06）：路径非法 / 文件读不出 / 格式不认识 / PDF·DOCX 结构损坏
+  // 都归这一个码——它们在界面上的处置相同（一句可读中文 + 让人换个文件），拆成六个码只会让界面写六遍分支；
+  // 具体子原因在 `details.code` 里（`SourceFailureCode`），技术原文在 `message` 尾部，不进界面。
+  | 'RESUME_IMPORT_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

@@ -51,7 +51,8 @@ export type ResumeSourceResult =
     }
   | {
       readonly status: 'too-short';
-      readonly format: ResumeSourceFormat | null;
+      /** 过短腿仍然带判定出的格式：扫描件是「读得出是 PDF 但没文本层」，界面要按格式给补录指引。 */
+      readonly format: ResumeSourceFormat;
       readonly issues: readonly ParseIssue[];
       readonly textLength: number;
     }

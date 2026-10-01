@@ -1,8 +1,11 @@
-import { Ban, Eye, FileDown, FileText, GitCompareArrows, History, RefreshCw } from 'lucide-react';
+import { Ban, Eye, FileDown, FileText, GitCompareArrows, History, ListChecks, RefreshCw, Upload } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
+  AppErrorPayload,
   ExportReceiptView,
+  ImportReceiptView,
+  PendingImportRowView,
   ResumeLocaleView,
   ResumeSeedView,
   SnapshotDiffView,
@@ -23,13 +26,31 @@ const CHANGE_LABEL_KEY = {
   modified: 'resume.changeModified',
 } as const;
 
+/** 待确认标记的种类 → 文案键（五种标记在 4.1-04 的清单里各有一句人话，界面按它分列）。 */
+const ISSUE_LABEL_KEY = {
+  'text-too-short': 'resume.issueTextTooShort',
+  'missing-field': 'resume.issueMissingField',
+  'unparsable-field': 'resume.issueUnparsableField',
+  'sensitive-redacted': 'resume.issueSensitiveRedacted',
+  'unknown-section': 'resume.issueUnknownSection',
+} as const;
+
+/** 导入源格式 → 文案键（格式由主进程按魔数判定，界面只转述读数）。 */
+const FORMAT_LABEL_KEY = {
+  pdf: 'resume.formatPdf',
+  docx: 'resume.formatDocx',
+  markdown: 'resume.formatMarkdown',
+  text: 'resume.formatText',
+} as const;
+
 /**
- * 简历生成轨自测面板（spec 3.3-01 / 04 / 05 / 09 / 10 的界面化身）：
- * 「载入固定内容 → iframe 预览 → 导出 PDF」三步把「文档 → 同一份打印 HTML → PDF」这条链
- * 摆到界面上，让 harness 能在同一张截图里取到预览与回执证据（AGENTS.md §7.1）。
+ * 简历生成轨自测面板（spec 3.3-01 / 04 / 05 / 09 / 10 + 4.1-04 / 05 / 06 / 07 的界面化身）：
+ * 「导入真实文件 → 载入固定内容 → iframe 预览 → 导出 PDF」把「原文 → 脱敏文档 → 同一份打印 HTML → PDF」
+ * 这条链摆到界面上，让 harness 能在同一张截图里取到待确认清单、错误态与回执证据（AGENTS.md §7.1）。
  *
  * 只转述主进程读数：预览 HTML 与导出用的是**同一份** `resume.export` 产物（3.3-01「预览即导出所见」在界面上的体现），
- * 回执里的页数 / 字节 / 路径全部来自 `toPdf`，界面不自己算（AGENTS.md §2.5）。
+ * 回执里的页数 / 字节 / 路径全部来自 `toPdf`，导入回执里的字段数与待确认标记全部来自 `resume.parse`，界面不自己算（AGENTS.md §2.5）。
+ * 渲染层没有读文件的通道，所以导入入口是一行绝对路径输入框，而不是原生文件选择器（见 bridge.ts 的白名单注释）。
  * 编辑轨（3.5）之前没有录入入口，故用 `seedDemo` 喂一份虚构内容做端到端种子（3.3-10）。
  */
 export function ResumePanel() {
@@ -42,11 +63,46 @@ export function ResumePanel() {
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
   const [diff, setDiff] = useState<SnapshotDiffView>();
+  const [importPath, setImportPath] = useState('');
+  const [lastImport, setLastImport] = useState<ImportReceiptView>();
+  const [importError, setImportError] = useState<AppErrorPayload>();
+  const [pending, setPending] = useState<PendingImportRowView[]>([]);
   const bridge = window.autoCC;
 
-  // 本面板无持久快照要回读，动作后不需要额外刷新主进程状态。
-  const read = useCallback(async () => {}, []);
+  /**
+   * 重读待确认清单（spec 4.1-04）：导入落库与确认都发生在主进程，界面不猜它当下的状态，
+   * 所以每个动作结束后都调一次 `resume.parse.pending`（AGENTS.md §2.5）。
+   */
+  const read = useCallback(async () => {
+    const reply = await bridge?.resume['parse.pending']();
+    if (reply?.ok) setPending(reply.value);
+  }, [bridge]);
   const { busy, notice, run } = useBridgeAction(read);
+
+  /**
+   * 导入一份简历文件（spec 4.1-06 / 07）：把绝对路径交给主进程 `resume.parse.fromFile`，
+   * 抽取、脱敏、判定、入库全在主进程做，界面只摆回执与待确认标记（§2.5）。
+   * 同一份文件重复导入时 `isNew` 为假，提示要说「已导入过、内容没变」而不是假装写了一遍新文档（4.1-07）。
+   */
+  const importResume = () =>
+    void run(t('resume.import'), () => bridge?.resume['parse.fromFile'](importPath.trim()), {
+      apply: (value) => {
+        setLastImport(value);
+        setImportError(undefined);
+      },
+      onError: setImportError,
+      describe: (value) =>
+        value.status === 'scanned'
+          ? t('resume.importScanned', { textLength: value.textLength })
+          : value.isNew
+            ? t('resume.importDone', {
+                docId: value.docId,
+                format: t(FORMAT_LABEL_KEY[value.format]),
+                textLength: value.textLength,
+                count: value.issues.length,
+              })
+            : t('resume.importDup', { docId: value.docId }),
+    });
 
   /**
    * 落一份演示文档（`base` 或 `edited`），成功后立刻按当前语言渲一次预览（种子与预览一次点到位）。
@@ -152,6 +208,103 @@ export function ResumePanel() {
           </select>
         </label>
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex flex-1 items-center gap-1 text-[11px] text-slate-400">
+          {t('resume.importPath')}
+          <input
+            data-testid="resume-import-path"
+            value={importPath}
+            onChange={(event) => setImportPath(event.target.value)}
+            className="min-w-[240px] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+          />
+        </label>
+        <button
+          type="button"
+          data-action="import"
+          disabled={importPath.trim() === '' || !!busy}
+          onClick={importResume}
+          className="flex items-center gap-1 rounded-md border border-indigo-800 px-2 py-1 text-[11px] text-indigo-300 hover:bg-indigo-950 disabled:opacity-40"
+        >
+          <Upload size={12} />
+          {t('resume.import')}
+        </button>
+      </div>
+
+      <p className="mt-1 text-[11px] text-slate-500" data-testid="resume-import-hint">
+        {t('resume.importHint')}
+      </p>
+
+      {importError && (
+        <p
+          className="mt-2 break-all rounded-md border border-rose-900 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200"
+          data-testid="resume-import-error"
+        >
+          {t('resume.importError', { code: importError.code, message: importError.message })}
+        </p>
+      )}
+
+      {lastImport && (
+        <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="resume-import-sections">
+          {lastImport.sections.map((section) => (
+            <span
+              key={section.kind}
+              data-testid="resume-import-section"
+              className="rounded border border-slate-700 px-1 text-[11px] text-slate-400"
+            >
+              {t(`resume.kind.${section.kind}`)} · {section.entries}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {pending.length === 0 ? (
+        <p className="mt-2 text-[11px] text-slate-500" data-testid="resume-pending-empty">
+          {t('resume.pendingEmpty')}
+        </p>
+      ) : (
+        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/60 p-3" data-testid="resume-pending-list">
+          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <ListChecks size={14} />
+            {t('resume.pending')} · {t('resume.pendingCount', { count: pending.length })}
+          </h3>
+          <ul className="mt-2 space-y-2">
+            {pending.map((row) => (
+              <li
+                key={row.sourceHash}
+                data-testid="resume-pending-row"
+                data-status={row.status}
+                className="rounded border border-slate-800 px-2 py-1.5"
+              >
+                <p className="text-[11px] text-slate-400">
+                  {t('resume.pendingRow', {
+                    docId: row.docId,
+                    textLength: row.textLength,
+                    time: new Date(row.updatedAt).toLocaleTimeString(),
+                  })}{' '}
+                  · {t(row.status === 'scanned' ? 'resume.statusScanned' : 'resume.statusImported')} ·{' '}
+                  {t(FORMAT_LABEL_KEY[row.format])}
+                </p>
+                <ul className="mt-1 space-y-0.5 pl-2">
+                  {row.issues.map((issue, index) => (
+                    <li
+                      key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
+                      data-testid="resume-pending-issue"
+                      className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
+                    >
+                      <span className="rounded border border-amber-900 px-1 text-amber-300">
+                        {t(ISSUE_LABEL_KEY[issue.code])}
+                      </span>
+                      <span>{issue.sectionKind ?? '-'}</span>
+                      <span className="break-all">{issue.excerpt}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button

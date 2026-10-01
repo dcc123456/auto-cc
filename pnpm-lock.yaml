@@ -269,6 +269,9 @@ importers:
       '@auto-cc/plugin-resume-doc':
         specifier: workspace:*
         version: link:../resume-doc
+      '@auto-cc/plugin-resume-kb':
+        specifier: workspace:*
+        version: link:../resume-kb
       '@auto-cc/plugin-sessions':
         specifier: workspace:*
         version: link:../sessions
@@ -455,6 +458,19 @@ importers:
       pdfjs-dist:
         specifier: ^6.3.289
         version: 6.3.289
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@auto-cc/plugin-config':
+        specifier: workspace:*
+        version: link:../config
+      '@auto-cc/plugin-logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/sessions:
     dependencies:

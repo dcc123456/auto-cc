@@ -16,6 +16,12 @@
     "@auto-cc/core": "workspace:*",
     "@auto-cc/plugin-resume-doc": "workspace:*",
     "mammoth": "^1.13.0",
-    "pdfjs-dist": "^6.3.289"
+    "pdfjs-dist": "^6.3.289",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@auto-cc/plugin-config": "workspace:*",
+    "@auto-cc/plugin-logger": "workspace:*",
+    "@auto-cc/plugin-store": "workspace:*"
   }
 }
