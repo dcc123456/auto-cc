@@ -1,0 +1,47 @@
+2.8-09 活体读数（对话真工具卡片）
+时间：2026-10-01 09:44~09:50（本机 Windows）
+台架：pnpm dev（AUTO_CC_USER_DATA_DIR=tmp/dev-userdata-25f，CDP 10222）+ pnpm fixture（10233）
+驱动：packages/testing 的 CdpSession，单进程连接（tmp/probe-28c-*.ts）
+      —— 分多次 `pnpm harness` 调用抓不到 running：每次进程启动 2~3 秒，而快工具只跑几十毫秒。
+
+【1】事件流：一次调用只推两次跳变，running 带 null 耗时、终态带真实耗时
+  jd.capture.run（无会话时）    {"s":"running","d":null} → {"s":"failed","d":5}
+  sessions.open                 {"s":"running","d":null} → {"s":"done","d":...}
+  jd.capture.run（有会话时）    {"s":"running","d":null} → {"s":"done","d":40} / {"s":"done","d":878}
+  outbound.deliver.perform 超时 {"s":"running","d":null} → {"s":"failed","d":120016}
+  outbound.deliver.perform 批准 {"s":"running","d":null,"at":1790819318308} → {"s":"done","d":68571,"at":1790819386908}
+
+【2】卡片 DOM 读数（批准分支，最后一次）
+  data-tool-id="outbound.deliver.perform"  data-tool-state="done"
+  data-tool-effect="outbound"              data-tool-confirm="true"
+  [data-tool-status]="已完成"              [data-tool-duration]="68571"
+  .font-medium（中文标题，走 i18n）="投递简历"
+  data-tool-input="{\"request\":{\"platform\":\"boss\",\"jobId\":\"2002\",\"filePath\":\"D:/.../tmp/28c-resume.pdf\",\"title\":\"后端工程师\",\"company\":\"某某网络\"}}"
+  镜像位 [data-testid="workflow-mirror"] = 「同一个 runner：未开始」
+
+【3】失败分支不改口（§1.7 第 8 条）
+  无会话：TOOL_FAILED：工具 jd.capture.run 执行失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面
+  缺附件：TOOL_FAILED：工具 outbound.deliver.perform 执行失败：没有要投递的简历文件：请求里没带 filePath，配置里也没设 resumeFile
+  等确认超时：TOOL_FAILED：工具 outbound.deliver.perform 执行失败：未投递：等待确认超过 120000ms，按拒绝处理
+  三张卡都保持红色「失败」+ 结构化原因原文，没有任何一条被写成「已完成」。
+
+【4】running 是真的挂在那里，不是抓帧抓快了
+  第 1 帧 1790819318476（state=running）→ 等 3 秒第 2 帧 1790819321626（state=running，DOM 复读仍是「执行中」）
+  两帧像素差 142（只有滚动条/时钟抖动），与终态帧差 331593 像素（16.85%）→ 证明 running 与 done 是两张不同的画面。
+  挂起的原因是产品行为本身：`outbound.deliver` 档位是 semi（cordis.yml:209），投递要等人工确认，
+  确认单在「诊断」视图的 JobLabPanel 里（App.tsx:109），点掉之后卡片才跳到 done 并落下 68571 毫秒耗时。
+
+【5】验收过程中的两处更正（都不是产品缺陷，记下来免得下次重踩）
+  a) 视图切换要用 `[data-view="workflow"]` / `[data-view="diagnostics"]`：`button:nth-of-type(2)` 点得到节点但页面不换，
+     于是确认单一直是 0x0 的隐藏节点，点了没反应。三个视图是 `hidden` 类切换、不卸载（App.tsx:85 注释），
+     所以切走再回来时对话卡片与滚动位置都还在。
+  b) 在 Git Bash 里给 harness 传 `/tool` 会被 MSYS 改成 `D:/daiwenchi/Git/tool`，
+     必须 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
+     顺带反向验证了前缀规则是字面匹配：那条被改写的消息没有生成工具卡片，只走了普通回复。
+
+【6】与 2.8-01 面板状态的关系（诚实说明）
+  这一片的工具调用都不建工作流 run（`jd.capture.run` / `outbound.deliver.perform` 走的是工具面直调，
+  不经过 `workflow.runner`），所以镜像位全程是「同一个 runner：未开始」——它和卡片不矛盾：
+  卡片说的是**这次工具调用**的状态，面板说的是**runner**的状态。
+  「对话发起 → 面板跟着动」这条判据要由 2.8-11（人工接管后重读 DOM）与 2.8-07（boss-e2e 全链路）来验，
+  那两条走的是 `workflow.runner.start`，会有真正的 run 状态可对照。
