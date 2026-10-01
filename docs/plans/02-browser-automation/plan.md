@@ -1914,8 +1914,10 @@ reload 后两个面板各自重新读库、只显示已确认时刻。证据五�
 ### 15.4 fixture 靶子与全链路（2.8-07 / M6 的落点）
 
 `boss-basic` 与 `boss-deliver` 都不足以当 M6 判据：前者没有投递/打招呼节点，后者从「已入库的 JD」起步。
-新增内置计划 **`boss-e2e`**：`jd.capture → script.generate → greet → deliver`（简历定制一格在 P2 只放**占位**——
-读知识库里既有经历拼一份附件路径，生成轨属 P3，不能在这里偷做），
+新增内置计划 **`boss-e2e`**：`jd.capture → jd.list → greeting.send → resume.customize → resume.deliver`
+（**2.8-d 实测更正**：原先写的 `script.generate` 不作为独立节点存在——话术生成已在 `greet.ts:163` 内部发生，
+再开一只节点类型就是同一逻辑两处，见 §15.9 决策 1；简历定制一格在 P2 只放**占位**——
+读配置里的简历文件路径并显式声明「未做岗位定制」，生成轨属 P3，不能在这里偷做，见 §15.9 决策 2），
 `startUrl` 全指本地仿站 10233。2.8-07 的验收是**在 app 首页面板里**跑完这条链、中途暂停再续跑，
 关键节点各一张截图；「占位」那一格在截图与验收记录里都要显式写成占位，不得算作 P3 完成。
 
@@ -2074,3 +2076,61 @@ P2 一条消息里至多一张卡（`attachToolPart` 是串行的），所以不
 **落点 5：`agent.test.ts` 里那句过期注释必须改。**
 它写着「P1 的注册表是空表」，而 2.8-b 之后生产注册表有九只工具——留着它，下一条读不到工具的人
 会照着它去查错地方（AGENTS.md §2.4 的"被替换的旧实现"也包括旧断言）。
+
+### 15.9 2.8-d 的落点设计（写代码前定稿，覆盖 2.8-07 / 2.8-11 / 2.8-05）
+
+**先量现状**（全部读源码得到，不是推断）：
+
+| #   | 事实                                                                                                                                                                                 | 位置                                                                                        | 对 2.8-d 的影响                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 1   | 内置计划只有 `boss-basic` / `boss-deliver` 两条，`planId` 在 `WorkflowRunnerService` 构造器里就解析成计划视图                                                                        | `workflow/src/plan.ts:215`、`index.ts:143`                                                  | 切计划需要服务重建，harness 用 `plugins.saveConfig('workflow', {planId})` 走热切，不改仓库里的默认值 |
+| 2   | 已登记的节点类型只有 `demo.flaky` / `jd.capture` / `jd.list` / `greeting.send` / `resume.deliver`                                                                                    | `executors.ts:69`、`jd-capture.ts:350`、`jd-store.ts:398`、`greet.ts:251`、`deliver.ts:553` | 链上**没有** `script.generate` 这个类型                                                              |
+| 3   | 话术生成已经在打招呼内部发生（无 `text` 时用 `title`/`company` 调 `outbound.script.generate`，来源写进账本 `source` 列）                                                             | `greet.ts:146-168`                                                                          | 见决策 1                                                                                             |
+| 4   | 节点参数是声明值，节点之间**没有传值通道**                                                                                                                                           | `plan.ts:20-40`（`params: record<string, string\|number\|boolean>`）                        | 「生成话术」单独一格产不出下一步能吃的东西                                                           |
+| 5   | 唯一一处页面派生缓存是适配器的 `seen`（jobId → 摘要，含 detailUrl）                                                                                                                  | `platform-boss/src/adapter.ts:147`                                                          | 2.8-11 的「复用旧快照」判据只能钉在它身上，见决策 3                                                  |
+| 6   | `pause` 把当前步打回 `pending`，`resume` 之后 `advance` **从头重跑这一步**，`runOnce` 重新 `openSearch` + `readListing`                                                              | `machine.ts:136`、`index.ts:355`、`jd-capture.ts:245-268`                                   | 重读是结构性的，不需要新机制；但要被断言钉住                                                         |
+| 7   | 接管点只活在内存与 `workflow/progress` 推送里，`toMirror` 一律把落库行写成 `requiresHuman: null`                                                                                     | `index.ts:1046-1066`、`run-store.ts:59-75`（无对应列）                                      | 「已人工接管」显示位若落库就是新状态存储，见决策 2                                                   |
+| 8   | 界面在接管**期间**有横幅与角标（`workflow-takeover` / `takeoverTitle` 等待你接管），**恢复后没有任何痕迹**                                                                           | `WorkflowPanel.tsx:200-220, 256-264`                                                        | spec 2.8-11 要的「接管后明确显示」缺的是这一段                                                       |
+| 9   | 仿站 10233 已具备全链靶页：`/api/jobs` + `/boss`(列表) + `/boss/detail` + `/chat` + `/deliver?targetId` + `/api/outbox` + `/api/threads` + `/api/risk-mode`，1002 恒回「岗位已下架」 | `scripts/fixture-server.ts:943-1305`                                                        | 一次 run 走完整链不必加路由；`/api/risk-mode` 就是 2.8-11 的接管扳机                                 |
+
+**决策 1：`boss-e2e` 的「生成话术」不新增节点类型，由 `greeting.send` 那一格承担。**
+候选 A 是照 §15.4 字面补一只 `script.generate` 执行器包一层 `outbound.script.generate`——**否决**：
+同一件事将出现两处（`greet.ts:163` 已经在调它，§2.2/§2.5），而节点间没有传值通道（事实 4），
+生成的正文交给下一步之后仍然要在下一步重新生成一遍，等于同一次 run 里说两遍话。
+候选 B（采纳）：`greeting.send` 节点带 `title`/`company` 不带 `text`，面板那一格文案写成「生成话术并打招呼」，
+证据取仿站 `/api/threads` 里真正落到页面上的那条文本 + 账本 `source` 列的 `scriptVersion:jdId`（spec 2.5-09 已有口）。
+由此 §15.4 那条链按**能力**对齐而不是按节点数对齐：`jd.capture(搜索) → jd.list(读JD) → greeting.send(生成话术+打招呼) → resume.customize(定制简历·占位) → resume.deliver(择机投递)`，格子数与 spec 文案一致。
+
+**决策 2：「定制简历」占位格 = 新节点类型 `resume.customize`，同时是一只只读工具，同一个实现两处登记。**
+它做的唯一一件真实的事是**把这次要发出去的简历文件定下来**：读 `outbound.deliver` 配置的 `resumeFile`，
+把文件名与字节数作为这一步的读数报出来，正文显式写「未做岗位定制（P3 生成轨）」。
+`effect: 'read'`、`retryTimes: 0`（它不碰页面，重复执行没有副作用）。
+否决方案：① 空跑直接 `done`——那一格在截图里就是骗人，spec 要求占位**显式写成占位**；
+② 放进 `workflow` 包当 demo 节点——`resumeFile` 是 outbound 的配置，放进内核层就是把领域事实挪错地方，还要多开一条依赖。
+
+**决策 3：2.8-11 的「重读 DOM」不加任何缓存失效机制，改成断言已有性质。**
+实测恢复路径必然重读（事实 6），而 `seen` 在每次 `readListing` 里被实时页面覆盖（事实 5），
+所以**不写** `invalidatePageCache`、不在 runner 里挂钩子问平台层——那是为不会发生的场景做防御（§2.6）。
+判据落成两条：
+
+- **C**：单测—— fake 页面让第一次列表读返回 A、第二次返回 B，中途制造一次接管并恢复，
+  断言库里落的是 **B**（重读发生）而不是 A（复用旧快照），且执行器第二次被调时 `openSearch` 也重新跑过；
+- **V**：harness——`/api/risk-mode captcha` 把 run 停在风控接管点，人工把 risk-mode 关掉并把视图换回列表页，
+  恢复后必须真抓到行入库（复用旧快照的话这里只会是零新增）。
+
+**决策 4：「已人工接管」显示位放在 run 视图里，不落库。**
+`WorkflowRunView` 增 `takeoverHandled`（复用 `WorkflowTakeoverView` 形状），`resume` 迁移时把
+`requiresHuman` 归档进去、`start` 时清空；面板据此在对应格子挂一枚「已人工接管」角标（lucide 现有图标）。
+**为什么只到内存**：接管点从来不入 `workflow_nodes`（事实 7），为它加列就是新增第二套状态存储（§2.7 禁止项），
+而跨进程重启那条路径的真相是「这一步没跑完」，不是「谁接管过」——`resumeRun` 之后徽标为空是**如实**，不是缺陷。
+
+**决策 5：2.8-05 只做复核。**
+本片新增的界面文案是 `workflow.step.*`（新节点 id 五键）与 `workflow.takeoverHandled`，
+zh-CN / en 两份语言包同时补齐，复跑 `pnpm lint`（eslint + `check-renderer-conventions.ts`）要求 0 命中。
+
+**明确不做**：简历生成轨（P3）、agent 规划循环、批准流 UI（P5）、把 `takeoverHandled` 落库、
+为 `script.generate` 新增节点类型（决策 1 已否决）。
+
+**验收方式**：`pnpm dev`（CDP 10222）+ 仿站 10233，用 `plugins.saveConfig('workflow', {planId:'boss-e2e'})`
+热切计划，在首页面板里跑完整链；关键节点各一张截图，外加「接管前 / 人工处理后 / 恢复后」三张，
+跑完把 `planId` 切回 `boss-basic` 并复跑一次原路径，确认默认计划没被这次验收弄脏。全程只打本地仿站（§7.2）。
