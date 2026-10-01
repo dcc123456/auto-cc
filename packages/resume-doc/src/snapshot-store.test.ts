@@ -1,5 +1,5 @@
 /**
- * `resume.snapshot` 落库用例（spec 3.7-01 / 04 / 05）。
+ * `resume.snapshot` 落库用例（spec 3.7-01 / 03 / 04 / 05）。
  *
  * 一律打**真的 `node:sqlite`**（系统临时目录，不进仓库，AGENTS.md §7.5）：
  * 快照的全部意义是「导出瞬间那份文档被不可变地存下来、日后能原样还原」，
@@ -70,6 +70,16 @@ function rawRow(db: DatabaseSync, snapshotId: string) {
        FROM resume_snapshots WHERE snapshot_id = ?`,
     )
     .get(snapshotId) as Record<string, string | number | bigint | null> | undefined;
+}
+
+/** 调 `diff` 并把抛出的错误对象取回来（断言它的 code 与「起点/终点」措辞，而不是只看抛没抛）。 */
+function catchDiff(snapshots: ResumeSnapshotService, from: string, to: string) {
+  try {
+    snapshots.diff(from, to);
+    return undefined;
+  } catch (error) {
+    return error as { code?: string; message?: string };
+  }
 }
 
 afterAll(async () => {
@@ -190,5 +200,111 @@ describe('3.7-05 保留上限与清理策略', () => {
     // 后插入的两条（f2、f3）留下，最早插入的 f1 被裁——rowid 兜底让同刻写入的取舍确定，而不是随机留谁。
     expect(listed.map((item) => item.snapshotId)).toEqual([third, second]);
     expect(listed.map((item) => item.snapshotId)).not.toContain(first);
+  });
+});
+
+describe('3.7-03 任意两份快照可 diff（条目级 + 字段级）', () => {
+  it('改一处字段值 + 加一个条目 → diff 精确到 key，事实锁定字段带出 locked', async () => {
+    const { snapshots } = await boot();
+    const before = snapshots.record(sampleDoc(), 'classic', 'f', 1);
+    const after = snapshots.record(
+      sampleDoc({
+        sections: [
+          {
+            id: 'exp',
+            kind: 'experience',
+            title: '经历',
+            entries: [
+              {
+                id: 'e1',
+                fields: [
+                  makeField('experience', 'company', '星桥信息科技'),
+                  makeField('experience', 'role', '后端工程师'),
+                ],
+              },
+              { id: 'e2', fields: [makeField('experience', 'company', '南屿软件')] },
+            ],
+          },
+        ],
+      }),
+      'classic',
+      'f',
+      2,
+    );
+
+    const result = snapshots.diff(before.snapshotId, after.snapshotId);
+    expect(result.isEmpty).toBe(false);
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0]).toMatchObject({ sectionId: 'exp', kind: 'experience', change: 'modified' });
+
+    const [modifiedEntry, addedEntry] = result.sections[0]!.entries;
+    // `role` 两侧相同 → 不出现在 diff 里（界面只摆真变化，§2.6）。
+    expect(modifiedEntry).toMatchObject({
+      entryId: 'e1',
+      change: 'modified',
+      fields: [{ key: 'company', change: 'modified', before: '星桥科技', after: '星桥信息科技', locked: true }],
+    });
+    // 整条目新增：它的每个字段按 added 摆出（before=null，界面据此显示「（无）」）。
+    expect(addedEntry).toMatchObject({
+      entryId: 'e2',
+      change: 'added',
+      fields: [{ key: 'company', change: 'added', before: null, after: '南屿软件', locked: true }],
+    });
+  });
+
+  it('整区块新增 → section 级 added，其下条目与字段全部合成出来给界面摆', async () => {
+    const { snapshots } = await boot();
+    const before = snapshots.record(sampleDoc(), 'classic', 'f', 1);
+    const after = snapshots.record(
+      sampleDoc({
+        sections: [
+          ...sampleDoc().sections,
+          {
+            id: 'skills',
+            kind: 'skills',
+            title: '技能',
+            entries: [{ id: 'k1', fields: [{ key: 'text', value: 'Electron', locked: false, factKey: null }] }],
+          },
+        ],
+      }),
+      'classic',
+      'f',
+      2,
+    );
+
+    const result = snapshots.diff(before.snapshotId, after.snapshotId);
+    expect(result.sections).toHaveLength(1);
+    expect(result.sections[0]).toMatchObject({ sectionId: 'skills', kind: 'skills', change: 'added' });
+    expect(result.sections[0]!.entries).toEqual([
+      {
+        entryId: 'k1',
+        change: 'added',
+        fields: [{ key: 'text', change: 'added', before: null, after: 'Electron', locked: false }],
+      },
+    ]);
+  });
+
+  it('内容一致的两次快照 → isEmpty，界面走「无差异」态而不是空列表', async () => {
+    const { snapshots } = await boot();
+    const before = snapshots.record(sampleDoc(), 'classic', 'f', 1);
+    const after = snapshots.record(sampleDoc(), 'modern', 'g', 2);
+    // 模板与字体不同不算内容差异：diff 只看文档正文（模板属呈现，3.7-01 另有一列记录）。
+    expect(snapshots.diff(before.snapshotId, after.snapshotId)).toEqual({ sections: [], isEmpty: true });
+  });
+
+  it('任一侧读不回合法文档 → 结构化 AppError 并说清是起点还是终点', async () => {
+    const { snapshots, db } = await boot();
+    const known = snapshots.record(sampleDoc(), 'classic', 'f', 1).snapshotId;
+
+    const fromMissing = catchDiff(snapshots, 'never-recorded', known);
+    expect(fromMissing).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(String(fromMissing?.message)).toContain('起点');
+
+    const corrupt = snapshots.record(sampleDoc(), 'classic', 'f', 2).snapshotId;
+    db.prepare("UPDATE resume_snapshots SET doc_json = '{ broken' WHERE snapshot_id = ?").run(corrupt);
+    const toCorrupt = catchDiff(snapshots, known, corrupt);
+    expect(toCorrupt).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(String(toCorrupt?.message)).toContain('终点');
+    expect(String(toCorrupt?.message)).toContain('JSON 解析失败');
   });
 });

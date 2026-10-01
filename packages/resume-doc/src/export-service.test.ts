@@ -263,3 +263,24 @@ describe('3.7-01 每次导出产生一条不可变快照', () => {
     expect(new Set(listed.map((item) => item.templateId))).toEqual(new Set(['classic', 'modern']));
   });
 });
+
+describe('3.7-03 界面链路：两份种子 → 两次导出 → 快照差异非空', () => {
+  it('base 与 edited 两种子各自导出后，diff 落在改动的字段与新增的区块上', async () => {
+    const { exporter, snapshots } = await boot();
+    const base = exporter.seedDemo('base');
+    await exporter.toPdf(base.docId, 'classic');
+    exporter.seedDemo('edited');
+    await exporter.toPdf(base.docId, 'classic');
+
+    // 列表最新的在前：起点取最旧那份，正是界面「快照历史」按钮预置的一对。
+    const listed = snapshots.list(base.docId);
+    expect(listed).toHaveLength(2);
+    const result = snapshots.diff(listed[1]!.snapshotId, listed[0]!.snapshotId);
+    expect(result.isEmpty).toBe(false);
+    const kinds = result.sections.map((section) => `${section.kind}:${section.change}`);
+    // edited 只动概述与技能两处自由文本，并整块加一段项目经历（锁定的公司/职位/时间随它进 diff）。
+    expect(kinds).toEqual(expect.arrayContaining(['summary:modified', 'skills:modified', 'project:added']));
+    const project = result.sections.find((section) => section.kind === 'project')!;
+    expect(project.entries[0]!.fields.every((field) => field.locked)).toBe(true);
+  });
+});
