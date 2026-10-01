@@ -274,6 +274,12 @@ plugins:
       evidenceDir: evidence
       retentionRuns: 20
 
+  # 简历文档存储（spec 3.1-08 / P3 生成轨地基）：`resume_docs` 表由本服务自己把迁移推进（号段 6）。
+  # 只落库、不渲染：3.2 模板与 3.3 打印轨都从这张表读同一份合法文档。依赖里带 store 即可，
+  # 无运行期配置（Schema 是空 strictObject）。摘掉它，后续任何按 id 读简历文档的入口得到结构化失败。
+  - id: resume-doc
+    dependsOn: [store]
+
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。
   # 演示流式速度：在装配面板改 chunkChars / chunkIntervalMs（不重启 app）。

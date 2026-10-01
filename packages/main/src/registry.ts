@@ -34,6 +34,7 @@ import {
   JdStoreService,
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
+import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -99,6 +100,9 @@ export const REGISTRY: Registry = {
   'workflow-store': WorkflowRunStoreService,
   // 2.4 起槽位来自计划、进度同时落库；1.10 的六步占位流水线已被节点模型替换。
   workflow: WorkflowRunnerService,
+  // 简历文档存储（spec 3.1-08）：`resume_docs` 表的唯一落点，迁移号段 6。P3 生成轨的地基，
+  // 只落库不做渲染——3.2 的模板、3.3 的打印轨都从这张表读同一份合法文档，故它是 P3 的第一块积木。
+  'resume-doc': ResumeDocService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,

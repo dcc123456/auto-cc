@@ -22,6 +22,7 @@
     "@auto-cc/plugin-outbound": "workspace:*",
     "@auto-cc/plugin-platform-boss": "workspace:*",
     "@auto-cc/plugin-plugins": "workspace:*",
+    "@auto-cc/plugin-resume-doc": "workspace:*",
     "@auto-cc/plugin-sessions": "workspace:*",
     "@auto-cc/plugin-store": "workspace:*",
     "@auto-cc/plugin-workflow": "workspace:*",
