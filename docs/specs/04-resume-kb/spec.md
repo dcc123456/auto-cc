@@ -149,14 +149,15 @@
   不产生工作副本——没有文档可存，第 3 例断言 `resume_docs` 行数为 0。
 - 顺手纠出两处**文档与常量对不上**的陈旧注释（`cordis.yml` 与 `packages/main/src/registry.ts`
   把 `resume-doc` 的迁移号段写成 6，实际常量是 7）：号段是防撞车的唯一依据，写错的号段比没有注释更坏。
-- 本条不改动 4.2 任何一行的状态位：4.2-01/02/11 的判据还要等 `kb_entities`（迁移 11）与实体派生落地。
+- 本条当时不改动 4.2 任何一行的状态位：4.2-01/02/11 的判据还要等 `kb_entities`（迁移 11）与实体派生落地。
+  后续更新：4.2-a（2026-10-01，见本节下方落地记录）已勾上 4.2-02 与 4.2-11，4.2-01 因「可删」未做而保持 `[ ]`。
 
 ## 4.2 知识库建模与管理界面
 
 | ID     | 验收标准                                                              | 方式 | 验证操作                           | 状态 |
 | ------ | --------------------------------------------------------------------- | ---- | ---------------------------------- | ---- |
 | 4.2-01 | 四类实体（经历/项目/技能/成果）+ 关系定型，可建可查可改可删           | U+C  | CRUD 单测 + migration up/down      | [ ]  |
-| 4.2-02 | 每条实体有稳定 id，供 `evidenceRefs` 反查引用（4.5/4.6 依赖）         | C    | 引用完整性断言                     | [ ]  |
+| 4.2-02 | 每条实体有稳定 id，供 `evidenceRefs` 反查引用（4.5/4.6 依赖）         | C    | 引用完整性断言                     | [x]  |
 | 4.2-03 | `evidenceFor(claim)` 能由一句简历描述反查到支撑实体                   | U    | 单测：给定句子命中正确项目         | [ ]  |
 | 4.2-04 | 删除经历时其下属项目/成果级联处理策略明确（不留孤儿行）               | U+C  | 断言外键/级联结果                  | [ ]  |
 | 4.2-05 | 管理界面展示实体树与关系，条目可展开查看证据链                        | V    | 截图（列表 + 展开态）              | [ ]  |
@@ -165,7 +166,50 @@
 | 4.2-08 | 支持导出/导入知识库备份（本地文件），导入冲突有明确策略               | C    | round-trip + 冲突用例              | [ ]  |
 | 4.2-09 | 界面文案全部 i18n、样式全部 Tailwind、图标全部 lucide                 | C    | 1.2-13~16 规则复跑 0 违规          | [ ]  |
 | 4.2-10 | 变量与函数命名有含义，无 `data/res/temp/flag` 类命名                  | C    | AGENTS.md §3.4 抽样核对            | [ ]  |
-| 4.2-11 | 表结构与 P2 的 JD 表、P3 的文档表无重复定义（同一实体只有一处真相源） | C    | 三计划表清单对账，重复项必须已合并 | [ ]  |
+| 4.2-11 | 表结构与 P2 的 JD 表、P3 的文档表无重复定义（同一实体只有一处真相源） | C    | 三计划表清单对账，重复项必须已合并 | [x]  |
+
+**4.2-a 落地记录（2026-10-01）**——迁移 11 `kb_entities` + 实体派生 + `kb.profile` CRUD
+
+- **建表与号段**：`KB_PROFILE_MIGRATION_VERSION = 11`，列为
+  `entity_id`(PK) / `kind` / `parent_id` / `source_doc_id` / `payload_json` / `normalized_hash` / `created_at` /
+  `updated_at`，另两条索引 `idx_kb_entities_doc(source_doc_id, kind)`、`idx_kb_entities_parent(parent_id)`；
+  `down` 只 DROP 本表。防撞号用本仓库既有的写法：单测手抄 1–10 已分配号段断言 11 未被占用，
+  并实测 `store.rollback(10)` **只**回收 `kb_entities`，`resume_imports` / `resume_docs` 的行都还在
+  （`down` 写窄了会静默删掉别人的表，这条断言是唯一的防线）。
+- **派生是纯函数**：`entities.ts` 不认识 cordis、不认识 SQLite，输入 `ResumeDocument` 输出草稿数组，
+  所以「关系定型」这件事能被单测直接打死（谁挂谁、去重、顺序无关）。落库只在 `profile-service.ts`。
+  四种 kind 的来源与 plan §1.4 裁定二 的映射表逐字一致；`summary / education / campus` 不产实体行，
+  campus 里的 `achievement` 字段仍产成果实体且 `parent_id` 为 `null`。
+- **`parent_id` 靠月份重叠，不靠公司名**：项目挂到「与它时间重叠最多」的经历上，「至今」按开区间上界处理，
+  并列时取实体 id 字典序小者——同一份文档永远派生出同一棵树。没有项目没有时间段、或所有经历都无时间段时
+  `parent_id` 为 `null`（不猜）。
+- **稳定 id 的真实强度必须写清**（防止 4.5 / 4.6 误用）：id 是 `kb-` + sha256(`docId|kind|slot`) 前 16 位，
+  而 `slot` 对经历 / 项目取 `entry.id`，`entry.id` 是**位置号**（`sections.ts:235` 的 `${kind}-${index + 1}`）。
+  所以「稳定」的含义是**同一文档同一条目结构下、重复同步幂等**（单测断言两次 `sync` 得到的 id 列表逐字相等、
+  且第二次 `{created:0, updated:0, removed:0}`），**不含**「用户删掉中间某条经历后，后面条目的 id 不变」。
+  跨编辑的不可变 entry id 属 P3.1 文档模型的改动，本片不动，4.2-d 做界面编辑时必须把这条当作已知约束。
+- **手动实体永远 `source_doc_id IS NULL`**，因此 `sync()` 的修剪不可能误删人工录入的行（单测直接断言）；
+  回查手动实体走 `list({ sourceDocId: null })`，用 `IS NULL` 而不是 `= NULL`。
+- **本片没有 `remove()`**：4.2-04 的级联策略是「删经历时下属项目/成果的去留」这个**策略**决定，
+  归 4.2-c。提前写一个删一行留一堆孤儿的版本，等于让 4.2-c 先删掉它再重写，故 4.2-01 的「可删」判据
+  **仍未满足**，这一行保持 `[ ]`。
+- **4.2-02 勾 [x] 的确切范围**：`验证操作` 那一栏要求的引用完整性断言已落在单测里——成果实体的 `parent_id`
+  一定指向同一次派生内的经历实体（或 `null`），派生 id 列表可重复取得，手动实体能被 `get` 原样读回。
+  「由一句简历陈述反查」的行为本身是 4.2-03 的判据，不在本行了结。
+- **4.2-11 复跑**：对账清单见 plan §1.4 的「4.2-a 落地后复跑」一条——`kb_entities` 只新增派生投影列，
+  `payload_json` 内容来自 `resume_docs.doc_json` 而不是第二份文档结构，`source_doc_id` 指回 `resume_docs.id`；
+  全部业务表逐张枚举后无第二处真相源。
+- **两处不粉饰的缺口**（本片刻意不声称完成的部分）：
+  ① `kb.profile` 已进 `REGISTRY` 与 `cordis.yml`，但**渲染层没有任何调用方**，界面/真窗口证据归 4.2-d（4.2-05 / 06）；
+  ② 全仓**没有测试校验 `cordis.yml` 与 `REGISTRY` 的配对**（`packages/kernel/src/lifecycle.test.ts` 用自己的假
+  REGISTRY，`delivery-snapshot-link.test.ts` 只挂自选子集），所以「app 真起后这张表被建」目前只有 vitest
+  装配证据（测试里真的 mount 了 `store → resume.doc → kb.profile` 并建表），没有真窗口证据。
+- **写 fixture 的人必须知道的规则**：`sections.ts` 按**空行**切条目。两条经历之间不空行会被合成一条 entry，
+  症状是 `sync` 出来 5 行而不是 7 行、且解析器不报任何错。这条已经写进
+  `packages/resume-kb/src/profile-service.test.ts` 的 fixture 注释里。
+- **单测覆盖**：`packages/resume-kb test` 6 文件 / 91 用例全绿，其中本片新增 `entities.test.ts` 8 例、
+  `profile-service.test.ts` 14 例（含端到端：`resume.parse.fromFile` → `kb.profile.sync`，断言落库
+  `payload_json` 里没有原始手机号）。
 
 ## 4.3 本地检索（BM25 默认，向量可选）
 

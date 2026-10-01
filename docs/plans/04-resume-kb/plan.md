@@ -170,6 +170,34 @@ optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 
   已经占用了「evidence」这个词，指的是**工作流失败截图的相对路径**。两者语义无关，KB 侧统一用复数
   `evidence_refs` / `evidenceRefs` 并在注释里点明区别，防止后来者把两套 readings 混为一谈。
 
+**4.2-a 落地状态（2026-10-01）**：迁移 11 `kb_entities` + 实体派生 + `kb.profile` CRUD 已实现并通过全闸；
+裁定一那一刀（导入→`resume_docs`）此前已单独落地，所以本片不再碰它。落地时新增的**事实**（不是设计变更）：
+
+- **稳定 id 的强度只有 16 位、且绑在 `entry.id` 上**。实体 id 是 `kb-` + sha256(`docId|kind|slot`).slice(0,16)，
+  slot 对经历 / 项目取 `entry.id`，对成果取 `entry.id#achievement`，对技能取 `entry.id#s<n>`。
+  而 `entry.id` 本身是**位置号**（`sections.ts:235` 的 `${kind}-${index + 1}`）——**用户删除或重排中间某条经历，
+  其后所有条目的实体 id 都会变**。这一条必须在 4.2-b（`evidenceFor`）与 4.2-d（界面编辑）之前写死：
+  4.5 / 4.6 存的 `evidenceRefs` 只能保证「同一次同步快照内可反查」，**跨编辑不保证长期稳定**。
+  若要长期稳定，得给 entry 引入真正不可变 id，那是 P3.1 文档模型的改动，不属本片，也不在本片偷偷做。
+- **项目挂到经历靠「月份区间重叠最多」，不靠公司名匹配**。公司名在中文简历里写法散（「阿里巴巴」/「阿里云」/
+  「阿里巴巴集团」），字符串相等会把同一经历拆成两棵树；重叠月数可由 `period.ts` 的 `parsePeriod` 纯函数算出，
+  「至今」按 `OPEN_ENDED_MONTH = 99_999` 处理，并列时按实体 id 字典序取小者——结果与遍历顺序无关。
+- **去重在派生阶段做**（键 `kind + normalized_hash`，保留首次出现），没有加 SQL `UNIQUE` 约束。原因：成果文本
+  与所属经历正文天然重复，而 `source_doc_id` 允许为 `NULL`（手动实体），在 SQLite 里给含 NULL 的列建唯一索引
+  等于把「多台机器上的手动实体」变成不同的约束语义，收益不值。
+- **`summary / education / campus` 不产实体行**（campus 里 `factKey === 'achievement'` 的字段仍然产成果实体，
+  `parent_id` 为 `null`）。与裁定二 的表格一致，且已按承诺把「chunk 粒度」的后果留给 4.3。
+- **手动创建的实体永远 `source_doc_id IS NULL`**，因此 `sync()` 的修剪（按 `source_doc_id` 找回派生行）
+  不可能碰到它们——这是「派生数据」与「人工数据」共表而不互伤的关键约束。
+- **本切片没做 `remove()`**。4.2-04 的级联策略（删经历时下属项目/成果去留）是策略决定而不是 CRUD 缺口，
+  归 4.2-c；提前写一个「删一行、留下孤儿行」的版本只会让 4.2-c 先删掉它再重写。
+- **两处刻意留下的可见缺口**（不粉饰）：`kb.profile` 已进 `REGISTRY` 与 `cordis.yml`，但**渲染层没有任何调用方**，
+  所以「app 真起后这张表被建、service 被挂」目前**只有单测证据、没有真窗口证据**；且
+  `packages/kernel/src/lifecycle.test.ts` 用的是**它自己的假 REGISTRY**，全仓**没有任何测试校验 `cordis.yml`
+  与 `REGISTRY` 的配对**——这条由 4.2-d 的 V 类验收补，不由本片声称完成。
+- **fixture 教训（写进测试注释，防止下一位重演）**：`sections.ts` 只按**空行**切条目。两条经历之间不空行，
+  会被合成一条 entry，于是派生出 5 行而不是 7 行，症状出现在断言里而不是解析器里，排查成本极高。
+
 **裁定三：管理界面挂在 diagnostics 里与 `ResumePanel` 并列（新增 `KbPanel`），但同一切片必须把
 `kb.profile` 登记为 agent 工具。**
 
@@ -181,13 +209,13 @@ optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 
 
 **切片顺序（一次只做一个，每片自带验收）**
 
-| 切片  | 内容                                                                             | 覆盖条目           | 前置            |
-| ----- | -------------------------------------------------------------------------------- | ------------------ | --------------- |
-| 4.2-a | 迁移 11 `kb_entities` + 导入→`resume_docs` upsert + 实体派生 + `kb.profile` CRUD | 4.2-01 / 02 / 11   | 裁定一、二      |
-| 4.2-b | `evidenceFor(claim)` 确定性反查（归一化包含 + token 重叠，不靠 LLM 自评）        | 4.2-03             | 4.2-a           |
-| 4.2-c | 级联删除策略（删经历时下属项目/成果的去留显式化）+ 知识库备份导出/导入与冲突策略 | 4.2-04 / 08        | 4.2-a           |
-| 4.2-d | `KbPanel`（实体树 + 展开证据链 + 编辑即时生效）+ `kb.profile` 的 agent 工具登记  | 4.2-05 / 06 + §5.9 | 4.2-a / 02 / 03 |
-| 4.2-e | 收尾机检：网络审计（除 llm 网关外零上行）+ 1.2 三项前端规约复跑 + 命名抽样       | 4.2-07 / 09 / 10   | 4.2-d           |
+| 切片  | 内容                                                                                                                                                                   | 覆盖条目           | 前置            |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | --------------- |
+| 4.2-a | 迁移 11 `kb_entities` + 导入→`resume_docs` upsert + 实体派生 + `kb.profile` CRUD<br>**（已落地 2026-10-01；`remove`/级联按上述留给 4.2-c，真窗口挂载证据留给 4.2-d）** | 4.2-01 / 02 / 11   | 裁定一、二      |
+| 4.2-b | `evidenceFor(claim)` 确定性反查（归一化包含 + token 重叠，不靠 LLM 自评）                                                                                              | 4.2-03             | 4.2-a           |
+| 4.2-c | 级联删除策略（删经历时下属项目/成果的去留显式化）+ 知识库备份导出/导入与冲突策略                                                                                       | 4.2-04 / 08        | 4.2-a           |
+| 4.2-d | `KbPanel`（实体树 + 展开证据链 + 编辑即时生效）+ `kb.profile` 的 agent 工具登记                                                                                        | 4.2-05 / 06 + §5.9 | 4.2-a / 02 / 03 |
+| 4.2-e | 收尾机检：网络审计（除 llm 网关外零上行）+ 1.2 三项前端规约复跑 + 命名抽样                                                                                             | 4.2-07 / 09 / 10   | 4.2-d           |
 
 - 4.2-07 的「无上行」判据落点：本切片不新增任何 `fetch` / `http` 调用点，审计以**扫描 + 真实窗口内跑一遍
   全链路**留证，而不是引用文档转述（§6.2）。
@@ -196,9 +224,12 @@ optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 
 - **4.2-11 的三计划表清单对账结果**（逐张 `CREATE TABLE` 枚举过，非引用文档转述）：P1/P2 侧
   `usage_ledger`(1) / `chat_session`+`chat_message`(2) / `jobs`(3) / `workflow_runs`+`workflow_nodes`(4) /
   `conversation_messages`(5) / `automation_consents`(6)；P3 侧 `resume_docs`(7) / `resume_snapshots`(8) /
-  `delivery_records`(9)；本计划 `resume_imports`(10)。`jobs.experience` 是 **JD 要求串**不是简历经历，
+  `delivery_records`(9)；本计划 `resume_imports`(10) / `kb_entities`(11)。`jobs.experience` 是 **JD 要求串**不是简历经历，
   与 KB 实体无重叠。**唯一真实重复就是裁定一 的三份 `doc_json`**，其余无重复定义；
   迁移执行器自身还有一张 `schema_migrations`（`packages/store/src/migrate.ts:54-62`），不属于业务表。
+  **4.2-a 落地后复跑（2026-10-01）**：`kb_entities` 只新增 `entity_id/kind/parent_id/source_doc_id/payload_json/
+normalized_hash/created_at/updated_at` 八列，其中 `payload_json` 装的是**从 `resume_docs.doc_json` 派生**的字段值
+  而不是第二份文档结构，`source_doc_id` 是指回 `resume_docs.id` 的外键式引用；对账结论未变，无新增重复真相源。
 
 ## 2. 包与 service
 
