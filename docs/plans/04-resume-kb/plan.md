@@ -346,3 +346,41 @@ packages/
 - 不做「简历打分/职级评估」这类无据可依的衍生功能。
 - 不做 prompt 注入式「让 LLM 判断是否可信」——事实校验必须是确定性代码（`fact.check`），LLM 只生成不背书。
 - 不做第二套 LLM 客户端、不做 prompt 硬编码在业务代码里（prompt 集中注册表，可版本化，2.5-09 需记录版本）。
+
+---
+
+## 4.3 开工前置：内置 sqlite 检索能力实测（2026-10-01 spike，§6.2 要求以本机实测为准）
+
+spike 脚本只跑不入库（`tmp/43/fts-probe.cjs`，gitignored，对齐 §6.4），两个运行时各跑一次：
+`node tmp/43/fts-probe.cjs` 与 `node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/electron.exe tmp/43/fts-probe.cjs`。
+
+| 事实 | Node 24.18（`node:sqlite`） | Electron 44.4.5 主进程（同一模块） |
+| --- | --- | --- |
+| sqlite 版本 | 3.53.1 | 3.53.4 |
+| `compile_options` 里的检索相关项 | `ENABLE_FTS3` / `ENABLE_FTS3_PARENTHESIS` / `ENABLE_FTS5` | 同左，**没有 ICU** |
+| `CREATE VIRTUAL TABLE … USING fts5(body)` | OK | OK |
+| `tokenize='trigram'` / `'trigram case_sensitive 0'` | OK / OK | OK / OK |
+| `bm25()` 聚合函数 | OK | OK |
+
+**中文查询的实测行为（这一条决定 4.3 的设计，不是文档转述）**：往 fts5(trigram) 里写
+`主导订单服务重构，P99 延迟下降 40%` 后——
+
+- `match '订单服'`（3 字）→ 命中 1；`match 'P99'`（ASCII）→ 命中 1；`match '不存在词'` → 命中 0（正常）。
+- `match '订单'`（**2 字**）→ **命中 0**。trigram tokenizer 按三字符滑窗建索引，**短于 3 个字符的查询根本进不了索引**。
+- 默认 `unicode61` 分词器下 `match '订单服'` → **命中 0**：它按空白/标点切词，一整段中文被当成一个 token，
+  所以「不写 tokenizer 的 FTS5」对中文等于不可用。
+
+**由此定下的 4.3 口径（写在这里，避免实现时重新发明）**：
+
+1. **BM25 默认 = 内置 FTS5 + `bm25()`**，零新增依赖、零原生编译（对齐 §9「禁止 better-sqlite3」与
+   §2「禁止第二套基础设施」）；向量检索仍是可选项，且**不能**为它引入第二个 sqlite 连接或外部引擎。
+2. **中文短查询必须有兜底通道**：求职者的真实查询大量是 2 字词（订单、重构、高并发），只挂一张
+   trigram 表会让这类查询恒为空——这不是性能问题而是功能缺陷。兜底沿用 4.2 已经落地的确定性打分思路
+   （`evidence.ts` 的 `contains` / 词面重合），即 **FTS5 命中集 ∪ 子串重合候选集**，两路分数在同一口径下合并排序，
+   而不是各出一套结果。具体合并式在 4.3 的 plan 里定，这里只锁定「必须有第二路」。
+3. **索引表与实体表的关系**：FTS5 表是 `kb_entities` 的**派生索引**，不是第二个真相源——
+   写入路径必须与 `sync/create/update/remove/importBackup` 同一事务收敛，删除实体时索引行必须同步消失
+   （否则 4.2-04 的「不留孤儿行」在检索面被绕过）。
+4. **反向验证条目（§6.5）**：本次实测已证明内置 FTS5 覆盖 BM25 需求，缺口只在中文短查询且可由应用层补齐，
+   因此「不引入 tantivy / MeiliSearch / lancedb / sqlite-vec」没有造成不可补齐的能力缺口——
+   4.3 的 spec 里要留一条对应条目显式回答这一点。
