@@ -365,6 +365,17 @@
       "empty": "Ledger is empty: no action has passed the gate yet",
       "none": "no target"
     },
+    "resume": {
+      "heading": "Resume Generation Self-test",
+      "locale": "Locale",
+      "seed": "Load demo content",
+      "preview": "Preview",
+      "export": "Export PDF",
+      "seedReceipt": "Loaded demo document {{docId}}",
+      "previewDone": "Preview refreshed",
+      "previewEmpty": "No preview yet: load demo content, then press Preview",
+      "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes"
+    },
     "workflow": {
       "heading": "Job-hunting workflow (plan-driven node pipeline)",
       "refresh": "Reload workflow state",

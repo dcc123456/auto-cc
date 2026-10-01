@@ -164,6 +164,11 @@ export const RENDERER_ALLOWLIST = [
   'chat.session.stop',
   'chat.session.setAutonomy',
   'chat.session.startSession',
+  // 3.3 生成轨导出面：预览/导出只认 docId + 模板 + 语言，文档正文不过进程边界（编辑轨 3.5 才引入 resume.doc.* 写入面）。
+  // seedDemo 是 3.5 之前给端到端自测喂一份固定内容文档的口（spec 3.3-10）。
+  'resume.export.seedDemo',
+  'resume.export.preview',
+  'resume.export.toPdf',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -543,6 +548,27 @@ export type DevtoolsStatusView = {
   targets: DevtoolsTargetView[];
 };
 
+/**
+ * 简历语言档（镜像 resume-doc 的 `TemplateLocale`）。
+ * shared 不认识领域包（依赖方向 + 不让 cordis 泄进渲染层产物），故线格式在此独立声明。
+ */
+export type ResumeLocaleView = 'zh-CN' | 'en';
+
+/** 演示种子的回执（镜像 `resume.export.seedDemo` 的返回）。 */
+export interface ResumeSeedView {
+  docId: string;
+  hash: string;
+}
+
+/** 一次导出的回执（镜像 resume-doc 的 `ExportReceipt`）。 */
+export interface ExportReceiptView {
+  docId: string;
+  path: string;
+  pages: number;
+  bytes: number;
+  hash: string;
+}
+
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
@@ -725,6 +751,24 @@ export interface BridgeSignatures {
   'chat.session.setAutonomy': { args: [level: AutonomyLevel]; returns: ChatSessionView };
   /** 另起一个新会话，旧会话的行一条都不动（spec 1.11-08）。 */
   'chat.session.startSession': { args: []; returns: ChatSnapshotView };
+  /**
+   * 落一份固定内容演示简历（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 之前导出链的唯一文档来源）；
+   * 返回种子 id 与落库 hash，界面据此再去预览/导出。
+   */
+  'resume.export.seedDemo': { args: []; returns: ResumeSeedView };
+  /**
+   * 渲染预览 HTML（spec 3.3-01「预览即导出所见」）：返回与 `toPdf` **同一份**打印 HTML 字符串，
+   * 界面塞进 iframe 即可所见即所得。文档内容不过进程边界，只传 docId + 模板 + 语言。
+   */
+  'resume.export.preview': { args: [docId: string, templateId: string, locale?: ResumeLocaleView]; returns: string };
+  /**
+   * 导出 PDF（spec 3.3-04 / 05 / 09）：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，
+   * 界面拿到的是产物回执（路径 / 页数 / 字节 / hash）或结构化失败。
+   */
+  'resume.export.toPdf': {
+    args: [docId: string, templateId: string, locale?: ResumeLocaleView];
+    returns: ExportReceiptView;
+  };
 }
 
 /**

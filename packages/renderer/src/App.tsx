@@ -7,6 +7,7 @@ import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
 import { JobLabPanel } from './JobLabPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
+import { ResumePanel } from './ResumePanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 import { UsagePanel } from './UsagePanel';
@@ -107,6 +108,7 @@ export function App() {
             <SessionPanel />
             <LocatorLabPanel />
             <JobLabPanel />
+            <ResumePanel />
             <WorkflowLabPanel />
             <UsagePanel />
             <AssemblyPanel />

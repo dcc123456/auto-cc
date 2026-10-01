@@ -365,6 +365,17 @@
       "empty": "账本为空：还没有任何动作通过闸门",
       "none": "无对象"
     },
+    "resume": {
+      "heading": "简历生成轨自测",
+      "locale": "语言",
+      "seed": "载入演示内容",
+      "preview": "预览",
+      "export": "导出 PDF",
+      "seedReceipt": "已载入演示文档 {{docId}}",
+      "previewDone": "预览已刷新",
+      "previewEmpty": "尚未预览：先载入演示内容再点预览",
+      "exportReceipt": "导出成功：{{pages}} 页 · {{bytes}} 字节"
+    },
     "workflow": {
       "heading": "求职工作流（计划驱动的节点流水线）",
       "refresh": "重新读取工作流状态",

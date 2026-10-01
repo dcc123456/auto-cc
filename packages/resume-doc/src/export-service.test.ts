@@ -180,3 +180,30 @@ describe('3.3-12 并发不同文档互不串', () => {
     expect(readFileSync(rb.path)).toEqual(TWO_PAGE_PDF);
   });
 });
+
+describe('3.3-10 seedDemo 喂固定内容做端到端种子', () => {
+  it('seedDemo 落一份可载入的合法文档，返回 id 与 hash，随后预览/导出直接吃它', async () => {
+    const { docs, exporter } = await boot();
+    const seeded = exporter.seedDemo();
+    expect(seeded.docId).toBe('resume-demo');
+    expect(seeded.hash).toBeTruthy();
+    const loaded = docs.load('resume-demo');
+    expect(loaded.status).toBe('found');
+    if (loaded.status !== 'found') return;
+    // 种子内容进得了预览（3.3-01 同一份 HTML 源），也导得出 PDF（端到端不用另存）。
+    expect(exporter.preview('resume-demo', 'classic')).toContain('星桥科技');
+    const receipt = await exporter.toPdf('resume-demo', 'classic');
+    expect(receipt.docId).toBe('resume-demo');
+    expect(receipt.pages).toBe(2);
+  });
+
+  it('重复 seedDemo 覆盖同一份 demo 文档，不留第二行', async () => {
+    const { store, docs, exporter } = await boot();
+    const first = exporter.seedDemo();
+    const second = exporter.seedDemo();
+    expect(second.docId).toBe(first.docId);
+    expect(docs.load('resume-demo').status).toBe('found');
+    const row = store.db.prepare('SELECT COUNT(*) AS n FROM resume_docs').get() as { n: number };
+    expect(row.n).toBe(1);
+  });
+});

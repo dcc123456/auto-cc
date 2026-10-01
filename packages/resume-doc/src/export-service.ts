@@ -14,11 +14,15 @@ import { z } from 'zod';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ResumeDocService } from './doc-store.js';
+import { createEmptyDocument, makeField, type ResumeDocument } from './model.js';
 import { resumePrint } from './print.js';
 import type { TemplateLocale } from './template.js';
 
 /** 导出产物落盘的子目录名（在 `userDataDir` 之下，与库、会话分区同根）。 */
 const EXPORTS_SUBDIR = 'exports';
+
+/** 演示种子文档 id（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 落地后由用户文档取代）。 */
+const DEMO_DOC_ID = 'resume-demo';
 
 /** 无配置服务：目录来自 `config`，打印来自注入端口，本服务自身没有运行期可调项。 */
 export const resumeExportSchema = z.strictObject({});
@@ -56,6 +60,54 @@ export class ResumeExportService extends Service {
   private get config(): ConfigService {
     return asApp(this.ctx).config;
   }
+
+  /**
+   * 落一份**固定内容**的演示简历文档（spec 3.3-10 的「本机先用固定内容验」）。
+   *
+   * 编辑轨（3.5）之前界面没有「录入文档」的入口，导出管线的端到端自测需要先有一份合法文档做种子；
+   * 内容全为虚构、不含真实个人信息，只用来把「文档 → 打印 HTML → PDF」这条链在真实内核上跑通。
+   * @returns 种子文档的 id 与落库后的内容 hash
+   */
+  seedDemo = (): { docId: string; hash: string } => {
+    const seeded: ResumeDocument = {
+      ...createEmptyDocument(DEMO_DOC_ID, Date.now()),
+      profile: { name: '张三', contact: { email: 'zhangsan@example.com', phone: '13800000000', location: '上海' } },
+      sections: [
+        {
+          id: 'summary',
+          kind: 'summary',
+          title: '个人简介',
+          entries: [{ id: 's1', fields: [makeField('summary', 'text', '五年后端工程师，专注高并发服务与可观测性。')] }],
+        },
+        {
+          id: 'exp',
+          kind: 'experience',
+          title: '工作经历',
+          entries: [
+            {
+              id: 'e1',
+              fields: [
+                makeField('experience', 'company', '星桥科技'),
+                makeField('experience', 'role', '后端工程师'),
+                makeField('experience', 'period', '2021 - 2024'),
+                makeField('experience', 'achievement', '主导订单服务重构，P99 延迟下降 40%。'),
+              ],
+            },
+          ],
+        },
+        {
+          id: 'skills',
+          kind: 'skills',
+          title: '技能',
+          entries: [
+            { id: 'k1', fields: [makeField('skills', 'text', 'TypeScript / Node.js / PostgreSQL / Electron')] },
+          ],
+        },
+      ],
+    };
+    const saved = this.docStore.save(seeded);
+    return { docId: DEMO_DOC_ID, hash: saved.hash };
+  };
 
   /**
    * 载入一份合法文档；缺失或库里存坏了都以 `RESUME_EXPORT_FAILED` 结构化失败上浮（3.3-11 的「文档非法」腿）。
