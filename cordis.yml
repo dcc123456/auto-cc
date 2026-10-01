@@ -335,6 +335,16 @@ plugins:
     config:
       evidenceTopK: 5
       evidenceMinScore: 0.34
+      # 本地检索（spec 4.3-01 / 02 / 03）：BM25 的两个参数与两条腿的权重全部在这里，代码内无魔法数。
+      # 默认值是 Okapi 惯用值，实测（docs/acceptance/4.3/）换档只改分值不改头部次序，
+      # 所以 4.3-e 做评测集标定时的动作就是调这一处而不是改代码。
+      searchTopK: 10
+      searchMinScore: 0.2
+      bm25K1: 1.2
+      bm25B: 0.75
+      bm25Weight: 0.6
+      lexicalWeight: 0.4
+      substringFloorScore: 0.25
 
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。

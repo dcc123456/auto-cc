@@ -21,6 +21,19 @@ const CJK_RANGES = /[㐀-䶿一-鿿豈-﫿]/;
 const MIN_LATIN_TOKEN_LENGTH = 2;
 
 /**
+ * 文本归一化（NFKC + 转小写）——分词侧与子串兜底侧共用的同一把尺子（spec 4.3-02 / 4.3-01）。
+ *
+ * 为什么要单独成一个函数：倒排通道按 token 匹配，天然吃过「全角 / 大小写」差异（两侧都归一化过），
+ * 而子串兜底通道是在**原文列**上做 `instr`，不归一就会漏——实测（spike6 §S6）查 `p99` 时
+ * 原文 `instr` 命中 0 行、归一列命中 3 行，且全角「Ｐ９９」只有归一后才与库内半角形式相遇。
+ * @param text 任意文本
+ * @returns NFKC 归一（全角转半角、兼容字符拆开）并转小写后的串；不做停用词过滤，理由见文件头
+ */
+export function normalizeText(text: string): string {
+  return text.normalize('NFKC').toLowerCase();
+}
+
+/**
  * 把一段串切成**有序、含重复**的 token 序列（4.3-a 的写入侧预分词用，见 `chunks.ts` 的 `indexTokens`）。
  *
  * 为什么不复用 `tokenize()` 的去重结果：spike 实测（plan §4.3 预分词小节轮次四 A）去重列会让
@@ -31,7 +44,7 @@ const MIN_LATIN_TOKEN_LENGTH = 2;
  * @returns 按原文出现顺序排列的 token；空文本或全是分隔符时返回空数组
  */
 export function tokenSequence(text: string): string[] {
-  const normalized = text.normalize('NFKC').toLowerCase();
+  const normalized = normalizeText(text);
   const tokens: string[] = [];
   let latinRun = '';
   let cjkRun = '';

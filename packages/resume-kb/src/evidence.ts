@@ -59,6 +59,34 @@ export function evidenceTextOf(payload: Readonly<Record<string, string>>): strin
 }
 
 /**
+ * 两个 token 集合之间的词面覆盖强度（4.2-03 与 4.3-01 共用的一份尺子）。
+ *
+ * 抽成函数而不是在 `rankEvidence` 里内联：4.3-b 的检索要把同一份覆盖率与 BM25 分数合并排序，
+ * 同一段判定出现第二次就必须抽公共层（AGENTS.md §2.2），否则反查与检索会在「什么算沾边」上走散。
+ * @param claimTokens 一侧的 token 集合（陈述或查询，方向不影响结果）
+ * @param targetTokens 另一侧的 token 集合（实体正文或切片正文）
+ * @returns 命中为 0 时返回 `null`（「没有任何词重合」不是 0 分而是「无从解释」，调用方据此跳过）；
+ *          否则给 0～1 的强度、命中的 token（升序）、以及 `contains` / `overlap` 判定
+ */
+export function coverageOf(
+  claimTokens: ReadonlySet<string>,
+  targetTokens: ReadonlySet<string>,
+): { score: number; matched: string[]; reason: EvidenceReason } | null {
+  if (claimTokens.size === 0 || targetTokens.size === 0) return null;
+  const matched: string[] = [];
+  for (const token of claimTokens) {
+    if (targetTokens.has(token)) matched.push(token);
+  }
+  if (matched.length === 0) return null;
+  const score = Math.max(matched.length / claimTokens.size, matched.length / targetTokens.size);
+  return {
+    score: Math.round(score * 10_000) / 10_000,
+    matched: matched.sort(),
+    reason: score >= 0.9999 ? 'contains' : 'overlap',
+  };
+}
+
+/**
  * 给一句陈述找支撑实体，按强度排序返回。
  * @param claim 待反查的陈述（简历里的一句话、或 JD 的一条要求）
  * @param targets 候选实体（通常是某次 `list()` 的投影）
@@ -76,21 +104,14 @@ export function rankEvidence(
 
   const hits: EvidenceRef[] = [];
   for (const target of targets) {
-    const entityTokens = tokenize(target.text);
-    if (entityTokens.size === 0) continue;
-    const matched: string[] = [];
-    for (const token of claimTokens) {
-      if (entityTokens.has(token)) matched.push(token);
-    }
-    if (matched.length === 0) continue;
-    const score = Math.max(matched.length / claimTokens.size, matched.length / entityTokens.size);
-    if (score < options.minScore) continue;
+    const covered = coverageOf(claimTokens, tokenize(target.text));
+    if (covered === null || covered.score < options.minScore) continue;
     hits.push({
       entityId: target.entityId,
       kind: target.kind,
-      score: Math.round(score * 10_000) / 10_000,
-      reason: score >= 0.9999 ? 'contains' : 'overlap',
-      matchedTokens: matched.sort(),
+      score: covered.score,
+      reason: covered.reason,
+      matchedTokens: covered.matched,
     });
   }
   // 分数相同的按 id 升序：不依赖候选来自 `list()` 的排序，两次调用必然同一结果。

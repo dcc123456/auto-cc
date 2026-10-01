@@ -7,7 +7,8 @@
  * `source.ts` / `sections.ts` / `period.ts` **不认识 cordis、也不打开自己的 SQLite 连接**——解析规则要能离线、
  * 逐字段断言；`parse-service.ts` 是本包唯一接触装配与入库（4.1-06 / 4.1-07 / 4.1-09 / 4.1-10）的文件，
  * 且入库只经 1.3 的共享 `store` 连接，判定的那三个纯函数文件不因装配而变脏。
- * 4.2 带来 `entities.ts`（实体派生）与 `evidence.ts`（反查打分），4.3-a 带来 `chunks.ts`（检索切片派生）——
+ * 4.2 带来 `entities.ts`（实体派生）与 `evidence.ts`（反查打分），4.3-a 带来 `chunks.ts`（检索切片派生），
+ * 4.3-b 带来 `search.ts`（切片 → 分数的合并排序）——
  * 同一个规矩：切分与派生是纯函数，落库与事务只在 `profile-service.ts`。
  */
 export { extractPeriod, parsePeriod, type ParsedPeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
@@ -60,6 +61,10 @@ export {
 // 让外面自己算一份就是开第二条写路径（§2.5）。
 export { type EvidenceReason, type EvidenceRef } from './evidence.js';
 export { type KbChunkKind, type KbChunkView } from './chunks.js';
+// 检索读数的**形状**（4.3-01 / 02）：`search()` 是 service 的公开方法，4.3-c 要把它过 IPC 给界面与 agent，
+// 所以对外只给结果形状；`buildFtsQuery` / `rankChunks` / `tokensOf` 属包内纯函数，不外露——
+// 让外面自己拼 FTS5 表达式就是开第二条检索通道（§2.5），而且会绕开转义那条安全约束。
+export { type KbSearchHit, type KbSearchReason, type KbSearchResult, type KbSearchStatus } from './search.js';
 export {
   detectFormat,
   extractSourceText,

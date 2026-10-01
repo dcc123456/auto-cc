@@ -30,11 +30,17 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { KB_BACKUP_SCHEMA_VERSION } from './backup.js';
 import { deriveSectionChunks, entityChunkOf, indexTokens } from './chunks.js';
-import { KB_CHUNKS_MIGRATION_VERSION, KB_PROFILE_MIGRATION_VERSION, KbProfileService } from './profile-service.js';
+import {
+  KB_CHUNKS_MIGRATION_VERSION,
+  KB_PROFILE_MIGRATION_VERSION,
+  KB_SEARCH_MIGRATION_VERSION,
+  KbProfileService,
+} from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
 import { parseResumeText } from './sections.js';
 
@@ -143,13 +149,29 @@ function tempDir(): string {
   return dir;
 }
 
+/** 与 `cordis.yml` 一致的检索默认值（4.3-03 的「参数来自配置」用例靠覆盖它来成立）。 */
+const SEARCH_DEFAULTS = {
+  searchTopK: 10,
+  searchMinScore: 0.2,
+  bm25K1: 1.2,
+  bm25B: 0.75,
+  bm25Weight: 0.6,
+  lexicalWeight: 0.4,
+  substringFloorScore: 0.25,
+};
+
 /**
  * 挂起 config + log + store + resume.doc + kb.profile（外加 `resume.parse`，端到端那条用例要用）。
  * @param dir 复用哪个目录
  * @param evidence 反查阈值（4.2-03）；默认与 `cordis.yml` 一致，用于验证「阈值来自配置」那两条用例
+ * @param search 检索参数（4.3-03），默认与 `cordis.yml` 一致；传部分键即只覆盖那几项
  * @returns 实体服务、文档存储服务、导入服务与裸连接
  */
-async function boot(dir = tempDir(), evidence: { topK: number; minScore: number } = { topK: 5, minScore: 0.34 }) {
+async function boot(
+  dir = tempDir(),
+  evidence: { topK: number; minScore: number } = { topK: 5, minScore: 0.34 },
+  search: Partial<typeof SEARCH_DEFAULTS> = {},
+) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir, redact: false }));
@@ -161,6 +183,8 @@ async function boot(dir = tempDir(), evidence: { topK: number; minScore: number 
     await ctx.plugin(KbProfileService, {
       evidenceTopK: evidence.topK,
       evidenceMinScore: evidence.minScore,
+      ...SEARCH_DEFAULTS,
+      ...search,
     }),
   );
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
@@ -204,11 +228,39 @@ function orphanChunkCount(db: DatabaseSync): number {
   return Number(row.total);
 }
 
+/**
+ * 「倒排里有行但主表没有对应切片」的行数——4.3-b 的派生索引不变量。
+ *
+ * 与 `orphanChunkCount` 是两层：那一层管「切片找不到实体」，这一层管「倒排行找不到切片」。
+ * 孤儿倒排行的表现不是报错而是**搜到已经不存在的内容**（召回阶段命中，join 回主表时才会掉，
+ * 而子串通道根本不走 join，所以旧文本会直接出现在结果里），所以两边都要机检。
+ * @param db 裸连接
+ * @returns 孤儿倒排行数；任何一次写路径之后都应为 0
+ */
+function orphanFtsCount(db: DatabaseSync): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS total FROM kb_chunks_fts WHERE rowid NOT IN (SELECT seq FROM kb_chunks)')
+    .get() as { total: number | bigint };
+  return Number(row.total);
+}
+
+/** `kb_chunks_fts` 的全部行数。 */
+function ftsCount(db: DatabaseSync): number {
+  const row = db.prepare('SELECT COUNT(*) AS total FROM kb_chunks_fts').get() as { total: number | bigint };
+  return Number(row.total);
+}
+
 /** 表是否存在（回滚用例的判据）。 */
 function tableExists(db: DatabaseSync, name: string): boolean {
   const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name) as
     { name?: string } | undefined;
   return row?.name === name;
+}
+
+/** `kb_chunks` 上是否存在某一列（迁移 13 的 `norm_text` 加减半边）。 */
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as readonly { name: string }[];
+  return rows.some((row) => row.name === column);
 }
 
 afterAll(async () => {
@@ -225,20 +277,27 @@ afterAll(async () => {
 });
 
 describe('建表与迁移', () => {
-  it('挂载即建 kb_entities / kb_chunks 表，迁移号段为 11 / 12', async () => {
+  it('挂载即建 kb_entities / kb_chunks / kb_chunks_fts 与 norm_text 列，迁移号段为 11 / 12 / 13', async () => {
     const { db } = await boot();
     expect(tableExists(db, 'kb_entities')).toBe(true);
     expect(tableExists(db, 'kb_chunks')).toBe(true);
+    expect(tableExists(db, 'kb_chunks_fts')).toBe(true);
+    expect(hasColumn(db, 'kb_chunks', 'norm_text')).toBe(true);
     expect(KB_PROFILE_MIGRATION_VERSION).toBe(11);
     expect(KB_CHUNKS_MIGRATION_VERSION).toBe(12);
+    expect(KB_SEARCH_MIGRATION_VERSION).toBe(13);
   });
 
   it('迁移号段不复用任何已分配号段（撞号的表现是「见号已存在就跳过建表」，表根本没建）', () => {
     // 已分配：账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
-    // resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10 / kb_entities 11。
+    // resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10。
     const taken = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(taken.has(KB_PROFILE_MIGRATION_VERSION)).toBe(false);
+    // 本包的三段彼此也不许撞：撞了就是后两个 `up()` 里的建表被「见号已存在」跳过。
     expect(new Set([...taken, KB_PROFILE_MIGRATION_VERSION]).has(KB_CHUNKS_MIGRATION_VERSION)).toBe(false);
+    expect(
+      new Set([...taken, KB_PROFILE_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION]).has(KB_SEARCH_MIGRATION_VERSION),
+    ).toBe(false);
   });
 
   it('带 `down` 的迁移可以倒回去：回滚到 10 之后 kb_entities 表消失（spec 4.2-01 的 migration up/down 半边）', async () => {
@@ -252,7 +311,7 @@ describe('建表与迁移', () => {
     expect(tableExists(db, 'resume_docs')).toBe(true);
   });
 
-  it('切片表能单独倒回去：回滚 12 只删 `kb_chunks`，实体表与它的数据原样留着（spec 4.3-11 的 down 半边）', async () => {
+  it('切片表能单独倒回去：回滚 11 同时倒回 13 与 12，实体表与它的数据原样留着（spec 4.3-11 的 down 半边）', async () => {
     const { kb, doc, store, db } = await boot();
     const parsed = parseResumeText(RESUME_MD, 'resume-rollback-chunks', NOW_MS);
     if (parsed.status !== 'ok') throw new Error('样例简历解析失败');
@@ -261,11 +320,34 @@ describe('建表与迁移', () => {
     expect(chunkCount(db)).toBeGreaterThan(0);
 
     const result = store.rollback(KB_PROFILE_MIGRATION_VERSION);
-    expect(result.reverted).toEqual([KB_CHUNKS_MIGRATION_VERSION]);
+    // 倒序：先 13（倒排表 + 归一列）再 12（切片表），顺序反了会撞「表已不在」。
+    expect(result.reverted).toEqual([KB_SEARCH_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION]);
     expect(tableExists(db, 'kb_chunks')).toBe(false);
+    expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
     // 派生索引删掉了，真相还在：实体表一行不少，重新挂载就能按实体补建回来（下面有用例判这条）。
     expect(tableExists(db, 'kb_entities')).toBe(true);
     expect(entityCount(db)).toBe(7);
+  });
+
+  it('倒排能单独倒回去：回滚 12 只删虚表与 `norm_text` 列，切片行一条不少（spec 4.3-01 的 down 半边）', async () => {
+    const dir = tempDir();
+    const { store, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-rollback-fts');
+    const before = chunkCount(db);
+    expect(before).toBeGreaterThan(0);
+
+    const result = store.rollback(KB_CHUNKS_MIGRATION_VERSION);
+    expect(result.reverted).toEqual([KB_SEARCH_MIGRATION_VERSION]);
+    expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
+    expect(hasColumn(db, 'kb_chunks', 'norm_text')).toBe(false);
+    // 主表原样：切片是派生索引，倒排只是它的加速结构，删加速结构不许动数据（否则回滚就成了破坏性操作）。
+    expect(chunkCount(db)).toBe(before);
+    expect(orphanChunkCount(db)).toBe(0);
+
+    // 重新挂载即恢复：迁移 13 的 `up()` 把虚表与归一列按现有切片重建，检索立刻可用。
+    const again = await boot(dir);
+    expect(again.kb.listChunks()).toHaveLength(before);
+    expect(ftsCount(again.db)).toBe(before);
+    expect(again.kb.search('订单').hits.length).toBeGreaterThan(0);
   });
 });
 
@@ -449,8 +531,14 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
  * @param evidence 反查阈值；省略时用装配默认值
  * @returns 装配好的服务与裸连接
  */
-async function syncedKb(dir: string, corpus: string, docId: string, evidence?: { topK: number; minScore: number }) {
-  const booted = await boot(dir, evidence);
+async function syncedKb(
+  dir: string,
+  corpus: string,
+  docId: string,
+  evidence?: { topK: number; minScore: number },
+  search?: Partial<typeof SEARCH_DEFAULTS>,
+) {
+  const booted = await boot(dir, evidence, search);
   const parsed = parseResumeText(corpus, docId, NOW_MS);
   if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
   booted.doc.save(parsed.document);
@@ -1070,6 +1158,187 @@ describe('检索切片收敛（4.3-a / spec 4.3-11）', () => {
   });
 });
 
+describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-01 / 02 / 03）', () => {
+  /** 供检索用例复用的语料同步（`RESUME_MD_WITH_SECTIONS` 里同时有区块级与实体级切片）。 */
+  async function searchableKb(search: Partial<typeof SEARCH_DEFAULTS> = {}) {
+    return syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-search', undefined, search);
+  }
+
+  it('五条写路径跑完之后：倒排行数与切片行数严格相等且两侧都无孤儿', async () => {
+    const dir = tempDir();
+    const { kb, doc, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-search-integrity');
+    const created = kb.create({ kind: 'achievement', payload: { text: '把订单链路 P99 压到 200 毫秒' } }, NOW_MS);
+    kb.update(created.entityId, { text: '把库存链路 P99 压到 200 毫秒' }, LATER_MS);
+    kb.sync('resume-search-integrity', LATER_MS);
+    expect(ftsCount(db)).toBe(chunkCount(db));
+    expect(orphanFtsCount(db)).toBe(0);
+
+    kb.remove(created.entityId, LATER_MS);
+    expect(ftsCount(db)).toBe(chunkCount(db));
+    expect(orphanFtsCount(db)).toBe(0);
+
+    // 把工作副本里的经历删光再同步：`prune` 与区块级重建两支都要带走倒排行
+    const parsed = parseResumeText(RESUME_MD_SKILLS_ONLY, 'resume-search-integrity', LATER_MS);
+    if (parsed.status !== 'ok') throw new Error('精简语料解析失败');
+    doc.save(parsed.document);
+    kb.sync('resume-search-integrity', LATER_MS);
+    expect(ftsCount(db)).toBe(chunkCount(db));
+    expect(orphanFtsCount(db)).toBe(0);
+    expect(orphanChunkCount(db)).toBe(0);
+  });
+
+  it('按「订单」检索：相关切片在前，每条命中的理由与命中词都非空', async () => {
+    const { kb } = await searchableKb();
+    const result = kb.search('订单');
+    expect(result.status).toBe('ok');
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits[0]?.text).toContain('订单');
+    // 切片级命中要能把出处带回来（4.5 的事实锁定靠这一列反查实体）
+    for (const hit of result.hits) {
+      expect(hit.reasons.length).toBeGreaterThan(0);
+      expect(hit.matchedTokens.length).toBeGreaterThan(0);
+      expect(hit.chunkId).toBeTruthy();
+      expect(result.queryTokens).toContain('订单');
+    }
+    // 与订单无关的校园那条不该进来
+    expect(result.hits.some((hit) => hit.text.includes('判题机'))).toBe(false);
+  });
+
+  it('中文能力词查询命中对应那条：「高并发」找到简介里的稳定性、「算法竞赛」找到校园经历（spec 4.3-02）', async () => {
+    const { kb } = await searchableKb();
+
+    // 语料里只有个人简介那一段写了「高并发」，命中它就是「二字组索引按中文切开了」的直接证据
+    const concurrency = kb.search('高并发');
+    expect(concurrency.status).toBe('ok');
+    expect(concurrency.hits[0]?.text).toContain('高并发');
+    expect(concurrency.hits[0]?.matchedTokens).toEqual(['并发', '高并']);
+
+    // 校园段那条被 4.1 锁成了 `achievement` 事实，所以它既有实体级切片、又有区块级切片——
+    // 同一个中文查询两侧都命中。两条切片的内容是同一句话，**只断句子不断段头**，
+    // 否则断言会莫名挂在「区块切片多带了公司名与时间」这种与检索无关的差异上。
+    const contest = kb.search('算法竞赛');
+    expect(contest.hits.map((hit) => hit.text)).toContain('组织过三十人规模的校内算法竞赛，负责赛题与判题机。');
+    expect(new Set(contest.hits.map((hit) => hit.chunkKind))).toEqual(new Set(['entity', 'section']));
+
+    // 手工建的技能实体同样进得了检索：切片与实体的 1:1 对能力词查询成立
+    const skill = kb.create({ kind: 'skill', payload: { name: '推荐算法与召回排序' } }, NOW_MS);
+    expect(kb.search('推荐算法').hits.map((hit) => hit.chunkId)).toContain(skill.entityId);
+  });
+
+  it('单字查询走子串通道：倒排切不出来的「订」仍然命中，并标 substring 理由', async () => {
+    const { kb, db } = await searchableKb();
+    // 前置事实：倒排里确实没有单字 `订` 这个 token（预分词是二字组），否则这条用例就没在判子串通道。
+    const ftsRows = db.prepare('SELECT rowid FROM kb_chunks_fts WHERE kb_chunks_fts MATCH ?').all('"订"') as unknown;
+    expect(ftsRows).toEqual([]);
+
+    const result = kb.search('订');
+    expect(result.status).toBe('ok');
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits.every((hit) => hit.text.includes('订'))).toBe(true);
+    expect(result.hits.some((hit) => hit.reasons.includes('substring'))).toBe(true);
+  });
+
+  it('全角与大小写在归一列上相遇：查「Ｐ９９」命中库内写成半角的 P99', async () => {
+    const { kb } = await searchableKb();
+    const result = kb.search('Ｐ９９');
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits.some((hit) => hit.text.includes('P99'))).toBe(true);
+  });
+
+  it('切不出 token 的查询给确定空态，而不是把 FTS5 语法错误抛给界面', async () => {
+    const { kb } = await searchableKb();
+    expect(kb.search('。。。')).toEqual({ status: 'no_query_tokens', hits: [], queryTokens: [] });
+    expect(kb.search('')).toMatchObject({ status: 'no_query_tokens' });
+  });
+
+  it('参数来自配置：topK、minScore、两腿权重各自改动都会改变结果（4.3-03 的无魔法数判据）', async () => {
+    const baseline = (await searchableKb()).kb.search('订单');
+    expect(baseline.hits.length).toBeGreaterThan(1);
+
+    const capped = (await searchableKb({ searchTopK: 1 })).kb.search('订单');
+    expect(capped.hits).toHaveLength(1);
+    expect(capped.hits[0]?.chunkId).toBe(baseline.hits[0]?.chunkId);
+
+    const strict = (await searchableKb({ searchMinScore: 0.99 })).kb.search('订单');
+    expect(strict.hits.length).toBeLessThan(baseline.hits.length);
+
+    // 只留覆盖腿与只留 BM25 腿是两种取向，头部次序应当能被其中一条腿翻掉；
+    // 若两腿权重根本不进算式，这三条断言会给出完全相同的结果。
+    const bm25Only = (await searchableKb({ bm25Weight: 1, lexicalWeight: 0 })).kb.search('订单服务重构');
+    const lexicalOnly = (await searchableKb({ bm25Weight: 0, lexicalWeight: 1 })).kb.search('订单服务重构');
+    expect(bm25Only.hits.map((hit) => hit.score)).not.toEqual(lexicalOnly.hits.map((hit) => hit.score));
+    expect(lexicalOnly.hits.every((hit) => hit.score <= 1)).toBe(true);
+  });
+
+  it('grep 判据：七个参数的默认值只活在 `cordis.yml` 里，检索源码一处赋数字都没有（4.3-03 的 C 半边）', () => {
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    const yaml = readFileSync(join(here, '../../../cordis.yml'), 'utf8');
+    const profileStart = yaml.indexOf('- id: kb-profile');
+    expect(profileStart).toBeGreaterThan(-1);
+    const rest = yaml.slice(profileStart);
+    const block = rest.slice(0, rest.indexOf('\n  - id:'));
+    const searchKeys = [
+      'searchTopK',
+      'searchMinScore',
+      'bm25K1',
+      'bm25B',
+      'bm25Weight',
+      'lexicalWeight',
+      'substringFloorScore',
+    ];
+    for (const key of searchKeys) expect(block).toMatch(new RegExp(`^\\s+${key}: \\d`, 'm'));
+
+    // 注释里写着实测拿到的数字（spike 结论里的 1.2 / 0.75），先把注释行剔掉再查赋值：
+    // 这条判据要拦的是代码里的默认值，不是解释。
+    const codeOnly = (file: string): string =>
+      readFileSync(join(here, file), 'utf8')
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
+        .join('\n');
+    const scoring = codeOnly('search.ts');
+    const wiring = codeOnly('profile-service.ts');
+    // 参数名（应用侧的叫法，与 `cordis.yml` 的键名不同源）一旦被赋数字，表现就是「改了配置检索没变」，
+    // 而这条只能靠源码检查发现——运行期断言拿到的永远是装配时传进去的那份配置。
+    for (const name of ['k1', 'b', 'topK', 'minScore', 'bm25Weight', 'lexicalWeight', 'substringFloorScore']) {
+      const assigned = new RegExp(`\\b${name}\\s*[:=]\\s*\\d`);
+      expect(scoring.match(assigned)?.[0] ?? null).toBeNull();
+      expect(wiring.match(assigned)?.[0] ?? null).toBeNull();
+    }
+  });
+
+  it('实体改过之后倒排立即收敛：旧句子搜不到、新句子搜得到', async () => {
+    const { kb } = await searchableKb();
+    // 两条文本刻意不共享任何二字组（`链路` 这种两边都有的词会让「搜不到」变成假阴性判据）
+    const created = kb.create({ kind: 'project', payload: { text: '订单中心的对账流程治理' } }, NOW_MS);
+    expect(kb.search('对账流程').hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
+    expect(kb.search('灰度放量').hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
+
+    kb.update(created.entityId, { text: '商品中心的灰度放量机制' }, LATER_MS);
+    expect(kb.search('对账流程').hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
+    expect(kb.search('灰度放量').hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
+  });
+
+  it('只缺倒排表的老库重新挂载即可检索：迁移 13 自己把倒排行与归一列回填（不留给启动路径补建）', async () => {
+    const dir = tempDir();
+    const { kb, store, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-search-backfill');
+    expect(kb.search('订单').hits.length).toBeGreaterThan(0);
+
+    // 模拟「带着 kb_chunks 但没有倒排」的老库：倒回一格就是只回滚 13，切片行与实体行都不动。
+    store.rollback(KB_CHUNKS_MIGRATION_VERSION);
+    expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
+
+    const again = await boot(dir);
+    expect(tableExists(again.db, 'kb_chunks_fts')).toBe(true);
+    expect(ftsCount(again.db)).toBe(chunkCount(again.db));
+    // 回填的归一列必须一起补上，否则升级后子串通道对老数据永久失效（表现为「单字搜不到」这种最难查的缺口）
+    expect(again.kb.listChunks().every((chunk) => chunk.normText === chunk.text.normalize('NFKC').toLowerCase())).toBe(
+      true,
+    );
+    expect(again.kb.search('订单').hits.length).toBeGreaterThan(0);
+    expect(again.kb.search('订').hits.some((hit) => hit.reasons.includes('substring'))).toBe(true);
+  });
+});
+
 describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
   /**
    * 结构面：整包源码里不允许出现任何网络能力的入口。
@@ -1127,6 +1396,9 @@ describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
     try {
       expect(kb.list({ kind: 'experience' }).length).toBeGreaterThan(0);
       expect(kb.evidenceFor('主导订单服务重构').length).toBeGreaterThan(0);
+      // 4.3-b 的检索入口也在同一条存根下跑一遍：它新引入了 FTS5 查询与 `instr` 全表扫，
+      // 但读的全是本地库文件，一条网络语句都不该有（spec 4.2-07 / 4.3-05 的「零上行」延伸到检索）。
+      expect(kb.search('订单').hits.length).toBeGreaterThan(0);
       const created = kb.create({ kind: 'skill', payload: { name: 'Kafka' } }, NOW_MS);
       kb.update(created.entityId, { name: 'Kafka / 消息队列' }, LATER_MS);
       kb.sync(docId, LATER_MS);

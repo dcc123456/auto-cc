@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import type { ResumeDocument, SectionKind } from '@auto-cc/plugin-resume-doc';
 import { evidenceTextOf } from './evidence.js';
-import { tokenSequence } from './tokenize.js';
+import { normalizeText, tokenSequence } from './tokenize.js';
 
 /** 切片的两种来源，顺序即 `kb_chunks.chunk_kind` 的 CHECK 约束取值。 */
 export const KB_CHUNK_KINDS = ['entity', 'section'] as const;
@@ -42,6 +42,8 @@ export interface KbChunkDraft {
   readonly text: string;
   /** 写入侧预分词结果，交给 4.3-b 的 FTS5 虚表索引。 */
   readonly tokens: string;
+  /** 归一化后的原文（NFKC + 小写），4.3-b 的**子串兜底通道**在这一列上做 `instr`（口径与理由见 `normalizeText`）。 */
+  readonly normText: string;
 }
 
 /**
@@ -73,6 +75,7 @@ export function entityChunkOf(entity: {
     sectionKind: null,
     text,
     tokens: indexTokens(text),
+    normText: normalizeText(text),
   };
 }
 
@@ -112,6 +115,7 @@ export function deriveSectionChunks(document: ResumeDocument): readonly KbChunkD
         sectionKind: section.kind,
         text,
         tokens: indexTokens(text),
+        normText: normalizeText(text),
       });
     }
   }
@@ -126,6 +130,8 @@ export interface KbChunkView {
   readonly sectionKind: SectionKind | null;
   readonly text: string;
   readonly tokens: string;
+  /** 归一化原文；检索的子串通道在这一列上匹配，读数带它是为了让单测能直接断言「库里这一列确实归过一」。 */
+  readonly normText: string;
   readonly updatedAt: number;
 }
 
@@ -137,6 +143,7 @@ export function chunkViewOf(row: {
   readonly section_kind: string | null;
   readonly text: string;
   readonly tokens: string;
+  readonly norm_text: string;
   readonly updated_at: number | bigint;
 }): KbChunkView {
   return {
@@ -146,6 +153,7 @@ export function chunkViewOf(row: {
     sectionKind: row.section_kind as SectionKind | null,
     text: row.text,
     tokens: row.tokens,
+    normText: row.norm_text,
     updatedAt: Number(row.updated_at),
   };
 }
