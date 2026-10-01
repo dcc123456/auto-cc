@@ -1,8 +1,9 @@
 /**
  * `@auto-cc/plugin-resume-doc` 对外出口（AGENTS.md §4.2：`src/index.ts` 是唯一门面）。
  *
- * P3 生成轨的地基包：简历文档模型 + Schema + 归一化/hash + diff + 容错导入 + 落库服务 + 模板渲染（纯函数）。
- * 本包**不认识**打印 / 导出（那是 3.3 的活）——模板只交出「一份合法简历渲染成什么 HTML」，不碰 printToPDF、不落地字体子集。
+ * P3 生成轨的地基包：简历文档模型 + Schema + 归一化/hash + diff + 容错导入 + 落库服务 + 模板渲染（纯函数）+ 打印文档装配（纯函数）。
+ * 本包**不认识 Electron**：打印层只交出「一份可直接喂给 `printToPDF` 的完整 HTML + 打印选项」与「对产物 Buffer 的结构读数」，
+ * 真正调 `webContents.printToPDF` 的执行器落在 L1 `shell`（经依赖注入消费本层产物），见 plan §3.3 分层落点。
  */
 export {
   createEmptyDocument,
@@ -49,3 +50,4 @@ export {
   type TemplateLocale,
   type TemplateOrigin,
 } from './template.js';
+export { resumePrint, type PdfInspection, type PrintRequest, type PrintRequestOptions } from './print.js';
