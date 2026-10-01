@@ -75,14 +75,27 @@ export interface RejectedResumeText {
 /** `parseResumeText` 的返回：成功给文档，过短只给判定读数（两条路径都带 issues，界面可复用同一套渲染）。 */
 export type ParseTextResult = ParsedResumeText | RejectedResumeText;
 
-/** 区块标题词典。顺序即优先级——「实习经历」归 experience 而不是 campus。 */
+/** 区块标题词典。顺序即优先级——「实习经历」归 experience 而不是 campus；英文词条给拉丁文 PDF/DOCX 腿用（匹配前统一小写）。 */
 const HEADING_TERMS: ReadonlyArray<readonly [SectionKind, readonly string[]]> = [
-  ['summary', ['个人简介', '自我介绍', '自我评价', '个人总结', '简介']],
-  ['experience', ['工作经历', '工作经验', '职业经历', '实习经历', '履历']],
-  ['project', ['项目经历', '项目经验']],
-  ['education', ['教育经历', '教育背景', '学习经历', '教育']],
-  ['skills', ['专业技能', '技能特长', '技能清单', '技能']],
-  ['campus', ['校园经历', '校园活动', '学生活动', '社团活动', '志愿者']],
+  ['summary', ['个人简介', '自我介绍', '自我评价', '个人总结', '简介', 'summary', 'profile', 'objective']],
+  [
+    'experience',
+    [
+      '工作经历',
+      '工作经验',
+      '职业经历',
+      '实习经历',
+      '履历',
+      'work experience',
+      'employment history',
+      'internship',
+      'experience',
+    ],
+  ],
+  ['project', ['项目经历', '项目经验', 'selected projects', 'projects', 'project']],
+  ['education', ['教育经历', '教育背景', '学习经历', '教育', 'education']],
+  ['skills', ['专业技能', '技能特长', '技能清单', '技能', 'technical skills', 'core skills', 'skills']],
+  ['campus', ['校园经历', '校园活动', '学生活动', '社团活动', '志愿者', 'campus activities', 'volunteering']],
 ];
 
 /** 标题行长度上限：超过它就认定是正文（正文里也常出现「工作经历梳理」这类词组）。 */
