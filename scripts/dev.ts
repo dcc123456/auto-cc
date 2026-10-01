@@ -10,6 +10,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { context, type Plugin } from 'esbuild';
 import { createServer } from 'vite';
+import { RUNTIME_ESBUILD_EXTERNAL, resolveRuntimeDeps, vendorRuntimeDeps } from './vendor-runtime-deps.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const mainEntry = path.join(repoRoot, 'packages', 'main', 'src', 'index.ts');
@@ -132,13 +133,19 @@ async function bundle(entry: string, outfile: string, restart: boolean) {
     platform: 'node',
     format: 'cjs',
     target: 'node22',
-    external: ['electron'],
+    external: RUNTIME_ESBUILD_EXTERNAL,
     sourcemap: true,
     logLevel: 'warning',
     plugins: restart ? [restartPlugin] : [],
   });
   await ctx.watch();
 }
+
+/**
+ * 外置依赖搬到 `main.cjs` 旁边：开发态的运行期解析路径必须与打包后的 staging 一致，
+ * 否则「dev 跑得通、装机才炸」没人拦得住（搬运逻辑与 1.7 共用同一份实现）。
+ */
+vendorRuntimeDeps(path.join(distDir, 'node_modules'), resolveRuntimeDeps());
 
 const server = await createServer({ root: rendererRoot });
 await server.listen();

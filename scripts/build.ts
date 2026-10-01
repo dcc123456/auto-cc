@@ -1,14 +1,16 @@
 /**
  * 生产态构建：bundle 主进程与 preload、构建渲染层、注入 CSP，组装 electron-builder 的 staging 目录。
  *
- * staging 里只放 `package.json` + 两份 cjs + `renderer/`，没有 `node_modules`：esbuild 把 cordis 与全部
- * `@auto-cc/*` 内联进 `main.cjs`（external 只留 electron），所以「零依赖产物」是构建结构本身保证的，
- * 不是打包后再筛选（spec §8.2 决策 1 / 验收 1.7-12）。
+ * staging 里只有**运行期外置的那几个包**（`mammoth` + `pdfjs-dist` 及其传递依赖）会以 `node_modules`
+ * 形式落盘，其余依赖全部被 esbuild 内联进 `main.cjs`。「外置哪些」的唯一真相源在
+ * `vendor-runtime-deps.ts`，为什么必须外置（pdf.js worker 相对自身解析）见
+ * `docs/plans/04-resume-kb/plan.md` §1.2（spec 4.1-c 决策：依赖外置 + `asarUnpack`）。
  */
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { build as viteBuild } from 'vite';
+import { RUNTIME_ESBUILD_EXTERNAL, resolveRuntimeDeps, vendorRuntimeDeps } from './vendor-runtime-deps.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const appDir = path.join(repoRoot, 'build', 'app');
@@ -46,7 +48,7 @@ async function bundleMainProcess(): Promise<void> {
       platform: 'node',
       format: 'cjs',
       target: 'node22',
-      external: ['electron'],
+      external: RUNTIME_ESBUILD_EXTERNAL,
       logLevel: 'warning',
     });
   }
@@ -63,8 +65,8 @@ function injectCsp(htmlFile: string): void {
   writeFileSync(htmlFile, html.replace(head, meta));
 }
 
-/** staging 的 package.json：只带 electron-builder 需要的元数据，零依赖。 */
-function writeAppManifest(): void {
+/** staging 的 package.json：元数据 + 运行期外置依赖声明（不声明的话 electron-builder 的依赖收集会把它们当野文件）。 */
+function writeAppManifest(deps: readonly { name: string; version: string }[]): void {
   const root = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     version: string;
     description: string;
@@ -80,6 +82,7 @@ function writeAppManifest(): void {
         author: { name: 'auto-cc', email: 'auto-cc@example.com' },
         license: 'UNLICENSED',
         private: true,
+        dependencies: Object.fromEntries(deps.map(({ name, version }) => [name, version])),
       },
       null,
       2,
@@ -112,6 +115,11 @@ await bundleMainProcess();
 await viteBuild({ root: rendererRoot, logLevel: 'warn' });
 cpSync(path.join(rendererRoot, 'dist'), path.join(appDir, 'renderer'), { recursive: true });
 injectCsp(path.join(appDir, 'renderer', 'index.html'));
-writeAppManifest();
+const vendored = vendorRuntimeDeps(path.join(appDir, 'node_modules'), resolveRuntimeDeps());
+writeAppManifest(vendored);
 
-console.log(`[build] staging 就绪：${path.relative(repoRoot, appDir)}`);
+console.log(
+  `[build] staging 就绪：${path.relative(repoRoot, appDir)}（外置依赖 ${String(vendored.length)} 个：${vendored
+    .map(({ name, version }) => `${name}@${version}`)
+    .join(' ')}）`,
+);

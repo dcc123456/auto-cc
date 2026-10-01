@@ -23,6 +23,11 @@ electronDownload:
 # staging 已是最终形态，不需要再解析依赖或跑 native rebuild。
 npmRebuild: false
 asar: true
+# 外置依赖（spec 4.1-c 决策：依赖外置 + `asarUnpack`）。pdf.js 的 worker 由 `pdf.mjs` 用 ESM `import()`
+# 按自身文件位置解析，留在 asar 内的读取路径本仓库未实测，所以解包到 `app.asar.unpacked`；
+# mammoth 是纯 CJS、按 require 解析，留在 asar 内即可，不解包（多解一份就多一份安装体积）。
+asarUnpack:
+  - node_modules/pdfjs-dist/**
 
 files:
   - '**/*'
