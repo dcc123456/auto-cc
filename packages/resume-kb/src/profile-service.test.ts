@@ -22,7 +22,7 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -794,5 +794,82 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     expect(await tool.run({})).toEqual(kb.list());
     // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
     expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
+  });
+});
+
+describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
+  /**
+   * 结构面：整包源码里不允许出现任何网络能力的入口。
+   *
+   * Node 内置模块的 ESM 命名空间是只读的（`http.request` 改不动），所以运行期想靠打桩覆盖全部通道做不到；
+   * 与其留一个假的安全感，不如把「这个包根本不 import 网络模块」变成断言——它是永久机检，不是一次快照。
+   */
+  it('包内没有任何网络模块入口（node:http/https/net/dns/tls/dgram、fetch、WebSocket、第三方 http 客户端）', () => {
+    const forbidden = [
+      /node:(http|https|net|dns|tls|dgram)\b/,
+      /\bfetch\s*\(/,
+      /\bWebSocket\b/,
+      /\bXMLHttpRequest\b/,
+      /\b(undici|axios|got|superagent|node-fetch)\b/,
+    ];
+    const offenders: string[] = [];
+    for (const file of readdirSync(import.meta.dirname)) {
+      if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
+      const text = readFileSync(join(import.meta.dirname, file), 'utf8');
+      for (const pattern of forbidden) {
+        if (pattern.test(text)) offenders.push(`${file} 命中 ${pattern}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('运行期把 fetch / WebSocket / XHR 换成计数存根后，读+同步+增删改+反查+备份全链路零调用', async () => {
+    const { kb, tools } = await seededKb(tempDir());
+    const docId = kb.list()[0]?.sourceDocId;
+    if (typeof docId !== 'string') throw new Error('种子库里没有派生实体，sync 路径没被覆盖');
+    const backupPath = join(tempDir(), 'kb-zero-uplink.json');
+
+    const uplink: string[] = [];
+    const globalChannels = globalThis as { WebSocket?: unknown; XMLHttpRequest?: unknown };
+    const original = {
+      fetch: globalThis.fetch,
+      webSocket: globalChannels.WebSocket,
+      xhr: globalChannels.XMLHttpRequest,
+    };
+    globalThis.fetch = (url: unknown) => {
+      uplink.push(`fetch ${String(url)}`);
+      return Promise.resolve(new Response('{}'));
+    };
+    globalChannels.WebSocket = class {
+      constructor() {
+        uplink.push('WebSocket');
+      }
+    };
+    globalChannels.XMLHttpRequest = class {
+      open() {
+        uplink.push('XMLHttpRequest.open');
+      }
+    };
+
+    try {
+      expect(kb.list({ kind: 'experience' }).length).toBeGreaterThan(0);
+      expect(kb.evidenceFor('主导订单服务重构').length).toBeGreaterThan(0);
+      const created = kb.create({ kind: 'skill', payload: { name: 'Kafka' } }, NOW_MS);
+      kb.update(created.entityId, { name: 'Kafka / 消息队列' }, LATER_MS);
+      kb.sync(docId, LATER_MS);
+      kb.exportBackup(backupPath, LATER_MS);
+      kb.importBackup(backupPath, 'skip');
+      expect(kb.remove(created.entityId).removed).toBe(1);
+      // agent 工具面走的是同一个入口，所以它也得在这套存根下跑一遍。
+      const tool = tools.declarations.get('kb.profile.list');
+      if (tool === undefined) throw new Error('kb.profile.list 未登记进 agent 工具面');
+      await tool.run({});
+    } finally {
+      globalThis.fetch = original.fetch;
+      globalChannels.WebSocket = original.webSocket;
+      globalChannels.XMLHttpRequest = original.xhr;
+    }
+
+    expect(uplink).toEqual([]);
   });
 });
