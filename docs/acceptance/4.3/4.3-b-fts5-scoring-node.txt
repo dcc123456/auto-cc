@@ -1,0 +1,120 @@
+# spec 4.3-b 实现前实测口径（FTS5 召回与自建 BM25 的一致性、df/tf/avgdl 取数、seq 对齐的倒排维护）
+# 运行时：纯 Node（node:sqlite 直用）：node v24.18.0 / sqlite 3.53.1
+# 命令：node .research-repos/fts5-preseg-spike/spike6.cjs && node .research-repos/fts5-preseg-spike/spike7.cjs  （工作目录 = 仓库根）
+# 脚本位置：.research-repos/fts5-preseg-spike/spike6.cjs 与 spike7.cjs（AGENTS.md §6.4：spike 代码不进主干，只结论进文档）
+# 对照文件：4.3-b-fts5-scoring-electron.txt（同一对脚本在另一个运行时下的输出）
+
+########## spike6.cjs ##########
+sqlite 版本: 3.53.1
+
+== S1 bm25() 的列权重（字段权重来自 config 的前提）
+  权重 head=1 body=1 → [{"rowid":1,"s":-0.000004321428571428571},{"rowid":2,"s":-0.000004321428571428571}]
+  权重 head=10 body=1 → [{"rowid":2,"s":-0.000006048294195835181},{"rowid":1,"s":-0.000005967213114754099}]
+  权重 head=1 body=10 → [{"rowid":1,"s":-0.000006048294195835181},{"rowid":2,"s":-0.000005967213114754099}]
+  列数不符（只给 1 个权重、表有 2 列，且带 MATCH）→ 没报错（不可依赖）
+  bm25(w_fts, 'k1', 1.2, 'b', 0.75, 1, 1)（带 MATCH）→ 没报错，结果 [{"rowid":1,"s":-0.0000014666666666666667},{"rowid":2,"s":-0.0000011}]（数字实参被当成第 3/4 列权重丢弃了）
+  bm25(w_fts, 1.2, 0.75, 1, 1, 1)（带 MATCH）→ 没报错，结果 [{"rowid":2,"s":-0.0000015931034482758624},{"rowid":1,"s":-0.0000015230769230769232}]（数字实参被当成第 3/4 列权重丢弃了）
+
+== S2 df（含该 token 的切片数）能否用 FTS5 逐 token 查出来
+  「订单」FTS5 df=3，全表 LIKE 粗算=3
+  「并发」FTS5 df=1，全表 LIKE 粗算=1
+  「p99」FTS5 df=3，全表 LIKE 粗算=3
+  「订」FTS5 df=1，全表 LIKE 粗算=4
+
+== S3 tf（词频）：为什么必须在应用数而不是用 SQL 数子串
+  e1：应用侧精确数「订单」=1，SQL 子串数=1
+  e6：应用侧精确数「订单」=4，SQL 子串数=4
+  内置 bm25() 对同一条 token 的排序（堆叠句是否排前）：[{"rowid":6,"s":-0.7378104549465083},{"rowid":1,"s":-0.4576585771791626},{"rowid":2,"s":-0.3811163761178393}]
+  误命中验证：查询「go」在 e4 的子串数=2（logo / django 里的 go），应用侧精确数=0 ⇒ tf 必须按 token 精确数，不能数子串
+  FTS5 侧同样不会误命中：MATCH "go" → []
+
+== S4 avgdl：能否一条 SQL 算准（token 数 = 空格数 + 1，空串为 0）
+  SQL：{"n":8,"total":99} → avgdl=12.375
+  应用侧逐行数：total=99 → avgdl=12.375（两者必须相等）
+
+== S5 倒排行与 kb_chunks.seq 对齐后的维护路径（新增/改文/删除）
+  改 2 号原文后：「订单」→ [{"rowid":1},{"rowid":2},{"rowid":6}]
+              「流水号」→ [{"rowid":2}]
+  删 5 号后 fts 行数=7，chunks 行数=7
+  join 回原文取回 text：[{"chunk_id":"e1","text":"主导订单服务重构，P99 延迟下降 40%。"},{"chunk_id":"e2","text":"负责订单中心与库存服务的接口设计与落地"},{"chunk_id":"e6","text":"订单、订单、订单，一年里重复了三次订单这个词"}]
+
+== S6 子串兜底通道：instr 对 norm_text 与对原文的差别（全角 / 大小写）
+  查询「p99」：instr(原文)=0，instr(归一)=3，FTS5=3
+  查询「Ｐ９９」：instr(原文)=1，instr(归一)=3，FTS5=3
+  查询「延迟」：instr(原文)=2，instr(归一)=2，FTS5=2
+  查询「订」：instr(原文)=3，instr(归一)=3，FTS5=0
+
+== S7 自建 BM25（k1/b 可设）与内置 bm25() 的排序一致性 + 分值量级
+  「订单」内置 bm25() 顺序=[6,2,1] 分值=[-0.4077,-0.303,-0.2513]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=1.2 b=0.75 → [{"chunk_id":"e6","score":1.341},{"chunk_id":"e2","score":0.9965},{"chunk_id":"e1","score":0.8267}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=0.5 b=0.30 → [{"chunk_id":"e6","score":1.0931},{"chunk_id":"e2","score":0.8626},{"chunk_id":"e1","score":0.8267}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=2.0 b=0.95 → [{"chunk_id":"e6","score":1.5321},{"chunk_id":"e2","score":1.123},{"chunk_id":"e1","score":0.8267}]
+  「高并发 缓存」内置 bm25() 顺序=[3] 分值=[-3.9909]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=1.2 b=0.75 → [{"chunk_id":"e3","score":4.556}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=0.5 b=0.30 → [{"chunk_id":"e3","score":4.8994}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=2.0 b=0.95 → [{"chunk_id":"e3","score":4.3355}]
+  「P99 延迟下降」内置 bm25() 顺序=[1] 分值=[-3.9724]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=1.2 b=0.75 → [{"chunk_id":"e1","score":5.3378},{"chunk_id":"e7","score":2.304},{"chunk_id":"e4","score":0.7063}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=0.5 b=0.30 → [{"chunk_id":"e1","score":5.3378},{"chunk_id":"e7","score":2.0584},{"chunk_id":"e4","score":0.7936}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=2.0 b=0.95 → [{"chunk_id":"e1","score":5.3378},{"chunk_id":"e7","score":2.5223},{"chunk_id":"e4","score":0.6541}]
+  「订单服务」内置 bm25() 顺序=[1] 分值=[-3.184]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=1.2 b=0.75 → [{"chunk_id":"e1","score":4.1746},{"chunk_id":"e6","score":1.341},{"chunk_id":"e2","score":0.9965}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=0.5 b=0.30 → [{"chunk_id":"e1","score":4.1746},{"chunk_id":"e6","score":1.0931},{"chunk_id":"e2","score":0.8626}]
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+      自建 k1=2.0 b=0.95 → [{"chunk_id":"e1","score":4.1746},{"chunk_id":"e6","score":1.5321},{"chunk_id":"e2","score":1.123}]
+
+  归一化候选：score / (不同查询 token 数 × (k1+1))，看是否落在 0～1 且可跨语料比较
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+  「订单」原始最高=1.341 token 数=1 上界=2.20 归一=0.6095
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+  「高并发 缓存」原始最高=4.556 token 数=3 上界=6.60 归一=0.6903
+    [语料统计] chunks=7 / fts 行=7（两者必须相等，否则倒排与主表已经走散）avgdl=12.000
+  「P99 延迟下降」原始最高=5.3378 token 数=4 上界=8.80 归一=0.6066
+
+########## spike7.cjs ##########
+== A. INSERT ... ON CONFLICT ... RETURNING 在 node:sqlite 里能不能拿到 seq
+  首次插入 → {"seq":1}
+  同 chunk_id 再写 → {"seq":1}（两次必须同一个 seq，否则倒排会指错行）
+  全表：[{"seq":1,"chunk_id":"c1"},{"seq":2,"chunk_id":"c2"},{"seq":3,"chunk_id":"c3"}]
+
+== B. 事务里 ALTER TABLE ADD COLUMN + CREATE VIRTUAL TABLE 能不能成（迁移 13 的形态）
+  成功：ALTER ADD COLUMN 与 CREATE VIRTUAL TABLE 可同事务；列数=6
+
+== C. 倒排维护：DELETE rowid 后再 INSERT 同一 rowid，然后 OR 查询
+  fts 行数=3
+  MATCH "订单" OR "库存" → [{"rowid":3,"s":-0.5914823012027262},{"rowid":1,"s":-0.4495265489140719}]
+  MATCH "订单" OR "并发" OR "缓存" → [{"rowid":2,"s":-1.0216512475319814},{"rowid":1,"s":-0.4495265489140719}]
+  MATCH "库存" OR "不存在" → [{"rowid":3,"s":-0.5914823012027262}]
+  MATCH "订单" → [{"rowid":1,"s":-0.4495265489140719}]
+
+== D. instr(列, ?) 绑定参数 + 单字/末字兜底
+  「订」→ [{"chunk_id":"c1"}]
+  「单」→ [{"chunk_id":"c1"}]
+  FTS5 侧「单」→ []
+
+== E. 逐 token 数 df 的批量成本：2000 行 × 8 个查询 token
+  8 次 df 查询耗时 0ms
+  OR 召回候选集 2000 行，耗时 1ms
+  取回候选 token 串 2000 行，耗时 3ms
+  单字/子串通道全表扫 instr 耗时 0ms
+  语料统计（n/avgdl）耗时 1ms → {"n":2000,"total":37390}
+
+== F. 空候选集时 IN () 不能拼（同 prune 的坑）
+  IN () 没报错（不可依赖）
+
+########## 与 4.3-b-fts5-scoring-electron.txt 的差异（diff 全文） ##########
+唯一差异是上面那行 sqlite 版本号（3.53.1 vs 3.53.4）。
+逐行 diff（去掉抬头 6 行：5 行注释 + 1 空行）后唯一差异是版本号：spike6 §S1~§S7 与 spike7 §A~§F 的命中行集、token 序列、
+bm25 数值、df/tf/avgdl 计数、报错文本、以及 spike7 的耗时数量级在两个运行时下完全一致。
+结论：4.3-b 的召回与打分口径不必按运行时分支，实现里的 SQL 与自建 BM25 只写一份。
