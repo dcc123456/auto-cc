@@ -48,7 +48,7 @@ function entryBody(
   const lines = view.lines
     .map((line) => `<div class="${lineClass}"><span>${line.label}</span><span>${line.value}</span></div>`)
     .join('');
-  return `<div class="${rowClass}">${heading}<div class="flex gap-2">${meta}</div>${lines}</div>`;
+  return `<div class="resume-entry ${rowClass}">${heading}<div class="flex gap-2">${meta}</div>${lines}</div>`;
 }
 
 /** 经典模板：居中姓名抬头 + 分隔线式区块标题，正文两端对齐（时间靠右）。 */

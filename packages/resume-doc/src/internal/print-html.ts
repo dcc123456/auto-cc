@@ -50,8 +50,10 @@ export function buildPrintHtml(
       `${f.unicodeRange ? `unicode-range:${f.unicodeRange};` : ''}src:url('${fontBaseUrl}/${f.file}') format('woff2');}`,
   ).join('');
   const pageRule = `@page{size:${pageSize};margin:${margin.topMm}mm ${margin.rightMm}mm ${margin.bottomMm}mm ${margin.leftMm}mm;}`;
+  // 分页护栏（3.3-08）：单条经历整体不跨页（break-inside:avoid），区块标题不被甩到页尾成孤儿（break-after:avoid）。
+  const breakRule = '.resume-entry{break-inside:avoid;}h2{break-after:avoid;}';
   const baseRule = `html{font-family:'${FONT_FAMILY}',sans-serif;font-size:${baseFontPt}pt;line-height:${lineHeight};-webkit-print-color-adjust:exact;print-color-adjust:exact;}body{margin:0;}`;
-  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${baseRule}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${breakRule}${baseRule}</style></head><body>${body}</body></html>`;
 }
 
 /**
