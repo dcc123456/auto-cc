@@ -1,0 +1,33 @@
+=== 1.7-15 外置依赖搬运审计（win-unpacked + app.asar + app.asar.unpacked） ===
+采集时间：2026-10-01；命令链：pnpm dist（= pnpm app:build && electron-builder --config electron-builder.yml --dir --publish never）
+
+-- build/app/node_modules 顶层（由 resolveRuntimeDeps() 递归解析，非手填） --
+@xmldom/ argparse/ base64-js/ core-util-is/ dingbat-to-unicode/ duck/ immediate/ inherits/ isarray/ jszip/ lie/ lop/ mammoth/ option/ pako/ pdfjs-dist/ process-nextick-args/ readable-stream/ safe-buffer/ setimmediate/ sprintf-js/ string_decoder/ underscore/ util-deprecate/ xmlbuilder/ 
+包数 = 25；根 = mammoth + pdfjs-dist（scripts/vendor-runtime-deps.ts 的 RUNTIME_EXTERNAL_ROOTS）
+
+-- app.asar 内 node_modules 顶层 --
+asar 内 node_modules 顶层 = @xmldom @xmldom/xmldom argparse base64-js core-util-is dingbat-to-unicode duck immediate inherits isarray jszip lie lop mammoth option pako pdfjs-dist process-nextick-args readable-stream safe-buffer setimmediate sprintf-js string_decoder underscore util-deprecate xmlbuilder
+包数 = 25（列表里的 26 项含 `@xmldom` 作用项目录本身；与 staging 一致，说明 electron-builder 没有额外塞进第三个根）
+
+-- app.asar.unpacked --
+node_modules node_modules/pdfjs-dist 
+-- 第二内核 / 第三方浏览器自动化痕迹 --
+asar 内命中数 = 0
+
+-- 体积 --
+app.asar = 6159855 B
+staging node_modules = 20209668 B（搬运后已剔除 *.map 与 pdfjs 的 web/ 与 types/）
+win-unpacked 解包总体积 = 407785028 B（含 Electron 44.4.5 内核本体）
+
+-- 真实 Electron 内核内的 asar 读取实测（一次性探针，代码不入主干） --
+ASAR_ROOT=dist/win-unpacked/resources/app.asar 用 packages/main 的 electron.exe 跑探针，输出：
+{"asarExists":true,"workerReadableViaAsarPath":true,"workerBytes":2395538,"mainReadableViaAsarPath":true,
+ "mammothReadableViaAsarPath":true,"pdfModuleLoaded":true}
+=> 解包后的 pdf.worker.mjs 经 app.asar 路径可读，pdf.mjs 动态 import 成功拿到 getDocument。
+=> 唯一的运行期噪音是 optional 原生包 @napi-rs/canvas 的 3 行 Warning（刻意不搬运，4.3-06 不引入需编译扩展）；
+   它只影响 DOMMatrix/Path2D 的渲染 polyfill，文本抽取路径不碰，实测抽取结果不受影响。
+
+-- staging 位置（与装机同解析路径）的 PDF 抽取实测 --
+把 tmp 探针 bundle 成 build/app/probe-41c.cjs（同样的 external 四项）后用 node 运行：
+{"status":"ok","format":"pdf","sections":["summary","experience","education"],"email":"j***@example.com"}
+=> 依赖腿在 staging/装机布局下可用（此前内联形态报 Cannot find module 'pdf.worker.mjs'）。

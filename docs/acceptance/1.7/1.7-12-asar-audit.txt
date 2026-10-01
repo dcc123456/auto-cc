@@ -42,3 +42,12 @@ asar 内命中 node_modules/playwright/puppeteer/chromium 的条目数 = 0
 win-unpacked 顶层/resources 命中第二内核的条目 = LICENSES.chromium.html
 说明：resources/default_app.asar 与 ffmpeg.dll / icudtl.dat / *.pak 属于 Electron 44.4.5 官方发行包本体，不是第二套内核；
      resources/app-update.yml 是 electron-builder 对 nsis 目标的默认产物，主进程未调用 autoUpdater，因此不产生任何更新行为（更新器归 P5）。
+
+=== 2026-10-01 更正（本文件上方清单作废的部分）===
+上方「-- app.asar 顶层 --」只列了 main.cjs / preload.cjs / renderer / package.json，那是**依赖外置决策之前**的产物。
+4.1-c 采纳「依赖外置 + asarUnpack」（实测：pdfjs 内联进 CJS 后运行期找不到 pdf.worker.mjs），
+所以 `app.asar` 内现在**确实有 node_modules**（25 个包 = mammoth + pdfjs-dist 两个根及其传递依赖）。
+本条的两项判据据此重新核对：
+  - 「无 chromium / playwright / puppeteer」→ 在新产物上复验通过（1.7-15 证据里 asar 清单命中 0）。
+  - 「asar 内无 node_modules」→ 作废，由 1.7-15（白名单审计）与 1.7-16（装机布局 + 真实内核可解析）接续守同一意图。
+新产物的完整数字见同目录 `1.7-15-external-deps-audit.txt`。

@@ -78,15 +78,22 @@ spike 与打包探针都跑在 `packages/resume-kb` 内、用完删除（AGENTS.
 3. `electron-builder.yml` 加 `asarUnpack: ['node_modules/pdfjs-dist/**']`：pdf.js 的 worker 走 ESM `import()`，
    留在 asar 内的读取路径本仓库未实测，解包到 `app.asar.unpacked` 是已验证过的稳妥形态（mammoth 不需要解包，纯 JS）。
 4. **1.7-12 的后半句判据（「`app.asar` 内无 `node_modules`」）随之作废**——它的本意是「没有第二套浏览器内核、
-   没有意外混入的依赖」，外置两个包之后这个本意要换个判据继续守：新增 **1.7-13「asar 内的 `node_modules` 只允许
-   `pdfjs-dist` + `mammoth` 及其传递依赖，且审计清单里不得出现第三个包」**。1.7-12 在依赖搬运落地前仍成立（当前
-   主进程还没有任何 import 触到这两个包），所以本轮不动 1.7 的表格，等地真改了再一起翻状态，避免纸上作废一条已通过项。
+   没有意外混入的依赖」，外置两个包之后这个本意要换个判据继续守。1.7 表里 **1.7-13 / 1.7-14 已被 CSP 两条占用**
+   （§4.5：文档 ID 一经分配永不复用），所以新增判据落在空号上：**1.7-15「asar 内的 `node_modules` 只允许
+   `mammoth` + `pdfjs-dist` 两个根及其传递依赖，不得出现第三个根」**与 **1.7-16「外置依赖在装机布局与真实内核内
+   可解析」**。1.7-12 保留 `[x]`（它的「无第二内核」判据在新产物上复验通过），只在验证操作里追加更正说明，
+   并把作废的那半句指到 1.7-15。
 
-体积账要一起记：这两个依赖约 1.9 MB JS（全内联 2.7 MB vs 外置 825 KB 的实测差），换来的是 PDF 抽取腿；
-用户侧仍是「只装一个 app」，无 node-gyp、无运行期下载。
+落地后的实测数字（同一份证据文件 `docs/acceptance/1.7/1.7-15-external-deps-audit.txt`）：外置闭包 **25 个包**
+（`mammoth` 带 8 个直接依赖 + 16 个传递，`pdfjs-dist` 自身零 `dependencies`），搬运后 staging `node_modules`
+20,209,668 B（已剔 `*.map` 与 pdfjs 的 `web/`、`types/`），`app.asar` 6,159,855 B（内联形态是 1,454,750 B），
+`app.asar.unpacked` 只有 `node_modules/pdfjs-dist` 一项，win-unpacked 解包 407,785,028 B（原 387,469,699 B）。
+optional 原生包 `@napi-rs/canvas` 刻意不搬运，代价是运行期 3 行 `Warning: Cannot load "@napi-rs/canvas"` 噪音，
+不影响文本抽取。体积账：约 +20 MB 换 PDF 抽取腿；用户侧仍是「只装一个 app」，无 node-gyp、无运行期下载。
 
-**在上面的清单落地并实测通过之前，依赖腿只能算「包内实测通过」，不能算「桌面 app 内可用」**——这条门禁挂在
-4.1-06（service + IPC）上，打包问题没解决前 4.1-06 不得打勾。
+**打包形态这一半已经落地并实测通过（1.7-15 / 1.7-16）**，4.1-06 的门禁收到剩下的那一半：service + IPC
+
+- 界面错误态没接完之前，4.1-06 仍不得打勾——「依赖能装进 app」不等于「用户点一下能拿到结果」。
 
 ## 2. 包与 service
 

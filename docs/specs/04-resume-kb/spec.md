@@ -64,9 +64,10 @@
   不含中日韩字形，这是夹具生成方式的硬约束而非解析缺陷；DOCX 与 Markdown 腿复用同一份中文语料断言同形。
   全部内容为虚构，测试内生成，不含真实个人信息。
 - 标题词典补英文词条（`summary / work experience / education / skills …`）：没有它「三种输入」实际只剩一种半。
-- **打包前置门禁（实测，见 plan §1.2）**：pdfjs 被 esbuild 内联进 CJS 后运行期找不到 `pdf.worker.mjs` 而失败；
-  标为 external 后同一探针正常。所以「桌面 app 内可用」在 service 接线片解决此项之前不成立，
-  4.1-06 不得提前打勾。
+- **打包前置门禁已落地（2026-10-01，判据落在 1.7-15 / 1.7-16）**：pdfjs 内联进 CJS 会运行期找不到
+  `pdf.worker.mjs`，改为「依赖外置 + `asarUnpack`」后，同一探针在 staging 布局返回 `status: ok`，
+  真实 Electron 内核经 `app.asar` 路径读到解包后的 worker。于是「桌面 app 内可用」的这一半已经成立，
+  4.1-06 剩下的门禁只是它字面要求的那半：service + IPC + 损坏文件的界面错误态截图。
 - 仍 `[ ]`：4.1-04 V、4.1-05 C、4.1-06、4.1-07、4.1-08、4.1-09 / 4.1-10 的入库与日志半边。
 - 复用核对：PDF / DOCX 抽文本各只有 `source.ts` **一个**调用点，`sections.ts` 不感知来源格式；
   脱敏仍然只有 `@auto-cc/core` 的 `redactText` 一处（已断言 PDF 腿上的邮箱不以原文进入文档）。
