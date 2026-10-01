@@ -589,6 +589,44 @@ describe('作为工作流节点（spec 2.4-01 / 2.4-07 / 2.4-09）', () => {
   });
 });
 
+describe('接管后重新读页面（spec 2.8-11 的 C 半边）', () => {
+  it('恢复=从头重放这一格：第二次读的是页面此刻的列表，不是上一次那份快照', async () => {
+    // 两屏是**换掉**而不是叠加：接管期间用户在页面上动了手（清了验证码、改了筛选条件），
+    // 列表里已经没有 1001、只剩 2002。抓取服务与适配器都没有页面缓存，所以第二圈必须看见新内容。
+    const script: PageScript = {
+      listContainer: pack.locators.jobCard!,
+      list: [extractOf(LIST_URL, [cardRow(0, '1001')]), extractOf(LIST_URL, [cardRow(0, '2002')])],
+      detail: ['1001', '2002'].map((jobId) => extractOf(`${DETAIL_BASE}?jobId=${jobId}`, [detailRow(jobId)])),
+    };
+    const { executors, jd, fake } = await boot(script, { targetCount: 1 });
+    const executor = executors?.resolve('jd.capture');
+    const spec = captureNodeSpec({ query: '前端工程师', city: '上海', target: 1 });
+
+    await executor?.(invocationOf(spec));
+    expect(jd.list(500).rows.map((row) => row.jobId)).toEqual(['1001']);
+    // 接管前的一格：一次搜索页导航 → 一次列表抽取 → 一次详情。
+    expect(fake.kinds).toEqual(['list', 'detail']);
+    expect(fake.navigated[0]).toContain('query=');
+
+    // 恢复：runner 把 `stepIndex` 指回这一步、换一只新的让出信号，再调**同一个**执行器（spec 2.4-07 的续跑形状）。
+    await executor?.(invocationOf(spec));
+
+    // 重读发生的两处读数：又一次搜索页导航、又一次列表抽取（不是从上一圈的收集里接着往下走）。
+    expect(fake.kinds).toEqual(['list', 'detail', 'list', 'detail']);
+    expect(fake.navigated.filter((url) => url.includes('query='))).toHaveLength(2);
+    // 2002 的地址**只出现在第二屏**：适配器靠列表读出来的 `seen` 表把 jobId 翻译成详情页地址，
+    // 没有重读列表的话这一步会直接抛「没见过 jobId 2002」，库里也就永远等不来这一行。
+    expect(fake.navigated.at(-1)).toBe(`${DETAIL_BASE}?jobId=2002`);
+    expect(
+      jd
+        .list(500)
+        .rows.map((row) => row.jobId)
+        .sort(),
+    ).toEqual(['1001', '2002']);
+    expect(jd.status()).toMatchObject({ total: 2, withDetail: 2 });
+  });
+});
+
 describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', () => {
   it('没签过字：CONSENT_REQUIRED，一次页面调用都不发、一条额度也不扣', async () => {
     const { capture, sessions, gate, fake, ledger, events } = await boot(twoScreenScript(['1001', '1002']));

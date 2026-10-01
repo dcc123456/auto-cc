@@ -31,12 +31,18 @@ import {
 } from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { DELIVER_ACTION, DELIVER_NODE_KIND, OutboundDeliverService, type DeliverConfig } from './deliver.js';
+import {
+  CUSTOMIZE_NODE_KIND,
+  DELIVER_ACTION,
+  DELIVER_NODE_KIND,
+  OutboundDeliverService,
+  type DeliverConfig,
+} from './deliver.js';
 import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
@@ -829,5 +835,108 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
     await deliverFiber.dispose();
     expect(tools?.removed).toEqual(['outbound.deliver.perform']);
     expect(tools?.list()).toEqual([]);
+  });
+});
+
+describe('简历定制占位格（spec 2.8-07 的 `resume.customize` / plan §15.9 决策 2）', () => {
+  /** 一条占位格的节点声明：参数按执行器真正读的字段给，其余留登记处的默认形状。 */
+  function customizeSpec(params: Record<string, string | number | boolean>): WorkflowNodeSpec {
+    return {
+      id: 'customize-1',
+      kind: CUSTOMIZE_NODE_KIND,
+      target: `resume://${String(params.job ?? '')}`,
+      params,
+      effect: 'read',
+      retryTimes: null,
+      requiresHuman: false,
+    };
+  }
+
+  it('它定的文件与真递出去的文件是同一份，并且如实声明「没定制过」', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+
+    const view = deliver.customize({ platform: 'boss', jobId: 'job-1001', filePath });
+    expect(view).toEqual({
+      platform: 'boss',
+      jobId: 'job-1001',
+      filePath,
+      fileName: 'resume.pdf',
+      // 字节数来自文件系统，不是把常量抄回断言：换一份文件它就变。
+      bytes: RESUME_CONTENT.byteLength,
+      customized: false,
+    });
+
+    // 同一条解析：请求没带 filePath 时占位格与 `stage` 都落到配置的 `resumeFile`（AGENTS.md §2.2）。
+    const withDefault = await boot({ dir, resumeFile: writeResume(dir, 'default-resume.pdf') });
+    expect(withDefault.deliver.customize({ platform: 'boss', jobId: 'job-1001' }).filePath).toBe(
+      join(dir, 'default-resume.pdf'),
+    );
+    // 这一格一格都不外发：渠道没被调、账本没多行、确认卡片一张都不出现。
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    expect(deliver.pending()).toEqual([]);
+  });
+
+  it('没有可用渠道也照样定得下简历：这一格不开页面、不进闸门', async () => {
+    const { dir, deliver } = await boot({});
+    const filePath = writeResume(dir);
+    expect(deliver.customize({ platform: 'boss', jobId: 'job-1001', filePath }).fileName).toBe('resume.pdf');
+  });
+
+  it('缺平台/缺岗位/两处都没路径/文件读不出：一律 INVALID_ARGUMENT 且不写任何文件', async () => {
+    const { dir, deliver, ledger } = await boot({});
+    const filePath = writeResume(dir);
+
+    expect(thrown(() => deliver.customize({ platform: '', jobId: 'job-1001', filePath }))).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('缺平台'),
+    });
+    expect(thrown(() => deliver.customize({ platform: 'boss', jobId: '', filePath }))).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('缺岗位'),
+    });
+    expect(thrown(() => deliver.customize({ platform: 'boss', jobId: 'job-1001' }))).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('resumeFile'),
+    });
+    const missing = join(dir, 'gone.pdf');
+    expect(thrown(() => deliver.customize({ platform: 'boss', jobId: 'job-1001', filePath: missing }))).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('gone.pdf'),
+    });
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('走工作流节点时参数从 `spec.params` 读进来，跑完只有日志：字节、账本、页面都不动', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({ channel: hand.channel });
+    const filePath = writeResume(dir);
+    const before = statSync(filePath);
+
+    await deliver.executeCustomizeNode({
+      runId: 'run-e2e',
+      spec: customizeSpec({ platform: 'boss', job: 'job-1001', file: filePath }),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    // 占位格名副其实：文件还是那份文件（mtime 与大小都没变）。
+    const after = statSync(filePath);
+    expect(after.size).toBe(before.size);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+
+    // 参数缺失同样在执行器这一层报出来（runner 的 `runNode` 是 async 方法，同步抛出仍然落成节点失败）。
+    expect(() =>
+      deliver.executeCustomizeNode({
+        runId: 'run-e2e',
+        spec: customizeSpec({ job: 'job-1001' }),
+        attempt: 1,
+        signal: new AbortController().signal,
+      }),
+    ).toThrowError(/缺平台/);
   });
 });

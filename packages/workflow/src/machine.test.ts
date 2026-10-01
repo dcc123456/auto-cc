@@ -192,6 +192,8 @@ describe('接管点（spec 2.1-08 / 2.4-06）', () => {
 
   it('未开始的 run 没有接管点，界面不会凭空挂出「等待你接管」', () => {
     expect(idleRun().requiresHuman).toBeNull();
+    // 归档位同理：新 run 上没有任何一格该挂「已人工接管」（spec 2.8-11 的反向验证）。
+    expect(idleRun().takeoverHandled).toBeNull();
   });
 
   it('普通暂停只是用户按了停止，不写接管点', () => {
@@ -222,6 +224,36 @@ describe('接管点（spec 2.1-08 / 2.4-06）', () => {
       { type: 'pause', takeover: { subject: 'boss', reason: 'missing', stepId: 'jd-capture', at: 2500 } },
     ]);
     expect(applyAll(paused, [{ type: 'resume' }]).requiresHuman).toBeNull();
+  });
+
+  it('续跑把那次接管归档到 `takeoverHandled`：横幅消失，但「已人工接管」的格子留痕（spec 2.8-11）', () => {
+    const takeover = { subject: 'boss', reason: 'risk-control', stepId: 'jd-capture', at: 2500 } as const;
+    const resumed = applyAll(applyAll(running(), [{ type: 'pause', takeover }]), [{ type: 'resume' }]);
+    expect(resumed.requiresHuman).toBeNull();
+    // 留的是**同一份数据**：界面按 `stepId` 找格子、按 `reason` 组织文案，主进程不组句。
+    expect(resumed.takeoverHandled).toEqual(takeover);
+  });
+
+  it('普通暂停（用户按停止）恢复后不留「已人工接管」：没接管过就不该有痕', () => {
+    const resumed = applyAll(applyAll(running(), [{ type: 'pause' }]), [{ type: 'resume' }]);
+    expect(resumed.status).toBe('running');
+    expect(resumed.takeoverHandled).toBeNull();
+  });
+
+  it('再次接管时归档换成最近一次：一个 run 只有一格挂「已人工接管」', () => {
+    const first = { subject: 'boss', reason: 'missing', stepId: 'jd-capture', at: 2500 } as const;
+    const second = { subject: 'boss', reason: 'expired', stepId: 'jd-list', at: 9000 } as const;
+    // 第一段：jd-capture 上接管并恢复（恢复后这一步从头再跑，所以要先 started 再 finished），然后停在 jd-list。
+    const afterFirst = applyAll(running(), [
+      { type: 'pause', takeover: first },
+      { type: 'resume' },
+      { type: 'step-started', stepId: 'jd-capture', at: 2900 },
+      { type: 'step-finished', stepId: 'jd-capture', at: 3000 },
+      { type: 'step-started', stepId: 'jd-list', at: 3100 },
+    ]);
+    expect(afterFirst.takeoverHandled).toEqual(first);
+    const afterSecond = applyAll(afterFirst, [{ type: 'pause', takeover: second }, { type: 'resume' }]);
+    expect(afterSecond.takeoverHandled).toEqual(second);
   });
 
   it('重新起一个 run 不会把上一个的接管点带过来', () => {

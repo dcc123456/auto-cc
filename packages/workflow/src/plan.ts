@@ -206,15 +206,74 @@ export const BOSS_DELIVER_PLAN: PlanInput = {
 };
 
 /**
+ * 全链路计划（spec 2.8-07 / M6 的验收对象）：搜索 → 读 JD → 生成话术并打招呼 →（定制简历·占位）→ 投递。
+ *
+ * 三条口径要写在这里，免得下一条读计划的人以为漏了节点：
+ * ① **没有独立的「生成话术」节点**——`greeting.send` 不带 `text` 时用 `title`/`company` 现生成
+ *    （`greet.ts:163` 调 `outbound.script.generate`，来源与模板版本一起写进账本 `source` 列），
+ *    再开一只 `script.generate` 节点就是同一逻辑两处，而且节点之间没有传值通道，
+ *    生成结果交给下一步也只会让它再生成一遍（plan §15.9 决策 1）；
+ * ② 目标岗位取仿站的 **1001**：`/chat` 与 `/deliver` 都按 `targetId` 认它，`/api/jobs` 也能搜到它，
+ *    所以打招呼与投递这两格外看到的是**同一个**岗位，链子不是拼出来的；
+ * ③ `resume.deliver` 不带 `file` 参数：路径来自 `outbound.deliver` 配置的 `resumeFile`，
+ *    与 `boss-deliver` 同一条理由——把某台机器上的绝对路径钉进仓库文件就是把演示数据当计划数据。
+ */
+export const BOSS_E2E_PLAN: PlanInput = {
+  id: 'boss-e2e',
+  nodes: [
+    {
+      id: 'e2e-capture',
+      kind: 'jd.capture',
+      // 关键词取仿站里真实存在的岗位名，链子后半的打招呼/投递才有同一个目标可对。
+      params: { query: '前端工程师', city: '上海', target: 3 },
+      effect: 'read',
+    },
+    {
+      id: 'e2e-list',
+      kind: 'jd.list',
+      params: { limit: 5 },
+      effect: 'read',
+    },
+    {
+      id: 'e2e-greet',
+      kind: 'greeting.send',
+      target: 'greet://1001',
+      // `title`/`company` 不给 `text`：这一步就要走生成那一路，界面与账本上才看得到话术来源。
+      params: { platform: 'boss', job: '1001', title: '桌面端前端工程师（Electron）', company: '星桥科技' },
+      effect: 'outbound',
+    },
+    {
+      id: 'e2e-customize',
+      kind: 'resume.customize',
+      target: 'resume://1001',
+      params: { platform: 'boss', job: '1001' },
+      // 只读：占位格一个字节都不改，也不外发（真做定制属 P3，plan §15.9 决策 2）。
+      effect: 'read',
+    },
+    {
+      id: 'e2e-deliver',
+      kind: 'resume.deliver',
+      target: 'deliver://1001',
+      params: { platform: 'boss', job: '1001', title: '桌面端前端工程师（Electron）', company: '星桥科技' },
+      effect: 'outbound',
+      // 同 boss-deliver：投递失败多半是页面不收，重放只是再撞一次（spec 2.6-07）。
+      retryTimes: 0,
+    },
+  ],
+};
+
+/**
  * P2 的内置计划清单：`planId` → 声明。
  *
  * `boss-basic` 是 2.4 的「顺序推进 / 失败重试 / 断点续跑」主线，`boss-deliver` 是 2.6 的投递主线
- * （节点路径要能落到库里那两张表，才取得到 `workflow_nodes.error` 这类读数）。
+ * （节点路径要能落到库里那两张表，才取得到 `workflow_nodes.error` 这类读数），
+ * `boss-e2e` 是 2.8-07 / M6 的全链路收口：从搜索一直走到投递，中间每一步都是真的能力而不是演示节点。
  * 配置键 `planId` 从这张表里选一条，选不到就装配期失败。
  */
 export const WORKFLOW_PLANS: Readonly<Record<string, PlanInput>> = {
   'boss-basic': BOSS_BASIC_PLAN,
   'boss-deliver': BOSS_DELIVER_PLAN,
+  'boss-e2e': BOSS_E2E_PLAN,
 };
 
 /**

@@ -6,7 +6,15 @@
  * 指纹若受键序影响，从库里读回来的计划会永远对不上，续跑就永远被拒绝。
  */
 import { describe, expect, it } from 'vitest';
-import { BOSS_BASIC_PLAN, BOSS_DELIVER_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchema } from './plan.js';
+import {
+  BOSS_BASIC_PLAN,
+  BOSS_DELIVER_PLAN,
+  BOSS_E2E_PLAN,
+  buildPlan,
+  planById,
+  WORKFLOW_PLANS,
+  workflowPlanSchema,
+} from './plan.js';
 
 describe('计划声明的解析与补全（spec 2.4-01）', () => {
   it('把省略的键补成确定形状，节点顺序即执行顺序', () => {
@@ -99,9 +107,47 @@ describe('投递主线计划（spec 2.6-01 / 03 / 07 的节点半边）', () => 
     expect(plan.nodes.every((node) => !('file' in node.params))).toBe(true);
   });
 
-  it('内置清单按 id 取得到两条计划，取不到时点名可用项', () => {
+  it('内置清单按 id 取得到三条计划，取不到时点名可用项', () => {
     expect(planById('boss-deliver').nodes).toHaveLength(2);
-    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic', 'boss-deliver']);
+    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic', 'boss-deliver', 'boss-e2e']);
     expect(() => planById('boss-none')).toThrowError(/可选/);
+  });
+});
+
+describe('全链路计划 boss-e2e（spec 2.8-07 / M6）', () => {
+  it('五格顺序是搜索→读库→打招呼→定制（占位）→投递，且每格都是真能力不是演示节点', () => {
+    const plan = buildPlan(BOSS_E2E_PLAN);
+    expect(plan.id).toBe('boss-e2e');
+    expect(plan.nodes.map((node) => node.kind)).toEqual([
+      'jd.capture',
+      'jd.list',
+      'greeting.send',
+      'resume.customize',
+      'resume.deliver',
+    ]);
+    // 挂名的 kinds 必须都有执行器登记（`demo.flaky` 那种测试专用节点出现在这里就是链子造假）。
+    expect(plan.nodes.some((node) => node.kind.startsWith('demo.'))).toBe(false);
+  });
+
+  it('外发两格是 outbound、只读三格是 read，投递那格零重试', () => {
+    const plan = buildPlan(BOSS_E2E_PLAN);
+    expect(plan.nodes.map((node) => node.effect)).toEqual(['read', 'read', 'outbound', 'read', 'outbound']);
+    // 纯读节点没有目标可对，target 留空串；三条外发/占位格各按岗位分开，幂等键才分得开。
+    expect(plan.nodes.map((node) => node.target)).toEqual(['', '', 'greet://1001', 'resume://1001', 'deliver://1001']);
+    expect(plan.nodes.map((node) => node.retryTimes)).toEqual([null, null, null, null, 0]);
+  });
+
+  it('话术不在计划里预置：打招呼那格只给 title/company，生成走 `greeting.send` 内部（plan §15.9 决策 1）', () => {
+    const plan = buildPlan(BOSS_E2E_PLAN);
+    const greet = plan.nodes[2]!;
+    expect(greet.params).not.toHaveProperty('text');
+    expect(greet.params).toMatchObject({
+      platform: 'boss',
+      job: '1001',
+      title: '桌面端前端工程师（Electron）',
+      company: '星桥科技',
+    });
+    // 简历路径同理不钉进仓库：取 `outbound.deliver` 配置的 `resumeFile`。
+    expect(plan.nodes.every((node) => !('file' in node.params))).toBe(true);
   });
 });

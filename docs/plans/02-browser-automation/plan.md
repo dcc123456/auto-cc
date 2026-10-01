@@ -2101,10 +2101,12 @@ P2 一条消息里至多一张卡（`attachToolPart` 是串行的），所以不
 证据取仿站 `/api/threads` 里真正落到页面上的那条文本 + 账本 `source` 列的 `scriptVersion:jdId`（spec 2.5-09 已有口）。
 由此 §15.4 那条链按**能力**对齐而不是按节点数对齐：`jd.capture(搜索) → jd.list(读JD) → greeting.send(生成话术+打招呼) → resume.customize(定制简历·占位) → resume.deliver(择机投递)`，格子数与 spec 文案一致。
 
-**决策 2：「定制简历」占位格 = 新节点类型 `resume.customize`，同时是一只只读工具，同一个实现两处登记。**
+**决策 2：「定制简历」占位格 = 新节点类型 `resume.customize`，只登记为节点执行器，不登记成 agent 工具。**
 它做的唯一一件真实的事是**把这次要发出去的简历文件定下来**：读 `outbound.deliver` 配置的 `resumeFile`，
 把文件名与字节数作为这一步的读数报出来，正文显式写「未做岗位定制（P3 生成轨）」。
 `effect: 'read'`、`retryTimes: 0`（它不碰页面，重复执行没有副作用）。
+不登记工具的口径：spec 2.8-08 已按「9 只工具」验收归档（`2.8-08-tool-list-and-tiers.txt`），
+为占位格添加工具会让那条读数与证据不一致，而对话侧要同步的是一件 P3 才成立的能力——现在给它入口只是多一个能骗人的按钮。
 否决方案：① 空跑直接 `done`——那一格在截图里就是骗人，spec 要求占位**显式写成占位**；
 ② 放进 `workflow` 包当 demo 节点——`resumeFile` 是 outbound 的配置，放进内核层就是把领域事实挪错地方，还要多开一条依赖。
 

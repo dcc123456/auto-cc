@@ -49,6 +49,34 @@ export const DELIVER_ACTION = 'deliver';
 /** 工作流节点名（plan §13.3 第 1 条）；与 `greeting.send` 同一命名口径。 */
 export const DELIVER_NODE_KIND = 'resume.deliver';
 
+/**
+ * 「定制简历」那一格的节点名（spec 2.8-07 / plan §15.9 决策 2）。
+ *
+ * P2 它是**占位**：只把这次要发出去的简历文件定下来，一个字都不按岗位改（生成轨属 P3）。
+ * 之所以仍要单独一格，而不是让投递节点自己去读配置——M6 的全链路截图里必须看得见「定制」这一步
+ * 到底做没做，藏进投递节点内部就等于在验收照片里撒了个谎。
+ */
+export const CUSTOMIZE_NODE_KIND = 'resume.customize';
+
+/**
+ * 「定制简历」这一步的读数（spec 2.8-07 的占位格）。
+ *
+ * `customized` 恒为 `false` 是有意的：把「没做定制」做成一个**字段**而不是文案，
+ * 界面与验收记录就拿到的是一个可核对的读数，将来 P3 真做定制时它翻成 `true`，
+ * 而不用去改一句写死的话。
+ */
+export type ResumeCustomizeView = {
+  platform: string;
+  jobId: string;
+  /** 定下来的简历文件绝对路径——`resume.deliver` 那一步用的就是它（同一条解析，见 `resolveResumePath`） */
+  filePath: string;
+  fileName: string;
+  /** 文件字节数（读文件系统得到，不是猜的；为 0 也算读数） */
+  bytes: number;
+  /** P2 恒 false：没有按岗位改过任何一个字 */
+  customized: false;
+};
+
 /** 投递档位：直接复用 `AutonomyLevel`，不新造枚举（plan §13.3 第 3 条）。 */
 const autonomyLevelSchema = z.enum(['suggest', 'semi', 'auto']);
 
@@ -172,6 +200,30 @@ export class OutboundDeliverService extends Service {
   }
 
   /**
+   * 解析「这次要用哪份简历文件」：请求带的路径优先，没带用配置的 `resumeFile`。
+   *
+   * 抽成一个方法是因为两处都要这条判断（`stage` 投递前、`customize` 定制格），
+   * 而两条路径必须给出**同一个**答案——占位格报出来的文件和真正递出去的文件不是同一份，
+   * 那一格就成了摆设（AGENTS.md §2.2）。
+   * @param requested 请求里显式给的路径（工具/界面入口用得上）
+   * @param jobId 只用于把错误说得清（哪个岗位等这份简历）
+   * @returns 简历文件的绝对路径
+   * @throws 两个来源都没给时 `INVALID_ARGUMENT`
+   */
+  private resolveResumePath(requested: string | undefined, jobId: string): string {
+    const filePath = requested ?? this.config.resumeFile;
+    if (!filePath) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        '没有要投递的简历文件：请求里没带 filePath，配置里也没设 resumeFile',
+        'outbound.deliver',
+        { jobId },
+      );
+    }
+    return filePath;
+  }
+
+  /**
    * 准备好一次投递：现问渠道 → 校验文件 → 算 hash → 查幂等（spec 2.6-06 要的中间态）。
    * @param raw 请求（见 `deliverRequestSchema`）；`filePath` 省略时取配置里的 `resumeFile`
    * @returns 已备好的投递（含附件三要素与 `source`），**尚未发出、尚未进闸门、尚未落账**
@@ -192,15 +244,7 @@ export class OutboundDeliverService extends Service {
     const { platform, jobId, title, company } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = parsed.data.workflowRunId ?? null;
-    const filePath = parsed.data.filePath ?? this.config.resumeFile;
-    if (!filePath) {
-      throw new AppError(
-        'INVALID_ARGUMENT',
-        '没有要投递的简历文件：请求里没带 filePath，配置里也没设 resumeFile',
-        'outbound.deliver',
-        { jobId },
-      );
-    }
+    const filePath = this.resolveResumePath(parsed.data.filePath, jobId);
 
     // 渠道在准备工作里就问（同打招呼的理由）：平台名写错要在**读文件、算 hash 之前**就失败，
     // 而不是让人在界面上确认完一份永远递不出去的简历。
@@ -546,13 +590,79 @@ export class OutboundDeliverService extends Service {
     }
   };
 
+  /**
+   * 定下这次投递要用哪份简历文件，并如实声明「没有按岗位定制」（spec 2.8-07 的占位格）。
+   *
+   * 与 `stage` 走同一条路径解析（`resolveResumePath`），所以这里报出来的文件与真正递出去的是同一份；
+   * 不读页面、不碰闸门、不落账、不写文件（`effect: 'read'` 因此是实话）。
+   * @param input.platform 平台标识（只用于把读数说完整）
+   * @param input.jobId 目标岗位标识
+   * @param input.filePath 显式指定的简历路径；省略时取配置 `resumeFile`
+   * @returns 简历文件读数 + `customized: false`
+   * @throws 平台或岗位没给、两个来源都没给路径、那个文件读不出来时都是 `INVALID_ARGUMENT`
+   */
+  customize = (input: { platform: string; jobId: string; filePath?: string }): ResumeCustomizeView => {
+    if (!input.platform || !input.jobId) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `简历定制必须给出平台与目标岗位，现在${!input.platform ? '缺平台' : '缺岗位'}`,
+        CUSTOMIZE_NODE_KIND,
+        { jobId: input.jobId },
+      );
+    }
+    const filePath = this.resolveResumePath(input.filePath, input.jobId);
+    let bytes: number;
+    try {
+      bytes = statSync(filePath).size;
+    } catch {
+      // 配置指到不存在的文件是装配期就会踩到的真缺陷：这里说得出一句人话，比让投递那一步
+      // 在读附件时才炸要早一步（spec 2.6-06 的「准备工作里就失败」同口径）。
+      throw new AppError('INVALID_ARGUMENT', `简历文件读不出来：${path.basename(filePath)}`, CUSTOMIZE_NODE_KIND, {
+        jobId: input.jobId,
+      });
+    }
+    return {
+      platform: input.platform,
+      jobId: input.jobId,
+      filePath,
+      fileName: path.basename(filePath),
+      bytes,
+      customized: false,
+    };
+  };
+
+  /**
+   * 作为工作流节点（`kind: resume.customize`）时的执行函数——P2 这一格是**占位**。
+   *
+   * 参数与投递节点同口径（`platform` / `job`，可选 `file`），跑完只留一条日志与一个读数：
+   * 它不改简历正文，所以后面那格 `resume.deliver` 递的是同一份文件（plan §15.9 决策 2）。
+   * @param invocation 节点执行输入：这一步不外发，所以只取 `spec.params`，不看 `signal`
+   * @throws 缺 `platform`/`job`、没有可定下来的文件、文件读不出时 `INVALID_ARGUMENT`
+   */
+  executeCustomizeNode: WorkflowNodeExecutor = ({ spec }) => {
+    const view = this.customize({
+      platform: paramString(spec.params.platform) ?? '',
+      jobId: paramString(spec.params.job) ?? '',
+      filePath: paramString(spec.params.file) ?? undefined,
+    });
+    this.ctx.logger.info(
+      `简历定制（P2 占位）：岗位 ${view.jobId} · 文件 ${view.fileName} · ${String(view.bytes)} 字节 · 未按岗位改一字（生成轨属 P3）`,
+    );
+    // 定文件是同步的（读文件系统的 stat），但执行器契约要求返回 Promise——runner 的退避与让出都按异步编排。
+    return Promise.resolve();
+  };
+
   [Service.init](): void {
     // 登记处是可选依赖：工作流没装时投递照样能从界面单次触发，只是没有节点可跑。
     const registry = executorRegistryOf(this.ctx);
     if (registry) {
       registry.register(DELIVER_NODE_KIND, this.executeNode);
+      registry.register(CUSTOMIZE_NODE_KIND, this.executeCustomizeNode);
       // 卸载时摘回登记：留下指向已销毁实例的函数，下一次跑工作流会得到无法解释的错误。
-      this.ctx.effect(() => () => registry.unregister(DELIVER_NODE_KIND));
+      this.ctx.effect(() => () => {
+        registry.unregister(DELIVER_NODE_KIND);
+        registry.unregister(CUSTOMIZE_NODE_KIND);
+      });
     }
     // 服务被重建（改配置热改）时，上一份 Map 里悬着的等待必须自己收掉：那些 await 的调用方
     // 已经跟着旧实例一起没了，让它们带着 timer 悬在事件循环里就是「重建即悬挂」（plan §13.3 第 2 条）。
@@ -579,7 +689,7 @@ export class OutboundDeliverService extends Service {
     ]);
     const deliverable = deliverChannelsOf(this.ctx)?.deliverablePlatforms() ?? [];
     this.ctx.logger.info(
-      `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+      `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND} / ${CUSTOMIZE_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 

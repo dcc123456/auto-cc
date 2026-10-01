@@ -154,6 +154,13 @@ export type WorkflowRunView = {
    * 它与 `status: 'paused'` 是两件事：暂停可以是用户自己点的，接管一定是机器被要求停手。
    */
   requiresHuman: WorkflowTakeoverView | null;
+  /**
+   * 刚刚被人工处理掉的那次接管（spec 2.8-11）：`resume` 时从 `requiresHuman` 归档过来，
+   * 界面据此在对应格子上挂「已人工接管」——只有「正在等」的横幅的话，接管完就查不到痕迹了。
+   * **只活在内存里**：接管点从来不入 `workflow_nodes`（plan §15.9 事实 7），
+   * 所以跨进程重启续跑后它是 null，那是如实（重启后没人知道上一次谁接管过），不是漏写。
+   */
+  takeoverHandled: WorkflowTakeoverView | null;
 };
 
 /**

@@ -400,9 +400,15 @@
       "step": {
         "jd-capture": "抓取 JD 入库",
         "jd-list": "读取已入库的 JD",
-        "flaky": "退避重试演示"
+        "flaky": "退避重试演示",
+        "e2e-capture": "搜索并抓取 JD 入库",
+        "e2e-list": "读取已入库的 JD",
+        "e2e-greet": "生成话术并打招呼",
+        "e2e-customize": "定制简历（P2 占位·未定制）",
+        "e2e-deliver": "投递这份简历"
       },
       "takeoverTitle": "等待你接管",
+      "takeoverHandled": "已人工接管",
       "takeoverBody": {
         "missing": "{{subject}} 还没登录（会话里没有 cookie），工作流停在「{{step}}」；请在内嵌视图里登录后继续。",
         "expired": "{{subject}} 的登录态已失效，工作流停在「{{step}}」；请在内嵌视图里重新登录后继续。",

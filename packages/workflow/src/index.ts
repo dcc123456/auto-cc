@@ -1062,6 +1062,9 @@ function toMirror(stored: WorkflowRunStateView): WorkflowRunView {
     steps,
     startedAt: stored.startedAt,
     requiresHuman: null,
+    // 接管点从来不入库（`workflow_nodes` 没有对应列，plan §15.9 事实 7），所以从库里重建的镜像
+    // 两个接管位都是空的：跨进程续跑后界面上不该出现「等待接管 / 已人工接管」——那事已经随进程死了。
+    takeoverHandled: null,
   };
 }
 

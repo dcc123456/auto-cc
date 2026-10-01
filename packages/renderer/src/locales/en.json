@@ -400,9 +400,15 @@
       "step": {
         "jd-capture": "Capture JDs into the store",
         "jd-list": "Read stored JDs",
-        "flaky": "Retry backoff demo"
+        "flaky": "Retry backoff demo",
+        "e2e-capture": "Search and capture JDs",
+        "e2e-list": "Read stored JDs",
+        "e2e-greet": "Generate script and greet",
+        "e2e-customize": "Customize resume (P2 placeholder)",
+        "e2e-deliver": "Deliver this resume"
       },
       "takeoverTitle": "Waiting for you",
+      "takeoverHandled": "Taken over manually",
       "takeoverBody": {
         "missing": "{{subject}} is not signed in (no cookie in the session), the run stopped at \"{{step}}\". Sign in inside the embedded view, then continue.",
         "expired": "The sign-in for {{subject}} has expired, the run stopped at \"{{step}}\". Sign in again inside the embedded view, then continue.",

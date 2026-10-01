@@ -6,6 +6,7 @@ import {
   RefreshCw,
   RotateCw,
   ShieldAlert,
+  ShieldCheck,
   Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -230,12 +231,18 @@ export function WorkflowPanel() {
           {current.steps.map((step, index) => {
             /** 这一步是不是那个「run 级待接管」的落点：只有停住的那一步该被描出来，别的格子不加戏。 */
             const isTakeoverStep = current.requiresHuman?.stepId === step.id;
+            /**
+             * 这一步是不是**刚刚被人接管过**（spec 2.8-11）：接管横幅在续跑那一刻就消失了，
+             * 没有这枚角标的话「谁处理过」在界面上查不到任何痕迹。还在等的时候不叠着画，两者互斥。
+             */
+            const isHandledStep = !isTakeoverStep && current.takeoverHandled?.stepId === step.id;
             return (
               <li
                 key={step.id}
                 data-step-id={step.id}
                 data-step-status={step.status}
                 data-step-takeover={isTakeoverStep ? 'true' : undefined}
+                data-step-takeover-handled={isHandledStep ? (current.takeoverHandled?.reason ?? 'true') : undefined}
                 className={`rounded-lg border px-3 py-2 text-[11px] ${STEP_STATUS_STYLE[step.status]} ${isTakeoverStep ? TAKEOVER_OVERLAY : ''}`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -260,6 +267,15 @@ export function WorkflowPanel() {
                       >
                         <ShieldAlert size={12} />
                         {t('workflow.takeoverTitle')}
+                      </span>
+                    ) : null}
+                    {isHandledStep ? (
+                      <span
+                        className="ml-1 inline-flex items-center gap-1 text-emerald-300"
+                        data-testid="workflow-step-takeover-handled"
+                      >
+                        <ShieldCheck size={12} />
+                        {t('workflow.takeoverHandled')}
                       </span>
                     ) : null}
                   </span>

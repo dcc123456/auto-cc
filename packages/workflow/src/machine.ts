@@ -50,7 +50,7 @@ export function createRun(runId: string, at: number, nodeIds: readonly string[])
     durationMs: null,
     error: null,
   }));
-  return { runId, status: 'idle', stepIndex: 0, steps, startedAt: at, requiresHuman: null };
+  return { runId, status: 'idle', stepIndex: 0, steps, startedAt: at, requiresHuman: null, takeoverHandled: null };
 }
 
 /** 替换某个下标处的步骤读数（其余字段原样带着走，避免逐字段手抄漏一个）。 */
@@ -141,7 +141,17 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
     case 'resume':
       if (run.status !== 'paused') return { ok: false, reason: `只有暂停中的 run 可以续跑，当前是 ${run.status}` };
       // 续跑即宣告接管完成：接管标记不清掉的话，界面会一直挂着「等待用户」的横幅。
-      return { ok: true, run: { ...run, status: 'running', requiresHuman: null } };
+      // 清掉之前先归档到 `takeoverHandled`（spec 2.8-11）——用户处理完风控再回来，
+      // 界面上必须还能看出「这一步是被人接管过才继续的」，否则横幅一消失就什么都查不到了。
+      return {
+        ok: true,
+        run: {
+          ...run,
+          status: 'running',
+          requiresHuman: null,
+          takeoverHandled: run.requiresHuman ?? run.takeoverHandled,
+        },
+      };
 
     case 'run-failed': {
       if (run.status !== 'running')
