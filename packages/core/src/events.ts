@@ -626,10 +626,14 @@ export type ChatSessionView = {
 export type ChatSnapshotView = { session: ChatSessionView; messages: ChatMessageView[] };
 
 /**
- * 流式增量事件载荷（spec 1.11-03）。
+ * 流式增量事件载荷（spec 1.11-03 / 2.8-09）。
  *
  * 只带一个片段与两个 id：整份历史由 `chat.session.current()` 一次给全，事件只负责"字数在涨"。
  * 载荷刻意不传 parts 数组——那会让每片都带上整条消息，等于把流式退化成轮询的变体。
+ * `tool` 是 2.8-c 补的那一位：卡片对象只在**两次状态跳变**上出现（开跑一次、落定一次），
+ * 不随文本片重复，所以不违反上面那句。没有它，`执行中` 在界面上永远看不见——`ChatPanel`
+ * 画的是本地 `liveStream`，而带卡片的那条 `live` 消息在快照里被 `isStreaming` 过滤掉了
+ * （plan §15.8 落点 2）。
  */
 export type ChatDeltaEvent = {
   sessionId: string;
@@ -638,6 +642,8 @@ export type ChatDeltaEvent = {
   text: string;
   /** 该消息是否已结束；界面见到 true 才去重读快照，把工具卡片补上。 */
   done: boolean;
+  /** 工具卡片的一次跳变（含最新状态）；纯文本推进的那一片不带这一位。 */
+  tool?: ChatToolPart;
 };
 
 /**

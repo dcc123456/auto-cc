@@ -6,9 +6,15 @@
  * P5 换成真模型时改的是主进程的生成函数，这个文件一行不用改。
  */
 import { Bot, Gauge, LoaderCircle, Plus, Send, Square, User, Workflow as WorkflowIcon, Wrench } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AutonomyLevel, ChatMessageView, ChatSnapshotView, ChatToolPart } from '@auto-cc/shared';
+import type {
+  AutonomyLevel,
+  ChatMessageView,
+  ChatSnapshotView,
+  ChatToolPart,
+  ToolDescriptorView,
+} from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 import { useWorkflowRun } from './useWorkflowRun';
 
@@ -26,20 +32,34 @@ const TOOL_STATE_STYLE: Record<ChatToolPart['state'], string> = {
   failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
 };
 
-/** 工具 id → 界面标题的 i18n key。P1 的注册表是空表，所以这里只登记演示用的那一个。 */
-const TOOL_LABEL_KEY: Record<string, string> = { 'demo.echo': 'agent.tool.echo' };
+/**
+ * 工具 id → 界面标题的 i18n key，九个已登记的能力各一条（spec 2.8-09）。
+ * id 里带点，而语言包按点分层，所以键用短码；映射表在编译期钉住，未落进来的 id 走 `agent.tool.unregistered`。
+ */
+const TOOL_LABEL_KEY: Record<string, string> = {
+  'browser.act.click': 'agent.tool.labels.actClick',
+  'browser.act.type': 'agent.tool.labels.actType',
+  'browser.locate.find': 'agent.tool.labels.locateFind',
+  'browser.page.navigate': 'agent.tool.labels.pageNavigate',
+  'browser.page.snapshot': 'agent.tool.labels.pageSnapshot',
+  'jd.capture.run': 'agent.tool.labels.jdCapture',
+  'outbound.deliver.perform': 'agent.tool.labels.deliverPerform',
+  'outbound.greet.perform': 'agent.tool.labels.greetPerform',
+  'sessions.open': 'agent.tool.labels.sessionsOpen',
+};
 
 /** 界面上正在累加的那条助手回复（主进程快照在流式期间也带这条，两边同时画会重复，所以过滤掉它）。 */
-type LiveStream = { sessionId: string; messageId: string; text: string };
+type LiveStream = { sessionId: string; messageId: string; text: string; tool?: ChatToolPart };
 
 /**
- * 一张工具调用卡片（spec 1.11-06 的占位组件）。
+ * 一张工具调用卡片（spec 2.8-09：工具名、关键参数、状态、耗时，外加副作用分级）。
  *
- * 卡片是**一条消息的一部分**，不是另一条消息：P5 的 agent 一次输出「文本 + 工具调用」时不需要改表。
- * @param part 主进程写进 `parts[]` 的工具段
- * @returns 标题 + 入参摘要 + 状态；失败时把结构化原因原样显示，不改口成「已完成」
+ * 卡片是**一条消息的一部分**，不是另一条消息：agent 一次输出「文本 + 工具调用」时不需要改表。
+ * @param part 主进程写进 `parts[]`（或经 `chat/delta` 带出）的工具段
+ * @param meta 注册表里这只工具的声明（`agent.tools.list()` 的读数）；未登记或读数未回来时为 undefined
+ * @returns 标题 + 入参摘要 + 状态 + 分级；失败时把结构化原因原样显示，不改口成「已完成」
  */
-function ToolCard({ part }: { part: ChatToolPart }) {
+function ToolCard({ part, meta }: { part: ChatToolPart; meta?: ToolDescriptorView }) {
   const { t } = useTranslation();
   const labelKey = TOOL_LABEL_KEY[part.toolId];
   return (
@@ -47,6 +67,8 @@ function ToolCard({ part }: { part: ChatToolPart }) {
       data-testid="chat-tool-card"
       data-tool-id={part.toolId}
       data-tool-state={part.state}
+      data-tool-effect={meta?.effect ?? 'unknown'}
+      data-tool-confirm={meta ? String(meta.requiresConfirmation) : 'unknown'}
       className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${TOOL_STATE_STYLE[part.state]}`}
     >
       <div className="flex items-center gap-2">
@@ -60,10 +82,12 @@ function ToolCard({ part }: { part: ChatToolPart }) {
       <p className="mt-1 break-all text-slate-400" data-tool-input={JSON.stringify(part.input)}>
         {t('agent.tool.input', { input: JSON.stringify(part.input) })}
       </p>
-      <div className="mt-1 flex items-center gap-3 text-[10px] text-slate-500">
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
         {part.durationMs !== null ? (
           <span data-tool-duration={String(part.durationMs)}>{t('agent.tool.duration', { ms: part.durationMs })}</span>
         ) : null}
+        {meta ? <span>{t(`agent.tool.effect.${meta.effect}`)}</span> : null}
+        {meta?.requiresConfirmation ? <span data-tool-needs-approval>{t('agent.tool.needsConfirm')}</span> : null}
         {part.errorText ? (
           <span className="break-all text-rose-300" data-tool-error={part.errorText}>
             {part.errorText}
@@ -77,9 +101,16 @@ function ToolCard({ part }: { part: ChatToolPart }) {
 /**
  * 一条消息：用户右对齐、助手左对齐，`parts[]` 按顺序渲染（文本段 + 工具卡片段）。
  * @param message 主进程返回的消息视图
+ * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
  * @returns 气泡节点
  */
-function MessageBubble({ message }: { message: ChatMessageView }) {
+function MessageBubble({
+  message,
+  toolMetas,
+}: {
+  message: ChatMessageView;
+  toolMetas: Map<string, ToolDescriptorView>;
+}) {
   const isUser = message.role === 'user';
   return (
     <li
@@ -101,7 +132,7 @@ function MessageBubble({ message }: { message: ChatMessageView }) {
               {part.text}
             </p>
           ) : (
-            <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} />
+            <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
           ),
         )}
       </div>
@@ -117,6 +148,7 @@ export function ChatPanel() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<ChatSnapshotView>();
   const [liveStream, setLiveStream] = useState<LiveStream>();
+  const [tools, setTools] = useState<ToolDescriptorView[]>([]);
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const bridge = window.autoCC;
@@ -128,9 +160,16 @@ export function ChatPanel() {
     if (reply?.ok) setSnapshot(reply.value);
   }, [bridge]);
 
+  /** 读注册表声明（卡片上的副作用分级由主进程给，界面不自己标）。 */
+  const readTools = useCallback(async () => {
+    const reply = await bridge?.agent['tools.list']();
+    if (reply?.ok) setTools(reply.value);
+  }, [bridge]);
+
   useEffect(() => {
     void read();
-  }, [read]);
+    void readTools();
+  }, [read, readTools]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -141,14 +180,18 @@ export function ChatPanel() {
         void read();
         return;
       }
-      setLiveStream((prev) =>
-        prev && prev.messageId === event.messageId
-          ? { ...prev, text: prev.text + event.text }
-          : { sessionId: event.sessionId, messageId: event.messageId, text: event.text },
-      );
+      setLiveStream((prev) => {
+        const base =
+          prev && prev.messageId === event.messageId
+            ? { ...prev, text: prev.text + event.text }
+            : { sessionId: event.sessionId, messageId: event.messageId, text: event.text };
+        // 卡片的两跳（running → 终态）都靠这一位带出来：流式期间那条消息不在快照的可画集合里。
+        return event.tool ? { ...base, tool: event.tool } : base;
+      });
     });
   }, [bridge, read]);
 
+  const toolMetas = useMemo(() => new Map(tools.map((tool) => [tool.id, tool])), [tools]);
   const messages = snapshot?.messages.filter((message) => !message.isStreaming) ?? [];
   const isStreaming = liveStream !== undefined;
 
@@ -256,7 +299,7 @@ export function ChatPanel() {
         ) : (
           <ul data-testid="chat-messages" className="flex flex-col gap-3">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble key={message.id} message={message} toolMetas={toolMetas} />
             ))}
             {liveStream ? (
               <li
@@ -272,6 +315,9 @@ export function ChatPanel() {
                   <p className="whitespace-pre-wrap break-words" data-part-kind="text">
                     {liveStream.text}
                   </p>
+                  {liveStream.tool ? (
+                    <ToolCard part={liveStream.tool} meta={toolMetas.get(liveStream.tool.toolId)} />
+                  ) : null}
                 </div>
               </li>
             ) : null}

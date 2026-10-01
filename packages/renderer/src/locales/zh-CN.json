@@ -450,7 +450,7 @@
       "stop": "停止",
       "newSession": "新建会话",
       "streaming": "回复生成中…",
-      "toolHint": "P1 骨架：本地确定性回复，不接 LLM、不发网络请求",
+      "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "workflowMirror": "同一个 runner：{{status}}",
       "actionSend": "发送消息",
       "actionStop": "停止回复",
@@ -465,8 +465,24 @@
         "auto": "全自动"
       },
       "tool": {
-        "echo": "演示用回显工具",
         "unregistered": "未登记的工具",
+        "labels": {
+          "actClick": "点击控件",
+          "actType": "输入文本",
+          "deliverPerform": "投递简历",
+          "greetPerform": "发送打招呼",
+          "jdCapture": "搜索并抓取 JD",
+          "locateFind": "定位控件",
+          "pageNavigate": "页面导航",
+          "pageSnapshot": "读取页面快照",
+          "sessionsOpen": "打开平台会话"
+        },
+        "effect": {
+          "read": "只读",
+          "local-write": "本地写入",
+          "outbound": "外发"
+        },
+        "needsConfirm": "需人工批准",
         "input": "参数 {{input}}",
         "duration": "{{ms}} 毫秒",
         "state": {

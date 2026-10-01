@@ -81,7 +81,7 @@ function makeEchoTool(): AgentTool<{ text: string }> {
 }
 
 describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
-  it('P1 的注册表是空表，列举得到空数组（1.11-04）', async () => {
+  it('单元台架里没有能力包登记，注册表是空表（1.11-04；真注册表的 9 只见 2.8-08 活体）', async () => {
     const { tools } = await boot();
     expect(tools.list()).toEqual([]);
   });
@@ -158,6 +158,8 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     }
     const monotonic = cumulative.every((length, index) => index === 0 || length > (cumulative[index - 1] ?? -1));
     expect(monotonic).toBe(true);
+    // 模板长度随文案变，这里不猜片数×间隔，直接等到收尾那一条：判据是「最后一片 done 为 true」。
+    await waitUntil(() => deltas.at(-1)?.done === true, 6000, '分片回复没有收尾');
     expect(deltas.at(-1)?.done).toBe(true);
   });
 
@@ -184,7 +186,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(first?.kind === 'text' && first.text).toContain('帮我看看这个岗位');
   });
 
-  it('/tool 前缀得到一张失败态工具卡片，原因写着未注册（1.11-06 + 09）', async () => {
+  it('/tool 指名未登记的工具：卡片失败态，原因写着未注册，id 是用户点的那只（1.11-06 + 09）', async () => {
     const { chat } = await boot();
     chat.send('/tool 打个招呼');
     await settle(120);
@@ -192,7 +194,33 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     const part = assistant?.parts.find((candidate) => candidate.kind === 'tool');
     expect(part?.kind === 'tool' ? part.state : null).toBe('failed');
     expect(part?.kind === 'tool' ? part.errorText : '').toContain('TOOL_NOT_REGISTERED');
-    expect(part?.kind === 'tool' ? part.toolId : '').toBe('demo.echo');
+    // 2.8-09 之后不再固定打到某个演示 id：用户点谁就是谁，未登记即失败，会话层不兜底改名。
+    expect(part?.kind === 'tool' ? part.toolId : '').toBe('打个招呼');
+  });
+
+  it('裸 /tool 真调默认工具，卡片推 running→done 两次跳变并带耗时与结果（2.8-09）', async () => {
+    const { chat, tools, deltas } = await boot({ chunkChars: 50, chunkIntervalMs: 1 });
+    tools.register({
+      id: 'jd.capture.run',
+      description: '假抓取：只回一个计数',
+      input: z.object({ criteria: z.unknown() }),
+      effect: 'outbound',
+      requiresConfirmation: true,
+      run: () => Promise.resolve({ captured: 3 }),
+    });
+    chat.send('/tool');
+    await waitUntil(() => deltas.at(-1)?.done === true, 6000, '工具卡片没有收尾');
+    const jumps = deltas.filter((delta) => delta.tool);
+    expect(jumps.map((delta) => delta.tool?.state)).toEqual(['running', 'done']);
+    expect(jumps[0]?.tool?.durationMs).toBeNull();
+    expect(jumps[1]?.tool?.durationMs).toBeTypeOf('number');
+    expect(jumps[1]?.tool?.output).toEqual({ captured: 3 });
+    expect(jumps[1]?.tool?.input).toEqual({ criteria: { keyword: '前端', city: '上海', limit: 3 } });
+    const part = chat
+      .current()
+      .messages.at(-1)
+      ?.parts.find((candidate) => candidate.kind === 'tool');
+    expect(part?.kind === 'tool' ? part.state : null).toBe('done');
   });
 
   it('流式途中停止：已产出的部分如实落库，不留下「永远在流式」的行（1.11-13）', async () => {

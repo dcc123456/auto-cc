@@ -37,11 +37,36 @@ export const CHAT_MIGRATION_VERSION = 2;
 /** 用户单条输入的字数上限：这是系统边界（渲染层来的不可信输入），也防止一条超长输入把验收截图拖到几十秒。 */
 const MAX_USER_INPUT_CHARS = 2000;
 
-/** 以该前缀开头的输入会额外演示一次工具调用。纯前缀命中，不做任何意图识别（1.11-14）。 */
+/**
+ * 以该前缀开头的输入会真调一次注册表，形态是 `/tool <工具id> [入参 JSON]`。
+ * 纯前缀命中，不做任何意图识别（1.11-14 + plan §15.8 落点 1）。
+ */
 const TOOL_DEMO_PREFIX = '/tool';
 
-/** 演示工具调用用的 id：它**从未被注册**，所以卡片必然以失败态出现（1.11-06 + 1.11-09）。 */
-const DEMO_TOOL_ID = 'demo.echo';
+/** 裸 `/tool` 不指名时落到的那只工具：2.8-09 的判据是「从对话发起一次搜索」，而它只打本地仿站。 */
+const DEFAULT_TOOL_ID = 'jd.capture.run';
+
+/** 默认入参（`limit: 3` 让验收截图不必等一整轮节流跑完）。 */
+const DEFAULT_TOOL_INPUT = { criteria: { keyword: '前端', city: '上海', limit: 3 } } as const;
+
+/**
+ * 把 `/tool` 之后的原文切成「工具 id + 入参」。
+ * @param raw 前缀之后的原文（已去空）
+ * @returns 缺 id 时用默认的那只与默认入参；入参不是合法 JSON 时**把原始字符串照交给注册表**，
+ *   由 schema 回 `TOOL_INPUT_INVALID`——会话层不另造一套入参校验（plan §15.8 落点 1，AGENTS.md §2.6）
+ */
+function parseToolRequest(raw: string): { toolId: string; input: unknown } {
+  if (!raw) return { toolId: DEFAULT_TOOL_ID, input: DEFAULT_TOOL_INPUT };
+  const spaceAt = raw.search(/\s/);
+  const toolId = spaceAt === -1 ? raw : raw.slice(0, spaceAt);
+  const rest = spaceAt === -1 ? '' : raw.slice(spaceAt + 1).trim();
+  if (!rest) return { toolId, input: {} };
+  try {
+    return { toolId, input: JSON.parse(rest) as unknown };
+  } catch {
+    return { toolId, input: rest };
+  }
+}
 
 /** 会话与消息两张表的建表迁移；`up` 只写 DDL。 */
 const chatMigration = {
@@ -329,16 +354,16 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 追加一段工具卡片并调用注册表（1.11-06 的可截图形态）。
+   * 追加一段工具卡片并真调注册表（spec 2.8-09：`/tool`→`demo.echo` 的壳换成真调用）。
    * @param message 要追加卡片的助手消息
-   * @param userText 用户原文，前缀之后的内容当作演示入参
+   * @param userText 用户原文，前缀之后的内容按 `/tool <工具id> [入参 JSON]` 解析
    */
   private async attachToolPart(message: ChatMessageView, userText: string): Promise<void> {
-    const input = { text: userText.slice(TOOL_DEMO_PREFIX.length).trim() || 'ping' };
+    const { toolId, input } = parseToolRequest(userText.slice(TOOL_DEMO_PREFIX.length).trim());
     const part: ChatToolPart = {
       kind: 'tool',
       toolCallId: randomUUID(),
-      toolId: DEMO_TOOL_ID,
+      toolId,
       input,
       state: 'running',
       output: null,
@@ -346,8 +371,11 @@ export class ChatSessionService extends Service {
       errorText: null,
     };
     message.parts.push(part);
+    // `running` 必须推出去：正在流式的那条消息被 ChatPanel 从快照里滤掉（plan §15.8 落点 2），
+    // 不让卡片经事件带一线，界面上就永远看不见「执行中」这一态。
+    this.emitTool(message, part);
     const at = Date.now();
-    const reply = await this.registry.call(DEMO_TOOL_ID, input);
+    const reply = await this.registry.call(toolId, input);
     part.durationMs = Date.now() - at;
     if (reply.ok) {
       part.state = 'done';
@@ -357,6 +385,22 @@ export class ChatSessionService extends Service {
       part.state = 'failed';
       part.errorText = `${reply.code}：${reply.message}`;
     }
+    this.emitTool(message, part);
+  }
+
+  /**
+   * 推一次工具卡片的状态跳变。
+   * @param message 卡片所属的助手消息
+   * @param part 卡片当前读数（含最新状态）；复制一份，避免界面持有可变引用
+   */
+  private emitTool(message: ChatMessageView, part: ChatToolPart): void {
+    this.ctx.emit('chat/delta', {
+      sessionId: message.sessionId,
+      messageId: message.id,
+      text: '',
+      done: false,
+      tool: { ...part },
+    });
   }
 
   /**
@@ -378,9 +422,9 @@ export class ChatSessionService extends Service {
    */
   private fakeReplyFor(userText: string): string {
     const hint = userText.startsWith(TOOL_DEMO_PREFIX)
-      ? '刚才那次工具调用会显示在下方卡片里——注册表是空表，所以它必然以失败态呈现。'
-      : '想演示工具卡片，把消息以 /tool 开头再发一次。';
-    return `已收到：「${userText}」。这是 P1 对话骨架的本地确定性回复——不接 LLM、不发网络请求，也调不到任何外发能力（打招呼 / 投递 / 发送简历）。${hint}`;
+      ? '工具名称、关键参数、状态与耗时显示在下方卡片里。'
+      : '想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。';
+    return `已收到：「${userText}」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。${hint}`;
   }
 }
 

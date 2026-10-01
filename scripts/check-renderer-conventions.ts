@@ -121,6 +121,26 @@ if (!Number.isFinite(ratio) || !Number.isFinite(cssPercent)) {
   failures.push(`内核视图宽度不一致：主进程 ${String(ratio * 100)}% ≠ 渲染层 ${String(cssPercent)}%`);
 }
 
+// 5) 工作流运行状态的来源唯一（spec 2.8-12）+ 进度靠事件而非轮询（spec 2.8-02）
+//    这两条在 2.8-a 之前是靠人工读代码确认的，本片按 plan §15.8 落点 4 把它们变成机检：
+//    `workflow.runner.current()` 的调用点必须只有一个（`useWorkflowRun`），两个视图都从它取数；
+//    任何文件都不许在定时器里读 workflow 服务——那会把「事件流驱动」退化成轮询的变体。
+const runStateReaders: string[] = [];
+for (const file of tsxFiles) {
+  const source = await readFile(file, 'utf8');
+  if (/workflow\['runner\.current'\]/.test(source)) runStateReaders.push(path.relative(repoRoot, file));
+  if (/setInterval[\s\S]*workflow\[/.test(source)) {
+    failures.push(
+      `${path.relative(repoRoot, file)} 在定时器里读 workflow 服务，进度必须由 workflow/progress 事件驱动（2.8-02）`,
+    );
+  }
+}
+if (runStateReaders.join(',') !== path.relative(repoRoot, path.join(rendererRoot, 'useWorkflowRun.ts'))) {
+  failures.push(
+    `workflow.runner.current() 的调用点应唯一在 useWorkflowRun.ts，实际见：${runStateReaders.join(', ') || '（无）'}`,
+  );
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);

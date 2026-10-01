@@ -450,7 +450,7 @@
       "stop": "Stop",
       "newSession": "New session",
       "streaming": "Reply is being generated…",
-      "toolHint": "P1 skeleton: local deterministic reply, no LLM and no network call",
+      "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "workflowMirror": "Same runner: {{status}}",
       "actionSend": "send message",
       "actionStop": "stop reply",
@@ -465,8 +465,24 @@
         "auto": "Full-auto"
       },
       "tool": {
-        "echo": "Demo echo tool",
         "unregistered": "Unregistered tool",
+        "labels": {
+          "actClick": "Click control",
+          "actType": "Type text",
+          "deliverPerform": "Deliver resume",
+          "greetPerform": "Send greeting",
+          "jdCapture": "Search and capture JDs",
+          "locateFind": "Locate control",
+          "pageNavigate": "Navigate page",
+          "pageSnapshot": "Read page snapshot",
+          "sessionsOpen": "Open platform session"
+        },
+        "effect": {
+          "read": "read-only",
+          "local-write": "local write",
+          "outbound": "outbound"
+        },
+        "needsConfirm": "requires approval",
         "input": "Input: {{input}}",
         "duration": "{{ms}} ms",
         "state": {
