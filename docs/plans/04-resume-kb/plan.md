@@ -55,20 +55,38 @@ service 只做装配——这样 4.1-03 的 ≥8 例参数化单测不需要起 
 
 spike 与打包探针都跑在 `packages/resume-kb` 内、用完删除（AGENTS.md §6.4），以下是**实测**到的形态，不是文档转述：
 
-| 实测项                                                                                                                                                                                                       | 结论（可复现）                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pdfjs 的引入路径                                                                                                                                                                                             | 包内 `package.json` 为 `main=build/pdf.mjs`、`types=types/src/pdf.d.ts`、**无 `exports` 字段**；`legacy/build/` 下有 `pdf.mjs` + `pdf.d.mts`。Node 侧走 `import('pdfjs-dist/legacy/build/pdf.mjs')`，无需 worker 进程                                                                                                                 |
-| 抽文本必需选项                                                                                                                                                                                               | `{ isEvalSupported: false, useSystemFonts: true, disableFontFace: true, verbosity: 0 }`，缺 `isEvalSupported:false` 会在无 DOM 环境尝试 eval 构造                                                                                                                                                                                     |
-| 文本项形态                                                                                                                                                                                                   | 每项是 `{ str, dir, width, height, transform, fontName, hasEOL }`；**断行看 `hasEOL`**，同一视觉行的两列（公司 / 时间）由 pdf.js 自己插入一个宽度 273 的空格项，所以顺序拼 `str` 就得到「公司 时间」同行——这正是 `splitHeader` 需要的形状。真实 PDF **不含空行**，所以区块边界靠 `sections.ts` 的逐行标题识别，而不是空行分块         |
-| 释放入口                                                                                                                                                                                                     | 文档代理上**没有** `destroy`（实测 `TypeError: document.destroy is not a function`）；释放要在 `getDocument()` 返回的**加载任务**上调 `destroy()`，页级用 `page.cleanup()`                                                                                                                                                            |
-| ArrayBuffer 移交                                                                                                                                                                                             | `getDocument({ data })` 会**移交（detach）**传入的 `Uint8Array` 的底层 buffer，之后再读该数组得到空壳（实测 `Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer`）。所以**来源哈希必须在抽取前算**，且包内统一「先 `bytes.slice(0)` 再交给三方库」                                                                 |
-| 损坏输入的错误形态                                                                                                                                                                                           | 空文件 `InvalidPDFException: The PDF file is empty...`；垃圾/截断 `InvalidPDFException: Invalid PDF structure.`；非 zip 的 `.docx` `Error: Can't find end of central directory ...`。四条都映射成 `SourceFailureCode`，不抛给主进程（4.1-06 的 U 半边）                                                                               |
-| mammoth 的类型                                                                                                                                                                                               | **不发布类型声明**（`package.json` 无 `types` / `exports`，registry 亦无 `@types/mammoth`），因此包内 `src/mammoth.d.ts` 只声明实际用到的 `extractRawText({ buffer }) → { value, messages }`，其余 API 不臆造。段落之间给 `\n\n`，正好是块边界                                                                                        |
-| **打包（关键风险）**                                                                                                                                                                                         | esbuild `--bundle --format=cjs` 把 pdfjs 内联时**运行期失败**：`Cannot find module '<bundle 目录>/pdf.worker.mjs'`（内联后 worker 的相对路径被改到产物目录）。把 `pdfjs-dist` / `mammoth` 标为 external 且从能解析到包的位置运行，同一探针正常抽出文本。**产物体积**：全内联 2.7 MB，external 后 825 KB（即这两个依赖约 1.9 MB JS）。 |
-| **接线片（service + 打包）必须先解决的问题**：`scripts/build.ts` / `scripts/dev.ts` 现在只把 `electron` 列为 external，这是 1.7「零依赖产物」的契约。依赖腿接进主进程后有两条路，二选一并回补 1.7 相关条目： |
-| （A）`pdfjs-dist` + `mammoth` 提升到根 `package.json` 依赖并加进两处 esbuild 的 external，由 electron-builder 打进 asar 内的 `node_modules`（pdf.js 的 worker 相对自身文件解析，天然可用）；                 |
-| （B）保持内联，把 `pdf.worker.mjs` 作为资源随包发布并在抽文本前设 `GlobalWorkerOptions.workerSrc`。                                                                                                          |
-| **未验证之前，依赖腿只能算「包内实测通过」，不能算「桌面 app 内可用」**——这条门禁挂在 4.1-06（service + IPC）上，打包问题没解决前 4.1-06 不得打勾。                                                          |
+| 实测项                       | 结论（可复现）                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pdfjs 的引入路径             | 包内 `package.json` 为 `main=build/pdf.mjs`、`types=types/src/pdf.d.ts`、**无 `exports` 字段**；`legacy/build/` 下有 `pdf.mjs` + `pdf.d.mts`。Node 侧走 `import('pdfjs-dist/legacy/build/pdf.mjs')`，无需 worker 进程                                                                                                                 |
+| 抽文本必需选项               | `{ isEvalSupported: false, useSystemFonts: true, disableFontFace: true, verbosity: 0 }`，缺 `isEvalSupported:false` 会在无 DOM 环境尝试 eval 构造                                                                                                                                                                                     |
+| 文本项形态                   | 每项是 `{ str, dir, width, height, transform, fontName, hasEOL }`；**断行看 `hasEOL`**，同一视觉行的两列（公司 / 时间）由 pdf.js 自己插入一个宽度 273 的空格项，所以顺序拼 `str` 就得到「公司 时间」同行——这正是 `splitHeader` 需要的形状。真实 PDF **不含空行**，所以区块边界靠 `sections.ts` 的逐行标题识别，而不是空行分块         |
+| 释放入口                     | 文档代理上**没有** `destroy`（实测 `TypeError: document.destroy is not a function`）；释放要在 `getDocument()` 返回的**加载任务**上调 `destroy()`，页级用 `page.cleanup()`                                                                                                                                                            |
+| ArrayBuffer 移交             | `getDocument({ data })` 会**移交（detach）**传入的 `Uint8Array` 的底层 buffer，之后再读该数组得到空壳（实测 `Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer`）。所以**来源哈希必须在抽取前算**，且包内统一「先 `bytes.slice(0)` 再交给三方库」                                                                 |
+| 损坏输入的错误形态           | 空文件 `InvalidPDFException: The PDF file is empty...`；垃圾/截断 `InvalidPDFException: Invalid PDF structure.`；非 zip 的 `.docx` `Error: Can't find end of central directory ...`。四条都映射成 `SourceFailureCode`，不抛给主进程（4.1-06 的 U 半边）                                                                               |
+| mammoth 的类型               | **不发布类型声明**（`package.json` 无 `types` / `exports`，registry 亦无 `@types/mammoth`），因此包内 `src/mammoth.d.ts` 只声明实际用到的 `extractRawText({ buffer }) → { value, messages }`，其余 API 不臆造。段落之间给 `\n\n`，正好是块边界                                                                                        |
+| **打包（关键风险）**         | esbuild `--bundle --format=cjs` 把 pdfjs 内联时**运行期失败**：`Cannot find module '<bundle 目录>/pdf.worker.mjs'`（内联后 worker 的相对路径被改到产物目录）。把 `pdfjs-dist` / `mammoth` 标为 external 且从能解析到包的位置运行，同一探针正常抽出文本。**产物体积**：全内联 2.7 MB，external 后 825 KB（即这两个依赖约 1.9 MB JS）。 |
+| 接线片（service + 打包）形态 | **已定案（2026-10-01）：依赖外置 + `asarUnpack`**，落地清单见下表之后的段落                                                                                                                                                                                                                                                           |
+
+**接线片（service + 打包）的形态已定（2026-10-01 决策：依赖外置 + `asarUnpack`）**，落地清单如下，一次做完再谈 4.1-06 打勾：
+
+1. `scripts/build.ts` / `scripts/dev.ts` 的 esbuild `external` 从 `['electron']` 扩到
+   `['electron', 'mammoth', 'pdfjs-dist', 'pdfjs-dist/*']`（子路径必须单列，esbuild 的 external 不做前缀匹配）。
+2. `scripts/build.ts` 的 staging 目录补一步**依赖搬运**：把 `pdfjs-dist`、`mammoth` 及其**传递依赖**从 pnpm 软链
+   解析成真实目录后复制进 `build/app/node_modules/`（`writeAppManifest` 合成的清单要同时声明这几个依赖，
+   否则 electron-builder 的依赖收集会把它们当野文件忽略）。递归解析器是这里唯一新写的基础设施，
+   禁止手填依赖清单——漏一个就是装机后才炸。
+3. `electron-builder.yml` 加 `asarUnpack: ['node_modules/pdfjs-dist/**']`：pdf.js 的 worker 走 ESM `import()`，
+   留在 asar 内的读取路径本仓库未实测，解包到 `app.asar.unpacked` 是已验证过的稳妥形态（mammoth 不需要解包，纯 JS）。
+4. **1.7-12 的后半句判据（「`app.asar` 内无 `node_modules`」）随之作废**——它的本意是「没有第二套浏览器内核、
+   没有意外混入的依赖」，外置两个包之后这个本意要换个判据继续守：新增 **1.7-13「asar 内的 `node_modules` 只允许
+   `pdfjs-dist` + `mammoth` 及其传递依赖，且审计清单里不得出现第三个包」**。1.7-12 在依赖搬运落地前仍成立（当前
+   主进程还没有任何 import 触到这两个包），所以本轮不动 1.7 的表格，等地真改了再一起翻状态，避免纸上作废一条已通过项。
+
+体积账要一起记：这两个依赖约 1.9 MB JS（全内联 2.7 MB vs 外置 825 KB 的实测差），换来的是 PDF 抽取腿；
+用户侧仍是「只装一个 app」，无 node-gyp、无运行期下载。
+
+**在上面的清单落地并实测通过之前，依赖腿只能算「包内实测通过」，不能算「桌面 app 内可用」**——这条门禁挂在
+4.1-06（service + IPC）上，打包问题没解决前 4.1-06 不得打勾。
 
 ## 2. 包与 service
 
