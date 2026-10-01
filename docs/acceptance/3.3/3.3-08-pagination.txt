@@ -1,0 +1,34 @@
+# 3.3-08 分页不腰斩条目 — 验收证据（真实 Chromium 打印 A/B）
+
+## 判据
+`spec.md 3.3-08`：跨页文档下，单条经历条目不被页面边界腰斩（头部与正文整体同页），区块标题不沦为页尾孤儿。
+
+## 方法（可复现）
+本机 Electron 内核（与 app 打印执行器 `packages/shell/src/print-executor.ts` 同款：离屏窗口 → `file://` 装载 → `await document.fonts.ready` → `printToPDF(同一 options)`）打印同一份「必然跨页」简历的两版 HTML，二者逐字节只差那一条护栏 CSS：
+
+- A `guarded`：生产 `resumePrint.toRequest` 产物（含 `.resume-entry{break-inside:avoid;}h2{break-after:avoid;}`）。
+- B `unguarded`：从同一 HTML 里精确删掉这一条规则（56 字节），其余正文/版式/打印选项完全一致。
+
+文档：8 条经历、每条 `achievement` 拉长到约半页，使页面边界大概率切进条目内部。每条正文首尾各埋一个纯 ASCII 哨兵 `@@S{n}@@` / `@@F{n}@@`（中文经子集化后 `pdftotext` 不可读，ASCII 稳定）。
+
+判读规则：若某条目的 S 与 F 落在同一页 → 该条目完整；落在相邻两页 → 被腰斩。逐页 S 计数≠F 计数即是「有条目跨界」的指纹。
+
+## 结果
+```
+带护栏(生产 break-inside:avoid)   : 页数=3 | 逐页=p1:2S/2F p2:3S/3F p3:3S/3F | 完整条目=8 | 被腰斩条目=无
+删护栏(同一文档/同一选项,仅去掉那条CSS): 页数=3 | 逐页=p1:3S/2F p2:3S/3F p3:2S/3F | 完整条目=6 | 被腰斩条目=[3,6]
+```
+
+- **带护栏**：每一页的「条目起始数 == 条目结束数」（2=2 / 3=3 / 3=3），说明没有任何条目跨越页边界，8 条全部完整。
+- **删护栏**：p1 出现 `3S/2F`（3 个开头却只有 2 个结尾）——第 3 个条目的正文被边界切开、结尾落到了 p2；同理 #6 被腰斩。这是没有护栏时 Chromium 默认按行拆块的确凿指纹。
+
+结论：`break-inside:avoid` 正是把条目保持在同一页的那条规则——加上它 0 腰斩，去掉它 2 腰斩，其余变量恒定。
+
+## 单测半边（无 Electron 的可回归部分）
+`packages/resume-doc/src/print.test.ts` → `describe('3.3-08 ...')`：断言生产打印 HTML 里带 `.resume-entry{break-inside:avoid;}` 与 `h2{break-after:avoid;}`，且每个条目 div 带 `resume-entry` 类。
+
+## 诚实标注
+本机无 `pdftoppm`，无法把 PDF 页光栅化成 PNG，故本条 V 证据以**产物字节级文本层断言**（逐页哨兵分布）呈现，而非截图。真实内核（Chromium）+ 生产装配码 + 生产打印选项的 A/B 已充分证明机制生效。
+
+## 复现物（spike，不进主干，AGENTS.md §6.4）
+`.research-repos/pagination-spike/{gen-html.ts, print.cjs, report.cjs}`（`.gitignore` 已覆盖）；产物 PDF/HTML 落 `tmp/pagination/`（已忽略）。
