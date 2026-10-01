@@ -59,15 +59,21 @@ function tempDir(): string {
 /**
  * 挂起 config + log + store + resume.doc + kb.profile（外加 `resume.parse`，端到端那条用例要用）。
  * @param dir 复用哪个目录
+ * @param evidence 反查阈值（4.2-03）；默认与 `cordis.yml` 一致，用于验证「阈值来自配置」那两条用例
  * @returns 实体服务、文档存储服务、导入服务与裸连接
  */
-async function boot(dir = tempDir()) {
+async function boot(dir = tempDir(), evidence: { topK: number; minScore: number } = { topK: 5, minScore: 0.34 }) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  fibers.push(await ctx.plugin(KbProfileService, {}));
+  fibers.push(
+    await ctx.plugin(KbProfileService, {
+      evidenceTopK: evidence.topK,
+      evidenceMinScore: evidence.minScore,
+    }),
+  );
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   const app = asApp(ctx);
   return {
@@ -297,5 +303,78 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
       .map((row) => String(row.payload_json))
       .join('\n');
     expect(stored).not.toContain('13800001111');
+  });
+});
+
+/**
+ * 反查的接线用例（spec 4.2-03）。
+ *
+ * 算法本身在 `evidence.test.ts` 里逐条断言过，这里只验三件**只有装配起来才成立**的事：
+ * 候选确实来自库里那些行、阈值确实读的是配置而不是写死在函数里、手工实体也在候选范围内。
+ * @param dir 本次用的临时目录（每个用例独立一份库）
+ * @param evidence 反查阈值
+ * @returns 已同步好实体的 `kb.profile` 与文档存储服务
+ */
+async function seededKb(dir: string, evidence?: { topK: number; minScore: number }) {
+  const booted = await boot(dir, evidence);
+  const parsed = parseResumeText(RESUME_MD, 'resume-evidence', NOW_MS);
+  if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
+  booted.doc.save(parsed.document);
+  booted.kb.sync('resume-evidence', NOW_MS);
+  return booted;
+}
+
+describe('证据反查 evidenceFor（4.2-03）', () => {
+  it('一句陈述同时命中承载它的经历与那条成果，且每个命中都能原样读回', async () => {
+    const { kb } = await seededKb(tempDir());
+    const hits = kb.evidenceFor('主导订单服务重构');
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(hits.map((hit) => hit.kind))).toEqual(new Set(['experience', 'achievement']));
+    for (const hit of hits) {
+      expect(kb.get(hit.entityId)).not.toBeNull();
+      expect(hit.reason).toBe('contains');
+      expect(hit.score).toBe(1);
+    }
+  });
+
+  it('弱命中被默认阈值挡在门外，把 minScore 调低才放出来并标 overlap（阈值来自配置）', async () => {
+    const strict = await seededKb(tempDir());
+    expect(strict.kb.evidenceFor('订单系统的性能')).toEqual([]);
+
+    const lenient = await seededKb(tempDir(), { topK: 5, minScore: 0.05 });
+    const hits = lenient.kb.evidenceFor('订单系统的性能');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]?.reason).toBe('overlap');
+  });
+
+  it('topK 来自配置：调成 1 就只回一条，且回的是同分时 id 最小的那条', async () => {
+    const unbounded = await seededKb(tempDir());
+    const claim = '主导订单服务重构';
+    const all = unbounded.kb.evidenceFor(claim);
+    expect(all.length).toBeGreaterThan(1);
+    const smallestId = all.map((hit) => hit.entityId).sort()[0];
+
+    const capped = await seededKb(tempDir(), { topK: 1, minScore: 0.34 });
+    expect(capped.kb.evidenceFor(claim).map((hit) => hit.entityId)).toEqual([smallestId]);
+  });
+
+  it('候选范围可以按 kind 过滤：只在技能里找时不会漏出别的种类', async () => {
+    const { kb } = await seededKb(tempDir());
+    const skills = kb.evidenceFor('精通 TypeScript 与 Go', { kind: 'skill' });
+    expect(skills.length).toBeGreaterThanOrEqual(2);
+    for (const hit of skills) expect(hit.kind).toBe('skill');
+  });
+
+  it('手工建的实体（无来源文档）也在候选范围内', async () => {
+    const { kb } = await seededKb(tempDir());
+    const manual = kb.create({ kind: 'achievement', payload: { text: '组织过校园黑客松' } }, LATER_MS);
+    const hits = kb.evidenceFor('组织过校园黑客松', { sourceDocId: null });
+    expect(hits.map((hit) => hit.entityId)).toEqual([manual.entityId]);
+  });
+
+  it('库里没有相关实体时返回空数组而不是抛错——查无支撑是正常态', async () => {
+    const { kb } = await seededKb(tempDir());
+    expect(kb.evidenceFor('会做棉花糖')).toEqual([]);
+    expect(kb.evidenceFor('')).toEqual([]);
   });
 });

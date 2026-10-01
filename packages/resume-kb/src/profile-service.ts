@@ -1,8 +1,9 @@
 /**
- * `kb.profile` service（spec 4.2-01 / 4.2-02）：四类知识库实体的建表、派生入库与查询。
+ * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03）：四类知识库实体的建表、派生入库、查询与证据反查。
  *
- * 这一层只做四件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
- * 按稳定 id 幂等 upsert 并清掉已不存在的派生行、以及给出界面与后续检索（4.3）要用的读接口。
+ * 这一层只做五件事：把迁移 11 的 `kb_entities` 建出来、从 `resume_docs` 的**当前工作副本**派生实体、
+ * 按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）要用的读接口、
+ * 以及把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`，本文件只负责取候选与套配置）。
  * 「文本 → 实体」的判定全在 `entities.ts`（纯函数，离线逐条断言），本文件不重复任何解析规则。
  *
  * 为什么读文档要经 `resume.doc` 而不是自己查 `resume_docs` 表：plan §1.4 裁定一把 `resume_docs` 定成
@@ -20,6 +21,7 @@ import {
   manualEntityId,
   payloadHashOf,
 } from './entities.js';
+import { type EvidenceOptions, type EvidenceRef, evidenceTextOf, rankEvidence } from './evidence.js';
 
 /** 迁移号段：**11**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
  *  resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10）。
@@ -50,8 +52,18 @@ const kbEntitiesMigration = {
   },
 };
 
-/** `kb.profile` 的可调项：实体建模本身不需要运行期配置，检索参数属 4.3。 */
-export const kbProfileSchema = z.strictObject({});
+/**
+ * `kb.profile` 的可调项。
+ *
+ * 反查（spec 4.2-03）的两个阈值放这里而不是写死在函数里：同 4.3-03 的口径（检索类参数代码内无魔法数），
+ * 也因为 4.5 做「JD 要求 → 支撑证据」时要按岗位松紧调它，而那不该是一次发版。
+ */
+export const kbProfileSchema = z.strictObject({
+  /** 一次反查最多返回几条支撑实体。 */
+  evidenceTopK: z.number().int().min(1).max(50).default(5),
+  /** 低于此匹配强度（0～1）的实体不算支撑——「沾一点边」不等于有证据。 */
+  evidenceMinScore: z.number().min(0).max(1).default(0.34),
+});
 export type KbProfileConfig = z.output<typeof kbProfileSchema>;
 
 /** 一条实体的界面/服务读数（`payload` 已从 JSON 还原）。 */
@@ -118,7 +130,10 @@ export class KbProfileService extends Service {
   static Config = kbProfileSchema;
   static inject = ['store', 'resume.doc'];
 
-  constructor(ctx: Context, _options: KbProfileConfig) {
+  constructor(
+    ctx: Context,
+    private readonly options: KbProfileConfig,
+  ) {
     super(ctx, 'kb.profile');
   }
 
@@ -145,7 +160,7 @@ export class KbProfileService extends Service {
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info(
-      `[kb-profile] kb_entities 表就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}`,
+      `[kb-profile] kb_entities 表就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}`,
     );
   }
 
@@ -217,6 +232,34 @@ export class KbProfileService extends Service {
     const row = this.store.db.prepare('SELECT * FROM kb_entities WHERE entity_id = ?').get(entityId) as
       KbEntityRow | undefined;
     return row === undefined ? null : viewOf(row);
+  }
+
+  /**
+   * 由一句陈述反查支撑它的实体（spec 4.2-03）。
+   *
+   * 判定全在 `evidence.ts` 的纯函数里（token 包含与重叠），**不经过模型**：
+   * 「这句话有没有据可依」如果由模型自评，§8.4 的事实锁定就只剩一句提示词。
+   * @param claim 待反查的陈述（简历里的一句话，或 JD 的一条要求）
+   * @param filter 候选范围，与 `list()` 同义：`kind` 限定种类，`sourceDocId` 限定来源文档
+   *               （传 `null` 只在手工实体里找）；不传则全库
+   * @returns 命中列表（强度倒序、同分按 id 升序，取 `evidenceTopK` 条）；
+   *          陈述与库里任何一条都搭不上时返回**空数组**——「查无支撑」是正常态而非失败，
+   *          4.5 要靠它区分「有证据」和「这条是模型编的」
+   */
+  evidenceFor(
+    claim: string,
+    filter: { kind?: KbEntityKind; sourceDocId?: string | null } = {},
+  ): readonly EvidenceRef[] {
+    const options: EvidenceOptions = {
+      topK: this.options.evidenceTopK,
+      minScore: this.options.evidenceMinScore,
+    };
+    const targets = this.list(filter).map((entity) => ({
+      entityId: entity.entityId,
+      kind: entity.kind,
+      text: evidenceTextOf(entity.payload),
+    }));
+    return rankEvidence(claim, targets, options);
   }
 
   /**
