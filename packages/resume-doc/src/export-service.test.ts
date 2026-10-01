@@ -32,6 +32,8 @@ class FakePrintService extends Service implements ResumePrintPort {
 
   pdf: Uint8Array = TWO_PAGE_PDF;
   shouldThrow = false;
+  /** 打开后产物字节随请求 html 变化，用来证明并发导出各写各的、不串内容（3.3-12）。 */
+  echoHtml = false;
   lastRequest: ResumePrintRequest | null = null;
 
   constructor(ctx: Context, _options: z.infer<typeof FakePrintService.Config>) {
@@ -47,6 +49,9 @@ class FakePrintService extends Service implements ResumePrintPort {
   render(request: ResumePrintRequest): Promise<Uint8Array> {
     this.lastRequest = request;
     if (this.shouldThrow) return Promise.reject(new Error('内核崩溃'));
+    // 保留两页标记让页数读数不变，只在尾部带上请求 html，使不同文档产出可区分的字节。
+    if (this.echoHtml)
+      return Promise.resolve(Buffer.from(`${TWO_PAGE_PDF.toString('latin1')} ${request.html}`, 'utf8'));
     return Promise.resolve(this.pdf);
   }
 }
@@ -169,15 +174,34 @@ describe('3.3-11 失败腿全部收敛成 RESUME_EXPORT_FAILED', () => {
   });
 });
 
-describe('3.3-12 并发不同文档互不串', () => {
-  it('两份文档各导出各的，落到两条不同路径且都被写全', async () => {
-    const { docs, exporter } = await boot();
-    docs.save(sampleDoc({ id: 'a' }));
-    docs.save(sampleDoc({ id: 'b' }));
+describe('3.3-12 并发导出各写各的、不串内容', () => {
+  it('同时导出两份不同文档：落到两条路径、各自字节只含自己的内容、回执 hash 各匹配各文档', async () => {
+    const { docs, exporter, print } = await boot();
+    print.echoHtml = true;
+    docs.save(
+      sampleDoc({ id: 'a', profile: { name: '甲员工', contact: { email: 'a@x.com', phone: null, location: '上海' } } }),
+    );
+    docs.save(
+      sampleDoc({ id: 'b', profile: { name: '乙员工', contact: { email: 'b@x.com', phone: null, location: '上海' } } }),
+    );
     const [ra, rb] = await Promise.all([exporter.toPdf('a', 'classic'), exporter.toPdf('b', 'classic')]);
+
     expect(ra.path).not.toBe(rb.path);
-    expect(readFileSync(ra.path)).toEqual(TWO_PAGE_PDF);
-    expect(readFileSync(rb.path)).toEqual(TWO_PAGE_PDF);
+    const bytesA = readFileSync(ra.path, 'utf8');
+    const bytesB = readFileSync(rb.path, 'utf8');
+    // 各写各的：A 的产物只含 A 的姓名，B 反之——并发编排没有把两份内容搅在一起。
+    expect(bytesA).toContain('甲员工');
+    expect(bytesA).not.toContain('乙员工');
+    expect(bytesB).toContain('乙员工');
+    expect(bytesB).not.toContain('甲员工');
+    // 回执 hash 各由自己文档的内容算出，两份必然不同（页数仍按两页标记各自回写）。
+    expect(ra.hash).not.toBe(rb.hash);
+    const reloadedA = docs.load('a');
+    const reloadedB = docs.load('b');
+    expect(reloadedA.status === 'found' && reloadedA.document.metrics.pages).toBe(2);
+    expect(reloadedB.status === 'found' && reloadedB.document.metrics.pages).toBe(2);
+    expect(reloadedA.status === 'found' && reloadedA.document.profile.name).toBe('甲员工');
+    expect(reloadedB.status === 'found' && reloadedB.document.profile.name).toBe('乙员工');
   });
 });
 
