@@ -371,6 +371,7 @@
       "seed": "载入演示内容",
       "preview": "预览",
       "export": "导出 PDF",
+      "fail": "注入失败导出",
       "seedReceipt": "已载入演示文档 {{docId}}",
       "previewDone": "预览已刷新",
       "previewEmpty": "尚未预览：先载入演示内容再点预览",

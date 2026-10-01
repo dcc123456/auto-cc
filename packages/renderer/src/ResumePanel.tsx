@@ -1,4 +1,4 @@
-import { Eye, FileDown, FileText, RefreshCw } from 'lucide-react';
+import { Ban, Eye, FileDown, FileText, RefreshCw } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ExportReceiptView, ResumeLocaleView, ResumeSeedView } from '@auto-cc/shared';
@@ -6,6 +6,9 @@ import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
 const TEMPLATE_ID = 'classic';
+
+/** 故意不存在的文档 id：供「注入失败导出」按钮触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
+const FAILURE_DOC_ID = 'resume-fail-injected';
 
 /**
  * 简历生成轨自测面板（spec 3.3-01 / 04 / 05 / 09 / 10 的界面化身）：
@@ -60,6 +63,13 @@ export function ResumePanel() {
       describe: (value) => t('resume.exportReceipt', { pages: value.pages, bytes: value.bytes }),
     });
 
+  /**
+   * 注入一次导出失败（对不存在的文档调 `toPdf`），让主进程的 `AppErrorPayload` 经同一个
+   * `run` 外壳显示为可读中文提示——spec 3.3-11「注入失败 → 截图错误态，主进程不崩」的界面入口。
+   */
+  const injectFailure = () =>
+    void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, TEMPLATE_ID, locale));
+
   return (
     <section data-testid="resume-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
       <div className="flex items-center justify-between">
@@ -111,6 +121,16 @@ export function ResumePanel() {
         >
           <FileDown size={12} />
           {t('resume.export')}
+        </button>
+        <button
+          type="button"
+          data-action="fail"
+          disabled={!!busy}
+          onClick={injectFailure}
+          className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
+        >
+          <Ban size={12} />
+          {t('resume.fail')}
         </button>
       </div>
 

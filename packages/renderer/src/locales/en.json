@@ -371,6 +371,7 @@
       "seed": "Load demo content",
       "preview": "Preview",
       "export": "Export PDF",
+      "fail": "Inject export failure",
       "seedReceipt": "Loaded demo document {{docId}}",
       "previewDone": "Preview refreshed",
       "previewEmpty": "No preview yet: load demo content, then press Preview",
