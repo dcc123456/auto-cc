@@ -589,3 +589,57 @@ FTS5 对复用 rowid 不覆盖（spike7 §C）。删除一律走 `deleteChunksWh
 **测试规模**：装配侧新增 1 例（工具元数据 + 与 `search()` 逐字段相等 + 空态是值不是入参错误），
 该包 9 文件 / **189** 用例全绿。V 证据四张截图 + 一份八段 DOM 断言，见
 `docs/acceptance/4.3/4.3-10-*`。
+
+## 4.3-d 选型与证据（2026-10-02，向量增强走硅基流动 BAAI/bge-m3）
+
+**provider 由用户裁定**（2026-10-01）：embedding 走**硅基流动**的 `BAAI/bge-m3`。下面四条是为本片取的实测证据，
+其中两条直接改变了实现形状。
+
+| 候选                                                   | 结论                     | 依据                                                                                                                 |
+| ------------------------------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| 硅基流动 `BAAI/bge-m3`（OpenAI 兼容 `/v1/embeddings`） | **采用**                 | 端点与维度实测见下 [1][2][3]；中文/多语混排是 bge-m3 的主场，个人知识库数十至数百条、千级 chunk 的规模按次计费可忽略 |
+| 本机跑 bge-m3（ONNX / transformers）                   | 否决                     | 要带权重与原生算子库，直接违反 4.3-06「无 node-gyp / 无用户机编译」与主计划 §1.4「用户只装一个 app」                 |
+| ChromaDB / `sqlite-vec`                                | 否决（4.3-05 / 06 已定） | 外部服务或需三端预编译扩展                                                                                           |
+| 哈希伪向量（`ai-resume` 的 sha256 退化路径）           | **明令禁止**             | 4.3-08 的判据就是它：embed 不可用只能返回 `unavailable` 并降级纯 BM25，不许造一个"看起来能算余弦"的东西              |
+
+- **[1] 端点路径实测**：`POST https://api.siliconflow.cn/v1/embeddings` 在无 key 时回
+  `401 {"code":30014,"data":null,"message":"Token is invalid."}`，而单数形式 `/v1/embedding` 回 `404 Not Found`
+  → 路径钉死为复数 `embeddings`，鉴权是 `Authorization: Bearer <key>`（与 chat 同一支头）。
+- **[2] 错误体不是 OpenAI 形态（这条改了实现）**：硅基流动回的是**顶层** `{code, data, message}`，
+  而 OpenAI / DeepSeek 回 `{error: {message, code}}`。现有 `describeError()` 只读 `error.message`，
+  遇到前者会把整段 JSON 原文塞进错误文案。所以本片要给它加第三支（顶层 `message` / `code`），
+  顺带让 chat 侧遇到同类网关也能给出人话。这是 §6.2「文档转述不可信、以实测为准」在本项目的第三次命中。
+- **[3] 模型参数实测**：`config.json` 里 `hidden_size = 1024`、`max_position_embeddings = 8194`
+  （走 `hf-mirror.com` 取的——本机 `huggingface.co` 直连被 connection reset，与 §9 的 GitHub 直连不稳定同源）。
+  **但代码里不写 1024**：`embedDimensions` 默认 `null` = 不向对端传该字段、用模型默认维度，
+  实际维度以每次响应回来写进 `kb_vectors.dim` 列。写死数字等于把"换模型要改代码"埋回实现里（4.3-03 的口径）。
+- **[4] 为什么不能复用 `llm.chat` 的 baseUrl/model**：DeepSeek 官方文档只列了 chat completions，
+  **没有 embeddings 端点**（实测其文档站端点清单）。聊天网关与向量网关在现实里就是两家服务，
+  所以配置必须各自独立，`llm.embed` 未配置时 `llm.chat` 照常可用（话术生成与检索增强互不绑架）。
+- **OpenAI 兼容 embeddings 的请求/响应契约**（同族形态，取自阿里云百炼 compatible-mode 文档）：
+  请求 `{model, input: string | string[], dimensions?, encoding_format?}`；
+  响应 `{data: [{embedding: number[], index, object: "embedding"}], model, object: "list", usage: {total_tokens}}`。
+  `input` 支持数组 → **一次批量喂多条切片**，`embedBatchSize` 控制每批大小，避免一条切片一次 HTTP。
+
+**实现形状（本片要动的四处，都不新建平行基础设施）**：
+
+1. `packages/llm` 内**新增** `llm.embed` 服务，复用同一个 fetch / 超时 / 错误骨架（§2.7 禁的是第二个客户端，
+   不是同一个客户端的第二个方法）；配置新增 `embedBaseUrl` / `embedModel` / `embedKeyEnv`
+   （默认 `AUTO_CC_SILICONFLOW_API_KEY`）/ `embedDimensions`（默认 null）/ `embedBatchSize`，超时复用 `timeoutMs`。
+   默认全空 = 未配置 = `unavailable` 且**一次网络都不发**（与 `llm.chat` 同口径，4.3-04 的离线冒烟靠这一条成立）。
+2. `check-llm-single-entry` 随之升级，否则机检会与新现实脱节：provider 断言从"`llm.chat` 声明唯一"扩成
+   "`llm.*` 只允许出现在 `packages/llm`，chat 与 embed 各一"，并把 `/embeddings` 加进端点痕迹清单。
+3. 迁移号段 **14** 建 `kb_vectors(chunk_id PRIMARY KEY, model, dim, vec BLOB, updated_at)`，float32 小端序列化。
+   它是**派生索引**，与 `kb_chunks` 同生命周期（删切片即删向量，`prune()` 一并带走），
+   `model` 列就是失效判据——换模型或换维度即整表作废重算，不做"半新半旧混着算余弦"。
+4. 融合用 **RRF**（`1/(k + rank)`，`k` 来自配置默认 60），**只用名次不用分数**：
+   BM25 侧是归一到 0..1 的自建分，向量侧是余弦，两者量纲不同且都会随语料漂移
+   （4.3-b 已经为绝对阈值吃过一次教训），加权求和会把漂移直接乘进排序。
+   embed 不可用/失败 → 结果里带 `vectorStatus: 'unavailable'`，排序退回纯 BM25，**零 BLOB 写入**。
+
+**诚实的边界（不粉饰）**：4.3-07 的判据是"固定评测集上融合**优于**纯 BM25"，这需要真实可用的 embedding 端点；
+本机没有 key（`env` 里无 `SILICONFLOW` / `AUTO_CC_*` 变量，仓库也没有 `.env`）。因此本片把可离线证明的部分
+（机制、批量、降级、零写入、维度/模型失效、RRF 排序正确性）用本地 fixture 打满，
+**增益那一条如实标 `[!]`**，并在此写明复跑步骤：导出 `AUTO_CC_SILICONFLOW_API_KEY` →
+在 `cordis.yml` 的 `llm` 块补 `embedBaseUrl: https://api.siliconflow.cn/v1` + `embedModel: BAAI/bge-m3` →
+跑评测集脚本对比 topK 命中率。
