@@ -183,6 +183,8 @@ export const RENDERER_ALLOWLIST = [
   // 以及 4.2-08 的备份导出 / 导入。渲染层没有 SQL 通道，也没有读文件的通道——备份路径同样是绝对路径口径。
   // `remove` 对派生实体必然以 `KB_ENTITY_DERIVED` 失败（4.2-04），界面据 `sourceDocId` 分两套处置而不是挂个必失败的按钮。
   'kb.profile.list',
+  // 4.3-c 的本地检索（spec 4.3-10）：只读，查询串原样交给主进程的预分词，命中理由与分数全在服务侧算完。
+  'kb.profile.search',
   'kb.profile.evidenceFor',
   'kb.profile.create',
   'kb.profile.update',
@@ -753,6 +755,36 @@ export interface KbEvidenceRowView {
   readonly matchedTokens: readonly string[];
 }
 
+/**
+ * 一条检索命中（镜像 `KbSearchHit`，4.3-10 的结果行数据源）。
+ *
+ * `reasons` 与 `coverageReason` 是判定码不是文案：界面按码取 i18n（§5.5），
+ * 而「BM25 腿 / 词面覆盖腿 / 子串通道」这套说法属于主进程的实现细节，不该在渲染层再拼一遍（§2.5）。
+ */
+export interface KbSearchRowHit {
+  readonly chunkId: string;
+  readonly chunkKind: 'entity' | 'section';
+  readonly sourceDocId: string | null;
+  readonly sectionKind: ResumeSectionKindView | null;
+  /** 切片正文（原文不在倒排索引里，主进程按 seq join 回主表） */
+  readonly text: string;
+  /** 合并后的 0～1 分数，主进程已按 4 位小数取整 */
+  readonly score: number;
+  readonly bm25Score: number;
+  readonly lexicalScore: number;
+  readonly coverageReason: 'contains' | 'overlap' | null;
+  readonly reasons: readonly ('bm25' | 'lexical' | 'substring')[];
+  readonly matchedTokens: readonly string[];
+}
+
+/** 一次本地检索的读数（镜像 `KbSearchResult`）。 */
+export interface KbSearchRowResult {
+  /** `no_query_tokens` = 这句话切不出可检索的 token（全是标点/空白），与「库里没有」是两件事 */
+  readonly status: 'ok' | 'no_query_tokens';
+  readonly hits: readonly KbSearchRowHit[];
+  readonly queryTokens: readonly string[];
+}
+
 /** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
 export interface KbCreateRowInput {
   readonly kind: KbEntityKindView;
@@ -1022,6 +1054,12 @@ export interface BridgeSignatures {
     args: [filter?: { kind?: KbEntityKindView; sourceDocId?: string | null }];
     returns: KbEntityRowView[];
   };
+  /**
+   * 本地检索（spec 4.3-01 / 4.3-10）：倒排召回 ∪ 子串召回，分数、理由与命中词全在主进程算完再过来。
+   * 空结果不是失败：切不出 token 给 `status: 'no_query_tokens'`，库里没有相关就给 `status: 'ok'` + 空 `hits`，
+   * 界面据这两个态给不同的提示与可行动建议（4.3-10 的判据）。
+   */
+  'kb.profile.search': { args: [query: string]; returns: KbSearchRowResult };
   /**
    * 由一句陈述反查支撑它的实体（spec 4.2-03 / 05 的展开态）：分数与判定全在主进程的纯函数里算，
    * **不经过模型**；查无支撑返回空数组而不是失败（4.5 要靠它区分「有证据」与「模型编的」）。

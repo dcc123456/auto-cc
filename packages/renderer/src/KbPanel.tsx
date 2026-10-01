@@ -1,7 +1,14 @@
 import { Database, Download, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { KbEntityKindView, KbEntityRowView, KbEvidenceRowView, KbImportModeView } from '@auto-cc/shared';
+import type {
+  KbEntityKindView,
+  KbEntityRowView,
+  KbEvidenceRowView,
+  KbImportModeView,
+  KbSearchRowHit,
+  KbSearchRowResult,
+} from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 实体种类 → 文案键（四类在界面上的各自说法，英文串不直接上界面，对齐 §5.5）。 */
@@ -16,6 +23,13 @@ const KIND_LABEL_KEY: Record<KbEntityKindView, string> = {
 const REASON_LABEL_KEY: Record<KbEvidenceRowView['reason'], string> = {
   contains: 'kb.reasonContains',
   overlap: 'kb.reasonOverlap',
+};
+
+/** 检索命中的通道 / 分数腿 → 文案键（三个码各说一件事：靠 BM25 排上来、靠词面覆盖、只被子串通道接住）。 */
+const SEARCH_REASON_LABEL_KEY: Record<KbSearchRowResult['hits'][number]['reasons'][number], string> = {
+  bm25: 'kb.searchReasonBm25',
+  lexical: 'kb.searchReasonLexical',
+  substring: 'kb.searchReasonSubstring',
 };
 
 /** 变更动作 → 文案键（事件载荷里的动作码，界面按它说「刚发生了什么」）。 */
@@ -90,6 +104,8 @@ export function KbPanel() {
   const [expandedId, setExpandedId] = useState<string>();
   const [evidence, setEvidence] = useState<KbEvidenceRowView[]>([]);
   const [claim, setClaim] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [searchResult, setSearchResult] = useState<KbSearchRowResult>();
   const [editing, setEditing] = useState<EditingDraft>();
   const [docId, setDocId] = useState('');
   const [backupPath, setBackupPath] = useState('');
@@ -115,6 +131,8 @@ export function KbPanel() {
     if (!bridge) return;
     return bridge.on('kb/entities-changed', (event) => {
       setNotice(t('kb.changed', { action: t(ACTION_LABEL_KEY[event.action]), count: event.changed }));
+      // 库被改过之后上一批检索结果就是陈旧的（切片可能已删）；清空比留着更诚实，界面也不去猜哪条还在。
+      setSearchResult(undefined);
       void read();
     });
   }, [bridge, read, setNotice, t]);
@@ -139,6 +157,23 @@ export function KbPanel() {
         setExpandedId(hits.length > 0 ? expandId : undefined);
       },
       describe: (hits) => (hits.length === 0 ? t('kb.evidenceEmpty') : t('kb.evidenceCount', { count: hits.length })),
+    });
+
+  /**
+   * 在本地知识库检索（spec 4.3-01 / 4.3-10 的界面入口）：召回、打分、理由与命中词全部在主进程算完再过来，
+   * 界面只负责把三个态说成三句不同的话——
+   * `no_query_tokens`（这句切不出词）、`ok` + 空 `hits`（库里确实没有沾边的）、有命中。
+   * 前两个都必须给一句可行动建议，空结果不是失败（4.3-10 的判据）。
+   */
+  const runSearch = () =>
+    void run(t('kb.search'), () => bridge?.kb['profile.search'](searchText.trim()), {
+      apply: (value) => setSearchResult(value),
+      describe: (value) =>
+        value.status === 'no_query_tokens'
+          ? t('kb.searchNoTokens')
+          : value.hits.length === 0
+            ? t('kb.searchNoHitsCount')
+            : t('kb.searchCount', { count: value.hits.length }),
     });
 
   /**
@@ -210,6 +245,21 @@ export function KbPanel() {
   /** 根节点（无归属）在前，其下属按 `parentId` 挂在下面——层级关系只从库里的 `parentId` 推导，界面不另存一份。 */
   const roots = entities.filter((entity) => entity.parentId === null);
   const childrenOf = (entityId: string) => entities.filter((entity) => entity.parentId === entityId);
+
+  /**
+   * 一条检索命中的出处说法（4.3-10：结果行要看得出「这是哪来的」）。
+   * 实体级切片的 `chunkId` 就是实体 id，所以能在已经读到的实体树里查到它的种类；
+   * 查不到（例如刚被删掉、树还没重读）就退回切片种类本身——界面不猜一个标签出来。
+   * @param hit 一条检索命中
+   * @returns 一句短标签；区块级复用简历区块的既有文案键，不另起一套说法（§2.5）
+   */
+  const searchSourceLabel = (hit: KbSearchRowHit): string => {
+    if (hit.chunkKind === 'section') {
+      return hit.sectionKind ? t(`resume.kind.${hit.sectionKind}`) : t('kb.chunkSection');
+    }
+    const entity = entities.find((item) => item.entityId === hit.chunkId);
+    return entity ? `${t('kb.chunkEntity')} · ${t(KIND_LABEL_KEY[entity.kind])}` : t('kb.chunkEntity');
+  };
 
   /**
    * 渲染一行实体卡片（含展开态）。
@@ -345,6 +395,57 @@ export function KbPanel() {
           <Search className="h-3 w-3" />
           {t('kb.evidence')}
         </button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            data-kb-field="search"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder={t('kb.searchPlaceholder')}
+            className="min-w-40 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          />
+          <button
+            type="button"
+            data-kb-action="search"
+            onClick={runSearch}
+            disabled={busy !== undefined || searchText.trim() === ''}
+            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          >
+            <Search className="h-3 w-3" />
+            {t('kb.search')}
+          </button>
+        </div>
+        {searchResult &&
+          (searchResult.status === 'no_query_tokens' ? (
+            // 确定空态之一：这句查询里切不出可检索的词（全是标点或空白）。不返回随机结果，也不报「检索失败」。
+            <p data-kb-search="no_tokens" className="text-xs leading-relaxed text-slate-500">
+              {t('kb.searchNoTokensHint')}
+            </p>
+          ) : searchResult.hits.length === 0 ? (
+            // 确定空态之二：库里确实没有沾边的内容——建议给出下一步（先同步、或换个更短的关键词、或补一条实体）。
+            <p data-kb-search="empty" className="text-xs leading-relaxed text-slate-500">
+              {t('kb.searchNoHitsHint')}
+            </p>
+          ) : (
+            <>
+              <p data-kb-search="ok" className="text-xs text-slate-500">
+                {t('kb.searchTokens', { tokens: searchResult.queryTokens.join(' / ') })}
+              </p>
+              <ul className="flex flex-col gap-1">
+                {searchResult.hits.map((hit) => (
+                  <li key={hit.chunkId} data-kb-search-hit={hit.chunkId} className="text-xs text-slate-400">
+                    <span className="text-slate-300">{searchSourceLabel(hit)}</span> · {hit.text} ·{' '}
+                    <span className="text-slate-300">
+                      {hit.reasons.map((reason) => t(SEARCH_REASON_LABEL_KEY[reason])).join(' / ')}
+                    </span>{' '}
+                    · {hit.score.toFixed(2)} · {hit.matchedTokens.join(' / ')}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ))}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

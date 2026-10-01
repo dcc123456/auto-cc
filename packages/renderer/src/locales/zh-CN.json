@@ -534,6 +534,8 @@
           "deliverPerform": "投递简历",
           "greetPerform": "发送打招呼",
           "jdCapture": "搜索并抓取 JD",
+          "kbList": "列出知识库实体",
+          "kbSearch": "检索知识库",
           "locateFind": "定位控件",
           "pageNavigate": "页面导航",
           "pageSnapshot": "读取页面快照",
@@ -573,6 +575,14 @@
       "evidence": "证据链",
       "evidenceEmpty": "查无支撑：库里没有一条实体与这句话重合",
       "evidenceCount": "命中 {{count}} 条实体",
+      "search": "检索知识库",
+      "searchPlaceholder": "输入关键词，如「高并发」「订单」",
+      "searchCount": "命中 {{count}} 条切片",
+      "searchTokens": "按这些词检索：{{tokens}}",
+      "searchNoTokens": "这句查询里切不出可检索的词",
+      "searchNoTokensHint": "这句查询切不出可检索的词（全是标点或空白）。换成一两个中文词再试，例如「高并发」「订单」「推荐算法」。",
+      "searchNoHitsCount": "库里没有与这句沾边的内容",
+      "searchNoHitsHint": "库里没有与这句沾边的内容。可以：先在上方填简历文档 id 做一次「从简历同步」把简历建进知识库；或换一个更短、更通用的关键词（检索按两字一组切词，单个字要靠子串匹配）；或用下方「新建手工实体」把这段经历补进库。",
       "create": "新建手工实体",
       "created": "已新建 {{entityId}}",
       "save": "保存",
@@ -603,7 +613,12 @@
       "kindSkill": "技能",
       "kindAchievement": "成果",
       "reasonContains": "完全覆盖",
-      "reasonOverlap": "部分重合"
+      "reasonOverlap": "部分重合",
+      "chunkEntity": "实体切片",
+      "chunkSection": "区块切片",
+      "searchReasonBm25": "词频相关",
+      "searchReasonLexical": "词面覆盖",
+      "searchReasonSubstring": "子串命中"
     }
   }
 }

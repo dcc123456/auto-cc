@@ -977,6 +977,21 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
     expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
   });
+
+  it('检索登记的也是同一个入口：跑工具与直接调 service 逐字段相等，且空态是值而不是入参错误（裁定三 / 4.3-10）', async () => {
+    const { kb, tools } = await seededKb(tempDir());
+    const tool = tools.declarations.get('kb.profile.search');
+    if (tool === undefined) throw new Error('kb.profile.search 未登记进 agent 工具面');
+    expect(tool.effect).toBe('read');
+    expect(tool.requiresConfirmation).toBe(false);
+    expect(await tool.run({ query: '订单' })).toEqual(kb.search('订单'));
+    // 空查询必须过 schema：注册表那层的 `TOOL_INPUT_INVALID` 会把 4.3-10 要区分的两个确定空态吃成一个错误。
+    expect(tool.input.safeParse({ query: '' }).success).toBe(true);
+    expect(await tool.run({ query: '。。。' })).toEqual({ status: 'no_query_tokens', hits: [], queryTokens: [] });
+    // 结果要落进消息 parts 并过 IPC，所以必须是纯 JSON（Map / Set 一旦漏进去就是「界面上拿到空对象」）。
+    const serialized = JSON.parse(JSON.stringify(await tool.run({ query: '订单' }))) as { hits: unknown[] };
+    expect(serialized.hits.length).toBeGreaterThan(0);
+  });
 });
 
 /**

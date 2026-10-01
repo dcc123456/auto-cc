@@ -534,6 +534,8 @@
           "deliverPerform": "Deliver resume",
           "greetPerform": "Send greeting",
           "jdCapture": "Search and capture JDs",
+          "kbList": "List knowledge base entities",
+          "kbSearch": "Search knowledge base",
           "locateFind": "Locate control",
           "pageNavigate": "Navigate page",
           "pageSnapshot": "Read page snapshot",
@@ -573,6 +575,14 @@
       "evidence": "Evidence",
       "evidenceEmpty": "No support: no entity in the library overlaps this claim",
       "evidenceCount": "{{count}} entities matched",
+      "search": "Search knowledge base",
+      "searchPlaceholder": "Type keywords, e.g. \"high concurrency\", \"orders\"",
+      "searchCount": "{{count}} chunks matched",
+      "searchTokens": "Searched by these terms: {{tokens}}",
+      "searchNoTokens": "This query yields no searchable term",
+      "searchNoTokensHint": "This query yields no searchable term (punctuation or whitespace only). Try one or two real words, e.g. \"high concurrency\" or \"orders\".",
+      "searchNoHitsCount": "Nothing in the library relates to this query",
+      "searchNoHitsHint": "Nothing in the library relates to this query. You can: fill in the resume doc id above and run \"Sync from resume\" to build the library; try a shorter or more general keyword (Chinese is indexed in two-character groups, single characters rely on substring matching); or add this experience via \"New manual entity\" below.",
       "create": "New manual entity",
       "created": "Created {{entityId}}",
       "save": "Save",
@@ -603,7 +613,12 @@
       "kindSkill": "Skill",
       "kindAchievement": "Achievement",
       "reasonContains": "Full coverage",
-      "reasonOverlap": "Partial overlap"
+      "reasonOverlap": "Partial overlap",
+      "chunkEntity": "Entity chunk",
+      "chunkSection": "Section chunk",
+      "searchReasonBm25": "Term frequency",
+      "searchReasonLexical": "Lexical coverage",
+      "searchReasonSubstring": "Substring match"
     }
   }
 }

@@ -368,6 +368,18 @@ export class KbProfileService extends Service {
         requiresConfirmation: false,
         run: (filter) => Promise.resolve(this.list(filter)),
       }),
+      // 检索口同时是工具（裁定三）：对话里「找找和高并发相关的经历」与界面上的检索框必须打同一个 `search()`。
+      // 入参不设 `min(1)`：空查询在库里表现为「切不出 token」而不是「参数不合法」，
+      // 注册表那层的 `TOOL_INPUT_INVALID` 会把 4.3-10 要区分的两个确定空态吃成一个错误。
+      agentTool({
+        id: 'kb.profile.search',
+        description:
+          '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；不联网、不经过模型',
+        input: z.strictObject({ query: z.string() }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ query }) => Promise.resolve(this.search(query)),
+      }),
     ]);
     this.ctx.logger.info(
       `[kb-profile] kb_entities / kb_chunks / kb_chunks_fts 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)} / ${String(KB_SEARCH_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}，检索阈值 topK=${String(this.options.searchTopK)} minScore=${String(this.options.searchMinScore)} k1=${String(this.options.bm25K1)} b=${String(this.options.bm25B)} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
