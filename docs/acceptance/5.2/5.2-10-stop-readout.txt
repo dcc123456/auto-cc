@@ -1,0 +1,16 @@
+[saveConfig 40000] {"ok":true,"value":{"id":"agent-loop","state":"active","dependsOn":["agent","agent-policy","chat","store"],"keys":["stepLimit","tokenBudget","contextCharsCap"]}}
+[goal 长度] 1631
+[A-起草-trace]    12ms proposed#0
+[A-页内点击] {"clicked":"已点（第 1 次轮询 · 按下确认后 30ms 起）","atMs":77}
+[A-叫停后-trace]   108ms running#4
+[A-叫停后-trace]   127ms paused#4
+[A-终态] {"命中":{"state":"paused#4","atMs":127},"读数":{"runId":"73dd146c-eb48-475e-9855-0056d4e72e27","status":"paused","stopReason":"USER_STOPPED","statusLabel":"已暂停","stopReasonLabel":"由人叫停","progress":"已落 4 / 45 步","tokens":"已用 2486 token","limits":"步数上限 50 · token 预算 40000","outbound":"其中 0 步会离开本机","stopAccepted":null,"notice":"确认并执行计划：成功","executed":4,"planned":41,"hasStopButton":false}}
+[A-库] {"run":{"status":"paused","stop_reason":"USER_STOPPED","plan_step_index":4,"step_limit":50,"token_budget":40000,"tokens_used":2486,"plan_len":45},"stepCount":4,"lastSteps":[{"plan_step_index":1,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":2,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":3,"tool_id":"sessions.open","status":"ok"}]}
+[B-起草-trace]     1ms paused#4
+[B-起草-trace]    15ms proposed#0
+[B-鼠标点击] {"clicked":"落点 86,518 · 该点元素 button:stop-run（第 1 次轮询 · 按下确认后 24ms 起）","atMs":115}
+[B-叫停后-trace]   154ms running#5
+[B-叫停后-trace]   173ms paused#7
+[B-终态] {"命中":{"state":"paused#7","atMs":173},"读数":{"runId":"99e75331-9686-40ab-acac-f73906f41c83","status":"paused","stopReason":"USER_STOPPED","statusLabel":"已暂停","stopReasonLabel":"由人叫停","progress":"已落 7 / 45 步","tokens":"已用 3250 token","limits":"步数上限 50 · token 预算 40000","outbound":"其中 0 步会离开本机","stopAccepted":null,"notice":"确认并执行计划：成功","executed":7,"planned":38,"hasStopButton":false}}
+[B-库] {"run":{"status":"paused","stop_reason":"USER_STOPPED","plan_step_index":7,"step_limit":50,"token_budget":40000,"tokens_used":3250,"plan_len":45},"stepCount":7,"lastSteps":[{"plan_step_index":4,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":5,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":6,"tool_id":"sessions.open","status":"ok"}]}
+[restoreConfig] {"ok":true,"value":{"id":"agent-loop","state":"active","dependsOn":["agent","agent-policy","chat","store"],"keys":["stepLimit","tokenBudget","contextCharsCap"]}}

@@ -1,0 +1,49 @@
+[saveConfig 40000] {"ok":true,"value":{"id":"agent-loop","state":"active","dependsOn":["agent","agent-policy","chat","store"],"keys":["stepLimit","tokenBudget","contextCharsCap"]}}
+[goal 长度] 1631
+[A-起草-trace]    12ms proposed#0
+[A-页内点击] {"clicked":"按钮被禁用（按下确认后 20ms 起轮询）","atMs":66}
+[A-叫停后-trace]   116ms running#4
+[A-叫停后-trace]   160ms running#6
+[A-叫停后-trace]   223ms running#9
+[A-叫停后-trace]   287ms running#11
+[A-叫停后-trace]   334ms running#13
+[A-叫停后-trace]   377ms running#15
+[A-叫停后-trace]   442ms running#18
+[A-叫停后-trace]   506ms running#21
+[A-叫停后-trace]   568ms running#23
+[A-叫停后-trace]   613ms running#26
+[A-叫停后-trace]   681ms running#28
+[A-叫停后-trace]   748ms running#31
+[A-叫停后-trace]   792ms running#34
+[A-叫停后-trace]   855ms running#36
+[A-叫停后-trace]   895ms running#38
+[A-叫停后-trace]   962ms running#41
+[A-叫停后-trace]  1008ms running#44
+[A-叫停后-trace]  1042ms completed#45
+[A-终态] {"命中":{"state":"completed#45","atMs":1042},"读数":{"runId":"e20931b0-33c0-4ea0-9e7d-4eddcd034928","status":"completed","stopReason":"COMPLETED","statusLabel":"已完成","stopReasonLabel":"全部步骤跑完","progress":"已落 45 / 45 步","tokens":"已用 26560 token","limits":"步数上限 50 · token 预算 40000","outbound":"其中 0 步会离开本机","stopAccepted":null,"notice":"确认并执行计划：成功","executed":45,"planned":0,"hasStopButton":false}}
+[A-库] {"run":{"status":"completed","stop_reason":"COMPLETED","plan_step_index":45,"step_limit":50,"token_budget":40000,"tokens_used":26560,"plan_len":45},"stepCount":45,"lastSteps":[{"plan_step_index":42,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":43,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":44,"tool_id":"sessions.open","status":"ok"}]}
+[B-起草-trace]     1ms completed#45
+[B-起草-trace]    11ms proposed#0
+[B-鼠标点击] {"clicked":"按钮被禁用（按下确认后 25ms 起轮询）","atMs":65}
+[B-叫停后-trace]   114ms running#3
+[B-叫停后-trace]   156ms running#5
+[B-叫停后-trace]   195ms running#7
+[B-叫停后-trace]   238ms running#8
+[B-叫停后-trace]   286ms running#10
+[B-叫停后-trace]   355ms running#13
+[B-叫停后-trace]   422ms running#16
+[B-叫停后-trace]   471ms running#18
+[B-叫停后-trace]   536ms running#21
+[B-叫停后-trace]   600ms running#24
+[B-叫停后-trace]   663ms running#27
+[B-叫停后-trace]   708ms running#29
+[B-叫停后-trace]   750ms running#31
+[B-叫停后-trace]   795ms running#33
+[B-叫停后-trace]   855ms running#36
+[B-叫停后-trace]   944ms running#39
+[B-叫停后-trace]   989ms running#40
+[B-叫停后-trace]  1015ms running#43
+[B-叫停后-trace]  1044ms completed#45
+[B-终态] {"命中":{"state":"completed#45","atMs":1044},"读数":{"runId":"c015ccc9-6810-4609-96c5-9801500ed59e","status":"completed","stopReason":"COMPLETED","statusLabel":"已完成","stopReasonLabel":"全部步骤跑完","progress":"已落 45 / 45 步","tokens":"已用 26560 token","limits":"步数上限 50 · token 预算 40000","outbound":"其中 0 步会离开本机","stopAccepted":null,"notice":"确认并执行计划：成功","executed":45,"planned":0,"hasStopButton":false}}
+[B-库] {"run":{"status":"completed","stop_reason":"COMPLETED","plan_step_index":45,"step_limit":50,"token_budget":40000,"tokens_used":26560,"plan_len":45},"stepCount":45,"lastSteps":[{"plan_step_index":42,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":43,"tool_id":"sessions.open","status":"ok"},{"plan_step_index":44,"tool_id":"sessions.open","status":"ok"}]}
+[restoreConfig] {"ok":true,"value":{"id":"agent-loop","state":"active","dependsOn":["agent","agent-policy","chat","store"],"keys":["stepLimit","tokenBudget","contextCharsCap"]}}
