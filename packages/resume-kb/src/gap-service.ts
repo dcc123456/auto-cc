@@ -55,12 +55,8 @@ import {
   type RequirementKind,
 } from './requirements.js';
 import type { KbProfileService } from './profile-service.js';
-import {
-  buildRequirementMessages,
-  mergeModelWithLexical,
-  readModelRequirements,
-  REQUIREMENT_PROMPT_VERSION,
-} from './requirements-model.js';
+import { mergeModelWithLexical, readModelRequirements } from './requirements-model.js';
+import { buildRequirementMessages, REQUIREMENT_PROMPT_VERSION } from './prompts.js';
 
 /**
  * 模型腿的五种结局（spec 4.4-02 的「不可用要能被看见」就落在这个字段上）。

@@ -37,7 +37,7 @@ import { waitForLogLine } from './log-file.js';
 import { KbProfileService, kbProfileSchema } from './profile-service.js';
 import { parseResumeText } from './sections.js';
 import { REQUIREMENT_LEXICON_VERSION } from './requirements.js';
-import { REQUIREMENT_PROMPT_VERSION } from './requirements-model.js';
+import { REQUIREMENT_PROMPT_VERSION } from './prompts.js';
 import { FakeAgentToolsService, FakeChatService } from './test-doubles.js';
 
 /** 固定样例 JD（虚构）：四类齐全，正文里埋一句可当哨兵的长句与一个假手机号。 */

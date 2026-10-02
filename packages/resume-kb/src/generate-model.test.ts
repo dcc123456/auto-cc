@@ -8,13 +8,8 @@
 import { createEmptyDocument, makeField, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { describe, expect, it } from 'vitest';
 import { generationTargetFields } from './fact-check.js';
-import {
-  applyRewrites,
-  buildGenerateMessages,
-  buildRetryAppendix,
-  GENERATE_PROMPT_VERSION,
-  readModelRewrites,
-} from './generate-model.js';
+import { applyRewrites, readModelRewrites } from './generate-model.js';
+import { buildGenerateMessages, buildRetryAppendix, GENERATE_PROMPT_VERSION } from './prompts.js';
 
 const NOW_MS = 1_700_000_000_000;
 const MAX_CHARS = 600;

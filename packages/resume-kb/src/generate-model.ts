@@ -31,12 +31,6 @@ import { z } from 'zod';
 import type { GenerationField } from './fact-check.js';
 import { stripFence } from './requirements-model.js';
 
-/**
- * 生成腿的提示词版本（沿用 4.4-a 的 `jdreq-v1` 与 2.5-09 的 `scriptVersion` 口径）：
- * 改提示词必须同时改它，否则 4.5-10 复盘时分不清某份产物是哪一版产的。
- */
-export const GENERATE_PROMPT_VERSION = 'resume-generate-v1';
-
 /** 一条通过契约与位置校验的改写（带着原文，装回文档时按位置逐处替换）。 */
 export interface GeneratedRewrite {
   readonly sectionId: string;
@@ -61,68 +55,6 @@ export interface ModelRewriteRead {
   readonly droppedDuplicate: number;
   /** 与原文逐字相同而丢弃的条数（不算违规，但要能看出「模型其实没改」） */
   readonly droppedUnchanged: number;
-}
-
-/**
- * 重试那一轮的约束补强（spec 4.5-05 的「RETRY_APPEND 式」）。
- *
- * 拼在 system 后面而不是重发一遍清单：第一轮失败几乎都是「动了不该动的东西」，
- * 把上一轮的具体违规行原样贴回去，比再加一句「请谨慎」有用。
- * @param violationLines `describeViolations()` 的读数（已过脱敏，不含字段原文）
- * @returns 一段可直接追加的中文约束；没有读数时返回空串（调用方据此决定要不要追加）
- */
-export function buildRetryAppendix(violationLines: readonly string[]): string {
-  if (violationLines.length === 0) return '';
-  return (
-    '\n\n上一轮的改写未通过事实校验，违规项如下（只给路径与判据，不含原文）：\n' +
-    violationLines.map((line) => `- ${line}`).join('\n') +
-    '\n这一轮请只修掉这些问题：数值一个都不许增减或改写，机构名与专业名一律照抄，' +
-    '拿不准就原样返回该条，不要为了润色而改动事实。'
-  );
-}
-
-/**
- * 拼给模型的两句消息（system 定规矩，user 给清单与原文）。
- *
- * 里面没有端点、模型名、密钥（AGENTS.md §2.7 的入口唯一性由 `check-llm-single-entry` 机检），
- * 传输全在 `llm.chat`。
- * @param jdText 岗位 JD 正文（改写要贴合的方向，与 4.4 拆解用的是同一份字符串）
- * @param requirementLines 已拆出的要求短句（与缺口报告共用同一份读数，不让模型再拆一遍）
- * @param targets 待改写的散文位置（`generationTargetFields` 的产物，已按重排后的相关性顺序）
- * @param retryAppendix 第二轮才有的约束补强
- * @returns 可直接交给 `ChatGateway.complete` 的消息序列
- */
-export function buildGenerateMessages(
-  jdText: string,
-  requirementLines: readonly string[],
-  targets: readonly GenerationField[],
-  retryAppendix = '',
-): Array<{ role: 'system' | 'user'; content: string }> {
-  const system =
-    '你在帮中国求职者把已有简历改写得更贴合一个具体岗位。你只能改写我给出的句子，不能新增、不能编造。\n' +
-    '规则：\n' +
-    '1. 只输出 JSON，形如 {"entries":[{"sectionId":"experience","entryId":"experience-1","fieldKey":"achievement","text":"改写后的整段"}]}，' +
-    '不要解释、不要注释；代码围栏可以有。\n' +
-    '2. 每条必须原样回填我给它的 sectionId / entryId / fieldKey 三个值，text 是这一整段的新写法。\n' +
-    '3. 数字与百分比一个都不许增减、不许改写成「大幅 / 显著」这类模糊词，也不许反过来凭空补一个数。\n' +
-    '4. 公司名、学校名、专业名、职位名、时间范围一律照抄我给过的写法，不许出现任何新的机构名或人名。\n' +
-    '5. 只在确实能更贴合岗位要求时改写；无话可改就把原文逐字返回。\n' +
-    '6. 只改写清单里的位置，清单外的 sectionId / entryId / fieldKey 会被整条丢弃。' +
-    retryAppendix;
-  const listed = targets.map((target) => ({
-    sectionId: target.sectionId,
-    entryId: target.entryId,
-    fieldKey: target.fieldKey,
-    text: target.text,
-  }));
-  const user =
-    `岗位 JD：\n${jdText.trim()}\n\n` +
-    `这个岗位的能力要求：${requirementLines.length === 0 ? '（未拆出明确要求）' : requirementLines.join('、')}\n\n` +
-    `待改写的段落清单（JSON）：\n${JSON.stringify(listed)}\n\n请按要求输出改写结果。`;
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: user },
-  ];
 }
 
 /** 模型契约的一条：四个键之外多一个键即非法（判据六的形状保证就落在这个 `strictObject` 上）。 */

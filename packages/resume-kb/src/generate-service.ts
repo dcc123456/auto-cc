@@ -55,16 +55,10 @@ import {
   type GenerationCheckReport,
   type GenerationField,
 } from './fact-check.js';
-import {
-  applyRewrites,
-  buildGenerateMessages,
-  buildRetryAppendix,
-  GENERATE_PROMPT_VERSION,
-  readModelRewrites,
-  type GeneratedRewrite,
-} from './generate-model.js';
+import { applyRewrites, readModelRewrites, type GeneratedRewrite } from './generate-model.js';
 import { evidenceOfEntries, reorderDocument, type ReorderBasis } from './generate-reorder.js';
 import { GAP_MODEL_STATUSES, wasAsked, type GapModelStatus, type KbGapService } from './gap-service.js';
+import { buildGenerateMessages, buildRetryAppendix, GENERATE_PROMPT_VERSION } from './prompts.js';
 import type { GapRequirementView } from './requirements-compare.js';
 import type { RequirementKind } from './requirements.js';
 

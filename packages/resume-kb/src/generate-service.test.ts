@@ -44,7 +44,7 @@ import {
   type KbGenerateConfig,
 } from './generate-service.js';
 import { preservesAllEntries } from './generate-reorder.js';
-import { GENERATE_PROMPT_VERSION } from './generate-model.js';
+import { GENERATE_PROMPT_VERSION } from './prompts.js';
 import { KbGapService, kbGapSchema } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
 import { KbProfileService, kbProfileSchema } from './profile-service.js';

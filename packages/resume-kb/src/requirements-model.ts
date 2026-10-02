@@ -11,7 +11,9 @@
  *    引文在原文里找不到就丢弃并计入 `droppedUnlocatable`，绝不为了让报告好看而保留一条无据的要求；
  * 2. **确定性**：模型返回的次序先按「四类表次序 → 起始下标」归一，再与词面腿合并，
  *    所以同一个词面结果 + 同一份模型输出永远得到同一个合并序列（4.4-07 的稳定性判据接得上）；
- * 3. **纯函数**：这里不发请求、不碰 cordis、不开连接（4.4-08），提示词只是拼字符串。
+ * 3. **纯函数**：这里不发请求、不碰 cordis、不开连接（4.4-08）。提示词字面量自 4.6-a 起在本包的
+ *    注册表 `./prompts.ts` 里（spec 4.6-09 的落点唯一性由 `scripts/check-prompts.ts` 机检），
+ *    本文件只管读回与合并。
  *
  * 提示词与判据全部是本仓库自写的中文表达，未从任何参考项目搬运（plan §4.4-b 证据 [1]：
  * `.research-repos/src/ai-resume-master/server/src/prompts/jdParse.ts` 只借了「四类划分」这个口径，
@@ -25,12 +27,6 @@ import {
   type RequirementItem,
   type RequirementKind,
 } from './requirements.js';
-
-/**
- * 提示词版本（同 2.5-09 的 `scriptVersion` 与 4.4-a 的 `lexiconVersion` 口径）：
- * 改提示词必须同时改它，否则 4.4-07 复盘时分不清某份报告是哪一版产的。
- */
-export const REQUIREMENT_PROMPT_VERSION = 'jdreq-v1';
 
 /**
  * 模型契约里的一条声明（还没定位，`quote` 是模型声称的原文片段）。
@@ -67,32 +63,6 @@ function yearsFromQuote(quote: string): number | null {
   const matched = /(\d{1,2})\s*年/.exec(quote);
   const value = matched ? Number(matched[1]) : Number.NaN;
   return Number.isNaN(value) ? null : value;
-}
-
-/**
- * 拼给模型的两句消息（system 定规矩，user 给原文）。
- *
- * 里面没有端点、没有模型名、也没有 key（AGENTS.md §2.7 的入口唯一性由 `check-llm-single-entry` 机检），
- * 传输全在 `llm.chat`。
- * @param jdText 待拆解的 JD 正文（去空白后）
- * @param limitPerKind 每类最多几条，进提示词约束模型别把整段技术清单倒出来
- * @returns 可直接交给 `ChatGateway.complete` 的消息序列
- */
-export function buildRequirementMessages(
-  jdText: string,
-  limitPerKind: number,
-): Array<{ role: 'system' | 'user'; content: string }> {
-  const system =
-    '你在帮中国求职者拆解招聘 JD 里的能力要求。只依据我给出的 JD 原文，不得引入原文没有的要求，' +
-    '不得编造公司、岗位、技术名词或年限。' +
-    `每一项给出：类别 kind（只能是 hard_skill / soft_skill / education / experience_years）、` +
-    `代表词 label（用业界通用写法，同一能力只算一项）、原文引文 quote（必须逐字摘自 JD 原文，不超过 40 字）。` +
-    `每类最多 ${String(limitPerKind)} 项。只输出 JSON，形如 {"items":[{"kind":"hard_skill","label":"React","quote":"精通 React"}]}，` +
-    '不要输出解释、注释或代码块以外的任何文字。';
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: `请拆解以下 JD 原文中的能力要求：\n${jdText}` },
-  ];
 }
 
 /**

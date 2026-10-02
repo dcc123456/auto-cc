@@ -6,12 +6,8 @@
  * 语料是本地虚构样例（§7.2），公司名与手机号都是假的。
  */
 import { describe, expect, it } from 'vitest';
-import {
-  buildRequirementMessages,
-  mergeModelWithLexical,
-  readModelRequirements,
-  REQUIREMENT_PROMPT_VERSION,
-} from './requirements-model.js';
+import { mergeModelWithLexical, readModelRequirements } from './requirements-model.js';
+import { buildRequirementMessages, REQUIREMENT_PROMPT_VERSION } from './prompts.js';
 import { extractRequirementsLexically, type RequirementItem } from './requirements.js';
 
 /** 固定样例 JD（虚构）：第二句里的「数据治理」「成本优化」不在词表里，正是模型腿要补的长尾。 */

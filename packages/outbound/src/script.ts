@@ -9,9 +9,12 @@
  * 3. **要离开 app 的文本必须过黑名单**（AGENTS.md §8.4 事实锁定 + §8.5 个人数据脱敏的前置闸门）。
  *
  * 模板与提示词全部是本仓库自写的中文表达，未从任何参考项目搬运（plan §12.7 的许可约束）。
+ * 自 4.6-a 起，那些字面量搬进本包的注册表 `./prompts.ts`（spec 4.6-09：一包的 prompt 只许一处，
+ * 由 `scripts/check-prompts.ts` 机检），本文件只做装配、校验与回落决策。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
+import { buildGreetingMessages, renderGreetingTemplate } from './prompts.js';
 
 /** 知识库证据的一条（P4 未接前允许整体为空数组，plan §12.8）。 */
 export const scriptEvidenceSchema = z.strictObject({
@@ -67,40 +70,6 @@ export interface ScriptDraftView {
   scriptVersion: string;
   /** 归属的 JD id，用于把文案与目标对上 */
   jdId: string;
-}
-
-/**
- * 拼本地模板开场白。
- * @param request 已校验过的生成入参（岗位名、公司名必非空）
- * @returns 含岗位名与公司名的中文开场白；无关键词时省略方向那一小句
- */
-function renderTemplate(request: ScriptRequest): string {
-  const direction = request.keywords.length > 0 ? `（方向：${request.keywords.slice(0, 3).join('、')}）` : '';
-  const evidence = request.evidence.length > 0 ? '我的经历与岗位要求比较匹配，' : '我对这个方向有兴趣，';
-  return `您好！看到贵司「${request.company}」在招「${request.title}」${direction}，${evidence}想向您请教岗位的具体要求，方便的话希望进一步沟通，谢谢！`;
-}
-
-/**
- * 组装给模型的两句消息（system 定规矩，user 给事实）。
- * @param request 生成入参
- * @param maxChars 长度上限（字符），进提示词
- * @returns 直接可交给 `llm.chat.complete` 的消息数组
- */
-function buildMessages(request: ScriptRequest, maxChars: number) {
-  const system =
-    '你帮中国求职者在招聘软件上写第一条打招呼消息。只依据用户给出的事实，不得编造公司、职位、时间或数字；' +
-    `语气礼貌克制，不超过 ${String(maxChars)} 个字，必须点明岗位名或公司名，不要留任何占位符。` +
-    '禁止出现手机号、身份证号、验证码、密码等个人凭据。只输出消息正文。';
-  const facts = [
-    `岗位：${request.title}`,
-    `公司：${request.company}`,
-    request.keywords.length > 0 ? `方向关键词：${request.keywords.join('、')}` : '',
-    request.evidence.length > 0 ? `可引用的经历：${request.evidence.map((item) => item.fact).join('；')}` : '',
-  ].filter((line) => line.length > 0);
-  return [
-    { role: 'system' as const, content: system },
-    { role: 'user' as const, content: `请针对以下岗位写一条开场白：\n${facts.join('\n')}` },
-  ];
 }
 
 export class OutboundScriptService extends Service {
@@ -171,7 +140,7 @@ export class OutboundScriptService extends Service {
       return { text: attempt.text, origin: 'model', scriptVersion: this.options.scriptVersion, jdId: request.jdId };
     }
     // 回落不是失败：流程继续，但原因必须跟着结果走上前，界面才知道该说什么。
-    const text = renderTemplate(request);
+    const text = renderGreetingTemplate(request);
     this.assertSendable(text, 'template');
     this.ctx.logger.warn(`话术回落模板：${attempt.reason}`);
     return {
@@ -194,7 +163,7 @@ export class OutboundScriptService extends Service {
     const llm = asApp(this.ctx)['llm.chat'];
     let text: string;
     try {
-      const completion = await llm.complete({ messages: buildMessages(request, this.options.maxChars) });
+      const completion = await llm.complete({ messages: buildGreetingMessages(request, this.options.maxChars) });
       text = completion.text.trim();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
