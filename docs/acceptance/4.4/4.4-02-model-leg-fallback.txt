@@ -1,0 +1,150 @@
+4.4-02 验收证据 · JD 拆解的模型腿与可见回落（2026-10-02，切片 4.4-b）
+==============================================================================
+
+条目原文：拆解失败或 LLM 不可用时回落关键词抽取，功能不中断（U+V）。
+本片收的是 U 半边（回落判据与五态可读），V 半边（界面上的那句提示）在 4.4-d 接界面时复跑。
+
+
+【1】命令与用例（vitest verbose，逐条对应判据）
+------------------------------------------------------------------------------
+$ npx vitest run --reporter=verbose src/requirements-model.test.ts src/gap-service.test.ts
+（工作目录 packages/resume-kb，Node 24 / vitest 3.2.7）
+
+ ✓ 提示词的拼装 > 两条消息：system 定四类与每类上限并把引文要求写死，user 带原文
+ ✓ 提示词的拼装 > 提示词版本是可复盘的常量（同 2.5-09 的 scriptVersion 口径）
+ ✓ 模型输出的读取 > 合法 JSON：逐条定位回原文，位置由我们自己算、via 标成 model
+ ✓ 模型输出的读取 > Markdown 代码围栏包起来的 JSON 同样能读（模型实测常见形态）
+ ✓ 模型输出的读取 > 引文在原文里找不到就丢弃并计数，绝不保留一条无据的要求（§8.4 的 4.4 对应物）
+ ✓ 模型输出的读取 > 类别不在四类、字段缺失、文本超长都算契约不合格，逐条丢弃而不牵连其他条
+ ✓ 模型输出的读取 > 经验年限的数字从定位到的原文里取，不采信模型自己填的数
+ ✓ 模型输出的读取 > 整份产出不是 JSON、缺 items 数组、或空回复：给出可直接播报的原因而不是抛
+ ✓ 模型输出的读取 > 模型重复认领同一处原文时，第二条按区间重叠丢弃
+ ✓ 两条腿的合并 > 词面腿是底座：合并后每条原始条目都在，且模型条目排在同类别后
+ ✓ 两条腿的合并 > 同一处原文或同一要求（忽略大小写与空格）不双计，词面那条留下
+ ✓ 两条腿的合并 > 该类别已被词面腿占满上限时，模型条目计入触顶丢弃
+ ✓ 两条腿的合并 > 同一份词面 + 同一份模型输出，无论模型给的次序如何，合并序列完全一致（4.4-07）
+ ✓ kb.gap 的拆解入口 > 四类齐全，计数与词表版本随结果返回，且每条都是词面腿产的
+ ✓ kb.gap 的拆解入口 > 先去空白再判长度：输入两端留白不影响 inputChars 与产出
+ ✓ kb.gap 的拆解入口 > 过短的 JD 结构化失败，而不是给一份空报告（spec 4.4-01 的入参校验）
+ ✓ kb.gap 的拆解入口 > 每类上限来自配置：调小之后只留稳定序列头部，丢弃条数如实报出
+ ✓ kb.gap 的模型腿五态 > merged：词面基线一条不少，模型补的长尾带上 via=model 与可对回原文的位置
+ ✓ kb.gap 的模型腿五态 > 装配里没有 llm.chat：报 unavailable，产出就是词面基线（功能不中断）
+ ✓ kb.gap 的模型腿五态 > unavailable：配齐了替身但模型没配 key，一次请求都不发
+ ✓ kb.gap 的模型腿五态 > failed：请求抛错就回落，原因里带上那句可直接播报的话
+ ✓ kb.gap 的模型腿五态 > rejected：模型答得上来但一条都采不了信——引文对不上原文
+ ✓ kb.gap 的模型腿五态 > rejected：模型报的与词面腿完全重复时也不虚增条数
+ ✓ kb.gap 的模型腿五态 > disabled：allowModelLeg=false 时不碰模型，哪怕替身是可用状态
+ ✓ kb.gap 的模型腿五态 > 温度取 0：拆解是读数不是创作（4.4-07 的稳定判据）
+ ✓ kb.gap 的日志脱敏 > 日志里只有四类计数与腿状态，查不到 JD 正文、手机号与模型原文
+ ✓ kb.gap 的日志脱敏 > 回落那一路走 warn，让「没用上模型」在日志里也是显眼的
+
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+
+（同目录的 requirements.test.ts 11 例一并复跑通过；本包全量 13 文件 / 260 例见第 5 节门禁汇总。）
+
+
+【2】运行期五态实测（真实装配，不是单测断言）
+------------------------------------------------------------------------------
+$ npx tsx tmp/demo-44b.ts      # 一次性演示脚本，跑完即删（§6.4 / §7.5，不进主干）
+                              # 副本留在仓库外的 .research-repos/kb-gap-spike/demo-44b.ts，
+                              # 复跑时把它放回 packages/resume-kb/tmp/ 即可（相对导入路径按那个位置写的），
+                              # 但跑完必须删掉——它不在包 tsconfig 的项目列表里，留着会让 pnpm lint 报解析错
+
+装配是四个真服务：ConfigService + LogService + **LlmChatService（真类）** + KbGapService。
+模型端点是脚本内起的一个本地 fixture HTTP 服务（127.0.0.1 随机端口，回 OpenAI 信封），
+因为本机没有对话模型的 key（`AUTO_CC_LLM_API_KEY` 未设置，见第 6 节的诚实边界）。
+§7.2 禁的是自动化测试访问真实招聘平台，本地回环不是外发；这里也没有任何真实平台地址。
+
+### ① unavailable（真 llm.chat 在场，但端点/模型都没配）
+modelStatus=unavailable · model=null · 并入 0 条 · 丢弃 0 条 · 提示词 null
+reason=模型未配置，缺 baseUrl / model
+条数=6（词面 6 + 模型 0） · 模型条目可对回原文=true · items 指纹 d668f55a7d54d3f7
+  日志：WARN [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型腿 unavailable（模型未配置，缺 baseUrl / model） · 丢弃 0 条 · 词表 lex-v1
+
+### ② merged（真 llm.chat 打到本地 fixture 端点）
+modelStatus=merged · model=fixture-jd-model · 并入 1 条 · 丢弃 2 条 · 提示词 jdreq-v1
+reason=null
+条数=7（词面 6 + 模型 1） · 模型条目可对回原文=true · items 指纹 752f3c49a71c6721
+  · [hard_skill] 订单链路 ← 「负责订单与推荐链路的后端服务」 @ 12-26
+  日志：INFO [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型腿 merged 并入 1 条 · 丢弃 2 条 · 词表 lex-v1 / 提示词 jdreq-v1
+  连跑两次序列一致=true（4.4-07） · 请求体 max_tokens=1200 temperature=0
+
+fixture 这一次回给三条声明，去向逐条可查：
+  {"hard_skill","订单链路","负责订单与推荐链路的后端服务"} → 并入（词面抓不到这句的长尾表达）
+  {"soft_skill","英语流利","听说读写流利"}                → 丢弃（JD 原文里没有这七个字，§8.4 不接受无据条目）
+  {"hard_skill","Java","Java"}                            → 丢弃（词面腿已经认出 Java，同 label 不双计）
+于是 `modelAdded=1 / modelDropped=2`，且合并序列的条数 = 词面 6 + 1，**词面基线一条没少**。
+
+### ③ rejected（模型答得上来，但整份不是 JSON）
+modelStatus=rejected · reason=模型产出不是合法 JSON · 并入 0 条 · 提示词 jdreq-v1
+条数=6 · items 指纹 d668f55a7d54d3f7（与 ①④⑤ 同一串，即"回落后的产出就是词面基线"）
+  日志：WARN [kb-gap] ... · 模型腿 rejected（模型产出不是合法 JSON） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
+
+### ④ failed（端点指向已关闭的端口）
+modelStatus=failed · reason=问模型失败：模型请求发不出去：fetch failed · 提示词 jdreq-v1
+条数=6 · items 指纹 d668f55a7d54d3f7
+  日志：WARN [kb-gap] ... · 模型腿 failed（问模型失败：模型请求发不出去：fetch failed） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
+
+### ⑤ disabled（allowModelLeg=false，模型这次是可用的）
+modelStatus=disabled · reason=配置里关掉了模型腿（allowModelLeg=false） · 提示词 null
+条数=6 · items 指纹 d668f55a7d54d3f7 · fixture 端点一次请求都没收到（服务没走到 complete）
+  日志：WARN [kb-gap] ... · 模型腿 disabled（配置里关掉了模型腿（allowModelLeg=false）） · 丢弃 0 条 · 词表 lex-v1
+
+
+【3】4.4-02 的两句判据分别怎么落
+------------------------------------------------------------------------------
+- 「功能不中断」：五种结局里有四种（unavailable / rejected / failed / disabled）交回的 `items`
+  指纹与"完全不问模型的词面基线"**逐字相同**（d668f55a7d54d3f7），第五种是 merged，它只增不减。
+  也就是说本方法在模型任何形态下都不抛、不清空、不截断词面结果。唯一的例外是 `INVALID_ARGUMENT`
+  （我们拼错了请求），那条照旧上抛——回落不该掩盖自己的 bug（`outbound.script` 的同一判据）。
+- 「回落要能被看见」：`modelStatus` + `modelReason` + `modelAdded` + `modelDropped` 四个字段随结果返回，
+  且非 merged 的那一路日志级别是 **WARN**（merged 是 INFO）。界面 4.4-d 直接按这五态出五句文案，
+  不需要自己再推断"是没配还是失败了"——`missing` 的具体项已经写在 `modelReason` 里。
+
+与 2.5-01（话术生成回落模板）的形状差异，是这条链后续可复用的结论：
+话术那侧的回落是**换产出者**（模型不行就本地模板出文案），拆解这侧的回落是**减少产出**
+（模型不行就只交词面基线）。所以这里必须区分五态而话术只需两态——少了哪一类，界面说的话就不同。
+
+
+【4】脱敏与离线口径（§8.5 / 4.3-12 / 4.4-08）
+------------------------------------------------------------------------------
+哨兵 grep（对演示输出与 verbose 用例输出，命中次数应为 0）：
+  13800002222      → demo 输出 0 次 / vitest 输出 0 次
+  星桥科技          → demo 输出 0 次 / vitest 输出 0 次
+  抗压能力          → demo 输出 0 次 / vitest 输出 0 次
+  英语流利（模型label）→ demo 输出 0 次 / vitest 输出 0 次
+  听说读写流利（模型quote，被丢弃的那条）→ demo 输出 0 次 / vitest 输出 0 次
+（demo 输出里出现的唯一原文片段是被**采信**的那条引文「负责订单与推荐链路的后端服务」——
+ 它进的是结果（界面要看），没进日志行。日志行本身只含字数与计数，见上面五行 WARN/INFO。）
+
+结构断言（4.4-08 的"测试不碰网络"半边）：
+  src/requirements-model.ts  fetch=0 http=0 completions=0 require(=0
+  src/gap-service.ts         fetch=0 http=0 completions=0 require(=0
+  src/requirements-model.test.ts / gap-service.test.ts 同样四项全 0
+  → 模型调用只经 `chatGatewayOf(ctx)` 要 `llm.chat`，端点、请求体形态、响应解析全在 `packages/llm`。
+$ npx tsx scripts/check-llm-single-entry.ts
+  ✔ LLM 入口唯一性检查通过（扫描 276 个文件，llm.chat / llm.embed 各自声明者唯一，模型端点只在 packages/llm）
+
+用例里的模型腿一律打**替身**（`FakeChatService`，`provide = 'llm.chat'`，只在用例显式要求时才挂进装配）；
+不挂替身那条用例就是"真实装配里注掉 llm 那一行"的形态，`modelStatus` 报 unavailable 且产出照常。
+
+
+【5】门禁汇总（本切片收口时复跑）
+------------------------------------------------------------------------------
+见 docs/acceptance/4.4/4.4-b-gates.txt（typecheck / lint / format:check / test 四条命令的实际输出与退出码）。
+
+
+【6】诚实边界（本片没证的、以及为什么）
+------------------------------------------------------------------------------
+- **真模型没跑过**：本机 `AUTO_CC_LLM_API_KEY` 未设置（`env | grep AUTO_CC` 为空），
+  所以 ② 那一路用的是本地 fixture 端点。它证明的是**形状与接线**（请求体参数、OpenAI 信封解析、
+  契约校验、定位、合并、五态播报）全链路穿通，**不证明**真实模型的召回质量与 JSON 合规率。
+  真 key 到位后的复跑步骤：`cordis.yml` 的 `llm` 段补 baseUrl/model 两行 + 导出 key →
+  `pnpm dev` → 缺口报告界面（4.4-d）拆一份真实样例 JD → 看 `modelStatus` 是否 merged、
+  `modelDropped` 里"引文对不上原文"占多少——那个比例就是提示词 jdreq-v1 的合规率，要记进 4.4-d 的记录。
+- **V 半边（界面提示）未做**：条目是 U+V，本片只到服务与结果层，界面上那句"没用上模型，
+  以下是关键词拆解"要等 4.4-d 的缺口报告界面（§5.9 双入口同批接）。
+- **`rejection` 的分布未知**：模型在真实 JD 上到底会给出多少定位不回的引文，只有真端点跑过才知道；
+  现在能说的只有"引文对不上就一定不收，且这条计数看得见"。
+- 迁移号段本片**没有新增**（仍停在 14，15 空着）：4.4 的拆解不落库，见 plan §4.4 口径 3。
