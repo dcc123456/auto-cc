@@ -146,12 +146,21 @@ const agentRunMigration = {
 };
 
 /**
- * 把观察文本收到定长（超了就截，不留整段工具正文）。
- * @param reading 工具读数或失败原话
- * @returns 不超过 `OBSERVATION_TEXT_CAP` 字的文本
+ * 把工具读数收成一句**可进 prompt** 的话（5.2-06）。
+ *
+ * 两步都在挡同一件事：整页 HTML 不进模型的正文。先去标记（连同被截断后剩下的半个开标签），
+ * 再把空白压成单空格，最后截到 `OBSERVATION_TEXT_CAP`——顺序反了就是拿截断后的碎片去猜标签边界，
+ * 页面上的「<htm」这种半截串会直接漏进 prompt。整页原文要看不去证据引用里看，不进正文。
+ * @param reading 工具读数或失败原话（可能是一整页正文）
+ * @returns 不超过 `OBSERVATION_TEXT_CAP + 1` 字的纯文本（末位可能是省略号；全空的读数回空串）
  */
 function clipReading(reading: string): string {
-  return reading.length > OBSERVATION_TEXT_CAP ? `${reading.slice(0, OBSERVATION_TEXT_CAP)}…` : reading;
+  const plain = reading
+    .replace(/<[^>]*>/g, ' ') // 成对标签（含属性、整段 script/style）一律摘掉
+    .replace(/<[\s\S]*$/, ' ') // 畸形或截断留下的半个开标签：后面没有 `>` 也要一起掉
+    .replace(/\s+/g, ' ')
+    .trim();
+  return plain.length > OBSERVATION_TEXT_CAP ? `${plain.slice(0, OBSERVATION_TEXT_CAP)}…` : plain;
 }
 
 /**
@@ -451,21 +460,29 @@ export class AgentLoopService extends Service {
       ref: `run:${scope.runId}/step:${String(Number(row.plan_step_index))}`,
       line: `#${String(Number(row.plan_step_index) + 1)} ${row.tool_id} ${row.status} → ${clipReading(row.observation)}`,
     }));
-    // 装不下的从**最早**的几条开始丢：离当前越近的越界越要留给模型看。
-    const kept: typeof entries = [];
-    let total = 0;
+    // 装不下的从**最早**的几条开始丢：离当前越近的越要留给模型看。
+    // 预算连「前 N 步已略」那一行自己也算进去——它是会进 prompt 的文本，不算账外，
+    // 不然 5.2-06 的长度上限就成了约等于。丢到连最近一条都放不下时，正文只剩这一行说明：
+    // 宁可让模型看见「这一轮没有上下文」，也不能给它一句被腰斩的观察，那才是会被当成事实读的东西。
+    const noteFor = (omittedCount: number) => `（前 ${String(omittedCount)} 步已略）`;
+    // 一份保留清单写进 prompt 实际占用的字符数（行之间与说明之后各有一个换行）。
+    const charsOf = (keptRows: typeof entries) =>
+      keptRows.reduce((sum, entry) => sum + entry.line.length, 0) +
+      Math.max(0, keptRows.length - 1) +
+      (keptRows.length < entries.length ? noteFor(entries.length - keptRows.length).length + 1 : 0);
+    let kept: typeof entries = [];
     for (let index = entries.length - 1; index >= 0; index -= 1) {
-      const entry = entries[index]!;
-      if (total + entry.line.length > this.config.contextCharsCap) break;
-      kept.unshift(entry);
-      total += entry.line.length;
+      // 只往「放得下」的方向加：再加一条更早的观察只会更长，一旦超长就可以停了。
+      const candidate = [entries[index]!, ...kept];
+      if (charsOf(candidate) > this.config.contextCharsCap) break;
+      kept = candidate;
     }
     const omitted = entries.length - kept.length;
     return {
       refs: kept.map((entry) => entry.ref),
       text:
         omitted > 0
-          ? `（前 ${String(omitted)} 步已略）\n${kept.map((entry) => entry.line).join('\n')}`
+          ? `${noteFor(omitted)}\n${kept.map((entry) => entry.line).join('\n')}`
           : kept.map((entry) => entry.line).join('\n'),
     };
   }
