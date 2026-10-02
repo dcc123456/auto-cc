@@ -37,6 +37,9 @@ import { type EvidenceOptions, type EvidenceRef, evidenceTextOf, rankEvidence } 
 import { decodeBackup, encodeBackup } from './backup.js';
 import { type KbChunkDraft, type KbChunkView, chunkViewOf, deriveSectionChunks, entityChunkOf } from './chunks.js';
 import { normalizeText } from './tokenize.js';
+// 证据正文读口的 `origin` 与比对层共用同一份字面量联合（§2.5：同一概念不留两份字面量）。
+// 用 `import type`：只借类型，不把本服务接进比对模块的运行时依赖里。
+import type { GapEvidenceOrigin } from './requirements-compare.js';
 import {
   type KbSearchCandidate,
   type KbSearchContext,
@@ -222,6 +225,20 @@ export interface KbEntityView {
   readonly normalizedHash: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+/**
+ * 一条证据的正文（spec 4.4-05 的证据链跳转：报告只给 id，正文由 `evidenceBody()` 现取）。
+ *
+ * `origin` 复用比对层那份联合而不是在这里重列一遍——同一个概念有两份字面量就会各自漂移（§2.5）。
+ * 这里刻意**不带 `kind`**：实体类与区块切片的类别是两套枚举，凑成一个字段要么写成 `string`
+ * 要么造一个假联合，而界面在这一层只需要"这条证据的原文与出处"。
+ */
+export interface KbEvidenceBodyView {
+  readonly id: string;
+  readonly origin: GapEvidenceOrigin;
+  readonly text: string;
+  readonly sourceDocId: string | null;
 }
 
 /** 一次同步的读数（4.2-01 的幂等断言点：第二次同步三项计数应为 0 / 0 / 0）。 */
@@ -595,6 +612,39 @@ export class KbProfileService extends Service {
     const row = this.store.db.prepare('SELECT * FROM kb_entities WHERE entity_id = ?').get(entityId) as
       KbEntityRow | undefined;
     return row === undefined ? null : viewOf(row);
+  }
+
+  /**
+   * 按证据 id 回库里取那条证据的正文（spec 4.4-05 的证据链跳转）。
+   *
+   * 缺口报告里每条证据**只带 id 不带正文**（§8.5 的脱敏口径 + plan §4.4-c 接线形状最后一条：
+   * 个人内容不塞进建议对象，也不随报告整份过 IPC）。所以界面要展开原文时，必须有且只有这一条
+   * id→文本的读口——再加一个"按 id 批量取正文"就是第二条通道（§2.5）。
+   *
+   * id 的前缀决定查哪张表：学历腿给的是 `kbs-` 开头的区块切片 id（4.2 裁定二：学历不产实体行），
+   * 其余是实体 id。这里**先实体后切片**地试两张表而不是按前缀分流：前缀是实现细节，
+   * 真按前缀判就会让"报告给的 id 一定能读回"这条不变量依赖命名规则（同 4.2 的 `get` 不做前缀校验）。
+   * @param id 证据 id（`GapEvidence.id`，界面从报告里拿到后原样递回来）
+   * @returns `{ id, origin, text, sourceDocId }`；两张表都查不到时 `null`（"查无"是正常态，
+   *          界面据此显示"这条证据已不在库里"，而不是抛错打断整份报告）
+   */
+  evidenceBody(id: string): KbEvidenceBodyView | null {
+    const entity = this.get(id);
+    if (entity !== null) {
+      return {
+        id: entity.entityId,
+        origin: 'entity',
+        // 正文取法复用 4.2-c 的 `evidenceTextOf`：证据文本的拼装规则只有一份，界面不许自己拼 payload。
+        text: evidenceTextOf(entity.payload),
+        sourceDocId: entity.sourceDocId,
+      };
+    }
+    const row = this.store.db
+      .prepare(`SELECT ${chunkSelect('')} FROM kb_chunks WHERE chunk_id = ?`)
+      .get(id) as unknown as KbChunkRow | undefined;
+    if (row === undefined) return null;
+    const chunk = chunkViewOf(row);
+    return { id: chunk.chunkId, origin: 'section_chunk', text: chunk.text, sourceDocId: chunk.sourceDocId };
   }
 
   /**

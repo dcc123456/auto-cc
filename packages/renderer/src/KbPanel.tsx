@@ -9,15 +9,8 @@ import type {
   KbSearchRowHit,
   KbSearchRowResult,
 } from '@auto-cc/shared';
+import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
 import { useBridgeAction } from './useBridgeAction';
-
-/** 实体种类 → 文案键（四类在界面上的各自说法，英文串不直接上界面，对齐 §5.5）。 */
-const KIND_LABEL_KEY: Record<KbEntityKindView, string> = {
-  experience: 'kb.kindExperience',
-  project: 'kb.kindProject',
-  skill: 'kb.kindSkill',
-  achievement: 'kb.kindAchievement',
-};
 
 /** 反查命中理由 → 文案键（`contains` 与 `overlap` 在界面是两句不同的话，分数只是它们共同的强度读数）。 */
 const REASON_LABEL_KEY: Record<KbEvidenceRowView['reason'], string> = {
@@ -272,7 +265,7 @@ export function KbPanel() {
       return hit.sectionKind ? t(`resume.kind.${hit.sectionKind}`) : t('kb.chunkSection');
     }
     const entity = entities.find((item) => item.entityId === hit.chunkId);
-    return entity ? `${t('kb.chunkEntity')} · ${t(KIND_LABEL_KEY[entity.kind])}` : t('kb.chunkEntity');
+    return entity ? `${t('kb.chunkEntity')} · ${t(ENTITY_KIND_LABEL_KEY[entity.kind])}` : t('kb.chunkEntity');
   };
 
   /** 本次检索的向量腿状态（还没检索过时是 `undefined`，界面那一栏整个不出现）。 */
@@ -304,7 +297,7 @@ export function KbPanel() {
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
-            {t(KIND_LABEL_KEY[entity.kind])}
+            {t(ENTITY_KIND_LABEL_KEY[entity.kind])}
           </span>
           <span className="text-sm text-slate-200">{primaryTextOf(entity)}</span>
           <span className="text-xs text-slate-500" data-kb-entity-id={entity.entityId}>
@@ -357,7 +350,7 @@ export function KbPanel() {
             ) : (
               evidence.map((hit) => (
                 <p key={hit.entityId} data-kb-hit={hit.entityId} className="text-xs text-slate-400">
-                  {t(KIND_LABEL_KEY[hit.kind])} · {hit.entityId} ·{' '}
+                  {t(ENTITY_KIND_LABEL_KEY[hit.kind])} · {hit.entityId} ·{' '}
                   <span className="text-slate-300">{t(REASON_LABEL_KEY[hit.reason])}</span> · {hit.score.toFixed(2)} ·{' '}
                   {hit.matchedTokens.join(' / ')}
                 </p>
@@ -555,9 +548,9 @@ export function KbPanel() {
               disabled={editing.entityId !== null}
               className="self-start rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 disabled:opacity-40"
             >
-              {(Object.keys(KIND_LABEL_KEY) as KbEntityKindView[]).map((kind) => (
+              {(Object.keys(ENTITY_KIND_LABEL_KEY) as KbEntityKindView[]).map((kind) => (
                 <option key={kind} value={kind}>
-                  {t(KIND_LABEL_KEY[kind])}
+                  {t(ENTITY_KIND_LABEL_KEY[kind])}
                 </option>
               ))}
             </select>

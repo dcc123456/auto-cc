@@ -192,6 +192,12 @@ export const RENDERER_ALLOWLIST = [
   'kb.profile.sync',
   'kb.profile.exportBackup',
   'kb.profile.importBackup',
+  // 4.4-d 的缺口报告双入口（spec 4.4-05）：报告是「JD × 库」的现算投影，只读本地库，
+  // 三态、分数、五种模型腿结局全在主进程算完（同 `kb.profile.search` 的口径）。
+  // 证据正文单独一条只读口：报告里每条证据只有 id，把正文并进报告就等于让一次比对把半本库
+  // 推过进程边界——而界面上一次只会展开一条。
+  'kb.gap.report',
+  'kb.profile.evidenceBody',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -799,6 +805,116 @@ export interface KbSearchRowResult {
   readonly vectorStatus: 'ok' | 'unavailable' | 'no_vectors' | 'failed' | 'not_attempted';
 }
 
+/**
+ * 缺口报告过进程边界的形状（4.4-05 的缺口面板数据源）。
+ *
+ * 这一组全是 `@auto-cc/plugin-resume-kb` 里同名类型的**镜像**：`shared` 在 L1，不许依赖 L2 能力包
+ * （AGENTS.md §4.1），与上面 `KbEntityRowView` 之于 `KbEntityView` 同一做法。
+ * 镜像的取舍口径是"界面上要出现的东西才过来"：三态、建议 key、五种模型腿结局、证据 id 与分数都要，
+ * 而 `RequirementItem.label` 这类词表内部字段虽然是判据的一部分，界面要用它做「要求是什么」的标题，所以照带。
+ */
+
+/** JD 要求的四类（镜像 `RequirementKind`；下划线形式与主进程一致，界面按它取 i18n 文案）。 */
+export type GapRequirementKindView = 'hard_skill' | 'soft_skill' | 'education' | 'experience_years';
+
+/** 三态之一（镜像 `GapState`）。列与列的归属就是它，不是要求种类（plan §4.4-d 判据二）。 */
+export type GapStateView = 'matched' | 'partial' | 'missing';
+
+/** 证据 id 的来源（镜像 `GapEvidenceOrigin`）：库内实体，还是学历区块的切片。 */
+export type GapEvidenceOriginView = 'entity' | 'section_chunk';
+
+/** 模型腿的五种结局（镜像 `GapModelStatus`，spec 4.4-02 的 V 半边：五态五句文案，不许合成一句"没用上模型"）。 */
+export type GapModelStatusView = 'merged' | 'rejected' | 'failed' | 'unavailable' | 'disabled';
+
+/** 补救建议的 i18n key（镜像 `GapSuggestionKey`）：文案本体在语言包，主进程只给 key 与参数（§5.5 / §5.7）。 */
+export type GapSuggestionKeyView =
+  'add_evidence' | 'strengthen_evidence' | 'years_gap' | 'education_gap' | 'education_missing';
+
+/** 一条 JD 要求（镜像 `RequirementItem`）。`start` / `end` 是 JD 正文里的 UTF-16 下标，`end` 不含。 */
+export interface GapRequirementRowItem {
+  readonly kind: GapRequirementKindView;
+  readonly label: string;
+  /** JD 原文里实际出现的形式（界面上的原文高亮就打它） */
+  readonly quote: string;
+  readonly start: number;
+  readonly end: number;
+  /** 年限类要求的年数；其余三类为 `null`（0 是合法读数，不能拿来表示"没有"） */
+  readonly years: number | null;
+  /** 这条来自哪条腿：词面还是模型（4.4-02 的 V 类：界面上"模型补的"要能被看出来） */
+  readonly via: 'lexicon' | 'model';
+}
+
+/** 一条证据引用（镜像 `GapEvidence`）：只有 id，正文由界面另问 `kb.profile.evidenceBody`。 */
+export interface GapEvidenceRowItem {
+  readonly id: string;
+  readonly origin: GapEvidenceOriginView;
+  /** 实体种类；区块切片给 `'education'`（学历区块不产实体行，它的据只能在区块级） */
+  readonly kind: KbEntityKindView | 'education';
+  readonly score: number;
+  readonly matchedTokens: readonly string[];
+}
+
+/** 一条补救建议（镜像 `GapSuggestion`）：`params` 只放 id 与数字，不放库内正文。 */
+export interface GapSuggestionRow {
+  readonly key: GapSuggestionKeyView;
+  readonly params: Readonly<Record<string, string | number>>;
+}
+
+/** 一条要求的比对结果（镜像 `GapRequirementView`）。 */
+export interface GapRequirementRowView {
+  readonly item: GapRequirementRowItem;
+  readonly state: GapStateView;
+  /** `missing` 时恒为空数组——"没有据"不靠塞弱据圆场 */
+  readonly evidence: readonly GapEvidenceRowItem[];
+  /** 最强那条的强度；完全无命中为 `null`（与"0 分"区分开） */
+  readonly bestScore: number | null;
+  /** 非 `matched` 时必不为 `null`（spec 4.4-06 的结构断言，界面因此可以无脑渲染建议行） */
+  readonly suggestion: GapSuggestionRow | null;
+}
+
+/** 反向比对的一条亮点候选（镜像 `GapHighlightView`）。 */
+export interface GapHighlightRowView {
+  readonly entityId: string;
+  readonly kind: KbEntityKindView;
+  /** 与 **JD 全文** 的覆盖率，衡量"相关"而不是"具备" */
+  readonly score: number;
+  readonly relatedTokens: readonly string[];
+}
+
+/** 一次缺口报告的完整读数（镜像 `GapReportView` = 拆解视图 + 比对投影）。 */
+export interface GapReportRowView {
+  readonly items: readonly GapRequirementRowItem[];
+  readonly inputChars: number;
+  readonly droppedByLimit: number;
+  readonly lexiconVersion: string;
+  readonly modelStatus: GapModelStatusView;
+  /** 非 `merged` 时是"为什么没用上模型"的一句原因（主进程写的句子，界面按 `modelStatus` 取文案、把它作参数插进去） */
+  readonly modelReason: string | null;
+  readonly model: string | null;
+  readonly modelAdded: number;
+  readonly modelDropped: number;
+  readonly promptVersion: string | null;
+  readonly rows: readonly GapRequirementRowView[];
+  readonly highlights: readonly GapHighlightRowView[];
+  readonly highlightsDropped: number;
+  /** 三态各自的条数——界面上的计数读这里，不在渲染层重算一遍（§2.5） */
+  readonly counts: Readonly<Record<GapStateView, number>>;
+  readonly totalExperienceMonths: number;
+  readonly libraryEducationRank: number | null;
+  /** 参与比对的库内实体条数；0 时界面要说清"是没录简历，不是你不合格" */
+  readonly entityCount: number;
+  /** 「至今」夹到的那个月（`YYYY-MM`），年限读数的时间基准，必须播出去 */
+  readonly asOfMonth: string;
+}
+
+/** 一条证据的正文（镜像 `KbEvidenceBodyView`，spec 4.4-05 的证据链跳转；查无为主进程的 `null`）。 */
+export interface KbEvidenceBodyRowView {
+  readonly id: string;
+  readonly origin: GapEvidenceOriginView;
+  readonly text: string;
+  readonly sourceDocId: string | null;
+}
+
 /** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
 export interface KbCreateRowInput {
   readonly kind: KbEntityKindView;
@@ -1109,6 +1225,22 @@ export interface BridgeSignatures {
   'kb.profile.exportBackup': { args: [filePath: string]; returns: KbExportRowResult };
   /** 从本地 JSON 备份导入（spec 4.2-08）：单事务，中途失败整批回滚；默认策略 `skip` 不动用户已有数据。 */
   'kb.profile.importBackup': { args: [filePath: string, mode?: KbImportModeView]; returns: KbImportRowResult };
+  /**
+   * 缺口报告（spec 4.4-03 / 04 / 05 / 06）：一段 JD 正文与本地库现算一次三态比对。
+   *
+   * 只有 `filter`，**没有 `nowMs`**：年限读数的"今天"由主进程取，界面与 agent 都不许递时间戳
+   * （plan §4.4-d 判据六——让调用方填日期等于让它决定报告该不该变红）。
+   * 两种结构化失败上浮给界面分别播报：`INVALID_ARGUMENT`（JD 过短）、`KB_LIBRARY_MISSING`（库里还没东西）。
+   */
+  'kb.gap.report': {
+    args: [jdText: string, filter?: { kind?: KbEntityKindView; sourceDocId?: string | null }];
+    returns: GapReportRowView;
+  };
+  /**
+   * 按 id 取一条证据的正文（spec 4.4-05 的证据链跳转）：先查实体表、再查区块切片表，
+   * 两表都查无返回 `null` 而不是失败——报告是现算的，用户停在旧报告上时那条实体可能已经被删了。
+   */
+  'kb.profile.evidenceBody': { args: [id: string]; returns: KbEvidenceBodyRowView | null };
 }
 
 /**

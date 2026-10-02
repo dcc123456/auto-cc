@@ -33,7 +33,7 @@ const TOOL_STATE_STYLE: Record<ChatToolPart['state'], string> = {
 };
 
 /**
- * 工具 id → 界面标题的 i18n key，十一个已登记的能力各一条（spec 2.8-09）。
+ * 工具 id → 界面标题的 i18n key，每个已登记的能力各一条（spec 2.8-09）。
  * id 里带点，而语言包按点分层，所以键用短码；映射表在编译期钉住，未落进来的 id 走 `agent.tool.unregistered`。
  */
 const TOOL_LABEL_KEY: Record<string, string> = {
@@ -43,6 +43,8 @@ const TOOL_LABEL_KEY: Record<string, string> = {
   'browser.page.navigate': 'agent.tool.labels.pageNavigate',
   'browser.page.snapshot': 'agent.tool.labels.pageSnapshot',
   'jd.capture.run': 'agent.tool.labels.jdCapture',
+  // 缺口报告（4.4-d）：对话里问"这份 JD 我差在哪"与界面上的缺口面板打的是同一个 `report()`。
+  'kb.gap.report': 'agent.tool.labels.kbGapReport',
   // 知识库的两个读口（4.2-f / 4.3-c）：对话里挑中它们时卡片要说得出人话，而不是「未登记的工具」。
   'kb.profile.list': 'agent.tool.labels.kbList',
   'kb.profile.search': 'agent.tool.labels.kbSearch',

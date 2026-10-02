@@ -3,9 +3,9 @@
  * 4.4-04 的反向比对 / 4.4-06 的建议随结论 / 4.4-07 的稳定读数 / 4.4-10 的来源标注）。
  *
  * 4.4 这条链在本包里做到「拆解 + 比对」为止：输入一段 JD 正文，产出带原文位置的四类要求，
- * 再拿它们与库内的实体比出三态与亮点候选。「界面呈现与证据链跳转」（4.4-05 / 4.4-02 的 V 半边）
- * 分属 4.4-d，现在就把界面写进来会同时踩两条规矩：AGENTS.md §2.6（不为假想的未来做抽象）与
- * §0（一次只推进一个切片）。
+ * 再拿它们与库内的实体比出三态与亮点候选。出口有两个，读的是同一个 `GapReportView`：
+ * agent 工具面在本文件 `[Service.init]` 里登记（4.4-05 的双入口），界面呈现与证据链跳转
+ * （4.4-05 / 4.4-02 的 V 半边）在渲染层的 `GapPanel`，本文件不写任何 UI（§4.1 的依赖方向）。
  *
  * 两条腿的分工是本服务的形状（plan §4.4-b 证据 [3] 对 4.4-a 草案的更正）：
  * **词面腿是基线，每次都跑；模型腿是增强，只在基线上补**。于是模型缺席时报告只是短一些，
@@ -29,9 +29,17 @@
  *    本服务落的两行只有字数、条数、丢弃数、模型腿状态与模型名、比对三态计数与截止日期，
  *    **不含 JD 正文，也不含模型原文或库内正文**。
  */
-import { AppError, chatGatewayOf, maybeService, Service, type Context } from '@auto-cc/core';
+import {
+  agentTool,
+  AppError,
+  chatGatewayOf,
+  maybeService,
+  registerAgentTools,
+  Service,
+  type Context,
+} from '@auto-cc/core';
 import { z } from 'zod';
-import { monthIndexOf, monthKeyOf, type KbEntityKind } from './entities.js';
+import { KB_ENTITY_KINDS, monthIndexOf, monthKeyOf, type KbEntityKind } from './entities.js';
 import {
   compareRequirements,
   libraryEntityOf,
@@ -214,6 +222,47 @@ export class KbGapService extends Service {
   ) {
     // 必须接住第二个实参：cordis 递的是校验后的配置（AGENTS.md §9 实测 1.3）。
     super(ctx, 'kb.gap');
+  }
+
+  /**
+   * 挂载时登记 agent 工具（spec 4.4-05 的双入口半边）。
+   *
+   * 这里只做登记，不 `inject` `kb.profile`、也不 `dependsOn`：报告需要库，但"库里还没录简历"要用
+   * `KB_LIBRARY_MISSING` 在**调用那一刻**说出来（界面据此给「先去导入简历」），
+   * 而硬依赖会让 `kb-gap` 整个服务起不来，界面就只能播一句"服务没起来"（plan §4.4-d 判据六）。
+   * @returns 无返回值
+   */
+  [Service.init](): void {
+    // 对话里问"这份 JD 我差在哪"和界面上的缺口面板必须打同一个 `report()`（§5.9：不许各长一套）。
+    // `nowMs` 刻意不进工具入参：那等于让模型自己填"今天是几月"，而年限读数的基准只能由服务取当前时间
+    // （4.4-07 要的是同一输入两次读数一致，不是一个模型可以随手编的输入）。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'kb.gap.report',
+        description:
+          '把一段 JD 正文与本地简历知识库比对，返回三态缺口报告（命中 / 部分命中 / 缺失）、每条未命中要求的改写建议、库内具备而 JD 未提的相关亮点，以及经验月数与学历档位两个换算读数；模型腿不可用时自动退回词面拆解并在 modelStatus 里给出原因，全程只读本地库、不出网',
+        input: z.strictObject({
+          jdText: z.string(),
+          kind: z.enum(KB_ENTITY_KINDS).optional(),
+          sourceDocId: z.string().min(1).nullable().optional(),
+        }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: (params) => this.report(params.jdText, { kind: params.kind, sourceDocId: params.sourceDocId }),
+      }),
+    ]);
+    // 库在不在装配里，是运行期每次调用都要现问的事实（§9 的 2.5-e：不存第二份），
+    // 但启动时把当前读数写出来才有现场可诊断——`report()` 抛 `KB_LIBRARY_MISSING` 时日志里连一行都没有。
+    const hasLibrary = maybeService<KbProfileService>(this.ctx, 'kb.profile') !== undefined;
+    this.ctx.logger.info(
+      `[kb-gap] 缺口比对就绪：阈值 topK=${String(this.options.evidenceTopK)}` +
+        ` hit=${String(this.options.evidenceHitMinScore)} partial=${String(this.options.evidencePartialMinScore)}` +
+        ` yearsRatio=${String(this.options.yearsPartialRatio)} highlight=${String(this.options.highlightMinScore)}` +
+        ` maxHighlights=${String(this.options.maxHighlights)} · 模型腿 ${
+          this.options.allowModelLeg ? '开' : '关（纯词面）'
+        } · 知识库 ${hasLibrary ? '已装配' : '未装配（调用时报 KB_LIBRARY_MISSING）'}` +
+        ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+    );
   }
 
   /**

@@ -16,7 +16,6 @@ import {
   NO_CONFIG,
   Service,
   asApp,
-  type AgentToolDeclaration,
   type AppErrorCode,
   type KbEntitiesChangedEvent,
   Context,
@@ -44,6 +43,7 @@ import {
 import { ResumeParseService } from './parse-service.js';
 import { waitForLogLine } from './log-file.js';
 import { parseResumeText } from './sections.js';
+import { FakeAgentToolsService } from './test-doubles.js';
 import { KB_VECTOR_MIGRATION_VERSION, decodeVector } from './vectors.js';
 
 const NOW_MS = 1_700_000_000_000;
@@ -114,35 +114,7 @@ const RESUME_MD_WITH_SECTIONS = [
 ].join('\n');
 
 /**
- * 假的 `agent.tools`（裁定三的单测替身）。
- *
- * 与 `packages/browser/src/test-doubles.ts` 里那份同款，理由也一样：注册表属于 L3 对话插件，
- * 本包（L2）连测试都不该 import 它，而跨包共享一个替身要新建一个包（§4.3 得先在 plan 里记理由）。
- */
-class FakeAgentToolsService extends Service {
-  static provide = 'agent.tools';
-  static Config = z.strictObject({});
-
-  /** 收到的声明，迭代序即登记顺序。 */
-  readonly declarations = new Map<string, AgentToolDeclaration>();
-
-  constructor(ctx: Context) {
-    super(ctx, 'agent.tools');
-  }
-
-  /** 契约见 `AgentToolRegistry.register`。 */
-  register<I>(tool: AgentToolDeclaration<I>): void {
-    this.declarations.set(tool.id, tool);
-  }
-
-  /** 契约见 `AgentToolRegistry.unregister`。 */
-  unregister(id: string): boolean {
-    return this.declarations.delete(id);
-  }
-}
-
-/**
- * 假的 `llm.embed`（spec 4.3-07 / 08 的单测替身，与上面 `FakeAgentToolsService` 同一种替身）。
+ * 假的 `llm.embed`（spec 4.3-07 / 08 的单测替身，与 `test-doubles.ts` 里的 `FakeAgentToolsService` 同一种替身）。
  *
  * 只认一张「文本片段 → 向量」的 fixture 表：命中第一个出现在文本里的片段就用它的向量，否则给零向量。
  * 为什么自己造向量而不是打真端点：4.3-07 的判据是「融合会改变名次」，那需要一个**可控**的语义相关度；
@@ -750,6 +722,57 @@ describe('证据反查 evidenceFor（4.2-03）', () => {
     const { kb } = await seededKb(tempDir());
     expect(kb.evidenceFor('会做棉花糖')).toEqual([]);
     expect(kb.evidenceFor('')).toEqual([]);
+  });
+});
+
+/**
+ * 证据正文读口（spec 4.4-05 的证据链跳转）。
+ *
+ * 缺口报告里每条证据只有 id，界面点开时才现取正文，所以这个口必须同时能读**两类**据：
+ * 库内实体（四类要求的技能/经历证据）与区块切片（学历那一路的据在区块级，4.2 裁定二）。
+ * 判据是"两条路都不靠猜 id 前缀"——id 前缀是实现的副产品，拿它分派就等于把格式钉进调用方。
+ */
+describe('证据正文 evidenceBody（spec 4.4-05）', () => {
+  it('传实体 id：读到的是该实体载荷拼出的正文，出处是它自己那份简历', async () => {
+    const { kb } = await seededKb(tempDir());
+    const entity = kb.list({ kind: 'achievement' })[0];
+    if (entity === undefined) throw new Error('语料应该派生出成就实体');
+    const body = kb.evidenceBody(entity.entityId);
+    expect(body).not.toBeNull();
+    expect(body?.id).toBe(entity.entityId);
+    expect(body?.origin).toBe('entity');
+    expect(body?.text).toContain('订单服务');
+    expect(body?.sourceDocId).toBe('resume-evidence');
+  });
+
+  it('传区块切片 id：origin 标成 section_chunk，正文与 listChunks 里那条逐字相同', async () => {
+    // 语料取带教育区块的那份：缺口报告的学历那条据正是 `sectionKind === 'education'` 的切片，
+    // 这条用例要跳的就是那一类 id（默认简历语料只有会建实体行的区块，压根派不出切片）。
+    const { kb } = await syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-evidence-sections');
+    const chunk = kb.listChunks().find((item) => item.sectionKind === 'education');
+    if (chunk === undefined) throw new Error('语料应该派生出学历区块切片');
+    const body = kb.evidenceBody(chunk.chunkId);
+    expect(body?.origin).toBe('section_chunk');
+    expect(body?.text).toBe(chunk.text);
+    expect(body?.sourceDocId).toBe('resume-evidence-sections');
+  });
+
+  it('两类 id 都不问前缀：库里没有这个 id 时返回 null 而不是抛错', async () => {
+    const { kb } = await seededKb(tempDir());
+    expect(kb.evidenceBody('kb-does-not-exist')).toBeNull();
+    expect(kb.evidenceBody('kbs-does-not-exist')).toBeNull();
+    expect(kb.evidenceBody('')).toBeNull();
+  });
+
+  it('手工实体读得出正文，且出处为 null（它不属于任何一份简历）', async () => {
+    const { kb } = await seededKb(tempDir());
+    const manual = kb.create({ kind: 'skill', payload: { name: 'Kotlin' } }, LATER_MS);
+    expect(kb.evidenceBody(manual.entityId)).toEqual({
+      id: manual.entityId,
+      origin: 'entity',
+      text: 'Kotlin',
+      sourceDocId: null,
+    });
   });
 });
 

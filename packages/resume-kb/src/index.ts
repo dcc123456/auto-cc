@@ -45,6 +45,7 @@ export {
   kbProfileSchema,
   type KbCreateInput,
   type KbEntityView,
+  type KbEvidenceBodyView,
   type KbExportResult,
   type KbImportMode,
   type KbImportResult,

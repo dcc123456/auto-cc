@@ -24,6 +24,7 @@
 import {
   AppError,
   Context,
+  NO_CONFIG,
   Service,
   asApp,
   type ChatCompletionView,
@@ -46,6 +47,7 @@ import { KbProfileService, kbProfileSchema } from './profile-service.js';
 import { parseResumeText } from './sections.js';
 import { REQUIREMENT_LEXICON_VERSION } from './requirements.js';
 import { REQUIREMENT_PROMPT_VERSION } from './requirements-model.js';
+import { FakeAgentToolsService } from './test-doubles.js';
 
 /** 固定样例 JD（虚构）：四类齐全，正文里埋一句可当哨兵的长句与一个假手机号。 */
 const SAMPLE_JD = [
@@ -364,7 +366,7 @@ const LIBRARY_DOC_ID = 'resume-gap-report';
  * 库里那几行不是手写的，而是**从简历文本经 4.1 的区块解析与 4.2 的实体派生**得到的——
  * 本条用例要判的正是「拆出来的要求能不能比回真实派生结果」，自己造一批实体等于没接库（AGENTS.md §2.1）。
  * @param gapConfig `kb.gap` 的覆盖项（亮点上限那条用例靠它）
- * @returns 缺口服务、实体服务与日志文件路径
+ * @returns 缺口服务、实体服务、agent 工具注册表替身与日志文件路径
  */
 async function bootGapWithLibrary(gapConfig: Partial<KbGapConfig> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-kb-gap-lib-'));
@@ -376,13 +378,20 @@ async function bootGapWithLibrary(gapConfig: Partial<KbGapConfig> = {}) {
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   // 配置项一律取 schema 的默认值（与 `cordis.yml` 同源），不在测试里另抄一份阈值。
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
+  // 注册表先于本服务上岗：`registerAgentTools` 是软取，晚挂载就只能登记出 0 个工具（4.4-05 的双入口）。
+  fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   fibers.push(await ctx.plugin(KbGapService, { ...DEFAULT_CONFIG, ...gapConfig }));
   const app = asApp(ctx);
   const parsed = parseResumeText(LIBRARY_MD, LIBRARY_DOC_ID, AS_OF_MS);
   if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
   app['resume.doc'].save(parsed.document);
   app['kb.profile'].sync(LIBRARY_DOC_ID, AS_OF_MS);
-  return { gap: app['kb.gap'], kb: app['kb.profile'], logFile: join(dir, 'auto-cc.log') };
+  return {
+    gap: app['kb.gap'],
+    kb: app['kb.profile'],
+    tools: ctx.get('agent.tools') as unknown as FakeAgentToolsService,
+    logFile: join(dir, 'auto-cc.log'),
+  };
 }
 
 /**
@@ -514,5 +523,58 @@ describe('kb.gap.report 的日志与播报（spec 4.4-06 / 4.3-12 的口径延�
     const line = lastLogLine(await waitForLogLine(logFile, '[kb-gap] 比对'), '[kb-gap] 比对');
     expect(line).toContain('WARN');
     expect(line).toContain('命中 0');
+  });
+});
+
+/**
+ * agent 工具面（spec 4.4-05 的双入口判据）。
+ *
+ * 界面上的缺口面板与对话里问「这份 JD 我差在哪」必须打同一个 `report()`，所以这里判三件事：
+ * 登记了几只、契约字段对不对；跑工具与直接调 service 的结果是否逐字相等；入参边界有没有把
+ * `nowMs` 挡在外面。最后一条是 4.4-d 的刻意设计：年限读数的时间基准只能由服务取当前时间，
+ * 把它做成工具入参等于让模型自己填「今天是几月」，而 4.4-07 要的是同一输入两次读数一致。
+ */
+describe('kb.gap 的 agent 工具面（spec 4.4-05）', () => {
+  it('注册表只收到一只 kb.gap.report，且它是只读、不需确认的', async () => {
+    const { tools } = await bootGapWithLibrary();
+    // 只有一只：注册表挂在 `kb.profile` 之后，所以那一位的登记早于它上岗、不会混进来（本包的装配顺序）。
+    expect([...tools.declarations.keys()]).toEqual(['kb.gap.report']);
+    const tool = tools.declarations.get('kb.gap.report');
+    if (tool === undefined) throw new Error('kb.gap.report 未登记进 agent 工具面');
+    expect(tool.effect).toBe('read');
+    expect(tool.requiresConfirmation).toBe(false);
+    // 描述是给模型挑工具看的，「只读本地库、不出网」这句必须写在里面（4.4-08 的口径）
+    expect(tool.description).toContain('只读本地库、不出网');
+  });
+
+  it('跑工具与直接调 service 逐字相等：两入口共用同一份比对，不许各长一套（§5.9）', async () => {
+    const { gap, tools } = await bootGapWithLibrary();
+    const tool = tools.declarations.get('kb.gap.report');
+    if (tool === undefined) throw new Error('kb.gap.report 未登记进 agent 工具面');
+    // 两边都不传基准时刻，因此比的正是「同一条服务路径 + 同一个默认时间基」的读数
+    expect(JSON.stringify(await tool.run({ jdText: SAMPLE_JD }))).toBe(JSON.stringify(await gap.report(SAMPLE_JD)));
+    expect(JSON.stringify(await tool.run({ jdText: SAMPLE_JD, kind: 'skill' }))).toBe(
+      JSON.stringify(await gap.report(SAMPLE_JD, { kind: 'skill' })),
+    );
+  });
+
+  it('入参是边界：正文必填、种类限四类、nowMs 一律拒收', async () => {
+    const { tools } = await bootGapWithLibrary();
+    const tool = tools.declarations.get('kb.gap.report');
+    if (tool === undefined) throw new Error('kb.gap.report 未登记进 agent 工具面');
+    expect(tool.input.safeParse({ jdText: SAMPLE_JD }).success).toBe(true);
+    expect(tool.input.safeParse({}).success).toBe(false);
+    expect(tool.input.safeParse({ jdText: SAMPLE_JD, kind: 'no-such-kind' }).success).toBe(false);
+    expect(tool.input.safeParse({ jdText: SAMPLE_JD, sourceDocId: null }).success).toBe(true);
+    expect(tool.input.safeParse({ jdText: SAMPLE_JD, nowMs: AS_OF_MS }).success).toBe(false);
+  });
+
+  it('注册表缺席时本服务照样上岗，日志把「没登记成」这件事写出来（软取不阻塞装配）', async () => {
+    const { gap, logFile } = await bootGap();
+    expect(gap).toBeDefined();
+    const line = lastLogLine(await waitForLogLine(logFile, '[kb-gap] 缺口比对就绪'), '[kb-gap] 缺口比对就绪');
+    expect(line).toContain('agent 工具登记 0 个（注册表未挂载）');
+    // 同一条日志还要报出库的当前装配读数：缺库时启动不失败，但调用会报 KB_LIBRARY_MISSING
+    expect(line).toContain('知识库 未装配（调用时报 KB_LIBRARY_MISSING）');
   });
 });
