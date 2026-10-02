@@ -626,6 +626,7 @@ FTS5 对复用 rowid 不覆盖（spike7 §C）。删除一律走 `deleteChunksWh
 1. `packages/llm` 内**新增** `llm.embed` 服务，复用同一个 fetch / 超时 / 错误骨架（§2.7 禁的是第二个客户端，
    不是同一个客户端的第二个方法）；配置新增 `embedBaseUrl` / `embedModel` / `embedKeyEnv`
    （默认 `AUTO_CC_SILICONFLOW_API_KEY`）/ `embedDimensions`（默认 null）/ `embedBatchSize`，超时复用 `timeoutMs`。
+   （**落地时改名并拆出超时**，实际键名见下面「4.3-d 落地记录」的偏离段。）
    默认全空 = 未配置 = `unavailable` 且**一次网络都不发**（与 `llm.chat` 同口径，4.3-04 的离线冒烟靠这一条成立）。
 2. `check-llm-single-entry` 随之升级，否则机检会与新现实脱节：provider 断言从"`llm.chat` 声明唯一"扩成
    "`llm.*` 只允许出现在 `packages/llm`，chat 与 embed 各一"，并把 `/embeddings` 加进端点痕迹清单。
@@ -641,5 +642,39 @@ FTS5 对复用 rowid 不覆盖（spike7 §C）。删除一律走 `deleteChunksWh
 本机没有 key（`env` 里无 `SILICONFLOW` / `AUTO_CC_*` 变量，仓库也没有 `.env`）。因此本片把可离线证明的部分
 （机制、批量、降级、零写入、维度/模型失效、RRF 排序正确性）用本地 fixture 打满，
 **增益那一条如实标 `[!]`**，并在此写明复跑步骤：导出 `AUTO_CC_SILICONFLOW_API_KEY` →
-在 `cordis.yml` 的 `llm` 块补 `embedBaseUrl: https://api.siliconflow.cn/v1` + `embedModel: BAAI/bge-m3` →
-跑评测集脚本对比 topK 命中率。
+在 `cordis.yml` 的 **`llm-embed` 块**（不是 `llm` 块）补 `baseUrl: https://api.siliconflow.cn/v1` +
+`model: BAAI/bge-m3` → 跑评测集脚本对比 topK 命中率。
+
+## 4.3-d 落地记录（2026-10-02，向量可选增强：`llm.embed` + RRF 融合）
+
+判据细节、五态语义、活体读数见 spec「4.3-d 落地记录」与 `docs/acceptance/4.3/4.3-08-*`。
+这里只记三条**属本计划**的结构性决定与一处对原稿的更正。
+
+**跨包能力用「软查」而不是 `static inject`**：向量出口的形状（`EmbedGateway` / `embedGatewayOf(ctx)`）声明在
+`packages/core`，`resume-kb` 用的时候按名字现问（`maybeService`），**不写 `static inject`**。
+理由有两条：① AGENTS.md §9（2.5 实测）——热改配置会连带重建下游插件，本地存一份"别人 init 时推给我的引用"
+会在改配置后静默变空；② 这一腿是**可选增强**，一旦做成硬注入，摘掉 `llm-embed` 会让 `kb-profile` 整个 PENDING，
+"可选"就变成"必需"。装配清单里 `resume-kb` 也**不**列 `dependsOn: [llm-embed]`，同一个理由。
+
+**传输骨架是抽出来的，不是复制的（§2.2 在本项目的第一次兑现于 L2 之间）**：`llm.chat` 已有的
+fetch + `AbortSignal.timeout` + 三种错误形态归一，在 `llm.embed` 这里是**第二次出现**，所以直接抽成
+`packages/llm/src/http.ts` 给两个方法共用；`describeError()` 顺带补了硅基流动那种顶层
+`{code, data, message}` 错误体（实测证据 [2]），chat 侧同受益。§2.7 禁的是第二个客户端，
+不是同一个客户端的第二个方法——`check-llm-single-entry.ts` 现在把这条写成了断言：
+`llm.*` provider 只允许 `chat` / `embed` 两个名字、各自只有一个真实声明者，端点痕迹（含 `/embeddings`）
+只允许出现在 `packages/llm`。
+
+**补建向量是外发动作，入口只留一条**：`kb.profile.syncVectors` 登记为 `effect: 'outbound'` +
+`requiresConfirmation: true`，且**不进 `RENDERER_ALLOWLIST`**。界面上因此没有任何按钮能"顺手"把切片发给模型，
+它只负责显示当次检索少了哪一腿。这与 §7.3（外发必经闸门）同源，也是 4.3-08「绝不产生伪向量」的另一半：
+不自动补建 ⇒ `kb_vectors` 空表是正确状态 ⇒ 不存在"为了填满表而造点什么"的动机。
+
+**对原稿的更正（键名与超时）**：上面「实现形状」第 1 条写的 `embedBaseUrl` / `embedModel` / `embedKeyEnv` /
+`embedDimensions` / `embedBatchSize` 落地为 `llm-embed` 块内的 `baseUrl` / `model` / `keyEnv` / `dimensions` /
+`batchSize`（默认 `16`），超时**不复用** `llm.chat` 的 `8000`，向量侧独立 `timeoutMs` 默认 `15000`
+（一批 16 条切片的编码耗时随批大小线性增长，沿用聊天默认等于把"批量"做成"批量超时"）。
+`dimensions` 默认 `null` = 不向对端传该字段，实际维度以响应为准写进 `kb_vectors.dim`——原稿这条照原样落地了。
+
+**测试规模**：`vectors.test.ts` 13 例（纯算式）、`search.test.ts` RRF 6 例（含 `rrfK` 翻转反例）、
+`profile-service.test.ts` 装配侧 11 例 + 迁移号段 14 的建表/回滚例；`resume-kb` 10 文件 / **220** 用例全绿，
+`packages/llm` 侧 `embed.test.ts` 覆盖批量切分、超时、三种错误形态与"未配置时一次都不发"。

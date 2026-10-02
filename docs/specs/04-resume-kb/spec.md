@@ -365,11 +365,11 @@
 | 4.3-01 | BM25 + 倒排检索可用：给定查询返回排序 chunk 列表，含分数与命中理由字段             | U    | 排序断言（相关项在前）+ 理由非空                           | [x]  |
 | 4.3-02 | 中文检索有效：bigram 分词下，「推荐算法」「高并发」类查询能命中对应经历            | U    | 语料样例断言                                               | [x]  |
 | 4.3-03 | 检索参数（k1/b、字段权重、topK）来自 `config`，代码内无魔法数                      | C    | 参数扫描断言 + grep 无内联常量                             | [!]  |
-| 4.3-04 | **离线可用**：无 LLM key、无网络时检索与比对全链路正常                             | C    | 断网冒烟测试通过                                           | [ ]  |
+| 4.3-04 | **离线可用**：无 LLM key、无网络时检索与比对全链路正常                             | C    | 断网冒烟测试通过                                           | [x]  |
 | 4.3-05 | 不引入外部向量数据库服务：依赖树中无 `chromadb` / 需下载的服务                     | C    | `pnpm why chromadb` 无结果；无 docker 依赖                 | [ ]  |
 | 4.3-06 | 不引入需用户机编译的原生扩展：无 `sqlite-vec` / `better-sqlite3` / node-gyp 路径   | C    | `pnpm why` + 装机冒烟（对齐 M2b）                          | [ ]  |
-| 4.3-07 | 向量检索为**可选增强**：可用时与 BM25 做 RRF 融合，结果优于纯 BM25（固定评测集上） | U    | 评测集 topK 命中率对比断言                                 | [ ]  |
-| 4.3-08 | embedding 不可用时返回 `unavailable` 并自动降级纯 BM25，**绝不产生伪向量**         | U+C  | 断言 `llm.embed` 失败路径无 BLOB 写入；grep 无哈希冒充向量 | [ ]  |
+| 4.3-07 | 向量检索为**可选增强**：可用时与 BM25 做 RRF 融合，结果优于纯 BM25（固定评测集上） | U    | 评测集 topK 命中率对比断言                                 | [!]  |
+| 4.3-08 | embedding 不可用时返回 `unavailable` 并自动降级纯 BM25，**绝不产生伪向量**         | U+C  | 断言 `llm.embed` 失败路径无 BLOB 写入；grep 无哈希冒充向量 | [x]  |
 | 4.3-09 | 检索延迟可接受：千级 chunk 下 P95 在配置阈值内                                     | C    | 基准脚本输出记录                                           | [ ]  |
 | 4.3-10 | 检索为空时给出确定态（界面提示 + 可行动建议），不返回随机结果                      | V+C  | 冷门查询截图                                               | [x]  |
 | 4.3-11 | chunk 粒度 = 可引用粒度（按实体自然分层），无任意滑窗切碎语义                      | U    | 断言 chunk 边界与实体边界一致                              | [x]  |
@@ -500,6 +500,52 @@ bm25B / bm25Weight / lexicalWeight / substringFloorScore` 必须真的在 `kb-pr
   **harness 实测补一条**：`window.autoCC.*` 的返回是 `{ ok, value }` 信封，而渲染层拿到的 `bridge` 已解包一次；
   `agent.tools.call` 的 `value` 里还套一层 `{ ok, value }`——在页面里做等价性断言要**解两层**，
   只解一层会得到 `uiAndToolIdentical=false` 的假阴性。
+
+## 4.3-d 落地记录（4.3-08 / 4.3-04，2026-10-02；4.3-07 记 BLOCKED）
+
+- **判据的拆法**：4.3-07 的原文是「融合 + **结果优于纯 BM25（固定评测集上）**」，后半句要真 key 与评测集，
+  所以本片只把**机制**做完并证死（RRF 算式、融合只改名次不改读数、向量腿五态、失败路径零写入），
+  量化增益整条标 `[!]`，复跑步骤写在 plan §4.3-d 的「待真端点」小节；4.3-08 的两个判据（失败路径无 BLOB 写入、
+  grep 无哈希冒充向量）都是**离线可证**的，本片收口为 `[x]`。
+- **4.3-04 的「断网冒烟」换成了更强的判据**：不是把网线拔了再跑，而是**这条路径根本不产生请求**——
+  `llm-embed` 三项缺一即 `available: false`，检索侧看到 `unavailable` 直接走纯词面（活体日志：启动一条
+  「向量出口未就绪…」、每次检索一条「向量腿 unavailable / 语义名单 0 条」，全程 0 次出网）。
+  不出网所以断不断网等价，这一条比原判据覆盖面更大；比对腿本来就不碰模型（3.7-03 / 4.2 的快照 diff 已验）。
+- **`unavailable` 与 `no_vectors` 是两件事，各自短路在不同位置**：前者是「向量出口没配好」（`EmbedGateway.status()`
+  三项缺失），后者是「出口能用、但当前 model 在 `kb_vectors` 里一行都没有」。第二种**故意不发查询向量**——
+  库里没货时把 query 编码一次等于花一次钱买一个必然空的名单。加上 `failed`（请求真出错）、`ok`、
+  `not_attempted`（查询切不出词，在 SQL 与网络之前就返回），五态一起进 `KbSearchRowResult.vectorStatus`，
+  界面单独一行、日志单独一条（`…（ok · 向量腿 unavailable / 语义名单 0 条）`）。
+  **降级必须看得见**：用户看到的排序少了哪一腿，是这一片唯一的交付物。
+- **`kb_vectors` 空表是正确状态，不是待办**：它是派生索引（float32 小端 BLOB + `model` 作失效键），
+  向量**永不在启动或同步时自动补建**——补建要出网、要花钱，所以只有 `kb.profile.syncVectors` 这一只
+  `effect: 'outbound'` / `requiresConfirmation: true` 的工具能做，且它**不在 `RENDERER_ALLOWLIST` 里**
+  （活体实测 `window.autoCC.kb['profile.syncVectors'] === undefined`）。这条取舍与 §7.3「外发必经闸门」同源：
+  界面能读、能显示降级，但不能替用户决定出一次网。
+- **融合不改动既有读数（本片最重要的回归保护）**：`fuseByRrf` 只重排名次，`score` / `bm25Score` /
+  `lexicalScore` / `text` 一律原样；只被向量捞到的命中从 `kb_chunks` 反查补正文，**不受 `minScore` 约束**
+  （词面分数为 0 是「词面没查到」，不是「质量差」，用词面闸门拦它是类别错误）。活体复跑：无向量腿时
+  「订单」首条仍是 **0.6829 / 0.6034**，与 4.3-c 归档逐位相同——「可选增强」真的是可选，接不上就等于本片不存在。
+- **迁移号段 14 打在真实旧库上**：验收用的 `tmp/43c-userdata` 带着 4.3-c 时期的 11/12/13 与 7 条实体，
+  重启后 `PRAGMA user_version` = 14、`kb_vectors` 五列建好、`kb_chunks` 8 行而 `kb_vectors` **0 行**
+  （升级 + 不自动补建同时成立）。`store.rollback(12)` 的降级面在单测里覆盖（回滚顺序 [14, 13]）。
+- **两处与 plan §4.3-d 原稿的偏离（以代码为准）**：① 配置键**不带 `embed` 前缀**——plan 里写的
+  `embedBaseUrl` / `embedModel` / `embedKeyEnv` / `embedDimensions` / `embedBatchSize` 落成为 `llm-embed` 块内的
+  `baseUrl` / `model` / `keyEnv` / `dimensions` / `batchSize`，块名已经给过这层信息，再加前缀是同一件事说两遍；
+  ② `timeoutMs` **不复用 `llm.chat` 的 8000**，向量侧自己一个键、默认 **15000**——一整批（`batchSize` 默认 16）
+  切片的编码耗时随批大小线性增长，沿用聊天默认值会把「批量」变成「批量超时」，而超时是不可重试的静默降级。
+  两处都是实现期决定，写在这里是为了让 plan 与代码不各说一套。
+- **`check-llm-single-entry.ts` 加了一条测试替身豁免**：provider 计数只算**真实实现**（`*.test.ts` 里的
+  `provide = 'llm.embed'` 替身不计入），否则「一个名字只有一个声明者」这条断言等于禁止给 `llm.embed` 写用例；
+  **端点痕迹那一断言不豁免测试文件**，替身里出现 `embeddings` 字样照样红。
+- **单测覆盖**：`vectors.test.ts` 13 例（float32 字节往返 / 余弦的长度无关性与零向量 / `rankByCosine` 排序、
+  截断、坏行跳过），`search.test.ts` 新增 6 例 RRF 纯算式（含 `rrfK` 在 1 与 60 之间**名次翻转**的反例），
+  `profile-service.test.ts` 新增「向量补建与 RRF 融合」11 例（含失败路径零 BLOB 写入、`no_vectors` 零请求、
+  九个检索参数的 grep 判据）；该包 **10 文件 / 220** 用例全绿，根 `pnpm typecheck`（0 error）/
+  `lint`（四项检查全过，含 LLM 入口唯一性）/ `format:check` / `test` 全绿。
+  V 证据：`docs/acceptance/4.3/4.3-08-vector-status-zh.png`、`4.3-08-vector-status-en.png`
+  与 `4.3-08-dom-assertions.txt`（七段读数：界面两语态、IPC 同源、日志零上行、迁移 14 打在旧库、
+  工具面 12 只含 `syncVectors` 外发口、`not_attempted` 整行不出现、i18n parity 由类型面强制）。
 
 ## 4.4 JD → 能力要求拆解与缺口比对
 
