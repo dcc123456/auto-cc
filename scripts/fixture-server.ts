@@ -42,6 +42,13 @@
  *   `off` 让 `/boss` 照常出列表页，`captcha` 出 200 的「安全验证」页（正文判据的靶子），
  *   `blocked` 出 403 的「访问受限」页（状态码判据的靶子）。开关在 fixture 进程里，所以能在
  *   工作流正跑着的时候切，把「运行中突然被拦 → 立即暂停」这条时序演出来（spec 2.7-01）；
+ * - `/api/generate-mode` 是**改写腿档位开关**（POST `{mode:'rewrite'|'fabricate'}`，GET 只读，
+ *   DELETE 归回 `rewrite`），对端是 `/v1/chat/completions` —— 一个只回 OpenAI 信封的本地靶端点：
+ *   它把请求里那份「待改写清单」原样回填位置三 id，`rewrite` 档在正文后追加一句不含数字与机构名的
+ *   哨兵（确定性事实校验三条判据都会放行，界面能拍到真改写行），`fabricate` 档凭空补一个 `91%`
+ *   （数值守恒必然不过，两轮都过不了 → 拒绝产出）。4.5 的 V 类条目要的就是「界面上看得见改写行 /
+ *   看得见被拒」，而真打外部模型服务要花钱、也需用户单独授权，所以这一条腿在本地打靶（spec 4.5-02 /
+ *   05 / 11，与 §7.2「测试不打真实平台」同一条口径）；
  * - `/pii` 是**脱敏靶页**（spec 2.7-07）：裸写的手机号 / 邮箱 / 身份证 + 一组刻意留下的对照数字
  *   （薪资区间、编号、年份）+ 一个把号码拆成三个文本节点的块，遮罩到底盖住了什么、盖不住什么，
  *   由这一页的截图与正文读数说，不由实现自述；
@@ -163,6 +170,86 @@ const RISK_BLOCKED_HTML =
   '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>访问受限 - 本地仿站</title></head>' +
   '<body><h1 data-testid="risk-heading">访问受限</h1>' +
   '<p data-testid="risk-body">您的请求过于频繁，请稍后再试。</p></body></html>';
+
+/**
+ * 改写腿的应答档位（spec 4.5-02 / 05 / 11 的 V 半边用）。
+ *
+ * 为什么要有这个靶子：这三条的判据都是"界面上看得见改写行"，而**没有模型就没有改写行**
+ * （4.5-09 的保守版只有重排）。真打外部模型服务要花钱、也需用户单独授权（同 4.4-02 一直标 `[!]`
+ * 的理由），所以这里在本地做一个只回 OpenAI 信封的靶端点：
+ * - `rewrite` 逐条原样回填位置三 id，正文只在原文后追加一句**不含数字、不含机构名**的哨兵，
+ *   于是确定性事实校验（数值守恒 + 具名回查 + 事实锁）三条全过，产物是 `rewritten`；
+ *   截图里"改后"与"改前"必须肉眼可分，否则证明不了这一行真从模型腿来。
+ * - `fabricate` 把正文换成一句凭空多了 `91%` 的说法，**必然**命中数值守恒，两轮都不过 →
+ *   `rejected`、没有产物、界面列出违规行（4.5-05 要的正是"注入必失败用例"）。
+ * 档位由验收脚本现调，不在启动时定死：同一份简历要能反复拍这两种结局。
+ */
+type GenerateMode = 'rewrite' | 'fabricate';
+
+let generateMode: GenerateMode = 'rewrite';
+
+/** 待改写清单的一条（与 `generate-model.ts` 递给模型的那份 JSON 同形）。 */
+interface GenerateTarget {
+  readonly sectionId: string;
+  readonly entryId: string;
+  readonly fieldKey: string;
+  readonly text: string;
+}
+
+/** 提示词里那份清单的前导标记串，与 `buildGenerateMessages` 的 user 消息逐字一致。 */
+const GENERATE_TARGET_MARKER = '待改写的段落清单（JSON）：\n';
+
+/** 过校验的哨兵后缀：不加数字、不加机构名，只让改前改后在截图里分得开。 */
+const GENERATE_REWRITE_SUFFIX = '【定制】这段做法可按岗位要求逐条核对，事实与指标保持原样。';
+
+/** 越界的哨兵正文：凭空补一个基线里不存在的百分比，数值守恒判据一定会抓到它。 */
+const GENERATE_FABRICATED_TEXT = '把存量问题的解决率提升到 91%。';
+
+/**
+ * 从一次 chat 请求体里读出那份待改写清单。
+ *
+ * 认标记串而不是认模型名或某条消息的顺序：清单只可能由改写腿的提示词拼出来，
+ * 而 4.4 的拆解腿、2.5 的话术腿用的是完全不同的提示词，它们打到这里应当被判"不是改写腿"
+ * 并回 400，而不是拿到一份看似成功、实则答非所问的回复。
+ * @param body 请求体（OpenAI 信封：`{model, messages:[{role, content}]}`）
+ * @returns 清单条目；请求里没有那份清单（或读不出合法 JSON）时 null
+ */
+function readGenerateTargets(body: Record<string, unknown>): GenerateTarget[] | null {
+  const messages = body['messages'];
+  if (!Array.isArray(messages)) return null;
+  let userText = '';
+  for (const message of messages) {
+    const entry = message as { role?: unknown; content?: unknown };
+    if (entry.role === 'user' && typeof entry.content === 'string') userText = entry.content;
+  }
+  const markerAt = userText.indexOf(GENERATE_TARGET_MARKER);
+  if (markerAt < 0) return null;
+  const afterMarker = userText.slice(markerAt + GENERATE_TARGET_MARKER.length);
+  // 清单是单独一行 JSON（后面只跟一句"请按要求输出改写结果"），按换行切出那一行即可。
+  const line = afterMarker.slice(0, afterMarker.indexOf('\n') === -1 ? afterMarker.length : afterMarker.indexOf('\n'));
+  let payload: unknown;
+  try {
+    payload = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(payload)) return null;
+  const targets: GenerateTarget[] = [];
+  for (const item of payload) {
+    const candidate = item as Record<string, unknown>;
+    const { sectionId, entryId, fieldKey, text } = candidate;
+    if (
+      typeof sectionId !== 'string' ||
+      typeof entryId !== 'string' ||
+      typeof fieldKey !== 'string' ||
+      typeof text !== 'string'
+    ) {
+      return null;
+    }
+    targets.push({ sectionId, entryId, fieldKey, text });
+  }
+  return targets;
+}
 
 /**
  * 脱敏靶页（spec 2.7-07）。
@@ -667,19 +754,23 @@ const newtabTargetPageHtml = `<!doctype html>
 `;
 
 /**
- * 读完请求体再回调；上限 64 KB，避免样例端点被当成缓冲区滥用。
+ * 读完请求体再回调；默认上限 64 KB，避免样例端点被当成缓冲区滥用。
+ * @param request 入站请求
+ * @param response 出站响应（超限时就地回 413，所以调用方拿到 null 时不要再写头）
+ * @param maxBytes 体积上限（字节）；改写腿的请求体带整份待改写清单，只有它需要放宽
  * @returns 解析后的对象；体不是合法 JSON 时 `undefined`，超限并已就地回了 413 时 `null`
  */
 function readJson(
   request: IncomingMessage,
   response: ServerResponse,
+  maxBytes = 64 * 1024,
 ): Promise<Record<string, unknown> | undefined | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
     request.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 64 * 1024) {
+      if (size > maxBytes) {
         response.writeHead(413).end();
         request.destroy();
         // destroy 之后不会再有 end，必须在这里定下来，否则调用方永远悬着。
@@ -1154,6 +1245,81 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  // 改写腿档位开关（spec 4.5-02 / 05 / 11 的 V 半边）：只认 rewrite / fabricate 两个值，
+  // 别的按 400 拒绝——靶子没立起来必须是一次看得见的失败，否则截图里那份"改写版"说明不了任何事。
+  if (url.pathname === '/api/generate-mode' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    const next = body?.['mode'];
+    if (next !== 'rewrite' && next !== 'fabricate') {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'mode 只接受 rewrite / fabricate' }));
+      return;
+    }
+    generateMode = next;
+    console.log(`[fixture] 改写腿档位切换为 ${next}`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, mode: generateMode }));
+    return;
+  }
+
+  // DELETE 归回 rewrite：验收要能反复拍「改写过 → 被拒 → 再改写过」这三段，停在 fabricate 时
+  // 后面每一轮都会立刻被拒，第二次的「改写版」截图就拍不到了。
+  if (url.pathname === '/api/generate-mode' && request.method === 'DELETE') {
+    generateMode = 'rewrite';
+    console.log('[fixture] 改写腿档位归零（rewrite）');
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, mode: generateMode }));
+    return;
+  }
+
+  if (url.pathname === '/api/generate-mode') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ mode: generateMode }));
+    return;
+  }
+
+  // OpenAI 信封的本地靶端点（`llm.baseUrl` 指到 `http://127.0.0.1:<port>/v1` 时打的就是这里）。
+  // 只应答改写腿，别的提示词一律 400 并说清原因：话术腿、拆解腿的答案这里给不出，
+  // 假装给得出就会把「模型腿跑通了」的假证据留在截图里。
+  if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
+    // 提示词带的是整份待改写清单，64KB 那道上限是给页面表单定的，这里按 512KB 走。
+    const body = await readJson(request, response, 512 * 1024);
+    if (body === null) return;
+    const targets = body === undefined ? null : readGenerateTargets(body);
+    if (targets === null || targets.length === 0) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(
+        JSON.stringify({ error: { message: 'fixture 的 chat 端点只应答简历改写腿：请求里读不出待改写清单' } }),
+      );
+      return;
+    }
+    const entries = targets.map((target) => ({
+      sectionId: target.sectionId,
+      entryId: target.entryId,
+      fieldKey: target.fieldKey,
+      text: generateMode === 'rewrite' ? `${target.text}${GENERATE_REWRITE_SUFFIX}` : GENERATE_FABRICATED_TEXT,
+    }));
+    // 模型名按请求回显（`llm.chat` 配置里给的是 `fixture-generate-model`，界面上要能认出打的是靶端点），
+    // 但只回显字符串：`String(非字符串)` 会印出 `[object Object]`，那是条会误导人的读数。
+    const requestedModel = body['model'];
+    // 日志只落条数与档位，正文一个字都不打（AGENTS.md §8.5：简历内容默认脱敏）。
+    console.log(`[fixture] 改写腿应答 ${String(entries.length)} 条，档位 ${generateMode}`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({
+        id: 'fixture-generate',
+        object: 'chat.completion',
+        model: typeof requestedModel === 'string' ? requestedModel : 'fixture-generate-model',
+        choices: [
+          { index: 0, message: { role: 'assistant', content: JSON.stringify({ entries }) }, finish_reason: 'stop' },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: entries.length },
+      }),
+    );
+    return;
+  }
+
   // 2.2-12 / 2.2-13 的对端读数：页面把 isTrusted / inputType / value 整份报上来。
   if (url.pathname === '/api/trust' && request.method === 'POST') {
     const body = await readJson(request, response);
@@ -1323,7 +1489,7 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   // 路由清单打在启动日志里：验收脚本按这份列表逐条 curl，不用回头翻代码。
   console.log(
-    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/risk-mode · /api/deliveries（cookie ${cookieName}）`,
+    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/risk-mode · /api/generate-mode · /v1/chat/completions · /api/deliveries（cookie ${cookieName}）`,
   );
 });
 
