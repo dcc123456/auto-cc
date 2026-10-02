@@ -11,6 +11,7 @@ import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { ResumePanel } from './ResumePanel';
+import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
 import { UsagePanel } from './UsagePanel';
@@ -111,6 +112,8 @@ export function App() {
             <SessionPanel />
             <LocatorLabPanel />
             <JobLabPanel />
+            {/* 4.6-d 的话术候选面板紧跟 JD 库：候选 → 选中 → 打招呼是同一条链的三段，隔开放就要跨面板对目标 */}
+            <ScriptPanel />
             <ResumePanel />
             <KbPanel />
             <GapPanel />

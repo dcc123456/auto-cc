@@ -717,6 +717,45 @@
       "errorStale": "生成之后你自己改过这份简历：两份改动叠在一起是谁都没法解释的产物。先按现在这一版重新生成，本次没有写任何内容。",
       "errorCheck": "这次选中的组合没过事实校验，本次没有写入工作副本：{{message}}",
       "errorOther": "接受失败：{{message}}"
+    },
+    "script": {
+      "heading": "打招呼话术候选",
+      "hint": "选一行库内 JD，先向知识库要几条能引用的经历，再逐条生成候选：每条都写明它是模型产出还是模板回落、引用了哪条经历。选中一条才放开「打招呼」——这一步只生成内容，真正发送走的还是打招呼那条编排（闸门、频控、黑名单一个都不省）。",
+      "targetLabel": "目标岗位（取自 JD 库）",
+      "targetEmpty": "JD 库还是空的：先在上面的抓取面板跑一轮，再来生成话术。",
+      "targetRow": "{{platform}} 的「{{title}}」· {{company}}",
+      "platform": {
+        "boss": "BOSS 直聘"
+      },
+      "kind": {
+        "greeting": "开场白",
+        "follow-up": "追问",
+        "rejection": "拒绝应对"
+      },
+      "quotePlaceholder": "对方最后一条消息原文（追问与拒绝应对必填）",
+      "quoteHintGreeting": "开场白不看这一格；只有追问与拒绝应对把它当成立的前提。",
+      "quoteRequired": "这一类话术必须指涉对方说过的话：先填上面那格，否则生成只会以入参错误失败。",
+      "keywordsPlaceholder": "方向关键词（可选，逗号分隔）",
+      "actionGenerate": "生成候选",
+      "candidatesHeading": "话术候选（{{count}} 条并列）",
+      "candidatesEmpty": "没有可展示的候选：去重之后所有候选都是同一句话。",
+      "evidenceHits": "引用知识库经历：取前 {{used}} 条（本次检索命中 {{total}} 条）",
+      "evidenceNoHits": "库里没有与这个岗位相关的经历，候选只能全部走通用文案——这不等于已经个性化。",
+      "evidenceNoTokens": "这句岗位名与公司名切不出可检索的词，候选只能全部走通用文案。",
+      "origin": {
+        "model": "模型产出",
+        "template": "模板",
+        "manual": "用户选定"
+      },
+      "refs": "引用 {{count}} 条经历（{{ids}}）",
+      "refsNone": "未引用经历",
+      "version": "版本 {{version}}",
+      "fallback": "回落原因：{{reason}}",
+      "actionSend": "在 {{platform}} 给「{{title}}」发这条",
+      "pickHint": "选中上面任意一条才放开发送；候选阶段不产生任何离开本机的内容。",
+      "noticeGenerated": "共 {{count}} 条候选，其中 {{template}} 条来自模板回落",
+      "receiptRow": "已发送：目标 {{jobId}} · 账本行 {{ledgerId}} · 来源 {{source}} · 内容 {{origin}} · 页面确认「{{reason}}」",
+      "errorRow": "{{code}}：{{message}}"
     }
   }
 }

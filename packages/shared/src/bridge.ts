@@ -206,6 +206,11 @@ export const RENDERER_ALLOWLIST = [
   // 它刻意**不**登记为 agent 工具——让模型自己接受自己生成的内容，等于把 4.5-11 的"人逐项过目"取消掉，
   // 而事实锁定的最后一道闸就是那道过目（§8.4）。界面侧调用点在 `GeneratePanel`。
   'resume.generate.accept',
+  // 4.6-d 的话术候选面板（spec 4.6-07）：以前界面只能经 `outbound.greet.perform` **间接**触发话术生成
+  // （生成入参藏在 greet 的 `script` 字段里），拿不到候选、也看不见「模板」标识与回落原因。
+  // 这里开的是一条**只生成、不外发**的口：它不现问渠道、不过闸门、不产生任何离开 app 的字节，
+  // 真正发出去仍然只有 `greet.perform` / `deliver.perform` 那两条（AGENTS.md §7.3 的红线没有被这条口绕过）。
+  'outbound.script.generate',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -444,6 +449,51 @@ export type GreetReceiptView = {
   source: string;
   /** 内容来源：模型产出 / 模板回落 / 用户手改 */
   origin: 'model' | 'template' | 'manual';
+};
+
+/**
+ * 一次话术生成的入参（镜像 `outbound.script` 的 `scriptRequestSchema`，spec 4.6-01 / 02）。
+ *
+ * 与上面 `GreetRequestView.script` 的区别只有一点：这里是**独立生成**那条口的入参，所以带上
+ * `kind` 与 `recruiterMessage`（4.6-c 刻意把它们留给本片裁定）。打招呼那一路的镜像仍保持最小必需集，
+ * 免得 P2 的入参形状被界面面板带着长（4.6-11 的接口定型判据看的是那一口）。
+ */
+export type ScriptGenerateRequestView = {
+  /** 归属的 JD 标识：界面用库内行 id，产物与账本都按它回指 */
+  jdId: string;
+  /** 岗位名（缺失即被服务判 `INVALID_ARGUMENT`，不做空话术） */
+  title: string;
+  /** 公司名（同上） */
+  company: string;
+  /** 方向关键词：只进提示词与模板的「方向」短语，不参与任何判据 */
+  keywords?: string[];
+  /** 证据：每条必带 `refId`（取 `kb.profile.search` 命中的 `chunkId`），spec 4.6-02 */
+  evidence?: { fact: string; refId: string }[];
+  /** 话术分型，省略为 `greeting`（spec 4.6-01） */
+  kind?: ScriptKindView;
+  /** 对方最后一条消息原文：追问与拒绝应对缺它会被服务拒掉 */
+  recruiterMessage?: string;
+};
+
+/** 话术分型的界面视图取值（镜像 `SCRIPT_KINDS`，文案按它在语言包里取）。 */
+export type ScriptKindView = 'greeting' | 'follow-up' | 'rejection';
+
+/**
+ * 一条话术候选的读数（镜像 `ScriptDraftView`，spec 4.6-06 / 07 的界面数据源）。
+ *
+ * `origin` 与 `fallbackReason` 是这条口存在的理由：模板回落必须**看得见**，否则界面把一句套壳文案
+ * 摆成"为你个性化生成的"（4.6-06）。`evidenceRefs` 为空数组是有意义的读数，不是缺字段。
+ */
+export type ScriptDraftRowView = {
+  /** 已过黑名单与长度校验的正文 */
+  text: string;
+  origin: 'model' | 'template';
+  /** `template` 时的原因，界面原样播报，不二次加工 */
+  fallbackReason?: string;
+  scriptVersion: string;
+  jdId: string;
+  kind: ScriptKindView;
+  evidenceRefs: string[];
 };
 
 /**
@@ -1219,6 +1269,13 @@ export interface BridgeSignatures {
    * 全在主进程一侧完成，界面拿到的是回执或被拒的结构化错误，没有绕过闸门的第二条口。
    */
   'outbound.greet.perform': { args: [request: GreetRequestView]; returns: GreetReceiptView };
+  /**
+   * 生成一条话术候选（spec 4.6-01 / 02 / 06 / 07）：只产内容，不发送、不过闸门。
+   *
+   * 界面一次点按会按"每条证据一条 + 一条不引用证据的"逐条调它（候选的条数与去重在界面侧，
+   * 判据全在服务侧）；被入参校验拒掉时以结构化错误上浮，与其它口同一条口径。
+   */
+  'outbound.script.generate': { args: [request: ScriptGenerateRequestView]; returns: ScriptDraftRowView };
   /**
    * 投递编排入口（spec 2.6-01 / 02 / 03 / 05 / 06）：stage → 闸门 → 频控 → 审批 → 现问渠道
    * 二次校验 → 页面投递 → 落账，全在主进程一侧。`semi` 档会在这里挂起等 `resolveApproval`，

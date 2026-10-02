@@ -717,6 +717,45 @@
       "errorStale": "You edited this résumé after the generation: stacking the two changes produces something nobody can explain. Generate again from the current version. Nothing was written.",
       "errorCheck": "The combination you selected failed the fact check, so nothing was written: {{message}}",
       "errorOther": "Accept failed: {{message}}"
+    },
+    "script": {
+      "heading": "Greeting script candidates",
+      "hint": "Pick a stored JD, pull a few citable experiences from the knowledge base, then generate one candidate per experience. Each row states whether it came from the model or the local template, and which experience it cites. The send button only unlocks after you pick one — this step just generates text; the actual send still runs the greeting orchestration (quota gate, throttling, blocklist included).",
+      "targetLabel": "Target role (from the JD store)",
+      "targetEmpty": "The JD store is empty: run the capture panel above first, then generate scripts.",
+      "targetRow": "\"{{title}}\" at {{company}} on {{platform}}",
+      "platform": {
+        "boss": "BOSS Zhipin"
+      },
+      "kind": {
+        "greeting": "Opening",
+        "follow-up": "Follow-up",
+        "rejection": "After a decline"
+      },
+      "quotePlaceholder": "Their last message (required for follow-up and decline replies)",
+      "quoteHintGreeting": "An opening line ignores this box; only follow-up and decline replies depend on it.",
+      "quoteRequired": "This kind of script must refer to something they said: fill the box above or generation fails on validation.",
+      "keywordsPlaceholder": "Direction keywords (optional, comma separated)",
+      "actionGenerate": "Generate candidates",
+      "candidatesHeading": "Script candidates ({{count}} side by side)",
+      "candidatesEmpty": "Nothing to show: every candidate collapsed to the same sentence after deduplication.",
+      "evidenceHits": "Citing knowledge base: first {{used}} of {{total}} hits",
+      "evidenceNoHits": "No experience matches this role in the library, so every candidate is the generic wording — not personalised.",
+      "evidenceNoTokens": "The role and company names yield no searchable tokens, so every candidate is the generic wording.",
+      "origin": {
+        "model": "Model",
+        "template": "Template",
+        "manual": "Chosen by you"
+      },
+      "refs": "Cites {{count}} experience(s) ({{ids}})",
+      "refsNone": "No experience cited",
+      "version": "Version {{version}}",
+      "fallback": "Fallback reason: {{reason}}",
+      "actionSend": "Send this to \"{{title}}\" on {{platform}}",
+      "pickHint": "Pick a candidate above to enable sending; the candidate stage never leaves this machine.",
+      "noticeGenerated": "{{count}} candidates, {{template}} of them from the template fallback",
+      "receiptRow": "Sent: target {{jobId}} · ledger row {{ledgerId}} · source {{source}} · content {{origin}} · page confirmed \"{{reason}}\"",
+      "errorRow": "{{code}}: {{message}}"
     }
   }
 }
