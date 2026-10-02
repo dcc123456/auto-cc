@@ -36,6 +36,17 @@ export interface KbEntityDraft {
   readonly payload: Readonly<Record<string, string>>;
   /** 载荷的规范化哈希：幂等比对与同文档内去重的键。 */
   readonly normalizedHash: string;
+  /**
+   * 这条实体出自文档里的哪一条 entry（手工实体与备份导入行为 `null`）。
+   *
+   * 为什么单独存一份而不从 `entityId` 反解：id 是 sha256 的前 16 位，**不可逆**；槽位串
+   * （`entryId` / `entryId#achievement` / `entryId#sN`）只在派生那一刻存在。
+   * 4.5-02 的重排与 4.5-06 的证据反查都要"这条证据撑着文档里的哪一条"，
+   * 让消费方各自重算槽位语法等于把这套规则复制第二遍（§2.2），所以派生时顺手把 entry id 带出来。
+   * 它**不是 `kb_entities` 的列**：只有对当前文档现算 `deriveEntities` 的那条路拿得到，
+   * 库里读出来的实体行没有它（见 `profile-service.ts` 的 `insert`，列名是逐个写死的）。
+   */
+  readonly entryId: string | null;
 }
 
 /** 技能自由文本的分隔符（顿号 / 中英文逗号分号 / 斜杠 / 竖线；换行单独先切）。 */
@@ -223,6 +234,7 @@ export function deriveEntities(document: ResumeDocument): readonly KbEntityDraft
           sourceDocId: document.id,
           payload,
           normalizedHash: payloadHashOf(kind, payload),
+          entryId: entry.id,
         });
       }
 
@@ -240,6 +252,7 @@ export function deriveEntities(document: ResumeDocument): readonly KbEntityDraft
           sourceDocId: document.id,
           payload: { text: achievementValue },
           normalizedHash: payloadHashOf('achievement', { text: achievementValue }),
+          entryId: entry.id,
         });
       }
 
@@ -253,6 +266,7 @@ export function deriveEntities(document: ResumeDocument): readonly KbEntityDraft
             sourceDocId: document.id,
             payload: { text: skill },
             normalizedHash: payloadHashOf('skill', { text: skill }),
+            entryId: entry.id,
           });
         });
       }

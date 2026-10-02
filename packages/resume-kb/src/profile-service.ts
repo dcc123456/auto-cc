@@ -697,6 +697,8 @@ export class KbProfileService extends Service {
       sourceDocId: null,
       payload,
       normalizedHash: payloadHashOf(input.kind, payload),
+      // 手工实体不是从文档里长出来的，没有 entry 可回指（`entryId` 只随 `deriveEntities` 的内存草案存在）。
+      entryId: null,
     };
     this.withTransaction(() => {
       this.insert(draft, nowMs);
@@ -868,6 +870,9 @@ export class KbProfileService extends Service {
           sourceDocId: entry.sourceDocId,
           payload,
           normalizedHash: payloadHashOf(entry.kind, payload),
+          // 备份文件与库表都不存 `entryId`（它不是列），恢复回来的实体因此没有可回指的 entry；
+          // 要这条映射的消费方（4.5-b 的重排）从**当前文档**现算 `deriveEntities`，不指望库里带出来。
+          entryId: null,
         };
         // 时间戳取自文件而不是 `nowMs`：恢复备份是把过去的记录放回库里，不是「刚刚新建」。
         this.upsert(draft, entry.updatedAt, entry.createdAt);

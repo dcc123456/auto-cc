@@ -180,6 +180,31 @@ describe('四类实体的派生映射（裁定二）', () => {
     // 但经历实体本身不去重：载荷含公司/职位/时间，三条就是三条。
     expect(kindOf(drafts, 'experience')).toHaveLength(3);
   });
+
+  it('每条派生实体都带着它出自哪条 entry，证据反查不必重算槽位语法（4.5-02 / 4.5-06 的前提）', () => {
+    const doc = makeDoc();
+    const drafts = deriveEntities(doc);
+    const entryIds = new Set(doc.sections.flatMap((section) => section.entries.map((entry) => entry.id)));
+
+    // 反向也成立：派生结果的 entryId 必须全部是文档里真实存在的条目 id（不能是 `experience-1#achievement` 这类槽位串）。
+    for (const draft of drafts) expect(entryIds.has(draft.entryId ?? '')).toBe(true);
+
+    // 带后缀的槽位（成果 / 技能）回指到承载它的 entry，而不是自己造一个 id。
+    const achievement = kindOf(drafts, 'achievement').find(
+      (draft) => draft.payload.text === '主导订单服务重构，P99 延迟下降 40%。',
+    );
+    expect(achievement?.entryId).toBe('experience-1');
+    expect(kindOf(drafts, 'skill').map((draft) => draft.entryId)).toEqual([
+      'skills-1',
+      'skills-1',
+      'skills-1',
+      'skills-1',
+    ]);
+    // 同一条 entry 派生出的多条实体（经历本体 + 它的成果）在 id 上必然不同，否则重排时无从分辨改的是哪一处。
+    expect(achievement?.entityId).not.toBe(
+      kindOf(drafts, 'experience').find((draft) => draft.entryId === 'experience-1')?.entityId,
+    );
+  });
 });
 
 describe('稳定 id（spec 4.2-02）', () => {
