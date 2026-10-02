@@ -46,6 +46,7 @@ const TOOL_LABEL_KEY: Record<string, string> = {
   // 知识库的两个读口（4.2-f / 4.3-c）：对话里挑中它们时卡片要说得出人话，而不是「未登记的工具」。
   'kb.profile.list': 'agent.tool.labels.kbList',
   'kb.profile.search': 'agent.tool.labels.kbSearch',
+  'kb.profile.syncVectors': 'agent.tool.labels.kbSyncVectors',
   'outbound.deliver.perform': 'agent.tool.labels.deliverPerform',
   'outbound.greet.perform': 'agent.tool.labels.greetPerform',
   'sessions.open': 'agent.tool.labels.sessionsOpen',

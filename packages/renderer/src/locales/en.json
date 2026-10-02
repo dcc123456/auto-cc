@@ -536,6 +536,7 @@
           "jdCapture": "Search and capture JDs",
           "kbList": "List knowledge base entities",
           "kbSearch": "Search knowledge base",
+          "kbSyncVectors": "Build resume vectors",
           "locateFind": "Locate control",
           "pageNavigate": "Navigate page",
           "pageSnapshot": "Read page snapshot",
@@ -618,7 +619,12 @@
       "chunkSection": "Section chunk",
       "searchReasonBm25": "Term frequency",
       "searchReasonLexical": "Lexical coverage",
-      "searchReasonSubstring": "Substring match"
+      "searchReasonSubstring": "Substring match",
+      "searchReasonVector": "Semantic match",
+      "vectorStatusOk": "Semantic similarity is folded into this ranking.",
+      "vectorStatusUnavailable": "No embedding service is available, so this ranking is lexical only.",
+      "vectorStatusNoVectors": "No vectors exist for the current model yet, so this ranking is lexical only (fusion starts after a backfill).",
+      "vectorStatusFailed": "Embedding this query failed, so the ranking fell back to lexical only."
     }
   }
 }

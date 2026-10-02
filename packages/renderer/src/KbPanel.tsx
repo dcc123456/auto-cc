@@ -25,11 +25,25 @@ const REASON_LABEL_KEY: Record<KbEvidenceRowView['reason'], string> = {
   overlap: 'kb.reasonOverlap',
 };
 
-/** 检索命中的通道 / 分数腿 → 文案键（三个码各说一件事：靠 BM25 排上来、靠词面覆盖、只被子串通道接住）。 */
+/** 检索命中的通道 / 分数腿 → 文案键（四个码各说一件事：靠 BM25 排上来、靠词面覆盖、只被子串通道接住、只被语义相近捞到）。 */
 const SEARCH_REASON_LABEL_KEY: Record<KbSearchRowResult['hits'][number]['reasons'][number], string> = {
   bm25: 'kb.searchReasonBm25',
   lexical: 'kb.searchReasonLexical',
   substring: 'kb.searchReasonSubstring',
+  vector: 'kb.searchReasonVector',
+};
+
+/**
+ * 向量腿当次状态 → 文案键（spec 4.3-08：降级必须看得见，否则界面给出的只是「三条词面命中」这种读不出原因的形态）。
+ *
+ * `not_attempted` 不在表里：那一态只在查询切不出 token 时出现，界面那时正在说「这句话没词」，
+ * 再补一句「没做语义增强」是噪声而不是信息。
+ */
+const VECTOR_STATUS_LABEL_KEY: Record<Exclude<KbSearchRowResult['vectorStatus'], 'not_attempted'>, string> = {
+  ok: 'kb.vectorStatusOk',
+  unavailable: 'kb.vectorStatusUnavailable',
+  no_vectors: 'kb.vectorStatusNoVectors',
+  failed: 'kb.vectorStatusFailed',
 };
 
 /** 变更动作 → 文案键（事件载荷里的动作码，界面按它说「刚发生了什么」）。 */
@@ -261,6 +275,15 @@ export function KbPanel() {
     return entity ? `${t('kb.chunkEntity')} · ${t(KIND_LABEL_KEY[entity.kind])}` : t('kb.chunkEntity');
   };
 
+  /** 本次检索的向量腿状态（还没检索过时是 `undefined`，界面那一栏整个不出现）。 */
+  const vectorStatus = searchResult?.vectorStatus;
+  /**
+   * 本次检索的向量腿那句提示（spec 4.3-08 的判据半边：三种降级都得让用户读出来是哪种）。
+   * `not_attempted` 也给 `null`——那种空态正在说「这句话切不出词」，再补一句「没做语义增强」是噪声。
+   */
+  const vectorStatusHint =
+    vectorStatus === undefined || vectorStatus === 'not_attempted' ? null : t(VECTOR_STATUS_LABEL_KEY[vectorStatus]);
+
   /**
    * 渲染一行实体卡片（含展开态）。
    * @param entity 实体读数
@@ -417,6 +440,12 @@ export function KbPanel() {
             {t('kb.search')}
           </button>
         </div>
+        {/* 向量腿的当次状态单独一行（spec 4.3-08）：命中数不变，但「只有词面结果」这件事必须读得出原因。 */}
+        {vectorStatusHint !== null && (
+          <p data-kb-search="vector-status" className="text-xs leading-relaxed text-slate-500">
+            {vectorStatusHint}
+          </p>
+        )}
         {searchResult &&
           (searchResult.status === 'no_query_tokens' ? (
             // 确定空态之一：这句查询里切不出可检索的词（全是标点或空白）。不返回随机结果，也不报「检索失败」。

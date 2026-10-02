@@ -536,6 +536,7 @@
           "jdCapture": "搜索并抓取 JD",
           "kbList": "列出知识库实体",
           "kbSearch": "检索知识库",
+          "kbSyncVectors": "补建简历向量",
           "locateFind": "定位控件",
           "pageNavigate": "页面导航",
           "pageSnapshot": "读取页面快照",
@@ -618,7 +619,12 @@
       "chunkSection": "区块切片",
       "searchReasonBm25": "词频相关",
       "searchReasonLexical": "词面覆盖",
-      "searchReasonSubstring": "子串命中"
+      "searchReasonSubstring": "子串命中",
+      "searchReasonVector": "语义相近",
+      "vectorStatusOk": "本次已把语义相近度并入排序。",
+      "vectorStatusUnavailable": "没有可用的向量服务，本次只按词面排序。",
+      "vectorStatusNoVectors": "当前模型还没有生成向量，本次只按词面排序（补建之后才会参与融合）。",
+      "vectorStatusFailed": "本次向量的编码没有成功，已退回只按词面排序。"
     }
   }
 }

@@ -772,8 +772,15 @@ export interface KbSearchRowHit {
   readonly score: number;
   readonly bm25Score: number;
   readonly lexicalScore: number;
+  /**
+   * 向量腿的余弦读数（4 位小数）；本次没用向量腿、或这条没进向量名单时为 `null`。
+   *
+   * 与 `score` 分开放而不是合成一个数：词面分是 0～1 的证据强度，余弦是 0～1 的几何夹角，
+   * 量纲不同源，界面要能分别说「词面有多强」和「语义有多近」（spec 4.3-07）。
+   */
+  readonly vectorScore: number | null;
   readonly coverageReason: 'contains' | 'overlap' | null;
-  readonly reasons: readonly ('bm25' | 'lexical' | 'substring')[];
+  readonly reasons: readonly ('bm25' | 'lexical' | 'substring' | 'vector')[];
   readonly matchedTokens: readonly string[];
 }
 
@@ -783,6 +790,13 @@ export interface KbSearchRowResult {
   readonly status: 'ok' | 'no_query_tokens';
   readonly hits: readonly KbSearchRowHit[];
   readonly queryTokens: readonly string[];
+  /**
+   * 本次检索的向量腿状态（镜像 `KbVectorStatus`，spec 4.3-08 的播报依据）。
+   *
+   * 降级必须看得见：`unavailable` / `no_vectors` / `failed` 三种情况下界面给出的都是「只有词面命中」，
+   * 没有这一项用户读不出原因，只能靠猜（4.3-08 的判据半边就在这一列上）。
+   */
+  readonly vectorStatus: 'ok' | 'unavailable' | 'no_vectors' | 'failed' | 'not_attempted';
 }
 
 /** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
