@@ -460,6 +460,90 @@ describe('失败与叫停的如实记录（5.2-09 / 10 的代码半边）', () =
   });
 });
 
+describe('进度事件的推送形状（5.2-04 / 09 / 10 的事件半边）', () => {
+  /**
+   * 把一份推送载荷收成可比较的时间轴刻度：状态 + 游标 + 各步状态。
+   * @param view `agent/run-progress` 的载荷（与 `agent.loop.read()` 同形状）
+   * @returns 形如 `running#1/[ok,pending]` 的紧凑读数
+   */
+  function shape(view: AgentRunView): string {
+    return `${view.status}#${String(view.planStepIndex)}/[${view.steps.map((step) => step.status).join(',')}]`;
+  }
+
+  it('起草不推；起跑先推，一步「开始 / 结束」各推一次，终态再推一次', async () => {
+    const { ctx, loop } = await bootLoop();
+    const events: AgentRunView[] = [];
+    ctx.on('agent/run-progress', (event) => {
+      events.push(event);
+    });
+    const proposed = await loop.propose(goalNaming(2));
+    // 起草不执行任何动作，也就没有进度可推（计划卡画的是 `loop.propose` 的返回值本身）。
+    expect(events).toEqual([]);
+    await loop.confirm(proposed.runId);
+    expect(events.map(shape)).toEqual([
+      'running#0/[]',
+      'running#0/[pending]',
+      'running#1/[ok]',
+      'running#1/[ok,pending]',
+      'running#2/[ok,ok]',
+      'completed#2/[ok,ok]',
+    ]);
+    // 上面那条序列里真正承重的是第 2 项：第 1 步在**还没返回**时就已经在事件里露过一面。
+    // 少这一次推送，界面只能等它跑完才画卡片——5.2-04 要的「逐步出现」就成了「批量出现」。
+    expect(events[1]?.steps[0]).toMatchObject({ planStepIndex: 0, status: 'pending', observation: '' });
+    // 第三条事件（第 1 步落观察之后）的游标与账必须已经跟着动：
+    // 活体截图上出现过「已落 11 / 12 步」配「已用 545 token」，那就是这两列只在收尾写过。
+    expect(events[2]?.planStepIndex).toBe(1);
+    expect((events[2]?.tokensUsed ?? 0) > (events[0]?.tokensUsed ?? 0)).toBe(true);
+  });
+
+  it('失败步的裸码与观察出现在同一次推送里；终态事件带的是 failed 而不是 completed', async () => {
+    const { ctx, loop, tools } = await bootLoop();
+    const events: AgentRunView[] = [];
+    ctx.on('agent/run-progress', (event) => {
+      events.push(event);
+    });
+    tools.unregister('demo.tick');
+    tools.register({
+      ...makeTickTool([]),
+      run: () => Promise.reject(new Error('页面出现验证码，已停止')),
+    });
+    await loop.confirm((await loop.propose(goalNaming(1))).runId);
+    const failedStep = events.at(-2)?.steps[0];
+    // 「对话里如实指向证据」要求码与观察同一刻到齐：只推裸码会让界面自己编一句安慰话。
+    expect(failedStep).toMatchObject({ status: 'failed', code: 'TOOL_FAILED' });
+    expect(failedStep?.observation).toContain('验证码');
+    expect(shape(events.at(-1)!)).toBe('failed#1/[failed]');
+  });
+
+  it('叫停时 `stop()` 读到的还是 running，而 `paused` 一定从事件里来（界面那句「已受理」的依据）', async () => {
+    const { ctx, loop, tools, calls } = await bootLoop();
+    const events: AgentRunView[] = [];
+    ctx.on('agent/run-progress', (event) => {
+      events.push(event);
+    });
+    const gate = makeGate();
+    tools.unregister('demo.tick');
+    tools.register({
+      ...makeTickTool(calls),
+      run: (params) => {
+        calls.push(`tick:${String(params.n)}`);
+        gate.entered();
+        return gate.releaseAfter(() => toolResult({ n: params.n }, { summary: '门后执行完' }));
+      },
+    });
+    const proposed = await loop.propose(goalNaming(2));
+    const inFlight = loop.confirm(proposed.runId);
+    await gate.enteredPromise;
+    expect(loop.stop(proposed.runId).status).toBe('running');
+    gate.open();
+    await inFlight;
+    // 界面按了叫停那一刻只能说「已受理」：`paused` 是收尾时最后一条事件带出来的，不是它自己推的。
+    expect(shape(events.at(-1)!)).toBe('paused#1/[ok]');
+    expect(calls).toEqual(['tick:1']);
+  });
+});
+
 /**
  * 一只可控的「门」：让假工具能停在实现里，等测试放行才返回。
  * @returns `entered` 通知测试已进实现、`open` 放行、`releaseAfter` 把返回值排在放行之后

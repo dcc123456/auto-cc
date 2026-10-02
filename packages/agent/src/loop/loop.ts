@@ -314,6 +314,8 @@ export class AgentLoopService extends Service {
     }
     scope.planConfirmed = true;
     this.updateRun(runId, { status: 'running', planStepIndex: scope.cursor, tokensUsed: scope.tokensUsed });
+    // 起跑就先推一次：界面画的是「第 0 步也已经开始」这一态，而不是等第一个工具返回才有动静。
+    this.publish(scope.runId);
     await this.execute(scope);
     return this.read(runId);
   }
@@ -324,7 +326,10 @@ export class AgentLoopService extends Service {
    * 正在跑的那一步不硬切：这里只置信号，循环在**下一个安全点**（取步之前）看见信号就停，
    * 已经发出去的动作照常收尾并落它的观察记录。
    * @param runId 要停的 run
-   * @returns 停下之后的读数；已经终态的 run 原样返回读数，不报错
+   * @returns 停下之后的读数；已经终态的 run 原样返回读数，不报错。
+   * **running 分支返回的是置信号那一刻的读数（仍是 `running`）**——这是事实不是缺陷：
+   * 那一步确实还在飞，真正的 `paused` 由收尾时的 `agent/run-progress` 带出来，
+   * 界面因此在这一刻只能说「已受理叫停」，不能说「已停止」（5.2-c 的文案口径）。
    */
   stop(runId: string): AgentRunView {
     const view = this.read(runId);
@@ -418,6 +423,9 @@ export class AgentLoopService extends Service {
         return;
       }
       this.writeStep(scope, step, 'pending', '', [], null, null);
+      // 步一开工就推：卡片要先出现在流里（running 态），否则界面只能等它跑完，
+      // 5.2-04 要的「逐步出现」就成了「批量出现」。
+      this.publish(scope.runId);
       const at = Date.now();
       const reply = await this.registry.call(step.toolId, step.input);
       const durationMs = Date.now() - at;
@@ -429,6 +437,11 @@ export class AgentLoopService extends Service {
       scope.tokensUsed += summary.usage.inputTokens + summary.usage.outputTokens;
       this.writeStep(scope, step, outcome, summary.text, evidenceRefs, durationMs, reply.ok ? null : reply.code);
       scope.cursor += 1;
+      // 观察落库后立刻**写回游标与账**再推：失败那一步的 `code` 与观察要出现在同一张卡片上，
+      // 否则 5.2-09 的「对话里如实指向证据」就变成界面自己编的安慰话。
+      // 写回是这片补上的：原先 run 行的两列只在起跑和收尾各写一次，执行途中读到的额度停在起草值——
+      // 活体截图上出现过「已落 11 / 12 步」配「已用 545 token」，那个不动的数会被人当成事实读。
+      this.sync(scope);
     }
     const finished = this.store.db
       .prepare('SELECT status FROM agent_step WHERE run_id = ?')
@@ -566,7 +579,32 @@ export class AgentLoopService extends Service {
   ): void {
     this.updateRun(scope.runId, { status, planStepIndex: scope.cursor, tokensUsed: scope.tokensUsed, stopReason });
     this.scopes.delete(scope.runId);
+    // 终态必须推一次：`stop()` 的 running 分支返回的还是 `running`，界面上那一格「已停止」只能从这里来。
+    // 放在 `scopes.delete` 之后不影响——载荷从库里现读，不看内存里的作用域。
+    this.publish(scope.runId);
     this.ctx.logger.info(`run ${scope.runId} 收尾：${status}（${stopReason}）· 跑到第 ${String(scope.cursor)} 步`);
+  }
+
+  /**
+   * 把这份 run 的当前落库读数推给渲染层（`agent/run-progress`，spec 5.2-04）。
+   *
+   * 载荷刻意就是 `read()` 的原样返回值：不包事件外壳、不裁字段，界面与日志读的是同一个形状。
+   * @param runId 刚被写过的那条 run
+   */
+  private publish(runId: string): void {
+    this.ctx.emit('agent/run-progress', this.read(runId));
+  }
+
+  /**
+   * 把内存里的游标与 token 账写回 run 行，随即推一次（执行途中只有数字真的动了的那一处用它）。
+   *
+   * 状态写死 `running` 是事实而不是猜测：能走到这里说明循环还在步与步之间，
+   * 终态一律由 `finish()` 落，不从这条口出。
+   * @param scope 本次 run 的作用域
+   */
+  private sync(scope: RunScope): void {
+    this.updateRun(scope.runId, { status: 'running', planStepIndex: scope.cursor, tokensUsed: scope.tokensUsed });
+    this.publish(scope.runId);
   }
 
   /**

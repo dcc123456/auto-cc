@@ -4,8 +4,10 @@
  * 这里画的是**主进程那份会话**的镜像：消息一律来自 `chat.session.current()` 与 `chat/delta` 事件，
  * 组件不自己拼句子、不自己判进度。助手回复目前是本地确定性模板（P1 不接 LLM），
  * P5 换成真模型时改的是主进程的生成函数，这个文件一行不用改。
+ * 5.2-c 起，`/run` 开头的那一句走 agent 循环：计划卡与逐步卡片流插在**同一段对话流**里
+ * （plan 5.2-c 的切法），读数来自 `agent.loop.read` 与 `agent/run-progress`，同样不在这里推导。
  */
-import { Bot, Gauge, LoaderCircle, Plus, Send, Square, User, Workflow as WorkflowIcon, Wrench } from 'lucide-react';
+import { Bot, Gauge, LoaderCircle, Plus, Send, Square, User, Workflow as WorkflowIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -15,6 +17,9 @@ import type {
   ChatToolPart,
   ToolDescriptorView,
 } from '@auto-cc/shared';
+import { AgentRunPanel } from './AgentRunPanel';
+import { ToolCard } from './ToolCard';
+import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
 import { useWorkflowRun } from './useWorkflowRun';
 
@@ -25,64 +30,17 @@ import { useWorkflowRun } from './useWorkflowRun';
  */
 const AUTONOMY_OPTIONS = ['suggest', 'semi', 'auto'] as const satisfies readonly AutonomyLevel[];
 
-/** 工具卡片的状态配色；状态本身来自主进程写在 `parts[]` 里的那一份。 */
-const TOOL_STATE_STYLE: Record<ChatToolPart['state'], string> = {
-  running: 'border-amber-900 bg-amber-950/30 text-amber-200',
-  done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
-  failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
-};
-
 /** 界面上正在累加的那条助手回复（主进程快照在流式期间也带这条，两边同时画会重复，所以过滤掉它）。 */
 type LiveStream = { sessionId: string; messageId: string; text: string; tool?: ChatToolPart };
 
 /**
- * 一张工具调用卡片（spec 2.8-09：工具名、关键参数、状态、耗时，外加副作用分级）。
+ * 交给 agent 循环的那一句的前缀：`/run` 之后是任务目标原文。
  *
- * 卡片是**一条消息的一部分**，不是另一条消息：agent 一次输出「文本 + 工具调用」时不需要改表。
- * @param part 主进程写进 `parts[]`（或经 `chat/delta` 带出）的工具段
- * @param meta 注册表里这只工具的声明（`agent.tools.list()` 的读数）；未登记或读数未回来时为 undefined
- * @returns 标题 + 入参摘要 + 状态 + 分级；失败时把结构化原因原样显示，不改口成「已完成」
+ * 走前缀而不是加第三个输入框，是因为 5.2-c 要的判据形状就是「自然语言输入后先产出可见计划」——
+ * 入口得还在对话里。它**不**进 `chat.session.send`：那条链会产出一句模板回复，
+ * 于是同一句话既有对话答案又有计划，两个都能用就是 §2.5 禁的形态。
  */
-function ToolCard({ part, meta }: { part: ChatToolPart; meta?: ToolDescriptorView }) {
-  const { t } = useTranslation();
-  // 标题键来自注册表声明本身（spec 5.1-02：一份事实一个来源），界面不再留 id→键的映射表；
-  // 未登记或读数未回来时只有这一条兜底文案，卡片因此永远不会显示裸 id 当标题。
-  const labelKey = meta?.titleKey;
-  return (
-    <div
-      data-testid="chat-tool-card"
-      data-tool-id={part.toolId}
-      data-tool-state={part.state}
-      data-tool-effect={meta?.effect ?? 'unknown'}
-      data-tool-confirm={meta ? String(meta.requiresConfirmation) : 'unknown'}
-      className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${TOOL_STATE_STYLE[part.state]}`}
-    >
-      <div className="flex items-center gap-2">
-        <Wrench size={12} />
-        <span className="font-medium">{t(labelKey ?? 'agent.tool.unregistered')}</span>
-        <span className="font-mono text-slate-500">{part.toolId}</span>
-        <span className="ml-auto" data-tool-status={t(`agent.tool.state.${part.state}`)}>
-          {t(`agent.tool.state.${part.state}`)}
-        </span>
-      </div>
-      <p className="mt-1 break-all text-slate-400" data-tool-input={JSON.stringify(part.input)}>
-        {t('agent.tool.input', { input: JSON.stringify(part.input) })}
-      </p>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
-        {part.durationMs !== null ? (
-          <span data-tool-duration={String(part.durationMs)}>{t('agent.tool.duration', { ms: part.durationMs })}</span>
-        ) : null}
-        {meta ? <span>{t(`agent.tool.effect.${meta.effect}`)}</span> : null}
-        {meta?.requiresConfirmation ? <span data-tool-needs-approval>{t('agent.tool.needsConfirm')}</span> : null}
-        {part.errorText ? (
-          <span className="break-all text-rose-300" data-tool-error={part.errorText}>
-            {part.errorText}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
+const RUN_COMMAND_PREFIX = '/run';
 
 /**
  * 一条消息：用户右对齐、助手左对齐，`parts[]` 按顺序渲染（文本段 + 工具卡片段）。
@@ -140,6 +98,8 @@ export function ChatPanel() {
   const bridge = window.autoCC;
   // 对话与工作流镜像同一个 runner 实例（spec 1.10-08 的后半句判据）。
   const { run } = useWorkflowRun();
+  // agent 循环的进度独立于 chat 的忙碌态：跑任务的时候输入区照常能用（spec 5.2-12）。
+  const agentRun = useAgentRun();
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
@@ -185,14 +145,25 @@ export function ChatPanel() {
   useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [snapshot, liveStream]);
+  }, [snapshot, liveStream, agentRun.run]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
 
-  /** 发送输入框里的话；流式期间不发（主进程会以 `CHAT_BUSY` 结构化拒绝，但按钮先禁用更清楚）。 */
+  /**
+   * 发送输入框里的话；流式期间不发（主进程会以 `CHAT_BUSY` 结构化拒绝，但按钮先禁用更清楚）。
+   * `/run` 开头那一句走 agent 循环：它不进对话表，只在同一段流里起一张计划卡（spec 5.2-03）。
+   */
   const submit = () => {
     const text = draft.trim();
     if (!text || isStreaming) return;
+    if (text.startsWith(RUN_COMMAND_PREFIX)) {
+      // 先清输入框再派发：`propose` 是异步的，而输入区在任务跑起来时不该留着上一条命令（5.2-12）。
+      // 前缀后面是空的也照样交给主进程——它用 `AGENT_LOOP_EMPTY_GOAL` 结构化拒绝，
+      // 那句原话会出现在面板提示行里，界面不必再编一条自己的判定（§2.6）。
+      setDraft('');
+      void agentRun.propose(text.slice(RUN_COMMAND_PREFIX.length).trim());
+      return;
+    }
     void call(t('chat.actionSend'), () => bridge?.chat['session.send'](text), {
       apply: () => setDraft(''),
     });
@@ -278,7 +249,7 @@ export function ChatPanel() {
 
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。 */}
       <div ref={scrollRef} data-testid="chat-scroll" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && !isStreaming ? (
+        {messages.length === 0 && !isStreaming && !agentRun.run ? (
           <p className="text-[11px] text-slate-500" data-testid="chat-empty">
             {t('chat.empty')}
           </p>
@@ -306,6 +277,19 @@ export function ChatPanel() {
                   ) : null}
                 </div>
               </li>
+            ) : null}
+            {/* 计划卡与逐步卡片流插在同一段对话流末尾（plan 5.2-c：五条 V 共用这段流，不另开一条历史）。 */}
+            {agentRun.run ? (
+              <AgentRunPanel
+                run={agentRun.run}
+                toolMetas={toolMetas}
+                busy={agentRun.busy}
+                notice={agentRun.notice}
+                stopAccepted={agentRun.stopAccepted}
+                onConfirm={() => void agentRun.confirm()}
+                onStop={() => void agentRun.stop()}
+                onDismiss={agentRun.dismiss}
+              />
             ) : null}
           </ul>
         )}
@@ -364,6 +348,10 @@ export function ChatPanel() {
           </button>
           <p className="ml-auto text-[10px] text-slate-500" data-testid="chat-hint">
             {t('chat.toolHint')}
+          </p>
+          {/* 循环入口写在提示里而不是加第三个输入框：`/run` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
+          <p className="text-[10px] text-slate-500" data-testid="chat-run-hint">
+            {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
           </p>
         </div>
       </footer>

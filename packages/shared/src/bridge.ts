@@ -5,6 +5,7 @@
  * 因此「渲染层能调什么」与「主进程允许什么」永远是同一个常量，不会漂移。
  */
 import type {
+  AgentRunView,
   AppErrorPayload,
   AutonomyLevel,
   ChatDeltaEvent,
@@ -38,6 +39,11 @@ import type {
  * 所以不在此转出。
  */
 export type {
+  AgentPlanStepView,
+  AgentRunStatus,
+  AgentRunView,
+  AgentStepStatus,
+  AgentStepView,
   AppErrorPayload,
   AutonomyLevel,
   ChatDeltaEvent,
@@ -160,6 +166,13 @@ export const RENDERER_ALLOWLIST = [
   // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
   'agent.tools.list',
   'agent.tools.call',
+  // 5.2-c 的循环入口面（spec 5.2-03 / 04 / 10）：起草可见计划、人确认后才动、中途叫停、随时读整份进度。
+  // `confirm` 与 `resume.generate.accept` 同一口径：**只由人按**，刻意不登记为 agent 工具——
+  // 让模型自己确认自己的计划，等于把「人逐项过目」那道闸取消掉（AGENTS.md §8.4）。
+  'agent.loop.propose',
+  'agent.loop.confirm',
+  'agent.loop.stop',
+  'agent.loop.read',
   'chat.session.current',
   'chat.session.send',
   'chat.session.stop',
@@ -1370,6 +1383,29 @@ export interface BridgeSignatures {
    * 工具失败要变成卡片上的一条内容，不能让整条消息消失。
    */
   'agent.tools.call': { args: [toolId: string, input: unknown]; returns: ToolCallReply };
+  /**
+   * 起草一份计划并落一条 `proposed` 的 run（spec 5.2-03）：**这一步不执行任何动作**，
+   * 返回的就是计划卡要画的那份读数（步骤 + 每步副作用级 + 档位快照 + 两条上限）。
+   * @param goal 用户原文，主进程侧按系统边界校验（去空、限长）
+   */
+  'agent.loop.propose': { args: [goal: string]; returns: AgentRunView };
+  /**
+   * 确认这份计划并开始逐步执行（spec 5.2-03 / 04）。只有界面点出来的这一条路，
+   * 不登记为 agent 工具（见 `RENDERER_ALLOWLIST` 同处的说明）。
+   * @param runId 待确认的 run；不在 `proposed` 态时结构化失败，不会「再跑一遍」
+   */
+  'agent.loop.confirm': { args: [runId: string]; returns: AgentRunView };
+  /**
+   * 叫停（spec 5.2-10）：正在跑的那一步不被硬切，停在**下一个安全点**。
+   * @param runId 要停的 run；已终态的原样返回读数，不报错
+   */
+  'agent.loop.stop': { args: [runId: string]; returns: AgentRunView };
+  /**
+   * 现读一次 run 的整份落库读数（spec 5.2-04 / 09 的界面半边）：进度**主要由 `agent/run-progress` 推**，
+   * 这条负责「错过了也还在」（与 `outbound.deliver.pending()` 同一分工）。
+   * @param runId 运行 id
+   */
+  'agent.loop.read': { args: [runId: string]; returns: AgentRunView };
   /** 当前会话的整份快照（spec 1.11-08）；首次访问就地建会话，永不为 null。 */
   'chat.session.current': { args: []; returns: ChatSnapshotView };
   /** 发一条用户消息并起一次流式回复，返回刚进入流式态的助手消息（spec 1.11-02 / 03）。 */
@@ -1556,6 +1592,8 @@ export const RENDERER_EVENTS = [
   'browser/risk-signal',
   // 知识库实体表被写过（spec 4.2-06）：编辑即时生效靠它，界面不轮询也不靠用户手动刷新。
   'kb/entities-changed',
+  // 5.2-c 的循环进度（spec 5.2-04）：逐步卡片流靠它推进，载荷就是 `agent.loop.read` 那份读数。
+  'agent/run-progress',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -1572,6 +1610,7 @@ export interface RendererEventSignatures {
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
   'kb/entities-changed': KbEntitiesChangedEvent;
+  'agent/run-progress': AgentRunView;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

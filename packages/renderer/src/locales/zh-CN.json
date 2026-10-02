@@ -513,6 +513,7 @@
       "newSession": "新建会话",
       "streaming": "回复生成中…",
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
+      "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
       "workflowMirror": "同一个 runner：{{status}}",
       "actionSend": "发送消息",
       "actionStop": "停止回复",
@@ -553,11 +554,53 @@
         },
         "needsConfirm": "需人工批准",
         "input": "参数 {{input}}",
+        "inputToggle": "展开参数摘要",
         "duration": "{{ms}} 毫秒",
         "state": {
           "running": "执行中",
           "done": "已完成",
           "failed": "失败"
+        }
+      },
+      "run": {
+        "heading": "任务计划",
+        "dismiss": "收起",
+        "dismissed": "已收起这条任务，库里的记录一条都没改",
+        "goal": "目标：{{goal}}",
+        "autonomySnapshot": "起草时档位：{{level}}",
+        "outboundCount": "其中 {{outbound}} 步会离开本机",
+        "limits": "步数上限 {{steps}} · token 预算 {{tokens}}",
+        "progress": "已落 {{done}} / {{total}} 步",
+        "tokensUsed": "已用 {{used}} token",
+        "tierNote": "改档位从下一步生效：正在执行的那一步照常收尾",
+        "emptyPlan": "这份计划一步都没有，确认也不会执行任何动作",
+        "stepIndex": "第 {{index}} 步",
+        "notStarted": "未开始",
+        "effectUnregistered": "未登记",
+        "beforeConfirm": "确认之前不执行任何动作",
+        "confirm": "确认并执行",
+        "cancel": "取消这份计划",
+        "stopNow": "叫停",
+        "stopAccepted": "已受理叫停：正在跑的那一步不被打断，停在下一个安全点",
+        "stopHint": "叫停在下一个安全点生效，不硬切在飞的动作",
+        "actionPropose": "起草任务计划",
+        "actionConfirm": "确认并执行计划",
+        "actionStop": "叫停任务",
+        "status": {
+          "proposed": "待确认",
+          "running": "执行中",
+          "paused": "已暂停",
+          "completed": "已完成",
+          "failed": "失败"
+        },
+        "stopReason": {
+          "COMPLETED": "全部步骤跑完",
+          "PLAN_EMPTY": "计划为空",
+          "POLICY_REFUSED": "档位不允许，已拒绝",
+          "STEP_LIMIT": "撞到步数上限",
+          "TOKEN_LIMIT": "撞到 token 预算",
+          "USER_STOPPED": "由人叫停",
+          "STEP_UNSUCCESSFUL": "有步骤没成功"
         }
       }
     },

@@ -513,6 +513,7 @@
       "newSession": "New session",
       "streaming": "Reply is being generated…",
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
+      "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
       "workflowMirror": "Same runner: {{status}}",
       "actionSend": "send message",
       "actionStop": "stop reply",
@@ -553,11 +554,53 @@
         },
         "needsConfirm": "requires approval",
         "input": "Input: {{input}}",
+        "inputToggle": "Show input summary",
         "duration": "{{ms}} ms",
         "state": {
           "running": "running",
           "done": "done",
           "failed": "failed"
+        }
+      },
+      "run": {
+        "heading": "Task plan",
+        "dismiss": "Collapse",
+        "dismissed": "Panel hidden; the stored run was not changed",
+        "goal": "Goal: {{goal}}",
+        "autonomySnapshot": "Tier at draft time: {{level}}",
+        "outboundCount": "{{outbound}} step(s) would leave this machine",
+        "limits": "Step cap {{steps}} · token budget {{tokens}}",
+        "progress": "{{done}} of {{total}} steps recorded",
+        "tokensUsed": "{{used}} tokens used",
+        "tierNote": "A tier change applies from the next step; the in-flight step finishes",
+        "emptyPlan": "This plan has no step, so confirming would run nothing",
+        "stepIndex": "Step {{index}}",
+        "notStarted": "Not started",
+        "effectUnregistered": "Unregistered",
+        "beforeConfirm": "Nothing runs before you confirm",
+        "confirm": "Confirm and run",
+        "cancel": "Cancel this plan",
+        "stopNow": "Stop",
+        "stopAccepted": "Stop accepted: the in-flight step finishes, then it halts",
+        "stopHint": "Stop applies at the next safe point",
+        "actionPropose": "draft the task plan",
+        "actionConfirm": "confirm and run the plan",
+        "actionStop": "stop the task",
+        "status": {
+          "proposed": "awaiting confirmation",
+          "running": "running",
+          "paused": "paused",
+          "completed": "completed",
+          "failed": "failed"
+        },
+        "stopReason": {
+          "COMPLETED": "all steps finished",
+          "PLAN_EMPTY": "empty plan",
+          "POLICY_REFUSED": "refused by tier policy",
+          "STEP_LIMIT": "hit the step cap",
+          "TOKEN_LIMIT": "hit the token budget",
+          "USER_STOPPED": "stopped by you",
+          "STEP_UNSUCCESSFUL": "a step did not succeed"
         }
       }
     },

@@ -1071,6 +1071,12 @@ declare module 'cordis' {
      */
     'chat/delta'(event: ChatDeltaEvent): void;
     /**
+     * agent 循环每推进一次（确认起跑 / 一步开始 / 一步结束 / 收尾）由 `agent.loop` 发出（spec 5.2-04）。
+     * 载荷**就是** `agent.loop.read()` 那份 `AgentRunView`，不额外包一层：界面与日志读的是同一个形状，
+     * 包一层就得在渲染层再推导一次「现在到底跑到第几步」，那是 §2.7 禁的第二份事实。
+     */
+    'agent/run-progress'(event: AgentRunView): void;
+    /**
      * 一次定位由「上一次成功留下的指纹」自愈重找到元素时由 `browser.locate` 发出（spec 2.2-05）。
      * 2.7 的选择器腐化率只统计这一条来源，漏发就等于宣称站点没有改版。
      */
