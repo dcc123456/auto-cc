@@ -32,28 +32,6 @@ const TOOL_STATE_STYLE: Record<ChatToolPart['state'], string> = {
   failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
 };
 
-/**
- * 工具 id → 界面标题的 i18n key，每个已登记的能力各一条（spec 2.8-09）。
- * id 里带点，而语言包按点分层，所以键用短码；映射表在编译期钉住，未落进来的 id 走 `agent.tool.unregistered`。
- */
-const TOOL_LABEL_KEY: Record<string, string> = {
-  'browser.act.click': 'agent.tool.labels.actClick',
-  'browser.act.type': 'agent.tool.labels.actType',
-  'browser.locate.find': 'agent.tool.labels.locateFind',
-  'browser.page.navigate': 'agent.tool.labels.pageNavigate',
-  'browser.page.snapshot': 'agent.tool.labels.pageSnapshot',
-  'jd.capture.run': 'agent.tool.labels.jdCapture',
-  // 缺口报告（4.4-d）：对话里问"这份 JD 我差在哪"与界面上的缺口面板打的是同一个 `report()`。
-  'kb.gap.report': 'agent.tool.labels.kbGapReport',
-  // 知识库的两个读口（4.2-f / 4.3-c）：对话里挑中它们时卡片要说得出人话，而不是「未登记的工具」。
-  'kb.profile.list': 'agent.tool.labels.kbList',
-  'kb.profile.search': 'agent.tool.labels.kbSearch',
-  'kb.profile.syncVectors': 'agent.tool.labels.kbSyncVectors',
-  'outbound.deliver.perform': 'agent.tool.labels.deliverPerform',
-  'outbound.greet.perform': 'agent.tool.labels.greetPerform',
-  'sessions.open': 'agent.tool.labels.sessionsOpen',
-};
-
 /** 界面上正在累加的那条助手回复（主进程快照在流式期间也带这条，两边同时画会重复，所以过滤掉它）。 */
 type LiveStream = { sessionId: string; messageId: string; text: string; tool?: ChatToolPart };
 
@@ -67,7 +45,9 @@ type LiveStream = { sessionId: string; messageId: string; text: string; tool?: C
  */
 function ToolCard({ part, meta }: { part: ChatToolPart; meta?: ToolDescriptorView }) {
   const { t } = useTranslation();
-  const labelKey = TOOL_LABEL_KEY[part.toolId];
+  // 标题键来自注册表声明本身（spec 5.1-02：一份事实一个来源），界面不再留 id→键的映射表；
+  // 未登记或读数未回来时只有这一条兜底文案，卡片因此永远不会显示裸 id 当标题。
+  const labelKey = meta?.titleKey;
   return (
     <div
       data-testid="chat-tool-card"

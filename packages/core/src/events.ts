@@ -752,6 +752,9 @@ export type ToolEffect = (typeof TOOL_EFFECTS)[number];
 /** 工具注册表对外可见的元数据（`run` 与 schema 实例过不了 IPC，也不该过）。 */
 export type ToolDescriptorView = {
   id: string;
+  /** 界面标题的语言包键（`agent.tool.labels.*`）——卡片只读它，不再自己存一份 id→键映射（spec 5.1-02） */
+  titleKey: string;
+  /** 给模型与调试面板看的说明，不是界面文案 */
   description: string;
   effect: ToolEffect;
   requiresConfirmation: boolean;
@@ -779,7 +782,15 @@ export type ToolCallReply =
 export interface AgentToolDeclaration<I = unknown> {
   /** 全限定 id，约定 `域.动作` 且与服务口名一致（plan §15.1 决策 5） */
   readonly id: string;
-  /** 给模型与界面看的一句话说明，工具卡片标题读它 */
+  /**
+   * 界面标题的语言包键（spec 5.1-02）。
+   *
+   * 它是**注册表里的一个键，不是文案**：卡片把这条键交给语言包解析，界面上就不该再有第二份 id→键映射。
+   * 之前那份映射长在渲染层（`ChatPanel` 的 `TOOL_LABEL_KEY`），后果已经现场抓到过：
+   * `resume.generate.run` 登记成了工具、却漏在那张表里，卡片于是显示「未登记的工具」。
+   */
+  readonly titleKey: string;
+  /** 给模型与调试面板看的一句话说明：描述这只工具**做什么**，消费者是模型与开发者，不是界面文案 */
   readonly description: string;
   /** 入参 schema：调用前 `safeParse`，不过就以 `TOOL_INPUT_INVALID` 返回，绝不把脏值递给 `run` */
   readonly input: ZodType<I>;

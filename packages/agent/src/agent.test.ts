@@ -72,6 +72,7 @@ async function waitUntil(until: () => boolean, timeoutMs: number, reason: string
 function makeEchoTool(): AgentTool<{ text: string }> {
   return {
     id: 'demo.echo',
+    titleKey: 'agent.tool.labels.demoEcho',
     description: '把入参原样返回',
     input: z.object({ text: z.string().min(1) }),
     effect: 'read',
@@ -102,12 +103,18 @@ describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
     expect(tools.list()).toEqual([]);
   });
 
-  it('注册后元数据带齐协议四个字段，入参不合法被 schema 拦下（1.11-05）', async () => {
+  it('注册后元数据带齐协议五个字段，入参不合法被 schema 拦下（1.11-05 / 5.1-01）', async () => {
     const { tools } = await boot();
     tools.register(makeEchoTool());
     const view: ToolDescriptorView[] = tools.list();
     expect(view).toEqual([
-      { id: 'demo.echo', description: '把入参原样返回', effect: 'read', requiresConfirmation: false },
+      {
+        id: 'demo.echo',
+        titleKey: 'agent.tool.labels.demoEcho',
+        description: '把入参原样返回',
+        effect: 'read',
+        requiresConfirmation: false,
+      },
     ]);
     const invalid = await tools.call('demo.echo', { text: '' });
     expect(invalid.ok).toBe(false);
@@ -202,6 +209,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     const { chat, tools, deltas } = await boot({ chunkChars: 50, chunkIntervalMs: 1 });
     tools.register({
       id: 'jd.capture.run',
+      titleKey: 'agent.tool.labels.jdCapture',
       description: '假抓取：只回一个计数',
       input: z.object({ criteria: z.unknown() }),
       effect: 'outbound',

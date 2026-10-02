@@ -368,6 +368,7 @@ export class ResumeGenerateService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'resume.generate.run',
+        titleKey: 'agent.tool.labels.generateRun',
         description:
           '按一段 JD 定制这份简历的内容：区块与条目顺序由知识库证据强度算出（不进模型），简介 / 经历成果 / 教育描述三类散文段交模型改写，改写后必过三条确定性事实校验（事实字段原样、数值多重集守恒、具名机构回查），不过则带违规明细重试一次、仍不过就拒绝产出；模型腿不可用时退回「仅重排、不改写」的保守版本并在 modelStatus 里给出原因。只产出提议态文档与证据 id，不写工作副本、不接外发额度闸门',
         input: z.strictObject({

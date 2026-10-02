@@ -479,6 +479,7 @@ export class BrowserActService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'browser.act.click',
+        titleKey: 'agent.tool.labels.actClick',
         description: '点击定位声明指向的控件（真实页面上的外部副作用，需先经批准流）',
         input: z.strictObject({ spec: locateSpecSchema }),
         effect: 'outbound',
@@ -487,6 +488,7 @@ export class BrowserActService extends Service {
       }),
       agentTool({
         id: 'browser.act.type',
+        titleKey: 'agent.tool.labels.actType',
         description: '往定位声明指向的输入控件写文本（中文与 emoji 原样送入）',
         input: z.strictObject({ spec: locateSpecSchema, text: z.string().min(1) }),
         effect: 'outbound',

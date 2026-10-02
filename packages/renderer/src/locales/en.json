@@ -541,7 +541,8 @@
           "locateFind": "Locate control",
           "pageNavigate": "Navigate page",
           "pageSnapshot": "Read page snapshot",
-          "sessionsOpen": "Open platform session"
+          "sessionsOpen": "Open platform session",
+          "generateRun": "Tailor the resume content for this JD"
         },
         "effect": {
           "read": "read-only",

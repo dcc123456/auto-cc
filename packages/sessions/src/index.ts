@@ -355,6 +355,7 @@ export class SessionsService extends Service implements ConsentGate {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'sessions.open',
+        titleKey: 'agent.tool.labels.sessionsOpen',
         description: '在指定平台的会话分区里打开内嵌视图（重启后沿用同一份登录态）',
         input: z.strictObject({ platform: z.string().min(1) }),
         effect: 'read',

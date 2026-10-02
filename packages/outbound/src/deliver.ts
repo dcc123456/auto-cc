@@ -702,6 +702,7 @@ export class OutboundDeliverService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'outbound.deliver.perform',
+        titleKey: 'agent.tool.labels.deliverPerform',
         description: '向指定岗位投递简历附件，经闸门判定并按审批档位落一条 deliver 账',
         input: z.strictObject({
           request: z.strictObject({

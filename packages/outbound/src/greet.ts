@@ -298,6 +298,7 @@ export class OutboundGreetService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'outbound.greet.perform',
+        titleKey: 'agent.tool.labels.greetPerform',
         description: '向指定岗位的目标发送一句打招呼文案，经闸门判定并落一条 greet 账',
         input: z.strictObject({
           request: z.strictObject({

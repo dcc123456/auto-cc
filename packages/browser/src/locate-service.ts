@@ -246,6 +246,7 @@ export class BrowserLocateService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'browser.locate.find',
+        titleKey: 'agent.tool.labels.locateFind',
         description: '按定位声明在当前内核页面找控件，带回打分与指纹；找不到就失败，不猜',
         input: z.strictObject({ spec: locateSpecSchema }),
         effect: 'read',

@@ -427,6 +427,7 @@ export class KbProfileService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'kb.profile.list',
+        titleKey: 'agent.tool.labels.kbList',
         description:
           '列出本地知识库里的经历 / 项目 / 技能 / 成果实体，可按种类过滤；sourceDocId 传 null 时只取用户手工创建的实体',
         input: z.strictObject({
@@ -442,6 +443,7 @@ export class KbProfileService extends Service {
       // 注册表那层的 `TOOL_INPUT_INVALID` 会把 4.3-10 要区分的两个确定空态吃成一个错误。
       agentTool({
         id: 'kb.profile.search',
+        titleKey: 'agent.tool.labels.kbSearch',
         description:
           '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；默认纯本地不联网，只有已配置并补建过向量时才额外做一次查询编码（结果里的 vectorStatus 说明本次用了哪条腿）',
         input: z.strictObject({ query: z.string() }),
@@ -455,6 +457,7 @@ export class KbProfileService extends Service {
       // 「不联网也能用」——出网必须是显式动作，界面与对话都只在用户按下去时才发。
       agentTool({
         id: 'kb.profile.syncVectors',
+        titleKey: 'agent.tool.labels.kbSyncVectors',
         description:
           '为本地知识库中尚无向量的检索切片调用 embedding 端点补建向量（会出网，按当前配置的模型；已配好则只报告待补条数），返回逐条计数而不含正文',
         input: z.strictObject({}),

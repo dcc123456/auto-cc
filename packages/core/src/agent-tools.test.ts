@@ -6,7 +6,8 @@
  * 1. **注册表没装时不报错也不静默**——返回 0 由调用方打进日志（1.5-03/04 的「agent 可单独摘掉」靠它）；
  * 2. **登记方销毁时摘得干净**——热改配置重建服务后，旧实例的 `run` 闭包若还悬在表里，
  *    下一次调用打到的就是一个已经销毁的实例（plan §12.13 记过的那类现场）。
- * 这里不测真注册表的行为（`list` / `call` / schema 校验由 `agent` 包的用例负责），只测这条跨层通道。
+ * 这里不测真注册表的行为（`list` / `call` / schema 校验由 `agent` 包的用例负责），只测这条跨层通道，
+ * 外加文件末尾那一组**契约取值面**断言：副作用枚举是闸门与界面分级的唯一词表，多一个值就等于多一类工具。
  */
 import { z } from 'zod';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,6 +15,7 @@ import {
   Context,
   NO_CONFIG,
   Service,
+  TOOL_EFFECTS,
   agentToolsOf,
   registerAgentTools,
   type AgentToolDeclaration,
@@ -66,6 +68,7 @@ class FakeRegistryService extends Service implements AgentToolRegistry {
 function makeTool(id: string): AgentToolDeclaration {
   return {
     id,
+    titleKey: `agent.tool.labels.fake${id}`,
     description: `假工具 ${id}`,
     input: z.strictObject({}),
     effect: 'read',
@@ -142,5 +145,14 @@ describe('agent 工具登记通道（spec 2.8-08）', () => {
     await registryFiber?.dispose();
     await expect(fiber.dispose()).resolves.toBeUndefined();
     expect(registry?.removed).toEqual(['fake.alpha', 'fake.beta']);
+  });
+});
+
+describe('工具契约的取值面（spec 5.1-03）', () => {
+  it('副作用枚举恰好三值，顺序稳定且没有 unknown 这类兜底位', () => {
+    // 这一位决定闸门与界面分级，多一个值就等于多一类工具；顺序进断言是因为界面按下标上色。
+    expect(TOOL_EFFECTS).toEqual(['read', 'local-write', 'outbound']);
+    expect(new Set(TOOL_EFFECTS).size).toBe(3);
+    expect(TOOL_EFFECTS).not.toContain('unknown');
   });
 });

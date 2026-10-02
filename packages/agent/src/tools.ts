@@ -94,6 +94,7 @@ export class AgentToolsService extends Service {
   list(): ToolDescriptorView[] {
     return [...this.table.values()].map((tool) => ({
       id: tool.id,
+      titleKey: tool.titleKey,
       description: tool.description,
       effect: tool.effect,
       requiresConfirmation: tool.requiresConfirmation,

@@ -33,6 +33,7 @@ class FakeCapabilityService extends Service {
     this.registeredCount = registerAgentTools(this.ctx, [
       {
         id: 'fake.capability.run',
+        titleKey: 'agent.tool.labels.fakeCapabilityRun',
         description: '假能力包登记的一只工具',
         input: z.strictObject({ text: z.string().min(1) }),
         effect: 'read',
@@ -62,6 +63,7 @@ describe('agent.tools 的跨层登记面（spec 2.8-08）', () => {
     expect(tools.list()).toEqual([
       {
         id: 'fake.capability.run',
+        titleKey: 'agent.tool.labels.fakeCapabilityRun',
         description: '假能力包登记的一只工具',
         effect: 'read',
         requiresConfirmation: false,
@@ -108,6 +110,7 @@ describe('agent.tools 的跨层登记面（spec 2.8-08）', () => {
     expect(tools.list()).toEqual([
       {
         id: 'fake.capability.run',
+        titleKey: 'agent.tool.labels.fakeCapabilityRun',
         description: '假能力包登记的一只工具',
         effect: 'read',
         requiresConfirmation: false,

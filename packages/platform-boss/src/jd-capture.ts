@@ -356,6 +356,7 @@ export class JdCaptureService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'jd.capture.run',
+        titleKey: 'agent.tool.labels.jdCapture',
         description: '按搜索条件在平台列表页滚动收集 JD 并读详情入库，占一条 search 额度',
         input: z.strictObject({
           criteria: z.strictObject({

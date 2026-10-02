@@ -324,6 +324,7 @@ export class BrowserPageService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'browser.page.navigate',
+        titleKey: 'agent.tool.labels.pageNavigate',
         description: '让内嵌内核视图导航到已登记平台的同源地址，并回一份页面快照',
         input: z.strictObject({ url: z.url() }),
         effect: 'read',
@@ -332,6 +333,7 @@ export class BrowserPageService extends Service {
       }),
       agentTool({
         id: 'browser.page.snapshot',
+        titleKey: 'agent.tool.labels.pageSnapshot',
         description: '读取当前内核视图所在页面的快照（标题 / 地址 / 装载态 / 正文节选）',
         input: z.strictObject({ maxChars: z.number().int().min(1).max(50_000).optional() }),
         effect: 'read',

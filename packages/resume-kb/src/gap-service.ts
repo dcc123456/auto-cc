@@ -263,6 +263,7 @@ export class KbGapService extends Service {
     const tools = registerAgentTools(this.ctx, [
       agentTool({
         id: 'kb.gap.report',
+        titleKey: 'agent.tool.labels.kbGapReport',
         description:
           '把一段 JD 正文与本地简历知识库比对，返回三态缺口报告（命中 / 部分命中 / 缺失）、每条未命中要求的改写建议、库内具备而 JD 未提的相关亮点，以及经验月数与学历档位两个换算读数；模型腿不可用时自动退回词面拆解并在 modelStatus 里给出原因，全程只读本地库、不出网',
         input: z.strictObject({
