@@ -63,7 +63,11 @@ async function bootLoop(overrides: Partial<AgentLoopConfig> = {}, tier: Autonomy
   await storeFiber;
   const toolsFiber = ctx.plugin(AgentToolsService, {});
   await toolsFiber;
-  const chatFiber = ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0 });
+  const chatFiber = ctx.plugin(ChatSessionService, {
+    chunkChars: 40,
+    chunkIntervalMs: 0,
+    defaultAutonomy: 'suggest',
+  });
   await chatFiber;
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
@@ -821,6 +825,29 @@ describe('摘掉工具面之后的反向验证（5.2-13）', () => {
       expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'TOOL_UNAVAILABLE' });
       expect(finished).toMatchObject({ status: 'failed', stopReason: 'POLICY_REFUSED' });
       expect(rig.calls).toEqual([]);
+    } finally {
+      recording.restore();
+    }
+  });
+});
+
+describe('档位提升不是 agent 的一只手（spec 5.3-04 的循环半边）', () => {
+  it('草案点名「切换档位」：拒在 TOOL_UNAVAILABLE，跑完之后档位仍是用户设的那档', async () => {
+    const rig = await bootLoop({}, 'semi');
+    rig.tools.register(makeGreetTool(rig.calls));
+    const tierBefore = rig.chat.current().session.autonomy;
+    // 工具面上没有这只手（改档只在 `chat.session`，而它不是能力包登记的手，机检 ⑤ 钉的就是这个），
+    // 所以模型要升档只有一条路：凭空点名——而点名不存在的手在判定口就死（与 5.2-07 同源）。
+    const recording = recordModel((steps) =>
+      steps.map((step) => ({ ...step, toolId: 'chat.session.setAutonomy', input: { level: 'auto' } })),
+    );
+    try {
+      const proposed = await rig.loop.propose('demo.greet {"to":"boss/123"}');
+      const finished = await rig.loop.confirm(proposed.runId);
+      expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'TOOL_UNAVAILABLE' });
+      expect(finished).toMatchObject({ status: 'failed', stopReason: 'POLICY_REFUSED' });
+      expect(rig.calls).toEqual([]);
+      expect(rig.chat.current().session.autonomy).toBe(tierBefore);
     } finally {
       recording.restore();
     }

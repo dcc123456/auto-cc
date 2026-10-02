@@ -11,7 +11,13 @@
  */
 export { AgentToolsService, agentToolsConfigSchema } from './tools.js';
 export type { AgentTool } from './tools.js';
-export { CHAT_MIGRATION_VERSION, ChatSessionService, chatConfigSchema, MAX_USER_INPUT_CHARS } from './session.js';
+export {
+  CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_MIGRATION_VERSION,
+  ChatSessionService,
+  chatConfigSchema,
+  MAX_USER_INPUT_CHARS,
+} from './session.js';
 export type { ChatConfig } from './session.js';
 export { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, agentLoopSchema } from './loop/loop.js';
 export type { AgentLoopConfig } from './loop/loop.js';

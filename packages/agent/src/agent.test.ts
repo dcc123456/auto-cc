@@ -14,7 +14,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { CHAT_MIGRATION_VERSION, ChatSessionService, type ChatConfig } from './session.js';
+import {
+  CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_MIGRATION_VERSION,
+  ChatSessionService,
+  chatConfigSchema,
+  type ChatConfig,
+} from './session.js';
 import { AgentToolsService, type AgentTool } from './tools.js';
 
 const opened: { dispose(): Promise<unknown> }[] = [];
@@ -42,7 +48,14 @@ async function boot(config: Partial<ChatConfig> = {}) {
   // 先订阅再挂载：流式一旦跑起来，晚一行订阅就漏掉前面几片，"字数递增"就断言不出来了。
   const deltas: ChatDeltaEvent[] = [];
   ctx.on('chat/delta', (event) => deltas.push(event));
-  const chatFiber = ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, ...config });
+  const chatFiber = ctx.plugin(ChatSessionService, {
+    chunkChars: 40,
+    chunkIntervalMs: 0,
+    // 带 `.default()` 的键在直接调用点必须显式给出（AGENTS.md §9 的 1.3 实测）；
+    // 「装配里不给这一行」那半边由 `chatConfigSchema.parse({})` 的用例证明（5.3-02）。
+    defaultAutonomy: 'suggest',
+    ...config,
+  });
   await chatFiber;
   opened.push(chatFiber, toolsFiber, storeFiber);
   const app = asApp(ctx);
@@ -439,7 +452,11 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(chatVersions()).toBe(1);
 
     await chatFiber.dispose();
-    const remounted = ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0 });
+    const remounted = ctx.plugin(ChatSessionService, {
+      chunkChars: 40,
+      chunkIntervalMs: 0,
+      defaultAutonomy: 'suggest',
+    });
     await remounted;
     expect(chatVersions()).toBe(1);
     // 版本没重复只是一半，另一半是「重新挂载之后读到的还是那两份表」——upgrade() 在已到版本的库上是空转。
@@ -499,5 +516,90 @@ describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
     // 卡片状态见 `ChatToolPart.state`，流式见 `chat/delta` 事件——三者都不依赖任何外部库。
     expect(tools.list()[0]).toHaveProperty('requiresConfirmation');
     expect(tool.effect).toBe('read');
+  });
+});
+
+describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () => {
+  it('装配不给 defaultAutonomy：schema 补出来的就是最保守档', () => {
+    // 5.3-02 的验证操作是「删配置 → 断言档位为建议模式」。这里删的是配置里的这一行，
+    // 而 `cordis.yml` 的 `chat` 条目本来就没写它——所以这条断言读的是真实装配，不是想象中的装配。
+    expect(chatConfigSchema.parse({}).defaultAutonomy).toBe('suggest');
+    const cordisYml = readFileSync(join(fileURLToPath(new URL('.', import.meta.url)), '../../../cordis.yml'), 'utf8');
+    const chatEntryBlock = cordisYml.match(/\n {2}- id: chat\n[\s\S]*?(?=\n {2}- id: )/)?.[0] ?? '';
+    // 注释行要剔掉再判：装配文件里写着「这一行为什么不给」的说明，那不是配置键本身。
+    const chatConfigLines = chatEntryBlock
+      .split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    expect(chatConfigLines).toContain('chunkChars');
+    expect(chatConfigLines).not.toContain('defaultAutonomy');
+  });
+
+  it('新会话落在配置的默认档，而不是写死的某个档', async () => {
+    const first = await boot();
+    expect(first.chat.current().session.autonomy).toBe('suggest');
+    const second = await boot({ defaultAutonomy: 'semi' });
+    expect(second.chat.current().session.autonomy).toBe('semi');
+  });
+
+  it('库里读到认不出的档位：一律回落到最保守档，不把它读成一个更宽的档', async () => {
+    const { ctx, chat } = await boot();
+    const snapshot = chat.current();
+    asApp(ctx)
+      .store.db.prepare('UPDATE chat_session SET autonomy = ? WHERE id = ?')
+      .run('superman', snapshot.session.id);
+    expect(chat.current().session.autonomy).toBe('suggest');
+  });
+
+  it('每次真的改档都留一条审计（时间/前档/后档/来源=用户），没变更就不留', async () => {
+    const { chat } = await boot();
+    const sessionId = chat.current().session.id;
+    // 建会话本身不是「变更」：它落的是默认档，此时审计必须是空的，否则审计里全是噪音行。
+    expect(chat.autonomyAudit(sessionId)).toEqual([]);
+    chat.setAutonomy('semi');
+    chat.setAutonomy('auto');
+    chat.setAutonomy('auto');
+    const rows = chat.autonomyAudit(sessionId);
+    expect(rows).toHaveLength(2);
+    // 倒序：最新一条在前，界面与排查都是先看最近一次改档。
+    expect(rows[0]).toMatchObject({ fromAutonomy: 'semi', toAutonomy: 'auto', source: 'user' });
+    expect(rows[1]).toMatchObject({ fromAutonomy: 'suggest', toAutonomy: 'semi', source: 'user' });
+    expect(Number(rows[0]!.createdAt)).toBeGreaterThanOrEqual(Number(rows[1]!.createdAt));
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+  });
+
+  it('非法档位仍按结构化失败拒掉，且不动档位列、不留审计', async () => {
+    const { chat } = await boot();
+    const sessionId = chat.current().session.id;
+    // 断的是 `AppError.code` 而不是 message：桥接层按 code 回结构化失败，界面按它取文案。
+    const thrown = (() => {
+      try {
+        chat.setAutonomy('yolo');
+        return null;
+      } catch (error) {
+        return error as { code?: string };
+      }
+    })();
+    expect(thrown?.code).toBe('CHAT_AUTONOMY_INVALID');
+    expect(chat.current().session.autonomy).toBe('suggest');
+    expect(chat.autonomyAudit(sessionId)).toEqual([]);
+  });
+
+  it('老库（只有号段 2、没有审计表）重新挂载后能建出审计表并写进行', async () => {
+    // 这一条是实跑探针抓出来的缺陷回归位：审计表最初挂在号段 2 的 `up` 里，而 `runMigrations` 认的是
+    // `schema_migrations` 台账——已记「2 已应用」的库根本不会重跑那支迁移，老用户机上第一次切档位
+    // 就以 `no such table` 失败。每个用例都从空库起，所以单测全绿照不出这条腿（详见 plan §5.3-a 的更正）。
+    const { ctx, chatFiber } = await boot();
+    const store = asApp(ctx).store;
+    store.db.exec('DROP TABLE chat_autonomy_audit');
+    store.db.prepare('DELETE FROM schema_migrations WHERE version = ?').run(CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION);
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE name = 'chat_autonomy_audit'").get()).toBeUndefined();
+
+    await chatFiber.dispose();
+    await ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, defaultAutonomy: 'suggest' });
+    const remounted = asApp(ctx)['chat.session'];
+    const sessionId = remounted.current().session.id;
+    remounted.setAutonomy('semi');
+    expect(remounted.autonomyAudit(sessionId)).toMatchObject([{ fromAutonomy: 'suggest', toAutonomy: 'semi' }]);
   });
 });

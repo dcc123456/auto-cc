@@ -86,6 +86,35 @@ const chatMigration = {
   },
 };
 
+/**
+ * 迁移号段 **17**（5.3-a 起）：`chat_autonomy_audit` 单独一支。
+ *
+ * 为什么不能挂在号段 2 的 `up` 里（我最初的判断，已被实测推翻并更正在这里）：`runMigrations` 认的是
+ * `schema_migrations` 台账，不是 DDL 幂等——开发实例的库里早就记着「2 已应用」，把建表语句塞进
+ * 号段 2 永远不会重跑，老用户机上第一次切档位就会以 `no such table` 失败。单测每个用例都从空库起，
+ * 因此全绿也照不出这条腿（回看证据见 plan §5.3-a 的更正）。
+ */
+export const CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION = 17;
+
+/** 档位变更审计表；`down` 与号段 2 / 16 同一口径不写（同包惯例：省略即「这张表回不去」，回滚会显式失败）。 */
+const chatAutonomyAuditMigration = {
+  version: CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS chat_autonomy_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      from_autonomy TEXT NOT NULL,
+      to_autonomy TEXT NOT NULL,
+      source TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    // 回看一个会话的档位历史是「按时间倒序取最近若干条」，没这条索引就是全表扫。
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS chat_autonomy_audit_session_ts ON chat_autonomy_audit (session_id, created_at)',
+    );
+  },
+};
+
 /** 会话表的一行原始读数（列名是 snake_case，转成视图的工作收在 `toMessageView`）。 */
 type SessionRow = { id: string; autonomy: string; created_at: number | bigint };
 
@@ -103,10 +132,47 @@ export const chatConfigSchema = z.strictObject({
   chunkChars: z.number().int().min(1).max(50).default(6),
   /** 两片之间的间隔（毫秒）。上限 1 秒：再慢就演示不到「运行中仍可输入」。 */
   chunkIntervalMs: z.number().int().min(0).max(1000).default(120),
+  /**
+   * 新会话的起始档位（spec 5.3-02）。缺省即最保守档 `suggest`——只出计划不动手。
+   *
+   * 为什么做成配置而不是留字面量：5.3-02 的验证操作是「删配置 → 断言档位为建议模式」，
+   * 代码里写死 `'suggest'` 就删不动任何东西，「回落」也无从断言。装配文件 `cordis.yml` 里
+   * **故意不给这一行**，缺省值因此是被装配本身证明的。能配成 `auto` 是刻意留的口子：
+   * 那是用户在装配面板上的**显式**表态（5.3-04 要防的是 agent 自己升档，不是人改默认值）。
+   */
+  defaultAutonomy: z.enum(AUTONOMY_LEVELS).default('suggest'),
 });
 
 /** 校验后的配置形状（在装配面板可热改，走 1.5 的 `plugins.saveConfig`）。 */
 export type ChatConfig = z.output<typeof chatConfigSchema>;
+
+/**
+ * 一次档位变更的审计读数（spec 5.3-05）。
+ *
+ * `source` 只可能是 `'user'`：写这一列的唯一入口是 `setAutonomy`，而它只由界面点击触发
+ * （5.3-04 的另一半由 `scripts/check-agent-model-authority.ts` 静态钉住）。这一位不是冗余——
+ * 它把「谁动的」写进证据里，将来若有第二条来源必须显式新增枚举值，机检与用例都会因此被要求更新。
+ */
+export type AutonomyAuditRow = {
+  id: number;
+  sessionId: string;
+  fromAutonomy: AutonomyLevel;
+  toAutonomy: AutonomyLevel;
+  source: string;
+  createdAt: number;
+};
+
+/** 审计一次取多少条：界面只展示最近这几次改档，全量导出不属 5.3。 */
+const AUTONOMY_AUDIT_LIMIT = 50;
+
+/**
+ * 把库里读到的档位列收成合法档位。
+ * @param stored `chat_session.autonomy` 的原始文本（可能是历史脏值或被外部改过）
+ * @returns 认识的档位名；未知一律回落最保守档 `suggest`（5.3-02「配置缺失亦回落到最保守」的库侧半边）
+ */
+function coerceAutonomy(stored: string): AutonomyLevel {
+  return (AUTONOMY_LEVELS as readonly string[]).includes(stored) ? (stored as AutonomyLevel) : 'suggest';
+}
 
 /** 把库里的消息行转成跨进程视图：JSON 还原成 parts，bigint 收成 number。 */
 function toMessageView(row: MessageRow): ChatMessageView {
@@ -212,7 +278,11 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 切换自治档位（1.11-07）。P1 只写这一列，不产生任何行为差异。
+   * 切换自治档位（1.11-07）——**档位列全仓唯一的写入口**，且只由界面点击触发（spec 5.3-04）。
+   *
+   * 循环拿不到这只手：它没有对应的 agent 工具，`loop.ts` 里也只读 `current()`（这条由
+   * `scripts/check-agent-model-authority.ts` 静态钉住）。每次真的改了值都落一条审计（5.3-05）；
+   * 传进同一个档位是「没发生变更」，不写审计行——审计记的是变更，不是点击次数。
    * @param levelRaw 档位名，来自渲染层，按不可信输入校验
    * @returns 更新后的会话读数
    * @throws 非法档位以 `CHAT_AUTONOMY_INVALID` 结构化失败
@@ -225,8 +295,47 @@ export class ChatSessionService extends Service {
       });
     }
     const id = this.ensureSession();
+    const before = this.readSession(id).autonomy;
     this.store.db.prepare('UPDATE chat_session SET autonomy = ? WHERE id = ?').run(levelRaw, id);
+    if (before !== levelRaw) {
+      this.store.db
+        .prepare(
+          `INSERT INTO chat_autonomy_audit (session_id, from_autonomy, to_autonomy, source, created_at)
+           VALUES (?, ?, ?, 'user', ?)`,
+        )
+        .run(id, before, levelRaw, Date.now());
+    }
     return this.readSession(id);
+  }
+
+  /**
+   * 读档位变更审计（spec 5.3-05 的「可查询」半边）。
+   * @param sessionId 会话 id；省略时取当前会话
+   * @returns 最近 `AUTONOMY_AUDIT_LIMIT` 条变更，按时间倒序（最新在前）；从没改过档时是空数组
+   */
+  autonomyAudit(sessionId?: string): AutonomyAuditRow[] {
+    const id = sessionId ?? this.ensureSession();
+    const rows = this.store.db
+      .prepare(
+        `SELECT id, session_id, from_autonomy, to_autonomy, source, created_at FROM chat_autonomy_audit
+         WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      )
+      .all(id, AUTONOMY_AUDIT_LIMIT) as unknown as {
+      id: number | bigint;
+      session_id: string;
+      from_autonomy: string;
+      to_autonomy: string;
+      source: string;
+      created_at: number | bigint;
+    }[];
+    return rows.map((row) => ({
+      id: Number(row.id),
+      sessionId: row.session_id,
+      fromAutonomy: coerceAutonomy(row.from_autonomy),
+      toAutonomy: coerceAutonomy(row.to_autonomy),
+      source: row.source,
+      createdAt: Number(row.created_at),
+    }));
   }
 
   /**
@@ -239,7 +348,7 @@ export class ChatSessionService extends Service {
     this.stop();
     this.store.db
       .prepare('INSERT INTO chat_session (id, autonomy, created_at) VALUES (?, ?, ?)')
-      .run(randomUUID(), 'suggest', Date.now());
+      .run(randomUUID(), this.config.defaultAutonomy, Date.now());
     return this.current();
   }
 
@@ -248,26 +357,29 @@ export class ChatSessionService extends Service {
     this.ctx.effect(() => () => this.controller?.abort());
     this.ensureSchema();
     this.ctx.logger.info(
-      `对话会话就绪：分片 ${String(this.config.chunkChars)} 字 / ${String(this.config.chunkIntervalMs)}ms，档位默认 suggest`,
+      `对话会话就绪：分片 ${String(this.config.chunkChars)} 字 / ${String(this.config.chunkIntervalMs)}ms，` +
+        `新会话默认档位 ${this.config.defaultAutonomy}`,
     );
   }
 
   /**
-   * 把会话表的迁移登记进 `store.migrations` 并建表。
+   * 把会话域的迁移登记进 `store.migrations` 并建表（号段 2 的会话/消息 + 号段 17 的档位审计）。
    *
    * 幂等是硬要求：`plugins.start('chat')` 会重新构造本服务，无条件 push 同一个 version
    * 会让 `runMigrations` 直接抛「迁移版本重复」（plan §8.4 决策 5）。
    */
   private ensureSchema(): void {
     const migrations = this.store.migrations;
-    if (!migrations.some((migration) => migration.version === CHAT_MIGRATION_VERSION)) {
-      migrations.push(chatMigration);
+    for (const migration of [chatMigration, chatAutonomyAuditMigration]) {
+      if (!migrations.some((registered) => registered.version === migration.version)) {
+        migrations.push(migration);
+      }
     }
     this.store.upgrade();
   }
 
   /**
-   * 取最新会话的 id；一个都没有时就地建一个默认档位的。
+   * 取最新会话的 id；一个都没有时就地建一个**默认档位**的（5.3-02：默认值来自配置，缺省即最保守）。
    * @returns 当前会话 id，永不为空
    */
   private ensureSession(): string {
@@ -277,7 +389,7 @@ export class ChatSessionService extends Service {
     const id = randomUUID();
     this.store.db
       .prepare('INSERT INTO chat_session (id, autonomy, created_at) VALUES (?, ?, ?)')
-      .run(id, 'suggest', Date.now());
+      .run(id, this.config.defaultAutonomy, Date.now());
     return id;
   }
 
@@ -294,7 +406,8 @@ export class ChatSessionService extends Service {
       { n?: number | bigint } | undefined;
     return {
       id: row.id,
-      autonomy: row.autonomy as AutonomyLevel,
+      // 未知值一律收成最保守档：这一列可能被外部改过，而「读不懂」绝不能读成一个更宽的档（5.3-02）。
+      autonomy: coerceAutonomy(row.autonomy),
       createdAt: Number(row.created_at),
       messageCount: Number(count?.n ?? 0),
     };

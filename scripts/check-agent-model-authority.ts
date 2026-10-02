@@ -8,13 +8,16 @@
  *   副作用与「模型说它安全」都不在其中；草案 `PlanStepDraft` 的字段也长不出 `approved` 那一位；
  * ③ `loop.ts` 里唯一那处 `this.policy.decide({...})` 的实参只读档位、确认位与工具 id，
  *   不出现 `intent` / `observation` / `summary` / `draft` / `steps` 这些模型产出的名字；
- * ④ `policy.ts` 不 import `model.ts`——判定口连模型的类型都不认识，就接不到它的话。
+ * ④ `policy.ts` 不 import `model.ts`——判定口连模型的类型都不认识，就接不到它的话；
+ * ⑤（5.3-a 加，spec 5.3-04）写档位的路径只有「人」那一条：`setAutonomy` 在全仓非测试源码里
+ *   只许出现在定义处、IPC 白名单派发处、界面上那只切换这三份文件里，而 `UPDATE chat_session SET autonomy`
+ *   全仓一处，`loop.ts` / `policy.ts` 连那一列的表名都不出现——循环只读档位。
  *
  * 探针（5.2-b 实测，三条各打一处再还原）：给 `StepPermissionRequest` 加一位 `authorized?: boolean`、
  * 把 ③ 的实参改成带 `step.intent`、给 `LoopModel` 多加一条 `requestPermission`，本脚本都在那一处立刻 exit 1。
  * 结论与还原凭据写在 spec 的 5.2-b 落地记录。
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -125,11 +128,58 @@ if (/from '\.\/model\.js'/.test(policySource)) {
   problems.push('policy.ts 不该 import model.ts：判定口一旦认识模型的类型，就有一条可以听它表态的通道');
 }
 
+// ⑤ 档位不是 agent 的一只手（spec 5.3-04）：写 `chat_session.autonomy` 的路径必须只有「人」那一条。
+//    判法不数工具清单（清单会长），而数**名字**：全仓非测试源码里能出现 `setAutonomy` 的文件是穷举过的三份——
+//    定义处（session.ts）、IPC 白名单派发处（bridge.ts）、界面上那只切换（ChatPanel.tsx）。
+//    多出第四份 = 有人给 agent 或某个后台路径开了第二条升档口；少了任何一份 = 这条口被改名了，判据失效。
+const tierWriteAllowlist = [
+  'packages/agent/src/session.ts',
+  'packages/shared/src/bridge.ts',
+  'packages/renderer/src/ChatPanel.tsx',
+];
+/**
+ * 递归收集各包 `src` 目录下的源码文件（跳过测试与产物目录）。
+ * @param current 当前目录（相对仓库根）
+ * @returns 相对路径清单，顺序稳定（按目录名字典序，跨机器可比）
+ */
+function collectSources(current: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(path.join(repoRoot, current), { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+    const relative = `${current}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...collectSources(relative));
+    else if (/\.(?:ts|tsx)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) found.push(relative);
+  }
+  return found.sort();
+}
+
+const sourceFiles = collectSources('packages');
+const tierWriters = sourceFiles.filter((relative) => read(relative).includes('setAutonomy')).sort();
+if (tierWriters.join(',') !== [...tierWriteAllowlist].sort().join(',')) {
+  problems.push(
+    `写档位的口子应当只有这三处（${tierWriteAllowlist.join(' / ')}），现在提到 setAutonomy 的文件是：${tierWriters.join(' / ') || '（一个都没有）'}`,
+  );
+}
+// 那一列的 UPDATE 语句全仓只允许出现在 session.ts 一处——多一处就是第二套写入口（AGENTS.md §2.5）。
+const updateHits = sourceFiles.filter((relative) => /UPDATE chat_session SET autonomy/.test(read(relative)));
+if (updateHits.join(',') !== 'packages/agent/src/session.ts') {
+  problems.push(
+    `UPDATE chat_session SET autonomy 应只在 session.ts 出现一处，现在出现在：${updateHits.join(' / ') || '（没有）'}`,
+  );
+}
+// 循环侧连那一列的名字都不该出现：它只读档位（`chat.session.current()`），不碰表。
+for (const relative of ['packages/agent/src/loop/loop.ts', 'packages/agent/src/loop/policy.ts']) {
+  const text = read(relative);
+  if (text.includes('setAutonomy') || text.includes('chat_session')) {
+    problems.push(`${relative} 里出现了 setAutonomy 或 chat_session——循环只该读档位，写档位不是它的手`);
+  }
+}
+
 if (problems.length) {
   console.error('✖ agent 模型表态通道检查未通过：');
   for (const problem of problems) console.error(`  · ${problem}`);
   process.exit(1);
 }
 console.log(
-  '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / policy 不 import model）',
+  '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / policy 不 import model / 升档只有人这一条口）',
 );
