@@ -9,6 +9,39 @@ const CORDIS = {
   message: "do not import 'cordis' directly — re-export it from @auto-cc/core so upgrades touch one place",
 };
 
+/**
+ * agent 层的能力包边界（spec 5.1-08）。
+ *
+ * 对话里的 agent 只能经 `agent.tools` 注册表向能力包要动作，不许 `import` 任何一只「手」：
+ * 一旦 import 进来，它就能绕开注册表直接调 service——那条路上没有入参校验、没有额度闸门、
+ * 没有审批档位、也不在工具卡片上留痕（AGENTS.md §5.9 禁止的正是"各长一套业务逻辑"）。
+ * 名单按 5.1-08 点到的四族展开（包名的真形是 `@auto-cc/plugin-*`，写成 `@auto-cc/browser` 会让这条规则空转）：
+ * `browser.*`→ plugin-browser + plugin-sessions（内核会话是浏览器能力的持有者）、
+ * `platform.*` / `jd.*`→ plugin-platform-boss + plugin-outbound（JD 抓取与打招呼/投递的动作都在这两家）、
+ * `resume.*` / `kb.*`→ plugin-resume-doc + plugin-resume-kb。
+ * **故意不列** `@auto-cc/plugin-workflow`：plan 与 §5.9 要求对话与工作流共用同一个 `workflow.runner`，
+ * 把它禁掉会逼出第二套编排；`plugin-llm` / `plugin-entitlement` 同理不在禁令里，
+ * agent 的对话腿要发模型、档位判定要问闸门。
+ */
+const AGENT_CAPABILITY = {
+  group: [
+    '@auto-cc/plugin-browser',
+    '@auto-cc/plugin-browser/**',
+    '@auto-cc/plugin-sessions',
+    '@auto-cc/plugin-sessions/**',
+    '@auto-cc/plugin-platform-*',
+    '@auto-cc/plugin-platform-*/**',
+    '@auto-cc/plugin-outbound',
+    '@auto-cc/plugin-outbound/**',
+    '@auto-cc/plugin-resume-doc',
+    '@auto-cc/plugin-resume-doc/**',
+    '@auto-cc/plugin-resume-kb',
+    '@auto-cc/plugin-resume-kb/**',
+  ],
+  message:
+    'agent 层不得直接 import 能力包：动作只能经 agent.tools 注册表调用，否则绕过入参校验、闸门与工具卡片（spec 5.1-08 / AGENTS.md §5.9）',
+};
+
 const CJK = '[\\u4e00-\\u9fff]';
 
 /** 渲染层硬约束：样式只用 Tailwind、图标只用 lucide、文案只走 i18n、不碰 Node。 */
@@ -102,6 +135,14 @@ export default tseslint.config(
           paths: [{ name: 'react-dom/server', message: '渲染层不做服务端渲染，只挂载到 #root' }],
         },
       ],
+    },
+  },
+  {
+    // spec 5.1-08 的依赖边界。只管 `src/`：测试替身按名字假装配一只能力包不算架构越界，
+    // 而运行期代码里出现这些 import，就等于 agent 有了绕过注册表的第二条路。
+    files: ['packages/agent/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [INTERNAL, CORDIS, AGENT_CAPABILITY] }],
     },
   },
 );
