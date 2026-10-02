@@ -298,7 +298,7 @@
 | 5.2-10 | 中途叫停在下一个安全点生效（正在跑的动作不被硬切，但不进下一步）                             | V    | 运行中点停 → 截图状态为 paused 且无后续步       | [x]  |
 | 5.2-11 | 循环有步数与 token 双上限，达上限即停并说明原因（不无限自转）                                | U    | 构造无解任务 → 断言在 N 步内终止                | [x]  |
 | 5.2-12 | 任意时刻界面不冻结：循环执行中输入区仍可交互（复用 1.11-13）                                 | V    | 执行中打字并截图                                | [x]  |
-| 5.2-13 | 反向验证：注册表为空的 agent 仍能完成纯对话回答，但任何动作请求都被明确拒绝（不假装做了）    | V+U  | 清空注册表 → 要求"帮我投递" → 截图拒绝文案      | [ ]  |
+| 5.2-13 | 反向验证：注册表为空的 agent 仍能完成纯对话回答，但任何动作请求都被明确拒绝（不假装做了）    | V+U  | 清空注册表 → 要求"帮我投递" → 截图拒绝文案      | [x]  |
 
 **5.2-a 落地记录（2026-10-02）**
 
@@ -476,6 +476,74 @@
   `packages/agent`：`Test Files 3 passed (3)` / `Tests 58 passed (58)`（本片的推送形状 3 条在其中），
   `packages/browser 235`、`packages/outbound 141`、`packages/resume-kb 398`、`packages/platform-boss 130`、
   `packages/main 15` 皆绿。完整输出留在被忽略的 `tmp/52c/test-all.txt`。
+
+**5.2-d 落地记录（2026-10-03）**
+
+- **落点只有 `packages/agent/src/loop/loop.test.ts` 与文档**：**生产代码零改动**。这不是偷懒，是这条验收项的形状
+  决定的——`PLAN_EMPTY`、`TOOL_UNAVAILABLE`、`registerAgentTools` 的销毁副作用（能力包卸载即摘手）在 5.2-a/b
+  里已经是既成事实，5.2-13 要的是「把它们摆到一起来证明反向结论」。按 §2.3 为一条验收新开一个模块才是缺陷。
+- **摘手用的是 app 自己的口**：`plugins.stop('<id>')` × 12（`browser` / `browser-locate` / `browser-act` /
+  `sessions` / `outbound-script` / `outbound-greet` / `outbound-deliver` / `jd-capture` / `resume-parse` /
+  `kb-profile` / `kb-gap` / `kb-generate`），把 `agent.tools.list` 从 **16 只**打到 **`[]`**。
+  `agent-policy` / `agent-loop` / `chat` / `kernel` / `ipc` / `plugins` **一律不摘**——要验的是「没有手的 agent」，
+  不是「半死的 app」；摘了循环或策略就变成验「什么都不 work」，得不出任何结论。这 12 个 id 也不在
+  `cordis.yml` 的守护名单（`[kernel, ipc, plugins]`）里，Stop 不会被拒。
+- **为什么用「同一段文本起草两次」**：对照 run 与摘手 run 的目标文本逐字相同
+  （`帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {"to":"boss/123"}`），
+  桩模型的 `draftPlan` 只会把**注册表里真实存在的 id**写进步骤。于是两次之间**唯一的自变量就是注册表**，
+  「计划从 2 步变成 0 步」不可能被解释成模型换了、文本换了、档位换了。实测：对照 `planned:2` /
+  `tokens_used:105`，摘手后 `planned:0` / `tokens_used:41`（那 41 只花在一次起草上，没有步可跑就没有第二次调用）。
+- **「不假装做了」在四层上分别立据，缺任一层都算不上证明**：
+  ① 界面文案——计划卡上出现红字「这份计划一步都没有，确认也不会执行任何动作」，进度「已落 0 / 0 步」、
+  外发「其中 0 步会离开本机」（`5.2-13-empty-plan-refusal.png`）；
+  ② 按钮真禁——真实鼠标事件（`Input.dispatchMouseEvent` pressed/released）落在
+  `elementFromPoint` 自证的 `104,354`，该点元素是 `button:confirm-run`、`disabled=true`，点击后读数仍是
+  `proposed`，页面上没有任何东西开始动；
+  ③ 硬按 IPC——绕过界面直接 `window.autoCC['agent.loop']['confirm'](runId)`，返回
+  `status:"failed"` / `stopReason:"PLAN_EMPTY"` / `plan:[]` / `steps:[]`，**不是 `completed`**（这条是判据的正身：
+  空计划若自称完成，就是本项要防的那种谎）；
+  ④ 库里的行——`agent_runs` 落 `failed/PLAN_EMPTY`、`plan_len:0`、`plan_step_index:0`，`agent_run_steps`
+  查得 `stepCount:0`，`usage_ledger` 前后都是**既有的 4 行、逐字节相同**（id 1–4，无新增外发记账）。
+  终态截图 `5.2-13-after-forced-confirm.png` 上是「失败 / 计划为空」且一张步骤卡也没有。
+- **另半边「仍能聊天」也拍到**：摘手期间发普通消息，对话照常出文本回复
+  （`messageCount:2`、`streaming:false`、`toolId:null` — `5.2-13-chat-still-answers.png`）；再点名
+  `/tool outbound.deliver.perform {}`，卡片以 `failed` 收尾并把原因写成
+  `TOOL_NOT_REGISTERED：工具 outbound.deliver.perform 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）`
+  （`5.2-13-tool-denied.png`，同一帧里既有失败卡片又有「失败 / 计划为空」面板）。拒的是**指名道姓**地拒，
+  不是静默吞掉。
+- **收尾把 12 只手装回并验证**：`plugins.start` × 12 → 工具面回到 **16 只、id 清单与基线逐字相同**，
+  再用同一段文本起草得到 `planned:2` / `confirmDisabled:false`（`5.2-13-restored-plan.png`）。
+  取证脚本把这段放进 `finally`：中途抛错也不能把用户的 app 留在「没有手」的状态。
+- **harness 的两条坑（本篇撞到的，写进 §9 级别的事实）**：① **会话是持久化的，旧工具卡会留在 DOM 里**——
+  全文档 `querySelector('[data-tool-id]')` 读到的是上一片的 `done` 卡，等待循环据此提前退出、新卡还停在
+  `running`，第一次实跑就在这里崩掉。正确做法是按 `[data-message-id]` 取**最后一条消息**再在帧内找，
+  并在开头点 `[data-action="new-session"]`；② 崩在 `finally` 之前会把 app 留在摘手状态，
+  恢复要用一份独立的最小脚本（`tmp/52d/restore.ts`）单跑，别指望重跑整个取证脚本。
+- **一处如实观察**：新建会话继承的是配置里的默认档位，两次 run 快照都写着 `autonomy:"suggest"`；
+  早先手工测到的 `semi` 属于旧会话。不是缺陷，但记录在此，免得日后有人拿「档位怎么变了」当 bug 找。
+- **U 半边 3 条测试**（`describe('摘掉工具面之后的反向验证（5.2-13）')`）：同一段点名文本「表里有手起草两步 /
+  摘手一步也没有且不自称完成」；注册表为空不波及纯对话（普通消息出文本、回复里一条工具段也没有）；
+  表空着而模型硬要动手 → 每步 `refused/TOOL_UNAVAILABLE`、`effect===null`、run 记
+  `failed/POLICY_REFUSED`、`calls` 为空。台架里摘手用注册表自己的 `unregister`（与能力包销毁时同一条清理口），
+  不是给测试开的后门。
+- **§7.4 自检逐条**：① 四道门禁实跑全绿（命令与输出见本节末）；② 唯一的 V 类项 5.2-13 有 6 张两两不同的截图
+  （sha1 已核）+ 机读对账 `5.2-13-live-readout.txt`，逐条对应 spec ID；③ 状态位——5.2 一节 13 条**全部 `[x]`**，
+  无 `[ ]`、本片也无 `[!]`；④ 复用检查——零新增实现，摘手走 `plugins.stop`、拒绝走既有 `PLAN_EMPTY` /
+  `TOOL_UNAVAILABLE`，没有第二份「空计划」判定；⑤ 死代码——`loop.test.ts` 只增不改，无新导出、无注释掉的代码；
+  ⑥ 前端三项——本片渲染层零改动，页面上出现的两句文案（`agent.run.emptyPlan`、
+  `agent.run.stopReason.PLAN_EMPTY`）是 5.2-c 已入库的双语键，i18n / Tailwind / lucide 无新对象；
+  ⑦ 提交——测试 `test(agent)` 与文档 `docs(agent)` 两片分开（§1.4），均推送 `origin/main`；
+  ⑧ 暂存区只有 `loop.test.ts`、本文件与 `docs/acceptance/5.2/5.2-13-*`（6 png + 1 txt），
+  取证脚本、恢复脚本、四道门禁日志与截图原件全在被忽略的 `tmp/52d/`。
+- **5.2 全片收口**：13 条状态位逐条有证据可回查——01/02/05/06/07/08/11 见 5.2-a、5.2-b 两节记录
+  （`loop.test.ts` 头部注明了各自编号），03/04/09/10/12 见 5.2-c 记录里的九张 `5.2-*.png` 与
+  `5.2-c-live-readout.txt`，13 见本节。**下一片是 5.3**：真模型接入不在 5.2 的范围内（§6 的取证与
+  「真打外部模型服务要花钱、需单独授权」仍未解除），5.3 先做档位与确认策略的代码半边判定。
+- **四道门禁的实际命令与输出（2026-10-03，`tmp/52d/gates.txt`）**：
+  `pnpm typecheck` → 退出码 0，24 个包逐个 `Done`；`pnpm lint` → 退出码 0，eslint 无告警 + 八道机检全 `✔`；
+  `pnpm format:check` → 退出码 0，`All matched files use Prettier code style!`；
+  `pnpm -r --no-bail test` → 退出码 0，21 个测试包全 `Done` 无一失败，其中
+  `packages/agent`：`Test Files 3 passed (3)` / `Tests 61 passed (61)`（较 5.2-c 的 58 条净增本片的 3 条）。
 
 ## 5.3 自治档位与确认策略
 

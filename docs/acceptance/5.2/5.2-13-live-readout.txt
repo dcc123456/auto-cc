@@ -1,0 +1,43 @@
+[00-新会话空态] {"messageCount":0,"streaming":false,"empty":false,"notice":"新建会话：成功","lastId":null,"lastRole":null,"lastText":null,"toolId":null,"toolState":null,"toolError":null}
+[01-基线工具数] 16 只：browser.act.click,browser.act.type,browser.locate.find,browser.page.navigate,browser.page.snapshot,jd.capture.run,kb.gap.report,kb.profile.list,kb.profile.search,kb.profile.syncVectors,outbound.deliver.perform,outbound.greet.perform,outbound.script.generate,resume.generate.run,resume.parse.fromFile,sessions.open
+[01-基线台账] [{"id":1,"action":"search","target_id":"后端","ts":1790938995081},{"id":2,"action":"greet","target_id":"1002","ts":1790939145238},{"id":3,"action":"search","target_id":"前端","ts":1790940879696},{"id":4,"action":"greet","target_id":"1005","ts":1790940954298}]
+[13-对照计划] {"runId":"c6073fb5-50a4-4ac4-b50d-177ed91dd86d","status":"proposed","stopReason":"","statusLabel":"待确认","stopReasonLabel":null,"emptyPlan":null,"progress":"已落 0 / 2 步","outbound":"其中 2 步会离开本机","goal":"目标：帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","confirmDisabled":false,"planToolIds":["outbound.deliver.perform","outbound.greet.perform"],"executed":0,"planned":2}
+[13-对照库] {"run":{"status":"proposed","stop_reason":null,"autonomy":"suggest","plan_step_index":0,"tokens_used":105,"plan_len":2},"stepCount":0,"steps":[],"ledger":{"rows":4}}
+[02-stop-browser] 已卸载
+[02-stop-browser-locate] 已卸载
+[02-stop-browser-act] 已卸载
+[02-stop-sessions] 已卸载
+[02-stop-outbound-script] 已卸载
+[02-stop-outbound-greet] 已卸载
+[02-stop-outbound-deliver] 已卸载
+[02-stop-jd-capture] 已卸载
+[02-stop-resume-parse] 已卸载
+[02-stop-kb-profile] 已卸载
+[02-stop-kb-gap] 已卸载
+[02-stop-kb-generate] 已卸载
+[02-摘手后工具面] []
+[13-摘手后计划] {"runId":"9a3891c4-09c7-450f-8a41-93f05a9c9b29","status":"proposed","stopReason":"","statusLabel":"待确认","stopReasonLabel":null,"emptyPlan":"这份计划一步都没有，确认也不会执行任何动作","progress":"已落 0 / 0 步","outbound":"其中 0 步会离开本机","goal":"目标：帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","confirmDisabled":true,"planToolIds":[],"executed":0,"planned":0}
+[13-确认按钮] 落点 104,354 · disabled=true · 该点元素 button:confirm-run
+[13-点击后读数] {"runId":"9a3891c4-09c7-450f-8a41-93f05a9c9b29","status":"proposed","stopReason":"","statusLabel":"待确认","stopReasonLabel":null,"emptyPlan":"这份计划一步都没有，确认也不会执行任何动作","progress":"已落 0 / 0 步","outbound":"其中 0 步会离开本机","goal":"目标：帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","confirmDisabled":true,"planToolIds":[],"executed":0,"planned":0}
+[13-硬按confirm的回复] {"runId":"9a3891c4-09c7-450f-8a41-93f05a9c9b29","sessionId":"70279f3c-5529-495e-acbd-a2559aa82655","goal":"帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","status":"failed","autonomy":"suggest","planStepIndex":0,"plan":[],"steps":[],"stepLimit":12,"tokenBudget":4000,"tokensUsed":41,"stopReason":"PLAN_EMPTY","createdAt":1790961105393,"updatedAt":1790961106296}
+[13-终态读数] {"runId":"9a3891c4-09c7-450f-8a41-93f05a9c9b29","status":"failed","stopReason":"PLAN_EMPTY","statusLabel":"失败","stopReasonLabel":"计划为空","emptyPlan":"这份计划一步都没有，确认也不会执行任何动作","progress":"已落 0 / 0 步","outbound":"其中 0 步会离开本机","goal":"目标：帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","planToolIds":[],"executed":0,"planned":0}
+[13-终态库] {"run":{"status":"failed","stop_reason":"PLAN_EMPTY","autonomy":"suggest","plan_step_index":0,"tokens_used":41,"plan_len":0},"stepCount":0,"steps":[],"ledger":{"rows":4}}
+[13-纯对话读数] {"messageCount":2,"streaming":false,"empty":false,"notice":"发送消息：成功","lastId":"64792919-19a7-4234-b707-55ab28890bac","lastRole":"assistant","lastText":"已收到：「帮我按这个 JD 优化简历」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。","toolId":null,"toolState":null,"toolError":null}
+[13-工具点名读数] {"messageCount":4,"streaming":false,"empty":false,"notice":"发送消息：成功","lastId":"106256c9-f22e-472d-a2f3-a2748cc3de2c","lastRole":"assistant","lastText":"已收到：「/tool outbound.deliver.perform {}」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。工具名称、关键参数、状态与耗时显示在下方卡片里。","toolId":"outbound.deliver.perform","toolState":"failed","toolError":"TOOL_NOT_REGISTERED：工具 outbound.deliver.perform 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）"}
+[13-摘手后台账] [{"id":1,"action":"search","target_id":"后端","ts":1790938995081},{"id":2,"action":"greet","target_id":"1002","ts":1790939145238},{"id":3,"action":"search","target_id":"前端","ts":1790940879696},{"id":4,"action":"greet","target_id":"1005","ts":1790940954298}]
+[06-start-browser] 已挂载
+[06-start-browser-locate] 已挂载
+[06-start-browser-act] 已挂载
+[06-start-sessions] 已挂载
+[06-start-outbound-script] 已挂载
+[06-start-outbound-greet] 已挂载
+[06-start-outbound-deliver] 已挂载
+[06-start-jd-capture] 已挂载
+[06-start-resume-parse] 已挂载
+[06-start-kb-profile] 已挂载
+[06-start-kb-gap] 已挂载
+[06-start-kb-generate] 已挂载
+[06-装回后工具数] 16 只：browser.act.click,browser.act.type,browser.locate.find,browser.page.navigate,browser.page.snapshot,jd.capture.run,kb.gap.report,kb.profile.list,kb.profile.search,kb.profile.syncVectors,outbound.deliver.perform,outbound.greet.perform,outbound.script.generate,resume.generate.run,resume.parse.fromFile,sessions.open
+[13-装回后计划] {"runId":"1074e566-12c6-4fb1-899b-734d09bc2767","status":"proposed","stopReason":"","statusLabel":"待确认","stopReasonLabel":null,"emptyPlan":null,"progress":"已落 0 / 2 步","outbound":"其中 2 步会离开本机","goal":"目标：帮我把简历投递出去 outbound.deliver.perform {} · outbound.greet.perform {\"to\":\"boss/123\"}","confirmDisabled":false,"planToolIds":["outbound.deliver.perform","outbound.greet.perform"],"executed":0,"planned":2}
+[13-装回后库] {"run":{"status":"proposed","stop_reason":null,"autonomy":"suggest","plan_step_index":0,"tokens_used":105,"plan_len":2},"stepCount":0,"steps":[],"ledger":{"rows":4}}
+[done] 证据 6 张 + 台账 tmp/52d/phase-d-readout.txt
