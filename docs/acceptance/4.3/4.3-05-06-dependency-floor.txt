@@ -1,0 +1,58 @@
+4.3-05 / 4.3-06 离线依赖门槛（spec 4.3-05 不引入外部向量服务 / 4.3-06 不引入需用户机编译的原生扩展）
+================================================================================
+执行命令  pnpm lint   （末位新增 `tsx scripts/check-dependency-floor.ts`，进常驻机检链而不是一次人肉 `pnpm why`）
+执行时间  2026-10-02
+判据      三层扫描任一命中即 exit 1：
+          ① 声明层——根与每个 packages/*/package.json 的四类依赖表里不得出现禁令包名；
+          ② 解析层——pnpm-lock.yaml 全量包名（传递依赖也算）里不得出现**能力类**禁令
+             （外来向量库 / 向量服务客户端 / docker 客户端 / 非内置 SQLite 绑定）；
+          ③ 搬运层——scripts/vendor-runtime-deps.ts 的 resolveRuntimeDeps() 闭包
+             （= 装机用户真正拿到的那批 esbuild 外置依赖）里不得有 .node/.dll/.so/.dylib/.o/binding.gyp，
+             也不得有 preinstall/install/postinstall 这三个会在装依赖时触发本机编译的脚本。
+
+--------------------------------------------------------------------------------
+本轮实测读数
+--------------------------------------------------------------------------------
+✔ 离线依赖门槛机检通过（25 份 package.json + 锁文件 544 个包名 + 25 个装机依赖共 1476 个文件：
+  无外来向量库/向量服务/docker 客户端、无非内置 SQLite 绑定、装机闭包内无原生二进制与安装期编译脚本）
+  · 锁文件里有 14 个原生编译链包名（@napi-rs/canvas、@napi-rs/lzma、node-gyp 的家族与平台变体）：
+    均为传递依赖、非本项目声明，且搬运层已确认它们不在 25 个装机依赖里 —— 会不会落到用户机上以搬运层为准。
+
+补充读数（同轮实测）：
+- pnpm-lock.yaml 里 sqlite 相关包名 **0 个**（`node:sqlite` 是内置模块，AGENTS.md §9 的禁 `better-sqlite3` 由此成立）。
+- 4.3 的检索实现只用到内置 `node:sqlite` 的 FTS5 虚表 + 应用层 BM25，没有引入任何向量库：
+  向量走 `llm.embed` 的远端 API（packages/llm），本机不养服务。
+- 装机闭包的 25 个包来自 RUNTIME_EXTERNAL_ROOTS = ['mammoth', 'pdfjs-dist'] 的传递依赖闭包，
+  pdfjs 的 `optionalDependencies`（含 @napi-rs/canvas 家族）不参与闭包展开，所以不进装机包；
+  `web/`、`types/` 两个与 Node 侧抽文本无关的大目录在搬运时被裁掉，`cmaps/`、`standard_fonts/`、`wasm/`
+  保留（CJK PDF 抽文本必需，`.wasm` 是预编译产物、用户机不需要编译）。
+
+--------------------------------------------------------------------------------
+反向验证：三层都会红（把"绿"变成"测出来的"而不是"没测过"）
+--------------------------------------------------------------------------------
+本轮临时改动跑完即还原（还原后 `git status` 与改动前逐字一致），三次命中记录如下。
+
+① 声明层命中——在 packages/resume-kb/package.json 的 devDependencies 里临时加 `"better-sqlite3": "^11.0.0"`：
+✖ 离线依赖门槛机检未通过（spec 4.3-05 无外部向量服务 / 4.3-06 无本机编译扩展）：
+  - packages/resume-kb/package.json 的 devDependencies 里声明了 better-sqlite3：非内置的 SQLite 绑定或向量扩展（AGENTS.md §9 已实测 `node:sqlite` 在 Electron 44 主进程直接可用，禁止原生编译依赖）
+EXIT=1
+
+②③ 解析层 + 搬运层同时命中——在 pnpm-lock.yaml 末尾临时加一个 `'@zilliz/milvus2-sdk-node@6.5.0'` 包键，
+   并在 packages/resume-kb/node_modules/ 临时放一个 fake-native 包（带 install 脚本 + 一个 .node 文件），
+   同时把它临时列进 RUNTIME_EXTERNAL_ROOTS：
+✖ 离线依赖门槛机检未通过（spec 4.3-05 无外部向量服务 / 4.3-06 无本机编译扩展）：
+  - pnpm-lock.yaml 的依赖树里解析出 @zilliz/milvus2-sdk-node：外来向量数据库客户端（spec 4.3-05，plan §4.3-d 候选表第 3 行已否决）
+  - 装机依赖 fake-native@0.0.1 带 install 脚本：用户装 app 时会触发本机编译（spec 4.3-06）
+  - 装机依赖 fake-native@0.0.1 内含原生产物 prebuilt.node：需要用户机编译或按平台下载二进制（spec 4.3-06）
+EXIT=1
+
+--------------------------------------------------------------------------------
+边界（如实声明，避免误以为机检守得比实际更宽）
+--------------------------------------------------------------------------------
+1) 解析层只判**能力类**禁令。锁文件里的 dev-only 传递原生链路（node-gyp、pdfjs 的 optional @napi-rs/canvas
+   家族）记为提示而不是失败——lint 不该宣布"整个 npm 生态里不许有编译工具"，它们会不会到用户机上由搬运层判。
+   这条边界写在脚本头注释里，不靠悄悄放宽规则实现。
+2) 本检查判的是**包名与产物**，不判许可证（许可证记账由 §8.7 与 AGENTS.md 的 NOTICE 条目管）。
+3) 「装机冒烟」的判据半边由搬运层覆盖（运行期闭包内无原生二进制、无安装期编译脚本）。
+   三端安装包本身在用户机上的安装-启动冒烟仍属 M2b / 2.x 的收口项，
+   且本机为 Windows，macOS / Linux 的运行期验证按 AGENTS.md §9 一律标 BLOCKED。
