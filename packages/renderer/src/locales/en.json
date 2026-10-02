@@ -542,7 +542,9 @@
           "pageNavigate": "Navigate page",
           "pageSnapshot": "Read page snapshot",
           "sessionsOpen": "Open platform session",
-          "generateRun": "Tailor the resume content for this JD"
+          "generateRun": "Tailor the resume content for this JD",
+          "parseFromFile": "Import this resume file into the knowledge base",
+          "scriptGenerate": "Draft one chat line for this job"
         },
         "effect": {
           "read": "read-only",

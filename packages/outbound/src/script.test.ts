@@ -9,7 +9,7 @@
  * 网络一律用 `globalThis.fetch` 存根（模型端点与 fixture 都不真连，AGENTS.md §7.2），
  * 并且每次都断言请求次数——"回落"只有在确定没发网络时才是可测的（plan §12.6.1）。
  */
-import { AppError, asApp, Context } from '@auto-cc/core';
+import { AppError, asApp, Context, NO_CONFIG } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LlmChatService, type LlmConfig } from '@auto-cc/plugin-llm';
 import { describe, expect, it } from 'vitest';
@@ -22,6 +22,7 @@ import {
   type OutboundScriptConfig,
   type ScriptDraftView,
 } from './script.js';
+import { FakeAgentToolsService } from './test-doubles.js';
 import { SCRIPT_PROMPT_VERSION } from './prompts.js';
 
 const KEY_ENV = 'AUTO_CC_LLM_TEST_KEY';
@@ -64,13 +65,28 @@ function stubFetch(reply: { status: number; body: unknown }): {
   return { bodies, restore: () => (globalThis.fetch = original) };
 }
 
-/** 装到 `outbound.script` 为止；`llm` 决定模型侧配置，`script` 决定话术侧配置。 */
-async function ready(llm: Partial<LlmConfig>, script: Partial<OutboundScriptConfig> = {}) {
+/**
+ * 装到 `outbound.script` 为止，并挂上一只 agent 工具注册表替身。
+ * 替身必须早于本服务上岗：`registerAgentTools` 是软取，晚挂载只会登记出 0 个（2.8-08 的前提）。
+ * @param llm 模型侧配置（`baseUrl: null` 即"未配置"，两类用例都靠它决定走模型还是走回落）
+ * @param script 话术侧配置
+ * @returns 话术服务与注册表替身
+ */
+async function bootScript(llm: Partial<LlmConfig>, script: Partial<OutboundScriptConfig> = {}) {
   const ctx = new Context();
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(LlmChatService, { ...LLM_BASE, ...llm });
+  await ctx.plugin(FakeAgentToolsService, NO_CONFIG);
   await ctx.plugin(OutboundScriptService, { ...SCRIPT_BASE, ...script });
-  return asApp(ctx)['outbound.script'];
+  return {
+    script: asApp(ctx)['outbound.script'],
+    tools: ctx.get('agent.tools') as unknown as FakeAgentToolsService,
+  };
+}
+
+/** 装到 `outbound.script` 为止；`llm` 决定模型侧配置，`script` 决定话术侧配置。 */
+async function ready(llm: Partial<LlmConfig>, script: Partial<OutboundScriptConfig> = {}) {
+  return (await bootScript(llm, script)).script;
 }
 
 /** 模型正常回话的响应体（OpenAI 兼容形状，plan §12.6.1 第 2 条）。 */
@@ -655,5 +671,53 @@ describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
     } finally {
       fixture.restore();
     }
+  });
+});
+
+/**
+ * 5.1-c 的话术腿：`outbound.script` 要能被对话挑中（spec 5.1-07 的「生成话术」），
+ * 且挑中之后走的仍是 2.5 / 4.6 那一条生成链。三段判据与 `resume-kb` 的建档腿同形：
+ * 登记形状、两入口产物逐字相等、入参是边界。
+ */
+describe('outbound.script 的 agent 工具面（spec 5.1-07 的生成话术）', () => {
+  /** 从替身注册表里取本服务那只工具，取不到就当场失败（免得断言退化成对 undefined 取属性）。 */
+  function scriptTool(tools: FakeAgentToolsService) {
+    const tool = tools.declarations.get('outbound.script.generate');
+    if (tool === undefined) throw new Error('outbound.script.generate 未登记进 agent 工具面');
+    return tool;
+  }
+
+  it('挂载即登记一只 outbound.script.generate：本地写入、需批准、标题是 i18n 键不是文案', async () => {
+    const { tools } = await bootScript({ baseUrl: null, model: null });
+    // 打招呼与投递那两只是外发（effect 为 outbound），它们在各自服务里登记，本用例没挂它们。
+    expect([...tools.declarations.keys()]).toEqual(['outbound.script.generate']);
+    const tool = scriptTool(tools);
+    expect(tool.effect).toBe('local-write');
+    expect(tool.requiresConfirmation).toBe(true);
+    expect(tool.titleKey).toBe('agent.tool.labels.scriptGenerate');
+    // 描述里必须写清「只产文案，不发送、不占外发额度」：否则模型会把它当成打招呼那一步的替代口（判据五）。
+    expect(tool.description).toContain('不发送');
+    expect(tool.description).toContain('不占外发额度');
+  });
+
+  it('跑工具与直接调 service 的产物逐字相等：两入口共用同一条生成链（§5.9）', async () => {
+    const { script, tools } = await bootScript({ baseUrl: null, model: null });
+    const tool = scriptTool(tools);
+    // 模型端点未配置 → 两条腿都走可见回落，产物只由配置与入参决定，因此逐字比较是确定的。
+    const viaTool = (await tool.run(tool.input.parse(JD))) as ScriptDraftView;
+    const viaService = await script.generate(JD);
+    expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));
+    expect(viaTool.origin).toBe('template');
+    expect(viaTool.kind).toBe('greeting');
+  });
+
+  it('入参是边界：缺岗位名/公司名与非声明键一律拒收，kind / evidence / keywords 由 schema 补默认', async () => {
+    const { tools } = await bootScript({ baseUrl: null, model: null });
+    const input = scriptTool(tools).input;
+    expect(input.safeParse(JD).success).toBe(true);
+    expect(input.safeParse({ jdId: 'job-1001', title: '前端工程师' }).success).toBe(false);
+    expect(input.safeParse({ ...JD, maxChars: 20 }).success).toBe(false);
+    // 默认值由 schema 补而不是由调用方记：界面、工作流节点、agent 三面传的是同一份最小入参。
+    expect(input.parse(JD)).toMatchObject({ kind: 'greeting', evidence: [], keywords: ['React', 'TypeScript'] });
   });
 });

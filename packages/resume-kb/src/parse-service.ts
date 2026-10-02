@@ -13,7 +13,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, agentTool, asApp, registerAgentTools, Service, type Context } from '@auto-cc/core';
 import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
@@ -56,6 +56,18 @@ export const resumeParseSchema = z.strictObject({
 });
 
 export type ResumeParseConfig = z.output<typeof resumeParseSchema>;
+
+/**
+ * `resume.parse.fromFile` 的工具入参（spec 5.1-07 的建档腿）。
+ *
+ * 只有 `filePath` 一个键，且刻意收成非空串就停：绝对路径、存在性、字节上限、格式识别全都由
+ * `fromFile()` 自己判（它已经为此抛 `RESUME_IMPORT_FAILED`）。在这里再写一遍 `refine` 等于同一
+ * 校验两处判、两处报的是不同错误码（§2.5）；而 `nowMs` 不进声明是 4.1 既定的口径——入库时间只能由
+ * 服务取，让模型自己填就等于让它决定"这份简历是哪天导入的"。
+ */
+export const resumeParseRequestSchema = z.strictObject({
+  filePath: z.string().min(1),
+});
 
 /** 界面要的「一份已入库的简历」读数（不含文档正文，正文在库里，见 spec 4.1-c 的边界说明）。 */
 export interface ImportReceipt {
@@ -142,8 +154,26 @@ export class ResumeParseService extends Service {
 
   [Service.init](): void {
     this.ensureSchema();
+    // 5.1-c 的建档腿：登记只转发 `fromFile`，判定与入库都在那一条路上（§5.9 双入口共用一条业务链，
+    // 工具面不构成第二条导入通道）。注册表是软取（agent 可单独摘掉），没装时这里返回 0 并如实进日志。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'resume.parse.fromFile',
+        titleKey: 'agent.tool.labels.parseFromFile',
+        description:
+          '把磁盘上的一份简历文件（pdf / docx / md / txt）导入知识库：抽正文、解析成可编辑的简历工作副本、按来源哈希幂等入库，并把解析里没把握的条目落成待确认清单。同一份文件重复导入只会落到同一个文档 id，不会产生第二套实体。只读用户给出的那一个绝对路径、只往本地库里写，不出网、不做任何外发；文本过短（疑似扫描件）时不产文档，只回一条 scanned 读数与原因',
+        input: resumeParseRequestSchema,
+        // `local-write`：写 `resume_imports` 与 `resume.doc` 的工作副本，一条网络请求都不发。
+        // 需要批准是因为入参是一条任意本地路径、产物是简历库的工作副本——这两样都不该被对话静默做掉
+        // （与 `resume.generate.run` 同一口径：不是外发，所以不占额度闸门，但也不是无人看一眼就落库）。
+        effect: 'local-write',
+        requiresConfirmation: true,
+        run: ({ filePath }) => this.fromFile(filePath),
+      }),
+    ]);
     this.ctx.logger.info(
-      `[resume-parse] resume_imports 表就绪，迁移号段 ${String(RESUME_IMPORT_MIGRATION_VERSION)}，单次上限 ${String(this.options.maxBytes)} 字节`,
+      `[resume-parse] resume_imports 表就绪，迁移号段 ${String(RESUME_IMPORT_MIGRATION_VERSION)}，单次上限 ${String(this.options.maxBytes)} 字节` +
+        ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 

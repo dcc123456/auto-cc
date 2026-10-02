@@ -1,14 +1,17 @@
 /**
- * agent 工具契约机检（spec 5.1-02 的「缺失即失败」那半条）。
+ * agent 工具契约机检（spec 5.1-02 的「缺失即失败」，加上 5.1-06 / 5.1-07 的「列举清单对齐」）。
  *
  * 5.1-a 已经让 `titleKey` 变成声明里的必填字段，但**类型只保证"写了这个字段"**：
  * 写成 `'点击控件'`（把文案本身当 key）、写成 `agent.tool.labels.pageClicl`（拼错一截）、
  * 或者补了 `zh-CN` 忘了 `en`，全都是编译期合法、运行期在界面上显示成裸 key 或中文的缺陷。
- * 所以这里按源码里的**声明现场**逐条查四件事：
+ * 所以这里按源码里的**声明现场**逐条查六件事：
  * 1. 每处 `agentTool({…})` 都读得出字符串字面量 `id` 与 `titleKey`（动态拼出来的对不上机检，也就会话里变一只幽灵工具）；
  * 2. `titleKey` 是键不是文案：形状 `agent.tool.labels.<camelCase>` 且全 ASCII；
  * 3. 该键在**每一份**语言包（`zh-CN` / `en`）的 `shell` 命名空间下都存在、非空，且非中文 locale 里不许还是中文；
- * 4. `id` 全局唯一、`id` ↔ `titleKey` 一一对应，语言包的 labels 一节里不许有没人引用的孤儿键（§2.4 的死文案）。
+ * 4. `id` 全局唯一、`id` ↔ `titleKey` 一一对应，语言包的 labels 一节里不许有没人引用的孤儿键（§2.4 的死文案）；
+ * 5. spec 点名的 P2 八件与 P4 四件能力都在声明现场出现（缺一条就是那条能力没接进对话入口）；
+ * 6. 登记方服务在装配清单里排在注册表 `agent` **之后**——清单顺序即挂载顺序，排在前面就等于 init 时
+ *    软问 `agent.tools` 问不到，那只工具静默地不进清单（5.1-c 的活体日志实测到的就是这一条，见下）。
  *
  * 为什么直查语言包而不复用 `check-renderer-conventions.ts` 的键对齐：那条判据是「各 locale 的键集相等」，
  * 两份**同时缺**一个键时它照样绿，而注册表缺的正是那一种（注册表在能力包，语言包在渲染层，没人逼着两边同步）。
@@ -60,6 +63,22 @@ interface DeclarationSite {
   id: string | null;
   /** 界面标题的 i18n key；读不出字面量时为 null */
   titleKey: string | null;
+  /** 声明所在的服务类名（取声明之前最后一个 `class X extends Service`）；在类体外登记时为 null */
+  ownerClass: string | null;
+}
+
+/**
+ * 取 `at` 之前最后一个 `class X extends Service` 的类名，即「这只工具是在哪个服务的类体里登记的」。
+ * @param source 文件内容
+ * @param at 声明现场（对象字面量左花括号）的下标
+ * @returns 类名；声明在类体外时返回 null
+ */
+function ownerClassOf(source: string, at: number): string | null {
+  let last: string | null = null;
+  for (const hit of source.slice(0, at).matchAll(/\bclass\s+([A-Z]\w*)\s+extends\s+Service\b/g)) {
+    last = hit[1] ?? null;
+  }
+  return last;
 }
 
 /**
@@ -132,6 +151,7 @@ function declarationsOf(file: string, source: string): DeclarationSite[] {
       line: source.slice(0, braceAt).split('\n').length,
       id: readLiteral('id'),
       titleKey: readLiteral('titleKey'),
+      ownerClass: ownerClassOf(source, braceAt),
     });
   }
   return found;
@@ -267,11 +287,126 @@ for (const pack of locales) {
   }
 }
 
+/**
+ * 能力清单（spec 5.1-06 / 5.1-07 要的"列举清单对齐"那半边）。
+ *
+ * 为什么把清单钉在脚本里，而不是从各包 service 名现推：那两条判据说的是**界面与对话能调到的能力**
+ * 有没有缺，而"某个包提供了什么服务"是装配面的事实、会随重构漂移——用它当判据就等于让判据跟着被测物
+ * 一起改。清单按 spec 原文逐字抄（P2 八件来自 2.8-08 的括号，P4 四件是 5.1-07 的括号），
+ * 只补一列 id 把它落到具体工具上；新增能力要先进 spec 再进这里，顺序反过来就是先写实现后补验收。
+ */
+const CAPABILITY_CHECKLIST: readonly {
+  readonly group: string;
+  readonly items: readonly (readonly [string, string])[];
+}[] = [
+  {
+    group: 'P2 浏览器能力（spec 2.8-08 的八件）',
+    items: [
+      ['打开会话', 'sessions.open'],
+      ['导航', 'browser.page.navigate'],
+      ['定位', 'browser.locate.find'],
+      ['读取', 'browser.page.snapshot'],
+      ['点击', 'browser.act.click'],
+      ['输入', 'browser.act.type'],
+      ['打招呼', 'outbound.greet.perform'],
+      ['投递', 'outbound.deliver.perform'],
+    ],
+  },
+  {
+    group: 'P4 内容能力（spec 5.1-07 的四件）',
+    items: [
+      ['建档', 'resume.parse.fromFile'],
+      ['检索', 'kb.profile.search'],
+      ['生成简历', 'resume.generate.run'],
+      ['生成话术', 'outbound.script.generate'],
+    ],
+  },
+];
+
+for (const group of CAPABILITY_CHECKLIST) {
+  for (const [capability, id] of group.items) {
+    if (!idsSeen.has(id)) {
+      failures.push(
+        `${group.group} 的「${capability}」没有以工具形式登记（注册表里读不到 id「${id}」）：5.9 的双入口少了一条腿`,
+      );
+    }
+  }
+}
+
+const checklistCount = CAPABILITY_CHECKLIST.reduce((total, group) => total + group.items.length, 0);
+
+/**
+ * 装配顺序判据（5.1-c 的活体实测逼出来的一条）。
+ *
+ * 登记工具的服务在自己的 `[Service.init]` 里**软问** `agent.tools`（软问是为了让 agent 包能被单独摘掉，
+ * 见 cordis.yml 里 `agent` 那一行的注释），而 kernel 是按 `cordis.yml` 的清单顺序逐个 await 挂载的：
+ * 登记方排在注册表之前，init 那一刻问不到东西，`registerAgentTools` 如实返回 0 并把「注册表未挂载」
+ * 打进日志——界面上那只工具从此不存在，但没有任何一处报错。5.1-c 给 `outbound.script` 加工具时撞上的就是它：
+ * 真 app 日志读数 `话术生成就绪 … agent 工具登记 0 个（注册表未挂载）`，活体清单 15 只、缺 `outbound.script.generate`，
+ * 而同一天 `pnpm test` 全绿（包内用例都先把注册表替身挂在登记方前面，顺序问题在单测里根本不存在）。
+ * 所以这条只能查装配文件本身：代码、语言包、单测三处都对不上它。
+ *
+ * 查法是「声明现场所在的服务类 → registry.ts 的插件 id → cordis.yml 里的位置」三段串起来，
+ * 三段里任何一段读不出来都记失败（宁可报错也不要把「没查到」过成「查过了」）。
+ */
+const REGISTRY_PLUGIN_ID = 'agent';
+
+/** `packages/main/src/registry.ts`：插件 id → 实现类名（清单只写 id，类在这里给）。 */
+const registrySource = await readFile(path.join(repoRoot, 'packages/main/src/registry.ts'), 'utf8');
+const classByPluginId = new Map<string, string>();
+for (const hit of registrySource.matchAll(/^\s*'?([\w-]+)'?:\s*([A-Z]\w*),\s*$/gm)) {
+  classByPluginId.set(hit[1] as string, hit[2] as string);
+}
+
+/** 根 `cordis.yml` 的 `plugins:` 清单，数组下标即挂载顺序。 */
+const manifestSource = await readFile(path.join(repoRoot, 'cordis.yml'), 'utf8');
+const manifestOrder = [...manifestSource.matchAll(/^\s{2}-\s+id:\s*([\w-]+)\s*$/gm)].map((hit) => hit[1] as string);
+const positionOf = new Map(manifestOrder.map((id, index) => [id, index]));
+
+if (manifestOrder.length === 0) failures.push('cordis.yml 的 plugins 清单读不出任何 `- id:`：装配顺序判据已失效');
+const registryAt = positionOf.get(REGISTRY_PLUGIN_ID);
+if (registryAt === undefined)
+  failures.push(`cordis.yml 清单里没有 ${REGISTRY_PLUGIN_ID} 这一行：注册表不挂载，所有工具都登记不上`);
+
+/** 真的比对成功的对数；0 表示一条都没查成（判据失效，而不是碰巧没问题）。 */
+let orderChecked = 0;
+if (registryAt !== undefined) {
+  for (const site of sites) {
+    const where = `${relative(site.file)}:${String(site.line)}`;
+    if (!site.ownerClass) {
+      failures.push(`${where} 的 agentTool 声明读不出所在服务类（登记在类体外？），装配顺序判据对不上它`);
+      continue;
+    }
+    const pluginId = [...classByPluginId].find(([, className]) => className === site.ownerClass)?.[0];
+    if (!pluginId) {
+      failures.push(
+        `${where} 的登记方 ${site.ownerClass} 不在 packages/main/src/registry.ts 的「插件 id → 类」表里：它挂不上，工具也就进不了清单`,
+      );
+      continue;
+    }
+    const at = positionOf.get(pluginId);
+    if (at === undefined) {
+      failures.push(
+        `${where} 的登记方 ${site.ownerClass}（插件 id ${pluginId}）没出现在 cordis.yml 清单里：装配面上没有它`,
+      );
+      continue;
+    }
+    orderChecked += 1;
+    if (at < registryAt) {
+      failures.push(
+        `${where} 的登记方 ${pluginId} 在 cordis.yml 里排在 ${REGISTRY_PLUGIN_ID} 之前（第 ${String(at + 1)} 项 vs 第 ${String(registryAt + 1)} 项）：挂载时注册表还不存在，这只工具会静默不进清单`,
+      );
+    }
+  }
+}
+if (sites.length > 0 && orderChecked === 0)
+  failures.push('装配顺序判据一条都没比对成功：registry.ts 或 cordis.yml 的形状变了，这条机检已失效');
+
 if (failures.length) {
   console.error('✖ agent 工具契约检查未通过（spec 5.1-02：titleKey 是键，且两份语言包都得翻得出言）：');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
-  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键）`,
+  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 ${String(checklistCount)} 件逐条对得上登记；${String(orderChecked)} 个登记方都排在注册表 ${REGISTRY_PLUGIN_ID} 之后）`,
 );

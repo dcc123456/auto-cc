@@ -15,7 +15,7 @@
  * 模板与提示词全部在注册表 `./prompts.ts`（spec 4.6-09，由 `scripts/check-prompts.ts` 机检），
  * 本文件只做装配、校验与回落决策。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
+import { AppError, agentTool, asApp, registerAgentTools, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
 import { findUnsupportedClaims } from './claims.js';
 import { buildScriptMessages, renderScriptTemplate, SCRIPT_PROMPT_VERSION } from './prompts.js';
@@ -368,11 +368,31 @@ export class OutboundScriptService extends Service {
   };
 
   [Service.init](): void {
+    // 5.1-c 的话术腿：工具面只转发 `generate`，校验、黑名单、回落决策一条都不在登记处重写（§2.5）。
+    // 入参直接复用 `scriptRequestSchema`——界面、工作流节点（`greet.ts` 里的 `outbound.script.generate`）、
+    // agent 工具三面读的是同一个入参形状，这是 4.6-11「接口定型」要求的那种一致。
+    // `effect: 'local-write'`：本条不落库、也不把内容送到招聘平台（那是 `outbound.greet.perform`），
+    // 但它会出网打模型服务、产出的是一段要给人看一眼的文案，按 `resume.generate.run` 的既定口径记
+    // （plan 的 5.1-c 切片表已如此裁定：分档看的是"要不要人看一眼"与"内容是否离开 app"，不是包名）。
+    // 需要批准同理：一次调用就是一次模型开销，不该由对话静默做掉。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'outbound.script.generate',
+        titleKey: 'agent.tool.labels.scriptGenerate',
+        description:
+          '按一个岗位生成一句可发送的话术文案：三类共用这一只入口（开场白 greeting / 追问 follow-up / 拒绝应对 rejection），后两类必须带上对方最后那条消息否则直接失败。产出前过两道硬判据——凭据与夸大诱导两组禁发内容、没有证据支撑的数字，命中就不产出；模型腿不可用或产出不合格时回落本地模板并把原因随结果返回。证据条目的 refId 会原样回指成 evidenceRefs，空数组表示这句话术没有任何库内依据。只产文案，不发送、不落库、不占外发额度',
+        input: scriptRequestSchema,
+        effect: 'local-write',
+        requiresConfirmation: true,
+        run: (params) => this.generate(params),
+      }),
+    ]);
     this.ctx.logger.info(
       `话术生成就绪：版本 ${this.options.scriptVersion} · ${SCRIPT_KINDS.join('/')} 三类 · ` +
         `上限 ${String(this.options.maxChars)} 字 · 语气 ${this.options.tone} · ` +
         `禁发规则 凭据 ${String(this.forbidden.length)} 条/夸大诱导 ${String(this.overclaim.length)} 条 · ` +
-        `模型 ${asApp(this.ctx)['llm.chat'].status().available ? '可用' : '不可用（走模板回落）'}`,
+        `模型 ${asApp(this.ctx)['llm.chat'].status().available ? '可用' : '不可用（走模板回落）'}` +
+        ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

@@ -542,7 +542,9 @@
           "pageNavigate": "页面导航",
           "pageSnapshot": "读取页面快照",
           "sessionsOpen": "打开平台会话",
-          "generateRun": "按这份 JD 定制简历内容"
+          "generateRun": "按这份 JD 定制简历内容",
+          "parseFromFile": "把这份简历文件导入知识库",
+          "scriptGenerate": "按这个岗位生成一句话术"
         },
         "effect": {
           "read": "只读",

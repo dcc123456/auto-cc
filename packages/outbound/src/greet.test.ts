@@ -524,7 +524,11 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
 
   it('挂载即在注册表里登记一只外发工具，id 与服务口名一致且带「需批准」', async () => {
     const { tools } = await boot({ agentTools: true });
-    expect(tools?.list()).toEqual([{ id: 'outbound.greet.perform', effect: 'outbound', requiresConfirmation: true }]);
+    // 注册表是本包共享的：话术服务在同批装配里也登记自己的 `outbound.script.generate`（它在 script.test.ts 里
+    // 有对应用例），所以这里按 id 取 greet 那一行，而不是断言整张清单——清单长度属于注册表自己的用例。
+    expect(tools?.list().filter((entry) => entry.id === 'outbound.greet.perform')).toEqual([
+      { id: 'outbound.greet.perform', effect: 'outbound', requiresConfirmation: true },
+    ]);
   });
 
   it('对话入口调外发：没签过字被 CONSENT_REQUIRED 拦下，渠道没被调也不落账（2.8-10）', async () => {
@@ -570,9 +574,10 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
 
   it('打招呼服务卸载时工具一起摘回：清单不会留着指向旧实例的入口', async () => {
     const { tools, greetFiber } = await boot({ agentTools: true });
-    expect(tools?.declarations.size).toBe(1);
+    expect(tools?.declarations.has('outbound.greet.perform')).toBe(true);
     await greetFiber.dispose();
     expect(tools?.removed).toEqual(['outbound.greet.perform']);
-    expect(tools?.list()).toEqual([]);
+    // 摘回只针对自己那一条：话术那条仍在（同一注册表，另一只服务的生命周期），断言它没被连带摘走。
+    expect(tools?.list().map((entry) => entry.id)).toEqual(['outbound.script.generate']);
   });
 });

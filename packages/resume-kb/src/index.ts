@@ -28,6 +28,7 @@ export {
 export {
   RESUME_IMPORT_MIGRATION_VERSION,
   ResumeParseService,
+  resumeParseRequestSchema,
   resumeParseSchema,
   type ImportReceipt,
   type ImportStatus,

@@ -8,7 +8,7 @@
  * 语料仍是**自造的虚构简历**（明显编造的号段），且日志侧故意把 `redact: false` 打开——
  * 4.1-09 要证明的是「本服务压根没把原文交给日志」，而不是「出口帮忙遮掉了」，两者是完全不同强度的结论。
  */
-import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
+import { AppError, asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
@@ -18,7 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { RESUME_IMPORT_MIGRATION_VERSION, ResumeParseService } from './parse-service.js';
+import { RESUME_IMPORT_MIGRATION_VERSION, ResumeParseService, type ImportReceipt } from './parse-service.js';
+import { FakeAgentToolsService } from './test-doubles.js';
 
 const NOW_MS = 1_700_000_000_000;
 const LATER_MS = 1_700_000_900_000;
@@ -76,9 +77,11 @@ function writeFile(dir: string, name: string, content: string | Uint8Array): str
  * 挂起 config + log + store + resume.doc + resume.parse。
  * @param dir 复用哪个目录（演「换个进程重挂同一份库」时传同一个）
  * @param maxBytes 单次导入字节上限，用于测「超大文件」这条失败腿
- * @returns 解析服务、文档存储服务、日志出口与裸连接
+ * @param withAgentTools 是否在本服务之前挂上 agent 工具注册表替身（默认不挂：5.1-c 之外的用例判的是
+ *        入库与脱敏，不该被注册表分走注意力；要挂必须早于本服务，`registerAgentTools` 是软取）
+ * @returns 解析服务、文档存储服务、日志出口、裸连接，以及（挂了替身时）注册表替身，未挂时为 null
  */
-async function boot(dir = tempDir(), maxBytes = 5_242_880) {
+async function boot(dir = tempDir(), maxBytes = 5_242_880, withAgentTools = false) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   // `redact: false`：见文件头说明，为了让 4.1-09 的日志半边断言到「根本没落原文」而不是「出口遮掉了」。
@@ -86,9 +89,16 @@ async function boot(dir = tempDir(), maxBytes = 5_242_880) {
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   // 工作副本的落点（plan §1.4 裁定一）：`resume.parse` 现在 inject 了 `resume.doc`，不挂它整个服务会 PENDING。
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  if (withAgentTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes }));
   const app = asApp(ctx);
-  return { parse: app['resume.parse'], doc: app['resume.doc'], log: app.log, db: app.store.db };
+  return {
+    parse: app['resume.parse'],
+    doc: app['resume.doc'],
+    log: app.log,
+    db: app.store.db,
+    tools: withAgentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
+  };
 }
 
 /** `resume_imports` 的全部行数。 */
@@ -404,5 +414,69 @@ describe('导入即建可编辑工作副本（plan §1.4 裁定一）', () => {
     const receipt = await parse.fromFile(writeFile(dir, 'tiny.md', '张三\n电话：13800001111'), NOW_MS);
     expect(receipt.status).toBe('scanned');
     expect(workCopyCount(db)).toBe(0);
+  });
+});
+
+/**
+ * 5.1-c 的建档腿：`resume.parse` 要能被对话挑中，且挑中之后走的仍是 4.1 那一条导入链——
+ * 判据与 4.5-b 的 `resume.generate.run` 同形（登记形状 / 两入口产物相等 / 入参是边界）。
+ */
+describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
+  /** 从替身注册表里取本包那只工具，取不到就直接失败（免得断言退化成对 undefined 取属性）。 */
+  function parseTool(tools: FakeAgentToolsService | null) {
+    const tool = tools?.declarations.get('resume.parse.fromFile');
+    if (tool === undefined) throw new Error('resume.parse.fromFile 未登记进 agent 工具面');
+    return tool;
+  }
+
+  it('挂载即登记一只 resume.parse.fromFile：本地写入、需批准、标题是 i18n 键不是文案', async () => {
+    const { tools } = await boot(tempDir(), 5_242_880, true);
+    if (tools === null) throw new Error('注册表替身未挂载');
+    // 本包只往这里登记这一只（`kb.profile` / `kb.gap` 那几只在它们自己的服务里登记，本用例没挂它们）。
+    expect([...tools.declarations.keys()]).toEqual(['resume.parse.fromFile']);
+    const tool = parseTool(tools);
+    expect(tool.effect).toBe('local-write');
+    expect(tool.requiresConfirmation).toBe(true);
+    expect(tool.titleKey).toBe('agent.tool.labels.parseFromFile');
+    // 描述里必须写清「不出网、不外发、幂等」：模型据此判断这不是外发动作、重复导入不会长出第二套实体。
+    expect(tool.description).toContain('不出网');
+    expect(tool.description).toContain('幂等');
+  });
+
+  it('注册表没装时服务照常挂载并能导入：登记数为 0 而不是抛错（agent 可单独摘掉的前提）', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, 'no-tools.md', RESUME_MD), NOW_MS);
+    expect(receipt.status).toBe('imported');
+    expect(rowCount(db)).toBe(1);
+  });
+
+  it('跑工具与直接调 service 的产物逐字相等：两入口共用同一条导入链（§5.9）', async () => {
+    const toolDir = tempDir();
+    const serviceDir = tempDir();
+    const { tools, db: toolDb, doc: toolDoc } = await boot(toolDir, 5_242_880, true);
+    const { parse, db: serviceDb } = await boot(serviceDir);
+    // 两份沙箱、同一份正文：`sourceHash` 由内容决定，所以两条腿必须落到同一个 docId。
+    // 逐字比较而不是比字段，是因为 `ImportReceipt` 里没有时间戳（入库时间只进库列），相等就是整条链相等。
+    const viaTool = (await parseTool(tools).run({
+      filePath: writeFile(toolDir, 'same.md', RESUME_MD),
+    })) as ImportReceipt;
+    const viaService = await parse.fromFile(writeFile(serviceDir, 'same.md', RESUME_MD));
+    expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));
+    expect(rowCount(toolDb)).toBe(1);
+    expect(rowCount(serviceDb)).toBe(1);
+    // 工具那条腿同样把可编辑工作副本建起来了（只写 `resume_imports` 的话，3.x 的编辑与导出读不到它）。
+    expect(toolDoc.load(viaTool.docId).status).toBe('found');
+  });
+
+  it('入参是边界：空路径与非声明键一律拒收，拒收时不碰文件系统', async () => {
+    const dir = tempDir();
+    const { tools } = await boot(dir, 5_242_880, true);
+    const input = parseTool(tools).input;
+    expect(input.safeParse({ filePath: writeFile(dir, 'ok.md', RESUME_MD) }).success).toBe(true);
+    expect(input.safeParse({}).success).toBe(false);
+    expect(input.safeParse({ filePath: '' }).success).toBe(false);
+    // 入库时间只能由服务取：让模型填 `nowMs` 等于让它决定「这份简历是哪天导入的」（同 4.5-b 的 nowMs 判据）。
+    expect(input.safeParse({ filePath: 'C:/x.md', nowMs: NOW_MS }).success).toBe(false);
   });
 });
