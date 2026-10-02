@@ -199,8 +199,12 @@ interface GenerateTarget {
 /** 提示词里那份清单的前导标记串，与 `buildGenerateMessages` 的 user 消息逐字一致。 */
 const GENERATE_TARGET_MARKER = '待改写的段落清单（JSON）：\n';
 
-/** 过校验的哨兵后缀：不加数字、不加机构名，只让改前改后在截图里分得开。 */
-const GENERATE_REWRITE_SUFFIX = '【定制】这段做法可按岗位要求逐条核对，事实与指标保持原样。';
+/**
+ * 过校验的哨兵后缀：不加数字、不加机构名，只让改前改后在截图里分得开。
+ * 尾巴上那串纯 ASCII（`JD-REWRITE-MARK`）是给 4.5-13 的 PDF 文本层断言用的：
+ * 中文字体在打印产物里被子集化，`pdftotext` 读不出中文，只有 ASCII 稳（见 3.3 的取证口径）。
+ */
+const GENERATE_REWRITE_SUFFIX = '【定制】这段做法可按岗位要求逐条核对，事实与指标保持原样。JD-REWRITE-MARK';
 
 /** 越界的哨兵正文：凭空补一个基线里不存在的百分比，数值守恒判据一定会抓到它。 */
 const GENERATE_FABRICATED_TEXT = '把存量问题的解决率提升到 91%。';
