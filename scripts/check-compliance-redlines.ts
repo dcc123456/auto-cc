@@ -1,15 +1,17 @@
 /**
  * 合规护栏机检（spec 2.7-02 / 2.7-04，AGENTS.md §8.1/§8.3 的落地）。
  *
- * 两条规则、两种失效模式：
+ * 三条规则、三种失效模式：
  * 1. **红线**（2.7-02）：验证码识别、UA 与指纹伪装、请求头改写、多账号分区池——这四类一旦进了代码库，
  *    就不再是"某个人的坏主意"而是"这个项目支持的用法"，所以按**字符串痕迹**扫（要绕过它得改的是意图，不是标识符）。
  * 2. **节奏数**（2.7-04）：等间隔是机器行为（AGENTS.md §8.3），而"从配置读一个定值再固定地睡"同样是机器行为。
  *    所以这条规则只认得"数值得从配置来"这一件事：出现在 `sleep(` / `setTimeout(` / `setInterval(` 实参位置上的
  *    数字字面量一律失败，`*.default()` 里的默认值与具名常量不在它的射程内。
+ * 3. **测试面 URL**（4.4-08 / AGENTS.md §7.2）：自动化不许碰真实招聘平台。这条只扫**测试与脚本面**
+ *    （理由见下面的 `TEST_SURFACE`），主机名只许是回环、RFC 保留名，或写进 allowlist 并说明理由的真实域名。
  *
  * 判定按行而不是 AST：本仓已有的同类检查（`check-llm-single-entry.ts`）就是这个形状，
- * 换 AST 要为两条规则引入一个解析器依赖，不值。
+ * 换 AST 要为三条规则引入一个解析器依赖，不值。
  */
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -51,6 +53,30 @@ const PACING_PACKAGES = ['browser', 'outbound', 'platform-boss', 'workflow', 'ag
  */
 const PACING_ALLOWLIST: readonly RegExp[] = [/\.default\(/, /MAX_[A-Z_]*MS\b/];
 
+/**
+ * 规则三放行的真实域名：**每条都必须带一句"这里为什么可以出现真实域名"**。
+ *
+ * 这两处都不是"被请求的地址"而是"被判读的字符串"：
+ * - `schemas.openxmlformats.org` 是 OOXML 的 XML 命名空间标识符，docx 解析用例拿它比对字符串常量；
+ * - `zhipin.com` 出现在**拒绝路径**上——导航策略要判「这个域名不属于任何已登记平台」，
+ *   知识包契约用例把它当 `startUrl` 字段的值喂给校验器。判"会不会被拒绝"必须拿真域名，
+ *   换成 `*.invalid` 就把要检的那件事本身检掉了（spec 2.2-08 / 2.7 的判据）。
+ * 加新条目的门槛：先确认这段代码真的不发请求，否则该改的是用例，不是这张表。
+ */
+const TEST_REAL_HOST_ALLOWLIST: readonly (readonly [RegExp, string])[] = [
+  [/^schemas\.openxmlformats\.org$/, 'OOXML 命名空间标识符（只比对字符串，不发请求）'],
+  [/^(?:www\.)?zhipin\.com$/, '导航策略与知识包契约用例的"被判拒绝域名"（真域名才能判出登记表之外）'],
+];
+
+/** 回环地址：`127.0.0.0/8` 与 `localhost` / `::1`，本地 fixture 站点与 CDP 都住在这里。 */
+const LOOPBACK_HOST = /^(?:127\.(?:\d{1,3}\.){2}\d{1,3}|localhost|::1)$/;
+
+/** RFC 2606 / 6761 保留名（含 `model.test.invalid` 这类多级写法），公网不可达。 */
+const RESERVED_NAME = /(?:^|\.)(?:invalid|test|localhost|example)$/;
+
+/** RFC 2606 保留的文档用域名（`fixture.example.com` 这类测试数据常用它）。 */
+const RESERVED_DOC_DOMAIN = /(?:^|\.)example\.(?:com|org|net)$/;
+
 const failures: string[] = [];
 
 /**
@@ -73,6 +99,62 @@ async function filesIn(dir: string): Promise<string[]> {
 const relative = (file: string): string => path.relative(repoRoot, file).replaceAll('\\', '/');
 
 const isTestFile = (rel: string): boolean => /\.(test|spec)\.ts$/.test(rel) || rel.endsWith('/test-doubles.ts');
+
+/**
+ * 规则三的射程：测试面 + 脚本面 + CDP harness 所在的 `packages/testing`。
+ *
+ * **刻意不扫生产代码**：这个 app 的本职工作就是驱动真实招聘站，`packages/browser` 里出现
+ * `zhipin.com` 是产品形态而不是违规（那部分由 `entitlement.gate`、风控停机和 ToS 确认三件事管）。
+ * 违规只有一种形态：**自动化路径**把真实平台当成了被测目标——那种代码一定住在上面这几处。
+ */
+const TEST_SURFACE = (rel: string): boolean =>
+  isTestFile(rel) || rel.startsWith('packages/testing/') || rel.startsWith('scripts/');
+
+/**
+ * 判一个 URL 主机名能不能出现在规则三的射程里。
+ * @param rawHost 去掉协议后的主机段（可能带端口、可能带 `user@`、也可能是 `${host}` 插值）
+ * @returns 允许返回 null；不允许返回一句可直接打印的违规说明
+ */
+function hostViolation(rawHost: string): string | null {
+  // 主机名来自变量时字符串面判不了（`http://${host}:${port}`）。这不是漏洞：同一件事的另一半
+  // 由 `CdpSession.navigate` 的运行期 loopback 守卫兜住（plan §4.4-e 判据二），那里变量已经落成实值。
+  if (rawHost.includes('${')) return null;
+  const withoutCredentials = rawHost.split('@').pop() ?? rawHost;
+  const bracketed = /^\[(.*?)(?:\]|:)/.exec(withoutCredentials);
+  const host = (bracketed?.[1] ?? withoutCredentials.split(':')[0] ?? '').toLowerCase().replace(/\.$/, '');
+  if (!host) return null;
+  if (LOOPBACK_HOST.test(host)) return null;
+  if (RESERVED_NAME.test(host) || RESERVED_DOC_DOMAIN.test(host)) return null;
+  // 单标签主机名（用例里的 `http://top`、`http://x`）不是可注册域名，DNS 上都到不了站。
+  if (!host.includes('.')) return null;
+  const allowed = TEST_REAL_HOST_ALLOWLIST.find(([pattern]) => pattern.test(host));
+  if (allowed) return null;
+  return (
+    `测试/脚本面出现了真实域名「${host}」：自动化一律只许打本地 fixture（127.0.0.1 / localhost）或` +
+    ' RFC 保留名（*.invalid / *.test / *.example），真实招聘平台只在用户在场时手动验证' +
+    '（spec 4.4-08 / AGENTS.md §7.2）。确属"被判读的字符串而非被请求的地址"才允许加进 ' +
+    'TEST_REAL_HOST_ALLOWLIST，并写清理由'
+  );
+}
+
+/**
+ * 扫一个文件里的 URL 字面量，把违规写进 `failures`。
+ *
+ * 抽成函数是因为射程跨两个循环（`packages/*` 与 `scripts/`），而 §2.2 不允许同一个判定写两遍。
+ * @param rel 相对仓库根的路径
+ * @param lines 文件按行切开的内容
+ */
+function scanTestSurfaceHosts(rel: string, lines: string[]): void {
+  if (!TEST_SURFACE(rel)) return;
+  lines.forEach((line, index) => {
+    // 注释里的 URL 不参与判定：注释发不出请求，而本仓的 JSDoc 惯例是把真实端点写清楚当证据（§6.1）。
+    const code = line.replace(/^\s*(?:\/\/|\*|\/\*).*$/, '');
+    for (const match of code.matchAll(/(?:https?|wss?):\/\/([^\s'"`/?#\\]+)/g)) {
+      const violation = hostViolation(match[1] ?? '');
+      if (violation) failures.push(`${rel}:${String(index + 1)} ${violation}`);
+    }
+  });
+}
 
 const packageDirs = await Promise.all(
   (await readdir(packagesDir, { withFileTypes: true }))
@@ -107,6 +189,9 @@ for (const { name, files } of packageDirs) {
       }
     });
 
+    // —— 规则三：测试与脚本面的 URL 主机名（先看，别被下面规则二的 continue 跳过）——
+    scanTestSurfaceHosts(rel, lines);
+
     // —— 规则二：节奏数字面量（只看生产代码）——
     if (!PACING_PACKAGES.includes(name) || isTestFile(rel)) continue;
     lines.forEach((line, index) => {
@@ -130,12 +215,20 @@ for (const { name, files } of packageDirs) {
   }
 }
 
+// 规则三还要覆盖 `scripts/**`：上面的循环只遍历 packages，而 fixture 服务与验收脚本才是真的会起进程、
+// 真的会被人手跑起来打网络的那一层（§7.2 禁的是"自动化访问真实平台"，脚本面首当其冲）。
+const scriptFiles = await filesIn(path.join(repoRoot, 'scripts')).catch(() => [] as string[]);
+for (const file of scriptFiles) {
+  scanTestSurfaceHosts(relative(file), (await readFile(file, 'utf8')).split('\n'));
+}
+
 if (failures.length) {
-  console.error('✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数）：');
+  console.error('✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数 / 4.4-08 测试面 URL）：');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
-  `✔ 合规护栏机检通过（扫描 ${String(packageDirs.reduce((sum, entry) => sum + entry.files.length, 0))} 个源码文件：` +
-    `无 UA/指纹/打码/自定义分区痕迹，${PACING_PACKAGES.join('/')} 的节奏数值全部来自配置）`,
+  `✔ 合规护栏机检通过（扫描 ${String(packageDirs.reduce((sum, entry) => sum + entry.files.length, 0) + scriptFiles.length)} 个源码文件：` +
+    `无 UA/指纹/打码/自定义分区痕迹，${PACING_PACKAGES.join('/')} 的节奏数值全部来自配置，` +
+    `测试与脚本面的 ${String(TEST_REAL_HOST_ALLOWLIST.length)} 条真实域名豁免之外没有出网地址）`,
 );

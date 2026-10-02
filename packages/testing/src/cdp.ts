@@ -128,6 +128,42 @@ function describeException(details: ExceptionDetails): string {
   return `${details.exception?.description ?? details.text}${line}`;
 }
 
+/**
+ * 本地测试地址的主机名：回环 v4/v6 与 `localhost`。
+ *
+ * `URL.hostname` 对 IPv6 会带回方括号（`http://[::1]:10222` → `[::1]`），所以两种写法都收。
+ */
+const LOCAL_TEST_HOST = /^(?:127\.(?:\d{1,3}\.){2}\d{1,3}|localhost|\[[\da-f:]+\])$/i;
+
+/** 允许出现在本地测试地址上的协议：`file:` 开的是本机产物，其余四种只要主机是回环就不出网。 */
+const LOCAL_TEST_PROTOCOLS = ['http:', 'https:', 'ws:', 'wss:'];
+
+/**
+ * 判一个 harness 要导航过去的地址是不是本地地址。
+ *
+ * 这是 AGENTS.md §7.2 的**运行期半边**：字符串面由 `scripts/check-compliance-redlines.ts` 规则三扫
+ * 测试与脚本源码，但那里判不了变量拼出来的 URL（`harness open --url` 就是人现场敲的一个字符串）。
+ * 主机在真正发请求之前拦，是这条规则唯一还能兜住人为失误的位置。
+ * @param url 要导航的完整地址（相对地址一律拒绝：没有主机就无从判定）
+ * @returns 放行返回 null；否则返回可直接打印的拒绝原因（**不抛异常**，好让单测把两半都判成表驱动）
+ */
+export function localTestUrlViolation(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `「${url}」不是完整 URL（相对地址无法判定主机，也就无法证明它不出网）`;
+  }
+  // `file:` 读本机磁盘，不会产生任何出网请求；验收里"打开导出产物看一眼"走的就是它。
+  if (parsed.protocol === 'file:') return null;
+  if (!LOCAL_TEST_PROTOCOLS.includes(parsed.protocol)) return `协议 ${parsed.protocol} 不在本地测试白名单内`;
+  if (LOCAL_TEST_HOST.test(parsed.hostname)) return null;
+  return (
+    `主机「${parsed.hostname}」不是本地地址。harness 只许驱动本地 fixture 与 app 自己的页面` +
+    '（127.0.0.1 / localhost / [::1]）；真实招聘平台只在用户在场时手动验证（AGENTS.md §7.2 / spec 4.4-08）'
+  );
+}
+
 /** 一个已连上某个 target 的 CDP 会话。 */
 export class CdpSession {
   private readonly socket: WebSocket;
@@ -358,8 +394,15 @@ export class CdpSession {
     return { before: focused.value, after: after?.value ?? null, tag: focused.tag };
   }
 
-  /** 导航当前 target 并等 `Page.loadEventFired`。 */
+  /**
+   * 导航当前 target 并等 `Page.loadEventFired`。
+   * @param url 目标地址，**必须是本地地址**（回环或 `file:`），见 `localTestUrlViolation`
+   * @throws 非本地地址时先抛错、一个 CDP 命令都不发；其余同底层 `Page.navigate`
+   */
   async navigate(url: string): Promise<void> {
+    // 守卫放在发命令之前：`Page.navigate` 一旦送达，浏览器就已经把请求发出去了，再判就晚了。
+    const violation = localTestUrlViolation(url);
+    if (violation) throw new Error(`拒绝导航：${violation}`);
     const loaded = this.waitForEvent('Page.loadEventFired');
     await this.send('Page.navigate', { url });
     await loaded;
