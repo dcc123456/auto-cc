@@ -471,6 +471,9 @@ importers:
       '@auto-cc/plugin-store':
         specifier: workspace:*
         version: link:../store
+      yaml:
+        specifier: ^2.7.0
+        version: 2.9.1
 
   packages/sessions:
     dependencies:

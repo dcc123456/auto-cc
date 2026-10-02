@@ -26,7 +26,7 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -1872,5 +1872,99 @@ describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
     }
 
     expect(uplink).toEqual([]);
+  });
+});
+
+describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec 4.3-12）', () => {
+  /**
+   * 语料里出现的原文哨兵（正文短语 + 姓名 + 手机号）。
+   *
+   * 前三条同时也是「会被检索命中的内容」，后两条是 PII（对齐 4.1-09 / §8.5 的口径：
+   * 派生表里只放结构化字段，原文不外溢到日志）。查询原文与切片正文共用同一串是**有意的**：
+   * 一条断言就同时锁死「不记查询原文」和「不记命中内容」两件事，
+   * 比 spec 的「只记查询与命中 id」更严（plan §4.3-e 的口径：计数行足够排障，原文没有必要）。
+   */
+  const RAW_TEXT_SENTINELS = ['主导订单服务重构', 'P99 延迟下降 40%', '沧海数据', '张三', '13800001111'];
+
+  /**
+   * 轮询等日志文件里出现某一行。
+   *
+   * 写流是异步落盘的（`createWriteStream` 的 `write()` 只保证入队顺序，不保证同步可见），
+   * 而「等到最后一行出现」比固定 sleep 更稳：顺序保证在它之前的所有行都已刷完，
+   * 负向断言因此覆盖了整条链路而不是截到半截。
+   * @param file 日志文件绝对路径
+   * @param needle 期待出现的子串（本用例传最后一次操作的日志标记）
+   * @returns 落盘后的完整日志文本；2 秒内没等到就抛（宁可让用例红，不要给出「查不到所以干净」的假通过）
+   */
+  async function waitForLogFile(file: string, needle: string): Promise<string> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (existsSync(file)) {
+        const text = readFileSync(file, 'utf8');
+        if (text.includes(needle)) return text;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`日志里 2 秒内没出现「${needle}」一行，脱敏断言失去了前提`);
+  }
+
+  it('五条写路径 + 检索 + 反查跑完后，日志有计数行而查不到任何原文哨兵', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD, 'resume-log');
+    const { kb } = booted;
+    const logFile = asApp(booted.ctx).log.filePath;
+    if (logFile === undefined) throw new Error('日志服务未落盘，4.3-12 无处可断');
+
+    // 检索与反查都要真的命中，否则「日志里没有正文」可能只是「什么都没发生」。
+    const searchResult = await kb.search('主导订单服务重构');
+    expect(searchResult.hits.length).toBeGreaterThan(0);
+    expect(kb.evidenceFor('主导订单服务重构').length).toBeGreaterThan(0);
+
+    // 其余四条写路径按 4.2 的装配顺序扫一遍：新建 → 改 → 同步 → 导出 → 导入 → 删除。
+    const created = kb.create({ kind: 'skill', payload: { name: 'Kafka' } }, NOW_MS);
+    kb.update(created.entityId, { name: 'Kafka / 消息队列' }, LATER_MS);
+    kb.sync('resume-log', LATER_MS);
+    const backupPath = join(tempDir(), 'kb-log.json');
+    kb.exportBackup(backupPath, LATER_MS);
+    kb.importBackup(backupPath, 'skip');
+    expect(kb.remove(created.entityId).removed).toBe(1);
+
+    // `remove` 是本用例最后一条会写日志的操作，等到它即等到全部。
+    const logText = await waitForLogFile(logFile, '删除手工实体');
+
+    // —— 正向半边：检索计数行确实存在，用例不是靠「日志压根没写」通过的 ——
+    expect(logText).toMatch(
+      /\[kb-profile\] 检索 \d+ 个 token \/ \d+ 条候选 → \d+ 条命中（\w+ · 向量腿 \w+ \/ 语义名单 \d+ 条）/,
+    );
+    expect(logText).toContain('同步 resume-log：派生');
+
+    const leaks = RAW_TEXT_SENTINELS.filter((sentinel) => logText.includes(sentinel));
+    expect(leaks).toEqual([]);
+  });
+
+  it('向量腿失败与退库路径也不带切片正文（warn 分支同样只记计数与原因）', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD, 'resume-log-vector', undefined, undefined, {
+      available: true,
+      model: 'bge-m3',
+      table: { 订单: [1, 0] },
+    });
+    const { kb } = booted;
+    const embed = booted.embed;
+    if (embed === undefined) throw new Error('向量替身没挂上，本用例退不出 `failed` 分支');
+    const logFile = asApp(booted.ctx).log.filePath;
+    if (logFile === undefined) throw new Error('日志服务未落盘，4.3-12 无处可断');
+
+    // 先补建（fixture 表里只有「订单」这个片段，所以只有含它的切片会写向量），
+    // 再让检索走一趟正常融合；最后把存根打成超时，逼出 `warn` 那条退回纯词面的分支。
+    await kb.syncVectors(NOW_MS);
+    expect((await kb.search('订单')).hits.length).toBeGreaterThan(0);
+    embed.failWith = 'timeout';
+    const failed = await kb.search('主导订单服务重构');
+    expect(failed.vectorStatus).toBe('failed');
+
+    const logText = await waitForLogFile(logFile, '退回纯词面检索');
+    expect(logText).toMatch(/向量编码失败/);
+    const leaks = RAW_TEXT_SENTINELS.filter((sentinel) => logText.includes(sentinel));
+    expect(leaks).toEqual([]);
   });
 });

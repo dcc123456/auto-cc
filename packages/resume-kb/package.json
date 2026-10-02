@@ -10,7 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "tsx src/bench.ts"
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@auto-cc/plugin-config": "workspace:*",
     "@auto-cc/plugin-logger": "workspace:*",
-    "@auto-cc/plugin-store": "workspace:*"
+    "@auto-cc/plugin-store": "workspace:*",
+    "yaml": "^2.7.0"
   }
 }
