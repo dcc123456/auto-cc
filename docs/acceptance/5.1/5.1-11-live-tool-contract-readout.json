@@ -1,0 +1,103 @@
+{
+  "说明": "5.1-d 活体读数：真 app（dev userData）里经 window.autoCC 白名单口跑工具契约四条判据的现场输出",
+  "命令": "pnpm harness assert --url 5173 --expr-file tmp/51d-readout.mjs（表达式见本仓库 docs/specs/05-chat-agent/spec.md 的 5.1-d 落地记录）",
+  "退出码": 0,
+  "at": "2026-10-02T14:28:41.692Z",
+  "toolCountInLiveRegistry": 16,
+  "assertions": {
+    "unregisteredIsRefused": true,
+    "nearMissIsNotGuessed": true,
+    "wrongTypeRejected": true,
+    "badEnumRejected": true,
+    "allReadingsHaveThreeFields": true,
+    "descriptorsCarryNoDisabledFlag": true,
+    "chatCardCarriesThreeFieldOutput": true
+  },
+  "liveChatToolPart": {
+    "toolId": "kb.profile.search",
+    "state": "done",
+    "outputKeys": [
+      "evidenceRefs",
+      "summary",
+      "value"
+    ],
+    "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量腿 unavailable）",
+    "evidenceRefs": [
+      "chunk:kbs-f36b7699466d5b4b",
+      "chunk:kb-15bcbd47c3f28866"
+    ],
+    "valueIsRawServiceReading": true
+  },
+  "readings": {
+    "5.1-05_unregistered_boss.greets": {
+      "ok": false,
+      "code": "TOOL_NOT_REGISTERED",
+      "message": "工具 boss.greets 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）"
+    },
+    "5.1-05_near-miss_kb.profile.searchh": {
+      "ok": false,
+      "code": "TOOL_NOT_REGISTERED",
+      "message": "工具 kb.profile.searchh 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）"
+    },
+    "5.1-04_wrong-type_input": {
+      "ok": false,
+      "code": "TOOL_INPUT_INVALID",
+      "message": "工具 kb.profile.search 入参不合法：query Invalid input: expected string, received number"
+    },
+    "5.1-04_bad-enum_input": {
+      "ok": false,
+      "code": "TOOL_INPUT_INVALID",
+      "message": "工具 kb.profile.list 入参不合法：kind Invalid option: expected one of \"experience\"|\"project\"|\"skill\"|\"achievement\""
+    },
+    "5.1-11_list_ok": {
+      "ok": true,
+      "resultKeys": [
+        "evidenceRefs",
+        "summary",
+        "value"
+      ],
+      "summary": "库里有 10 条实体",
+      "evidenceRefCount": 10,
+      "evidenceRefSample": [
+        "entity:kb-15bcbd47c3f28866",
+        "entity:kb-27df8ef027aff659",
+        "entity:kb-0589f4e57b987cc2"
+      ],
+      "valueType": "array(10)"
+    },
+    "5.1-11_search_ok": {
+      "ok": true,
+      "resultKeys": [
+        "evidenceRefs",
+        "summary",
+        "value"
+      ],
+      "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量腿 unavailable）",
+      "evidenceRefCount": 2,
+      "evidenceRefSample": [
+        "chunk:kbs-f36b7699466d5b4b",
+        "chunk:kb-15bcbd47c3f28866"
+      ],
+      "valueType": "object"
+    },
+    "5.1-11_search_no-tokens": {
+      "ok": true,
+      "resultKeys": [
+        "evidenceRefs",
+        "summary",
+        "value"
+      ],
+      "summary": "检索「。。。」：切出 0 个 token → 0 条命中（no_query_tokens · 向量腿 not_attempted）",
+      "evidenceRefCount": 0,
+      "evidenceRefSample": [],
+      "valueType": "object"
+    }
+  },
+  "判据与条目对应": {
+    "5.1-04": "wrongTypeRejected / badEnumRejected —— 错参被 schema 挡在实现之外",
+    "5.1-05": "unregisteredIsRefused / nearMissIsNotGuessed —— 未注册与近似名都拒绝，不猜",
+    "5.1-10": "descriptorsCarryNoDisabledFlag —— 清单读数只有五字段，禁用位不外泄；禁用态本身在单测里断（活体清单内无被禁工具，机检判据 8 禁止那种做法）",
+    "5.1-11": "allReadingsHaveThreeFields + liveChatToolPart —— 三条成功读数都是 summary/value/evidenceRefs，且对话卡片的 output 同形状过 IPC"
+  },
+  "个人数据说明": "按 §8.5 只落摘要、计数与 id 引用，实体正文与简历原文不进本文件"
+}

@@ -22,14 +22,14 @@
 | 5.1-01 | P1 的 `agent.tools` 空注册表被填充，每个工具含 `id/titleKey/params/sideEffect/requiresApproval/run` 六项 | U    | 遍历注册表断言字段齐全                           | [x]  |
 | 5.1-02 | 工具 `titleKey` 是 i18n key 而非文案本身；`zh-CN` 与 `en` 均有对应翻译，缺失即失败                       | C+U  | 缺 key 校验脚本通过                              | [x]  |
 | 5.1-03 | 副作用枚举仅三值（`read` / `localWrite` / `outbound`），无第四类且无 `unknown`                           | C    | 类型检查 + 断言枚举成员数                        | [x]  |
-| 5.1-04 | 每个工具入参由 zod schema 校验；非法入参被拒绝且**未执行任何动作**                                       | U    | 传错参调用 → 断言副作用计数为 0                  | [ ]  |
-| 5.1-05 | 调用未注册 id 返回明确错误（不猜测、不接受近似名匹配）                                                   | U    | 调 `boss.greets` → 断言「未注册工具」            | [ ]  |
+| 5.1-04 | 每个工具入参由 zod schema 校验；非法入参被拒绝且**未执行任何动作**                                       | U    | 传错参调用 → 断言副作用计数为 0                  | [x]  |
+| 5.1-05 | 调用未注册 id 返回明确错误（不猜测、不接受近似名匹配）                                                   | U    | 调 `boss.greets` → 断言「未注册工具」            | [x]  |
 | 5.1-06 | P2 的浏览器能力（打开/导航/定位/读取/点击/输入/打招呼/投递）全部以工具形式可见                           | C+U  | 列举清单与 2.8-08 对齐                           | [x]  |
 | 5.1-07 | P4 的内容能力（建档/检索/生成简历/生成话术）全部以工具形式可见                                           | C+U  | 列举清单与 P4 service 对齐                       | [x]  |
 | 5.1-08 | `agent.*` 模块不直接 import `browser.*` / `platform.*` / `jd.*` / `resume.*` / `kb.*`                    | C    | eslint 依赖边界规则 0 命中（规则本条新增并生效） | [x]  |
 | 5.1-09 | 依赖边界是**机检强制**而非约定：故意写一条越界 import 后 `pnpm lint` 失败                                | C    | 反向验证：临时注入违规 import → lint 报错 → 移除 | [x]  |
-| 5.1-10 | 注册表可声明"暂不开放"的工具（存在但对 agent 不可见），且该状态可被单测断言                              | U    | 标记一个工具 disabled → agent 侧列举不到         | [ ]  |
-| 5.1-11 | 工具执行结果统一为 `ToolResult`（成功含结果摘要与证据引用；失败含原因，禁止吞错返 `undefined`）          | U    | 强制失败路径 → 断言有原因文本与证据引用          | [ ]  |
+| 5.1-10 | 注册表可声明"暂不开放"的工具（存在但对 agent 不可见），且该状态可被单测断言                              | U    | 标记一个工具 disabled → agent 侧列举不到         | [x]  |
+| 5.1-11 | 工具执行结果统一为 `ToolResult`（成功含结果摘要与证据引用；失败含原因，禁止吞错返 `undefined`）          | U    | 强制失败路径 → 断言有原因文本与证据引用          | [x]  |
 
 ### 5.1-a 落地记录（契约里长出 `titleKey`，渲染层那份 id→键映射被删掉，2026-10-02）
 
@@ -218,6 +218,69 @@
   （代码 `feat(kb)`/`feat(outbound)` 一片、文档 `docs(resume-kb)` 一片），均已推送 `origin/main`；
   ⑧ 暂存区——只有源码、`cordis.yml`、检查脚本、两份语言包、两份文档与 3 份证据文件，
   探针表达式、实跑日志、导入用的 `51c-resume-sample.md` 全在被忽略的 `tmp/`。
+
+### 5.1-d 落地记录（四条非功能判据收口：三条硬拦 + 一种读数，2026-10-02）
+
+- **本片收的是 5.1 剩下的四格（5.1-04 / 05 / 10 / 11），分两批提交**：`e87776c` 给契约加 `disabled` 声明位并把
+  非法入参、未注册 id 两条硬拦做实；`ed392b0` 把成功侧读数收成 `ToolResult`。零新包、零新 service、零新 IPC 口，
+  改动面是契约（`core/events.ts`）、注册表（`agent/tools.ts`）、16 处登记现场、机检脚本与用例。
+- **5.1-04 拆成两半边判，缺一边都不算过**：行为半边用一只带副作用计数靶的假工具（`makeCountedTool`）——
+  五种非法形状（缺必填、空串撞 `min(1)`、类型错、多余键撞 `z.strictObject`、键名拼错）逐条调用后
+  `sideEffects` 仍是 `[]`，紧接着一次合法调用才让它变 `['hi']`，证明"拦住了"而不是"没测到"
+  （`packages/agent/src/agent.test.ts` 的「工具调用的三条硬拦」一节）。schema 半边不能只靠运行期：
+  `z.object` 一样能让五条用例通过（因为五条都打在字段本身），所以机检新增**判据 7**——
+  16 处声明现场的 `input` 顶层必须是 `z.strictObject`（具名 schema 常量经同包扫描表对上），读不出形状即失败。
+- **5.1-05 判的是"不猜"**：表里只有 `demo.counted`，六个近得离谱的名字（`demo.counter` / `demo.count` /
+  `DEMO.COUNTED` / 带尾空格的 `demo.counted ` / `outbound.greet` / spec 原文点名的 `boss.greets`）
+  全部回 `TOOL_NOT_REGISTERED` 且 `message` 里带的就是用户点的那只 id，副作用计数仍为 0。
+  模糊匹配一旦成立，"未注册"就变成"调到了别的能力"，白名单与副作用归属同时失效——这句写在用例注释里。
+- **5.1-10 的禁用态是双拦，不是只藏清单**：`list()` 过滤掉 `disabled` 的声明（对 agent 不可见），
+  `call()` 另有一条 `TOOL_DISABLED` 的硬拒（对 IPC 与对话也不可达）。只做前一半会留下"看不见但按得到"的暗门，
+  那是 §2.5 明令禁止的两套都能用。单测同时断言"启用它走的是同一条登记路径"（先 `unregister` 再登记），
+  不引入第二份"启用表"。机检**判据 8** 补上另一头：能力清单里的 12 件不许声明 `disabled`——
+  否则 5.1-06 / 07 的"以工具形式可见"当场失去对象，而声明现场看着齐全、单测也照样绿。
+- **5.1-11 把成功侧收成一种形状**：`ToolCallReply` 的 `ok:true` 分支从裸值改成
+  `{ ok: true, result: ToolResult }`，`ToolResult = { summary, value, evidenceRefs }`，实现侧统一经
+  `toolResult(value, { summary, evidenceRefs })` 构造口产出。**包装点选在工具的 `run`（工具面适配层）而不是
+  service 方法口**：service 方法同时是界面与 IPC 的读数口，给它套壳等于让每个面板都先拆一层壳才能拿到数据。
+  `evidenceRefs: []` 是一条**有意义的读数**（库里确实没依据），不是缺字段——4.3-10 的确定空态与"这条工具没交引用"
+  必须分得开，所以 `kb.gap.report` 在空库下如实给空数组，用例也按空数组断。
+  "禁止吞错返 `undefined`"这半边是结构性的：`run` 的返回类型就是 `Promise<ToolResult>`，实现给不出读数只能抛，
+  抛出被注册表收成 `TOOL_FAILED` 并把原因带进 `message`（新增用例用"额度已用尽"验这一格）。
+- **两处随之而来的口径更正，不是回退**：① `resume-kb` 与 `main` 里"跑工具与直接调 service 逐字相等"的
+  双入口用例改为比对 `.value`——两入口共用同一条路径判的是读数本身，摘要与引用是工具面这层的包装，
+  service 直接调用时没有它们；② 三只包内假注册表（`browser` / `outbound` / `platform-boss` 的 `test-doubles.ts`）
+  的 `call()` 返回值同步改成 `result` 命名，与真注册表对齐。**已知债**：那三份 `call()` 是同一逻辑的第二、三、四份
+  实现（§2.2），本片只把它们对齐、没有抽公共层——抽出来要落到一处跨包测试工具，归 5.2 顺手收。
+- **机检第 9 条与其变异探针**：判据 9 要求每处声明的 `run` 现场里读得出真实的 `toolResult(` 调用
+  （用去掉字符串与注释后的整段切片，因为 `keepTopLevelOnly` 会把嵌套内容抹平），并配"一条都没比对成功即失败"
+  的反向断言。探针：把 `sessions.open` 的 `run` 改成手写 `{ summary, value, evidenceRefs }` 字面量——
+  `tsc` 通过（形状一致，编译期无从分辨），`pnpm lint` 报
+  「`packages/sessions/src/index.ts` 的工具「sessions.open」的 run 里没有 toolResult(…) 调用」并 exit 1；
+  探针已按字节还原。这条判据要防的是"绕过构造口自己拼一个壳"，那等于把统一读数变成口头承诺。
+- **活体复跑（真 app，dev userData，CDP 10222）**：`pnpm harness assert --url 5173` 经渲染层白名单口
+  （`window.autoCC.agent['tools.call']` / `['tools.list']` / `chat['session.current']`）跑七条断言全为 true：
+  未注册与近似名各回 `TOOL_NOT_REGISTERED`、类型错与枚举错各回 `TOOL_INPUT_INVALID`、
+  三条成功读数的 `result` 键集恰为 `evidenceRefs,summary,value`、清单读数不带 `disabled` 字段、
+  对话里那条 `kb.profile.search` 工具卡片的 `output` 同形状过了 IPC。活体清单 16 只。
+  读数归档 `docs/acceptance/5.1/5.1-11-live-tool-contract-readout.json`（按 §8.5 只落摘要、计数与 id 引用，
+  实体正文与简历原文不进文件）；卡片可视证据 `docs/acceptance/5.1/5.1-11-live-tool-card-three-field-reading.png`
+  （zh「检索知识库 kb.profile.search 已完成 / 1 毫秒 / 只读」，sha1 `b715f085…`，与 5.1-a / 5.1-b / 5.1-c 四张互不相同）。
+  **注意这张截图同时暴露了本片的边界**：卡片上只有 id、参数、状态与耗时，`summary` 与 `evidenceRefs` 到了渲染层
+  但没被显示——四条判据都是 U 类，界面呈现是 5.2 的活（要配 i18n 与 Tailwind，不能塞进本片当死文案）。
+- **本片没修的三处缺口，如实留着**：① 工具卡片不显示摘要与证据引用（上一条）；
+  ② `effect` ↔ `requiresConfirmation` 的一致性判定仍推到 5.3（判定者 `agent.policy` 还不存在，理由与 5.1-a/b/c 相同）；
+  ③ 助手那条本地确定性回复在 en 下仍是中文（`session.ts` 的固定文案，§5.5 的机检照不到主进程），归 5.2。
+- **§7.4 自检逐条**：① 四道门禁实跑 exit 0（`pnpm -r --no-bail typecheck` / `pnpm lint`（8 项脚本机检，
+  工具契约检查内含 9 条判据）/ `pnpm format:check` / `pnpm -r --no-bail test` 21 包 95 文件 1378 例 0 失败）；
+  ② 四条均为 U 类，无 V 义务，但按项目纪律仍做了活体复跑并留一张卡片截图与一份 json 读数；
+  ③ 状态位：5.1-04 / 05 / 10 / 11 → `[x]`，5.1 一节 11 条至此无 `[ ]`；④ 复用检查——`toolResult` 构造口与
+  `agentTool` helper 复用同一份扫描器（`declarationsOf`），判据 9 不新写解析器；service 方法口一律未改签名，
+  界面与 IPC 读数零改动；⑤ 死代码——`ToolCallReply` 的裸值通路整块删除（不留"两种都能用"），
+  三只假注册表的旧 `value` 命名同步改净；⑥ 前端三项——本片渲染层零改动（卡片不读 `output`，grep 证），
+  无新增文案，故 i18n / Tailwind / lucide 三项无对象；⑦ 提交——代码 `feat(agent)` 两片（`e87776c` / `ed392b0`）
+  与文档一片分开，均已推送 `origin/main`；⑧ 暂存区——源码、检查脚本、文档与两份证据（png + json），
+  探针表达式、活体表达式与截图原件全在被忽略的 `tmp/`。
 
 ## 5.2 Agent 循环：规划 → 执行 → 观察 → 续推
 
