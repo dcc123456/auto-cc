@@ -709,6 +709,7 @@
       "levelEntry": "Entry",
       "moved": "position {{from}} → {{to}}",
       "reorderScore": "relevance {{score}}",
+      "reorderDisplaced": "Nothing in this row matched the JD; it only shifted because more relevant rows moved ahead, and its relative order is unchanged.",
       "selectedCount": "{{selected}} of {{total}} ticked: with nothing ticked the accept button stays disabled, because there would be nothing to write",
       "accepted": "Written into the working copy: {{applied}} rewrite(s) · {{sections}} section move(s) · {{entries}} entry move(s) · timestamp {{at}}",
       "acceptedRebind": "The working copy is now the edited version, while the library's entities and retrieval index still reflect the previous one: re-sync before the next comparison or generation.",

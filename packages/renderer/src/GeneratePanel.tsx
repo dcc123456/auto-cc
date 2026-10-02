@@ -220,7 +220,13 @@ export function GeneratePanel() {
         </span>
         · {basis.label} · {t('generate.moved', { from: basis.fromIndex + 1, to: basis.toIndex + 1 })}
       </p>
-      <p className="text-[11px] text-slate-500">{t('generate.reorderScore', { score: basis.score.toFixed(2) })}</p>
+      {/* 零分那一行的依据不是分数，是"被顶下来的"：把 `相关性 0.00` 摆在界面上，
+          等于告诉用户"我们没理由就挪了它"，而真实原因是前面有更强的项前移（`orderByScore` 把零分留在原序）。 */}
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        {basis.score > 0
+          ? t('generate.reorderScore', { score: basis.score.toFixed(2) })
+          : t('generate.reorderDisplaced')}
+      </p>
       {basis.hits.length > 0 && (
         <p data-generate-reorder-hits={basis.id} className="mt-1 text-[11px] leading-relaxed text-slate-400">
           {basis.hits.map((hit) => `${hit.label}（${hit.tokens.join(' / ')} · ${hit.score.toFixed(2)}）`).join('；')}
