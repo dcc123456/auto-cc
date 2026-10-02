@@ -550,10 +550,10 @@
 | ID     | 验收标准                                                                                 | 方式 | 验证操作                                        | 状态 |
 | ------ | ---------------------------------------------------------------------------------------- | ---- | ----------------------------------------------- | ---- |
 | 5.3-01 | 三档语义落地：`建议模式` 只出计划不执行；`半自动` 逐个写/外发询问；`全自动` 白名单内自主 | U    | 真值表测试：档位 × 副作用 × requiresApproval    | [ ]  |
-| 5.3-02 | 默认档位永远是最保守档（首次启动为`建议模式`；配置缺失亦回落到最保守）                   | U    | 删配置 → 断言档位为建议模式                     | [ ]  |
+| 5.3-02 | 默认档位永远是最保守档（首次启动为`建议模式`；配置缺失亦回落到最保守）                   | U    | 删配置 → 断言档位为建议模式                     | [x]  |
 | 5.3-03 | 当前档位常驻界面可见，任一截图可读出档位与生效范围                                       | V    | 三档各截一张图                                  | [ ]  |
-| 5.3-04 | 档位提升必须由用户显式操作触发，agent 自身无法提升（无工具、无自动路径）                 | C+U  | 静态查：无 `setTier` 类工具；断言循环内调用被拒 | [ ]  |
-| 5.3-05 | 档位变更记录审计（时间/前后档位/来源=用户），可查询                                      | U    | 切换两次 → 断言两条审计记录                     | [ ]  |
+| 5.3-04 | 档位提升必须由用户显式操作触发，agent 自身无法提升（无工具、无自动路径）                 | C+U  | 静态查：无 `setTier` 类工具；断言循环内调用被拒 | [x]  |
+| 5.3-05 | 档位变更记录审计（时间/前后档位/来源=用户），可查询                                      | U    | 切换两次 → 断言两条审计记录                     | [x]  |
 | 5.3-06 | 外发类工具在**全自动**档下仍默认需要确认（除非用户显式把该工具加入白名单）               | U    | 全自动 + 未加白 → 打招呼被暂停                  | [ ]  |
 | 5.3-07 | 外发白名单是显式配置项，可列出、可逐条撤销，界面上能看到"哪些动作已免确认"               | V    | 加白一项 → 截图列表                             | [ ]  |
 | 5.3-08 | 确认暂停分两类且界面区分：`approval`（是/否）与 `elicitation`（需补充信息，可多轮）      | V    | 各触发一次 → 两张卡片截图                       | [ ]  |
@@ -561,6 +561,60 @@
 | 5.3-10 | 审批超时不默认放行（超时 = 未确认 = 不执行），并回报超时                                 | U    | 缩短超时 → 断言未外发                           | [ ]  |
 | 5.3-11 | 外发三闸门缺一即不外发：档位允许 + 确认 + `entitlement.gate` 放行                        | U    | 三维各关掉一次 → 三次都被拒                     | [ ]  |
 | 5.3-12 | 被闸门拦下的动作在 `usage.ledger` 里留下"被拒"记录与可读原因                             | U    | 超额触发 → 断言拒绝记录                         | [ ]  |
+
+**5.3-a 落地记录（2026-10-03）**——档位真值表钉成用例、默认档做成配置、档位列唯一写入口 + 变更审计
+
+- **落点**：`packages/agent/src/session.ts`（`defaultAutonomy` 配置键、未知值回落 `coerceAutonomy`、
+  `setAutonomy` 写审计、只读查询口 `autonomyAudit`、审计表的新迁移号段 17）、`packages/agent/src/index.ts`
+  （多导出 `CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION`）、`cordis.yml`（`chat` 条目仍只给 `chunkChars` /
+  `chunkIntervalMs`，**故意不给 `defaultAutonomy`**，另加四行说明）、`packages/agent/src/loop/policy.test.ts`
+  （新增文件，18 格真值表）、`packages/agent/src/loop/loop.test.ts`（新增"档位提升不是 agent 的一只手"）、
+  `packages/agent/src/agent.test.ts`（新增 6 条）、`scripts/check-agent-model-authority.ts`（加第 ⑤ 条判据）、
+  `AGENTS.md` §9（新增一条环境事实，见下面的缺陷记录）。
+- **`packages/agent/src/loop/policy.ts` 零改动**：判定口早就是「确认位 → 注册表真相 → 档位 → 需批准/semi 写操作」
+  四级短路，5.3-01 要的是把这张表逐格钉住，不是再造一次判定。
+- **真值表**（`policy.test.ts`）：6 只合成工具 `demo.<effect>-<ask|free>`（三种副作用级 × 两种是否自主要批准）
+  × 三档 = 18 格，每格的期望码写成字面量而不是由代码算出——算出来的表只会重复被测逻辑的错。
+  `ALLOWED` 恰好 4 格（断言里钉了这个数目）：`suggest` 0 格、`semi` 只有 `read-free`、`auto` 三格免批准。
+  所有 `*-ask` 在任何档位都是 `CONFIRMATION_REQUIRED`——一只自己要求点头的手，`auto` 也不替用户点头。
+- **5.3-01 在本片不勾**：`auto × outbound × 免确认` 这一格结构上是 `ALLOWED`。今天没有活的工具长成那样
+  （plan §5.1-a 的人工核对：16 只里 `outbound` 级全部 `requiresConfirmation: true`），但 5.3-06 要的正是
+  "外发在全自动档下默认仍问，除非用户显式加白"，那条口与免确认白名单是 5.3-b 的活。这里既不为它改期望值，
+  也不往判定口塞一条「outbound 一律拒」的临时规则（§2.6），如实留 `[ ]`。
+- **5.3-04 的两半**：静态半边并进既有那道机检而不是新建第十道——`setAutonomy` 字样在源码（非测试）里只允许
+  出现在 `session.ts` / `bridge.ts` / `ChatPanel.tsx` 三处，且实际集合必须与白名单**完全相等**（多一只少一只都失败）；
+  全仓 `UPDATE chat_session SET autonomy` 恰好一处；`loop.ts` 与 `policy.ts` 里既不许出现 `setAutonomy`
+  也不许出现 `chat_session`——循环只读档位，不写档位。运行半边：草案点名 `chat.session.setAutonomy`
+  （那是 IPC 白名单上的名字，不是工具面上的 id）→ 判定 `TOOL_UNAVAILABLE` → 整跑 `failed` / `POLICY_REFUSED`，
+  工具一次都没进，跑完之后档位仍是用户设的那一档。
+- **实跑探针抓到的一处真缺陷（本片最值钱的记录）**：审计表最初挂在号段 2 的 `up` 里，四道门禁全绿、
+  `packages/agent` 72 条全过。对着活着的开发实例回看库（只读打开 `tmp/dev-userdata/store.db`）得到的是
+  `chat_message, chat_session` 两张表、`user_version: 16`、台账 1..16 全记过账——**已记过账的版本永远不会重跑**，
+  `CREATE TABLE IF NOT EXISTS` 在这里执行都执行不到，老用户机上第一次切档位会以 `no such table` 失败。
+  单测照不出这类缺陷：每个用例都从空库起，所有迁移都是头一回跑。改法是审计表 own 一支迁移（号段 17），
+  回归位写成「drop 掉表 + 删掉台账里 17 那一行 → 重新挂载服务 → 表回来了且切档位能写进行」。
+  改完后 dev 热重启把老库升上去，回看得到 `chat_autonomy_audit` 与 `user_version: 17`。
+  这条已进 `AGENTS.md` §9，plan §5.3-a 的原判断就地更正。
+- **活体读数**（`pnpm harness eval --url 127.0.0.1:5173`，探针 `tmp/53a/probe-live.js`；桥接层每条回复包成
+  `{ok,value}`，探针要先 unwrap）：`toolCount 16 / autonomyBefore suggest / afterSemi semi / afterSuggest suggest`。
+  非法档 `yolo` 经 IPC 回来的是结构化失败 `{ok:false,error:{code:'CHAT_AUTONOMY_INVALID',details:{level:'yolo',
+known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_audit` 恰好两行
+  （`suggest→semi`、`semi→suggest`，`source` 均为 `user`，倒序最新在前），那次失败的 `yolo` 没留行；
+  会话档位按原样回到 `suggest`。
+- **写这片撞上的两处工具形态**：块注释里不能出现 `*/`（一句 `packages/*/src` 让 esbuild 在一行无关代码上报
+  「Expected ; but found $」）；带 `.default()` 的配置键在直接调用点必须显式给（§9 的 1.3 实测），
+  因此三处台架 `ctx.plugin(ChatSessionService, …)` 都补了 `defaultAutonomy`。
+- **界面**：渲染层零改动，因此没有新增 V 证据、没有新增文案（i18n 键零改动）。5.3-03（三档各截图）与
+  5.3-07（免确认白名单列表）都在 5.3-b。
+- **§7.4 收尾自检**：① `pnpm typecheck` exit 0（24 个包 `typecheck: Done`）、`pnpm lint` exit 0
+  （eslint + 8 道 tsx 机检全 ✔，agent 那条现在带「升档只有人这一条口」）、`pnpm format:check` exit 0、
+  `pnpm -r --no-bail test` exit 0（21 个测试包 Done、无 failed；`packages/agent` `Test Files 4 passed (4)` /
+  `Tests 72 passed (72)`，较 5.2-d 的 61 条净增 11 条）。② 本片四条都是 U/C，活体读数是体检不是 V 证据。
+  ③ 状态位 5.3-02 / 04 / 05 → `[x]`，5.3-01 如实 `[ ]`。④ 复用：档位枚举取 `AUTONOMY_LEVELS`，回落判定只此一处
+  `coerceAutonomy`，迁移登记沿用既有"版本没记过账才 push"的结构，错误走既有 `AppError.code`。
+  ⑤ 无死代码：`autonomyAudit` 有用例与实跑两个消费者，界面包在 5.3-b 接。⑥ Tailwind / lucide / i18n 无新对象。
+  ⑦ 代码与文档分两片提交并推 origin。⑧ 暂存区只有源码 / 测试 / 文档 / `cordis.yml` / `AGENTS.md`，
+  探针脚本与门禁日志都在被忽略的 `tmp/53a/`。
 
 ## 5.4 对话 → 工作流沉淀
 

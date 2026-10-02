@@ -230,6 +230,11 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   真 app 的工具清单就静默少一只（本项目 5.1-c 撞上过一次：四道门禁全绿、活体清单 15 只而非 16 只）。
   **单测看不见这一类缺陷**——用例都把注册表替身挂在被测服务前面。这条顺序从此由
   `scripts/check-tool-contract.ts`（`pnpm lint` 链内）机检，别再依赖注释。
+- **实测（5.3-a）给已有服务加新表必须另起迁移号段，改老迁移的 `up` 不会重跑**：`runMigrations` 的判据是
+  `schema_migrations` 台账里"这一版记过账没有"，不是 DDL 幂等——`CREATE TABLE IF NOT EXISTS` 塞进已应用的
+  版本号里，在老库（含本机开发实例）上根本执行不到，运行期才以 `no such table` 失败。
+  **单测同样看不见**：每个用例都从空库起，所有迁移都是头一回跑。加表前先 `SELECT version FROM schema_migrations`
+  看台账最高值，取下一号段（本项目当前到 17）。
 - **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe
