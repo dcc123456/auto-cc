@@ -27,6 +27,7 @@ import {
   type WorkflowNodeExecutor,
   agentTool,
   registerAgentTools,
+  toolResult,
 } from '@auto-cc/core';
 import type { CaptureFailureView, CaptureRunView, CaptureStatusView, JobSearchCriteriaView } from '@auto-cc/shared';
 import type { BrowserPageService, JobDetail, JobSummary, PlatformRegistryService } from '@auto-cc/plugin-browser';
@@ -368,7 +369,17 @@ export class JdCaptureService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: ({ criteria }) => this.run(criteria),
+        // 本轮不回传逐行 JD id（`CaptureRunView` 只有计数），所以引用给的是「哪一轮抓取」这个回指标；
+        // 逐条 JD 的证据由 `jd.repository` 那侧按 keyword 查得到，不在这里造第二套读数。
+        run: async ({ criteria }) => {
+          const result = await this.run(criteria);
+          return toolResult(result, {
+            summary:
+              `在 ${result.platform} 抓「${result.keyword}」：${String(result.rounds)} 轮 · 入库 ${String(result.stored)} 条` +
+              `（跳过 ${String(result.skipped.length)} 条）· 停在 ${result.stoppedBy} · 库内共 ${String(result.total)} 条`,
+            evidenceRefs: [`search:${result.platform}/${result.keyword}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

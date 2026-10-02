@@ -458,9 +458,11 @@ describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
     const { parse, db: serviceDb } = await boot(serviceDir);
     // 两份沙箱、同一份正文：`sourceHash` 由内容决定，所以两条腿必须落到同一个 docId。
     // 逐字比较而不是比字段，是因为 `ImportReceipt` 里没有时间戳（入库时间只进库列），相等就是整条链相等。
-    const viaTool = (await parseTool(tools).run({
-      filePath: writeFile(toolDir, 'same.md', RESUME_MD),
-    })) as ImportReceipt;
+    const viaTool = (
+      await parseTool(tools).run({
+        filePath: writeFile(toolDir, 'same.md', RESUME_MD),
+      })
+    ).value as ImportReceipt;
     const viaService = await parse.fromFile(writeFile(serviceDir, 'same.md', RESUME_MD));
     expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));
     expect(rowCount(toolDb)).toBe(1);

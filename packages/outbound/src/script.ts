@@ -15,7 +15,7 @@
  * 模板与提示词全部在注册表 `./prompts.ts`（spec 4.6-09，由 `scripts/check-prompts.ts` 机检），
  * 本文件只做装配、校验与回落决策。
  */
-import { AppError, agentTool, asApp, registerAgentTools, Service, type Context } from '@auto-cc/core';
+import { AppError, agentTool, asApp, registerAgentTools, Service, toolResult, type Context } from '@auto-cc/core';
 import { z } from 'zod';
 import { findUnsupportedClaims } from './claims.js';
 import { buildScriptMessages, renderScriptTemplate, SCRIPT_PROMPT_VERSION } from './prompts.js';
@@ -384,7 +384,17 @@ export class OutboundScriptService extends Service {
         input: scriptRequestSchema,
         effect: 'local-write',
         requiresConfirmation: true,
-        run: (params) => this.generate(params),
+        // 话术本身不进摘要（那是给模型与界面读的产出，不是"做成了什么"的读数），只报字数与来源；
+        // `draft.evidenceRefs` 本来就是 4.6-02 的证据引用，这里把它接到统一结果上（5.1-11 的缺口就在这一步）。
+        run: async (params) => {
+          const draft = await this.generate(params);
+          return toolResult(draft, {
+            summary:
+              `已产出「${draft.kind}」话术 ${String(draft.text.length)} 字（来源 ${draft.origin} · 模板 ${draft.scriptVersion}）` +
+              (draft.fallbackReason === undefined ? '' : ` · 回落原因：${draft.fallbackReason}`),
+            evidenceRefs: [...draft.evidenceRefs, `jd:${draft.jdId}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

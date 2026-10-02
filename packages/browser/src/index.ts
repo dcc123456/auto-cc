@@ -14,7 +14,7 @@
  * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（只允许已登记平台的同源地址）；
  * 2. 页面内容只在页面里读（注入脚本），主进程不解析 HTML 字符串，因此不引入第二套 DOM 实现。
  */
-import { Service, asApp, AppError, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
+import { Service, asApp, AppError, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
 import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScrollReading } from '@auto-cc/shared';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents } from 'electron';
@@ -329,7 +329,14 @@ export class BrowserPageService extends Service {
         input: z.strictObject({ url: z.url() }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ url }) => this.navigate(url),
+        // 摘要按快照自己的读数说话：装载态没到 `complete` 就不说「页面加载好了」（5.1-11 禁止含糊的"已完成"）。
+        run: async ({ url }) => {
+          const page = await this.navigate(url);
+          return toolResult(page, {
+            summary: `内核视图已导航到 ${page.url}（装载态 ${page.readyState} · ${String(page.elementCount)} 个元素）`,
+            evidenceRefs: [`page:${page.url}`],
+          });
+        },
       }),
       agentTool({
         id: 'browser.page.snapshot',
@@ -338,7 +345,15 @@ export class BrowserPageService extends Service {
         input: z.strictObject({ maxChars: z.number().int().min(1).max(50_000).optional() }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ maxChars }) => this.snapshot(maxChars),
+        // 正文节选不进摘要：快照文本是页面上的原文，可能带着候选人姓名与联系方式（§8.5 默认脱敏），
+        // 摘要只报长度与地址这类定位信息，正文留给 `value` 由界面按判据显示。
+        run: async ({ maxChars }) => {
+          const page = await this.snapshot(maxChars);
+          return toolResult(page, {
+            summary: `已读取 ${page.url} 的页面快照（正文截断前 ${String(page.textLength)} 字 · 装载态 ${page.readyState}）`,
+            evidenceRefs: [`page:${page.url}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

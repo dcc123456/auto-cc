@@ -1134,8 +1134,10 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     if (tool === undefined) throw new Error('kb.profile.list 未登记进 agent 工具面');
     expect(tool.effect).toBe('read');
     expect(tool.requiresConfirmation).toBe(false);
-    expect(await tool.run({ kind: 'experience' })).toEqual(kb.list({ kind: 'experience' }));
-    expect(await tool.run({})).toEqual(kb.list());
+    // 5.1-11 之后工具面交回统一读数，「两入口打同一个口」判的是 `value` 与 service 返回值相等；
+    // 摘要与引用是工具面那层的包装，service 直接调用时没有它们。
+    expect((await tool.run({ kind: 'experience' })).value).toEqual(kb.list({ kind: 'experience' }));
+    expect((await tool.run({})).value).toEqual(kb.list());
     // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
     expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
   });
@@ -1146,18 +1148,23 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     if (tool === undefined) throw new Error('kb.profile.search 未登记进 agent 工具面');
     expect(tool.effect).toBe('read');
     expect(tool.requiresConfirmation).toBe(false);
-    expect(await tool.run({ query: '订单' })).toEqual(await kb.search('订单'));
+    // 同一句理由：两入口相等判的是检索读数（`value`），包装字段由工具面自己产出。
+    expect((await tool.run({ query: '订单' })).value).toEqual(await kb.search('订单'));
     // 空查询必须过 schema：注册表那层的 `TOOL_INPUT_INVALID` 会把 4.3-10 要区分的两个确定空态吃成一个错误。
     expect(tool.input.safeParse({ query: '' }).success).toBe(true);
-    expect(await tool.run({ query: '。。。' })).toEqual({
+    expect((await tool.run({ query: '。。。' })).value).toEqual({
       status: 'no_query_tokens',
       hits: [],
       queryTokens: [],
       vectorStatus: 'not_attempted',
     });
+    // 空态的引用也要是「空数组」而不是缺字段——界面按它区分「没依据」与「没数」（5.1-11）。
+    expect((await tool.run({ query: '。。。' })).evidenceRefs).toEqual([]);
     // 结果要落进消息 parts 并过 IPC，所以必须是纯 JSON（Map / Set 一旦漏进去就是「界面上拿到空对象」）。
-    const serialized = JSON.parse(JSON.stringify(await tool.run({ query: '订单' }))) as { hits: unknown[] };
-    expect(serialized.hits.length).toBeGreaterThan(0);
+    const serialized = JSON.parse(JSON.stringify(await tool.run({ query: '订单' }))) as {
+      value: { hits: unknown[] };
+    };
+    expect(serialized.value.hits.length).toBeGreaterThan(0);
   });
 });
 

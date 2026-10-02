@@ -9,7 +9,7 @@
  * 与 `browser.page` 的分工：页面服务只读「整页长什么样」，这里读「我要的那个东西在哪」。
  * 两者共用 `frame-channel`（同一块视图、同一条多帧求值通道），不存在第二套取句柄逻辑。
  */
-import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
 import type { ElementFingerprint, LocateResultView, LocateSpec, LocateStatusView, LocatedView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { evaluateInFrames, readingsFromFrames, requireKernelContents, type KernelHost } from './frame-channel.js';
@@ -251,7 +251,15 @@ export class BrowserLocateService extends Service {
         input: z.strictObject({ spec: locateSpecSchema }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ spec }) => this.find(spec),
+        // `snapshotRef` 本来就是 2.4 留证据用的指针（`<帧地址>@<时间戳>`），这里把它接到统一结果上，
+        // 不新造一种引用格式。
+        run: async ({ spec }) => {
+          const result = await this.find(spec);
+          return toolResult(result, {
+            summary: `定位「${spec.description}」→ ${result.status}（${result.reason}）`,
+            evidenceRefs: [`snapshot:${result.snapshotRef}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

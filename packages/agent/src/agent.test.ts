@@ -7,7 +7,7 @@
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { asApp, Context, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
+import { asApp, Context, toolResult, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,7 +77,7 @@ function makeEchoTool(): AgentTool<{ text: string }> {
     input: z.object({ text: z.string().min(1) }),
     effect: 'read',
     requiresConfirmation: false,
-    run: (params) => Promise.resolve({ echoed: params.text }),
+    run: (params) => Promise.resolve(toolResult({ echoed: params.text }, { summary: '回声完成' })),
   };
 }
 
@@ -96,7 +96,7 @@ function makeCountedTool(sideEffects: string[]): AgentTool<{ text: string }> {
     requiresConfirmation: true,
     run: (params) => {
       sideEffects.push(params.text);
-      return Promise.resolve({ echoed: params.text });
+      return Promise.resolve(toolResult({ echoed: params.text }, { summary: `已记入 ${params.text}` }));
     },
   };
 }
@@ -140,7 +140,10 @@ describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) expect(invalid.code).toBe('TOOL_INPUT_INVALID');
     const ok = await tools.call('demo.echo', { text: 'hi' });
-    expect(ok).toEqual({ ok: true, value: { echoed: 'hi' } });
+    expect(ok).toEqual({
+      ok: true,
+      result: { summary: '回声完成', value: { echoed: 'hi' }, evidenceRefs: [] },
+    });
   });
 
   it('工具自己抛错时原样回报为 TOOL_FAILED，不改口成「已完成」（§1.7 第 8 条）', async () => {
@@ -222,6 +225,55 @@ describe('工具调用的三条硬拦（spec 5.1-04 / 05 / 10）', () => {
   });
 });
 
+/**
+ * 登记一只「交回统一读数」的假工具（spec 5.1-11 的三条判据共用一个构造口）。
+ * @param tools 本次挂载的注册表
+ * @param run 实现侧要交回的东西：成功读数或直接抛错，由用例决定
+ */
+function registerReadingTool(tools: AgentToolsService, run: AgentTool<{ docId: string }>['run']): void {
+  tools.register({
+    id: 'demo.reading',
+    titleKey: 'agent.tool.labels.demoReading',
+    description: '交回一条统一读数的假工具',
+    input: z.strictObject({ docId: z.string().min(1) }),
+    effect: 'read',
+    requiresConfirmation: false,
+    run,
+  });
+}
+
+describe('成功侧只有一种读数（spec 5.1-11）', () => {
+  it('成功回复带齐 summary / value / evidenceRefs：界面不必按工具 id 猜形状', async () => {
+    const { tools } = await boot();
+    registerReadingTool(tools, ({ docId }) =>
+      Promise.resolve(toolResult({ docId }, { summary: `已读到 ${docId}`, evidenceRefs: ['entity:doc-1'] })),
+    );
+    await expect(tools.call('demo.reading', { docId: 'doc-1' })).resolves.toEqual({
+      ok: true,
+      result: { summary: '已读到 doc-1', value: { docId: 'doc-1' }, evidenceRefs: ['entity:doc-1'] },
+    });
+  });
+
+  it('库里确实没有依据时 evidenceRefs 是空数组而不是缺字段：「没依据」与「没数」是两种读数', async () => {
+    const { tools } = await boot();
+    registerReadingTool(tools, () => Promise.resolve(toolResult({ hits: [] }, { summary: '词面未命中' })));
+    const reply = await tools.call('demo.reading', { docId: 'doc-1' });
+    expect(reply.ok).toBe(true);
+    if (!reply.ok) throw new Error('这条用例只该走成功侧');
+    expect(reply.result.evidenceRefs).toEqual([]);
+  });
+
+  it('实现抛错时收成 TOOL_FAILED 并把原因带出来：成功侧不会给出 undefined 冒充完成', async () => {
+    const { tools } = await boot();
+    registerReadingTool(tools, () => Promise.reject(new Error('额度已用尽')));
+    await expect(tools.call('demo.reading', { docId: 'doc-1' })).resolves.toEqual({
+      ok: false,
+      code: 'TOOL_FAILED',
+      message: expect.stringContaining('额度已用尽'),
+    });
+  });
+});
+
 describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
   it('首次读取就地建会话：默认档位 suggest、消息为空', async () => {
     const { chat } = await boot();
@@ -295,7 +347,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
       input: z.object({ criteria: z.unknown() }),
       effect: 'outbound',
       requiresConfirmation: true,
-      run: () => Promise.resolve({ captured: 3 }),
+      run: () => Promise.resolve(toolResult({ captured: 3 }, { summary: '抓到 3 条', evidenceRefs: ['search:demo'] })),
     });
     chat.send('/tool');
     await waitUntil(() => deltas.at(-1)?.done === true, 6000, '工具卡片没有收尾');
@@ -303,7 +355,12 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(jumps.map((delta) => delta.tool?.state)).toEqual(['running', 'done']);
     expect(jumps[0]?.tool?.durationMs).toBeNull();
     expect(jumps[1]?.tool?.durationMs).toBeTypeOf('number');
-    expect(jumps[1]?.tool?.output).toEqual({ captured: 3 });
+    // 2.8-09 之后 output 就是统一读数（spec 5.1-11）：摘要 + 产出 + 证据引用三样，卡片不必再按工具 id 猜形状。
+    expect(jumps[1]?.tool?.output).toEqual({
+      summary: '抓到 3 条',
+      value: { captured: 3 },
+      evidenceRefs: ['search:demo'],
+    });
     expect(jumps[1]?.tool?.input).toEqual({ criteria: { keyword: '前端', city: '上海', limit: 3 } });
     const part = chat
       .current()

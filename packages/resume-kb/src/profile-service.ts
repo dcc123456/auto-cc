@@ -20,7 +20,16 @@
  * 可编辑工作副本的**唯一真相源**，而它的 `load()` 顺带做了 Schema 重新校验——绕过它就是用裸 SQL
  * 造第二条读取通道（AGENTS.md §2.5），库里被改坏的文档将不再被发现。
  */
-import { AppError, asApp, embedGatewayOf, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
+import {
+  AppError,
+  asApp,
+  embedGatewayOf,
+  Service,
+  agentTool,
+  registerAgentTools,
+  toolResult,
+  type Context,
+} from '@auto-cc/core';
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -436,7 +445,16 @@ export class KbProfileService extends Service {
         }),
         effect: 'read',
         requiresConfirmation: false,
-        run: (filter) => Promise.resolve(this.list(filter)),
+        // 实体正文不进摘要（§8.5：库内是简历原文，含姓名与联系方式），引用给逐条实体 id。
+        run: (filter) => {
+          const entities = this.list(filter);
+          return Promise.resolve(
+            toolResult(entities, {
+              summary: `库里有 ${String(entities.length)} 条${filter.kind ?? ''}实体`,
+              evidenceRefs: entities.map((entity) => `entity:${entity.entityId}`),
+            }),
+          );
+        },
       }),
       // 检索口同时是工具（裁定三）：对话里「找找和高并发相关的经历」与界面上的检索框必须打同一个 `search()`。
       // 入参不设 `min(1)`：空查询在库里表现为「切不出 token」而不是「参数不合法」，
@@ -449,7 +467,15 @@ export class KbProfileService extends Service {
         input: z.strictObject({ query: z.string() }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ query }) => this.search(query),
+        run: async ({ query }) => {
+          const result = await this.search(query);
+          return toolResult(result, {
+            summary:
+              `检索「${query}」：切出 ${String(result.queryTokens.length)} 个 token → ${String(result.hits.length)} 条命中` +
+              `（${result.status} · 向量腿 ${result.vectorStatus}）`,
+            evidenceRefs: result.hits.map((hit) => `chunk:${hit.chunkId}`),
+          });
+        },
       }),
       // 向量补建（spec 4.3-07 / 08）：这一只把手是**出网的**（切片文本要发给 embedding 端点），
       // 所以 `effect: 'outbound'` + 需要批准，与 `jd.capture` 同一口径（plan §15.7 落点 4）。
@@ -463,7 +489,16 @@ export class KbProfileService extends Service {
         input: z.strictObject({}),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: () => this.syncVectors(),
+        // 引用给「本次对哪个模型补了向量」——4.3-08 要的是降级看得见，模型名是那条读数的键。
+        run: async () => {
+          const sync = await this.syncVectors();
+          return toolResult(sync, {
+            summary:
+              `向量腿 ${sync.status}：待补 ${String(sync.pending)} 条 · 本次写入 ${String(sync.written)} 条` +
+              ` · 清理 ${String(sync.removed)} 条 · 模型 ${sync.model ?? '未配置'} · 维度 ${String(sync.dim ?? '（无）')}`,
+            evidenceRefs: sync.model === null ? [] : [`vectors:${sync.model}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

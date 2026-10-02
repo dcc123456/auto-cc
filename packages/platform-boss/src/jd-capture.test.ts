@@ -697,9 +697,13 @@ describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10�
       true,
     );
     const reply = await tools?.call('jd.capture.run', { criteria: { keyword: '前端', city: '上海' } });
+    // spec 5.1-11：抓取这一轮的可回指标（`search:平台/关键词`）随结果一起出来，工具卡片不必自己拼。
     expect(reply).toMatchObject({
       ok: true,
-      value: { platform: 'boss', keyword: '前端', city: '上海', stored: 3, total: 3 },
+      result: {
+        value: { platform: 'boss', keyword: '前端', city: '上海', stored: 3, total: 3 },
+        evidenceRefs: ['search:boss/前端'],
+      },
     });
     expect(ledger.count()).toBe(1);
     expect(ledger.summary().recent[0]).toMatchObject({ action: 'search', targetId: '前端' });

@@ -19,6 +19,7 @@ import {
   type AgentToolRegistry,
   type Context,
   type ToolEffect,
+  type ToolResult,
 } from '@auto-cc/core';
 import type { LocateResultView, LocatedReading, KernelPageSnapshotView, SessionsStatusView } from '@auto-cc/shared';
 import type { MainFrameResponseReading } from '@auto-cc/plugin-sessions';
@@ -601,13 +602,13 @@ export class FakeAgentToolsService extends Service implements AgentToolRegistry 
    * 于是用例断言的是页面 / 定位 / 动作服务自己那批错误码。
    * @param id 工具 id
    * @param rawInput 未收窄的入参（来自模型或界面，按不可信输入处理）
-   * @returns schema 通过时是实现返回值；不通过时带回 `INPUT_INVALID`，id 没登记带回 `NOT_REGISTERED`
+   * @returns schema 通过时是实现产出的统一读数（spec 5.1-11 的 `ToolResult`）；不通过时带回 `INPUT_INVALID`，id 没登记带回 `NOT_REGISTERED`
    */
-  async call(id: string, rawInput: unknown): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
+  async call(id: string, rawInput: unknown): Promise<{ ok: true; result: ToolResult } | { ok: false; reason: string }> {
     const tool = this.declarations.get(id);
     if (!tool) return { ok: false, reason: 'NOT_REGISTERED' };
     const parsed = tool.input.safeParse(rawInput);
     if (!parsed.success) return { ok: false, reason: 'INPUT_INVALID' };
-    return { ok: true, value: await tool.run(parsed.data) };
+    return { ok: true, result: await tool.run(parsed.data) };
   }
 }

@@ -36,6 +36,7 @@ import {
   maybeService,
   registerAgentTools,
   Service,
+  toolResult,
   type Context,
 } from '@auto-cc/core';
 import { z } from 'zod';
@@ -273,7 +274,24 @@ export class KbGapService extends Service {
         }),
         effect: 'read',
         requiresConfirmation: false,
-        run: (params) => this.report(params.jdText, { kind: params.kind, sourceDocId: params.sourceDocId }),
+        // 摘要不复述 JD 正文也不复述库内原文（4.3-12 的口径同样适用于返回值：它会经 IPC 落进渲染层日志），
+        // 只报条数、参与比对的实体数与两个换算读数；引用给逐条撑着结论的证据 id。
+        run: async (params) => {
+          const report = await this.report(params.jdText, {
+            kind: params.kind,
+            sourceDocId: params.sourceDocId,
+          });
+          return toolResult(report, {
+            summary:
+              `缺口比对读毕：${String(report.rows.length)} 条要求逐条给出三态与依据 · ` +
+              `库内 ${String(report.entityCount)} 条实体参与 · 经验合计 ${String(report.totalExperienceMonths)} 个月` +
+              `（截至 ${report.asOfMonth}）· 亮点候选 ${String(report.highlights.length)} 条`,
+            evidenceRefs: [
+              ...new Set(report.rows.flatMap((row) => row.evidence.map((evidence) => `evidence:${evidence.id}`))),
+              ...report.highlights.map((highlight) => `entity:${highlight.entityId}`),
+            ],
+          });
+        },
       }),
     ]);
     // 库在不在装配里，是运行期每次调用都要现问的事实（§9 的 2.5-e：不存第二份），

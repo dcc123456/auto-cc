@@ -13,7 +13,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { AppError, agentTool, asApp, registerAgentTools, Service, type Context } from '@auto-cc/core';
+import { AppError, agentTool, asApp, registerAgentTools, Service, toolResult, type Context } from '@auto-cc/core';
 import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
@@ -168,7 +168,18 @@ export class ResumeParseService extends Service {
         // （与 `resume.generate.run` 同一口径：不是外发，所以不占额度闸门，但也不是无人看一眼就落库）。
         effect: 'local-write',
         requiresConfirmation: true,
-        run: ({ filePath }) => this.fromFile(filePath),
+        // 「新建档」与「同哈希命中既有档」是两件不同的事（4.1-07 的幂等判据），摘要必须分开说；
+        // 引用给文档 id 与来源哈希，界面无需再读正文就能对上是哪一份。
+        run: async ({ filePath }) => {
+          const receipt = await this.fromFile(filePath);
+          return toolResult(receipt, {
+            summary:
+              `${receipt.isNew ? '已建档' : '同一哈希命中既有档'}：${receipt.docId}` +
+              `（${receipt.format} · ${String(receipt.textLength)} 字 · ${String(receipt.sections.length)} 个区块` +
+              `${receipt.status === 'scanned' ? ' · 判定为扫描件，未产文档' : ''}）`,
+            evidenceRefs: [`doc:${receipt.docId}`, `hash:${receipt.sourceHash}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

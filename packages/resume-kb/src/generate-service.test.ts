@@ -722,10 +722,10 @@ describe('resume.generate 的 agent 工具面（spec 4.5 的双入口）', () =>
     const { gen, tools } = await bootGenerate({ allowModelLeg: false });
     const tool = tools.declarations.get('resume.generate.run');
     if (tool === undefined) throw new Error('resume.generate.run 未登记进 agent 工具面');
-    // 注册表不知道各只工具各自产什么形状，`run` 的返回是 `unknown`（`tools.ts:128` 原样透出）。
+    // `run` 交回的是统一读数 `ToolResult`（spec 5.1-11），产物在 `.value` 里。
     // 这里显式收束成 `GenerationView`：工具面哪天少给一个键，下面那三行属性访问当场发红，
     // 而不是跟着 `JSON.stringify(undefined)` 双方都变成 undefined 而悄悄通过。
-    const viaTool = (await tool.run({ jdText: SAMPLE_JD, docId: DOC_ID })) as GenerationView;
+    const viaTool = (await tool.run({ jdText: SAMPLE_JD, docId: DOC_ID })).value as GenerationView;
     const viaService = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
     expect(JSON.stringify(viaTool.document)).toBe(JSON.stringify(viaService.document));
     expect(JSON.stringify(viaTool.evidence)).toBe(JSON.stringify(viaService.evidence));

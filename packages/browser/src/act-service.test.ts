@@ -515,7 +515,7 @@ describe('agent 工具登记（spec 2.8-08 / plan §15.7 落点 4）', () => {
     // 逐字段比对而不是整对象相等：`located` 里带帧地址等读数，两次调用的先后本身不是被测点。
     expect(throughTool).toMatchObject({
       ok: true,
-      value: { action: direct.action, channel: direct.channel, trusted: direct.trusted },
+      result: { value: { action: direct.action, channel: direct.channel, trusted: direct.trusted } },
     });
   });
 

@@ -15,6 +15,7 @@ import {
   type ConsentGate,
   type Context,
   type ToolEffect,
+  type ToolResult,
   type WorkflowExecutorRegistry,
   type WorkflowNodeExecutor,
 } from '@auto-cc/core';
@@ -750,13 +751,13 @@ export class FakeAgentToolsService extends Service implements AgentToolRegistry 
    * 实现抛错时**原样上抛**（真注册表把它收成 `TOOL_FAILED`，那一步由 `agent` 包的用例断言）。
    * @param id 工具 id
    * @param rawInput 未收窄的入参（来自模型或界面，按不可信输入处理）
-   * @returns schema 通过时是实现返回值；不通过时带回 `INPUT_INVALID`，id 没登记带回 `NOT_REGISTERED`
+   * @returns schema 通过时是实现产出的统一读数（spec 5.1-11 的 `ToolResult`）；不通过时带回 `INPUT_INVALID`，id 没登记带回 `NOT_REGISTERED`
    */
-  async call(id: string, rawInput: unknown): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
+  async call(id: string, rawInput: unknown): Promise<{ ok: true; result: ToolResult } | { ok: false; reason: string }> {
     const tool = this.declarations.get(id);
     if (!tool) return { ok: false, reason: 'NOT_REGISTERED' };
     const parsed = tool.input.safeParse(rawInput);
     if (!parsed.success) return { ok: false, reason: 'INPUT_INVALID' };
-    return { ok: true, value: await tool.run(parsed.data) };
+    return { ok: true, result: await tool.run(parsed.data) };
   }
 }

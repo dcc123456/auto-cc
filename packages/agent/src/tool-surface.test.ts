@@ -6,7 +6,16 @@
  * 以及能力包 fiber 销毁后工具是否跟着摘掉。之所以放在本包：真 `AgentToolsService` 只有这里能 import
  * （L2 不许依赖 L3），而这两条性质一旦不成立，界面上就会出现「工具清单里有、调用却未注册」的假象。
  */
-import { Context, NO_CONFIG, Service, asApp, agentToolsOf, registerAgentTools, type Fiber } from '@auto-cc/core';
+import {
+  Context,
+  NO_CONFIG,
+  Service,
+  asApp,
+  agentToolsOf,
+  registerAgentTools,
+  toolResult,
+  type Fiber,
+} from '@auto-cc/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AgentToolsService } from './tools.js';
@@ -38,7 +47,7 @@ class FakeCapabilityService extends Service {
         input: z.strictObject({ text: z.string().min(1) }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ text }) => Promise.resolve({ echoed: text }),
+        run: ({ text }) => Promise.resolve(toolResult({ echoed: text }, { summary: `已回声 ${text}` })),
       },
     ]);
   }
@@ -71,7 +80,7 @@ describe('agent.tools 的跨层登记面（spec 2.8-08）', () => {
     ]);
     await expect(tools.call('fake.capability.run', { text: 'hi' })).resolves.toEqual({
       ok: true,
-      value: { echoed: 'hi' },
+      result: { summary: '已回声 hi', value: { echoed: 'hi' }, evidenceRefs: [] },
     });
   });
 
@@ -118,7 +127,7 @@ describe('agent.tools 的跨层登记面（spec 2.8-08）', () => {
     ]);
     await expect(tools.call('fake.capability.run', { text: 'hi' })).resolves.toEqual({
       ok: true,
-      value: { echoed: 'hi' },
+      result: { summary: '已回声 hi', value: { echoed: 'hi' }, evidenceRefs: [] },
     });
   });
 });

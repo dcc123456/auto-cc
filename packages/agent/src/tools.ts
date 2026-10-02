@@ -109,7 +109,7 @@ export class AgentToolsService extends Service {
    * @param toolId 来自渲染层的字符串，按不可信输入处理，不做任何「猜它想调什么」
    * @param rawInput 未收窄的入参值，必须过 `tool.input` 的 schema
    * @param signal 取消信号；中止后结果不再写回消息
-   * @returns 成功带 `value`，失败带结构化 code 与**要显示给用户看**的一句话
+   * @returns 成功带统一结果读数 `result`（摘要 + 产出 + 证据引用），失败带结构化 code 与**要显示给用户看**的一句话
    */
   async call(toolId: string, rawInput: unknown, signal?: AbortSignal): Promise<ToolCallReply> {
     const tool = this.table.get(toolId);
@@ -138,7 +138,8 @@ export class AgentToolsService extends Service {
       };
     }
     try {
-      return { ok: true, value: await tool.run(parsed.data, signal) };
+      // 成功侧只有一种形状（spec 5.1-11）：实现自己产出 `ToolResult`，注册表不替它编摘要、也不给它补引用。
+      return { ok: true, result: await tool.run(parsed.data, signal) };
     } catch (error) {
       // §1.7 第 8 条：失败原样回报，禁止用「已完成」的措辞掩盖。
       return {

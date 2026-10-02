@@ -147,10 +147,11 @@ export function agentToolTable(ctx: Context): Map<string, AgentToolDeclaration> 
  * （AGENTS.md §2.6：边界校验只在系统边界做，而工具入参正是边界）。
  * 套上这一层之后 `I` 由 schema 反推，字段名写错就是编译期错误。
  * @template I schema 解析后的入参类型（由 `input` 推出，不需要手写）
+ * @template R 本次产出类型（由 `run` 返回的 `ToolResult.value` 推出）
  * @param tool 工具声明
  * @returns 同一个声明，只是带着收窄后的类型参数
  */
-export function agentTool<I>(tool: AgentToolDeclaration<I>): AgentToolDeclaration<I> {
+export function agentTool<I, R>(tool: AgentToolDeclaration<I, R>): AgentToolDeclaration<I, R> {
   return tool;
 }
 

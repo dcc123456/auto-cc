@@ -4,7 +4,7 @@
  * 5.1-a 已经让 `titleKey` 变成声明里的必填字段，但**类型只保证"写了这个字段"**：
  * 写成 `'点击控件'`（把文案本身当 key）、写成 `agent.tool.labels.pageClicl`（拼错一截）、
  * 或者补了 `zh-CN` 忘了 `en`，全都是编译期合法、运行期在界面上显示成裸 key 或中文的缺陷。
- * 所以这里按源码里的**声明现场**逐条查六件事：
+ * 所以这里按源码里的**声明现场**逐条查九件事：
  * 1. 每处 `agentTool({…})` 都读得出字符串字面量 `id` 与 `titleKey`（动态拼出来的对不上机检，也就会话里变一只幽灵工具）；
  * 2. `titleKey` 是键不是文案：形状 `agent.tool.labels.<camelCase>` 且全 ASCII；
  * 3. 该键在**每一份**语言包（`zh-CN` / `en`）的 `shell` 命名空间下都存在、非空，且非中文 locale 里不许还是中文；
@@ -16,6 +16,8 @@
  *    原样递给实现，模型或界面多拼一个字段就不再是"这一只工具的入参"。
  * 8. 能力清单里的 12 件没有一件声明 `disabled`（spec 5.1-10 与 5.1-06 / 07 的连带）：禁用位是给"登记了但
  *    暂不开放"用的，把它用在清单内的工具上，等于让那两条判据当场失去对象。
+ * 9. 每处声明的 `run` 里出现 `toolResult(…)` 调用（spec 5.1-11）：成功侧只有一种读数（摘要 + 产出 + 证据引用），
+ *    而注册表不替实现编摘要、也不给它补引用——实现没走这个构造口，`ToolCallReply.result` 就少了字段。
  *
  * 为什么直查语言包而不复用 `check-renderer-conventions.ts` 的键对齐：那条判据是「各 locale 的键集相等」，
  * 两份**同时缺**一个键时它照样绿，而注册表缺的正是那一种（注册表在能力包，语言包在渲染层，没人逼着两边同步）。
@@ -75,6 +77,8 @@ interface DeclarationSite {
   inputReadAs: string;
   /** 是否声明了 `disabled: true`（spec 5.1-10） */
   isDisabled: boolean;
+  /** 声明切片里是否出现 `toolResult(` 调用（spec 5.1-11：成功侧的唯一读数构造口） */
+  runUsesToolResult: boolean;
 }
 
 /**
@@ -135,7 +139,7 @@ function keepTopLevelOnly(source: string, blanked: string, from: number, to: num
 }
 
 /**
- * 摘出一段源码里所有 `agentTool({…})` 声明的 `id`、`titleKey`、入参形状与禁用位。
+ * 摘出一段源码里所有 `agentTool({…})` 声明的 `id`、`titleKey`、入参形状、禁用位与结果构造口。
  * @param file 文件绝对路径（只用于回填现场）
  * @param source 文件内容
  * @param schemaShapes 具名 schema 的顶层形状表：`input: scriptRequestSchema` 这类声明要靠它对上
@@ -185,6 +189,9 @@ function declarationsOf(
             .trim()
         : '（读不出 input 这一项）',
       isDisabled: /(?:^|[{,\s])disabled\s*:\s*true\b/.test(topLevel),
+      // `run` 的实现体在嵌套层里，而 `keepTopLevelOnly` 把 depth>1 的字符全抹平了，
+      // 因此这条查「字符串与注释已空白的整段声明切片」：命中的必须是真调用，不是某句注释里提到这个词。
+      runUsesToolResult: /\btoolResult\s*\(/.test(blanked.slice(braceAt, closeAt + 1)),
     });
   }
   return found;
@@ -428,6 +435,27 @@ for (const site of sites) {
 }
 
 /**
+ * 统一读数判据（spec 5.1-11）。
+ *
+ * `ToolCallReply` 成功侧只有 `result: ToolResult`，注册表把 `tool.run(...)` 的返回原样放进去、不替实现
+ * 编摘要也不给它补引用。于是摘要与证据引用在不在，只取决于实现走没走 `toolResult()` 这个构造口——
+ * 类型能保证形状，保证不了"某只 run 直接 `return { summary: '', ... }` 手搓一个"，那等于第二套口径（§2.5）。
+ * 这条只钉构造口在场；空摘要与吞错由 `agent.test.ts` 的三条用例从行为侧负责。
+ */
+let resultWrapped = 0;
+for (const site of sites) {
+  if (site.runUsesToolResult) {
+    resultWrapped += 1;
+    continue;
+  }
+  failures.push(
+    `${relative(site.file)}:${String(site.line)} 的工具「${site.id ?? '（读不出 id）'}」的 run 里没有 toolResult(…) 调用：成功侧交不出摘要与证据引用，5.1-11 要求的统一读数缺字段`,
+  );
+}
+if (sites.length > 0 && resultWrapped === 0)
+  failures.push('统一读数判据一条都没比对成功：声明里都不过 toolResult 构造口，或 helper 改了名，这条机检已失效');
+
+/**
  * 装配顺序判据（5.1-c 的活体实测逼出来的一条）。
  *
  * 登记工具的服务在自己的 `[Service.init]` 里**软问** `agent.tools`（软问是为了让 agent 包能被单独摘掉，
@@ -500,5 +528,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 ${String(checklistCount)} 件逐条对得上登记；${String(strictChecked)} 只工具入参顶层全是 z.strictObject 且清单内无 disabled 位；${String(orderChecked)} 个登记方都排在注册表 ${REGISTRY_PLUGIN_ID} 之后）`,
+  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 ${String(checklistCount)} 件逐条对得上登记；${String(strictChecked)} 只工具入参顶层全是 z.strictObject 且清单内无 disabled 位；${String(resultWrapped)} 只工具的 run 都过 toolResult 构造口；${String(orderChecked)} 个登记方都排在注册表 ${REGISTRY_PLUGIN_ID} 之后）`,
 );

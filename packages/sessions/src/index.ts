@@ -19,7 +19,16 @@
  *    响应观测同一条纪律：只交出状态码、状态行与地址，不交出请求/响应头。
  */
 import { app, session, type WebRequestFilter } from 'electron';
-import { AppError, asApp, Service, agentTool, registerAgentTools, type ConsentGate, type Context } from '@auto-cc/core';
+import {
+  AppError,
+  asApp,
+  Service,
+  agentTool,
+  registerAgentTools,
+  toolResult,
+  type ConsentGate,
+  type Context,
+} from '@auto-cc/core';
 import {
   partitionFor,
   type SessionConsentView,
@@ -360,7 +369,15 @@ export class SessionsService extends Service implements ConsentGate {
         input: z.strictObject({ platform: z.string().min(1) }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ platform }) => this.open(platform),
+        // 工具面与界面打的是同一个 `open()`（§5.9 不许各长一套）；这里只负责把读数换成统一结果（5.1-11）。
+        // 摘要不写「登录成功」——`open` 只保证会话分区在，登录态由读数里的 status 自己说。
+        run: async ({ platform }) => {
+          const status = await this.open(platform);
+          return toolResult(status, {
+            summary: `已打开 ${platform} 的会话分区，当前活动平台 ${status.activePlatform ?? '（无）'}，可读平台 ${String(status.platforms.length)} 个`,
+            evidenceRefs: [`session:${platform}`],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

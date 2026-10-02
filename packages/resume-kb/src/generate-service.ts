@@ -40,6 +40,7 @@ import {
   maybeService,
   registerAgentTools,
   Service,
+  toolResult,
   type Context,
 } from '@auto-cc/core';
 import { randomUUID } from 'node:crypto';
@@ -380,7 +381,21 @@ export class ResumeGenerateService extends Service {
         // 需要批准是有意的——真正的改写落进简历是界面上逐项接受那一步，但出网与建档这一步不该被静默做掉。
         effect: 'local-write',
         requiresConfirmation: true,
-        run: (params) => this.run(params.jdText, { docId: params.docId, jdId: params.jdId }),
+        // 提议态的正文不进摘要（判据三：界面无需读正文就能对上"改了哪几处"，引用给证据 id 与回执 id）。
+        // `receipt.id` 是接受那一步唯一的凭据，所以它同时是一条证据引用。
+        run: async (params) => {
+          const view = await this.run(params.jdText, { docId: params.docId, jdId: params.jdId });
+          return toolResult(view, {
+            summary:
+              `已产出提议态：${String(view.rewrites.length)} 处改写 · ${String(view.evidence.length)} 条证据` +
+              ` · ${String(view.reorderBases.length)} 处重排（回执 ${view.receipt.id}，文档 ${view.receipt.docId}）`,
+            evidenceRefs: [
+              `generation:${view.receipt.id}`,
+              `doc:${view.receipt.docId}`,
+              ...view.evidence.map((evidence) => `entity:${evidence.evidenceId}`),
+            ],
+          });
+        },
       }),
     ]);
     const hasGap = maybeService<KbGapService>(this.ctx, 'kb.gap') !== undefined;

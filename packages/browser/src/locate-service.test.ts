@@ -347,7 +347,7 @@ describe('agent 工具登记（spec 2.8-08）', () => {
     const throughTool = await tools?.call('browser.locate.find', { spec: testIdSpec });
     expect(throughTool).toMatchObject({
       ok: true,
-      value: { status: 'matched', chosen: { strategy: 'testId', score: 100, frameUrl } },
+      result: { value: { status: 'matched', chosen: { strategy: 'testId', score: 100, frameUrl } } },
     });
     expect((await locate.find(testIdSpec)).status).toBe('matched');
     expect(page.snapshotCalls).toBe(0);

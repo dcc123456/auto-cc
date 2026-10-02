@@ -18,6 +18,7 @@ import {
   TOOL_EFFECTS,
   agentToolsOf,
   registerAgentTools,
+  toolResult,
   type AgentToolDeclaration,
   type AgentToolRegistry,
   type Fiber,
@@ -73,7 +74,7 @@ function makeTool(id: string): AgentToolDeclaration {
     input: z.strictObject({}),
     effect: 'read',
     requiresConfirmation: false,
-    run: () => Promise.resolve({ id }),
+    run: () => Promise.resolve(toolResult({ id }, { summary: `假工具 ${id} 已执行`, evidenceRefs: [`fake:${id}`] })),
   };
 }
 
@@ -125,10 +126,15 @@ describe('agent 工具登记通道（spec 2.8-08）', () => {
     fibers.push(fiber);
     expect(capability.registeredCount).toBe(2);
     expect(registry?.received.map((tool) => tool.id)).toEqual(['fake.alpha', 'fake.beta']);
-    // 声明是原物递过去的（不是被复制后失去字段）：`run` 与 `effect` 都在注册表这一侧可用。
+    // 声明是原物递过去的（不是被复制后失去字段）：`run` 与 `effect` 都在注册表这一侧可用，
+    // 而 5.1-11 之后 `run` 交回的是统一读数，摘要与证据引用也得整段原样到得了调用方。
     const first = registry?.received[0];
     expect(first?.effect).toBe('read');
-    await expect(first?.run({})).resolves.toEqual({ id: 'fake.alpha' });
+    await expect(first?.run({})).resolves.toEqual({
+      summary: '假工具 fake.alpha 已执行',
+      value: { id: 'fake.alpha' },
+      evidenceRefs: ['fake:fake.alpha'],
+    });
   });
 
   it('登记方销毁时两只工具都摘回去：不留指向已销毁实例的闭包', async () => {

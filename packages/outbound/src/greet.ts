@@ -27,6 +27,7 @@ import {
   type Context,
   agentTool,
   registerAgentTools,
+  toolResult,
 } from '@auto-cc/core';
 import type { GreetReceiptView, GreetRequestView } from '@auto-cc/shared';
 import { z } from 'zod';
@@ -309,7 +310,15 @@ export class OutboundGreetService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: ({ request }) => this.perform(request),
+        // 回执只在真发出去时存在（失败一律以结构化错误上浮），所以这里可以说「已发出」；
+        // 账本行 id 是最硬的一条证据引用——它同时是额度闸门记下的那一笔（§7.3）。
+        run: async ({ request }) => {
+          const receipt = await this.perform(request);
+          return toolResult(receipt, {
+            summary: `已向 ${receipt.platform} 的岗位 ${receipt.jobId} 发出打招呼（账本第 ${String(receipt.ledgerId)} 行 · 内容来源 ${receipt.origin}）`,
+            evidenceRefs: [`ledger:${String(receipt.ledgerId)}`, `job:${receipt.platform}/${receipt.jobId}`],
+          });
+        },
       }),
     ]);
     const greetable = greetChannelsOf(this.ctx)?.greetablePlatforms() ?? [];

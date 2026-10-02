@@ -802,7 +802,7 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
     const { dir, tools, ledger } = await boot({ channel: hand.channel, agentTools: true, autonomy: 'auto' });
     const filePath = writeResume(dir);
     const reply = await tools?.call('outbound.deliver.perform', { request: toolRequest({ filePath }) });
-    expect(reply).toMatchObject({ ok: true, value: { committed: true, jobId: 'job-1001' } });
+    expect(reply).toMatchObject({ ok: true, result: { value: { committed: true, jobId: 'job-1001' } } });
     expect(hand.calls.map((call) => call.targetId)).toEqual(['job-1001']);
     expect(ledger.count()).toBe(1);
     expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: 'job-1001' });

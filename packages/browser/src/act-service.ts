@@ -14,7 +14,7 @@
  * CDP 走不通就直接结构化失败（spec 2.6-04）。它也不看坐标——隐藏的上传控件照样能注，
  * 于是等待用 `appear`、并且不受 iframe 偏移折算成败的影响。
  */
-import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
 import type { ActResultView, LocatedView, LocateSpec, WaitPredicate } from '@auto-cc/shared';
 import type { WebContents } from 'electron';
 import { basename, isAbsolute } from 'node:path';
@@ -484,7 +484,15 @@ export class BrowserActService extends Service {
         input: z.strictObject({ spec: locateSpecSchema }),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: ({ spec }) => this.click(spec),
+        // `done` / `timeout` 由 `status` 自己说，摘要不复述成「已发送」（5.1-11 的"不掩盖失败"）。
+        // 证据引用给的是**胜出的那一个元素所在的帧**：动作打在了哪一页，比入参更值得对账。
+        run: async ({ spec }) => {
+          const result = await this.click(spec);
+          return toolResult(result, {
+            summary: `点击「${spec.description}」${result.status === 'done' ? '已完成' : '等待超时'}（事件通道 ${result.channel} · ${String(result.waitedMs)} 毫秒）`,
+            evidenceRefs: result.located ? [`frame:${result.located.frameUrl}`] : [],
+          });
+        },
       }),
       agentTool({
         id: 'browser.act.type',
@@ -493,7 +501,14 @@ export class BrowserActService extends Service {
         input: z.strictObject({ spec: locateSpecSchema, text: z.string().min(1) }),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: ({ spec, text }) => this.type(spec, text),
+        // 摘要里只报**回读到的字符数**，不报内容本身：写进去的是求职者姓名/手机号这类个人信息（§8.5）。
+        run: async ({ spec, text }) => {
+          const result = await this.type(spec, text);
+          return toolResult(result, {
+            summary: `往「${spec.description}」送入 ${String(text.length)} 字，页面回读 ${String(result.valueAfter?.length ?? 0)} 字（${result.status === 'done' ? '已回读' : '等待超时'}）`,
+            evidenceRefs: result.located ? [`frame:${result.located.frameUrl}`] : [],
+          });
+        },
       }),
     ]);
     this.ctx.logger.info(

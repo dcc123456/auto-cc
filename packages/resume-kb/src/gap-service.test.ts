@@ -483,11 +483,17 @@ describe('kb.gap 的 agent 工具面（spec 4.4-05）', () => {
     const { gap, tools } = await bootGapWithLibrary();
     const tool = tools.declarations.get('kb.gap.report');
     if (tool === undefined) throw new Error('kb.gap.report 未登记进 agent 工具面');
-    // 两边都不传基准时刻，因此比的正是「同一条服务路径 + 同一个默认时间基」的读数
-    expect(JSON.stringify(await tool.run({ jdText: SAMPLE_JD }))).toBe(JSON.stringify(await gap.report(SAMPLE_JD)));
-    expect(JSON.stringify(await tool.run({ jdText: SAMPLE_JD, kind: 'skill' }))).toBe(
+    // 两边都不传基准时刻，因此比的正是「同一条服务路径 + 同一个默认时间基」的读数。
+    // 5.1-11 之后工具面交回的是统一读数，所以逐字相等比的是 `value` 那一段——摘要与引用是工具面的包装，
+    // service 直接返回裸报告，硬要求两边整段相等就是把「同一个入口」判成了「同一个返回值类型」。
+    expect(JSON.stringify((await tool.run({ jdText: SAMPLE_JD })).value)).toBe(
+      JSON.stringify(await gap.report(SAMPLE_JD)),
+    );
+    expect(JSON.stringify((await tool.run({ jdText: SAMPLE_JD, kind: 'skill' })).value)).toBe(
       JSON.stringify(await gap.report(SAMPLE_JD, { kind: 'skill' })),
     );
+    // 包装也不能是空的：读数的条数要在摘要里说得出，否则界面与 agent 拿到的是一只没有话的卡。
+    expect((await tool.run({ jdText: SAMPLE_JD })).summary).toContain('缺口比对读毕');
   });
 
   it('入参是边界：正文必填、种类限四类、nowMs 一律拒收', async () => {

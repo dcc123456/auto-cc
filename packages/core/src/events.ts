@@ -678,8 +678,8 @@ export type ChatToolPart = {
   toolId: string;
   input: unknown;
   state: ChatToolPartState;
-  /** 成功后的结果值；未结束与失败时为 null。 */
-  output: unknown;
+  /** 成功后的统一结果读数（spec 5.1-11）；未结束与失败时为 null。 */
+  output: ToolResult | null;
   /** 耗时毫秒；未结束为 null（不用 0 冒充「零耗时」）。 */
   durationMs: number | null;
   /** 失败原因（含 `TOOL_NOT_REGISTERED` 这类结构化 code 文案），成功时为 null。 */
@@ -761,13 +761,48 @@ export type ToolDescriptorView = {
 };
 
 /**
+ * 一次工具执行的**成功读数**（spec 5.1-11：结果统一为 `ToolResult`）。
+ *
+ * 三个字段各管一件事，缺任何一个都会退化成「界面自己猜结果」：
+ * - `summary`：一句话说清这次做成了什么。卡片标题之外的那半句，也是调试面板与日志的读数；
+ * - `value`：工具原本的结构化产出，模型与界面按它取字段（工具自己的返回形状不因本契约改变）；
+ * - `evidenceRefs`：这次结果回指到哪些证据条目（账本行 / 库内实体 / 切片 / 快照 / 页面地址）。
+ *   **空数组是有意义的读数**——「这次产出没有任何库内依据」，与 4.6-02 对话术证据的口径同源，
+ *   不允许为了好看去凑一条，也不允许留 `undefined` 让界面分不清「没依据」与「没实现」。
+ * @template V 工具自己的产出类型（默认 `unknown`，读侧按工具收窄）
+ */
+export type ToolResult<V = unknown> = {
+  readonly summary: string;
+  readonly value: V;
+  readonly evidenceRefs: readonly string[];
+};
+
+/**
+ * 组装一只工具的成功读数（16 个登记点共用，§2.2：同一逻辑第二次出现就抽公共层）。
+ *
+ * `evidenceRefs` 省略即空数组：把「没有依据」做成默认值，比让每只工具各写一遍 `[]` 更不容易漏，
+ * 也比 `undefined` 好——字段永远在场，界面与断言不必区分两种「无」。
+ * @param value 工具的结构化产出（必须可 JSON 序列化：它要落进消息 parts 并过 IPC）
+ * @param init 摘要文案与证据引用；摘要说「做成了什么」，不重复 `value` 里已有的每个字段
+ * @returns 三键齐备的 `ToolResult`
+ */
+export function toolResult<V>(value: V, init: { summary: string; evidenceRefs?: readonly string[] }): ToolResult<V> {
+  return { summary: init.summary, value, evidenceRefs: init.evidenceRefs ?? [] };
+}
+
+/**
  * 一次工具调用的结果联合（spec 1.11-09：调不到的工具即报错，禁止用「已完成」的措辞掩盖）。
  *
  * 三类失败都**不抛异常**而走返回值：工具失败是对话流里要显示的一条内容（卡片红态 + 原因），
  * 不是要把整条消息抹掉的进程错误。
+ *
+ * 成功侧只有一种形状（spec 5.1-11）：`{ ok: true, result: ToolResult }`。刻意**不保留**
+ * 「直接返回裸值」那条通路——那等于同一件事有两条口径，界面得按工具 id 分支去猜结果长什么样。
+ * 失败侧必带 `code` + `message`：`message` 是要显示给用户看的原话，禁止吞错返 `undefined`
+ * （注册表把实现的异常收成 `TOOL_FAILED`，实现自己不参与这层的措辞）。
  */
 export type ToolCallReply =
-  | { ok: true; value: unknown }
+  | { ok: true; result: ToolResult }
   | {
       ok: false;
       code: 'TOOL_NOT_REGISTERED' | 'TOOL_DISABLED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED';
@@ -782,8 +817,9 @@ export type ToolCallReply =
  * 否则就是两份定义（§2.5）。`input` 用 zod 不是为了好看：工具入参来自模型或渲染层，
  * 是系统边界上的不可信输入，必须在递给实现之前收一次窄（§2.6）。
  * @template I schema 解析后的入参类型（默认 `unknown`，注册处收窄）
+ * @template R 本次产出（`ToolResult.value`）的类型（默认 `unknown`，由 `run` 的返回推出）
  */
-export interface AgentToolDeclaration<I = unknown> {
+export interface AgentToolDeclaration<I = unknown, R = unknown> {
   /** 全限定 id，约定 `域.动作` 且与服务口名一致（plan §15.1 决策 5） */
   readonly id: string;
   /**
@@ -816,9 +852,10 @@ export interface AgentToolDeclaration<I = unknown> {
    * 实际执行。
    * @param params 已过 schema 的入参
    * @param signal 取消信号，实现必须协作式让出（与 runner 同一语义）
-   * @returns 结果值，必须可 JSON 序列化（要落进消息 parts 并过 IPC）
+   * @returns `ToolResult`（spec 5.1-11）：摘要 + 结构化产出 + 证据引用；产出必须可 JSON 序列化
+   *   （要落进消息 parts 并过 IPC）。**不许返回裸值**——那会让成功侧重新长出两种形状。
    */
-  run(params: I, signal?: AbortSignal): Promise<unknown>;
+  run(params: I, signal?: AbortSignal): Promise<ToolResult<R>>;
 }
 
 /**
@@ -827,7 +864,7 @@ export interface AgentToolDeclaration<I = unknown> {
  * 刻意不含 `list` / `call`：那两个是给对话入口与界面读的，能力包只该往里放东西。
  */
 export interface AgentToolRegistry {
-  register<I>(tool: AgentToolDeclaration<I>): void;
+  register<I, R>(tool: AgentToolDeclaration<I, R>): void;
   unregister(id: string): boolean;
 }
 

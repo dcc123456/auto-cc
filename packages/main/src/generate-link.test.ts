@@ -197,9 +197,13 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
     const reply = await tools.call('resume.generate.run', { jdText: JD_TEXT, docId: DOC_ID });
     expect(reply.ok).toBe(true);
     if (!reply.ok) throw new Error(`工具调用失败：${reply.code} · ${reply.message}`);
-    const viaTool = reply.value as GenerationView;
+    const viaTool = reply.result.value as GenerationView;
     expect(viaTool.receipt.outcome).toBe('reorder_only');
     expect(viaTool.checks.ok).toBe(true);
+    // spec 5.1-11：摘要与证据引用是「读数」的一部分，真链路上就得带上——4.5-06 的反查面靠它，
+    // 而不是让渲染层按工具 id 自己去拼一份第二事实（§2.5）。
+    expect(reply.result.summary).not.toBe('');
+    expect(reply.result.evidenceRefs.length).toBeGreaterThan(0);
     // 畸形入参在递给实现之前就被 schema 挡下（工具面的入站数据按不可信输入处理）。
     expect((await tools.call('resume.generate.run', { jdText: JD_TEXT, docId: '' })).ok).toBe(false);
   });

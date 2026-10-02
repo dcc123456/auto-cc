@@ -379,7 +379,7 @@ export class ChatSessionService extends Service {
     part.durationMs = Date.now() - at;
     if (reply.ok) {
       part.state = 'done';
-      part.output = reply.value;
+      part.output = reply.result;
     } else {
       // §1.7 第 8 条：原样回报，卡片就是失败态。
       part.state = 'failed';

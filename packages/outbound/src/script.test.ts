@@ -704,7 +704,7 @@ describe('outbound.script 的 agent 工具面（spec 5.1-07 的生成话术）',
     const { script, tools } = await bootScript({ baseUrl: null, model: null });
     const tool = scriptTool(tools);
     // 模型端点未配置 → 两条腿都走可见回落，产物只由配置与入参决定，因此逐字比较是确定的。
-    const viaTool = (await tool.run(tool.input.parse(JD))) as ScriptDraftView;
+    const viaTool = (await tool.run(tool.input.parse(JD))).value as ScriptDraftView;
     const viaService = await script.generate(JD);
     expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));
     expect(viaTool.origin).toBe('template');

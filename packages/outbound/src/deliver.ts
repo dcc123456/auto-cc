@@ -31,6 +31,7 @@ import {
   type WorkflowNodeExecutor,
   agentTool,
   registerAgentTools,
+  toolResult,
 } from '@auto-cc/core';
 import type {
   DeliverApprovalView,
@@ -715,7 +716,22 @@ export class OutboundDeliverService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
-        run: ({ request }) => this.perform(request),
+        // `committed` 决定措辞：suggest 档只暂存，摘要说成「已投递」就是掩盖（5.1-11 的同一条判据）。
+        // `ledgerId` / `snapshotId` 为 null 时不硬凑引用——空着是实话，凑出来的是假证据。
+        run: async ({ request }) => {
+          const receipt = await this.perform(request);
+          return toolResult(receipt, {
+            summary:
+              `岗位 ${receipt.jobId} 的简历投递${receipt.committed ? '已发出' : '只暂存未发送（按当前审批档位）'}` +
+              (receipt.ledgerId === null ? '' : `，账本第 ${String(receipt.ledgerId)} 行`) +
+              ` · 附件 ${receipt.attachment.fileName}`,
+            evidenceRefs: [
+              `job:${receipt.platform}/${receipt.jobId}`,
+              ...(receipt.ledgerId === null ? [] : [`ledger:${String(receipt.ledgerId)}`]),
+              ...(receipt.snapshotId === null ? [] : [`snapshot:${receipt.snapshotId}`]),
+            ],
+          });
+        },
       }),
     ]);
     const deliverable = deliverChannelsOf(this.ctx)?.deliverablePlatforms() ?? [];

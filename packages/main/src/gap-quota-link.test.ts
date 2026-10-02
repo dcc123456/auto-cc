@@ -148,7 +148,12 @@ describe('4.4-09 缺口报告不误扣额度（真闸门 + 真账本）', () => 
     const reply = await tools.call('kb.gap.report', { jdText: JD_TEXT });
     expect(reply.ok).toBe(true);
     if (!reply.ok) throw new Error(`工具调用失败：${reply.code} · ${reply.message}`);
-    expect((reply.value as { rows: unknown[] }).rows.length).toBeGreaterThan(0);
+    expect((reply.result.value as { rows: unknown[] }).rows.length).toBeGreaterThan(0);
+    // spec 5.1-11：真链路上读数要带齐三个字段。这里的空库**没有**依据可引（每行都判缺失、亮点为空），
+    // 所以合法的读数是「空数组」而不是缺字段——界面正是按它区分「库里没依据」与「这条工具没交引用」。
+    expect(Object.keys(reply.result).sort()).toEqual(['evidenceRefs', 'summary', 'value']);
+    expect(reply.result.evidenceRefs).toEqual([]);
+    expect(reply.result.summary).toContain('缺口比对读毕');
     expect(ledgerRows(db)).toBe(rowsBefore);
   });
 
