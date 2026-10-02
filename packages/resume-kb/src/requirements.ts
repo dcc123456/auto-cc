@@ -197,12 +197,15 @@ function needsWordBoundary(alias: string): boolean {
 
 /**
  * 收集一段文本里所有不重叠的命中区间。
+ *
+ * 对模型腿（`requirements-model.ts`）也开放：两条腿判「这段原文是不是已经被占」必须用同一个区间语义，
+ * 各写一份就会在重叠边界上给出不同答案（§2.2 同一逻辑第二次出现就抽公共）。
  * @param taken 已占用的区间列表（按起始升序维护，长别名先占位，短别名只能在缝里找）
  * @param start 待判区间的起始下标
  * @param end 待判区间的结束下标（不含）
  * @returns 与任何已占用区间都不重叠时返回 true
  */
-function isFreeSpan(taken: readonly { start: number; end: number }[], start: number, end: number): boolean {
+export function isFreeSpan(taken: readonly { start: number; end: number }[], start: number, end: number): boolean {
   return !taken.some((span) => start < span.end && span.start < end);
 }
 
@@ -278,10 +281,13 @@ function kindRank(kind: RequirementKind): number {
 /**
  * 对同一 `kind + label` 只保留最早出现的那一条（别名的不同写法归成一条要求），
  * 并按「四类次序 → 起始下标」排成稳定序列。
+ *
+ * 对模型腿同样开放（§2.2）：4.4-07 的稳定序列只能有一条产生路径，
+ * 模型腿自己再排一次就会出现「两条腿各自有序、合并后无序」。
  * @param items 未去重、未排序的命中列表
  * @returns 去重排序后的列表
  */
-function dedupeAndSort(items: readonly RequirementItem[]): RequirementItem[] {
+export function dedupeAndSort(items: readonly RequirementItem[]): RequirementItem[] {
   const firstOf = new Map<string, RequirementItem>();
   for (const item of items) {
     const key = `${item.kind}:${item.label}`;

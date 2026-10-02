@@ -424,6 +424,53 @@ export interface EmbedGateway {
   embed(texts: readonly string[]): Promise<{ model: string; dim: number | null; vectors: number[][] }>;
 }
 
+/**
+ * 对话网关的可用性读数（spec 4.4-02）。
+ *
+ * 与 `EmbedStatusView` 同三项，只去掉了 `llm.chat` 自己才有的 `endpoint`：
+ * 取模型的一方要判的是「能不能用、缺哪样、用的哪个模型」，端点地址属于 `packages/llm` 的内部事实
+ * （AGENTS.md §2.7：模型端点只出现在那一个包，零上行机检按这条扫）。
+ */
+export type ChatStatusView = {
+  available: boolean;
+  /** 不可用的原因项，与 `llm.chat` 的 `LlmStatus.missing` 同一组词。 */
+  missing: Array<'baseUrl' | 'model' | 'apiKey'>;
+  model: string | null;
+};
+
+/** 一次对话补全的入参（字段与 `llm.chat` 的 `chatRequestSchema` 逐字对齐，故调用点不用换名）。 */
+export type ChatRequestView = {
+  messages: Array<{ role: 'system' | 'user'; content: string }>;
+  maxTokens?: number | null;
+  temperature?: number | null;
+};
+
+/** 一次对话补全的结果；token 用量只有模型侧才说得清，属 `llm.chat` 内部，不进本询问面。 */
+export type ChatCompletionView = { text: string; model: string };
+
+/**
+ * 要一次对话补全的询问面（spec 4.4-02），实现方是 `llm.chat`。
+ *
+ * 为什么与 `EmbedGateway` 同套路而不是像 `outbound.script` 那样 `static inject`：
+ * 话术生成没有"不装模型也能用"的形态（那里注释写明"装上半个不如不装"），而 JD 拆解**有**——
+ * 词面腿（4.4-a）就是它的离线基线。硬注入会让摘掉 `llm` 包连带把 `kb.gap` 降成 PENDING，
+ * 等于把"增强"做成"必需"（plan §4.4-b 证据 [2]）。
+ */
+export interface ChatGateway {
+  /**
+   * 当前是否可用，以及不可用时缺了哪几样。**纯本地判定，一次网络都不发**（同 `EmbedGateway.status`）。
+   * @returns 可用性读数
+   */
+  status(): ChatStatusView;
+  /**
+   * 发一次对话补全。
+   * @param request 消息序列（至少一条）与可选的单次覆盖
+   * @returns 回复正文与实际用的模型名
+   * @throws 未配置时 `LLM_UNAVAILABLE`（不发请求）；网络 / 超时 / 非 2xx / 空回复时 `LLM_REQUEST_FAILED`
+   */
+  complete(request: ChatRequestView): Promise<ChatCompletionView>;
+}
+
 /** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
 export type WorkflowPlanView = {
   id: string;

@@ -55,10 +55,13 @@ export {
 } from './profile-service.js';
 // 4.4-a 的拆解入口（spec 4.4-01）：`kb.gap` 与它的配置形状要进 `packages/main` 的注册表与 `cordis.yml`，
 // 所以服务与 schema 对外；`extractRequirementsLexically` 不外露——绕过服务自己拆就是开第二条拆解通道（§2.5）。
+// 4.4-b 的模型腿同理（`requirements-model.ts` 的三个函数只在包内被服务调用），
+// 但 `GapModelStatus` 跟着视图对外：界面与 agent 要按五种结局分别播报（spec 4.4-02 的 V 类）。
 export {
   KbGapService,
   kbGapSchema,
   type GapExtractView,
+  type GapModelStatus,
   type KbGapConfig,
   type RequirementItem,
 } from './gap-service.js';
