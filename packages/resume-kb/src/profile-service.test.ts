@@ -26,7 +26,7 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -42,6 +42,7 @@ import {
   KbProfileService,
 } from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
+import { waitForLogLine } from './log-file.js';
 import { parseResumeText } from './sections.js';
 import { KB_VECTOR_MIGRATION_VERSION, decodeVector } from './vectors.js';
 
@@ -1886,27 +1887,6 @@ describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec
    */
   const RAW_TEXT_SENTINELS = ['主导订单服务重构', 'P99 延迟下降 40%', '沧海数据', '张三', '13800001111'];
 
-  /**
-   * 轮询等日志文件里出现某一行。
-   *
-   * 写流是异步落盘的（`createWriteStream` 的 `write()` 只保证入队顺序，不保证同步可见），
-   * 而「等到最后一行出现」比固定 sleep 更稳：顺序保证在它之前的所有行都已刷完，
-   * 负向断言因此覆盖了整条链路而不是截到半截。
-   * @param file 日志文件绝对路径
-   * @param needle 期待出现的子串（本用例传最后一次操作的日志标记）
-   * @returns 落盘后的完整日志文本；2 秒内没等到就抛（宁可让用例红，不要给出「查不到所以干净」的假通过）
-   */
-  async function waitForLogFile(file: string, needle: string): Promise<string> {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (existsSync(file)) {
-        const text = readFileSync(file, 'utf8');
-        if (text.includes(needle)) return text;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error(`日志里 2 秒内没出现「${needle}」一行，脱敏断言失去了前提`);
-  }
-
   it('五条写路径 + 检索 + 反查跑完后，日志有计数行而查不到任何原文哨兵', async () => {
     const dir = tempDir();
     const booted = await syncedKb(dir, RESUME_MD, 'resume-log');
@@ -1929,7 +1909,7 @@ describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec
     expect(kb.remove(created.entityId).removed).toBe(1);
 
     // `remove` 是本用例最后一条会写日志的操作，等到它即等到全部。
-    const logText = await waitForLogFile(logFile, '删除手工实体');
+    const logText = await waitForLogLine(logFile, '删除手工实体');
 
     // —— 正向半边：检索计数行确实存在，用例不是靠「日志压根没写」通过的 ——
     expect(logText).toMatch(
@@ -1962,7 +1942,7 @@ describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec
     const failed = await kb.search('主导订单服务重构');
     expect(failed.vectorStatus).toBe('failed');
 
-    const logText = await waitForLogFile(logFile, '退回纯词面检索');
+    const logText = await waitForLogLine(logFile, '退回纯词面检索');
     expect(logText).toMatch(/向量编码失败/);
     const leaks = RAW_TEXT_SENTINELS.filter((sentinel) => logText.includes(sentinel));
     expect(leaks).toEqual([]);

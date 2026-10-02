@@ -36,7 +36,7 @@ import {
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
-import { KbProfileService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import { KbGapService, KbProfileService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -132,6 +132,10 @@ export const REGISTRY: Registry = {
   // 摘掉它，4.2-d 的实体面板与 4.3 的检索都失去数据源；本切片（4.2-a）它还没有界面调用方，这是刻意留下的
   // 可见缺口——表先在真实 app 里建好，界面与 agent 工具在 4.2-d 接，两侧都不许对着内存假数据验收。
   'kb-profile': KbProfileService,
+  // JD 能力要求拆解（spec 4.4-01）：4.4-a 只有词面腿，所以它**不建表、不依赖 store**，
+  // 拆解是纯派生、用时现算（plan §4.4 口径 3：可重建的投影不落库，`jobs.requirements_json` 仍是 2.3 抓取的原样真相）。
+  // 与 `kb-profile` 一样，本切片它没有界面调用方——缺口报告在 4.4-d 接，届时两侧共用这一个入口（§5.9）。
+  'kb-gap': KbGapService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,
