@@ -438,6 +438,24 @@ plugins:
       chunkChars: 6
       chunkIntervalMs: 120
 
+  # 判定口（spec 5.2-02 / 07）：循环的每一步都只向它问「现在能不能执行」。
+  # 它不看模型说的话（请求里根本没有副作用那一位），也不看额度（外发工具自己经闸门，
+  # 这里再问一次就是 §2.5 禁止的两套口径）。摘掉它，整条循环停在判定之前而不是照跑。
+  - id: agent-policy
+    dependsOn: [agent]
+
+  # 对话循环（spec 5.2-01 / 05 / 08 / 11）：`agent_run` + `agent_step` 两张表由本服务把迁移
+  # push 进 `store.migrations`，号段取 16（账本 1、会话 2、jobs 3、workflow run 4…生成记录 15）。
+  # 模型腿是确定性桩（`loop/model.ts`）：真模型出网要花钱且须用户单独授权，本片不接。
+  # 两条上限就是 5.2-11 的判据对象，在装配面板里改了就生效（改配置会重建本服务并清空内存作用域，
+  # 进度因此一律从库里的 run/步行重建——见 `ensureScope` 的注释）。
+  - id: agent-loop
+    dependsOn: [agent, agent-policy, chat, store]
+    config:
+      stepLimit: 12
+      tokenBudget: 4000
+      contextCharsCap: 1200
+
 # ---------------------------------------------------------------------------
 # 验收工具的读数位（**不属于插件装配**）：`parseManifest()` 只认 `plugins` 数组，多余的顶层键原样忽略
 # （实测口径见 packages/kernel/src/manifest.test.ts:200 那条「缺 plugins 才报错」的例子），所以这一段

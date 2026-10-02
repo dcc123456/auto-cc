@@ -869,6 +869,88 @@ export interface AgentToolRegistry {
 }
 
 /**
+ * 一次 agent 任务的运行状态（spec 5.2-05）。
+ *
+ * 五态各有明确的进入条件，**不留「看起来像成功」的模糊位**：
+ * - `proposed`：计划草案已出、用户还没确认，此时一步都不许执行（5.2-03）；
+ * - `running`：已确认，正在「取步 → 判闸门 → 调工具 → 写观察」；
+ * - `paused`：被叫停，或某一步被 `agent.policy` 拒了等表态（5.3 的审批口从这里接）；
+ * - `completed`：**跑到的每一步都成功**才用它——它就是界面那句「做完了」的凭据；
+ * - `failed`：有步失败/被拒，或撞到步数、token 上限。原因在 `stopReason`，不在状态名里。
+ */
+export const AGENT_RUN_STATUSES = ['proposed', 'running', 'paused', 'completed', 'failed'] as const;
+
+export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number];
+
+/**
+ * 一步的落库状态（spec 5.2-02 / 05）。
+ *
+ * `pending` 是「行已经写下、动作还没回来」：它让中途叫停与崩溃后的重读都看得见进度，
+ * 而不是只能等这一步变成终态。没有 `skipped`——没跑到的步根本不落行，
+ * 「跳过了第 3 步」这种读数没人能产生，留着就是死枚举（§2.4）。
+ */
+export const AGENT_STEP_STATUSES = ['pending', 'ok', 'failed', 'refused'] as const;
+
+export type AgentStepStatus = (typeof AGENT_STEP_STATUSES)[number];
+
+/**
+ * 计划里的一步：模型说的部分 + 注册表说的部分**分开放**（spec 5.2-07）。
+ *
+ * `intent` / `input` / `toolId` 来自模型草案，属于不可信输入；`effect` / `requiresConfirmation`
+ * 是循环从注册表现读的真相。模型若在草案里自称「这步只读、无需确认」，界面与判定都不看它一眼——
+ * 这正是 5.2-07 要的形态：权限由代码判，措辞由模型写。
+ * `effect` 允许为 null：那是「草案指了一只不存在的手」，此时策略直接拒，不猜名（与 5.1-05 同一口径）。
+ */
+export type AgentPlanStepView = {
+  planStepIndex: number;
+  toolId: string;
+  input: unknown;
+  /** 模型对这步的说明（是**内容**不是界面文案：模型产出的文本不进语言包，界面只显示外壳） */
+  intent: string;
+  effect: ToolEffect | null;
+  requiresConfirmation: boolean;
+};
+
+/** 一步的执行记录（spec 5.2-05 要的 `planStepIndex/status/snapshotRefs` 都在这张读数上）。 */
+export type AgentStepView = {
+  runId: string;
+  planStepIndex: number;
+  toolId: string;
+  status: AgentStepStatus;
+  /** 这一步递给模型的上下文引用（`run:<runId>/step:<i>`），5.2-06 的「按引用传」就落在这一位 */
+  snapshotRefs: string[];
+  /** 观察摘要：成功是模型把工具读数收的一句，失败是注册表给的 code + 原话 */
+  observation: string;
+  /** 工具交回的证据引用（`ToolResult.evidenceRefs` 原样带上，空数组同样有意义） */
+  evidenceRefs: string[];
+  /** 耗时毫秒；还没跑完为 null（不用 0 冒充零耗时） */
+  durationMs: number | null;
+  /** 拒因或失败码（`POLICY_*` / `TOOL_*`），成功为 null */
+  code: string | null;
+};
+
+/** 一次任务的整份读数：界面与日志都从这里取，run 行与步行的唯一投影（§2.5 一份口径）。 */
+export type AgentRunView = {
+  runId: string;
+  sessionId: string;
+  /** 用户原文（已去空）——桩模型与真模型都按它起草计划 */
+  goal: string;
+  status: AgentRunStatus;
+  /** 起草时读到的档位快照；执行中改档位不改这一位（5.3 管档位提升的审计） */
+  autonomy: AutonomyLevel;
+  planStepIndex: number;
+  plan: AgentPlanStepView[];
+  steps: AgentStepView[];
+  stepLimit: number;
+  tokenBudget: number;
+  tokensUsed: number;
+  /** 循环为什么停下（`COMPLETED` / `USER_STOPPED` / `POLICY_REFUSED` / `STEP_LIMIT` / `TOKEN_LIMIT` / `MODEL_UNAVAILABLE`） */
+  stopReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/**
  * 定位层「由指纹自愈重找到元素」的事件载荷（spec 2.2-05）。
  *
  * `strategy` 这里是 `string` 而不是那八个策略名的联合：联合定义在 `@auto-cc/shared`，

@@ -452,7 +452,20 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
 
 describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
   /**
-   * 读本包 src 下所有实现文件的 import 行，断言没有触达任何业务能力。
+   * 递归列出本包 src 下的所有实现文件（5.2-a 起循环长在 `src/loop/` 里，只扫平铺一层会漏掉它）。
+   * @param dir 要扫的目录
+   * @returns 非测试的 `.ts` 文件绝对路径
+   */
+  function implementationFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) return implementationFiles(fullPath);
+      return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [fullPath] : [];
+    });
+  }
+
+  /**
+   * 读本包所有实现文件的 import 行，断言没有触达任何业务能力。
    * @returns 命中的违规行数组（空即通过）
    */
   function forbiddenImportLines(): string[] {
@@ -466,13 +479,11 @@ describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
       'plugin-entitlement',
       'plugin-sessions',
     ];
-    return readdirSync(here)
-      .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
-      .flatMap((name) =>
-        readFileSync(join(here, name), 'utf8')
-          .split(/\r?\n/)
-          .filter((line) => line.includes('import') && banned.some((token) => line.includes(token))),
-      );
+    return implementationFiles(here).flatMap((path) =>
+      readFileSync(path, 'utf8')
+        .split(/\r?\n/)
+        .filter((line) => line.includes('import') && banned.some((token) => line.includes(token))),
+    );
   }
 
   it('agent.* 不 import 任何平台 / 简历 / 外发 / 闸门模块（1.11-14）', async () => {

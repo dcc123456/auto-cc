@@ -26,6 +26,7 @@ import type { StoreService } from '@auto-cc/plugin-store';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { splitToolRequest } from './tool-request.js';
 import type { AgentToolsService } from './tools.js';
 
 /**
@@ -34,8 +35,11 @@ import type { AgentToolsService } from './tools.js';
  */
 export const CHAT_MIGRATION_VERSION = 2;
 
-/** 用户单条输入的字数上限：这是系统边界（渲染层来的不可信输入），也防止一条超长输入把验收截图拖到几十秒。 */
-const MAX_USER_INPUT_CHARS = 2000;
+/**
+ * 用户单条输入的字数上限：这是系统边界（渲染层来的不可信输入），也防止一条超长输入把验收截图拖到几十秒。
+ * 5.2-a 的 `agent.loop.propose` 收的是同一类输入，因此共用这一个常量而不是各写一份 2000（§2.2）。
+ */
+export const MAX_USER_INPUT_CHARS = 2000;
 
 /**
  * 以该前缀开头的输入会真调一次注册表，形态是 `/tool <工具id> [入参 JSON]`。
@@ -52,20 +56,13 @@ const DEFAULT_TOOL_INPUT = { criteria: { keyword: '前端', city: '上海', limi
 /**
  * 把 `/tool` 之后的原文切成「工具 id + 入参」。
  * @param raw 前缀之后的原文（已去空）
- * @returns 缺 id 时用默认的那只与默认入参；入参不是合法 JSON 时**把原始字符串照交给注册表**，
- *   由 schema 回 `TOOL_INPUT_INVALID`——会话层不另造一套入参校验（plan §15.8 落点 1，AGENTS.md §2.6）
+ * @returns 缺 id 时用默认的那只与默认入参；其余切法走 `splitToolRequest`（与桩模型共用，§2.2），
+ *   入参不是合法 JSON 时**把原始字符串照交给注册表**，由 schema 回 `TOOL_INPUT_INVALID`
+ *   ——会话层不另造一套入参校验（plan §15.8 落点 1，AGENTS.md §2.6）
  */
 function parseToolRequest(raw: string): { toolId: string; input: unknown } {
-  if (!raw) return { toolId: DEFAULT_TOOL_ID, input: DEFAULT_TOOL_INPUT };
-  const spaceAt = raw.search(/\s/);
-  const toolId = spaceAt === -1 ? raw : raw.slice(0, spaceAt);
-  const rest = spaceAt === -1 ? '' : raw.slice(spaceAt + 1).trim();
-  if (!rest) return { toolId, input: {} };
-  try {
-    return { toolId, input: JSON.parse(rest) as unknown };
-  } catch {
-    return { toolId, input: rest };
-  }
+  const split = splitToolRequest(raw);
+  return split.toolId ? split : { toolId: DEFAULT_TOOL_ID, input: DEFAULT_TOOL_INPUT };
 }
 
 /** 会话与消息两张表的建表迁移；`up` 只写 DDL。 */

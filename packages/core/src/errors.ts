@@ -87,6 +87,16 @@ export type AppErrorCode =
   | 'KB_GENERATION_PROPOSAL_MISSING'
   | 'KB_GENERATION_STALE_BASELINE'
   | 'KB_GENERATION_CHECK_FAILED'
+  // 对话循环（spec 5.2-01 / 05）。这五个码分两组：
+  // 入参组（goal 空 / 超长）与界面组处置相同——把原因显示成一行提示、不改任何状态；
+  // 状态组（run 查无 / 状态不对就不许确认）必须分开，因为界面给的话不同——
+  // 「这张计划卡过期了」与「这条 run 查不到」是两件不同的事，合成一个码会让人误判。
+  // `AGENT_LOOP_STATUS_INVALID` 单独留着：它只在写库前挡一个非法状态值，用户永远不该看见它。
+  | 'AGENT_LOOP_EMPTY_GOAL'
+  | 'AGENT_LOOP_GOAL_TOO_LONG'
+  | 'AGENT_LOOP_RUN_NOT_FOUND'
+  | 'AGENT_LOOP_NOT_PROPOSED'
+  | 'AGENT_LOOP_STATUS_INVALID'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
