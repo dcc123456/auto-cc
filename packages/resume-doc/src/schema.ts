@@ -141,12 +141,21 @@ export function validateDocument(raw: unknown): ValidateResult {
   return { ok: false, issues };
 }
 
-/** 一条事实锁定违规：某个 locked 字段在生成轨里被改动了值。 */
+/** 一条锁定违规是被哪一道判据拦下的（同一字段可能两道都成立，取更强的一道）。 */
+export const FACT_VIOLATION_GATES = ['fact-lock', 'editable-allowlist'] as const;
+
+/** 违规来源：模型级事实锁（3.1-03），或生成轨的「可改写键白名单」之外（4.5-03）。 */
+export type FactViolationGate = (typeof FACT_VIOLATION_GATES)[number];
+
+/** 一条事实锁定违规：某个不许改动的字段在生成轨里被改动了值。 */
 export interface FactViolation {
   sectionId: string;
   entryId: string;
   fieldKey: string;
-  factKey: FactKey;
+  /** 事实类别；只有模型里标了锁的字段有值。`school / degree / major` 这类"生成轨不许动、模型未标锁"的为 null。 */
+  factKey: FactKey | null;
+  /** 是哪一道判据拦下的（界面与复盘要分清"改了一条事实"与"改了不该改的字段"）。 */
+  gate: FactViolationGate;
   before: string;
   after: string;
 }
@@ -157,16 +166,27 @@ function fieldValue(entry: Entry, key: string): string | undefined {
 }
 
 /**
- * 比较生成前 / 生成后两份文档，找出被**改写的事实锁定字段**（3.1-03）。
+ * 比较生成前 / 生成后两份文档，找出不许改动的字段被改动的地方（3.1-03 + 4.5-03）。
  *
- * 判据：同一区块、同一 id 条目、同一 key 的字段，若在原文件中 `locked` 且值与结果不同，即违规。
- * 新增条目 / 新增字段不算违规（那是补充非事实内容，由别的环节把关）；只有**篡改已锁定的既有事实**才拦。
+ * 判据（缺省，即 3.1-03 的原语义，不传第三个参数时逐字不变）：同一区块、同一 id 条目、同一 key 的字段，
+ * 若在原文件里 `locked` 且值与结果不同即违规。新增条目 / 新增字段不算违规；只有**篡改既有事实**才拦。
+ *
+ * 判据（传 `editableKeys`，即生成轨口径）：语义反过来——**白名单里的键允许改写，其余字段一律原样引用**。
+ * 反过来的理由是 `school / degree / major` 在模型里不标锁（3.1 的 `FactKey` 只有四类事实），
+ * 但"把学校改成另一所"仍是编造。加枚举会牵动 schema / 快照 hash / 模板 / diff，而这里是校验面的一条口径，
+ * 所以用一个参数表达，比对实现仍只有一份（AGENTS.md §2.5）。
  * @param original 生成轨输入的基线（来自知识库确认过的事实）
  * @param proposed 生成轨产出的候选
- * @returns 违规列表；空数组表示生成轨没有动任何锁定事实
+ * @param editableKeys 允许改写的字段键；省略时沿用 3.1-03 的「只比 locked 字段」判据
+ * @returns 违规列表；空数组表示生成轨没动任何不许动的字段
  */
-export function checkFactLock(original: ResumeDocument, proposed: ResumeDocument): FactViolation[] {
+export function checkFactLock(
+  original: ResumeDocument,
+  proposed: ResumeDocument,
+  editableKeys?: readonly string[],
+): FactViolation[] {
   const violations: FactViolation[] = [];
+  const allowlist = editableKeys === undefined ? null : new Set(editableKeys);
   const originalSections = new Map<string, Section>(original.sections.map((section) => [section.id, section]));
   for (const section of proposed.sections) {
     const base = originalSections.get(section.id);
@@ -176,7 +196,9 @@ export function checkFactLock(original: ResumeDocument, proposed: ResumeDocument
       const baseEntry = baseEntries.get(entry.id);
       if (!baseEntry) continue;
       for (const field of entry.fields) {
-        if (!field.locked || field.factKey === null) continue;
+        // 缺省口径只比 locked 字段；白名单口径比"不在白名单里的全部字段"（locked 的自然落在里面）。
+        const compared = allowlist === null ? field.locked : !allowlist.has(field.key);
+        if (!compared) continue;
         const before = fieldValue(baseEntry, field.key);
         if (before !== undefined && before !== field.value) {
           violations.push({
@@ -184,6 +206,7 @@ export function checkFactLock(original: ResumeDocument, proposed: ResumeDocument
             entryId: entry.id,
             fieldKey: field.key,
             factKey: field.factKey,
+            gate: field.locked ? 'fact-lock' : 'editable-allowlist',
             before,
             after: field.value,
           });

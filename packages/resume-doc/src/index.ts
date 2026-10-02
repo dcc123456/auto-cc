@@ -27,8 +27,10 @@ export {
 export {
   checkFactLock,
   documentSchema,
+  FACT_VIOLATION_GATES,
   validateDocument,
   type FactViolation,
+  type FactViolationGate,
   type ReadableIssue,
   type ValidateResult,
 } from './schema.js';
