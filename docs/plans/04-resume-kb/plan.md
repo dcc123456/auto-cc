@@ -1248,6 +1248,19 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
 - 证据与逐项验收：`docs/acceptance/4.4/4.4-09-quota-and-allowlist.txt`、spec 的 4.4-09 与「4.4-e1 落地记录」，
   AGENTS.md §10 的 §7.2 行已从"待落地 1.6"改为"已落地（4.4-e）"。
 
+**4.4-e2 已落地（2026-10-02）**，本节判据三按原文兑现，落点与偏离：
+
+- 三个文件一份脚本，一次抽公共不留两份：`gap-calibration-corpus.ts`（29 + 13 条标注，每条带人判理由）、
+  `gap-calibration.ts`（`sweepTextThresholds` / `sweepHighlightThreshold` / `evaluate*`，只调 `coverageOf`，
+  不重新实现任何打分）、`gap-calibration.test.ts`（13 例回归锁）、包脚本 `pnpm --filter @auto-cc/plugin-resume-kb calibrate`。
+  测试与脚本共用同一只手，所以"脚本绿了而用例跑的是另一把尺子"这种失效不可能出现。
+- **定稿没说清、落地时补的一条**：判据三只写了"取类间间隔最大"，没写**并列怎么破**。第一版按错分数 +
+  单一 margin 破并列，16 组并列被网格顺序判成了贴着样本的 `hit=0.51`——正是判据三禁止的那个方向。
+  落地把第三判据定成"余量剖面逐位比"（`pickBestIndex`），选型才落到带中点 0.58。
+- 标定值 `0.33 / 0.58 / 0.11` 与两条口径值的依据、翻脸与盲区清单、界面文案与两张复拍图，
+  全部记在 spec「4.4-e2 落地记录」与 `docs/acceptance/4.4/4.4-e-threshold-calibration.txt`。
+  顺带修掉的两处（schema 缺 `.refine` 而注释声称有、两份测试各自手抄出厂阈值）也记在那条里。
+
 **判据一：`entitlement.gate` 管的是"平台侧代价"，本地计算今天不进 ledger**（4.4-09 的判定）
 
 - `QUOTA_ACTIONS` 现在的三条（`shared/bridge.ts:324`）有一个共同属性：**在真实平台上留下痕迹**，
