@@ -6,6 +6,7 @@ import { switchLanguage, type SupportedLanguage } from './i18n';
 import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
 import { GapPanel } from './GapPanel';
+import { GeneratePanel } from './GeneratePanel';
 import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
@@ -113,6 +114,7 @@ export function App() {
             <ResumePanel />
             <KbPanel />
             <GapPanel />
+            <GeneratePanel />
             <WorkflowLabPanel />
             <UsagePanel />
             <AssemblyPanel />
