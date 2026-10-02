@@ -198,6 +198,10 @@ export const RENDERER_ALLOWLIST = [
   // 推过进程边界——而界面上一次只会展开一条。
   'kb.gap.report',
   'kb.profile.evidenceBody',
+  // 4.5-b 的定向生成双入口（spec 4.5-01 / 09 / 10）：与 `kb.gap.report` 同一口径，**只给读数与提议内容**，
+  // P3.1 文档本体不过进程边界——`shared` 在 L1、不许依赖 L2 的 `resume-doc`，在 L1 再镜像一份文档模型
+  // 就是造第二个真相源（§2.5），而界面要显示的"改了哪几处、为什么提前"全在下面那几行读数里。
+  'resume.generate.run',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -915,6 +919,100 @@ export interface KbEvidenceBodyRowView {
   readonly sourceDocId: string | null;
 }
 
+/**
+ * 定向生成过进程边界的形状（4.5-11 预览面板的数据源）。
+ *
+ * 与上面那组同样是 `@auto-cc/plugin-resume-kb` 同名类型的**镜像**，口径也是"界面上要出现的东西才过来"，
+ * 但这里多一条刻意的取舍：**不镜像 `ResumeDocument`**。三条理由叠在一起——
+ * ① `shared` 在 L1，不许依赖 L2 的 `resume-doc`，在 L1 抄一份文档模型就是第二个真相源（§2.5）；
+ * ② 3.3 / 4.1 已定下「文档正文不过进程边界，界面只认 docId」这条（见上面白名单那一段的注释）；
+ * ③ 4.5-11 的逐项接受要的是「哪一处改成了什么 + 为什么提前」，`rewrites` / `reorderBases` /
+ *   `evidence` 三行读数就够，原文由界面从工作副本自己读（那份才是真相源）。
+ * `rejected` 的判定按 `outcome` 读，不看"文档是否为 null"——服务侧 `document` 与 `outcome` 是同一处
+ * 三元表达式产出的（`generate-service.ts` 的返回体），所以带 `outcome` 就等于带了"有没有产物"。
+ */
+
+/** 一次定向生成的三种结局（镜像 `GenerationOutcome`，spec 4.5-05 / 09 的播报依据）。 */
+export type GenerationOutcomeView = 'rewritten' | 'reorder_only' | 'rejected';
+
+/** 一条改写（镜像 `GenerationRewriteView`）：位置三 id + 新写法，不含原文。 */
+export interface GenerationRewriteRowView {
+  readonly sectionId: string;
+  readonly entryId: string;
+  readonly fieldKey: string;
+  readonly rewrittenText: string;
+}
+
+/** 一条证据引用（镜像 `GenerationEvidenceView`）：正文另问 `kb.profile.evidenceBody`（§8.5）。 */
+export interface GenerationEvidenceRowView {
+  readonly sectionId: string;
+  readonly entryId: string;
+  readonly evidenceId: string;
+  readonly kind: GapRequirementKindView;
+  /** JD 里那条要求的代表词（JD 内容，不是用户的个人信息） */
+  readonly label: string;
+  readonly score: number;
+  readonly tokens: readonly string[];
+}
+
+/** 撑起一次换位的一条命中（镜像 `ReorderHit`）。 */
+export interface GenerationHitRowView {
+  readonly evidenceId: string;
+  readonly label: string;
+  readonly kind: GapRequirementKindView;
+  readonly score: number;
+  readonly tokens: readonly string[];
+}
+
+/** 一次换位的依据（镜像 `ReorderBasis`，spec 4.5-02 的"依据可解释"就是这一行）。 */
+export interface GenerationReorderRowView {
+  /** 区块之间换序，还是区块内的条目换序 */
+  readonly level: 'section' | 'entry';
+  readonly id: string;
+  readonly score: number;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly hits: readonly GenerationHitRowView[];
+}
+
+/** 事实校验的读数（镜像 `GenerationChecksView`）：违规行只到「路径 + 判据 + 长度」的形状。 */
+export interface GenerationChecksRowView {
+  readonly ok: boolean;
+  /** 是否重跑过那一轮（4.5-05 的"自动重试一次"只有这一次） */
+  readonly retried: boolean;
+  readonly violations: readonly string[];
+  readonly violationCount: number;
+}
+
+/** 一次生成的凭证（镜像 `GenerationReceipt`，与 `resume_generations` 那一行同内容，4.5-10）。 */
+export interface GenerationReceiptRowView {
+  readonly id: string;
+  readonly docId: string;
+  readonly jdId: string | null;
+  readonly createdAt: number;
+  /** 实际发过提示词才有版本号；`disabled` / `unavailable` 时为 null */
+  readonly promptVersion: string | null;
+  readonly model: string | null;
+  readonly modelStatus: GapModelStatusView;
+  readonly modelReason: string | null;
+  readonly outcome: GenerationOutcomeView;
+  readonly retried: boolean;
+  readonly movedSections: number;
+  readonly movedEntries: number;
+  readonly rewritesApplied: number;
+  readonly rewritesDropped: number;
+}
+
+/** `resume.generate.run` 过界的那一份（镜像 `GenerationView` 去掉 `document`，理由见本节头注释）。 */
+export interface GenerationRunRowView {
+  readonly rewrites: readonly GenerationRewriteRowView[];
+  readonly evidence: readonly GenerationEvidenceRowView[];
+  /** 只含真正换了位置的对象（没动的不进这里，界面不会把"本来就在第一位"报成一次调整） */
+  readonly reorderBases: readonly GenerationReorderRowView[];
+  readonly checks: GenerationChecksRowView;
+  readonly receipt: GenerationReceiptRowView;
+}
+
 /** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
 export interface KbCreateRowInput {
   readonly kind: KbEntityKindView;
@@ -1241,6 +1339,20 @@ export interface BridgeSignatures {
    * 两表都查无返回 `null` 而不是失败——报告是现算的，用户停在旧报告上时那条实体可能已经被删了。
    */
   'kb.profile.evidenceBody': { args: [id: string]; returns: KbEvidenceBodyRowView | null };
+  /**
+   * 按一段 JD 定制这份简历（spec 4.5-01 / 05 / 09 / 10 / 11 的界面入口）。
+   *
+   * 与 `kb.gap.report` 一样**没有 `nowMs`**：记录行的时间戳由主进程取，调用方不许决定"这次生成算哪一天"。
+   * `docId` 省略时只在库里恰好一份简历的情况下自动选，多份则以 `INVALID_ARGUMENT` 上浮（"要定制哪一份"是人来答的）。
+   * 三种结构化失败各有界面口径：`INVALID_ARGUMENT`（JD 过短 / 多份简历未指明）、`KB_SOURCE_MISSING`（还没导入简历）、
+   * `KB_LIBRARY_MISSING`（缺口腿未装配，只能报"功能不可用"）。
+   * 返回体**不含文档本体**（见上面那组镜像的头注释）：产物是否存在的判据是 `receipt.outcome`，
+   * `rejected` 时界面只给违规明细与"需人工确认"，不给一份看起来像成功过的空壳（判据三）。
+   */
+  'resume.generate.run': {
+    args: [jdText: string, filter?: { docId?: string; jdId?: string | null }];
+    returns: GenerationRunRowView;
+  };
 }
 
 /**

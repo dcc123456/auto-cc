@@ -36,7 +36,7 @@ import {
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
-import { KbGapService, KbProfileService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import { KbGapService, KbProfileService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -136,6 +136,11 @@ export const REGISTRY: Registry = {
   // 拆解是纯派生、用时现算（plan §4.4 口径 3：可重建的投影不落库，`jobs.requirements_json` 仍是 2.3 抓取的原样真相）。
   // 与 `kb-profile` 一样，本切片它没有界面调用方——缺口报告在 4.4-d 接，届时两侧共用这一个入口（§5.9）。
   'kb-gap': KbGapService,
+  // 定向内容生成（spec 4.5-01 / 05 / 09 / 10）：`resume_generations` 表的唯一落点，迁移号段 15。
+  // 摘掉这一行，4.5-c 的预览面板与 agent 的 `resume.generate.run` 同时得到结构化失败，
+  // 而知识库、缺口报告、导出轨照旧——「算出改了什么」与「按改动出 PDF」分属两条。
+  // 它不 `inject` `kb.gap`（用的时候现问），所以摘掉上面那行它不会连带 PENDING，只会在调用时报库未装配。
+  'kb-generate': ResumeGenerateService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,
