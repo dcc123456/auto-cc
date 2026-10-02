@@ -1097,3 +1097,93 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
   证据链跳转，V 类，必须出 harness 截图）、`4.4-02` 的 V 半边（界面上那句"这次没用上模型"，按五态出五句）、
   以及本片五个 `gap.suggestion.*` 文案键（zh-CN + en 同时补，缺一边 `pnpm lint` 当场红）。
   `kb.gap.report` 过 IPC 要进 `packages/main` 的白名单注册表，与 4.3-c 的 `kb.search` 同一处登记。
+
+## 4.4-d 设计定稿（2026-10-02，写代码之前把界面与工具面的判据钉死）
+
+本片收三条：`4.4-05`（缺口报告界面，V 类）、`4.4-02` 的 V 半边（界面上那句"这次没用上模型"）、
+以及 `kb.gap.report` 的**双入口**接线（§5.9：界面与 agent 打同一个 service，不许各长一套）。
+接线清单以 4.3-c 的 `kb.search` 为模板，逐处对应如下。
+
+**判据一：界面挂在哪儿**（决定"这算不算一个桌面 app 的功能页"）
+
+- 新建 `packages/renderer/src/GapPanel.tsx`，挂进 `App.tsx` 的 `diagnostics` 视图区
+  （与 `<KbPanel />` 相邻，沿用"面板常驻、只切 display"的现状）。
+- **不塞进 `KbPanel.tsx`**：那个文件已是本包最大的界面文件（27 KB），且两者方向相反——
+  `KbPanel` 是"我的库有什么"，缺口报告是"这份 JD 要我有什么"。混在一起会让 4.4-05 要的
+  "分栏"与库列表在同一屏里争焦点。（§2.3 的"优先扩展现有模块"指的是**服务能力**，不是把两个视图缝在一起。）
+- 输入是一份 JD 正文（粘贴），与 2.3 的 JD 抓取来源无关：本片**不**接 `jobs` 表，
+  避免与 P2 的 JD 列表页产生第二个入口真相（"从某条 JD 打开缺口报告"是 4.4-e 之后的接线，
+  届时的入参是 `jdText` 而不是数据库 id，报告仍然现算不落库）。
+
+**判据二：三态分栏的"栏"是状态，不是类别**
+
+- 三栏 = `matched / partial / missing`，栏内**保持拆解序**（不再按类别或分数二次排序，
+  4.4-07 的稳定序在界面上的兑现就是"两次跑出来一眼看上去是同一页"）。
+- 栏头显示计数，数字来自报告的 `counts`，不由前端 `filter().length` 重算
+  （两处各算一遍就会在边界输入上对不上，§2.5 的"一个入口"延伸到展示层）。
+- 亮点区（`highlights`）单独一栏在右侧，`highlightsDropped > 0` 时必须显示"另有 N 条未展开"，
+  截断不可静默（4.4-06 的计数可见口径）。
+- **年限行的分数不上三态色**：4.4-c 落地记录里那条"best=0.5625 却判 matched"是本片界面必须
+  显式处理的一处不一致——这一行的状态来自算术，`score` 只作展示。色带按 `state` 上，不按 `score` 上，
+  否则会出现"命中"行显示成黄色进度条的自相矛盾画面。
+
+**判据三：证据链跳转要新开一个只读口，不能在报告里带正文**
+
+- 报告里每条证据只有 `{ id, origin, score, matchedTokens }`，**没有正文**（§8.5 + 4.4-c 接线形状最后一条）。
+  所以"点证据看原文"必须有一口 id→文本的读口。
+- `kb.profile.get(entityId)` 只认实体 id，而学历证据的 id 是 `kbs-` 前缀的切片 id（4.2 裁定二），
+  两个表。故在 `KbProfileService` 上加**一个**公开方法 `evidenceBody(id)`：先按实体查、查不到再按切片查，
+  返回 `{ id, origin, kind, text, sourceDocId } | null`；文本复用 `evidenceTextOf`（§2.1，不新写第二套取文本逻辑）。
+- 相应进 `RENDERER_ALLOWLIST` 的是 `kb.gap.report` 与 `kb.profile.evidenceBody` **两条**，
+  每条都要在 `BridgeSignatures` 补签名（`BridgeSignaturesCovered` 那个编译期引信会强制），
+  返回值形状在 `shared` 侧要写**镜像类型**（L1 不许 import L2 的包，沿用 `KbSearchRowResult` 的既有做法）。
+- 跳转交互：点行内证据 → 该行下方**内联展开**原文（同 `KbPanel` 的 `data-kb-evidence` 既有形状），
+  不做路由跳转、不弹新窗（§8.1 的窗口策略 + 桌面 app 里"离开再回来"比"就地展开"贵）。
+
+**判据四：模型腿五态在界面上是五句文案，不是一句"降级了"**
+
+- `GapModelStatus` 五值 → 五个 i18n key，用 `Record<GapModelStatus, string>` 接（4.3-c 的
+  `KIND_LABEL_KEY` 同法：漏一个键就是编译错误，不靠人记）。
+- `merged` 那句要说"补了几条"（`modelAdded`），`rejected` 那句要说"采了 0 条"（`modelDropped`），
+  `unavailable` 那句要说**缺什么**（`modelReason` 已由服务侧写好，界面不再拼句子）。
+  这条是 4.4-02 的 V 半边：判据不是"有句提示"，而是"五种结局各不相同且都读得出原因"。
+- `KB_LIBRARY_MISSING` 是**另一种**空态：库缺席时报告根本没产出，界面给"先去导入简历"的引导，
+  而不是给一份全缺失的报告（与服务的处置一致，错误经 `useBridgeAction` 的 `onError` 落一句 i18n 文案）。
+
+**判据五：五个 suggestion key 的双语文案在本片补齐，机检点已就位**
+
+- `add_evidence / strengthen_evidence / years_gap / education_gap / education_missing`
+  进 `shell.gap.suggestion.*`，zh-CN 与 en **同时**补。
+- 强制力来自 `scripts/check-renderer-conventions.ts`：键在两个语言包间对齐（:55-72）+
+  代码里引用的键必须存在、`{{占位符}}` 必须有实参（:74-111）。所以"只补一边"不是风格问题，是 `pnpm lint` 红。
+- `params` 的形状由服务给死（4.4-c 第【1】节的表），界面只填插值，不追加字段。
+
+**判据六：工具面与界面共用同一个 `report()`**（§5.9，与 4.3-c 裁定三同一件事）
+
+- `KbGapService` 补 `[Service.init]`，经 `core` 的 `registerAgentTools` 登记 `kb.gap.report`，
+  `effect: 'read'`、`requiresConfirmation: false`（只读本地库与一段文本，不碰外发——§7.3 的闸门只管
+  打招呼/发简历这类外发动作，本地计算不经它、也不误扣额度，正是 4.4-09 要的那条）。
+- 入参 zod 形状与 `report()` 的实参一致（`jdText` 必填，`filter`、`nowMs` 可选）。
+  **`nowMs` 不进工具入参**：agent 说"截至这个月"是唯一合理语义，把它暴露给模型只会诱发编造时间戳；
+  服务侧的默认值就是 `Date.now()`，而 `report()` 内部仍按 `monthIndexOf(nowMs)` 显式夹取（4.4-c 判据二）。
+- `ChatPanel.tsx` 的 `TOOL_LABEL_KEY` 加一条 → `agent.tool.labels.kbGapReport`（双语）。
+  工具 `description` 是给模型读的中文串（沿用现状），与界面文案是两条面，不共用键。
+- `cordis.yml` 的 `kb-gap` **不加 `dependsOn: [kb-profile]`**：报告拿库是软取后抛 `KB_LIBRARY_MISSING`，
+  加了硬依赖会让摘掉 `kb-profile` 时 `kb-gap` 整体降 PENDING——界面于是显示"服务没起来"，
+  而不是本片要的"库里还没东西，去导入"。装配顺序上 `kb-profile`（:343）本就排在 `kb-gap`（:383）之前，
+  正常运行不依赖这个字段。
+
+**V 判据的证据形状**（§7.1：必须是亲眼看到页面，不是单测）
+
+- 面板根节点 `data-testid="gap-panel"`；三栏分别 `data-gap-column="matched|partial|missing"`；
+  证据展开体 `data-gap-evidence="<id>"`；腿状态条 `data-gap-model="<status>"`；库缺席空态 `data-gap-library-missing`。
+  有 `data-*` 钩子是因为 harness 的 `assert` / `dom` 靠属性定位，而 `shot --reveal` 只吃 CSS 选择器。
+- 计划出四张图（`harness shot --url 5173` → `archive --id 4.4-05`）：
+  ① zh 三态分栏全貌 ② 证据内联展开（实体一条 + 学历切片一条，证明两个 origin 都能跳）
+  ③ en 同页 ④ 腿状态/库缺席空态。命令原文与退出码进 `docs/acceptance/4.4/4.4-05-*` 与
+  DOM 断言文本，图只走 §7.5 的验收路径。
+- 跑真界面要先起 app：`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`（§9 的实测：
+  装机版在跑时 `pnpm dev` 会静默退出 0、CDP 端口根本不监听），CDP 用 10222，不用 9222。
+
+**本片不做的事**：不做报告导出、不做阈值调参界面、不做"从 jobs 表某条 JD 打开报告"、
+不接 `entitlement.gate` 的扣额度（4.4-09 归 4.4-e）、不落新表（号段 15 继续空着）。
