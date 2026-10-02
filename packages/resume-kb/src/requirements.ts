@@ -149,18 +149,37 @@ const SOFT_SKILL_GROUPS: readonly LexiconGroup[] = [
 ];
 
 /**
- * 学历要求词表。
+ * 学历要求档位表（`rank` 越大越高），抽取腿与比对腿**共用一份**（plan §4.4-c 设计定稿）。
  *
- * 「研究生」单列而不并进「硕士」：JD 写「研究生及以上学历」时按字面给「研究生」，
- * 三态比对（4.4-c）再按"硕士 ⊇ 研究生"的口径归并，那一步是有据的放宽，不该混进抽取阶段。
+ * 「研究生」单列而不并进「硕士」：JD 写「研究生及以上学历」时按字面给「研究生」（抽取阶段不猜意图），
+ * 但两者给**同一个档位**——三态比对按"硕士 ≡ 研究生层次"归并，那一步是有据的放宽，
+ * 归并发生在比对阶段而不是抽取阶段（4.4-a 记录里就写明了这个分工）。
+ * 档位从 1 开始而不是从 0 开始：比对要用「正好低一档」判部分命中，`0` 会被读成"最低档也够"。
+ * 「中专 / 高中」不进表：它们只作"表外 label"由 `educationRankOf` 返回 `null`，
+ * 比对时退回文本反查而不是自己编一档（§2.6 不为假想的未来补位）。
  */
-const EDUCATION_GROUPS: readonly LexiconGroup[] = [
-  { kind: 'education', label: '博士', aliases: ['博士'] },
-  { kind: 'education', label: '硕士', aliases: ['硕士'] },
-  { kind: 'education', label: '研究生', aliases: ['研究生'] },
-  { kind: 'education', label: '本科', aliases: ['本科', '学士'] },
-  { kind: 'education', label: '大专', aliases: ['大专', '专科'] },
+export const EDUCATION_TIERS: readonly { label: string; aliases: readonly string[]; rank: number }[] = [
+  { label: '大专', aliases: ['大专', '专科'], rank: 1 },
+  { label: '本科', aliases: ['本科', '学士'], rank: 2 },
+  { label: '硕士', aliases: ['硕士'], rank: 3 },
+  { label: '研究生', aliases: ['研究生'], rank: 3 },
+  { label: '博士', aliases: ['博士'], rank: 4 },
 ];
+
+/**
+ * 学历 label → 档位。
+ * @param label 拆解结果里的学历标签（词面腿必是本表的 label；模型腿可能给任意短语，如「中专」）
+ * @returns 档位号；不在本表内返回 `null`，调用方按「没有可比的档」处理（退回文本反查，不猜档位）
+ */
+export function educationRankOf(label: string): number | null {
+  return EDUCATION_TIERS.find((tier) => tier.label === label)?.rank ?? null;
+}
+
+const EDUCATION_GROUPS: readonly LexiconGroup[] = EDUCATION_TIERS.map((tier) => ({
+  kind: 'education',
+  label: tier.label,
+  aliases: tier.aliases,
+}));
 
 /** 拍平并按"长别名先匹配"定死的词表：次序只由别名长度与字典序决定，与上面的书写顺序无关（4.4-07）。 */
 const LEXICON_ENTRIES: readonly { kind: RequirementKind; label: string; alias: string }[] = [

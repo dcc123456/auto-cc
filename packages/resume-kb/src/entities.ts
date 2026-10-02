@@ -97,10 +97,12 @@ function payloadOfEntry(entry: Entry): Record<string, string> {
  *
  * 复用 `period.ts` 而不是在这里再写一遍正则（AGENTS.md §2.1）：时间归一的口径必须与解析轨一致，
  * 否则同一份简历在「事实锁定」和「实体归属」上会给出两个答案。
+ * 4.4-c 的年限比对是第二个调用方（同一把尺子），故对外可见；它给的 `end` 在「至今」时是
+ * `OPEN_ENDED_MONTH` 这个**哨兵值**，只做归属排序可用，任何求和都要先夹到"今天"（见 `requirements-compare.ts`）。
  * @param periodText 时间段文本，缺失或认不出时返回 `null`
  * @returns 以月为单位的闭区间；一端都没有时为 `null`
  */
-function monthSpanOf(periodText: string | undefined): { start: number; end: number } | null {
+export function monthSpanOf(periodText: string | undefined): { start: number; end: number } | null {
   if (periodText === undefined || periodText === '') return null;
   const period = parsePeriod(periodText);
   const start = endpointToMonth(period.from);
@@ -110,11 +112,36 @@ function monthSpanOf(periodText: string | undefined): { start: number; end: numb
 }
 
 /**
+ * 「今天」在绝对月序号尺度上的位置（4.4-c 的年限比对要把「至今」的哨兵终点夹到这里）。
+ *
+ * 时间由调用方**显式**给（毫秒时间戳），本函数不读运行期现状：比对层要满足 4.4-07 的
+ * 「同一输入两次运行 hash 相同」，隐式读时钟会让报告在跨月的那一刻莫名变红。
+ * @param nowMs 时间戳（毫秒）
+ * @returns 与 `endpointToMonth` 同尺度的绝对月序号（自己拼的 key 必然可解析，`0` 只是让类型闭合）
+ */
+export function monthIndexOf(nowMs: number): number {
+  return endpointToMonth(monthKeyOf(nowMs)) ?? 0;
+}
+
+/**
+ * 毫秒时间戳 → `YYYY-MM`（比对结果里"截至某年某月"的播报口径，与 `monthIndexOf` 同一份拼法）。
+ * @param nowMs 时间戳（毫秒）
+ * @returns 补零后的年月串
+ */
+export function monthKeyOf(nowMs: number): string {
+  const date = new Date(nowMs);
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
  * `YYYY` 或 `YYYY-MM` → 绝对月序号。
+ *
+ * 对外可见是给 4.4-c 用的第二个调用方：它要把"今天"折算到**同一个**月序号尺度上再夹住「至今」的哨兵值，
+ * 自己再写一份 `年 × 12 + 月` 就是造第二把尺子（AGENTS.md §2.2）。
  * @param endpoint 归一化后的时间端点
  * @returns 年 × 12 + 月（只有年时按 1 月）；端点为空返回 `null`
  */
-function endpointToMonth(endpoint: string | null): number | null {
+export function endpointToMonth(endpoint: string | null): number | null {
   if (endpoint === null) return null;
   const matched = /^(\d{4})(?:-(\d{2}))?$/.exec(endpoint);
   if (matched === null) return null;

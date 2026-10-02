@@ -57,14 +57,28 @@ export {
 // 所以服务与 schema 对外；`extractRequirementsLexically` 不外露——绕过服务自己拆就是开第二条拆解通道（§2.5）。
 // 4.4-b 的模型腿同理（`requirements-model.ts` 的三个函数只在包内被服务调用），
 // 但 `GapModelStatus` 跟着视图对外：界面与 agent 要按五种结局分别播报（spec 4.4-02 的 V 类）。
+// 4.4-c 的 `GapReportView` 是 `kb.gap.report()` 的返回体，界面（4.4-d）与 agent 工具面读的是同一个对象，
+// 所以它嵌套的三态行 / 亮点 / 建议形状必须一起对外；`compareRequirements` 本身不外露——
+// 绕过服务自己比就是开第二条比对通道（§2.5），而库里那些行只有 `kb.profile` 能给。
 export {
   KbGapService,
   kbGapSchema,
   type GapExtractView,
   type GapModelStatus,
+  type GapReportView,
   type KbGapConfig,
   type RequirementItem,
 } from './gap-service.js';
+export {
+  GAP_SUGGESTION_KEYS,
+  type GapEvidence,
+  type GapEvidenceOrigin,
+  type GapHighlightView,
+  type GapRequirementView,
+  type GapState,
+  type GapSuggestion,
+  type GapSuggestionKey,
+} from './requirements-compare.js';
 // 反查结果的形状（4.2-03）：`EvidenceRef` 是将来 `kb.profile.evidenceFor` 过 IPC 的返回体，
 // 所以只导出形状；`rankEvidence` / `evidenceTextOf` 属包内纯函数，不对外（§2.4 不导出无人调用的入口）。
 // 备份编解码（`backup.ts`，4.2-08）同样只在包内被 `exportBackup` / `importBackup` 调用，格式对外只以

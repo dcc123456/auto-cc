@@ -1,35 +1,52 @@
 /**
- * `kb.gap` service（spec 4.4-01 的入口位 / 4.4-02 的模型腿与可见回落 / 4.4-07 的稳定读数 /
- * 4.4-10 的来源标注）。
+ * `kb.gap` service（spec 4.4-01 的入口位 / 4.4-02 的模型腿与可见回落 / 4.4-03 的三态比对 /
+ * 4.4-04 的反向比对 / 4.4-06 的建议随结论 / 4.4-07 的稳定读数 / 4.4-10 的来源标注）。
  *
- * 4.4 这条链在本包里只做**拆解**：输入一段 JD 正文，输出带原文位置的四类能力要求。
- * 「拿这些要求去库里比三态」（4.4-03 / 04）与「界面呈现」（4.4-05 / 06）分属 4.4-c 与 4.4-d，
- * 现在就把比对与界面写进来会同时踩两条规矩：AGENTS.md §2.6（不为假想的未来做抽象）与 §0（一次只推进一个切片）。
+ * 4.4 这条链在本包里做到「拆解 + 比对」为止：输入一段 JD 正文，产出带原文位置的四类要求，
+ * 再拿它们与库内的实体比出三态与亮点候选。「界面呈现与证据链跳转」（4.4-05 / 4.4-02 的 V 半边）
+ * 分属 4.4-d，现在就把界面写进来会同时踩两条规矩：AGENTS.md §2.6（不为假想的未来做抽象）与
+ * §0（一次只推进一个切片）。
  *
- * 两条腿的分工是本服务的全部形状（plan §4.4-b 证据 [3] 对 4.4-a 草案的更正）：
+ * 两条腿的分工是本服务的形状（plan §4.4-b 证据 [3] 对 4.4-a 草案的更正）：
  * **词面腿是基线，每次都跑；模型腿是增强，只在基线上补**。于是模型缺席时报告只是短一些，
  * 而拆解这件事本身不会失败——这正是 4.4-02 要的「功能不中断 + 回落可被看见」。
+ * 比对腿（4.4-c）反过来是**硬依赖**：报告要比的是"我这本库里有没有"，库里没有可比对象时
+ * 给一份全缺失的报告等于把装配问题说成能力问题，所以那条路直接结构化失败（`KB_LIBRARY_MISSING`）。
  *
- * 四条装配层的立身之本：
+ * 五条装配层的立身之本：
  * 1. **入参校验只在系统边界做**（§2.6）：JD 正文是从界面文本框或 `jobs.description` 进来的外部数据，
- *    所以过短在这里拒绝；判定本身仍旧全在 `requirements.ts` / `requirements-model.ts` 的纯函数里，
- *    本文件不重复任何规则（§2.5）。
+ *    所以过短在这里拒绝；判定本身仍旧全在 `requirements.ts` / `requirements-model.ts` /
+ *    `requirements-compare.ts` 的纯函数里，本文件不重复任何规则（§2.5）。
  * 2. **模型只有一个入口**：本文件不出现端点、密钥与模型 SDK，全部经 `ChatGateway` 询问面拿
  *    （`llm.chat` 的实现，spec 2.5-12 / 4.4-08，由 `check-llm-single-entry` 机检）。
- * 3. **不建新表**（plan §4.4 口径 3）：拆解是几次正则、词典扫描加一次模型调用，代价与一次检索同量级，
- *    而 `jobs.requirements_json` 已经装了「页面原样的要求标签」——那是 2.3 抓取的真相源，
- *    把派生结果写回同一列就是造第二个真相（4.2-11 的同一件事）。可重建的投影不落库，用时现算。
- * 4. **日志只记计数与状态**（延续 4.3-12 的脱敏口径）：JD 正文与简历正文一样是个人的，
- *    本服务落的一行只有字数、条数、丢弃数、模型腿状态与模型名，**不含 JD 正文，也不含模型原文**。
+ * 3. **库也只有一个入口**：比对要的那些行了当是 `kb.profile` 的 `list()` / `listChunks()`，
+ *    用的时候按名字现问（§9 的 2.5 实测条），不在本服务里存第二份实体事实。
+ * 4. **不建新表**（plan §4.4 口径 3）：拆解是几次正则、词典扫描加一次模型调用，比对是同一把
+ *    `coverageOf` 上的几次数，代价与一次检索同量级；而 `jobs.requirements_json` 已经装了
+ *    「页面原样的要求标签」——那是 2.3 抓取的真相源，把派生结果写回同一列就是造第二个真相（4.2-11）。
+ *    可重建的投影不落库，用时现算。
+ * 5. **日志只记计数与状态**（延续 4.3-12 的脱敏口径）：JD 正文与简历正文一样是个人的，
+ *    本服务落的两行只有字数、条数、丢弃数、模型腿状态与模型名、比对三态计数与截止日期，
+ *    **不含 JD 正文，也不含模型原文或库内正文**。
  */
-import { AppError, chatGatewayOf, Service, type Context } from '@auto-cc/core';
+import { AppError, chatGatewayOf, maybeService, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
+import { monthIndexOf, monthKeyOf, type KbEntityKind } from './entities.js';
+import {
+  compareRequirements,
+  libraryEntityOf,
+  type GapCompareResult,
+  type GapHighlightView,
+  type GapRequirementView,
+  type GapState,
+} from './requirements-compare.js';
 import {
   extractRequirementsLexically,
   type LexicalExtractResult,
   type RequirementItem,
   type RequirementKind,
 } from './requirements.js';
+import type { KbProfileService } from './profile-service.js';
 import {
   buildRequirementMessages,
   mergeModelWithLexical,
@@ -76,9 +93,31 @@ export const kbGapSchema = z.strictObject({
    * 同一个 JD 两次拆出不同的清单会让 4.4-07 的稳定性验收无从谈起。
    */
   modelTemperature: z.number().min(0).max(2).default(0),
+
+  // ---- 以下六项属比对腿（spec 4.4-03 / 04 / 06，plan §4.4-c 判据一 / 二）----
+  // 阈值全是拍的，与 4.2-b 的 `evidenceMinScore` 同一诚实口径：标定要等真评测集（4.4-e），
+  // 现在它们的作用只是"弱据不进证据链"，不是"已调优"。放配置而不是写进代码，是为了标定时的动作
+  // 只剩改 `cordis.yml`（同 4.3-03「代码内无魔法数」）。
+  /** 每条要求最多挂几条证据（界面分栏一屏装得下的量）。 */
+  evidenceTopK: z.number().int().min(1).max(10).default(3),
+  /** ≥ 此强度算「命中」。 */
+  evidenceHitMinScore: z.number().min(0).max(1).default(0.62),
+  /** ≥ 此强度算「部分命中」，低于它算「缺失」。 */
+  evidencePartialMinScore: z.number().min(0).max(1).default(0.3),
+  /** 库内总年限 ≥ 要求 × 此比例算部分命中（年限是算术判断，与文本阈值无关）。 */
+  yearsPartialRatio: z.number().min(0).max(1).default(0.6),
+  /** 亮点候选与 JD 全文的最低覆盖率——只判「JD 没提」会把驾照、六级当亮点推给用户。 */
+  highlightMinScore: z.number().min(0).max(1).default(0.12),
+  /** 亮点候选最多几条（超出按强度截断，丢弃数随结果报出）。 */
+  maxHighlights: z.number().int().min(0).max(20).default(6),
 });
 
-/** 校验后的配置形状。 */
+/**
+ * 校验后的配置形状。
+ *
+ * 两条文本阈值必须有序（部分 ≤ 命中），否则任何命中都会先被判成缺失；配置是用户可编辑的系统边界，
+ * 所以这条约束在 schema 上拒掉而不是在比对里兜底（§2.6）。
+ */
 export type KbGapConfig = z.infer<typeof kbGapSchema>;
 
 /**
@@ -109,6 +148,31 @@ export interface GapExtractView {
   modelDropped: number;
   /** 提示词版本，随结果进复盘；没问过模型时 null */
   promptVersion: string | null;
+}
+
+/**
+ * 一次缺口报告的读数 = 拆解视图（含模型腿五态）+ 比对结果。
+ *
+ * 界面上的"这次没用上模型"与"这三条JD要求你库里没据"要同时被看见，所以两层视图叠成一个返回体，
+ * 而不是让渲染层自己拼两个调用（§5.9 双入口共用同一 service）。
+ */
+export interface GapReportView extends GapExtractView {
+  /** 与 `items` 同序的三态行（比对不重排，界面分栏不再二次排序） */
+  rows: readonly GapRequirementView[];
+  /** 反向比对：库内具备、JD 未提、且与岗位相关的亮点候选（spec 4.4-04） */
+  highlights: readonly GapHighlightView[];
+  /** 因 `maxHighlights` 被截掉的候选条数 */
+  highlightsDropped: number;
+  /** 三态各多少条（4.4-06 的"计数可见"） */
+  counts: Readonly<Record<GapState, number>>;
+  /** 库内经验总月数（重叠区间合并后），界面换算成年 */
+  totalExperienceMonths: number;
+  /** 库内最高学历档位；库里没有学历区块时 null */
+  libraryEducationRank: number | null;
+  /** 参与比对的库内实体条数；0 条时界面上要说清"是没录简历，不是你不合格" */
+  entityCount: number;
+  /** 「至今」夹到的那个月（`YYYY-MM`）——年限读数的时间基准，界面必须播出去 */
+  asOfMonth: string;
 }
 
 /**
@@ -173,7 +237,7 @@ export class KbGapService extends Service {
     }
     const lexical = extractRequirementsLexically(trimmed, this.options.perKindLimit);
     const attempt = await this.askModel(trimmed, lexical.items);
-    this.report(trimmed.length, lexical, attempt);
+    this.logExtract(trimmed.length, lexical, attempt);
     return {
       items: attempt.items,
       inputChars: trimmed.length,
@@ -261,13 +325,90 @@ export class KbGapService extends Service {
   };
 
   /**
+   * 把一份 JD 与知识库比成缺口报告：三态比对 + 反向比对（spec 4.4-03 / 04 / 06 / 07）。
+   *
+   * 拆解**复用** `extract()`，本方法不重开一条拆解通道（§2.5）；判据全在 `requirements-compare.ts` 的纯函数里，
+   * 这里只做投影（库内实体 / 学历区块）与播报。
+   *
+   * 与模型腿不同，**库是必需输入而不是增强**：`kb.profile` 不在装配里时抛 `KB_LIBRARY_MISSING`，
+   * 而不是给一份"全是缺失"的报告——那是最容易骗到自己的一种假读数（plan §4.4-c 接线形状）。
+   * @param jdText JD 正文（与 `extract()` 同一份入参口径）
+   * @param filter 比对范围：`sourceDocId` 限定"针对哪份简历"，不传则全库（含手工实体）
+   * @param nowMs 「今天」的时间戳（毫秒）。显式入参而不是在比对里读时钟：4.4-07 要"同一输入两次运行
+   *              hash 相同"，隐式读现状会让报告在跨月的那一刻莫名变红。
+   * @returns 拆解视图 + 三态行 + 亮点候选 + 三态计数与两个换算读数
+   * @throws AppError(`INVALID_ARGUMENT`) JD 过短（由 `extract()` 判）；
+   *         AppError(`KB_LIBRARY_MISSING`) 知识库服务未装配
+   */
+  async report(
+    jdText: string,
+    filter: { kind?: KbEntityKind; sourceDocId?: string | null } = {},
+    nowMs = Date.now(),
+  ): Promise<GapReportView> {
+    const extracted = await this.extract(jdText);
+    const profile = maybeService<KbProfileService>(this.ctx, 'kb.profile');
+    if (!profile) {
+      throw new AppError('KB_LIBRARY_MISSING', '知识库服务 kb.profile 未装配：缺口报告没有可比的对象');
+    }
+    const entities = profile.list(filter).map(libraryEntityOf);
+    const educationChunks = profile
+      .listChunks()
+      .filter((chunk) => chunk.sectionKind === 'education')
+      .map((chunk) => ({ chunkId: chunk.chunkId, text: chunk.text }));
+    const compared = compareRequirements(
+      { jdText: jdText.trim(), items: extracted.items, entities, educationChunks },
+      {
+        evidenceTopK: this.options.evidenceTopK,
+        hitMinScore: this.options.evidenceHitMinScore,
+        partialMinScore: this.options.evidencePartialMinScore,
+        yearsPartialRatio: this.options.yearsPartialRatio,
+        highlightMinScore: this.options.highlightMinScore,
+        maxHighlights: this.options.maxHighlights,
+        nowMonth: monthIndexOf(nowMs),
+      },
+    );
+    this.logComparison(compared, entities.length, nowMs);
+    return {
+      ...extracted,
+      rows: compared.rows,
+      highlights: compared.highlights,
+      highlightsDropped: compared.highlightsDropped,
+      counts: compared.counts,
+      totalExperienceMonths: compared.totalExperienceMonths,
+      libraryEducationRank: compared.libraryEducationRank,
+      entityCount: entities.length,
+      asOfMonth: monthKeyOf(nowMs),
+    };
+  }
+
+  /**
+   * 写一行比对日志：只有三态计数、候选条数与"截至"的年月，**没有 JD 正文、没有实体文本**（4.3-12 口径）。
+   * @param compared 一次比对的读数
+   * @param entityCount 参与比对的库内实体条数
+   * @param nowMs 「今天」的时间戳（毫秒），换算成 `YYYY-MM` 播报
+   * @returns 无
+   */
+  private logComparison(compared: GapCompareResult, entityCount: number, nowMs: number): void {
+    const line =
+      `[kb-gap] 比对：要求 ${String(compared.rows.length)} 条 →` +
+      ` 命中 ${String(compared.counts.matched)} / 部分 ${String(compared.counts.partial)} /` +
+      ` 缺失 ${String(compared.counts.missing)}` +
+      ` · 亮点候选 ${String(compared.highlights.length)}（丢弃 ${String(compared.highlightsDropped)}）` +
+      ` · 库内实体 ${String(entityCount)} 条 · 经验合计 ${String(compared.totalExperienceMonths)} 月` +
+      ` · 截至 ${monthKeyOf(nowMs)}`;
+    // 一份全是缺失的报告是产品最该显眼的时刻，不该混在 INFO 流里。
+    if (compared.counts.matched === 0 && compared.rows.length > 0) this.ctx.logger.warn(line);
+    else this.ctx.logger.info(line);
+  }
+
+  /**
    * 写一行拆解日志（只记计数与状态，§8.5 / 4.3-12 的脱敏口径）。
    * @param inputChars 参与拆解的正文字符数
    * @param lexical 词面腿的产出
    * @param attempt 模型腿的结局
    * @returns 无
    */
-  private report(inputChars: number, lexical: LexicalExtractResult, attempt: ModelAttempt): void {
+  private logExtract(inputChars: number, lexical: LexicalExtractResult, attempt: ModelAttempt): void {
     const counts =
       `硬技能 ${String(countOfKind(lexical.items, 'hard_skill'))}` +
       ` / 软技能 ${String(countOfKind(lexical.items, 'soft_skill'))}` +

@@ -1,11 +1,17 @@
 /**
  * `kb.gap` 的装配用例（spec 4.4-01 的入参边界 / 4.4-02 的模型腿五态与可见回落 /
- * 4.4-06 的计数可见 / 4.4-08 的离线口径 / 4.3-12 的脱敏延续）。
+ * 4.4-03 / 04 的三态比对与反向比对 / 4.4-06 的计数与建议可见 / 4.4-07 的全链确定性 /
+ * 4.4-08 的离线口径 / 4.3-12 的脱敏延续）。
  *
  * 拆解与合并的规则本身在 `requirements.test.ts` 与 `requirements-model.test.ts` 里逐条断过了，
- * 这里只判服务这一层的四件事：入参校验、每类上限走配置、**模型腿的五种结局各能观测到、
- * 且除 merged 之外的四种结局交回来的序列就是词面基线**、日志只有计数没有 JD 正文。
+ * 三态怎么定、两道闸怎么设则在 `requirements-compare.test.ts` 的纯函数层断言；
+ * 这里只判服务这一层的事：入参校验、每类上限走配置、**模型腿的五种结局各能观测到、
+ * 且除 merged 之外的四种结局交回来的序列就是词面基线**、比对确实接的是 `kb.profile`、日志只有计数没有正文。
  * 语料是**写在文件里的本地样例**（§7.2 不许碰真实招聘平台），公司名与手机号都是虚构。
+ *
+ * 4.4-c 那组用例挂**真的 `node:sqlite` + 真派生结果**（简历文本经 4.1 区块解析、4.2 实体派生入库）：
+ * 「拆出来的要求能不能比回库里那些行」只在真实装配路径上才成立，手写一批实体当库等于没接库（§2.1）。
+ * 全链 hash（4.4-07）也在这一组里复跑——拆解腿那半边的 hash 稳定在 4.4-a 已归档。
  *
  * 模型腿用的是测试替身（`FakeChatService`）而不是真端点：本机没有对话模型的 key，
  * 而 4.4-02 要判的是「五态可区分 + 回落不断流」，那需要一个**可控**的回复。
@@ -15,16 +21,29 @@
  * 4.4-08 的另一半（不联网）在这里是**结构性成立**而不是断言：替身一个端点都不碰、
  * 出网入口只在 `packages/llm` 由 `pnpm lint` 的 `check-llm-single-entry.ts` 机检。
  */
-import { AppError, Context, Service, type ChatCompletionView, type ChatRequestView, type Fiber } from '@auto-cc/core';
+import {
+  AppError,
+  Context,
+  Service,
+  asApp,
+  type ChatCompletionView,
+  type ChatRequestView,
+  type Fiber,
+} from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
+import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { StoreService } from '@auto-cc/plugin-store';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { KbGapService, type KbGapConfig } from './gap-service.js';
+import { KbGapService, type KbGapConfig, type GapReportView } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
+import { KbProfileService, kbProfileSchema } from './profile-service.js';
+import { parseResumeText } from './sections.js';
 import { REQUIREMENT_LEXICON_VERSION } from './requirements.js';
 import { REQUIREMENT_PROMPT_VERSION } from './requirements-model.js';
 
@@ -48,6 +67,12 @@ const DEFAULT_CONFIG: KbGapConfig = {
   allowModelLeg: true,
   modelMaxTokens: 1200,
   modelTemperature: 0,
+  evidenceTopK: 3,
+  evidenceHitMinScore: 0.62,
+  evidencePartialMinScore: 0.3,
+  yearsPartialRatio: 0.6,
+  highlightMinScore: 0.12,
+  maxHighlights: 6,
 };
 
 /** 替身的可调项（走 `static Config`，与真 `llm.chat` 同一条 cordis 传参路径，见 §9 实测 1.3）。 */
@@ -297,5 +322,197 @@ describe('kb.gap 的日志脱敏（延续 spec 4.3-12 的口径）', () => {
     await gap.extract(SAMPLE_JD);
     const logText = await waitForLogLine(logFile, '模型腿 unavailable');
     expect(logText).toContain('WARN');
+  });
+});
+
+/**
+ * 撑起缺口报告的库语料（虚构）。
+ *
+ * 两段经历**首尾相接**（2021.07-2024.06 与 2024.07 至今）是有意的：它让「相邻区间连成一段」这条
+ * 判据在真派生结果上被走到，而不是只在纯函数用例里成立。「教育经历」那段决定学历腿有没有据
+ * （4.2 裁定二：学历不产实体行，档位只能从区块切片读）。
+ */
+const LIBRARY_MD = [
+  '张三',
+  '电话：13800002222',
+  '',
+  '## 教育经历',
+  '江海大学｜软件工程 本科 2017.09-2021.06',
+  '辅修分布式系统，完成过千万级日志处理的课程设计。',
+  '',
+  '## 工作经历',
+  '星桥科技｜后端工程师 2021.07-2024.06',
+  '- 主导订单服务重构，把 P99 延迟压下降 40%。',
+  '',
+  '沧海数据｜架构师 2024.07至今',
+  '- 负责推荐接口的容量规划与稳定性治理。',
+  '',
+  '## 技能',
+  '- Java、Spring Boot、MySQL',
+  '- Kubernetes、Docker、Grafana',
+].join('\n');
+
+/** `report()` 的判定基准时刻（2026 年 10 月，用本地时间构造，与 `monthKeyOf` 同一套时区口径）。 */
+const AS_OF_MS = new Date(2026, 9, 15, 12).getTime();
+
+/** 入库用的文档 id。 */
+const LIBRARY_DOC_ID = 'resume-gap-report';
+
+/**
+ * 建一份「拆解 + 真库」的装配：config + log + store + resume.doc + kb.profile + kb.gap。
+ *
+ * 库里那几行不是手写的，而是**从简历文本经 4.1 的区块解析与 4.2 的实体派生**得到的——
+ * 本条用例要判的正是「拆出来的要求能不能比回真实派生结果」，自己造一批实体等于没接库（AGENTS.md §2.1）。
+ * @param gapConfig `kb.gap` 的覆盖项（亮点上限那条用例靠它）
+ * @returns 缺口服务、实体服务与日志文件路径
+ */
+async function bootGapWithLibrary(gapConfig: Partial<KbGapConfig> = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'auto-cc-kb-gap-lib-'));
+  tempDirs.push(dir);
+  const ctx = new Context();
+  fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
+  fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
+  fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  fibers.push(await ctx.plugin(ResumeDocService, {}));
+  // 配置项一律取 schema 的默认值（与 `cordis.yml` 同源），不在测试里另抄一份阈值。
+  fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
+  fibers.push(await ctx.plugin(KbGapService, { ...DEFAULT_CONFIG, ...gapConfig }));
+  const app = asApp(ctx);
+  const parsed = parseResumeText(LIBRARY_MD, LIBRARY_DOC_ID, AS_OF_MS);
+  if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
+  app['resume.doc'].save(parsed.document);
+  app['kb.profile'].sync(LIBRARY_DOC_ID, AS_OF_MS);
+  return { gap: app['kb.gap'], kb: app['kb.profile'], logFile: join(dir, 'auto-cc.log') };
+}
+
+/**
+ * 取日志里最后一条含标记的那一行（整份文本一起断言会把上一条评论带进来，级别就判不准了）。
+ * @param text `waitForLogLine` 拿到的完整日志文本
+ * @param needle 定位用的子串
+ * @returns 最后一行命中；没有命中时返回空串（调用方的正则断言随即失败，不给假通过）
+ */
+function lastLogLine(text: string, needle: string): string {
+  return (
+    text
+      .split('\n')
+      .filter((line) => line.includes(needle))
+      .at(-1) ?? ''
+  );
+}
+
+describe('kb.gap.report 的三态比对与反向比对（spec 4.4-03 / 4.4-04 / 4.4-07）', () => {
+  it('每条实体证据都能从库里原样读回，三态计数与行数对得上', async () => {
+    const { gap, kb } = await bootGapWithLibrary();
+    const view = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    expect(view.entityCount).toBeGreaterThan(0);
+    expect(view.rows).toHaveLength(view.items.length);
+    expect(view.counts.matched + view.counts.partial + view.counts.missing).toBe(view.rows.length);
+    let checked = 0;
+    for (const row of view.rows) {
+      for (const evidence of row.evidence) {
+        if (evidence.origin !== 'entity') continue;
+        expect(kb.get(evidence.id)).not.toBeNull();
+        checked += 1;
+      }
+      // 命中与部分命中必须带据，缺失必须一条据都不给（4.4-03 的判据）。
+      expect(row.state === 'missing' ? row.evidence.length === 0 : row.evidence.length > 0).toBe(true);
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('年限腿在真库上走算术：首尾相接的两段合并成一段，换算成年后判命中', async () => {
+    const { gap } = await bootGapWithLibrary();
+    const view = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    // 2021.07 → 2026.10 连成一段 = 64 个月 = 5 整年 ≥ JD 要的 3 年
+    expect(view.totalExperienceMonths).toBe(64);
+    const yearsRow = view.rows.find((row) => row.item.kind === 'experience_years');
+    expect(yearsRow?.state).toBe('matched');
+    expect(yearsRow?.suggestion).toBeNull();
+    expect(view.asOfMonth).toBe('2026-10');
+  });
+
+  it('学历腿从区块切片取档位，证据 id 落在切片而不是实体上（4.2 裁定二）', async () => {
+    const { gap } = await bootGapWithLibrary();
+    const view = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    const eduRow = view.rows.find((row) => row.item.kind === 'education');
+    expect(eduRow?.state).toBe('matched');
+    expect(view.libraryEducationRank).toBe(2);
+    const chunkEvidence = eduRow?.evidence.filter((one) => one.origin === 'section_chunk') ?? [];
+    expect(chunkEvidence).toHaveLength(1);
+    expect(chunkEvidence[0]?.id).not.toBe('');
+  });
+
+  it('同一 JD + 同一库连跑两次，整份报告的 hash 逐字相同（4.4-07 的全链判据）', async () => {
+    const first = await (await bootGapWithLibrary()).gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    const second = await (await bootGapWithLibrary()).gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    /**
+     * 整份报告的稳定摘要（截取 16 位足够比对，全文进断言消息会太长）。
+     * @param view 报告读数
+     * @returns sha256 前 16 位
+     */
+    const digest = (view: GapReportView) =>
+      createHash('sha256').update(JSON.stringify(view)).digest('hex').slice(0, 16);
+    expect(digest(second)).toBe(digest(first));
+  });
+
+  it('filter 一路递到库里：只比技能类实体时证据全属技能类，且参与比对的实体变少', async () => {
+    const { gap, kb } = await bootGapWithLibrary();
+    const all = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    const skillsOnly = await gap.report(SAMPLE_JD, { kind: 'skill' }, AS_OF_MS);
+    expect(skillsOnly.entityCount).toBeLessThan(all.entityCount);
+    for (const row of skillsOnly.rows) {
+      for (const evidence of row.evidence.filter((one) => one.origin === 'entity')) {
+        expect(kb.get(evidence.id)?.kind).toBe('skill');
+      }
+    }
+  });
+
+  it('亮点候选受配置上限约束，被截掉的条数随报告一起返回', async () => {
+    const uncapped = await (await bootGapWithLibrary()).gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    const capped = await (await bootGapWithLibrary({ maxHighlights: 0 })).gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    expect(capped.highlights).toEqual([]);
+    expect(capped.highlightsDropped).toBe(uncapped.highlights.length);
+    for (const highlight of uncapped.highlights) {
+      expect(['skill', 'achievement']).toContain(highlight.kind);
+      // 亮点是「JD 没提」那一侧的读数，不该与拆解出的要求撞车
+      expect(highlight.relatedTokens.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('库里没有 kb.profile 时结构化失败：报告没有可比对象，而不是给一份全缺失的假报告', async () => {
+    const { gap } = await bootGap();
+    let caught: unknown;
+    try {
+      await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe('KB_LIBRARY_MISSING');
+    expect((caught as AppError).message).not.toContain('星桥科技');
+  });
+});
+
+describe('kb.gap.report 的日志与播报（spec 4.4-06 / 4.3-12 的口径延续）', () => {
+  it('比对日志只有计数与截止日期，查不到 JD 正文、库内正文与手机号', async () => {
+    const { gap, logFile } = await bootGapWithLibrary();
+    await gap.report(SAMPLE_JD, {}, AS_OF_MS);
+    const line = lastLogLine(await waitForLogLine(logFile, '[kb-gap] 比对'), '[kb-gap] 比对');
+    expect(line).toMatch(
+      /\[kb-gap\] 比对：要求 \d+ 条 → 命中 \d+ \/ 部分 \d+ \/ 缺失 \d+ · 亮点候选 \d+（丢弃 \d+） · 库内实体 \d+ 条 · 经验合计 \d+ 月 · 截至 2026-10/,
+    );
+    expect(line).toContain('INFO');
+    for (const sentinel of ['13800002222', '星桥科技', '抗压能力', '订单服务重构', 'Java']) {
+      expect(line).not.toContain(sentinel);
+    }
+  });
+
+  it('整份报告一条都没命中时那一行走 warn，让「这岗位不合适」在日志里也显眼', async () => {
+    const { gap, logFile } = await bootGapWithLibrary();
+    const view = await gap.report('要求精通 Rust、Zig 与 Unison，博士及以上学历，15 年以上经验。', {}, AS_OF_MS);
+    expect(view.counts.matched).toBe(0);
+    const line = lastLogLine(await waitForLogLine(logFile, '[kb-gap] 比对'), '[kb-gap] 比对');
+    expect(line).toContain('WARN');
+    expect(line).toContain('命中 0');
   });
 });

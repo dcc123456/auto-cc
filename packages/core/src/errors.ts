@@ -76,6 +76,10 @@ export type AppErrorCode =
   // 派生实体的删除入口不在知识库（spec 4.2-04 的级联策略）：它在简历工作副本里，删完同步即可。
   // 单独一个码是因为界面的处置不同——这一条要给「去简历里删」的跳转，而不是给一句删除失败的提示。
   | 'KB_ENTITY_DERIVED'
+  // 缺口报告（spec 4.4-03）：库里没有可比的实体。与 `KB_SOURCE_MISSING` 分开，因为处置不同——
+  // 前者是「这份简历还没入库」（去导入并派生），后者是「知识库服务整个没装配」，
+  // 用户自己修不了后者，界面只能给一句"功能不可用"而不是引导。
+  | 'KB_LIBRARY_MISSING'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
