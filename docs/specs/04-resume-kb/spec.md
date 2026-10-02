@@ -1174,10 +1174,41 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 | 4.6-06 | LLM 不可用时回落模板话术并明确标识「模板」，不冒充个性化                              | U+V  | 断网截图 + 标识可见                           | [ ]  |
 | 4.6-07 | 话术候选可多条并列展示，用户选一条后进入发送流程（2.5-02 前）                         | V    | 截图候选列表与选中态                          | [ ]  |
 | 4.6-08 | 生成动作计入额度（若配置为付费项），必经 `entitlement.gate`                           | C    | 断言 ledger 与拒绝路径                        | [ ]  |
-| 4.6-09 | 话术库/prompt 集中注册、可版本化，业务代码内无硬编码 prompt 字符串                    | C    | 扫描规则：prompt 字面量只允许出现在注册表目录 | [ ]  |
+| 4.6-09 | 话术库/prompt 集中注册、可版本化，业务代码内无硬编码 prompt 字符串                    | C    | 扫描规则：prompt 字面量只允许出现在注册表目录 | [x]  |
 | 4.6-10 | 复用核对：话术生成不重复实现 JD 解析、检索、事实校验（全部调用 4.4/4.5 已有 service） | C    | 依赖图核对，无平行实现                        | [ ]  |
 | 4.6-11 | 与 P2 的接口定型：`script.greeting` 输出即为 2.5-01 所需结构，P2 不再二次加工         | U+C  | 契约单测（mock 消费方）                       | [ ]  |
 | 4.6-12 | 不发送任何凭据/验证码类内容（对齐 2.5-10）                                            | C    | 黑名单字段校验断言                            | [ ]  |
+
+### 4.6-a 落地记录（提示词集中注册 + 落点机检，2026-10-02）
+
+- **这条为什么单独成片、且不写任何新能力**：4.6-b/c 要往话术里加三类 prompt 与两份模板，
+  而 §4.6-09 要的是「业务代码内无硬编码 prompt 字符串」——先搬家再加盖子，比先写新 prompt
+  再回头扫旧账便宜。本片**行为零变化**：搬过去的文字与调用参数逐字未动。
+- **落点（每包一份 `src/prompts.ts`，跨包注册表已在 plan 的裁定三里否决）**：
+  `packages/outbound/src/prompts.ts` 收开场白的 system/user 消息与本地回落模板；
+  `packages/resume-kb/src/prompts.ts` 收 JD 拆解腿、简历改写腿的消息构造，以及
+  `jdreq-v1` / `resume-generate-v1` 两个版本常量。服务层（`script.ts` / `gap-service.ts` /
+  `generate-service.ts`）只剩装配、校验与回落决策。
+- **机检判据按形状取，不按名字取**：`scripts/check-prompts.ts`（已进 `pnpm lint` 链尾）认两条痕迹
+  ——消息对象里的 `role: 'system'` 那一项、`*_PROMPT_VERSION` 常量声明，二者只允许出现在各包
+  `src/prompts.ts`。为什么不按「字符串像不像提示词」判：那需要语义判断，机检做不了；而**伪造落点的
+  方式是新写一处消息字面量，不是改函数名**。豁免口径（`.test.ts` / `.spec.ts` / `test-doubles.ts`）
+  与 `check-llm-single-entry.ts:36` 逐字相同，两处不该各判各的（§2.5）。
+- **负控做实，不接受「绿了就是干净」**：临时放一个违例文件 → `exit 1` 并逐行指名两处痕迹
+  （`出现发给模型的 system 消息字面量` / `出现提示词版本常量声明`）；删掉后 `exit 0`。
+  实跑读数：扫描 248 个源码文件、注册表 2 份。另有一条正向着床：注册表**一份都没有**时也报失败，
+  否则「把两个 prompts.ts 删了」会被读成「仓库变干净了」。
+- **`[x]` 的边界要说清**：本行的「可版本化」在两条模型腿上是注册表里的版本常量并随产物回执；
+  开场白那一腿的版本是配置项 `scriptVersion`（schema 默认 `v1`，不是 prompt 字面量），
+  4.6-b 新增三类话术时按同一形状在注册表里补 `SCRIPT_PROMPT_VERSION`，届时仍由这道机检守。
+  也就是说本行现在为真，且**它的持续性由 lint 链保证，不靠 4.6-e 记得复查**。
+- **门禁实跑**：`typecheck` 全包 Done、`lint`（含新增的 `check-prompts`）通过、`format:check` 通过、
+  `pnpm test` 全绿（`resume-kb` 19 文件 398 例 / `outbound` 6 文件 94 例 / `main` 3 文件 15 例，
+  余下 workflow 99、browser 235、platform-boss 130、resume-doc 106、agent 24、kernel 23、
+  sessions 15、store 21、logger 13、entitlement 12、plugins 5、shell 8 例同批通过）。
+- **§7.4 自检里需要显式回答的**：④ 复用检查——本片零新实现，只有搬家与一份机检脚本；
+  ⑤ 死代码检查——被搬空的 `renderTemplate` / `buildMessages` 及两个原址常量声明已删除，
+  `stripFence` 保留导出（两条腿共用，第二份围栏剥离就是第二套判据）。
 
 ---
 
