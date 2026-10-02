@@ -4,7 +4,8 @@
  * 表由本服务把迁移 push 进 `store.migrations` 再 `upgrade()`（`store/src/index.ts:37` 为此留的口子），
  * 因此连接池仍然只有一处（AGENTS.md §2.7），而「哪张表属于哪个域」由建表的一方自己说清楚。
  *
- * `source` 列从 2.5-e 起有真实消费方（打招呼写 `${scriptVersion}:${jdId}`，spec 2.5-09），
+ * `source` 列从 2.5-e 起有真实消费方，4.6-e 起那条链是「[manual:]模板版本:话术类型:JD id[#证据 id 列表]」
+ * （拼装只在 `outbound/greet.ts` 的 `ledgerSource` 一处，spec 2.5-09 / 4.6-02），
  * `remoteRef` 仍是 null：那是 P5 接 SaaS 时「不改表就能对上账」的第二条预留，
  * 空列比空接口便宜得多，也改不动已有数据（spec 1.9-08）。
  */

@@ -1,5 +1,5 @@
 /**
- * 打招呼编排的骨架测试（spec 2.5-02 / 03 / 04 / 09 / 10 / 13 + 2.4-07 的让出）。
+ * 打招呼编排的骨架测试（spec 2.5-02 / 03 / 04 / 09 / 10 / 13 + 2.4-07 的让出 + 4.6-02 的来源入账）。
  *
  * 编排的每一步失败都在这里各测一遍，判据统一是「渠道有没有被调、账本有没有多一行」：
  * 被拒、命中黑名单、页面没确认、工作流让出——四种都没真发出去，所以都不许落账（plan §8.4 决策 1）。
@@ -242,7 +242,7 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     });
   });
 
-  it('没给文案：走话术生成并按模板回落，来源写成 v1:<jdId> 且一次网络都不发（2.5-01 / 2.5-09）', async () => {
+  it('没给文案：走话术生成并按模板回落，来源写成 v1:greeting:<jdId> 且一次网络都不发（2.5-01 / 2.5-09）', async () => {
     const hand = fakeChannel();
     const original = globalThis.fetch;
     let networkRequestCount = 0;
@@ -260,13 +260,54 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
         nowMs: T0,
       });
       expect(receipt.origin).toBe('template');
-      expect(receipt.source).toBe('v1:job-2002');
+      expect(receipt.source).toBe('v1:greeting:job-2002');
       expect(hand.calls[0]?.text).toContain('前端工程师');
-      expect(ledger.summary().recent[0]?.source).toBe('v1:job-2002');
+      expect(ledger.summary().recent[0]?.source).toBe('v1:greeting:job-2002');
       expect(networkRequestCount).toBe(0);
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  it('界面选中候选再发：正文逐字符原样到渠道，账本来源带上类型与证据引用（4.6-02 / 4.6-e）', async () => {
+    const hand = fakeChannel();
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    const chosen = '您好，看到贵司在招前端工程师，我在示例科技做过同类岗位，想进一步沟通。';
+    const receipt = await greet.perform({
+      platform: 'boss',
+      jobId: 'job-3003',
+      text: chosen,
+      // 界面把候选视图上的四个来源字段原样递回来（`ScriptPanel.tsx` 的 send），正文走 text 那一路。
+      provenance: { jdId: '1002', kind: 'follow-up', scriptVersion: 'v1', evidenceRefs: ['chunk-11', 'chunk-22'] },
+      nowMs: T0,
+    });
+    expect(receipt.origin).toBe('manual');
+    expect(receipt.source).toBe('manual:v1:follow-up:1002#chunk-11,chunk-22');
+    expect(hand.calls).toEqual([{ targetId: 'job-3003', text: chosen }]);
+    expect(ledger.summary().recent[0]?.source).toBe('manual:v1:follow-up:1002#chunk-11,chunk-22');
+
+    // 通用候选（未引用任何经历）不留一个空 `#` 段：账本里"没有引用"要读得出来。
+    const generic = await greet.perform({
+      platform: 'boss',
+      jobId: 'job-3004',
+      text: chosen,
+      provenance: { jdId: '1002', kind: 'greeting', scriptVersion: 'v1', evidenceRefs: [] },
+      nowMs: T0,
+    });
+    expect(generic.source).toBe('manual:v1:greeting:1002');
+  });
+
+  it('来源里的话术类型只认注册表那三个值：写错的 kind 直接拒，账本不留无法归类的行（4.6-01 / 4.6-09）', async () => {
+    const hand = fakeChannel();
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    await expect(
+      greet.perform({
+        ...request({ jobId: 'job-4001' }),
+        provenance: { jdId: '1002', kind: 'thanks', scriptVersion: 'v1', evidenceRefs: [] },
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
   });
 
   it('额度到量：第 N+1 次以 QUOTA_EXCEEDED 被拒、渠道没被调、账本不增（2.5-02）', async () => {

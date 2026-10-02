@@ -402,6 +402,23 @@ export type SendReceiptView = {
 };
 
 /**
+ * 一条已生成候选的来源字段（spec 4.6-02 / 4.6-11）：`ScriptDraftRowView` 里除正文与内容来源之外的那几项。
+ *
+ * 单独列一个类型而不是直接复用 draft 视图，是因为消费方（`outbound.greet`）只需要这四样就能记账，
+ * 把 `text` / `origin` / `fallbackReason` 一起收进来只会让人以为发送口会重新判一遍内容来源。
+ */
+export type ScriptProvenanceView = {
+  /** 归属的 JD 标识，与 `GreetRequestView.jobId` 同源，账本按它回指 */
+  jdId: string;
+  /** 话术分型（spec 4.6-01）：记进账本才能分清"发出去的是开场白还是追问" */
+  kind: ScriptKindView;
+  /** 提示词与模板的版本号（注册表常量，spec 4.6-09） */
+  scriptVersion: string;
+  /** 这条候选引用的知识库证据 id（spec 4.6-02 的回指清单，可为空 = 未引用经历） */
+  evidenceRefs: string[];
+};
+
+/**
  * 打一次招呼的入参（spec 2.5-02 / 2.5-13）。
  *
  * `text` 与 `script` 二选一：前者是用户在界面上改过的现成文案，后者交给 `outbound.script` 生成。
@@ -425,6 +442,15 @@ export type GreetRequestView = {
     keywords?: string[];
     evidence?: { fact: string; refId: string }[];
   };
+  /**
+   * 现成文案的**来源记账**（spec 4.6-02 / M4 的"留生成来源"在界面选定那一路的落点）。
+   *
+   * 只在带 `text` 时有意义：界面上"选中一条候选再发送"走的是现成文案那一路（服务不该再生成一遍），
+   * 于是账本本来只剩 `manual:<jdId>`，那条候选引用的知识库经历就此丢掉。这里把它补回去。
+   * **它不参与任何判据**——不改正文、不决定回落、不触发第二次生成，只进账本 `source` 列；
+   * 也因此**没有动 `script` 的形状**（4.6-11 的接口定型判据要的就是 P2 那口的入参不被界面带着长）。
+   */
+  provenance?: ScriptProvenanceView;
   /** 属于哪一次工作流运行；界面单次触发时为空 */
   workflowRunId?: string | null;
   /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚发过一次」，不必真等一个频控周期） */
@@ -445,7 +471,10 @@ export type GreetReceiptView = {
   ledgerId: number;
   /** 为满足频控实际等待的毫秒数；第一次发送为 0 */
   waitedMs: number;
-  /** 可追溯来源：`模板版本:JD id`，用户手改的文案写成 `manual:JD id`（spec 2.5-09） */
+  /**
+   * 可追溯来源（spec 2.5-09 + 4.6-02）：`模板版本:话术类型:JD id[#证据 id 列表]`；
+   * 用户手改/界面选定的现成文案写成 `manual:` 打头的同一条链，没带来源就只有 `manual:JD id`。
+   */
   source: string;
   /** 内容来源：模型产出 / 模板回落 / 用户手改 */
   origin: 'model' | 'template' | 'manual';

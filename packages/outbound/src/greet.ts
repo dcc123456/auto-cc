@@ -30,7 +30,7 @@ import {
 } from '@auto-cc/core';
 import type { GreetReceiptView, GreetRequestView } from '@auto-cc/shared';
 import { z } from 'zod';
-import { scriptRequestSchema } from './script.js';
+import { SCRIPT_KINDS, scriptRequestSchema } from './script.js';
 
 /** 额度键与账本动作名（`entitlement.gate` 按它数日上限，spec 2.5-02 / 2.5-04）。 */
 export const GREET_ACTION = 'greet';
@@ -48,6 +48,8 @@ export type GreetConfig = z.infer<typeof greetSchema>;
  * 打招呼请求的入站校验（渲染层与计划都是不可信来源，AGENTS.md §2.6）。
  *
  * `text` 与 `script` 二选一：前者是用户在界面上改过的现成文案，后者交给 `outbound.script` 生成。
+ * `provenance` 只在 `text` 那一路有意义：界面上"选中一条候选再发送"的内容是现成的，
+ * 但它的来源（版本 / 类型 / 引用的经历）不该就此丢掉（spec 4.6-02 与 M4 的"留生成来源"）。
  * `nowMs` 是判定与落账的基准，单测靠它造「刚发过一次」而不必真等 45 秒。
  */
 const greetRequestSchema = z.strictObject({
@@ -55,9 +57,40 @@ const greetRequestSchema = z.strictObject({
   jobId: z.string().min(1),
   text: z.string().min(1).optional(),
   script: scriptRequestSchema.optional(),
+  provenance: z
+    .strictObject({
+      jdId: z.string().min(1),
+      kind: z.enum(SCRIPT_KINDS),
+      scriptVersion: z.string().min(1),
+      evidenceRefs: z.array(z.string().min(1)),
+    })
+    .optional(),
   workflowRunId: z.string().min(1).nullish(),
   nowMs: z.number().int().positive().optional(),
 });
+
+/**
+ * 拼账本 `source` 列那条可追溯链（spec 2.5-09 + 4.6-02）。
+ *
+ * 两条腿共用一个拼装函数：格式长两遍就是两条复盘口径。`manualPrefix` 为真时链首是 `manual`，
+ * 表示"这条正文是调用方给定的、本服务没有再生成"，其后仍是生成它的那份话术的来源。
+ * @param manualPrefix 内容是否来自调用方的现成文案
+ * @param scriptVersion 提示词与模板的版本号（注册表常量）
+ * @param kind 话术分型（4.6-01）
+ * @param jdId 归属的 JD 标识
+ * @param evidenceRefs 这条话术引用的知识库证据 id，可为空（未引用经历）
+ * @returns 形如 `script-v1:greeting:1002#kb-abc` 的来源串；无引用时不带 `#` 段
+ */
+function ledgerSource(
+  manualPrefix: boolean,
+  scriptVersion: string,
+  kind: string,
+  jdId: string,
+  evidenceRefs: readonly string[],
+): string {
+  const chain = manualPrefix ? ['manual', scriptVersion, kind, jdId] : [scriptVersion, kind, jdId];
+  return evidenceRefs.length > 0 ? `${chain.join(':')}#${evidenceRefs.join(',')}` : chain.join(':');
+}
 
 /**
  * 把节点参数里的字符串读出来（缺键或非字符串都返回 null，由调用方报缺参数）。
@@ -109,7 +142,7 @@ export class OutboundGreetService extends Service {
         'outbound.greet',
       );
     }
-    const { platform, jobId, text, script, workflowRunId } = parsed.data;
+    const { platform, jobId, text, script, provenance, workflowRunId } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = workflowRunId ?? null;
 
@@ -148,10 +181,14 @@ export class OutboundGreetService extends Service {
     let origin: GreetReceiptView['origin'];
     let source: string;
     if (text) {
-      // 界面上改过的文案：没有 prompt 版本可记，来源如实写成 manual。
+      // 界面上改过的文案：正文是现成的，但选中候选那条链不能断（spec 4.6-02）——
+      // 调用方把候选的来源随 `provenance` 一起递过来，账本里就能写出「manual + 哪个版本给哪条 JD 生成的」。
+      // 没带 provenance 时（工作流节点、agent 工具那种纯手打文案）来源如实写成 manual。
       finalText = text;
       origin = 'manual';
-      source = `manual:${script?.jdId ?? jobId}`;
+      source = provenance
+        ? ledgerSource(true, provenance.scriptVersion, provenance.kind, provenance.jdId, provenance.evidenceRefs)
+        : `manual:${script?.jdId ?? jobId}`;
     } else {
       if (!script) {
         throw new AppError(
@@ -163,8 +200,9 @@ export class OutboundGreetService extends Service {
       const draft = await scriptService.generate(script);
       finalText = draft.text;
       origin = draft.origin;
-      // 2.5-09 的可追溯来源：模板版本 + JD id，写进账本已有的 `source` 列（不加列、不加迁移）。
-      source = `${draft.scriptVersion}:${draft.jdId}`;
+      // 2.5-09 的可追溯来源：模板版本 + 话术类型 + JD id（+ 证据引用），写进账本已有的 `source`
+      // 列（不加列、不加迁移）。字段取自 draft 本身，不信调用方递的 provenance——现生成的那条就是真相源。
+      source = ledgerSource(false, draft.scriptVersion, draft.kind, draft.jdId, draft.evidenceRefs);
     }
     // 文本离开 app 的边界就在这里（spec 2.5-10）：模型产出、模板回落、用户手改三路都过同一份黑名单。
     scriptService.assertSendable(finalText, origin);

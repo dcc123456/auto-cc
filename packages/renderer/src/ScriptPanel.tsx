@@ -180,6 +180,9 @@ export function ScriptPanel() {
    * 把选中的那一条发出去（spec 4.6-07 的"进入发送流程"就是这一步）。
    *
    * 走 `text` 那一路而不是 `script`：用户已经选定，服务不该再生成一遍。
+   * 但来源不能跟着正文一起丢掉（spec 4.6-02 / 4.6-e）：候选视图上的 `scriptVersion` / `kind` /
+   * `jdId` / `evidenceRefs` 原样递进 `provenance`，账本才写得出"发出去的是哪一版给哪条 JD 生成、
+   * 引用了哪几条经历"。这四个字段全是服务读数，界面没有重算也没有补造。
    * 编排（幂等 → 黑名单 → 额度 → 频控 → 发送 → 落账）全在服务侧，面板只摆回执与结构化错误。
    * 先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①），与打招呼面板同一只钩子，不另写一套签字流程。
    */
@@ -193,6 +196,12 @@ export function ScriptPanel() {
             platform: target.platform,
             jobId: target.jobId,
             text: selectedDraft.text,
+            provenance: {
+              jdId: selectedDraft.jdId,
+              kind: selectedDraft.kind,
+              scriptVersion: selectedDraft.scriptVersion,
+              evidenceRefs: selectedDraft.evidenceRefs,
+            },
           }),
         {
           apply: (receipt) => {

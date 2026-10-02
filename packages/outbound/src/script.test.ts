@@ -1,10 +1,11 @@
 /**
- * 话术生成的骨架测试（spec 2.5-01 / 09 / 10 + 4.6-01 / 02 / 04 / 05 / 06 / 12）。
+ * 话术生成的骨架测试（spec 2.5-01 / 09 / 10 + 4.6-01 / 02 / 04 / 05 / 06 / 11 / 12）。
  *
  * 三条主线：模型可用时用模型的、不可用时**可见地**回落模板、任何一路产出的文本都要过黑名单。
  * 4.6-b 起加两条：三类话术走同一个入口（分型只换文案与入参校验）、超长先按句末截断再决定回落。
  * 4.6-c 起再加三条：产物显式回指引用的证据（`evidenceRefs`）、模型编出来的数被判不合格、
  * 夸大与诱导承诺和凭据分两组但走同一条判据（发送腿硬拦、模型腿可见回落）。
+ * 4.6-e 起再加一段：与 P2 的接口定型契约，用一只只会读字段的假消费方证明"不二次加工"（4.6-11）。
  * 网络一律用 `globalThis.fetch` 存根（模型端点与 fixture 都不真连，AGENTS.md §7.2），
  * 并且每次都断言请求次数——"回落"只有在确定没发网络时才是可测的（plan §12.6.1）。
  */
@@ -19,6 +20,7 @@ import {
   OutboundScriptService,
   truncateToSentence,
   type OutboundScriptConfig,
+  type ScriptDraftView,
 } from './script.js';
 import { SCRIPT_PROMPT_VERSION } from './prompts.js';
 
@@ -549,6 +551,107 @@ describe('outbound.script 的凭据黑名单分组（spec 4.6-12）', () => {
         group: 'credential',
         rule: 3,
       });
+    } finally {
+      fixture.restore();
+    }
+  });
+});
+
+/**
+ * `outbound.script` 与 P2（打招呼编排）的接口定型（spec 4.6-11 的契约单测）。
+ *
+ * 判据是"P2 不再二次加工"，因此这里的主角是一只**假消费方**：它只准读视图上的既有字段，
+ * 拼字符串的能力一概不给（能拼就能改写，那条断言就废了）。加工一旦发生在消费方，
+ * 界面上看到的和真正发出去的就分成两份事实（§2.5）。
+ *
+ * 命名对账（写在代码里，因为它是这份契约唯一的入口名读数）：spec 4.6-11 原文写的是
+ * `script.greeting`，实现里的口是 `outbound.script.generate` + 入参 `kind='greeting'`
+ * （4.6-b 的裁定：三类共用一只口，不按界面需要拆成三个入口）。这里锁的是那只口的**输出形状**，
+ * 与名字无关——名字对不上是文档滞后，形状对不上才是缺陷。
+ */
+describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
+  /** 视图上锁死的六个必填键（升序）。多一个必填键意味着 P2 要重新推断它是什么，少一个就是来源断了。 */
+  const REQUIRED_DRAFT_KEYS = ['evidenceRefs', 'jdId', 'kind', 'origin', 'scriptVersion', 'text'];
+
+  /**
+   * 该条候选**应当**有的键集合：模型腿六个，模板腿多一个 `fallbackReason`。
+   * @param draft 话术视图
+   * @returns 升序键名清单（可选键只在它出现的那条腿上出现，所以集合随 `origin` 而定，这是契约的一部分）
+   */
+  const pinnedDraftKeys = (draft: ScriptDraftView): string[] =>
+    draft.origin === 'model' ? REQUIRED_DRAFT_KEYS : [...REQUIRED_DRAFT_KEYS, 'fallbackReason'].sort();
+
+  /** 假消费方的读数：正文原样收到的那份，加上它从视图上抄下来的来源串。 */
+  interface Consumed {
+    text: string;
+    source: string;
+  }
+
+  /**
+   * 一只只会"读字段"的消费方，模拟 `outbound.greet` 拿到候选后做的事。
+   * @param draft 话术视图
+   * @returns 消费读数：正文未经任何改写，来源串只由视图既有字段拼成（`join` 是记账格式，不是加工）
+   */
+  const consume = (draft: ScriptDraftView): Consumed => {
+    const chain = [draft.scriptVersion, draft.kind, draft.jdId].join(':');
+    return {
+      text: draft.text,
+      source: draft.evidenceRefs.length > 0 ? `${chain}#${draft.evidenceRefs.join(',')}` : chain,
+    };
+  };
+
+  it('开场白视图：必填六键一字不多不少，消费方逐字符原样发出且来源取自视图（4.6-11）', async () => {
+    const fixture = stubFetch(
+      modelReply('您好，示例科技的前端工程师岗位，我有 React 与 TypeScript 经验，想进一步沟通。'),
+    );
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate(JD);
+      expect(Object.keys(draft).sort()).toEqual(pinnedDraftKeys(draft));
+      expect(draft.origin).toBe('model');
+      const consumed = consume(draft);
+      // 二次加工的两种常见形态：改标点/空白、按 origin 分支重排。这里要求逐字符相等。
+      expect(consumed.text).toBe(draft.text);
+      expect(consumed.source).toBe('v1:greeting:job-1001');
+      // 消费方抄出来的那份正文仍然过得了发送腿的判据——它不需要"先修一修再发"。
+      expect(script.assertSendable(consumed.text, draft.origin)).toBeUndefined();
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('三类共用同一形状：kind 只是值，消费方不为分型加任何分支（4.6-01 × 4.6-11）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      const drafts = await Promise.all([
+        script.generate(JD),
+        script.generate({ ...JD, kind: 'follow-up', recruiterMessage: '我们把简历都过一遍再联系你' }),
+        script.generate({ ...JD, kind: 'rejection', recruiterMessage: '这个岗位我们想先看看内部转岗' }),
+        script.generate({ ...JD, evidence: [{ fact: '做过三个 React 后台项目', refId: 'chunk-11' }] }),
+      ]);
+      for (const draft of drafts) expect(Object.keys(draft).sort()).toEqual(pinnedDraftKeys(draft));
+      expect(drafts.map((draft) => consume(draft).source)).toEqual([
+        'v1:greeting:job-1001',
+        'v1:follow-up:job-1001',
+        'v1:rejection:job-1001',
+        'v1:greeting:job-1001#chunk-11',
+      ]);
+      expect(fixture.bodies).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('回落那条也不逼消费方加工：fallbackReason 是读数，来源链与模型腿同形（4.6-06 × 4.6-11）', async () => {
+    const fixture = stubFetch({ status: 503, body: {} });
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate(JD);
+      expect(draft.origin).toBe('template');
+      expect(draft.fallbackReason).toBeTruthy();
+      expect(Object.keys(draft).sort()).toEqual(pinnedDraftKeys(draft));
+      expect(consume(draft)).toEqual({ text: draft.text, source: 'v1:greeting:job-1001' });
     } finally {
       fixture.restore();
     }
