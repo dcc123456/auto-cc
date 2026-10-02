@@ -1,0 +1,165 @@
+4.4-c 收口门禁 · 六条命令的实际输出与退出码（2026-10-02，切片 4.4-c）
+==============================================================================
+
+工作目录仓库根 `D:\works\deep-seek-workspace\auto-cc`（Windows + Git Bash / Node 24 / pnpm）。
+收口轮时间戳 10:36 ~ 10:42，全部命令在演示脚本副本从包里删掉**之后**复跑，
+所以读数里不含任何临时文件的贡献。
+
+本片一共红过三轮，三轮的原因与修法都记在第 6 节，不留"看起来全绿"的记录。
+本文件记的是修完之后那轮。
+
+
+【1】pnpm typecheck → TYPECHECK_EXIT=0
+------------------------------------------------------------------------------
+> pnpm -r --if-present typecheck
+Scope: 24 of 25 workspace projects
+（逐包 `tsc --noEmit`，节选）
+packages/outbound typecheck: Done
+packages/resume-kb typecheck: Done
+packages/platform-boss typecheck: Done
+packages/main typecheck: Done
+TYPECHECK_EXIT=0
+
+本片要过的编译期断言里，两条是新形状：`AppError('KB_LIBRARY_MISSING', …)` 的 code 必须在
+`packages/core/src/errors.ts` 的 `AppErrorCode` 联合里（第 6 节的第一轮红就在这）；
+`GapReportView` 经 `index.ts` 对外后，`packages/main` 的注册表侧引用它不报错。
+
+
+【2】pnpm lint → LINT_EXIT=0
+------------------------------------------------------------------------------
+> eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts
+  && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts
+  && tsx scripts/check-dependency-floor.ts
+
+（`eslint .` 无输出即零 error / 零 warning；下面是后五只机检脚本的原文）
+✔ 渲染层规范检查通过（2 个语言包，22 个源文件）
+✔ 站点知识包检查通过（扫描 1 个平台包，选择器只在知识包目录里）
+✔ LLM 入口唯一性检查通过（扫描 278 个文件，llm.chat / llm.embed 各自声明者唯一，模型端点只在 packages/llm）
+✔ 合规护栏机检通过（扫描 227 个源码文件：无 UA/指纹/打码/自定义分区痕迹，browser/outbound/platform-boss/workflow/agent 的节奏数值全部来自配置）
+✔ 离线依赖门槛机检通过（25 份 package.json + 锁文件 544 个包名 + 25 个装机依赖共 1476 个文件：无外来向量库/向量服务/docker 客户端、无非内置 SQLite 绑定、装机闭包内无原生二进制与安装期编译脚本）
+  · 锁文件里有 14 个原生编译链包名（@napi-rs/canvas、@napi-rs/lzma、node-gyp 的家族与平台变体）：均为传递依赖、非本项目声明，且搬运层已确认它们不在 25 个装机依赖里 —— 会不会落到用户机上以搬运层为准。
+LINT_EXIT=0
+
+文件数从上一片的 276 涨到 278，增量正是本片新增的 `requirements-compare.ts` 与其用例。
+本片**没有**新增模型端点、没有新增日志出口、没有新增 SQLite 连接，所以三条机检的结论没变。
+第一轮那次报的是 280，多的两个是当时还在包里的 `tmp/demo-44c.ts` 与它 sed 出来的副本
+（删掉后回到 278，见第 6 节）。渲染层那一条仍是 2 个语言包 / 22 个源文件：
+本片一行界面代码都没碰，五个 suggestion key 的语言包文案按切片表归 4.4-d。
+
+
+【3】pnpm format:check → FORMAT_EXIT=0
+------------------------------------------------------------------------------
+> prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+FORMAT_EXIT=0
+
+代码侧一次过。`prettier` 不解析 `.txt`，所以四份验收证据文件（含本文件）不受这条门禁约束；
+但 plan / spec 两份 `.md` 里本片追加的表格**必须**先 `npx prettier --write` 再复跑，
+上一片就是在这一条上红的（`4.4-b-gates.txt` 第 3 节）。本片按那个教训先写了再格式化。
+
+
+【4】pnpm test → TEST_EXIT=0（21 个包 / 83 个测试文件 / 1184 例，全绿）
+------------------------------------------------------------------------------
+> pnpm -r --if-present test
+
+core          3 文件 /  24 例      sessions        2 文件 /  15 例
+testing       3 文件 /  20 例      agent           2 文件 /  24 例
+config        3 文件 /  17 例      workflow        4 文件 /  99 例
+devtools      1 文件 /   3 例      browser        14 文件 / 235 例
+ipc           2 文件 /  14 例      outbound        6 文件 /  94 例
+llm           2 文件 /  28 例      **resume-kb    14 文件 / 295 例**
+kernel        3 文件 /  23 例      platform-boss   6 文件 / 130 例
+shell         1 文件 /   8 例      main            1 文件 /   3 例
+logger        2 文件 /  13 例
+store         2 文件 /  21 例      （其余：plugins 1/5、entitlement 1/12、resume-doc 10/101）
+TEST_EXIT=0
+
+`packages/resume-kb` 从上一片的 13 文件 / 260 例变成 **14 文件 / 295 例**：
+新增 `requirements-compare.test.ts` 26 例，`gap-service.test.ts` 由 14 例扩到 23 例（+9）。
+逐条 verbose 用例名分别记在：
+- `docs/acceptance/4.4/4.4-03-three-state-comparison.txt`（三态与确定性）
+- `docs/acceptance/4.4/4.4-04-reverse-comparison.txt`（两道闸）
+- `docs/acceptance/4.4/4.4-06-suggestion-structure.txt`（结构断言与日志）
+
+同目录的 `requirements.test.ts`（11 例）与 `requirements-model.test.ts`（13 例）原样复跑通过，
+其中"18/18 位置可反查"那条 4.4-01 判据仍然成立——比对的输入形状没有改动拆解腿。
+
+
+【5】pnpm bench:kb → BENCH_EXIT=0（4.3-09 的检索基准复跑，本片没碰检索但共用同一份配置段）
+------------------------------------------------------------------------------
+> pnpm bench:kb（即 resume-kb 包内 `tsx src/bench.ts`）
+
+配置来源：cordis.yml 的 bench.kb-search → chunks=1500 queries=240 p95BudgetMs=150
+检索参数（同一份清单的 kb-profile 段，经 config 服务分层解析）：topK=10 minScore=0.2 k1=1.2 b=0.75 权重=0.6/0.4 子串折扣=0.25 rrfK=60 vectorMinCosine=0.35
+装配：config + log + store(journal=wal) + resume.doc + kb.profile；未挂 llm-embed、未给 embedding key
+库文件：tmp\kb-bench\store.db
+写入侧：1500 条实体（实体行 + 切片 + 倒排三写，真实事务路径）用时 1656.99ms ＝ 905 条/秒
+库内读数：kb_chunks=1500 / kb_chunks_fts=1500 / 孤儿倒排行=0
+采样：预热 22 × 11 轮（不计入），再取 240 个样本
+延迟：P50=3.25ms  P95=7.64ms  P99=8.71ms  max=9.90ms  mean=3.66ms
+命中分布：0 命中 86 次 / 平均 6.42 条 / 上限 topK=10
+向量腿：unavailable×240（没有 key 就必须全是降级态）
+出网：globalThis.fetch 存根被调用 0 次（判据：0）
+RESULT 4.3-09 p95=7.64ms budget=150ms verdict=PASS
+BENCH_EXIT=0
+
+跑这一条的理由不是"检索也要验收"，而是它同时是 **§7.2 的零出网证据**与库内三表一致性的复证：
+比对腿复用 `coverageOf` 与 `listChunks()`，没有新增 SQL、没有新增表（迁移号段仍停在 14，15 空着——
+plan §4.4 口径 3：报告是可重算的投影，落库就造出第二个真相）。上一片记的是 p95=8.10ms，
+这次 7.64ms，同一量级。`tmp\kb-bench` 是 gitignored 的基准库，不入库（§7.5）。
+
+
+【6】三轮红过的原因与处理（对应 AGENTS.md §7.4 的诚实要求）
+------------------------------------------------------------------------------
+**第一轮 · typecheck 8 个 error**（本片代码写完、门禁首跑）：
+① `KB_LIBRARY_MISSING` 不在 `AppErrorCode` 联合里 → 在 `packages/core/src/errors.ts` 追加该码，
+  并写明它与 `KB_SOURCE_MISSING` 分开的原因（前者是"这份简历还没入库"、用户能自己修，
+  后者是"知识库服务整个没装配"、界面只能给一句功能不可用）。
+② 其余 7 条是 `noUncheckedIndexedAccess` 打开后的下标访问：`ordered.at(0)`、`top.at(0)`、
+  `rows[i]` 一类可能为 `undefined`。修法是**把取值改成 `.at()` 并在类型上接住 null**，
+  不是加 `!` 断言——`!` 只是把同一件事骗过编译器，运行时该崩还崩（eslint 也把多余断言判红）。
+
+**第二轮 · lint 1 条**：`requirements-compare.ts` 的 `compareByEducation(item, chunks, options)`
+里 `options` 未使用（学历腿不需要阈值，档位比较是离散量）→ 删参数、删它的 JSDoc 行、
+改调用点实参（§2.4：发现无用代码及时删除，不留"以后可能用得上"的形参）。
+
+**第三轮 · test 1 例**：「起点在未来的区间直接不计」那条例用最初写成要求 12 年、
+却断言这一行带证据。跑出来是红的——**红得对**：库里只有一段经历时，砍掉未来段之后确实不够 12 年，
+该行按规格就是 `missing`，而"missing ⇒ 证据恒为空"是本片自己立的不变量（4.4-03 第【0】节）。
+所以**改用例、不改实现**：把要求改成 1 年，让该行落在 matched 上，同时保留"未来段不贡献负数月"的断言。
+这个判断的依据是规格而不是"让它绿"，如果反过来改实现（missing 也塞证据），
+4.4-03 那条"证据恒为空数组而不是塞一条弱据圆场"就得删——那就是自证了。
+
+**第四轮（收口轮）**：typecheck / lint / format / test / bench 全 0，见本文件 1~5 节。
+
+
+【7】收尾自检（AGENTS.md §7.4 八条逐条回答）
+------------------------------------------------------------------------------
+① 六条命令的实际输出与退出码：见 1~5 节，收口轮全 0。
+② V 类：本片**不含 V 判据**。4.4-03 / 04 是 U，4.4-06 是 C（结构断言）。
+  可视侧的替代证据是真装配那次的七节读数（三态行、两道闸候选、filter 效果、两次全链 hash、
+  库缺席的错误、日志行与六个哨兵），记在 4.4-03 / 04 / 06 三份文件里，不是单测断言。
+  界面分栏与证据链跳转（4.4-05）按切片表归 4.4-d，保持 `[ ]`。
+③ spec 状态位：4.4-03 / 04 / 06 → `[x]`；4.4-07 在拆解半边已 `[x]` 的基础上补记**全链复跑**
+  （两次 `report()` 的 sha256 相同，`260f1b58202d4e44aa8e9e469a3f207b07c4e6a454e4e6bfec79ef750c25b1ff`）；
+  4.4-02 维持 `[!]`（V 半边仍归 4.4-d，本片没碰界面）；4.4-05 / 09 保持 `[ ]`。
+④ 复用检查：打分一律复用 `coverageOf`（4.2-c），时间解析复用 `monthSpanOf` / `endpointToMonth`（4.1-a），
+  库读数复用 `kb.profile` 的 `list` / `listChunks`；为此把 `coverageOf`、`evidenceTextOf`、`monthSpanOf`
+  三个原本私有的函数改为包内可见（§2.2 抽公共层），**没有**新写第二套相似度、第二套时间解析、
+  第二个 SQLite 连接（§2.7）。本片自写的只有区间合并、档位比较、两道闸编排。
+⑤ 死代码检查：`compareByEducation` 的无用形参已删（第二轮 lint）；`GAP_STATES` /
+  `GAP_EVIDENCE_ORIGINS` / `GAP_SUGGESTION_KEYS` 三个常量各被类型与用例两处使用；
+  `compareRequirements` 只经 `gap-service.report()` 调用，**不外露**（§2.5：比对只能从这一个入口出）；
+  对外的只有形状（`GapRequirementView` 等）与 `GAP_SUGGESTION_KEYS`（4.4-d 的语言包对齐要用）。
+  演示脚本与其 `tmp` 副本已删（§6.4 / §7.5），主干里没有注释掉的旧实现。
+⑥ 前端三项：本片不碰渲染层，Tailwind / lucide / i18n 三项由 `check-renderer-conventions` 复证通过。
+  需要留意的是五个 suggestion key 尚无语言包文案，这是**按计划**留给 4.4-d，不是遗漏后不管。
+⑦ 提交与推送：按 §1.4 分两个提交——`feat(kb): 4.4-c 接上三态比对与反向比对…`（1a7777b，9 文件 +1444/-34）
+  与本 `docs(kb)` 提交（plan 落地记录 + spec 状态位 + 四份验收文件）。
+  `pnpm status:check` 在文档提交前那次跑的是 EXIT=1，报的不是脏区而是"本地有 2 个提交未推送"
+  （feat 提交与它前面的 plan 定稿提交都还没推）；文档提交落地的同一步 `git push origin main`，
+  推完复跑该命令应为 EXIT=0——这一条的复跑结果在收口回复里当场给出，不在此预先声称。
+⑧ 暂存区产物检查：`packages/resume-kb/tmp/`（演示脚本副本与 `kb-bench` 基准库）全部删除或被 ignore；
+  入库的四份文件是 `docs/acceptance/4.4/4.4-{03,04,06}-*.txt` 与本文件，
+  文件名对应 spec 条目 ID，符合 §7.5 的验收证据路径口径。截图零张（本片无 V 判据）。
