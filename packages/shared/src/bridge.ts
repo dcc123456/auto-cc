@@ -409,8 +409,17 @@ export type GreetRequestView = {
   jobId: string;
   /** 现成文案（用户改过的）；省略时按 `script` 生成 */
   text?: string;
-  /** 话术生成入参的最小必需集：岗位名与公司名缺一即拒，不生成空话术 */
-  script?: { jdId: string; title: string; company: string; keywords?: string[]; evidence?: { fact: string }[] };
+  /**
+   * 话术生成入参的最小必需集：岗位名与公司名缺一即拒，不生成空话术。
+   * `evidence` 每条必带 `refId`（spec 4.6-02：产物要能回指到库里哪一行），值取 `kb.profile.search` 的 `chunkId`。
+   */
+  script?: {
+    jdId: string;
+    title: string;
+    company: string;
+    keywords?: string[];
+    evidence?: { fact: string; refId: string }[];
+  };
   /** 属于哪一次工作流运行；界面单次触发时为空 */
   workflowRunId?: string | null;
   /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚发过一次」，不必真等一个频控周期） */

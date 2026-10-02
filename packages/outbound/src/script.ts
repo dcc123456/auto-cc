@@ -1,25 +1,36 @@
 /**
- * `outbound.script` 服务（spec 2.5-01 / 2.5-09 / 2.5-10 + 4.6-01 / 04 / 06）：话术生成入口。
+ * `outbound.script` 服务（spec 2.5-01 / 2.5-09 / 2.5-10 + 4.6-01 / 02 / 04 / 05 / 06 / 12）：话术生成入口。
  *
  * 它只管「内容」，不管「怎么发」——选择器、发送按钮、成功判据都在平台适配器里（plan §12.3）。
- * 四条立身之本：
+ * 五条立身之本：
  * 1. **模型只有一个入口**：本文件不出现任何端点，全部经 `llm.chat`（spec 2.5-12 的机检覆盖到这里）；
  * 2. **不可用要回落，且回落要能被看见**：模型没配或这次失败时改用本地模板，并把回落原因随结果返回，
  *    由调用方在界面播报（§12.2 采纳 browser-copilot 的立场但换判据——它抛错，我们要可见回落）；
  * 3. **要离开 app 的文本必须过黑名单**（AGENTS.md §8.4 事实锁定 + §8.5 个人数据脱敏的前置闸门）；
  * 4. **一条入口三类话术**（4.6-01）：`kind` 只切换文案与约束，装配、校验、回落决策共用一份——
- *    分型不是复制（§2.5），`greeting` 的现有入参与出参形状一字未改（4.6-11 的接口定型判据靠这个）。
+ *    分型不是复制（§2.5），`greeting` 的现有入参与出参形状一字未改（4.6-11 的接口定型判据靠这个）；
+ * 5. **说出来的每个数都要有出处**（4.6-02）：入参证据带 `refId`、产物回指 `evidenceRefs`，
+ *    模型产出里没支撑的数字一律判不合格。禁发内容分两组（凭据 / 夸大与诱导承诺），两组同一条判据入口。
  *
  * 模板与提示词全部在注册表 `./prompts.ts`（spec 4.6-09，由 `scripts/check-prompts.ts` 机检），
  * 本文件只做装配、校验与回落决策。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
+import { findUnsupportedClaims } from './claims.js';
 import { buildScriptMessages, renderScriptTemplate, SCRIPT_PROMPT_VERSION } from './prompts.js';
 
-/** 知识库证据的一条（P4 未接前允许整体为空数组，plan §12.8）。 */
+/**
+ * 知识库证据的一条（P4 已接：`kb.search` 的命中直接喂这里，plan §12.8）。
+ *
+ * `refId` 是**必填**的——spec 4.6-02 要求产物显式回指证据，而一个没有 id 的 `fact` 串
+ * 事后无法核对"这句话到底来自库里哪一行"（2.5-09 的来源可追溯在证据这一层的落点）。
+ * 值取 `kb.profile.search` 命中的 `chunkId`（entity 腿就是实体行 id），由调用方传入：
+ * 话术服务不查库，这是 plan §4.6 裁定二（`outbound` 反向依赖 `resume-kb` 是 §4.1 禁止的横向引用）。
+ */
 export const scriptEvidenceSchema = z.strictObject({
   fact: z.string().min(1),
+  refId: z.string().min(1),
 });
 
 /**
@@ -72,6 +83,25 @@ export const DEFAULT_FORBIDDEN_PATTERNS = [
   String.raw`(?:验证码|密码)[：:\s]*\d{6,}`,
 ];
 
+/**
+ * 内置的夸大/诱导承诺黑名单（spec 4.6-05），与凭据那组分列两组。
+ *
+ * 为什么分两组而不是并进 `DEFAULT_FORBIDDEN_PATTERNS`：两组的**处置语义不同**——凭据是"这条内容会伤人"，
+ * 夸大承诺是"这句话我们替用户许不了"，界面上的提示语（4.6-d）和复盘时想知道的问题不是一回事。
+ * 分开还让 `check-compliance-redlines` 之外多一处可逐条核对的清单。
+ *
+ * 每条都按"形状"写而不是按整句匹配，因为中文说法太多；代价是可能误伤正常句子，
+ * 所以每条都刻意收窄：`包过` 前面带 `(?<!含)`，否则「包括」里就有一次命中。
+ */
+export const DEFAULT_OVERCLAIM_PATTERNS = [
+  String.raw`(?<!含)包(?:过|录取|进|offer|Offer)`,
+  String.raw`保证(?:录用|入职|通过|拿到)`,
+  String.raw`一定(?:能|会)?(?:录用|入职|拿到|通过)`,
+  String.raw`(?:加|换|留|有)\s*(?:我)?\s*(?:微信|VX|vx|QQ|qq)`,
+  String.raw`付费内推|收费内推|押金|保证金|培训费|内推码`,
+  String.raw`扫码|点击链接|戳.{0,4}链接`,
+];
+
 export const outboundScriptSchema = z.strictObject({
   /**
    * 模板/prompt 版本（spec 2.5-09）：默认值取自文案旁边的 `SCRIPT_PROMPT_VERSION`，
@@ -89,6 +119,8 @@ export const outboundScriptSchema = z.strictObject({
   tone: z.enum(SCRIPT_TONES).default('formal'),
   /** 黑名单正则源串；配置里给了就整体替换内置三条，方便后续加规则而不改代码。 */
   forbiddenPatterns: z.array(z.string().min(1)).default(DEFAULT_FORBIDDEN_PATTERNS),
+  /** 夸大/诱导承诺的正则源串（spec 4.6-05），覆盖口径与上面那条一致：给了就整体替换内置那六条。 */
+  overclaimPatterns: z.array(z.string().min(1)).default(DEFAULT_OVERCLAIM_PATTERNS),
 });
 
 /** 校验后的配置形状。 */
@@ -120,6 +152,12 @@ export interface ScriptDraftView {
    * 账本侧 4.6-e 把它一起写进 `source`。**新增键而不改上面任何键**（4.6-11：P2 不二次加工）。
    */
   kind: ScriptKind;
+  /**
+   * 这句话术引用了哪些证据（spec 4.6-02）：入参 `evidence[].refId` 的去重原样回指，
+   * 顺序保持入参顺序。空数组是**有意义的读数**——"这条话术没有任何知识库依据"，
+   * 界面据此显示「未引用经历」而不是假装它个性化过（4.6-06 的「不冒充个性化」在证据层的同一口径）。
+   */
+  evidenceRefs: string[];
 }
 
 /** 一句中文话术里可作为截断点的句末标点（半角与分号一并认：模型经常混用）。 */
@@ -156,13 +194,31 @@ export class OutboundScriptService extends Service {
 
   private readonly options: OutboundScriptConfig;
   private readonly forbidden: RegExp[];
+  private readonly overclaim: RegExp[];
 
   constructor(ctx: Context, options: OutboundScriptConfig) {
     // 第二个实参是 cordis 校验后的配置（AGENTS.md §9 实测 1.3）。
     super(ctx, 'outbound.script');
     this.options = options;
     this.forbidden = options.forbiddenPatterns.map((source) => new RegExp(source));
+    this.overclaim = options.overclaimPatterns.map((source) => new RegExp(source));
   }
+
+  /**
+   * 找出文案命中的第一条禁发表述（两组黑名单一次判完）。
+   *
+   * 只留这一个判据入口：模型腿（`askModel`，命中就可见回落）与发送腿（`assertSendable`，命中就硬拦）
+   * 处置不同，但**"什么算禁发"必须一字不差**——两处各写一遍就会各判各的（§2.5）。
+   * @param text 待判文案
+   * @returns 命中组别与组内序号（从 1 起，界面与账本按它说话）；没命中为 null
+   */
+  private firstBlocker = (text: string): { group: 'credential' | 'overclaim'; rule: number } | null => {
+    const credentialHit = this.forbidden.findIndex((pattern) => pattern.test(text));
+    if (credentialHit >= 0) return { group: 'credential', rule: credentialHit + 1 };
+    const overclaimHit = this.overclaim.findIndex((pattern) => pattern.test(text));
+    if (overclaimHit >= 0) return { group: 'overclaim', rule: overclaimHit + 1 };
+    return null;
+  };
 
   /**
    * 发送前黑名单与长度校验（spec 2.5-10）。
@@ -174,13 +230,13 @@ export class OutboundScriptService extends Service {
    * @throws 命中黑名单时以 `OUTBOUND_FORBIDDEN_CONTENT` 失败（detail 带第几条规则）；超长同理
    */
   assertSendable = (text: string, origin: ScriptOrigin): void => {
-    const hitIndex = this.forbidden.findIndex((pattern) => pattern.test(text));
-    if (hitIndex >= 0) {
+    const blocker = this.firstBlocker(text);
+    if (blocker !== null) {
       throw new AppError(
         'OUTBOUND_FORBIDDEN_CONTENT',
-        `文案命中禁发内容（第 ${String(hitIndex + 1)} 条规则），已阻止发送`,
+        `文案命中禁发内容（第 ${String(blocker.rule)} 条规则），已阻止发送`,
         'outbound.script',
-        { rule: hitIndex + 1, origin },
+        { rule: blocker.rule, group: blocker.group, origin },
       );
     }
     if (text.length > this.options.maxChars) {
@@ -221,11 +277,14 @@ export class OutboundScriptService extends Service {
         { kind: request.kind },
       );
     }
+    // 引用清单在**问模型之前**就定下来：它是产物的回指，不是模型选了什么才算数（spec 4.6-02）。
+    // 去重是因为同一个实体可能既作为经历又作为成就被喂进来两次。
+    const evidenceRefs = [...new Set(request.evidence.map((item) => item.refId))];
     const attempt = await this.askModel(request);
     if (attempt.ok) {
       this.assertSendable(attempt.text, 'model');
       this.ctx.logger.info(
-        `话术由模型产出：${request.kind} · ${String(attempt.text.length)} 字 · 版本 ${this.options.scriptVersion}`,
+        `话术由模型产出：${request.kind} · ${String(attempt.text.length)} 字 · 版本 ${this.options.scriptVersion} · 引用 ${String(evidenceRefs.length)} 条`,
       );
       return {
         text: attempt.text,
@@ -233,6 +292,7 @@ export class OutboundScriptService extends Service {
         scriptVersion: this.options.scriptVersion,
         jdId: request.jdId,
         kind: request.kind,
+        evidenceRefs,
       };
     }
     // 回落不是失败：流程继续，但原因必须跟着结果走上前，界面才知道该说什么。
@@ -246,14 +306,16 @@ export class OutboundScriptService extends Service {
       scriptVersion: this.options.scriptVersion,
       jdId: request.jdId,
       kind: request.kind,
+      evidenceRefs,
     };
   };
 
   /**
    * 问一次模型，把各种失败收敛成"能不能用"，不在这里决定回落策略。
    *
-   * 三道判据的顺序是有理由的：**先查完整文本的禁发内容**（凭据出现在任何一句里都说明这条回答不可信，
-   * 也免得"截断刚好把手机号截掉了"这种蒙混过关），再按句末截断，最后才要求截完仍点明岗位/公司。
+   * 四道判据的顺序是有理由的：① **先查完整文本的禁发内容**（凭据或夸大承诺出现在任何一句里都说明这条回答
+   * 不可信，也免得"截断刚好把手机号截掉了"这种蒙混过关）；② 再按句末截断；③ 截完才要求点明岗位/公司；
+   * ④ 最后查**无依据的数字**——放在截断之后是因为要判的是"实际发出去那一条"有没有编。
    * @param request 已校验的生成入参
    * @returns 成功时带正文；失败时带一句可直接播报的原因（不带上游堆栈）
    */
@@ -273,8 +335,12 @@ export class OutboundScriptService extends Service {
       if (cause instanceof AppError && cause.code === 'INVALID_ARGUMENT') throw cause;
       return { ok: false, reason: message };
     }
-    if (this.forbidden.some((pattern) => pattern.test(rawText))) {
-      return { ok: false, reason: '模型产出含禁发内容' };
+    const blocker = this.firstBlocker(rawText);
+    if (blocker !== null) {
+      return {
+        ok: false,
+        reason: blocker.group === 'credential' ? '模型产出含禁发内容' : '模型产出含夸大或诱导承诺的表述',
+      };
     }
     const text = truncateToSentence(rawText, this.options.maxChars);
     if (text === null) {
@@ -285,15 +351,28 @@ export class OutboundScriptService extends Service {
     if (!text.includes(request.title) && !text.includes(request.company)) {
       return { ok: false, reason: '模型产出缺少岗位名/公司名' };
     }
+    // 无依据的数字（spec 4.6-02）：只认这次真喂进去的事实——证据正文、岗位名、公司名、关键词、对方原话。
+    // JD 正文里的数字不在支撑面里（入参只有那四个字段），要让它进话术得先经 4.4 拆解或 4.5 入库，
+    // 而不是在这里放宽成"模型说来自 JD 就算数"——那等于把 §8.4 的事实锁定交还给模型自查。
+    const unsupported = findUnsupportedClaims(text, [
+      ...request.evidence.map((item) => item.fact),
+      request.title,
+      request.company,
+      ...request.keywords,
+      request.recruiterMessage ?? '',
+    ]);
+    if (unsupported.length > 0) {
+      return { ok: false, reason: `模型产出含没有证据支撑的数字：${unsupported.join('、')}` };
+    }
     return { ok: true, text };
   };
 
   [Service.init](): void {
     this.ctx.logger.info(
       `话术生成就绪：版本 ${this.options.scriptVersion} · ${SCRIPT_KINDS.join('/')} 三类 · ` +
-        `上限 ${String(this.options.maxChars)} 字 · 语气 ${this.options.tone} · 模型 ${
-          asApp(this.ctx)['llm.chat'].status().available ? '可用' : '不可用（走模板回落）'
-        }`,
+        `上限 ${String(this.options.maxChars)} 字 · 语气 ${this.options.tone} · ` +
+        `禁发规则 凭据 ${String(this.forbidden.length)} 条/夸大诱导 ${String(this.overclaim.length)} 条 · ` +
+        `模型 ${asApp(this.ctx)['llm.chat'].status().available ? '可用' : '不可用（走模板回落）'}`,
     );
   }
 }

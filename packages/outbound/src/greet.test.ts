@@ -31,7 +31,12 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { GREET_ACTION, GREET_NODE_KIND, OutboundGreetService, type GreetConfig } from './greet.js';
-import { DEFAULT_FORBIDDEN_PATTERNS, OutboundScriptService, type OutboundScriptConfig } from './script.js';
+import {
+  DEFAULT_FORBIDDEN_PATTERNS,
+  DEFAULT_OVERCLAIM_PATTERNS,
+  OutboundScriptService,
+  type OutboundScriptConfig,
+} from './script.js';
 import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
@@ -71,6 +76,7 @@ const SCRIPT_BASE: OutboundScriptConfig = {
   maxChars: 200,
   tone: 'formal',
   forbiddenPatterns: DEFAULT_FORBIDDEN_PATTERNS,
+  overclaimPatterns: DEFAULT_OVERCLAIM_PATTERNS,
 };
 
 /** 一次渠道调用的读数。 */

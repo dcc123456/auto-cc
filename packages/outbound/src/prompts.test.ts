@@ -53,12 +53,15 @@ describe('话术库的模板回落（spec 4.6-06）', () => {
 
   it('有证据时引用第一条、证据里的换行压平且不整段照抄（4.6-06 的「不冒充个性化」边界）', () => {
     const withEvidence = renderScriptTemplate(
-      request({ evidence: [{ fact: '主导过订单服务重构\nP99 延迟下降 40%' }] }),
+      request({ evidence: [{ fact: '主导过订单服务重构\nP99 延迟下降 40%', refId: 'chunk-77' }] }),
       'formal',
     );
     expect(withEvidence).toContain('订单服务重构 P99 延迟下降 40%');
     expect(withEvidence).not.toContain('\n');
-    const tooLong = renderScriptTemplate(request({ evidence: [{ fact: '经'.repeat(60) }] }), 'formal');
+    const tooLong = renderScriptTemplate(
+      request({ evidence: [{ fact: '经'.repeat(60), refId: 'chunk-78' }] }),
+      'formal',
+    );
     expect(tooLong).toContain('…');
     expect(tooLong.length).toBeLessThan(60 + 80);
   });
@@ -98,7 +101,11 @@ describe('话术提示词的组装（spec 4.6-01 的结构断言）', () => {
     expect(bare).not.toContain('对方最后一条消息');
     const full =
       buildScriptMessages(
-        request({ kind: 'follow-up', evidence: [{ fact: '做过大促稳定性治理' }], recruiterMessage: '下周再说' }),
+        request({
+          kind: 'follow-up',
+          evidence: [{ fact: '做过大促稳定性治理', refId: 'chunk-79' }],
+          recruiterMessage: '下周再说',
+        }),
         200,
         'formal',
       )[1]?.content ?? '';

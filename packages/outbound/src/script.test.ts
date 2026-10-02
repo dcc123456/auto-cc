@@ -1,17 +1,20 @@
 /**
- * 话术生成的骨架测试（spec 2.5-01 / 09 / 10 + 4.6-01 / 04 / 06）。
+ * 话术生成的骨架测试（spec 2.5-01 / 09 / 10 + 4.6-01 / 02 / 04 / 05 / 06 / 12）。
  *
  * 三条主线：模型可用时用模型的、不可用时**可见地**回落模板、任何一路产出的文本都要过黑名单。
  * 4.6-b 起加两条：三类话术走同一个入口（分型只换文案与入参校验）、超长先按句末截断再决定回落。
+ * 4.6-c 起再加三条：产物显式回指引用的证据（`evidenceRefs`）、模型编出来的数被判不合格、
+ * 夸大与诱导承诺和凭据分两组但走同一条判据（发送腿硬拦、模型腿可见回落）。
  * 网络一律用 `globalThis.fetch` 存根（模型端点与 fixture 都不真连，AGENTS.md §7.2），
  * 并且每次都断言请求次数——"回落"只有在确定没发网络时才是可测的（plan §12.6.1）。
  */
-import { asApp, Context } from '@auto-cc/core';
+import { AppError, asApp, Context } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LlmChatService, type LlmConfig } from '@auto-cc/plugin-llm';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FORBIDDEN_PATTERNS,
+  DEFAULT_OVERCLAIM_PATTERNS,
   outboundScriptSchema,
   OutboundScriptService,
   truncateToSentence,
@@ -39,6 +42,7 @@ const SCRIPT_BASE: OutboundScriptConfig = {
   maxChars: 200,
   tone: 'formal',
   forbiddenPatterns: DEFAULT_FORBIDDEN_PATTERNS,
+  overclaimPatterns: DEFAULT_OVERCLAIM_PATTERNS,
 };
 
 const JD = { jdId: 'job-1001', title: '前端工程师', company: '示例科技', keywords: ['React', 'TypeScript'] };
@@ -72,6 +76,25 @@ const modelReply = (content: string) => ({
   status: 200,
   body: { model: 'test-model', choices: [{ message: { content } }] },
 });
+
+/**
+ * 跑一次同步调用，把拦下来的那条读成可断言的四元组。
+ *
+ * 为什么不用 `toThrow*`  matcher：这几条验收要核对的是 `details` 里的**分组与序号**
+ * （4.6-05 的两组、4.6-12 的各条规则），那是结构化契约而不是一句报错文本。
+ * @param attempt 会（或不会）抛出的那次调用
+ * @returns 没拦时 null；拦下时带错误码、规则序号、分组与内容来源
+ */
+const blockReading = (attempt: () => unknown): { code: string; rule: number; group: string; origin: string } | null => {
+  try {
+    attempt();
+    return null;
+  } catch (cause) {
+    if (!(cause instanceof AppError)) throw cause;
+    const details = cause.details as { rule?: number; group?: string; origin?: string };
+    return { code: cause.code, rule: details.rule ?? -1, group: details.group ?? '', origin: details.origin ?? '' };
+  }
+};
 
 describe('outbound.script 的回落与黑名单（spec 2.5-01 / 09 / 10）', () => {
   it('模型未配置：回落模板、带上原因，且一次网络都不发（2.5-01）', async () => {
@@ -330,5 +353,204 @@ describe('outbound.script 的长度与语气约束（spec 4.6-04）', () => {
 
   it('版本默认取自注册表常量：改文案的那一次就会看到它（4.6-09 的可版本化落点）', () => {
     expect(outboundScriptSchema.parse({}).scriptVersion).toBe(SCRIPT_PROMPT_VERSION);
+  });
+});
+
+describe('outbound.script 的证据绑定（spec 4.6-02）', () => {
+  /** 两条不同证据 + 同一条的第二路命中（同一个 refId 出现两次），用来验去重与保序。 */
+  const EVIDENCED = {
+    ...JD,
+    evidence: [
+      { fact: '主导过订单服务重构', refId: 'chunk-11' },
+      { fact: '覆盖 30 万用户', refId: 'chunk-22' },
+      { fact: '同一实体的第二条分片', refId: 'chunk-11' },
+    ],
+  };
+
+  it('产物回指证据 id：去重且保持入参顺序，与模型是否引用无关（4.6-02 的回指面）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      const draft = await script.generate(EVIDENCED);
+      expect(draft.evidenceRefs).toEqual(['chunk-11', 'chunk-22']);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('模型只引用其中一条时，回指清单仍是喂进去的全部证据（回指记录的是这次依据，不是模型的取舍）', async () => {
+    const fixture = stubFetch(modelReply('您好，示例科技的前端工程师岗位，我主导过订单服务重构。'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate(EVIDENCED);
+      expect(draft.origin).toBe('model');
+      expect(draft.evidenceRefs).toEqual(['chunk-11', 'chunk-22']);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('没有任何证据时回指是空数组：这是"没个性化过"的读数，不是缺字段（4.6-02 / 06 同一口径）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      expect((await script.generate(JD)).evidenceRefs).toEqual([]);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('证据缺 refId：以 INVALID_ARGUMENT 失败且不碰模型——只带正文的证据事后无从核对出处', async () => {
+    const fixture = stubFetch(modelReply('不该被用到'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      await expect(script.generate({ ...JD, evidence: [{ fact: '主导过订单服务重构' }] })).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+      });
+      expect(fixture.bodies).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('模型写出没有出处的数字：判不合格并可见回落，原因里带着那个数（4.6-02 的拦截面）', async () => {
+    const fixture = stubFetch(modelReply('您好，示例科技的前端工程师岗位，我把延迟下降了 40%。'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate({ ...JD, evidence: [{ fact: '主导过订单服务重构', refId: 'chunk-11' }] });
+      expect(draft.origin).toBe('template');
+      expect(draft.fallbackReason).toContain('没有证据支撑的数字');
+      expect(draft.fallbackReason).toContain('40');
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('同一个数在证据里有过出处就放过：拦的是编造，不是引用（4.6-02 的反向验证）', async () => {
+    const fixture = stubFetch(modelReply('您好，示例科技的前端工程师岗位，我把延迟下降了 40%。'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate({
+        ...JD,
+        evidence: [{ fact: '主导订单服务重构，延迟下降 40%', refId: 'chunk-11' }],
+      });
+      expect(draft.origin).toBe('model');
+      expect(draft.fallbackReason).toBeUndefined();
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('对方原话里的数字算出处：追问引用对方说过的排期不是编造（4.6-01 × 02 的交界）', async () => {
+    const fixture = stubFetch(modelReply('您好，示例科技的前端工程师岗位，那我们就 3 天后见面。'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate({ ...JD, kind: 'follow-up', recruiterMessage: '我们 3 天后面试' });
+      expect(draft.origin).toBe('model');
+    } finally {
+      fixture.restore();
+    }
+  });
+});
+
+describe('outbound.script 的夸大与诱导承诺拦截（spec 4.6-05）', () => {
+  it('模型产出承诺"包过"：不采用，回落原因说的是夸大承诺而不是凭据（分组各说各的话）', async () => {
+    const fixture = stubFetch(modelReply('您好，示例科技的前端工程师岗位，我这边包过。'));
+    try {
+      const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
+      const draft = await script.generate(JD);
+      expect(draft.origin).toBe('template');
+      expect(draft.fallbackReason).toContain('夸大或诱导承诺');
+      expect(draft.text).not.toContain('包过');
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('发送腿对四类夸大/诱导说法逐条硬拦，并带上组别与规则序号（4.6-05 的可核对清单）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      const cases: Array<[string, number]> = [
+        ['这个岗位包过，放心投。', 1],
+        ['我们保证录用。', 2],
+        ['一定能拿到 offer。', 3],
+        ['方便的话加我微信细聊。', 4],
+        ['我有付费内推渠道。', 5],
+        ['请点击链接查看我的简历。', 6],
+      ];
+      for (const [text, rule] of cases) {
+        expect(blockReading(() => script.assertSendable(text, 'manual'))).toEqual({
+          code: 'OUTBOUND_FORBIDDEN_CONTENT',
+          rule,
+          group: 'overclaim',
+          origin: 'manual',
+        });
+      }
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('「包含过」这类正常表述不误伤：黑名单收窄到承诺形状（机检之外的人工边界）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      expect(blockReading(() => script.assertSendable('我的职责包含过支付与结算两块。', 'model'))).toBeNull();
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('overclaimPatterns 有消费点：配置给了就整体替换内置六条（§12.2「配置改了行为不变=缺陷」）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const custom = await ready({}, { overclaimPatterns: [String.raw`内定名单`] });
+      expect(blockReading(() => custom.assertSendable('这个岗位包过。', 'manual'))).toBeNull();
+      expect(blockReading(() => custom.assertSendable('你在内定名单上。', 'manual'))).toMatchObject({
+        group: 'overclaim',
+        rule: 1,
+      });
+    } finally {
+      fixture.restore();
+    }
+  });
+});
+
+describe('outbound.script 的凭据黑名单分组（spec 4.6-12）', () => {
+  it('三条凭据规则各拦各的形状，组别都是 credential、序号与内置清单对得上', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      const cases: Array<[string, number]> = [
+        ['我的手机 13800138000，请直接联系我。', 1],
+        // 合成串：只保证形状（17 位数字 + X），不是真实身份证，测试不落个人信息（§8.5）。
+        ['证件号 12010100000000000X 已上传。', 2],
+        ['我的验证码：123456，麻烦帮忙看下。', 3],
+      ];
+      for (const [text, rule] of cases) {
+        expect(blockReading(() => script.assertSendable(text, 'manual'))).toEqual({
+          code: 'OUTBOUND_FORBIDDEN_CONTENT',
+          rule,
+          group: 'credential',
+          origin: 'manual',
+        });
+      }
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('凭据优先于夸大：两组同一条判据入口，先判会伤人的那一组', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      expect(blockReading(() => script.assertSendable('包过，我的验证码：123456。', 'manual'))).toMatchObject({
+        group: 'credential',
+        rule: 3,
+      });
+    } finally {
+      fixture.restore();
+    }
   });
 });
