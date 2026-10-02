@@ -24,8 +24,8 @@
 | 5.1-03 | 副作用枚举仅三值（`read` / `localWrite` / `outbound`），无第四类且无 `unknown`                           | C    | 类型检查 + 断言枚举成员数                        | [x]  |
 | 5.1-04 | 每个工具入参由 zod schema 校验；非法入参被拒绝且**未执行任何动作**                                       | U    | 传错参调用 → 断言副作用计数为 0                  | [ ]  |
 | 5.1-05 | 调用未注册 id 返回明确错误（不猜测、不接受近似名匹配）                                                   | U    | 调 `boss.greets` → 断言「未注册工具」            | [ ]  |
-| 5.1-06 | P2 的浏览器能力（打开/导航/定位/读取/点击/输入/打招呼/投递）全部以工具形式可见                           | C+U  | 列举清单与 2.8-08 对齐                           | [ ]  |
-| 5.1-07 | P4 的内容能力（建档/检索/生成简历/生成话术）全部以工具形式可见                                           | C+U  | 列举清单与 P4 service 对齐                       | [ ]  |
+| 5.1-06 | P2 的浏览器能力（打开/导航/定位/读取/点击/输入/打招呼/投递）全部以工具形式可见                           | C+U  | 列举清单与 2.8-08 对齐                           | [x]  |
+| 5.1-07 | P4 的内容能力（建档/检索/生成简历/生成话术）全部以工具形式可见                                           | C+U  | 列举清单与 P4 service 对齐                       | [x]  |
 | 5.1-08 | `agent.*` 模块不直接 import `browser.*` / `platform.*` / `jd.*` / `resume.*` / `kb.*`                    | C    | eslint 依赖边界规则 0 命中（规则本条新增并生效） | [x]  |
 | 5.1-09 | 依赖边界是**机检强制**而非约定：故意写一条越界 import 后 `pnpm lint` 失败                                | C    | 反向验证：临时注入违规 import → lint 报错 → 移除 | [x]  |
 | 5.1-10 | 注册表可声明"暂不开放"的工具（存在但对 agent 不可见），且该状态可被单测断言                              | U    | 标记一个工具 disabled → agent 侧列举不到         | [ ]  |
@@ -155,6 +155,69 @@
   本节文档随后单独提交（§1.4 功能与文档分开）；
   ⑧ 暂存区——只有 1 个新脚本 + `eslint.config.js` + `package.json` 两处配置，无图片、无探针产物，
   实跑日志（`tmp/51b-*.txt`、`tmp/51b-test.log`）留在被忽略的 `tmp/`。
+
+### 5.1-c 落地记录（建档与生成话术登记成工具，装配顺序从此有机检，2026-10-02）
+
+- **这一片把 5.1-06 / 5.1-07 的清单补齐，并且只补两条腿**：`resume.parse.fromFile`（建档）与
+  `outbound.script.generate`（生成话术）各以 `agentTool({…})` 登记进 `agent.tools`，**复用两只服务已有的方法口**
+  （`fromFile(filePath)` / `generate(params)`），零新 service、零新 IPC 口、零新依赖——两包各自 `registerAgentTools`
+  的写法与另外八包同构，入参 schema 直接复用既有导出的 `resumeParseRequestSchema` / `scriptRequestSchema`
+  （AGENTS.md §2.1/§2.3：按能力搜过，没有第二份校验、没有平行模块）。语言包各补一键（`parseFromFile` /
+  `scriptGenerate`，zh-CN + en 同时补），注册表清单从 14 只变 16 只。
+- **`outbound.script.generate` 的 `effect` 定成 `local-write` 而不是 `outbound`**（与 plan §5.1-c 那一行同口径）：
+  它会出网打模型服务，但 `outbound` 在本仓库的判定是"向求职者之外的第三方发出可见内容"，那件事属于
+  `outbound.greet.perform` / `outbound.deliver.perform`；话术生成本身不发送、不占外发额度闸门。
+  但 `requiresConfirmation: true` 保留——话术会被人一键复制进真实对话，与 `resume.generate.run` 同一口径。
+  活体核对：`effect === 'outbound'` 的工具全部 `requiresConfirmation: true`（`outboundWithoutConfirm: []`）。
+- **清单对齐做成机检**（`scripts/check-tool-contract.ts` 的第 5 条判据，从 5.1-b 的 14 只扩到 12 件能力）：
+  P2 八件 + P4 四件的 id 写死在检查里，逐条要求"登记现场读得到"。spec 字面与实现的两处命名差异在这里显式对上，
+  不是偷改判据：「打开」= `sessions.open`（打开的是内核会话视图，`browser.page.*` 里没有第二只打开口）、
+  「读取」= `browser.page.snapshot`、「检索」= `kb.profile.search`（`kb.profile.list` 也登记着，是它的邻居不是替身）。
+  U 的半边在各包自己的登记用例里：`script.test.ts` +3、`parse-service.test.ts` +4、`greet.test.ts` 两条按 id 收窄
+  （注册表是同包共享的，整张清单的长度属于注册表自己的用例）。
+- **活体实测抓到一片真缺陷，四道门禁全绿时它不存在**：`pnpm typecheck` / `lint` / `format:check` / `test`
+  （21 包 / 95 文件 / 1372 例）全过之后，去真 app 里读 `agent.tools.list()` 得到的是 **15 只**、
+  `missing: ["outbound.script.generate"]`。主进程日志把位置指得很死：
+  `话术生成就绪：… · agent 工具登记 0 个（注册表未挂载）`，而 `工具注册表就绪：当前已登记 0 个工具`。
+  根因是 `cordis.yml` 的**清单顺序**：kernel 按列表顺序逐个 await 挂载，`outbound-script` 那行原本排在 `agent`
+  之前（它 2.5 落地时不登记任何东西，排前面无害），本片给它加了登记动作，于是软问 `agent.tools` 拿到 undefined、
+  返回 0，界面上永久少一只工具而全局不报错。**单测结构上看不见这一条**——用例都是先把注册表替身挂在被测服务前面的。
+  修法是把 `outbound-script` 整块挪到 `agent` 之后（顺序理由写进 `cordis.yml` 的 `agent` 注释），
+  **没有**动 `registerAgentTools` 的软问契约，也没有加"注册表没装就先攒着"的第二条路径（那会让八包共用的
+  替身断言失效，且违反 §2.5「不允许两套都能用」）。
+- **这条顺序从此是机检**（同一脚本的第 6 条判据）：登记现场所在的服务类 → `packages/main/src/registry.ts`
+  的「插件 id → 类」表 → `cordis.yml` 里的位置，必须排在 `agent` 之后。反向验证照 5.1-b 的打法实跑：
+  把 `outbound-script` 搬回原位 → `✖ … packages/outbound/src/script.ts:379 的登记方 outbound-script 在 cordis.yml 里
+排在 agent 之前（第 13 项 vs 第 14 项）：挂载时注册表还不存在，这只工具会静默不进清单`；还原后
+  `✔ …16 个登记方都排在注册表 agent 之后`。判据本身也带反向断言（清单读不出 `- id:`、登记方对不上类名、
+  一条都没比对成功，三种情况各自失败），免得 helper 改个形状就静默变成永真。
+- **修完的活体读数**（CDP 10222 → 页面 5173，`window.autoCC.agent['tools.list']()`）：
+  `count: 16`、`effects: ["local-write","outbound","read"]`、`missing: []`、`outboundWithoutConfirm: []`，
+  两条新登记的日志变成 `agent 工具登记 1 个`。注册表自己那行就绪日志仍然显示 0 个——它按设计就是第一批挂载、
+  此刻还没有人来登记，**能依赖的数只有 `agent.tools.list()`**，这条读数连同三行启动日志一起归档在
+  `docs/acceptance/5.1/5.1-06-registry-live-readout.json`。
+- **两只新工具是真跑通的，不是只出现在清单里**：在对话里 `/tool outbound.script.generate {…}` →
+  卡片「已完成 / 2 毫秒」，产出 `origin: "template"` 的一句话术并带 `fallbackReason`（模型未配置，符合 2.5 的回落契约）；
+  `/tool resume.parse.fromFile {"filePath":"…/tmp/51c-resume-sample.md"}` → 「已完成 / 15 毫秒」，
+  回执 `status: "imported"`、`docId: resume-ff521764ee68`、`format: markdown`、`textLength: 702`。
+  双语标题在同一屏：zh「按这个岗位生成一句话术」「把这份简历文件导入知识库」（本地写入 / 需人工批准），
+  en "Draft one chat line for this job" / "Import this resume file into the knowledge base"（local write / requires approval），
+  见 `5.1-07-p4-new-tools-zh.png` 与 `5.1-07-p4-new-tools-en.png`（sha1 `cc774963…` / `fe62a088…`，与 5.1-a 那两张互不相同）。
+- **顺手记下两处本片没修的缺口**（都写清楚，别让"验收全过"被读成"这一带干净"）：
+  ① `effect` ↔ `requiresConfirmation` 的一致性检查仍推到 5.3，理由与 5.1-a/5.1-b 完全相同（判定者还不存在）；
+  ② 卡片标题走注册表了，但助手那条**本地确定性回复**（`已收到：「/tool …」。这是对话骨架的本地确定性回复——`）
+  是主进程 `session.ts` 里的固定文案，切到 en 时它仍是中文——它不是渲染层裸文案，§5.5 的机检照不到它。
+  归 5.2（接真模型循环时这段模板本来就要重写）处理，本片不动它，截图里可以看见。
+- **§7.4 自检逐条**：① 四道门禁实跑 exit 0（`pnpm typecheck` / `pnpm lint`（8 项机检，含新第 6 条）/
+  `pnpm format:check` / `pnpm test` 21 包 95 文件 1372 例 0 失败）；② V 半边两条截图按 5.1-07 归档，
+  5.1-06 以机检 + 活体清单读数（json 归档）为准，P2 八件的卡片可视证据在 2.8-08 已归档，不重复拍；
+  ③ 状态位：5.1-06 / 07 → `[x]`，5.1-04 / 05 / 10 / 11 仍是 `[ ]`（5.1-d）；④ 复用检查——两只工具都调既有方法口、
+  复用既有 schema，第 6 条判据复用同一份 `declarationsOf()` 扫描结果，没有新扫描器；⑤ 死代码——无新增未调用导出，
+  被替换的旧顺序（`outbound-script` 在前）已整块搬走，`cordis.yml` 里不留注释掉的备用行；⑥ 前端三项——渲染层只多读
+  一个 `titleKey`（5.1-a 已有），本片未新增 JSX 文案，语言包两键双语齐补且被机检逼着；⑦ 提交——代码与文档分开
+  （代码 `feat(kb)`/`feat(outbound)` 一片、文档 `docs(resume-kb)` 一片），均已推送 `origin/main`；
+  ⑧ 暂存区——只有源码、`cordis.yml`、检查脚本、两份语言包、两份文档与 3 份证据文件，
+  探针表达式、实跑日志、导入用的 `51c-resume-sample.md` 全在被忽略的 `tmp/`。
 
 ## 5.2 Agent 循环：规划 → 执行 → 观察 → 续推
 

@@ -1,0 +1,35 @@
+{
+  "spec": "5.1-06 / 5.1-07 活体注册表读数（真 app，CDP 10222 → 页面 5173，`window.autoCC.agent['tools.list']()`）",
+  "capturedAt": "2026-10-02T13:23:12Z",
+  "count": 16,
+  "ids": [
+    "outbound.script.generate",
+    "sessions.open",
+    "browser.page.navigate",
+    "browser.page.snapshot",
+    "browser.locate.find",
+    "browser.act.click",
+    "browser.act.type",
+    "outbound.greet.perform",
+    "outbound.deliver.perform",
+    "jd.capture.run",
+    "resume.parse.fromFile",
+    "kb.profile.list",
+    "kb.profile.search",
+    "kb.profile.syncVectors",
+    "kb.gap.report",
+    "resume.generate.run"
+  ],
+  "effects": ["local-write", "outbound", "read"],
+  "missing": [],
+  "outboundWithoutConfirm": [],
+  "newTwo": [
+    "outbound.script.generate | agent.tool.labels.scriptGenerate | local-write | confirm=true",
+    "resume.parse.fromFile | agent.tool.labels.parseFromFile | local-write | confirm=true"
+  ],
+  "bootLog": [
+    "agent-tools-service: 工具注册表就绪：当前已登记 0 个工具（清单见 agent.tools.list）",
+    "outbound-script-service: 话术生成就绪：… · agent 工具登记 1 个",
+    "resume-parse-service: [resume-parse] resume_imports 表就绪，迁移号段 10，单次上限 5242880 字节 · agent 工具登记 1 个"
+  ]
+}
