@@ -69,6 +69,7 @@ const LLM_BASE: LlmConfig = {
 const SCRIPT_BASE: OutboundScriptConfig = {
   scriptVersion: 'v1',
   maxChars: 200,
+  tone: 'formal',
   forbiddenPatterns: DEFAULT_FORBIDDEN_PATTERNS,
 };
 
