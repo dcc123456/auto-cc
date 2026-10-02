@@ -189,12 +189,18 @@ export interface GenerationRewriteView {
    * 这段原文在知识库里的**出处 id**（4.5-06 的收口：被改写的原文本来就是库里那份记录）。
    * 与 `evidence` 那一份是两类依据：那份是"这条目命中了 JD 的哪条要求"，这份是"这段原文出自哪条实体"。
    *
-   * 为空只有两种情况，界面必须把两种分开播报（都不许伪装成"有依据"）：
-   * ① 库里还没同步过（实体表由 `kb.profile.sync` 从工作副本派生，一次都没跑就没有 id 可给）；
-   * ② 该区块按 4.2 裁定二**不产实体行**（`summary` / `education`）——那时这段散文在库里的形态是
-   *    区块切片而不是实体，切片 id 属于 `kb.profile` 的派生索引，本服务不越包去读那张表（§2.7）。
+   * 判据是**载荷逐字相等**（`sourceEvidenceIdsOf`）：实体草案是 `deriveEntities(基线)` 现算的，
+   * 所以这里与"实体表同步过没有"无关，界面不许把它说成"你还没同步"。
+   * 为空只有两种情况，靠下面的 `entryModeled` 分开，播报也各是一句（都不许伪装成"有依据"）：
+   * ① `entryModeled` 为 false：该条目所属区块按 4.2 裁定二**不产实体行**（`summary` / `education` /
+   *    `campus`）——那段散文在库里的形态是区块级切片，切片 id 属于 `kb.profile` 的派生索引，
+   *    本服务不越包去读那张表（§2.7），所以这里给不出 id 也不是漏判；
+   * ② `entryModeled` 为 true 但仍然为空：这个条目产了实体行，只是**这一个字段的原文**不是任何一条
+   *    载荷的值（例如条目里的短字段没被单独建模）。这时界面要说"回查不到逐字出处，这句要人工确认"。
    */
   readonly sourceEvidenceIds: readonly string[];
+  /** 该条目在库里是否派生出了实体行（区分上面两种空态用的那一位，不是"有没有出处"本身）。 */
+  readonly entryModeled: boolean;
 }
 
 /** 事实校验的读数（违规明细只到 `describeViolations()` 那种「路径 + 判据 + 长度」的形状）。 */
@@ -898,6 +904,8 @@ function rewriteRows(
   const rewriteAt = new Map(
     rewrites.map((rewrite) => [positionKey(rewrite.sectionId, rewrite.entryId, rewrite.fieldKey), rewrite]),
   );
+  // 一位集合而不是每条再扫一遍草案：界面分两种空态要用的就是"这个条目派生过实体行没有"。
+  const modeledEntryIds = new Set(drafts.map((draft) => draft.entryId));
   const rows: GenerationRewriteView[] = [];
   for (const section of document.sections) {
     for (const entry of section.entries) {
@@ -913,6 +921,7 @@ function rewriteRows(
           originalText: field.value,
           rewrittenText: rewrite.rewrittenText,
           sourceEvidenceIds: sourceEvidenceIdsOf(entry.id, field.value, drafts),
+          entryModeled: modeledEntryIds.has(entry.id),
         });
       }
     }

@@ -958,10 +958,14 @@ export interface GenerationRewriteRowView {
   readonly originalText: string;
   readonly rewrittenText: string;
   /**
-   * 这段原文在知识库里的出处实体 id（4.5-06）。
-   * 为空只有两种情况且必须分开播报：① 库里还没同步过；② 该区块按 4.2 裁定二不产实体行。
+   * 这段原文在知识库里的出处实体 id（4.5-06）。为空只有两种情况，靠下面那一位分开，各给一句播报。
    */
   readonly sourceEvidenceIds: readonly string[];
+  /**
+   * 该条目在库里是否派生出了实体行（`false` = 所属区块按 4.2 裁定二不产实体行）。
+   * 界面用它把两种空态分开：不产实体行是**结构使然**，产了却回查不到逐字载荷是**要人工确认**。
+   */
+  readonly entryModeled: boolean;
 }
 
 /** 一条证据引用（镜像 `GenerationEvidenceView`）：正文另问 `kb.profile.evidenceBody`（§8.5）。 */

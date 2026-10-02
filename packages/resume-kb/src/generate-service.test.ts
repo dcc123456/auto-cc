@@ -327,6 +327,12 @@ describe('resume.generate 的产物面与 Schema（spec 4.5-01 / 12）', () => {
     // 出处 id 只能指向这份文档派生出来的实体（4.5-06 的收口：认领方式是载荷逐字相等，不是猜）
     const derivedEntityIds = new Set(deriveEntities(boot.baseline).map((draft) => draft.entityId));
     expect(rewriteRow.sourceEvidenceIds.every((id) => derivedEntityIds.has(id))).toBe(true);
+    // 两种空态分得开（4.5-06 的播报半边）：`entryModeled` 就是那一位——派生过实体行却给不出 id，
+    // 才是"逐字载荷回查不到、这句要人工确认"；没派生过实体行是区块形态使然，不是漏判。
+    expect(rewriteRow.entryModeled).toBe(
+      deriveEntities(boot.baseline).some((draft) => draft.entryId === rewriteRow.entryId),
+    );
+    expect(view.rewrites.every((row) => row.sourceEvidenceIds.length === 0 || row.entryModeled)).toBe(true);
     expect(view.receipt.model).toBe('fake-generate-model');
     expect(view.receipt.promptVersion).toBe(GENERATE_PROMPT_VERSION);
     expect(fake?.calls).toHaveLength(1);
