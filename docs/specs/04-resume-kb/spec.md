@@ -1173,10 +1173,10 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 | 4.6-05 | 不含违法/夸大/诱导承诺类表达（黑名单确定性拦截，不靠 LLM 自律）                       | U+C  | 构造诱导断言被拦                              | [x]  |
 | 4.6-06 | LLM 不可用时回落模板话术并明确标识「模板」，不冒充个性化                              | U+V  | 断网截图 + 标识可见                           | [x]  |
 | 4.6-07 | 话术候选可多条并列展示，用户选一条后进入发送流程（2.5-02 前）                         | V    | 截图候选列表与选中态                          | [x]  |
-| 4.6-08 | 生成动作计入额度（若配置为付费项），必经 `entitlement.gate`                           | C    | 断言 ledger 与拒绝路径                        | [ ]  |
+| 4.6-08 | 生成动作计入额度（若配置为付费项），必经 `entitlement.gate`                           | C    | 断言 ledger 与拒绝路径                        | [!]  |
 | 4.6-09 | 话术库/prompt 集中注册、可版本化，业务代码内无硬编码 prompt 字符串                    | C    | 扫描规则：prompt 字面量只允许出现在注册表目录 | [x]  |
-| 4.6-10 | 复用核对：话术生成不重复实现 JD 解析、检索、事实校验（全部调用 4.4/4.5 已有 service） | C    | 依赖图核对，无平行实现                        | [ ]  |
-| 4.6-11 | 与 P2 的接口定型：`script.greeting` 输出即为 2.5-01 所需结构，P2 不再二次加工         | U+C  | 契约单测（mock 消费方）                       | [ ]  |
+| 4.6-10 | 复用核对：话术生成不重复实现 JD 解析、检索、事实校验（全部调用 4.4/4.5 已有 service） | C    | 依赖图核对，无平行实现                        | [x]  |
+| 4.6-11 | 与 P2 的接口定型：`script.greeting` 输出即为 2.5-01 所需结构，P2 不再二次加工         | U+C  | 契约单测（mock 消费方）                       | [x]  |
 | 4.6-12 | 不发送任何凭据/验证码类内容（对齐 2.5-10）                                            | C    | 黑名单字段校验断言                            | [x]  |
 
 ### 4.6-a 落地记录（提示词集中注册 + 落点机检，2026-10-02）
@@ -1415,6 +1415,87 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
   **这四张的 sha1 两两不同**——第一版归档时 `4.6-06` 与 `4.6-07-1` 是同一张像素（同一次捕获被按两个条目 ID
   各存了一份），复跑 `sha1sum` 才发现，于是把未选中态与选中态分成两次真实捕获重拍重归档。
   两个条目共用一张图就是其中一条在冒充另一条的证据，这类事只能靠哈希核对，不能靠"我记得拍过"。
+
+### 4.6-e 落地记录（额度记账与接口对账，2026-10-02）
+
+- **切片表写的是"预期零新实现，只有契约测试与状态位"，实际落了一处真改动**，就是 4.6-d 记在案的那条遗留：
+  界面把选中候选以 `text` 分支送进 `greet.perform`，账本 `source` 只读成 `manual:1002`，
+  候选的 `kind` 与 `evidenceRefs` 就此断在界面里。M4 的判据（"打招呼话术来自知识库证据且留生成来源"）
+  要的就是这条链，所以本片修的是链，不是判据。
+- **裁定：加一只可选的 `provenance`，而不是把选中改走 `script` 分支**。三条候选路线里另两条都被否掉：
+  ① 改走 `script` 意味着服务再生成一遍——用户选定的那条正文就不是发出去的那条，界面和账本分成两份事实；
+  ② 把 `GreetRequestView.script` 长胖（往里面塞 `kind` 之外的来源字段）会直接撞 4.6-11 的判据，
+  那条要的是**P2 消费口的入参形状不由界面带着长**；
+  ③ `provenance` 是纯记账键：不参与任何判据，不改正文、不决定回落、不触发第二次生成，只进账本那一列。
+  服务侧生成的那一路**不信调用方递来的 `provenance`**，字段直接取自 draft 本身——现生成的那条才是真相源。
+- **账本 `source` 的新格式**：`[manual:]模板版本:话术类型:JD id[#证据 id 列表]`。
+  两条腿（现成文案 / 现场生成）共用 `outbound/greet.ts` 里的 `ledgerSource()` 一处拼装，
+  格式长两遍就是两条复盘口径（§2.5）。不加列、不加迁移，写进 2.5-e 就留好的那个 `source` 自由文本列。
+  `entitlement/src/ledger.ts` 的文件头原来还写着旧格式 `${scriptVersion}:${jdId}`，一并更正。
+- **4.6-02 的运行时实证**（不是单测代替）：在本地 fixture 支撑的真实 app 上走一遍"生成 → 选中 → 发送"，
+  账本第 4 行读回 `manual:script-v1:greeting:7#kb-53e64c7a4c3a59c3`，回执同时把这条来源显示在面板上
+  （"已发送：目标 1005 · 账本行 4 · 来源 manual:script-v1:greeting:7#kb-53e64c7a4c3a59c3 · 内容 用户选定"）。
+  证据 `docs/acceptance/4.6/4.6-02-ledger-source-with-kind.png`（sha1 `c368ed0e…`，
+  与 4.6-d 那四张逐对比对 `sha1sum` 两两不同）。这张图是**点了诊断导航之后**才拍到的：
+  ScriptPanel 挂在诊断列，未激活视图宽度为 0，直接 `shot --reveal` 拍到的是聊天视图。
+- **第二条真发送口核对（plan 裁定四要的那一步）读数是：没有**。全仓 `gate.perform` 只有四处调用点——
+  `outbound/greet.ts:235`（打招呼）、`outbound/deliver.ts:416`（投递）、`outbound/index.ts:67`（样例消息）、
+  `platform-boss/jd-capture.ts:210`（`search` 额度，整段抓取在闸门里）；
+  真正把内容写进招聘方会话框的 `channel.send` 只有两处——`greet.ts:239` 与 `deliver.ts:420`，都在闸门闭包内。
+  也就是说**追问与拒绝应对根本没有自己的发送口**：它们要真发出去，只能走 `greet.perform` 那条已过
+  幂等 / 黑名单 / 额度 / 频控的路，而现在 `kind` 进了账本，事后能分清发出去的是开场白还是追问。
+- **4.6-08 因此如实标 `[!]`，不写 `[x]`**。判据原文是"生成动作计入额度（若配置为付费项），必经
+  `entitlement.gate`"，而事实是：`QUOTA_ACTIONS = ['search','greet','deliver']`（`shared/src/bridge.ts:337`），
+  闸门只认这三种动作；话术生成**不是付费项，也不外发**，把它接进闸门等于给一只纯读的服务套上写口子的假账。
+  外发那一路本来就在闸门里（上面四处调用点），不需要"补"。按裁定四的原文执行——
+  "没有则把 4.6-08 如实标 `[!]`，不拿'生成'冒充'外发'"。**残留的真实缺口**（留给接 SaaS 计费那片，不在本片偷偷收）：
+  若将来把"模型生成"定成付费项，需要新增第四个额度键并让 `outbound.script.generate` 经 `gate.check`，
+  那是一次动作语义变更，不是一次记账格式变更。
+- **4.6-10 依赖图核对**（判据："不重复实现 JD 解析、检索、事实校验"）。`outbound/src/script.ts` 的 import
+  全集就是四行：`@auto-cc/core`、`zod`、`./claims.js`、`./prompts.js`——
+  没有 JD 解析（入参里的 `title` / `company` / `keywords` 由调用方从 `jd.store` 抄过来），
+  没有检索（`evidence[].refId` 值取自 `kb.profile.search` 的 `chunkId`，界面上的三条候选就是它的三条命中），
+  没有第二套事实校验（夸大 / 诱导 / 凭据类拦截在 `./claims.js` + `assertSendable`，
+  而数值抽取与守恒口径 4.6-c 已上移到 `core/src/numbers.ts` 一份、`fact-check.ts` 里的旧声明不留别名）。
+  顺带核对了一处最容易被误判成"第二套连接池"的：`outbound/src/delivery-record-store.ts` 里出现
+  `DatabaseSync` 是 `import type`，它把迁移 push 进 `store.migrations` 再 `upgrade()`，连接池仍只有一处（§2.7）。
+- **4.6-11 契约单测**：`script.test.ts` 尾部新增一只 describe，主角是**一只只会读字段的假消费方**
+  （`consume(draft)` 只允许读视图上的既有键，拼字符串的能力一概不给——能拼就能改写，那条断言就废了）。
+  三例读数：模型腿的视图必填键锁死六个（`evidenceRefs / jdId / kind / origin / scriptVersion / text`），
+  消费方收到的正文与 `draft.text` **逐字符相等**且 `assertSendable` 放行；
+  三类 + 带证据那条共用同一形状，来源串读作 `v1:greeting:job-1001` / `v1:follow-up:job-1001` /
+  `v1:rejection:job-1001` / `v1:greeting:job-1001#chunk-11`（`fixture.bodies` 长度 0，零网络）；
+  503 回落那条只多一个可选键 `fallbackReason`，同样不需要消费方加工。
+  **键数不是七而是"六或七"**：写第一版时按七个必填断言，读 `script.ts:289-310` 才确认模型腿的 return
+  根本没有 `fallbackReason` 这个键（不是空串，是键不存在），改成按 `origin` 分别锁定才对。
+  **命名对账**：判据原文写 `script.greeting`，实现里的口是 `outbound.script.generate` + 入参 `kind='greeting'`
+  （4.6-b 的裁定：三类共用一只口）。这里锁的是那只口的**输出形状**——名字对不上是文档滞后，形状对不上才是缺陷，
+  对账结论写在测试文件头部注释里。
+- **账本那三条契约的单测改动**（`greet.test.ts`，24 例）：2.5-09 那例的来源断言从 `v1:job-2002` 升到
+  `v1:greeting:job-2002`（回执与账本两处都断）；新增"界面选中候选再发"一例，断言
+  `manual:v1:follow-up:1002#chunk-11,chunk-22`、渠道收到的**正是**选定的那条正文
+  （`hand.calls` 逐字段相等，服务没改成另一条），以及无引用候选那条写成 `manual:v1:greeting:1002`；
+  再新增一条拒收：`kind:'thanks'`（不在 `SCRIPT_KINDS`）在 schema 层就 `INVALID_ARGUMENT`，
+  渠道零调用、账本零行——记账键不接受没见过的分型。
+- **门禁实跑**：`pnpm typecheck` 全包 Done；`pnpm lint` exit 0（eslint + 渲染层规范 / 站点知识包 /
+  LLM 入口唯一 / 合规护栏 / 离线依赖门槛 / 提示词落点"注册表 2 份：packages/outbound/src/prompts.ts、
+  packages/resume-kb/src/prompts.ts"）；`pnpm format:check` "All matched files use Prettier code style!"；
+  `pnpm test` 21 包 exit 0、零 FAIL 行，共 1364 例通过（`outbound` 8 文件 138 例，其中 `script.test.ts` 34、
+  `greet.test.ts` 24；`resume-kb` 394、`browser` 235、`workflow` 99、`platform-boss` 130、`main` 15）。
+- **§7.4 自检逐条回答**：① 四条门禁如上，命令与读数都在本节；② V 半边——4.6-02 的运行时读数有截图
+  `docs/acceptance/4.6/4.6-02-ledger-source-with-kind.png`，且是真实点击而非 DOM 断言伪造；
+  ③ 状态位——4.6-02 早已 `[x]`（本片是把它实证的来源链补全），4.6-08 `[!]` 带原因，4.6-10 / 4.6-11 `[x]`，
+  不留"看起来过了"的模糊项；④ 复用检查——`ledgerSource` 是两条腿共用的**唯一**拼装点，
+  界面只递服务读数不重算，账本列沿用 2.5-e 预留的 `source`，零新列零新迁移零新 service；
+  ⑤ 死代码检查——`provenance` 有真实消费方（界面写入、服务读取、两处测试断言），
+  `ScriptProvenanceView` 被 `GreetRequestView` 引用，`ledgerSource` 两个调用点；
+  中途确实出现过一次"helper 先写、`perform` 未接"的半改状态，接完才继续，没有留下未被调用的导出；
+  ⑥ 前端三项——渲染层只多了一个请求体字段，样式仍全 Tailwind、图标仍只用 lucide、
+  页面新增文案为零（回执用的是既有 `script.receipt*` 键），i18n 无新增面；
+  ⑦ 提交——代码与文档按 §1.4 分两个提交，推送 origin（`dcc123456/auto-cc`）；
+  ⑧ 暂存区——入库图片只有 `4.6-02-ledger-source-with-kind.png` 一张（按条目 ID 命名），
+  探针脚本（`tmp/prep-461.js` / `gen-461.js` / `send-461.js` / `show-461.js` / `read-dev-store.mjs`）、
+  中间态截图与 dev 日志全部留在被忽略的 `tmp/`。
 
 ---
 
