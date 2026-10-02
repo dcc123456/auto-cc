@@ -12,6 +12,10 @@
  * 5. spec 点名的 P2 八件与 P4 四件能力都在声明现场出现（缺一条就是那条能力没接进对话入口）；
  * 6. 登记方服务在装配清单里排在注册表 `agent` **之后**——清单顺序即挂载顺序，排在前面就等于 init 时
  *    软问 `agent.tools` 问不到，那只工具静默地不进清单（5.1-c 的活体日志实测到的就是这一条，见下）。
+ * 7. 每处声明的 `input` 顶层是 `z.strictObject`（spec 5.1-04 的"非法入参被拒绝"半边）：`z.object` 会把多余键
+ *    原样递给实现，模型或界面多拼一个字段就不再是"这一只工具的入参"。
+ * 8. 能力清单里的 12 件没有一件声明 `disabled`（spec 5.1-10 与 5.1-06 / 07 的连带）：禁用位是给"登记了但
+ *    暂不开放"用的，把它用在清单内的工具上，等于让那两条判据当场失去对象。
  *
  * 为什么直查语言包而不复用 `check-renderer-conventions.ts` 的键对齐：那条判据是「各 locale 的键集相等」，
  * 两份**同时缺**一个键时它照样绿，而注册表缺的正是那一种（注册表在能力包，语言包在渲染层，没人逼着两边同步）。
@@ -65,6 +69,12 @@ interface DeclarationSite {
   titleKey: string | null;
   /** 声明所在的服务类名（取声明之前最后一个 `class X extends Service`）；在类体外登记时为 null */
   ownerClass: string | null;
+  /** 入参 schema 的顶层形状：`strict` / `loose`（多余键放行）/ `unreadable`（读不出，按失败处理） */
+  inputShape: 'strict' | 'loose' | 'unreadable';
+  /** `input:` 现场读到的原文片段，失败信息里要指回它 */
+  inputReadAs: string;
+  /** 是否声明了 `disabled: true`（spec 5.1-10） */
+  isDisabled: boolean;
 }
 
 /**
@@ -125,12 +135,17 @@ function keepTopLevelOnly(source: string, blanked: string, from: number, to: num
 }
 
 /**
- * 摘出一段源码里所有 `agentTool({…})` 声明的 `id` 与 `titleKey`。
+ * 摘出一段源码里所有 `agentTool({…})` 声明的 `id`、`titleKey`、入参形状与禁用位。
  * @param file 文件绝对路径（只用于回填现场）
  * @param source 文件内容
+ * @param schemaShapes 具名 schema 的顶层形状表：`input: scriptRequestSchema` 这类声明要靠它对上
  * @returns 每个声明一个现场；花括号配不上时记一条失败并返回已读到的部分
  */
-function declarationsOf(file: string, source: string): DeclarationSite[] {
+function declarationsOf(
+  file: string,
+  source: string,
+  schemaShapes: Map<string, 'strict' | 'loose'>,
+): DeclarationSite[] {
   const blanked = blankOutStringsAndComments(source);
   const found: DeclarationSite[] = [];
   const opener = /agentTool\s*\(\s*\{/g;
@@ -146,12 +161,30 @@ function declarationsOf(file: string, source: string): DeclarationSite[] {
       const field = new RegExp(`(?:^|[{,\\s])${key}\\s*:\\s*(['"])([^'"]*)\\1`).exec(topLevel);
       return field?.[2] ?? null;
     };
+    // 入参形状只查顶层：嵌套 schema 是领域对象自己的口径，这条判据管的是"进门这一层挡不挡多余键"（5.1-04）。
+    // 注意 `topLevel` 里 depth>1 的字符已被抹成空格，`z.strictObject(` 的左括号读不到，所以判到名字为止。
+    const strictInline = /(?:^|[{,\s])input\s*:\s*z\.strictObject/.test(topLevel);
+    const looseInline = /(?:^|[{,\s])input\s*:\s*z\.object/.test(topLevel);
+    const namedInput = /(?:^|[{,\s])input\s*:\s*([A-Za-z_$][\w$]*)/.exec(topLevel)?.[1] ?? null;
+    const inputAt = /(?:^|[{,\s])input\s*:/.exec(topLevel);
     found.push({
       file,
       line: source.slice(0, braceAt).split('\n').length,
       id: readLiteral('id'),
       titleKey: readLiteral('titleKey'),
       ownerClass: ownerClassOf(source, braceAt),
+      inputShape: strictInline
+        ? 'strict'
+        : looseInline
+          ? 'loose'
+          : ((namedInput === null ? undefined : schemaShapes.get(namedInput)) ?? 'unreadable'),
+      inputReadAs: inputAt
+        ? topLevel
+            .slice(inputAt.index + inputAt[0].length, inputAt.index + inputAt[0].length + 40)
+            .replace(/\s+/g, ' ')
+            .trim()
+        : '（读不出 input 这一项）',
+      isDisabled: /(?:^|[{,\s])disabled\s*:\s*true\b/.test(topLevel),
     });
   }
   return found;
@@ -205,10 +238,26 @@ const tsFiles = (
 ).flat();
 
 const sites: DeclarationSite[] = [];
+/** 非测试源码先读一遍：`input: scriptRequestSchema` 的形状可能定义在同包的另一处。 */
+const sources = new Map<string, string>();
 for (const file of tsFiles) {
   // 测试替身里的声明是给注册表单测用的假工具，不进界面，也就没有翻译要对。
   if (isTestOnlyModule(relative(file))) continue;
-  sites.push(...declarationsOf(file, await readFile(file, 'utf8')));
+  sources.set(file, await readFile(file, 'utf8'));
+}
+
+/** 具名 schema 常量 → 顶层形状，供声明现场把 `input: 某Schema` 对上 strict / loose（spec 5.1-04）。 */
+const schemaShapes = new Map<string, 'strict' | 'loose'>();
+for (const source of sources.values()) {
+  for (const hit of source.matchAll(
+    /(?:^|\n)\s*(?:export )?const\s+(\w+)\s*(?::[^=\n]*)?=\s*z\.(strictObject|object)\(/g,
+  )) {
+    schemaShapes.set(hit[1] as string, hit[2] === 'strictObject' ? 'strict' : 'loose');
+  }
+}
+
+for (const [file, source] of sources) {
+  sites.push(...declarationsOf(file, source, schemaShapes));
 }
 
 // 反向断言：一只都没扫到 == 判据本身失效，不能算通过。
@@ -336,6 +385,49 @@ for (const group of CAPABILITY_CHECKLIST) {
 const checklistCount = CAPABILITY_CHECKLIST.reduce((total, group) => total + group.items.length, 0);
 
 /**
+ * 入参形状判据（spec 5.1-04 的"非法入参被拒绝"半边）。
+ *
+ * 校验发生在注册表里（`tool.input.safeParse` 在 `run` 之前），所以"进了实现没有"是可测的行为；
+ * 但**拦得住多少**取决于声明本身：`z.object` 会把模型多拼的键原样递给实现，`min(1)` 缺失会把空串递进去。
+ * 这一条把口径钉在源码现场——比运行期遍历清单更早（提交期就红），也比"记得写 strictObject"更硬。
+ */
+let strictChecked = 0;
+for (const site of sites) {
+  const where = `${relative(site.file)}:${String(site.line)}`;
+  const toolName = site.id ?? '（读不出 id）';
+  if (site.inputShape === 'strict') {
+    strictChecked += 1;
+    continue;
+  }
+  if (site.inputShape === 'loose') {
+    failures.push(
+      `${where} 的工具「${toolName}」入参是 z.object（现场：input: ${site.inputReadAs}）：多余键会被放行到实现里，5.1-04 要的"非法入参零副作用"就成了只看运气的承诺`,
+    );
+    continue;
+  }
+  failures.push(
+    `${where} 的工具「${toolName}」读不出入参形状（既不是 z.strictObject，也解析不到具名 schema 常量；现场：input: ${site.inputReadAs}）：机检无法确认它挡得住非法入参`,
+  );
+}
+if (sites.length > 0 && strictChecked === 0)
+  failures.push('入参形状判据一条都没比对成功：声明里都不带 input，或 zod 的写法变了，这条机检已失效');
+
+/**
+ * 禁用位判据（spec 5.1-10 与 5.1-06 / 07 的连带）。
+ *
+ * `disabled` 是"登记了但暂不开放"的声明位，本身合法；不合法的是把它用在能力清单里的工具上——
+ * 那 12 件的判据原文是"以工具形式可见"，一禁用它们就从清单里消失，而声明现场看着齐全、单测也照样绿。
+ */
+for (const site of sites) {
+  if (!site.isDisabled || site.id === null) continue;
+  if (CAPABILITY_CHECKLIST.some((group) => group.items.some(([, id]) => id === site.id))) {
+    failures.push(
+      `${relative(site.file)}:${String(site.line)} 把清单内的能力「${site.id}」声明成 disabled：它对 agent 既不可见也不可调用，5.1-06 / 07 的清单当场对不上`,
+    );
+  }
+}
+
+/**
  * 装配顺序判据（5.1-c 的活体实测逼出来的一条）。
  *
  * 登记工具的服务在自己的 `[Service.init]` 里**软问** `agent.tools`（软问是为了让 agent 包能被单独摘掉，
@@ -408,5 +500,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 ${String(checklistCount)} 件逐条对得上登记；${String(orderChecked)} 个登记方都排在注册表 ${REGISTRY_PLUGIN_ID} 之后）`,
+  `✔ agent 工具契约检查通过（${String(sites.length)} 只工具 × ${String(locales.length)} 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 ${String(checklistCount)} 件逐条对得上登记；${String(strictChecked)} 只工具入参顶层全是 z.strictObject 且清单内无 disabled 位；${String(orderChecked)} 个登记方都排在注册表 ${REGISTRY_PLUGIN_ID} 之后）`,
 );

@@ -81,6 +81,26 @@ function makeEchoTool(): AgentTool<{ text: string }> {
   };
 }
 
+/**
+ * 一只「执行就留下副作用」的靶工具（spec 5.1-04 / 05 / 10 的判据都要能证明"什么都没发生"）。
+ * @param sideEffects 副作用清单，每进一次 `run` 追加一条；调用方断言它空与非空
+ * @returns 合规声明：入参是 `strictObject`（多余键也算非法），`run` 把文本记进清单
+ */
+function makeCountedTool(sideEffects: string[]): AgentTool<{ text: string }> {
+  return {
+    id: 'demo.counted',
+    titleKey: 'agent.tool.labels.demoCounted',
+    description: '把入参记进副作用清单',
+    input: z.strictObject({ text: z.string().min(1) }),
+    effect: 'local-write',
+    requiresConfirmation: true,
+    run: (params) => {
+      sideEffects.push(params.text);
+      return Promise.resolve({ echoed: params.text });
+    },
+  };
+}
+
 describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
   it('单元台架里没有能力包登记，注册表是空表（1.11-04；真注册表的 9 只见 2.8-08 活体）', async () => {
     const { tools } = await boot();
@@ -138,6 +158,67 @@ describe('agent.tools 空表与调用协议（1.11-04 / 05 / 09）', () => {
     const { tools } = await boot();
     tools.register(makeEchoTool());
     expect(() => tools.register(makeEchoTool())).toThrowError(/已注册/);
+  });
+});
+
+describe('工具调用的三条硬拦（spec 5.1-04 / 05 / 10）', () => {
+  it('非法入参被 schema 拦在门外：一次副作用都没发生（spec 5.1-04）', async () => {
+    const { tools } = await boot();
+    const sideEffects: string[] = [];
+    tools.register(makeCountedTool(sideEffects));
+    // 五种非法形状各拦一次：缺必填、空串（min(1)）、类型错、多余键（strictObject 的作用）、键名拼错。
+    const invalidInputs: unknown[] = [{}, { text: '' }, { text: 42 }, { text: 'hi', extra: 1 }, { tex: 'hi' }];
+    for (const input of invalidInputs) {
+      const reply = await tools.call('demo.counted', input);
+      expect(reply.ok).toBe(false);
+      if (!reply.ok) expect(reply.code).toBe('TOOL_INPUT_INVALID');
+    }
+    // 判据的实质：拦下来不是"返回了错误"，而是**实现根本没被叫起来**——副作用清单必须还是空的。
+    expect(sideEffects).toEqual([]);
+    await expect(tools.call('demo.counted', { text: 'hi' })).resolves.toMatchObject({ ok: true });
+    expect(sideEffects).toEqual(['hi']);
+  });
+
+  it('未注册 id 一律明确报错：近似名、大小写、多余空格都不猜（spec 5.1-05）', async () => {
+    const { tools } = await boot();
+    const sideEffects: string[] = [];
+    tools.register(makeCountedTool(sideEffects));
+    // 表里只有 `demo.counted` 一只。下面每一项都离它「很近」：改一截后缀、改大小写、带个尾空格，
+    // 以及两条真实存在过的能力名（`boss.greets` 是 spec 原文点名的例子）——注册表一个都不认。
+    for (const toolId of [
+      'demo.counter',
+      'demo.count',
+      'DEMO.COUNTED',
+      'demo.counted ',
+      'outbound.greet',
+      'boss.greets',
+    ]) {
+      const reply = await tools.call(toolId, { text: 'hi' });
+      expect(reply.ok).toBe(false);
+      if (!reply.ok) expect(reply.code).toBe('TOOL_NOT_REGISTERED');
+      // 猜名一旦成立，"未注册"就会变成"调到了别的能力"，白名单与副作用归属同时失去意义。
+      if (!reply.ok) expect(reply.message).toContain(toolId);
+    }
+    expect(sideEffects).toEqual([]);
+  });
+
+  it('声明 disabled 的工具：清单列不到、调用也调不到（spec 5.1-10）', async () => {
+    const { tools } = await boot();
+    const sideEffects: string[] = [];
+    tools.register({ ...makeCountedTool(sideEffects), disabled: true });
+    // 对 agent 不可见（1.11-04 的清单口径）……
+    expect(tools.list()).toEqual([]);
+    // ……而且不是一条"看不见但能按"的暗门（§2.5：同一条通路只留一套口径）。
+    const reply = await tools.call('demo.counted', { text: 'hi' });
+    expect(reply.ok).toBe(false);
+    if (!reply.ok) expect(reply.code).toBe('TOOL_DISABLED');
+    expect(sideEffects).toEqual([]);
+    // 打开它走的是同一条登记路径：先摘再登记，不引入第二份"启用表"。
+    expect(tools.unregister('demo.counted')).toBe(true);
+    tools.register(makeCountedTool(sideEffects));
+    expect(tools.list().map((entry) => entry.id)).toEqual(['demo.counted']);
+    await expect(tools.call('demo.counted', { text: 'hi' })).resolves.toMatchObject({ ok: true });
+    expect(sideEffects).toEqual(['hi']);
   });
 });
 

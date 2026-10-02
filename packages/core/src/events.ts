@@ -768,7 +768,11 @@ export type ToolDescriptorView = {
  */
 export type ToolCallReply =
   | { ok: true; value: unknown }
-  | { ok: false; code: 'TOOL_NOT_REGISTERED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED'; message: string };
+  | {
+      ok: false;
+      code: 'TOOL_NOT_REGISTERED' | 'TOOL_DISABLED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED';
+      message: string;
+    };
 
 /**
  * 一个工具的声明式契约（spec 2.8-08）。
@@ -798,6 +802,16 @@ export interface AgentToolDeclaration<I = unknown> {
   readonly effect: ToolEffect;
   /** 是否需要用户先批准再执行；P2 只登记值，强制属 P5 */
   readonly requiresConfirmation: boolean;
+  /**
+   * 「已登记但暂不开放」（spec 5.1-10）。省略即开放。
+   *
+   * 它不是「隐藏的开关」而是「收回的手」：`list()` 不列它，`call()` 也调不到它（`TOOL_DISABLED`）。
+   * 只藏清单不拦调用会留下第二条通路——界面上看不见、模型不知道，但拼得出 id 的人照样能按下去，
+   * 那是 §2.5 禁止的「两套都能用」，也让「工具面 = service 白名单」这句话失去意义。
+   * 为什么留在注册表而不是直接不登记：登记是**能力包声明自己有这只手**，禁用是**装配/档位侧暂时收窄**，
+   * 两件事分属两侧；做成不登记就把「能力存在但此刻不给用」这个事实丢了，日志与断言都无从对账。
+   */
+  readonly disabled?: boolean;
   /**
    * 实际执行。
    * @param params 已过 schema 的入参

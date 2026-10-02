@@ -88,21 +88,24 @@ export class AgentToolsService extends Service {
   }
 
   /**
-   * 列举当前可见的工具元数据。
-   * @returns 数组顺序即登记顺序；表里没有能力包登记的工具时为空数组（spec 1.11-04 的判据）
+   * 列举当前对 agent 可见的工具元数据。
+   * @returns 数组顺序即登记顺序，`disabled: true` 的那几只不在里面（spec 5.1-10）；
+   *   表里没有能力包登记的工具时为空数组（spec 1.11-04 的判据）
    */
   list(): ToolDescriptorView[] {
-    return [...this.table.values()].map((tool) => ({
-      id: tool.id,
-      titleKey: tool.titleKey,
-      description: tool.description,
-      effect: tool.effect,
-      requiresConfirmation: tool.requiresConfirmation,
-    }));
+    return [...this.table.values()]
+      .filter((tool) => tool.disabled !== true)
+      .map((tool) => ({
+        id: tool.id,
+        titleKey: tool.titleKey,
+        description: tool.description,
+        effect: tool.effect,
+        requiresConfirmation: tool.requiresConfirmation,
+      }));
   }
 
   /**
-   * 调用一个工具：查表 → 校验入参 → 执行 → 原样回报。
+   * 调用一个工具：查表 → 校验禁用 → 校验入参 → 执行 → 原样回报。
    * @param toolId 来自渲染层的字符串，按不可信输入处理，不做任何「猜它想调什么」
    * @param rawInput 未收窄的入参值，必须过 `tool.input` 的 schema
    * @param signal 取消信号；中止后结果不再写回消息
@@ -115,6 +118,15 @@ export class AgentToolsService extends Service {
         ok: false,
         code: 'TOOL_NOT_REGISTERED',
         message: `工具 ${toolId} 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）`,
+      };
+    }
+    // 禁用同时拦清单与调用（spec 5.1-10）：只藏清单的话，拼得出 id 的人仍能从 IPC 把它按下去，
+    // 「工具面 = service 白名单」就成了一句只看界面的话。
+    if (tool.disabled === true) {
+      return {
+        ok: false,
+        code: 'TOOL_DISABLED',
+        message: `工具 ${toolId} 已登记但当前不开放（能力包声明了 disabled，等它被打开才能调用）`,
       };
     }
     const parsed = tool.input.safeParse(rawInput);
@@ -141,7 +153,11 @@ export class AgentToolsService extends Service {
     // 读数必须在挂载时现算：登记由各能力包在自己的 init 里推（spec 2.8-08），本服务先于它们就绪时
     // 这里就是 0，把「注册表就绪」写成「已登记 N 个」才不会出现 §12.13 那种骗人的空数。
     // 表是按 Context 存的，所以「被重建的那一次」读到的是既有内容，日志仍然说实话。
-    this.ctx.logger.info(`工具注册表就绪：当前已登记 ${String(this.table.size)} 个工具（清单见 agent.tools.list）`);
+    // 两个数都要报：登记数（含 disabled）与可见数差了哪几只，是 5.1-10 唯一能在现场对账的地方。
+    const visibleCount = this.list().length;
+    this.ctx.logger.info(
+      `工具注册表就绪：当前已登记 ${String(this.table.size)} 个工具（对 agent 可见 ${String(visibleCount)} 个，其余声明了 disabled；清单见 agent.tools.list）`,
+    );
   }
 }
 
