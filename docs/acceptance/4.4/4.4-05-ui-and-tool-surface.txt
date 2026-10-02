@@ -1,0 +1,178 @@
+4.4-05 验收证据 · 缺口报告界面（分栏 + 证据链跳转 + i18n）与 agent 工具面（2026-10-02，切片 4.4-d）
+==================================================================================================
+
+条目原文：缺口报告界面可读（分栏 + 证据链跳转），文案 i18n（V 类，判据"截图两栏 + 点击跳转"）。
+
+结论：`[x]`。界面是 `packages/renderer/src/GapPanel.tsx`（新文件，挂在 `App.tsx` 诊断区 `KbPanel` 之后），
+它**只做呈现**：三态、计数、分数、建议、模型腿结局全部来自 `kb.gap.report` 的返回体，
+本文件不重排、不重新判定（plan §4.4-d 判据二）。同时 `kb.gap.report` 进了 agent 工具面，
+两入口读的是同一个 `report()`（判据六）。
+
+本机为 Windows，macOS / Linux 的运行期验证在本机无法完成 → 该侧 BLOCKED，不做推测。
+
+
+【0】命令与退出码（真实页面，CDP 10222，渲染层 target `--url 5173`）
+------------------------------------------------------------------------------
+前置：`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`（隔离 userData，避免撞单实例锁），
+库经真实入口灌入：`resume.parse.fromFile(tmp/gap-demo-resume.md)` → `kb.profile.sync(docId)`
+→ 界面「比对缺口」按钮（脚本 `tmp/seed-gap-kb.js`，读数 docId `resume-0185fba4a2cc` / 10 条实体）。
+
+$ pnpm harness eval --url 5173 --expr-file tmp/dom-assert.js          # 退出码 0
+$ pnpm harness eval --url 5173 --expr-file tmp/dom-evidence.js        # 退出码 0（在页面里点两条证据按钮后读回正文）
+$ pnpm harness eval --url 5173 --expr-file tmp/tool-surface.js        # 退出码 0（agent 工具面读数）
+$ pnpm harness eval --url 5173 --expr-file tmp/tool-effects.js        # 退出码 0（整张注册表的效果位）
+$ pnpm harness shot --url 5173 --reveal '[data-testid="gap-panel"]' --out tmp/44d-*.png
+$ pnpm harness archive --id 4.4-05 --slug <见第【3】节> --in tmp/44d-*.png   # 五张，全部归档成功
+
+第一次 `shot` 在点完「比对缺口」后立即跑，退出码 1（瞬态：React 还没提交完这一帧），
+重跑即写出 png——这条如实记在这里，不写成一次通过。
+
+
+【1】单元侧对应用例（vitest，工作目录 packages/resume-kb，Node 24 / vitest 3.2.7）
+------------------------------------------------------------------------------
+$ npx vitest run --reporter=verbose src/gap-service.test.ts src/profile-service.test.ts
+ Test Files  2 passed (2)
+      Tests  106 passed (106)
+
+本片新增/相关的用例：
+
+ ✓ kb.gap 的 agent 工具面（spec 4.4-05） > 注册表只收到一只 kb.gap.report，且它是只读、不需确认的
+ ✓ kb.gap 的 agent 工具面（spec 4.4-05） > 跑工具与直接调 service 逐字相等：两入口共用同一份比对，不许各长一套（§5.9）
+ ✓ kb.gap 的 agent 工具面（spec 4.4-05） > 入参是边界：正文必填、种类限四类、nowMs 一律拒收
+ ✓ kb.gap 的 agent 工具面（spec 4.4-05） > 注册表缺席时本服务照样上岗，日志把「没登记成」这件事写出来（软取不阻塞装配）
+ ✓ 证据正文 evidenceBody（spec 4.4-05） > 传实体 id：读到的是该实体载荷拼出的正文，出处是它自己那份简历
+ ✓ 证据正文 evidenceBody（spec 4.4-05） > 传区块切片 id：origin 标成 section_chunk，正文与 listChunks 里那条逐字相同
+ ✓ 证据正文 evidenceBody（spec 4.4-05） > 两类 id 都不问前缀：库里没有这个 id 时返回 null 而不是抛错
+ ✓ 证据正文 evidenceBody（spec 4.4-05） > 手工实体读得出正文，且出处为 null（它不属于任何一份简历）
+
+`evidenceBody` 是本片**唯一新增的公开读口**（判据三）：报告里的证据只带 id，正文按需另问，
+所以打开面板不会把整本库拖进渲染层。实体与切片两类 id 走同一只手，不问前缀——
+界面不需要知道"这是实体还是区块"，那是服务侧的事实。
+
+白名单面：`packages/shared/src/bridge.ts` 的 `RENDERER_ALLOWLIST` 本次净增 **2** 条
+（`git diff` 实测：`+ 'kb.gap.report'`、`+ 'kb.profile.evidenceBody'`），
+每条都配了 `BridgeSignaturesCovered` 要求的签名，缺签名编译不过（§8.2 的纵深防御没有绕过口）。
+
+装配面：`cordis.yml` 的 `kb-gap` 段**未改动**（`git status` 里它不在改动清单内），
+即刻意不加 `dependsOn: [kb-profile]`——库里没录简历要用 `KB_LIBRARY_MISSING` 在调用那一刻说，
+而不是让整个服务装不上、界面只能播一句"服务没起来"（判据六）。第【2】节的库缺席截图就是这条的现场。
+
+
+【2】页面 DOM 断言读数（`tmp/dom-assert.js`，退出码 0）
+------------------------------------------------------------------------------
+面板可见 + 摘要行（计数全部由主进程给出，界面只摆出来）：
+
+  visible: true
+  summary: 库内 10 条实体 · 经验合计 68 个月 · 库内最高学历档位 2 · 年限算到 2026-10 · 词表 lex-v1 · 提示词 未问过模型
+
+三栏 = 三种**状态**，栏头计数取自 `report.counts`，行数与之一致：
+
+  columns: [ {state: "matched", rows: 4}, {state: "partial", rows: 1}, {state: "missing", rows: 10} ]
+
+每条未命中/部分命中的行都带一句建议（4.4-06 在界面上的落点），键名从 DOM 上直接读得出：
+
+  suggestionKeys: ["education_gap", "add_evidence" ×10]      # 11 条 = partial 1 + missing 10
+  evidenceToggles: 6
+  modelLeg: "unavailable"
+  modelNotice: "比对完成：命中 4 / 部分 1 / 缺失 10"    # 这一行是"最近一次动作"的播报：点完证据展开后它变成「证据：成功」
+  highlights: 0                                              # 本语料下反向比对无候选，见第【4】节
+
+色带按状态给、不按分数给——这条判据在页面上的具体形状是：年限行分数 0.59（低于 hit 阈值 0.62）
+却落在**命中**栏，且行内多一句只作展示的播报：
+
+  yearsRows: [{state: "matched", tone: "… border-emerald-900 bg-emerald-950/30", text: "年限 · 5 年以上工作经验 · 5 年 · 词面拆解"}]
+  scoreDisplayOnlyRows: 1                                    # 文案「年限行的分数只作展示，色带按状态给」
+
+证据链跳转（`tmp/dom-evidence.js`，退出码 0）：在页面里真点两个按钮，两类 origin 各自就地展开正文，
+不新开窗、不跳路由（判据三的内联口径）：
+
+  clicked: ["库内实体 kb-ba545af11d6c16b5 · 强度 1.00（点开看正文） · java",
+            "简历区块 kbs-f9eccc4cf5cb30c6 · 强度 1.00（点开看正文）"]
+  bodies:  kb-ba545af11d6c16b5 → "Java"
+           kbs-f9eccc4cf5cb30c6 → "本科\n软件工程\n2017-09 - 2021-06\n江海大学"   # 出现两次：本科行与硕士行共用同一条区块依据
+
+第二条正是学历腿的形状：`硕士`（部分命中 0.67）与 `本科`（命中）指向**同一条** `section_chunk` 证据，
+界面上不复制正文，两处各自展开同一 id——"凭什么叫部分命中"在页面上是可查的，不需要再问模型。
+
+
+【3】截图（五张，`harness archive --id 4.4-05`，全部经肉眼复核）
+------------------------------------------------------------------------------
+1. `4.4-05-zh-three-columns.png` — zh 三态分栏全貌：命中 4 / 部分 1 / 缺失 10，绿·琥珀·玫红三色带，
+   缺失行每条带建议，年限行带"分数只作展示"那句。
+2. `4.4-05-zh-evidence-entity-and-section-chunk.png` — 两类 origin 同时展开（`Java` 与学历区块正文），
+   证明实体与切片都跳得动。
+3. `4.4-05-en-three-columns.png` — 同一份报告切到 English：标题、栏头、建议句、模型腿播报、摘要行全部翻成英文。
+4. `4.4-05-zh-model-leg-disabled.png` — 腿状态 `disabled` 的播报：「模型腿已在配置里关掉，本报告只有词面拆解」。
+5. `4.4-05-zh-library-missing.png` — 库缺席空态（`plugins.stop('kb-profile')` 后点比对）：
+   「还没有可比对的知识库：先在下方「知识库实体」面板导入简历并同步，再回来比这份 JD。
+   这不是「你不合格」，是根本没比过。」+ 失败播报「比对缺口 失败：知识库服务 kb.profile 未装配：缺口报告没有可比的对象」。
+   这张同时证明两件事：`kb-gap` 在没有 `dependsOn` 时**照样上岗并可见地失败**，
+   以及旧的报告在 `kb/entities-changed` 后被清掉（页面上没有残留的三栏）。
+
+判据四要求"五种模型腿状态 → 五个 i18n 键"，现场看到的是 `unavailable`（缺 key）与 `disabled`（配置关腿）两种；
+`merged` / `rejected` / `failed` 三种要真实可用的模型网关才排得出，见第【4】节。
+
+
+【4】agent 工具面实测（`tmp/tool-surface.js`，退出码 0）
+------------------------------------------------------------------------------
+$ pnpm harness eval --url 5173 --expr-file tmp/tool-surface.js
+
+  toolCount: 13
+  toolIds: sessions.open, browser.page.navigate, browser.page.snapshot, browser.locate.find,
+           browser.act.click, browser.act.type, outbound.greet.perform, outbound.deliver.perform,
+           jd.capture.run, kb.gap.report, kb.profile.list, kb.profile.search, kb.profile.syncVectors
+  gapToolDescriptor: {id: "kb.gap.report", effect: "read", requiresConfirmation: false, description: "把一段 JD 正文与本地简历知识库比对…"}
+
+  viaTool.summary   : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 腿unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
+  directReadings    : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 腿unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
+  identicalFullJson : true                      # 整份返回体逐字节相等，不是"看起来一样"
+
+  strictObjectRejectsNowMs : "TOOL_INPUT_INVALID"   # 入参 {jdText, nowMs:1} 被 z.strictObject 拒收
+  emptyInputRejected       : "TOOL_INPUT_INVALID"   # 入参 {} 缺正文同样拒收
+
+`nowMs` 拒收这条是判据六的硬边界：把它开成工具入参等于让模型自己填"今天是几月"，
+而年限读数的基准只能由服务取当前时间（4.4-07 要的是同一输入两次读数一致）。
+`effect: read` + `requiresConfirmation: false` 与界面侧的只读口一致。整张注册表的效果位一并读了一遍
+（`pnpm harness eval --url 5173 --expr-file tmp/tool-effects.js`，退出码 0）：
+
+  sessions.open / browser.page.navigate / browser.page.snapshot / browser.locate.find   read 免确认
+  browser.act.click / browser.act.type / outbound.greet.perform / outbound.deliver.perform
+  jd.capture.run / kb.profile.syncVectors                                               outbound 需确认
+  kb.gap.report / kb.profile.list / kb.profile.search                                   read 免确认
+
+也就是"只读"这一位不是本片自说自话：同一张表里外发的那几只确实是 `outbound` + 需确认，
+`kb.gap.report` 与 `kb.profile.list/search` 同排（§7.3 的闸门位没有被稀释）。
+
+对话卡片标题走 `ChatPanel.TOOL_LABEL_KEY` + `agent.tool.labels.kbGapReport`（zh/en 双份），
+`gap.suggestion.*` 与 `gap.model*` 全部键在两份语言包里齐全——`pnpm lint` 的渲染层规范机检
+（`✔ 渲染层规范检查通过（2 个语言包，24 个源文件）`）就是查这个的：只解析字面 `t('key', {…})` 调用，
+所以界面里写了 5 条字面建议调用与 5 条字面腿播报，而不是动态拼 key。
+
+
+【5】本片没覆盖什么（如实记录）
+------------------------------------------------------------------------------
+- `merged` / `rejected` / `failed` 三种腿状态的**界面播报**没有现场图：本机 `llm` 未配 baseUrl/model/apiKey，
+  而 4.4-02 的 U 半边已用契约用例钉住这五态的产出。缺的是"接上真 key 后在页面上看一眼"，
+  与 4.4-02 的收口绑在同一个动作里（见 `4.4-02-model-leg-fallback.txt` 第【4】节）。
+- 反向比对亮点区在本语料下 0 条，所以 `data-gap-highlight` 与"另有 N 条未展开"（`data-gap-highlight-dropped`）
+  只有单测证据（4.4-c 的 `4.4-04-reverse-comparison.txt`），没有截图。
+  界面代码路径是同一份 `report.highlights`，但**没有现场看过**就是没有，不写成通过。
+- `modelReason` 与错误播报来自服务侧，是诊断载荷而不是界面文案，所以在英文页上仍是中文
+  （例：「模型未配置，缺 baseUrl / model / apiKey」）。§5.5 管的是页面上出现的文案，
+  这一条按诊断信息处理，写在 plan §4.4-d 的落地记录里，不当 i18n 违规去"顺手翻译"。
+- 阈值未标定：界面上那句「各阈值当前未标定，可在 cordis.yml 的 kb-gap 段调整」是有意保留的，
+  标定动作归 4.4-e（与 4.4-09 的额度/合规收口同片）。
+- 导出、阈值调节 UI、从 `jobs` 表打开报告、`entitlement` 扣额度：判据里的"不做"清单，本片一条都没做。
+
+
+【6】收尾四闸（2026-10-02 复跑）
+------------------------------------------------------------------------------
+$ pnpm typecheck        → EXIT=0（各包 tsc --noEmit 全 Done）
+$ pnpm lint             → EXIT=0（eslint + 渲染层规范 + 站点知识包 + LLM 入口唯一 + 合规红线 + 离线依赖门槛）
+$ pnpm format:check     → EXIT=0（All matched files use Prettier code style!）
+$ pnpm test             → EXIT=0（全部包通过；本片所在的 resume-kb 包 106 条用例见第【1】节）
+
+收口时按 §2.2 把 `GapPanel` 三栏里第二次出现的 `report.rows.filter(row => row.state === state)`
+抽成栏内局部变量 `rowsInState`（纯展示层去重，不动任何判定）。改完经 Vite HMR 后**复跑同一条 DOM 断言**，
+读数与第【2】节逐字相同（三栏 4/1/10、11 条建议、6 个证据按钮、两条展开正文、年限行仍是 emerald 色带）——
+也就是说这次重构没有改变页面，五张截图仍然对得上当前代码。

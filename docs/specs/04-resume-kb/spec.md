@@ -608,7 +608,7 @@ bm25B / bm25Weight / lexicalWeight / substringFloorScore` 必须真的在 `kb-pr
 | 4.4-02 | 拆解失败或 LLM 不可用时回落关键词抽取，功能不中断                           | U+V  | 断网断言仍产出粗粒度要求 + 界面提示      | [!]  |
 | 4.4-03 | 三态比对：命中 / 部分命中 / 缺失，每项都附证据实体 id                       | U    | 断言三态与引用                           | [x]  |
 | 4.4-04 | 反向比对：库内具备但 JD 未提的相关能力，作为差异化亮点候选输出              | U    | 单测                                     | [x]  |
-| 4.4-05 | 缺口报告界面可读（分栏 + 证据链跳转），文案 i18n                            | V    | 截图两栏 + 点击跳转                      | [ ]  |
+| 4.4-05 | 缺口报告界面可读（分栏 + 证据链跳转），文案 i18n                            | V    | 截图两栏 + 点击跳转                      | [x]  |
 | 4.4-06 | 报告不得只输出负面结论（缺失项必须同时给出可用证据或补救建议）              | C    | 输出结构断言：缺失项必带 suggestion 字段 | [x]  |
 | 4.4-07 | 比对结果稳定：同一 JD + 同一库重复运行输出一致（无随机抖动）                | U    | 两次运行 hash 相同                       | [x]  |
 | 4.4-08 | JD 输入使用本地样例文件，**测试不访问真实招聘平台**                         | C    | URL allowlist 复跑（AGENTS.md §7.2）     | [x]  |
@@ -745,6 +745,59 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 - **本片没有的**：4.4-05（缺口报告界面：分栏 + 证据链跳转 + i18n 文案，V 类）与 4.4-02 的 V 半边
   一起在 **4.4-d** 接，§5.9 的双入口（界面 + agent 工具）也在那一片；4.4-09（额度接线）与阈值标定归
   4.4-e。五个 suggestion key **尚无语言包文案**，这是按切片表留给 4.4-d 的动作，不是遗漏。
+
+### 4.4-d 落地记录（4.4-05 的界面与双入口 + 4.4-02 的 V 半边，2026-10-02）
+
+- **界面只摆事实，不做二次判定**（plan §4.4-d 判据二）：`GapPanel.tsx` 拿到的 `rows` 已经是
+  「四类表次序 → 原文起始位置」的稳定序列，三栏按 `row.state` 分桶**不重排**，栏头计数直接读
+  `report.counts`。栏内顺序等于要求在原文件里出现的顺序——界面再排一次，4.4-07 的"同一输入两次读数一致"
+  就有了第二个可能漂移的地方，而它没有任何补偿价值。
+- **三栏是三种状态，不是三种性质**，所以色带按 `state` 给、不按 `score` 给。这条在页面上的具体形状是
+  年限行：`bestScore 0.59 < hitMinScore 0.62` 却判 `matched`（年限走月区间算术，不走 token 覆盖，
+  见 4.4-c 判据一），若按分数上色就会把"够格"染成玫红。界面对这一行额外播一句
+  「年限行的分数只作展示，色带按状态给」，因为把 0.59 摆在命中栏里不解释就是可疑。
+- **证据链跳转是"就地展开"，正文另问一只手**（判据三）：报告里的证据只有 `{id, origin, score, matchedTokens}`，
+  点开才调 `kb.profile.evidenceBody(id)`。这是本片**唯一新增的公开读口**，返回 `null` 而不是抛错——
+  报告是旧读数而那条依据已被删掉是正常态，界面据此播「这条依据在库里已经找不到了」。
+  `RENDERER_ALLOWLIST` 净增 2 条（`kb.gap.report` / `kb.profile.evidenceBody`），
+  每条都有 `BridgeSignaturesCovered` 要求的签名；不新开窗、不跳路由（桌面 app 里为一段正文换视图是倒退）。
+  实体与切片两类 id 走同一只手、不问前缀——"这是实体还是区块"是服务侧的事实，界面不需要复制一份。
+- **两类 origin 都真跳得动**（真机，`tmp/dom-evidence.js`）：`kb-ba545af11d6c16b5 → "Java"`（entity），
+  `kbs-f9eccc4cf5cb30c6 → "本科 / 软件工程 / 2017-09 - 2021-06 / 江海大学"`（section_chunk）。
+  后者在页面上出现**两次**——`本科`（命中）与 `硕士`（部分命中 0.67）指向同一条学历区块，
+  这正是 4.2 裁定二（学历不产实体行）在界面上的后果，也是"凭什么叫部分命中"可查的证据。
+- **库缺席与模型缺席是两种空态**（判据四）：`KB_LIBRARY_MISSING` 给的是「还没有可比对的知识库：先在下方
+  「知识库实体」面板导入简历并同步，再回来比这份 JD。这不是「你不合格」，是根本没比过。」，
+  与"拆不出要求"（`no_requirements`）、"库里没实体"（`no_entities`）三个确定空态分开。
+  `kb-gap` 的 `[Service.init]` 因此**不** `dependsOn: [kb-profile]`（`cordis.yml` 未改动）：
+  硬依赖会让整个服务起不来，界面只能播一句"服务没起来"，而用户能自己做的那件事（导入简历）就没人告诉他了。
+  真机验证方式是把 `kb-profile` 停掉再点比对（截图 5），同时证明旧报告在 `kb/entities-changed` 后被清掉。
+- **建议句在服务层是 `{key, params}`，中文只在语言包里**（判据五）：五个 `gap.suggestion.*` key
+  在 zh-CN / en 两份齐全，`pnpm lint` 的渲染层机检只解析**字面** `t('key', {…})` 调用，所以界面里
+  写了 5 条字面建议 + 5 条字面腿播报（switch 分支），没有动态拼 key——动态拼会绕过机检，
+  §5.5 的"缺翻译即失败"在这两处就形同虚设。`years_gap` 还要按 `params.noPeriod` 分叉成两句
+  （"差 N 年"与"库里根本没有带时间的经历"是两件不同的事，不能合成一句）。
+- **双入口读的是同一个 `report()`**（判据六，§5.9）：agent 侧 `kb.gap.report` 声明
+  `effect: 'read'` + `requiresConfirmation: false`，真机整表读数（`tmp/tool-effects.js`）里
+  它与 `kb.profile.list/search` 同排，外发那六只仍是 `outbound` + 需确认。
+  `nowMs` **刻意不进工具入参**（`z.strictObject` 实测拒收 → `TOOL_INPUT_INVALID`）：
+  那等于让模型自己填"今天是几月"，而 4.4-07 要的是同一输入两次读数一致。
+  跑工具与直接调 service 的整份返回体 `JSON.stringify` **逐字节相等**（`identicalFullJson: true`），
+  不是"看起来一样"。对话卡片标题走 `ChatPanel.TOOL_LABEL_KEY` + `agent.tool.labels.kbGapReport`。
+- **复用检查**（§2.1/§2.2）：实体种类标签表从 `KbPanel.tsx` 抽到 `entity-kind-labels.ts`，
+  两个面板共用（这是本片第二次出现同一份四类映射）；`FakeAgentToolsService` 从 `gap-service.test.ts`
+  提到 `test-doubles.ts`，因为 `profile-service.test.ts` 也要挂（同包内第三处）。
+  界面没有新增任何比对、打分或换算逻辑，月数/档位/三态全部来自服务返回体。
+- **单测与门**：`gap-service.test.ts` 23 → **27 例**（工具面 4 例）、`profile-service.test.ts` 75 → **79 例**
+  （`evidenceBody` 4 例）；本包 14 文件 / **303 例**，仓库 21 包 / 83 文件 / **1192 例**全绿。
+  四闸 `typecheck` / `lint`（渲染层规范：2 个语言包、24 个源文件）/ `format:check` / `test` 收口轮全 0。
+  证据：`docs/acceptance/4.4/4.4-05-ui-and-tool-surface.txt` + 五张 `4.4-05-*.png`
+  （zh 三栏全貌 / 两类证据展开 / en 同页 / `disabled` 腿播报 / 库缺席空态）。
+- **4.4-02 的 V 半边收到哪里**：五态里在**真实页面**上看到的是 `unavailable`（缺 baseUrl/model/apiKey）
+  与 `disabled`（配置关腿）两种，截图各一张；`merged` / `rejected` / `failed` 要一个真能用的模型网关才排得出，
+  本机没有 → 4.4-02 保持 `[!]`，机制侧由 4.4-b 的 U 半边钉死。同理 `highlights` 在本语料下 0 条，
+  亮点区与「另有 N 条未展开」只有单测证据、没有截图，不写成通过。
+- **本机为 Windows**，macOS / Linux 的运行期验证无法在本机完成 → 相关条目 BLOCKED。
 
 ## 4.5 定向内容生成（强制事实校验闭环）
 

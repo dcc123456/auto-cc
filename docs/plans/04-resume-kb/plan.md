@@ -1187,3 +1187,41 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
 
 **本片不做的事**：不做报告导出、不做阈值调参界面、不做"从 jobs 表某条 JD 打开报告"、
 不接 `entitlement.gate` 的扣额度（4.4-09 归 4.4-e）、不落新表（号段 15 继续空着）。
+
+## 4.4-d 落地记录（2026-10-02，缺口报告界面 + agent 工具面）
+
+判据细节、真机 DOM 断言、四闸输出见 spec「4.4-d 落地记录」与
+`docs/acceptance/4.4/4.4-05-ui-and-tool-surface.txt` + 五张 `4.4-05-*.png`。这里只记**定稿与落地的差异**
+和三处后来者会踩的现场事实。
+
+- **亮点区没有做成"右侧第四栏"**（定稿判据二的偏离）：落地是**三栏下方独立一节**
+  （`gap.highlights` + 每条 `entityId · 种类 · score · 相关词`）。理由是三栏已经占满 `grid-cols-3`，
+  再切一份宽度会让每栏的 JD 引文与证据行频繁折行；而亮点判的是"库内有、JD 没提"，
+  与三栏的"JD 要什么、我有没有"是**两个方向**，塞进同一排视觉上就成一栏状态了。
+  `highlightsDropped > 0` 仍显式给"另有 N 条未展开"，截断可见这条没打折。
+- **四张图变五张**：定稿的④把"腿状态"与"库缺席空态"写在一张里，落地拆成两张——
+  两者是**互斥的页面状态**（库没装配时连报告都没有，同一张图拍不出两件事），
+  合拍只会得到一张空态图 + 一句"另外腿也关着"的口头说明。
+- **现场语料要经真实入口灌，且 docId 是内容哈希**：`resume.parse.fromFile` 得到
+  `docId = resume-<sha256(正文).slice(0,12)>`，所以**改一次 demo 简历再同步 = 库里两份文档**
+  （实体 id 内嵌 docId，旧 doc 的行 `remove()` 抛 `KB_ENTITY_DERIVED`，也没有 doc 级删除口），
+  10 条变 20 条、摘要行就开始说谎。正确做法：停 app → 用 `node:sqlite` 清空 `tmp/dev-userdata/store.db`
+  的 `kb_*` / `resume_*` 表（FTS 影子表 `*_fts_*` 不能 DELETE，跳过）→ 起 app → 只同步一次。
+  脚本留在 `tmp/wipe-kb.mjs` / `tmp/seed-gap-kb.js`（tmp 不入库，§7.5）。
+  为了让学历那条 `section_chunk` 证据可达，demo 简历的教育段加了「本科」二字——
+  `libraryEducationOf` 只认 `EDUCATION_TIERS` 别名，没有别名就没有档位，也就没有那条跳转。
+- **`window.autoCC` 的命名空间按第一个点切**（`packages/preload/src/index.ts`）：
+  `agent.tools.list` 在页面上是 `b.agent['tools.list']()`，**不是** `b.agent.tools.list()`。
+  探针按后者写会得到 `Cannot read properties of undefined (reading 'list')`，
+  看起来像"agent 工具面没接线"，其实是取错了键。同理 `kb.gap.report` → `b.kb['gap.report']`。
+  另外 `agent.tools.call` 的返回是**两层**：外层 `BridgeReply{ok,value}`，内层才是协议内的
+  `ToolCallReply{ok,code|value}`——工具失败不抛异常，所以探针要读 `reply.value.code` 才看得到
+  `TOOL_INPUT_INVALID`。
+- **`nowMs` 拒收是实测出来的**：工具入参用 `z.strictObject`，真机传 `{jdText, nowMs: 1}` 得
+  `TOOL_INPUT_INVALID`（不是"被忽略"）。这条边界只有 strict 才守得住，写成 `z.object` 就会静默收下
+  一个模型编出来的时间基准。
+- **下一片**：4.4-e（额度/合规收口 + 阈值标定）。它要接 `4.4-09`（LLM 计入额度时必经 `entitlement.gate`，
+  本地调用不误扣），并把五个阈值（`evidenceHitMinScore` / `evidencePartialMinScore` / `yearsPartialRatio` /
+  `highlightMinScore` / `maxHighlights`）从"未标定"推到"有依据"——界面上那句
+  「各阈值当前未标定，可在 cordis.yml 的 kb-gap 段调整」在标定完成时要跟着改。
+  `4.4-02` 的 `[!]` 也在那一片收口（要一个真能用的模型网关才能拍到 `merged` / `rejected` / `failed`）。
