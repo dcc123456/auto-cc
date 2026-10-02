@@ -230,10 +230,13 @@ interface ModelAttempt {
 
 /**
  * 这次是否真的把提示词发出去了（视图里的 `promptVersion` 与日志尾部的版本段共用这条判据）。
+ *
+ * 对外可见是因为 4.5 的生成腿共用同一套五态与同一条"没问过就不许报版本"的判断（§2.2）：
+ * 生成记录表里的 `prompt_version` 也必须在这个函数说"没发过"时为 null，两处各写一遍迟早会分叉。
  * @param status 模型腿结局
  * @returns 走到"问"这一步（含问了但失败 / 被拒）时为 true
  */
-function wasAsked(status: GapModelStatus): boolean {
+export function wasAsked(status: GapModelStatus): boolean {
   return status !== 'disabled' && status !== 'unavailable';
 }
 

@@ -10,6 +10,9 @@
  * 4.2 带来 `entities.ts`（实体派生）与 `evidence.ts`（反查打分），4.3-a 带来 `chunks.ts`（检索切片派生），
  * 4.3-b 带来 `search.ts`（切片 → 分数的合并排序）——
  * 同一个规矩：切分与派生是纯函数，落库与事务只在 `profile-service.ts`。
+ * 4.4 带来 `requirements*.ts` / `requirements-compare.ts` / `gap-service.ts`（JD 拆解与三态比对），
+ * 4.5 带来 `generate-reorder.ts`（顺序）/ `generate-model.ts`（改写）/ `fact-check.ts`（三条确定性判据）
+ * 与装配层 `generate-service.ts`——判定仍然全在纯函数里，出网、落库与播报只发生在服务里。
  */
 export { extractPeriod, parsePeriod, type ParsedPeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
 export {
@@ -80,6 +83,24 @@ export {
   type GapSuggestion,
   type GapSuggestionKey,
 } from './requirements-compare.js';
+// 4.5-b 的生成轨入口（spec 4.5-01 / 10 / 12）。同 4.4 的规矩：对外只给**服务与读数形状**，
+// 三条确定性判据（`fact-check.ts`）与模型腿的读写函数（`generate-model.ts`）不外露——
+// 绕过 `resume.generate` 自己校验或自己拼提示词就是开第二条生成通道（§2.5），
+// 而那条通道上的产物不会落 `resume_generations` 那一行记录（4.5-10 的复盘面会缺一半）。
+// `GENERATION_OUTCOMES` 与迁移号段跟着对外：界面要按三种结局分支，`packages/main` 的注册表要写号段。
+export {
+  GENERATION_OUTCOMES,
+  RESUME_GENERATION_MIGRATION_VERSION,
+  ResumeGenerateService,
+  kbGenerateSchema,
+  type GenerationChecksView,
+  type GenerationEvidenceView,
+  type GenerationOutcome,
+  type GenerationReceipt,
+  type GenerationRewriteView,
+  type GenerationView,
+  type KbGenerateConfig,
+} from './generate-service.js';
 // 反查结果的形状（4.2-03）：`EvidenceRef` 是将来 `kb.profile.evidenceFor` 过 IPC 的返回体，
 // 所以只导出形状；`rankEvidence` / `evidenceTextOf` 属包内纯函数，不对外（§2.4 不导出无人调用的入口）。
 // 备份编解码（`backup.ts`，4.2-08）同样只在包内被 `exportBackup` / `importBackup` 调用，格式对外只以

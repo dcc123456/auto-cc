@@ -156,6 +156,8 @@ describe('4.5-02 判据一：顺序由 4.4 的读数算出', () => {
     const movedEntry = result.bases.find((basis) => basis.id === 'experience-2' && basis.level === 'entry');
     expect(movedEntry).toMatchObject({ fromIndex: 1, toIndex: 0, score: 0.9 });
     expect(movedEntry?.hits).toHaveLength(1);
+    // 依据带的是证据 id 而不是正文（4.4-d 的口径）：界面拿它去问 `kb.profile.evidenceBody`。
+    expect(movedEntry?.hits[0]?.evidenceId).toBe(draftFor(drafts, 'experience-2', 'achievement').entityId);
     // 被挤后的条目同样是"真正换了位置的对象"：分数 0、依据为空数组，界面因此能说"它没拿到据"而不是"它没动"。
     const pushedBack = result.bases.find((basis) => basis.id === 'experience-1' && basis.level === 'entry');
     expect(pushedBack).toMatchObject({ fromIndex: 0, toIndex: 1, score: 0, hits: [] });
@@ -241,6 +243,38 @@ describe('4.5-02 判据一：顺序由 4.4 的读数算出', () => {
     ];
     const result = reorderDocument(doc, rows, drafts);
     expect(result.bases).toHaveLength(0);
+  });
+
+  it('每条依据的证据 id 都能回查到本份文档派生出的实体（4.5-06 的重排半边：不许有查无此据的依据）', () => {
+    // 与上一例是一对：那例判"对不上的不许进依据"，这例判"进了依据的一定对得上"。
+    // 两例合起来才是那句"任何输出内容都能反查到证据 id"——只做其中一半都会漏。
+    const rows = [
+      makeRow('Kubernetes', 'hard_skill', [
+        makeEvidence(draftFor(drafts, 'experience-2', 'achievement'), 0.9, ['kubernetes']),
+      ]),
+      makeRow('订单中台', 'hard_skill', [makeEvidence(draftFor(drafts, 'project-1', 'project'), 0.6, ['订单'])]),
+    ];
+    const known = new Set(drafts.map((draft) => draft.entityId));
+    // 反查表按「要求代表词 + 证据 id」建：`sortHits` 就是按这个键去重的，两处必须用同一个键（§2.5）。
+    const evidenceOf = new Map<string, GapEvidence>();
+    for (const row of rows) {
+      for (const evidence of row.evidence) evidenceOf.set(`${row.item.label}\u0001${evidence.id}`, evidence);
+    }
+    const result = reorderDocument(doc, rows, drafts);
+    // 区块层与条目层都要有依据，否则这个循环只是空转（`toHaveLength` 之前先确认它非空）。
+    expect(result.bases.some((basis) => basis.level === 'section')).toBe(true);
+    expect(result.bases.some((basis) => basis.level === 'entry')).toBe(true);
+    for (const basis of result.bases) {
+      for (const hit of basis.hits) {
+        expect(known.has(hit.evidenceId)).toBe(true);
+        // 分数与命中 token 从证据原样搬过来：排序的依据与反查的依据必须是同一份读数。
+        const source = evidenceOf.get(`${hit.label}\u0001${hit.evidenceId}`);
+        expect(source?.score).toBe(hit.score);
+        expect(source?.matchedTokens).toEqual(hit.tokens);
+      }
+      // 拿到分的依据一定非空；空依据只属于"被挤后的零分对象"，那是上一段注释里的那条区分。
+      if (basis.score > 0) expect(basis.hits.length).toBeGreaterThan(0);
+    }
   });
 
   it('summary / education 永远拿不到分：它们不产实体行，因此只会被挤后而不会被提前', () => {

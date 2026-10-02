@@ -13,7 +13,8 @@
  * 「拆出来的要求能不能比回库里那些行」只在真实装配路径上才成立，手写一批实体当库等于没接库（§2.1）。
  * 全链 hash（4.4-07）也在这一组里复跑——拆解腿那半边的 hash 稳定在 4.4-a 已归档。
  *
- * 模型腿用的是测试替身（`FakeChatService`）而不是真端点：本机没有对话模型的 key，
+ * 模型腿用的是测试替身（`test-doubles.ts` 里的 `FakeChatService`，4.5-b 是它的第二个消费者，
+ * 所以从本文件抽了出去）而不是真端点：本机没有对话模型的 key，
  * 而 4.4-02 要判的是「五态可区分 + 回落不断流」，那需要一个**可控**的回复。
  * 替身只在用例显式要求时才挂进装配——不挂就是真实装配里注掉 `llm` 那一行的形态（spec 4.4-02 的
  * 「装配缺包时功能照常」半边），这条判据只有分开挂才有意义。
@@ -21,16 +22,7 @@
  * 4.4-08 的另一半（不联网）在这里是**结构性成立**而不是断言：替身一个端点都不碰、
  * 出网入口只在 `packages/llm` 由 `pnpm lint` 的 `check-llm-single-entry.ts` 机检。
  */
-import {
-  AppError,
-  Context,
-  NO_CONFIG,
-  Service,
-  asApp,
-  type ChatCompletionView,
-  type ChatRequestView,
-  type Fiber,
-} from '@auto-cc/core';
+import { AppError, Context, NO_CONFIG, asApp, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
@@ -40,14 +32,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import { KbGapService, kbGapSchema, type KbGapConfig, type GapReportView } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
 import { KbProfileService, kbProfileSchema } from './profile-service.js';
 import { parseResumeText } from './sections.js';
 import { REQUIREMENT_LEXICON_VERSION } from './requirements.js';
 import { REQUIREMENT_PROMPT_VERSION } from './requirements-model.js';
-import { FakeAgentToolsService } from './test-doubles.js';
+import { FakeAgentToolsService, FakeChatService } from './test-doubles.js';
 
 /** 固定样例 JD（虚构）：四类齐全，正文里埋一句可当哨兵的长句与一个假手机号。 */
 const SAMPLE_JD = [
@@ -68,57 +59,6 @@ const GOOD_REPLY = `{"items":[{"kind":"hard_skill","label":"订单链路","quote
  * 手抄一份等于让测试跑在一把没人用的尺子上——改数不重跑标定要在这里发红，而不是继续绿。
  */
 const DEFAULT_CONFIG: KbGapConfig = kbGapSchema.parse({});
-
-/** 替身的可调项（走 `static Config`，与真 `llm.chat` 同一条 cordis 传参路径，见 §9 实测 1.3）。 */
-const fakeChatSchema = z.strictObject({
-  available: z.boolean(),
-  model: z.string().nullable(),
-  reply: z.string(),
-  fail: z.boolean(),
-});
-
-/**
- * 假的 `llm.chat`（spec 4.4-02 的单测替身，与 4.3-d 的 `FakeEmbedService` 同一种替身）。
- *
- * 只回一段写死的文本，可选地按指令抛 `LLM_REQUEST_FAILED`；`calls` 记下每次收到的消息序列，
- * 用来断言「不可用时一次都不发」（那是 `llm.chat` 自己的判据，这里当作替身的自检）。
- */
-class FakeChatService extends Service {
-  static provide = 'llm.chat';
-  static Config = fakeChatSchema;
-
-  /** 每次 `complete()` 收到的消息序列（断言提示词确实带着原文）。 */
-  readonly calls: Array<Array<{ role: 'system' | 'user'; content: string }>> = [];
-
-  constructor(
-    ctx: Context,
-    private readonly options: z.infer<typeof fakeChatSchema>,
-  ) {
-    super(ctx, 'llm.chat');
-  }
-
-  /** 契约见 `ChatGateway.status`。 */
-  status(): { available: boolean; missing: Array<'baseUrl' | 'model' | 'apiKey'>; model: string | null } {
-    if (!this.options.available) return { available: false, missing: ['baseUrl', 'model', 'apiKey'], model: null };
-    return { available: true, missing: [], model: this.options.model };
-  }
-
-  /**
-   * 契约见 `ChatGateway.complete`。
-   * 不写成 `async`：存根里没有任何 `await` 表达式，加 `async` 只是白造一层微任务；
-   * 契约要的是「返回 Promise」，失败半边用 `Promise.reject` 给的就是同一个被调用方 `catch` 住的错误。
-   * 用普通方法而不是箭头属性：唯一的调用点是 `gateway.complete({...})`，`this` 由调用点绑定。
-   */
-  complete(request: ChatRequestView): Promise<ChatCompletionView> {
-    this.calls.push(request.messages);
-    if (this.options.fail) {
-      return Promise.reject(
-        new AppError('LLM_REQUEST_FAILED', '模型请求超时（测试存根）', 'llm.chat', { reason: 'timeout' }),
-      );
-    }
-    return Promise.resolve({ text: this.options.reply, model: this.options.model ?? 'fake-model' });
-  }
-}
 
 const tempDirs: string[] = [];
 const fibers: Fiber[] = [];
@@ -163,7 +103,7 @@ async function bootGap(config: Partial<KbGapConfig> = {}, chat?: ChatSetup) {
       await ctx.plugin(FakeChatService, {
         available: chat.available ?? true,
         model: chat.model === undefined ? 'fake-jd-model' : chat.model,
-        reply: chat.reply ?? GOOD_REPLY,
+        replies: [chat.reply ?? GOOD_REPLY],
         fail: chat.fail ?? false,
       }),
     );

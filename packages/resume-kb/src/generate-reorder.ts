@@ -30,6 +30,12 @@ import type { RequirementKind } from './requirements.js';
 
 /** 一条重排依据里引用的一次命中（把 `RequirementItem` 的最小可读投影出来，界面直接拼文案）。 */
 export interface ReorderHit {
+  /**
+   * 撑起这次命中的知识库证据 id（`GapEvidence.id`，界面与生成记录都只带 id，正文另问
+   * `kb.profile.evidenceBody`——4.4-d 定的口径，个人信息不随依据整份过 IPC，§8.5）。
+   * 4.5-06 要的"输出内容能反查到证据 id"用的就是这一位。
+   */
+  readonly evidenceId: string;
   /** JD 里那条要求的代表词（来自受控词表或模型腿，不进本文件的判断）。 */
   readonly label: string;
   /** 四类之一，界面按类分组显示。 */
@@ -68,8 +74,13 @@ export interface ReorderResult {
   readonly movedEntries: number;
 }
 
-/** 一个条目（或区块）的相关性读数。 */
-interface Relevance {
+/**
+ * 一个条目（或区块）的相关性读数。
+ *
+ * 对外可见是有目的的：`resume.generate` 用它拼 4.5-06 的证据视图（哪些 id 撑着文档里的哪一条），
+ * 那份映射与重排用的是同一个口径，分成两处算就会出现"界面显示的依据和排序的依据不是一份东西"（§2.5）。
+ */
+export interface Relevance {
   readonly score: number;
   readonly hits: readonly ReorderHit[];
 }
@@ -108,7 +119,10 @@ function sortHits(hits: readonly ReorderHit[]): ReorderHit[] {
  * @param drafts 由同一份文档派生出的实体草案（`deriveEntities(document)` 的返回）
  * @returns 条目 id → 相关性；未拿到任何证据的条目不在表里（读不到即 0 分）
  */
-function relevanceOf(rows: readonly GapRequirementView[], drafts: readonly KbEntityDraft[]): Map<string, Relevance> {
+export function evidenceOfEntries(
+  rows: readonly GapRequirementView[],
+  drafts: readonly KbEntityDraft[],
+): Map<string, Relevance> {
   const entryOfEntity = new Map<string, string>();
   for (const draft of drafts) {
     if (draft.entryId !== null) entryOfEntity.set(draft.entityId, draft.entryId);
@@ -120,6 +134,7 @@ function relevanceOf(rows: readonly GapRequirementView[], drafts: readonly KbEnt
       const entryId = entryOfEntity.get(evidence.id);
       if (entryId === undefined) continue;
       const hit: ReorderHit = {
+        evidenceId: evidence.id,
         label: row.item.label,
         kind: row.item.kind,
         score: evidence.score,
@@ -187,7 +202,7 @@ export function reorderDocument(
   rows: readonly GapRequirementView[],
   drafts: readonly KbEntityDraft[],
 ): ReorderResult {
-  const entryRelevance = relevanceOf(rows, drafts);
+  const entryRelevance = evidenceOfEntries(rows, drafts);
   const bases: ReorderBasis[] = [];
 
   // 区块分由**文档结构**聚合，而不是由实体 kind 猜：一条 `achievement` 实体的 kind 是

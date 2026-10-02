@@ -24,6 +24,18 @@ const LLM_PACKAGE = 'llm';
 /** 允许的 `llm.*` provider 名（超出即视为第二套客户端）。 */
 const ALLOWED_PROVIDERS = ['chat', 'embed'];
 
+/**
+ * 判定"只服务于测试的文件"：`.test.ts` / `.spec.ts` 是用例文件，`test-doubles.ts` 是多份用例共用的替身模块。
+ *
+ * 后者不能叫 `.test.ts`——那样 vitest 会把它当一个套件收集并报"没有任何用例"，
+ * 而它存在的理由正是 §2.2（同一个替身在 4.4 与 4.5 的用例里各抄一份就是重复实现）。
+ * 这条口径与 `scripts/check-compliance-redlines.ts:101` 逐字相同，两处不该各判各的（§2.5）。
+ * @param rel 相对仓库根的路径（分隔符已归一为 `/`）
+ * @returns 该文件的 `llm.*` 声明不该算成"真实实现"时为 true
+ */
+const isTestOnlyModule = (rel: string): boolean =>
+  /\.(?:test|spec)\.[cm]?ts$/.test(rel) || rel.endsWith('/test-doubles.ts');
+
 /** 一条「这是在直接够模型」的痕迹特征。 */
 const MODEL_TRACES: readonly (readonly [RegExp, string])[] = [
   [/chat\/completions/, 'chat completion 端点路径'],
@@ -77,7 +89,7 @@ for (const file of allFiles) {
     // 测试替身不计入「声明者」：它同样 `provide = 'llm.embed'`（服务是按名字查的，替身必须占同一个名字），
     // 但它一个端点都不碰、向量来自内存 fixture。这条断言守的是「一个名字只有一个**真实实现**」，
     // 把替身算进来就等于禁止给 `llm.embed` 写用例；而端痕迹那一断言（下面）不豁免测试文件。
-    if (declared && !/\.test\.[cm]?ts$/.test(file)) {
+    if (declared !== undefined && !isTestOnlyModule(relative(file))) {
       providerDeclarations.set(declared, [
         ...(providerDeclarations.get(declared) ?? []),
         `${relative(file)}:${String(index + 1)}`,
