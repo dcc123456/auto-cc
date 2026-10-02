@@ -204,7 +204,6 @@ export function GeneratePanel() {
     }
     void run(t('generate.source'), () => bridge?.kb['profile.evidenceBody'](evidenceId), {
       apply: (value) => setBodies((current) => ({ ...current, [evidenceId]: value?.text ?? null })),
-      describe: () => undefined,
     });
   };
 

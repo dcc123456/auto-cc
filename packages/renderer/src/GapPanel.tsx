@@ -134,7 +134,6 @@ export function GapPanel() {
     }
     void run(t('gap.evidence'), () => bridge?.kb['profile.evidenceBody'](evidence.id), {
       apply: (value) => setBodies((current) => ({ ...current, [evidence.id]: value?.text ?? null })),
-      describe: () => undefined,
     });
   };
 
