@@ -1,16 +1,21 @@
 /**
- * `llm.chat` —— 全仓**唯一**的模型出口（spec 2.5-12，plan §12.0）。
+ * `llm.chat` —— 全仓**唯一**的对话模型出口（spec 2.5-12，plan §12.0）。
  *
  * 它只做三件事：拼一次 OpenAI 兼容的 chat completion 请求、按超时掐断、把失败变成结构化错误。
  * 不含 prompt 业务、不落库、不重试 —— 那些都属于调用方（话术生成在 `outbound.script`，
  * 简历内容在 P4，agent 规划在 P5）。之所以单独成包：`AGENTS.md §2.7` 禁的是「第二套 LLM 客户端」，
  * 而这句话隐含「第一套得有唯一归属」；不先立一个，三个计划会各长出一个 `fetch`。
  *
+ * 同包的 `llm.embed`（spec 4.3-07 / 08，见 `embed.ts`）是这个客户端的**第二个方法**而不是第二套客户端：
+ * 传输骨架共用 `http.ts`，只有配置各自独立——DeepSeek 没有 embeddings 端点而硅基流动有，
+ * 两者绑在一起配就会变成「为了向量增强而改坏话术生成」（plan §4.3-d 证据 [4]）。
+ *
  * 零新依赖（不引 SDK）：请求形态按 DeepSeek / OpenAI 兼容端点实测（plan §12.6 S3）。
  * key 不进 `cordis.yml`（那是入库的清单，§8.6 禁止把密钥写进仓库），只从环境变量读。
  */
 import { AppError, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
+import { joinEndpoint, postJson } from './http.js';
 
 /** 消息角色：P2 的话术生成只用 system + user，assistant/tool 留给 P5 的对话循环。 */
 export const chatRoleSchema = z.enum(['system', 'user']);
@@ -72,37 +77,13 @@ export interface LlmStatus {
   endpoint: string | null;
 }
 
-/** 对端错误体的截断长度（错误文本会进界面与日志，不能整页 HTML 塞进去）。 */
-const ERROR_TEXT_LIMIT = 200;
-
 /**
  * 把配置里的端点前缀与 `chat/completions` 拼成完整 URL。
  * @param baseUrl 端点前缀（可能带也可能不带尾斜杠，兼容 `https://api.deepseek.com` 与 `.../v1/`）
  * @returns 可直接 POST 的完整地址
  */
 function completionsUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-}
-
-/**
- * 从对端的错误响应里读出一句人话。
- * @param status HTTP 状态码（拼进文案，便于区分 401 鉴权与 429 限流）
- * @param body 对端返回的原始文本（实测：无 key 时 DeepSeek 回的是**纯文本**而不是 JSON，两种都要能吃下）
- * @returns 截断到 200 字符的错误描述，进 `LLM_REQUEST_FAILED` 的 message
- */
-function describeError(status: number, body: string): string {
-  const trimmed = body.trim();
-  let message = trimmed;
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(trimmed) as { error?: { message?: string; code?: string } };
-      message = parsed.error?.message ?? parsed.error?.code ?? trimmed;
-    } catch {
-      // 不是合法 JSON（或被截断），退回原文，不为了清洗把真实信息丢掉。
-    }
-  }
-  const clipped = message.length > ERROR_TEXT_LIMIT ? `${message.slice(0, ERROR_TEXT_LIMIT)}…` : message;
-  return `对端返回 ${String(status)}：${clipped}`;
+  return joinEndpoint(baseUrl, 'chat/completions');
 }
 
 export class LlmChatService extends Service {
@@ -168,35 +149,20 @@ export class LlmChatService extends Service {
       temperature: parsed.data.temperature ?? this.options.temperature,
       stream: false,
     };
-    let response: Response;
-    try {
-      response = await fetch(status.endpoint as string, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.readKey()}` },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.options.timeoutMs),
-      });
-    } catch (cause) {
-      const isTimeout = cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
-      throw new AppError(
-        'LLM_REQUEST_FAILED',
-        isTimeout ? `模型请求超时（${String(this.options.timeoutMs)}ms）` : `模型请求发不出去：${this.reason(cause)}`,
-        'llm.chat',
-        { endpoint: status.endpoint, reason: isTimeout ? 'timeout' : 'network' },
-      );
-    }
-    if (!response.ok) {
-      throw new AppError('LLM_REQUEST_FAILED', describeError(response.status, await response.text()), 'llm.chat', {
-        endpoint: status.endpoint,
-        status: response.status,
-      });
-    }
-    const payload = (await response.json().catch(() => null)) as {
+    // 传输骨架与 `llm.embed` 共用（§2.2）：这里只负责「请求体长什么样」和「回复怎么读」。
+    const payload = (await postJson({
+      endpoint: status.endpoint as string,
+      apiKey: this.readKey(),
+      body,
+      timeoutMs: this.options.timeoutMs,
+      source: 'llm.chat',
+      label: '模型请求',
+    })) as {
       model?: string;
       choices?: Array<{ message?: { content?: string } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
-    } | null;
-    const text = payload?.choices?.[0]?.message?.content?.trim();
+    };
+    const text = payload.choices?.[0]?.message?.content?.trim();
     if (!text) {
       // 空回复不能当成功返回：下游（打招呼文案）会把它当真内容发出去。
       throw new AppError('LLM_REQUEST_FAILED', '模型返回空回复', 'llm.chat', {
@@ -205,24 +171,17 @@ export class LlmChatService extends Service {
       });
     }
     this.ctx.logger.info(
-      `模型回复已取回：${text.length} 字 · 用量 ${String(payload?.usage?.prompt_tokens ?? '?')}/${String(
-        payload?.usage?.completion_tokens ?? '?',
+      `模型回复已取回：${text.length} 字 · 用量 ${String(payload.usage?.prompt_tokens ?? '?')}/${String(
+        payload.usage?.completion_tokens ?? '?',
       )} tokens`,
     );
     return {
       text,
-      model: payload?.model ?? (status.model as string),
-      promptTokens: payload?.usage?.prompt_tokens ?? null,
-      completionTokens: payload?.usage?.completion_tokens ?? null,
+      model: payload.model ?? (status.model as string),
+      promptTokens: payload.usage?.prompt_tokens ?? null,
+      completionTokens: payload.usage?.completion_tokens ?? null,
     };
   };
-
-  /**
-   * 把未知异常压成一句短描述（只进日志与错误详情，不含 key）。
-   * @param cause 捕获到的异常对象
-   * @returns 异常消息或字符串化结果
-   */
-  private reason = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
   [Service.init](): void {
     const status = this.status();
@@ -239,3 +198,6 @@ declare module '@auto-cc/core' {
     'llm.chat': LlmChatService;
   }
 }
+
+/** 同包的向量出口（spec 4.3-07 / 08）：包外只经这一个入口用它（§4.2）。 */
+export * from './embed.js';

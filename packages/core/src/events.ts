@@ -386,6 +386,44 @@ export interface ResumeChannelSource {
   deliverablePlatforms(): string[];
 }
 
+/**
+ * 向量网关的可用性读数（spec 4.3-08）。
+ *
+ * 只露 `available` / `missing` / `model` 三项：`missing` 让界面能说清「是没配端点还是没配 key」，
+ * 而 `model` 是知识库向量表的**失效判据**（换模型即整表重算，见 plan §4.3-d 实现形状 3），
+ * 所以取向量的一方必须拿得到它，不能只问「能不能用」。
+ */
+export type EmbedStatusView = {
+  available: boolean;
+  /** 不可用的原因项，与 `llm.chat` 的 `LlmStatus.missing` 同一组词。 */
+  missing: Array<'baseUrl' | 'model' | 'apiKey'>;
+  model: string | null;
+};
+
+/**
+ * 把一段文本变成向量的询问面（spec 4.3-07 / 08），实现方是 `llm.embed`。
+ *
+ * 为什么形状声明在 L0 而不是让 `resume-kb` 直接 import `@auto-cc/plugin-llm`：
+ * 知识库（L2 领域）与模型出口（L2 领域）同级，互相 import 会新开一条横向依赖（AGENTS.md §4.1），
+ * 而 `static inject = ['llm.embed']` 会把「向量增强」变成硬依赖——4.3-04 要的正是
+ * 「没有 key、没有这个插件时检索照常」，所以这里与 `GreetChannelSource` / `PagePacer` 同套路：
+ * core 声明最小形状，实现方结构上满足，调用方**用的时候按名字现问**（AGENTS.md §9 的 2.5 实测条）。
+ */
+export interface EmbedGateway {
+  /**
+   * 当前是否可用。**纯本地判定，一次网络都不发**（同 `llm.chat.status()`）。
+   * @returns 可用性读数
+   */
+  status(): EmbedStatusView;
+  /**
+   * 把若干段文本编成向量。
+   * @param texts 待编码文本（顺序即返回向量的顺序）；空数组时实现方**不发请求**
+   * @returns 实际模型名、统一维度（无向量时为 null）与逐条向量
+   * @throws 未配置时 `LLM_UNAVAILABLE`；网络 / 超时 / 非 2xx / 响应形态不合约定时 `LLM_REQUEST_FAILED`
+   */
+  embed(texts: readonly string[]): Promise<{ model: string; dim: number | null; vectors: number[][] }>;
+}
+
 /** 一份计划（spec 2.4-01）：线性节点序列 + 由内容算出的指纹。 */
 export type WorkflowPlanView = {
   id: string;

@@ -13,6 +13,7 @@ import type {
   AgentToolDeclaration,
   AgentToolRegistry,
   ConsentGate,
+  EmbedGateway,
   GreetChannelSource,
   PagePacer,
   ResumeChannelSource,
@@ -221,6 +222,20 @@ export function pagePacerOf(ctx: Context): PagePacer {
  */
 export function consentGateOf(ctx: Context): ConsentGate {
   return ctx.get('sessions') as ConsentGate;
+}
+
+/**
+ * 取向量网关（spec 4.3-07 / 08 的可选增强），实现方是 `llm.embed`。
+ *
+ * 做成**软取**（不写 `static inject`）是 4.3-04 的前提：知识库必须在「没装向量插件、没配 key、
+ * 断了网」时照常检索，硬依赖会让摘掉 `llm-embed` 连带把 `kb-profile` 降成 PENDING。
+ * 与 `agentToolsOf` / `greetChannelsOf` 同一套路：形状在 L0，实现方结构上满足，调用方现问现用
+ * （AGENTS.md §9 的 2.5 实测条——存第二份事实会在热改配置后静默变空）。
+ * @param ctx 调用方的上下文
+ * @returns 询问面；`llm.embed` 没装时为 undefined，此时调用方退回纯词面检索并如实报 `unavailable`
+ */
+export function embedGatewayOf(ctx: Context): EmbedGateway | undefined {
+  return maybeService<EmbedGateway>(ctx, 'llm.embed');
 }
 
 /** Service name convention: `域.能力`, e.g. `store.db`, `jd.store`. */

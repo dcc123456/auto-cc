@@ -8,6 +8,7 @@
 import { asApp, Context } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { bodyText, json, stubFetch } from './fetch-stub.js';
 import type { LlmConfig } from './index.js';
 import { LlmChatService } from './index.js';
 
@@ -43,34 +44,6 @@ async function boot(config: Partial<LlmConfig> = {}, key = 'sk-test-abcdef'): Pr
   await ctx.plugin(LlmChatService, { ...CONFIG, ...config });
   return { llm: asApp(ctx)['llm.chat'] };
 }
-
-/**
- * 把 `globalThis.fetch` 换成存根并记录请求。
- * @param reply 存根回的响应（Response 或抛出的异常工厂）
- * @returns `requests` 每次调用的 url 与 init，`calls` 次数
- */
-function stubFetch(reply: () => Promise<Response> | Promise<never>) {
-  const requests: { url: string; init: RequestInit }[] = [];
-  const original = globalThis.fetch;
-  const stub: typeof fetch = (input, init) => {
-    // `RequestInfo | URL` 里只有字符串这一支是被测代码实际传的，其余分支占位成可辨识的假地址。
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : '(request)';
-    requests.push({ url, init: init ?? {} });
-    return reply();
-  };
-  globalThis.fetch = stub;
-  return { requests, restore: () => (globalThis.fetch = original) };
-}
-
-/**
- * 把存根记录下来的请求体取成文本。
- * @param init 存根收到的 fetch 第二参数
- * @returns `body` 的字符串形态（被测代码只传字符串；非字符串按空对象处理，测试会因此失败而不是误判）
- */
-const bodyText = (init: RequestInit): string => (typeof init.body === 'string' ? init.body : '{}');
-
-const json = (value: unknown, status = 200): Response =>
-  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
 describe('llm.chat 的可用性判定（spec 2.5-01 前提：回落必须是可测的）', () => {
   it('配置齐全：status 报可用，端点由前缀拼出且不带重复斜杠', async () => {
