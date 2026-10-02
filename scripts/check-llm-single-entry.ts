@@ -13,28 +13,20 @@
  *
  * 判定按**字符串字面量**而不是标识符：调用方伪造端点的方式是写一个新 URL，不是改函数名。
  */
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import process from 'node:process';
+import { filesIn, isTestOnlyModule, packageDirs, relative } from './internal/scan.js';
 
-const repoRoot = path.resolve(import.meta.dirname, '..');
-const packagesDir = path.join(repoRoot, 'packages');
 /** 唯一的模型出口包：只有这里的源码允许出现下列痕迹。 */
 const LLM_PACKAGE = 'llm';
 /** 允许的 `llm.*` provider 名（超出即视为第二套客户端）。 */
 const ALLOWED_PROVIDERS = ['chat', 'embed'];
 
 /**
- * 判定"只服务于测试的文件"：`.test.ts` / `.spec.ts` 是用例文件，`test-doubles.ts` 是多份用例共用的替身模块。
- *
- * 后者不能叫 `.test.ts`——那样 vitest 会把它当一个套件收集并报"没有任何用例"，
- * 而它存在的理由正是 §2.2（同一个替身在 4.4 与 4.5 的用例里各抄一份就是重复实现）。
- * 这条口径与 `scripts/check-compliance-redlines.ts:101` 逐字相同，两处不该各判各的（§2.5）。
- * @param rel 相对仓库根的路径（分隔符已归一为 `/`）
- * @returns 该文件的 `llm.*` 声明不该算成"真实实现"时为 true
+ * 只服务于测试的文件（`.test.ts` / `.spec.ts` / `test-doubles.ts`）不算"真实实现"。
+ * 口径来自 `scripts/internal/scan.ts`，与 `check-compliance-redlines.ts` 的同一条判断共用一份。
  */
-const isTestOnlyModule = (rel: string): boolean =>
-  /\.(?:test|spec)\.[cm]?ts$/.test(rel) || rel.endsWith('/test-doubles.ts');
+const isScannable = (name: string): boolean => /\.(ts|tsx|mts|cts|js|json|yml)$/.test(name);
 
 /** 一条「这是在直接够模型」的痕迹特征。 */
 const MODEL_TRACES: readonly (readonly [RegExp, string])[] = [
@@ -51,30 +43,10 @@ const MODEL_TRACES: readonly (readonly [RegExp, string])[] = [
 
 const failures: string[] = [];
 
-/**
- * 递归列出目录下的源码文件（跳过构建产物与依赖）。
- * @param dir 起始目录
- * @returns 绝对路径列表
- */
-async function filesIn(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.isDirectory() && ['node_modules', 'dist', 'out'].includes(entry.name)) continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...(await filesIn(full)));
-    else if (/\.(ts|tsx|mts|cts|js|json|yml)$/.test(entry.name)) found.push(full);
-  }
-  return found;
-}
-
-/** 相对仓库根的路径，报错时才指得清是哪个文件。 */
-const relative = (file: string): string => path.relative(repoRoot, file).replaceAll('\\', '/');
-
-const packageDirs = (await readdir(packagesDir, { withFileTypes: true }))
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => path.join(packagesDir, entry.name));
 // `llm` 包自己也要扫：它只能有一个 provider 声明（第二条断言），但豁免端点痕迹（第一条断言）。
-const allFiles = (await Promise.all(packageDirs.map((dir) => filesIn(dir).catch(() => [] as string[])))).flat();
+const allFiles = (
+  await Promise.all((await packageDirs()).map((dir) => filesIn(dir, isScannable).catch(() => [] as string[])))
+).flat();
 
 /** 每个 `llm.<name>` provider 的声明者位置，用于「每个名字只允许一个声明者」的断言。 */
 const providerDeclarations = new Map<string, string[]>();

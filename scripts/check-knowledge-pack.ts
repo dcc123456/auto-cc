@@ -10,13 +10,12 @@
  * 第 2 条故意复用 `browser` 的同一份实现（相对路径直接指向源码）：知识包的判定只能有一个入口，
  * 脚本里再写一遍 zod 就是第二套基础设施（AGENTS.md §2.2 / §2.5）。
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { parseKnowledgePack } from '../packages/browser/src/platform-contract.js';
+import { filesIn, packageDirs, relative, stringLiteralsOf } from './internal/scan.js';
 
-const repoRoot = path.resolve(import.meta.dirname, '..');
-const packagesDir = path.join(repoRoot, 'packages');
 /** 知识包目录名：只有这里的文件允许写选择器。 */
 const KNOWLEDGE_DIR = 'knowledge';
 
@@ -58,88 +57,12 @@ function selectorShapeOf(text: string): string | null {
   return null;
 }
 
-/**
- * 从一份 TS/JS 源码里摘出**字符串字面量**，注释与模板插值一律不算。
- *
- * 只做词法级别的扫描（不引解析器）：三态推进——代码、行注释、块注释——外加字符串态。
- * 落在 `from` / `import` / `require` 之后的字面量是模块说明符，直接跳过，
- * 因为 `import … from './x.js'` 里的 `./` 长成 XPath 的样子。
- * @param source 源码文本
- * @returns `[字符串内容, 起始下标]` 的列表，起始下标用来把命中换算成行号
- */
-function stringLiteralsOf(source: string): [string, number][] {
-  const found: [string, number][] = [];
-  const previousWord = (at: number): string => {
-    const before = source.slice(0, at).match(/(\w+)(\s*)$/);
-    return before?.[1] ?? '';
-  };
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === '/' && source[index + 1] === '/') {
-      index += 2;
-      while (index < source.length && source[index] !== '\n') index += 1;
-      continue;
-    }
-    if (char === '/' && source[index + 1] === '*') {
-      index += 2;
-      while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) index += 1;
-      index += 1;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      const quote = char;
-      const start = index;
-      let text = '';
-      index += 1;
-      while (index < source.length && source[index] !== quote) {
-        if (source[index] === '\\') {
-          text += source[index + 1] ?? '';
-          index += 2;
-          continue;
-        }
-        // 模板插值里装的是表达式（`DELIVERED_BY[method]` 这类），不是页面结构，整段跳过。
-        if (quote === '`' && source[index] === '$' && source[index + 1] === '{') {
-          index += 2;
-          let depth = 1;
-          while (index < source.length && depth > 0) {
-            if (source[index] === '{') depth += 1;
-            if (source[index] === '}') depth -= 1;
-            index += 1;
-          }
-          continue;
-        }
-        if (quote !== '`' && source[index] === '\n') break;
-        text += source[index] ?? '';
-        index += 1;
-      }
-      const specifierKeyword = previousWord(start);
-      if (!['from', 'import', 'require'].includes(specifierKeyword)) found.push([text, start]);
-      continue;
-    }
-  }
-  return found;
-}
-
-/** 递归列出目录下的文件。 */
-async function filesIn(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...(await filesIn(full)));
-    else found.push(full);
-  }
-  return found;
-}
-
-/** 相对仓库根的路径，报错时才指得清是哪个文件。 */
-const relative = (file: string): string => path.relative(repoRoot, file).replaceAll('\\', '/');
-
 /** 这个文件属于知识包目录吗（只有那里允许写选择器）。 */
 const isKnowledgeFile = (file: string): boolean => relative(file).includes(`/${KNOWLEDGE_DIR}/`);
 
-const platformPackages = (await readdir(packagesDir, { withFileTypes: true }))
-  .filter((entry) => entry.isDirectory() && entry.name.startsWith('platform-'))
-  .map((entry) => path.join(packagesDir, entry.name, 'src'));
+const platformPackages = (await packageDirs((name) => name.startsWith('platform-'))).map((dir) =>
+  path.join(dir, 'src'),
+);
 
 for (const srcDir of platformPackages) {
   let files: string[];

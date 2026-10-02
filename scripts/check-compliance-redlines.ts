@@ -13,12 +13,10 @@
  * 判定按行而不是 AST：本仓已有的同类检查（`check-llm-single-entry.ts`）就是这个形状，
  * 换 AST 要为三条规则引入一个解析器依赖，不值。
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-
-const repoRoot = path.resolve(import.meta.dirname, '..');
-const packagesDir = path.join(repoRoot, 'packages');
+import { filesIn, packageDirs, relative, repoRoot } from './internal/scan.js';
 
 /** 规则一：一条「这是在绕过风控而不是停下来」的痕迹。 */
 const REDLINES: readonly (readonly [RegExp, string])[] = [
@@ -79,24 +77,11 @@ const RESERVED_DOC_DOMAIN = /(?:^|\.)example\.(?:com|org|net)$/;
 
 const failures: string[] = [];
 
-/**
- * 递归列出目录下的源码文件（跳过构建产物与依赖）。
- * @param dir 起始目录
- * @returns 绝对路径列表
- */
-async function filesIn(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.isDirectory() && ['node_modules', 'dist', 'out'].includes(entry.name)) continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...(await filesIn(full)));
-    else if (/\.(ts|tsx|mts|cts|js)$/.test(entry.name)) found.push(full);
-  }
-  return found;
-}
+/** 红线痕迹的射程：TS 全家加 `.js`（脚本面与构建配置里也可能藏着改写请求的代码）。 */
+const isSourceFile = (name: string): boolean => /\.(ts|tsx|mts|cts|js)$/.test(name);
 
-/** 相对仓库根、正斜杠的路径，报错时才指得清是哪个文件。 */
-const relative = (file: string): string => path.relative(repoRoot, file).replaceAll('\\', '/');
+/** 按上面的口径列出一个目录下的源码文件。 */
+const filesInSource = (dir: string): Promise<string[]> => filesIn(dir, isSourceFile);
 
 const isTestFile = (rel: string): boolean => /\.(test|spec)\.ts$/.test(rel) || rel.endsWith('/test-doubles.ts');
 
@@ -156,16 +141,14 @@ function scanTestSurfaceHosts(rel: string, lines: string[]): void {
   });
 }
 
-const packageDirs = await Promise.all(
-  (await readdir(packagesDir, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map(async (entry) => ({
-      name: entry.name,
-      files: await filesIn(path.join(packagesDir, entry.name)).catch(() => [] as string[]),
-    })),
+const scannedPackages = await Promise.all(
+  (await packageDirs()).map(async (dir) => ({
+    name: path.basename(dir),
+    files: await filesInSource(dir).catch(() => [] as string[]),
+  })),
 );
 
-for (const { name, files } of packageDirs) {
+for (const { name, files } of scannedPackages) {
   for (const file of files) {
     const rel = relative(file);
     const source = await readFile(file, 'utf8');
@@ -217,7 +200,7 @@ for (const { name, files } of packageDirs) {
 
 // 规则三还要覆盖 `scripts/**`：上面的循环只遍历 packages，而 fixture 服务与验收脚本才是真的会起进程、
 // 真的会被人手跑起来打网络的那一层（§7.2 禁的是"自动化访问真实平台"，脚本面首当其冲）。
-const scriptFiles = await filesIn(path.join(repoRoot, 'scripts')).catch(() => [] as string[]);
+const scriptFiles = await filesInSource(path.join(repoRoot, 'scripts')).catch(() => [] as string[]);
 for (const file of scriptFiles) {
   scanTestSurfaceHosts(relative(file), (await readFile(file, 'utf8')).split('\n'));
 }
@@ -228,7 +211,7 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  `✔ 合规护栏机检通过（扫描 ${String(packageDirs.reduce((sum, entry) => sum + entry.files.length, 0) + scriptFiles.length)} 个源码文件：` +
+  `✔ 合规护栏机检通过（扫描 ${String(scannedPackages.reduce((sum, entry) => sum + entry.files.length, 0) + scriptFiles.length)} 个源码文件：` +
     `无 UA/指纹/打码/自定义分区痕迹，${PACING_PACKAGES.join('/')} 的节奏数值全部来自配置，` +
     `测试与脚本面的 ${String(TEST_REAL_HOST_ALLOWLIST.length)} 条真实域名豁免之外没有出网地址）`,
 );
