@@ -21,7 +21,7 @@
  * 已知残余（如实记下，不写成"全拦住了"）：模型若往散文里新增一个**不含数字**的邮箱，三条判据都抓不到，
  * 它会原样进产物，由 4.5-11 的逐项人工接受兜底。
  */
-import { AppError, Context, NO_CONFIG, asApp, type Fiber } from '@auto-cc/core';
+import { AppError, Context, NO_CONFIG, asApp, numbersOf, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { documentSchema, ResumeDocService, validateDocument, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { deriveEntities } from './entities.js';
-import { generationTargetFields, numbersOf, type GenerationField } from './fact-check.js';
+import { generationTargetFields, type GenerationField } from './fact-check.js';
 import {
   GENERATION_OUTCOMES,
   kbGenerateSchema,

@@ -8,18 +8,18 @@
  * 可改写面按 2026-10-02 用户裁定的 A 口径（plan §4.5 取证三 已同步更正）：
  * 散文键 `text / achievement / description` 可改写，受数值与具名两条判据约束；
  * 结构事实键整句原样引用。技能行不进生成腿的提议面，但仍在校验面内（下面单有一例锁住这个关系）。
+ *
+ * 数值抽取本身的口径测试不在这里：那份实现搬到 `@auto-cc/core` 的 `numbers.ts`（两个同级包共用），
+ * 用例跟着搬去 `packages/core/src/numbers.test.ts`；本文件只测"校验读得出篡改"这一层。
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, makeField, type ResumeDocument, type Section } from '@auto-cc/plugin-resume-doc';
 import {
-  chineseNumeralToNumber,
   collectKnownNames,
   describeViolations,
-  diffNumberMultiset,
   findUnknownEntityCandidates,
   generationEditableFields,
   generationTargetFields,
-  numbersOf,
   verifyGeneration,
 } from './fact-check.js';
 
@@ -132,34 +132,6 @@ function withField(
 }
 
 const JD_TEXT = '岗位职责：负责订单与结算服务。公司名称：星桥科技。要求：熟悉 Kubernetes。';
-
-describe('4.5-04 数值抽取的归一化口径', () => {
-  it('阿拉伯数字带量级、千分位、小数都按数值读，百分号不进比对', () => {
-    expect(numbersOf('主导订单服务重构，P99 延迟下降 40%。')).toEqual([99, 40]);
-    expect(numbersOf('月下载 2 万次')).toEqual([20000]);
-    expect(numbersOf('管理 1,000 台机器，成本 3.5 万元')).toEqual([1000, 35000]);
-  });
-
-  it('中文数词只在紧跟量词时算一个数，副词强度读法不误报', () => {
-    expect(numbersOf('三年后端经验')).toEqual([3]);
-    expect(numbersOf('十分匹配岗位要求，万分感谢')).toEqual([]);
-    expect(numbersOf('二十万人关注，百万级请求')).toEqual([200000, 1000000]);
-  });
-
-  it('中文数词解析覆盖十进制组合', () => {
-    expect(chineseNumeralToNumber('二十三')).toBe(23);
-    expect(chineseNumeralToNumber('两万')).toBe(20000);
-    expect(chineseNumeralToNumber('百万')).toBe(1000000);
-    expect(chineseNumeralToNumber('一百二十')).toBe(120);
-  });
-
-  it('多重集比对能抓到"少一个数"和"多一个数"两个方向', () => {
-    expect(diffNumberMultiset('延迟下降 40%', '延迟大幅下降')).toEqual({ missing: ['40'], added: [] });
-    expect(diffNumberMultiset('延迟下降 40%', '延迟下降 50%')).toEqual({ missing: ['40'], added: ['50'] });
-    // 两个 40% 改写成一个 40%：集合口径会放行，多重集口径必须抓到（基线里的第二条没被消耗）
-    expect(diffNumberMultiset('下降 40%，复用率 40%', '下降 40%')).toEqual({ missing: ['40'], added: [] });
-  });
-});
 
 describe('4.5-07 具名候选回查（启发式补刀，强保证在结构面）', () => {
   const known = collectKnownNames(makeBaselineDocument());
