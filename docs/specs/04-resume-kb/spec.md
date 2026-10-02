@@ -1136,6 +1136,32 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 - **4.5-e 收口时还剩的账**：4.5-06 的 `[!]` 等裁定（两个候选收口都动既定决策，见 4.5-c 记录），
   其余 4.5-01～05 / 07～14 均已有单测或真页面、真产物证据，复跑时按 `docs/acceptance/4.5/` 逐项对名。
 
+### 4.5-e 收口记录（4.5-01～14 逐项复跑与状态位对账，2026-10-02）
+
+- **复跑读数**（不是引用旧结果）：`packages/resume-kb` 内 `npx vitest run generate fact-check`
+  → 4 个文件 81 例全绿（`fact-check` 22 / `generate-reorder` 11 / `generate-model` 15 /
+  `generate-service` 33）；`packages/main` 的 `generate-link.test.ts` 8 例（真 store + 真装配，
+  4.5-10 的查库断言与 4.5-14 的日志/落库两出口在这条上）。四道门禁在 4.5-d 收口时同批实跑全绿。
+- **逐条对账（V 类必须有图，C 类必须有可指认的机检或库读）**：
+  01 → `generate-service.test.ts:292` 起 + 4.5-13 真产物；02 → `4.5-02-reorder-basis.{txt,png×2}`；
+  03/04/07/08 → `fact-check.test.ts` + `4.5-a-fact-check.txt`，服务侧闭环在 `4.5-b-generate-chain.txt`；
+  05 → `4.5-05-rejected-no-accept.{png,txt}`；09 → `4.5-09-reorder-only-fallback.{png,txt}`；
+  10 → `main` 侧 `generate-link.test.ts` 的 `resume_generations` 字段断言（含两处计划外补列
+  `model_status` / `retried`，见 plan 的偏离二）；11 → `4.5-11-one-of-two-accepted.{txt,png×3}`；
+  12 → 键集合相等断言 + P3 侧 strict 拒未知键 + 真链路 `validated()` 放行；
+  13 → `4.5-13-m5-chain.{txt,png×2}`；14 → 四条出口（提示词/返回体/日志文件/生成记录表）各自的断言，
+  其中产物出口由 4.5-13 的 `138****1111` 读数补上最后一格。
+- **4.5-06 保持 `[!]`，这是本片唯一的未收项**：原文要断言 `evidenceRefs` 非空，而 4.2 裁定二让
+  `summary`/`education` 类区块根本不建实体行，"非空"对它们永远不成立；播报半边（`entryModeled`
+  把两种"没有出处"分开）已经落地并在界面上可读，但两个能真正满足原文的收口（收窄提议面 /
+  给散文区块补一条派生实体证据 id）都要动既定决策，属用户裁定，不自行放宽。
+- **M5 判据的两头从此对齐**：本 spec 的 4.5-13 与 `03-resume-pdf` 的 3.3-10 是同一件事的两半，
+  后者原先因"P4.5 未就位"挂 `[!]`，现按 4.5-d 的真产物转 `[x]`，且那行里写清了断言强度的边界
+  （JD 造成的可见变化是次序与被接受的那一条改写，不是"凭空多出关键词"）。
+- **§7.4 自检里两条需要显式回答的**：④ 复用检查——本片零新实现，取证脚本全部留在被忽略的 `tmp/`；
+  ⑧ 暂存区——入库图片只有 `docs/acceptance/4.5/4.5-13-m5-chain-*.png`（按 spec 条目 ID 命名），
+  PDF 二进制与 `pdftotext` 输出都留在 `tmp/`（§7.5）。
+
 ## 4.6 话术生成器
 
 | ID     | 验收标准                                                                              | 方式 | 验证操作                                      | 状态 |
