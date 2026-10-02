@@ -1,0 +1,127 @@
+4.4-09 缺口报告不误扣额度 + 4.4-08 的 §7.2 机检落地（4.4-e1，2026-10-02）
+=========================================================================
+
+判据原文（docs/specs/04-resume-kb/spec.md 4.4 表）：
+  4.4-09  LLM 调用若计入额度（如后续付费）必经 entitlement.gate，本地调用不误扣额度 | C | 断言 ledger 行为符合配置
+  4.4-08  JD 输入使用本地样例文件，测试不访问真实招聘平台 | C | URL allowlist 复跑（AGENTS.md §7.2）
+设计定稿：docs/plans/04-resume-kb/plan.md §4.4-e 判据一（额度接线）/ 判据二（合规机检两半）。
+
+
+[1] 接线判定：真的闸门 + 真的账本 + 真的 agent 注册表 + 真的 kb.gap
+------------------------------------------------------------------
+$ cd packages/main && npx vitest run src/gap-quota-link.test.ts
+
+   ✓ src/gap-quota-link.test.ts (4 tests) 459ms
+
+   Test Files  1 passed (1)
+        Tests  4 passed (4)
+
+四条各守一种失效模式（前两条判"没扣"，第三条判"落账口是活的"，第四条判"符合配置"）：
+  1) mode:'daily' 且三键上限都取 1，当天先用 gate.perform('search') 落到见底，
+     gate.check('search') 读数 { allowed:false, remaining:0 } —— 此时 kb.gap.report() 仍产出
+     整份报告（rows.length>0、counts.missing===rows.length、modelStatus==='unavailable'），
+     且 usage_ledger 行数一分不多。**这条是正向证明**：报告路径若在任何一处问了闸门，
+     就会在这里收到 QUOTA_EXCEEDED 而炸掉，比"断言源码里没写 perform"强。
+  2) agent 工具面入口（tools.call('kb.gap.report')，经真注册表的 z.strictObject safeParse）同样不落账。
+  3) 正向对照：同一份装配里 gate.perform('greet') 确实多出第二行（ledgerId>0），
+     之后 check('greet').allowed === false —— 证明第 1/2 条的"行数不变"是没被调用，不是调用不生效。
+  4) 配置语义对照：mode:'unlimited' 下 check('deliver') 恒为 { allowed:true, remaining:null, reason:null }，
+     报告同样不落账。"符合配置"要有第二个配置值才成立。
+
+账本行数是直接对共享的 node:sqlite 连接数 `SELECT COUNT(*) FROM usage_ledger`，不是读服务自报的计数。
+库是空的（挂了 kb.profile 但没同步简历）：本片判的是接线，比对读数质量已由 4.4-c 的真库用例断过。
+
+
+[2] 模型腿不落账：唯一出口的结构面断言（住在 packages/llm）
+----------------------------------------------------------
+$ cd packages/llm && npx vitest run src/quota-boundary.test.ts
+
+   ✓ src/quota-boundary.test.ts (2 tests) 3ms
+
+   Test Files  1 passed (1)
+        Tests  2 passed (2)
+
+为什么不住在调用方一侧：模型腿的调用方有 outbound.script / kb.gap / 将来的 P5 规划好几处，
+逐个调用方测则每加一个调用方就要加一条用例、且永远漏掉下一个。`packages/llm` 是全仓唯一模型出口
+（`check-llm-single-entry` 已在机检这件事），所以"出口本身不碰账本"是射程覆盖全部调用方的断言。
+扫描面（本包非测试源码 + package.json 依赖清单）：entitlement.gate / usage.ledger /
+EntitlementGateService / UsageLedgerService / @auto-cc/plugin-entitlement / usage_ledger（表名，防绕过闸门直写）/
+QUOTA_ACTIONS / perform('… / countToday / latestActionTs —— 命中即红。
+将来真要计费（判据一定死的落点：新增第四个动作键 llm，落在本包 complete()/embed() 里用 gate.perform），
+这条用例会红，届时必须连同 spec 条目一起改，而不是顺手加豁免。
+
+
+[3] §7.2 机检的字符串面：check-compliance-redlines 规则三（进 pnpm lint）
+------------------------------------------------------------------------
+$ npx tsx scripts/check-compliance-redlines.ts
+✔ 合规护栏机检通过（扫描 243 个源码文件：无 UA/指纹/打码/自定义分区痕迹，
+  browser/outbound/platform-boss/workflow/agent 的节奏数值全部来自配置，
+  测试与脚本面的 2 条真实域名豁免之外没有出网地址）
+
+射程 = 测试面（*.test.ts / *.spec.ts / test-doubles.ts）+ packages/testing/** + scripts/**。
+生产代码不在射程内：这个 app 的本职工作就是驱动真实站点，把产品形态扫成违规没有意义，
+那部分由 entitlement.gate + 风控停机 + ToS 确认管（2.7 已落地）。
+放行条件：回环（127.0.0.0/8、localhost、::1）/ RFC 2606-6761 保留名（*.invalid *.test *.example *.localhost、
+example.com|org|net）/ 无点的单标签主机（用例里的 http://top、http://x）/ 显式登记在 TEST_REAL_HOST_ALLOWLIST。
+主机名来自主机段的 ${...} 插值时字符串面判不了，交给 [4] 的运行期守卫。
+
+两条豁免（实测取数：grep -rhoE "https?://…" --include='*.test.ts' --include='test-doubles.ts' 全仓枚举后逐条核对）：
+  - schemas.openxmlformats.org —— OOXML 的 XML 命名空间标识符，docx 解析用例只比对字符串，不发请求；
+  - (www.)zhipin.com —— 出现在拒绝路径上：navigate-policy.test.ts 判「不属于任何已登记平台」要抛错，
+    platform-contract.test.ts 把它当知识包 startUrl 字段的值喂给校验器。换成 *.invalid 就把要检的事检掉了。
+
+反向验证（机检必须能红，否则等于没有）：临时在射程内放一个探针文件，含
+  https://www.zhipin.com/web/geek/job / https://api.deepseek.com/v1 / http://127.0.0.1:10233/ok / `http://${host}:${port}/interp`
+$ npx tsx scripts/check-compliance-redlines.ts
+✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数 / 4.4-08 测试面 URL）：
+  - packages/testing/src/probe-rule3.test.ts:2 测试/脚本面出现了真实域名「api.deepseek.com」：…
+（豁免内的 zhipin、回环、插值主机均未命中 → 三档放行与一档拦截各得其所；探针文件当场删除，未入库。）
+
+过程中修掉的一个自身缺陷：URL 正则第一版没在 `/` 处截断主机，把
+`http://other-origin.example/frame` 的整段当成了主机名，导致 27 条误报。修完 0 误报、反向探针仍命中。
+
+
+[4] §7.2 机检的运行面：harness 导航前的 loopback 守卫
+----------------------------------------------------
+$ cd packages/testing && npx vitest run src/cdp.test.ts
+
+   ✓ src/cdp.test.ts (12 tests) 3ms
+
+   Test Files  1 passed (1)
+        Tests  12 passed (12)
+
+`CdpSession.navigate(url)` 在发出第一条 CDP 命令之前判 `localTestUrlViolation(url)`，非本地即抛错
+（`Page.navigate` 一旦送达，浏览器已经把请求发出去了，再判就晚）。守卫放在 `send` 之前这件事本身
+也有一条结构断言兜住——顺序错就等于守卫形同虚设。
+放行：127.0.0.1 / localhost / [::1] / file:（开本机产物）；大小写不敏感。
+拒绝：远端主机（含 localhost.attacker.example 这类后缀混淆——判定按整个主机名而非 startsWith）、
+非本地协议（javascript: / data:）、判不出主机的写法（相对地址与 //host 形态）。
+用例里的"远端主机"一律取 RFC 保留名（embed.test.invalid / job.example）：它们公网不可达，
+同时又能让规则三放行——保留名恰好是"既出不了网、又能被判成非本地"的那一类。
+唯一调用点核对：`packages/testing/src/cli.ts:144`（harness open --to <url>）；
+`packages/platform-boss` 里的 `page.navigate` 是内核页接口、属生产路径，不经这道守卫（§0 判据一）。
+
+
+[5] 四闸（本切片收口轮）
+-----------------------
+$ pnpm typecheck     → 21 包 tsc --noEmit，0 失败（修掉两处 NO_CONFIG 传参类型：账本与注册表的
+                       Config 是 z.strictObject({}) → Record<string, never>，而 NO_CONFIG 的类型是 undefined，
+                       只适配"构造器不接配置"的插件）
+$ pnpm lint          → eslint + 5 项机检全绿；其中 LLM 入口唯一性扫描 284 个文件通过
+                       （写这条时踩到一次：cdp.test.ts 里的 `…/v1/embeddings` 被判成模型端点，改路径即可）
+$ pnpm format:check  → All matched files use Prettier code style!
+$ pnpm test          → 21 包 / 86 个测试文件 / 1210 例全绿，0 失败、0 未处理异常
+                       （本切片新增 3 个文件 / 18 例：main 4 + llm 2 + testing 12；
+                       首轮 main 那条冒出过 4 个 ENOENT 未处理异常——日志写流是异步开文件的，
+                       afterAll 先 rmSync 就会在收尾之后炸；按 resume-kb 的既有口径补了 dispose→等 300ms→删目录，
+                       复跑 4 passed / 0 未处理异常）
+
+
+[6] 本条判到了哪一步、没判到哪一步
+--------------------------------
+判到：4.4-09 的验收操作"断言 ledger 行为符合配置"在真装配上成立（两种配置、两条入口、含落账口活性对照）；
+      4.4-08 从"结构性成立"升级为**有机检**——AGENTS.md §10 里那条 §7.2 的"待落地 1.6"就此收口。
+没判：真花钱的模型调用要不要扣额度——今天没有付费网关，`llm` 这个动作键也不存在，
+      所以本条判的是"本地计算与未配置的模型腿都不误扣"，落点与形态已写进 plan 判据一，接线一变用例会红。
+      界面文案与阈值的标定不在本切片（4.4-e2），4.4-02 的 merged/rejected/failed 三态仍缺真网关（保持 [!]）。
+本机为 Windows：macOS / Linux 运行期验证无法在本机完成，相关条目 BLOCKED。

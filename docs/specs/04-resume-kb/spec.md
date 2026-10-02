@@ -612,7 +612,7 @@ bm25B / bm25Weight / lexicalWeight / substringFloorScore` 必须真的在 `kb-pr
 | 4.4-06 | 报告不得只输出负面结论（缺失项必须同时给出可用证据或补救建议）              | C    | 输出结构断言：缺失项必带 suggestion 字段 | [x]  |
 | 4.4-07 | 比对结果稳定：同一 JD + 同一库重复运行输出一致（无随机抖动）                | U    | 两次运行 hash 相同                       | [x]  |
 | 4.4-08 | JD 输入使用本地样例文件，**测试不访问真实招聘平台**                         | C    | URL allowlist 复跑（AGENTS.md §7.2）     | [x]  |
-| 4.4-09 | LLM 调用若计入额度（如后续付费）必经 `entitlement.gate`，本地调用不误扣额度 | C    | 断言 ledger 行为符合配置                 | [ ]  |
+| 4.4-09 | LLM 调用若计入额度（如后续付费）必经 `entitlement.gate`，本地调用不误扣额度 | C    | 断言 ledger 行为符合配置                 | [x]  |
 | 4.4-10 | 抽取来源标注与许可判定记录（对齐 `ai-resume` prompt 风格借鉴，未复制文本）  | C    | 文件头核对                               | [x]  |
 
 ### 4.4-a 落地记录（4.4-01 / 07 / 08 / 10 的词面腿，2026-10-02）
@@ -798,6 +798,50 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
   本机没有 → 4.4-02 保持 `[!]`，机制侧由 4.4-b 的 U 半边钉死。同理 `highlights` 在本语料下 0 条，
   亮点区与「另有 N 条未展开」只有单测证据、没有截图，不写成通过。
 - **本机为 Windows**，macOS / Linux 的运行期验证无法在本机完成 → 相关条目 BLOCKED。
+
+### 4.4-e1 落地记录（4.4-09 的额度接线 + 4.4-08 的 §7.2 机检，2026-10-02）
+
+- **4.4-09 判到的形态是"三条断言"而不是"一段说明"**（plan §4.4-e 判据一）：本切片**没有**给 `kb.gap` 接
+  `gate.perform`——闸门管的从来不是"花了多少钱"而是"平台侧的代价"（`QUOTA_ACTIONS` 只有 search/greet/deliver，
+  每个都对应一次可能被风控的页面动作）。把 JD 拆解套进 `search` 会造出比不接更坏的后果：拆 20 份 JD 就吃掉
+  20 轮抓取额度，这与 2.7-03 当初拒绝"把额度键当计费分类用"是同一条论证。所以验收操作落成
+  `packages/main/src/gap-quota-link.test.ts` 的四条断言：额度见底挡不住报告、两条入口都不落账、
+  **落账口活性对照**（同装配里 `perform('greet')` 确实多一行并转为拒绝，否则"行数不变"可能只是账本坏了）、
+  以及 `unlimited` 与 `daily` 两种配置下的读数——"符合配置"得有第二个配置值才成立。
+- **为什么住 `packages/main`**：`resume-kb` 不依赖 `entitlement`（§4.1 依赖方向，领域包之间也不许横向 import），
+  在自己包里只能用替身演一遍"没扣额度"，而替身既不会拒绝也不会落账，那条断言是空的。
+  这与 3.7-02 那份跨包用例住同一处、同一个理由。账本行数直接 `SELECT COUNT(*) FROM usage_ledger`，不读服务自报值。
+- **模型腿半边住 `packages/llm`**（§2.1 的复用口径反过来用：判"所有调用方"就在唯一出口判）：
+  `quota-boundary.test.ts` 扫本包非测试源码 + `package.json` 依赖清单，闸门/账本的**全部**可辨识入口
+  （service 名、类名、包名、表名 `usage_ledger`、`QUOTA_ACTIONS`、`perform('…`、`countToday`）命中即红。
+  它同时是"尚未计费"的销针：将来真要计费（第四个动作键 `llm`，用 `gate.perform` 落在这两个方法里），
+  这条用例会红，必须连同 spec 一起改而不是加豁免。第三条"不计费也要回报用量"没在这里重复断言——
+  `llm.test.ts` 已按存根判过 `promptTokens/completionTokens`（§2.5）。
+- **§7.2 从"结构性成立"升级为有机检**（AGENTS.md §10 里那条"待落地 1.6"就此收口，两半都做）：
+  字符串面 = `check-compliance-redlines.ts` 新增**规则三**，射程只限测试与脚本面
+  （`*.test.ts`/`*.spec.ts`/`test-doubles.ts`/`packages/testing/**`/`scripts/**`）——生产代码不在内，
+  因为这个 app 的本职工作就是驱动真实站点，把产品形态扫成违规没有意义。放行条件是回环、
+  RFC 2606/6761 保留名、无点单标签主机，或登记进 `TEST_REAL_HOST_ALLOWLIST` 并写清理由
+  （今天两条：`schemas.openxmlformats.org` 是命名空间字符串、`(www.)zhipin.com` 出现在**拒绝路径**上，
+  换成 `*.invalid` 就把要检的事检掉了）。运行面 = `CdpSession.navigate` 在发第一条 CDP 命令前判
+  `localTestUrlViolation`，管的是字符串面看不见的那一支（`harness open --to <人现场敲的 URL>`）。
+- **机检自己也被反向验证过**（绿的机检不等于有效的机检）：临时探针文件里四个主机各判一档——
+  `api.deepseek.com` 被拦、豁免内的 zhipin 与回环放行、`${host}` 插值交运行面——探针当场删除未入库。
+  过程中修掉规则三自身一个缺陷：URL 正则第一版没在 `/` 处截断主机，把 `http://other-origin.example/frame`
+  整段当主机名，造成 27 条误报。
+- **后缀混淆是守卫的一条真实失效模式**：判定按整个主机名而不是 `startsWith`，否则
+  `http://localhost.attacker.example:10222/` 就混进去了；相对地址与 `//host` 形态一律拒（判不出主机就
+  无法证明它不出网）。用例里的"远端主机"全取 RFC 保留名——它们公网不可达、又能让规则三放行，
+  这道机检与那条机检在这里正好互锁。
+- **四闸与规模**：`typecheck` 21 包 0 失败、`lint`（eslint + 5 项机检，合规护栏扫描 243 个源码文件）全绿、
+  `format:check` 全绿、`test` 21 包 / **86 文件 / 1210 例**（本切片 +3 文件 / +18 例）。
+  途中两次"通过之前先红"：main 那份用例首轮带 4 个 ENOENT 未处理异常（日志写流异步开文件，
+  `afterAll` 先删目录就会在收尾后炸，按 `resume-kb` 口径补 dispose→等 300ms→删目录）；
+  `cdp.test.ts` 里的 `/v1/embeddings` 被 LLM 入口唯一性机检拦下（改路径而不是加豁免）。
+  证据：`docs/acceptance/4.4/4.4-09-quota-and-allowlist.txt`。
+- **本条没判到的**：今天没有付费网关，`llm` 动作键也不存在，所以 4.4-09 判的是"本地计算与未配置的模型腿
+  都不误扣"，真花钱调用的扣费形态只在判据一里定了落点。阈值标定与界面那句"未标定"归 4.4-e2，
+  4.4-01～10 的逐项复跑归 4.4-e3。本机 Windows，macOS / Linux 运行期条目 BLOCKED。
 
 ## 4.5 定向内容生成（强制事实校验闭环）
 

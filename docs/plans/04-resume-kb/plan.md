@@ -1238,6 +1238,16 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
 | 4.4-e2 | 三个测量型阈值的标注集与扫描、两个口径值的书面依据、界面文案与复拍    | `gap-calibration*` + `cordis.yml` |
 | 4.4-e3 | 4.4-01～10 逐项复跑、四闸、证据归档，`4.4-02` 的 `[!]` 按实测状态收口 | `docs/acceptance/4.4/4.4-e-*.txt` |
 
+**4.4-e1 已落地（2026-10-02）**，本节判据按原文兑现为可执行断言，落点：
+
+- 判定一（额度接线）→ `packages/main/src/gap-quota-link.test.ts`（四条：耗尽挡不住报告、两条腿都不落账、
+  正向对照证明落账口是活的、`unlimited` 语义），模型腿的结构面 → `packages/llm/src/quota-boundary.test.ts`。
+- 判定二（§7.2 机检）→ 字符串面是 `scripts/check-compliance-redlines.ts` 的规则三（含两条白名单与反向探针），
+  运行面是 `packages/testing/src/cdp.ts` 的 `localTestUrlViolation` + `CdpSession.navigate` 守卫，
+  用例在 `packages/testing/src/cdp.test.ts`。
+- 证据与逐项验收：`docs/acceptance/4.4/4.4-09-quota-and-allowlist.txt`、spec 的 4.4-09 与「4.4-e1 落地记录」，
+  AGENTS.md §10 的 §7.2 行已从"待落地 1.6"改为"已落地（4.4-e）"。
+
 **判据一：`entitlement.gate` 管的是"平台侧代价"，本地计算今天不进 ledger**（4.4-09 的判定）
 
 - `QUOTA_ACTIONS` 现在的三条（`shared/bridge.ts:324`）有一个共同属性：**在真实平台上留下痕迹**，
