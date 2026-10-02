@@ -17,17 +17,31 @@ import { redactText } from '@auto-cc/core';
 import { checkFactLock, type FactViolation, type ResumeDocument, type SectionKind } from '@auto-cc/plugin-resume-doc';
 
 /**
- * 生成轨允许改写的字段键。
+ * 生成轨允许改写的字段键（**散文键集合**，不是"非事实键"集合）。
  *
- * 当前文档模型的字段词表是 `company / role / period / achievement / school / degree / major / text`
- * （见 `sections.ts` 与 `resume-doc/src/export-service.ts`），其中只有 `text` 装散文
- * （summary 正文、技能行、区块正文），其余都是结构化事实。`achievement` 在模型里已经标了锁，
- * 所以"整句原样引用"由第 1 条判据保证，4.5-08 要检的是 `text` 里的数值。
+ * 4.5-03 的原文是「`facts.locked` 字段（公司 / 职位 / 时间 / 数字 / 学历 / 证书号）只能原样引用」——
+ * 那份清单里没有「成果」。这不是疏漏：`achievement` 装的就是"主导订单服务重构，P99 延迟下降 40%"
+ * 这类**描述性散文**，而简历里真正会被 JD 改写的正文只有它（`sections.ts:282` 把经历 / 项目 / 校园的
+ * 正文键定为 `achievement`，教育正文键是 `description`，`text` 是简介与技能行）。
+ * 若把它整句锁死，本条链在真实解析出的简历上**无处可改**，4.5-01 的"输出定制内容"会退化成只重排顺序，
+ * 而 4.5-08 的"不许把「提升 20%」写成「大幅提升」"更是永远不会触发——那条规则要防的正是"这句可以被改写"。
+ *
+ * 所以这里按 spec 的两轨读法收：散文键可改写，但改写受**另外两条判据**约束——
+ * 数值守恒（4.5-08）与具名候选回查（4.5-07）；结构事实键（`company / role / period / school / degree /
+ * major`）一律不进白名单。已知残余风险：散文里"主导"改成"参与"这类**不含数与名**的弱化，三条判据都抓不到，
+ * 它由 4.5-11 的逐项人工接受 / 回退兜底——这也是 spec 把接受动作放在界面而不是让机器自动入库的原因。
  */
-export const GENERATION_EDITABLE_KEYS = ['text'] as const;
+export const GENERATION_EDITABLE_KEYS = ['text', 'achievement', 'description'] as const;
 
-/** 参与「组织名候选」抽取的区块种类（联系资料与技能行不算具名实体来源）。 */
-const ENTITY_BEARING_SECTION_KINDS: readonly SectionKind[] = [
+/**
+ * 生成腿可以**提议改写**的区块种类（比校验面小一圈）。
+ *
+ * `skills` 刻意不在内：技能行不是"描述性文字"，而让它进生成腿等于开一条最贵的虚构通道——
+ * 模型往技能行里加一个库里没有的「Rust」，具名回查（只认机构后缀形态）与数值守恒都拦不住。
+ * 技能在 4.2 里本来就是一条一个 id 的独立实体，要改该走知识库的实体编辑，用户当面确认。
+ * 联系资料（`profile`）不是区块字段，天然不在面上。
+ */
+const GENERATION_TARGET_SECTION_KINDS: readonly SectionKind[] = [
   'summary',
   'experience',
   'project',
@@ -328,19 +342,34 @@ export function findUnknownEntityCandidates(
   return unknown;
 }
 
+/** 一个可改写位置：定位到「区块 id + 条目 id + 字段键」，加它当前的文本。 */
+export interface GenerationField {
+  readonly sectionId: string;
+  readonly entryId: string;
+  readonly fieldKey: string;
+  readonly text: string;
+}
+
 /**
- * 取一个区块里所有"生成轨可改写"字段的 (条目, 字段) 组合，供数值与具名两条判据复用。
+ * 取文档里所有"生成轨可改写"字段的 (条目, 字段) 组合。
+ *
+ * 两个调用方共用：本文件的数值 / 具名两条判据（`verifyGeneration`），以及 `resume.generate` 拼提示词与
+ * 采纳改写时的目标面。**必须是同一个函数**——校验遍历的面比递给模型的面小，就等于留了一个
+ * "模型可以改、校验器不看"的口子（4.5-07 的强保证会在那一刻变成假话）。
  * @param document 待遍历的文档（基线或候选各调一次，遍历口径必须一致，否则两条腿比的不是同一段文字）
- * @param editableKeys 可改写键白名单
- * @returns 位置与文本的三元组列表，顺序为区块 → 条目 → 字段
+ * @param editableKeys 可改写键白名单，省略时用 `GENERATION_EDITABLE_KEYS`
+ * @param sectionKinds 只收这些区块种类；省略时**收全部区块**（校验面要比提议面广：技能行不许生成腿改，
+ *        但万一被改了仍要按数值与具名两条判据检一遍，不许出现"改了没人看"的位置）
+ * @returns 位置与文本的列表，顺序为区块 → 条目 → 字段（进提示词的编号因此稳定）
  */
-function editableFieldsOf(
+export function generationEditableFields(
   document: ResumeDocument,
-  editableKeys: readonly string[],
-): Array<{ sectionId: string; entryId: string; fieldKey: string; text: string }> {
-  const fields: Array<{ sectionId: string; entryId: string; fieldKey: string; text: string }> = [];
+  editableKeys: readonly string[] = GENERATION_EDITABLE_KEYS,
+  sectionKinds?: readonly SectionKind[],
+): GenerationField[] {
+  const fields: GenerationField[] = [];
   for (const section of document.sections) {
-    if (!ENTITY_BEARING_SECTION_KINDS.includes(section.kind)) continue;
+    if (sectionKinds !== undefined && !sectionKinds.includes(section.kind)) continue;
     for (const entry of section.entries) {
       for (const field of entry.fields) {
         if (!editableKeys.includes(field.key)) continue;
@@ -349,6 +378,19 @@ function editableFieldsOf(
     }
   }
   return fields;
+}
+
+/**
+ * 生成腿这一趟**被允许提议改写**的位置（`generationEditableFields` 的子集，理由见
+ * `GENERATION_TARGET_SECTION_KINDS` 与 `GENERATION_EDITABLE_KEYS` 两处注释）。
+ *
+ * 服务层拿它做两件事：拼提示词里的"待改写清单"，以及**只采纳落在这份清单里的模型回答**——
+ * 位置不在清单上就整条丢弃（判据六的结构面：没有新增条目 / 新增字段的通道）。
+ * @param document 基线文档
+ * @returns 可提议改写的位置与当前文本
+ */
+export function generationTargetFields(document: ResumeDocument): GenerationField[] {
+  return generationEditableFields(document, GENERATION_EDITABLE_KEYS, GENERATION_TARGET_SECTION_KINDS);
 }
 
 /**
@@ -362,7 +404,7 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
   const editableKeys = input.editableKeys ?? GENERATION_EDITABLE_KEYS;
   const fieldViolations = checkFactLock(input.original, input.proposed, editableKeys);
   const baselineByKey = new Map(
-    editableFieldsOf(input.original, editableKeys).map((field) => [
+    generationEditableFields(input.original, editableKeys).map((field) => [
       `${field.sectionId}#${field.entryId}#${field.fieldKey}`,
       field.text,
     ]),
@@ -370,7 +412,7 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
   const numberFindings: NumberFinding[] = [];
   const entityFindings: EntityFinding[] = [];
   const knownNames = collectKnownNames(input.original);
-  for (const field of editableFieldsOf(input.proposed, editableKeys)) {
+  for (const field of generationEditableFields(input.proposed, editableKeys)) {
     const location = `${field.sectionId}#${field.entryId}#${field.fieldKey}`;
     const originalText = baselineByKey.get(location);
     // 基线里根本没有这一段（候选新增了条目/字段）：由结构面把关（模型腿没有新增通道），这里不重复判。

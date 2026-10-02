@@ -4,6 +4,10 @@
  * 覆盖口径照 plan §4.5 取证一写死：源仓库 `factCheckService` 用 levenshtein ≤3 容差，
  * 「字节跳动」与「字节科技」在那边判为一致——本项目必须把这条输入判成篡改，否则等于抄了个有洞的实现。
  * PII 哨兵是**植入**的（4.5-14 判据七：否定式"我们没打印"不算证据），哨兵没被植入时用例自己会红。
+ *
+ * 可改写面按 2026-10-02 用户裁定的 A 口径（plan §4.5 取证三 已同步更正）：
+ * 散文键 `text / achievement / description` 可改写，受数值与具名两条判据约束；
+ * 结构事实键整句原样引用。技能行不进生成腿的提议面，但仍在校验面内（下面单有一例锁住这个关系）。
  */
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, makeField, type ResumeDocument, type Section } from '@auto-cc/plugin-resume-doc';
@@ -13,6 +17,8 @@ import {
   describeViolations,
   diffNumberMultiset,
   findUnknownEntityCandidates,
+  generationEditableFields,
+  generationTargetFields,
   numbersOf,
   verifyGeneration,
 } from './fact-check.js';
@@ -208,7 +214,7 @@ describe('4.5-03 / 04 字段原样引用', () => {
     expect(report.fieldViolations[0]?.gate).toBe('editable-allowlist');
   });
 
-  it('整句被锁的 achievement 改一个字 → 拦住（4.5-08 的数字守恒在这一类由"不许动"保证）', () => {
+  it('achievement 里把 40% 改成 60% → 由数值守恒拦下（4.5-08 的真实射程）', () => {
     const base = makeBaselineDocument();
     const proposed = withField(
       base,
@@ -218,8 +224,75 @@ describe('4.5-03 / 04 字段原样引用', () => {
       '主导订单服务重构，P99 延迟下降 60%，复用率 40%。' + PII_EMAIL,
     );
     const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.ok).toBe(false);
+    // 关键在"哪一条判据拦的"：整句锁死也能拦住这条，但那样连合法改写一起拦了（见下一条）。
+    expect(report.fieldViolations).toHaveLength(0);
+    expect(report.numberFindings).toHaveLength(1);
+    expect(report.numberFindings[0]?.fieldKey).toBe('achievement');
+    expect(report.numberFindings[0]?.missing).toEqual(['40']);
+    expect(report.numberFindings[0]?.added).toEqual(['60']);
+  });
+
+  it('改写 achievement 但数与名都守住 → 通过（这才是生成轨每天在做的事）', () => {
+    const base = makeBaselineDocument();
+    const proposed = withField(
+      base,
+      'experience',
+      'e1',
+      'achievement',
+      `面向高并发场景主导订单服务重构，P99 延迟下降 40%，配置复用率同为 40%。${PII_EMAIL}`,
+    );
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.ok).toBe(true);
+  });
+
+  it('改写 achievement 时塞进库里没有的公司 → 具名回查拦下（4.5-07 的补刀）', () => {
+    const base = makeBaselineDocument();
+    const proposed = withField(
+      base,
+      'experience',
+      'e1',
+      'achievement',
+      '为蓝海云计算公司主导订单服务重构，P99 延迟下降 40%，复用率 40%。' + PII_EMAIL,
+    );
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.ok).toBe(false);
+    expect(report.entityFindings.map((finding) => finding.fieldKey)).toEqual(['achievement']);
+  });
+
+  it('结构化事实键仍旧整句锁死：role / period 改一个字即违规', () => {
+    const base = makeBaselineDocument();
+    const report = verifyGeneration({
+      original: base,
+      proposed: withField(base, 'experience', 'e1', 'role', '后端开发工程师'),
+      jdText: JD_TEXT,
+    });
     expect(report.fieldViolations).toHaveLength(1);
     expect(report.fieldViolations[0]?.gate).toBe('fact-lock');
+    expect(report.fieldViolations[0]?.factKey).toBe('role');
+  });
+
+  it('技能行不许生成腿改，但万一被改了仍按数值守恒检（校验面 ⊇ 提议面）', () => {
+    const base: ResumeDocument = {
+      ...makeBaselineDocument(),
+      sections: [
+        ...makeBaselineDocument().sections,
+        {
+          id: 'skills',
+          kind: 'skills',
+          title: '技能',
+          entries: [{ id: 'k1', fields: [makeField('skills', 'text', 'TypeScript、Go，五年经验')] }],
+        },
+      ],
+    };
+    const proposed = withField(base, 'skills', 'k1', 'text', 'TypeScript、Rust，三年经验');
+    // 提议面里没有这一条位置（`generationTargetFields` 不含 skills 区块），所以正常流程改不到它；
+    // 这里直接喂给校验器，确认它不是"改了没人看"的死角。
+    expect(generationTargetFields(base).some((field) => field.sectionId === 'skills')).toBe(false);
+    expect(generationEditableFields(base).some((field) => field.sectionId === 'skills')).toBe(true);
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.numberFindings[0]?.missing).toEqual(['5']);
+    expect(report.numberFindings[0]?.added).toEqual(['3']);
   });
 
   it('按 JD 相关性重排区块与条目顺序 → 零违规（比对按 id 对齐，重排对它不可见）', () => {
