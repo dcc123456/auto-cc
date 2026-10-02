@@ -19,9 +19,9 @@
 
 | ID     | 验收标准                                                                                                 | 方式 | 验证操作                                         | 状态 |
 | ------ | -------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------ | ---- |
-| 5.1-01 | P1 的 `agent.tools` 空注册表被填充，每个工具含 `id/titleKey/params/sideEffect/requiresApproval/run` 六项 | U    | 遍历注册表断言字段齐全                           | [ ]  |
+| 5.1-01 | P1 的 `agent.tools` 空注册表被填充，每个工具含 `id/titleKey/params/sideEffect/requiresApproval/run` 六项 | U    | 遍历注册表断言字段齐全                           | [x]  |
 | 5.1-02 | 工具 `titleKey` 是 i18n key 而非文案本身；`zh-CN` 与 `en` 均有对应翻译，缺失即失败                       | C+U  | 缺 key 校验脚本通过                              | [ ]  |
-| 5.1-03 | 副作用枚举仅三值（`read` / `localWrite` / `outbound`），无第四类且无 `unknown`                           | C    | 类型检查 + 断言枚举成员数                        | [ ]  |
+| 5.1-03 | 副作用枚举仅三值（`read` / `localWrite` / `outbound`），无第四类且无 `unknown`                           | C    | 类型检查 + 断言枚举成员数                        | [x]  |
 | 5.1-04 | 每个工具入参由 zod schema 校验；非法入参被拒绝且**未执行任何动作**                                       | U    | 传错参调用 → 断言副作用计数为 0                  | [ ]  |
 | 5.1-05 | 调用未注册 id 返回明确错误（不猜测、不接受近似名匹配）                                                   | U    | 调 `boss.greets` → 断言「未注册工具」            | [ ]  |
 | 5.1-06 | P2 的浏览器能力（打开/导航/定位/读取/点击/输入/打招呼/投递）全部以工具形式可见                           | C+U  | 列举清单与 2.8-08 对齐                           | [ ]  |
@@ -30,6 +30,65 @@
 | 5.1-09 | 依赖边界是**机检强制**而非约定：故意写一条越界 import 后 `pnpm lint` 失败                                | C    | 反向验证：临时注入违规 import → lint 报错 → 移除 | [ ]  |
 | 5.1-10 | 注册表可声明"暂不开放"的工具（存在但对 agent 不可见），且该状态可被单测断言                              | U    | 标记一个工具 disabled → agent 侧列举不到         | [ ]  |
 | 5.1-11 | 工具执行结果统一为 `ToolResult`（成功含结果摘要与证据引用；失败含原因，禁止吞错返 `undefined`）          | U    | 强制失败路径 → 断言有原因文本与证据引用          | [ ]  |
+
+### 5.1-a 落地记录（契约里长出 `titleKey`，渲染层那份 id→键映射被删掉，2026-10-02）
+
+- **本片实际只干一件事：把"工具在界面上叫什么"从两处收成一处。** 改前：注册表有 `description`（给模型看的行为
+  描述），渲染层 `ChatPanel.tsx` 另存一张 `TOOL_LABEL_KEY: Record<string, string>`（13 条，id → i18n 键）。
+  改后：`AgentToolDeclaration` 与 `ToolDescriptorView` 各多一个**必填** `titleKey`（`core/src/events.ts`），
+  14 处登记各带自己的键，`agent.tools.list()` 把它带过进程边界，卡片标题读 `meta?.titleKey`，
+  那张硬表整块删除。零新包、零新 service、零新依赖、零新 IPC 口。
+- **写下来的两处与 spec 字面的差异，不是偷偷不改**：
+  ① 5.1-01 的字段名 `params / sideEffect / requiresApproval` 在本仓库分别叫 `input / effect / requiresConfirmation`
+  ——它们是 2.8-08 就落地并被六个包的登记处、`workflow.plan` 的 `z.enum(TOOL_EFFECTS)`、界面分级徽标共用的既有名字，
+  本片按 §2.3「扩展现有接口而不是新建平行物」在原名字上加字段，不改名（改名是纯搬家，得单开一片并复跑全部下游断言）。
+  ② 5.1-03 写 `localWrite`，实现是 `local-write`：kebab 是 `TOOL_EFFECTS` 的既有取值，也是语言包键
+  `agent.tool.effect.local-write` 的最后一段，两边拼法一致才有机检可写。判据的实质（**恰好三值、无第四类、无
+  `unknown`**）已按字面钉住：`packages/core/src/agent-tools.test.ts` 新增一组断言逐值比 `TOOL_EFFECTS`，
+  活体侧 `effects` 去重后也恰好是 `['local-write','outbound','read']`。
+- **`requiresApproval` 的"三态"（自动放行 / 必须问人 / 永不放行）本片没做，推到 5.3**：5.3 整段就是自治档位与
+  确认策略，`建议模式 / 半自动 / 全自动` 那位开关（界面右上角已可见）才是它的消费者。在这一片把布尔换成三态
+  等于在契约里放一个**没有判定者的值**——按 §2.6 那是给假想的未来做抽象。本片只保证一件事：布尔的语义
+  与 `effect` 一致（`outbound` 必 `true`），活体 14 只逐条核对通过（`outboundAllNeedConfirm: true`）。
+- **现场抓到的真缺陷就是这张硬表的代价**（不是构造出来的例子）：`resume.generate.run` 4.5-b 就登记成了工具，
+  但没人往 `TOOL_LABEL_KEY` 里补第 14 条，于是对话里挑中它，卡片标题显示「未登记的工具」——**一只真实存在、
+  真的会执行的工具，在界面上被说成不存在**。这类漂移在有单一来源之后不可能再发生，因为字段是必填的，
+  少写一处 `pnpm typecheck` 直接红。修后读数见 `5.1-02-title-from-registry-zh.png`（标题「按这份 JD 定制简历内容」，
+  配徽标「本地写入 / 需人工批准」）与 `5.1-02-title-from-registry-en.png`（同一张卡 "Tailor the resume content for this
+  JD"，配徽标 "local write / requires approval"，未注册那只同屏显示 "Unregistered tool"）。两张 sha1 不同（`d998369d…`
+  / `712e9047…`）。
+- **活体注册表遍历（5.1-01 的判据原文"遍历注册表断言字段齐全"）**：在真实 app 里 `agent.tools.list()` →
+  `count: 14`、`allFieldsPresent: true`（五字段视图逐个 `undefined` 检查）、`titleKeysUnderLabelsNamespace: 14`
+  （每只的键都在 `agent.tool.labels.` 命名空间下，没有一只把文案当键塞进契约）、`effects` 三值、
+  `outbound` 全部需要批准。P2 的八项能力（打开 / 导航 / 定位 / 读取 / 点击 / 输入 / 打招呼 / 投递）
+  在这 14 条里逐条对得上，5.1-06 的清单核对以此为素材，但那条要的是**机检 + 单测**，本片没做，状态位保持 `[ ]`。
+- **5.1-02 只完成了一半，所以状态位保持 `[ ]`**：`titleKey` 已是键不是文案、14 个键在 `zh-CN` / `en` 两份语言包
+  里都齐（各 14 条，`generateRun` 是这次补的第 14 条），但判据要的是"**缺失即失败**"——那需要一条机检
+  （注册表给的键 ↔ 两份语言包逐条对齐），它按切片表属于 5.1-b。在那之前这条只是"当前恰好齐"，不写 `[x]`。
+- **顺带实证到两条后续条目的界面半边**（写在这里是因为它们是同一次操作顺手读到的，不是本片判据）：
+  错参调用 `resume.generate.run {}` → 3ms 内 `TOOL_INPUT_INVALID：…jdText Invalid input`，卡片红态、
+  **一次副作用都没发生**（5.1-04 要的那一格）；`/tool boss.greets` → `TOOL_NOT_REGISTERED`，
+  错误文本直说"该能力包当前未挂载，或它没有把这只手登记进工具面"（5.1-05 要的那一格，且不做近似名匹配）。
+- **一处如实的不对称**：切到 `en` 之后三张卡的**标题、状态、分级徽标**全变了，但卡片里那条
+  `TOOL_INPUT_INVALID：工具 … 入参不合法` 仍是中文——它是主进程服务侧的 `message`，从来不在语言包里
+  （§5.5 管的是页面文案，结构化错误原因按 1.11-09 原样显示、不改口）。要不要把服务侧原因也做成键 + 参数，
+  是 5.6（脱敏与会话）之后才能定形状的事，本片不动它，也不假装它已经国际化了。
+- **门禁实跑（文档改完后再复跑一遍，取末次读数）**：`pnpm typecheck` exit 0；`pnpm lint` exit 0（含渲染层规范检查
+  "2 个语言包，26 个源文件"、提示词落点、合规红线、依赖下限等 6 项机检）；`pnpm format:check` 全部符合；
+  `pnpm test` 21 包 exit 0、**1365 例全过**（本片新增 1 例枚举取值断言，其余是把 5 处形状断言跟着契约更新，
+  没有删任何一例）。
+- **§7.4 自检里需要显式回答的**：④ 复用检查——没有新逻辑，`titleKey` 走既有 `agent.tools.list()` 口与既有
+  `useTranslation()`，卡片标题取值处从"查本地表"改成"读声明"；⑤ 死代码检查——`TOOL_LABEL_KEY` 整块删除，
+  全仓 grep 只剩注册表侧的 14 处 `titleKey` 与测试替身，无残留别名、无"两套都能用"（§2.5）；
+  ⑥ 前端三项——无新增样式、图标未动（仍只有 `Wrench`/`Send`/`Square` 等既有 lucide）、新增文案 0 条
+  （第 14 条标题键是**给既有工具补名**，两份语言包同步补齐，机检实跑为证）；
+  ⑧ 暂存区——入库图片只有本节的 `docs/acceptance/5.1/5.1-02-title-from-registry-{zh,en}.png`，
+  探针脚本（`tmp/51a-probe-registry.js`、`tmp/51a-gen-set.mjs`）与中间态截图全部留在被忽略的 `tmp/`。
+- **一条环境事实值得记进 AGENTS.md §9 那一类**：Git Bash 会把以 `/` 开头的实参做 MSYS 路径转换，
+  `node gen.mjs '/tool kb.profile.list'` 到了脚本里变成 `D:/daiwenchi/Git/tool kb.profile.list`，
+  表现为"消息发出去了但没进 `/tool` 分支"。 harness 驱动对话时要给这类实参加 `MSYS2_ARG_CONV_EXCL='*'`。
+  另外 React 受控 `textarea` 不能用 `harness type` 追加（上一次会话残留的文本还在框里），
+  要用原生 value setter + `input` 事件整值替换，否则打出去的是拼接后的脏文本。
 
 ## 5.2 Agent 循环：规划 → 执行 → 观察 → 续推
 
