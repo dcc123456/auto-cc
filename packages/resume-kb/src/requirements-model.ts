@@ -98,12 +98,13 @@ export function buildRequirementMessages(
 /**
  * 剥掉模型常用的 Markdown 代码围栏与前后空白。
  *
- * 单列成函数是因为「模型把 JSON 包在 ```json 里」是实测常见形态（`outbound.script` 那边是纯文本所以没这问题），
- * 判据只该有一处：下面 `readModelRequirements` 的解析入口。
+ * 单列成函数并**对外可见**是因为「模型把 JSON 包在 ```json 里」是实测常见形态（`outbound.script` 那边是纯文本所以没这问题），
+ * 判据只该有一处：本文件与 4.5 的生成腿（`generate-model.ts`）读的都是同一份模型回复，
+ * 第二份围栏剥离实现就是第二套判据（AGENTS.md §2.2/§2.5）。
  * @param text 模型回复正文
  * @returns 去掉围栏与首尾空白后的文本
  */
-function stripFence(text: string): string {
+export function stripFence(text: string): string {
   const trimmed = text.trim();
   if (!trimmed.startsWith('```')) return trimmed;
   const body = trimmed.slice(trimmed.indexOf('\n') + 1);
