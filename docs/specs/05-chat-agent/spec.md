@@ -20,14 +20,14 @@
 | ID     | 验收标准                                                                                                 | 方式 | 验证操作                                         | 状态 |
 | ------ | -------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------ | ---- |
 | 5.1-01 | P1 的 `agent.tools` 空注册表被填充，每个工具含 `id/titleKey/params/sideEffect/requiresApproval/run` 六项 | U    | 遍历注册表断言字段齐全                           | [x]  |
-| 5.1-02 | 工具 `titleKey` 是 i18n key 而非文案本身；`zh-CN` 与 `en` 均有对应翻译，缺失即失败                       | C+U  | 缺 key 校验脚本通过                              | [ ]  |
+| 5.1-02 | 工具 `titleKey` 是 i18n key 而非文案本身；`zh-CN` 与 `en` 均有对应翻译，缺失即失败                       | C+U  | 缺 key 校验脚本通过                              | [x]  |
 | 5.1-03 | 副作用枚举仅三值（`read` / `localWrite` / `outbound`），无第四类且无 `unknown`                           | C    | 类型检查 + 断言枚举成员数                        | [x]  |
 | 5.1-04 | 每个工具入参由 zod schema 校验；非法入参被拒绝且**未执行任何动作**                                       | U    | 传错参调用 → 断言副作用计数为 0                  | [ ]  |
 | 5.1-05 | 调用未注册 id 返回明确错误（不猜测、不接受近似名匹配）                                                   | U    | 调 `boss.greets` → 断言「未注册工具」            | [ ]  |
 | 5.1-06 | P2 的浏览器能力（打开/导航/定位/读取/点击/输入/打招呼/投递）全部以工具形式可见                           | C+U  | 列举清单与 2.8-08 对齐                           | [ ]  |
 | 5.1-07 | P4 的内容能力（建档/检索/生成简历/生成话术）全部以工具形式可见                                           | C+U  | 列举清单与 P4 service 对齐                       | [ ]  |
-| 5.1-08 | `agent.*` 模块不直接 import `browser.*` / `platform.*` / `jd.*` / `resume.*` / `kb.*`                    | C    | eslint 依赖边界规则 0 命中（规则本条新增并生效） | [ ]  |
-| 5.1-09 | 依赖边界是**机检强制**而非约定：故意写一条越界 import 后 `pnpm lint` 失败                                | C    | 反向验证：临时注入违规 import → lint 报错 → 移除 | [ ]  |
+| 5.1-08 | `agent.*` 模块不直接 import `browser.*` / `platform.*` / `jd.*` / `resume.*` / `kb.*`                    | C    | eslint 依赖边界规则 0 命中（规则本条新增并生效） | [x]  |
+| 5.1-09 | 依赖边界是**机检强制**而非约定：故意写一条越界 import 后 `pnpm lint` 失败                                | C    | 反向验证：临时注入违规 import → lint 报错 → 移除 | [x]  |
 | 5.1-10 | 注册表可声明"暂不开放"的工具（存在但对 agent 不可见），且该状态可被单测断言                              | U    | 标记一个工具 disabled → agent 侧列举不到         | [ ]  |
 | 5.1-11 | 工具执行结果统一为 `ToolResult`（成功含结果摘要与证据引用；失败含原因，禁止吞错返 `undefined`）          | U    | 强制失败路径 → 断言有原因文本与证据引用          | [ ]  |
 
@@ -62,9 +62,10 @@
   （每只的键都在 `agent.tool.labels.` 命名空间下，没有一只把文案当键塞进契约）、`effects` 三值、
   `outbound` 全部需要批准。P2 的八项能力（打开 / 导航 / 定位 / 读取 / 点击 / 输入 / 打招呼 / 投递）
   在这 14 条里逐条对得上，5.1-06 的清单核对以此为素材，但那条要的是**机检 + 单测**，本片没做，状态位保持 `[ ]`。
-- **5.1-02 只完成了一半，所以状态位保持 `[ ]`**：`titleKey` 已是键不是文案、14 个键在 `zh-CN` / `en` 两份语言包
+- **5.1-02 只完成了一半，所以状态位当时保持 `[ ]`**：`titleKey` 已是键不是文案、14 个键在 `zh-CN` / `en` 两份语言包
   里都齐（各 14 条，`generateRun` 是这次补的第 14 条），但判据要的是"**缺失即失败**"——那需要一条机检
   （注册表给的键 ↔ 两份语言包逐条对齐），它按切片表属于 5.1-b。在那之前这条只是"当前恰好齐"，不写 `[x]`。
+  （机检已在 5.1-b 落地，状态位随之转 `[x]`，见下节。）
 - **顺带实证到两条后续条目的界面半边**（写在这里是因为它们是同一次操作顺手读到的，不是本片判据）：
   错参调用 `resume.generate.run {}` → 3ms 内 `TOOL_INPUT_INVALID：…jdText Invalid input`，卡片红态、
   **一次副作用都没发生**（5.1-04 要的那一格）；`/tool boss.greets` → `TOOL_NOT_REGISTERED`，
@@ -89,6 +90,71 @@
   表现为"消息发出去了但没进 `/tool` 分支"。 harness 驱动对话时要给这类实参加 `MSYS2_ARG_CONV_EXCL='*'`。
   另外 React 受控 `textarea` 不能用 `harness type` 追加（上一次会话残留的文本还在框里），
   要用原生 value setter + `input` 事件整值替换，否则打出去的是拼接后的脏文本。
+
+### 5.1-b 落地记录（两条机检进 lint 链：`titleKey` 双语齐检 + agent 依赖边界，2026-10-02）
+
+- **本片运行期代码一行没动**：14 处登记、两份语言包、`packages/agent/src` 全部原样。交付物是两条"会失败的检查"，
+  所以验收方式是注入缺陷看它红，不是看页面——02 / 08 / 09 三条的判据栏写的都是 C，
+  界面那半边的证据在 5.1-a 那两张双语截图里，本片不需要重复取证。
+- **动手前先做了一次纯重构**（不属于任何 spec 条目，故单独提交 `cad086a`）：新增 `scripts/internal/scan.ts`，
+  把 `filesIn`（原本 4 份）、`isTestOnlyModule`（2 份）、`relative` + `repoRoot`（4 份）、`stringLiteralsOf`
+  （1 份，而 5.1-b 是它的第二个消费者）收成一份。§2.2 说第二次重复就该抽，这里是第四次抄，
+  而且两份旧注释都在写"与另一处逐字相同"——靠注释维持的不变量正是最容易漂移的那种。
+  **判定范围逐字保持**：各脚本的扩展名白名单留在调用点原样传入（公共层不提供 `isTsSource` 这类预置，
+  否则会把某个脚本的文件集悄悄扩大）；`check-compliance-redlines.ts` 保留它自己那条更窄的 `isTestFile`，
+  统一口径等于放宽一条合规豁免，那不本片的风险预算。改前后逐条对过读数：知识包 1 个平台包、
+  LLM 305 个文件、提示词 254 个文件 / 2 份注册表，全部与改前一致；合规面 265 → 266 → 267 的两次 +1
+  分别是 `internal/scan.ts` 与 `check-tool-contract.ts` 自己进了被扫目录，不是判定面变化。
+- **`scripts/check-tool-contract.ts` 查四件事**：① 每处 `agentTool({…})` 读得出字符串字面量的 `id` 与 `titleKey`；
+  ② `titleKey` 形状是 `agent.tool.labels.<camelCase>` 且全 ASCII（含汉字就是把文案当键）；
+  ③ 该键在**每一份**语言包里非空，且非 `zh*` 的 locale 里不许还是中文（拿中文占位交差等于没翻）；
+  ④ `id` 全局唯一、`id` ↔ `titleKey` 一一对应，labels 一节里不许有没人引用的孤儿键。
+- **为什么读源码现场，而不是遍历运行期注册表**：起一次 app 遍历只能证明"此刻这 14 只齐"，
+  而"缺失即失败"要的是提交期就红——声明在能力包、文案在渲染层，两者之间没有任何编译期关系绑着，
+  能把它俩焊住的只有机检。遍历那半边已经以活体读数的形式记在 5.1-a（`titleKeysUnderLabelsNamespace: 14`）。
+- **词法配对不是可选项**：声明里嵌着 `input: z.strictObject({ id: z.string() })`，直接对原文取 `id:` 会读到
+  schema 的字段名；`description: '…}…'` 又会让括号在字符串里提前收尾。所以先把字符串与注释抹成空格，
+  再按 `{}()` 三类括号算深度、只保留顶层字符。这一条是**演过的**：把 `input` 提到声明最前并塞一只
+  `id: 'nested-decoy'`，读出来的仍是 `browser.page.navigate`（没有出现"重复登记 id"）。
+- **5.1-02 的"缺失即失败"四组注入全部命中，每组都 `exit 1`、报错行号指到声明现场**：
+  ① `titleKey: '页面导航'` → `packages/browser/src/index.ts:325 titleKey「页面导航」不合规…`，
+  并连带把 `pageNavigate` 报成两份语言包里的孤儿键（那只工具已不再引用它）；
+  ② 两只工具共用一个键（把 `sessions.open` 的键改成 `agent.tool.labels.pageSnapshot`）→
+  `titleKey「agent.tool.labels.pageSnapshot」被 2 只工具共用（browser.page.snapshot / sessions.open）`；
+  ③ `en.json` 的 `kbList` 填中文、`locateFind` 填空串 → `「kbList」的文案还是中文（列出知识库实体）` 与
+  `在 en.json 里是空串` 各一条；④ 往 `zh-CN.json` 加一条 `probeOrphan` → `没有任何 agentTool 声明引用`。
+  **探针全部当场还原**：还原后 `git status` 只剩新脚本一行，复跑 `exit 0`——不是"改回去一半"。
+- **反向断言（扫到 0 条声明即失败）**不是洁癖：helper 改名或声明挪进配置就能让一条检查永真，
+  而它打印"通过"时没人会怀疑它压根什么都没看。与 `check-prompts.ts` 对注册表份数的处理同一条理由。
+- **5.1-08 的 eslint 边界**：`AGENT_CAPABILITY` 挂在 `packages/agent/src/**/*.ts` 上，禁 6 只能力包
+  （`plugin-browser` / `plugin-sessions` / `plugin-platform-*` / `plugin-outbound` / `plugin-resume-doc` /
+  `plugin-resume-kb`），并精确到"包名 + 深路径"两种形态。只管 `src/`：测试替身按名字假装配一只能力包
+  不算架构越界。**第一版名单整条空转**——写的是 `@auto-cc/browser`，而仓库真实包名是
+  `@auto-cc/plugin-browser`（`plugin-*` 是 1.5 定的口径）。"规则存在"与"规则命中"是两件事，这条坑留字。
+  有意不列 `plugin-workflow`（§5.9 要求对话与工作流共用同一个 `workflow.runner`）、
+  `plugin-llm` 与 `plugin-entitlement`（agent 的对话腿要发模型、档位判定要问闸门）。
+- **5.1-09 反向验证按判据原文打整条 `pnpm lint`**：新建 `packages/agent/src/probe-5109.ts`，三条越界 import
+  各测一种名单形态（精确名 `@auto-cc/plugin-resume-kb`、通配 `@auto-cc/plugin-platform-boss`、
+  深路径 `@auto-cc/plugin-browser/src/index.js`）→ `pnpm lint` **exit 1**、`✖ 3 problems (3 errors)`，
+  三条都带"agent 层不得直接 import 能力包：动作只能经 agent.tools 注册表调用…"，
+  且因为 lint 是 `&&` 链，后面 7 项机检根本没跑。删掉探针复跑 → **exit 0**、7 条 ✔，
+  其中新增的那条是 `✔ agent 工具契约检查通过（14 只工具 × 2 份语言包：…）`。
+- **本片没做的一条，理由与 5.1-a 推掉三态完全相同**：`effect` ↔ `requiresConfirmation` 的一致性检查。
+  判定者（自治档位）要到 5.3 才存在，先写检查就是 §2.6 禁止的"为假想的未来做抽象"。
+- **门禁实跑**：`pnpm typecheck` exit 0；`pnpm lint` exit 0（链从 6 项机检变 7 项）；`pnpm format:check` 全部符合；
+  `pnpm test` 21 包 exit 0、**1365 例全过**（本片未增删运行期代码，一例未动）。
+  顺带记录一处**门禁照不到的既有缺口**（本片不改）：根 `tsconfig.json` 把 `scripts/**` 纳进来，
+  但 `pnpm typecheck` 是 `-r` 逐包跑，`npx tsc -p tsconfig.json` 实跑出 16 处历史报错，
+  全部在 `scripts/fixture-server.ts` 与 `scripts/vendor-runtime-deps.ts`，本片新增的两个文件 0 处。
+  要不要把根脚本纳进门禁，是一条独立的决定，记在这里是为了别让"门禁绿了"被读成"根 tsconfig 干净"。
+- **§7.4 自检里需要显式回答的**：④ 复用检查——新检查没有再抄一份扫描器，公共层即本片的前置重构；
+  ⑤ 死代码检查——4 份 `filesIn`、2 份 `isTestOnlyModule`、4 份 `relative`/`repoRoot` 已删，
+  探针文件与探针语言包改动当场还原，未留别名、未留"两套都能用"；
+  ⑥ 前端三项——本片未触碰渲染层，语言包只被读取、一字未改（终态 `git status` 可证）；
+  ⑦ 提交——分两片入库（`cad086a` 纯重构、`1166d81` 检查 + eslint + lint 链），均已推送 `origin/main`，
+  本节文档随后单独提交（§1.4 功能与文档分开）；
+  ⑧ 暂存区——只有 1 个新脚本 + `eslint.config.js` + `package.json` 两处配置，无图片、无探针产物，
+  实跑日志（`tmp/51b-*.txt`、`tmp/51b-test.log`）留在被忽略的 `tmp/`。
 
 ## 5.2 Agent 循环：规划 → 执行 → 观察 → 续推
 
