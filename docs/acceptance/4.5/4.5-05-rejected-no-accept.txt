@@ -1,0 +1,39 @@
+4.5-05 验收证据 · 事实校验不过 → 拒绝产出 + 界面提示需人工确认
+===================================================================
+日期：2026-10-02　子计划：4.5-c　方式：V（真页面截图 + DOM 断言 + 磁盘复核）
+截图：4.5-05-rejected-no-accept.png
+
+注入方式（不是推测，是真的让校验器拒一次）
+-------------------------------------------------------------------
+本地 fixture 靶切到 fabricate 模式：POST http://127.0.0.1:10233/api/generate-mode
+  {"mode":"fabricate"} → 模型腿返回的散文把数值改成"91%"，即"注入必失败用例"的页面版。
+仍然零外发：不打真实平台（§7.2），不打外部模型（判据四）。
+
+DOM 读数
+-------------------------------------------------------------------
+[data-generate-outcome] = "rejected"
+结果框文案：事实校验没过（2 条违规），本次拒绝产出：没有文档可以接受
+[data-generate-receipt]：目标简历 resume-0185fba4a2cc · 提示词 resume-generate-v1 · 校验前重试 重试过一次
+[data-generate-violation] ×2：
+  summary/summary-1.text → number-preservation（少了 5，多了 91）
+  experience/experience-2.achievement → number-preservation（少了 45、8，多了 91）
+[data-generate-rejected]：需要人工确认：下面的违规行是校验器的读数（只含路径、判据与长度，不含正文）。
+  改不改由你判断，本次没有任何内容写入工作副本。
+acceptBtn（[data-generate-action="accept"] 是否存在）= false
+rewriteRows（改写行数）= 0
+
+磁盘复核（node tmp/peek-mark.mjs，直接读工作副本 JSON）
+-------------------------------------------------------------------
+【定制】出现次数 = 1，命中 summary/summary-1.text —— 这一处来自 4.5-11 的逐项接受，
+本次拒绝产出没有让计数变化，即"无产物"是真的，不只是界面上没显示。
+
+生成记录表复核（node tmp/peek-gen.mjs，读 resume_generations）
+-------------------------------------------------------------------
+{"model_status":"merged","status":"rejected","retried":1,
+ "violations_json":"[\"summary/summary-1.text → number-preservation（少了 5，多了 91）\",…"}
+拒了、为什么拒、重试过没有，四样都留在库里（4.5-10 的复盘面）。
+
+违规明细的口径
+-------------------------------------------------------------------
+中文数词参与比对：「五年」→ 5，所以读数能说出"少了 5"；违规行只含路径/判据/长度，
+正文不过进程边界也不进日志（4.5-14 的第四条出口）。
