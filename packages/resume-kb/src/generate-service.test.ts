@@ -36,8 +36,10 @@ import { generationTargetFields, numbersOf, type GenerationField } from './fact-
 import {
   GENERATION_OUTCOMES,
   kbGenerateSchema,
+  MAX_PENDING_PROPOSALS,
   RESUME_GENERATION_MIGRATION_VERSION,
   ResumeGenerateService,
+  type GenerationRewriteView,
   type GenerationView,
   type KbGenerateConfig,
 } from './generate-service.js';
@@ -244,6 +246,18 @@ function generationRows(db: DatabaseSync): Array<Record<string, unknown>> {
 }
 
 /**
+ * 按字节读回库里那份工作副本（`updated_at` + `doc_json`），用来断言"这次表态到底写没写盘"。
+ * @param db store 的连接句柄
+ * @returns 两个字段拼的对象；行不存在时抛错——那是装配问题，不能让比较悄悄通过
+ */
+function dbCopy(db: DatabaseSync): { updatedAt: number; body: string } {
+  const row = db.prepare('SELECT updated_at, doc_json AS body FROM resume_docs WHERE id = ?').get(DOC_ID) as
+    { updated_at?: number | bigint; body?: string } | undefined;
+  if (row === undefined) throw new Error(`工作副本 ${DOC_ID} 没落进 resume_docs：装配或建表出了问题`);
+  return { updatedAt: Number(row.updated_at ?? -1), body: String(row.body ?? '') };
+}
+
+/**
  * 取日志里最后一条含标记的那一行（整份文本一起断言会把上一条评论带进来，级别就判不准了）。
  * @param text `waitForLogLine` 拿到的完整日志文本
  * @param needle 定位用的子串
@@ -297,9 +311,22 @@ describe('resume.generate 的产物面与 Schema（spec 4.5-01 / 12）', () => {
     expect(after.get(changed[0] as string)).toBe(rewritten);
     expect(view.checks.ok).toBe(true);
     expect(view.checks.retried).toBe(false);
-    expect(view.rewrites).toEqual([
-      { sectionId: target.sectionId, entryId: target.entryId, fieldKey: target.fieldKey, rewrittenText: rewritten },
-    ]);
+    // 逐项接受的行（4.5-11 的数据面）：除了"改成什么"，还带"改的是哪一段、原文逐字是什么、
+    // 原文出自库里哪条实体"。原文取自工作副本而不是模型回报——界面上"改前"那一栏必须是用户自己的话。
+    const rewriteRow = view.rewrites[0] as GenerationRewriteView;
+    expect(rewriteRow).toMatchObject({
+      sectionId: target.sectionId,
+      entryId: target.entryId,
+      fieldKey: target.fieldKey,
+      originalText: target.text,
+      rewrittenText: rewritten,
+    });
+    expect(view.rewrites).toHaveLength(1);
+    expect(rewriteRow.sectionTitle.length).toBeGreaterThan(0);
+    expect(rewriteRow.entryLabel.length).toBeGreaterThan(0);
+    // 出处 id 只能指向这份文档派生出来的实体（4.5-06 的收口：认领方式是载荷逐字相等，不是猜）
+    const derivedEntityIds = new Set(deriveEntities(boot.baseline).map((draft) => draft.entityId));
+    expect(rewriteRow.sourceEvidenceIds.every((id) => derivedEntityIds.has(id))).toBe(true);
     expect(view.receipt.model).toBe('fake-generate-model');
     expect(view.receipt.promptVersion).toBe(GENERATE_PROMPT_VERSION);
     expect(fake?.calls).toHaveLength(1);
@@ -709,5 +736,207 @@ describe('resume.generate 的 agent 工具面（spec 4.5 的双入口）', () =>
     expect(tool.input.safeParse({ jdText: SAMPLE_JD, jdId: null }).success).toBe(true);
     // 时间基准只能由服务取：让模型自己填「今天是几月」会破坏 4.5-07 的确定性（同 4.4-05 的判据）
     expect(tool.input.safeParse({ jdText: SAMPLE_JD, nowMs: AS_OF_MS }).success).toBe(false);
+  });
+});
+
+/**
+ * 把模型给出的清单拼成一条回复（多条改写时按原样给）。
+ * @param rewrites 每条改写的目标位置与新写法
+ * @returns 可直接当替身回复的 JSON 串
+ */
+function multiReplyFor(rewrites: readonly GenerationField[]): string {
+  return JSON.stringify({ entries: rewrites.map((item) => ({ ...item })) });
+}
+
+/**
+ * 起一份「模型按 `picked` 逐条改写」的装配。
+ *
+ * 为什么要跑两遍装配：待改写清单的位置只能从服务给的 `generationTargetFields(baseline)` 里取
+ * （自己编 id 就等于绕开判据六那道"位置必须在清单上"），而清单要先有一份基线文档才能算。
+ * @param picked 要模型改的那几个位置（从第一次装配的清单里挑）
+ * @returns 真正被使用的装配：生成服务、应用句柄与那次生成的视图
+ */
+async function bootRewrittenAt(picked: readonly GenerationField[]) {
+  const rewrites = picked.map((field) => ({ ...field, text: safeRewriteOf(field) }));
+  const { gen, app } = await bootGenerate({}, { replies: [multiReplyFor(rewrites)] });
+  const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+  return { gen, app, view };
+}
+
+describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写工作副本）', () => {
+  it('接受全部改写并采纳重排：工作副本变成产物那一份，读回来仍过 P3 Schema', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app, view } = await bootRewrittenAt([target]);
+    expect(view.receipt.outcome).toBe('rewritten');
+    const product = view.document;
+    if (product === null) throw new Error('rewritten 的产物不该是 null');
+    const result = gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 1);
+    expect(result).toEqual({
+      docId: DOC_ID,
+      receiptId: view.receipt.id,
+      appliedRewrites: 1,
+      reorderApplied: true,
+      movedSections: view.receipt.movedSections,
+      movedEntries: view.receipt.movedEntries,
+      updatedAt: AS_OF_MS + 1,
+    });
+    const loaded = app['resume.doc'].load(DOC_ID);
+    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    expect(validateDocument(loaded.document).ok).toBe(true);
+    expect(JSON.stringify(loaded.document.sections)).toBe(JSON.stringify(product.sections));
+  });
+
+  it('只勾其中一条：另一处逐字留在原样，接受不是整份覆盖', async () => {
+    const boot = await bootGenerate({}, {});
+    const targets = generationTargetFields(boot.baseline);
+    const picked = [targets[0] as GenerationField, targets[1] as GenerationField];
+    const { gen, app, view } = await bootRewrittenAt(picked);
+    expect(view.rewrites).toHaveLength(2);
+    const accepted = view.rewrites[0] as GenerationRewriteView;
+    const refused = view.rewrites[1] as GenerationRewriteView;
+    expect(
+      gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: false }, AS_OF_MS + 1).appliedRewrites,
+    ).toBe(1);
+    const loaded = app['resume.doc'].load(DOC_ID);
+    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    const values = fieldValuesByLocation(loaded.document);
+    expect(values.get(`${accepted.sectionId}#${accepted.entryId}#${accepted.fieldKey}`)).toBe(accepted.rewrittenText);
+    // 没勾的那条：工作副本里仍是原文，而不是产物里那句新写法（部分接受必须真的部分）
+    expect(values.get(`${refused.sectionId}#${refused.entryId}#${refused.fieldKey}`)).toBe(refused.originalText);
+  });
+
+  it('提议态不在 / 下标越界 / 重复接受：三种表态都不写盘，各给一句确定的话', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app, view } = await bootRewrittenAt([target]);
+    const row = dbCopy(app.store.db);
+    // ① 界面拿着一个从没生成过的 id 来表态（重启过 / 过期了）：只能重生成，不能猜当时看到什么
+    expect(() => gen.accept('gen-never-heard-of-it', { acceptedIndexes: [0], applyReorder: true })).toThrow(AppError);
+    let caught: unknown;
+    try {
+      gen.accept('gen-never-heard-of-it', { acceptedIndexes: [0], applyReorder: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
+    // ② 下标越界：那是"界面停在旧产物上"，不是"少接受一条"，所以按参数错拒绝而不是静默少写
+    try {
+      gen.accept(view.receipt.id, { acceptedIndexes: [7], applyReorder: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('INVALID_ARGUMENT');
+    expect(dbCopy(app.store.db)).toEqual(row);
+    // ③ 一次接受用掉一份提议态：同一张单子接受第二次落在"重新生成"那句更清楚的话上
+    gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 1);
+    try {
+      gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 2);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
+  });
+
+  it('生成之后用户自己改过简历：接受被拦下，用户那处改动原样留着（不叠两份改动）', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app, view } = await bootRewrittenAt([target]);
+    const loaded = app['resume.doc'].load(DOC_ID);
+    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    // 只动时刻就足够构成"生成之后副本变了"——判定看的是逐字比较，不是挑某几个字段
+    const edited = { ...loaded.document, updatedAt: AS_OF_MS + 5 };
+    app['resume.doc'].save(edited);
+    let caught: unknown;
+    try {
+      gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 6);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
+    const after = app['resume.doc'].load(DOC_ID);
+    expect(after.status).toBe('found');
+    expect(JSON.stringify((after as { document: ResumeDocument }).document)).toBe(JSON.stringify(edited));
+  });
+
+  it('一条都没勾也没采纳重排：这声接受一次盘都不落，提议态也留着', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app, view } = await bootRewrittenAt([target]);
+    const before = dbCopy(app.store.db);
+    const result = gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: false }, AS_OF_MS + 3);
+    expect(result).toMatchObject({ appliedRewrites: 0, reorderApplied: false, updatedAt: before.updatedAt });
+    expect(dbCopy(app.store.db)).toEqual(before);
+    // 什么都没写就不该把这单子判成"已用掉"：同一张单子随后仍能正常接受
+    expect(
+      gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 4).appliedRewrites,
+    ).toBe(1);
+  });
+
+  it('只采纳重排、一条改写都没勾：顺序按产物走，字段值一字未动', async () => {
+    // 不挂模型腿的装配本身就是保守版（4.5-09）：`rewrites` 天然为空，正好用来判"只动顺序"这一支
+    const { gen, app } = await bootGenerate();
+    const before = app['resume.doc'].load(DOC_ID);
+    if (before.status !== 'found') throw new Error(`读回工作副本失败：${before.status}`);
+    const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(view.receipt.outcome).toBe('reorder_only');
+    expect(view.rewrites).toEqual([]);
+    const result = gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 1);
+    expect(result.reorderApplied).toBe(true);
+    expect(result.movedSections + result.movedEntries).toBeGreaterThan(0);
+    const after = app['resume.doc'].load(DOC_ID);
+    if (after.status !== 'found') throw new Error(`读回工作副本失败：${after.status}`);
+    expect(JSON.stringify(after.document.sections)).toBe(JSON.stringify(view.document?.sections));
+    // 每条改写各自守恒数值，重排又不动内容，所以两侧的位置集合与取值必须逐字相同
+    expect(fieldValuesByLocation(after.document)).toEqual(fieldValuesByLocation(before.document));
+    expect(view.document?.updatedAt).toBe(before.document.updatedAt);
+    expect(after.document.updatedAt).toBe(AS_OF_MS + 1);
+  });
+
+  it('被拒的那次没有提议态可接受：界面只能给"需人工确认"，捞不出一份产物', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app } = await bootGenerate(
+      {},
+      {
+        replies: [replyFor(target, numberLosingRewriteOf(target)), replyFor(target, numberLosingRewriteOf(target))],
+      },
+    );
+    const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(view.receipt.outcome).toBe('rejected');
+    expect(view.document).toBeNull();
+    expect(view.rewrites).toEqual([]);
+    expect(view.checks.violationCount).toBeGreaterThan(0);
+    let caught: unknown;
+    try {
+      gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
+    expect(dbCopy(app.store.db).body).toContain('星桥科技');
+  });
+
+  it('提议态只留最近 `MAX_PENDING_PROPOSALS` 份：最早那份接受时报"重新生成一次"', async () => {
+    const { gen, app } = await bootGenerate();
+    const ids: string[] = [];
+    // 循环里只生成不接受：工作副本一直停在同一份基线上，越界与过期两条判定都不会抢在前面，
+    // 这里判的就只剩"保留窗口"这一件事（接受掉任何一份都会把它自己从窗口里删掉）。
+    for (let index = 0; index <= MAX_PENDING_PROPOSALS; index += 1) {
+      const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS + index);
+      ids.push(view.receipt.id);
+    }
+    let caught: unknown;
+    try {
+      gen.accept(ids[0] as string, { acceptedIndexes: [], applyReorder: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
+    // 最新那份还在窗口里：被挤掉的只有最早的那一份，不是"来第二次就把第一次弄丢"
+    expect(
+      gen.accept(ids[MAX_PENDING_PROPOSALS] as string, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS).docId,
+    ).toBe(DOC_ID);
+    expect(app['resume.doc'].load(DOC_ID).status).toBe('found');
   });
 });

@@ -80,6 +80,13 @@ export type AppErrorCode =
   // 前者是「这份简历还没入库」（去导入并派生），后者是「知识库服务整个没装配」，
   // 用户自己修不了后者，界面只能给一句"功能不可用"而不是引导。
   | 'KB_LIBRARY_MISSING'
+  // 定向生成的接受面（spec 4.5-11）：三个码各自对应界面的一句不同的话，所以不合并——
+  // `PROPOSAL_MISSING` 是"提议态没了"（重新生成一次），`STALE_BASELINE` 是"你在生成之后自己改过简历"
+  // （改的那份还在，别覆盖），`CHECK_FAILED` 是"这次选中的组合没过事实校验"（这不是重试能解决的，
+  // 要人少勾几条）。合成一个"接受失败"就等于把三种不同的下一步压成一句没用的话。
+  | 'KB_GENERATION_PROPOSAL_MISSING'
+  | 'KB_GENERATION_STALE_BASELINE'
+  | 'KB_GENERATION_CHECK_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

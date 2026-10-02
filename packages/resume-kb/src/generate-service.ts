@@ -10,9 +10,10 @@
  * - 相关性读数：`kb.gap.report()`，本服务**不重开一条拆解或比对通道**（§2.5）。
  *
  * 五条装配层的立身之本：
- * 1. **不写工作副本**。产物是"提议态"，写入只发生在界面上用户逐项接受之后（4.5-11，归 4.5-c）。
- *    于是本服务对 `resume.doc` 只有 `load()` 一条读路径，一次 `save()` 都不发生——
+ * 1. **`run()` 不写工作副本**。产物是"提议态"，唯一的 `save()` 发生在 `accept()` 里、
+ *    也就是用户逐项接受之后（4.5-11）。于是生成这条路对 `resume.doc` 只有 `load()`，
  *    这是 4.5-05 那句"拒绝产出"能被断言的前提：没有产物可捞，也没有半份改动留在副本里。
+ *    接受侧同样不放松：写之前比基线、写之前复验，两道都过才动那份文档（见 `accept()`）。
  * 2. **产物与证据并排返回，不嵌进文档**（判据二）：`documentSchema` 是 `strictObject`，
  *    多一个私有键就同时破掉 4.5-01 与 4.5-12。所以返回体是
  *    `{ document, rewrites, evidence, reorderBases, checks, receipt }`，证据留在旁边那一份里。
@@ -44,7 +45,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { validateDocument, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
+import { validateDocument, type Entry, type ResumeDocument, type Section } from '@auto-cc/plugin-resume-doc';
 import { deriveEntities, type KbEntityDraft } from './entities.js';
 import {
   describeViolations,
@@ -74,6 +75,15 @@ import type { RequirementKind } from './requirements.js';
  *  撞号的表现是「见号已存在就跳过建表」→ 表根本没建 → 读写 `no such table`，所以号段列全并进单测断言。
  */
 export const RESUME_GENERATION_MIGRATION_VERSION = 15;
+
+/**
+ * 主进程侧最多同时保留几份待接受产物（4.5-11 的落点上限）。
+ *
+ * 要一个上限而不是"来多少存多少"：每份提议态装的是一整份简历文档，用户连着试十几段 JD 是正常用法，
+ * 内存不该只跟着使用次数涨。也不做成"只留最近一份"——逐项接受要回头对比，生成第二次就把第一次的
+ * 表态弄丢是不可接受的。超出即挤掉最早那份，界面对它得到 `KB_GENERATION_PROPOSAL_MISSING`。
+ */
+export const MAX_PENDING_PROPOSALS = 8;
 
 /**
  * 一次生成的三种结局。
@@ -159,13 +169,32 @@ export interface GenerationEvidenceView {
 /**
  * 界面逐项接受 / 回退要用的一条改写（4.5-11 的数据面）。
  *
- * 刻意**不回原文**：原文由界面从工作副本自己读（那份才是真相源），返回体里少一份正文就少一处脱敏面。
+ * **随改写一起过界的还有原文与位置标签**（4.5-c 补的一条，此前这里写的是"不回原文"）：
+ * 逐项接受要人判断的是「这句改得对不对」，只给新写法就等于让人蒙着签字；而渲染层没有
+ * 读工作副本的白名单口（`resume.doc.*` 一条都不在允许清单里），"界面自己去读原文"无从落地。
+ * 过界的是**这一条被改动的字段**的那一份正文，不是 P3.1 文档模型本体——后者仍然不过桥（判据二）。
  */
 export interface GenerationRewriteView {
   readonly sectionId: string;
   readonly entryId: string;
   readonly fieldKey: string;
+  /** 区块标题（文档里的 `title` 原样，界面用它说"改的是哪一段"）。 */
+  readonly sectionTitle: string;
+  /** 条目标签（该条目里被事实锁定的字段值拼出来，见 `entryLabelOf`）。 */
+  readonly entryLabel: string;
+  /** 改写前的正文（就是工作副本里那一份，逐字）。 */
+  readonly originalText: string;
   readonly rewrittenText: string;
+  /**
+   * 这段原文在知识库里的**出处 id**（4.5-06 的收口：被改写的原文本来就是库里那份记录）。
+   * 与 `evidence` 那一份是两类依据：那份是"这条目命中了 JD 的哪条要求"，这份是"这段原文出自哪条实体"。
+   *
+   * 为空只有两种情况，界面必须把两种分开播报（都不许伪装成"有依据"）：
+   * ① 库里还没同步过（实体表由 `kb.profile.sync` 从工作副本派生，一次都没跑就没有 id 可给）；
+   * ② 该区块按 4.2 裁定二**不产实体行**（`summary` / `education`）——那时这段散文在库里的形态是
+   *    区块切片而不是实体，切片 id 属于 `kb.profile` 的派生索引，本服务不越包去读那张表（§2.7）。
+   */
+  readonly sourceEvidenceIds: readonly string[];
 }
 
 /** 事实校验的读数（违规明细只到 `describeViolations()` 那种「路径 + 判据 + 长度」的形状）。 */
@@ -199,6 +228,43 @@ export interface GenerationReceipt {
 }
 
 /**
+ * 一次换位的读数 + 界面要指认的对象标签（4.5-02 的 V 半边）。
+ *
+ * `ReorderBasis` 里只有 id 与下标——那是给代码看的。界面上"这段被提前了"必须说出**是哪段**，
+ * 而标签只能从文档结构取（区块 `title` / 条目里被锁定的字段值），所以这一层在装配层补，
+ * 不放进 `generate-reorder.ts`：那个文件是纯排序函数，让它去拼中文标签等于把展示逻辑塞进判据里。
+ */
+export interface GenerationReorderView extends ReorderBasis {
+  readonly label: string;
+}
+
+/**
+ * 界面上逐项表态的那一份（spec 4.5-11：接受后才写入工作副本）。
+ *
+ * 用**下标**而不是位置三键：改写列表是随一次生成给出去的，下标不会与别的产物串台；
+ * 下标以 `view.rewrites` 的顺序为准（界面显示的就是那一份，表态必须落在看得见的那一行上）。
+ * 下标越界一律以 `INVALID_ARGUMENT` 拒绝（那是"界面停在旧产物上"，不是"少接受一条"）；
+ * 重复下标按"只接受一次"处理，不去猜用户为什么数了两遍。
+ */
+export interface GenerationDecision {
+  readonly acceptedIndexes: readonly number[];
+  /** 重排是整组接受 / 整组回退：逐条回退会让位置互相依赖变成二次猜测（判据一的稳定序前提就没了）。 */
+  readonly applyReorder: boolean;
+}
+
+/** 接受成功后的读数（界面据此播报"写进去了几处、动没动顺序"）。 */
+export interface GenerationAcceptResult {
+  readonly docId: string;
+  readonly receiptId: string;
+  readonly appliedRewrites: number;
+  readonly reorderApplied: boolean;
+  readonly movedSections: number;
+  readonly movedEntries: number;
+  /** 写入后工作副本的 `updatedAt`（毫秒），界面上"改的是哪一版"的凭据。 */
+  readonly updatedAt: number;
+}
+
+/**
  * 一次定向生成的返回体（plan §4.5 判据二的"文档与证据并排"）。
  *
  * `document` 为 null 就是**没有产物**（4.5-05 的拒绝路径），界面此时只能给"需人工确认"与违规明细，
@@ -209,9 +275,29 @@ export interface GenerationView {
   readonly rewrites: readonly GenerationRewriteView[];
   readonly evidence: readonly GenerationEvidenceView[];
   /** 重排依据：只含真正换了位置的对象（4.5-02 的"引用命中项"）。 */
-  readonly reorderBases: readonly ReorderBasis[];
+  readonly reorderBases: readonly GenerationReorderView[];
   readonly checks: GenerationChecksView;
   readonly receipt: GenerationReceipt;
+}
+
+/**
+ * 主进程侧替用户暂存的那份提议态（4.5-11 的落点）。
+ *
+ * **为什么必须有**：逐项接受要写的是"基线 + 用户选中的那几处改写 + 要不要重排"，
+ * 而这三样都不该由渲染层拼——正文不过进程边界（判据二），位置三键由界面回传就等于让界面决定
+ * 往哪一格写什么。所以 `run()` 把这一份留在内存里，`accept()` 只认 `receiptId`。
+ * 有意的取舍：**进程寿命内的状态**。热改配置会重建本服务（§9 实测 2.5），重建后旧 `receiptId`
+ * 一律 `KB_GENERATION_PROPOSAL_MISSING`，界面据此提示"重新生成一次"；把提议态持久化会往
+ * `resume_generations` 里加正文列，那是判据三明确不要的东西（被拒内容不留整段），不落库是规则而非疏漏。
+ */
+interface PendingProposal {
+  /** 生成那一刻的工作副本（接受前要比对，用户中途改过简历就不能再按旧产物写）。 */
+  readonly baseline: ResumeDocument;
+  /** 重排后的区块序列（与 `view.reorderBases` 同源）。 */
+  readonly sections: readonly Section[];
+  /** 拼提示词时用的那份 JD 正文（`accept` 里复验具名回查要用，界面无从提供）。 */
+  readonly jdText: string;
+  readonly view: GenerationView;
 }
 
 /** 一次模型腿尝试的内部结果（`askModel` 的返回）。 */
@@ -248,6 +334,13 @@ export class ResumeGenerateService extends Service {
   private get store() {
     return asApp(this.ctx).store;
   }
+
+  /**
+   * 待用户逐项表态的产物（`receiptId` → 提议态），4.5-11 的唯一落点。
+   *
+   * 有意是**进程内**状态：见 `PendingProposal` 的注释（不落库是判据三的规则，不是疏漏）。
+   */
+  private readonly proposals = new Map<string, PendingProposal>();
 
   private get docStore() {
     return asApp(this.ctx)['resume.doc'];
@@ -397,23 +490,144 @@ export class ResumeGenerateService extends Service {
       rewritesApplied: outcome === 'rejected' ? 0 : attempt.rewrites.length,
     });
     const view: GenerationView = {
-      document: outcome === 'rejected' ? null : product,
-      rewrites:
-        outcome === 'rejected'
-          ? []
-          : attempt.rewrites.map((rewrite) => ({
-              sectionId: rewrite.sectionId,
-              entryId: rewrite.entryId,
-              fieldKey: rewrite.fieldKey,
-              rewrittenText: rewrite.rewrittenText,
-            })),
+      document: product,
+      // 逐条改写的原文与位置标签从**文档**这一侧取（不是从模型回答取）：界面上"改了什么"必须
+      // 与简历里那一条逐字对得上，而模型回报的位置只是请求清单的复读（判据六）。
+      rewrites: product === null ? [] : rewriteRows(reorderedDoc, attempt.rewrites, drafts),
       evidence,
-      reorderBases: reordered.bases,
+      // 被拒时没有产物，重排依据也不播报——留着就会长成"看起来提前过但又没东西可看"。
+      reorderBases: product === null ? [] : reorderLabelsWith(reorderedDoc, reordered.bases),
       checks: { ok: check?.ok === true, retried, violations, violationCount: violations.length },
       receipt,
     };
+    if (product !== null) {
+      // 提议态留在主进程：`accept` 认的是 `receiptId`，位置三键与正文都不经界面来回（判据二 / 4.5-11）。
+      this.remember(receipt.id, {
+        baseline,
+        sections: reordered.sections,
+        jdText,
+        view,
+      });
+    }
     this.logRun(view, report.rows.length);
     return view;
+  }
+
+  /**
+   * 按用户在界面上的逐项表态，把选中的改写与（可选的）重排写进工作副本（spec 4.5-11）。
+   *
+   * 三条不放行的判定，都在"写"之前：
+   * 1. **提议态还在**（本服务重启过 / 超出保留窗口 → 让界面重新生成，不猜用户当时看到什么）；
+   * 2. **工作副本逐字未变**（生成之后用户自己改过简历 → 两份改动叠在一起是谁都没法解释的产物）；
+   * 3. **子集再过一次同一套校验**（每条改写各自守恒数值，所以子集必然通过；这里跑它不是为了防模型，
+   *    是为了防"界面回传的下标拼出来一份我们没验过的组合"——写用户简历是全片唯一不可逆的动作）。
+   * 一条都没勾且重排也没采纳时**一次盘都不落**（见函数体里那条早退），返回的是零改写的读数。
+   * @param receiptId 一次生成的凭证 id（`receipt.id`，同时是 `resume_generations` 那一行的主键）
+   * @param decision 逐项表态：接受哪几条改写（下标）、要不要采纳重排
+   * @param nowMs 写入时刻（毫秒），只用于比对与读数，不进 `save`
+   * @returns 写进去的改写条数、是否采纳重排、以及工作副本写入后的 `updatedAt`
+   * @throws AppError(`KB_GENERATION_PROPOSAL_MISSING` / `INVALID_ARGUMENT` / `KB_SOURCE_MISSING` /
+   *         `KB_GENERATION_STALE_BASELINE` / `KB_GENERATION_CHECK_FAILED`)
+   */
+  accept(receiptId: string, decision: GenerationDecision, nowMs = Date.now()): GenerationAcceptResult {
+    const proposal = this.proposals.get(receiptId);
+    if (proposal === undefined) {
+      throw new AppError(
+        'KB_GENERATION_PROPOSAL_MISSING',
+        `找不到 ${receiptId} 的提议态：服务重启过或该产物已超出保留窗口，请重新生成一次`,
+      );
+    }
+    if (proposal.view.document === null) {
+      throw new AppError('INVALID_ARGUMENT', `${receiptId} 那次生成被拒绝产出，没有可接受的改写`);
+    }
+    const docId = proposal.view.receipt.docId;
+    // 表态的是**界面看见的那一行**（`view.rewrites`），不是模型回答里的那一条：两者的顺序不同
+    // （行按文档结构排，回答按模型给的顺序排），拿回答侧的下标就等于让用户签他没看见的东西。
+    const rows = proposal.view.rewrites;
+    const shouldApply = new Set<number>();
+    for (const index of decision.acceptedIndexes) {
+      if (rows[index] === undefined) {
+        throw new AppError(
+          'INVALID_ARGUMENT',
+          `接受列表里的第 ${String(index)} 条不在 ${receiptId} 的改写清单里：界面可能停在旧产物上，请重新生成`,
+        );
+      }
+      shouldApply.add(index);
+    }
+    const selected = rows
+      .filter((_, index) => shouldApply.has(index))
+      .map((row) => ({
+        sectionId: row.sectionId,
+        entryId: row.entryId,
+        fieldKey: row.fieldKey,
+        originalText: row.originalText,
+        rewrittenText: row.rewrittenText,
+      }));
+    const loaded = this.docStore.load(docId);
+    if (loaded.status !== 'found') {
+      throw new AppError('KB_SOURCE_MISSING', `工作副本 ${docId} ${loaded.status === 'missing' ? '不存在' : '已损坏'}`);
+    }
+    if (JSON.stringify(loaded.document) !== JSON.stringify(proposal.baseline)) {
+      throw new AppError(
+        'KB_GENERATION_STALE_BASELINE',
+        `工作副本 ${docId} 在生成之后被改过：先重新生成，再逐项接受，不要把两份改动叠在一起`,
+      );
+    }
+    if (selected.length === 0 && !decision.applyReorder) {
+      // 一条没勾、重排也没采纳：这声"接受"没有要写的内容，就一次盘都不落。
+      // 写下去会顶掉 `updated_at`，用户明明什么都没采纳，简历却显示"刚刚被改过"——
+      // 那是界面读数在撒谎。提议态也留着不删（这次表态还没用完）。
+      return {
+        docId,
+        receiptId,
+        appliedRewrites: 0,
+        reorderApplied: false,
+        movedSections: 0,
+        movedEntries: 0,
+        updatedAt: loaded.document.updatedAt,
+      };
+    }
+    const sections = decision.applyReorder ? proposal.sections : proposal.baseline.sections;
+    const proposed = applyRewrites({ ...proposal.baseline, sections: [...sections] }, selected);
+    const verified = verifyGeneration({ original: proposal.baseline, proposed, jdText: proposal.jdText });
+    if (!verified.ok) {
+      // 违规读数走 `describeViolations`，它每条都过 `redactText`（4.5-14 的偏离二），
+      // 所以这句错文可以安全地进日志与界面。
+      throw new AppError(
+        'KB_GENERATION_CHECK_FAILED',
+        `接受后的文档未过事实校验（${describeViolations(verified).join('；')}）：本次不写入工作副本`,
+      );
+    }
+    // 时刻由这次表态决定，而不是沿用基线：`resume.doc.save()` 存的是文档自带的 `updatedAt`，
+    // 不重新打点。内容换了、时刻还停在导入那一刻，3.7 的快照与界面上的"哪一版"就都读不出先后。
+    this.docStore.save(validated({ ...proposed, updatedAt: nowMs }));
+    // 一次接受用掉一份提议态：同一个 receiptId 再接受一次，读到的就是刚才那份副本（必然撞上面
+    // 那条 stale），删掉它让它落在"重新生成"这句更清楚的话上。
+    this.proposals.delete(receiptId);
+    return {
+      docId,
+      receiptId,
+      appliedRewrites: selected.length,
+      reorderApplied: decision.applyReorder,
+      movedSections: decision.applyReorder ? proposal.view.receipt.movedSections : 0,
+      movedEntries: decision.applyReorder ? proposal.view.receipt.movedEntries : 0,
+      updatedAt: nowMs,
+    };
+  }
+
+  /**
+   * 记住一份提议态，并把超出保留窗口的旧产物挤掉。
+   * @param receiptId 那次生成的凭证 id
+   * @param proposal 装配好的提议态
+   * @returns 无返回值
+   */
+  private remember(receiptId: string, proposal: PendingProposal): void {
+    this.proposals.set(receiptId, proposal);
+    while (this.proposals.size > MAX_PENDING_PROPOSALS) {
+      const oldest = this.proposals.keys().next();
+      if (oldest.done === true) break;
+      this.proposals.delete(oldest.value);
+    }
   }
 
   /**
@@ -620,6 +834,111 @@ function evidenceOf(
     }
   }
   return views;
+}
+
+/** 位置三键的拼接（区块 / 条目 / 字段），与 `applyRewrites`、`checkFactLock` 的定位口径一致。 */
+const positionKey = (sectionId: string, entryId: string, fieldKey: string): string =>
+  [sectionId, entryId, fieldKey].join('\u0001');
+
+/**
+ * 一个条目在界面上的名字（4.5-11 的"这条改得对不对"要先能指认是哪一条）。
+ *
+ * 取**被事实锁定的那几个字段值**，因为它们是"这是哪一段经历"的坐标（公司 · 职位 / 学校 · 专业）；
+ * 散文段不当名字：改写面就是那段散文，用旧内容当标题会让"改前 / 改后"两栏看着一模一样。
+ * 一个锁定字段都没有（技能与校园那类只有 `text`）时退回正文前 40 字——那是该条目唯一的可指认信息。
+ * @param entry 文档里的一个条目
+ * @returns 一句短标签；条目没有任何非空字段时为空串（Schema 要求字段有值，读到空即文档本身已异常）
+ */
+function entryLabelOf(entry: Entry): string {
+  const locked = entry.fields
+    .filter((field) => field.locked)
+    .map((field) => field.value.trim())
+    .filter((value) => value !== '')
+    .slice(0, 2);
+  if (locked.length > 0) return locked.join(' · ');
+  const body = (entry.fields.find((field) => field.value.trim() !== '')?.value ?? '').trim();
+  return body.length > 40 ? body.slice(0, 40) + '…' : body;
+}
+
+/**
+ * 这段原文在知识库里的出处实体 id（spec 4.5-06 的收口半边）。
+ *
+ * 认领方式是**载荷逐字相等**：不做 id 反解（`entityId` 是哈希前 16 位，不可逆，见
+ * `KbEntityDraft.entryId` 的注释），也不加一张 fieldKey→kind 映射表——那张表就是第二份真相源（§2.5），
+ * 而"这段被改写的散文在库里是哪条实体"这个问题，内容相等这一条判据已经足够回答。
+ * 命中多条全部带上（一条经历同时派生出经历实体与成果实体是正常的），顺序等于派生顺序（确定序）。
+ * @param entryId 被改写条目在文档里的 id
+ * @param originalText 改写前那份正文（工作副本里的逐字原文）
+ * @param drafts 同一份文档现算的实体草案
+ * @returns 出处实体 id 列表；为空就是 `GenerationRewriteView.sourceEvidenceIds` 注释里那两种情况之一
+ */
+function sourceEvidenceIdsOf(entryId: string, originalText: string, drafts: readonly KbEntityDraft[]): string[] {
+  return drafts
+    .filter((draft) => draft.entryId === entryId && Object.values(draft.payload).includes(originalText))
+    .map((draft) => draft.entityId);
+}
+
+/**
+ * 把采信进产物的改写摊成界面上逐项表态的一行（spec 4.5-11 的数据面）。
+ *
+ * 遍历方向是**文档 → 改写**而不是改写 → 文档：原文、区块标题、条目标签必须取自工作副本那一份，
+ * 所以传进来的是"重排后、改写前"的那份文档，不是产物——产物的字段值已经是改写后的内容，
+ * 拿它当原文等于把改后的那句话印进"改前"栏，逐项接受就变成让人对着新写法签旧写法。
+ * 顺序按文档结构（区块 → 条目 → 字段）而不是模型回答顺序：界面要按简历的阅读次序排。
+ * @param document 改写**前**的那一份（结构已重排、字段值仍是基线）
+ * @param rewrites 通过契约与位置校验、装进产物的那些改写（未通过的不在这里）
+ * @param drafts 同一份文档现算的实体草案，供出处回查
+ * @returns 与 `rewrites` 等长的行列表；位置对不上的改写不会出现（`readModelRewrites` 已按清单核对过位置）
+ */
+function rewriteRows(
+  document: ResumeDocument,
+  rewrites: readonly GeneratedRewrite[],
+  drafts: readonly KbEntityDraft[],
+): GenerationRewriteView[] {
+  const rewriteAt = new Map(
+    rewrites.map((rewrite) => [positionKey(rewrite.sectionId, rewrite.entryId, rewrite.fieldKey), rewrite]),
+  );
+  const rows: GenerationRewriteView[] = [];
+  for (const section of document.sections) {
+    for (const entry of section.entries) {
+      for (const field of entry.fields) {
+        const rewrite = rewriteAt.get(positionKey(section.id, entry.id, field.key));
+        if (rewrite === undefined) continue;
+        rows.push({
+          sectionId: section.id,
+          entryId: entry.id,
+          fieldKey: field.key,
+          sectionTitle: section.title,
+          entryLabel: entryLabelOf(entry),
+          originalText: field.value,
+          rewrittenText: rewrite.rewrittenText,
+          sourceEvidenceIds: sourceEvidenceIdsOf(entry.id, field.value, drafts),
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+/**
+ * 给每个换位对象补上"它是哪一段"的名字（spec 4.5-02 的 V 半边）。
+ *
+ * `ReorderBasis` 只有 id 与下标，那是判据用的读数；界面上"这段被提前了"必须说得出是哪段，
+ * 而名字只在文档结构里（区块 `title` / 条目里被锁定的字段值）。读的是改写**前**那份文档，
+ * 与 `rewriteRows` 同一口径：位置是这次生成造成的，名字得是用户当时看见的那一份。
+ * @param document 改写前的那一份（结构已重排）
+ * @param bases 只含真正换了位置的对象
+ * @returns 与 `bases` 等长同序的读数，每条多一个 `label`（id 在文档里查不到时退回 id 本身，不编名字）
+ */
+function reorderLabelsWith(document: ResumeDocument, bases: readonly ReorderBasis[]): GenerationReorderView[] {
+  const labelAt = new Map<string, string>();
+  for (const section of document.sections) {
+    labelAt.set(section.id, section.title);
+    for (const entry of section.entries) {
+      labelAt.set(entry.id, entryLabelOf(entry));
+    }
+  }
+  return bases.map((basis) => ({ ...basis, label: labelAt.get(basis.id) ?? basis.id }));
 }
 
 /**

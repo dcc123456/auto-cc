@@ -13,11 +13,20 @@
  *    这条只有在把 7 / 11～14 那几个包一起装上时才判得准，包内用例那份装配里没有它们。
  * 2. **agent 入口经真注册表调得通**（`tools.call('resume.generate.run', …)`）：工具 id、参数 schema、
  *    返回体三者都要对得上，否则 4.5-c 的界面与对话两条入口会长成两套行为（§5.9）。
- * 3. **跑完之后工作副本逐字未变**（判据三）：本服务只有 `load()` 一条读路径。这条只能在真库里判——
- *    替身文档存不住"被 `save()` 过"这件事，而一次静默写回就是把用户的原始简历覆盖掉。
+ * 3. **`run()` 跑完之后工作副本逐字未变**（判据三）：生成侧只有 `load()` 一条读路径，
+ *    唯一的写口是 `accept()`。这条只能在真库里判——替身文档存不住"被 `save()` 过"这件事，
+ *    而一次静默写回就是把用户的原始简历覆盖掉。
  * 4. **`shared` 的镜像不漂移**：把服务返回体去掉 `document` 之后赋给 `GenerationRunRowView`，
  *    编译期发红即说明两侧不同步；再过一次 `structuredClone`，因为 IPC 载荷走的是结构化克隆，
  *    带函数或带不可克隆成员的形状在单测里能通过、到进程边界才会丢。
+ *
+ * 下面第二组（4.5-c 的接受面）再加三条，判的都是"唯一写口"这一侧：
+ * 5. **`accept()` 在真 store 里写回的是它自己复验过的那一份**，且写后的 `updated_at` 等于表态时刻；
+ *    返回体能赋给 `GenerationAcceptRowResult` 并克隆得过去。
+ * 6. **基线过期在真库里拦得住**：用户经 `resume.doc.save()` 自己改过简历后，旧产物接受必须以
+ *    `KB_GENERATION_STALE_BASELINE` 拒绝，且库里留的仍然是用户那一版。
+ * 7. **写口的可达面只有界面**：`resume.generate.accept` 在渲染层白名单里，
+ *    而 `agent.tools` 的声明里没有它（对话不替用户签字），`resume.doc.save` 也不在白名单里（正文不过界）。
  *
  * 判据五（生成不接额度闸门）在这里是**结构性**成立的：这份装配里根本没有 `entitlement.*` / `usage.*`
  * 服务，而生成照样跑完——与 4.4-e1 判据三同一手法。真接付费网关那天要动的 spec 是 4.6-08，不是这里。
@@ -27,7 +36,7 @@
  * 这条用例判的恰恰是"没有模型时装配面不断流"，改写内容与重试的判定在包内的
  * `generate-service.test.ts` 用替身断过。
  */
-import { asApp, Context, type Fiber } from '@auto-cc/core';
+import { asApp, AppError, Context, type Fiber } from '@auto-cc/core';
 import { AgentToolsService } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
@@ -43,7 +52,7 @@ import {
   type GenerationView,
 } from '@auto-cc/plugin-resume-kb';
 import { StoreService } from '@auto-cc/plugin-store';
-import type { GenerationRunRowView } from '@auto-cc/shared';
+import { isAllowedCall, type GenerationAcceptRowResult, type GenerationRunRowView } from '@auto-cc/shared';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -131,6 +140,18 @@ function generationRowCount(db: DatabaseSync): number {
   return Number(row.n ?? 0);
 }
 
+/**
+ * 按字节读出库里那份工作副本并解析（接受面判"落盘的到底是哪一份"，判据三的反面）。
+ * @param db 真 sqlite 连接
+ * @returns `save()` 规范化之后落库的那份文档对象
+ */
+function storedDoc(db: DatabaseSync): Record<string, unknown> {
+  const row = db.prepare('SELECT doc_json AS body FROM resume_docs WHERE id = ?').get(DOC_ID) as
+    { body?: string } | undefined;
+  if (row?.body === undefined) throw new Error(`工作副本 ${DOC_ID} 没落进 resume_docs：装配或建表出了问题`);
+  return JSON.parse(row.body) as Record<string, unknown>;
+}
+
 afterAll(async () => {
   for (const fiber of fibers) await fiber.dispose();
   // 日志写流是异步开文件的（同 `gap-quota-link.test.ts`）：不等一下就删目录会冒出收尾后的 ENOENT。
@@ -183,7 +204,7 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
     expect((await tools.call('resume.generate.run', { jdText: JD_TEXT, docId: '' })).ok).toBe(false);
   });
 
-  it('跑完生成之后工作副本逐字未变：本服务一次 save 都不发生（plan §4.5 判据三）', async () => {
+  it('跑完生成之后工作副本逐字未变：`run()` 一次 save 都不发生（plan §4.5 判据三）', async () => {
     const { app, db } = await bootAssembly();
     const before = workingCopy(db);
     const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
@@ -191,8 +212,9 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
     // 正向对照：这一次确实生成并落库了（否则"未变"可能只是因为什么都没跑）。
     expect(generationRowCount(db)).toBe(1);
     // 反向判定按字节读库里那一份：`updated_at` 与 `doc_json` 都停在导入时的样子，提议态只活在返回体里。
-    // 写成 SQL 而不是比两份文档对象，为的是连时间戳一起判——`save()` 一定会顶 `updated_at`，
-    // 那是"被动过"最留不住痕迹的一位。
+    // 这里比整串 `doc_json` 而不是比文档对象：`save()` 存的是文档自带的 `updatedAt`（它自己不重新打点），
+    // 所以"时间戳没变"证明不了没被写过——真正留得住痕迹的是正文那一列。也正因如此，`accept()`
+    // 必须在写入时自己盖章（见 `generate-service.ts` 里那句注释），否则改过简历却读不出先后。
     expect(workingCopy(db)).toEqual(before);
   });
 
@@ -213,5 +235,98 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
     expect(cloned.rewrites).toEqual([]);
     expect(cloned.receipt.modelStatus).toBe('unavailable');
     expect(cloned.receipt.modelReason).not.toBeNull();
+  });
+});
+
+describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.5-11 的接线半边）', () => {
+  it('只采纳重排也在真库里写回：落盘的就是产物那一份，`updated_at` 等于表态时刻（判据三的反面）', async () => {
+    const { app, db } = await bootAssembly();
+    const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
+    const product = view.document;
+    if (product === null) throw new Error('保守版应当有产物：装配或降级路径出了问题');
+    const moved = view.receipt.movedSections + view.receipt.movedEntries;
+    expect(moved).toBeGreaterThan(0);
+    const before = workingCopy(db);
+    const acceptAt = AS_OF_MS + 60_000;
+    const result = app['resume.generate'].accept(
+      view.receipt.id,
+      { acceptedIndexes: [], applyReorder: true },
+      acceptAt,
+    );
+    expect(result).toEqual({
+      docId: DOC_ID,
+      receiptId: view.receipt.id,
+      appliedRewrites: 0,
+      reorderApplied: true,
+      movedSections: view.receipt.movedSections,
+      movedEntries: view.receipt.movedEntries,
+      updatedAt: acceptAt,
+    });
+    expect(workingCopy(db).updatedAt).toBe(acceptAt);
+    expect(workingCopy(db).body).not.toBe(before.body);
+    // 落盘内容与主进程那份产物同源：顺序真的换了，而一条改写都没勾，正文字字未动。
+    expect(storedDoc(db).sections).toEqual(product.sections);
+    // 接受口不许成为唯一能把简历存坏的通道——写进去的那一份读回来仍是合法文档（3.1-08 的安全往返）。
+    expect(app['resume.doc'].load(DOC_ID).status).toBe('found');
+    // 编译期保险丝 + 结构化克隆：界面按下的那个按钮拿到的形状与 `shared` 镜像同步（4.5-11 的数据面）。
+    const row: GenerationAcceptRowResult = result;
+    expect(structuredClone(row).receiptId).toBe(view.receipt.id);
+  });
+
+  it('一条没勾、重排也没采纳时一次盘都不落，且那份提议态没被用掉（"不写"必须是真的不写）', async () => {
+    const { app, db } = await bootAssembly();
+    const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
+    const before = workingCopy(db);
+    const empty = app['resume.generate'].accept(
+      view.receipt.id,
+      { acceptedIndexes: [], applyReorder: false },
+      AS_OF_MS + 1000,
+    );
+    expect(empty).toMatchObject({ appliedRewrites: 0, reorderApplied: false, movedSections: 0, movedEntries: 0 });
+    // 播报的是库里那一版当下的时刻，不是这次点按钮的时刻：什么都没改，界面就不该显示"刚刚被改过"。
+    expect(empty.updatedAt).toBe(before.updatedAt);
+    expect(workingCopy(db)).toEqual(before);
+    // 没写东西就不算用掉：同一份产物随后采纳重排仍然可用，不必重新生成一次。
+    const retryAt = AS_OF_MS + 2000;
+    expect(
+      app['resume.generate'].accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true }, retryAt).updatedAt,
+    ).toBe(retryAt);
+  });
+
+  it('用户在生成之后自己存过简历：接受被基线挡下，库里留的仍是用户那一版', async () => {
+    const { app, db } = await bootAssembly();
+    const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
+    const loaded = app['resume.doc'].load(DOC_ID);
+    if (loaded.status !== 'found') throw new Error(`读不回工作副本：${loaded.status}`);
+    // 用户侧每一次保存都会带新的 `updatedAt`（3.1 的界面保存路径），所以只动这一位就足以代表"生成后改过"。
+    const userEditedAt = AS_OF_MS + 30_000;
+    app['resume.doc'].save({ ...loaded.document, updatedAt: userEditedAt });
+    const userCopy = workingCopy(db);
+    let caught: unknown;
+    try {
+      app['resume.generate'].accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true }, userEditedAt + 1000);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
+    // 挡下来必须是不写：两份改动叠在一起是谁都没法解释的产物，用户那一版得逐字留在库里。
+    expect(workingCopy(db)).toEqual(userCopy);
+  });
+
+  it('写口只对界面开放：白名单放行 accept，agent 只拿到 run，文档正文从不过界（4.5-11 / 判据二）', async () => {
+    const { app } = await bootAssembly();
+    expect(isAllowedCall('resume.generate.run')).toBe(true);
+    expect(isAllowedCall('resume.generate.accept')).toBe(true);
+    // 界面没有 `resume.doc.*` 任何一条口，所以"改前正文"只能随改写行一起过界（`bridge.ts` 本节头注释 ③）。
+    expect(isAllowedCall('resume.doc.save')).toBe(false);
+    expect(isAllowedCall('resume.doc.load')).toBe(false);
+    // 反向验证（§6.5）：接受不是 agent 工具——让模型替用户在简历上签字，等于把 4.5-11 的人工确认绕掉。
+    expect(
+      app['agent.tools']
+        .list()
+        .map((tool) => tool.id)
+        .filter((id) => id.startsWith('resume.generate')),
+    ).toEqual(['resume.generate.run']);
   });
 });

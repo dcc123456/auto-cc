@@ -202,6 +202,10 @@ export const RENDERER_ALLOWLIST = [
   // P3.1 文档本体不过进程边界——`shared` 在 L1、不许依赖 L2 的 `resume-doc`，在 L1 再镜像一份文档模型
   // 就是造第二个真相源（§2.5），而界面要显示的"改了哪几处、为什么提前"全在下面那几行读数里。
   'resume.generate.run',
+  // 4.5-c 的接受口（spec 4.5-11）：4.5 那条链上**唯一**会写工作副本的一口，入站只有 `receiptId` + 下标。
+  // 它刻意**不**登记为 agent 工具——让模型自己接受自己生成的内容，等于把 4.5-11 的"人逐项过目"取消掉，
+  // 而事实锁定的最后一道闸就是那道过目（§8.4）。界面侧调用点在 `GeneratePanel`。
+  'resume.generate.accept',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -927,7 +931,10 @@ export interface KbEvidenceBodyRowView {
  * ① `shared` 在 L1，不许依赖 L2 的 `resume-doc`，在 L1 抄一份文档模型就是第二个真相源（§2.5）；
  * ② 3.3 / 4.1 已定下「文档正文不过进程边界，界面只认 docId」这条（见上面白名单那一段的注释）；
  * ③ 4.5-11 的逐项接受要的是「哪一处改成了什么 + 为什么提前」，`rewrites` / `reorderBases` /
- *   `evidence` 三行读数就够，原文由界面从工作副本自己读（那份才是真相源）。
+ *   `evidence` 三行读数就够。**原文随改写行一起过来（4.5-c 更正，此前这里写的是"界面自己去读"）**：
+ *   渲染层的白名单里一条 `resume.doc.*` 都没有，"自己去读工作副本"无从落地；而逐项接受要人判断的
+ *   正是「这句改得对不对」，只给新写法等于让人蒙着签字。过界的仍然只是**被改动的那一个字段**的
+ *   那一份正文，不是文档模型本体——后者照样不过桥（判据二）。
  * `rejected` 的判定按 `outcome` 读，不看"文档是否为 null"——服务侧 `document` 与 `outcome` 是同一处
  * 三元表达式产出的（`generate-service.ts` 的返回体），所以带 `outcome` 就等于带了"有没有产物"。
  */
@@ -935,12 +942,26 @@ export interface KbEvidenceBodyRowView {
 /** 一次定向生成的三种结局（镜像 `GenerationOutcome`，spec 4.5-05 / 09 的播报依据）。 */
 export type GenerationOutcomeView = 'rewritten' | 'reorder_only' | 'rejected';
 
-/** 一条改写（镜像 `GenerationRewriteView`）：位置三 id + 新写法，不含原文。 */
+/**
+ * 一条改写（镜像 `GenerationRewriteView`）：位置三 id + 改前改后两份正文 + 出处 id。
+ * 原文在这里是**逐项接受的判据**而不是文档正文的透传——只有被改动的那个字段过界（见本节头注释 ③）。
+ */
 export interface GenerationRewriteRowView {
   readonly sectionId: string;
   readonly entryId: string;
   readonly fieldKey: string;
+  /** 区块标题（界面用它说"改的是哪一段"） */
+  readonly sectionTitle: string;
+  /** 条目标签（该条目里被事实锁定的字段值拼出来的"这是哪一条"） */
+  readonly entryLabel: string;
+  /** 改写前的正文，逐字取自工作副本 */
+  readonly originalText: string;
   readonly rewrittenText: string;
+  /**
+   * 这段原文在知识库里的出处实体 id（4.5-06）。
+   * 为空只有两种情况且必须分开播报：① 库里还没同步过；② 该区块按 4.2 裁定二不产实体行。
+   */
+  readonly sourceEvidenceIds: readonly string[];
 }
 
 /** 一条证据引用（镜像 `GenerationEvidenceView`）：正文另问 `kb.profile.evidenceBody`（§8.5）。 */
@@ -964,11 +985,13 @@ export interface GenerationHitRowView {
   readonly tokens: readonly string[];
 }
 
-/** 一次换位的依据（镜像 `ReorderBasis`，spec 4.5-02 的"依据可解释"就是这一行）。 */
+/** 一次换位的依据（镜像 `GenerationReorderView`，spec 4.5-02 的"依据可解释"就是这一行）。 */
 export interface GenerationReorderRowView {
   /** 区块之间换序，还是区块内的条目换序 */
   readonly level: 'section' | 'entry';
   readonly id: string;
+  /** 换了位置的那一段叫什么（区块标题 / 条目标签，取自文档，界面上不许只报 id） */
+  readonly label: string;
   readonly score: number;
   readonly fromIndex: number;
   readonly toIndex: number;
@@ -1011,6 +1034,29 @@ export interface GenerationRunRowView {
   readonly reorderBases: readonly GenerationReorderRowView[];
   readonly checks: GenerationChecksRowView;
   readonly receipt: GenerationReceiptRowView;
+}
+
+/**
+ * 界面上的逐项表态（镜像 `GenerationDecision`，spec 4.5-11）。
+ * 只回传**下标**：正文与位置三键都不经界面来回，改写清单是随产物给出去的，回来的是"第几行我同意"。
+ */
+export interface GenerationDecisionRowInput {
+  /** 以 `GenerationRunRowView.rewrites` 的顺序为准（界面显示的那一份） */
+  readonly acceptedIndexes: readonly number[];
+  /** 重排整组接受 / 整组回退（逐条回退会让判据一的稳定序变成二次猜测） */
+  readonly applyReorder: boolean;
+}
+
+/** 接受成功后的读数（镜像 `GenerationAcceptResult`）。 */
+export interface GenerationAcceptRowResult {
+  readonly docId: string;
+  readonly receiptId: string;
+  readonly appliedRewrites: number;
+  readonly reorderApplied: boolean;
+  readonly movedSections: number;
+  readonly movedEntries: number;
+  /** 写入后工作副本的 `updatedAt`（毫秒） */
+  readonly updatedAt: number;
 }
 
 /** 手工新建实体的入站形状（镜像 `KbCreateInput`）。 */
@@ -1352,6 +1398,19 @@ export interface BridgeSignatures {
   'resume.generate.run': {
     args: [jdText: string, filter?: { docId?: string; jdId?: string | null }];
     returns: GenerationRunRowView;
+  };
+  /**
+   * 把人逐项过目后选中的那几处改写与（可选的）重排写进工作副本（spec 4.5-11）。
+   *
+   * 入站只有 `receiptId` 与下标：正文、位置三键、时间戳都不由界面提供（主进程那份提议态里都有，
+   * 界面回传正文等于让渲染层决定"往哪一格写什么字"）。四种失败各给一句不同的话：
+   * `KB_GENERATION_PROPOSAL_MISSING`（重新生成）、`KB_GENERATION_STALE_BASELINE`（你在生成后自己改过简历）、
+   * `KB_GENERATION_CHECK_FAILED`（选中的组合没过事实校验，本次不写入）、`INVALID_ARGUMENT`（下标越界）。
+   * 全片唯一会改用户简历的调用点在这里，所以服务侧写之前复验一次基线、再复验一次校验（见 `accept()`）。
+   */
+  'resume.generate.accept': {
+    args: [receiptId: string, decision: GenerationDecisionRowInput];
+    returns: GenerationAcceptRowResult;
   };
 }
 
