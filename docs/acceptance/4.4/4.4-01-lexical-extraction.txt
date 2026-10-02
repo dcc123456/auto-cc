@@ -1,0 +1,100 @@
+4.4-a 词面拆解腿 验收证据（spec 4.4-01 / 4.4-07 / 4.4-08 / 4.4-10）
+日期：2026-10-02　机器：Windows（Git Bash）　命令均在仓库根或其包目录执行
+
+=====================================================================
+一、真装配的一次性演示脚本（tmp/ 目录，gitignored，跑完即删）
+    装配：ConfigService + LogService(file, redact:false) + KbGapService{perKindLimit:12,minJdChars:20}
+    输入：本地虚构样例 JD（264 字，与 src/requirements.test.ts 的 SAMPLE_JD 同串），不来自任何真实平台
+---------------------------------------------------------------------
+输入字符数：264 丢弃：0 词表：lex-v1
+hard_skill        Java           [41,45) "Java" slice=OK
+hard_skill        Go             [48,50) "Go" slice=OK
+hard_skill        Kafka          [57,62) "Kafka" slice=OK
+hard_skill        Redis          [63,68) "Redis" slice=OK
+hard_skill        MySQL          [69,74) "MySQL" slice=OK
+hard_skill        SQL            [90,93) "SQL" slice=OK
+hard_skill        TypeScript     [207,217) "TypeScript" slice=OK
+hard_skill        JavaScript     [218,228) "JavaScript" slice=OK
+hard_skill        CI/CD          [232,237) "CI/CD" slice=OK
+hard_skill        Docker         [239,242) "容器化" slice=OK
+hard_skill        Kubernetes     [248,258) "Kubernetes" slice=OK
+soft_skill        英语             [103,107) "英文文献" slice=OK
+soft_skill        抗压             [172,176) "抗压能力" slice=OK
+soft_skill        沟通表达           [180,185) "良好的沟通" slice=OK
+soft_skill        带团队            [191,194) "带团队" slice=OK
+education         本科             [164,166) "本科" slice=OK
+experience_years  3 年以上经验        [135,146) "3 年以上相关工作经验" slice=OK
+experience_years  5 年以上经验        [147,155) "5 年及以上经验" slice=OK
+连跑两次指纹：50327bd752c557d2f9911358b51a3c838275ea06a4632075b7f09b4a2ba46298 / 50327bd752c557d2f9911358b51a3c838275ea06a4632075b7f09b4a2ba46298
+--- 日志文件内容 ---
+2026-10-02T01:30:14.715Z INFO [log-service] 日志落盘：C:\Users\ragfl\AppData\Local\Temp\auto-cc-kb-gap-demo-oZQun0\auto-cc.log（级别 info，缓冲 50 条，脱敏 false）
+2026-10-02T01:30:14.718Z INFO [kb-gap-service] [kb-gap] 词面拆解 264 字 → 硬技能 11 / 软技能 4 / 学历 1 / 年限 2（丢弃 0，词表 lex-v1）
+2026-10-02T01:30:14.720Z INFO [kb-gap-service] [kb-gap] 词面拆解 264 字 → 硬技能 11 / 软技能 4 / 学历 1 / 年限 2（丢弃 0，词表 lex-v1）
+--- 哨兵 grep（全部应为 0）---
+星桥科技：0 次
+负责订单与推荐链路的后端服务：0 次
+抗压能力：0 次
+Kubernetes：0 次
+
+读数说明：
+- 四类齐全（4.4-01）；每条 `slice=OK` 表示 `SAMPLE_JD.slice(start, end) === quote`（原文位置是真的，界面可据此高亮跳转）。
+- 「容器化」归到 label=Docker、「K8s」与「Kubernetes」归一条（label 去重保最早出现），所以硬技能 11 条里没有重复项。
+- 「NoSQL」里的 SQL 没被捡走，SQL 那条命中的是 [90,93) 的独立「SQL」；「JavaScript」独立成条而没有被 Java 抢占 —— 长别名先占位 + 区间不重叠。
+- 「2020 年 3 月 1 日」没有被读成 20 年经验（年限两条都来自「3 年以上相关工作经验」「5 年及以上经验」）。
+- 两次运行的稳定序列指纹逐字相同（4.4-07）。
+- 日志只落计数与词表版本，JD 正文、公司名、手机号一律查不到（4.3-12 口径延到 JD）。
+
+=====================================================================
+二、单测（`packages/resume-kb`：npx vitest run src/requirements.test.ts src/gap-service.test.ts --reporter=verbose）
+---------------------------------------------------------------------
+ ✓ src/requirements.test.ts > 词面拆解：四类要求与原文位置（spec 4.4-01） > 硬技能把 Java / Go / Kafka / Redis / MySQL / TypeScript / CI/CD / Kubernetes 都认出来 2ms
+ ✓ src/requirements.test.ts > 词面拆解：四类要求与原文位置（spec 4.4-01） > 软技能、学历、经验年限各有产出 1ms
+ ✓ src/requirements.test.ts > 词面拆解：四类要求与原文位置（spec 4.4-01） > 每条的 quote 都能按 start/end 从原文原样切回（界面高亮的依据，4.4-05 的前置） 1ms
+ ✓ src/requirements.test.ts > 词面拆解：四类要求与原文位置（spec 4.4-01） > 四类以外的 kind 不出现，且输出次序是四类表序 + 起始下标（稳定序列） 0ms
+ ✓ src/requirements.test.ts > 词面拆解的误伤与回落判据（spec 4.4-01 / 4.4-02） > 纯字母别名的词边界：NoSQL 里不捡 SQL，JavaScript 里不重复捡 Java，logo 里不捡 Go 0ms
+ ✓ src/requirements.test.ts > 词面拆解的误伤与回落判据（spec 4.4-01 / 4.4-02） > 纯字母别名的词边界：logo 里不捡 Go，Node 单独成词才捡 1ms
+ ✓ src/requirements.test.ts > 词面拆解的误伤与回落判据（spec 4.4-01 / 4.4-02） > 空文本与全空白都是合法读数：空列表、零丢弃，不抛异常 1ms
+ ✓ src/requirements.test.ts > 词面拆解的误伤与回落判据（spec 4.4-01 / 4.4-02） > 年限的数字边界：「2020年入职」不会被读成 20 年经验 0ms
+ ✓ src/requirements.test.ts > 词面拆解的误伤与回落判据（spec 4.4-01 / 4.4-02） > 超出每类上限时按稳定次序截断，并把丢掉的条数如实报出（4.4-06 要求计数可见） 1ms
+ ✓ src/requirements.test.ts > 词面拆解的确定性（spec 4.4-07） > 同一 JD 连跑三次，指纹与词表版本完全一致 1ms
+ ✓ src/requirements.test.ts > 词面拆解的确定性（spec 4.4-07） > 语料顺序被打乱后重新拼接，同一条要求的 quote 与下标跟着原文走（位置是真的，不是数出来的） 0ms
+ ✓ src/gap-service.test.ts > kb.gap 的拆解入口（spec 4.4-01 / 4.4-06） > 四类齐全，计数与词表版本随结果返回，且每条都是词面腿产的 11ms
+ ✓ src/gap-service.test.ts > kb.gap 的拆解入口（spec 4.4-01 / 4.4-06） > 先去空白再判长度：输入两端留白不影响 inputChars 与产出（界面粘贴的常见形态） 3ms
+ ✓ src/gap-service.test.ts > kb.gap 的拆解入口（spec 4.4-01 / 4.4-06） > 过短的 JD 结构化失败，而不是给一份空报告（spec 4.4-01 的入参校验） 2ms
+ ✓ src/gap-service.test.ts > kb.gap 的拆解入口（spec 4.4-01 / 4.4-06） > 每类上限来自配置：调小之后只留稳定序列头部，丢弃条数如实报出 5ms
+ ✓ src/gap-service.test.ts > kb.gap 的日志脱敏（延续 spec 4.3-12 的口径） > 日志里只有四类计数与词表版本，查不到 JD 正文与手机号 61ms
+
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+
+本包全量：Test Files 12 passed (12) / Tests 238 passed (238)
+
+=====================================================================
+三、4.4-08 的离线口径（结构性成立 + 复跑读数）
+---------------------------------------------------------------------
+- 两条新用例的 JD 文本都是**写在测试文件里的字面量**（虚构公司「星桥科技」、虚构手机号 13800002222），
+  没有 URL、没有 fetch、没有浏览器会话：
+      grep -n "http" packages/resume-kb/src/requirements.test.ts packages/resume-kb/src/gap-service.test.ts  → 0 命中
+- `KbGapService` 不 `inject` `store` 与 `llm.*`，装配只挂 `config` + `logger` + `kb.gap`（见 gap-service.test.ts 的 bootGap），
+  所以这条链**没有出网入口**；根 `pnpm lint` 的零上行机检同时保证出网只可能发生在 `packages/llm`：
+      ✔ LLM 入口唯一性检查通过（扫描 274 个文件，llm.chat / llm.embed 各自声明者唯一，模型端点只在 packages/llm）
+      ✔ 离线依赖门槛机检通过（25 份 package.json + 锁文件 544 个包名 + 25 个装机依赖共 1476 个文件）
+
+=====================================================================
+四、4.4-10 的来源标注核对（文件头逐字核对）
+---------------------------------------------------------------------
+- `packages/resume-kb/src/requirements.ts` 头注释第 17–22 行：四类口径参考
+  `.research-repos/src/ai-resume-master/server/src/prompts/jdParse.ts`（比对做法读自同仓库 `keywordService.ts`），
+  声明「本文件未复制其任何文本」，并指向 `docs/research/source-repos-analysis.md` §1.1（README 声明 MIT /
+  server/package.json 写 ISC / 无 LICENSE 文件）与 §1.2（版权方确认归其所有、可自由改授的书面豁免记录）。
+- 反向核对：本包四类 label、别名写法与 jdParse.ts 的 prompt 文本无重叠（那份 prompt 里出现的只有
+  「hard_skills / soft_skills / exp_years / edu_level」四个字段名与「本科/硕士/不限」三个示例值，
+  本项目没有把它的句子或字段名写进代码）。
+
+=====================================================================
+五、门禁命令与输出摘要（仓库根）
+---------------------------------------------------------------------
+pnpm typecheck      → 25 包全部 Done，0 error
+pnpm lint           → eslint 0 问题 + 渲染层规范 / 站点知识包 / LLM 入口唯一 / 合规护栏 / 离线依赖门槛 全过
+pnpm format:check   → All matched files use Prettier code style!
+pnpm test           → 各包 Done（本包 12 文件 / 238 例；platform-boss 130 例；main 3 例 …）
