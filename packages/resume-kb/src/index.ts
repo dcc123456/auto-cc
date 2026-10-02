@@ -51,6 +51,7 @@ export {
   type KbProfileConfig,
   type KbRemoveResult,
   type KbSyncResult,
+  type KbVectorSyncResult,
 } from './profile-service.js';
 // 反查结果的形状（4.2-03）：`EvidenceRef` 是将来 `kb.profile.evidenceFor` 过 IPC 的返回体，
 // 所以只导出形状；`rankEvidence` / `evidenceTextOf` 属包内纯函数，不对外（§2.4 不导出无人调用的入口）。
@@ -64,7 +65,13 @@ export { type KbChunkKind, type KbChunkView } from './chunks.js';
 // 检索读数的**形状**（4.3-01 / 02）：`search()` 是 service 的公开方法，4.3-c 要把它过 IPC 给界面与 agent，
 // 所以对外只给结果形状；`buildFtsQuery` / `rankChunks` / `tokensOf` 属包内纯函数，不外露——
 // 让外面自己拼 FTS5 表达式就是开第二条检索通道（§2.5），而且会绕开转义那条安全约束。
-export { type KbSearchHit, type KbSearchReason, type KbSearchResult, type KbSearchStatus } from './search.js';
+export {
+  type KbSearchHit,
+  type KbSearchReason,
+  type KbSearchResult,
+  type KbSearchStatus,
+  type KbVectorStatus,
+} from './search.js';
 export {
   detectFormat,
   extractSourceText,

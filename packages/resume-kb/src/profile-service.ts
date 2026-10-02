@@ -2,22 +2,25 @@
  * `kb.profile` service（spec 4.2-01 / 4.2-02 / 4.2-03 / 4.2-04 / 4.2-08 + 4.3-11 / 4.3-01 / 4.3-02 / 4.3-03）：
  * 四类知识库实体的建表、派生入库、查询、证据反查、删除、备份，以及检索切片的派生索引与本地检索。
  *
- * 这一层只做九件事：把迁移 11 的 `kb_entities`、迁移 12 的 `kb_chunks`、迁移 13 的
- * `kb_chunks_fts`（FTS5 虚表 + `norm_text` 列）建出来、从 `resume_docs` 的
- * **当前工作副本**派生实体、按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）
+ * 这一层只做十件事：把迁移 11 的 `kb_entities`、迁移 12 的 `kb_chunks`、迁移 13 的
+ * `kb_chunks_fts`（FTS5 虚表 + `norm_text` 列）、迁移 14 的 `kb_vectors`（向量派生索引）建出来、
+ * 从 `resume_docs` 的**当前工作副本**派生实体、按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）
  * 要用的读接口、把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、本地备份文件的读写
  * （4.2-08，格式在 `backup.ts`）、4.2-05 / 06 需要的两条装配腿（写入后发 `kb/entities-changed` 事件、
  * 把读口 `list` 登记成 agent 工具——裁定三，界面与 agent 走同一个 service，不许各长一套），
  * 4.3-a 的切片收敛：**每一条实体写删都在同一事务里带上它的切片**（4.3-11 的「无孤儿索引行」），
- * 以及 4.3-b 的检索取数：倒排召回 ∪ 子串召回 → 把语料统计与 df 交给 `search.ts` 打分（判定全在纯函数里）。
+ * 4.3-b 的检索取数：倒排召回 ∪ 子串召回 → 把语料统计与 df 交给 `search.ts` 打分（判定全在纯函数里），
+ * 以及 4.3-d 的向量增强：按当前 embedding 模型补向量（`syncVectors`）与在检索里做一次 RRF 融合
+ * （`fuseByRrf`）——向量服务没配就整条腿跳过，**一个 BLOB 都不写**（4.3-08）。
  * 「文本 → 实体」的判定全在 `entities.ts`，「文本 → 切片」的判定全在 `chunks.ts`，
- * 「切片 → 分数」的判定全在 `search.ts`（三者都是纯函数，离线逐条断言），本文件不重复任何规则。
+ * 「切片 → 分数」的判定全在 `search.ts`，「向量 → 名次」的度量全在 `vectors.ts`
+ * （四者都是纯函数，离线逐条断言），本文件不重复任何规则。
  *
  * 为什么读文档要经 `resume.doc` 而不是自己查 `resume_docs` 表：plan §1.4 裁定一把 `resume_docs` 定成
  * 可编辑工作副本的**唯一真相源**，而它的 `load()` 顺带做了 Schema 重新校验——绕过它就是用裸 SQL
  * 造第二条读取通道（AGENTS.md §2.5），库里被改坏的文档将不再被发现。
  */
-import { AppError, asApp, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
+import { AppError, asApp, embedGatewayOf, Service, agentTool, registerAgentTools, type Context } from '@auto-cc/core';
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
@@ -40,15 +43,25 @@ import {
   type KbSearchParams,
   type KbSearchResult,
   type KbSearchCorpus,
+  type KbVectorStatus,
   buildFtsQuery,
+  fuseByRrf,
   queryTokensOf,
   quoteFtsTerm,
   rankChunks,
 } from './search.js';
+import {
+  KB_VECTOR_MIGRATION_VERSION,
+  type KbVectorRow,
+  type KbVectorScore,
+  encodeVector,
+  kbVectorsMigration,
+  rankByCosine,
+} from './vectors.js';
 
 /** 迁移号段：**11 / 12 / 13**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 /
  *  resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10 / kb_entities 11 / kb_chunks 12 /
- *  kb_chunks_fts 13）。
+ *  kb_chunks_fts 13 / kb_vectors 14（号段常量在 `vectors.ts`））。
  *  撞号的表现是「见号已存在就跳过建表」——表根本没建，读写得到 `no such table`，所以号段必须在注释里列全并被单测断言。 */
 export const KB_PROFILE_MIGRATION_VERSION = 11;
 
@@ -180,6 +193,22 @@ export const kbProfileSchema = z.strictObject({
    * 实测（spike 轮次五）单字与词尾字只有它有结果，不打折会让一条只沾一个字的切片排到前面。
    */
   substringFloorScore: z.number().min(0).max(1).default(0.25),
+  /**
+   * RRF 融合常数（spec 4.3-07，plan §4.3-d 实现形状 4）。
+   *
+   * 60 是 IR 社区做 rank fusion 的惯用值（原始 RRF 论文用的就是 k=60），它的作用是压平头部名次的差距：
+   * k 越小越相信「第一名就是第一名」。默认沿用惯用值而不自己调一个：4.3-07 的判据是
+   * 「融合只改名次不改分数、k 来自配置」，真实的取值标定需要评测集，归 4.3-e。
+   */
+  rrfK: z.number().int().min(1).max(1000).default(60),
+  /**
+   * 向量腿的余弦门限（低于它就不进融合）。
+   *
+   * 与 `searchMinScore` 分开的理由是量纲不同：那边是 0～1 的合并分，这边是 -1～1 的余弦，
+   * 共用一个数就会变成「调检索松紧顺手把向量腿也调了」。默认值给的是 bge-m3 上偏保守的常见区间，
+   * 与 `rrfK` 同理，真实取值等 4.3-e 的评测集标定（届时的动作是改 `cordis.yml`，不改代码）。
+   */
+  vectorMinCosine: z.number().min(0).max(1).default(0.35),
 });
 export type KbProfileConfig = z.output<typeof kbProfileSchema>;
 
@@ -201,6 +230,26 @@ export interface KbSyncResult {
   readonly created: number;
   readonly updated: number;
   readonly removed: number;
+}
+
+/**
+ * 一次向量补建的读数（spec 4.3-07 / 08：界面要能说清「补了几条、为什么一条没补」）。
+ *
+ * 只有计数与模型名，没有任何切片正文（4.3-12 的口径同样适用于返回值——它会经 IPC 落进渲染层日志）。
+ */
+export interface KbVectorSyncResult {
+  /** `unavailable` = 没配好向量服务（未出网）；`failed` = 出网了但没成功（未写入）；`ok` = 本次无需写入或已全部写入。 */
+  readonly status: 'ok' | 'unavailable' | 'failed';
+  /** 当前配置的 embedding 模型（`kb_vectors.model` 的键）；未配置时为 null。 */
+  readonly model: string | null;
+  /** 待补条数（`unavailable` 时没有可比的模型，故为 0）。 */
+  readonly pending: number;
+  /** 本次 upsert 的行数；`failed` / `unavailable` 时为 0（零 BLOB 写入是 4.3-08 的判据）。 */
+  readonly written: number;
+  /** 清掉的「不属于当前模型」的向量行数（换模型后的失效清理）。 */
+  readonly removed: number;
+  /** 实际维度，以响应为准（配置里可以不写维度）；本次没有向量时为 null。 */
+  readonly dim: number | null;
 }
 
 /** 手工新建实体的入参。 */
@@ -325,7 +374,7 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 幂等地把本服务的三条迁移（11 / 12 / 13）推进共享迁移列表并升级到最新。
+   * 幂等地把本服务的四条迁移（11 / 12 / 13 / 14）推进共享迁移列表并升级到最新。
    *
    * 迁移 12 是「新加的一张派生表」，老库里在它建出来时 `kb_entities` 已经有数据了，
    * 所以只在**这一版真的被应用过**时做一次全量补建（`applied` 里有没有 12 就是判据，
@@ -333,11 +382,14 @@ export class KbProfileService extends Service {
    * 迁移 13（倒排表 + 归一列）的补建写在它自己的 `up()` 里：那一轮只读 `kb_chunks` 同一张表，
    * 不需要跨服务取工作副本，所以不留给启动路径。两条补建的先后是安全的：13 先按当时已有的切片建倒排，
    * 之后 12 的补建若再写新行，走的都是 `upsertChunk`——它自己就维护倒排行与归一列。
+   * 迁移 14（`kb_vectors`）**只建空表、不补建**：向量要发网络请求才能算出来，冷启动时替用户发一批
+   * 是与「不联网也能用」直接冲突的（4.3-04 / 4.3-08），所以补建只在显式的 `syncVectors()` 里发生，
+   * 表空着本身就是合法状态。
    * @returns 无返回值
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    for (const migration of [kbEntitiesMigration, kbChunksMigration, kbSearchMigration]) {
+    for (const migration of [kbEntitiesMigration, kbChunksMigration, kbSearchMigration, kbVectorsMigration]) {
       if (!migrations.some((item) => item.version === migration.version)) {
         migrations.push(migration);
       }
@@ -374,16 +426,41 @@ export class KbProfileService extends Service {
       agentTool({
         id: 'kb.profile.search',
         description:
-          '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；不联网、不经过模型',
+          '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；默认纯本地不联网，只有已配置并补建过向量时才额外做一次查询编码（结果里的 vectorStatus 说明本次用了哪条腿）',
         input: z.strictObject({ query: z.string() }),
         effect: 'read',
         requiresConfirmation: false,
-        run: ({ query }) => Promise.resolve(this.search(query)),
+        run: ({ query }) => this.search(query),
+      }),
+      // 向量补建（spec 4.3-07 / 08）：这一只把手是**出网的**（切片文本要发给 embedding 端点），
+      // 所以 `effect: 'outbound'` + 需要批准，与 `jd.capture` 同一口径（plan §15.7 落点 4）。
+      // 它不做成「检索时自动补建」：那等于用户每搜一句就把整库发出去一次，而 4.3-04 要的是
+      // 「不联网也能用」——出网必须是显式动作，界面与对话都只在用户按下去时才发。
+      agentTool({
+        id: 'kb.profile.syncVectors',
+        description:
+          '为本地知识库中尚无向量的检索切片调用 embedding 端点补建向量（会出网，按当前配置的模型；已配好则只报告待补条数），返回逐条计数而不含正文',
+        input: z.strictObject({}),
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: () => this.syncVectors(),
       }),
     ]);
     this.ctx.logger.info(
-      `[kb-profile] kb_entities / kb_chunks / kb_chunks_fts 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)} / ${String(KB_SEARCH_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}，检索阈值 topK=${String(this.options.searchTopK)} minScore=${String(this.options.searchMinScore)} k1=${String(this.options.bm25K1)} b=${String(this.options.bm25B)} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+      `[kb-profile] kb_entities / kb_chunks / kb_chunks_fts / kb_vectors 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)} / ${String(KB_SEARCH_MIGRATION_VERSION)} / ${String(KB_VECTOR_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}，检索阈值 topK=${String(this.options.searchTopK)} minScore=${String(this.options.searchMinScore)} k1=${String(this.options.bm25K1)} b=${String(this.options.bm25B)}，向量腿 rrfK=${String(this.options.rrfK)} minCosine=${String(this.options.vectorMinCosine)}${this.vectorGatewayHint()} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
+  }
+
+  /**
+   * 装配日志尾部的向量腿状态（spec 4.3-08 的可读性：现场要能一眼看出这次检索到底有没有语义腿）。
+   * @returns 一句 ` · 向量增强 …` 后缀；未挂载 / 未配置时把缺的项一并写出来
+   */
+  private vectorGatewayHint(): string {
+    const gateway = embedGatewayOf(this.ctx);
+    if (gateway === undefined) return ' · 向量增强 未挂载 llm.embed';
+    const status = gateway.status();
+    if (!status.available) return ` · 向量增强 未配置（缺 ${status.missing.join('/')}）`;
+    return ` · 向量增强 ${status.model ?? '(未知模型)'}`;
   }
 
   /**
@@ -862,6 +939,10 @@ export class KbProfileService extends Service {
         nowMs,
       ) as { seq: number | bigint };
     this.replaceFtsRow(Number(row.seq), draft.tokens);
+    // 正文一变，旧向量就不再描述这一行（它与新文本的余弦毫无意义，比"没有向量"更糟：它会被选进融合名单）。
+    // 所以这里删而不是更新——更新要再发一次网络请求，而切片写入这条路径必须能在离线时走完（4.3-04）。
+    // 删掉之后这一行就落回 `syncVectors()` 的待补集合，语义与"从没编过"完全一致。
+    this.store.db.prepare('DELETE FROM kb_vectors WHERE chunk_id = ?').run(draft.chunkId);
   }
 
   /**
@@ -880,11 +961,12 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 按谓词批量删切片，并连带删掉它们的倒排行。
+   * 按谓词批量删切片，并连带删掉它们的倒排行与向量行。
    *
-   * 「先删倒排再删主表」的顺序是硬约束：删倒排靠 `SELECT seq FROM kb_chunks WHERE <同一个谓词>`，
-   * 主表行先没了就没有参照对象（同 `prune` 里实体与切片的先后）。
-   * 两条批量删除路径（同步清理派生行、区块级重建）都走这里，避免其中一条忘了带上倒排（§2.2）。
+   * 「先删派生行再删主表行」的顺序是硬约束：删倒排与向量都靠
+   * `SELECT seq / chunk_id FROM kb_chunks WHERE <同一个谓词>`，主表行先没了就没有参照对象（同 `prune` 里实体与切片的先后）。
+   * 三条批量删除路径（同步清理派生行、区块级重建、删单条）都走这里，避免其中一条忘了带上派生表（§2.2）——
+   * 4.3-11 的「无孤儿索引行」现在要多守一张表：留着的向量行搜不到主表内容，却仍会进 RRF 名单。
    * @param where 作用在 `kb_chunks` 上的谓词（不含 `WHERE`）
    * @param args 谓词参数
    * @returns 被删掉的主表行数（倒排行数与它相等，由单测断言）
@@ -892,6 +974,7 @@ export class KbProfileService extends Service {
   private deleteChunksWhere(where: string, args: readonly (string | null)[]): number {
     const db = this.store.db;
     db.prepare(`DELETE FROM kb_chunks_fts WHERE rowid IN (SELECT seq FROM kb_chunks WHERE ${where})`).run(...args);
+    db.prepare(`DELETE FROM kb_vectors WHERE chunk_id IN (SELECT chunk_id FROM kb_chunks WHERE ${where})`).run(...args);
     return Number(db.prepare(`DELETE FROM kb_chunks WHERE ${where}`).run(...args).changes);
   }
 
@@ -981,7 +1064,7 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 本地检索一句查询（spec 4.3-01 / 4.3-02 / 4.3-03）。
+   * 本地检索一句查询（spec 4.3-01 / 4.3-02 / 4.3-03 / 4.3-07 / 4.3-08）。
    *
    * 本方法只负责**取数**，一条分数都不在这里算：
    * ① 倒排召回（FTS5 `OR` 短语，见 `buildFtsQuery` 为什么不许裸拼也不许用 `AND`）；
@@ -989,16 +1072,21 @@ export class KbProfileService extends Service {
    * ③ 语料统计（`N` 与 `avgdl`，一条 SQL，实测与 JS 侧 token 数完全一致，spike6 §S4）；
    * ④ 逐个查询 token 的 `df`（同一句 prepared 语句复用，2000 条语料下 8 个 token 约 0ms，spike6 §S5）。
    * 两路召回的并集连同 ③④ 交给 `rankChunks` 合并打分与排序（判定全在纯函数里，可离线断言）。
+   * ⑤ 向量腿（4.3-d）：只在 `llm.embed` 已配置**且**库里已有当前模型的向量时才编一次查询，
+   *   把余弦名单与词面名单交给 `fuseByRrf` 按名次融合。这条腿缺席时结果内容与次序都不变，
+   *   缺席的原因写进 `vectorStatus`——降级必须看得见（4.3-08）。
    * @param query 用户查询原文（可以带标点、全角字符、引号）
-   * @returns 命中读数；`status` 为 `no_query_tokens` 时**没有进过 SQL**（`MATCH ''` 会抛语法错误，
+   * @returns 命中读数；`status` 为 `no_query_tokens` 时**没有进过 SQL、也没有出网**（`MATCH ''` 会抛语法错误，
    *          且「这句话切不出词」与「库里没有」对界面是两种确定空态，见 4.3-10）
    * @remarks 日志只记 token 数与命中数，不记查询原文与切片正文（4.3-12 的日志脱敏：查询本身就是用户的
    *          简历语汇，落到日志文件等于把内容抄了一份到别处）。
    */
-  search(query: string): KbSearchResult {
+  async search(query: string): Promise<KbSearchResult> {
     const db = this.store.db;
     const queryTokens = queryTokensOf(query);
-    if (queryTokens.length === 0) return { status: 'no_query_tokens', hits: [], queryTokens: [] };
+    if (queryTokens.length === 0) {
+      return { status: 'no_query_tokens', vectorStatus: 'not_attempted', hits: [], queryTokens: [] };
+    }
 
     const candidates: KbSearchCandidate[] = [];
     const recalled = db
@@ -1041,12 +1129,154 @@ export class KbProfileService extends Service {
       dfByToken.set(token, Number(row?.n ?? 0));
     }
 
+    const params = this.searchParams();
     const context: KbSearchContext = { corpus, dfByToken, substringChunkIds };
-    const result = rankChunks(query, candidates, context, this.searchParams());
+    const lexical = rankChunks(query, candidates, context, params);
+    const vector = await this.vectorRanking(query, params);
+    const views = new Map<string, KbSearchCandidate>(candidates.map((candidate) => [candidate.chunkId, candidate]));
+    // 向量腿可以给出一条**词面一点都没召回**的切片（查询「性能优化」对上「P99 延迟下降 40%」就是这种：
+    // 没有共同 token、`norm_text` 里也不含查询串）。这正是它存在的理由，所以要把这些 id join 回主表补进
+    // 候选视图——不补的话语义名单会被词面召回集裁掉，RRF 退化成「只给已有结果换换序」，增强就成了装饰。
+    const missingIds = vector.scores.map((score) => score.chunkId).filter((chunkId) => !views.has(chunkId));
+    if (missingIds.length > 0) {
+      const semanticRows = db
+        .prepare(
+          `SELECT ${chunkSelect('')} FROM kb_chunks WHERE chunk_id IN (${missingIds.map(() => '?').join(', ')}) ORDER BY chunk_id`,
+        )
+        .all(...missingIds) as unknown as readonly KbChunkRow[];
+      for (const row of semanticRows) views.set(row.chunk_id, chunkViewOf(row));
+    }
+    // 名单为空时也照走一遍融合：`fuseByRrf` 对空名单给出的就是词面原序，
+    // 少一个「名单空了就绕过融合」的分支，就少一处「两条路径的 tie-break 不一样」的地方。
+    const hits = vector.status === 'ok' ? fuseByRrf(query, lexical.hits, vector.scores, views, params) : lexical.hits;
+    const result: KbSearchResult = { ...lexical, hits, vectorStatus: vector.status };
     this.ctx.logger.info(
-      `[kb-profile] 检索 ${String(queryTokens.length)} 个 token / ${String(candidates.length)} 条候选 → ${String(result.hits.length)} 条命中（${result.status}）`,
+      `[kb-profile] 检索 ${String(queryTokens.length)} 个 token / ${String(candidates.length)} 条候选 → ${String(result.hits.length)} 条命中（${result.status} · 向量腿 ${result.vectorStatus} / 语义名单 ${String(vector.scores.length)} 条）`,
     );
     return result;
+  }
+
+  /**
+   * 向量腿取数：把一句查询编成向量，并在**当前模型**下按余弦排名（spec 4.3-07）。
+   *
+   * 三道本地判定把出网次数压到最少：服务没挂载 / 没配置 → `unavailable`；库里没有该模型的行 →
+   * `no_vectors`（为了一句查询去编整库是浪费，补建只在 `syncVectors()` 里发生）。两种都一次网络都不发。
+   * @param query 用户查询原文（只有这一句出网，切片正文不外发）
+   * @param params 余弦门限与 `topK`
+   * @returns 融合用的名单与状态；`failed` 是发了但没成功（超时 / 对端错误 / 维度不合），
+   *          此时名单为空、检索退回纯词面——**任何一支路都不产生伪向量**（4.3-08 判的就是这个）
+   */
+  private async vectorRanking(
+    query: string,
+    params: KbSearchParams,
+  ): Promise<{ status: KbVectorStatus; scores: KbVectorScore[] }> {
+    const gateway = embedGatewayOf(this.ctx);
+    const availability = gateway?.status();
+    const model = availability?.model ?? null;
+    if (gateway === undefined || availability?.available !== true || model === null) {
+      return { status: 'unavailable', scores: [] };
+    }
+    const db = this.store.db;
+    const existing = db.prepare('SELECT count(*) AS n FROM kb_vectors WHERE model = ?').get(model) as unknown as
+      { n: number | bigint } | undefined;
+    if (Number(existing?.n ?? 0) === 0) return { status: 'no_vectors', scores: [] };
+
+    let encoded: { model: string; dim: number | null; vectors: number[][] };
+    try {
+      encoded = await gateway.embed([query]);
+    } catch (error) {
+      // 只记错误码：`AppError.message` 里带端点与对端文案，把它抄进日志等于把「谁的 key 在打不通」
+      // 写进一个通常会被一起提交/贴出的文件；正文本来就不进日志（4.3-12）。
+      const code = error instanceof AppError ? error.code : '未知错误';
+      this.ctx.logger.warn(`[kb-profile] 查询向量编码失败（${code}），本次退回纯词面检索`);
+      return { status: 'failed', scores: [] };
+    }
+    // `.at(0)` 而不是 `[0]`：这条边界是真的会被触发——对端把错误包成 2xx + 空 `data` 时向量数组就是空的，
+    // 而「没有查询向量」与「编码失败」在检索侧是同一种处置（退回纯词面），不是拿 `undefined` 去算余弦。
+    const queryVector = encoded.vectors.at(0);
+    if (queryVector === undefined) return { status: 'failed', scores: [] };
+
+    const rows = db
+      .prepare('SELECT chunk_id AS chunkId, vec AS vec FROM kb_vectors WHERE model = ? ORDER BY chunk_id')
+      .all(model) as unknown as readonly KbVectorRow[];
+    const ranked = rankByCosine(queryVector, rows, params.topK).filter(
+      (score) => score.cosine >= params.vectorMinCosine,
+    );
+    return { status: 'ok', scores: ranked };
+  }
+
+  /**
+   * 为库里尚无当前模型向量的切片补建向量（spec 4.3-07 / 08，本片唯一的出网入口）。
+   *
+   * 三步：① 现问 `llm.embed` 可用性——不可用就直接返回，**一次网络都不发、一个 BLOB 都不写**（4.3-08）；
+   * ② 把 `kb_chunks` 里缺 `(chunk_id, 当前模型)` 行的文本一次性交给 `gateway.embed()`
+   *   （分批由那一侧的 `batchSize` 负责，这里不重复一套批量逻辑，§2.2）；
+   * ③ 全部拿到之后才在**一个事务**里 upsert——中途失败整体不落库，库里保持「这批还没有向量」的原状，
+   *   而不是留下半库向量（半库会让 RRF 名单随重试次数变化，比没有更难解释）。
+   * 顺带清掉 `model ≠ 当前模型` 的行：换 embedding 模型后旧向量与新查询向量不同源，余弦毫无意义
+   * （plan §4.3-d 形状 3，`model` 列就是失效判据）。
+   * @param nowMs 写入时间戳（毫秒），注入以便单测断言
+   * @returns 逐条计数读数，不含任何切片正文；`status` 为 `unavailable` 时 `pending` 与 `written` 都是 0
+   *          （没有「当前模型」可比，所以连待补数都问不出来，这不是失败而是未配置）
+   */
+  async syncVectors(nowMs = Date.now()): Promise<KbVectorSyncResult> {
+    const gateway = embedGatewayOf(this.ctx);
+    const availability = gateway?.status();
+    const model = availability?.model ?? null;
+    if (gateway === undefined || availability?.available !== true || model === null) {
+      this.ctx.logger.info('[kb-profile] 向量补建跳过：llm.embed 未挂载或未配置，库里没有写入任何向量');
+      return { status: 'unavailable', model: null, pending: 0, written: 0, removed: 0, dim: null };
+    }
+
+    const db = this.store.db;
+    // 失效行先清：这一支是纯本地删除，即使后面的编码失败也不该把上一个模型的向量留下——
+    // 留在库里只会被下一次检索的 `model = ?` 过滤掉，白占空间还可能被误读成「有向量」。
+    const removed = Number(db.prepare('DELETE FROM kb_vectors WHERE model <> ?').run(model).changes);
+    const pendingRows = db
+      .prepare(
+        `SELECT c.chunk_id AS chunk_id, c.text AS text
+           FROM kb_chunks AS c
+          WHERE NOT EXISTS (SELECT 1 FROM kb_vectors AS v WHERE v.chunk_id = c.chunk_id AND v.model = ?)
+          ORDER BY c.chunk_id`,
+      )
+      .all(model) as unknown as readonly { chunk_id: string; text: string }[];
+    if (pendingRows.length === 0) {
+      this.ctx.logger.info(`[kb-profile] 向量补建：模型 ${model} 下 ${String(removed)} 条失效向量已清理，无待补切片`);
+      return { status: 'ok', model, pending: 0, written: 0, removed, dim: null };
+    }
+
+    let encoded: { model: string; dim: number | null; vectors: number[][] };
+    try {
+      encoded = await gateway.embed(pendingRows.map((row) => row.text));
+    } catch (error) {
+      const code = error instanceof AppError ? error.code : '未知错误';
+      this.ctx.logger.warn(
+        `[kb-profile] 向量补建失败（${code}）：${String(pendingRows.length)} 条待补，未写入任何向量`,
+      );
+      return { status: 'failed', model, pending: pendingRows.length, written: 0, removed, dim: null };
+    }
+    // 键用**配置里的那个模型名**，不用响应回显的名字：检索与待补查询都拿 `status().model` 过滤，
+    // 写进另一个名字就等于造一批永远取不到的行（回显与配置不同的情形会真实发生，见 `embed.ts` 的 model 取值）。
+    const dim = encoded.dim;
+    const written = this.withTransaction(() => {
+      const statement = db.prepare(
+        `INSERT INTO kb_vectors (chunk_id, model, dim, vec, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (chunk_id) DO UPDATE SET
+           model = excluded.model,
+           dim = excluded.dim,
+           vec = excluded.vec,
+           updated_at = excluded.updated_at`,
+      );
+      pendingRows.forEach((row, index) => {
+        const vector = encoded.vectors[index] as number[];
+        statement.run(row.chunk_id, model, dim ?? vector.length, encodeVector(vector), nowMs);
+      });
+      return pendingRows.length;
+    });
+    this.ctx.logger.info(
+      `[kb-profile] 向量补建完成：模型 ${model} 维度 ${String(dim ?? '未知')}，写入 ${String(written)} 条 / 清理失效 ${String(removed)} 条`,
+    );
+    return { status: 'ok', model, pending: pendingRows.length, written, removed, dim };
   }
 
   /**
@@ -1054,7 +1284,7 @@ export class KbProfileService extends Service {
    *
    * 单独一个方法而不是就地读 `this.options`：改配置会重建本 service 实例（AGENTS.md §9 的 2.5-d 实测），
    * 所以每次检索现取就是取到当前值，不需要额外的热更新通道。
-   * @returns 直接喂给 `rankChunks` 的参数集
+   * @returns 直接喂给 `rankChunks` 与 `fuseByRrf` 的参数集
    */
   private searchParams(): KbSearchParams {
     return {
@@ -1065,6 +1295,8 @@ export class KbProfileService extends Service {
       bm25Weight: this.options.bm25Weight,
       lexicalWeight: this.options.lexicalWeight,
       substringFloorScore: this.options.substringFloorScore,
+      rrfK: this.options.rrfK,
+      vectorMinCosine: this.options.vectorMinCosine,
     };
   }
 

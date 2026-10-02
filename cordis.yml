@@ -33,6 +33,16 @@ plugins:
   #   model: deepseek-chat
   - id: llm
 
+  # 向量出口（spec 4.3-07 / 08）：与上面同包、同一个客户端的**第二个方法**，但配置各自独立——
+  # DeepSeek 没有 embeddings 端点而硅基流动有，绑在一起配就会变成「为了要向量而把话术生成改地址」
+  # （plan §4.3-d 证据 [4]）。默认留空 = 未配置：`embed()` 以 `LLM_UNAVAILABLE` 结构化失败且一次网络都不发，
+  # 于是知识库检索自动退回「词面 + 倒排」而不产生伪向量，4.3-04 的断网/无 key 可用因此是可测的。
+  # key 同样不进清单（§8.6），只从环境变量 `AUTO_CC_SILICONFLOW_API_KEY` 读。要真跑向量就补两行：
+  #   baseUrl: https://api.siliconflow.cn/v1
+  #   model: BAAI/bge-m3
+  # 维度不写在这里：bge-m3 的 1024 只是文档读数，实际维度以响应为准并落进 `kb_vectors.dim`（4.3-03 无魔法数口径）。
+  - id: llm-embed
+
   # 外发额度骨架（spec 1.9）：账本与闸门各占一条，因为 1.9-05 要能**只摘掉闸门**而账本还活着。
   # `mode: unlimited` 是当前产品阶段的 shipped 默认——不收费、不登录、不联网校验（1.9-02 / 1.9-09）。
   # 上限是**按动作**的三条（spec 2.7-03）：抓取（一轮 run 记一条）、打招呼、投递各自计数、互不占用，
@@ -345,6 +355,12 @@ plugins:
       bm25Weight: 0.6
       lexicalWeight: 0.4
       substringFloorScore: 0.25
+      # 向量增强（spec 4.3-07 / 08）：RRF 的阻尼常数与向量腿自己的余弦下限。
+      # 不进 `dependsOn: [llm-embed]` 是有意的——向量腿是**可选增强**，摘掉那行插件检索照样跑
+      # （`vectorStatus: unavailable`），硬依赖会让知识库插件跟着对话/向量网关一起 PENDING。
+      # `rrfK` 60 是信息检索的惯用值；`vectorMinCosine` 的 0.35 是待标定的占位（4.3-e 评测集动这两处而不是改代码）。
+      rrfK: 60
+      vectorMinCosine: 0.35
 
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。

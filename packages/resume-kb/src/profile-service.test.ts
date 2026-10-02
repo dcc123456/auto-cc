@@ -43,6 +43,7 @@ import {
 } from './profile-service.js';
 import { ResumeParseService } from './parse-service.js';
 import { parseResumeText } from './sections.js';
+import { KB_VECTOR_MIGRATION_VERSION, decodeVector } from './vectors.js';
 
 const NOW_MS = 1_700_000_000_000;
 const LATER_MS = 1_700_000_900_000;
@@ -139,6 +140,72 @@ class FakeAgentToolsService extends Service {
   }
 }
 
+/**
+ * 假的 `llm.embed`（spec 4.3-07 / 08 的单测替身，与上面 `FakeAgentToolsService` 同一种替身）。
+ *
+ * 只认一张「文本片段 → 向量」的 fixture 表：命中第一个出现在文本里的片段就用它的向量，否则给零向量。
+ * 为什么自己造向量而不是打真端点：4.3-07 的判据是「融合会改变名次」，那需要一个**可控**的语义相关度；
+ * 而本机没有 embedding key（plan §4.3-d 的诚实边界条），打真端点的用例在这台机器上只能是 BLOCKED。
+ * 真端点下的增益对比复跑步骤写在 plan 里，等 key 到位再跑。
+ */
+class FakeEmbedService extends Service {
+  static provide = 'llm.embed';
+  // 与 `llmEmbedSchema` 同一种写法：`static Config` 会被 cordis 校验后作为第二个实参传进构造器，
+  // 所以替身的 fixture 必须进 schema，写成 `strictObject({})` 会在挂载这一步就把三个键判成未知字段。
+  static Config = z.strictObject({
+    available: z.boolean(),
+    model: z.string().nullable(),
+    table: z.record(z.string(), z.array(z.number())),
+  });
+
+  /** 每次 `embed()` 收到的文本，用于断言「没配好时一次都不发」。 */
+  readonly calls: string[][] = [];
+
+  /** 置为 `timeout` 后每次 `embed()` 都抛 `LLM_REQUEST_FAILED`，用来验失败路径零写入。 */
+  failWith: 'timeout' | null = null;
+
+  constructor(
+    ctx: Context,
+    private readonly options: { available: boolean; model: string | null; table: Record<string, number[]> },
+  ) {
+    super(ctx, 'llm.embed');
+  }
+
+  /** 契约见 `EmbedGateway.status`。 */
+  status(): { available: boolean; missing: Array<'baseUrl' | 'model' | 'apiKey'>; model: string | null } {
+    if (!this.options.available) return { available: false, missing: ['baseUrl', 'model', 'apiKey'], model: null };
+    return { available: true, missing: [], model: this.options.model };
+  }
+
+  /**
+   * 契约见 `EmbedGateway.embed`：顺序与输入一致，维度取第一条的长度。
+   * 不写成 `async`：存根里没有任何 `await` 表达式，加 `async` 只是白造一层微任务；
+   * 契约要的是「返回 Promise」，失败半边用 `Promise.reject` 给的就是同一个被调用方 `catch` 住的错误。
+   */
+  embed(texts: readonly string[]): Promise<{ model: string; dim: number | null; vectors: number[][] }> {
+    this.calls.push([...texts]);
+    if (this.failWith === 'timeout') {
+      return Promise.reject(
+        new AppError('LLM_REQUEST_FAILED', '向量请求超时（测试存根）', 'llm.embed', { reason: 'timeout' }),
+      );
+    }
+    const vectors = texts.map((text) => this.vectorOf(text));
+    return Promise.resolve({ model: this.options.model ?? '', dim: vectors[0]?.length ?? null, vectors });
+  }
+
+  /**
+   * 文本 → fixture 向量。
+   * @param text 一段切片正文或查询
+   * @returns 第一个片段命中的向量；一个都不命中时给零向量（余弦因此为 0，等于「语义上谁都不像」）
+   */
+  private vectorOf(text: string): number[] {
+    for (const [fragment, vector] of Object.entries(this.options.table)) {
+      if (text.includes(fragment)) return vector;
+    }
+    return [0, 0];
+  }
+}
+
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
 
@@ -158,19 +225,31 @@ const SEARCH_DEFAULTS = {
   bm25Weight: 0.6,
   lexicalWeight: 0.4,
   substringFloorScore: 0.25,
+  rrfK: 60,
+  vectorMinCosine: 0.35,
 };
+
+/** 装配 `llm.embed` 替身时的形状（不传即整条向量腿缺席，与真实装配里「摘掉 llm-embed」同构）。 */
+interface EmbedFixture {
+  available: boolean;
+  model: string | null;
+  table: Record<string, number[]>;
+}
 
 /**
  * 挂起 config + log + store + resume.doc + kb.profile（外加 `resume.parse`，端到端那条用例要用）。
  * @param dir 复用哪个目录
  * @param evidence 反查阈值（4.2-03）；默认与 `cordis.yml` 一致，用于验证「阈值来自配置」那两条用例
  * @param search 检索参数（4.3-03），默认与 `cordis.yml` 一致；传部分键即只覆盖那几项
+ * @param embed 向量服务替身（4.3-07 / 08）；不传就不挂 `llm.embed`，向量腿整条缺席——
+ *              那正是「摘掉插件」的真实装配形态，也是 `unavailable` 分支的入口
  * @returns 实体服务、文档存储服务、导入服务与裸连接
  */
 async function boot(
   dir = tempDir(),
   evidence: { topK: number; minScore: number } = { topK: 5, minScore: 0.34 },
   search: Partial<typeof SEARCH_DEFAULTS> = {},
+  embed?: EmbedFixture,
 ) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
@@ -178,6 +257,8 @@ async function boot(
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   // 注册表先于本包上岗：`registerAgentTools` 是软取，晚挂载就只能登记出 0 个工具。
   fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
+  // 替身只在显式要求时挂：不挂就是真实装配里「注掉 llm-embed 那一行」的形态（4.3-08 的 `unavailable` 分支）。
+  const embedStub = embed === undefined ? undefined : (await ctx.plugin(FakeEmbedService, embed), ctx.get('llm.embed'));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(
     await ctx.plugin(KbProfileService, {
@@ -192,6 +273,7 @@ async function boot(
   return {
     ctx,
     tools: ctx.get('agent.tools') as unknown as FakeAgentToolsService,
+    embed: embedStub as FakeEmbedService | undefined,
     kb: app['kb.profile'],
     doc: app['resume.doc'],
     parse: app['resume.parse'],
@@ -250,6 +332,31 @@ function ftsCount(db: DatabaseSync): number {
   return Number(row.total);
 }
 
+/**
+ * `kb_vectors` 的全部行数（4.3-08 的「零 BLOB 写入」判据靠它，而不是靠返回值自述）。
+ * @param db 裸连接
+ * @returns 行数；表不存在时抛错——用例本就该在未回滚的库上跑
+ */
+function vectorCount(db: DatabaseSync): number {
+  const row = db.prepare('SELECT COUNT(*) AS total FROM kb_vectors').get() as { total: number | bigint };
+  return Number(row.total);
+}
+
+/**
+ * `kb_vectors` 里「切片已不在 `kb_chunks`」的行数——向量派生索引的孤儿判据。
+ *
+ * 与 `orphanFtsCount` 同理：孤儿向量的表现不是报错而是**语义召回已经删掉的内容**
+ * （向量名单靠 id 回查主表，查不到才被丢掉，而丢掉之前它占了一个 topK 名额）。
+ * @param db 裸连接
+ * @returns 孤儿向量行数；任何一条写路径之后都应为 0
+ */
+function orphanVectorCount(db: DatabaseSync): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS total FROM kb_vectors WHERE chunk_id NOT IN (SELECT chunk_id FROM kb_chunks)')
+    .get() as { total: number | bigint };
+  return Number(row.total);
+}
+
 /** 表是否存在（回滚用例的判据）。 */
 function tableExists(db: DatabaseSync, name: string): boolean {
   const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name) as
@@ -277,15 +384,17 @@ afterAll(async () => {
 });
 
 describe('建表与迁移', () => {
-  it('挂载即建 kb_entities / kb_chunks / kb_chunks_fts 与 norm_text 列，迁移号段为 11 / 12 / 13', async () => {
+  it('挂载即建 kb_entities / kb_chunks / kb_chunks_fts / kb_vectors 与 norm_text 列，迁移号段为 11 / 12 / 13 / 14', async () => {
     const { db } = await boot();
     expect(tableExists(db, 'kb_entities')).toBe(true);
     expect(tableExists(db, 'kb_chunks')).toBe(true);
     expect(tableExists(db, 'kb_chunks_fts')).toBe(true);
+    expect(tableExists(db, 'kb_vectors')).toBe(true);
     expect(hasColumn(db, 'kb_chunks', 'norm_text')).toBe(true);
     expect(KB_PROFILE_MIGRATION_VERSION).toBe(11);
     expect(KB_CHUNKS_MIGRATION_VERSION).toBe(12);
     expect(KB_SEARCH_MIGRATION_VERSION).toBe(13);
+    expect(KB_VECTOR_MIGRATION_VERSION).toBe(14);
   });
 
   it('迁移号段不复用任何已分配号段（撞号的表现是「见号已存在就跳过建表」，表根本没建）', () => {
@@ -293,10 +402,15 @@ describe('建表与迁移', () => {
     // resume_docs 7 / resume_snapshots 8 / delivery_records 9 / resume_imports 10。
     const taken = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(taken.has(KB_PROFILE_MIGRATION_VERSION)).toBe(false);
-    // 本包的三段彼此也不许撞：撞了就是后两个 `up()` 里的建表被「见号已存在」跳过。
+    // 本包的四段彼此也不许撞：撞了就是后几个 `up()` 里的建表被「见号已存在」跳过。
     expect(new Set([...taken, KB_PROFILE_MIGRATION_VERSION]).has(KB_CHUNKS_MIGRATION_VERSION)).toBe(false);
     expect(
       new Set([...taken, KB_PROFILE_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION]).has(KB_SEARCH_MIGRATION_VERSION),
+    ).toBe(false);
+    expect(
+      new Set([...taken, KB_PROFILE_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION, KB_SEARCH_MIGRATION_VERSION]).has(
+        KB_VECTOR_MIGRATION_VERSION,
+      ),
     ).toBe(false);
   });
 
@@ -311,7 +425,7 @@ describe('建表与迁移', () => {
     expect(tableExists(db, 'resume_docs')).toBe(true);
   });
 
-  it('切片表能单独倒回去：回滚 11 同时倒回 13 与 12，实体表与它的数据原样留着（spec 4.3-11 的 down 半边）', async () => {
+  it('切片表能单独倒回去：回滚 11 依次倒回 14 / 13 / 12，实体表与它的数据原样留着（spec 4.3-11 的 down 半边）', async () => {
     const { kb, doc, store, db } = await boot();
     const parsed = parseResumeText(RESUME_MD, 'resume-rollback-chunks', NOW_MS);
     if (parsed.status !== 'ok') throw new Error('样例简历解析失败');
@@ -320,26 +434,45 @@ describe('建表与迁移', () => {
     expect(chunkCount(db)).toBeGreaterThan(0);
 
     const result = store.rollback(KB_PROFILE_MIGRATION_VERSION);
-    // 倒序：先 13（倒排表 + 归一列）再 12（切片表），顺序反了会撞「表已不在」。
-    expect(result.reverted).toEqual([KB_SEARCH_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION]);
+    // 倒序：14（向量表）→ 13（倒排表 + 归一列）→ 12（切片表），顺序反了会撞「表已不在」。
+    expect(result.reverted).toEqual([
+      KB_VECTOR_MIGRATION_VERSION,
+      KB_SEARCH_MIGRATION_VERSION,
+      KB_CHUNKS_MIGRATION_VERSION,
+    ]);
     expect(tableExists(db, 'kb_chunks')).toBe(false);
     expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
+    expect(tableExists(db, 'kb_vectors')).toBe(false);
     // 派生索引删掉了，真相还在：实体表一行不少，重新挂载就能按实体补建回来（下面有用例判这条）。
     expect(tableExists(db, 'kb_entities')).toBe(true);
     expect(entityCount(db)).toBe(7);
   });
 
-  it('倒排能单独倒回去：回滚 12 只删虚表与 `norm_text` 列，切片行一条不少（spec 4.3-01 的 down 半边）', async () => {
+  it('倒排能单独倒回去：回滚 12 只删虚表、归一列与向量表，切片行一条不少（spec 4.3-01 的 down 半边）', async () => {
     const dir = tempDir();
-    const { store, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-rollback-fts');
+    const { kb, store, db } = await syncedKb(
+      dir,
+      RESUME_MD_WITH_SECTIONS,
+      'resume-rollback-fts',
+      undefined,
+      undefined,
+      {
+        available: true,
+        model: 'BAAI/bge-m3',
+        table: { 订单: [1, 0] },
+      },
+    );
     const before = chunkCount(db);
     expect(before).toBeGreaterThan(0);
+    await kb.syncVectors(NOW_MS);
+    expect(vectorCount(db)).toBe(before);
 
     const result = store.rollback(KB_CHUNKS_MIGRATION_VERSION);
-    expect(result.reverted).toEqual([KB_SEARCH_MIGRATION_VERSION]);
+    expect(result.reverted).toEqual([KB_VECTOR_MIGRATION_VERSION, KB_SEARCH_MIGRATION_VERSION]);
     expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
+    expect(tableExists(db, 'kb_vectors')).toBe(false);
     expect(hasColumn(db, 'kb_chunks', 'norm_text')).toBe(false);
-    // 主表原样：切片是派生索引，倒排只是它的加速结构，删加速结构不许动数据（否则回滚就成了破坏性操作）。
+    // 主表原样：切片是派生索引，倒排与向量只是它的两种加速结构，删加速结构不许动数据（否则回滚就成了破坏性操作）。
     expect(chunkCount(db)).toBe(before);
     expect(orphanChunkCount(db)).toBe(0);
 
@@ -347,7 +480,9 @@ describe('建表与迁移', () => {
     const again = await boot(dir);
     expect(again.kb.listChunks()).toHaveLength(before);
     expect(ftsCount(again.db)).toBe(before);
-    expect(again.kb.search('订单').hits.length).toBeGreaterThan(0);
+    // 向量表跟着重建但**空着**：派生索引不自动回填（补建要出网，必须由用户/agent 显式触发，4.3-04 的离线保证靠这一条）。
+    expect(vectorCount(again.db)).toBe(0);
+    expect((await again.kb.search('订单')).hits.length).toBeGreaterThan(0);
   });
 });
 
@@ -529,6 +664,8 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
  * @param corpus 简历正文
  * @param docId 存进 `resume_docs` 时用的文档 id
  * @param evidence 反查阈值；省略时用装配默认值
+ * @param search 检索参数；省略时用装配默认值
+ * @param embed 向量服务替身；省略即整条向量腿缺席（4.3-08 的 `unavailable` 分支）
  * @returns 装配好的服务与裸连接
  */
 async function syncedKb(
@@ -537,8 +674,9 @@ async function syncedKb(
   docId: string,
   evidence?: { topK: number; minScore: number },
   search?: Partial<typeof SEARCH_DEFAULTS>,
+  embed?: EmbedFixture,
 ) {
-  const booted = await boot(dir, evidence, search);
+  const booted = await boot(dir, evidence, search, embed);
   const parsed = parseResumeText(corpus, docId, NOW_MS);
   if (parsed.status !== 'ok') throw new Error(`语料解析失败：${parsed.status}`);
   booted.doc.save(parsed.document);
@@ -984,10 +1122,15 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     if (tool === undefined) throw new Error('kb.profile.search 未登记进 agent 工具面');
     expect(tool.effect).toBe('read');
     expect(tool.requiresConfirmation).toBe(false);
-    expect(await tool.run({ query: '订单' })).toEqual(kb.search('订单'));
+    expect(await tool.run({ query: '订单' })).toEqual(await kb.search('订单'));
     // 空查询必须过 schema：注册表那层的 `TOOL_INPUT_INVALID` 会把 4.3-10 要区分的两个确定空态吃成一个错误。
     expect(tool.input.safeParse({ query: '' }).success).toBe(true);
-    expect(await tool.run({ query: '。。。' })).toEqual({ status: 'no_query_tokens', hits: [], queryTokens: [] });
+    expect(await tool.run({ query: '。。。' })).toEqual({
+      status: 'no_query_tokens',
+      hits: [],
+      queryTokens: [],
+      vectorStatus: 'not_attempted',
+    });
     // 结果要落进消息 parts 并过 IPC，所以必须是纯 JSON（Map / Set 一旦漏进去就是「界面上拿到空对象」）。
     const serialized = JSON.parse(JSON.stringify(await tool.run({ query: '订单' }))) as { hits: unknown[] };
     expect(serialized.hits.length).toBeGreaterThan(0);
@@ -1175,8 +1318,8 @@ describe('检索切片收敛（4.3-a / spec 4.3-11）', () => {
 
 describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-01 / 02 / 03）', () => {
   /** 供检索用例复用的语料同步（`RESUME_MD_WITH_SECTIONS` 里同时有区块级与实体级切片）。 */
-  async function searchableKb(search: Partial<typeof SEARCH_DEFAULTS> = {}) {
-    return syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-search', undefined, search);
+  async function searchableKb(search: Partial<typeof SEARCH_DEFAULTS> = {}, embed?: EmbedFixture) {
+    return syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-search', undefined, search, embed);
   }
 
   it('五条写路径跑完之后：倒排行数与切片行数严格相等且两侧都无孤儿', async () => {
@@ -1204,7 +1347,8 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
 
   it('按「订单」检索：相关切片在前，每条命中的理由与命中词都非空', async () => {
     const { kb } = await searchableKb();
-    const result = kb.search('订单');
+    const result = await kb.search('订单');
+    expect(result.vectorStatus).toBe('unavailable');
     expect(result.status).toBe('ok');
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits[0]?.text).toContain('订单');
@@ -1223,7 +1367,7 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     const { kb } = await searchableKb();
 
     // 语料里只有个人简介那一段写了「高并发」，命中它就是「二字组索引按中文切开了」的直接证据
-    const concurrency = kb.search('高并发');
+    const concurrency = await kb.search('高并发');
     expect(concurrency.status).toBe('ok');
     expect(concurrency.hits[0]?.text).toContain('高并发');
     expect(concurrency.hits[0]?.matchedTokens).toEqual(['并发', '高并']);
@@ -1231,13 +1375,13 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     // 校园段那条被 4.1 锁成了 `achievement` 事实，所以它既有实体级切片、又有区块级切片——
     // 同一个中文查询两侧都命中。两条切片的内容是同一句话，**只断句子不断段头**，
     // 否则断言会莫名挂在「区块切片多带了公司名与时间」这种与检索无关的差异上。
-    const contest = kb.search('算法竞赛');
+    const contest = await kb.search('算法竞赛');
     expect(contest.hits.map((hit) => hit.text)).toContain('组织过三十人规模的校内算法竞赛，负责赛题与判题机。');
     expect(new Set(contest.hits.map((hit) => hit.chunkKind))).toEqual(new Set(['entity', 'section']));
 
     // 手工建的技能实体同样进得了检索：切片与实体的 1:1 对能力词查询成立
     const skill = kb.create({ kind: 'skill', payload: { name: '推荐算法与召回排序' } }, NOW_MS);
-    expect(kb.search('推荐算法').hits.map((hit) => hit.chunkId)).toContain(skill.entityId);
+    expect((await kb.search('推荐算法')).hits.map((hit) => hit.chunkId)).toContain(skill.entityId);
   });
 
   it('单字查询走子串通道：倒排切不出来的「订」仍然命中，并标 substring 理由', async () => {
@@ -1246,7 +1390,7 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     const ftsRows = db.prepare('SELECT rowid FROM kb_chunks_fts WHERE kb_chunks_fts MATCH ?').all('"订"') as unknown;
     expect(ftsRows).toEqual([]);
 
-    const result = kb.search('订');
+    const result = await kb.search('订');
     expect(result.status).toBe('ok');
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits.every((hit) => hit.text.includes('订'))).toBe(true);
@@ -1255,37 +1399,47 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
 
   it('全角与大小写在归一列上相遇：查「Ｐ９９」命中库内写成半角的 P99', async () => {
     const { kb } = await searchableKb();
-    const result = kb.search('Ｐ９９');
+    const result = await kb.search('Ｐ９９');
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits.some((hit) => hit.text.includes('P99'))).toBe(true);
   });
 
   it('切不出 token 的查询给确定空态，而不是把 FTS5 语法错误抛给界面', async () => {
     const { kb } = await searchableKb();
-    expect(kb.search('。。。')).toEqual({ status: 'no_query_tokens', hits: [], queryTokens: [] });
-    expect(kb.search('')).toMatchObject({ status: 'no_query_tokens' });
+    expect(await kb.search('。。。')).toEqual({
+      status: 'no_query_tokens',
+      hits: [],
+      queryTokens: [],
+      vectorStatus: 'not_attempted',
+    });
+    expect(await kb.search('')).toMatchObject({ status: 'no_query_tokens', vectorStatus: 'not_attempted' });
   });
 
   it('参数来自配置：topK、minScore、两腿权重各自改动都会改变结果（4.3-03 的无魔法数判据）', async () => {
-    const baseline = (await searchableKb()).kb.search('订单');
+    const { kb: baselineKb } = await searchableKb();
+    const baseline = await baselineKb.search('订单');
     expect(baseline.hits.length).toBeGreaterThan(1);
 
-    const capped = (await searchableKb({ searchTopK: 1 })).kb.search('订单');
+    const { kb: cappedKb } = await searchableKb({ searchTopK: 1 });
+    const capped = await cappedKb.search('订单');
     expect(capped.hits).toHaveLength(1);
     expect(capped.hits[0]?.chunkId).toBe(baseline.hits[0]?.chunkId);
 
-    const strict = (await searchableKb({ searchMinScore: 0.99 })).kb.search('订单');
+    const { kb: strictKb } = await searchableKb({ searchMinScore: 0.99 });
+    const strict = await strictKb.search('订单');
     expect(strict.hits.length).toBeLessThan(baseline.hits.length);
 
     // 只留覆盖腿与只留 BM25 腿是两种取向，头部次序应当能被其中一条腿翻掉；
     // 若两腿权重根本不进算式，这三条断言会给出完全相同的结果。
-    const bm25Only = (await searchableKb({ bm25Weight: 1, lexicalWeight: 0 })).kb.search('订单服务重构');
-    const lexicalOnly = (await searchableKb({ bm25Weight: 0, lexicalWeight: 1 })).kb.search('订单服务重构');
+    const { kb: bm25Kb } = await searchableKb({ bm25Weight: 1, lexicalWeight: 0 });
+    const { kb: lexKb } = await searchableKb({ bm25Weight: 0, lexicalWeight: 1 });
+    const bm25Only = await bm25Kb.search('订单服务重构');
+    const lexicalOnly = await lexKb.search('订单服务重构');
     expect(bm25Only.hits.map((hit) => hit.score)).not.toEqual(lexicalOnly.hits.map((hit) => hit.score));
     expect(lexicalOnly.hits.every((hit) => hit.score <= 1)).toBe(true);
   });
 
-  it('grep 判据：七个参数的默认值只活在 `cordis.yml` 里，检索源码一处赋数字都没有（4.3-03 的 C 半边）', () => {
+  it('grep 判据：九个参数的默认值只活在 `cordis.yml` 里，检索源码一处赋数字都没有（4.3-03 的 C 半边）', () => {
     const here = fileURLToPath(new URL('.', import.meta.url));
     const yaml = readFileSync(join(here, '../../../cordis.yml'), 'utf8');
     const profileStart = yaml.indexOf('- id: kb-profile');
@@ -1300,6 +1454,8 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
       'bm25Weight',
       'lexicalWeight',
       'substringFloorScore',
+      'rrfK',
+      'vectorMinCosine',
     ];
     for (const key of searchKeys) expect(block).toMatch(new RegExp(`^\\s+${key}: \\d`, 'm'));
 
@@ -1314,7 +1470,17 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     const wiring = codeOnly('profile-service.ts');
     // 参数名（应用侧的叫法，与 `cordis.yml` 的键名不同源）一旦被赋数字，表现就是「改了配置检索没变」，
     // 而这条只能靠源码检查发现——运行期断言拿到的永远是装配时传进去的那份配置。
-    for (const name of ['k1', 'b', 'topK', 'minScore', 'bm25Weight', 'lexicalWeight', 'substringFloorScore']) {
+    for (const name of [
+      'k1',
+      'b',
+      'topK',
+      'minScore',
+      'bm25Weight',
+      'lexicalWeight',
+      'substringFloorScore',
+      'rrfK',
+      'vectorMinCosine',
+    ]) {
       const assigned = new RegExp(`\\b${name}\\s*[:=]\\s*\\d`);
       expect(scoring.match(assigned)?.[0] ?? null).toBeNull();
       expect(wiring.match(assigned)?.[0] ?? null).toBeNull();
@@ -1325,18 +1491,18 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     const { kb } = await searchableKb();
     // 两条文本刻意不共享任何二字组（`链路` 这种两边都有的词会让「搜不到」变成假阴性判据）
     const created = kb.create({ kind: 'project', payload: { text: '订单中心的对账流程治理' } }, NOW_MS);
-    expect(kb.search('对账流程').hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
-    expect(kb.search('灰度放量').hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
+    expect((await kb.search('对账流程')).hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
+    expect((await kb.search('灰度放量')).hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
 
     kb.update(created.entityId, { text: '商品中心的灰度放量机制' }, LATER_MS);
-    expect(kb.search('对账流程').hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
-    expect(kb.search('灰度放量').hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
+    expect((await kb.search('对账流程')).hits.some((hit) => hit.chunkId === created.entityId)).toBe(false);
+    expect((await kb.search('灰度放量')).hits.some((hit) => hit.chunkId === created.entityId)).toBe(true);
   });
 
   it('只缺倒排表的老库重新挂载即可检索：迁移 13 自己把倒排行与归一列回填（不留给启动路径补建）', async () => {
     const dir = tempDir();
     const { kb, store, db } = await syncedKb(dir, RESUME_MD_WITH_SECTIONS, 'resume-search-backfill');
-    expect(kb.search('订单').hits.length).toBeGreaterThan(0);
+    expect((await kb.search('订单')).hits.length).toBeGreaterThan(0);
 
     // 模拟「带着 kb_chunks 但没有倒排」的老库：倒回一格就是只回滚 13，切片行与实体行都不动。
     store.rollback(KB_CHUNKS_MIGRATION_VERSION);
@@ -1349,8 +1515,279 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     expect(again.kb.listChunks().every((chunk) => chunk.normText === chunk.text.normalize('NFKC').toLowerCase())).toBe(
       true,
     );
-    expect(again.kb.search('订单').hits.length).toBeGreaterThan(0);
-    expect(again.kb.search('订').hits.some((hit) => hit.reasons.includes('substring'))).toBe(true);
+    expect((await again.kb.search('订单')).hits.length).toBeGreaterThan(0);
+    expect((await again.kb.search('订')).hits.some((hit) => hit.reasons.includes('substring'))).toBe(true);
+  });
+});
+
+/**
+ * 向量补建与 RRF 融合的装配用例（spec 4.3-07 / 08，plan §4.3-d）。
+ *
+ * 纯函数那半边（float32 往返、余弦、名次合成）在 `vectors.test.ts` 与 `search.test.ts` 里逐条断言过，
+ * 这里只判**只有真库 + 真挂载才成立**的四件事：
+ * ① 补建向量的三条出口（未挂载 / 未配置 / 编码失败）都**一个 BLOB 都不写、一次请求都不发**——4.3-08 的正文；
+ * ② `model` 列真的是失效判据（换模型即整表作废，不做「半新半旧混着算余弦」）；
+ * ③ 切片的每一条写路径都带着它的向量行一起收敛（派生索引不许留孤儿，4.3-11 延伸到这张表）；
+ * ④ 检索的四态（`unavailable` / `no_vectors` / `failed` / `ok`）与「语义命中能进结果」是装配出来的结果。
+ *
+ * 向量替身为什么按「正文片段 → 向量」造而不是打真端点：4.3-07 的判据要的是**可控**的语义相关度，
+ * 而本机没有 embedding key（plan §4.3-d 的诚实边界条）。真端点下的增益对比复跑步骤写在 plan 里。
+ */
+describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
+  /** 替身模型名，与硅基流动的 `BAAI/bge-m3` 同形：代码不认识具体模型名，换它只换配置（4.3-03）。 */
+  const FIXTURE_MODEL = 'fixture-bge-m3';
+
+  /**
+   * 词面与语义**故意给出不同名次**的一张表。
+   *
+   * 「发布流水线」只在个人简介那段出现，「重构」只在工作经历那条出现，而查询「订单」两边都含：
+   * 于是词面腿把「主导订单服务重构」排在前，语义腿把简介那条排在最前（余弦 0.995 vs 0.0995）。
+   * 片段按声明顺序匹配，所以特异片段必须写在通用片段前面，否则两边都落到 `[10,1]` 上、名次就不分了。
+   */
+  const SEMANTIC_TABLE: Record<string, number[]> = {
+    发布流水线: [10, 0],
+    重构: [0, 10],
+    订单: [10, 1],
+  };
+
+  /** 装配一份「同步好切片 + 挂上向量替身」的库。 */
+  async function embedKb(
+    dir: string,
+    docId: string,
+    table: Record<string, number[]>,
+    search: Partial<typeof SEARCH_DEFAULTS> = {},
+    available = true,
+  ) {
+    return syncedKb(dir, RESUME_MD_WITH_SECTIONS, docId, undefined, search, {
+      available,
+      model: available ? FIXTURE_MODEL : null,
+      table,
+    });
+  }
+
+  it('向量表随挂载而建、空表就是正确状态：没人按补建就没有一行向量，检索也不发编码请求', async () => {
+    const dir = tempDir();
+    const { kb, embed, db } = await embedKb(dir, 'resume-vectors-empty', SEMANTIC_TABLE);
+    expect(chunkCount(db)).toBeGreaterThan(0);
+    expect(vectorCount(db)).toBe(0);
+
+    const result = await kb.search('订单');
+    expect(result.vectorStatus).toBe('no_vectors');
+    expect(result.hits.length).toBeGreaterThan(0);
+    // 「库里没有同源向量」与「向量不可用」是两态，但共同点是不出网：一条编码请求都不该发（4.3-04）
+    expect(embed?.calls).toEqual([]);
+  });
+
+  it('未挂载 `llm.embed` 时补建给 `unavailable` 且零写入（摘掉插件是降级，不是崩溃）', async () => {
+    const { kb, db } = await syncedKb(tempDir(), RESUME_MD_WITH_SECTIONS, 'resume-vectors-unmounted');
+    expect(await kb.syncVectors(NOW_MS)).toMatchObject({
+      status: 'unavailable',
+      model: null,
+      pending: 0,
+      written: 0,
+      removed: 0,
+      dim: null,
+    });
+    expect(vectorCount(db)).toBe(0);
+    expect((await kb.search('订单')).vectorStatus).toBe('unavailable');
+  });
+
+  it('挂载了但没配好（缺 baseUrl / model / key）同样零写入、零请求：`available:false` 不是「试一下再失败」', async () => {
+    const { kb, embed, db } = await embedKb(tempDir(), 'resume-vectors-unconfigured', {}, undefined, false);
+    expect(await kb.syncVectors(NOW_MS)).toMatchObject({ status: 'unavailable', written: 0 });
+    expect(vectorCount(db)).toBe(0);
+    expect((await kb.search('订单')).vectorStatus).toBe('unavailable');
+    expect(embed?.calls).toEqual([]);
+  });
+
+  it('配好后补建：一次批量喂全部切片、float32 落库、维度取响应，重复补建幂等且不再出网', async () => {
+    const { kb, embed, db } = await embedKb(tempDir(), 'resume-vectors-happy', SEMANTIC_TABLE);
+    const chunks = kb.listChunks();
+    expect(await kb.syncVectors(NOW_MS)).toMatchObject({
+      status: 'ok',
+      model: FIXTURE_MODEL,
+      pending: chunks.length,
+      written: chunks.length,
+      removed: 0,
+      dim: 2,
+    });
+    expect(vectorCount(db)).toBe(chunks.length);
+    expect(embed?.calls).toHaveLength(1);
+    // 一条切片一次 HTTP 会让数百条切片变成数百次往返，这里断的就是「一次批量」这件事
+    expect(embed?.calls[0]).toHaveLength(chunks.length);
+
+    const target = chunks.find((chunk) => chunk.text.includes('重构'));
+    if (target === undefined) throw new Error('语料里没有带「重构」的切片，fixture 失效');
+    const stored = db
+      .prepare('SELECT model, dim, vec, updated_at FROM kb_vectors WHERE chunk_id = ?')
+      .get(target.chunkId) as {
+      model: string;
+      dim: number;
+      vec: unknown;
+      updated_at: number;
+    };
+    expect(stored.model).toBe(FIXTURE_MODEL);
+    expect(stored.dim).toBe(2);
+    expect(stored.updated_at).toBe(NOW_MS);
+    expect(decodeVector(stored.vec)).toEqual([0, 10]);
+
+    expect(await kb.syncVectors(LATER_MS)).toMatchObject({ status: 'ok', pending: 0, written: 0, removed: 0 });
+    expect(embed?.calls).toHaveLength(1);
+  });
+
+  it('换 embedding 模型即整表作废重算：`model` 是失效判据，不留半新半旧混着算余弦', async () => {
+    const dir = tempDir();
+    const old = await embedKb(dir, 'resume-vectors-model', SEMANTIC_TABLE);
+    await old.kb.syncVectors(NOW_MS);
+    const before = vectorCount(old.db);
+    expect(before).toBeGreaterThan(0);
+
+    const fresh = await boot(dir, undefined, undefined, {
+      available: true,
+      model: 'another-model',
+      table: SEMANTIC_TABLE,
+    });
+    expect(await fresh.kb.syncVectors(LATER_MS)).toMatchObject({ status: 'ok', removed: before, written: before });
+    const models = fresh.db
+      .prepare('SELECT DISTINCT model FROM kb_vectors ORDER BY model')
+      .all() as unknown as readonly {
+      model: string;
+    }[];
+    expect(models.map((row) => row.model)).toEqual(['another-model']);
+  });
+
+  it('编码中途失败（超时）：返回 `failed`、`written: 0`，表里一个 BLOB 都没有（4.3-08 的判据）', async () => {
+    const { kb, embed, db } = await embedKb(tempDir(), 'resume-vectors-fail', SEMANTIC_TABLE);
+    if (embed === undefined) throw new Error('向量替身未挂载');
+    const pending = chunkCount(db);
+    embed.failWith = 'timeout';
+    expect(await kb.syncVectors(NOW_MS)).toMatchObject({
+      status: 'failed',
+      pending,
+      written: 0,
+      removed: 0,
+      dim: null,
+    });
+    expect(vectorCount(db)).toBe(0);
+    expect(embed.calls).toHaveLength(1);
+  });
+
+  it('向量跟着切片一起收敛：改正文即删旧向量、删实体与区块重建都不留孤儿行（4.3-11 延伸到向量表）', async () => {
+    const { kb, doc, db } = await embedKb(tempDir(), 'resume-vectors-hygiene', SEMANTIC_TABLE);
+    await kb.syncVectors(NOW_MS);
+    const before = kb.listChunks();
+    expect(vectorCount(db)).toBe(before.length);
+
+    const editable = before.find((chunk) => chunk.chunkKind === 'entity');
+    if (editable === undefined) throw new Error('语料里没有实体级切片');
+    kb.update(editable.chunkId, { text: '改了正文，旧向量就不再同源了' }, LATER_MS);
+    expect(vectorCount(db)).toBe(before.length - 1);
+
+    // 新建的切片**不自动补向量**：补建要出网，只能是显式动作（4.3-04 的离线冒烟靠这一条成立）
+    const created = kb.create({ kind: 'achievement', payload: { text: '订单中心的对账流程治理' } }, LATER_MS);
+    expect(vectorCount(db)).toBe(before.length - 1);
+    expect(orphanVectorCount(db)).toBe(0);
+    expect(await kb.syncVectors(LATER_MS)).toMatchObject({ status: 'ok', pending: 2, written: 2 });
+
+    kb.remove(created.entityId, LATER_MS);
+    expect(orphanVectorCount(db)).toBe(0);
+
+    // 把工作副本里的经历删光再同步：区块级切片重建要连带删掉它们的向量行
+    const parsed = parseResumeText(RESUME_MD_SKILLS_ONLY, 'resume-vectors-hygiene', LATER_MS);
+    if (parsed.status !== 'ok') throw new Error('精简语料解析失败');
+    doc.save(parsed.document);
+    kb.sync('resume-vectors-hygiene', LATER_MS);
+    expect(orphanVectorCount(db)).toBe(0);
+    expect(vectorCount(db)).toBeLessThan(before.length);
+  });
+
+  it('检索四态之 `failed`：查询侧编码失败就退回纯词面，命中与没有向量腿时逐字段相等', async () => {
+    const dir = tempDir();
+    const seeded = await embedKb(dir, 'resume-rrf-failed', SEMANTIC_TABLE);
+    await seeded.kb.syncVectors(NOW_MS);
+    if (seeded.embed === undefined) throw new Error('向量替身未挂载');
+    seeded.embed.failWith = 'timeout';
+
+    const plain = await boot(dir);
+    const lexical = await plain.kb.search('订单');
+    const degraded = await seeded.kb.search('订单');
+    expect(degraded.vectorStatus).toBe('failed');
+    expect(degraded.status).toBe('ok');
+    expect(degraded.hits).toEqual(lexical.hits);
+  });
+
+  it('融合会改变名次：语义最近的那条升到首位，而每条命中的词面读数原样保留（spec 4.3-07）', async () => {
+    const dir = tempDir();
+    const seeded = await embedKb(dir, 'resume-rrf', SEMANTIC_TABLE);
+    await seeded.kb.syncVectors(NOW_MS);
+    const plain = await boot(dir);
+    const lexical = await plain.kb.search('订单');
+    expect(lexical.hits.length).toBeGreaterThan(1);
+
+    const fused = await seeded.kb.search('订单');
+    expect(fused.vectorStatus).toBe('ok');
+    expect(fused.hits[0]?.text).toContain('发布流水线');
+    expect(fused.hits[0]?.reasons).toContain('vector');
+    expect(fused.hits[0]?.vectorScore).toBeGreaterThan(0.9);
+    // 词面腿的第一名（那条「主导订单服务重构」）在融合后掉到了后面——这就是「融合优于纯 BM25」的机制证据
+    const lexicalFirst = lexical.hits[0];
+    if (lexicalFirst === undefined) throw new Error('词面基线没有命中');
+    expect(lexicalFirst.text).not.toContain('发布流水线');
+    expect(fused.hits.findIndex((hit) => hit.chunkId === lexicalFirst.chunkId)).toBeGreaterThan(0);
+    // 融合只改次序、不改读数：同一条切片在两次的三个词面读数必须完全一致
+    for (const hit of lexical.hits) {
+      const merged = fused.hits.find((candidate) => candidate.chunkId === hit.chunkId);
+      expect(merged?.score).toBe(hit.score);
+      expect(merged?.bm25Score).toBe(hit.bm25Score);
+      expect(merged?.lexicalScore).toBe(hit.lexicalScore);
+    }
+  });
+
+  it('只被语义捞到的切片也能进结果：查询「比赛」与库内「竞赛」没有任何共用 token，词面腿 0 命中', async () => {
+    const dir = tempDir();
+    const seeded = await embedKb(dir, 'resume-rrf-semantic', { 竞赛: [1, 0], 比赛: [1, 0] });
+    await seeded.kb.syncVectors(NOW_MS);
+
+    const plain = await boot(dir);
+    expect((await plain.kb.search('比赛')).hits).toEqual([]);
+
+    const result = await seeded.kb.search('比赛');
+    expect(result.vectorStatus).toBe('ok');
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.hits.every((hit) => hit.text.includes('竞赛'))).toBe(true);
+    expect(result.hits.every((hit) => hit.reasons.includes('vector'))).toBe(true);
+    // 词面分为 0 也照样进结果：`minScore` 是词面腿的门槛，不许拿来挡语义命中（plan §4.3-d 的落地更正）
+    expect(result.hits.every((hit) => hit.score === 0)).toBe(true);
+  });
+
+  it('向量下限来自配置：0.35 挡掉「词面强但语义远」的那条，放到 0.05 就让它进向量名单（4.3-03）', async () => {
+    const dir = tempDir();
+    const seeded = await embedKb(dir, 'resume-rrf-threshold', SEMANTIC_TABLE);
+    await seeded.kb.syncVectors(NOW_MS);
+
+    const strict = await seeded.kb.search('订单');
+    const strictVectorHits = strict.hits.filter((hit) => hit.reasons.includes('vector'));
+    expect(strictVectorHits.length).toBeGreaterThan(0);
+    expect(strictVectorHits.every((hit) => hit.text.includes('发布流水线'))).toBe(true);
+
+    const lenient = await boot(
+      dir,
+      undefined,
+      { vectorMinCosine: 0.05 },
+      { available: true, model: FIXTURE_MODEL, table: SEMANTIC_TABLE },
+    );
+    const relaxed = await lenient.kb.search('订单');
+    expect(relaxed.hits.some((hit) => hit.reasons.includes('vector') && hit.text.includes('重构'))).toBe(true);
+  });
+
+  it('补建向量在 agent 工具面登记为 `outbound` + 需确认：把简历正文交给外部端点不是读操作', async () => {
+    const { tools } = await syncedKb(tempDir(), RESUME_MD, 'resume-vectors-tool');
+    const tool = tools.declarations.get('kb.profile.syncVectors');
+    if (tool === undefined) throw new Error('kb.profile.syncVectors 未登记进 agent 工具面');
+    expect(tool.effect).toBe('outbound');
+    expect(tool.requiresConfirmation).toBe(true);
+    expect(tool.input.safeParse({}).success).toBe(true);
+    expect(tool.input.safeParse({ docId: 'anything' }).success).toBe(false);
   });
 });
 
@@ -1380,8 +1817,8 @@ describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('运行期把 fetch / WebSocket / XHR 换成计数存根后，读+同步+增删改+反查+备份全链路零调用', async () => {
-    const { kb, tools } = await seededKb(tempDir());
+  it('运行期把 fetch / WebSocket / XHR 换成计数存根后，读+同步+增删改+反查+检索+向量补建+备份全链路零调用', async () => {
+    const { kb, tools, db } = await seededKb(tempDir());
     const docId = kb.list()[0]?.sourceDocId;
     if (typeof docId !== 'string') throw new Error('种子库里没有派生实体，sync 路径没被覆盖');
     const backupPath = join(tempDir(), 'kb-zero-uplink.json');
@@ -1413,7 +1850,11 @@ describe('零上行审计（spec 4.2-07：知识库数据全本地）', () => {
       expect(kb.evidenceFor('主导订单服务重构').length).toBeGreaterThan(0);
       // 4.3-b 的检索入口也在同一条存根下跑一遍：它新引入了 FTS5 查询与 `instr` 全表扫，
       // 但读的全是本地库文件，一条网络语句都不该有（spec 4.2-07 / 4.3-05 的「零上行」延伸到检索）。
-      expect(kb.search('订单').hits.length).toBeGreaterThan(0);
+      expect((await kb.search('订单')).hits.length).toBeGreaterThan(0);
+      // 4.3-d 的向量补建是本包唯一的出网入口：`llm.embed` 没挂载时它必须原样返回「未配置」，
+      // 既不发起请求，也不留下任何 BLOB（spec 4.3-04 的离线冒烟 + 4.3-08 的零写入判据）。
+      expect(await kb.syncVectors(LATER_MS)).toMatchObject({ status: 'unavailable', written: 0 });
+      expect(vectorCount(db)).toBe(0);
       const created = kb.create({ kind: 'skill', payload: { name: 'Kafka' } }, NOW_MS);
       kb.update(created.entityId, { name: 'Kafka / 消息队列' }, LATER_MS);
       kb.sync(docId, LATER_MS);

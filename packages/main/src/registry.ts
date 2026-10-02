@@ -18,7 +18,7 @@ import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
-import { LlmChatService } from '@auto-cc/plugin-llm';
+import { LlmChatService, LlmEmbedService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
   DeliveryRecordService,
@@ -54,6 +54,10 @@ export const REGISTRY: Registry = {
   // 未配置（缺 baseUrl / model / 环境变量里的 key）时它照样挂载，只是 `complete()` 以 `LLM_UNAVAILABLE`
   // 结构化失败且一次网络都不发 —— 话术生成因此能走模板回落并在界面播报，而不是静默空串。
   llm: LlmChatService,
+  // 向量出口（spec 4.3-07 / 08）：同一个客户端的第二个方法，但**配置独立**——DeepSeek 没有 embeddings
+  // 端点而硅基流动有，绑在一起配就会变成「为了向量增强改坏话术生成」（plan §4.3-d 证据 [4]）。
+  // 未配置时它照样挂载且一次网络都不发，知识库因此能纯词面 + 倒排检索（4.3-04 的离线可用）。
+  'llm-embed': LlmEmbedService,
   // 账本与闸门是同一个域的两个服务，所以各占一个清单 id：`gate` 能单独被摘掉，
   // 1.9-05 的「闸门缺席即拦不住就不许装」才有可演示的形态（摘掉闸门时账本还活着）。
   usage: UsageLedgerService,

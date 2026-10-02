@@ -1,5 +1,5 @@
 /**
- * 检索打分的纯函数用例（spec 4.3-01 / 4.3-02 / 4.3-03 的判定半边）。
+ * 检索打分的纯函数用例（spec 4.3-01 / 4.3-02 / 4.3-03 的判定半边，4.3-d 加上融合腿）。
  *
  * 这一份文件**不开数据库**：`search.ts` 里全是「两个 token 集合 → 一个分数」的算式，
  * 只有离线断言才能把每个系数的作用单独钉住（在装配用例里改一个参数会同时动召回、df、语料统计三样，
@@ -12,9 +12,12 @@ import { indexTokens } from './chunks.js';
 import {
   type KbSearchCandidate,
   type KbSearchContext,
+  type KbSearchHit,
   type KbSearchParams,
+  type KbSearchReason,
   bm25ScoreOf,
   buildFtsQuery,
+  fuseByRrf,
   normalizeBm25,
   queryTokensOf,
   quoteFtsTerm,
@@ -31,6 +34,8 @@ const PARAMS: KbSearchParams = {
   bm25Weight: 0.6,
   lexicalWeight: 0.4,
   substringFloorScore: 0.25,
+  rrfK: 60,
+  vectorMinCosine: 0.35,
 };
 
 /** 造一条候选切片：只有 `text` / `tokens` 参与打分，其余字段是把命中认出来的标签。 */
@@ -277,5 +282,135 @@ describe('两腿合并成一条排序（4.3-01 / 4.3-02）', () => {
 
   it('查询 token 会回带给界面解释「按哪些词搜的」', () => {
     expect(rankChunks('高并发', all, ctx, PARAMS).queryTokens).toEqual(['并发', '高并']);
+  });
+});
+
+/**
+ * RRF 融合（4.3-d / spec 4.3-07 的判定半边）。
+ *
+ * 这里的命中全部手搭，不调 `rankChunks`：融合这段的判据是「名次怎么合成一条次序」，
+ * 如果输入本身是另一段被测代码算出来的，那么一次改动就会同时动两个环节，
+ * 失败时看不出是词面打分坏了还是融合坏了。装配（真库 + 真取数）在 `profile-service.test.ts` 判。
+ */
+describe('RRF 融合只改名次、不改读数（4.3-07）', () => {
+  /** 造一条词面腿命中：只有 `chunkId` 与三项读数参与融合的算式，其余是把命中认出来的标签。 */
+  function lexicalHit(chunkId: string, score: number, reasons: readonly KbSearchReason[] = ['bm25']): KbSearchHit {
+    return {
+      chunkId,
+      chunkKind: 'entity',
+      sourceDocId: null,
+      sectionKind: null,
+      text: `正文-${chunkId}`,
+      score,
+      bm25Score: score,
+      lexicalScore: score / 2,
+      vectorScore: null,
+      coverageReason: 'overlap',
+      reasons,
+      matchedTokens: ['订单'],
+    };
+  }
+
+  /** 造一条向量腿命中（`rankByCosine` 的读数形状）。 */
+  function vectorHit(chunkId: string, cosine: number) {
+    return { chunkId, cosine };
+  }
+
+  /** 只给了词面名单：次序与每一条读数都原样留着（降级路径必须与「没有这层代码」等价）。 */
+  it('向量名单为空时等价于纯词面结果', () => {
+    const lexical = [lexicalHit('e-a', 0.9), lexicalHit('e-b', 0.5), lexicalHit('e-c', 0.2)];
+    expect(fuseByRrf('订单', lexical, [], new Map(), { rrfK: PARAMS.rrfK, topK: 10 })).toEqual(lexical);
+  });
+
+  it('两边都命中的那条只被补上余弦与理由，三项词面读数一个字都不动', () => {
+    const lexical = [lexicalHit('e-a', 0.9, ['bm25', 'lexical']), lexicalHit('e-b', 0.5)];
+    const fused = fuseByRrf('订单', lexical, [vectorHit('e-a', 0.8765)], new Map(), { rrfK: PARAMS.rrfK, topK: 10 });
+    const top = fused[0];
+    if (top === undefined) throw new Error('两边都命中的那条应当还在结果里');
+    // 合并分是 0～1 的词面证据强度，把它换成量纲完全不同的 RRF 值会让 `minScore` 失去意义（文件头口径）。
+    expect(top.score).toBe(0.9);
+    expect(top.bm25Score).toBe(0.9);
+    expect(top.lexicalScore).toBe(0.45);
+    expect(top.vectorScore).toBe(0.8765);
+    expect(top.reasons).toEqual(['bm25', 'lexical', 'vector']);
+    expect(top.text).toBe('正文-e-a');
+    // 另一条没进向量名单，读数保持 null 而不是被填成 0（「没算过」与「算出 0」在界面上是两件事）。
+    expect(fused[1]?.vectorScore).toBeNull();
+  });
+
+  it('只被向量捞到的切片从 `views` 补全正文，词面三项读数记 0', () => {
+    const vectorOnly = candidate('e-semantic', '组织校内算法竞赛，负责赛题与判题机');
+    const fused = fuseByRrf(
+      '竞赛',
+      [],
+      [vectorHit('e-semantic', 0.9123)],
+      new Map([[vectorOnly.chunkId, vectorOnly]]),
+      { rrfK: PARAMS.rrfK, topK: 10 },
+    );
+    expect(fused).toHaveLength(1);
+    const top = fused[0];
+    if (top === undefined) throw new Error('只被语义捞到的那条应当进结果');
+    expect(top.text).toBe(vectorOnly.text);
+    expect(top.chunkKind).toBe(vectorOnly.chunkKind);
+    expect(top.score).toBe(0);
+    expect(top.bm25Score).toBe(0);
+    expect(top.lexicalScore).toBe(0);
+    expect(top.coverageReason).toBeNull();
+    expect(top.reasons).toEqual(['vector']);
+    // 与子串通道同一种处理：没有 token 级重合可展示时给归一化后的查询串本身，界面不能留空白字段。
+    expect(top.matchedTokens).toEqual(['竞赛']);
+  });
+
+  it('向量名单里的 id 在 `views` 缺行时跳过，而不是造一条没有正文的命中', () => {
+    // 唯一真实来路是「切片刚被删掉、向量行还没跟上」；那种时候给界面一条空文本结果是自造故障。
+    const fused = fuseByRrf('订单', [lexicalHit('e-a', 0.9)], [vectorHit('e-gone', 0.99)], new Map(), {
+      rrfK: PARAMS.rrfK,
+      topK: 10,
+    });
+    expect(fused.map((hit) => hit.chunkId)).toEqual(['e-a']);
+  });
+
+  it('rrfK 真的进了算式：k=1 时词面第一名压过双第二，k=60 时反过来', () => {
+    // a = 词面第 1 + 向量第 4；b = 词面第 2 + 向量第 2（两边都靠前的那条另说，这里要判的是阻尼）。
+    // k=1：a = 1/2 + 1/5 = 0.700 > b = 2/3 ≈ 0.667；k=60：a = 1/61 + 1/64 ≈ 0.03202 < b = 2/62 ≈ 0.03226。
+    // 头部名次「值多少」完全由这个常数决定，所以两侧各跑一次就能证明它是配置项而不是装饰。
+    const a = lexicalHit('a-solo-top', 0.9);
+    const b = lexicalHit('b-mid-both', 0.5);
+    const views = new Map<string, KbSearchCandidate>([
+      ['v-head', candidate('v-head', '负责库存服务')],
+      ['v-tail', candidate('v-tail', '参与开源社区维护')],
+    ]);
+    const vectors = [
+      vectorHit('v-head', 0.99),
+      vectorHit('b-mid-both', 0.9),
+      vectorHit('v-tail', 0.8),
+      vectorHit('a-solo-top', 0.7),
+    ];
+    const dampened = { topK: 10 };
+    expect(fuseByRrf('订单', [a, b], vectors, views, { ...dampened, rrfK: 1 }).map((hit) => hit.chunkId)).toEqual([
+      'a-solo-top',
+      'b-mid-both',
+      'v-head',
+      'v-tail',
+    ]);
+    expect(fuseByRrf('订单', [a, b], vectors, views, { ...dampened, rrfK: 60 }).map((hit) => hit.chunkId)).toEqual([
+      'b-mid-both',
+      'a-solo-top',
+      'v-head',
+      'v-tail',
+    ]);
+  });
+
+  it('融合总分同分时按 chunkId 升序，且 topK 截断发生在融合之后', () => {
+    // 两条都只在自己的那条腿里排第一：`1/(k+1)` 完全相同，于是次序只能由 chunkId 决定。
+    const lexical = [lexicalHit('z-lexical', 0.9)];
+    const vectors = [vectorHit('a-vector', 0.9)];
+    const views = new Map<string, KbSearchCandidate>([['a-vector', candidate('a-vector', '组织校内算法竞赛')]]);
+    expect(fuseByRrf('订单', lexical, vectors, views, { rrfK: PARAMS.rrfK, topK: 10 })).toHaveLength(2);
+    // 截断留下的是融合后的头部而不是先来那条腿的头名：`topK: 1` 时活下来的是 id 更小的 `a-vector`。
+    expect(
+      fuseByRrf('订单', lexical, vectors, views, { rrfK: PARAMS.rrfK, topK: 1 }).map((hit) => hit.chunkId),
+    ).toEqual(['a-vector']);
+    expect(fuseByRrf('订单', lexical, vectors, views, { rrfK: PARAMS.rrfK, topK: 0 })).toEqual([]);
   });
 });
