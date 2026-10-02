@@ -1,7 +1,8 @@
 /**
  * 三态比对与反向比对的离线用例（spec 4.4-03 / 4.4-04 / 4.4-06 / 4.4-07 的比对层半边）。
  *
- * 这里断言的是**判据**，所以全部打在纯函数上（不起 store、不碰 cordis）：
+ * 这里断言的是**判据**，所以全部打在纯函数上（不起 store、不挂载插件；只有出厂阈值经
+ * `kbGapSchema` 现读，以免这份用例跑在一把已经没人用的尺子上）：
  * 1. 四类要求不共用一把尺子（plan §4.4-c 判据一）——年限的判据是算术，词面尺子在它上面必然给假读数；
  * 2. 「今天」是入参（判据二的前半）——同一份输入换 `nowMonth` 就该换结论，函数内部读时钟做不到这条；
  * 3. 反向比对的两道闸（判据二的后半）——只判「JD 没提」会把驾照推成亮点，那会让整份报告失去可信度；
@@ -20,19 +21,25 @@ import {
   type GapLibraryEntity,
 } from './requirements-compare.js';
 import type { KbEntityKind } from './entities.js';
+import { kbGapSchema } from './gap-service.js';
 import type { RequirementItem, RequirementKind } from './requirements.js';
 
 /** 「今天」= 2026 年 10 月的绝对月序号（`年 × 12 + 月`，与 `monthSpanOf` 同尺度）。 */
 const NOW_MONTH = 2026 * 12 + 10;
 
-/** 与 `cordis.yml` 的 `kb-gap` 段同源的默认阈值（改动要两边一起看；阈值本身未标定，见 plan §4.4-e）。 */
+/**
+ * 与出厂配置同源的默认阈值：从 `kbGapSchema` 的 `.default()` 现读，不在这里抄第二份数字。
+ * 4.4-e 标定后这三条文本阈值是量出来的（`gap-calibration.test.ts` 锁"标定值 = 出厂值"）；
+ * 抄一份写死的旧阈值，这份用例就会永远跑在一把没人用的尺子上。
+ */
+const SHIPPED_GAP_CONFIG = kbGapSchema.parse({});
 const BASE_OPTIONS: GapCompareOptions = {
-  evidenceTopK: 3,
-  hitMinScore: 0.62,
-  partialMinScore: 0.3,
-  yearsPartialRatio: 0.6,
-  highlightMinScore: 0.12,
-  maxHighlights: 6,
+  evidenceTopK: SHIPPED_GAP_CONFIG.evidenceTopK,
+  hitMinScore: SHIPPED_GAP_CONFIG.evidenceHitMinScore,
+  partialMinScore: SHIPPED_GAP_CONFIG.evidencePartialMinScore,
+  yearsPartialRatio: SHIPPED_GAP_CONFIG.yearsPartialRatio,
+  highlightMinScore: SHIPPED_GAP_CONFIG.highlightMinScore,
+  maxHighlights: SHIPPED_GAP_CONFIG.maxHighlights,
   nowMonth: NOW_MONTH,
 };
 

@@ -41,7 +41,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { KbGapService, type KbGapConfig, type GapReportView } from './gap-service.js';
+import { KbGapService, kbGapSchema, type KbGapConfig, type GapReportView } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
 import { KbProfileService, kbProfileSchema } from './profile-service.js';
 import { parseResumeText } from './sections.js';
@@ -62,20 +62,12 @@ const LONG_TAIL_QUOTE = '负责订单与推荐链路的后端服务';
 /** 一条会被采信的模型回复（契约见 `requirements-model.ts`）。 */
 const GOOD_REPLY = `{"items":[{"kind":"hard_skill","label":"订单链路","quote":"${LONG_TAIL_QUOTE}"}]}`;
 
-/** 装配用的默认配置（与 `cordis.yml` 的 `kb-gap` 段同源，改动要两边一起看）。 */
-const DEFAULT_CONFIG: KbGapConfig = {
-  perKindLimit: 12,
-  minJdChars: 20,
-  allowModelLeg: true,
-  modelMaxTokens: 1200,
-  modelTemperature: 0,
-  evidenceTopK: 3,
-  evidenceHitMinScore: 0.62,
-  evidencePartialMinScore: 0.3,
-  yearsPartialRatio: 0.6,
-  highlightMinScore: 0.12,
-  maxHighlights: 6,
-};
+/**
+ * 装配用的默认配置：直接取 `kbGapSchema` 的 `.default()`，不在测试里手抄一遍数字。
+ * 4.4-e 之后这三条文本阈值是**标定值**（`gap-calibration.test.ts` 锁"标定值 = 出厂值"），
+ * 手抄一份等于让测试跑在一把没人用的尺子上——改数不重跑标定要在这里发红，而不是继续绿。
+ */
+const DEFAULT_CONFIG: KbGapConfig = kbGapSchema.parse({});
 
 /** 替身的可调项（走 `static Config`，与真 `llm.chat` 同一条 cordis 传参路径，见 §9 实测 1.3）。 */
 const fakeChatSchema = z.strictObject({

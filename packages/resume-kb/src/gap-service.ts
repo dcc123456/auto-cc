@@ -81,44 +81,69 @@ export type GapModelStatus = (typeof GAP_MODEL_STATUSES)[number];
  * 每类上限放配置而不是写死（同 4.3-03「代码内无魔法数」）：4.4-05 的分栏界面一栏放十几条就要滚动，
  * 而不同岗位的 JD 写法差异很大（有的列 30 个技术名词），这个数应该按岗位类型调而不是发版。
  */
-export const kbGapSchema = z.strictObject({
-  /** 每一类最多保留几条要求（超出按稳定序列头部截断，丢弃条数如实报出）。 */
-  perKindLimit: z.number().int().min(1).max(50).default(12),
-  /**
-   * JD 正文的下限（字符）。短到这个数基本是粘贴错了对话框或详情页没加载完，
-   * 拆出来的「要求」没有依据；判成错误比给一份空报告诚实（spec 4.4-01 的入参校验）。
-   */
-  minJdChars: z.number().int().min(1).max(2000).default(20),
-  /**
-   * 是否允许问模型腿。关掉后本服务退回纯词面拆解（4.4-02 的「没有模型也能用」在运行期也要成立，
-   * 而不是只靠摘插件——离线演示、省额度、以及 4.4-e 的额度闸门都直接把这个开关递给用户）。
-   */
-  allowModelLeg: z.boolean().default(true),
-  /** 模型腿单次回复的长度上限（token）。四类型别 + 每类上限的清单远小于对话全文，1200 足够且防跑飞。 */
-  modelMaxTokens: z.number().int().min(128).max(4096).default(1200),
-  /**
-   * 模型腿的采样温度。与话术生成的 0.7 相反，这里取 0：拆解是**读数**不是创作，
-   * 同一个 JD 两次拆出不同的清单会让 4.4-07 的稳定性验收无从谈起。
-   */
-  modelTemperature: z.number().min(0).max(2).default(0),
+export const kbGapSchema = z
+  .strictObject({
+    /** 每一类最多保留几条要求（超出按稳定序列头部截断，丢弃条数如实报出）。 */
+    perKindLimit: z.number().int().min(1).max(50).default(12),
+    /**
+     * JD 正文的下限（字符）。短到这个数基本是粘贴错了对话框或详情页没加载完，
+     * 拆出来的「要求」没有依据；判成错误比给一份空报告诚实（spec 4.4-01 的入参校验）。
+     */
+    minJdChars: z.number().int().min(1).max(2000).default(20),
+    /**
+     * 是否允许问模型腿。关掉后本服务退回纯词面拆解（4.4-02 的「没有模型也能用」在运行期也要成立，
+     * 而不是只靠摘插件——离线演示、省额度、以及 4.4-e 的额度闸门都直接把这个开关递给用户）。
+     */
+    allowModelLeg: z.boolean().default(true),
+    /** 模型腿单次回复的长度上限（token）。四类型别 + 每类上限的清单远小于对话全文，1200 足够且防跑飞。 */
+    modelMaxTokens: z.number().int().min(128).max(4096).default(1200),
+    /**
+     * 模型腿的采样温度。与话术生成的 0.7 相反，这里取 0：拆解是**读数**不是创作，
+     * 同一个 JD 两次拆出不同的清单会让 4.4-07 的稳定性验收无从谈起。
+     */
+    modelTemperature: z.number().min(0).max(2).default(0),
 
-  // ---- 以下六项属比对腿（spec 4.4-03 / 04 / 06，plan §4.4-c 判据一 / 二）----
-  // 阈值全是拍的，与 4.2-b 的 `evidenceMinScore` 同一诚实口径：标定要等真评测集（4.4-e），
-  // 现在它们的作用只是"弱据不进证据链"，不是"已调优"。放配置而不是写进代码，是为了标定时的动作
-  // 只剩改 `cordis.yml`（同 4.3-03「代码内无魔法数」）。
-  /** 每条要求最多挂几条证据（界面分栏一屏装得下的量）。 */
-  evidenceTopK: z.number().int().min(1).max(10).default(3),
-  /** ≥ 此强度算「命中」。 */
-  evidenceHitMinScore: z.number().min(0).max(1).default(0.62),
-  /** ≥ 此强度算「部分命中」，低于它算「缺失」。 */
-  evidencePartialMinScore: z.number().min(0).max(1).default(0.3),
-  /** 库内总年限 ≥ 要求 × 此比例算部分命中（年限是算术判断，与文本阈值无关）。 */
-  yearsPartialRatio: z.number().min(0).max(1).default(0.6),
-  /** 亮点候选与 JD 全文的最低覆盖率——只判「JD 没提」会把驾照、六级当亮点推给用户。 */
-  highlightMinScore: z.number().min(0).max(1).default(0.12),
-  /** 亮点候选最多几条（超出按强度截断，丢弃数随结果报出）。 */
-  maxHighlights: z.number().int().min(0).max(20).default(6),
-});
+    // ---- 以下六项属比对腿（spec 4.4-03 / 04 / 06，plan §4.4-c 判据一 / 二）----
+    // 其中三条（`evidenceHitMinScore` / `evidencePartialMinScore` / `highlightMinScore`）是**测量型**：
+    // 它们是这把 token 尺子的刻度，4.4-e 已按人判标注集标定（语料 `gap-calibration-corpus.ts`、
+    // 选值 `gap-calibration.ts`、回归锁 `gap-calibration.test.ts`、读数
+    // `docs/acceptance/4.4/4.4-e-threshold-calibration.txt`）。改这三个数必须重跑 `pnpm calibrate`，
+    // 否则那条"选值 = 出厂值"的回归锁会直接发红。
+    // 另两条（`yearsPartialRatio` / `maxHighlights`）是**口径型**：一个问"干满几成算部分够"，
+    // 一个是界面一栏放几条，都不进标定——给产品决策套上数据的外衣比拍初值更不诚实（plan §4.4-e 判据三）。
+    /** 每条要求最多挂几条证据（界面分栏一屏装得下的量）。 */
+    evidenceTopK: z.number().int().min(1).max(10).default(3),
+    /**
+     * ≥ 此强度算「命中」。标定值 0.58 取自 (0.5, 0.6667] 这条空带的中间：0.5 那一档是部分命中
+     * （压测脚本 ≠ 高并发设计），0.6667 是「项目管理」被写全的那条命中读数——两侧各留 0.08 余量，
+     * 而不是贴着某条样本（plan §4.4-e 判据三）。
+     */
+    evidenceHitMinScore: z.number().min(0).max(1).default(0.58),
+    /**
+     * ≥ 此强度算「部分命中」，低于它算「缺失」。标定值 0.33 落在标注尺子的最小刻度上：
+     * `coverageOf` 给的是 1/n 的离散读数，0.25（四条 token 里对上三条）是"词面巧合"的量级，
+     * 必须留在缺失侧。已知代价：0.3333 这一档同时装着人判「部分命中」与「缺失」各一条
+     * （T15 / T24），任何阈值都分不开——报告里那条翻脸记录是**标注与刻度的冲突**，不是选值失误。
+     */
+    evidencePartialMinScore: z.number().min(0).max(1).default(0.33),
+    /** 库内总年限 ≥ 要求 × 此比例算部分命中（年限是算术判断，与文本阈值无关）。 */
+    yearsPartialRatio: z.number().min(0).max(1).default(0.6),
+    /**
+     * 亮点候选与 JD 全文的最低覆盖率——只判「JD 没提」会把驾照、六级当亮点推给用户。
+     * 标定值 0.11 是可行带上**唯一**的网格点（不相关侧最高 0.1，相关侧最低 0.1111），
+     * 所以它的可信度低于上面两条：这一条线只能保证"明写了岗位技术的实体不被漏"，
+     * 拦不住词面巧合（H12），界面因此把它叫"候选"而不是"亮点结论"。
+     */
+    highlightMinScore: z.number().min(0).max(1).default(0.11),
+    /** 亮点候选最多几条（超出按强度截断，丢弃数随结果报出）。 */
+    maxHighlights: z.number().int().min(0).max(20).default(6),
+  })
+  // 两条文本阈值必须有序，写反等于造一把"任何命中都先被判成缺失"的尺子。配置是用户可编辑的
+  // 系统边界，所以在挂载前拒掉而不是在比对里兜底（§2.6，与 `outbound.throttle` 的 `min ≤ max` 同形）。
+  .refine((config) => config.evidencePartialMinScore <= config.evidenceHitMinScore, {
+    message: 'evidencePartialMinScore 不能大于 evidenceHitMinScore',
+    path: ['evidenceHitMinScore'],
+  });
 
 /**
  * 校验后的配置形状。

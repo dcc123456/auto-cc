@@ -629,7 +629,7 @@
     },
     "gap": {
       "heading": "Job gap report",
-      "hint": "Compares a pasted JD against your local knowledge base right now. The three columns are states — matched, partially matched, missing — and rows inside a column keep the extraction order; the panel never re-sorts. Counts, scores and states all come from the main process. When the model leg is unavailable the report falls back to the lexical baseline and is simply shorter. Thresholds are not calibrated yet and live in the kb-gap section of cordis.yml.",
+      "hint": "Compares a pasted JD against your local knowledge base right now. The three columns are states — matched, partially matched, missing — and rows inside a column keep the extraction order; the panel never re-sorts. Counts, scores and states all come from the main process. When the model leg is unavailable the report falls back to the lexical baseline and is simply shorter. The three text thresholds were calibrated on 42 locally annotated samples (2026-10-02); the years ratio and the highlight cap are product decisions, and every value still lives in the kb-gap section of cordis.yml. The lexical ruler only sees literal overlap, so a differently worded but equivalent claim can read as missing.",
       "jdPlaceholder": "Paste the JD body (the full description — a job title alone yields no requirements)",
       "analyze": "Compare gaps",
       "evidence": "Evidence",
