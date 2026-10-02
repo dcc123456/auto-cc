@@ -1,5 +1,5 @@
 /**
- * `agent.loop` 与 `agent.policy` 的行为测试（spec 5.2-01 / 02 / 05 / 08 / 11，另带 09 / 10 的代码半边）。
+ * `agent.loop` 与 `agent.policy` 的行为测试（spec 5.2-01 / 02 / 05 / 08 / 11，另带 09 / 10 的代码半边与 13 的反向半边）。
  *
  * 与 `agent.test.ts` 同一口径：**这里不测界面**。5.2 的可视判据（计划卡、逐步卡片流、中途叫停、
  * 执行中输入不冻结）由 CDP harness 驱动真实窗口验收（AGENTS.md §7.1，落在 5.2-c）。
@@ -10,7 +10,7 @@
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { asApp, Context, toolResult, type AgentRunView, type AutonomyLevel } from '@auto-cc/core';
+import { asApp, Context, sleep, toolResult, type AgentRunView, type AutonomyLevel } from '@auto-cc/core';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -762,6 +762,64 @@ describe('模型话术改变不了判定（5.2-07）', () => {
       const proposed = await rig.loop.propose('demo.greet {"to":"boss/123"}');
       const finished = await rig.loop.confirm(proposed.runId);
       expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'TOOL_UNAVAILABLE' });
+      expect(rig.calls).toEqual([]);
+    } finally {
+      recording.restore();
+    }
+  });
+});
+
+describe('摘掉工具面之后的反向验证（5.2-13）', () => {
+  // 这一节是 plan §7.2 里 §6.5 要求的那条反向条目：「工具面即能力面」只在能力缺席时才验得出来。
+  // 台架里把手摘掉用的是注册表自己的 `unregister`（能力包销毁时走的就是同一条清理口，
+  // 见 core 的 `registerAgentTools` 挂的 effect），不是给测试开的后门；活体那半边经 `plugins.stop` 演。
+  it('同一段点名文本：表里有手就起草出两步，把手摘掉就一步也没有、且不自称完成', async () => {
+    const { loop, tools, calls, store } = await bootLoop();
+    const withTool = await loop.propose(goalNaming(2));
+    expect(withTool.plan).toHaveLength(2);
+
+    expect(tools.unregister('demo.tick')).toBe(true);
+    expect(tools.list()).toEqual([]);
+    const withoutTool = await loop.propose(goalNaming(2));
+    // 起草这一步就空了：桩不猜意图，表上没登记的手它变不出来（与 5.1-05 同一口径）。
+    expect(withoutTool.plan).toEqual([]);
+    const finished = await loop.confirm(withoutTool.runId);
+    // 「一步都没跑」不许写成 `completed`：那正是本条要防的谎报形态。
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'PLAN_EMPTY', planStepIndex: 0 });
+    expect(stepRecords(store, withoutTool.runId)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it('注册表为空不波及纯对话：普通消息照常出文本回复，回复里一条工具段也没有', async () => {
+    const { chat, tools } = await bootLoop();
+    tools.unregister('demo.tick');
+    chat.send('帮我按这个 JD 优化简历');
+    await sleep(120);
+    const last = chat.current().messages.at(-1);
+    expect(last?.isStreaming).toBe(false);
+    expect(last?.parts).toHaveLength(1);
+    const firstPart = last?.parts[0];
+    expect(firstPart?.kind).toBe('text');
+    expect(firstPart?.kind === 'text' ? firstPart.text : '').toContain('已收到');
+  });
+
+  it('表空着而模型硬要动手：每一步都拒在 TOOL_UNAVAILABLE，零副作用、run 记 failed', async () => {
+    const rig = await bootLoop();
+    rig.tools.unregister('demo.tick');
+    // 起草请求里 `knownToolIds` 此时是空清单，但草案内容由模型侧给——这一条判的是「循环不许因为它自己想了个 id 就放过」。
+    const insisting = (): PlanStepDraft[] => [
+      { toolId: 'outbound.greet.perform', input: { to: 'boss/123' }, intent: AUTHORITY_CLAIM },
+      { toolId: 'outbound.deliver.perform', input: {}, intent: AUTHORITY_CLAIM },
+    ];
+    const recording = recordModel(insisting);
+    try {
+      const proposed = await rig.loop.propose('帮我把简历投出去');
+      expect(proposed.plan).toHaveLength(2);
+      // 副作用级是 null：注册表没有这只手，计划卡上就不许出现一个看起来像承诺的等级。
+      expect(proposed.plan.every((step) => step.effect === null)).toBe(true);
+      const finished = await rig.loop.confirm(proposed.runId);
+      expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'TOOL_UNAVAILABLE' });
+      expect(finished).toMatchObject({ status: 'failed', stopReason: 'POLICY_REFUSED' });
       expect(rig.calls).toEqual([]);
     } finally {
       recording.restore();
