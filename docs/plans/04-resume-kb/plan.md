@@ -1412,21 +1412,27 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
 - 本项目有两个更强的现成落点：`Field.locked` + `factKeyOf`（`resume-doc/src/model.ts:152`，四类
   `company|role|period|achievement`）把"哪些字段承载事实"写进数据；`documentSchema` 是 `z.strictObject`
   （`schema.ts:61`），**多一个键即非法**。由此 4.5 的改写面不是一段 prompt，而是一个可判的集合：
-  - **可改写面 = 只有 `key === 'text'` 的字段**（当前字段词表全量：`company / role / period / achievement /
-school / degree / major / text`，见 `resume-kb/src/sections.ts:203-242` 与
-    `resume-doc/src/export-service.ts:119-159`；`text` 装的是 summary / skills / 区块正文这类散文）。
-  - `achievement` 在模型里是 **locked** 事实，所以「主导订单服务重构，P99 延迟下降 40%」这类句子
-    **整句原样引用**——4.5-08 的数字守恒在这一类上由"根本不许动"天然成立，不需要再写一条数字比对。
-  - 反向的残余风险在 `text` 里：模型可能把「提升 20%」润色成「大幅提升」，也可能反过来无中生有一个数字。
-    所以 4.5-08 要检的是**非锁定文本的数字多重集守恒**（原文每个数字都还在、且不出现新数字），
-    只检 `text`，不检 locked 字段（那些已由全等拦掉）。
-  - `school / degree / major` 当前**不在** locked 表里，只判 `locked` 会放过一个被改掉的学校名。
-    4.5-03 要的"学历、证书号原样引用"由此得解：**生成校验比模型锁更严**，用"可改写键白名单"表达，
-    而**不是**给 3.1 的 `FactKey` 加两个枚举——加枚举会连带 `documentSchema`、`contentHash`/快照、模板、
-    diff 全动，而 3.1-03 的判据写死是四类事实；为一个当前没有消费者的语义去改模型，
-    与 4.1-08 头像那条是同一条论证（不给不存在的消费者做建模）。
+  - **可改写面 = 散文键 `{text, achievement, description}`**（2026-10-02 裁定 A 的口径，本节此前写的是
+    "只有 `key === 'text'`"，已被推翻并就地更正——留旧文不改会让后来者按不存在的白名单读代码）。
+    当前字段词表全量是 `company / role / period / achievement / school / degree / major / text`
+    （见 `resume-kb/src/sections.ts:203-242` 与 `resume-doc/src/export-service.ts:119-159`；`text` 装的是
+    summary / skills / 区块正文这类散文，`description` 是解析层给经历正文用的键）。
+  - **为什么不把 `achievement` 排除掉**：它是 3.1 的 locked 事实，按旧口径"整句原样引用"看似最严，实际把
+    4.5-02 / 4.5 的全部价值拦在门外——会被 JD 重排与润色的句子恰恰是「主导订单服务重构，P99 延迟下降 40%」
+    这一类。改成"允许改写、但受两条确定性判据约束"：**数字多重集守恒**（那个 40 必须还在，既不许润色成
+    「大幅」也不许凭空多出一个 12）+ **具名机构词面回查**（不许出现库里没有的组织名）。
+  - **`company / role / period / school / degree / major` 一律原样引用**：前三个由 locked 全等拦，
+    后三个不在 locked 表里，靠"可改写键白名单"反向拦。不给 3.1 的 `FactKey` 加枚举这条不变——加枚举会连带
+    `documentSchema`、`contentHash`/快照、模板、diff 全动，而 3.1-03 的判据写死是四类事实；为当前没有消费者的
+    语义去改模型，与 4.1-08 头像那条是同一条论证（不给不存在的消费者做建模）。
+  - 4.5-08 因此检的是**白名单内文本的数字多重集守恒**（原文每个数字都还在、且不出现新数字），
+    技能行不进**提议面**（不给模型改 skill 行的通道）但仍在**校验面**里：产物与基线整份比，
+    谁动了没被提议的键都会撞上 `editable-allowlist`。
+  - 「主导 → 参与」这类不带数字的弱化，确定性判据抓不到（词面与数值都守恒）。这是裁定 A 明确接受的残余，
+    兜底面是 4.5-11 的逐项人工接受——界面必须把原文与改写文并排给出，人才判得动这一类。
   - 落地形状：`checkFactLock(original, proposed, editableKeys?)` 加**一个可选参数**，缺省行为与现在逐字相同
-    （既有 3.1 用例一条不动），`fact.check` 传 `['text']`。一处实现，两个口径，不留第二份比对。
+    （既有 3.1 用例一条不动），`fact.check` 传 `['text', 'achievement', 'description']`。一处实现，两个口径，
+    不留第二份比对。
 
 **取证四：模型腿不需要新接口，状态与取用方式都是现成的**
 
@@ -1505,8 +1511,10 @@ school / degree / major / text`，见 `resume-kb/src/sections.ts:203-242` 与
 
 **判据六：4.5-07 的强保证在结构面，不在比对面**
 
-- 模型腿的输出形状是**逐条目的散文改写**（`{ entries: [{ entryId, text }] }`），它没有"新增条目 / 新增区块 /
-  改字段键"的通道。库外公司名、编造的一段经历在数据结构上**表达不出来**——比"表达得出来再被比对抓住"强一档，
+- 模型腿的输出形状是**逐条目的散文改写**（落地为 `{ entries: [{ sectionId, entryId, fieldKey, text }] }`，
+  比原设想多带 `sectionId / fieldKey`：一个可改写字段要三键才定位得了，而 `applyRewrites` 与
+  `checkFactLock` 都是按这三键对齐的——少一个就得在服务里再查一遍文档结构才能装回去），
+  它没有"新增条目 / 新增区块 / 改字段键"的通道。库外公司名、编造的一段经历在数据结构上**表达不出来**——比"表达得出来再被比对抓住"强一档，
   也与 §2.6"不为不会发生的情况写异常处理"对称：不会发生的违规不需要检查，需要检查的是能发生的违规。
   4.5-07 的用例因此是：给模型一个塞了库外公司的回答 → 整条被判契约不合格丢弃 → 文档与产物里都不出现该名字。
 - 残余风险在 `text` 内部：被拒的只是形状，模型仍可在合法散文里写一个库外公司。对此做一条**诚实的启发式**：
@@ -1541,6 +1549,31 @@ school / degree / major / text`，见 `resume-kb/src/sections.ts:203-242` 与
 - **给 4.5-b 的硬约束**：`fact-check.ts` 现在包外无消费者（未从 `index.ts` 导出）。§4.4 禁孤儿文件——
   4.5-b 若不接 `resume.generate`，这个文件与 18 例必须删除，不许以"以后会用"长期挂着。
   判据二的 `{ document, evidence, checks, receipt }` 返回体与号段 15 一片未动，仍在 4.5-b。
+
+**4.5-b 已落地（2026-10-02，代码与接线半边；V 半边在 4.5-c）**，判据二～七的兑现与三处计划外偏离：
+
+- 判据二（返回体四件套）与号段 15 落进 `resume-kb/src/generate-service.ts`；判据三（不写工作副本）由
+  `packages/main/src/generate-link.test.ts` 用**真库按字节**判：`SELECT updated_at, doc_json` 跑前跑后相等，
+  配一条正向对照（同一份装配里 `resume_generations` 确实多出一行），否则"没变"可能只是"没跑"。
+- 判据四（一次都不问模型的通道）比原计划多做了一层：`targets.length === 0` 时**连提示词都不拼**——
+  没有内容可改写还要把整份简历发出去，是纯粹的泄露面而不是成本问题。这一支同时是 4.5-09 的保守版路径。
+- 判据五（不接闸门）在装配面上结构性成立：那份真装配用例里**根本没有** `entitlement.*` / `usage.*` 服务，
+  生成照样跑完。与 4.4-e1 判据三同一手法，不需要额外写一条"我没调用它"的注释型断言。
+- 判据七（哨兵）扩到**四条出口**：提示词、返回体、日志文件、生成记录表。前两条在包内用例，后两条只在
+  真 store + 真 LogService 的装配里判得准。
+- **偏离一（两侧入口的返回体故意不对称）**：IPC 面（`shared` 镜像 `GenerationRunRowView`）**不带** `document`，
+  agent 工具面带。理由是 `shared` 在 L1、不许依赖 L2 的 `resume-doc`，镜像 P3.1 文档模型就是造第二个真相源
+  （§2.5），而"有没有产物"由 `receipt.outcome` 判——它与 `document` 出自服务里同一句三元表达式；
+  对话入口要把产物交给导出工具（4.5-d），那边需要完整返回体。
+- **偏离二（生成记录表多了两列）**：计划里的复盘面只有 prompt 版本 / 模型 / JD id / 时间，实现补了
+  `model_status` 与 `retried`。前者是 4.5-09 的播报根据（"为什么没用上模型"要能事后回答），
+  后者是 4.5-05 的闸门痕迹（重试过但仍不过才叫拒绝产出）。
+- **偏离三（机检口径补正）**：假 `llm.chat` 从 `gap-service.test.ts` 搬进 `test-doubles.ts`（第二个消费者
+  出现，§2.2），`scripts/check-llm-single-entry.ts` 的"测试替身不计入声明者"从按 `.test.ts` 后缀判定改为
+  与 `check-compliance-redlines.ts:101` 同一条口径（`.test/.spec.ts` 或 `test-doubles.ts`）。
+  端点痕迹那一断言不豁免，所以放宽的只是"声明者计数"，不是"能不能碰模型"。
+- **本片没消费者的一行**：`GenerationView.document` 在界面侧暂时无人渲染（4.5-c 的预览面板是它的第一个
+  消费者）。同 4.5-a 那条 §4.4 禁孤儿文件的账，4.5-c 若不做，两侧镜像里只为 `document` 存在的形状要一并删。
 
 **4.5 不做的事**：不做 DOCX/PDF 回写（产物交 3.3 的既有管线）、不做多候选版本 A/B 对比、
 不做"生成质量打分"这类无据衍生功能（plan §6）、不给 `FactKey` 加枚举、不建 prompt 注册表框架、

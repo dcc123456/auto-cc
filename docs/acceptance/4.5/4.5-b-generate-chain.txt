@@ -1,0 +1,117 @@
+4.5-b 定向内容生成（生成轨 + 强制事实校验闭环 + 双入口 + 生成记录表）——代码与接线半边的实测记录
+执行时间：2026-10-02 15:25～15:40（本机 Windows，Git Bash）
+子计划：docs/plans/04-resume-kb/plan.md §4.5 ／ 验收表：docs/specs/04-resume-kb/spec.md §4.5
+
+================================================================================
+0. 本片范围（plan 切片表 4.5-b 那一行原文）
+================================================================================
+`resume.generate` service：确定性重排 + 模型腿改写 + 重试一次 + 拒绝产出 + 生成记录表（号段 15）
++ agent 工具 + IPC 白名单。
+零界面改动（预览与逐项接受在 4.5-c）、零真模型调用（模型腿一律用替身或根本不装配 `llm.chat`）、
+零出网、零新依赖。工作副本只读：本服务没有任何 `save()` 路径。
+
+================================================================================
+1. 四道门禁（逐条实跑，命令与结论照抄）
+================================================================================
+$ pnpm typecheck
+  → 24 个包全部 `typecheck: Done`，EXIT=0。
+  首跑红两处，都是"把 unknown 当已知用"，按显式收束修掉而不是 `as any`：
+    packages/resume-kb/src/generate-service.test.ts(693,27): 'viaTool' is of type 'unknown'
+      → 工具面返回体显式收束成 `GenerationView`（`agent.tools` 的 `run()` 不知道各只工具产什么形状，
+        `packages/agent/src/tools.ts:128` 原样透出；不收束则三行属性访问各自判不出漏字段）。
+    packages/main/src/generate-link.test.ts(103,71): Property 'document' does not exist on 'ParseTextResult'
+      → `parseResumeText` 是可判别联合（4.1-05：拒绝就不给半份文档），先判 `status !== 'ok'` 当场抛错。
+
+$ pnpm lint
+  → eslint 通过 + 五条规范脚本全绿（渲染层规范 / 站点知识包 / LLM 入口唯一性 / 合规红线 / 离线依赖门槛）。
+  首跑红两处：
+    generate-service.test.ts:248 `no-unnecessary-type-assertion`（`.all()` 已是
+      `Record<string, unknown>[]`，多余的双层断言删掉）。
+    check-llm-single-entry.ts 报「provider 名 llm.chat 的声明者应为 1 个，实际 2 个」
+      → 假 `llm.chat` 因第二个消费者出现，从 `gap-service.test.ts` 搬进 `test-doubles.ts`（§2.2），
+        而该脚本的"测试替身不计入声明者"只认 `.test.ts` 后缀。修法是把它对齐到
+        `scripts/check-compliance-redlines.ts:101` 已有的同一条判定（`.test/.spec.ts` 或 `test-doubles.ts`）；
+        **端点痕迹那一断言不豁免**，所以放宽的只是声明者计数，不是"测试能不能碰模型端点"（§2.5 一处口径）。
+
+$ pnpm format:check
+  → 首跑红 4 个文件（generate-link.test.ts / generate-service.ts / generate-service.test.ts / test-doubles.ts
+    未按 prettier 对齐），`npx prettier --write` 后复跑：`All matched files use Prettier code style!`
+  → 文档补写后复跑仍通过。
+
+$ pnpm test
+  → EXIT=0，全仓 **1306 例全绿**（按包求和：testing 32 / core 24 / config 17 / devtools 3 / ipc 14 /
+    llm 30 / kernel 23 / shell 8 / logger 13 / store 21 / entitlement 12 / resume-doc 106 / plugins 5 /
+    sessions 15 / agent 24 / workflow 99 / browser 235 / outbound 94 / resume-kb 390 /
+    platform-boss 130 / main 11）。
+  本片新增 / 扩充 49 例：generate-service.test.ts 25（新建）、generate-model.test.ts 15（新建，前半片已入库）、
+  fact-check.test.ts +4（18 → 22，判 achievement 可改写后仍受数值与具名两条约束）、
+  generate-reorder.test.ts +1（10 → 11，4.5-06 的证据反查半边）、generate-link.test.ts 4（新建，真装配）。
+  上次记录的总数 1246 是 4.5-a 收口时测的；其间未重记总数，故此处只报实测值，不硬凑差额。
+
+================================================================================
+2. 逐条对应到验收 ID（勾上的六行各是哪条用例）
+================================================================================
+4.5-03 单测：被改写即被 fact.check 拒绝
+  - fact-check.test.ts「结构化事实键仍旧整句锁死：role / period 改一个字即违规」
+  - fact-check.test.ts「学历区块的学校名被改 → 拦住，且标成白名单口径（模型里它不标锁）」
+  - fact-check.test.ts「公司名换成两字之差的另一家 → 必须拦住（源实现容差 3 会放行，取证一）」
+  - generate-service.test.ts「编出清单外的机构名：具名回查拦下，违规明细里只有 unknown-entity 而没有数值读数」
+4.5-04 代码走查 + 单测覆盖篡改类型
+  - `verifyGeneration()` 签名里没有 ctx、不发请求、不写库（`fact-check.ts:403`）；三条判据 =
+    字段全等（含可改写白名单）+ 数字多重集守恒 + 具名机构词面回查。
+  - fact-check.test.ts「多重集比对能抓到"少一个数"和"多一个数"两个方向」
+    「阿拉伯数字带量级、千分位、小数都按数值读，百分号不进比对」
+    「中文数词只在紧跟量词时算一个数，副词强度读法不误报」
+4.5-07 构造诱导 → 输出不含库外实体
+  - 强保证在结构面：generate-model.test.ts「多写一个键即非法：新增字段 / 新增条目在契约上表达不出来」
+    +「位置不在清单里（模型自己拼的 id）整条丢弃并计数」。
+  - 启发式补刀：fact-check.test.ts「库里没有的组织名被拦下」「库里没有、JD 里也没有的学校名被拦下」
+    「JD 原文里出现过的公司名不算虚构」「指代词读法（本公司 / 该社区）不是具名实体，不产生违规」。
+  - 漏判面如实保留（无后缀裸公司名、人名、地名不拦），见 spec 4.5-a/4.5-b 记录。
+4.5-08 数字比对单测
+  - fact-check.test.ts「achievement 里把 40% 改成 60% → 由数值守恒拦下（4.5-08 的真实射程）」
+  - generate-service.test.ts「第一轮动数值、第二轮改回来：恰好两次请求，第二轮的提示词里带着上一轮的违规行而不带原文」
+4.5-10 查库断言字段
+  - generate-service.test.ts「每次生成落一行：归因、腿状态、结局与证据 id 都在，且没有正文字段」
+    「挂载即建表，迁移号段为 15 且不与前十四张表撞号」「结局枚举与库里的 CHECK 同源」
+  - generate-link.test.ts（真 store）第 1 例：`doc_id / jd_id / prompt_version=null / model=null /
+    model_status='unavailable' / status='reorder_only' / retried=0`，`evidence_json` 长度与返回体证据行数相等。
+4.5-14 断言脱敏（对齐 4.1-09）
+  - generate-service.test.ts「四条通道的哨兵各自被植入、各自被挡在生成轨之外」：
+    通道 1 提示词、通道 2 返回体、通道 3 日志文件、通道 4 生成记录表，各自带正向对照（哨兵确实被植入）。
+  - 断言取的是文档里**实际掩码后的串**而不是写死的掩码字面量：`stripMarkup` 会吃掉连续星号里成对的 `**`
+    （`z***@` → `z*@`），写死字面量会红在解析层而不是红在脱敏。
+  - 已知残余（记在 spec，不写成"全拦住了"）：模型新增一个**不含数字**的邮箱时，三条判据与四条通道都抓不到，
+    由 4.5-11 的逐项人工接受兜底。
+
+================================================================================
+3. 双入口与装配面（generate-link.test.ts 四例，全在 packages/main 的真装配里判）
+================================================================================
+$ npx vitest run packages/main/src/generate-link.test.ts
+ ✓ src/generate-link.test.ts (4 tests) 534ms
+  1. 号段 15 与 7 / 11～14 一起装得起来（撞号的症状是整个 store 起不来：`migrate.ts:91` 在动手之前先查版本重复）
+  2. agent 工具面经真注册表调得通（`tools.call('resume.generate.run', …)` → `receipt.outcome='reorder_only'`、
+     `checks.ok=true`；`docId: ''` 在递给实现之前被 schema 挡下）
+  3. 跑完生成之后工作副本逐字未变（按字节读 `resume_docs.updated_at` 与 `doc_json`，
+     配正向对照 `resume_generations` 确实多出一行——否则"未变"可能只是"没跑"）
+  4. 过 IPC 的那一份与 `shared` 的镜像同形（编译期保险丝）且 `structuredClone` 过得去
+
+$ npx vitest run packages/resume-kb/src/generate-service.test.ts
+ ✓ src/generate-service.test.ts (25 tests) 2956ms
+$ npx vitest run packages/resume-kb/src/generate-reorder.test.ts
+ ✓ src/generate-reorder.test.ts (11 tests) 13ms
+
+================================================================================
+4. 本片没勾的行，以及各自欠的那一半（防止"看起来过了"）
+================================================================================
+4.5-01 校验零错误 ✓ ／ 渲染交 P3 成功 —— 要 4.5-d 把产物真送进 3.3 导出管线。
+4.5-02 顺序断言 ✓ ／ 界面显示依据（截图）—— 要 4.5-c。
+4.5-05 注入必失败 → 无产物 ✓ ／ 界面提示截图 —— 要 4.5-c。
+4.5-09 断网冒烟 ✓（三种"没用上模型"的结局各有用例）／ 截图保守版提示 —— 要 4.5-c。
+4.5-11 逐项接受 / 回退 —— 整行属 4.5-c，且需要主进程侧提议态落点的设计（正文仍不过进程边界）。
+4.5-12 返回体过 P3 Schema ✓ ／ P3 侧真校验 P4 产物 —— 要 4.5-d（与 01 同一条链）。
+4.5-13 M5 判据（P4 半边）—— 要 4.5-d 的全链路留证。
+4.5-06 **本片发现的具体缺口，不是措辞问题**：提议面 `generationTargetFields()` 不按"这条目有没有命中 JD
+  要求"过滤，而 `evidenceOf()` 只对有命中的条目出证据行 → 落在零命中条目上的合法改写会进产物却在证据表里
+  查不到 `evidenceId`，正是本行"无证据的句子被拦截"的反面。两个候选收口（收窄提议面 ／ 给每条改写补一条
+  "来自本文档派生实体"的证据 id）已写进 spec 4.5-b 记录，待裁定，本片未擅自选。
