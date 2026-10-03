@@ -48,6 +48,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+// 幂等那句拒因与打招呼共用同一句判据（下面那条注释说的就是同一件事），文案因此从 greet 那一侧取，
+// 不再抄一份——两处各自描述"哪个范围"迟早会漂成两个说法（AGENTS.md §2.2）。
+import { alreadySentScope } from './greet.js';
 
 /** 额度键与账本动作名（`entitlement.gate` 按它数日上限，spec 2.6-02 / 03）。 */
 export const DELIVER_ACTION = 'deliver';
@@ -295,7 +298,7 @@ export class OutboundDeliverService extends Service {
     if (this.ledger.countFor(DELIVER_ACTION, jobId, runId) > 0) {
       throw new AppError(
         'OUTBOUND_ALREADY_SENT',
-        `目标 ${jobId} 在本次运行里已经递过简历，不再重复发送`,
+        `目标 ${jobId} ${alreadySentScope(runId)}已经递过简历，不再重复发送`,
         'outbound.deliver',
         { jobId, workflowRunId: runId },
       );

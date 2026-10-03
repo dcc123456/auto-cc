@@ -373,6 +373,25 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     expect(ledger.count()).toBe(3);
   });
 
+  it('幂等拒因里的范围与判据口径一致：带 run 说「本次运行」，单发说「未挂工作流的那些」（5.4-c）', async () => {
+    const hand = fakeChannel();
+    const { greet } = await boot({ channel: hand.channel });
+    await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }));
+    await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }))).rejects.toMatchObject({
+      code: 'OUTBOUND_ALREADY_SENT',
+      message: '目标 job-1001 在本次运行里已经打过招呼，不再重复发送',
+    });
+    // 界面与 agent 的单发没有 run，账本按 `workflow_run_id IS NULL` 数的是历史上所有单发（2.5-13），
+    // 所以文案也必须换成那个范围——否则第二次单发会读到一句对不上号的话。
+    await greet.perform(request({ jobId: 'job-3003' }));
+    await expect(greet.perform(request({ jobId: 'job-3003' }))).rejects.toMatchObject({
+      code: 'OUTBOUND_ALREADY_SENT',
+      message: '目标 job-3003 在此前那些未挂工作流的发送里已经打过招呼，不再重复发送',
+      details: { jobId: 'job-3003', workflowRunId: null },
+    });
+    expect(hand.calls).toHaveLength(2);
+  });
+
   it('换个进程重挂同一份库：重复发送防护照样成立——判据在账本里，不在内存集合里（2.5-13）', async () => {
     const hand = fakeChannel();
     const { dir, greet, ledger } = await boot({ channel: hand.channel });

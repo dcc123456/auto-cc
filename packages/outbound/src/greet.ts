@@ -39,6 +39,18 @@ export const GREET_ACTION = 'greet';
 /** 工作流节点名（spec 2.5-e：`greeting.send`）；与 `jd.capture` 同一命名口径，计划里按它选执行器。 */
 export const GREET_NODE_KIND = 'greeting.send';
 
+/**
+ * 幂等拒因里那句「在哪个范围里已经发过」（投递复用同一句，spec 2.5-13 / 2.6-05）。
+ *
+ * 范围不是这里选的，是 `usage.ledger.countFor(action, target, runId)` 的 WHERE 决定的：带着工作流 run
+ * 时只数这一次（`workflow_run_id = ?`）；没有 run 时数的是**历史上所有非工作流发起的那几次**
+ * （`workflow_run_id IS NULL`，spec 2.5-13 有意为之——界面单发没有"这一次"可依据）。
+ * 所以文案必须跟着范围走，否则第二次单发会看到「在本次运行里已经打过招呼」这种说不通的话
+ * （5.4-b 收口时发现，5.4-c 处理）。
+ */
+export const alreadySentScope = (runId: string | null): string =>
+  runId === null ? '在此前那些未挂工作流的发送里' : '在本次运行里';
+
 /** 编排层暂无可选项；strict 让 `cordis.yml` 里写错的键在挂载期就报错。 */
 export const greetSchema = z.strictObject({});
 
@@ -168,7 +180,7 @@ export class OutboundGreetService extends Service {
     if (ledger.countFor(GREET_ACTION, jobId, runId) > 0) {
       throw new AppError(
         'OUTBOUND_ALREADY_SENT',
-        `目标 ${jobId} 在本次运行里已经打过招呼，不再重复发送`,
+        `目标 ${jobId} ${alreadySentScope(runId)}已经打过招呼，不再重复发送`,
         'outbound.greet',
         {
           jobId,
