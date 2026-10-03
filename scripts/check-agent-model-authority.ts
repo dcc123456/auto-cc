@@ -21,6 +21,10 @@
  *   界面上发送表态的那一份文件之外不许有第四份提到它，`loop.ts` 里连 `respond(` 都不出现——循环只许开单等人，不许自己把单答了；
  *   同时 `pause.ts` 不许 import 循环或判定口（与 ④ 同形）：通道一旦认识 run，就有了第二处判定现场。
  *   这一条防的是第三种形态：模型把「批准自己」写成一只手，「等人批准」就变成「等人被跳过」。
+ * ⑧（5.5-a 加，spec 5.5-01 / 02）恢复被人工接管按住的 run 也只有「人」那一条口：`agent.loop.resume`
+ *   在全仓非测试源码里只许出现在定义处（`loop.ts`）与 IPC 白名单派发处（`bridge.ts`）两份文件里，
+ *   而它**不登记为 agent 工具**（`agent.tools` 的清单里没有这一只，界面上那颗「继续」走桥接白名单）。
+ *   这一条防的是第四种形态：接管若挡不住模型自己按「继续」，5.5-02 那句「接管期间一步都不发」就成了装饰。
  *
  * 探针（5.2-b 实测，三条各打一处再还原）：给 `StepPermissionRequest` 加一位 `authorized?: boolean`、
  * 把 ③ 的实参改成带 `step.intent`、给 `LoopModel` 多加一条 `requestPermission`，本脚本都在那一处立刻 exit 1。
@@ -249,6 +253,25 @@ if (/from '\.\/(?:loop|policy)\.js'/.test(pauseSource)) {
   problems.push('pause.ts 不该 import loop.ts / policy.ts：通道只认单号与值，认了 run 就有第二处判定现场（§2.5）');
 }
 
+// ⑧（5.5-a 加，spec 5.5-01 / 02）恢复被人工接管按住的 run 只有「人」那一条口：定义处（loop.ts 的 `resume`）
+//    与 IPC 白名单派发处（bridge.ts）之外不许有第三份文件提到它——界面上那只「继续」5.5-b 接上时补进名单，
+//    名单里少了它就是那条判据此刻不成立（与 ⑦ 同一份长法）。
+//    模型若能自己按「继续」，接管就挡不住任何东西：它只要在下一步之前把 run 恢复，
+//    「人在页面上操作」这件事在系统里就成了一个可以随时被模型关掉的状态，5.5-02 当场作废。
+//    搜的是这两个**具体形状**而不是裸词 `resume`：工作流那一路也有一条续跑的口（`resume()`），
+//    把它的名字算进来会让这条判据指着错误的文件，而一条会误报的机检最后只会被关掉。
+expectSingleWriter(
+  ['resume(runIdRaw', "'agent.loop.resume'"],
+  ['packages/agent/src/loop/loop.ts', 'packages/shared/src/bridge.ts'],
+  '恢复被接管按住的 run',
+);
+// 这只口刻意**不登记为 agent 工具**：注册表那边的清单里读到它，就等于把人的表态做成了模型的一只手
+//（`agent.tools` 是唯一的手册，5.1-08 / 5.2-07 同一条红线）。
+const toolsSource = read('packages/agent/src/tools.ts');
+if (toolsSource.includes('agent.loop.resume') || toolsSource.includes("'loop.resume'")) {
+  problems.push('agent.loop.resume 被登记成了 agent 的手：恢复自动化只许由人按，不许出现在工具注册表里');
+}
+
 if (problems.length) {
   console.error('✖ agent 模型表态通道检查未通过：');
   for (const problem of problems) console.error(`  · ${problem}`);
@@ -256,5 +279,6 @@ if (problems.length) {
 }
 console.log(
   '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / ' +
-    'policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / 应答暂停单只有人这一条口）',
+    'policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / 应答暂停单只有人这一条口 / ' +
+    '恢复被接管按住的 run 只有人这一条口）',
 );
