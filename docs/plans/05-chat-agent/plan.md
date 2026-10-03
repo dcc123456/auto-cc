@@ -932,6 +932,79 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
 `nodes` 数组，§5.10.2 已把"线性是每条边都走 default 出口的特例"写进那边的模型）；不接真模型（参数化按白名单键名
 判定，"让模型看哪里像变量"既不可复现也没判据要求）；不做录制→自动生成、不做子工作流、不做计划的导入导出文件。
 
+## 7.4 5.6 的落点与切片（2026-10-03 现场读码 + 外部一手取证后定，逐片独立跑门禁、独立提交）
+
+**现状是实测读到的，不是推的**：
+
+- **F1 会话与消息早有表**。`packages/agent/src/session.ts` 的 `chat.session` 在**号段 2** 建
+  `chat_session(id, autonomy, created_at)` 与 `chat_message(id, session_id, role, parts, created_at)`，
+  `parts` 是 `ChatPart` 数组的 JSON；消息只在**完成时**落库（`finalize()`），流式那半条只活在内存。
+  所以 5.6-01 缺的不是表，是**界面挂载时不回看**——正是 5.5-d 挂过来的那笔账（`useAgentRun` 不在挂载时恢复历史 run）。
+- **F2 四类记录四张表全在**：会话/消息（2）、运行/步（16）、审批（22 `agent_pause_requests`）、档位审计（17）。
+  最高已用号段是 **22**，5.6 若要新列（标题、软删、压缩覆盖区间）从 **23** 起。
+- **F3 agent 包里 `redact` 零命中**——聊天正文落库这条路径今天**没有任何脱敏**，而 `packages/core/src/redact.ts`
+  是全项目唯一的一份正则（`redactText` / `redactValue` / `PII_VALUE_PATTERNS`：手机留前 3 后 4、身份证留后 4、
+  邮箱留首字符与域名），logger、workflow 证据（2.7-d）、resume-kb 入库（4.1-09）都复用它。**5.6-05 是真缺口**。
+- **F4 `chat.session` 没有标题列、没有重命名/删除口**（只有 `UPDATE autonomy`），"当前会话"是
+  `ensureSession()` 里 `ORDER BY created_at DESC LIMIT 1` 的隐式取一条。5.6-07 的三个操作全是缺口。
+- **F5 白名单五类事实全部可以现问**，不必从文本里摘：剩余额度 = `entitlement.gate.check()` 的 `remaining`；
+  当前档位 = `chat.session.current().session.autonomy`；最近失败原因 = `agent.loop.read(runId).stopReason`
+  加 `usage.ledger.summary().recentDenials`；已投目标 id = `outbound.deliveries.listFor(jobId)` 加账本行的
+  `targetId`；被否决做法 = `agent_step.status='refused'` 加 `agent_pause_requests.resolution`。
+- **F6 出站腿只有一处**：`llm.chat` 的 `complete(request)`（`packages/llm`，`keyEnv` 默认
+  `AUTO_CC_LLM_API_KEY`，未配置即 `LLM_UNAVAILABLE` 且不发请求），测试走 `stubFetch`。agent 侧模型仍是硬接的
+  `StubLoopModel`（`estimateTokens` = 长度 / 2），真模型未接。
+- **F7 位置早在 §3 留好了**：`agent.transcript`（L4，"会话与消息持久化、流式增量、压缩与关键事实保留、脱敏"）
+  与 `transcript/` 目录注释。但 F1 说明**持久化那半边已经在 `chat.session` 里长成**，再造一个平行服务就是
+  §2.5 禁止的"两套都能用"（§2.3 要理由）。所以本片**扩展现有 service**，不新建 `agent.transcript`。
+
+**外部一手取证（AGENTS.md §6.1）**：候选是业界统称 compaction 的这一族做法，取到的官方文档是
+[Microsoft Agent Framework — Compaction](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/compaction)
+（`ms.date` 2026-09-08，同一篇给出 C# / Python / Go 三套实现的策略表，说明不是单一 SDK 的私有设计）。
+四条与本片直接相关的事实：
+
+1. 它把**工具调用与其结果当一个原子组**（`MessageGroupKind.ToolCall`，原文"removing one without the other would
+   cause LLM API errors"）→ 我们的同构单位是"一条 run 加它的步记录"，折叠时不许拆开。
+2. 每个策略分**触发**（何时开始）与**目标**（何时停），token 默认用字符数启发式（`CharacterEstimatorTokenizer`
+   = 4 字符 1 词元）→ 我们的 `estimateTokens` 已是同一类粗估，5.6-04 要的"下降可量化"用同一把尺就够，不引 tokenizer。
+3. **不依赖模型的策略是主流第一档**：`ToolResultStrategy`（折叠旧工具结果，温和、保留度高）、
+   `SlidingWindowStrategy`、`TruncationStrategy`；只有 `SummarizationStrategy` 需要模型。
+4. 官方对摘要式压缩自己写了两句风险：_"Tool arguments and results can contain sensitive data, and
+   `SummarizationStrategy` sends those details to the summarizer"_；以及注册位置不对时**合成出的摘要行会反过来进
+   持久化历史**，而注册在 builder 上时"compacts only the in-flight messages sent to the model. The conversation
+   history stored by `ChatHistoryProvider` remains unchanged"。
+
+→ **采纳**：① 压缩默认**不接模型**（确定性折叠），第 4 句的敏感数据顾虑正是 §8.5 / 4.2-07 的同一口径；
+② 压缩产物**不回写覆盖原文**（"宁可长，不可丢"既是 5.6-10 的判据，也是那句官方警告的结构化避免）；
+③ **否决项留档**：`SummarizationStrategy` 那条路要真模型、要单独授权、会把含 PII 的工具参数交给摘要模型，
+而 5.6-03 要求数值逐字不变——模型改写恰恰是风险来源，故不进 5.6 判据，将来要做另开一片。
+
+**三条决策（写死，避免执行时自由发挥）**：
+
+- **决策一：脱敏只调 core 那一份，落点钉在两个系统边界**——消息落库前（`chat.session` 写 `chat_message.parts`
+  那一步）与出站前（`llm.chat.complete()` 内部，一处覆盖所有走模型的文本）。agent 包内**不写第二套正则**
+  （§2.5 / §8.5），也不为聊天另开一份脱敏配置。边界校验只在系统边界做（§2.6），这两处正是边界。
+- **决策二：压缩是"折叠"不是"改写"**——原文行永不删除；压缩产物是一行**摘要 + 覆盖区间**（`from_ts` / `to_ts`），
+  读历史时把被覆盖那段替换成摘要行，摘要行缺失或对不上就整体退回原文。于是 5.6-03（数值逐字相同）与 5.6-10
+  （压缩抛错/超时不丢消息）由**结构**保证而不是靠断言补救：最坏情况就是"没折"。
+- **决策三：白名单五类事实不进摘要文本，一律现问**（按 F5 逐处的真值）。压缩段旁边挂的是一张**从真相现读出来的
+  事实卡**，不是"从旧消息里摘出来的数字"。理由与 §9 的 2.5 教训同源：本地存第二份事实早晚会与真值不一致；
+  而 5.6-02 若要靠文本摘取来答，就永远只是近似。
+
+**5.6 的切片表**：
+
+| 切片  | 内容（服务半边优先）                                                                                   | 覆盖条目                | 为什么这么切                                                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------- |
+| 5.6-a | 落库前与出站前两道脱敏（决策一）+ 含 PII 剧本的库内断言 + 拦截出站请求体断言                           | 5.6-05 / 06             | 唯一一条**正在积累风险**的缺口（F3：今天零脱敏），只改写入与出站路径，不依赖新表，先落最安全       |
+| 5.6-b | 挂载时回看：会话历史 + 最近 run + 未定局审批一次加载（收掉 5.5-d 挂的 `useAgentRun` 账）+ 重启活体复跑 | 5.6-01（+ 5.5-01 重拍） | 判据是"重启 → 截图历史完整"（V），要杀进程重启，取证形状与 5.5-d 同源，独立成片才不互相污染        |
+| 5.6-c | 号段 23 起：会话标题列 + 新建/重命名/软删三口 + 界面三操作与恢复途径提示                               | 5.6-07                  | 唯一真正要动 DDL 的片，判据是三连 V 截图，与 a/b 的 U 半边分开提交（§1.4）                         |
+| 5.6-d | 压缩：触发阈值 + 原子组折叠 + 事实卡现问 + 失败保留原文 + 界面「较早消息已压缩」提示                   | 5.6-02 / 03 / 04 / 10   | 四条判据全挂在同一个结构（覆盖区间 + 事实卡）上；拆开会先出现"有摘要行却没有覆盖区间"的中间态      |
+| 5.6-e | 导出 JSON（字段命名稳定 + 走同一份脱敏）+ 注入面反向验证 + 5.6 十条逐项收口                            | 5.6-09 / 08 + 收口      | 09 是把前几片的产物按稳定字段读一遍（顺带复跑脱敏），08 是 §6.5 要求的反向条目，两者都不需要新机制 |
+
+**5.6 不做的事**：不做语义/向量式长期记忆（4.3 那套是简历知识库，不是对话记忆）；不做云端同步与多设备合并；
+不接真实模型做摘要（见上面的否决项）；不做消息编辑与撤回；不做 PDF/CSV 第二种导出格式；
+不引入按词元精确计数的依赖（沿用粗估，判据只要求"下降可量化"）；不新建 `agent.transcript` 平行 service（F7）。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
