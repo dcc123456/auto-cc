@@ -2266,9 +2266,11 @@ deliver 同样被预检）、只读性质（无账本行、无被拒流水）、
 因为没有代码改动会使旧证据失效；③ 状态位：02 留 `[ ]` 并写明缺哪只口、11 保持 `[!]`、
 M6-01 不动，M6-02 / P5-01 / P5-04 保持 `[ ]` 并各写原因，P5-02 / P5-03 打勾且勾下是这一轮重演的读数；
 ④ 复用检查：本片零新增实现；⑤ 死代码检查：探针文件已删除、未入库，`git status` 干净；
-⑥ 前端未涉及；⑦ 按 §1.4 一个文档提交（本片只动文档），中文 subject，推送按 §1.6 执行——
-GitHub 直连仍不稳（两次 `Connection reset by peer` / `Could not read from remote repository`），
-如实记为**已提交未推送**，本地领先远端 11 个提交，下轮继续重试；⑧ 暂存区只有两份文档，
+⑥ 前端未涉及；⑦ 按 §1.4 一个文档提交（本片只动文档），中文 subject；推送的实际结果是**先两次失败、第三次成功**——
+前两次分别报 `Read from remote host ssh.github.com: Connection reset by peer` 与
+`Could not read from remote repository`（§9 记过 GitHub 直连不稳），本片段位一度是"已提交未推送"（领先 11 个提交），
+随后 `git push origin main` 实跑通过：`f4be13c..aa8df83 main -> main`，`git status -sb` 显示 `## main...origin/main`
+（不领先不落后）。这一段是在推送成功之后回头改的，原先写"未推送"是对当时状态的如实记录，不是笔误。⑧ 暂存区只有两份文档，
 门禁日志写在 gitignore 的 `tmp/5.7e2-*.log`。
 
 ## 5.8 指标看板
