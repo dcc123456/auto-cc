@@ -1835,7 +1835,7 @@ covered_count / tokens_before / tokens_after / created_at`）+ 一条 `(session_
 | ID     | 验收标准                                                                                     | 方式 | 验证操作                                                                        | 状态 |
 | ------ | -------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------- | ---- |
 | 5.7-01 | fixture 站内一句话完成 搜索→读JD→建档→话术→打招呼→定制简历→择机投递 全链路，全程可中断可续跑 | V    | 关键节点各留截图（**M6 的本机等价判据**，同一条 run 内跑完，见 5.7-d 落地记录） | [x]  |
-| 5.7-02 | 全链路的每一步在对话流可回溯到 run 记录与证据文件（点击卡片跳到证据）                        | V    | 点卡片 → 截图证据视图                                                           | [ ]  |
+| 5.7-02 | 全链路的每一步在对话流可回溯到 run 记录与证据文件（点击卡片跳到证据）                        | V    | 点卡片 → 截图证据视图（五只引用逐只点开，三结局齐现，见 5.7-d-2 落地记录）      | [x]  |
 | 5.7-03 | 择机投递的时机判定来自代码规则（回复状态 + 时间窗 + 频控 + 额度），规则可读、可配置          | U    | 真值表测试                                                                      | [x]  |
 | 5.7-04 | 失败重试策略明确：只读步自动重试 ≤2 次，外发步**不自动重试**                                 | U    | 注入两类失败 → 断言重试次数差异                                                 | [x]  |
 | 5.7-05 | 已保存工作流可建定时任务（每日/工作日/自定义 cron），任务列表可见启停                        | V    | 建两条 → 截图列表                                                               | [x]  |
@@ -2118,7 +2118,7 @@ resume-0185fba4a2cc-classic.pdf / 43871 字节 / sha256 c272d0a4378a… / delive
 
 **5.7-02 未动（保持 `[ ]`）**：工具卡的 `evidenceRefs` 至今是纯文本 `<li data-evidence-ref>`（`ToolCard.tsx:126-131`），
 点不进既有的证据视图（`WorkflowEvidence.tsx:20` 的 `NodeEvidenceSection` 经 `workflow.runner.readEvidence`）。
-本轮没有为了凑数改渲染层。
+本轮没有为了凑数改渲染层。**（这段是当时的现场；下一片 5.7-d-2 已按决策十一把这只口做出来并收口，见下面那条记录。）**
 
 **§7.4 收尾自检**：① 四道门禁实跑并记下退出码：`pnpm typecheck` → `TYPECHECK_EXIT=0`、`pnpm lint` → `LINT_EXIT=0`
 （十条检查全绿，含 16 只工具的契约检查与调度器进程内那条）、`pnpm format:check` → `RERUN_EXIT=0`「All matched files use Prettier code style!」、
@@ -2133,6 +2133,94 @@ resume-0185fba4a2cc-classic.pdf / 43871 字节 / sha256 c272d0a4378a… / delive
 ⑦ 按 §1.4 分两个提交：渲染层（选择器改名 + 布局让位）与文档+验收证据（本记录 + 六张新图 + 五张作废图 `git rm`），中文 subject；
 §1.6 的推送按 `origin/main` 执行，GitHub 直连不稳（§9）时如实报"已提交未推送"而不是静默跳过；
 ⑧ 暂存区只有本 spec 与按条目 ID 命名的验收截图（§7.5 允许的路径），驱动脚本、探针、中间态图全在 gitignore 的 `tmp/5.7-d/`。
+
+### 5.7-d-2 落地记录（2026-10-04 收口，5.7-02：对话卡片上的每条证据引用点得开，一只口按前缀现问归属）
+
+**跑法**：CDP 10222 打渲染层（`--url 5173`），真实 dev app（`AUTO_CC_USER_DATA_DIR=tmp/dev-userdata`）。
+**这一片全程只读**：不打 fixture、不外发、不改任何配置（§9 的"热改配置会重建下游并关掉已开会话"这条决定了它不能顺手 `saveConfig`）。
+靶子是会话里既有的那条三步 run `b86fe8b1-39bd-4b43-9ec8-f033faec21b7`（5.7-d 第十二轮留下的，`semi` 档、`completed`），
+挑它就是因为它名下五条引用正好一次覆盖三种前缀结局：两条读得到（`doc:` / `hash:`）、三条各有各的说不清（`snapshot:` / `search:` / `jd:`）。
+
+**已证成（五只 chip 逐只点开，读数与库里的行逐位对账）**：
+
+1. `5.7-02-01-collapsed-chips.png`（a2cfa20457a5）点之前：`› jd:1009` 是一颗收起的 chip（chevron 朝右），
+   工具卡下方只有引用原文，没有正文——这就是本轮之前的全部形态。
+2. `5.7-02-02-read-doc.png`（e7152aeb9e64）`doc:resume-bc38158829d5` → **读到正文**：
+   「未填姓名 的简历工作副本」·「记录时刻：2026/10/4 01:04:11」·「文档 id：resume-bc38158829d5」·
+   「区块：4 个 · 工作经历（2 条）、项目经历（1 条）、教育背景（1 条）、技能（1 条）」·「排版页数：1」·
+   「完整正文在「简历」那一页看，这里不搬第二份全文」。那句时刻与 `resume_docs.updated_at = 1791047051207` 逐位相同。
+3. `5.7-02-03-read-hash.png`（22cdb3bfa5a7）`hash:bc38158829d5e027…` → **读到正文**：
+   「简历导入记录 · text · imported」·「记录时刻：2026/10/4 02:41:35」（= `resume_imports.updated_at = 1791052895945`）·
+   「文档 id：resume-bc38158829d5」·「来源指纹：bc38158829d5e027fbf3d1415997517e551e5b13489d03a427b9437798068f4b」（全 64 位）·
+   「正文长度：488 字」·「待确认条目：8 条」，其中第一行是 `sensitive-redacted（文档级）：z***@example.com`
+   ——**脱敏在这条读数口上仍然成立**（§8.5）：库里存的那份就是遮过的，界面没有第二道解遮。
+4. `5.7-02-04-reason-snapshot.png`（2b252caef0d0）`snapshot:browser.page.snapshot@1791052874773` → **时刻缺口**：
+   「这条引用记的是时刻不是文件：那一刻某只手读到的东西只进了当时的上下文，没有随引用落盘」。
+   同一帧里还看得见这一步的观察原话（「入库 4 条（跳过 0 条）· 停在 target-count · 库内共 7 条 | 动手前已重读页面（snapshot:…）」）。
+5. `5.7-02-05-reason-search.png`（5445e4128b71）`search:boss/前端` → **入口缺口**：
+   「搜索引用记的是这一趟抓的入口（平台 / 关键词），它不是一条记录的 id。抓到了哪几条，按逐条的 job 或 jd 引用回看」，时刻位显示「无时刻」。
+6. `5.7-02-06-unread-jd.png`（8f99a24778f0）`jd:1009` → **库里没有**：「库里没有岗位 1009」。
+   这句是去 `jobs` 表现查过的：`WHERE job_id = '1009'` 返回空，表里只有 boss/1001–1005、1007、1008 共 7 行——拒因是真的，不是读数口编的。
+
+**归属核对（不是只看界面字）**：界面上五只 chip 的 `data-step` 依次是 `0 / 0 / 1 / 1 / 2`，与库里
+`agent_step(run_id = b86fe8b1…)` 的 `evidence_refs_json` 逐条一致（step0 = snapshot + search、step1 = doc + hash、step2 = jd:1009）。
+也就是说渲染层交回主进程的是**这一步自己的下标**，不是猜的；归属闸门（`ownershipFailure`）因此在这条链路上是通的，
+越界与张冠李戴那两类由 `evidence.test.ts` 的用例判（见下面代码半边）。
+
+**没证成的那条，另开 #113 跟**：`jd:1009` 是 `outbound.script.generate` 那一步自己 mint 的引用，而它点名的岗位从未进过本地库
+——那一轮的话术是给 fixture 靶子 1009 生成的，抓取步入库的是列表里的另外四条。读数口这边只能如实说"库里没有"，
+缺口在**登记侧**：一条引用指向库里不存在的记录，用户点开的永远是一句"没有"。不在本片顺手改，因为"话术步骤该引用库行 id 还是 fixture 靶子"
+是另一条判定，牵动 2.8-c 与 4.6 的引用形状。
+
+**代码半边（一只口，按决策十一）**：
+
+- `packages/agent/src/loop/evidence.ts` 新增 `EvidenceRefService`（`static provide = 'agent.run'`、`inject = ['agent.loop']`），
+  一只 `evidence(runId, planStepIndex, ref)`：先过归属闸门（这条 ref 必须真在那一步的 `evidence_refs_json` 里，run/步记录是唯一判据来源），
+  再按前缀 `switch` **现问**归属服务（`maybeService`，§2.7 与 §9 的 2.5-e 教训：不在本地存第二份路由事实）。
+  **契约是永不抛**：读不到一律投影成 `unavailableReason`，连归属服务自己抛异常都接住转成「归属服务读数失败：+原话」，
+  所以界面永远有三种结局之一（读到正文 / 说清为什么没有正文 / 说清这条为什么不归这一步）。
+- 各家 owner **扩展现有 service** 补了定点读法（§2.3，没有新建平行模块）：`usage.ledger.row(id)`、`jd.store.detail(jobId, platform?)`、
+  `resume.parse.importOf(sourceHash)`、`resume.generate.receiptOf(receiptId)`、`resume.snapshot.meta(snapshotId)`；
+  `doc:` 直接复用 `resume.doc.load(docId)` 的三态返回（`found` / `missing` / `corrupt`，后两态各带原话）。
+- 白名单加这一条 path（`packages/shared/src/bridge.ts` 的裸字符串数组 + 类型化签名表同名键，两处一起），
+  渲染层经 `window.autoCC.agent['run.evidence']` 走 `cordis:call`，`contextIsolation` / `sandbox` 未动（§8.1/§8.2）。
+- `EvidenceRefButton.tsx` 复用 `useBridgeAction` 与 `NodeEvidenceSection` 的呈现形状（首次展开才读、之后复用那一份、
+  同一套 busy/notice、同样的容器与 chip 样式），`ToolCard.tsx` 把裸 `<li>` 文本换成 chip + 内联读数；
+  文案全走 `chat.evidence.*`，`zh-CN` 与 `en` 同时补齐、占位符实参齐（lint 的双语齐检过）。
+  **两套证据视图仍然并存**，但读的是两份不同数据（工作流的失败证据文件 vs run 步记录里的引用），
+  共用的是外壳与 hook——按 §2.5 的判据"是不是同一件事"，这里不是同一件事，故不合并。
+
+**测试半边**：`packages/agent/src/loop/evidence.test.ts` 23 条（每种前缀至少一条引用，`ALL_REFS` 是 `switch` 分支表的镜像，
+漏一支就红；含"永不抛"的性质用例、归属闸门的三类拒因、形状不对的引用）；
+`packages/main/src/evidence-link.test.ts` 9 条（**真装配**：按 `cordis.yml` 的顺序挂到 46 个服务里的相关面，
+再用 `resolveCall('agent.run.evidence', …)` 走一遍白名单解析，证明这只口在 app 里真的接得到，而不是单测里的假想路由）。
+
+**踩过的三条坑，写下来省下一轮**：
+
+1. **`jd.store.detail()` 依赖 `conversation_messages` 表**：岗位行的「已回复」是 LEFT JOIN 现算的（2.5-14），
+   而那张表只由 `ConversationStoreService` 建。装配级用例没挂会话库时它直接抛 `no such table`，
+   读数口就退化成"归属服务读数失败"。修的是**用例的装配**（补挂 `PlatformRegistryService` + `ConversationStoreService`，
+   与真实 `cordis.yml` 同序），不是把 JOIN 删掉绕过去。
+2. **`NO_CONFIG` 那条缝的完整形状**：`PlatformRegistryService` 的构造器只接 `ctx`，`ctx.plugin(X)` 调用点的配置类型
+   由第二参数反推成 `undefined`，所以写 `{}` 是 TS2345；但**运行期 cordis 照旧拿 `static Config` 解析一次实参**，
+   整个不写就抛 `invalid config: - Invalid input: expected object, received undefined`。
+   `@auto-cc/core` 的 `NO_CONFIG`（`{} as unknown as undefined`）正是为这条缝准备的，换它之后 9/9 绿。
+   这条把 §9 的"单参数构造器"那条补全了：类型面与运行期各要一次实参，两边都得对。
+3. **取证必须"先点开、等读数回来、再滚"**：消息流在每次读数落地时会自动滚到底，
+   所以 `shot --reveal <css>` 那套"先滚再点"的顺序会拍到两帧一模一样、且都停在卡底的图
+   （本轮 `11-read-doc.png` 与 `12-read-hash.png` sha1 相同就是这么来的，那两张已作废）。
+   改成点完等 900ms、再对目标行 `scrollIntoView({ block: 'center' })`、单独拍，六帧 sha1 全不相同。
+
+**§7.4 收尾自检**：① 四道门禁实跑——`pnpm typecheck` 全包 `Done`、`pnpm lint` 全绿（含合规红线机检：测试面里的假主机名
+一律 `*.test.invalid`，`fixture.local` 被拦下后按 §7.2 改命名而不是放宽 allowlist）、`pnpm format:check` 通过、
+`pnpm test` 22 个包 `TEST_EXIT=0`；② V 类 = 上面六张 `docs/acceptance/5.7/5.7-02-0*.png`，逐张与 `tmp/5.7-d2/` 原件对过 sha1
+且逐张亲眼看过内容，对应条目 5.7-02；③ 状态位：02 → `[x]`（判据"每一步都能回溯"按决策十一读作"每条引用都有确定结局"，五只全中）；
+④ 复用检查：证据回看只有一只口、界面复用 `useBridgeAction` 与既有呈现形状、owner 侧全是扩展现有 service，
+新写的只有前缀路由与投影；⑤ 死代码检查：无未调用导出（`makeRefsTool` 那个从未被读的形参在 lint 逼问下删了而不是留着）；
+⑥ 前端三项满足：Tailwind utility 组合（无新 CSS、无内联样式）、图标只用 lucide 现有的
+`ChevronDown` / `ChevronRight` / `ScrollText` / `SearchX`、文案全进 `chat.evidence.*` 双语；⑦ 按 §1.4 分片提交（agent 路由 / 各家 owner 定点读法 / IPC 白名单与类型面 / 渲染层 / 测试 / 文档+证据），
+§1.6 推 `origin/main`，GitHub 直连不稳时如实报"已提交未推送"；⑧ 暂存区只有本 spec 与按条目 ID 命名的验收截图（§7.5 允许的路径），
+探针、驱动脚本、中间态图与 store 副本全在 gitignore 的 `tmp/5.7-d2/`。
 
 ### 5.7-e-1 落地记录（2026-10-04，5.7-08 收口：调度侧的频控只读预检 + 真闸门 daily 的跨包链路用例）
 
