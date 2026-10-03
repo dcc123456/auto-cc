@@ -1033,6 +1033,125 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
   自动化测试不碰真实平台，§7.2），断言 `chat_session.autonomy` 不变、`chat_autonomy_audit` 零新行、
   计划步序列与不含注入的对照跑**逐字相同**、且工具正文里的 `/tool …` 不会被对话链路二次解析成第二次调用。
 
+## 7.5 5.7 的落点与切片（2026-10-03 现场读码 + 外部一手取证后定，逐片独立跑门禁、独立提交）
+
+5.7 的十三条里有一大半在仓库里**一行机制都没有**：05/06/07/09/10 完全空白，03 缺"回复状态 + 时间窗"两个输入，
+04 只靠计划里手写的字面量，01 只有截图没有自动化断言。所以这一节先把现状读清楚（哪些是空的），再定切片。
+
+### 7.5.1 现场读码（F1–F10，均为 2026-10-03 实读）
+
+- **F1 全仓无调度器**：唯一与"时间"有关的既有设施是 `outbound.throttle.nextGapMs()`
+  （`packages/outbound/src/throttle.ts:4-6`，纯函数：给定间隔算还要等多久）与 `sleep(ms, signal)`。
+  没有任何 `setInterval` 在驱动业务触发。
+- **F2 位置是预留的**：本文 §3 的包表与服务表早已写下 `packages/scheduler/` + `schedule.registry`（L3），
+  而 `ls packages/` 当前无该目录、`packages/main/src/registry.ts:14-179` 无该名字。新建包的理由与边界按 §4.3 记在下面的决策一。
+- **F3 可执行入口只有一个，而且只收 id**：`workflow.runner.start(planIdRaw?: string)`（`packages/workflow/src/index.ts:427`）
+  同步返回 `WorkflowRunView`；`resolvePlan`(:474) 先查内置目录再查 `workflow_plans`，未知 id 以 `INVALID_ARGUMENT` 失败并列出可用值；
+  已有 run 处于非 idle/done 态时以 `WORKFLOW_INVALID_STATE` 失败。**所以 5.7-07 可以是结构事实而不是校验代码**：
+  调度器能拿到的最远的口就是"给一个计划 id 起跑"，仓库里不存在"给一段自由对话起一个无人值守 run"的路径可被它误用。
+- **F4 已保存计划的形态**：`workflow_plans`（号段 20，`packages/workflow/src/plan-store.ts:24,35-43`），
+  列 `id / name / plan_json / fingerprint / source_run_id / created_at / updated_at`；写入口不在 IPC 白名单，
+  agent 侧经 `agent.sediment.save`。调度任务**只引用它的 id**，不复制计划本体——复制就是第二份事实（§9 的 2.5 实测教训）。
+- **F5 迁移号段最高 24**（`CHAT_COMPACTION_MIGRATION_VERSION`，`packages/agent/src/session.ts:193`）→ 5.7 取 **25**。
+  登记口径照 `session.ts:797-810`：`[Service.init]` 里按 version 去重后 push 进 `store.migrations` 再 `store.upgrade()`，
+  不去重会在 `plugins.start` 重建服务时撞「迁移版本重复」。
+- **F6 重试不看 effect**：`const maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes);`（`index.ts:868`）。
+  "外发步不自动重试"目前靠计划里手写字面量 `retryTimes: 0`（`packages/workflow/src/plan.ts:237,245,302`）达成，
+  而 `BOSS_E2E_PLAN` 的 `e2e-greet`（effect 为 `outbound`，`plan.ts:281-286`）**漏了这一行**——
+  这正是 5.7-04 要收的形状：靠人记得写的规则就是一条会被漏写的规则。
+- **F7 择机投递的输入齐两样缺两样**：频控在（`throttle.nextGapMs()` + `ledger.latestActionTs` + `sleep`，
+  `greet.ts:242-249`、`deliver.ts:399`）、额度在（`gate.enforce`）；`replied` 由 `packages/platform-boss/src/jd-store.ts:192,319`
+  派生但**投递侧从不读**；全仓没有时间窗 / 工作日概念。→ 5.7-03 是新建一条可读规则并接到投递前置，不是接线。
+- **F8 闸门读数面**：`check(action, context)`(:83) 只读、`enforce`(:107) 是 `usage_denials` 唯一写盘口、
+  `perform(action, context, task)`(:127) 记账；动作名恰好是 `['search','greet','deliver']`；
+  `DEFAULT_DAILY_LIMITS = {search:40, greet:20, deliver:10}`，模式 `unlimited | daily`；`usage_ledger` 没有结果列。
+- **F9 界面落点**：`App.tsx:27 type TopView = 'chat' | 'workflow' | 'diagnostics'`，列表形态照 `WorkflowPlans.tsx`；
+  i18n 根命名空间是 `shell`，当前零个 schedule 键。
+- **F10 跨包链路测试已有形**：`packages/main/*-link.test.ts`（sediment / three-gate / gap-quota / generate / delivery-snapshot）
+  都是"在 fiber 里按序 `ctx.plugin` 真服务 + 真 store"。5.7-01 的自动化半边照这个形；
+  `boss-e2e` 目前只有 harness 截图（`docs/acceptance/2.8/2.8-07-*.png`），没有自动化跨包断言。
+
+### 7.5.2 选型与证据（AGENTS.md §6.1）
+
+需要的外部能力只有一件：**把 cron 表达式换算成下一个计划时刻**。触发、记账、跳过一律自己写。
+
+| 候选                                                               | 判定     | 理由                                                                                                                                                                              |
+| ------------------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| cron-parser 5.10.1（MIT；唯一依赖 luxon ^3.7.2，纯 JS 无原生编译） | **采纳** | 把"表达式 → 时刻"做成纯函数（`CronExpressionParser.parse(expr, {currentDate}).next()`），时钟与定时器留在自己手里，正好是 5.7-09 / 5.7-10 要的形态                                |
+| node-cron 4.6.0（ISC）                                             | 否决     | 它把"定时器 + 错过就不跑"做成黑盒，只给 `schedule()`，不给"上一次/下一次计划点"的读数；而 5.7-09 要的正是"关机期间越过了一次"这条可断言的账。要拿它当纯解析器用等于绕开它的主 API |
+| 自写五段式解析（含 `1-5`、`*/30`、别名、闰月）                     | 否决     | §2.7 的"第二套同类基础设施"就落在这里：这类解析器的坑全在边界上，自己写等于自己认领 cron 方言的全部历史包袱                                                                       |
+| 系统 crontab / Windows 任务计划程序                                | 否决     | 5.7-10 直接判负，且要求用户配置外部环境，与"用户只装一个 app"冲突                                                                                                                 |
+
+一手来源与本机实测（§6.2 文档转述不可信；以下都是 `.research-repos/5.7-a-cron/` 里跑出来的输出，spike 代码不进主干，见 §6.4）：
+
+- `npm view cron-parser version license` → `5.10.1` / `MIT`；包内 `types` 指 `dist/types/index.d.ts`，
+  具名导出 `CronExpressionParser`（同表还有 `CronDate / CronExpression / CronFileParser` 等 11 个）。
+- `CronExpressionParser.parse('0 9 * * 1-5', { currentDate: '2026-10-03T15:00:00Z' }).next().toDate()`
+  → `2026-10-05T01:00:00.000Z`，即**运行机器本地时区**（本机 UTC+8）的周一 09:00，不是 UTC 09:00。
+  这条定了语义：求职者的"每天早上 9 点"就是本地 9 点，`nextRunAtMs(expr, fromMs)` 一律不传 `tz`；
+  跨时区差旅读数不在本片范围（app 是桌面端，人在哪算哪）。
+- `.next()` 返回的是库自己的 CronDate，**不是 `Date` 实例**（`.toUTCString()` 不存在），只有 `.toDate()` 可靠 →
+  库类型只允许出现在 `packages/scheduler/src/internal/`，对外只交 `number`（毫秒时间戳），§4.2 的 internal 分区正好用于此。
+- `parse('@daily', …)` → 本地次日 00:00；`parse('0 0 31 2 *')`（2 月 31 日）在**解析期**就抛
+  `Invalid explicit day of month definition` → 非法表达式在"建任务"那一刻就结构化失败，不会等到触发期才发现。
+- 反向验证（§6.5）：不引入 `node-cron` 没有造成能力缺口——本项目要的三件事（算下一次、算是否越过、本地时区）
+  全在 cron-parser 的纯函数侧覆盖，而 node-cron 独占的"替你持有定时器"恰是 5.7-10 要求我们**自己做**的那部分。
+
+### 7.5.3 决策（5.7-a 开工前定，实现按此执行）
+
+**决策一：新包 `packages/scheduler/`，服务名 `schedule.registry`，清单 id `schedule`。**
+理由是 §4.3 的"跨不出才新建"：调度既不是领域（它不碰 JD / 简历 / 浏览器）也不是壳（它不碰 Electron），
+它是 L3 的"何时起跑"这一件事，塞进 `workflow` 会让"计划本体"和"计划何时被触发"混在一个包里，
+而摘掉反向验证（`registry.ts` 的注释口径）需要它们可分别摘除。边界向下：`@auto-cc/core`（AppError/Service/asApp）、
+`@auto-cc/shared`（视图类型）、`cron-parser`；对同级的 `workflow` / `entitlement` **不 import**，
+经 `maybeService` 按名字现问（§9 的 2.5 实测：存第二份事实会静默变空）。依赖记账：cron-parser 与 luxon 均 MIT，
+不触发 §8.7 的 AGPL NOTICE。
+
+**决策二：号段 25 两张表，而不是一张。**
+`schedule_jobs`（任务本体：`id / name / plan_id / expression / time_zone 不做 / is_enabled / last_planned_at / next_run_at / created_at / updated_at`）
+与 `schedule_triggers`（每次触发一行：`id / job_id / planned_at / fired_at / result / reason / workflow_run_id / created_at`）。
+为什么不给 `workflow_plans` 加列：一个是"怎么跑"、一个是"什么时候跑"，生命周期不同——改计划不该动任务，停任务不该改计划。
+为什么每次触发都要有一行：5.7-06 的"失败不影响下次"与 5.7-09 的"已跳过并显示原因"都是**只有追加记录才能证明**的判据，
+把结果写在 job 行上就只剩"最后一次"的读数。
+
+**决策三：5.7-07 做成结构 + 一条守口。**
+`createJob` 的入参只收 `planId`（字符串），并在建任务时就用 `workflow_plans` / 内置目录验它存在；
+服务对外**没有任何**接 `goal` / 对话文本 / agent run 的方法。测试形态是给调度器一段自由对话任务（F3 的"根本没有这个口"）
+→ 断言 `INVALID_ARGUMENT`，而不是"传了但被拒"。
+
+**决策四：额度用尽即跳过，走闸门已有的只读 `check`，不新建第二套额度判断。**
+触发前对两个外发动作（`greet` / `deliver`）各问一次 `gate.check`，任一被拒就**不起 run**，
+落一行 `result='skipped'` 的触发记录并把拒因原文带进 `reason`。这不是绕过闸门——真正的记账仍在节点里由
+`enforce` / `perform` 完成，这里只是"明知第一步必死就别先起一个半途而废的 run"，
+并且拒因来自闸门而不是调度器自己的算术（§8 红线：闸门是唯一额度事实）。
+闸门未挂载时**照跑**而不是拦：5.3-d 的三闸门在节点侧，调度侧缺席不该变成新的免额外发路径（跑起来节点自己会拒）。
+
+**决策五：不补跑（5.7-09）——把"错过"变成一条读数。**
+tick 只做一件事：对每条启用的任务算 `next_run_at <= now` 就触发一次并把 `next_run_at` 推到下一次。
+服务挂载时（`[Service.init]`）跑一次**追账**：凡是 `next_run_at < 现在` 的启用任务，先按 `now` 起算出"关机期间越过的计划点"，
+落一行 `result='skipped'` / `reason='app 关闭期间错过'`，再把 `next_run_at` 置为**现在之后**的第一个计划点。
+于是重启后界面上看到的是"已跳过（原因）"，而不是一次凭空补跑。测试用注入时钟（决策六）冻结时间，不需要真等。
+
+**决策六：单一 `setInterval` + 可注入时钟，时钟不许在业务代码里现调 `Date.now()`。**
+`[Service.init]` 里起一个 tick（间隔来自配置 `tickIntervalMs`，默认 60_000），`ctx.effect` 返回清定时器——
+卸载后不留活口（同 `chat.session` 的 abort 口径）。所有"现在几点"都走 `this.nowMs()`，
+它读 `config.clock?.()`（可注入）或 `Date.now()`，测试注入假时钟即可冻结。
+这是 5.7-06/09 能写成 U 而不必真等一分钟的原因，也是 5.7-10 静态检查能只盯"一个定时器、零外部计划任务"的原因。
+
+### 7.5.4 切片表（一次一片，片内独立跑四道门禁、独立提交推送）
+
+| 片    | 内容                                                                                                                                                                                                                      | 覆盖条目                                                       | 类型  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----- |
+| 5.7-a | `packages/scheduler/` 落地：`schedule.registry` + 号段 25 两张表 + `internal/cron.ts` 封装 + 建/列/启停 + 只能触发已保存工作流 + 触发记录 + 不补跑追账 + 额度尽跳过 + tick 单定时器；静态检查脚本拦"写系统计划任务"的调用 | 5.7-06、5.7-07、5.7-09（U 半边）、5.7-10，加 5.7-05 的服务半边 | U + C |
+| 5.7-b | 界面定时任务列表 + IPC 白名单口 + 双语 i18n（建任务→列表→启停→"已跳过"标记可见）                                                                                                                                          | 5.7-05（V）、5.7-09（V 半边）                                  | V     |
+| 5.7-c | 择机投递规则（回复状态 + 时间窗 + 频控 + 额度）真值表并接到投递前置；重试策略按 `effect` 收窄（只读 ≤2、外发不重试）并补 `e2e-greet` 漏写的那条                                                                           | 5.7-03、5.7-04                                                 | U     |
+| 5.7-d | fixture 站内的自动全链路（搜索→读JD→建档→话术→打招呼→定制简历→择机投递，可中断可续跑）+ 对话卡片点进证据                                                                                                                  | 5.7-01（M6 本机判据）、5.7-02                                  | U + V |
+| 5.7-e | 逐项收口：复跑 5.7 全部条目、M6/M6b 门禁复核、5.7-11 如实标 BLOCKED、落地记录入档                                                                                                                                         | 5.7 全表状态位                                                 | 收口  |
+
+> 5.7-11（真实 BOSS 账号端到端）按 §7.2 与 spec 既有标注保持 `[!]`——它只在用户在场时手动验证，
+> 本机不写自动化、也不写推测。结转项：#103（会话历史导出的界面/IPC 口）与 #100（白名单 path↔方法名活体机检）
+> 各自在 5.7-b / 5.7-e 里同批处理，不再单独开片。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
