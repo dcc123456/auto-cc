@@ -7,7 +7,7 @@
  * 5.2-c 起，`/run` 开头的那一句走 agent 循环：计划卡与逐步卡片流插在**同一段对话流**里
  * （plan 5.2-c 的切法），读数来自 `agent.loop.read` 与 `agent/run-progress`，同样不在这里推导。
  */
-import { Bot, Gauge, LoaderCircle, Plus, Send, Square, User, Workflow as WorkflowIcon } from 'lucide-react';
+import { Bot, Gauge, LoaderCircle, Send, Square, User, Workflow as WorkflowIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -20,6 +20,7 @@ import type {
 import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
+import { ChatSessionBar } from './ChatSessionBar';
 import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
@@ -93,7 +94,7 @@ function MessageBubble({
 }
 
 /**
- * 对话面板：消息流 + 输入区 + 运行中指示三块最小结构（spec 1.11-02），加档位与新建会话两个入口。
+ * 对话面板：消息流 + 输入区 + 运行中指示三块最小结构（spec 1.11-02），加档位一行与 `ChatSessionBar` 那条会话操作带。
  * @returns 占满可用高度的聊天面板；主进程快照未回来之前消息流显示占位文案
  */
 export function ChatPanel() {
@@ -231,22 +232,12 @@ export function ChatPanel() {
               {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
             </span>
           ) : null}
-          <button
-            type="button"
-            data-action="new-session"
-            disabled={busy !== undefined}
-            onClick={() =>
-              void call(t('chat.actionNewSession'), () => bridge?.chat['session.startSession'](), {
-                apply: (view) => setSnapshot(view),
-              })
-            }
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
-          >
-            <Plus size={12} />
-            {t('chat.newSession')}
-          </button>
         </div>
       </header>
+
+      {/* 会话三操作（新建/改名/软删 + 已删栏）自成一条带（spec 5.6-07）：
+          它们改的是 `chat_session` 那一行，与下面的档位、白名单、消息流都不是一件事。 */}
+      <ChatSessionBar session={snapshot?.session} read={read} />
 
       <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">

@@ -552,6 +552,23 @@
       "actionStop": "stop reply",
       "actionNewSession": "start a new session",
       "actionAutonomy": "switch autonomy to {{level}}",
+      "session": {
+        "untitled": "Chat {{code}}",
+        "rename": "Rename",
+        "titlePlaceholder": "Name this conversation",
+        "titleHint": "Up to 60 characters; phone numbers and emails are masked before they are stored",
+        "saveTitle": "Save name",
+        "cancel": "Keep it",
+        "delete": "Delete session",
+        "deleteHint": "Deleting only folds this conversation into the list below: every message stays and can be restored",
+        "trashHeading": "Deleted sessions ({{total}})",
+        "restore": "Restore",
+        "actionRename": "rename session {{code}}",
+        "actionDelete": "delete session {{code}}",
+        "actionRestore": "restore session {{code}}",
+        "deleted": "Session {{code}} is folded away; restore it from the Deleted sessions list",
+        "restored": "Session {{code}} is back and is now the current one"
+      },
       "sediment": {
         "heading": "Save as workflow",
         "hint": "Project the run you just finished into a reusable workflow. Whether it qualifies and which cells still hold last time's literal values are decided in the main process; this card only lays them out for you.",

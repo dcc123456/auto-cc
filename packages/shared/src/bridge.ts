@@ -247,6 +247,14 @@ export const RENDERER_ALLOWLIST = [
   'chat.session.stop',
   'chat.session.setAutonomy',
   'chat.session.startSession',
+  // 5.6-c 的会话三操作（spec 5.6-07）：改名、软删、恢复都是**人**对会话这件事的表态，
+  // 与 `chat.session.setAutonomy`、`agent.pause.respond` 同一口径刻意不登记为 agent 工具——
+  // 模型若能自己删会话，「它跑过什么」就可被它自己抹掉，那是 5.3-04 防的另一种形态。
+  'chat.session.rename',
+  'chat.session.remove',
+  'chat.session.restore',
+  // 软删过的会话要有份读数，那句「可恢复」才不是随重启消失的谎话（spec 5.6-07 的恢复途径）。
+  'chat.session.trash',
   // 3.3 生成轨导出面：预览/导出只认 docId + 模板 + 语言，文档正文不过进程边界（编辑轨 3.5 才引入 resume.doc.* 写入面）。
   // seedDemo 是 3.5 之前给端到端自测喂一份固定内容文档的口（spec 3.3-10）。
   'resume.export.seedDemo',
@@ -1590,6 +1598,30 @@ export interface BridgeSignatures {
   'chat.session.setAutonomy': { args: [level: AutonomyLevel]; returns: ChatSessionView };
   /** 另起一个新会话，旧会话的行一条都不动（spec 1.11-08）。 */
   'chat.session.startSession': { args: []; returns: ChatSnapshotView };
+  /**
+   * 给当前会话起个名字（spec 5.6-07）。标题进库之前先过那只 `redactText` 手——它属于对话记录面。
+   * @param title 人去空格后的名字；空串或超 `MAX_SESSION_TITLE_CHARS` 时结构化失败（`CHAT_TITLE_EMPTY` / `CHAT_TITLE_TOO_LONG`），不落库
+   * @returns 变更后的会话读数，界面一次调用即可刷新标题位
+   */
+  'chat.session.rename': { args: [title: string]; returns: ChatSessionView };
+  /**
+   * 软删当前会话（spec 5.6-07）：只把 `deleted_at` 打上位，消息、run、档位审计的行一条都不动，
+   * 因此这一格是可逆的——返回值里带着会话 id，界面把它当成「撤销」的凭据。
+   * @returns 变更后的（已删除）会话读数；一个可删的会话都没有时结构化失败 `CHAT_SESSION_NOT_FOUND`
+   */
+  'chat.session.remove': { args: []; returns: ChatSessionView };
+  /**
+   * 恢复一个软删的会话（spec 5.6-07 的「恢复途径」）：清掉 `deleted_at`，它又变回「最新的那一个」。
+   * @param sessionId 会话 id，来自 `chat.session.remove()` 的返回（界面上就是那条撤销提示）
+   * @returns 变更后的会话读数；查无此单 `CHAT_SESSION_NOT_FOUND`，本来没删 `CHAT_SESSION_NOT_DELETED`
+   */
+  'chat.session.restore': { args: [sessionId: string]; returns: ChatSessionView };
+  /**
+   * 被软删的会话清单（spec 5.6-07 的恢复途径）：界面拿它把「可恢复」画成一只只按得下去的按钮，
+   * 而不是一个随重启就消失的撤销提示。
+   * @returns 按删除时间倒序的会话读数；一条都没删过时为空数组（界面整块不渲染）
+   */
+  'chat.session.trash': { args: []; returns: ChatSessionView[] };
   /**
    * 落一份固定内容演示简历（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 之前导出链的唯一文档来源）；
    * 返回种子 id 与落库 hash，界面据此再去预览/导出。`variant='edited'` 会在同一 docId 上落一份内容不同的第二版

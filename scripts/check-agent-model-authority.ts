@@ -26,6 +26,10 @@
  *   界面上那颗「继续」（`useAgentRun.ts`）三份文件里，
  *   而它**不登记为 agent 工具**（`agent.tools` 的清单里没有这一只，界面上那颗「继续」走桥接白名单）。
  *   这一条防的是第四种形态：接管若挡不住模型自己按「继续」，5.5-02 那句「接管期间一步都不发」就成了装饰。
+ * ⑨（5.6-c 加，spec 5.6-07）会话的改名 / 软删 / 恢复三张口也只有「人」那一条路：写 `chat_session` 的
+ *   `title` / `deleted_at` 两列的 UPDATE 全仓一处（定义处 session.ts），界面上那三只按钮是唯一提到
+ *   `session.rename/remove/restore/trash` 的文件（ChatSessionBar.tsx），循环与注册表连这些名字都不出现。
+ *   这一条防的是第五种形态：模型若能自己删会话、自己改名，「它跑过什么」就能被它自己抹掉或改写。
  *
  * 探针（5.2-b 实测，三条各打一处再还原）：给 `StepPermissionRequest` 加一位 `authorized?: boolean`、
  * 把 ③ 的实参改成带 `step.intent`、给 `LoopModel` 多加一条 `requestPermission`，本脚本都在那一处立刻 exit 1。
@@ -274,6 +278,31 @@ if (toolsSource.includes('agent.loop.resume') || toolsSource.includes("'loop.res
   problems.push('agent.loop.resume 被登记成了 agent 的手：恢复自动化只许由人按，不许出现在工具注册表里');
 }
 
+// ⑨（5.6-c 加，spec 5.6-07）会话的改名 / 软删 / 恢复三张口只有「人」那一条路。
+//    判法与 ⑤ 同形而不是数工具清单：写 `chat_session` 那两位（title / deleted_at）的 UPDATE 全仓只许出现在
+//    定义处（session.ts）一份文件；界面上那三只按钮是唯一提到这几只桥接口名的文件（ChatSessionBar.tsx）；
+//    而循环与注册表连这些名字都不出现。
+//    这一条防的是第五种形态：模型若能自己删会话、自己改名，「它跑过什么」就可以被它自己抹掉或改写——
+//    检查点（5.5-d）与档位审计（5.3-05）防的都是同一件事，只是那两处防的是「漏记」，这里防的是「事后删」。
+const sessionColumnWriteHits = sourceFiles.filter((relative) =>
+  /UPDATE chat_session SET (title|deleted_at)/.test(read(relative)),
+);
+if (sessionColumnWriteHits.join(',') !== 'packages/agent/src/session.ts') {
+  problems.push(
+    `UPDATE chat_session SET title/deleted_at 应只在 session.ts 出现，现在出现在：${sessionColumnWriteHits.join(' / ') || '（没有）'}`,
+  );
+}
+expectSingleWriter(
+  ["'session.rename'", "'session.remove'", "'session.restore'", "'session.trash'"],
+  ['packages/renderer/src/ChatSessionBar.tsx'],
+  '界面上的会话改名/软删/恢复',
+);
+for (const relative of ['packages/agent/src/loop/loop.ts', 'packages/agent/src/tools.ts']) {
+  if (/session\.(rename|remove|restore|trash)\b/.test(read(relative))) {
+    problems.push(`${relative} 里提到了 session.rename/remove/restore/trash——会话的改名与删除不是 agent 的手`);
+  }
+}
+
 if (problems.length) {
   console.error('✖ agent 模型表态通道检查未通过：');
   for (const problem of problems) console.error(`  · ${problem}`);
@@ -282,5 +311,5 @@ if (problems.length) {
 console.log(
   '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / ' +
     'policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / 应答暂停单只有人这一条口 / ' +
-    '恢复被接管按住的 run 只有人这一条口）',
+    '恢复被接管按住的 run 只有人这一条口 / 会话改名与软删只有人这一条口）',
 );

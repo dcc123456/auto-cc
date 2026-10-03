@@ -552,6 +552,23 @@
       "actionStop": "停止回复",
       "actionNewSession": "新建会话",
       "actionAutonomy": "切换档位为 {{level}}",
+      "session": {
+        "untitled": "对话 {{code}}",
+        "rename": "改名",
+        "titlePlaceholder": "给这条会话起个名字",
+        "titleHint": "最长 60 字；手机号、邮箱这类内容在进库存之前会被打码",
+        "saveTitle": "保存名字",
+        "cancel": "先不改",
+        "delete": "删除会话",
+        "deleteHint": "删除只是把这条会话收进下面那一栏，消息一条都没少，随时能恢复",
+        "trashHeading": "已删除的会话（{{total}} 条）",
+        "restore": "恢复",
+        "actionRename": "重命名会话 {{code}}",
+        "actionDelete": "删除会话 {{code}}",
+        "actionRestore": "恢复会话 {{code}}",
+        "deleted": "会话 {{code}} 已收起，在「已删除的会话」那一栏里可以恢复",
+        "restored": "会话 {{code}} 已恢复，它就是当前会话"
+      },
       "sediment": {
         "heading": "保存为工作流",
         "hint": "把这次跑通的那一段投成一条可复用的工作流：能不能投、哪几格还是上次的残留值，都由主进程算，这里只负责摆给你看。",
