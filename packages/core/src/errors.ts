@@ -61,6 +61,15 @@ export type AppErrorCode =
   | 'CHAT_INPUT_TOO_LONG'
   | 'CHAT_BUSY'
   | 'CHAT_AUTONOMY_INVALID'
+  // 会话标题（spec 5.6-07）：空与超长都在写库之前拒掉，界面各说一句不同的话——
+  // 前者是「还没填」，后者是「填太多」，合并成一句会让改了半截的人以为没保存成功。
+  | 'CHAT_TITLE_EMPTY'
+  | 'CHAT_TITLE_TOO_LONG'
+  // 会话改名/软删/恢复（spec 5.6-07）。两个码的处置不同所以不合并：
+  // NOT_FOUND 是「这一行没有」（重读列表），NOT_DELETED 是「按下的是恢复而它根本没被删」——
+  // 后者界面上该改的是按钮，不是给一句失败提示。
+  | 'CHAT_SESSION_NOT_FOUND'
+  | 'CHAT_SESSION_NOT_DELETED'
   | 'TOOL_DUPLICATE'
   // 模型出口（spec 2.5-01 / 2.5-12）：两个码必须分开，因为处置不同——
   // `LLM_UNAVAILABLE` 是「根本没配」，调用方应当回落模板并在界面播报；`LLM_REQUEST_FAILED` 是「配了但这次没成」，

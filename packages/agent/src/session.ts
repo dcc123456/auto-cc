@@ -48,6 +48,14 @@ export const CHAT_MIGRATION_VERSION = 2;
 export const MAX_USER_INPUT_CHARS = 2000;
 
 /**
+ * 会话标题的字数上限（spec 5.6-07 的系统边界：渲染层来的不可信输入）。
+ *
+ * 为什么不复用上面那个 2000：标题是画在头部一行里的，不是正文；给它 2000 等于允许人把整段对话
+ * 粘成标题，头部那一行就没了。60 字是「一句像样的名字」的量。
+ */
+export const MAX_SESSION_TITLE_CHARS = 60;
+
+/**
  * 以该前缀开头的输入会真调一次注册表，形态是 `/tool <工具id> [入参 JSON]`。
  * 纯前缀命中，不做任何意图识别（1.11-14 + plan §15.8 落点 1）。
  */
@@ -121,8 +129,33 @@ const chatAutonomyAuditMigration = {
   },
 };
 
+/**
+ * 迁移号段 **23**（5.6-c 起）：给 `chat_session` 补「人起的名字」与「软删标记」两列（spec 5.6-07）。
+ *
+ * 为什么单开一支而不是塞进号段 2 的 `up`：`runMigrations` 认的是 `schema_migrations` 台账而不是
+ * DDL 幂等，老库里「2 已应用」永远不会重跑（号段 17 就是栽过一次才更正的，见上面那段）。
+ * 为什么用 `ADD COLUMN` 而不是重建表：两列都可空、无默认值依赖，重建表要连消息行的归属一起搬，
+ * 风险远大于收益；而「软删」要的恰恰是**不动任何既有行**。
+ */
+export const CHAT_SESSION_META_MIGRATION_VERSION = 23;
+
+/** 会话标题与软删标记两列；`down` 与号段 2 / 17 / 22 同一口径不写（同包惯例：回滚会显式失败）。 */
+const chatSessionMetaMigration = {
+  version: CHAT_SESSION_META_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE chat_session ADD COLUMN title TEXT');
+    db.exec('ALTER TABLE chat_session ADD COLUMN deleted_at INTEGER');
+  },
+};
+
 /** 会话表的一行原始读数（列名是 snake_case，转成视图的工作收在 `toMessageView`）。 */
-type SessionRow = { id: string; autonomy: string; created_at: number | bigint };
+type SessionRow = {
+  id: string;
+  autonomy: string;
+  created_at: number | bigint;
+  title: string | null;
+  deleted_at: number | bigint | null;
+};
 
 /** 消息表的一行原始读数；`parts` 是 JSON 文本。 */
 type MessageRow = {
@@ -361,6 +394,83 @@ export class ChatSessionService extends Service {
     return this.current();
   }
 
+  /**
+   * 给**当前**会话起一个名字（spec 5.6-07 的「重命名」）。
+   *
+   * 只作用于当前会话、不接 sessionId：界面上此刻就只有这一条会话可看（没有切换口），
+   * 而「改哪一条」由界面决定会变成「猜另一条也许可爱的会话」。
+   * @param titleRaw 渲染层传来的原文（去空、限长，进库之前脱敏）
+   * @returns 更新后的会话读数
+   * @throws 空标题 `CHAT_TITLE_EMPTY`；超长 `CHAT_TITLE_TOO_LONG`
+   */
+  rename(titleRaw: string): ChatSessionView {
+    const title = titleRaw.trim();
+    if (!title) throw new AppError('CHAT_TITLE_EMPTY', '会话标题不能为空，起个名字总得有几个字', 'chat.session', {});
+    if (title.length > MAX_SESSION_TITLE_CHARS) {
+      throw new AppError(
+        'CHAT_TITLE_TOO_LONG',
+        `会话标题最长 ${String(MAX_SESSION_TITLE_CHARS)} 字，当前 ${String(title.length)} 字`,
+        'chat.session',
+        { length: title.length },
+      );
+    }
+    const id = this.ensureSession();
+    // 标题也是「进对话记录」的一条：它会画在头部、也会跟着 5.6 的导出一起走，所以同一只 redactText 手（spec 5.6-05）。
+    this.store.db.prepare('UPDATE chat_session SET title = ? WHERE id = ?').run(redactText(title), id);
+    return this.readSession(id);
+  }
+
+  /**
+   * 软删**当前**会话（spec 5.6-07 的「删除」）：只给这一行打个时间戳，消息与 run 的行一条都不动。
+   *
+   * 为什么不做硬删：判据要「提示恢复途径」，而那条途径之所以是真的，就是因为数据还在库里。
+   * 为什么删完不需要另立「选中会话」状态：当前会话的定义本来就是「未删会话里最新的那一条」
+   * （`currentSessionId`），打上标记之后 `current()` 自然落到上一条，多存一份指针就是 §2.7 禁的第二份事实。
+   * @returns 被删那一行的读数（带着刚打上的 `deletedAt`），界面拿它的 id 作「撤销」的凭据
+   * @throws 库里没有任何未删会话时 `CHAT_SESSION_NOT_FOUND`（不去删一条本就不存在的东西）
+   */
+  remove(): ChatSessionView {
+    const id = this.currentSessionId();
+    if (!id) throw new AppError('CHAT_SESSION_NOT_FOUND', '没有可删除的会话', 'chat.session', {});
+    this.store.db.prepare('UPDATE chat_session SET deleted_at = ? WHERE id = ?').run(Date.now(), id);
+    return this.readSession(id);
+  }
+
+  /**
+   * 撤销一次软删（spec 5.6-07 的「恢复途径」：界面上那句提示必须指向一只真按得下去的按钮）。
+   * @param sessionId 要恢复的会话 id，来自 `remove()` 或 `trashed()` 的读数；不取「最近被删的那条」——那会让误点变成第二次删除的续命
+   * @returns 恢复后的会话读数（`deletedAt` 回到 null）
+   * @throws 没有这一行 `CHAT_SESSION_NOT_FOUND`；这一行根本没被删过 `CHAT_SESSION_NOT_DELETED`
+   */
+  restore(sessionId: string): ChatSessionView {
+    const row = this.store.db.prepare('SELECT deleted_at FROM chat_session WHERE id = ?').get(sessionId) as
+      { deleted_at?: number | bigint | null } | undefined;
+    if (!row) {
+      throw new AppError('CHAT_SESSION_NOT_FOUND', `找不到会话 ${sessionId}`, 'chat.session', { sessionId });
+    }
+    if (row.deleted_at === null || row.deleted_at === undefined) {
+      throw new AppError('CHAT_SESSION_NOT_DELETED', `会话 ${sessionId} 并没有被删除，无需恢复`, 'chat.session', {
+        sessionId,
+      });
+    }
+    this.store.db.prepare('UPDATE chat_session SET deleted_at = NULL WHERE id = ?').run(sessionId);
+    return this.readSession(sessionId);
+  }
+
+  /**
+   * 列出被软删的会话（spec 5.6-07 的「恢复途径」要有的一份读数）。
+   *
+   * 为什么不能只把刚删的那条的 id 存在前端内存里：那句撤销提示一旦随重启消失，库里那一行就再没有途径捞回来，
+   * 「软删」在用户眼里就等同于硬删——正是判据要防的那件事。这一口只查已删的那些，不是会话切换器（5.6 之外的事）。
+   * @returns 按删除时间倒序的会话读数；一条都没删过时为空数组（界面据此整块不渲染，不占一行）
+   */
+  trashed(): ChatSessionView[] {
+    const rows = this.store.db
+      .prepare('SELECT id FROM chat_session WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC')
+      .all() as { id: string }[];
+    return rows.map((row) => this.readSession(row.id));
+  }
+
   [Service.init](): void {
     // 卸载时必须让出在跑的流式，否则 `plugins.stop('chat')` 之后定时器链还在往没人看的消息里灌字。
     this.ctx.effect(() => () => this.controller?.abort());
@@ -372,14 +482,14 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 把会话域的迁移登记进 `store.migrations` 并建表（号段 2 的会话/消息 + 号段 17 的档位审计）。
+   * 把会话域的迁移登记进 `store.migrations` 并建表（号段 2 的会话/消息 + 号段 17 的档位审计 + 号段 23 的标题与软删）。
    *
    * 幂等是硬要求：`plugins.start('chat')` 会重新构造本服务，无条件 push 同一个 version
    * 会让 `runMigrations` 直接抛「迁移版本重复」（plan §8.4 决策 5）。
    */
   private ensureSchema(): void {
     const migrations = this.store.migrations;
-    for (const migration of [chatMigration, chatAutonomyAuditMigration]) {
+    for (const migration of [chatMigration, chatAutonomyAuditMigration, chatSessionMetaMigration]) {
       if (!migrations.some((registered) => registered.version === migration.version)) {
         migrations.push(migration);
       }
@@ -388,13 +498,12 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 取最新会话的 id；一个都没有时就地建一个**默认档位**的（5.3-02：默认值来自配置，缺省即最保守）。
+   * 取最新**未删**会话的 id；一个都没有时就地建一个**默认档位**的（5.3-02：默认值来自配置，缺省即最保守）。
    * @returns 当前会话 id，永不为空
    */
   private ensureSession(): string {
-    const row = this.store.db.prepare('SELECT id FROM chat_session ORDER BY created_at DESC, id DESC LIMIT 1').get() as
-      { id?: string } | undefined;
-    if (row?.id) return row.id;
+    const existing = this.currentSessionId();
+    if (existing) return existing;
     const id = randomUUID();
     this.store.db
       .prepare('INSERT INTO chat_session (id, autonomy, created_at) VALUES (?, ?, ?)')
@@ -403,13 +512,29 @@ export class ChatSessionService extends Service {
   }
 
   /**
+   * 「当前会话」的唯一判定口径：未删会话里按创建时间最新的那一条。
+   *
+   * 为什么按 `created_at DESC, id DESC` 而不是另存一个指针：软删之后这条口径自己就会落到上一条，
+   * 再存一份「选中的会话」就是第二处事实，两处不一致时界面上会出现「删掉的会话还在画消息」（§2.7）。
+   * `id DESC` 是并列时间戳时的稳定 tiebreaker（同一毫秒建出两条会话是可能的）。
+   * @returns 会话 id；一条未删的都没有时为 undefined——调用方决定是报错（`remove`）还是就地建一条（`ensureSession`）
+   */
+  private currentSessionId(): string | undefined {
+    const row = this.store.db
+      .prepare('SELECT id FROM chat_session WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1')
+      .get() as { id?: string } | undefined;
+    return row?.id;
+  }
+
+  /**
    * 读一个会话的界面读数。
    * @param id 会话 id
-   * @returns 档位 + 已落库消息条数（正在流式那条不计，它还没进表）
+   * @returns 档位 + 标题 + 软删标记 + 已落库消息条数（正在流式那条不计，它还没进表）
    */
   private readSession(id: string): ChatSessionView {
-    const row = this.store.db.prepare('SELECT id, autonomy, created_at FROM chat_session WHERE id = ?').get(id) as
-      SessionRow | undefined;
+    const row = this.store.db
+      .prepare('SELECT id, autonomy, created_at, title, deleted_at FROM chat_session WHERE id = ?')
+      .get(id) as SessionRow | undefined;
     if (!row) throw new Error(`会话 ${id} 的行缺失（ensureSession 之后不应发生）`);
     const count = this.store.db.prepare('SELECT COUNT(*) AS n FROM chat_message WHERE session_id = ?').get(id) as
       { n?: number | bigint } | undefined;
@@ -419,6 +544,9 @@ export class ChatSessionService extends Service {
       autonomy: coerceAutonomy(row.autonomy),
       createdAt: Number(row.created_at),
       messageCount: Number(count?.n ?? 0),
+      // 标题为 null 就是「人没起过名」，界面自己用 i18n 的默认称呼补（主进程不造文案，见 ChatSessionView 的注释）。
+      title: row.title,
+      deletedAt: row.deleted_at === null || row.deleted_at === undefined ? null : Number(row.deleted_at),
     };
   }
 

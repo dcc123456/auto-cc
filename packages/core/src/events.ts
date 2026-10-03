@@ -888,16 +888,21 @@ export type ChatMessageView = {
 };
 
 /**
- * 一个会话的读数（含档位）。
+ * 一个会话的读数（含档位与标题）。
  *
- * 没有 title 字段：会话标题要么来自模型总结（P1 没有模型），要么是界面文案（必须走 i18n，
- * 不能由主进程造一句中文塞进数据库）。P1 界面显示会话 id 短码与消息数就够 1.11-08 判定。
+ * 标题只有 `title` 这一位，且**只有人改得动**（`chat.session.rename` 是界面专属口，模型没有对应工具）：
+ * 主进程从不替会话造一个名字——那等于把界面文案塞进数据库，i18n 就废了（1.11-08 的原始判断仍然成立，
+ * 5.6-07 加的只是「人可以自己起一个」，所以 `title: null` 才是常态，界面用 i18n 那句默认称呼补上）。
  */
 export type ChatSessionView = {
   id: string;
   autonomy: AutonomyLevel;
   createdAt: number;
   messageCount: number;
+  /** 人给这条会话起的名字（进库之前已脱敏）；从没改过名时为 null，界面显示默认称呼 + id 短码 */
+  title: string | null;
+  /** 软删时间戳（毫秒）；未删为 null。删除只打这一位，消息与 run 的行一条都不动（spec 5.6-07） */
+  deletedAt: number | null;
 };
 
 /** 界面首屏与重读时拿到的整份快照：当前会话 + 它的消息。 */

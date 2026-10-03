@@ -32,12 +32,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ChatSessionService } from '../session.js';
+import {
+  CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_MIGRATION_VERSION,
+  CHAT_SESSION_META_MIGRATION_VERSION,
+  ChatSessionService,
+} from '../session.js';
 import { FakeTakeoverService } from '../test-doubles.js';
 import { AgentToolsService, type AgentTool } from '../tools.js';
 import { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, type AgentLoopConfig } from './loop.js';
 import { StubLoopModel, type ObservationRequest, type PlanDraftRequest, type PlanStepDraft } from './model.js';
-import { AgentPauseService } from './pause.js';
+import { AGENT_PAUSE_MIGRATION_VERSION, AgentPauseService } from './pause.js';
 import { AgentPolicyService, type PolicyDecision, type StepPermissionRequest } from './policy.js';
 
 /** 拆卸清单与临时库目录（每个用例一套，跑完即删）。 */
@@ -71,6 +76,18 @@ const BASE_CONFIG: AgentLoopConfig = {
  * 表态它就超时」——超时那一条要的是它**自己**指定一个更短的值（见「无人表态」用例里的 200）。
  */
 const BASE_PAUSE_TIMEOUT_MS = 1000;
+
+/**
+ * 台架里由**会话服务**登记的号段。
+ *
+ * 判「循环一族有没有往上加号段」时要先把它们剔掉：`bootLoop` 挂的是真 `ChatSessionService`
+ * （会话域从 1.11 起就带着自己的账，5.6-c 又加了号段 23），按版本号大小筛会把邻居的登记算到循环头上。
+ */
+const SESSION_DOMAIN_MIGRATION_VERSIONS = [
+  CHAT_MIGRATION_VERSION,
+  CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_SESSION_META_MIGRATION_VERSION,
+];
 
 /** `agent_step` 的原始行读数——断言时直接对表说话，不经视图转换。 */
 type StepRecord = {
@@ -1243,8 +1260,12 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
     expect(rows[0]).toMatchObject({ kind: 'approval', plan_step_index: 0, resolution: 'approve' });
     expect(Number(rows[0]?.resolved_at)).toBeGreaterThan(0);
     // 台架里的接管态是不带迁移的替身：接管那段账（号段 21 的 `takeover_events`）属于 `browser.takeover`，
-    // 循环这一侧只写 `stop_reason`，所以这一族里 22 之上不该出现任何登记。
-    expect(rig.store.migrations.some((migration) => migration.version >= 23)).toBe(false);
+    // 循环这一侧只写 `stop_reason`：剔掉会话域那三行登记之后，它这一族最大的号段仍是 22
+    // （5.6-c 的号段 23 是 `chat_session` 的标题与软删，登记方是 `ChatSessionService`，不是循环）。
+    const loopFamilyVersions = rig.store.migrations
+      .map((migration) => migration.version)
+      .filter((version) => !SESSION_DOMAIN_MIGRATION_VERSIONS.includes(version));
+    expect(Math.max(...loopFamilyVersions)).toBe(AGENT_PAUSE_MIGRATION_VERSION);
   });
 });
 

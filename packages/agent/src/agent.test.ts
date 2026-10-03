@@ -17,6 +17,7 @@ import { z } from 'zod';
 import {
   CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
   CHAT_MIGRATION_VERSION,
+  CHAT_SESSION_META_MIGRATION_VERSION,
   ChatSessionService,
   chatConfigSchema,
   type ChatConfig,
@@ -78,6 +79,21 @@ async function waitUntil(until: () => boolean, timeoutMs: number, reason: string
   while (!until()) {
     if (Date.now() > deadline) throw new Error(`等待超时：${reason}`);
     await settle(10);
+  }
+}
+
+/**
+ * 跑一支会抛的调用并把 `AppError.code` 取出来。
+ * 界面与桥接层分支靠的是 code 而不是 message，所以判结构化失败要断这一位（5.6-c 起三处这么查，抽成一份）。
+ * @param action 要跑的调用
+ * @returns 抛出的 AppError 的 code；压根没抛时返回 null，用例据此失败而不是静默通过
+ */
+function codeOf(action: () => unknown): string | null {
+  try {
+    action();
+    return null;
+  } catch (error) {
+    return (error as { code?: string }).code ?? null;
   }
 }
 
@@ -571,6 +587,145 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
   });
 });
 
+describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', () => {
+  /**
+   * 数一张表现在有几行。
+   * @param ctx 本次台架的上下文
+   * @param table 表名（只用在测试里已知的两张表上）
+   * @returns 行数（`COUNT(*)` 在 node:sqlite 下回 bigint，这里统一收成 number）
+   */
+  function rowCount(ctx: Context, table: string): number {
+    const row = asApp(ctx).store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n?: number | bigint };
+    return Number(row.n ?? 0);
+  }
+
+  it('默认没有标题；改名落在同一行，去空格由主进程做', async () => {
+    const { ctx, chat } = await boot();
+    const sessionId = chat.current().session.id;
+    expect(chat.current().session.title).toBeNull();
+    expect(chat.current().session.deletedAt).toBeNull();
+    const renamed = chat.rename('  投简历这条  ');
+    expect(renamed.id).toBe(sessionId);
+    expect(renamed.title).toBe('投简历这条');
+    // 直接查库：改名是 UPDATE 而不是 INSERT，界面看到的与库里的是同一行。
+    const row = asApp(ctx)
+      .store.db.prepare('SELECT title, deleted_at FROM chat_session WHERE id = ?')
+      .get(sessionId) as unknown as { title: string | null; deleted_at: number | null };
+    expect(row.title).toBe('投简历这条');
+    expect(row.deleted_at).toBeNull();
+    expect(rowCount(ctx, 'chat_session')).toBe(1);
+  });
+
+  it('标题里的手机号与邮箱在进库之前就被遮掉（与消息正文同一只手）', async () => {
+    const { ctx, chat } = await boot();
+    const renamed = chat.rename('联系 13800001111 或 zhou@example.com');
+    const stored = asApp(ctx)
+      .store.db.prepare('SELECT title FROM chat_session WHERE id = ?')
+      .get(renamed.id) as unknown as { title: string };
+    expect(stored.title).not.toContain('13800001111');
+    expect(stored.title).not.toContain('zhou@example.com');
+    expect(stored.title).toContain('138****1111');
+    expect(stored.title).toContain('z***@example.com');
+    // 没遮坏：这句话剩下的部分还在，人才读得懂自己起的名为什么少了几位。
+    expect(stored.title).toContain('联系');
+    expect(JSON.stringify(chat.current())).not.toContain('13800001111');
+  });
+
+  it('空标题与超长标题结构化失败，标题位与库里都不留痕', async () => {
+    const { ctx, chat } = await boot();
+    const sessionId = chat.current().session.id;
+    expect(codeOf(() => chat.rename('   '))).toBe('CHAT_TITLE_EMPTY');
+    expect(codeOf(() => chat.rename('x'.repeat(61)))).toBe('CHAT_TITLE_TOO_LONG');
+    expect(chat.rename('x'.repeat(60)).title).toBe('x'.repeat(60));
+    expect(chat.current().session.id).toBe(sessionId);
+    expect(rowCount(ctx, 'chat_session')).toBe(1);
+  });
+
+  it('软删只打一位标记：被删那条的消息行一条不少，当前会话落到上一条', async () => {
+    const { ctx, chat } = await boot();
+    chat.send('旧会话的消息');
+    await settle(120);
+    const oldId = chat.current().session.id;
+    chat.startSession();
+    chat.send('新会话的消息');
+    await settle(120);
+    const removed = chat.remove();
+    expect(removed.id).not.toBe(oldId);
+    expect(removed.deletedAt).not.toBeNull();
+    // 判据的前半句：删的是「这条会话此刻不再被看到」，不是它下面那两段对话。
+    const rowsOf = (sessionId: string) =>
+      asApp(ctx).store.db.prepare('SELECT parts FROM chat_message WHERE session_id = ?').all(sessionId) as unknown as {
+        parts: string;
+      }[];
+    expect(rowsOf(removed.id)).toHaveLength(2);
+    expect(rowsOf(oldId)).toHaveLength(2);
+    expect(chat.current().session.id).toBe(oldId);
+    expect(chat.current().messages).toHaveLength(2);
+    expect(chat.trashed().map((row) => row.id)).toEqual([removed.id]);
+    // 未删与已删的两行都还在表里：号段 23 写的只是 deleted_at，硬删从没发生。
+    expect(rowCount(ctx, 'chat_session')).toBe(2);
+    expect(rowCount(ctx, 'chat_message')).toBe(4);
+  });
+
+  it('恢复途径是真的：restore 之后那条又成为当前会话，标题与消息都在', async () => {
+    const { chat } = await boot();
+    chat.send('要说的事');
+    await settle(120);
+    const titled = chat.rename('改过名字的会话');
+    const removed = chat.remove();
+    expect(removed.id).toBe(titled.id);
+    const restored = chat.restore(removed.id);
+    expect(restored.deletedAt).toBeNull();
+    expect(restored.title).toBe('改过名字的会话');
+    expect(chat.trashed()).toEqual([]);
+    expect(chat.current().session.id).toBe(removed.id);
+    expect(chat.current().messages).toHaveLength(2);
+  });
+
+  it('查无此单与「根本没删过」都结构化失败，一行都不动', async () => {
+    const { chat } = await boot();
+    const sessionId = chat.current().session.id;
+    expect(codeOf(() => chat.restore('00000000-0000-0000-0000-000000000000'))).toBe('CHAT_SESSION_NOT_FOUND');
+    expect(codeOf(() => chat.restore(sessionId))).toBe('CHAT_SESSION_NOT_DELETED');
+    expect(chat.current().session.id).toBe(sessionId);
+    expect(chat.current().session.deletedAt).toBeNull();
+    expect(chat.trashed()).toEqual([]);
+  });
+
+  it('一条不剩地全删掉：current() 就地建一条默认档位的，绝不把已删的那条再端出来', async () => {
+    const { chat } = await boot();
+    const only = chat.current().session.id;
+    expect(chat.remove().id).toBe(only);
+    expect(codeOf(() => chat.remove())).toBe('CHAT_SESSION_NOT_FOUND');
+    const snapshot = chat.current();
+    expect(snapshot.session.id).not.toBe(only);
+    expect(snapshot.session.autonomy).toBe('suggest');
+    expect(snapshot.messages).toEqual([]);
+    // 回收站那一条不能因为「没有未删的了」就被当成当前会话——那是 5.6-07 判据里「软删」二字的反面。
+    expect(chat.trashed().map((row) => row.id)).toEqual([only]);
+  });
+
+  it('号段 23 只登记一次：停掉重挂不重复 push，标题与删除标记都读得回来', async () => {
+    const { ctx, chat, chatFiber } = await boot();
+    const titled = chat.rename('重启之前起的名字');
+    const versions = () =>
+      asApp(ctx).store.migrations.filter((migration) => migration.version === CHAT_SESSION_META_MIGRATION_VERSION)
+        .length;
+    expect(versions()).toBe(1);
+
+    await chatFiber.dispose();
+    await ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, defaultAutonomy: 'suggest' });
+    expect(versions()).toBe(1);
+    const remounted = asApp(ctx)['chat.session'];
+    expect(remounted.current().session.id).toBe(titled.id);
+    expect(remounted.current().session.title).toBe('重启之前起的名字');
+    expect(remounted.trashed()).toEqual([]);
+    expect(remounted.remove().deletedAt).not.toBeNull();
+    expect(remounted.trashed().map((row) => row.id)).toEqual([titled.id]);
+    expect(remounted.restore(titled.id).deletedAt).toBeNull();
+  });
+});
+
 describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
   /**
    * 递归列出本包 src 下的所有实现文件（5.2-a 起循环长在 `src/loop/` 里，只扫平铺一层会漏掉它）。
@@ -676,15 +831,7 @@ describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () 
     const { chat } = await boot();
     const sessionId = chat.current().session.id;
     // 断的是 `AppError.code` 而不是 message：桥接层按 code 回结构化失败，界面按它取文案。
-    const thrown = (() => {
-      try {
-        chat.setAutonomy('yolo');
-        return null;
-      } catch (error) {
-        return error as { code?: string };
-      }
-    })();
-    expect(thrown?.code).toBe('CHAT_AUTONOMY_INVALID');
+    expect(codeOf(() => chat.setAutonomy('yolo'))).toBe('CHAT_AUTONOMY_INVALID');
     expect(chat.current().session.autonomy).toBe('suggest');
     expect(chat.autonomyAudit(sessionId)).toEqual([]);
   });
