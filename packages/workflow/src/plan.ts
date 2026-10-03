@@ -283,6 +283,9 @@ export const BOSS_E2E_PLAN: PlanInput = {
       // `title`/`company` 不给 `text`：这一步就要走生成那一路，界面与账本上才看得到话术来源。
       params: { platform: 'boss', job: '1001', title: '桌面端前端工程师（Electron）', company: '星桥科技' },
       effect: 'outbound',
+      // 这句今天已经由 `retryBudgetFor` 兜住（外发步恒一次，spec 5.7-04），写在这里是为了读计划的人
+      // 不必知道那条代码规则——声明与行为一致才有可读的计划。
+      retryTimes: 0,
     },
     {
       id: 'e2e-customize',

@@ -129,12 +129,13 @@ describe('全链路计划 boss-e2e（spec 2.8-07 / M6）', () => {
     expect(plan.nodes.some((node) => node.kind.startsWith('demo.'))).toBe(false);
   });
 
-  it('外发两格是 outbound、只读三格是 read，投递那格零重试', () => {
+  it('外发两格是 outbound、只读三格是 read，两格外发都显式写零重试', () => {
     const plan = buildPlan(BOSS_E2E_PLAN);
     expect(plan.nodes.map((node) => node.effect)).toEqual(['read', 'read', 'outbound', 'read', 'outbound']);
     // 纯读节点没有目标可对，target 留空串；三条外发/占位格各按岗位分开，幂等键才分得开。
     expect(plan.nodes.map((node) => node.target)).toEqual(['', '', 'greet://1001', 'resume://1001', 'deliver://1001']);
-    expect(plan.nodes.map((node) => node.retryTimes)).toEqual([null, null, null, null, 0]);
+    // 这两行的 `0` 从 5.7-04 起只是写给人看的：漏写了也不会重发，`retryBudgetFor` 按 `effect` 压成一次。
+    expect(plan.nodes.map((node) => node.retryTimes)).toEqual([null, null, 0, null, 0]);
   });
 
   it('话术不在计划里预置：打招呼那格只给 title/company，生成走 `greeting.send` 内部（plan §15.9 决策 1）', () => {

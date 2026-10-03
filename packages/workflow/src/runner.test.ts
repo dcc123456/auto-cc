@@ -471,6 +471,61 @@ describe('退避重试（2.4-03）', () => {
   });
 });
 
+describe('重试按节点效果分档（spec 5.7-04 的 runner 半边）', () => {
+  /**
+   * 一条两节点计划：读节点第 3 次才成功（演「只读步 ≤2 次额外重试」），
+   * 外发节点每次都失败（演「外发步只试一次」）。只为本用例存在，`finally` 里立刻摘掉——
+   * 要证的是「同一个 runner 里两种效果各按各的档位走」，不是给产品加一条用不上的计划。
+   */
+  const RETRY_SPLIT_PLAN: PlanInput = {
+    id: 'retry-split',
+    nodes: [
+      { id: 'read-step', kind: 'mock.read', effect: 'read', retryTimes: 2 },
+      { id: 'outbound-step', kind: 'mock.outbound', effect: 'outbound', retryTimes: 2 },
+    ],
+  };
+
+  it('同一条计划里读步试满 3 次、外发步只试 1 次，且被压掉那一份要在日志里说出来', async () => {
+    const plans = WORKFLOW_PLANS as Record<string, PlanInput>;
+    plans['retry-split'] = RETRY_SPLIT_PLAN;
+    const booted = await boot({ config: { planId: 'retry-split' } });
+    // 外发步声明的和读步一样（都是 2 次额外重试）：差别必须只来自 `effect`。
+    booted.registry.register('mock.read', ({ spec, attempt }) => {
+      booted.calls.push(`${spec.id}#${String(attempt)}`);
+      if (attempt <= 2) return Promise.reject(new AppError('WORKFLOW_STEP_FAILED', '对端不可达', 'workflow.executors'));
+      return Promise.resolve();
+    });
+    booted.registry.register('mock.outbound', ({ spec, attempt }) => {
+      booted.calls.push(`${spec.id}#${String(attempt)}`);
+      return Promise.reject(new AppError('WORKFLOW_STEP_FAILED', '页面说岗位已下架', 'workflow.executors'));
+    });
+
+    const warned: string[] = [];
+    const logger = booted.ctx.logger as unknown as { warn: (text: string) => void };
+    const originalWarn = logger.warn;
+    logger.warn = (text: string) => {
+      warned.push(text);
+    };
+    try {
+      booted.runner.start();
+      await waitFor(() => booted.runner.current().status === 'failed');
+    } finally {
+      logger.warn = originalWarn;
+      delete plans['retry-split'];
+    }
+
+    expect(booted.calls).toEqual(['read-step#1', 'read-step#2', 'read-step#3', 'outbound-step#1']);
+    const stored = booted.runner.state();
+    expect(stored?.status).toBe('failed');
+    // 落库的 attempts 是界面那条读数（2.4-03 同一列）：读步 3、外发步 1。
+    expect(stored?.nodes.map((node) => node.attempts)).toEqual([3, 1]);
+    const clampWarns = warned.filter((text) => text.includes('外发步'));
+    expect(clampWarns).toHaveLength(1);
+    expect(clampWarns[0]).toContain('outbound-step 是外发步，声明的 2 次额外重试不生效');
+    expect(Object.keys(WORKFLOW_PLANS)).toEqual(['boss-basic', 'boss-deliver', 'boss-e2e']);
+  });
+});
+
 describe('失败证据（2.4-04）', () => {
   it('判失败时把错误 payload 写成文件，库里只存相对路径；没挂页面通道时现场两位都是 null', async () => {
     const { runner, dir } = await boot({

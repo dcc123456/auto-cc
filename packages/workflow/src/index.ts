@@ -44,12 +44,15 @@ import type { WorkflowExecutorRegistryService } from './executors.js';
 import { BOSS_BASIC_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchema } from './plan.js';
 import { assertPlanName, newPlanId } from './plan-store.js';
 import type { WorkflowRunStoreService } from './run-store.js';
+import { retryBudgetFor } from './retry-policy.js';
 
 // 登记处与落库服务从包出口露出去：装配清单要为它们各占一个 id（main/registry.ts）。
 // 执行器的**契约**（`WorkflowNodeExecutor` 等）在 `@auto-cc/core`，能力包从那里取，不 import 本包。
 export { WorkflowExecutorRegistryService } from './executors.js';
 export { WorkflowRunStoreService } from './run-store.js';
 export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema };
+// 重试预算单独露出去（spec 5.7-04）：判据是"外发不重试、只读 ≤2"，用例直接打这条纯函数比造一个假执行器更省。
+export { READ_RETRY_CEILING, retryBudgetFor, type RetryBudget } from './retry-policy.js';
 
 /** 一个失败节点留下的证据（spec 2.4-04）。 */
 type NodeEvidence = {
@@ -865,7 +868,14 @@ export class WorkflowRunnerService extends Service {
     spec: WorkflowNodeSpec,
     executor: WorkflowNodeExecutor,
   ): Promise<boolean> {
-    const maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes);
+    const budget = retryBudgetFor(spec, this.config.retryTimes);
+    const maxAttempts = budget.attempts;
+    if (budget.clampedAway > 0) {
+      // 外发步写了 retryTimes 也要压到一次，并且**说出来**：静默压掉会让人以为计划里那行生效了。
+      this.ctx.logger.warn(
+        `节点 ${spec.id} 是外发步，声明的 ${String(budget.clampedAway)} 次额外重试不生效（spec 5.7-04）`,
+      );
+    }
     // 库里那一列记的是**跨进程**的总尝试次数（2.4-03/10 的读数），循环计数是本进程这一次尝试序列：
     // 被 kill 过一次之后库里已经有 1 次，本进程的第 1 次其实是这个位置的第 2 次。
     const alreadyAttempted = this.store.state(runId)?.nodes[index]?.attempts ?? 1;
