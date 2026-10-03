@@ -631,6 +631,14 @@
           "session-expired": "The login session expired and you need to sign in again",
           "unknown": "The takeover reason could not be read"
         }
+      },
+      "evidence": {
+        "actionRead": "read this reference",
+        "loading": "Reading this reference from the main process…",
+        "at": "Recorded at: {{at}}",
+        "none": "no timestamp",
+        "untitled": "This reference carries no title line",
+        "hollow": "The main process returned neither a body nor a reason — this read-back is incomplete; please report the reference above as a clue"
       }
     },
     "agent": {

@@ -8,6 +8,7 @@
 import { Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
+import { EvidenceRefButton } from './EvidenceRefButton';
 
 /** 工具卡片的状态配色；状态本身来自主进程写的那一份读数。 */
 export const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
@@ -123,12 +124,12 @@ export function ToolCard({
           {step.observation}
         </p>
       ) : null}
+      {/* 5.7-02：引用从裸文本变成点得开的读数。run 与步下标从这里带进去（只有循环卡片有 `step`），
+          分派前缀的事一概交给主进程那一只手，界面不知道 `ledger:` 归账本、`doc:` 归简历。 */}
       {step && step.evidenceRefs.length > 0 ? (
-        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-slate-500" data-step-evidence>
+        <ul className="mt-1 flex flex-col gap-y-1 font-mono text-[10px] text-slate-500" data-step-evidence>
           {step.evidenceRefs.map((ref) => (
-            <li key={ref} data-evidence-ref={ref} className="break-all">
-              {ref}
-            </li>
+            <EvidenceRefButton key={ref} runId={step.runId} planStepIndex={step.planStepIndex} evidenceRef={ref} />
           ))}
         </ul>
       ) : null}
