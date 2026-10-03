@@ -800,6 +800,51 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
 （动手口仍恰好一处 `registry.call` 且 `decide` 排在前面；重读口恰好一处，且函数体里先验 `effect === 'read'`），
 而不是把「一处」放宽成「几处都行」——一条会误报的机检最后只会被关掉。
 
+**5.5-d 的落点与决策（2026-10-03 现场取证后定，先 plan 再写代码）**
+
+**现状是实测读到的，不是推的**：
+
+1. `agent.pause`（`packages/agent/src/loop/pause.ts`）**今天不建表、不占号段**，文件头第 4–6 行写着理由
+   （待决暂停是等待状态而不是事实记录；做成表就得回答「进程死了谁收 in-flight 的单子」），并且 `loop.test.ts:1217`
+   有一条断言「跑完一轮带暂停的循环之后，库里没有第四张 agent 表」。5.5-05 要的正是这份持久性，所以本片**推翻** 5.3-c
+   那条决策——判据优先于旧决策，改的时候必须把两处（文件头那段注释 + 那条断言）一起改掉，不许留一份自相矛盾的说明。
+2. 在等的单只有 `PendingChannel` 那份内存登记；`ask()` 里 `await ticket.outcome` 是进程内的一条 Promise，进程死了它就不存在，
+   `respond(requestId)` 重启后必然 `APPROVAL_NOT_FOUND`。
+3. **挂在确认单上的那一步期间，run 的 `status` 仍是 `running`**（`awaitStepApproval` 全程不写 `paused`；只有叫停 / 接管 / 终态才
+   `finish(...)`）。所以崩溃之后的库里是一行写着「正在跑」的 run——它既不在跑，也没被任何人事先停过。这是本片要回答的第二问，
+   比"卡片重推"更要紧：不处理就是界面长期显示假账（§7.1 要求读数是真的）。
+4. 建表与号段的既有口径照 `takeover-service.ts:282` 那段：服务在 `[Service.init]` 里 `ensureSchema`，用**台账**登记版本号
+   （认台账不认 `user_version`），且幂等是硬要求——`plugins.start` 会重新构造服务，无条件 push 同一个 version 会让
+   `runMigrations` 抛「迁移版本重复」。5.5-d 用**号段 22**。
+
+**四个决策（实现时若与实测不符，回来改这里，不要静默改行为）**：
+
+- **D1 表形状**：`agent_pause_requests`，主键 `request_id`，其余列与 `AgentPauseView` 一一对齐
+  （`run_id / plan_step_index / tool_id / kind / reason / missing_json / round / requested_at / expires_at`），
+  另开 `answered_at`、`decision` 两列做收单。**为什么留行不删**：一张单被人答过就是事实，删行等于把「谁在什么时候批的」抹掉
+  （5.3-10 的审计口径），而 `answered_at IS NULL` 恰好就是"重启后要重推的那一批"的查询条件，不需要第三张表。
+- **D2 重推的是卡片，不是 Promise**：init 时把 `answered_at IS NULL` 的行读出来重新登记进通道，**沿用老单号**——
+  界面上那张卡按 `requestId` 路由，换新号会让用户在旧卡片上的那一次点击落进 `APPROVAL_NOT_FOUND`（那正是 5.3-09 要防的形状）。
+  超时从**重推这一刻**重新起算：老 `expires_at` 在服务不在的那段时间里已经烧完了，续用旧值等于「重启即超时」，
+  判据要的"以新的可见卡片重新出现"就成了一张死卡。
+- **D3 崩溃对账**：init 时把库里 `status = 'running'` 而**没有任何在跑的 `execute` 持有**的 run 落成 `paused` +
+  新 `stopReason = INTERRUPTED`。这一位必须与 `TAKEOVER_HELD` 分开——`resume` 只认后者，混用会让「重启后按继续」变成
+  「替人重跑崩溃那一刻的动作」。**这条 run 的续跑口不在本片**（"崩溃后续推"在 5.5 里没有判据要它），5.5-d 只保证它读起来是真的、
+  界面有对应文案，不谎报完成。
+- **D4 5.5-06 是断言不是新机制**：`agent_step` 主键 `(run_id, plan_step_index)` 与「游标由 `ensureScope` 从库里重建」今天已成立。
+  用例形态：跑两步 → 第三步开单 → 重建服务（`plugins.start` 那条路径，模拟重启）→ 应答 → 断言 `calls` 里只有第三步那只手，
+  第一、二步没有第二次。V+C 那半边另拍：真·杀进程重启 + harness（CDP 10222，`AUTO_CC_USER_DATA_DIR` 换一份 dev userData），
+  重启后 `pending()` 里那张卡在页面上可见，截图按 5.5-05 条目号入 `docs/acceptance/5.5/`。
+
+**写代码之前要补的三条取证欠账**：① `AgentPauseView` 的确切字段与 `missing` 的形状（在 `@auto-cc/core` 的哪一份文件里）；
+② `PendingChannel.open()` 今天自己生成单号，D2 要**给定** id 登记——不允许就在那只共用基础设施上加一位（§2.5 的扩展，
+不是再造第二条通道）；③ 渲染层 `AgentPauseCards.tsx` 现读 `pause.pending()` 的时机（只跟着事件，还是也随 run 进度重读），
+它决定"重启后卡片自己出现"需不需要界面侧补一次现读。
+
+**5.5-d 不做的事**：不做崩溃后自动续推（没有判据要它，且"谁替人决定重跑"正是接管这一片反对的那只手）；
+不把暂停单开放给模型（`respond` 与加白撤白同属人表态的口，机检第 ⑧ 条同口径）；不做暂停单的历史回看界面
+（`answered_at` 那两列留着是给对账用的，界面上的"曾经哪张单被谁批过"归 5.5-e 之后另议）。
+
 **5.4-c 落地时的原地更正（2026-10-03）**（下面两段是 5.4 的补记，按落片顺序追加在 5.5 之后，内容仍归 5.4）：① 上面只说了"两处挂同一个 hook"，落片时发现还差一道机检——
 第 5 条（`runner.current` 调用点唯一 + 无定时器）拦得住"对话自己再读一份"，拦不住"对话根本不读"，
 后者表现恰好是这条验收要防的"对话里看不见进度"，所以补了 `check-renderer-conventions.ts` 第 6 条：
