@@ -1135,7 +1135,7 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
 
 | ID     | 验收标准                                                                                   | 方式 | 验证操作                                 | 状态 |
 | ------ | ------------------------------------------------------------------------------------------ | ---- | ---------------------------------------- | ---- |
-| 5.5-01 | 任意时刻用户可接管内嵌浏览器，界面明确显示"已人工接管"，agent 自动化停住                   | V    | 接管 → 截图状态标识                      | [ ]  |
+| 5.5-01 | 任意时刻用户可接管内嵌浏览器，界面明确显示"已人工接管"，agent 自动化停住                   | V    | 接管 → 截图状态标识                      | [x]  |
 | 5.5-02 | 接管期间 agent 不发出任何动作（含只读动作也不改变页面）                                    | U    | 接管后断言动作计数为 0                   | [x]  |
 | 5.5-03 | 恢复时**强制重读**目标页面状态，不复用接管前的 DOM 快照                                    | U    | 接管时改页面 → 恢复 → 断言重读发生       | [ ]  |
 | 5.5-04 | 元素指纹不匹配时重新规划该步，而不是硬点或按索引回退                                       | U    | 改结构 → 断言走重规划分支                | [ ]  |
@@ -1214,6 +1214,70 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
   `FakeTakeoverService` 被两份台架用。⑥ 前端三项：本片零渲染层改动（无新文案、无样式、无图标）。
   ⑦ 提交分六片：core 契约 / browser 状态源（含装配与白名单）/ browser 那份用例 / agent 闸门与恢复口
   （含 policy 与 loop 的用例、main 的两份台架）/ 机检脚本第 ⑧ 条 / 本篇文档，逐片推 `origin/main`。⑧ 暂存区只有源码、测试与本文档；探针脚本与四份门禁日志都在被忽略的 `tmp/`（§7.5）。
+
+**5.5-b 落地记录（2026-10-03）**——接管态进界面：常驻横幅 + 两把分开表态的手 + 拒因原话留在提示行
+
+- **落点**：`packages/renderer/src/useTakeover.ts`（新增：只读 `browser.takeover.held()`、订
+  `browser/takeover-changed` 后**现读**、两只动作 `hold` / `release`）、`TakeoverBanner.tsx`（新增：一行常驻状态条）、
+  `format.ts`（`formatElapsed`，`m:ss`）、`useAgentRun.ts`（第四个动作之后加 `resume`，注释同步改「五个动作」）、
+  `AgentRunPanel.tsx`（页脚在 `paused` + `stopReason === TAKEOVER_HELD` 时多一颗「继续这条任务」与一句随接管态切换的提示，
+  新增 `pageHeld` / `onResume` 两个入参）、`ChatPanel.tsx`（把当前 run 的 id 递给 `useTakeover`、把横幅插进档位行下方、
+  把 `pageHeld` / `onResume` 接进计划卡）、两份语言包（`chat.takeover.*` 十三键 + `agent.run.{resume,actionResume,resumeHint,resumeHeldHint}`
+  + `agent.run.stopReason.{TAKEOVER_HELD,RESUMED_AFTER_TAKEOVER}`，zh-CN / en 齐）、
+  `scripts/check-agent-model-authority.ts`（第 ⑧ 条名单加第三份文件与第三个形状）。
+- **判据 5.5-01 的三截各落在哪一帧**（`docs/acceptance/5.5/`，九张 png 两两 sha1 不同 + `5.5-01-live-readout.txt`）：
+  「任意时刻可接管」= `5.5-01-idle-banner.png`（未接管时那一条也常驻，读数是「页面在 agent 手里」+ 一句
+  「接管只停住后面的动作，不打断正在飞的那一步」+「我来接管」，它在消息流**之外**，不随卡片滚走）；
+  「界面明确显示已人工接管」= `5.5-01-held-banner-1.png` / `-2.png`（琥珀条：「已人工接管 · 由你按下「我来接管」 ·
+  已接管 0:01」→ 同一位置 0:02，时长是主进程给的 `startedAt` 现算的，界面只扳重画、不另起一份账）；
+  「agent 自动化停住」= `5.5-01-agent-stopped-at-safe-point.png`（接管中按「确认并执行」，计划卡落成
+  已暂停 / 已落 0 / 3 步 / 已用 139 token / 「被人工接管按住，停在安全点」，第三步仍是「未开始」，
+  同一时刻库里 `stepRows:[]`、`plan_step_index:0`——**一格都没开工**，与 5.5-a 判定口那 18 格对得上）。
+  顺带把 5.5-02 的界面半边拍下来了：`5.5-01-resume-refused-while-held.png` 里拒因是主进程原话
+  「继续被接管按住的任务 失败：页面仍在人工接管中，自动化不能恢复：先交还页面（那是人的手，系统不代按），再按这一次「继续」」，
+  与「继续这条任务」按钮、提示「页面仍在人工接管中，先交还页面再按继续」同框；
+  `5.5-01-page-handed-back.png`（交还后横幅回「页面在 agent 手里」，那条 run **仍**是 paused——系统不代按继续）；
+  `5.5-01-resumed-and-completed.png`（人再按继续之后第 1 步真出手并落「已完成 · 检索「支付」：切出 1 个 token → 0 条命中」）。
+- **两把按钮是两次分开表态，界面上不合并**：交还页面 = `browser.takeover.end`（只把页面还回自动化，不碰任何 run）；
+  继续这条任务 = `agent.loop.resume`（只在那条 run 是因接管停在安全点时管用）。**「继续」在接管中不禁用**：
+  禁掉就看不到主进程那句原话，而 §2.6 的口径是「边界校验只在系统边界做」——真拒的是主进程，界面把拒因留在提示行里。
+- **5.5-09 那处口径差按了一半**：`begin` 的 `runId` 位现在由界面填（`ChatPanel` 把 `agentRun.run?.runId` 递进去），
+  读数里两条 `takeover_events` 都带 `run_id`，人按下接管那一路「按 run 查那段时间」已经闭合。
+  **自动那一路（风控 / 登录失效）仍不闭合**：发信号的是 L2 的 `browser.risk` 与 `sessions`，它们不知道 L3 当下跑着哪条 run，
+  而层级只许上层依赖下层（§4.1）——要合流只能自上而下登记，不在本片硬扭。这一条继续留在 5.5-e 的收尾里。
+- **机检第 ⑧ 条按实际命中改，而不是按预告改**：5.5-a 写的是「接界面时把 `ChatPanel` 补进名单」，实测命中的是
+  `useAgentRun.ts`——`'loop.resume'` 这个桥接客户端形状只出现在 hook 里，`ChatPanel` 只调 `agentRun.resume()`。
+  名单因此是 `loop.ts`（定义）/ `bridge.ts`（白名单派发）/ `useAgentRun.ts`（界面这一手）三份，
+  并且**新增第三个形状**而不是放宽判据：模型若能自己按「继续」，接管就挡不住任何东西。
+- **补掉一处会漏在页面上的裸键**：`resume` 会把 run 的 `stop_reason` 就地改写成 `RESUMED_AFTER_TAKEOVER`
+  （5.5-a 定的语义：留着 `TAKEOVER_HELD` 会同时读成「正在跑」与「被接管按住」），而计划卡用
+  `t(\`agent.run.stopReason.${run.stopReason}\`)` 画它——这个 key 两份语言包里都没有，恢复那一瞬界面会甩出裸键。
+  动态模板键是 i18n 机检的已知盲区（`pnpm lint` 只查字面量键），本片补上中英两条。
+- **两条 harness 坑（§9 级别，别再撞）**：① `data-action="resume-run"` 在 `WorkflowLabPanel` 与 `AgentRunPanel`
+  **同名**（两只按钮属于两个视图，不是 app 缺陷），页内按裸属性选会选到另一只——取证脚本一律限定
+  `[data-testid=agent-run-panel] [data-action=...]`，读数里带 `resumeMatches` 自证命中数。
+  ② 对话列表可视高度只有 ~147px（上面被白名单面板、横幅、提示行占住），而提示行在计划卡**内部**、页脚之上：
+  第一版按 `reveal(notice)` 拍的那一帧里拒因被 ChatPanel 的置底副作用拉回了底部（5.2-c 第 ② 条坑的第二次，
+  这次是取景被完全覆盖）。改成「等提示行落定 → `sleep 600` → 连滚两次 → 打印 `noticeVisibleTop` 自检」，
+  自检读数 `top:6 / bottom:55 / viewport:147` 证明那一行确实在视口里，才按快门。
+- **两轮取证、两条 run，如实分开记**：阶段 A（`2d38bbac…`）走完未接管 → 接管 → 接管中确认 → 按继续被拒 → 交还 →
+  按继续跑完的整条；阶段 B（`4612a862…`）是为把拒因那一帧框进视口而重跑的同一序列。两份读数在同一文件里，
+  各自的 `run_id` 与 `takeover_events` 逐条对得上（阶段 B 的库里 `stepRows:[]` + 一行 `begin` 带同一个 run_id）。
+  上限用装配默认值 12 步 / 4000 token，没有为测试改配置；`tmp/dev-userdata` 在被忽略的目录里。
+- **四道门禁实测**（收口前复跑，退出码逐个 echo）：`pnpm typecheck` exit 0、`pnpm lint` exit 0（含九条机检与
+  「恢复被接管按住的 run 只有人这一条口」那一条通过）、`pnpm format:check` exit 0、`pnpm test` exit 0。
+  macOS / Linux 运行期未验证（§9，一律 BLOCKED）。
+- **逐条状态位**：5.5-01 → `[x]`（V，判据三截各有帧 + 机读读数）。5.5-02 / 07 / 09 保持 `[x]`，
+  本片只把 09 的「人按那一路」闭合、自动那一路如实留着。5.5-03 ~ 06、08、10 分属 c / d / e 三片，未动。
+- **§7.4 收尾自检**：① 四道门禁见上一条。② V 类：5.5-01 九张帧逐条对应判据的三截，另有 `5.5-01-live-readout.txt`
+  与库里的行对账。③ 状态位无模糊项。④ 复用检查：接管读数只有 `browser.takeover.held()` 一份事实，
+  hook 不存事件载荷、只现读；时长格式化进 `format.ts`（那里已经是第三处共用读数格式化）；
+  动作外壳复用 `useBridgeAction`（忙碌态 / 提示行 / 跑完一律重读），没有另起一套。⑤ 死代码：无未用导出，
+  `formatElapsed` 与 `resume` 都有真实消费者；`takeover.audit` 仍未开进白名单（回看界面归 5.5-e）。
+  ⑥ 前端三项：新增 19 条文案 zh-CN / en 双语齐备（i18n 机检过）、样式全 Tailwind、
+  图标只用 lucide 的 `Hand` / `MousePointerClick` / `Play`。⑦ 提交分两片：代码 `feat(ui)` 与文档 `docs(agent)`，
+  逐片推 `origin/main`。⑧ 暂存区只有源码、两份语言包、机检脚本、本文档与 `docs/acceptance/5.5/**`
+  （九张 png + 一份读数）；探针脚本、原始截图与门禁日志都在被忽略的 `tmp/55b/`（§7.5）。
 
 ## 5.6 会话持久化、压缩与脱敏
 
