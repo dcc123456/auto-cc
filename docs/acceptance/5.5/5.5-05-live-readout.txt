@@ -1,0 +1,46 @@
+5.5-05 真·杀进程重启的现场读数（dev userData = tmp/dev-userdata，CDP 10222，app 页 --url 5173）
+方法：全自动档发 `/run 用 outbound.greet.perform 打招呼` → 循环在第 0 步开出一张确认单挂住 →
+`taskkill /F /PID <netstat 查到的 10222 持有者> /T` 硬杀 → `pnpm dev` 重启 → 在**重推出来的那张卡**上点批准。
+
+════════ 杀进程之前 ════════
+界面（tmp/harness/pause-read.js 经 harness eval）：
+  tier = 全自动
+  agent-pause-band: data-pause-count = 1
+  agent-pause-approval: data-pause-request-id = 44a99eb1-c5c7-4cc4-967c-2f7bb8fed4fe, kind = approval
+  agent-run-panel: data-run-id = 95dd55cd-687f-40ff-932e-746ba6699969
+                   data-run-status = running, data-run-stop-reason = ""（空）
+库里（node:sqlite 只读直查 tmp/dev-userdata/store.db）：
+  agent_run   : status=running, plan_step_index=0, tokens_used=46, stop_reason=null
+  agent_step  : []（挂在确认单上的那一步还没写行——批准之后才有 `pending` 那一位）
+  agent_pause_requests（号段 22）:
+    requested_at=1791025142825, expires_at=1791025262825, resolved_at=null, resolution=null
+一句话形状：一行写着「正在跑」的 run + 一张没人应答的单，正是进程被 kill 那一刻留下的样子。
+
+════════ 重启之后（还没点任何东西）════════
+界面：
+  agent-pause-band: data-pause-count = 1
+  agent-pause-approval: data-pause-request-id = 44a99eb1-c5c7-4cc4-967c-2f7bb8fed4fe（**同一个 id**）
+  渲染层零改动：卡片是首次绘制时现读 `agent/pause.pending()` 拿到的，
+  init 期那次 `pause/pending` 事件没有订阅者（「事件负责此刻提醒，读数负责错过了也还在」）。
+
+════════ 在重推的卡上点「批准」之后 ════════
+界面：
+  agent-pause-band: data-pause-count = 0
+  agent-pause-approval 消失，卡片留下 data-pause-resolved-outcome = answered
+库里：
+  agent_run : status=paused, stop_reason=INTERRUPTED, plan_step_index=0, tokens_used=46,
+              updated_at=1791025258624 ← 对账写在 [Service.init]，早于下面那次应答的 1791025348555
+  agent_step: []（**没有因为批准而新增任何一步** → 不重放、也不跳过，D3/5.5-06 的判据）
+  agent_pause_requests:
+    resolution=approve, resolved_at=1791025348555
+    ——比原本 expires_at=1791025262825 晚 85730 ms（约 86 秒）：超时是从「从重推这一刻」重新计时的，
+      不是拿旧期限把重启后的卡片判成超时（D2 的判据）。
+  usage_ledger: 最新一条 greet 仍是 id 19 / ts 1791012076323，
+    早于本次 run 的 created_at 1791025115098 → **批准一张重推的单没有造成任何外发**。
+
+════════ 证据文件与各自形状 ════════
+  5.5-05-before-kill.png        杀进程前：跑着的 run 面板 + 挂着的确认单
+  5.5-05-after-restart-card.png 重启后：同一 requestId 的卡片自己重新出现（渲染层未改）
+  5.5-05-answer-after-restart.png 点完批准：卡片收敛成 answered，run 停在 INTERRUPTED
+注：run 行上 INTERRUPTED 那段文案本身**没有截图证据**——`useAgentRun` 不在挂载时恢复历史 run，
+重载后老 run 的读数拿不到（「回看」是另一片范围）。这一半只有上面的库读数支撑，spec 里如实写。

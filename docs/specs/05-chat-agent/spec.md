@@ -1139,8 +1139,8 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
 | 5.5-02 | 接管期间 agent 不发出任何动作（含只读动作也不改变页面）                                    | U    | 接管后断言动作计数为 0                   | [x]  |
 | 5.5-03 | 恢复时**强制重读**目标页面状态，不复用接管前的 DOM 快照                                    | U    | 接管时改页面 → 恢复 → 断言重读发生       | [x]  |
 | 5.5-04 | 元素指纹不匹配时重新规划该步，而不是硬点或按索引回退                                       | U    | 改结构 → 断言走重规划分支                | [x]  |
-| 5.5-05 | 检查点包含**待决审批请求**；重启后未应答的请求以新的可见卡片重新出现                       | V+C  | 挂起审批 → 杀进程重启 → 截图待决卡片     | [ ]  |
-| 5.5-06 | 检查点还原后 `runId` 与已完成步不重复执行（幂等键 `runId+nodeId+targetId` 生效）           | U    | 还原 → 断言已完成步未重放                | [ ]  |
+| 5.5-05 | 检查点包含**待决审批请求**；重启后未应答的请求以新的可见卡片重新出现                       | V+C  | 挂起审批 → 杀进程重启 → 截图待决卡片     | [x]  |
+| 5.5-06 | 检查点还原后 `runId` 与已完成步不重复执行（幂等键 `runId+nodeId+targetId` 生效）           | U    | 还原 → 断言已完成步未重放                | [x]  |
 | 5.5-07 | 登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA                          | U    | 三类 fixture 响应 → 断言均停住并通知     | [x]  |
 | 5.5-08 | 用户在场手动操作后，agent 能正确识别"这一步已被人做完"并跳过                               | V    | 手动完成打招呼 → 恢复 → 截图显示跳过该步 | [ ]  |
 | 5.5-09 | 接管与恢复全过程写入步记录（可审计谁在何时动了页面）                                       | U    | 查 run 记录含接管时间段                  | [x]  |
@@ -1341,6 +1341,67 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
   已知盲区，按 5.5-b 同一口径人工补齐）、样式与图标零改动。⑦ 提交分四片：core 契约 / agent 循环与用例
   （含装配与语言包）/ 语言包提示文案更正 / 本篇文档，逐片推 `origin/main`。⑧ 暂存区只有源码、测试、两份语言包、
   `cordis.yml` 与本文档；四份门禁日志在被忽略的 `tmp/`（§7.5）。
+
+**5.5-d 落地记录（2026-10-03）**——待决审批进检查点：崩在"人还没表态"的那一刻，卡片会自己回来，那一步不会重跑
+
+- **落点（三片代码提交）**：`f1e4a3e` `packages/core/src/pending-channel.ts` 的 `open()` 加**可选给定单号**入参
+  （默认行为一字不变——这只通道是 `outbound.deliver` 的确认单（2.6-c）也在用的那一只，§2.5 不许另起第二条）；
+  `c559b97` `agent.pause` 建表（**号段 22**）+ 开单落账 + 定局补两列 + `[Service.init]` 重推未定局的老单；
+  `19c7b05` `agent.loop` 的 `[Service.init]` 崩溃对账 + `INTERRUPTED` 的中英文案。
+- **D1 的列名就地更正**：实际两列叫 `resolved_at` / `resolution`，plan 里写的 `answered_at` / `decision` 已改口。
+  不叫 `answered` 的理由是这一格记的是**定局**：三种定局里只有 `answered` 是人表过态，`timed-out` 也要落在同一对列上
+  （超时是这张单的结局，不是"没有结局"）。
+- **`cancelled` 不落账**（plan 的 D1/D2 没写到这一格，落片时才逼出来）：通道第三种定局说的是**等待方消失了**
+  （叫停、服务被重建、干净退出），不是这张单有了结局。把它记成任何一种 `resolution`，重启后就没有依据把这张单重推回来，
+  "崩过一次"与"干净退过一次"还会在账上长得一模一样。所以 `markResolved` 对 `cancelled` 直接早退，那一行保持
+  `resolved_at IS NULL`——**重推因此对两种停法都成立，不需要区分进程是怎么停的**。超时按 `timed-out` 记成它自己，
+  绝不记成 `deny`（5.3-10 的口径：超时＝未确认，不是有人说不）。
+- **D2 重推的是卡片，不是 Promise**：唯一查询 `WHERE resolved_at IS NULL ORDER BY requested_at`（配同族索引，
+  否则每次启动全表扫），**沿用老单号**；`requested_at` / `expires_at` 两列不改写（那是这张单第一次开出的时刻），
+  定时器由通道按传进去的 `timeoutMs` **从重推这一刻重新算**。活体证据：应答时刻 `1791025348555` 比原 `expires_at`
+  `1791025262825` 晚 85.7 秒——旧期限没有把重启后的卡片当场判成超时。重推的单应答后**只落两处**：台账补 `resolution`、
+  发一次 `agent/pause-resolved`；它**不放行任何一步**（这条 run 早在对账时停成 `paused`，`respond` 找不到也不该找回
+  等待它的那个 Promise）。用例与活体读数同形状：`agent_step` 仍空、`usage_ledger` 最新一条 greet 仍是本次 run 之前的 id 19。
+- **D3 对账**：`[Service.init]` 里 `ensureSchema` 之后、就绪日志之前，把 `status='running'` 的行逐条落成
+  `paused` + `stopReason='INTERRUPTED'`，游标与 token 两列原样带回（只改状态位，不"顺手"重置进度），每改一条发一次
+  `agent/run-updated`，条数进就绪日志（不让这条恢复静默）。这一位与 `TAKEOVER_HELD` **必须分开**：`resume` 只认后者，
+  混用等于把"重启后按继续"变成"替人重跑崩溃那一刻的动作"。词汇取自工作流那侧的 `run-store.ts markInterrupted()`
+  （同一件事不新造第二套说法），`AGENT_RUN_STATUSES` 一字未动——不因此多开第六种界面状态。
+- **5.5-06 是断言不是新机制**（D4 成立）：幂等在循环这一侧的形状是 `agent_step` 主键 `(run_id, plan_step_index)`
+  - 游标由 `ensureScope` 从库里重建，**不是**判据栏那句工作流的 `runId+nodeId+targetId` 三元组（按命名差异处理，
+    判据"已完成步不重复执行"逐字成立）。三条用例：跑两步 + 第三步挂在门后的工具里 → 卸掉旧实例 → 重新挂载 →
+    ① 那一行从 `running` 变 `paused`+`INTERRUPTED`、游标仍是 2；② `calls` 仍是 `['tick:1','tick:2']`（**不重放**）
+    且步行仍是 `ok/ok/pending`（**不跳过**）；③ `resume` 拒（`AGENT_LOOP_NOT_RESUMABLE`）。另有一条反向：干净跑完的
+    `completed` run 经同一次重建后原样不动。
+- **台架为什么绝不打开那只门**（cordis 的事实，写下来省得下次再撞）：崩在一步中途的形状要靠一只**不接 abort 信号**的
+  工具来摆——叫停的语义就是不硬切，所以卸载循环服务时那一行留在 `running`。若在用例结尾 `gate.open()` 再 await 那条
+  in-flight 的 `confirm`，旧实例会在自己的上下文已失效之后醒来写库，撞 `cannot get required service "store" in
+inactive context`（`loop.ts:384`）；那是 cordis 的重建语义，不是本片要判的东西，真·崩掉时那只门随进程一起没了。
+  顺带一条：dispose 期 abort **确实**会让暂停卡路径同步写回 `PAUSE_CANCELLED`，所以"热改配置重建"与"进程被 kill"
+  在 run 行上只有靠那只不接 abort 的工具才分得开——而两种停法走的是同一个对账口，这正是 D3 要的。
+- **渲染层零改动**（plan 取证 ③ 兑现）：卡片是首次绘制时现读 `agent.pause.pending()` 拿到的，init 那一次
+  `agent/pause-requested` 发出去时**还没有订阅者**——「事件负责此刻提醒，读数负责错过了也还在」这条既有分工，
+  正是"重启后卡片自己出现"不需要新代码的原因。
+- **这一片没有做到什么（诚实标注）**：run 行上 `INTERRUPTED` 那段文案**只有库读数，没有截图**。`useAgentRun` 不在挂载时
+  恢复历史 run（"回看"归 5.5-e 之后另议），所以重载后老 run 的读数拿不到，界面没有承载它的那一格。两条判据都不依赖
+  这一格（5.5-05 要的是卡片，5.5-06 要的是不重放），故按各自判据栏勾 `[x]`；这条限制同时是 5.6-01（重启后四类记录
+  全部可加载）会撞上的第一块地方，写在这里给那一片留话。
+- **四道门禁实测**（收口前复跑，退出码逐个 echo）：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`
+  各 exit 0，21 个测试包无一失败（`packages/agent 155`，其中 5.5-06 三条与暂停单账目若干为本片新增；
+  `packages/core 45`，Piece A 四条）。macOS / Linux 运行期未验证（§9，一律 BLOCKED）。
+- **逐条状态位**：5.5-05 → `[x]`（V+C）、5.5-06 → `[x]`（U）。5.5-01 / 02 / 03 / 04 / 07 / 09 保持 `[x]`；
+  5.5-08 / 10 归 5.5-e，仍是 `[ ]`。
+- **§7.4 收尾自检**：① 四道门禁见上一条。② V 条目证据：`docs/acceptance/5.5/5.5-05-before-kill.png`
+  （sha1 `1dae4957…`）、`5.5-05-after-restart-card.png`（`95ca36ea…`）、`5.5-05-answer-after-restart.png`
+  （`9aa223e8…`）——三张逐条目独立捕获、两两 sha1 不同，另有一张同帧全页图（与 card 那张 sha1 相同）按 §7.5 留在
+  `tmp/` 未入库；机读读数在 `5.5-05-live-readout.txt`。③ 状态位无模糊项，未做的写明归属。④ 复用检查：单号路由 /
+  超时 / 收单全部复用 `PendingChannel`（只加一个可选入参），对账复用 `updateRun` 唯一写入口，词汇复用工作流的
+  `markInterrupted`——没有第二张表、第二条通道、第二套状态。⑤ 死代码：`reconcileInterruptedRuns` 的返回值进就绪日志
+  （不是留着没人读的计数），`PauseResolution` 四种定局三种有消费者，`cancelled` 那一支的"不写"由 `markResolved`
+  的早退与注释共同钉住。⑥ 前端三项：只多一条 `agent.run.stopReason.INTERRUPTED`，zh-CN / en 齐（动态模板键仍是 i18n
+  机检的已知盲区，按 5.5-b 同一口径人工核对）；样式与图标零改动。⑦ 提交分四片：core 入参 / agent 表与重推 /
+  agent 对账与文案 / 本篇文档 + 证据，逐片推 `origin/main`。⑧ 暂存区只有这两份文档与 `docs/acceptance/5.5/` 下按条目号
+  命名的四份证据；门禁日志、dev userData、重复的那张全页截图都留在被忽略的 `tmp/`（§7.5）。
 
 ## 5.6 会话持久化、压缩与脱敏
 
