@@ -1226,6 +1226,38 @@ F6 的形状：`maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes)`�
 `M6b-01` 的原文说的是「超限**投递**被拒…（手动 + 调度两条路径）」：手动那半边由 `deliver.test.ts` 的真闸门用例判过，
 本片在调度那半边按 `deliver` 与 `greet` 各演一次，两条外发动作都盖到才算对上原文。
 
+### 7.5.7 5.7 收口后留下的两条设计（下一片照此执行，本轮只写不做）
+
+**决策十一：5.7-02 要的是"一只按引用回看的口"，不是把五种引用各开一只口。**
+现状（本轮现场读码）：`evidenceRefs` 由各家自己 mint——`ledger:<id>`（`greet.ts:353` / `deliver.ts:816`）、
+`job:<platform>/<jobId>`、`doc:<docId>`（`parse-service.ts:180` / `generate-service.ts:394`）、
+`hash:<sourceHash>`、`generation:<receiptId>`、`search:<platform>/<keyword>`（`jd-capture.ts:388`）、
+以及三种形状完全不同的 `snapshot:`（循环合成的 `snapshot:<toolId>@<at>`、页面读数的 `snapshot:<snapshotRef>`、
+投递引用的 `snapshot:<snapshotId>`）。渲染层 `ToolCard.tsx:126-134` 只把它们画成 `<li data-evidence-ref>` 的裸文本。
+**如果每种前缀各开一只 IPC 口并让界面去分派**，界面就得知道"哪条引用归谁管"——那是把主进程的路由表抄第二份（§2.5），
+而且循环合成的那类引用根本没有落盘正文，界面还会替它编一个空视图。
+所以下一片的形状是：**`agent.run.evidence(runId, planStepIndex, ref)` 一只口**（新文件 `packages/agent/src/loop/evidence.ts`），
+它按前缀现问归属服务（`maybeService`，§9 的 2.5 教训：不在本地存第二份事实），把读到的东西投影成一个统一视图
+`EvidenceRefView = { ref, kind, title, body, unavailableReason }`；
+**读不到就返回 `unavailableReason` 而不是抛**——今天的缺口本身就是要给人在屏幕上看懂的读数，
+三种缺口各有各的话：`ledger:` 没有按 id 的读数（只有 `summary().recent`，得给 `usage.ledger` 加一只按 id 的定点读法）、
+`generation:` 只有列表与 `accept`（得给生成服务加按 receiptId 的读法）、
+`snapshot:<toolId>@<at>` 是循环合成的、正文只进了当时的上下文没落盘（诚实的说法是"这条引用记的是时刻不是文件"）。
+界面侧只加"点开→在卡片下方内联展开这段读数"，复用既有的 `useBridgeAction` 与 `NodeEvidenceSection` 的呈现形状，
+白名单加这一条 path，双语各补 `chat.evidence.*` 若干键。判据的"每一步都能回溯"取决于**所有前缀都有确定结局**
+（读到正文 / 说明为什么读不到），不是取决于都能读到正文——这一条写进用例，别让 02 打成一个空心勾。
+
+**决策十二：#100 的白名单机检分三层，本轮判明"方法名存在性"这层不能用文本正则做。**
+`packages/shared/src/bridge.ts` 里同时住着运行期的裸字符串数组和编译期的类型化签名表（`'workflow.runner.readEvidence'`
+这类键两边各写一次）。可行的两层：① 每条白名单 path 在类型化表里有同名键，且表里没有白名单外的多余键
+（纯结构断言，测试面跑得动，抓的是"加了一口忘了声明"与"改了名只改一处"）；② path 的服务名段能在
+`packages/main/src/registry.ts` 的挂载集合里对上（抓的是"服务改名/摘除后白名单还留着"）。
+不可行的那层是"方法名真的存在于该 service 实例上"：`outbound.throttle` 的 `checkGap`、`deliver` 的若干手都是
+构造器上赋的实例箭头函数，`Object.prototype` 上查不到，正则扫源码又会假红；
+要真做得把整份 `cordis.yml` 的 46 个服务装进一个 `Context`，而 browser / sessions 这类服务在测试环境里挂不起来
+（§9 的会话与内核视图那条）。所以那一层的正确解是**在已有的装配级链路用例里逐个覆盖**（`schedule-gate-link.test.ts`
+那种形态就是它的活体证明），#100 保持 pending，别用一个脆的静态检查冒充它。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
