@@ -239,6 +239,85 @@ describe('工具调用的三条硬拦（spec 5.1-04 / 05 / 10）', () => {
 });
 
 /**
+ * `validateInput` 只读校验（spec 5.3-09 的「卡片上写着还缺哪几个字段」的来源）。
+ *
+ * 它与 `call` 分两半是因为循环里多了一个时机：**先问缺什么、再问能不能补**——
+ * 5.3-09 的补充信息单要在人不表态之前就知道「还缺 `jobId`」，而不能靠真的跑一次把手伸进副作用。
+ * 于是这里钉三件只有本函数才有的性质：字段名清单（界面上的措辞靠它，不靠中文原话）、
+ * 「没有这只手」不进字段清单（那是事实陈述不是入参问题）、以及**禁用不在它的口径内**
+ * （校验管的是形状，开放与否只有 `call` 拦得住，见 spec 5.1-10）。
+ */
+describe('入参的只读校验与缺失字段清单（spec 5.3-09）', () => {
+  /**
+   * 一只两个必填字段的靶工具（`missing` 要能列出两条才看得出「按字段名给」这件事）。
+   * @returns 合规声明：`strictObject` 且 `run` 什么都不做
+   */
+  function makeTwoFieldTool(): AgentTool<{ text: string; jobId: string }> {
+    return {
+      id: 'demo.two-fields',
+      titleKey: 'agent.tool.labels.demoTwoFields',
+      description: '两个必填字段的只读校验靶',
+      input: z.strictObject({ text: z.string().min(1), jobId: z.string().min(1) }),
+      effect: 'read',
+      requiresConfirmation: false,
+      run: (params) =>
+        Promise.resolve(toolResult({ echoed: params.text }, { summary: `已回读 ${params.text} / ${params.jobId}` })),
+    };
+  }
+
+  it('合格入参给出收窄后的值：调用方不必再解析一遍原始对象', async () => {
+    const { tools } = await boot();
+    tools.register(makeTwoFieldTool());
+    expect(tools.validateInput('demo.two-fields', { text: 'hi', jobId: 'jd-1' })).toEqual({
+      ok: true,
+      input: { text: 'hi', jobId: 'jd-1' },
+    });
+  });
+
+  it('缺哪几个字段就报哪几个字段名，中文原话里带着同样的字段名', async () => {
+    const { tools } = await boot();
+    tools.register(makeTwoFieldTool());
+    const check = tools.validateInput('demo.two-fields', { text: '' });
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    // 顺序跟着 schema 的声明顺序，界面上「还缺」那一行按它排；两条都缺就都列出来，
+    // 不做「先补一条再看下一条」的挤牙膏——那样一个人要点两轮才填得完。
+    expect(check.missing).toEqual(['text', 'jobId']);
+    expect(check.message).toContain('text');
+    expect(check.message).toContain('jobId');
+  });
+
+  it('整段不是对象时用 `-` 占位：卡片说「入参得是个对象」而不是「还缺一个空字段名的东西」', async () => {
+    const { tools } = await boot();
+    tools.register(makeTwoFieldTool());
+    const check = tools.validateInput('demo.two-fields', '请把第几次补上');
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    expect(check.missing).toEqual(['-']);
+  });
+
+  it('没有这只手时 missing 是空数组：那句原话是事实陈述，不是入参问题', async () => {
+    const { tools } = await boot();
+    const check = tools.validateInput('demo.not-here', {});
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    expect(check.missing).toEqual([]);
+    expect(check.message).toContain('未注册');
+  });
+
+  it('声明 disabled 的手在这里照样过形状校验：禁用是「开放」问题，只有 call 拦得住', async () => {
+    const { tools } = await boot();
+    tools.register({ ...makeTwoFieldTool(), disabled: true });
+    expect(tools.validateInput('demo.two-fields', { text: 'hi', jobId: 'jd-1' })).toMatchObject({ ok: true });
+    // 同一次调用走 `call` 才是那条拦得住的路（spec 5.1-10 的口径没有第二份）。
+    await expect(tools.call('demo.two-fields', { text: 'hi', jobId: 'jd-1' })).resolves.toMatchObject({
+      ok: false,
+      code: 'TOOL_DISABLED',
+    });
+  });
+});
+
+/**
  * 登记一只「交回统一读数」的假工具（spec 5.1-11 的三条判据共用一个构造口）。
  * @param tools 本次挂载的注册表
  * @param run 实现侧要交回的东西：成功读数或直接抛错，由用例决定

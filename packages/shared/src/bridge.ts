@@ -5,6 +5,9 @@
  * 因此「渲染层能调什么」与「主进程允许什么」永远是同一个常量，不会漂移。
  */
 import type {
+  AgentPauseAnswer,
+  AgentPauseResolvedEvent,
+  AgentPauseView,
   AgentRunView,
   AppErrorPayload,
   AutonomyLevel,
@@ -40,6 +43,10 @@ import type {
  * 所以不在此转出。
  */
 export type {
+  AgentPauseAnswer,
+  AgentPauseKind,
+  AgentPauseResolvedEvent,
+  AgentPauseView,
   AgentPlanStepView,
   AgentRunStatus,
   AgentRunView,
@@ -182,6 +189,12 @@ export const RENDERER_ALLOWLIST = [
   'agent.policy.exemptList',
   'agent.policy.setExempt',
   'agent.policy.clearExempt',
+  // 5.3-c 的暂停单（spec 5.3-08 / 09）：`pending()` 负责「错过了也还在」，`respond()` 是**人**按的那一格。
+  // 与 `agent.loop.confirm`、`agent.policy.setExempt` 同一口径：刻意不登记为 agent 工具——
+  // 模型若能自己应答自己的确认单，5.3-04 防的「agent 自己给自己放行」就换了个名字重演。
+  // 静态那半边由 `scripts/check-agent-model-authority.ts` 的 ⑦ 钉住。
+  'agent.pause.pending',
+  'agent.pause.respond',
   'chat.session.current',
   'chat.session.send',
   'chat.session.stop',
@@ -1431,6 +1444,18 @@ export interface BridgeSignatures {
    * @param toolId 工具 id；不在名单里时读数与调用前一致，不报错也不写审计
    */
   'agent.policy.clearExempt': { args: [toolId: string]; returns: ExemptToolView[] };
+  /**
+   * 当前在等的暂停单（spec 5.3-08 的读路）：两种卡片都从这一份现读，事件只负责「此刻提醒一下」。
+   * 没有在等的单时是空数组——界面因此没有「以为还有卡片」的余地。
+   */
+  'agent.pause.pending': { args: []; returns: AgentPauseView[] };
+  /**
+   * 把一句表态按单号送回那张单（spec 5.3-09）。返回值是**变更后的整份在等清单**，
+   * 与 `agent.policy.setExempt` 同一形状：界面一次调用即可刷新，不必自己把那张卡从列表里摘掉。
+   * @param requestId 单号，来自 `agent.pause.pending()` 或 `agent/pause-requested`
+   * @param answer `approve` / `deny` / 带文本的 `supply`；种类与单不相配、或查无此单时结构化失败且不落地
+   */
+  'agent.pause.respond': { args: [requestId: string, answer: AgentPauseAnswer]; returns: AgentPauseView[] };
   /** 当前会话的整份快照（spec 1.11-08）；首次访问就地建会话，永不为 null。 */
   'chat.session.current': { args: []; returns: ChatSnapshotView };
   /** 发一条用户消息并起一次流式回复，返回刚进入流式态的助手消息（spec 1.11-02 / 03）。 */
@@ -1619,6 +1644,10 @@ export const RENDERER_EVENTS = [
   'kb/entities-changed',
   // 5.2-c 的循环进度（spec 5.2-04）：逐步卡片流靠它推进，载荷就是 `agent.loop.read` 那份读数。
   'agent/run-progress',
+  // 5.3-c 的暂停单开与收（spec 5.3-08 / 10）：前者弹卡片，后者把卡片收掉——**超时与叫停也发这一条**，
+  // 界面上那张卡才不会悬着；它带的 `outcome` 说的是「没人应答」，不是「用户拒绝了」，措辞由此分开。
+  'agent/pause-requested',
+  'agent/pause-resolved',
 ] as const;
 
 export type RendererEventName = (typeof RENDERER_EVENTS)[number];
@@ -1636,6 +1665,8 @@ export interface RendererEventSignatures {
   'browser/risk-signal': RiskSignalEvent;
   'kb/entities-changed': KbEntitiesChangedEvent;
   'agent/run-progress': AgentRunView;
+  'agent/pause-requested': AgentPauseView;
+  'agent/pause-resolved': AgentPauseResolvedEvent;
 }
 
 /** 与 `BridgeSignaturesCovered` 同样的保险丝：新增事件名必须补载荷类型。 */

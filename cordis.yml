@@ -451,13 +451,24 @@ plugins:
   - id: agent-policy
     dependsOn: [agent, store]
 
+  # 暂停通道（spec 5.3-08 / 09 / 10）：「这一步要人表态」时唯一的等待处——确认单与补充信息单共用它，
+  # 单号路由、超时＝未确认＝不执行、销毁收单这三条性质长在 `@auto-cc/core` 的 `PendingChannel` 上。
+  # 不建表也不占迁移号段：待决暂停是**等待状态**而不是事实记录，经过落在 `agent_step` 与 `agent_run.stop_reason`。
+  # 无依赖：它只认「单号 + 人给的值 + 时刻」，不认识 run 也不认识注册表（谁都能开单，应答只按 id 路由）。
+  # `pauseTimeoutMs` 写在这里而不是代码里（4.x 起的同一条口径：代码内无魔法数）。
+  # **改这一格会连带重建 `agent-loop`**（它 inject 本服务，§9 的 2.5 实测）：可接受的前提是销毁时收单——
+  # 在等的卡全部按「未表态」定局、那条 run 停在安全点并写明原因，绝不留一个悬着的 `await`，也绝不放行。
+  - id: agent-pause
+    config:
+      pauseTimeoutMs: 120000
+
   # 对话循环（spec 5.2-01 / 05 / 08 / 11）：`agent_run` + `agent_step` 两张表由本服务把迁移
   # push 进 `store.migrations`，号段取 16（账本 1、会话 2、jobs 3、workflow run 4…生成记录 15）。
   # 模型腿是确定性桩（`loop/model.ts`）：真模型出网要花钱且须用户单独授权，本片不接。
   # 两条上限就是 5.2-11 的判据对象，在装配面板里改了就生效（改配置会重建本服务并清空内存作用域，
   # 进度因此一律从库里的 run/步行重建——见 `ensureScope` 的注释）。
   - id: agent-loop
-    dependsOn: [agent, agent-policy, chat, store]
+    dependsOn: [agent, agent-pause, agent-policy, chat, store]
     config:
       stepLimit: 12
       tokenBudget: 4000

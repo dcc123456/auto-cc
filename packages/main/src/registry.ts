@@ -5,7 +5,13 @@
  * `import(变量)` 在运行时拿不到路径。因此清单负责「装哪些」，这里负责「用哪个类装」。
  * 新增插件时同时改两处——清单漏了它就不装，注册表漏了它在插件树里显示 failed。
  */
-import { AgentLoopService, AgentPolicyService, AgentToolsService, ChatSessionService } from '@auto-cc/plugin-agent';
+import {
+  AgentLoopService,
+  AgentPauseService,
+  AgentPolicyService,
+  AgentToolsService,
+  ChatSessionService,
+} from '@auto-cc/plugin-agent';
 import {
   BrowserActService,
   BrowserLocateService,
@@ -149,6 +155,10 @@ export const REGISTRY: Registry = {
   // 单独占一个清单 id 是为了让 5.2-d 的反向验证可演——摘掉它，循环就拿不到判定而整条停住，
   // 而不是悄悄退回「没人判，照跑」。它只依赖注册表，档位从请求里带进来，不认 `chat`。
   'agent-policy': AgentPolicyService,
+  // 暂停通道（spec 5.3-08 / 09 / 10）：确认单与补充信息单的唯一等待处，不建表、不占号段。
+  // 单独占一个清单 id 是为了让「摘掉它」可演示：`agent-loop` inject 了它，摘掉这一行整条循环停在挂载期，
+  // 而不是悄悄退回「没人可等，照跑」——与上面 `agent-policy` 同一口径。
+  'agent-pause': AgentPauseService,
   // 循环（spec 5.2-01 / 05 / 08 / 11）：`agent_run` + `agent_step` 两张表的唯一落点，迁移号段 16。
   // 摘掉它，run 与步记录都不再产生（界面读不到任何进度），而工具面照旧可单点调用——
   // 「有一只手」与「有人排着计划用它」分属两条，与 1.11 的 agent/chat 分法同一口径。

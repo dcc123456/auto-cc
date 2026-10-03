@@ -10,7 +10,16 @@
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { asApp, Context, sleep, toolResult, type AgentRunView, type AutonomyLevel } from '@auto-cc/core';
+import {
+  asApp,
+  Context,
+  sleep,
+  toolResult,
+  type AgentPauseAnswer,
+  type AgentPauseView,
+  type AgentRunView,
+  type AutonomyLevel,
+} from '@auto-cc/core';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +30,7 @@ import { ChatSessionService } from '../session.js';
 import { AgentToolsService, type AgentTool } from '../tools.js';
 import { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, type AgentLoopConfig } from './loop.js';
 import { StubLoopModel, type ObservationRequest, type PlanDraftRequest, type PlanStepDraft } from './model.js';
+import { AgentPauseService } from './pause.js';
 import { AgentPolicyService, type PolicyDecision, type StepPermissionRequest } from './policy.js';
 
 /** 拆卸清单与临时库目录（每个用例一套，跑完即删）。 */
@@ -35,6 +45,14 @@ afterEach(async () => {
 /** 循环配置的起手值（上限类用例只改自己关心的那一位，其余照默认走）。 */
 const BASE_CONFIG: AgentLoopConfig = { stepLimit: 12, tokenBudget: 4000, contextCharsCap: 1200 };
 
+/**
+ * 台架的暂停超时（毫秒）。
+ *
+ * 取 1 秒而不是配置的缺省 120 秒：一个忘了收的单子不该把用例挂到两分钟，但也不能短到「测试还没来得及
+ * 表态它就超时」——超时那一条要的是它**自己**指定一个更短的值（见「无人表态」用例里的 200）。
+ */
+const BASE_PAUSE_TIMEOUT_MS = 1000;
+
 /** `agent_step` 的原始行读数——断言时直接对表说话，不经视图转换。 */
 type StepRecord = {
   run_id: string;
@@ -48,12 +66,17 @@ type StepRecord = {
 };
 
 /**
- * 装一套 store + 注册表 + 会话 + 判定口 + 循环，并登记一只留下副作用的假工具。
+ * 装一套 store + 注册表 + 会话 + 判定口 + 暂停通道 + 循环，并登记一只留下副作用的假工具。
  * @param overrides 循环配置覆盖
  * @param tier 起手档位；默认 `auto`（多数用例要的是「允许动手」），判定拒绝的用例显式传 `suggest`
- * @returns 上下文、四个服务句柄、副作用清单、临时库目录与循环的 fiber（重建服务时用）
+ * @param pauseTimeoutMs 暂停单的超时（毫秒）；超时类用例传一个短值
+ * @returns 上下文、五个服务句柄、副作用清单、临时库目录与循环的 fiber（重建服务时用）
  */
-async function bootLoop(overrides: Partial<AgentLoopConfig> = {}, tier: AutonomyLevel = 'auto') {
+async function bootLoop(
+  overrides: Partial<AgentLoopConfig> = {},
+  tier: AutonomyLevel = 'auto',
+  pauseTimeoutMs = BASE_PAUSE_TIMEOUT_MS,
+) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-loop-'));
   dirs.push(dir);
   const config: AgentLoopConfig = { ...BASE_CONFIG, ...overrides };
@@ -71,9 +94,12 @@ async function bootLoop(overrides: Partial<AgentLoopConfig> = {}, tier: Autonomy
   await chatFiber;
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
+  // `pauseTimeoutMs` 带 `.default()`，直接调用点必须显式给（AGENTS.md §9 的 1.3 实测）。
+  const pauseFiber = ctx.plugin(AgentPauseService, { pauseTimeoutMs });
+  await pauseFiber;
   const loopFiber = ctx.plugin(AgentLoopService, config);
   await loopFiber;
-  opened.push(loopFiber, policyFiber, chatFiber, toolsFiber, storeFiber);
+  opened.push(loopFiber, pauseFiber, policyFiber, chatFiber, toolsFiber, storeFiber);
   const app = asApp(ctx);
   /** 副作用清单：每进一次工具实现追加一条；判「被拒 = 什么都没发生」就看它空不空。 */
   const calls: string[] = [];
@@ -85,6 +111,7 @@ async function bootLoop(overrides: Partial<AgentLoopConfig> = {}, tier: Autonomy
     tools: app['agent.tools'],
     chat: app['chat.session'],
     policy: app['agent.policy'],
+    pause: app['agent.pause'],
     loop: app['agent.loop'],
     calls,
     loopFiber,
@@ -104,6 +131,51 @@ async function remountLoop(ctx: Context, overrides: Partial<AgentLoopConfig>): P
   opened.push(fiber);
   return asApp(ctx)['agent.loop'];
 }
+
+/** 一张被观察到的暂停卡片：通道的读数 + 测试这边按了什么 + 通道最后定的局。 */
+type CardRecord = AgentPauseView & { decision: string | null; outcome: string | null };
+
+/**
+ * 装上「人会怎么按」的那只手：订阅暂停事件，按 `answerFor` 给的表态应答每一张开出的单，并把卡片留档。
+ *
+ * 为什么做成订阅而不是让测试直接调 `ask`：判据要的是「循环自己开的那张单被人应答之后它怎么走」，
+ * 测试替循环开单就成了另一件事。应答走的是与界面同一条 `agent.pause.respond`。
+ * @param ctx 本次台架的上下文
+ * @param pause 暂停通道句柄
+ * @param answerFor 看到这张单时的表态；返回 null 表示「没人理它」（走超时或叫停）
+ * @returns 按开出顺序的卡片清单（含表态与定局），供用例逐张断言
+ */
+function watchPauses(
+  ctx: Context,
+  pause: AgentPauseService,
+  answerFor: (request: AgentPauseView) => AgentPauseAnswer | null,
+): CardRecord[] {
+  const seen: CardRecord[] = [];
+  ctx.on('agent/pause-requested', (event) => {
+    const card: CardRecord = { ...event, decision: null, outcome: null };
+    seen.push(card);
+    const answer = answerFor(card);
+    if (answer !== null) {
+      pause.respond(event.requestId, answer);
+      card.decision = answer.decision;
+    }
+  });
+  // 定局那一格只由 `agent/pause-resolved` 填：超时与叫停也得让卡片消失，而它带的不是「人按了什么」。
+  ctx.on('agent/pause-resolved', (event) => {
+    const card = seen.find((entry) => entry.requestId === event.requestId);
+    if (card) card.outcome = event.outcome;
+  });
+  return seen;
+}
+
+/** 一句「有人按批准」的表态机（多数确认单用例只要它）。 */
+const APPROVE = (): AgentPauseAnswer => ({ decision: 'approve' });
+
+/** 一句「有人按拒绝」的表态机。 */
+const DENY = (): AgentPauseAnswer => ({ decision: 'deny' });
+
+/** 一张也没人应答的表态机（超时与叫停那两条判据用它）。 */
+const NOBODY = (): null => null;
 
 /**
  * 一只「执行就留痕」的假工具（5.2-02 / 05 的判据都要能证明「拒了就是没发生」）。
@@ -197,6 +269,29 @@ describe('桩模型的确定性草案（5.2-01）', () => {
   });
 });
 
+/**
+ * 一只「每次都要人批准」的假工具（5.3-08 的 `approval` 那一路以它开局）。
+ * @param calls 副作用清单
+ * @returns 合规声明：`outbound` 级 + `requiresConfirmation: true`
+ */
+function makeApprovalTool(calls: string[]): AgentTool<{ n: number }> {
+  return {
+    id: 'demo.needs-approval',
+    titleKey: 'agent.tool.labels.demoNeedsApproval',
+    description: '要求批准才可执行',
+    input: z.strictObject({ n: z.number().int().min(0) }),
+    effect: 'outbound',
+    requiresConfirmation: true,
+    run: (params) => {
+      calls.push(`approved:${String(params.n)}`);
+      return Promise.resolve(toolResult({ n: params.n }, { summary: '批准后执行完成' }));
+    },
+  };
+}
+
+/** 点名那只「每次都要人批准」的手（与 `goalNaming` 同一口径：输入即脚本）。 */
+const APPROVAL_GOAL = 'demo.needs-approval {"n":1}';
+
 describe('每一步都过判定口（5.2-02）', () => {
   it('确认之前零动作：只有 run 行与计划，没有任何步行、没有任何副作用', async () => {
     const { loop, store, calls } = await bootLoop();
@@ -208,9 +303,10 @@ describe('每一步都过判定口（5.2-02）', () => {
   });
 
   it('档位「建议模式」下确认计划：步记 refused 并写明原因，工具一次都没进', async () => {
-    const { loop, calls } = await bootLoop({}, 'suggest');
-    const proposed = await loop.propose(goalNaming(2));
-    const finished = await loop.confirm(proposed.runId);
+    const rig = await bootLoop({}, 'suggest');
+    const cards = watchPauses(rig.ctx, rig.pause, NOBODY);
+    const proposed = await rig.loop.propose(goalNaming(2));
+    const finished = await rig.loop.confirm(proposed.runId);
     expect(finished).toMatchObject({ status: 'failed', stopReason: 'POLICY_REFUSED' });
     expect(finished.steps).toHaveLength(1);
     expect(finished.steps[0]).toMatchObject({
@@ -221,26 +317,56 @@ describe('每一步都过判定口（5.2-02）', () => {
     });
     expect(finished.steps[0]?.observation).toContain('建议模式');
     // 判据的实质不是「返回了错误」，而是实现根本没被叫起来。
-    expect(calls).toEqual([]);
+    expect(rig.calls).toEqual([]);
+    // 这一档连一张单都不该开：档位本来就不许动手，还替它收表态就是替用户做一个他没打算做的决定
+    // （5.3-08 只把 `CONFIRMATION_REQUIRED` 接进通道，别的拒因照旧一步落 `refused`）。
+    expect(cards).toEqual([]);
   });
 
-  it('一只自己声明要批准的手，`auto` 档也不替用户点头：CONFIRMATION_REQUIRED 且零副作用', async () => {
-    const { loop, tools, calls } = await bootLoop();
-    tools.register({
-      id: 'demo.needs-approval',
-      titleKey: 'agent.tool.labels.demoNeedsApproval',
-      description: '要求批准才可执行',
-      input: z.strictObject({ n: z.number().int().min(0) }),
-      effect: 'outbound',
-      requiresConfirmation: true,
-      run: (params) => {
-        calls.push(`approved:${String(params.n)}`);
-        return Promise.resolve(toolResult({ n: params.n }, { summary: '不该走到这里' }));
-      },
+  it('一只自己声明要批准的手：先开一张确认单，人批准之后这一步照原样跑', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
+    const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      kind: 'approval',
+      toolId: 'demo.needs-approval',
+      planStepIndex: 0,
+      round: 1,
+      missing: [],
+      decision: 'approve',
+      outcome: 'answered',
     });
-    const finished = await loop.confirm((await loop.propose('demo.needs-approval {"n":1}')).runId);
-    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'CONFIRMATION_REQUIRED' });
-    expect(calls).toEqual([]);
+    // 卡片上那句原话是判定口的理由原文，循环不另编一句（人得知道自己批的是哪一档动作）。
+    expect(cards[0]?.reason).toContain('要先由你批准');
+    expect(finished.steps[0]).toMatchObject({ status: 'ok', code: null });
+    expect(finished).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    expect(rig.calls).toEqual(['approved:1']);
+  });
+
+  it('同一只手的确认单上按「拒绝」：步记 refused + PAUSE_DENIED，工具一次都没进', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, DENY);
+    const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+    expect(cards[0]).toMatchObject({ decision: 'deny', outcome: 'answered' });
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'PAUSE_DENIED' });
+    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_DENIED', evidenceRefs: [] });
+    expect(finished.steps[0]?.observation).toContain('按了拒绝');
+    // 与 5.2-02 同一实质判据：拒绝不是「返回了错误」，而是实现根本没被叫起来。
+    expect(rig.calls).toEqual([]);
+  });
+
+  it('免确认白名单是这条分支的另一条出口：加白之后不再开单，直接跑', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
+    rig.policy.setExempt('demo.needs-approval');
+    const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+    expect(cards).toEqual([]);
+    expect(finished).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    expect(rig.calls).toEqual(['approved:1']);
   });
 
   it('起草之后手被摘掉：执行时按注册表现读的结果拒，认它是 TOOL_UNAVAILABLE', async () => {
@@ -715,17 +841,23 @@ describe('递给模型的只有引用与摘要（5.2-06）', () => {
 });
 
 describe('模型话术改变不了判定（5.2-07）', () => {
-  it('半自动档下草案写满「已获授权」：仍停在 CONFIRMATION_REQUIRED，工具一次都没进', async () => {
+  it('半自动档下草案写满「已获授权」：仍停在要人批准这一步，卡片上也读不到那句话', async () => {
     const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeGreetTool(rig.calls));
+    // 表态机给的是拒绝：判据不是「它开了一张单」，而是模型那句「已授权」既没让这一步跑起来，
+    // 也没顺着 `reason` 爬到人所见的卡片上（5.3-08 的卡片原文来自判定口，不来自草案）。
+    const cards = watchPauses(rig.ctx, rig.pause, DENY);
     const recording = recordModel((steps) => steps.map((step) => ({ ...step, intent: AUTHORITY_CLAIM })));
     try {
       const proposed = await rig.loop.propose('demo.greet {"to":"boss/123"}');
       // 措辞确实进到了计划里——不是「模型没机会说」，而是说了不算。
       expect(proposed.plan[0]?.intent).toBe(AUTHORITY_CLAIM);
       const finished = await rig.loop.confirm(proposed.runId);
-      expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'CONFIRMATION_REQUIRED' });
-      expect(finished).toMatchObject({ status: 'failed', stopReason: 'POLICY_REFUSED' });
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({ kind: 'approval', toolId: 'demo.greet' });
+      expect(JSON.stringify(cards)).not.toContain('已获授权');
+      expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_DENIED' });
+      expect(finished).toMatchObject({ status: 'failed', stopReason: 'PAUSE_DENIED' });
       expect(rig.calls).toEqual([]);
     } finally {
       recording.restore();
@@ -735,6 +867,7 @@ describe('模型话术改变不了判定（5.2-07）', () => {
   it('判定者收到的入参恰好三位（档位/确认位/工具 id），没有一位装模型文本', async () => {
     const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeGreetTool(rig.calls));
+    watchPauses(rig.ctx, rig.pause, DENY);
     const seen: StepPermissionRequest[] = [];
     const originalDecide = rig.policy.decide.bind(rig.policy);
     rig.policy.decide = (request: StepPermissionRequest): PolicyDecision => {
@@ -851,5 +984,119 @@ describe('档位提升不是 agent 的一只手（spec 5.3-04 的循环半边）
     } finally {
       recording.restore();
     }
+  });
+});
+
+/** 点名叫 `demo.tick` 却不跟一段入参对象：桩交出 `input: {}`，这就是 5.3-09 那张补充信息单的现成触发器。 */
+const GOAL_WITHOUT_INPUT = 'demo.tick 请把第几次补上';
+
+describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', () => {
+  it('没人表态：超时按「未批准」收，步记 PAUSE_TIMEOUT、run 记 failed、工具没进', async () => {
+    // 超时取 200 毫秒（配置下限）：这一条判据要的是「等不到就什么都不做」，不是等满两分钟。
+    const rig = await bootLoop({}, 'auto', 200);
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, NOBODY);
+    const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+    expect(cards).toHaveLength(1);
+    // `outcome` 是从 `agent/pause-resolved` 事件里记下的：超时也必须把卡片收掉，界面不能留一张按不动的单。
+    expect(cards[0]?.outcome).toBe('timed-out');
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'PAUSE_TIMEOUT' });
+    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_TIMEOUT' });
+    // 原话说清「不是人拒绝了它」——超时的回报与拒绝的回报不能是同一句，否则人以为有人按过。
+    expect(finished.steps[0]?.observation).toContain('无人表态');
+    expect(rig.calls).toEqual([]);
+    expect(rig.pause.pending()).toEqual([]);
+  });
+
+  it('卡片还开着时叫停：等待以 cancelled 收，run 落 paused 而不是 failed', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, NOBODY);
+    const proposed = await rig.loop.propose(APPROVAL_GOAL);
+    const inFlight = rig.loop.confirm(proposed.runId);
+    // 这条 run 停在「等人」这一态：状态是 running（人的按钮该在这里按），单子在通道里挂着。
+    expect(rig.loop.read(proposed.runId).status).toBe('running');
+    expect(rig.pause.pending().map((entry) => [entry.runId, entry.kind])).toEqual([[proposed.runId, 'approval']]);
+    expect(rig.loop.stop(proposed.runId).status).toBe('running');
+    const finished = await inFlight;
+    expect(cards[0]?.outcome).toBe('cancelled');
+    expect(finished).toMatchObject({ status: 'paused', stopReason: 'PAUSE_CANCELLED' });
+    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_CANCELLED' });
+    expect(finished.steps[0]?.observation).toContain('没有人表过态');
+    // 判据的实质：`cancelled` 在循环这一侧永远读不成「同意了」。
+    expect(rig.calls).toEqual([]);
+    expect(rig.pause.pending()).toEqual([]);
+  });
+
+  it('模型没给入参：开的是补充信息单，人补够之后这一步用的是补过的值，步行里留一句注记', async () => {
+    const rig = await bootLoop();
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'supply', text: '{"n":3}' }));
+    const finished = await rig.loop.confirm((await rig.loop.propose(GOAL_WITHOUT_INPUT)).runId);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'elicitation', toolId: 'demo.tick', missing: ['n'], round: 1 });
+    // 卡片上那句「缺什么」是工具自己的 schema 说的原话，不是循环编的（同一次校验，见 `validateInput`）。
+    expect(cards[0]?.reason).toContain('入参不合法');
+    expect(finished.steps[0]).toMatchObject({ status: 'ok', code: null });
+    expect(finished.steps[0]?.observation).toContain('入参经人补充 1 轮');
+    expect(finished.steps[0]?.observation).toContain('"n":3');
+    // 真正递进实现的是补过之后的值，不是草案里那份空对象。
+    expect(rig.calls).toEqual(['tick:3']);
+  });
+
+  it('第一轮补的还是不合格：再开一张新单（新单号、第 2 轮、还写着缺哪个字段）', async () => {
+    const rig = await bootLoop();
+    // 第一句是人话（不是 JSON），于是被当作 `n` 的值并进去、类型还是不对；第二轮给合法的 JSON。
+    const answers = ['第 3 次吧', '{"n":4}'];
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'supply', text: answers.shift() ?? '{}' }));
+    const finished = await rig.loop.confirm((await rig.loop.propose(GOAL_WITHOUT_INPUT)).runId);
+    expect(cards.map((card) => [card.round, card.kind, card.missing])).toEqual([
+      [1, 'elicitation', ['n']],
+      [2, 'elicitation', ['n']],
+    ]);
+    // 每补一轮**重开一张单**：单号不同，于是通道里没有「一单里的分页状态」这种东西要维护。
+    expect(cards[0]?.requestId).not.toBe(cards[1]?.requestId);
+    expect(cards[0]?.decision).toBe('supply');
+    expect(cards[1]?.decision).toBe('supply');
+    expect(finished.steps[0]).toMatchObject({ status: 'ok' });
+    expect(finished.steps[0]?.observation).toContain('入参经人补充 2 轮');
+    expect(rig.calls).toEqual(['tick:4']);
+  });
+
+  it('补充信息单上按「放弃」：PAUSE_DENIED 且零副作用，run 记 failed', async () => {
+    const rig = await bootLoop();
+    const cards = watchPauses(rig.ctx, rig.pause, DENY);
+    const finished = await rig.loop.confirm((await rig.loop.propose(GOAL_WITHOUT_INPUT)).runId);
+    expect(cards[0]).toMatchObject({ kind: 'elicitation', decision: 'deny', outcome: 'answered' });
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'PAUSE_DENIED' });
+    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_DENIED' });
+    expect(finished.steps[0]?.observation).toContain('按了放弃');
+    expect(rig.calls).toEqual([]);
+  });
+
+  it('既要人批准、入参又没给：先问能不能做，这一步本来不该做时不去收字段值', async () => {
+    const rig = await bootLoop({}, 'semi');
+    // `demo.needs-approval` 在 `semi` 档下是 outbound → 判定口先拒；同时它的入参也是空的 → 该问字段。
+    rig.tools.register(makeApprovalTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, (request) =>
+      request.kind === 'approval' ? { decision: 'deny' } : { decision: 'supply', text: '{"n":1}' },
+    );
+    const finished = await rig.loop.confirm((await rig.loop.propose('demo.needs-approval 请打招呼')).runId);
+    // 只出现一张单，而且是确认单：反过来就成了「这一步不该做，却还在替它收简历号」。
+    expect(cards.map((card) => card.kind)).toEqual(['approval']);
+    expect(finished.steps[0]).toMatchObject({ status: 'refused', code: 'PAUSE_DENIED' });
+    expect(rig.calls).toEqual([]);
+  });
+
+  it('暂停单不建表、不占号段：跑完一轮带暂停的循环之后，库里没有第四张 agent 表', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    watchPauses(rig.ctx, rig.pause, APPROVE);
+    await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+    const tables = rig.store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'agent_pause%'")
+      .all();
+    // 待决暂停是**等待状态**而不是事实记录：经过落在 `agent_step.status / code` 与 `agent_run.stop_reason` 上。
+    expect(tables).toEqual([]);
+    expect(rig.store.migrations.some((migration) => migration.version >= 19)).toBe(false);
   });
 });

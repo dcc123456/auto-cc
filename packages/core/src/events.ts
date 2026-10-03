@@ -980,6 +980,63 @@ export type ExemptAuditRow = {
 };
 
 /**
+ * 一张暂停单分哪两类（spec 5.3-08）。
+ *
+ * 两类要问人的事根本不是一回事，所以界面是两张卡而不是一张卡两种按钮：
+ * `approval` 问「这一步可以动手吗」（是/否），`elicitation` 问「这一步还缺哪些信息」（可多轮补充）。
+ */
+export type AgentPauseKind = 'approval' | 'elicitation';
+
+/**
+ * 一张正在等人的暂停单（spec 5.3-08 / 09）。
+ *
+ * 它同时是 `agent/pause-requested` 的载荷与 `agent.pause.pending()` 的现读形状——两者必须同一个类型，
+ * 否则「错过事件之后刷新出来的卡片」会和飘过时的那张长成两副样子（与 `DeliverApprovalView` 同一条口径）。
+ * `requestId` 是应答的路由键：交叉应答只能各归各的步，错 id / 重复 id 的应答在通道里是 no-op（5.3-09）。
+ * `reason` / `missing` 是**服务侧产出的人读原话**，与 `AgentPlanStepView.intent` 同理不进语言包：
+ * 它们的内容由判定与 schema 决定，不是界面能自己编的措辞。
+ */
+export type AgentPauseView = {
+  requestId: string;
+  runId: string;
+  planStepIndex: number;
+  toolId: string;
+  kind: AgentPauseKind;
+  /** 为什么停在这里（`approval` 是判定口原话，`elicitation` 是工具自己的契约原话） */
+  reason: string;
+  /** 这一步的入参还缺/错在哪些字段（`-` 表示整段不是对象）；`approval` 单恒为空数组 */
+  missing: string[];
+  /** 第几轮：`approval` 恒为 1，`elicitation` 每重新开一单加一（多轮=新单，不在一单里做分页） */
+  round: number;
+  /** 什么时候开始等人（毫秒时间戳） */
+  requestedAt: number;
+  /** 到点即拒（`requestedAt + pauseTimeoutMs`）：**没人表态永远不等于同意**（spec 5.3-10） */
+  expiresAt: number;
+};
+
+/**
+ * 人对一张暂停单的表态（spec 5.3-08）。
+ *
+ * 三种表态而不是「两类卡各有各的应答形状」，是因为两类卡都有**同一个放弃口**：
+ * `elicitation` 的「放弃」与 `approval` 的「拒绝」在循环侧是同一种结局（这一步不执行），
+ * 分两套类型就会逼调用方写两份分支去表达同一件事。
+ * 一张单能接住哪几种表态由 `agent.pause` 按单自己的 `kind` 判（渲染层是系统边界，§2.6）。
+ */
+export type AgentPauseAnswer = { decision: 'approve' } | { decision: 'deny' } | { decision: 'supply'; text: string };
+
+/**
+ * 一张暂停单收掉的信号（spec 5.3-08 的界面半边：卡片要能从界面上消失）。
+ *
+ * 只有 id 与结局，不带内容——界面对话框里的正文它本来就有（`pending()` 那份），
+ * 再推一遍就是第二份真相（§2.5）。
+ */
+export interface AgentPauseResolvedEvent {
+  requestId: string;
+  /** `answered` 是人的表态落了地；后两者都**不是一种表态**，界面要说「没人应答」而不是「用户拒绝了」 */
+  outcome: 'answered' | 'timed-out' | 'cancelled';
+}
+
+/**
  * 定位层「由指纹自愈重找到元素」的事件载荷（spec 2.2-05）。
  *
  * `strategy` 这里是 `string` 而不是那八个策略名的联合：联合定义在 `@auto-cc/shared`，
@@ -1105,6 +1162,18 @@ declare module 'cordis' {
      * 包一层就得在渲染层再推导一次「现在到底跑到第几步」，那是 §2.7 禁的第二份事实。
      */
     'agent/run-progress'(event: AgentRunView): void;
+    /**
+     * 循环里的某一步挂在人身上时由 `agent.pause` 发出（spec 5.3-08）。
+     * 两类暂停共用这一条事件名，分型由载荷里的 `kind` 说——它们是同一条通道的两种问法，
+     * 拆成两个事件名就会有两处订阅、两套「错过了怎么办」的逻辑（§2.2）。
+     * 与投递单同一分工：事件负责「此刻提醒」，`agent.pause.pending()` 负责「错过了也还在」。
+     */
+    'agent/pause-requested'(event: AgentPauseView): void;
+    /**
+     * 一张暂停单收掉时由 `agent.pause` 发出（spec 5.3-08 的界面半边：卡片要消失得掉）。
+     * 超时与让出也发这一条，且 `outcome` 说的就是"没人应答"——界面不许把它画成"用户拒绝了"。
+     */
+    'agent/pause-resolved'(event: AgentPauseResolvedEvent): void;
     /**
      * 一次定位由「上一次成功留下的指纹」自愈重找到元素时由 `browser.locate` 发出（spec 2.2-05）。
      * 2.7 的选择器腐化率只统计这一条来源，漏发就等于宣称站点没有改版。

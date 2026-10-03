@@ -39,6 +39,26 @@ export const agentToolsConfigSchema = z.strictObject({});
 export type AgentToolsConfig = z.output<typeof agentToolsConfigSchema>;
 
 /**
+ * 入参校验的读数（spec 5.3-08 的第二类暂停由它触发）。
+ *
+ * 合规侧带回收窄后的值（递给实现之前不收窄就等于把 `any` 漏进业务层，§2.6）；
+ * 不合规侧同时给人读原话与**字段名清单**：前者是要显示给用户看的那句话，后者让补充信息卡片
+ * 能说出「还缺 `jobId`」而不必让用户自己从一句中文里抠字段。
+ */
+export type ToolInputCheck = { ok: true; input: unknown } | { ok: false; message: string; missing: string[] };
+
+/**
+ * 「这只手没登记」的人读原话。
+ *
+ * 单独一个函数而不是在 `call` 与 `validateInput` 各写一遍：两处说的是同一件事（§2.2）。
+ * @param toolId 未注册的工具 id
+ * @returns 一句能直接显示在卡片上的中文
+ */
+function notRegisteredMessage(toolId: string): string {
+  return `工具 ${toolId} 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）`;
+}
+
+/**
  * 工具注册表：全应用唯一的 agent 能力入口。
  *
  * 它是**读面**，不是持有者：声明表按 `Context` 存在 `core`（`agentToolTable`），
@@ -105,6 +125,30 @@ export class AgentToolsService extends Service {
   }
 
   /**
+   * 单独问一句「这份入参合不合这只手的声明」，不动手。
+   *
+   * 抽出来的原因不是给循环一个更方便的口，而是「合法才动手」这条判辞只许有一处实现（§2.2）：
+   * 5.3-c 的补充信息卡片要在**执行之前**知道缺哪几个字段，若它自己再 `safeParse` 一遍，
+   * 将来声明改约束（比如加 `.min(1)`）就只有卡片那一侧会跟上，循环会照着旧口径放行。
+   * @param toolId 工具 id（模型给的原话，按不可信输入处理）
+   * @param rawInput 未收窄的入参值
+   * @returns `ok: true` 带收窄后的值；`ok: false` 给人读原话与**缺失字段名清单**。
+   *   「没有这只手」在这里按同一句话回（`missing` 为空），因为它是事实陈述不是入参问题——
+   *   禁用则**不在本函数的口径内**：那属于「手在但不开放」，只有 `call` 拦得住（spec 5.1-10）
+   */
+  validateInput(toolId: string, rawInput: unknown): ToolInputCheck {
+    const tool = this.table.get(toolId);
+    if (!tool) return { ok: false, message: notRegisteredMessage(toolId), missing: [] };
+    const parsed = tool.input.safeParse(rawInput);
+    if (parsed.success) return { ok: true, input: parsed.data };
+    return {
+      ok: false,
+      message: `工具 ${toolId} 入参不合法：${parsed.error.issues.map((issue) => `${issue.path.join('.') || '-'} ${issue.message}`).join('；')}`,
+      missing: [...new Set(parsed.error.issues.map((issue) => issue.path.join('.') || '-'))],
+    };
+  }
+
+  /**
    * 调用一个工具：查表 → 校验禁用 → 校验入参 → 执行 → 原样回报。
    * @param toolId 来自渲染层的字符串，按不可信输入处理，不做任何「猜它想调什么」
    * @param rawInput 未收窄的入参值，必须过 `tool.input` 的 schema
@@ -114,11 +158,7 @@ export class AgentToolsService extends Service {
   async call(toolId: string, rawInput: unknown, signal?: AbortSignal): Promise<ToolCallReply> {
     const tool = this.table.get(toolId);
     if (!tool) {
-      return {
-        ok: false,
-        code: 'TOOL_NOT_REGISTERED',
-        message: `工具 ${toolId} 未注册（该能力包当前未挂载，或它没有把这只手登记进工具面）`,
-      };
+      return { ok: false, code: 'TOOL_NOT_REGISTERED', message: notRegisteredMessage(toolId) };
     }
     // 禁用同时拦清单与调用（spec 5.1-10）：只藏清单的话，拼得出 id 的人仍能从 IPC 把它按下去，
     // 「工具面 = service 白名单」就成了一句只看界面的话。
@@ -129,17 +169,11 @@ export class AgentToolsService extends Service {
         message: `工具 ${toolId} 已登记但当前不开放（能力包声明了 disabled，等它被打开才能调用）`,
       };
     }
-    const parsed = tool.input.safeParse(rawInput);
-    if (!parsed.success) {
-      return {
-        ok: false,
-        code: 'TOOL_INPUT_INVALID',
-        message: `工具 ${toolId} 入参不合法：${parsed.error.issues.map((issue) => `${issue.path.join('.') || '-'} ${issue.message}`).join('；')}`,
-      };
-    }
+    const check = this.validateInput(toolId, rawInput);
+    if (!check.ok) return { ok: false, code: 'TOOL_INPUT_INVALID', message: check.message };
     try {
       // 成功侧只有一种形状（spec 5.1-11）：实现自己产出 `ToolResult`，注册表不替它编摘要、也不给它补引用。
-      return { ok: true, result: await tool.run(parsed.data, signal) };
+      return { ok: true, result: await tool.run(check.input, signal) };
     } catch (error) {
       // §1.7 第 8 条：失败原样回报，禁止用「已完成」的措辞掩盖。
       return {

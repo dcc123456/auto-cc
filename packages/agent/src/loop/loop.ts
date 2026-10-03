@@ -1,7 +1,7 @@
 /**
  * `agent.loop`：一次任务的「规划 → 执行 → 观察 → 续推」循环（spec 5.2-01 / 02 / 05 / 08 / 11）。
  *
- * 四条硬规矩长在结构里，不是长在注释里：
+ * 五条硬规矩长在结构里，不是长在注释里：
  * 1. **每一步都问 `agent.policy`**（5.2-02）：循环里只有「判闸门 → 调工具」这一条顺序，
  *    没有旁路——`registry.call` 只在 `decide()` 放行之后出现，读这段代码时一眼能对上。
  * 2. **模型没有裁量口**（5.2-07，判定在 5.2-b 演）：`LoopModel` 只有起草与摘要两条口，
@@ -13,15 +13,22 @@
  *    并写明 `stopReason`，不无限自转。上限是**这条 run 的**（起草时从配置定下并落进
  *    `agent_run` 的两列），不是服务的当前配置——否则改一次配置就会回改正在跑的旧任务的额度，
  *    而那两列也就成了摆设。
+ * 5. **要人表态的那一步挂在人身上**（5.3-08 / 09 / 10）：策略交回 `CONFIRMATION_REQUIRED` 与模型入参
+ *    过不了工具自己的 strict schema 这两件事，各开一张暂停单（经 `agent.pause`），批准/补够才继续；
+ *    拒绝、超时、叫停都落 `refused` 步行。判定的顺序写死在这里：**先问能不能做，再问缺什么**——
+ *    反过来就会出现「这一步本来就不该做，却还在替它收字段值」。
  *
  * 叫停（5.2-10）取「安全点」语义：正在跑的那一步**不硬切**——所以不把 abort 信号递给注册表，
- * 半途掐断一次打招呼比让它跑完更糟；信号只在下一步开始之前生效。
+ * 半途掐断一次打招呼比让它跑完更糟；信号只在下一步开始之前生效。挂在人身上的那一步用的就是
+ * 同一个信号（`ask(..., scope.controller.signal)`）：叫停一张开着的单是 `cancelled`，
+ * 而 `cancelled` 在循环这一侧**永远读不成「同意了」**（spec 5.3-10）。
  */
 import {
   AGENT_RUN_STATUSES,
   AppError,
   Service,
   asApp,
+  type AgentPauseView,
   type AgentPlanStepView,
   type AgentRunStatus,
   type AgentRunView,
@@ -37,6 +44,7 @@ import { MAX_USER_INPUT_CHARS } from '../session.js';
 import type { ChatSessionService } from '../session.js';
 import type { AgentToolsService } from '../tools.js';
 import { StubLoopModel, type LoopModel, type ModelContext } from './model.js';
+import { pauseKindLabel, type AgentPauseService } from './pause.js';
 import type { AgentPolicyService } from './policy.js';
 
 /** 迁移号段 16（plan §7.2 的 5.2-a 落点）：`agent_run` + `agent_step` 同一次迁移建出。 */
@@ -164,6 +172,83 @@ function clipReading(reading: string): string {
 }
 
 /**
+ * 一张暂停单的三种「没等到放行」定局映射成的拒因（spec 5.3-10 的落点）。
+ *
+ * 映射权在循环这一侧而不是在通道里（plan §5.3-c）：通道只报「人给了值 / 到点了 / 这一等不再有人接」，
+ * 至于到点在账上写成什么码、run 落成终态里的哪一档，是循环的领域。
+ */
+type PauseRejection = {
+  code: 'PAUSE_DENIED' | 'PAUSE_TIMEOUT' | 'PAUSE_CANCELLED';
+  message: string;
+  runStatus: Extract<AgentRunStatus, 'failed' | 'paused'>;
+};
+
+/**
+ * 把「没有表态」的两种定局说成一句能对账的话。
+ * @param kind `timed-out` 或 `cancelled`（`answered` 不走这里——那是人表了态，另一种拒因）
+ * @param request 那张已经收掉的单，只为把**单号与到期时刻**写进原话：5.3-10 的验收要看的是
+ *   「回报里说得清是超时不是拒绝」，一个不含时刻与 id 的「未获批准」做不到这一点
+ * @returns 超时是 `failed`（这一步没做、也不会补做），叫停是 `paused`（人在安全点按了停）
+ */
+function rejectionFor(kind: 'timed-out' | 'cancelled', request: AgentPauseView): PauseRejection {
+  const label = pauseKindLabel(request.kind);
+  if (kind === 'timed-out') {
+    return {
+      code: 'PAUSE_TIMEOUT',
+      message: `${label} ${request.requestId} 等到 ${String(request.expiresAt)} 无人表态：超时按未确认收，这一步不执行（不是人拒绝了它）`,
+      runStatus: 'failed',
+    };
+  }
+  return {
+    code: 'PAUSE_CANCELLED',
+    message: `${label} ${request.requestId} 的等待被叫停：没有人表过态，这一步不执行`,
+    runStatus: 'paused',
+  };
+}
+
+/**
+ * 把人补的那段原话并进当前入参，交给**同一次** schema 校验去判（spec 5.3-09 的「多轮」）。
+ *
+ * 只做两种看得见的合并，不做任何猜测式映射：给的是 JSON 对象就**逐字段并进**（是补充不是整体替换——
+ * 模型已经写对的那几个字段，不该因为人只补了一个字段而丢掉）；给的不是对象（普通一句话、裸数字、裸串）
+ * 而这次**恰好只缺一个顶层字段**时，把这句话当作那个字段的值。其余情形原样返回旧候选值，于是下一张卡片
+ * 会说「还是缺这几个字段」——那比循环替用户猜「他大概想说的是 jobId」诚实，也是 §8 第 4 条「不许编造」
+ * 在同一个小口子上的落实。
+ * @param text 人在文本域里的原话（系统边界输入，本函数负责去空白）
+ * @param candidate 上一次校验没过的那份入参（可能就是空对象，也可能是非对象的原文串）
+ * @param missing 上一次校验给出的**问题字段名**清单（缺的、值不对的、多出来的都在里面），既用来定位「只缺一个就填它」，
+ *   也用来把上一版的旧值丢掉
+ * @returns 并进之后的候选入参；**本函数不判合不合法**，判由调用方交给 `agent.tools.validateInput`
+ */
+function mergeSupplement(text: string, candidate: unknown, missing: readonly string[]): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return candidate;
+  const base: Record<string, unknown> = isPlainRecord(candidate) ? { ...candidate } : {};
+  // 上一轮被点名有问题的字段，旧值不许带进下一份候选：留着它就是把同一份不合格的入参再递一遍，
+  // 「补了几轮还是不过」就成了死局（`strictObject` 下最明显——多出来的那个键永远不会被收）。
+  for (const field of missing) delete base[field];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // 不是 JSON 就当普通一句话看（人在文本域里回「boss/123」是最自然的答法，不该要求他补一对花括号）。
+    parsed = undefined;
+  }
+  if (isPlainRecord(parsed)) return { ...base, ...parsed };
+  const onlyField = missing.length === 1 && !missing[0]?.includes('.') ? missing[0] : undefined;
+  return onlyField ? { ...base, [onlyField]: trimmed } : candidate;
+}
+
+/**
+ * 是不是一个可以按字段并的普通对象（数组与 null 都不算——它们没有「补一个字段」这种读法）。
+ * @param value 待判的值
+ * @returns 收窄成 `Record<string, unknown>` 的判定结果
+ */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * 把一行 run 与它的步行拼成界面读数。
  * @param run 运行行
  * @param steps 步行（按 plan_step_index 升序）
@@ -201,7 +286,7 @@ function toRunView(run: RunRow, steps: StepRow[]): AgentRunView {
 export class AgentLoopService extends Service {
   static provide = 'agent.loop';
   static Config = agentLoopSchema;
-  static inject = ['store', 'agent.tools', 'agent.policy', 'chat.session'];
+  static inject = ['store', 'agent.tools', 'agent.policy', 'agent.pause', 'chat.session'];
 
   constructor(
     ctx: Context,
@@ -231,6 +316,11 @@ export class AgentLoopService extends Service {
 
   private get policy(): AgentPolicyService {
     return asApp(this.ctx)['agent.policy'];
+  }
+
+  /** 暂停通道（5.3-c）：开单等人用的那一条，循环自己不持有任何等待状态。 */
+  private get pause(): AgentPauseService {
+    return asApp(this.ctx)['agent.pause'];
   }
 
   private get session(): ChatSessionService {
@@ -418,8 +508,24 @@ export class AgentLoopService extends Service {
         toolId: step.toolId,
       });
       if (!decision.canRun) {
-        this.writeStep(scope, step, 'refused', decision.message, [], null, decision.code);
-        this.finish(scope, 'failed', 'POLICY_REFUSED');
+        // 只有 `CONFIRMATION_REQUIRED` 是「等人一句话就能继续」的拒因：档位只读与「这只手不在开放面上」
+        // 问人也问不出结果，照 5.2-02 的结局直接落 refused。把这两种情形也做成卡片，等于在一条用户
+        // 根本批不了的路上让他按「批准」——那张按钮按下去还是不动，那就是骗他点一下。
+        if (decision.code !== 'CONFIRMATION_REQUIRED') {
+          this.writeStep(scope, step, 'refused', decision.message, [], null, decision.code);
+          this.finish(scope, 'failed', 'POLICY_REFUSED');
+          return;
+        }
+        const approved = await this.awaitStepApproval(scope, step, decision.message);
+        if (!approved.ok) {
+          this.refuseStep(scope, step, approved.rejection);
+          return;
+        }
+      }
+      // 入参这一问排在判定之后（文件头第 5 条）：这只手本来就不许动的时候，不该有人在替它收简历号。
+      const inputResolution = await this.resolveStepInput(scope, step);
+      if (!inputResolution.ok) {
+        this.refuseStep(scope, step, inputResolution.rejection);
         return;
       }
       this.writeStep(scope, step, 'pending', '', [], null, null);
@@ -427,7 +533,7 @@ export class AgentLoopService extends Service {
       // 5.2-04 要的「逐步出现」就成了「批量出现」。
       this.publish(scope.runId);
       const at = Date.now();
-      const reply = await this.registry.call(step.toolId, step.input);
+      const reply = await this.registry.call(step.toolId, inputResolution.input);
       const durationMs = Date.now() - at;
       const outcome = reply.ok ? 'ok' : 'failed';
       const reading = reply.ok ? reply.result.summary : `${reply.code}：${reply.message}`;
@@ -435,7 +541,10 @@ export class AgentLoopService extends Service {
       const context = this.buildContext(scope);
       const summary = await this.model.summarizeObservation({ step, reading: clipReading(reading), outcome, context });
       scope.tokensUsed += summary.usage.inputTokens + summary.usage.outputTokens;
-      this.writeStep(scope, step, outcome, summary.text, evidenceRefs, durationMs, reply.ok ? null : reply.code);
+      // 入参经人补过就要在步行里留一句：计划里那份是模型的草案，实际动用的是补过之后的值，
+      // 两者不同却只记一个数，5.2-09 的「对话里如实指向证据」就成了半句话。
+      const observation = inputResolution.note === null ? summary.text : `${summary.text}｜${inputResolution.note}`;
+      this.writeStep(scope, step, outcome, observation, evidenceRefs, durationMs, reply.ok ? null : reply.code);
       scope.cursor += 1;
       // 观察落库后立刻**写回游标与账**再推：失败那一步的 `code` 与观察要出现在同一张卡片上，
       // 否则 5.2-09 的「对话里如实指向证据」就变成界面自己编的安慰话。
@@ -449,6 +558,112 @@ export class AgentLoopService extends Service {
     // 「跑到了」不等于「做成了」：任何一步不是 ok，这条 run 就不能自称 completed（5.2-09 的凭据）。
     const allSucceeded = scope.cursor > 0 && finished.every((row) => row.status === 'ok');
     this.finish(scope, allSucceeded ? 'completed' : 'failed', allSucceeded ? 'COMPLETED' : 'STEP_UNSUCCESSFUL');
+  }
+
+  /**
+   * 等一张确认单（spec 5.3-08 的 `approval` 那一路，也是 5.3-10 的主判据现场）。
+   * @param scope 本次 run 的作用域——叫停信号从这里递给通道，所以卡片还开着时按「停止」，单子按 `cancelled` 收
+   * @param step 被策略要求「每次都要人批准」的那一步
+   * @param reason 策略交回的人读原话（为什么这一步要批准），原样进卡片，不在这里另编一句
+   * @returns 批准是 `{ ok: true }`；拒绝 / 超时 / 叫停三种都带拒因与终态，**没有第四种**，也不存在「默认批准」
+   */
+  private async awaitStepApproval(
+    scope: RunScope,
+    step: AgentPlanStepView,
+    reason: string,
+  ): Promise<{ ok: true } | { ok: false; rejection: PauseRejection }> {
+    const { request, outcome } = await this.pause.ask(
+      {
+        runId: scope.runId,
+        planStepIndex: step.planStepIndex,
+        toolId: step.toolId,
+        kind: 'approval',
+        reason,
+        missing: [],
+        round: 1,
+      },
+      scope.controller.signal,
+    );
+    if (outcome.kind !== 'answered') return { ok: false, rejection: rejectionFor(outcome.kind, request) };
+    if (outcome.answer.decision === 'approve') return { ok: true };
+    return {
+      ok: false,
+      rejection: {
+        code: 'PAUSE_DENIED',
+        message: `人在${pauseKindLabel(request.kind)} ${request.requestId} 上按了拒绝：这一步不执行`,
+        runStatus: 'failed',
+      },
+    };
+  }
+
+  /**
+   * 把这一步的入参收到「过得了工具自己的 schema」为止（spec 5.3-09 的多轮补充信息）。
+   *
+   * 校验走 `agent.tools.validateInput`——就是 `call()` 里那一次 `safeParse` 的同一份实现，
+   * 循环只是提前问了同一个问题，没有第二套「什么叫合法」。每补一轮**重开一张新单**（新 `requestId`），
+   * 于是一单里的分页状态、超时重置、路由特化这三件事一件都不存在。
+   * @param scope 本次 run 的作用域（同样把叫停信号交给通道）
+   * @param step 计划里的那一步，`step.input` 是模型给的草案
+   * @returns 合格入参（收窄后的值，递给 `call`）与一句「经人补过」的注记；或拒因与终态
+   */
+  private async resolveStepInput(
+    scope: RunScope,
+    step: AgentPlanStepView,
+  ): Promise<{ ok: true; input: unknown; note: string | null } | { ok: false; rejection: PauseRejection }> {
+    let candidate = step.input;
+    let suppliedRounds = 0;
+    for (;;) {
+      const check = this.registry.validateInput(step.toolId, candidate);
+      if (check.ok) {
+        return {
+          ok: true,
+          input: check.input,
+          note:
+            suppliedRounds === 0
+              ? null
+              : `入参经人补充 ${String(suppliedRounds)} 轮，实际使用：${clipReading(JSON.stringify(check.input))}`,
+        };
+      }
+      const { request, outcome } = await this.pause.ask(
+        {
+          runId: scope.runId,
+          planStepIndex: step.planStepIndex,
+          toolId: step.toolId,
+          kind: 'elicitation',
+          reason: check.message,
+          missing: check.missing,
+          round: suppliedRounds + 1,
+        },
+        scope.controller.signal,
+      );
+      if (outcome.kind !== 'answered') return { ok: false, rejection: rejectionFor(outcome.kind, request) };
+      if (outcome.answer.decision !== 'supply') {
+        return {
+          ok: false,
+          rejection: {
+            code: 'PAUSE_DENIED',
+            message: `人在${pauseKindLabel(request.kind)} ${request.requestId} 上按了放弃：这一步不执行`,
+            runStatus: 'failed',
+          },
+        };
+      }
+      suppliedRounds += 1;
+      candidate = mergeSupplement(outcome.answer.text, candidate, check.missing);
+    }
+  }
+
+  /**
+   * 把「等人表态没等到」落成账：一行 `refused` 步行 + 一个终态。
+   *
+   * 两处调用（确认单与补充信息单）走同一个入口（§2.2）——「没批就不能做」这条性质只写一遍，
+   * 免得将来加第三种暂停时漏掉一处的 `code`，那正是 5.3-10 会静默失效的形态。
+   * @param scope 本次 run 的作用域
+   * @param step 被拒的那一步
+   * @param rejection 拒因（码、要显示给人看的一句原话、run 该落的终态）
+   */
+  private refuseStep(scope: RunScope, step: AgentPlanStepView, rejection: PauseRejection): void {
+    this.writeStep(scope, step, 'refused', rejection.message, [], null, rejection.code);
+    this.finish(scope, rejection.runStatus, rejection.code);
   }
 
   /**
