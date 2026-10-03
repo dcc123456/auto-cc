@@ -44,7 +44,8 @@ import {
   type DeliverConfig,
 } from './deliver.js';
 import { DeliveryRecordService } from './delivery-record-store.js';
-import { FakeAgentToolsService, FakeSessionsService } from './test-doubles.js';
+import { deliverTimingSchema } from './deliver-timing.js';
+import { FakeAgentToolsService, FakeJdReplyStatusService, FakeSessionsService } from './test-doubles.js';
 import { OutboundThrottleService, type OutboundThrottleConfig } from './throttle.js';
 
 /** 判定基准：一个真实的当下毫秒数，所有 `nowMs` 都在它附近，避免与本地日界打架。 */
@@ -130,7 +131,7 @@ class FakePlatformRegistryService extends Service implements ResumeChannelSource
   deliverablePlatforms = (): string[] => [...this.channels.keys()];
 }
 
-/** `boot` 的装配项：额度、频控间隔、渠道、档位、确认超时、大小上限、默认简历、复用目录、注册表替身。 */
+/** `boot` 的装配项：额度、频控间隔、渠道、档位、确认超时、大小上限、默认简历、复用目录、注册表替身、时机规则、回复状态替身。 */
 type BootOptions = {
   gate?: GateConfig;
   gapMs?: number;
@@ -141,6 +142,10 @@ type BootOptions = {
   maxResumeBytes?: number;
   resumeFile?: string;
   agentTools?: boolean;
+  /** 择机投递配置；给了就按它装配（未给的键走 `deliverTimingSchema` 的默认值） */
+  timing?: Partial<DeliverConfig['timing']>;
+  /** 岗位回复状态；给值才会挂上 `jd.store` 替身，不给就是「平台层没挂载」那一支 */
+  replied?: boolean;
 };
 
 /**
@@ -166,7 +171,17 @@ async function boot(options: BootOptions = {}) {
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
   await ctx.plugin(FakeSessionsService, {});
-  // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例才改得动它的登记表（同 greet 用例的先例）。
+  // 回复状态替身按需要挂：不挂正是 5.7-03 的「问不到」那一支——真身缺席时规则必须保守起见不动手。
+  let jdStore: FakeJdReplyStatusService | null = null;
+  if (options.replied !== undefined) {
+    await ctx.plugin(FakeJdReplyStatusService, {});
+    // `ctx.get` 按名字查表、返回 any，所以在这里就用声明收成具体类型：
+    // 可空的 `let` 上直接点方法，类型收窄拿不到赋值结果（TS18047），而替身此刻必然已经挂上。
+    const statusStore: FakeJdReplyStatusService = ctx.get('jd.store');
+    statusStore.set('boss', 'job-1001', options.replied);
+    jdStore = statusStore;
+  }
+  // 替身要在挂载之后取：`ctx.get` 返回的是那个真实例，用例因此改得动它的登记表（同 greet 用例的先例）。
   const registry = ctx.get('platform.registry') as unknown as FakePlatformRegistryService;
   const sessions = ctx.get('sessions') as unknown as FakeSessionsService;
   // 默认当作「已经点过风险确认」（同 greet 用例）：本文件测的是投递的九种失败分支，
@@ -177,6 +192,7 @@ async function boot(options: BootOptions = {}) {
     autonomy: options.autonomy ?? 'semi',
     approveTimeoutMs: options.approveTimeoutMs ?? 120_000,
     maxResumeBytes: options.maxResumeBytes ?? 5_242_880,
+    timing: { ...deliverTimingSchema.parse({}), ...options.timing },
     ...(options.resumeFile === undefined ? {} : { resumeFile: options.resumeFile }),
   };
   const deliverFiber: Fiber = await ctx.plugin(OutboundDeliverService, deliverConfig);
@@ -186,6 +202,7 @@ async function boot(options: BootOptions = {}) {
     deliver: asApp(ctx)['outbound.deliver'],
     registry,
     sessions,
+    jdStore,
     ledger: asApp(ctx)['usage.ledger'],
     records: asApp(ctx)['outbound.deliveries'],
     deliverFiber,
@@ -1028,5 +1045,147 @@ describe('投递记录与账本同生同灭（spec 3.7-02）', () => {
       signal: new AbortController().signal,
     });
     expect(records.listFor('job-4004').map((item) => item.snapshotId)).toEqual(['snap-node']);
+  });
+});
+
+describe('择机投递的接线（spec 5.7-03 的服务半边）', () => {
+  /**
+   * 时间两位全开的时机配置：`weekdaysOnly` 关、窗口 0–24 点，
+   * 于是这组用例只演「回复状态」和「频控」两位参与，与跑测试的机器时刻无关（时间语义由真值表那边断）。
+   */
+  const TIME_OPEN = { enabled: true, weekdaysOnly: false, windowStartHour: 0, windowEndHour: 24 };
+
+  it('无人值守 + 对方没回复 → OUTBOUND_DELIVER_DEFERRED，页面/账本/投递记录/被拒流水全零', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, jdStore, ledger, records } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      replied: false,
+      timing: TIME_OPEN,
+    });
+    const filePath = writeResume(dir);
+    const error = await deliver
+      .perform(request({ filePath, workflowRunId: 'run-1' }))
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe('OUTBOUND_DELIVER_DEFERRED');
+    expect((error as AppError).details).toMatchObject({
+      jobId: 'job-1001',
+      workflowRunId: 'run-1',
+      blockers: ['对方还没有回复这条岗位，按择机投递的约定先不递简历'],
+      nextEligibleAtMs: null,
+    });
+    // 「推迟」不是「失败了一次外发」：一次页面动作都没发生，所以账本、投递记录、被拒流水都该是零。
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+    expect(ledger.recentDenials(50)).toHaveLength(0);
+    expect(records.listFor('job-1001')).toEqual([]);
+    // 回复状态是现问出来的（§9 的 2.5 实测教训：存第二份事实会静默变空），问了一次就是问了一次。
+    expect(jdStore?.asks).toBe(1);
+  });
+
+  it('问不到回复状态（平台层没挂载）→ 同一条推迟，但拒因是「问不到」而不是「没回复」', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      timing: TIME_OPEN,
+    });
+    const error = await deliver
+      .perform(request({ filePath: writeResume(dir), workflowRunId: 'run-1' }))
+      .catch((reason: unknown) => reason);
+    expect((error as AppError).details).toMatchObject({
+      blockers: ['问不到这条岗位的回复状态（库里没有它或平台层没挂载），先不递简历'],
+    });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('频控还没到点 → 拒因与「最早合格时刻」一起上浮，而且不等满间隔才拒', async () => {
+    const hand = fakeChannel();
+    const gapMs = 3_000;
+    const { dir, deliver, jdStore, ledger } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      gapMs,
+      replied: true,
+      timing: TIME_OPEN,
+    });
+    const filePath = writeResume(dir);
+    // 两条岗位都标成「已回复」，于是挡下第二条的只剩频控这一位（真值表那边已单独测过多条拒因）。
+    jdStore?.set('boss', 'job-2002', true);
+    await deliver.perform(request({ filePath, jobId: 'job-1001', workflowRunId: 'run-1' }));
+    const started = Date.now();
+    const error = await deliver
+      .perform(request({ filePath, jobId: 'job-2002', workflowRunId: 'run-2' }))
+      .catch((reason: unknown) => reason);
+    expect(Date.now() - started).toBeLessThan(gapMs);
+    expect((error as AppError).code).toBe('OUTBOUND_DELIVER_DEFERRED');
+    expect((error as AppError).details).toMatchObject({
+      blockers: ['离上一次投递还差 3 秒，按频控此刻不动手'],
+      nextEligibleAtMs: T0 + gapMs,
+    });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('额度已用完时不由择机改判：照旧是 QUOTA_EXCEEDED，被拒流水那一行仍然由闸门留下（spec 5.3-12）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, jdStore, ledger } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      gate: GATE_ONE_DELIVER,
+      replied: true,
+      timing: TIME_OPEN,
+    });
+    const filePath = writeResume(dir);
+    await deliver.perform(request({ filePath, jobId: 'job-1001' }));
+    // 把下一条岗位设成「没回复」：择机规则读到额度已满，于是让开路，不替闸门做拒绝、也不改写结局。
+    jdStore?.set('boss', 'job-2002', false);
+    const error = await deliver
+      .perform(request({ filePath, jobId: 'job-2002', workflowRunId: 'run-2' }))
+      .catch((reason: unknown) => reason);
+    expect((error as AppError).code).toBe('QUOTA_EXCEEDED');
+    expect(ledger.recentDenials(50)).toMatchObject([{ action: DELIVER_ACTION, targetId: 'job-2002' }]);
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('界面那一路不吃这条规则：workflowRunId 为 null 时连回复状态都不问，卡片照旧弹、点了就递（plan §7.5.5 决策七第 1 条）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, jdStore, ledger } = await boot({ channel: hand.channel, replied: false, timing: TIME_OPEN });
+    const pending = deliver.perform(request({ filePath: writeResume(dir) }));
+    await nap();
+    expect(deliver.pending()).toHaveLength(1);
+    expect(jdStore?.asks).toBe(0);
+
+    deliver.resolveApproval(deliver.pending()[0]!.approvalId, true);
+    const receipt = await pending;
+    expect(receipt.committed).toBe(true);
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('规则关着（默认）时行为与 2.6 验收过的一致：没回复也照样递', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto', replied: false });
+    const receipt = await deliver.perform(request({ filePath: writeResume(dir), workflowRunId: 'run-1' }));
+    expect(receipt.committed).toBe(true);
+    expect(ledger.count()).toBe(1);
+  });
+
+  it('风险确认仍在择机之前：没签过字先看到 CONSENT_REQUIRED，而不是「此刻不递」', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, sessions } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      replied: false,
+      timing: TIME_OPEN,
+    });
+    sessions.revoke('boss');
+    await expect(
+      deliver.perform(request({ filePath: writeResume(dir), workflowRunId: 'run-1' })),
+    ).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
+    expect(hand.calls).toHaveLength(0);
   });
 });

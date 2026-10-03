@@ -12,6 +12,7 @@ import {
   type AgentToolRegistry,
   type ConsentGate,
   type Context,
+  type JdReplyStatusSource,
   Service,
   type ToolEffect,
   type ToolResult,
@@ -137,4 +138,42 @@ export class FakeAgentToolsService extends Service implements AgentToolRegistry 
     if (!parsed.success) return { ok: false, reason: 'INPUT_INVALID' };
     return { ok: true, result: await tool.run(parsed.data) };
   }
+}
+
+/**
+ * 假的 `jd.store`：只回答「这条岗位对方回过没有」。
+ *
+ * 存在理由是择机投递（spec 5.7-03）把回复状态列为四个输入之一，而真身在 `platform-boss` 包里、
+ * 挂着 sqlite 与浏览器层——外发层的用例只需要「回过 / 没回过 / 库里没这条」三态。
+ * 三态必须能拨：`null` 那一支是这条规则最要紧的边界（问不到就**不动手**，见 plan §7.5.5 决策七）。
+ */
+export class FakeJdReplyStatusService extends Service implements JdReplyStatusSource {
+  static provide = 'jd.store';
+  static Config = z.strictObject({});
+
+  /** 每条岗位的回答；缺键就是「库里没有这条」，与真身的 `replyStatus` 同语义。 */
+  private readonly statuses = new Map<string, boolean>();
+
+  /** 被问了多少次（现问的读数：一次判定只该问一次，不缓存）。 */
+  asks = 0;
+
+  constructor(ctx: Context, _options: Record<string, never>) {
+    super(ctx, 'jd.store');
+  }
+
+  /**
+   * 设定一条岗位的回复状态。
+   * @param platform 平台标识
+   * @param jobId 岗位标识
+   * @param replied true 回过、false 一条没回
+   */
+  set(platform: string, jobId: string, replied: boolean): void {
+    this.statuses.set(`${platform}/${jobId}`, replied);
+  }
+
+  /** 契约见 `JdReplyStatusSource.replyStatus`；未设定过即 null（库里没有这条）。 */
+  replyStatus = (platform: string, jobId: string): boolean | null => {
+    this.asks += 1;
+    return this.statuses.get(`${platform}/${jobId}`) ?? null;
+  };
 }

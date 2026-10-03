@@ -639,6 +639,27 @@ export interface PagePacer {
 }
 
 /**
+ * 「这条岗位等到回复没有」的询问面（spec 5.7-03 的第一项输入），实现方是 `jd.store`。
+ *
+ * 为什么形状声明在 L0：要问这句话的是投递编排（L3 `outbound.deliver` 的择机规则），而回复事实的
+ * 归属在会话消息表那一侧（L2 `jd.store` 从 `conversation_messages` 现算，2.5-14 的单一来源不动）。
+ * 让 L3 横向 import `plugin-platform-boss` 会新开一条 AGENTS.md §4.1 禁止的依赖边，
+ * 所以照 `GreetChannelSource` / `ConsentGate` 的套路：core 只声明这一个方法，实现方结构上满足即可。
+ *
+ * 只露「读」不露写：回复状态永远由消息流入决定，任何写入口都会变成第二套事实。
+ */
+export interface JdReplyStatusSource {
+  /**
+   * 某条岗位到现在为止有没有等到对方回复。
+   * @param platform 平台标识（与 `jobs.platform` 同源）
+   * @param jobId 平台侧岗位 id（与 `jobs.job_id` 同源，不是库内自增 id）
+   * @returns true 至少回过一条；false 一条没回；**null 表示库里没有这条**——
+   *          它不等于「没回复」，把不知道翻译成假会让择机规则静默挡掉本该递出去的简历
+   */
+  replyStatus(platform: string, jobId: string): boolean | null;
+}
+
+/**
  * 首次启用自动化的风险签字（spec 2.7-06）的询问面，实现方是 `sessions`。
  *
  * 为什么形状声明在 L0：要问「这个平台签过字没有」的三方分别在外发编排（L3 `outbound.greet` /

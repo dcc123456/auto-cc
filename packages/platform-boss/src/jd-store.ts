@@ -345,6 +345,29 @@ export class JdStoreService extends Service {
   };
 
   /**
+   * 这条岗位到现在为止等到回复没有（spec 5.7-03 的第一项输入，契约见 core 的 `JdReplyStatusSource`）。
+   *
+   * 「已回复」仍然只在 `conversation_messages` 上算出来（2.5-14 的单一来源不动），这里新增的只是
+   * **按 (platform, job_id) 定点问**这一种查询形状——列表那一条已经会算，投递侧要的是一行的读数。
+   * @param platform 平台标识（与 `jobs.platform` 同源）
+   * @param jobId 平台侧岗位 id（与 `jobs.job_id` 同源）
+   * @returns true 至少回过一条；false 有这条岗位但一条没回；null 库里没有这条岗位（问不到，不是没回复）
+   */
+  replyStatus = (platform: string, jobId: string): boolean | null => {
+    const job = this.store.db
+      .prepare('SELECT 1 AS hit FROM jobs WHERE platform = ? AND job_id = ? LIMIT 1')
+      .get(platform, jobId) as { hit?: number } | undefined;
+    if (!job) return null;
+    const inbound = this.store.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM conversation_messages
+         WHERE platform = ? AND job_id = ? AND direction = 'recruiter'`,
+      )
+      .get(platform, jobId) as { n?: number | bigint };
+    return Number(inbound.n ?? 0) > 0;
+  };
+
+  /**
    * 库内总行数。
    * @returns 行数；空表为 0
    */

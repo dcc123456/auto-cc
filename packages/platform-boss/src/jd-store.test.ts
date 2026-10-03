@@ -401,6 +401,44 @@ describe('已回复标记的左连（spec 2.5-08 / 2.5-14）', () => {
   });
 });
 
+describe('回复状态的单点问法（spec 5.7-03 的取数那一路）', () => {
+  it('三态分得开：回过 true、没回 false、库里没这条 null（择机规则靠这三态做三种决定）', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft({ jobId: 'A', title: '有人回了的岗位' }));
+    jd.upsert(
+      draft({ jobId: 'B', title: '只我说过话的岗位', sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=B' }),
+    );
+    seedMessage(db, 'A', 'recruiter', '方便聊聊吗');
+    seedMessage(db, 'B', 'self', '你好，我对这个岗位很感兴趣');
+    expect(jd.replyStatus('boss', 'A')).toBe(true);
+    expect(jd.replyStatus('boss', 'B')).toBe(false);
+    expect(jd.replyStatus('boss', 'C')).toBeNull();
+  });
+
+  it('状态与 `list` 里的 `replied` 同源于同一段 SQL：同一个 jobId 的两行岗位各自都能问到 true', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft({ jobId: 'shared', title: '同一个 jobId 的第一行' }));
+    jd.upsert(
+      draft({
+        jobId: 'shared',
+        title: '同一个 jobId 的第二行',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=shared-other',
+      }),
+    );
+    seedMessage(db, 'shared', 'recruiter', '方便聊聊吗');
+    expect(jd.replyStatus('boss', 'shared')).toBe(true);
+    // 与列表读数对齐（spec 2.5-14 的单一事实来源）：两处给出不同的答案就是有两套判定。
+    expect(jd.list().rows.every((row) => row.replied)).toBe(true);
+  });
+
+  it('平台是查询的一部分：换个平台问同一条 jobId 得到 null，而不是别处的回复状态', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(draft({ jobId: 'A' }));
+    seedMessage(db, 'A', 'recruiter', '方便聊聊吗');
+    expect(jd.replyStatus('liepin', 'A')).toBeNull();
+  });
+});
+
 describe('节点执行器登记（spec 2.4-01 / 2.4-08）', () => {
   it('挂载即把 jd.list 交给登记处，卸载后摘回来——不留指向已销毁实例的函数', async () => {
     const { jdFiber, executors } = await boot(tempDir(), true);

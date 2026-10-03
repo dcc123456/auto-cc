@@ -18,6 +18,9 @@ export type AppErrorCode =
   | 'OUTBOUND_CHANNEL_MISSING'
   | 'OUTBOUND_ALREADY_SENT'
   | 'OUTBOUND_NOT_DELIVERED'
+  // 择机投递（spec 5.7-03）：无人值守那一路被时机规则判成「此刻不该递」。它与上面三个码都不合并——
+  // 那三个是「试了没成」，这一条是「压根没试」：不落账、不进被拒流水、下一次计划点照跑。
+  | 'OUTBOUND_DELIVER_DEFERRED'
   // 首次启用自动化的风险确认（spec 2.7-06）：这个平台还没有一份签字记录。
   // 与 `QUOTA_EXCEEDED` 分开，是因为额度到量是「今天别再发了」，而这一条是「你还没承认风险」——
   // 前者等一天自己就好，后者必须由用户点一次确认，界面给的按钮完全不同。

@@ -26,6 +26,7 @@ import {
   consentGateOf,
   deliverChannelsOf,
   executorRegistryOf,
+  jdReplyStatusOf,
   PendingChannel,
   Service,
   sleep,
@@ -51,6 +52,8 @@ import { z } from 'zod';
 // 幂等那句拒因与打招呼共用同一句判据（下面那条注释说的就是同一件事），文案因此从 greet 那一侧取，
 // 不再抄一份——两处各自描述"哪个范围"迟早会漂成两个说法（AGENTS.md §2.2）。
 import { alreadySentScope } from './greet.js';
+// 择机投递的判定本体不在这个文件里（spec 5.7-03）：这里只负责把四项读数问出来，交给纯函数裁决。
+import { deliverTimingSchema, evaluateDeliverTiming, gapRemainingMs } from './deliver-timing.js';
 
 /** 额度键与账本动作名（`entitlement.gate` 按它数日上限，spec 2.6-02 / 03）。 */
 export const DELIVER_ACTION = 'deliver';
@@ -102,6 +105,18 @@ export const deliverSchema = z.strictObject({
   maxResumeBytes: z.number().int().min(1024).max(52_428_800).default(5_242_880),
   /** 默认简历路径；请求里没带 `filePath` 时用它（P3 之前的临时入口，plan §13.5） */
   resumeFile: z.string().min(1).optional(),
+  /**
+   * 择机投递规则（spec 5.7-03）：只在无人值守那一路生效，默认关。
+   * 默认值取关有两个理由（plan §7.5.5 决策七）：① 2.6 验收过的投递主线是「审批档位决定何时递」，
+   * 不该在没人设置的情况下被这条新规则改写；② 默认开会让整个测试套件变成时间依赖（深夜跑必红）。
+   */
+  timing: deliverTimingSchema.default({
+    enabled: false,
+    requireReply: true,
+    weekdaysOnly: true,
+    windowStartHour: 9,
+    windowEndHour: 21,
+  }),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -234,6 +249,50 @@ export class OutboundDeliverService extends Service {
    */
   private get deliveryRecords() {
     return asApp(this.ctx)['outbound.deliveries'];
+  }
+
+  /**
+   * 无人值守投递的「此刻该不该递」判定（spec 5.7-03 的接线点）。
+   *
+   * 三项读数都是现场问出来的，本服务不缓存任何一份（§9 的 2.5 实测教训）：
+   * 回复状态向 `jd.store` 现问、额度向闸门现问只读 `check`、节奏向 `outbound.throttle` 现掷。
+   * @param staged 已备好的投递
+   * @returns 需要推迟时给出拒因原文与最早合格时刻；不需要推迟（规则关着、或这是界面那一路）时为 null
+   */
+  private timingDeferral(staged: StagedDelivery): {
+    reason: string;
+    blockers: string[];
+    nextEligibleAtMs: number | null;
+  } | null {
+    const timing = this.config.timing;
+    // 两个前提条件少一个都不判：规则默认关（决策七），而界面那一路是**人表态**，
+    // 拦它等于把人的决定翻译成规则的决定（§5.5 定过同一类边界）。
+    if (!timing.enabled || staged.workflowRunId === null) return null;
+
+    const quota = this.gate.check(DELIVER_ACTION, { nowMs: staged.nowMs });
+    // 额度不足时不由择机改写结局：继续往下走，让 `gate.enforce` 记它的被拒流水（spec 5.3-12）。
+    // 这条短路是"规则把额度当输入"的确切含义——它读到额度，但不替闸门做拒绝。
+    if (!quota.allowed) return null;
+
+    const decision = evaluateDeliverTiming(
+      {
+        nowMs: staged.nowMs,
+        replied: jdReplyStatusOf(this.ctx)?.replyStatus(staged.platform, staged.jobId) ?? null,
+        gapRemainingMs: gapRemainingMs(
+          this.ledger.latestActionTs(DELIVER_ACTION),
+          asApp(this.ctx)['outbound.throttle'].nextGapMs(),
+          staged.nowMs,
+        ),
+        quotaAllowed: true,
+      },
+      timing,
+    );
+    if (decision.ready) return null;
+    return {
+      reason: `此刻不投递：${decision.blockers.join('；')}`,
+      blockers: decision.blockers,
+      nextEligibleAtMs: decision.nextEligibleAtMs,
+    };
   }
 
   /**
@@ -378,7 +437,8 @@ export class OutboundDeliverService extends Service {
    * @param signal 让出信号，工作流节点路径用它响应暂停；界面路径传 undefined
    * @returns 投递回执（`committed` 恒为 true——没发出去一律以错误上浮；`snapshotId` 是这次递出去的哪一版）
    * @throws `QUOTA_EXCEEDED`（日额度到量，带剩余额度）、`CONSENT_REQUIRED`（该平台还没签过风险确认，
-   *         此时不进审批、不碰页面、不落账）、`OUTBOUND_APPROVAL_DENIED`（被拒或超时，
+   *         此时不进审批、不碰页面、不落账）、`OUTBOUND_DELIVER_DEFERRED`（择机规则判定此刻不合适，
+   *         仅无人值守那一路；`details` 带拒因原文与最早合格时刻）、`OUTBOUND_APPROVAL_DENIED`（被拒或超时，
    *         此时页面动作次数为零、不落账不扣额度）、`DELIVER_TARGET_OFFLINE`（页面说这个岗位不收了）、
    *         `OUTBOUND_NOT_DELIVERED`（页面回读没确认，此时不落账）、
    *         `WORKFLOW_STEP_FAILED`（等待期间工作流让出）、
@@ -391,20 +451,31 @@ export class OutboundDeliverService extends Service {
     // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
     consentGateOf(this.ctx).ensureConsent(platform);
 
+    // 择机投递（spec 5.7-03）：无人值守那一路先问一句「此刻该不该递」，不合适就到此为止——
+    // 此刻页面动作次数为零、账本零行、被拒流水零行，下一次计划点照跑（5.7-06 的读数）。
+    const deferral = this.timingDeferral(staged);
+    if (deferral) {
+      throw new AppError('OUTBOUND_DELIVER_DEFERRED', deferral.reason, 'outbound.deliver', {
+        jobId,
+        workflowRunId,
+        blockers: deferral.blockers,
+        nextEligibleAtMs: deferral.nextEligibleAtMs,
+      });
+    }
+
     // 到量即在等待之前停（spec 2.6 的同条判据）。留痕由闸门的 `enforce` 负责：
     // 被拒要进 `usage_denials`（spec 5.3-12），编排层自己比对 `check` 就把那条性质漏掉了。
     this.gate.enforce(DELIVER_ACTION, { targetId: jobId, workflowRunId, nowMs });
 
     // 频控的钟是账本里最近一条 deliver，与打招呼各数各的间隔（两套动作互不背锅）。
+    // 减法抽在 `gapRemainingMs` 里（择机规则也算同一段，§2.2 不许留两份算术）；这里再掷一次间隔是
+    // 有意的——节奏必须不可预测，重复用上一次的读数等于把等待做成定值。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();
-    const lastSentAt = this.ledger.latestActionTs(DELIVER_ACTION);
+    const remaining = gapRemainingMs(this.ledger.latestActionTs(DELIVER_ACTION), gap, nowMs);
     let waitedMs = 0;
-    if (lastSentAt !== null) {
-      const remaining = lastSentAt + gap - nowMs;
-      if (remaining > 0) {
-        await sleep(remaining, signal);
-        waitedMs = remaining;
-      }
+    if (remaining > 0) {
+      await sleep(remaining, signal);
+      waitedMs = remaining;
     }
     // 让出检查点必须落在**发送之前**（spec 2.4-07）：`sleep` 在 abort 时是正常返回的，
     // 不在这里问一句，被暂停的那一步仍会把简历递出去。

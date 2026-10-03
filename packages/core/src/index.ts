@@ -16,6 +16,7 @@ import type {
   ConsentGate,
   EmbedGateway,
   GreetChannelSource,
+  JdReplyStatusSource,
   PagePacer,
   ResumeChannelSource,
   TakeoverStateSource,
@@ -198,6 +199,18 @@ export function greetChannelsOf(ctx: Context): GreetChannelSource | undefined {
  */
 export function deliverChannelsOf(ctx: Context): ResumeChannelSource | undefined {
   return maybeService<ResumeChannelSource>(ctx, 'platform.registry');
+}
+
+/**
+ * 取「这条岗位等到回复没有」的询问面（spec 5.7-03），实现方是 `jd.store`。
+ *
+ * 做成**可选**而不是硬依赖：择机规则只在无人值守那一路生效，而投递服务在只装了平台适配器、
+ * 还没跑过抓取的进程里也要能用——那时问不到回复状态，规则按「不猜」处理（见 `JdReplyStatusSource`）。
+ * @param ctx 调用方的上下文
+ * @returns 询问面实例；JD 库没挂载时为 undefined
+ */
+export function jdReplyStatusOf(ctx: Context): JdReplyStatusSource | undefined {
+  return maybeService<JdReplyStatusSource>(ctx, 'jd.store');
 }
 
 /**
