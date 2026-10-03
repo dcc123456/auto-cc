@@ -176,10 +176,13 @@ export class AgentToolsService extends Service {
       return { ok: true, result: await tool.run(check.input, signal) };
     } catch (error) {
       // §1.7 第 8 条：失败原样回报，禁止用「已完成」的措辞掩盖。
+      // `reasonCode` 只带实现自己那个结构化码（5.5-04 要靠它分「页面变了」与「这只手本来就错了」），
+      // 不带 `details`——那里面有整页快照，进会话与步行就是几 KB 正文（5.2-06 的口径）。
       return {
         ok: false,
         code: 'TOOL_FAILED',
         message: `工具 ${toolId} 执行失败：${error instanceof Error ? error.message : String(error)}`,
+        ...(error instanceof AppError ? { reasonCode: error.code } : {}),
       };
     }
   }

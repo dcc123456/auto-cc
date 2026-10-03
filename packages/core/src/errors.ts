@@ -108,6 +108,10 @@ export type AppErrorCode =
   // 恢复口按下去时页面**还在接管中**（spec 5.5-01）：这不是「按错了别的路」，而是「那一双手还没离开页面」。
   // 与上面那条分开，是因为界面上的处置完全不同——这条要把「交还页面」那只按钮指给他，而不是让他去改档位。
   | 'AGENT_LOOP_TAKEOVER_HELD'
+  // 恢复前的**强制重读**没做成（spec 5.5-03）：重读口不在开放面上、或它自己失败了。
+  // 单独一个码而不是复用 `AGENT_LOOP_TAKEOVER_HELD`，是因为界面上的处置完全不同——那条让人「先交还页面」，
+  // 这条是页面已经交回来了、缺的是「读一遍现在的页面」这道能力（装配或站点问题），run 照旧停在安全点。
+  | 'AGENT_LOOP_REREAD_UNAVAILABLE'
   | 'AGENT_LOOP_STATUS_INVALID'
   // 免确认白名单（spec 5.3-06 / 07）：只在开放面上的动作才能加白。单独一个码而不是复用 `TOOL_UNAVAILABLE`
   // 那类判定读数，是因为这条走的是**写入口**——界面上的处置是「名单一行都不动 + 说明这只手不在开放面上」，
@@ -158,3 +162,13 @@ export function isAppErrorPayload(value: unknown): value is AppErrorPayload {
     typeof (value as AppErrorPayload).message === 'string'
   );
 }
+
+/**
+ * 「页面现状与计划里的声明不符」这一族失败码（spec 5.5-04 的扳机）。
+ *
+ * 放在定义码的这一个文件里，而不是在循环里抄一份字符串：这两个码的主人是 L2 的定位与动作层
+ * （`browser.locate` / `browser.act`），循环只是**读**它们来判断「这一步落空是因为页面变了」。
+ * 刻意不含 `ACT_FAILED`（页面动作被拒）与 `TOOL_*`（注册表自己的拒），那些不是「找不到目标」，
+ * 按 5.5-04 重规划它们就是把「重规划」用成了无条件重试。
+ */
+export const PAGE_DRIFT_CODES: readonly string[] = ['WAIT_TIMEOUT', 'LOCATE_FAILED'];

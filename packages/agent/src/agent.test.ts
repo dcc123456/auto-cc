@@ -7,7 +7,7 @@
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { asApp, Context, toolResult, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
+import { AppError, asApp, Context, toolResult, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -363,6 +363,31 @@ describe('成功侧只有一种读数（spec 5.1-11）', () => {
       code: 'TOOL_FAILED',
       message: expect.stringContaining('额度已用尽'),
     });
+  });
+
+  it('实现抛的是结构化错误时，原码跟着 `reasonCode` 一起交回（spec 5.5-04 分「页面变了」靠的就是它）', async () => {
+    const { tools } = await boot();
+    registerReadingTool(tools, () =>
+      Promise.reject(
+        new AppError('LOCATE_FAILED', '定位未过线，动作没有执行：最优候选得分低于阈值', 'browser.act', {
+          snapshotRef: 'fixture.local@1',
+          snapshot: '<html>整页正文</html>',
+        }),
+      ),
+    );
+    const reply = await tools.call('demo.reading', { docId: 'doc-1' });
+    // `code` 那一格留 `TOOL_FAILED`（界面对四种注册表结局的既有口径），实现的码是**加**在旁边的第二位数。
+    expect(reply).toMatchObject({ ok: false, code: 'TOOL_FAILED', reasonCode: 'LOCATE_FAILED' });
+    if (reply.ok) throw new Error('这条用例只该走失败侧');
+    expect(reply.message).toContain('定位未过线');
+    // `details` 不跟着出来：那里装着整页快照，进会话与步行就是几 KB 正文（与 5.2-06 同一口径）。
+    expect('details' in reply).toBe(false);
+    // 反向半边：非结构化的错误没有原码可报，这一位**不出现**而不是编一个——省得循环把「不知道」读成一种因由。
+    tools.unregister('demo.reading');
+    registerReadingTool(tools, () => Promise.reject(new Error('额度已用尽')));
+    const plain = await tools.call('demo.reading', { docId: 'doc-1' });
+    if (plain.ok) throw new Error('这条用例只该走失败侧');
+    expect('reasonCode' in plain).toBe(false);
   });
 });
 

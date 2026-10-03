@@ -990,6 +990,13 @@ export type ToolCallReply =
       ok: false;
       code: 'TOOL_NOT_REGISTERED' | 'TOOL_DISABLED' | 'TOOL_INPUT_INVALID' | 'TOOL_FAILED';
       message: string;
+      /**
+       * 实现自己抛出的结构化码（`AppError.code`，如 `LOCATE_FAILED` / `WAIT_TIMEOUT`），只在
+       * `TOOL_FAILED` 那一支出现（spec 5.5-04）。为什么要把原码带上而不是让人去读 `message`：
+       * 循环要按「这一步落空是不是因为页面变了」分支，靠匹配一句要显示给人看的中文原话分支
+       * 就是措辞一改就静默失效；而 `code` 那一格仍留 `TOOL_FAILED`，界面对四种注册表结局的口径不变。
+       */
+      reasonCode?: string;
     };
 
 /**
