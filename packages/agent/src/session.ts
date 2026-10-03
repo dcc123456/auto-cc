@@ -17,10 +17,14 @@ import {
   AppError,
   Service,
   asApp,
+  maybeService,
   redactText,
   redactValue,
   sleep,
+  type AgentRunView,
   type AutonomyLevel,
+  type ChatCompactionView,
+  type ChatFactCard,
   type ChatMessageView,
   type ChatPart,
   type ChatSessionView,
@@ -29,9 +33,17 @@ import {
   type Context,
 } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
+/**
+ * 额度动作名与闸门/账本的读数形状取自契约包，不在这份文件里抄一遍名单：
+ * `QUOTA_ACTIONS` 的注释就写着「任何一处自己抄一遍，就会出现界面能发明一个闸门没有的动作名」，
+ * 事实卡这一侧同样适用（§2.7 禁第二份事实）。契约包只有类型与常量，不带任何一只「手」，
+ * 所以它不在 spec 5.1-08 那份「agent 不得 import 能力包」的名单里。
+ */
+import { QUOTA_ACTIONS, type GateDecisionView, type QuotaAction, type UsageSummaryView } from '@auto-cc/shared';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { estimateTokens } from './loop/model.js';
 import { splitToolRequest } from './tool-request.js';
 import type { AgentToolsService } from './tools.js';
 
@@ -148,6 +160,50 @@ const chatSessionMetaMigration = {
   },
 };
 
+/**
+ * 迁移号段 **24**（5.6-d 起）：`chat_compaction` —— 一段被折叠的较早消息的读数（spec 5.6-02 / 04 / 10）。
+ *
+ * 为什么新建一张表而不是给 `chat_message` 加一位「已折叠」标记：判据是「压缩不改写事实、失败不丢原文」，
+ * 而标记位写在原文行上就意味着原文被压缩这件事改写过了它——一次 UPDATE 就是把「没折」和「折过」压成一位。
+ * 独立一张表让「折叠」是**附加的一层读数**：删掉这行历史就整段回来了，原文行自始至终没被碰过。
+ * 为什么存 `covered_ids` 而不是只存 `from_ts` / `to_ts`：读的一侧要能判定「这行摘要点名的原文还在不在」，
+ * 只按时间区间筛的话，一条被外部删掉的消息会静默变成「那段不见了」——那正是 5.6-10 要防的丢消息。
+ */
+export const CHAT_COMPACTION_MIGRATION_VERSION = 24;
+
+/** 压缩读数表；`down` 与本包其余号段同一口径不写（回滚会显式失败）。 */
+const chatCompactionMigration = {
+  version: CHAT_COMPACTION_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS chat_compaction (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      from_ts INTEGER NOT NULL,
+      to_ts INTEGER NOT NULL,
+      covered_ids TEXT NOT NULL,
+      covered_count INTEGER NOT NULL,
+      tokens_before INTEGER NOT NULL,
+      tokens_after INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    // 读的一侧每次都要「取这段会话里 to_ts 最大的那一条」，没这条索引就是全表扫。
+    db.exec('CREATE INDEX IF NOT EXISTS chat_compaction_session_ts ON chat_compaction (session_id, to_ts)');
+  },
+};
+
+/** `chat_compaction` 的一行原始读数；`covered_ids` 是 JSON 数组文本。 */
+type CompactionRow = {
+  id: string;
+  session_id: string;
+  from_ts: number | bigint;
+  to_ts: number | bigint;
+  covered_ids: string;
+  covered_count: number | bigint;
+  tokens_before: number | bigint;
+  tokens_after: number | bigint;
+  created_at: number | bigint;
+};
+
 /** 会话表的一行原始读数（列名是 snake_case，转成视图的工作收在 `toMessageView`）。 */
 type SessionRow = {
   id: string;
@@ -180,6 +236,21 @@ export const chatConfigSchema = z.strictObject({
    * 那是用户在装配面板上的**显式**表态（5.3-04 要防的是 agent 自己升档，不是人改默认值）。
    */
   defaultAutonomy: z.enum(AUTONOMY_LEVELS).default('suggest'),
+  /**
+   * 触发折叠的 token 估计阈值（spec 5.6-02「长会话触发压缩」，plan §7.4 取证 2）。
+   *
+   * 尺子是 `estimateTokens`（约 2 字 ≈ 1 token），与循环那条 token 上限用的是同一把粗估——不引 tokenizer：
+   * 判据要的是「下降可量化」（5.6-04），同一把尺前后一比就够，换成精确尺反而要让两处口径一致。
+   * 为什么默认 600 而不是模型上下文长度：这段会话的助手回复是本地模板（F1），今天的成本是**界面长度**
+   * 而不是出网长度，600 大约是十几轮短对话；真模型接上后该按上下文窗口重标，那一改只动这一行配置。
+   */
+  compactTriggerTokens: z.number().int().min(20).max(200000).default(600),
+  /**
+   * 折叠时保留不动的最近条数（spec 5.6-02：白名单之外的当下语境要看得见）。
+   *
+   * 下限 2 是有意的：一条问 + 一条答是最小有意义的窗口，允许折到只剩 1 条就等于把语境折没了。
+   */
+  compactKeepRecentMessages: z.number().int().min(2).max(200).default(8),
 });
 
 /** 校验后的配置形状（在装配面板可热改，走 1.5 的 `plugins.saveConfig`）。 */
@@ -256,12 +327,182 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 当前会话的整份快照：会话读数 + 已落库消息 + 正在流式那一条（如果有）。
+   * 当前会话的整份快照：会话读数 + 未被折叠的消息 + 正在流式那一条（如果有）+ 压缩读数。
+   *
+   * 消息这一侧只给「折叠窗口之外」的那些（spec 5.6-04 的「较早消息已压缩」就是这么来的）：
+   * 原文行一条都没少，只是不再逐条画出来，界面上那一行摘要带的是条数与 token 前后对照。
+   * 摘要是**附加的一层读数**而不是改写：那行压缩记录一旦被删、或它点名的原文行不在库里，这里就退回全文。
    * @returns 永不为 null——首次访问会就地建出一个默认档位的会话
    */
   current(): ChatSnapshotView {
     const session = this.readSession(this.ensureSession());
-    return { session, messages: this.messagesOf(session.id) };
+    const compaction = this.validCompactionRow(session.id);
+    const coveredIds = new Set(compaction ? (JSON.parse(compaction.covered_ids) as string[]) : []);
+    const messages = this.messagesOf(session.id).filter((message) => !coveredIds.has(message.id));
+    return { session, messages, compaction: compaction ? this.viewOfRow(compaction) : null };
+  }
+
+  /**
+   * 折掉这段会话里较早的一截（spec 5.6-02，plan §7.4 决策二）。
+   *
+   * 两条门槛都要过才动库里那一行：行数超过保留条数、整段 token 估计超过阈值；否则**什么都不写**。
+   * 原文行既不移动也不改写，所以 5.6-03（数值逐字相同）与 5.6-10（失败不丢消息）不靠断言补救，
+   * 最坏情况就是「没折」。折叠单位是**整条消息行**：一条 run 的步卡片就长在它所属那条消息的 `parts` 里，
+   * 行边界天然就是原子组（取证 1 说的「不许把调用和结果拆开的」那件事，在这里是结构上成立的）。
+   * 触发点只有 `finalize()` 一处（不另开按需口）：压缩是读的一侧的呈现问题，不是一个该让模型或界面
+   * 自己按下扳机的动作——多一个入口就多一份「什么时候折」的口径（§2.5）。
+   * 返回值刻意是 void 而不是刚写下的那行读数：事实卡属于**读的那一侧**（见 `factCard()` 的注释），
+   * 折的时候把它算出来存下，就成了第二份会过期的真值（§9 的 2.5-e 教训）。
+   * @param sessionId 要折叠的会话 id——指**那条消息自己的**会话，而不是「此刻界面在看的那一条」，
+   *   因为流式收尾时用户可能已经新建了会话
+   * @returns 无。不满足触发条件时什么都不写；满足时库里多一行压缩读数
+   */
+  private compactSession(sessionId: string): void {
+    const keep = this.config.compactKeepRecentMessages;
+    const rows = this.storedRows(sessionId);
+    if (rows.length <= keep) return;
+    const tokensBefore = rows.reduce((total, row) => total + estimateTokens(row.parts), 0);
+    if (tokensBefore <= this.config.compactTriggerTokens) return;
+    const covered = rows.slice(0, rows.length - keep);
+    const kept = rows.slice(rows.length - keep);
+    const coveredIds = covered.map((row) => row.id);
+    const fromTs = Number(covered[0]?.created_at ?? 0);
+    const toTs = Number(covered[covered.length - 1]?.created_at ?? 0);
+    const tokensAfter = kept.reduce((total, row) => total + estimateTokens(row.parts), 0);
+    const existing = this.store.db
+      .prepare('SELECT id FROM chat_compaction WHERE session_id = ? LIMIT 1')
+      .get(sessionId) as { id?: string } | undefined;
+    if (existing?.id) {
+      // 一段会话只留**一行**压缩读数：折得越多次，那一行覆盖的前缀越长、`to_ts` 越靠后。
+      // 每次插一行的写法会让「哪段被折了」有了多个答案，而读的一侧本来就只认一个（§2.5），
+      // 而且那张表会随着对话无上限地长。
+      this.store.db
+        .prepare(
+          `UPDATE chat_compaction SET from_ts = ?, to_ts = ?, covered_ids = ?, covered_count = ?,
+           tokens_before = ?, tokens_after = ?, created_at = ? WHERE id = ?`,
+        )
+        .run(
+          fromTs,
+          toTs,
+          JSON.stringify(coveredIds),
+          coveredIds.length,
+          tokensBefore,
+          tokensAfter,
+          Date.now(),
+          existing.id,
+        );
+      return;
+    }
+    this.store.db
+      .prepare(
+        `INSERT INTO chat_compaction (id, session_id, from_ts, to_ts, covered_ids, covered_count,
+         tokens_before, tokens_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        sessionId,
+        fromTs,
+        toTs,
+        JSON.stringify(coveredIds),
+        coveredIds.length,
+        tokensBefore,
+        tokensAfter,
+        Date.now(),
+      );
+  }
+
+  /**
+   * 把一行压缩读数转成跨进程形状：bigint 收成 number，事实卡在这一步现问。
+   * @param row `chat_compaction` 的一行（已由 `validCompactionRow` 验过原文还在）
+   * @returns 界面与单测读的那一份
+   */
+  private viewOfRow(row: CompactionRow): ChatCompactionView {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      fromTs: Number(row.from_ts),
+      toTs: Number(row.to_ts),
+      coveredCount: Number(row.covered_count),
+      tokensBefore: Number(row.tokens_before),
+      tokensAfter: Number(row.tokens_after),
+      createdAt: Number(row.created_at),
+      factCard: this.factCard(row.session_id),
+    };
+  }
+
+  /**
+   * 取这段会话里 `to_ts` 最大的那条压缩读数，并验它点名的原文行**都还在**库里。
+   *
+   * 对不上就返回 null（界面上整体退回原文）：这是 5.6-10 的结构半边——摘要行说丢了 12 条而库里只有 9 条，
+   * 那就是摘要行错了，此时**看得全**比**看得短**重要，绝不让一段对不上号的摘要盖住原文。
+   * @param sessionId 会话 id
+   * @returns 有效的压缩读数行；没有或无效时为 null
+   */
+  private validCompactionRow(sessionId: string): CompactionRow | null {
+    const row = this.store.db
+      .prepare(
+        `SELECT id, session_id, from_ts, to_ts, covered_ids, covered_count, tokens_before, tokens_after, created_at
+         FROM chat_compaction WHERE session_id = ? ORDER BY to_ts DESC, created_at DESC LIMIT 1`,
+      )
+      .get(sessionId) as CompactionRow | undefined;
+    if (!row) return null;
+    const ids = JSON.parse(row.covered_ids) as string[];
+    if (!ids.length || ids.length !== Number(row.covered_count)) return null;
+    const placeholders = ids.map(() => '?').join(',');
+    const present = this.store.db
+      .prepare(`SELECT COUNT(*) AS n FROM chat_message WHERE session_id = ? AND id IN (${placeholders})`)
+      .get(sessionId, ...ids) as { n?: number | bigint } | undefined;
+    return Number(present?.n ?? 0) === ids.length ? row : null;
+  }
+
+  /**
+   * 关键事实卡：五类白名单事实一律**此刻从真相问一遍**，不进摘要文本（spec 5.6-02，plan F5 + 决策三）。
+   *
+   * 为什么现问而不是折的时候一起存：§9 那条实测教训——本地存第二份事实，早晚会与真值不一致
+   * （2.5-e 的打招呼渠道表就是被热改配置清空过）。而 5.6-03 要的「数值逐字不变」如果靠从旧消息里
+   * 摘数字，永远只是近似；现问回来的那一位则是真值本身。
+   * 问不到的那一位留 `null` / 空数组而不是猜：「这台机器没挂那只服务」与「额度剩 0」是两件事。
+   * @param sessionId 会话 id
+   * @returns 事实卡；跨服务的一律按名字现问（不写进 `static inject`，避免会话域与循环域互相依赖成环）
+   */
+  private factCard(sessionId: string): ChatFactCard {
+    const gate = maybeService<{ check: (action: QuotaAction) => GateDecisionView }>(this.ctx, 'entitlement.gate');
+    const ledger = maybeService<{ summary: (recentLimit?: number) => UsageSummaryView }>(this.ctx, 'usage.ledger');
+    const loop = maybeService<{ latestRun: (sessionId: string) => AgentRunView | null }>(this.ctx, 'agent.loop');
+    const run = loop?.latestRun(sessionId) ?? null;
+    const summary = ledger?.summary(30) ?? null;
+    return {
+      autonomy: this.readSession(sessionId).autonomy,
+      // 闸门没挂载时给**空数组**而不是三项 null：`remaining: null` 在 1.9-02 里说的是「不限额」，
+      // 用它兼表「问不到」就会把「这台机器没挂闸门」画成「额度无限」——那是最贵的一种误读。
+      remainingByAction: gate
+        ? QUOTA_ACTIONS.map((action) => ({ action, remaining: gate.check(action).remaining }))
+        : [],
+      lastStopReason: run?.stopReason ?? null,
+      refusedSteps:
+        run?.steps
+          .filter((step) => step.status === 'refused')
+          .map((step) => ({ toolId: step.toolId, code: step.code })) ?? [],
+      deliveredTargetIds: (summary?.recent ?? [])
+        .filter((row) => row.action === 'deliver' && row.targetId)
+        .map((row) => row.targetId as string),
+    };
+  }
+
+  /**
+   * 库里已落定的消息行（不含正在流式那一条），按时间升序。
+   * @param sessionId 会话 id
+   * @returns 原始行；`messagesOf()` 与 `compactSession()` 共用这一份查询（§2.2）
+   */
+  private storedRows(sessionId: string): MessageRow[] {
+    // 次级排序用 `rowid` 而不是 `id`：同一毫秒里落的两行（用户那条与流式收尾那条）时间戳相同，
+    // 而 id 是随机 UUID——按 id 排会把「后落的那条」排到前面，折叠因此可能折掉最新的一行。
+    // `chat_message` 不是 WITHOUT ROWID 表，rowid 就是落库顺序。
+    return this.store.db
+      .prepare(
+        'SELECT id, session_id, role, parts, created_at FROM chat_message WHERE session_id = ? ORDER BY created_at ASC, rowid ASC',
+      )
+      .all(sessionId) as unknown as MessageRow[];
   }
 
   /**
@@ -489,7 +730,12 @@ export class ChatSessionService extends Service {
    */
   private ensureSchema(): void {
     const migrations = this.store.migrations;
-    for (const migration of [chatMigration, chatAutonomyAuditMigration, chatSessionMetaMigration]) {
+    for (const migration of [
+      chatMigration,
+      chatAutonomyAuditMigration,
+      chatSessionMetaMigration,
+      chatCompactionMigration,
+    ]) {
       if (!migrations.some((registered) => registered.version === migration.version)) {
         migrations.push(migration);
       }
@@ -556,12 +802,7 @@ export class ChatSessionService extends Service {
    * @returns 有序数组
    */
   private messagesOf(sessionId: string): ChatMessageView[] {
-    const rows = this.store.db
-      .prepare(
-        'SELECT id, session_id, role, parts, created_at FROM chat_message WHERE session_id = ? ORDER BY created_at ASC, id ASC',
-      )
-      .all(sessionId) as unknown as MessageRow[];
-    const history = rows.map(toMessageView);
+    const history = this.storedRows(sessionId).map(toMessageView);
     if (this.live?.sessionId === sessionId) history.push(this.live);
     return history;
   }
@@ -662,6 +903,10 @@ export class ChatSessionService extends Service {
   private finalize(message: ChatMessageView): ChatMessageView {
     this.insertMessage(message.sessionId, 'assistant', message.parts, message.createdAt);
     if (this.live === message) this.live = undefined;
+    // 「长会话触发压缩」的触发点在这里而不是在 `send()`：一条回复落定之后这段对话才完整，
+    // 而折叠的门槛是行数与 token（都不满足就返回 null，什么都不写）。它不改变返回给界面的那一条消息，
+    // 界面下一次 `current()` 自然看见少掉的那一截 + 一行摘要（原文行一条都没动，见 `compactSession()` 的注释）。
+    this.compactSession(message.sessionId);
     this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: true });
     return { ...message, isStreaming: false };
   }
