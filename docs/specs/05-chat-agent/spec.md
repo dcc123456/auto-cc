@@ -875,14 +875,14 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
 
 | ID     | 验收标准                                                                               | 方式 | 验证操作                   | 状态 |
 | ------ | -------------------------------------------------------------------------------------- | ---- | -------------------------- | ---- |
-| 5.4-01 | 已跑通的一轮多步执行可一键「保存为工作流」                                             | V    | 点击后截图面板出现新工作流 | [ ]  |
+| 5.4-01 | 已跑通的一轮多步执行可一键「保存为工作流」                                             | V    | 点击后截图面板出现新工作流 | [x]  |
 | 5.4-02 | 只允许沉淀"全部步成功且有 run 记录"的连续段；含失败步的段落被拒绝并说明                | U    | 构造含失败步 → 断言拒绝    | [x]  |
-| 5.4-03 | 沉淀出的 `WorkflowPlan` 与 2.4 节点模型完全同构，面板可直接运行，无需二次转换          | C+U  | 结构断言 + 面板运行一次    | [ ]  |
-| 5.4-04 | 具体入参被参数化（城市/关键词/日期区间提取为变量），未参数化的残留值在面板显式标出     | V    | 截图标红残留值             | [ ]  |
-| 5.4-05 | 沉淀时必填名称走 i18n 提示文案，命名长度与非法字符有校验                               | U    | 空名/超长/符号 → 断言被拒  | [ ]  |
+| 5.4-03 | 沉淀出的 `WorkflowPlan` 与 2.4 节点模型完全同构，面板可直接运行，无需二次转换          | C+U  | 结构断言 + 面板运行一次    | [x]  |
+| 5.4-04 | 具体入参被参数化（城市/关键词/日期区间提取为变量），未参数化的残留值在面板显式标出     | V    | 截图标红残留值             | [x]  |
+| 5.4-05 | 沉淀时必填名称走 i18n 提示文案，命名长度与非法字符有校验                               | U    | 空名/超长/符号 → 断言被拒  | [x]  |
 | 5.4-06 | 沉淀后的工作流修改不影响原会话记录（快照语义，不共享可变对象）                         | U    | 改节点 → 断言历史会话不变  | [x]  |
 | 5.4-07 | 同一工作流再运行时进度在**对话与面板两处同步显示**（同一 runner，无第二状态源）        | V    | 运行中两处各截图对比       | [ ]  |
-| 5.4-08 | 工作流列表支持重命名/复制/删除，删除前要求确认                                         | V    | 三操作各截图               | [ ]  |
+| 5.4-08 | 工作流列表支持重命名/复制/删除，删除前要求确认                                         | V    | 三操作各截图               | [x]  |
 | 5.4-09 | 反向验证：沉淀不含"agent 临场决定"的隐藏步骤——导出计划里每一步都能在对话里找到对应卡片 | C+U  | 对比步数与卡片数一致       | [ ]  |
 
 **5.4-a 落地记录（2026-10-03）**——沉淀的服务半边：投影口、计划表（号段 20）、唯一写入口与三条机检
@@ -973,7 +973,83 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
   无图片、无探针产物（`packages/main` 用例的库与日志写在 `mkdtempSync(tmpdir()/auto-cc-sediment-*)` 里，
   `afterAll` 逐个 `dispose` + `rmSync`；负证副本在 `tmp/negchk/`，`tmp/` 被忽略）。
 
-## 5.5 人工接管与恢复
+**5.4-b 落地记录（2026-10-03）**——沉淀预览卡 + 计划管理口，九条里第一次全部拿活页面验收
+
+- **落点**：`packages/renderer/src/SedimentCard.tsx`（新增，预览卡：判决行 / 逐步格子 / 变量与残留值标色 /
+  名字必填 / 提示行 / 已存成行）、`packages/renderer/src/useSediment.ts`（新增，`preview` / `saved` /
+  `nameDraft` / `busy` / `notice` 五个量与 `open` / `save` / `close` 三个动作，全部经白名单口，界面不自己判
+  能不能沉淀）、`packages/renderer/src/WorkflowPlans.tsx`（新增，计划库一节：下拉 + 列表 + 行内改名 /
+  复制 / 二次删除确认）、`ChatPanel.tsx`（挂沉淀卡，27 行）、`WorkflowPanel.tsx`（挂计划库 +
+  `runner.start(selectedPlanId)`）、两份语言包各 +59 行（`chat.sediment.*` 与 `workflow.plans.*`，
+  zh-CN / en 键齐）、`packages/core/src/events.ts` + `packages/shared/src/bridge.ts`
+  （新事件 `workflow/plans-changed` 的载荷类型与跨进程登记）、`packages/workflow/src/index.ts`
+  （`savePlan` / `renamePlan` / `removePlan` 三处写完广播；`duplicatePlan` 走 `savePlan` 所以自动继承）、
+  `packages/workflow/src/plan-store.ts`（名字字符集补全角括号）+ `plan-store.test.ts`（一条回归用例）。
+- **与 plan 的三处偏离，都写在代码注释就地**：① 计划库落在**第二视图的 `WorkflowPanel`**，不是诊断页那只
+  `WorkflowLabPanel`——5.4-03 / 08 的判据字面说的都是"面板"，而用户每天看的是那一屏。② `bridge.ts` 里
+  5.4-a 把 `plans` / `renamePlan` / `duplicatePlan` 三条注释挂到了 `5.4-06` / `5.4-05`，本片按实际条目
+  改成 `5.4-03 的挑中它跑` / `5.4-08 的三操作` / `5.4-05 的校验口径`（纯注释，无行为改动）。③ plan 里没有
+  "计划库要广播"这一条，它是实测里逼出来的（见下面第二条缺陷）。
+- **实测抓出来的三个缺陷，只有第三个是写代码时想不到的**：
+  ① **dev 库的 schema 漂移**：`workflow_plans` 表里留着一列 `revision`，而 5.4-a 的落库语句不再写它 →
+  `NOT NULL constraint failed`。迁移台账里 version 20 已记过，`ALTER` 不会重跑（AGENTS.md §9 的那条坑），
+  所以这是**只属于这台机器的 dev userData**（`tmp/dev-userdata/store.db`）的状态，手工
+  `ALTER TABLE workflow_plans DROP COLUMN revision` 修好；仓库里的迁移定义本身没有这一列，装机路径不会撞上。
+  留这一条是为了下次别把它当发版缺陷去改迁移号段。
+  ② **计划库不刷新**：沉淀卡在对话侧，它存成一条计划时计划库界面根本不经手，而两个视图都常驻 DOM
+  （切视图不卸载），于是"挂载时读一次"就是永远读不到后来写入的那条。修法沿用 `kb/entities-changed`
+  那份口径：写的那一方（`workflow.runner` 的三个口）广播，载荷只带 `planId` 不带内容，界面收到就现查
+  `plans()`（§2.7 不在界面存第二份事实）。**差分是实测出来的**：改之前对话侧存成一条，工作流视图的
+  下拉仍是 5 项、列表仍是 `plan-0a7d3217488c / boss-basic / boss-deliver / boss-e2e`；改之后不切视图、
+  不刷新，下拉变 6 项且新 id `plan-01c0c896c592` 在里面。
+  ③ **全角括号被自己的名字校验拒了**：界面上敲「搜上海前端打招呼（改名后）」→
+  `工作流名称「…」含不被允许的字符`。原因是字符集收了 ASCII `()` 没收 `（）`，而中文输入法打出来的就是全角
+  ——等于在告诉用户"中文名字不许有括号"。这一条单测永远测不到（用例里写的是半角），**只有真敲键盘才现形**。
+  补 `（）` 进白名单 + 一条用全名的回归用例（`plan-store.test.ts`）。
+- **一处如实记下但本片不改的行为**：`outbound.greet` 的重复发送防护读的是
+  `ledger.countFor(GREET_ACTION, jobId, runId)`，而 agent 循环那一路没有 `workflowRunId` → `runId` 为 null，
+  `countFor` 的 `workflow_run_id IS NULL` 就把**历史上所有"非工作流发起"的同一目标**都算进去了（这是
+  spec 2.5-13 有意为之，注释里写着"界面直接点的那几次"也要防）。实测表现：换个新 run 再打 1009 会被拒，
+  拒因文案却是「目标 1009 在**本次运行里**已经打过招呼」。文案与真实范围不符，属于 5.3 那一片的口径问题，
+  改它要动 `packages/outbound` 的断言，**不塞进 5.4-b**（§1.4 一个提交只做一件事）；留给 5.4-c 一并处理。
+- **V 证据（11 张，`docs/acceptance/5.4/`，逐张独立捕获、sha1 两两不同）**：
+  `5.4-01-sediment-preview-{1,2,3}.png`（预览卡判决 + 存成后的 `data-plan-id` + 计划库同时列出两条自定义计划、
+  内置那三条只有「复制」按钮）；`5.4-02-blocked-preview.png`（含失败步那一段：判决行点名"第 1 步的状态是
+  failed"、逐步拒因、按钮禁用并注「这一段不合格，存不了」）；`5.4-03-plan-dropdown.png`（下拉里挑中自定义计划）
+  与 `5.4-03-plan-run-from-panel.png`（**点开始后真跑完**：run `196e0092-…` 已完成，两格 27 毫秒 / 10420 毫秒，
+  节点参数逐字是那条沉淀计划的 `query=前端 / city=上海 / target=2` 与 `job=1009`，没有二次转换）——
+  03 的"面板运行一次"半边由此勾上；`5.4-04-variable-and-residual-chips.png`（第 1 步三格蓝"变量"、
+  第 2 步三格红"残留值"，同一张里还能看到空名提示行）；`5.4-05-name-rejected.png`（40 字上限的拒因原话留在
+  提示行）；`5.4-08-plan-actions-{1,2,3}.png`（行内改名编辑器 / 复制出 `plan-142672b5cbe7` +「已复制为 …」/
+  行内二次确认「只删这一条计划登记：历史 run 各自带着当时的计划快照，不会因此失去进度。」+「已删除 …」）。
+- **四道门禁实测**：`pnpm typecheck` 24 包 `Done`；`pnpm lint` exit 0（十道机检的最后一行仍是
+  「16 只工具 × 2 份语言包 …3 条沉淀条款对得上 6 个已登记 kind」）；`pnpm format:check`
+  `All matched files use Prettier code style!`；`pnpm test` exit 0（21 个测试包无一失败，
+  `packages/workflow 118`、`packages/main 31`、`packages/platform-boss 130`、`packages/resume-kb 398`）。
+- **harness 使用约束新增五条**（都实测过，写进 §9 那类事实）：① 渲染层没有 `#chat-panel` 这个 id，
+  发送口是裸 `[data-action=send]`（`[data-testid=chat-panel]` 才是那条测试钩子，而它不在 DOM 里）；
+  ② 受控输入框不能靠 `type` 追加，要用 `HTMLTextAreaElement.prototype` 的 value setter + `input` 事件，
+  否则 React 的 state 不认；③ 未激活视图的宽高是 0，同名选择器会命中隐藏那一份（`[data-action=start]`
+  在工作流视图与用量面板里各一只），点之前先量 `getBoundingClientRect().height`；④ Electron 的 CDP
+  **没有 `Browser` 域**，`Emulation.setDeviceMetricsOverride` 只在会话存活期有效，所以放大视口 + 滚动 +
+  `Page.captureScreenshot` 必须在同一条 WebSocket 里做完（`tmp/54b/shot.mjs`）；⑤ `/run` 那一路的
+  计划卡需要人按「确认并执行」（`[data-action=confirm-run]`），这是 5.3 定的不可自提升，脚本别绕。
+- **逐条状态位**：5.4-01 / 03 / 04 / 05 / 08 → `[x]`（判据见上面证据清单），5.4-02 / 06 保持 `[x]`。
+  还剩两条：5.4-07（对话与面板两处进度同步，需要 `useWorkflowRun` 同时喂对话侧的运行卡）与
+  5.4-09（"导出计划每一步都能在对话里找到对应卡片"的活体步数对比）——两条都在 5.4-c 收。
+- **§7.4 收尾自检**：① 四道门禁见上，命令与输出行数一致。② V 类九条里本片勾的五条**全部**有截图，
+  且每张都是最终构建（改完字符集与广播之后重启过的那一版）上重拍的，不是改之前那批（`preview-ok.png`
+  等四张早期图留在 `tmp/`，未入库）。③ 状态位没有模糊项，欠的两条点名 5.4-c。④ 复用检查：名字校验只有
+  `assertPlanName` 一处（界面只拦空值，长度与字符集交给服务侧，拒因原话显示）；三处广播共用一个事件名与
+  一份载荷类型；`duplicatePlan` 复用 `savePlan`；事件登记复用 `RENDERER_EVENTS` 那条循环
+  （`packages/ipc/src/index.ts` 不需要改一行）。⑤ 死代码：`sediment.close` 与 `saved` 都有消费者，
+  没有注释掉的旧实现；沉淀卡早期那版"界面自己算能不能沉淀"的分支已删干净。⑥ 前端三项：新增文案全走
+  `chat.sediment.*` / `workflow.plans.*` 双语（`pnpm lint` 的键齐检通过）、样式全 Tailwind、图标只用
+  lucide 的 `Bookmark` / `Workflow` / `Save` / `Check` / `X` / `Layers` / `Pencil` / `Copy` / `Trash2`。
+  ⑦ 本片按 §1.4 分两次提交：代码片 `feat(workflow)`（服务侧广播 + 字符集 + 界面 + 测试），文档片
+  `docs(agent)`（本节与状态位），逐片推 `origin/main`。
+  ⑧ 暂存区：源码 / 测试 / 本文档 / `docs/acceptance/5.4/` 的 12 张按条目号命名的证据；探针脚本与
+  早期截图都在被忽略的 `tmp/54b/`（§7.5）。
 
 | ID     | 验收标准                                                                                   | 方式 | 验证操作                                 | 状态 |
 | ------ | ------------------------------------------------------------------------------------------ | ---- | ---------------------------------------- | ---- |
