@@ -713,6 +713,21 @@ export class OutboundDeliverService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
+        // 沉淀条款（spec 5.4-03，同 `outbound.greet.perform` 的口径：字面量 kind + 点路径参数）。
+        // `file` 敢带上是因为执行器把它当**可选**（`paramsString(spec.params.file) ?? 配置的 resumeFile`）：
+        // 这一次真跑用的就是记录里那个路径，沉淀下来复现的是同一件事；省略它则回到"每次递配置里那份"。
+        // `snapshot` 不在条款里：它是这一版快照的临时身份，沉淀成常量就是把一次性的东西钉进计划（§2.6）。
+        workflow: {
+          kind: 'resume.deliver',
+          target: 'request.jobId',
+          params: {
+            platform: 'request.platform',
+            job: 'request.jobId',
+            file: 'request.filePath',
+            title: 'request.title',
+            company: 'request.company',
+          },
+        },
         // `committed` 决定措辞：suggest 档只暂存，摘要说成「已投递」就是掩盖（5.1-11 的同一条判据）。
         // `ledgerId` / `snapshotId` 为 null 时不硬凑引用——空着是实话，凑出来的是假证据。
         run: async ({ request }) => {

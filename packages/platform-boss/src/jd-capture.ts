@@ -369,6 +369,14 @@ export class JdCaptureService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
+        // 沉淀条款（spec 5.4-03）：`query`/`target` 是**节点侧**的参数名（`executeNode` 读的就是这三个键），
+        // 工具侧叫 `keyword`/`limit`，翻译只写在这一处；`experience` 不带——节点没有对应参数，
+        // 带上就是一句执行器永远不会读的映射（§2.4）。
+        workflow: {
+          kind: 'jd.capture',
+          target: 'criteria.keyword',
+          params: { query: 'criteria.keyword', city: 'criteria.city', target: 'criteria.limit' },
+        },
         // 本轮不回传逐行 JD id（`CaptureRunView` 只有计数），所以引用给的是「哪一轮抓取」这个回指标；
         // 逐条 JD 的证据由 `jd.repository` 那侧按 keyword 查得到，不在这里造第二套读数。
         run: async ({ criteria }) => {

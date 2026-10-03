@@ -305,6 +305,16 @@ export class OutboundGreetService extends Service {
         }),
         effect: 'outbound',
         requiresConfirmation: true,
+        // 沉淀条款（spec 5.4-03）：这只手能被沉淀成哪一个工作流节点、参数从入参的哪条路径取。
+        // 值全是 `input` 里的点路径字符串，不是闭包——`check-tool-contract.ts` 才机检得动（plan 5.4-a 落点）。
+        // `kind` 写字面量而不写 `GREET_NODE_KIND`：机检第 10 条比的就是「这句字面量能不能对上某处
+        // `registry.register` 的常量」，写成引用就等于让检查脚本去解标识符，而它一解就漏。
+        // 键名按计划口径写（执行器读的是 `platform`/`job`/`text`，见 `executeNode`），工具侧的 `jobId` 在这里翻译。
+        workflow: {
+          kind: 'greeting.send',
+          target: 'request.jobId',
+          params: { platform: 'request.platform', job: 'request.jobId', text: 'request.text' },
+        },
         // 回执只在真发出去时存在（失败一律以结构化错误上浮），所以这里可以说「已发出」；
         // 账本行 id 是最硬的一条证据引用——它同时是额度闸门记下的那一笔（§7.3）。
         run: async ({ request }) => {
