@@ -1214,19 +1214,29 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
     expect(rig.calls).toEqual([]);
   });
 
-  it('暂停单不建表、不占号段：跑完一轮带暂停的循环之后，库里没有第四张 agent 表', async () => {
+  it('暂停单落号段 22 那一行账：跑完一轮带暂停的循环之后，那张已批准的单在库里可对账', async () => {
     const rig = await bootLoop();
     rig.tools.register(makeApprovalTool(rig.calls));
     watchPauses(rig.ctx, rig.pause, APPROVE);
     await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
-    const tables = rig.store.db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'agent_pause%'")
-      .all();
-    // 待决暂停是**等待状态**而不是事实记录：经过落在 `agent_step.status / code` 与 `agent_run.stop_reason` 上。
-    expect(tables).toEqual([]);
+    const rows = rig.store.db
+      .prepare('SELECT request_id, run_id, plan_step_index, kind, resolved_at, resolution FROM agent_pause_requests')
+      .all() as unknown as {
+      request_id: string;
+      run_id: string;
+      plan_step_index: number | bigint;
+      kind: string;
+      resolved_at: number | bigint | null;
+      resolution: string | null;
+    }[];
+    // 5.3-c 当初判的是「不建表、不占号段」（待决暂停是等待状态）；5.5-05 要的恰是那行账能熬过重启，
+    // 所以本片把那条决策翻了过来：等待状态仍在内存里，库里记的是「这张单开过、谁怎么表的态」。
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'approval', plan_step_index: 0, resolution: 'approve' });
+    expect(Number(rows[0]?.resolved_at)).toBeGreaterThan(0);
     // 台架里的接管态是不带迁移的替身：接管那段账（号段 21 的 `takeover_events`）属于 `browser.takeover`，
-    // 循环这一侧只写 `stop_reason`，所以这里 19 以上不该出现任何登记。
-    expect(rig.store.migrations.some((migration) => migration.version >= 19)).toBe(false);
+    // 循环这一侧只写 `stop_reason`，所以这一族里 22 之上不该出现任何登记。
+    expect(rig.store.migrations.some((migration) => migration.version >= 23)).toBe(false);
   });
 });
 
