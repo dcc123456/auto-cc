@@ -22,6 +22,7 @@ import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
 import { SedimentCard } from './SedimentCard';
 import { ToolCard } from './ToolCard';
+import { WorkflowRunCard } from './WorkflowRunCard';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -102,7 +103,8 @@ export function ChatPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bridge = window.autoCC;
   // 对话与工作流镜像同一个 runner 实例（spec 1.10-08 的后半句判据）。
-  const { run } = useWorkflowRun();
+  // 5.4-c 起这条订阅在对话侧有两个用户：表头那只徽标显示状态，流末尾那张卡显示进度（同一份读数，spec 5.4-07）。
+  const { run: workflowRun, live: workflowLive } = useWorkflowRun();
   // agent 循环的进度独立于 chat 的忙碌态：跑任务的时候输入区照常能用（spec 5.2-12）。
   const agentRun = useAgentRun();
   // 挂在人身上的那些单自成一条读数：它跟着 run 走，但按不按是人的手，不能被循环的忙碌态盖掉（spec 5.3-08）。
@@ -155,12 +157,19 @@ export function ChatPanel() {
    * 用局部常量钉一份既保住类型收窄，也省掉一个永远不会走到的兜底（§2.6）。
    */
   const agentRunView = agentRun.run;
+  /**
+   * 值得在对话流里回显的工作流运行（spec 5.4-07）。
+   * `idle`（挂载后一次都没跑过）不占一行：那时格子全是待执行，画出来只是一张空表。
+   * 这里的三元已经把类型收窄成非 undefined，卡片 props 因此不必再判一次空（§2.6：不加不会发生的分支）。
+   */
+  const workflowRunView = workflowRun && workflowRun.status !== 'idle' ? workflowRun : undefined;
 
   // 新片段落在最下面，滚动位置跟过去，否则连拍截图看到的是上面几行。
+  // `workflowRun` 也在依赖里：工作流是从面板起跑的，卡片出现在这一段流末尾，不跟下去就拍不到它（spec 5.4-07）。
   useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [snapshot, liveStream, agentRun.run, agentPause.pending]);
+  }, [snapshot, liveStream, agentRun.run, agentPause.pending, workflowRun]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
 
@@ -206,13 +215,13 @@ export function ChatPanel() {
           {t('chat.heading')}
         </h2>
         <div className="ml-auto flex items-center gap-2">
-          {run ? (
+          {workflowRun ? (
             <span
               data-testid="chat-workflow-mirror"
               className="flex items-center gap-1 rounded-md border border-slate-800 px-2 py-1 text-[10px] text-slate-400"
             >
               <WorkflowIcon size={11} />
-              {t('chat.workflowMirror', { status: t(`workflow.status.${run.status}`) })}
+              {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
             </span>
           ) : null}
           <button
@@ -268,7 +277,7 @@ export function ChatPanel() {
 
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。 */}
       <div ref={scrollRef} data-testid="chat-scroll" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && !isStreaming && !agentRun.run ? (
+        {messages.length === 0 && !isStreaming && !agentRun.run && !workflowRunView ? (
           <p className="text-[11px] text-slate-500" data-testid="chat-empty">
             {t('chat.empty')}
           </p>
@@ -337,6 +346,10 @@ export function ChatPanel() {
               notice={agentPause.notice}
               onRespond={(card, answer) => void agentPause.respond(card, answer)}
             />
+            {/* 工作流运行卡放在这一段最末尾（spec 5.4-07）：它是「面板那一次起跑现在到哪了」的回显，
+                与上面三张卡同源但不同事——那三张属于 agent 这条循环，这一张属于 `workflow.runner`。
+                数据仍然只有那一口订阅：这里没有第二次 `runner.current()`，也没有定时器（2.8-12 的机检会红）。 */}
+            {workflowRunView ? <WorkflowRunCard run={workflowRunView} live={workflowLive} /> : null}
           </ul>
         )}
       </div>

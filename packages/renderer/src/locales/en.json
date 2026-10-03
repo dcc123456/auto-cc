@@ -542,6 +542,12 @@
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
       "workflowMirror": "Same runner: {{status}}",
+      "workflowRun": {
+        "heading": "Workflow progress",
+        "progress": "Step {{index}} of {{total}}",
+        "step": "Broadcast step: {{step}}",
+        "run": "Same run {{id}}"
+      },
       "actionSend": "send message",
       "actionStop": "stop reply",
       "actionNewSession": "start a new session",

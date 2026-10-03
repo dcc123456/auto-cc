@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, DatabaseBackup, Pause, Play, RefreshCw, Workflow } from 'lucide-react';
 import type { WorkflowNodeRunView, WorkflowNodeSpec, WorkflowRunStateView } from '@auto-cc/shared';
+import { displayStepNumber } from './format';
 import { useBridgeAction } from './useBridgeAction';
 import { useWorkflowRun } from './useWorkflowRun';
 
@@ -67,8 +68,8 @@ export function WorkflowLabPanel() {
 
   /** 画的是哪一次 run：优先内存这次已落库的行，否则是库里那次可续的（已被判成中断/失败/暂停）。 */
   const shown = state ?? resumable;
-  /** 界面显示的「第 i 个」：`nodeIndex` 在跑完时等于节点数（越界一位），所以要夹回来。 */
-  const currentNode = shown ? Math.min(shown.nodeIndex + 1, shown.totalNodes) : 0;
+  /** 界面显示的「第 i 个」：游标在跑完时等于节点数（越界一位），夹法与对话侧的运行卡同源（`format.ts`）。 */
+  const currentNode = shown ? displayStepNumber(shown.nodeIndex, shown.totalNodes) : 0;
 
   return (
     <div className="flex flex-col gap-4" data-testid="workflow-lab">

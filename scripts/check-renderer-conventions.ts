@@ -2,8 +2,9 @@
  * 渲染层规范机检（AGENTS.md §5.1/§5.3/§5.5/§5.6，spec 1.2-13…1.2-16）。
  *
  * eslint 负责逐文件拦截（内联 style、自制 svg、裸中文、非入口样式），
- * 这个脚本负责跨文件一致性的四类事实：样式文件白名单、语言包 key 对齐、
- * 代码里用到的 i18n key 是否真的存在（含占位符实参齐不齐）、内核视图宽度两侧是否同源。
+ * 这个脚本负责跨文件一致性：样式文件白名单、语言包 key 对齐、代码里用到的 i18n key 是否真的存在
+ * （含占位符实参齐不齐）、内核视图宽度两侧是否同源、工作流进度的状态源与消费者。
+ * 编号与各条判据一一对应，新增一条只在文件末尾追加一节，别把已有的类别计数写进注释（它会过期）。
  * 任一不符即 exit 1，因此挂在 `pnpm lint` 上是硬门禁而不是提示。
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -126,6 +127,8 @@ if (!Number.isFinite(ratio) || !Number.isFinite(cssPercent)) {
 //    `workflow.runner.current()` 的调用点必须只有一个（`useWorkflowRun`），两个视图都从它取数；
 //    任何文件都不许在定时器里读 workflow 服务——那会把「事件流驱动」退化成轮询的变体。
 const runStateReaders: string[] = [];
+/** 从 `useWorkflowRun` 取进度的那些视图（下面第 6 条要按文件判，这里只收集事实不做判断）。 */
+const workflowHookUsers = new Set<string>();
 for (const file of tsxFiles) {
   const source = await readFile(file, 'utf8');
   if (/workflow\['runner\.current'\]/.test(source)) runStateReaders.push(path.relative(repoRoot, file));
@@ -134,11 +137,22 @@ for (const file of tsxFiles) {
       `${path.relative(repoRoot, file)} 在定时器里读 workflow 服务，进度必须由 workflow/progress 事件驱动（2.8-02）`,
     );
   }
+  if (/from '\.\/useWorkflowRun'/.test(source)) workflowHookUsers.add(path.basename(file));
 }
 if (runStateReaders.join(',') !== path.relative(repoRoot, path.join(rendererRoot, 'useWorkflowRun.ts'))) {
   failures.push(
     `workflow.runner.current() 的调用点应唯一在 useWorkflowRun.ts，实际见：${runStateReaders.join(', ') || '（无）'}`,
   );
+}
+
+// 6) 同一次运行的进度必须两处都在（spec 5.4-07 的静态半边）
+//    对话流与工作流面板是同一份读数的两个用户：谁都不许绕过那口订阅自己读服务（第 5 条已经拦住了
+//    「自己调 current()」和「定时器轮询」两种偏法），但**少一个用户**是第 5 条查不出来的静默回归——
+//    表现恰好是"对话里看不见进度"，也就是这条验收原本要防的事。
+for (const required of ['ChatPanel.tsx', 'WorkflowPanel.tsx']) {
+  if (!workflowHookUsers.has(required)) {
+    failures.push(`${required} 不再从 ./useWorkflowRun 取进度，双入口同步（5.4-07）断了一处`);
+  }
 }
 
 if (failures.length) {

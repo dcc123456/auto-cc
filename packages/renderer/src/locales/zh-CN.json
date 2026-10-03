@@ -542,6 +542,12 @@
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
       "workflowMirror": "同一个 runner：{{status}}",
+      "workflowRun": {
+        "heading": "工作流进度",
+        "progress": "第 {{index}} / {{total}} 步",
+        "step": "播报的那一步：{{step}}",
+        "run": "同一 run {{id}}"
+      },
       "actionSend": "发送消息",
       "actionStop": "停止回复",
       "actionNewSession": "新建会话",
