@@ -202,7 +202,11 @@ describe('建表与迁移（spec 2.3-05）', () => {
     const versions = app.store.migrations.map((item) => item.version);
     expect(new Set(versions).size).toBe(versions.length);
     expect(versions).toContain(1);
-    expect(app.store.version).toBe(JD_MIGRATION_VERSION);
+    // `store.version` 是「已应用版本的最大值」，账本后来新增的号段会把它顶上去（5.3-12 的被拒表就是 19）。
+    // 所以 2.3-05 这一条判的从来不是那个数字，而是**各家的号段各自建各自的表**：本包的 3 在清单里、
+    // 版本至少推进到它，并且两边的表都真在（下面三条读数各读各的，互不越界）。
+    expect(versions).toContain(JD_MIGRATION_VERSION);
+    expect(app.store.version).toBeGreaterThanOrEqual(JD_MIGRATION_VERSION);
     expect(app.store.db.prepare('SELECT COUNT(*) AS n FROM usage_ledger').get()).toBeTruthy();
     expect(app['jd.store'].count()).toBe(0);
   });
