@@ -20,6 +20,7 @@ import type {
 import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
+import { ChatCompactionBanner } from './ChatCompactionBanner';
 import { ChatSessionBar } from './ChatSessionBar';
 import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
@@ -238,6 +239,10 @@ export function ChatPanel() {
       {/* 会话三操作（新建/改名/软删 + 已删栏）自成一条带（spec 5.6-07）：
           它们改的是 `chat_session` 那一行，与下面的档位、白名单、消息流都不是一件事。 */}
       <ChatSessionBar session={snapshot?.session} read={read} />
+
+      {/* 压缩读数是一条独立的窄带（spec 5.6-04）：它说的是「这段对话还有多少没画出来」，
+          与消息流、与会话操作带都不是同一件事，画成一条假消息会让人以为模型说过那句话。 */}
+      <ChatCompactionBanner compaction={snapshot?.compaction} />
 
       <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">

@@ -569,6 +569,21 @@
         "deleted": "Session {{code}} is folded away; restore it from the Deleted sessions list",
         "restored": "Session {{code}} is back and is now the current one"
       },
+      "compress": {
+        "covered": "The earlier {{total}} messages are folded into one summary line — nothing was deleted",
+        "tokens": "Estimated length {{before}} → {{after}} (same ruler both sides)",
+        "factsHeading": "Key facts right now (each read live, not lifted from old messages)",
+        "autonomy": "Current level: {{level}}",
+        "quota": "{{action}}: {{remaining}} left today",
+        "quotaUnlimited": "{{action}}: unlimited",
+        "quotaUnknown": "Quota unavailable: the gate is not mounted",
+        "stopReason": "Last stop: {{code}}",
+        "stopNone": "No task has run in this session yet",
+        "refused": "Refused approach: {{tool}} ({{code}})",
+        "refusedNone": "No step was refused by a decider",
+        "delivered": "Delivered targets: {{targets}}",
+        "deliveredNone": "No résumé delivered yet"
+      },
       "sediment": {
         "heading": "Save as workflow",
         "hint": "Project the run you just finished into a reusable workflow. Whether it qualifies and which cells still hold last time's literal values are decided in the main process; this card only lays them out for you.",

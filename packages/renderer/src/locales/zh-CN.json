@@ -569,6 +569,21 @@
         "deleted": "会话 {{code}} 已收起，在「已删除的会话」那一栏里可以恢复",
         "restored": "会话 {{code}} 已恢复，它就是当前会话"
       },
+      "compress": {
+        "covered": "较早的 {{total}} 条消息已折成一行摘要，原文一条都没删",
+        "tokens": "长度估计 {{before}} → {{after}}（前后同一把尺）",
+        "factsHeading": "此刻的关键事实（每一位都是现在问回来的，不是从旧消息里摘的）",
+        "autonomy": "当前档位：{{level}}",
+        "quota": "{{action}} 今日还剩 {{remaining}} 条",
+        "quotaUnlimited": "{{action}} 不限额",
+        "quotaUnknown": "额度读数问不到：闸门没挂载",
+        "stopReason": "最近一次停下：{{code}}",
+        "stopNone": "这段会话还没跑过任务",
+        "refused": "被否决的做法：{{tool}}（{{code}}）",
+        "refusedNone": "没有被判定口拒过的步",
+        "delivered": "已投递的目标：{{targets}}",
+        "deliveredNone": "还没递过简历"
+      },
       "sediment": {
         "heading": "保存为工作流",
         "hint": "把这次跑通的那一段投成一条可复用的工作流：能不能投、哪几格还是上次的残留值，都由主进程算，这里只负责摆给你看。",
