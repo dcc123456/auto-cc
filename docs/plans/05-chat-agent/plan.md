@@ -1152,6 +1152,45 @@ tick 只做一件事：对每条启用的任务算 `next_run_at <= now` 就触�
 > 本机不写自动化、也不写推测。结转项：#103（会话历史导出的界面/IPC 口）与 #100（白名单 path↔方法名活体机检）
 > 各自在 5.7-b / 5.7-e 里同批处理，不再单独开片。
 
+### 7.5.5 5.7-c 的两条决策（2026-10-03 现场读码后补，实现按此执行）
+
+**决策七：择机投递做成"纯函数规则 + 投递服务的一个配置块"，不新建服务。**
+F7 说清了现状：四个输入里频控与额度已经在投递那条腿上（`throttle.nextGapMs()` + `ledger.latestActionTs` + `gate.enforce`），
+回复状态只在 `jd.store` 的列表读数里算出来过、投递侧从不读，时间窗全仓没有。所以本片是**新建一条可读规则并接到投递前置**。
+落点选 `packages/outbound/src/deliver-timing.ts`（纯函数）而不是新包/新服务，按 §2.3"扩展现有模块"：
+它管的就是"这一刻该不该递"，而"该不该递"这件事已经住在投递服务里了。
+
+四个输入的来源与各自的单一事实：
+
+- **回复状态** ← 向 `jd.store` 现问（§9 的 2.5 实测教训：不在本地存第二份），为此给它加一个按 `(platform, jobId)` 的
+  定点读数 `replyStatus`。「已回复」仍然只在 `conversation_messages` 上算（2.5-14 的口径不动），新增的是查询形状而不是新事实。
+- **时间窗** ← 投递服务配置（`windowStartHour` / `windowEndHour` / `weekdaysOnly`），**按运行机器本地时区**判定，
+  与 5.7-a 的 cron 同一口径（求职者的"白天"就是他所在地的白天）。区间含头不含尾。
+- **频控** ← `throttle.nextGapMs()` 与 `ledger.latestActionTs('deliver')` 之间那段减法，抽成一处 `gapRemainingMs()`，
+  投递本体与规则共用（§2.2：同一逻辑第二次出现就抽，不许留两份算术）。
+- **额度** ← 闸门的只读 `check`（决策四同一口径）。**规则不替闸门改写拒绝**：额度不足时规则只把它作为短路输入，
+  真正的拒绝仍由 `gate.enforce` 走，`usage_denials` 那一行不能因为"择机"而少记（spec 5.3-12）。
+
+三条边界是这片的设计核心，都写进测试而不是只写注释：
+
+1. **只在无人值守路径生效**（`staged.workflowRunId` 非空）。界面上那一次"投递"点击本身就是人表态，
+   拦它等于把人的决定翻译成规则的决定；§5.5 已定过同一类边界（人做完即跳过）。
+2. **默认关闭**（`timing.enabled: false`）。2.6 验收过的投递主线是"审批档位决定何时递"，
+   本片不该悄悄把它改成"还要看对方回没回"；真 app 与 5.7-d 的自动链路在 `cordis.yml` 里显式打开。
+   这条也顺带避开一个坑：默认开启会让整个测试套件变成**时间依赖**（深夜跑必红），与 5.7-a 定的"换时区机器不假红"相冲。
+3. **推迟而不是失败成噪音**：不合适时以结构化错误 `OUTBOUND_DELIVER_DEFERRED` 上浮，`details` 带拒因原文数组与
+   `nextEligibleAtMs`；此刻页面动作次数为零、账本零行、`usage_denials` 零行。调度侧因此把它记成一次 `failed` 触发，
+   下一次计划点照跑（5.7-06 的"失败不影响下次"正是这条的读数）。
+
+**决策八：重试次数由 `effect` 决定，计划里的手写值只在不冲突时生效。**
+F6 的形状：`maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes)`（`index.ts:868`），
+"外发步不自动重试"全靠计划里手抄 `retryTimes: 0`，而 `BOSS_E2E_PLAN` 的 `e2e-greet` 漏写了——
+漏写的那一步今天真会重放外发（`config.retryTimes` 默认 2）。所以规则进代码：
+`maxAttemptsFor(spec, configRetryTimes)` 放在 `packages/workflow/src/retry-policy.ts`，
+`effect === 'outbound'` 恒为 1 次尝试（写了 `retryTimes: 2` 也压到 1，并打一行 warn 让漏写在计划里的人看得见），
+非外发为 `1 + min(声明 ?? 配置, READ_RETRY_CEILING = 2)`，于是"只读 ≤2 次重试"成为代码性质而不是配置巧合。
+`retryTimes: 0` 仍补进 `e2e-greet`：代码已经不依赖它，但声明与代码一致才有可读的计划（§3.2 的"写为什么"）。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
