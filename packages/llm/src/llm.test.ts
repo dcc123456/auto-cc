@@ -149,6 +149,38 @@ describe('llm.chat 的请求形态与解析（实测契约，plan §12.6 S3）',
       fixture.restore();
     }
   });
+
+  it('消息正文里的个人数据出站前被遮（spec 5.6-06，AGENTS.md §8.5）', async () => {
+    const fixture = stubFetch(() => Promise.resolve(json({ choices: [{ message: { content: '好的' } }] })));
+    try {
+      const { llm } = await boot();
+      await llm.complete({
+        messages: [
+          { role: 'system', content: '按这段 JD 写一句打招呼' },
+          {
+            role: 'user',
+            content: 'HR 周女士 13800001111，邮箱 zhou@example.com，身份证 110101199003071234，薪资 15000-25000',
+          },
+        ],
+      });
+      const body = JSON.parse(bodyText(fixture.requests[0]?.init ?? {})) as {
+        messages: { role: string; content: string }[];
+      };
+      const [system, user] = body.messages;
+      // 遮在唯一出口上：调用方拼 prompt 时不必、也不该各遮一遍（plan §7.4 决策一）。
+      expect(system?.content).toBe('按这段 JD 写一句打招呼');
+      expect(user?.content).not.toContain('13800001111');
+      expect(user?.content).not.toContain('zhou@example.com');
+      expect(user?.content).not.toContain('110101199003071234');
+      expect(user?.content).toContain('138****1111');
+      expect(user?.content).toContain('z***@example.com');
+      expect(user?.content).toContain('**********1234');
+      // 脱敏不吃半个号：`薪资 15000-25000` 是业务数字，遮了模型就答非所问（core 那两份正则的环视判据）。
+      expect(user?.content).toContain('15000-25000');
+    } finally {
+      fixture.restore();
+    }
+  });
 });
 
 describe('llm.chat 的失败形态（全部结构化，不许静默）', () => {

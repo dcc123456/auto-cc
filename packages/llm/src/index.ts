@@ -1,7 +1,8 @@
 /**
  * `llm.chat` —— 全仓**唯一**的对话模型出口（spec 2.5-12，plan §12.0）。
  *
- * 它只做三件事：拼一次 OpenAI 兼容的 chat completion 请求、按超时掐断、把失败变成结构化错误。
+ * 它只做四件事：拼一次 OpenAI 兼容的 chat completion 请求、把消息正文里的个人数据遮掉（spec 5.6-06）、
+ * 按超时掐断、把失败变成结构化错误。
  * 不含 prompt 业务、不落库、不重试 —— 那些都属于调用方（话术生成在 `outbound.script`，
  * 简历内容在 P4，agent 规划在 P5）。之所以单独成包：`AGENTS.md §2.7` 禁的是「第二套 LLM 客户端」，
  * 而这句话隐含「第一套得有唯一归属」；不先立一个，三个计划会各长出一个 `fetch`。
@@ -13,7 +14,7 @@
  * 零新依赖（不引 SDK）：请求形态按 DeepSeek / OpenAI 兼容端点实测（plan §12.6 S3）。
  * key 不进 `cordis.yml`（那是入库的清单，§8.6 禁止把密钥写进仓库），只从环境变量读。
  */
-import { AppError, Service, type Context } from '@auto-cc/core';
+import { AppError, Service, redactText, type Context } from '@auto-cc/core';
 import { z } from 'zod';
 import { joinEndpoint, postJson } from './http.js';
 
@@ -144,7 +145,13 @@ export class LlmChatService extends Service {
     }
     const body = {
       model: status.model as string,
-      messages: parsed.data.messages,
+      // 出站前的唯一一道脱敏（spec 5.6-06，§8.5）：调用方拼 prompt 时会把 JD 正文、页面读数、
+      // 简历段落塞进 messages，个人数据就这样离开了本机。放在这里而不是每个调用方各遮一遍，
+      // 是因为「所有走模型的文本」只有这一个出口（§2.7 禁第二套 LLM 客户端），遮一处即遮全部。
+      messages: parsed.data.messages.map((message) => ({
+        role: message.role,
+        content: redactText(message.content),
+      })),
       max_tokens: parsed.data.maxTokens ?? this.options.maxTokens,
       temperature: parsed.data.temperature ?? this.options.temperature,
       stream: false,

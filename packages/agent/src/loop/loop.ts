@@ -59,6 +59,8 @@ import {
   PAGE_DRIFT_CODES,
   Service,
   asApp,
+  redactText,
+  redactValue,
   takeoverStateOf,
   type AgentPauseView,
   type AgentPlanStepView,
@@ -532,8 +534,12 @@ export class AgentLoopService extends Service {
       .run(
         runId,
         this.session.current().session.id,
-        goal,
+        // 目标原文里可能被人贴上带手机号的 JD 文本；`read()` 回来的视图与界面显示都取自这一列（spec 5.6-05）。
+        redactText(goal),
         tier,
+        // `plan_json` 存的是**执行件**（原样入参），不是对话记录：改配置重建服务、或重启后按 5.6-01 回看时，
+        // `ensureScope` 要把同一份参数原样递回那只手（spec 5.6-05 的「遮号码不等于遮功能」半边）。
+        // 它因此只被 `readForExecution` 读，界面与事件走 `read()`——那一条会把这里的参数遮成掩码。
         JSON.stringify(plan),
         this.config.stepLimit,
         this.config.tokenBudget,
@@ -691,12 +697,28 @@ export class AgentLoopService extends Service {
   }
 
   /**
-   * 读一次 run 的整份落库读数（界面与日志的唯一去处）。
+   * 读一次 run 的整份**界面**读数（IPC 白名单上 `agent.loop.read` 与 `agent/run-progress` 的同一份形状）。
+   *
+   * 计划里的入参在这一道口遮一遍（spec 5.6-05）：模型起草时是把用户那句话照抄进参数的，
+   * 而 `ToolCard` 的「参数 {…}」那一行、验收截图、以及界面回看的历史都来自这里。
+   * 执行侧**不**走这条路（`readForExecution`），所以「遮参数」不会变成「遮功能」——
+   * 恢复时要原样重跑的那只手、沉淀时按点路径取值的那份参数都还是原文（plan §7.4 决策一的反向半边）。
    * @param runId 运行 id
-   * @returns run + 计划 + 已跑到的步
+   * @returns run + 计划 + 已跑到的步，其中 `plan[i].input` 是掩码（其余两位在落库前已遮，见 `propose` / `writeStep`）
    * @throws 库里没有这条 run 时 `AGENT_LOOP_RUN_NOT_FOUND`
    */
   read(runId: string): AgentRunView {
+    const view = this.readForExecution(runId);
+    return { ...view, plan: view.plan.map((step) => ({ ...step, input: redactValue(step.input) })) };
+  }
+
+  /**
+   * 读一次 run 的**原样**读数（循环自己与 `agent.sediment` 用，刻意不在 IPC 白名单上）。
+   * @param runId 运行 id
+   * @returns 未脱敏的读数：`plan[i].input` 就是落库那一份，恢复按它重跑、沉淀按它取值
+   * @throws 库里没有这条 run 时 `AGENT_LOOP_RUN_NOT_FOUND`
+   */
+  readForExecution(runId: string): AgentRunView {
     const run = this.store.db.prepare('SELECT * FROM agent_run WHERE id = ?').get(runId) as RunRow | undefined;
     if (!run) throw new AppError('AGENT_LOOP_RUN_NOT_FOUND', `找不到 run ${runId}`, 'agent.loop', { runId });
     const steps = this.store.db
@@ -1152,7 +1174,7 @@ export class AgentLoopService extends Service {
     }
     const base = this.buildContext(scope);
     const draft = await this.model.draftPlan({
-      goal: this.read(scope.runId).goal,
+      goal: this.readForExecution(scope.runId).goal,
       tier: this.session.current().session.autonomy,
       knownToolIds: this.registry
         .list()
@@ -1308,7 +1330,9 @@ export class AgentLoopService extends Service {
         step.toolId,
         status,
         JSON.stringify(context.refs),
-        observation,
+        // 观察文本是从页面读数里拼出来的，落库前遮一遍（spec 5.6-05）：`read()` 与 `agent/run-progress`
+        // 都从这一列取视图，所以遮这一处就同时覆盖了界面，不必在每个去路上各遮一次。
+        redactText(observation),
         JSON.stringify(evidenceRefs),
         durationMs,
         code,
@@ -1337,7 +1361,8 @@ export class AgentLoopService extends Service {
   /**
    * 把这份 run 的当前落库读数推给渲染层（`agent/run-progress`，spec 5.2-04）。
    *
-   * 载荷刻意就是 `read()` 的原样返回值：不包事件外壳、不裁字段，界面与日志读的是同一个形状。
+   * 载荷刻意就是 `read()` 的返回值：不包事件外壳、不裁字段，界面与日志读的是同一个形状。
+   * 因此这一推走的是**界面读数**那一条（参数已遮，spec 5.6-05），而不是执行侧那份原文。
    * @param runId 刚被写过的那条 run
    */
   private publish(runId: string): void {
@@ -1399,13 +1424,15 @@ export class AgentLoopService extends Service {
    *
    * 必须能重建：改配置会重建本服务并把 `scopes` 清空（AGENTS.md §9 的 2.5 实测），
    * 那时若只能读内存，界面就得到「有 run 却没有进度」。
+   * 取的是 `readForExecution` 而不是 `read`：重建出来的计划要**原样递回那只手**（`registry.call`），
+   * 而界面上那份读数的参数是掩码（spec 5.6-05）——在这里读掩码就等于把脱敏做成了破坏功能。
    * @param runId 运行 id
    * @returns 与落库进度一致的作用域
    */
   private ensureScope(runId: string): RunScope {
     const existing = this.scopes.get(runId);
     if (existing) return existing;
-    const view = this.read(runId);
+    const view = this.readForExecution(runId);
     const scope: RunScope = {
       runId,
       cursor: view.steps.length > 0 ? Math.max(...view.steps.map((step) => step.planStepIndex)) + 1 : 0,

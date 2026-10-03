@@ -707,3 +707,98 @@ describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () 
     expect(remounted.autonomyAudit(sessionId)).toMatchObject([{ fromAutonomy: 'suggest', toAutonomy: 'semi' }]);
   });
 });
+
+/**
+ * 5.6-a：对话记录的脱敏（spec 5.6-05）。
+ *
+ * 三条去路各查一遍是这条判据的全部要点：`chat/delta` 事件（界面正在显示的那一份）、
+ * `current()` 的内存镜像（重启前屏幕上残留的那一份）、`chat_message` 行（落盘的那一份）。
+ * 只查库是这类判据最常见的假通过——遮在写库那一行，前面两条还是原文。
+ */
+describe('进入对话记录之前先脱敏（spec 5.6-05）', () => {
+  /** 一句同时带手机、邮箱、身份证的 JD 素材（值形态三条正则各有对象）。 */
+  const PII_TEXT = '这个岗位 HR 姓周，手机 13800001111，邮箱 zhou@example.com，身份证 110101199003071234';
+
+  /**
+   * 把库里现有的每条消息正文拼成一段可 grep 的文本。
+   * @param ctx 本次台架的上下文
+   * @returns 所有 `chat_message.parts` 的原始 JSON（按时间序，含用户行与助手行）
+   */
+  function storedParts(ctx: Context): string {
+    const rows = asApp(ctx)
+      .store.db.prepare('SELECT parts FROM chat_message ORDER BY created_at ASC')
+      .all() as unknown as { parts: string }[];
+    return rows.map((row) => row.parts).join('\n');
+  }
+
+  it('用户贴进一段带联系方式的 JD：落库、内存镜像、流式事件三处都不可还原', async () => {
+    const { ctx, chat, deltas } = await boot();
+    chat.send(PII_TEXT);
+    await waitUntil(() => !chat.current().messages.some((message) => message.isStreaming), 6000, '回复没有收尾');
+    const stored = storedParts(ctx);
+    expect(stored).not.toContain('13800001111');
+    expect(stored).not.toContain('zhou@example.com');
+    expect(stored).not.toContain('110101199003071234');
+    expect(stored).toContain('138****1111');
+    expect(stored).toContain('z***@example.com');
+    expect(stored).toContain('**********1234');
+    // 展示半边①：推给界面的每一个字。
+    expect(deltas.map((delta) => delta.text).join('')).not.toContain('13800001111');
+    // 展示半边②：`current()` 现读值（ChatPanel 就是按它画气泡的）。
+    expect(JSON.stringify(chat.current())).not.toContain('13800001111');
+    // 脱敏遮的是号码，不是这句话：上下文与被遮的值都还在，人才看得懂为什么少了几位。
+    expect(stored).toContain('HR 姓周');
+  });
+
+  it('工具卡片的入参与产出都遮，而注册表实收的是原样入参（遮号码不等于遮功能）', async () => {
+    const { ctx, chat, tools, deltas } = await boot();
+    const received: unknown[] = [];
+    tools.register({
+      id: 'demo.pii',
+      titleKey: 'agent.tool.labels.demoPii',
+      description: '假联系：把收件人手机号回进摘要与产出',
+      input: z.object({ to: z.string() }),
+      effect: 'read',
+      requiresConfirmation: false,
+      run: (params) => {
+        received.push(params);
+        return Promise.resolve(
+          toolResult({ phone: '13800001111' }, { summary: '已联系 13800001111', evidenceRefs: ['contact:demo'] }),
+        );
+      },
+    });
+    chat.send('/tool demo.pii {"to":"13800001111"}');
+    await waitUntil(() => deltas.at(-1)?.done === true, 6000, '工具卡片没有收尾');
+    const card = deltas.filter((delta) => delta.tool).at(-1)?.tool;
+    expect(card?.output).toMatchObject({
+      summary: '已联系 138****1111',
+      value: { phone: '138****1111' },
+      evidenceRefs: ['contact:demo'],
+    });
+    expect(card?.input).toEqual({ to: '138****1111' });
+    // 判据的反面：工具真收到的必须是原样。`part.input` 是展示与记录，`registry.call` 才是执行。
+    expect(received).toEqual([{ to: '13800001111' }]);
+    expect(storedParts(ctx)).not.toContain('13800001111');
+  });
+
+  it('失败原因里的邮箱也遮，而错误码一字不动：原样回报说的是原因不被改写', async () => {
+    const { ctx, chat, tools, deltas } = await boot();
+    tools.register({
+      id: 'demo.pii-fail',
+      titleKey: 'agent.tool.labels.demoPiiFail',
+      description: '假失败：报错信息里带收件人邮箱',
+      input: z.object({}),
+      effect: 'read',
+      requiresConfirmation: false,
+      run: () => Promise.reject(new Error('收件人 zhou@example.com 不在联系人列表里')),
+    });
+    chat.send('/tool demo.pii-fail');
+    await waitUntil(() => deltas.at(-1)?.done === true, 6000, '失败卡片没有收尾');
+    const card = deltas.filter((delta) => delta.tool).at(-1)?.tool;
+    expect(card?.state).toBe('failed');
+    expect(card?.errorText).toContain('TOOL_FAILED');
+    expect(card?.errorText).not.toContain('zhou@example.com');
+    expect(card?.errorText).toContain('z***@example.com');
+    expect(storedParts(ctx)).not.toContain('zhou@example.com');
+  });
+});

@@ -1,7 +1,7 @@
 /**
- * 合规护栏机检（spec 2.7-02 / 2.7-04，AGENTS.md §8.1/§8.3 的落地）。
+ * 合规护栏机检（spec 2.7-02 / 2.7-04 / 5.6-05 / 5.6-06，AGENTS.md §8.1/§8.3/§8.5 的落地）。
  *
- * 三条规则、三种失效模式：
+ * 四条规则、四种失效模式：
  * 1. **红线**（2.7-02）：验证码识别、UA 与指纹伪装、请求头改写、多账号分区池——这四类一旦进了代码库，
  *    就不再是"某个人的坏主意"而是"这个项目支持的用法"，所以按**字符串痕迹**扫（要绕过它得改的是意图，不是标识符）。
  * 2. **节奏数**（2.7-04）：等间隔是机器行为（AGENTS.md §8.3），而"从配置读一个定值再固定地睡"同样是机器行为。
@@ -9,9 +9,12 @@
  *    数字字面量一律失败，`*.default()` 里的默认值与具名常量不在它的射程内。
  * 3. **测试面 URL**（4.4-08 / AGENTS.md §7.2）：自动化不许碰真实招聘平台。这条只扫**测试与脚本面**
  *    （理由见下面的 `TEST_SURFACE`），主机名只许是回环、RFC 保留名，或写进 allowlist 并说明理由的真实域名。
+ * 4. **两道脱敏边界**（5.6-05 / 5.6-06 / §8.5）：个人数据只有两个出界口——进对话记录之前、出网络之前。
+ *    这条只判"那两处还在不在调用 core 的那一份 redact"，遮得对不对由 `agent.test.ts` / `llm.test.ts`
+ *    的含 PII 剧本用例判（机检查得出结构缺席，查不出语义）。
  *
  * 判定按行而不是 AST：本仓已有的同类检查（`check-llm-single-entry.ts`）就是这个形状，
- * 换 AST 要为三条规则引入一个解析器依赖，不值。
+ * 换 AST 要为四条规则引入一个解析器依赖，不值。
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -64,6 +67,22 @@ const PACING_ALLOWLIST: readonly RegExp[] = [/\.default\(/, /MAX_[A-Z_]*MS\b/];
 const TEST_REAL_HOST_ALLOWLIST: readonly (readonly [RegExp, string])[] = [
   [/^schemas\.openxmlformats\.org$/, 'OOXML 命名空间标识符（只比对字符串，不发请求）'],
   [/^(?:www\.)?zhipin\.com$/, '导航策略与知识包契约用例的"被判拒绝域名"（真域名才能判出登记表之外）'],
+];
+
+/** 边界文件必须从 `@auto-cc/core` 把 redact 那一份请进来（跨行的 `import { … }` 也算）。 */
+const CORE_REDACT_IMPORT = /import\s*\{[^}]*\bredact[A-Z]\w*[^}]*\}\s*from ['"]@auto-cc\/core['"]/;
+
+/**
+ * 规则四：个人数据出界的两道边界，各有一处必须还在调用 core 那一份 redact（spec 5.6-05 / 5.6-06）。
+ *
+ * 为什么只做"调用点还在不在"这一层：机检查得出结构缺席，查不出语义——`redactText(clip(x))` 这种
+ * 遮了半个字段的写法要靠用例判，而「一次重构把落库前的那句遮掉换成原样递进去」正是本条能当场拦住的形态。
+ * 落点选在**边界文件**而不是"整个 agent 包不许出现原文"：`plan_json` 那类执行件必须留原文才能重跑
+ * （plan §7.4 决策一的反向半边），按包扫会把正确的例外一起误伤，逼人在检查里堆豁免表。
+ */
+const PII_BOUNDARIES: readonly (readonly [file: string, call: RegExp, boundary: string])[] = [
+  ['packages/agent/src/session.ts', /\bredact(?:Text|Value)\s*\(/, '消息正文与工具卡片进对话记录之前'],
+  ['packages/llm/src/index.ts', /\bredactText\s*\(/, 'messages 正文出网之前'],
 ];
 
 /** 回环地址：`127.0.0.0/8` 与 `localhost` / `::1`，本地 fixture 站点与 CDP 都住在这里。 */
@@ -205,13 +224,36 @@ for (const file of scriptFiles) {
   scanTestSurfaceHosts(relative(file), (await readFile(file, 'utf8')).split('\n'));
 }
 
+// —— 规则四：两道脱敏边界的调用点（5.6-05 落库前 / 5.6-06 出站前）——
+for (const [file, call, boundary] of PII_BOUNDARIES) {
+  const source = await readFile(path.join(repoRoot, file), 'utf8').catch(() => null);
+  if (source === null) {
+    failures.push(`${file} 读不到：「${boundary}」这道边界没有落点，个人数据会原样出去（spec 5.6-05 / 5.6-06）`);
+    continue;
+  }
+  if (!call.test(source)) {
+    failures.push(
+      `${file} 里没有 redact 调用：「${boundary}」这道边界失效，手机号/邮箱/证件号会原样进存储或出网` +
+        '（spec 5.6-05 / 5.6-06、AGENTS.md §8.5）',
+    );
+  } else if (!CORE_REDACT_IMPORT.test(source)) {
+    failures.push(
+      `${file} 的脱敏调用不是从 @auto-cc/core 请进来的：那是第二套 PII 正则，` +
+        '遮出来的形状会与 logger、证据文本（2.7-d）、KB 入库（4.1-09）那几处不一致（AGENTS.md §2.5 / §2.7）',
+    );
+  }
+}
+
 if (failures.length) {
-  console.error('✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数 / 4.4-08 测试面 URL）：');
+  console.error(
+    '✖ 合规护栏机检未通过（spec 2.7-02 红线 / 2.7-04 节奏数 / 4.4-08 测试面 URL / 5.6-05 与 5.6-06 两道脱敏边界）：',
+  );
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
   `✔ 合规护栏机检通过（扫描 ${String(scannedPackages.reduce((sum, entry) => sum + entry.files.length, 0) + scriptFiles.length)} 个源码文件：` +
     `无 UA/指纹/打码/自定义分区痕迹，${PACING_PACKAGES.join('/')} 的节奏数值全部来自配置，` +
-    `测试与脚本面的 ${String(TEST_REAL_HOST_ALLOWLIST.length)} 条真实域名豁免之外没有出网地址）`,
+    `测试与脚本面的 ${String(TEST_REAL_HOST_ALLOWLIST.length)} 条真实域名豁免之外没有出网地址，` +
+    `${PII_BOUNDARIES.map(([file]) => file).join(' 与 ')} 的两道脱敏边界都在调用 core 那一份 redact）`,
 );

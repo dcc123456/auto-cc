@@ -1730,3 +1730,90 @@ describe('进程停过一次之后的对账与不重放（spec 5.5-05 的 run �
     expect(calls).toEqual(['tick:1', 'tick:2']);
   });
 });
+
+/**
+ * 5.6-a：run 与步记录落库前先脱敏（spec 5.6-05 的 agent 半边）。
+ *
+ * 为什么直查表而不只看 `read()` 的返回值：判据原文是「展示与存储均不可还原」，视图恰好遮了而库里
+ * 仍是原文正是这条要防的形态。为什么还要订阅 `agent/run-progress`：那是界面唯一读到的东西，
+ * 库遮了而事件没遮，界面上照样是漏的。
+ * 两处例外由这组用例同时钉住：`agent_run.plan_json` 的入参与工具实收的实参留原文——那是恢复与重跑
+ * 要原样交给那只手的**执行件**，不是对话记录（plan §7.4 决策一的反向半边），界面看到的参数摘要走掩码。
+ */
+describe('个人数据进 run 与步记录之前（spec 5.6-05 的 agent 半边）', () => {
+  /**
+   * 一只「把页面上读到的 HR 联系方式原样交回」的假手——真实那口 `browser.page.snapshot` 的现场形状。
+   * @param received 每进一次 `run` 记下它**实收**的入参；用例据此证明脱敏没把执行拆散
+   * @returns 合规声明：`read` 级（`auto` 档直接放行）、`strictObject` 入参、摘要里带三样 PII
+   */
+  function makeContactTool(received: unknown[]): AgentTool<{ to: string }> {
+    return {
+      id: 'demo.contact',
+      titleKey: 'agent.tool.labels.demoContact',
+      description: '回一段带 HR 联系方式的页面读数',
+      input: z.strictObject({ to: z.string().min(1) }),
+      effect: 'read',
+      requiresConfirmation: false,
+      run: (params) => {
+        received.push(params);
+        return Promise.resolve(
+          toolResult(
+            { page: '联系人见名片' },
+            { summary: 'HR 周女士 13800001111，邮箱 zhou@example.com，证件 110101199003071234' },
+          ),
+        );
+      },
+    };
+  }
+
+  it('目标里粘了带手机号的 JD：agent_run.goal 存掩码，read() 与界面同源', async () => {
+    const { loop, store } = await bootLoop();
+    // 目标里必须点一只真登记过的手（`demo.tick`）：桩模型只认原文里点名的工具，一句「帮我看看岗位」
+    // 起草出来是空计划，`confirm` 会按 5.2 的既有口径落 `PLAN_EMPTY`，那条 run 连一步都没跑，
+    // 这一条要验的「跑完之后的 goal 列」根本不会存在。
+    const proposed = await loop.propose('demo.tick {"n":1} 之后看这个岗位，联系 13800001111 / hr@example.com');
+    const row = store.db.prepare('SELECT goal FROM agent_run WHERE id = ?').get(proposed.runId) as unknown as {
+      goal: string;
+    };
+    expect(row.goal).not.toContain('13800001111');
+    expect(row.goal).not.toContain('hr@example.com');
+    expect(row.goal).toContain('138****1111');
+    expect(row.goal).toContain('h***@example.com');
+    // 界面读的是 `read()`，而 `read()` 读的就是这一列：遮一处即遮全部，不必每个去路各遮一遍。
+    expect(loop.read(proposed.runId).goal).toBe(row.goal);
+    expect(await loop.confirm(proposed.runId)).toMatchObject({ status: 'completed' });
+  });
+
+  it('工具从页面读回手机号与证件号：落库的观察文本与推给界面的进度事件都不含原文', async () => {
+    const { ctx, loop, store, tools } = await bootLoop();
+    const received: unknown[] = [];
+    tools.register(makeContactTool(received));
+    const progress: AgentRunView[] = [];
+    ctx.on('agent/run-progress', (event) => progress.push(event));
+    const proposed = await loop.propose('demo.contact {"to":"13800001111"}');
+    const finished = await loop.confirm(proposed.runId);
+    expect(finished.status).toBe('completed');
+    const observation = stepRecords(store, proposed.runId)[0]?.observation ?? '';
+    expect(observation).not.toContain('13800001111');
+    expect(observation).not.toContain('110101199003071234');
+    expect(observation).toContain('138****1111');
+    expect(observation).toContain('z***@example.com');
+    expect(observation).toContain('**********1234');
+    // 事件那半边单独查：它不是从库里再遮一遍，而是与库同一份遮好的值。
+    const pushed = JSON.stringify(progress.at(-1) ?? {});
+    expect(pushed).not.toContain('13800001111');
+    expect(pushed).not.toContain('zhou@example.com');
+    // 计划里的入参也在界面上（`ToolCard` 的「参数 {…}」那一行，5.2-09 的折叠摘要），所以 `read()` 遮它；
+    // 而 `readForExecution` 是执行与沉淀侧的原样读数——恢复重跑要按它递参，遮了就成半个号码。
+    expect(finished.plan[0]?.input).toEqual({ to: '138****1111' });
+    expect(loop.readForExecution(proposed.runId).plan[0]?.input).toEqual({ to: '13800001111' });
+    // 反向半边：脱敏只改展示与存储里的**对话面**，不改执行件，也不改工具实收的入参。
+    // `plan_json` 那一列留原文正是这一条的落点（`agent_run.plan_json` 是恢复时要原样重跑的东西，
+    // 见 plan §7.4 决策一与 `propose` 里那段注释）；将来若有人把它也遮了，这条会先响。
+    const planRow = store.db.prepare('SELECT plan_json FROM agent_run WHERE id = ?').get(proposed.runId) as unknown as {
+      plan_json: string;
+    };
+    expect(planRow.plan_json).toContain('13800001111');
+    expect(received).toEqual([{ to: '13800001111' }]);
+  });
+});

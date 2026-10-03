@@ -7,12 +7,18 @@
  *
  * 为什么正在流式的那条消息不落库：`chat_message` 只存**已完成**的消息。半截回复留在内存里，
  * 于是 app 被杀掉时不会留下一行「永远在流式」的孤儿数据，重启后读到的历史必然是完整的（1.11-08）。
+ *
+ * 为什么脱敏收在「进入对话记录」那两处，而不是收在写库那一行（spec 5.6-05）：判据要的是**展示与存储都不可还原**，
+ * 而卡片正文有三条去路——`chat/delta` 事件、`current()` 的内存镜像、`chat_message` 行。只遮最后一条会漏前两条。
+ * 收在入口则三条去路天然同一份，且只用 core 那一份正则（§2.5 禁第二套实现）。
  */
 import {
   AUTONOMY_LEVELS,
   AppError,
   Service,
   asApp,
+  redactText,
+  redactValue,
   sleep,
   type AutonomyLevel,
   type ChatMessageView,
@@ -251,7 +257,9 @@ export class ChatSessionService extends Service {
     }
     const sessionId = this.ensureSession();
     const at = Date.now();
-    this.insertMessage(sessionId, 'user', [{ kind: 'text', text }], at);
+    // 进入对话记录之前先脱敏（spec 5.6-05）：事件、内存镜像、落库三条去路共用这一份值，遮一处不如遮源头。
+    const safeText = redactText(text);
+    this.insertMessage(sessionId, 'user', [{ kind: 'text', text: safeText }], at);
     const message: ChatMessageView = {
       id: randomUUID(),
       sessionId,
@@ -262,7 +270,8 @@ export class ChatSessionService extends Service {
     };
     this.live = message;
     this.controller = new AbortController();
-    void this.pump(message, text);
+    // `text` 只多带这一层：`/tool` 的入参要按原样交给注册表，见 `pump` 的 `rawText` 注释。
+    void this.pump(message, safeText, text);
     return message;
   }
 
@@ -445,9 +454,11 @@ export class ChatSessionService extends Service {
   /**
    * 流式推进：一片一片把模板回复吐出去，每片推一条 `chat/delta`。
    * @param message 本次要填充的助手消息（内存镜像）
-   * @param userText 触发这次回复的用户输入，用于生成模板与判定是否演示工具
+   * @param userText 已脱敏的用户文本，用于生成模板与判定是否演示工具（回复里回显的就是这一份）
+   * @param rawText 用户原文，**只**交给 `attachToolPart` 解析一次入参：`/tool` 打给注册表的那份
+   *   必须是原样，否则一个 11 位岗位 id 会被手机号规则吃掉，脱敏就变成了破坏功能。它不进事件、不落库、不写进卡片。
    */
-  private async pump(message: ChatMessageView, userText: string): Promise<void> {
+  private async pump(message: ChatMessageView, userText: string, rawText: string): Promise<void> {
     const controller = this.controller;
     const reply = this.fakeReplyFor(userText);
     for (let cursor = 0; cursor < reply.length; cursor += this.config.chunkChars) {
@@ -459,14 +470,15 @@ export class ChatSessionService extends Service {
       // 让出之后必须先确认「这次让出是谁引起的」：stop()/新建会话已经把它落库并从内存摘掉了。
       if (controller?.signal.aborted || this.live !== message) return;
     }
-    if (userText.startsWith(TOOL_DEMO_PREFIX)) await this.attachToolPart(message, userText);
+    if (userText.startsWith(TOOL_DEMO_PREFIX)) await this.attachToolPart(message, rawText);
     this.finalize(message);
   }
 
   /**
    * 追加一段工具卡片并真调注册表（spec 2.8-09：`/tool`→`demo.echo` 的壳换成真调用）。
    * @param message 要追加卡片的助手消息
-   * @param userText 用户原文，前缀之后的内容按 `/tool <工具id> [入参 JSON]` 解析
+   * @param userText 用户**原文**，前缀之后的内容按 `/tool <工具id> [入参 JSON]` 解析；
+   *   卡片与落库拿的是解析后脱敏的那一份（spec 5.6-05），真调注册表用原样那一份（见 `pump` 的 `rawText`）
    */
   private async attachToolPart(message: ChatMessageView, userText: string): Promise<void> {
     const { toolId, input } = parseToolRequest(userText.slice(TOOL_DEMO_PREFIX.length).trim());
@@ -474,7 +486,7 @@ export class ChatSessionService extends Service {
       kind: 'tool',
       toolCallId: randomUUID(),
       toolId,
-      input,
+      input: redactValue(input),
       state: 'running',
       output: null,
       durationMs: null,
@@ -488,12 +500,13 @@ export class ChatSessionService extends Service {
     const reply = await this.registry.call(toolId, input);
     part.durationMs = Date.now() - at;
     if (reply.ok) {
+      // 工具产出是从页面上读来的原文，可能带着 HR 的手机号与邮箱（§8.5 默认脱敏，spec 5.6-05）。
       part.state = 'done';
-      part.output = reply.result;
+      part.output = redactValue(reply.result);
     } else {
-      // §1.7 第 8 条：原样回报，卡片就是失败态。
+      // §1.7 第 8 条：原样回报，卡片就是失败态——"原样"说的是代码与原因不改写，不是把 PII 也照抄。
       part.state = 'failed';
-      part.errorText = `${reply.code}：${reply.message}`;
+      part.errorText = redactText(`${reply.code}：${reply.message}`);
     }
     this.emitTool(message, part);
   }

@@ -84,7 +84,7 @@ function readScalarPath(input: unknown, path: string): WorkflowParamValue | unde
  *
  * 预览与落库必须走这一个函数：分开写就会出现「界面说可以、服务拒了」或反之，而 5.4-02 判的正是拒绝口径
  * （plan 5.4-a：三条「拒」的口径必须由同一次投影给出）。
- * @param run `agent.loop.read()` 的整份读数（计划草案 + 已跑到的步）
+ * @param run `agent.loop.readForExecution()` 的整份读数（计划草案 + 已跑到的步；参数必须是原文，理由见 `preview`）
  * @param lookups 声明表与执行器登记处的查表口
  * @returns 逐格读数 + 整段能不能沉淀 + 第一条拒因
  */
@@ -204,12 +204,17 @@ export class AgentSedimentService extends Service {
 
   /**
    * 看一眼这次任务能不能沉淀、每个格子会变成什么（spec 5.4-01 的预览卡素材）。
+   *
+   * 取的是 `agent.loop.readForExecution`（原样读数），不是界面那份 `read`：格子参数是从计划草案的入参里
+   * 按点路径摘出来的（`readScalarPath`），而 `save` 直接拿本函数的产物去落 `workflow_plans`。
+   * 界面那层把参数遮成掩码是 spec 5.6-05 的要求（`agent.loop.read`），照搬到这里就会把
+   * 「138****1111」这种串存成以后每次重跑的入参——那是把脱敏做成了破坏功能（plan §7.4 决策一的反向半边）。
    * @param runId `agent.loop` 的 run id（来自对话卡片，不是用户手打的）
    * @returns 逐格读数 + 整段判决 + 第一条拒因
    * @throws 库里没有这条 run 时按 `agent.loop.read` 的口径失败（`AGENT_LOOP_RUN_NOT_FOUND`）
    */
   preview(runId: string): SedimentPreviewView {
-    return projectRun(this.loop.read(runId), this.lookups());
+    return projectRun(this.loop.readForExecution(runId), this.lookups());
   }
 
   /**
