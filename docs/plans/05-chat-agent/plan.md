@@ -836,10 +836,15 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
   第一、二步没有第二次。V+C 那半边另拍：真·杀进程重启 + harness（CDP 10222，`AUTO_CC_USER_DATA_DIR` 换一份 dev userData），
   重启后 `pending()` 里那张卡在页面上可见，截图按 5.5-05 条目号入 `docs/acceptance/5.5/`。
 
-**写代码之前要补的三条取证欠账**：① `AgentPauseView` 的确切字段与 `missing` 的形状（在 `@auto-cc/core` 的哪一份文件里）；
-② `PendingChannel.open()` 今天自己生成单号，D2 要**给定** id 登记——不允许就在那只共用基础设施上加一位（§2.5 的扩展，
-不是再造第二条通道）；③ 渲染层 `AgentPauseCards.tsx` 现读 `pause.pending()` 的时机（只跟着事件，还是也随 run 进度重读），
-它决定"重启后卡片自己出现"需不需要界面侧补一次现读。
+**三条取证的落定（同一次现场读码，写代码之前不再猜）**：
+① `AgentPauseView` 的字段与 `pause.ts` 里 `PausePayload` 那句注释对得上——`requestId / requestedAt / expiresAt` 由通道补，
+其余（`runId / planStepIndex / toolId / kind / reason / missing / round`）是调用方给的载荷，D1 那些列就是它逐字段落地。
+② `PendingChannel.open()`（`packages/core/src/pending-channel.ts:73`）**自己生成单号**（`randomUUID()`），D2 要沿用老单号，
+因此必须在这只共用基础设施上开一个「给定 id」的口子——它是 `outbound.deliver` 的确认单（2.6-c）也在用的那一只，
+所以改动只能是**加一个可选入参**、默认行为一字不变，不许另起第二条通道（§2.5）。
+③ 渲染层 `useAgentPause.ts` 的分工是「事件提醒 + 现读兜底」：两条 `agent/pause-*` 事件的处理器都不存载荷，只现读
+`pause.pending()`。所以"重启后卡片自己出现"应当**零渲染层改动**：init 重推每张单时照旧发一次 `agent/pause-requested`，
+界面那条既有订阅就会现读。实现时顺手确认首屏那一次 `read()` 在不在——它在则更稳，不在也不影响这条判据走事件那一路。
 
 **5.5-d 不做的事**：不做崩溃后自动续推（没有判据要它，且"谁替人决定重跑"正是接管这一片反对的那只手）；
 不把暂停单开放给模型（`respond` 与加白撤白同属人表态的口，机检第 ⑧ 条同口径）；不做暂停单的历史回看界面
