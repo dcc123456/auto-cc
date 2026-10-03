@@ -559,8 +559,8 @@
 | 5.3-08 | 确认暂停分两类且界面区分：`approval`（是/否）与 `elicitation`（需补充信息，可多轮）      | V    | 各触发一次 → 两张卡片截图                       | [x]  |
 | 5.3-09 | 审批请求带 requestId；应答按 id 路由回发起步骤，错 id / 重复 id 的应答被忽略             | U    | 并发两个请求 → 交叉应答 → 断言不串              | [x]  |
 | 5.3-10 | 审批超时不默认放行（超时 = 未确认 = 不执行），并回报超时                                 | U    | 缩短超时 → 断言未外发                           | [x]  |
-| 5.3-11 | 外发三闸门缺一即不外发：档位允许 + 确认 + `entitlement.gate` 放行                        | U    | 三维各关掉一次 → 三次都被拒                     | [ ]  |
-| 5.3-12 | 被闸门拦下的动作在 `usage.ledger` 里留下"被拒"记录与可读原因                             | U    | 超额触发 → 断言拒绝记录                         | [ ]  |
+| 5.3-11 | 外发三闸门缺一即不外发：档位允许 + 确认 + `entitlement.gate` 放行                        | U    | 三维各关掉一次 → 三次都被拒                     | [x]  |
+| 5.3-12 | 被闸门拦下的动作在 `usage.ledger` 里留下"被拒"记录与可读原因                             | U    | 超额触发 → 断言拒绝记录                         | [x]  |
 
 **5.3-a 落地记录（2026-10-03）**——档位真值表钉成用例、默认档做成配置、档位列唯一写入口 + 变更审计
 
@@ -785,6 +785,91 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
   那几条 run / 步行与审计记录是真实历史，不清（清了就没有审计可对）。
 - **5.3 剩余两条与下一片**：5.3-11（外发三闸门缺一即不外发）/ 5.3-12（被拦下的动作进 `usage.ledger`
   留可读拒因）与 12 条状态位的逐项收口是 5.3-d。真模型仍不在 5.3 的范围内（§6 的出网授权未解除）。
+
+**5.3-d 落地记录（2026-10-03）**——三闸门串到同一条外发链上、被拦下必留一条被拒流水，并把 5.3 的十二条逐条对着当前代码复跑收口
+
+- **落点**：`packages/main/src/three-gate-link.test.ts`（新，4 例）、`packages/entitlement/src/ledger.ts`
+  （号段 19 的 `usage_denials` + `recordDenial` / `recentDenials`，读出口并进既有 `summary()`）、
+  `packages/entitlement/src/gate.ts`（新增 `enforce`＝判定 + 留痕 + 抛，`perform` 改为先走它）、
+  `packages/entitlement/src/index.ts`（复导出 `DENIAL_MIGRATION_VERSION`）、`packages/shared/src/bridge.ts`
+  （`LedgerDenialView` 与 `summary` 视图多一个 `recentDenials`）、`packages/outbound/src/{greet,deliver}.ts`
+  （等间隔之前那次额度询问改走 `enforce`）、`packages/platform-boss/src/jd-store.test.ts`（共存用例的口径更正，见下）。
+  **`agent` 包与渲染层零改动**：5.3-11 / 12 两条都是 U 类，判据在跨包那条链上，链条两端本来就已经存在。
+- **5.3-11 的四格都是真身**（真循环 + 真判定口 + 真暂停通道 + 真工具注册表 + 真 `outbound.greet` 编排 + 真闸门与账本，
+  只有 `platform.registry` 与 `sessions` 是替身——它们 `inject` Electron 外壳，Node 侧挂不起来，先例见
+  `packages/outbound/src/test-doubles.ts`；发送由假渠道记调用清单，全程不出网、不碰真实招聘平台 §7.2）。
+  闸门配置是 `{mode:'daily', dailyLimits:{…DEFAULT_DAILY_LIMITS, greet:1}}`——只收紧 `greet` 一条，
+  数字从 shipped 默认展开而不是抄进用例（§2.2）。每格都断言同两件事：**假渠道 `calls` 为空** + **用量行数与事前相等**：
+  ① `suggest` 档关掉 → `cards==[]`（批不动的路径上不给按钮）、run `failed`/`POLICY_REFUSED`、步行
+  `refused`/`TIER_SUGGEST_READ_ONLY`、`recentDenials` 也空（闸门根本没被问）；
+  ② `auto` 未加白关掉 → 恰一张 `approval` 单（`kind`/`toolId` 逐字对上）、人按 `deny` → run `failed`/`PAUSE_DENIED`、
+  工具没被调；③ `auto` + 已加白而额度见底关掉 → 不开单、工具**真被调**、run `failed`/`STEP_UNSUCCESSFUL`，
+  观察里原样出现闸门那句「今日 1 次额度已用完」，而 `usage_ledger` 仍是种子那 1 行、`usage_denials` 恰 1 行
+  （`action:'greet'`、`targetId:'job-9003'`、`code:'QUOTA_EXCEEDED'`）。这一格就是「免确认 ≠ 免闸门」
+  （plan §5.3 的 2026-10-03 裁定）唯一能被证成的形状。④ 正向对照（三维全放行）→ `completed`/`COMPLETED`、
+  `channel.calls` 恰 `[{targetId:'job-9004', text:…}]`、用量 +1、无被拒行，且 `steps[0].evidenceRefs`
+  含 `ledger:<id>`——前三格的「没出手」只有在落账口与渠道都是活的时候才不是空话。
+- **一处与方法栏的偏差如实记（不改协议）**：第三格的步行 `code` 是 `TOOL_FAILED` 而不是 `QUOTA_EXCEEDED`——
+  `agent.tools.call()` 把 `run` 抛出的结构化错误统一收成 `TOOL_FAILED`，这是 5.1-d 已验收的调用协议（卡片只说
+  「这一步失败了」并带原因），把它改成透传业务码要在注册表里开一条「哪些码原样上抛」的白名单，超出本片范围。
+  两条读数因此分工：`code` 那格证明「不是模型编的」看 `usage_denials.code`（`QUOTA_EXCEEDED`，结构化、可查），
+  人读的那句原话看 `observation`。用例注释里写着这一句，免得后来者把它当断言写错。
+- **5.3-12 的实现比 plan 的字面多收了一步，这是本片唯一算「设计更正」的地方**：写入口最终是
+  `gate.enforce`（判定 + 留痕 + 抛三步在一处），`perform` 内部先走它，`greet` / `deliver` 在**等频控间隔之前**
+  那次额度询问也走它。改前那两处是自己比对 `gate.check()` 再自造 `AppError('QUOTA_EXCEEDED', …)`——
+  同一逻辑的第二次出现（§2.2），而且正好漏掉本片要验的留痕：走那条路的被拦**不会**进 `usage_denials`。
+  错误码、`reason` 措辞与 `details {action, remaining}` 逐字保持原样（已核对 `outbound` 侧 141 例不断言 `source`），
+  所以 `deliver.ts` 里 consent 仍在闸门之前，2.7-06 的判序与 2.5-04「别让人白等一个频控周期」都没动。
+  `recordDenial` 全仓只有一个调用点（`gate.ts` 的 `enforce` 内），这条用 grep 复核过，不是注释里的说法。
+- **与 1.9-03 已验收原话的冲突调和落在一条用例上**：1.9 那句「被拒既不花钱也不落账」约束的是**用量**那一侧，
+  5.3-12 要的是**审计**那一侧。`usage_denials` 是独立表，三处计数（`countToday` 日上限、`latestActionTs` 频控的钟、
+  `countFor` 同目标重复发送防护）都只读 `usage_ledger`，所以「被拒不占额度、不启动钟、不挡重复发送」是结构性质；
+  用例把这三条各钉一次（`entitlement.test.ts` 的「被拒不占日上限、不启动频控的钟、也不挡住同目标的重复发送防护」）。
+- **顺手抓到并更正的一处既有断言**：`jd-store.test.ts` 的同库共存用例原先写死 `store.version === JD_MIGRATION_VERSION`，
+  而 `store.version` 是**已应用版本的最大值**——账本新增号段 19 之后它必然被顶高，用例报 `expected 19 to be 3`。
+  判据真正要断的是「各家号段各自建各自的表、版本号互不重复」，于是改成「清单去重后长度不变 + 含 1 + 含 JD 的 3 +
+  `store.version >= 3`」，单独一片提交（`test(platform-boss)`）。这类断言写死等值的地方，后来每加一支迁移都会再响一次。
+- **5.3 十二条逐项收口（照 5.2-d 口径：对着当前代码复跑判据，不复读前四片的记录）**：
+  01 `policy.test.ts` 单跑 12 例过（18 格真值表 + 加白 9 格「只有 auto 那一行改判」）——本片给这格补上了
+  此前缺的活体外发手（`outbound.greet.perform` 真在注册表里、真加白、真被闸门拦），所以 `auto × outbound × 免确认`
+  不再是结构上空位；02 复看 `session.ts` 的 `defaultAutonomy` 缺省 `suggest`、`coerceAutonomy` 未知值回落、
+  `cordis.yml` 的 `chat` 条目**故意不给这一行**（装配本身就是那半边证据）；03 三档截图在档且 sha1 三三不同
+  （`26be14d0`/`0e7d8549`/`13494132`），本片渲染层零改动故不重拍——重拍会得到与判据无关的环境差异；
+  04 `pnpm lint` 实跑那条机检的读数里带着「升档只有人这一条口」，`loop.test.ts` 的「档位提升不是 agent 的一只手」
+  一节随 `packages/agent` 107 例一起过；05 `agent.test.ts`「档位的默认值、回落与变更审计」+ 号段 17 的老库回归位；
+  06 = ①②两格 + 5.3-b 那三跑活体对照（唯一自变量是名单）；07 `5.3-07-list/revoke.png` 在档，
+  `AgentPolicyPanel.tsx` 最后一次改动仍是 5.3-b 的 `ca7c191`；08 `AgentPauseCards.tsx` 最后改动仍是 `abe4c10`、
+  三张卡片图在档；09 `pause.test.ts` 的单号路由与 `agent.test.ts` 的 `validateInput` 缺失字段清单；
+  10 `pause.test.ts` 的超时定局两条 + `5.3-10-timeout.png`；11 / 12 = 本片的四格 + `entitlement.test.ts`
+  「被闸门拦下的动作（spec 5.3-12）」5 例。**结论：5.3 一节 12 条全部 `[x]`，无 `[ ]`、无 `[!]`。**
+- **本片没做的，如实留着**：① 被拒流水**没有界面**——`recentDenials` 现在的消费者只有用例与 `summary()` 读数，
+  用量面板显示它是后面的验收条目，按 §2.6 不提前堆代码；② 真模型仍不在 5.3 范围内（§6 的出网授权未解除）；
+  ③ 5.3-11 没关掉第四道闸门（风险签字 `sessions`），因为它是恒真的替身——那一道的判序在 2.7-06 自己的用例里钉着，
+  在这里再关一次会把「三维」混成「四维」。
+- **§7.4 收尾自检（逐条回答）**：
+  ① 四条门禁的实际命令与输出（2026-10-03 12:00 前后复跑，本片代码全部落定之后）：
+  `pnpm -r typecheck` → 退出码 0，各包 `typecheck: Done`；`pnpm lint` → 退出码 0，eslint 无告警 + 八道 tsx 机检全
+  `✔`（agent 那道现在的判据是「LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 /
+  policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / 应答暂停单只有人这一条口」，
+  工具契约那道是「16 只工具 × 2 份语言包 … 16 个登记方都排在注册表 agent 之后」）；
+  `pnpm format:check` → 退出码 0，`All matched files use Prettier code style!`；
+  `pnpm test` → 退出码 0，21 个测试包 / 100 个测试文件 / **1474 例**无一失败，其中
+  `packages/main`：`Test Files 4 passed (4)` / `Tests 19 passed (19)`（本片的 4 格在其中，较 5.2-c 记录的 15 例净增 4）、
+  `packages/entitlement 17`（净增本片 5 例中的 4 条 + 既有 13 条）、`packages/agent 107`、`packages/outbound 141`、
+  `packages/platform-boss 130`、`packages/resume-kb 398`、`packages/browser 235`、`packages/workflow 99`、
+  `packages/resume-doc 106`。
+  ② 本片两条均为 U 类，**无 V 义务**，故本节没有新截图；五条既有 V 证据（5.3-03 / 07 / 08 / 09 / 10）逐张核过
+  文件存在且 sha1 两两不同，见上面收口那一条。③ 状态位 5.3-11 / 12 → `[x]`，5.3 一节 12 条收口。
+  ④ 复用检查——被拒的判定+留痕+抛收成 `gate.enforce` 一处，`greet` / `deliver` 的自造 `QUOTA_EXCEEDED` 已删；
+  读出口并进既有 `summary()` 而不是新开 service 或新 IPC 口；台架沿用 `gap-quota-link.test.ts` 的 `boot()` 组法与
+  `test-doubles.ts` 的两个替身，没有第三份替身；`ONE_GREET_PER_DAY` 从 `DEFAULT_DAILY_LIMITS` 展开而不是抄数字。
+  ⑤ 死代码——`check` 的返回值在编排层不再被用来做拒绝分支，删掉的正是那 6+7 行；`gate.check` 保留（它仍有
+  展示侧消费者与 1.9-01/02 的用例），不构成未用导出；`recentDenials` 有用例消费者。
+  ⑥ 前端三项——本片渲染层零改动：无新增文案（i18n 键零改动）、无样式、无图标，三项无对象。
+  ⑦ 提交与推送——按 §1.4 拆三片：`feat(entitlement)`（被拒表 + `enforce` + 两处调用点 + shared 视图 + 5 例）、
+  `test(main)`（装配层四格）、`test(platform-boss)`（共存用例更正），文档本片随后单独提交，逐片推 `origin/main`。
+  ⑧ 暂存区：只有源码 / 测试 / 本文档与 `docs/plans` 那一小段更正，无图片、无探针产物（`packages/main` 的用例把
+  store 与日志写在 `mkdtempSync(tmpdir()/auto-cc-three-gate-*)` 里，`afterAll` 逐个 `dispose` + `rmSync`，§7.5）。
 
 ## 5.4 对话 → 工作流沉淀
 
