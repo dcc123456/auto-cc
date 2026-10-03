@@ -28,6 +28,9 @@ import type {
   SavedWorkflowPlanView,
   SedimentPreviewView,
   SessionExpiredEvent,
+  TakeoverBeginInput,
+  TakeoverEndInput,
+  TakeoverStateView,
   ToolCallReply,
   ToolDescriptorView,
   WorkflowEvidenceView,
@@ -81,6 +84,9 @@ export type {
   SedimentPreviewView,
   SedimentStepView,
   SessionExpiredEvent,
+  TakeoverBeginInput,
+  TakeoverEndInput,
+  TakeoverStateView,
   ToolCallReply,
   ToolDescriptorView,
   ToolEffect,
@@ -144,6 +150,14 @@ export const RENDERER_ALLOWLIST = [
   'browser.act.type',
   'browser.act.select',
   'browser.act.waitFor',
+  // 5.5-a 的人工接管态（spec 5.5-01 / 02）：`held` 只读当下，`begin` / `end` 是界面上那两只按钮
+  //（UI 那一路是 5.5-b，这里只先把口立起来；`audit` 不进白名单——审计流水是给主进程看的，
+  // 界面上那张接管历史属于 5.5-d，届时要连着红线条款一起过）。
+  // 与 `agent.loop.confirm`、`agent.policy.setExempt` 同一口径：刻意**不登记为 agent 工具**——
+  // 模型若能自己接管或自己交还页面，5.5-02 那道「接管期间一步都不发」就成了它可以自己开关的东西。
+  'browser.takeover.held',
+  'browser.takeover.begin',
+  'browser.takeover.end',
   // 2.2 的平台登记面：只读清单（适配器本身不给渲染层，外发口在 2.5/2.6 另接闸门）。
   'platform.registry.list',
   // 2.3 的抓取入口与 JD 库读数：抓取只有读动作，外发一行都不产生。
@@ -201,6 +215,11 @@ export const RENDERER_ALLOWLIST = [
   'agent.loop.confirm',
   'agent.loop.stop',
   'agent.loop.read',
+  // 5.5-a 的恢复口（spec 5.5-01）：把人做完的那一段交还之后，从被按住的那一步接着跑。
+  // 与 `agent.loop.confirm` 同族、同一口径——**只由人按**，刻意不登记为 agent 工具（机检 ⑧）。
+  // 接管那一段的历史（谁、何时、因为什么）不在这里开新口：它在号段 21 的 `takeover_events` 里，
+  // 界面上那张回看属于 5.5-d，届时再连着红线条款一起过白名单。
+  'agent.loop.resume',
   // 5.4-a 的对话 → 工作流沉淀（spec 5.4-01 / 02）：`preview` 只读、`save` 是人在预览卡上按的那一格。
   // 与 `agent.loop.confirm` 同一口径，刻意不登记为 agent 工具：沉淀改变的是「以后每次都怎么跑」，
   // 让模型自己把一次对话固化成工作流，就是 5.3-04 防的「agent 给自己放宽」换了个更省事的写法。
@@ -1345,6 +1364,12 @@ export interface BridgeSignatures {
   'browser.act.select': { args: [spec: LocateSpec, value: string]; returns: ActResultView };
   /** 谓词等待：页面内 MutationObserver 触发，超时是结构化失败而不是抛错（spec 2.2-03 / 2.2-04）。 */
   'browser.act.waitFor': { args: [predicate: WaitPredicate]; returns: ActResultView };
+  /** 读当下是否处于人工接管中（spec 5.5-01 的界面态；`isHeld` 为 false 就是自动化照旧，不是返回 null）。 */
+  'browser.takeover.held': { args: []; returns: TakeoverStateView };
+  /** 由人发起接管（界面上那只「我来接手」）；`actor` 由调用方给，渲染层那一路恒为 `user`。 */
+  'browser.takeover.begin': { args: [input: TakeoverBeginInput]; returns: TakeoverStateView };
+  /** 交还页面；**不**顺带恢复任何 run（恢复由人再按一次 `agent.loop.resume`，spec 5.5-01）。 */
+  'browser.takeover.end': { args: [input?: TakeoverEndInput]; returns: TakeoverStateView };
   /** 已登记平台清单（spec 2.2-07）：内核侧只读，不返回适配器本身。 */
   'platform.registry.list': { args: []; returns: PlatformRegistryView };
   /** 2.3-01 / 2.3-09：跑一轮抓取（列表滚动 + 详情读取 + 入库），回传本轮结局。 */
@@ -1501,6 +1526,8 @@ export interface BridgeSignatures {
    * @param runId 运行 id
    */
   'agent.loop.read': { args: [runId: string]; returns: AgentRunView };
+  /** 人交还页面之后按的那次「继续」：只吃被接管按住的 `paused`，其余态结构化失败（spec 5.5-01）。 */
+  'agent.loop.resume': { args: [runId: string]; returns: AgentRunView };
   /**
    * 沉淀预览（spec 5.4-01）：这次对话能不能变成一条工作流、每一步会变成哪个节点、
    * 不能沉淀的那一格为什么不行（逐格读数 + 整段第一句拒因）。**只读**，不写库。
@@ -1727,6 +1754,9 @@ export const RENDERER_EVENTS = [
   'outbound/approval-requested',
   // 风控信号（spec 2.7-01）：暂停由 `workflow.runner` 在主进程做，界面只负责把「卡在哪、为什么」说出来。
   'browser/risk-signal',
+  // 页面「在谁手里」变了（spec 5.5-01 / 02）：接管条与那两只按钮由它驱动，载荷就是 `browser.takeover.held()`
+  // 那份读数——不另包一层，免得渲染层再推一次「现在到底谁在操作」（§2.7 禁的第二份事实）。
+  'browser/takeover-changed',
   // 知识库实体表被写过（spec 4.2-06）：编辑即时生效靠它，界面不轮询也不靠用户手动刷新。
   'kb/entities-changed',
   // 计划库被写过（spec 5.4-01）：沉淀卡在对话侧，它存成一条计划时计划库界面并不经手，
@@ -1753,6 +1783,7 @@ export interface RendererEventSignatures {
   'jd/progress': JdProgressEvent;
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
+  'browser/takeover-changed': TakeoverStateView;
   'kb/entities-changed': KbEntitiesChangedEvent;
   'workflow/plans-changed': WorkflowPlansChangedEvent;
   'agent/run-progress': AgentRunView;

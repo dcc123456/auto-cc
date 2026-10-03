@@ -15,12 +15,14 @@
   "dependencies": {
     "@auto-cc/core": "workspace:*",
     "@auto-cc/plugin-sessions": "workspace:*",
+    "@auto-cc/plugin-store": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "@auto-cc/shell": "workspace:*",
     "cordis": "4.0.0-rc.10",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@auto-cc/plugin-config": "workspace:*",
     "electron": "^44.4.5"
   }
 }

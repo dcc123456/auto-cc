@@ -387,6 +387,14 @@ export {
 export { BrowserLocateService, browserLocateSchema, type BrowserLocateConfig } from './locate-service.js';
 export { BrowserActService, browserActSchema, type BrowserActConfig } from './act-service.js';
 export { BrowserRiskService, browserRiskSchema, type BrowserRiskConfig } from './risk-service.js';
+export {
+  BrowserTakeoverService,
+  BROWSER_TAKEOVER_MIGRATION_VERSION,
+  browserTakeoverSchema,
+  type BrowserTakeoverConfig,
+  type TakeoverBeginInput,
+  type TakeoverEndInput,
+} from './takeover-service.js';
 export { PlatformRegistryService } from './platform-registry.js';
 export {
   knowledgePackSchema,

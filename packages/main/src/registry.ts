@@ -18,6 +18,7 @@ import {
   BrowserLocateService,
   BrowserPageService,
   BrowserRiskService,
+  BrowserTakeoverService,
   PlatformRegistryService,
 } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
@@ -98,6 +99,10 @@ export const REGISTRY: Registry = {
   // 风控观测（spec 2.7-01）：它是每个分区 `onResponseStarted` 那个**唯一槽位**的独占者，
   // 所以单独占一个清单 id 是可演示的——摘掉它之后验证码页会被照常翻页，而暂停只能由它触发。
   'browser-risk': BrowserRiskService,
+  // 人工接管态（spec 5.5-01 / 02 / 09）：「这块页面此刻在谁手里」的唯一状态源，号段 21 的接管流水在它名下。
+  // 摘掉它时 `agent.policy` 与 `agent.loop` 一起不进装配（那两个服务把它列成硬依赖）——刻意不是软降级：
+  // 读不到接管态还照动手，等于「接管期间一步都不发」这条护栏在少一行配置之后静默失效。
+  'browser-takeover': BrowserTakeoverService,
   // 平台登记处（spec 2.2-07）：适配器实例只在这里流通，渲染层只拿得到 `platform.registry.list`。
   'platform-registry': PlatformRegistryService,
   // BOSS 适配器（spec 2.2-06）：它在自己的 init 里把自己登记进上一行，`browser` 一行都不认识它。
