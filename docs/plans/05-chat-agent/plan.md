@@ -684,6 +684,24 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
   且没有两只工具认领同一 kind、`params` 的每个点路径都能在该工具 `input` 的 schema 字面量里对上；
   ⑪ 反向断言——一条条款都没读到时不得打印"通过"（5.1-b/5.1-c 立的同一条规矩）。
 
+**5.4-a 落地时对上面这段的原地更正（2026-10-03）**——写代码时读到的现场与这里的口径有四处不同，就地改口而不另开一份说明：
+
+1. **没有 `workflow.plans` 这只 service**。计划的存储与读写全部长在既有的 `workflow.runner` 上
+   （`savePlan / plans / renamePlan / duplicatePlan / removePlan`）+ 既有的 `workflow.store`（那张表和迁移），
+   所以上文与 5.4-b 里出现的 `workflow.plans.save` / `workflow.plans.list()` 一律读作
+   `workflow.runner.savePlan` / `workflow.runner.plans`。理由就是 §2.3——为一张同域表新开一只 service
+   与被禁的"第二套存储"只差一层包装；这也顺手定了 5.4-b 的界面口：走 `workflow.runner.*` 那五条白名单，
+   i18n 键仍在既有的 `workflow.panel.*` 与新增的 `chat.sediment.*` 两个命名空间里，不新起第三套。
+2. **`agent_step.status` 的成功字面量是 `'ok'`**，不是上文写的 `'succeeded'`（取值以 `AgentRunView` 那套枚举为准，
+   `packages/core/src/events.ts`）。判定内容不变：段内每一格都要是成功。
+3. **机检是三条不是两条**：⑩ kind 是字面量且能对上一处**两实参**的 `.register(X, …)`（一实参的那两类是
+   工具/适配器登记，不算执行器；标识符实参经 `const X = 'literal'` 表展开，展不开即失败）、
+   ⑪ kind 不被重复认领、⑫ `target` 与 `params` 的每条点路径都能在该工具 `input` 的 schema 里点到，
+   `input` 解不出时按失败处理（解不开就放行，等于允许存一条会跑出另一次搜索的计划）。
+4. **"今天 14 只"应读作 16 只**（5.1-c 之后注册表是 16 只），且**带条款的仍是那 3 只**——
+   `outbound.greet.perform` / `outbound.deliver.perform` / `jd.capture.run`，`resume.generate.run` 依旧不算，
+   理由（`customized` 恒 `false` 的占位）与上文一致。
+
 **5.4-b 的落点与理由**：
 
 - **变量白名单按能力键名钉死，不交给模型判断**：`query`（关键词）/ `city`（城市）/ `limit`·`target`（条数）。

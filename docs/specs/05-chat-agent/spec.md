@@ -876,14 +876,102 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
 | ID     | 验收标准                                                                               | 方式 | 验证操作                   | 状态 |
 | ------ | -------------------------------------------------------------------------------------- | ---- | -------------------------- | ---- |
 | 5.4-01 | 已跑通的一轮多步执行可一键「保存为工作流」                                             | V    | 点击后截图面板出现新工作流 | [ ]  |
-| 5.4-02 | 只允许沉淀"全部步成功且有 run 记录"的连续段；含失败步的段落被拒绝并说明                | U    | 构造含失败步 → 断言拒绝    | [ ]  |
+| 5.4-02 | 只允许沉淀"全部步成功且有 run 记录"的连续段；含失败步的段落被拒绝并说明                | U    | 构造含失败步 → 断言拒绝    | [x]  |
 | 5.4-03 | 沉淀出的 `WorkflowPlan` 与 2.4 节点模型完全同构，面板可直接运行，无需二次转换          | C+U  | 结构断言 + 面板运行一次    | [ ]  |
 | 5.4-04 | 具体入参被参数化（城市/关键词/日期区间提取为变量），未参数化的残留值在面板显式标出     | V    | 截图标红残留值             | [ ]  |
 | 5.4-05 | 沉淀时必填名称走 i18n 提示文案，命名长度与非法字符有校验                               | U    | 空名/超长/符号 → 断言被拒  | [ ]  |
-| 5.4-06 | 沉淀后的工作流修改不影响原会话记录（快照语义，不共享可变对象）                         | U    | 改节点 → 断言历史会话不变  | [ ]  |
+| 5.4-06 | 沉淀后的工作流修改不影响原会话记录（快照语义，不共享可变对象）                         | U    | 改节点 → 断言历史会话不变  | [x]  |
 | 5.4-07 | 同一工作流再运行时进度在**对话与面板两处同步显示**（同一 runner，无第二状态源）        | V    | 运行中两处各截图对比       | [ ]  |
 | 5.4-08 | 工作流列表支持重命名/复制/删除，删除前要求确认                                         | V    | 三操作各截图               | [ ]  |
 | 5.4-09 | 反向验证：沉淀不含"agent 临场决定"的隐藏步骤——导出计划里每一步都能在对话里找到对应卡片 | C+U  | 对比步数与卡片数一致       | [ ]  |
+
+**5.4-a 落地记录（2026-10-03）**——沉淀的服务半边：投影口、计划表（号段 20）、唯一写入口与三条机检
+
+- **落点**：`packages/workflow/src/plan-store.ts`（新增，迁移号段 **20**、七列
+  `id` `name` `plan_json` `fingerprint` `source_run_id` `created_at` `updated_at`）、
+  `packages/workflow/src/run-store.ts`
+  （`WorkflowRunStoreService` 挂上计划表的读写与 `planSnapshot(runId)`）、`packages/workflow/src/index.ts`
+  （`workflow.runner` 的 `savePlan`、`plans`、`renamePlan`、`duplicatePlan`、`removePlan`、
+  `start(planId?)`、`resolvePlan`、`selectPlan`，以及 `nodes()` 改读 run 自己的快照）、
+  `packages/workflow/src/plan.ts`
+  （两条读路共用的 `planFromStoredText`）、`packages/agent/src/loop/sediment.ts`
+  （新增，纯函数 `projectRun` 与 `AgentSedimentService` 的 `preview` / `save` 两口）、
+  `packages/core/src/events.ts`（跨进程读数：
+  `SavedWorkflowPlanView`、`WORKFLOW_VARIABLE_PARAM_KEYS`、沉淀预览的逐格与判决类型）、
+  `packages/shared/src/bridge.ts`（白名单 5 条新口 + `start` 的可选 `planId`）、`cordis.yml` 与
+  `packages/main/src/registry.ts`（`agent-sediment` 一个装配位、一个服务名，可单独摘除）、
+  三处 `workflow` 条款：`packages/outbound/src/greet.ts:313`、`deliver.ts:720`、
+  `packages/platform-boss/src/jd-capture.ts:375`、`scripts/check-tool-contract.ts`（第 10~12 条），
+  测试四个文件：`plan-store.test.ts`（18）、`run-store.test.ts`（19，含新加的快照/续跑两条）、
+  `sediment.test.ts`（15）、`packages/main/src/sediment-link.test.ts`（12，跨包链路）。
+- **不新开 service**：计划表挂在既有 `workflow.store` 的同一个 `DatabaseSync` 与同一份迁移台账上（§2.3/§2.7），
+  `plan-store.ts` 只做纯函数（迁移定义、名字校验、读写），另起一只 `workflow.plans` 才是被禁的第二套存储。
+  `plan_json` 存的一定是 `buildPlan` 之后的文本（`buildPlan` 总按节点内容重算指纹），所以"库里那一行自洽"
+  是结构上成立的，不是靠约定；`planFromStoredText` 只此一份重算机器，run 行与计划表共用（§2.2）。
+- **与 plan 口径的三处偏离，都已在代码注释就地写明**：① 表里**没有** `variables_json`，也**没有** `revision`
+  列——5.4 的写入口只有"新增/改名/复制/删除"，没有一处改节点内容（那是 5.10 的编辑器），一个恒等于 1 的
+  版本号与一份没人读的参数表都是 §2.6 禁止的"为假想未来做抽象"；哪些值是变量由 `WORKFLOW_VARIABLE_PARAM_KEYS`
+  在投影时现算，不落库。② 计划读写折进 `workflow.store` + `workflow.runner`，而不是 plan 里写的"新开一只
+  保存口"。③ 变量白名单落在 `@auto-cc/core`（渲染层与 agent 都要读它来标红），不是 workflow 包内部常量。
+- **实跑口径的三处如实更正**（写这片时才从现场读到的，plan 里原话更粗）：
+  ① 步状态的字面量是 `'ok'` 不是 `'succeeded'`（`agent_step.status` 的取值来自 `AgentRunView` 那套枚举）；
+  ② 节点 `effect` 取自**工具声明**而不是 run 记录，参数取自**计划草案的入参**而不是工具回执的 observation
+  ——沉淀要复现的是"当初那次是怎么打的"，回执里的字段是结果，不是输入；
+  ③ 条款里 `params` 的**键**是节点侧的名字（`greeting.send` / `resume.deliver` 用 `platform` / `job` / `text` /
+  `file`，`jd.capture` 用 `query` / `city` / `target`），**值**才是"该工具 input 的点路径"
+  （`request.jobId`、`criteria.limit` 一类的工具侧名字）——条款指向节点的 `params` 形状，指错了就是一条跑不动的计划。
+- **可缺席的两景（`sediment-link.test.ts` 的 `full` / `registry-only` / `none` 三种装配）**：只摘 `workflow.runner`
+  时预览仍说"能沉淀"、保存以 `SERVICE_NOT_FOUND` 结构化失败且不静默丢用户点下的那一下；整个工作流域都不在时
+  投影在**第一道**就拒在 kind 未登记，而不是"存失败了"。`SERVICE_NOT_FOUND` 只有"登记处在、runner 不在"这一景可达，
+  所以这两景必须分开演——合在一起测，等于没测那条口。
+- **三道拒绝都长在服务侧的写入口，界面只负责显示**：段内每一格 `agent_step.status === 'ok'`（5.4-02，
+  含失败步整段拒，拒因说清是第几步）；每一格的 toolId 都带 `workflow` 条款且该 `kind` 在 `workflow.executors`
+  解得出（解不出即这只工具不可沉淀，没有"按 id 猜 kind"的回落）；名字校验（5.4-05：非空 / ≤40 字符 /
+  字符集白名单）只在 `workflow.runner.savePlan` 这一处做——界面拦一道、服务再拦一道就是两套规则。
+  `save` 先跑一遍 `projectRun` 再决定存不存，所以预览卡上的绿勾与落库放行永远同一口径。
+- **可沉淀面今天有多大（防止读成"全都能沉淀"）**：16 只工具里只有 3 只带了条款（打招呼、投递、JD 抓取），
+  `resume.generate.run` **不算**——`resume.customize` 那一格在 P2 是"定文件、一个字不改"的占位
+  （`deliver.ts` 自己写着 `customized` 恒为 `false`），把它当"生成定制内容"的同义词就是给验收照片撒谎。
+- **机检（并进第九道，不新开第十道）**：⑩ 每处条款的 `kind` 必须是字面量、且能在某处**两实参**的
+  `.register(X, …)` 现场对上（一实参的 `.register(tool)` 是工具/适配器登记，不算执行器）；标识符实参经
+  `const X = 'literal'` 表展开，展不开就失败而不是跳过。⑪ `kind` 不得被两只工具重复认领。⑫ `target` 与
+  `params` 的每个点路径都要能在该工具 `input` 的 schema 里点得到（内联与具名常量都解，`z.array` 不进），
+  `input` 读不出时**记失败而不放行**（fail-closed：静默丢掉一个参数，存下来的就是一条会跑出另一次搜索的计划）。
+  反向断言照旧：一条条款、一个登记 kind 都没读到时不许打印"通过"。
+  **这三条被证明会咬人**：把 `deliver.ts` 的 `params.file` 改成不存在的键、把 `greet.ts` 的 `kind` 改成未登记值、
+  把 `jd-capture.ts` 的 `target` 改成错路径，三处分别报错并指到 `文件:行` 与 tool id；副本与还原放在 `tmp/negchk/`
+  （未入库，§7.5），还原后重跑为 ✔。
+- **四道门禁实测**：`pnpm typecheck` 24 包 `Done`、`pnpm lint` exit 0（第九道现在的结尾一行是
+  「3 条沉淀条款对得上 6 个已登记 kind、其中 3 条的 target 与 params 路径全在各自 input schema 里点得到、
+  kind 无重复认领」）、`pnpm format:check` 全部合规、`pnpm -r --no-bail test` exit 0（无 failed 包；
+  本片四个测试文件分别 18 / 19 / 15 / 12 条，`packages/main` 那条是跨 agent↔workflow 的真链路）。
+  另注：根 `tsconfig`（含 `scripts/**`）**不在** `pnpm typecheck` 的调用面里，直接 `tsc -p tsconfig.json`
+  会看到 `scripts/fixture-server.ts` 与 `scripts/vendor-runtime-deps.ts` 的既有报错，与本片无关、本片也没碰。
+- **写这片撞上的两处既有约束**：`check-agent-model-authority.ts` 的"两张表只许出现在 `policy.ts`"是按
+  **文本**匹配的，`plan-store.ts` 里一句**说明性**提及号段邻居（`agent_policy_exempt`）就把它点着了——
+  改法是把那张表按角色描述而不是点名，没有给它加豁免（加了那条红线就空了）。另外测试里的执行器桩
+  写成 `async` 但没 `await` 会撞 `require-await`，取同步签名 `return Promise.resolve()`，
+  不去放宽 `WorkflowNodeExecutor` 的类型。
+- **界面**：渲染层零改动，因此本片没有 V 证据、没有新增文案（i18n 键零改动）。预览卡、"保存为工作流"按钮、
+  计划管理那一列、双入口进度对比全在 5.4-b / 5.4-c。
+- **逐条状态位**：5.4-02 → `[x]`（`sediment.test.ts` 的失败步整段拒 + `sediment-link.test.ts` 的真链路）。
+  5.4-06 → `[x]`（每行各存一份 `plan_json`，改计划不动历史 run 的读数，`run-store.test.ts` 断言）。
+  5.4-03 与 5.4-09 各只完成**结构 / 机检半边**（切片表本来就这么分的）——03 的沉淀产物已经在真 runner 上跑过
+  一遍（`sediment-link.test.ts`：格子来自那条 run 自己的快照、参数逐字递到执行器、与内置计划换着跑互不污染），
+  还差面板上"从下拉挑中它、点开始"那一口，而计划下拉是 5.4-b 的界面；09 的机检半边由第 10~12 条钉住、
+  运行时半边由"没有条款的工具拒得点名它"钉住，还差"步数与卡片数逐格对比"的活体断言，故两条都保持 `[ ]`。
+  5.4-01 / 04 / 07 / 08 是 V 类，依赖 5.4-b 的预览卡与 5.4-c 的管理口，本片一并留 `[ ]`，
+  其中 5.4-05 的校验本身已在服务侧落地（`plan-store.test.ts` + `sediment-link.test.ts` 各有一道）、
+  只等 i18n 提示文案进卡片才勾。
+- **§7.4 收尾自检**：① 四道门禁见上。② 本片九条里勾的两条都是 U，无 V 条目欠账被掩盖。
+  ③ 状态位如上，七行留 `[ ]` 且写清缺哪半边。④ 复用：`buildPlan` / `planById` / `requireExecutable` /
+  `AgentRunView` 全部沿用既有实现，新增的跨包查表用的是既有的"用的时候按名字现问"（`maybeService`、
+  `agentToolTable`、`executorRegistryOf`），没有第二份本地事实；机检沿用既有那份扫描器（`closingAt`、
+  `fieldsAtThisLevel`、空白副本），没新写解析器。⑤ 死代码：`preview` 与 `save` 都进白名单、都被测试打到，
+  `duplicatePlan` 走的是 `savePlan` 而不是另写一份插入。⑥ 前端零改动（Tailwind / lucide / i18n 三项无涉）。
+  ⑦ 本片按 §1.4 分两次提交（代码 / 文档）并推 `origin/main`。⑧ 暂存区只有源码、测试与本文档，
+  无图片、无探针产物（`packages/main` 用例的库与日志写在 `mkdtempSync(tmpdir()/auto-cc-sediment-*)` 里，
+  `afterAll` 逐个 `dispose` + `rmSync`；负证副本在 `tmp/negchk/`，`tmp/` 被忽略）。
 
 ## 5.5 人工接管与恢复
 
