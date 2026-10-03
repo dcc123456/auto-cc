@@ -1137,8 +1137,8 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
 | ------ | ------------------------------------------------------------------------------------------ | ---- | ---------------------------------------- | ---- |
 | 5.5-01 | 任意时刻用户可接管内嵌浏览器，界面明确显示"已人工接管"，agent 自动化停住                   | V    | 接管 → 截图状态标识                      | [x]  |
 | 5.5-02 | 接管期间 agent 不发出任何动作（含只读动作也不改变页面）                                    | U    | 接管后断言动作计数为 0                   | [x]  |
-| 5.5-03 | 恢复时**强制重读**目标页面状态，不复用接管前的 DOM 快照                                    | U    | 接管时改页面 → 恢复 → 断言重读发生       | [ ]  |
-| 5.5-04 | 元素指纹不匹配时重新规划该步，而不是硬点或按索引回退                                       | U    | 改结构 → 断言走重规划分支                | [ ]  |
+| 5.5-03 | 恢复时**强制重读**目标页面状态，不复用接管前的 DOM 快照                                    | U    | 接管时改页面 → 恢复 → 断言重读发生       | [x]  |
+| 5.5-04 | 元素指纹不匹配时重新规划该步，而不是硬点或按索引回退                                       | U    | 改结构 → 断言走重规划分支                | [x]  |
 | 5.5-05 | 检查点包含**待决审批请求**；重启后未应答的请求以新的可见卡片重新出现                       | V+C  | 挂起审批 → 杀进程重启 → 截图待决卡片     | [ ]  |
 | 5.5-06 | 检查点还原后 `runId` 与已完成步不重复执行（幂等键 `runId+nodeId+targetId` 生效）           | U    | 还原 → 断言已完成步未重放                | [ ]  |
 | 5.5-07 | 登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA                          | U    | 三类 fixture 响应 → 断言均停住并通知     | [x]  |
@@ -1223,8 +1223,8 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
   `AgentRunPanel.tsx`（页脚在 `paused` + `stopReason === TAKEOVER_HELD` 时多一颗「继续这条任务」与一句随接管态切换的提示，
   新增 `pageHeld` / `onResume` 两个入参）、`ChatPanel.tsx`（把当前 run 的 id 递给 `useTakeover`、把横幅插进档位行下方、
   把 `pageHeld` / `onResume` 接进计划卡）、两份语言包（`chat.takeover.*` 十三键 + `agent.run.{resume,actionResume,resumeHint,resumeHeldHint}`
-  + `agent.run.stopReason.{TAKEOVER_HELD,RESUMED_AFTER_TAKEOVER}`，zh-CN / en 齐）、
-  `scripts/check-agent-model-authority.ts`（第 ⑧ 条名单加第三份文件与第三个形状）。
+  - `agent.run.stopReason.{TAKEOVER_HELD,RESUMED_AFTER_TAKEOVER}`，zh-CN / en 齐）、
+    `scripts/check-agent-model-authority.ts`（第 ⑧ 条名单加第三份文件与第三个形状）。
 - **判据 5.5-01 的三截各落在哪一帧**（`docs/acceptance/5.5/`，九张 png 两两 sha1 不同 + `5.5-01-live-readout.txt`）：
   「任意时刻可接管」= `5.5-01-idle-banner.png`（未接管时那一条也常驻，读数是「页面在 agent 手里」+ 一句
   「接管只停住后面的动作，不打断正在飞的那一步」+「我来接管」，它在消息流**之外**，不随卡片滚走）；
@@ -1252,7 +1252,7 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
 - **补掉一处会漏在页面上的裸键**：`resume` 会把 run 的 `stop_reason` 就地改写成 `RESUMED_AFTER_TAKEOVER`
   （5.5-a 定的语义：留着 `TAKEOVER_HELD` 会同时读成「正在跑」与「被接管按住」），而计划卡用
   `t(\`agent.run.stopReason.${run.stopReason}\`)` 画它——这个 key 两份语言包里都没有，恢复那一瞬界面会甩出裸键。
-  动态模板键是 i18n 机检的已知盲区（`pnpm lint` 只查字面量键），本片补上中英两条。
+动态模板键是 i18n 机检的已知盲区（`pnpm lint` 只查字面量键），本片补上中英两条。
 - **两条 harness 坑（§9 级别，别再撞）**：① `data-action="resume-run"` 在 `WorkflowLabPanel` 与 `AgentRunPanel`
   **同名**（两只按钮属于两个视图，不是 app 缺陷），页内按裸属性选会选到另一只——取证脚本一律限定
   `[data-testid=agent-run-panel] [data-action=...]`，读数里带 `resumeMatches` 自证命中数。
@@ -1278,6 +1278,66 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
   图标只用 lucide 的 `Hand` / `MousePointerClick` / `Play`。⑦ 提交分两片：代码 `feat(ui)` 与文档 `docs(agent)`，
   逐片推 `origin/main`。⑧ 暂存区只有源码、两份语言包、机检脚本、本文档与 `docs/acceptance/5.5/**`
   （九张 png + 一份读数）；探针脚本、原始截图与门禁日志都在被忽略的 `tmp/55b/`（§7.5）。
+
+**5.5-c 落地记录（2026-10-03）**——动手之前先把页面重读一遍，落空的那一步换手顶替
+
+- **落点**：`packages/core/src/errors.ts`（`PAGE_DRIFT_CODES = ['WAIT_TIMEOUT', 'LOCATE_FAILED']`——"页面与声明不符"
+  这一族的定义放在**码的主人**那一侧）、`packages/core/src/events.ts`（`ToolCallReply` 失败支新增
+  `reasonCode?: string`，只在 `AppError` 时带原码；`details` 里装着整页快照，不透出给界面与日志）、
+  `packages/agent/src/tools.ts`（注册表把 `AppError.code` 填进那一位）、`packages/agent/src/loop/loop.ts`
+  （文件头第 7 条 + `resume` 里的重读扳机 + `effectOf` / `rereadPage` / `replanStep` 三处私有实现 +
+  `execute` 的漂移分支 + `RunScope.freshRead`）、`packages/agent/src/agent.test.ts`（`reasonCode` 的契约：
+  `AppError` 带原码、非 `AppError` 不带）、`cordis.yml`（`agent-loop` 的 `rereadToolId: browser.page.snapshot`
+  与 `replanLimit: 2`）、两份语言包（`agent.run.stopReason.{REPLAN_UNCHANGED,REPLAN_EXHAUSTED,REREAD_UNAVAILABLE}`
+  中英各三条）。
+- **5.5-03 的「断言重读发生」怎么做到不靠日志**：重读回来的引用是 `snapshot:<toolId>@<时间戳>`，**每次都是新时间戳**，
+  所以接管前后两份快照在步行里必然不同名；`resume` 把这份读数交给**紧接的那一步**（`execute` 里消费一次就清空），
+  引用进 `evidence_refs_json`、原话进 `observation`。用例据此断言两件事：`calls` 里那只重读的手排在任何动作之前
+  （顺序），下一步的行里带着本次那个 ref（凭据）；第二步不再拿恢复时那份快照当现状（用完即清）。
+  四种形态各有用例：动手前重读 / 下一步本身是只读的手**不**重读 / 重读口不在工具面上 / 重读口被配成一只动手的手。
+  后两种都拒恢复（`AGENT_LOOP_REREAD_UNAVAILABLE`），并断言 run 仍是 `paused` + `TAKEOVER_HELD` + 游标 0 + `calls` 空——
+  **不先把状态翻成 `running` 再失败**，界面上不会闪过「正在跑」。
+- **5.5-04 断言的是分支，不是重试**：台架里 `demo.drift` 抛 `AppError('LOCATE_FAILED' | 'WAIT_TIMEOUT', …, 'browser.act', {snapshotRef})`，
+  注册表把原码透出成 `reasonCode`，循环命中族定义后进 `replanStep`。四步各挡一件事：① 先重读（与 5.5-03 同一份实现，
+  读不到就停在安全点，不带着旧快照续推）；② 续推走**已有**的 `draftPlan`（机检 ① 钉死模型只有起草与摘要两条口，
+  多开一条「请求重规划」就是给它开一条表态通道）；③ `knownToolIds` 里**摘掉落空那一只**——它在页面上已经找不到目标，
+  续推若还选它，要么等于原地再点一次（硬点），要么就是没接住新读数；④ 顶替只发生在**同一格**（游标不动，计划从这一格
+  起被续推序列替换；`agent_step` 主键 `(run_id, plan_step_index)` 的覆盖是既有口径，本片给 `ON CONFLICT` 补上
+  `tool_id = excluded.tool_id`，否则顶替者的观察会挂在下标相同、手还写着旧那只的行上）。
+  「不硬点」的断言形状是：整条 run 的 `calls` 里那只落空的手**只出现一次**。三种停法各有用例：续推仍指向同一只 →
+  `REPLAN_UNCHANGED`；`replanLimit: 0` → `REPLAN_EXHAUSTED` 且**根本不重读**（额度先看，不为一次不会发生的续推去读页面）；
+  重读缺席 → `REREAD_UNAVAILABLE`。反向一条：`ACT_FAILED` 落空**不**进这一族，那一格记 `failed`、后面的步照常按原计划走。
+- **5.5-10 的机制由这一片预置，但状态位不预勾**：那一条要的「明确报『无法定位目标，需重规划』而非静默重试到底」，
+  今天就是 `replanStep` 交回的 `REPLAN_UNCHANGED` / `REPLAN_EXHAUSTED` 两条终态码，加上语言包里那三条 `stopReason` 文案。
+  它的判据栏要的是**活页面**（清空真 fixture 的目标节点），所以仍归 5.5-e。
+- **配置两键的口径**：`rereadToolId` 是**接线**而不是业务映射——循环只按 id 现问注册表，不知道
+  `browser.page.snapshot` 是什么、也不知道它属于浏览器能力；把它配成一只动手的手会**响亮失败**
+  （拒恢复并在拒因里点名副作用级），不会「借着重读的名义在页面上按一下」。**残留如实记**：`replanLimit` 取的是
+  服务当下的配置，不像步数 / token 那样按 run 落两列——收紧时它只会让 run 更早停在安全点（那种停写
+  `REPLAN_EXHAUSTED`，界面读得到），放宽时则会给已经在跑的 run 更多次续推。要不要按 run 锁死，等 5.5-e 收口时
+  按「有没有判据要它锁」定，本片不先建列。
+- **这一片没有做到什么（诚实标注）**：没有在一次真页面改版上跑通 `agent.loop` 的「接管 → 改结构 → 恢复 → 换手」活体链路。
+  两件事分别落在别处：「恢复后重读 DOM 而不是复用旧快照」这条性质在 2.8-11 已用 fixture 靶页活体验过**一次**，
+  但走的是 `workflow.runner` 的续跑、不是这条循环；`browser.locate.find` 在真页面上确实回 `LOCATE_FAILED`
+  属于定位层（2.2）的判据。5.5-03 / 04 的判据栏是 U、要的是循环内部分支，证据因此是上面那组用例；
+  `agent.loop` 这一路的活体复跑并入 5.5-e 与 5.5-08（V）一起拍。
+- **四道门禁实测**（收口前复跑，退出码逐个 echo）：`pnpm typecheck` exit 0、`pnpm lint` exit 0（九条机检与
+  16 只生产工具 × 两份语言包的 titleKey 齐检都在这一行背后）、`pnpm format:check` exit 0、`pnpm test` exit 0——
+  21 个测试包无一失败（`packages/agent 145`，其中 5.5-03 五条 + 5.5-04 六条为本片新增；`packages/core 41`、
+  `packages/browser 252`、`packages/outbound 142`、`packages/resume-kb 398`、`packages/main 31`）。
+  macOS / Linux 运行期未验证（§9，一律 BLOCKED）。
+- **逐条状态位**：5.5-03 → `[x]`、5.5-04 → `[x]`（两条判据栏都是 U）。5.5-01 / 02 / 07 / 09 保持 `[x]`；
+  5.5-05 / 06 归 5.5-d，5.5-08 / 10 归 5.5-e，仍是 `[ ]`。
+- **§7.4 收尾自检**：① 四道门禁见上一条。② 本片两条判据的判据栏都是 U，没有 V 条目因此没有截图；
+  那句"没有截图"的代价与归属写在上面「没有做到什么」那条里。③ 状态位无模糊项，`[ ]` 的都写明归属。
+  ④ 复用检查：读页面只 `rereadPage` 一处实现，`resume` 与 `replanStep` 共用（§2.2 抽的正是这一处）；
+  续推复用 `draftPlan` 不新开口子；顶替复用既有的 `enrich` 与 `agent_step` 覆盖口径，没有第二份计划存储；
+  漂移族由 `core` 导出、循环只读（§2.5 不留两份判据）。⑤ 死代码：新 import 的 `ToolEffect` 有真实消费者
+  （`effectOf` 的返回类型），`scope.freshRead` 两处写两处读、用完即清，没有留下注释掉的旧实现。
+  ⑥ 前端三项：本片渲染层只多三条 `stopReason` 文案与一句提示行更正，zh-CN / en 双语齐（动态模板键是 i18n 机检的
+  已知盲区，按 5.5-b 同一口径人工补齐）、样式与图标零改动。⑦ 提交分四片：core 契约 / agent 循环与用例
+  （含装配与语言包）/ 语言包提示文案更正 / 本篇文档，逐片推 `origin/main`。⑧ 暂存区只有源码、测试、两份语言包、
+  `cordis.yml` 与本文档；四份门禁日志在被忽略的 `tmp/`（§7.5）。
 
 ## 5.6 会话持久化、压缩与脱敏
 
