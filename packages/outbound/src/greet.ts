@@ -210,13 +210,8 @@ export class OutboundGreetService extends Service {
 
     const gate = asApp(this.ctx)['entitlement.gate'];
     // 先查额度再等间隔：到量即停的意思就是「别让用户白等一个频控周期」（spec 2.5-04）。
-    const decision = gate.check(GREET_ACTION, { nowMs });
-    if (!decision.allowed) {
-      throw new AppError('QUOTA_EXCEEDED', decision.reason ?? `动作 ${GREET_ACTION} 的额度已用完`, 'outbound.greet', {
-        action: GREET_ACTION,
-        remaining: decision.remaining,
-      });
-    }
+    // 走 `enforce` 而不是自己比对 `check`：被拦下要留一条被拒流水（spec 5.3-12），而留痕只在闸门那一处。
+    gate.enforce(GREET_ACTION, { targetId: jobId, workflowRunId: runId, nowMs });
 
     // 频控的钟是账本里最近一条 greet，不是本服务的内存字段：跨重启成立，也不是第二套状态存储（§2.7）。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();

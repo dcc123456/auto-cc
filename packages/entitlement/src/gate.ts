@@ -1,8 +1,10 @@
 /**
  * `entitlement.gate` 服务（spec 1.9-01 / 1.9-02 / 1.9-03 / 2.7-03）：所有外发与抓取动作的唯一必经口。
  *
- * 两个方法分工是刻意的：
+ * 三个方法分工是刻意的：
  * - `check()` **只用于展示**（剩余额度、界面提示），它不产生任何副作用，也不代表许可；
+ * - `enforce()` 是「现在就问一句，到量就把这一次记成被拒再抛」——外发编排在等频控间隔**之前**用它，
+ *   免得用户白等一个周期（spec 2.5-02 / 2.6 的「到量即停」）；
  * - `perform()` 才是放行口 —— 判定、执行、落账三步在一个方法里完成，
  *   所以「调了 check 再自己发」这种绕过在结构上就写不出正确的代码（spec 1.9-05 的立足点）。
  *
@@ -93,23 +95,37 @@ export class EntitlementGateService extends Service {
   };
 
   /**
-   * 放行一次外发：判定 → 执行 → 落账。
+   * 问一句「现在能不能做」，不能做就**先把这一次记成被拒流水再抛**。
+   *
+   * 它是 `usage_denials` 的唯一写入口（spec 5.3-12）：判定、留痕、抛错三件事长在一起，
+   * 所以调用方拿不到「被拒但没留痕」这个选项。`perform` 内部也走这里，两处判定因此是同一处实现。
+   * @param action 额度动作名
+   * @param context 判定与留痕的上下文（`targetId` / `workflowRunId` / `nowMs`，进被拒表的那三列）
+   * @returns 放行时的判定读数（界面可顺带取剩余额度）
+   * @throws 到量时以 `QUOTA_EXCEEDED` 失败（`details` 带动作名与剩余额度），不静默跳过
+   */
+  enforce = (action: QuotaAction, context: ActionContext = {}): GateDecisionView => {
+    const decision = this.check(action, context);
+    if (decision.allowed) return decision;
+    const reason = decision.reason ?? `动作 ${action} 的额度已用完`;
+    asApp(this.ctx)['usage.ledger'].recordDenial({ action, ...context, code: 'QUOTA_EXCEEDED', reason });
+    throw new AppError('QUOTA_EXCEEDED', reason, 'entitlement.gate', { action, remaining: decision.remaining });
+  };
+
+  /**
+   * 放行一次外发：判定 → 执行 → 落账；判定不过则由 `enforce` 先记一条被拒流水再抛。
    *
    * 落账在 `task` **成功之后**（plan §8.4 决策 1）：被拒与发送失败都没有消耗平台侧的任何东西，
-   * 记进账本就是假用量；反过来只要账上有行，就说明那条动作真的走完了。
+   * 记进用量表就是假用量；反过来只要用量表上有行，就说明那条动作真的走完了。
+   * 被拒的那一次另有去处（`usage_denials`，spec 5.3-12）：它是"有人试过、被拦下了"的审计事实，
+   * 不是用量，所以既不占日上限、也不启动频控的钟（那是 1.9-03 那句「既不花钱也不落账」的原意）。
    * @param action 动作名
    * @param context 落账上下文（`targetId` / `workflowRunId` / `nowMs`）
    * @param task 真正的外发动作；只能是进程内的闭包 —— 它不出 IPC，因此无法被渲染层绕过
    * @returns 业务返回值与本次的账本行 id
    */
   perform = async <T>(action: QuotaAction, context: ActionContext, task: () => Promise<T>): Promise<Performed<T>> => {
-    const decision = this.check(action, context);
-    if (!decision.allowed) {
-      throw new AppError('QUOTA_EXCEEDED', decision.reason ?? '额度已用完', 'entitlement.gate', {
-        action,
-        remaining: decision.remaining,
-      });
-    }
+    this.enforce(action, context);
     const value = await task();
     const ledgerId = asApp(this.ctx)['usage.ledger'].record({ action, ...context });
     this.ctx.logger.info(`闸门放行并落账：动作 ${action} · 账本行 ${String(ledgerId)}`);

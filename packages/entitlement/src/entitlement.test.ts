@@ -1,5 +1,5 @@
 /**
- * 闸门与账本的装配测试（spec 1.9-01 / 02 / 03 / 04 / 07 / 08 / 09 / 2.7-03）。
+ * 闸门与账本的装配测试（spec 1.9-01 / 02 / 03 / 04 / 07 / 08 / 09 / 2.7-03 / 5.3-12）。
  *
  * 一律用真的 `node:sqlite` 落临时库：额度这件事的语义就是「跨调用、跨重启的计数」，
  * mock 掉数据库等于把被验证的东西换成一个假计数。临时目录在 `os.tmpdir`，不进仓库（AGENTS.md §7.5）。
@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { QuotaAction } from '@auto-cc/shared';
 import {
+  DENIAL_MIGRATION_VERSION,
   LEDGER_MIGRATION_VERSION,
   DEFAULT_DAILY_LIMITS,
   EntitlementGateService,
@@ -205,6 +206,102 @@ describe('entitlement.gate（spec 1.9-01…04）', () => {
     // 版本没重复只是一半，另一半是「重新挂载之后照样落账」——upgrade() 在已到版本的库上是空转。
     expect(asApp(ctx)['usage.ledger'].record({ action: 'greet', targetId: 'job-x' })).toBeGreaterThan(0);
     expect(asApp(ctx)['usage.ledger'].summary().total).toBe(1);
+  });
+});
+
+/**
+ * 被拦下的动作进被拒流水（spec 5.3-12）。
+ *
+ * 这一族用例存在的意义是**同时**成立两件事：拦下必留痕（5.3-12），留痕绝不进用量（1.9 已验收的
+ * 「被拒既不花钱也不落账」与 plan §8.4 决策 1）。只断言前者，后来者把两件事搅回一张表也照样绿。
+ */
+describe('被闸门拦下的动作（spec 5.3-12）', () => {
+  it('拦下几次就记几行，用量表一行也不许多', async () => {
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
+    await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('first'));
+    for (const targetId of ['job-2', 'job-3']) {
+      await expect(gate.perform('greet', { targetId }, () => Promise.resolve('不该被执行'))).rejects.toMatchObject({
+        code: 'QUOTA_EXCEEDED',
+      });
+    }
+
+    const summary = ledger.summary(50);
+    expect(summary.total).toBe(1);
+    expect(summary.recentDenials).toHaveLength(2);
+    // 倒序（最近一条在前）且带可读原话：人要回头看出「刚才那两次是被谁以什么理由拦下的」。
+    expect(summary.recentDenials[0]).toMatchObject({
+      action: 'greet',
+      targetId: 'job-3',
+      code: 'QUOTA_EXCEEDED',
+    });
+    expect(summary.recentDenials[0]?.reason).toContain('额度已用完');
+    expect(summary.recentDenials[1]?.targetId).toBe('job-2');
+  });
+
+  it('只用于展示的 check 不落任何流水，无限模式也不会被记成被拒', async () => {
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
+    await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('first'));
+    for (let attempt = 0; attempt < 3; attempt += 1) expect(gate.check('greet').allowed).toBe(false);
+    expect(ledger.recentDenials(50)).toHaveLength(0);
+
+    const unlimited = await boot();
+    expect(unlimited.gate.check('greet').allowed).toBe(true);
+    expect(unlimited.ledger.recentDenials(50)).toHaveLength(0);
+  });
+
+  it('enforce（外发编排等间隔之前那次询问）是留痕的口：放行不记，拦下必记', async () => {
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
+    // 放行那一支返回读数本身（界面靠它显示还剩几条），并且一行都不记。
+    expect(gate.enforce('greet', { targetId: 'job-1' })).toMatchObject({ allowed: true, remaining: 1 });
+    expect(ledger.recentDenials(50)).toHaveLength(0);
+
+    await gate.perform('greet', { targetId: 'job-1' }, () => Promise.resolve('first'));
+    let refused: { code?: string; details?: unknown } | null = null;
+    try {
+      gate.enforce('greet', { targetId: 'job-2', workflowRunId: 'run-9' });
+    } catch (error) {
+      refused = error as { code?: string; details?: unknown };
+    }
+    expect(refused).toMatchObject({ code: 'QUOTA_EXCEEDED', details: { action: 'greet', remaining: 0 } });
+    // 上下文三件都在：回看时要能认出「哪一次运行、对哪个目标试过」，否则审计只剩一句"被拒了"。
+    expect(ledger.recentDenials(50)).toMatchObject([{ action: 'greet', targetId: 'job-2', workflowRunId: 'run-9' }]);
+  });
+
+  it('被拒不占日上限、不启动频控的钟、也不挡住同目标的重复发送防护', async () => {
+    const { gate, ledger } = await boot(daily({ greet: 1 }));
+    await gate.perform('greet', { targetId: 'job-1', workflowRunId: 'run-1' }, () => Promise.resolve('first'));
+    const usedBefore = ledger.countToday('greet', Date.now());
+    const clockBefore = ledger.latestActionTs('greet');
+    const forJob2Before = ledger.countFor('greet', 'job-2', 'run-1');
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        gate.perform('greet', { targetId: 'job-2', workflowRunId: 'run-1' }, () => Promise.resolve('不该被执行')),
+      ).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' });
+    }
+
+    // 三条计数都只读 usage_ledger，所以被拒行进了另一张表就等于它们结构性地看不见这件事。
+    expect(ledger.countToday('greet', Date.now())).toBe(usedBefore);
+    expect(ledger.latestActionTs('greet')).toBe(clockBefore);
+    expect(ledger.countFor('greet', 'job-2', 'run-1')).toBe(forJob2Before);
+  });
+
+  it('老库重新挂载后照样建得出被拒表并写得进去（5.3-a 号段那条实测的复跑）', async () => {
+    const { ctx, ledgerFiber, ledger } = await boot();
+    expect(ledger.recentDenials(10)).toHaveLength(0);
+
+    await ledgerFiber.dispose();
+    const remounted = ctx.plugin(UsageLedgerService, {});
+    await remounted;
+    const again = asApp(ctx)['usage.ledger'];
+    const store = asApp(ctx).store;
+    expect(store.migrations.filter((item) => item.version === DENIAL_MIGRATION_VERSION)).toHaveLength(1);
+    expect(again.recordDenial({ action: 'greet', code: 'QUOTA_EXCEEDED', reason: '今日 1 次已用完' })).toBeGreaterThan(
+      0,
+    );
+    expect(again.summary().recentDenials[0]?.code).toBe('QUOTA_EXCEEDED');
+    // 用量侧仍是空的：被拒行不可能被任何一条计数查询读到（本用例的后半段就是那条断言）。
+    expect(again.summary().total).toBe(0);
   });
 });
 

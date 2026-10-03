@@ -408,7 +408,27 @@ export type LedgerRowView = {
   remoteRef: string | null;
 };
 
-/** 用量回看的聚合读数（spec 1.9-07）：总数、按天分组、按动作分组，外加最近几行。 */
+/**
+ * 被闸门拦下的一次动作（spec 5.3-12）。
+ *
+ * 它与 `LedgerRowView` 是两张表：这一份**不是用量**（那一次动作什么都没消耗），
+ * 只是"有人试过了、被谁以什么理由拦下"的审计读数。分成两张表是为了让日上限、
+ * 重复发送防护、频控那三处计数结构上读不到被拒行（详见 `entitlement/src/ledger.ts` 的头注释）。
+ */
+export type LedgerDenialView = {
+  id: number;
+  action: string;
+  targetId: string | null;
+  workflowRunId: string | null;
+  /** 毫秒时间戳，本地时区。 */
+  ts: number;
+  /** 拒因码（当前只有 `QUOTA_EXCEEDED`），给用例断言用，不给人读。 */
+  code: string;
+  /** 要显示给人看的原话（闸门 `check()` 那句 reason）。 */
+  reason: string;
+};
+
+/** 用量回看的聚合读数（spec 1.9-07 / 5.3-12）：总数、按天分组、按动作分组，外加最近几行与被拒几行。 */
 export type UsageSummaryView = {
   total: number;
   /** 本地「今天」的条数，与闸门日额度用的是同一个日界。 */
@@ -416,6 +436,8 @@ export type UsageSummaryView = {
   byDay: { day: string; count: number; actions: { action: string; count: number }[] }[];
   byAction: { action: string; count: number }[];
   recent: LedgerRowView[];
+  /** 最近被闸门拦下的几行（spec 5.3-12），按时间倒序；不计进上面任何一项。 */
+  recentDenials: LedgerDenialView[];
 };
 
 /** 一次外发样例的入参（spec 1.9-03 / 1.9-04 / 2.7-03：动作名是枚举，不是任意字符串）。 */

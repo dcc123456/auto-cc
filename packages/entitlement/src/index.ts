@@ -13,6 +13,7 @@ export {
   type Performed,
 } from './gate.js';
 export {
+  DENIAL_MIGRATION_VERSION,
   LEDGER_MIGRATION_VERSION,
   UsageLedgerService,
   dayKey,

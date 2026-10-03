@@ -388,15 +388,9 @@ export class OutboundDeliverService extends Service {
     // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
     consentGateOf(this.ctx).ensureConsent(platform);
 
-    const decision = this.gate.check(DELIVER_ACTION, { nowMs });
-    if (!decision.allowed) {
-      throw new AppError(
-        'QUOTA_EXCEEDED',
-        decision.reason ?? `动作 ${DELIVER_ACTION} 的额度已用完`,
-        'outbound.deliver',
-        { action: DELIVER_ACTION, remaining: decision.remaining },
-      );
-    }
+    // 到量即在等待之前停（spec 2.6 的同条判据）。留痕由闸门的 `enforce` 负责：
+    // 被拒要进 `usage_denials`（spec 5.3-12），编排层自己比对 `check` 就把那条性质漏掉了。
+    this.gate.enforce(DELIVER_ACTION, { targetId: jobId, workflowRunId, nowMs });
 
     // 频控的钟是账本里最近一条 deliver，与打招呼各数各的间隔（两套动作互不背锅）。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();
