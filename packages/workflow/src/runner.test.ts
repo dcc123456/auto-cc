@@ -235,7 +235,7 @@ async function settle(ms = 120): Promise<void> {
 
 /**
  * 本线程当前挂着的定时器句柄数（2.4-09 的机读判据）。
- * @returns 活跃的 `Timeout` 资源个数；退避中的 `sleep()` 会让它 +1，被 abort 后应回到原值
+ * @returns 活跃的 `Timeout` 资源个数；退避中的 `sleep()` 会让它 +1，被 abort 后不应再高于计数时的基线
  */
 function pendingTimers(): number {
   return process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
@@ -1011,7 +1011,7 @@ describe('卸载让出（1.10-04 / 2.4-07 / 2.4-09）', () => {
     expect(events.at(-1)?.phase).toBe('started');
   });
 
-  it('卸载把退避定时器一起带走：句柄数回到基线，且不等到退避睡满才返回（2.4-09 的「无悬挂句柄」）', async () => {
+  it('卸载把退避定时器一起带走：句柄数不高于基线，且不等到退避睡满才返回（2.4-09 的「无悬挂句柄」）', async () => {
     const { runner, runnerFiber, events } = await boot({
       config: { retryTimes: 2, retryBackoffMs: 1_200, retryBackoffCapMs: 1_200 },
       behavior: { 'jd.capture': failThenSucceed(9, '对端不可达') },
@@ -1019,16 +1019,22 @@ describe('卸载让出（1.10-04 / 2.4-07 / 2.4-09）', () => {
     const baseline = pendingTimers();
     runner.start();
     await waitFor(() => events.some((event) => event.phase === 'retrying'));
-    // 先确认「此刻真有一个在途定时器」，否则下面那句「回到基线」就是句空话。
+    // 先确认「此刻真有一个在途定时器」，否则下面那句「不高于基线」就是句空话。
     expect(pendingTimers()).toBeGreaterThan(baseline);
 
     const startedAt = Date.now();
     await runnerFiber.dispose();
     fibers.splice(fibers.indexOf(runnerFiber), 1);
     await settle(30);
-    expect(pendingTimers()).toBe(baseline);
+    // 判据是「不高于基线」而不是「等于基线」：这里数的是**整条线程**上的定时器，
+    // 其中混着测试运行时自己那些短命的句柄——实测本例基线 1、退避在途 2、卸载前再等 60ms 就自己掉回 1、
+    // 卸载之后掉到 0。按相等断言写就等于把一条与被测代码无关的环境计时器当成被测对象，机器忙慢就翻脸。
+    expect(pendingTimers()).toBeLessThanOrEqual(baseline);
     // 等满 1.2s 才返回是悬挂句柄的另一种表现：卸载必须立刻让出，`plugins.stop` 不能变成「等这条 run 睡完」。
     expect(Date.now() - startedAt).toBeLessThan(1_000);
+    // 「不高于基线」挡不住一种假通过：恰好有一只环境计时器在这窗口到期，把泄漏的那只盖掉。
+    // 所以用行为收口——真悬挂的话这条 run 会在退避睡到点之后自己醒过来续跑，相位就不再停在 retrying。
+    await settle(1_250);
     expect(events.at(-1)?.phase).toBe('retrying');
   });
 });
