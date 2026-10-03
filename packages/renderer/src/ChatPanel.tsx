@@ -108,7 +108,8 @@ export function ChatPanel() {
   // 5.4-c 起这条订阅在对话侧有两个用户：表头那只徽标显示状态，流末尾那张卡显示进度（同一份读数，spec 5.4-07）。
   const { run: workflowRun, live: workflowLive } = useWorkflowRun();
   // agent 循环的进度独立于 chat 的忙碌态：跑任务的时候输入区照常能用（spec 5.2-12）。
-  const agentRun = useAgentRun();
+  // 会话 id 递进去是挂载回看的认领依据：重新挂载（含重启）后按这一段会话取最近一次 run 把计划卡画回来（spec 5.6-01）。
+  const agentRun = useAgentRun(snapshot?.session.id);
   // 挂在人身上的那些单自成一条读数：它跟着 run 走，但按不按是人的手，不能被循环的忙碌态盖掉（spec 5.3-08）。
   const agentPause = useAgentPause();
   // 沉淀卡挂在 run 上而不是挂在会话上：预览读数按 runId 认领，换一条对话不会沿用上一段的投影（spec 5.4-01）。

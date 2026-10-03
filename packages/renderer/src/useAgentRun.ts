@@ -4,6 +4,9 @@
  * 进度**由 `agent/run-progress` 推**，`loop.read` 只负责「错过了也还在」——与 `outbound.deliver`
  * 那条审批单同一分工（事件提醒 + 现读兜底）。界面不自己数第几步：所有下标、状态、token 账都取自主进程，
  * 自己推导一份就是 §2.7 禁的第二份事实。
+ *
+ * 第三格是「连事件都没赶上」的那一种（重新挂载 / 进程停过一次）：那时无处可接推送，只能按当前会话
+ * 现取最近一次 run 的读数（`agent.loop.latestRun`，spec 5.6-01）——四类记录本来就在 SQLite 里，缺的只是挂载时回看。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,16 +15,21 @@ import { useBridgeAction } from './useBridgeAction';
 
 /**
  * 挂一次 agent 循环的界面状态。
+ * @param sessionId 当前会话 id（来自 `chat.session.current()`，未回来时为 undefined）——
+ *   挂载回看按它认领「这一段对话的最近一次 run」，不传就不回看（免得在快照之前猜一个会话）
  * @returns `run`（当前这条 run 的读数，没起草过为 undefined）、`notice`、`propose` / `confirm` / `stop` /
  *   `resume` / `dismiss` 五个动作，以及 `stopAccepted`（点过叫停但 `paused` 还没落进来——界面此刻只能说「已受理」，不能说「已停止」）
  */
-export function useAgentRun() {
+export function useAgentRun(sessionId?: string) {
   const { t } = useTranslation();
   const [run, setRun] = useState<AgentRunView>();
   const [stopAccepted, setStopAccepted] = useState(false);
   const bridge = window.autoCC;
   // 重读用的 id 存在 ref 里：`read` 要进 `useCallback` 的依赖，而 runId 变了不该换掉动作函数的身份。
   const runIdRef = useRef<string | undefined>(undefined);
+  // 本地这份读数是从哪一段会话回看来的：同一会话里刚起草的那一条永远比库里的旧读数新，
+  // 而换会话（`startSession`）之后必须换，否则上一段的计划卡会串到这一段对话里来。
+  const restoredFromSessionRef = useRef<string | undefined>(undefined);
 
   /** 现读当前 run 的落库读数（每个动作跑完由 `useBridgeAction` 调一次，界面不猜主进程当下的状态）。 */
   const read = useCallback(async () => {
@@ -41,6 +49,32 @@ export function useAgentRun() {
       setRun(event);
     });
   }, [bridge]);
+
+  /**
+   * 挂载时回看这段会话的最近一次 run（spec 5.6-01）：`agent/run-progress` 只负责「此刻推得到的」，
+   * 重新挂载（含进程停过一次）后要靠这一口从 `agent_run` + `agent_step` 把计划卡与逐步卡片流画回来。
+   *
+   * 分工与 `useAgentPause` 那条挂载回看同一口径（5.5-d 挂的就是这一格）。读数走 `agent.loop.read`
+   * 那一份形状，所以参数是掩码（spec 5.6-05）——界面画的从来不是执行件。
+   */
+  useEffect(() => {
+    if (!bridge || !sessionId) return;
+    // 快照到位之前不发起（`sessionId` 为空），到位之后这一段只回看一次：依赖里只有 sessionId。
+    let isCurrentMount = true;
+    void (async () => {
+      const reply = await bridge?.agent['loop.latestRun'](sessionId);
+      if (!isCurrentMount || !reply?.ok) return;
+      if (runIdRef.current && restoredFromSessionRef.current === sessionId) return;
+      runIdRef.current = reply.value?.runId;
+      restoredFromSessionRef.current = sessionId;
+      setStopAccepted(false);
+      // 该会话一次都没起草过时返回 null：这里必须清空，否则换会话之后画着的还是上一段那条 run。
+      setRun(reply.value ?? undefined);
+    })();
+    return () => {
+      isCurrentMount = false;
+    };
+  }, [bridge, sessionId]);
 
   /**
    * 起草一份计划（spec 5.2-03）：这一步在主进程里不执行任何动作，返回的就是计划卡要画的那份读数。
