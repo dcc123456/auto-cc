@@ -2090,8 +2090,8 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 ④ 复用检查：新写的只有 `tmp/5.7-d/` 里五个一次性驱动与探针脚本，链路上的每一步都走既有服务与既有口，
 没有第二套判定/账本/证据面；⑤ 死代码检查：主干零改动；⑥ 前端未改动，Tailwind / lucide / i18n 三项无新增；
 ⑦ 本条记录与六张截图同一提交（纯文档 + 验收证据，无功能改动可分），提交号 `0fcd1a3`；§1.6 的「提交后即推」
-   当下连试三次失败（GitHub 报 `Please make sure you have the correct access rights and the repository exists`，
-   即 §9 记的直连不稳定），所以该片收尾的真实状态是**已提交、未推送**，网络恢复后补推而不是静默跳过；
+当下连试三次失败（GitHub 报 `Please make sure you have the correct access rights and the repository exists`，
+即 §9 记的直连不稳定），所以该片收尾的真实状态是**已提交、未推送**，网络恢复后补推而不是静默跳过；
 ⑧ 暂存区只有本 spec 与六张按条目 ID 命名的验收截图（§7.5 允许的路径），驱动脚本与中间态图留在 gitignore 的 `tmp/`。
 
 ## 5.8 指标看板
