@@ -31,6 +31,7 @@ import {
 } from '@auto-cc/core';
 import type { GreetReceiptView, GreetRequestView } from '@auto-cc/shared';
 import { z } from 'zod';
+import { gapRemainingMs } from './deliver-timing.js';
 import { SCRIPT_KINDS, scriptRequestSchema } from './script.js';
 
 /** 额度键与账本动作名（`entitlement.gate` 按它数日上限，spec 2.5-02 / 2.5-04）。 */
@@ -240,14 +241,13 @@ export class OutboundGreetService extends Service {
 
     // 频控的钟是账本里最近一条 greet，不是本服务的内存字段：跨重启成立，也不是第二套状态存储（§2.7）。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();
-    const lastSentAt = ledger.latestActionTs(GREET_ACTION);
+    // 减法收进 `gapRemainingMs`（spec 5.7-e 收口时把这条并进来）：投递本体与择机规则算的是同一段，
+    // 这里再手写一遍 `lastSentAt + gap - nowMs` 就是 §2.2 禁的第二处算术。
+    const remaining = gapRemainingMs(ledger.latestActionTs(GREET_ACTION), gap, nowMs);
     let waitedMs = 0;
-    if (lastSentAt !== null) {
-      const remaining = lastSentAt + gap - nowMs;
-      if (remaining > 0) {
-        await sleep(remaining, signal);
-        waitedMs = remaining;
-      }
+    if (remaining > 0) {
+      await sleep(remaining, signal);
+      waitedMs = remaining;
     }
     // 让出检查点必须落在**发送之前**：`sleep` 在 abort 时是正常返回的（暂停不是失败），
     // 不在这里问一句，被暂停的那一步仍会把消息发出去（spec 2.4-07）。
