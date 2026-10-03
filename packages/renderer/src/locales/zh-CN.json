@@ -669,6 +669,7 @@
         "empty": "当前没有在等人的单",
         "step": "第 {{index}} 步",
         "approvalHeading": "这一步要你先批准",
+        "deliverHeading": "投递要把简历发给这个岗位（outbound.deliver 自己的确认单）",
         "elicitationHeading": "这一步还缺信息",
         "missing": "还缺或不合契约的字段：{{fields}}",
         "round": "第 {{round}} 轮补充",

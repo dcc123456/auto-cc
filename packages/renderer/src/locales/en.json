@@ -669,6 +669,7 @@
         "empty": "No ticket is waiting right now",
         "step": "Step {{index}}",
         "approvalHeading": "This step needs your approval",
+        "deliverHeading": "Delivery needs your say-so for this job (outbound.deliver approval)",
         "elicitationHeading": "This step is missing information",
         "missing": "Fields still missing or invalid: {{fields}}",
         "round": "Supplement round {{round}}",

@@ -1,19 +1,58 @@
 /**
- * 挂在人身上的那两张卡（spec 5.3-08 的界面半边）：`approval` 与 `elicitation` 形状不同，因为要问人的事不是一回事。
+ * 挂在人身上的那几张卡（spec 5.3-08 的界面半边 + 5.7-14）：`approval` 与 `elicitation` 形状不同，因为要问人的事不是一回事。
  *
  * 一张问「这一步可以动手吗」（是 / 否），一张问「这一步还缺哪些信息」（填一段 / 放弃 + 第几轮）。
- * 组件自己不判「这一步要不要批准」、不数「缺哪几个字段」：那些都在 `agent.pause.pending()` 那份读数里
- * 由主进程算好（AGENTS.md §2.5），`reason` / `missing` 是服务侧产出的人读原话，按内容显示、不进语言包
+ * 组件自己不判「这一步要不要批准」、不数「缺哪几个字段」：那些都在主进程的 `pending()` 读数里
+ * 由服务侧算好（AGENTS.md §2.5），`reason` / `missing` 是服务侧产出的人读原话，按内容显示、不进语言包
  * （与 `AgentPlanStepView.intent` 同一条口径）。
+ *
+ * 投递服务自己的确认单也画在这里（`origin:'deliver'` 那一路）：它与 `approval` 暂停单问的是同一句话
+ * ——「这只手现在能不能动」——所以复用同一对按钮与同一片外壳，只有正文来自 `DeliverApprovalView`
+ * 那份真实读数（发哪个岗位、附的哪个文件）。两路各有应答口，路由在 `useAgentPause.respond` 里做。
  *
  * 卡片**由读数驱动**：事件只负责提醒去读（见 `useAgentPause`），所以刷新、错过的推送、
  * 甚至表态之后的那张卡，走的都是同一条路——界面上不存在「以为还有卡片」的余地。
  */
-import { Check, CircleAlert, Clock, ShieldQuestion, X } from 'lucide-react';
+import { Check, CircleAlert, Clock, ShieldQuestion, ShieldCheck, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentPauseAnswer, AgentPauseView, ToolDescriptorView } from '@auto-cc/shared';
-import type { ResolvedPause } from './useAgentPause';
+import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
+import { formatClock } from './format';
+import type { PendingDecision, ResolvedPause } from './useAgentPause';
+
+/**
+ * 「是 / 否」那一对按钮（`approval` 暂停单与投递确认单共用，同一逻辑不写第二遍）。
+ * @param busy 正在执行的动作标签；非空时两颗都禁用，防止同一张单被按两次
+ * @param onDecide 把人按下的那颗交出去（`approve` / `deny`）
+ * @returns 一行两颗按钮
+ */
+function ApproveDenyButtons({ busy, onDecide }: { busy?: string; onDecide: (decision: 'approve' | 'deny') => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button
+        type="button"
+        data-action="pause-approve"
+        disabled={busy !== undefined}
+        onClick={() => onDecide('approve')}
+        className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
+      >
+        <Check size={12} />
+        {t('agent.pause.approve')}
+      </button>
+      <button
+        type="button"
+        data-action="pause-deny"
+        disabled={busy !== undefined}
+        onClick={() => onDecide('deny')}
+        className="flex items-center gap-1 rounded-md border border-rose-800 px-3 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
+      >
+        <X size={12} />
+        {t('agent.pause.deny')}
+      </button>
+    </div>
+  );
+}
 
 /**
  * 一张在等的单共有的抬头：工具名 + 副作用级 + 哪一步 + 单号。
@@ -80,28 +119,62 @@ function ApprovalCard({
         <Clock size={10} />
         {t('agent.pause.timeoutNote')}
       </p>
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          data-action="pause-approve"
-          disabled={busy !== undefined}
-          onClick={() => onRespond(card, { decision: 'approve' })}
-          className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
-        >
-          <Check size={12} />
-          {t('agent.pause.approve')}
-        </button>
-        <button
-          type="button"
-          data-action="pause-deny"
-          disabled={busy !== undefined}
-          onClick={() => onRespond(card, { decision: 'deny' })}
-          className="flex items-center gap-1 rounded-md border border-rose-800 px-3 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
-        >
-          <X size={12} />
-          {t('agent.pause.deny')}
-        </button>
-      </div>
+      <ApproveDenyButtons busy={busy} onDecide={(decision) => onRespond(card, { decision })} />
+    </div>
+  );
+}
+
+/**
+ * 投递服务自己的确认单（spec 5.7-14）：semi 档下对话那一路的第二道表态。
+ *
+ * 正文只列主进程读数里真有的东西——发哪个岗位、附的哪个文件、什么时候到点——
+ * 措辞复用 `JobLabPanel` 那条 `deliver.pendingRow`（同一句话不翻译两遍，§2.1）。
+ * @param approval `outbound.deliver.pending()` 里的那份读数
+ * @param busy 正在执行的动作标签；非空时两颗按钮禁用
+ * @param onDecide 把「发 / 不发」交回上层（上层按来源送回 `deliver.resolveApproval`）
+ * @returns 一张与 `approval` 暂停单同外壳的确认卡
+ */
+function DeliverApprovalCard({
+  approval,
+  busy,
+  onDecide,
+}: {
+  approval: DeliverApprovalView;
+  busy?: string;
+  onDecide: (answer: AgentPauseAnswer) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="agent-pause-approval"
+      data-pause-request-id={approval.approvalId}
+      data-pause-kind="approval"
+      data-pause-origin="deliver"
+      data-deliver-job-id={approval.jobId}
+      data-pause-expires-at={String(approval.expiresAt)}
+      className="mt-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2"
+    >
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-200">
+        <ShieldCheck size={12} />
+        {t('agent.pause.deliverHeading')}
+      </p>
+      <p className="mt-1 break-words text-[11px] text-slate-300">
+        {t('deliver.pendingRow', {
+          jobId: approval.jobId,
+          title: approval.title,
+          company: approval.company,
+          fileName: approval.attachment.fileName,
+          sizeBytes: approval.attachment.sizeBytes,
+          sha: approval.attachment.sha256.slice(0, 12),
+          requestedAt: formatClock(approval.requestedAt, t('jd.none')),
+          expiresAt: formatClock(approval.expiresAt, t('jd.none')),
+        })}
+      </p>
+      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+        <Clock size={10} />
+        {t('agent.pause.timeoutNote')}
+      </p>
+      <ApproveDenyButtons busy={busy} onDecide={(decision) => onDecide({ decision })} />
     </div>
   );
 }
@@ -192,13 +265,13 @@ function ElicitationCard({
 }
 
 /**
- * 暂停卡片带：把「此刻挂在人身上的每一步」画在对话流里，并留一行最近收掉的单的结局回报。
- * @param cards 现读的在等清单（`agent.pause.pending()` 那份）；还没读到过时为 undefined
- * @param resolved 最近收掉的一张与它的结局（5.3-10 的「回报超时」就落在这一行）
+ * 表态卡片带：把「此刻挂在人身上的每一步、以及投递欠的那一次表态」画在对话流里，并留一行最近收掉的单的结局回报。
+ * @param cards 现读的在等清单（`agent.pause.pending()` + `outbound.deliver.pending()` 汇成的一份）；还没读到过时为 undefined
+ * @param resolved 最近收掉的一张 agent 单与它的结局（5.3-10 的「回报超时」就落在这一行）
  * @param toolMetas 注册表读数按 id 建的索引，抬头用它显示副作用分级与标题
- * @param busy 正在执行的动作标签，非空时四颗按钮都禁用
+ * @param busy 正在执行的动作标签，非空时按钮禁用
  * @param notice 动作提示行（失败原因留在界面上，截图才拿得到证据）
- * @param onRespond 一句表态 + 那张单，交回 `useAgentPause` 发送
+ * @param onRespond 一句表态 + 那张单（含来源），交回 `useAgentPause` 送回各自的口
  * @returns 一条插在对话流末尾的 `<li>`；没有在等的单、也没有可回报的结局时不画任何东西
  */
 export function AgentPauseCards({
@@ -209,20 +282,25 @@ export function AgentPauseCards({
   notice,
   onRespond,
 }: {
-  cards: AgentPauseView[] | undefined;
+  cards: PendingDecision[] | undefined;
   resolved: ResolvedPause | undefined;
   toolMetas: Map<string, ToolDescriptorView>;
   busy?: string;
   notice?: string;
-  onRespond: (card: AgentPauseView, answer: AgentPauseAnswer) => void;
+  onRespond: (decision: PendingDecision, answer: AgentPauseAnswer) => void;
 }) {
   const { t } = useTranslation();
   const count = cards?.length ?? 0;
+  const deliverCount = cards?.filter((decision) => decision.origin === 'deliver').length ?? 0;
+  // agent 那一路把「哪张单」由卡片自己带回来，这里按来源包一次；投递那一路在各自卡片里已经闭包了来源。
+  const respondToAgent = (card: AgentPauseView, answer: AgentPauseAnswer): void =>
+    onRespond({ origin: 'agent', card }, answer);
   if (count === 0 && !resolved && !notice) return null;
   return (
     <li
       data-testid="agent-pause-band"
       data-pause-count={String(count)}
+      data-pause-deliver-count={String(deliverCount)}
       className="rounded-xl border border-slate-700 bg-slate-900/80"
     >
       <header className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
@@ -239,14 +317,25 @@ export function AgentPauseCards({
             {t('agent.pause.empty')}
           </p>
         ) : (
-          cards?.map((card) =>
-            card.kind === 'elicitation' ? (
+          cards?.map((decision) => {
+            if (decision.origin === 'deliver') {
+              return (
+                <DeliverApprovalCard
+                  key={decision.card.approvalId}
+                  approval={decision.card}
+                  busy={busy}
+                  onDecide={(answer) => onRespond(decision, answer)}
+                />
+              );
+            }
+            const card = decision.card;
+            return card.kind === 'elicitation' ? (
               <ElicitationCard
                 key={card.requestId}
                 card={card}
                 meta={toolMetas.get(card.toolId)}
                 busy={busy}
-                onRespond={onRespond}
+                onRespond={respondToAgent}
               />
             ) : (
               <ApprovalCard
@@ -254,10 +343,10 @@ export function AgentPauseCards({
                 card={card}
                 meta={toolMetas.get(card.toolId)}
                 busy={busy}
-                onRespond={onRespond}
+                onRespond={respondToAgent}
               />
-            ),
-          )
+            );
+          })
         )}
 
         {resolved ? (
