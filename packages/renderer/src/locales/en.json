@@ -541,6 +541,37 @@
         "actionAdd": "Add {{tool}} to the allowlist",
         "noCandidates": "Nothing left to allowlist (every approval-required action is already exempted)"
       },
+      "pause": {
+        "heading": "Waiting for you",
+        "pendingCount": "{{total}} ticket(s) waiting for you",
+        "hint": "Approval and supplements are pressed only by you: timeout = unconfirmed = not executed, and the entitlement gate and rate limits still apply",
+        "empty": "No ticket is waiting right now",
+        "step": "Step {{index}}",
+        "approvalHeading": "This step needs your approval",
+        "elicitationHeading": "This step is missing information",
+        "missing": "Fields still missing or invalid: {{fields}}",
+        "round": "Supplement round {{round}}",
+        "supplyPlaceholder": "Fill in what is missing (a raw JSON snippet works too)",
+        "timeoutNote": "When the deadline passes with no answer the ticket closes as unapproved - it never defaults to allowed",
+        "approve": "Approve",
+        "deny": "Deny",
+        "submit": "Submit",
+        "giveUp": "Give up",
+        "action": {
+          "approve": "approve this step",
+          "deny": "deny this step",
+          "supply": "submit the supplement"
+        },
+        "kind": {
+          "approval": "approval ticket",
+          "elicitation": "supplement ticket"
+        },
+        "outcome": {
+          "answered": "{{kind}} closed with your answer (round {{round}})",
+          "timed-out": "{{kind}} reached its deadline with no answer (round {{round}}); the step was closed as unapproved - a timeout is not approval",
+          "cancelled": "{{kind}} was closed because this task gave up (round {{round}}); nobody ever answered, so the step did not run"
+        }
+      },
       "tool": {
         "unregistered": "Unregistered tool",
         "labels": {
@@ -614,7 +645,10 @@
           "STEP_LIMIT": "hit the step cap",
           "TOKEN_LIMIT": "hit the token budget",
           "USER_STOPPED": "stopped by you",
-          "STEP_UNSUCCESSFUL": "a step did not succeed"
+          "STEP_UNSUCCESSFUL": "a step did not succeed",
+          "PAUSE_DENIED": "you denied this step on the card",
+          "PAUSE_TIMEOUT": "the wait reached its deadline with no answer, so it was not released",
+          "PAUSE_CANCELLED": "a stop or rebuild closed the waiting ticket; nobody ever answered"
         }
       }
     },

@@ -17,8 +17,8 @@
  *   `agent_policy_exempt` 两张表只在判定口被碰，而 `loop.ts` 连名单的名字都不出现——
  *   循环每一步只把工具 id 交给判定口，「这只手免不免确认」由判定口现读库。
  *   这一条防的是 5.3-04 那个风险换一副面孔重演：模型若能自己加白，它就又能给自己放宽了。
- * ⑦（5.3-c 加，spec 5.3-09）应答暂停单的路径也只有「人」那一条：`respond` 的定义处与 IPC 派发处之外
- *   不许有第三份文件提到它，`loop.ts` 里连 `respond(` 都不出现——循环只许开单等人，不许自己把单答了；
+ * ⑦（5.3-c 加，spec 5.3-09）应答暂停单的路径也只有「人」那一条：`respond` 的定义处、IPC 派发处、
+ *   界面上发送表态的那一份文件之外不许有第四份提到它，`loop.ts` 里连 `respond(` 都不出现——循环只许开单等人，不许自己把单答了；
  *   同时 `pause.ts` 不许 import 循环或判定口（与 ④ 同形）：通道一旦认识 run，就有了第二处判定现场。
  *   这一条防的是第三种形态：模型把「批准自己」写成一只手，「等人批准」就变成「等人被跳过」。
  *
@@ -224,15 +224,18 @@ if (['setExempt', 'clearExempt', 'exemptList', 'agent_policy_exempt'].some((need
   problems.push('loop.ts 里读得到免确认名单的名字——循环不该知道名单的存在，它只负责把每一步交给判定口');
 }
 
-// ⑦（5.3-c 加，spec 5.3-09）应答暂停单的口只有「人」那一条：定义处（pause.ts）与 IPC 白名单派发处（bridge.ts）。
-//    界面上那两颗按钮所在的组件在 5.3-c 的界面半边接上时要补进这份名单——**没补就是那条判据此刻不成立**。
+// ⑦（5.3-c 加，spec 5.3-09）应答暂停单的口只有「人」那一条：定义处（pause.ts）、IPC 白名单派发处（bridge.ts），
+//    以及界面上那四颗按钮把表态发出去的那一处（useAgentPause.ts）——5.3-c 的界面半边接上时补进了这份名单，
+//    名单里少了它就是那条判据此刻不成立。
 //    模型若能自己应答自己这一步的确认单，5.2-07 与 5.3-04 就一起作废：它只要把「批准」写成一只手，
 //    「等人批准」就变成了「等人被跳过」。
-//    搜的是这两个**具体形状**而不是裸词 `respond`：那一个词会命中「response」这类常见英文，
+//    搜的是这三个**具体形状**而不是裸词 `respond`：那一个词会命中「response」这类常见英文，
 //    判据就会因为一句注释而随机失败，而一条会误报的机检最后只会被关掉。
+//    `'pause.respond'` 是渲染层取桥接方法时用的键名（命名空间把 `agent.` 前缀提掉了），
+//    它不会命中 `'agent.pause.respond'`，所以三份文件各由一个形状抓到，谁也不会被漏掉。
 expectSingleWriter(
-  ['respond(requestIdRaw', "'agent.pause.respond'"],
-  ['packages/agent/src/loop/pause.ts', 'packages/shared/src/bridge.ts'],
+  ['respond(requestIdRaw', "'agent.pause.respond'", "'pause.respond'"],
+  ['packages/agent/src/loop/pause.ts', 'packages/shared/src/bridge.ts', 'packages/renderer/src/useAgentPause.ts'],
   '应答暂停单',
 );
 // 循环只能开单等人：它读到 `respond(` 就等于自己把单答了，那一张卡片从此只是给界面看的装饰。

@@ -541,6 +541,37 @@
         "actionAdd": "把 {{tool}} 加进免确认名单",
         "noCandidates": "没有待加白的动作（要批准的都已在名单里）"
       },
+      "pause": {
+        "heading": "等人表态",
+        "pendingCount": "{{total}} 张单在等你",
+        "hint": "批准与补充都由你按下：超时＝未确认＝不执行，额度闸门与频控照旧",
+        "empty": "当前没有在等人的单",
+        "step": "第 {{index}} 步",
+        "approvalHeading": "这一步要你先批准",
+        "elicitationHeading": "这一步还缺信息",
+        "missing": "还缺或不合契约的字段：{{fields}}",
+        "round": "第 {{round}} 轮补充",
+        "supplyPlaceholder": "把缺的信息补在这里（也可以原样贴一段 JSON）",
+        "timeoutNote": "到点无人表态就按未批准收掉，绝不默认放行",
+        "approve": "批准",
+        "deny": "拒绝",
+        "submit": "提交",
+        "giveUp": "放弃",
+        "action": {
+          "approve": "批准这一步",
+          "deny": "拒绝这一步",
+          "supply": "提交补充信息"
+        },
+        "kind": {
+          "approval": "确认单",
+          "elicitation": "补充信息单"
+        },
+        "outcome": {
+          "answered": "{{kind}}已按你的表态收掉（第 {{round}} 轮）",
+          "timed-out": "{{kind}}到点无人应答（第 {{round}} 轮），这一步已按未批准收掉——超时不等于批准",
+          "cancelled": "{{kind}}因这条任务让出而收掉（第 {{round}} 轮）：没人表过态，这一步没有执行"
+        }
+      },
       "tool": {
         "unregistered": "未登记的工具",
         "labels": {
@@ -614,7 +645,10 @@
           "STEP_LIMIT": "撞到步数上限",
           "TOKEN_LIMIT": "撞到 token 预算",
           "USER_STOPPED": "由人叫停",
-          "STEP_UNSUCCESSFUL": "有步骤没成功"
+          "STEP_UNSUCCESSFUL": "有步骤没成功",
+          "PAUSE_DENIED": "你在卡片上拒绝了这一步",
+          "PAUSE_TIMEOUT": "等人表态到点无人应答，未放行",
+          "PAUSE_CANCELLED": "叫停或重建时收掉了在等的单，没人表过态"
         }
       }
     },

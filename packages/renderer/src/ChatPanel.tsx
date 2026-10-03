@@ -17,9 +17,11 @@ import type {
   ChatToolPart,
   ToolDescriptorView,
 } from '@auto-cc/shared';
+import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
 import { ToolCard } from './ToolCard';
+import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
 import { useWorkflowRun } from './useWorkflowRun';
@@ -101,6 +103,8 @@ export function ChatPanel() {
   const { run } = useWorkflowRun();
   // agent 循环的进度独立于 chat 的忙碌态：跑任务的时候输入区照常能用（spec 5.2-12）。
   const agentRun = useAgentRun();
+  // 挂在人身上的那些单自成一条读数：它跟着 run 走，但按不按是人的手，不能被循环的忙碌态盖掉（spec 5.3-08）。
+  const agentPause = useAgentPause();
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
@@ -146,7 +150,7 @@ export function ChatPanel() {
   useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [snapshot, liveStream, agentRun.run]);
+  }, [snapshot, liveStream, agentRun.run, agentPause.pending]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
 
@@ -296,6 +300,16 @@ export function ChatPanel() {
                 onDismiss={agentRun.dismiss}
               />
             ) : null}
+            {/* 挂在人身上的单跟在计划卡后面（spec 5.3-08）：批准与补充信息都同属这一段对话流，
+                另开一条历史就没人能在同一屏里看到「这一步为什么停」和「它现在等谁」。 */}
+            <AgentPauseCards
+              cards={agentPause.pending}
+              resolved={agentPause.resolved}
+              toolMetas={toolMetas}
+              busy={agentPause.busy}
+              notice={agentPause.notice}
+              onRespond={(card, answer) => void agentPause.respond(card, answer)}
+            />
           </ul>
         )}
       </div>

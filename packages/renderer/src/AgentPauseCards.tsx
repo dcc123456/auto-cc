@@ -1,0 +1,286 @@
+/**
+ * 挂在人身上的那两张卡（spec 5.3-08 的界面半边）：`approval` 与 `elicitation` 形状不同，因为要问人的事不是一回事。
+ *
+ * 一张问「这一步可以动手吗」（是 / 否），一张问「这一步还缺哪些信息」（填一段 / 放弃 + 第几轮）。
+ * 组件自己不判「这一步要不要批准」、不数「缺哪几个字段」：那些都在 `agent.pause.pending()` 那份读数里
+ * 由主进程算好（AGENTS.md §2.5），`reason` / `missing` 是服务侧产出的人读原话，按内容显示、不进语言包
+ * （与 `AgentPlanStepView.intent` 同一条口径）。
+ *
+ * 卡片**由读数驱动**：事件只负责提醒去读（见 `useAgentPause`），所以刷新、错过的推送、
+ * 甚至表态之后的那张卡，走的都是同一条路——界面上不存在「以为还有卡片」的余地。
+ */
+import { Check, CircleAlert, Clock, ShieldQuestion, X } from 'lucide-react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { AgentPauseAnswer, AgentPauseView, ToolDescriptorView } from '@auto-cc/shared';
+import type { ResolvedPause } from './useAgentPause';
+
+/**
+ * 一张在等的单共有的抬头：工具名 + 副作用级 + 哪一步 + 单号。
+ * @param card 主进程给的那份读数
+ * @param meta 注册表读数（读不到时按未登记画，不猜名字）
+ * @returns 一行抬头（卡片自己不带外壳，两种卡共用这一段）
+ */
+function PauseHeader({ card, meta }: { card: AgentPauseView; meta: ToolDescriptorView | undefined }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+      <span className="font-medium text-slate-200">{t(meta?.titleKey ?? 'agent.tool.unregistered')}</span>
+      {/* 注册表读不到这只手时不猜副作用级：与 `AgentRunPanel` 里未登记那格用同一个读数（§2.5）。 */}
+      <span className="text-slate-400">
+        {t(meta ? `agent.tool.effect.${meta.effect}` : 'agent.run.effectUnregistered')}
+      </span>
+      <span className="text-slate-500" data-pause-step={String(card.planStepIndex)}>
+        {t('agent.pause.step', { index: card.planStepIndex + 1 })}
+      </span>
+      <span className="break-all font-mono text-[10px] text-slate-500" data-pause-tool-id={card.toolId}>
+        {card.toolId}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 确认单（`approval`）：能不能动手这一步，只有是 / 否两颗按钮。
+ * @param card 在等的这张单
+ * @param meta 注册表读数
+ * @param busy 正在执行的动作标签；非空时按钮禁用，防止同一张单被按两次
+ * @param onRespond 把表态交回上层（上层只负责发送，落库与放行都在主进程）
+ */
+function ApprovalCard({
+  card,
+  meta,
+  busy,
+  onRespond,
+}: {
+  card: AgentPauseView;
+  meta: ToolDescriptorView | undefined;
+  busy?: string;
+  onRespond: (card: AgentPauseView, answer: AgentPauseAnswer) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="agent-pause-approval"
+      data-pause-request-id={card.requestId}
+      data-pause-kind={card.kind}
+      data-pause-expires-at={String(card.expiresAt)}
+      className="mt-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2"
+    >
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-200">
+        <ShieldQuestion size={12} />
+        {t('agent.pause.approvalHeading')}
+      </p>
+      <PauseHeader card={card} meta={meta} />
+      {/* 判定口的原话是人唯一会读到的下一步指引，界面不复述、不改写。 */}
+      <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
+        {card.reason}
+      </p>
+      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+        <Clock size={10} />
+        {t('agent.pause.timeoutNote')}
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          data-action="pause-approve"
+          disabled={busy !== undefined}
+          onClick={() => onRespond(card, { decision: 'approve' })}
+          className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
+        >
+          <Check size={12} />
+          {t('agent.pause.approve')}
+        </button>
+        <button
+          type="button"
+          data-action="pause-deny"
+          disabled={busy !== undefined}
+          onClick={() => onRespond(card, { decision: 'deny' })}
+          className="flex items-center gap-1 rounded-md border border-rose-800 px-3 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
+        >
+          <X size={12} />
+          {t('agent.pause.deny')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 补充信息单（`elicitation`）：入参过不了工具自己声明的 schema，动手之前按契约问一句人。
+ *
+ * 文本域的内容只活在本组件里：它是**还没交出去的表态**，不是界面状态，交给主进程那一刻才算数（§2.5）。
+ * @param card 在等的这张单（`round` 是第几轮：上一轮补的没过校验才会再开一张新单）
+ * @param meta 注册表读数
+ * @param busy 正在执行的动作标签
+ * @param onRespond 把 `supply` / `deny` 交回上层
+ */
+function ElicitationCard({
+  card,
+  meta,
+  busy,
+  onRespond,
+}: {
+  card: AgentPauseView;
+  meta: ToolDescriptorView | undefined;
+  busy?: string;
+  onRespond: (card: AgentPauseView, answer: AgentPauseAnswer) => void;
+}) {
+  const { t } = useTranslation();
+  const [supplement, setSupplement] = useState('');
+  return (
+    <div
+      data-testid="agent-pause-elicitation"
+      data-pause-request-id={card.requestId}
+      data-pause-kind={card.kind}
+      data-pause-round={String(card.round)}
+      data-pause-missing={card.missing.join(',')}
+      data-pause-expires-at={String(card.expiresAt)}
+      className="mt-2 rounded-lg border border-sky-900/70 bg-sky-950/20 px-3 py-2"
+    >
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-sky-200">
+        <ShieldQuestion size={12} />
+        {t('agent.pause.elicitationHeading')}
+      </p>
+      <PauseHeader card={card} meta={meta} />
+      <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
+        {card.reason}
+      </p>
+      {/* 「还缺哪些字段」由工具的 strict schema 现报（`agent.tools.validateInput`），界面只列名字。 */}
+      <p className="mt-1 break-all text-[11px] text-slate-400">
+        {t('agent.pause.missing', { fields: card.missing.join('、') })}
+      </p>
+      <p className="mt-1 text-[10px] text-slate-500" data-pause-round-label={String(card.round)}>
+        {t('agent.pause.round', { round: card.round })}
+      </p>
+      <textarea
+        data-testid="agent-pause-supply-input"
+        rows={2}
+        value={supplement}
+        onChange={(event) => setSupplement(event.target.value)}
+        placeholder={t('agent.pause.supplyPlaceholder')}
+        className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-800"
+      />
+      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+        <Clock size={10} />
+        {t('agent.pause.timeoutNote')}
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          data-action="pause-supply"
+          disabled={busy !== undefined || supplement.trim() === ''}
+          onClick={() => onRespond(card, { decision: 'supply', text: supplement })}
+          className="flex items-center gap-1 rounded-md border border-sky-800 px-3 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+        >
+          <Check size={12} />
+          {t('agent.pause.submit')}
+        </button>
+        <button
+          type="button"
+          data-action="pause-deny"
+          disabled={busy !== undefined}
+          onClick={() => onRespond(card, { decision: 'deny' })}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <X size={12} />
+          {t('agent.pause.giveUp')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 暂停卡片带：把「此刻挂在人身上的每一步」画在对话流里，并留一行最近收掉的单的结局回报。
+ * @param cards 现读的在等清单（`agent.pause.pending()` 那份）；还没读到过时为 undefined
+ * @param resolved 最近收掉的一张与它的结局（5.3-10 的「回报超时」就落在这一行）
+ * @param toolMetas 注册表读数按 id 建的索引，抬头用它显示副作用分级与标题
+ * @param busy 正在执行的动作标签，非空时四颗按钮都禁用
+ * @param notice 动作提示行（失败原因留在界面上，截图才拿得到证据）
+ * @param onRespond 一句表态 + 那张单，交回 `useAgentPause` 发送
+ * @returns 一条插在对话流末尾的 `<li>`；没有在等的单、也没有可回报的结局时不画任何东西
+ */
+export function AgentPauseCards({
+  cards,
+  resolved,
+  toolMetas,
+  busy,
+  notice,
+  onRespond,
+}: {
+  cards: AgentPauseView[] | undefined;
+  resolved: ResolvedPause | undefined;
+  toolMetas: Map<string, ToolDescriptorView>;
+  busy?: string;
+  notice?: string;
+  onRespond: (card: AgentPauseView, answer: AgentPauseAnswer) => void;
+}) {
+  const { t } = useTranslation();
+  const count = cards?.length ?? 0;
+  if (count === 0 && !resolved && !notice) return null;
+  return (
+    <li
+      data-testid="agent-pause-band"
+      data-pause-count={String(count)}
+      className="rounded-xl border border-slate-700 bg-slate-900/80"
+    >
+      <header className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+        <ShieldQuestion size={14} />
+        <h3 className="text-xs font-semibold text-slate-200">{t('agent.pause.heading')}</h3>
+        <span className="text-[10px] text-slate-400" data-pause-pending-count={String(count)}>
+          {t('agent.pause.pendingCount', { total: count })}
+        </span>
+        <span className="ml-auto text-[10px] text-slate-500">{t('agent.pause.hint')}</span>
+      </header>
+      <div className="px-3 pb-2">
+        {count === 0 ? (
+          <p className="mt-2 text-[11px] text-slate-500" data-testid="agent-pause-empty">
+            {t('agent.pause.empty')}
+          </p>
+        ) : (
+          cards?.map((card) =>
+            card.kind === 'elicitation' ? (
+              <ElicitationCard
+                key={card.requestId}
+                card={card}
+                meta={toolMetas.get(card.toolId)}
+                busy={busy}
+                onRespond={onRespond}
+              />
+            ) : (
+              <ApprovalCard
+                key={card.requestId}
+                card={card}
+                meta={toolMetas.get(card.toolId)}
+                busy={busy}
+                onRespond={onRespond}
+              />
+            ),
+          )
+        )}
+
+        {resolved ? (
+          <p
+            className="mt-2 flex items-start gap-1 text-[11px] text-slate-400"
+            data-testid="agent-pause-resolved"
+            data-pause-resolved-outcome={resolved.outcome}
+            data-pause-resolved-request-id={resolved.card.requestId}
+          >
+            <CircleAlert size={11} className="mt-0.5 shrink-0" />
+            {t(`agent.pause.outcome.${resolved.outcome}`, {
+              kind: t(`agent.pause.kind.${resolved.card.kind}`),
+              round: String(resolved.card.round),
+            })}
+          </p>
+        ) : null}
+
+        {notice ? (
+          <p className="mt-2 text-[11px] text-slate-300" data-testid="agent-pause-notice">
+            {notice}
+          </p>
+        ) : null}
+      </div>
+    </li>
+  );
+}
