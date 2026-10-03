@@ -18,6 +18,7 @@ import type {
   GreetChannelSource,
   PagePacer,
   ResumeChannelSource,
+  TakeoverStateSource,
   WorkflowExecutorRegistry,
 } from './events.js';
 
@@ -224,6 +225,20 @@ export function pagePacerOf(ctx: Context): PagePacer {
  */
 export function consentGateOf(ctx: Context): ConsentGate {
   return ctx.get('sessions') as ConsentGate;
+}
+
+/**
+ * 取人工接管态的询问面（spec 5.5-02），实现方是 `browser.takeover`。
+ *
+ * 与 `pagePacerOf` / `consentGateOf` 同一条理由做**硬依赖**（不返回 undefined）：要把它的是判定口
+ * 与循环，两者都把 `browser.takeover` 写进了 `static inject`，装配没满足时它们根本不会 init。
+ * 做成「拿不到就当没在接管」的软降级恰好是这条护栏要防的那件事——**接管态未知就照动手**，
+ * 于是 5.5-02 判的「接管期间 agent 不发出任何动作」会在摘掉一个插件之后静默失效。
+ * @param ctx 调用方的上下文
+ * @returns 接管态的窄询问面（只有 `held()`，没有 begin / end：解除是人的手，见 `TakeoverStateSource`）
+ */
+export function takeoverStateOf(ctx: Context): TakeoverStateSource {
+  return ctx.get('browser.takeover') as TakeoverStateSource;
 }
 
 /**

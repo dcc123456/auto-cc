@@ -75,6 +75,11 @@ export interface RiskSignalEvent {
 }
 
 /**
+ * 接管态的类型（spec 5.5-01 / 02 / 09）住在下面 `TakeoverReason` 那一节，
+ * 与 `WorkflowTakeoverView` 相邻——那里是唯一的一份，这里不再另起一张。
+ */
+
+/**
  * 步骤槽位的 id。
  *
  * 2.4 起它是**计划里的节点 id**（`WorkflowNodeSpec.id`），不再是固定的一份六步清单：
@@ -134,6 +139,115 @@ export type WorkflowTakeoverView = {
   /** 记下接管的时间戳（毫秒）。 */
   at: number;
 };
+
+/**
+ * 接管态的原因（spec 5.5-07）：哪一件事把页面交回给人手的。
+ *
+ * 三个值各有主人：`manual` 是人在界面上按「我来接手」（`actor` 为 `user`，5.5-01）；
+ * `risk` 与 `session-expired` 由 `browser.takeover` 自己订阅那两条既有信号写下（`actor` 为 `system`，
+ * 5.5-07）——**验证码也在 `risk` 里**，因为本项目的验证码判据就是风控文案那一条（2.7-c 的 `riskPattern`），
+ * 不需要第二条通道。
+ * 与 `WorkflowTakeoverReason` 是两份枚举而不是同一份：那一份描述的是工作流某一格的接管点
+ * （含 `unobserved-side-effect`、`manual-takeover` 这种只有节点执行器才有的判据），这一份描述的是
+ * **整块页面当前在谁手里**，两者共用会让「agent 这一路根本没有节点」这件事在类型上被抹平
+ * （plan §7.3 决策 1），也会让这一份里出现没有写点的死值（AGENTS.md §2.4）。
+ */
+export type TakeoverReason = 'manual' | 'risk' | 'session-expired';
+
+/** 这次接管由谁写下（5.5-09 的「谁在何时动了页面」里的「谁」）。 */
+export type TakeoverActor = 'user' | 'system';
+
+/** 接管事件表里的行类型：只有 `begin` / `end` 两种，一次接管一对。 */
+export type TakeoverEventKind = 'begin' | 'end';
+
+/**
+ * 接管态的当前读数（spec 5.5-01 / 02 的唯一状态源对外形状）。
+ *
+ * 为什么在 core：它是 `browser/takeover-changed` 的载荷，而事件声明与跨进程视图只住在 L0
+ * （`WorkflowTakeoverView`、`AgentRunView` 同处——渲染层不许 import 领域包，AGENTS.md §4.1）。
+ * `beginCount` / `endCount` 是**这轮进程内**的次数，跨重启的账在 `takeover_events` 表里（号段 21）：
+ * 视图要的是「现在屏上该写什么」，表要的是「谁在何时动过」，把两者拧成一份就会既读不清也审不明。
+ */
+export type TakeoverStateView = {
+  /** 页面当前是否在人手里。 */
+  isHeld: boolean;
+  /** 因何接管；未接管时为 null。 */
+  reason: TakeoverReason | null;
+  /** 这轮接管开始的毫秒时刻；未接管时为 null（界面按它算「已经接管多久」）。 */
+  startedAt: number | null;
+  /** 本进程内成功进入接管的次数（幂等的连发不计数，见 `begin` 的注释）。 */
+  beginCount: number;
+  /** 本进程内成功解除接管的次数；与 `beginCount` 相等就是「此刻没有在途接管」。 */
+  endCount: number;
+};
+
+/**
+ * 发起一次接管的入参（spec 5.5-01）。
+ *
+ * 形状住在 L0 而不是浏览器包里：它是 `browser.takeover.begin` 的**跨进程入参**，而桥接契约只许
+ * import core 的类型（`@auto-cc/shared` 与渲染层都不该认识领域包，AGENTS.md §4.1）。
+ * `actor` 必填而不是缺省：谁写下这次接管是审计里那个「谁」（5.5-09），让调用点漏一个字段就变成猜测。
+ */
+export type TakeoverBeginInput = {
+  /** 接管原因（形状见 `TakeoverReason`）。 */
+  reason: TakeoverReason;
+  /** 触发它的 run；不属于任何 run（人在页面上直接动手）时为 null 或省略。 */
+  runId?: string | null;
+  /** 停在哪个节点上；没有节点归属时省略。 */
+  nodeId?: string | null;
+  /** 这次表态来自人的手还是系统的观测。 */
+  actor: TakeoverActor;
+};
+
+/**
+ * 解除一次接管的入参（spec 5.5-01 / 09）：只用来把 `end` 行对上它结束的那一轮 `begin`。
+ *
+ * `actor` **省略按 `user` 记**——缺省是 user 不是猜测，而是 5.5 的口径本身：解除接管在 spec 里只有
+ * 人的手（plan §7.3 决策 3「恢复是人的手」，系统自动解除就是把接管态变成建议态）。所以要走系统那一条
+ * 必须显式写 `system`，于是审计里出现 `system` 的 end 行时，它指的一定是真有一条自动通道解除了接管。
+ */
+export type TakeoverEndInput = {
+  /** 被解除的那轮接管所属的 run。 */
+  runId?: string | null;
+  /** 被解除的那轮接管停在的节点。 */
+  nodeId?: string | null;
+  /** 谁解除的；省略按 `user` 记，理由见类型头的注释。 */
+  actor?: TakeoverActor;
+};
+
+/**
+ * 一条接管审计行（spec 5.5-09）。
+ *
+ * `runId` / `nodeId` 可空：手动接管与循环停住都不隶属某一格，硬塞一个占位值会让审计把
+ * 「不知道是谁的」读成「是那条 run 的」。
+ */
+export type TakeoverAuditRow = {
+  id: number;
+  kind: TakeoverEventKind;
+  reason: TakeoverReason | null;
+  actor: TakeoverActor | null;
+  runId: string | null;
+  nodeId: string | null;
+  /** 这条事件写下的毫秒时刻。 */
+  createdAt: number;
+};
+
+/**
+ * 接管态的询问面（spec 5.5-02 的读路），实现方是 `browser.takeover`。
+ *
+ * 为什么形状声明在 L0：要用它的是判定口与循环（L3 对话层），而接管的事实归属是浏览器层（L2）。
+ * agent 层 import 浏览器包会被 eslint 的 `AGENT_CAPABILITY` 直接拦掉（spec 5.1-08：那等于给 agent
+ * 一条绕过注册表的路），所以 core 只声明「现问一次接管态」这一口，由实现方结构上满足——
+ * 与 `PagePacer` / `ConsentGate` 同一套路。**只有读、没有 `begin` / `end`**：解除接管是人的手
+ * （plan §7.3 决策 3），判定口与循环都不许自己把接管摘掉。
+ */
+export interface TakeoverStateSource {
+  /**
+   * 现读接管态。
+   * @returns 当前读数；不抛异常，也不返回「上一次问的时候是什么」——接管态只能现问（AGENTS.md §9 的 2.5 实测条）
+   */
+  held(): TakeoverStateView;
+}
 
 /**
  * 一次 run 的完整可序列化状态（spec 1.10-03 / 1.10-05）。
@@ -1282,6 +1396,15 @@ declare module 'cordis' {
      * 于是「暂停」只需要在一处订阅（plan §14.3 第 1 条），而界面只拿到判定数据、自己组句子。
      */
     'browser/risk-signal'(event: RiskSignalEvent): void;
+    /**
+     * 页面「在谁手里」这件事发生变化时由 `browser.takeover` 发出（spec 5.5-01 / 02 / 09）。
+     *
+     * 载荷就是 `held()` 的那份读数、不另包一层：界面、判定口、循环读的是同一个形状，
+     * 包一层就得在渲染层再推一次「现在到底谁在操作」，那是 §2.7 禁的第二份事实。
+     * 幂等的那两次调用**不发**这一条（`begin` / `end` 的注释写着为什么），所以订阅方不会因为
+     * 风控信号连发而被叫醒第三次。
+     */
+    'browser/takeover-changed'(event: TakeoverStateView): void;
     /**
      * 内嵌内核视图的主文档加载失败时由 `shell` 发出（spec 1.8-09）。
      * 界面不能靠轮询 `shell.getStatus` 看到它：`sessions.open` 先返回、失败事件后到，

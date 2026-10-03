@@ -38,6 +38,9 @@ export type AppErrorCode =
   // 两者界面表现不同——前者是「你给的地址不让去」，后者是「先点开门」，所以不合并成一个码。
   | 'NAVIGATE_URL_REJECTED'
   | 'NO_KERNEL_SESSION'
+  // 人工接管（spec 5.5-01）：界面上那只「我来接手」收的是一句人写的理由，超长就结构化失败，
+  // 不静默截断——截断等于把人写的话改成我们想听的样子，而这句话是审计里那条接管的原文。
+  | 'TAKEOVER_REASON_TOO_LONG'
   // 注入脚本本身在页面里抛了（页面被销毁、脚本被 CSP 拦下），与「读到了但内容为空」是两回事。
   | 'PAGE_SCRIPT_FAILED'
   // 内核视图取像素失败（spec 2.4-04 的失败截图）：`capturePage()` 抛错与回了一张空图共用一个码，
@@ -98,6 +101,13 @@ export type AppErrorCode =
   | 'AGENT_LOOP_GOAL_TOO_LONG'
   | 'AGENT_LOOP_RUN_NOT_FOUND'
   | 'AGENT_LOOP_NOT_PROPOSED'
+  // 恢复口（spec 5.5-01 / 02）：只有「因接管而停住」的 run 能被「继续」再跑起来。
+  // 与 `AGENT_LOOP_NOT_PROPOSED` 分开，是因为界面上那两只按钮属于两种态——按错了要说的是
+  // 「这条 run 不是被接管按住的」（去做另一件事），而不是「这张计划卡还没确认」。
+  | 'AGENT_LOOP_NOT_RESUMABLE'
+  // 恢复口按下去时页面**还在接管中**（spec 5.5-01）：这不是「按错了别的路」，而是「那一双手还没离开页面」。
+  // 与上面那条分开，是因为界面上的处置完全不同——这条要把「交还页面」那只按钮指给他，而不是让他去改档位。
+  | 'AGENT_LOOP_TAKEOVER_HELD'
   | 'AGENT_LOOP_STATUS_INVALID'
   // 免确认白名单（spec 5.3-06 / 07）：只在开放面上的动作才能加白。单独一个码而不是复用 `TOOL_UNAVAILABLE`
   // 那类判定读数，是因为这条走的是**写入口**——界面上的处置是「名单一行都不动 + 说明这只手不在开放面上」，
