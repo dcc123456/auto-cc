@@ -1550,3 +1550,86 @@ describe('页面与声明不符时重新规划这一步（spec 5.5-04）', () =>
     expect(rig.calls).toEqual(['drift:1', 'tick:2']);
   });
 });
+
+describe('进程停过一次之后的对账与不重放（spec 5.5-05 的 run 半边 / 5.5-06）', () => {
+  /**
+   * 起一条「前两步已跑完、第三步正卡在工具里」的 run，随后把旧的循环实例卸掉——崩在一步中途的形状。
+   *
+   * 为什么用门后的工具而不是暂停单来摆这个形状：卸载循环服务时它自己的回收器会 abort 全部作用域，
+   * 那张开着的单立刻以 `cancelled` 定局，旧实例顺手把 `PAUSE_CANCELLED` 写回 run 行（文件头第 5 条），
+   * 于是拿不到「一行写着正在跑而没人持有」；而门后的那一步**不接** abort 信号——叫停的语义就是不硬切——
+   * 所以库里那一行留在 `running`，正是进程被 kill 那一刻留下的样子。
+   *
+   * 那只门到用例结束都不打开，`confirm` 那条 Promise 也就永远不落地：这与「不去 await 它」是同一个意思
+   * （5.5-d 的 `void ask` 那条口径）。真·崩掉时它随进程一起没了；同进程里让它醒来只会撞上已失效的上下文
+   * （`cannot get required service "store" in inactive context`），那是 cordis 的重建语义，不是这里要判的东西。
+   * @returns 台架与那条 run 的 id（那只门只活在助手内部：它的用途是「确认已经进到第三步的工具里」）
+   */
+  async function bootRunStuckMidStep() {
+    const rig = await bootLoop();
+    const gate = makeGate();
+    rig.tools.register({
+      id: 'demo.gated',
+      titleKey: 'agent.tool.labels.demoGated',
+      description: '进实现即通知测试，等放行才回',
+      input: z.strictObject({ n: z.number().int().min(0) }),
+      effect: 'read',
+      requiresConfirmation: false,
+      run: (params) => {
+        gate.entered();
+        return gate.releaseAfter(() => toolResult({ n: params.n }, { summary: `门后执行第 ${String(params.n)} 次` }));
+      },
+    });
+    const proposed = await rig.loop.propose('demo.tick {"n":1} 然后 demo.tick {"n":2} 然后 demo.gated {"n":3}');
+    // 故意不 await 这一次确认：它要停在「第三步还压在工具里」的样子，才是进程被 kill 那一刻留下的形状。
+    void rig.loop.confirm(proposed.runId);
+    await gate.enteredPromise;
+    // 「进程没了」由用例自己在断言完起手形态之后按下：卸载旧实例等于它那一下（作用域表随之清空，
+    // 再没有谁会来写这一行的终态），但先把库里那行 `running` 看一眼才知道对账改的是什么。
+    return { rig, runId: proposed.runId };
+  }
+
+  it('重新挂载时库里那行「正在跑」落成 paused + INTERRUPTED，已跑完的两步一次都没重放', async () => {
+    const { rig, runId } = await bootRunStuckMidStep();
+    expect(rig.loop.read(runId)).toMatchObject({ status: 'running', planStepIndex: 2 });
+    expect(rig.calls).toEqual(['tick:1', 'tick:2']);
+    // 卡住的那一步留着一行 `pending`：那一位的用途就是「崩了之后重读看得见进度」（`AGENT_STEP_STATUSES` 的文件头）。
+    expect(stepRecords(rig.store, runId).map((row) => [Number(row.plan_step_index), row.status])).toEqual([
+      [0, 'ok'],
+      [1, 'ok'],
+      [2, 'pending'],
+    ]);
+
+    // 重建服务走的就是热改配置那一条路：同名服务不许注册两次，先卸旧的再挂新的（AGENTS.md §9 的 2.5 实测）。
+    await rig.loopFiber.dispose();
+    const revived = await remountLoop(rig.ctx, {});
+    expect(revived.read(runId)).toMatchObject({ status: 'paused', stopReason: 'INTERRUPTED', planStepIndex: 2 });
+    // 5.5-06 的判据就落在这两行上：新实例把进度从库里读回来，而不是从头再跑一遍。
+    expect(rig.calls).toEqual(['tick:1', 'tick:2']);
+    expect(stepRecords(rig.store, runId).map((row) => row.status)).toEqual(['ok', 'ok', 'pending']);
+    // 上面两行合起来就是「不重放也不跳过」：游标停在 2、那一步仍是 `pending`，等的是人的显式表态，不是自动续跑。
+  });
+
+  it('中断位不是接管位：对账之后的 run 按「继续」被拒，不会替人重跑崩掉那一刻的动作', async () => {
+    const { rig, runId } = await bootRunStuckMidStep();
+    await rig.loopFiber.dispose();
+    const revived = await remountLoop(rig.ctx, {});
+    // `resume` 只认 `TAKEOVER_HELD`：那条口的前提是「人刚刚在页面上弄完了」，而这条 run 谁也没看过。
+    // 把两种停混成一位，就等于给「重启后按继续」开了一只自动重跑的手（plan D3 特意分开的正是这一位）。
+    await expect(revived.resume(runId)).rejects.toMatchObject({ code: 'AGENT_LOOP_NOT_RESUMABLE' });
+    expect(rig.calls).toEqual(['tick:1', 'tick:2']);
+    // 被拒之后读数一字不变：既不谎报「已经恢复了」，也不改掉中断位让人去猜它到底怎么停的。
+    expect(revived.read(runId)).toMatchObject({ status: 'paused', stopReason: 'INTERRUPTED' });
+  });
+
+  it('干净跑完的 run 重新挂载后照旧是 completed：对账只管那一行「正在跑」', async () => {
+    const { ctx, loop, loopFiber, calls } = await bootLoop();
+    const finished = await loop.confirm((await loop.propose(goalNaming(2))).runId);
+    expect(finished).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    await loopFiber.dispose();
+    const revived = await remountLoop(ctx, {});
+    // 反向半边：判据是「上次进程死过」而不是「库里有任何一条 run」，终态行一条都不该被改写。
+    expect(revived.read(finished.runId)).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    expect(calls).toEqual(['tick:1', 'tick:2']);
+  });
+});

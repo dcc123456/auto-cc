@@ -1,7 +1,7 @@
 /**
  * `agent.loop`：一次任务的「规划 → 执行 → 观察 → 续推」循环（spec 5.2-01 / 02 / 05 / 08 / 11）。
  *
- * 五条硬规矩长在结构里，不是长在注释里：
+ * 硬规矩长在结构里，不是长在注释里（编号按落片顺序追加）：
  * 1. **每一步都问 `agent.policy`**（5.2-02）：循环里只有「判闸门 → 调工具」这一条顺序，
  *    没有旁路——`registry.call` 只在 `decide()` 放行之后出现，读这段代码时一眼能对上。
  * 2. **模型没有裁量口**（5.2-07，判定在 5.2-b 演）：`LoopModel` 只有起草与摘要两条口，
@@ -40,6 +40,11 @@
  *    会把 5.5-b 已经验过的那条恢复路径拒成「重读页面失败」（那是自造的失效，不是 spec 要的保险）。
  *    同一次重读也用在「页面与声明不符」那一条（5.5-04）：那一格落空后先重读、再让模型带着新读数
  *    续推；续推给出的**还是同一只手**时不重跑（那叫硬点），停在安全点把原因说清。
+ * 8. **进程停过一次就重新对账**（5.5-d / spec 5.5-05 的 run 半边）：挂在暂停单上的那几步里状态一直是
+ *    `running`（第 5 条），所以崩一次之后库里留下的是一行「正在跑」——它既不在跑，也没被任何人事先停过。
+ *    `[Service.init]` 把这样的行落成 `paused` + `stopReason = INTERRUPTED`：与 `TAKEOVER_HELD` **分开**，
+ *    因为 `resume` 只认后者；混用就成了「重启后按继续＝替人重跑崩溃那一刻的动作」。这条 run 的续跑口
+ *    不在本片（崩溃后自动续推没有判据要它），这里只保证读数是真的、界面有对应文案，不谎报完成。
  */
 import {
   AGENT_RUN_STATUSES,
@@ -79,6 +84,17 @@ export const AGENT_RUN_MIGRATION_VERSION = 16;
  * `agent_step.code` 与 `agent_run.stop_reason` 的那串字符，判定读数的类型改名不该牵动已落库的历史值。
  */
 const TAKEOVER_HELD = 'TAKEOVER_HELD';
+
+/**
+ * 「这条 run 所在的进程停过一次」的对账位（spec 5.5-05 的 run 半边，plan 5.5-d 的 D3）。
+ *
+ * 必须与 `TAKEOVER_HELD` 分开：`resume` 只认后者。混为一谈就是把「重启后按继续」变成「替人重跑崩溃
+ * 那一刻的动作」——那正是 5.5 整片反对的那只手（崩溃后的续跑没有判据要它，见 plan「5.5-d 不做的事」）。
+ * 与 workflow 那侧同一条口径：`workflow.run_store.markInterrupted` 用落库侧专有的 `interrupted` 状态，
+ * 这里 `AGENT_RUN_STATUSES` 不动，中断只作为「它为什么停在 paused 上」的原因出现——两种形态说的是同一件事，
+ * 而界面不需要为它新增一态（§2.5 一件事一个入口，§2.3 扩展现有读数而不是再造一维）。
+ */
+const INTERRUPTED = 'INTERRUPTED';
 
 /** 一条观察摘要里最多留多少个字（5.2-06 的「只带摘要」：整段工具正文不进 prompt）。 */
 const OBSERVATION_TEXT_CAP = 80;
@@ -628,9 +644,41 @@ export class AgentLoopService extends Service {
       }
     });
     this.ensureSchema();
+    // 崩过一次的对账排在建表之后、就绪日志之前：那一刻库里那行「正在跑」已经不会再有人来写终态了（D3）。
+    const interrupted = this.reconcileInterruptedRuns();
     this.ctx.logger.info(
-      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型腿 确定性桩`,
+      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型腿 确定性桩` +
+        (interrupted > 0 ? ` · 本次启动把 ${String(interrupted)} 条 run 判为中断（上次进程停过，不是有人叫的停）` : ''),
     );
+  }
+
+  /**
+   * 启动对账：把库里写着「正在跑」的 run 落成 `paused` + `INTERRUPTED`（spec 5.5-05 的 run 半边 / plan D3）。
+   *
+   * 为什么这里不必再问「有没有在跑的 execute」：本实例的作用域表在 `[Service.init]` 这一刻必然是空的，
+   * 而 `running` 只有 `confirm` / `resume` 在同一进程内才写得出来——所以库里那一行「正在跑」背后已经没有人
+   * 会再来写它的终态。真·被 kill 是那一种；同进程内热改配置重建也走到同一位，因为回收器 abort 之后那一步
+   * 若还压在不可硬切的工具里（第 3 条叫停的语义），它醒来时旧实例的上下文已经失效，那一行没人能改写。
+   * 留着不判，界面就长期显示一行假账，违反 §7.1「读数是真的」。挂在确认单上的那一步尤其如此：
+   * 那期间循环整条 `await` 在人的表态上，状态一直是 `running`（plan 现状 3 实测）。
+   * @returns 被判定为中断的 run 条数；0 表示干净退出（终态都已落）或这台库里没跑过东西
+   */
+  private reconcileInterruptedRuns(): number {
+    // 游标与 token 账按原值写回：`updateRun` 是这条 run 行唯一的写入口（§2.5），
+    // 中断改的是「为什么停」，不是「停在哪」——进度属于那条 run 自己，不在这段对账的职权里。
+    const rows = this.store.db
+      .prepare("SELECT id, plan_step_index, tokens_used FROM agent_run WHERE status = 'running'")
+      .all() as unknown as { id: string; plan_step_index: number | bigint; tokens_used: number | bigint }[];
+    for (const row of rows) {
+      this.updateRun(row.id, {
+        status: 'paused',
+        planStepIndex: Number(row.plan_step_index),
+        tokensUsed: Number(row.tokens_used),
+        stopReason: INTERRUPTED,
+      });
+      this.publish(row.id);
+    }
+    return rows.length;
   }
 
   /** 幂等登记号段 16 并建表（`plugins.start('agent-loop')` 会重跑 init）。 */
