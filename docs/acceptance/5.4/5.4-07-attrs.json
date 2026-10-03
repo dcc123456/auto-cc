@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-03T07:21:18.852Z",
+  "chat": {
+    "card": {
+      "runId": "b60ca68c-ea15-4205-a116-8ff8581d73b4",
+      "status": "running",
+      "step": "2",
+      "total": "2",
+      "text": "工作流进度运行中第 2 / 2 步播报的那一步：node-2同一 run b60ca68c-ea15-4205-a116-8ff8581d73b4最近播报：开始 node-2"
+    },
+    "mirror": "同一个 runner：运行中",
+    "panelRunId": "b60ca68c-ea15-4205-a116-8ff8581d73b4",
+    "panelState": "运行中 · b60ca68c-ea15-4205-a116-8ff8581d73b4",
+    "panelSteps": [
+      "node-1:done",
+      "node-2:running"
+    ],
+    "panelLive": "最近播报：开始 node-2"
+  },
+  "panel": {
+    "card": {
+      "runId": "b60ca68c-ea15-4205-a116-8ff8581d73b4",
+      "status": "running",
+      "step": "2",
+      "total": "2",
+      "text": "工作流进度运行中第 2 / 2 步播报的那一步：node-2同一 run b60ca68c-ea15-4205-a116-8ff8581d73b4最近播报：开始 node-2"
+    },
+    "mirror": "同一个 runner：运行中",
+    "panelRunId": "b60ca68c-ea15-4205-a116-8ff8581d73b4",
+    "panelState": "运行中 · b60ca68c-ea15-4205-a116-8ff8581d73b4",
+    "panelSteps": [
+      "node-1:done",
+      "node-2:running"
+    ],
+    "panelLive": "最近播报：开始 node-2"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "spec": "5.4-09",
+  "at": "2026-10-03T15:21:00+08:00",
+  "agentRunId": "f2e38c78-5441-4ed9-84f7-4dd92a212d7f",
+  "agentRunStatus": "completed",
+  "goal": "jd.capture.run {\"criteria\":{\"keyword\":\"前端\",\"city\":\"上海\",\"limit\":2}} outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"1011\",\"text\":\"你好，我对贵司上海的前端岗位很感兴趣，方便聊聊吗\"}}",
+  "chatSide": {
+    "planStepIndexes": [0, 1],
+    "planToolIds": ["jd.capture.run", "outbound.greet.perform"],
+    "executedRows": [
+      { "planStepIndex": 0, "toolId": "jd.capture.run", "status": "ok" },
+      { "planStepIndex": 1, "toolId": "outbound.greet.perform", "status": "ok" }
+    ],
+    "executedBadges": ["0", "1"],
+    "toolCardsInsideRunPanel": ["jd.capture.run", "outbound.greet.perform"]
+  },
+  "sedimentPreview": {
+    "verdict": "这一段 2 步全部跑通，可以沉淀",
+    "stepCount": 2,
+    "steps": [
+      {
+        "sedimentStep": "0",
+        "toolId": "jd.capture.run",
+        "nodeKind": "jd.capture",
+        "params": "变量 query = 前端 / 变量 city = 上海 / 变量 target = 2"
+      },
+      {
+        "sedimentStep": "1",
+        "toolId": "outbound.greet.perform",
+        "nodeKind": "greeting.send",
+        "params": "残留值 platform = boss / 残留值 job = 1011 / 残留值 text = 你好，我对贵司上海的前端岗位很感兴趣，方便聊聊吗"
+      }
+    ]
+  },
+  "savedPlan": {
+    "id": "plan-93b506f9e64c",
+    "name": "搜上海前端打招呼 1011",
+    "nodeCount": 2,
+    "savedLine": "已存为计划 搜上海前端打招呼 1011（2 个节点）"
+  },
+  "panelRunOfSavedPlan": {
+    "runId": "b60ca68c-ea15-4205-a116-8ff8581d73b4",
+    "status": "done",
+    "stepRows": ["node-1:done", "node-2:done"],
+    "chatRunCard": "工作流进度 已完成 第 2 / 2 步 播报的那一步：node-2 同一 run b60ca68c-… 最近播报：node-2 完成"
+  },
+  "comparison": {
+    "对话里的已执行步卡片": 2,
+    "沉淀预览的格子": 2,
+    "存出的计划节点数": 2,
+    "面板里该计划跑起来的步行": 2,
+    "结论": "四处一一对应：导出计划里没有一步是对话里没发生过的（预览格子与计划节点都只跟着 agent_step 的步行长），也没有一步在对话里找不到对应卡片"
+  }
+}
