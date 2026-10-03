@@ -42,6 +42,7 @@ import {
   chatConfigSchema,
   type AgentTool,
 } from '@auto-cc/plugin-agent';
+import { BrowserTakeoverService } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -144,6 +145,9 @@ async function boot(workflow: WorkflowMount = 'full') {
   };
   await mount(ctx.plugin(ConfigService, { appName: 'auto-cc', paths: { userDataDir: dir } }));
   await mount(ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 5.5-a 起接管态是判定口与循环的硬依赖（不挂它就整个不挂载），所以这里挂装配里真有的那一份；
+  // 三种 `workflow` 挂载层级都留着它——本片判的是「工作流侧缺谁」，接管态与那一维无关。
+  await mount(ctx.plugin(BrowserTakeoverService, {}));
   await mount(ctx.plugin(AgentToolsService, {}));
   await mount(ctx.plugin(ChatSessionService, chatConfigSchema.parse({})));
   await mount(ctx.plugin(AgentPolicyService, {}));

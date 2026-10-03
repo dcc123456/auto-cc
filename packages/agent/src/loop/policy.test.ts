@@ -12,17 +12,21 @@
  * **名单为空**时的档位语义，也就是用户从没动过名单时的默认行为），而是单独一组用例钉
  * 「只有 `auto` 档 + 只有加过白的那一只」这两个「只有」——越界的格子必须仍是要确认。
  *
+ * 5.5-a 起判定口前面还有一道**与这三个自由度无关**的闸：页面在人手里时 18 格一律改判
+ * `TAKEOVER_HELD`（spec 5.5-02）。它同样另开一组用例，18 格表因此继续只表达档位语义本身。
+ *
  * 全程打本地假工具，不碰真实招聘平台也不出网（AGENTS.md §7.2）。
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { asApp, Context, toolResult, type AutonomyLevel, type ToolEffect } from '@auto-cc/core';
+import { asApp, Context, fiberState, type AutonomyLevel, type Fiber, type ToolEffect, toolResult } from '@auto-cc/core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AgentToolsService, type AgentTool } from '../tools.js';
+import { FakeTakeoverService } from '../test-doubles.js';
 import { AGENT_POLICY_MIGRATION_VERSION, AgentPolicyService, type PolicyCode } from './policy.js';
 
 /** 拆卸清单与临时库目录（每个用例一套注册表 + 判定口 + 一份库，跑完即拆即删）。 */
@@ -38,9 +42,10 @@ afterEach(async () => {
  * 装一套 store + 注册表 + 判定口，并把六只合成手登记进去（三种副作用级 × 要不要批准）。
  *
  * store 是 5.3-b 加上的：免确认名单与它的审计两张表（号段 18）落在库里，判定口要读的就是这张表。
+ * @param withTakeover 是否供上接管态替身（省略为 true；传 false 就是「摘掉 browser-takeover 那一行装配」）
  * @returns 上下文、注册表句柄、判定口、store 句柄、判定口的 fiber（老库重挂那条用例要拆了再装）
  */
-async function bootPolicy() {
+async function bootPolicy(withTakeover = true) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-policy-'));
   dirs.push(dir);
   const ctx = new Context();
@@ -49,16 +54,33 @@ async function bootPolicy() {
   await storeFiber;
   const toolsFiber = ctx.plugin(AgentToolsService, {});
   await toolsFiber;
+  // 5.5-a：判定口把接管态写成**硬依赖**——读不到还照动手，等于「接管期间一步都不发」这条护栏
+  // 在少一行装配之后静默失效。台架因此必须先供上这份替身（它也用于「闸门缺席 → 服务不挂载」那条）。
+  const fibers: Fiber[] = [storeFiber, toolsFiber];
+  if (withTakeover) {
+    const takeoverFiber = ctx.plugin(FakeTakeoverService, {});
+    await takeoverFiber;
+    fibers.push(takeoverFiber);
+  }
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
-  opened.push(policyFiber, toolsFiber, storeFiber);
+  opened.push(policyFiber, ...fibers);
   const app = asApp(ctx);
   for (const effect of EFFECTS) {
     for (const requiresConfirmation of [false, true]) {
       app['agent.tools'].register(makeSyntheticTool(effect, requiresConfirmation));
     }
   }
-  return { ctx, store: app.store, tools: app['agent.tools'], policy: app['agent.policy'], policyFiber };
+  // `takeover` 在 `withTakeover: false` 那条用例里是 undefined：那里只读 `policyFiber` 与 `ctx`，
+  // 要看的是「判定口根本没挂上」，所以不需要一个能动的接管态。
+  return {
+    ctx,
+    store: app.store,
+    tools: app['agent.tools'],
+    policy: app['agent.policy'],
+    takeover: ctx.get('browser.takeover') as FakeTakeoverService,
+    policyFiber,
+  };
 }
 
 /** 三种副作用级，顺序与 `TOOL_EFFECTS` 一致（这里不 import 那个常量，免得表格跟着它漂移）。 */
@@ -311,5 +333,66 @@ describe('agent.policy 的免确认白名单（5.3-06 / 07）', () => {
     remounted.setExempt('demo.outbound-ask');
     expect(remounted.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' }).canRun).toBe(true);
     expect(remounted.exemptAudit()).toMatchObject([{ action: 'add', toolId: 'demo.outbound-ask' }]);
+  });
+});
+
+describe('agent.policy 的接管闸门（spec 5.5-02）', () => {
+  it('接管中：18 格一律改判 TAKEOVER_HELD，档位与计划确认都不放行', async () => {
+    const { policy, takeover } = await bootPolicy();
+    takeover.setHold('manual');
+    for (const cell of CONFIRMED_TABLE) {
+      const decision = policy.decide({
+        tier: cell.tier,
+        planConfirmed: true,
+        toolId: toolIdFor(cell.effect, cell.requiresConfirmation),
+      });
+      // 连 `auto` + 计划已确认那格（真值表里最松的一格）都放行不了：人在动页面时读页面也算动手。
+      expect(`${cell.tier}/${cell.effect}/${String(cell.requiresConfirmation)} → ${decision.code}`).toBe(
+        `${cell.tier}/${cell.effect}/${String(cell.requiresConfirmation)} → TAKEOVER_HELD`,
+      );
+      expect(decision.canRun).toBe(false);
+    }
+  });
+
+  it('接管判在一切之前：未确认计划与未登记的手都报接管，而不是各自的码', async () => {
+    const { policy, takeover } = await bootPolicy();
+    takeover.setHold('risk');
+    expect(policy.decide({ tier: 'auto', planConfirmed: false, toolId: 'demo.read-free' }).code).toBe('TAKEOVER_HELD');
+    expect(policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.not-registered' }).code).toBe(
+      'TAKEOVER_HELD',
+    );
+  });
+
+  it('加白绕不过接管：同一只手加白后仍是 TAKEOVER_HELD，交还页面才回到 ALLOWED', async () => {
+    const { policy, takeover } = await bootPolicy();
+    policy.setExempt('demo.outbound-ask');
+    const before = policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' });
+    expect(before.canRun).toBe(true);
+
+    takeover.setHold('manual');
+    const held = policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' });
+    expect(held).toMatchObject({ canRun: false, code: 'TAKEOVER_HELD' });
+    // 名单还在（接管不改用户的表态），但它此刻放行不了任何东西。
+    expect(policy.exemptList()).toHaveLength(1);
+    expect(held.message).toContain('加白');
+
+    takeover.setHold(null);
+    expect(policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' }).canRun).toBe(true);
+  });
+
+  it('拒因说清「因为什么、已经多久、唯一那只口」：界面与日志都直接念这句', async () => {
+    const { policy, takeover } = await bootPolicy();
+    takeover.setHold('session-expired');
+    const decision = policy.decide({ tier: 'semi', planConfirmed: true, toolId: 'demo.read-free' });
+    expect(decision.message).toContain('session-expired');
+    expect(decision.message).toContain('已持续');
+    expect(decision.message).toContain('一步都不发');
+  });
+
+  it('接管态闸门缺席（少一行装配）：判定口停在 pending，根本不挂载', async () => {
+    const { ctx, policyFiber } = await bootPolicy(false);
+    // cordis 对依赖缺席的插件停在 PENDING 而不是抛错，所以「没挂上」要看状态而不是等异常（同 1.9-05）。
+    expect(fiberState(policyFiber.state)).toBe('pending');
+    expect(asApp(ctx).get('agent.policy')).toBeUndefined();
   });
 });

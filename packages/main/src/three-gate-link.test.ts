@@ -43,6 +43,7 @@ import {
   chatConfigSchema,
 } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
+import { BrowserTakeoverService } from '@auto-cc/plugin-browser';
 import { DEFAULT_DAILY_LIMITS, EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { LogService } from '@auto-cc/plugin-logger';
 import { LlmChatService, llmSchema } from '@auto-cc/plugin-llm';
@@ -150,6 +151,10 @@ async function boot(options: { tier: AutonomyLevel; exempt: boolean; seedGreetUs
   await mount(ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   await mount(ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   await mount(ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 5.5-a：接管态是判定口与循环的硬依赖，这里挂**真身**而不是替身——`browser.takeover` 只 inject `store`，
+  // 而这一片要证的三道闸门本来就与接管无关（它恒为「没在接管」）。不挂它则 policy / loop 根本不挂载，
+  // 三道闸门的用例就变成在测空气（替身已经够 agent 包内那两用例用，跨包链路面要的是装配里真有的那一份）。
+  await mount(ctx.plugin(BrowserTakeoverService, {}));
   await mount(ctx.plugin(UsageLedgerService, {}));
   await mount(ctx.plugin(EntitlementGateService, ONE_GREET_PER_DAY));
   await mount(ctx.plugin(LlmChatService, llmSchema.parse({})));

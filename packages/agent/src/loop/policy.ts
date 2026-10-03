@@ -1,13 +1,16 @@
 /**
  * `agent.policy`：一次任务里「这一步现在到底能不能执行」的唯一判定口（spec 5.2-02 / 07）。
  *
- * 循环的每一步都必须经过它，且它**只看三样东西**：当前档位、计划确认了没有、这只手在注册表里的真相。
- * 请求里没有 `effect` 也没有「模型说它安全」那一位——不是漏了，是刻意不给：
- * 副作用分级由判定者现读注册表（`list()` 里那份），模型的自述在这条口上根本没有入口，
- * 于是 5.2-07 要的不是「我们忽略了模型的话」，而是「模型没有一条可以表态的通道」。
+ * 循环的每一步都必须经过它，且它**只看四样东西**：当前档位、计划确认了没有、这只手在注册表里的真相、
+ * 以及这块页面现在归谁动（5.5-a 起）。请求里没有 `effect` 也没有「模型说它安全」那一位——不是漏了，是刻意不给：
+ * 副作用分级由判定者现读注册表（`list()` 里那份），接管与否由判定者现问 `browser.takeover`
+ * （core 的 `takeoverStateOf`，**硬依赖**：读不到接管态就当没接管，等于把这条护栏做成可以摘掉的东西，5.5-02 会静默失效），
+ * 模型的自述在这条口上根本没有入口，于是 5.2-07 要的不是「我们忽略了模型的话」，而是「模型没有一条可以表态的通道」。
  *
  * 5.2 立的是这个口本身；5.3-a 把档位语义钉成真值表；5.3-b 在这里接上**免确认白名单**——
  * 它是本服务自己的读数（表 + 唯一写入口 + 审计），不是请求方带进来的主张，所以判定请求那三位一个字都没改。
+ * 5.5-a 加的第四位同样**不进请求**：`StepPermissionRequest` 一个字段都没多——接管是判定者自己现读的事实，
+ * 让请求方（循环）自己声明「现在没人动页面」就是把判据交给了要它管的那一方（与 5.2-07 同一条理由）。
  * 两类暂停（审批、补充信息）的通道在 5.3-c，额度还剩多少也不在这里判——外发工具自己经
  * `entitlement.gate`（AGENTS.md §7.3），这里再问一次就是同一件事两套口径（§2.5）。
  */
@@ -15,10 +18,13 @@ import {
   AppError,
   Service,
   asApp,
+  takeoverStateOf,
   type AutonomyLevel,
   type Context,
   type ExemptAuditRow,
   type ExemptToolView,
+  type TakeoverStateSource,
+  type TakeoverStateView,
   type ToolDescriptorView,
 } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
@@ -31,10 +37,17 @@ import type { AgentToolsService } from '../tools.js';
  *
  * `ALLOWED` 之外全是「这一步不动」，区别只在为什么不动、由谁解除：
  * `PLAN_UNCONFIRMED` 等用户确认计划；`TIER_SUGGEST_READ_ONLY` 等档位被用户显式改；
- * `CONFIRMATION_REQUIRED` 等 5.3 的审批口；`TOOL_UNAVAILABLE` 是注册表里没有或已声明 disabled。
+ * `CONFIRMATION_REQUIRED` 等 5.3 的审批口；`TOOL_UNAVAILABLE` 是注册表里没有或已声明 disabled；
+ * `TAKEOVER_HELD` 等人把页面交回来（5.5-02）——它由循环落成 `paused` 而不是 `failed`，
+ * 因为「有人在打字」不是一个需要重跑的失败，是一段必须等人结束的时间。
  */
 export type PolicyCode =
-  'ALLOWED' | 'PLAN_UNCONFIRMED' | 'TIER_SUGGEST_READ_ONLY' | 'CONFIRMATION_REQUIRED' | 'TOOL_UNAVAILABLE';
+  | 'ALLOWED'
+  | 'PLAN_UNCONFIRMED'
+  | 'TIER_SUGGEST_READ_ONLY'
+  | 'CONFIRMATION_REQUIRED'
+  | 'TOOL_UNAVAILABLE'
+  | 'TAKEOVER_HELD';
 
 /** 一条判定读数：可否执行 + 码 + 要显示给人看的原话。 */
 export type PolicyDecision = { canRun: boolean; code: PolicyCode; message: string };
@@ -105,7 +118,7 @@ const EXEMPT_AUDIT_LIMIT = 50;
 export class AgentPolicyService extends Service {
   static provide = 'agent.policy';
   static Config = agentPolicySchema;
-  static inject = ['store', 'agent.tools'];
+  static inject = ['store', 'agent.tools', 'browser.takeover'];
 
   constructor(
     ctx: Context,
@@ -125,11 +138,54 @@ export class AgentPolicyService extends Service {
   }
 
   /**
+   * 接管态的那一份当下读数（判定输入里的第四位，用的时候现问，见文件头）。
+   *
+   * 走 core 的 `takeoverStateOf`（**硬依赖**，与 `pagePacerOf` / `consentGateOf` 同一套路）而不是
+   * `maybeService`：判定口在 agent 这一层不能 import 浏览器包（eslint 的 `AGENT_CAPABILITY`，5.1-08 防的是
+   * 「给 agent 一条绕过注册表的路」），所以这里只认 core 声明的那个窄形状，接管的事实仍只有一份、住在 L2。
+   * 做成软降级的后果很具体：**拿不到接管态就照放行**，于是摘掉 `browser-takeover` 那一行插件之后
+   * 5.5-02 的「接管期间一步都不发」静默失效——一条会静默失效的护栏等于没有（AGENTS.md §8 的红线口径）。
+   * 也不在本地存「上一次读到什么」：改配置会重建本服务，那份缓存就会静默变空（§9 的 2.5 实测）。
+   */
+  private get takeover(): TakeoverStateSource {
+    return takeoverStateOf(this.ctx);
+  }
+
+  /**
+   * 这一次接管已经持续了多少毫秒（只给判定原话那一句人读的话用，界面自己按 `startedAt` 排版）。
+   *
+   * 不在这里存「上一次算出来的数」：持续多久是派生值，问一次算一次，两份事实只在存了旧数时才出现。
+   * @param hold 刚现读到的那份接管读数（判定口在同一次 `decide` 里拿到的那一份，不重复问）
+   * @returns 从 `startedAt` 到此刻的毫秒数；`startedAt` 为 null（只有未接管才会这样）时给 0，
+   *   免得把 `null` 拼进给人看的那句话里
+   */
+  private heldForMs(hold: TakeoverStateView): number {
+    return hold.startedAt === null ? 0 : Math.max(0, Date.now() - hold.startedAt);
+  }
+
+  /**
    * 判这一步可否执行。
-   * @param request 档位 + 计划是否已确认 + 工具 id
+   * @param request 档位 + 计划是否已确认 + 工具 id（接管与否不在请求里：那是判定者自己的读数，见文件头）
    * @returns 判定读数；**永不抛异常**——拒绝是一种正常结果，不是要把循环炸掉的错误
    */
   decide(request: StepPermissionRequest): PolicyDecision {
+    // 接管排在**最前**，比「计划确认了没有」还靠前一步：它说的是这块页面此刻在谁手里，
+    // 而这一点比任何授权表态都更物理——人手正在键盘上，这一步发出去就是接在他的半截输入之后。
+    // 位置在这里也就保证了 5.5-02 那句「包括只读工具在内一步都不发」：这一支在所有分级之前，
+    // `snapshot` / `extract` 这些不改页面的手同样过不了（放行只读等于把「人正在打字」读成没人）。
+    const hold = this.takeover.held();
+    if (hold.isHeld) {
+      return {
+        canRun: false,
+        code: 'TAKEOVER_HELD',
+        // 这一句只指当下真有的那只口：解除的办法是人的手（交还页面），档位与免确认名单在这里一概不放行。
+        // 「已持续多久」由 `startedAt` 现算——它是这句人读的话里唯一的时间事实，界面那一侧同一份读数。
+        message:
+          `页面此刻由你人工操作中（原因：${String(hold.reason)}，已持续 ${String(this.heldForMs(hold))} 毫秒），` +
+          `工具 ${request.toolId} 这一步不执行——接管期间自动化一步都不发（连读页面都不发）。` +
+          '在你把页面交还回自动化之前，改档位与加白都绕不过这一条',
+      };
+    }
     if (!request.planConfirmed) {
       return {
         canRun: false,

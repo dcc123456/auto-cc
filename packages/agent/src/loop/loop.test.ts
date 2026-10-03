@@ -6,6 +6,9 @@
  * 单测负责的是结构事实：草案确定性、每一步必经判定口、run 与步两行表里记了什么、
  * 作用域是否真按 run 隔离、以及两条上限是否真会停。
  *
+ * 5.5-a 起这里还测**接管**那一路：接管中确认计划要停在安全点（零动作、零步行、零卡片），
+ * 交还页面之后 `agent.loop.resume` 从同一个游标继续；界面那半边（接管条与两只按钮）在 5.5-b 拿活页面截图。
+ *
  * 全程打本地假工具（`demo.*`），不碰真实招聘平台也不出网（AGENTS.md §7.2）。
  */
 import { ConfigService } from '@auto-cc/plugin-config';
@@ -13,12 +16,14 @@ import { StoreService } from '@auto-cc/plugin-store';
 import {
   asApp,
   Context,
+  fiberState,
   sleep,
   toolResult,
   type AgentPauseAnswer,
   type AgentPauseView,
   type AgentRunView,
   type AutonomyLevel,
+  type Fiber,
 } from '@auto-cc/core';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ChatSessionService } from '../session.js';
+import { FakeTakeoverService } from '../test-doubles.js';
 import { AgentToolsService, type AgentTool } from '../tools.js';
 import { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, type AgentLoopConfig } from './loop.js';
 import { StubLoopModel, type ObservationRequest, type PlanDraftRequest, type PlanStepDraft } from './model.js';
@@ -70,12 +76,14 @@ type StepRecord = {
  * @param overrides 循环配置覆盖
  * @param tier 起手档位；默认 `auto`（多数用例要的是「允许动手」），判定拒绝的用例显式传 `suggest`
  * @param pauseTimeoutMs 暂停单的超时（毫秒）；超时类用例传一个短值
+ * @param withTakeover 是否供上接管态替身（省略为 true；false 就是「摘掉 browser-takeover 那一行装配」）
  * @returns 上下文、五个服务句柄、副作用清单、临时库目录与循环的 fiber（重建服务时用）
  */
 async function bootLoop(
   overrides: Partial<AgentLoopConfig> = {},
   tier: AutonomyLevel = 'auto',
   pauseTimeoutMs = BASE_PAUSE_TIMEOUT_MS,
+  withTakeover = true,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-loop-'));
   dirs.push(dir);
@@ -92,6 +100,14 @@ async function bootLoop(
     defaultAutonomy: 'suggest',
   });
   await chatFiber;
+  // 5.5-a：接管态是判定口与循环的**硬依赖**（读不到接管态还照动手＝「接管期间一步都不发」静默失效），
+  // 所以台架要先供上这一份替身，它同时是那条「闸门缺席 → 服务不挂载」用例的对照物。
+  const takeoverFibers: Fiber[] = [];
+  if (withTakeover) {
+    const takeoverFiber = ctx.plugin(FakeTakeoverService, {});
+    await takeoverFiber;
+    takeoverFibers.push(takeoverFiber);
+  }
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
   // `pauseTimeoutMs` 带 `.default()`，直接调用点必须显式给（AGENTS.md §9 的 1.3 实测）。
@@ -99,7 +115,7 @@ async function bootLoop(
   await pauseFiber;
   const loopFiber = ctx.plugin(AgentLoopService, config);
   await loopFiber;
-  opened.push(loopFiber, pauseFiber, policyFiber, chatFiber, toolsFiber, storeFiber);
+  opened.push(loopFiber, pauseFiber, ...takeoverFibers, policyFiber, chatFiber, toolsFiber, storeFiber);
   const app = asApp(ctx);
   /** 副作用清单：每进一次工具实现追加一条；判「被拒 = 什么都没发生」就看它空不空。 */
   const calls: string[] = [];
@@ -107,6 +123,7 @@ async function bootLoop(
   app['chat.session'].setAutonomy(tier);
   return {
     ctx,
+    takeover: ctx.get('browser.takeover') as FakeTakeoverService,
     store: app.store,
     tools: app['agent.tools'],
     chat: app['chat.session'],
@@ -1097,6 +1114,118 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
       .all();
     // 待决暂停是**等待状态**而不是事实记录：经过落在 `agent_step.status / code` 与 `agent_run.stop_reason` 上。
     expect(tables).toEqual([]);
+    // 台架里的接管态是不带迁移的替身：接管那段账（号段 21 的 `takeover_events`）属于 `browser.takeover`，
+    // 循环这一侧只写 `stop_reason`，所以这里 19 以上不该出现任何登记。
     expect(rig.store.migrations.some((migration) => migration.version >= 19)).toBe(false);
+  });
+});
+
+describe('人工接管把循环停在安全点（spec 5.5-01 的恢复半边 / 5.5-02）', () => {
+  it('接管中确认计划：零动作、零步行、零卡片，run 记 paused + TAKEOVER_HELD 且游标不动', async () => {
+    const rig = await bootLoop();
+    const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
+    rig.takeover.setHold('manual');
+    const proposed = await rig.loop.propose(goalNaming(2));
+    const parked = await rig.loop.confirm(proposed.runId);
+
+    expect(parked).toMatchObject({ status: 'paused', stopReason: 'TAKEOVER_HELD', planStepIndex: 0 });
+    // 5.5-02 的判据就是这一位：接管期间连只读工具都不发，副作用清单必须是空的。
+    expect(rig.calls).toEqual([]);
+    expect(stepRecords(rig.store, proposed.runId)).toEqual([]);
+    // 不开确认单：此刻缺的那一句话不在卡片上，在他的手上（文件头第 6 条）。
+    expect(cards).toEqual([]);
+  });
+
+  it('交还页面后按「继续」：从同一个安全点把剩下的步跑完，run 落 completed', async () => {
+    const rig = await bootLoop();
+    rig.takeover.setHold('manual');
+    const proposed = await rig.loop.propose(goalNaming(2));
+    const parked = await rig.loop.confirm(proposed.runId);
+    expect(parked.status).toBe('paused');
+
+    rig.takeover.setHold(null);
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(resumed).toMatchObject({ status: 'completed', stopReason: 'COMPLETED', planStepIndex: 2 });
+    // 停住时一格都没跑，恢复后两步都跑：游标没被推进过，也就没有被跳过的步。
+    expect(rig.calls).toEqual(['tick:1', 'tick:2']);
+    expect(resumed.steps.map((step) => [step.planStepIndex, step.status])).toEqual([
+      [0, 'ok'],
+      [1, 'ok'],
+    ]);
+  });
+
+  it('仍在接管中按「继续」：AGENT_LOOP_TAKEOVER_HELD，run 仍 paused 且一步都没动', async () => {
+    const rig = await bootLoop();
+    rig.takeover.setHold('risk');
+    const parked = await rig.loop.confirm((await rig.loop.propose(goalNaming(2))).runId);
+
+    const thrown = await rig.loop
+      .resume(parked.runId)
+      .then(() => null)
+      .catch((error: { code?: string }) => error.code);
+    expect(thrown).toBe('AGENT_LOOP_TAKEOVER_HELD');
+    expect(rig.loop.read(parked.runId)).toMatchObject({ status: 'paused', stopReason: 'TAKEOVER_HELD' });
+    expect(rig.calls).toEqual([]);
+  });
+
+  it('「继续」只认被接管按住的那条 run：待确认与真人叫停的各回各的口', async () => {
+    const rig = await bootLoop();
+    const proposed = await rig.loop.propose(goalNaming(1));
+    const notYet = await rig.loop
+      .resume(proposed.runId)
+      .then(() => null)
+      .catch((error: { code?: string }) => error.code);
+    expect(notYet).toBe('AGENT_LOOP_NOT_RESUMABLE');
+
+    // 真人按「停止」留下的 paused 与接管留下的 paused 是两件事：把它当接管停的来恢复，就等于替用户撤回他的决定。
+    const stopped = rig.loop.stop(proposed.runId);
+    expect(stopped).toMatchObject({ status: 'paused', stopReason: 'USER_STOPPED' });
+    const wrongKind = await rig.loop
+      .resume(proposed.runId)
+      .then(() => null)
+      .catch((error: { code?: string }) => error.code);
+    expect(wrongKind).toBe('AGENT_LOOP_NOT_RESUMABLE');
+    expect(rig.calls).toEqual([]);
+
+    await expect(rig.loop.resume('run-does-not-exist')).rejects.toMatchObject({ code: 'AGENT_LOOP_RUN_NOT_FOUND' });
+  });
+
+  it('接管叫醒挂在确认单上的那一步：那一格记 TAKEOVER_HELD 而不是 PAUSE_CANCELLED，恢复后重走', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeApprovalTool(rig.calls));
+    let handedOver = false;
+    const cards = watchPauses(rig.ctx, rig.pause, () => {
+      // 确认单还挂着的时候，人在页面上按下了「我来接手」。
+      if (!handedOver) {
+        handedOver = true;
+        rig.takeover.setHold('manual');
+        return null;
+      }
+      return APPROVE();
+    });
+    const parked = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
+
+    expect(parked).toMatchObject({ status: 'paused', stopReason: 'TAKEOVER_HELD' });
+    // 谎报的形态是这一格：卡片确实被收掉了，但收掉它的是接管信号，不是有人按了「停止」。
+    expect(cards[0]).toMatchObject({ outcome: 'cancelled', decision: null });
+    expect(parked.steps[0]).toMatchObject({ status: 'refused', code: 'TAKEOVER_HELD' });
+    expect(parked.steps[0]?.observation).toContain('人工接管');
+    expect(rig.calls).toEqual([]);
+
+    rig.takeover.setHold(null);
+    const resumed = await rig.loop.resume(parked.runId);
+    // 游标回拨那一格：它一次都没真的执行过，跳过之后再由 `allSucceeded` 读数就成了「这一步失败了」。
+    expect(cards).toHaveLength(2);
+    expect(cards[1]).toMatchObject({ kind: 'approval', decision: 'approve', outcome: 'answered' });
+    expect(resumed).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    expect(rig.calls).toEqual(['approved:1']);
+  });
+
+  it('接管态缺席（少一行装配）：循环停在 pending，根本不挂载', async () => {
+    const { ctx, loopFiber } = await bootLoop({}, 'auto', BASE_PAUSE_TIMEOUT_MS, false);
+    // 判定口那条同一形状的对照在 `policy.test.ts`：这里要钉的是循环自己也把接管态写成硬依赖，
+    // 否则「摘掉 browser-takeover」只会让循环在接管期间照动手，一句错误都不出。
+    expect(fiberState(loopFiber.state)).toBe('pending');
+    expect(asApp(ctx).get('agent.loop')).toBeUndefined();
   });
 });

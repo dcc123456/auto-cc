@@ -22,12 +22,21 @@
  * 半途掐断一次打招呼比让它跑完更糟；信号只在下一步开始之前生效。挂在人身上的那一步用的就是
  * 同一个信号（`ask(..., scope.controller.signal)`）：叫停一张开着的单是 `cancelled`，
  * 而 `cancelled` 在循环这一侧**永远读不成「同意了」**（spec 5.3-10）。
+ *
+ * 6. **人在动页面的时候一步都不发**（5.5-a / 5.5-02）：接管态不进这份作用域，每轮都现问一次
+ *    （`browser.takeover` 是那份事实的唯一持有者，本地存副本就会在改配置重建之后静默变空，§9 的 2.5 实测）。
+ *    命中就把 run 落成 `paused` + `stopReason = TAKEOVER_HELD`——**不落 refused 步行、不开确认单**
+ *    （人就在页面上，再让他点一次「批准」是骗他），正在跑的那一步照上面那条不硬切，
+ *    所以「停在安全点」这件事由两处置地生效：步与步之间的那次现问，以及订阅 `browser/takeover-changed`
+ *    去叫醒那些**正挂在暂停单上**的 run（它们走不到下一次现问）。
+ *    恢复只能由人按（`resume`），与 `confirm` / `respond` / 写档位 / 加白撤白同属「人表态」的那一类口。
  */
 import {
   AGENT_RUN_STATUSES,
   AppError,
   Service,
   asApp,
+  takeoverStateOf,
   type AgentPauseView,
   type AgentPlanStepView,
   type AgentRunStatus,
@@ -35,6 +44,7 @@ import {
   type AgentStepView,
   type AutonomyLevel,
   type Context,
+  type TakeoverStateSource,
 } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { randomUUID } from 'node:crypto';
@@ -49,6 +59,14 @@ import type { AgentPolicyService } from './policy.js';
 
 /** 迁移号段 16（plan §7.2 的 5.2-a 落点）：`agent_run` + `agent_step` 同一次迁移建出。 */
 export const AGENT_RUN_MIGRATION_VERSION = 16;
+
+/**
+ * 「这一步被人工接管挡住了」的步行码，同时是 run 的 `stop_reason`（spec 5.5-09 的回看判据）。
+ *
+ * 与 `agent.policy` 的 `PolicyCode` 里那一位同值，但刻意不在这里 import 那个类型：循环要的是写进
+ * `agent_step.code` 与 `agent_run.stop_reason` 的那串字符，判定读数的类型改名不该牵动已落库的历史值。
+ */
+const TAKEOVER_HELD = 'TAKEOVER_HELD';
 
 /** 一条观察摘要里最多留多少个字（5.2-06 的「只带摘要」：整段工具正文不进 prompt）。 */
 const OBSERVATION_TEXT_CAP = 80;
@@ -286,7 +304,7 @@ function toRunView(run: RunRow, steps: StepRow[]): AgentRunView {
 export class AgentLoopService extends Service {
   static provide = 'agent.loop';
   static Config = agentLoopSchema;
-  static inject = ['store', 'agent.tools', 'agent.policy', 'agent.pause', 'chat.session'];
+  static inject = ['store', 'agent.tools', 'agent.policy', 'agent.pause', 'chat.session', 'browser.takeover'];
 
   constructor(
     ctx: Context,
@@ -325,6 +343,19 @@ export class AgentLoopService extends Service {
 
   private get session(): ChatSessionService {
     return asApp(this.ctx)['chat.session'];
+  }
+
+  /**
+   * 接管态的那份当下读数（文件头第 6 条的唯一事实源）。
+   *
+   * 每次用都现问、不存进 `RunScope`：本服务不持有任何「上一次的接管」，那一位只属于 `browser.takeover`
+   * （AGENTS.md §9 的 2.5 实测：改配置会重建下游插件，本地存第二份事实就会静默变空——
+   * 对循环来说那不是「读不到」，那是「接管中却照动手」，5.5-02 当场失效）。
+   * 走 core 的 `takeoverStateOf`（硬依赖）而不是 `maybeService`：拿不到接管态时**没有任何安全的读数**，
+   * 静默按「未接管」放行是这条护栏唯一要防的那件事；装配缺这一行就该在挂载期响亮失败。
+   */
+  private get takeover(): TakeoverStateSource {
+    return takeoverStateOf(this.ctx);
   }
 
   /**
@@ -411,6 +442,63 @@ export class AgentLoopService extends Service {
   }
 
   /**
+   * 从「因人工接管而停住」的那个安全点继续跑（spec 5.5-01 的恢复半边，**只有人能按**）。
+   *
+   * 为什么不复用 `confirm`：那条口的语义是「这张计划我认了」，只吃 `proposed` 态；把两种表态合并成一只口，
+   * 界面上就没有「确认计划」与「交还页面后继续」这两件不同的事可说了（§2.5 同一件事一个入口，反之两个入口）。
+   * 为什么它**不登记为 agent 工具**：恢复自动化是人的表态，与 `confirm` / `respond` / 写档位 /
+   * 加白撤白同族——模型若能自己按「继续」，接管就挡不住任何东西（5.5-02 当场失效；静态那半边由
+   * `scripts/check-agent-model-authority.ts` 的 ⑧ 钉住）。
+   * 与判定口的分工：`agent.policy.decide` 管「这一步能不能动手」（接管中它连只读工具都拒），
+   * 这一张口只管「人已经把页面交回来了，可以再往下走」。所以这里先现问一次接管态、**仍在接管中就拒**：
+   * 放行会做出「按了继续却没继续」那种要人猜的形态，而拒因说得很清楚——先交还页面，再按继续。
+   * @param runIdRaw 一条 `paused` + `stopReason = TAKEOVER_HELD` 的 run（界面原样递回它读到的 id）
+   * @returns 跑完（或再次停在下一个安全点）之后的读数
+   * @throws 库里没有这条 run `AGENT_LOOP_RUN_NOT_FOUND`；仍在接管中 `AGENT_LOOP_TAKEOVER_HELD`；
+   *   不是被接管按住的那条 run（`proposed` / `failed` / 被真人叫停的 `paused`）`AGENT_LOOP_NOT_RESUMABLE`
+   */
+  async resume(runIdRaw: string): Promise<AgentRunView> {
+    const runId = runIdRaw.trim();
+    const view = this.read(runId);
+    if (view.status !== 'paused' || view.stopReason !== TAKEOVER_HELD) {
+      throw new AppError(
+        'AGENT_LOOP_NOT_RESUMABLE',
+        `run ${runId} 不是被人工接管按住的（现在：${view.status} / ${String(view.stopReason)}）：` +
+          '「继续」只在那条 run 因接管停在安全点时才管用，其余态各回各的口',
+        'agent.loop',
+        { status: view.status, stopReason: view.stopReason },
+      );
+    }
+    if (this.takeover.held().isHeld) {
+      throw new AppError(
+        'AGENT_LOOP_TAKEOVER_HELD',
+        '页面仍在人工接管中，自动化不能恢复：先交还页面（那是人的手，系统不代按），再按这一次「继续」',
+        'agent.loop',
+        { runId, reason: this.takeover.held().reason },
+      );
+    }
+    const scope = this.ensureScope(runId);
+    // 游标可能要**回拨一格**：停在暂停单上被打断的那种形态落了一行 `refused` 步行
+    // （`code = TAKEOVER_HELD`，见 `refuseStep`），而 `ensureScope` 按「已有步行的最大下标 + 1」重建游标，
+    // 于是那一格被跳过——它一次都没真的执行过，跳过之后再由 `allSucceeded` 读数就成了「这一步失败了」。
+    // 只回拨这一种码：真人按过「拒绝」的那一步不重跑，那是他的表态（spec 5.3-10）。
+    const interrupted = view.steps.at(-1);
+    if (interrupted && interrupted.status === 'refused' && interrupted.code === TAKEOVER_HELD) {
+      scope.cursor = interrupted.planStepIndex;
+    }
+    this.updateRun(runId, {
+      status: 'running',
+      planStepIndex: scope.cursor,
+      tokensUsed: scope.tokensUsed,
+      // 停住原因就地改写：留着 `TAKEOVER_HELD` 会让这条 run 同时读成「正在跑」与「被接管按住」。
+      stopReason: 'RESUMED_AFTER_TAKEOVER',
+    });
+    this.publish(scope.runId);
+    await this.execute(scope);
+    return this.read(runId);
+  }
+
+  /**
    * 叫停一次 run（5.2-10 的入口半边）。
    *
    * 正在跑的那一步不硬切：这里只置信号，循环在**下一个安全点**（取步之前）看见信号就停，
@@ -460,6 +548,20 @@ export class AgentLoopService extends Service {
       for (const scope of this.scopes.values()) scope.controller.abort();
       this.scopes.clear();
     });
+    // 接管开始的那一刻叫醒在跑的 run（文件头第 6 条）。这里**只置信号、不落终态**：
+    // 正在飞的那一步照常收尾（第 5 条），`paused` + `TAKEOVER_HELD` 由循环自己在下一个安全点落——
+    // 终态只有 `finish()` 一个出口（§2.5），在这儿再写一次就会有两处地方宣称同一条 run 停了。
+    // 为什么信号已经够用、不需要在这里再问一次 `held()`：载荷为 `isHeld: true` 就是那件事发生了，
+    // 而循环随后那次现问（`execute` 取步之前）读到什么就以什么为准，两者之间没有缓存的状态（§9 的 2.5 实测）。
+    // `isHeld === false`（交还页面）这条路**不**自动恢复：恢复是人的手（`resume`，spec 5.5-01），
+    // 系统在毫秒级把页面还给自动化正是 5.5 要避免的那种「没人看见就跑起来了」。
+    this.ctx.on('browser/takeover-changed', (event) => {
+      if (!event.isHeld) return;
+      for (const scope of this.scopes.values()) {
+        scope.controller.abort();
+        this.ctx.logger.info(`run ${scope.runId} 已受理人工接管信号：最迟在下一步之前停在安全点`);
+      }
+    });
     this.ensureSchema();
     this.ctx.logger.info(
       `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型腿 确定性桩`,
@@ -472,6 +574,8 @@ export class AgentLoopService extends Service {
     if (!migrations.some((migration) => migration.version === AGENT_RUN_MIGRATION_VERSION)) {
       migrations.push(agentRunMigration);
     }
+    // 接管那段账不在这里：号段 21 的 `takeover_events` 归 `browser.takeover`（那份事实的主人），
+    // 循环只把自己的 `stop_reason` 落成 TAKEOVER_HELD，两边靠 run id 与时刻对上，不各存一份。
     this.store.upgrade();
   }
 
@@ -486,6 +590,15 @@ export class AgentLoopService extends Service {
       return;
     }
     while (scope.cursor < scope.plan.length) {
+      // 接管排在叫停**之前**，这是 5.5-02 的账而不是排版：叫醒这些 run 的信号正是本服务在
+      // `browser/takeover-changed` 里自己置的（见 `[Service.init]`），先读 `aborted` 就会把
+      // 「人在页面上打字」落成「用户停止了任务」——同一次接管被记成用户的决定，`resume` 也认不出这条 run。
+      // 这一问与判定口那次不是两份判据：判定口答「这一步能不能动手」，这里只答「这个安全点该记哪个原因」，
+      // 两边读的都是 `browser.takeover` 那一份当下事实，没有第三份状态。
+      if (this.takeover.held().isHeld) {
+        this.finish(scope, 'paused', TAKEOVER_HELD);
+        return;
+      }
       if (scope.controller.signal.aborted) {
         this.finish(scope, 'paused', 'USER_STOPPED');
         return;
@@ -508,6 +621,15 @@ export class AgentLoopService extends Service {
         toolId: step.toolId,
       });
       if (!decision.canRun) {
+        // 接管中：**不落 refused 步行、不开确认单**，只停在安全点、游标不动（文件头第 6 条）。
+        // 不落步行等于把这一步判死——恢复后它再也不会被走一遍，人交还页面看到的还是「这一步没做」；
+        // 开确认单则是骗他再按一次「批准」，而此刻真正缺的那一句话不在卡片上，在他的手上。
+        // 游标不动是 `resume` 能接上的全部凭据：那一格没有步行，`ensureScope` 重建出的游标就是它。
+        // 接管这段账本身在号段 21 的 `takeover_events` 里（谁、何时、因为什么），这里不重复记。
+        if (decision.code === TAKEOVER_HELD) {
+          this.finish(scope, 'paused', TAKEOVER_HELD);
+          return;
+        }
         // 只有 `CONFIRMATION_REQUIRED` 是「等人一句话就能继续」的拒因：档位只读与「这只手不在开放面上」
         // 问人也问不出结果，照 5.2-02 的结局直接落 refused。把这两种情形也做成卡片，等于在一条用户
         // 根本批不了的路上让他按「批准」——那张按钮按下去还是不动，那就是骗他点一下。
@@ -662,6 +784,26 @@ export class AgentLoopService extends Service {
    * @param rejection 拒因（码、要显示给人看的一句原话、run 该落的终态）
    */
   private refuseStep(scope: RunScope, step: AgentPlanStepView, rejection: PauseRejection): void {
+    // 接管把这张卡片收掉的那一路改记成接管（文件头第 6 条）：`PAUSE_CANCELLED` 的原话是「等待被叫停」，
+    // 而叫停它的是本服务在 `browser/takeover-changed` 里自己置的信号，不是人在这张卡片上表过的态。
+    // 记成「用户停止了任务」就是谎报（5.3-10 说 `cancelled` 永远读不成「同意了」，它也永远不是「按了停止」），
+    // 而 `stop_reason` 错了的那条 run 在 `resume` 那里再也认不出自己是因接管停的——恢复口就关上了。
+    // 步行照落：这张卡片确实开过、确实没等到了，它与「被真人拒绝」的区分就在 `code` 上，
+    // 于是 `resume` 只回拨这一种码的那一格（见那里的注释），其余拒因都不重跑。
+    const hold = this.takeover.held();
+    if (hold.isHeld) {
+      this.writeStep(
+        scope,
+        step,
+        'refused',
+        `${rejection.message}｜此刻页面由人工接管（原因：${String(hold.reason)}），这一步未执行`,
+        [],
+        null,
+        TAKEOVER_HELD,
+      );
+      this.finish(scope, 'paused', TAKEOVER_HELD);
+      return;
+    }
     this.writeStep(scope, step, 'refused', rejection.message, [], null, rejection.code);
     this.finish(scope, rejection.runStatus, rejection.code);
   }
