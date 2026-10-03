@@ -243,9 +243,11 @@ function makeTickTool(calls: string[]): AgentTool<{ n: number }> {
 /**
  * 一只「只读当前页面」的假手（spec 5.5-03 / 04 的重读口，配置里那个名字的台架对应物）。
  * @param rereads 每被问一次追加一条它交回的摘要，用例据此断言「恢复后先读了一遍、而且只读了一遍」
+ * @param pageText 页面正文（5.5-08 用）：给了就只放进 `value.text`、**不进摘要**——真实那口 `browser.page.snapshot`
+ *   的摘要按 §8.5 默认脱敏，正文只活在 `value` 里，所以哨兵必须能在正文里被找到才算对上现场形状
  * @returns 合规声明：`read` 级、无入参、不要求批准（副作用级不是 `read` 时循环会拒，见那两条用例）
  */
-function makeRereadTool(rereads: string[]): AgentTool<Record<string, never>> {
+function makeRereadTool(rereads: string[], pageText: string | null = null): AgentTool<Record<string, never>> {
   return {
     id: 'demo.reread',
     titleKey: 'agent.tool.labels.demoReread',
@@ -257,7 +259,9 @@ function makeRereadTool(rereads: string[]): AgentTool<Record<string, never>> {
       // 读数里带标记与整页正文：新快照进上下文之前也要先去标记截断（5.2-06 的口径对它同样成立）。
       const summary = `<html><body>${'交还之后页面已换成工单表单 '.repeat(6)}</body></html>`;
       rereads.push(summary);
-      return Promise.resolve(toolResult({ summary }, { summary, evidenceRefs: [] }));
+      return Promise.resolve(
+        toolResult(pageText === null ? { summary } : { summary, text: pageText }, { summary, evidenceRefs: [] }),
+      );
     },
   };
 }
@@ -296,9 +300,11 @@ function makeDriftTool(
 /**
  * 一只「要动手」的假手（spec 5.5-03 的扳机对照物）：下一步是它就得先重读，下一步是只读的 `demo.tick` 就不必。
  * @param calls 副作用清单，每进一次 `run` 追加一条
+ * @param doneMarker 「人已经把这一步做完了」在页面上的那句话（spec 5.5-08 的哨兵）；
+ *   省略就是**没标定**——循环里 `null` 的语义是「永不自动跳过」，那一条对照用例靠它成立
  * @returns 合规声明：`local-write` 级（`auto` 档放行、不用批准）、`strictObject` 入参、成功返回摘要
  */
-function makeWriteTool(calls: string[]): AgentTool<{ n: number }> {
+function makeWriteTool(calls: string[], doneMarker: string | null = null): AgentTool<{ n: number }> {
   return {
     id: 'demo.write',
     titleKey: 'agent.tool.labels.demoWrite',
@@ -306,6 +312,8 @@ function makeWriteTool(calls: string[]): AgentTool<{ n: number }> {
     input: z.strictObject({ n: z.number().int().min(0) }),
     effect: 'local-write',
     requiresConfirmation: false,
+    // 哨兵挂在**这只手自己的声明**上（plan 5.5-e 的 E1）：循环既不读模型给的那一步，也不猜平台文案。
+    ...(doneMarker === null ? {} : { doneMarker }),
     run: (params) => {
       calls.push(`write:${String(params.n)}`);
       return Promise.resolve(
@@ -1466,6 +1474,95 @@ describe('下一步要动手时先把页面重读一遍（spec 5.5-03）', () =>
     expect(error?.message).toContain('重读只许用只读的手');
     // 判据的实质那一位：配错之后那只手一次都没被调过。
     expect(rig.calls).toEqual([]);
+  });
+});
+
+/** 人在页面上做完打招呼后，那一页必然留下的一句话（5.5-08 的哨兵；现场取 fixture 聊天页的原话形状）。 */
+const DONE_BY_HUMAN_MARKER = '已从 iframe 内发出第 1 条';
+
+describe('人已做完的那一步不再动手（spec 5.5-08）', () => {
+  it('恢复时读到的现状里有哨兵：那一格记 skipped 而那只手一次都没被按，三道闸门全都不参与', async () => {
+    const rig = await bootLoop();
+    // 哨兵只出现在**正文**里（`value.text`），摘要里没有——真实那口 `browser.page.snapshot` 就是这个形状（§8.5）。
+    rig.tools.register(makeRereadTool(rig.rereads, `你好，${DONE_BY_HUMAN_MARKER}：你好，我们对这个岗位很感兴趣`));
+    rig.tools.register(makeWriteTool(rig.calls, DONE_BY_HUMAN_MARKER));
+    // 判定口被问过的每一步都记下来：跳过的那一格必须一次都不出现（它拦的是"动手"，这一步没动手）。
+    const judged: StepPermissionRequest[] = [];
+    const decideOriginal = rig.policy.decide.bind(rig.policy);
+    rig.policy.decide = (request: StepPermissionRequest): PolicyDecision => {
+      judged.push(request);
+      return decideOriginal(request);
+    };
+    const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(rig.calls).toEqual([]);
+    expect(rig.rereads).toHaveLength(1);
+    expect(judged).toEqual([]);
+    expect(cards).toEqual([]);
+    expect(resumed.steps).toHaveLength(1);
+    expect(resumed.steps[0]).toMatchObject({
+      status: 'skipped',
+      code: 'DONE_BY_HUMAN',
+      // 「这只手一次都没被按」在时长那一格也要读得出来：写 0 就成了「跑了一次、耗时为零」。
+      durationMs: null,
+    });
+    expect(resumed.steps[0]?.evidenceRefs[0]).toMatch(/^snapshot:demo\.reread@\d+$/);
+    expect(resumed.steps[0]?.observation).toContain('这一步由人在页面上做完了');
+    expect(resumed.steps[0]?.observation).toContain(DONE_BY_HUMAN_MARKER);
+    // 终态判据：`skipped` 与 `ok` 同权——人在接管期间做完了事，这条 run 就该说「做完了」而不是「有步骤没成功」。
+    expect(resumed).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+  });
+
+  it('跳过只消费这一格：后面的步骤照常动手，且不再拿这份读数当现状', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads, `消息记录：${DONE_BY_HUMAN_MARKER}`));
+    rig.tools.register(makeWriteTool(rig.calls, DONE_BY_HUMAN_MARKER));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_THEN_READ_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const resumed = await rig.loop.resume(parked.runId);
+    // 整条 run 只读一次页面，那一份归了被跳过的那一格；第二步要是也想领一份「现状」就得自己再问。
+    expect(rig.rereads).toHaveLength(1);
+    // 第一格是打招呼那只手（被跳过，一次没按），第二格是只读的 `demo.tick`：它照常动手。
+    expect(rig.calls).toEqual(['tick:2']);
+    expect(resumed.steps.map((step) => step.status)).toEqual(['skipped', 'ok']);
+    expect(resumed.steps.map((step) => step.evidenceRefs.some((ref) => ref.startsWith('snapshot:')))).toEqual([
+      true,
+      false,
+    ]);
+    expect(resumed).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+  });
+
+  it('那只手没标定哨兵：照原样动手，恢复路径与 5.5-03 完全一致', async () => {
+    // 哨兵默认不给（装配侧不配就没有），不给就永不自动跳过——猜中的那次会悄悄跳掉一次外发。
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads, `消息记录：${DONE_BY_HUMAN_MARKER}`));
+    rig.tools.register(makeWriteTool(rig.calls));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(rig.calls).toEqual(['write:1']);
+    expect(resumed.steps[0]).toMatchObject({ status: 'ok', code: null });
+  });
+
+  it('标了哨兵但页面上没那句话：照样动手，不因声明了就跳（避免把「大概长这样」当真）', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads, '交还之后页面仍停在岗位列表，没有任何发送记录'));
+    rig.tools.register(makeWriteTool(rig.calls, DONE_BY_HUMAN_MARKER));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(rig.calls).toEqual(['write:1']);
+    expect(resumed.steps[0]).toMatchObject({ status: 'ok', code: null });
   });
 });
 

@@ -566,7 +566,8 @@
           "pending": "not settled",
           "ok": "succeeded",
           "failed": "failed",
-          "refused": "refused by the gate"
+          "refused": "refused by the gate",
+          "skipped": "done by hand, skipped"
         },
         "nodeKind": "node {{kind}}",
         "paramVariable": "variable {{key}} = {{value}}",

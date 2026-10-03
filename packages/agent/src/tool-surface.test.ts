@@ -130,4 +130,32 @@ describe('agent.tools 的跨层登记面（spec 2.8-08）', () => {
       result: { summary: '已回声 hi', value: { echoed: 'hi' }, evidenceRefs: [] },
     });
   });
+
+  it('人已做完的哨兵只在主进程现读：对 agent 可见的清单里没有这一位（spec 5.5-08）', async () => {
+    const { tools } = await boot();
+    tools.register({
+      id: 'fake.greet.send',
+      titleKey: 'agent.tool.labels.fakeGreetSend',
+      description: '打招呼（声明了"人做完长什么样"的那只手）',
+      input: z.strictObject({ to: z.string().min(1) }),
+      effect: 'outbound',
+      requiresConfirmation: false,
+      doneMarker: '已从 iframe 内发出第 1 条',
+      run: ({ to }) => Promise.resolve(toolResult({ to }, { summary: `已向 ${to} 打招呼` })),
+    });
+    // `toEqual` 摆的是整条视图的形状：多出一个字段就整片红，所以这一条同时钉住「哨兵不进视图、不过 IPC」
+    // 与「登记面没有把整份声明原样透出去」——界面上能看见的还是那五个字段。
+    expect(tools.list()[1]).toEqual({
+      id: 'fake.greet.send',
+      titleKey: 'agent.tool.labels.fakeGreetSend',
+      description: '打招呼（声明了"人做完长什么样"的那只手）',
+      effect: 'outbound',
+      requiresConfirmation: false,
+    });
+    expect(tools.doneMarkerOf('fake.greet.send')).toBe('已从 iframe 内发出第 1 条');
+    // 三种"没有"都回 `null`：没标定哨兵的那只、压根没登记的这个名字。
+    // `null` 在循环里的语义是**永不自动跳过**，所以这里不能回空串——空串是「页面上出现空串就跳」，见谁跳谁。
+    expect(tools.doneMarkerOf('fake.capability.run')).toBeNull();
+    expect(tools.doneMarkerOf('demo.not-registered')).toBeNull();
+  });
 });

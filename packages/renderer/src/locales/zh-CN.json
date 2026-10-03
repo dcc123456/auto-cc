@@ -566,7 +566,8 @@
           "pending": "未落定",
           "ok": "已成功",
           "failed": "失败",
-          "refused": "被闸门拒"
+          "refused": "被闸门拒",
+          "skipped": "人做完，跳过"
         },
         "nodeKind": "节点 {{kind}}",
         "paramVariable": "变量 {{key}} = {{value}}",

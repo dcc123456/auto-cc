@@ -124,7 +124,14 @@ class FakePlatformRegistryService extends Service implements GreetChannelSource 
 
 /** 装配到 `outbound.greet` 为止的整套真实服务（闸门/账本/话术/频控都不用替身，只有平台层是）。 */
 async function boot(
-  options: { gate?: GateConfig; gapMs?: number; channel?: GreetChannel; dir?: string; agentTools?: boolean } = {},
+  options: {
+    gate?: GateConfig;
+    gapMs?: number;
+    channel?: GreetChannel;
+    dir?: string;
+    agentTools?: boolean;
+    greetConfig?: GreetConfig;
+  } = {},
 ) {
   // 传 dir 是演「换个进程重挂同一份库」：库是那份库，实例是全新的一轮挂载。
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'auto-cc-greet-'));
@@ -151,7 +158,7 @@ async function boot(
   sessions.grant('boss');
   // 渠道默认就登记好；要演「挂载时登记表是空的」那一支，用例自己 remove。
   if (options.channel) registry.add('boss', options.channel);
-  const greetConfig: GreetConfig = {};
+  const greetConfig: GreetConfig = options.greetConfig ?? {};
   const greetFiber: Fiber = await ctx.plugin(OutboundGreetService, greetConfig);
   const greet = asApp(ctx)['outbound.greet'];
   return {
@@ -546,6 +553,20 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
     // 注册表是本包共享的：话术服务在同批装配里也登记自己的 `outbound.script.generate`（它在 script.test.ts 里
     // 有对应用例），所以这里按 id 取 greet 那一行，而不是断言整张清单——清单长度属于注册表自己的用例。
     expect(tools?.list().filter((entry) => entry.id === 'outbound.greet.perform')).toEqual([
+      { id: 'outbound.greet.perform', effect: 'outbound', requiresConfirmation: true },
+    ]);
+  });
+
+  it('人已做完的哨兵由装配配置给：没配就没有这一位，配了才原样进声明（spec 5.5-08）', async () => {
+    // 哨兵**默认不给**是这一片的取向：猜中的那次会悄悄跳掉一次外发，猜不中的那次只是多问一句「要不要批准」。
+    // 所以 shipped 配置里没有这句话时，声明上连这个键都不该出现——循环读到 `undefined` 走的正是「永不跳过」那条路。
+    const unset = await boot({ agentTools: true });
+    expect(unset.tools?.declarations.get('outbound.greet.perform')?.doneMarker).toBeUndefined();
+
+    const calibrated = await boot({ agentTools: true, greetConfig: { doneMarker: '已从 iframe 内发出第' } });
+    expect(calibrated.tools?.declarations.get('outbound.greet.perform')?.doneMarker).toBe('已从 iframe 内发出第');
+    // 加了哨兵不改变这只手的其它任何读数：需要批准、外发级、清单长度都不许跟着动（那是另一码事）。
+    expect(calibrated.tools?.list().filter((entry) => entry.id === 'outbound.greet.perform')).toEqual([
       { id: 'outbound.greet.perform', effect: 'outbound', requiresConfirmation: true },
     ]);
   });

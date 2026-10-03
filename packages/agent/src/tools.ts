@@ -187,6 +187,19 @@ export class AgentToolsService extends Service {
     }
   }
 
+  /**
+   * 现问一只工具声明的「人已做完」文本哨兵（spec 5.5-08 的判据对象）。
+   *
+   * 与 `list()` 的分工是刻意的：哨兵**不进视图**（`ToolDescriptorView` 没有这一位，也就不过 IPC），
+   * 但循环必须在**每次恢复时**现读它——本服务会随配置热改被重建，声明却活在 app 级的那张表里（§9 的 2.5 实测）。
+   * 因此这里给一个窄口而不是让调用方去摸 `agentToolTable`：注册表是这张表的唯一读者入口（§2.5）。
+   * @param toolId 计划里那一步的工具 id（模型给的原话，按不可信输入处理——查不到就是没有）
+   * @returns 声明里的哨兵原串；那只手没登记、或它没标定哨兵时返回 `null`（`null` 的语义是**永不自动跳过**）
+   */
+  doneMarkerOf(toolId: string): string | null {
+    return this.table.get(toolId)?.doneMarker ?? null;
+  }
+
   [Service.init](): void {
     // 读数必须在挂载时现算：登记由各能力包在自己的 init 里推（spec 2.8-08），本服务先于它们就绪时
     // 这里就是 0，把「注册表就绪」写成「已登记 N 个」才不会出现 §12.13 那种骗人的空数。

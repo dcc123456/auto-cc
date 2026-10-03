@@ -45,6 +45,13 @@
  *    `[Service.init]` 把这样的行落成 `paused` + `stopReason = INTERRUPTED`：与 `TAKEOVER_HELD` **分开**，
  *    因为 `resume` 只认后者；混用就成了「重启后按继续＝替人重跑崩溃那一刻的动作」。这条 run 的续跑口
  *    不在本片（崩溃后自动续推没有判据要它），这里只保证读数是真的、界面有对应文案，不谎报完成。
+ * 9. **人做完的那一步不再动手**（5.5-e / spec 5.5-08）：`resume` 里那份重读读数除了「给下一步当现状」，
+ *    还回答一个问题——页面上是不是已经出现这件事的结果。判据是那只手**自己声明**的文本哨兵
+ *    （`AgentToolDeclaration.doneMarker`，经 `agent.tools.doneMarkerOf` 现读，不过 IPC），
+ *    命中就把那一格落成 `skipped`（`code = DONE_BY_HUMAN`）并推进游标：那只手一次都不许被按，
+ *    外发的那三道闸门与确认单也因此都不会开——重复打招呼比多问一句「要不要批准」严重得多。
+ *    没标定哨兵（`null`）**永远不跳过**，比对只发生在恢复那一条路上且只看**这一次**的新读数；
+ *    `skipped` 在终态判定里与 `ok` 同权（第 8 步那种「跑到的每一步都成功」不能因为人代劳了就变假）。
  */
 import {
   AGENT_RUN_STATUSES,
@@ -62,6 +69,7 @@ import {
   type Context,
   type TakeoverStateSource,
   type ToolEffect,
+  type ToolResult,
 } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { randomUUID } from 'node:crypto';
@@ -96,8 +104,27 @@ const TAKEOVER_HELD = 'TAKEOVER_HELD';
  */
 const INTERRUPTED = 'INTERRUPTED';
 
+/**
+ * 「这一步由人在页面上做完了」的步行码（spec 5.5-08，文件头第 9 条）。
+ *
+ * 它与 `TAKEOVER_HELD` 一样只出现在 `agent_step.code`，不进 `agent_run.stop_reason`——
+ * 被跳过的这一步不会把 run 停在安全点上，它让 run **更像**跑完了。
+ * 界面要能把这一格和「成功了」区分开：`code` 是唯一的区分位（`status` 那边已经有 `skipped` 这一态，
+ * 而读数里「这只手一次都没被按」这件事必须有原话可查，见 `skipStepDoneByHuman` 写的观察）。
+ */
+const DONE_BY_HUMAN = 'DONE_BY_HUMAN';
+
 /** 一条观察摘要里最多留多少个字（5.2-06 的「只带摘要」：整段工具正文不进 prompt）。 */
 const OBSERVATION_TEXT_CAP = 80;
+
+/**
+ * 「人已做完」那次比对能读进去多少字（spec 5.5-08）。
+ *
+ * 它与 `OBSERVATION_TEXT_CAP` 是两个数，刻意不合并：80 字是给 prompt 与观察用的正文上限，
+ * 而哨兵可能出现在整页正文的任何位置——拿被截成 80 字的那一份去比，就会把「页面明明已经做完」
+ * 判成没做完。这个上限只管内存里的一次子串比对，读完即丢，既不进 prompt 也不落库（§8.5）。
+ */
+const DONE_CHECK_HAYSTACK_CAP = 4000;
 
 /** 单条输入文本的边界校验：与 `chat.session` 共用同一个上限常量（§2.2 同一逻辑只留一份）。 */
 const MAX_GOAL_CHARS = MAX_USER_INPUT_CHARS;
@@ -131,8 +158,12 @@ export type AgentLoopConfig = z.output<typeof agentLoopSchema>;
  * `ref` 是给步行与证据用的指针，`excerpt` 是**已经去标记并截过**的一句摘要（整页正文永不进 prompt，
  * 5.2-06 的口径对新读数同样成立），`note` 是说给下一步观察用的那句话——谁生的读数谁写措辞，
  * 于是循环里只有「消费一次」这一处逻辑（§2.2）。
+ *
+ * `haystack` 是 5.5-08 补的第二份文本，口径与 `excerpt` 相反：它**只**拿来做一次子串比对，
+ * 不进 prompt、不进观察、不落库（页面上的原文可能带着候选人姓名与联系方式，§8.5 默认脱敏；
+ * 落进账里的只有那句哨兵本身与快照引用）。为什么不能复用 `excerpt`——见 `DONE_CHECK_HAYSTACK_CAP`。
  */
-type FreshPageRead = { ref: string; excerpt: string; at: number; note: string };
+type FreshPageRead = { ref: string; excerpt: string; haystack: string; at: number; note: string };
 
 /**
  * 一次 run 的作用域：进度只活在这一份对象里，按 runId 存放。
@@ -228,21 +259,71 @@ const agentRunMigration = {
 };
 
 /**
- * 把工具读数收成一句**可进 prompt** 的话（5.2-06）。
+ * 把可能带 HTML 的读数摊成一行纯文本（去标记 → 压空白）。
  *
- * 两步都在挡同一件事：整页 HTML 不进模型的正文。先去标记（连同被截断后剩下的半个开标签），
- * 再把空白压成单空格，最后截到 `OBSERVATION_TEXT_CAP`——顺序反了就是拿截断后的碎片去猜标签边界，
- * 页面上的「<htm」这种半截串会直接漏进 prompt。整页原文要看不去证据引用里看，不进正文。
+ * 两步的顺序是刻意的：先截断再去标记，就会拿「<htm」这种半截碎片去猜标签边界，
+ * 页面上那种畸形串会直接漏进正文。
  * @param reading 工具读数或失败原话（可能是一整页正文）
- * @returns 不超过 `OBSERVATION_TEXT_CAP + 1` 字的纯文本（末位可能是省略号；全空的读数回空串）
+ * @returns 不含标签、空白压成单空格的文本（未截断）
  */
-function clipReading(reading: string): string {
-  const plain = reading
+function toPlainText(reading: string): string {
+  return reading
     .replace(/<[^>]*>/g, ' ') // 成对标签（含属性、整段 script/style）一律摘掉
     .replace(/<[\s\S]*$/, ' ') // 畸形或截断留下的半个开标签：后面没有 `>` 也要一起掉
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * 把工具读数收成一句**可进 prompt** 的话（5.2-06）。
+ *
+ * 先去标记（`toPlainText`），再截到 `OBSERVATION_TEXT_CAP`——整页原文要看就去证据引用里看，不进正文。
+ * @param reading 工具读数或失败原话（可能是一整页正文）
+ * @returns 不超过 `OBSERVATION_TEXT_CAP + 1` 字的纯文本（末位可能是省略号；全空的读数回空串）
+ */
+function clipReading(reading: string): string {
+  const plain = toPlainText(reading);
   return plain.length > OBSERVATION_TEXT_CAP ? `${plain.slice(0, OBSERVATION_TEXT_CAP)}…` : plain;
+}
+
+/**
+ * 递归收一个读数里的字符串叶子（spec 5.5-08 的比对文本从这里来）。
+ *
+ * 只认形状不认字段名：`ToolResult.value` 必须可 JSON 序列化（spec 5.1-11），所以这里没有环，
+ * 也就不需要访问标记。数组与对象的值都往下走，键名不收——哨兵是页面上的话，不是字段名。
+ * @param value 工具交回的产出（`unknown`，按不可信的形状处理）
+ * @param sink 收集清单（就地追加）
+ */
+function collectStrings(value: unknown, sink: string[]): void {
+  if (typeof value === 'string') {
+    sink.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, sink);
+    return;
+  }
+  if (isPlainRecord(value)) {
+    for (const nested of Object.values(value)) collectStrings(nested, sink);
+  }
+}
+
+/**
+ * 把一次只读读数摊平成「页面上现在写着什么」的比对文本（文件头第 9 条 / spec 5.5-08）。
+ *
+ * 摘要 + 产出的全部字符串叶子，一起去标记再截到 `DONE_CHECK_HAYSTACK_CAP`。
+ * 为什么不用 `clipReading` 的产物：那一份只有 80 字，是给 prompt 与观察用的上限，
+ * 而哨兵可以出现在整页正文的任何位置——拿那 80 字去比就是把 5.5-08 变成看运气的判据。
+ * 这一份**只活在一次调用里**：不进 prompt、不落库、界面读不到（§8.5 的脱敏口径对它同样成立，
+ * 落进账里的只有那句哨兵与快照引用）。
+ * @param result 那只只读手交回的 `ToolResult`
+ * @returns 截断后的纯文本；一只都没有字符串时为空串
+ */
+function textHaystack(result: ToolResult): string {
+  const parts: string[] = [result.summary];
+  collectStrings(result.value, parts);
+  const plain = toPlainText(parts.join(' ｜ '));
+  return plain.length > DONE_CHECK_HAYSTACK_CAP ? `${plain.slice(0, DONE_CHECK_HAYSTACK_CAP)}…` : plain;
 }
 
 /**
@@ -566,6 +647,9 @@ export class AgentLoopService extends Service {
       // 这份新读数交给**紧接的那一步**落进引用与观察（`execute` 里消费一次）：恢复口自己不写步行，
       // 但「重读发生在恢复之后、动手之前」这件事要在下一步的行里留得下凭据，否则 5.5-03 只能靠日志证明。
       scope.freshRead = reread.read;
+      // 交还页面时先问一句「这件事是不是人已经顺手做完了」（spec 5.5-08）：
+      // 做过就记 `skipped` 并推进游标，那只手一次都不许被按——重复打招呼比多问一句「要不要批准」严重得多。
+      this.skipStepDoneByHuman(scope, reread.read);
     }
     this.updateRun(runId, {
       status: 'running',
@@ -810,7 +894,9 @@ export class AgentLoopService extends Service {
       .prepare('SELECT status FROM agent_step WHERE run_id = ?')
       .all(scope.runId) as unknown as { status: string }[];
     // 「跑到了」不等于「做成了」：任何一步不是 ok，这条 run 就不能自称 completed（5.2-09 的凭据）。
-    const allSucceeded = scope.cursor > 0 && finished.every((row) => row.status === 'ok');
+    // 唯一的例外是 `skipped`：人在接管期间把这件事做完了（5.5-08），页面上那条结果是真的，只是不由本 agent 做出。
+    // 把它算成失败会让最常态的那种协助把界面那句「做完了」变成「有步骤没成功」——那是谎报的反方向，但同样没人要。
+    const allSucceeded = scope.cursor > 0 && finished.every((row) => row.status === 'ok' || row.status === 'skipped');
     this.finish(scope, allSucceeded ? 'completed' : 'failed', allSucceeded ? 'COMPLETED' : 'STEP_UNSUCCESSFUL');
   }
 
@@ -952,6 +1038,43 @@ export class AgentLoopService extends Service {
   }
 
   /**
+   * 人已经在页面上把这一步做完了，就把那一格记成跳过（spec 5.5-08，文件头第 9 条的唯一实现处）。
+   *
+   * 三条口径写死在这里：
+   * ① 判据来自**那只手自己的声明**（经 `agent.tools.doneMarkerOf` 现读，见那里的注释为什么是一个窄口）——
+   *    循环不认识平台、也不猜页面文案；没标定就是 `null`，`null` 就永不跳过。把「大概长这样」猜进来
+   *    换来的是悄悄跳掉一次外发（plan 5.5-e 的 E4：假阳性看得见，假阴性才是没人管的）；
+   * ② 只看**这一次恢复时**的新读数（`haystack`），不看接管前那份快照，也不再读第二次页面：
+   *    5.5-03 那一道重读就是这里唯一的事实来源，读两次就有了两条互相可能的「现在」（§2.5）；
+   * ③ 命中即落一行 `skipped` + 推进游标 + 消费掉这份读数，**一次都不调工具**：
+   *    判定口、确认单、`entitlement.gate` 那三道闸门因此全都不参与——它们拦的是"动手"，这一步没动手。
+   * @param scope 本次 run 的作用域（游标停在要判的那一格）
+   * @param read 恢复时那份新读数（比对完即丢，正文不进 prompt 也不落库，§8.5）
+   * @returns 是否真的跳过了那一格；跳过时那一行已落库、游标已推进、这份读数已被消费
+   */
+  private skipStepDoneByHuman(scope: RunScope, read: FreshPageRead): boolean {
+    const step = scope.plan[scope.cursor];
+    if (!step) return false;
+    const marker = this.registry.doneMarkerOf(step.toolId);
+    if (marker === null || !read.haystack.includes(marker)) return false;
+    this.writeStep(
+      scope,
+      step,
+      'skipped',
+      `这一步由人在页面上做完了：重读到的现状里出现「${marker}」，那只手一次都没被按｜${read.note}`,
+      [read.ref],
+      null,
+      DONE_BY_HUMAN,
+    );
+    scope.freshRead = null;
+    scope.cursor += 1;
+    this.ctx.logger.info(
+      `run ${scope.runId} 第 ${String(step.planStepIndex + 1)} 步 ${step.toolId} 人已做完，记为 skipped（哨兵「${marker}」· 证据 ${read.ref}）`,
+    );
+    return true;
+  }
+
+  /**
    * 现问一次「现在这页长成什么样」（spec 5.5-03 / 04 共用的那道重读）。
    *
    * 三条口径写死在这里，因为它们正是这片要防的三件事：
@@ -960,8 +1083,9 @@ export class AgentLoopService extends Service {
    * ② 读不到就返回原因而不是抛——调用方一处是「拒绝恢复」、一处是「停在安全点报原因」，
    *    两种处置说的话不同（`resume` 与 `replanStep`），但读页面这个动作只此一份实现（§2.2）；
    * ③ 回来的正文一律先去标记、截断之后才进上下文（`clipReading`），整页 HTML 不进 prompt（5.2-06）。
-   * @returns 成功带 `{ref, excerpt, at, note}`（`ref` 每次都是新的时间戳，所以接管前后的两份快照
-   *   在步行里必然不同名——5.5-03 要的就是这个可对比性）；失败带一句能对账的原因
+   * @returns 成功带 `{ref, excerpt, haystack, at, note}`（`ref` 每次都是新的时间戳，所以接管前后的两份快照
+   *   在步行里必然不同名——5.5-03 要的就是这个可对比性；`haystack` 只给 5.5-08 的比对用，见 `textHaystack`）；
+   *   失败带一句能对账的原因
    */
   private async rereadPage(): Promise<{ ok: true; read: FreshPageRead } | { ok: false; reason: string }> {
     const toolId = this.config.rereadToolId;
@@ -984,7 +1108,13 @@ export class AgentLoopService extends Service {
     const ref = `snapshot:${toolId}@${String(at)}`;
     return {
       ok: true,
-      read: { ref, excerpt: clipReading(reply.result.summary), at, note: `动手前已重读页面（${ref}）` },
+      read: {
+        ref,
+        excerpt: clipReading(reply.result.summary),
+        haystack: textHaystack(reply.result),
+        at,
+        note: `动手前已重读页面（${ref}）`,
+      },
     };
   }
 

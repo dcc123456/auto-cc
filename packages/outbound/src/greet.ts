@@ -52,7 +52,16 @@ export const alreadySentScope = (runId: string | null): string =>
   runId === null ? '在此前那些未挂工作流的发送里' : '在本次运行里';
 
 /** 编排层暂无可选项；strict 让 `cordis.yml` 里写错的键在挂载期就报错。 */
-export const greetSchema = z.strictObject({});
+export const greetSchema = z.strictObject({
+  /**
+   * 「这一步由人在页面上做完了」的那句话面文本（spec 5.5-08 的判据，交给 `agent.loop` 现读）。
+   *
+   * 它是**装配侧标定的一个事实**而不是业务映射：本包不猜任何平台页面上写着什么（AGENTS.md §6——
+   * 猜来的文案一旦在页面上出现就会悄悄跳掉一次外发），所以默认不给，不给就永不自动跳过。
+   * 标定来自活页面：在 fixture 上手动发一条打招呼，看父页那行状态真的写出什么，再把它原样填进来。
+   */
+  doneMarker: z.string().min(1).optional(),
+});
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
 export type GreetConfig = z.infer<typeof greetSchema>;
@@ -130,8 +139,12 @@ export class OutboundGreetService extends Service {
     'sessions',
   ];
 
-  constructor(ctx: Context, _options: GreetConfig) {
-    // 无配置项也要接住第二个实参：cordis 递的是校验后的配置对象（AGENTS.md §9 实测 1.3）。
+  constructor(
+    ctx: Context,
+    private readonly config: GreetConfig,
+  ) {
+    // 接住校验后的配置对象（AGENTS.md §9 实测 1.3）：本服务现在只读其中一位——`doneMarker`，
+    // 它是装配侧对标定事实的陈述，不是本包对页面的猜测（见 `greetSchema` 里那一条注释）。
     super(ctx, 'outbound.greet');
   }
 
@@ -327,6 +340,10 @@ export class OutboundGreetService extends Service {
           target: 'request.jobId',
           params: { platform: 'request.platform', job: 'request.jobId', text: 'request.text' },
         },
+        // 「人已做完」的哨兵（spec 5.5-08）：原样透传装配侧标定过的那句话面文本，没标定就是 `undefined`，
+        // 循环据此**永不自动跳过**——外发这一格跳过错了的代价是「这条打招呼再也不会发」，
+        // 而漏判的代价只是「再问一次要不要批准」，两个方向不对称，所以猜不可作为默认值。
+        doneMarker: this.config.doneMarker,
         // 回执只在真发出去时存在（失败一律以结构化错误上浮），所以这里可以说「已发出」；
         // 账本行 id 是最硬的一条证据引用——它同时是额度闸门记下的那一笔（§7.3）。
         run: async ({ request }) => {

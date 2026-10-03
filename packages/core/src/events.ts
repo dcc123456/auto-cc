@@ -1064,6 +1064,19 @@ export interface AgentToolDeclaration<I = unknown, R = unknown> {
    */
   readonly workflow?: AgentToolWorkflowClause;
   /**
+   * 这一步**由人在页面上做完了**长什么样的一句话面文本（spec 5.5-08 的判据对象）。**省略即永不自动跳过**。
+   *
+   * 为什么是文本而不是选择器或闭包：判据要问的是「现在这页上有没有出现『已发出／已回复』这类结果」，
+   * 而循环不认识浏览器、也不认识任何具体平台的选择器（plan §8 禁止在 agent 层写业务映射）。
+   * 文本哨兵是这只手的主人（能力包）自己标定的一条页面事实，循环只做一次子串比对（`agent.loop` 的
+   * `skipStepDoneByHuman`），比对的 haystack 是那次只读重读交回的**全部可读文本**，不是进 prompt 的那 80 字摘要。
+   * 与 `workflow` 同一口径：**只在主进程内被现读**（`agent.tools.doneMarkerOf`），不进 `ToolDescriptorView`、
+   * 不过 IPC——渲染层为一个用不上的字段拆壳没有收益（§2.6）。
+   * 为什么默认不给：猜中的那次会把一次外发悄悄跳掉，猜不中的那次只是多问一句「要不要批准」；
+   * 未标定因此取安全方向，而标定必须由人在装配侧（服务配置）显式写下那句页面原话。
+   */
+  readonly doneMarker?: string;
+  /**
    * 实际执行。
    * @param params 已过 schema 的入参
    * @param signal 取消信号，实现必须协作式让出（与 runner 同一语义）
@@ -1098,13 +1111,16 @@ export const AGENT_RUN_STATUSES = ['proposed', 'running', 'paused', 'completed',
 export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number];
 
 /**
- * 一步的落库状态（spec 5.2-02 / 05）。
+ * 一步的落库状态（spec 5.2-02 / 05 / 08）。
  *
  * `pending` 是「行已经写下、动作还没回来」：它让中途叫停与崩溃后的重读都看得见进度，
- * 而不是只能等这一步变成终态。没有 `skipped`——没跑到的步根本不落行，
- * 「跳过了第 3 步」这种读数没人能产生，留着就是死枚举（§2.4）。
+ * 而不是只能等这一步变成终态。
+ * `skipped` 是 5.5-08 补的第五态：**这只手一次都没被按**，因为人在接管期间已经把这件事做完了
+ * （判据是那只手声明的 `doneMarker` 出现在恢复时那份新读数里）。它与 `refused` 的区别在谁也没拒绝它，
+ * 与 `ok` 的区别在页面上那条结果不是本 agent 做的——`observation` 与 `evidence_refs` 必须能读出这两件事，
+ * 所以生产者是 `agent.loop.skipStepDoneByHuman` 一处，别处不许凭空写这一态（§2.4 不留死枚举）。
  */
-export const AGENT_STEP_STATUSES = ['pending', 'ok', 'failed', 'refused'] as const;
+export const AGENT_STEP_STATUSES = ['pending', 'ok', 'failed', 'refused', 'skipped'] as const;
 
 export type AgentStepStatus = (typeof AGENT_STEP_STATUSES)[number];
 
@@ -1175,7 +1191,7 @@ export type AgentRunView = {
 export type SedimentStepView = {
   planStepIndex: number;
   toolId: string;
-  /** 这一步在 `agent_step` 里的状态原值（`pending` / `ok` / `failed` / `refused`，见 `AGENT_STEP_STATUSES`）。 */
+  /** 这一步在 `agent_step` 里的状态原值（`pending` / `ok` / `failed` / `refused` / `skipped`，见 `AGENT_STEP_STATUSES`）。 */
   stepStatus: AgentStepStatus;
   sedimentable: boolean;
   reason: string | null;
