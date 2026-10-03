@@ -241,9 +241,9 @@ describe('agent.policy 的免确认白名单（5.3-06 / 07）', () => {
     expect(after).toEqual([]);
     const refusedAgain = policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' });
     expect(refusedAgain).toMatchObject({ canRun: false, code: 'CONFIRMATION_REQUIRED' });
-    // 拒绝原话是指针，必须指向**当下真有的**那条口（5.3-b 的免确认白名单）；
-    // 它还留着「逐条批准的卡片在 5.3-c 接」这句限定，所以这句不许被改写成已经能逐条批准。
+    // 拒绝原话是指针，必须指向**当下真有的**那条口：5.3-b 的免确认白名单，以及 5.3-c 已经接上的确认单。
     expect(refusedAgain.message).toContain('免确认白名单');
+    expect(refusedAgain.message).toContain('确认单');
   });
 
   it('名单读数现读注册表：加白的一只带副作用级与标题键，手被摘掉后 descriptor 变 null 且判定给 TOOL_UNAVAILABLE', async () => {
