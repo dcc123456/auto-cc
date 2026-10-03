@@ -15,7 +15,16 @@
  * 模板与提示词全部在注册表 `./prompts.ts`（spec 4.6-09，由 `scripts/check-prompts.ts` 机检），
  * 本文件只做装配、校验与回落决策。
  */
-import { AppError, agentTool, asApp, registerAgentTools, Service, toolResult, type Context } from '@auto-cc/core';
+import {
+  AppError,
+  agentTool,
+  asApp,
+  jdKeySourceOf,
+  registerAgentTools,
+  Service,
+  toolResult,
+  type Context,
+} from '@auto-cc/core';
 import { z } from 'zod';
 import { findUnsupportedClaims } from './claims.js';
 import { buildScriptMessages, renderScriptTemplate, SCRIPT_PROMPT_VERSION } from './prompts.js';
@@ -275,6 +284,19 @@ export class OutboundScriptService extends Service {
         `${request.kind} 类话术需要对方最后那条消息（recruiterMessage）才能成立，请先取到对话记录再生成`,
         'outbound.script',
         { kind: request.kind },
+      );
+    }
+    // 岗位键必须有出处（spec 5.7-f / plan 决策十三）：§8.4 的事实锁定管住了话术里的数字与承诺，
+    // 但管不住「这句话是发给哪个岗位的」——5.7-d 那次模型给的 `jdId:"1009"` 在 `jobs` 里没有行，
+    // 模板照样产出一句「前端工程师（工具链方向）」；那句话若被发出去，收信人对上一个不存在的岗位。
+    // 只在问得到时拦：`jd.store` 未挂载（纯 outbound 测试、没装平台包的进程）时放行，
+    // 与 `jdReplyStatusOf` 的「问不到不猜」同源，否则本地模板话术会被整套锁死。
+    if (jdKeySourceOf(this.ctx)?.hasJob(request.jdId) === false) {
+      throw new AppError(
+        'OUTBOUND_JD_UNREGISTERED',
+        `岗位 ${request.jdId} 在库里没有记录，话术不能凭空指向一个没抓到的岗位；先跑一次 JD 抓取，或用抓取结果里给出的岗位键`,
+        'outbound.script',
+        { jdId: request.jdId },
       );
     }
     // 引用清单在**问模型之前**就定下来：它是产物的回指，不是模型选了什么才算数（spec 4.6-02）。

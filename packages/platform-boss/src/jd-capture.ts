@@ -120,6 +120,9 @@ function reasonOf(error: unknown): string {
 
 /** 停止判定的三种结局，界面据此说明「为什么停了」。 */
 type StoppedBy = CaptureRunView['stoppedBy'];
+
+/** 一次抓取回给对话的岗位键上限（spec 5.7-f）：卡片不是日志，超出的条数只在摘要里报数、不再列引用。 */
+const CAPTURED_REF_LIMIT = 12;
 export class JdCaptureService extends Service {
   static provide = 'jd.capture';
   static Config = jdCaptureSchema;
@@ -295,6 +298,8 @@ export class JdCaptureService extends Service {
       rounds,
       containers,
       stored: touched.size,
+      // 本轮的真实岗位键（spec 5.7-f）：直接取抓取循环本来就攥着的 `collected`，不查库、不二次判定。
+      captured: [...collected.values()].map((summary) => ({ jobId: summary.jobId, title: summary.title })),
       skipped,
       stoppedBy,
       total: this.store.count(),
@@ -358,7 +363,9 @@ export class JdCaptureService extends Service {
       agentTool({
         id: 'jd.capture.run',
         titleKey: 'agent.tool.labels.jdCapture',
-        description: '按搜索条件在平台列表页滚动收集 JD 并读详情入库，占一条 search 额度',
+        description:
+          '按搜索条件在平台列表页滚动收集 JD 并读详情入库，占一条 search 额度；' +
+          '结果与摘要里会带回本轮抓到的岗位键（`jdId` 只能从这些键里选，不要自己编号）',
         input: z.strictObject({
           criteria: z.strictObject({
             keyword: z.string().min(1),
@@ -377,15 +384,21 @@ export class JdCaptureService extends Service {
           target: 'criteria.keyword',
           params: { query: 'criteria.keyword', city: 'criteria.city', target: 'criteria.limit' },
         },
-        // 本轮不回传逐行 JD id（`CaptureRunView` 只有计数），所以引用给的是「哪一轮抓取」这个回指标；
-        // 逐条 JD 的证据由 `jd.repository` 那侧按 keyword 查得到，不在这里造第二套读数。
+        // 逐条岗位键在这里交出去（spec 5.7-f）：只回计数时，规划器手上没有一个可指的真实 id，
+        // 5.7-d 那次就是因此编出 `jdId:"1009"`。摘要与引用共用同一份 `result.captured`，不各查一遍库。
         run: async ({ criteria }) => {
           const result = await this.run(criteria);
+          const listed = result.captured.slice(0, CAPTURED_REF_LIMIT);
+          const evidenceRefs = [`search:${result.platform}/${result.keyword}`];
+          for (const job of listed) evidenceRefs.push(`job:${result.platform}/${job.jobId}`);
+          const keys = listed.map((job) => `${job.jobId}「${job.title}」`).join('、');
+          const omitted = result.captured.length - listed.length;
           return toolResult(result, {
             summary:
               `在 ${result.platform} 抓「${result.keyword}」：${String(result.rounds)} 轮 · 入库 ${String(result.stored)} 条` +
-              `（跳过 ${String(result.skipped.length)} 条）· 停在 ${result.stoppedBy} · 库内共 ${String(result.total)} 条`,
-            evidenceRefs: [`search:${result.platform}/${result.keyword}`],
+              `（跳过 ${String(result.skipped.length)} 条）· 停在 ${result.stoppedBy} · 库内共 ${String(result.total)} 条` +
+              ` · 本轮岗位键：${keys}${omitted > 0 ? `（另有 ${String(omitted)} 条未列，见引用）` : ''}`,
+            evidenceRefs,
           });
         },
       }),

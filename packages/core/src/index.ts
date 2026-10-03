@@ -16,6 +16,7 @@ import type {
   ConsentGate,
   EmbedGateway,
   GreetChannelSource,
+  JdKeySource,
   JdReplyStatusSource,
   PagePacer,
   ResumeChannelSource,
@@ -211,6 +212,19 @@ export function deliverChannelsOf(ctx: Context): ResumeChannelSource | undefined
  */
 export function jdReplyStatusOf(ctx: Context): JdReplyStatusSource | undefined {
   return maybeService<JdReplyStatusSource>(ctx, 'jd.store');
+}
+
+/**
+ * 取「这个岗位键在库里有没有一条记录」的询问面（spec 5.7-f），实现方同样是 `jd.store`。
+ *
+ * 与上面一问同为**可选**：话术服务在只装了 outbound、没装平台包的进程里也要能产文案
+ * （界面手填一条岗位也能生成），那时问不到就放行——这是有意为之的弱保证，
+ * 判据与理由都写进 spec，不让它变成一个悄悄生效的开关。
+ * @param ctx 调用方的上下文
+ * @returns 询问面实例；JD 库没挂载时为 undefined
+ */
+export function jdKeySourceOf(ctx: Context): JdKeySource | undefined {
+  return maybeService<JdKeySource>(ctx, 'jd.store');
 }
 
 /**

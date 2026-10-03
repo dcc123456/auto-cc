@@ -660,6 +660,25 @@ export interface JdReplyStatusSource {
 }
 
 /**
+ * 「这个岗位键在库里有没有一条记录」的询问面（spec 5.7-f），实现方是 `jd.store`。
+ *
+ * 为什么形状声明在 L0：要问这句话的是话术生成（L3 `outbound.script`），而岗位记录的归属在
+ * L2 的 `jobs` 表那一侧。与 `JdReplyStatusSource` 同一个套路，但**不并入那一只**：
+ * 那一只按 (平台, 岗位 id) 问回复，话术入参里只有 `jdId`、没有平台，
+ * 借它返回值判「库里没有」等于替调用方决定"平台未知时算不算存在"。
+ *
+ * 同样只露读：存在性由 `jobs` 表决定，任何写入口都会变成第二套事实。
+ */
+export interface JdKeySource {
+  /**
+   * 一个平台侧岗位 id 在库里有没有对应记录（不区分平台，跨平台同名 id 取最近一条，与 `jd:` 引用同判据）。
+   * @param jobId 平台侧岗位 id（与 `jobs.job_id` 同源，不是库内自增 id）
+   * @returns true 库里至少有这条岗位；false 库里没有——话术不能凭空指向一个没抓到的岗位
+   */
+  hasJob(jobId: string): boolean;
+}
+
+/**
  * 首次启用自动化的风险签字（spec 2.7-06）的询问面，实现方是 `sessions`。
  *
  * 为什么形状声明在 L0：要问「这个平台签过字没有」的三方分别在外发编排（L3 `outbound.greet` /

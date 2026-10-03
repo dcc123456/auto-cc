@@ -379,6 +379,16 @@ export class JdStoreService extends Service {
   };
 
   /**
+   * 这个平台侧岗位 id 在库里有没有一条记录（spec 5.7-f 的 `JdKeySource.hasJob`）。
+   *
+   * 不另开一条 SQL：存在性就是"按同一判据读得到一行"，`detail()` 已经决定了那判据是什么
+   * （不区分平台时取最近一条）。两处各写各的 WHERE，早晚会各判各的（§2.5）。
+   * @param jobId 平台侧岗位 id（与 `jobs.job_id` 同源，不是库内自增 id）
+   * @returns true 至少有一行；false 库里没有
+   */
+  hasJob = (jobId: string): boolean => this.detail(jobId) !== null;
+
+  /**
    * 这条岗位到现在为止等到回复没有（spec 5.7-03 的第一项输入，契约见 core 的 `JdReplyStatusSource`）。
    *
    * 「已回复」仍然只在 `conversation_messages` 上算出来（2.5-14 的单一来源不动），这里新增的只是

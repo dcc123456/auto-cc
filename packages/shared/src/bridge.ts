@@ -2326,6 +2326,12 @@ export interface CaptureRunView {
   containers: number;
   /** 本轮新入库 + 更新的行数 */
   stored: number;
+  /**
+   * 本轮读到并落库的岗位键（spec 5.7-f）。抓取只回计数时，下游（尤其是对话的规划器）手上
+   * 没有任何可指的真实 id，只能编一个——5.7-d 那次就是这样产出 `jdId:"1009"` 的。
+   * 键是平台侧 `job_id`，与 `job:` / `jd:` 引用的那一把同源，不是库内自增 id。
+   */
+  captured: { jobId: string; title: string }[];
   skipped: CaptureFailureView[];
   /** 停止原因（spec 2.3-06 的「停止条件明确」） */
   stoppedBy: 'target-count' | 'no-new-content' | 'max-rounds';
