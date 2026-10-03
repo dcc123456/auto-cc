@@ -1,0 +1,63 @@
+5.6-04 长会话确定性压缩 —— 活体读数（真实窗口，非用例）
+
+窗口：pnpm dev（AUTO_CC_USER_DATA_DIR=tmp/dev-userdata，CDP 10222）
+入口：渲染层 target --url 5173，对话视图
+会话：7bb97c9c-990f-4379-98a5-07a163a0269e（本次新建，未切换过）
+门槛：生产默认 compactKeepRecentMessages=8 / compactTriggerTokens=600（cordis.yml 未覆盖，取 schema 默认）
+
+一、驱动方式
+在真输入框 [data-testid="chat-input"] 里逐轮 type + 真发送键 [data-action="send"] 点击，共 7 轮，
+每轮等到 [data-testid="chat-streaming-message"] 消失再发下一轮（回复是本地确定性模板，不接 LLM、不发网络）。
+
+二、逐轮界面读数（harness eval tmp/5.6d/state.js）
+round 2: rendered 4
+round 3: rendered 6
+round 4: rendered 8
+round 5: rendered 8   ← 行数过 8 且 token 过 600，前缀开始被折，界面不再往上长
+round 6: rendered 8
+round 7: rendered 8   banner { covered: "6", before: "1231", after: "686" }
+
+三、折叠后的消息流 DOM 断言（chat-scroll 内层容器 scrollTop=0）
+{ "scrollTop": 0, "items": 8, "firstText": "第四轮：简历里有一段空窗期是准备考研，写出来会不会减分，还是只写项目经历把时间线" }
+→ 被折的是第 1~3 轮共 6 行（前缀连续），第一条可见消息是第 4 轮的用户消息。
+
+四、服务侧同一份读数（window.autoCC.chat['session.current']()，折叠后）
+{
+  "sessionId": "7bb97c9c-990f-4379-98a5-07a163a0269e",
+  "autonomy": "suggest",
+  "visibleMessages": 8,
+  "compaction": {
+    "id": "b5c796da-ba38-45db-90fe-0441f7af81b2",
+    "coveredCount": 6,
+    "tokensBefore": 1231,
+    "tokensAfter": 686,
+    "factCard": {
+      "autonomy": "suggest",
+      "remainingByAction": [
+        { "action": "search", "remaining": null },
+        { "action": "greet", "remaining": null },
+        { "action": "deliver", "remaining": null }
+      ],
+      "lastStopReason": null,
+      "refusedSteps": [],
+      "deliveredTargetIds": []
+    }
+  }
+}
+tokensBefore 1231 → tokensAfter 686：同一把尺（estimateTokens 量 row.parts 文本）下的可量化下降，
+差值 545 正是被折那 6 行的估计量。remaining 全为 null 是本机闸门未配日上限（无限），不是缺数据。
+
+五、「事实卡是现问的」这一条的活体证据
+点真按钮 [data-autonomy="semi"]（切档位）之后，同一次 current() 读到：
+  session.autonomy = "semi"
+  factCard.autonomy = "semi"      ← 跟着变
+  compaction.id = "b5c796da-ba38-45db-90fe-0441f7af81b2"  ← 同一行，没重写
+  coveredCount / tokensBefore / tokensAfter = 6 / 1231 / 686 ← 一个数字都没动
+界面同步显示「当前档位：半自动」与「切换档位为 半自动：成功」。
+压缩行只存覆盖区间与两个 token 数，档位/额度/停止原因/被拒步/已投递目标五位在**读的时候**现问服务，
+所以真值一变、卡片就跟着变，而折叠读数本身保持稳定。
+
+六、证据文件
+docs/acceptance/5.6/5.6-04-compress-banner.png  d9d4e0c17b284eea9a9700f7ddd90c1c6fa2c5e7
+docs/acceptance/5.6/5.6-04-facts-follow-tier.png ae3f7eb7f4fd99241e7fe6437afb25b88321d04c
+（两张 sha1 两两不同；母图留在被忽略的 tmp/5.6d/，未入库）
