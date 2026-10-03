@@ -1131,18 +1131,89 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
   本篇文档，逐片推 `origin/main`。⑧ 暂存区只有源码 / 测试 / 本文档与 `docs/acceptance/5.4/` 新增的 6 个文件
   （4 张按条目号命名的 png + 2 份读数 json）；探针脚本、原始截图、测试日志都在被忽略的 `tmp/54c/`（§7.5）。
 
+## 5.5 人工接管与恢复
+
 | ID     | 验收标准                                                                                   | 方式 | 验证操作                                 | 状态 |
 | ------ | ------------------------------------------------------------------------------------------ | ---- | ---------------------------------------- | ---- |
 | 5.5-01 | 任意时刻用户可接管内嵌浏览器，界面明确显示"已人工接管"，agent 自动化停住                   | V    | 接管 → 截图状态标识                      | [ ]  |
-| 5.5-02 | 接管期间 agent 不发出任何动作（含只读动作也不改变页面）                                    | U    | 接管后断言动作计数为 0                   | [ ]  |
+| 5.5-02 | 接管期间 agent 不发出任何动作（含只读动作也不改变页面）                                    | U    | 接管后断言动作计数为 0                   | [x]  |
 | 5.5-03 | 恢复时**强制重读**目标页面状态，不复用接管前的 DOM 快照                                    | U    | 接管时改页面 → 恢复 → 断言重读发生       | [ ]  |
 | 5.5-04 | 元素指纹不匹配时重新规划该步，而不是硬点或按索引回退                                       | U    | 改结构 → 断言走重规划分支                | [ ]  |
 | 5.5-05 | 检查点包含**待决审批请求**；重启后未应答的请求以新的可见卡片重新出现                       | V+C  | 挂起审批 → 杀进程重启 → 截图待决卡片     | [ ]  |
 | 5.5-06 | 检查点还原后 `runId` 与已完成步不重复执行（幂等键 `runId+nodeId+targetId` 生效）           | U    | 还原 → 断言已完成步未重放                | [ ]  |
-| 5.5-07 | 登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA                          | U    | 三类 fixture 响应 → 断言均停住并通知     | [ ]  |
+| 5.5-07 | 登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA                          | U    | 三类 fixture 响应 → 断言均停住并通知     | [x]  |
 | 5.5-08 | 用户在场手动操作后，agent 能正确识别"这一步已被人做完"并跳过                               | V    | 手动完成打招呼 → 恢复 → 截图显示跳过该步 | [ ]  |
-| 5.5-09 | 接管与恢复全过程写入步记录（可审计谁在何时动了页面）                                       | U    | 查 run 记录含接管时间段                  | [ ]  |
+| 5.5-09 | 接管与恢复全过程写入步记录（可审计谁在何时动了页面）                                       | U    | 查 run 记录含接管时间段                  | [x]  |
 | 5.5-10 | 反向验证：接管后页面被改到无法继续时，agent 明确报"无法定位目标，需重规划"而非静默重试到底 | U    | 清空目标节点 → 断言终止并给原因          | [ ]  |
+
+**5.5-a 落地记录（2026-10-03）**——接管态做成一处状态源，判定口与循环都硬依赖它，恢复口只归人
+
+- **落点**：`packages/core/src/events.ts`（`TakeoverStateView` / `TakeoverBeginInput` / `TakeoverEndInput` /
+  `TakeoverAuditRow` / `TakeoverStateSource` 与 `browser/takeover-changed` 事件，跨进程契约只在这一处）、
+  `packages/browser/src/takeover-service.ts`（新增 `browser.takeover`，`begin` / `end` / `held` / `audit` 四口 +
+  号段 **21** 的 `takeover_events` 两张索引）、`packages/agent/src/loop/policy.ts`（判序第一道：接管在途 →
+  `TAKEOVER_HELD`，排在「计划未确认」「档位只读」「免确认白名单」之前）、`packages/agent/src/loop/loop.ts`
+  （每轮步前现问 + 订 `browser/takeover-changed` 叫醒挂在暂停单上的 run + 被接管收掉的确认单改记
+  `TAKEOVER_HELD` + 新增 `agent.loop.resume`）、`packages/shared/src/bridge.ts`（三只口进白名单、事件进
+  `RENDERER_EVENTS`；`audit` **没进**——回看界面归 5.5-b/5.5-e，先不开放一条只读全景口）、
+  `packages/main/src/registry.ts` + `cordis.yml`（`browser-takeover` 装配位与 `agent-policy` / `agent-loop` 的
+  `dependsOn`）、`scripts/check-agent-model-authority.ts`（新增第 ⑧ 条）。
+- **三条判据逐条怎么对上**：
+  - **5.5-02**：判定口那 18 格（三档 × 三种副作用级 × 两只手）在接管中**逐格**交回 `TAKEOVER_HELD`，
+    只读级也被拒——判据的字面是「含只读动作也不改变页面」；循环侧两条路都验了副作用清单为空
+    （`calls.length === 0`）而不是「返回了一个拒绝」：一是步前现问直接落 `paused`，二是正挂在确认单上时
+    被接管收单（卡片读数 `cancelled` + `decision:null`，步行记 `refused` 并在原话里点名接管），
+    交还页面后人再按批准才真出手（`calls` 里只有 `approved:1` 那一条）。
+  - **5.5-07**：三类读数是从**真观测层**发出来的（`browser.risk` 挂四只替身跑起来，喂主文档 403 / 429 /
+    200 的验证页），不是手造信号——手造那两只证「订阅在不在」，这一组证「接没接错线」
+    （kind 与 reason 对不上时前者照样过）。登录失效走 `session/expired` → `reason: 'session-expired'`。
+    连发两次风控读数只开一轮接管（`beginCount` 仍是 1、审计仍是一行），起点与第一个原因不会被后一次抹掉。
+    本包对「什么是验证码」没有任何判据（§8.3 不识别不规避），只把信号换成状态。
+  - **5.5-09**：`takeover_events` 一行 `begin` 一行 `end`，各带 `actor`（人按下记 `user`、自动记 `system`）
+    与 `created_at`；run 那侧落 `status: 'paused'` + `stop_reason: 'TAKEOVER_HELD'`，被收掉的那张卡片另有一行
+    `refused` 步行。**残留的口径差**（如实记）：自动接管那一路的信号里没有 runId，所以「按 runId 直查那段时间」
+    今天只有人按下接管那条路能做到（`begin` 的入参已经有 `runId` 位，等 5.5-b 的界面把当前 run 递进来就闭合），
+    自动那一路要人查时刻与 run 的 `stop_reason` 对上。这一条不改判据本体，登记到 5.5-b 的收尾里。
+- **与 plan §7.3 切片表的偏差（一处，必须留痕）**：那一行写的是「runner 的 begin/end 写入点」，落地改成
+  `browser.takeover` **订阅已有的两条信号**（`browser/risk-signal` 与 `session/expired`）。理由：工作流那一路今天
+  只有 run 内的 `requiresHuman` / `takeoverHandled` 标记，再让 runner 写一份「页面在人手里」就是第二份事实（§2.5
+  禁止两套都能用），而 5.5-07 要的三类信号本来就已经由 `browser.risk` 与 `sessions` 发出，缺的只是有人把它们
+  收敛成一个状态源。副作用：workflow 那一路的接管标记与这份状态源**尚未合流**，合流的人手入口是 5.5-b 那两把按钮。
+- **为什么是硬依赖而不是"有就查、没有就放行"**：`agent.policy` 与 `agent.loop` 把 `browser.takeover` 写进
+  `static inject`，装配面板摘掉它这两个服务就停在 PENDING（`fiberState === 'pending'` 且
+  `asApp(ctx).get('agent.policy')` 是 undefined，用例钉住）。「读不到接管态还照动手」正是 5.5-02 要防的那种静默失效。
+  代价已经付过一次：`packages/main` 里两份跨包链路台架（`three-gate-link` / `sediment-link`）因此必须挂真状态源，
+  本轮补上——`browser.takeover` 只 `inject` `store`，Node 侧挂得起来，不需要 Electron 外壳。
+- **号段与 §9 的 5.3-a 实测条**：两张索引 + 建表挂在**新开的 21** 上，且 `push` 认台账不认 `user_version`；
+  用例是「先写一行接管再重挂服务」——迁移里仍是 1 条 21、老库里那行审计还在、内存态回落到「没在接管」。
+- **`resume` 只回拨一格，且只回拨接管那一种**：末行是 `refused` + `code === TAKEOVER_HELD` 才把游标退回去，
+  `PAUSE_DENIED`（人按了拒绝）与超时那种不回拨——否则「人表过态拒了」会被恢复成「再问一次」；
+  恢复时仍在接管中就拒（`AGENT_LOOP_TAKEOVER_HELD`），放行会做出「按了继续却没继续」那种要人猜的形态。
+- **机检第 ⑧ 条**：`resume(runIdRaw` 与 `'agent.loop.resume'` 在全仓非测试源码里只许出现在 `loop.ts`（定义处）
+  与 `bridge.ts`（白名单派发处）两份文件，且 `tools.ts` 里读到这两个字符串即失败——模型若能自己按「继续」，
+  接管就挡不住任何东西。搜的是这两个具体形状而不是裸词 `resume`：工作流那一路也有一条 `resume()`，
+  把它算进来会让判据指着错误的文件，而一条会误报的机检最后只会被关掉。5.5-b 接界面时要把 `ChatPanel` 补进名单。
+- **本轮撞到的三条实测教训**：① 测试替身也要写**两参数构造器**——`ctx.plugin(FakeTakeoverService, {})` 的配置类型
+  是从构造器第二个实参反推的（§9 的 1.3 实测条），单参数写法在 `loop.test.ts` / `policy.test.ts` 两处各报一次
+  TS2345；② `pnpm lint` 那条「写档位只有一只口」的机检是**按文件里出现过的字符串**判的，注释里点名
+  `setAutonomy` 也会命中——改成中文概念名（「写档位」）而不是放宽机检，机检本身不动；
+  ③ 门禁结论一律靠 `> log 2>&1; echo EXIT=$?` 拿（5.4-c 那条教训在这里第二次起作用：第一次跑 test 时
+  `packages/main` 有 16 条失败，靠退出码才发现）。
+- **四道门禁实测**（收口前复跑，退出码逐个 echo）：`pnpm typecheck` exit 0、`pnpm lint` exit 0（九条机检含新的 ⑧
+  与 16 只工具的契约检查都在这一行背后）、`pnpm format:check` exit 0、`pnpm test` exit 0——21 个测试包无一失败
+  （`packages/browser 252`（其中接管那一份 17 条）、`packages/agent 133`、`packages/main 31`、`packages/core 41`、
+  `packages/workflow 118`、`packages/outbound 142`、`packages/resume-kb 398`）。macOS / Linux 运行期未验证（§9，一律 BLOCKED）。
+- **逐条状态位**：5.5-02 → `[x]`、5.5-07 → `[x]`、5.5-09 → `[x]`（三条判据栏都是 U，证据是上面那组用例与断言输出）；
+  5.5-01 保持 `[ ]`——它的判据要「界面明确显示已人工接管」，那半边的横幅与两把按钮是 5.5-b，
+  截图必须拍在功能同一刻（5.2-c / 5.3-b / 5.4-b 同一口径）。5.5-03 ~ 06、08、10 分属 c / d / e 三片，未动。
+- **§7.4 收尾自检**：① 四道门禁见上一条实测记录。② 本片没有 V 类条目（唯一相关的 5.5-01 明确留给 5.5-b）。
+  ③ 状态位无模糊项，`[ ]` 的两条都写明了归属。④ 复用检查：接管判据只写 `TAKEOVER_HELD` 一处码，
+  「读不到状态源就不挂载」用 `static inject` 表达而不是各处 `if (takeover)`，两类暂停的落账走同一个
+  `refuseStep` 入口，5.5-07 不新做检测而是订已有的两条信号（§2.1 / §2.3 / §2.5）。⑤ 死代码：`audit()` 只被用例调，
+  生产侧消费者在 5.5-b——它在白名单里没开放，因此不是一个"能用但没人用"的口子；替身
+  `FakeTakeoverService` 被两份台架用。⑥ 前端三项：本片零渲染层改动（无新文案、无样式、无图标）。
+  ⑦ 提交分六片：core 契约 / browser 状态源（含装配与白名单）/ browser 那份用例 / agent 闸门与恢复口
+  （含 policy 与 loop 的用例、main 的两份台架）/ 机检脚本第 ⑧ 条 / 本篇文档，逐片推 `origin/main`。⑧ 暂存区只有源码、测试与本文档；探针脚本与四份门禁日志都在被忽略的 `tmp/`（§7.5）。
 
 ## 5.6 会话持久化、压缩与脱敏
 
