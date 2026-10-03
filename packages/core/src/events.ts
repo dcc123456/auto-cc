@@ -840,8 +840,11 @@ export type ChatRole = 'user' | 'assistant';
  *
  * 命名与 AI SDK 的 `ToolUIPart` 状态对齐（`input-available` ≈ `running`、`output-error` ≈ `failed`），
  * 但不照抄它的全集：P1 没有「入参正在流式生成」这件事，也不做批准态（那是 P5 的策略层）。
+ * `skipped` 是 5.5-08 补的第四态：这一步**由人在页面上做完了**，那只手一次都没被按。它既不是 `done`
+ * （本 agent 没做成任何事，写成绿色「已完成」会把人做的功记到系统账上），也不是 `failed`
+ * （事确实办成了，红色会让人以为要重跑）——界面必须有第四格，否则这一态只能被借画成一句谎话。
  */
-export type ChatToolPartState = 'running' | 'done' | 'failed';
+export type ChatToolPartState = 'running' | 'done' | 'failed' | 'skipped';
 
 /** 一条消息里的文本片段。 */
 export type ChatTextPart = { kind: 'text'; text: string };

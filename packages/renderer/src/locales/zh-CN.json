@@ -685,7 +685,8 @@
         "state": {
           "running": "执行中",
           "done": "已完成",
-          "failed": "失败"
+          "failed": "失败",
+          "skipped": "人做完，跳过"
         }
       },
       "run": {

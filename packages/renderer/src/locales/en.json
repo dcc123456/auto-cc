@@ -685,7 +685,8 @@
         "state": {
           "running": "running",
           "done": "done",
-          "failed": "failed"
+          "failed": "failed",
+          "skipped": "done by hand, skipped"
         }
       },
       "run": {

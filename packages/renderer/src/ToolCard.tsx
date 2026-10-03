@@ -14,6 +14,8 @@ export const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
   running: 'border-amber-900 bg-amber-950/30 text-amber-200',
   done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
   failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
+  // 跳过用中性偏冷的色：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
+  skipped: 'border-slate-700 bg-slate-900/40 text-slate-300',
 };
 
 /**
@@ -27,7 +29,14 @@ export const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
  * @returns 直接喂给 `ToolCard` 的工具段
  */
 export function stepToToolPart(step: AgentStepView, input: unknown): ChatToolPart {
-  const state: ChatToolPartState = step.status === 'pending' ? 'running' : step.status === 'ok' ? 'done' : 'failed';
+  const state: ChatToolPartState =
+    step.status === 'pending'
+      ? 'running'
+      : step.status === 'ok'
+        ? 'done'
+        : step.status === 'skipped'
+          ? 'skipped'
+          : 'failed';
   return {
     kind: 'tool',
     // 卡片键位带上 run 与下标：同一条链里两步调同一只工具时，React 不能把它们认成一张卡。
@@ -40,7 +49,9 @@ export function stepToToolPart(step: AgentStepView, input: unknown): ChatToolPar
     output: null,
     durationMs: step.durationMs,
     // 失败码原样带出（是数据不是文案，不进语言包），中文陈述由观察那一行负责。
-    errorText: step.code,
+    // 跳过那一格例外：它的 `code` 是 `DONE_BY_HUMAN`，记的是"谁做的"而不是"哪里错了"，
+    // 摆进红色那格就成了报错；原话已经在观察那一行说给人在看，错误位留空。
+    errorText: step.status === 'skipped' ? null : step.code,
   };
 }
 
@@ -102,10 +113,11 @@ export function ToolCard({
         inputLine
       )}
       {/* 观察与证据只在循环卡片上出现（5.2-09 的「指向证据」）：对话卡片没有落步读数，就不画这两段。
-          失败那一步的观察同样要画——那是「对话里出现的失败陈述」本体，上面那行裸码只是它的编号。 */}
+          失败那一步的观察同样要画——那是「对话里出现的失败陈述」本体，上面那行裸码只是它的编号。
+          跳过那一格与成功同色：它说的是一句已成的事实（人做完了），不是一处需要修的错（5.5-08）。 */}
       {step && step.observation ? (
         <p
-          className={`mt-1 break-words ${step.status === 'ok' ? 'text-slate-300' : 'text-rose-200'}`}
+          className={`mt-1 break-words ${step.status === 'failed' || step.status === 'refused' ? 'text-rose-200' : 'text-slate-300'}`}
           data-step-observation={step.observation}
         >
           {step.observation}
