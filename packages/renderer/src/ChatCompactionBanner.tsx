@@ -23,7 +23,7 @@ export function ChatCompactionBanner({ compaction }: { compaction: ChatCompactio
       data-covered-count={compaction.coveredCount}
       data-tokens-before={compaction.tokensBefore}
       data-tokens-after={compaction.tokensAfter}
-      className="border-b border-slate-800 bg-slate-900/40 px-4 py-2 text-[11px] text-slate-400"
+      className="min-h-[56px] shrink overflow-y-auto border-b border-slate-800 bg-slate-900/40 px-4 py-2 text-[11px] text-slate-400"
     >
       <span className="flex items-center gap-1 text-slate-300">
         <Minimize2 size={11} />

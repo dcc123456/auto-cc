@@ -289,8 +289,10 @@ export function ChatPanel() {
         onRelease={() => void takeover.release()}
       />
 
-      {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。 */}
-      <div ref={scrollRef} data-testid="chat-scroll" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
+          消息流留 120px 地板：上面几条常驻读数带（会话条、压缩读数、档位、免确认白名单、接管横幅）
+          在 737px 高的窗口里没有地板时会被挤成 24px 的一条缝，任务卡整个看不见（5.7-d 实测）。 */}
+      <div ref={scrollRef} data-testid="chat-scroll" className="min-h-[120px] flex-1 overflow-y-auto px-4 py-3">
         {messages.length === 0 && !isStreaming && !agentRun.run && !workflowRunView ? (
           <p className="text-[11px] text-slate-500" data-testid="chat-empty">
             {t('chat.empty')}

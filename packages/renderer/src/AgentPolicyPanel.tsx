@@ -52,8 +52,13 @@ export function AgentPolicyPanel({
   const exemptIds = new Set((exempt ?? []).map((row) => row.toolId));
   const candidates = tools.filter((tool) => tool.requiresConfirmation && !exemptIds.has(tool.id));
 
+  // 整带限高且自带滚动：窗口矮时这一带让位给消息流，而不是把任务卡挤出可视区（5.7-d 实测过
+  // 737px 高的窗口里它长到 191px，消息流被挤成 24px 的一条缝）。带内两张清单仍各自限高。
   return (
-    <div data-testid="agent-policy-panel" className="border-b border-slate-800 px-4 py-2">
+    <div
+      data-testid="agent-policy-panel"
+      className="max-h-20 min-h-[56px] shrink overflow-y-auto border-b border-slate-800 px-4 py-2"
+    >
       <div className="flex items-center gap-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
           <ShieldCheck size={11} />
