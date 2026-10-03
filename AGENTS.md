@@ -253,6 +253,16 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   早就按这个写了（"它是全进程指标，别的用例的定时器也在进出"），`packages/workflow` 那条按相等写的用例
   在机器忙时必红，与被测代码无关。
   要用相等断言就得自己保证基线只含被测对象，做不到就补一条行为判据（等过退避时长看相位有没有自己续跑）。
+- **实测（5.4-b）harness 再补四条**：⑥ Electron 的 CDP endpoint **没有 `Browser` 域**，且
+  `Emulation.setDeviceMetricsOverride` 只在**那条会话存活期间**有效——放大视口 + 滚动 + `Page.captureScreenshot`
+  必须在同一条 WebSocket 里做完，用完再关（`tmp/54b/shot.mjs` 就是这么写的）；⑦ 未激活的视图宽高是 0，
+  同名选择器会命中隐藏那一份（`[data-action=start]` 在工作流视图与用量面板里各一只），点之前先量
+  `getBoundingClientRect().height`；⑧ 渲染层没有 `#chat-panel` 这个 id，发送口是裸 `[data-action=send]`，
+  找入口要现枚举而不是照 testid 猜；⑨ `/run` 那一路的计划卡必须人按「确认并执行」才动
+  （`[data-action=confirm-run]`），这是 5.3 定的"不可自提升"，脚本不要绕过去调 `agent.loop.confirm`。
+- **实测（5.4-b）页面里敲进去的中文会撞自己的字符集校验**：`assertPlanName` 收了 ASCII `()` 没收全角 `（）`，
+  于是"中文名字不许有括号"——单测里写的是半角，永远测不到。**边界校验写完必须用真实输入法在页面上敲一遍**，
+  这属于 §7.1 的 V 类而不是 §7.4 的④。
 - **实测（2.5）页面上的浏览器动作前必须先 `sessions.open`**：内核视图未打开时页面操作以
   `NO_KERNEL_SESSION` 失败，而改一次配置就会关掉已打开的会话视图（与上面第一条同源），
   顺序必须是「改配置 → 重开会话 → 跑」。
