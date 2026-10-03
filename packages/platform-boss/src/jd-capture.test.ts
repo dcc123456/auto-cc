@@ -215,6 +215,9 @@ describe('抓取编排（spec 2.3-01 / 2.3-06）', () => {
     });
     expect(run.containers).toBe(5);
     expect(run.stored).toBe(3);
+    // 逐条岗位键交得出去（spec 5.7-f）：规划器只有拿到真实 id 才不会自己编一个。
+    expect(run.captured.map((job) => job.jobId)).toEqual(['1001', '1002', '1003']);
+    expect(run.captured.every((job) => job.title.length > 0)).toBe(true);
     expect(run.total).toBe(3);
     expect(jd.status()).toMatchObject({ total: 3, withDetail: 3 });
 
@@ -697,14 +700,16 @@ describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10�
       true,
     );
     const reply = await tools?.call('jd.capture.run', { criteria: { keyword: '前端', city: '上海' } });
-    // spec 5.1-11：抓取这一轮的可回指标（`search:平台/关键词`）随结果一起出来，工具卡片不必自己拼。
+    // spec 5.1-11 + 5.7-f：抓取既回「哪一轮抓的」（search:），也逐条回「抓到了哪几条」（job:平台/id），
+    // 工具卡片与规划器拿到的都是真键，不必自己编号。
     expect(reply).toMatchObject({
       ok: true,
       result: {
         value: { platform: 'boss', keyword: '前端', city: '上海', stored: 3, total: 3 },
-        evidenceRefs: ['search:boss/前端'],
+        evidenceRefs: ['search:boss/前端', 'job:boss/1001', 'job:boss/1002', 'job:boss/1003'],
       },
     });
+    expect(String((reply as { result: { summary: string } }).result.summary)).toContain('本轮岗位键：1001');
     expect(ledger.count()).toBe(1);
     expect(ledger.summary().recent[0]).toMatchObject({ action: 'search', targetId: '前端' });
   });

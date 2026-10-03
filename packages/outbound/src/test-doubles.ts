@@ -12,6 +12,7 @@ import {
   type AgentToolRegistry,
   type ConsentGate,
   type Context,
+  type JdKeySource,
   type JdReplyStatusSource,
   Service,
   type ToolEffect,
@@ -141,13 +142,14 @@ export class FakeAgentToolsService extends Service implements AgentToolRegistry 
 }
 
 /**
- * 假的 `jd.store`：只回答「这条岗位对方回过没有」。
+ * 假的 `jd.store`：回答「这条岗位对方回过没有」与「这条岗位在不在库里」两问。
  *
  * 存在理由是择机投递（spec 5.7-03）把回复状态列为四个输入之一，而真身在 `platform-boss` 包里、
  * 挂着 sqlite 与浏览器层——外发层的用例只需要「回过 / 没回过 / 库里没这条」三态。
  * 三态必须能拨：`null` 那一支是这条规则最要紧的边界（问不到就**不动手**，见 plan §7.5.5 决策七）。
+ * 5.7-f 起它还答第二问（话术生成前查岗位键有没有出处），两问共用同一张表。
  */
-export class FakeJdReplyStatusService extends Service implements JdReplyStatusSource {
+export class FakeJdReplyStatusService extends Service implements JdReplyStatusSource, JdKeySource {
   static provide = 'jd.store';
   static Config = z.strictObject({});
 
@@ -156,6 +158,9 @@ export class FakeJdReplyStatusService extends Service implements JdReplyStatusSo
 
   /** 被问了多少次（现问的读数：一次判定只该问一次，不缓存）。 */
   asks = 0;
+
+  /** 存在性被问了多少次（spec 5.7-f 同一条读数：话术生成在问模型之前问一次）。 */
+  keyAsks = 0;
 
   constructor(ctx: Context, _options: Record<string, never>) {
     super(ctx, 'jd.store');
@@ -175,5 +180,15 @@ export class FakeJdReplyStatusService extends Service implements JdReplyStatusSo
   replyStatus = (platform: string, jobId: string): boolean | null => {
     this.asks += 1;
     return this.statuses.get(`${platform}/${jobId}`) ?? null;
+  };
+
+  /**
+   * 契约见 `JdKeySource.hasJob`。与上面一问共用同一张 `statuses`——`set` 过就是库里有这条，
+   * 再存一份"已知岗位"表就是第二套事实（§2.7）。不区分平台：真身按 `job_id` 取最近一条，同判据。
+   */
+  hasJob = (jobId: string): boolean => {
+    this.keyAsks += 1;
+    for (const key of this.statuses.keys()) if (key.endsWith(`/${jobId}`)) return true;
+    return false;
   };
 }

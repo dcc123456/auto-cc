@@ -22,7 +22,7 @@ import {
   type OutboundScriptConfig,
   type ScriptDraftView,
 } from './script.js';
-import { FakeAgentToolsService } from './test-doubles.js';
+import { FakeAgentToolsService, FakeJdReplyStatusService } from './test-doubles.js';
 import { SCRIPT_PROMPT_VERSION } from './prompts.js';
 
 const KEY_ENV = 'AUTO_CC_LLM_TEST_KEY';
@@ -70,17 +70,20 @@ function stubFetch(reply: { status: number; body: unknown }): {
  * 替身必须早于本服务上岗：`registerAgentTools` 是软取，晚挂载只会登记出 0 个（2.8-08 的前提）。
  * @param llm 模型侧配置（`baseUrl: null` 即"未配置"，两类用例都靠它决定走模型还是走回落）
  * @param script 话术侧配置
- * @returns 话术服务与注册表替身
+ * @param withJdStore 是否挂上 `jd.store` 替身（spec 5.7-f：话术生成前要先问岗位键有没有出处）
+ * @returns 话术服务、注册表替身，以及（挂了替身时）那份岗位表
  */
-async function bootScript(llm: Partial<LlmConfig>, script: Partial<OutboundScriptConfig> = {}) {
+async function bootScript(llm: Partial<LlmConfig>, script: Partial<OutboundScriptConfig> = {}, withJdStore = false) {
   const ctx = new Context();
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
   await ctx.plugin(LlmChatService, { ...LLM_BASE, ...llm });
   await ctx.plugin(FakeAgentToolsService, NO_CONFIG);
+  if (withJdStore) await ctx.plugin(FakeJdReplyStatusService, {});
   await ctx.plugin(OutboundScriptService, { ...SCRIPT_BASE, ...script });
   return {
     script: asApp(ctx)['outbound.script'],
     tools: ctx.get('agent.tools') as unknown as FakeAgentToolsService,
+    jd: withJdStore ? (ctx.get('jd.store') as unknown as FakeJdReplyStatusService) : null,
   };
 }
 
@@ -113,6 +116,50 @@ const blockReading = (attempt: () => unknown): { code: string; rule: number; gro
     return { code: cause.code, rule: details.rule ?? -1, group: details.group ?? '', origin: details.origin ?? '' };
   }
 };
+
+describe('话术的岗位键必须有出处（spec 5.7-f / plan 决策十三）', () => {
+  it('库里有这把岗位键：照常产出，且只在问模型之前问一次出处', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const { script, jd } = await bootScript({}, {}, true);
+      jd?.set('boss', JD.jdId, false);
+      const draft = await script.generate(JD);
+      expect(draft.jdId).toBe(JD.jdId);
+      expect(jd?.keyAsks).toBe(1);
+      expect(fixture.bodies).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('库里没有这把岗位键：以 OUTBOUND_JD_UNREGISTERED 拦下，不发网络、不产文案（5.7-d 那次的 1009 就是这一类）', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const { script, jd } = await bootScript({}, {}, true);
+      jd?.set('boss', 'other-job', true);
+      const reading = await script
+        .generate(JD)
+        .then(() => null)
+        .catch((cause: unknown) => (cause instanceof AppError ? { code: cause.code, details: cause.details } : null));
+      expect(reading).toMatchObject({ code: 'OUTBOUND_JD_UNREGISTERED', details: { jdId: JD.jdId } });
+      expect(fixture.bodies).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('问不到出处（`jd.store` 未挂载）时放行——有意为之的弱保证，判据与理由写在 plan 决策十三', async () => {
+    const fixture = stubFetch({ status: 200, body: {} });
+    try {
+      const script = await ready({});
+      const draft = await script.generate({ ...JD, jdId: 'no-such-job-in-a-store-that-is-not-mounted' });
+      expect(draft.origin).toBe('template');
+      expect(fixture.bodies).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+});
 
 describe('outbound.script 的回落与黑名单（spec 2.5-01 / 09 / 10）', () => {
   it('模型未配置：回落模板、带上原因，且一次网络都不发（2.5-01）', async () => {
