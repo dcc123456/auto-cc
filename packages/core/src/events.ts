@@ -905,8 +905,62 @@ export type ChatSessionView = {
   deletedAt: number | null;
 };
 
-/** 界面首屏与重读时拿到的整份快照：当前会话 + 它的消息。 */
-export type ChatSnapshotView = { session: ChatSessionView; messages: ChatMessageView[] };
+/**
+ * 压缩时**现问**回来的关键事实卡（spec 5.6-02 的白名单，plan §7.4 决策三）。
+ *
+ * 每一位都是读的那一刻从真相取的，**不存进摘要行**：本地存第二份事实早晚会与真值不一致
+ * （§9 那条 2.5-e 的教训），而 5.6-03 要的「数值逐字不变」如果靠从旧消息里摘数字就永远只是近似。
+ * 取不到的那一位一律 `null` / 空数组，而不是猜一个——「这台机器没挂那只服务」与「额度是 0」是两件事。
+ */
+export type ChatFactCard = {
+  /** 当前会话此刻的档位（库里的 `chat_session.autonomy`，认不出的值已收成最保守档） */
+  autonomy: AutonomyLevel;
+  /**
+   * 各外发动作此刻还剩几条（`entitlement.gate.check()`）；`unlimited` 模式下该位为 null，闸门未挂载时整个数组为空。
+   *
+   * 动作名这里是 `string` 而不是 `QuotaAction`：那份名单住在契约包，而契约包反向依赖本包，
+   * 把三个字面值抄到这里就是第二份会漂移的口径（§2.7）。给值的一侧（agent）从 `QUOTA_ACTIONS` 遍历，
+   * 界面上这一位只当标签显示。
+   */
+  remainingByAction: { action: string; remaining: number | null }[];
+  /** 这段会话最近一次 run 为什么停下（`agent_run.stop_reason`，枚举码不是文案）；没跑过为 null */
+  lastStopReason: string | null;
+  /** 被判定口拒掉的步：哪只工具、哪个拒因码（spec 5.6-02 的「被否决做法」） */
+  refusedSteps: { toolId: string; code: string | null }[];
+  /** 已经递过简历的目标 id（账本里 `deliver` 行的 `targetId`，spec 5.6-02 的「已投目标 id」） */
+  deliveredTargetIds: string[];
+};
+
+/**
+ * 一段被折叠的较早消息的读数（spec 5.6-02 / 04，号段 24）。
+ *
+ * 这一位**不存文案**：库里存的是覆盖区间与被折叠的消息 id，句子由界面用 i18n 拼（主进程不造文案，
+ * 与 `ChatSessionView.title` 同一口径）。摘要是「折叠」的产物而不是「改写」：原文行一条都没动，
+ * 所以 5.6-03（数值逐字相同）与 5.6-10（压缩失败不丢消息）由结构保证，最坏情况就是「没折」。
+ */
+export type ChatCompactionView = {
+  id: string;
+  sessionId: string;
+  /** 被覆盖区间的左右端（毫秒，含左含右）：两条边界都是真存在过的消息时间戳 */
+  fromTs: number;
+  toTs: number;
+  /** 被折叠掉的消息条数（界面上那句「N 条较早消息已压缩」的 N） */
+  coveredCount: number;
+  /** 折叠前后的 token 估计（同一把尺：`estimateTokens`），5.6-04 要的「下降可量化」就是这两个数 */
+  tokensBefore: number;
+  tokensAfter: number;
+  createdAt: number;
+  /** 读的那一刻现问回来的关键事实（不是折叠那一刻的快照，见 `ChatFactCard` 的注释） */
+  factCard: ChatFactCard;
+};
+
+/** 界面首屏与重读时拿到的整份快照：当前会话 + 未被折叠的那段消息 + 压缩读数（没折过时为 null）。 */
+export type ChatSnapshotView = {
+  session: ChatSessionView;
+  messages: ChatMessageView[];
+  /** 最近一段有效压缩的读数；一条都没折过、或摘要行与被折叠的原文对不上（原文被外部删了）时为 null，界面上退回全文 */
+  compaction: ChatCompactionView | null;
+};
 
 /**
  * 流式增量事件载荷（spec 1.11-03 / 2.8-09）。
