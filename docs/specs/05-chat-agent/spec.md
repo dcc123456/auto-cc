@@ -1837,12 +1837,82 @@ covered_count / tokens_before / tokens_after / created_at`）+ 一条 `(session_
 | 5.7-03 | 择机投递的时机判定来自代码规则（回复状态 + 时间窗 + 频控 + 额度），规则可读、可配置          | U    | 真值表测试                                             | [ ]  |
 | 5.7-04 | 失败重试策略明确：只读步自动重试 ≤2 次，外发步**不自动重试**                                 | U    | 注入两类失败 → 断言重试次数差异                        | [ ]  |
 | 5.7-05 | 已保存工作流可建定时任务（每日/工作日/自定义 cron），任务列表可见启停                        | V    | 建两条 → 截图列表                                      | [ ]  |
-| 5.7-06 | 调度触发记录落库（触发时间、结果、消耗额度），失败任务不影响下次触发                         | U    | 手工触发一次失败 → 断言记录与后续触发                  | [ ]  |
-| 5.7-07 | 调度**只能**触发已保存工作流，不能触发自由对话任务（无人值守下不临场规划外发）               | C+U  | 尝试给调度器传对话任务 → 断言拒绝                      | [ ]  |
+| 5.7-06 | 调度触发记录落库（触发时间、结果、消耗额度），失败任务不影响下次触发                         | U    | 手工触发一次失败 → 断言记录与后续触发                  | [x]  |
+| 5.7-07 | 调度**只能**触发已保存工作流，不能触发自由对话任务（无人值守下不临场规划外发）               | C+U  | 尝试给调度器传对话任务 → 断言拒绝                      | [x]  |
 | 5.7-08 | 调度触发同样受 `entitlement.gate` 与频控约束，额度用尽即跳过并记账                           | U    | 切「每天 N 次」实现 → 断言被拒（**M6b 判据**）         | [ ]  |
 | 5.7-09 | app 关闭期间不补跑错过的任务，重启后在列表标记"已跳过"并显示原因                             | U+V  | 冻结时间到计划点后重启 → 截图标记                      | [ ]  |
-| 5.7-10 | 调度器进程内运行，不写系统 crontab / 任务计划程序，不要求用户配置外部环境                    | C    | 静态检查产物：无对外部计划任务的写入调用               | [ ]  |
+| 5.7-10 | 调度器进程内运行，不写系统 crontab / 任务计划程序，不要求用户配置外部环境                    | C    | 静态检查产物：无对外部计划任务的写入调用               | [x]  |
 | 5.7-11 | `[!]` 真实 BOSS 账号端到端一次（搜索→打招呼→投递），**仅用户在场时手动验证**                 | V    | 用户在场执行，结果与截图记入 `docs/acceptance/5.7-11/` | [!]  |
+
+### 5.7-a 落地记录（2026-10-03，服务半边：`packages/scheduler` + 号段 25）
+
+**为什么这一片只做服务侧**：`plan §7.5.1` 读码结论是全仓零调度机制（F1/F2），界面与 IPC 口要在有登记处之后才有东西可列，
+所以 a 片落"任务表 + 触发记录 + 触发腿 + 静态检查"，b 片再接界面（5.7-05 的 V、5.7-09 的截图标记都在 b）。
+本片完成后本包**尚未进 app 装配清单**（`packages/main/src/registry.ts` 与 `cordis.yml` 各一行在 5.7-b 同批加），
+所以 5.7-05 / 5.7-09 保持 `[ ]` 而不是 `[x]`——真 app 里现在还看不到任何定时任务，这是刻意的可见缺口，不是遗漏。
+
+**号段 25 两张表**（`registry.ts` 的 `SCHEDULE_MIGRATION_VERSION`）：`schedule_jobs`（任务本体，引用 `plan_id` 而不复制计划）
+与 `schedule_triggers`（每次触发追加一行：`planned_at / fired_at / result / reason / workflow_run_id`）。
+登记口径照号段 24 的先例：`[Service.init]` 里按 version 去重后 push 进 `store.migrations` 再 `upgrade()`，
+否则 `plugins.start('schedule')` 重建服务会撞「迁移版本重复」。测试里断言 `schema_migrations` 有 25 且两张表都在。
+
+**5.7-07 是结构事实，不是校验代码**（`[x]`）：`ScheduleLaunchPort` 只有 `plans()` 与 `start(planId)` 两只手（`types.ts`），
+建任务入参是 `z.strictObject({name, planId, expression, isEnabled})`——**没有 `goal` 这个键**。
+用例演的是"越形即拒"：塞 `goal: '每天搜一遍并挨个打招呼'` → `INVALID_ARGUMENT`，且拒因原话里带 `goal`（`strictObject` 的
+unrecognized key 报法），落库零行、起跑零次。仓库里也不存在"给一段自由对话起一个无人值守 run"的路径可被误用（F3），
+所以这条是双重封闭：接口形状上没有 + 代码路径上没有。
+
+**5.7-06（`[x]`）与"消耗额度"这一列的偏差要写清楚**：触发记录**不存额度消耗数**，
+额度消耗的唯一事实仍在 `usage_ledger`（它有 `workflow_run_id` 列，与触发记录上的 `workflow_run_id` 对得上）。
+在本表再存一份消耗数就是 §2.7 禁止的第二份事实。用例按验证操作原文走：`FakeRunnerService.failWith` 让起跑抛
+`WORKFLOW_INVALID_STATE` → 断言那一行 `result='failed'` 且 `reason` 是 runner 的原话（"已有 run 处于 running 态，先处理完它"），
+随后 `tick` 下一个计划点照样起成功——失败不影响下一次是可断言的，不是"看起来会吧"。
+调度器不翻译别人的失败：拒因一律原样上浮，`5.7-02` 的证据链将来要对着原话而不是转述。
+
+**5.7-10（`[x]`）**：`scripts/check-scheduler-no-external-cron.ts` 已挂进 `pnpm lint` 最后一条，扫 `packages/scheduler/src`
+全部 `.ts`：禁 `node:child_process`、`crontab`、`schtasks`、`systemd|systemctl|.timer`、`launchctl|LaunchAgents`，
+并要求**恰好一处** `setInterval`（注释行不计）。实跑输出：`扫描 5 个文件，0 处外部计划任务写入，恰好 1 处 setInterval`。
+这条判据必须是静态的——"没写系统计划任务"在运行期没有正面信号（正常运行时本来就不会冒出外部进程），只能从代码形状钉。
+顺带一提：脚本第一次跑就把自己包体的注释撞红了一次（注释里写了"crontab"这个词），已改写注释而**没有**放宽规则。
+
+**5.7-08 保持 `[ ]` 的原因**：额度那半边已落（触发前对 `greet` / `deliver` 各问一次只读 `check`，任一被拒就落 `skipped` 行、
+拒因用闸门原话、一次 `start` 都不发；额度恢复后下一计划点照跑），但两条没到位：
+① 频控那半边没做——`throttle.nextGapMs()` 仍在节点侧，调度层没有预检，这需要与真工作流一起验才不流于假数据；
+② 判据原文要求"切『每天 N 次』实现"，本片的断言用的是 `FakeGateService`（只读端口的形状），
+真闸门 `mode:'daily'` 的端到端要等 5.7-d 的全链路复跑（`gap-quota-link.test.ts` 那种形态）。
+写在这里而不是含糊打个勾：**M6b 的判据主体在 d 片**。
+
+**cron 求值的三条实测约束**（都收在 `internal/cron.ts`，包外看不见库类型）：默认按**运行机器本地时区**算
+（用例因此断言"本地 9 点、周一到周五"而不是写死 UTC 串，换时区机器不假红）；`.next()` 返回 `CronDate` 不是 `Date`；
+每次求值重新 `parse`（`.next()` 会推进自身游标）。永不成立的表达式（`0 0 31 2 *`）在求值期即 `INVALID_ARGUMENT`，
+所以"建任务那一刻就知道这条永远不会跑"。
+
+**时钟全部注入**（`tick(nowMs)` / `accountForMissedRuns(nowMs)` / `triggerNow(jobId, nowMs)` / `setEnabled(id, on, nowMs)`）：
+5.7-06 / 08 / 09 的时序因此是冻结时间的断言，用例不等真分钟；`[Service.init]` 里的 `setInterval` 用一小时间隔，
+让触发只可能来自显式调用。追账那一条还演了真重启：改表把 `next_run_at` 拨到过去 → dispose → 同库文件重装，
+`[Service.init]` 自己把越过点标成 `skipped`（`firedAt` 为 null 是诚实读数：那一刻 app 不在，没有"动手时刻"可报），
+起跑口一次都没被调用，下一次被推到当下之后。
+
+**闸门缺席时照跑而不是拦**：`maybeService<ScheduleQuotaPort>` 取不到就跳过预检（用例断言仍起成功）。
+理由写在代码注释里——真正的三闸门在节点侧（5.3-d），调度侧的缺席不该变成一条新的免额外出发路径，也不该变成
+"没配闸门就什么都别跑"。同理 `inject` 只有 `['store']`：§9 的 2.5 实测教训（热改配置重建下游）决定了跨包能力用的时候现问。
+
+**新增用例 16 条**（`packages/scheduler/src/scheduler.test.ts`）：cron 本地时区与永不成立式 2 条；建任务校验 3 条
+（含越形拒 `goal`）；触发记录 3 条（到点 started、失败 failed 且不影响下次、手工跑一次走同一条腿）；闸门 3 条
+（额度尽 skipped、名单恰为 greet/deliver、闸门缺席照跑）；不补跑 2 条（tick 层与真重启层）；启停 2 条
+（停用不触发且停用期间不记"错过"、删除任务保留触发历史）；号段 1 条。
+
+**四道门禁**：`pnpm typecheck` 全部包 Done（含新增 `packages/scheduler`）；`npx eslint . --max-warnings 0` 通过
+（首跑报出 4 处 `?.x!` 非空断言可选链，已改成用例侧的 `nextAt()` 助手而不是放宽规则）；`pnpm format:check` 全绿；
+`pnpm test` 22 个包全过，其中 `packages/scheduler` 16 passed（`Test Files 1 passed`）。
+静态检查那条已并入 `pnpm lint` 链路末尾并实跑通过。
+
+**§7.4 收尾自检**：① 命令与输出见上一段；② 本片无 V 类条目（05 / 09 的界面半边在 b 片），不拿单测冒充截图；
+③ 状态位：06 / 07 / 10 打勾，05 / 08 / 09 留 `[ ]` 并在上面写明缺哪半边，11 保持 `[!]`；
+④ 复用检查：cron 求值只有 `internal/cron.ts` 一处，额度判定只有闸门一处（本包只读问它），存储走 `store.migrations`，
+没有新建第二套配置读取；⑤ 死代码检查：包口只复导出服务/schema/常量/类型，`nextRunAtMs` **不**复导出（包外无调用方，
+避免开出"顺手解析 cron"的第二条路）；⑥ 前端未涉及；⑦ 本片一个提交，中文 subject 说清"做了什么 + 为什么"，已推送；
+⑧ 暂存区只有包源码 / 测试 / 检查脚本 / lockfile / package.json，无临时产物与图片。
 
 ## 5.8 指标看板
 
