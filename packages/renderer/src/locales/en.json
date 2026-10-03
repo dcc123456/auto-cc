@@ -737,7 +737,7 @@
         },
         "resume": "Resume this task",
         "actionResume": "resume the task held by takeover",
-        "resumeHint": "The first step after resuming re-reads the page instead of reusing the pre-takeover snapshot",
+        "resumeHint": "If the step about to run acts on the page, resuming re-reads it first instead of reusing the pre-takeover snapshot",
         "resumeHeldHint": "The page is still under manual takeover — hand it back before pressing resume"
       }
     },
