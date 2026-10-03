@@ -57,9 +57,9 @@ export function WorkflowRunCard({ run, live }: { run: WorkflowRunView; live?: Wo
             {t('chat.workflowRun.step', { step: t(`workflow.step.${live.stepId}`, live.stepId) })}
           </span>
         ) : null}
-        <span className="break-all font-mono" data-testid="workflow-run-id">
-          {t('chat.workflowRun.run', { id: run.runId })}
-        </span>
+        {/* run 号在这里只作人读文本：机器比对用卡片根上的 `data-run-id`，不再挂一只 `workflow-run-id`
+            ——那个 testid 属于工作流面板（1.10-08 的验收探针按它在整份文档里取唯一节点），两处同名会让探针取错。 */}
+        <span className="break-all font-mono">{t('chat.workflowRun.run', { id: run.runId })}</span>
       </div>
 
       {live?.message ? (
