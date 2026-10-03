@@ -582,6 +582,75 @@ export type WorkflowRunStateView = {
 };
 
 /**
+ * 节点参数的取值域（与 `workflow.plan` 的 `nodeParamSchema` 同一口径：计划要能整体 JSON 落库，
+ * 所以不接受嵌套对象）。放在 L0 是因为沉淀侧（agent）与存储侧（workflow）都要写它，
+ * 而它两边都不该各自再声明一遍（AGENTS.md §2.2）。
+ */
+export type WorkflowParamValue = string | number | boolean;
+
+/**
+ * 「这个参数键算不算变量」的白名单（spec 5.4-04 的判据落点）。
+ *
+ * 放在 L0 一处、沉淀侧与界面侧都读它，是为了让"哪些值被换过、哪些还是上次的具体值"这件事
+ * 只有一个答案；写成第二份列表就等于允许两边不一致。
+ * **判定按键名，不按值长得像不像**（值形如"上海"也可能是岗位名的一部分），也不交给模型判断。
+ *
+ * 如实一条：spec 原文点名的"日期区间"在**当前 14 只工具的入参与 5 个节点 kind 的参数里都没有
+ * 对应字段**（plan §5.4-b 已 grep 两侧），所以那一项在本片是空项——等真出现带日期入参的能力，
+ * 往这张表加一个键名即可，不造一个假字段凑判据。
+ */
+export const WORKFLOW_VARIABLE_PARAM_KEYS = ['query', 'keyword', 'city', 'limit', 'target'] as const;
+
+/**
+ * 一条**已保存的自定义计划**的列表读数（spec 5.4-01 / 08）。
+ *
+ * 只有这一张表里的计划可以被重命名 / 复制 / 删除；内置那几条来自代码常量目录，
+ * 它们的"读数"在 `WorkflowPlanOptionView` 里并排给出，不写进表（写了就得回答"改了重启算谁"）。
+ *
+ * 这里**没有** revision / version 一列：5.4 的写入口只有「新增、改名、复制、删除」，
+ * 没有任何一处会改节点内容（那是 5.10 的编辑器），一个永远等于 1 的版本号是 §2.6 禁止的
+ * 「为假想的未来做的抽象」——等真出现覆盖保存时再加，那时它才有消费者。
+ */
+export type SavedWorkflowPlanView = {
+  id: string;
+  name: string;
+  fingerprint: string;
+  nodeCount: number;
+  /** 从哪条 agent run 沉淀来的；手工建的为 null。 */
+  sourceRunId: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/**
+ * 「这条计划现在能不能被跑」的并排读数（界面计划下拉的唯一素材，spec 5.4-03 的运行半边）。
+ *
+ * 内置与自定义合成一张是给界面的一个事实：**能选的就是能跑的**，
+ * 分成两份清单就会长出"下拉里看得见、点下去说没有"的第二状态源（§2.5）。
+ */
+export type WorkflowPlanOptionView = {
+  id: string;
+  name: string;
+  source: 'builtin' | 'custom';
+  fingerprint: string;
+  nodeCount: number;
+};
+
+/**
+ * 一个节点参数的"变量 / 残留"读数（spec 5.4-04）。
+ *
+ * `isVariable` 由**键名白名单**判定（plan §5.4-b：`query`/`keyword`/`city`/`limit`/`target`），
+ * 不是模型觉得像变量；剩下的都是"这次跑通用的那一个具体值"，界面按它标红，
+ * 于是"沉淀下来的工作流只能复现上一次那一条"这件事是看得见的，而不是靠事后手工改。
+ */
+export type PlanParamReadoutView = {
+  nodeId: string;
+  paramKey: string;
+  value: WorkflowParamValue;
+  isVariable: boolean;
+};
+
+/**
  * 一次失败节点的证据读数（spec 2.8-04）。
  *
  * 它是 `writeEvidence` 落盘那份 JSON 的**读侧投影**，不是第二份事实：字段只从文件里取，
@@ -810,6 +879,24 @@ export type ToolCallReply =
     };
 
 /**
+ * 「这只工具沉淀成工作流时对应哪个节点」的声明（spec 5.4-03 的前提，plan §5.4-a 落点）。
+ *
+ * 形状刻意是**数据而不是函数**：`params` / `target` 的值都是这只工具 `input` 里的点路径，
+ * 于是 ① 机检读得动（`scripts/check-tool-contract.ts` 已经在扫 `agentTool({...})` 现场的字面量，
+ * 换成闭包就只能"约定它大概对"），② 5.10.4 的算子表将来读同一处声明，不再长第二份映射。
+ * 为什么不做成"按 id 猜 kind"：猜中的那次能跑，猜不中的那次会把一条跑得通的工作流说成沉淀成功，
+ * 而 5.4-09 判的正是"导出计划里每一步都在对话里找得到对应卡片"。
+ */
+export type AgentToolWorkflowClause = {
+  /** 节点执行器名，必须能在 `workflow.executors` 登记处解出（机检第 10 条 + 起跑前 `requireExecutable` 两道）。 */
+  readonly kind: string;
+  /** `节点参数键 → 工具入参点路径`；点路径必须能在本工具的 `input` schema 里对上。 */
+  readonly params: Readonly<Record<string, string>>;
+  /** `target` 的取值路径（参与幂等键 `runId+nodeId+target`）；省略即空串，表示这步不按目标去重。 */
+  readonly target?: string;
+};
+
+/**
  * 一个工具的声明式契约（spec 2.8-08）。
  *
  * 形状放在 `core` 而不是 `agent`：登记方是 L2 的能力包（浏览器 / 会话 / 外发 / 平台），
@@ -848,6 +935,13 @@ export interface AgentToolDeclaration<I = unknown, R = unknown> {
    * 两件事分属两侧；做成不登记就把「能力存在但此刻不给用」这个事实丢了，日志与断言都无从对账。
    */
   readonly disabled?: boolean;
+  /**
+   * 这只手能不能沉淀成工作流节点（spec 5.4-03 的前提）。**省略即不可沉淀**，没有默认回落。
+   *
+   * 只在主进程内被 `agent.sediment` 现读（不进 `ToolDescriptorView`、不过 IPC）：它是"能力怎么被复用"
+   * 的声明，不是界面上要画的读数；把它搬到进程边界另一侧，渲染层就得为一个用不上的字段拆壳（§2.6）。
+   */
+  readonly workflow?: AgentToolWorkflowClause;
   /**
    * 实际执行。
    * @param params 已过 schema 的入参
@@ -948,6 +1042,40 @@ export type AgentRunView = {
   stopReason: string | null;
   createdAt: number;
   updatedAt: number;
+};
+
+/**
+ * 一步能不能沉淀、为什么不能（spec 5.4-02 / 09 的逐格读数）。
+ *
+ * `reason` 与 `AgentPauseView.reason` 同理是**服务侧产出的人读原话**，不进语言包：
+ * 它的内容由工具声明与执行器登记处决定，界面只负责把它摆在正确的格子里（外壳文案才走 i18n）。
+ * `node` 是投影出来的节点声明，`null` 表示这步压根没有可跑的对应节点——此时 `sedimentable` 必为 false。
+ */
+export type SedimentStepView = {
+  planStepIndex: number;
+  toolId: string;
+  /** 这一步在 `agent_step` 里的状态原值（`pending` / `ok` / `failed` / `refused`，见 `AGENT_STEP_STATUSES`）。 */
+  stepStatus: AgentStepStatus;
+  sedimentable: boolean;
+  reason: string | null;
+  node: WorkflowNodeSpec | null;
+  /** 这个节点里每个参数的"变量 / 残留"读数（spec 5.4-04）。 */
+  params: PlanParamReadoutView[];
+};
+
+/**
+ * 一次沉淀预览（spec 5.4-01 的界面素材，`agent.sediment.preview` 的返回）。
+ *
+ * 预览与落库走的是同一条投影（不是"界面先猜一版、服务再拒一版"）：界面上说得出的"能沉淀"，
+ * `save()` 必然做得成；反过来 `save()` 拒的每一条原因都能在这张读数里先看见。
+ */
+export type SedimentPreviewView = {
+  runId: string;
+  goal: string;
+  steps: SedimentStepView[];
+  canSediment: boolean;
+  /** 整段被拒的原话；可以沉淀时为 null。 */
+  blockingReason: string | null;
 };
 
 /**
