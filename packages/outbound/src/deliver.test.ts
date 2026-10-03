@@ -406,7 +406,12 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
     const pending = deliver.perform(request({ filePath: writeResume(dir) }));
     await nap();
     await deliverFiber.dispose();
-    await expect(pending).rejects.toMatchObject({ code: 'OUTBOUND_APPROVAL_DENIED' });
+    // 原话必须说的是「服务被重建」而不是「用户点了拒绝」：这一条路上没有任何人点过任何东西，
+    // 把系统的清理写成人的表态，就是界面在替用户做一个他没做过的决定。
+    await expect(pending).rejects.toMatchObject({
+      code: 'OUTBOUND_APPROVAL_DENIED',
+      message: expect.stringContaining('被重建'),
+    });
     expect(deliver.pending()).toEqual([]);
     expect(hand.calls).toHaveLength(0);
     expect(ledger.count()).toBe(0);

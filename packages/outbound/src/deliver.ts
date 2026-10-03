@@ -12,6 +12,9 @@
  * ② 多一个**等人**的环节——档位 `semi`（默认）在发送前必须有人在 app 内点确认，超时按拒绝。
  *    这台状态机做在本服务里而不是界面里：投递有两个入口（工作流节点、界面单发），
  *    把「等人」做在界面那一侧，第二个入口必然漏一套（AGENTS.md §2.5）。
+ *    「等人」的**机制**（单号、登记表、超时、让出、收单）在 5.3-c 抽到了 `@auto-cc/core` 的
+ *    `PendingChannel`，因为对话循环成了这台机器的第二个用户；本服务留下的只有领域那半边：
+ *    卡片上写哪几格，以及三种定局各映射成哪个错误码。
  *
  * 和打招呼一样，它**不认识任何平台也不保存任何平台的手**：每次现向 `platform.registry` 问渠道
  * （plan §12.13 的教训——自己持表会被配置热重载清空）。
@@ -23,9 +26,11 @@ import {
   consentGateOf,
   deliverChannelsOf,
   executorRegistryOf,
+  PendingChannel,
   Service,
   sleep,
   type Context,
+  type PendingRequest,
   type ResumeAttachment,
   type ResumeDeliveryChannel,
   type WorkflowNodeExecutor,
@@ -39,7 +44,7 @@ import type {
   DeliverReceiptView,
   DeliverRequestView,
 } from '@auto-cc/shared';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
@@ -138,14 +143,20 @@ export type StagedDelivery = {
   snapshotId: string | null;
 };
 
-/** 一张在等的确认单。`settle` 由界面按钮、超时或让出三方之一调用，且只生效一次。 */
-type PendingApproval = {
-  view: DeliverApprovalView;
-  settle: (approved: boolean) => void;
-};
+/**
+ * 确认单上除了单号与时刻之外的那几格——那三位由 `PendingChannel` 补齐（5.3-c 抽的公共通道）。
+ */
+type ApprovalPayload = Omit<DeliverApprovalView, 'approvalId' | 'requestedAt' | 'expiresAt'>;
 
-/** 一次确认的三种定局。 */
-type ApprovalSettlement = { kind: 'approved' } | { kind: 'denied'; reason: string } | { kind: 'aborted' };
+/**
+ * 把通道里的等待读数拼成跨 IPC 的确认单视图。
+ * @param request 通道读数（单号 + 开单时刻 + 到点时刻 + 卡片载荷）
+ * @returns 界面认识的那个形状：单号这一列沿用的是 2.6-c 定下的 `approvalId`，不改名
+ */
+function approvalView(request: PendingRequest<ApprovalPayload>): DeliverApprovalView {
+  const { requestId, ...payload } = request;
+  return { approvalId: requestId, ...payload };
+}
 
 /**
  * 把节点参数里的字符串读出来（缺键或非字符串都返回 null，由调用方报缺参数）。
@@ -182,13 +193,14 @@ export class OutboundDeliverService extends Service {
   ];
 
   /**
-   * 在等的确认单。
+   * 在等的确认单（5.3-c 起是共用通道的一个实例）。
    *
-   * 为什么是内存 Map 而不是库里一张表：它是一次**等待**的状态，不是事实记录——投递的真相永远在
+   * 为什么是内存登记表而不是库里一张表：它是一次**等待**的状态，不是事实记录——投递的真相永远在
    * 账本那一行里（成功才有行）。做成表就要处理「进程死了谁把 in-flight 的单子收掉」，
    * 而超时按拒绝这条性质本来就把所有悬挂兜住了（plan §13.3 第 2 条）。
+   * 应答值的类型是 `boolean`：这一张卡片问的只有「发 / 不发」。
    */
-  private readonly approvals = new Map<string, PendingApproval>();
+  private readonly approvals = new PendingChannel<ApprovalPayload, boolean>();
 
   constructor(
     ctx: Context,
@@ -482,7 +494,7 @@ export class OutboundDeliverService extends Service {
    * 这份读数负责「错过了也还在」。
    * @returns 按申请顺序的待确认单；一张都没有是空数组
    */
-  pending = (): DeliverApprovalView[] => [...this.approvals.values()].map((entry) => entry.view);
+  pending = (): DeliverApprovalView[] => this.approvals.pending().map(approvalView);
 
   /**
    * 界面上那两个按钮打到这里（spec 2.6-01）。
@@ -490,91 +502,81 @@ export class OutboundDeliverService extends Service {
    * @param approved 用户是否点了确认
    * @returns 这张单子的岗位与文件三要素，让界面把「批了哪一份」画进结果卡片，不必自己缓存
    * @throws `APPROVAL_NOT_FOUND`——单子不存在（已定局、已超时，或服务在等待期间被重建过）。
-   *         这里是 fail-closed：查不到就报结构化失败，绝不因为「找不到对应的那份」而放行任何一次投递
+   *         这里是 fail-closed：查不到就报结构化失败，绝不因为「找不到对应的那份」而放行任何一次投递。
+   *         「id 存在但已经被定过一次」走的是同一条：那张单子已经不算数了，与查无此单对人而言是同一句话
    */
   resolveApproval = (approvalId: string, approved: boolean): DeliverApprovalView => {
-    const entry = this.approvals.get(approvalId);
-    if (!entry) {
+    const waiting = this.approvals.pending().find((request) => request.requestId === approvalId);
+    if (!waiting || !this.approvals.answer(approvalId, approved)) {
       throw new AppError('APPROVAL_NOT_FOUND', `确认单 ${approvalId} 已经不在等待中`, 'outbound.deliver', {
         approvalId,
-        pending: [...this.approvals.keys()],
+        pending: this.approvals.pendingIds(),
       });
     }
-    entry.settle(approved);
-    return entry.view;
+    return approvalView(waiting);
   };
 
   /**
    * 挂起等人确认，并把这张单子登记进 `pending()`。
+   *
+   * 单号、登记表、超时定时器、让出监听、只生效一次这些**机制**都在 `PendingChannel` 里；
+   * 这里只负责把三种定局翻译成投递域的三句话。
    * @param staged 待投递读数
    * @param waitedMs 为满足频控已经等了多久——只为了把确认单的展示时间算准，不参与任何判据
    * @param signal 让出信号：暂停要能立刻打断等待，且**不发送、不落账**（与打招呼的让出语义逐字一致）
-   * @returns 确认通过时 resolve；被拒、超时或让出时以结构化错误 reject
-   * @throws `OUTBOUND_APPROVAL_DENIED`（拒绝或超时）、`WORKFLOW_STEP_FAILED`（让出）
+   * @returns 确认通过时正常返回；被拒、超时或让出时以结构化错误抛出
+   * @throws `OUTBOUND_APPROVAL_DENIED`（拒绝、超时、服务被重建）、`WORKFLOW_STEP_FAILED`（让出）
    */
-  private awaitApproval(staged: StagedDelivery, waitedMs: number, signal?: AbortSignal): Promise<void> {
-    const approvalId = randomUUID();
-    const requestedAt = Date.now();
+  private async awaitApproval(staged: StagedDelivery, waitedMs: number, signal?: AbortSignal): Promise<void> {
     const timeoutMs = this.config.approveTimeoutMs;
-    return new Promise<void>((resolve, reject) => {
-      const settle = (outcome: ApprovalSettlement): void => {
-        if (!this.approvals.has(approvalId)) return; // 已经定局过一次（超时/让出/重复点击）：后到的表态不算数
-        clearTimeout(timer);
-        this.approvals.delete(approvalId);
-        signal?.removeEventListener('abort', onAbort);
-        if (outcome.kind === 'approved') {
-          resolve();
-          return;
-        }
-        if (outcome.kind === 'aborted') {
-          reject(
-            new AppError('WORKFLOW_STEP_FAILED', '工作流已让出，投递等待中止，未发送', 'outbound.deliver', {
-              jobId: staged.jobId,
-            }),
-          );
-          return;
-        }
-        reject(
-          new AppError('OUTBOUND_APPROVAL_DENIED', `未投递：${outcome.reason}`, 'outbound.deliver', {
-            approvalId,
-            jobId: staged.jobId,
-          }),
-        );
-      };
-      const onAbort = (): void => settle({ kind: 'aborted' });
-      const view: DeliverApprovalView = {
-        approvalId,
+    const ticket = this.approvals.open(
+      {
         platform: staged.platform,
         jobId: staged.jobId,
         title: staged.title,
         company: staged.company,
         attachment: attachmentView(staged.attachment),
-        requestedAt,
-        expiresAt: requestedAt + timeoutMs,
-      };
-      this.approvals.set(approvalId, {
-        view,
-        // 界面那句「批 / 不批」定成什么；等待方不看界面，只看这个布尔。
-        settle: (approved: boolean) =>
-          settle(
-            approved
-              ? { kind: 'approved' }
-              : { kind: 'denied', reason: `用户在确认卡片上点了拒绝（目标 ${staged.jobId}）` },
-          ),
-      });
-      // 先登记再发事件：界面收到提醒后立刻 `pending()` 也必须能读回这张单子（spec 2.6-01）。
-      this.ctx.emit('outbound/approval-requested', view);
-      // 定时器与 `settle` 互相引用，但都不在定义时求值：超时回调只可能在下面这几行跑完之后才 fire。
-      const timer = setTimeout(() => {
-        settle({ kind: 'denied', reason: `等待确认超过 ${String(timeoutMs)}ms，按拒绝处理` });
-      }, timeoutMs);
-      signal?.addEventListener('abort', onAbort, { once: true });
-      // 让出可能在这之前就已经发生了（暂停与投递撞在同一拍）。
-      if (signal?.aborted) settle({ kind: 'aborted' });
-      this.ctx.logger.info(
-        `等待投递确认：单 ${approvalId} · 目标 ${staged.jobId} · 文件 ${staged.attachment.fileName} · 频控已等待 ${String(waitedMs)}ms`,
+      },
+      { timeoutMs, signal },
+    );
+    // 先登记再发事件：界面收到提醒后立刻 `pending()` 也必须能读回这张单子（spec 2.6-01）。
+    // 通道在 `open()` 返回之前就已经把它登记上了，所以这句话的顺序由类型保证，不需要额外判据。
+    this.ctx.emit('outbound/approval-requested', approvalView(ticket.request));
+    this.ctx.logger.info(
+      `等待投递确认：单 ${ticket.request.requestId} · 目标 ${staged.jobId} · 文件 ${staged.attachment.fileName} · 频控已等待 ${String(waitedMs)}ms`,
+    );
+    const outcome = await ticket.outcome;
+    // 只有「人点了是」这一种定局放行；其余三条分支每一句都带「未投递」，与 §8 第 3 条的取向一致。
+    if (outcome.kind === 'answered' && outcome.answer) return;
+    if (outcome.kind === 'answered') {
+      throw new AppError(
+        'OUTBOUND_APPROVAL_DENIED',
+        `未投递：用户在确认卡片上点了拒绝（目标 ${staged.jobId}）`,
+        'outbound.deliver',
+        { approvalId: ticket.request.requestId, jobId: staged.jobId },
       );
-    });
+    }
+    if (outcome.kind === 'timed-out') {
+      throw new AppError(
+        'OUTBOUND_APPROVAL_DENIED',
+        `未投递：等待确认超过 ${String(timeoutMs)}ms，按拒绝处理`,
+        'outbound.deliver',
+        { approvalId: ticket.request.requestId, jobId: staged.jobId },
+      );
+    }
+    // `cancelled` 有两种来路且给用户的处置不同，所以不并成一句话：让出（人按了暂停）与等待方自己消失
+    // （服务被热改配置重建）。后者原来的文案是「用户在确认卡片上点了拒绝」，那是句假话——没人点过任何东西。
+    if (signal?.aborted) {
+      throw new AppError('WORKFLOW_STEP_FAILED', '工作流已让出，投递等待中止，未发送', 'outbound.deliver', {
+        jobId: staged.jobId,
+      });
+    }
+    throw new AppError(
+      'OUTBOUND_APPROVAL_DENIED',
+      '未投递：投递服务在这一次等待期间被重建，等待已按「未获批准」收掉',
+      'outbound.deliver',
+      { approvalId: ticket.request.requestId, jobId: staged.jobId },
+    );
   }
 
   /**
@@ -695,9 +697,10 @@ export class OutboundDeliverService extends Service {
         registry.unregister(CUSTOMIZE_NODE_KIND);
       });
     }
-    // 服务被重建（改配置热改）时，上一份 Map 里悬着的等待必须自己收掉：那些 await 的调用方
+    // 服务被重建（改配置热改）时，上一份登记表里悬着的等待必须自己收掉：那些 await 的调用方
     // 已经跟着旧实例一起没了，让它们带着 timer 悬在事件循环里就是「重建即悬挂」（plan §13.3 第 2 条）。
-    this.ctx.effect(() => () => this.disposeApprovals());
+    // 收掉的定局是 `cancelled` 而不是放行——「我这边不等了」从来不是任何人同意了（AGENTS.md §8 第 3 条）。
+    this.ctx.effect(() => () => this.approvals.cancelAll());
     // 投递的闸门、审批与落账都在 `perform` 内部（`deliver.ts:308` / `:310` / `:348`），工具层只转发。
     // 入参不含 `workflowRunId`：那是工作流侧的归属字段，从对话入口发起的一次投递本就不属于任何 run。
     const tools = registerAgentTools(this.ctx, [
@@ -738,19 +741,6 @@ export class OutboundDeliverService extends Service {
     this.ctx.logger.info(
       `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND} / ${CUSTOMIZE_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
-  }
-
-  /**
-   * 收掉全部在等的确认单：清空定时器并按**拒绝**定局。
-   *
-   * 「服务要没了」不是用户同意了，所以这里绝不 resolve 任何一个等待（AGENTS.md §8 第 3 条的
-   * 同一取向：不做任何可能被读成「默认放行」的处置）。
-   */
-  private disposeApprovals(): void {
-    for (const entry of [...this.approvals.values()]) {
-      entry.settle(false);
-    }
-    this.approvals.clear();
   }
 }
 
