@@ -556,9 +556,9 @@
 | 5.3-05 | 档位变更记录审计（时间/前后档位/来源=用户），可查询                                      | U    | 切换两次 → 断言两条审计记录                     | [x]  |
 | 5.3-06 | 外发类工具在**全自动**档下仍默认需要确认（除非用户显式把该工具加入白名单）               | U    | 全自动 + 未加白 → 打招呼被暂停                  | [x]  |
 | 5.3-07 | 外发白名单是显式配置项，可列出、可逐条撤销，界面上能看到"哪些动作已免确认"               | V    | 加白一项 → 截图列表                             | [x]  |
-| 5.3-08 | 确认暂停分两类且界面区分：`approval`（是/否）与 `elicitation`（需补充信息，可多轮）      | V    | 各触发一次 → 两张卡片截图                       | [ ]  |
-| 5.3-09 | 审批请求带 requestId；应答按 id 路由回发起步骤，错 id / 重复 id 的应答被忽略             | U    | 并发两个请求 → 交叉应答 → 断言不串              | [ ]  |
-| 5.3-10 | 审批超时不默认放行（超时 = 未确认 = 不执行），并回报超时                                 | U    | 缩短超时 → 断言未外发                           | [ ]  |
+| 5.3-08 | 确认暂停分两类且界面区分：`approval`（是/否）与 `elicitation`（需补充信息，可多轮）      | V    | 各触发一次 → 两张卡片截图                       | [x]  |
+| 5.3-09 | 审批请求带 requestId；应答按 id 路由回发起步骤，错 id / 重复 id 的应答被忽略             | U    | 并发两个请求 → 交叉应答 → 断言不串              | [x]  |
+| 5.3-10 | 审批超时不默认放行（超时 = 未确认 = 不执行），并回报超时                                 | U    | 缩短超时 → 断言未外发                           | [x]  |
 | 5.3-11 | 外发三闸门缺一即不外发：档位允许 + 确认 + `entitlement.gate` 放行                        | U    | 三维各关掉一次 → 三次都被拒                     | [ ]  |
 | 5.3-12 | 被闸门拦下的动作在 `usage.ledger` 里留下"被拒"记录与可读原因                             | U    | 超额触发 → 断言拒绝记录                         | [ ]  |
 
@@ -689,6 +689,102 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
 - **开发实例的库已复原**：本片验完后把会话档位改回 `suggest`、名单撤空，收尾复跑得
   `{"tier":"suggest","exempt":[]}`——留在用户机上的不是"我验的时候那一档"。审计表里那两条 add/revoke
   与被拒的 run 记录是真实历史，不清（清了就没有审计可对）。
+
+**5.3-c 落地记录（2026-10-03）**——两类暂停（确认单 / 补充信息单）做成一条通道、挂上循环、并在对话流里长出两张形状不同的卡
+
+- **落点**：`packages/core/src/pending-channel.ts`（新，单号 / 值 / 时刻三样东西 + `answered` / `timed-out` /
+  `cancelled` 三种定局 + `cancelAll()` 的计数）、`packages/outbound`（2.6-c 那份投递审批改走这条通道，
+  `3ca0b5d`，行为不变、用例复跑）、`packages/agent/src/loop/pause.ts`（新服务 `agent.pause`）、
+  `packages/agent/src/loop/loop.ts`（`awaitStepApproval` 与 `resolveStepInput` 两个等待点 + `refuseStep` 一个落账口）、
+  `packages/renderer/src/useAgentPause.ts` + `AgentPauseCards.tsx`（新）与 `ChatPanel.tsx`（插在计划卡后面）、
+  `packages/shared/src/bridge.ts`（`agent.pause.pending` / `agent.pause.respond` 进 IPC 白名单 +
+  `agent/pause-requested` / `agent/pause-resolved` 进事件白名单 + 两条签名）、`packages/core/src/events.ts`
+  （`AgentPauseView` / `AgentPauseAnswer` / `AgentPauseResolvedEvent` 三个跨进程读数）、`cordis.yml`
+  （`agent-pause` 条目，`agent-loop` 的 `dependsOn` 加它）、`scripts/check-agent-model-authority.ts`（第 ⑦ 条判据）。
+- **不建表、不占迁移号段**（与 2.6-c 同一个判断）：待决暂停是**等待状态**而不是事实记录，经过落在既有的
+  `agent_step.status / code` 与 `agent_run.stop_reason` 上；做成表就得回答「进程死了谁收 in-flight 的单子」，
+  而「超时＝未确认＝不执行」本来就把所有悬挂兜住了。单号路由、超时、收单长在 `core` 的通道上（§2.2：
+  投递那边已经有过一次同样的逻辑），`agent.pause` 留下的是领域那半边：卡片显示什么、两类单各接得住哪几种
+  表态、推哪两条事件。
+- **两类单共用一条通道、分型只在载荷的 `kind` 上**：拆两条通道就会出现「错 id 被忽略」这类断言只在一侧成立。
+  但两张卡形状不同（问人的事不是一回事）：`approval` 是抬头 + 判定口原话 + 批准 / 拒绝，
+  `elicitation` 是同一份抬头 + 校验原话 + 缺哪些字段 + 文本域 + 提交 / 放弃 + 第几轮读数。
+- **表态的口只有「人」那一条**：`agent.pause.respond` 刻意不登记为 agent 工具，机检 ⑦ 钉住
+  「定义处 + IPC 派发处 + 界面发送处」三份文件之外不许有第四份提到它——模型若能自己应答自己的确认单，
+  5.3-04 防的「agent 自己给自己放行」就换了个名字重演。
+- **分工沿用 2.6-01 一字未改**：事件负责「此刻提醒」，`agent.pause.pending()` 读数负责「错过了也还在」；
+  卡片一律由读数驱动（`respond` 返回变更后的整份清单，与 `policy.setExempt` 同形状），界面上不存在第二份事实。
+  唯一留在本地的一份是 elicitation 那个文本域——它是**还没交出去的表态**，交给主进程那一刻才算数。
+- **每补一轮重开一张新单**（新 `requestId`、`round + 1`）：单内分页、超时重置、路由特化这三件事一件都不必写。
+  校验走 `agent.tools.validateInput`，就是 `call()` 里那一次 `safeParse` 的同一份实现（§2.5：
+  不许有第二套「什么叫合法」）。
+- **顺序不变式**：先判定（approval）后入参（elicitation）——这只手本来就不许动的时候，不该有人在替它收字段。
+- **V 类证据（活体，`pnpm harness`，CDP 10222，打应用页 `--url 5173`，五张都在 `docs/acceptance/5.3/`，
+  sha1 两两不同）**：
+  - **5.3-08**：`5.3-08-approval.png`（`auto` 档 + 未加白 → 「这一步要你先批准」+ 发送打招呼 / 外发 / 第 1 步 /
+    `outbound.greet.perform` + 判定口原话 + 批准·拒绝两颗）；`5.3-08-elicitation.png` 与
+    `5.3-08-elicitation-actions.png`（批准之后这一步真进了入参校验：「这一步还缺信息」+ 原话
+    `request Invalid input: expected object, received undefined` + 还缺的字段 `request` + 第 1 轮 + 文本域与
+    提交·放弃两颗；一张拍抬头半屏、一张拍动作半屏，因为免确认白名单那条候选表占了可视高度）。
+  - **5.3-09（U 类的活体加强）**：`5.3-09-round2.png` + `tmp/5.3-09-*.txt` 读数——补一轮没过校验 →
+    **界面上是新单 `0ae1bf5e…`、`data-pause-round=2`**（旧单 `745f9736…` 已收），且卡片上的
+    `data-pause-request-id` 与 `pending()` 那份读数逐字一致；对已收掉的旧单再应答 →
+    `APPROVAL_NOT_FOUND` 并附「还等着哪几张」；把 `supply` 送给确认单 → `INVALID_ARGUMENT`
+    「确认单接不住「supply」这种表态」，**且那张单照旧在等**（校验不过不落地）。并发两张单交叉应答那条
+    由 `pause.test.ts` 的「两张单并存时各按各的单号路由，互不串台」钉住。
+  - **5.3-10**：`5.3-10-timeout.png`——什么都不按，等满缺省 120 秒：卡片收掉、回报行「确认单到点无人应答
+    （第 1 轮），这一步已按未批准收掉——超时不等于批准」，run `failed` / `stopReason: PAUSE_TIMEOUT`，
+    步行原话「确认单 be5ab1a5… 等到 1790997127460 无人表态：超时按未确认收，这一步不执行
+    （不是人拒绝了它）」，且 `参数摘要 {}`、没有 evidence——**这一步没有外发**。另两条定局也各跑了一次活的：
+    按「放弃」→ `PAUSE_DENIED` / run `failed`；卡片还开着时按「停止」→ 回报行「确认单因这条任务让出而收掉
+    （第 1 轮）：没人表过态，这一步没有执行」/ run `paused` / `PAUSE_CANCELLED`（读数在 `tmp/5.3-10-cancel.txt`）。
+    **一处与方法栏的偏差如实记**：条目写的是「缩短超时」，活体这遍用的是缺省 120s（改那一格会连带重建
+    `agent.loop` 并触发收单，见 §9 的 2.5 实测，与要验的性质无关），缩短到 200ms 下限那一路由
+    `pause.test.ts` 的「超时到点定局」与「一张单挂到超时为止，期间没有第二次定局事件」两条覆盖。
+- **机检 ⑦ 的反向验证**：临时造第四份文件提到 `'pause.respond'` → 检查如实报「应答暂停单的口子应当只在这
+  三处（pause.ts / bridge.ts / useAgentPause.ts），现在提到 …ProbePauseRespond.tsx」，探针文件随即删掉
+  （§6.2：不看代码以为会拦，要真撞一次）。同时兑现了这条判据自己写下的那句「界面上那两颗按钮所在的组件
+  在 5.3-c 的界面半边接上时要补进这份名单——没补就是那条判据此刻不成立」。needle 用三个互斥形状
+  （`respond(requestIdRaw` 只在 pause.ts、`'agent.pause.respond'` 只在 bridge、`'pause.respond'` 只在渲染层，
+  命名空间把 `agent.` 前缀提掉了），避免裸词 `respond` 命中「response」这类常见英文让判据随机误报。
+- **一处就地改掉的人读文案**：`CONFIRMATION_REQUIRED` 的原话不再写「逐条批准的卡片在 5.3-c 接」，改成指向
+  当下真有的两条口（确认单 + 免确认白名单）；`policy.test.ts` 把这两句钉住，防止以后又改回空头承诺。
+  这句 `message` 就是卡片上的 `reason`，所以它是**人唯一会读到的下一步指引**。
+- **界面取舍**：卡片上没有把 `expiresAt` 格式化成时刻串——`formatClock` 那份是策略面板的「加白时刻」专用，
+  而暂停单恒有到期时刻，为它写一个 null 占位文案就是不会发生的分支（§2.6）；改为一句静态
+  `timeoutNote` + `data-pause-expires-at` 供 DOM 断言。超时措辞只有三种，全部来自
+  `agent/pause-resolved` 的 `outcome`，界面不自己编「超时大概算批准」。
+- **§7.4 收尾自检（逐条回答）**：
+  ① 四条门禁的实际命令与输出（2026-10-03 11:02–11:07，日志 `tmp/gates-5-3-c-*.log`）：
+  `pnpm typecheck` → 退出码 0（24 个包逐个 `typecheck: Done`）；`pnpm lint` → 退出码 0，八道 tsx 机检全 `✔`，
+  agent 那道现在的判据是「LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 /
+  policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / **应答暂停单只有人这一条口**」；
+  `pnpm format:check` → 退出码 0；`pnpm -r --no-bail test` → 退出码 0，21 个测试包全 `Done`。
+  `packages/agent`：`Test Files 5 passed (5)` / `Tests 107 passed (107)`（本片新增 `pause.test.ts` 13 条，
+  `loop.test.ts` 从 32 条到 41 条——两种暂停的等待点与三种定局的接线）；`packages/workflow`：`Tests 99 passed (99)`
+  （投递审批改走共用通道后行为不变）。
+  ② V 证据五张（`docs/acceptance/5.3/`，sha1 两两不同）逐条对应 5.3-08 / 09 / 10，见上面的活体读数。
+  ③ 状态位：5.3-08 / 09 / 10 → `[x]`；5.3-11 / 12 仍是 `[ ]`（5.3-d）。
+  ④ 复用检查：等待状态机只在 `core/pending-channel` 一份（投递那条口也改走它）；「什么叫合法入参」只在
+  `agent.tools.validateInput` 一份；「没等到人怎么落账」只在 `refuseStep` 一份；单子的中文称呼只在
+  `pauseKindLabel` 一份；界面无第二套读数（每次动作后现读 `pending()`）。
+  ⑤ 死代码：`ResolvedPause` 只被 `AgentPauseCards` 用（它是 resolved 事件按单号回查后的形状）；
+  没有未被调用的导出，也没有注释掉的旧实现。
+  ⑥ Tailwind / lucide / i18n：新组件只用 utility class 与现有 lucide 图标（`ShieldQuestion` 用在带抬头与
+  确认单抬头、`Check` / `X` 用在四颗按钮、`Clock` 用在超时那句、`CircleAlert` 用在回报行），
+  没有自绘 SVG、没有内联样式；`agent.pause.*` 与三条 `stopReason` 双语逐键对齐（渲染层机检过；
+  `agent.pause.action.*` / `kind.*` / `outcome.*` 是动态 key、机检不查，已逐键手工核对）。
+  ⑦ 提交与推送：本片按 §1.4 拆成 `docs(agent)`（plan 先行）→ `feat(core)`（共用等人通道）→
+  `refactor(outbound)`（投递审批改走它）→ `feat(agent)`（`agent.pause` + 循环接线）→ `feat(ui)`
+  （两张卡 + 语言包 + 机检 ⑦）→ `fix(agent)`（拒绝原话指向当下真有的口）→ `docs(agent)`（本记录与五张证据），
+  逐片推 origin。
+  ⑧ 暂存区：只有源码 / 测试 / 文档 / `cordis.yml` / 五张 `docs/acceptance/5.3/5.3-*.png`；
+  探针脚本、活体读数与门禁日志都在被忽略的 `tmp/`（`tmp/harness/pause-*.js`、`tmp/5.3-0[89]-*.txt`、
+  `tmp/5.3-10-*.txt`、`tmp/gates-5-3-c-*.log`）。
+- **开发实例的库已复原**：验完把会话档位改回 `suggest`（界面上现读回「建议模式」）；免确认名单本就是空的。
+  那几条 run / 步行与审计记录是真实历史，不清（清了就没有审计可对）。
+- **5.3 剩余两条与下一片**：5.3-11（外发三闸门缺一即不外发）/ 5.3-12（被拦下的动作进 `usage.ledger`
+  留可读拒因）与 12 条状态位的逐项收口是 5.3-d。真模型仍不在 5.3 的范围内（§6 的出网授权未解除）。
 
 ## 5.4 对话 → 工作流沉淀
 
