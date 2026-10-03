@@ -1,0 +1,392 @@
+# 5.6-01 挂载时回看 · 重启活体复跑（2026-10-03，Windows，dev userData=tmp/dev-userdata，CDP 10222）
+
+## 步骤
+1) 对话里发一句含手机/邮箱的话 → 落库前遮码（见 5.6-05）
+2) /run outbound.greet.perform {…} → agent.loop.propose → 计划卡（proposed）
+3) 按「确认并执行」→ 半自动档开出外发审批单（approval / 第 1 步），**不按批准**
+4) taskkill 主进程树（PID 36840，连同 vite 36024 一起退出）→ 进程真的死过一次
+5) AUTO_CC_USER_DATA_DIR=tmp/dev-userdata pnpm dev 重启 → 渲染层挂载时只发一次 chat.session.current()
+6) 三类记录（消息 / run+计划 / 未定局审批）全部读回来 → 下面三份 UI/DB 读数与四张截图
+
+## 杀进程之前的界面读数（tmp/5.6b/before-kill-ui.txt）
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/5.6b/readout.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/5.6b/readout.js"
+
+{
+  "seenAt": "2026-10-03T13:04:33.863Z",
+  "autonomy": "semi",
+  "sessionId": "70279f3c-5529-495e-acbd-a2559aa82655",
+  "messageCount": 8,
+  "tail": [
+    {
+      "role": "assistant",
+      "parts": [
+        "已收到：「D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。"
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        "这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗"
+      ]
+    },
+    {
+      "role": "assistant",
+      "parts": [
+        "已收到：「这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。"
+      ]
+    }
+  ],
+  "panels": [
+    {
+      "runId": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "status": "running",
+      "stopReason": "",
+      "goal": "目标：outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"fixture-1\",\"text\":\"您好，我的手机 138****1111，邮箱 m***@example.com\"}}",
+      "plan": [
+        {
+          "toolId": "outbound.greet.perform",
+          "effect": "outbound",
+          "needsApproval": true,
+          "intent": "按消息里点名的第 1 只手执行"
+        }
+      ],
+      "executed": 0
+    }
+  ],
+  "approvals": [
+    {
+      "requestId": "6fdda7fd-2000-4436-89b6-63b80d94f7d5",
+      "kind": "approval",
+      "toolId": null,
+      "step": null,
+      "expiresAt": "1791032765854"
+    }
+  ],
+  "elicitations": [],
+  "maskedPiiOnScreen": {
+    "rawPhone": false,
+    "maskedPhone": true,
+    "rawEmail": false,
+    "maskedEmail": true
+  }
+}
+
+## 杀进程之前的库读数（tmp/5.6b/before-kill-db.txt）
+{
+  "sessions": [
+    {
+      "id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "autonomy": "semi",
+      "created_at": 1790961103772
+    },
+    {
+      "id": "285ed789-295a-4dea-a127-3bf7f3d19fc7",
+      "autonomy": "semi",
+      "created_at": 1790947580680
+    },
+    {
+      "id": "6e81b407-9fa4-42b4-b4a7-f0726956e864",
+      "autonomy": "suggest",
+      "created_at": 1790947548445
+    },
+    {
+      "id": "3aa70e65-9c8a-4ec7-971f-b4376de449e8",
+      "autonomy": "suggest",
+      "created_at": 1790911080868
+    }
+  ],
+  "messageCount": 30,
+  "latestMessages": [
+    {
+      "id": "97f3e40d-1ea2-4b0b-9503-688d63cae939",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "assistant",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"已收到：「这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。\"}]"
+    },
+    {
+      "id": "04a5fb98-9c33-4902-a6ee-f4be0e153f0a",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "user",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗\"}]"
+    },
+    {
+      "id": "8431efe8-c2f9-4429-9821-521adda41df1",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "assistant",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"已收到：「D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。\"}]"
+    },
+    {
+      "id": "5576abf4-1585-45a9-958a-608a3a2638e7",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "user",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼\"}]"
+    }
+  ],
+  "runs": [
+    {
+      "id": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "running",
+      "autonomy": "semi",
+      "stop_reason": null,
+      "goal": "outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"fixture-1\",\"text\":\"您好，我的手机 138****1111，邮箱 m***@example.com\"}}"
+    },
+    {
+      "id": "32fe33a6-7e0f-4de8-a930-4420c3608906",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "paused",
+      "autonomy": "semi",
+      "stop_reason": "TAKEOVER_HELD",
+      "goal": "用 outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"1002\",\"text\":\"您好，看到贵司在招前端工程师，想进一步沟通。\"}} 打招呼"
+    },
+    {
+      "id": "075bd2c5-37dd-43cf-9baa-a46288196998",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "completed",
+      "autonomy": "semi",
+      "stop_reason": "COMPLETED",
+      "goal": "用 outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"1002\",\"text\":\"您好，看到贵司在招前端工程师，想进一步沟通。\"}} 打招呼"
+    }
+  ],
+  "stepCounts": [
+    {
+      "run_id": "075bd2c5-37dd-43cf-9baa-a46288196998",
+      "n": 1
+    },
+    {
+      "run_id": "2d38bbac-7c71-41da-9733-6cd665f33892",
+      "n": 3
+    },
+    {
+      "run_id": "6748f8fc-6353-49a4-8225-5066a519509b",
+      "n": 3
+    }
+  ],
+  "openPauses": [
+    {
+      "request_id": "6fdda7fd-2000-4436-89b6-63b80d94f7d5",
+      "run_id": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "plan_step_index": 0,
+      "tool_id": "outbound.greet.perform",
+      "kind": "approval",
+      "reason": "这一步是「outbound」级动作，要先由你批准（循环会为此开一张确认单，批准与拒绝都在卡片上按；全自动档下也可把这只手加进免确认白名单，之后不再每次问你）",
+      "missing_json": "[]",
+      "round": 1,
+      "requested_at": 1791032645854,
+      "expires_at": 1791032765854,
+      "resolved_at": null,
+      "resolution": null
+    }
+  ],
+  "resolvedPauseCount": 1,
+  "greetLedgerRows": 9
+}
+
+## 重启之后的界面读数（同一份 readout.js，未改页面）
+
+> auto-cc@0.1.0 harness D:\works\deep-seek-workspace\auto-cc
+> pnpm --filter @auto-cc/testing harness "eval" "--url" "5173" "--expr-file" "tmp/5.6b/readout.js"
+
+
+> @auto-cc/testing@0.1.0 harness D:\works\deep-seek-workspace\auto-cc\packages\testing
+> tsx src/cli.ts "eval" "--url" "5173" "--expr-file" "tmp/5.6b/readout.js"
+
+{
+  "seenAt": "2026-10-03T13:06:41.168Z",
+  "autonomy": "semi",
+  "sessionId": "70279f3c-5529-495e-acbd-a2559aa82655",
+  "messageCount": 8,
+  "tail": [
+    {
+      "role": "assistant",
+      "parts": [
+        "已收到：「D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。"
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        "这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗"
+      ]
+    },
+    {
+      "role": "assistant",
+      "parts": [
+        "已收到：「这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。"
+      ]
+    }
+  ],
+  "panels": [
+    {
+      "runId": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "status": "paused",
+      "stopReason": "INTERRUPTED",
+      "goal": "目标：outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"fixture-1\",\"text\":\"您好，我的手机 138****1111，邮箱 m***@example.com\"}}",
+      "plan": [
+        {
+          "toolId": "outbound.greet.perform",
+          "effect": "outbound",
+          "needsApproval": true,
+          "intent": "按消息里点名的第 1 只手执行"
+        }
+      ],
+      "executed": 0
+    }
+  ],
+  "approvals": [
+    {
+      "requestId": "6fdda7fd-2000-4436-89b6-63b80d94f7d5",
+      "kind": "approval",
+      "toolId": null,
+      "step": null,
+      "expiresAt": "1791032870153"
+    }
+  ],
+  "elicitations": [],
+  "maskedPiiOnScreen": {
+    "rawPhone": false,
+    "maskedPhone": true,
+    "rawEmail": false,
+    "maskedEmail": true
+  }
+}
+
+## 重启之后的库读数
+{
+  "sessions": [
+    {
+      "id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "autonomy": "semi",
+      "created_at": 1790961103772
+    },
+    {
+      "id": "285ed789-295a-4dea-a127-3bf7f3d19fc7",
+      "autonomy": "semi",
+      "created_at": 1790947580680
+    },
+    {
+      "id": "6e81b407-9fa4-42b4-b4a7-f0726956e864",
+      "autonomy": "suggest",
+      "created_at": 1790947548445
+    },
+    {
+      "id": "3aa70e65-9c8a-4ec7-971f-b4376de449e8",
+      "autonomy": "suggest",
+      "created_at": 1790911080868
+    }
+  ],
+  "messageCount": 30,
+  "latestMessages": [
+    {
+      "id": "97f3e40d-1ea2-4b0b-9503-688d63cae939",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "assistant",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"已收到：「这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。\"}]"
+    },
+    {
+      "id": "04a5fb98-9c33-4902-a6ee-f4be0e153f0a",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "user",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"这个岗位 HR 留的手机是 138****1111，邮箱 h***@example.com，帮我看看合适吗\"}]"
+    },
+    {
+      "id": "8431efe8-c2f9-4429-9821-521adda41df1",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "assistant",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"已收到：「D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，外发级工具按 2.8-10 经额度闸门与账本。想演示工具卡片，把消息以 /tool 开头再发一次（可跟工具 id 与入参 JSON，缺省走 jd.capture.run）。\"}]"
+    },
+    {
+      "id": "5576abf4-1585-45a9-958a-608a3a2638e7",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "role": "user",
+      "parts_head": "[{\"kind\":\"text\",\"text\":\"D:/daiwenchi/Git/run 用 outbound.greet.perform 打招呼\"}]"
+    }
+  ],
+  "runs": [
+    {
+      "id": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "paused",
+      "autonomy": "semi",
+      "stop_reason": "INTERRUPTED",
+      "goal": "outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"fixture-1\",\"text\":\"您好，我的手机 138****1111，邮箱 m***@example.com\"}}"
+    },
+    {
+      "id": "32fe33a6-7e0f-4de8-a930-4420c3608906",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "paused",
+      "autonomy": "semi",
+      "stop_reason": "TAKEOVER_HELD",
+      "goal": "用 outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"1002\",\"text\":\"您好，看到贵司在招前端工程师，想进一步沟通。\"}} 打招呼"
+    },
+    {
+      "id": "075bd2c5-37dd-43cf-9baa-a46288196998",
+      "session_id": "70279f3c-5529-495e-acbd-a2559aa82655",
+      "status": "completed",
+      "autonomy": "semi",
+      "stop_reason": "COMPLETED",
+      "goal": "用 outbound.greet.perform {\"request\":{\"platform\":\"boss\",\"jobId\":\"1002\",\"text\":\"您好，看到贵司在招前端工程师，想进一步沟通。\"}} 打招呼"
+    }
+  ],
+  "stepCounts": [
+    {
+      "run_id": "075bd2c5-37dd-43cf-9baa-a46288196998",
+      "n": 1
+    },
+    {
+      "run_id": "2d38bbac-7c71-41da-9733-6cd665f33892",
+      "n": 3
+    },
+    {
+      "run_id": "6748f8fc-6353-49a4-8225-5066a519509b",
+      "n": 3
+    }
+  ],
+  "openPauses": [
+    {
+      "request_id": "6fdda7fd-2000-4436-89b6-63b80d94f7d5",
+      "run_id": "33cf610a-e413-48a8-941c-89db4dae02fe",
+      "plan_step_index": 0,
+      "tool_id": "outbound.greet.perform",
+      "kind": "approval",
+      "reason": "这一步是「outbound」级动作，要先由你批准（循环会为此开一张确认单，批准与拒绝都在卡片上按；全自动档下也可把这只手加进免确认白名单，之后不再每次问你）",
+      "missing_json": "[]",
+      "round": 1,
+      "requested_at": 1791032645854,
+      "expires_at": 1791032765854,
+      "resolved_at": null,
+      "resolution": null
+    }
+  ],
+  "resolvedPauseCount": 1,
+  "greetLedgerRows": 9
+}
+
+## 重启之后的 DOM 断言
+== 5.6-01 挂载回看 活体复跑：DOM 断言（重启后）==
+
+{
+  "isPassed": true,
+  "actual": "33cf610a-e413-48a8-941c-89db4dae02fe"
+}
+    at <anonymous>:1:110 @ 第 1 行
+D:\works\deep-seek-workspace\auto-cc\packages\testing:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @auto-cc/testing@0.1.0 harness: `tsx src/cli.ts "assert" "--url" "5173" "--expr" "(async()=>document.querySelector('[data-testid=agent-pause-approval]').getAttribute('data-pause-request-id'))()" "--equals" "\"6fdda7fd-2000-4436-89b6-63b80d94f7d5\""`
+Exit status 1
+ ELIFECYCLE  Command failed with exit code 1.
+> tsx src/cli.ts "assert" "--url" "5173" "--expr" "(async()=>({messages:await window.autoCC.chat['session.current']().then(r=>r.value.messages.length), rawPhone:document.body.innerText.indexOf('〈原始号码，故意不在证据里落明文〉')>=0, maskedPhone:document.body.innerText.indexOf('138****1111')>=0}))()"
+
+{
+  "isPassed": true,
+  "actual": {
+    "messages": 8,
+    "rawPhone": false,
+    "maskedPhone": true
+  }
+}
