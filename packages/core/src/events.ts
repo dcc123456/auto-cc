@@ -1248,6 +1248,20 @@ export interface KbEntitiesChangedEvent {
   readonly at: number;
 }
 
+/**
+ * 自定义计划库被写过时由 `workflow.runner` 发出（spec 5.4-01 的「存成后计划库出现新条目」）。
+ * 载荷**不含计划内容**：计划库那一份真相在 `workflow_plans` 表里，界面收到信号就重读
+ * `workflow.runner.plans`，不在渲染层留第二份列表（AGENTS.md §2.5 / §9 的 2.5 实测条）。
+ */
+export interface WorkflowPlansChangedEvent {
+  /** 触发这次变更的动作，界面按它取一句人话 */
+  readonly action: 'save' | 'rename' | 'remove';
+  /** 这次写进 / 改掉 / 删掉的那条计划 id */
+  readonly planId: string;
+  /** 变更发生的毫秒时间戳 */
+  readonly at: number;
+}
+
 declare module 'cordis' {
   interface Events {
     /** `log` 服务每写出一条已脱敏日志时发出，IPC 网关节据此推给渲染层。 */
@@ -1323,5 +1337,11 @@ declare module 'cordis' {
      * （spec 4.2-06）：编辑要即时生效，界面不靠用户重启或手动刷新，也不靠轮询 `list()`。
      */
     'kb/entities-changed'(event: KbEntitiesChangedEvent): void;
+    /**
+     * 计划库发生任何写入（沉淀存成 / 重命名 / 复制 / 删除）时由 `workflow.runner` 发出
+     * （spec 5.4-01）：这些写入口有一处**不在计划库界面里**（对话侧的沉淀卡），
+     * 只靠界面自己刷新就会漏掉那一类，所以刷新信号只能从写入口这一侧发。
+     */
+    'workflow/plans-changed'(event: WorkflowPlansChangedEvent): void;
   }
 }

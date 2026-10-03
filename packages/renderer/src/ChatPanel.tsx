@@ -20,10 +20,12 @@ import type {
 import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
+import { SedimentCard } from './SedimentCard';
 import { ToolCard } from './ToolCard';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
+import { useSediment } from './useSediment';
 import { useWorkflowRun } from './useWorkflowRun';
 
 /**
@@ -105,6 +107,8 @@ export function ChatPanel() {
   const agentRun = useAgentRun();
   // 挂在人身上的那些单自成一条读数：它跟着 run 走，但按不按是人的手，不能被循环的忙碌态盖掉（spec 5.3-08）。
   const agentPause = useAgentPause();
+  // 沉淀卡挂在 run 上而不是挂在会话上：预览读数按 runId 认领，换一条对话不会沿用上一段的投影（spec 5.4-01）。
+  const sediment = useSediment();
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
@@ -145,6 +149,12 @@ export function ChatPanel() {
   const toolMetas = useMemo(() => new Map(tools.map((tool) => [tool.id, tool])), [tools]);
   const messages = snapshot?.messages.filter((message) => !message.isStreaming) ?? [];
   const isStreaming = liveStream !== undefined;
+  /**
+   * 当前这条 run 的局部绑定。
+   * 沉淀卡的两个动作要把 runId 交给主进程，而 `agentRun.run` 是属性访问、进了闭包就不再收窄，
+   * 用局部常量钉一份既保住类型收窄，也省掉一个永远不会走到的兜底（§2.6）。
+   */
+  const agentRunView = agentRun.run;
 
   // 新片段落在最下面，滚动位置跟过去，否则连拍截图看到的是上面几行。
   useEffect(() => {
@@ -298,6 +308,23 @@ export function ChatPanel() {
                 onConfirm={() => void agentRun.confirm()}
                 onStop={() => void agentRun.stop()}
                 onDismiss={agentRun.dismiss}
+              />
+            ) : null}
+            {/* 沉淀卡紧跟计划卡（spec 5.4-01）：判「能不能沉淀」的那一口发生在人刚看完这份进度的一屏里，
+                把它挪到工作流面板就等于让人拿着记忆去另一处重述一遍这次跑了什么。 */}
+            {agentRunView ? (
+              <SedimentCard
+                runId={agentRunView.runId}
+                runStatus={agentRunView.status}
+                preview={sediment.preview}
+                saved={sediment.saved}
+                nameDraft={sediment.nameDraft}
+                busy={sediment.busy}
+                notice={sediment.notice}
+                onNameChange={sediment.setNameDraft}
+                onOpen={() => void sediment.open(agentRunView.runId)}
+                onSave={() => void sediment.save(agentRunView.runId, sediment.nameDraft)}
+                onClose={sediment.close}
               />
             ) : null}
             {/* 挂在人身上的单跟在计划卡后面（spec 5.3-08）：批准与补充信息都同属这一段对话流，

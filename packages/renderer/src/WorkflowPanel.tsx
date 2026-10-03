@@ -17,6 +17,7 @@ import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
 import { NodeEvidenceSection } from './WorkflowEvidence';
+import { WorkflowPlansSection } from './WorkflowPlans';
 
 /** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
 const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
@@ -51,11 +52,19 @@ const TAKEOVER_OVERLAY = 'ring-1 ring-inset ring-amber-500/70';
  * 2.8-a 加了三样，都不新增判定：「中止」调 `runner.abort`（停推进 + 库里记 `USER_ABORT`，读回仍是
  * `paused` + 接管位，见 spec 2.8-03）；「待接管」是画在停住那一格上的叠加态而不是第五种步骤状态
  * （spec 2.8-01）；失败那一格可以展开证据，内容整份来自 `runner.readEvidence`（spec 2.8-04）。
+ *
+ * 5.4-b 在这里加了计划库（spec 5.4-03 的「挑中它跑」+ 5.4-08 的重命名 / 复制 / 删除）。放在这个面板而不是
+ * 诊断页的 `WorkflowLabPanel`，因为那三条判据字面说的都是「面板」，而第二视图才是用户每天看的那一屏。
+ * 下拉选中的 id 只作为 `runner.start(planId)` 的一个实参交出去，界面不据此推导任何进度：装载哪条计划、
+ * 跑得起来吗，全在服务侧那一次 `resolvePlan` 里定——挑中一条坏计划在起点就被 `INVALID_ARGUMENT` 拒掉，
+ * 原话留在提示行，内存态一行都不动。
  */
 export function WorkflowPanel() {
   const { t } = useTranslation();
   const { run: current, live, refresh: read } = useWorkflowRun();
   const bridge = window.autoCC;
+  /** 下拉里挑中的计划；undefined = 不改动 runner 当前装载的那份（1.10 起的默认路径）。 */
+  const [selectedPlanId, setSelectedPlanId] = useState<string>();
 
   const { busy, notice, run: call } = useBridgeAction(read);
   const { refresh: refreshConsent, ...consent } = useConsent();
@@ -65,6 +74,11 @@ export function WorkflowPanel() {
    * 「开始工作流」这一口的拦截点要知道该问哪个平台的签字（spec 2.7-06 ①），而 runner 本身
    * 不认识平台（plan §11.3 第 5 条），所以唯一诚实的事实源就是计划里每个节点自己带的参数。
    * 读不到就是空列表：界面不猜平台名，放行动作后由释放路径上的硬拦（拦截点 ②）说话。
+   *
+   * 5.4-b 起下拉可以换一条计划，而「这条计划里有哪些平台」要等 `start(planId)` 真把计划装载进来之后
+   * 才读得到（`runner.nodes()` 没有按 id 读的那一口，也不该有：那等于让界面预先算一遍服务侧的解析）。
+   * 所以这里数出的可能是**上一份**装载的计划——这一处偏旧是有意接受的：它只会让签字询问少问一次，
+   * 不会多放行一步，真正拦外发的是释放路径上那道硬拦（它认的是节点当下要动的平台）。
    */
   const [planPlatforms, setPlanPlatforms] = useState<string[]>([]);
 
@@ -126,7 +140,7 @@ export function WorkflowPanel() {
           disabled={busy !== undefined || !canStart}
           onClick={() =>
             void consent.ensure(planPlatforms, () =>
-              act(t('workflow.actionStart'), () => bridge?.workflow['runner.start']()),
+              act(t('workflow.actionStart'), () => bridge?.workflow['runner.start'](selectedPlanId)),
             )
           }
           className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
@@ -174,6 +188,8 @@ export function WorkflowPanel() {
           </span>
         ) : null}
       </div>
+
+      <WorkflowPlansSection selectedId={selectedPlanId} onSelect={setSelectedPlanId} />
 
       {consent.request && (
         <ConsentCard

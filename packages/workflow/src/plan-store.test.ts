@@ -113,6 +113,10 @@ describe('名字校验（spec 5.4-05）', () => {
     expect(assertPlanName(allowed)).toBe(allowed);
   });
 
+  it('全角括号 （） 与半角 () 同等收（中文输入法打出来的就是全角，5.4-b 实测撞过）', () => {
+    expect(assertPlanName('搜上海前端打招呼（改名后）')).toBe('搜上海前端打招呼（改名后）');
+  });
+
   it('引号、尖括号、路径分隔符、控制字符一律拒（它们目前没有消费者）', () => {
     for (const illegal of ['a"b', "a'b", '<script>', 'a/b', 'a\\b', 'a\nb', 'a;b', '|cat', 'a$b', '`x`', '岗位*']) {
       expect(() => assertPlanName(illegal)).toThrowError(/不被允许的字符/);

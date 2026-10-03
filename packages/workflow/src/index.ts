@@ -245,7 +245,12 @@ export class WorkflowRunnerService extends Service {
     const name = assertPlanName(nameRaw);
     const id = newPlanId();
     const plan = buildPlan({ id, nodes });
-    return this.store.savePlan({ id, name, plan, sourceRunId, at: Date.now() });
+    const saved = this.store.savePlan({ id, name, plan, sourceRunId, at: Date.now() });
+    // 写完就广播（5.4-01 的「存成后计划库出现新条目」）：这一条**必须**由写的一方发，
+    // 因为沉淀卡在对话侧，它存计划时计划库界面并不经手，等界面自己刷新就会漏掉这一类写入。
+    // 载荷只带 id 不带内容，界面收到就现查 `plans()`（AGENTS.md §2.7：不存第二份事实）。
+    this.ctx.emit('workflow/plans-changed', { action: 'save', planId: id, at: Date.now() });
+    return saved;
   }
 
   /**
@@ -256,7 +261,10 @@ export class WorkflowRunnerService extends Service {
    * @returns 改后的读数；库里没有这条时为 null
    */
   renamePlan(id: string, nameRaw: string): SavedWorkflowPlanView | null {
-    return this.store.renamePlan(id, nameRaw, Date.now());
+    const renamed = this.store.renamePlan(id, nameRaw, Date.now());
+    // 改名成功才广播（5.4-08）：列表那一列显示的就是名字，不刷新就还是旧名。
+    if (renamed) this.ctx.emit('workflow/plans-changed', { action: 'rename', planId: id, at: Date.now() });
+    return renamed;
   }
 
   /**
@@ -282,7 +290,10 @@ export class WorkflowRunnerService extends Service {
    * @returns 真的删掉一行为 true；本来就没有为 false（界面按"列表已经刷新过"处理，不额外报错）
    */
   removePlan(id: string): boolean {
-    return this.store.deletePlan(id);
+    const removed = this.store.deletePlan(id);
+    // 没删掉东西就不广播：界面会为一次空操作白读一遍表（同 `renamePlan` 的 null 分支）。
+    if (removed) this.ctx.emit('workflow/plans-changed', { action: 'remove', planId: id, at: Date.now() });
+    return removed;
   }
 
   /**

@@ -501,6 +501,33 @@
         "runRow": "plan {{planId}} · run {{runId}} · fingerprint {{fingerprint}}",
         "attempts": "{{num}} attempts ({{retries}} retries)",
         "evidence": "evidence: {{ref}}"
+      },
+      "plans": {
+        "heading": "Plan library (built-in catalogue + the ones you sedimented)",
+        "selectLabel": "Plan to run",
+        "selectDefault": "Keep whatever the runner already loaded",
+        "option": "{{name}} ({{source}} · {{count}} nodes)",
+        "nodes": "{{count}} nodes",
+        "sourceBuiltin": "built-in",
+        "sourceCustom": "custom",
+        "rename": "Rename",
+        "duplicate": "Duplicate",
+        "remove": "Delete",
+        "save": "Save name",
+        "cancel": "Cancel",
+        "namePlaceholder": "New name",
+        "confirmRemove": "Delete “{{name}}” for good?",
+        "confirmRemoveHint": "Only the plan registration goes away: every past run keeps its own plan snapshot, so their progress does not disappear with it.",
+        "confirmButton": "Confirm delete",
+        "actionRename": "rename {{name}} to {{next}}",
+        "actionDuplicate": "duplicate {{name}} as {{next}}",
+        "actionRemove": "delete plan {{name}}",
+        "renamed": "Renamed to {{name}}",
+        "duplicated": "Duplicated as {{name}}",
+        "removed": "Deleted {{name}}",
+        "alreadyGone": "That plan is already gone: the list is re-read every time, there is no second copy of the truth",
+        "builtinReadonly": "Built-in plans are read-only — duplicate one to change it",
+        "empty": "No custom plans yet: finish a run in the chat and press Save as workflow"
       }
     },
     "chat": {
@@ -518,7 +545,37 @@
       "actionSend": "send message",
       "actionStop": "stop reply",
       "actionNewSession": "start a new session",
-      "actionAutonomy": "switch autonomy to {{level}}"
+      "actionAutonomy": "switch autonomy to {{level}}",
+      "sediment": {
+        "heading": "Save as workflow",
+        "hint": "Project the run you just finished into a reusable workflow. Whether it qualifies and which cells still hold last time's literal values are decided in the main process; this card only lays them out for you.",
+        "open": "Preview this sedimentation",
+        "notSettled": "This run is still going or not confirmed yet: there is nothing to sediment until it settles (completed, failed or stopped)",
+        "close": "Dismiss",
+        "goal": "Goal: {{goal}}",
+        "canSediment": "All {{count}} steps of this segment succeeded — it can be sedimented",
+        "blocked": "This segment cannot be sedimented: ",
+        "stepIndex": "Step {{index}}",
+        "stepStatus": {
+          "pending": "not settled",
+          "ok": "succeeded",
+          "failed": "failed",
+          "refused": "refused by the gate"
+        },
+        "nodeKind": "node {{kind}}",
+        "paramVariable": "variable {{key}} = {{value}}",
+        "paramResidual": "leftover {{key}} = {{value}}",
+        "residualHint": "Marked values are the concrete ones from last time: leave them and the saved workflow only replays this exact run.",
+        "nameLabel": "Workflow name (required, at most 40 characters)",
+        "namePlaceholder": "e.g. Search front-end roles in Hangzhou and greet",
+        "nameRequired": "No name yet: fill one in before it can be stored",
+        "save": "Store as custom plan",
+        "saveBlocked": "This segment is not eligible, so it cannot be stored: handle the reason above first",
+        "saved": "Stored as plan {{name}} ({{count}} nodes)",
+        "savedHint": "Pick it in the Plan library dropdown of the workflow view and press start — it runs as is, no second conversion.",
+        "actionPreview": "preview the sedimentation readout",
+        "actionSave": "save workflow {{name}}"
+      }
     },
     "agent": {
       "autonomy": {

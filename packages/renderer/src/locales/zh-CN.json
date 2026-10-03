@@ -501,6 +501,33 @@
         "runRow": "计划 {{planId}} · run {{runId}} · 指纹 {{fingerprint}}",
         "attempts": "尝试 {{num}} 次（重试 {{retries}}）",
         "evidence": "证据：{{ref}}"
+      },
+      "plans": {
+        "heading": "计划库（内置目录 + 你自己沉淀的那几条）",
+        "selectLabel": "要跑的计划",
+        "selectDefault": "沿用 runner 当前装载的那份",
+        "option": "{{name}}（{{source}} · {{count}} 个节点）",
+        "nodes": "{{count}} 个节点",
+        "sourceBuiltin": "内置",
+        "sourceCustom": "自定义",
+        "rename": "重命名",
+        "duplicate": "复制",
+        "remove": "删除",
+        "save": "存名字",
+        "cancel": "取消",
+        "namePlaceholder": "新名字",
+        "confirmRemove": "确认删除「{{name}}」？",
+        "confirmRemoveHint": "只删这一条计划登记：历史 run 各自带着当时的计划快照，不会因此失去进度。",
+        "confirmButton": "确认删除",
+        "actionRename": "把 {{name}} 改名为 {{next}}",
+        "actionDuplicate": "把 {{name}} 复制为 {{next}}",
+        "actionRemove": "删除计划 {{name}}",
+        "renamed": "已改名为 {{name}}",
+        "duplicated": "已复制为 {{name}}",
+        "removed": "已删除 {{name}}",
+        "alreadyGone": "这条计划已经不在了：列表按当下重读，没有第二份事实",
+        "builtinReadonly": "内置计划只读，要改就先复制一份",
+        "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条"
       }
     },
     "chat": {
@@ -518,7 +545,37 @@
       "actionSend": "发送消息",
       "actionStop": "停止回复",
       "actionNewSession": "新建会话",
-      "actionAutonomy": "切换档位为 {{level}}"
+      "actionAutonomy": "切换档位为 {{level}}",
+      "sediment": {
+        "heading": "保存为工作流",
+        "hint": "把这次跑通的那一段投成一条可复用的工作流：能不能投、哪几格还是上次的残留值，都由主进程算，这里只负责摆给你看。",
+        "open": "预览这次沉淀",
+        "notSettled": "这条 run 还在跑或还没确认：等它收口（跑完、失败或叫停）之后才有得沉淀",
+        "close": "收起",
+        "goal": "目标：{{goal}}",
+        "canSediment": "这一段 {{count}} 步全部跑通，可以沉淀",
+        "blocked": "这一段不能沉淀：",
+        "stepIndex": "第 {{index}} 步",
+        "stepStatus": {
+          "pending": "未落定",
+          "ok": "已成功",
+          "failed": "失败",
+          "refused": "被闸门拒"
+        },
+        "nodeKind": "节点 {{kind}}",
+        "paramVariable": "变量 {{key}} = {{value}}",
+        "paramResidual": "残留值 {{key}} = {{value}}",
+        "residualHint": "标出来的是上一次那一条的具体值：不改掉它，存下来的工作流只会复现这一次。",
+        "nameLabel": "工作流名字（必填，不超过 40 个字符）",
+        "namePlaceholder": "例如：搜杭州前端并打招呼",
+        "nameRequired": "名字还没填：填好才能落库",
+        "save": "存为自定义计划",
+        "saveBlocked": "这一段不合格，存不了：先照上面的拒因处理",
+        "saved": "已存为计划 {{name}}（{{count}} 个节点）",
+        "savedHint": "在工作流面板的「计划库」下拉里挑中它，点开始就直接跑，无需二次转换。",
+        "actionPreview": "预览沉淀读数",
+        "actionSave": "保存工作流 {{name}}"
+      }
     },
     "agent": {
       "autonomy": {

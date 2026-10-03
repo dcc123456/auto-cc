@@ -33,6 +33,7 @@ import type {
   WorkflowEvidenceView,
   WorkflowNodeSpec,
   WorkflowPlanOptionView,
+  WorkflowPlansChangedEvent,
   WorkflowProgressEvent,
   WorkflowRunStateView,
   WorkflowRunView,
@@ -87,6 +88,7 @@ export type {
   WorkflowNodeRunView,
   WorkflowNodeSpec,
   WorkflowPlanOptionView,
+  WorkflowPlansChangedEvent,
   WorkflowProgressEvent,
   WorkflowRunStateView,
   WorkflowRunStatus,
@@ -180,7 +182,7 @@ export const RENDERER_ALLOWLIST = [
   // 2.8-a：中止（停在可恢复点上并落库 interrupted）与失败证据的读回。
   'workflow.runner.abort',
   'workflow.runner.readEvidence',
-  // 5.4-a 的计划管理面（spec 5.4-06）：列表 / 改名 / 复制 / 删。
+  // 5.4-a 的计划管理面（spec 5.4-03 的挑中它跑 + 5.4-08 的列表三操作）：列表 / 改名 / 复制 / 删。
   // 四条都**只由人按**，刻意不登记为 agent 工具：沉淀出来的计划是「以后每次都这么跑」的授权，
   // 模型若能自己改计划，等于给自己铺了一条不必每次问人的路（与 `agent.loop.confirm` 同一口径，§8.4）。
   // 这里**没有** `savePlan`：写入口只有一条 `agent.sediment.save`（投影 + 校验都在服务侧），
@@ -1440,19 +1442,19 @@ export interface BridgeSignatures {
    */
   'workflow.runner.readEvidence': { args: [runId: string, nodeId: string]; returns: WorkflowEvidenceView };
   /**
-   * 可选计划清单（spec 5.4-06）：库里存的自定义计划在前，内置目录在后，两者都带指纹与节点数。
-   * 每次现读不缓存——「存了一条新计划之后下拉里必须能看到它」是 5.4-06 的判据，缓存就成了一句看运气的话。
+   * 可选计划清单（spec 5.4-03 的下拉 + 5.4-08 的列表）：库里存的自定义计划在前，内置目录在后，两者都带指纹与节点数。
+   * 每次现读不缓存——「存了一条新计划之后下拉里必须能看到它」是 5.4-01 / 08 的判据，缓存就成了一句看运气的话。
    */
   'workflow.runner.plans': { args: []; returns: WorkflowPlanOptionView[] };
   /**
-   * 改一条自定义计划的名字（spec 5.4-05）：只动 `name` 这一列，`plan_json` 与指纹原样留着——
+   * 改一条自定义计划的名字（spec 5.4-08 的重命名）：只动 `name` 这一列，`plan_json` 与指纹原样留着——
    * 名字是人读的，指纹是 run 读的，改名不该让历史 run 的快照失去对应（5.4-06 的反向验证）。
    * @param id 计划 id；库里没有这条时返回 null（不是错误：列表刚被另一个窗口删过是常态）
-   * @param nameRaw 新名字原值，校验与 trim 在 `workflow_plans` 那一份实现里做（唯一口径）
+   * @param nameRaw 新名字原值，校验与 trim 在 `workflow_plans` 那一份实现里做（唯一口径，见 5.4-05）
    */
   'workflow.runner.renamePlan': { args: [id: string, nameRaw: string]; returns: SavedWorkflowPlanView | null };
   /**
-   * 复制一条计划（spec 5.4-06 的「改之前先留一份」）：新 id、新名字，节点内容与源一致。
+   * 复制一条计划（spec 5.4-08 的复制）：新 id、新名字，节点内容与源一致；内置计划想改就先复制一份。
    * 内置计划也可以复制——复制出来的是一条普通自定义计划，内置目录本身仍只读。
    * @param id 源计划 id；找不到返回 null
    * @param nameRaw 新名字原值
@@ -1727,6 +1729,9 @@ export const RENDERER_EVENTS = [
   'browser/risk-signal',
   // 知识库实体表被写过（spec 4.2-06）：编辑即时生效靠它，界面不轮询也不靠用户手动刷新。
   'kb/entities-changed',
+  // 计划库被写过（spec 5.4-01）：沉淀卡在对话侧，它存成一条计划时计划库界面并不经手，
+  // 只靠界面自己刷新就漏这一类写入——与 `kb/entities-changed` 同一个道理。
+  'workflow/plans-changed',
   // 5.2-c 的循环进度（spec 5.2-04）：逐步卡片流靠它推进，载荷就是 `agent.loop.read` 那份读数。
   'agent/run-progress',
   // 5.3-c 的暂停单开与收（spec 5.3-08 / 10）：前者弹卡片，后者把卡片收掉——**超时与叫停也发这一条**，
@@ -1749,6 +1754,7 @@ export interface RendererEventSignatures {
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
   'kb/entities-changed': KbEntitiesChangedEvent;
+  'workflow/plans-changed': WorkflowPlansChangedEvent;
   'agent/run-progress': AgentRunView;
   'agent/pause-requested': AgentPauseView;
   'agent/pause-resolved': AgentPauseResolvedEvent;
