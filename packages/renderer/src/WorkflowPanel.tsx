@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
 import { ConsentCard, ConsentStatusRow } from './ConsentCard';
+import { ScheduleSection } from './SchedulePanel';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
@@ -190,6 +191,9 @@ export function WorkflowPanel() {
       </div>
 
       <WorkflowPlansSection selectedId={selectedPlanId} onSelect={setSelectedPlanId} />
+
+      {/* 定时任务紧跟计划库（spec 5.7-05）：一条任务就是"这条已保存计划 + 这个时刻"，隔开放要跨面板对计划名。 */}
+      <ScheduleSection />
 
       {consent.request && (
         <ConsentCard
