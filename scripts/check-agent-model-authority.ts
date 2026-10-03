@@ -21,8 +21,9 @@
  *   界面上发送表态的那一份文件之外不许有第四份提到它，`loop.ts` 里连 `respond(` 都不出现——循环只许开单等人，不许自己把单答了；
  *   同时 `pause.ts` 不许 import 循环或判定口（与 ④ 同形）：通道一旦认识 run，就有了第二处判定现场。
  *   这一条防的是第三种形态：模型把「批准自己」写成一只手，「等人批准」就变成「等人被跳过」。
- * ⑧（5.5-a 加，spec 5.5-01 / 02）恢复被人工接管按住的 run 也只有「人」那一条口：`agent.loop.resume`
- *   在全仓非测试源码里只许出现在定义处（`loop.ts`）与 IPC 白名单派发处（`bridge.ts`）两份文件里，
+ * ⑧（5.5-a 加、5.5-b 补界面那一只手，spec 5.5-01 / 02）恢复被人工接管按住的 run 也只有「人」那一条口：
+ *   `agent.loop.resume` 在全仓非测试源码里只许出现在定义处（`loop.ts`）、IPC 白名单派发处（`bridge.ts`）、
+ *   界面上那颗「继续」（`useAgentRun.ts`）三份文件里，
  *   而它**不登记为 agent 工具**（`agent.tools` 的清单里没有这一只，界面上那颗「继续」走桥接白名单）。
  *   这一条防的是第四种形态：接管若挡不住模型自己按「继续」，5.5-02 那句「接管期间一步都不发」就成了装饰。
  *
@@ -253,16 +254,17 @@ if (/from '\.\/(?:loop|policy)\.js'/.test(pauseSource)) {
   problems.push('pause.ts 不该 import loop.ts / policy.ts：通道只认单号与值，认了 run 就有第二处判定现场（§2.5）');
 }
 
-// ⑧（5.5-a 加，spec 5.5-01 / 02）恢复被人工接管按住的 run 只有「人」那一条口：定义处（loop.ts 的 `resume`）
-//    与 IPC 白名单派发处（bridge.ts）之外不许有第三份文件提到它——界面上那只「继续」5.5-b 接上时补进名单，
-//    名单里少了它就是那条判据此刻不成立（与 ⑦ 同一份长法）。
+// ⑧（5.5-a 加，5.5-b 接上界面那一只手，spec 5.5-01 / 02）恢复被人工接管按住的 run 只有「人」那一条口：
+//    定义处（loop.ts 的 `resume`）、IPC 白名单派发处（bridge.ts）、界面上那颗「继续」（useAgentRun.ts）
+//    之外不许有第四份文件提到它——名单里少了界面那一份就是 5.5-b 还没接上，与 ⑤⑥⑦ 同一份长法。
 //    模型若能自己按「继续」，接管就挡不住任何东西：它只要在下一步之前把 run 恢复，
 //    「人在页面上操作」这件事在系统里就成了一个可以随时被模型关掉的状态，5.5-02 当场作废。
-//    搜的是这两个**具体形状**而不是裸词 `resume`：工作流那一路也有一条续跑的口（`resume()`），
+//    搜的是这几个**具体形状**而不是裸词 `resume`：工作流那一路也有一条续跑的口（`resume()`），
 //    把它的名字算进来会让这条判据指着错误的文件，而一条会误报的机检最后只会被关掉。
+//    `'loop.resume'` 是桥接客户端那侧的写法（命名空间已经切给 `bridge.agent`），5.5-b 接界面才出现。
 expectSingleWriter(
-  ['resume(runIdRaw', "'agent.loop.resume'"],
-  ['packages/agent/src/loop/loop.ts', 'packages/shared/src/bridge.ts'],
+  ['resume(runIdRaw', "'agent.loop.resume'", "'loop.resume'"],
+  ['packages/agent/src/loop/loop.ts', 'packages/shared/src/bridge.ts', 'packages/renderer/src/useAgentRun.ts'],
   '恢复被接管按住的 run',
 );
 // 这只口刻意**不登记为 agent 工具**：注册表那边的清单里读到它，就等于把人的表态做成了模型的一只手

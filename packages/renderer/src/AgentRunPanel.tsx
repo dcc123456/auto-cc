@@ -5,7 +5,7 @@
  * 组件自己不数「跑到第几步」、不猜「会不会外发」，那些全是主进程算好的（AGENTS.md §2.5）。
  * `intent` 是模型写的说明文字，按内容显示、不进语言包；界面只负责画它的外壳。
  */
-import { Check, ListChecks, Square, X } from 'lucide-react';
+import { Check, ListChecks, Play, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, ToolDescriptorView } from '@auto-cc/shared';
 import { ToolCard, stepToToolPart } from './ToolCard';
@@ -17,8 +17,10 @@ import { ToolCard, stepToToolPart } from './ToolCard';
  * @param busy 正在执行的动作标签；非空时两个表态按钮都禁用，防止重复触发
  * @param notice 动作提示行（失败原因留在界面上，截图才拿得到证据）
  * @param stopAccepted 已按叫停但 `paused` 还没落进来（此时只能说「已受理」）
+ * @param pageHeld 页面此刻是否在人工接管中（`browser.takeover` 那份读数的界面侧）；只用于提示行
  * @param onConfirm 人按下「确认并执行」——确认之前主进程一步都没跑
  * @param onStop 人按下「叫停」
+ * @param onResume 人按下「继续」（只出现在被接管按住的那条 run 上，spec 5.5-01）
  * @param onDismiss 收起面板（库里的 run 一行都不动）
  * @returns 一张插在对话流里的面板
  */
@@ -28,8 +30,10 @@ export function AgentRunPanel({
   busy,
   notice,
   stopAccepted,
+  pageHeld,
   onConfirm,
   onStop,
+  onResume,
   onDismiss,
 }: {
   run: AgentRunView;
@@ -37,8 +41,10 @@ export function AgentRunPanel({
   busy?: string;
   notice?: string;
   stopAccepted: boolean;
+  pageHeld: boolean;
   onConfirm: () => void;
   onStop: () => void;
+  onResume: () => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -209,6 +215,28 @@ export function AgentRunPanel({
             ) : (
               <span className="ml-auto text-[10px] text-slate-500">{t('agent.run.stopHint')}</span>
             )}
+          </>
+        ) : null}
+        {/* 被接管按住的那条 run 才有第三颗按钮（spec 5.5-01 的第二个动作）：
+            「交还页面」把操作权还给 agent，这一颗才是「接着跑」——两次分开表态，
+            因为人可以只改个登录态、看一眼，再决定要不要让它继续。
+            页面仍在接管时**不禁用**它：主进程会用 `AGENT_LOOP_TAKEOVER_HELD` 结构化拒绝，
+            那句原话落在下面的提示行里。把拒绝藏起来，界面上就只剩一个按了没反应的按钮（§2.6）。 */}
+        {run.status === 'paused' && run.stopReason === 'TAKEOVER_HELD' ? (
+          <>
+            <button
+              type="button"
+              data-action="resume-run"
+              disabled={busy !== undefined}
+              onClick={onResume}
+              className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
+            >
+              <Play size={12} />
+              {t('agent.run.resume')}
+            </button>
+            <span className="ml-auto text-[10px] text-slate-500" data-run-resume-hint={pageHeld ? 'held' : 'free'}>
+              {t(pageHeld ? 'agent.run.resumeHeldHint' : 'agent.run.resumeHint')}
+            </span>
           </>
         ) : null}
       </footer>

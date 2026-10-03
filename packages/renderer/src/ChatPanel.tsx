@@ -21,12 +21,14 @@ import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
 import { SedimentCard } from './SedimentCard';
+import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
 import { useSediment } from './useSediment';
+import { useTakeover } from './useTakeover';
 import { useWorkflowRun } from './useWorkflowRun';
 
 /**
@@ -111,6 +113,10 @@ export function ChatPanel() {
   const agentPause = useAgentPause();
   // 沉淀卡挂在 run 上而不是挂在会话上：预览读数按 runId 认领，换一条对话不会沿用上一段的投影（spec 5.4-01）。
   const sediment = useSediment();
+  // 接管态是「这块页面此刻在谁手里」的唯一读数（spec 5.5-01 / 02）：横幅与两只按钮都只画它，
+  // 界面不再存一份「我按过接管」的本地标志——按了却没生效的那一条就是谎报。
+  // 把当前 run 的 id 跟着递进 `begin`，审计里那一条才说得出「这次接管按住的是哪条 run」（spec 5.5-09）。
+  const takeover = useTakeover(agentRun.run?.runId);
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
@@ -275,6 +281,17 @@ export function ChatPanel() {
           分成两处看就没人能一眼读出「全自动档下这个动作到底会不会问我」。 */}
       <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
 
+      {/* 接管横幅贴在档位/白名单之下、消息流之上（spec 5.5-01）：它说的是「这块页面此刻在谁手里」，
+          与档位（授权范围）和卡片（某一步的等待）都不是一件事，塞进任何一张卡里都会让人漏看它。 */}
+      <TakeoverBanner
+        state={takeover.state}
+        elapsedMs={takeover.elapsedMs}
+        busy={takeover.busy}
+        notice={takeover.notice}
+        onHold={() => void takeover.hold()}
+        onRelease={() => void takeover.release()}
+      />
+
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。 */}
       <div ref={scrollRef} data-testid="chat-scroll" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {messages.length === 0 && !isStreaming && !agentRun.run && !workflowRunView ? (
@@ -314,8 +331,10 @@ export function ChatPanel() {
                 busy={agentRun.busy}
                 notice={agentRun.notice}
                 stopAccepted={agentRun.stopAccepted}
+                pageHeld={takeover.state?.isHeld ?? false}
                 onConfirm={() => void agentRun.confirm()}
                 onStop={() => void agentRun.stop()}
+                onResume={() => void agentRun.resume()}
                 onDismiss={agentRun.dismiss}
               />
             ) : null}

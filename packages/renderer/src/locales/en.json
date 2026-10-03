@@ -581,6 +581,23 @@
         "savedHint": "Pick it in the Plan library dropdown of the workflow view and press start — it runs as is, no second conversion.",
         "actionPreview": "preview the sedimentation readout",
         "actionSave": "save workflow {{name}}"
+      },
+      "takeover": {
+        "notHeld": "The agent holds the page",
+        "held": "Manual takeover active",
+        "hold": "Take over",
+        "release": "Hand the page back",
+        "since": "Held for {{duration}}",
+        "notHeldHint": "Taking over stops later actions only; the in-flight step is not interrupted",
+        "heldHint": "Automation stopped at a safe point; after handing the page back you decide whether to continue",
+        "actionHold": "take over the page",
+        "actionRelease": "hand the page back",
+        "reason": {
+          "manual": "You pressed “Take over”",
+          "risk": "The page showed a risk-control or captcha signal",
+          "session-expired": "The login session expired and you need to sign in again",
+          "unknown": "The takeover reason could not be read"
+        }
       }
     },
     "agent": {
@@ -711,8 +728,14 @@
           "STEP_UNSUCCESSFUL": "a step did not succeed",
           "PAUSE_DENIED": "you denied this step on the card",
           "PAUSE_TIMEOUT": "the wait reached its deadline with no answer, so it was not released",
-          "PAUSE_CANCELLED": "a stop or rebuild closed the waiting ticket; nobody ever answered"
-        }
+          "PAUSE_CANCELLED": "a stop or rebuild closed the waiting ticket; nobody ever answered",
+          "TAKEOVER_HELD": "Held by manual takeover, stopped at a safe point",
+          "RESUMED_AFTER_TAKEOVER": "Page handed back; a person pressed Continue to resume it"
+        },
+        "resume": "Resume this task",
+        "actionResume": "resume the task held by takeover",
+        "resumeHint": "The first step after resuming re-reads the page instead of reusing the pre-takeover snapshot",
+        "resumeHeldHint": "The page is still under manual takeover — hand it back before pressing resume"
       }
     },
     "state": {

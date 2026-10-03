@@ -1,5 +1,5 @@
 /**
- * agent 循环的界面侧状态（spec 5.2-03 / 04 / 10）：一次 run 的读数、四个动作、以及「已受理叫停」这一位。
+ * agent 循环的界面侧状态（spec 5.2-03 / 04 / 10）：一次 run 的读数、五个动作、以及「已受理叫停」这一位。
  *
  * 进度**由 `agent/run-progress` 推**，`loop.read` 只负责「错过了也还在」——与 `outbound.deliver`
  * 那条审批单同一分工（事件提醒 + 现读兜底）。界面不自己数第几步：所有下标、状态、token 账都取自主进程，
@@ -85,6 +85,22 @@ export function useAgentRun() {
     });
   }, [action, bridge, t]);
 
+  /**
+   * 恢复被人工接管按住的那条 run（spec 5.5-01 的第二个动作，机检 ⑧ 名单里「界面上那颗继续按钮」）。
+   *
+   * 它与 `confirm` 不是同一只手：`confirm` 是「这份计划我批了」，恢复发生在计划早就批过之后，
+   * 人按下去表达的只有「页面我弄好了，接着跑」。所以这一口只画在 `paused` + `stopReason=TAKEOVER_HELD`
+   * 那一格里，且必须先交还页面（`useTakeover.release`）——主进程在仍接管时以 `AGENT_LOOP_TAKEOVER_HELD`
+   * 拒绝，界面不去猜「他大概已经弄完了」。
+   */
+  const resume = useCallback(async (): Promise<void> => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    await action.run(t('agent.run.actionResume'), () => bridge?.agent['loop.resume'](runId), {
+      apply: setRun,
+    });
+  }, [action, bridge, t]);
+
   /** 收起面板：只清界面上的这一份，库里的 run 一行都不动（随时可再读回来）。 */
   const dismiss = useCallback((): void => {
     runIdRef.current = undefined;
@@ -93,5 +109,5 @@ export function useAgentRun() {
     action.setNotice(t('agent.run.dismissed'));
   }, [action, t]);
 
-  return { run, busy: action.busy, notice: action.notice, stopAccepted, propose, confirm, stop, dismiss };
+  return { run, busy: action.busy, notice: action.notice, stopAccepted, propose, confirm, stop, resume, dismiss };
 }

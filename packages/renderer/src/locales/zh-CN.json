@@ -581,6 +581,23 @@
         "savedHint": "在工作流面板的「计划库」下拉里挑中它，点开始就直接跑，无需二次转换。",
         "actionPreview": "预览沉淀读数",
         "actionSave": "保存工作流 {{name}}"
+      },
+      "takeover": {
+        "notHeld": "页面在 agent 手里",
+        "held": "已人工接管",
+        "hold": "我来接管",
+        "release": "交还页面",
+        "since": "已接管 {{duration}}",
+        "notHeldHint": "接管只停住后面的动作，不打断正在飞的那一步",
+        "heldHint": "自动化已停在安全点；交还页面后由人决定是否继续",
+        "actionHold": "人工接管页面",
+        "actionRelease": "交还页面",
+        "reason": {
+          "manual": "由你按下「我来接管」",
+          "risk": "页面出现风控 / 验证码信号",
+          "session-expired": "登录态已失效，需要重新登录",
+          "unknown": "接管原因未能读出"
+        }
       }
     },
     "agent": {
@@ -711,8 +728,14 @@
           "STEP_UNSUCCESSFUL": "有步骤没成功",
           "PAUSE_DENIED": "你在卡片上拒绝了这一步",
           "PAUSE_TIMEOUT": "等人表态到点无人应答，未放行",
-          "PAUSE_CANCELLED": "叫停或重建时收掉了在等的单，没人表过态"
-        }
+          "PAUSE_CANCELLED": "叫停或重建时收掉了在等的单，没人表过态",
+          "TAKEOVER_HELD": "被人工接管按住，停在安全点",
+          "RESUMED_AFTER_TAKEOVER": "已交还页面，由人按下「继续」恢复"
+        },
+        "resume": "继续这条任务",
+        "actionResume": "继续被接管按住的任务",
+        "resumeHint": "恢复后第一步是重读页面，不复用接管前的快照",
+        "resumeHeldHint": "页面仍在人工接管中，先交还页面再按继续"
       }
     },
     "state": {

@@ -3,7 +3,8 @@
  *
  * 抽出来是因为「时间戳 → 本地时间」在会话、定位、抓取三个面板里已经是第三次出现（AGENTS.md §2.2）；
  * 占位文案由调用方从 i18n 取，本模块不碰翻译，所以它仍是一个纯格式化函数。
- * 5.4-c 起这里还放「步下标 → 第几步」那一处夹法：它同样只是读数格式化，句子仍归语言包。
+ * 5.4-c 起这里还放「步下标 → 第几步」那一处夹法；5.5-b 起还放接管时长 `m:ss`。
+ * 两者都只是读数格式化，句子仍归语言包。
  */
 
 /**
@@ -26,3 +27,19 @@ export const formatClock = (ms: number | null, noneLabel: string): string =>
  */
 export const displayStepNumber = (stepIndex: number, total: number): number =>
   total === 0 ? 0 : Math.min(stepIndex + 1, total);
+
+/**
+ * 一段时长 → `m:ss`（5.5-b 的「已经接管多久」）。
+ *
+ * 放在这里而不是写进组件：它和上面的步号一样只是读数格式化，句子归语言包。
+ * 秒数向上取整到「不满一秒也算一秒」，因为显示 `0:00` 的接管横幅读起来像没接管——
+ * 而这一格判据（5.5-01「界面明确显示」）要的正是人一眼看见它。
+ * @param ms 时长毫秒数；负数（时钟回拨）与 null 都按 0 处理
+ * @returns 分:秒两段、秒补零；一小时以上不进这个格式，界面用不上那么长的接管
+ */
+export const formatElapsed = (ms: number | null): string => {
+  const totalSeconds = Math.max(0, Math.ceil((ms ?? 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes)}:${String(seconds).padStart(2, '0')}`;
+};
