@@ -191,6 +191,14 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `electron_mirror`。**实测更正（1.2）**：Electron 44 起包内**没有 install 脚本**，只暴露
   `install-electron` bin，`pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 对它空转；
   二进制由根 `package.json` 的 `postinstall` 显式调用 `install.js` 拉取。
+- **实测（5.7-d-2）推送走的不是 22 端口**：`ssh -T git@ssh.github.com` 的 22 端口本机直接超时，
+  而 `git push origin main`（远端写作 `git@github.com:...`）会被 `Connection reset by 20.205.243.160 port 443`
+  反复拒掉（同一分钟里试过四次）。可用的写法是把远端展开成 443 的 URL 形式一次性推：
+  `git push ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main`，推完用
+  `git ls-remote ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main` 复核远端 ref。
+  **推到裸 URL 不会更新 `refs/remotes/origin/main`**，复核一致后要手动
+  `git update-ref refs/remotes/origin/main <远端 sha>`，否则 `git status -sb` 会一直假报"领先 N 个提交"。
+  不要为了这条去改 `remote.origin.url`（本文件禁止动 git 配置），也不要把它当成稳定通道——它也会抖。
 - npm 生命周期脚本在本环境**可能被禁用**：不要依赖 husky/commitlint 安装期钩子，钩子用
   `core.hooksPath` + 纯 shell 实现（已在 `.githooks/`）。根 `prepare` 在非 git 目录里会失败，
   临时目录装依赖时要先 `git init`。

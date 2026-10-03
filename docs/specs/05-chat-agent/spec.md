@@ -2219,7 +2219,12 @@ resume-0185fba4a2cc-classic.pdf / 43871 字节 / sha256 c272d0a4378a… / delive
 新写的只有前缀路由与投影；⑤ 死代码检查：无未调用导出（`makeRefsTool` 那个从未被读的形参在 lint 逼问下删了而不是留着）；
 ⑥ 前端三项满足：Tailwind utility 组合（无新 CSS、无内联样式）、图标只用 lucide 现有的
 `ChevronDown` / `ChevronRight` / `ScrollText` / `SearchX`、文案全进 `chat.evidence.*` 双语；⑦ 按 §1.4 分片提交（agent 路由 / 各家 owner 定点读法 / IPC 白名单与类型面 / 渲染层 / 测试 / 文档+证据），
-§1.6 推 `origin/main`，GitHub 直连不稳时如实报"已提交未推送"；⑧ 暂存区只有本 spec 与按条目 ID 命名的验收截图（§7.5 允许的路径），
+§1.6 的推送**实际跑法是**：`git push origin main` 连续四次被重置（`Connection reset by 20.205.243.160 port 443`，
+且 `ssh -T git@ssh.github.com` 的 22 端口直接超时），改按 §9 新增那条走
+`git push ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main` 一次通过：`f58f5a6..7624a5f  main -> main`；
+再用 `git ls-remote` 同一只口复核远端 `refs/heads/main = 7624a5f471e…`，与本地 HEAD 一致后把
+`refs/remotes/origin/main` 同步到该点（推到裸 URL 不会自动更新跟踪引用，这不是猜测而是复核过的值），
+`git status -sb` 现为 `## main...origin/main`（不领先不落后）；⑧ 暂存区只有本 spec 与按条目 ID 命名的验收截图（§7.5 允许的路径），
 探针、驱动脚本、中间态图与 store 副本全在 gitignore 的 `tmp/5.7-d2/`。
 
 ### 5.7-e-1 落地记录（2026-10-04，5.7-08 收口：调度侧的频控只读预检 + 真闸门 daily 的跨包链路用例）
