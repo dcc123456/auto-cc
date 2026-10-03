@@ -7,6 +7,10 @@
  *
  * 本服务**只管数据**：不认识执行器、不做重试、不发事件。所有编排在 `workflow.runner`，
  * 于是 2.4-08 的 mock 链和 2.4-01 的序列化 round-trip 都能直接对着这张表测。
+ *
+ * 5.4 起它还是**自定义工作流计划**的落点（`workflow_plans`，号段 20，读写机器在 `plan-store.ts`）。
+ * 挂在这一个服务上而不是新起 `workflow.plans` 服务，理由写在 `plan-store.ts` 的文件头：
+ * 同属工作流持久化、同一个连接、同一份迁移清单，再起一个服务就是第二条通路（AGENTS.md §2.3/§2.7）。
  */
 import {
   AppError,
@@ -15,6 +19,7 @@ import {
   asSqlInt,
   Service,
   type Context,
+  type SavedWorkflowPlanView,
   type WorkflowNodeRunView,
   type WorkflowNodeSpec,
   type WorkflowNodeStatsView,
@@ -26,7 +31,17 @@ import {
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { buildPlan } from './plan.js';
+import { planFromStoredText } from './plan.js';
+import {
+  deletePlan,
+  getPlan,
+  insertPlan,
+  listPlans,
+  renamePlan,
+  workflowPlanMigration,
+  WORKFLOW_PLAN_MIGRATION_VERSION,
+  type SavedPlanInput,
+} from './plan-store.js';
 
 /**
  * run 表的迁移号段：**4**（`usage_ledger` 占 1、`chat` 的两张表占 2、`jobs` 占 3）。
@@ -209,6 +224,10 @@ export class WorkflowRunStoreService extends Service {
     if (!migrations.some((item) => item.version === WORKFLOW_MIGRATION_VERSION)) {
       migrations.push(workflowMigration);
     }
+    // 计划表那一支单独判一次：两支都属于本服务，但版本号互不相干，缺任何一支都要各自补齐。
+    if (!migrations.some((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)) {
+      migrations.push(workflowPlanMigration);
+    }
     this.store.upgrade();
   }
 
@@ -354,27 +373,7 @@ export class WorkflowRunStoreService extends Service {
   state = (runId: string): WorkflowRunStateView | null => {
     const run = this.runRow(runId);
     if (!run) return null;
-    let plan: WorkflowPlanView;
-    try {
-      plan = buildPlan(JSON.parse(run.plan_json) as unknown);
-    } catch (error) {
-      throw new AppError(
-        'INVALID_ARGUMENT',
-        `库里这次 run 的计划读数已损坏，无法读回状态：${error instanceof Error ? error.message : String(error)}`,
-        'workflow.store',
-        { runId },
-      );
-    }
-    // 指纹是从节点内容**重算**的，`plan_fingerprint` 列是开跑时写下的历史值：两者不一致就说明
-    // 计划文本在落库之后被改过（或列被改过）。这种情况下的「第 i 个节点」已经不是当初那个节点，
-    // 所以宁可拒绝读数，也不能让续跑按一个没人核对过的下标走下去（spec 2.4-05 的串档判据）。
-    if (plan.fingerprint !== run.plan_fingerprint) {
-      throw new AppError('INVALID_ARGUMENT', `这次 run 的计划与登记的指纹不一致，拒绝按原进度续跑`, 'workflow.store', {
-        runId,
-        stored: run.plan_fingerprint,
-        recomputed: plan.fingerprint,
-      });
-    }
+    const plan = this.runPlan(run);
     const rows = this.db
       .prepare('SELECT * FROM workflow_nodes WHERE run_id = ? ORDER BY node_index')
       .all(runId) as NodeRow[];
@@ -393,6 +392,21 @@ export class WorkflowRunStoreService extends Service {
       lastError: run.last_error,
       nodes,
     };
+  };
+
+  /**
+   * 读回某次 run **自己带上**的那份计划（spec 5.4-07 的地基）。
+   *
+   * 为什么不复用 `state()`：那里给的是「节点进度」，界面要的是「这一格当初声明的是什么」
+   * （kind、参数、是否接管点）。两者读的是同一列，所以校验只写在一处（`runPlan`），
+   * 而 `nodes()` 因此能按 run 自己的快照回答——面板此刻配了哪条计划与它无关。
+   * @param runId 本次 run
+   * @returns 计划视图；库里没有这次 run 时为 null（初始镜像还没有行）
+   * @throws 计划文本损坏或与登记指纹不一致，同 `state()`——绝不返回半条计划
+   */
+  planSnapshot = (runId: string): WorkflowPlanView | null => {
+    const run = this.runRow(runId);
+    return run ? this.runPlan(run) : null;
   };
 
   /**
@@ -502,6 +516,56 @@ export class WorkflowRunStoreService extends Service {
     return ids;
   };
 
+  /**
+   * 存一条自定义计划（spec 5.4-01 的落库那一半）。
+   * @param input 计划本体、名字、来源 run；`at` 由调用方给（本服务不自己读钟）
+   * @returns 刚落库的列表读数
+   */
+  savePlan = (input: SavedPlanInput): SavedWorkflowPlanView => insertPlan(this.db, input);
+
+  /**
+   * 列出全部自定义计划（不含内置那三条，内置的在 runner 的目录里）。
+   * @returns 按最后改动时间倒序的列表读数；一条都没有时为空数组
+   */
+  listPlans = (): SavedWorkflowPlanView[] => listPlans(this.db);
+
+  /**
+   * 读一条自定义计划。
+   * @param id 计划 id
+   * @returns 列表读数 + 交给 runner 的本体；库里没有这条时为 null
+   */
+  getPlan = (id: string): { saved: SavedWorkflowPlanView; plan: WorkflowPlanView } | null => getPlan(this.db, id);
+
+  /**
+   * 给自定义计划改名（spec 5.4-08 的重命名）。
+   * @param id 计划 id
+   * @param rawName 新名字，校验在 `plan-store` 那一处，不在界面重复
+   * @param at 改动时刻（毫秒）
+   * @returns 改后的读数；这条不存在时为 null
+   */
+  renamePlan = (id: string, rawName: string, at: number): SavedWorkflowPlanView | null =>
+    renamePlan(this.db, id, rawName, at);
+
+  /**
+   * 删一条自定义计划（spec 5.4-08 的删除——确认发生在界面，这里只负责删）。
+   * @param id 计划 id
+   * @returns 真的删掉一行为 true；本来就没有为 false
+   */
+  deletePlan = (id: string): boolean => deletePlan(this.db, id);
+
+  /**
+   * 把 run 行里的 `plan_json` 解析回计划，并核对指纹（`state()` 与 `planSnapshot()` 共用的一处校验）。
+   *
+   * 判据本体在 `plan.ts` 的 `planFromStoredText`——`workflow_plans` 那条读路走的是同一份机器（§2.2），
+   * 这里只负责递上「这条 run 的原文 + 它登记的指纹」和一句指认谁的话。
+   * @param run 已经读到手的 run 行
+   * @returns 补全默认值并重算过指纹的计划视图
+   * @throws `INVALID_ARGUMENT`（文本读不回、形状不合、或与登记的指纹不一致），绝不返回半条计划
+   */
+  private runPlan(run: RunRow): WorkflowPlanView {
+    return planFromStoredText(run.plan_json, run.plan_fingerprint, '库里这次 run', { runId: run.run_id });
+  }
+
   /** 读 run 行；没有就 null（内部用，所以不抛）。 */
   private runRow(runId: string): RunRow | undefined {
     return this.db.prepare('SELECT * FROM workflow_runs WHERE run_id = ?').get(runId) as RunRow | undefined;
@@ -516,7 +580,8 @@ export class WorkflowRunStoreService extends Service {
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info(
-      `run 存储就绪：workflow_runs / workflow_nodes（schema v${String(WORKFLOW_MIGRATION_VERSION)}）`,
+      `run 存储就绪：workflow_runs / workflow_nodes（schema v${String(WORKFLOW_MIGRATION_VERSION)}）` +
+        ` · 自定义计划 workflow_plans（schema v${String(WORKFLOW_PLAN_MIGRATION_VERSION)}）`,
     );
   }
 }

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
+import { WORKFLOW_PLAN_MIGRATION_VERSION } from './plan-store.js';
 import { WORKFLOW_MIGRATION_VERSION, WorkflowRunStoreService, type NodeOutcome } from './run-store.js';
 
 const sandboxes: string[] = [];
@@ -68,7 +69,7 @@ afterAll(async () => {
 });
 
 describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）', () => {
-  it('挂载即把两张表建出来，schema 版本停在号段 4', async () => {
+  it('挂载即把工作流三张表建出来，schema 版本停在最高号段', async () => {
     const { store, db } = await boot();
     const tables = (
       db
@@ -77,10 +78,12 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
         name: string;
       }[]
     ).map((row) => row.name);
-    expect(tables).toEqual(['workflow_nodes', 'workflow_runs']);
-    expect(store.version).toBe(WORKFLOW_MIGRATION_VERSION);
-    // 号段是全局的（1=usage_ledger、2=chat、3=jobs），撞号只在运行期炸，所以钉在断言里。
+    // `workflow_plans` 是 5.4-01 加的那张表，与 run 两张表同一个服务、另一个号段。
+    expect(tables).toEqual(['workflow_nodes', 'workflow_plans', 'workflow_runs']);
+    expect(store.version).toBe(WORKFLOW_PLAN_MIGRATION_VERSION);
+    // 号段是全局的（1=usage_ledger、2=chat、3=jobs、…、19=usage_denials），撞号只在运行期炸，所以钉在断言里。
     expect(WORKFLOW_MIGRATION_VERSION).toBe(4);
+    expect(WORKFLOW_PLAN_MIGRATION_VERSION).toBe(20);
   });
 
   it('幂等键上有唯一索引，孤儿行扫描与聚合各有一条支撑索引', async () => {
@@ -100,13 +103,17 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(runIndexes).toContain('workflow_runs_status');
   });
 
-  it('重复挂载不会往共享迁移清单里塞第二个 v4，且重启后照样写得进去', async () => {
+  it('重复挂载不会往共享迁移清单里塞第二个 v4 / v20，且重启后照样写得进去', async () => {
     const { ctx, store, runFiber } = await boot();
+    // 两个号段各一条：push 的判据是「清单里有没有这个版本」，不是「有没有我这一支」，
+    // 所以第二次挂载既不能把 v4 变成两条，也不能把 v20 变成两条（老库重跑迁移就是建表语句报错）。
     expect(store.migrations.filter((item) => item.version === WORKFLOW_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
     await runFiber.dispose();
     fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
     expect(store.migrations.filter((item) => item.version === WORKFLOW_MIGRATION_VERSION)).toHaveLength(1);
-    expect(store.version).toBe(WORKFLOW_MIGRATION_VERSION);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.version).toBe(WORKFLOW_PLAN_MIGRATION_VERSION);
     // 必须拿**新**实例读写：旧句柄的 ctx 已经 inactive，用它调用会在 cordis 层就失败（实测过一次），
     // 而「重启后照样能用」要证的正是新实例，不是旧壳子。
     const again = asApp(ctx)['workflow.store'];
@@ -114,13 +121,14 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(again.state('r-again')?.status).toBe('running');
   });
 
-  it('回滚把两张表一起丢掉，再升级又建得回来（down 路径实测）', async () => {
+  it('回滚把工作流三张表一起丢掉，再升级又建得回来（down 路径实测）', async () => {
     const { store, db, runs } = await boot();
     runs.openRun('r-rollback', buildPlan(BOSS_BASIC_PLAN), 1_000);
     expect(runs.state('r-rollback')).not.toBeNull();
 
     const back = store.rollback(WORKFLOW_MIGRATION_VERSION - 1);
-    expect(back.reverted).toEqual([WORKFLOW_MIGRATION_VERSION]);
+    // 倒序回滚：先 20（计划表）再 4（run 两张表），两条 down 各自只 DROP 自己那张。
+    expect(back.reverted).toEqual([WORKFLOW_PLAN_MIGRATION_VERSION, WORKFLOW_MIGRATION_VERSION]);
     expect(store.version).toBe(WORKFLOW_MIGRATION_VERSION - 1);
     const leftovers = db
       .prepare("select name from sqlite_master where type in ('table','index') and name like 'workflow_%'")
@@ -129,8 +137,17 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     // 查询直接失败在 sqlite 层：这是「表真的不在了」的证据，不是我们的判断。
     expect(() => runs.state('r-rollback')).toThrowError(/no such table/);
 
-    expect(store.upgrade().applied).toEqual([WORKFLOW_MIGRATION_VERSION]);
+    expect(store.upgrade().applied).toEqual([WORKFLOW_MIGRATION_VERSION, WORKFLOW_PLAN_MIGRATION_VERSION]);
     expect(runs.state('r-rollback')).toBeNull();
+    // 升级回来的不只是 run 表：计划表也必须建得回来，否则老库回滚再升级会得出「能跑、存不了」。
+    runs.savePlan({
+      id: 'plan-rollback',
+      name: '回滚后仍可写',
+      plan: buildPlan(BOSS_BASIC_PLAN),
+      sourceRunId: null,
+      at: 2_000,
+    });
+    expect(runs.listPlans().map((plan) => plan.id)).toEqual(['plan-rollback']);
   });
 });
 

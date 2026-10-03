@@ -20,12 +20,14 @@ import {
   sleep,
   type Context,
   type RiskSignalEvent,
+  type SavedWorkflowPlanView,
   type SessionExpiredEvent,
   type ToolEffect,
   type WorkflowNodeSpec,
   type WorkflowNodeExecutor,
   type WorkflowNodePhase,
   type WorkflowEvidenceView,
+  type WorkflowPlanOptionView,
   type WorkflowPlanView,
   type WorkflowRunStateView,
   type WorkflowRunView,
@@ -39,14 +41,15 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createRun, transition, type RunnerEvent } from './machine.js';
 import type { WorkflowExecutorRegistryService } from './executors.js';
-import { planById } from './plan.js';
+import { BOSS_BASIC_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchema } from './plan.js';
+import { assertPlanName, newPlanId } from './plan-store.js';
 import type { WorkflowRunStoreService } from './run-store.js';
 
 // 登记处与落库服务从包出口露出去：装配清单要为它们各占一个 id（main/registry.ts）。
 // 执行器的**契约**（`WorkflowNodeExecutor` 等）在 `@auto-cc/core`，能力包从那里取，不 import 本包。
 export { WorkflowExecutorRegistryService } from './executors.js';
 export { WorkflowRunStoreService } from './run-store.js';
-export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema } from './plan.js';
+export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema };
 
 /** 一个失败节点留下的证据（spec 2.4-04）。 */
 type NodeEvidence = {
@@ -124,8 +127,14 @@ export class WorkflowRunnerService extends Service {
   static Config = workflowConfigSchema;
   static inject = ['workflow.store', 'workflow.executors', 'config'];
 
-  /** 本次要跑的计划（挂载时按 `planId` 解析，之后不可变——指纹就是它的身份）。 */
-  private readonly plan: WorkflowPlanView;
+  /**
+   * 当前要跑的计划。挂载时取配置里那条（`config.planId`），`start(planId)` 可以把它换成挑中的那条。
+   *
+   * 5.4 起它不再是挂载期常量：判据 5.4-03 要求"沉淀出的计划面板可直接运行"，而界面不能为了换一条
+   * 计划去改配置（改配置会重建下游，见 AGENTS.md §9 的 2.5 实测）。**不做持久化**——重启回到配置值，
+   * 九条判据里没有一条要求"重启后仍停在某条自定义计划"。写点只有 `selectPlan` 一处。
+   */
+  private plan: WorkflowPlanView;
 
   /**
    * 当前 run 的镜像：挂载即是一个 `idle` 的节点数快照，所以界面任何时候都有槽位可画（spec 1.10-02/03）。
@@ -140,7 +149,8 @@ export class WorkflowRunnerService extends Service {
     super(ctx, 'workflow.runner');
     // 这两样在构造器体里赋值而不是写在字段初始化器上：参数属性 `config` 是在字段初始化**之后**才写入的，
     // 初始化器里读它会拿到 undefined（TS2729）。计划不合法时在这里就抛，挂载因此结构化失败。
-    this.plan = planById(config.planId);
+    // 挂载期只查内置目录：那时 `workflow.store` 的迁移不一定已经跑完，读表会把装配打崩。
+    this.plan = this.selectPlan(planById(config.planId));
     this.run = createRun(
       'pending',
       Date.now(),
@@ -178,11 +188,101 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 当前计划的节点声明（spec 2.4-01）。面板与 2.8 的工具卡片用它列节点。
+   * 界面画格子要用的节点声明（spec 2.4-01，5.4-07 把它从"当前计划"改成"这次 run 自己的快照"）。
+   *
+   * 有 run 就读那条 run 的 `plan_json`，没有 run（只有初始镜像）才读当前计划。差别在切换计划之后才显现：
+   * 面板这时配的是 B，而屏幕上那条 run 是 A 跑的——格子必须还是 A 的那些格，否则进度会错位到
+   * 别的节点上，而对话侧读的是同一个 `workflow/progress`，两处就会显示两件事（5.4-07 的判据）。
    * @returns 按执行顺序排列的节点声明；返回的是计划本体的引用，调用方不该改
    */
   nodes(): WorkflowNodeSpec[] {
-    return this.plan.nodes;
+    return this.store.planSnapshot(this.run.runId)?.nodes ?? this.plan.nodes;
+  }
+
+  /**
+   * 可跑的计划清单：内置目录 + 用户沉淀出来的自定义计划（spec 5.4-01/08 的列表数据源）。
+   *
+   * 每次现读表、不在服务里存第二份计划事实（AGENTS.md §9 的 2.5 实测条：改配置重建下游时本地镜像会静默变空）。
+   * 自定义计划排在前面（按最后改动时间倒序），面板顶部就是"我刚刚存下来的那条"。
+   * @returns 每条计划的选项读数（id / 名字 / 指纹 / 节点数 / 来源）
+   */
+  plans(): WorkflowPlanOptionView[] {
+    const custom = this.store.listPlans().map((saved) => ({
+      id: saved.id,
+      name: saved.name,
+      source: 'custom' as const,
+      fingerprint: saved.fingerprint,
+      nodeCount: saved.nodeCount,
+    }));
+    const builtin = Object.keys(WORKFLOW_PLANS).map((id) => {
+      const plan = planById(id);
+      return {
+        // 内置计划没有"名字"这一维：id 就是它对外的称呼（`boss-basic` 一类是稳定标识，不进 i18n）。
+        id,
+        name: id,
+        source: 'builtin' as const,
+        fingerprint: plan.fingerprint,
+        nodeCount: plan.nodes.length,
+      };
+    });
+    return [...custom, ...builtin];
+  }
+
+  /**
+   * 存一条自定义计划（spec 5.4-01 的落库半边，也是 `agent.sediment.save` 的落点）。
+   *
+   * 这是计划的**唯一写入口**，所以三道拒绝里的命名校验（5.4-05）与形状校验都只做在这里：
+   * 界面再拦一道是提示，服务拦不住才是缺陷（AGENTS.md §2.6——用户输入是系统边界）。
+   * 落库前先过 `buildPlan`：它总是按节点内容**重算**指纹（`plan.ts` 的注释写着"传进来的值一律不信"），
+   * 于是 5.4-03 的"与 2.4 节点模型完全同构"是结构上成立的，不是靠约定。
+   * @param nodes 沉淀出来的节点声明（`agent.sediment` 的投影产物）
+   * @param nameRaw 用户填的名字（首尾空格会被去掉）
+   * @param sourceRunId 这条计划来自哪次 run；手工新建时传 null
+   * @returns 刚落库的读数（含新 id，界面据此把下拉指过去）
+   * @throws `INVALID_ARGUMENT`：名字不合法（空 / 超 40 字 / 非法字符）或节点形状不合、`kind` 未知由 runner 管
+   */
+  savePlan(nodes: readonly WorkflowNodeSpec[], nameRaw: string, sourceRunId: string | null): SavedWorkflowPlanView {
+    const name = assertPlanName(nameRaw);
+    const id = newPlanId();
+    const plan = buildPlan({ id, nodes });
+    return this.store.savePlan({ id, name, plan, sourceRunId, at: Date.now() });
+  }
+
+  /**
+   * 重命名一条自定义计划（spec 5.4-08）。只改名字，所以指纹不动——改名不该让
+   * 已有的 run 变成"续不上"，那个判据管的是计划文本变没变。
+   * @param id 计划 id（内置那三条不在表里，直接返回 null）
+   * @param nameRaw 新名字，校验同 `savePlan`
+   * @returns 改后的读数；库里没有这条时为 null
+   */
+  renamePlan(id: string, nameRaw: string): SavedWorkflowPlanView | null {
+    return this.store.renamePlan(id, nameRaw, Date.now());
+  }
+
+  /**
+   * 复制一条计划（spec 5.4-08 的"复制"）：拿到一份同内容、新 id、新名字的副本。
+   *
+   * 副本的指纹与源头相同（内容一样，指纹就是内容算出来的），这是**对的**：指纹的身份是"哪份计划文本"，
+   * 不是"哪个列表条目"。5.4-06 的快照语义靠的是每行各存一份 `plan_json`，两条以后各改各的就会分岔。
+   * @param id 源头计划 id
+   * @param nameRaw 副本名字
+   * @returns 副本的读数；源头不存在时为 null
+   */
+  duplicatePlan(id: string, nameRaw: string): SavedWorkflowPlanView | null {
+    const source = this.store.getPlan(id);
+    if (!source) return null;
+    return this.savePlan(source.plan.nodes, nameRaw, source.saved.sourceRunId);
+  }
+
+  /**
+   * 删一条自定义计划（spec 5.4-08 的删除；二次确认发生在界面，这里只管删）。
+   *
+   * 历史 run 不受影响：每一行各带自己的 `plan_json` 快照，删掉计划不会让它们变成"有计划、无进度"。
+   * @param id 计划 id
+   * @returns 真的删掉一行为 true；本来就没有为 false（界面按"列表已经刷新过"处理，不额外报错）
+   */
+  removePlan(id: string): boolean {
+    return this.store.deletePlan(id);
   }
 
   /**
@@ -305,11 +405,15 @@ export class WorkflowRunnerService extends Service {
 
   /**
    * 起一个新的 run 并开始推进。
+   * @param planIdRaw 挑中的计划 id（spec 5.4-03 的"面板可直接运行"）。省略时沿用**当前**计划，
+   *                  所以 2.4 那条"点了开始就跑配置里那条"的路径一字不变；给了 id 就按不可信输入处理，
+   *                  先换计划再起 run，换不了（未知 id）时内存态原样不动。
    * @returns 刚进入 `running` 的状态
    * @throws 上一个 run 还没走完时以 `WORKFLOW_INVALID_STATE` 失败（先暂停/重试，别并行两个 run）；
+   *         计划 id 不在内置目录也不在 `workflow_plans` 时以 `INVALID_ARGUMENT` 失败并列出可用值；
    *         计划里有登记处不认识的 `kind` 时以 `INVALID_ARGUMENT` 失败（装配期就拒，不跑到一半才发现）
    */
-  start(): WorkflowRunView {
+  start(planIdRaw?: string): WorkflowRunView {
     if (this.run.status !== 'idle' && this.run.status !== 'done') {
       throw new AppError(
         'WORKFLOW_INVALID_STATE',
@@ -318,6 +422,8 @@ export class WorkflowRunnerService extends Service {
         { status: this.run.status },
       );
     }
+    // 切换计划放在状态闸门之后、起 run 之前：`resolvePlan` 失败时这里一行内存态都没动。
+    if (planIdRaw !== undefined) this.selectPlan(this.resolvePlan(planIdRaw));
     this.requireExecutable(this.plan);
     this.applyRetention();
     this.claimedPositions.clear();
@@ -332,6 +438,40 @@ export class WorkflowRunnerService extends Service {
     const started = this.apply({ type: 'start' }, null, `计划 ${this.plan.id} 开跑`);
     void this.pump();
     return started;
+  }
+
+  /**
+   * 当前计划的**唯一**写点：挂载期取配置值，`start(planId)` 时换成挑中的那条（5.4 起它可变，但不持久化）。
+   * @param plan 收窄过、指纹已重算的计划本体
+   * @returns 同一个计划——写成表达式是为了让构造器里那一次是 TS 认得的直接赋值
+   * （`strictPropertyInitialization` 不追方法调用，只写 `this.selectPlan(...)` 会报「未初始化」）
+   */
+  private selectPlan(plan: WorkflowPlanView): WorkflowPlanView {
+    this.plan = plan;
+    return plan;
+  }
+
+  /**
+   * 按 id 解析一条计划：先内置目录，再 `workflow_plans`。
+   *
+   * 顺序是刻意的——内置 id 是稳定标识（`boss-basic`），自定义 id 带 `plan-` 前缀（见 `newPlanId`），
+   * 两者形状上不撞；先查表的话，用户存的一条坏计划就能盖掉一条演示主线。
+   * @param id 界面或配置给的值，按不可信输入处理
+   * @returns 补全默认值并算好指纹的计划视图
+   * @throws 两处都查不到时 `INVALID_ARGUMENT`，并列出当前所有可用 id（含自定义那几条）
+   */
+  private resolvePlan(id: string): WorkflowPlanView {
+    if (id in WORKFLOW_PLANS) return planById(id);
+    const saved = this.store.getPlan(id);
+    if (saved) return saved.plan;
+    throw new AppError(
+      'INVALID_ARGUMENT',
+      `未知的工作流计划 ${id}，可选：${this.plans()
+        .map((option) => option.id)
+        .join('、')}`,
+      'workflow.runner',
+      { planId: id, available: this.plans().map((option) => option.id) },
+    );
   }
 
   /**
@@ -436,6 +576,10 @@ export class WorkflowRunnerService extends Service {
    *                   给了 id 就按不可信输入处理，库里没有就拒绝
    * @returns 重新进入 `running`（或停在接管点上的 `paused`）的状态
    * @throws 库里没有可续的 run、或计划指纹与当前配置不是同一条时 `INVALID_ARGUMENT`（2.4-05 的串档判据）
+   *
+   * 5.4 之后要多留意一句：**续自定义计划的 run，得先把当前计划换成那条**（面板的下拉，5.4-b 的入口）。
+   * 这里没有改成"按 run 自己的快照续"，因为 2.4-05 已验收的判据字面就是"配置的计划与 run 不一致时拒绝续"，
+   * 放开它就是把一条已验收的安全网悄悄拆掉。
    */
   resumeRun(runIdRaw?: string): WorkflowRunView {
     const candidate = runIdRaw === undefined ? this.store.resumeCandidate(this.plan.fingerprint) : null;

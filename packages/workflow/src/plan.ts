@@ -132,6 +132,48 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
 }
 
 /**
+ * 把「库里存的一段计划文本 + 当时登记的指纹」收成可信本体。
+ *
+ * 这条判据有**两个**读路要它：run 行的 `plan_json`（2.4-05 的断点续跑）与 `workflow_plans` 的行
+ * （5.4-06 的自定义计划）。落库之后文本可能被外部改坏，也可能节点变了而指纹列还是旧值——那时
+ * 「第 i 个节点」已经不是当初那个节点，宁可拒绝读数，也不能按一个没人核对过的下标继续跑。
+ * 重算机器只写这一份（AGENTS.md §2.2）：两条读路分开写迟早漂成两个口径，而「按坏计划开跑」是唯一
+ * 无法事后发现的错。
+ * @param text `plan_json` 列的原文
+ * @param fingerprint 随行登记的指纹（run 的 `plan_fingerprint` 或计划表的 `fingerprint`）
+ * @param subject 句子主语，指认是谁的那份读数（如「库里这次 run」「计划 plan-1a2b」），界面原样显示
+ * @param details 结构化上下文（runId / planId），进 `AppError.details` 供日志与卡片读
+ * @returns 补全默认值并**重算过指纹**的计划本体
+ * @throws `INVALID_ARGUMENT` 文本读不回、形状不合、或与登记的指纹不一致——绝不返回半条计划
+ */
+export function planFromStoredText(
+  text: string,
+  fingerprint: string,
+  subject: string,
+  details: Record<string, unknown>,
+): WorkflowPlanView {
+  let plan: WorkflowPlanView;
+  try {
+    plan = buildPlan(JSON.parse(text) as unknown);
+  } catch (error) {
+    throw new AppError(
+      'INVALID_ARGUMENT',
+      `${subject}的计划读数已损坏，无法读回：${error instanceof Error ? error.message : String(error)}`,
+      'workflow.store',
+      details,
+    );
+  }
+  if (plan.fingerprint !== fingerprint) {
+    throw new AppError('INVALID_ARGUMENT', `${subject}的计划与登记的指纹不一致，已拒绝读回`, 'workflow.store', {
+      ...details,
+      stored: fingerprint,
+      recomputed: plan.fingerprint,
+    });
+  }
+  return plan;
+}
+
+/**
  * BOSS 主线的第一条计划（spec 2.4-02/03/05 的验收对象）。
  *
  * 三个节点都是**线性**的，且第三个故意是「前两次必失败」的演示节点：
