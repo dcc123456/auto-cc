@@ -34,6 +34,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_COMPACTION_MIGRATION_VERSION,
   CHAT_MIGRATION_VERSION,
   CHAT_SESSION_META_MIGRATION_VERSION,
   ChatSessionService,
@@ -81,12 +82,13 @@ const BASE_PAUSE_TIMEOUT_MS = 1000;
  * 台架里由**会话服务**登记的号段。
  *
  * 判「循环一族有没有往上加号段」时要先把它们剔掉：`bootLoop` 挂的是真 `ChatSessionService`
- * （会话域从 1.11 起就带着自己的账，5.6-c 又加了号段 23），按版本号大小筛会把邻居的登记算到循环头上。
+ * （会话域从 1.11 起就带着自己的账，5.6-c 加了号段 23、5.6-d 加了号段 24），按版本号大小筛会把邻居的登记算到循环头上。
  */
 const SESSION_DOMAIN_MIGRATION_VERSIONS = [
   CHAT_MIGRATION_VERSION,
   CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
   CHAT_SESSION_META_MIGRATION_VERSION,
+  CHAT_COMPACTION_MIGRATION_VERSION,
 ];
 
 /** `agent_step` 的原始行读数——断言时直接对表说话，不经视图转换。 */
@@ -128,6 +130,8 @@ async function bootLoop(
     chunkChars: 40,
     chunkIntervalMs: 0,
     defaultAutonomy: 'suggest',
+    compactTriggerTokens: 600,
+    compactKeepRecentMessages: 8,
   });
   await chatFiber;
   // 5.5-a：接管态是判定口与循环的**硬依赖**（读不到接管态还照动手＝「接管期间一步都不发」静默失效），
@@ -1260,8 +1264,8 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
     expect(rows[0]).toMatchObject({ kind: 'approval', plan_step_index: 0, resolution: 'approve' });
     expect(Number(rows[0]?.resolved_at)).toBeGreaterThan(0);
     // 台架里的接管态是不带迁移的替身：接管那段账（号段 21 的 `takeover_events`）属于 `browser.takeover`，
-    // 循环这一侧只写 `stop_reason`：剔掉会话域那三行登记之后，它这一族最大的号段仍是 22
-    // （5.6-c 的号段 23 是 `chat_session` 的标题与软删，登记方是 `ChatSessionService`，不是循环）。
+    // 循环这一侧只写 `stop_reason`：剔掉会话域那四行登记之后，它这一族最大的号段仍是 22
+    // （5.6-c 的 23 是 `chat_session` 的标题与软删、5.6-d 的 24 是 `chat_compaction`，登记方都是 `ChatSessionService`）。
     const loopFamilyVersions = rig.store.migrations
       .map((migration) => migration.version)
       .filter((version) => !SESSION_DOMAIN_MIGRATION_VERSIONS.includes(version));

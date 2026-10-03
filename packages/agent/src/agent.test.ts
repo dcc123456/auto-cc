@@ -7,15 +7,28 @@
  */
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { AppError, asApp, Context, toolResult, type ChatDeltaEvent, type ToolDescriptorView } from '@auto-cc/core';
+import {
+  AppError,
+  asApp,
+  Context,
+  NO_CONFIG,
+  Service,
+  toolResult,
+  type AgentRunView,
+  type ChatDeltaEvent,
+  type ToolDescriptorView,
+} from '@auto-cc/core';
+import type { UsageSummaryView } from '@auto-cc/shared';
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { estimateTokens } from './loop/model.js';
 import {
   CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
+  CHAT_COMPACTION_MIGRATION_VERSION,
   CHAT_MIGRATION_VERSION,
   CHAT_SESSION_META_MIGRATION_VERSION,
   ChatSessionService,
@@ -55,6 +68,10 @@ async function boot(config: Partial<ChatConfig> = {}) {
     // 带 `.default()` 的键在直接调用点必须显式给出（AGENTS.md §9 的 1.3 实测）；
     // 「装配里不给这一行」那半边由 `chatConfigSchema.parse({})` 的用例证明（5.3-02）。
     defaultAutonomy: 'suggest',
+    // 压缩的两个门槛在这里给一份「测试默认」：绝大多数用例只发一两条短消息，够不着门槛，
+    // 需要它们的两条用例（5.6-02 / 03 / 10）自己用 `boot({...})` 覆盖这一对值。
+    compactTriggerTokens: 600,
+    compactKeepRecentMessages: 8,
     ...config,
   });
   await chatFiber;
@@ -95,6 +112,31 @@ function codeOf(action: () => unknown): string | null {
   } catch (error) {
     return (error as { code?: string }).code ?? null;
   }
+}
+
+/**
+ * 数一张表现在有几行。
+ * @param ctx 本次台架的上下文
+ * @param table 表名（只用在测试里已知的几张表上）
+ * @returns 行数（`COUNT(*)` 在 node:sqlite 下回 bigint，这里统一收成 number）
+ */
+function rowCount(ctx: Context, table: string): number {
+  const row = asApp(ctx).store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n?: number | bigint };
+  return Number(row.n ?? 0);
+}
+
+/**
+ * 取某张表的一列原始文本。
+ * @param ctx 本次台架的上下文
+ * @param sql 只回一列的查询（用例里都是 `SELECT <列> FROM <表> WHERE …`，最多取一行）
+ * @param params 查询的占位参数（用例里只有文本），按绑定而不是拼进 SQL
+ * @returns 那一列的值；没有行时为 undefined
+ */
+function firstColumn(ctx: Context, sql: string, ...params: string[]): string | undefined {
+  const row = asApp(ctx)
+    .store.db.prepare(sql)
+    .get(...params) as Record<string, string | undefined> | undefined;
+  return row ? Object.values(row)[0] : undefined;
 }
 
 /** 一个合规的假工具：只用来验证协议字段与 schema 校验，不碰任何真实能力。 */
@@ -576,6 +618,10 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
       chunkChars: 40,
       chunkIntervalMs: 0,
       defaultAutonomy: 'suggest',
+      // 压缩门槛给的是生产默认值：这几条用例折的是「重挂载不重跑迁移」，
+      // 消息短到远够不着阈值，折与不折都不该改变它们的读数。
+      compactTriggerTokens: 600,
+      compactKeepRecentMessages: 8,
     });
     await remounted;
     expect(chatVersions()).toBe(1);
@@ -588,17 +634,6 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
 });
 
 describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', () => {
-  /**
-   * 数一张表现在有几行。
-   * @param ctx 本次台架的上下文
-   * @param table 表名（只用在测试里已知的两张表上）
-   * @returns 行数（`COUNT(*)` 在 node:sqlite 下回 bigint，这里统一收成 number）
-   */
-  function rowCount(ctx: Context, table: string): number {
-    const row = asApp(ctx).store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n?: number | bigint };
-    return Number(row.n ?? 0);
-  }
-
   it('默认没有标题；改名落在同一行，去空格由主进程做', async () => {
     const { ctx, chat } = await boot();
     const sessionId = chat.current().session.id;
@@ -714,7 +749,13 @@ describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', ()
     expect(versions()).toBe(1);
 
     await chatFiber.dispose();
-    await ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, defaultAutonomy: 'suggest' });
+    await ctx.plugin(ChatSessionService, {
+      chunkChars: 40,
+      chunkIntervalMs: 0,
+      defaultAutonomy: 'suggest',
+      compactTriggerTokens: 600,
+      compactKeepRecentMessages: 8,
+    });
     expect(versions()).toBe(1);
     const remounted = asApp(ctx)['chat.session'];
     expect(remounted.current().session.id).toBe(titled.id);
@@ -847,7 +888,13 @@ describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () 
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE name = 'chat_autonomy_audit'").get()).toBeUndefined();
 
     await chatFiber.dispose();
-    await ctx.plugin(ChatSessionService, { chunkChars: 40, chunkIntervalMs: 0, defaultAutonomy: 'suggest' });
+    await ctx.plugin(ChatSessionService, {
+      chunkChars: 40,
+      chunkIntervalMs: 0,
+      defaultAutonomy: 'suggest',
+      compactTriggerTokens: 600,
+      compactKeepRecentMessages: 8,
+    });
     const remounted = asApp(ctx)['chat.session'];
     const sessionId = remounted.current().session.id;
     remounted.setAutonomy('semi');
@@ -947,5 +994,282 @@ describe('进入对话记录之前先脱敏（spec 5.6-05）', () => {
     expect(card?.errorText).not.toContain('zhou@example.com');
     expect(card?.errorText).toContain('z***@example.com');
     expect(storedParts(ctx)).not.toContain('zhou@example.com');
+  });
+});
+
+describe('长会话折叠与关键事实卡（spec 5.6-02 / 03 / 10，加 04 的可量化半边）', () => {
+  /**
+   * 一只按名字假装配上的额度闸门（本包不许 import 真实能力包，1.11-14）。
+   *
+   * 事实卡的判据是「每一位都是**此刻**问回来的」，所以读数必须可被用例改写：改一次 `remaining`，
+   * 读侧就要跟着变，否则「现问」与「折的时候存一份」在测试里长得一模一样、分不出来。
+   */
+  class FakeGateService extends Service {
+    static provide = 'entitlement.gate';
+    static Config = z.strictObject({});
+
+    /** 每个动作名此刻还剩几条；`null` 是 unlimited 模式下的「不限额」（1.9-02），与「问不到」是两件事。 */
+    remaining: Record<string, number | null> = { search: 9, greet: 5, deliver: 3 };
+
+    constructor(ctx: Context) {
+      super(ctx, 'entitlement.gate');
+    }
+
+    /** 报一次额度判定（只回剩几条，用例不关心放行与否）。 */
+    check = (action: string) => ({ allowed: true, remaining: this.remaining[action] ?? null, reason: null });
+  }
+
+  /** 一只按名字假装配上的用量账本：`recent` 里那几行 `deliver` 就是「已投递的目标」的唯一来源。 */
+  class FakeLedgerService extends Service {
+    static provide = 'usage.ledger';
+    static Config = z.strictObject({});
+
+    /** 递过简历的目标 id，每个算一行 `deliver` 账。 */
+    delivered: string[] = ['job-88'];
+
+    constructor(ctx: Context) {
+      super(ctx, 'usage.ledger');
+    }
+
+    /** 交回一份形状完整的用量读数（事实卡只读 `recent` 那一段）。 */
+    summary = (): UsageSummaryView => ({
+      total: this.delivered.length,
+      today: this.delivered.length,
+      byDay: [],
+      byAction: [{ action: 'deliver', count: this.delivered.length }],
+      recent: this.delivered.map((targetId, index) => ({
+        id: index + 1,
+        action: 'deliver',
+        targetId,
+        workflowRunId: null,
+        ts: Date.now(),
+        source: null,
+        remoteRef: null,
+      })),
+      recentDenials: [],
+    });
+  }
+
+  /** 一只按名字假装配上的循环：「最近一次为什么停下」与「被否决的做法」两位来自它的 run 读数。 */
+  class FakeLoopService extends Service {
+    static provide = 'agent.loop';
+    static Config = z.strictObject({});
+
+    /** 最近一次 run 为什么停下（枚举码，不是文案）。 */
+    stopReason: string | null = 'TOOL_REFUSED';
+
+    /** 最近一次 run 的步；事实卡只挑 `status === 'refused'` 的那些。 */
+    steps: { toolId: string; status: string; code: string | null }[] = [
+      { toolId: 'outbound.deliver', status: 'refused', code: 'APPROVAL_REQUIRED' },
+      { toolId: 'jd.search', status: 'succeeded', code: null },
+    ];
+
+    constructor(ctx: Context) {
+      super(ctx, 'agent.loop');
+    }
+
+    /** 交回一份只含事实卡要读的那两位的 run 读数——跨整个 `AgentRunView` 形状没有意义，那一位归 5.2 的用例管。 */
+    latestRun = (): AgentRunView | null =>
+      ({ stopReason: this.stopReason, steps: this.steps }) as unknown as AgentRunView;
+  }
+
+  /**
+   * 装一套会话再把三只按名字假装配的能力挂上去。
+   * @param config 会话配置覆盖（折叠门槛的用例都传 `compactTriggerTokens` / `compactKeepRecentMessages`）
+   * @returns `boot()` 的全部返回，外加三只假服务的实例句柄（用例改它们的读数要用）
+   */
+  async function bootWithFacts(config: Partial<ChatConfig> = {}) {
+    const booted = await boot(config);
+    opened.push(
+      await booted.ctx.plugin(FakeGateService, NO_CONFIG),
+      await booted.ctx.plugin(FakeLedgerService, NO_CONFIG),
+      await booted.ctx.plugin(FakeLoopService, NO_CONFIG),
+    );
+    return {
+      ...booted,
+      gate: booted.ctx.get('entitlement.gate') as unknown as FakeGateService,
+      ledger: booted.ctx.get('usage.ledger') as unknown as FakeLedgerService,
+      loop: booted.ctx.get('agent.loop') as unknown as FakeLoopService,
+    };
+  }
+
+  /**
+   * 发若干轮对话，每轮等到用户行与助手行都落库为止。
+   *
+   * 逐轮等而不是发完再等：`created_at` 是毫秒，几轮挤在同一毫秒里会让「按时间排序」的断言变得讲不清道理。
+   * @param ctx 本次台架的上下文（数行要用库）
+   * @param chat 会话服务
+   * @param rounds 轮数，每轮产生 2 行
+   * @returns 无；跑完即库里每轮两行都在
+   */
+  async function sendRounds(ctx: Context, chat: ChatSessionService, rounds: number): Promise<void> {
+    for (let round = 1; round <= rounds; round += 1) {
+      const rowsBefore = rowCount(ctx, 'chat_message');
+      chat.send(`第 ${String(round)} 轮：这条消息够长，投递后还剩 3 条额度，先记在这儿当被折叠的原文。`);
+      await waitUntil(() => rowCount(ctx, 'chat_message') === rowsBefore + 2, 6000, `第 ${round} 轮的两行没有落库`);
+    }
+  }
+
+  /**
+   * 读出压缩行点名的那批原文 id（按折叠时的顺序）。
+   * @param ctx 本次台架的上下文
+   * @param sessionId 会话 id
+   * @returns `covered_ids` 解析出的数组；没有压缩行时为空数组
+   */
+  function coveredIdsOf(ctx: Context, sessionId: string): string[] {
+    const raw = firstColumn(ctx, 'SELECT covered_ids FROM chat_compaction WHERE session_id = ?', sessionId);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  }
+
+  it('两条门槛任一没过就什么都不写：库里没有压缩行，界面读到的还是整段原文（5.6-02 的反面）', async () => {
+    // 行数过了门槛（4 > 2）而 token 没过：门槛是「与」的关系，任一不足就不该有第二份读数。
+    const { ctx, chat } = await boot({ compactTriggerTokens: 5000, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 2);
+    expect(chat.current().compaction).toBeNull();
+    expect(chat.current().messages).toHaveLength(4);
+    expect(rowCount(ctx, 'chat_compaction')).toBe(0);
+  });
+
+  it('门槛过了才折：折掉的是较早那一截，原文行一条不少，读数只有一行（5.6-02 / 04 的条数与 token）', async () => {
+    const { ctx, chat } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 3);
+    const snapshot = chat.current();
+    expect(snapshot.compaction).not.toBeNull();
+    expect(snapshot.compaction?.coveredCount).toBe(4);
+    // 画出来的只剩最近两条，而最近那条属于第 3 轮——被折的永远是较早的前缀。
+    expect(snapshot.messages).toHaveLength(2);
+    expect(JSON.stringify(snapshot.messages[0]?.parts)).toContain('第 3 轮');
+    expect(rowCount(ctx, 'chat_message')).toBe(6);
+    expect(rowCount(ctx, 'chat_compaction')).toBe(1);
+    // 5.6-04 要的「下降可量化」就是这两个数：同一把尺（`estimateTokens`）量出来的前后。
+    expect(snapshot.compaction?.tokensBefore ?? 0).toBeGreaterThan(snapshot.compaction?.tokensAfter ?? 0);
+  });
+
+  it('折叠只读不写：被折那行的数字逐字还在库里，而压缩表里没有一列装文案（5.6-03）', async () => {
+    const { ctx, chat } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 3);
+    const sessionId = chat.current().session.id;
+    const ids = coveredIdsOf(ctx, sessionId);
+    expect(ids).toHaveLength(4);
+    // 数值逐字不变的判据取「被折掉的那一行的原文还在」：摘要是附加的一层读数，不是改写出来的句子。
+    expect(firstColumn(ctx, 'SELECT parts FROM chat_message WHERE id = ?', ids[0] ?? '')).toContain('还剩 3 条');
+    const compaction = chat.current().compaction;
+    const coveredTokens = ids.reduce(
+      (total, id) => total + estimateTokens(firstColumn(ctx, 'SELECT parts FROM chat_message WHERE id = ?', id) ?? ''),
+      0,
+    );
+    // 前后之差恰好等于被折那几行的 token：既没有把留下的算进去，也没有凭空少算。
+    expect((compaction?.tokensBefore ?? 0) - (compaction?.tokensAfter ?? 0)).toBe(coveredTokens);
+    // 表结构本身就是证据：九列全是区间 / 条数 / 长度，没有一列能放「摘要文案」，
+    // 所以界面那句话只能是读的时候拼出来的（§5.5），库里也就无从编造事实（§8.4）。
+    const columns = asApp(ctx).store.db.prepare('PRAGMA table_info(chat_compaction)').all() as unknown as {
+      name: string;
+    }[];
+    expect(columns.map((column) => column.name).sort()).toEqual([
+      'covered_count',
+      'covered_ids',
+      'created_at',
+      'from_ts',
+      'id',
+      'session_id',
+      'to_ts',
+      'tokens_after',
+      'tokens_before',
+    ]);
+  });
+
+  it('事实卡五位都在，且是读的那一刻问回来的：改真值之后同一行摘要的读数跟着变（5.6-02）', async () => {
+    const { ctx, chat, gate, ledger, loop } = await bootWithFacts({
+      compactTriggerTokens: 20,
+      compactKeepRecentMessages: 2,
+    });
+    await sendRounds(ctx, chat, 3);
+    chat.setAutonomy('semi');
+    const before = chat.current().compaction;
+    expect(before?.factCard).toMatchObject({
+      autonomy: 'semi',
+      lastStopReason: 'TOOL_REFUSED',
+      deliveredTargetIds: ['job-88'],
+      refusedSteps: [{ toolId: 'outbound.deliver', code: 'APPROVAL_REQUIRED' }],
+    });
+    // 三项顺序就是 `QUOTA_ACTIONS` 的顺序，界面因此不必自己猜名单。
+    expect(before?.factCard.remainingByAction).toEqual([
+      { action: 'search', remaining: 9 },
+      { action: 'greet', remaining: 5 },
+      { action: 'deliver', remaining: 3 },
+    ]);
+
+    gate.remaining.deliver = 0;
+    gate.remaining.search = null;
+    ledger.delivered = ['job-99', 'job-100'];
+    loop.stopReason = 'STEP_LIMIT';
+    loop.steps = [];
+    const after = chat.current().compaction;
+    // 摘要行没被重写（同一行、同一覆盖数），变的只是那五位读数——这就是「现问」与「存一份」的区别。
+    expect(after?.id).toBe(before?.id);
+    expect(after?.coveredCount).toBe(before?.coveredCount);
+    expect(after?.factCard.remainingByAction).toEqual([
+      { action: 'search', remaining: null },
+      { action: 'greet', remaining: 5 },
+      { action: 'deliver', remaining: 0 },
+    ]);
+    expect(after?.factCard.deliveredTargetIds).toEqual(['job-99', 'job-100']);
+    expect(after?.factCard.lastStopReason).toBe('STEP_LIMIT');
+    expect(after?.factCard.refusedSteps).toEqual([]);
+  });
+
+  it('闸门没挂载时段落是空的而不是 null：「问不到」不画成「不限额」（5.6-02 的最坏误读）', async () => {
+    const { ctx, chat } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 3);
+    expect(chat.current().compaction?.factCard).toEqual({
+      autonomy: 'suggest',
+      remainingByAction: [],
+      lastStopReason: null,
+      refusedSteps: [],
+      deliveredTargetIds: [],
+    });
+  });
+
+  it('摘要点名的原文被外部删掉一条就整体退回原文：看得全优先于看得短（5.6-10）', async () => {
+    const { ctx, chat } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 3);
+    const sessionId = chat.current().session.id;
+    expect(chat.current().compaction).not.toBeNull();
+    const [firstCovered] = coveredIdsOf(ctx, sessionId);
+    // 模拟「摘要行说折了 4 条而库里只有 3 条」：外因删掉一行，压缩行自己不知道。
+    asApp(ctx)
+      .store.db.prepare('DELETE FROM chat_message WHERE id = ?')
+      .run(firstCovered ?? '');
+    const snapshot = chat.current();
+    expect(snapshot.compaction).toBeNull();
+    expect(snapshot.messages).toHaveLength(5);
+    expect(rowCount(ctx, 'chat_message')).toBe(5);
+  });
+
+  it('号段 24 只登记一次，重挂载之后压缩读数与折叠后的消息都读得回来（§7.4 的迁移幂等面）', async () => {
+    const { ctx, chat, chatFiber } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 2);
+    const sessionId = chat.current().session.id;
+    const compactionVersions = () =>
+      asApp(ctx).store.migrations.filter((migration) => migration.version === CHAT_COMPACTION_MIGRATION_VERSION).length;
+    expect(compactionVersions()).toBe(1);
+    const compactionId = chat.current().compaction?.id;
+    expect(compactionId).toBeTruthy();
+
+    await chatFiber.dispose();
+    const remounted = ctx.plugin(ChatSessionService, {
+      chunkChars: 40,
+      chunkIntervalMs: 0,
+      defaultAutonomy: 'suggest',
+      compactTriggerTokens: 20,
+      compactKeepRecentMessages: 2,
+    });
+    await remounted;
+    opened.push(remounted);
+    expect(compactionVersions()).toBe(1);
+    const snapshot = asApp(ctx)['chat.session'].current();
+    expect(snapshot.session.id).toBe(sessionId);
+    expect(snapshot.compaction?.id).toBe(compactionId);
+    expect(snapshot.messages).toHaveLength(2);
   });
 });
