@@ -240,12 +240,18 @@ plugins:
   # 并看着行为变，而默认值必须是 `semi`——默认 `auto` 等于装好 app 就往真实站点上自动递简历。
   # 摘掉这一行：`resume.deliver` 节点得到「执行器未登记」的结构化失败；上一行摘掉则投递照旧、打招呼没了。
   # `resumeFile` 是 P3（简历 PDF 生成）之前的临时默认路径，请求里带 `filePath` 时以请求为准（plan §13.5）。
+  # 择机投递（spec 5.7-03）在真实装配里**显式打开**：代码默认关（plan §7.5.5 决策七第 2 条——已验收的 2.6 主线
+  # 不该在没人设置的情况下改行为，也不该让测试套件变成时间依赖），但无人值守那一路本就该受时间窗与回复状态约束。
+  # 这里刻意不加 `dependsOn: jd-store`：规则只往那个包**现问**回复状态（§9 的"不存第二份事实"），它没挂载时
+  # 规则得到「问不到」并按保守起见不递，而不是把整个投递服务拖进 PENDING——递不了与不该递是两回事。
   - id: outbound-deliver
     dependsOn: [entitlement, outbound-throttle, outbound-delivery-records, platform-registry]
     config:
       autonomy: semi
       approveTimeoutMs: 120000
       maxResumeBytes: 5242880
+      timing:
+        enabled: true
 
   # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/boss.json`，
   # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。

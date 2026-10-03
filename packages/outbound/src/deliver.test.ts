@@ -31,9 +31,10 @@ import {
 } from '@auto-cc/plugin-entitlement';
 import { StoreService } from '@auto-cc/plugin-store';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -1187,5 +1188,27 @@ describe('择机投递的接线（spec 5.7-03 的服务半边）', () => {
       deliver.perform(request({ filePath: writeResume(dir), workflowRunId: 'run-1' })),
     ).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
     expect(hand.calls).toHaveLength(0);
+  });
+
+  it('真实装配里这条规则是开着的，且只写一行 `enabled` 就够（plan §7.5.5 决策七第 2 条）', () => {
+    // 判据是 `U`，但"规则只存在于测试里"是这条最可能的失败方式：所以直接读装配文件本体。
+    const cordisYml = readFileSync(join(fileURLToPath(new URL('.', import.meta.url)), '../../../cordis.yml'), 'utf8');
+    const entryBlock = cordisYml.match(/\n {2}- id: outbound-deliver\n[\s\S]*?(?=\n {2}- id: )/)?.[0] ?? '';
+    // 注释行剔掉再判：装配里写着"这一行为什么开"的说明，那不是配置键本身（同 agent 用例的先例）。
+    const configLines = entryBlock
+      .split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+    expect(configLines).toContain('timing:');
+    expect(configLines).toContain('enabled: true');
+    // 那一行确实是最省写法：喂给 schema 补出来的就是「要求回复 + 工作日 + 本地 09–21」，
+    // 于是"想改窗口只改装配这一处"在真 app 里成立，而不是只有测试里成立。
+    expect(deliverTimingSchema.parse({ enabled: true })).toEqual({
+      enabled: true,
+      requireReply: true,
+      weekdaysOnly: true,
+      windowStartHour: 9,
+      windowEndHour: 21,
+    });
   });
 });
