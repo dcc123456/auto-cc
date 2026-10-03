@@ -1,53 +1,12 @@
 /**
- * 调度域的对外读数与外部端口形状（spec 5.7-05 / 06 / 09）。
+ * 调度域的外部端口形状（spec 5.7-06 / 07 的封闭接口）。
  *
- * 为什么这些类型住在本包而不是 `@auto-cc/core`：core 的类型面是**跨包共用**的（`ChatExportView` 那种），
- * 而下面这几张视图今天只有一个生产者与一个消费者，都在调度域内。5.7-b 接界面时若渲染层要经
- * `cordis:call` 读它们，再按 §5.8 的契约口径把它们提到契约包——现在提前提就是第二份未使用的出口（§2.4）。
+ * 读数类型（`ScheduleJobView` / `ScheduleTriggerView` / `ScheduleTriggerResult`）**不住在这里**：
+ * 5.7-b 接界面时它们要经 `cordis:call` 过进程边界，按 §5.8 的契约口径提到契约包 `@auto-cc/shared`
+ * 定型一次，本包经它取同一份（口径与 `outbound` 用 `SendReceiptView` 一致）。这里再写一遍就是 §2.5
+ * 禁止的第二份事实——两边字段一旦漂开，界面读到的和落库的就不再是同一件事。
  */
-
-/** 任务启用状态与"下一次什么时候跑"的合并读数，界面上那一行就来自它。 */
-export type ScheduleJobView = {
-  id: string;
-  /** 用户给任务起的名字，只用于界面辨认，不参与任何判定 */
-  name: string;
-  /** 被触发的那条**已保存工作流**的 id（5.7-07：只能是它，不能是一段自由对话） */
-  planId: string;
-  /** cron 表达式原文；回显用，判定一律走重算（见 `internal/cron.ts`） */
-  expression: string;
-  isEnabled: boolean;
-  /**
-   * 下一个计划时刻（毫秒，绝对时间点，按运行机器本地时区算出）。
-   * 停用任务为 null——它没有"下一次"，重新启用时按当时重算，于是停用期间自然越过的那些点不算"错过"。
-   */
-  nextRunAt: number | null;
-  /** 上一次被处理掉的计划点（触发成功、被跳过、失败都算处理过），null = 从来没处理过 */
-  lastPlannedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-};
-
-/**
- * 单次触发的结局。
- * `started` 只说"起跑口返回了一条 run"，不说"这轮工作流跑成了"——那是 `workflow` 侧的读数（5.7-02 的证据链）。
- */
-export type ScheduleTriggerResult = 'started' | 'skipped' | 'failed';
-
-/** 每一次触发都追加一行（5.7-06）：结果写在记录上而不是 job 行上，才答得出"失败有没有影响下一次"。 */
-export type ScheduleTriggerView = {
-  id: string;
-  jobId: string;
-  /** 这一次对应的那个计划点 */
-  plannedAt: number;
-  /** 实际动手的时刻（毫秒）；`skipped` 里"错过补记"那一条为 null，因为那一刻 app 根本没在跑 */
-  firedAt: number | null;
-  result: ScheduleTriggerResult;
-  /** 跳过/失败的**原话**：额度拒因来自闸门，起跑失败的原因来自 `workflow.runner`，调度器不自己编 */
-  reason: string | null;
-  /** 起成功时 `workflow.runner` 给的 run id；其余为 null */
-  workflowRunId: string | null;
-  createdAt: number;
-};
+export type { ScheduleJobView, ScheduleTriggerResult, ScheduleTriggerView } from '@auto-cc/shared';
 
 /**
  * 调度器眼里的"起跑口"（`workflow.runner` 的本包侧投影）。

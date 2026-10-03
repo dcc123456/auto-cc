@@ -303,6 +303,18 @@ export const RENDERER_ALLOWLIST = [
   // 这里开的是一条**只生成、不外发**的口：它不现问渠道、不过闸门、不产生任何离开 app 的字节，
   // 真正发出去仍然只有 `greet.perform` / `deliver.perform` 那两条（AGENTS.md §7.3 的红线没有被这条口绕过）。
   'outbound.script.generate',
+  // 5.7-b 的定时任务面（spec 5.7-05 / 06 / 09）：两条只读（任务列表、触发史）+ 三条写（建、启停、删）
+  // + 一条"现在跑一次"。`triggerNow` 与到点触发走的是同一条腿（同一个 `launch`），所以它同样先问额度、
+  // 同样落一条触发记录——手工跑不等于额外出发（§7.3）。
+  // 刻意**不登记** `tick` / `accountForMissedRuns`：那是调度器自己的心跳与追账。界面若能手动画一次"到点"
+  // 或"补跑"，5.7-09 的"关闭期间不补跑"就变成渲染层可以发明的第二种结局，而这条判据要的恰恰是它不可选。
+  // 计划下拉复用既有的 `workflow.runner.plans`（§2.1：不为调度再开一条读计划的口）。
+  'schedule.registry.jobs',
+  'schedule.registry.triggers',
+  'schedule.registry.createJob',
+  'schedule.registry.setEnabled',
+  'schedule.registry.removeJob',
+  'schedule.registry.triggerNow',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -1306,6 +1318,67 @@ export interface KbImportRowResult {
   readonly danglingParents: number;
 }
 
+/**
+ * 定时任务的跨进程读数（spec 5.7-05 / 09 的界面入口）。
+ *
+ * 为什么住在本契约包而不是调度包自己那份：渲染层只认 `@auto-cc/shared` 一个入口（§5.8），
+ * 而调度包在 L3，契约层不许反向依赖它。口径与 `SendReceiptView` 一致——类型在这里定型一次，
+ * 生产方（`packages/scheduler`）经 `@auto-cc/shared` 取**同一份**，不在两处各写一遍（§2.5）。
+ */
+export type ScheduleJobView = {
+  id: string;
+  /** 用户给任务起的名字，只用于界面辨认，不参与任何判定 */
+  name: string;
+  /** 被触发的那条**已保存工作流**的 id（5.7-07：只能是它，不能是一段自由对话） */
+  planId: string;
+  /** cron 表达式原文；回显用，判定一律走重算（见调度包的 `internal/cron.ts`） */
+  expression: string;
+  isEnabled: boolean;
+  /**
+   * 下一个计划时刻（毫秒，绝对时间点，按运行机器本地时区算出）。
+   * 停用任务为 null——它没有"下一次"，重新启用时按当时重算，于是停用期间自然越过的那些点不算"错过"。
+   */
+  nextRunAt: number | null;
+  /** 上一次被处理掉的计划点（触发成功、被跳过、失败都算处理过），null = 从来没处理过 */
+  lastPlannedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/**
+ * 单次触发的结局。
+ * `started` 只说"起跑口返回了一条 run"，不说"这轮工作流跑成了"——那是 `workflow` 侧的读数（5.7-02 的证据链）。
+ */
+export type ScheduleTriggerResult = 'started' | 'skipped' | 'failed';
+
+/** 每一次触发都追加一行（5.7-06）：结果写在记录上而不是 job 行上，才答得出"失败有没有影响下一次"。 */
+export type ScheduleTriggerView = {
+  id: string;
+  jobId: string;
+  /** 这一次对应的那个计划点 */
+  plannedAt: number;
+  /** 实际动手的时刻（毫秒）；`skipped` 里"错过补记"那一条为 null，因为那一刻 app 根本没在跑 */
+  firedAt: number | null;
+  result: ScheduleTriggerResult;
+  /** 跳过/失败的**原话**：额度拒因来自闸门，起跑失败的原因来自 `workflow.runner`，调度器不自己编 */
+  reason: string | null;
+  /** 起成功时 `workflow.runner` 给的 run id；其余为 null */
+  workflowRunId: string | null;
+  createdAt: number;
+};
+
+/**
+ * 建任务的入站形状（与调度服务 `createJobSchema` 的输入同形）。
+ * 这里**没有** `goal` 一类的自由文本键：5.7-07「调度只能触发已保存工作流」在契约层就是没有那个字段，
+ * 而服务侧的 `strictObject` 会把越形键原话拒出来。
+ */
+export type ScheduleJobCreateInput = {
+  name: string;
+  planId: string;
+  expression: string;
+  isEnabled?: boolean;
+};
+
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
@@ -1756,6 +1829,34 @@ export interface BridgeSignatures {
     args: [receiptId: string, decision: GenerationDecisionRowInput];
     returns: GenerationAcceptRowResult;
   };
+  /**
+   * 定时任务列表（spec 5.7-05）：按"下一次什么时候跑"排序的只读读数，停用任务的 `nextRunAt` 为 null。
+   * 界面每次现读、不缓存第二份（§9 的 2.5 实测：热改配置会重建下游，本地存一份就静默变空）。
+   */
+  'schedule.registry.jobs': { args: []; returns: ScheduleJobView[] };
+  /**
+   * 触发记录（spec 5.7-06 / 09）：`jobId` 省略时取全局最近若干条。
+   * `result='skipped'` 且 `reason` 是那句"app 关闭期间越过了这个计划点"的那一行，就是界面上的"已跳过"标记。
+   */
+  'schedule.registry.triggers': { args: [jobId?: string, limit?: number]; returns: ScheduleTriggerView[] };
+  /**
+   * 建一条定时任务（spec 5.7-05）。
+   * 三种失败都在落库之前，因此都是"零副作用"：`INVALID_ARGUMENT`（名字空/越形键）、
+   * cron 求值不出下一个点（同一条码，拒因带表达式）、`planId` 不在计划库目录里（`INVALID_ARGUMENT` 带原话）。
+   */
+  'schedule.registry.createJob': { args: [input: ScheduleJobCreateInput]; returns: ScheduleJobView };
+  /**
+   * 启停一条任务（spec 5.7-05 的列表可见启停）。
+   * 重新启用按当时重算下一个点，所以停用期间越过的那些点不会被记成"错过"——那是人的决定，不是 app 的失约。
+   */
+  'schedule.registry.setEnabled': { args: [jobId: string, enabled: boolean]; returns: ScheduleJobView };
+  /** 删除任务（触发记录保留，5.7-06 的账不能跟着任务一起消失）。 */
+  'schedule.registry.removeJob': { args: [jobId: string]; returns: void };
+  /**
+   * 立刻跑一次（把"到点"这件事交给人按一次，用于验证 5.7-06 的失败不影响下次）。
+   * 与到点触发同一条腿：先问额度、被拒即落 `skipped` 并带回闸门原话，一次 `start` 都不发。
+   */
+  'schedule.registry.triggerNow': { args: [jobId: string]; returns: ScheduleTriggerView };
 }
 
 /**

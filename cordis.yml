@@ -498,6 +498,21 @@ plugins:
     dependsOn: [agent, agent-loop]
     config: {}
 
+  # 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点（号段 25），
+  # 进程内一个 `setInterval`，不注册任何操作系统的计划任务（判据由 `scripts/check-scheduler-no-external-cron.ts` 钉）。
+  # `dependsOn: workflow` 只为了**顺序**：挂载时那一次追账与之后的每个 tick 都要有起跑口在场，
+  # 否则第一分钟就会落一串 `failed` 记录——那是接线顺序问题，不该写进触发史里当事实。
+  # 刻意**不写** `entitlement`：额度是触发前的一次只读预检（被拒就落 `skipped` 并带闸门原话），
+  # 不是装配依赖。写成依赖会让"摘掉闸门"变成"调度整个不装"，而 5.7-a 定的行为是闸门缺席时照跑、
+  # 真正的三闸门在节点侧（5.3-d）——见 plan §7.5.3 决策四。
+  # 注掉这一行：界面的「定时任务」一节给出「服务未挂载」的结构化失败，对话与工作流照旧——
+  # 「现在跑一次」与「以后每次都在这时刻跑」分属两条。
+  - id: schedule
+    dependsOn: [store, workflow]
+    config:
+      # 一分钟一格：用户能配的表达式最小粒度就是分钟，更密只会多扫几次索引。
+      tickIntervalMs: 60000
+
 # ---------------------------------------------------------------------------
 # 验收工具的读数位（**不属于插件装配**）：`parseManifest()` 只认 `plugins` 数组，多余的顶层键原样忽略
 # （实测口径见 packages/kernel/src/manifest.test.ts:200 那条「缺 plugins 才报错」的例子），所以这一段

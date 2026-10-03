@@ -45,6 +45,7 @@ import {
 import { PluginsService } from '@auto-cc/plugin-plugins';
 import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import { KbGapService, KbProfileService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import { ScheduleRegistryService } from '@auto-cc/plugin-scheduler';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
@@ -153,6 +154,11 @@ export const REGISTRY: Registry = {
   // 而知识库、缺口报告、导出轨照旧——「算出改了什么」与「按改动出 PDF」分属两条。
   // 它不 `inject` `kb.gap`（用的时候现问），所以摘掉上面那行它不会连带 PENDING，只会在调用时报库未装配。
   'kb-generate': ResumeGenerateService,
+  // 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点，
+  // 迁移号段 25，也是全仓唯一持有调度 `setInterval` 的地方（`scripts/check-scheduler-no-external-cron.ts` 钉住）。
+  // 摘掉这一行：界面点「定时任务」得到「服务未挂载」的结构化失败，而对话、循环、工作流三条照旧——
+  // 「有人排着跑」与「现在跑一次」分属两条。它 `inject` 只有 `store`，起跑口与额度都是用的时候现问（§9 的 2.5）。
+  schedule: ScheduleRegistryService,
   // 1.11 的对话骨架：注册表与会话各占一个清单 id，所以 `agent` 能被单独摘掉——
   // 摘掉后发消息仍然流式，只是工具调用一律 `TOOL_NOT_REGISTERED`（1.11-09 的可演示形态）。
   agent: AgentToolsService,

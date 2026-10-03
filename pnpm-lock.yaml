@@ -281,6 +281,9 @@ importers:
       '@auto-cc/plugin-resume-kb':
         specifier: workspace:*
         version: link:../resume-kb
+      '@auto-cc/plugin-scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
       '@auto-cc/plugin-sessions':
         specifier: workspace:*
         version: link:../sessions

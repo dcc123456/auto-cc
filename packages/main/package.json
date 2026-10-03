@@ -25,6 +25,7 @@
     "@auto-cc/plugin-plugins": "workspace:*",
     "@auto-cc/plugin-resume-doc": "workspace:*",
     "@auto-cc/plugin-resume-kb": "workspace:*",
+    "@auto-cc/plugin-scheduler": "workspace:*",
     "@auto-cc/plugin-sessions": "workspace:*",
     "@auto-cc/plugin-store": "workspace:*",
     "@auto-cc/plugin-workflow": "workspace:*",
