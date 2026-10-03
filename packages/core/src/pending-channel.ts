@@ -49,10 +49,11 @@ type PendingEntry<TView, TAnswer> = {
 /**
  * 在等的单子的登记表：内存 Map，不是库里一张表。
  *
- * 理由与 `deliver.ts` 头注释里那条一模一样（2.6-c 的实测判断，本片原样沿用）：
- * 这是**等待状态**而不是事实记录——经过永远落在调用方自己的账上（投递落在 `usage_ledger`，
- * 循环落在 `agent_step`）。做成表就要回答「进程死了谁把 in-flight 的单子收掉」，
- * 而「超时按未确认」这条性质本来就把所有悬挂兜住了。
+ * 理由与 `deliver.ts` 头注释里那条一模一样（2.6-c 的实测判断）：这里存的是**等待状态**而不是事实记录——
+ * 「此刻有谁在等」随进程一起死，把这一格做成表并没有多出任何性质，反而要凭空处理半张没人接的表。
+ * 需要单子熬过重启的调用方（5.5-d 的暂停单）在自己的域里落一份**账**，init 时拿老单号调
+ * `open({ requestId })` 重新登记——那份账归它管，通道仍然是内存的；
+ * 至于「超时按未确认」，无论有没有表都是同一条兜底。
  * @template TView 展示载荷（见 `PendingRequest`）
  * @template TAnswer 人给回的值（投递是 `boolean`，循环的补充信息是一段待再校验的文本）
  */
@@ -68,10 +69,18 @@ export class PendingChannel<TView, TAnswer> {
    * @param options.timeoutMs 多久没人应答就按 `timed-out` 定局（毫秒）；0 表示「下一拍就超时」，
    *   与投递配置里 `approveTimeoutMs` 的既有语义一致（到点按拒绝，绝不因为 0 就放行）
    * @param options.signal 让出信号：abort 时以 `cancelled` 定局，不等超时也不接受应答
+   * @param options.requestId 沿用一个**已有的单号**而不是新发一个（毫秒级可选；缺省仍是 `randomUUID()`）。
+   *   来路只有一种：调用方把单子持久化过、进程重启后要把同一张单重新登记回来——此时单号必须与界面上
+   *   那张卡片一致，否则用户点旧卡片就成了「查无此单」（spec 5.5-05 的重推判据）。
+   *   时刻这一头**不接受**外部传入：`requestedAt` / `expiresAt` 由本次开单重新算，超时从这一拍重新等
+   *   （旧单子上的到点时刻在进程停摆期间已经烧完，照搬就成了「重启即超时」的一张死卡）
    * @returns 单子读数与定局 Promise；本函数自己永不抛（抛不出「没有对应的人」这种错，那是 `answer` 的事）
    */
-  open(view: TView, options: { timeoutMs: number; signal?: AbortSignal }): PendingTicket<TView, TAnswer> {
-    const requestId = randomUUID();
+  open(
+    view: TView,
+    options: { timeoutMs: number; signal?: AbortSignal; requestId?: string },
+  ): PendingTicket<TView, TAnswer> {
+    const requestId = options.requestId ?? randomUUID();
     const requestedAt = Date.now();
     const entries = this.entries;
     const request = { requestId, requestedAt, expiresAt: requestedAt + options.timeoutMs, ...view };

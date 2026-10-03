@@ -1,7 +1,8 @@
 /**
  * 等人应答通道的用例（spec 5.3-09 / 10 的机制半边）。
  *
- * 这里钉的是**通道的四条性质**：按 id 路由、重复与错 id 无副作用、超时不是表态、等待方消失时收单。
+ * 这里钉的是**通道的四条性质**：按 id 路由、重复与错 id 无副作用、超时不是表态、等待方消失时收单，
+ * 外加 5.5-05 要求的「单号可由调用方给定」（重推一张老单时沿用旧 id，时刻仍从这一拍重算）。
  * 领域映射（投递侧的错误码、循环侧的 `refused` 步行）不在这里测——那两个消费者各自的用例
  * （`deliver.test.ts` 的 2.6-01 一族、`confirm.test.ts` 的 5.3 一族）才是它们该红的地方。
  */
@@ -122,5 +123,46 @@ describe('5.3-10 超时与让出都不是一种表态', () => {
     const timedOut = channel.open({ label: '会超时' }, { timeoutMs: 5 });
     expect(await timedOut.outcome).toEqual({ kind: 'timed-out' });
     expect(channel.pending()).toHaveLength(0);
+  });
+});
+
+describe('5.5-05 重推一张老单：单号沿用，时刻重算', () => {
+  it('给定 requestId 时用它登记，应答按这个老单号路由到这张新等的单', async () => {
+    const channel = new PendingChannel<{ label: string }, boolean>();
+    // 界面上那张卡片带着重启前的单号；用户点它，必须点到重推后的这一等上。
+    const ticket = channel.open({ label: '投递确认（重启前开出）' }, { timeoutMs: 5_000, requestId: 'pause-7f3a' });
+    expect(ticket.request.requestId).toBe('pause-7f3a');
+    expect(channel.pendingIds()).toEqual(['pause-7f3a']);
+    expect(channel.answer('pause-7f3a', true)).toBe(true);
+    expect(await ticket.outcome).toEqual({ kind: 'answered', answer: true });
+  });
+
+  it('重推不把旧的 expiresAt 带过来：等待时长从这一拍重新起算', () => {
+    const channel = new PendingChannel<{ label: string }, boolean>();
+    const before = Date.now();
+    channel.open({ label: '重推的单' }, { timeoutMs: 60_000, requestId: 'pause-old' });
+    const [request] = channel.pending();
+    // 老单子的到点时刻在进程停摆期间早就烧完，照搬会得到一张「重启即超时」的死卡；
+    // 这条断言钉住的是通道这一头根本没有入口接受外部时刻。
+    expect(request!.requestedAt).toBeGreaterThanOrEqual(before);
+    expect(request!.expiresAt).toBe(request!.requestedAt + 60_000);
+  });
+
+  it('不给 requestId 时仍旧每次新发、互不相同（投递侧的既有行为一字未动）', () => {
+    const channel = new PendingChannel<{ label: string }, boolean>();
+    const first = channel.open({ label: '一' }, { timeoutMs: 5_000 });
+    const second = channel.open({ label: '二' }, { timeoutMs: 5_000 });
+    expect(first.request.requestId).not.toBe(second.request.requestId);
+    expect(first.request.requestId).toMatch(/^[0-9a-f]{8}-/);
+  });
+
+  it('沿用老单号的重推照样吃超时与收单：定局性质不因 id 来路而变', async () => {
+    const channel = new PendingChannel<{ label: string }, boolean>();
+    const timed = channel.open({ label: '会超时' }, { timeoutMs: 10, requestId: 'pause-ttl' });
+    expect(await timed.outcome).toEqual({ kind: 'timed-out' });
+    expect(channel.answer('pause-ttl', true)).toBe(false);
+    const cancelled = channel.open({ label: '会被收' }, { timeoutMs: 5_000, requestId: 'pause-cancel' });
+    expect(channel.cancelAll()).toBe(1);
+    expect(await cancelled.outcome).toEqual({ kind: 'cancelled' });
   });
 });
