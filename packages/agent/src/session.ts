@@ -906,7 +906,14 @@ export class ChatSessionService extends Service {
     // 「长会话触发压缩」的触发点在这里而不是在 `send()`：一条回复落定之后这段对话才完整，
     // 而折叠的门槛是行数与 token（都不满足就返回 null，什么都不写）。它不改变返回给界面的那一条消息，
     // 界面下一次 `current()` 自然看见少掉的那一截 + 一行摘要（原文行一条都没动，见 `compactSession()` 的注释）。
-    this.compactSession(message.sessionId);
+    // 这一句必须包起来：原文行在上一行就已经落库，折叠只是**多加一行读数**，它写不进去时最坏的结果
+    // 只能是「这一轮没折」。漏掉这个兜法的话，异常会从 `pump()` 里穿出去、`done` 事件不发，
+    // 界面就停在「还在吐字」那一态——那才是 spec 5.6-10「宁可长，不可丢」要钉住的东西。
+    try {
+      this.compactSession(message.sessionId);
+    } catch (error) {
+      this.ctx.logger.warn(`会话压缩失败，本轮保留全部原文：${error instanceof Error ? error.message : String(error)}`);
+    }
     this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: true });
     return { ...message, isStreaming: false };
   }

@@ -1246,6 +1246,38 @@ describe('长会话折叠与关键事实卡（spec 5.6-02 / 03 / 10，加 04 的
     expect(rowCount(ctx, 'chat_message')).toBe(5);
   });
 
+  it('折叠那一行写不进去时：原文一条不少、只留一条告警（5.6-10 字面判据的反向验证）', async () => {
+    const { ctx, chat } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
+    await sendRounds(ctx, chat, 3);
+    const before = chat.current().compaction;
+    expect(before?.coveredCount).toBe(4);
+    // 只掐折叠那一次写：`chat_compaction` 上的 BEFORE UPDATE 触发器让 `RAISE(ABORT)`，
+    // 而消息行的 INSERT 一条都不受影响——判据要的是「折叠失败不许牵连消息」，不是「把库整个弄坏」。
+    asApp(ctx).store.db.exec(
+      `CREATE TEMP TRIGGER inject_compaction_failure BEFORE UPDATE ON chat_compaction
+         BEGIN SELECT RAISE(ABORT, '注入：折叠写不进去'); END`,
+    );
+    const warned: string[] = [];
+    const logger = ctx.logger as unknown as { warn: (text: string) => void };
+    const originalWarn = logger.warn;
+    logger.warn = (text: string) => {
+      warned.push(text);
+    };
+    try {
+      await sendRounds(ctx, chat, 1);
+    } finally {
+      logger.warn = originalWarn;
+    }
+    // 那两条新消息照样落库（`sendRounds` 等到的就是它们），折叠行还是旧读数：多出来的两条只是没被折。
+    expect(rowCount(ctx, 'chat_message')).toBe(8);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('保留全部原文');
+    const snapshot = chat.current();
+    expect(snapshot.compaction?.id).toBe(before?.id);
+    expect(snapshot.compaction?.coveredCount).toBe(4);
+    expect(snapshot.messages).toHaveLength(4);
+  });
+
   it('号段 24 只登记一次，重挂载之后压缩读数与折叠后的消息都读得回来（§7.4 的迁移幂等面）', async () => {
     const { ctx, chat, chatFiber } = await boot({ compactTriggerTokens: 20, compactKeepRecentMessages: 2 });
     await sendRounds(ctx, chat, 2);
