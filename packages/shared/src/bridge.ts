@@ -25,11 +25,14 @@ import type {
   LogLineView,
   PluginErrorView,
   RiskSignalEvent,
+  SavedWorkflowPlanView,
+  SedimentPreviewView,
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
   WorkflowEvidenceView,
   WorkflowNodeSpec,
+  WorkflowPlanOptionView,
   WorkflowProgressEvent,
   WorkflowRunStateView,
   WorkflowRunView,
@@ -70,8 +73,12 @@ export type {
   KernelViewLoadError,
   LocatorRelocatedEvent,
   LogLineView,
+  PlanParamReadoutView,
   PluginErrorView,
   RiskSignalEvent,
+  SavedWorkflowPlanView,
+  SedimentPreviewView,
+  SedimentStepView,
   SessionExpiredEvent,
   ToolCallReply,
   ToolDescriptorView,
@@ -79,6 +86,7 @@ export type {
   WorkflowEvidenceView,
   WorkflowNodeRunView,
   WorkflowNodeSpec,
+  WorkflowPlanOptionView,
   WorkflowProgressEvent,
   WorkflowRunStateView,
   WorkflowRunStatus,
@@ -172,6 +180,15 @@ export const RENDERER_ALLOWLIST = [
   // 2.8-a：中止（停在可恢复点上并落库 interrupted）与失败证据的读回。
   'workflow.runner.abort',
   'workflow.runner.readEvidence',
+  // 5.4-a 的计划管理面（spec 5.4-06）：列表 / 改名 / 复制 / 删。
+  // 四条都**只由人按**，刻意不登记为 agent 工具：沉淀出来的计划是「以后每次都这么跑」的授权，
+  // 模型若能自己改计划，等于给自己铺了一条不必每次问人的路（与 `agent.loop.confirm` 同一口径，§8.4）。
+  // 这里**没有** `savePlan`：写入口只有一条 `agent.sediment.save`（投影 + 校验都在服务侧），
+  // 界面上再开一条直存路径就是 §2.5 禁止的「两个都能用」，而 5.4 的界面根本没有节点编辑器。
+  'workflow.runner.plans',
+  'workflow.runner.renamePlan',
+  'workflow.runner.duplicatePlan',
+  'workflow.runner.removePlan',
   // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
   'agent.tools.list',
   'agent.tools.call',
@@ -182,6 +199,11 @@ export const RENDERER_ALLOWLIST = [
   'agent.loop.confirm',
   'agent.loop.stop',
   'agent.loop.read',
+  // 5.4-a 的对话 → 工作流沉淀（spec 5.4-01 / 02）：`preview` 只读、`save` 是人在预览卡上按的那一格。
+  // 与 `agent.loop.confirm` 同一口径，刻意不登记为 agent 工具：沉淀改变的是「以后每次都怎么跑」，
+  // 让模型自己把一次对话固化成工作流，就是 5.3-04 防的「agent 给自己放宽」换了个更省事的写法。
+  'agent.sediment.preview',
+  'agent.sediment.save',
   // 5.3-b 的免确认白名单（spec 5.3-06 / 07）：`auto` 档下「哪些动作不再每次问我」是**用户**的显式设置，
   // 所以这三条口只出现在界面上，和 `agent.loop.confirm`、`chat.session.setAutonomy` 同一口径——
   // 刻意不登记为 agent 工具：模型若能自己加白，5.3-04 防的「agent 自己给自己放宽」就换了个名字重演。
@@ -1389,7 +1411,7 @@ export interface BridgeSignatures {
    */
   'workflow.runner.current': { args: []; returns: WorkflowRunView };
   /** 起一次真实计划驱动的 run（2.4 之后不再是「六步空转」），返回初始状态。 */
-  'workflow.runner.start': { args: []; returns: WorkflowRunView };
+  'workflow.runner.start': { args: [planId?: string]; returns: WorkflowRunView };
   /** 请求暂停：等当前步协作让出，不强杀（spec 1.10-05 / 2.4-07）。 */
   'workflow.runner.pause': { args: []; returns: WorkflowRunView };
   /** 从当前步续跑，不重置已完成步（spec 1.10-05）。 */
@@ -1417,6 +1439,33 @@ export interface BridgeSignatures {
    * 两个 id 都来自界面读数而不是用户输入，主进程仍然按不可信输入处理（查不到就不读盘）。
    */
   'workflow.runner.readEvidence': { args: [runId: string, nodeId: string]; returns: WorkflowEvidenceView };
+  /**
+   * 可选计划清单（spec 5.4-06）：库里存的自定义计划在前，内置目录在后，两者都带指纹与节点数。
+   * 每次现读不缓存——「存了一条新计划之后下拉里必须能看到它」是 5.4-06 的判据，缓存就成了一句看运气的话。
+   */
+  'workflow.runner.plans': { args: []; returns: WorkflowPlanOptionView[] };
+  /**
+   * 改一条自定义计划的名字（spec 5.4-05）：只动 `name` 这一列，`plan_json` 与指纹原样留着——
+   * 名字是人读的，指纹是 run 读的，改名不该让历史 run 的快照失去对应（5.4-06 的反向验证）。
+   * @param id 计划 id；库里没有这条时返回 null（不是错误：列表刚被另一个窗口删过是常态）
+   * @param nameRaw 新名字原值，校验与 trim 在 `workflow_plans` 那一份实现里做（唯一口径）
+   */
+  'workflow.runner.renamePlan': { args: [id: string, nameRaw: string]; returns: SavedWorkflowPlanView | null };
+  /**
+   * 复制一条计划（spec 5.4-06 的「改之前先留一份」）：新 id、新名字，节点内容与源一致。
+   * 内置计划也可以复制——复制出来的是一条普通自定义计划，内置目录本身仍只读。
+   * @param id 源计划 id；找不到返回 null
+   * @param nameRaw 新名字原值
+   */
+  'workflow.runner.duplicatePlan': { args: [id: string, nameRaw: string]; returns: SavedWorkflowPlanView | null };
+  /**
+   * 删一条自定义计划。
+   * 只删登记，**不动任何历史 run 的 `plan_json`**：那一份快照是「当时到底跑了什么」的唯一凭据（2.4-04），
+   * 删掉它等于把跑过的 run 变成无法解释的行。
+   * @param id 计划 id
+   * @returns 是否真的删掉了一条（false = 没这条，或那是内置计划——内置目录不可删）
+   */
+  'workflow.runner.removePlan': { args: [id: string]; returns: boolean };
   /**
    * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，
    * 界面把它摆在档位旁边，「工具面是空表」这件事本身就看得见。
@@ -1450,6 +1499,20 @@ export interface BridgeSignatures {
    * @param runId 运行 id
    */
   'agent.loop.read': { args: [runId: string]; returns: AgentRunView };
+  /**
+   * 沉淀预览（spec 5.4-01）：这次对话能不能变成一条工作流、每一步会变成哪个节点、
+   * 不能沉淀的那一格为什么不行（逐格读数 + 整段第一句拒因）。**只读**，不写库。
+   * @param runId 来自对话卡片的 run id
+   */
+  'agent.sediment.preview': { args: [runId: string]; returns: SedimentPreviewView };
+  /**
+   * 把这次对话存成一条自定义计划（spec 5.4-01 的落库半边）：先按 `preview` 同一条投影判一次，
+   * 不合格就以 `INVALID_ARGUMENT` 结构化失败并带回逐格读数——界面上的勾与这里的放行永远不会各说各话。
+   * @param runId 要沉淀的 run
+   * @param nameRaw 人填的工作流名字；校验只在 `workflow_plans` 那一处（空 / 超长 / 符号 → 结构化失败）
+   * @returns 刚落库的计划读数，界面据此把计划下拉指过去
+   */
+  'agent.sediment.save': { args: [runId: string, nameRaw: string]; returns: SavedWorkflowPlanView };
   /**
    * 列出当前免确认的动作（spec 5.3-07）：每项带注册表现读的副作用级与标题键，
    * 名单为空就画空态——**缺省为空**是「默认仍需每次确认」的界面证据。

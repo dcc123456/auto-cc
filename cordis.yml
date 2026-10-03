@@ -474,6 +474,16 @@ plugins:
       tokenBudget: 4000
       contextCharsCap: 1200
 
+  # 对话 → 工作流沉淀（spec 5.4-01 / 02 / 09）：把一次跑通的对话**投影**成工作流计划的唯一口，
+  # 自己不建表——计划落库经 `workflow.runner.savePlan`（名字校验与指纹重算都只在那一处，§2.5）。
+  # 注掉这一行：预览卡与「沉淀为工作流」按钮给出「服务未挂载」的结构化失败，
+  # 而对话、循环、工作流三条照旧——「跑成过一次」与「固化成以后每次都这么跑」是可分别摘除的两件事。
+  # 它只 `inject` `agent.loop`；对 `workflow.runner` 是**用的时候现问**（§9 的 2.5 实测：
+  # 热改配置会重建下游，存第二份引用就会在改配置后静默变空）。
+  - id: agent-sediment
+    dependsOn: [agent, agent-loop]
+    config: {}
+
 # ---------------------------------------------------------------------------
 # 验收工具的读数位（**不属于插件装配**）：`parseManifest()` 只认 `plugins` 数组，多余的顶层键原样忽略
 # （实测口径见 packages/kernel/src/manifest.test.ts:200 那条「缺 plugins 才报错」的例子），所以这一段

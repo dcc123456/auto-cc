@@ -9,6 +9,7 @@ import {
   AgentLoopService,
   AgentPauseService,
   AgentPolicyService,
+  AgentSedimentService,
   AgentToolsService,
   ChatSessionService,
 } from '@auto-cc/plugin-agent';
@@ -163,5 +164,11 @@ export const REGISTRY: Registry = {
   // 摘掉它，run 与步记录都不再产生（界面读不到任何进度），而工具面照旧可单点调用——
   // 「有一只手」与「有人排着计划用它」分属两条，与 1.11 的 agent/chat 分法同一口径。
   'agent-loop': AgentLoopService,
+  // 对话 → 工作流沉淀（spec 5.4-01 / 02 / 09）：投影 + 唯一写入口，自己不建表、不占号段。
+  // 单独占一个清单 id 是为了让「摘掉它」可演示：沉淀按钮得到「服务未挂载」的结构化失败，
+  // 而对话、循环、工作流三条都照旧——「跑过一次」与「固化成以后每次都这么跑」分属两条。
+  // 它只 `inject` `agent.loop`；计划存储经 `maybeService` 现问，所以摘掉 `workflow` 不会把它一起带进 PENDING，
+  // 只在按「沉淀」那一刻报「没有可写入的计划存储口」（§9 的 2.5 实测：存第二份事实会静默变空）。
+  'agent-sediment': AgentSedimentService,
   shell: ShellService,
 };
