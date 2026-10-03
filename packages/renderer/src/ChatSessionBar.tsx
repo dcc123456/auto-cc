@@ -43,7 +43,7 @@ export function ChatSessionBar({
 
   /** 重读已删栏：能不能恢复、要恢复哪一条，都以库里 `deleted_at` 那一列为准。 */
   const readTrash = useCallback(async () => {
-    const reply = await bridge?.chat['session.trash']();
+    const reply = await bridge?.chat['session.trashed']();
     if (reply?.ok) setTrash(reply.value);
   }, [bridge]);
 

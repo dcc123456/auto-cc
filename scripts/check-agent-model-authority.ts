@@ -293,13 +293,13 @@ if (sessionColumnWriteHits.join(',') !== 'packages/agent/src/session.ts') {
   );
 }
 expectSingleWriter(
-  ["'session.rename'", "'session.remove'", "'session.restore'", "'session.trash'"],
+  ["'session.rename'", "'session.remove'", "'session.restore'", "'session.trashed'"],
   ['packages/renderer/src/ChatSessionBar.tsx'],
   '界面上的会话改名/软删/恢复',
 );
 for (const relative of ['packages/agent/src/loop/loop.ts', 'packages/agent/src/tools.ts']) {
-  if (/session\.(rename|remove|restore|trash)\b/.test(read(relative))) {
-    problems.push(`${relative} 里提到了 session.rename/remove/restore/trash——会话的改名与删除不是 agent 的手`);
+  if (/session\.(rename|remove|restore|trashed)\b/.test(read(relative))) {
+    problems.push(`${relative} 里提到了 session.rename/remove/restore/trashed——会话的改名与删除不是 agent 的手`);
   }
 }
 

@@ -254,7 +254,7 @@ export const RENDERER_ALLOWLIST = [
   'chat.session.remove',
   'chat.session.restore',
   // 软删过的会话要有份读数，那句「可恢复」才不是随重启消失的谎话（spec 5.6-07 的恢复途径）。
-  'chat.session.trash',
+  'chat.session.trashed',
   // 3.3 生成轨导出面：预览/导出只认 docId + 模板 + 语言，文档正文不过进程边界（编辑轨 3.5 才引入 resume.doc.* 写入面）。
   // seedDemo 是 3.5 之前给端到端自测喂一份固定内容文档的口（spec 3.3-10）。
   'resume.export.seedDemo',
@@ -1619,9 +1619,10 @@ export interface BridgeSignatures {
   /**
    * 被软删的会话清单（spec 5.6-07 的恢复途径）：界面拿它把「可恢复」画成一只只按得下去的按钮，
    * 而不是一个随重启就消失的撤销提示。
+   * 末段与 `ChatSessionService.trashed()` 一字不差：网关是按 `service.method` 现取方法，名字对不上只在运行期炸（5.6-c 活体验收踩到）。
    * @returns 按删除时间倒序的会话读数；一条都没删过时为空数组（界面整块不渲染）
    */
-  'chat.session.trash': { args: []; returns: ChatSessionView[] };
+  'chat.session.trashed': { args: []; returns: ChatSessionView[] };
   /**
    * 落一份固定内容演示简历（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 之前导出链的唯一文档来源）；
    * 返回种子 id 与落库 hash，界面据此再去预览/导出。`variant='edited'` 会在同一 docId 上落一份内容不同的第二版
