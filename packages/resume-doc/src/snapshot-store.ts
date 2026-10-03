@@ -258,6 +258,32 @@ export class ResumeSnapshotService extends Service {
     }));
   };
 
+  /**
+   * 按快照 id 定点读那一行的元数据（spec 5.7-02 的 `snapshot:<id>` 引用回看）。
+   *
+   * 只回元数据不回正文：正文经 `restore()` 读，而那是「把工作副本换回去」那一步的手，
+   * 证据回看不该顺手改任何东西（与 `doc-store.listIds` 同一口径——不另开一条捞全文的通道）。
+   * @param snapshotId 快照 id（投递回执里 `snapshot:` 后面那一段）
+   * @returns 那一行的元数据；库里没有返回 `null`（引用可能来自定位器的一次内存快照，那本来就不落库）
+   */
+  meta = (snapshotId: string): SnapshotMeta | null => {
+    const row = this.db
+      .prepare(
+        `SELECT snapshot_id, doc_id, template_id, font_set, content_hash, created_at
+         FROM resume_snapshots WHERE snapshot_id = ? LIMIT 1`,
+      )
+      .get(snapshotId) as unknown as SnapshotRow | undefined;
+    if (row === undefined) return null;
+    return {
+      snapshotId: String(row.snapshot_id),
+      docId: String(row.doc_id),
+      templateId: String(row.template_id),
+      fontSet: String(row.font_set),
+      hash: String(row.content_hash),
+      createdAt: Number(row.created_at),
+    };
+  };
+
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info(

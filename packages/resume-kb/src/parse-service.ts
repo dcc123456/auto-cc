@@ -111,6 +111,23 @@ function docIdOf(sourceHash: string): string {
 }
 
 /**
+ * 把 `resume_imports` 的一行转成界面读数（待确认清单与按哈希回看共用，§2.2 只此一份映射）。
+ * @param row 库里的原始行（`bigint` 列在这里统一收成 number）
+ * @returns 不含正文的记录视图
+ */
+function toPendingView(row: ResumeImportRow): PendingImportView {
+  return {
+    docId: row.doc_id,
+    sourceHash: row.source_hash,
+    format: row.format as ResumeSourceFormat,
+    status: row.status as ImportStatus,
+    textLength: Number(row.text_length),
+    updatedAt: Number(row.updated_at),
+    issues: JSON.parse(row.issues_json) as ParseIssue[],
+  };
+}
+
+/**
  * 简历导入服务：读文件 → 抽文本 → 解析成 P3.1 文档 → 按来源哈希幂等入库。
  *
  * 失败一律抛 `AppError('RESUME_IMPORT_FAILED')`（4.1-06）：路径不是绝对路径、文件不存在、
@@ -245,15 +262,27 @@ export class ResumeParseService extends Service {
                  ORDER BY updated_at DESC`,
       )
       .all() as unknown as readonly ResumeImportRow[];
-    return rows.map((row) => ({
-      docId: row.doc_id,
-      sourceHash: row.source_hash,
-      format: row.format as ResumeSourceFormat,
-      status: row.status as ImportStatus,
-      textLength: Number(row.text_length),
-      updatedAt: Number(row.updated_at),
-      issues: JSON.parse(row.issues_json) as ParseIssue[],
-    }));
+    return rows.map(toPendingView);
+  }
+
+  /**
+   * 按来源哈希定点读一次导入的记录（spec 5.7-02 的 `hash:<sourceHash>` 引用回看）。
+   *
+   * 为什么按哈希而不是按文档 id：建档那一步交回的两条引用里，`doc:` 指向可编辑的工作副本、
+   * `hash:` 指向**那份原始文件的字节指纹**（4.1-07 的幂等键）。两者归两个服务，
+   * 在证据口里把哈希截成文档 id 等于把 `docIdOf` 那条规则抄第二份（§2.5）。
+   * @param sourceHash 来源文件的 sha256 十六进制串
+   * @returns 那一行的读数（与待确认清单同形状）；库里没有返回 `null`
+   */
+  importOf(sourceHash: string): PendingImportView | null {
+    const row = this.store.db
+      .prepare(
+        `SELECT doc_id, source_hash, format, status, text_length, issues_json, updated_at
+                  FROM resume_imports
+                 WHERE source_hash = ? LIMIT 1`,
+      )
+      .get(sourceHash) as unknown as ResumeImportRow | undefined;
+    return row === undefined ? null : toPendingView(row);
   }
 
   /**

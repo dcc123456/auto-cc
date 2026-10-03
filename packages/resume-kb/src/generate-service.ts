@@ -282,6 +282,47 @@ export interface GenerationView {
 }
 
 /**
+ * `resume_generations` 那一行的定点读数（spec 5.7-02 的 `generation:<id>` 引用回看）。
+ *
+ * 它与 `GenerationReceipt` **刻意不同形**：回执是生成那一刻在内存里算出来的，带 `modelReason`、
+ * 换位计数与改写条数；库里只存 id、路径、状态、证据 id 与被拦下的陈述（判据三：不留正文）。
+ * 让按 id 的回看假装能读出正文之外的那些数，就是给它编内容。
+ */
+export interface GenerationRecordView {
+  readonly id: string;
+  readonly docId: string;
+  readonly jdId: string | null;
+  readonly createdAt: number;
+  readonly promptVersion: string | null;
+  readonly model: string | null;
+  readonly modelStatus: GapModelStatus;
+  readonly outcome: GenerationOutcome;
+  readonly retried: boolean;
+  /** 那次产物引用的证据 id（`evidence_json` 原样，正文要向 `kb.profile` 另问） */
+  readonly evidenceIds: readonly string[];
+  /** 事实校验拦下的陈述原话（`violations_json` 原样） */
+  readonly violations: readonly string[];
+}
+
+/**
+ * `resume_generations` 一行的原始读数（`node:sqlite` 的整数列可能是 number 或 bigint）。
+ * @internal 只给 `receiptOf()` 用，跨进程一律走 `GenerationRecordView`
+ */
+interface GenerationRecordRow {
+  readonly id: string;
+  readonly doc_id: string;
+  readonly jd_id: string | null;
+  readonly prompt_version: string | null;
+  readonly model: string | null;
+  readonly model_status: string;
+  readonly status: string;
+  readonly retried: number | bigint;
+  readonly created_at: number | bigint;
+  readonly evidence_json: string;
+  readonly violations_json: string;
+}
+
+/**
  * 主进程侧替用户暂存的那份提议态（4.5-11 的落点）。
  *
  * **为什么必须有**：逐项接受要写的是"基线 + 用户选中的那几处改写 + 要不要重排"，
@@ -790,6 +831,41 @@ export class ResumeGenerateService extends Service {
       movedEntries: input.movedEntries,
       rewritesApplied: input.rewritesApplied,
       rewritesDropped: input.attempt.dropped,
+    };
+  }
+
+  /**
+   * 按回执 id 定点读那一行生成记录（spec 5.7-02 的 `generation:<id>` 引用回看）。
+   *
+   * 补这只口的原因是一条具体的缺口：提议态只在内存里、最多留 8 份（4.5-11），
+   * 而 `accept()` 只认那个内存键——所以一次生成只要被挤掉或服务重建过，界面上那条
+   * `generation:` 引用就无处可去。库里那一行才是长期的真相，回看必须读它（§2.7 用的时候现问归属服务）。
+   * @param receiptId 回执 id（`gen-<uuid>`，同时是 `resume_generations` 的主键）
+   * @returns 那一行的读数；库里没有返回 `null`（「查无」由调用方显示原因，不抛）
+   */
+  receiptOf(receiptId: string): GenerationRecordView | null {
+    const row = this.store.db
+      .prepare(
+        `SELECT id, doc_id, jd_id, prompt_version, model, model_status, status, retried, created_at,
+                evidence_json, violations_json
+         FROM resume_generations WHERE id = ? LIMIT 1`,
+      )
+      .get(receiptId) as unknown as GenerationRecordRow | undefined;
+    if (row === undefined) return null;
+    return {
+      id: row.id,
+      docId: row.doc_id,
+      jdId: row.jd_id,
+      createdAt: Number(row.created_at),
+      promptVersion: row.prompt_version,
+      model: row.model,
+      modelStatus: row.model_status as GapModelStatus,
+      outcome: row.status as GenerationOutcome,
+      retried: Number(row.retried) === 1,
+      evidenceIds: (JSON.parse(row.evidence_json) as readonly GenerationEvidenceView[]).map(
+        (evidence) => evidence.evidenceId,
+      ),
+      violations: JSON.parse(row.violations_json) as readonly string[],
     };
   }
 

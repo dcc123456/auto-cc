@@ -196,6 +196,19 @@ function toRowView(row: JobRow): JobRowView {
 /** 列表条数的钳制区间：界面不需要一万行，SQL 注入面也不在 `?` 参数上，但上限能防一次误传。 */
 export const LIST_LIMIT = { min: 1, max: 500, fallback: 50 };
 
+/**
+ * 「对方回了几条」的那段子查询（spec 2.5-14 的单一来源：只在 `conversation_messages` 上算）。
+ *
+ * 抽出来是因为定点读一行（5.7-02 的 `job:` 回看）与列表要的是同一件事——两处各写一遍的话，
+ * 改判定口径（比如以后把机器人回复也剔掉）就会漏一处，两处的「已回复」从此不一致。
+ */
+const REPLY_JOIN = `LEFT JOIN (
+           SELECT platform, job_id, COUNT(*) AS inbound
+           FROM conversation_messages
+           WHERE direction = 'recruiter'
+           GROUP BY platform, job_id
+         ) reply ON reply.platform = jobs.platform AND reply.job_id = jobs.job_id`;
+
 export const jdStoreSchema = z.strictObject({});
 
 /** 校验后的配置形状。 */
@@ -331,17 +344,38 @@ export class JdStoreService extends Service {
       .prepare(
         `SELECT jobs.*, reply.inbound AS inbound_count
          FROM jobs
-         LEFT JOIN (
-           SELECT platform, job_id, COUNT(*) AS inbound
-           FROM conversation_messages
-           WHERE direction = 'recruiter'
-           GROUP BY platform, job_id
-         ) reply ON reply.platform = jobs.platform AND reply.job_id = jobs.job_id
+         ${REPLY_JOIN}
          ORDER BY CASE WHEN reply.inbound IS NULL THEN 0 ELSE 1 END DESC, jobs.captured_at DESC, jobs.id DESC
          LIMIT ?`,
       )
       .all(capped) as unknown as JobRow[];
     return { total, rows: rows.map(toRowView) };
+  };
+
+  /**
+   * 按平台侧岗位 id 定点读一行（spec 5.7-02 的 `job:` / `jd:` 引用回看）。
+   *
+   * 「已回复」照列表那一条的算法现算（同一个 `REPLY_JOIN`，§2.2：不在这里再拼一遍子查询，
+   * 也不把 `inbound_count` 假成 0——读回一行却说错它回没回，比读不到更糟）。
+   * @param jobId 平台侧岗位 id（`jobs.job_id`）
+   * @param platform 平台标识；省略时按 `job_id` 取**最近更新的那一行**（话术那只手只知道 `jdId`，
+   *        而 `job:` 引用两个都带，所以一只手服务两种引用形状）
+   * @returns 该行的跨进程视图；库里没有返回 `null`（「查无」是正常态，由调用方显示原因）
+   */
+  detail = (jobId: string, platform?: string): JobRowView | null => {
+    const where = platform === undefined ? 'jobs.job_id = ?' : 'jobs.job_id = ? AND jobs.platform = ?';
+    const args = platform === undefined ? [jobId] : [jobId, platform];
+    const row = this.store.db
+      .prepare(
+        `SELECT jobs.*, reply.inbound AS inbound_count
+         FROM jobs
+         ${REPLY_JOIN}
+         WHERE ${where}
+         ORDER BY jobs.captured_at DESC, jobs.id DESC
+         LIMIT 1`,
+      )
+      .get(...args) as unknown as JobRow | undefined;
+    return row === undefined ? null : toRowView(row);
   };
 
   /**

@@ -347,6 +347,22 @@ export class UsageLedgerService extends Service {
     };
   };
 
+  /**
+   * 按账本行 id 定点读一行（spec 5.7-02 的 `ledger:<id>` 引用回看）。
+   *
+   * 为什么单开一只手而不是让调用方去翻 `summary().recent`：那只手是给用量面板做汇总的，
+   * 最近 N 行之外的行读不到——而一次打招呼落的那行账，跑完第二条就已经不在前十行了。
+   * 直接 `WHERE id = ?` 而不是把整张表读进 JS 再找：与 `count()` 同一个理由（汇总要分组才全表读，
+   * 定点读不需要）。
+   * @param id 账本行 id（外发回执的 `ledgerId`，即引用里 `ledger:` 后面那一段）
+   * @returns 该行的跨进程视图；库里没有这一行返回 `null`（「查无」是正常态，界面据此显示原因而不是崩）
+   */
+  row = (id: number): LedgerRowView | null => {
+    const row = this.store.db.prepare('SELECT * FROM usage_ledger WHERE id = ?').get(id) as unknown as
+      LedgerRow | undefined;
+    return row === undefined ? null : toRowView(row);
+  };
+
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info(
