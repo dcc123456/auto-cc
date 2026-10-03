@@ -527,6 +527,20 @@
         "semi": "Semi-auto",
         "auto": "Full-auto"
       },
+      "policy": {
+        "heading": "Confirmation-free allowlist",
+        "exemptCount": "{{total}} exempted",
+        "onlyAuto": "Current tier is {{level}}, so the allowlist does not change execution yet",
+        "hint": "The allowlist only applies in the Full-auto tier: an exempted action stops asking each time, while the entitlement gate, rate limit and daily cap still apply.",
+        "loading": "Loading the allowlist...",
+        "empty": "The allowlist is empty - every approval-required action still asks you",
+        "addedAt": "Added at {{time}}",
+        "revoke": "Revoke",
+        "actionRevoke": "Revoke the exemption for {{tool}}",
+        "add": "Allowlist",
+        "actionAdd": "Add {{tool}} to the allowlist",
+        "noCandidates": "Nothing left to allowlist (every approval-required action is already exempted)"
+      },
       "tool": {
         "unregistered": "Unregistered tool",
         "labels": {

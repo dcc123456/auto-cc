@@ -17,6 +17,7 @@ import type {
   ChatToolPart,
   ToolDescriptorView,
 } from '@auto-cc/shared';
+import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
 import { ToolCard } from './ToolCard';
 import { useAgentRun } from './useAgentRun';
@@ -246,6 +247,10 @@ export function ChatPanel() {
           {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
         </span>
       </div>
+
+      {/* 免确认白名单贴在档位行下方（spec 5.3-07）：档位与「哪些动作已免确认」是同一件事的两半，
+          分成两处看就没人能一眼读出「全自动档下这个动作到底会不会问我」。 */}
+      <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
 
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。 */}
       <div ref={scrollRef} data-testid="chat-scroll" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">

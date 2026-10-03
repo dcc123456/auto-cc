@@ -445,8 +445,11 @@ plugins:
   # 判定口（spec 5.2-02 / 07）：循环的每一步都只向它问「现在能不能执行」。
   # 它不看模型说的话（请求里根本没有副作用那一位），也不看额度（外发工具自己经闸门，
   # 这里再问一次就是 §2.5 禁止的两套口径）。摘掉它，整条循环停在判定之前而不是照跑。
+  # 5.3-b 起它依赖 store：免确认白名单与它的变更流水是**跨重启成立的用户表态**，
+  # 落在号段 18 的两张表里（`agent_policy_exempt` / `agent_policy_exempt_audit`），不是配置键——
+  # 装配面板写配置只改内存里的运行时层，且改本服务配置会连带重建正在跑循环的 `agent-loop`（§9 的 2.5 实测）。
   - id: agent-policy
-    dependsOn: [agent]
+    dependsOn: [agent, store]
 
   # 对话循环（spec 5.2-01 / 05 / 08 / 11）：`agent_run` + `agent_step` 两张表由本服务把迁移
   # push 进 `store.migrations`，号段取 16（账本 1、会话 2、jobs 3、workflow run 4…生成记录 15）。

@@ -1,5 +1,5 @@
 /**
- * `agent.policy` 的档位真值表（spec 5.3-01 的代码半边）。
+ * `agent.policy` 的档位真值表与免确认白名单（spec 5.3-01 / 06 / 07 的代码半边）。
  *
  * 为什么单独成文件（plan §5.3-a 的落点说明）：判定口的输入是三个自由度的组合
  * （档位 × 副作用级 × 这只手要不要批准），把它摊成 18 格表钉住，与「循环怎么跑」无关；
@@ -8,41 +8,57 @@
  * 期望值**逐格写死**，不写「按同一套规则算一遍」的函数——用被测逻辑的实现推期望，
  * 断言就只剩「代码等于自己」，改坏了判定顺序也不会红。
  *
+ * 5.3-b 起这里多一个自由度：这只手在不在免确认名单里。它不进 18 格表（那张表测的是
+ * **名单为空**时的档位语义，也就是用户从没动过名单时的默认行为），而是单独一组用例钉
+ * 「只有 `auto` 档 + 只有加过白的那一只」这两个「只有」——越界的格子必须仍是要确认。
+ *
  * 全程打本地假工具，不碰真实招聘平台也不出网（AGENTS.md §7.2）。
  */
 import { ConfigService } from '@auto-cc/plugin-config';
+import { StoreService } from '@auto-cc/plugin-store';
 import { asApp, Context, toolResult, type AutonomyLevel, type ToolEffect } from '@auto-cc/core';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AgentToolsService, type AgentTool } from '../tools.js';
-import { AgentPolicyService, type PolicyCode } from './policy.js';
+import { AGENT_POLICY_MIGRATION_VERSION, AgentPolicyService, type PolicyCode } from './policy.js';
 
-/** 拆卸清单（每个用例一套注册表 + 判定口，跑完即拆）。 */
+/** 拆卸清单与临时库目录（每个用例一套注册表 + 判定口 + 一份库，跑完即拆即删）。 */
 const opened: { dispose(): Promise<unknown> }[] = [];
+const dirs: string[] = [];
 
 afterEach(async () => {
   while (opened.length) await opened.pop()?.dispose();
+  while (dirs.length) rmSync(dirs.shift() ?? '', { recursive: true, force: true });
 });
 
 /**
- * 装一套「注册表 + 判定口」，并把六只合成手登记进去（三种副作用级 × 要不要批准）。
- * @returns 上下文、注册表句柄、判定口
+ * 装一套 store + 注册表 + 判定口，并把六只合成手登记进去（三种副作用级 × 要不要批准）。
+ *
+ * store 是 5.3-b 加上的：免确认名单与它的审计两张表（号段 18）落在库里，判定口要读的就是这张表。
+ * @returns 上下文、注册表句柄、判定口、store 句柄、判定口的 fiber（老库重挂那条用例要拆了再装）
  */
 async function bootPolicy() {
+  const dir = mkdtempSync(join(tmpdir(), 'auto-cc-policy-'));
+  dirs.push(dir);
   const ctx = new Context();
   await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+  const storeFiber = ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
+  await storeFiber;
   const toolsFiber = ctx.plugin(AgentToolsService, {});
   await toolsFiber;
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
-  opened.push(policyFiber, toolsFiber);
+  opened.push(policyFiber, toolsFiber, storeFiber);
   const app = asApp(ctx);
   for (const effect of EFFECTS) {
     for (const requiresConfirmation of [false, true]) {
       app['agent.tools'].register(makeSyntheticTool(effect, requiresConfirmation));
     }
   }
-  return { tools: app['agent.tools'], policy: app['agent.policy'] };
+  return { ctx, store: app.store, tools: app['agent.tools'], policy: app['agent.policy'], policyFiber };
 }
 
 /** 三种副作用级，顺序与 `TOOL_EFFECTS` 一致（这里不 import 那个常量，免得表格跟着它漂移）。 */
@@ -80,15 +96,15 @@ function makeSyntheticTool(effect: ToolEffect, requiresConfirmation: boolean): A
 type TruthCell = { tier: AutonomyLevel; effect: ToolEffect; requiresConfirmation: boolean; expected: PolicyCode };
 
 /**
- * 计划已确认时的 18 格。
+ * 计划已确认、且**免确认名单为空**时的 18 格（spec 5.3-01 的默认行为半边）。
  *
  * 读法：`suggest` 一行三格全是 `TIER_SUGGEST_READ_ONLY`（只出计划不执行，与副作用级无关）；
  * `semi` 放行且仅放行「只读且不要求批准」；`auto` 放行「不要求批准」的一切——
  * 这一格里 `outbound-free` 是**产品上不许存在**的形状：真实登记的 16 只手外，外发级都声明了
- * `requiresConfirmation: true`（plan §5.1-a 那句「`outbound` 必 `true`，逐条通过」），所以它今天不可达；
- * 但「不可达」目前是人工核对出来的、不是机检钉住的，而 5.3-06 要的恰恰是**即使用户升到 `auto`、
- * 外发仍默认要点头**——那要靠 5.3-b 的免确认白名单把这一格也管起来。因此 5.3-01 在本片**不勾**，
- * 这里如实记为 ALLOWED，不为它改期望值、也不给判定口塞一条「outbound 一律拒」的临时规则（§2.6）。
+ * `requiresConfirmation: true`（plan §5.1-a 那句「`outbound` 必 `true`，逐条通过」），所以它今天不可达。
+ *
+ * 5.3-b 把「用户把某只手加白之后」另开一组用例（下面的 `EXEMPT_CELLS`），这张表因此继续只表达一件事：
+ * **缺省即要确认**。这正是 5.3-06 的前半句判据——升到 `auto` 也不会默认放行外发。
  */
 const CONFIRMED_TABLE: TruthCell[] = [
   // suggest：整行拒绝，且拒的原因是档位不是别的。
@@ -105,7 +121,7 @@ const CONFIRMED_TABLE: TruthCell[] = [
   { tier: 'semi', effect: 'local-write', requiresConfirmation: true, expected: 'CONFIRMATION_REQUIRED' },
   { tier: 'semi', effect: 'outbound', requiresConfirmation: false, expected: 'CONFIRMATION_REQUIRED' },
   { tier: 'semi', effect: 'outbound', requiresConfirmation: true, expected: 'CONFIRMATION_REQUIRED' },
-  // auto：手自己声明要批准的，任何档位都不替用户点头；其余放行（白名单收窄在 5.3-b）。
+  // auto：手自己声明要批准的，名单为空时仍不替用户点头；其余放行。
   { tier: 'auto', effect: 'read', requiresConfirmation: false, expected: 'ALLOWED' },
   { tier: 'auto', effect: 'read', requiresConfirmation: true, expected: 'CONFIRMATION_REQUIRED' },
   { tier: 'auto', effect: 'local-write', requiresConfirmation: false, expected: 'ALLOWED' },
@@ -164,5 +180,136 @@ describe('agent.policy 的档位真值表（5.3-01）', () => {
     const { policy } = await bootPolicy();
     expect(() => policy.decide({ tier: 'suggest', planConfirmed: false, toolId: 'demo.read-free' })).not.toThrow();
     expect(() => policy.decide({ tier: 'auto', planConfirmed: true, toolId: '' })).not.toThrow();
+  });
+});
+
+/**
+ * 加白之后的格子（spec 5.3-06）。
+ *
+ * 每格都是「先把这一只手加进名单，再问判定口」。三档 × 三种副作用级的 `*-ask` 手共 9 格，
+ * 逐格写死期望：`suggest` 整行仍只因档位被拒（白名单不改档位语义），`semi` 整行仍要确认
+ * （名单只在 `auto` 生效——让它在 semi 也管用等于把三档收成两档），只有 `auto` 那三格放行。
+ */
+const EXEMPT_CELLS: { tier: AutonomyLevel; effect: ToolEffect; expected: PolicyCode }[] = [
+  { tier: 'suggest', effect: 'read', expected: 'TIER_SUGGEST_READ_ONLY' },
+  { tier: 'suggest', effect: 'local-write', expected: 'TIER_SUGGEST_READ_ONLY' },
+  { tier: 'suggest', effect: 'outbound', expected: 'TIER_SUGGEST_READ_ONLY' },
+  { tier: 'semi', effect: 'read', expected: 'CONFIRMATION_REQUIRED' },
+  { tier: 'semi', effect: 'local-write', expected: 'CONFIRMATION_REQUIRED' },
+  { tier: 'semi', effect: 'outbound', expected: 'CONFIRMATION_REQUIRED' },
+  { tier: 'auto', effect: 'read', expected: 'ALLOWED' },
+  { tier: 'auto', effect: 'local-write', expected: 'ALLOWED' },
+  { tier: 'auto', effect: 'outbound', expected: 'ALLOWED' },
+];
+
+describe('agent.policy 的免确认白名单（5.3-06 / 07）', () => {
+  it('名单默认是空的：缺省即「每个要批准的动作仍逐次问」', async () => {
+    const { policy } = await bootPolicy();
+    expect(policy.exemptList()).toEqual([]);
+    expect(policy.exemptAudit()).toEqual([]);
+  });
+
+  it('加白 9 格逐格对上：只有 auto 那一行改判，suggest 与 semi 一行都不动', async () => {
+    const { policy } = await bootPolicy();
+    for (const cell of EXEMPT_CELLS) {
+      const toolId = toolIdFor(cell.effect, true);
+      policy.setExempt(toolId);
+      const decision = policy.decide({ tier: cell.tier, planConfirmed: true, toolId });
+      expect(`${cell.tier}/${cell.effect}/加白 → ${decision.code}`).toBe(
+        `${cell.tier}/${cell.effect}/加白 → ${cell.expected}`,
+      );
+      expect(decision.canRun).toBe(cell.expected === 'ALLOWED');
+      // 免确认≠免闸门：改判的那三格要在原话里说清额度与频控照旧，人读界面才知道省掉的是「问」不是「闸」。
+      if (cell.expected === 'ALLOWED') expect(decision.message).toContain('闸门');
+      policy.clearExempt(toolId);
+    }
+  });
+
+  it('加白只改这一只手：同档下没加白的那一只仍要确认', async () => {
+    const { policy } = await bootPolicy();
+    policy.setExempt('demo.outbound-ask');
+    expect(policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' }).canRun).toBe(true);
+    const kept = policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.local-write-ask' });
+    expect(kept).toMatchObject({ canRun: false, code: 'CONFIRMATION_REQUIRED' });
+  });
+
+  it('撤销之后立刻回到要确认（5.3-07 的逐条撤销是真生效，不是界面上划掉一行）', async () => {
+    const { policy } = await bootPolicy();
+    policy.setExempt('demo.outbound-ask');
+    expect(policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' }).canRun).toBe(true);
+    const after = policy.clearExempt('demo.outbound-ask');
+    expect(after).toEqual([]);
+    const refusedAgain = policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' });
+    expect(refusedAgain).toMatchObject({ canRun: false, code: 'CONFIRMATION_REQUIRED' });
+    // 拒绝原话是指针，必须指向**当下真有的**那条口（5.3-b 的免确认白名单）；
+    // 它还留着「逐条批准的卡片在 5.3-c 接」这句限定，所以这句不许被改写成已经能逐条批准。
+    expect(refusedAgain.message).toContain('免确认白名单');
+  });
+
+  it('名单读数现读注册表：加白的一只带副作用级与标题键，手被摘掉后 descriptor 变 null 且判定给 TOOL_UNAVAILABLE', async () => {
+    const { policy, tools } = await bootPolicy();
+    policy.setExempt('demo.outbound-ask');
+    expect(policy.exemptList()).toMatchObject([
+      { toolId: 'demo.outbound-ask', descriptor: { effect: 'outbound', requiresConfirmation: true } },
+    ]);
+    tools.unregister('demo.outbound-ask');
+    const [row] = policy.exemptList();
+    // 陈旧的那一条还在名单里（记录不跟着注册表消失），但它放行不了任何东西：先查表就给 TOOL_UNAVAILABLE。
+    expect(row).toMatchObject({ toolId: 'demo.outbound-ask', descriptor: null });
+    expect(policy.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' })).toMatchObject({
+      canRun: false,
+      code: 'TOOL_UNAVAILABLE',
+    });
+    // 手不在开放面上了，用户仍然要能把当初加的白撤掉——留一条撤不掉的免确认比留一条陈旧记录危险。
+    expect(policy.clearExempt('demo.outbound-ask')).toEqual([]);
+  });
+
+  it('加白不在开放面上的动作：结构化失败、名单不动、也不留审计', async () => {
+    const { policy } = await bootPolicy();
+    const thrown = (() => {
+      try {
+        policy.setExempt('demo.not-registered');
+        return null;
+      } catch (error) {
+        return error as { code?: string };
+      }
+    })();
+    expect(thrown?.code).toBe('AGENT_POLICY_EXEMPT_UNKNOWN');
+    expect(policy.exemptList()).toEqual([]);
+    expect(policy.exemptAudit()).toEqual([]);
+  });
+
+  it('审计只记真实变更：重复加白不叠行，撤销不在名单里的不写行，一加一撤各留一条', async () => {
+    const { policy } = await bootPolicy();
+    policy.setExempt('demo.outbound-ask');
+    policy.setExempt('demo.outbound-ask');
+    policy.clearExempt('demo.read-ask');
+    const first = policy.exemptAudit();
+    expect(first).toMatchObject([{ toolId: 'demo.outbound-ask', action: 'add', source: 'user' }]);
+    expect(first).toHaveLength(1);
+    policy.clearExempt('demo.outbound-ask');
+    const rows = policy.exemptAudit();
+    expect(rows).toHaveLength(2);
+    // 倒序：最新在前，排查时先看最近一次动过名单的是谁。
+    expect(rows[0]).toMatchObject({ toolId: 'demo.outbound-ask', action: 'revoke', source: 'user' });
+    expect(rows[1]!.action).toBe('add');
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+  });
+
+  it('老库（号段 18 未记账、两张表都没有）重新挂载后能建表并写入读出', async () => {
+    // 与 5.3-a 那条同一教训的回归位：`runMigrations` 认台账不认 `PRAGMA user_version`，
+    // 把两张表挂到已记账的号段上，老用户机上第一次加白就以 `no such table` 失败（单测从空库起照不出来）。
+    const { ctx, store, policyFiber } = await bootPolicy();
+    store.db.exec('DROP TABLE agent_policy_exempt; DROP TABLE agent_policy_exempt_audit');
+    store.db.prepare('DELETE FROM schema_migrations WHERE version = ?').run(AGENT_POLICY_MIGRATION_VERSION);
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE name = 'agent_policy_exempt'").get()).toBeUndefined();
+
+    await policyFiber.dispose();
+    await ctx.plugin(AgentPolicyService, {});
+    const remounted = asApp(ctx)['agent.policy'];
+    expect(remounted.exemptList()).toEqual([]);
+    remounted.setExempt('demo.outbound-ask');
+    expect(remounted.decide({ tier: 'auto', planConfirmed: true, toolId: 'demo.outbound-ask' }).canRun).toBe(true);
+    expect(remounted.exemptAudit()).toMatchObject([{ action: 'add', toolId: 'demo.outbound-ask' }]);
   });
 });

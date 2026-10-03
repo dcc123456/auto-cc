@@ -12,6 +12,11 @@
  * ⑤（5.3-a 加，spec 5.3-04）写档位的路径只有「人」那一条：`setAutonomy` 在全仓非测试源码里
  *   只许出现在定义处、IPC 白名单派发处、界面上那只切换这三份文件里，而 `UPDATE chat_session SET autonomy`
  *   全仓一处，`loop.ts` / `policy.ts` 连那一列的表名都不出现——循环只读档位。
+ * ⑥（5.3-b 加，spec 5.3-06 / 07）写免确认白名单的路径同样只有「人」那一条：
+ *   `setExempt` / `clearExempt` 只许出现在判定口、IPC 白名单派发处、界面上那两颗按钮这三份文件里，
+ *   `agent_policy_exempt` 两张表只在判定口被碰，而 `loop.ts` 连名单的名字都不出现——
+ *   循环每一步只把工具 id 交给判定口，「这只手免不免确认」由判定口现读库。
+ *   这一条防的是 5.3-04 那个风险换一副面孔重演：模型若能自己加白，它就又能给自己放宽了。
  *
  * 探针（5.2-b 实测，三条各打一处再还原）：给 `StepPermissionRequest` 加一位 `authorized?: boolean`、
  * 把 ③ 的实参改成带 `step.intent`、给 `LoopModel` 多加一条 `requestPermission`，本脚本都在那一处立刻 exit 1。
@@ -154,12 +159,31 @@ function collectSources(current: string): string[] {
 }
 
 const sourceFiles = collectSources('packages');
-const tierWriters = sourceFiles.filter((relative) => read(relative).includes('setAutonomy')).sort();
-if (tierWriters.join(',') !== [...tierWriteAllowlist].sort().join(',')) {
-  problems.push(
-    `写档位的口子应当只有这三处（${tierWriteAllowlist.join(' / ')}），现在提到 setAutonomy 的文件是：${tierWriters.join(' / ') || '（一个都没有）'}`,
-  );
+
+/**
+ * 断言「这几个名字只许出现在这几份文件里」（⑤⑥ 共用同一判据形状）。
+ *
+ * 判法数**名字**而不是数工具清单：清单会长，而「谁能写这一位」是穷举过的事实——
+ * 多出一份文件就是有人开了第二条口（给 agent，或给某条不用人点头的后台路径），少一份则说明这条口被改名、判据失效。
+ * @param needles 要搜的名字，任一命中即算提到
+ * @param allowlist 允许提到这些名字的文件（相对仓库根）
+ * @param label 报错时说的事名
+ */
+function expectSingleWriter(needles: readonly string[], allowlist: readonly string[], label: string): void {
+  const hits = sourceFiles
+    .filter((relative) => {
+      const text = read(relative);
+      return needles.some((needle) => text.includes(needle));
+    })
+    .sort();
+  if (hits.join(',') !== [...allowlist].sort().join(',')) {
+    problems.push(
+      `${label} 的口子应当只在这几处（${allowlist.join(' / ')}），现在提到 ${needles.join(' / ')} 的文件是：${hits.join(' / ') || '（一个都没有）'}`,
+    );
+  }
 }
+
+expectSingleWriter(['setAutonomy'], tierWriteAllowlist, '写档位');
 // 那一列的 UPDATE 语句全仓只允许出现在 session.ts 一处——多一处就是第二套写入口（AGENTS.md §2.5）。
 const updateHits = sourceFiles.filter((relative) => /UPDATE chat_session SET autonomy/.test(read(relative)));
 if (updateHits.join(',') !== 'packages/agent/src/session.ts') {
@@ -175,11 +199,33 @@ for (const relative of ['packages/agent/src/loop/loop.ts', 'packages/agent/src/l
   }
 }
 
+// ⑥（5.3-b 加，spec 5.3-06 / 07）免确认白名单也不是 agent 的一只手：写它的口只有「人」那一条。
+//    判据与 ⑤ 同形——「agent 自己给自己放宽」若换个名字重演（模型把下一步要用的那只手先加白），
+//    5.3-04 就白立了。三份文件分别是：定义处（policy.ts）、IPC 白名单派发处（bridge.ts）、界面上那两颗按钮（AgentPolicyPanel.tsx）。
+expectSingleWriter(
+  ['setExempt', 'clearExempt'],
+  ['packages/agent/src/loop/policy.ts', 'packages/shared/src/bridge.ts', 'packages/renderer/src/AgentPolicyPanel.tsx'],
+  '写免确认名单',
+);
+// 那两张表只许判定口自己碰：多出第二处就是第二套写入口（AGENTS.md §2.5），而名单是判定依据，两处能写就没人知道当下哪一份作数。
+const exemptTableWriters = sourceFiles.filter((relative) => read(relative).includes('agent_policy_exempt'));
+if (exemptTableWriters.join(',') !== 'packages/agent/src/loop/policy.ts') {
+  problems.push(
+    `agent_policy_exempt 两张表应只在 policy.ts 出现，现在出现在：${exemptTableWriters.join(' / ') || '（没有）'}`,
+  );
+}
+// 循环侧同样连表名都不该出现：它每一步只把 id 交给判定口，名单由判定口现读（5.2-07 的「模型没有表态通道」延续到 5.3-b）。
+const loopText = read('packages/agent/src/loop/loop.ts');
+if (['setExempt', 'clearExempt', 'exemptList', 'agent_policy_exempt'].some((needle) => loopText.includes(needle))) {
+  problems.push('loop.ts 里读得到免确认名单的名字——循环不该知道名单的存在，它只负责把每一步交给判定口');
+}
+
 if (problems.length) {
   console.error('✖ agent 模型表态通道检查未通过：');
   for (const problem of problems) console.error(`  · ${problem}`);
   process.exit(1);
 }
 console.log(
-  '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / policy 不 import model / 升档只有人这一条口）',
+  '✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / ' +
+    'policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口）',
 );

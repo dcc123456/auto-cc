@@ -527,6 +527,20 @@
         "semi": "半自动",
         "auto": "全自动"
       },
+      "policy": {
+        "heading": "免确认白名单",
+        "exemptCount": "已免确认 {{total}} 项",
+        "onlyAuto": "当前档位是{{level}}，名单暂不影响执行",
+        "hint": "名单只在「全自动」档生效：加白之后这一步不再每次问你，但额度闸门、频控与日上限照旧。",
+        "loading": "正在读取名单…",
+        "empty": "名单为空——每个要批准的动作仍会逐次问你",
+        "addedAt": "加白于 {{time}}",
+        "revoke": "撤销",
+        "actionRevoke": "撤销 {{tool}} 的免确认",
+        "add": "加白",
+        "actionAdd": "把 {{tool}} 加进免确认名单",
+        "noCandidates": "没有待加白的动作（要批准的都已在名单里）"
+      },
       "tool": {
         "unregistered": "未登记的工具",
         "labels": {

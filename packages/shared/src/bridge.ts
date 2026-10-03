@@ -14,6 +14,7 @@ import type {
   ChatSnapshotView,
   DeliverApprovalView,
   DeliverAttachmentView,
+  ExemptToolView,
   JdProgressEvent,
   KbEntitiesChangedEvent,
   KernelViewLoadError,
@@ -57,6 +58,7 @@ export type {
   ChatToolPartState,
   DeliverApprovalView,
   DeliverAttachmentView,
+  ExemptToolView,
   JdProgressEvent,
   KernelViewLoadError,
   LocatorRelocatedEvent,
@@ -173,6 +175,13 @@ export const RENDERER_ALLOWLIST = [
   'agent.loop.confirm',
   'agent.loop.stop',
   'agent.loop.read',
+  // 5.3-b 的免确认白名单（spec 5.3-06 / 07）：`auto` 档下「哪些动作不再每次问我」是**用户**的显式设置，
+  // 所以这三条口只出现在界面上，和 `agent.loop.confirm`、`chat.session.setAutonomy` 同一口径——
+  // 刻意不登记为 agent 工具：模型若能自己加白，5.3-04 防的「agent 自己给自己放宽」就换了个名字重演。
+  // 静态那半边由 `scripts/check-agent-model-authority.ts` 的 ⑥ 钉住（全仓只有这三份文件能提这两个方法名）。
+  'agent.policy.exemptList',
+  'agent.policy.setExempt',
+  'agent.policy.clearExempt',
   'chat.session.current',
   'chat.session.send',
   'chat.session.stop',
@@ -1406,6 +1415,22 @@ export interface BridgeSignatures {
    * @param runId 运行 id
    */
   'agent.loop.read': { args: [runId: string]; returns: AgentRunView };
+  /**
+   * 列出当前免确认的动作（spec 5.3-07）：每项带注册表现读的副作用级与标题键，
+   * 名单为空就画空态——**缺省为空**是「默认仍需每次确认」的界面证据。
+   */
+  'agent.policy.exemptList': { args: []; returns: ExemptToolView[] };
+  /**
+   * 把一只动作加进免确认名单（spec 5.3-06 / 07，只在 `auto` 档生效，且不豁免额度闸门与频控）。
+   * @param toolId 工具 id；不在开放面上时以 `AGENT_POLICY_EXEMPT_UNKNOWN` 结构化失败
+   * @returns 变更后的整份名单，界面一次调用即可刷新
+   */
+  'agent.policy.setExempt': { args: [toolId: string]; returns: ExemptToolView[] };
+  /**
+   * 撤销一只动作的免确认（spec 5.3-07 的「可逐条撤销」）。
+   * @param toolId 工具 id；不在名单里时读数与调用前一致，不报错也不写审计
+   */
+  'agent.policy.clearExempt': { args: [toolId: string]; returns: ExemptToolView[] };
   /** 当前会话的整份快照（spec 1.11-08）；首次访问就地建会话，永不为 null。 */
   'chat.session.current': { args: []; returns: ChatSnapshotView };
   /** 发一条用户消息并起一次流式回复，返回刚进入流式态的助手消息（spec 1.11-02 / 03）。 */

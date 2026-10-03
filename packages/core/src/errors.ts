@@ -97,6 +97,10 @@ export type AppErrorCode =
   | 'AGENT_LOOP_RUN_NOT_FOUND'
   | 'AGENT_LOOP_NOT_PROPOSED'
   | 'AGENT_LOOP_STATUS_INVALID'
+  // 免确认白名单（spec 5.3-06 / 07）：只在开放面上的动作才能加白。单独一个码而不是复用 `TOOL_UNAVAILABLE`
+  // 那类判定读数，是因为这条走的是**写入口**——界面上的处置是「名单一行都不动 + 说明这只手不在开放面上」，
+  // 而读数类的拒绝是「这一步不执行」，两件事混在一个码里会让人以为已经加白了只是这次没跑。
+  | 'AGENT_POLICY_EXEMPT_UNKNOWN'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

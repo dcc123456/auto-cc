@@ -951,6 +951,35 @@ export type AgentRunView = {
 };
 
 /**
+ * 一条「当前免确认」的读数（spec 5.3-07：界面上要能读出哪些动作已免确认）。
+ *
+ * 名单里只存「这只手免不免确认」这一件事，副作用级与标题键都是**现读注册表**的那份投影——
+ * 在本表镜像一份 effect 就会在能力包被摘掉后说假话（AGENTS.md §2.5 + §9 的 2.5 实测）。
+ * `descriptor` 为 null 就是那种情况：加白时这只手还在，如今不在开放面上了，界面按「未登记」画；
+ * 判定口对它仍先给 `TOOL_UNAVAILABLE`，免确认名单不会因为一条陈旧记录而放行任何东西。
+ */
+export type ExemptToolView = {
+  toolId: string;
+  /** 加白时刻（毫秒） */
+  addedAt: number;
+  descriptor: ToolDescriptorView | null;
+};
+
+/**
+ * 一次加白 / 撤白的审计读数（与 5.3-05 的档位变更审计同族）。
+ *
+ * `source` 只可能是 `'user'`：写入口只有界面上那一条，加白与撤销这两个口都不登记为 agent 工具
+ * （5.3-04 防的是"agent 自己给自己放宽"，加白正是它的第二种形态）。
+ */
+export type ExemptAuditRow = {
+  id: number;
+  toolId: string;
+  action: 'add' | 'revoke';
+  source: string;
+  createdAt: number;
+};
+
+/**
  * 定位层「由指纹自愈重找到元素」的事件载荷（spec 2.2-05）。
  *
  * `strategy` 这里是 `string` 而不是那八个策略名的联合：联合定义在 `@auto-cc/shared`，

@@ -21,7 +21,7 @@ export {
 export type { ChatConfig } from './session.js';
 export { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, agentLoopSchema } from './loop/loop.js';
 export type { AgentLoopConfig } from './loop/loop.js';
-export { AgentPolicyService, agentPolicySchema } from './loop/policy.js';
+export { AGENT_POLICY_MIGRATION_VERSION, AgentPolicyService, agentPolicySchema } from './loop/policy.js';
 export type { AgentPolicyConfig, PolicyCode, PolicyDecision, StepPermissionRequest } from './loop/policy.js';
 export { StubLoopModel } from './loop/model.js';
 export type {
