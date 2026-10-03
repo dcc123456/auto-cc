@@ -1817,3 +1817,51 @@ describe('个人数据进 run 与步记录之前（spec 5.6-05 的 agent 半边�
     expect(received).toEqual([{ to: '13800001111' }]);
   });
 });
+
+/**
+ * 5.6-b：挂载回看要的那份读数（spec 5.6-01 的「运行」半边）。
+ *
+ * 为什么在台架里重建服务、而不是在这儿杀进程：判据的活体半边（重启 → 截图历史完整）是 V 条目、
+ * 由 harness 打真窗口取证；这一条只管**读数口**——「换了实例还读得到同一条」正是重启后界面的处境
+ * （`remountLoop` 与热改配置重建下游同构，AGENTS.md §9 的 2.5 实测：新实例内存里一个 scope 都没有）。
+ */
+describe('挂载时回看这段会话的最近一次 run（spec 5.6-01 的运行半边）', () => {
+  it('没起草过就是 null；服务换过实例仍读得到那一条，且就是界面那份读数', async () => {
+    const { ctx, chat, loop, loopFiber } = await bootLoop();
+    const sessionId = chat.current().session.id;
+    expect(loop.latestRun(sessionId)).toBeNull();
+    // 空串不去猜「当前会话」：认领依据缺失时宁可答「没有」，否则会把别的会话的计划卡画到这一段对话里。
+    expect(loop.latestRun('')).toBeNull();
+
+    const proposed = await loop.propose('demo.tick {"n":1}');
+    expect(await loop.confirm(proposed.runId)).toMatchObject({ status: 'completed' });
+    // 回看复用 `read()`：掩码与界面同源（掩码本身已由上面 5.6-05 那两条钉住，这里只钉「不是第二份投影」）。
+    expect(loop.latestRun(sessionId)).toEqual(loop.read(proposed.runId));
+
+    await loopFiber.dispose();
+    const rebuilt = await remountLoop(ctx, {});
+    const restored = rebuilt.latestRun(sessionId);
+    expect(restored).toMatchObject({ runId: proposed.runId, status: 'completed', goal: proposed.goal });
+    expect(restored?.steps).toHaveLength(1);
+    // 反向半边：新实例的内存 scope 是空的，这一份只能从 `agent_run` + `agent_step` 两张表来。
+    expect(rebuilt.latestRun(sessionId)?.plan).toEqual(proposed.plan);
+  });
+
+  it('按会话认领：新会话没有 run，旧会话取最后起草的那一条', async () => {
+    const { chat, loop } = await bootLoop();
+    const firstSession = chat.current().session.id;
+    const older = await loop.propose('demo.tick {"n":1}');
+    const newer = await loop.propose('demo.tick {"n":2}');
+    // 「最近」按起草先后而不是按结局：两次 `proposed` 之间取后写的那一行（`created_at` 同毫秒时靠 rowid）。
+    expect(loop.latestRun(firstSession)?.runId).toBe(newer.runId);
+
+    const fresh = chat.startSession();
+    expect(loop.latestRun(fresh.session.id)).toBeNull();
+    expect(loop.latestRun(firstSession)?.runId).toBe(newer.runId);
+    const third = await loop.propose('demo.tick {"n":3}');
+    expect(loop.latestRun(fresh.session.id)?.runId).toBe(third.runId);
+    // 老会话那条不被新会话的计划顶掉：这是 5.6-c 会话列表「切回去看到的是那一段历史」的前提。
+    expect(loop.latestRun(firstSession)?.runId).toBe(newer.runId);
+    expect(loop.read(older.runId).status).toBe('proposed');
+  });
+});

@@ -727,6 +727,27 @@ export class AgentLoopService extends Service {
     return toRunView(run, steps);
   }
 
+  /**
+   * 读一个会话里**最近一次** run 的界面读数（spec 5.6-01 的「运行」那半边：重启后靠这一口把计划卡画回来）。
+   *
+   * 为什么要按会话取而不是全局取一条：`chat.session` 有多个会话时「当前会话」是 `ensureSession()`
+   * 的隐式取一条，而 `agent_run.session_id` 从 5.2-a 起就在写（`propose` 里那一列）——按 id 问一次
+   * 就把「上一段对话的计划卡串到这一段来」这类错画彻底挡住。
+   * 为什么复用 `read()` 而不是自己拼一份投影：界面要的就是 `agent.loop.read` 那一份形状（含 5.6-05 的掩码），
+   * 在这里再 `toRunView` 一次就是第二份事实（AGENTS.md §2.5）。
+   * @param sessionId 会话 id（界面手上那份来自 `chat.session.current()`；空串直接算「没有」，不去猜是哪个会话）
+   * @returns 该会话最近一条 run 的界面读数；那条会话一次都没起草过时返回 `null`（不抛，挂载回看不是错误路径）
+   */
+  latestRun(sessionId: string): AgentRunView | null {
+    if (!sessionId) return null;
+    const row = this.store.db
+      .prepare('SELECT id FROM agent_run WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1')
+      .get(sessionId) as { id: string } | undefined;
+    // 只查得到 id 却读不到整份读数，说明那一行在两次查询之间被删了——当前没有任何删 run 的口，
+    // 所以这里不为它加异常处理（§2.6），交给 `read()` 按它既有的口径报 `AGENT_LOOP_RUN_NOT_FOUND`。
+    return row ? this.read(row.id) : null;
+  }
+
   [Service.init](): void {
     // 卸载时把在跑的循环都停在安全点，别留下「服务已经没了、循环还在调注册表」的形态。
     // 必须是「返回一个函数」：cordis 会立刻执行这里的第一层来取回收器（AGENTS.md §9 实测 1.3），

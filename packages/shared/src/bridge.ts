@@ -215,6 +215,10 @@ export const RENDERER_ALLOWLIST = [
   'agent.loop.confirm',
   'agent.loop.stop',
   'agent.loop.read',
+  // 5.6-b 的挂载回看（spec 5.6-01）：界面重新挂载（含重启）时按**当前会话**取最近一次 run 的读数，
+  // 计划卡与逐步卡片流因此能从 SQLite 画回来，而不是只活在 `agent/run-progress` 那一推里。
+  // 与 `agent.loop.read` 同为只读口，不改变任何状态，也不在人表态的那几只手里。
+  'agent.loop.latestRun',
   // 5.5-a 的恢复口（spec 5.5-01）：把人做完的那一段交还之后，从被按住的那一步接着跑。
   // 与 `agent.loop.confirm` 同族、同一口径——**只由人按**，刻意不登记为 agent 工具（机检 ⑧）。
   // 接管那一段的历史（谁、何时、因为什么）不在这里开新口：它在号段 21 的 `takeover_events` 里，
@@ -1526,6 +1530,12 @@ export interface BridgeSignatures {
    * @param runId 运行 id
    */
   'agent.loop.read': { args: [runId: string]; returns: AgentRunView };
+  /**
+   * 读一个会话最近一次 run 的界面读数（spec 5.6-01 的运行半边）：重新挂载（含重启）时用它把
+   * 计划卡与逐步卡片流从库里画回来；返回的是 `agent.loop.read` 那一份形状（含 5.6-05 的掩码），不是第二份投影。
+   * @param sessionId 当前会话 id，来自 `chat.session.current()`；该会话没起草过 run 时返回 null（不是错误）
+   */
+  'agent.loop.latestRun': { args: [sessionId: string]; returns: AgentRunView | null };
   /** 人交还页面之后按的那次「继续」：只吃被接管按住的 `paused`，其余态结构化失败（spec 5.5-01）。 */
   'agent.loop.resume': { args: [runId: string]; returns: AgentRunView };
   /**
