@@ -17,6 +17,7 @@ import type {
   ChatSnapshotView,
   DeliverApprovalView,
   DeliverAttachmentView,
+  EvidenceRefView,
   ExemptToolView,
   JdProgressEvent,
   KbEntitiesChangedEvent,
@@ -74,6 +75,7 @@ export type {
   ChatToolPartState,
   DeliverApprovalView,
   DeliverAttachmentView,
+  EvidenceRefView,
   ExemptToolView,
   JdProgressEvent,
   KernelViewLoadError,
@@ -231,6 +233,10 @@ export const RENDERER_ALLOWLIST = [
   // 让模型自己把一次对话固化成工作流，就是 5.3-04 防的「agent 给自己放宽」换了个更省事的写法。
   'agent.sediment.preview',
   'agent.sediment.save',
+  // 5.7-02 的按引用回看（plan §7.5.7 决策十一）：整条链只有这一只口认识引用前缀。
+  // 刻意**不登记为 agent 工具**，也不按每种前缀各开一只：界面若自己分派「哪条引用归谁管」，
+  // 就等于把主进程的路由表抄第二份（§2.5）；而它是只读口，既不是外发也不是表态，闸门与审计都不涉及。
+  'agent.run.evidence',
   // 5.3-b 的免确认白名单（spec 5.3-06 / 07）：`auto` 档下「哪些动作不再每次问我」是**用户**的显式设置，
   // 所以这三条口只出现在界面上，和 `agent.loop.confirm`、`chat.session.setAutonomy` 同一口径——
   // 刻意不登记为 agent 工具：模型若能自己加白，5.3-04 防的「agent 自己给自己放宽」就换了个名字重演。
@@ -1635,6 +1641,16 @@ export interface BridgeSignatures {
    * @returns 刚落库的计划读数，界面据此把计划下拉指过去
    */
   'agent.sediment.save': { args: [runId: string, nameRaw: string]; returns: SavedWorkflowPlanView };
+  /**
+   * 按引用回看一步上的证据读数（spec 5.7-02 / plan §7.5.7 决策十一）：整条链只有这一只手认识引用前缀，
+   * 界面拿到的是统一视图，**不需要知道哪条引用归哪个服务管**。
+   * 三种结局都在返回值里（读到正文 / 这类引用本就不落正文 / 归属服务此刻没挂载），这只口从不抛——
+   * 跨进程抛裸异常会丢掉原因，界面上就只剩「An error occurred」，而这里要给人看的正是那句原因。
+   * @param runId 来自对话卡片的 run id
+   * @param planStepIndex 那一步的下标（与 `AgentStepView.planStepIndex` 同源）；先验归属再读记录
+   * @param ref 被点的那一条引用原文，须与步记录上的 `evidenceRefs` 逐字相同
+   */
+  'agent.run.evidence': { args: [runId: string, planStepIndex: number, ref: string]; returns: EvidenceRefView };
   /**
    * 列出当前免确认的动作（spec 5.3-07）：每项带注册表现读的副作用级与标题键，
    * 名单为空就画空态——**缺省为空**是「默认仍需每次确认」的界面证据。

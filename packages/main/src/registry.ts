@@ -12,6 +12,7 @@ import {
   AgentSedimentService,
   AgentToolsService,
   ChatSessionService,
+  EvidenceRefService,
 } from '@auto-cc/plugin-agent';
 import {
   BrowserActService,
@@ -184,5 +185,11 @@ export const REGISTRY: Registry = {
   // 它只 `inject` `agent.loop`；计划存储经 `maybeService` 现问，所以摘掉 `workflow` 不会把它一起带进 PENDING，
   // 只在按「沉淀」那一刻报「没有可写入的计划存储口」（§9 的 2.5 实测：存第二份事实会静默变空）。
   'agent-sediment': AgentSedimentService,
+  // 按引用回看（spec 5.7-02 / plan §7.5.7 决策十一）：对话卡片上每条证据引用唯一的读数口，只读、不建表。
+  // id 取 `agent-run` 与 provide 名 `agent.run` 对齐（点换横线），白名单里的 `agent.run.evidence` 因此可机械对上。
+  // 单独占一个清单 id 是为了让「摘掉它」可演示：点引用得到「服务未挂载」的结构化失败，
+  // 而对话、循环、卡片流照旧——「跑过一步并留下引用」与「把引用读回成人看得懂的记录」分属两条。
+  // 归属服务一律 `maybeService` 现问（§9 的 2.5 实测：热改配置会重建下游，存第二份路由表会静默变空）。
+  'agent-run': EvidenceRefService,
   shell: ShellService,
 };

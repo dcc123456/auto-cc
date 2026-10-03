@@ -504,6 +504,16 @@ plugins:
     dependsOn: [agent, agent-loop]
     config: {}
 
+  # 按引用回看（spec 5.7-02 / plan §7.5.7 决策十一）：对话卡片上一条证据引用的唯一读数口。
+  # 一只口而不是每种前缀各一只：路由表只许住在主进程这一侧，界面只负责画 `EvidenceRefView` 那个外壳。
+  # 只读、不建表、不占号段；归属服务（用量账本 / 岗位库 / 工作副本 / 导入 / 生成 / 知识库 / 快照）
+  # 全部经 `maybeService` 按名字现问，所以摘掉任何一条能力腿都不会把它一起带进 PENDING，
+  # 只会在点开那一条引用时给出一句「那个服务此刻没有挂载」的确定读数（§9 的 2.5 实测）。
+  # 注掉这一行：卡片上的引用点不开、给出「服务未挂载」的结构化失败，而对话、循环、卡片流照旧。
+  - id: agent-run
+    dependsOn: [agent, agent-loop]
+    config: {}
+
   # 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点（号段 25），
   # 进程内一个 `setInterval`，不注册任何操作系统的计划任务（判据由 `scripts/check-scheduler-no-external-cron.ts` 钉）。
   # `dependsOn: workflow` 只为了**顺序**：挂载时那一次追账与之后的每个 tick 都要有起跑口在场，

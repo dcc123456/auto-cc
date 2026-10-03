@@ -1273,6 +1273,33 @@ export type AgentStepView = {
   code: string | null;
 };
 
+/**
+ * 一条证据引用点开之后的读数（spec 5.7-02）。
+ *
+ * 形状上最重要的一条是**`title` / `body` / `unavailableReason` 三者必有其一**：这只口对每一种引用
+ * 都给确定结局（读到正文，或说清为什么读不到），从不抛错也从不留白。判据「每一步都能回溯」问的是
+ * 结局确定，不是每条都能读到正文——循环合成的重读引用记的是时刻而不是文件，硬凑一个空视图才是说谎。
+ * 文本由主进程按归属服务的字段拼出来，与观察摘要同一口径（是**内容**，不进语言包；界面只画外壳）。
+ */
+export type EvidenceRefView = {
+  /** 引用原文，与 `AgentStepView.evidenceRefs` 里被点的那一条逐字相同 */
+  ref: string;
+  /** 引用前缀（`ledger` / `job` / `doc` …），路由表的键；界面只当数据画，不再据它分派（决策十一） */
+  kind: string;
+  /** 归属记录的标题行；读不到正文为 null */
+  title: string | null;
+  /** 归属记录的正文读数；读不到为 null */
+  body: string | null;
+  /** 为什么读不到（服务未挂载 / 库里没有这一行 / 这条引用本来就不落正文）；读到正文为 null */
+  unavailableReason: string | null;
+  /**
+   * 归属记录的时刻（毫秒时间戳）；引用里带时刻的（`…@<毫秒>`）也填这一位。
+   * 主进程只给数不给格式化后的字符串：本地时区与显示格式是界面的事，而账本 `dayKey` 那一课已经证明
+   * 「把时区判定写进主进程」会让同一时刻在两条路上算出不同的日子（AGENTS.md §8.5 的口径同样适用）。
+   */
+  at: number | null;
+};
+
 /** 一次任务的整份读数：界面与日志都从这里取，run 行与步行的唯一投影（§2.5 一份口径）。 */
 export type AgentRunView = {
   runId: string;
