@@ -730,7 +730,10 @@
           "PAUSE_TIMEOUT": "the wait reached its deadline with no answer, so it was not released",
           "PAUSE_CANCELLED": "a stop or rebuild closed the waiting ticket; nobody ever answered",
           "TAKEOVER_HELD": "Held by manual takeover, stopped at a safe point",
-          "RESUMED_AFTER_TAKEOVER": "Page handed back; a person pressed Continue to resume it"
+          "RESUMED_AFTER_TAKEOVER": "Page handed back; a person pressed Continue to resume it",
+          "REPLAN_UNCHANGED": "The page changed; replanning could not find a usable step",
+          "REPLAN_EXHAUSTED": "Out of replans, stopped at a safe point",
+          "REREAD_UNAVAILABLE": "Could not re-read the page, so the stale snapshot was not used"
         },
         "resume": "Resume this task",
         "actionResume": "resume the task held by takeover",

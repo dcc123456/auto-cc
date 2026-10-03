@@ -30,10 +30,21 @@
  *    所以「停在安全点」这件事由两处置地生效：步与步之间的那次现问，以及订阅 `browser/takeover-changed`
  *    去叫醒那些**正挂在暂停单上**的 run（它们走不到下一次现问）。
  *    恢复只能由人按（`resume`），与 `confirm` / `respond` / 写档位 / 加白撤白同属「人表态」的那一类口。
+ * 7. **要在下一步动手之前把页面重读一遍**（5.5-c / spec 5.5-03）：交还页面之后的第一件事不是动手，是
+ *    「现在这页长成什么样」。`resume` 在游标回拨**之后**现问一次重读口（配置里的 `rereadToolId`，
+ *    只认 `effect === 'read'` 的那只手——重读是一道保险，不能变成另一只动手的口），
+ *    读不到就**拒绝恢复**并把 run 留在安全点（`AGENT_LOOP_REREAD_UNAVAILABLE`）：
+ *    「按了继续却没重读」正是要防的那种静默失效，接管前那份快照不许再带进下一步。
+ *    这道保险按**下一步的副作用级**扳机（回拨之后才知道下一步是谁）：下一步本身是只读的手时不重读——
+ *    它要的现状就是它自己现读的那一份，没有旧快照可复用，而为了一个 KB 检索去要求浏览器开着，
+ *    会把 5.5-b 已经验过的那条恢复路径拒成「重读页面失败」（那是自造的失效，不是 spec 要的保险）。
+ *    同一次重读也用在「页面与声明不符」那一条（5.5-04）：那一格落空后先重读、再让模型带着新读数
+ *    续推；续推给出的**还是同一只手**时不重跑（那叫硬点），停在安全点把原因说清。
  */
 import {
   AGENT_RUN_STATUSES,
   AppError,
+  PAGE_DRIFT_CODES,
   Service,
   asApp,
   takeoverStateOf,
@@ -45,6 +56,7 @@ import {
   type AutonomyLevel,
   type Context,
   type TakeoverStateSource,
+  type ToolEffect,
 } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { randomUUID } from 'node:crypto';
@@ -82,10 +94,29 @@ export const agentLoopSchema = z.strictObject({
   tokenBudget: z.number().int().min(50).max(200000).default(4000),
   /** 递给模型的上下文字数上限（5.2-06：有界摘要，不含整页 HTML）。 */
   contextCharsCap: z.number().int().min(100).max(8000).default(1200),
+  /**
+   * 恢复前那道「重读页面」走的手（5.5-03）。
+   *
+   * 它是**接线**而不是业务映射：循环不认识浏览器，也不猜「该读哪一页」，只按装配给出的这只手现问一次，
+   * 并且硬要求它的副作用级是 `read`（见 `rereadPage`）——写在这里的默认值是装配面板上那一行
+   * （`cordis.yml` 的 `agent-loop` 配置）可以改的，改了名字循环照问新那只。
+   */
+  rereadToolId: z.string().min(1).default('browser.page.snapshot'),
+  /** 一条 run 里最多重规划几次（5.5-04 的自转保险丝；0 就是「页面不符即停，不重规划」）。 */
+  replanLimit: z.number().int().min(0).max(5).default(2),
 });
 
 /** 校验后的循环配置。 */
 export type AgentLoopConfig = z.output<typeof agentLoopSchema>;
+
+/**
+ * 一次「现问页面」的读数（5.5-03 / 04 共用的那份新快照）。
+ *
+ * `ref` 是给步行与证据用的指针，`excerpt` 是**已经去标记并截过**的一句摘要（整页正文永不进 prompt，
+ * 5.2-06 的口径对新读数同样成立），`note` 是说给下一步观察用的那句话——谁生的读数谁写措辞，
+ * 于是循环里只有「消费一次」这一处逻辑（§2.2）。
+ */
+type FreshPageRead = { ref: string; excerpt: string; at: number; note: string };
 
 /**
  * 一次 run 的作用域：进度只活在这一份对象里，按 runId 存放。
@@ -104,6 +135,15 @@ type RunScope = {
   tokenBudget: number;
   planConfirmed: boolean;
   controller: AbortController;
+  /**
+   * 刚重读到的页面读数，只在**紧接的下一步**消费一次（5.5-03）。
+   *
+   * 它是「这份新快照要落在哪一行的引用里」的指针，不是第二份页面事实：页面长什么样永远以现问为准，
+   * 这一位一旦被某一步用掉就清空，绝不跟着 run 走完全程（留着它就会把恢复时那次读数当成现状）。
+   */
+  freshRead: FreshPageRead | null;
+  /** 已经用掉的重规划次数（5.5-04 的自转保险丝，只活在内存：重建服务时这条 run 本来也没在跑）。 */
+  replanUsed: number;
 };
 
 /** `agent_run` 的一行原始读数。 */
@@ -413,6 +453,8 @@ export class AgentLoopService extends Service {
       tokenBudget: this.config.tokenBudget,
       planConfirmed: false,
       controller: new AbortController(),
+      freshRead: null,
+      replanUsed: 0,
     });
     return this.read(runId);
   }
@@ -485,6 +527,29 @@ export class AgentLoopService extends Service {
     const interrupted = view.steps.at(-1);
     if (interrupted && interrupted.status === 'refused' && interrupted.code === TAKEOVER_HELD) {
       scope.cursor = interrupted.planStepIndex;
+    }
+    // 交还页面之后的第一件事是**看一眼现在这页长成什么样**（spec 5.5-03），不是动手。
+    // 人在页面上做过什么，接管前那份快照里一个字都没有；要动手却读不到这份新读数就**拒绝恢复**、
+    // run 原样停在安全点（不先翻成 `running` 再失败——那样界面上会闪过「正在跑」）：
+    // 「按了继续却没重读」是这片最不能留的一种形态，它会让人以为自动化看过了页面。
+    // 扳机看**下一步的副作用级**（所以排在回拨之后，回拨之前还不知道下一步是谁）：
+    // 只读的手要的现状就是它自己现读的那一份，为它要求浏览器开着只会自造一种失效（文件头第 7 条）。
+    // 下一步指向一只不存在的手时也不重读——那种形态由判定口按 5.1-05 原话拒，这里不抢它的入口（§2.5）。
+    const nextEffect = this.effectOf(scope.plan[scope.cursor]?.toolId);
+    if (nextEffect !== null && nextEffect !== 'read') {
+      const reread = await this.rereadPage();
+      if (!reread.ok) {
+        throw new AppError(
+          'AGENT_LOOP_REREAD_UNAVAILABLE',
+          `run ${runId} 没有恢复：交还页面之后没能重读一遍现在的页面（${reread.reason}）。` +
+            '这一步不读页面就照动手，等于拿接管前那份快照当现状',
+          'agent.loop',
+          { runId, toolId: this.config.rereadToolId, reason: reread.reason },
+        );
+      }
+      // 这份新读数交给**紧接的那一步**落进引用与观察（`execute` 里消费一次）：恢复口自己不写步行，
+      // 但「重读发生在恢复之后、动手之前」这件事要在下一步的行里留得下凭据，否则 5.5-03 只能靠日志证明。
+      scope.freshRead = reread.read;
     }
     this.updateRun(runId, {
       status: 'running',
@@ -659,14 +724,33 @@ export class AgentLoopService extends Service {
       const durationMs = Date.now() - at;
       const outcome = reply.ok ? 'ok' : 'failed';
       const reading = reply.ok ? reply.result.summary : `${reply.code}：${reply.message}`;
-      const evidenceRefs = reply.ok ? [...reply.result.evidenceRefs] : [];
+      // 恢复或重规划时那份**新**页面读数只在这一行落一次账：引用进 `evidence_refs`、原话进观察，
+      // 用完就地清空（下一步要现状就再问一次，而不是把这一次读数当现状带着跑完整条 run，5.5-03）。
+      const fresh = scope.freshRead;
+      scope.freshRead = null;
+      const evidenceRefs = reply.ok
+        ? [...(fresh ? [fresh.ref] : []), ...reply.result.evidenceRefs]
+        : [...(fresh ? [fresh.ref] : [])];
       const context = this.buildContext(scope);
       const summary = await this.model.summarizeObservation({ step, reading: clipReading(reading), outcome, context });
       scope.tokensUsed += summary.usage.inputTokens + summary.usage.outputTokens;
       // 入参经人补过就要在步行里留一句：计划里那份是模型的草案，实际动用的是补过之后的值，
       // 两者不同却只记一个数，5.2-09 的「对话里如实指向证据」就成了半句话。
-      const observation = inputResolution.note === null ? summary.text : `${summary.text}｜${inputResolution.note}`;
+      const notes = [inputResolution.note, fresh?.note].filter((note): note is string => Boolean(note));
+      const observation = notes.length > 0 ? `${summary.text}｜${notes.join('｜')}` : summary.text;
       this.writeStep(scope, step, outcome, observation, evidenceRefs, durationMs, reply.ok ? null : reply.code);
+      if (!reply.ok && PAGE_DRIFT_CODES.includes(reply.reasonCode ?? '')) {
+        // 「这一步落空是因为页面不是计划里那个样子」——这一格既不再按旧入参点一次（那叫硬点），
+        // 也不退回按索引找元素（那叫猜），而是重读页面 + 让模型带着新读数续推（`replanStep`，5.5-04）。
+        // 上面那一行 `failed` 步行是**这一次尝试的账**：重规划成功时同下标覆盖（DDL 主键就是覆盖口径），
+        // 顶替它的那只手会把落空原因原样带在观察里；重规划失败时这一行就停在 `failed`，run 如实报失败。
+        const replanned = await this.replanStep(scope, step, `${String(reply.reasonCode)}：${reply.message}`);
+        if (!replanned.ok) {
+          this.finish(scope, 'failed', replanned.stopReason);
+          return;
+        }
+        continue;
+      }
       scope.cursor += 1;
       // 观察落库后立刻**写回游标与账**再推：失败那一步的 `code` 与观察要出现在同一张卡片上，
       // 否则 5.2-09 的「对话里如实指向证据」就变成界面自己编的安慰话。
@@ -809,6 +893,135 @@ export class AgentLoopService extends Service {
   }
 
   /**
+   * 现问注册表：这一只手声明的副作用级是什么（文件头第 7 条那道扳机）。
+   * @param toolId 要问的工具 id；计划已经跑到头时传进来的是 undefined
+   * @returns 声明的副作用级；没有下一步、或那只手根本不在对 agent 开放的工具面上时为 `null`——
+   *   调用方据此**不猜名**（与 5.1-05 同一口径：指向不存在的手由判定口按原话拒，这里不抢它的入口）
+   */
+  private effectOf(toolId: string | undefined): ToolEffect | null {
+    if (toolId === undefined) return null;
+    return this.registry.list().find((entry) => entry.id === toolId)?.effect ?? null;
+  }
+
+  /**
+   * 现问一次「现在这页长成什么样」（spec 5.5-03 / 04 共用的那道重读）。
+   *
+   * 三条口径写死在这里，因为它们正是这片要防的三件事：
+   * ① 只许用**只读**的手（`effect === 'read'`）——重读是一道保险，装配把它配成动手的那只就得响亮失败，
+   *    而不是让循环借着「重读」的名义在页面上按一下；
+   * ② 读不到就返回原因而不是抛——调用方一处是「拒绝恢复」、一处是「停在安全点报原因」，
+   *    两种处置说的话不同（`resume` 与 `replanStep`），但读页面这个动作只此一份实现（§2.2）；
+   * ③ 回来的正文一律先去标记、截断之后才进上下文（`clipReading`），整页 HTML 不进 prompt（5.2-06）。
+   * @returns 成功带 `{ref, excerpt, at, note}`（`ref` 每次都是新的时间戳，所以接管前后的两份快照
+   *   在步行里必然不同名——5.5-03 要的就是这个可对比性）；失败带一句能对账的原因
+   */
+  private async rereadPage(): Promise<{ ok: true; read: FreshPageRead } | { ok: false; reason: string }> {
+    const toolId = this.config.rereadToolId;
+    const descriptor = this.registry.list().find((entry) => entry.id === toolId);
+    if (!descriptor) {
+      return {
+        ok: false,
+        reason: `重读口 ${toolId} 不在对 agent 开放的工具面上（能力包未挂载，或它没把这只手登记进来）`,
+      };
+    }
+    if (descriptor.effect !== 'read') {
+      return {
+        ok: false,
+        reason: `重读口 ${toolId} 声明的副作用级是 ${descriptor.effect}，重读只许用只读的手（配错就停下，不借道动手）`,
+      };
+    }
+    const reply = await this.registry.call(toolId, {});
+    if (!reply.ok) return { ok: false, reason: `${reply.code}：${reply.message}` };
+    const at = Date.now();
+    const ref = `snapshot:${toolId}@${String(at)}`;
+    return {
+      ok: true,
+      read: { ref, excerpt: clipReading(reply.result.summary), at, note: `动手前已重读页面（${ref}）` },
+    };
+  }
+
+  /**
+   * 页面与声明不符时把这一步重新规划（spec 5.5-04 的唯一实现处）。
+   *
+   * 四步都在挡同一件事——「拿着旧页面认知继续动手」：
+   * ① 先重读（复用 `rereadPage`，同 5.5-03 那一道），读不到就停在安全点，不带着旧快照续推；
+   * ② 续推走 `draftPlan` 这一条**已有**的口（机检 ① 钉死模型只有两条口，多一条「请求重规划」
+   *    就是给它开一条表态通道），递进去的上下文带着新读数与那一步的落空原话；
+   * ③ `knownToolIds` 里**摘掉刚落空的那一只手**：它在页面上已经找不到目标了，续推若还选它，要么等于
+   *    原地再点一次（硬点），要么就是没接住新读数。换一只手做同一件事才配叫「重规划」；
+   * ④ 顶替只发生在**同一格**（游标不动，计划从这一格起被续推序列替换）。同下标覆盖那一行是 DDL 的既有
+   *    口径，落空原因由顶替者的观察原样带出，不另存第二份计划（§2.5）。
+   * @param scope 本次 run 的作用域
+   * @param step 刚落空的那一步（就是 `scope.plan[scope.cursor]`）
+   * @param failure 工具交回的落空原话（进上下文，也给顶替者的观察用）
+   * @returns `ok: true` 表示计划已换、下一轮照常先过判定口；否则带一个终态码（`REPLAN_*` / `REREAD_UNAVAILABLE`）
+   */
+  private async replanStep(
+    scope: RunScope,
+    step: AgentPlanStepView,
+    failure: string,
+  ): Promise<{ ok: true } | { ok: false; stopReason: string }> {
+    if (scope.replanUsed >= this.config.replanLimit) {
+      this.ctx.logger.warn(
+        `run ${scope.runId} 第 ${String(step.planStepIndex + 1)} 步落空（${failure}），但重规划额度已用完（上限 ${String(this.config.replanLimit)}）：停在安全点，不重试到底`,
+      );
+      return { ok: false, stopReason: 'REPLAN_EXHAUSTED' };
+    }
+    const reread = await this.rereadPage();
+    if (!reread.ok) {
+      this.ctx.logger.warn(`run ${scope.runId} 重规划前没能重读页面（${reread.reason}）：停在安全点`);
+      return { ok: false, stopReason: 'REREAD_UNAVAILABLE' };
+    }
+    const base = this.buildContext(scope);
+    const draft = await this.model.draftPlan({
+      goal: this.read(scope.runId).goal,
+      tier: this.session.current().session.autonomy,
+      knownToolIds: this.registry
+        .list()
+        .map((descriptor) => descriptor.id)
+        .filter((id) => id !== step.toolId),
+      context: {
+        refs: [...base.refs, reread.read.ref],
+        text: [
+          base.text,
+          `页面现状（刚重读 ${reread.read.ref}）：${reread.read.excerpt}`,
+          `落空的是第 ${String(step.planStepIndex + 1)} 步 ${step.toolId}：${clipReading(failure)}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+    });
+    scope.tokensUsed += draft.usage.inputTokens + draft.usage.outputTokens;
+    if (draft.steps.length === 0 || draft.steps[0]?.toolId === step.toolId) {
+      // 续推给不出别的手就是「无法定位目标」：明说并停住，而不是把同一只手按第二遍。
+      this.ctx.logger.warn(
+        `run ${scope.runId} 重新规划没能给出可换的手（第 ${String(step.planStepIndex + 1)} 步 ${step.toolId} 落空后续推仍指向同一只或没有新路）：停在安全点`,
+      );
+      return { ok: false, stopReason: 'REPLAN_UNCHANGED' };
+    }
+    const tail = draft.steps.map((draftStep, offset) =>
+      this.enrich(step.planStepIndex + offset, draftStep.toolId, draftStep.input, draftStep.intent),
+    );
+    scope.plan = [...scope.plan.slice(0, step.planStepIndex), ...tail];
+    scope.replanUsed += 1;
+    scope.freshRead = {
+      ...reread.read,
+      note: `这一步由重规划顶替（前一次落空：${clipReading(failure)}），顶替前已重读页面`,
+    };
+    this.updateRun(scope.runId, {
+      status: 'running',
+      planStepIndex: scope.cursor,
+      tokensUsed: scope.tokensUsed,
+      plan: scope.plan,
+    });
+    this.publish(scope.runId);
+    this.ctx.logger.warn(
+      `run ${scope.runId} 第 ${String(step.planStepIndex + 1)} 步已重新规划：${step.toolId} → ${String(tail.length)} 步新序列（${tail.map((entry) => entry.toolId).join(', ')}）`,
+    );
+    return { ok: true };
+  }
+
+  /**
    * 拼递给模型的上下文：只有已落步的**引用 + 摘要**（5.2-06）。
    * @param scope 本次 run 的作用域
    * @returns 引用清单与有界文本；整页 HTML 与工具正文都不在这里出现
@@ -903,6 +1116,7 @@ export class AgentLoopService extends Service {
          evidence_refs_json, duration_ms, code)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (run_id, plan_step_index) DO UPDATE SET
+           tool_id = excluded.tool_id,
            status = excluded.status,
            snapshot_refs_json = excluded.snapshot_refs_json,
            observation = excluded.observation,
@@ -966,28 +1180,40 @@ export class AgentLoopService extends Service {
 
   /**
    * 更新 run 行的可变列。
+   *
+   * 两个可选列按「给了才写」拼进 SET，因为 `undefined` 在这里是「这一列不动」而不是「抹成空」：
+   * `stopReason` 不带就不擦已有的拒因（执行途中不该把上一次为什么停的话抹掉），
+   * `plan` 不带就不重写 `plan_json`（只有 5.5-04 的重规划会换计划，其余调用点必须留着起草时那份）。
    * @param runId 运行 id
    * @param patch 要写的列（至少含 status）
    */
   private updateRun(
     runId: string,
-    patch: { status: AgentRunStatus; planStepIndex: number; tokensUsed: number; stopReason?: string | null },
+    patch: {
+      status: AgentRunStatus;
+      planStepIndex: number;
+      tokensUsed: number;
+      stopReason?: string | null;
+      plan?: AgentPlanStepView[];
+    },
   ): void {
     if (!AGENT_RUN_STATUSES.includes(patch.status))
       throw new AppError('AGENT_LOOP_STATUS_INVALID', `未知 run 状态 ${patch.status}`, 'agent.loop', {
         status: patch.status,
       });
-    if (patch.stopReason === undefined) {
-      this.store.db
-        .prepare('UPDATE agent_run SET status = ?, plan_step_index = ?, tokens_used = ?, updated_at = ? WHERE id = ?')
-        .run(patch.status, patch.planStepIndex, patch.tokensUsed, Date.now(), runId);
-      return;
+    const assignments = ['status = ?', 'plan_step_index = ?', 'tokens_used = ?'];
+    const values: (string | number | null)[] = [patch.status, patch.planStepIndex, patch.tokensUsed];
+    if (patch.plan !== undefined) {
+      assignments.push('plan_json = ?');
+      values.push(JSON.stringify(patch.plan));
     }
-    this.store.db
-      .prepare(
-        'UPDATE agent_run SET status = ?, plan_step_index = ?, tokens_used = ?, stop_reason = ?, updated_at = ? WHERE id = ?',
-      )
-      .run(patch.status, patch.planStepIndex, patch.tokensUsed, patch.stopReason, Date.now(), runId);
+    if (patch.stopReason !== undefined) {
+      assignments.push('stop_reason = ?');
+      values.push(patch.stopReason);
+    }
+    assignments.push('updated_at = ?');
+    values.push(Date.now(), runId);
+    this.store.db.prepare(`UPDATE agent_run SET ${assignments.join(', ')} WHERE id = ?`).run(...values);
   }
 
   /**
@@ -1012,6 +1238,11 @@ export class AgentLoopService extends Service {
       tokenBudget: view.tokenBudget,
       planConfirmed: view.status !== 'proposed',
       controller: new AbortController(),
+      // 重建出来的作用域**不带**任何「上一次的重读」：那份读数属于内存里的那一次，
+      // 而内存已经跟着服务一起没了（§9 的 2.5 实测）。宁可下一步重新问一次页面，
+      // 也不把一份不知道还算不算数的旧快照当成现状（5.5-03 的反面形态）。
+      freshRead: null,
+      replanUsed: 0,
     };
     this.scopes.set(runId, scope);
     return scope;

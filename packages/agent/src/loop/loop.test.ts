@@ -14,6 +14,7 @@
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
+  AppError,
   asApp,
   Context,
   fiberState,
@@ -48,8 +49,20 @@ afterEach(async () => {
   while (dirs.length) rmSync(dirs.shift() ?? '', { recursive: true, force: true });
 });
 
-/** 循环配置的起手值（上限类用例只改自己关心的那一位，其余照默认走）。 */
-const BASE_CONFIG: AgentLoopConfig = { stepLimit: 12, tokenBudget: 4000, contextCharsCap: 1200 };
+/**
+ * 循环配置的起手值（上限类用例只改自己关心的那一位，其余照默认走）。
+ *
+ * `rereadToolId` 指向台架那只只读假手而不是装配默认的 `browser.page.snapshot`：循环不认识浏览器，
+ * 它只按配置里这个名字现问一次（spec 5.5-03），台架换个名字就是换一只手，实现一行都不改——
+ * 这一位是**接线**的证据，不是业务映射。
+ */
+const BASE_CONFIG: AgentLoopConfig = {
+  stepLimit: 12,
+  tokenBudget: 4000,
+  contextCharsCap: 1200,
+  rereadToolId: 'demo.reread',
+  replanLimit: 2,
+};
 
 /**
  * 台架的暂停超时（毫秒）。
@@ -77,7 +90,7 @@ type StepRecord = {
  * @param tier 起手档位；默认 `auto`（多数用例要的是「允许动手」），判定拒绝的用例显式传 `suggest`
  * @param pauseTimeoutMs 暂停单的超时（毫秒）；超时类用例传一个短值
  * @param withTakeover 是否供上接管态替身（省略为 true；false 就是「摘掉 browser-takeover 那一行装配」）
- * @returns 上下文、五个服务句柄、副作用清单、临时库目录与循环的 fiber（重建服务时用）
+ * @returns 上下文、六个服务句柄、副作用清单与重读清单、临时库目录与循环的 fiber（重建服务时用）
  */
 async function bootLoop(
   overrides: Partial<AgentLoopConfig> = {},
@@ -119,6 +132,13 @@ async function bootLoop(
   const app = asApp(ctx);
   /** 副作用清单：每进一次工具实现追加一条；判「被拒 = 什么都没发生」就看它空不空。 */
   const calls: string[] = [];
+  /**
+   * 重读口被问的清单（5.5-03 / 04 的判据对象）。
+   *
+   * 与 `calls` 分开记是刻意的：那一条要能读出「接管期间一步都没发」「这只手只被按了一次」，
+   * 把恢复时那道只读重读混进去就成了自证障碍——重读不是动作，它是保险的现场。
+   */
+  const rereads: string[] = [];
   app['agent.tools'].register(makeTickTool(calls));
   app['chat.session'].setAutonomy(tier);
   return {
@@ -131,6 +151,7 @@ async function bootLoop(
     pause: app['agent.pause'],
     loop: app['agent.loop'],
     calls,
+    rereads,
     loopFiber,
     config,
   };
@@ -213,6 +234,84 @@ function makeTickTool(calls: string[]): AgentTool<{ n: number }> {
         toolResult(
           { n: params.n },
           { summary: `已执行第 ${String(params.n)} 次`, evidenceRefs: [`tick:${String(params.n)}`] },
+        ),
+      );
+    },
+  };
+}
+
+/**
+ * 一只「只读当前页面」的假手（spec 5.5-03 / 04 的重读口，配置里那个名字的台架对应物）。
+ * @param rereads 每被问一次追加一条它交回的摘要，用例据此断言「恢复后先读了一遍、而且只读了一遍」
+ * @returns 合规声明：`read` 级、无入参、不要求批准（副作用级不是 `read` 时循环会拒，见那两条用例）
+ */
+function makeRereadTool(rereads: string[]): AgentTool<Record<string, never>> {
+  return {
+    id: 'demo.reread',
+    titleKey: 'agent.tool.labels.demoReread',
+    description: '读一遍当前页面的摘要',
+    input: z.strictObject({}),
+    effect: 'read',
+    requiresConfirmation: false,
+    run: () => {
+      // 读数里带标记与整页正文：新快照进上下文之前也要先去标记截断（5.2-06 的口径对它同样成立）。
+      const summary = `<html><body>${'交还之后页面已换成工单表单 '.repeat(6)}</body></html>`;
+      rereads.push(summary);
+      return Promise.resolve(toolResult({ summary }, { summary, evidenceRefs: [] }));
+    },
+  };
+}
+
+/**
+ * 一只「按声明去定位，但页面已经不是计划里那个样子」的假手（spec 5.5-04 的触发器）。
+ *
+ * 它抛的是 `browser.act` 那一族的结构化错误（`PAGE_DRIFT_CODES` 里的 `LOCATE_FAILED`），
+ * 循环分得清「页面变了」与「这只手本来就错了」靠的是注册表透出的那个原码，不是要给人看的中文。
+ * @param calls 副作用清单——「同一只手只被按了一次、没有硬点」这条判据就数它
+ * @param code 落空时抛的那个结构化码（默认 `LOCATE_FAILED`，另一条用例用 `WAIT_TIMEOUT` 验同一族）
+ * @returns 合规声明：`local-write` 级（判定口在 `auto` 档放行，把重规划这一段单独暴露出来）、每次必抛
+ */
+function makeDriftTool(
+  calls: string[],
+  code: 'LOCATE_FAILED' | 'WAIT_TIMEOUT' = 'LOCATE_FAILED',
+): AgentTool<{ n: number }> {
+  return {
+    id: 'demo.drift',
+    titleKey: 'agent.tool.labels.demoDrift',
+    description: '按声明定位元素，页面改版后必然落空',
+    input: z.strictObject({ n: z.number().int().min(0) }),
+    effect: 'local-write',
+    requiresConfirmation: false,
+    run: (params) => {
+      calls.push(`drift:${String(params.n)}`);
+      return Promise.reject(
+        new AppError(code, '定位未过线，动作没有执行：最优候选得分 0.31 低于阈值 0.55', 'browser.act', {
+          snapshotRef: 'fixture.local@1',
+        }),
+      );
+    },
+  };
+}
+
+/**
+ * 一只「要动手」的假手（spec 5.5-03 的扳机对照物）：下一步是它就得先重读，下一步是只读的 `demo.tick` 就不必。
+ * @param calls 副作用清单，每进一次 `run` 追加一条
+ * @returns 合规声明：`local-write` 级（`auto` 档放行、不用批准）、`strictObject` 入参、成功返回摘要
+ */
+function makeWriteTool(calls: string[]): AgentTool<{ n: number }> {
+  return {
+    id: 'demo.write',
+    titleKey: 'agent.tool.labels.demoWrite',
+    description: '在页面上落一次副作用',
+    input: z.strictObject({ n: z.number().int().min(0) }),
+    effect: 'local-write',
+    requiresConfirmation: false,
+    run: (params) => {
+      calls.push(`write:${String(params.n)}`);
+      return Promise.resolve(
+        toolResult(
+          { n: params.n },
+          { summary: `已动手第 ${String(params.n)} 次`, evidenceRefs: [`write:${String(params.n)}`] },
         ),
       );
     },
@@ -412,10 +511,21 @@ describe('每一步都过判定口（5.2-02）', () => {
     expect(decisions.map((request) => request.toolId)).toEqual(['demo.tick', 'demo.tick', 'demo.tick']);
     expect(finished.status).toBe('completed');
     expect(calls).toEqual(['tick:1', 'tick:2', 'tick:3']);
-    // 代码走查的机检半边（5.2-02 是 C 类）：调工具的口只有一处，且它排在判定之后——没有第二条旁路。
+    // 代码走查的机检半边（5.2-02 是 C 类）：**动手**的口只有一处，且它排在判定之后——没有第二条旁路。
+    // 5.5-c 之后源码里多了第二处 `registry.call`，那是「重读页面」那道保险（spec 5.5-03），
+    // 它不在计划步的执行路径上，也不许动页面。所以这条走查按两类口径分开钉，而不是把「一处」放宽成「无所谓几处」：
+    // 步这一侧仍然一处且排在判定之后，重读那一侧必须被 `effect === 'read'` 关在自己的函数里。
     const source = readFileSync(fileURLToPath(new URL('./loop.ts', import.meta.url)), 'utf8');
-    expect(source.match(/this\.registry\.call\(/g)).toHaveLength(1);
-    expect(source.indexOf('this.policy.decide(')).toBeLessThan(source.indexOf('this.registry.call('));
+    const rereadStart = source.indexOf('private async rereadPage');
+    const rereadEnd = source.indexOf('private async replanStep');
+    expect(rereadStart).toBeGreaterThan(-1);
+    expect(rereadEnd).toBeGreaterThan(rereadStart);
+    const rereadBody = source.slice(rereadStart, rereadEnd);
+    const stepBody = source.replace(rereadBody, '');
+    expect(rereadBody.match(/this\.registry\.call\(/g)).toHaveLength(1);
+    expect(rereadBody).toContain("descriptor.effect !== 'read'");
+    expect(stepBody.match(/this\.registry\.call\(/g)).toHaveLength(1);
+    expect(stepBody.indexOf('this.policy.decide(')).toBeLessThan(stepBody.indexOf('this.registry.call('));
   });
 });
 
@@ -1138,6 +1248,8 @@ describe('人工接管把循环停在安全点（spec 5.5-01 的恢复半边 / 5
 
   it('交还页面后按「继续」：从同一个安全点把剩下的步跑完，run 落 completed', async () => {
     const rig = await bootLoop();
+    // 这条判的是恢复的**位置**（游标回拨与剩下的步都跑），下一步是只读的手，所以 5.5-c 那道重读保险
+    // 在这里不扳——扳机与它自己的用例都在下面「下一步要动手时先把页面重读一遍」那一节（5.5-03）。
     rig.takeover.setHold('manual');
     const proposed = await rig.loop.propose(goalNaming(2));
     const parked = await rig.loop.confirm(proposed.runId);
@@ -1193,6 +1305,8 @@ describe('人工接管把循环停在安全点（spec 5.5-01 的恢复半边 / 5
   it('接管叫醒挂在确认单上的那一步：那一格记 TAKEOVER_HELD 而不是 PAUSE_CANCELLED，恢复后重走', async () => {
     const rig = await bootLoop();
     rig.tools.register(makeApprovalTool(rig.calls));
+    // 恢复要重读（见上一条用例的注释）：这一条里那只只读手同样是「继续」按下去之后第一件事。
+    rig.tools.register(makeRereadTool(rig.rereads));
     let handedOver = false;
     const cards = watchPauses(rig.ctx, rig.pause, () => {
       // 确认单还挂着的时候，人在页面上按下了「我来接手」。
@@ -1227,5 +1341,202 @@ describe('人工接管把循环停在安全点（spec 5.5-01 的恢复半边 / 5
     // 否则「摘掉 browser-takeover」只会让循环在接管期间照动手，一句错误都不出。
     expect(fiberState(loopFiber.state)).toBe('pending');
     expect(asApp(ctx).get('agent.loop')).toBeUndefined();
+  });
+});
+
+/** 点名「会落空的那只手」后面紧跟一只做得成同一件事的手（5.5-04 的续推素材来自这里）。 */
+const DRIFT_THEN_TICK_GOAL = 'demo.drift {"n":1} 然后 demo.tick {"n":2}';
+
+/** 只点名那只落空的手：续推换不出别的手，就是界面该说「无法定位目标」的那种情形。 */
+const DRIFT_ONLY_GOAL = 'demo.drift {"n":1}';
+
+/** 下一步是「要动手的手」：5.5-03 那道保险在这里扳（恢复后先重读这一页，再动这一格）。 */
+const WRITE_GOAL = 'demo.write {"n":1}';
+
+/** 动手那一格之后紧跟一格只读的：验新读数只喂紧接那一步，第二格不拿恢复时那份快照当现状。 */
+const WRITE_THEN_READ_GOAL = 'demo.write {"n":1} 然后 demo.tick {"n":2}';
+
+describe('下一步要动手时先把页面重读一遍（spec 5.5-03）', () => {
+  it('交还页面后按继续：重读排在任何动作之前，那一步的证据与观察里带着这份新快照', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    // 停在安全点的那段时间里一次都没读：那一步没动，页面上的事此刻归人（5.5-02 的同一口径）。
+    expect(parked.status).toBe('paused');
+    expect(rig.rereads).toEqual([]);
+    expect(rig.calls).toEqual([]);
+
+    rig.takeover.setHold(null);
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(rig.rereads).toHaveLength(1);
+    // 顺序判据的落点：动作清单里那一条是**重读之后**才出现的，而重读只有那一次。
+    expect(rig.calls).toEqual(['write:1']);
+    const freshRef = resumed.steps[0]?.evidenceRefs[0];
+    expect(freshRef).toMatch(/^snapshot:demo\.reread@\d+$/);
+    // 「这一步是看着现在的页面做的」要能在步行里读出来，而不是只能 grep 日志（5.5-03 的判据形态）。
+    expect(resumed.steps[0]?.observation).toContain('动手前已重读页面');
+    expect(resumed.steps[0]?.observation).toContain(String(freshRef));
+  });
+
+  it('新读数只喂紧接的那一步：第二步不再拿恢复时那份快照当现状', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_THEN_READ_GOAL)).runId);
+    expect(parked.status).toBe('paused');
+
+    rig.takeover.setHold(null);
+    const resumed = await rig.loop.resume(parked.runId);
+    // 整条 run 只读一次（恢复时那一次），所以只有第 1 步带 `snapshot:` 引用——第二问要现状得自己再问。
+    expect(rig.rereads).toHaveLength(1);
+    expect(resumed.steps.map((step) => step.evidenceRefs.some((ref) => ref.startsWith('snapshot:')))).toEqual([
+      true,
+      false,
+    ]);
+    expect(resumed.steps[1]?.observation).not.toContain('重读');
+  });
+
+  it('下一步本身是只读的手：不重读也照常恢复，不为它去要求浏览器开着', async () => {
+    // 台架里放着那只重读手，为的是断言它**没被问**：只读的手要的现状就是它自己现读的那一份，
+    // 没有旧快照可复用；而 5.5-b 已经在活页面上验过这条恢复路径（对话里跑一次 KB 检索），
+    // 把保险扳成「任何恢复都得先读页面」就会让那条路径拒成「重读页面失败」——自造的失效，不是 spec 要的。
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(goalNaming(1))).runId);
+    expect(parked.status).toBe('paused');
+    rig.takeover.setHold(null);
+
+    const resumed = await rig.loop.resume(parked.runId);
+    expect(rig.rereads).toEqual([]);
+    expect(rig.calls).toEqual(['tick:1']);
+    expect(resumed).toMatchObject({ status: 'completed', stopReason: 'COMPLETED' });
+    expect(resumed.steps[0]?.evidenceRefs.some((ref) => ref.startsWith('snapshot:'))).toBe(false);
+  });
+
+  it('重读口不在工具面上（能力包没挂载）：拒绝恢复，run 原样停在安全点且一步都没动', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeWriteTool(rig.calls));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const thrown = await rig.loop
+      .resume(parked.runId)
+      .then(() => null)
+      .catch((error: { code?: string }) => error.code);
+    // 「按了继续却没重读」是这片最不能留的静默失效：它让人以为自动化看过了页面。
+    expect(thrown).toBe('AGENT_LOOP_REREAD_UNAVAILABLE');
+    expect(rig.loop.read(parked.runId)).toMatchObject({
+      status: 'paused',
+      stopReason: 'TAKEOVER_HELD',
+      planStepIndex: 0,
+    });
+    expect(rig.calls).toEqual([]);
+    expect(rig.rereads).toEqual([]);
+  });
+
+  it('重读口被配成一只动手的手：照样拒绝，不借着「重读」的名义在页面上按一下', async () => {
+    // 装配把 `rereadToolId` 写成一只会动的名字（配错就是一次配错）——循环认的是声明里的副作用级，不是名字。
+    const rig = await bootLoop({ rereadToolId: 'demo.drift' });
+    rig.tools.register(makeDriftTool(rig.calls));
+    rig.tools.register(makeWriteTool(rig.calls));
+    rig.takeover.setHold('manual');
+    const parked = await rig.loop.confirm((await rig.loop.propose(WRITE_GOAL)).runId);
+    rig.takeover.setHold(null);
+
+    const error = await rig.loop
+      .resume(parked.runId)
+      .then(() => null)
+      .catch((thrown: AppError) => thrown);
+    expect(error?.code).toBe('AGENT_LOOP_REREAD_UNAVAILABLE');
+    expect(error?.message).toContain('重读只许用只读的手');
+    // 判据的实质那一位：配错之后那只手一次都没被调过。
+    expect(rig.calls).toEqual([]);
+  });
+});
+
+describe('页面与声明不符时重新规划这一步（spec 5.5-04）', () => {
+  it('落空之后先重读再换手：同一格被顶替，那只落空的手一次都没被按第二遍', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeDriftTool(rig.calls));
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_THEN_TICK_GOAL)).runId);
+
+    // 「不硬点」的字面对账：这只手总共就被按了一次，第二次是**另一只手**。
+    expect(rig.calls).toEqual(['drift:1', 'tick:2']);
+    expect(rig.rereads).toHaveLength(1);
+    expect(finished).toMatchObject({ status: 'completed', stopReason: 'COMPLETED', planStepIndex: 1 });
+    // 计划被换掉要留在 run 行里，不能只活在内存（改配置重建后界面还得读出同一份）。
+    expect(finished.plan.map((step) => step.toolId)).toEqual(['demo.tick']);
+    const replaced = finished.steps[0];
+    // 同格覆盖记的是**实际动过**的那只手：留着 `demo.drift` 就成了「这只手成功了一次」的谎。
+    expect(replaced).toMatchObject({ toolId: 'demo.tick', status: 'ok' });
+    expect(replaced?.observation).toContain('这一步由重规划顶替');
+    expect(replaced?.observation).toContain('LOCATE_FAILED');
+    expect(replaced?.evidenceRefs[0]).toMatch(/^snapshot:demo\.reread@\d+$/);
+  });
+
+  it('等不到可点与定位未过线同一族：`WAIT_TIMEOUT` 落空同样先重读再续推', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeDriftTool(rig.calls, 'WAIT_TIMEOUT'));
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_THEN_TICK_GOAL)).runId);
+    expect(rig.calls).toEqual(['drift:1', 'tick:2']);
+    expect(finished.steps[0]).toMatchObject({ toolId: 'demo.tick', status: 'ok' });
+    expect(finished.steps[0]?.observation).toContain('WAIT_TIMEOUT');
+  });
+
+  it('续推给不出别的手：明说并停在安全点，而不是把同一只手按第二遍', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeDriftTool(rig.calls));
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_ONLY_GOAL)).runId);
+    // 「无法定位目标」这一句从这里来：额度、续推、判定都不许把它掩盖成「已经重试过了并成功」。
+    expect(rig.calls).toEqual(['drift:1']);
+    expect(rig.rereads).toHaveLength(1);
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'REPLAN_UNCHANGED' });
+    expect(finished.steps[0]).toMatchObject({ toolId: 'demo.drift', status: 'failed', code: 'TOOL_FAILED' });
+  });
+
+  it('重规划额度用完（这里给 0）：落空即停在安全点，不自转到底', async () => {
+    const rig = await bootLoop({ replanLimit: 0 });
+    rig.tools.register(makeRereadTool(rig.rereads));
+    rig.tools.register(makeDriftTool(rig.calls));
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_THEN_TICK_GOAL)).runId);
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'REPLAN_EXHAUSTED' });
+    expect(rig.calls).toEqual(['drift:1']);
+    // 额度先判，所以连那一次重读都没发生：不为一件根本不做的事去读页面。
+    expect(rig.rereads).toEqual([]);
+  });
+
+  it('重规划前没能重读页面：停住并把原因说清，不带着旧快照续推', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeDriftTool(rig.calls));
+    // 台架里不放那只只读手：重读口缺席时续推这一步就不该发生。
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_THEN_TICK_GOAL)).runId);
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'REREAD_UNAVAILABLE' });
+    expect(rig.calls).toEqual(['drift:1']);
+  });
+
+  it('落空的原因不是「页面变了」：不重读也不续推，后面的步照常按原计划走', async () => {
+    const rig = await bootLoop();
+    rig.tools.register(makeRereadTool(rig.rereads));
+    // `ACT_FAILED` 不在 `PAGE_DRIFT_CODES` 里（页面动作被站点拒绝是另一件事，不表示声明过期了）。
+    rig.tools.register({
+      ...makeDriftTool(rig.calls),
+      run: (params) => {
+        rig.calls.push(`drift:${String(params.n)}`);
+        return Promise.reject(new AppError('ACT_FAILED', '页面动作失败：站点拒收了这一次点击', 'browser.act', {}));
+      },
+    });
+    const finished = await rig.loop.confirm((await rig.loop.propose(DRIFT_THEN_TICK_GOAL)).runId);
+    expect(finished).toMatchObject({ status: 'failed', stopReason: 'STEP_UNSUCCESSFUL' });
+    expect(rig.rereads).toEqual([]);
+    expect(finished.plan.map((step) => step.toolId)).toEqual(['demo.drift', 'demo.tick']);
+    expect(rig.calls).toEqual(['drift:1', 'tick:2']);
   });
 });

@@ -730,7 +730,10 @@
           "PAUSE_TIMEOUT": "等人表态到点无人应答，未放行",
           "PAUSE_CANCELLED": "叫停或重建时收掉了在等的单，没人表过态",
           "TAKEOVER_HELD": "被人工接管按住，停在安全点",
-          "RESUMED_AFTER_TAKEOVER": "已交还页面，由人按下「继续」恢复"
+          "RESUMED_AFTER_TAKEOVER": "已交还页面，由人按下「继续」恢复",
+          "REPLAN_UNCHANGED": "页面已改版，重新规划也换不出可用的一步",
+          "REPLAN_EXHAUSTED": "重规划的次数用尽，停在安全点",
+          "REREAD_UNAVAILABLE": "重读页面失败，没敢按旧快照继续"
         },
         "resume": "继续这条任务",
         "actionResume": "继续被接管按住的任务",

@@ -12,8 +12,8 @@ import { useBridgeAction } from './useBridgeAction';
 
 /**
  * 挂一次 agent 循环的界面状态。
- * @returns `run`（当前这条 run 的读数，没起草过为 undefined）、`notice`、`propose` / `confirm` / `stop` / `dismiss`，
- *   以及 `stopAccepted`（点过叫停但 `paused` 还没落进来——界面此刻只能说「已受理」，不能说「已停止」）
+ * @returns `run`（当前这条 run 的读数，没起草过为 undefined）、`notice`、`propose` / `confirm` / `stop` /
+ *   `resume` / `dismiss` 五个动作，以及 `stopAccepted`（点过叫停但 `paused` 还没落进来——界面此刻只能说「已受理」，不能说「已停止」）
  */
 export function useAgentRun() {
   const { t } = useTranslation();

@@ -480,6 +480,13 @@ plugins:
       stepLimit: 12
       tokenBudget: 4000
       contextCharsCap: 1200
+      # 5.5-03 的重读口**接线**（不是业务映射）：循环不认识浏览器，只按这个名字现问注册表，
+      # 并且只认声明里 `effect === 'read'` 的那只手。写成一只动手的手会响亮失败
+      # （`AGENT_LOOP_REREAD_UNAVAILABLE`），循环不会借着「重读」的名义在页面上按一下。
+      rereadToolId: browser.page.snapshot
+      # 5.5-04 的自转保险丝：一条 run 里最多把几步换成另一只手，用完就停在安全点报
+      # `REPLAN_EXHAUSTED`（0 表示从不重规划：落空即停，把原因交回给人）。
+      replanLimit: 2
 
   # 对话 → 工作流沉淀（spec 5.4-01 / 02 / 09）：把一次跑通的对话**投影**成工作流计划的唯一口，
   # 自己不建表——计划落库经 `workflow.runner.savePlan`（名字校验与指纹重算都只在那一处，§2.5）。
