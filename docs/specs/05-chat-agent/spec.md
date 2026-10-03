@@ -1998,6 +1998,9 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 于是"想改窗口只改装配这一处"。这里刻意**不加** `dependsOn: jd-store`：那个包没挂载时规则得到「问不到」而按保守起见不递，
 不该把整个投递服务拖进 PENDING——递不了与不该递是两件事。本片还补了一条读装配文件本体的用例
 （口径同 5.3 的 `chat` 条目先例：剔掉注释行再判），因为这条判据虽是 `U`，但"规则只活在测试里、真 app 关着"是它最可能的失败方式。
+手改的那段 YAML 还单独核过一次解析结果：用 `packages/kernel` 已装的 `yaml` 包（内核读装配文件用的就是它）
+解析仓库根的 `cordis.yml`，`outbound-deliver` 那条读出 `{autonomy:'semi', approveTimeoutMs:120000, maxResumeBytes:5242880, timing:{enabled:true}}`、
+装配条目总数 46——这个一次性脚本放在 gitignore 的 `tmp/` 里，按 §7.5 不入仓库；没有为了跑它去重启用户正在开的 app（§9 的会话重建代价）。
 
 **真值表 21 条**（`deliver-timing.test.ts`，三个 describe 分别 13 / 3 / 5）。判定那 13 条分组：全绿一条；
 回复状态三条（未回复 / 问不到 / `requireReply` 关掉后照递）；工作日三条（周六 10:00 → 下一次是周一 09:00、
@@ -2036,7 +2039,7 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 ⑥ 前端未改动（本片零渲染层文件），Tailwind / lucide / i18n 三项无新增——被推迟那一路不新增界面文案，
 拒因原话走的是既有的结构化失败面（`workflow_runs.last_error` 与调度触发记录的 `reason`）；
 ⑦ 按 §1.4 分三个提交：择机规则（含 `core` 端口与 `jd.store` 取数）、重试按效果分档、真实装配打开规则，文档另计，中文 subject，
-提交后即推（本片推送时遇 GitHub `Connection reset by ... 443`，按 §1.6 如实报未推送并重试）；
+提交后即推（首次推送遇 GitHub `Connection reset by ... 443`，按 §1.6 如实报未推送并重试，重试后 `802a987..f092a60` 已上远端）；
 ⑧ 暂存区只有包源码 / 测试 / `cordis.yml` / 文档，无临时产物与图片。
 
 ## 5.8 指标看板
