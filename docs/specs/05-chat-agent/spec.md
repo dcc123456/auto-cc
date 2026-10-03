@@ -549,13 +549,13 @@
 
 | ID     | 验收标准                                                                                 | 方式 | 验证操作                                        | 状态 |
 | ------ | ---------------------------------------------------------------------------------------- | ---- | ----------------------------------------------- | ---- |
-| 5.3-01 | 三档语义落地：`建议模式` 只出计划不执行；`半自动` 逐个写/外发询问；`全自动` 白名单内自主 | U    | 真值表测试：档位 × 副作用 × requiresApproval    | [ ]  |
+| 5.3-01 | 三档语义落地：`建议模式` 只出计划不执行；`半自动` 逐个写/外发询问；`全自动` 白名单内自主 | U    | 真值表测试：档位 × 副作用 × requiresApproval    | [x]  |
 | 5.3-02 | 默认档位永远是最保守档（首次启动为`建议模式`；配置缺失亦回落到最保守）                   | U    | 删配置 → 断言档位为建议模式                     | [x]  |
-| 5.3-03 | 当前档位常驻界面可见，任一截图可读出档位与生效范围                                       | V    | 三档各截一张图                                  | [ ]  |
+| 5.3-03 | 当前档位常驻界面可见，任一截图可读出档位与生效范围                                       | V    | 三档各截一张图                                  | [x]  |
 | 5.3-04 | 档位提升必须由用户显式操作触发，agent 自身无法提升（无工具、无自动路径）                 | C+U  | 静态查：无 `setTier` 类工具；断言循环内调用被拒 | [x]  |
 | 5.3-05 | 档位变更记录审计（时间/前后档位/来源=用户），可查询                                      | U    | 切换两次 → 断言两条审计记录                     | [x]  |
-| 5.3-06 | 外发类工具在**全自动**档下仍默认需要确认（除非用户显式把该工具加入白名单）               | U    | 全自动 + 未加白 → 打招呼被暂停                  | [ ]  |
-| 5.3-07 | 外发白名单是显式配置项，可列出、可逐条撤销，界面上能看到"哪些动作已免确认"               | V    | 加白一项 → 截图列表                             | [ ]  |
+| 5.3-06 | 外发类工具在**全自动**档下仍默认需要确认（除非用户显式把该工具加入白名单）               | U    | 全自动 + 未加白 → 打招呼被暂停                  | [x]  |
+| 5.3-07 | 外发白名单是显式配置项，可列出、可逐条撤销，界面上能看到"哪些动作已免确认"               | V    | 加白一项 → 截图列表                             | [x]  |
 | 5.3-08 | 确认暂停分两类且界面区分：`approval`（是/否）与 `elicitation`（需补充信息，可多轮）      | V    | 各触发一次 → 两张卡片截图                       | [ ]  |
 | 5.3-09 | 审批请求带 requestId；应答按 id 路由回发起步骤，错 id / 重复 id 的应答被忽略             | U    | 并发两个请求 → 交叉应答 → 断言不串              | [ ]  |
 | 5.3-10 | 审批超时不默认放行（超时 = 未确认 = 不执行），并回报超时                                 | U    | 缩短超时 → 断言未外发                           | [ ]  |
@@ -615,6 +615,80 @@ known:['suggest','semi','auto']}}}`，主进程不崩；库里 `chat_autonomy_au
   ⑤ 无死代码：`autonomyAudit` 有用例与实跑两个消费者，界面包在 5.3-b 接。⑥ Tailwind / lucide / i18n 无新对象。
   ⑦ 代码与文档分两片提交并推 origin。⑧ 暂存区只有源码 / 测试 / 文档 / `cordis.yml` / `AGENTS.md`，
   探针脚本与门禁日志都在被忽略的 `tmp/53a/`。
+
+**5.3-b 落地记录（2026-10-03）**——免确认白名单做成显式、可持久、可逐条撤销的用户设置 + 界面可见列表
+
+- **落点**：`packages/agent/src/loop/policy.ts`（名单 own 迁移号段 18 的两张表
+  `agent_policy_exempt` / `agent_policy_exempt_audit`，四个口 `exemptList` / `setExempt` / `clearExempt` /
+  `exemptAudit`，以及 `decide()` 里唯一新增的那一格）、`packages/core/src/events.ts`
+  （`ExemptToolView` / `ExemptAuditRow` 两个跨进程读数）、`packages/core/src/errors.ts`
+  （新码 `AGENT_POLICY_EXEMPT_UNKNOWN`）、`packages/shared/src/bridge.ts`（三只口进 IPC 白名单 +
+  `BridgeSignatures` 三条签名）、`packages/renderer/src/AgentPolicyPanel.tsx`（新组件）与 `ChatPanel.tsx`
+  （贴在档位行下方）、两份语言包的 `agent.policy.*` 12 个键（双语逐键对齐，`pnpm lint` 的渲染层机检查过）、`cordis.yml`（`agent-policy` 条目
+  `dependsOn: [agent, store]`）、`scripts/check-agent-model-authority.ts`（第 ⑥ 条判据）。
+- **为什么落 SQLite 而不是配置键**（实测两条，已进 `AGENTS.md` §9）：`plugins.saveConfig` 走
+  `kernel.applyConfig → patchRuntime`，改的是内存运行时层、从不落盘，重启即失——而"我把这只手的每次确认
+  免掉了"是一句要跨重启仍然算数的人的表态；且改任何服务的配置都会重建注入它的下游服务，把名单做成配置键
+  还会白丢一次 `agent-loop` 重建（§9 的 2.5 实测同源）。
+- **判定口只多一格**：`StepPermissionRequest` 仍是 `{tier, planConfirmed, toolId}` 三位（机检 ② 钉着），
+  名单只在既有那条「需批准 / semi 的写操作」分支里把 `auto && isExempt` 改判 `ALLOWED`。`semi` 不看名单——
+  看了就等于把三档收成两档（主计划 §1.7 只有这三档）。`ALLOWED` 的原话里明写「额度闸门与频控照旧生效」。
+- **候选集只有一个来源**：注册表里 `requiresConfirmation: true` 的那些（今天 16 只中的 9 只），
+  界面不另判一套规则（§2.5）；`outbound` 级不在候选之外的特例——用户裁定外发可显式加白（plan §5.3）。
+- **V 类证据（活体，`pnpm harness`，CDP 10222，打应用页 `--url 5173`，七张都在 `docs/acceptance/5.3/`）**：
+  - **5.3-03**：`5.3-03-suggest.png` / `-semi.png` / `-auto.png`。档位行右侧常驻读数 + 名单带上的
+    「当前档位是X，名单暂不影响执行」在前两档可见；`auto` 档那句消失，生效范围改由名单自带的那句 hint 说明。
+  - **5.3-07**：`5.3-07-list.png`（界面上点「加白」→「已免确认 1 项」，行里是工具名 / 副作用级 / 工具 id /
+    加白时刻 + 撤销按钮，候选从 9 掉到 8）与 `5.3-07-revoke.png`（点撤销 → 名单回到 0 项、那只手回到候选）。
+  - **5.3-06 的行为对照**（U 类的活体加强，两张）：同一条 `/run 用 outbound.greet.perform 打招呼` 在 `auto`
+    档下——未加白：run `failed` / `stopReason: POLICY_REFUSED`、步码 `CONFIRMATION_REQUIRED`
+    （`5.3-06-not-exempt.png`）；加白后重跑同一条：这一步**真的进了工具**，`stopReason: STEP_UNSUCCESSFUL`、
+    码 `TOOL_INPUT_INVALID`（来自工具自己的 strict schema，桩没给出合法入参），`5.3-06-exempt.png`；
+    撤销后第三次跑：回到 `POLICY_REFUSED` / `CONFIRMATION_REQUIRED`。三跑之间唯一被动的就是那张名单。
+- **一处就地改掉的人读文案**：`CONFIRMATION_REQUIRED` 的原话原本写「审批通道在 5.3 接」，5.3-b 落完之后
+  那是一句指不到按钮的话，改成指向当下真有的那条口（免确认白名单），并保留「逐条批准的卡片在 5.3-c 接」。
+  用例钉住「免确认白名单」这五个字，防止以后又改回空头承诺。上面 `-not-exempt.png` 是改完热重启后重跑重截的，
+  `-exempt.png` 不含这句、不受影响。
+- **机检 ⑥ 的反向验证**：临时造第四个文件提到 `setExempt` → 检查如实报「写免确认名单的口子应当只在这三处」，
+  探针文件随即删掉（§6.2：不看代码以为会拦，要真撞一次）。
+- **老库回归位**：`policy.test.ts` 里「drop 两张表 + 删台账 18 那一行 → 重挂服务 → 建表并写进行」沿用
+  5.3-a 抓出的那条口径——`runMigrations` 认的是 `schema_migrations` 台账而不是 `PRAGMA user_version`，
+  每个用例都从空库起的单测照不出这类缺陷。
+- **§7.4 收尾自检（逐条回答）**：
+  ① 四条门禁的实际命令与输出（2026-10-03 09:13–09:19，日志 `tmp/gates-5-3-b-final.log`，文案改动与 ② 之后复跑）：
+  `pnpm typecheck` → 退出码 0，24 个包逐个 `typecheck: Done`；
+  `pnpm lint` → 退出码 0，eslint 无告警 + 八道 tsx 机检全 `✔`，其中 agent 那道现在的判据是
+  「LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / policy 不 import model /
+  升档只有人这一条口 / **加白与撤白只有人这一条口**」；
+  `pnpm format:check` → 退出码 0，`All matched files use Prettier code style!`；
+  `pnpm -r --no-bail test` → 退出码 0，21 个测试包全 `Done`、整份日志里除了两条用例名里的「failed」字样没有失败。
+  `packages/agent`：`Test Files 4 passed (4)` / `Tests 80 passed (80)`（较 5.3-a 的 72 条净增本片 8 条）；
+  `packages/workflow`：`Tests 99 passed (99)`。
+  ② 五条 V 证据（`docs/acceptance/5.3/`，七张、sha1 两两不同）逐条对应 5.3-03 / 06 / 07，见上面的活体读数。
+  ③ 状态位：5.3-01 / 03 / 06 / 07 → `[x]`；5.3-08 ~ 12 仍是 `[ ]`（5.3-c / 5.3-d）。
+  ④ 复用检查：判定只在 `policy.decide` 一处、候选集只从注册表读、审计沿用 5.3-a 的写法与迁移登记结构、
+  错误走既有 `AppError.code`、机检并进既有脚本而不是新起第十道；界面无第二套读数（每次动作后现读 `exemptList`）。
+  ⑤ 死代码：`exemptAudit` 目前只有用例消费者——它是 plan §5.3-b 里"加白留审计"的查询半边，界面按裁定不画，
+  已在上面那条记录里写明；除此之外没有未被调用的导出。
+  ⑥ Tailwind / lucide / i18n：新组件只用 utility class 与现有 lucide 图标（`ShieldCheck` 用在标题与「加白」那颗、
+  `X` 用在「撤销」那颗），没有自绘 SVG、没有内联样式；12 条 `agent.policy.*` 键双语逐键对齐，由渲染层机检过。
+  ⑦ 提交与推送：本片按 §1.4 拆成三片——`feat(agent)`（源码 + 机检 + `cordis.yml`）、
+  `test(workflow)`（2.4-09 那条句柄判据的口径更正，见 spec 2.4 记录里的就地更正）、
+  `docs(agent)`（plan / spec / AGENTS.md 与七张证据），逐片推 origin。
+  ⑧ 暂存区：只有源码 / 测试 / 文档 / `cordis.yml` / 七张 `docs/acceptance/5.3/5.3-*.png`；
+  探针脚本与门禁日志都在被忽略的 `tmp/`（`tmp/harness/*.js`、`tmp/gates-5-3-b*.log`）。
+- **跑门禁时红的那条不是本片的代码**：`packages/workflow` 的 2.4-09 句柄用例在 `pnpm -r test` 里稳定失败，
+  诊断读数是「基线 1 → 退避在途 2 → 卸载前 60ms 自己掉回 1 → 卸载后 0」——`process.getActiveResourcesInfo()`
+  数的是整条线程的定时器，基线里那只属于测试运行时自己，与被测的 runner 无关；runner 的清理行为两次读数都证明
+  是 dispose 清掉的。判据按 1.5 记录第 5 条的既有口径改成「不高于基线」，并补一条"等过退避时长相位仍停在
+  `retrying`"的行为判据（防"环境计时器恰好到期把泄漏盖掉"这种假通过）。这条单独提交，见 ⑦。
+  本节写完之后复跑四条门禁即上面 ① 的数。
+- **5.3 剩余五条与下一片**：08（两类暂停的卡片形状）/ 09（requestId 路由、错 id 与重复 id 被忽略）/
+  10（超时＝未确认＝不执行）是 5.3-c 的活，11（三闸门缺一即不外发）/ 12（被拦下的动作进 `usage.ledger` 留被拒记录）
+  与 12 条状态位的逐项收口是 5.3-d。真模型仍不在 5.3 的范围内（§6 的出网授权未解除）。
+- **开发实例的库已复原**：本片验完后把会话档位改回 `suggest`、名单撤空，收尾复跑得
+  `{"tier":"suggest","exempt":[]}`——留在用户机上的不是"我验的时候那一档"。审计表里那两条 add/revoke
+  与被拒的 run 记录是真实历史，不清（清了就没有审计可对）。
 
 ## 5.4 对话 → 工作流沉淀
 

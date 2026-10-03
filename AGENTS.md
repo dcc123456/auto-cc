@@ -239,6 +239,20 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe
   （fixture 聊天页）里的内容要在帧内 `eval --url 10233` 调 `scrollIntoView` 后再 `shot`。
+- **实测（5.3-b）harness 另两条**：④ 属性选择器里的值带点必须加引号——`[data-candidate-tool-id="outbound.greet.perform"]`，
+  裸写报 `not a valid selector`，而报错来自页面里、容易被当成点击没生效；⑤ 以 `/` 开头的实参会被 Git Bash
+  的路径转换吃掉（`type --value "/run …"` 到了页面里变成 `D:/…/Git//run …`），往受控输入框写这种文本要用 `eval`
+  取 `HTMLTextAreaElement` 的原生 setter 赋值再派发 `input` 事件（直接改 `.value` React 不收）。
+- **实测（5.3-b）配置层只写内存运行时层，从不落盘**：`plugins.saveConfig` → `kernel.applyConfig` → `patchRuntime`
+  改的是运行期合并结果，重启即失。所以"跨重启仍然算数的人的表态"（免确认白名单这类）不能做成配置键，
+  要 own 一支迁移落 SQLite；顺带一条：改任何服务的配置都会重建注入它的下游服务（上一条已记），
+  把名单做成配置键还会白丢一次 `agent-loop` 重建。
+- **实测（5.3-b 收口）`process.getActiveResourcesInfo()` 的定时器读数含测试运行时自己的短命句柄**：
+  单条线程上「基线」不是 0，而且基线里那只会自己到期（本机读数：基线 1 → 退避在途 2 → 卸载前 60ms 已掉回 1 →
+  卸载后 0）。句柄类判据因此一律写成**不许变多**（`<=` 基线）而不是**等于**基线——1.5 的收尾记录第 5 条
+  早就按这个写了（"它是全进程指标，别的用例的定时器也在进出"），`packages/workflow` 那条按相等写的用例
+  在机器忙时必红，与被测代码无关。
+  要用相等断言就得自己保证基线只含被测对象，做不到就补一条行为判据（等过退避时长看相位有没有自己续跑）。
 - **实测（2.5）页面上的浏览器动作前必须先 `sessions.open`**：内核视图未打开时页面操作以
   `NO_KERNEL_SESSION` 失败，而改一次配置就会关掉已打开的会话视图（与上面第一条同源），
   顺序必须是「改配置 → 重开会话 → 跑」。
