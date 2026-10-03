@@ -1,12 +1,13 @@
 /**
  * `schedule.registry` 的行为测试（spec 5.7-05 / 06 / 07 / 08 / 09 的服务半边）。
  *
- * 一律打**假端口**：起跑口与闸门都只声明"调度器需要的那两件事"，
- * 于是这三条判据是可断言的结构事实，而不是对真实现的猜测——
+ * 一律打**假端口**：起跑口、闸门与频控预检都只声明"调度器需要的那件事"，
+ * 于是这几条判据是可断言的结构事实，而不是对真实现的猜测——
  * ① 调度能做的最远一步就是 `start(planId)`（5.7-07）；
- * ② 拒因来自闸门与 runner 的原话，调度器不自己编（5.7-06 / 08）；
+ * ② 拒因来自闸门、频控与 runner 的原话，调度器不自己编（5.7-06 / 08）；
  * ③ 时间全部注入，用例不等真分钟（plan §7.5.3 决策六）。
- * 真工作流跑起来是什么样子由 `packages/main/*-link.test.ts` 与 5.7-d 的全链路负责，这里不重复。
+ * 真闸门 `mode:'daily'` 与真频控服务在同一条装配里怎么接力，由 `packages/main/src/schedule-gate-link.test.ts` 判；
+ * 真工作流跑起来是什么样子由 5.7-d 的全链路负责，这里不重复。
  */
 import { AppError, Context, Service, asApp, maybeService } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
@@ -84,11 +85,39 @@ class FakeGateService extends Service {
 }
 
 /**
- * 装一套 config + store + 调度登记处（+ 可选的两个假端口）。
- * @param options.withGate 是否挂闸门；不挂就演"闸门缺席时照跑，而不是调度器自己发明免限"
- * @returns 上下文、调度服务、两个假服务句柄、本次临时目录
+ * 假的 `outbound.throttle`：只有只读的预检那一只手（spec 5.7-08 的频控半边）。
+ *
+ * 区间数字刻意写死在用例里而不是让假服务持有配置：本包判的是"拿到拒因就跳过、不起 run"，
+ * 至于下界怎么算出来的，由 `packages/outbound/src/throttle.test.ts` 与真装配那份链路用例负责。
  */
-async function boot(options: { withGate?: boolean; dir?: string } = {}) {
+class FakeThrottleService extends Service {
+  static provide = 'outbound.throttle';
+  static Config = z.strictObject({});
+
+  /** 动作名 → 拒因；没配的动作一律放行。 */
+  refusals: Record<string, string> = {};
+  /** 被问了几次（现问的读数：一次触发每条外发动作各问一次，不该更多） */
+  asks = 0;
+
+  constructor(ctx: Context, _options: Record<string, never>) {
+    super(ctx, 'outbound.throttle');
+  }
+
+  checkGap(action: string) {
+    this.asks += 1;
+    const reason = this.refusals[action];
+    if (reason) return { allowed: false, remainingMs: 25_000, reason };
+    return { allowed: true, remainingMs: 0, reason: null };
+  }
+}
+
+/**
+ * 装一套 config + store + 调度登记处（+ 可选的三个假端口）。
+ * @param options.withGate 是否挂闸门；不挂就演"闸门缺席时照跑，而不是调度器自己发明免限"
+ * @param options.withThrottle 是否挂频控预检口；同上，缺席时调度器也不自己造间隔
+ * @returns 上下文、调度服务、三个假服务句柄、本次临时目录
+ */
+async function boot(options: { withGate?: boolean; withThrottle?: boolean; dir?: string } = {}) {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'auto-cc-schedule-'));
   if (!options.dir) dirs.push(dir);
   const ctx = new Context();
@@ -103,11 +132,16 @@ async function boot(options: { withGate?: boolean; dir?: string } = {}) {
     fibers.push(await ctx.plugin(FakeGateService, {}));
     gate = maybeService<FakeGateService>(ctx, 'entitlement.gate')!;
   }
+  let throttle: FakeThrottleService | null = null;
+  if (options.withThrottle !== false) {
+    fibers.push(await ctx.plugin(FakeThrottleService, {}));
+    throttle = maybeService<FakeThrottleService>(ctx, 'outbound.throttle')!;
+  }
   // `tickIntervalMs` 带默认值，直接挂载点必须显式给（AGENTS.md §9 的 1.3 实测条）；
   // 这里给一小时，是为了让用例里的"触发"只来自显式的 `tick(nowMs)` 调用，而不是后台真的响了一次。
   fibers.push(await ctx.plugin(ScheduleRegistryService, { tickIntervalMs: 3_600_000 }));
   const schedule = asApp(ctx)['schedule.registry'];
-  return { ctx, dir, schedule, runner, gate };
+  return { ctx, dir, schedule, runner, gate, throttle };
 }
 
 /** 取一次失败的错误码，用于断言"结构化失败而不是抛个字符串"。 */
@@ -279,6 +313,65 @@ describe('额度闸门（spec 5.7-08）', () => {
     schedule.tick(job.nextRunAt!);
     expect(runner.starts).toEqual(['boss-e2e']);
     expect(schedule.triggers(job.id)[0]?.result).toBe('started');
+  });
+});
+
+describe('频控预检（spec 5.7-08 的频控半边）', () => {
+  it('间隔未到即跳过并记账，一次 run 都不起，且下一跳照跑', async () => {
+    const { schedule, runner, throttle } = await boot();
+    const job = everyMinute(schedule);
+    throttle!.refusals.greet = '离上一次打招呼还差 25 秒（外发间隔 45.0s – 150.0s 的下界还没过），按频控此刻不动手';
+
+    expect(schedule.tick(job.nextRunAt!)).toBe(1);
+    expect(runner.starts).toEqual([]);
+    const [record] = schedule.triggers(job.id);
+    // 拒因是节流服务的原话，调度器不翻译（同 5.7-a 对 runner 失败的口径：证据链要对着原话而不是转述）。
+    expect(record?.result).toBe('skipped');
+    expect(record?.reason).toBe('离上一次打招呼还差 25 秒（外发间隔 45.0s – 150.0s 的下界还没过），按频控此刻不动手');
+
+    // 跳过的这一跳照样把计划点推进：不推进就会每分钟重试一次、把触发记录写成一行行重复的等待。
+    expect(schedule.jobs()[0]!.nextRunAt).toBeGreaterThan(job.nextRunAt!);
+
+    // 间隔过去之后（这里等于"预检放行"），下一个计划点正常起跑——频控不是熔断。
+    delete throttle!.refusals.greet;
+    schedule.tick(schedule.jobs()[0]!.nextRunAt!);
+    expect(runner.starts).toEqual(['boss-e2e']);
+  });
+
+  it('两条外发动作各问一次且只问一次，用的名单与额度预检同一份', async () => {
+    const { schedule, throttle } = await boot();
+    const job = everyMinute(schedule);
+    schedule.tick(job.nextRunAt!);
+    expect(throttle!.asks).toBe(SCHEDULE_OUTBOUND_ACTIONS.length);
+    expect([...SCHEDULE_OUTBOUND_ACTIONS]).toEqual(['greet', 'deliver']);
+  });
+
+  it('节流服务未挂载时照跑，而不是让调度器自己造一个间隔', async () => {
+    const { schedule, runner } = await boot({ withThrottle: false });
+    const job = everyMinute(schedule);
+    schedule.tick(job.nextRunAt!);
+    expect(runner.starts).toEqual(['boss-e2e']);
+    expect(schedule.triggers(job.id)[0]?.result).toBe('started');
+  });
+
+  it('额度与频控同时被拒时报的是额度那句（判序固定：今天没了 ≠ 再等一会儿）', async () => {
+    const { schedule, gate, throttle } = await boot();
+    const job = everyMinute(schedule);
+    gate!.denials.deliver = '动作 deliver 今日 10 次额度已用完';
+    throttle!.refusals.deliver = '离上一次投递还差 40 秒，按频控此刻不动手';
+    schedule.tick(job.nextRunAt!);
+    expect(schedule.triggers(job.id)[0]?.reason).toBe('动作 deliver 今日 10 次额度已用完');
+    // 频控那一句根本没被问到：闸门已经判死，不必再问还要等多久。
+    expect(throttle!.asks).toBe(0);
+  });
+
+  it('手工「跑一次」也被频控挡住：它不是后门，走的是同一条腿', async () => {
+    const { schedule, runner, throttle } = await boot();
+    const job = everyMinute(schedule);
+    throttle!.refusals.greet = '离上一次打招呼还差 12 秒，按频控此刻不动手';
+    const trigger = schedule.triggerNow(job.id, job.nextRunAt!);
+    expect(trigger.result).toBe('skipped');
+    expect(runner.starts).toEqual([]);
   });
 });
 

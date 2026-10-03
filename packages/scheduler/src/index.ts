@@ -18,6 +18,7 @@ export type {
   ScheduleJobView,
   ScheduleLaunchPort,
   ScheduleQuotaPort,
+  ScheduleThrottlePort,
   ScheduleTriggerResult,
   ScheduleTriggerView,
 } from './types.js';

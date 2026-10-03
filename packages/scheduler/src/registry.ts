@@ -9,7 +9,7 @@
  * ③ 定时器只有这里的一个 `setInterval`，不注册任何操作系统的计划任务（5.7-10，
  *    由 `scripts/check-scheduler-no-external-cron.ts` 机检；那个脚本扫本包源码里的外部任务写入通道）。
  *
- * 它**不 import** `workflow` / `entitlement` 两个同级包（§4.1），一律经 `maybeService` 按名字现问——
+ * 它**不 import** `workflow` / `entitlement` / `outbound` 三个同级包（§4.1），一律经 `maybeService` 按名字现问——
  * §9 的 2.5 实测教训：在本地存第二份事实（哪怕是配置）会静默变空。
  */
 import { randomUUID } from 'node:crypto';
@@ -22,6 +22,7 @@ import type {
   ScheduleJobView,
   ScheduleLaunchPort,
   ScheduleQuotaPort,
+  ScheduleThrottlePort,
   ScheduleTriggerResult,
   ScheduleTriggerView,
 } from './types.js';
@@ -69,11 +70,13 @@ const scheduleMigration = {
 };
 
 /**
- * 外发额度预检查用的动作名单。
+ * 起跑前预检（额度 + 频控）用的动作名单。
  *
  * 只列外发两条（不打 `search`）：抓取失败顶多白跑一趟，外发被拒却会留下一条**半截的 run**——
- * 后者才是 5.7-08 要的"额度用尽即跳过并记账"。名单是本包私有的常量而不是从契约包 import，
- * 因为本包不依赖那个包（§4.1）；两处用同一份名单靠的是这一个常量，不靠复制。
+ * 后者才是 5.7-08 要的"额度用尽即跳过并记账"。`search` 不进名单还有个具体理由：它的节奏是页面动作那一档
+ * （`nextScrollGapMs`，秒级），而 `outbound.throttle.checkGap` 只认外发两条、陌生动作名直接结构化失败，
+ * 所以将来往这里加第三条时不会悄悄拿到一个错误区间的预检。
+ * 名单是本包私有的常量而不是从契约包 import，因为本包不依赖那个包（§4.1）；两处预检用同一份名单，不靠复制。
  */
 export const SCHEDULE_OUTBOUND_ACTIONS = ['greet', 'deliver'] as const;
 
@@ -366,6 +369,28 @@ export class ScheduleRegistryService extends Service {
             nowMs,
             'skipped',
             decision.reason ?? `动作 ${action} 的额度已用完`,
+            null,
+            nowMs,
+          );
+        }
+      }
+    }
+
+    // 频控预检（spec 5.7-08 的另一半边）：判据来自 `outbound.throttle` 自己——本包不复制间隔区间、
+    // 也不自己算「还要等多久」，那两处都会成为第二套节奏事实（§2.7）。
+    // 判序放在额度之后是有意的：额度是「今天彻底没了」，频控只是「再等一会儿」，
+    // 界面读到前者要建议人改配置，读到后者只需知道下一跳照跑，两句拒因不许混成一句。
+    const throttle = maybeService<ScheduleThrottlePort>(this.ctx, 'outbound.throttle');
+    if (throttle) {
+      for (const action of SCHEDULE_OUTBOUND_ACTIONS) {
+        const gap = throttle.checkGap(action, { nowMs });
+        if (!gap.allowed) {
+          return this.record(
+            job.id,
+            plannedAt,
+            nowMs,
+            'skipped',
+            gap.reason ?? `动作 ${action} 的频控间隔未到`,
             null,
             nowMs,
           );

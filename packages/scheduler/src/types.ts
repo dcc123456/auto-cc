@@ -37,3 +37,18 @@ export interface ScheduleQuotaPort {
     context?: { nowMs?: number },
   ): { allowed: boolean; remaining: number | null; reason: string | null };
 }
+
+/**
+ * 调度器眼里的"频控预检口"（`outbound.throttle` 的本包侧投影，spec 5.7-08 的频控那半边）。
+ *
+ * 与额度那只端口分开的理由是**判的东西不同**：闸门答「今天还能不能做」，这里答「此刻动手会不会被间隔按住」。
+ * 两份读数都只读——预检不记账、不留痕（被拒流水只在 `gate.enforce` 那一个写入口产生，spec 5.3-12），
+ * 所以"调度器跳过的这一跳"不会被算成一次尝试、也不会启动频控的钟。
+ * 实现方是 `outbound.throttle`，它按区间**下界**判：只有必然还要等才拒，见那边的 `checkGap` 注释。
+ */
+export interface ScheduleThrottlePort {
+  checkGap(
+    action: string,
+    context?: { nowMs?: number },
+  ): { allowed: boolean; remainingMs: number; reason: string | null };
+}
