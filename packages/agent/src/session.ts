@@ -24,6 +24,8 @@ import {
   type AgentRunView,
   type AutonomyLevel,
   type ChatCompactionView,
+  type ChatExportReceiptView,
+  type ChatExportView,
   type ChatFactCard,
   type ChatMessageView,
   type ChatPart,
@@ -41,6 +43,8 @@ import type { StoreService } from '@auto-cc/plugin-store';
  */
 import { QUOTA_ACTIONS, type GateDecisionView, type QuotaAction, type UsageSummaryView } from '@auto-cc/shared';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { estimateTokens } from './loop/model.js';
@@ -58,6 +62,23 @@ export const CHAT_MIGRATION_VERSION = 2;
  * 5.2-a 的 `agent.loop.propose` 收的是同一类输入，因此共用这一个常量而不是各写一份 2000（§2.2）。
  */
 export const MAX_USER_INPUT_CHARS = 2000;
+
+/**
+ * 会话历史导出的字段契约版号（spec 5.6-09「字段命名稳定」）。
+ *
+ * 这一位写进文件顶部，而用例把顶层与每一层的键序逐字钉住：**改名、删字段、加字段都要动它**，
+ * 否则拿这份 JSON 做备份的人与将来的第二个读它的工具，会分不清落盘的是哪一版。
+ */
+export const CHAT_TRANSCRIPT_SCHEMA_VERSION = 1;
+
+/**
+ * 导出落盘的儿子目录名，与 3.3 的简历 PDF 同一根（`userData/exports`）。
+ *
+ * 刻意做成包内私有常量而不是配置键：`chatConfigSchema` 每多一个带默认值的键，六个直接调用点都要补一行
+ * （§9 的 1.3 实测），而 5.6-09 没有要求人能改导出目录。userData 的解析只有一个去处——
+ * `config.paths().userDataDir`（与 workflow 的证据目录同一处，§2.7 禁第二套路径解析）。
+ */
+const EXPORTS_SUBDIR = 'exports';
 
 /**
  * 会话标题的字数上限（spec 5.6-07 的系统边界：渲染层来的不可信输入）。
@@ -301,7 +322,8 @@ function toMessageView(row: MessageRow): ChatMessageView {
 export class ChatSessionService extends Service {
   static provide = 'chat.session';
   static Config = chatConfigSchema;
-  static inject = ['store', 'agent.tools'];
+  /** `config` 是导出落点的那一处真相（`paths().userDataDir`），与 workflow.runner 的 `evidenceDir` 同源，不在本地另算一份。 */
+  static inject = ['config', 'store', 'agent.tools'];
 
   constructor(
     ctx: Context,
@@ -710,6 +732,50 @@ export class ChatSessionService extends Service {
       .prepare('SELECT id FROM chat_session WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC')
       .all() as { id: string }[];
     return rows.map((row) => this.readSession(row.id));
+  }
+
+  /**
+   * 把当前会话的历史导出成本地 JSON（spec 5.6-09）。
+   *
+   * 三个刻意的形状：
+   * ① 只在这里过 `redactValue`（**写盘那一次**），不在读的一侧遮——判据要的是"导出的文件不含明文 PII"，
+   *    而库里与界面上那两份早已在 5.6-a 的两道边界遮过了，再遮一遍就是第二份口径（§2.5）。
+   * ② `messages` 给**全量原文**，连被折叠那一段一起给：折叠是界面的呈现（5.6-04），落盘不是（5.6-10 的"不可丢"）。
+   * ③ 同名覆盖：一个会话一份文件，导出是"当前历史的读数"而不是版本库；要留版本请用文件系统的备份，
+   *    在这里堆时间戳文件名只会把一个可复原的目录变成 litter（§2.6 不做超出需求的）。
+   * @returns 导出回执（会话 id / 绝对路径 / 条数 / 字节数）
+   * @throws 落盘失败（目录不可写、磁盘满）`CHAT_EXPORT_FAILED`——失败必须让人知道文件没写成，不能静默返回一份不存在的回执
+   */
+  exportTranscript(): ChatExportReceiptView {
+    const session = this.readSession(this.ensureSession());
+    const compaction = this.validCompactionRow(session.id);
+    const transcript: ChatExportView = {
+      schemaVersion: CHAT_TRANSCRIPT_SCHEMA_VERSION,
+      exportedAt: Date.now(),
+      session,
+      compaction: compaction ? this.viewOfRow(compaction) : null,
+      // 取 `storedRows` 而不是 `messagesOf`：正在流式那半条只活在内存（1.11-08），导出一份「永远不会完成的助手消息」
+      // 等于把那条不变式带进文件里。导出说的是**已落库的历史**。
+      messages: this.storedRows(session.id).map(toMessageView),
+    };
+    const dir = join(asApp(this.ctx).config.paths().userDataDir, EXPORTS_SUBDIR);
+    const target = join(dir, `chat-${session.id}.json`);
+    const text = `${JSON.stringify(redactValue(transcript), null, 2)}\n`;
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(target, text, 'utf8');
+    } catch (error) {
+      throw new AppError(
+        'CHAT_EXPORT_FAILED',
+        `会话历史导出落盘失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return {
+      sessionId: session.id,
+      path: target,
+      messageCount: transcript.messages.length,
+      bytes: Buffer.byteLength(text),
+    };
   }
 
   [Service.init](): void {

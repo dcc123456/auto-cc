@@ -963,6 +963,36 @@ export type ChatSnapshotView = {
 };
 
 /**
+ * 一份会话历史导出的顶层形状（spec 5.6-09）。
+ *
+ * 字段名一经落盘就是契约：`schemaVersion` 是这一份的版号，改名、删字段、加字段都要动它——
+ * 人拿它做备份、将来别的工具读它，靠的就是「同一份版号下键名不会变」。
+ * `messages` 给**库里全量原文**（含被折叠那一段）：折叠只是界面的呈现（5.6-04），落盘不是，
+ * 「宁可长，不可丢」（5.6-10）在导出这一侧同样成立。
+ * `compaction` 是那一行压缩读数（连同现问回来的事实卡）：没有它，读这份文件的人无法知道界面上为什么少了六条。
+ */
+export type ChatExportView = {
+  schemaVersion: number;
+  /** 导出时刻（毫秒），只说明"这一份是哪一刻的读数"，不参与任何判定 */
+  exportedAt: number;
+  session: ChatSessionView;
+  compaction: ChatCompactionView | null;
+  messages: ChatMessageView[];
+};
+
+/**
+ * 一次导出的回执：界面或调用方拿到的"写到哪儿了"。
+ * `path` 给绝对路径——桌面 app 里人是要按路径去文件夹里找这份文件的。
+ */
+export type ChatExportReceiptView = {
+  sessionId: string;
+  path: string;
+  messageCount: number;
+  /** 落盘字节数（不是字符数：掩码后的中文按 UTF-8 占多字节） */
+  bytes: number;
+};
+
+/**
  * 流式增量事件载荷（spec 1.11-03 / 2.8-09）。
  *
  * 只带一个片段与两个 id：整份历史由 `chat.session.current()` 一次给全，事件只负责"字数在涨"。
