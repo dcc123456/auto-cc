@@ -1142,9 +1142,9 @@ runId)` 在 `workflow_run_id IS ?` 时是"本次运行"范围，在 `runId` 为 
 | 5.5-05 | 检查点包含**待决审批请求**；重启后未应答的请求以新的可见卡片重新出现                       | V+C  | 挂起审批 → 杀进程重启 → 截图待决卡片     | [x]  |
 | 5.5-06 | 检查点还原后 `runId` 与已完成步不重复执行（幂等键 `runId+nodeId+targetId` 生效）           | U    | 还原 → 断言已完成步未重放                | [x]  |
 | 5.5-07 | 登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA                          | U    | 三类 fixture 响应 → 断言均停住并通知     | [x]  |
-| 5.5-08 | 用户在场手动操作后，agent 能正确识别"这一步已被人做完"并跳过                               | V    | 手动完成打招呼 → 恢复 → 截图显示跳过该步 | [ ]  |
+| 5.5-08 | 用户在场手动操作后，agent 能正确识别"这一步已被人做完"并跳过                               | V    | 手动完成打招呼 → 恢复 → 截图显示跳过该步 | [x]  |
 | 5.5-09 | 接管与恢复全过程写入步记录（可审计谁在何时动了页面）                                       | U    | 查 run 记录含接管时间段                  | [x]  |
-| 5.5-10 | 反向验证：接管后页面被改到无法继续时，agent 明确报"无法定位目标，需重规划"而非静默重试到底 | U    | 清空目标节点 → 断言终止并给原因          | [ ]  |
+| 5.5-10 | 反向验证：接管后页面被改到无法继续时，agent 明确报"无法定位目标，需重规划"而非静默重试到底 | U    | 清空目标节点 → 断言终止并给原因          | [x]  |
 
 **5.5-a 落地记录（2026-10-03）**——接管态做成一处状态源，判定口与循环都硬依赖它，恢复口只归人
 
@@ -1402,6 +1402,63 @@ inactive context`（`loop.ts:384`）；那是 cordis 的重建语义，不是本
   机检的已知盲区，按 5.5-b 同一口径人工核对）；样式与图标零改动。⑦ 提交分四片：core 入参 / agent 表与重推 /
   agent 对账与文案 / 本篇文档 + 证据，逐片推 `origin/main`。⑧ 暂存区只有这两份文档与 `docs/acceptance/5.5/` 下按条目号
   命名的四份证据；门禁日志、dev userData、重复的那张全页截图都留在被忽略的 `tmp/`（§7.5）。
+
+**5.5-e 落地记录（2026-10-03）**——人做完即跳过：恢复时先认现状，认得出是**人**做完了就把那一步记 `skipped`，那只手一次都不许被按
+
+- **落点（两片代码提交）**：`3bfae3a`（core 契约 + `agent.tools.doneMarkerOf` + `agent.loop.skipStepDoneByHuman`
+  - `outbound.greet` 的配置键 + 5 条循环用例 / 1 条工具面用例 / 1 条打招呼用例）、`a5bbd86`（渲染层第四态）。
+- **E1 的口径按落片时的读码结果更正（原 plan 写的是"用 `refind`/`extract` 验目标态"）**：判据不来自模型给的那一步，
+  也不来自循环里任何一句猜测的平台文案，而来自**这只工具自己的声明**新增的 `doneMarker` 条款，由循环用的时候现读
+  （`agent.tools.doneMarkerOf(toolId)`，§9 的 2.5：不在本地存第二份事实）。省略即 `null`，`null` 即**永不自动跳过**——
+  外发这一格猜错的代价是"这条打招呼再也不会发"，漏判的代价只是"再问一次要不要批准"，两个方向不对称，所以默认值必须是"不跳"。
+  标定落在装配侧（`outbound-greet` 的 `doneMarker` 配置键，`cordis.yml` 里默认不给），活页面取证时经
+  `plugins.saveConfig` 现标，见下面阶段 0。
+- **E2 比的是整份现状而不是节选**：比较对象是 5.5-c 那一次 `rereadPage()` 产出的新鲜读数，但**不用 `excerpt`**——
+  `browser.page.snapshot` 的摘要按 §8.5 不带正文，而 `clipReading` 只留 80 字，两处都不够长。改为在内存里把
+  `summary` + `ToolResult.value` 的**全部字符串叶子**拼成 haystack（去标签、上限 4000 字）再判 `includes`。
+  用例刻意把哨兵只放进 `value.text`（摘要里没有），钉住的是"循环收的是通用叶子集合"这件事，不是台架把答案递给提示词。
+- **命中之后只发生这些**：写一行 `skipped` + `code=DONE_BY_HUMAN` + `duration_ms=null`，观察原话带着命中的那句话面文本，
+  证据指向那一次快照引用（`snapshot:browser.page.snapshot@…`），游标前进，**工具不调用**。所以 `agent.policy` 判定口、
+  确认单、`entitlement.gate` 三道全都没参与——活体读数里 `pauseBandCount=null`、`approvalCard=false`、
+  `usage_ledger` 在 run 之后零条 greet、`/api/outbox` 停在人发的那一条（9 → 10 → 10）。
+- **`skipped` 是第五种落步态，也是界面第四张卡**：`AGENT_STEP_STATUSES` 加 `skipped`（工作流那侧 `run-store.ts` 早有此态，
+  词汇沿用不另造），终局判定 `allSucceeded` 把 `skipped` 与 `ok` 同等看待（人做完了这一步就是完成了）。渲染层
+  `ChatToolPartState` 补第四态：中性冷色 + 文案「人做完，跳过」，且 `errorText` 对 `skipped` 一律留 `null`——
+  它的 `code` 记的是"谁做的"不是"哪里错了"，画成红色「失败」会让人以为要重跑，画成绿色「已完成」会把人的功记到系统账上。
+- **5.5-08 的活页面判据（V）**：一条 run `075bd2c5-37dd-43cf-9baa-a46288196998`（一步 `outbound.greet.perform`，半自动档）。
+  序列 = 标哨兵 → 导航 fixture `/chat` → 起草 → 人按「我来接管」→ 人在帧内点「发送打招呼」（页面写出
+  「已从 iframe 内发出第 10 条：…」，服务端收件计数 9→10）→ 接管期间确认执行（`paused`/`TAKEOVER_HELD`，`executed=0`）
+  → 交还 → 人按「继续」→ 卡片 `data-tool-state=skipped`、状态文案「人做完，跳过」。三张图逐条目独立捕获、sha1 两两不同：
+  `5.5-08-page-done.png`（`3d24e35a…`，内核视图 target）、`5.5-08-held-paused.png`（`be28400b…`）、
+  `5.5-08-skipped-card.png`（`3deb1e66…`），机读读数在 `5.5-08-live-readout.txt`。
+- **5.5-10 按判据栏（U）收口，plan 里那句"要活页面"没有加码成判据**：机制在 5.5-c 就落成，三条既有用例逐字满足
+  「断言终止并给原因」——`续推给不出别的手` → `REPLAN_UNCHANGED`（且 `calls` 仍只有一只手按过一遍）、
+  `重规划额度用完（给 0）` → `REPLAN_EXHAUSTED`（额度先判，连那一次重读都不发生）、
+  `重规划前没能重读页面` → `REREAD_UNAVAILABLE`（不带着旧快照续推）。本轮的活页面证据走的是同一处 `rereadPage()`
+  的另一分支（5.5-08 那次真读到了人做完的现状）。**没有做**：在活页面上清空目标节点再拍一帧——判据栏是 U，
+  为它加一帧 V 属于超出判据的功能（§2.6），这一格若将来要拍，归 5.6-01（重启后四类记录可加载）那次活体复跑顺手带。
+- **这一片没有做到什么（诚实标注）**：① 5.5-c 留下的那条旧账——`docs/acceptance/5.5/5.5-01-page-handed-back.png`
+  重拍——**本片没补上**：本轮复跑到手的交还态那一帧里，恢复提示行没有入画（取景时该 run 已不在 `paused`，
+  提示行只在"已交还且可续推"时渲染），拿它覆盖旧图会把"少了那一行"当成新证据，比留着旧图更糟。旧图继续挂着，
+  口径过时的这一条从 5.5-c 记到这里，重拍归 5.6-01 那次活体复跑。② `skipped` 这一步**进不了沉淀**（5.4）：
+  `sediment.ts:99` 的筛步条件是 `row.status !== 'ok'` 即不沉淀，人做完的那一步没有可复用的"系统动作"，
+  把它沉淀成节点等于让工作流替人再按一次——这一格的行为是**判据之外的既有口径**，本片按原样保留并在此登记。
+  ③ 5.5-d 那条"回看"限制（`useAgentRun` 不在挂载时恢复历史 run）在本片**仍只登记、不做**，归 5.6-01。
+- **四道门禁实测**：两片代码各自收口时复跑 `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`
+  全 exit 0，21 个测试包无一失败（`loop.test.ts` 65 条、`tool-surface.test.ts` 5 条、`greet.test.ts` 26 条）。
+  macOS / Linux 运行期未验证（§9，一律 BLOCKED）。
+- **逐条状态位**：5.5-08 → `[x]`（V，三图 + 机读读数）、5.5-10 → `[x]`（U，三条既有用例 + 本轮活体另一分支）。
+  至此 5.5 的十条里 01 / 02 / 03 / 04 / 05 / 06 / 07 / 08 / 09 / 10 全为 `[x]`，5.5 子计划收口。
+- **§7.4 收尾自检**：① 四道门禁见上一条。② V 条目证据：上面三张 `5.5-08-*.png` + `5.5-08-live-readout.txt`，
+  逐条对应 5.5-08 的判据栏。③ 状态位无模糊项，没做的两件写在「没有做到什么」里并标了归属。④ 复用检查：
+  重读只 `rereadPage()` 一处（`resume` / `replanStep` / 跳过判定三路共用），状态色只 `TOOL_STATE_STYLE` 一份，
+  卡片只 `ToolCard` 一只（对话与循环共用，§2.5）；`skipped` 一词沿用工作流 `run-store.ts` 的既有态名，没造第二套说法。
+  ⑤ 死代码：`doneMarkerOf` 有唯一消费者（`skipStepDoneByHuman`），`DONE_CHECK_HAYSTACK_CAP` 用在那一处拼接，
+  `ChatToolPartState` 第四态在 `TOOL_STATE_STYLE` / `stepToToolPart` 两处都有真实分支，没有留着没人读的导出。
+  ⑥ 前端三项：新文案两条（`agent.tool.state.skipped`、`chat.sediment.stepStatus.skipped`）zh-CN / en 齐；
+  样式只用 Tailwind utility 组合，图标零新增（沿用 `Wrench`）。⑦ 提交分片：core+agent+outbound 一片、渲染层一片、
+  本篇文档与证据一片，逐片推 `origin/main`。⑧ 暂存区只有这两份文档与 `docs/acceptance/5.5/` 下按条目号命名的四份证据；
+  dev userData、harness 台架脚本、门禁日志、取景失败的那两张重拍图都留在被忽略的 `tmp/`（§7.5）。
 
 ## 5.6 会话持久化、压缩与脱敏
 

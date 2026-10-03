@@ -1,0 +1,57 @@
+5.5-08 活体取证（5.5-e：人做完即跳过 · CDP 10222 · 真实窗口 · 本地 fixture · 2026-10-03）
+
+环境：dev 实例（userData = tmp/dev-userdata，`scripts/dev.ts` 拉起），fixture 服务 10233。
+档位：半自动（界面上按「半自动」按钮，`chatNotice=切换档位为 半自动：成功`）。
+页面：内嵌内核视图导航到 http://127.0.0.1:10233/chat（同源 iframe 聊天实验台，AGENTS.md §7.2 的本地靶站）。
+一条 run：075bd2c5-37dd-43cf-9baa-a46288196998（一步 `outbound.greet.perform`，上限 12 步 / 4000 token 为装配默认值）
+
+════════ 阶段 0：装配侧标定哨兵（不是代码里的猜测）════════
+`plugins.saveConfig('outbound-greet', { doneMarker: '已从 iframe 内发出第' })` →
+  saveConfig={"id":"outbound-greet","state":"active",…,"keys":["doneMarker"]}
+  readConfig={"id":"outbound-greet","values":{"doneMarker":"已从 iframe 内发出第"},"mounted":true}
+改配置会重建下游服务并关掉已开会话（§9 实测），所以随后重开：
+  sessions.open('fixture') → partition=persist:fixture
+  browser.page.navigate('http://127.0.0.1:10233/chat') → readyState=complete · elementCount=17 · textLength=266
+
+════════ 阶段 1：动手之前的页面读数（哨兵还没出现）════════
+  statusLine=待发送 · outbox=9 · frameStatus=待发送 · logCount=0
+
+════════ 阶段 2：起草 → 人按下接管 → 人在页面上把这条发掉 ════════
+消息：`/run 用 outbound.greet.perform {"request":{"platform":"boss","jobId":"1002","text":"您好，看到贵司在招前端工程师，想进一步沟通。"}} 打招呼`
+  run=075bd2c5… · status=proposed · 已落 0 / 1 步 · confirmBtn=true
+按下 `[data-action=takeover-hold]` → banner held=true reason=manual（`已人工接管…自动化已停在安全点`）
+人在帧内点 `[data-testid=chat-send]`（走页面自己的表单逻辑，app 的那只外发工具没被碰）：
+  statusLine=已从 iframe 内发出第 10 条：您好，看到贵司在招前端工程师，想进一步沟通。（人工在页面上发的那一条）
+  outbox=10 · frameStatus=第 10 条已送达服务端 · logCount=1
+证据：5.5-08-page-done.png（截内核视图 target，见 project-harness-view-screenshot-caveat）
+
+════════ 阶段 3：接管期间确认执行 → 停在安全点，一步没落 ════════
+按下 `[data-action=confirm-run]`：
+  status=paused · stopReason=TAKEOVER_HELD · 已落 0 / 1 步 · executed=0
+  greetCards=[] · pauseBandCount=null · approvalCard=false ← 判定口与确认单在这一刻都还没参与
+证据：5.5-08-held-paused.png
+
+════════ 阶段 4：交还页面 → 人按「继续」→ 恢复时重读，命中哨兵即跳过 ════════
+按下 `[data-action=takeover-release]` → held=false；再按 `[data-action=resume-run]`：
+  run.status=completed · stopReason=COMPLETED · plan_step_index=1 · 已落 1 / 1 步 · tokens_used=86
+界面上的那张卡片（`data-tool-id=outbound.greet.perform`）：
+  data-tool-state=skipped · 状态文案=「人做完，跳过」 · durationMs 缺席（不是 0 毫秒） · 无 errorText
+  observation=这一步由人在页面上做完了：重读到的现状里出现「已从 iframe 内发出第」，那只手一次都没被按｜动手前已重读页面（snapshot:browser.page.snapshot@1791028391746）
+  evidence=snapshot:browser.page.snapshot@1791028391746
+  参数摘要仍是人给的那一条 `{"request":{"platform":"boss","jobId":"1002","text":"…"}}`（原样带出，没被改写过）
+  pauseBandCount=null · approvalCard=false ← 跳过这一步既没进 `agent.policy` 判定，也没开确认单
+证据：5.5-08-skipped-card.png
+
+════════ 库里（node:sqlite 只读直查 tmp/dev-userdata/store.db）════════
+agent_run   : status=completed, plan_step_index=1, tokens_used=86, stop_reason=COMPLETED
+agent_step  : 一行 —— plan_step_index=0, tool_id=outbound.greet.perform,
+              status=skipped, code=DONE_BY_HUMAN, duration_ms=null,
+              evidence_refs_json=["snapshot:browser.page.snapshot@1791028391746"]
+takeover_events（同一条 run）: begin(actor=user) 1791028343915 · end(actor=user) 1791028389834
+usage_ledger: action='greet' 且 ts ≥ run.created_at 的行数 = 0（run 之前累计 9 条）
+              ← 外发一只没落账，正是「那只手一次都没被按」的账本读数
+/api/outbox : count=10 —— 人发的那一条进了对端，agent 没有再发第二条（9 → 10 → 10）
+
+════════ 一句话形状 ════════
+人在接管期间把那条打招呼发掉了，恢复时循环先重读页面、在**这只工具自己的声明**标定过的那句话面文本里认出现状，
+于是这一步记 `skipped` / `DONE_BY_HUMAN` 并把功劳指向那一次快照引用：闸门没问、确认单没开、账本没落、外发没发生。
