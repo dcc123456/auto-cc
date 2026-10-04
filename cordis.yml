@@ -209,7 +209,7 @@ plugins:
 
   # 工作流节点执行器登记处（spec 2.4-01 / 2.4-08）：`kind` → 执行函数的表，本身不含任何站点知识。
   # 各能力包在自己的服务里把节点登记进来，与 `platform-boss` 登记进 `platform.registry` 同一个手法，
-  # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有 `demo.flaky`。
+  # 于是 `workflow` 一行代码都不认识平台包（plan §11.3 第 5 条）。内置只有两只演示节点：`demo.flaky`、`demo.branch`。
   # **必须排在一切登记方之前**（2.5-e 起有两个：`jd-capture` 与 `outbound-greet`）：装配是「按清单顺序
   # 逐个 await 挂载」（kernel `assemble()`），那两个服务在自己的 `[Service.init]` 里取登记处来登记节点，
   # 取不到就没人登记 `jd.capture` / `greeting.send`。它自己没有任何依赖，所以放多早都不会 PENDING。

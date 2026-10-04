@@ -4,7 +4,17 @@
  * 描述表在 `@auto-cc/core`，那里不能出现 JSX（core 是 L0 内核层，AGENTS.md §4.1），
  * 所以表里存的是图标**名**，渲染层按名查这一张表——图标仍然只有 lucide 一个来源（§5.3）。
  */
-import { Circle, FileText, List, MessageSquare, RotateCcw, Search, Send, type LucideIcon } from 'lucide-react';
+import {
+  Circle,
+  FileText,
+  GitBranch,
+  List,
+  MessageSquare,
+  RotateCcw,
+  Search,
+  Send,
+  type LucideIcon,
+} from 'lucide-react';
 
 /** 已用过的图标名；新增算子时在这里补一行，别在描述表里写组件。 */
 const ICON_BY_NAME: Readonly<Record<string, LucideIcon>> = {
@@ -14,6 +24,7 @@ const ICON_BY_NAME: Readonly<Record<string, LucideIcon>> = {
   send: Send,
   'file-text': FileText,
   'rotate-ccw': RotateCcw,
+  'git-branch': GitBranch,
 };
 
 /**

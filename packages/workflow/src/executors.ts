@@ -11,7 +11,7 @@
  *
  * 契约形状（`WorkflowNodeInvocation` / `WorkflowNodeExecutor` / `WorkflowExecutorRegistry`）在
  * `@auto-cc/core`：登记由各能力包（L2）发起，而下层不能 import 上层（AGENTS.md §4.1），
- * 所以这一层只放**实现**与 `demo.flaky`。取登记处用 `core` 的 `executorRegistryOf`。
+ * 所以这一层只放**实现**与两只内置演示节点（`demo.flaky`、`demo.branch`）。取登记处用 `core` 的 `executorRegistryOf`。
  */
 import {
   AppError,
@@ -31,7 +31,7 @@ export type ExecutorRegistryConfig = z.infer<typeof executorRegistrySchema>;
 /**
  * 内置的失败注入执行器（spec 2.4-03 / 2.4-05 / 2.4-06 的靶子）。
  *
- * 它是全仓唯一一个不碰任何平台包的节点实现，因为它的用途就是「可控地失败若干次」：
+ * 它与下面的 `demo.branch` 是仅有的两只不碰任何平台包的内置实现；这一只的用途是「可控地失败若干次」：
  * 打一个本地 fixture 计数器，命中次数不超过 `failTimes` 就抛。计数放在 app 外部，
  * 所以真 kill 之后重启也能看见「第 3 次才成功」这条完整的路（2.4-05 的截图才有内容可拍）。
  * @param invocation 节点执行输入，参数取 `url`（fixture 计数端点）与 `failTimes`
@@ -68,6 +68,37 @@ const flakyExecutor: WorkflowNodeExecutor = async ({ spec, attempt, signal }) =>
 /** `demo.flaky` 的 kind 名，写在一处以免计划常量与登记表各说一份。 */
 export const DEMO_FLAKY_KIND = 'demo.flaky';
 
+/**
+ * 内置的分支演示执行器（spec 5.10-08 / 09 / 13 的 V 半边靶子，plan §7.8.3-decies 的裁定①）。
+ *
+ * 它是全仓唯一一只**宣告自己走过哪只出口句柄**的执行器：比较节点自己的两个参数，
+ * `value >= threshold` 走 `yes`，否则走 `no`。句柄的合法性不在这里重复判——`advanceGraph`
+ * 会拿节点声明的 `outputs` 校验，多出一支就以 `INVALID_ARGUMENT` 停下（AGENTS.md §2.6：
+ * 同一条规矩不许立两处）。
+ *
+ * 零网络是刻意的：§7.2 不许自动化碰真实招聘平台，而这只节点连本地 fixture 都不必起，
+ * 于是"同一张图、同一份参数"永远走同一支，V 类截图才复现得了。
+ * @param invocation 节点执行输入，参数取 `value`（比较左侧）与 `threshold`（比较右侧），都是整数
+ * @returns `{ output }`：`yes` 或 `no`，即该节点实际走过的出口句柄
+ * @throws 任一参数缺失或不是数字时 `INVALID_ARGUMENT`——**不猜走哪一支**，猜错的那一支在库里就是一行 `done`
+ */
+const branchExecutor: WorkflowNodeExecutor = ({ spec }) => {
+  const value = spec.params.value;
+  const threshold = spec.params.threshold;
+  if (typeof value !== 'number' || typeof threshold !== 'number') {
+    throw new AppError(
+      'INVALID_ARGUMENT',
+      `节点 ${spec.id} 缺少数值参数 value / threshold，无法判断走哪一支`,
+      'workflow.executors',
+      { nodeId: spec.id },
+    );
+  }
+  return Promise.resolve({ output: value >= threshold ? 'yes' : 'no' });
+};
+
+/** `demo.branch` 的 kind 名，同上。 */
+export const DEMO_BRANCH_KIND = 'demo.branch';
+
 export class WorkflowExecutorRegistryService extends Service implements WorkflowExecutorRegistry {
   static provide = 'workflow.executors';
   static Config = executorRegistrySchema;
@@ -95,9 +126,10 @@ export class WorkflowExecutorRegistryService extends Service implements Workflow
   list = (): string[] => [...this.table.keys()];
 
   [Service.init](): void {
-    // 失败注入器随登记表一起就位：它不属于任何能力包，也就没有别的时机可挂。
+    // 两只演示节点随登记表一起就位：它们不属于任何能力包，也就没有别的时机可挂。
     this.register(DEMO_FLAKY_KIND, flakyExecutor);
-    this.ctx.logger.info(`执行器登记处就绪：内置 ${DEMO_FLAKY_KIND}，其余由各能力包自行登记`);
+    this.register(DEMO_BRANCH_KIND, branchExecutor);
+    this.ctx.logger.info(`执行器登记处就绪：内置 ${DEMO_FLAKY_KIND} / ${DEMO_BRANCH_KIND}，其余由各能力包自行登记`);
   }
 }
 

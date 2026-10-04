@@ -227,7 +227,7 @@ export function operatorByKind(
 }
 
 /**
- * 内置算子表：现役六只执行器，一条不多一条不少。
+ * 内置算子表：现役七只执行器，一条不多一条不少。
  *
  * 参数 schema 是**照着各执行器真正读的键**写的（`jd-capture.ts:340-348`、`jd-store.ts:468`、
  * `greet.ts:284-300`、`deliver.ts:661-676`），不是照着理想形状编的：多一个键就是界面上
@@ -310,6 +310,24 @@ export const WORKFLOW_OPERATORS: readonly OperatorDescriptor[] = [
     params: z.strictObject({
       url: z.string().min(1),
       failTimes: z.number().int().min(0).max(5).optional(),
+    }),
+  },
+  {
+    // 全表**唯一**一只多出口算子（plan §7.8.3-decies 的裁定①）：画布的出口连接点只从这张表取，
+    // 所以六只全是 `['default']` 时，活体里连不出分支边，spec 5.10-08/09/13 的 V 半边一张也截不到。
+    // 句柄名沿用 U 用例（`runner.test.ts:1205-1404`）已经在读的 `yes` / `no`，不另起一套词。
+    kind: 'demo.branch',
+    category: 'demo',
+    titleKey: 'workflow.operator.demo.branch.title',
+    // `read`：它不写库、不出网、不碰平台，因此既不经过额度闸门也不触发风险确认（§7.2 / §7.3）。
+    effect: 'read',
+    icon: 'git-branch',
+    outputs: ['yes', 'no'],
+    // 两个数而不是"一个数 + 代码里的常数"：常数写进执行器就是在算子层埋业务规则（plan §8 第一条）。
+    // 都带默认值，好让刚从算子库拖出来的格子不必先填表也能跑（首跑走 yes 支）。
+    params: z.strictObject({
+      value: z.number().int().default(1),
+      threshold: z.number().int().default(1),
     }),
   },
 ];

@@ -72,7 +72,7 @@ function nodeSpec(patch: Partial<WorkflowNodeSpec> = {}): WorkflowNodeSpec {
 }
 
 describe('算子描述表本身', () => {
-  it('内置六只算子的 kind 与 titleKey 都唯一，且每只都能派生出表单字段', () => {
+  it('内置七只算子的 kind 与 titleKey 都唯一，且每只都能派生出表单字段', () => {
     const kinds = WORKFLOW_OPERATORS.map((descriptor) => descriptor.kind);
     const titleKeys = WORKFLOW_OPERATORS.map((descriptor) => descriptor.titleKey);
     expect(new Set(kinds).size).toBe(kinds.length);
@@ -82,12 +82,21 @@ describe('算子描述表本身', () => {
     }
   });
 
-  it('描述表里的 kind 就是三条内置计划用到的那六个执行器名', () => {
+  it('描述表覆盖三条内置计划用到的每一个 kind，多出来的只有那只分支演示', () => {
     const planKinds = new Set<string>();
     for (const input of Object.values(WORKFLOW_PLANS)) {
       for (const node of buildPlan(input).nodes) planKinds.add(node.kind);
     }
-    expect([...planKinds].sort()).toEqual([...WORKFLOW_OPERATORS.map((d) => d.kind)].sort());
+    // 单向包含而不是相等：`demo.branch`（5.10-k / 裁定①）**刻意不进任何内置计划**——
+    // 内置那三条是线性 `plan_json`，投影出来的图没有分支边，把这只塞进去只会多一格永远走 yes 的死格子。
+    // 它存在的意义是让画布长出第二只出口点，从而截得到 5.10-08/09/13 那三张分支图。
+    expect([...WORKFLOW_OPERATORS.map((d) => d.kind)].sort()).toEqual([...planKinds, 'demo.branch'].sort());
+  });
+
+  it('全表只有一只多出口算子，且它的句柄就是 U 用例在读的 yes / no', () => {
+    const multi = WORKFLOW_OPERATORS.filter((descriptor) => descriptor.outputs.length > 1);
+    expect(multi.map((descriptor) => descriptor.kind)).toEqual(['demo.branch']);
+    expect(operatorByKind('demo.branch')?.outputs).toEqual(['yes', 'no']);
   });
 });
 
@@ -99,7 +108,11 @@ describe('5.10-03 唯一登记处：只改一处描述表，四处同时生效',
 
     // ① 调色板：分组里多出一格，且没有新开分组
     const demoGroup = groupOperatorsByCategory(table).find((group) => group.category === 'demo');
-    expect(demoGroup?.operators.map((descriptor) => descriptor.kind)).toEqual(['demo.flaky', 'mock.echo']);
+    expect(demoGroup?.operators.map((descriptor) => descriptor.kind)).toEqual([
+      'demo.flaky',
+      'demo.branch',
+      'mock.echo',
+    ]);
     expect(groupOperatorsByCategory(table).length).toBe(groupOperatorsByCategory().length);
 
     // ② 节点渲染：标题键、图标、出口数都来自同一处声明

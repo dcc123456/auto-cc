@@ -640,6 +640,9 @@
         "demo": {
           "flaky": {
             "title": "退避重试演示"
+          },
+          "branch": {
+            "title": "条件分支演示（数值 ≥ 阈值走 yes）"
           }
         }
       },
@@ -681,6 +684,10 @@
           "flaky": {
             "url": "计数端点地址",
             "failTimes": "先失败几次"
+          },
+          "branch": {
+            "value": "数值",
+            "threshold": "阈值"
           }
         }
       }

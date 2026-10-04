@@ -640,6 +640,9 @@
         "demo": {
           "flaky": {
             "title": "Retry backoff demo"
+          },
+          "branch": {
+            "title": "Conditional branch demo (value ≥ threshold takes yes)"
           }
         }
       },
@@ -681,6 +684,10 @@
           "flaky": {
             "url": "Counter endpoint",
             "failTimes": "Failures before success"
+          },
+          "branch": {
+            "value": "Value",
+            "threshold": "Threshold"
           }
         }
       }
