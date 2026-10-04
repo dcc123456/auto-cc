@@ -99,7 +99,9 @@ export function UpdateSection() {
       </div>
       <ul className="mt-3 space-y-1 text-xs text-slate-400">
         <li data-testid="update-state">{stateLine()}</li>
-        {view && <li>{t('update.currentVersion', { version: view.currentVersion })}</li>}
+        {/* 版本号只在真的问过运行期之后才有值：`no-feed` 与 `idle` 两态下更新器单连都没解析，
+            此时渲染一条「当前版本 」空尾巴看起来像坏了，所以没值就不出现。 */}
+        {!!view?.currentVersion && <li>{t('update.currentVersion', { version: view.currentVersion })}</li>}
         {failure && <li className="break-all text-rose-300">{t('update.rejected', { message: failure })}</li>}
       </ul>
     </section>
