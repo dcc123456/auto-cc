@@ -2894,7 +2894,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 | 5.9-01 | 三端安装包（mac dmg/zip、win nsis、linux AppImage+deb）产出且各自在对应平台可启动           | V    | 本机平台实测；其余平台以 `[!]` 记录受限范围 | `[x]`（win）／`[!]`（mac、linux） |
 | 5.9-02 | 产物自包含：全新环境无 Node / 无系统 Chrome / 无外网即可完整启动并进主界面                  | V    | 断网 + 干净账户启动截图（复用 1.7 判据）    | `[x]`（win）／`[!]`（mac、linux） |
 | 5.9-03 | 更新检查不违反零首启动下载：更新仅为**提示 + 用户主动触发**，且失败不阻塞使用               | U+V  | 断网启动 → 截图正常 + 无强制下载            | [ ]                               |
-| 5.9-04 | `LICENSES.md` 收口：所有生产依赖许可证列全，AGPL 来源（pdfjs-dist/mupdf）与 NOTICE 明确记录 | C    | 许可证扫描脚本输出归档                      | [ ]                               |
+| 5.9-04 | `LICENSES.md` 收口：所有生产依赖许可证列全，AGPL 来源（pdfjs-dist/mupdf）与 NOTICE 明确记录 | C    | 许可证扫描脚本输出归档                      | `[x]`                             |
 | 5.9-05 | `[!]` 三个源项目的许可立场在文档中给出最终结论（clean-room 或授权豁免），并链接到取证记录   | C    | 用户确认后方可置 `[x]`（见 research §1.2）  | [!]                               |
 | 5.9-06 | 发布产物内含隐私声明与使用条款首屏（中文），且声明不自动外发简历未经确认                    | V    | 首启动截图                                  | [ ]                               |
 | 5.9-07 | 冒烟脚本对安装后产物跑一遍最小链路（启动→进对话→跑占位工作流→退出），失败即阻断发布         | C    | 冒烟通过日志归档                            | [ ]                               |
@@ -2918,6 +2918,29 @@ ENOENT），deb 未及执行——所以 5.9-01 里"三端安装包产出"只有
 顺带记两个不属于本片判据、留给后续片的事实：`resources/app-update.yml`（provider github / owner dcc123456 /
 repo auto-cc）已由 electron-builder 打进产物但**当前没有消费者**（外置依赖闭包里没有 electron-updater），
 这正是 5.9-b 要接的那条 feed；linux 日志提示 `desktopName` 未设置，属发布打磨项。
+
+**5.9-c 落地记录（许可证记账收口，2026-10-04）**：证据 `docs/acceptance/5.9/5.9-04-license-scan.txt`。
+`scripts/check-licenses.ts` 已进 `pnpm lint` 链，做四件机检：① 取数只用 `pnpm licenses list --json --prod`
+（不另写依赖解析，§2.7）；② 搬运层的 25 个包必须全部在册（进 asar 却不进记账 = 失败）；
+③ copyleft 闸门（AGPL/LGPL/GPL-3/SSPL/QPL/CDDL/MPL/CECILL）命中而未登记处置即失败，登记反过来过期也失败；
+④ `LICENSES.md` 的生成节与扫描结果逐字比对，漂了提示 `--write`。实测读数：44 个包条目 / 8 种许可 / 零 UNKNOWN。
+
+三条必须写下来的实测结论，不允许读成"文档本来是对的"：
+① **判据里的 AGPL 断言被实测推翻**——`pdfjs-dist@6.3.289` 是 **Apache-2.0** 且**已在产物内**，
+`mupdf` 从未引入。原 `LICENSES.md` 把两者并列为"AGPL-3.0 / 尚未引入"，两处都错，文档里留了勘误段
+（判据原文不动，按 §6.2「以实测为准」处理）。
+② **扫出一个真实分发缺口**：`isarray@1.0.0` 的 npm 发布物里**没有 LICENSE 文件**（包目录只有
+Makefile/README/component.json/index.js/package.json/test.js）。处置是从包自己的 manifest 登记
+（license/author/repository）并让构建期生成 `THIRD-PARTY-NOTICES.txt` 承接，**不从网络补抄条文**——
+凭记忆生成许可文本比登记缺口更危险。
+③ **记账随包**：`electron-builder.yml` 的 `extraResources` 新增 `THIRD-PARTY-NOTICES.txt` 与 `LICENSES.md`
+两条，脚本静态断言这条接线存在。**诚实边界**：本轮只跑到 `pnpm app:build`（staging 里那份 76867 字节、
+25 个块的文件是实测产物），没有重跑 electron-builder，所以"安装目录 Resources/ 里看得见它"这一眼
+留给 5.9-e 的冒烟复跑；5.9-04 是 C 类，判据"扫描脚本输出归档"已满足，但不要把 F 段读成"产物侧已全验"。
+反向验证（改坏处置表与闸门正则）三条独立拒因全部命中，见证据 E 段。
+
+**5.9-05 维持 `[!]`**：三个源仓库（canva-pdf / browser-copilot / ai-resume）的许可立场终稿要用户裁定，
+脚本与文档都不替用户签这个字；本轮把"哪些是机检能定的"与"哪一条等人"分开了。
 
 ## 5.10 工作流画布编辑器（算子图）
 

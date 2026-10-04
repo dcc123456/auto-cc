@@ -1621,6 +1621,44 @@ updaterCacheDirName）已经被 electron-builder 打进产物，但**当前没�
 运行期证据取在同一份载荷的 `win-unpacked` 形态；"无外网"是 netlog 零请求口径，不是真拔网线。
 两条都写进了 `5.9-01` 的 C 段与 `5.9-02` 的说明段，spec 行内状态位按 win `[x]`／mac、linux `[!]` 分写。
 
+### 7.7.5 5.9-c 落地记录（2026-10-04，含一次公开的次序偏离）
+
+**先说偏离**：切片表原本 b → c → d → e，本片把 c 提到 b 前面。依据是两条不同的性质，不是"挑软的做"——
+b 的实现半边要在装机产物上取 V 证据（重建 dist + 断网 + feed 指向本地），当轮剩余预算不足以把它**收口**，
+挂着半片比没做更糟；c 是 C 类（脚本输出归档即判据），自包含、可当轮闭环。
+b 的前置取证（§7.7.2.1）已完成，它缺的只剩实现半边，没有因为等待而变得不可执行。
+偏离写在这里，是让下一个人知道顺序**被改过**，而不是照着切片表按原序推。
+
+四件机检的切法与理由（判据原文："所有生产依赖许可证列全，AGPL 来源与 NOTICE 明确记录"）：
+
+| 机检          | 做法                                                                             | 为什么这样切                                                  |
+| ------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 取数          | 只调 `pnpm licenses list --json --prod`                                          | 自己解析依赖树就是第二套真相源（§2.7），且与安装事实不同源    |
+| 搬运层在册    | `resolveRuntimeDeps()`（1.7-15 / 5.9-a 读的同一个口）25 个包必须全在扫描里       | "进了 asar 却没进记账"一定会漂，同源才拦得住                  |
+| copyleft 闸门 | 命中 `AGPL/LGPL/GPL-3/SSPL/QPL/CDDL/MPL/CECILL` 未登记处置即失败；过期登记也失败 | 失效模式是"某次顺手 `pnpm add`"（§8.7）；只写在文档里等于没写 |
+| 文档对齐      | `LICENSES.md` 的 `BEGIN/END:generated` 节由 `--write` 生成，校验时比对           | 手抄依赖表抄一次错一次；机器生成后人只写 judgement            |
+| 随包接线      | 断言 `electron-builder.yml` 的 `extraResources` 含两份记账文件                   | 记账只留在仓库就不算"分发义务完成"                            |
+
+只在实测里才看得见的四条：
+
+① **判据自身有错**：`pdfjs-dist@6.3.289` 是 Apache-2.0 而非 AGPL，且已随产物分发；`mupdf` 不在树里。
+判据原文与文档 ID 都不改（§4.5），勘误写在 `LICENSES.md` 正文并链到证据。
+② **扫出真实缺口**：`isarray@1.0.0` 的 npm 发布物里没有 LICENSE 文件（包目录只有 Makefile/README/
+component.json/index.js/package.json/test.js）。处置不从网络补抄条文（那等于凭记忆生成许可文本），
+改由构建期 `emitThirdPartyNotices()` 按 manifest 的 license/author/repository 生成
+`THIRD-PARTY-NOTICES.txt` 承接，并把"缺全文"做成**必须登记才能过**的一张表——放行不是登记，登记才是。
+③ **闸门与格式化工具会打架**：`--write` 生成的 markdown 表格随后被 prettier 重排列宽，逐字比对就永远不等，
+那条闸门会退化成"`pnpm format` 之后必须再跑一次 `--write`"的假阳性（本轮真的撞上了：`format:check` 报
+`LICENSES.md`，而 lint 的比对同时开始失真）。改为**按行归一化**（去首尾空白、连续空格压一、丢空行）后比较——
+表格内容是记账，列宽不是。教训写在代码注释里，不只写在这里。
+④ **诚实边界**：本轮只跑到 `pnpm app:build`（staging 里 76867 字节 / 25 个块是实测产物），
+没有重跑 electron-builder，所以"安装目录 `Resources/` 里看得见这两份文件"这一眼明确留给 5.9-e 冒烟复跑，
+不预先声称产物侧已全验（证据 F 段原话）。
+
+留给后续片的读数：copyleft 当前只命中 `jszip`（取 MIT 那一支）；`typescript`（Apache-2.0）与
+`@napi-rs/canvas-win32-x64-msvc`（MIT，pdfjs 的 optionalDependencies 被 pnpm 收进 `--prod`）都在这 44 条里，
+5.9-e 若做体积审计要认这两个读数。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。

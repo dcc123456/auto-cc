@@ -1,0 +1,106 @@
+5.9-04 许可证扫描与记账机检 —— 实测输出归档（slice 5.9-c，本机 Windows，2026-10-04）
+
+判据原文（spec §5.9）：`LICENSES.md` 收口：所有生产依赖许可证列全，AGPL 来源（pdfjs-dist/mupdf）与
+NOTICE 明确记录 | C | 许可证扫描脚本输出归档。
+
+本机实测命令与**原样输出**（不含转述）：
+
+════════════════════════════════════════════════════════════════════════
+A. 取数口（唯一真相源：pnpm 自己的许可聚合，不另写依赖解析）
+════════════════════════════════════════════════════════════════════════
+$ pnpm licenses list --json --prod        # 原始 JSON 落在 tmp/licenses-prod.json（未入库，§7.5）
+
+按许可分组（44 个包条目 / 8 组，零 UNKNOWN）：
+  MIT                                        31  @babel/runtime, @napi-rs/canvas, @napi-rs/canvas-win32-x64-msvc,
+                                               @standard-schema/spec, @xmldom/xmldom, argparse, base64-js, cordis,
+                                               core-util-is, cosmokit, cron-parser, html-parse-stringify, i18next,
+                                               immediate, isarray, lie, luxon, process-nextick-args, react, react-dom,
+                                               react-i18next, readable-stream, safe-buffer, scheduler, setimmediate,
+                                               string_decoder, underscore, util-deprecate, void-elements, xmlbuilder, zod
+  BSD-2-Clause                                4  dingbat-to-unicode, lop, mammoth, option
+  ISC                                         3  inherits, lucide-react, yaml
+  Apache-2.0                                  2  pdfjs-dist, typescript
+  (MIT OR GPL-3.0-or-later)                   1  jszip
+  (MIT AND Zlib)                              1  pako
+  BSD                                         1  duck
+  BSD-3-Clause                                1  sprintf-js
+
+════════════════════════════════════════════════════════════════════════
+B. 勘误：判据里的 AGPL 断言与实测不符（AGENTS.md §6.2 的具体执行）
+════════════════════════════════════════════════════════════════════════
+· `pdfjs-dist@6.3.289` 的许可实测为 **Apache-2.0**，且**已经在产物里**（搬运层第二个外置根，
+  `scripts/vendor-runtime-deps.ts` 的 `RUNTIME_EXTERNAL_ROOTS = ['mammoth','pdfjs-dist']`）。
+  原 LICENSES.md 把它与 mupdf 并列为 "AGPL-3.0 / 尚未引入" —— 两处都错，已在文档里改并留勘误段。
+· `mupdf` 实测**不在依赖树里**（扫描输出无此包），AGPL 义务目前不适用；
+  但 copyleft 闸门把它可能进来的路堵住了：命中 `AGPL|LGPL|GPL-3|GPLv3|SSPL|QPL|CDDL|MPL|CECILL`
+  而未登记处置即 `pnpm lint` 失败。
+· copyleft 闸门当前唯一命中：`jszip@3.10.2`，许可串 `(MIT OR GPL-3.0-or-later)`，
+  处置 = 取 MIT 那一支（mammoth 的传递依赖，随 asar 分发），登记在 LICENSES.md 的生成节。
+
+════════════════════════════════════════════════════════════════════════
+C. 搬运层（唯一"整包拷进产物"的那一层）的许可全文核对
+════════════════════════════════════════════════════════════════════════
+第一版脚本（还没有缺全文处置表时）跑出来的原话——这一条就是本次扫描查出的**真实缺口**：
+$ npx tsx scripts/check-licenses.ts --write
+✔ 已重写 LICENSES.md 的生成节（44 个包条目）
+✖ 许可证记账检查未通过：
+  · 搬运层有 1 个包目录里没有许可全文：
+      isarray（MIT，目录：D:\works\deep-seek-workspace\auto-cc\node_modules\.pnpm\isarray@1.0.0\node_modules\isarray）
+
+补上处置表与 `THIRD-PARTY-NOTICES.txt` 承接之后（拒因文案随之变成"缺全文且没有处置登记"）：
+$ npx tsx scripts/check-licenses.ts
+✔ 许可证记账检查通过（生产依赖 44 个包条目 / 8 种许可；搬运层 25 个包全部在册，
+  其中 1 个上游无许可全文、已登记处置；copyleft 命中 1 条且都有处置）
+
+isarray 缺全文是**上游发布物本身**的缺项，实测包目录内容：
+$ ls node_modules/.pnpm/isarray@1.0.0/node_modules/isarray/
+Makefile  README.md  component.json  index.js  package.json  test.js
+→ manifest 里 `license: "MIT"`、`author: Julian Gruber <mail@juliangruber.com>`、
+  `repository: git://github.com/juliangruber/isarray.git`。
+处置：不由本项目凭记忆补抄一份 MIT 条文（那等于生成许可文本），改由构建期生成的
+`THIRD-PARTY-NOTICES.txt` 按 manifest 字段登记，并在 LICENSES.md 的缺全文处置表写明缺口来源。
+
+════════════════════════════════════════════════════════════════════════
+D. 记账随包分发（构建期产物，$ pnpm app:build 后实测）
+════════════════════════════════════════════════════════════════════════
+$ ls -la build/app/THIRD-PARTY-NOTICES.txt
+-rw-r--r-- 1 ragfl 197609 76867 Oct  4 11:55 build/app/THIRD-PARTY-NOTICES.txt
+$ grep -c '^\[' build/app/THIRD-PARTY-NOTICES.txt
+25            # 与搬运层 25 个包一一对齐
+$ head -4 build/app/THIRD-PARTY-NOTICES.txt
+搬运层（esbuild 外置、随 app 一起分发的运行期依赖）的第三方许可汇总。
+由 scripts/vendor-runtime-deps.ts 在构建时生成，共 25 个包。
+人工记账与全量生产依赖清单见仓库根的 LICENSES.md。
+
+抽查三条（原文）：
+  [isarray] 1.0.0 / license MIT / notice「上游发布物内无许可全文…已在 LICENSES.md 的 copyleft/缺失全文处置表中记录」
+  [jszip] 3.10.2 / license (MIT OR GPL-3.0-or-later) / notice「以下转录包内 LICENSE.markdown」
+  [pdfjs-dist] 6.3.289 / license Apache-2.0 / notice「以下转录包内 LICENSE」 → 全文随附
+  [mammoth] 1.13.0 / license BSD-2-Clause / notice「以下转录包内 LICENSE」 → 全文随附
+
+electron-builder.yml 的随包接线（本轮新增两条 extraResources，安装后在 Resources/ 直接可见，不必解包 asar）：
+  - from: build/app/THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
+  - from: LICENSES.md
+    to: LICENSES.md
+机检：`check-licenses.ts` 断言这两个名字出现在 `extraResources` 段，删掉接线即 lint 失败。
+
+════════════════════════════════════════════════════════════════════════
+E. 反向验证（闸门真的会拦，而不是永远绿）
+════════════════════════════════════════════════════════════════════════
+临时改坏两处（把 jszip 的处置键改名 + 把 copyleft 正则里的 AGPL 换成不可能命中的词），跑校验模式：
+✖ 许可证记账检查未通过：
+  · 以下包命中 copyleft 闸门但没有处置登记：jszip
+  · 处置表里有 1 条已经没有对应的包（jszipNotThere），删掉以免误导
+  · LICENSES.md 的生成节与当前扫描结果不一致，跑 tsx scripts/check-licenses.ts --write
+还原后复跑：✔ 通过（读数同 C 段）。
+→ 三条独立拒因都命中：新增 copyleft 未登记 / 处置表过期 / 文档与扫描漂移。
+
+════════════════════════════════════════════════════════════════════════
+F. 产物侧的 electron 许可文件（5.9-a 已构建的 dist/win-unpacked 上核对）
+════════════════════════════════════════════════════════════════════════
+· `LICENSE.electron.txt`、`LICENSES.chromium.html` 均在 `dist/win-unpacked/` 内（脚本里那条检查没有报缺失）。
+· **未重跑 electron-builder**：本轮只跑了 `pnpm app:build`（staging），所以 D 段那两条 extraResources
+  在**当前 dist 产物里还不存在**。判据是 C 类（脚本输出归档），随包接线由静态机检覆盖；
+  装进安装包后的那一眼留给 5.9-e 的冒烟复跑（它本来就要对 dist 产物跑一遍）。
+  这一条如实记为"部分实测"，不写成"已验证产物内含"。
