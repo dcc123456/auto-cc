@@ -422,7 +422,12 @@ export type WorkflowGraphSaveView = { planId: string; revision: number; fingerpr
  */
 export type WorkflowGraphSaveInput = {
   planId: string;
-  graph: WorkflowGraphView;
+  /**
+   * 画布命令栈里那一版：id + 节点 + 边，**故意不含 `fingerprint`**。
+   * 保存口的 `buildGraph` 一律重算指纹（它不信传进来的那串，与 `buildPlan` 同一条理由），
+   * 所以入参不该要求调用方编一个——界面手里本来只有 `WorkflowGraphDraft`，硬要它填只能填过期的。
+   */
+  graph: { id: string; nodes: WorkflowNodeSpec[]; edges: WorkflowEdgeView[] };
   placements: WorkflowNodePlacement[];
   expectedRevision: number;
 };

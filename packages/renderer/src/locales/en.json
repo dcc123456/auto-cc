@@ -479,6 +479,8 @@
         "undo": "Undo",
         "redo": "Redo",
         "validate": "Validate before save",
+        "save": "Save to store",
+        "actionSave": "Save the canvas graph",
         "validatePassed": "No problems found in this graph.",
         "draftCount": "{{nodeCount}} node(s) on the graph",
         "actionLoad": "Load the plan's graph",
@@ -595,7 +597,7 @@
       },
       "operator": {
         "paletteHeading": "Operators",
-        "editHint": "Cells added from the library stay on the canvas only — the write into the plan store is not wired yet; edges work and undo removes one at a time.",
+        "editHint": "Cells added from the library stay on the canvas until you press Save to store; edges work and undo removes one at a time.",
         "readOnlyHint": "A run is in progress, so the canvas is read-only: editing changes the fingerprint and that run could no longer be resumed.",
         "paramHeading": "Parameters",
         "paramHint": "Fields are generated from this operator's parameter schema",

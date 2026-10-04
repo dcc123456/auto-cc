@@ -1,6 +1,6 @@
 /**
  * 算子图画布（spec 5.10-01 的骨架 + 5.10-03/04 的编辑态第一层 + 5.10-d 的连线、命令栈与保存前校验
- * + 5.10-g 的"运行态叠在编辑态同一张图上"）。
+ * + 5.10-g 的"运行态叠在编辑态同一张图上" + 5.10-10 的写入口「保存到库」）。
  *
  * 两种画法共用**同一张图**（§5.10.5 的口径）：
  * - **图的节点与边**来自库：下拉里选中那条计划时经 `workflow.graph.load` 读进来（5.10-02 要的
@@ -222,10 +222,15 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
    */
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   /**
-   * 画布现在照的是库里哪条计划（5.10-02 的判据要在界面上认得出来源）；
-   * null = 没照库画（没选计划，或那次读数没成功），此时格子来自运行镜像。
+   * 画布现在照的是库里哪条计划（5.10-02 的判据要在界面上认得出来源），以及覆盖保存要的版本号。
+   * null = 没照库画（没选计划，或那次读数没成功），此时格子来自运行镜像，没有可写的对象。
+   *
+   * `revision` 是覆盖保存的乐观并发凭据：每存成功一次跟上一次，同一张图在两个窗口各改一版时，
+   * 后写那一次由保存口拒掉并报错，而不是静默抹掉前一版（`WorkflowGraphLoadView.revision` 的对面）。
+   * 这里**不记「这条计划是不是自定义的」**："库里有这一行才存得下"由保存口判（它读同一张表），
+   * 界面再判一次就是第二份事实，而且读回来的 `isCustom` 说的是"图存过没有"，不是同一件事。
    */
-  const [loadedPlanId, setLoadedPlanId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{ planId: string; revision: number } | null>(null);
   /** 拖拽后的落点（视图层）：图上格子与镜像补的格子都按这一份覆盖初始摆放。 */
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
   /** 图变过一次就自增一次，让下面的 effect 重新贴合视口（0 = 还没变过，不该动用户的视野）。 */
@@ -246,8 +251,8 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   /**
    * 用库里读来的那张图重铺命令栈：节点、边、落点都照库里那一版，撤销到底也回到这一版。
    *
-   * 换一条计划就等于丢掉尚未入库的编辑——这是**如实**而不是省事：画布那侧的写入口还没接上
-   * （保存口只在 5.10-e 的 IPC 上），既然留不住，就不假装留得住。
+   * 换一条计划就等于丢掉尚未入库的编辑——这是**如实**而不是省事：写入口是「保存到库」那一次明确的
+   * 按钮（5.10-10），画布不做自动存草稿，所以没按过就还没进库，切走了也就没了。
    * @param view `workflow.graph.load` 的读数
    */
   const seedFromGraph = useCallback((view: WorkflowGraphLoadView) => {
@@ -258,13 +263,13 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
       Object.fromEntries(view.placements.map((placement) => [placement.nodeId, { x: placement.x, y: placement.y }])),
     );
     setSelectedNodeId(null);
-    setLoadedPlanId(view.planId);
+    setLoaded({ planId: view.planId, revision: view.revision });
     setFitRequestId((previous) => previous + 1);
   }, []);
 
   /** 一次读数没有「动作跑完重读快照」这回事，复用外壳只为忙碌态与失败提示的同一套呈现（§2.1，同 `NodeEvidenceSection`）。 */
   const nothingToReread = useCallback(() => Promise.resolve(), []);
-  const { notice: graphNotice, run: readGraph } = useBridgeAction(nothingToReread);
+  const { notice: graphNotice, run: runGraphAction } = useBridgeAction(nothingToReread);
 
   /**
    * 选中的计划变了就去库里读它的那张图（spec 5.10-02：内置线性计划不重写就能画成一条链）。
@@ -272,13 +277,13 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
    */
   useEffect(() => {
     if (!planId) {
-      setLoadedPlanId(null);
+      setLoaded(null);
       return;
     }
-    void readGraph(t('workflow.canvas.actionLoad'), () => bridge?.workflow['graph.load'](planId), {
+    void runGraphAction(t('workflow.canvas.actionLoad'), () => bridge?.workflow['graph.load'](planId), {
       apply: seedFromGraph,
     });
-  }, [planId, bridge, readGraph, seedFromGraph, t]);
+  }, [planId, bridge, runGraphAction, seedFromGraph, t]);
 
   /** 被校验点名的节点 id——红环按这一份落，与文案无关（同一份事实的两个读数）。 */
   const issueNodeIds = useMemo(() => new Set((issues ?? []).flatMap((issue) => issue.nodeIds)), [issues]);
@@ -427,6 +432,36 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   }
 
   /**
+   * 把画布上这一版写回库（spec 5.10-10 的写入口，plan §7.8.3-septies 的 B 片）。
+   *
+   * 界面这条只是**发起**：服务端那三道（结构 → 五条语义 → 版本号）在 `workflow.graph` 里跑，
+   * 不合法就以结构化错误回来、库里那一版原样不动，所以这里不预先拦、也不猜"能不能存"——
+   * 内置那三条不在 `workflow_plans` 表里，保存口会直接回「画布图无处可存，请先复制成自定义计划」，
+   * 那句判据在存储层（它读那张表），界面再判一次就是第二份事实（§2.5）。
+   * 落点从 `nodes` 现取而不重算初始摆放：那条规则只有一份（§2.2），抄第二份就会漂。
+   */
+  function saveDraft() {
+    if (loaded === null) return;
+    const graphCellIds = new Set(snapshot.nodes.map((node) => node.id));
+    void runGraphAction(
+      t('workflow.canvas.actionSave'),
+      () =>
+        bridge?.workflow['graph.save']({
+          planId: loaded.planId,
+          graph: { id: loaded.planId, nodes: snapshot.nodes, edges: snapshot.edges },
+          placements: nodes
+            .filter((node) => graphCellIds.has(node.id))
+            .map((node) => ({ nodeId: node.id, x: node.position.x, y: node.position.y })),
+          expectedRevision: loaded.revision,
+        }),
+      {
+        // 存成功就把版本号跟上：库里那一版已经前进了，下一次保存的凭据必须是新的那一个。
+        apply: (saved) => setLoaded((previous) => (previous ? { ...previous, revision: saved.revision } : previous)),
+      },
+    );
+  }
+
+  /**
    * 画布上的边。
    *
    * - 图上的边只从 `snapshot.edges` 来（库里存的那一份，或用户在算子库之间连出来的那一份）。
@@ -462,6 +497,12 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   const canUndo = editorRef.current.canUndo();
   const canRedo = editorRef.current.canRedo();
   /**
+   * 能不能发起这一次保存：照的是库里那张图（不是运行镜像）、不在运行期、图上至少有一格。
+   * 「这条计划存不存得下」不在这里判（见 `saveDraft` 那条注释）；空格那条也不是防御——
+   * `workflowGraphSchema` 的 `nodes.min(1)` 真会拒，而"图上一格都没有"此刻在界面上看得见。
+   */
+  const canSave = loaded !== null && !isReadOnly && snapshot.nodes.length > 0;
+  /**
    * 点开的那一格。从 `canvasCells` 找而不是再算一次标签：标签规则只在那一份里（§2.2），
    * 且这一格被撤销 / 换一条计划之后可能已经不在了，找不到就是"它不在这张图上"。
    */
@@ -481,10 +522,10 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
       <p
         className="mt-1 text-[11px] text-slate-500"
         data-testid="canvas-graph-source"
-        data-loaded-plan={loadedPlanId ?? ''}
+        data-loaded-plan={loaded?.planId ?? ''}
       >
-        {loadedPlanId
-          ? t('workflow.canvas.graphSourceGraph', { planId: loadedPlanId })
+        {loaded
+          ? t('workflow.canvas.graphSourceGraph', { planId: loaded.planId })
           : t('workflow.canvas.graphSourceMirror')}
       </p>
       {graphNotice ? (
@@ -526,6 +567,17 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
         >
           {t('workflow.canvas.validate')}
+        </button>
+        {/* 写入口（5.10-10）：一次点击一次覆盖保存，画布不自动存草稿——"改了就进库"会让 5.10-07 的
+            指纹续跑判据在用户不知情时生效，那比丢掉未入库的编辑更糟。 */}
+        <button
+          type="button"
+          data-testid="canvas-save"
+          onClick={saveDraft}
+          disabled={!canSave}
+          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
+        >
+          {t('workflow.canvas.save')}
         </button>
       </div>
       {issues !== null ? (

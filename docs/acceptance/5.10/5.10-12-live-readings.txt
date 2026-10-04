@@ -35,3 +35,43 @@
   本窗也没有用户在场，所以不能为了这张截图去跑它。
 - 与 5.10-08/09/13 同一前置：要么登记一只多出口/纯 fixture 的演示算子（属新能力，plan §7.8.3-bis 待裁定），
   要么把画布的写入口接上（能存一条只含 fixture 节点的自定义计划）。两条都不在本片范围内，已写进 plan 的落地记录。
+
+---
+
+5.10-12 的后一半已结算（画布写入口接上之后，同一份文件续记 · 2026-10-04 22:38–22:41）
+
+前置：先用画布把自定义计划 `local-flaky-4` 的 `flaky-3` 那格 `failTimes` 改成 5 并「保存到库」
+（revision 3、指纹 a5b4a0e5→8d339fa2），再把失败计数端点归零后跑一遍：
+run ba4e93c0-b47d-40f1-9ed9-1b3ebfb010de 在第三格失败（`lastError`：第 5 次命中，按注入计划失败（failTimes=5））。
+
+一、点开的正是失败那一格（`[data-testid="canvas-node-detail"]` 的属性）
+  data-node-id      flaky-3
+  data-node-source  state            ← 与审计段同一份取数（`runStateReading.ts`），不是二次拼装
+
+二、四项读数逐字（点开那一刻读一次，界面无定时器）
+  状态            已失败
+  尝试            3 次
+  耗时            1507 毫秒
+  错误            第 5 次命中，按注入计划失败（failTimes=5）
+  事实源那一行     workflow_nodes · 本次进程的 run ba4e93c0-… · 状态 已失败
+
+三、证据正文（点「查看失败证据」展开，2.8-04 那一只复用组件）
+  第 3 次尝试 · 判于 2026/10/4 22:34:06
+  WORKFLOW_STEP_FAILED · 第 5 次命中，按注入计划失败（failTimes=5）
+  这一步没有留下页面读数（当时没有可用的内核会话）
+  这一步没有现场截图（抓取时没取到画面）
+  证据文件：evidence/ba4e93c0-b47d-40f1-9ed9-1b3ebfb010de-flaky-3.json
+  —— 后两行是 `demo.flaky` 的真实情况（本地节点没有浏览器现场），组件按 2.4 的口径如实说，不编造。
+
+四、参数半边（同一格）
+  参数卡只有**一张**（`operator-param-form` 计数 = 1），字段与值逐字等于库里那条声明：
+  url = http://127.0.0.1:10233/api/fail-counter，failTimes = 5（即上面保存进去的那个值）。
+
+五、截图
+  docs/acceptance/5.10/5.10-12-failed-node-readings.png（四读数 + 展开的证据正文同框）
+
+六、一条如实记录（与本条判据无关，但探针撞上了）
+  长时间开着 dev 实例反复热改 `WorkflowCanvas.tsx` 之后，同一张画布的 DOM 里出现过 13 张参数卡
+  （都在 `[data-testid="workflow-canvas"]` 直下，全部可见），而 JSX 只有一处渲染点、根节点也只有一个。
+  整页 reload + 重挂画布后计数回到 1。成因未查（HMR 遗留 DOM 与产品缺陷两种都能解释这个现象），
+  上面第四确的「1 张」是 reload 之后重取的干净读数。

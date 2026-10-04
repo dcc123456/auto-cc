@@ -1,0 +1,40 @@
+5.10-20（V）端到端在本地 fixture（127.0.0.1:10233）上跑通并截图，自动化测试不触达真实招聘平台 · 2026-10-04 22:50（本机 macOS，dev 实例）
+
+读法裁定（用户 2026-10-04 选定）：按字面判据验收——「一张四节点图跑完 → 截图终态」，
+用四只不碰平台包的本地算子（`demo.flaky`）拼图。求职链那四格（搜索 → 读 JD → 打招呼 → 投递）在仿站上跑完
+的那一份仍要用户在场签一次 `boss` 的风险确认（2.7-06 拦截点 ②），代理不代签，故留在 2.8 / M6 的记录里。
+
+一、图上是什么（`workflow.graph.load('local-flaky-4')`）
+  planId            local-flaky-4（自定义计划，由画布写入口「保存到库」存下来的）
+  nodes             flaky-1 → flaky-2 → flaky-3 → flaky-4（4 格，kind 全是 demo.flaky，effect 全是 local-write）
+  edges             3 条，sourceHandle 均为 default
+  params            { url: 'http://127.0.0.1:10233/api/fail-counter', failTimes: 0 或 5 }
+  fingerprint       8d339fa2（第 5 版）
+
+二、跑完的终态（`runner.state()`，run d994163f-1262-4493-b246-c8eec996afff）
+  status            done
+  flaky-1           done · attempts 1
+  flaky-2           done · attempts 1
+  flaky-3           done · attempts 1
+  flaky-4           done · attempts 1
+  lastError         null
+  四格在画布上同时可见（fitView 后 x=72 / 248 / 424 / 600，宽度各 72 像素）
+
+三、判据逐条
+  ① 一张四节点图跑完     → 是（status done，四格全 done）
+  ② 截图终态             → docs/acceptance/5.10/5.10-20-four-node-local-run.png
+                             （画布四格 + 条上「图上 4 格」+ 保存前校验/保存到库两颗按钮 + 算子库那行已改口的提示）
+  ③ 自动化不触真实平台   → 全程只打 127.0.0.1:10233 的失败计数端点；四格 effect 都是 local-write，
+                             链路上没有 outbound 节点，也没有打开任何内核会话
+  ④ 零 CONSENT_REQUIRED  → 本次 run 的 lastError 为 null，四行 error 全为 null，界面上没出现过签字询问
+
+四、顺带验掉 plan §7.8.3-septies 那条「接完 B 必须当场验一次」
+  用画布写入口保存下来的、以 `demo.flaky` 为首格的自定义计划，整条 run 走不到任何平台节点，
+  因此**确实**零 `CONSENT_REQUIRED`——这一条不是既成事实，是跑出来的读数。
+
+五、同一台机器上取到的反向对照（不属于本条判据，但记在这里免得被当成缺口的证据）
+  重启后 `runner.resumable()` 报出的是库里另一次未完成 run（boss-basic 的 0cebb65f-…，指纹 28e12a28），
+  点「从失败节点续跑」之后 `jd-capture` 的 attempts 由 3 涨到 6，而 `lastError` 是
+  「平台 boss 还没有一份自动化风险确认记录，先确认承担该风险」——
+  即续跑**确实**会重新派发节点，而外发链路上的那道硬拦（§7.3 / 2.7-06 拦截点 ②）在活体里拦住了它，
+  没有打开真实平台页面、没有绕过签字。

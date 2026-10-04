@@ -2060,6 +2060,54 @@ per-platform 漂移怎么摆平。P3 的 28 条 `[ ]`（3.4/3.5/3.6 编辑轨）
 "刻意的缺口，等编辑面的下一件事再定"），而且它牵出的「从画布新建一条计划（id 归属）」仍未定——本表的最小档只到
 「在已复制出来的计划上保存」。不同意这个边界就直接说改成什么，本节不替谁决定。
 
+##### 7.8.3-octies 5.10-i：画布写入口（B）落地，顺带取到 07/12/20 三颗 V，并留下两条活体缺陷候选（2026-10-04）
+
+**这一片做了什么**（用户 2026-10-04 裁定的档位 B：不引新算子、不引新依赖、不动 CSP）：
+
+1. `WorkflowCanvas.tsx` 接上「保存到库」：`loaded` 从只存 `planId` 改成存 `{ planId, revision }`，
+   保存实参照 `graph.save` 的契约给（图本体 + 从现有 `nodes` 派生的落点 + `expectedRevision`），
+   回执里的新 `revision` 写回 state。按钮的禁用判据是 `loaded !== null && !isReadOnly && 有格子`——
+   **刻意不判"这条计划存不存得下"**：`readPlanGraph` 的 `isCustom` 语义是「`graph_json` 存过没有」，
+   拿它当闸门会让一条刚复制出来、从没存过图的计划永远存不了第一次（先有鸡还是先有蛋），
+   存不存得下由服务侧那一道（库里没有这一行就 `INVALID_ARGUMENT`）说话。
+2. `core/events.ts` 把 `WorkflowGraphSaveInput.graph` 从 `WorkflowGraphView` 收窄成 `{ id, nodes, edges }`：
+   `buildGraph` 每次重算指纹，所以入参不该要求调用方递一个（必然可能过期的）指纹。
+3. 算子库那行提示原来写着「写入口还没接线」，接线之后就是假话，两份语言包一起改了口径。
+4. `WorkflowLabPanel.tsx` 的「从失败节点续跑」禁用判据从 `!resumable` 改成 `!shown`（屏上没有这次 run 才禁）。
+   理由：5.10-07 要的是界面上**说出**为什么不能续，而那句原话只有服务侧知道；
+   在渲染层比一次指纹再编一句文案就是第二份事实（§2.5）。改完之后拒因原样落到提示行（见证据）。
+
+**取到的三颗 V**（判据读数与截图在 `docs/acceptance/5.10/5.10-07-*`、`5.10-12-*`、`5.10-20-*`）：
+5.10-07（改图→续跑被拒那句 + 反向对照：指纹存回去就报得出可续）、
+5.10-12 的后一半（失败节点四读数 attempts/耗时/错误/证据正文，`demo.flaky` 首格那条 run 全程零 `CONSENT_REQUIRED`——
+-septies 要求"接完 B 必须当场验一次"的那条，验了）、
+5.10-20（按用户选定的字面读法：四格本地算子跑到 `done`，只打 127.0.0.1:10233，没打开内核会话）。
+
+**两条活体缺陷候选，本窗没有动代码去修，只如实记下**：
+
+- **同进程内 `resumeRun` + `resume` 不推进**：run ba4e93c0（failed）还在内存时，
+  「从失败节点续跑」与「续跑」两次调用都返回 `ok`，但 `flaky-3` 的 attempts 停在 3、失败计数端点一次都没被再打；
+  而**跨重启**的同一条路（重启后 `resumable()` 报出库里那次 failed run → 续跑）确实把 `jd-capture` 的 attempts 从 3 推到 6。
+  也就是说 5.10-13 判据里"从中断节点继续"这一条，活体只在重启形态下成立，内存里挂着同一次 failed run 时是空转。
+  5.10-13 的 U 用例是从空库起造的，看不见这一类形态差。
+- **一次 failed run 会把工作流视图堵死**：`runner.start()` 报「已有 run 处于 failed 态，先处理完它」，
+  `runner.abort()` 报「没有可中止的 run，当前是 failed」，`resumeRun` 又是上一条的空转——三条出口同时走不通，
+  本窗是靠重启 dev 实例才继续取证的。这一条要在下一片决定"到底哪一条出口该管 failed 态"。
+
+**另一条与本片无关但探针撞上的**：同一张画布长时间热改（HMR）之后 DOM 里出现过 13 张参数卡，
+reload 后回到 1 张；成因未查（HMR 遗留与真实泄漏两种都能解释），已记在 5.10-12 的证据文件末尾。
+
+**下一件事仍然等裁定**：5.10-08/09/13/18 的 V 半边要的是**分支图**，而分支要先有一只多出口算子（档 A，属新能力）。
+-septies 那张三档表仍然有效，本节只是把 B 那一档结掉。
+
+**四道门禁读数（本窗收口实跑，每条都是 `cmd > log 2>&1; echo EXIT=$?` 的写法，不接 `tail`）**：
+`pnpm typecheck` EXIT=0；`pnpm test` EXIT=0（22 个包全绿，无 failed：`packages/workflow` 205、`packages/agent` 223、
+`packages/browser` 252、`packages/resume-kb` 398……）；`pnpm format:check` 第一次 EXIT=1，红在
+`docs/specs/05-chat-agent/spec.md` 的表列对齐（改判据那三行时手写的空格与 Prettier 不一致），
+`prettier --write` 该文件后 EXIT=0，重跑 `--check` 同一条命令确认；`pnpm lint` EXIT=1，
+**失败项仍只有 `check-licenses.ts` 那一条 `LICENSES.md` per-platform 漂移**（前四窗记的同一处待裁定，
+本窗没有为它重新生成表，见上面 ③）。
+
 #### 7.8.5 b 片收口对账（2026-10-04，图语义层；判据读数在 spec 的 5.10-b 落地记录）
 
 **裁定七（b 片现场补）指纹是"执行身份"的一条通道，节点上加的是清单里的键而不是整对象**：

@@ -479,6 +479,8 @@
         "undo": "撤销",
         "redo": "重做",
         "validate": "保存前校验",
+        "save": "保存到库",
+        "actionSave": "保存画布的图",
         "validatePassed": "这张图没有发现问题。",
         "draftCount": "图上 {{nodeCount}} 格",
         "actionLoad": "读取计划的图",
@@ -595,7 +597,7 @@
       },
       "operator": {
         "paletteHeading": "算子库",
-        "editHint": "从算子库加入的格子只在画布上，尚未存进计划库（写入口还没接线）；连线已可用，撤销一条就没了。",
+        "editHint": "从算子库加入的格子只在画布上，按「保存到库」才写进计划库；连线已可用，撤销一条就没了。",
         "readOnlyHint": "有正在进行的运行，画布只读：改图会换指纹，那次运行就不能续跑了。",
         "paramHeading": "参数",
         "paramHint": "字段由该算子的参数 schema 生成",

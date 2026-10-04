@@ -128,12 +128,15 @@ export function WorkflowLabPanel() {
           </button>
           {/* 动作名带 `workflow` 前缀：本视图在 `App.tsx` 里是用 CSS `hidden` 藏起来的常驻分支，
               与对话页的 `resume-run`（agent 循环续跑）同名时，一条 `[data-action="resume-run"]` 选择器
-              会在 DOM 里同时命中两颗——而这一颗在 `!resumable` 时是 `disabled` 的，
-              `.click()` 落在它身上就成了「按了没反应」，把探针指错的方向读成 app 缺陷（5.7-d 实测踩过）。 */}
+              会在 DOM 里同时命中两颗（5.7-d 实测踩过）。
+              禁用判据取 `shown`（屏上有这次 run）而不是 `resumable`：5.10-07 要的是界面上**说出**
+              「旧 run 不能续」那句原因，而那句原话只有服务侧知道（它比的指纹在库里）。
+              在界面里比一次指纹再编一句文案就是第二份事实（§2.5），所以这里让按钮可点、
+              把 `runner.resumeRun()` 的拒因原样落到提示行。 */}
           <button
             type="button"
             data-action="resume-workflow-run"
-            disabled={busy !== undefined || !resumable}
+            disabled={busy !== undefined || !shown}
             onClick={() =>
               void call(t('workflow.lab.actionResumeRun'), () => bridge?.workflow['runner.resumeRun'](), {
                 describe: (view) => t('workflow.nowStatus', { status: t(`workflow.status.${view.status}`) }),

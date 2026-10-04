@@ -1,0 +1,35 @@
+5.10-07（V）指纹变化后的旧 run 不可续跑，界面上说出原因而不是静默开新 run · 2026-10-04 22:40–22:41（本机 macOS，dev 实例）
+
+前置（这一条整个 V 半边等的就是画布写入口，plan §7.8.3-septies 第 3 档）：
+  1. 画布选中 `local-flaky-4` 的 `flaky-3`，把 `failTimes` 由 0 改成 5，按「保存到库」
+     → revision 2→3，指纹 a5b4a0e5→8d339fa2（`workflow.graph.save` 的回执 + `graph.load` 重读）；
+  2. 失败计数端点归零后跑一遍 → run ba4e93c0-b47d-40f1-9ed9-1b3ebfb010de 在第三格失败，
+     那次 run 记的指纹是 8d339fa2；
+  3. 再把 `flaky-3` 的 `failTimes` 改回 0 并「保存到库」→ revision 3→4，指纹回到 a5b4a0e5。
+     此刻**库里的计划**与**那次未完成 run 记的指纹**不同源。
+
+一、界面上的拒因（点「从失败节点续跑」之后的 `wf-lab-notice` 原样文本）
+  从库里那次中断续跑 失败：库里没有按当前计划（a5b4a0e5）可续的 run
+
+  —— 这句是服务侧 `workflow.runner.resumeRun` 抛出的 `INVALID_ARGUMENT` 原话（同一次调用的桥返回：
+  `{"ok":false,"error":{"code":"INVALID_ARGUMENT","message":"库里没有按当前计划（a5b4a0e5）可续的 run",
+     "path":"workflow.runner","details":{"planId":"local-flaky-4"}}}`），
+  界面只做转述。渲染层里**没有**第二处指纹比较（AGENTS.md §2.5：能不能续这一判断只有服务侧那一份）。
+
+二、「不静默开新 run」的读数
+  点击前后 `runner.current()` 的 runId 仍是 ba4e93c0-…、status 仍是 failed（没有新 runId 出现，
+  也没有任何节点被派发）；`workflow_nodes` 那几行原地不动。
+
+三、反向对照（同一处判据的另一边，顺手取到）
+  把 `flaky-3` 的 `failTimes` 再改回 5 并保存 → revision 4→5、指纹回到 8d339fa2，
+  此时 `runner.resumable()` 立刻返回 `{ runId: ba4e93c0-…, status: 'failed', planFingerprint: '8d339fa2' }`。
+  即：**同一张画布、同一个按钮**，指纹对上就报得出可续、对不上就报不出，差别只在库里那份。
+
+四、截图
+  docs/acceptance/5.10/5.10-07-resume-refused-after-graph-edit.png
+  （画面里同时有：提示行那句拒因 + 下面「库里的 run 与逐节点读数」段首的 `指纹 8d339fa2` + 当前计划四格）
+
+五、本片为取到这句而改的一处界面判据
+  `WorkflowLabPanel.tsx` 的「从失败节点续跑」原先在 `!resumable` 时是 `disabled` 的——
+  那是**静默**：用户看不出为什么不能续。现在禁用判据改成「屏上有没有这次 run」（`shown`），
+  续不了就让服务侧那句原话落到提示行。
