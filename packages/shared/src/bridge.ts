@@ -109,6 +109,35 @@ export type {
   WorkflowTakeoverView,
 } from '@auto-cc/core';
 
+/**
+ * 算子描述表（spec 5.10-03）在渲染层的唯一入口。
+ *
+ * 为什么在这里再导出而不是让渲染层 import `@auto-cc/core`：渲染层只允许看见 `@auto-cc/shared`
+ * （AGENTS.md §5.8 的边界），而调色板/节点格子/参数表单三处都要读同一张表——把表搬进 IPC 反而
+ * 让「界面能摆出的算子」与「主进程登记的执行器」变成两份要同步的事实，所以表本身走编译期共享。
+ *
+ * **必须走 `@auto-cc/core/operators` 这个子路径出口，不许从 core 的 barrel 取值**（实测）：
+ * 上面的类型复导出是 `export type`，编译后整条擦掉，渲染层的运行期模块图里没有 core；一旦按值 import
+ * barrel，Vite 就会把 `core/src/paths.ts` 的 `node:path` 拖进浏览器包，渲染层在挂载前抛
+ * `Module "node:path" has been externalized`（`#root` 留空、整个 app 起不来）。子路径出口只带
+ * `operators.ts` + `zod`（纯浏览器可用），这条边界由 e 片之后的活体截图继续守着。
+ */
+export {
+  OPERATOR_CATEGORIES,
+  WORKFLOW_OPERATORS,
+  groupOperatorsByCategory,
+  operatorByKind,
+  operatorParamDefaults,
+  operatorParamFields,
+  validateOperatorParams,
+} from '@auto-cc/core/operators';
+export type {
+  OperatorCategory,
+  OperatorDescriptor,
+  OperatorParamField,
+  OperatorParamType,
+} from '@auto-cc/core/operators';
+
 /** 渲染层可调用的 `service.method` 全限定名白名单（spec 1.4-07 的唯一依据）。 */
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
