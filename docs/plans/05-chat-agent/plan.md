@@ -1406,6 +1406,29 @@ F14 说现状只有一套闸门实现，`source` / `remote_ref` 是空列。看�
 | 5.8-b | IPC 白名单口 + `MetricsPanel`（漏斗五级 / 额度三量 / 时间范围筛选与 localStorage 持久化 / 空态 / 无源那级的显式标注）+ 活体截图 | 5.8-01（V）、5.8-03（V）、5.8-04（V）、5.8-07（V）、新增 5.8-08（V） | V    |
 | 5.8-c | 万级记录计时读数归档 + 只读性静态检查（看板无外发调用）+ 依赖树断言（无图表库）+ 5.8 逐项状态位收口                             | 5.8-05、5.8-06、5.8 全表                                             | C    |
 
+**5.8-a 执行后对本表的更正（2026-10-04，细节、真装配读数与四道门禁输出在 spec 的 5.8-a 落地记录）**：
+
+1. **决策十六那句 "provide `funnel.query`" 与 §3 路径表里的 `funnel.query` 不能同时成立**，实现按**路径表**为准：
+   `static provide = 'funnel'` + 方法 `query`。原因是网关按最长前缀拆 `service.method`（`packages/ipc/src/resolve.ts`），
+   服务名本身带点时路径只能是 `funnel.query.<方法>`，而 `pickMethod` 还拒绝带点的方法名。
+   活证是用例里那句 `resolveCall('funnel.query', …)` → `{ok:true, service:'funnel', method:'query'}` 并真的调得通。
+   决策十六其余部分（不建表、不占号段、四只归属计数、缺服务给确定结局）原样落地。
+2. **回复级数的是"回过话的岗位数"，不是消息条数**：`repliedJobCount` = `COUNT(DISTINCT platform||'|'||job_id)`
+   且只认 `direction='recruiter'`。这比决策十六原文多写了一个口径判断，理由是五级要同量纲才读得出转化，
+   且它必须与 `conversation.store.status().jobs` 相等（用例把这条等式钉住了）。按消息数会把"一人聊八句"顶到招呼数之上。
+3. **号段 26、27 抬高了 `store.version`，而 `PRAGMA user_version` 是全库一个数**：
+   只装会话包的用例里它停在该包的最大新号 26（全装配则是 27）。`conversation-store.test.ts` 里原先钉死 5 的三处断言
+   （挂载后 / 号段 / 回滚后）因此一并改到 26，并新增「迁移清单里 5 与 26 各只有一条」的幂等断言。这是决策十七预期的连带改动，不是回归。
+4. **装配活证不复用 `REGISTRY`**：`packages/main/src/registry.ts` 连带 import `@auto-cc/shell`，
+   后者在模块顶层读 `app.isPackaged`，纯 Node 测试宿主里必崩（本仓此前没有任何测试 import 过 `registry.ts`）。
+   所以"清单 + 注册表两处都在"这一条改成读两份源文本（`registry.ts` 里那一行 + `cordis.yml` 里那个 `- id: funnel`），
+   与 `deliver.test.ts` 直接读装配文件的先例同法；真装配那一半由本文件自己按类挂载来证。
+5. **测试装具的"摘腿"必须是惰性的**：`mount(name, ctx.plugin(X, cfg))` 的实参在函数调用前就真挂载了，
+   摘腿分支只是不把 fiber 记进清单。第一版因此读到 `count: 0` 而不是 `null`（断言当场失败、把假绿抓了出来），
+   正确形状是 `mount(name, () => ctx.plugin(X, cfg))`。5.8-b 之后若还有用例要摘腿，照这一条写。
+6. **本片结束时 5.8 全表仍是 `[ ]`**：判据主体（截图、白名单、面板）在 5.8-b / 5.8-c，
+   服务半边与 C 半边的证据已在 spec 的 5.8-a 落地记录里逐条对应到条目 ID，不在表里提前打勾。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
