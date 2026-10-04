@@ -7,6 +7,7 @@
  */
 import { AppError, TOOL_EFFECTS, type WorkflowNodeSpec, type WorkflowPlanView } from '@auto-cc/core';
 import { z } from 'zod';
+import { graphFingerprint } from './canonical.js';
 
 /** 节点参数值：计划要能整体 JSON 序列化进库，所以不接受嵌套对象（嵌套就得再设计一层模板引擎）。 */
 const nodeParamSchema = z.union([z.string(), z.number(), z.boolean()]);
@@ -36,6 +37,11 @@ export const workflowNodeSpecSchema = z.strictObject({
   retryTimes: z.number().int().min(0).max(5).nullable().default(null),
   /** 声明为人工接管点：失败即停并等用户，不自动重试（验证码/风控一类）。 */
   requiresHuman: z.boolean().default(false),
+  /**
+   * 本节点声明的出口名（5.10-b 起，spec 5.10-02）。省略 = 只有 `default` 出口，
+   * 也就是 2.4 那三条线性计划的写法；**线性计划不需要逐个补写**。
+   */
+  outputs: z.array(z.string().min(1)).min(1).optional(),
 });
 
 /** 一条计划的声明形状（`fingerprint` 由 `buildPlan` 现算，不接受外部传入）。 */
@@ -55,50 +61,15 @@ export const workflowPlanSchema = z.strictObject({
 export type PlanInput = z.input<typeof workflowPlanSchema>;
 
 /**
- * 稳定哈希：FNV-1a 32 位，输出 8 位十六进制。
- *
- * 选它而不是 `node:crypto` 的 sha256：这条指纹只用来判「同一份计划文本」（plan §11.2 的
- * 「跨计划串档」一条），要的是**短、确定、零依赖**，不是抗碰撞；而 crypto 摘要写进日志反而难读。
- * @param text 已经规范化（键排序）的文本
- * @returns 8 位小写十六进制
- */
-function fnv1a32(text: string): string {
-  let hash = 0x811c_9dc5;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    // `Math.imul` 给出 32 位截断乘法，`>>> 0` 把结果收回无符号域（JS 位运算是带符号的）。
-    hash = Math.imul(hash, 0x0100_0193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, '0');
-}
-
-/**
- * 把值转成**键有序**的 JSON 文本。
- *
- * 必须排序：计划是从库里读回来的，`JSON.parse` 之后键序按写入时的文本走，
- * 不排序的话同一份计划两次序列化得到不同指纹，续跑就会误判成「跨计划串档」。
- * @param value 计划节点这类纯 JSON 值（对象/数组/标量）
- * @returns 稳定的 JSON 文本
- */
-function canonicalJson(value: unknown): string {
-  if (value === undefined || value === null) return 'null';
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-/**
  * 算一条计划的指纹（2.4-01 的「可序列化」与 plan §11.3 的「续跑前校验指纹」共用一处实现）。
+ *
+ * 哈希原语与口径整体搬到 `canonical.ts`：那里还服务 5.10-b 的图读数，而计划与它的线性投影
+ * **必须**算出同一个值（否则同一份语义两条真相，5.10-07 的续跑判据就空了）。
  * @param nodes 补全默认值之后的节点数组
- * @returns 8 位十六进制指纹；只与节点内容有关，与计划 id 无关
+ * @returns 8 位十六进制指纹；只与执行语义有关，与计划 id 无关
  */
 function planFingerprint(nodes: readonly WorkflowNodeSpec[]): string {
-  return fnv1a32(canonicalJson(nodes));
+  return graphFingerprint(nodes);
 }
 
 /**
@@ -119,6 +90,8 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
     seen.add(node.id);
   }
   // `params` 的默认值必须在这里补全：落库和界面读到的都应当是补全后的形状，而不是「有时有 key 有时没有」。
+  // `outputs` 反过来**不补默认值**：省略就是"只有 default 出口"的读法，由投影方（`graph.ts`）按同一口径解释，
+  // 这样 2.4 时代留下的计划文本一个字节都不变，历史 run 的续跑判据也不会被 5.10-b 动到。
   const nodes: WorkflowNodeSpec[] = parsed.data.nodes.map((node) => ({
     id: node.id,
     kind: node.kind,
@@ -127,6 +100,7 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
     effect: node.effect,
     retryTimes: node.retryTimes,
     requiresHuman: node.requiresHuman,
+    ...(node.outputs === undefined ? {} : { outputs: node.outputs }),
   }));
   return { id: parsed.data.id, nodes, fingerprint: planFingerprint(nodes) };
 }

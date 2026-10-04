@@ -330,6 +330,48 @@ export type WorkflowNodeSpec = {
   retryTimes: number | null;
   /** 声明为人工接管点：跑到这里就停住等用户，不做自动重试（spec 2.4-03 的例外分支）。 */
   requiresHuman: boolean;
+  /**
+   * 这个节点**声明**的出口名（spec 5.10-02/08，5.10-b 起）。省略 = 只有 `default` 一个出口，
+   * 也就是 2.4 那三条线性计划原来的样子——不逐个补写、也不改指纹（见 `graphFingerprint` 的口径）。
+   *
+   * 刻意留在 `core` 且是**可选**字段：出口只有在真的连出边时才改变"哪一步会跑"，
+   * 所以它是声明面而不是执行身份的一部分；执行语义由 `nodes + edges` 一起定（5.10-06）。
+   */
+  outputs?: readonly string[];
+};
+
+/** 线性节点序列里那条唯一的出口名（`default`），也是边的默认出口。 */
+export const WORKFLOW_DEFAULT_OUTPUT = 'default';
+
+/**
+ * 一条执行边（spec 5.10-02）：从 `source` 节点的第 `sourceHandle` 个出口连到 `target` 节点。
+ *
+ * `id` 由投影方生成并保证图内唯一——画布要拿它做 React Flow 的 key，重排边时不能靠下标。
+ */
+export type WorkflowEdgeView = {
+  id: string;
+  /** 起点节点 id。 */
+  source: string;
+  /** 起点出口的 name；线性节点是 `default`，分支节点是它 `outputs` 里的一项。 */
+  sourceHandle: string;
+  /** 终点节点 id。 */
+  target: string;
+};
+
+/**
+ * 一份计划的**图**读数（spec 5.10-02）：节点 + 边 + 指纹。
+ *
+ * 与 `WorkflowPlanView` 的关系是"同一份语义的两种读法"，不是第二份真相：
+ * 线性计划经 `projectPlanToGraph` 原样投影成一条链（b 片不动那三条计划声明），
+ * 自定义图（5.10-e 落库）才是这张形状的第一个新来源。视图层位置走 `views` 通道，
+ * 既不在这里、也不进指纹（5.10-06）。
+ */
+export type WorkflowGraphView = {
+  id: string;
+  nodes: WorkflowNodeSpec[];
+  edges: WorkflowEdgeView[];
+  /** 与 `WorkflowPlanView.fingerprint` 同一口径：线性投影与源计划必须算出同一个值。 */
+  fingerprint: string;
 };
 
 /**
