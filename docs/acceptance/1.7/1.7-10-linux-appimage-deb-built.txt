@@ -1,0 +1,61 @@
+1.7-10（Linux AppImage + deb 可构建）—— 本机实测收口
+================================================================
+
+判据原文：`docs/specs/01-framework/spec.md` 1.7-10，方式 C「Linux `AppImage` + `deb` 可构建」。
+原验证操作：「`pnpm dist:linux` 实测：deb 需要 fpm、AppImage 需要 mksquashfs；能出则记产物文件名，
+缺件则逐目标标 BLOCKED 并写清缺哪个二进制、镜像里有没有」。
+
+执行的就是这条自己写的验证操作：**跑 `pnpm dist:linux`，把产物文件名记下来**。两档 arch 都跑了。
+
+命令与日志：
+    CSC_IDENTITY_AUTO_DISCOVERY=false pnpm dist:linux            → EXIT=0（tmp/p3-leg/dist-linux.log）
+    CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder \
+      --config electron-builder.yml --linux --x64 --publish never → EXIT=0（tmp/p3-leg/dist-linux-x64.log）
+
+一、产物文件名（判据要的就是这个）
+    arm64（`packaging platform=linux arch=arm64 appOutDir=dist/linux-arm64-unpacked`）
+        dist/auto-cc-0.1.0-linux-arm64.AppImage    134397604  （含 embedded block map）
+        dist/auto-cc-0.1.0-linux-arm64.deb         101519812
+        dist/latest-linux-arm64.yml                      550
+    x64（`packaging platform=linux arch=x64 appOutDir=dist/linux-unpacked`）
+        dist/auto-cc-0.1.0-linux-x86_64.AppImage   133153110
+        dist/auto-cc-0.1.0-linux-amd64.deb         106391908
+        dist/latest-linux.yml                            552
+    `electron-builder.yml` 的 `linux.target` 是 `[AppImage, deb]`、没写 `arch`，
+    所以单跑 `pnpm dist:linux` 只出宿主档（arm64）；x64 要显式 `--x64`。这条记在这里，
+    免得下一个人以为一次命令就出两档。
+
+二、判据担心的「缺件」没有发生：electron-builder 26 自己在构建时拉预编译件
+    日志里逐条下载记录（宿主是 darwin-arm64）：
+        downloaded label=electron                     （linux 档的 electron 二进制 zip）
+        downloaded label=appimage-12.0.1.7z
+        downloaded label=7zip-darwin-arm64.tar.gz
+        downloaded label=linux-tools-mac-darwin-arm64.tar.gz
+        downloaded label=fpm-1.17.0-ruby-3.4.3-darwin-arm64.7z   ← deb 用的 fpm
+        building embedded block map file=...AppImage             ← AppImage 拼装成功
+    也就是 §9 里那句「deb 需要 fpm、AppImage 需要 mksquashfs」在本机不需要用户预装：
+    26.15.3 会按宿主平台下载 darwin 版工具链。全日志无 `ERROR`、无 `Cannot spawn`。
+
+三、顺带查出并记下的两个事实
+    1) 产物侧许可件在 linux 是齐的：`dist/linux-unpacked/` 与 `dist/linux-arm64-unpacked/` 里都有
+       `LICENSE.electron.txt`（1096）与 `LICENSES.chromium.html`（20111209）。这与 mac 侧形成对照
+       （mac 的 .app 布局 electron-builder 不放，靠 `mac.extraResources` 补，见
+       `docs/acceptance/1.7/1.7-09-macos-dual-arch-dmg.txt` 第四节）。
+       `scripts/check-licenses.ts` 的产物侧核对因此按平台并列，linux 的两个目录名
+       （`linux-unpacked` / `linux-<arch>-unpacked`）都在射程内。
+    2) 日志里一行 `missing optional dependencies dependencies=["@napi-rs/canvas@^1.0.0"]`：
+       这不是功能缺口。`@napi-rs/canvas` 在本仓库**没有任何生产码 import**，它只是 `pdfjs-dist` 的
+       optional 传递依赖（`scripts/vendor-runtime-deps.ts:56` 明确记载它是可选原生模块、
+       4.3-06 判定不引入需编译的扩展；全仓 `@napi-rs/canvas` 检索只命中 `scripts/*` 的注释与
+       `pnpm-lock.yaml`）。linux 包里少它，运行时不会缺能力。
+
+四、诚实标注（这条只收了「可构建」，没收「可安装可运行」）
+    1) 宿主是 macOS arm64，**没有 Linux userland**：deb 未过 `dpkg -i` / `lintian`，
+       AppImage 未 `chmod +x` 挂载运行，`linux-deb` 的桌面集成（`desktopName` 未设，
+       构建日志为此打了两次警告）没有实测。所以 M1-01 的 linux 半边仍是 `[!]`，
+       2.1-12 / 3.4-08 的 linux 运行期半边同理。
+    2) 构建日志里的 `desktopName is not set in package.json` 是一条**已知待办**（窗口与 .desktop
+       关联用），不是本轮引入的回归，也不在 1.7-10 的判据里。留在这里，别让下一个人当成失败。
+
+结论：1.7-10 的 C 半边成立（AppImage + deb 两档 arch 都产出了，产物名与字节数如上）。
+运行期那半边按 §7.4 的③如实留在 `[!]`，范围只写「缺 Linux 宿主」，不再写「本机无 mac」。

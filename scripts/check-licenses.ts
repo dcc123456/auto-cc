@@ -306,15 +306,61 @@ if (!existsSync(LICENSE_DOC)) {
 }
 
 // 随包运行时的产物侧核对（产物不存在时如实跳过）。
-const unpacked = path.join(repoRoot, 'dist', 'win-unpacked');
-if (existsSync(unpacked)) {
-  const missingLicenseFiles = ['LICENSE.electron.txt', 'LICENSES.chromium.html'].filter(
-    (name) => !existsSync(path.join(unpacked, name)),
-  );
-  if (missingLicenseFiles.length > 0) {
-    failures.push(`产物里缺少 electron 自带的许可文件：${missingLicenseFiles.join(', ')}`);
+// 三端的产物目录形状不同，写死 win 一种会让 mac / linux 构建永远「没跑」：
+// win 是 `dist/win-unpacked/`（arm64 出 `win-arm64-unpacked`），linux 是 `dist/linux-unpacked/`
+// （**实测 arm64 出的是 `linux-arm64-unpacked`**，写死无后缀那个名字会让 linux 侧永远核对不到），
+// mac 是 `dist/<mac 目录>/auto-cc.app/Contents/Resources/`
+// ——实测 electron-builder 26 + electron 44.4.5 在 arm64 上出 `mac-arm64`，在 x64 上出 `mac`（构建日志 `appOutDir=dist/mac`）。
+// 只核对**本机这一档 arch**：另一档留下的旧目录可能是补位之前打的，拿它判失败等于让 lint 依赖构建残留。
+// mac 侧为什么要单独盯这两个文件：win/linux 的 unpacked 里 electron-builder 会自动放 electron 的许可全文，
+// **mac 的 .app 布局它不放**，靠 `electron-builder.yml` 的 `mac.extraResources` 补位（§8.7 许可记账红线）。
+const macOutDirs = process.arch === 'arm64' ? ['mac-arm64'] : ['mac', 'mac-x64'];
+const unpackedDirs = [
+  'win-unpacked',
+  `win-${process.arch}-unpacked`,
+  'linux-unpacked',
+  `linux-${process.arch}-unpacked`,
+];
+const artifactRoots: { label: string; dir: string }[] = [
+  ...unpackedDirs.map((dir) => ({ label: dir, dir: path.join(repoRoot, 'dist', dir) })),
+  ...macOutDirs.map((dir) => ({
+    label: dir,
+    dir: path.join(repoRoot, 'dist', dir, 'auto-cc.app', 'Contents', 'Resources'),
+  })),
+];
+const builtArtifacts = artifactRoots
+  .filter((root) => existsSync(root.dir))
+  .map((root) => ({
+    ...root,
+    missingLicenseFiles: ['LICENSE.electron.txt', 'LICENSES.chromium.html'].filter(
+      (name) => !existsSync(path.join(root.dir, name)),
+    ),
+  }));
+for (const artifact of builtArtifacts) {
+  if (artifact.missingLicenseFiles.length > 0) {
+    failures.push(
+      `产物 ${artifact.label} 里缺少 electron 自带的许可文件：${artifact.missingLicenseFiles.join(', ')}（mac 侧由 electron-builder.yml 的 mac.extraResources 补位）`,
+    );
   }
 }
+
+// 产物侧到底核没核过，要在失败输出里也看得见：5.10-15 的产物半边判据就是"本轮没跑"和"跑过且齐"
+// 必须能被区分出来，否则 LICENSES.md 那一半一红，产物那一半的状态就跟着一起消失在输出里。
+if (builtArtifacts.length === 0)
+  console.log('  · 提示：dist/ 下没有任何一端产物，产物侧许可文件本轮未核对（不是通过，是没跑）');
+else
+  console.log(
+    `  · 产物侧已核对：${builtArtifacts
+      .map(
+        (a) =>
+          `${a.label}（${
+            a.missingLicenseFiles.length === 0
+              ? 'LICENSE.electron.txt + LICENSES.chromium.html 齐'
+              : `缺 ${a.missingLicenseFiles.join(' / ')}`
+          }）`,
+      )
+      .join('、')}`,
+  );
 
 if (failures.length > 0) {
   console.error('✖ 许可证记账检查未通过：');
@@ -328,6 +374,4 @@ if (failures.length > 0) {
       `搬运层 ${String(vendored.length)} 个包全部在册，其中 ${String(missingLicenseText.length)} 个上游无许可全文、已登记处置；` +
       `copyleft 命中 ${String(hitNames.size)} 条且都有处置）`,
   );
-  if (!existsSync(unpacked))
-    console.log('  · 提示：dist/win-unpacked 不存在，产物侧许可文件本轮未核对（不是通过，是没跑）');
 }

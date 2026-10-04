@@ -1,0 +1,52 @@
+5.10-15 的产物侧半边（许可边界机检 × 装机产物）—— 本机实测收口
+================================================================
+
+判据原文：`docs/specs/05-chat-agent/spec.md` 5.10-15（方式 C）。表内侧那半边早已 `[x]`
+（`@xyflow/react` / `@xyflow/system` MIT、`mupdf` 从未引入、全表无 PolyForm-NC，
+三条边界已落成 `check-dependency-floor.ts` / `check-licenses.ts` 非商用闸门 /
+`check-renderer-conventions.ts` 第 8 节的机检）。
+本轮收的是它自己写在验证操作里的 `[!]` 那半边：
+
+    「**产物侧 `[!]`**：`dist/` 在本机不存在，`check-licenses.ts` 自己把这条报成"本轮没跑"
+      而不是通过——要等一次装机产物再核（同一台机器换 OS 后连 `LICENSES.md` 的 per-platform
+      二进制行都会漂，见 plan §7.8.3-bis 那笔待裁定）」
+
+一、跑法与读数（本机 macOS arm64，先有装机产物再核）
+    `pnpm exec tsx scripts/check-licenses.ts` 的输出（EXIT=1，失败原因见第四节，与产物侧无关）：
+        · 产物侧已核对：linux-unpacked（LICENSE.electron.txt + LICENSES.chromium.html 齐）、
+          linux-arm64-unpacked（同上，齐）、mac-arm64（同上，齐）
+        ✖ 许可证记账检查未通过：
+          · LICENSES.md 的生成节与当前扫描结果不一致，跑 tsx scripts/check-licenses.ts --write
+    产物来自 `docs/acceptance/1.7/1.7-09-macos-dual-arch-dmg.txt` 与
+    `docs/acceptance/1.7/1.7-10-linux-appimage-deb-built.txt` 那两次真实构建（dmg/zip/AppImage/deb）。
+
+二、这一跑查出了一个真实的合规漏洞，并已修
+    补位前 mac 的 `auto-cc.app/Contents/Resources/` 里**没有** electron 自带的许可全文
+    （win/linux 的 unpacked 目录 electron-builder 会自动放，mac 的 .app 布局它不放）。
+    §8.7 要求「随包分发的副本带上许可全文」，所以：
+        - `electron-builder.yml` 加 `mac.extraResources` 两条（`LICENSE` → `LICENSE.electron.txt`、
+          `LICENSES.chromium.html`）；
+        - `scripts/check-licenses.ts` 的产物侧核对从写死 `dist/win-unpacked` 改成**按平台并列**
+          （win / linux 两种目录名形状 / mac 两档 arch 目录名，只核本机 arch 那一档，
+            避免 lint 依赖另一档的构建残留），并且把「核对了哪些产物、齐不齐」这一行
+            **移到失败分支之前**打印——否则表内侧一红（现在就是红的，见第四节），
+            产物侧到底是"跑过且齐"还是"根本没跑"就一起从输出里消失了，正是这条判据最怕的模糊态。
+    机检反向验证（证明它真会拦，不是摆设）：临时把产物里的 `LICENSES.chromium.html` 移走再跑，
+    得到「产物 mac-arm64 里缺少 electron 自带的许可文件：LICENSES.chromium.html」并 EXIT=1；
+    复原（20111209 字节，与移走前一致）后该行消失。
+
+三、win 侧那半边仍然没跑（如实记）
+    本机是 macOS，`pnpm dist:win` 未在本窗执行，`dist/win-unpacked` 不存在，
+    所以产物侧核对的覆盖面是「mac（本机 arch）+ linux（两档 arch）」，win 一档留空。
+    上一轮在 Windows 宿主上跑过的 win 产物侧证据不在本文件射程内。
+
+四、剩下那条 EXIT=1 不是本判据的失败
+    `LICENSES.md` 生成节与当前扫描结果不一致 = **同一台机器换 OS 后 per-platform 二进制行会漂**，
+    正是 5.10-15 括号里点名、也是 `docs/plans/05-chat-agent/plan.md` §7.8.3-bis 那笔**待用户裁定**
+    （改成逐平台并列，还是把 `@napi-rs/canvas` 的变体折叠成平台无关一行）。
+    本窗**没有**跑 `--write`：那会把生成节里的平台从 Windows 翻成 macOS，等于替那条待裁定的决定
+    改账（§8.7 的账目是给人看的，不能由换 OS 的人顺手覆盖）。
+    所以 `pnpm lint` 今天仍然是 EXIT=1，且这一条与本半边的结论无关，指针已写在 master plan 的待裁定表里。
+
+结论：5.10-15 的产物侧半边成立（真装机产物核过、缺件会被拦、并顺手补掉一处 mac 侧许可全文缺失）；
+表内侧维持 `[x]`；`LICENSES.md` 那一行的漂移继续挂在待裁定，不替用户决定。

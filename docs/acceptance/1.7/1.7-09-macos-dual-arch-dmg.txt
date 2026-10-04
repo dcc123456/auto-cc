@@ -1,0 +1,69 @@
+1.7-09（macOS dmg arm64+x64 可构建）—— 本机实测收口
+================================================================
+
+判据原文：`docs/specs/01-framework/spec.md` 1.7-09，方式 C「macOS `dmg`（arm64+x64）可构建」。
+原验证操作写的是「本机为 Windows → 预期 BLOCKED（electron-builder 拒绝在非 mac 主机产 dmg，且缺 Xcode
+许可）；先跑 `pnpm dist:mac` 把真实报错与配置里的双 arch 留档，不得声称已构建」。
+
+为什么今天能做：本窗实例是 macOS 24.6.0 / Darwin arm64（AGENTS.md §9 那条「本机 Windows」已列在待裁定表里）。
+宿主就是 mac，所以这条不再需要跨宿主猜测，`pnpm dist:mac` 是**原生**构建，不是 cross-build。
+
+复现命令（本机可逐字重跑）：
+    CSC_IDENTITY_AUTO_DISCOVERY=false pnpm dist:mac
+构建日志留档：`tmp/p3-leg/dist-mac.log`、`tmp/p3-leg/dist-mac2.log`（补位后重建）、
+`tmp/p3-leg/rebuild.log`（`rm -rf dist/mac dist/mac-arm64` 之后的全量重建，EXIT=0）。
+
+一、产物读数（`ls -l dist/`，补位后重建的那一批）
+    auto-cc-0.1.0-mac-arm64.dmg          143473323
+    auto-cc-0.1.0-mac-arm64.dmg.blockmap    147093
+    auto-cc-0.1.0-mac-arm64.zip          140809432
+    auto-cc-0.1.0-mac-arm64.zip.blockmap    148154
+    auto-cc-0.1.0-mac-x64.dmg          147166426
+    auto-cc-0.1.0-mac-x64.dmg.blockmap    152021
+    auto-cc-0.1.0-mac-x64.zip          144539032
+    auto-cc-0.1.0-mac-x64.zip.blockmap    151978
+    latest-mac.yml                             819
+配置里的双 arch 确实都被执行（`electron-builder.yml` 的 `mac.target` 对 dmg 与 zip 各列
+`arch: [arm64, x64]`），日志两档各一行 `packaging platform=darwin arch=…`。
+
+二、dmg 完整性与内容（补位后重建的那份）
+    hdiutil verify dist/auto-cc-0.1.0-mac-arm64.dmg → checksum ... is VALID
+    hdiutil verify dist/auto-cc-0.1.0-mac-x64.dmg   → checksum ... is VALID
+    hdiutil attach -nobrowse -readonly dist/auto-cc-0.1.0-mac-arm64.dmg → /Volumes/auto-cc 0.1.0-arm64
+        auto-cc.app/
+        Applications -> /Applications（拖拽安装用的软链）
+        .VolumeIcon.icns、.background.tiff
+    hdiutil detach → "disk8" ejected.
+
+三、装机后的 app 真的起得来、界面真的可见
+    打包产物直接 `open` 后用 CDP 10222 打渲染层（`--url 5173` 那条限制是针对 dev 的，装机版是
+    app 自己的页面），枚举到三个入口页签、`window.autoCC` 上 23 个 service 命名空间、
+    界面中文文案 896 字符。截图：`docs/acceptance/1.7/1.7-09-M1-01-mac-packaged-app.png`
+    （555501 字节，md5 `af5cb660813c7f86e6f78e63c089fa14`）。
+    活体日志：`tmp/p3-leg/packaged-app.log`；启动用的独立 userData 在 `tmp/p3-leg/dist-userdata/`
+    （AGENTS.md §9「单实例锁按 userData 目录算」那条，不能去碰用户默认目录）。
+
+四、构建过程中查出并修掉的一处真实合规漏洞（§8.7）
+    补位前，`dist/mac-arm64/auto-cc.app/Contents/Resources/` 里**只有** `app.asar` 与本仓库的
+    extraResources，没有 electron 自带的 `LICENSE.electron.txt` / `LICENSES.chromium.html`
+    （win / linux 的 unpacked 目录里 electron-builder 会自动放，mac 的 .app 布局它不放）。
+    MIT/BSD 的义务是「随副本分发许可全文」，装到用户机器上的那份副本里不能没有它，
+    所以 `electron-builder.yml` 的 `mac.extraResources` 显式补两条（源自
+    `packages/main/node_modules/electron/dist/LICENSE` 与 `.../LICENSES.chromium.html`），
+    并让 `scripts/check-licenses.ts` 的产物侧核对按平台并列、盯住这条不再掉。
+    补位后实测：`Contents/Resources/` 里 `LICENSE.electron.txt` 1096 字节、
+    `LICENSES.chromium.html` 20111209 字节、`LICENSES.md` 同目录在册。
+    机检反向验证（证明这条真会拦）：临时把 `LICENSES.chromium.html` 从产物里移走再跑
+    `pnpm exec tsx scripts/check-licenses.ts`，输出「产物 mac-arm64 里缺少 electron 自带的许可文件：
+    LICENSES.chromium.html」并 EXIT=1；放回去（20111209 字节，与移走前一致）后该行恢复正常。
+
+五、诚实标注（三条，都不是漏做）
+    1) **未签名**：`CSC_IDENTITY_AUTO_DISCOVERY=false`，`codesign -dv` 显示 `Identifier=Electron`、
+       无 TeamID。判据问的是「可构建」，签名与公证是另一件事，且需要开发者证书，不在本判据里；
+       但分发给别人时 Gatekeeper 会拦，这条要留给发布决策。
+    2) **x64 dmg 未运行**：宿主是 arm64，x64 档只做到「构建成功 + 校验和 VALID + arch 读数正确」。
+       跑它需要 Rosetta，那是运行期而不是构建，归 M1-01 的 mac 半边而不是这条。
+    3) 本节所有 pixel/文案读数来自装机 app 自己的渲染层，不含桌面截图。
+
+结论：1.7-09 的 C 半边（dmg arm64+x64 可构建）在本机成立，产物名与字节数如上，
+外加补位后重建、校验、挂载、装机启动四道复核。M1-01 的 mac 半边同时有了实测证据。

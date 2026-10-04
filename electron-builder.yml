@@ -64,6 +64,15 @@ nsis:
 mac:
   icon: resources/icon.png
   category: public.app-category.productivity
+  # electron 自己的许可全文：win/linux 的 unpacked 目录里 electron-builder 会自动放
+  # `LICENSE.electron.txt` / `LICENSES.chromium.html`，**mac 的 .app 布局它不放**（44.4.5 实测：
+  # `Contents/Resources/` 里只有本仓库 extraResources 那几条）。MIT/BSD 的义务是「随副本分发许可全文」，
+  # 装到用户机器上的那份副本里不能没有它，所以显式补进 Resources，`scripts/check-licenses.ts` 的产物侧核对钉住这条。
+  extraResources:
+    - from: packages/main/node_modules/electron/dist/LICENSE
+      to: LICENSE.electron.txt
+    - from: packages/main/node_modules/electron/dist/LICENSES.chromium.html
+      to: LICENSES.chromium.html
   target:
     - target: dmg
       arch:
