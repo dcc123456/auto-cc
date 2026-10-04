@@ -1865,6 +1865,27 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
 - 落地时的实测点（按 §2.6 不写守卫，只做判据）：投影必须幂等——同一张图连着保存两次得到的 `plan_json` 字节一致，
   否则 `revision` 每加一指纹就漂一次，保存口自己就会变成那条"永远续不上"的成因。单测按这条打。
 
+##### 7.8.3-bis 5.10-f 进度与接手清单（2026-10-04 本窗停在这里，下一条从这里接）
+
+**已落且已推的四步**（判据都在上面的裁定里，这里只记形状）：① 纯推进层 `graph-advance.ts`（`initialAdvanceState` /
+`advanceGraph` / 出口校验 / 级联跳过到不动点）＋ 13 条单测；② `topologicalOrder`（乱序声明的菱形"每条边都正着走"）；
+③ `skipped` 步态与 `step-skipped` 的 `reason: 'already-done' | 'branch-not-taken'`、界面琥珀色、`workflow.stepStatus.skipped`
+双语去掉"（幂等）"限定；④ 号段 29 的 `output_handle` 列（写点 `recordNode`、读点 `WorkflowNodeRunView.outputHandle`）
+＋ `WorkflowNodeExecutor` 返回值放宽。**这四步都没有动 runner 本体**，2.4 的已验收面此刻仍是线的。
+
+**接手时要做的四件事，按顺序，别并行**：
+
+1. 保存口回写投影（裁定六）：`workflow.graph.save` 里按 `topologicalOrder(graph)` 重算 `plan_json` 与指纹，
+   并补一条幂等单测（同一张图连存两次字节一致）。这一步做完才允许动 `start()`，否则图与本体仍是两份事实。
+2. runner 接线：节点序列取拓扑序、每格问 `advanceGraph`；级联跳过的格写 `recordNode(status:'skipped')` 并
+   `apply({type:'step-skipped', reason:'branch-not-taken'})`；`succeedNode` 的 done 判据从
+   `index + 1 === nodes.length` 换成 `advanceState.finished`；身份一律 `(run_id, node_id)`，而 `node_index` 继续是
+   `plan_json` 的声明下标（`state()` 按声明下标映射，把它当执行序会让面板串格——这是读代码读出来的硬约束）。
+3. 续跑重建：从存下来的 `output_handle` 复原推进态；**句柄缺失就转人工接管，绝不猜 `default`**。
+4. 用例与活体：分支图一支 done 一支 skipped、菱形 join 的 `recordNode` 恰好一次（5.10-09 的 U 半边）、
+   分支图中途 kill 重启后 attempts 不变且不重放同一支（5.10-13）；再上 `pnpm dev`（换 dev userData）＋ fixture ＋
+   harness(10222) 截图进 `docs/acceptance/5.10/`。在此之前 5.10-07/08/09/13 保持 `[ ]`——runner 还没真的跑过一张分支图。
+
 #### 7.8.4 a 片收口对账（2026-10-04，判据与读数在 spec 的 5.10-a 落地记录，这里只留后面几片要继承的口径）
 
 - **切片状态**：a 已完成（5.10-01 `[x]` win、5.10-16 打的是"当前画布文案与样式"这一半，后续片要复跑）。
