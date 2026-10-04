@@ -4,6 +4,15 @@ import { Service, type Context } from '@auto-cc/core';
 import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
+import { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema } from './update.js';
+import type {
+  AutopilotSwitches,
+  UpdateActionName,
+  UpdateCheckResultLike,
+  UpdateConfig,
+  UpdateRuntime,
+  UpdaterLike,
+} from './update.js';
 
 /** 仓库根目录（开发态）。 */
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -434,7 +443,10 @@ export class ShellService extends Service {
 declare module '@auto-cc/core' {
   interface AppServices {
     shell: ShellService;
+    update: UpdateService;
   }
 }
 
 export { ResumePrintService } from './print-executor.js';
+export { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema };
+export type { AutopilotSwitches, UpdateActionName, UpdateCheckResultLike, UpdateConfig, UpdateRuntime, UpdaterLike };

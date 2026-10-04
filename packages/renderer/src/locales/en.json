@@ -1102,6 +1102,25 @@
       "remainingNoGate": "Remaining unknown: gate not mounted",
       "took": "Aggregation took {{ms}} ms",
       "readOnly": "Read-only aggregate, no outbound calls"
+    },
+    "update": {
+      "heading": "Updates",
+      "note": "Updates only happen when you press a button: this app never downloads in the background, never installs silently, and never schedules a restart for you.",
+      "check": "Check for updates",
+      "download": "Download installer",
+      "install": "Restart and install",
+      "idle": "You haven't checked yet.",
+      "available": "A new version {{latest}} is available (you are on {{current}}). Download it?",
+      "downloaded": "Version {{latest}} is downloaded to this machine and takes effect after a restart: restart now, or finish what you're doing.",
+      "failed": "That didn't work: {{detail}}",
+      "currentVersion": "Current version {{version}}",
+      "rejected": "The main process refused this: {{message}}",
+      "state": {
+        "no-feed": "No update source is configured, so not a single request was sent.",
+        "unavailable-in-dev": "In development mode the update channel sends no requests by default; this state is not acceptance evidence.",
+        "up-to-date": "You are on the latest version.",
+        "downloading": "Downloading the installer…"
+      }
     }
   }
 }

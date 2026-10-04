@@ -35,18 +35,20 @@
 > 本节由 `tsx scripts/check-licenses.ts --write` 生成，请勿手改；正文其余部分是人工记账。
 > 取数口：`pnpm licenses list --json --prod`（与安装事实同源，不另写依赖解析）。
 
-**生产依赖合计 44 个包条目**，按许可分组：
+**生产依赖合计 60 个包条目**，按许可分组：
 
 | 许可                      | 包数 |
 | ------------------------- | ---- |
-| MIT                       | 31   |
+| MIT                       | 43   |
+| ISC                       | 5    |
 | BSD-2-Clause              | 4    |
-| ISC                       | 3    |
 | Apache-2.0                | 2    |
 | (MIT AND Zlib)            | 1    |
 | (MIT OR GPL-3.0-or-later) | 1    |
+| BlueOak-1.0.0             | 1    |
 | BSD                       | 1    |
 | BSD-3-Clause              | 1    |
+| Python-2.0                | 1    |
 
 **逐包清单**（版本 = 锁定的实际解析版本）：
 
@@ -56,14 +58,17 @@
 | `jszip`                          | 3.10.2      | (MIT OR GPL-3.0-or-later) |
 | `pdfjs-dist`                     | 6.3.289     | Apache-2.0                |
 | `typescript`                     | 5.9.3       | Apache-2.0                |
+| `sax`                            | 1.6.1       | BlueOak-1.0.0             |
 | `duck`                           | 0.1.12      | BSD                       |
 | `dingbat-to-unicode`             | 1.0.2       | BSD-2-Clause              |
 | `lop`                            | 0.4.2       | BSD-2-Clause              |
 | `mammoth`                        | 1.13.0      | BSD-2-Clause              |
 | `option`                         | 0.2.4       | BSD-2-Clause              |
 | `sprintf-js`                     | 1.0.3       | BSD-3-Clause              |
+| `graceful-fs`                    | 4.2.11      | ISC                       |
 | `inherits`                       | 2.0.4       | ISC                       |
 | `lucide-react`                   | 0.544.0     | ISC                       |
+| `semver`                         | 7.7.4       | ISC                       |
 | `yaml`                           | 2.9.1       | ISC                       |
 | `@babel/runtime`                 | 7.29.7      | MIT                       |
 | `@napi-rs/canvas`                | 1.0.9       | MIT                       |
@@ -72,16 +77,26 @@
 | `@xmldom/xmldom`                 | 0.8.15      | MIT                       |
 | `argparse`                       | 1.0.10      | MIT                       |
 | `base64-js`                      | 1.5.1       | MIT                       |
+| `builder-util-runtime`           | 9.7.0       | MIT                       |
 | `cordis`                         | 4.0.0-rc.10 | MIT                       |
 | `core-util-is`                   | 1.0.3       | MIT                       |
 | `cosmokit`                       | 1.8.1       | MIT                       |
 | `cron-parser`                    | 5.10.1      | MIT                       |
+| `debug`                          | 4.4.3       | MIT                       |
+| `electron-updater`               | 6.8.9       | MIT                       |
+| `fs-extra`                       | 10.1.0      | MIT                       |
 | `html-parse-stringify`           | 3.1.0       | MIT                       |
 | `i18next`                        | 25.10.10    | MIT                       |
 | `immediate`                      | 3.0.6       | MIT                       |
 | `isarray`                        | 1.0.0       | MIT                       |
+| `js-yaml`                        | 4.3.2       | MIT                       |
+| `jsonfile`                       | 6.2.1       | MIT                       |
+| `lazy-val`                       | 1.0.5       | MIT                       |
 | `lie`                            | 3.3.0       | MIT                       |
+| `lodash.escaperegexp`            | 4.1.2       | MIT                       |
+| `lodash.isequal`                 | 4.5.0       | MIT                       |
 | `luxon`                          | 3.7.2       | MIT                       |
+| `ms`                             | 2.1.3       | MIT                       |
 | `process-nextick-args`           | 2.0.1       | MIT                       |
 | `react`                          | 19.3.0      | MIT                       |
 | `react-dom`                      | 19.3.0      | MIT                       |
@@ -91,11 +106,14 @@
 | `scheduler`                      | 0.28.0      | MIT                       |
 | `setimmediate`                   | 1.0.5       | MIT                       |
 | `string_decoder`                 | 1.1.1       | MIT                       |
+| `tiny-typed-emitter`             | 2.1.0       | MIT                       |
 | `underscore`                     | 1.13.8      | MIT                       |
+| `universalify`                   | 2.0.1       | MIT                       |
 | `util-deprecate`                 | 1.0.2       | MIT                       |
 | `void-elements`                  | 3.1.0       | MIT                       |
 | `xmlbuilder`                     | 10.1.1      | MIT                       |
 | `zod`                            | 4.6.5       | MIT                       |
+| `argparse`                       | 2.0.1       | Python-2.0                |
 
 **随包运行时**：
 
@@ -109,10 +127,11 @@
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `jszip` | 双许可 `(MIT OR GPL-3.0-or-later)`：**取 MIT 那一支**（mammoth 的依赖，随 asar 分发）。MIT 分支无 NOTICE 义务；此条存在的意义是防止下一个人看到 GPL-3 字样就以为整个 app 被传染。 |
 
-**搬运层缺许可全文的包 1 个**（上游发布物本身没有 LICENSE 文件，义务由产物内的 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记承接；两者都走 `pnpm lint` 闸门）：
+**搬运层缺许可全文的包 2 个**（上游发布物本身没有 LICENSE 文件，义务由产物内的 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记承接；两者都走 `pnpm lint` 闸门）：
 
-| 包        | 处置                                                                                                                                                                                                                                                                                                         |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `isarray` | `isarray@1.0.0` 的 npm 发布物内只有 Makefile/README/component.json/index.js/package.json/test.js，**没有 LICENSE 文件**（实测）。许可字段是 MIT、作者是 package.json 里的 Julian Gruber，义务由 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记承接；不从网络补抄条文——那是凭记忆生成许可文本，比登记缺口更危险。 |
+| 包         | 处置                                                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `isarray`  | `isarray@1.0.0` 的 npm 发布物内只有 Makefile/README/component.json/index.js/package.json/test.js，**没有 LICENSE 文件**（实测）。许可字段是 MIT、作者是 package.json 里的 Julian Gruber，义务由 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记承接；不从网络补抄条文——那是凭记忆生成许可文本，比登记缺口更危险。 |
+| `lazy-val` | `lazy-val@1.0.5`（electron-updater 带进来的）发布物内只有 out/、package.json、readme.md，**没有 LICENSE 文件**（实测）。许可字段是 MIT、作者是 package.json 里的 Vladimir Krivosheev，处置与 isarray 同一条：由 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记，不从网络补抄条文。                               |
 
 <!-- END:generated-by-check-licenses -->

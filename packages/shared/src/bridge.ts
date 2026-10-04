@@ -327,6 +327,15 @@ export const RENDERER_ALLOWLIST = [
   // 刻意**不登记为 agent 工具**：看板是给人核对用的读数，模型若能自己按"近 7 天转化率低"去凑数，
   // 就可能为了把数字做上去自己触发抓取（§8.3 的频控红线不该由一只读口引出来）。
   'funnel.query',
+  // 更新通道（spec 5.9-03）：四条口全是**人按下去才有动作**的一问一答——`status` 只读内存里上一次读数、
+  // `check` 只在被点时发一次元数据请求、`download` 与 `install` 只在上一态成立时才动手。
+  // 刻意不登记为 agent 工具：模型若能自己触发检查/下载，"零首启动下载"就变成"模型想下就下"。
+  // 三条自动开飞开关（autoDownload / autoInstallOnAppQuit / autoRunAppAfterInstall）在 service 侧
+  // 关死并有测试兜住，见 `packages/shell/src/update.ts`。
+  'update.status',
+  'update.check',
+  'update.download',
+  'update.install',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -584,6 +593,40 @@ export type FunnelView = {
   levels: FunnelLevelView[];
   quota: FunnelQuotaView;
   tookMs: number;
+};
+
+/**
+ * 更新通道的一次读数（spec 5.9-03）。
+ *
+ * 状态是**枚举**，界面按它取 i18n 文案；`detail` 只装上游原话（HTTP 错误、被拒原因），
+ * 属于数据而不是文案，所以不翻译、原样显示——主进程不产中文界面文字（§5.5）。
+ */
+export type UpdateState =
+  /** 还没点过「检查更新」 */
+  | 'idle'
+  /** 配置里没有更新源：一次请求都不发（默认不指向 GitHub 直连，见 plan §7.7.2.1 第 3 条） */
+  | 'no-feed'
+  /** dev 且未开 `forceDevUpdateConfig`：库自己就不发请求，不能拿它当验收证据 */
+  | 'unavailable-in-dev'
+  /** 已检查过，当前版本就是最新 */
+  | 'up-to-date'
+  /** 有新版本，等用户点「下载」 */
+  | 'available'
+  /** 用户已点下载，正在取安装包 */
+  | 'downloading'
+  /** 安装包已在本地，等用户点「重启并安装」 */
+  | 'downloaded'
+  /** 失败：只落一句原话，不阻塞使用 */
+  | 'failed';
+
+export type UpdateView = {
+  state: UpdateState;
+  /** 运行中的版本号，取 `app.getVersion()`，界面上与 `latestVersion` 并排显示 */
+  currentVersion: string;
+  /** 更新源报出的版本号；只在 available/downloading/downloaded 三态有值 */
+  latestVersion: string | null;
+  /** 上游原话或本服务给出的拒因（ASCII 或上游语言），无则为 null */
+  detail: string | null;
 };
 
 /** 一次外发样例的入参（spec 1.9-03 / 1.9-04 / 2.7-03：动作名是枚举，不是任意字符串）。 */
@@ -1569,6 +1612,14 @@ export interface BridgeSignatures {
    * `context.nowMs` 只影响「今日已用/剩余」那一块，省略则取主进程当前时间。
    */
   'funnel.query': { args: [range: FunnelRange, context?: { nowMs?: number }]; returns: FunnelView };
+  /** 更新通道四条口（spec 5.9-03）：`status` 只读上一次读数，其余三条只在人按下去时动作。 */
+  'update.status': { args: []; returns: UpdateView };
+  /** 向配置里的更新源问一次版本号；没有配置更新源时返回 `no-feed`，一条请求都不发。 */
+  'update.check': { args: []; returns: UpdateView };
+  /** 用户看过新版本后主动下载安装包；上一态不是 `available` 即拒绝。 */
+  'update.download': { args: []; returns: UpdateView };
+  /** 用户主动重启并安装；上一态不是 `downloaded` 即拒绝。 */
+  'update.install': { args: []; returns: UpdateView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
   /**

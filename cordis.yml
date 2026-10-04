@@ -525,6 +525,13 @@ plugins:
   - id: funnel
     config: {}
 
+  # 更新通道（spec 5.9-03）：**默认没有更新源**——`feedUrl` 缺省即 `no-feed`，一次请求都不发，
+  # 这条默认值本身就是判据的一部分（"默认不指向 GitHub 直连"，plan §7.7.2.1 第 3 条 + §9 的网络事实）。
+  # 要接自建镜像时在这里补 `feedUrl: https://…/generic/`；`forceDevUpdateConfig` 只为取验收证据时开。
+  - id: update
+    config:
+      forceDevUpdateConfig: false
+
   # 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点（号段 25），
   # 进程内一个 `setInterval`，不注册任何操作系统的计划任务（判据由 `scripts/check-scheduler-no-external-cron.ts` 钉）。
   # `dependsOn: workflow` 只为了**顺序**：挂载时那一次追账与之后的每个 tick 都要有起跑口在场，

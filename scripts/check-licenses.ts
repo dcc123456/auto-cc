@@ -182,6 +182,10 @@ const MISSING_LICENSE_TEXT_DISPOSITIONS: Readonly<Record<string, string>> = {
     '`isarray@1.0.0` 的 npm 发布物内只有 Makefile/README/component.json/index.js/package.json/test.js，' +
     '**没有 LICENSE 文件**（实测）。许可字段是 MIT、作者是 package.json 里的 Julian Gruber，' +
     '义务由 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记承接；不从网络补抄条文——那是凭记忆生成许可文本，比登记缺口更危险。',
+  'lazy-val':
+    '`lazy-val@1.0.5`（electron-updater 带进来的）发布物内只有 out/、package.json、readme.md，' +
+    '**没有 LICENSE 文件**（实测）。许可字段是 MIT、作者是 package.json 里的 Vladimir Krivosheev，' +
+    '处置与 isarray 同一条：由 `THIRD-PARTY-NOTICES.txt` 按 manifest 登记，不从网络补抄条文。',
 };
 
 /**

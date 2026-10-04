@@ -1102,6 +1102,25 @@
       "remainingNoGate": "剩余未知：闸门未挂载",
       "took": "本次聚合 {{ms}} ms",
       "readOnly": "只读聚合，无任何外发口"
+    },
+    "update": {
+      "heading": "更新",
+      "note": "更新只在被点的时候才发生：本应用不会在后台下载、不会静默安装，也不会替你安排重启。",
+      "check": "检查更新",
+      "download": "下载安装包",
+      "install": "重启并安装",
+      "idle": "还没有检查过。",
+      "available": "发现新版本 {{latest}}（当前 {{current}}）。要不要下载？",
+      "downloaded": "新版本 {{latest}} 已下载到本机，重启后生效：你可以现在重启，也可以先用完这一轮。",
+      "failed": "这次没有成功：{{detail}}",
+      "currentVersion": "当前版本 {{version}}",
+      "rejected": "这条被主进程拒了：{{message}}",
+      "state": {
+        "no-feed": "没有配置更新源，所以一次请求都没有发出去。",
+        "unavailable-in-dev": "开发模式下更新通道默认不发请求；这一态不能当作验收证据。",
+        "up-to-date": "已经是最新版本。",
+        "downloading": "正在下载安装包……"
+      }
     }
   }
 }

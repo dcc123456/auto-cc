@@ -16,7 +16,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 const declaringPackage = path.join(repoRoot, 'packages', 'resume-kb', 'package.json');
 
 /** 需要外置的包名（esbuild external 与搬运清单的共同真相源）。 */
-export const RUNTIME_EXTERNAL_ROOTS = ['mammoth', 'pdfjs-dist'] as const;
+export const RUNTIME_EXTERNAL_ROOTS = ['mammoth', 'pdfjs-dist', 'electron-updater'] as const;
 
 /** 搬运层随包落地的第三方许可全文文件名（spec 5.9-04 的 NOTICE 半边；写在 `node_modules` 根旁边）。 */
 export const THIRD_PARTY_NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';

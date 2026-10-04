@@ -55,7 +55,7 @@ import {
   WorkflowRunnerService,
   WorkflowRunStoreService,
 } from '@auto-cc/plugin-workflow';
-import { ResumePrintService, ShellService } from '@auto-cc/shell';
+import { ResumePrintService, ShellService, UpdateService } from '@auto-cc/shell';
 
 export const REGISTRY: Registry = {
   config: ConfigService,
@@ -198,4 +198,8 @@ export const REGISTRY: Registry = {
   // 而注掉本行让看板整块读不到数——「有几级数」与「有一个地方把它们拼起来」分属两条。
   funnel: FunnelQueryService,
   shell: ShellService,
+  // 更新通道（spec 5.9-03）：唯一会读 `latest.yml` 的服务，三条口全要人按。
+  // 它没有 `inject`，也不在挂载期碰更新器单例——取单例、关三条自动开飞开关、发请求都发生在被调用的那一刻，
+  // 所以「注掉这一行」的效果是界面四条口得到「服务未挂载」，而 app 照常启动、照常能用。
+  update: UpdateService,
 };

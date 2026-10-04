@@ -12,6 +12,7 @@ import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
+import { UpdateSection } from './UpdateSection';
 import { ResumePanel } from './ResumePanel';
 import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
@@ -123,6 +124,8 @@ export function App() {
         >
           <div className="flex flex-col gap-4">
             <ShellPanel />
+            {/* 更新通道（5.9-b）紧挨桥接自检台：两者都是"主进程只在被点时动一下"的读数，放一起才对得上同一套口径 */}
+            <UpdateSection />
             <SessionPanel />
             <LocatorLabPanel />
             <JobLabPanel />
