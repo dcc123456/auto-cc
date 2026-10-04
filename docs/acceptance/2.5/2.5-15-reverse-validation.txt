@@ -1,0 +1,81 @@
+2.5-15 反向验证：否决 browser-copilot 的验证码 OCR 识别链，未造成主线能力缺口
+      —— 取证读数（2026-10-04，macOS arm64 / Electron 44.4.5 / CDP 10222）
+
+判据的两半边（AGENTS.md §6.5：被否决的技术路线必须反向验证「没有留下补不回来的缺口」）
+  C 半边：全仓不存在任何验证码/图像文字识别的实现与依赖；主线的每一步都不需要它。
+  V 半边：风控页出现时界面确实停在可恢复点并通知用户 —— 与 spec 2.7-01 联验（截图共用）。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+① 活体工具面：17 只登记工具里没有任何「识别/求解」能力
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+取法：harness eval --url 5173 → window.autoCC.agent['tools.list']()
+返回 {ok:true, count:17}，ids 逐字（排序后）：
+
+  browser.act.click        browser.act.type         browser.locate.find
+  browser.page.navigate    browser.page.snapshot    jd.capture.run
+  kb.gap.report            kb.profile.list          kb.profile.search
+  kb.profile.syncVectors   outbound.deliver.perform outbound.greet.perform
+  outbound.script.generate resume.generate.run      resume.parse.fromFile
+  sessions.open            workflow.run
+
+对照被否决的那只（plan §12.2「风控与验证码」行：`browser-copilot` 的 `recognize_image`，
+本地 Tesseract.js 取图内文字、MAX_OCR_ATTEMPTS=3、置信度阈值、失败回落视觉模型，
+再提示模型 "fill the CAPTCHA field"）：
+  - 这张清单里没有它的同位物；`browser.page.snapshot` 读的是 DOM 文本与可交互元素，
+    不做图像→文字识别，也不回填任何验证码输入框。
+  - 清单里唯一「读图」的同名概念来自 4.1-05（简历扫描件判定），那条的立场同样是**不引入 OCR**
+    （`packages/resume-kb/src/source.ts:13`、`sections.ts:34`：抽不到文本就明确失败并要求人工补录）。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+② 依赖面：零 OCR / 零打码服务
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+命令与读数（根 + 各包的 package.json 全量检索，零命中即无依赖）：
+  grep -rn "tesseract\|opencv\|jimp\|sharp" package.json packages/*/package.json   → 无输出
+  scripts/check-compliance-redlines.ts 规则一的字面量清单里就有第三方打码服务本身
+  （`2captcha|anticaptcha|capmonster|deathbycaptcha|scratch-captcha`），
+  这条机检在 `pnpm lint` 链内、注入违规必红；其 145 文件 0 命中的读数见
+  docs/acceptance/2.7/2.7-02-redline-scan.txt（spec 2.7-02 `[x]`）。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+③ 需求面：spec 里每一处「验证码 / captcha / OCR」都是**反向**条目
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+grep -rn "验证码\|captcha\|OCR" docs/specs/ 的逐处归类（无一处要求识别或绕过）：
+  2.1-09  全仓检索 `captcha` 只剩 logger 脱敏规则与测试样例串            → 合规
+  2.5-10  自动化不发送任何个人凭据/密码/手机验证码到页面                  → 禁外发
+  2.7-01  检测到风控信号（验证码页 / 403 / 429）立即暂停整条工作流并通知  → 检测即停
+  2.7-02  不做任何验证码识别/绕过、不做 UA 与指纹伪装、不做多账号池       → 明确不做
+  2.8-11  接管 → 手动处理 → 恢复后**重新读 DOM**（不复用旧快照）          → 人来解，机器重读
+  4.1-05  抽文本过短判疑似扫描件，走明确失败路径，不引入 OCR 依赖         → 不引入
+  4.6-12  不发送任何凭据/验证码类内容（对齐 2.5-10）                      → 禁外发
+  5.5-07  登录失效 / 验证码 / 403 / 429 一律转人工接管，不自助绕过、不换 UA → 转人工
+  5.5-07 的落地记录还有一句：「本包对『什么是验证码』没有任何判据（§8.3 不识别不规避），
+          只把信号换成状态」——这正是被否决链路的反面。
+
+结论：计划树上没有任何一条待办依赖「认出并解出验证码」这项能力，
+      所以否决它没有造成缺口；被换掉的只是「无人值守地闯过去」，而这是 §8.3 明确不许要的东西。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+④ V 半边：暂停截图取 2.7-01 的联验证据（同一 fixture 开关、同一判据）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  docs/acceptance/2.7/2.7-01-captcha-paused-panel-3.png  主窗口：已暂停 + 接管横幅
+      横幅逐字（zh-CN）：等待你接管 / boss 的页面出现了风控拦截（验证码 / 访问受限一类），
+      工作流已停在「抓取 JD 入库」；请在内嵌视图里人工完成后继续。
+      机读：[data-testid=workflow-takeover] subject=boss reason=risk-control step=jd-capture
+            workflow.runner.current() → {status:"paused", requiresHuman:{…}}
+            节点表 jd-capture/jd-list/flaky 全为 pending —— 停在可恢复点，未起下一步
+  docs/acceptance/2.7/2.7-01-captcha-page-4.png           内嵌视图里的「请完成安全验证」页
+  docs/acceptance/2.7/2.7-01-risk-signal-6.txt            两类判据（HTTP 403 / 页面文案）+ 摘掉
+      browser-risk 的反向观测 + 「改回 off 点续跑 → 同一 run 三个节点依次 done」
+      —— 这一条就是缺口被换成了什么：不是"卡死"，是"人做完那一步、run 继续"
+
+  本轮在 macOS 上没有重放这一发的原因（如实记录，不推测）：
+  平台 `boss` 在这台机器的 userData 里还没有风险确认记录。点「开始」之后 run 0cebb65f-9d94-
+  4d89-a826-f185185e03c1 的 jd-capture 在 1ms 内失败，错误原文：
+      「平台 boss 还没有一份自动化风险确认记录，先确认承担该风险」
+  界面同一时刻的读数：[data-testid=workflow-notice] = 本次动作返回：运行中，
+      签字状态行 = 「boss 尚未确认自动化风险，动作会先等你点头」，
+      runner.current() 的 steps 为 failed / pending / pending（停在第一步，未起下一步）。
+  —— 这行读数本身是 2.7-06「denied 也要硬拦」的又一次活体复现（拦截点 ②），
+     但签字是用户本人的风险承担表态，代理不代签，因此不重放需要签字的那条链。
+
+收尾：靶页开关已归零（DELETE /api/risk-mode → {"ok":true,"mode":"off"}，GET 复核 {"mode":"off"}）。
