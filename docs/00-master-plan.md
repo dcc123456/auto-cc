@@ -461,8 +461,8 @@ P4 71 行（65 / 6 / 0）、P5 122 行（107 / 5 / **6 未做** + 4 条 C 半边
 | P3 的编辑轨要不要做                   | `docs/specs/03-resume-pdf/spec.md` 3.4-10                       | 做 / 降级 / 放弃——3.4 余下的与 3.6 全部挂在它后面（3.5 另有下面那条授权前置）                                                  |
 | 源码许可的书面豁免落盘                | `docs/research/source-repos-analysis.md` §1.2 与 P1 结论 P1-02  | 落成仓库内授权文件，否则 3.5 的「搬运」不开始（AGPL 的 `mupdf` / `pdfjs-dist` 不在豁免范围）                                   |
 | 多出口的纯 fixture 演示算子要不要登记 | `docs/plans/05-chat-agent/plan.md` 7.8.3 的「下一窗的一条命令」 | 5.10-08 / 09 / 13 / 18 的 V 半边与 P5-01 全卡在这只算子上（§6 新能力，要先补证据小节）                                         |
-| 续跑停在接管点时库里该写什么          | `docs/plans/05-chat-agent/plan.md` 5.10-j                       | 内存 `paused` 镜像与库行 `failed` 两份事实；`local-write` 要不要读式的盲重放                                                   |
-| 从画布新建一条计划的归属              | `docs/plans/05-chat-agent/plan.md` 5.10 待裁定                  | 新 `plan_id` 由谁生成、节点/边的删除语义                                                                                       |
+| 续跑停在接管点时库里该写什么          | `docs/plans/05-chat-agent/plan.md` 7.8.3-novies                 | 内存 `paused` 镜像与库行 `failed` 两份事实；`local-write` 要不要读式的盲重放                                                   |
+| 从画布新建一条计划的归属              | `docs/plans/05-chat-agent/plan.md` 7.8.3-septies 末（行 2060）  | 新 `plan_id` 由谁生成、节点 / 边的删除语义                                                                                     |
 | AGENTS.md §9 的「本机 Windows」       | `AGENTS.md` §9                                                  | 本窗实例是 macOS arm64：V/BLOCKED 的平台口径重定，随之解掉 1.7-09 / 1.7-10 / M1-01 / 2.1-12 这一类「本机无 mac / Linux」的措辞 |
 | `LICENSES.md` 的 per-platform 漂移    | `docs/plans/05-chat-agent/plan.md` 7.8.3                        | `pnpm lint` 末位机检今天必红：改成逐平台并列，还是把 `@napi-rs/canvas` 的变体折叠成平台无关一行                                |
 | 头像抽取要不要落点                    | `docs/specs/04-resume-kb/spec.md` 4.1-08                        | 给 P3 文档模型加图像字段 + 模板槽位，还是判为不做                                                                              |
