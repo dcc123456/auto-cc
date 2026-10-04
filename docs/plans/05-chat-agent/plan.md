@@ -1716,7 +1716,7 @@ CDP 10255、全新 `tmp/dist-update-userdata7`、更新源是本机 `scripts/upd
 | 实测结论                                                                                                                                                 | 后果 / 处置                                                                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `autoUpdater` 是 `out/main.js` 里 `Object.defineProperty` 的惰性 getter，cjs-module-lexer 静态扫不到                                                     | ESM 命名空间顶层没有它，解构得 undefined → 装机版一点就崩。改 `pickAutoUpdater()` 两种形状都认，都没有才抛 `UPDATE_RUNTIME_UNAVAILABLE`（补 3 条单测）                                                                                                               |
-| `setFeedURL()` 只管**检查**半边；**下载**半边读 `resources/app-update.yml` 取 `updaterCacheDirName`（`loadUpdateConfig` 是裸 readFile，缺文件即 ENOENT） | 该文件只在 `electron-builder.yml` 声明了 `publish` 且目标合适（win nsis / mac dmg                                                                                                                                                                                    | zip）时生成，`--dir` 永远不出 → `publish` 占位源是**产物侧必需项**，不是发布时才加装饰 |
+| `setFeedURL()` 只管**检查**半边；**下载**半边读 `resources/app-update.yml` 取 `updaterCacheDirName`（`loadUpdateConfig` 是裸 readFile，缺文件即 ENOENT） | 该文件只在 `electron-builder.yml` 声明了 `publish` 且目标合适（win nsis、mac dmg/zip）时生成，`--dir` 永远不出 → `publish` 占位源是**产物侧必需项**，不是发布时才加装饰                                                                                              |
 | 更新器缓存在 `%LOCALAPPDATA%\auto-cc-updater\pending\`，**不在 userData 里**，且 `DownloadedUpdateHelper` 按 **sha512** 认缓存                           | 换 profile 清不掉它；活体点"安装"会去装这份**与用户已装机 app 共享**的缓存 → 明确禁止点。假包 payload 原先与版本无关，跨版本 sha512 相同被缓存吃掉，"点下载"发不出请求——曾误读成产品 bug，实际是证据工具的 bug，改成 payload 带版本号（同版本可复现、跨版本必 miss） |
 
 **为取到读数修掉的四处**：产品 1 处（`pickAutoUpdater`）、界面 1 处（`no-feed`/`idle` 两态下更新器单连都没
@@ -1726,6 +1726,45 @@ CDP 10255、全新 `tmp/dist-update-userdata7`、更新源是本机 `scripts/upd
 
 **次序偏离第三次**：b 排在 c/d 之后做。上一轮写下的"5.9-e 把需要重建产物的判据标成一批"本轮兑现了一半
 （b 自己就是那批里最重的），剩下的 `Resources/` 两件事（许可证文件、首屏）仍在 5.9-e 排队。
+
+### 7.7.8 5.9-e 落地记录（2026-10-04，dist 产物发布冒烟 + 5.9 收口）
+
+**测的东西**：spec 5.9-07「冒烟脚本对安装后产物跑一遍最小链路，失败即阻断发布」。
+前面几片的证据都停在"能起、能进主界面"（1.7 / 5.9-a）或"某一屏在产物里对"（5.9-b/d），
+发布真正要回答的是**装配之后那条主链路在 `app.asar` 载荷里还通不通**——dev 通不代表产物通，
+因为外置依赖搬运、CSP、内核路径这三样只在产物侧才生效。所以这一步是新增一条独立入口
+`pnpm smoke:dist`（`scripts/smoke-dist.ts`），而不是把断言塞进已有的 `pnpm test`：
+后者跑在 Node 里，够不着装机载荷。
+
+**六步与读数**（原始日志 `docs/acceptance/5.9/5.9-07-smoke.txt`）：
+① 产物存在 + 随包文件齐（`app-update.yml` / `LICENSES.md` / `THIRD-PARTY-NOTICES.txt` 三项皆「在」）
+② fixture 站点可用（本轮复用已在听的那台）③ 启动产物、CDP target 里出现 `app.asar` 页面
+④ 隐私首屏出现过=true → 点确认 → `[data-view="chat"]` 出现 → 对话输入框可见=true
+⑤ `workflow.runner.plans` 回 `boss-basic(3), boss-deliver(2), boss-e2e(5)` → grantConsent/open →
+起跑 `runId=3fe0954f…` → `status=done`，三节点全 done ⑥ `Browser.close` 后进程自行退出 `code=0`。
+**阻断性反向验证**：`--plan does-not-exist` → 第 5 步 FAIL、`冒烟结论：失败`、退出码 1
+（`5.9-07-smoke-negative-plan.txt`）。判据里"失败即阻断发布"靠这一次负向跑才成立，
+只跑一次绿的等于没验退出码。
+
+**顺带补掉前两片明写"留给 5.9-e"的产物侧一眼**：5.9-c 的「安装目录 Resources/ 里看得见记账文件」
+在第一步读到实物，5.9-d 的「发布产物内含这一屏」在第四步读到实物。这两处一闭，5.9-06 才从
+"dist 复跑并入 5.9-e"改成 `[x]`；§7.7.7 末尾那句"`Resources/` 两件事仍在 5.9-e 排队"至此清账。
+
+**为取到读数修掉的五处脚本缺陷**（都是"第一次真跑才暴露"的那类，写下来免得下次重踩）：
+
+| 现场读数                                                                              | 根因与处置                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listen EADDRINUSE 127.0.0.1:10233`，脚本在写下第一条判据之前就崩                     | 内置计划的 `startUrl` 写死 10233（`packages/platform-boss/src/knowledge/boss.json`），而那台端口上常已有 dev/harness 起的 fixture。先探 `/api/jobs` 的 JSON content-type **认它是 fixture 再复用**，认不出才在本进程里 `import` 起一台（脚本退出它跟着散） |
+| `未找到可点击元素：[data-view="chat"]`                                                | 点完隐私确认是一次 React 状态迁移，产物上没有 HMR、慢一拍；新增 `waitForSelector()` 轮询而不是加 `sleep` 猜时间                                                                                                                                            |
+| `PLATFORM_NOT_CONFIGURED 未配置的平台：boss`，而 `sessions.platforms` 里明明有 `boss` | 自己的 `callBridge` 把实参包成 `[[...args]]`（`JSON.stringify([args])`），`'boss'` 变成 `[['boss']]` 的一个实参。改成 `...${JSON.stringify(args)}`。**这是脚本的 bug，读成产品 bug 就会去改产品**                                                          |
+| `status=done requiresHuman=null` 被判失败                                             | 占位计划里没有人工节点，`requiresHuman` 是 `null`（"还没到需要判的节点"）而不是 `false`；断言改成 `!view.requiresHuman` 并把 null 记为读数                                                                                                                 |
+| 六步全 PASS，进程却以退出码 13 结束并打印 `Detected unsettled top-level await`        | `await bridge.send('Browser.close')` 永不 settle——浏览器收摊那一瞬间回包对象就没了。发完不等，改轮询 spawn 的 `exit` 事件判"干净退出"，并在失败路径补 `bridge.close()` / `app.kill()`                                                                      |
+
+**复用与不越界（§2.1 / §7.2 / §9）**：CDP 会话与 target 发现直接 `import { CdpSession, listTargets }`
+自 `packages/testing/src/cdp.js`，没有第二套驱动；业务动作全部经 `window.autoCC.*` 白名单口
+（命名空间按**第一个点**切，所以是 `autoCC.workflow['runner.start']`）；userData 每轮新开一份
+`tmp/smoke-dist/userdata-<时间戳>` 且**留着不删**（删了每轮都假装首启动，掩盖真实状态）；
+未跟踪的日志与 userdata 全在被忽略的 `tmp/`，入库只有按条目 ID 命名的两份文字证据。
 
 ## 8. 明确不做
 
