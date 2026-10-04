@@ -131,6 +131,18 @@ export {
   operatorParamFields,
   validateOperatorParams,
 } from '@auto-cc/core/operators';
+
+/**
+ * 保存前图校验与编辑命令栈（spec 5.10-05 / 5.10-14 / 5.10-19）在渲染层的唯一入口。
+ * 放 core 而渲染层经窄子路径取值的理由见 `core/src/graph-check.ts` 头注与 plan 裁定九：
+ * 界面要边画边给反馈，保存口（L3）落库前要按同一套规则再拦一遍，两份规则迟早漂（§2.2）。
+ */
+export { WORKFLOW_GRAPH_CHECK_CODES, checkWorkflowGraph, isWorkflowGraphValid } from '@auto-cc/core/graph-check';
+export type { WorkflowGraphCheckCode, WorkflowGraphIssue } from '@auto-cc/core/graph-check';
+
+/** 画布命令栈：加节点/连线/改参数三类编辑的撤销重做，位置不进栈（5.10-06 的口径）。 */
+export { createWorkflowGraphEditor, workflowEdgeIdOf } from '@auto-cc/core/graph-edit';
+export type { WorkflowGraphDraft, WorkflowGraphEditor } from '@auto-cc/core/graph-edit';
 export type {
   OperatorCategory,
   OperatorDescriptor,

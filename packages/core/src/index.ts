@@ -302,6 +302,8 @@ export type ServiceName = string & {};
 export * from './errors.js';
 export * from './events.js';
 export * from './operators.js';
+export * from './graph-check.js';
+export * from './graph-edit.js';
 export * from './paths.js';
 export * from './sql.js';
 export * from './concurrency.js';

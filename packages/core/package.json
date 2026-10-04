@@ -8,6 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./operators": "./src/operators.ts",
+    "./graph-check": "./src/graph-check.ts",
+    "./graph-edit": "./src/graph-edit.ts",
     "./package.json": "./package.json"
   },
   "scripts": {
