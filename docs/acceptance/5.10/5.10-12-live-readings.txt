@@ -70,8 +70,23 @@ run ba4e93c0-b47d-40f1-9ed9-1b3ebfb010de 在第三格失败（`lastError`：第 
 五、截图
   docs/acceptance/5.10/5.10-12-failed-node-readings.png（四读数 + 展开的证据正文同框）
 
-六、一条如实记录（与本条判据无关，但探针撞上了）
+六、一条如实记录（与本条判据无关，但探针撞上了）——2026-10-04 本窗稍后把成因查到底
   长时间开着 dev 实例反复热改 `WorkflowCanvas.tsx` 之后，同一张画布的 DOM 里出现过 13 张参数卡
   （都在 `[data-testid="workflow-canvas"]` 直下，全部可见），而 JSX 只有一处渲染点、根节点也只有一个。
-  整页 reload + 重挂画布后计数回到 1。成因未查（HMR 遗留 DOM 与产品缺陷两种都能解释这个现象），
-  上面第四确的「1 张」是 reload 之后重取的干净读数。
+  整页 reload + 重挂画布后计数回到 1。
+
+  三条静态读码（本窗实读，命令与出处都写在这里）：
+    1) `WorkflowCanvas.tsx:634-643` 是 `OperatorParamForm` 在全仓**唯一**的渲染点，外面套的是
+       `selectedSpec && selectedDescriptor` 一个条件，组件还带 `key={selectedSpec.id}`。
+       所以单棵 React 树里至多一张（选中一格一张，换格是重挂载而不是往旁边叠一张）。
+    2) 渲染层里 `createRoot` 只有 `main.tsx:15` 一处调用，整个 `packages/renderer/src` 里
+       `appendChild` / `insertAdjacentHTML` / `dangerouslySetInnerHTML` 命中 0 处——
+       没有任何代码绕过 React 往 DOM 里手动插卡。
+    3) 读数形状与上面两条只有一种合理解释：13 张 = 13 棵并存的根，而并存根在 dev 模式下的来源
+       就是 Vite Fast Refresh 反复换同一模块的实现时旧根没被拆掉。真实运行期泄漏不该在 reload 后
+       归 1（泄漏点挂在挂载路径上，重来一遍还会再长），也不该长成"整张卡各存一份"这种形状。
+
+  **结论：判为热改遗留，不是产品缺陷**；上面第四确的「1 张」按 reload 之后的干净读数记账。
+  诚实边界：这是**排除到只剩一个解释**，不是当场抓到 Fast Refresh 拆根失败的日志；
+  还差一条正向复现（不热改、只反复点格子看计数会不会涨），本窗没做——它不属于任何验收判据，
+  要补的话属于编辑面的下一件事。
