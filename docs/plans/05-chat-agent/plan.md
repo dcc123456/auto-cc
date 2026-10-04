@@ -1889,6 +1889,8 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
    真 app 里也就没有可截图的分支图。要么登记一只多出口的演示算子（`core/src/operators.ts` + `executors.ts` 两处，
    属新能力，按 §6 要先立证据与理由），要么把 5.10-08/13 的 V 半边如实标 BLOCKED 到那一步之后。**本窗不自行造算子。**
 
+**5.10-18 的 V 半边进展（2026-10-04 另窗活体）**：面板与 agent 两个入口已证到「共用同一个 runner」（同一 runId、同一张四步表、对话镜像自写「同一个 runner」），计划是 `local-flaky-4`（四只 `demo.flaky` 打本地 10233，§7.2 合规）；只差「两处各起跑一次」那两条不同 runId——面板跑完先 `[data-action=abort]` 再从对话 `/run` + 点 `[data-action=confirm-run]` 即可补齐，读数与选择器见 `docs/acceptance/5.10/5.10-18-shared-runner-live-partial.txt`。
+
 **本窗读码读出来的两件，都超出 5.10-f 的裁定范围，交给人裁定而不是就地改**：
 
 - **自定义计划的跨进程续跑有一条既有的缝**：`workflow.runner` 的「当前计划」只有 `start()` 会换，

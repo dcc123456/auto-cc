@@ -1,0 +1,55 @@
+5.10-18 的 V 半边（画布保存的工作流：面板入口与 agent 工具入口跑的是同一个 runner）
+================================================================
+
+判据原文：`docs/specs/05-chat-agent/spec.md` 5.10-18「画布保存的工作流既能被面板运行也能被 agent 当工具
+运行，三处共用同一个 `workflow.runner`」，方式 C+V。C 半边 5.10-h 已过（`workflow.run` 登记进
+`agent.tools`、入参只有 `planId`、`run` 里不含推进逻辑，5 条用例证的是「同一个 runner」）。
+本文件记 V 半边（活体截图）的实测进度与**没做完的那一口气**。
+
+一、用的计划（§7.2 合规）
+    活体 dev 实例（CDP 10222 / vite 5173 / fixture 10233，独立 userData `tmp/dev-userdata/`）里
+    下拉选中的是自定义计划 `local-flaky-4`：4 只 `demo.flaky` 节点，`target` 全是
+    `demo://flaky-N`，参数 URL 指向 `http://127.0.0.1:10233/api/fail-counter`（本地 fixture 服务）。
+    库里另三条 `boss-basic` / `boss-deliver` / `boss-e2e` 是内置计划，**本轮一条都没跑**——
+    它们射程里的真实平台动作按 §7.2 只能在用户在场时手动验证。
+
+二、面板入口这一次（已过）
+    `[data-action=start]` 全页只有一只、高 26（不存在 §9 的⑦「命中隐藏那一份」的歧义）。
+    点完 3 秒后读数：
+        步态: flaky-1=done, flaky-2=done, flaky-3=done, flaky-4=done
+        状态行: 「已完成 · dae11dc1-45e9-465b-b3af-69461f59b787」
+    截图 `51018-panel-run.png`（活体页面，画布收起态；面板状态区在画面内）。
+
+三、agent 工具入口这一次（跑通了流程，但拿到的读数与上面是同一条 run）
+    流程：切到「对话」页 → 用 `HTMLTextAreaElement` 的原生 setter 写 `/run local-flaky-4`
+    （§9 的：直接改 `.value` React 不收）→ 派发 `input` → 点最高的那只 `[data-action=send]`
+    → 出现计划卡 `[data-action=confirm-run]` → **脚本只点这只人该点的按钮**，
+    没有绕过 5.3 定的「不可自提升」去调 `agent.loop.confirm`（§9 的⑨）。
+    确认后 6 秒读数：
+        步态: flaky-1=done, flaky-2=done, flaky-3=done, flaky-4=done
+        runId（[data-testid=workflow-run-id]）: dae11dc1-45e9-465b-b3af-69461f59b787
+        对话侧镜像（[data-testid=chat-workflow-mirror]）: 「同一个 runner：已完成」
+    截图 `51018-agent-run.png`。
+
+四、这两张图证到了什么、没证到什么（这条是本文件最重要的一段）
+    **证到了**：两个入口显示的是**同一份运行读数**——同一个 `runId`、同一张四步表、
+    对话侧那面镜子自己写着「同一个 runner」。这正是判据后半句「三处共用同一个 `workflow.runner`」
+    的活体形态，也排除了「agent 那条路自己长了一套推进逻辑」。
+    **没证到**：判据前半句「既能被面板运行也能被 agent 当工具运行」要的是**两处各起跑一次**，
+    也就是两条不同的 run。本轮从面板起跑后没先「中止」再走 agent 入口，于是 agent 那一次
+    拿到的还是面板那条已完成的 current run 的读数。差的动作很具体：
+    跑完面板那条 → 点 `[data-action=abort]` → 再从对话里 `/run local-flaky-4` + 点「确认并执行」
+    → 比对两个 `runId` 必须不同、且四步 `done` 的读数是后一次自己产生的。
+    因此 5.10-18 的 V 半边**记 `[!]`**，理由不是环境也不是缺能力（计划、按钮、确认链路都活着），
+    是本轮预算内没跑完那一次重跑。指针写进 plan 的接手清单，下一个人只差那三个点击。
+
+五、复现（可直接逐字重跑）
+    探针脚本都在被忽略的 `tmp/p3-leg/`（不进仓库，§7.5）：
+        pnpm harness eval --url 5173 --expr-file tmp/p3-leg/h-steps.js
+        pnpm harness eval --url 5173 --expr 'document.querySelector("[data-action=start]").click(); "started"'
+        pnpm harness shot --out tmp/p3-leg/51018-panel-run.png
+    步态的 DOM 判据属性（本轮实测存在）：`[data-step-id]` + `[data-step-status]`；
+    视图与运行区的 `data-testid`：`workflow-panel` / `workflow-state` / `workflow-run-id` /
+    `workflow-run-card` / `chat-workflow-mirror`。
+    早期两次失败尝试记录：`[data-node-run-id]`、`[data-run-step]` 这两个属性**不存在**（猜的），
+    所以第一版探针拿到「步骤行数 0」，别照抄。
