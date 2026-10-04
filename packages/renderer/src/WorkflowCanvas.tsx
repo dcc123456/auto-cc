@@ -1,14 +1,22 @@
 /**
- * 算子图画布（spec 5.10-01 的骨架 + 5.10-03/04 的编辑态第一层 + 5.10-d 的连线、命令栈与保存前校验）。
+ * 算子图画布（spec 5.10-01 的骨架 + 5.10-03/04 的编辑态第一层 + 5.10-d 的连线、命令栈与保存前校验
+ * + 5.10-g 的"运行态叠在编辑态同一张图上"）。
  *
  * 两种画法共用**同一张图**（§5.10.5 的口径）：
- * - **运行态**格子来自 `workflow/progress` 推来的 `steps`，画布自己不发起请求、不起定时器
- *   （spec 5.10-11 要求"离开画布无残留句柄"，所以它由面板按开合挂载/卸载，而不是常驻）。
- * - **编辑态**草稿来自算子库：一只草稿节点的全部外观与参数形状都由 `WORKFLOW_OPERATORS` 里那一行
+ * - **图的节点与边**来自库：下拉里选中那条计划时经 `workflow.graph.load` 读进来（5.10-02 要的
+ *   「内置线性计划不重写就能画成一条链」就是这一条），没选计划时退化成照运行镜像摆格子。
+ * - **状态**来自 `workflow/progress` 推来的 `steps`，只叠在 id 对得上的格子上；画布自己不发起请求、
+ *   不起定时器（spec 5.10-11 要求"离开画布无残留句柄"，所以它由面板按开合挂载/卸载，而不是常驻）。
+ *   点开一格看它的参数 / attempts / 耗时 / 证据是另一件事：那一份读数由 `WorkflowNodeDetail`
+ *   **在点开那一刻**去库里问一次（spec 5.10-12），不参与格子的状态，画布因此仍没有第二个状态源。
+ * - **运行时只读**（5.10-11）：`isReadOnly` 由父层按 run 状态给出，调色板、连线、参数表单、撤销重做
+ *   在那期间一律禁用——改图会换指纹，而「计划已修改 → 旧 run 不可续跑」正是 5.10-07 要的结果，
+ *   所以这条路根本不该在运行期间存在，而不是留给用户去踩。
+ * - **算子形状来自描述表**：一只节点的全部外观与参数形状都由 `WORKFLOW_OPERATORS` 里那一行
  *   决定（图标、危险度徽标、出口句柄数、表单字段），这里没有 per-算子 的分支。
  *
  * - **位置是视图层**：拖完之后位置由画布自己持有，不进命令栈、不参与指纹（5.10-06 已把这条钉成测试）。
- * - **边是执行顺序**：运行链的边由步骤顺序派生，草稿之间的边由用户连（5.10-d），两者都只画不解释。
+ * - **边是执行顺序**：库里的边照画，镜像里多出的那几格（图上没有）按镜像顺序补一条链。
  * - **合法性规则不在这里长第二份**：五条保存前校验读 `@auto-cc/core/graph-check`（渲染层与 L3 的保存口
  *   同一份规则，plan 裁定九），界面只按 `code` 取文案、按 `nodeIds` 落红环。
  * - **配色与步骤行同源**：`STEP_STATUS_STYLE` 与工作流面板共用一份，同一状态在两处必须同色。
@@ -40,19 +48,19 @@ import {
   type WorkflowGraphDraft,
   type WorkflowGraphEditor,
   type WorkflowGraphIssue,
+  type WorkflowGraphLoadView,
   type WorkflowNodeSpec,
   type WorkflowStepView,
 } from '@auto-cc/shared';
 import { STEP_STATUS_STYLE } from './stepStatusStyle';
 import { OperatorPalette } from './OperatorPalette';
 import { OperatorParamForm } from './OperatorParamForm';
+import { WorkflowNodeDetail } from './WorkflowNodeDetail';
 import { operatorIconOf } from './operator-icons';
+import { useBridgeAction } from './useBridgeAction';
 
-/** 运行链的初始摆放间距（像素）；真正的分层落点在后续片里按拓扑算（裁定三）。 */
+/** 格子的初始摆放间距（像素）；库里存过落点时以落点为准（裁定三）。 */
 const NODE_GAP_X = 260;
-
-/** 草稿节点从运行链下方开始摆，避免与正在跑的格子叠在一起看不清。 */
-const DRAFT_ORIGIN_Y = 250;
 
 /** 多出口算子的源句柄纵向落点——用 Tailwind 任意值而不是手写 CSS（AGENTS.md §5.1）。 */
 const SOURCE_HANDLE_CLASS = ['!top-1/2', '!top-[70%]', '!top-[88%]'] as const;
@@ -70,13 +78,30 @@ interface OperatorData extends Record<string, unknown> {
   status: WorkflowStepView['status'];
   /** 第几步（从 1 开始，与步骤行的序号同口径） */
   order: number;
-  /** 草稿节点的算子 kind；运行态格子拿不到 kind（步骤镜像里没有这一项）所以是 null */
+  /** 算子 kind：图上每一格都有；只有"镜像里有、图上没有"那几格拿不到（步骤镜像里没有这一项） */
   kind: string | null;
   /** 这只格子被保存前校验点名了吗（红环依据是它，不是那句文案） */
   hasIssue: boolean;
 }
 
 type OperatorNode = Node<OperatorData, 'operator'>;
+
+/**
+ * 画布上一格格子的读数——图上的格子与运行镜像补的格子统一成这一个形状，
+ * 下面摆节点、连边、选中都只认它，不再分两套路径（5.10-g 的「同一张图」）。
+ */
+interface CanvasCell {
+  /** 格子 id：图上格子和镜像格子都稳定，harness 按它定位 */
+  id: string;
+  /** 展示标签（图上格子来自描述表，镜像格子来自 `workflow.step.<id>`） */
+  label: string;
+  /** 叠加后的状态：图上格子取镜像同 id 那一格，取不到是 pending */
+  status: WorkflowStepView['status'];
+  /** 算子 kind；只有镜像补的那几格是 null（步骤镜像里没有这一项） */
+  kind: string | null;
+  /** 这一格来自库里的图，还是来自运行镜像（决定它有没有参数可填、边从哪来） */
+  isFromGraph: boolean;
+}
 
 /**
  * 由描述表造一只草稿节点的声明（命令栈里存的就是这个形状，与运行侧的节点声明同构）。
@@ -159,14 +184,22 @@ const NODE_TYPES = { operator: OperatorNodeCard } as const;
 export interface WorkflowCanvasProps {
   /** 当前 run 的步骤镜像（`workflow/progress` 推来的那份，不是画布自己读的）；没有 run 时是空表 */
   steps: WorkflowStepView[];
+  /**
+   * 下拉里选中的那条计划的 id——画布照它的图库版本摆格子（5.10-02）。
+   * undefined = 用户没选（`start()` 的默认路径是「沿用 runner 当下装载的那份」，而那份的 id 界面读不到，
+   * 也不该由界面猜），此时画布只照 `steps` 摆，不冒充「这就是库里的图」。
+   */
+  planId: string | undefined;
+  /** 有正在进行的 run（running / paused）：画布只读（5.10-11），判据由父层给，画布不自己问 runner */
+  isReadOnly: boolean;
 }
 
 /**
- * 画布主体：运行链 + 算子库加入的草稿节点。
- * @param steps 当前 run 的步骤读数
+ * 画布主体：库里那条计划的图 + 叠在上面的运行状态 + 算子库新加进来的格子。
+ * @param props 见 `WorkflowCanvasProps`
  * @returns 可平移缩放、格子可拖拽、能加算子并填参数的画布
  */
-function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
+function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps) {
   const { t } = useTranslation();
   const flow = useReactFlow<OperatorNode>();
 
@@ -179,15 +212,25 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
     editorRef.current = createWorkflowGraphEditor({ nodes: [], edges: [] });
   }
 
-  /** 草稿图的一份只读快照（命令栈的内容在编辑器对象里，React 读不到，所以每次编辑后复制一份出来） */
+  /** 图上那一份只读快照（命令栈的内容在编辑器对象里，React 读不到，所以每次编辑后复制一份出来） */
   const [snapshot, setSnapshot] = useState<WorkflowGraphDraft>({ nodes: [], edges: [] });
   /** 上一次"保存前校验"的结果；null = 还没校验过（不是"校验过且没问题"） */
   const [issues, setIssues] = useState<WorkflowGraphIssue[] | null>(null);
-  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
-  /** 拖拽后的落点（视图层）：运行态格子与草稿都按这一份覆盖初始摆放。 */
+  /**
+   * 点开的格子（spec 5.10-12）：画布下方摆两张卡——参数卡（描述表派生）与运行读数卡（库里那一行）。
+   * 只有一格能选中，因为这两张卡说的都是"这一格"，同时选中两格会让用户分不清读数在讲谁。
+   */
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  /**
+   * 画布现在照的是库里哪条计划（5.10-02 的判据要在界面上认得出来源）；
+   * null = 没照库画（没选计划，或那次读数没成功），此时格子来自运行镜像。
+   */
+  const [loadedPlanId, setLoadedPlanId] = useState<string | null>(null);
+  /** 拖拽后的落点（视图层）：图上格子与镜像补的格子都按这一份覆盖初始摆放。 */
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
-  /** 加过草稿就自增一次，让下面的 effect 重新贴合视口（0 = 还没加过，不该动用户的视野）。 */
+  /** 图变过一次就自增一次，让下面的 effect 重新贴合视口（0 = 还没变过，不该动用户的视野）。 */
   const [fitRequestId, setFitRequestId] = useState(0);
+  const bridge = window.autoCC;
 
   /**
    * 把命令栈的当前图复制成一份 React 状态，并清掉上一轮的校验读数。
@@ -200,44 +243,97 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
     setIssues(null);
   }, []);
 
+  /**
+   * 用库里读来的那张图重铺命令栈：节点、边、落点都照库里那一版，撤销到底也回到这一版。
+   *
+   * 换一条计划就等于丢掉尚未入库的编辑——这是**如实**而不是省事：画布那侧的写入口还没接上
+   * （保存口只在 5.10-e 的 IPC 上），既然留不住，就不假装留得住。
+   * @param view `workflow.graph.load` 的读数
+   */
+  const seedFromGraph = useCallback((view: WorkflowGraphLoadView) => {
+    editorRef.current = createWorkflowGraphEditor({ nodes: view.graph.nodes, edges: view.graph.edges });
+    setSnapshot({ nodes: view.graph.nodes, edges: view.graph.edges });
+    setIssues(null);
+    setDragOffsets(
+      Object.fromEntries(view.placements.map((placement) => [placement.nodeId, { x: placement.x, y: placement.y }])),
+    );
+    setSelectedNodeId(null);
+    setLoadedPlanId(view.planId);
+    setFitRequestId((previous) => previous + 1);
+  }, []);
+
+  /** 一次读数没有「动作跑完重读快照」这回事，复用外壳只为忙碌态与失败提示的同一套呈现（§2.1，同 `NodeEvidenceSection`）。 */
+  const nothingToReread = useCallback(() => Promise.resolve(), []);
+  const { notice: graphNotice, run: readGraph } = useBridgeAction(nothingToReread);
+
+  /**
+   * 选中的计划变了就去库里读它的那张图（spec 5.10-02：内置线性计划不重写就能画成一条链）。
+   * 只在这一条变化时读——运行进度仍由父层从 `workflow/progress` 推（5.10-11），画布不轮询 runner。
+   */
+  useEffect(() => {
+    if (!planId) {
+      setLoadedPlanId(null);
+      return;
+    }
+    void readGraph(t('workflow.canvas.actionLoad'), () => bridge?.workflow['graph.load'](planId), {
+      apply: seedFromGraph,
+    });
+  }, [planId, bridge, readGraph, seedFromGraph, t]);
+
   /** 被校验点名的节点 id——红环按这一份落，与文案无关（同一份事实的两个读数）。 */
   const issueNodeIds = useMemo(() => new Set((issues ?? []).flatMap((issue) => issue.nodeIds)), [issues]);
 
-  const nodes = useMemo<OperatorNode[]>(() => {
-    const runningNodes = steps.map((step, index) => ({
-      id: step.id,
-      type: 'operator' as const,
-      position: dragOffsets[step.id] ?? { x: index * NODE_GAP_X, y: 0 },
-      data: {
-        stepId: step.id,
-        label: t(`workflow.step.${step.id}`, { defaultValue: step.id }),
-        status: step.status,
-        order: index + 1,
-        kind: null,
-        hasIssue: issueNodeIds.has(step.id),
-      },
-    }));
-    const draftNodes = snapshot.nodes.map((draft, index) => {
+  /** 镜像里的状态按 id 索引：它是叠在图上那一层，不是第二批格子（5.10-g 的「同一张图」）。 */
+  const statusById = useMemo(() => new Map(steps.map((step) => [step.id, step.status])), [steps]);
+
+  /**
+   * 画布上的格子：图上每一格（算子、参数、出口都由描述表说话），再加上「镜像里有、图上没有」那几格。
+   * 后一种只出现在没选计划的时候——那时画布没有库里的图可照，只能照运行镜像摆，且如实标明不是图上的。
+   */
+  const canvasCells = useMemo<CanvasCell[]>(() => {
+    const graphCells = snapshot.nodes.map<CanvasCell>((node) => {
       // 标题键也从描述表取：这里再拼一次 `workflow.operator.${kind}.title` 就是第二份规则（§2.2）。
-      const descriptor = operatorByKind(draft.kind);
+      const descriptor = operatorByKind(node.kind);
       return {
-        id: draft.id,
-        type: 'operator' as const,
-        // 位置不进命令栈（5.10-06）：栈里那份没有 position 字段，初始落点由下标现算，
-        // 拖过的落点存在视图层的 `dragOffsets` 里——撤销一条边不会把格子弹回原位。
-        position: dragOffsets[draft.id] ?? { x: 0, y: DRAFT_ORIGIN_Y + index * 78 },
-        data: {
-          stepId: draft.id,
-          label: descriptor ? t(descriptor.titleKey, { defaultValue: draft.kind }) : draft.kind,
-          status: 'pending' as const,
-          order: runningNodes.length + index + 1,
-          kind: draft.kind,
-          hasIssue: issueNodeIds.has(draft.id),
-        },
+        id: node.id,
+        label: descriptor ? t(descriptor.titleKey, { defaultValue: node.kind }) : node.kind,
+        status: statusById.get(node.id) ?? 'pending',
+        kind: node.kind,
+        isFromGraph: true,
       };
     });
-    return [...runningNodes, ...draftNodes];
-  }, [steps, snapshot, dragOffsets, issueNodeIds, t]);
+    const inGraph = new Set(snapshot.nodes.map((node) => node.id));
+    const mirrorCells = steps
+      .filter((step) => !inGraph.has(step.id))
+      .map<CanvasCell>((step) => ({
+        id: step.id,
+        label: t(`workflow.step.${step.id}`, { defaultValue: step.id }),
+        status: step.status,
+        kind: null,
+        isFromGraph: false,
+      }));
+    return [...graphCells, ...mirrorCells];
+  }, [snapshot, steps, statusById, t]);
+
+  const nodes = useMemo<OperatorNode[]>(
+    () =>
+      canvasCells.map((cell, index) => ({
+        id: cell.id,
+        type: 'operator' as const,
+        // 位置不进命令栈（5.10-06）：栈里那份没有 position 字段，初始落点由下标现算，
+        // 拖过的落点存在视图层的 `dragOffsets` 里（库里存过的落点也在这一份里）——撤销一条边不会把格子弹回原位。
+        position: dragOffsets[cell.id] ?? { x: index * NODE_GAP_X, y: 0 },
+        data: {
+          stepId: cell.id,
+          label: cell.label,
+          status: cell.status,
+          order: index + 1,
+          kind: cell.kind,
+          hasIssue: issueNodeIds.has(cell.id),
+        },
+      })),
+    [canvasCells, dragOffsets, issueNodeIds],
+  );
 
   /**
    * 只接住位置变更：`nodes` 是受控的，落点回到 state 才拖得住；
@@ -259,15 +355,15 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
   }, []);
 
   /**
-   * 从算子库加一格草稿：id 由 kind 派生保证可读，参数初值只带 schema 里声明过的默认值。
+   * 从算子库加一格：id 由 kind 派生保证可读，参数初值只带 schema 里声明过的默认值。
    * @param descriptor 被点中的算子描述（整份从描述表来，画布不认识任何一只算子）
    */
-  function addDraftNode(descriptor: OperatorDescriptor) {
+  function addOperatorNode(descriptor: OperatorDescriptor) {
     const sameKindCount = snapshot.nodes.filter((draft) => draft.kind === descriptor.kind).length;
     const draftId = `${descriptor.kind.replaceAll('.', '-')}-draft-${String(sameKindCount + 1)}`;
     if (!editorRef.current?.addNode(draftNodeSpec(descriptor, draftId))) return;
     sync();
-    setSelectedDraftId(draftId);
+    setSelectedNodeId(draftId);
     setFitRequestId((previous) => previous + 1);
   }
 
@@ -287,12 +383,12 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
   }, [fitRequestId, flow]);
 
   /**
-   * 表单校验通过后写回草稿参数（红标期间走不到这里，见 `OperatorParamForm`）。
-   * @param draftId 目标草稿节点 id
+   * 表单校验通过后写回节点参数（红标期间走不到这里，见 `OperatorParamForm`）。
+   * @param nodeId 目标节点 id
    * @param params 已按 zod 补全的参数
    */
-  function commitDraftParams(draftId: string, params: Record<string, string | number | boolean>) {
-    if (!editorRef.current?.setParams(draftId, params)) return;
+  function commitNodeParams(nodeId: string, params: Record<string, string | number | boolean>) {
+    if (!editorRef.current?.setParams(nodeId, params)) return;
     sync();
   }
 
@@ -330,17 +426,25 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
     setIssues(checkWorkflowGraph(snapshot, WORKFLOW_OPERATORS));
   }
 
-  /** 运行链的相邻边 + 草稿之间用户连的边（两者都只画不解释）。 */
-  const edges = useMemo<Edge[]>(
-    () => [
-      ...steps.slice(1).map((step, index) => ({
-        id: `${steps[index]?.id}->${step.id}`,
-        source: steps[index]?.id ?? '',
+  /**
+   * 画布上的边。
+   *
+   * - 图上的边只从 `snapshot.edges` 来（库里存的那一份，或用户在算子库之间连出来的那一份）。
+   * - **只有**「镜像里有、图上没有」那几格之间才按镜像顺序补一条链——那是没选计划、画布没有图可照时的
+   *   退化态。图上已有这一格时绝不按步骤顺序再连一条，否则会凭空多出图里没有的边，与 5.10-07 的指纹不是同一件事。
+   * - `animated` 只看源格子是否在跑：流线的动画是"这一步正在往下走"的读数，不引入新的状态源。
+   */
+  const edges = useMemo<Edge[]>(() => {
+    const mirrorOnlyCells = canvasCells.filter((cell) => !cell.isFromGraph);
+    return [
+      ...mirrorOnlyCells.slice(1).map((cell, index) => ({
+        id: `${mirrorOnlyCells[index]?.id}->${cell.id}`,
+        source: mirrorOnlyCells[index]?.id ?? '',
         sourceHandle: 'default',
-        target: step.id,
+        target: cell.id,
         targetHandle: 'default',
         type: 'smoothstep',
-        animated: step.status === 'running',
+        animated: cell.status === 'running',
       })),
       ...snapshot.edges.map((edge) => ({
         // 边的 id 与命令栈里那一份同源（`workflowEdgeIdOf` 的读法），撤销才认得回同一条线
@@ -350,23 +454,48 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
         target: edge.target,
         targetHandle: 'default',
         type: 'smoothstep',
+        animated: statusById.get(edge.source) === 'running',
       })),
-    ],
-    [steps, snapshot],
-  );
+    ];
+  }, [canvasCells, snapshot, statusById]);
 
   const canUndo = editorRef.current.canUndo();
   const canRedo = editorRef.current.canRedo();
-  const selectedDraft = snapshot.nodes.find((draft) => draft.id === selectedDraftId) ?? null;
-  const selectedDescriptor = selectedDraft ? operatorByKind(selectedDraft.kind) : undefined;
+  /**
+   * 点开的那一格。从 `canvasCells` 找而不是再算一次标签：标签规则只在那一份里（§2.2），
+   * 且这一格被撤销 / 换一条计划之后可能已经不在了，找不到就是"它不在这张图上"。
+   */
+  const selectedCell = canvasCells.find((cell) => cell.id === selectedNodeId) ?? null;
+  /**
+   * 选中格子在命令栈里的那份声明（kind 与参数的来源）。只在**图上有这一格**时才有——
+   * 镜像补的那几格没有声明可改，参数卡因此不出现，运行读数卡照常出现（5.10-12 的两张卡本来就是两回事）。
+   */
+  const selectedSpec = snapshot.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const selectedDescriptor = selectedSpec ? operatorByKind(selectedSpec.kind) : undefined;
 
   return (
     <div className="mt-3" data-testid="workflow-canvas">
       <h3 className="text-xs font-semibold text-slate-300">{t('workflow.canvas.heading')}</h3>
       <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('workflow.canvas.hint')}</p>
-      <OperatorPalette onAdd={addDraftNode} />
-      {/* 命令栈与校验的读数条：草稿数、撤销/重做是否可用、校验按钮。
-          按钮的禁用态直接读 canUndo/canRedo，不让界面自己数历史（那会是第二份事实，§2.5）。 */}
+      {/* 画布照的是哪一份要说出来（2.4-05 的口径：内存里那次 run 与库里那条计划是两件事，界面不替用户混着说）。 */}
+      <p
+        className="mt-1 text-[11px] text-slate-500"
+        data-testid="canvas-graph-source"
+        data-loaded-plan={loadedPlanId ?? ''}
+      >
+        {loadedPlanId
+          ? t('workflow.canvas.graphSourceGraph', { planId: loadedPlanId })
+          : t('workflow.canvas.graphSourceMirror')}
+      </p>
+      {graphNotice ? (
+        <p className="mt-1 text-[11px] text-amber-300" data-testid="canvas-graph-notice">
+          {graphNotice}
+        </p>
+      ) : null}
+      <OperatorPalette onAdd={addOperatorNode} isReadOnly={isReadOnly} />
+      {/* 命令栈与校验的读数条：图上格子数、撤销/重做是否可用、校验按钮。
+          按钮的禁用态直接读 canUndo/canRedo，不让界面自己数历史（那会是第二份事实，§2.5）；
+          运行时只读再叠一层（5.10-11）——改图会换指纹，续跑的老 run 就此作废，这条路不该在运行期间存在。 */}
       <div className="mt-2 flex items-center gap-2 text-[11px]">
         <span data-testid="canvas-draft-count" className="text-slate-500">
           {t('workflow.canvas.draftCount', { nodeCount: snapshot.nodes.length })}
@@ -375,7 +504,7 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           type="button"
           data-testid="canvas-undo"
           onClick={undoEdit}
-          disabled={!canUndo}
+          disabled={!canUndo || isReadOnly}
           className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
         >
           {t('workflow.canvas.undo')}
@@ -384,7 +513,7 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           type="button"
           data-testid="canvas-redo"
           onClick={redoEdit}
-          disabled={!canRedo}
+          disabled={!canRedo || isReadOnly}
           className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
         >
           {t('workflow.canvas.redo')}
@@ -393,7 +522,8 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           type="button"
           data-testid="canvas-validate"
           onClick={validateDraft}
-          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 hover:border-slate-500"
+          disabled={isReadOnly}
+          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
         >
           {t('workflow.canvas.validate')}
         </button>
@@ -426,7 +556,7 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           onNodesChange={onNodesChange}
           onConnect={onConnect}
           onNodeClick={(_event, node) => {
-            if (node.data.kind) setSelectedDraftId(node.id);
+            setSelectedNodeId(node.id);
           }}
           nodeTypes={NODE_TYPES}
           // 库自带明暗两套主题（`dist/style.css` 里的 `.react-flow.dark` 变量组）。本 app 只有深色一套
@@ -438,9 +568,9 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           // 工作流视图里的一段"滚动墙"。读 `@xyflow/system` 编译产物确认这条出口（§6.2）：
           // `preventScrolling=false` 时 `createZoomOnScrollHandler` 对不带 Ctrl 的 wheel 直接 return。
           preventScrolling={false}
-          // 开放连线（5.10-d）：拖出来的边进命令栈，撤销一条就没了。
+          // 开放连线（5.10-d）：拖出来的边进命令栈，撤销一条就没了。运行时关掉（5.10-11 的只读）。
           // 删除仍然关着——删节点/删边属 5.10-e 入库时的编辑面，且没有回边以外的删除语义要先定。
-          nodesConnectable
+          nodesConnectable={!isReadOnly}
           deleteKeyCode={null}
           // 库的署名浮标是一个外链，AGENTS.md §8.1 要求外链默认拒绝，所以关掉
           proOptions={{ hideAttribution: true }}
@@ -449,13 +579,22 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
-      {selectedDraft && selectedDescriptor ? (
+      {selectedSpec && selectedDescriptor ? (
         <OperatorParamForm
-          // 换一只草稿节点就重挂载：草稿文本属于那一格，不该跟着跳过去
-          key={selectedDraft.id}
+          // 换一格就重挂载：未提交的草稿文本属于那一格，不该跟着跳过去
+          key={selectedSpec.id}
           descriptor={selectedDescriptor}
-          params={selectedDraft.params}
-          onCommit={(params) => commitDraftParams(selectedDraft.id, params)}
+          params={selectedSpec.params}
+          isReadOnly={isReadOnly}
+          onCommit={(params) => commitNodeParams(selectedSpec.id, params)}
+        />
+      ) : null}
+      {selectedCell ? (
+        <WorkflowNodeDetail
+          // 同理：读数属于那一格，换格子必须重新去库里问一次
+          key={selectedCell.id}
+          nodeId={selectedCell.id}
+          label={selectedCell.label}
         />
       ) : null}
     </div>
@@ -469,12 +608,14 @@ function WorkflowCanvasBoard({ steps }: WorkflowCanvasProps) {
  * 而 `useReactFlow()` 只有在 provider 之下才拿得到实例——库的 `fitView` prop 只在挂载时算一次，
  * 覆盖不了"挂载之后又加了格子"这一种情况。
  * @param steps 当前 run 的步骤读数
+ * @param planId 下拉里选中的计划 id（决定画布照库里哪张图）
+ * @param isReadOnly 有正在进行的 run 时为真：编辑面全部禁用
  * @returns 挂好 provider 的画布
  */
-export function WorkflowCanvas({ steps }: WorkflowCanvasProps) {
+export function WorkflowCanvas({ steps, planId, isReadOnly }: WorkflowCanvasProps) {
   return (
     <ReactFlowProvider>
-      <WorkflowCanvasBoard steps={steps} />
+      <WorkflowCanvasBoard steps={steps} planId={planId} isReadOnly={isReadOnly} />
     </ReactFlowProvider>
   );
 }

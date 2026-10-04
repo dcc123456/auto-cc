@@ -10,21 +10,28 @@ import { groupOperatorsByCategory, type OperatorDescriptor } from '@auto-cc/shar
 import { operatorIconOf } from './operator-icons';
 
 export interface OperatorPaletteProps {
-  /** 点中一格就把整份描述交给画布建草稿节点：id/危险度/出口/参数初值都由画布按描述表算。 */
+  /** 点中一格就把整份描述交给画布建节点：id/危险度/出口/参数初值都由画布按描述表算。 */
   onAdd: (descriptor: OperatorDescriptor) => void;
+  /** 只读（spec 5.10-11：正在跑的时候不许改图）——按钮禁用并在段末写清原因 */
+  isReadOnly: boolean;
 }
 
 /**
  * 渲染按分类分组的算子库。
- * @param onAdd 加入画布的回调
+ * @param props 见 `OperatorPaletteProps`
  * @returns 调色板区块
  */
-export function OperatorPalette({ onAdd }: OperatorPaletteProps) {
+export function OperatorPalette({ onAdd, isReadOnly }: OperatorPaletteProps) {
   const { t } = useTranslation();
   return (
     <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3" data-testid="operator-palette">
       <h4 className="text-xs font-semibold text-slate-300">{t('workflow.operator.paletteHeading')}</h4>
       <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('workflow.operator.editHint')}</p>
+      {isReadOnly ? (
+        <p className="mt-1 text-[11px] text-amber-300" data-testid="palette-readonly">
+          {t('workflow.operator.readOnlyHint')}
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-2">
         {groupOperatorsByCategory().map((group) => (
           <div
@@ -44,8 +51,9 @@ export function OperatorPalette({ onAdd }: OperatorPaletteProps) {
                   type="button"
                   data-action="palette-add"
                   data-kind={descriptor.kind}
+                  disabled={isReadOnly}
                   onClick={() => onAdd(descriptor)}
-                  className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
+                  className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   <Icon size={11} />
                   {t(descriptor.titleKey)}

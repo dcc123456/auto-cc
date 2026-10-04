@@ -11,12 +11,18 @@ import { useTranslation } from 'react-i18next';
 import { operatorParamFields, validateOperatorParams, type OperatorDescriptor } from '@auto-cc/shared';
 
 export interface OperatorParamFormProps {
-  /** 该草稿节点的算子描述（字段、必填、枚举候选都由它来） */
+  /** 该节点的算子描述（字段、必填、枚举候选都由它来） */
   descriptor: OperatorDescriptor;
   /** 节点当前已提交的参数；作为草稿的初值 */
   params: Record<string, string | number | boolean>;
   /** 仅在校验通过时回调，收到的就是可以写进 `WorkflowNodeSpec.params` 的形状 */
   onCommit: (params: Record<string, string | number | boolean>) => void;
+  /**
+   * 只读（spec 5.10-11：正在跑的时候画布只读）。
+   * 判据不是"看着不舒服"：改参数会换指纹，而 5.10-07 要的正是「计划已修改 → 旧 run 不可续跑」，
+   * 所以运行期间界面上根本不该存在这条路。
+   */
+  isReadOnly: boolean;
 }
 
 /**
@@ -39,7 +45,7 @@ function draftFromParams(descriptor: OperatorDescriptor, params: Record<string, 
  * @param props 见 `OperatorParamFormProps`
  * @returns 按 schema 顺序排列的字段行 + 保存按钮
  */
-export function OperatorParamForm({ descriptor, params, onCommit }: OperatorParamFormProps) {
+export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: OperatorParamFormProps) {
   const { t } = useTranslation();
   const fields = useMemo(() => operatorParamFields(descriptor.params), [descriptor]);
   const [draft, setDraft] = useState<Record<string, string>>(() => draftFromParams(descriptor, params));
@@ -77,6 +83,11 @@ export function OperatorParamForm({ descriptor, params, onCommit }: OperatorPara
       <p className="mt-1 text-[11px] text-slate-500">
         {t(descriptor.titleKey)} · {t('workflow.operator.paramHint')}
       </p>
+      {isReadOnly ? (
+        <p className="mt-1 text-[11px] text-amber-300" data-testid="param-form-readonly">
+          {t('workflow.operator.readOnlyHint')}
+        </p>
+      ) : null}
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {fields.map((field) => {
           const isInvalid = invalidFields.includes(field.name);
@@ -99,6 +110,7 @@ export function OperatorParamForm({ descriptor, params, onCommit }: OperatorPara
               {field.type === 'boolean' ? (
                 <input
                   type="checkbox"
+                  disabled={isReadOnly}
                   checked={draft[field.name] === 'true'}
                   onChange={(event) => edit(field.name, event.target.checked ? 'true' : 'false')}
                   className="mt-1 h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
@@ -106,6 +118,7 @@ export function OperatorParamForm({ descriptor, params, onCommit }: OperatorPara
               ) : field.type === 'enum' ? (
                 <select
                   value={draft[field.name] ?? ''}
+                  disabled={isReadOnly}
                   aria-invalid={isInvalid}
                   onChange={(event) => edit(field.name, event.target.value)}
                   className={`mt-1 w-full rounded-md border bg-slate-900 px-2 py-1 text-[11px] text-slate-100 ${borderClass}`}
@@ -120,6 +133,7 @@ export function OperatorParamForm({ descriptor, params, onCommit }: OperatorPara
                 <input
                   type={field.type === 'number' ? 'number' : 'text'}
                   value={draft[field.name] ?? ''}
+                  disabled={isReadOnly}
                   aria-invalid={isInvalid}
                   onChange={(event) => edit(field.name, event.target.value)}
                   className={`mt-1 w-full rounded-md border bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-700 ${borderClass}`}
@@ -136,8 +150,9 @@ export function OperatorParamForm({ descriptor, params, onCommit }: OperatorPara
         <button
           type="button"
           data-action="param-save"
+          disabled={isReadOnly}
           onClick={commit}
-          className="rounded-md border border-sky-900 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950"
+          className="rounded-md border border-sky-900 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
         >
           {t('workflow.operator.save')}
         </button>

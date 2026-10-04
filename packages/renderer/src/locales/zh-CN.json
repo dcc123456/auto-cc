@@ -480,13 +480,24 @@
         "redo": "重做",
         "validate": "保存前校验",
         "validatePassed": "这张图没有发现问题。",
-        "draftCount": "草稿 {{nodeCount}} 格",
+        "draftCount": "图上 {{nodeCount}} 格",
+        "actionLoad": "读取计划的图",
+        "graphSourceGraph": "画布照的是库里的图（计划 {{planId}}）；格子上的状态来自本次运行的进度推送。",
+        "graphSourceMirror": "没有选中计划，格子只按本次运行的步骤镜像摆；这不是库里的图。",
         "issue": {
           "unknownKind": "算子未登记：{{nodeIds}}",
           "danglingEdge": "有边接在不存在的节点或未声明的出口上：{{nodeIds}}",
           "multipleSources": "只能有一个起点，现在有 {{nodeIds}}",
           "cycle": "这些节点连成了环，本项目的图不做循环与回边（重试请用节点的重试次数）：{{nodeIds}}",
           "outboundMissingTarget": "外发节点缺少动作对象，无法判定幂等与额度：{{nodeIds}}"
+        },
+        "detail": {
+          "heading": "{{label}} 的运行读数",
+          "noRun": "本次进程没有 run，库里也没有可续的 run，所以这一格没有落库读数。",
+          "attempts": "尝试 {{attempts}} 次",
+          "duration": "耗时 {{durationMs}} 毫秒",
+          "durationPending": "耗时 —（尚未结束）",
+          "error": "错误 {{error}}"
         }
       },
       "status": {
@@ -582,7 +593,8 @@
       },
       "operator": {
         "paletteHeading": "算子库",
-        "editHint": "从算子库加入的格子只是画布上的草稿：连线属 5.10-d，存进计划库属 5.10-e。",
+        "editHint": "从算子库加入的格子只在画布上，尚未存进计划库（写入口还没接线）；连线已可用，撤销一条就没了。",
+        "readOnlyHint": "有正在进行的运行，画布只读：改图会换指纹，那次运行就不能续跑了。",
         "paramHeading": "参数",
         "paramHint": "字段由该算子的参数 schema 生成",
         "save": "保存参数",

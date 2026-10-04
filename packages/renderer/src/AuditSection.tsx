@@ -9,35 +9,19 @@
  * 节点行的读数取 `workflow['runner.state']()`，读不到（本次进程还没跑过 run）时才回落到
  * `['runner.resumable']()` 的那条库里可续 run，并把用的是哪一份写在段首——
  * 界面因此不会把「上次中断的那个 run」说成「这次跑的」。
+ * 这一条取数规则抽在 `runStateReading.ts`、那句来源提示抽在 `NodeRunSourceLine.tsx`
+ * （画布的点格弹层两处都用同一份，AGENTS.md §2.2）。
  */
 import { ScanLine } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { UsageSummaryView, WorkflowRunStateView } from '@auto-cc/shared';
+import type { UsageSummaryView } from '@auto-cc/shared';
+import { NodeRunSourceLine } from './NodeRunSourceLine';
 import { formatClock } from './format';
+import { readNodeRunState, type NodeRunReading } from './runStateReading';
 
 /** 账本侧一次列多少行：用量面板那 5 行是给「今天用了多少」看的，这里要给「都干了什么」看。 */
 const AUDIT_LEDGER_LIMIT = 20;
-
-/** 节点行的事实源（写进界面，不让用户猜这段读的是内存还是库）。 */
-type NodeSource = 'state' | 'resumable';
-
-/**
- * 取节点行的两份读数，并按「内存优先、库里兜底」选一份。
- * @param bridge 渲染层桥接（纯浏览器调试态下可以是 undefined）
- * @returns 选中的 run 状态 + 它来自哪份读数；两份都读不到时为 null
- */
-async function readRunState(
-  bridge: Window['autoCC'],
-): Promise<{ state: WorkflowRunStateView; source: NodeSource } | null> {
-  const [stateReply, resumableReply] = await Promise.all([
-    bridge?.workflow['runner.state'](),
-    bridge?.workflow['runner.resumable'](),
-  ]);
-  if (stateReply?.ok && stateReply.value) return { state: stateReply.value, source: 'state' };
-  if (resumableReply?.ok && resumableReply.value) return { state: resumableReply.value, source: 'resumable' };
-  return null;
-}
 
 /**
  * 审计回看段（挂在用量面板下方，同页不同段，不新开视图）。
@@ -45,13 +29,13 @@ async function readRunState(
 export function AuditSection() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<UsageSummaryView>();
-  const [run, setRun] = useState<{ state: WorkflowRunStateView; source: NodeSource } | null>(null);
+  const [run, setRun] = useState<NodeRunReading | null>(null);
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
     const [summaryReply, runReading] = await Promise.all([
       bridge?.usage['ledger.summary'](AUDIT_LEDGER_LIMIT),
-      readRunState(bridge),
+      readNodeRunState(bridge),
     ]);
     if (summaryReply?.ok) setSummary(summaryReply.value);
     setRun(runReading);
@@ -132,13 +116,7 @@ export function AuditSection() {
         </p>
       ) : (
         <>
-          <p className="text-[11px] text-slate-500" data-testid="audit-nodes-source" data-node-source={run.source}>
-            {t('audit.sourceNodes')} ·{' '}
-            {t(run.source === 'state' ? 'audit.nodesFromState' : 'audit.nodesFromResumable', {
-              runId: run.state.runId,
-              status: t(`audit.runStatus.${run.state.status}`),
-            })}
-          </p>
+          <NodeRunSourceLine reading={run} testId="audit-nodes-source" />
           <ul className="mt-1 flex flex-col gap-0.5" data-testid="audit-node-rows">
             {run.state.nodes.map((node) => (
               <li

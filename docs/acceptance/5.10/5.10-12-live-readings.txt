@@ -1,0 +1,37 @@
+5.10-12 活体读数：点一格节点弹出的两张卡（参数 / 运行读数），以及本片仍未结算的那一半
+
+取证时间：2026-10-04（macOS arm64，`pnpm dev` + CDP 10222 + Vite 5173）
+前置：同 5.10-02 那份（选中 boss-basic、画布照库里的图），随后
+  pnpm harness click --url 5173 --selector '[data-node-id="flaky"]'
+  pnpm harness eval  --url 5173 --expr-file tmp/510g/read-detail.js
+
+活体读数（原样输出，去转义）：
+{
+  "detailNodeId": "flaky",
+  "detailSource": "none",
+  "detailText": "退避重试演示 的运行读数 本次进程没有 run，库里也没有可续的 run，所以这一格没有落库读数。",
+  "formPresent": true,
+  "fields": [
+    { "name": "url",       "value": "http://127.0.0.1:10233/api/fail-counter", "disabled": false },
+    { "name": "failTimes", "value": "2",                                       "disabled": false }
+  ],
+  "saveDisabled": false
+}
+
+已过的那一半（判据逐条）：
+- **点一格才读**：`canvas-node-detail` 只在点中之后出现（点击前同一条探针的读数是 `detailPresent: false`），
+  组件挂载时读一次、没有定时器（5.10-11 的口径由 `check-renderer-conventions.ts` 第 7 节继续机检）。
+- **参数来自同一份图，不是二次拼装**：字段名与值逐字等于 `workflow.graph.load` 读来的那条节点声明
+  （`url`/`failTimes` 与 `plan.ts` 里 `flaky` 那一格一致），字段形状由 `demo.flaky` 的 zod schema 派生
+  （5.10-04 那一套），界面没有第三处参数来源。
+- **用的是哪份读数要写出来**：`data-node-source="none"` + 那句「本次进程没有 run，库里也没有可续的 run」。
+  取数走 `runStateReading.ts`（`runner.state` 优先、`runner.resumable` 兜底），与审计段同一份实现、
+  同一句来源文案（`NodeRunSourceLine`），不是为画布另写一套。
+
+未过的那一半（[!]，不静默跳过）：
+- 条目原文要的是「**失败节点**点开 → 截图证据内容与库一致」，即 attempts / 耗时 / 错误 / 证据正文四读数。
+  这需要一个**已落库的失败节点行**。当前活体实例里 `runner.state()` 与 `runner.resumable()` 都是 null，
+  而三条内置计划的首格都是真实平台节点（`jd.capture` 要打开 BOSS 会话）——AGENTS.md §7.2 禁止自动化碰真实平台，
+  本窗也没有用户在场，所以不能为了这张截图去跑它。
+- 与 5.10-08/09/13 同一前置：要么登记一只多出口/纯 fixture 的演示算子（属新能力，plan §7.8.3-bis 待裁定），
+  要么把画布的写入口接上（能存一条只含 fixture 节点的自定义计划）。两条都不在本片范围内，已写进 plan 的落地记录。

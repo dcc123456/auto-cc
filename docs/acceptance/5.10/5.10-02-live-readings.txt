@@ -1,0 +1,35 @@
+5.10-02 V 半边：现有线性 BOSS_BASIC_PLAN 不重写即作为图加载，画成 3 节点一条链、边全为 default 出口
+
+取证时间：2026-10-04（macOS arm64，`pnpm dev` + CDP 10222 + Vite 5173，fixture 服务 10233 在跑但本次未被访问）
+操作序列（全部经 harness，无手改 DOM）：
+  1. pnpm harness eval --url 5173 --expr-file tmp/510g/open-canvas.js   # 切到工作流视图 + 展开算子图（aria-pressed false → true）
+  2. pnpm harness eval --url 5173 --expr-file tmp/510g/pick-plan.js     # 下拉选 boss-basic（原生 setter + change 事件）
+  3. pnpm harness eval --url 5173 --expr-file tmp/510g/read-canvas.js   # 读画布 DOM
+
+活体读数（第 3 步原样输出，去转义）：
+{
+  "selectedPlan": "boss-basic",
+  "loadedPlan": "boss-basic",
+  "sourceText": "画布照的是库里的图（计划 boss-basic）；格子上的状态来自本次运行的进度推送。",
+  "noticeText": "读取计划的图：成功",
+  "nodes": [
+    { "id": "jd-capture", "kind": "jd.capture",  "status": "pending" },
+    { "id": "jd-list",    "kind": "jd.list",     "status": "pending" },
+    { "id": "flaky",      "kind": "demo.flaky",  "status": "pending" }
+  ],
+  "edges": [
+    { "id": "jd-capture:default->jd-list" },
+    { "id": "jd-list:default->flaky" }
+  ],
+  "detailPresent": false,
+  "readOnlyHint": 0
+}
+
+判据对照：
+- 3 格：`nodes` 三条，id 与 `packages/workflow/src/plan.ts:159` 起的 BOSS_BASIC_PLAN（`jd-capture`/`jd-list`/`flaky`）逐一对得上，
+  `kind` 来自 `workflow.graph.load` 的读数（不是运行镜像——此刻没有任何 run，`detailSource` 见 5.10-12 那份）。
+- 边全为 default 出口：两条边的 id 就是 `workflowEdgeIdOf(source,'default',target)` 的形状，
+  源句柄名写在 id 里，界面上没有第二处边的来源。
+- 「不重写即可加载」：本次没有调用任何写入口（画布的保存口本片仍未接线），只读了一次 `graph.load`；
+  内置计划没有 `graph_json`，这一张图是服务侧从 `plan_json` 线性投影现算的（5.10-b 的 C 半边用例）。
+- 截图：`5.10-02-graph-from-store.png`（同一时刻的界面，含「画布照的是库里的图（计划 boss-basic）」那行来源读数）。

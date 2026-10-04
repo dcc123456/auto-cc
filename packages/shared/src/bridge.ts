@@ -98,6 +98,7 @@ export type {
   ToolDescriptorView,
   ToolEffect,
   WorkflowEvidenceView,
+  WorkflowGraphLoadView,
   WorkflowNodeRunView,
   WorkflowNodeSpec,
   WorkflowPlanOptionView,

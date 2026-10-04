@@ -362,7 +362,14 @@ export function WorkflowPanel() {
       {/* 按需挂载（裁定一）：收起就是卸载，画布那套 resize/pan 观察者跟着一起走，不留残留句柄。
           运行态数据仍取 current.steps——画布是同一份运行读数的第二种画法，不是第二个状态源。
           5.10-c 起放开「没有 run 也要能开画布」：摆算子、填参数是编辑态的事，不该等一次执行。 */}
-      {isCanvasOpen ? <WorkflowCanvas steps={current?.steps ?? []} /> : null}
+      {isCanvasOpen ? (
+        <WorkflowCanvas
+          steps={current?.steps ?? []}
+          planId={selectedPlanId}
+          // 5.10-11 的运行时只读：判据在父层（它握着 run 状态），画布不自己去问 runner
+          isReadOnly={status === 'running' || status === 'paused'}
+        />
+      ) : null}
     </section>
   );
 }
