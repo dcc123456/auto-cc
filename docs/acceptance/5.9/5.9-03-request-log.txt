@@ -1,0 +1,77 @@
+spec 5.9-03 活体证据：更新只在被点时发生、失败不阻塞使用
+==========================================================
+运行时间：2026-10-04 05:23:23Z ~ 05:24:48Z
+被测对象：本机 dist 产物 `dist/win-unpacked/auto-cc.exe`（app.isPackaged=true，version 0.1.0）
+          由 `pnpm dist:win` 全量构建（nsis 目标，产出 `resources/app-update.yml`）
+CDP：10255（`--remote-debugging-port=10255`），页面 target 子串 `index.html`
+userData：`tmp/dist-update-userdata7`（全新，保证启动时没有配好的更新源）
+更新源：`scripts/update-feed-fixture.ts` 起的本机静态目录 `http://127.0.0.1:10244/`
+        version=9.9.11，安装包 2 MiB 假字节（sha512 随版本变，见该文件注释）
+操作方式：全部用 harness 的**原生鼠标点击**（`harness click --selector`），不用 JS 直接调服务口
+
+判据读数（每一步都是页面上的 `data-update-state` + 该小节 innerText + fixture 侧请求日志）
+------------------------------------------------------------------------------
+① 未配置更新源 → 原生点「检查更新」
+   state: no-feed
+   文案：「没有配置更新源，所以一次请求都没有发出去。」
+   fixture 请求日志：只有起服务那行注释，**0 条应用请求**
+   截图：5.9-03-no-feed-zero-request.png
+
+② 运行期把 feed 配上（`plugins.saveConfig('update', { feedUrl })` → 服务重建，state 回 idle）
+   配置动作之后 fixture 请求日志：仍然 **0 条**（配了源不等于抓源）
+   → 原生点「检查更新」
+   state: available
+   文案：「发现新版本 9.9.11（当前 0.1.0）。要不要下载？」
+   fixture 请求日志新增 1 条：`GET /latest.yml?noCache=1k42lt9lq`
+   截图：5.9-03-available-after-one-click.png
+
+③ 原生点「下载安装包」
+   state: downloaded
+   文案：「新版本 9.9.11 已下载到本机，重启后生效：你可以现在重启，也可以先用完这一轮。」
+   fixture 请求日志新增 2 条：
+     `GET /auto-cc-9.9.11-win-x64-setup.exe.blockmap`（fixture 不提供 diff 包 → 404，走整包下载）
+     `GET /auto-cc-9.9.11-win-x64-setup.exe`
+   截图：5.9-03-downloaded-on-click.png
+   **没有点「重启并安装」**：安装包是假字节，装启动作不在活体上点（spec §7.2 与 plan §7.7.2.1 第 2 条）。
+
+④ 把 feed 指到死端口（10299 无监听）→ 原生点「检查更新」
+   state: failed
+   文案：「这次没有成功：net::ERR_CONNECTION_REFUSED」——上游原话照搬，不翻译不粉饰
+   截图：5.9-03-failed-carries-upstream-text.png
+
+⑤ 失败之后 app 仍可用
+   切回「对话」视图：输入框可见（composerVisible=true）
+   `update.status()` 仍正常回话：{ok:true, value:{state:'failed', currentVersion:'0.1.0', detail:'net::ERR_CONNECTION_REFUSED'}}
+   主进程日志里那条 Error 停在更新器自己的栈里，没有穿透到 IPC 顶层
+
+fixture 侧完整请求日志（本次运行）
+------------------------------------------------------------------------------
+# fixture feed 起于 2026-10-04T05:23:23.684Z · version=9.9.11 · dir=D:\works\deep-seek-workspace\auto-cc\tmp\update-feed
+2026-10-04T05:24:11.581Z GET /latest.yml?noCache=1k42lt9lq
+2026-10-04T05:24:17.337Z GET /auto-cc-9.9.11-win-x64-setup.exe.blockmap
+2026-10-04T05:24:17.341Z GET /auto-cc-9.9.11-win-x64-setup.exe
+
+三条时间线对应三次表态：05:24:0x 点检查、05:24:1x 点下载；启动到点检查之间是 0 条。
+
+本轮为取到这份读数而修掉的两个工具/产品缺陷
+------------------------------------------------------------------------------
+1) 产品（装机版必现）：`import('electron-updater')` 的 ESM 命名空间里**没有** `autoUpdater`
+   （它是 `out/main.js` 里 `Object.defineProperty` 的惰性 getter，cjs-module-lexer 静态扫不到），
+   原写法解构得到 undefined，一点「检查更新」报
+   `Cannot set properties of undefined (setting 'autoDownload')`。
+   → 改为 `pickAutoUpdater()`：顶层没有就退回 `default` 上那一份，两种形状都没有才抛
+     `UPDATE_RUNTIME_UNAVAILABLE`，并补 3 条单测（`packages/shell/src/update.test.ts`）。
+2) 证据工具：fixture 用 `path.basename(request.url)` 认文件，把 `?noCache=…` 一起当成了文件名 → 404。
+   → 先解析 pathname 再取 basename（`nameFromRequest`）。
+   另一处同类：假安装包内容原先与版本无关，sha512 跨版本相同，
+   `DownloadedUpdateHelper` 按 sha512 认缓存（日志原话「Update has already been downloaded to …」），
+   于是「点下载」被缓存吃掉、发不出请求 → 让 payload 带上版本号，同版本仍可复现、跨版本必 miss。
+
+顺带实测到的两条库行为（写进 plan §7.7.7）
+------------------------------------------------------------------------------
+- `setFeedURL()` 只影响**检查**那半边的 URL；**下载**半边仍会读 `resources/app-update.yml`
+  取 `updaterCacheDirName`（`AppUpdater.getOrCreateDownloadHelper → loadUpdateConfig` 直接 readFile，
+  缺文件即 ENOENT）。该文件只有在 `electron-builder.yml` 里声明了 `publish` 且打的是合适目标
+  （win nsis / mac dmg|zip）时才生成，`--dir` 永远不出——所以 `publish` 占位源是产物侧的必需项。
+- 更新器缓存目录**不在 userData 里**：实测落在 `%LOCALAPPDATA%\auto-cc-updater\pending\`，
+  换一份 userData 不会清掉它。因此活体上绝不点「重启并安装」——那会去装这份共享缓存里的包。

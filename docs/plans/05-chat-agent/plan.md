@@ -1695,6 +1695,38 @@ b 的实现半边要在 dist 产物上取 V 证据（装 `electron-updater` → 
 「搜岗位 · 生成话术 · 按岗位优化简历 · 由你确认后投递」，中英双语。
 产物侧"这一屏真的在安装包里"那一眼，与 5.9-c 的 `Resources/` 检查合并留给 5.9-e。
 
+### 7.7.7 5.9-b 落地记录（2026-10-04，装机产物活体四态）
+
+**测的东西**：spec 5.9-03 的判据是"更新仅为提示 + 用户主动触发，且失败不阻塞使用"。这条只能在
+**打包产物**上验——dev 里 `checkForUpdates()` 直接返回 null（库自己判 `!app.isPackaged`），
+拿 dev 读数去勾这条判据就是假绿。所以本轮全在 `dist/win-unpacked/auto-cc.exe` 上跑，
+CDP 10255、全新 `tmp/dist-update-userdata7`、更新源是本机 `scripts/update-feed-fixture.ts`（v9.9.11）。
+**每一次推进都走 harness 的原生鼠标点击**，不用 JS 直接调服务口——判据里"用户主动触发"要的是
+"没有点击就没有请求"，绕过界面点就等于把要证的东西假设进去了。
+
+**读数**（逐条对应 `docs/acceptance/5.9/5.9-03-request-log.txt`，四张截图同目录）：
+未配源点检查 → `no-feed` 且 fixture 日志 **0 条请求**；配好源之后日志仍 0 条（配源不等于抓源）；
+点一次检查 → `available` + 恰好 1 条 `GET /latest.yml?noCache=…`；点一次下载 → `downloaded` +
+`blockmap` 与安装包各 1 条；把源指到死端口 → `failed`，文案是上游原话
+`net::ERR_CONNECTION_REFUSED`，切回对话视图输入框可见、`update.status()` 照常回话——
+"失败不阻塞使用"是这一条，不是靠 catch 语句自我感觉。**「重启并安装」没有点**（见下面的缓存事实）。
+
+**这轮真正值钱的三个库事实**（都写进代码注释了，别靠记忆传）：
+
+| 实测结论                                                                                                                                                 | 后果 / 处置                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autoUpdater` 是 `out/main.js` 里 `Object.defineProperty` 的惰性 getter，cjs-module-lexer 静态扫不到                                                     | ESM 命名空间顶层没有它，解构得 undefined → 装机版一点就崩。改 `pickAutoUpdater()` 两种形状都认，都没有才抛 `UPDATE_RUNTIME_UNAVAILABLE`（补 3 条单测）                                                                                                               |
+| `setFeedURL()` 只管**检查**半边；**下载**半边读 `resources/app-update.yml` 取 `updaterCacheDirName`（`loadUpdateConfig` 是裸 readFile，缺文件即 ENOENT） | 该文件只在 `electron-builder.yml` 声明了 `publish` 且目标合适（win nsis / mac dmg                                                                                                                                                                                    | zip）时生成，`--dir` 永远不出 → `publish` 占位源是**产物侧必需项**，不是发布时才加装饰 |
+| 更新器缓存在 `%LOCALAPPDATA%\auto-cc-updater\pending\`，**不在 userData 里**，且 `DownloadedUpdateHelper` 按 **sha512** 认缓存                           | 换 profile 清不掉它；活体点"安装"会去装这份**与用户已装机 app 共享**的缓存 → 明确禁止点。假包 payload 原先与版本无关，跨版本 sha512 相同被缓存吃掉，"点下载"发不出请求——曾误读成产品 bug，实际是证据工具的 bug，改成 payload 带版本号（同版本可复现、跨版本必 miss） |
+
+**为取到读数修掉的四处**：产品 1 处（`pickAutoUpdater`）、界面 1 处（`no-feed`/`idle` 两态下更新器单连都没
+解析，`currentVersion` 是空串，渲染一条"当前版本 "空尾巴像坏了 → 没值就整行不出现，改完重建产物重截图）、
+证据工具 2 处（fixture 用 `path.basename(request.url)` 把 `?noCache=…` 当文件名 → 先取 pathname；上面那条 payload）。
+**"截图里看出来的问题"只有亲眼看图才能发现**——这条又一次证明了 §7.1 为什么不允许拿单测替代 V 类证据。
+
+**次序偏离第三次**：b 排在 c/d 之后做。上一轮写下的"5.9-e 把需要重建产物的判据标成一批"本轮兑现了一半
+（b 自己就是那批里最重的），剩下的 `Resources/` 两件事（许可证文件、首屏）仍在 5.9-e 排队。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
