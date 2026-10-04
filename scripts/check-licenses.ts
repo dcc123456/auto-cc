@@ -249,6 +249,21 @@ if (stale.length > 0) {
   failures.push(`处置表里有 ${stale.length} 条已经没有对应的包（${stale.join(', ')}），删掉以免误导`);
 }
 
+// 3.5 非商用许可闸门（spec 5.10-15）。
+//     copyleft 那一档"登记处置就放行"，这一档不行：app 是商用分发的桌面产品，
+//     PolyForm-Noncommercial / CC BY-NC 一类**没有可以买的处置**，命中即必须换依赖。
+//     触发它的是源仓库 browser-copilot 自己的 PolyForm-NC 立场——那条豁免只覆盖用户原创部分，
+//     真把它的依赖搬进来就会在这里红，而不是等发布前才发现。
+const NONCOMMERCIAL_PATTERN = /(NonCommercial|BY-NC|NC[-\s]?1\.0|CC-BY-NC)/i;
+const nonCommercialHits = entries.filter((entry) => NONCOMMERCIAL_PATTERN.test(entry.license));
+if (nonCommercialHits.length > 0) {
+  failures.push(
+    `以下包是**非商用**许可，商用分发不能靠登记放行：${nonCommercialHits
+      .map((entry) => `${entry.name}@${entry.versions.join('/') || '未知版本'}（${entry.license}）`)
+      .join('、')}`,
+  );
+}
+
 // 3.5 搬运层的许可全文随包核对（Apache-2.0/BSD 的义务在分发那一刻）。
 const missingLicenseText = findVendoredPackagesMissingLicenseText(vendored);
 const unregisteredMissing = missingLicenseText.filter((name) => MISSING_LICENSE_TEXT_DISPOSITIONS[name] === undefined);

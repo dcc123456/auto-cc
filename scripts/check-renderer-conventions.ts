@@ -7,6 +7,7 @@
  * 编号与各条判据一一对应，新增一条只在文件末尾追加一节，别把已有的类别计数写进注释（它会过期）。
  * 任一不符即 exit 1，因此挂在 `pnpm lint` 上是硬门禁而不是提示。
  */
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
@@ -152,6 +153,44 @@ if (runStateReaders.join(',') !== path.relative(repoRoot, path.join(rendererRoot
 for (const required of ['ChatPanel.tsx', 'WorkflowPanel.tsx']) {
   if (!workflowHookUsers.has(required)) {
     failures.push(`${required} 不再从 ./useWorkflowRun 取进度，双入口同步（5.4-07）断了一处`);
+  }
+}
+
+// 7) 画布的运行态只许由事件推给它（spec 5.10-11 的机检半边）
+//    第 5 条管的是"整个渲染层不许在定时器里读 workflow"，这一条把判据收到画布自己身上：
+//    `WorkflowCanvas.tsx` 里不许有 setInterval，也不许自己调 runner 的读数口——格子状态必须是父层
+//    从 workflow/progress 推来的那份 steps。画布一自己读，同一份运行态就有了第二个真相（§2.5），
+//    而它读到的那一刻和事件推来的那一刻谁的相位更新，界面上看不出来。
+const canvasSource = await readFile(path.join(rendererRoot, 'WorkflowCanvas.tsx'), 'utf8');
+if (/setInterval/.test(canvasSource)) {
+  failures.push('WorkflowCanvas.tsx 里有 setInterval：画布进度只能由 workflow/progress 事件推（5.10-11）');
+}
+for (const reader of ['runner.current', 'runner.state', 'runner.resumable']) {
+  const pattern = new RegExp(`workflow\\['${reader.replace('.', '\\.')}'\\]`);
+  if (pattern.test(canvasSource)) {
+    failures.push(`WorkflowCanvas.tsx 自己调了 ${reader}()：运行态读数必须由父层传入（5.10-11）`);
+  }
+}
+
+// 8) Automa 移植面零复制（spec 5.10-15）
+//    源仓库 browser-copilot 的编辑器是 Automa（AGPL v3，第三方版权，用户给的豁免覆盖不到）的 React 移植：
+//    61 只 Edit*.tsx + drawflow 那套数据格式。plan §5.10 的选型表因此只允许 clean-room 重写语义。
+//    这条闸门防的是"哪天顺手把那些文件搬过来"：文件名与格式标识符都不许出现在源码里。
+//    只扫 packages/*/src（文档与 research 里提到 drawflow 是取证，不算复制）。
+const automaRoots = (await readdir(path.join(repoRoot, 'packages'), { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => path.join(repoRoot, 'packages', entry.name, 'src'))
+  .filter((dir) => existsSync(dir));
+const automaFiles = (await Promise.all(automaRoots.map((dir) => files(dir, () => true)))).flat();
+for (const file of automaFiles) {
+  if (/^Edit.*\.tsx$/.test(path.basename(file))) {
+    failures.push(
+      `发现 Automa 编辑器同名的移植文件 ${path.relative(repoRoot, file)}：移植面只许 clean-room 重写（5.10-15）`,
+    );
+  }
+  const source = await readFile(file, 'utf8');
+  if (/drawflow/i.test(source)) {
+    failures.push(`${path.relative(repoRoot, file)} 里出现 drawflow 标识符：那是 Automa（AGPL）的数据格式（5.10-15）`);
   }
 }
 
