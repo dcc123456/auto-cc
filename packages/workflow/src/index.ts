@@ -50,6 +50,8 @@ import { retryBudgetFor } from './retry-policy.js';
 // 执行器的**契约**（`WorkflowNodeExecutor` 等）在 `@auto-cc/core`，能力包从那里取，不 import 本包。
 export { WorkflowExecutorRegistryService } from './executors.js';
 export { WorkflowRunStoreService } from './run-store.js';
+// 画布图的读写口（spec 5.10-10）：装配清单为它单独占一个 id，摘掉它画布读不到图但不影响 run。
+export { WorkflowGraphService } from './graph-service.js';
 export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema };
 // 重试预算单独露出去（spec 5.7-04）：判据是"外发不重试、只读 ≤2"，用例直接打这条纯函数比造一个假执行器更省。
 export { READ_RETRY_CEILING, retryBudgetFor, type RetryBudget } from './retry-policy.js';

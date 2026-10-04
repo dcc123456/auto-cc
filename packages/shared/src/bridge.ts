@@ -29,6 +29,9 @@ import type {
   SavedWorkflowPlanView,
   SedimentPreviewView,
   SessionExpiredEvent,
+  WorkflowGraphLoadView,
+  WorkflowGraphSaveInput,
+  WorkflowGraphSaveView,
   TakeoverBeginInput,
   TakeoverEndInput,
   TakeoverStateView,
@@ -250,6 +253,11 @@ export const RENDERER_ALLOWLIST = [
   'workflow.runner.renamePlan',
   'workflow.runner.duplicatePlan',
   'workflow.runner.removePlan',
+  // 5.10-e 的画布读写口（spec 5.10-10 / 5.10-17）：与上面四条同一口径，**只由人按**、刻意不登记为 agent 工具——
+  // 画布上按一次保存改的就是「以后每次都这么跑」的那份计划，模型若能自己改图，等于给自己铺了免问的路（§8.4）。
+  // 这里没有 `deleteGraph`：图列属于计划那一行，删计划（上面那条）就把图一起带走，不留「有图无计划」。
+  'workflow.graph.load',
+  'workflow.graph.save',
   // 1.11 的对话骨架：工具面（P1 为空表）与会话 / 消息 / 档位。
   'agent.tools.list',
   'agent.tools.call',
@@ -1757,6 +1765,20 @@ export interface BridgeSignatures {
    * @returns 是否真的删掉了一条（false = 没这条，或那是内置计划——内置目录不可删）
    */
   'workflow.runner.removePlan': { args: [id: string]; returns: boolean };
+  /**
+   * 读一条计划的画布图（spec 5.10-10）：库里存过就读人存下来的那一份；内置那三条与 5.4 沉淀行没有
+   * `graph_json`，由 `plan_json` 线性投影现算（`isCustom: false`），所以「能选出来的计划就能画」
+   * 在 IPC 这一侧同样成立，而不只是 5.10-b 的单测里成立（5.10-02）。
+   * @param planId 计划 id；库里与内置目录都没有时结构化失败——不返回空图，否则画布会画成「一条都没有」
+   */
+  'workflow.graph.load': { args: [planId: string]; returns: WorkflowGraphLoadView };
+  /**
+   * 保存画布图（spec 5.10-10 的写入口 + 5.10-15 的硬拦）。
+   * 界面上那圈红环只是**预览**，五条图校验在服务侧再跑一遍：不合法就结构化拒绝、逐条原因带回去，
+   * 库里那一版原样不动。`expectedRevision` 与库里不等时拒写而不是静默覆盖另一个窗口那一版。
+   * @param input 计划 id + 图本体 + 落点（视图层，不进指纹）+ 期望版本
+   */
+  'workflow.graph.save': { args: [input: WorkflowGraphSaveInput]; returns: WorkflowGraphSaveView };
   /**
    * 列举当前可见的工具（spec 1.11-04）；P1 恒返回空数组，
    * 界面把它摆在档位旁边，「工具面是空表」这件事本身就看得见。

@@ -278,6 +278,13 @@ plugins:
   - id: workflow-store
     dependsOn: [store]
 
+  # 画布图读写（spec 5.10-10 / 5.10-17）：`workflow_plans` 的 `graph_json` / `views_json` / `revision` /
+  # `is_custom` 四列由 `workflow-store` 在同一份迁移清单里 push（号段 28），本行只提供 load / save 两个方法
+  # 与保存前的五条图校验硬拦。注掉它，画布打不开任何计划，而计划列表与 run 进度照旧——
+  # 「能编辑」与「能跑」是可分别摘掉的两件事，不是一套塌了另一半还假装正常。
+  - id: workflow-graph
+    dependsOn: [ipc, workflow-store]
+
   # JD 库（spec 2.3-02 / 2.3-04 / 2.3-05）：`jobs` 表由本服务自己把迁移 push 进 `store.migrations`，
   # 号段取 3（`usage_ledger` 1、`chat` 2 —— 号段是全局的，撞号在运行期才炸）。
   # 摘掉这一行，`jd-capture` 连同进 PENDING：界面点「搜索并入库」得到结构化错误而不是静默不入库。

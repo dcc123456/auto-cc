@@ -375,6 +375,53 @@ export type WorkflowGraphView = {
 };
 
 /**
+ * 画布上一个节点的落点（逻辑像素，可为负）——**视图层**通道，spec 5.10-06。
+ *
+ * 它单独一条通道、单独一列（`views_json`），且没有任何路径能把它喂进指纹：
+ * 拖一下格子不许改变这条计划的执行身份。
+ */
+export type WorkflowNodePlacement = { nodeId: string; x: number; y: number };
+
+/**
+ * `workflow.graph.load` 的读数（spec 5.10-10）：画布重开时看到的那一张图。
+ *
+ * 两条来源合成一个读数是有意的：**能画的就是能存的**。内置计划与 5.4 沉淀行没有 `graph_json`，
+ * 由 `plan_json` 线性投影现算（`isCustom: false`），于是 5.10-02 的"不重写即可作为图加载"
+ * 在 IPC 这一侧同样成立，而不是只有单测里成立。
+ */
+export type WorkflowGraphLoadView = {
+  planId: string;
+  graph: WorkflowGraphView;
+  placements: WorkflowNodePlacement[];
+  /**
+   * 覆盖保存的乐观并发凭据（5.10-e）：库里每成功保存一次就 +1。
+   *
+   * 它存在的意义是"同一张图被两个窗口各改一版"时后写的那一次要**看见**冲突，
+   * 而不是静默把前一版的节点抹掉——画布的命令栈是进程内的，跨窗口它管不着。
+   */
+  revision: number;
+  /** true = `graph_json` 是人在画布上存下来的真相；false = 由 `plan_json` 线性投影现算。 */
+  isCustom: boolean;
+};
+
+/** `workflow.graph.save` 成功后的读数（界面用它把 revision 跟上，避免下一次保存被自己判成冲突）。 */
+export type WorkflowGraphSaveView = { planId: string; revision: number; fingerprint: string; updatedAt: number };
+
+/**
+ * `workflow.graph.save` 的入参形状（spec 5.10-10）：人在画布上改完的那一版。
+ *
+ * 契约放这里而不是 `workflow` 包：`packages/shared` 的跨进程签名表要引用它，而渲染层只认
+ * `@auto-cc/shared` 一个入口——签名与读数同侧，才不会出现「界面以为能传、服务不认」的两种形状。
+ * 形状校验（含图本体）在服务侧一次做完，见 `workflow.graph` 的 `saveGraphInputSchema`。
+ */
+export type WorkflowGraphSaveInput = {
+  planId: string;
+  graph: WorkflowGraphView;
+  placements: WorkflowNodePlacement[];
+  expectedRevision: number;
+};
+
+/**
  * 一次节点执行的输入（spec 2.4-01 / 2.4-07）。
  *
  * 契约放在 `core` 而不是 `workflow` 包：登记这个动作发生在**被登记的那一侧**——

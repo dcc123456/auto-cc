@@ -8,7 +8,9 @@
  * 本服务**只管数据**：不认识执行器、不做重试、不发事件。所有编排在 `workflow.runner`，
  * 于是 2.4-08 的 mock 链和 2.4-01 的序列化 round-trip 都能直接对着这张表测。
  *
- * 5.4 起它还是**自定义工作流计划**的落点（`workflow_plans`，号段 20，读写机器在 `plan-store.ts`）。
+ * 5.4 起它还是**自定义工作流计划**的落点（`workflow_plans`，号段 20，读写机器在 `plan-store.ts`）；
+ * 5.10-e 起同一张表多出画布那四列（`graph_json` / `views_json` / `revision` / `is_custom`，号段 28），
+ * 由同一个服务在同一份迁移清单里幂等 push——连接只有一份，加列也就不许开第二条通路（AGENTS.md §2.7）。
  * 挂在这一个服务上而不是新起 `workflow.plans` 服务，理由写在 `plan-store.ts` 的文件头：
  * 同属工作流持久化、同一个连接、同一份迁移清单，再起一个服务就是第二条通路（AGENTS.md §2.3/§2.7）。
  */
@@ -20,6 +22,8 @@ import {
   Service,
   type Context,
   type SavedWorkflowPlanView,
+  type WorkflowGraphLoadView,
+  type WorkflowGraphSaveView,
   type WorkflowNodeRunView,
   type WorkflowNodeSpec,
   type WorkflowNodeStatsView,
@@ -37,9 +41,14 @@ import {
   getPlan,
   insertPlan,
   listPlans,
+  readPlanGraph,
   renamePlan,
+  savePlanGraph,
+  workflowGraphMigration,
   workflowPlanMigration,
+  WORKFLOW_GRAPH_MIGRATION_VERSION,
   WORKFLOW_PLAN_MIGRATION_VERSION,
+  type SavedGraphInput,
   type SavedPlanInput,
 } from './plan-store.js';
 
@@ -227,6 +236,11 @@ export class WorkflowRunStoreService extends Service {
     // 计划表那一支单独判一次：两支都属于本服务，但版本号互不相干，缺任何一支都要各自补齐。
     if (!migrations.some((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)) {
       migrations.push(workflowPlanMigration);
+    }
+    // 号段 28 是画布那四列（5.10-e）。它必须**独立成一支**而不是并进 20 的 `up`：
+    // 老库已经记过「20 已应用」，并进去就永远不会跑（AGENTS.md §9 的 5.3-a 实测条）。
+    if (!migrations.some((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)) {
+      migrations.push(workflowGraphMigration);
     }
     this.store.upgrade();
   }
@@ -554,6 +568,25 @@ export class WorkflowRunStoreService extends Service {
   deletePlan = (id: string): boolean => deletePlan(this.db, id);
 
   /**
+   * 读一条计划的画布图（spec 5.10-10）：图 + 落点 + 版本号。
+   *
+   * 没有 `graph_json` 的行由 `plan_json` 线性投影现算（`isCustom: false`），所以"能选出来的计划就能画"
+   * 不依赖 5.4 的沉淀行被重写一遍。
+   * @param id 计划 id
+   * @returns 画布读数；库里没有这条时为 null
+   */
+  getPlanGraph = (id: string): WorkflowGraphLoadView | null => readPlanGraph(this.db, id);
+
+  /**
+   * 覆盖保存画布图（spec 5.10-10 的写入口）。图是不是合法**不在这里判**——
+   * 五条保存前校验只有一份判据，在 `workflow.graph` 服务里对着 `checkWorkflowGraph` 跑（§2.5）。
+   * @param input 图本体、落点、期望版本与时刻（`at` 由调用方给）
+   * @returns 保存后的版本号与指纹
+   * @throws `INVALID_ARGUMENT` 计划不存在；`WORKFLOW_INVALID_STATE` 版本冲突或写完读不回来
+   */
+  savePlanGraph = (input: SavedGraphInput): WorkflowGraphSaveView => savePlanGraph(this.db, input);
+
+  /**
    * 把 run 行里的 `plan_json` 解析回计划，并核对指纹（`state()` 与 `planSnapshot()` 共用的一处校验）。
    *
    * 判据本体在 `plan.ts` 的 `planFromStoredText`——`workflow_plans` 那条读路走的是同一份机器（§2.2），
@@ -581,7 +614,8 @@ export class WorkflowRunStoreService extends Service {
     this.ensureSchema();
     this.ctx.logger.info(
       `run 存储就绪：workflow_runs / workflow_nodes（schema v${String(WORKFLOW_MIGRATION_VERSION)}）` +
-        ` · 自定义计划 workflow_plans（schema v${String(WORKFLOW_PLAN_MIGRATION_VERSION)}）`,
+        ` · 自定义计划 workflow_plans（schema v${String(WORKFLOW_PLAN_MIGRATION_VERSION)}）` +
+        ` · 画布图列 graph_json/views_json/revision/is_custom（schema v${String(WORKFLOW_GRAPH_MIGRATION_VERSION)}）`,
     );
   }
 }

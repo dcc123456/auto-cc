@@ -52,6 +52,7 @@ import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
 import {
   WorkflowExecutorRegistryService,
+  WorkflowGraphService,
   WorkflowRunnerService,
   WorkflowRunStoreService,
 } from '@auto-cc/plugin-workflow';
@@ -128,6 +129,9 @@ export const REGISTRY: Registry = {
   'workflow-store': WorkflowRunStoreService,
   // 2.4 起槽位来自计划、进度同时落库；1.10 的六步占位流水线已被节点模型替换。
   workflow: WorkflowRunnerService,
+  // 5.10-e 的画布图读写口（spec 5.10-10）：单独占一个 id 是为了让它能被单独摘掉——摘掉之后画布读不到图，
+  // 而计划列表、run 进度、沉淀那一套照旧（它只在 `workflow_plans` 上多开四列，不另建表）。
+  'workflow-graph': WorkflowGraphService,
   // 简历文档存储（spec 3.1-08）：`resume_docs` 表的唯一落点，迁移号段 7。P3 生成轨的地基，
   // 只落库不做渲染——3.2 的模板、3.3 的打印轨都从这张表读同一份合法文档，故它是 P3 的第一块积木。
   'resume-doc': ResumeDocService,

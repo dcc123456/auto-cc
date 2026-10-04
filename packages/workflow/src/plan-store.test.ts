@@ -161,12 +161,26 @@ describe('存与读（spec 5.4-01 的落库半边）', () => {
     expect(runs.getPlan('plan-none')).toBeNull();
   });
 
-  it('表里只有那七列，没有 revision（覆盖保存在 5.4 没有消费者，§2.6）', async () => {
+  it('表里是那十一列：七列计划本体 + 画布那四列（5.10-e 的加列实测，号段 28）', async () => {
     const { db } = await boot();
     const columns = (db.prepare('PRAGMA table_info(workflow_plans)').all() as { name: string }[]).map(
       (col) => col.name,
     );
-    expect(columns).toEqual(['id', 'name', 'plan_json', 'fingerprint', 'source_run_id', 'created_at', 'updated_at']);
+    // `revision` 在 5.4 确实没有消费者（那时只有新增/改名/复制/删除），5.10-e 的覆盖保存才是它的第一只手，
+    // 所以这一条从「不许有第八列」改成「列就是这十一列，且画布那四列排在计划本体之后」。
+    expect(columns).toEqual([
+      'id',
+      'name',
+      'plan_json',
+      'fingerprint',
+      'source_run_id',
+      'created_at',
+      'updated_at',
+      'revision',
+      'graph_json',
+      'views_json',
+      'is_custom',
+    ]);
   });
 
   it('列表按最后改动时间倒序，同一时刻按 id 升序（界面顶部就是刚刚动过的那条）', async () => {
