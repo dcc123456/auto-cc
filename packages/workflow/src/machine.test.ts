@@ -341,3 +341,48 @@ describe('非法迁移一律拒绝且不抛异常（1.10-09）', () => {
     expect(run).toEqual(frozen);
   });
 });
+
+describe('step-skipped 的两种来由（spec 5.10-08：「跳过」与「已完成」必须分得开）', () => {
+  const head = NODE_IDS[0] ?? 'jd-capture';
+
+  /** 起手到第一步正在跑：`step-skipped` 只对运行中的当前步合法。 */
+  function runningHead(): WorkflowRunView {
+    return applyAll(idleRun(), [{ type: 'start' }, { type: 'step-started', stepId: head, at: 2000 }]);
+  }
+
+  it('不带 reason（库里这个位置已有结局）时镜像仍标 done，游标照下一格走', () => {
+    const result = transition(runningHead(), { type: 'step-skipped', stepId: head, at: 3000 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(stepAt(result.run, 0).status).toBe('done');
+    expect(result.run.stepIndex).toBe(1);
+  });
+
+  it('branch-not-taken 时镜像标 skipped——只走了半张图的 run 不许和跑完的长一样', () => {
+    const result = transition(runningHead(), {
+      type: 'step-skipped',
+      stepId: head,
+      at: 3000,
+      reason: 'branch-not-taken',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(stepAt(result.run, 0).status).toBe('skipped');
+    // 耗时照旧留 null：这一步没跑过，编个 0ms 就是往统计里掺假数（spec 2.4-10 的读数必须可信）。
+    expect(stepAt(result.run, 0).durationMs).toBeNull();
+    expect(result.run.stepIndex).toBe(1);
+  });
+
+  it('同一张 run 里 done 与 skipped 各留各的读数，后者不覆盖前者', () => {
+    const mixed = applyAll(idleRun(), [
+      { type: 'start' },
+      { type: 'step-started', stepId: head, at: 2000 },
+      { type: 'step-finished', stepId: head, at: 2500 },
+      { type: 'step-started', stepId: 'jd-list', at: 2600 },
+      { type: 'step-skipped', stepId: 'jd-list', at: 3000, reason: 'branch-not-taken' },
+    ]);
+    expect(mixed.steps.map((step) => step.status)).toEqual(['done', 'skipped', 'pending']);
+    expect(stepAt(mixed, 0).durationMs).toBe(500);
+    expect(stepAt(mixed, 1).finishedAt).toBe(3000);
+  });
+});

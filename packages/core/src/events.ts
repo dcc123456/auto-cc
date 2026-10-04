@@ -91,8 +91,14 @@ export type WorkflowStepId = string;
 /** run 的整体状态（spec 1.10-03 点名的五个态）。 */
 export type WorkflowRunStatus = 'idle' | 'running' | 'paused' | 'failed' | 'done';
 
-/** 单个步骤的状态；`pending` 也要出现在视图里，因为界面得显示"还没轮到"的槽位。 */
-export type WorkflowStepStatus = 'pending' | 'running' | 'done' | 'failed';
+/**
+ * 单个步骤的状态；`pending` 也要出现在视图里，因为界面得显示"还没轮到"的槽位。
+ *
+ * `skipped` 是 5.10-08 加的第二种「没执行却已结算」：分支图里没被取走的那一支既不是失败、
+ * 也不许冒充已完成——它和「库里已有结局、这次不重放」在界面上必须是两个颜色，
+ * 否则用户看不出这条 run 是走了一半还是走完了全部。
+ */
+export type WorkflowStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 
 /** 一个步骤槽位的读数（spec 1.10-06：状态 + 耗时）。 */
 export type WorkflowStepView = {

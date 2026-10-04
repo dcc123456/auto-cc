@@ -18,7 +18,13 @@ export type RunnerEvent =
   | { type: 'step-started'; stepId: WorkflowStepId; at: number }
   | { type: 'step-finished'; stepId: WorkflowStepId; at: number }
   | { type: 'step-failed'; stepId: WorkflowStepId; at: number; error: string }
-  | { type: 'step-skipped'; stepId: WorkflowStepId; at: number }
+  /**
+   * 这一步**没有执行**却已结算，两种来由在界面上必须分开（spec 5.10-08）：
+   * `already-done`（默认）= 库里这个位置已经有结局，续跑时不重放，镜像仍显示「已完成」；
+   * `branch-not-taken` = 上游那次分支没走这一支，镜像显示「已跳过」——把它标成完成，
+   * 一条只走了半张图的 run 就和走完全图的 run 长一样了。
+   */
+  | { type: 'step-skipped'; stepId: WorkflowStepId; at: number; reason?: StepSkipReason }
   | { type: 'pause'; takeover?: WorkflowTakeoverView | null }
   | { type: 'resume' }
   | { type: 'retry-step'; stepId: WorkflowStepId }
@@ -27,6 +33,9 @@ export type RunnerEvent =
    * 它必须存在：推进循环是 `void` 出去的，异常若不对应一次合法迁移，界面就会永远挂着「运行中」。
    */
   | { type: 'run-failed'; error: string; at: number };
+
+/** 一次「没执行却已结算」的来由（见 `RunnerEvent` 里 `step-skipped` 那一项）。 */
+export type StepSkipReason = 'already-done' | 'branch-not-taken';
 
 /** 一次迁移的结果：合法就给新状态，非法就给一句能显示给用户的原因。 */
 export type TransitionResult = { ok: true; run: WorkflowRunView } | { ok: false; reason: string };
@@ -120,10 +129,14 @@ export function transition(run: WorkflowRunView, event: RunnerEvent): Transition
       if (!current || current.id !== event.stepId) {
         return { ok: false, reason: `只能跳过当前步 ${current?.id ?? '（无）'}` };
       }
-      // 库里说这个位置已经有了结局（已完成过、或同一幂等键已被别处做过）：执行器一次都不该被调到。
-      // 镜像只标「这一步已结算」，耗时留空——把库里的真实耗时编成 0ms 是撒谎，界面宁可不显示耗时。
+      // 执行器一次都不该被调到（spec 2.4-05/06 的「不重放」），但两种来由给界面两种读数：
+      // 已完成过的格子继续算完成，分支没取走的格子必须显出「跳过」。
+      // 耗时都留 null——把库里的真实耗时编成 0ms 是撒谎，界面宁可不显示耗时。
       const stepIndex = run.stepIndex + 1;
-      const skipped = withStep(run, run.stepIndex, { status: 'done', finishedAt: event.at });
+      const skipped = withStep(run, run.stepIndex, {
+        status: event.reason === 'branch-not-taken' ? 'skipped' : 'done',
+        finishedAt: event.at,
+      });
       const status = stepIndex >= run.steps.length ? 'done' : skipped.status;
       return { ok: true, run: { ...skipped, stepIndex, status } };
     }
