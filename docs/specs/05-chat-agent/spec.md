@@ -3290,10 +3290,12 @@ a 片已经拍到过"三个节点两条边"的画面，但它证的是 5.10-01�
 证据：`docs/acceptance/5.10/5.10-05-graph-check-live-1.png`（逐条原因）、`-2.png`（通过态）、`-3.png`（红环两格）。
 
 **5.10-14 标 `[!]` 的原因（如实）**：回边的**判定**有 3 条单测覆盖（含"文案必须写明不做循环、重试由
-retryTimes 表达"与"自环只报一次"），但**活体页面上的回边截图**没拿到——harness 没有 drag 命令，
-用 CDP 在页面里合成的 `pointerdown/mousedown → 8 步 mousemove → mouseup` 序列没有触发 xyflow 的
-连接完成回调（实测 `.react-flow__edge` 数在两次拖拽前后都停在 2 条运行链边）。
-这条留给「给 harness 加一条 drag 命令」之后补，不用别的图凑数。
+retryTimes 表达"与"自环只报一次"），但**活体页面上的回边截图**仍未拿到。本片为此给 harness 补了一条
+`drag` 命令（`packages/testing`，走 CDP `Input.dispatchMouseEvent` 的 mousePressed → 12 步 mouseMoved
+→ mouseReleased，带 `buttons: 1`），实测命令本身跑通（能定位到句柄并回报落点），但拖完 `.react-flow__edge`
+仍是 2 条运行链边——落点坐标与页面内 `getBoundingClientRect` 对不上：同一次里 `jd-capture-draft-1` 出口句柄
+在滚动前量到 y=334、拖拽时量到 y=401，而两只草稿格子的句柄 y 反而相同（401.17 / 401.25），说明命中点不在句柄上。
+下一步要查 `cdp.ts` 里 `RECT_SOURCE` 的坐标基准（滚动/平移后的 viewport 坐标 vs 页面坐标），不用别的图凑数。
 
 **门禁读数**：`pnpm typecheck=0 / lint=0 / format:check=0 / test=0`，其中 `packages/workflow` 168 条用例
 （本片新增 `graph-edit.test.ts` 18 条），全仓零 `failed` 行。
