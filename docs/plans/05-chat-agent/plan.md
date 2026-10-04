@@ -1512,19 +1512,69 @@ F14 说现状只有一套闸门实现，`source` / `remote_ref` 是空列。看�
   下载完成后会弹出对话框由用户决定是否重启（即"官方形状本身也是用户表态后才装"）。
 - electron-builder 的自动更新文档在 `https://www.electron.build/auto-update`（本轮抓取返回 404，
   文档站改版导致；**不作为已取证的依据**）。5.9-b 开工时改读**装机包里的 `electron-updater` 类型声明**，
-  这也正是 §6.2「文档转述不可信，以实测为准」在本片的具体执行方式。
+  这也正是 §6.2「文档转述不可信，以实测为准」在本片的具体执行方式。**（2026-10-04 已执行，结论见 §7.7.2.1）**
 
 spike 纪律（§6.4）：验证 B 的可行性放在工作区外的 `.research-repos/`，代码不进主干，结论写回本节与落地记录。
 
+#### 7.7.2.1 B 方案的 spike 实测（2026-10-04，`electron-updater@6.8.9`，读装机包 `.d.ts`/`.js`）
+
+安装位置：`D:\works\deep-seek-workspace\.research-repos\5.9-b-updater-spike\`（工作区外，不进主干，§6.4）。
+下面每条都标了包内文件与行号，是**读代码读出来的**，不是博客转述（§6.2）。
+
+1. **默认值就是"全自动"，三条必须显式关掉。** `out/AppUpdater.js` 构造函数里
+   `autoDownload = true`（:109）、`autoInstallOnAppQuit = true`（:114）、`autoRunAppAfterInstall = true`（:119）。
+   也就是说**什么都不配**的话：一 `checkForUpdates()` 命中新版就立刻开始下载（正面撞 spec 5.9-03 的
+   "零首启动下载"），下载完在下次退出时静默安装，装完还自动把 app 重启。
+   结论：这三个开关不是"可选打磨"，而是接这个库的**前置硬条件**，service 里必须在实例化后立刻设 false，
+   并且要有测试盯着"没设 false 就不挂载"（同 §7.3 闸门的做法）。
+2. **dev 下根本不会发请求，验收形态被这条决定。** `out/AppUpdater.js:278`
+   `const isEnabled = this.app.isPackaged || this.forceDevUpdateConfig;`，不满足时 :280 只 log
+   "Skip checkForUpdates because application is not packed and dev update config is not forced" 并让
+   `checkForUpdates()` 返回 `null`。所以在 `pnpm dev` 里点"检查更新"看不到任何网络行为，
+   **不能拿它当 5.9-03 的证据**。两条可行路径：① 对 `dist/win-unpacked` 产物点一次真的检查（与 5.9-a 同一套
+   干净环境启动法）；② 开 `forceDevUpdateConfig` 并在 `getAppPath()` 下放 `dev-app-update.yml`，
+   把 feed 指到本地 fixture HTTP 服务。②更适合自动化，①更接近用户真实路径，5.9-b 两片都要跑。
+3. **API 形状（以 `.d.ts` 为准）**：`checkForUpdates(): Promise<UpdateCheckResult | null>`，
+   `UpdateCheckResult = { isUpdateAvailable, updateInfo, downloadPromise?, cancellationToken?, versionInfo(废弃) }`
+   （`out/types.d.ts:26-33`）；`downloadUpdate(cancellationToken?): Promise<Array<string>>`（返回落盘文件路径）；
+   `quitAndInstall(isSilent?, isForceRunAfter?)` 是 abstract（win 走 `NsisUpdater`）；
+   `setFeedURL(options: PublishConfiguration | AllPublishOptions | string)`（`out/AppUpdater.d.ts:164`）
+   —— **feed 源可以在运行期覆盖**，这正是"默认不指向 GitHub 直连、来源可配"的落点：
+   用 `{provider:'generic', url:…}` 指到自建静态目录即可，不必改 electron-builder 产出的那份 yml。
+   事件面是 `UpdaterEvents` 八个：`login / checking-for-update / update-available / update-not-available /
+update-cancelled / download-progress / update-downloaded / error`（`out/types.d.ts:42`）。
+   另有 `signals` 类型化快捷口（`autoUpdater.signals.updateDownloaded(…)`）。
+4. **配置读取路径是写死的**：prod 读 `path.join(process.resourcesPath, 'app-update.yml')`、
+   dev 读 `path.join(this.app.getAppPath(), 'dev-app-update.yml')`（`out/AppUpdater.js:155-157` 注释），
+   `updateConfigPath` 有 setter（:73）可覆盖。5.9-a 已经实测到 `resources/app-update.yml` 在产物里
+   （owner dcc123456 / repo auto-cc / provider github），且缺 `updaterCacheDirName` 时 :548 会 log error——
+   我们那份 yml 里已经有 `updaterCacheDirName: auto-cc-updater`，不会踩。**但它是 electron-builder 自动生成的，
+   不该由用户手改**，所以界面层的"feed 源可配"要走 `setFeedURL` 覆盖，而不是去写那个文件。
+5. **单例约束**：`out/main.d.ts` 导出的是 `export const autoUpdater: AppUpdater`（模块级单例）。
+   我们的 service 只能包装它，不能再 `new NsisUpdater()` 出第二个（§2 禁止第二套同类基础设施），
+   也意味着测试里要注入而不是直接摸单例。
+6. **依赖代价要如实记账**：`pnpm ls` 显示 `electron-updater` 一共带 16 个包
+   （builder-util-runtime、debug、sax、fs-extra、graceful-fs、jsonfile、universalify、js-yaml、argparse@2、
+   lazy-val、lodash.escaperegexp、lodash.isequal、semver、tiny-typed-emitter + 自己）。
+   与我们现有 25 个外置依赖的交集只有 `argparse`（且版本不同：我们是 1.0.10，它要 2.0.1，pnpm 会并存），
+   所以搬运层闭包会从 **25 → 约 38 个包**。全是纯 JS，没有原生编译依赖（符合 §9"用户只装一个 app"），
+   但 5.9-b 收口时必须复跑 `scripts/check-dependency-floor.ts` 与 5.8 的图表库禁令，
+   并把 `5.9-02` 的三处对齐判据（解析清单/staging/asar）重验一遍——那是 5.9-a 刚建立的基线。
+
+**spike 结论**：B 方案**可行**，且比 C 方案（自实现只读比对）多给出的正是我们要的那半条——
+`downloadUpdate()` + `quitAndInstall()` 让用户"点一下就装完"，不必回到浏览器手动抓安装包，
+这才满足主计划 §1.4 的"零手动下载"。代价是第 1、2 条：默认行为与判据正面对撞，必须显式关且要有测试兜住。
+不回落 C。
+
 ### 7.7.3 切片表（一次一片，片内独立跑四道门禁、独立提交推送）
 
-| 切片  | 内容                                                                                                                                                                        | 覆盖条目                     | 方式 |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ---- |
-| 5.9-a | win 本机产物构建复跑（`pnpm dist:win`）+ 产物自包含检查（staging 无 node_modules 之外的运行期依赖、CSP 头在产物里仍在）+ mac/linux 半边按 §9 如实标 BLOCKED                 | 5.9-01、5.9-02               | V+C  |
-| 5.9-b | 更新通道按 §7.7.2 做完 spike 后实现：检查只在用户点「检查更新」时发起、失败只落一句原话不阻塞、界面出现"有新版本 + 由人决定"的表态口；feed 源可配置且默认不指向 GitHub 直连 | 5.9-03                       | U+V  |
-| 5.9-c | 许可证扫描脚本落地（生产依赖全量 + AGPL 类依赖的 NOTICE 随包核对）+ `LICENSES.md` 与之对齐；三个源项目的许可结论保持 `[!]` 等用户裁定                                       | 5.9-04、5.9-05（后者按裁定） | C    |
-| 5.9-d | 首屏隐私声明与使用条款（中文），明说不未经确认自动外发简历；先读 2.7-e 的 `ConsentCard` 现状再定是补一屏还是补两句                                                          | 5.9-06                       | V    |
-| 5.9-e | 冒烟脚本对 **dist 产物**跑最小链路（启动→进对话→跑占位工作流→退出），失败即非零退出阻断发布；5.9 逐项状态位收口 + P5-01 对账                                                | 5.9-07                       | C    |
+| 切片  | 内容                                                                                                                                                                                                                                                                                                                                                                                                                          | 覆盖条目                     | 方式 |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ---- |
+| 5.9-a | win 本机产物构建复跑（`pnpm dist:win`）+ 产物自包含检查（staging 无 node_modules 之外的运行期依赖、CSP 头在产物里仍在）+ mac/linux 半边按 §9 如实标 BLOCKED                                                                                                                                                                                                                                                                   | 5.9-01、5.9-02               | V+C  |
+| 5.9-b | 更新通道按 §7.7.2.1 的 spike 结论实现：`autoDownload`/`autoInstallOnAppQuit`/`autoRunAppAfterInstall` 三条默认 true 必须显式关死并有测试兜住；检查只在用户点「检查更新」时发起、失败只落一句原话不阻塞、界面出现"有新版本 + 由人决定"的表态口；feed 源经 `setFeedURL` 在运行期可配且默认不指向 GitHub 直连；验证要在 dist 产物或 `forceDevUpdateConfig` + 本地 generic feed 上做（dev 默认根本不发请求，见 §7.7.2.1 第 2 条） | 5.9-03                       | U+V  |
+| 5.9-c | 许可证扫描脚本落地（生产依赖全量 + AGPL 类依赖的 NOTICE 随包核对）+ `LICENSES.md` 与之对齐；三个源项目的许可结论保持 `[!]` 等用户裁定                                                                                                                                                                                                                                                                                         | 5.9-04、5.9-05（后者按裁定） | C    |
+| 5.9-d | 首屏隐私声明与使用条款（中文），明说不未经确认自动外发简历；先读 2.7-e 的 `ConsentCard` 现状再定是补一屏还是补两句                                                                                                                                                                                                                                                                                                            | 5.9-06                       | V    |
+| 5.9-e | 冒烟脚本对 **dist 产物**跑最小链路（启动→进对话→跑占位工作流→退出），失败即非零退出阻断发布；5.9 逐项状态位收口 + P5-01 对账                                                                                                                                                                                                                                                                                                  | 5.9-07                       | C    |
 
 **顺序理由**：a→c 是"东西能不能装、许可记清没有"，属于发布前的硬门槛；b 是唯一要先取证再写代码的一条
 （所以它排在 a 之后、不在最前，避免拿未验证的 API 形状污染其余片）；d/e 是界面与自动化收口。
