@@ -17,6 +17,7 @@ import {
   Context,
   Service,
   type Fiber,
+  type WorkflowGraphView,
   type WorkflowNodeExecutor,
   type WorkflowNodeInvocation,
   type WorkflowProgressEvent,
@@ -30,6 +31,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WorkflowExecutorRegistryService } from './executors.js';
 import { WorkflowRunnerService, type WorkflowConfig } from './index.js';
+import { buildGraph, projectGraphToPlan } from './graph.js';
 import { BOSS_BASIC_PLAN, buildPlan, WORKFLOW_PLANS, type PlanInput } from './plan.js';
 import { WorkflowRunStoreService } from './run-store.js';
 
@@ -139,6 +141,11 @@ interface BootOptions {
   config?: Partial<WorkflowConfig>;
   /** 按 kind 覆盖执行行为；未覆盖的 kind 立刻成功。 */
   behavior?: Record<string, FakeBehavior>;
+  /**
+   * 按**节点 id** 宣告这个节点走过的出口句柄（5.10-f 的执行器读数）。
+   * 不给就是没有出口可言，runner 按 `default` 结算——线性计划因此一个字都不用改。
+   */
+  returns?: Record<string, string>;
   /** 是否额外挂一个假 `browser.page`。 */
   withPage?: boolean;
 }
@@ -167,6 +174,8 @@ async function boot(options: BootOptions = {}) {
     const executor: WorkflowNodeExecutor = async (invocation) => {
       calls.push(`${invocation.spec.id}#${String(invocation.attempt)}`);
       await options.behavior?.[kind]?.(invocation);
+      const taken = options.returns?.[invocation.spec.id];
+      return taken === undefined ? undefined : { output: taken };
     };
     registry.register(kind, executor);
   }
@@ -1139,5 +1148,222 @@ describe('保留上限（2.4-10 的清理侧）', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM workflow_nodes WHERE run_id = ?').get(firstRunId)).toMatchObject({
       n: 0,
     });
+  });
+});
+
+describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 / 13 的 U 半边）', () => {
+  /**
+   * 一张「二选一」的分支图：起点是唯一的，`cond` 声明两个出口，各连一支。
+   * 节点 kind 全部取登记处已有的那三只（`jd.capture` / `jd.list` / `demo.flaky`），
+   * 于是这条链仍然是 2.4-08 的「无浏览器纯 mock」口径（AGENTS.md §7.2）。
+   */
+  function branchGraph(id: string): WorkflowGraphView {
+    return buildGraph({
+      id,
+      nodes: [
+        { id: 'cond', kind: 'jd.capture', effect: 'read', outputs: ['yes', 'no'] },
+        { id: 'taken', kind: 'jd.list', effect: 'read' },
+        { id: 'untaken', kind: 'jd.list', effect: 'read' },
+      ],
+      edges: [
+        { id: 'e-yes', source: 'cond', sourceHandle: 'yes', target: 'taken' },
+        { id: 'e-no', source: 'cond', sourceHandle: 'no', target: 'untaken' },
+      ],
+    });
+  }
+
+  /** 一张菱形并行扇出 + 汇聚图（spec 5.10-09：join 要等两条入边都到齐）。 */
+  function diamondGraph(id: string): WorkflowGraphView {
+    return buildGraph({
+      id,
+      nodes: [
+        { id: 'fork', kind: 'jd.capture', effect: 'read' },
+        { id: 'left', kind: 'jd.list', effect: 'read' },
+        { id: 'right', kind: 'jd.list', effect: 'read' },
+        { id: 'join', kind: 'demo.flaky', effect: 'local-write', target: 'demo://join' },
+      ],
+      edges: [
+        { id: 'e-fan-left', source: 'fork', target: 'left' },
+        { id: 'e-fan-right', source: 'fork', target: 'right' },
+        { id: 'e-left-join', source: 'left', target: 'join' },
+        { id: 'e-right-join', source: 'right', target: 'join' },
+      ],
+    });
+  }
+
+  /**
+   * 存一条自定义图计划（走 `workflow.store` 的保存口，因此 `plan_json` 由图投影而来——裁定六）。
+   * @param runs `workflow.store` 句柄
+   * @param graph 图读数
+   * @returns 计划 id（与图 id 相同）
+   */
+  function seedGraph(runs: WorkflowRunStoreService, graph: WorkflowGraphView): string {
+    runs.savePlan({
+      id: graph.id,
+      name: 'DAG 用例',
+      plan: projectGraphToPlan(graph),
+      sourceRunId: null,
+      at: 1_700_000_000_000,
+    });
+    runs.savePlanGraph({ id: graph.id, graph, placements: [], expectedRevision: 1, at: 1_700_000_000_001 });
+    return graph.id;
+  }
+
+  /**
+   * 把「当前计划」换成某条自定义计划。
+   *
+   * 为什么只能绕这一步：`this.plan` 的唯一写点是 `start()`（5.4 起可变但不持久化），而 `resumeRun(runId)`
+   * 要先比对当前计划的指纹——于是「重启后续一条画布计划的旧 run」在今天必须先起一次新 run 才配得上计划。
+   * 这条缺口按 2.4-05 已验收的判据写死（不许按 run 自己的快照续），记在 plan 的 5.10-f 落地记录里，不在本片拆网。
+   * @param handle 挂载读数
+   * @param planId 要选中的计划
+   */
+  async function selectPlan(handle: Awaited<ReturnType<typeof boot>>, planId: string): Promise<void> {
+    handle.runner.start(planId);
+    await waitFor(() => handle.runner.current().status === 'done');
+    // 选计划用的这次 run 与后面的断言无关：调用序列清零，剩下的账才是续跑那一次的。
+    handle.calls.length = 0;
+  }
+
+  it('分支只走执行器宣告的那一支，未走一支落 `skipped` 且执行器一次都没调（5.10-08）', async () => {
+    const { runner, runs, calls } = await boot({ returns: { cond: 'yes' } });
+    const planId = seedGraph(runs, branchGraph('plan-dag-branch'));
+    runner.start(planId);
+    const runId = runner.current().runId;
+    await waitFor(() => runner.current().status === 'done');
+
+    expect(calls).toEqual(['cond#1', 'taken#1']);
+    const stored = runs.state(runId);
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'skipped']);
+    // 界面读数是同一个口径：没走的那一支必须是「跳过」，不能显示成「已完成」，
+    // 否则一条只走了半张图的 run 与跑完全图的 run 长得一模一样。
+    expect(runner.current().steps.map((step) => step.status)).toEqual(['done', 'done', 'skipped']);
+    expect(stored?.nodes[2]).toMatchObject({ attempts: 0, error: null, durationMs: null });
+  });
+
+  it('走过的出口句柄落库，续跑因此不必猜（5.10-13 依赖的那一位）', async () => {
+    const { runner, runs } = await boot({ returns: { cond: 'no' } });
+    const planId = seedGraph(runs, branchGraph('plan-dag-handle'));
+    runner.start(planId);
+    await waitFor(() => runner.current().status === 'done');
+    const stored = runs.state(runner.current().runId);
+    // 这次取的是 `no`：结算的是另一支，句柄必须如实是 `no`，不是 `default` 也不是 `yes`。
+    expect(stored?.nodes[0]).toMatchObject({ status: 'done', outputHandle: 'no' });
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'skipped', 'done']);
+  });
+
+  it('菱形扇出的 join 待两条入边都到齐才执行，且整条 run 只执行一次（5.10-09）', async () => {
+    const { runner, runs, calls } = await boot();
+    const planId = seedGraph(runs, diamondGraph('plan-dag-join'));
+    runner.start(planId);
+    const runId = runner.current().runId;
+    await waitFor(() => runner.current().status === 'done');
+
+    // 游标按拓扑序走：join 一定排在它两只上游之后，而且整条链上只出现一次。
+    expect(calls).toEqual(['fork#1', 'left#1', 'right#1', 'join#1']);
+    expect(calls.filter((call) => call.startsWith('join#'))).toEqual(['join#1']);
+    const stored = runs.state(runId);
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done', 'done', 'done']);
+    expect(stored?.nodes[3]).toMatchObject({ attempts: 1 });
+  });
+
+  it('画布上改过图之后再续旧 run：按 2.4-05 拒绝（5.10-07 的 C 半边，也就是裁定六显式记账的代价）', async () => {
+    const { runner, runs, calls } = await boot({
+      returns: { cond: 'yes' },
+      behavior: { 'jd.list': hangUntilAbort() },
+    });
+    const planId = seedGraph(runs, branchGraph('plan-dag-edited'));
+    runner.start(planId);
+    await waitFor(() => calls.includes('taken#1'));
+    const runId = runner.current().runId;
+    runner.pause();
+    await waitFor(() => runner.current().status === 'paused');
+
+    // 用户在画布上把未走那一支删掉并保存：保存口连带回写本体，指纹随之重算。
+    runs.savePlanGraph({
+      id: planId,
+      graph: buildGraph({
+        id: planId,
+        nodes: [
+          { id: 'cond', kind: 'jd.capture', effect: 'read', outputs: ['yes'] },
+          { id: 'taken', kind: 'jd.list', effect: 'read' },
+        ],
+        edges: [{ id: 'e-yes', source: 'cond', sourceHandle: 'yes', target: 'taken' }],
+      }),
+      placements: [],
+      expectedRevision: 2,
+      at: 1_700_000_000_002,
+    });
+
+    expect(() => runner.resumeRun(runId)).toThrow(/不是同一条/);
+    // 拒绝之后不留下半跑的账：这一次没有再执行任何节点。
+    expect(calls).toEqual(['cond#1', 'taken#1']);
+    expect(runner.current().status).toBe('paused');
+  });
+
+  it('库里那一行「分支节点已完成却没登记出口」时拒绝续跑，绝不猜 `default`（裁定 3）', async () => {
+    const handle = await boot({ returns: { cond: 'yes' } });
+    const planId = seedGraph(handle.runs, branchGraph('plan-dag-nohandle'));
+    await selectPlan(handle, planId);
+    const { runs, calls } = handle;
+    const body = runs.getPlan(planId)!.plan;
+    // 手工造出「旧进程跑完了分支节点、但那一列是空的」这一种库状态（老库升到号段 29 之后就是这形状）。
+    runs.openRun('run-nohandle', body, 1_000);
+    runs.claimNode('run-nohandle', 0, body.nodes[0]!, 1_100);
+    runs.recordNode('run-nohandle', 0, {
+      status: 'done',
+      attempts: 1,
+      startedAt: 1_100,
+      finishedAt: 1_200,
+      durationMs: 100,
+      error: null,
+      evidenceRef: null,
+      sideEffect: null,
+    });
+    runs.updateRun('run-nohandle', {
+      status: 'interrupted',
+      nodeIndex: 1,
+      finishedAt: null,
+      lastError: 'RUN_INTERRUPTED',
+    });
+    expect(runs.state('run-nohandle')?.nodes[0]?.outputHandle).toBeNull();
+
+    const refusal = (() => {
+      try {
+        handle.runner.resumeRun('run-nohandle');
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    })();
+    expect(refusal).toMatch(/没有它走过的出口/);
+    expect(calls).toEqual([]);
+  });
+
+  it('分支图跑中途 kill 掉进程：重启后已完成节点不重放、attempts 不涨，未走一支仍是 skipped（5.10-13）', async () => {
+    const dir = tempDir();
+    const first = await boot({ dir, returns: { cond: 'yes' }, behavior: { 'jd.list': hangUntilAbort() } });
+    const planId = seedGraph(first.runs, branchGraph('plan-dag-kill'));
+    first.runner.start(planId);
+    await waitFor(() => first.calls.includes('taken#1'));
+    const runId = first.runner.current().runId;
+    // `cond` 已带句柄结算、`taken` 正在跑、`untaken` 还没轮到——正是"半张图未结算"被 kill 的那一格。
+    expect(first.runs.state(runId)?.nodes.map((node) => node.status)).toEqual(['done', 'running', 'pending']);
+    await shutDown();
+
+    const second = await boot({ dir, returns: { cond: 'yes' } });
+    expect(second.runs.state(runId)).toMatchObject({ status: 'interrupted', nodeIndex: 1 });
+    await selectPlan(second, planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'done');
+
+    // 只有中断那一格被重跑，而它的总账接的是上一个进程用掉的那一次（跨进程的 attempts 是连着的）。
+    expect(second.calls).toEqual(['taken#2']);
+    const stored = second.runs.state(runId);
+    expect(stored?.nodes[0]).toMatchObject({ status: 'done', attempts: 1, outputHandle: 'yes' });
+    expect(stored?.nodes[1]).toMatchObject({ status: 'done', attempts: 2 });
+    // 未走那一支在重启之后依然被级联判成跳过，且一次执行器都没碰到。
+    expect(stored?.nodes[2]).toMatchObject({ status: 'skipped', attempts: 0 });
+    expect(stored?.nodes.map((node) => node.error)).toEqual([null, null, null]);
   });
 });

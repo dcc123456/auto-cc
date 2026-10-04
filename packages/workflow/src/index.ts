@@ -18,11 +18,13 @@ import {
   redactValue,
   Service,
   sleep,
+  WORKFLOW_DEFAULT_OUTPUT,
   type Context,
   type RiskSignalEvent,
   type SavedWorkflowPlanView,
   type SessionExpiredEvent,
   type ToolEffect,
+  type WorkflowGraphView,
   type WorkflowNodeSpec,
   type WorkflowNodeExecutor,
   type WorkflowNodePhase,
@@ -41,6 +43,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createRun, transition, type RunnerEvent } from './machine.js';
 import type { WorkflowExecutorRegistryService } from './executors.js';
+import { advanceGraph, initialAdvanceState, type GraphAdvanceView } from './graph-advance.js';
+import { projectPlanToGraph } from './graph.js';
 import { BOSS_BASIC_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchema } from './plan.js';
 import { assertPlanName, newPlanId } from './plan-store.js';
 import type { WorkflowRunStoreService } from './run-store.js';
@@ -155,6 +159,17 @@ export class WorkflowRunnerService extends Service {
    * 这个初始 run 在库里**没有行**——它只是给界面的空格子，第一次 `start()` 才产生 runId 并落库。
    */
   private run: WorkflowRunView;
+
+  /**
+   * 本次 run 的**图推进态**（spec 5.10-07/08/09 的调度侧依据）。
+   *
+   * 谁写它：`start()` 起一张图时取 `initialAdvanceState`，每个节点结算后由 `advanceGraph` 推进，
+   * `resumeRun()` 从库里那些 `output_handle` 重建。谁读它：推进循环问「这一格是不是被级联判成没走」，
+   * `succeedNode` 问「整张图结算完了没有」。
+   * 线性计划下它退化成「一步一格」，与 2.4 的 `+1` 给出同一个顺序，所以这条路径不是分支开关，
+   * 而是把原来那条线性推进换成图推进（同一件事只留一份实现，AGENTS.md §2.5）。
+   */
+  private advanceState: GraphAdvanceView = { outcomes: {}, ready: [], finished: false };
 
   constructor(
     ctx: Context,
@@ -328,8 +343,19 @@ export class WorkflowRunnerService extends Service {
    * @returns 可续 run 的落库状态；库里没有同指纹的中断/暂停/失败 run 时为 null（不是抛错）
    */
   resumable(): WorkflowRunStateView | null {
-    const candidate = this.store.resumeCandidate(this.plan.fingerprint);
+    const candidate = this.store.resumeCandidate(this.storedPlan().fingerprint);
     return candidate ? this.store.state(candidate.runId) : null;
+  }
+
+  /**
+   * 「此刻生效的计划」以**库里那份**为准（内置那三条不在表里，取不到才沿用自己那份）。
+   *
+   * 为什么不能直接读 `this.plan`：5.10-f 裁定六之后，画布保存会在任何时刻重算 `plan_json` 与指纹，
+   * 内存里那条因此只是可能陈旧的副本（AGENTS.md §9 的 2.5 实测条：本地镜像会静默变空/变旧）。
+   * @returns 与 `this.plan.id` 对应、此刻库里读得到的计划本体
+   */
+  private storedPlan(): WorkflowPlanView {
+    return this.store.getPlan(this.plan.id)?.plan ?? this.plan;
   }
 
   /**
@@ -460,9 +486,62 @@ export class WorkflowRunnerService extends Service {
       this.plan.nodes.map((node) => node.id),
     );
     this.store.openRun(this.run.runId, this.plan, this.run.startedAt);
+    this.advanceState = initialAdvanceState(this.executionGraph());
     const started = this.apply({ type: 'start' }, null, `计划 ${this.plan.id} 开跑`);
     void this.pump();
     return started;
+  }
+
+  /**
+   * 当前计划的**执行图**（plan §7.8.3 裁定 4）：画布存过图就用库里那份，否则由 `plan_json` 线性投影现算。
+   *
+   * 每次现问 `workflow.store`、不在 runner 里存第二份图（AGENTS.md §9 的 2.5 实测条：改配置重建下游时
+   * 本地镜像会静默变空）。内置那三条不在表里，`getPlanGraph` 返回 null，走投影那一支。
+   * 刻意**不**依赖 `workflow.graph` 服务：摘掉画布读写口不该让执行器跑不起来（裁定 4 的原话）。
+   * @returns 与当前计划同一份节点集合的图读数
+   */
+  private executionGraph(): WorkflowGraphView {
+    const stored = this.store.getPlanGraph(this.plan.id);
+    return stored?.isCustom ? stored.graph : projectPlanToGraph(this.plan);
+  }
+
+  /**
+   * 从库里那些行**重建**推进态（plan §7.8.3 裁定 3：续跑靠存下来的出口句柄，不靠猜）。
+   *
+   * 触发的场景是 5.10-13：分支节点 `done` 之后、两支都还没结算时被 kill，重启时库里只有「cond 完成了」，
+   * 只有 `workflow_nodes.output_handle` 能回答"走的哪一支"。从下游行的状态反推在这条路径上恰好失效
+   * （被选那支的目标当然不可能是 `skipped`，但它也可能只是"还没轮到"）。
+   * @param stored 库里这次 run 的完整读数（含逐节点的 status 与 outputHandle）
+   * @param graph 这次续跑要用的图（与 `stored` 同一条计划，由 `resumeRun` 的指纹闸门保证）
+   * @returns 与中断之前同一份推进状态：已结算的格子带着当初的出口，未走的支已被级联判成 `skipped`
+   * @throws `INVALID_ARGUMENT` 分支节点完成了却没登记走过的出口——猜一个出口会把半张图跑成另一张图，
+   *         项目立的规矩是不猜，所以结构化拒绝而不是继续；节点不在这张图里由 `advanceGraph` 自己报
+   */
+  private rebuildAdvanceState(stored: WorkflowRunStateView, graph: WorkflowGraphView): GraphAdvanceView {
+    const declaredOutputs = new Map(graph.nodes.map((node) => [node.id, node.outputs ?? [WORKFLOW_DEFAULT_OUTPUT]]));
+    let state = initialAdvanceState(graph);
+    for (const node of stored.nodes) {
+      if (node.status === 'done') {
+        const outputs = declaredOutputs.get(node.nodeId) ?? [WORKFLOW_DEFAULT_OUTPUT];
+        const isBranch = outputs.length > 1 || outputs[0] !== WORKFLOW_DEFAULT_OUTPUT;
+        if (isBranch && node.outputHandle === null) {
+          throw new AppError(
+            'INVALID_ARGUMENT',
+            `节点 ${node.nodeId} 已完成，但库里没有它走过的出口，无法判断该续哪一支，已拒绝按旧进度续跑`,
+            'workflow.runner',
+            { runId: stored.runId, nodeId: node.nodeId, declared: outputs },
+          );
+        }
+        state = advanceGraph(state, graph, {
+          nodeId: node.nodeId,
+          status: 'done',
+          ...(node.outputHandle === null ? {} : { output: node.outputHandle }),
+        });
+      } else if (node.status === 'skipped') {
+        state = advanceGraph(state, graph, { nodeId: node.nodeId, status: 'skipped' });
+      }
+    }
+    return state;
   }
 
   /**
@@ -605,26 +684,32 @@ export class WorkflowRunnerService extends Service {
    * 5.4 之后要多留意一句：**续自定义计划的 run，得先把当前计划换成那条**（面板的下拉，5.4-b 的入口）。
    * 这里没有改成"按 run 自己的快照续"，因为 2.4-05 已验收的判据字面就是"配置的计划与 run 不一致时拒绝续"，
    * 放开它就是把一条已验收的安全网悄悄拆掉。
+   *
+   * 5.10-f 裁定六之后「当前计划」这一维必须以**库里现在那份**为准（见下面 `current` 那一步）：
+   * 画布保存会在任何时刻重算 `plan_json` 与指纹，内存里的那条从此只是可能陈旧的副本，
+   * 而 5.10-07 要的「改过图之后旧 run 不可续跑」在同进程里就必须判得出来。
    */
   resumeRun(runIdRaw?: string): WorkflowRunView {
-    const candidate = runIdRaw === undefined ? this.store.resumeCandidate(this.plan.fingerprint) : null;
+    // 现查库、不拿内存镜像比（§2.7：同一件事只留一份事实）。
+    const current = this.storedPlan();
+    const candidate = runIdRaw === undefined ? this.store.resumeCandidate(current.fingerprint) : null;
     const runId = runIdRaw ?? candidate?.runId;
     if (!runId) {
       throw new AppError(
         'INVALID_ARGUMENT',
-        `库里没有按当前计划（${this.plan.fingerprint}）可续的 run`,
+        `库里没有按当前计划（${current.fingerprint}）可续的 run`,
         'workflow.runner',
-        { planId: this.plan.id },
+        { planId: current.id },
       );
     }
     const stored = this.store.state(runId);
     if (!stored) {
       throw new AppError('INVALID_ARGUMENT', `库里没有这次 run：${runId}`, 'workflow.runner', { runId });
     }
-    if (stored.planFingerprint !== this.plan.fingerprint) {
+    if (stored.planFingerprint !== current.fingerprint) {
       throw new AppError(
         'INVALID_ARGUMENT',
-        `这次 run 的计划与当前配置的不是同一条（库里 ${stored.planFingerprint}，当前 ${this.plan.fingerprint}），拒绝按原进度续跑`,
+        `这次 run 的计划与当前配置的不是同一条（库里 ${stored.planFingerprint}，当前 ${current.fingerprint}），拒绝按原进度续跑`,
         'workflow.runner',
         { runId, stored: stored.planFingerprint, current: this.plan.fingerprint },
       );
@@ -640,6 +725,8 @@ export class WorkflowRunnerService extends Service {
     // 中断/失败/暂停的 run 都从 `paused` 起步走同一条续跑口：接管标记在这里清掉，
     // 因为用户点「从失败节点续跑」本身就是「我知道发生了什么，继续」。
     this.run = { ...this.run, status: 'paused', requiresHuman: null };
+    // 推进态必须在起循环之前重建：没有它，runner 不知道哪些格子属于「没走的那一支」。
+    this.advanceState = this.rebuildAdvanceState(stored, this.executionGraph());
     return this.resume();
   }
 
@@ -782,12 +869,16 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 推进循环：按计划的节点顺序依次跑完，直到 run 不再是 `running`。
+   * 推进循环：按**拓扑序**（= `plan_json` 的节点顺序，5.10-f 裁定六把它投影成拓扑序）依次跑，直到 run 不再是 `running`。
    *
+   * 5.10-f 起的形状是「游标照旧 +1，但每一格先问图」：拓扑序保证游标走到任何一格时它的全部上游都已结算，
+   * 于是 `machine.ts` 那条只会 +1 的游标仍然合法（裁定 1，`machine.ts` 一字未动）；
+   * 而「这一支没走」不靠顺序排除，靠 `advanceGraph` 把它级联结算成 `skipped`（spec 5.10-08）。
    * 每一步都重新读 `this.run`，因为暂停/重试可能在两次推进之间改走状态；
    * `await` 之后必须先确认「这次让出是谁引起的」，否则会把 paused 覆盖成 done。
    */
   private async advance(): Promise<void> {
+    const graph = this.executionGraph();
     for (;;) {
       const run = this.run;
       if (run.status !== 'running') return;
@@ -795,6 +886,13 @@ export class WorkflowRunnerService extends Service {
       const step = run.steps[index];
       const spec = this.plan.nodes[index];
       if (!step || !spec) return;
+
+      if (this.advanceState.outcomes[spec.id]?.status === 'skipped') {
+        // 上游那一次分支没选这一支：执行器一次都不许调，落一行 `skipped` 并把「没走」推给界面。
+        this.store.markNodeSkipped(run.runId, index, spec, Date.now());
+        this.apply({ type: 'step-skipped', stepId: spec.id, at: Date.now(), reason: 'branch-not-taken' }, null, null);
+        continue;
+      }
 
       const claim = this.enterNode(run.runId, index, spec);
       if (claim === 'already-done') {
@@ -825,7 +923,7 @@ export class WorkflowRunnerService extends Service {
         );
         return;
       }
-      const settled = await this.runNode(run.runId, index, spec, executor);
+      const settled = await this.runNode(run.runId, index, spec, executor, graph);
       if (!settled) return;
     }
   }
@@ -870,6 +968,7 @@ export class WorkflowRunnerService extends Service {
    * @param index 节点下标
    * @param spec 节点声明
    * @param executor 登记处取到的执行函数
+   * @param graph 本次 run 的执行图（成功结算要按它查边）
    * @returns true 表示这个位置已经有了结局（成功或被判失败），循环该往下走；
    *          false 表示被暂停/接管打断，循环必须就地停下
    */
@@ -878,6 +977,7 @@ export class WorkflowRunnerService extends Service {
     index: number,
     spec: WorkflowNodeSpec,
     executor: WorkflowNodeExecutor,
+    graph: WorkflowGraphView,
   ): Promise<boolean> {
     const budget = retryBudgetFor(spec, this.config.retryTimes);
     const maxAttempts = budget.attempts;
@@ -899,13 +999,16 @@ export class WorkflowRunnerService extends Service {
         'started',
         attempt === 1 ? `开始 ${spec.id}` : `第 ${String(totalAttempts)} 次尝试 ${spec.id}`,
       );
+      // 执行器可以宣告它走掉的出口句柄（分支算子），省略即 `default`（裁定 3）。
+      let takenOutput: string | undefined;
       try {
-        await executor({
+        const outcome = await executor({
           runId,
           spec,
           attempt: totalAttempts,
           signal: controller?.signal ?? new AbortController().signal,
         });
+        takenOutput = typeof outcome === 'object' && outcome !== null ? outcome.output : undefined;
       } catch (error) {
         // 让出是暂停/卸载引起的：不是节点的失败，状态已经由引起它的那一方写好了，原样停下。
         if (controller?.signal.aborted || this.run.status !== 'running') return false;
@@ -936,21 +1039,39 @@ export class WorkflowRunnerService extends Service {
       // 把它记成成功会连着两个坏结果——库里留下一行假 `done`（续跑因此永远不重放它），
       // 而 `apply(step-finished)` 在 paused 态是非法迁移，会把异常抛进这条无人 await 的循环。
       if (controller?.signal.aborted || this.run.status !== 'running') return false;
-      this.succeedNode(runId, index, spec, totalAttempts, startedAt);
+      this.succeedNode(runId, index, spec, totalAttempts, startedAt, takenOutput, graph);
       return true;
     }
   }
 
   /**
-   * 写成功结局：落库 + 状态机推进一格。
+   * 写成功结局：落库（含走过的出口句柄）→ 按图推进 → 状态机推进一格。
    * @param runId 本次 run
    * @param index 节点下标
    * @param spec 节点声明
    * @param attempts 这个位置总共用掉的尝试次数（含首次、含其它进程用掉的）
    * @param startedAt 本节点首次开始的时间戳（毫秒）
+   * @param output 执行器宣告走过的出口句柄；省略即 `default`（裁定 3）
+   * @param graph 本次 run 的执行图
    */
-  private succeedNode(runId: string, index: number, spec: WorkflowNodeSpec, attempts: number, startedAt: number): void {
+  private succeedNode(
+    runId: string,
+    index: number,
+    spec: WorkflowNodeSpec,
+    attempts: number,
+    startedAt: number,
+    output: string | undefined,
+    graph: WorkflowGraphView,
+  ): void {
     const at = Date.now();
+    // 先推图再落库：`advanceGraph` 会校验「这个出口真是该节点声明过的」，声明里没有就结构化失败，
+    // 库里因此不会留下一行「done 但没人知道走的哪一支」的读数（5.10-13 续跑读的就是这一行）。
+    const next = advanceGraph(this.advanceState, graph, {
+      nodeId: spec.id,
+      status: 'done',
+      ...(output ? { output } : {}),
+    });
+    this.advanceState = next;
     this.store.recordNode(runId, index, {
       status: 'done',
       attempts,
@@ -961,11 +1082,14 @@ export class WorkflowRunnerService extends Service {
       evidenceRef: null,
       // 只有真的会动外面世界的节点才需要把副作用位收成 done（spec 2.4-06 的判据）。
       sideEffect: spec.effect === 'read' ? null : 'done',
+      output: output ?? null,
     });
+    // done 的判据从「下标+1 到底了」换成「图上全部格子都结算了」（裁定 2 里那一步的替代物）：
+    // 分支图里游标走到最后一格时，未走那一支早已级联成 skipped，两者此刻是同一个结论。
     this.store.updateRun(runId, {
-      status: this.plan.nodes.length === index + 1 ? 'done' : 'running',
+      status: next.finished ? 'done' : 'running',
       nodeIndex: index + 1,
-      finishedAt: this.plan.nodes.length === index + 1 ? at : null,
+      finishedAt: next.finished ? at : null,
       lastError: null,
     });
     this.apply({ type: 'step-finished', stepId: spec.id, at }, 'finished', `${spec.id} 完成`);
@@ -1222,10 +1346,17 @@ export class WorkflowRunnerService extends Service {
 function toMirror(stored: WorkflowRunStateView): WorkflowRunView {
   const steps: WorkflowStepView[] = stored.nodes.map((node) => ({
     id: node.nodeId,
-    // 库里的 `skipped` 在界面上与 `done` 同形（都是「这个位置不用再跑」）；
-    // 崩溃时正在跑的那个节点没有结局，退回 `pending` 等重放（spec 1.10-05 的暂停同口径）。
+    // 5.10-08 之后 `skipped` 有自己的读数（琥珀色的「这一支没走」），不许再与 `done` 同形：
+    // 只走了半张图的 run 与跑完全图的 run 必须是两个样子。崩溃时正在跑的那个节点没有结局，
+    // 退回 `pending` 等重放（spec 1.10-05 的暂停同口径）。
     status:
-      node.status === 'done' || node.status === 'skipped' ? 'done' : node.status === 'failed' ? 'failed' : 'pending',
+      node.status === 'done'
+        ? 'done'
+        : node.status === 'failed'
+          ? 'failed'
+          : node.status === 'skipped'
+            ? 'skipped'
+            : 'pending',
     startedAt: node.startedAt,
     finishedAt: node.finishedAt,
     durationMs: node.durationMs,

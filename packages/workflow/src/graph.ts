@@ -18,7 +18,8 @@ import {
 } from '@auto-cc/core';
 import { z } from 'zod';
 import { graphFingerprint, isLinearProjection } from './canonical.js';
-import { workflowNodeSpecSchema } from './plan.js';
+import { topologicalOrder } from './graph-advance.js';
+import { buildPlan, workflowNodeSpecSchema } from './plan.js';
 
 /** 一张图里边的数量上限：节点上限 64 时全连接是 4096 条，那不是"一条计划"而是另一件事。 */
 const EDGE_CEILING = 128;
@@ -96,6 +97,24 @@ export function projectPlanToGraph(plan: WorkflowPlanView): WorkflowGraphView {
     edges: linearEdges(plan.nodes),
     fingerprint: graphFingerprint(plan.nodes, linearEdges(plan.nodes)),
   };
+}
+
+/**
+ * 把一张图投影回**可执行本体**（plan §7.8.3-bis 裁定六：`plan_json` 是 `graph_json` 的投影）。
+ *
+ * 为什么必须有这一条：5.10-e 的保存口只写 `graph_json`，于是画布上加一个节点再保存，库里就是
+ * 「图里 4 个节点、可执行本体 3 个节点」两份事实，而 runner 的 `requireExecutable`、节点参数、
+ * 面板槽位读的全是后者。方向与内置那侧相反（内置是 `plan` 为真相、图由 `projectPlanToGraph` 现算），
+ * 但**同源**：两条都只有一份节点集合，写点仍只有保存口一处。
+ * @param graph 已过 `buildGraph` 与保存前五条校验的图读数
+ * @returns 节点按 `topologicalOrder` 排好、指纹由 `buildPlan` 现算的计划本体；
+ *          边只留在 `graph_json`，所以分支图的本体指纹是"节点集合 + 拓扑顺序"这一层
+ * @throws 无（无环由保存前校验保证，拓扑序必然覆盖全部节点——不会发生的事不写守卫，AGENTS.md §2.6）
+ */
+export function projectGraphToPlan(graph: WorkflowGraphView): WorkflowPlanView {
+  const position = new Map(topologicalOrder(graph).map((id, index) => [id, index]));
+  const nodes = [...graph.nodes].sort((left, right) => (position.get(left.id) ?? 0) - (position.get(right.id) ?? 0));
+  return buildPlan({ id: graph.id, nodes });
 }
 
 /**

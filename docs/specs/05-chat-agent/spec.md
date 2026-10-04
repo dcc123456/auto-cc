@@ -3044,13 +3044,13 @@ plan §7.8——① 画布是工作流视图内**按需挂载**的一块，不�
 | 5.10-04 | 参数表单由算子的 zod schema 生成（string/number/boolean/enum），无任何手写表单文件                                                                             | V    | 选三类算子各截图表单；必填留空 → 红标且拒绝保存（**已过**：`jd.capture`＝text+number、`greeting.send`＝enum 下拉（选项 `boss｜liepin`）、`demo.flaky`＝text+number 三张，加一张必填留空被拒的原图；`boolean` 控件在表单组件里存在但没有内置算子声明布尔参数，只有单测覆盖，见 5.10-c 落地记录的如实条目                  | [x]  |
 | 5.10-05 | 保存前图校验逐条可定位：未知 kind / 悬挂边 / 多源点 / 有环 / 外发缺 target                                                                                     | U    | 各构造一例 → 断言错误文案含节点 id                                                                                                                                                                                                                                                                                       | [x]  |
 | 5.10-06 | 拖动节点位置**不改变** `fingerprint`（位置属视图层）；改参数或改边则指纹变化                                                                                   | U    | 挪位置后比指纹相等；改参数后比指纹不等（10 条用例，见 5.10-b 落地记录）                                                                                                                                                                                                                                                  | [x]  |
-| 5.10-07 | 指纹变化后的旧 run 不可续跑，界面说明「计划已修改」而不是静默开新 run                                                                                          | V+C  | 改图 → 续跑 → 截图拒绝原因                                                                                                                                                                                                                                                                                               | [ ]  |
-| 5.10-08 | 条件分支：多出口节点按出口选边执行，未走的分支在画布上显示 skipped 而非 pending                                                                                | V    | 分支图跑一轮 → 截图两分支不同状态色                                                                                                                                                                                                                                                                                      | [ ]  |
-| 5.10-09 | 并行扇出与汇聚：两条出边可同时推进，join 节点待所有入边到达后才执行且只执行一次                                                                                | U+V  | 单测 join 计数为 1；截图并行两支同时 running                                                                                                                                                                                                                                                                             | [ ]  |
+| 5.10-07 | 指纹变化后的旧 run 不可续跑，界面说明「计划已修改」而不是静默开新 run                                                                                          | V+C  | **C 半边已过**（5.10-f：比较基准改成库里那一份 `storedPlan()`，改图→续跑以「不是同一条」拒绝且拒绝期间派发 0 次；用例见 5.10-f 落地记录）。V 半边待活体：截图要的是界面上那句拒绝原因，与 5.10-08 同一个前置（画布上先得有一只多出口格子）                                                                               | [ ]  |
+| 5.10-08 | 条件分支：多出口节点按出口选边执行，未走的分支在画布上显示 skipped 而非 pending                                                                                | V    | **推进逻辑已过 U**（分支只走执行器宣告的那一支，未走一支落 `skipped` 且执行器一次都没调）。V 半边 **BLOCKED**：六只内置算子全是单 `default` 出口、画布的出口只从描述表取，画不出分支格子——需要先登记一只多出口演示算子（属新能力，见 plan §7.8.3-bis）                                                                   | [ ]  |
+| 5.10-09 | 并行扇出与汇聚：两条出边可同时推进，join 节点待所有入边到达后才执行且只执行一次                                                                                | U+V  | **U 半边已过**（菱形扇出的 join 待两条入边到齐才执行、整条 run 只调一次：`calls === ['fork#1','left#1','right#1','join#1']`）。"同时推进"按裁定 5 是**拓扑序依次派发**、不并发，所以"两支同时 running"这张截图在本口径下不成立，V 半边与 08 同一前置                                                                     | [ ]  |
 | 5.10-10 | 自定义图计划落 SQLite `workflow_plans`，经 core 既有单一连接；重启后画布重开同一张图                                                                           | C    | 存图 → 重启 → 读回逐字段一致；确认无第二个连接                                                                                                                                                                                                                                                                           | [x]  |
 | 5.10-11 | 运行态回写只来自 `workflow/progress` 事件，画布内**无轮询定时器**，离开画布无残留句柄                                                                          | C+U  | 断言无 setInterval；卸载后无活跃句柄（同 2.4-09 法）                                                                                                                                                                                                                                                                     | [ ]  |
 | 5.10-12 | 点节点弹出参数/attempts/耗时/证据，与 2.4 的证据是同一数据源，不是二次拼装                                                                                     | V    | 失败节点点开 → 截图证据内容与库一致                                                                                                                                                                                                                                                                                      | [ ]  |
-| 5.10-13 | DAG 下重验 2.4-05/06：kill 后从中断节点继续、已完成不重放、外发幂等仍成立并留新证据                                                                            | V    | 分支图跑中途 kill → 重启截图 + 库比对 attempts 不变                                                                                                                                                                                                                                                                      | [ ]  |
+| 5.10-13 | DAG 下重验 2.4-05/06：kill 后从中断节点继续、已完成不重放、外发幂等仍成立并留新证据                                                                            | V    | **推进态重建已过 U**（分支图中途 kill：重启后 cond 的 attempts 仍是 1 且 `output_handle='yes'`、未走一支仍是 `skipped`/attempts 0、只派发被选那支的第二次执行；分支节点完成却没登记出口时**拒绝续跑**而不是猜）。V 半边与 08 同一前置（要真跑一张分支图得先有多出口算子）                                                | [ ]  |
 | 5.10-14 | 反向验证「不做循环」：连回边被校验拒绝并给出原因，且确认未造成当前主线能力缺口                                                                                 | U+V  | 构造回边 → 断言拒绝；截图拒绝文案                                                                                                                                                                                                                                                                                        | [x]  |
 | 5.10-15 | 许可边界机检：新增依赖仅 `@xyflow/react`（MIT），产物与 licenses 表内无 PolyForm-NC / AGPL，且 Automa 移植面（`Edit*.tsx`、drawflow 格式）零复制、本片全部自建 | C    | `pnpm licenses list` + 与源仓库代码逐处对照走查                                                                                                                                                                                                                                                                          | [ ]  |
 | 5.10-16 | 前端规范达标：节点样式全 Tailwind（唯一例外是库自带 `dist/style.css` 在全局入口引一次），算子图标仅 lucide-react，画布每条文案走 i18n 且 zh-CN/en 齐备         | C    | `pnpm lint` 与渲染层规范脚本 0 命中（画布半边，见 5.10-a）                                                                                                                                                                                                                                                               | [x]  |
@@ -3331,3 +3331,42 @@ agent 工具（§8.4）；未登记名（`workflow.graph.deleteGraph`、带点�
 **门禁读数**：`pnpm typecheck=0 / lint=0 / format:check=0 / test=0`，其中 `packages/workflow` 174 条用例
 （e 片新增 `graph-service.test.ts` 6 条）、`packages/main` 65 条（e 片新增 `graph-link.test.ts` 4 条），
 全仓零 `failed` 行。
+
+**5.10-f 落地记录（2026-10-04，runner DAG 化：保存口回写投影 + 推进循环 + 续跑重建）**：
+接手清单（plan §7.8.3-bis）四件事落了前三件，第四件只到 U 半边。三处接线口径：
+
+- **保存口是唯一的投影写点**（裁定六）：`workflow.graph.save` 落 `graph_json` 的同时按 `topologicalOrder(graph)`
+  重算 `plan_json` 与指纹，于是 runner 拿到的本体与画布上那张图**同源**，`node_index` 仍是声明下标而执行序由边决定。
+  `graph-service.test.ts` 新增 3 条：乱序声明的菱形存完本体按拓扑序、同一张图连存三次 `plan_json` 字节一致
+  （基准在第一次保存之后取，`revision` 走到 4——保存口自己不能成为"永远续不上"那条成因）、
+  分支图的 `outputs` 留在本体而边只在 `graph_json`。
+- **推进循环不改成图遍历解释器**（裁定 1）：`machine.ts` 一行没动，runner 每格先问 `advanceGraph`，
+  游标每一格都满足"全部上游已结算"，所以 `step-finished` 的 `+1` 仍然合法。级联跳过的格子写
+  `store.markNodeSkipped` 并 `apply({type:'step-skipped', reason:'branch-not-taken'})`；
+  `succeedNode` 的 done 判据从 `index + 1 === nodes.length` 换成 `advanceState.finished`；
+  执行器走掉的出口经 `WorkflowNodeExecutor` 的返回值带出（省略即 `default`，六个现有执行器一行未改），
+  落进号段 29 的 `workflow_nodes.output_handle`。图的来源是 `workflow.store.getPlanGraph`，
+  `isCustom` 才用库里那份，否则 `projectPlanToGraph`（裁定 4：runner 不依赖 `workflow.graph`）。
+- **续跑靠句柄、不靠猜**（裁定 3）：`rebuildAdvanceState` 按库里逐行的 `status` + `outputHandle` 重放推进态；
+  分支节点 `done` 而句柄为空时以 `INVALID_ARGUMENT` 拒绝（原文「节点 X 已完成，但库里没有它走过的出口，
+  无法判断该续哪一支，已拒绝按旧进度续跑」），因为从下游行反推在"cond 完成、两支都没结算"这条路径上恰好失效。
+  顺带把「当前计划」的比较基准从内存 `this.plan` 换成 `storedPlan()`（库里那份优先，取不到才沿用）——
+  5.10-07 要的"同进程内改过图就不可续"必须判得出来，而这是 §2.7"同一件事只留一份事实"的读法。
+
+用例：`runner.test.ts` 新增 6 条（分支一支 done 一支 skipped 且未走支执行器 0 次 / 句柄落库 /
+菱形 join 恰好一次 / 改图后续旧 run 被拒且派发 0 次 / 缺句柄拒绝续跑 / 中途 kill 重启 attempts 不涨且不重放另一支）。
+
+**两条如实没做的事**：① **V 半边整体 BLOCKED**，原因是缺能力而不是缺环境——六只内置算子在
+`core/src/operators.ts` 里全是单 `default` 出口，`WorkflowCanvas.tsx:99-141` 的把手只从描述表取，
+所以活体画布上画不出一只分支格子，5.10-07/08/09/13 的截图都取不到。解除条件：登记一只多出口演示算子
+（描述表 + `executors.ts` 两处），这是新能力，按 AGENTS.md §6 要先立证据与理由，本窗不自行造。
+② **自定义计划的跨进程续跑有一条既有的缝**（`this.plan` 只有 `start()` 会换，重启后要续画布计划的旧 run
+得先起一次新 run）——2.4-05 已验收的措辞是"配置与 run 不一致时拒绝续"，就地放开等于拆安全网，
+所以留在注释里交给人裁定，没有顺手改。
+
+**门禁读数**：`pnpm typecheck=0 / format:check=0 / test=0`；`packages/workflow` 200 条用例（本片 +9）、
+全仓零 `failed` 行。**`pnpm lint=1`，失败点不在源码而在最后一道许可证机检**：`LICENSES.md` 的生成节是按
+装机 `node_modules` 实测扫出来的，上一次在 Windows 上生成、那行是 `@napi-rs/canvas-win32-x64-msvc`，
+本机 macOS 装到的是 `-darwin-arm64`，`--write` 就会改掉那一行（列宽差异已被 `normalizeMarkdown` 吃掉，
+实跑 `--write` 后 `check-licenses.ts` 通过）。这条闸门今天按平台摆平，与本片无关，**本窗没有提交那个改动**，
+处置方式待裁定（逐平台并列 vs 折叠掉 per-platform 变体）。

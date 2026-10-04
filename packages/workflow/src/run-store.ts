@@ -401,6 +401,33 @@ export class WorkflowRunStoreService extends Service {
   };
 
   /**
+   * 给「这一支没走」的格子落一行 `skipped`（spec 5.10-08）。
+   *
+   * 为什么不能复用 `recordNode`：那是 UPDATE，而分支未走的格子**从来没有被 `claimNode` 声明过**，
+   * 库里根本没有行——不插这一行，`state()` 就把这一格读成 `pending`，界面上"没走的支"与
+   * "还没轮到的支"长一样，5.10-08 要的两种颜色就没了。
+   *
+   * 也刻意**不走 `claimNode`**：那会把 `side_effect` 写成 `started`、占住幂等键，等于在库里宣称
+   * 「这件外发开始过了」，而它一次都没被执行（§8.4 的诚实读数优先）。
+   * @param runId 本次 run
+   * @param index 节点下标（`plan_json` 的声明下标，见 plan §7.8.3 裁定 1）
+   * @param spec 节点声明
+   * @param at 结算时间戳（毫秒）
+   */
+  markNodeSkipped = (runId: string, index: number, spec: WorkflowNodeSpec, at: number): void => {
+    this.db
+      .prepare(
+        `INSERT INTO workflow_nodes
+          (run_id, node_index, node_id, kind, effect, status, attempts, started_at, finished_at,
+           duration_ms, idempotency_key, side_effect, evidence_ref, error, output_handle)
+         VALUES (?, ?, ?, ?, ?, 'skipped', 0, NULL, ?, NULL, NULL, NULL, NULL, NULL, NULL)
+         ON CONFLICT(run_id, node_index) DO UPDATE SET
+           status = 'skipped', finished_at = excluded.finished_at, side_effect = NULL, output_handle = NULL`,
+      )
+      .run(runId, index, spec.id, spec.kind, spec.effect, at);
+  };
+
+  /**
    * 推进或收尾一次 run。
    * @param runId 本次 run
    * @param outcome run 读数（下一个节点下标 + 状态 + 结束时间 + 错误码）

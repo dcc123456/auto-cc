@@ -14,6 +14,7 @@ import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildGraph } from './graph.js';
 import { WorkflowGraphService } from './graph-service.js';
@@ -34,6 +35,8 @@ function tempDir(): string {
 type Mount = {
   graph: WorkflowGraphService;
   runs: WorkflowRunStoreService;
+  /** 裸连接：裁定六的幂等判据要看 `plan_json` **列原文**，经解析再序列化就绕过了键序这一维。 */
+  db: DatabaseSync;
   dispose: () => Promise<void>;
 };
 
@@ -54,6 +57,7 @@ async function boot(dir: string): Promise<Mount> {
   return {
     graph: app['workflow.graph'] as WorkflowGraphService,
     runs: app['workflow.store'] as WorkflowRunStoreService,
+    db: asApp(ctx).store.db,
     dispose: async () => {
       for (const fiber of created.reverse()) await fiber.dispose();
       // 从全局台账里摘掉，免得 afterAll 二次释放同一份 fiber。
@@ -139,6 +143,84 @@ describe('存图 → 重启 → 读回（spec 5.10-10）', () => {
     expect(loaded.placements).toEqual([placements[1], placements[0]]);
     // 列表里的节点数从库存下来的图现算（§2.5：同一件事不留第二个口径）。
     expect(second.runs.listPlans().find((item) => item.id === 'plan-graph-1')?.nodeCount).toBe(2);
+  });
+});
+
+describe('保存口连带回写可执行本体（plan §7.8.3-bis 裁定六）', () => {
+  /**
+   * 读 `workflow_plans.plan_json` 列原文。
+   * @param db 裸连接
+   * @param id 计划 id
+   * @returns 落库的那串字节（幂等判据要看原文：解析后再序列化会抹掉键序这一维）
+   */
+  function planTextOf(db: DatabaseSync, id: string): string {
+    const row = db.prepare('SELECT plan_json FROM workflow_plans WHERE id = ?').get(id) as { plan_json: string };
+    return row.plan_json;
+  }
+
+  /** 存一条可写计划，返回它的 id（保存口要求表里先有这一行）。 */
+  async function writable(planId: string) {
+    const handle = await boot(tempDir());
+    handle.runs.savePlan({
+      id: planId,
+      name: '投影用例',
+      plan: buildPlan({ id: planId, nodes: BOSS_BASIC_PLAN.nodes }),
+      sourceRunId: null,
+      at: 1_700_000_000_000,
+    });
+    return handle;
+  }
+
+  it('图上加一只节点，本体跟着多一只且按拓扑序排：两条读数不再是两份事实', async () => {
+    const { runs, db } = await writable('plan-proj-1');
+    // 声明顺序故意写成 greet-1 在前：拓扑序（`jd-1 → greet-1`）才是执行顺序，本体照抄声明就是错的。
+    const graph = buildGraph({ id: 'plan-proj-1', nodes: [VALID_NODES[1]!, VALID_NODES[0]!], edges: VALID_EDGES });
+    expect(graph.nodes.map((node) => node.id)).toEqual(['greet-1', 'jd-1']);
+    runs.savePlanGraph({ id: 'plan-proj-1', graph, placements: [], expectedRevision: 1, at: 2_000 });
+
+    const body = runs.getPlan('plan-proj-1')!.plan;
+    expect(body.nodes.map((node) => node.id)).toEqual(['jd-1', 'greet-1']);
+    expect(body.fingerprint).toBe(buildPlan({ id: 'plan-proj-1', nodes: body.nodes }).fingerprint);
+    // 面板槽位与列表节点数读的都是本体，所以它们此刻与图上的格子数必然相同。
+    expect(runs.listPlans().find((item) => item.id === 'plan-proj-1')?.nodeCount).toBe(graph.nodes.length);
+    expect(JSON.parse(planTextOf(db, 'plan-proj-1')).nodes).toHaveLength(2);
+  });
+
+  it('同一张图连存两次：`plan_json` 字节一致（投影不幂等就等于每存一次指纹漂一次）', async () => {
+    const { runs, db } = await writable('plan-proj-2');
+    const graph = buildGraph({ id: 'plan-proj-2', nodes: VALID_NODES, edges: VALID_EDGES });
+    runs.savePlanGraph({ id: 'plan-proj-2', graph, placements: [], expectedRevision: 1, at: 2_000 });
+    const first = planTextOf(db, 'plan-proj-2');
+    runs.savePlanGraph({ id: 'plan-proj-2', graph, placements: [], expectedRevision: 2, at: 3_000 });
+    const second = planTextOf(db, 'plan-proj-2');
+    runs.savePlanGraph({ id: 'plan-proj-2', graph, placements: [], expectedRevision: 3, at: 4_000 });
+    const third = planTextOf(db, 'plan-proj-2');
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    // 幂等的是本体，不是那一版号：`revision` 与 `updated_at` 照样跟着保存走。
+    expect(runs.getPlanGraph('plan-proj-2')).toMatchObject({ revision: 4 });
+  });
+
+  it('分支图的本体取拓扑序，出口声明原样带着（runner 重建推进态要读它）', async () => {
+    const { runs } = await writable('plan-proj-3');
+    const graph = buildGraph({
+      id: 'plan-proj-3',
+      nodes: [
+        { id: 'cond', kind: 'jd.capture', effect: 'read', outputs: ['yes', 'no'] },
+        { id: 'left', kind: 'jd.list', effect: 'read' },
+        { id: 'right', kind: 'jd.list', effect: 'read' },
+      ],
+      edges: [
+        { id: 'e-yes', source: 'cond', sourceHandle: 'yes', target: 'left' },
+        { id: 'e-no', source: 'cond', sourceHandle: 'no', target: 'right' },
+      ],
+    });
+    runs.savePlanGraph({ id: 'plan-proj-3', graph, placements: [], expectedRevision: 1, at: 2_000 });
+    const body = runs.getPlan('plan-proj-3')!.plan;
+    expect(body.nodes.map((node) => node.id)).toEqual(['cond', 'left', 'right']);
+    // 边的信息只留在 `graph_json`，本体里活下来的是节点声明的出口——续跑判「这一支走没走」读的就是这一位。
+    expect(body.nodes[0]!.outputs).toEqual(['yes', 'no']);
+    expect(runs.getPlanGraph('plan-proj-3')!.graph.edges).toHaveLength(2);
   });
 });
 

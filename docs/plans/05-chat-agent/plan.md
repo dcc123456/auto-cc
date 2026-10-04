@@ -1865,7 +1865,7 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
 - 落地时的实测点（按 §2.6 不写守卫，只做判据）：投影必须幂等——同一张图连着保存两次得到的 `plan_json` 字节一致，
   否则 `revision` 每加一指纹就漂一次，保存口自己就会变成那条"永远续不上"的成因。单测按这条打。
 
-##### 7.8.3-bis 5.10-f 进度与接手清单（2026-10-04 本窗停在这里，下一条从这里接）
+##### 7.8.3-bis 5.10-f 进度与接手清单（2026-10-04 本窗落前三件 + 第四件的 U 半边）
 
 **已落且已推的四步**（判据都在上面的裁定里，这里只记形状）：① 纯推进层 `graph-advance.ts`（`initialAdvanceState` /
 `advanceGraph` / 出口校验 / 级联跳过到不动点）＋ 13 条单测；② `topologicalOrder`（乱序声明的菱形"每条边都正着走"）；
@@ -1873,18 +1873,35 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
 双语去掉"（幂等）"限定；④ 号段 29 的 `output_handle` 列（写点 `recordNode`、读点 `WorkflowNodeRunView.outputHandle`）
 ＋ `WorkflowNodeExecutor` 返回值放宽。**这四步都没有动 runner 本体**，2.4 的已验收面此刻仍是线的。
 
-**接手时要做的四件事，按顺序，别并行**：
+**接手清单的四件事：前三件已落，第四件只落了 U 半边**（判据与用例读数在 spec 的 5.10-f 落地记录）：
 
-1. 保存口回写投影（裁定六）：`workflow.graph.save` 里按 `topologicalOrder(graph)` 重算 `plan_json` 与指纹，
-   并补一条幂等单测（同一张图连存两次字节一致）。这一步做完才允许动 `start()`，否则图与本体仍是两份事实。
-2. runner 接线：节点序列取拓扑序、每格问 `advanceGraph`；级联跳过的格写 `recordNode(status:'skipped')` 并
-   `apply({type:'step-skipped', reason:'branch-not-taken'})`；`succeedNode` 的 done 判据从
-   `index + 1 === nodes.length` 换成 `advanceState.finished`；身份一律 `(run_id, node_id)`，而 `node_index` 继续是
-   `plan_json` 的声明下标（`state()` 按声明下标映射，把它当执行序会让面板串格——这是读代码读出来的硬约束）。
-3. 续跑重建：从存下来的 `output_handle` 复原推进态；**句柄缺失就转人工接管，绝不猜 `default`**。
-4. 用例与活体：分支图一支 done 一支 skipped、菱形 join 的 `recordNode` 恰好一次（5.10-09 的 U 半边）、
-   分支图中途 kill 重启后 attempts 不变且不重放同一支（5.10-13）；再上 `pnpm dev`（换 dev userData）＋ fixture ＋
-   harness(10222) 截图进 `docs/acceptance/5.10/`。在此之前 5.10-07/08/09/13 保持 `[ ]`——runner 还没真的跑过一张分支图。
+1. **已落**——保存口回写投影（裁定六）：`workflow.graph.save` 按 `topologicalOrder(graph)` 重算 `plan_json` 与指纹，
+   三条用例钉住「乱序声明→本体按拓扑序」「同一张图连存三次字节一致而 `revision` 照走」「分支图的 `outputs` 进本体、
+   边只在 `graph_json`」。
+2. **已落**——runner 接线：节点序列取拓扑序、每格问 `advanceGraph`，级联跳过写 `skipped` 行 +
+   `step-skipped(reason:'branch-not-taken')`，`succeedNode` 的 done 判据换成 `advanceState.finished`，
+   身份一律 `(run_id, node_id)` 而 `node_index` 仍是声明下标。
+3. **已落**——续跑重建：从 `output_handle` 复原推进态；**句柄缺失即拒绝续跑并转人工接管，不猜 `default`**（用例读的是
+   拒绝原文与「拒绝期间派发 0 次」）。
+4. **U 半边已落，V 半边没做**：分支一支 done 一支 skipped、菱形 join 恰好一次、改图后旧 run 不可续、
+   中途 kill 重启 attempts 不变且不重放同一支，六条全在 `runner.test.ts`。**活体那一张卡在缺能力上，不卡在环境上**：
+   六只内置算子全是单 `default` 出口，`WorkflowCanvas` 的出口只从描述表取，于是画布上画不出一只分支格子，
+   真 app 里也就没有可截图的分支图。要么登记一只多出口的演示算子（`core/src/operators.ts` + `executors.ts` 两处，
+   属新能力，按 §6 要先立证据与理由），要么把 5.10-08/13 的 V 半边如实标 BLOCKED 到那一步之后。**本窗不自行造算子。**
+
+**本窗读码读出来的两件，都超出 5.10-f 的裁定范围，交给人裁定而不是就地改**：
+
+- **自定义计划的跨进程续跑有一条既有的缝**：`workflow.runner` 的「当前计划」只有 `start()` 会换，
+  重启后想续一条**画布计划**的旧 run，得先起一次新 run 才能把 `this.plan` 切过去。5.10-f 把比较基准改成
+  库里那一份（`storedPlan()`），于是同进程内「改过图→续跑被拒」判得出来了（5.10-07 的 C 半边），
+  但 2.4-05 已验收的措辞是「配置的计划与 run 不一致时拒绝续」，放开它等于拆掉一条安全网，
+  所以这条缝**原样留着**并在 `index.ts` 的注释里写明。要不要为它开一条「按 run 自己的快照续」的口，是独立一件事。
+- **`pnpm lint` 的最后一道许可证机检在换机器后必红**：`LICENSES.md` 的生成节记的是**装机的 node_modules 实测扫描**，
+  上一次是在 Windows 上跑的，那行是 `@napi-rs/canvas-win32-x64-msvc`；本机 macOS 装到的是 `-darwin-arm64`，
+  `--write` 就会把那一行换掉（其余差异只是表格列宽，`normalizeMarkdown` 已吃掉）。
+  也就是说这条闸门今天**按平台摆平**：谁在哪个 OS 上跑 `--write`，文档就写哪个 OS 的二进制。
+  本窗没有提交这个改动（它会把 Windows 侧的记账改掉，且与本片无关），留待裁定：
+  要么生成节改成「逐平台并列」，要么把 `@napi-rs/canvas` 的 per-platform 变体折叠成一条平台无关的行。
 
 #### 7.8.4 a 片收口对账（2026-10-04，判据与读数在 spec 的 5.10-a 落地记录，这里只留后面几片要继承的口径）
 

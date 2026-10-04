@@ -20,7 +20,13 @@ import {
 } from '@auto-cc/core';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { buildGraph, canonicalViewsText, projectPlanToGraph, workflowViewsSchema } from './graph.js';
+import {
+  buildGraph,
+  canonicalViewsText,
+  projectGraphToPlan,
+  projectPlanToGraph,
+  workflowViewsSchema,
+} from './graph.js';
 import { planFromStoredText } from './plan.js';
 
 /**
@@ -351,9 +357,14 @@ export function readPlanGraph(db: DatabaseSync, id: string): WorkflowGraphLoadVi
  * 校验发生在调用方（`workflow.graph` 服务），这里只管"存进去的必须读得回来"：
  * `WHERE id = ? AND revision = ?` 让并发写变成 0 行改动而不是后写覆盖前写，随后按读路现查一遍，
  * 存进去自己读不回来比不存更糟——它会让人以为画布已经保存成功了。
+ *
+ * 5.10-f 裁定六起，这一处**连带回写 `plan_json` 与 `fingerprint`**（由 `projectGraphToPlan` 按拓扑序投影）：
+ * 只写 `graph_json` 会让「图里几个节点」与「可执行本体几个节点」变成两份事实，而 runner、面板槽位、
+ * 续跑指纹判据读的全是本体那一份。代价如实记在这里——保存会重算指纹，所以画布上动过节点之后，
+ * 改动前那次未完成的 run 按 2.4-05 拒绝续跑（把「图换了」如实说成「计划换了」）。
  * @param db 唯一连接
  * @param input 图本体、落点、期望版本与时刻
- * @returns 保存后的版本号与指纹（界面拿它把 `expectedRevision` 跟上）
+ * @returns 保存后的版本号与**图**指纹（含边；界面拿它把 `expectedRevision` 跟上）
  * @throws `INVALID_ARGUMENT` 库里没有这条计划（内置那三条不在表里，要先复制）；
  *         `WORKFLOW_INVALID_STATE` 版本不符（别处已经改过）或写完读不回来
  */
@@ -376,10 +387,20 @@ export function savePlanGraph(db: DatabaseSync, input: SavedGraphInput): Workflo
       { planId: input.id, revision: current, expectedRevision: input.expectedRevision },
     );
   }
+  const plan = projectGraphToPlan(input.graph);
   db.prepare(
-    `UPDATE workflow_plans SET graph_json = ?, views_json = ?, is_custom = 1, revision = revision + 1, updated_at = ?
+    `UPDATE workflow_plans SET graph_json = ?, views_json = ?, plan_json = ?, fingerprint = ?,
+       is_custom = 1, revision = revision + 1, updated_at = ?
      WHERE id = ? AND revision = ?`,
-  ).run(JSON.stringify(input.graph), canonicalViewsText(input.placements), input.at, input.id, input.expectedRevision);
+  ).run(
+    JSON.stringify(input.graph),
+    canonicalViewsText(input.placements),
+    JSON.stringify(plan),
+    plan.fingerprint,
+    input.at,
+    input.id,
+    input.expectedRevision,
+  );
   const saved = readPlanGraph(db, input.id);
   if (!saved) {
     throw new AppError(
