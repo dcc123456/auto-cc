@@ -1,0 +1,151 @@
+=== 5.9-02 产物自包含：无 Node / 无系统 Chrome / 无对外请求，仍能完整进主界面（win）===
+子计划：5.9-a。方法沿用 1.7-05（剥 PATH 启动）+ 1.7-06（netlog 解析）+ 1.7-12/1.7-15（asar 与外置依赖审计），
+本轮把它跑在 P5 之后的 48 插件载荷上复验，判据没有因为后续里程碑而退化。
+采集时间：2026-10-04T03:22Z（asar 审计）/ 03:32Z（干净环境启动与页面读数，同一次运行）
+
+------------------------------------------------------------------
+第 1 部分：打包产物机读审计（脚本 tmp/5-9-a/packaged-audit.ts，一次性探针，不入库）
+------------------------------------------------------------------
+=== 5.9-a 产物自包含审计（win）===
+采集时间：2026-10-04T03:22:42.430Z
+命令链：pnpm dist:win（= pnpm app:build && electron-builder --config electron-builder.yml --win --publish never）
+
+-- A. 产物清单 --
+auto-cc-0.1.0-win-x64.exe = 117784361 B
+auto-cc-0.1.0-win-x64.exe.blockmap = 124717 B
+latest.yml = 347 B
+app.asar = 7164171 B
+win-unpacked 解包总体积 = 408917352 B
+
+-- B. app.asar 顶层条目 --
+main.cjs | node_modules | package.json | preload.cjs | renderer
+
+-- C. 运行期外置依赖：解析清单 / staging / asar 三处对齐 --
+解析清单（resolveRuntimeDeps，根 = mammoth + pdfjs-dist）= 25 个
+staging build/app/node_modules 顶层 = 25 个
+asar 内 node_modules 顶层包 = 25 个
+两处 diff = 无 / 无
+第三个根：不在解析清单里的顶层包 = 0 个
+
+-- D. 第二套内核与浏览器自动化痕迹 --
+asar 内命中数 = 0
+（正则 /chromium|playwright|puppeteer|selenium|webdriver|chrome-|headless/i 扫 asar 内路径与包名）
+
+-- E. 打包版渲染层 CSP（从 asar 读磁盘上的 index.html）--
+meta CSP 存在 = true
+content = default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+          font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none';
+          form-action 'none'; frame-ancestors 'none'
+含 unsafe-eval = false
+开发态源文件 packages/renderer/index.html 的 CSP 命中数 = 0（说明头是 injectCsp 在构建期注入的，产物里才在）
+
+-- F. main.cjs / preload.cjs 的裸 require 说明符（对照 electron + node builtin + 两个外置根白名单）--
+main.cjs   = buffer, electron, fs, fs/promises, node:crypto, node:fs, node:fs/promises,
+             node:os, node:path, node:sqlite, node:url, process
+preload.cjs = electron
+→ 白名单外说明符 0 个：bundle 不会在运行期去找 staging 里不存在的包。
+
+-- G. app.asar.unpacked --
+解包路径（前两层）= node_modules/pdfjs-dist
+解包体积 = 15591394 B（asarUnpack 只放了 pdfjs-dist，与配置一致）
+
+-- H. extraResources --
+resources/cordis.yml = 41145 B
+resources/icon.png   = 794492 B
+resources/app-update.yml = 85 B
+app-update.yml 内容：owner: dcc123456 / repo: auto-cc / provider: github / updaterCacheDirName: auto-cc-updater
+→ 该文件由 electron-builder 自动产出，当前**没有消费者**（25 个外置依赖里没有 electron-updater），
+  正是 5.9-b 要接的那条 feed：必须做成来源可配、不自动下载。
+
+=== 结论 ===
+✔ 判据 A–H 全过：asar 内 node_modules 与解析清单/staging 三处一字不差（25 个包，第三个根 0 个）、
+  第二内核命中 0、CSP 在产物 HTML 里仍在且不含 unsafe-eval、bundle 无白名单外裸说明符、unpacked 只有 pdfjs-dist
+
+------------------------------------------------------------------
+第 2 部分：干净环境启动（同一份 PATH 剥除 + 独立 userData，实测输出）
+------------------------------------------------------------------
+child PATH = C:\Windows\System32;C:\Windows
+Get-Command node -> []
+Get-Command chrome -> []
+node.exe visible in system dirs = False
+userData = D:\works\deep-seek-workspace\auto-cc\tmp\5-9-a\userdata (separate from the installed app default dir)
+started
+this-artifact process count = 5
+main pid = 17564
+exe path = D:\works\deep-seek-workspace\auto-cc\dist\win-unpacked\auto-cc.exe
+userdata files = blob_storage,Cache,Code Cache,DawnGraphiteCache,DawnWebGPUCache,GPUCache,
+  GPUPersistentCache,GrShaderCache,Local Storage,Network,Partitions,ShaderCache,Shared Dictionary,
+  declarative_performance_observer.db,declarative_performance_observer.db-journal,DevToolsActivePort,
+  DIPS,DIPS-wal,Local State,lockfile,Preferences,store.db,store.db-shm,store.db-wal
+
+说明两点范围：
+① 启动的是 dist/win-unpacked/auto-cc.exe（nsis 包的同一载荷），不是装机版——原因见 5.9-01 的 C 段（§9 不许动用户在跑的 app）。
+② 「无外网」这条沿用 1.7-06 的判据形态：本机没有真的拔网线，而是用 netlog 证明进程**没有发起任何**对外请求
+   （见第 4 部分），这比"断网后没报错"更强，因为它能区分"没网可用"与"根本没用网"。
+③ 独立 userData 用 Chromium 的 --user-data-dir 开关（不是 scripts/dev.ts 的 AUTO_CC_USER_DATA_DIR 环境变量），
+   因此不会与装机版抢单实例锁；落盘里出现 store.db 即证明它用的是自己那份目录。
+
+------------------------------------------------------------------
+第 3 部分：页面读数（harness eval，端口 10223，target 子串 app.asar）
+------------------------------------------------------------------
+href              = file:///D:/works/deep-seek-workspace/auto-cc/dist/win-unpacked/resources/app.asar/renderer/index.html
+styleSheetCount   = 1        （外链样式表加载成功 → CSP 的 style-src 'self' 没有把产物样式挡掉）
+inlineStyleAttrs  = 0        （§5.1：没有内联 style 布局）
+viewTabs          = chat, workflow, diagnostics
+visibleText 前若干行（对话视图首屏，中文文案齐）：
+  auto-cc 桌面工作台 / 计划一 · 搭建主体框架 / 对话 / 工作流 / 诊断 / English /
+  同一个 runner：未开始 / 自治档位 建议模式 / 免确认白名单 已免确认 0 项 /
+  还没有消息：说说你想找什么样的岗位，agent 会把每一步做在这条对话里。
+
+shell.getStatus() → {ok:true, value:{
+  appVersion: '0.1.0', electronVersion: '44.4.5', nodeVersion: '24.21.0', platform: 'win32',
+  windowVisible: true, kernelViewVisible: true,
+  kernelViewBounds: {x:735,y:0,width:451,height:737},
+  kernelViewLoadError: null }}
+→ 没有 dev server：href 是 asar 内的 file://，不是 http://localhost:5173。
+
+devtools.status() → {ok:true, value:{ isPackaged: true, isCdpEnabled: false, cdpPort: null, targetCount: 2 }}
+→ 两条事实同时成立才算过：进程确实被外部追加了 --remote-debugging-port=10223（否则本读数取不到），
+  而 app 自己报告 isCdpEnabled=false / cdpPort=null，即 resolveCdpPort() 在打包态一律返回 null，
+  安装包不会自带调试口（§8 的 IPC/攻击面收敛）。
+
+kernel.tree() → {ok:true, value:{ nodes: 48, manifestError: <key 存在> }}
+nodeCount = 48 / stateHistogram = {"active": 48} / notReady = []
+firstIds = config, logger, store, llm, llm-embed, usage, entitlement, outbound
+lastIds  = chat, agent-policy, agent-pause, agent-loop, agent-sediment, agent-run, funnel, schedule
+→ P5 全量装配（含 5.7 的 schedule、5.8 的 funnel）在无 Node 环境下全部挂载成功。
+
+诊断视图（第二张截图）读数：
+  渲染层可见方法 120 个 · 白名单 120 个   （§8.2 的 IPC 白名单在产物里仍是收口的）
+  渲染层 require 未定义：true             （§8.1 的 sandbox / 无 nodeIntegration 在产物里成立）
+  最近主进程错误：无
+
+------------------------------------------------------------------
+第 4 部分：零首启动下载（netlog 解析，退出方式 CDP Browser.close）
+------------------------------------------------------------------
+外部追加的启动参数：--remote-debugging-port=10223 --disable-features=CalculateNativeWinOcclusion
+                    --user-data-dir=tmp/5-9-a/userdata --log-net-log=tmp/5-9-a/netlog.json
+退出：CloseMainWindow() 后仍有 5 个进程（app 设计为关窗收进托盘，packages/shell/src/index.ts:227），
+      必须走 CDP Browser.close 才会干净落盘 netlog（1.7-06 已踩过 Stop-Process 只剩 constants 段）。
+      关闭后本产物进程数 = 0。
+
+netlog 事件总数 = 57
+事件类型分布 = {"37":6,"308":6,"459":1,"538":10,"539":5,"540":5,"549":12,"557":6,"560":6}
+扫出的 http(s)/ws(s) URL 去重 = 0 条
+涉及的主机 = (无)
+constants 里含 url/host/domain 字样的条目 = (无)
+对外主机数 = 0
+✔ 零首启动下载：netlog 里没有任何 http(s)/ws(s) 请求
+（对比 1.7-06 的 13 事件：本轮事件多到 57，是因为 P5 之后多了 48 个插件与内嵌视图，
+  但对外请求数仍然是 0 —— 增长全在本地文件与进程内通道。）
+
+------------------------------------------------------------------
+结论
+------------------------------------------------------------------
+5.9-02 的 win 半边：[x]
+  产物里没有 node_modules 之外的运行期依赖（C/F 两处对齐、裸说明符白名单外 0 个）、
+  CSP 头在产物 HTML 里仍在且样式仍加载（E + styleSheetCount=1）、
+  没有第二套内核（D 命中 0）、
+  无 Node / 无系统 Chrome / 独立 userData 下完整进主界面并挂载 48 插件（第 2、3 部分 + 两张截图）、
+  全程零对外请求（第 4 部分）。
+mac / linux 半边：[!]，受限范围同 5.9-01 的 D、E 段——本机既打不出包也跑不了包。

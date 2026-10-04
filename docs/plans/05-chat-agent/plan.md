@@ -1531,6 +1531,46 @@ spike 纪律（§6.4）：验证 B 的可行性放在工作区外的 `.research-
 **本机的确定性边界**：macOS 与 Linux 的产物可以配置、可以构建描述，但**运行期无法在本机验证**（§9 已实测），
 5.9-01 的这两端一律 `[!]` 并写清受限范围，不允许用"配置已就绪"充当"已验证可启动"。
 
+### 7.7.4 5.9-a 落地记录（2026-10-04 实测）
+
+**做了什么**：`pnpm dist:win` 复跑（exit 0）→ 对 `dist/win-unpacked/resources/app.asar` 跑 A–H 八项机读审计
+→ 在剥掉 node/chrome 的 PATH + 独立 `--user-data-dir` 下启动产物、读页面与内核树、截两张图
+→ CDP `Browser.close` 干净退出后解析 netlog。mac/linux 两端的失败原文是本轮真跑出来的（`pnpm dist:mac`、
+`pnpm dist:linux`），不是引用 1.7 的旧结论。证据：`docs/acceptance/5.9/5.9-01-artifact-listing.txt`、
+`5.9-02-selfcontain.txt`、`5.9-02-clean-env-launch-1/2.png`。
+
+**核心结论：1.7 定下的自包含判据在 P5 之后的载荷上没有退化。** 外置依赖仍是 25 个、根仍是
+mammoth + pdfjs-dist 两个（第三个根 0 个），解析清单 / staging / asar 三处一字不差；
+第二内核痕迹 0；CSP 仍在产物 HTML 里且不含 `unsafe-eval`，同时 `styleSheetCount=1` 说明它没把样式挡掉；
+bundle 的裸 `require` 说明符全在 electron + node builtin + 两个外置根的白名单内；
+48 个插件节点在零 Node 环境下全部 `active`；netlog 57 事件、对外请求 0 条（1.7-06 当时是 13 事件 0 条，
+增长全在本地）。诊断视图实测「渲染层可见方法 120 个 · 白名单 120 个」「`require` 未定义：true」，
+即 §8.1/§8.2 两条底线在**产物**里而不是只在 dev 里成立。
+
+**复用优先（§2.1）的落点**：审计脚本没有自己再写一份依赖解析，而是 `import { RUNTIME_EXTERNAL_ROOTS,
+resolveRuntimeDeps }` 自 `scripts/vendor-runtime-deps.ts`——搬运层、`check-dependency-floor.ts` 与本轮审计
+共用同一个真值来源，所以"三处对齐"这条判据不会因为多份清单而自证。探针脚本全部留在被忽略的 `tmp/5-9-a/`，
+按 §6.4/§7.5 不入库。
+
+**给后续片的三条输入**：
+① 5.9-b：`resources/app-update.yml`（provider github / owner dcc123456 / repo auto-cc /
+updaterCacheDirName）已经被 electron-builder 打进产物，但**当前没有消费者**——25 个外置依赖里没有
+`electron-updater`。也就是说"feed 已存在、代码不存在"，正好是 §7.7.2 那张表里 B 方案的起点，
+开工前仍要先在 `.research-repos/` 对装好的 `electron-updater` 的 `.d.ts` 做 spike。
+② 5.9-d：首屏标题下的副标题在产物里仍是「计划一 · 搭建主体框架」——那是 P1 阶段的占位文案，
+发布版要换成什么、隐私声明放哪一屏，与 2.7-e 的 `ConsentCard` 一起定。
+③ 5.9-e：linux 日志里 `desktopName` 未设置的提示、以及 AppImage 打包器在 Windows 上被解析到
+`darwin/mksquashfs` 这两条，都只在真机/CI 上才会消解，冒烟脚本按平台跳过而不是硬跑。
+
+**两条探针级坑（下次写同类脚本直接避开）**：`@electron/asar` 的 `listPackage` 会把 scope 目录本身列成
+`@xmldom/undefined`，计数前要按 `!name.endsWith('/undefined')` 滤掉（1.7-15 踩过同一处）；
+`String.prototype.match` 不带 `/g` 返回的是数组，对它的结果再 `.match()` 会 `TypeError`，
+取 meta 标签要分两步（先取标签串、再取 `content="…"`）。
+
+**5.9-a 的范围诚实声明**：本轮没有重跑 NSIS 安装动作（会覆盖用户正在使用的装机版，§9 禁止），
+运行期证据取在同一份载荷的 `win-unpacked` 形态；"无外网"是 netlog 零请求口径，不是真拔网线。
+两条都写进了 `5.9-01` 的 C 段与 `5.9-02` 的说明段，spec 行内状态位按 win `[x]`／mac、linux `[!]` 分写。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。

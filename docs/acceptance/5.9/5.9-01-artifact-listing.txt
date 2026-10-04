@@ -1,0 +1,74 @@
+=== 5.9-01 三端安装包产出与可启动（win 实测 / mac、linux 按 §9 如实 BLOCKED）===
+子计划：5.9-a（win 本机产物构建复跑）
+采集时间：2026-10-04T03:21Z（win 构建）/ 03:29Z（mac、linux 复跑）
+构建命令链：pnpm dist:win = pnpm app:build（scripts/build.ts → staging build/app + injectCsp + vendorRuntimeDeps）
+            && electron-builder --config electron-builder.yml --win --publish never
+electron-builder 26.15.3 / electronVersion 44.4.5 / os=10.0.26200（Windows）
+
+-- A. win 产物清单（本次实测，exit 0）--
+dist/auto-cc-0.1.0-win-x64.exe            = 117,784,361 B   （nsis 安装包）
+dist/auto-cc-0.1.0-win-x64.exe.blockmap   =     124,717 B   （差量升级用）
+dist/win-unpacked/                        = 408,917,352 B   （安装包的同一载荷解包形态）
+dist/win-unpacked/resources/app.asar      =   7,164,171 B
+dist/latest.yml                           =         347 B
+
+latest.yml 原文（electron-builder 随 nsis 产出，是升级通道的 feed 载荷）：
+  version: 0.1.0
+  files:
+    - url: auto-cc-0.1.0-win-x64.exe
+      sha512: iE7weeqP8S9Xj9NMy8AJoNTfEPqPS5s5QCtz0KUcNOs0zGrskRA7EZjzZQcj+ixEwdA/mKT8ELvFCasuAZxyiw==
+      size: 117784361
+  path: auto-cc-0.1.0-win-x64.exe
+  sha512: iE7weeqP8S9Xj9NMy8AJoNTfEPqPS5s5QCtz0KUcNOs0zGrskRA7EZjzZQcj+ixEwdA/mKT8ELvFCasuAZxyiw==
+  releaseDate: '2026-10-04T03:21:23.330Z'
+
+-- B. win 可启动（实测见 5.9-02-selfcontain.txt 与两张截图）--
+在剥掉 node / chrome 的 PATH 下启动 dist/win-unpacked/auto-cc.exe，5 个进程存活、
+独立 userData 落 store.db，渲染层完整进主界面（对话视图），48 个内核节点全部 active。
+
+-- C. 本轮未重跑 NSIS 安装动作（受限范围，必须写清）--
+判据「安装包可启动」的运行期证据取在 dist/win-unpacked（与 nsis 包同一份 app.asar 载荷），
+没有再次执行 dist/auto-cc-0.1.0-win-x64.exe 的安装/卸载：
+electron-builder 的 per-user 安装包会覆盖并可能卸载用户当前正在使用的装机版，
+而 §9 明令「不要为了跑测试去杀用户正在用的 app」。安装包本身的动作在 1.7-03 已端到端验过
+（装机版路径 %LOCALAPPDATA%\Programs\auto-cc\auto-cc.exe，见 docs/acceptance/1.7/1.7-03-installed-ui.png），
+本轮新增的证据面是「P5 之后的 48 插件载荷仍然自包含并能干净启动」，两者合起来覆盖 5.9-01 的 win 半边。
+安装包侧的机读佐证：exe 产出 + blockmap（差量）+ latest.yml 的 sha512 与 size 与 exe 实际字节数一致。
+
+-- D. mac 端：BLOCKED（本机 Windows，electron-builder 直接拒绝）--
+命令：pnpm dist:mac（= pnpm app:build && electron-builder --config electron-builder.yml --mac --publish never）
+staging 阶段成功（外置依赖 25 个，与 win 同一份清单），随后：
+  ⨯ Build for macOS is supported only on macOS, please see https://electron.build/multi-platform-build
+  ELIFECYCLE  Command failed with exit code 1.   MAC_EXIT=1
+dist/ 下未产出任何 mac 产物（无 dmg、无 zip、无 mac-unpacked）。
+受限范围：electron-builder.yml 的 mac 段（dmg+zip × arm64/x64、category、icon）只是**配置就绪**，
+按 plan §7.7.3 的边界，不允许用「配置已就绪」充当「已验证可启动」。
+解除条件：在真机 macOS（或 CI 的 mac runner）上跑 pnpm dist:mac 并复跑 5.9-02 的自包含判据。
+
+-- E. linux 端：BLOCKED（打包成功，AppImage 打包器缺平台可执行文件）--
+命令：pnpm dist:linux（= pnpm app:build && electron-builder --config electron-builder.yml --linux --publish never）
+实际推进到的步骤（逐条来自日志）：
+  • packaging       platform=linux arch=x64 electron=44.4.5 appOutDir=dist\linux-unpacked
+  • downloaded electron zip extracted successfully  output=...\dist\linux-unpacked
+  • missing optional dependencies  dependencies=["@napi-rs/canvas@^1.0.0"]
+  • building        target=AppImage arch=x64 file=dist\auto-cc-0.1.0-linux-x86_64.AppImage
+  ⨯ failed to build AppImage  error=C:\Users\ragfl\AppData\Local\electron-builder\Cache\appimage-12.0.1\
+     appimage-12.0.1-1q2qv\darwin\mksquashfs process failed ENOENT
+     Exit code: ENOENT. spawn ...\darwin\mksquashfs ENOENT
+  ELIFECYCLE  Command failed with exit code 1.   LINUX_EXIT=1
+即：linux 载荷 dist/linux-unpacked 已产出（含 auto-cc 可执行、chrome-sandbox、libffmpeg.so、
+resources/ 等 ELF 形态文件），但 AppImage 目标失败即中止，deb 目标未及执行，
+dist/ 下没有 .AppImage 也没有 .deb。
+两处需要后续处理的事实（不属于 5.9-a 判据，先记录）：
+  ① mksquashfs 被解析到 cache 的 darwin/ 目录，是 electron-builder 在 Windows 上跨平台打 AppImage 的
+     工具链选择问题，不是本项目配置错误；真机 linux / CI linux runner 上不存在该路径分支。
+  ② 日志提示 desktopName 未设置（package.json 缺 desktopName + linux.syncDesktopName），
+     影响的是桌面环境把窗口关联到 .desktop 条目，属发布打磨项。
+受限范围：本机是 Windows，无法执行 linux ELF 可执行文件，因此 linux 端「可启动」无法验证；
+linux-unpacked 产出只能证明打包描述可用，不证明运行期。
+解除条件：真机 linux（或 CI linux runner）跑 pnpm dist:linux 出 AppImage+deb 并复跑自包含判据。
+
+-- 结论 --
+5.9-01 的 win 半边：[x]（产物 + 可启动，判据见本文件 C 段的范围说明）
+5.9-01 的 mac 半边：[!]（本机不支持，见 D 段原文）
+5.9-01 的 linux 半边：[!]（AppImage/deb 未产出且无法执行，见 E 段原文）
