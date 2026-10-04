@@ -6,7 +6,8 @@
  * `RepliedCountReader` / `DeliveryCountReader`）。于是「真服务到底提不提供 `countCaptured` /
  * `countAction` / `repliedJobCount` / `count` 这四只手、名字有没有拼错、区间口径对不对得上」
  * 在包内**编译期查不出来**（决策十二：方法名存在与否正则与原型都查不出来，活体装配才是活证）。
- * 本文件把两边一起装起来，让这四件事变成运行期事实。
+ * 装配本体在 `metrics-assembly.ts`（5.8-c 的万级计时判定用的是同一套装配，§2.2 不抄第二份），
+ * 本文件负责的是「写几条行内行外的数、数出来对不对」。
  *
  * 三条判定各守一种只在真装配里才会出现的失效：
  * 1. **五级从真库数得出**：岗位、打招呼、回话岗位、投递各写进行内与行外的数据，
@@ -19,15 +20,9 @@
  * 所以本文件只断言网关**切得动**这条路径，不断言它在白名单里。
  * 语料全是虚构中文，全程零出网、不碰真实招聘平台（AGENTS.md §7.2）。
  */
-import { asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import { FunnelQueryService } from '@auto-cc/plugin-agent';
-import { PlatformRegistryService } from '@auto-cc/plugin-browser';
-import { ConfigService } from '@auto-cc/plugin-config';
-import { DEFAULT_DAILY_LIMITS, EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
+import { DEFAULT_DAILY_LIMITS } from '@auto-cc/plugin-entitlement';
 import { resolveCall } from '@auto-cc/plugin-ipc';
-import { DeliveryRecordService } from '@auto-cc/plugin-outbound';
-import { ConversationStoreService, JdStoreService } from '@auto-cc/plugin-platform-boss';
-import { StoreService } from '@auto-cc/plugin-store';
 import {
   FUNNEL_LEVELS,
   isAllowedCall,
@@ -36,11 +31,11 @@ import {
   type FunnelRange,
   type QuotaAction,
 } from '@auto-cc/shared';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { bootFunnelAssembly, jobSeed, type FunnelAssembly } from './metrics-assembly.js';
 
 /** 判定基准：本机时区中午十二点，保证「今日」的日界与它同一天（跨时区也不会漂到前一天）。 */
 const AS_OF_MS = new Date(2026, 9, 15, 12).getTime();
@@ -52,68 +47,22 @@ const WINDOW: FunnelRange = { fromMs: AS_OF_MS - 2 * DAY_MS, toMs: AS_OF_MS + DA
 /** 窗口外的时刻（三日之前，`fromMs` 之下）：每条腿各写一条，用来证明区间真的在挡行。 */
 const BEFORE_WINDOW = AS_OF_MS - 3 * DAY_MS;
 
-const sandboxes: string[] = [];
-const fibers: Fiber[] = [];
+const assemblies: FunnelAssembly[] = [];
 
 /**
- * 造一条来源地址唯一的岗位草稿（幂等键是来源地址 + 标题，不给各自地址会并成一行）。
- * @param jobId 岗位标识
- * @param capturedAt 抓取时刻毫秒
- * @returns 交给 `jd.store.upsert` 的入参
- */
-function jobSeed(jobId: string, capturedAt: number) {
-  return {
-    platform: 'boss',
-    jobId,
-    title: `前端工程师 ${jobId}`,
-    company: '假司',
-    salaryText: '20-30K',
-    city: '上海',
-    experience: '3-5 年',
-    education: '本科',
-    requirements: ['TypeScript'],
-    sourceUrl: `https://fixture.test.invalid/job/${jobId}`,
-    capturedAt,
-  };
-}
-
-/**
- * 撑起「真库 + 四只归属服务 + 真闸门 + 真聚合口」的装配，并把行内与行外的数据写进去。
+ * 装配一份真库并把行内与行外的数据写进去。
  *
  * 写一律走各服务的**公开写入口**，不手搓 SQL：手搓会把「服务真认得这一行」判成假。
  * @param options.without 摘掉哪些服务的装配（服务名数组），用来演「那条能力腿没装」的现场
- * @returns 上下文、应用句柄、聚合口句柄，以及本装配写进去的各条腿的期望数
+ * @returns 上下文、应用句柄、聚合口句柄（本装配写进去的各条腿的期望数见下面各用例的字面量）
  */
 async function bootMetricsAssembly(options: { without?: string[] } = {}) {
   const without = new Set(options.without ?? []);
-  const dir = mkdtempSync(join(tmpdir(), 'auto-cc-metrics-link-'));
-  sandboxes.push(dir);
-  const ctx = new Context();
-  /**
-   * 挂一个插件并把 fiber 记进收尾清单（未点名的腿直接跳过）。
-   * 传**函数**而不是 fiber：`ctx.plugin(...)` 在实参位置就会真的挂载，
-   * 摘腿分支于是变成「只不入清单」，测试会拿到一只仍然在装的会话库（本次修复前的现状）。
-   */
-  const mount = async (name: string, open: () => Fiber | PromiseLike<Fiber>): Promise<void> => {
-    if (without.has(name)) return;
-    fibers.push(await open());
-  };
+  const assembly = await bootFunnelAssembly({ without, prefix: 'auto-cc-metrics-link-' });
+  assemblies.push(assembly);
+  const { app } = assembly;
   /** 装某一类时先问它被没被摘掉，被摘掉的连数据也不写（写不了）。 */
   const mounted = (name: string): boolean => !without.has(name);
-
-  await mount('config', () => ctx.plugin(ConfigService, { appName: 'auto-cc' }));
-  await mount('store', () => ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
-  await mount('usage.ledger', () => ctx.plugin(UsageLedgerService, {}));
-  await mount('entitlement.gate', () =>
-    ctx.plugin(EntitlementGateService, { mode: 'daily', dailyLimits: DEFAULT_DAILY_LIMITS }),
-  );
-  // 会话库要按平台找适配器，注册表是它的依赖；岗位库与它会话库同库时「已回复」才连得上。
-  await mount('platform.registry', () => ctx.plugin(PlatformRegistryService, NO_CONFIG));
-  await mount('jd.store', () => ctx.plugin(JdStoreService, {}));
-  await mount('conversation.store', () => ctx.plugin(ConversationStoreService, { platform: 'boss' }));
-  await mount('outbound.deliveries', () => ctx.plugin(DeliveryRecordService, {}));
-  await mount('funnel', () => ctx.plugin(FunnelQueryService, {}));
-  const app = asApp(ctx);
 
   // 行内两条 + 行外一条：区间真的在挡行，而不是数了整张表。
   if (mounted('jd.store')) {
@@ -194,19 +143,11 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
       ts: BEFORE_WINDOW,
     });
   }
-  return { ctx, app, funnel: app.funnel };
+  return { ctx: assembly.ctx, app, funnel: app.funnel };
 }
 
 afterAll(async () => {
-  // 先释放 fiber（关连接）再删目录：Windows 上句柄延迟释放会挡住删除。
-  for (const fiber of fibers) await fiber.dispose();
-  for (const dir of sandboxes) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // 清理失败不该把一次通过的验收判成失败。
-    }
-  }
+  for (const assembly of assemblies) await assembly.dispose();
 });
 
 describe('5.8-01 五级从真库数得出', () => {

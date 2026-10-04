@@ -1,16 +1,18 @@
 /**
- * 离线依赖门槛机检（spec 4.3-05 / 4.3-06，plan §4.3-e 实现形状 2）。
+ * 离线依赖门槛机检（spec 4.3-05 / 4.3-06，plan §4.3-e 实现形状 2；5.8-06 的图表库禁令并入同一台机检）。
  *
  * 这两条验收的失效模式很具体：**某次顺手 `pnpm add`**。今天"只用内置 sqlite、只走远端 embedding API"
  * 是干净的，明天有人为了向量检索装个 ChromaDB、或者嫌 `node:sqlite` 不熟装个 `better-sqlite3`，
  * 项目就从"用户只装一个 app"变成"用户还要跑一个服务 / 装一套编译链"（主计划 §1.4 的地基）。
+ * 5.8-06 是同一个失效模式的第三种写法：某天有人把看板的宽度条"升级"成 chart.js，
+ * 那是运行期依赖变重、不是服务变多，所以并入这里而不是另起一台机检（§2.2 同一条逻辑只留一个入口）。
  * 所以这里把它落成常驻机检（进 `pnpm lint` 链），而不是一次人肉 `pnpm why`。
  *
  * 三层扫描，各管一段，缺一层就会漏：
- * 1. **声明层**：每个 `package.json` 的四类依赖表里不得出现任何禁令（能力类 + 原生编译类）。
+ * 1. **声明层**：每个 `package.json` 的四类依赖表里不得出现任何禁令（`TREE_BANS` = 能力类 + 图表类，加原生编译类）。
  *    「我们主动引入的」才是我们的决定，这一层管的是决定。
  * 2. **解析层**：`pnpm-lock.yaml` 全量包名扫一遍（传递依赖也拦得住，且不依赖本机装没装，比 `pnpm why` 强）。
- *    这一层**只判能力类禁令**：外来向量库 / 向量服务 / docker 客户端 / 非内置 SQLite 绑定。
+ *    这一层判 `TREE_BANS`：外来向量库 / 向量服务 / docker 客户端 / 非内置 SQLite 绑定 / 图表与图形引擎（spec 5.8-06）。
  *    锁文件里本来就有的 dev-only 传递原生链路（`node-gyp`、pdfjs 的 optional `@napi-rs/canvas` 家族，
  *    实测见 pnpm-lock.yaml 的 1099～1170 行与 2524 行）**只记为提示**——它们不是本项目的检索能力，
  *    也不该由 lint 决定"整个 npm 生态里不许有编译工具"；它们会不会落到用户机上由第三层判。
@@ -68,6 +70,49 @@ const NATIVE_BANS: readonly Ban[] = [
   },
 ];
 
+/**
+ * 图表与图形渲染库禁令（spec 5.8-06「不引重型图表库」，plan §7.6.2 决策十九）。
+ *
+ * 失效模式与上面两类同形：某天有人觉得"漏斗该画成真的图"，`pnpm add` 一只 chart.js 或 echarts，
+ * 于是渲染层多一个几十 KB～几百 KB 的运行期依赖、而判据早就写明"比例宽度条 + 精确数字"够用。
+ * 这条也不是一次人肉 review 能守住的，所以进同一台机检的三层：声明、解析（含传递依赖）、搬运。
+ * 名单按家族列而不逐个版本号：`d3-*` / `@antv/*` / `@nivo/*` / `@pixi/*` 这类作用域与前后缀变体
+ * 都是同一次决定的不同写法。
+ */
+const VISUALIZATION_BANS: readonly Ban[] = [
+  {
+    pattern: /^(?:chart\.js|chartjs-.*|@chartjs\/.+)$/i,
+    reason: '图表库（spec 5.8-06：看板用十分位宽度条，界面不引图表库；决策十九）',
+  },
+  {
+    pattern: /^(?:echarts|@antv\/.+|antv)$/i,
+    reason: '图表库（spec 5.8-06 同一条否决）',
+  },
+  {
+    pattern: /^(?:recharts|victory|@victory(?:components|native)\/.+|semiotic|@nivo\/.+|@vx\/.+|visx)$/i,
+    reason: 'React 图表组件库（spec 5.8-06 同一条否决）',
+  },
+  {
+    pattern: /^(?:d3|d3-.*|@types\/d3.*|highcharts|highcharts-react-official|apexcharts|plotly\.js|c3|morris)$/i,
+    reason: '绘图与图表库（spec 5.8-06；§5.3 的 lucide-only 也不允许为了画图引入 SVG 手绘链路）',
+  },
+  {
+    pattern: /^(?:konva|react-konva|pixi\.js|@pixi\/.+|fabric|three|@react-three\/.+|babylonjs)$/i,
+    reason: 'Canvas / WebGL 图形引擎（spec 5.8-06：看板不是画布，画布类需求走 5.10 另行取证）',
+  },
+  {
+    pattern: /^(?:mermaid|dagre|@dagrejs\/.+|elkjs|gojs|jointjs|cytoscape|vis-network|vis-data)$/i,
+    reason: '图与流程图渲染引擎（spec 5.8-06 同一条否决；5.10 若要引入须先按 §6 取证再改这条）',
+  },
+];
+
+/**
+ * 依赖树三层都要判的禁令合集（能力类 + 图表类）。
+ * 原生编译链不在内：它的语义是"声明层禁止、传递链路只提示、是否落到用户机上由搬运层判"，
+ * 见文件头第 2 层与第 3 层的边界说明。
+ */
+const TREE_BANS: readonly Ban[] = [...CAPABILITY_BANS, ...VISUALIZATION_BANS];
+
 /** 搬运层要挑出来的原生产物文件（`.wasm` 不在内：预编译产物，用户机不需要编译）。 */
 const NATIVE_ARTIFACT = /\.(node|dll|so|dylib|o)$|^binding\.gyp$/;
 
@@ -101,7 +146,7 @@ function checkManifest(relPath: string, manifest: Record<string, unknown>): void
     const deps = manifest[field];
     if (typeof deps !== 'object' || deps === null) continue;
     for (const name of Object.keys(deps)) {
-      for (const ban of [...CAPABILITY_BANS, ...NATIVE_BANS]) {
+      for (const ban of [...TREE_BANS, ...NATIVE_BANS]) {
         if (ban.pattern.test(name)) failures.push(`${relPath} 的 ${field} 里声明了 ${name}：${ban.reason}`);
       }
     }
@@ -161,9 +206,9 @@ for (const match of lockText.matchAll(/^ {2}'?([^':\s]+)'?:/gm)) {
   lockNames.add(nameOfLockKey(match[1] ?? ''));
 }
 for (const name of lockNames) {
-  const capability = banOf(name, CAPABILITY_BANS);
-  if (capability) {
-    failures.push(`pnpm-lock.yaml 的依赖树里解析出 ${name}：${capability.reason}`);
+  const banned = banOf(name, TREE_BANS);
+  if (banned) {
+    failures.push(`pnpm-lock.yaml 的依赖树里解析出 ${name}：${banned.reason}`);
     continue;
   }
   if (banOf(name, NATIVE_BANS)) {
@@ -186,8 +231,11 @@ for (const dep of runtimeDeps) {
       }
     }
   }
-  if (banOf(dep.name, [...CAPABILITY_BANS, ...NATIVE_BANS])) {
-    failures.push(`装机依赖闭包里有 ${dep.name}@${dep.version}：它本不该出现在运行期外置依赖里（spec 4.3-05 / 06）`);
+  const runtimeBan = banOf(dep.name, [...TREE_BANS, ...NATIVE_BANS]);
+  if (runtimeBan) {
+    failures.push(
+      `装机依赖闭包里有 ${dep.name}@${dep.version}：它本不该出现在运行期外置依赖里（spec 4.3-05 / 06、5.8-06）——${runtimeBan.reason}`,
+    );
   }
   const files = await fileNamesUnder(dep.dir);
   runtimeFilesScanned += files.length;
@@ -201,14 +249,14 @@ for (const dep of runtimeDeps) {
 }
 
 if (failures.length) {
-  console.error('✖ 离线依赖门槛机检未通过（spec 4.3-05 无外部向量服务 / 4.3-06 无本机编译扩展）：');
+  console.error('✖ 离线依赖门槛机检未通过（spec 4.3-05 无外部向量服务 / 4.3-06 无本机编译扩展 / 5.8-06 无图表库）：');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
   `✔ 离线依赖门槛机检通过（${String(manifestsScanned)} 份 package.json + 锁文件 ${String(lockNames.size)} 个包名 + ` +
     `${String(runtimeDeps.length)} 个装机依赖共 ${String(runtimeFilesScanned)} 个文件：` +
-    '无外来向量库/向量服务/docker 客户端、无非内置 SQLite 绑定、装机闭包内无原生二进制与安装期编译脚本）',
+    '无外来向量库/向量服务/docker 客户端、无非内置 SQLite 绑定、无图表与图形引擎、装机闭包内无原生二进制与安装期编译脚本）',
 );
 if (nativeLockNames.length > 0) {
   // 一条汇总而不是 14 行：这组名字不构成失败也不构成通过，只是告诉下一个人"机检看见它们了，是有意放过"。

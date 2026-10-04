@@ -14,7 +14,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts && tsx scripts/check-dependency-floor.ts && tsx scripts/check-prompts.ts && tsx scripts/check-agent-model-authority.ts && tsx scripts/check-tool-contract.ts && tsx scripts/check-scheduler-no-external-cron.ts",
+    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts && tsx scripts/check-dependency-floor.ts && tsx scripts/check-prompts.ts && tsx scripts/check-agent-model-authority.ts && tsx scripts/check-tool-contract.ts && tsx scripts/check-scheduler-no-external-cron.ts && tsx scripts/check-dashboard-readonly.ts",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
