@@ -1,0 +1,62 @@
+# 3.2-02 三套模板逐页无溢出与错位 — 验收证据（真实内核打印 + 逐页光栅化）
+
+## 判据
+`spec.md 3.2-02`：≥3 套模板可用（经典 / 现代 / 极简），**同一文档**在各模板下均无溢出与错位；证据形态=每套模板导出后逐页截图。
+
+## 为什么今天才做得动
+这一条原先卡在「导出产物拿不到页数、也拿不到页面图」——即 `3.3` 未落地。现在两头都齐了：
+① 生产打印装配 `resumePrint.toRequest` 与页数读数（3.3-07/09）在主干里；
+② 本机找到了不引入新依赖的 PDF→PNG 通道（仓库已有的 `pdfjs-dist@6.3.289` + `@napi-rs/canvas@1.0.9`，
+见下面「光栅化」），3.3-08 当时写的「本机无 `pdftoppm`，只能给字节级证据」这条限制因此解除。
+
+## 方法（可复现）
+1. `pnpm exec tsx .research-repos/p3-template-leg/gen-html.ts`：同一份虚构文档，用**生产装配码**
+   `resumePrint.toRequest(doc, <template>, 'zh-CN', fontBaseUrl)` 生成 3 模板 × 2 长度共 6 份打印 HTML
+   （短文档=3 条经历；长文档=8 条正常经历 + 第 9 条比一页还长）。
+2. `node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron --user-data-dir=tmp/p3-leg/electron-userdata .research-repos/p3-template-leg/print.cjs`：
+   与生产执行器 `packages/shell/src/print-executor.ts` 同款离屏打印（`show:false` →
+   `sandbox:true/contextIsolation:true/nodeIntegration:false` → `file://` 装载 → `document.fonts.ready` →
+   `printToPDF(生产 options)`；生产 options 实测为
+   `{"pageSize":"A4","printBackground":true,"preferCSSPageSize":true,"margins":{0,0,0,0}}`）。
+   打印前把正文视口按 A4 宽（794px）设好，再扫一遍**横向溢出**：任何元素 `rect.right > clientWidth+1` 或 `left < -1` 记为溢出。
+   **与生产唯一的差异**：六份 HTML 串行复用同一个离屏窗口——本机实测「每次新建 + 立刻销毁窗口」会在第二次装载拿到
+   `ERR_FAILED (-2)`（与简历版面无关的内核抖动），改成复用后六份全成功。
+3. `node .research-repos/p3-template-leg/report.mjs`：`pdfjs-dist` 的 legacy 构建逐页取文本层
+   （`disableFontFace:true` + `standardFontDataUrl` + `cMapUrl`），并用 `@napi-rs/canvas` 的画布把每页光栅化成 PNG。
+
+## 结果一：横向溢出扫描（六份全零）
+```
+classic-short.pdf  contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+classic-long.pdf   contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+modern-short.pdf   contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+modern-long.pdf    contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+minimal-short.pdf  contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+minimal-long.pdf   contentPx=794 clientWidth=794 scrollWidth=794 offenders=0
+```
+`scrollWidth == clientWidth == 794` 且无一个元素越界：三套模板在 A4 正文宽度下都没有横向溢出。
+
+## 结果二：逐页截图（V 半边，本目录里的 PNG）
+- `3.2-02-classic-long-p1.png` / `3.2-02-modern-long-p1.png` / `3.2-02-minimal-long-p1.png`：同一份长文档在
+  三套模板下的首页。三张**像素不同**（md5 `8d3a8dc3…` / `7351b609…` / `67e1ab83…`），
+  中文正常成形（无豆腐块）、姓名/联系行/区块标题/条目层级都在位，没有互相压字。
+- `3.2-02-<template>-short-p1.png`：同一份短文档的三套首页（md5 各不相同），技能区块在页内，同样无溢出与错位。
+- 续页截图在 `3.2-09-long-p2..p5.png`（见该条：三套模板的 p2～p5 **像素完全相同**，故只留一份）。
+
+## 诚实标注（三条，不藏）
+1. **走的是生产装配码 + 生产打印选项，但没有走 app 的 IPC 桥**：app 侧至今没有「录入文档」的入口
+   （编辑轨 3.5 未落地），`resume.export.seedDemo` 只能落 1 页的固定内容，造不出多页文档，
+   所以「同一文档 × 三套模板 × 逐页」这一半只能在主干外的 spike 里用生产函数直接装配。
+   桥这一侧不是空白：同一窗口内用真实 app（CDP 10222 / `http://127.0.0.1:5173/`）经
+   `window.autoCC.resume['export.seedDemo']` + `['export.toPdf']` 实跑过三套模板，
+   回执分别是 `classic 1页/22504B`、`modern 1页/22554B`、`minimal 1页/22528B`（同一 docId `resume-demo`，
+   hash `af08f0e4a6…`），产物落 `tmp/dev-userdata/exports/`（已忽略）。
+2. **三套模板的 p2～p5 像素完全一致**：说明当前三套内置模板只在**首页版式**（标题条、联系行分隔符、区块标题措辞）
+   上分叉，正文条目共用同一套字号与栏宽。这不是本条判据的失败项（判据要的是「无溢出与错位」，已成立），
+   但它是「≥3 套模板」这句话的真实成色——`modern` 的注释写着「双列」，实测这份文档里**没有双列**，
+   只有标题与联系行的样式差别。要不要把双列做成真的分栏，属 3.2 的模板设计问题，留给用户裁定，本窗不动判据。
+3. 截图由 `pdfjs-dist` 光栅化，不是 macOS 预览/QuickLook 出的图：像素来自 PDF 自己的字形轮廓
+   （`disableFontFace:true`），因此它证明的是「产物里画了什么」，与 app 的预览 iframe 无必然关系。
+
+## 复现物（spike，不进主干，AGENTS.md §6.4）
+`.research-repos/p3-template-leg/{gen-html.ts, print.cjs, report.mjs}`（`.gitignore` 已覆盖）；
+中间产物 HTML/PDF/PNG/JSON 落 `tmp/p3-leg/`（已忽略）。
