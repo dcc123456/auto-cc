@@ -50,6 +50,15 @@ function listFlag(name: string): string[] {
 const port = Number(flag('port', '10222'));
 const urlFilter = flag('url') || undefined;
 
+/** 从 `--from-*` / `--to-*` 组装拖拽两端的定位描述。 */
+function dragSpecs(): { from: TargetSpec; to: TargetSpec } {
+  const from = { selector: flag('from-selector') || undefined, text: flag('from-text') || undefined };
+  const to = { selector: flag('to-selector') || undefined, text: flag('to-text') || undefined };
+  if (!from.selector && !from.text) throw new Error('缺少拖拽起点：给 --from-selector 或 --from-text 之一');
+  if (!to.selector && !to.text) throw new Error('缺少拖拽终点：给 --to-selector 或 --to-text 之一');
+  return { from, to };
+}
+
 /** 从 `--selector` / `--text` 组装元素定位描述；两个都没给就无从定位。 */
 function spec(): TargetSpec {
   const selector = flag('selector');
@@ -77,6 +86,7 @@ const COMMANDS = [
   'targets            列出可连接的页面 target',
   'wait --text <str>  等页面出现该文本（--timeout 毫秒）',
   'click [--selector <css>] [--text <str>]  中心点派发原生鼠标事件',
+  'drag --from-selector <css> --to-selector <css>  按住起点拖到终点松开（CDP 原生事件，能驱动 react-flow 连线）',
   'type [--selector <css>] [--text <str>] --value <str>  聚焦后走 Input.insertText',
   'text               打印页面可见文本',
   'dom --selector <css> [--attrs a,b]  打印匹配节点的机读快照',
@@ -117,6 +127,16 @@ try {
       const tag = await session.click(spec());
       session.close();
       console.log(`已点击 <${tag}>（原生鼠标事件）`);
+      break;
+    }
+    case 'drag': {
+      const session = await attach();
+      const { from, to } = dragSpecs();
+      const points = await session.drag(from, to, Number(flag('steps', '12')));
+      session.close();
+      console.log(
+        `已拖拽 ${String(points.from.x)},${String(points.from.y)} → ${String(points.to.x)},${String(points.to.y)}`,
+      );
       break;
     }
     case 'type': {

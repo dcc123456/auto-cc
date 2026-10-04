@@ -380,6 +380,59 @@ export class CdpSession {
   }
 
   /**
+   * 真实拖拽：在 `fromSpec` 元素中心按住左键，分步移到 `toSpec` 元素中心后松开。
+   *
+   * 为什么非走 CDP 不可：react-flow 的连线与节点拖拽建在 d3-drag 上，它只认浏览器派发的**可信事件**——
+   * 实测在页面里 `dispatchEvent` 一整套 pointer/mouse 序列之后 `.react-flow__edge` 数量纹丝不动
+   * （spec 5.10-14 的活体缺口就是这个），所以连线类判据必须用这条真事件通道。
+   * 中间的 `mouseMoved` 一律带 `buttons: 1`：不带就等于告诉浏览器"左键已松开"，拖拽会话刚起就结束。
+   * @param fromSpec 起点元素（按住的那只句柄）
+   * @param toSpec 终点元素（松开时落到的句柄）
+   * @param steps 中间移动步数，默认 12；步数太少会让命中测试跳过目标句柄
+   * @returns 起终点中心坐标，失败时用来定位是哪一个元素没量对
+   * @throws 任一端元素不存在
+   */
+  async drag(
+    fromSpec: TargetSpec,
+    toSpec: TargetSpec,
+    steps = 12,
+  ): Promise<{ from: { x: number; y: number }; to: { x: number; y: number } }> {
+    const from = await this.locate(fromSpec);
+    if (!from) throw new Error(`拖拽起点未找到：${String(fromSpec.selector ?? fromSpec.text)}`);
+    const to = await this.locate(toSpec);
+    if (!to) throw new Error(`拖拽终点未找到：${String(toSpec.selector ?? toSpec.text)}`);
+    const button = 'left' as const;
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y });
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: from.x,
+      y: from.y,
+      button,
+      buttons: 1,
+      clickCount: 1,
+    });
+    for (let step = 1; step <= steps; step += 1) {
+      await this.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: from.x + ((to.x - from.x) * step) / steps,
+        y: from.y + ((to.y - from.y) * step) / steps,
+        buttons: 1,
+      });
+    }
+    // 松手前等两帧：xyflow 在 mousemove 里记"当前悬停的句柄"，最后一帧没被消化就松手会连不上。
+    await this.settle();
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: to.x,
+      y: to.y,
+      button,
+      buttons: 0,
+      clickCount: 1,
+    });
+    return { from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y } };
+  }
+
+  /**
    * 真实输入：先聚焦元素，再走 `Input.insertText`（与输入法同一条路径，会派发原生 input 事件）。
    * @returns 输入前后的值对照
    * @throws 元素不存在或不是可输入控件
