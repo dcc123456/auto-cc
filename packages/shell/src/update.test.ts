@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   armManualOnly,
   assertManualOnly,
+  pickAutoUpdater,
   UpdateChannel,
   type UpdateCheckResultLike,
   type UpdateConfig,
@@ -149,5 +150,24 @@ describe('更新通道的状态机（spec 5.9-03：提示 + 用户主动触发�
     expect(view.state).toBe('failed');
     expect(view.detail).toContain('404 Cannot find latest.yml');
     expect(view.currentVersion).toBe('0.1.0');
+  });
+});
+
+describe('动态导入的更新器取法（装机版实测踩过的坑）', () => {
+  it('命名空间顶层有 autoUpdater 时直接用它', () => {
+    const { updater } = fakeUpdater();
+    expect(pickAutoUpdater({ autoUpdater: updater })).toBe(updater);
+  });
+
+  // 装机版走的是这一条：`autoUpdater` 是 defineProperty 的惰性 getter，ESM 命名空间扫不到，
+  // 只有 `default`（整个 module.exports）。之前按顶层解构取到 undefined，
+  // 一点「检查更新」就报 `Cannot set properties of undefined (setting 'autoDownload')`。
+  it('顶层没有 autoUpdater 时退回 default 上那一份', () => {
+    const { updater } = fakeUpdater();
+    expect(pickAutoUpdater({ default: { autoUpdater: updater } })).toBe(updater);
+  });
+
+  it('两种形状都没有：抛一句可显示的错，不把 TypeError 漏给状态机', () => {
+    expect(() => pickAutoUpdater({ default: {} })).toThrow('UPDATE_RUNTIME_UNAVAILABLE');
   });
 });

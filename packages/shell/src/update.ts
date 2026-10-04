@@ -52,12 +52,32 @@ export interface UpdateRuntime {
 }
 
 /**
+ * 从 `import('electron-updater')` 的模块命名空间里取出更新器单例。
+ *
+ * 必须兼容两种形状，因为实测过它们各自的失败面：这个库的 `autoUpdater` 是
+ * `Object.defineProperty(exports, 'autoUpdater', { get })` 的惰性单例（`out/main.js` 末尾），
+ * 走 ESM 动态 `import()` 时 cjs-module-lexer 静态扫不到它——实测命名空间里有 `default`、
+ * `NsisUpdater` 等，唯独没有 `autoUpdater`，直接解构拿到的是 `undefined`，
+ * 表现为装机版点一次「检查更新」报 `Cannot set properties of undefined (setting 'autoDownload')`。
+ * 而打包器把这条 `import()` 原样留在 CJS 产物里，所以两种取法都要留。
+ * @param namespace 动态导入结果（顶层有 `autoUpdater` 或只在 `default` 上有一份）
+ * @returns 更新器单例
+ * @throws Error 以 `UPDATE_RUNTIME_UNAVAILABLE:` 开头——两种形状都没有时宁可报错，也不要往下抛 TypeError
+ */
+export function pickAutoUpdater(namespace: unknown): UpdaterLike {
+  const shape = namespace as { autoUpdater?: UpdaterLike; default?: { autoUpdater?: UpdaterLike } };
+  const updater = shape.autoUpdater ?? shape.default?.autoUpdater;
+  if (updater == null) throw new Error('UPDATE_RUNTIME_UNAVAILABLE: electron-updater 没有导出 autoUpdater');
+  return updater;
+}
+
+/**
  * 真实运行期依赖：`electron-updater` 的单例 + Electron 自己的版本号。
  * @returns 更新器与当前版本
  */
 async function realRuntime(): Promise<UpdateRuntime> {
-  const [{ autoUpdater }, { app }] = await Promise.all([import('electron-updater'), import('electron')]);
-  return { updater: autoUpdater as unknown as UpdaterLike, version: app.getVersion() };
+  const [updaterModule, { app }] = await Promise.all([import('electron-updater'), import('electron')]);
+  return { updater: pickAutoUpdater(updaterModule), version: app.getVersion() };
 }
 
 /**
