@@ -1313,6 +1313,99 @@ F6 的形状：`maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes)`�
 **不做的两件事**：不给投递单加"已定局"事件（它没有 `agent/pause-resolved` 那样的广播，靠 `pending()` 现读就够——
 到点被收掉之后下一次读数里它自然不在）；不把 `supply` 画给投递单（一张"要不要把这份简历发出去"的单没有可补的字段）。
 
+## 7.6 5.8 指标看板的落点与切片（2026-10-04 现场读码后定，逐片独立跑门禁、独立提交）
+
+判据是 spec 5.8-01～07（表已在 spec 里）。这一节只补"从哪读、落在哪、怎么切"。
+
+### 7.6.1 现场读码（F11–F20，均为 2026-10-04 实读）
+
+- **F11 五级里四级有数、第五级没有源**。搜索数 ← `jobs`（`packages/platform-boss/src/jd-store.ts:45-67`，时刻列
+  `captured_at`）；打招呼数 ← `usage_ledger` 里 `action='greet'` 的行（`packages/entitlement/src/ledger.ts:38-48`，
+  时刻列 `ts`，唯一写入点 `outbound/src/greet.ts:257` 经 `gate.perform`）；回复数 ← `conversation_messages` 里
+  `direction='recruiter'`（`platform-boss/src/conversation-store.ts:44-52`，时刻列 `read_at`）；
+  投递数 ← `delivery_records`（`outbound/src/delivery-record-store.ts:34-40`，时刻列 `ts`）。
+  **面试数：全仓 `packages/**` 没有任何 `interview` / 约面字段或状态枚举**，只有文档与测试语料里的字样。
+- **F12 现成的聚合口没有一个接时间范围**：`jd.store.count()`（`jd-store.ts:418`）与 `status()`（`:427`）是全表；
+  `conversation.store.status()`（`conversation-store.ts:216`）给的 `recruiterMessages` 也是全表；
+  `delivery-record-store` 只有 `get/listFor/listBySnapshot`（`:118-155`），**连 `count` 都没有**；
+  `usage.ledger.summary()`（`ledger.ts:320`）有"今日"但没有区间，且它是**整张表读进 JS 再分组**（`:321-324`，
+  注释自陈理由是日界要走本地时区）。
+- **F13 索引现状决定"带界数一下"贵不贵**：`jobs_captured_at (captured_at DESC)`（`jd-store.ts:67`）与
+  `usage_ledger_action_ts (action, ts)`（`ledger.ts:48`）都在，按时间范围计数走索引；
+  `conversation_messages` 只有 `(platform, job_id, read_at)`（`:56`）、`delivery_records` 只有
+  `(job_id, ts)` 与 `(snapshot_id)`（`:41-42`）——**按时间范围数这两张就是全表扫**，正是 5.8-05 要防的那件事。
+- **F14 额度侧只有一套实现**：`EntitlementGateService` 是唯一提供者（`entitlement/src/gate.ts:60`），
+  `mode` 只有 `unlimited|daily`（`:26-31`），日上限是配置（`:42` 默认 + `cordis.yml:56-61` 实值）；
+  今日已用 = `ledger.countToday()`（`ledger.ts:260`），判定 = `gate.check()`（`:83`）。
+  `usage_ledger` 的 `source` / `remote_ref` 是接 SaaS 预留的空列（`ledger.ts:12-13`）。
+  **切换配置不发任何事件**（`plugins.saveConfig` → `kernel.applyConfig`，core 只声明 `plugin/error`），
+  界面靠现读刷新，现成范式见 `renderer/src/UsagePanel.tsx:44-65`。
+- **F15 界面挂载**：`renderer/src/App.tsx:27` 只有三个顶层视图（chat / workflow / diagnostics），
+  `:106-125` 是并列数组，diagnostics 那一列堆了 12 只面板（`JobLabPanel` 在 `:114`、`UsagePanel` 在 `:122`）。
+  次级面板的范式是不占顶层、由宿主内联（`SchedulePanel` 由 `WorkflowPanel.tsx:196` 内联）。
+- **F16 偏好持久化只有一条现成路**：渲染层 `localStorage`（`renderer/src/i18n.ts:8` key、`:13` 读、`:48` 写）。
+  主进程没有任何通用 KV / 偏好表（`preferences|settings|app_config` 全仓零命中；号段 6 的
+  `automation_consents` 是专用表）。
+- **F17 日界口径**：`entitlement/src/ledger.ts:120 dayKey` / `:132 startOfDay`（已从包入口 `index.ts:19-24` 导出），
+  `:117` 的注释写明为什么不能交给 SQLite（`date('now')` 是 UTC，界面显示的日子会比用户认知晚一天）。
+- **F18 迁移号段现存最大 25**（`scheduler/src/registry.ts:42 SCHEDULE_MIGRATION_VERSION`），**下一个可用是 26**——
+  AGENTS.md §9 里"当前到 17"那句已过时。号段全局，撞号在运行期才炸。
+- **F19 `agent` 包不 import 任何能力包**（eslint `AGENT_CAPABILITY` 禁列，`eslint.config.js:26-43`；
+  `plugin-outbound` / `plugin-platform-*` 在禁列，`plugin-store` / `plugin-entitlement` 不在），
+  所以跨域读数一律按**结构接口** `maybeService` 现问——现成范本 `agent/src/loop/evidence.ts:94-100`（声明）
+  与 `:298`（现问），以及它头注释里"不建表、不占号段、读不到也返回确定结局"三条取舍。
+- **F20 `<svg>` 在渲染层是机检禁止的**：`eslint.config.js:62-64` 拦 `JSXIdentifier[name='svg']`（§5.3）。
+  而 spec 5.8-06 写的是"图表用最小自绘 SVG 组件"——**这两条不可调和**，见决策十九。
+
+### 7.6.2 决策（5.8-a 开工前定，实现按此执行）
+
+**决策十五（面试级的口径，2026-10-04 由用户裁定）：第五级显式标「无数据源」，不给它编一个数。**
+F11 说清了现状：这一级压根没有结构化事实可数。三条候选里——
+① **（选中）界面上五级都在，前四级是真数字，第五级显示"无数据源"与一句原因**。这与 5.8-07 的判据同源：
+把"没跑过"显示成 0 就是骗人，而把"没有这个字段"显示成 0 是同一件事的另一种写法。
+② 新起号段 26 做人工标记表 + 界面上"标为已约面"的按钮——数字从此真了，但这是**新功能**（要定谁有权标、
+标错怎么改、与快照/投递记录怎么连），不该塞进一个只读看板的片里。
+③ 按招聘方消息正文 LIKE '%面试%' 粗筛——不建新表最省事，但它把"聊到面试"当成"约了面试"，
+是 §8.4 事实锁定明确禁止的那类"看起来像事实的猜测"。
+**所以 5.8-01 本片标 `[!]`**（"五级可见"成立、"五级都是数字"不成立），并新增 5.8-08 把这条口径钉成可验收的 V：
+无源的那一级必须显示"无数据源"而不是 0。②另开任务等立项。
+
+**决策十六：聚合口落在 `packages/agent/src/metrics/funnel.ts`（provide `funnel.query`），不建表、不占号段。**
+plan §3（`:71`、`:83`）早就给它留了位置。它自己不写任何 SQL 去打别人的表——那会是第二条读取通道（§2.7）。
+F12 的缺口这样补：**给四只归属服务各加一只"只读、带界"的计数方法**，让每张表仍由自己的主人去数：
+`jd.store.countCaptured(range)` / `conversation.store.repliedJobCount(range)` /
+`usage.ledger.countAction(action, range)` / `outbound.deliveries.count(range)`。
+新增的是**查询形状**，不是新事实（与 5.7-c 给 `jd.store` 加定点 `replyStatus` 同一口径）。
+`funnel.query` 按 F19 只声明这几位的结构接口，服务不在（平台插件没装）时那一级给 `unavailableReason`，
+与 `agent.run` 的"读不到也返回确定结局"同形。
+
+**决策十七：区间一律 `含头不含尾`，日界用归属包那份 `startOfDay`（F17），并补两条时间索引。**
+带界 SQL 走 F13 的两条现有索引；`conversation_messages` 与 `delivery_records` 各补一条
+`(read_at)` / `(ts)` 索引，占号段 **26、27**——不补就是 5.8-05 判据下的一次全表扫，
+而"万级记录下的响应时间有记录"这条要的是**有依据的读数**，不是"应该挺快"。
+
+**决策十八：筛选条件持久化用渲染层 localStorage（F16），不进 SQLite、不走 `plugins.saveConfig`。**
+为一个下拉框开新表与新迁移不值当；`saveConfig` 那条更错——§9 的 2.5 实测：热改配置会重建下游服务、
+还会关掉已打开的会话视图，而看板的判据（5.8-02）恰恰是"它什么动作都不该触发"。
+
+**决策十九：图表这一维落在"不画"。**
+F20 的冲突按 AGENTS.md 的优先级判（本文件 > spec）：§5.3 的机检在，5.8-06 那句"最小自绘 SVG"就不可执行。
+漏斗用**按宽度比例的 Tailwind 条**表达（`w-[NN%]` 由读数算出的 style 只做数据宽度、不做视觉布局，
+与 §5.1 那条"禁止内联 style 做视觉布局"不冲突——视觉样式仍是 Tailwind）。
+真要做时间序列图时必须像 5.10 那样为 §5.3 开一条显式例外并记账，本片不做这个假设。
+
+**决策二十：5.8-03 的"随 `entitlement` 实现切换而更新"按现状读作"随配置切换而更新"。**
+F14 说现状只有一套闸门实现，`source` / `remote_ref` 是空列。看板只展示 `gate.check` + `countToday` 的读数、
+自己不算剩余量；配置热改之后靠"再读一次"刷新（不新增事件、不订阅 `plugin/error`）。
+
+### 7.6.3 切片表（一次一片，片内独立跑四道门禁、独立提交推送）
+
+| 切片  | 内容                                                                                                                            | 覆盖条目                                                             | 方式 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---- |
+| 5.8-a | 四只归属服务各加一只带界只读计数 + 号段 26/27 两条时间索引 + `funnel.query` 服务（结构接口现问、缺服务给确定结局）+ 单测        | 5.8-01（服务半边）、5.8-02（C 半边）、5.8-04（服务半边）             | U    |
+| 5.8-b | IPC 白名单口 + `MetricsPanel`（漏斗五级 / 额度三量 / 时间范围筛选与 localStorage 持久化 / 空态 / 无源那级的显式标注）+ 活体截图 | 5.8-01（V）、5.8-03（V）、5.8-04（V）、5.8-07（V）、新增 5.8-08（V） | V    |
+| 5.8-c | 万级记录计时读数归档 + 只读性静态检查（看板无外发调用）+ 依赖树断言（无图表库）+ 5.8 逐项状态位收口                             | 5.8-05、5.8-06、5.8 全表                                             | C    |
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
