@@ -30,8 +30,15 @@ const logFile = path.resolve(repoRoot, flag('log', 'tmp/update-feed/requests.log
 const installerBytes = Number(flag('installer-bytes', String(2 * 1024 * 1024)));
 
 const installerName = `auto-cc-${version}-win-x64-setup.exe`;
-/** 固定内容而非随机：同一版本重跑时 sha512 不变，latest.yml 与日志可复现比对。 */
-const installerPayload = Buffer.alloc(installerBytes, 'auto-cc update channel fixture');
+/**
+ * 假安装包的字节内容。
+ *
+ * 确定性 + **随版本变**：同一版本重跑时 sha512 不变（latest.yml 与日志可复现比对），
+ * 但不同版本必须算出不同的 sha512——实测 `DownloadedUpdateHelper` 是按 sha512 认缓存的，
+ * 内容相同的两个版本会被判成"Update has already been downloaded"，
+ * 于是"点下载 → 真的发一条安装包请求"这一条读数取不到（`%LOCALAPPDATA%\auto-cc-updater\pending` 里那份 9.9.9 就是这个原因命中的）。
+ */
+const installerPayload = Buffer.alloc(installerBytes, `auto-cc update channel fixture ${version}`);
 const sha512Base64 = createHash('sha512').update(installerPayload).digest('base64');
 
 mkdirSync(feedDir, { recursive: true });
@@ -59,10 +66,25 @@ writeFileSync(
   'utf8',
 );
 
+/**
+ * 从请求行里取出文件名。
+ *
+ * 必须先把查询串剥掉：electron-updater 的 GenericProvider 每次都请求 `latest.yml?noCache=<随机数>`
+ * （实测：请求日志里是 `/latest.yml?noCache=1k42l17sb`），直接把 `request.url` 交给 `path.basename`
+ * 会得到带问号的整串，于是自家 fixture 回 404，活体上表现为
+ * `Cannot find channel "latest.yml" update info: HttpError: 404 Not Found`——那是证据工具的 bug，不是产品 bug。
+ * @param rawUrl 请求行里的原始 URL，可能是 `/latest.yml?x=1` 也可能是 `*`
+ * @returns 目录里的文件名；解析不出时回空串，由调用方按 404 处理
+ */
+const nameFromRequest = (rawUrl: string | undefined): string => {
+  const pathname = new URL(rawUrl ?? '/', `http://127.0.0.1:${String(port)}`).pathname;
+  return path.basename(pathname);
+};
+
 const server = createServer((request, response) => {
   const requestAt = new Date().toISOString();
   appendFileSync(logFile, `${requestAt} ${request.method} ${request.url}\n`, 'utf8');
-  const name = path.basename(request.url ?? '/');
+  const name = nameFromRequest(request.url);
   const file = path.join(feedDir, name);
   if (name === 'latest.yml' || name === installerName) {
     const body = readFileSync(file);
