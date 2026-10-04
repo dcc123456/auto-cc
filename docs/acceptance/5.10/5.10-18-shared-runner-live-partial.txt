@@ -47,9 +47,42 @@
     探针脚本都在被忽略的 `tmp/p3-leg/`（不进仓库，§7.5）：
         pnpm harness eval --url 5173 --expr-file tmp/p3-leg/h-steps.js
         pnpm harness eval --url 5173 --expr 'document.querySelector("[data-action=start]").click(); "started"'
-        pnpm harness shot --out tmp/p3-leg/51018-panel-run.png
+        pnpm harness shot --url 5173 --out tmp/p3-leg/51018-panel-run.png   # 2026-10-04 补正：漏 --url 见第六节
     步态的 DOM 判据属性（本轮实测存在）：`[data-step-id]` + `[data-step-status]`；
     视图与运行区的 `data-testid`：`workflow-panel` / `workflow-state` / `workflow-run-id` /
     `workflow-run-card` / `chat-workflow-mirror`。
     早期两次失败尝试记录：`[data-node-run-id]`、`[data-run-step]` 这两个属性**不存在**（猜的），
     所以第一版探针拿到「步骤行数 0」，别照抄。
+
+六、判据前半句跑到了底，撞在档位闸门上（2026-10-04 另窗续跑，读数原文见 tmp/p3-leg/51018-leg3.out）
+    本轮按第五节留下的三个动作重跑，并把顺序倒过来（先对话入口、后面板入口），拿到的是：
+    1) 对话入口**能长出计划卡**，但目标原文必须逐字点名已注册工具 id + JSON 入参——
+       确定性桩只从这种文本取材（`packages/agent/src/loop/model.ts` 的 `findNamedTools`，
+       「刻意不做意图猜测」是写在注释里的）。上一轮那句自然语言（"把四个演示节点跑完"）
+       起草出的是**空计划**，于是「确认并执行」按 `disabled={busy!==undefined || run.plan.length===0}`
+       天然禁用（`packages/renderer/src/AgentRunPanel.tsx:172`）。这不是缺陷，是 5.2-01 的设计；
+       但上一轮把它读成"点了没反应"，所以这一节把两件事分开记。
+       可用的一句：`/run workflow.run {"planId":"local-flaky-4"}` → 待确认步数 1、确认钮「可点/26」。
+    2) 人按确认并执行后：`agent-run-notice=确认并执行计划：成功`，但**库里 local-flaky-4 仍是 5 行**、
+       runId 未变。步骤卡抄出来的拒因是：
+           第 1 步 … workflow.run 失败 参数 {"planId":"local-flaky-4"}
+           当前档位「建议模式」只出计划不执行任何动作（要执行请由你把档位显式改掉）  TIER_SUGGEST_READ_ONLY
+       即：**对话入口起 run 这条腿被 5.3 的档位闸门挡住**，要人把档位显式改成半自动/全自动才走得动。
+       这条不由脚本代答（"不可自提升"是 5.3 定的），所以 5.10-18 判据前半句的"两处各起跑一次"
+       仍差**用户本人的档位表态**，本条目保持 `[!]`。
+    3) 同一条 run 由面板入口起跑是通的：点 `[data-view="workflow"]` → `[data-action=start]`
+       → 新 runId `6663b74c-f157-4ac9-a743-33545ee2aa87`，库行数 5 → 6，四步 `flaky-1..4=done`。
+    4) 共用同一个 runner 这一半，本轮反而**证得更硬**了：面板起跑之后，对话侧那只进度卡自己写着
+       "同一 run 6663b74c-…"、镜像条写着"同一个 runner：已完成"——对话入口读的就是面板那一条 current，
+       没有第二份状态（截图 `5.10-18-shared-runner-live-1.png` 工作流视图 / `-2.png` 对话视图）。
+    5) **上一轮那两张截图是无效的，本轮已替换**（诚实记账）：`-1.png` 与 `-2.png` 入库时字节完全相同
+       （md5 都是 8e7eb712029f90052267a29aad1de922，17868 B），因为 `harness shot` 漏了 `--url 5173`，
+       两次都截到默认 target（§9 的②）。替换后 md5：-1 = c6f6f81d527183a9bd10f6755759580a（310034 B，
+       工作流视图，卡上 runId 6663b74c…）、-2 = a75fd9ec155fa4961db6562730c62296（对话视图，
+       档位=建议模式、"确认并执行计划：成功"、进度卡"同一 run 6663b74c…"）。
+       另记一条 §9 的⑦同款坑：视图切走后 `[data-executed-step]` 的高度是 0，
+       所以"抄步骤卡"的探针必须先把视图切回对话再量高度，量到 0 就是没在看的同族症状。
+    6) 还差的三步（等用户档位表态后即可补成 `[x]`，全部选择器已实测存在）：
+       点 `[data-view="chat"]` → 档位选「半自动」→ 重发第 1) 条那句 `/run workflow.run {"planId":"local-flaky-4"}`
+       → 点可见且未禁用的 `[data-action=confirm-run]` → 期望库里多出第 7 行、`workflow-run-id` 换成新 UUID；
+       再点一次面板 `[data-action=start]` 拿到第 8 行 → 两条不同 runId 即判据前半句成立。
