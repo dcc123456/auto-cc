@@ -1905,6 +1905,30 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
 ② 草稿节点的参数只在**校验通过**时写回（拒绝路径不调 `onCommit`），所以红标期间图里不会有半成品参数，
 d 片的命令栈可以直接把"一次成功保存"当作一条撤销单元，不必处理半途状态。
 
+**5.10-f 的接线裁定（2026-10-04 现场读 `machine.ts` / `run-store.ts` / `index.ts` 的推进循环后定，接线那一步照此做）**：
+
+1. **游标与存储键分离**。`machine.ts` 的 run 读数是「一排格子 + 只会 +1 的游标」，DAG 化不改成图遍历解释器：
+   推进循环按 `topologicalOrder(图)` 走，游标每一格都满足「全部上游已结算」，于是 `step-finished` 的 `+1`
+   仍然合法，`machine.ts` 一行不动（除已落的 `step-skipped.reason`）。而 `workflow_nodes.node_index`
+   **继续是节点在 `plan_json` 里的声明下标**，不是执行序号——否则 `state()` 用
+   `plan.nodes.map((spec, index) => toNodeView(byIndex.get(index), …))` 那一句会把行贴到错误的格子上
+   （图形态下两个顺序不同），界面读到的进度就成了骗人的读数。落库与取回一律按 `(run_id, node_id)` 认身份，
+   `node_index` 只是那条行的主键组成部分。
+2. **走过的出口句柄必须落库**（号段 29，`workflow_nodes.output_handle TEXT`）。理由不是"以后可能要用"而是
+   5.10-13 的续跑判据：分支节点 `done` 之后、它的两支都还没结算时被 kill，重启时库里只有「cond 完成了」，
+   没有任何一行能回答"走的哪一支"。从下游行的状态反推（被选那支的目标绝不可能是 `skipped`）在这条路径上
+   恰好失效，而猜一个 `default` 会把半张图跑成另一张图——项目立的规矩是**不猜**。加列要独立成一支迁移，
+   不能并进 4 的 `up`（老库已记过 4 已应用）。
+3. **执行器返回它走掉的出口**：`WorkflowNodeExecutor` 的返回放宽成 `Promise<{ output?: string } | void>`，
+   省略即 `default`。现有六个执行器一行都不用改（`Promise<void>` 可赋给这个类型），分支算子按需返回。
+4. **图的来源**：`workflow.store.getPlanGraph(planId)` 且 `isCustom` 时用库里那份（画布存的是 `graph_json`，
+   e 片刻意不回写 `plan_json`），否则 `projectPlanToGraph(plan)`。runner 只依赖 `workflow.store`，
+   **不**依赖 `workflow-graph` 服务——摘掉画布读写口不该让执行器跑不起来。
+5. **join 只执行一次**是单测判据（5.10-09），不靠截图：断言汇聚节点的 `recordNode` 在一次 run 里只被调到一次，
+   且续跑时它的行已是 `done` → `claimNode` 判 `already-done`。并行扇出**先按拓扑序依次派发**，
+   `ready` 集合里多于一个格子时并不并发——并发要动 `this.controller` 的暂停语义与频控节奏，
+   那是 5.10-f 之后单独一件事，写在这里是为了别让"并行"两个字被截图糊弄过去。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
