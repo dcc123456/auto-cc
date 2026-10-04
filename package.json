@@ -28,7 +28,8 @@
     "dist:linux": "pnpm app:build && electron-builder --config electron-builder.yml --linux --publish never",
     "postinstall": "node packages/main/node_modules/electron/install.js",
     "prepare": "git config core.hooksPath .githooks",
-    "fixture": "tsx scripts/fixture-server.ts"
+    "fixture": "tsx scripts/fixture-server.ts",
+    "smoke:dist": "tsx scripts/smoke-dist.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
