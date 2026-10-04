@@ -16,8 +16,11 @@ import {
   maybeService,
   redactText,
   redactValue,
+  agentTool,
+  registerAgentTools,
   Service,
   sleep,
+  toolResult,
   WORKFLOW_DEFAULT_OUTPUT,
   type Context,
   type RiskSignalEvent,
@@ -68,6 +71,14 @@ export {
 export { BOSS_BASIC_PLAN, WORKFLOW_PLANS, planById, buildPlan, workflowPlanSchema };
 // 重试预算单独露出去（spec 5.7-04）：判据是"外发不重试、只读 ≤2"，用例直接打这条纯函数比造一个假执行器更省。
 export { READ_RETRY_CEILING, retryBudgetFor, type RetryBudget } from './retry-policy.js';
+
+/**
+ * `workflow.run` 的入参（spec 5.10-18，plan §7.8.2 裁定五）。
+ *
+ * 只有计划 id：节点内容一律由 `start()` 从配置或库里那份现取，工具面不接收节点数组——
+ * 那会让 agent 侧长出一条"绕过保存前五条校验直接拼图"的第二通路（§2.5）。
+ */
+const workflowRunInputSchema = z.strictObject({ planId: z.string().min(1) });
 
 /** 一个失败节点留下的证据（spec 2.4-04）。 */
 type NodeEvidence = {
@@ -749,6 +760,73 @@ export class WorkflowRunnerService extends Service {
       `工作流执行器就绪：计划 ${this.plan.id}（${String(this.plan.nodes.length)} 个节点，指纹 ${this.plan.fingerprint}）` +
         (interrupted.length > 0 ? `，本次启动把 ${String(interrupted.length)} 次旧 run 判为中断` : ''),
     );
+
+    // `workflow.run`（spec 5.10-18 / plan 裁定五）：agent 与面板跑的是**同一个** `workflow.runner`，
+    // 这只工具只是它的第三个入口——里面不含任何推进逻辑，只把「按那条计划起一次 run 并等到停下」包成一次调用。
+    // 定级取 `outbound` 是因为一只通用运行器的副作用取决于图里有什么，而声明期必须定级（F33），
+    // 取最保守的那一侧；确认由 `requiresConfirmation` 兜住，节点级的三闸门仍在 runner 里逐个判。
+    // 登记方排在 `agent` 之后才拿得到注册表（AGENTS.md §9 的 5.1-c 那条），`workflow` 在清单里正排在后面。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'workflow.run',
+        titleKey: 'agent.tool.labels.workflowRun',
+        description: '按库里那条计划起一次工作流运行并等到它停下，外发节点仍逐个过闸门与人工接管',
+        input: workflowRunInputSchema,
+        effect: 'outbound',
+        requiresConfirmation: true,
+        run: async ({ planId }, signal) => {
+          const started = this.start(planId);
+          const settled = await this.waitForSettled(started.runId, signal);
+          const unsettled = settled.steps.filter(
+            (step) => step.status === 'pending' || step.status === 'running',
+          ).length;
+          return toolResult(
+            {
+              runId: settled.runId,
+              status: settled.status,
+              steps: settled.steps.map((step) => ({ id: step.id, status: step.status })),
+            },
+            {
+              summary:
+                `计划 ${planId} 的这次 run 停在 ${settled.status}（${String(settled.steps.length)} 格` +
+                (settled.status === 'done' ? '）' : `，还有 ${String(unsettled)} 格未结算）`),
+              evidenceRefs: [`run:${settled.runId}`, `plan:${planId}`],
+            },
+          );
+        },
+      }),
+    ]);
+    if (tools === 0) {
+      this.ctx.logger.info('agent 工具注册表未挂载：workflow.run 本轮不登记（面板入口照常）');
+    }
+  }
+
+  /**
+   * 等到这次 run 停下（`done` / `failed` / `paused`）——`workflow.run` 的等待腿（spec 5.10-18）。
+   * @param runId 由 `start()` 当场返回的 run id，不接受外部输入
+   * @param signal 取消信号；让出的方式是**停在可恢复点**（`abort()`），与用户在界面按暂停同一条路，
+   *        于是"取消一次工具调用"不会变成"这一件事从没发生过"，续跑与幂等闸门照旧成立
+   * @returns 停下那一刻的运行镜像（读的是 `current()`，与界面/事件同一份内存事实，不另取一份）
+   */
+  private waitForSettled(runId: string, signal?: AbortSignal): Promise<WorkflowRunView> {
+    const isSettled = (view: WorkflowRunView): boolean =>
+      view.runId === runId && (view.status === 'done' || view.status === 'failed' || view.status === 'paused');
+    const already = this.current();
+    if (isSettled(already)) return Promise.resolve(already);
+    return new Promise<WorkflowRunView>((resolve) => {
+      const finish = (view: WorkflowRunView): void => {
+        off();
+        signal?.removeEventListener('abort', onAbort);
+        resolve(view);
+      };
+      const off = this.ctx.on('workflow/progress', (event) => {
+        if (isSettled(event.run)) finish(event.run);
+      });
+      const onAbort = (): void => {
+        finish(this.abort());
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   /** `workflow.store` 句柄。 */

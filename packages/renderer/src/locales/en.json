@@ -851,7 +851,8 @@
           "sessionsOpen": "Open platform session",
           "generateRun": "Tailor the resume content for this JD",
           "parseFromFile": "Import this resume file into the knowledge base",
-          "scriptGenerate": "Draft one chat line for this job"
+          "scriptGenerate": "Draft one chat line for this job",
+          "workflowRun": "Run this workflow plan"
         },
         "effect": {
           "read": "read-only",

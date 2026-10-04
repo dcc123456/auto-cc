@@ -851,7 +851,8 @@
           "sessionsOpen": "打开平台会话",
           "generateRun": "按这份 JD 定制简历内容",
           "parseFromFile": "把这份简历文件导入知识库",
-          "scriptGenerate": "按这个岗位生成一句话术"
+          "scriptGenerate": "按这个岗位生成一句话术",
+          "workflowRun": "运行这条工作流计划"
         },
         "effect": {
           "read": "只读",

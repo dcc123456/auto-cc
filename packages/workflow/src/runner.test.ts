@@ -1,9 +1,10 @@
 /**
  * `workflow.runner` 的服务侧行为测试（spec 1.10-02 / 04 / 05 / 06 / 07 / 09 → 2.4-01…2.4-10）。
  *
- * 2.4 之后这里测的不再是「六个占位步骤空转」，而是四件事：
+ * 2.4 之后这里测的不再是「六个占位步骤空转」，而是五件事：
  * ① 槽位来自计划且每一次推进同时落库（2.4-01/02）；② 退避重试的次数与时长（2.4-03）；
- * ③ 失败现场的证据（2.4-04）；④ 进程死过一次以后怎么续、以及外发为什么不敢盲重放（2.4-05/06）。
+ * ③ 失败现场的证据（2.4-04）；④ 进程死过一次以后怎么续、以及外发为什么不敢盲重放（2.4-05/06）；
+ * ⑤ agent 那只 `workflow.run` 工具与面板走的是同一个 runner（5.10-18）。
  *
  * **一律打假执行器 + 真 sqlite**：登记处（`workflow.executors`）存在的意义就是让 runner 不认识
  * 任何平台包，所以整条链在这里用三个假函数跑通本身就是 2.4-08 的证据；而「已完成节点不重放」
@@ -16,6 +17,8 @@ import {
   asApp,
   Context,
   Service,
+  type AgentToolDeclaration,
+  type AgentToolRegistry,
   type Fiber,
   type WorkflowGraphView,
   type WorkflowNodeExecutor,
@@ -135,6 +138,36 @@ class FakePageService extends Service {
   }
 }
 
+/**
+ * 假的 `agent.tools`：只做「往里放、往外摘」这两只手（5.10-18 的登记判据）。
+ *
+ * 与 outbound / browser / resume-kb / platform-boss 各留一份薄替身是同一条先例（见
+ * `packages/outbound/src/test-doubles.ts` 的记档）：注册表属于 L3 对话插件，本包（L2）连测试都不该
+ * import 它，而跨包共享要新建一个包（§4.3 得先在 plan 里记理由）。
+ * 它**只替登记处**：推进、闸门、证据、续跑全是真身，否则「双入口跑的是同一个 runner」就测不到。
+ */
+class FakeAgentToolsService extends Service implements AgentToolRegistry {
+  static provide = 'agent.tools';
+  static Config = z.strictObject({});
+
+  /** 收到的声明，`Map` 的迭代序即登记顺序。 */
+  readonly declarations = new Map<string, AgentToolDeclaration>();
+
+  constructor(ctx: Context, _options: Record<string, never>) {
+    super(ctx, 'agent.tools');
+  }
+
+  /** 契约见 `AgentToolRegistry.register`。 */
+  register<I>(tool: AgentToolDeclaration<I>): void {
+    this.declarations.set(tool.id, tool);
+  }
+
+  /** 契约见 `AgentToolRegistry.unregister`。 */
+  unregister(id: string): boolean {
+    return this.declarations.delete(id);
+  }
+}
+
 interface BootOptions {
   /** 库与 userData 的根；省略则新开临时目录（续跑用例要传同一个）。 */
   dir?: string;
@@ -148,6 +181,11 @@ interface BootOptions {
   returns?: Record<string, string>;
   /** 是否额外挂一个假 `browser.page`。 */
   withPage?: boolean;
+  /**
+   * 是否先挂假的 `agent.tools`（5.10-18）。必须在 runner **之前**挂载：`registerAgentTools` 是软取，
+   * 注册表晚上岗就只能登记出 0 只（AGENTS.md §9 的 5.1-c 那条，也是本条判据要区分开的两种结局）。
+   */
+  withAgentTools?: boolean;
 }
 
 /**
@@ -157,7 +195,7 @@ interface BootOptions {
  * 假执行器在登记处**自己登记之后**覆盖，所以 `demo.flaky` 那个打真 HTTP 的内置实现永远不会被调到
  * （登记是最后写入者说话，见 `executors.ts`）。
  * @param options 见 `BootOptions`
- * @returns 上下文、runner、原始 `workflow.store`、执行器登记处、页面替身（没挂就是 null），以及进度事件与调用序列两份账
+ * @returns 上下文、runner、原始 `workflow.store`、执行器登记处、页面替身与工具注册表替身（没挂就是 null），以及进度事件与调用序列两份账
  */
 async function boot(options: BootOptions = {}) {
   const dir = options.dir ?? tempDir();
@@ -167,6 +205,8 @@ async function boot(options: BootOptions = {}) {
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
   fibers.push(await ctx.plugin(WorkflowExecutorRegistryService, {}));
+  // 注册表替身排在这里：必须早于 runner，`[Service.init]` 那次登记才有地方放（5.10-18）。
+  if (options.withAgentTools) fibers.push(await ctx.plugin(FakeAgentToolsService, {}));
 
   const registry = asApp(ctx)['workflow.executors'];
   const calls: string[] = [];
@@ -198,6 +238,7 @@ async function boot(options: BootOptions = {}) {
     db: app.store.db,
     registry,
     page,
+    tools: options.withAgentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
     events,
     calls,
     // 单独卸 runner 用（等价于 `plugins.stop('workflow')`：进程没死，库与登记处都还在）。
@@ -1365,5 +1406,97 @@ describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 /
     // 未走那一支在重启之后依然被级联判成跳过，且一次执行器都没碰到。
     expect(stored?.nodes[2]).toMatchObject({ status: 'skipped', attempts: 0 });
     expect(stored?.nodes.map((node) => node.error)).toEqual([null, null, null]);
+  });
+});
+
+describe('workflow.run 工具：agent 与面板跑的是同一个 runner（spec 5.10-18 的 C 半边 / plan 裁定五）', () => {
+  /**
+   * 取注册表里那只 `workflow.run` 的声明。
+   * @param tools 注册表替身（没挂就是 null）
+   * @returns 声明本体；缺席时抛错——`?.` 会把「登记漏了」读成「返回 undefined」，那是假通过
+   */
+  function declarationOf(tools: FakeAgentToolsService | null): AgentToolDeclaration {
+    const declaration = tools?.declarations.get('workflow.run');
+    if (declaration === undefined) throw new Error('workflow.run 没有登记进注册表');
+    return declaration;
+  }
+
+  it('挂载即在注册表登记一只 workflow.run：外发定级 + 必批准 + 入参只认 planId（5.10-18 的声明半边）', async () => {
+    const { tools } = await boot({ withAgentTools: true });
+    expect([...(tools?.declarations.keys() ?? [])]).toEqual(['workflow.run']);
+    const declaration = declarationOf(tools);
+    // 定级取 `outbound` 是声明期的最保守那一侧（通用运行器的副作用取决于图里有什么），
+    // 而 §8.3 / plan §15.7 的硬约束是「外发必带必批准」——两位必须同时成立，缺一位就是闸门形同虚设。
+    expect(declaration).toMatchObject({
+      id: 'workflow.run',
+      titleKey: 'agent.tool.labels.workflowRun',
+      effect: 'outbound',
+      requiresConfirmation: true,
+    });
+    expect(declaration.input.safeParse({ planId: 'boss-basic' }).success).toBe(true);
+    expect(declaration.input.safeParse({}).success).toBe(false);
+    expect(declaration.input.safeParse({ planId: '' }).success).toBe(false);
+    // 图、节点参数、run id 都不在这只工具的门口：模型能说的只有「跑库里那条」，其余由 runner 自己定。
+    expect(declaration.input.safeParse({ planId: 'boss-basic', runId: 'x' }).success).toBe(false);
+  });
+
+  it('工具推进的是同一个 runner：返回值里的 run 就是 current() 那一次，进度事件共用同一条通道', async () => {
+    const { runner, tools, events, calls } = await boot({ withAgentTools: true });
+    const idleRunId = runner.current().runId;
+    const result = await declarationOf(tools).run({ planId: 'boss-basic' });
+    expect(result?.value).toMatchObject({
+      status: 'done',
+      steps: NODE_IDS.map((id) => ({ id, status: 'done' })),
+    });
+    expect(result?.summary).toContain('停在 done');
+    // 证据引用带回 run id：`current()` 此刻装着的就是工具报出的那一次运行，两侧没有各存一份事实。
+    expect(result?.evidenceRefs).toEqual([`run:${runner.current().runId}`, 'plan:boss-basic']);
+    expect(runner.current().runId).not.toBe(idleRunId);
+    // 推进逻辑只有 runner 一份：三只节点各被登记处的假执行器调了一次，与面板起的那次一模一样。
+    expect(calls).toEqual(NODE_IDS.map((id) => `${id}#1`));
+    expect(events.filter((event) => event.run.runId === runner.current().runId).length).toBeGreaterThan(1);
+  });
+
+  it('注册表没挂载时软取为 0 只、不抛错，面板那条入口照常起 run', async () => {
+    // 这一条钉的是 §9 的 5.1-c 教训的另一半：登记不到东西不是装配错误，不能让整条链跑不起来。
+    const { runner, tools, calls } = await boot();
+    expect(tools).toBeNull();
+    expect(runner.start('boss-basic').status).toBe('running');
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(NODE_IDS.map((id) => `${id}#1`));
+  });
+
+  it('未知 planId 以结构化失败收场，内存态一格没动（不会留下半途的 run）', async () => {
+    const { runner, tools, calls } = await boot({ withAgentTools: true });
+    const idleRunId = runner.current().runId;
+    // 这里**期望实现自己抛**：真注册表会把 AppError 收成 `TOOL_FAILED` + `reasonCode`（spec 5.5-04），
+    // 工具里再包一层 try/catch 就等于把这条例好替身行为吞掉，还违反 §2.6 的「不为边界已处理的场景加异常处理」。
+    await expect(declarationOf(tools).run({ planId: 'plan-does-not-exist' })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+    });
+    expect(runner.current().status).toBe('idle');
+    expect(runner.current().runId).toBe(idleRunId);
+    expect(calls).toEqual([]);
+  });
+
+  it('取消信号让这次运行停在可恢复点：返回 paused、库里记中断，续跑口把它接回去跑完', async () => {
+    const controller = new AbortController();
+    const { runner, tools, calls } = await boot({
+      withAgentTools: true,
+      behavior: { 'jd.list': hangOnceThenSucceed() },
+    });
+    const settling = declarationOf(tools).run({ planId: 'boss-basic' }, controller.signal);
+    await waitFor(() => calls.includes('jd-list#1'));
+    // 让出的方式是 `abort()`，与用户在界面按暂停同一条路：不是「这次调用没发生过」。
+    controller.abort();
+    const result = await settling;
+    expect(result?.value).toMatchObject({ status: 'paused' });
+    expect(runner.current().status).toBe('paused');
+    expect(runner.state()).toMatchObject({ status: 'interrupted' });
+    expect(runner.resumable()).not.toBeNull();
+
+    runner.resume();
+    await waitFor(() => runner.current().status === 'done');
+    expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
   });
 });

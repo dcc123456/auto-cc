@@ -122,7 +122,7 @@ type TruthCell = { tier: AutonomyLevel; effect: ToolEffect; requiresConfirmation
  *
  * 读法：`suggest` 一行三格全是 `TIER_SUGGEST_READ_ONLY`（只出计划不执行，与副作用级无关）；
  * `semi` 放行且仅放行「只读且不要求批准」；`auto` 放行「不要求批准」的一切——
- * 这一格里 `outbound-free` 是**产品上不许存在**的形状：真实登记的 16 只手外，外发级都声明了
+ * 这一格里 `outbound-free` 是**产品上不许存在**的形状：真实登记的 17 只手外，外发级都声明了
  * `requiresConfirmation: true`（plan §5.1-a 那句「`outbound` 必 `true`，逐条通过」），所以它今天不可达。
  *
  * 5.3-b 把「用户把某只手加白之后」另开一组用例（下面的 `EXEMPT_CELLS`），这张表因此继续只表达一件事：
