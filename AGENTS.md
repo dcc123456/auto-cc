@@ -286,6 +286,15 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `NO_KERNEL_SESSION` 失败，而改一次配置就会关掉已打开的会话视图（与上面第一条同源），
   顺序必须是「改配置 → 重开会话 → 跑」。
 - 仓库**已有 git 远端**（`origin` → `dcc123456/auto-cc`），§1.6 的"提交 + 推送"按原文执行。
+- **实测（5.10-18）`harness shot` 与 `eval` 一样必须带 `--url 5173`**：不带时它截的是**默认 CDP target**（内嵌内核视图），
+  而且**不报错**——表现为同一批里两张"不同场景"的截图字节完全相同（本项目 5.10-18 就入库过一次这样的无效证据，
+  两张 md5 都是 `8e7eb712029f90052267a29aad1de922`）。所以 §7.4 的②在收截图之前要对同批图片跑一次 `md5 -q` 去重，
+  相同即说明有一张根本没截到目标视图。
+- **实测（5.10-18）半自动档下点了「确认并执行」之后还要再点 `pause-approve`**：`agent.loop.confirm` 只把计划从
+  proposed 推到 running，循环随即**停在安全点**长出逐步批准卡（可见 `[data-action=pause-approve]` / `pause-deny` /
+  `stop-run`），活体验收必须点这一颗才真动手——只点 confirm 会得到"返回成功但库里不增行"的假象。
+  建议档位下更进一步：`TIER_SUGGEST_READ_ONLY`，且确定性桩只认**逐字点名的工具 id**，自然语言起草出的是空计划、
+  确认按钮天然禁用（`AgentRunPanel.tsx` 的 `disabled={busy !== undefined || run.plan.length === 0}`）。
 
 ---
 
