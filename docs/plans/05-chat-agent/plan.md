@@ -2085,20 +2085,16 @@ per-platform 漂移怎么摆平。P3 的 28 条 `[ ]`（3.4/3.5/3.6 编辑轨）
 
 **两条活体缺陷候选，本窗没有动代码去修，只如实记下**：
 
-- **同进程内 `resumeRun` + `resume` 不推进**：run ba4e93c0（failed）还在内存时，
+- **同进程内 `resumeRun` + `resume` 不推进**（**本窗稍后已查明并更正，见下面 7.8.3-novies——不是空转，是撞在
+  2.4-05 那道「外发未观察到完成」的闸门上**）：run ba4e93c0（failed）还在内存时，
   「从失败节点续跑」与「续跑」两次调用都返回 `ok`，但 `flaky-3` 的 attempts 停在 3、失败计数端点一次都没被再打；
   而**跨重启**的同一条路（重启后 `resumable()` 报出库里那次 failed run → 续跑）确实把 `jd-capture` 的 attempts 从 3 推到 6。
-  也就是说 5.10-13 判据里"从中断节点继续"这一条，活体只在重启形态下成立，内存里挂着同一次 failed run 时是空转。
-  5.10-13 的 U 用例是从空库起造的，看不见这一类形态差。
 - **一次 failed run 会把工作流视图堵死**：`runner.start()` 报「已有 run 处于 failed 态，先处理完它」，
   `runner.abort()` 报「没有可中止的 run，当前是 failed」，`resumeRun` 又是上一条的空转——三条出口同时走不通，
   本窗是靠重启 dev 实例才继续取证的。这一条要在下一片决定"到底哪一条出口该管 failed 态"。
 
 **另一条与本片无关但探针撞上的**：同一张画布长时间热改（HMR）之后 DOM 里出现过 13 张参数卡，
 reload 后回到 1 张；成因未查（HMR 遗留与真实泄漏两种都能解释），已记在 5.10-12 的证据文件末尾。
-
-**下一件事仍然等裁定**：5.10-08/09/13/18 的 V 半边要的是**分支图**，而分支要先有一只多出口算子（档 A，属新能力）。
--septies 那张三档表仍然有效，本节只是把 B 那一档结掉。
 
 **四道门禁读数（本窗收口实跑，每条都是 `cmd > log 2>&1; echo EXIT=$?` 的写法，不接 `tail`）**：
 `pnpm typecheck` EXIT=0；`pnpm test` EXIT=0（22 个包全绿，无 failed：`packages/workflow` 205、`packages/agent` 223、
@@ -2107,6 +2103,44 @@ reload 后回到 1 张；成因未查（HMR 遗留与真实泄漏两种都能解
 `prettier --write` 该文件后 EXIT=0，重跑 `--check` 同一条命令确认；`pnpm lint` EXIT=1，
 **失败项仍只有 `check-licenses.ts` 那一条 `LICENSES.md` per-platform 漂移**（前四窗记的同一处待裁定，
 本窗没有为它重新生成表，见上面 ③）。
+
+##### 7.8.3-novies 上面那两条「活体缺陷候选」查明了：一条被推翻、一条换了成因（2026-10-04，同一窗稍后）
+
+**取证方式**（一次决定性的观察，不是连着探：§6.2「以实测为准」，探针写在 `packages/workflow/src/runner.test.ts`
+里当次回删，读数留在被忽略的 `tmp/probe.log`）：`boot({ config:{retryTimes:0}, behavior:{'demo.flaky': 永远失败} })`
+→ `start()` → 等到 `failed`（库里 `flaky` 行 attempts 3、`side_effect='started'`）→ 依次调
+`resumeRun()` / `resume()` / `start()` / `abort()` / `retryStep('flaky')` 并读回每一步的镜像与库行。
+
+**读数（原样）**：`resumeRun()` 返回 `status:'running'`（这是**镜像快照**，异步 pump 之后才落到终相），
+pump 之后 `current()` 是 `status:'paused'`、`requiresHuman:{subject:'demo.flaky', reason:'unobserved-side-effect', stepId:'flaky'}`、
+`flaky` 那格从 `failed` 变回 `pending`、attempts **仍是 3**、执行器一次没被再调；而库里 run 行**还是 `failed`**。
+`start()` 这时报「已有 run 处于 paused 态」（不是 failed），`abort()` 从 paused 这一支**走通**并写成
+`interrupted` + `USER_ABORT`，`retryStep('flaky')` 也**走通**：登记一次确认、重放，attempts 推到 4/5/6 后又判失败
+（因为替身按设计永远失败）。
+
+**所以第一条候选被推翻**：不是"同进程空转"，而是 **2.4-05 那道「外发未观察到完成就拒绝盲重放」的闸门在这里说话**
+——`run-store.ts:318` 的判据是 `side_effect ∈ {started, done}` 且没有人工确认就返回 `needs-human`，
+`index.ts:981-987` 把它停成接管点。**与进程无关、与 effect 有关**：跨重启那次能推 attempts 的是 `jd-capture`
+（`effect:'read'`，库里 `side_effect` 为 null → `granted`），本窗不能推的是 `demo.flaky`（`local-write`）。
+同一个 `resumeRun` 对两种节点给出两种结果，正是这条既有安全网该有的样子；5.10-13 的"从中断节点继续"没有缺陷。
+（当时在界面上读成"空转"是因为按钮只拿到 `running` 那一帧镜像，横幅那一句 `requiresHuman` 我没有截图确认——
+这一条进 5.10-13 的 V 半边要补的正是它。）
+
+**第二条候选换了成因，但它是真的**：视图"堵死"不是三条出口同时关闭——`abort()` 与 `retryStep()` 都能从
+这个 paused 走通。真正的缺陷是**同一次续跑把两份事实留在了两个地方**：内存镜像 `paused` + 接管标记，
+库里 run 行仍写 `failed`（`stop()` 只回退当前步、不更新 run 行；对比 `abort()` 显式写 `interrupted`，`index.ts:639-644`）。
+于是界面在同一屏读 `current()` 得到"暂停等待接管"、读 `resumable()`/`state()` 得到"failed"，
+`start()` 的拒因也跟着从"failed"变成"paused"——我在活体里先看到 failed 那句、后看到 paused 那句，
+就是这两份事实在同一分钟里漂了一下。**这一条要裁的是**：续跑停在接管点上时，run 行该不该同步写成可恢复的中断
+（与 `abort()` 同源），还是让 `paused` 只属于内存、界面必须只认 `current()` 一份。
+
+**还剩一条与它相邻的口径问题，本窗不动代码**：`local-write` 是否该享受与 `read` 一样的盲重放放行。
+闸门当初按"外发只做一次"设计（2.4-06），`local-write` 被算进"动过手"这一侧是保守但一致的；
+把它放进"未观察到完成需人工看"会让一条只写本地计数器的节点每次失败都要人按一次「重试这一步」。
+两种口径都能自圆其说，属产品判据，留给用户裁。
+
+**下一件事仍然等裁定**：5.10-08/09/13/18 的 V 半边要的是**分支图**，而分支要先有一只多出口算子（档 A，属新能力）。
+-septies 那张三档表仍然有效，本节只是把 B 那一档结掉。
 
 #### 7.8.5 b 片收口对账（2026-10-04，图语义层；判据读数在 spec 的 5.10-b 落地记录）
 
