@@ -16,7 +16,7 @@ import {
   type Context,
   type WorkflowNodeExecutor,
 } from '@auto-cc/core';
-import type { JobListResultView, JobRowView, JdStoreStatusView, SalaryView } from '@auto-cc/shared';
+import type { FunnelRange, JobListResultView, JobRowView, JdStoreStatusView, SalaryView } from '@auto-cc/shared';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -417,6 +417,23 @@ export class JdStoreService extends Service {
    */
   count = (): number => {
     const row = this.store.db.prepare('SELECT COUNT(*) AS n FROM jobs').get() as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /**
+   * **半开区间** `[fromMs, toMs)` 内抓到并入库了多少条岗位（spec 5.8-01 的"搜索数"那一级）。
+   *
+   * 时刻列取 `captured_at`：一行岗位只有一次入库时刻，之后详情补抓（`detail_captured_at`）不该让它在
+   * 另一个区间里被再数一遍——那会把"近 7 天搜到 12 个"变成"近 7 天看过 12 次"（plan §7.6.1 F11）。
+   * 走既有的 `jobs_captured_at (captured_at DESC)` 索引（决策十七），不是全表扫。
+   * 新增的是查询形状、不是新事实：数仍由这张表的主人来数（决策十六）。
+   * @param range 半开区间毫秒时间戳，`fromMs` 含、`toMs` 不含（日界由调用方按本地时区算）
+   * @returns 区间内入库的岗位数；区间内一条没抓到为 0
+   */
+  countCaptured = (range: FunnelRange): number => {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM jobs WHERE captured_at >= ? AND captured_at < ?')
+      .get(range.fromMs, range.toMs) as { n?: number | bigint };
     return Number(row?.n ?? 0);
   };
 

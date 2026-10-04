@@ -14,6 +14,7 @@ import type {
   ConversationRowView,
   ConversationStatusView,
   ConversationSyncView,
+  FunnelRange,
 } from '@auto-cc/shared';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -59,6 +60,28 @@ export const conversationMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS conversation_messages');
+  },
+};
+
+/**
+ * 时间索引的迁移号段：**26**（此前最大是 5.7-b 调度登记处的 25，号段全局、撞号在运行期才炸）。
+ *
+ * 为什么要单开一条迁移而不是往号段 5 里加一行：已记「5 已应用」的老库永远不会重跑那支迁移
+ * （§9 的 5.3-a 实测），新库会建出索引而装机用户的库里没有——按时间范围数这张表就退成全表扫，
+ * 而 spec 5.8-05 要的恰恰是"万级记录下的响应时间有依据"。索引形状与既有那张不同，也不能复用：
+ * `(platform, job_id, read_at)` 服务的是"某个岗位的时间线"，前缀不是 `read_at`，
+ * 只给时间范围时 SQLite 用不上它（plan §7.6.1 F13）。
+ */
+export const CONVERSATION_TIME_INDEX_MIGRATION_VERSION = 26;
+
+/** 见 `CONVERSATION_TIME_INDEX_MIGRATION_VERSION`：只建/只删一条索引，不动数据。 */
+export const conversationTimeIndexMigration = {
+  version: CONVERSATION_TIME_INDEX_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('CREATE INDEX IF NOT EXISTS conversation_read_at ON conversation_messages (read_at)');
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP INDEX IF EXISTS conversation_read_at');
   },
 };
 
@@ -235,14 +258,40 @@ export class ConversationStoreService extends Service {
   };
 
   /**
+   * **半开区间** `[fromMs, toMs)` 内"有招聘方回过话"的目标有几个（spec 5.8-01 的"回复数"那一级）。
+   *
+   * 为什么数**岗位**而不是数**消息条数**：漏斗的上一级是"打了几个招呼"，同量纲才谈得上转化率；
+   * 一条回过话的岗位平均来三条消息，数条数会把"3 个人理你"显示成"12 条回复"，
+   * 那是把同一个岗位重复计进分子（plan §7.6.2 决策十六）。
+   * 时刻列取 `read_at`（本表只有这一列时刻——它是"读到的时刻"，不是"对方发出的时刻"，页面不给后者），
+   * 区间含头不含尾，走号段 26 那条 `conversation_read_at` 索引。
+   * 去重键取 `(platform, job_id)` 而不是裸 `job_id`：与 `status().jobs` 同一个口径（§2.5 只留一条数法），
+   * 两个平台的同一个岗位 id 是两次不同的回复。
+   * @param range 半开区间毫秒时间戳，`fromMs` 含、`toMs` 不含
+   * @returns 该区间内至少有一条招聘方消息的目标数；库里没有回复为 0
+   */
+  repliedJobCount = (range: FunnelRange): number => {
+    const row = this.store.db
+      .prepare(
+        `SELECT COUNT(DISTINCT platform || '|' || job_id) AS n FROM conversation_messages
+         WHERE direction = 'recruiter' AND read_at >= ? AND read_at < ?`,
+      )
+      .get(range.fromMs, range.toMs) as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /**
    * 登记迁移并把表建出来。
    *
    * 幂等 push 是硬要求：插件重启会重新构造本服务，无条件 push 会在共享清单里留下两个 `version: 5`。
+   * 两条迁移各自守自己的号（表 5、时间索引 26），老库升级时只有第二条会跑。
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    if (!migrations.some((item) => item.version === CONVERSATION_MIGRATION_VERSION)) {
-      migrations.push(conversationMigration);
+    for (const migration of [conversationMigration, conversationTimeIndexMigration]) {
+      if (!migrations.some((item) => item.version === migration.version)) {
+        migrations.push(migration);
+      }
     }
     this.store.upgrade();
   }

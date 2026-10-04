@@ -13,7 +13,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { CONVERSATION_MIGRATION_VERSION, ConversationStoreService } from './conversation-store.js';
+import {
+  CONVERSATION_MIGRATION_VERSION,
+  CONVERSATION_TIME_INDEX_MIGRATION_VERSION,
+  ConversationStoreService,
+} from './conversation-store.js';
 import { BossPlatformService, loadBossKnowledgePack } from './index.js';
 import {
   chatScript,
@@ -151,7 +155,8 @@ describe('读数与钳制（spec 2.5-07）', () => {
       total: 2,
       recruiterMessages: 1,
       jobs: 1,
-      schemaVersion: CONVERSATION_MIGRATION_VERSION,
+      // `status().schemaVersion` 读的是库上的全局版本（`PRAGMA user_version`），号段 26 那条索引把它一起推上去了。
+      schemaVersion: CONVERSATION_TIME_INDEX_MIGRATION_VERSION,
       newestJobId: '1001',
     });
   });
@@ -165,14 +170,18 @@ describe('读数与钳制（spec 2.5-07）', () => {
 });
 
 describe('迁移与重启（spec 2.5-07 的落库一半）', () => {
-  it('号段是 5，且重复挂载不会在清单里留下两个 5', async () => {
+  it('号段是 5 与 26，且重复挂载不会在清单里留下两个同名号', async () => {
     const dir = tempDir();
     const first = await boot(chatScript(pack, null, [messageRow(0)]), dir);
-    expect(first.store.version).toBe(CONVERSATION_MIGRATION_VERSION);
+    // 库上的全局版本是「已应用的最大号」，所以本包推的两条（建表 5 + 时间索引 26）之后停在 26。
+    expect(first.store.version).toBe(CONVERSATION_TIME_INDEX_MIGRATION_VERSION);
     await first.conversation.syncFrom('1001');
     await first.conversationFiber.dispose();
     const again = await boot(chatScript(pack, null, [messageRow(0)]), dir);
     expect(again.store.migrations.filter((item) => item.version === CONVERSATION_MIGRATION_VERSION)).toHaveLength(1);
+    expect(
+      again.store.migrations.filter((item) => item.version === CONVERSATION_TIME_INDEX_MIGRATION_VERSION),
+    ).toHaveLength(1);
     // 重启之后旧行还在：会话是「对方回了什么」的真相，不该随进程一起消失。
     expect(again.conversation.status().total).toBe(1);
     // 去重键活在索引里而不是内存里，所以重启后的第一遍同步不会把它算成新消息。
@@ -183,9 +192,77 @@ describe('迁移与重启（spec 2.5-07 的落库一半）', () => {
     const { conversation, store } = await boot(chatScript(pack, null, [messageRow(0), messageRow(1)]));
     await conversation.syncFrom('1001');
     expect(conversation.status().total).toBe(2);
+    // 回到 5 之前就是把两条一起回退（建表 + 时间索引），再升回来两条都重跑一遍。
     store.rollback(CONVERSATION_MIGRATION_VERSION - 1);
     store.upgrade();
-    expect(store.version).toBe(CONVERSATION_MIGRATION_VERSION);
+    expect(store.version).toBe(CONVERSATION_TIME_INDEX_MIGRATION_VERSION);
     expect(conversation.status().total).toBe(0);
+  });
+});
+
+describe('按区间数「回过话的岗位数」（spec 5.8-01 的会话库半边）', () => {
+  /**
+   * 直接往库里落一条消息（不走页面：区间用例要的是可控的 `read_at`，页面给的那一列永远是「现在」）。
+   * @param conversation 会话库句柄
+   * @param jobId 岗位标识
+   * @param at 读到的时刻毫秒，决定这行落在哪个区间里
+   * @param from 发送方角色（默认招聘方；`self` 用来证明它不计进这一级）
+   * @param note 正文与去重键的种子（同岗位多条要不同的去重键，否则并成一行）
+   */
+  function seedMessage(
+    conversation: ConversationStoreService,
+    jobId: string,
+    at: number,
+    from: 'recruiter' | 'self' = 'recruiter',
+    note = '',
+  ): void {
+    conversation.record({
+      platform: 'boss',
+      jobId,
+      from,
+      text: `方便聊聊${note}`,
+      externalId: `r-${jobId}${note}`,
+      at,
+    });
+  }
+
+  it('数的是岗位不是消息：同一岗位两条只算一个，区间含头不含尾', async () => {
+    const { conversation } = await boot(chatScript(pack, null, []));
+    seedMessage(conversation, 'job-a', 2_000);
+    seedMessage(conversation, 'job-a', 2_500, 'recruiter', ' second');
+    seedMessage(conversation, 'job-b', 4_000);
+    // 自己发出去的那条不算「对方回话」，否则这一级会被自己的打招呼灌水。
+    seedMessage(conversation, 'job-c', 3_000, 'self');
+    expect(conversation.repliedJobCount({ fromMs: 0, toMs: 3_000 })).toBe(1);
+    expect(conversation.repliedJobCount({ fromMs: 0, toMs: 4_000 })).toBe(1);
+    expect(conversation.repliedJobCount({ fromMs: 4_000, toMs: 5_000 })).toBe(1);
+    expect(conversation.repliedJobCount({ fromMs: 0, toMs: 5_000 })).toBe(2);
+    expect(conversation.repliedJobCount({ fromMs: 5_000, toMs: 6_000 })).toBe(0);
+  });
+
+  it('口径与 `status().jobs` 一致：同一套行两处数出同一个岗位数', async () => {
+    const { conversation } = await boot(chatScript(pack, null, []));
+    seedMessage(conversation, 'job-a', 2_000);
+    seedMessage(conversation, 'job-a', 2_100, 'recruiter', ' again');
+    seedMessage(conversation, 'job-b', 2_200);
+    const wholeWindow = { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER };
+    // 两处都按 `platform + job_id` 去重、都只认招聘方（§2.5：同一件事不留第二个口径）。
+    expect(conversation.repliedJobCount(wholeWindow)).toBe(conversation.status().jobs);
+    expect(conversation.repliedJobCount(wholeWindow)).toBe(2);
+  });
+
+  it('号段 26 的索引在，区间查询走它而不是全表扫（spec 5.8-05 的万级计时靠它）', async () => {
+    const { store } = await boot(chatScript(pack, null, []));
+    const index = store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='conversation_read_at'")
+      .get() as { name?: string } | undefined;
+    expect(index?.name).toBe('conversation_read_at');
+    const plan = store.db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT COUNT(DISTINCT platform || '|' || job_id) FROM conversation_messages
+         WHERE direction = 'recruiter' AND read_at >= ? AND read_at < ?`,
+      )
+      .all(0, 1) as unknown as { detail?: string }[];
+    expect(plan.some((row) => /conversation_read_at/i.test(row.detail ?? ''))).toBe(true);
   });
 });

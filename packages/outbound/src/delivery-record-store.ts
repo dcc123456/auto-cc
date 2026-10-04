@@ -14,6 +14,7 @@
  * 页面没确认那几路连账本都没有行，这里更不会有的。「已送达」是这行存在的前提，不是它的一个取值。
  */
 import { asApp, Service, type Context } from '@auto-cc/core';
+import type { FunnelRange } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -43,6 +44,27 @@ const deliveryRecordMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS delivery_records');
+  },
+};
+
+/**
+ * 投递时间索引的迁移号段：**27**（表 9、会话表 5、会话时间索引 26；号段全局，撞号在运行期才炸）。
+ *
+ * 理由与 `conversation_read_at` 那条一模一样（plan §7.6.2 决策十七）：`(job_id, ts)` 与 `(snapshot_id)`
+ * 两条既有索引的前缀都不是 `ts`，只按时间范围数这张表就是全表扫——而 spec 5.8-05 要的
+ * "万级记录下的响应时间有记录"必须是有依据的读数，不是"应该挺快"。
+ * 单开一条迁移而不是往号段 9 里加一行：已记「9 已应用」的老库永远不会重跑那支迁移。
+ */
+export const DELIVERY_TIME_INDEX_MIGRATION_VERSION = 27;
+
+/** 见 `DELIVERY_TIME_INDEX_MIGRATION_VERSION`：只建/只删一条索引，不动数据。 */
+export const deliveryTimeIndexMigration = {
+  version: DELIVERY_TIME_INDEX_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_delivery_records_ts ON delivery_records (ts)');
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP INDEX IF EXISTS idx_delivery_records_ts');
   },
 };
 
@@ -154,11 +176,31 @@ export class DeliveryRecordService extends Service {
     return rows.map(toRecord);
   };
 
-  /** 幂等地把本表迁移推进共享迁移列表并升级到最新。 */
+  /**
+   * **半开区间** `[fromMs, toMs)` 内确认送达了几次投递（spec 5.8-01 的"投递数"那一级）。
+   *
+   * 这张表此前连 `count` 都没有（plan §7.6.1 F12）——不是遗漏，是 3.7-02 时没有消费者：额度侧数的是
+   * `usage_ledger`，这张表只管"经过"。看板要的"投出去几条"因此有两种读法：数账本的 `deliver` 行，
+   * 或数这张表。选后者（决策十六）：这张表的一行只在**账本落账之后**才写（见文件头"没有 status 列"那段），
+   * 所以它是"真的递成功了"，而账本行还在的那一路如果记录写入失败会多算一条——分母该是成功数。
+   * 时刻列取 `ts`（与账本行同值），走号段 27 那条 `idx_delivery_records_ts` 索引。
+   * @param range 半开区间毫秒时间戳，`fromMs` 含、`toMs` 不含
+   * @returns 区间内的投递次数；没有递过为 0
+   */
+  count = (range: FunnelRange): number => {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM delivery_records WHERE ts >= ? AND ts < ?')
+      .get(range.fromMs, range.toMs) as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /** 幂等地把本表迁移推进共享迁移列表并升级到最新（表 9、时间索引 27 各守自己的号）。 */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    if (!migrations.some((item) => item.version === DELIVERY_RECORD_MIGRATION_VERSION)) {
-      migrations.push(deliveryRecordMigration);
+    for (const migration of [deliveryRecordMigration, deliveryTimeIndexMigration]) {
+      if (!migrations.some((item) => item.version === migration.version)) {
+        migrations.push(migration);
+      }
     }
     this.store.upgrade();
   }

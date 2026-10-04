@@ -15,7 +15,7 @@
 import { asApp, Service, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
-import type { LedgerDenialView, LedgerRowView, UsageSummaryView } from '@auto-cc/shared';
+import type { FunnelRange, LedgerDenialView, LedgerRowView, UsageSummaryView } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ActionContext } from './types.js';
 
@@ -252,16 +252,33 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 某动作在**半开区间** `[fromMs, toMs)` 内落了几条账（spec 5.8-01 的打招呼数、5.8-04 的区间筛选）。
+   *
+   * 新增的是**查询形状**而不是新事实（plan §7.6.2 决策十六）：数还是由这张表的主人来数，
+   * 看板的聚合口不写 SQL 打别人的表。走 `usage_ledger_action_ts (action, ts)` 那条既有索引（决策十七）。
+   * 区间含头不含尾：调用方按本地时区算日界（`startOfDay`），SQLite 不参与日期换算，
+   * 否则跨时区的机器上"近 7 天"会比用户认知的那一天晚一天（见 `dayKey` 的注释）。
+   * @param action 动作名（`search` / `greet` / `deliver`，账本里存什么名就按什么名数，不认的名为 0 而不是抛）
+   * @param range 半开区间毫秒时间戳，`fromMs` 含、`toMs` 不含
+   * @returns 区间内的行数；空区间或库里没有该动作为 0
+   */
+  countAction = (action: string, range: FunnelRange): number => {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE action = ? AND ts >= ? AND ts < ?')
+      .get(action, range.fromMs, range.toMs) as { n?: number | bigint };
+    return Number(row?.n ?? 0);
+  };
+
+  /**
    * 某动作在 `nowMs` 所在自然日已经用了几次（闸门判定的唯一数据源）。
    * @param action 动作名
    * @param nowMs 判定基准毫秒时间戳
    * @returns 今日已落账的行数
    */
   countToday = (action: string, nowMs: number): number => {
-    const row = this.store.db
-      .prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE action = ? AND ts >= ?')
-      .get(action, startOfDay(nowMs)) as { n?: number | bigint };
-    return Number(row?.n ?? 0);
+    // 上界给到 `MAX_SAFE_INTEGER` 而不是"明天零点"：判定要的是「此刻之前用了几次」，
+    // 让 `countAction` 只留一条 SQL 形状（§2.2），同时不必在此处再算一次日界。
+    return this.countAction(action, { fromMs: startOfDay(nowMs), toMs: Number.MAX_SAFE_INTEGER });
   };
 
   /**

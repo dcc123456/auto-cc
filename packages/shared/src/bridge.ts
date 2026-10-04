@@ -468,6 +468,19 @@ export type OutboundSampleAction = (typeof OUTBOUND_SAMPLE_ACTIONS)[number];
  */
 export type GateDecisionView = { allowed: boolean; remaining: number | null; reason: string | null };
 
+/**
+ * 额度的静态那一面（spec 5.8-03）：模式 + 按动作的日上限表。
+ *
+ * 上限必须由闸门给，不能让看板从「已用 + 剩余」推算：超限时 `remaining` 被夹在 0，
+ * 那条加法在「用光之后」就不再等于上限，界面于是会把「40 用完」显示成「上限 20」。
+ */
+export type GateQuotaView = {
+  /** `unlimited` 时界面该说「当前不设上限」，而不是把 `dailyLimits` 的数当真上限画出来。 */
+  mode: 'unlimited' | 'daily';
+  /** 每动作每天允许的条数（按本地自然日），与闸门判定读的是同一份配置。 */
+  dailyLimits: { search: number; greet: number; deliver: number };
+};
+
 /** 账本里的一行（spec 1.9-04 / 1.9-08）。 */
 export type LedgerRowView = {
   id: number;
@@ -513,6 +526,58 @@ export type UsageSummaryView = {
   recent: LedgerRowView[];
   /** 最近被闸门拦下的几行（spec 5.3-12），按时间倒序；不计进上面任何一项。 */
   recentDenials: LedgerDenialView[];
+};
+
+/** 漏斗的一级（spec 5.8-01）。名字是稳定的机器键，界面上的中文走语言包（§5.5）。 */
+export const FUNNEL_LEVELS = ['search', 'greet', 'reply', 'deliver', 'interview'] as const;
+
+/** 漏斗级别名（顺序即主计划 §5.8 的五级顺序）。 */
+export type FunnelLevel = (typeof FUNNEL_LEVELS)[number];
+
+/**
+ * 漏斗里的一级读数（spec 5.8-01 / 5.8-08）。
+ *
+ * 最重要的一条是 `count` 为 null 时**必须**有 `unavailableReason`，二者必有其一：
+ * 「没有这个数据源」（面试级，plan §7.6.2 决策十五）与「那个服务此刻没挂载」都绝不降级成 0，
+ * 因为 0 在看板上读起来就是「一条都没发生」——那正是 5.8-07 反向验证要拦的假象。
+ */
+export type FunnelLevelView = {
+  level: FunnelLevel;
+  /** 区间内的条数；无数据源或归属服务未挂载时为 null */
+  count: number | null;
+  /** 为什么没有数字（主进程给的原话，与 `EvidenceRefView.unavailableReason` 同口径）；有数字时为 null */
+  unavailableReason: string | null;
+};
+
+/** 看板的区间入参：毫秒时间戳，**含头不含尾**（`fromMs <= ts < toMs`），日界由发起方按本地时区算。 */
+export type FunnelRange = { fromMs: number; toMs: number };
+
+/** 额度消耗那一块（spec 5.8-03）：三条动作各一行「今日已用 / 上限 / 剩余」。 */
+export type FunnelQuotaView = {
+  /** 闸门未挂载时整个额度块为 null（界面上要说出"没挂载"，不画三个 0）。 */
+  mode: 'unlimited' | 'daily' | null;
+  actions: {
+    action: QuotaAction;
+    /** 本地今日已落账的条数；账本未挂载为 null */
+    usedToday: number | null;
+    /** 配置里的日上限（条/本地自然日）；闸门未挂载为 null，`unlimited` 模式下界面不按它判定 */
+    dailyLimit: number | null;
+    /** 闸门给的剩余（`unlimited` 模式恒为 null）；闸门未挂载为 null */
+    remaining: number | null;
+  }[];
+};
+
+/**
+ * 一次漏斗 + 额度的聚合读数（spec 5.8-01 / 03 / 05）。
+ *
+ * `tookMs` 是主进程这次聚合的真实耗时（spec 5.8-05 的计时证据就取这一位，界面原样显示、不自测），
+ * 单测与验收脚本因此能在同一份读数里同时核对数字与代价。
+ */
+export type FunnelView = {
+  range: FunnelRange;
+  levels: FunnelLevelView[];
+  quota: FunnelQuotaView;
+  tookMs: number;
 };
 
 /** 一次外发样例的入参（spec 1.9-03 / 1.9-04 / 2.7-03：动作名是枚举，不是任意字符串）。 */

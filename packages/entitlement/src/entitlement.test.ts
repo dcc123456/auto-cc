@@ -340,6 +340,29 @@ describe('usage.ledger 的读数（spec 1.9-07 / 1.9-08）', () => {
     });
   });
 
+  it('带界计数按含头不含尾数落账条数，`countToday` 就是它在「今天」这一档的取值（spec 5.8-01 的账本半边）', async () => {
+    const { ledger } = await boot();
+    const now = Date.now();
+    const dayStart = startOfDay(now);
+    ledger.record({ action: 'greet', targetId: 'job-yesterday', nowMs: dayStart - 1 });
+    ledger.record({ action: 'greet', targetId: 'job-boundary', nowMs: dayStart });
+    ledger.record({ action: 'greet', targetId: 'job-today', nowMs: now });
+    ledger.record({ action: 'deliver', targetId: 'job-deliver', nowMs: now });
+    // 含头不含尾是可数的：`now` 那一刻落的那条，上界取 `now` 时不在内、取 `now + 1` 时在内；
+    // 下界那条（正好在日界上）则一进一出都算，看板把「今天」与「明天」两段拼起来时不会重一条。
+    expect(ledger.countAction('greet', { fromMs: dayStart, toMs: now })).toBe(1);
+    expect(ledger.countAction('greet', { fromMs: dayStart, toMs: now + 1 })).toBe(2);
+    expect(ledger.countAction('greet', { fromMs: dayStart, toMs: dayStart + 1 })).toBe(1);
+    expect(ledger.countAction('deliver', { fromMs: dayStart, toMs: Number.MAX_SAFE_INTEGER })).toBe(1);
+    expect(ledger.countAction('search', { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER })).toBe(0);
+    // 昨日那条落在日界之外，今日这两条都在内——与 `countToday` 走的是同一个日界、同一条 SQL 形状。
+    expect(ledger.countToday('greet', now)).toBe(2);
+    expect(ledger.countToday('greet', now)).toBe(
+      ledger.countAction('greet', { fromMs: dayStart, toMs: Number.MAX_SAFE_INTEGER }),
+    );
+    expect(ledger.countAction('greet', { fromMs: 0, toMs: dayStart })).toBe(1);
+  });
+
   it('日界与日键都按本机时区，而不是 SQLite 的 UTC date()（决策 3）', () => {
     const midnight = startOfDay(Date.now());
     expect(midnight).toBeLessThanOrEqual(Date.now());

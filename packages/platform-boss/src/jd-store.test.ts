@@ -341,6 +341,55 @@ describe('只读接口（spec 2.3-09 的界面读数）', () => {
   });
 });
 
+/**
+ * 造一条「来源地址唯一 + 抓取时刻指定」的入库草稿。
+ *
+ * 幂等键是来源地址 + 标题（2.3-04），不给各自的地址时几条草稿会并成一行——
+ * 而「区间数」最容易被这种并行的假形状骗过去，所以逐条给出不同的来源地址与标题。
+ * @param jobId 岗位标识（同时作为来源地址与标题的种子）
+ * @param capturedAt 抓取时刻毫秒，决定这条落在哪个区间里
+ * @returns 交给 `upsert` 的草稿
+ */
+function capturedDraft(jobId: string, capturedAt: number): JobDraft {
+  return draft({
+    jobId,
+    title: `岗位 ${jobId}`,
+    sourceUrl: `http://127.0.0.1:10233/boss/detail?jobId=${jobId}`,
+    capturedAt,
+  });
+}
+
+describe('按区间数抓到的岗位条数（spec 5.8-01 的岗位库半边）', () => {
+  it('含头不含尾：下界那一刻算进来，上界那一刻不算', async () => {
+    const { jd } = await boot();
+    jd.upsert(capturedDraft('a', 1_000));
+    jd.upsert(capturedDraft('b', 2_000));
+    jd.upsert(capturedDraft('c', 3_000));
+    expect(jd.countCaptured({ fromMs: 1_000, toMs: 3_000 })).toBe(2);
+    expect(jd.countCaptured({ fromMs: 3_000, toMs: 4_000 })).toBe(1);
+    expect(jd.countCaptured({ fromMs: 0, toMs: 1_000 })).toBe(0);
+    expect(jd.countCaptured({ fromMs: 0, toMs: 4_000 })).toBe(3);
+  });
+
+  it('数的是「抓到的岗位」而不是「抓了几回」：详情重抓不会让同一岗位算两条', async () => {
+    const { jd } = await boot();
+    jd.upsert(draft({ capturedAt: 1_000 }));
+    // 同一来源地址 + 同一标题走更新分支，`captured_at` 永远取新（2.3-04），所以区间看到的是最新那一次。
+    jd.upsert(draft({ capturedAt: 5_000 }));
+    expect(jd.count()).toBe(1);
+    expect(jd.countCaptured({ fromMs: 0, toMs: 5_000 })).toBe(0);
+    expect(jd.countCaptured({ fromMs: 5_000, toMs: 6_000 })).toBe(1);
+  });
+
+  it('区间查询走号段 3 那条 `jobs_captured_at` 索引，不是全表扫（spec 5.8-05 的万级计时靠它）', async () => {
+    const { db } = await boot();
+    const plan = db
+      .prepare('EXPLAIN QUERY PLAN SELECT COUNT(*) FROM jobs WHERE captured_at >= ? AND captured_at < ?')
+      .all(1_000, 2_000) as unknown as { detail?: string }[];
+    expect(plan.some((row) => /jobs_captured_at/i.test(row.detail ?? ''))).toBe(true);
+  });
+});
+
 describe('已回复标记的左连（spec 2.5-08 / 2.5-14）', () => {
   it('只有招聘者方向的消息算「已回复」，自己发出去的不算', async () => {
     const { jd, db } = await boot();

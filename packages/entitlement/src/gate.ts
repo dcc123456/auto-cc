@@ -15,7 +15,7 @@
  * P5 接 SaaS 时替换的是本文件里的判定，调用点一个都不用改。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import { QUOTA_ACTIONS, type GateDecisionView, type QuotaAction } from '@auto-cc/shared';
+import { QUOTA_ACTIONS, type GateDecisionView, type GateQuotaView, type QuotaAction } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ActionContext } from './types.js';
 
@@ -93,6 +93,20 @@ export class EntitlementGateService extends Service {
       reason: `动作 ${action} 今日 ${String(limit)} 次额度已用完`,
     };
   };
+
+  /**
+   * 额度的**静态那一面**（spec 5.8-03）：当前模式与按动作的日上限表。
+   *
+   * 为什么单开一只手而不是让看板去推算：`check()` 的 `remaining` 在超限时被夹到 0（`Math.max`），
+   * 于是「已用 + 剩余」在超限那档就不再等于上限——上限只能从配置这一侧读，
+   * 而配置的唯一主人是本服务（AGENTS.md §2.7：不在界面存第二份额度事实）。
+   * 模式与上限都是**只读**读数：看板的判据（5.8-02）正是它不该触发任何一次改写。
+   * @returns 模式（`unlimited` 时界面该说「不设上限」而不是给一个大数）与三条动作的日上限（条/本地自然日）
+   */
+  quota = (): GateQuotaView => ({
+    mode: this.options.mode,
+    dailyLimits: { ...this.options.dailyLimits },
+  });
 
   /**
    * 问一句「现在能不能做」，不能做就**先把这一次记成被拒流水再抛**。

@@ -136,6 +136,10 @@ export type AppErrorCode =
   // 那类判定读数，是因为这条走的是**写入口**——界面上的处置是「名单一行都不动 + 说明这只手不在开放面上」，
   // 而读数类的拒绝是「这一步不执行」，两件事混在一个码里会让人以为已经加白了只是这次没跑。
   | 'AGENT_POLICY_EXEMPT_UNKNOWN'
+  // 指标看板的区间入参（spec 5.8-04）：`fromMs` / `toMs` 从渲染层经 IPC 进来，形状没有任何保证。
+  // 不复用 `INVALID_ARGUMENT`，是因为这条的界面处置是「区间选择器回到上一档 + 上屏这一句原话」，
+  // 而泛用的入参错通常只有一句提示；让非法区间静默查出 0，会让人把「这段时间没干活」当成读数。
+  | 'FUNNEL_RANGE_INVALID'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

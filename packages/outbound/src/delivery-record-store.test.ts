@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   DELIVERY_RECORD_MIGRATION_VERSION,
+  DELIVERY_TIME_INDEX_MIGRATION_VERSION,
   DeliveryRecordService,
   type DeliveryRecord,
 } from './delivery-record-store.js';
@@ -81,6 +82,43 @@ describe('建表与迁移', () => {
     // 已分配：账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 / resume_docs 7 / resume_snapshots 8。
     const taken = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(taken.has(DELIVERY_RECORD_MIGRATION_VERSION)).toBe(false);
+  });
+
+  it('号段 27 是「时间索引」这一条的新号，不与前二十六撞（spec 5.8-05）', () => {
+    // 已分配：1…8 见上一条，9 是本表，10…25 是后续各包，26 是会话库的时间索引（号段全局，撞号的后果同上）。
+    const allocated = new Set(Array.from({ length: 26 }, (_entry, position) => position + 1));
+    expect(DELIVERY_TIME_INDEX_MIGRATION_VERSION).toBe(27);
+    expect(allocated.has(DELIVERY_TIME_INDEX_MIGRATION_VERSION)).toBe(false);
+  });
+
+  it('号段 27 建的索引在，区间计数走它而不是全表扫（万级记录下的计时证据）', async () => {
+    const { db } = await boot();
+    const index = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_delivery_records_ts'")
+      .get() as { name?: string } | undefined;
+    expect(index?.name).toBe('idx_delivery_records_ts');
+    const plan = db
+      .prepare('EXPLAIN QUERY PLAN SELECT COUNT(*) FROM delivery_records WHERE ts >= ? AND ts < ?')
+      .all(1, 2) as unknown as { detail?: string }[];
+    expect(plan.some((row) => /idx_delivery_records_ts/i.test(row.detail ?? ''))).toBe(true);
+  });
+});
+
+describe('按区间数投递成功条数（spec 5.8-01 的投递记录半边）', () => {
+  it('含头不含尾：下界那一刻算进来，上界那一刻不算', async () => {
+    const { records } = await boot();
+    records.record(record({ ledgerId: 1, ts: 1_000 }));
+    records.record(record({ ledgerId: 2, jobId: 'job-2', ts: 2_000 }));
+    records.record(record({ ledgerId: 3, jobId: 'job-3', ts: 3_000 }));
+    expect(records.count({ fromMs: 1_000, toMs: 3_000 })).toBe(2);
+    expect(records.count({ fromMs: 3_000, toMs: 4_000 })).toBe(1);
+    expect(records.count({ fromMs: 0, toMs: 1_000 })).toBe(0);
+    expect(records.count({ fromMs: 0, toMs: 4_000 })).toBe(3);
+  });
+
+  it('库里没有记录时给 0 而不是报错：看板刚装好、还没递过任何东西就是这一档', async () => {
+    const { records } = await boot();
+    expect(records.count({ fromMs: 0, toMs: Number.MAX_SAFE_INTEGER })).toBe(0);
   });
 });
 

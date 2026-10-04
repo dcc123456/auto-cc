@@ -13,6 +13,7 @@ import {
   AgentToolsService,
   ChatSessionService,
   EvidenceRefService,
+  FunnelQueryService,
 } from '@auto-cc/plugin-agent';
 import {
   BrowserActService,
@@ -191,5 +192,10 @@ export const REGISTRY: Registry = {
   // 而对话、循环、卡片流照旧——「跑过一步并留下引用」与「把引用读回成人看得懂的记录」分属两条。
   // 归属服务一律 `maybeService` 现问（§9 的 2.5 实测：热改配置会重建下游，存第二份路由表会静默变空）。
   'agent-run': EvidenceRefService,
+  // 漏斗与额度的只读聚合口（spec 5.8-01 / 02 / 03 / 04）：看板的唯一数据源，id 与 provide 名同为 `funnel`
+  // （点换横线那条对齐规则），于是白名单里的 `funnel.query` 可机械对上「服务 funnel 的方法 query」。
+  // 它没有 `inject`：归属服务一律现问，摘掉任何一条能力腿都只会让那一级带上「没挂载」那句原话，
+  // 而注掉本行让看板整块读不到数——「有几级数」与「有一个地方把它们拼起来」分属两条。
+  funnel: FunnelQueryService,
   shell: ShellService,
 };
