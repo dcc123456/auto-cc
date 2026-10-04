@@ -1766,6 +1766,71 @@ CDP 10255、全新 `tmp/dist-update-userdata7`、更新源是本机 `scripts/upd
 `tmp/smoke-dist/userdata-<时间戳>` 且**留着不删**（删了每轮都假装首启动，掩盖真实状态）；
 未跟踪的日志与 userdata 全在被忽略的 `tmp/`，入库只有按条目 ID 命名的两份文字证据。
 
+### 7.8 5.10 画布编辑器的落点与切片（2026-10-04 现场读码后定，逐片独立跑门禁、独立提交）
+
+§5.10 那张设计表是 2026-09-30 写的，当时只做了外部取证。开工前按 §6.2 重新对着**当前代码**量一遍，
+量出五处设计与现状不一致的地方——不先把这些裁定掉，写出来的切片会互相打架。
+
+#### 7.8.1 现场读码（F27–F34，均为 2026-10-04 实读）
+
+| #   | 读数（file:line 为证）                                                                                                                                                                                                                                                                                                                                                                              | 对 5.10 的后果                                                                                                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F27 | 节点模型 `WorkflowNodeSpec`（`packages/core/src/events.ts:313-333`）= `id / kind / target / params / effect / retryTimes / requiresHuman`，**没有 outputs、没有边**；`WorkflowPlanView`（`:588-597`）注释直写"线性节点序列"；`workflowPlanSchema`（`packages/workflow/src/plan.ts:42-52`）的 `nodes.max(64)` 注释是"2.4 不做分支/并行"护栏。全仓 grep `edges\|sourceHandle` 在 workflow/core 命中 0 | §5.10.2 的"扩现有 schema 加 outputs"是**从零加概念**，不是接线；指纹口径（`canonicalJson(nodes)`，`plan.ts:65-102`）必须同步改成 nodes+edges                           |
+| F28 | runner 推进是 `for(;;)` 按下标 +1：`advance()`（`packages/workflow/src/index.ts:779-820`）取 `this.plan.nodes[run.stepIndex]`，`succeedNode:941` 写 `nodeIndex: index+1`                                                                                                                                                                                                                            | DAG 化动的就是这一处；`node_index` 定位失效 → 2.4-05/06 必须重验（5.10-13），这一片是全表风险最高的一片                                                                |
+| F29 | `workflow_plans` **已存在**（号段 20，`plan-store.ts:24-48`），列是 `id/name/plan_json/fingerprint/source_run_id/created_at/updated_at`；`:29-30` 明写"没有 revision 列……那是 5.10 的编辑器才需要的"。**号段 1–27 已用满**（27 = `delivery_time_index`），28 起才空                                                                                                                                 | §5.10.6 描述的表形状与实际不符：要加 `revision`/图列只能**另起号段 28 做 ALTER**，改号段 20 的 `up` 不会重跑（§9 的 5.3-a 实测条）                                     |
+| F30 | `skipped` 只在读侧白名单出现（`run-store.ts:136`、`index.ts:1217` 的 `toMirror`），runner **从不写** `WorkflowNodeStatus='skipped'`；`WorkflowStepStatus`（`events.ts:95`）四态里没有它                                                                                                                                                                                                             | 5.10-08"未走分支显示 skipped"缺写点，属 f 片新增；同时 `shell.workflow.stepStatus.*` 语言包要补一个键，否则 §5.6 的双语齐备机检拦下                                    |
+| F31 | 渲染层规范机检：`eslint.config.js:54` 拦 `ImportDeclaration[source.value=/\.css$/]:not([source.value='./globals.css'])`；`scripts/check-renderer-conventions.ts:125-156` 禁止任何 `setInterval … workflow[`，并要求 `workflow.runner.current()` 的调用点**唯一在 `useWorkflowRun.ts`**                                                                                                              | 两件事：①`@xyflow/react/dist/style.css` **必被 eslint 拦死**，§5.10.7 说的"在全局入口引一次"在现行机检下不成立；②画布不得自己轮询或自调 `current()`，只能复用那个 hook |
+| F32 | `@xyflow/react` **未安装**（renderer 运行时依赖只有 shared/i18next/lucide-react/react/react-dom/react-i18next；lock 与 node_modules 零命中），且 `scripts/check-dependency-floor.ts:104` 把 `dagre`/`@dagrejs/*`/`elkjs`/`mermaid`/`gojs`/`cytoscape` 等一律列禁                                                                                                                                    | 装包是 a 片第一步（网络走镜像，见 §9）；**自动布局库不能引**——落点得自己按拓扑分层算，或干脆让用户手摆（见裁定三）                                                     |
+| F33 | agent 侧 16 只工具里**没有任何 `workflow.*`**；现有方向是反的：工具声明带 `AgentToolWorkflowClause`（`events.ts:1143-1150`）供 `agent.sediment` 投影成线性计划（`loop/sediment.ts:120,272`）                                                                                                                                                                                                        | 5.10-18 是"从零新建一只工具"，不是复用；且 `effect` 是声明期字面量（契约机检扫 `agentTool({` 字面量），一只通用运行器怎么定级要先裁定（见裁定五）                      |
+| F34 | 视图切换是 `App.tsx:30` 的 `TopView = 'chat'\|'workflow'\|'diagnostics'`，三视图**常驻挂载、只改 display**；`workflow/progress` 的唯一出口是 `pushProgress`（`index.ts:722-724`），事件白名单在 `shared/src/bridge.ts:2035-2063`                                                                                                                                                                    | 画布若做成第四视图就永远挂着，5.10-11 的"离开画布无残留句柄"没法测。裁定：画布**在选择计划后按需挂载**（见裁定一）                                                     |
+
+#### 7.8.2 五条裁定（开工前定，实现按此执行）
+
+**裁定一 画布挂在 `shell.workflow.canvas.*`，按需挂载而不是加第四视图**：工作流视图里选中一个计划才渲染
+`PlanCanvas`，未选中不挂载。三个理由：F34 的常驻挂载让 5.10-11 的卸载断言无从下手；四视图常驻会把
+xyflow 的 DOM 与 resize observer 挂在每个用户的首启动上（§2.6 不为假想未来付代价）；运行态与编辑态
+按 §5.10.5 是**同一张图**，把它做成 workflow 视图的一块而不是并列的第二真相。
+
+**裁定二 图语义落库走号段 28 的加列迁移，不改号段 20**：`workflow_plans` 加 `revision INTEGER`、
+`graph_json TEXT`（nodes+edges+views 的规范 JSON）、`is_custom INTEGER`；`plan_json` 继续存**执行用的线性视图**
+（DAG 展开为节点数组），这样旧代码路径（`planFromStoredText`、runner）不必同时改两处读法。
+`views` 不进 `plan_json`、不进 `fingerprint`（F27 的指纹口径改为 nodes+edges 后仍然如此）。
+理由：F29 说清了这个表是**有意**不留 revision 的，本片给它加，而不是另建第二张计划表（§2.7 禁止第二套状态存储）。
+
+**裁定三 不引布局库，落点用"拓扑分层 + 同层顺序"确定性摆放**：新节点插入时按 `Kahn` 一层层算 `depth`，
+同层按既有节点数排 `y`；此后位置完全由用户拖动决定，程序不再自动重排。`dagre`/`elkjs` 在 F32 的禁令里，
+而"自动美化"这类按钮属于 §5.10.8 的不做范围。这样 5.10-06（拖动不改指纹）才有干净的判据：位置只可能来自视图层。
+
+**裁定四 样式例外按"精确字面量放行"开，而不是放宽整条规则**：`eslint.config.js` 那条 selector 改成
+只放行 `source.value === '@xyflow/react/dist/style.css'`（引一次，引在 `globals.css` 之后的入口模块里），
+其余 `.css` import 照旧拦。记账写在 spec 5.10-16 的落地记录里：这是第三方库样式的**唯一**例外，
+节点内部一律 Tailwind（§5.1/§5.2）。
+
+**裁定五 新工具 `workflow.run` 的 effect 声明为 `outbound`、`requiresConfirmation: true`**：
+一只通用运行器的副作用取决于图里有什么，但契约机检要求声明期定级（F33），而 §5.3-a 的立场是
+"档位与确认取最保守的一侧"。所以定级取 `outbound`（图里最重的那类动作），确认由 `requiresConfirmation`
+兜住，节点级的三闸门仍在 runner 里逐个判（5.3-d 已有的"缺一即不外发"不因工具入口而绕过，必须有测试兜住）。
+反向效果可接受：agent 跑一条纯读图也要用户确认一次——这比"读图与投递在工具面上看不出区别"好。
+
+#### 7.8.3 切片表（一次一片，片内独立跑四道门禁、独立提交推送）
+
+| 切片   | 内容                                                                                                                                                                                                                                                      | 覆盖条目                           | 方式  |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ----- |
+| 5.10-a | 装 `@xyflow/react`（走镜像，装完立刻跑 `pnpm lint` 确认许可扫描与依赖门槛两道机检把它记进账）+ 按裁定四开样式例外 + 在工作流视图内做**按需挂载**的 `PlanCanvas` 骨架（能平移缩放拖拽、`data-view`/`data-testid` 稳定）+ `workflow.canvas.*` 双语骨架      | 5.10-01、5.10-16 半边              | V+C   |
+| 5.10-b | graph 语义层：`WorkflowNodeSpec.outputs` + `WorkflowEdge` + `WorkflowGraph` 的 zod schema、指纹口径改 nodes+edges、`views` 单独一条通道且不进指纹；内置三条线性计划**原样投影**成图（不重写 `BOSS_BASIC_PLAN`）                                           | 5.10-02、5.10-06                   | U+C   |
+| 5.10-c | `OperatorDescriptor` 单一登记处（kind/category/titleKey/effect/params schema/outputs/icon），调色板、节点渲染、参数表单、执行器分派四处由它派生；表单从 zod 生成（string/number/boolean/enum），必填留空红标拒绝保存                                      | 5.10-03、5.10-04                   | C+V   |
+| 5.10-d | 编辑操作与保存前校验：加节点/连线/改参数的命令栈（撤销重做逐步回退，回退到底与初始图逐字段一致）+ 五条图校验（未知 kind、悬挂边、多源点、有环、外发缺 target），错误文案含节点 id；**反向验证**：连回边被拒且写明"不做循环"的理由                         | 5.10-05、5.10-14、5.10-19          | U+V   |
+| 5.10-e | 持久化与 IPC：号段 28 加列迁移（`revision`/`graph_json`/`is_custom`）、`workflow.graph.*` service 口进 `RENDERER_ALLOWLIST`、存图→重启→读回逐字段一致、未登记方法名结构化拒绝                                                                             | 5.10-10、5.10-17                   | C+U   |
+| 5.10-f | runner DAG 化：`advance()` 从"下标+1"改"按当前节点出口查边"、定位改 `(run_id, node_id)`、分支未走写 `skipped`（含 `stepStatus.*` 补键）、并行扇出与 join（入边全到齐才执行且只执行一次）；**2.4-05/06 在 DAG 下重验并留新证据**（中途 kill → 续跑不重放） | 5.10-07、5.10-08、5.10-09、5.10-13 | U+V   |
+| 5.10-g | 运行态叠画在编辑态同一张图上：状态只来自 `workflow/progress`（复用 `useWorkflowRun`，不加第二个定时器、不自调 `current()`）、运行时画布只读、离开画布无残留句柄、点节点弹出参数/attempts/耗时/证据且与 2.4 同一数据源                                     | 5.10-11、5.10-12                   | C+U+V |
+| 5.10-h | 双入口与许可走查收口：按裁定五登记 `workflow.run` 工具（画布保存的图面板能跑、agent 也能跑，三处共用同一个 `workflow.runner`）+ `@xyflow/react` 许可与 Automa 移植面零复制走查 + 5.10 全表状态位与 P5-01/P5-04 复判                                       | 5.10-15、5.10-16 全表、5.10-18     | C+V   |
+
+**顺序理由**：a→b→c 是"看得见、装得对、有算子"，任何校验与执行都还没有；d/e 才让图"存得下、拦得住"；
+f 是唯一改动 2.4 已验收面的一片，必须放在模型（b）与持久化（e）都稳定之后，且它自己把 5.10-13 的重验
+绑在片内——不允许"先跑通 DAG 再找时间补旧判据"；g 是运行态的界面兑现，h 收双入口与许可两笔账。
+**本机的确定性边界**：5.10-01/02/04/08/09/12/13/14/18 里所有 `V` 半边都是 win 本机截图，
+mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"另两端也验过"。
+
 ## 8. 明确不做
 
 - 不在 agent 层写任何业务动作（抓取/发送/生成），发现缺口回 P2/P4 补。
