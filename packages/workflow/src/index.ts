@@ -55,6 +55,7 @@ export { WorkflowGraphService } from './graph-service.js';
 export {
   advanceGraph,
   initialAdvanceState,
+  topologicalOrder,
   type GraphAdvanceInput,
   type GraphAdvanceView,
   type GraphNodeOutcome,

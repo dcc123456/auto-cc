@@ -6,7 +6,7 @@
  * 而 5.10-09 要的正是它）。runner 接线与截图证据是同一片的后半，落地时另记。
  */
 import { describe, expect, it } from 'vitest';
-import { advanceGraph, initialAdvanceState } from './graph-advance.js';
+import { advanceGraph, initialAdvanceState, topologicalOrder } from './graph-advance.js';
 import { buildGraph } from './graph.js';
 import type { WorkflowGraphView } from '@auto-cc/core';
 
@@ -185,5 +185,59 @@ describe('并行扇出与汇聚（spec 5.10-09：入边全到齐才执行，且�
     }
     expect(caught).toMatchObject({ code: 'INVALID_ARGUMENT', path: 'workflow.advance' });
     expect((caught as Error).message).toMatch(/不在这张图里/);
+  });
+});
+
+describe('拓扑序（runner 的游标只会 +1，图必须先摊成一条合法序列）', () => {
+  it('声明顺序乱序的菱形，排完保证每个上游都在下游之前', () => {
+    const reversed = graphOf(
+      'plan-advance-topo',
+      [{ id: 'join' }, { id: 'right' }, { id: 'a' }, { id: 'left' }],
+      [
+        { id: 'e-l', source: 'a', target: 'left' },
+        { id: 'e-r', source: 'a', target: 'right' },
+        { id: 'e-jl', source: 'left', target: 'join' },
+        { id: 'e-jr', source: 'right', target: 'join' },
+      ],
+    );
+    const order = topologicalOrder(reversed);
+    expect(order).toHaveLength(4);
+    // 判据不是「等于某个数组」而是「每条边都正着走」：这才把「游标 +1 不会跳到还没结算的上游」钉住。
+    for (const edge of reversed.edges) {
+      expect(order.indexOf(edge.source)).toBeLessThan(order.indexOf(edge.target));
+    }
+    expect(order[0]).toBe('a');
+    expect(order[3]).toBe('join');
+  });
+
+  it('线性投影的拓扑序就是计划原本的顺序（5.10-02 在调度层的反向判据）', () => {
+    const chain = graphOf(
+      'plan-advance-topo-linear',
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      [
+        { id: 'e-1', source: 'a', target: 'b' },
+        { id: 'e-2', source: 'b', target: 'c' },
+      ],
+    );
+    expect(topologicalOrder(chain)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('按拓扑序依次结算时， ready 里始终只有当前这一格（游标与图读数不脱节）', () => {
+    const diamond = graphOf(
+      'plan-advance-topo-cursor',
+      [{ id: 'a' }, { id: 'left' }, { id: 'right' }, { id: 'join' }],
+      [
+        { id: 'e-l', source: 'a', target: 'left' },
+        { id: 'e-r', source: 'a', target: 'right' },
+        { id: 'e-jl', source: 'left', target: 'join' },
+        { id: 'e-jr', source: 'right', target: 'join' },
+      ],
+    );
+    let state = initialAdvanceState(diamond);
+    for (const nodeId of topologicalOrder(diamond)) {
+      expect(state.ready).toContain(nodeId);
+      state = advanceGraph(state, diamond, { nodeId, status: 'done' });
+    }
+    expect(state.finished).toBe(true);
   });
 });

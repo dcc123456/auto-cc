@@ -118,6 +118,40 @@ export function advanceGraph(
 }
 
 /**
+ * 一条**拓扑序**（Kahn，同层按 `graph.nodes` 的声明顺序取）。
+ *
+ * 为什么 runner 需要它：`machine.ts` 的 run 读数是「一排格子 + 一个游标」，游标只会 `+1`。
+ * 拓扑序把「按出口查边」的图摊成一条合法的执行序列——任何节点都排在它全部上游之后，
+ * 于是游标每走一格都是「此刻上游已尽数结算」的位置，格子还是那排格子，`5.10-02` 的线性投影
+ * 与图推进因此给出同一个顺序（这就是「不重写即可照旧跑」在调度层的反向判据）。
+ * 分支不取走的格子不靠顺序排除，靠 `advanceGraph` 结算成 `skipped`（spec 5.10-08）。
+ * @param graph 已经过 `buildGraph` 与保存前校验的图（无环由 graph-check 保证，故此处不再防环）
+ * @returns 每个节点 id 恰好出现一次的顺序；声明顺序相同的两张图必然给出同一个数组
+ */
+export function topologicalOrder(graph: WorkflowGraphView): string[] {
+  const declarationPosition = new Map(graph.nodes.map((node, position) => [node.id, position]));
+  const unresolved = new Set(graph.nodes.map((node) => node.id));
+  const waitingOn = new Map<string, string[]>(
+    graph.nodes.map((node) => [
+      node.id,
+      graph.edges.filter((edge) => edge.target === node.id).map((edge) => edge.source),
+    ]),
+  );
+  const order: string[] = [];
+  // 每一轮从「全部上游都已排好」的节点里取声明顺序最靠前的一个；平局按声明顺序保证确定性。
+  for (;;) {
+    const picked = graph.nodes
+      .filter((node) => unresolved.has(node.id))
+      .filter((node) => (waitingOn.get(node.id) ?? []).every((source) => !unresolved.has(source)))
+      .sort((left, right) => (declarationPosition.get(left.id) ?? 0) - (declarationPosition.get(right.id) ?? 0))[0];
+    if (!picked) break;
+    unresolved.delete(picked.id);
+    order.push(picked.id);
+  }
+  return order;
+}
+
+/**
  * 一条入边是否「活着」：上游跑完了，且它当年走的就是这条边写着的那个出口句柄。
  * @param edge 待判的边
  * @param outcomes 上游的结算读数
