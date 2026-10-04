@@ -567,6 +567,94 @@
         "alreadyGone": "这条计划已经不在了：列表按当下重读，没有第二份事实",
         "builtinReadonly": "内置计划只读，要改就先复制一份",
         "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条"
+      },
+      "operator": {
+        "paletteHeading": "算子库",
+        "editHint": "从算子库加入的格子只是画布上的草稿：连线属 5.10-d，存进计划库属 5.10-e。",
+        "paramHeading": "参数",
+        "paramHint": "字段由该算子的参数 schema 生成",
+        "save": "保存参数",
+        "savedHint": "已写回画布上的这一格",
+        "rejectedHint": "必填项没填，已拒绝保存",
+        "rejectRequired": "必填",
+        "effect": {
+          "read": "只读",
+          "local-write": "本地写",
+          "outbound": "外发"
+        },
+        "category": {
+          "discover": "发现",
+          "outbound": "外发",
+          "resume": "简历",
+          "demo": "演示"
+        },
+        "jd": {
+          "capture": {
+            "title": "抓取 JD 入库"
+          },
+          "list": {
+            "title": "读取已入库的 JD"
+          }
+        },
+        "greeting": {
+          "send": {
+            "title": "生成话术并打招呼"
+          }
+        },
+        "resume": {
+          "deliver": {
+            "title": "投递简历"
+          },
+          "customize": {
+            "title": "定制简历（占位）"
+          }
+        },
+        "demo": {
+          "flaky": {
+            "title": "退避重试演示"
+          }
+        }
+      },
+      "param": {
+        "jd": {
+          "capture": {
+            "query": "关键词",
+            "city": "城市",
+            "target": "抓取条数"
+          },
+          "list": {
+            "limit": "读取条数"
+          }
+        },
+        "greeting": {
+          "send": {
+            "platform": "平台",
+            "job": "岗位 id",
+            "title": "岗位名",
+            "company": "公司",
+            "text": "话术原文"
+          }
+        },
+        "resume": {
+          "deliver": {
+            "platform": "平台",
+            "job": "岗位 id",
+            "file": "简历文件路径",
+            "title": "岗位名",
+            "company": "公司",
+            "snapshot": "快照 id"
+          },
+          "customize": {
+            "platform": "平台",
+            "job": "岗位 id"
+          }
+        },
+        "demo": {
+          "flaky": {
+            "url": "计数端点地址",
+            "failTimes": "先失败几次"
+          }
+        }
       }
     },
     "chat": {

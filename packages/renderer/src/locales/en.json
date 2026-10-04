@@ -567,6 +567,94 @@
         "alreadyGone": "That plan is already gone: the list is re-read every time, there is no second copy of the truth",
         "builtinReadonly": "Built-in plans are read-only — duplicate one to change it",
         "empty": "No custom plans yet: finish a run in the chat and press Save as workflow"
+      },
+      "operator": {
+        "paletteHeading": "Operators",
+        "editHint": "Cells added from the library are canvas drafts: edges land in 5.10-d, saving into the plan store in 5.10-e.",
+        "paramHeading": "Parameters",
+        "paramHint": "Fields are generated from this operator's parameter schema",
+        "save": "Save parameters",
+        "savedHint": "Written back to this canvas cell",
+        "rejectedHint": "A required field is empty, save refused",
+        "rejectRequired": "required",
+        "effect": {
+          "read": "read",
+          "local-write": "local write",
+          "outbound": "outbound"
+        },
+        "category": {
+          "discover": "Discover",
+          "outbound": "Outbound",
+          "resume": "Resume",
+          "demo": "Demo"
+        },
+        "jd": {
+          "capture": {
+            "title": "Capture JDs"
+          },
+          "list": {
+            "title": "List stored JDs"
+          }
+        },
+        "greeting": {
+          "send": {
+            "title": "Generate script and greet"
+          }
+        },
+        "resume": {
+          "deliver": {
+            "title": "Deliver resume"
+          },
+          "customize": {
+            "title": "Customize resume (placeholder)"
+          }
+        },
+        "demo": {
+          "flaky": {
+            "title": "Retry backoff demo"
+          }
+        }
+      },
+      "param": {
+        "jd": {
+          "capture": {
+            "query": "Query",
+            "city": "City",
+            "target": "Capture limit"
+          },
+          "list": {
+            "limit": "Rows to read"
+          }
+        },
+        "greeting": {
+          "send": {
+            "platform": "Platform",
+            "job": "Job id",
+            "title": "Job title",
+            "company": "Company",
+            "text": "Greeting text"
+          }
+        },
+        "resume": {
+          "deliver": {
+            "platform": "Platform",
+            "job": "Job id",
+            "file": "Resume path",
+            "title": "Job title",
+            "company": "Company",
+            "snapshot": "Snapshot id"
+          },
+          "customize": {
+            "platform": "Platform",
+            "job": "Job id"
+          }
+        },
+        "demo": {
+          "flaky": {
+            "url": "Counter endpoint",
+            "failTimes": "Failures before success"
+          }
+        }
       }
     },
     "chat": {
