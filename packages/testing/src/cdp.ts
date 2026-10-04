@@ -40,6 +40,34 @@ const RECT_SOURCE = `function (spec) {
 }`;
 
 /**
+ * 元素中心点的视口坐标（CSS 像素）——`locate` 与 `drag` 共用的读数形状。
+ */
+interface ElementRect {
+  tag: string;
+  x: number;
+  y: number;
+  isEnabled: boolean;
+}
+
+/**
+ * 只量位置、**不滚动**的读数口。
+ *
+ * 拖拽必须用它：两端各自 `scrollIntoView` 会先把对方推出画面（第二次滚动改写了第一次的坐标系），
+ * 于是按下点与松开点落在两个不同的滚动状态上，边永远连不上。正确顺序是「滚一次 → 等动画落定 → 两端各读一次」。
+ */
+const RECT_READ_SOURCE = `function (spec) {
+  const el = (${MATCH_SOURCE})(spec);
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  return {
+    tag: el.tagName.toLowerCase(),
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+    isEnabled: !el.disabled,
+  };
+}`;
+
+/**
  * 目标元素当前的位置与尺寸（视口坐标，CSS 像素）。
  *
  * `inner` 是视口高度，用来判断元素是不是已经整个装进了画面。
@@ -48,7 +76,25 @@ const SCROLL_STATE = `function (sel) {
   const target = document.querySelector(sel);
   if (!target) throw new Error('页面上没有匹配 ' + sel + ' 的元素');
   const rect = target.getBoundingClientRect();
-  return { top: Math.round(rect.top), height: Math.round(rect.height), inner: window.innerHeight };
+  // 可见框不是整个窗口：渲染层把内容放在带 overflow-y-auto 的容器里，上方还有固定标题栏。
+  // 只拿 window.innerHeight 判"到位"，会把被容器上沿裁掉的元素当成已经进画面（实测 5.10 校验列表 top=11 却看不见）。
+  let clipTop = 0;
+  let clipBottom = window.innerHeight;
+  let ancestor = target.parentElement;
+  while (ancestor) {
+    if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(ancestor).overflowY)) {
+      const box = ancestor.getBoundingClientRect();
+      clipTop = Math.max(clipTop, box.top);
+      clipBottom = Math.min(clipBottom, box.bottom);
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return {
+    top: Math.round(rect.top),
+    height: Math.round(rect.height),
+    clipTop: Math.round(clipTop),
+    clipBottom: Math.round(clipBottom),
+  };
 }`;
 
 /** 滚动收敛的轮数上限：到不了就报错，不拍一张拍错的东西当证据。 */
@@ -59,6 +105,9 @@ const SCROLL_STEP = 300;
 
 /** 判断「元素已完整进画面」时允许的像素误差（滚动位置带小数，取整后会差 1px）。 */
 const SCROLL_TOLERANCE = 2;
+
+/** 元素到位后离可见框上沿留出的像素间距——贴着上沿容易被标题栏/边框压住。 */
+const SCROLL_EDGE_GAP = 24;
 
 /** 一轮滚动之后留给平滑动画的时间（毫秒）——只等两帧会被动画截胡。 */
 const SCROLL_SETTLE_MS = 100;
@@ -315,11 +364,19 @@ export class CdpSession {
   private async scrollTo(selector: string): Promise<void> {
     let lastTop: number | undefined;
     for (let round = 0; round < SCROLL_MAX_ROUNDS; round += 1) {
-      const { top, height, inner } = await this.callOn<{ top: number; height: number; inner: number }>(SCROLL_STATE, [
-        selector,
-      ]);
-      // 整个元素都在画面里（允许 2px 舍入）、或它比视口还高（上下都溢出）都算到位，再滚只会把内容推过头。
-      if ((top >= 0 && top + height <= inner + SCROLL_TOLERANCE) || (top <= 0 && top + height >= inner)) return;
+      const { top, height, clipTop, clipBottom } = await this.callOn<{
+        top: number;
+        height: number;
+        clipTop: number;
+        clipBottom: number;
+      }>(SCROLL_STATE, [selector]);
+      // 整个元素都在可见框里（允许 2px 舍入）、或它比可见框还高（上下都溢出）都算到位，再滚只会把内容推过头。
+      if (
+        (top >= clipTop && top + height <= clipBottom + SCROLL_TOLERANCE) ||
+        (top <= clipTop && top + height >= clipBottom)
+      ) {
+        return;
+      }
       if (lastTop !== undefined && Math.abs(top - lastTop) < 1) {
         throw new Error(`已经滚到边界但 ${selector} 仍不在视口内，不拍错的东西`);
       }
@@ -329,7 +386,7 @@ export class CdpSession {
         x: 500,
         y: 400,
         deltaX: 0,
-        deltaY: Math.max(-SCROLL_STEP, Math.min(SCROLL_STEP, top - 24)),
+        deltaY: Math.max(-SCROLL_STEP, Math.min(SCROLL_STEP, top - (clipTop + SCROLL_EDGE_GAP))),
       });
       await this.settle();
     }
@@ -359,9 +416,18 @@ export class CdpSession {
     throw new Error(`等待文本超时（${String(timeoutMs)}ms）：${text}`);
   }
 
-  /** 定位元素中心点；找不到返回 null（调用方决定是报错还是换 target）。 */
-  locate(spec: TargetSpec): Promise<{ tag: string; x: number; y: number; isEnabled: boolean } | null> {
-    return this.callOn(RECT_SOURCE, [spec]);
+  /**
+   * 定位元素中心点；找不到返回 null（调用方决定是报错还是换 target）。
+   *
+   * 滚动之后必须复读一次：`scrollIntoView` 在带平滑滚动的容器里是**动画**，同一帧读到的 rect
+   * 还是滚动前的位置（实测同一句柄两次读数差 67px，拖拽因此落在画面外的旧坐标上连不出边）。
+   * 所以先滚、等动画落定、再量第二次，量不到的极端情况退回首帧读数。
+   */
+  async locate(spec: TargetSpec): Promise<ElementRect | null> {
+    const scrolled = await this.callOn<ElementRect>(RECT_SOURCE, [spec]);
+    if (!scrolled) return null;
+    await this.settle();
+    return (await this.callOn<ElementRect>(RECT_READ_SOURCE, [spec])) ?? scrolled;
   }
 
   /**
@@ -397,10 +463,28 @@ export class CdpSession {
     toSpec: TargetSpec,
     steps = 12,
   ): Promise<{ from: { x: number; y: number }; to: { x: number; y: number } }> {
-    const from = await this.locate(fromSpec);
+    // 只滚一次（把起点带到画面中间），等动画落定后两端各量一次：这样两个坐标出自同一份滚动状态，
+    // 才可比。两端各自 scrollIntoView 会让第二次滚动把第一个端点推走——实测正是边连不上的原因。
+    await this.callOn(RECT_SOURCE, [fromSpec]);
+    await this.settle();
+    const from = await this.callOn<ElementRect | null>(RECT_READ_SOURCE, [fromSpec]);
     if (!from) throw new Error(`拖拽起点未找到：${String(fromSpec.selector ?? fromSpec.text)}`);
-    const to = await this.locate(toSpec);
+    const to = await this.callOn<ElementRect | null>(RECT_READ_SOURCE, [toSpec]);
     if (!to) throw new Error(`拖拽终点未找到：${String(toSpec.selector ?? toSpec.text)}`);
+    const viewport = await this.evaluate<{ width: number; height: number }>(
+      '({ width: window.innerWidth, height: window.innerHeight })',
+    );
+    for (const [name, point] of [
+      ['起点', from],
+      ['终点', to],
+    ] as const) {
+      if (point.x < 0 || point.y < 0 || point.x > viewport.width || point.y > viewport.height) {
+        throw new Error(
+          `拖拽${name}不在视口内（${String(Math.round(point.x))},${String(Math.round(point.y))}，视口 ` +
+            `${String(viewport.width)}x${String(viewport.height)}）：拒绝往画面外派发事件，宁可报错也不拖出假证据`,
+        );
+      }
+    }
     const button = 'left' as const;
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y });
     await this.send('Input.dispatchMouseEvent', {

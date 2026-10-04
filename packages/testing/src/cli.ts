@@ -6,6 +6,7 @@
  *   pnpm harness wait --text "主进程状态"
  *   pnpm harness click --selector '[data-row-id="store"] [data-action="stop"]'
  *   pnpm harness type --text "日志级别" --value debug
+ *   pnpm harness drag --from-selector '.node-1 [data-handle-type="source"]' --to-selector '.node-2 [data-handle-type="target"]'
  *   pnpm harness dom --selector '[data-row-id]' --attrs data-row-id
  *   pnpm harness eval --expr "await window.autoCC.kernel.tree()"
  *   pnpm harness eval --expr-file tmp/probe.js   # 多行脚本走文件，见 expression() 的说明
