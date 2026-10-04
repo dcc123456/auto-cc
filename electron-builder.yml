@@ -92,3 +92,14 @@ appImage:
 
 deb:
   artifactName: auto-cc-${version}-linux-${arch}.${ext}
+
+# 更新通道的产物侧前置（spec 5.9-03）。实测：electron-updater 的下载半边会读
+# `resources/app-update.yml` 取 `updaterCacheDirName`（AppUpdater.getOrCreateDownloadHelper →
+# loadUpdateConfig 直接 readFile），而这个文件只有在配置了 publish 时才会生成——没有它，检查能过、
+# 下载必然 ENOENT。所以这里必须声明 publish，哪怕只是占位源。
+# 占位 URL 用保留的 .invalid 顶级域（RFC 2606：永不解析），且运行期从不使用它：
+# 真正抓哪份 latest.yml 由 cordis.yml 的 `update.feedUrl` 经 `setFeedURL` 决定；
+# 而 feedUrl 缺席时更新通道连 updater 单例都不解析，一次网络请求都不会发（5.9-b 的判据）。
+publish:
+  provider: generic
+  url: https://update.auto-cc.invalid/
