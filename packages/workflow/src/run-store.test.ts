@@ -14,7 +14,12 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
 import { WORKFLOW_GRAPH_MIGRATION_VERSION, WORKFLOW_PLAN_MIGRATION_VERSION } from './plan-store.js';
-import { WORKFLOW_MIGRATION_VERSION, WorkflowRunStoreService, type NodeOutcome } from './run-store.js';
+import {
+  WORKFLOW_MIGRATION_VERSION,
+  WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
+  WorkflowRunStoreService,
+  type NodeOutcome,
+} from './run-store.js';
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
@@ -80,11 +85,12 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     ).map((row) => row.name);
     // `workflow_plans` 是 5.4-01 加的那张表，与 run 两张表同一个服务、另一个号段。
     expect(tables).toEqual(['workflow_nodes', 'workflow_plans', 'workflow_runs']);
-    // 5.10-e 起最高号段是 28（同一张计划表上画布那四列），计划本体那一支的 20 排在它下面。
-    expect(store.version).toBe(WORKFLOW_GRAPH_MIGRATION_VERSION);
+    // 5.10-f 起最高号段是 29（节点行的出口句柄列），画布那四列的 28 与计划本体的 20 排在它下面。
+    expect(store.version).toBe(WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION);
     // 号段是全局的（1=usage_ledger、2=chat、3=jobs、…、19=usage_denials），撞号只在运行期炸，所以钉在断言里。
     expect(WORKFLOW_MIGRATION_VERSION).toBe(4);
     expect(WORKFLOW_PLAN_MIGRATION_VERSION).toBe(20);
+    expect(WORKFLOW_GRAPH_MIGRATION_VERSION).toBe(28);
   });
 
   it('幂等键上有唯一索引，孤儿行扫描与聚合各有一条支撑索引', async () => {
@@ -111,12 +117,14 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(store.migrations.filter((item) => item.version === WORKFLOW_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)).toHaveLength(1);
     await runFiber.dispose();
     fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
     expect(store.migrations.filter((item) => item.version === WORKFLOW_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)).toHaveLength(1);
-    expect(store.version).toBe(WORKFLOW_GRAPH_MIGRATION_VERSION);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.version).toBe(WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION);
     // 必须拿**新**实例读写：旧句柄的 ctx 已经 inactive，用它调用会在 cordis 层就失败（实测过一次），
     // 而「重启后照样能用」要证的正是新实例，不是旧壳子。
     const again = asApp(ctx)['workflow.store'];
@@ -130,8 +138,9 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(runs.state('r-rollback')).not.toBeNull();
 
     const back = store.rollback(WORKFLOW_MIGRATION_VERSION - 1);
-    // 倒序回滚：28（画布那四列）→ 20（计划表）→ 4（run 两张表），各支的 down 只管自己那一份。
+    // 倒序回滚：29（节点出口句柄）→ 28（画布那四列）→ 20（计划表）→ 4（run 两张表），各支的 down 只管自己那一份。
     expect(back.reverted).toEqual([
+      WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
       WORKFLOW_GRAPH_MIGRATION_VERSION,
       WORKFLOW_PLAN_MIGRATION_VERSION,
       WORKFLOW_MIGRATION_VERSION,
@@ -148,6 +157,7 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
       WORKFLOW_MIGRATION_VERSION,
       WORKFLOW_PLAN_MIGRATION_VERSION,
       WORKFLOW_GRAPH_MIGRATION_VERSION,
+      WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
     ]);
     expect(runs.state('r-rollback')).toBeNull();
     // 升级回来的不只是 run 表：计划表也必须建得回来，否则老库回滚再升级会得出「能跑、存不了」。
@@ -159,6 +169,19 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
       at: 2_000,
     });
     expect(runs.listPlans().map((plan) => plan.id)).toEqual(['plan-rollback']);
+  });
+
+  it('节点行写下出口句柄后能原样读回，重跑不记时把它清空（号段 29 的读写闭环）', async () => {
+    const { runs } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    runs.openRun('r-output', plan, 1_000);
+    runs.claimNode('r-output', 0, plan.nodes[0]!, 1_000);
+    runs.recordNode('r-output', 0, outcome({ output: 'yes' }));
+    // 续跑重建推进态读的就是这一格（spec 5.10-13）：读不回来就等于把当年走的出口丢了。
+    expect(runs.state('r-output')?.nodes[0]?.outputHandle).toBe('yes');
+    // 第二次尝试没给句柄 → 列必须是 NULL，留着上一轮的 'yes' 会把「换了出口」读成「没变」。
+    runs.recordNode('r-output', 0, outcome({ status: 'failed', error: 'boom' }));
+    expect(runs.state('r-output')?.nodes[0]?.outputHandle).toBeNull();
   });
 });
 

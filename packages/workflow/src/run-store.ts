@@ -110,6 +110,30 @@ const workflowMigration = {
   },
 };
 
+/**
+ * 节点出口句柄列的迁移号段：**29**（28 是计划表上画布那四列，27 是投递时间索引）。
+ *
+ * 必须**独立成一支**而不是并进 4 的 `up`：老库已经记过「4 已应用」，并进去就永远不会跑
+ * （AGENTS.md §9 的 5.3-a 实测条）。
+ *
+ * 为什么非落库不可（plan §7.8 裁定 2）：5.10-13 要在 kill 之后接着跑同一张 DAG，而分支节点
+ * 「当年走的是哪条出口」只存在于它跑完的那一刻。不存这一列，续跑就只能猜 `default`，
+ * 而猜错的表现不是报错——未走的那一支会被当成可执行，半张图被跑成另一张图。
+ */
+export const WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION = 29;
+
+/** 给 `workflow_nodes` 加「实际走过的出口句柄」一列（可空：线性节点与汇聚/起点节点永远没有）。 */
+export const workflowNodeOutputMigration = {
+  version: WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE workflow_nodes ADD COLUMN output_handle TEXT');
+  },
+  down: (db: DatabaseSync) => {
+    // 只丢自己那一列：run 与节点的表属于 4，回滚它得等 29 先退掉。
+    db.exec('ALTER TABLE workflow_nodes DROP COLUMN output_handle');
+  },
+};
+
 /** `workflow_runs` 一行的原始读数（列名与视图字段不同，转换收在 `toRunRow` 一侧）。 */
 type RunRow = {
   run_id: string;
@@ -139,6 +163,8 @@ type NodeRow = {
   side_effect: string | null;
   evidence_ref: string | null;
   error: string | null;
+  /** 分支节点实际走过的出口句柄；未走 / 非分支 / 旧行未升级为 null。 */
+  output_handle: string | null;
 };
 
 /** 节点状态的合法集合；库里躺着别的值时一律按 `pending` 读出来（宁可重跑也不当作已完成）。 */
@@ -171,6 +197,11 @@ export type NodeOutcome = {
   evidenceRef: string | null;
   /** 外部副作用位：null = 无副作用，`started` = 已开始未观察到完成，`done` = 已完成。 */
   sideEffect: null | 'started' | 'done';
+  /**
+   * 实际走过的出口句柄（分支节点用，值取自 `WorkflowNodeSpec.outputs`）。
+   * 省略即「这一次没有句柄」——写库时把列清成 NULL，绝不留上一次的旧值（5.10-13 的续跑读数必须是这一次的）。
+   */
+  output?: string | null;
 };
 
 /** 一次 run 的结束/推进读数（同样是完整对象，`updateRun` 每次写全）。 */
@@ -241,6 +272,10 @@ export class WorkflowRunStoreService extends Service {
     // 老库已经记过「20 已应用」，并进去就永远不会跑（AGENTS.md §9 的 5.3-a 实测条）。
     if (!migrations.some((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)) {
       migrations.push(workflowGraphMigration);
+    }
+    // 号段 29 是节点行的出口句柄列（5.10-f），同理独立成一支；它加在 4 的表上，所以排在 28 之后。
+    if (!migrations.some((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)) {
+      migrations.push(workflowNodeOutputMigration);
     }
     this.store.upgrade();
   }
@@ -347,7 +382,7 @@ export class WorkflowRunStoreService extends Service {
     this.db
       .prepare(
         `UPDATE workflow_nodes SET status = ?, attempts = ?, started_at = ?, finished_at = ?, duration_ms = ?,
-           error = ?, evidence_ref = ?, side_effect = ?
+           error = ?, evidence_ref = ?, side_effect = ?, output_handle = ?
          WHERE run_id = ? AND node_index = ?`,
       )
       .run(
@@ -359,6 +394,7 @@ export class WorkflowRunStoreService extends Service {
         outcome.error,
         outcome.evidenceRef,
         outcome.sideEffect,
+        outcome.output ?? null,
         runId,
         index,
       );
@@ -615,7 +651,8 @@ export class WorkflowRunStoreService extends Service {
     this.ctx.logger.info(
       `run 存储就绪：workflow_runs / workflow_nodes（schema v${String(WORKFLOW_MIGRATION_VERSION)}）` +
         ` · 自定义计划 workflow_plans（schema v${String(WORKFLOW_PLAN_MIGRATION_VERSION)}）` +
-        ` · 画布图列 graph_json/views_json/revision/is_custom（schema v${String(WORKFLOW_GRAPH_MIGRATION_VERSION)}）`,
+        ` · 画布图列 graph_json/views_json/revision/is_custom（schema v${String(WORKFLOW_GRAPH_MIGRATION_VERSION)}）` +
+        ` · 节点出口句柄 output_handle（schema v${String(WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)}）`,
     );
   }
 }
@@ -652,6 +689,7 @@ function toNodeView(row: NodeRow | undefined, spec: WorkflowNodeSpec, index: num
       error: null,
       evidenceRef: null,
       sideEffect: null,
+      outputHandle: null,
     };
   }
   return {
@@ -668,6 +706,8 @@ function toNodeView(row: NodeRow | undefined, spec: WorkflowNodeSpec, index: num
     evidenceRef: row.evidence_ref,
     // 库里可能是坏值：只认这三个，其余按 null 读，界面前不会出现「既没开始又开始过」的第三种说法。
     sideEffect: row.side_effect === 'started' || row.side_effect === 'done' ? row.side_effect : null,
+    // 列是 29 加上的，老库里没有它的行读出来是 undefined——统一按 null，续跑侧据此拒绝猜出口。
+    outputHandle: row.output_handle ?? null,
   };
 }
 

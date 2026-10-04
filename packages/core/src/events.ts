@@ -714,6 +714,12 @@ export type WorkflowNodeRunView = {
    * `started` 是「拒绝自动重放」的唯一依据（plan §11.3 第 5 条）——它意味着可能已经发出去了。
    */
   sideEffect: null | 'started' | 'done';
+  /**
+   * 分支节点**实际走过**的出口句柄（对应边上写的 `sourceHandle`）；其余节点为 null。
+   * 它是续跑重建 DAG 推进态的唯一依据（spec 5.10-13）：缺了它就只能猜 `default`，
+   * 而未走的那一支会被判成可执行，等于把半张图跑成另一张图。
+   */
+  outputHandle: string | null;
 };
 
 /**
