@@ -38,6 +38,13 @@ extraResources:
     to: cordis.yml
   - from: resources/icon.png
     to: icon.png
+  # 许可记账随包分发（spec 5.9-04）：THIRD-PARTY-NOTICES.txt 由 vendor-runtime-deps.ts 在
+  # app:build 阶段生成到 build/app 旁边；LICENSES.md 是仓库里的记账文档本体。
+  # 放在 Resources/ 而不是 asar 里，用户在安装目录里能直接看到，不必解包。
+  - from: build/app/THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
+  - from: LICENSES.md
+    to: LICENSES.md
 
 win:
   icon: resources/icon.png

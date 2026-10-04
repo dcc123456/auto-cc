@@ -7,7 +7,7 @@
  * 为什么清单要从 package.json 递归解析而不是手填：漏一个传递依赖就是「装机后才炸」，
  * 构建期看不出来；这里唯一允许的人工输入是 `RUNTIME_EXTERNAL_ROOTS`（哪几个包要外置）。
  */
-import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -17,6 +17,9 @@ const declaringPackage = path.join(repoRoot, 'packages', 'resume-kb', 'package.j
 
 /** 需要外置的包名（esbuild external 与搬运清单的共同真相源）。 */
 export const RUNTIME_EXTERNAL_ROOTS = ['mammoth', 'pdfjs-dist'] as const;
+
+/** 搬运层随包落地的第三方许可全文文件名（spec 5.9-04 的 NOTICE 半边；写在 `node_modules` 根旁边）。 */
+export const THIRD_PARTY_NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';
 
 /**
  * pdf.js 的包体里与「Node 侧抽文本」无关的大目录：`web/` 是浏览器阅读器 UI，`types/` 是 .d.ts。
@@ -36,6 +39,9 @@ export interface VendoredDep {
 
 interface PackageManifest {
   readonly version: string;
+  readonly license?: string | { readonly type?: string; readonly url?: string };
+  readonly author?: string | { readonly name?: string; readonly email?: string };
+  readonly repository?: string | { readonly type?: string; readonly url?: string };
   readonly dependencies?: Record<string, string>;
   readonly optionalDependencies?: Record<string, string>;
 }
@@ -74,6 +80,73 @@ export function resolveRuntimeDeps(): VendoredDep[] {
 }
 
 /**
+ * 在一个包目录里找许可全文文件（只看顶层，不递归——发布物约定许可在包根）。
+ * 判据形状 `licence/license/copying/authors` 覆盖 npm 生态里出现过的四种写法。
+ * @param dir 包目录（`resolveRuntimeDeps()` 给的 `dir`，或搬运后的目标目录）
+ * @returns 文件名；没有许可全文时返回 null（由调用方决定是失败还是记账）
+ */
+export function findLicenseFileIn(dir: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  return entries.find((entry) => /^(licen[cs]e|copying|authors)\b/i.test(entry)) ?? null;
+}
+
+/** 把 manifest 里三种合法形状（字符串 / `{type,url}` / 对象作者）归一成一行的展示串。 */
+function oneLine(value: PackageManifest[keyof PackageManifest] | undefined): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name : '';
+    const type = typeof record.type === 'string' ? record.type : '';
+    const url = typeof record.url === 'string' ? record.url : '';
+    return [name, type, url].filter(Boolean).join(' ') || JSON.stringify(record);
+  }
+  return '';
+}
+
+/**
+ * 生成搬运层的第三方许可全文汇总（spec 5.9-04：随包分发要把条文带上）。
+ *
+ * 为什么单独出一份而不是只靠每个包目录里的 LICENSE：`isarray@1.0.0` 这类老包的 **npm 发布物里根本没有
+ * 许可全文**（实测：目录内只有 Makefile/README/component.json/index.js/package.json/test.js），
+ * 而它的 MIT 义务是"分发时要带版权声明"。这里的做法是**从包自己的 manifest 元数据登记**
+ * （license 字段、author、repository），并在缺全文的那一条写明"缺的是上游发布物，不是我们漏拷"——
+ * 不去从网上补抄一份条文：那是凭记忆编造许可文本，风险比登记缺口大（§8 的诚实纪律）。
+ * @param nodeModulesDir 搬运目标根（`build/app/node_modules`）
+ * @param deps 搬运清单
+ * @returns 写出的文件绝对路径
+ */
+export function emitThirdPartyNotices(nodeModulesDir: string, deps: readonly VendoredDep[]): string {
+  const blocks = deps.map((dep) => {
+    const manifest = readManifest(dep.dir);
+    const licenseFile = findLicenseFileIn(dep.dir);
+    const header =
+      `[${dep.name}] ${dep.version}\n  license    : ${oneLine(manifest.license) || '(未在 manifest 中声明)'}\n` +
+      `  author     : ${oneLine(manifest.author) || '(未知)'}\n` +
+      `  repository : ${oneLine(manifest.repository) || '(未知)'}\n`;
+    if (licenseFile === null) {
+      return (
+        `${header}  notice     : 上游发布物内无许可全文（实测包目录里没有 LICENSE/COPYING 类文件）。` +
+        '本条按 manifest 的 license 字段登记；已在 LICENSES.md 的 copyleft/缺失全文处置表中记录。\n'
+      );
+    }
+    const text = readFileSync(path.join(dep.dir, licenseFile), 'utf8').trim();
+    return `${header}  notice     : 以下转录包内 ${licenseFile}\n\n${text}\n`;
+  });
+  const content =
+    `搬运层（esbuild 外置、随 app 一起分发的运行期依赖）的第三方许可汇总。\n` +
+    `由 scripts/vendor-runtime-deps.ts 在构建时生成，共 ${String(deps.length)} 个包。\n` +
+    `人工记账与全量生产依赖清单见仓库根的 LICENSES.md。\n\n${blocks.join('\n')}\n`;
+  const target = path.join(path.dirname(nodeModulesDir), THIRD_PARTY_NOTICES_FILE);
+  writeFileSync(target, content, 'utf8');
+  return target;
+}
+
+/**
  * 把外置依赖搬进某个 `node_modules` 根目录，供 `main.cjs` 运行期解析。
  * 目标目录每次先清空对应包，保证重复构建不残留旧版本文件。
  * @param nodeModulesDir 形如 `build/app/node_modules` 的目标根
@@ -93,6 +166,7 @@ export function vendorRuntimeDeps(nodeModulesDir: string, deps: readonly Vendore
         !(path.relative(dir, src).split(path.sep).length === 1 && pruned.has(path.basename(src))),
     });
   }
+  emitThirdPartyNotices(nodeModulesDir, deps);
   return deps;
 }
 
