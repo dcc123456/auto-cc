@@ -1961,8 +1961,19 @@ runner 的**第三个入口**——工具里只有「起一次 run + 等到停�
 `pnpm format:check` EXIT=0；`pnpm lint` EXIT=1 —— 只剩 `LICENSES.md` 生成节的 per-platform 漂移那一条既有待裁定项，
 渲染层规范脚本（2 个语言包、53 个源文件）与 i18n 双语对齐、工具契约（17 只 × 2 份）都在同一次运行里报通过。
 
-**下一窗的一条命令**：g 片已落 → `5.10-16 全表`（逐条读画布每一句文案的键与两份翻译）到了对它的时候，
-它不需要任何新能力、纯离线可判；多出口演示算子那条裁定仍未回答（连同 §9 平台口径、`LICENSES.md` 漂移两件）。
+**顺带结算的 5.10-16 全表**（同一窗做完，因为它不需要任何新能力、纯离线可判）：画布的文案有两类，
+第 3 条机检只看得见代码里写死的 `t('...')`，而 `workflow.operator.<kind>.title` / `workflow.param.<kind>.<field>` /
+`category`/`effect` / `workflow.canvas.issue.<code>` / `workflow.step.<nodeId>` 这一整类是**从描述表与计划目录现算出来的键**——
+加一只算子、一条校验码、一格节点都会静默漏一条。新增 `check-renderer-conventions.ts` 第 9 条把这两份事实源
+现算成 47 条派生键逐包查非空，走查当场抓到 `workflow.step.deliver-1001/1002` 两份语言包都没有
+（选 `boss-deliver` 时那两格原样画出 id），已补齐；反向验证（改名成 `deliver-1001-x` → 脚本按派生键缺漏失败）已跑。
+判据与读数记在 spec 的 5.10-16 行。
+
+**下一窗的一条命令**：g 片与 5.10-16 都已落，剩下的 V 半边（5.10-07/08/09/12 四读数/13/18）全部卡在同一条裁定上——
+**是否登记一只多出口 / 纯 fixture 的演示算子**（要 `core/src/operators.ts` 与 `packages/workflow/src/executors.ts` 各加一处声明，
+属 §6 的新能力，得先在 plan 里补证据小节才动代码）；另一条可替代路径是把画布的写入口（`workflow.graph.save` + 新建计划）接上。
+另有两件既有的裁定仍未回答：AGENTS.md §9 的「本机 Windows」已过期（本机是 macOS arm64，V/BLOCKED 的平台口径要重定），
+`LICENSES.md` 生成节的 per-platform 漂移怎么摆平（本窗 `pnpm lint` 仍只剩这一条红）。
 
 - **切片状态**：a 已完成（5.10-01 `[x]` win、5.10-16 打的是"当前画布文案与样式"这一半，后续片要复跑）。
   四道门禁 `0/0/0/0`，证据在 `docs/acceptance/5.10/5.10-01-*.{png,txt}`。

@@ -3,7 +3,7 @@
  *
  * eslint 负责逐文件拦截（内联 style、自制 svg、裸中文、非入口样式），
  * 这个脚本负责跨文件一致性：样式文件白名单、语言包 key 对齐、代码里用到的 i18n key 是否真的存在
- * （含占位符实参齐不齐）、内核视图宽度两侧是否同源、工作流进度的状态源与消费者。
+ * （含占位符实参齐不齐）、**描述表点名的派生文案**是否每份语言包都有、内核视图宽度两侧是否同源、工作流进度的状态源与消费者。
  * 编号与各条判据一一对应，新增一条只在文件末尾追加一节，别把已有的类别计数写进注释（它会过期）。
  * 任一不符即 exit 1，因此挂在 `pnpm lint` 上是硬门禁而不是提示。
  */
@@ -11,6 +11,9 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { WORKFLOW_GRAPH_CHECK_CODES } from '../packages/core/src/graph-check.js';
+import { WORKFLOW_OPERATORS, operatorParamFields } from '../packages/core/src/operators.js';
+import { WORKFLOW_PLANS } from '../packages/workflow/src/plan.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const rendererRoot = path.join(repoRoot, 'packages', 'renderer', 'src');
@@ -194,9 +197,38 @@ for (const file of automaFiles) {
   }
 }
 
+// 9) 描述表点名的派生文案必须在**每份**语言包里都有（spec 5.10-16 的全表半边）
+//    第 3 条只能扫代码里写死的 `t('...')`，而画布有一整类文案是现算出来的键：
+//    `workflow.operator.<kind>.title`、`workflow.param.<kind>.<field>`、`workflow.canvas.issue.<code>`、
+//    `workflow.step.<nodeId>`——它们的字面量不在代码里，加一只算子 / 一条校验码 / 一格节点就静默漏一条，
+//    表现是界面上原样画出 `deliver-1001` 这种 id（5.10-16 走查时正是这么抓到的）。
+//    判据按描述表与计划目录这两份事实源现算，所以它不需要维护第二份清单（§2.5）。
+const derivedKeys = new Set<string>();
+for (const descriptor of WORKFLOW_OPERATORS) {
+  derivedKeys.add(descriptor.titleKey);
+  derivedKeys.add(`workflow.operator.category.${descriptor.category}`);
+  derivedKeys.add(`workflow.operator.effect.${descriptor.effect}`);
+  for (const field of operatorParamFields(descriptor.params))
+    derivedKeys.add(`workflow.param.${descriptor.kind}.${field.name}`);
+}
+for (const code of WORKFLOW_GRAPH_CHECK_CODES) derivedKeys.add(`workflow.canvas.issue.${code}`);
+for (const plan of Object.values(WORKFLOW_PLANS)) {
+  for (const node of plan.nodes) derivedKeys.add(`workflow.step.${node.id}`);
+}
+for (const name of localeNames) {
+  // 语言包的根就是 i18next 的默认命名空间（`i18n.ts` 的 `ns: ['shell']`），代码里的键不带这一层。
+  const flat = new Set(localeKeys.get(name) ?? []);
+  const missing = [...derivedKeys].filter((key) => !flat.has(key) && !flat.has(`shell.${key}`));
+  if (missing.length) {
+    failures.push(`${name} 缺派生文案 ${String(missing.length)} 条：${missing.sort().join(', ')}`);
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.log(`✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件）`);
+console.log(
+  `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备）`,
+);

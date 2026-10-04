@@ -519,6 +519,8 @@
         "jd-capture": "抓取 JD 入库",
         "jd-list": "读取已入库的 JD",
         "flaky": "退避重试演示",
+        "deliver-1001": "投递岗位 1001",
+        "deliver-1002": "投递岗位 1002",
         "e2e-capture": "搜索并抓取 JD 入库",
         "e2e-list": "读取已入库的 JD",
         "e2e-greet": "生成话术并打招呼",

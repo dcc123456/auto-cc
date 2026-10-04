@@ -519,6 +519,8 @@
         "jd-capture": "Capture JDs into the store",
         "jd-list": "Read stored JDs",
         "flaky": "Retry backoff demo",
+        "deliver-1001": "Deliver to job 1001",
+        "deliver-1002": "Deliver to job 1002",
         "e2e-capture": "Search and capture JDs",
         "e2e-list": "Read stored JDs",
         "e2e-greet": "Generate script and greet",
