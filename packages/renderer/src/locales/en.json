@@ -1,7 +1,7 @@
 {
   "shell": {
     "title": "auto-cc desktop workspace",
-    "subtitle": "Plan 1 · core framework",
+    "subtitle": "Search jobs · draft messages · tailor the resume per job · deliver once you confirm",
     "language": {
       "switchTo": "中文"
     },
@@ -230,6 +230,39 @@
       "deny": "Not yet",
       "statusGranted": "{{platform}} automation risk acknowledged ({{time}})",
       "statusUnsigned": "{{platform}} automation risk not acknowledged; actions wait for your confirmation",
+      "never": "no timestamp"
+    },
+    "privacy": {
+      "heading": "Privacy statement and terms of use",
+      "entry": "Privacy & terms",
+      "intro": "Read this on first launch: where your data lives, when it leaves this machine, and under what conditions a resume actually gets sent.",
+      "keyPromise": "The promise: your resume is never sent to an employer without your confirmation.",
+      "keyPromiseDetail": "The default autonomy level is the most conservative one, and no outbound action runs on its own. Making it automatic takes two explicit choices from you - raise the level to automatic, and add that action to the auto-confirm list. The program cannot raise its own level, and the platform risk signature plus the daily quota gate still stand in front.",
+      "dataTitle": "Where your data lives",
+      "dataLocal": "Resume text, knowledge base, job records, chat history, logs and screenshot evidence are all written into the app data directory on this machine (one database file plus an evidence folder). We have no cloud account and no feature that syncs your data to any server.",
+      "dataDir": "Location: %APPDATA%\\auto-cc on Windows, ~/Library/Application Support/auto-cc on macOS, ~/.config/auto-cc on Linux.",
+      "dataKeptAfterUninstall": "Uninstalling keeps that directory - your login state and knowledge base are your assets. To remove everything, quit the app and delete it yourself.",
+      "noTelemetry": "No telemetry, no analytics, no usage tracking, no crash reporting.",
+      "netTitle": "When it uses the network",
+      "netAutomation": "Only after you enable automation for a platform does the built-in browser visit it, carrying your own login: searching jobs, reading details, greeting, delivering all happen inside that browser, and requests go to the platform itself.",
+      "netLlm": "AI features (drafting messages, tailoring text to a job, semantic search) talk to the provider you configure yourself: requests happen only once you fill in the base URL and key, otherwise the feature just reports what is missing. When they do run they send the passage relevant to the current job, not the whole library.",
+      "netNoBackground": "Beyond those two, there is no background network traffic: the UI, fonts and offline assets ship inside the app, so the main screen opens without any connection.",
+      "resumeTitle": "When a resume actually goes out",
+      "resumeNeverAuto": "That promise is a check in the code, not marketing: one outbound action must pass the autonomy level, the auto-confirm list, the quota gate and the platform risk signature, and it stops if any one of them is missing.",
+      "resumeApprovalChain": "At the level that requires confirmation you get an approval card naming the job and the exact attachment. Denying it, or letting it time out, both end as \"not delivered\".",
+      "resumePauseAnytime": "You can abort or take over at any point: the yield checkpoint sits before the send, so a paused step never hands the resume over.",
+      "riskTitle": "Platform risk and account responsibility",
+      "riskPlatform": "Script-driven searching, greeting and delivering can be flagged as abnormal behaviour by a recruiting platform. The consequences (warnings, rate limits, account bans) fall on the account being operated.",
+      "riskConsentCard": "That is why every platform shows a separate risk confirmation card before its first action. That card answers \"should this account be used\"; this screen answers \"where is the data\" - both matter.",
+      "riskNoEvasion": "This app does not solve captchas or work around platform defences: when either appears it stops and hands control back to you. Throttling and daily caps are mandatory, not optional.",
+      "termsTitle": "Terms of use, in short",
+      "termsSelfUse": "This is a tool for your own job search: operate only accounts and material you have the right to use, and do not use it to mass-spam employers.",
+      "termsNoWarranty": "The software is provided as is, with no guarantee of interviews or offers. You own the truthfulness of your resume - the app only assists with fact checking and will not invent experience for you.",
+      "termsUpdateChoice": "Updates are your decision: the app does not download an installer for you in the background.",
+      "licensesPointer": "Third-party licences are listed per package in LICENSES.md and THIRD-PARTY-NOTICES.txt inside the install directory, distributed with the app.",
+      "acknowledge": "I have read and agree, enter the workspace",
+      "close": "Back to the workspace",
+      "acknowledgedRow": "This machine acknowledged this statement at {{time}}",
       "never": "no timestamp"
     },
     "deliver": {

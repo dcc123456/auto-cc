@@ -1,4 +1,4 @@
-import { Languages } from 'lucide-react';
+import { Languages, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
@@ -11,6 +11,7 @@ import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
+import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
 import { ResumePanel } from './ResumePanel';
 import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
@@ -31,6 +32,8 @@ type TopView = 'chat' | 'workflow' | 'diagnostics';
 export function App() {
   const { t, i18n } = useTranslation();
   const [view, setView] = useState<TopView>('chat');
+  // 5.9-06：首屏隐私声明。首启动由 localStorage 判定，之后靠标题栏那颗按钮重开，两处共用同一份状态。
+  const privacy = usePrivacyNotice();
 
   /**
    * 视图按钮的样式，按层级分两档。
@@ -87,6 +90,16 @@ export function App() {
             <Languages size={14} />
             {t('language.switchTo')}
           </button>
+          {/* 5.9-06 的重入口：首屏那一层收起后必须还能一眼找回，否则"读过就再也看不见"是合规上的空洞 */}
+          <button
+            type="button"
+            data-action="privacy-open"
+            onClick={privacy.open}
+            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            <ShieldCheck size={14} />
+            {t('privacy.entry')}
+          </button>
         </div>
       </header>
 
@@ -133,6 +146,10 @@ export function App() {
           <p className="mt-6 text-xs text-slate-600">{KERNEL_VIEW_WIDTH_RATIO * 100}%</p>
         </aside>
       </main>
+
+      {/* 5.9-06：首屏隐私声明是盖在工作台上的覆盖层（fixed），首启动不表态就进不去；
+          收起后由标题栏那颗「隐私与条款」按钮随时重开，重开那一次不再算新的表态。 */}
+      {privacy.visible && <PrivacyNotice isReopened={privacy.isReopened} onClose={privacy.close} />}
     </div>
   );
 }
