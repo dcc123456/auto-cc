@@ -471,6 +471,12 @@
       "nowStatus": "This action returned: {{status}}",
       "live": "Latest progress: {{message}}",
       "duration": "{{ms}} ms",
+      "canvas": {
+        "heading": "Operator graph",
+        "hint": "Node positions are placement only and never change plan semantics; pan and zoom with the canvas controls.",
+        "open": "Operator graph",
+        "close": "Hide operator graph"
+      },
       "status": {
         "idle": "not started",
         "running": "running",

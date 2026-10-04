@@ -471,6 +471,12 @@
       "nowStatus": "本次动作返回：{{status}}",
       "live": "最近播报：{{message}}",
       "duration": "{{ms}} 毫秒",
+      "canvas": {
+        "heading": "算子图",
+        "hint": "节点位置只是摆放，不改动计划语义；用画布控件平移缩放。",
+        "open": "算子图",
+        "close": "收起算子图"
+      },
       "status": {
         "idle": "未开始",
         "running": "运行中",

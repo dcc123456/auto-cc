@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   Ban,
+  Network,
   Pause,
   Play,
   RefreshCw,
@@ -11,22 +12,22 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { BridgeReply, WorkflowRunView, WorkflowStepView } from '@auto-cc/shared';
+import type { BridgeReply, WorkflowRunView } from '@auto-cc/shared';
 import { ConsentCard, ConsentStatusRow } from './ConsentCard';
 import { ScheduleSection } from './SchedulePanel';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
 import { NodeEvidenceSection } from './WorkflowEvidence';
+import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowPlansSection } from './WorkflowPlans';
-
-/** 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。 */
-const STEP_STATUS_STYLE: Record<WorkflowStepView['status'], string> = {
-  pending: 'border-slate-800 text-slate-500',
-  running: 'border-sky-800 bg-sky-950/40 text-sky-200',
-  done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
-  failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
-};
+/**
+ * 步骤行的配色按状态取，状态本身一律来自主进程返回的 `run.steps`（界面不自己判进度）。
+ *
+ * 5.10-a 起这份映射与画布节点卡片共用同一个模块：同一个 run 在步骤行是蓝色、在画布上却是别的颜色，
+ * 用户就没法把两处对上（AGENTS.md §2.5「功能重复的实现合并到一个入口」）。
+ */
+import { STEP_STATUS_STYLE } from './stepStatusStyle';
 
 /**
  * 「待接管」叠加态的描边。
@@ -66,6 +67,14 @@ export function WorkflowPanel() {
   const bridge = window.autoCC;
   /** 下拉里挑中的计划；undefined = 不改动 runner 当前装载的那份（1.10 起的默认路径）。 */
   const [selectedPlanId, setSelectedPlanId] = useState<string>();
+  /**
+   * 算子图是否挂载（5.10-a）。
+   *
+   * 默认收起：画布要占一块固定高度的视口，而步骤行才是每天看的那一屏。
+   * 做成**按需挂载**而不是"画布常驻、只改 display"，是为了让 5.10-11 的判据（离开画布无残留句柄）
+   * 真的可测——收起就是卸载，库自己那套 resize/pan 观察者跟着走（plan §7.8.2 裁定一）。
+   */
+  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
 
   const { busy, notice, run: call } = useBridgeAction(read);
   const { refresh: refreshConsent, ...consent } = useConsent();
@@ -178,6 +187,17 @@ export function WorkflowPanel() {
         >
           <Ban size={12} />
           {t('workflow.abort')}
+        </button>
+        {/* 画布开关放在动作行末尾而不是新起一行：它切换的是同一批节点的另一种画法，不是又一个 runner 动作。 */}
+        <button
+          type="button"
+          data-action="canvas-toggle"
+          aria-pressed={isCanvasOpen}
+          onClick={() => setIsCanvasOpen((open) => !open)}
+          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+        >
+          <Network size={12} />
+          {t(isCanvasOpen ? 'workflow.canvas.close' : 'workflow.canvas.open')}
         </button>
         {current ? (
           <span className="ml-auto text-[11px] text-slate-500" data-testid="workflow-state">
@@ -338,6 +358,10 @@ export function WorkflowPanel() {
           {t('workflow.loading')}
         </p>
       )}
+
+      {/* 按需挂载（裁定一）：收起就是卸载，画布那套 resize/pan 观察者跟着一起走，不留残留句柄。
+          数据仍取 current.steps——画布是同一份运行读数的第二种画法，不是第二个状态源。 */}
+      {isCanvasOpen && current ? <WorkflowCanvas steps={current.steps} /> : null}
     </section>
   );
 }
