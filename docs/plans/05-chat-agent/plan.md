@@ -1969,6 +1969,34 @@ runner 的**第三个入口**——工具里只有「起一次 run + 等到停�
 （选 `boss-deliver` 时那两格原样画出 id），已补齐；反向验证（改名成 `deliver-1001-x` → 脚本按派生键缺漏失败）已跑。
 判据与读数记在 spec 的 5.10-16 行。
 
+##### 7.8.3-sexies P2 的最后一颗 `[ ]` 已结算（2.5-15 反向验证），并更正 -quinquies 里的一处卡点归因（2026-10-04）
+
+**做完的事**（读数在 `docs/acceptance/2.5/2.5-15-reverse-validation.txt`，判据写在 spec 2.5-15 行与 2.5 结算段）：
+AGENTS.md §6.5 给被否决路线留的反向验证条目 2.5-15 是 P2 唯一还挂 `[ ]` 的一行，本轮按四条独立证据结算——
+活体 `agent.tools.list()` 的 17 只工具里零识别口、依赖面零 OCR/打码服务、全 docs/specs 九处「验证码」逐处都是
+反向条目（没有一处要求"认出并解出"）、人工接管后同一 run 续跑真的跑通（V 半边按该行判据"与 2.7-01 联验"取那组截图）。
+P2 随之收口为 85 `[x]` + 3 `[!]` + 0 `[ ]`，`docs/00-master-plan.md` 的 P2 那行同步改写。
+
+**更正 -quinquies 的卡点归因**（那条写的是"三条内置计划的首格都是真实平台节点，§7.2 不许自动化碰真实平台"）：
+本机实测不成立。`platform.registry` 的 boss `startUrl` 指向本地仿站（2.6 收口记录第 1 条已写"全程只打本地 fixture"），
+所以挡路的不是 §7.2。这轮把靶页切 `captcha`、下拉选 `boss-basic`、点「开始」后拿到的活体读数是：
+run `0cebb65f…` 的 `jd-capture` 在 1ms 内 `failed`，错误原文「平台 boss 还没有一份自动化风险确认记录，先确认承担该风险」，
+`runner.current()` 的 steps 是 failed / pending / pending，界面签字行同时显示"boss 尚未确认自动化风险，动作会先等你点头"
+——那是 2.7-06 的拦截点 ②（denied 也硬拦）在 macOS 上的又一次活体复现。
+**真正的卡点是签字**：`sessions.grantConsent` 是用户本人承担自动化风险的表态（2.7-06 的判据就是"须显式确认"），
+代理不代签，因此需要走到页面的那几发 V（5.10-08/09/13/18 的 V 半边、5.10-12 的四读数）在这台机器上
+必须等用户在场签一次字，与"缺多出口算子"是**两个独立前置**。本窗没有为此改任何代码，靶页 `risk-mode` 已归零。
+
+**门禁**（本窗实跑，无源码改动）：`pnpm typecheck` EXIT=0；`pnpm test` EXIT=0（22 个包的 Test Files 全 passed，零 failed 行）；
+`pnpm format:check` EXIT=0；`pnpm lint` EXIT=1 —— 失败项仍只有 `check-licenses.ts`（LICENSES.md 的 per-platform 漂移），
+其余九项机检在同一次运行里逐条报绿，其中工具契约那条读数正是「17 只工具 × 2 份语言包」，与上面的活体清单同数。
+
+**仍等用户裁定的三件**（口径未变，本窗没有自行解开任何一件）：① 登记一只多出口 / 纯 fixture 的演示算子
+还是先接画布写入口；② AGENTS.md §9 的「本机 Windows」已过期（本机 macOS arm64，V/BLOCKED 的平台口径要重定——
+顺带一条：spec 2.1-12 那条 `[!] BLOCKED：本机无 mac/Linux` 现在就跑在这台 mac 上）；③ `LICENSES.md` 生成节的
+per-platform 漂移怎么摆平。P3 的 28 条 `[ ]`（3.4/3.5/3.6 编辑轨）另有它自己的前置：3.4-10 的做/降级/放弃判定，
+以及引 AGPL 的 mupdf 必须过的许可记账——那一条撞在 ③ 上，不在本窗解决。
+
 **下一窗的一条命令**：g 片与 5.10-16 都已落，剩下的 V 半边（5.10-07/08/09/12 四读数/13/18）全部卡在同一条裁定上——
 **是否登记一只多出口 / 纯 fixture 的演示算子**（要 `core/src/operators.ts` 与 `packages/workflow/src/executors.ts` 各加一处声明，
 属 §6 的新能力，得先在 plan 里补证据小节才动代码）；另一条可替代路径是把画布的写入口（`workflow.graph.save` + 新建计划）接上。
