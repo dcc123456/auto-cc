@@ -1,0 +1,24 @@
+5.10-c 活体读数（CDP harness，真实窗口 http://127.0.0.1:5173，非单测替身）
+
+① 调色板分组（由 OPERATOR_CATEGORIES + WORKFLOW_OPERATORS 派生，界面没有 per-算子 代码）：
+   discover: jd.capture「抓取 JD 入库只读」  /  jd.list「读取已入库的 JD只读」
+   outbound: greeting.send「生成话术并打招呼外发」  /  resume.deliver「投递简历外发」
+   resume: resume.customize「定制简历（占位）只读」
+   demo: demo.flaky「退避重试演示本地写」
+
+② 画布格子（同一行描述派生的图标/标题/危险度/出口句柄数）：
+   jd-capture kind=(运行态) status=failed 源句柄=1 文案=1抓取 JD 入库
+   jd-list kind=(运行态) status=pending 源句柄=1 文案=2读取已入库的 JD
+   flaky kind=(运行态) status=pending 源句柄=1 文案=3退避重试演示
+   jd-capture-draft-1 kind=jd.capture status=pending 源句柄=1 文案=抓取 JD 入库只读
+   greeting-send-draft-1 kind=greeting.send status=pending 源句柄=1 文案=生成话术并打招呼外发
+
+③ 参数表单（当前选中的草稿 = greeting.send，字段全部由 zod schema 生成）：
+   platform 必填=是 控件=select 选项=boss|liepin
+   job 必填=是 控件=input:text
+   title 必填=否 控件=input:text
+   company 必填=否 控件=input:text
+   text 必填=否 控件=input:text
+
+④ 执行器分派：本片只落 `dispatchBindingFor`（workflow/operators.ts），runner 尚未接线（5.10-f），
+   所以这一处由 packages/workflow/src/operators.test.ts 的"同一行派生四处"用例覆盖，不在此页读数内。
