@@ -39,13 +39,13 @@ import {
   DEFAULT_DAILY_LIMITS,
   EntitlementGateService,
   UsageLedgerService,
-  startOfDay,
   type GateConfig,
 } from '@auto-cc/plugin-entitlement';
 import { LogService } from '@auto-cc/plugin-logger';
 import { OutboundThrottleService, throttleSchema } from '@auto-cc/plugin-outbound';
 import { ScheduleRegistryService, type ScheduleJobView, type ScheduleLaunchPort } from '@auto-cc/plugin-scheduler';
 import { StoreService } from '@auto-cc/plugin-store';
+import { startOfDay } from '@auto-cc/shared';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

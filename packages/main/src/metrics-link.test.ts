@@ -23,17 +23,19 @@ import { asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import { FunnelQueryService } from '@auto-cc/plugin-agent';
 import { PlatformRegistryService } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
-import {
-  DEFAULT_DAILY_LIMITS,
-  EntitlementGateService,
-  UsageLedgerService,
-  startOfDay,
-} from '@auto-cc/plugin-entitlement';
+import { DEFAULT_DAILY_LIMITS, EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { resolveCall } from '@auto-cc/plugin-ipc';
 import { DeliveryRecordService } from '@auto-cc/plugin-outbound';
 import { ConversationStoreService, JdStoreService } from '@auto-cc/plugin-platform-boss';
 import { StoreService } from '@auto-cc/plugin-store';
-import { FUNNEL_LEVELS, type FunnelRange, type QuotaAction } from '@auto-cc/shared';
+import {
+  FUNNEL_LEVELS,
+  isAllowedCall,
+  RENDERER_ALLOWLIST,
+  startOfDay,
+  type FunnelRange,
+  type QuotaAction,
+} from '@auto-cc/shared';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -298,5 +300,15 @@ describe('5.8-04 网关切得动这条路径（白名单与界面在 5.8-b）', 
     // 坏入参不改状态：本口只读，而这条断言钉的是「校验发生在读数之前」。
     expect(ctx.get('funnel')).toBeInstanceOf(FunnelQueryService);
     expect(app['jd.store'].countCaptured(WINDOW)).toBe(2);
+  });
+
+  it('白名单里只有这一条 `funnel.*`，且它正是网关切出来的那一对（5.8-b 的界面口）', () => {
+    // preload 按同一条名单生成 `window.autoCC`，所以「网关切得出路径」与「界面调得到」之间
+    // 缺的就是登记这一步；这一条把它钉成用例，免得界面写完才发现 403 式的未登记。
+    expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('funnel.'))).toEqual(['funnel.query']);
+    expect(isAllowedCall('funnel.query')).toBe(true);
+    // 抄错的两种形状必须进不来：带点的方法名（`funnel.query.all`）与整名小写。
+    expect(isAllowedCall('funnel.query.all')).toBe(false);
+    expect(isAllowedCall('Funnel.query')).toBe(false);
   });
 });

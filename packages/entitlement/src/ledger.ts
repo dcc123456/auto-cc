@@ -15,7 +15,14 @@
 import { asApp, Service, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
-import type { FunnelRange, LedgerDenialView, LedgerRowView, UsageSummaryView } from '@auto-cc/shared';
+import {
+  dayKey,
+  startOfDay,
+  type FunnelRange,
+  type LedgerDenialView,
+  type LedgerRowView,
+  type UsageSummaryView,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ActionContext } from './types.js';
 
@@ -112,28 +119,11 @@ type DenialRow = {
 };
 
 /**
- * 本地日的 `YYYY-MM-DD` 键。
- * @param ts 毫秒时间戳
- * @returns 按**运行机器时区**算的日键 —— 故意不用 SQLite 的 `date('now')`，那是 UTC，
- *   中国用户会在早 8 点前被算进「昨天」（plan §8.4 决策 3）
+ * 本地日的 `YYYY-MM-DD` 键与本地日界零点已从本文件**上移**到 `@auto-cc/shared` 的 `time.ts`
+ * （spec 5.8-b 的复用收口 AGENTS.md §2.2）：指标看板必须按同一口径自己算区间（决策十七），
+ * 而渲染层引不到本包（会把 Node/SQLite 依赖拖进浏览器包），所以两处共用的只能是 L0 侧那一份。
+ * 本文件只做消费方，不再持有第二份事实。
  */
-export function dayKey(ts: number): string {
-  const date = new Date(ts);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${String(date.getFullYear())}-${month}-${day}`;
-}
-
-/**
- * 本地「今天」零点的毫秒时间戳。
- * @param ts 毫秒时间戳（判定基准，通常是 `Date.now()`）
- * @returns 该时刻所在自然日的起点
- */
-export function startOfDay(ts: number): number {
-  const date = new Date(ts);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
 
 /** 把数据库行转成跨进程视图：`bigint` 在 node:sqlite 里是常态，必须在出口处收成 number。 */
 function toRowView(row: LedgerRow): LedgerRowView {

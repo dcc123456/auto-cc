@@ -1030,6 +1030,45 @@
       "enabled": "Enabled, next {{next}}",
       "disabledNotice": "Disabled \"{{name}}\"",
       "removed": "Deleted \"{{name}}\""
+    },
+    "metrics": {
+      "heading": "Metrics dashboard",
+      "hint": "The five funnel levels and quota usage all come from one main-process reading via funnel.query. This panel is read-only and triggers nothing.",
+      "refresh": "Reload dashboard",
+      "filterLabel": "Time range",
+      "presetLast7": "Last 7 days",
+      "presetLast30": "Last 30 days",
+      "presetCustom": "Custom",
+      "from": "From",
+      "to": "To",
+      "rangeShown": "{{from}} ~ {{to}} (inclusive start, exclusive end)",
+      "loadFailed": "Dashboard read failed: {{message}}",
+      "emptyHint": "No records at all in this window: run a capture or a greeting first. A 0 here means \"nothing happened yet\", not a 0% conversion rate.",
+      "level": {
+        "search": "Jobs found",
+        "greet": "Greetings sent",
+        "reply": "Recruiter replies",
+        "deliver": "Resumes delivered",
+        "interview": "Interviews booked"
+      },
+      "count": "{{count}}",
+      "noNumber": "nothing to count",
+      "noSource": "No data source: {{reason}}",
+      "quotaHeading": "Quota usage",
+      "awaitRead": "No reading yet: the dashboard is waiting for the first numbers from the main process.",
+      "gateMissing": "Gate not mounted: the entitlement plugin is missing from the assembly, so none of the three quota figures has a source",
+      "modeDaily": "Measured against daily limits",
+      "modeUnlimited": "No limits in effect",
+      "sourceMissing": "Ledger not mounted: today usage unknown",
+      "usedToday": "Used today {{count}}",
+      "limitUnlimited": "no limit",
+      "limit": "Limit {{count}}",
+      "limitMissing": "Limit unknown: gate not mounted",
+      "remainingUnlimited": "unlimited left",
+      "remaining": "{{count}} left",
+      "remainingNoGate": "Remaining unknown: gate not mounted",
+      "took": "Aggregation took {{ms}} ms",
+      "readOnly": "Read-only aggregate, no outbound calls"
     }
   }
 }

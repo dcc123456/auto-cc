@@ -16,9 +16,7 @@ export {
   DENIAL_MIGRATION_VERSION,
   LEDGER_MIGRATION_VERSION,
   UsageLedgerService,
-  dayKey,
   ledgerSchema,
-  startOfDay,
   type LedgerConfig,
   type LedgerDraft,
 } from './ledger.js';

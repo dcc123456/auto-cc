@@ -10,6 +10,7 @@ import { GeneratePanel } from './GeneratePanel';
 import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
+import { MetricsPanel } from './MetricsPanel';
 import { ResumePanel } from './ResumePanel';
 import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
@@ -119,6 +120,8 @@ export function App() {
             <GapPanel />
             <GeneratePanel />
             <WorkflowLabPanel />
+            {/* 5.8-b 的指标看板排在用量面板前面：五级漏斗是「转化到哪一级」，下面那块是「今天还剩多少额度」 */}
+            <MetricsPanel />
             <UsagePanel />
             <AssemblyPanel />
           </div>

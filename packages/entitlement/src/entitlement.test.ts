@@ -11,15 +11,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { QuotaAction } from '@auto-cc/shared';
+import { dayKey, startOfDay, type QuotaAction } from '@auto-cc/shared';
 import {
   DENIAL_MIGRATION_VERSION,
   LEDGER_MIGRATION_VERSION,
   DEFAULT_DAILY_LIMITS,
   EntitlementGateService,
   UsageLedgerService,
-  dayKey,
-  startOfDay,
   type GateConfig,
   type GateDailyLimits,
 } from './index.js';

@@ -1030,6 +1030,45 @@
       "enabled": "已启用，下次 {{next}}",
       "disabledNotice": "已停用「{{name}}」",
       "removed": "已删除「{{name}}」"
+    },
+    "metrics": {
+      "heading": "指标看板",
+      "hint": "五级漏斗与额度消耗都来自 funnel.query 的一张主进程读数；本面板只读，不触发任何动作。",
+      "refresh": "重新读取看板",
+      "filterLabel": "时间范围",
+      "presetLast7": "近 7 天",
+      "presetLast30": "近 30 天",
+      "presetCustom": "自定义",
+      "from": "起",
+      "to": "止",
+      "rangeShown": "{{from}} ~ {{to}}（含头不含尾）",
+      "loadFailed": "看板读取失败：{{message}}",
+      "emptyHint": "这段时间库里一条记录都没有：先去跑一次抓取或打招呼再回来看。这里的 0 是「还没发生」，不是转化率为 0。",
+      "level": {
+        "search": "搜索到岗位",
+        "greet": "打招呼",
+        "reply": "招聘方回复",
+        "deliver": "投递成功",
+        "interview": "约面"
+      },
+      "count": "{{count}} 条",
+      "noNumber": "无数可数",
+      "noSource": "无数据源：{{reason}}",
+      "quotaHeading": "额度消耗",
+      "awaitRead": "还没有一次读数：看板正在等主进程回第一批数字。",
+      "gateMissing": "闸门未挂载：装配里缺 entitlement 插件，额度三量都没有来源",
+      "modeDaily": "当前按每日上限计量",
+      "modeUnlimited": "当前不设上限",
+      "sourceMissing": "账本未挂载：今日已用无数",
+      "usedToday": "今日已用 {{count}}",
+      "limitUnlimited": "不设上限",
+      "limit": "上限 {{count}}",
+      "limitMissing": "上限未知：闸门未挂载",
+      "remainingUnlimited": "剩余不限",
+      "remaining": "剩余 {{count}}",
+      "remainingNoGate": "剩余未知：闸门未挂载",
+      "took": "本次聚合 {{ms}} ms",
+      "readOnly": "只读聚合，无任何外发口"
     }
   }
 }

@@ -321,6 +321,12 @@ export const RENDERER_ALLOWLIST = [
   'schedule.registry.setEnabled',
   'schedule.registry.removeJob',
   'schedule.registry.triggerNow',
+  // 5.8-b 的指标看板口（spec 5.8-01 / 03 / 04 / 07 / 08）：**唯一一条只读聚合**，五级漏斗与额度三量一次取齐。
+  // 之所以要在白名单里立这一条而不是让界面去分别敲四张表的主人：那等于把主进程的归属表抄到渲染层第二份
+  // （AGENTS.md §2.5 实测：热改配置会重建下游，抄的那份会静默变空），而且四只现成的计数口全不带时间范围。
+  // 刻意**不登记为 agent 工具**：看板是给人核对用的读数，模型若能自己按"近 7 天转化率低"去凑数，
+  // 就可能为了把数字做上去自己触发抓取（§8.3 的频控红线不该由一只读口引出来）。
+  'funnel.query',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -1555,6 +1561,14 @@ export interface BridgeSignatures {
   'entitlement.gate.check': { args: [action: QuotaAction]; returns: GateDecisionView };
   /** 账本回看：总数、按天、按动作，外加最近几行（spec 1.9-07 / 1.9-08）。 */
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
+  /**
+   * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。
+   *
+   * `range` 是**含头不含尾**的毫秒区间，日界由发起方按本地时区算（决策十七）——主进程不猜"近 7 天"
+   * 从哪一刻起，所以界面传错时以 `FUNNEL_RANGE_INVALID` 结构化失败，而不是画一条假漏斗。
+   * `context.nowMs` 只影响「今日已用/剩余」那一块，省略则取主进程当前时间。
+   */
+  'funnel.query': { args: [range: FunnelRange, context?: { nowMs?: number }]; returns: FunnelView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
   /**
