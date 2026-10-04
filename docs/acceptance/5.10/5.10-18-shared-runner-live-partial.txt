@@ -86,3 +86,34 @@
        点 `[data-view="chat"]` → 档位选「半自动」→ 重发第 1) 条那句 `/run workflow.run {"planId":"local-flaky-4"}`
        → 点可见且未禁用的 `[data-action=confirm-run]` → 期望库里多出第 7 行、`workflow-run-id` 换成新 UUID；
        再点一次面板 `[data-action=start]` 拿到第 8 行 → 两条不同 runId 即判据前半句成立。
+
+七、判据前半句补齐：对话入口跑出了属于它自己的那条 run（2026-10-04 同窗第三次，读数原文 tmp/p3-leg/51018-leg4.out）
+    前置条件（**由测试脚本代设、跑完立刻还原**，不是用户本人的档位表态）：
+        点 [data-view="chat"] → 点 [data-autonomy="semi"]（chat-notice=切换档位为 半自动：成功）
+    1) 再发那句 `/run workflow.run {"planId":"local-flaky-4"}` → 计划卡一步、确认钮「可点/26」；
+       点 [data-action=confirm-run] → 循环**没有直接动手**，而是停在安全点长出逐步批准卡：
+       可见动作里出现 pause-approve / pause-deny / stop-run（半自动档的"每步问人"，与 5.3 的不可自提升不冲突）。
+    2) 点可见且未禁用的 [data-action=pause-approve]（agent-pause-notice=批准这一步：成功）→
+       步骤卡抄出：第 1 步 workflow.run → **已完成**，"计划 local-flaky-4 的这次 run 停在 done（4 格）
+       run:ce449e51-e5b9-4e5b-b85a-8c9d9d6ac31a plan:local-flaky-4 6 毫秒"；
+       库里 local-flaky-4 从 7 行 → **8 行**，最新行就是 ce449e51（done / idx4）。
+       —— 这条 run 是**对话入口起的**，不是复用面板那条：起它之前库里最新是 a93be1d3。
+    3) 反向同源也拿到了：agent 起跑之后，工作流视图那格读数 `[data-testid=workflow-run-id]`
+       自己变成 ce449e51…、进度卡写"同一 run ce449e51…"、四步 flaky-1..4=done。
+       即面板与对话**两个入口都能起 run、且看到的是同一条 current**，没有第二份状态。
+    4) 于是判据前半句「两处各起跑一次 = 两条不同 runId」的两条证据是：
+       面板入口 a93be1d3-4df5-4a83-add5-56eb6b07b820（库第 7 行）与
+       对话入口 ce449e51-e5b9-4e5b-b85a-8c9d9d6ac31a（库第 8 行）。截图：
+       `5.10-18-panel-entry-run-a93be1d3.png`（md5 8f0a95485392191b1159bf4f99f6d276）、
+       `5.10-18-agent-entry-own-run-ce449e51.png`（md5 9a9d62883467da0a823b0579163a00a5，
+       对话视图里看得到步骤完成卡与"同一 run ce449e51"）。
+    5) 档位还原（顺序如实记，别把因果写歪）：leg4 的第六步就点了 [data-autonomy="suggest"]，
+       chat-autonomy-current 实测回到「建议模式」——**而 pause-approve 是在那之后单独一发点下去的**。
+       所以这条 run 的完整因果是：半自动档下确认并执行 → 循环停在安全点长出逐步批准卡 → 档位降回建议模式 →
+       那张挂起的卡上**人那一颗仍可点** → 点下去才真动手。顺带一条观察（不改判据、留给 5.10-j 一起裁）：
+       降档不会作废已经挂起的批准卡，它不是自动执行，仍然要人点。
+       **默认档位仍是建议模式**，所以本条 `[x]` 的准确读法是"半自动档下两个入口各起一条 run 且共用同一个
+       runner"，而不是"默认档位下对话入口就能动手"——后者按 5.3 的设计就不该发生（见第六节第 2 条的
+       TIER_SUGGEST_READ_ONLY）。
+    6) 全程只打本地 fixture（`demo://flaky-N` → http://127.0.0.1:10233/api/fail-counter），
+       未触碰任何真实招聘平台（§7.2）；外发那只工具仍经闸门与逐步批准（§7.3）。
