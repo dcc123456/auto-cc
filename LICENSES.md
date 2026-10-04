@@ -35,19 +35,19 @@
 > 本节由 `tsx scripts/check-licenses.ts --write` 生成，请勿手改；正文其余部分是人工记账。
 > 取数口：`pnpm licenses list --json --prod`（与安装事实同源，不另写依赖解析）。
 
-**生产依赖合计 60 个包条目**，按许可分组：
+**生产依赖合计 83 个包条目**，按许可分组：
 
 | 许可                      | 包数 |
 | ------------------------- | ---- |
-| MIT                       | 43   |
-| ISC                       | 5    |
+| MIT                       | 57   |
+| ISC                       | 13   |
 | BSD-2-Clause              | 4    |
 | Apache-2.0                | 2    |
+| BSD-3-Clause              | 2    |
 | (MIT AND Zlib)            | 1    |
 | (MIT OR GPL-3.0-or-later) | 1    |
 | BlueOak-1.0.0             | 1    |
 | BSD                       | 1    |
-| BSD-3-Clause              | 1    |
 | Python-2.0                | 1    |
 
 **逐包清单**（版本 = 锁定的实际解析版本）：
@@ -64,7 +64,16 @@
 | `lop`                            | 0.4.2       | BSD-2-Clause              |
 | `mammoth`                        | 1.13.0      | BSD-2-Clause              |
 | `option`                         | 0.2.4       | BSD-2-Clause              |
+| `d3-ease`                        | 3.0.1       | BSD-3-Clause              |
 | `sprintf-js`                     | 1.0.3       | BSD-3-Clause              |
+| `d3-color`                       | 3.1.0       | ISC                       |
+| `d3-dispatch`                    | 3.0.1       | ISC                       |
+| `d3-drag`                        | 3.0.0       | ISC                       |
+| `d3-interpolate`                 | 3.0.1       | ISC                       |
+| `d3-selection`                   | 3.0.0       | ISC                       |
+| `d3-timer`                       | 3.0.1       | ISC                       |
+| `d3-transition`                  | 3.0.1       | ISC                       |
+| `d3-zoom`                        | 3.0.0       | ISC                       |
 | `graceful-fs`                    | 4.2.11      | ISC                       |
 | `inherits`                       | 2.0.4       | ISC                       |
 | `lucide-react`                   | 0.544.0     | ISC                       |
@@ -74,14 +83,26 @@
 | `@napi-rs/canvas`                | 1.0.9       | MIT                       |
 | `@napi-rs/canvas-win32-x64-msvc` | 1.0.9       | MIT                       |
 | `@standard-schema/spec`          | 1.1.0       | MIT                       |
+| `@types/d3-color`                | 3.1.3       | MIT                       |
+| `@types/d3-drag`                 | 3.0.7       | MIT                       |
+| `@types/d3-interpolate`          | 3.0.4       | MIT                       |
+| `@types/d3-selection`            | 3.0.12      | MIT                       |
+| `@types/d3-transition`           | 3.0.9       | MIT                       |
+| `@types/d3-zoom`                 | 3.0.9       | MIT                       |
+| `@types/react`                   | 19.3.0      | MIT                       |
+| `@types/react-dom`               | 19.3.0      | MIT                       |
 | `@xmldom/xmldom`                 | 0.8.15      | MIT                       |
+| `@xyflow/react`                  | 12.12.0     | MIT                       |
+| `@xyflow/system`                 | 0.0.83      | MIT                       |
 | `argparse`                       | 1.0.10      | MIT                       |
 | `base64-js`                      | 1.5.1       | MIT                       |
 | `builder-util-runtime`           | 9.7.0       | MIT                       |
+| `classcat`                       | 5.0.5       | MIT                       |
 | `cordis`                         | 4.0.0-rc.10 | MIT                       |
 | `core-util-is`                   | 1.0.3       | MIT                       |
 | `cosmokit`                       | 1.8.1       | MIT                       |
 | `cron-parser`                    | 5.10.1      | MIT                       |
+| `csstype`                        | 3.2.3       | MIT                       |
 | `debug`                          | 4.4.3       | MIT                       |
 | `electron-updater`               | 6.8.9       | MIT                       |
 | `fs-extra`                       | 10.1.0      | MIT                       |
@@ -109,10 +130,12 @@
 | `tiny-typed-emitter`             | 2.1.0       | MIT                       |
 | `underscore`                     | 1.13.8      | MIT                       |
 | `universalify`                   | 2.0.1       | MIT                       |
+| `use-sync-external-store`        | 1.7.0       | MIT                       |
 | `util-deprecate`                 | 1.0.2       | MIT                       |
 | `void-elements`                  | 3.1.0       | MIT                       |
 | `xmlbuilder`                     | 10.1.1      | MIT                       |
 | `zod`                            | 4.6.5       | MIT                       |
+| `zustand`                        | 4.5.7       | MIT                       |
 | `argparse`                       | 2.0.1       | Python-2.0                |
 
 **随包运行时**：

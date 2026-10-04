@@ -51,8 +51,12 @@ const RENDERER_SYNTAX = [
     message: '布局必须用 Tailwind 类，不允许内联 style（AGENTS.md §5.1）',
   },
   {
-    selector: "ImportDeclaration[source.value=/\\.css$/]:not([source.value='./globals.css'])",
-    message: '渲染层只允许入口 globals.css，禁止 CSS Module / CSS-in-JS（AGENTS.md §5.1）',
+    // 第三方库样式的**唯一**例外：@xyflow/react 的画布视口与连线全靠这份 CSS，不引就画不出来
+    // （AGENTS.md §5.2 的例外条款，记账见 docs/specs/05-chat-agent 的 5.10-16 落地记录）。
+    // 放行写成精确字面量而不是放宽正则——否则任何人 import 一个 .css 都能过。
+    selector:
+      "ImportDeclaration[source.value=/\\.css$/]:not([source.value='./globals.css']):not([source.value='@xyflow/react/dist/style.css'])",
+    message: '渲染层只允许入口 globals.css 与 @xyflow/react 的库样式，禁止 CSS Module / CSS-in-JS（AGENTS.md §5.1）',
   },
   {
     selector: 'ImportDeclaration[source.value=/emotion|styled-components|goober|linaria/]',

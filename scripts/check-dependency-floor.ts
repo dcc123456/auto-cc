@@ -13,6 +13,8 @@
  *    「我们主动引入的」才是我们的决定，这一层管的是决定。
  * 2. **解析层**：`pnpm-lock.yaml` 全量包名扫一遍（传递依赖也拦得住，且不依赖本机装没装，比 `pnpm why` 强）。
  *    这一层判 `TREE_BANS`：外来向量库 / 向量服务 / docker 客户端 / 非内置 SQLite 绑定 / 图表与图形引擎（spec 5.8-06）。
+ *    唯一例外是 `CANVAS_APPROVED` 那两只画布包带下来的图表类传递链（spec 5.10-01，plan §7.8.2 裁定六）：
+ *    放行条件写在**来源**上（父边必须全部落在画布族里），不写在包名上，所以看板那条判据没有被削弱。
  *    锁文件里本来就有的 dev-only 传递原生链路（`node-gyp`、pdfjs 的 optional `@napi-rs/canvas` 家族，
  *    实测见 pnpm-lock.yaml 的 1099～1170 行与 2524 行）**只记为提示**——它们不是本项目的检索能力，
  *    也不该由 lint 决定"整个 npm 生态里不许有编译工具"；它们会不会落到用户机上由第三层判。
@@ -71,6 +73,21 @@ const NATIVE_BANS: readonly Ban[] = [
 ];
 
 /**
+ * 图与流程图画布的**核准例外**（spec 5.10-01 / 5.10-16，plan §7.8.2 裁定六）。
+ *
+ * 下面那条「图与流程图渲染引擎」禁令的原文就写着「5.10 若要引入须先按 §6 取证再改这条」，
+ * 所以这不是悄悄放宽，而是走那条既定的口子：取证在 plan §5.10.1（本机 `npm view @xyflow/react`
+ * = 12.12.0、MIT、peer react>=17），改动只到这里，并且**边界收得很紧**——
+ * ① 只许渲染层声明（`packages/renderer`），别处声明即失败；
+ * ② 它带进来的 `d3-*` / `@types/d3-*` 传递链只认「父包是画布族或同样是画布族传下来的」这一种来源，
+ *    任何别的包（含各 workspace 的 package.json）直接依赖 d3 仍旧算违反 5.8-06；
+ * ③ 画布族与它的 d3 传递链一律不得进装机运行期闭包（第三层照旧判禁，画布是 Vite 打进 bundle 的）。
+ * 看板那条判据（5.8-06「比例宽度条 + 精确数字够用」）因此一个字都没被削弱。
+ */
+const CANVAS_APPROVED = ['@xyflow/react', '@xyflow/system'] as const;
+const CANVAS_APPROVED_SET: ReadonlySet<string> = new Set<string>(CANVAS_APPROVED);
+
+/**
  * 图表与图形渲染库禁令（spec 5.8-06「不引重型图表库」，plan §7.6.2 决策十九）。
  *
  * 失效模式与上面两类同形：某天有人觉得"漏斗该画成真的图"，`pnpm add` 一只 chart.js 或 echarts，
@@ -102,7 +119,8 @@ const VISUALIZATION_BANS: readonly Ban[] = [
   },
   {
     pattern: /^(?:mermaid|dagre|@dagrejs\/.+|elkjs|gojs|jointjs|cytoscape|vis-network|vis-data)$/i,
-    reason: '图与流程图渲染引擎（spec 5.8-06 同一条否决；5.10 若要引入须先按 §6 取证再改这条）',
+    reason:
+      '图与流程图渲染引擎（spec 5.8-06 同一条否决；5.10 的画布例外只走 CANVAS_APPROVED 那一条已取证的路，别的引擎仍旧禁止）',
   },
 ];
 
@@ -149,6 +167,12 @@ function checkManifest(relPath: string, manifest: Record<string, unknown>): void
       for (const ban of [...TREE_BANS, ...NATIVE_BANS]) {
         if (ban.pattern.test(name)) failures.push(`${relPath} 的 ${field} 里声明了 ${name}：${ban.reason}`);
       }
+      // 画布例外的边界①：核准只给渲染层。主进程/流水线里冒出一只画布库，就是把视图依赖塞进装机闭包。
+      if (CANVAS_APPROVED_SET.has(name) && relPath !== 'packages/renderer/package.json') {
+        failures.push(
+          `${relPath} 的 ${field} 里声明了 ${name}：画布库只许渲染层声明（spec 5.10-16 / plan §7.8.2 裁定六）`,
+        );
+      }
     }
   }
 }
@@ -178,6 +202,87 @@ function nameOfLockKey(key: string): string {
   return at <= 0 ? withoutPeer : withoutPeer.slice(0, at);
 }
 
+/**
+ * 从锁文件的 `snapshots:` 段读包与包之间的依赖边。
+ *
+ * 只读这一段是因为它是唯一描述**包与包**关系的部分：`importers:` 描述的是 workspace 的直接声明
+ * （那一层由 `checkManifest` 对着 package.json 判，更权威），`packages:` 段只有版本与完整性。
+ * 行的形状是固定的：两级缩进是包键，六级缩进是它 `dependencies` / `optionalDependencies` 里的条目。
+ * @param lockText `pnpm-lock.yaml` 全文
+ * @returns 两张互为反向的邻接表（父→子 与 子→父），供可达性计算与"来源核对"分别使用
+ */
+function lockSnapshotEdges(lockText: string): {
+  childrenByParent: Map<string, Set<string>>;
+  parentsByChild: Map<string, Set<string>>;
+} {
+  const childrenByParent = new Map<string, Set<string>>();
+  const parentsByChild = new Map<string, Set<string>>();
+  const snapshotsAt = lockText.indexOf('\nsnapshots:\n');
+  if (snapshotsAt < 0) return { childrenByParent, parentsByChild };
+  let parent = '';
+  for (const line of lockText.slice(snapshotsAt).split('\n')) {
+    const header = /^ {2}'?([^':\s]+)'?:\s*$/.exec(line);
+    if (header?.[1]) {
+      parent = nameOfLockKey(header[1]);
+      continue;
+    }
+    const dependency = /^ {6}'?([^':\s]+)'?:/.exec(line);
+    const child = dependency?.[1];
+    if (!parent || !child) continue;
+    const children = childrenByParent.get(parent) ?? new Set<string>();
+    children.add(child);
+    childrenByParent.set(parent, children);
+    const parents = parentsByChild.get(child) ?? new Set<string>();
+    parents.add(parent);
+    parentsByChild.set(child, parents);
+  }
+  return { childrenByParent, parentsByChild };
+}
+
+/**
+ * 算出「只由画布族带进来的」图表禁令包名（spec 5.10-01 例外的实际边界）。
+ *
+ * 两步，缺一步都会漏：
+ * 1. **可达性**：从 `CANVAS_APPROVED` 沿依赖边正向走，得到的集合之外一律不放行——否则两个与画布无关的
+ *    被禁包互相依赖就能把自己"供"出来。
+ * 2. **来源核对（最大不动点）**：可达集合里命中图表禁令的包名先全列为候选，再反复剔除「存在一条父边
+ *    既不属画布族、也不在候选里」的名字。用剔除式而不是加入式，是因为 `@types/d3-*` 之间有真实的环
+ *    （`@types/d3-zoom` ↔ `@types/d3-selection`），加入式的最小不动点会卡在空集上、把整条链判失败。
+ * 只查图表类禁令：向量库 / 非内置 SQLite 那一类能力禁令不存在"由画布带进来"的例外。
+ * @param lockText 锁文件全文
+ * @param lockNames 锁文件里出现过的全部包名
+ * @returns 可放行的画布传递链包名集合
+ */
+function canvasTransitiveBans(lockText: string, lockNames: ReadonlySet<string>): Set<string> {
+  const { childrenByParent, parentsByChild } = lockSnapshotEdges(lockText);
+  const reachable = new Set<string>();
+  const queue: string[] = [...CANVAS_APPROVED];
+  while (queue.length > 0) {
+    const name = queue.shift() ?? '';
+    if (reachable.has(name)) continue;
+    reachable.add(name);
+    for (const child of childrenByParent.get(name) ?? []) queue.push(child);
+  }
+  const candidates = new Set<string>();
+  for (const name of lockNames) {
+    if (reachable.has(name) && banOf(name, VISUALIZATION_BANS)) candidates.add(name);
+  }
+  for (;;) {
+    let shrank = false;
+    for (const name of [...candidates]) {
+      const parents = parentsByChild.get(name);
+      const hasForeignParent =
+        !parents ||
+        parents.size === 0 ||
+        [...parents].some((parent) => !CANVAS_APPROVED_SET.has(parent) && !candidates.has(parent));
+      if (!hasForeignParent) continue;
+      candidates.delete(name);
+      shrank = true;
+    }
+    if (!shrank) return candidates;
+  }
+}
+
 // —— 第一层：声明层（根 + 每个包）——
 const packageRoot = path.join(repoRoot, 'packages');
 const workspaceDirs = (await readdir(packageRoot, { withFileTypes: true }))
@@ -205,9 +310,13 @@ const lockNames = new Set<string>();
 for (const match of lockText.matchAll(/^ {2}'?([^':\s]+)'?:/gm)) {
   lockNames.add(nameOfLockKey(match[1] ?? ''));
 }
+/** 画布带进来的图表类传递链（放行的只有这一类，且以"父边全在画布族"为条件）。 */
+const canvasTolerated = canvasTransitiveBans(lockText, lockNames);
 for (const name of lockNames) {
   const banned = banOf(name, TREE_BANS);
   if (banned) {
+    // 边界②：命中禁令但来源只有画布族 → 记为放行，交给结尾那条汇总行说清"机检看见了、是有意放过"。
+    if (canvasTolerated.has(name)) continue;
     failures.push(`pnpm-lock.yaml 的依赖树里解析出 ${name}：${banned.reason}`);
     continue;
   }
@@ -235,6 +344,12 @@ for (const dep of runtimeDeps) {
   if (runtimeBan) {
     failures.push(
       `装机依赖闭包里有 ${dep.name}@${dep.version}：它本不该出现在运行期外置依赖里（spec 4.3-05 / 06、5.8-06）——${runtimeBan.reason}`,
+    );
+  }
+  // 边界③：画布例外是给渲染层 bundle 的，不是给外置运行期依赖的。它出现在这里说明打包接线被改坏了。
+  if (CANVAS_APPROVED_SET.has(dep.name)) {
+    failures.push(
+      `装机依赖闭包里有画布库 ${dep.name}@${dep.version}：画布属渲染层、由 Vite 打进 bundle，不得成为外置运行期依赖（spec 5.10-16）`,
     );
   }
   const files = await fileNamesUnder(dep.dir);
@@ -265,5 +380,14 @@ if (nativeLockNames.length > 0) {
     `  · 锁文件里有 ${String(nativeLockNames.length)} 个原生编译链包名（${families.join('、')} 的家族与平台变体）：` +
       `均为传递依赖、非本项目声明，且搬运层已确认它们不在 ${String(runtimeDeps.length)} 个装机依赖里 —— ` +
       '会不会落到用户机上以搬运层为准。',
+  );
+}
+if (canvasTolerated.size > 0) {
+  // 同一条口径：放行不等于看不见。这里把画布带进来的整条 d3 链报出来，下一个人能一眼看出例外有多大。
+  const toleratedNames = [...canvasTolerated].sort((left, right) => left.localeCompare(right));
+  console.log(
+    `  · 锁文件里有 ${String(canvasTolerated.size)} 个图表类包名（${toleratedNames.join('、')}）：` +
+      `逐条核对过父边，全部只由 ${CANVAS_APPROVED.join(' / ')} 带进来，按 spec 5.10-01 的画布例外放行 —— ` +
+      '任何 workspace 直接声明它们、或它们进了装机运行期闭包，都仍旧判失败。',
   );
 }
