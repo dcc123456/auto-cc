@@ -475,7 +475,19 @@
         "heading": "算子图",
         "hint": "节点位置只是摆放，不改动计划语义；用画布控件平移缩放。",
         "open": "算子图",
-        "close": "收起算子图"
+        "close": "收起算子图",
+        "undo": "撤销",
+        "redo": "重做",
+        "validate": "保存前校验",
+        "validatePassed": "这张图没有发现问题。",
+        "draftCount": "草稿 {{nodeCount}} 格",
+        "issue": {
+          "unknownKind": "算子未登记：{{nodeIds}}",
+          "danglingEdge": "有边接在不存在的节点或未声明的出口上：{{nodeIds}}",
+          "multipleSources": "只能有一个起点，现在有 {{nodeIds}}",
+          "cycle": "这些节点连成了环，本项目的图不做循环与回边（重试请用节点的重试次数）：{{nodeIds}}",
+          "outboundMissingTarget": "外发节点缺少动作对象，无法判定幂等与额度：{{nodeIds}}"
+        }
       },
       "status": {
         "idle": "未开始",

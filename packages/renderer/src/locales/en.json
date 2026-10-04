@@ -475,7 +475,19 @@
         "heading": "Operator graph",
         "hint": "Node positions are placement only and never change plan semantics; pan and zoom with the canvas controls.",
         "open": "Operator graph",
-        "close": "Hide operator graph"
+        "close": "Hide operator graph",
+        "undo": "Undo",
+        "redo": "Redo",
+        "validate": "Validate before save",
+        "validatePassed": "No problems found in this graph.",
+        "draftCount": "{{nodeCount}} draft node(s)",
+        "issue": {
+          "unknownKind": "Operator not registered: {{nodeIds}}",
+          "danglingEdge": "An edge points at a missing node or an undeclared output handle: {{nodeIds}}",
+          "multipleSources": "There can be only one start node, currently: {{nodeIds}}",
+          "cycle": "These nodes form a cycle; this graph language has no loops or back edges (use the node's retry count instead): {{nodeIds}}",
+          "outboundMissingTarget": "An outbound node has no action target, so idempotency and quota cannot be decided: {{nodeIds}}"
+        }
       },
       "status": {
         "idle": "not started",
