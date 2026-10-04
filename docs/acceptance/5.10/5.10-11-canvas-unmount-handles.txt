@@ -1,0 +1,60 @@
+5.10-11 的 U 半边（活体 mount → unmount 后无残留句柄）—— 本机实测
+================================================================
+
+判据原文：`docs/specs/05-chat-agent/spec.md` 5.10-11「运行态回写只来自 `workflow/progress` 事件，
+画布内**无轮询定时器**，离开画布无残留句柄」，方式 C+U。
+C 半边早已过（`scripts/check-renderer-conventions.ts` 第 7 节钉住 `WorkflowCanvas.tsx` 里不许出现
+`setInterval`、也不许自调 `runner.current/state/resumable`）。本轮收的是 U 半边，
+验证操作原文：「活体里 mount → unmount 读一次 pendingTimers 并截图」。
+
+一、卸载触发点找对了（这是之前卡住的地方）
+    `packages/renderer/src/App.tsx:111-123` 三个视图是 `hidden` / `block` **显示切换**，
+    不卸载组件，所以「切到聊天页」并不构成 mount→unmount。真正受判据管辖的卸载口是
+    `packages/renderer/src/WorkflowPanel.tsx:362-370` 的**按需挂载（裁定一）**：
+    `{isCanvasOpen ? <WorkflowCanvas …/> : null}`，按钮 `[data-action="canvas-toggle"]`
+    （WorkflowPanel.tsx:194）收起时整棵画布子树连 `ReactFlowProvider` 一起卸载。
+    因此活体的 mount / unmount 就是这只按钮点两次。
+
+二、探针与读数（真实 app 页面，CDP 10222，vite 5173）
+    探针 `tmp/p3-leg/h-patch.js`（只在活体页面里装记账壳，不进仓库）在页面里包住
+    `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` / `new ResizeObserver` /
+    `disconnect()`，并暴露 `__mark(label)` 记录「在册句柄数 `liveHandles`、创建/到期/清除计数、
+    文档里 `.react-flow` 节点数、按钮 `aria-pressed`」。
+    按 §9 的既有纪律，句柄类判据写成**不许变多**（`<=` 基线），不写等于绝对值。
+
+    实测三段（真实标签与读数，逐字来自 `window.__h.marks`）：
+        A-挂载前  liveHandles 0, timerCreated 0,  timerFired 0,  intervalCreated 0, intervalCleared 0,
+                  roCreated 0,  roDisconnected 0, flowNodesInDom 0, aria-pressed false
+        B-挂载后  liveHandles 0, timerCreated 3,  timerFired 3,  intervalCreated 1, intervalCleared 1,
+                  roCreated 6,  roDisconnected 1, flowNodesInDom 1, aria-pressed true
+        C-卸载后  liveHandles 0, timerCreated 3,  timerFired 3,  intervalCreated 1, intervalCleared 1,
+                  roCreated 6,  roDisconnected 2, flowNodesInDom 0, aria-pressed false
+
+    判读：
+      ① 卸载后再没有任何在册句柄：`liveHandles` 从挂载前 0 → 卸载后 0，**没有变多**；
+         挂载期间创建的 3 只定时器全部自己到期（timerFired 3、timerCleared 0，说明不是靠我们
+         clearTimeout 兜住的，而是本来就到点），1 只 interval 创建即被清除（intervalCleared 1）——
+         与 C 半边读到的代码事实一致：画布唯一的定时器是 `fitView` 的一次性 `setTimeout`，
+         没有轮询。
+      ② DOM 侧确实卸载干净：`.react-flow` 节点数 1 → 0。
+      ③ 观察器一侧要如实写：`roCreated 6` 而显式 `roDisconnected 2`，剩下 4 只没有 disconnect 记录。
+         这 4 只是 react-flow 内部持有的（我们自己的代码不建 ResizeObserver，C 半边机检已钉住），
+         它们观察的目标节点已随 ② 离开文档，因此不构成我们这一侧的泄漏口子，但也不能宣称
+         「观察器全部显式释放」。这一条留给 react-flow 的生命周期事实记录，不粉饰。
+
+三、截图（V/U 的可见反馈）
+    `docs/acceptance/5.10/5.10-11-canvas-unmounted.png`：活体页面在 C-卸载后状态，
+    画布子树已收起（按钮文案回到「展开算子图」一侧，`.react-flow` 读数 0）。
+    截图由 `pnpm harness shot --out …` 直出，随后 `archive --id 5.10-11` 归档。
+
+四、诚实标注
+    1) 探针只统计**装上之后**发生的创建：A-挂载前 的那一轮（画布在探针安装前就已挂载）不计入，
+       所以本轮走的是「先卸载到干净态，再 mount→unmount」的顺序，A 就是基线。
+    2) 早期一轮驱动脚本里有一条表达式写成了 `document.querySelector(...);.click()`（分号后移花接木），
+       JS 语法错误、点击没发生，表现为三段读数全都不变；改正后才有上面这组数。记录在此，
+       免得下一个人把「读数不变」当成代码没卸载。
+    3) 本轮没有把 `pendingTimers` 做成常驻机检（渲染层沙箱里没有 `process`，§5.8 的底线不为测试放开），
+       活体读数靠探针；常驻防线仍是 C 半边那条 `check-renderer-conventions.ts` 第 7 节。
+
+结论：5.10-11 的 U 半边成立（挂载 → 卸载后在册句柄数不增、定时器全部自然到期、画布 DOM 清零），
+观察器显式 disconnect 只有 2/6 这一事实按上面第③条留档。
