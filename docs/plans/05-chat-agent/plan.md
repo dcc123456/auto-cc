@@ -1930,8 +1930,13 @@ d 片的命令栈可以直接把"一次成功保存"当作一条撤销单元，�
 ② 命令栈是快照栈且 `draft()` 返回深拷贝，e 片的"保存"就是把这一份快照送进 IPC——
 撤销单元与"一次成功保存"是同粒度，不需要再造一个 dirty 标记。
 
-**已知缺口（不掩盖）**：画布连线类判据的 V 半边（5.10-14 的回边截图）在本轮仍拿不到。
-已经补上的是通道：`pnpm harness drag --from-selector <css> --to-selector <css>` 走 CDP 原生鼠标事件
-（页面内 `dispatchEvent` 那条路实测无效——d3-drag 不认可信事件）。剩下的缺口在坐标：`cdp.ts` 的
-`RECT_SOURCE` 在页面滚动或画布平移后给出的落点与元素实际位置不符（实测同一句柄两次读数差 67px），
-下一步先修这条基准，再回 5.10-14 复跑。
+**缺口已补（5.10-14 转 `[x]`）**：画布连线类判据的 V 半边卡在 harness 的坐标基准，不是画布。通道先补上了
+（`pnpm harness drag --from-selector <css> --to-selector <css>` 走 CDP 原生鼠标事件——页面内
+`dispatchEvent` 那条路实测无效，d3-drag 不认可信事件），但 `RECT_SOURCE` 在同一个 tick 里
+`scrollIntoView` + 读 `getBoundingClientRect`，平滑滚动未落定就取数，且两个端点各滚一次（第二次把第一个
+推走），实测同一句柄两次读数差 67px。改法是滚动一次 → `settle()` → 用只测量的 `RECT_READ_SOURCE` 复读，
+拖拽前再守住两端点都在视口内。修完真实页面两次拖拽即得回边，校验面板给出"不做循环与回边"的拒因原文，
+证据 `docs/acceptance/5.10/5.10-14-back-edge-cycle-rejected.png`。同一轮还修掉 `shot --reveal` 的同源缺陷：
+判"到位"用整个窗口高度，而内容在带 `overflow-y-auto` 的 `<section>` 里，元素 `top=11` 已被容器上沿裁掉
+却算通过——现在按祖先滚动容器的可见框求交。**后续片注意**：harness 的定位类命令（click/type/drag/shot
+--reveal）都以这套"可见框 + 滚动后复读"为准，页面内自测量与 CDP 落点不同源时以 CDP 侧为准。

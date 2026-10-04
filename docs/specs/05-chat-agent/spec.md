@@ -3051,7 +3051,7 @@ plan §7.8——① 画布是工作流视图内**按需挂载**的一块，不�
 | 5.10-11 | 运行态回写只来自 `workflow/progress` 事件，画布内**无轮询定时器**，离开画布无残留句柄                                                                          | C+U  | 断言无 setInterval；卸载后无活跃句柄（同 2.4-09 法）                                                                                                                                                                                                                                                                     | [ ]  |
 | 5.10-12 | 点节点弹出参数/attempts/耗时/证据，与 2.4 的证据是同一数据源，不是二次拼装                                                                                     | V    | 失败节点点开 → 截图证据内容与库一致                                                                                                                                                                                                                                                                                      | [ ]  |
 | 5.10-13 | DAG 下重验 2.4-05/06：kill 后从中断节点继续、已完成不重放、外发幂等仍成立并留新证据                                                                            | V    | 分支图跑中途 kill → 重启截图 + 库比对 attempts 不变                                                                                                                                                                                                                                                                      | [ ]  |
-| 5.10-14 | 反向验证「不做循环」：连回边被校验拒绝并给出原因，且确认未造成当前主线能力缺口                                                                                 | U+V  | 构造回边 → 断言拒绝；截图拒绝文案                                                                                                                                                                                                                                                                                        | [!]  |
+| 5.10-14 | 反向验证「不做循环」：连回边被校验拒绝并给出原因，且确认未造成当前主线能力缺口                                                                                 | U+V  | 构造回边 → 断言拒绝；截图拒绝文案                                                                                                                                                                                                                                                                                        | [x]  |
 | 5.10-15 | 许可边界机检：新增依赖仅 `@xyflow/react`（MIT），产物与 licenses 表内无 PolyForm-NC / AGPL，且 Automa 移植面（`Edit*.tsx`、drawflow 格式）零复制、本片全部自建 | C    | `pnpm licenses list` + 与源仓库代码逐处对照走查                                                                                                                                                                                                                                                                          | [ ]  |
 | 5.10-16 | 前端规范达标：节点样式全 Tailwind（唯一例外是库自带 `dist/style.css` 在全局入口引一次），算子图标仅 lucide-react，画布每条文案走 i18n 且 zh-CN/en 齐备         | C    | `pnpm lint` 与渲染层规范脚本 0 命中（画布半边，见 5.10-a）                                                                                                                                                                                                                                                               | [x]  |
 | 5.10-17 | 渲染层不碰 Node：图读写只经 `workflow.graph.*` 白名单，未登记名被拒，隔离档位未变弱                                                                            | C+U  | 调未登记方法 → 断言结构化拒绝                                                                                                                                                                                                                                                                                            | [ ]  |
@@ -3289,13 +3289,25 @@ a 片已经拍到过"三个节点两条边"的画面，但它证的是 5.10-01�
 点撤销 → 草稿计数 2→1、校验面板清空（图变了就不留旧拒因）、重做按钮转可用；点重做 → 再校验报出同样两条。
 证据：`docs/acceptance/5.10/5.10-05-graph-check-live-1.png`（逐条原因）、`-2.png`（通过态）、`-3.png`（红环两格）。
 
-**5.10-14 标 `[!]` 的原因（如实）**：回边的**判定**有 3 条单测覆盖（含"文案必须写明不做循环、重试由
-retryTimes 表达"与"自环只报一次"），但**活体页面上的回边截图**仍未拿到。本片为此给 harness 补了一条
-`drag` 命令（`packages/testing`，走 CDP `Input.dispatchMouseEvent` 的 mousePressed → 12 步 mouseMoved
-→ mouseReleased，带 `buttons: 1`），实测命令本身跑通（能定位到句柄并回报落点），但拖完 `.react-flow__edge`
-仍是 2 条运行链边——落点坐标与页面内 `getBoundingClientRect` 对不上：同一次里 `jd-capture-draft-1` 出口句柄
-在滚动前量到 y=334、拖拽时量到 y=401，而两只草稿格子的句柄 y 反而相同（401.17 / 401.25），说明命中点不在句柄上。
-下一步要查 `cdp.ts` 里 `RECT_SOURCE` 的坐标基准（滚动/平移后的 viewport 坐标 vs 页面坐标），不用别的图凑数。
+**5.10-14 的 V 半边：真实拖出回边 → 校验拒绝（已补）**。回边的**判定**有 3 条单测覆盖（含"文案必须写明
+不做循环、重试由 retryTimes 表达"与"自环只报一次"），活体这一半先卡住过一轮，根因是 harness 的坐标基准，
+不是画布：`RECT_SOURCE` 在同一个 tick 里 `scrollIntoView` 然后读 `getBoundingClientRect`，平滑动画还没落定，
+量到的是滚动途中的位置；而两个端点各滚一次，第二次滚动又把第一个端点推走（实测同一只出口句柄两次读到
+y=334 / y=401）。修法是滚动只做一次、`settle()` 之后用 `RECT_READ_SOURCE` 复读，并在拖拽前守住两端点
+都在视口内（`packages/testing/src/cdp.ts`）。修完在真实页面上连拖两次：
+
+- `drag jd.capture 出口句柄 → greeting.send 入口句柄` → 边数 3→4，草稿链成 `…:default → …`；
+- 反向 `drag greeting.send → jd.capture`（回边）→ 边数 4→5，`.react-flow__edge` 读数含
+  `greeting-send-draft-1:default->jd-capture-draft-1`；
+- 点「保存前校验」→ 面板给出两条拒因原文：`这些节点连成了环，本项目的图不做循环与回边（重试请用节点的
+重试次数）：jd-capture-draft-1, greeting-send-draft-1` 与 `外发节点缺少动作对象，无法判定幂等与额度：
+greeting-send-draft-1`，两只格子带红环。
+
+证据：`docs/acceptance/5.10/5.10-14-back-edge-cycle-rejected.png`（回边 + 拒因文案 + 红环同框）。
+顺带修掉同类的一处 `shot --reveal` 缺陷：判"到位"用的是整个窗口高度，而渲染层内容在带
+`overflow-y-auto` 的 `<section>` 里，元素 `top=11` 已被容器上沿裁掉却算通过——现在按祖先滚动容器的
+可见框求交。**缺口反向验证**：不做循环/回边没有砍掉主线能力——重试语义由 `retryTimes` 表达（2.4 已实现并
+验收），runner 的 DAG 推进不依赖回边，5.10-e 之后的保存口同样只收无环图。
 
 **门禁读数**：`pnpm typecheck=0 / lint=0 / format:check=0 / test=0`，其中 `packages/workflow` 168 条用例
 （本片新增 `graph-edit.test.ts` 18 条），全仓零 `failed` 行。
