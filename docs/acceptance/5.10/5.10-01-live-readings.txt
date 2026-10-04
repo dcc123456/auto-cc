@@ -1,0 +1,33 @@
+— 进工作流视图 —
+面板在位=true
+— 打开算子图 —
+（进门前先收起再展开一次，把视口复位到 fitView）
+画布挂载=true · 按钮文案=收起算子图 · aria-pressed=true
+几何读数={"innerH":737,"scrollerTop":0,"scrollerH":1148,"clientH":673,"canvasTop":706,"canvasH":466}
+滚轮穿透：画布中心 {"x":360,"y":487} 处滚 → 容器 scrollTop 475 → 235（变小即页面滚了）· 视口 transform=matrix(0.928115, 0, 0, 0.928115, 28, 193.722)（不变即画布没被缩放劫持）
+— 起跑内置 boss-basic（本机 fixture 站内，§7.2 零真实平台）—
+runId=46d3c86f-c34a-4fa0-a843-7dc5e3b3f052 status=running
+结束态 status=done
+步骤读数=jd-capture=done / jd-list=done / flaky=done
+画布节点数=3 读数=jd-capture:done / jd-list:done / flaky:done
+边数=2
+库样式生效（节点绝对定位）=true
+— 真鼠标拖拽一个节点 —
+首节点矩形={"x":69.33333587646484,"y":471.26373291015625,"width":94.30035400390625,"height":31.555908203125,"innerH":737}（y 要在 0..innerH 里，否则真鼠标落在画面外）
+节点 transform translate(0px, 0px) → translate(88.3511px, 68.957px)
+拖拽改变了节点位置=true
+— 平移画布（在空白处拖）—
+画布矩形={"x":41.333335876464844,"y":277.54168701171875,"width":637.3229370117188,"height":418.66668701171875} · 按下点=639,656
+视口 transform matrix(0.928115, 0, 0, 0.928115, 28, 193.722) → matrix(0.928115, 0, 0, 0.928115, -92, 113.722)
+平移生效=true
+— 缩放（画布控件的 + 按钮）—
+点 .react-flow__controls-zoomin 于 69,616
+视口 transform matrix(0.928115, 0, 0, 0.928115, -92, 113.722) → matrix(1.11374, 0, 0, 1.11374, -174.131, 94.6008)
+缩放生效=true
+— 切到中文，验 `workflow.canvas.*` 双语键都取得到（AGENTS.md §5.5/5.6）—
+当前是英文界面=false（已是中文，不再点）
+中文读数={"heading":"算子图","hint":"节点位置只是摆放，不改动计划语义；用画布控件平移缩放。","toggle":"收起算子图","nodeLabels":["1抓取 JD 入库","2读取已入库的 JD","3退避重试演示"],"missingKey":false}
+— 收起画布验卸载（裁定一：按需挂载，收起即无残留句柄）—
+容器数量 1 → 0（收起后应为 0）· 按钮文案回到=算子图
+— 重新打开后节点位置是否还在（视图层位置由画布自己持有）—
+重开后首节点 transform=translate(0px, 0px)（与收起前 translate(88.3511px, 68.957px) 同 = 位置留在 state，不同 = 卸载即回到初始摆放）

@@ -268,6 +268,13 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `getBoundingClientRect().height`；⑧ 渲染层没有 `#chat-panel` 这个 id，发送口是裸 `[data-action=send]`，
   找入口要现枚举而不是照 testid 猜；⑨ `/run` 那一路的计划卡必须人按「确认并执行」才动
   （`[data-action=confirm-run]`），这是 5.3 定的"不可自提升"，脚本不要绕过去调 `agent.loop.confirm`。
+- **实测（5.10-a）harness 再补两条**：⑩ `bridge.click` 派发的 mousedown/mouseup **不带 `buttons` 字段**，
+  第三方组件里就有点了什么都不发生的（react-flow 的缩放控件：函数返回 `tag=button` 看着点中了，DOM 的
+  `click` 监听根本没触发）。判据是"监听有没有跑"而不是"返回值像不像"，稳妥写法是自己读
+  `getBoundingClientRect()` 中心 + 显式 `buttons:1/0` 的 move/press/release 三发；
+  ⑪ 依赖初始布局的探针（`fitView`、默认摆放）**只在挂载那一刻生效**，同一份活体页面跑到第二轮拿的是上一轮
+  遗留的视口坐标，表现为"节点被我拖到画面外"这种假缺陷。起手必须先复位镜头（收起再展开一次），
+  且"把元素滚进画面"是 `scrollTop +=` 视觉偏移，不是赋值——两个 rect 相减拿到的已经是滚过之后的差。
 - **实测（5.4-b）页面里敲进去的中文会撞自己的字符集校验**：`assertPlanName` 收了 ASCII `()` 没收全角 `（）`，
   于是"中文名字不许有括号"——单测里写的是半角，永远测不到。**边界校验写完必须用真实输入法在页面上敲一遍**，
   这属于 §7.1 的 V 类而不是 §7.4 的④。
