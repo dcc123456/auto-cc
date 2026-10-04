@@ -446,8 +446,15 @@ export type WorkflowNodeInvocation = {
   signal: AbortSignal;
 };
 
-/** 一个节点的执行函数；失败就抛，runner 据此走退避或判失败。 */
-export type WorkflowNodeExecutor = (invocation: WorkflowNodeInvocation) => Promise<void>;
+/**
+ * 一个节点的执行函数；失败就抛，runner 据此走退避或判失败。
+ *
+ * 返回值放宽（plan §7.8 裁定 3）：给出 `{ output }` 就宣告「这一步走的是哪个出口句柄」，
+ * 值必须落在该节点自己声明的 `outputs` 里——那条校验在 `advanceGraph`，不在这里重复一份。
+ * 返回 `void`（或省略）表示没有出口可言，runner 按 `default` 处理，
+ * 所以现有的六个执行器（抓取 / 打招呼 / 投递 / 话术 / 生成 / 知识库）一个字都不用改。
+ */
+export type WorkflowNodeExecutor = (invocation: WorkflowNodeInvocation) => Promise<{ output?: string } | void>;
 
 /**
  * `workflow.executors` 服务对能力包露出的最小形状（同 `PlatformRegistry` 之于平台包）。
