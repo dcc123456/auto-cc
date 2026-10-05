@@ -58,7 +58,8 @@ async function boot(document = fixture()) {
   fibers.push(await ctx.plugin(StoreService, { dir: tempDir(), file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(await ctx.plugin(FontOnlyPrintService, {}));
-  fibers.push(await ctx.plugin(ResumeEditorService, {}));
+  // 3.6-08 的两只阈值随配置走（带 `.default()` 的键在直接调用点必须显式给出，§9 的 1.3 那条）。
+  fibers.push(await ctx.plugin(ResumeEditorService, { maxPreviewResponseMs: 1200, largeDocumentSectionCount: 5 }));
   const app = asApp(ctx);
   app['resume.doc'].save(document);
   // `resume.editor` 这个名字还没进 cordis 的 `AppServices` 声明（同 `workflow.graph` 那条），所以按名取时
@@ -117,6 +118,8 @@ describe('3.6-b 打开与投影（正文不过界的那条边界要能被断言�
     expect(view.locale).toBe('zh-CN');
     expect(view.templates).toContain('classic');
     expect(view.metricBounds).toEqual(EDITOR_METRIC_BOUNDS);
+    // 3.6-08「阈值来自配置」：界面上的那两个数就是构造时配进去的那两个，界面不再写死一份（§2）。
+    expect(view.timing).toEqual({ maxPreviewResponseMs: 1200, largeDocumentSectionCount: 5 });
     expect(view.isDirty).toBe(false);
     expect(view.canUndo).toBe(false);
     // 这条是 §8.1 第 1 条边界的可执行形式：字段值一旦出现在投影里，"界面只认 docId + 打印 HTML"就破了。

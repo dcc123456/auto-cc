@@ -220,6 +220,21 @@ U/C 可现在兑现的六条：
   `3.6-04` 的"数据一字不变"（模板与语言活在历史栈与文档之外，切换在结构上不碰一个字节）。
   没过的仍是**每一行的 V**：拖拽前后截图、界外提示截图、连续操作截图、双语截图、目视、计时截图、拦截提示截图——都在 3.6-c 界面腿，要真实窗口与你在场（§7.1 不允许用单测替代可视项）。
   本片**不新增 service、不新增白名单行、不新增迁移**（`resume.editor` 与其白名单是 3.6-b 契约腿；裁定⑨「只拦不存」使 3.6 全程不碰迁移台账）。逐条读数写在 plan §8.6。
+- **3.6-c 界面腿已落码（2026-10-06），九条状态位仍然一条都不动、仍全 `[ ]`**：`packages/renderer/src/ResumeEditor.tsx`
+  （动作过桥、投影回来：界面只有区块 `{ id, kind, entryIds }` + 度量数 + `metricBounds` + `timing` + 三位读数 + 一份打印 HTML 预览，
+  正文一句都不到这边）、`ResumePanel.tsx` 的 `data-action="open-editor"` 进入按钮（裁定⑩：另起组件、不占首页位）、
+  两份语言包各 44 只 `resume.editor.*` 键（`en` / `zh-CN` 键集对齐由 `check-renderer-conventions.ts` 机检）。
+  逐条落点：3.6-01 是 pointer 把手拖拽（plan §8.2 的选型，落点在下一次 `pointerup` 才发一次 `resume.editor.move`）、
+  3.6-02 是六条度量滑杆（**可拖范围在界表两端各外放 25%**，让"滑杆到界外"真能到；判定仍只在主进程一次，被拒的 message 单留一行），
+  3.6-03 撤销/重做两颗、3.6-04 模板与预览语言两个下拉（走 `.use`，不碰文档）、3.6-05 全走 i18n、
+  3.6-06 图标只取 lucide、3.6-07 全 Tailwind 无内联样式、3.6-08 每次取预览量一次往返毫秒并摆 `timing` 两只阈值、
+  3.6-09 关闭时的三选拦截块（裁定⑪：只拦组件卸载，app 关闭不做）。
+  **`resume.editor` 的 `static Config` 因此长出两只键**（`maxPreviewResponseMs` 默认 1200、`largeDocumentSectionCount` 默认 5，
+  随投影出去）——§8.3 那句"留给界面腿"的读侧到这片出现，**仍然不新增迁移**（裁定⑨ 只拦不存）。
+  `seedDemo variant='edited'` 的退场**留到九条 V 真取到证据时**（现在退掉会让 3.7-03 已入库的 diff 证据失去数据源）。
+  **为什么还是一条都不勾**：渲染层没有测试面，这片在离线下的全部证据是 `typecheck` / `lint` / `format:check` / `test` 四道门 EXIT=0
+  （`resume-doc` 136 例、`main` 78 例），而九条的验收方式每条都带截图或目视（§7.1 不许用静态门替代）。
+  缺口 = §8.5 第 4 条"V 腿时段"仍未定。落地记录见 `docs/plans/03-resume-pdf/plan.md` §8.8。
 - **3.6-b 契约腿已落地（2026-10-05），九条状态位仍然一条都不动、仍全 `[ ]`**：`resume.editor` 服务（`packages/resume-doc/src/editor-service.ts`，包内 124 → **136 例**）、
   注册表与 `cordis.yml` 各一行（且 `resume-editor` 排在 `resume-doc` / `resume-print` 之后，§9 的 5.1-c）、渲染层白名单**九行**与同名签名、
   四张错误码（`RESUME_EDITOR_NOT_OPEN` / `_DOC_UNAVAILABLE` / `_TEMPLATE_UNKNOWN` / `_EDIT_REJECTED`，后者的六种界外子原因进 `details.reason`，

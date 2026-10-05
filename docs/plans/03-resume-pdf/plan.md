@@ -714,3 +714,36 @@ TS2551（"Did you mean 'resume.doc'?"）——沿用 `graph-link.test.ts` 已有
 但九条的验收方式每一条都带 V 或界面读数，spec §7 不允许用单测替代可视项；按 master plan 的口径（P3 未做 **13 条** / 全局 **15 条**）
 这轮一条都没翻。**剩余实现面只有 3.6-c 界面腿**（`ResumeEditor.tsx` + `ResumePanel` 一个按钮进入，裁定⑩；未保存拦截只拦组件卸载，裁定⑪；
 3.6-08 的计时阈值配置随这片落；连带 `seedDemo variant='edited'` 的退场）——它要真实窗口与你在场（§7.1 / §7.9 第 3 条同一口径）。
+
+### 8.8 3.6-c 界面腿落码（2026-10-06，代码进主干、九条状态位仍然一条都不动）
+
+**这片写的是什么**：`packages/renderer/src/ResumeEditor.tsx`（新建）+ `ResumePanel.tsx` 的一颗进入按钮（裁定⑩：另起组件、
+不占首页位、面板里不再塞编辑逻辑）+ 两份语言包各 **44 键**（`shell.resume.editor.*`，键集对齐由 lint 链里的渲染层规范检查机检）。
+形状照 §8.1 第 1 条：**动作过桥、投影回来**——界面手里只有区块 `{ id, kind, entryIds }`、度量数、`metricBounds`、
+`timing`、三位 dirty/undo/redo 读数，加一份 `resume.editor.preview` 的打印 HTML；一句简历正文都不到这边（`sandbox=""` 的 iframe 摆它）。
+
+**逐条对着判据写的界面**：3.6-01 是 pointer 把手拖拽（`pointerdown` 起手、window 上的 `pointermove` 按行中心算落点、
+`pointerup` 才发一次 `resume.editor.move`；落点没变就一个字节都不发）——选型与否决理由照 §8.2，原生 HTML5 DnD 与 @dnd-kit 都没用；
+3.6-02 是六条度量的滑杆，**可拖范围在界表两端各外放 25%**（`OUT_OF_BOUNDS_REACH`，否则"滑杆到界外"这条在界面上永远到不了），
+判定仍只在主进程做一次，被拒的 message 单留一行 `resume-editor-rejected` 不被下一个动作冲掉；
+3.6-03 是撤销 / 重做两颗按钮 + `canUndo` / `canRedo` 驱动禁用；3.6-04 是模板下拉与预览语言下拉（都走 `.use`，不碰文档）；
+3.6-05 是全部文案走 i18n（`zh-CN` / `en` 双语）；3.6-06 图标只取 lucide 现有六只（`GripVertical` / `Undo2` / `Redo2` / `Save` / `X` /
+`AlertTriangle` / `Timer`）；3.6-07 样式全是 Tailwind utility，无内联 `style`；
+3.6-08 是每次取预览量一次往返毫秒 + `timing` 两个阈值读数（超阈值与大文档各一句）；
+3.6-09 是"关闭编辑器"的拦截块（保存并关闭 / 放弃并关闭 / 继续编辑三颗），按裁定⑪**只拦组件卸载**，app 关闭不做。
+
+**一处按 §8.4 的字面补齐**：`resume.editor` 的 `static Config` 从空对象变成 `maxPreviewResponseMs`(1200ms) 与
+`largeDocumentSectionCount`(5) 两只带 `.default()` 的键，并随投影出去——§8.7 里"此刻接上是无人读的死配置"那句的前提
+（无读侧）到这片结束了。带 `.default()` 的键在**直接调用点必须显式给出**（§9 的 1.3），所以两只测试装配点各补一份实参。
+
+**刻意没做的一笔**：`seedDemo variant='edited'` 的退场**留在真正收口时**。它的退场条件写的是"3.6 落地"，
+而 3.6 落地要的是九条 V 判据取到证据；此刻界面还没跑过真实窗口，先退掉会让 3.7-03 已经入库的 diff 证据失去数据源。
+
+**门禁读数（2026-10-06 本机）**：`pnpm format` / `format:check` / `typecheck` / `lint` / `test` 全部 **EXIT=0**；
+`resume-doc` 13 文件 / **136 例**（多了一条投影 `timing` 断言，例数不变）、`main` 12 文件 / **78 例**，其余包不变。
+**渲染层没有测试面**（无 `test` 脚本、无 `*.test.ts`），所以这片在离线下的全部证据就是这四道门 + 键集对齐机检。
+
+**状态位**：九条**仍全部 `[ ]`**，一条都不翻（P3 未做仍 13 条 / 全局仍 15 条）。这片只是把界面写出来并通过静态门，
+判据要的截图与目视一条都还没取——那需要真实窗口（CDP 10222、`--url 5173`、dev 换 `userData`、同批 `md5 -q` 去重），
+也就是 §8.5 第 4 条"V 腿时段"仍未定。**下一步就是在场跑这一轮**：载入种子 → 进编辑器 → 拖一把看预览变了 →
+滑到界外看那句拒绝 → 连撤销重做 → 切模板与语言 → 有改动时点关闭看拦截块。

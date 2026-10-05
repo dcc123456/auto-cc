@@ -1,4 +1,15 @@
-import { Ban, Eye, FileDown, FileText, GitCompareArrows, History, ListChecks, RefreshCw, Upload } from 'lucide-react';
+import {
+  Ban,
+  Eye,
+  FileDown,
+  FileText,
+  GitCompareArrows,
+  History,
+  ListChecks,
+  RefreshCw,
+  SlidersHorizontal,
+  Upload,
+} from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -11,6 +22,7 @@ import type {
   SnapshotDiffView,
   SnapshotMetaView,
 } from '@auto-cc/shared';
+import { ResumeEditor } from './ResumeEditor';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -67,6 +79,8 @@ export function ResumePanel() {
   const [lastImport, setLastImport] = useState<ImportReceiptView>();
   const [importError, setImportError] = useState<AppErrorPayload>();
   const [pending, setPending] = useState<PendingImportRowView[]>([]);
+  /** 打开的编辑器文档 id（裁定⑩：编辑器是另起一只组件，由这一颗按钮进入，不占首页位）。 */
+  const [editorDocId, setEditorDocId] = useState<string>();
   const bridge = window.autoCC;
 
   /**
@@ -357,6 +371,16 @@ export function ResumePanel() {
           <Ban size={12} />
           {t('resume.fail')}
         </button>
+        <button
+          type="button"
+          data-action="open-editor"
+          disabled={!seed || !!busy || !!editorDocId}
+          onClick={() => seed && setEditorDocId(seed.docId)}
+          className="flex items-center gap-1 rounded-md border border-indigo-800 px-2 py-1 text-[11px] text-indigo-300 hover:bg-indigo-950 disabled:opacity-40"
+        >
+          <SlidersHorizontal size={12} />
+          {t('resume.editor.enter')}
+        </button>
       </div>
 
       {notice && (
@@ -373,6 +397,10 @@ export function ResumePanel() {
           {receipt.path}
         </p>
       )}
+
+      {/* 编辑器一旦打开就摆在面板预览之上：3.6 的判据要看的是"改完立刻在编辑器自己的预览里见效"，
+          与本面板那份 `resume.export.preview`（已存的那份）分开摆，免得两张图分不清谁是谁。 */}
+      {editorDocId && <ResumeEditor docId={editorDocId} onClose={() => setEditorDocId(undefined)} />}
 
       {previewHtml ? (
         <iframe

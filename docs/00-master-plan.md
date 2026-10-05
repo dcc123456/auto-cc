@@ -488,6 +488,18 @@ P4 71 行（65 / 6 / 0）、P5 121 行（111 / 4 / **2 未做** + 4 条 C 半边
   （**同日 3.5-c₂ 会话腿落地**：`edit-session.ts` 的 `createPdfEditSession()` 把覆盖区列表与页序合成一份 draft 喂给 `@auto-cc/core` 的 `createSnapshotStack`（全仓仍只有那一份 past/present/future），六个动作都只在真的改了 draft 时长出撤销单元，判据的合法性复用另存那同一份 `planOverlays` / `planPageOrder`；形态按 §7.1 的存储行定为**纯模型**而非 service，所以本轮不新增白名单行。`3.5-08` 转 `[x]`，**P3 未做 14 → 13 条、全局 16 → 15 条**；逐条读数与那条「不许 import Node 能力」的约束见 `docs/plans/03-resume-pdf/plan.md` §7.14。）
   （**同日 3.6-a 模型腿落地**：`packages/resume-doc/src/editor-ops.ts`（度量界表 + 区块/条目重排的落点数学，界加在编辑器这一层而**不加进 `layoutSchema`**，以免用今天新立的滑杆范围追改 3.1/3.2 已验收的判据）+ `editor-session.ts`（`createResumeEditorSession`，仍走 `@auto-cc/core` 那唯一一份 `createSnapshotStack`；空编辑按 `contentHash` 不进栈，于是撤销回原样自动不再 dirty；模板与语言放在历史栈与文档之外，`3.6-04` 的"切换不丢数据"成了结构上不可能失败）。包内 106 → **124 例**；不新增 service、不新增白名单行、不新增迁移（裁定⑨「只拦不存」）。**本轮一个状态位都没翻**——3.6 九条的验收方式每条都带 V，P3 未做仍 13 条、全局仍 15 条；剩余实现面是 3.6-b 契约腿（离线可收）与 3.6-c 界面腿（要你在场），逐条读数见 `docs/plans/03-resume-pdf/plan.md` §8.6。）
   （**同日 3.6-b 契约腿落地**：`resume.editor` 服务成为编辑会话的持有者——它存在的唯一理由是 §8.1 那条已立的边界「简历文档正文不过进程边界」，既然正文不过来，编辑动作只能发生在主进程这边。落点四处置一次做完：`packages/resume-doc/src/editor-service.ts`（包内 124 → **136 例**，投影只出 `docId` + 区块 `{ id, kind, entryIds }` + 度量数 + `metricBounds` + 三位读数，一句正文都不出）、`registry.ts` 与 `cordis.yml` 各一行且 `resume-editor` **排在 `resume-doc` / `resume-print` 之后**（§9 的 5.1-c）、渲染层白名单**九行**加同名签名（`BridgeSignaturesCovered` 那条编译期保险丝因此过了）、四张错误码（界外的六种子原因进 `details.reason`，口径照 `PDF_EDIT_SAVE_FAILED`：处置相同就共用一支码）。接线判据在 `packages/main/src/editor-link.test.ts`（8 例，包内 70 → **78**）：九条逐条 `resolveCall` 切成服务 + **同名方法**且该方法在挂起来的实例上真是函数、界外值经网关仍带键名与界表两端、`structuredClone` 得过去而克隆串里没有简历原文、`agent.tools` 里找不到 `resume.editor*`。**不新增迁移**（裁定⑨），`3.6-08` 那两只阈值配置键按字面留给界面腿（此刻接上是无人读的死配置，§2.4）。**本轮一个状态位都没翻**——3.6 九条的验收方式每条都带 V 或界面读数，P3 未做仍 13 条、全局仍 15 条；剩余实现面只有 3.6-c 界面腿（要你在场），与 plan §8.3 的四处偏离逐条写了理由，见 `docs/plans/03-resume-pdf/plan.md` §8.7。）
+  （**同日 3.6-c 界面腿落码**：`packages/renderer/src/ResumeEditor.tsx` 成为排版编辑器的界面化身——照 5.10 画布那条已经走通的形状
+  **动作过桥、投影回来**，界面手里只有区块 `{ id, kind, entryIds }` + 度量数 + `metricBounds` + `timing` + 三位 dirty/undo/redo 读数，
+  加一份 `resume.editor.preview` 的打印 HTML（`sandbox=""` iframe），简历正文一句都不过界。九条判据各有一处落点：
+  pointer 把手拖拽（plan §8.2 的选型，原生 HTML5 DnD 与 @dnd-kit 都按理由否掉）、六条度量滑杆**可拖范围在界表两端各外放 25%**
+  （否则"滑杆到界外"这条在界面上永远走不到，而判定仍只在主进程做一次）、撤销重做两颗、模板与预览语言两个下拉走 `.use`（不碰文档）、
+  全文案 i18n（两份语言包各 44 键，键集对齐机检）、图标只取 lucide、样式全 Tailwind、每次取预览量一次往返毫秒并摆阈值读数、
+  关闭时三选拦截块（裁定⑪：只拦组件卸载）。**`resume.editor` 的 `static Config` 由此长出两只键**（`maxPreviewResponseMs` 1200 /
+  `largeDocumentSectionCount` 5，随投影出去）——§8.7 里"留给界面腿的死配置"到这片有了读侧，**仍然不新增迁移**（裁定⑨ 只拦不存）。
+  `seedDemo variant='edited'` 的退场**故意留下**：它的退场条件是 3.6 落地，而落地要的是九条 V 取到证据，此刻退掉会抽掉 3.7-03 已入库证据的数据源。
+  **本轮一个状态位都没翻**（P3 未做仍 13 条 / 全局仍 15 条）：渲染层没有测试面，离线证据只有 `typecheck` / `lint` / `format:check` / `test`
+  四道门 EXIT=0（`resume-doc` 136 例、`main` 78 例），九条每条都要截图或目视（§7.1）。**P3 的实现面到此写尽**，
+  欠的只剩 §8.5 第 4 条"V 腿时段"那一次在场活体，与 §7.9 那三条待裁。见 `docs/plans/03-resume-pdf/plan.md` §8.8。）
   （10-05 的这一次进位来自 5.10-k：`5.10-08` / `5.10-09` 的 V 半边由真实画布上那张 7 节点分支图跑出来并转 `[x]`，
   `5.10-13` 转 `[!]`——它的"kill 后从中断节点继续"这一条在界面上到不了（重启后 runner 的当前计划回到 `config.planId`，
   自定义计划那条 interrupted run 没有续跑入口），其余三条判据活体已过，缺口转 5.10-j 待裁；

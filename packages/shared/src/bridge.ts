@@ -1255,6 +1255,8 @@ export interface ResumeEditorView {
   /** 可用模板 id（下拉的数据源；模板名是渲染期标签，不过界）。 */
   readonly templates: string[];
   readonly metricBounds: Readonly<Record<EditorMetricKeyView, EditorMetricBoundView>>;
+  /** 3.6-08 的两只阈值：来自 `resume.editor` 自己的 `static Config`，界面不新开一套配置读取（§2）。 */
+  readonly timing: { readonly maxPreviewResponseMs: number; readonly largeDocumentSectionCount: number };
   readonly isDirty: boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;

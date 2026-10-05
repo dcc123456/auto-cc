@@ -23,8 +23,17 @@ import type { Layout, ResumeDocument, SectionKind } from './model.js';
 import { resumePrint } from './print.js';
 import { resumeTemplate, type TemplateLocale } from './template.js';
 
-/** 无配置服务：界值是模型级事实（`EDITOR_METRIC_BOUNDS`），不是运行期可调项；spec 3.6-08 的计时阈值随界面腿再谈。 */
-export const resumeEditorSchema = z.strictObject({});
+/**
+ * 3.6-08 的两只阈值（plan §8.4）：判据原文是"操作响应在可接受阈值内，**阈值来自配置**"，
+ * 所以它们落在本服务自己的 `static Config`，而不是界面里写死一个数，也不新开一套配置读取（§2）。
+ * 版面界值**不在此列**——那是模型级事实（`EDITOR_METRIC_BOUNDS`），不是运行期可调项。
+ */
+export const resumeEditorSchema = z.strictObject({
+  /** 一次预览构建的可接受上限（毫秒）；界面拿它与自己量到的往返时间比，只用于摆读数，判定不在界面重算。 */
+  maxPreviewResponseMs: z.number().int().positive().default(1200),
+  /** 区块数超过它就按"大文档"给一句提示（判据原文的 >5 页由这个数来，随配置走）。 */
+  largeDocumentSectionCount: z.number().int().positive().default(5),
+});
 export type ResumeEditorConfig = z.infer<typeof resumeEditorSchema>;
 
 /** 新建编辑会话时没指定模板的落点（与 `ResumePanel` 现在硬编码的那一个同源，3.6-c 之后由下拉给）。 */
@@ -51,6 +60,8 @@ export interface ResumeEditorState {
   /** 可用模板 id（下拉的数据源；模板名是渲染期标签，不过界）。 */
   templates: string[];
   metricBounds: Readonly<Record<MetricKey, MetricBound>>;
+  /** 3.6-08 的两只阈值（来自本服务 `static Config`）：界面摆读数用，判定不复制到界面去。 */
+  timing: { maxPreviewResponseMs: number; largeDocumentSectionCount: number };
   isDirty: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -71,8 +82,18 @@ export class ResumeEditorService extends Service {
    */
   private readonly sessions = new Map<string, ResumeEditorSession>();
 
-  constructor(ctx: Context, _options: ResumeEditorConfig) {
+  /**
+   * 3.6-08 的阈值：构造时从配置取一次，随投影出去（配置热改会重建本服务，见 §9 的 2.5——
+   * 重建即换一份阈值，界面下一份投影拿到的就是新值，界面不缓存它）。
+   */
+  private readonly timing: ResumeEditorState['timing'];
+
+  constructor(ctx: Context, options: ResumeEditorConfig) {
     super(ctx, 'resume.editor');
+    this.timing = {
+      maxPreviewResponseMs: options.maxPreviewResponseMs,
+      largeDocumentSectionCount: options.largeDocumentSectionCount,
+    };
   }
 
   private get docStore(): ResumeDocService {
@@ -279,6 +300,7 @@ export class ResumeEditorService extends Service {
       locale: session.locale(),
       templates: resumeTemplate.list().map((template) => template.id),
       metricBounds: EDITOR_METRIC_BOUNDS,
+      timing: this.timing,
       isDirty: session.isDirty(),
       canUndo: session.canUndo(),
       canRedo: session.canRedo(),

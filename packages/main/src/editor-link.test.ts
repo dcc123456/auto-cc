@@ -83,7 +83,8 @@ async function bootAssembly() {
   fibers.push(await ctx.plugin(AgentToolsService, {}));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
   fibers.push(await ctx.plugin(FakePrintService, {}));
-  fibers.push(await ctx.plugin(ResumeEditorService, {}));
+  // 3.6-08 的两只阈值随配置走（带 `.default()` 的键在直接调用点必须显式给出，§9 的 1.3 那条）。
+  fibers.push(await ctx.plugin(ResumeEditorService, { maxPreviewResponseMs: 1200, largeDocumentSectionCount: 5 }));
   const app = asApp(ctx);
   app['resume.doc'].save(fixtureDoc());
   // `resume.editor` 还没进 cordis 的 `AppServices` 声明（同 `workflow.graph` 那条），所以按名取时先落到
