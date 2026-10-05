@@ -2396,3 +2396,18 @@ C——白名单与 `RequestMap` 对齐（`pnpm lint` 链内的工具契约检�
 
 **取证据期间动过又改回的东西**：`cordis.yml` 的 `retryBackoffMs` 临时 500→3000（把暂停窗从 1.5 秒拉开到 3 秒，
 否则 `harness click` 那 1 秒左右的进程启动时间永远落在 run 结束之后），取完证据已改回，提交里没有它。
+
+---
+
+### 跨计划记号：5.10-19 的命令栈被抽成 `createSnapshotStack<T>`（2026-10-05，P3 的 3.5-c₁）
+
+`packages/core/src/graph-edit.ts` 里那一份 past/present/future **不再是画布私有**：推进历史的通用部分抽到
+`packages/core/src/snapshot-stack.ts` 的 `createSnapshotStack<T>(initial, clone, historyCeiling)`，
+`createWorkflowGraphEditor` 改为吃它，**对外签名与三条判据语义一字未动**（`draft()` 给副本、空编辑不入栈、
+超深度丢最老、新编辑作废重做分支）。判据仍由 5.10-19 已验收的那 7 条用例守着——它们本轮**一条都没改**，
+`packages/workflow` 复跑 209 例全绿（这也是 P3 plan §7.8 给 3.5-c 写下的约束："不许变绿→红"）。
+
+**为什么在这里留记号**：这只栈现在是**两个计划共用的机制**（P3 的轻编辑会话是第二个消费者，spec 3.5-08 明令
+"基于既有历史机制、不引入第二套历史栈"）。所以后续谁要改它的行为（比如加"批量提交算一步"、改深度裁剪口径），
+得同时看 `docs/plans/03-resume-pdf/plan.md` §7.7 的历史栈那一行与 5.10-19 的判据，不能按单一计划的便利改。
+新增的机制用例在 `packages/core/src/snapshot-stack.test.ts`（7 例，只测与状态形状无关的那部分）。

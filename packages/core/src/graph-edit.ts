@@ -9,10 +9,13 @@
  * - **存快照而不是存逆操作**。一张图的体量上限是 64 节点 / 128 边（`graph.ts` 的 schema 定死），
  *   一份深拷贝成本可忽略；而逆操作要为三类编辑各写一份反向逻辑（改参数还得记住旧值），
  *   那是同一件事的第二套实现，漂了就变成"撤销一次得到一张哪都没见过的图"（AGENTS.md §2.6/§2.7）。
+ *   推进历史这一段本身（past/present/future、深度上限、作废重做分支）已按 §2.2 抽进
+ *   `snapshot-stack.ts`，与编辑轨的轻编辑会话共用一只（spec 3.5-08 明令不许第二套历史栈）。
  * - **落点不进栈**。拖动位置属视图层、不参与指纹（5.10-06 已钉成用例），把它算作一步撤销单元
  *   会让"回退到底"这件事无法逐字段比对——用户按撤销时也不会期待位置跟着跳回去。
  */
 import { WORKFLOW_DEFAULT_OUTPUT, type WorkflowEdgeView, type WorkflowNodeSpec } from './events.js';
+import { createSnapshotStack, DEFAULT_SNAPSHOT_HISTORY } from './snapshot-stack.js';
 
 /** 一张可编辑的图：只有执行语义，落点与状态色都在别处。 */
 export type WorkflowGraphDraft = {
@@ -85,8 +88,8 @@ function cloneDraft(draft: WorkflowGraphDraft): WorkflowGraphDraft {
   };
 }
 
-/** 历史栈的默认深度：一屏一屏地撤销几十次是人的极限，再深只是内存占用（§2.6 不做未来抽象）。 */
-const DEFAULT_HISTORY_CEILING = 50;
+/** 历史栈的默认深度：转手给 `createSnapshotStack`，这里只保留调用点可省略的默认值。 */
+const DEFAULT_HISTORY_CEILING = DEFAULT_SNAPSHOT_HISTORY;
 
 /**
  * 建一只编辑命令栈。
@@ -98,71 +101,52 @@ export function createWorkflowGraphEditor(
   initial: WorkflowGraphDraft,
   historyCeiling: number = DEFAULT_HISTORY_CEILING,
 ): WorkflowGraphEditor {
-  let present = cloneDraft(initial);
-  const past: WorkflowGraphDraft[] = [];
-  let future: WorkflowGraphDraft[] = [];
-
-  /**
-   * 把当前图压进历史并换上下一份状态。
-   * @param next 编辑后的图（会被拷一份）
-   */
-  function commit(next: WorkflowGraphDraft): void {
-    past.push(present);
-    if (past.length > historyCeiling) past.shift();
-    present = next;
-    // 新编辑一律作废"重做"分支：这不是协同编辑，没有"两条历史线"要留（§5.10.8 明确不做多人协同）。
-    future = [];
-  }
+  const stack = createSnapshotStack(initial, cloneDraft, historyCeiling);
 
   return {
     draft() {
-      return cloneDraft(present);
+      return stack.present();
     },
     canUndo() {
-      return past.length > 0;
+      return stack.canUndo();
     },
     canRedo() {
-      return future.length > 0;
+      return stack.canRedo();
     },
     addNode(node) {
-      if (present.nodes.some((candidate) => candidate.id === node.id)) return false;
-      commit({ nodes: [...present.nodes, node], edges: present.edges });
+      const current = stack.present();
+      if (current.nodes.some((candidate) => candidate.id === node.id)) return false;
+      stack.commit({ nodes: [...current.nodes, node], edges: current.edges });
       return true;
     },
     connect(source, sourceHandle = WORKFLOW_DEFAULT_OUTPUT, target = '') {
       const edgeId = workflowEdgeIdOf(source, sourceHandle, target);
-      const known = new Set(present.nodes.map((node) => node.id));
+      const current = stack.present();
+      const known = new Set(current.nodes.map((node) => node.id));
       if (!known.has(source) || !known.has(target)) return false;
-      if (present.edges.some((edge) => edge.id === edgeId)) return false;
-      commit({ nodes: present.nodes, edges: [...present.edges, { id: edgeId, source, sourceHandle, target }] });
+      if (current.edges.some((edge) => edge.id === edgeId)) return false;
+      stack.commit({ nodes: current.nodes, edges: [...current.edges, { id: edgeId, source, sourceHandle, target }] });
       return true;
     },
     setParams(nodeId, params) {
-      const index = present.nodes.findIndex((node) => node.id === nodeId);
+      const current = stack.present();
+      const index = current.nodes.findIndex((node) => node.id === nodeId);
       if (index < 0) return false;
-      const previous = (present.nodes[index] as WorkflowNodeSpec).params;
+      const previous = (current.nodes[index] as WorkflowNodeSpec).params;
       const keys = new Set([...Object.keys(previous), ...Object.keys(params)]);
       const unchanged = [...keys].every((key) => previous[key] === params[key]);
       if (unchanged) return false;
-      const nextNodes = present.nodes.map((node, candidate) =>
+      const nextNodes = current.nodes.map((node, candidate) =>
         candidate === index ? { ...node, params: { ...params } } : node,
       );
-      commit({ nodes: nextNodes, edges: present.edges });
+      stack.commit({ nodes: nextNodes, edges: current.edges });
       return true;
     },
     undo() {
-      const previous = past.pop();
-      if (!previous) return false;
-      future.push(present);
-      present = previous;
-      return true;
+      return stack.undo();
     },
     redo() {
-      const next = future.pop();
-      if (!next) return false;
-      past.push(present);
-      present = next;
-      return true;
+      return stack.redo();
     },
   };
 }

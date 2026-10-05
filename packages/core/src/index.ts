@@ -304,6 +304,7 @@ export * from './events.js';
 export * from './operators.js';
 export * from './graph-check.js';
 export * from './graph-edit.js';
+export * from './snapshot-stack.js';
 export * from './paths.js';
 export * from './sql.js';
 export * from './concurrency.js';
