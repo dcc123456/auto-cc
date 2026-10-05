@@ -1,0 +1,34 @@
+5.10-08（V）条件分支：多出口节点按出口选边执行，未走的分支在画布上显示 skipped 而非 pending · 2026-10-05（本机 macOS，dev 实例）
+
+前置（裁定①「造，只走 fixture」）：5.10-k 新增只打本地 fixture 的多出口演示算子 `demo.branch`
+  （`packages/core/src/operators.ts` 登记，出口 `yes` / `no`；`packages/workflow/src/executors.ts` 的
+  `branchExecutor` 按 `value >= threshold` 决定走哪个出口）。它是本片之前缺的那块地基：
+  登记处里原先没有一只 `outputs.length > 1` 的算子，画布上连不出第二根出口线，08/09/13 三条 V 都取不到。
+
+一、这张图全部经真实画布 UI 搭出来（没有走 IPC 后门，plan §7.8.3-septies 的取证口径）
+  计划 `plan-ee4ec5235d43`（界面名「510k 分支演示」，7 个节点 / 7 条边，取证据时 revision 6→7、
+  指纹 ce3ed2e7→04cf8b51，中间那次只是把 `flaky-3` 的 `failTimes` 由 0 改成 2 并「保存到库」）。
+  连线（`workflow_plans.graph_json.edges` 原样）：
+    demo-branch-draft-1:yes -> flaky-1
+    demo-branch-draft-1:yes -> jd-list-draft-1      （同一个出口扇出两条，见 5.10-09）
+    demo-branch-draft-1:no  -> jd-list-draft-2      （未被选中的那一支）
+    flaky-1 -> flaky-2 -> flaky-3 -> flaky-4        （线性）
+    jd-list-draft-1:default -> flaky-4              （flaky-4 是汇聚点，两条入边）
+  操作口只有：算子库点两下加格子、`harness drag` 拖出口把手连线、参数卡改 `failTimes`、保存前校验、保存到库。
+
+二、跑出来的读数（run 49a78459-ff2f-4e3e-85ed-08219488befe，`workflow_nodes` 原样）
+    node_index 0  demo-branch-draft-1  demo.branch  status=done  attempts=1  output_handle='yes'
+    node_index 6  jd-list-draft-2      jd.list      status=skipped  attempts=0  duration_ms=null
+  —— 「走的哪一支」是登记在库里的一个事实（号段 29 的 `output_handle`），不是界面猜出来的；
+     没走的那一支由 runner **写**成 `skipped`（`skipped` 原先只在读侧合法、runner 从不写，见 plan §7.8.3-decies ④）。
+
+三、界面上看得见的样子
+  docs/acceptance/5.10/5.10-08-branch-taken-and-skipped.png
+  （同一屏：画布 6 格绿 + 1 格琥珀色「已跳过」，算子库那一行有「条件分支演示（数值 ≥ 阈值走 yes）」，
+    步骤表第 7 行 `7 · jd-list-draft-2 已跳过`，其余六行「已完成」）
+
+四、反向对照的落点（**不在这一屏**，如实记下）
+  活体只跑了 `value=1 / threshold=1` 这一次（走 `yes`）。走 `no` 那一支的级联跳过——选中 `no` 之后
+  `flaky-1..4` 整条下游都要变成 `skipped`、只有 `jd-list-draft-2` 执行——由 U 半边覆盖：
+  `packages/workflow` 里 5.10-f 的推进态重建用例（分支节点完成却没登记出口时**拒绝续跑**而不是猜，
+  见 spec 5.10-13 的 U 半边读数）。这里不把它写成活体已过。

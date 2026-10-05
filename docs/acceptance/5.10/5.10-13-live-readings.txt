@@ -1,0 +1,46 @@
+5.10-13（V）DAG 下重验 2.4-05/06：kill 后从中断节点继续、已完成不重放、外发幂等仍成立并留新证据 · 2026-10-05（本机 macOS，dev 实例）
+
+同一张分支图（`plan-ee4ec5235d43`，7 节点 / 7 边，搭图过程与连线清单见 `5.10-08-live-readings.txt`）。
+
+一、真的 kill 过一次
+  run 24ea63b2-381e-4273-b6db-aa4e5af48fd6 跑到 `flaky-3` 那一格（库里 `running` / attempts=1）时把 dev 主进程 kill 掉。
+  重启后 `workflow_runs.status` 由 `[Service.init]` 的 `markInterrupted` 判成 **`interrupted`**（`node tmp/…/dump.js` 读数），
+  界面上第一次读数没有把它显示成"仍在运行"。这一步是 2.4-05 那条判据在 DAG 上的重现，通过。
+
+二、但那条被 kill 的 run 在界面上**续不起来**——这是本片取证据时撞到的真缺口（不是环境问题）
+  重启后 runner 的「当前计划」回到 `config.planId`（内置那条），而画布保存过的自定义计划只有 `runner.start(planId)`
+  会切换（`packages/workflow/src/index.ts:488`），那颗按钮同时**必然开一条新 run**；面板上的计划下拉只改渲染层本地
+  state（`WorkflowPanel.tsx:69 / 153 / 213`），从不告诉主进程"当前计划是它"。于是 `resumable()` / `resumeRun()`
+  读的是另一条计划的指纹，那条 `interrupted` 的 DAG run 在界面上没有任何入口能续。
+  `resumeRun` 的注释（index.ts:703 起）写的"续自定义计划的 run，得先把当前计划换成那条（面板的下拉，5.4-b 的入口）"
+  这条路径**在下拉上并不成立**——它只在"同一个进程里已经点过一次开始"之后成立。
+  → 记为待裁条目 5.10-j（本 spec 的 5.10-j 小节 / 任务清单 #9），本片不自行改产品行为。
+
+三、可续的那一半在活体上跑通了：停在可恢复点上 → 从中断那一格继续 → 已完成不重放
+  runner 自己的口径（index.ts:622 附近）：暂停与中断续跑要的是同一条语义——都停在可恢复点上、都能按原下标续上。
+  全程真点（`harness click` 打 `[data-action=start]` / `[data-action=pause]` / `[data-action=resume]`），run d6736973-b094-48b0-9ff2-335b060ced30：
+    暂停那一刻  面板「已暂停 · d6736973」、步骤 1–2 已完成 / 3–7 待执行；库里 `flaky-2` 是 `running` / attempts=1
+    续跑跑完    步骤 6 格已完成 + `7 · jd-list-draft-2 已跳过`；库里 `flaky-2` attempts 1→2（**被停住那一格重新执行**）
+    已完成不重放 `flaky-1` 续跑前后 attempts 仍是 **1**、`idempotency_key` 仍是同一条
+                `d6736973-b094-48b0-9ff2-335b060ced30|flaky-1|demo://flaky-1`
+    外发/计数   本地 fixture 的 `/api/fail-counter`（§7.2：只打本地仿站）暂停时 hits=2，续跑跑完 hits=**5**，
+                增量 3 正好等于剩下三只 flaky 各执行一次——多出来的一次都没有，说明已完成节点没有被重放。
+  截图：`5.10-13-paused-at-node.png`（已暂停那一屏，步骤 1–2 绿、3–7 待执行、续跑按钮可点）
+        `5.10-13-resumed-to-done.png`（续跑后同一屏，6 绿 + 1 琥珀「已跳过」）
+  为把暂停窗拉开，临时把 `cordis.yml` 的 `retryBackoffMs` 由 500 改 3000（取完证据已改回，提交里没有这一处改动）。
+
+四、"外发幂等仍成立"在本 run 上读到的是哪一层（不夸大）
+  这张图里没有 `effect: outbound` 的节点（`demo.branch` 是 read、`demo.flaky` 是 local-write、`jd.list` 是 read），
+  所以 §7.3 那条"外发必经闸门"在这条 run 上根本没有可绕的东西；这里成立的判据是**幂等键在续跑前后一字未变**，
+  真实外发（打招呼 / 投递）的幂等仍由 2.4-06 与 2.5/2.6 的既有验收背着，本片没有重跑它。
+
+五、反向对照（活体取到，同一张图）
+  在诊断页的「工作流实验台」上点「从库里那次中断续跑」，界面原话：
+    「从库里那次中断续跑 失败：库里没有按当前计划（04cf8b51）可续的 run」
+  ——那是 5.10-07 的指纹闸门在 DAG 上同样的表现：一、里那条被 kill 的 run 记的是改图之前的指纹，改过图就不该续。
+  截图 `5.10-13-kill-then-refused.png`。
+
+六、顺带记一条渲染层缺陷（与本片判据无关，未修）
+  `[data-testid="operator-param-form"]` 会在同一个 `workflow-canvas` 区块里**按选点次数累积**（实测一次会话里 9→35 张，
+  单一 React 根、单一画布实例，硬刷新后从 1 张重新起算）。它会把下面的「运行读数」卡推到画面外。
+  取证据时靠"读最后一张卡"绕开，缺陷本身留给后续片子。

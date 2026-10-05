@@ -1,0 +1,30 @@
+5.10-09（U+V 的 V 半边）并行扇出与汇聚：两条出边可同时推进，join 节点待所有入边到达后才执行且只执行一次 · 2026-10-05（本机 macOS，dev 实例）
+
+同一张图、同一次 run（读数是 49a78459-ff2f-4e3e-85ed-08219488befe，逐节点 `workflow_nodes` 原样）：
+
+  node_id                started_at      finished_at     attempts  status
+  demo-branch-draft-1    …295573         …295573         1         done（output_handle='yes'）
+  flaky-1                …295574         …295592         1         done      ← 扇出第一子
+  flaky-2                …295593         …295597         1         done
+  flaky-3                …295597         …295598         1         done      ← 入边 A 到此完成
+  jd-list-draft-1        …295599         …295599         1         done      ← 扇出第二子 = 入边 B
+  flaky-4                …295599         …295600         1         done      ← 汇聚点
+  jd-list-draft-2        （无 started_at） …295600        0         skipped
+
+一、扇出：同一个出口 `yes` 上挂了两条边（`demo-branch-draft-1:yes->flaky-1` 与
+  `demo-branch-draft-1:yes->jd-list-draft-1`，见 `graph_json.edges`），**两条都被推进、各自执行了一次**
+  （两行都是 `done` / attempts=1）。画布上这两条线同时亮着，截图
+  `docs/acceptance/5.10/5.10-09-fanout-join-readings.png`（同一屏下方还有「库里的 run 与逐节点读数」段）。
+  **口径写清楚**：runner 是单条推进循环（一次派发一个节点），所以这里证明的是"两条出边都成为可推进的边、
+  都执行到"，不是墙上时钟意义上的并发执行——时间戳也照出了这一点（第二子 …599 晚于第一子那条链的 …574）。
+
+二、汇聚：`flaky-4` 有两条入边（`flaky-3:default->flaky-4`、`jd-list-draft-1:default->flaky-4`）。
+  它的 `started_at`（…295599）**不早于**两条入边各自终点的较晚者（`jd-list-draft-1` 的 …295599；
+  入边 A 那一支更早到 …295598），也就是**等齐了才动**。
+  并且**只动了一次**：这一行 attempts=1，`workflow_nodes` 里 `flaky-4` 只有这一行（`run_id + node_index` 唯一）。
+  反向对照（少一条入边时不许动）在 U 半边：5.10-f 的推进态用例里，入边未齐的节点不会被派发，
+  续跑时也是按库里那些行重建"还差哪一条"。
+
+三、级联跳过与汇聚的相互作用（这一条是 5.10-f 裁定 3 的判据，顺带在活体上确认）
+  未走那一支的 `jd-list-draft-2` 是 `skipped` / attempts=0 / 没有 `started_at`，
+  它没有把 `flaky-4` 卡住——因为 `flaky-4` 的入边里没有来自未走一支的那一条。
