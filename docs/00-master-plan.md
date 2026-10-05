@@ -485,6 +485,7 @@ P4 71 行（65 / 6 / 0）、P5 121 行（111 / 4 / **2 未做** + 4 条 C 半边
   `pdf-lib` 没有 `movePage`），`pdf.export.saveAs` 变成四实参、配置多一条尺度 `maxPages`，覆盖区**按来源页绑**（同一源的每一张副本都被盖上）。
   `3.5-07` 的 U 半边过、截图半边仍 `[ ]`（页序控件要等 c₂ 的会话面），`3.5-08` 的前件（`createSnapshotStack<T>`，commit `4db0fb0`）已就位而实现随 c₂。
   **本轮一个状态位都没翻，P3 未做仍 14 条、全局仍 16 条**；逐条读数与两处改名见 `docs/plans/03-resume-pdf/plan.md` §7.13。）
+  （**同日 3.5-c₂ 会话腿落地**：`edit-session.ts` 的 `createPdfEditSession()` 把覆盖区列表与页序合成一份 draft 喂给 `@auto-cc/core` 的 `createSnapshotStack`（全仓仍只有那一份 past/present/future），六个动作都只在真的改了 draft 时长出撤销单元，判据的合法性复用另存那同一份 `planOverlays` / `planPageOrder`；形态按 §7.1 的存储行定为**纯模型**而非 service，所以本轮不新增白名单行。`3.5-08` 转 `[x]`，**P3 未做 14 → 13 条、全局 16 → 15 条**；逐条读数与那条「不许 import Node 能力」的约束见 `docs/plans/03-resume-pdf/plan.md` §7.14。）
   （10-05 的这一次进位来自 5.10-k：`5.10-08` / `5.10-09` 的 V 半边由真实画布上那张 7 节点分支图跑出来并转 `[x]`，
   `5.10-13` 转 `[!]`——它的"kill 后从中断节点继续"这一条在界面上到不了（重启后 runner 的当前计划回到 `config.planId`，
   自定义计划那条 interrupted run 没有续跑入口），其余三条判据活体已过，缺口转 5.10-j 待裁；
