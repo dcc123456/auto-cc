@@ -304,6 +304,14 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `stop-run`），活体验收必须点这一颗才真动手——只点 confirm 会得到"返回成功但库里不增行"的假象。
   建议档位下更进一步：`TIER_SUGGEST_READ_ONLY`，且确定性桩只认**逐字点名的工具 id**，自然语言起草出的是空计划、
   确认按钮天然禁用（`AgentRunPanel.tsx` 的 `disabled={busy !== undefined || run.plan.length === 0}`）。
+- **实测（3.6-c）harness 再补三条**：⑫ `drag` 与 `click` 也和 `eval` / `shot` 一样必须带 `--url 5173`，不带时报的是
+  「拖拽起点未找到：<选择器>」，而同一份选择器在 `eval --url 5173` 里查得到——两条命令 attach 的不是同一个 target；
+  ⑬ **渲染层一 reload 就长出 `data-testid=privacy-notice` 全屏遮罩**，它会把 CDP 派发的**可信**鼠标事件全部接走，
+  而 `element.click()` 跳过命中测试。于是"程序化点击有效、真实拖拽无效"看起来像组件监听挂错时机。
+  跑任何真实鼠标动作前先 `click --url 5173 --selector '[data-action=privacy-acknowledge]'`，判据是
+  `document.elementFromPoint(把手中心)` 拿到的必须是把手本身；⑭ `shot --reveal <目标>` 对**相邻元素**不产生新的滚动位
+  （度量行与紧挨其下的计时行各截一张，两张字节完全相同），要独立画面就在页面里 `scrollIntoView({ block: 'start' })`
+  后不带 `--reveal` 重拍。第②条与 §9 的 5.10-18 是同一条硬步骤：收截图前对整批跑 `md5 -q | sort | uniq -c`。
 
 ---
 

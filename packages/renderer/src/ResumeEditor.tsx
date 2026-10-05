@@ -52,6 +52,8 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
   const [drag, setDrag] = useState<DragState>();
   /** 拖拽落点要读实时值：`pointerup` 的闭包里读 state 会拿到起手那一刻的旧落点。 */
   const dragRef = useRef<DragState | undefined>(undefined);
+  /** 进行中的拖拽监听的摘除口，供卸载时兜底。 */
+  const detachRef = useRef<(() => void) | undefined>(undefined);
   /** 区块行的 DOM，用于按指针位置算落点下标。 */
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
 
@@ -103,29 +105,38 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
   };
 
   /**
-   * 拖拽进行期间挂上 window 的 pointer 监听：move 算落点，up 提交那一次 `move`。
-   * 落点没变（`overIndex === fromIndex`）时一个字节都不发——3.6-03 的"空编辑不进栈"判在主进程那侧，
+   * 拖拽的监听在 `pointerdown` **当场**挂上，不挂在后续渲染的 effect 里。
+   *
+   * 活体第一次跑 3.6-01 就是这么失败的：`harness drag` 把 down/move/up 在几毫秒里连着派发完，
+   * 而 effect 要等这次渲染提交后才跑，`pointerup` 早就过去了——于是拖了个空、行数一字未改。
+   * 落点没变（`overIndex === fromIndex`）时一个字节都不发：3.6-03 的"空编辑不进栈"判在主进程那侧，
    * 但界面也不该白跑一趟跨进程调用。
+   * @param index 起手所在区块的行下标
    */
-  useEffect(() => {
-    if (!drag) return;
-    const rowCount = view?.sections.length ?? 0;
-    if (rowCount === 0) return;
+  const startDrag = (index: number) => {
+    const sections = view?.sections;
+    if (!sections || sections.length === 0) return;
     const move = (event: PointerEvent) => {
       const current = dragRef.current;
       if (!current) return;
-      const overIndex = indexOfPointer(event.clientY, rowCount);
+      const overIndex = indexOfPointer(event.clientY, sections.length);
       if (overIndex === current.overIndex) return;
       const next = { fromIndex: current.fromIndex, overIndex };
       dragRef.current = next;
       setDrag(next);
     };
+    const detach = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      detachRef.current = undefined;
+    };
     const up = () => {
       const current = dragRef.current;
       dragRef.current = undefined;
       setDrag(undefined);
-      if (!current || current.overIndex === current.fromIndex || !view) return;
-      const section = view.sections[current.fromIndex];
+      detach();
+      if (!current || current.overIndex === current.fromIndex) return;
+      const section = sections[current.fromIndex];
       if (!section) return;
       void run(
         t('resume.editor.moveSection'),
@@ -140,14 +151,21 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
         },
       );
     };
+    const initial = { fromIndex: index, overIndex: index };
+    dragRef.current = initial;
+    setDrag(initial);
+    detachRef.current = detach;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    // 只由"是否正在拖"驱动：监听里读的是 ref 与本次渲染的快照，落点每次变化都重挂监听反而丢事件。
-  }, [drag !== undefined]);
+  };
+
+  /** 卸载时摘掉进行中的监听：人在拖拽中途关掉编辑器，不该在 window 上留下孤儿监听。 */
+  useEffect(
+    () => () => {
+      detachRef.current?.();
+    },
+    [],
+  );
 
   /**
    * 改一条度量：界外与非有限值都由主进程拒，界面把那句原因原样摆出来并把滑杆弹回已提交的值。
@@ -349,9 +367,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
               data-action="drag-section"
               onPointerDown={(event) => {
                 event.preventDefault();
-                const initial = { fromIndex: index, overIndex: index };
-                dragRef.current = initial;
-                setDrag(initial);
+                startDrag(index);
               }}
               className={
                 drag?.fromIndex === index
