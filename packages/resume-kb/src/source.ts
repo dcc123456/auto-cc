@@ -12,8 +12,7 @@
  * - DOCX 走 `mammoth`（BSD-2-Clause）的 `extractRawText`，段与段之间给空行，正好落进 `sections.ts` 的块模型。
  * - **不引入 OCR**：图片型 PDF 抽出来就是近零字符，一律由 `MIN_TEXT_CHAR_COUNT` 判成疑似扫描件（4.1-05）。
  */
-import { createHash } from 'node:crypto';
-
+import { sha256Hex } from '@auto-cc/core/file-read';
 import { type ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { type ParseIssue, parseResumeText } from './sections.js';
 
@@ -106,10 +105,10 @@ export function detectFormat(bytes: Uint8Array): ResumeSourceFormat | null {
  * 必须在把字节交给 pdf.js **之前**算——实测 `getDocument` 会移交（detach）传入的 ArrayBuffer，
  * 之后同一份字节再读就是空壳。
  * @param bytes 文件字节
- * @returns sha256 十六进制串
+ * @returns sha256 十六进制串（摘要实现只在 `core/file-read` 一处，编辑轨的产物指纹读同一份口径）
  */
 export function sourceHashOf(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
+  return sha256Hex(bytes);
 }
 
 /**

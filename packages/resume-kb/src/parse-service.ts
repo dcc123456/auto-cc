@@ -10,10 +10,11 @@
  * 与 `outbound.deliver` 的 `readAttachment` 不合并：那条是「取投递附件并先验 `.pdf` 扩展名」，
  * 这一条是「取简历源文件并让解析层按魔数判格式」（4.1-01 要 pdf / docx / md / txt 四种），
  * 判定口径不同、失败语义也不同，抽成一份只会让两边都长出开关参数（AGENTS.md §2.7 的按事判断）。
+ * 但「绝对路径 + 字节上限 + 读出字节」这一小段是同一条逻辑，3.5-a 的编辑轨是它的第二回使用，
+ * 所以它已经上收到 `@auto-cc/core/file-read`（§2.2），本层只决定用哪个错误码。
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
 import { AppError, agentTool, asApp, registerAgentTools, Service, toolResult, type Context } from '@auto-cc/core';
+import { readBoundedFile } from '@auto-cc/core/file-read';
 import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
@@ -213,7 +214,7 @@ export class ResumeParseService extends Service {
    * @throws `AppError('RESUME_IMPORT_FAILED')`——路径非法、读不出、格式不认识、文件结构损坏（4.1-06）
    */
   async fromFile(filePath: string, nowMs = Date.now()): Promise<ImportReceipt> {
-    const bytes = this.readBounded(filePath);
+    const bytes = readBoundedFile(filePath, { maxBytes: this.options.maxBytes, code: 'RESUME_IMPORT_FAILED' });
     // 顺序是硬约束：pdf.js 会移交（detach）传入的 ArrayBuffer，抽取之后再算哈希就是空壳。
     const sourceHash = sourceHashOf(bytes);
     const docId = docIdOf(sourceHash);
@@ -283,31 +284,6 @@ export class ResumeParseService extends Service {
       )
       .get(sourceHash) as unknown as ResumeImportRow | undefined;
     return row === undefined ? null : toPendingView(row);
-  }
-
-  /**
-   * 读文件并卡住字节上限。
-   * @param filePath 绝对路径
-   * @returns 文件字节；调用方拿到的是副本，交给三方库前无需再复制
-   */
-  private readBounded(filePath: string): Uint8Array {
-    if (!isAbsolute(filePath)) {
-      throw new AppError('RESUME_IMPORT_FAILED', '简历路径必须是绝对路径');
-    }
-    if (!existsSync(filePath)) {
-      throw new AppError('RESUME_IMPORT_FAILED', `没有找到这个文件：${filePath}`);
-    }
-    const stat = statSync(filePath);
-    if (!stat.isFile()) {
-      throw new AppError('RESUME_IMPORT_FAILED', `这不是一个文件：${filePath}`);
-    }
-    if (stat.size > this.options.maxBytes) {
-      throw new AppError(
-        'RESUME_IMPORT_FAILED',
-        `这份文件 ${String(stat.size)} 字节，超过上限 ${String(this.options.maxBytes)} 字节`,
-      );
-    }
-    return new Uint8Array(readFileSync(filePath));
   }
 
   /**

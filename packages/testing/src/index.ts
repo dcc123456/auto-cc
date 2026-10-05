@@ -2,3 +2,4 @@ export { CdpSession, listTargets, type CdpTarget, type TargetSpec } from './cdp.
 export { decodePng, type Raster } from './png.js';
 export { diffPng, type DiffBox, type DiffReport } from './diff.js';
 export { archiveEvidence, evidenceName, SPEC_ID_PATTERN, type ArchivedFile } from './evidence.js';
+export { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf } from './pdf-fixture.js';

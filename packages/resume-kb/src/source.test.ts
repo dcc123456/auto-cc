@@ -3,9 +3,11 @@
  *
  * 夹具在测试内生成，不放二进制样本：最小 PDF 只能用 Type1/Helvetica（不含中日韩字形），所以 **PDF 腿用英文简历**；
  * DOCX 是 XML 文本，可以带中文，所以 **DOCX 腿复用 4.1-a 的中文语料**，证明两条依赖腿落到同一套模型。
+ * 最小 PDF 的生成器住在 `@auto-cc/testing`（编辑轨 3.4-03 的装载用例是它第二次被用到，AGENTS.md §2.2 要求抽公共层）。
  * 所有内容均为虚构，不含真实个人信息（spec 数据纪律）。
  */
 import { describe, expect, it } from 'vitest';
+import { minimalPdf } from '@auto-cc/testing';
 
 import { detectFormat, parseResumeSource, sourceHashOf, extractSourceText } from './source.js';
 
@@ -35,44 +37,6 @@ const DOCX_RESUME_PARAGRAPHS = [
   '## 教育经历',
   '东海大学 计算机科学与技术 学士 2015.09-2019.06',
 ];
-
-/**
- * 生成最小合法 PDF：Helvetica Type1 + 未压缩内容流，一行一个 `Tj`。
- * 括号与反斜杠会被剥掉（PDF 字符串转义不值得在测试里复刻）。
- * @param lines 逐行文本
- * @returns PDF 字节
- */
-function minimalPdf(lines: readonly string[]): Uint8Array {
-  const body = `BT /F1 12 Tf 50 800 Td ${lines
-    .map((line) => `(${line.replace(/[()\\]/g, '')}) Tj 0 -20 Td`)
-    .join(' ')} ET`;
-  return wrapPdf([
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Length ${String(Buffer.byteLength(body))} >>\nstream\n${body}\nendstream`,
-  ]);
-}
-
-/**
- * 把若干对象拼成带交叉引用表的 PDF 文件。
- * @param objects 对象正文（不含 `n 0 obj` 头）
- * @returns PDF 字节
- */
-function wrapPdf(objects: readonly string[]): Uint8Array {
-  let out = '%PDF-1.4\n';
-  const offsets: number[] = [];
-  objects.forEach((content, index) => {
-    offsets.push(Buffer.byteLength(out));
-    out += `${String(index + 1)} 0 obj\n${content}\nendobj\n`;
-  });
-  const xrefStart = Buffer.byteLength(out);
-  out += `xref\n0 ${String(objects.length + 1)}\n0000000000 65535 f \n`;
-  for (const offset of offsets) out += `${offset.toString().padStart(10, '0')} 00000 n \n`;
-  out += `trailer\n<< /Size ${String(objects.length + 1)} /Root 1 0 R >>\nstartxref\n${String(xrefStart)}\n%%EOF\n`;
-  return new Uint8Array(Buffer.from(out, 'latin1'));
-}
 
 /**
  * 生成最小合法 DOCX：STORE 法 zip + 三个部件，每段一个 `<w:p>`（真实 Word 的形状）。

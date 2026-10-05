@@ -211,8 +211,11 @@ packages/pdf-edit/          @auto-cc/plugin-pdf-edit   # L2，只做一件事：
 - **依赖方向**：`pdf-edit` 只依赖 `@auto-cc/core`（快照栈、`AppError`）、`@auto-cc/shared`（视图类型与 hash）、`@auto-cc/plugin-store`（不需要，见 §7.1 存储行）、
   `@auto-cc/plugin-config`（取 `paths().userDataDir`）；**禁止 import `resume-doc`**，也禁止被 `resume-doc` import（两者只在 `packages/main` 的装配层并列）。
   字节 hash 复用 `@auto-cc/plugin-resume-kb` 已复导的 `sourceHashOf`（`packages/resume-kb/src/index.ts` 行 131，唯一一份对 `Uint8Array` 算 sha 的实现），不在新包里重写。
+  **← 3.5-a 落地时更正（见 §7.11）**：这条走不通——`pdf-edit` 与 `resume-kb` 同为 L2，横向 import 被 §4.1 拦住，
+  而"有界读 + 字节 hash"因此上收到 `@auto-cc/core` 的 **subpath 导出** `./file-read`（不走 barrel 的理由是 `bridge.ts` 行 125 的打包陷阱）。
 - **挂载顺序**（§9 的 5.1-c 坑）：`cordis.yml` 里新增的 `pdf-edit` 行必须排在它 `inject` 的那几只（`config`、`resume-kb`）**之后**，
   并且加行之后要复跑 `scripts/check-tool-contract.ts`——它现在扫的是"软问注册表"的时序，静默少一只工具正是它拦下的那类缺陷。
+  **← 3.5-a 落地**：那一行是 `pdf-io` 且**没有** `dependsOn`（3.5-a 不落盘、不 inject、也不登记 agent 工具），排在 `kb-generate` 之后；见 §7.11 第 3 条。
 
 ### 7.4 对外 API 面与 IPC 白名单
 
@@ -260,12 +263,12 @@ i18n（§5.5/5.6）：新增命名空间 `pdfEdit.*`，两份语言包同批补�
 
 ### 7.8 子计划分解与顺序
 
-| 片                     | 内容                                                                                                           | 判据                                                         | 依赖         |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ |
-| **3.5-a** 引擎腿       | 引入 `pdf-lib` + fontkit、建 `packages/pdf-edit`、`pdf.io.open` + `pdf.layout.textItems`、许可记账两行         | `3.4-03` `[x]`、`3.5-01` 的 C 半边                           | 1.3 / 1.7    |
-| **3.5-b** 覆盖腿       | 覆盖区模型 + `overlay-writer`（白底矩形 + 中文字体子集）+ `pdf.export.saveAs` + 失败不落半成品                 | `3.5-02` / `03` / `06` / `09`，接住 3.4-04/07 转移来的确定态 | 3.5-a        |
-| **3.5-c** 整页与历史腿 | `page-ops`（增删/重排）+ `createSnapshotStack<T>` 抽取（workflow 画布同时改吃它）+ undo/redo                   | `3.5-07` / `08`，且 5.10-19 的原有用例复跑不许变绿→红        | 3.5-b / 5.10 |
-| **3.6** 排版编辑器     | 生成轨的文档模型编辑器（区块拖拽、度量调节、模板切换、i18n、拦截未保存离开）——**与轻编辑无关**，判据与状态不动 | `3.6-01…09` 九条                                             | 3.3          |
+| 片                                                  | 内容                                                                                                                  | 判据                                                         | 依赖         |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ |
+| **3.5-a** 引擎腿（**已落地 2026-10-05**，见 §7.11） | 引入 `pdf-lib`、建 `packages/pdf-edit`、`pdf.io.open`（fontkit 与 `pdf.layout.textItems` 顺延到 3.5-b，理由在 §7.11） | `3.4-03` 已 `[x]`；`3.5-01` 的 C 半边随顺延仍 `[ ]`          | 1.3 / 1.7    |
+| **3.5-b** 覆盖腿                                    | 覆盖区模型 + `overlay-writer`（白底矩形 + 中文字体子集）+ `pdf.export.saveAs` + 失败不落半成品                        | `3.5-02` / `03` / `06` / `09`，接住 3.4-04/07 转移来的确定态 | 3.5-a        |
+| **3.5-c** 整页与历史腿                              | `page-ops`（增删/重排）+ `createSnapshotStack<T>` 抽取（workflow 画布同时改吃它）+ undo/redo                          | `3.5-07` / `08`，且 5.10-19 的原有用例复跑不许变绿→红        | 3.5-b / 5.10 |
+| **3.6** 排版编辑器                                  | 生成轨的文档模型编辑器（区块拖拽、度量调节、模板切换、i18n、拦截未保存离开）——**与轻编辑无关**，判据与状态不动        | `3.6-01…09` 九条                                             | 3.3          |
 
 顺序裁定：a → b → c 是依赖链，**3.6 排在其后或并行都可**（它只依赖 3.3），但一次只推进一个窗口（§0）。
 3.5-c 那一片动到 5.10 已验收的画布栈，属于跨计划的重构，落码前要在 `docs/plans/05-chat-agent/plan.md` 里留一条对应记号，别让两个计划各自以为栈是自己的。
@@ -284,3 +287,52 @@ i18n（§5.5/5.6）：新增命名空间 `pdfEdit.*`，两份语言包同批补�
 - 不做 PDF 表单（AcroForm）、加密文档、批注；遇到即给"该文件不受支持"的确定态，不静默产出坏文件。
 - 不做逐像素位图预览（除非 §7.9 第 1 条裁成要）；不引入 `@napi-rs/canvas` 或任何需编译的原生模块。
 - 不让 agent 工具面出现 `pdf.*`（见 §7.4）。
+
+### 7.11 3.5-a 落地记录（2026-10-05，`3.4-03` 转 `[x]`）
+
+**实际落点**：`packages/pdf-edit`（`@auto-cc/plugin-pdf-edit`，L2）三个源文件
+（`pdf-document.ts` 装载与另存、`io-service.ts` 服务 `pdf.io`、`index.ts` 门面）+ 同目录两份测试；
+`packages/main/src/registry.ts` 与 `cordis.yml` 的 `pdf-io` 行；渲染层白名单 `pdf.io.open`
+与 `BridgeSignatures` 同批加（那里的 `BridgeSignaturesCovered` 是编译期保险丝，逼两边一起改），
+接线判据落在 `packages/main/src/pdf-link.test.ts`。
+
+**三条顺延**（写在这里，是为了让 §7.4 那张表不被读成"许可证"——它是路线图）：
+
+1. `@pdf-lib/fontkit` → **3.5-b**。3.5-a 只装载与量页，没有要嵌入字体的一笔，此刻引入就是一条没人评的空依赖（§2.6）。
+   所以 §7.7 那句"记账要补 `pdf-lib` / fontkit 的行"这轮只落了 `pdf-lib` 那一支：`LICENSES.md` 生成节多四行
+   （`pdf-lib@1.17.1` / `@pdf-lib/standard-fonts@1.0.0` / `@pdf-lib/upng@1.0.1` / `tslib@1.14.1`）。
+2. `pdf.layout.textItems` → **3.5-b 的线框腿**。理由是实测出来的：它需要**第二条 PDF 解析链**
+   （`pdfjs-dist` 的 textItems 与 `pdf-lib` 是两套解析器，两份对同一页的理解得并进同一个坐标空间），
+   而 3.4-03 的判据里没有这件东西；两条链一起进来反而让"装上了"有两个真相源。
+   于是 `3.5-01` 的 C 半边**没有**跟着 3.4-03 一起收，那一行仍 `[ ]`。
+3. `dependsOn: [config]` 与 `paths().userDataDir` → **3.5-b**。3.5-a 不落盘，也就没有要取的作用域目录；
+   `pdf-io` 因此排在 `kb-generate` 之后而不依赖任何东西（§9 的 5.1-c 顺序坑在这条上不存在），
+   摘掉这一行只是打不开文件，不会留下半截记录——它不建表、不占迁移号段。
+
+**更正 §7.3 的一条**：原写"字节 hash 复用 `@auto-cc/plugin-resume-kb` 复导的 `sourceHashOf`"。落码时做不到——
+`pdf-edit` 与 `resume-kb` 同为 L2，横向 import 被 eslint boundaries 拦住（§4.1）；借道 `@auto-cc/shared` 也不对，
+`shared` 在 L1 且是渲染层要打进包里的东西。做法是**上收到 L0**：`@auto-cc/core` 新增 **subpath 导出** `./file-read`
+（`readBoundedFile` + `sha256Hex`），刻意**不**出现在 `src/index.ts`——`bridge.ts` 行 125 记过的那个打包陷阱
+（走 barrel 会把 `node:path` 拖进 Vite 产物）。两个 L2 消费者各自决定错误码（`RESUME_IMPORT_FAILED` / `PDF_EDIT_READ_FAILED`），
+而"绝对路径 + 字节上限 + 读出字节"这一段从两份变成一份（§2.2 说的第二回使用）；
+`resume-kb` 侧的 `sourceHashOf` 保留公开名字与 detach 顺序注释，内部改为委派。
+
+**打包归属的实测决定**：`pdf-lib` 由 esbuild **打进 `main.cjs`**，不进 `scripts/vendor-runtime-deps.ts` 的
+`RUNTIME_EXTERNAL_ROOTS`（那三只外置的理由是要跑原生/二进制或体积巨大：`mammoth` / `pdfjs-dist` / `electron-updater`）。
+读数：`pnpm app:build` EXIT=0，`build/app/main.cjs` 3987713 字节内含 `pdf-lib` 628 处，`build/app/node_modules` 里 0 份。
+MIT 归属照样随包分发，因为 `LICENSES.md` 已经在 extraResources 里。
+
+**实测推翻的一处假定**（必须写进代码注释，否则下次又会按"load 失败就等于坏文件"来判）：
+`PDFDocument.load('%PDF-1.4' + 垃圾字节, { ignoreEncryption: true })` **不抛异常**，返回一份"装得上"的文档，
+崩的是下一步 `getPages()`。所以装载器把**逐页量得出宽高**当作装载成功的一部分（`pdf-document.ts` 的结构探针），
+度量在这里一次算好，`pageCount` 与 `pageMetrics()` 同源。
+
+**加密文件的夹具**：spike 那轮给不出真加密 PDF，这轮按 §6.2「以实测为准」用手写 `/Encrypt` trailer
+（Standard / V1 / R2 / 40 bit）让 `pdf-lib` 把 `isEncrypted` 报成真，于是 §7.10 那句"加密文档给确定态"有 C 类测试可判，
+而不是伪造一套加解密。夹具进 `@auto-cc/testing` 的 `minimalEncryptedPdf`，为此把 `wrapPdf` 收成模块私有并加第二个实参
+（trailer 多写 `/Encrypt n 0 R`）；同一轮删掉 `index.ts` 里没人用的 `wrapPdf` 复导（§2.4）。
+`packages/resume-kb/src/source.test.ts` 那份重复的最小 PDF 生成器也在这轮抽掉了——它就是 §2.2 说的第二次出现。
+
+**这轮的闸门读数**：`pnpm typecheck` EXIT=0、`pnpm lint` EXIT=0（许可证记账节按裁定③ 用 `--write` 重生成，
+在这台 macOS 上不再逐台漂）、`pnpm test` EXIT=0（`pdf-edit` 16 例、`main` 69 例含新接线腿、`resume-kb` 398 例夹具抽取后不降级）、
+`pnpm app:build` EXIT=0。P3 的实现面因此从 17 条变 **16 条**（剩 3.5 的六条轻编辑判据 + 3.6 的九条 + 3.4-03 之外的 BLOCKED 腿）。

@@ -322,6 +322,10 @@ export const RENDERER_ALLOWLIST = [
   // 界面拿到的是「哪个快照、模板与时刻」与「条目级 / 字段级差异」两种读数。
   'resume.snapshot.list',
   'resume.snapshot.diff',
+  // 3.5 编辑轨的打开腿（spec 3.4-03 / plan §7.4）：入参是**绝对路径**（渲染层没有读文件的通道，
+  // 与上面 4.1 的导入腿同一口径），回执只有页数与每页宽高——整页原文不过进程边界。
+  // `pdf.*` 一律**不登记为 agent 工具**（plan §7.4 末行）：编辑的是用户手里的文件，判据里没有「让模型改 PDF」这一条。
+  'pdf.io.open',
   // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
   // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
@@ -1076,6 +1080,25 @@ export interface SnapshotMetaView {
   hash: string;
   /** 快照时刻（毫秒），由主进程格式化前原样递出，界面按 locale 显示 */
   createdAt: number;
+}
+
+/** 一页的宽高读数（镜像 pdf-edit 的 `PdfPageMetric`，单位是 PDF 点，1 pt = 1/72 英寸）。 */
+export interface PdfPageMetricView {
+  /** 页序，从 1 起（界面显示是 1 基，主进程里的数组是 0 基，换算在这条边界上做完） */
+  number: number;
+  widthPt: number;
+  heightPt: number;
+}
+
+/**
+ * 打开一份 PDF 的回执（镜像 `pdf.io` 的 `PdfOpenReceipt`，spec 3.4-03 / 3.5-01 的打开半边）：
+ * 只有来源哈希、页数与每页宽高——**整页原文不过进程边界**（plan §7.4 沿用 3.7-03 的取向）。
+ */
+export interface PdfOpenReceiptView {
+  /** 源文件的 sha256，3.5-09「另存之后源文件仍是这一份」的基准 */
+  sourceHash: string;
+  pageCount: number;
+  pages: PdfPageMetricView[];
 }
 
 /** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
@@ -1936,6 +1959,12 @@ export interface BridgeSignatures {
    * 界面拿到的是条目级 + 字段级差异；任一侧查无此快照或内容已损坏以 `INVALID_ARGUMENT` 结构化失败上浮。
    */
   'resume.snapshot.diff': { args: [fromSnapshotId: string, toSnapshotId: string]; returns: SnapshotDiffView };
+  /**
+   * 打开一份 PDF（spec 3.4-03 / 3.5-01 的打开半边，plan §7.4 的第一条编辑轨口）：只回来源哈希、页数与每页宽高。
+   * 失败以 `AppErrorPayload`（`PDF_EDIT_READ_FAILED`）上浮，`details.code` 说清是哪一种
+   * （`empty` / `encrypted` / `invalid-pdf`），界面给三句不同的中文而不是同一句「打不开」。
+   */
+  'pdf.io.open': { args: [filePath: string]; returns: PdfOpenReceiptView };
   /**
    * 导入一份简历文件（spec 4.1-01 / 06 / 07）：主进程按绝对路径读字节、判格式、抽文本、幂等入库。
    * 失败以 `AppErrorPayload`（`RESUME_IMPORT_FAILED`）上浮，界面给一句中文；疑似扫描件不算失败，

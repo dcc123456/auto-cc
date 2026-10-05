@@ -21,6 +21,7 @@
     "@auto-cc/plugin-logger": "workspace:*",
     "@auto-cc/plugin-llm": "workspace:*",
     "@auto-cc/plugin-outbound": "workspace:*",
+    "@auto-cc/plugin-pdf-edit": "workspace:*",
     "@auto-cc/plugin-platform-boss": "workspace:*",
     "@auto-cc/plugin-plugins": "workspace:*",
     "@auto-cc/plugin-resume-doc": "workspace:*",

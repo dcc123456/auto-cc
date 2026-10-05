@@ -38,6 +38,7 @@ import {
   OutboundScriptService,
   OutboundThrottleService,
 } from '@auto-cc/plugin-outbound';
+import { PdfIoService } from '@auto-cc/plugin-pdf-edit';
 import {
   BossPlatformService,
   ConversationStoreService,
@@ -163,6 +164,12 @@ export const REGISTRY: Registry = {
   // 而知识库、缺口报告、导出轨照旧——「算出改了什么」与「按改动出 PDF」分属两条。
   // 它不 `inject` `kb.gap`（用的时候现问），所以摘掉上面那行它不会连带 PENDING，只会在调用时报库未装配。
   'kb-generate': ResumeGenerateService,
+  // 轻编辑的打开腿（spec 3.4-03 / plan §7.4）：`pdf.io` 只做「绝对路径 → 页数与每页宽高」。
+  // 它**不建表、不占迁移号段**——编辑会话只活在一次操作里，产物是一份新文件，没有跨重启还在的状态要存。
+  // 摘掉 `cordis.yml` 里这一行，`pdf.io.open` 得到「服务未挂载」的结构化失败，而导入轨与导出轨照旧：
+  // 「在用户那份 PDF 上改」与「按文档模型排出去」分属两条。本切片（3.5-a）它还没有界面调用方，
+  // 这是刻意留下的可见缺口——引擎腿先在真实装配里装好，界面与另存腿在 3.5-b 接（同 4.2-a 的口径）。
+  'pdf-io': PdfIoService,
   // 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点，
   // 迁移号段 25，也是全仓唯一持有调度 `setInterval` 的地方（`scripts/check-scheduler-no-external-cron.ts` 钉住）。
   // 摘掉这一行：界面点「定时任务」得到「服务未挂载」的结构化失败，而对话、循环、工作流三条照旧——

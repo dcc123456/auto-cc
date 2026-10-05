@@ -25,6 +25,7 @@
     "@auto-cc/plugin-config": "workspace:*",
     "@auto-cc/plugin-logger": "workspace:*",
     "@auto-cc/plugin-store": "workspace:*",
+    "@auto-cc/testing": "workspace:*",
     "yaml": "^2.7.0"
   }
 }
