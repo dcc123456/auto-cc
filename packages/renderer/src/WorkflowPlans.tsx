@@ -81,6 +81,28 @@ export function WorkflowPlansSection({
   };
 
   /**
+   * 选中一条计划：先让主进程认它，**成功了才**把本地指针指过去（plan 裁定七第 3 条）。
+   *
+   * 顺序反过来会长出"下拉显示的是 B、主进程当前计划还是 A"这种第二状态源，而实验台那颗
+   * 「从库里那次中断续跑」读的正是服务侧那一份（它比的指纹来自 `resumable()`）。
+   * 选不中（计划已不在、有 run 正停在中途、`kind` 没人登记）时本地指针不动，拒因原话留在提示行。
+   *
+   * 回到默认那一格（空值）**不**调主进程：它的语义是"这一次 `start` 不传 id"，不是"把当前计划
+   * 换回配置值"——服务侧没有"换回去"的入口，改配置会重建下游（AGENTS.md §9 的 2.5 实测条）。
+   * @param planId 下拉里的原始值，空串表示默认那一格
+   */
+  const pickPlan = async (planId: string): Promise<void> => {
+    if (planId === '') {
+      onSelect(undefined);
+      return;
+    }
+    await call(t('workflow.plans.actionSelect', { planId }), () => bridge?.workflow['runner.selectPlan'](planId), {
+      apply: () => onSelect(planId),
+      describe: (view) => t('workflow.plans.selected', { planId: view.planId, fingerprint: view.fingerprint }),
+    });
+  };
+
+  /**
    * 起一个行内编辑态。
    * @param plan 目标计划行
    * @param mode 编辑种类
@@ -123,8 +145,9 @@ export function WorkflowPlansSection({
           data-testid="workflow-plan-select"
           data-selected-plan={selectedId ?? ''}
           value={selectedId ?? ''}
-          onChange={(event) => onSelect(event.target.value === '' ? undefined : event.target.value)}
-          className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+          disabled={busy !== undefined}
+          onChange={(event) => void pickPlan(event.target.value)}
+          className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800 disabled:opacity-40"
         >
           <option value="">{t('workflow.plans.selectDefault')}</option>
           {plans.map((plan) => (

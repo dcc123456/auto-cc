@@ -2397,6 +2397,62 @@ C——白名单与 `RequestMap` 对齐（`pnpm lint` 链内的工具契约检�
 **取证据期间动过又改回的东西**：`cordis.yml` 的 `retryBackoffMs` 临时 500→3000（把暂停窗从 1.5 秒拉开到 3 秒，
 否则 `harness click` 那 1 秒左右的进程启动时间永远落在 run 结束之后），取完证据已改回，提交里没有它。
 
+### 5.10-j 落地记录（2026-10-05，`workflow.runner.selectPlan`；上面那条裁定七的实现面）
+
+**三条落点逐条对账，其中一条与裁定原文的写法不同，差异写在下面第二条里。**
+
+**1. `workflow.runner` 多了一只 `selectPlan(planId)`**（`packages/workflow/src/index.ts`，紧挨在 `start` 前面）。
+它只做"认这条计划为当前计划"这件事：不起 run、不写 `workflow_runs`、不动 `advanceState`、也不换内存里那条
+run 的镜像（idle 那一份的槽位仍属于上一条计划，直到 `start()` 或 `resumeRun()` 把它换掉——裁定七原话是
+"不动任何推进态"，而 idle 镜像在界面上只是一批空格子，为它再写一段推进逻辑属于 §2.6）。
+回执 `{ planId, fingerprint }` 是新类型 `SelectedWorkflowPlanView`（在 `@auto-cc/core/events.ts`，与
+`WorkflowPlanOptionView` 并排——契约类型都在那儿，渲染层只经 `@auto-cc/shared` 转出口径不变）。
+`this.plan` 的写点因此还是**一只**：原私有那份改名 `usePlan`，`start(planId)` 与 `selectPlan(planId)` 都经它
+（AGENTS.md §2.5——"谁能改当前计划"只允许一个答案）。
+
+**两处是裁定原文没写、实现时补的**，都不是新功能而是让这只口不出岔子：
+① `requireExecutable(plan)` 复用 `start` 那道装配期校验（`kind` 无人登记 / 节点数超上限就拒），于是"能选出来的
+计划就能跑"在 select 这一侧也成立，而不是等到 `resumeRun` 把循环起起来才发现跑不动；
+② 切完播报一次 run 级进度（`pushProgress(null, null, null)`，与 `[Service.init]` 里那句同一形态）。
+理由不是"界面好看"：实验台那颗 `[data-action="resume-workflow-run"]` 的禁用判据读的是 `runner.resumable()`，
+而 `resumable()` 比的正是**当前计划**的指纹——不推这一句，用户选完计划之后那颗按钮还停留在"没有可续的 run"，
+要等下一次节点事件才反应过来，而 select 恰恰不会引发节点事件。
+
+**2. 白名单落点是 `workflow.runner.selectPlan`，不是裁定七第 2 条那句 `workflow.plan.select`。**
+这不是口味问题：IPC 网关按**最长前缀**拆 `service.method`（`packages/ipc/src/resolve.ts` 的 `pathCandidates`），
+而 `pickMethod` 对带点的方法名直接不收。`workflow.plan.select` 会被切成一只不存在的服务 `workflow.plan` →
+`SERVICE_NOT_FOUND`，要么就得为这一只方法新建一个服务，而"当前计划"这份状态正 belongs to `workflow.runner`
+（§2.3 禁止新建平行模块、§2.5 禁止同一件事两处都能用）。其余照裁定执行：`RENDERER_ALLOWLIST` 一项 +
+`BridgeSignatures` 一条（`BridgeSignaturesCovered` 是 `{ [K in BridgeCallId]: ... }`，漏一条签名 typecheck 就红，
+所以"白名单与签名表对齐"这一条 C 半边是编译期兜的，不需要再造一个检查脚本），且**不登记为 agent 工具**——
+换掉当前计划会改变后续所有动作的走向，按 §5.9 与 5.3 的"不可自提升"只由人按。
+
+**3. 面板下拉 `onChange` 改成"先 select、成功了才落本地 state"**（`WorkflowPlans.tsx` 的 `pickPlan`）。
+`useBridgeAction` 的 `apply` 挂钩只在 `reply.ok` 时跑，所以"本地指针跟着服务侧走"是结构上的，不靠约定；
+失败时指针不动、拒因原话留在提示行（截图拿得到）。
+默认那一格（空值）**不**调主进程：它的语义是"这一次 `start` 不传 id"，不是"把当前计划换回配置值"，
+服务侧根本没有"换回去"的入口（改配置会重建下游，AGENTS.md §9 的 2.5 实测条）。
+续跑那颗按钮没有再自己调一次 select：`resumeRun()` 读的服务侧当前计划正是上一次 select 落下的那一份，
+"select → resumeRun"这条序列是**两次点击**（下拉选中 → 点续跑），与裁定七验收腿的活体操作步骤一字不差；
+把 select 塞进按钮里会让那颗按钮同时改两处状态，而界面里那两处（下拉 state 与服务侧当前计划）会分开失败。
+
+**一条被替换掉的旧实现**：`runner.test.ts` 里那个"为绕开这一步而先 `start(planId)` 跑完再清零调用序列"的
+辅助函数（5.10-f 落地记录里点名过的那条缺口证据）已删除，用它的那两条用例改成直接 `runner.selectPlan(planId)`。
+于是"库里那一行没登记出口就拒绝续跑"这条用例的 `expect(calls).toEqual([])` 变强了——以前那一次选计划
+**确实起过一条 run**，只是把账擦掉了；现在一行 run 都不该有。
+
+**新增的五条用例**（`packages/workflow/src/runner.test.ts`，209 → 214）：切过去之后回执等于库里那份指纹、
+`nodes()` 读得到它的节点、`workflow_runs` 行数不变且执行器一次都没调、且只多出一条 run 级进度；切回内置那条；
+run 停在中途时拒绝切换（`WORKFLOW_INVALID_STATE`，消息"先处理完它"）且当前计划一字不动——这条闸门是必需的，
+因为 `pump()` 取的是 `this.plan.nodes[index]`（`index.ts` 行 965），在半跑的 run 上换计划会让它按**另一条计划**
+的第 i 格续下去；认错一条计划时旧 run 依旧续不上（`不是同一条`），认对了才续得上——这条就是 2.4-05 那道护栏
+"没有被 select 拆掉"的直接证据，而它后半段（select → `resumeRun` → 只重跑中断那一格 → `taken#2`）是 5.10-13
+缺的那条界面入口在单元面上的等价物；`kind` 没人登记时拒绝选中。
+**2.4-05 与 5.10-07 的既有用例一条都没改。**
+
+**V 半边**：待活体取（步骤就是裁定七写的那五步：kill 一条自定义计划的 run → 重启 app → 下拉里选中那条 →
+点续跑 → 从中断那格继续），取到之前 `5.10-13` 保持 `[!]`、`5.10-j` 不算收口。
+
 ---
 
 ### 跨计划记号：5.10-19 的命令栈被抽成 `createSnapshotStack<T>`（2026-10-05，P3 的 3.5-c₁）

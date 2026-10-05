@@ -25,6 +25,7 @@ import {
   type Context,
   type RiskSignalEvent,
   type SavedWorkflowPlanView,
+  type SelectedWorkflowPlanView,
   type SessionExpiredEvent,
   type ToolEffect,
   type WorkflowGraphView,
@@ -161,7 +162,8 @@ export class WorkflowRunnerService extends Service {
    *
    * 5.4 起它不再是挂载期常量：判据 5.4-03 要求"沉淀出的计划面板可直接运行"，而界面不能为了换一条
    * 计划去改配置（改配置会重建下游，见 AGENTS.md §9 的 2.5 实测）。**不做持久化**——重启回到配置值，
-   * 九条判据里没有一条要求"重启后仍停在某条自定义计划"。写点只有 `selectPlan` 一处。
+   * 九条判据里没有一条要求"重启后仍停在某条自定义计划"。写点只有 `usePlan` 一处（5.10-j 起的
+   * `selectPlan(planId)` 与 `start(planId)` 都经它，所以"谁能改当前计划"仍然只有一个答案）。
    */
   private plan: WorkflowPlanView;
 
@@ -190,7 +192,7 @@ export class WorkflowRunnerService extends Service {
     // 这两样在构造器体里赋值而不是写在字段初始化器上：参数属性 `config` 是在字段初始化**之后**才写入的，
     // 初始化器里读它会拿到 undefined（TS2729）。计划不合法时在这里就抛，挂载因此结构化失败。
     // 挂载期只查内置目录：那时 `workflow.store` 的迁移不一定已经跑完，读表会把装配打崩。
-    this.plan = this.selectPlan(planById(config.planId));
+    this.plan = this.usePlan(planById(config.planId));
     this.run = createRun(
       'pending',
       Date.now(),
@@ -466,6 +468,43 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
+   * 把「当前计划」换成目录/库里的那一条，**只做这一件事**（plan 裁定七 / 5.10-j）。
+   *
+   * 它存在的理由是一条已验收的护栏：2.4-05 不许按 run 自己的快照续跑，于是"续一条自定义计划的旧 run"
+   * 必须先把当前计划换成那条。而在这之前唯一的换计划入口是 `start(planId)`，它必然开一条新 run
+   * （`runner.test.ts` 里为绕这一步写过一条辅助函数，就是这条缺口的证据）。
+   * 这条口把"认计划"从"起 run"里拆出来，护栏一字未动：切过去之后指纹若与那条 run 登记的值不符，
+   * `resumeRun` 照旧拒绝。
+   *
+   * 不动的东西一并列出来，免得后人以为漏了半边：不起 run、不写 `workflow_runs`、不改 `advanceState`、
+   * 也不换内存里那条 run 的镜像（它的槽位仍属于上一条计划，直到 `start()` 或 `resumeRun()` 把它换掉——
+   * 裁定七原话是"不动任何推进态"，而 idle 那一份在界面上只是一批空格子）。
+   * @param planIdRaw 要选中的计划 id，按不可信输入处理（内置目录优先，再查 `workflow_plans`）
+   * @returns 切过去后的回执 `{ planId, fingerprint }`，供界面回读
+   * @throws 有 run 停在非 idle/done 的态上时 `WORKFLOW_INVALID_STATE`：`resume()` 与 `retryStep()` 都按
+   *         **当前计划的下标**取节点，在半跑的 run 上换计划会让它按另一条计划的第 i 格续下去；
+   *         id 两处都查不到、或那条计划的节点无人能执行时 `INVALID_ARGUMENT`，此时当前计划一字未动
+   */
+  selectPlan(planIdRaw: string): SelectedWorkflowPlanView {
+    if (this.run.status !== 'idle' && this.run.status !== 'done') {
+      throw new AppError(
+        'WORKFLOW_INVALID_STATE',
+        `已有 run 处于 ${this.run.status} 态，先处理完它再换计划`,
+        'workflow.runner',
+        { status: this.run.status },
+      );
+    }
+    // 先解析再校验可执行性、两者都过了才写：失败的路径上内存态一行都不动（与 `start` 同一口径）。
+    const plan = this.resolvePlan(planIdRaw);
+    this.requireExecutable(plan);
+    this.usePlan(plan);
+    // 广播一次 run 级进度：`resumable()` 比的正是刚换上的这条指纹，实验台那颗「从库里那次中断续跑」
+    // 的禁用判据读的就是它（5.10-13 要的界面入口）。不推这一句，界面要等下一次节点事件才看得见这次切换。
+    this.pushProgress(null, null, null);
+    return { planId: plan.id, fingerprint: plan.fingerprint };
+  }
+
+  /**
    * 起一个新的 run 并开始推进。
    * @param planIdRaw 挑中的计划 id（spec 5.4-03 的"面板可直接运行"）。省略时沿用**当前**计划，
    *                  所以 2.4 那条"点了开始就跑配置里那条"的路径一字不变；给了 id 就按不可信输入处理，
@@ -485,7 +524,7 @@ export class WorkflowRunnerService extends Service {
       );
     }
     // 切换计划放在状态闸门之后、起 run 之前：`resolvePlan` 失败时这里一行内存态都没动。
-    if (planIdRaw !== undefined) this.selectPlan(this.resolvePlan(planIdRaw));
+    if (planIdRaw !== undefined) this.usePlan(this.resolvePlan(planIdRaw));
     this.requireExecutable(this.plan);
     this.applyRetention();
     this.claimedPositions.clear();
@@ -556,12 +595,13 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 当前计划的**唯一**写点：挂载期取配置值，`start(planId)` 时换成挑中的那条（5.4 起它可变，但不持久化）。
+   * 当前计划的**唯一**写点：挂载期取配置值，`start(planId)` 与 `selectPlan(planId)` 换成挑中的那条
+   * （5.4 起它可变，但不持久化）。
    * @param plan 收窄过、指纹已重算的计划本体
    * @returns 同一个计划——写成表达式是为了让构造器里那一次是 TS 认得的直接赋值
-   * （`strictPropertyInitialization` 不追方法调用，只写 `this.selectPlan(...)` 会报「未初始化」）
+   * （`strictPropertyInitialization` 不追方法调用，只写 `this.usePlan(...)` 会报「未初始化」）
    */
-  private selectPlan(plan: WorkflowPlanView): WorkflowPlanView {
+  private usePlan(plan: WorkflowPlanView): WorkflowPlanView {
     this.plan = plan;
     return plan;
   }
@@ -692,7 +732,8 @@ export class WorkflowRunnerService extends Service {
    * @returns 重新进入 `running`（或停在接管点上的 `paused`）的状态
    * @throws 库里没有可续的 run、或计划指纹与当前配置不是同一条时 `INVALID_ARGUMENT`（2.4-05 的串档判据）
    *
-   * 5.4 之后要多留意一句：**续自定义计划的 run，得先把当前计划换成那条**（面板的下拉，5.4-b 的入口）。
+   * 5.4 之后要多留意一句：**续自定义计划的 run，得先把当前计划换成那条**——5.10-j（plan 裁定七）起
+   * 这一口就是 `selectPlan(planId)`，面板下拉选中的正是它。
    * 这里没有改成"按 run 自己的快照续"，因为 2.4-05 已验收的判据字面就是"配置的计划与 run 不一致时拒绝续"，
    * 放开它就是把一条已验收的安全网悄悄拆掉。
    *

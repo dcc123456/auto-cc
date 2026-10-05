@@ -1250,22 +1250,6 @@ describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 /
     return graph.id;
   }
 
-  /**
-   * 把「当前计划」换成某条自定义计划。
-   *
-   * 为什么只能绕这一步：`this.plan` 的唯一写点是 `start()`（5.4 起可变但不持久化），而 `resumeRun(runId)`
-   * 要先比对当前计划的指纹——于是「重启后续一条画布计划的旧 run」在今天必须先起一次新 run 才配得上计划。
-   * 这条缺口按 2.4-05 已验收的判据写死（不许按 run 自己的快照续），记在 plan 的 5.10-f 落地记录里，不在本片拆网。
-   * @param handle 挂载读数
-   * @param planId 要选中的计划
-   */
-  async function selectPlan(handle: Awaited<ReturnType<typeof boot>>, planId: string): Promise<void> {
-    handle.runner.start(planId);
-    await waitFor(() => handle.runner.current().status === 'done');
-    // 选计划用的这次 run 与后面的断言无关：调用序列清零，剩下的账才是续跑那一次的。
-    handle.calls.length = 0;
-  }
-
   it('分支只走执行器宣告的那一支，未走一支落 `skipped` 且执行器一次都没调（5.10-08）', async () => {
     const { runner, runs, calls } = await boot({ returns: { cond: 'yes' } });
     const planId = seedGraph(runs, branchGraph('plan-dag-branch'));
@@ -1345,7 +1329,7 @@ describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 /
   it('库里那一行「分支节点已完成却没登记出口」时拒绝续跑，绝不猜 `default`（裁定 3）', async () => {
     const handle = await boot({ returns: { cond: 'yes' } });
     const planId = seedGraph(handle.runs, branchGraph('plan-dag-nohandle'));
-    await selectPlan(handle, planId);
+    handle.runner.selectPlan(planId);
     const { runs, calls } = handle;
     const body = runs.getPlan(planId)!.plan;
     // 手工造出「旧进程跑完了分支节点、但那一列是空的」这一种库状态（老库升到号段 29 之后就是这形状）。
@@ -1394,7 +1378,7 @@ describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 /
 
     const second = await boot({ dir, returns: { cond: 'yes' } });
     expect(second.runs.state(runId)).toMatchObject({ status: 'interrupted', nodeIndex: 1 });
-    await selectPlan(second, planId);
+    second.runner.selectPlan(planId);
     second.runner.resumeRun(runId);
     await waitFor(() => second.runner.current().status === 'done');
 
@@ -1406,6 +1390,105 @@ describe('DAG 推进：分支、汇聚与续跑重建（spec 5.10-07 / 08 / 09 /
     // 未走那一支在重启之后依然被级联判成跳过，且一次执行器都没碰到。
     expect(stored?.nodes[2]).toMatchObject({ status: 'skipped', attempts: 0 });
     expect(stored?.nodes.map((node) => node.error)).toEqual([null, null, null]);
+  });
+
+  describe('selectPlan：把「认这条计划为当前计划」从「起一条 run」里拆出来（plan 裁定七 / 5.10-j）', () => {
+    /**
+     * 库里 `workflow_runs` 的行数。"这一步不起 run"这句承诺只能在库上验，内存镜像不足以证明。
+     * @param handle 挂载读数
+     * @returns 行数
+     */
+    const runRows = (handle: Awaited<ReturnType<typeof boot>>): number => {
+      const row = handle.db.prepare('SELECT COUNT(*) AS total FROM workflow_runs').get() as {
+        total: number | bigint;
+      };
+      return Number(row.total);
+    };
+
+    it('切到自定义计划：回执带着它的指纹，库里一行 run 都没多，执行器一次都没调', async () => {
+      const handle = await boot({ returns: { cond: 'yes' } });
+      const planId = seedGraph(handle.runs, branchGraph('plan-dag-select'));
+      const rowsBefore = runRows(handle);
+      const eventsBefore = handle.events.length;
+
+      expect(handle.runner.selectPlan(planId)).toEqual({
+        planId,
+        fingerprint: handle.runs.getPlan(planId)!.plan.fingerprint,
+      });
+      // 「当前计划是它」必须读得出来：界面那条路径读的正是 `runner.nodes()`。
+      expect(handle.runner.nodes().map((node) => node.id)).toEqual(['cond', 'taken', 'untaken']);
+      expect(runRows(handle)).toBe(rowsBefore);
+      expect(handle.calls).toEqual([]);
+      expect(handle.runner.current().status).toBe('idle');
+      // 切换要播报一次 run 级进度：实验台那颗「从库里那次中断续跑」的禁用判据读的是 `resumable()`，
+      // 而它比的指纹正是刚换上的这条；不推这一句，用户选完计划还得等下一个节点事件才看得见变化。
+      expect(handle.events).toHaveLength(eventsBefore + 1);
+      expect(handle.events.at(-1)).toMatchObject({ stepId: null, phase: null });
+    });
+
+    it('切回内置那条：回执是它的指纹，`nodes()` 跟着换回来', async () => {
+      const handle = await boot({ returns: { cond: 'yes' } });
+      const planId = seedGraph(handle.runs, branchGraph('plan-dag-select-back'));
+      handle.runner.selectPlan(planId);
+
+      const expected = buildPlan({ id: 'boss-basic', nodes: BOSS_BASIC_PLAN.nodes }).fingerprint;
+      expect(handle.runner.selectPlan('boss-basic')).toEqual({ planId: 'boss-basic', fingerprint: expected });
+      expect(handle.runner.nodes().map((node) => node.id)).toEqual(BOSS_BASIC_PLAN.nodes.map((node) => node.id));
+    });
+
+    it('有 run 停在中途时拒绝切换：`resume()` 按当前计划的下标取节点，这时换计划会串格', async () => {
+      const handle = await boot({ returns: { cond: 'yes' }, behavior: { 'jd.list': hangUntilAbort() } });
+      const planId = seedGraph(handle.runs, branchGraph('plan-dag-select-busy'));
+      handle.runner.start(planId);
+      await waitFor(() => handle.calls.includes('taken#1'));
+      handle.runner.pause();
+      await waitFor(() => handle.runner.current().status === 'paused');
+      const rowsBefore = runRows(handle);
+
+      expect(() => handle.runner.selectPlan('boss-basic')).toThrow(/先处理完它/);
+      // 拒了就不是一句原话的事：当前计划必须还是那条被停住的，否则界面接下来按另一条计划的第 i 格续跑。
+      expect(handle.runner.nodes().map((node) => node.id)).toEqual(['cond', 'taken', 'untaken']);
+      expect(runRows(handle)).toBe(rowsBefore);
+    });
+
+    it('认了另一条计划之后旧 run 依旧续不上：select 没有把 2.4-05 那道串档护栏拆掉', async () => {
+      const dir = tempDir();
+      const first = await boot({ dir, returns: { cond: 'yes' }, behavior: { 'jd.list': hangUntilAbort() } });
+      const planId = seedGraph(first.runs, branchGraph('plan-dag-select-guard'));
+      first.runner.start(planId);
+      await waitFor(() => first.calls.includes('taken#1'));
+      const runId = first.runner.current().runId;
+      first.runner.pause();
+      await waitFor(() => first.runner.current().status === 'paused');
+      await shutDown();
+
+      const second = await boot({ dir, returns: { cond: 'yes' } });
+      // 重启后"当前计划"回到配置值，于是那条被停住的自定义计划 run 先认了别的计划：拒。
+      second.runner.selectPlan('boss-basic');
+      expect(() => second.runner.resumeRun(runId)).toThrow(/不是同一条/);
+      // 认对了才续得上——这一跳正是 5.10-13 缺的那个界面入口（下拉 select → 续跑）。
+      second.runner.selectPlan(planId);
+      second.runner.resumeRun(runId);
+      await waitFor(() => second.runner.current().status === 'done');
+      expect(second.calls).toEqual(['taken#2']);
+    });
+
+    it('计划里的 `kind` 没人登记时拒绝选中：能选出来的就必须能跑', async () => {
+      const handle = await boot();
+      const planId = 'plan-dag-select-unknown-kind';
+      handle.runs.savePlan({
+        id: planId,
+        name: '跑不动的那条',
+        plan: buildPlan({ id: planId, nodes: [{ id: 'ghost', kind: 'no.such.kind', effect: 'read' }] }),
+        sourceRunId: null,
+        at: 1_700_000_000_000,
+      });
+      const before = handle.runner.nodes().map((node) => node.kind);
+
+      expect(() => handle.runner.selectPlan(planId)).toThrow(/跑不了/);
+      expect(handle.runner.nodes().map((node) => node.kind)).toEqual(before);
+      expect(runRows(handle)).toBe(0);
+    });
   });
 });
 

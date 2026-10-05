@@ -491,6 +491,11 @@ P4 71 行（65 / 6 / 0）、P5 121 行（111 / 4 / **2 未做** + 4 条 C 半边
   自定义计划那条 interrupted run 没有续跑入口），其余三条判据活体已过，缺口转 5.10-j 待裁；
   上面那句 P5 手写与复数差 1 的未决项**照旧不改**，这次是在手写口径上加 2。证据 `docs/acceptance/5.10/5.10-08-live-readings.txt`、
   `5.10-09-live-readings.txt`、`5.10-13-live-readings.txt`。）
+  （**同日 5.10-j 的 U/C 半边落地**：那缺口按裁定七实现为白名单口 `workflow.runner.selectPlan(planId)`（只换当前计划、
+  不起 run、不写 `workflow_runs`，2.4-05 的指纹闸门与 `resumeRun` 的拒绝原样保留），面板下拉改调它、成功才落本地 state，
+  并广播一条 run 级 `workflow/progress` 让实验台续跑按钮的禁用判据拿到新指纹；`packages/workflow` 209 → 214 例。
+  **本轮一个状态位都没翻**（`5.10-13` 仍 `[!]`，缺的就是那条活体 kill-续跑），P5 与全局计数照旧；
+  落点、命名偏离 `workflow.plan.select` 的机检原因与五条新用例见 `docs/plans/05-chat-agent/plan.md` 的 5.10-j 落地记录。）
   （P3 那两个数在 10-04 同日里从 35/7 变成 37/5：`3.2-02` 与 `3.2-09` 的顺延腿收了，见 `docs/specs/03-resume-pdf/spec.md` 的「3.2 补记」。同日再进一层：P1 的 `1.7-09`（mac 双 arch dmg）与 `1.7-10`（linux AppImage+deb 双 arch）、P5 的 `5.10-15` 产物侧半边由本机 macOS 宿主实测收掉，`M1-01` / `2.1-12` / `3.4-08` 的 BLOCKED 理由从「本机无 mac」改写成「缺 win / linux 宿主 + mac 运行期未逐项复跑」，证据在 `docs/acceptance/1.7/1.7-09-macos-dual-arch-dmg.txt`、`docs/acceptance/1.7/1.7-10-linux-appimage-deb-built.txt`、`docs/acceptance/5.10/5.10-15-artifact-side-license-check.txt`。）同日再收 P5 的 `5.10-18` V 半边（活体里两个入口各起一条 run：面板 `a93be1d3…` / 对话 `ce449e51…`，对话那条的前置条件是**脚本代切半自动档、跑完还原**，默认档位仍是建议模式，证据 `docs/acceptance/5.10/5.10-18-shared-runner-live-partial.txt` 第七节）。
 
 **复数口径登记（2026-10-04，两条口径都记，免得下一个人重踩）**：为了确认"还剩哪些没做"，

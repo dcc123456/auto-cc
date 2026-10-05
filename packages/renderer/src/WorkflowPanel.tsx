@@ -57,7 +57,8 @@ const TAKEOVER_OVERLAY = 'ring-1 ring-inset ring-amber-500/70';
  *
  * 5.4-b 在这里加了计划库（spec 5.4-03 的「挑中它跑」+ 5.4-08 的重命名 / 复制 / 删除）。放在这个面板而不是
  * 诊断页的 `WorkflowLabPanel`，因为那三条判据字面说的都是「面板」，而第二视图才是用户每天看的那一屏。
- * 下拉选中的 id 只作为 `runner.start(planId)` 的一个实参交出去，界面不据此推导任何进度：装载哪条计划、
+ * 下拉选中一条计划时先调 `runner.selectPlan(planId)`（plan 裁定七 / 5.10-j）把主进程的当前计划换掉、
+ * 成功了才落本地 state；`runner.start(planId)` 那一次实参照旧带着，界面不据此推导任何进度：装载哪条计划、
  * 跑得起来吗，全在服务侧那一次 `resolvePlan` 里定——挑中一条坏计划在起点就被 `INVALID_ARGUMENT` 拒掉，
  * 原话留在提示行，内存态一行都不动。
  */

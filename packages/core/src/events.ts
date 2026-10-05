@@ -904,6 +904,18 @@ export type WorkflowPlanOptionView = {
 };
 
 /**
+ * 切完「当前计划」之后的回执（plan 裁定七）。
+ *
+ * 只有两条读数，因为这次动作除了"现在认哪一条为当前计划"之外什么都不改：不起 run、
+ * 不写 `workflow_runs`、不动推进态。`fingerprint` 是给界面回读的那一眼——用户接着点续跑时，
+ * 它与那条 run 登记的指纹仍不相符的话 `resumeRun` 照旧拒绝（2.4-05 的串档护栏原样保留）。
+ */
+export type SelectedWorkflowPlanView = {
+  planId: string;
+  fingerprint: string;
+};
+
+/**
  * 一个节点参数的"变量 / 残留"读数（spec 5.4-04）。
  *
  * `isVariable` 由**键名白名单**判定（plan §5.4-b：`query`/`keyword`/`city`/`limit`/`target`），

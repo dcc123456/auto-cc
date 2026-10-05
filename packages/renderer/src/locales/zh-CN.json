@@ -588,9 +588,11 @@
         "actionRename": "把 {{name}} 改名为 {{next}}",
         "actionDuplicate": "把 {{name}} 复制为 {{next}}",
         "actionRemove": "删除计划 {{name}}",
+        "actionSelect": "把当前计划换为 {{planId}}",
         "renamed": "已改名为 {{name}}",
         "duplicated": "已复制为 {{name}}",
         "removed": "已删除 {{name}}",
+        "selected": "当前计划已是 {{planId}}（指纹 {{fingerprint}}）",
         "alreadyGone": "这条计划已经不在了：列表按当下重读，没有第二份事实",
         "builtinReadonly": "内置计划只读，要改就先复制一份",
         "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条"

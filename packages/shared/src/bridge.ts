@@ -27,6 +27,7 @@ import type {
   PluginErrorView,
   RiskSignalEvent,
   SavedWorkflowPlanView,
+  SelectedWorkflowPlanView,
   SedimentPreviewView,
   SessionExpiredEvent,
   WorkflowGraphLoadView,
@@ -88,6 +89,7 @@ export type {
   PluginErrorView,
   RiskSignalEvent,
   SavedWorkflowPlanView,
+  SelectedWorkflowPlanView,
   SedimentPreviewView,
   SedimentStepView,
   SessionExpiredEvent,
@@ -254,6 +256,14 @@ export const RENDERER_ALLOWLIST = [
   'workflow.runner.renamePlan',
   'workflow.runner.duplicatePlan',
   'workflow.runner.removePlan',
+  // 5.10-j / plan 裁定七：把「当前计划」换成下拉里挑中的那条。它与上面四条同口径——**只由人按**、
+  // 不登记为 agent 工具（换掉当前计划等于换掉后续所有动作的走向，模型若能自己换，就能给自己铺一条
+  // 把旧 run 续到别的计划上的路），且它**不起 run、不写 `workflow_runs`**：续跑要的正是"先认计划、
+  // 再按库里那条 run 的进度续"，一次点击里长出两条 run 就成了另一件事。
+  // 落点写法是 `workflow.runner.selectPlan` 而不是裁定原文那句 `workflow.plan.select`：网关按
+  // **最长前缀**拆 `service.method`（`packages/ipc/src/resolve.ts`），后者会被切成一只不存在的
+  // 服务 `workflow.plan`，而带点的方法名 `pickMethod` 直接不收。
+  'workflow.runner.selectPlan',
   // 5.10-e 的画布读写口（spec 5.10-10 / 5.10-17）：与上面四条同一口径，**只由人按**、刻意不登记为 agent 工具——
   // 画布上按一次保存改的就是「以后每次都这么跑」的那份计划，模型若能自己改图，等于给自己铺了免问的路（§8.4）。
   // 这里没有 `deleteGraph`：图列属于计划那一行，删计划（上面那条）就把图一起带走，不留「有图无计划」。
@@ -1829,6 +1839,19 @@ export interface BridgeSignatures {
    * @returns 是否真的删掉了一条（false = 没这条，或那是内置计划——内置目录不可删）
    */
   'workflow.runner.removePlan': { args: [id: string]; returns: boolean };
+  /**
+   * 把「当前计划」换成下拉里挑中的那条（plan 裁定七 / 5.10-j）。
+   *
+   * 与 `workflow.runner.start` 的区别就是这一口存在的全部理由：`start` 是"照这条计划**起一条新的**"，
+   * 这里是"我现在认这条为当前计划"——它不起 run、不写 `workflow_runs`、不动推进态，
+   * 所以被 kill 的自定义计划 run 在重启后终于有了界面入口（先 select，再 `runner.resumeRun`）。
+   * 回执里的 `fingerprint` 是给界面回读的那一眼：它和那条 run 登记的值不相符时，
+   * `resumeRun` 照旧按 2.4-05 拒绝，这道串档护栏没有因为能换计划而松掉。
+   * @param planId 要选中的计划 id（内置目录或 `workflow_plans`）；两处都没有时结构化失败并列出可用值，
+   *               当前计划原样不动
+   * @returns 切过去后的 `{ planId, fingerprint }`
+   */
+  'workflow.runner.selectPlan': { args: [planId: string]; returns: SelectedWorkflowPlanView };
   /**
    * 读一条计划的画布图（spec 5.10-10）：库里存过就读人存下来的那一份；内置那三条与 5.4 沉淀行没有
    * `graph_json`，由 `plan_json` 线性投影现算（`isCustom: false`），所以「能选出来的计划就能画」

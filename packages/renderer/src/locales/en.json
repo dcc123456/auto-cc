@@ -588,9 +588,11 @@
         "actionRename": "rename {{name}} to {{next}}",
         "actionDuplicate": "duplicate {{name}} as {{next}}",
         "actionRemove": "delete plan {{name}}",
+        "actionSelect": "switch the current plan to {{planId}}",
         "renamed": "Renamed to {{name}}",
         "duplicated": "Duplicated as {{name}}",
         "removed": "Deleted {{name}}",
+        "selected": "Current plan is {{planId}} (fingerprint {{fingerprint}})",
         "alreadyGone": "That plan is already gone: the list is re-read every time, there is no second copy of the truth",
         "builtinReadonly": "Built-in plans are read-only — duplicate one to change it",
         "empty": "No custom plans yet: finish a run in the chat and press Save as workflow"
