@@ -10,7 +10,8 @@
  * 旧文字仍可被提取。于是「旧文字已删除」这类说法在本包的任何返回字段与错误文案里都不许出现。
  */
 import { sha256Hex } from '@auto-cc/core/file-read';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import type { PlannedOverlay } from './overlay-writer.js';
 
 /** 装载不了的三种确定态（plan §7.10：加密文档与结构损坏都不试图绕过，也不产出半成品）。 */
 export type PdfLoadFailure = 'empty' | 'encrypted' | 'invalid';
@@ -32,7 +33,8 @@ export type PdfLoadOutcome =
  * 一份被装载起来、等着叠加内容的 PDF。
  *
  * 它**不是**会话模型：3.5-b 的 `edit-session` 才持有覆盖区列表与页面顺序，这一层只保证
- * 「读得进来、写得出去、读得出每页多大」，正好是 3.4-03 那条判据要求引擎具备的三件事。
+ * 「读得进来、写得出去、读得出每页多大、把换算好的覆盖区追加到页上」——前人是 3.4-03 的判据，
+ * 后一条是 3.5-02 的绘制半边。
  */
 export class PdfEditDocument {
   private constructor(
@@ -78,6 +80,44 @@ export class PdfEditDocument {
    */
   pageMetrics(): readonly PdfPageMetric[] {
     return this.metrics;
+  }
+
+  /**
+   * 把换算好的覆盖区追加到各自那一页上（spec 3.5-02 的「叠加」半边）。
+   *
+   * 只有这一处碰 `pdf-lib` 的绘制 API，因为它决定了两件必须写死的事：
+   * ① 白底矩形必须 `borderWidth: 0`——实测（本机 `pdf-lib` 1.17.1 的 `PDFPageOptions.d.ts`）
+   *    `drawRectangle` 的默认描边宽是 1 pt，留着它就成了一圈黑框，而覆盖区的作用是垫一块干净的底；
+   * ② 文字走 `StandardFonts.Helvetica`（零内嵌成本）。**实测更正**：`drawText` 的 `font` 只收 `PDFFont`，
+   *    不收 `StandardFonts` 枚举，所以标准字体也要先 `embedFont` 一次拿到句柄——整场只嵌一次，
+   *    不是因为嵌多次会坏，而是因为一次都不该多。越界的中文早在 `planOverlays` 就被挡下了，
+   *    这里不再校验字形覆盖（plan §7.2 结论③：标准字体没有 CJK 字形，硬画得到豆腐块）。
+   * @param plans `planOverlays` 通过校验并换算好的覆盖区（PDF 坐标，页号从 1 起）
+   * @throws 页号越界时抛普通 `Error`（那是调用方拿了别的文档的计划过来，属编程错误）；
+   *         连同 `pdf-lib` 自己的绘制异常一起由服务层收敛成 `PDF_EDIT_SAVE_FAILED`，**不落半成品**
+   */
+  async applyOverlays(plans: readonly PlannedOverlay[]): Promise<void> {
+    const pages = this.pdf.getPages();
+    const latinFont = plans.some((plan) => plan.text !== undefined)
+      ? await this.pdf.embedFont(StandardFonts.Helvetica)
+      : undefined;
+    for (const plan of plans) {
+      const page = pages[plan.pageNumber - 1];
+      // 越界一律抛，不许静默跳过：跳过等于产出一份「看似改过实则少画几区」的文件（3.5-05 转移来的那条精神）。
+      if (page === undefined)
+        throw new Error(`覆盖区 ${plan.id} 指向第 ${String(plan.pageNumber)} 页，本档只有 ${String(pages.length)} 页`);
+      page.drawRectangle({
+        x: plan.xPt,
+        y: plan.yBottomPt,
+        width: plan.widthPt,
+        height: plan.heightPt,
+        color: rgb(1, 1, 1),
+        borderWidth: 0,
+      });
+      if (plan.text !== undefined && plan.textBaselinePt !== undefined && latinFont !== undefined) {
+        page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font: latinFont });
+      }
+    }
   }
 
   /**

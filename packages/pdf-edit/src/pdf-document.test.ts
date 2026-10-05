@@ -6,7 +6,7 @@
  * 否则「装载」这条腿等于自证（spec 3.4-03 要的是引擎对外部输入负责）。
  */
 import { describe, expect, it } from 'vitest';
-import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf } from '@auto-cc/testing';
+import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
 
 import { PdfEditDocument } from './pdf-document.js';
 
@@ -79,4 +79,40 @@ describe('plan §7.10 的确定态：打不开就给原因，不抛裸异常也�
       if (outcome.status === 'failed') expect(outcome.detail.length).toBeGreaterThan(0);
     });
   }
+});
+
+describe('3.5-02 的绘制半边：applyOverlays 只追加，页号越界当场抛而不静默跳过', () => {
+  it('拿着别的文档的计划过来：抛错并说清是哪一区（跳过就等于产出少画几区的半成品）', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(2));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+
+    await expect(
+      loaded.document.applyOverlays([
+        { id: 'box-9', pageNumber: 3, xPt: 0, yBottomPt: 0, widthPt: 10, heightPt: 10, sizePt: 11 },
+      ]),
+    ).rejects.toThrow(/box-9.*第 3 页.*只有 2 页/);
+  });
+
+  it('画过覆盖区的文档页数与每页宽高都不变——页面树没被动过（结构上必然的「非文本元素原样保留」）', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(2));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const before = loaded.document.pageMetrics();
+
+    await loaded.document.applyOverlays([
+      {
+        id: 'box-1',
+        pageNumber: 2,
+        xPt: 10,
+        yBottomPt: 20,
+        widthPt: 100,
+        heightPt: 30,
+        sizePt: 11,
+        text: 'OK',
+        textBaselinePt: 25,
+      },
+    ]);
+    expect(loaded.document.pageMetrics()).toEqual(before);
+    // 实测：新落的文字在产物里是十六进制串（`<4F4B> Tj`），不是字面串，所以按同样的口径算出期望值。
+    expect(pdfContentText(await loaded.document.save())).toContain('<4F4B> Tj');
+  });
 });

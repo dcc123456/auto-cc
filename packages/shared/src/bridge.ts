@@ -326,6 +326,9 @@ export const RENDERER_ALLOWLIST = [
   // 与上面 4.1 的导入腿同一口径），回执只有页数与每页宽高——整页原文不过进程边界。
   // `pdf.*` 一律**不登记为 agent 工具**（plan §7.4 末行）：编辑的是用户手里的文件，判据里没有「让模型改 PDF」这一条。
   'pdf.io.open',
+  // 3.5 编辑轨的另存腿（spec 3.5-02 / 3.5-09，plan §7.4）：源路径 + 覆盖区 + 产物路径 → 新文件。
+  // 边界上过的只有**比例坐标**与回执三个字段——整页原文与 PDF 字节都不过界（同上面 `pdf.io.open` 的取向）。
+  'pdf.export.saveAs',
   // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
   // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
@@ -1099,6 +1102,43 @@ export interface PdfOpenReceiptView {
   sourceHash: string;
   pageCount: number;
   pages: PdfPageMetricView[];
+}
+
+/**
+ * 覆盖区的矩形（镜像 `PdfOverlayRect`，spec 3.5-03）：**比例坐标** 0..1，原点左上、y 向下——
+ * 与界面上拖出来的框同一个方向，所以渲染层不需要自己翻轴（翻轴在 `pdf-edit` 里做，判据也在那儿测）。
+ */
+export interface PdfOverlayRectView {
+  xRatio: number;
+  yRatio: number;
+  widthRatio: number;
+  heightRatio: number;
+}
+
+/**
+ * 一条覆盖区（镜像 `PdfOverlayInput`，spec 3.5-02）：白底矩形 + 可选的叠加文字。
+ * 文字过界前不校验，越界与非法都在主进程侧拒（`details.code`），因为字号、面积这些尺度是服务配置。
+ */
+export interface PdfOverlayInputView {
+  /** 界面给的稳定标识：错误信息里用它指认是哪一区 */
+  id: string;
+  /** 页号，从 1 起（与 `PdfPageMetricView.number` 同一个口径） */
+  pageNumber: number;
+  rect: PdfOverlayRectView;
+  /** 叠加文字：本片只放拉丁，含中文以 `text-not-supported` 结构化失败（中文腿按裁定⑧ 随字体资产再落） */
+  text?: string;
+  /** 字号（pt），省略取服务配置的 `defaultTextSizePt` */
+  sizePt?: number;
+}
+
+/**
+ * 另存回执（镜像 `pdf.export` 的 `PdfSaveAsReceipt`，spec 3.5-02 / 3.5-09）：产物路径、产物指纹与页数。
+ * `sha256` 是**产物**的摘要，与 `PdfOpenReceiptView.sourceHash` 永远不同——源文件从头到尾没被写过。
+ */
+export interface PdfSaveAsReceiptView {
+  outPath: string;
+  sha256: string;
+  pageCount: number;
 }
 
 /** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
@@ -1965,6 +2005,18 @@ export interface BridgeSignatures {
    * （`empty` / `encrypted` / `invalid-pdf`），界面给三句不同的中文而不是同一句「打不开」。
    */
   'pdf.io.open': { args: [filePath: string]; returns: PdfOpenReceiptView };
+  /**
+   * 另存一份带覆盖区的 PDF（spec 3.5-02 / 3.5-09，plan §7.4 的 `pdf.export`）：
+   * 源文件只读，覆盖区以比例坐标进、以内容流里的新笔画出，产物写到 `outPath`。
+   * 失败以 `AppErrorPayload`（`PDF_EDIT_SAVE_FAILED`）上浮，`details.code` 说清是哪一种
+   * （`out-is-source` / `invalid-pdf` / `too-many` / `out-of-page` / `out-of-bounds` / `too-small` /
+   * `bad-size` / `text-not-supported` / `draw-failed` / `write-failed`），
+   * 而抛出时磁盘上既没有 `outPath` 也没有 `outPath.part`（plan §7.10 的「失败不落半成品」）。
+   */
+  'pdf.export.saveAs': {
+    args: [filePath: string, overlays: PdfOverlayInputView[], outPath: string];
+    returns: PdfSaveAsReceiptView;
+  };
   /**
    * 导入一份简历文件（spec 4.1-01 / 06 / 07）：主进程按绝对路径读字节、判格式、抽文本、幂等入库。
    * 失败以 `AppErrorPayload`（`RESUME_IMPORT_FAILED`）上浮，界面给一句中文；疑似扫描件不算失败，

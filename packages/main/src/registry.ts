@@ -38,7 +38,7 @@ import {
   OutboundScriptService,
   OutboundThrottleService,
 } from '@auto-cc/plugin-outbound';
-import { PdfIoService } from '@auto-cc/plugin-pdf-edit';
+import { PdfExportService, PdfIoService } from '@auto-cc/plugin-pdf-edit';
 import {
   BossPlatformService,
   ConversationStoreService,
@@ -170,6 +170,11 @@ export const REGISTRY: Registry = {
   // 「在用户那份 PDF 上改」与「按文档模型排出去」分属两条。本切片（3.5-a）它还没有界面调用方，
   // 这是刻意留下的可见缺口——引擎腿先在真实装配里装好，界面与另存腿在 3.5-b 接（同 4.2-a 的口径）。
   'pdf-io': PdfIoService,
+  // 轻编辑的另存腿（spec 3.5-02 / 3.5-09 / plan §7.4）：`pdf.export` 只做「源路径 + 覆盖区 + 产物路径 → 新文件」。
+  // 与 `pdf-io` 一样不建表、不占迁移号段、不 inject；它**只写产物、从不写源文件**，
+  // 于是摘掉 `pdf-io` 只是打不开，摘掉本行是「改完了存不出去」——两件事分开占行（§4.1 一个包只做一件事的装配版）。
+  // 本切片（3.5-b 前半）它同样还没有界面调用方：界面在 3.5-b 后半与 3.5-c 接，中文叠加腿按裁定⑧ 随字体资产再落。
+  'pdf-export': PdfExportService,
   // 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点，
   // 迁移号段 25，也是全仓唯一持有调度 `setInterval` 的地方（`scripts/check-scheduler-no-external-cron.ts` 钉住）。
   // 摘掉这一行：界面点「定时任务」得到「服务未挂载」的结构化失败，而对话、循环、工作流三条照旧——
