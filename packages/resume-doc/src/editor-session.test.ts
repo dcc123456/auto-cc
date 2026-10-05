@@ -48,19 +48,21 @@ describe('3.6-03 撤销/重做与当前步骤', () => {
     const session = open();
     expect(session.isDirty()).toBe(false);
     expect(session.canUndo()).toBe(false);
-    expect(session.moveSection('exp', 1)).toBe(true);
+    expect(session.moveSection('exp', 1).ok).toBe(true);
     expect(session.isDirty()).toBe(true);
     expect(session.canUndo()).toBe(true);
   });
 
-  it('空编辑一律不进栈：拖回原地、改成同一个值、越界与界外都是 false 且没有可退的一步', () => {
+  it('空编辑不进栈、非法编辑不进会话：两种都不长撤销单元，但只有一种是失败', () => {
     const session = open();
-    expect(session.moveSection('exp', 0)).toBe(false);
-    expect(session.moveEntry('exp', 'e1', 0)).toBe(false);
-    expect(session.setMetric('baseFontPt', 10.5)).toBe(false);
-    expect(session.setMetric('baseFontPt', 99)).toBe(false);
-    expect(session.setMetric('baseFontPt', Number.NaN)).toBe(false);
-    expect(session.moveSection('zz', 1)).toBe(false);
+    // 拖回原地 / 改成同一个值：判定是"通过"（界面不该报错），但没有新的一步。
+    expect(session.moveSection('exp', 0)).toEqual({ ok: true, value: session.document() });
+    expect(session.moveEntry('exp', 'e1', 0).ok).toBe(true);
+    expect(session.setMetric('baseFontPt', 10.5).ok).toBe(true);
+    // 界外、非有限数、未知 id：判定是"拒绝"，子原因原样上浮（3.6-b 的契约腿靠它拼提示）。
+    expect(session.setMetric('baseFontPt', 99)).toMatchObject({ ok: false, code: 'out-of-bounds' });
+    expect(session.setMetric('baseFontPt', Number.NaN)).toMatchObject({ ok: false, code: 'not-a-number' });
+    expect(session.moveSection('zz', 1)).toMatchObject({ ok: false, code: 'unknown-section' });
     expect(session.canUndo()).toBe(false);
     expect(session.isDirty()).toBe(false);
     expect(session.document()).toEqual(fixture());
@@ -114,6 +116,20 @@ describe('3.6-03 撤销/重做与当前步骤', () => {
     leaked.layout.baseFontPt = 2;
     expect(session.document().sections.map((section) => section.id)).toEqual(['exp', 'skills']);
     expect(session.isDirty()).toBe(false);
+  });
+
+  it('markSaved 把 dirty 基线推到当前内容：刚存过就不该再拦「未保存离开」，但历史照旧退得回去', () => {
+    const session = open();
+    session.setMetric('baseFontPt', 12);
+    expect(session.isDirty()).toBe(true);
+
+    session.markSaved();
+
+    expect(session.isDirty()).toBe(false);
+    expect(session.canUndo()).toBe(true);
+    expect(session.undo()).toBe(true);
+    // 退回到"打开时那份"之外的一步之后，与新的基线又不一样了——dirty 判的是"与上次保存的不同"。
+    expect(session.isDirty()).toBe(true);
   });
 });
 

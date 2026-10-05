@@ -651,3 +651,66 @@ DOM 与状态都要按 id 寻，不要按下标缓存位置。
 所以 P3 的实现面**仍是 14 条**，这轮一个勾都没打。
 **顺延**：① 3.6-b 契约腿（`resume.editor` service + 白名单/签名 + `ResumeEditorView` 投影 + `editor-link.test.ts`，离线可收）；
 ② 3.6-c 界面腿（要你在场）；③ §8.4 那笔连带——`seedDemo variant='edited'` 的退场，留给 3.6-c 收口，不夹带。
+
+### 8.7 3.6-b 契约腿落地记录（2026-10-05，九条状态位仍然一条都不动）
+
+**落点**（§8.3 那四条登记一次做完，没有新包）：`packages/core/src/errors.ts` 加四条码、
+`packages/resume-doc/src/editor-service.ts`（**新文件**：`ResumeEditorService`，provide 名 `resume.editor`，注入 `resume.doc` 与 `resume.print`）
+与 `editor-service.test.ts`（11 例，包内 124 → **136**）、`packages/shared/src/bridge.ts`（白名单 9 行 + 5 个投影类型 + 9 条签名）、
+`packages/main/src/registry.ts` 与 `cordis.yml` 各一行、`packages/main/src/editor-link.test.ts`（**新文件**，8 例，包内 70 → **78**）。
+迁移台账一字未动（裁定⑨：draft 只活在内存，所以本片没有表要建）。
+
+**四处与 §8.3 的偏离，逐条写理由**（不是随手改的，每条都是"照原文写会留下第二种事实"）：
+
+1. **白名单九行，比表里那八行多一条 `resume.editor.use`**。模板与语言是会话的读数（`editor-session.ts` 把它们存在历史栈之外），
+   界面若不经主进程就换不了它们；若让界面自己记着"当前是哪套模板"，就是 §2.7 禁止的第二份事实——而且 2.5-e 那条实测
+   （热改配置重建下游 → 本地那份静默变空）在这里同样成立。`.use` 返回的仍是同一条 `ResumeEditorView`，
+   所以"切完之后界面拿到什么"只有一种形状。
+2. **码只开四支，子原因进 `details.reason`**：`RESUME_EDITOR_NOT_OPEN` / `RESUME_EDITOR_DOC_UNAVAILABLE` /
+   `RESUME_EDITOR_TEMPLATE_UNKNOWN` / `RESUME_EDITOR_EDIT_REJECTED`。最后一条后面跟着 `editor-ops` 的六种拒绝码
+   （`unknown-metric` / `not-a-number` / `out-of-bounds` / `unknown-section` / `unknown-entry` / `index-out-of-range`）
+   作为子原因。先例是本仓的 `PDF_EDIT_SAVE_FAILED`（`errors.ts` 里那条注释写着为什么）：**界面处置相同就共用一支码**，
+   六种界外/越界的处置都是"这次没改成，改完再试"，开六支只会让界面的 switch 长六条一模一样的分支（§2.6）。
+   界值本身随投影给（`metricBounds`），界面因此不需要抄一份界表——`editor-ops.ts` 仍是全仓唯一读那张表的地方。
+3. **会话的三个变更方法从 `boolean` 改成 `EditorOutcome<ResumeDocument>`**。第一版是把服务写成"先看 `boolean`、
+   再自己拼一条拒绝"，那等于判据有两处（`editor-ops` 一处、服务一处），按 §2.5 当场退回：会话直接把 planner 的
+   判定原样转发，服务只负责把 `!ok` 翻成 `AppError`。`3.6-a` 那 9 条用例的断言因此跟着改了形状（`toBe(true)` → `.ok`），
+   一条判据没少。空编辑（拖回原地、改成同一个值）走的是 `{ ok: true }` 那一支——它没有推进栈，但也没被拒，
+   界面读到的是"当前读数原样"，这正是 §8.6 立的那条"空编辑不进栈"。
+4. **3.6-08 的两只配置键本片不装**（`static Config` 是空的 `z.strictObject({})`）。判据原文要的是"预览响应计时与阈值一致"，
+   而计时发生在界面那侧、阈值此刻没有任何读者——先接上就是无人读的死配置（§2.4），随 3.6-c 一起落。
+
+**`markSaved()` 是这片新加的会话能力**（3.6-09 的另一半）：`save` 把 `resume.doc` 存完，会话把 dirty 的**基线**推到当前内容，
+历史栈照旧保留。用例钉的是这组读数：存完 `isDirty=false` 而 `canUndo=true`；再退一步 `isDirty` 回到 `true`——
+因为"与已存那份不同"这件事又成立了。没有这一位，保存之后用户会看到一颗永远亮着的"未保存"。
+
+**投影的形状**（`ResumeEditorState` ↔ `bridge.ts` 的 `ResumeEditorView` 一一对应）：`docId` + 区块的 `{ id, kind, entryIds }` +
+`layout` 全量度量 + `templateId` / `locale` / `templates` + `metricBounds` + 三位读数（`isDirty` / `canUndo` / `canRedo`）。
+**没有一句正文**：区块标签由界面按 `kind` 走 i18n（3.2-06 已有口径），条目要显示内容走 `.preview` 那份打印 HTML。
+这条边界在两层各有一条可执行断言：包内是 `JSON.stringify(view)` 不含 `岗位-e1` / `经历`，装配面是**经网关拿到的投影再过一次
+`structuredClone`**（IPC 载荷的真实通路）之后仍不含正文——正文一旦出现在克隆串里，"界面只认 docId"就已经破了。
+
+**装配面判据**（`editor-link.test.ts`，四组八例）：① 注册表与 `cordis.yml` 都有 `resume-editor`，
+且它排在 `resume-doc` 与 `resume-print` **之后**（§9 的 5.1-c：清单顺序就是挂载顺序，顺序写反在包内用例里看不出来）；
+② 白名单九条逐条 `resolveCall` 切成服务 `resume.editor` + 同名方法，并断言那个方法在挂起来的实例上**真的是函数**
+（名单写了而服务没有，界面按下去得到的是网关的 `METHOD_NOT_FOUND`，不是结构化业务码）；
+③ 界外值经网关抛出的仍是 `RESUME_EDITOR_EDIT_REJECTED`，`message` 带键名与界表两端、`details.reason` 带子原因（3.6-02 的判据原文）；
+④ 未登记的名字（`dropSession` / 带点的 `save.all` / 整名大小写）与 `resume.doc.save` / `.load` 一律进不来，
+且 `agent.tools` 的清单里没有 `resume.editor*`（正向对照是同一次装配里句柄确实按名挂起来了，所以那条空清单不是"什么都没装"）。
+
+**两条只有装配面用例才会踩到的坑，记下来**：
+① `resume.editor` 与 `workflow.graph` 一样还没进 cordis 的 `AppServices` 声明，所以 `asApp(ctx)['resume.editor']` 直接写是
+TS2551（"Did you mean 'resume.doc'?"）——沿用 `graph-link.test.ts` 已有的手法：先 `as unknown as Record<'resume.editor', unknown>`
+再按句柄类型收口，**不去改 cordis 的声明**（那是框架的表，本片没有理由动它）。
+② 编辑器九条方法都是**同步**的（会话在内存里），所以 `Promise.resolve(invoke(…)).catch(…)` 接不住抛错——实参求值那一刻就抛了，
+`.catch` 挂在返回值上，于是错误穿透到测试体外（表现是两条用例红而错误信息就是那条业务 `AppError` 原话）。
+`pdf-link.test.ts` 那两条走的是异步另存腿，所以这个写法在那儿是对的；这里改成 `try/catch`。
+
+**这轮的闸门读数**：`pnpm typecheck` EXIT=0（第一次是 EXIT=2，就是上面那条 TS2551）、`pnpm lint` EXIT=0、
+`pnpm format` + `format:check` EXIT=0、`pnpm test` EXIT=0——23 个包全绿、无 failed 无 skipped，
+`resume-doc` 13 文件 / **136 例**、`main` 12 文件 / **78 例**，其余包未降级（`core` 52、`pdf-edit` 71、`workflow` 214、`agent` 223、`resume-kb` 398）。
+
+**状态位**：3.6 九条**仍全部 `[ ]`**。这轮收的是 §8.4 那行写的"3.6-02 的界外拒绝跨进程不丢 message、3.6-05 / 06 / 07 的 C 半边"，
+但九条的验收方式每一条都带 V 或界面读数，spec §7 不允许用单测替代可视项；按 master plan 的口径（P3 未做 **13 条** / 全局 **15 条**）
+这轮一条都没翻。**剩余实现面只有 3.6-c 界面腿**（`ResumeEditor.tsx` + `ResumePanel` 一个按钮进入，裁定⑩；未保存拦截只拦组件卸载，裁定⑪；
+3.6-08 的计时阈值配置随这片落；连带 `seedDemo variant='edited'` 的退场）——它要真实窗口与你在场（§7.1 / §7.9 第 3 条同一口径）。

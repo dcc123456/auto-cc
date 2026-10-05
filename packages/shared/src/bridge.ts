@@ -328,6 +328,20 @@ export const RENDERER_ALLOWLIST = [
   'resume.export.seedDemo',
   'resume.export.preview',
   'resume.export.toPdf',
+  // 3.6 排版编辑器的会话面（plan §8.3）：九行全是**人**在编辑器面板里的动作（打开、拖、推滑杆、换模板、
+  // 撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
+  // 与 §3 第 1 条的事实锁定同一条线（口径照 5.10-e 那四条写口与 `pdf.*` 那两行）。
+  // 过界的只有 docId、结构 id 与度量数：正文不过界（见上面 `resume.export.preview` 那行的注释），
+  // 界面要看内容走 `.preview` 那份打印 HTML，与导出同一份源。
+  'resume.editor.open',
+  'resume.editor.view',
+  'resume.editor.move',
+  'resume.editor.metric',
+  'resume.editor.use',
+  'resume.editor.preview',
+  'resume.editor.undo',
+  'resume.editor.redo',
+  'resume.editor.save',
   // 3.7 快照的只读面（spec 3.7-03）：列历史 + 比对两份快照。正文不过进程边界，
   // 界面拿到的是「哪个快照、模板与时刻」与「条目级 / 字段级差异」两种读数。
   'resume.snapshot.list',
@@ -1190,6 +1204,62 @@ export interface SnapshotDiffView {
   isEmpty: boolean;
 }
 
+/**
+ * 排版编辑器过进程边界的读数（spec 3.6，plan §8.3）。
+ *
+ * 与上面那组同样是主进程侧同名类型的**镜像**，而且这里刻意只镜像"界面要摆出来的东西"：
+ * 3.3 立下的口径（见白名单里那段注释）——文档正文不过界，界面只认 docId——在编辑器里照样成立。
+ * 于是界面拿到的是**结构**（区块 id / kind / 条目 id 序列）与**度量**（数），拿不到一句简历原文；
+ * 它要看内容靠的是 `resume.editor.preview` 那份打印 HTML，与导出所见同一份源（spec 3.3-01 的口径续用）。
+ */
+/** 可调度量的键（镜像 `MetricKey`；`columns` 不在其中——它只有 1..2 两档，由模型 schema 管着，不给人一根两档滑杆）。 */
+export type EditorMetricKeyView = 'baseFontPt' | 'lineHeight' | 'topMm' | 'rightMm' | 'bottomMm' | 'leftMm';
+
+/** 一条度量的上下界（镜像 `MetricBound`；单位随键：pt / 倍数 / mm）。 */
+export interface EditorMetricBoundView {
+  readonly min: number;
+  readonly max: number;
+}
+
+/** 版面度量（镜像 `Layout`）：**只有数**，简历的一个字都不在这里。 */
+export interface ResumeEditorLayoutView {
+  readonly pageSize: 'A4';
+  readonly margin: {
+    readonly topMm: number;
+    readonly rightMm: number;
+    readonly bottomMm: number;
+    readonly leftMm: number;
+  };
+  readonly baseFontPt: number;
+  readonly lineHeight: number;
+  readonly columns: number;
+}
+
+/** 编辑器里的一个区块（标签由界面按 kind 取 i18n，同 3.2-06 的口径；`entryIds` 是条目级拖拽的把手数据）。 */
+export interface ResumeEditorSectionView {
+  readonly id: string;
+  readonly kind: ResumeSectionKindView;
+  readonly entryIds: string[];
+}
+
+/**
+ * `resume.editor.*` 每一次动作后的统一读数（镜像 `ResumeEditorState`）。
+ * `metricBounds` 与主进程判界用的是同一张表：滑杆的 min/max 从这里来，界面不许自己抄一份（§2.5）。
+ */
+export interface ResumeEditorView {
+  readonly docId: string;
+  readonly sections: ResumeEditorSectionView[];
+  readonly layout: ResumeEditorLayoutView;
+  readonly templateId: string;
+  readonly locale: ResumeLocaleView;
+  /** 可用模板 id（下拉的数据源；模板名是渲染期标签，不过界）。 */
+  readonly templates: string[];
+  readonly metricBounds: Readonly<Record<EditorMetricKeyView, EditorMetricBoundView>>;
+  readonly isDirty: boolean;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+}
+
 /** 每个白名单调用的入参元组与返回值，渲染层类型的来源。 */
 /**
  * 知识库实体过进程边界的形状（4.2-05 的实体树数据源）。
@@ -2013,6 +2083,51 @@ export interface BridgeSignatures {
     args: [docId: string, templateId: string, locale?: ResumeLocaleView];
     returns: ExportReceiptView;
   };
+  /**
+   * 打开一份文档的编辑会话（spec 3.6，plan §8.3）：正文留在主进程，界面从这里拿到的是投影。
+   * 重新 open＝放弃上一份未保存的 draft（3.6-09 的"只拦不存"：拦截提示之后没有恢复途径）。
+   */
+  'resume.editor.open': {
+    args: [docId: string, templateId?: string, locale?: ResumeLocaleView];
+    returns: ResumeEditorView;
+  };
+  /** 只读当前会话投影（界面重挂或只要刷新读数时用；未 open 则 `RESUME_EDITOR_NOT_OPEN`）。 */
+  'resume.editor.view': { args: [docId: string]; returns: ResumeEditorView };
+  /**
+   * 拖一次：不给 `entryId` 是搬整个区块（3.6-01），给了就是在该区块内搬条目。
+   * 落点下标是**结果序列里的位置**；被拒时上浮 `RESUME_EDITOR_EDIT_REJECTED`，子原因在 `details.reason`。
+   */
+  'resume.editor.move': {
+    args: [docId: string, sectionId: string, toIndex: number, entryId?: string];
+    returns: ResumeEditorView;
+  };
+  /**
+   * 改一条度量（3.6-02）。界值以 `.view` 的 `metricBounds` 为准（滑杆摆的就是那一份），
+   * 界外与非有限数都被拒——**message 跨进程不丢**，界面上那句提示由主进程的原因拼。
+   */
+  'resume.editor.metric': { args: [docId: string, key: EditorMetricKeyView, value: number]; returns: ResumeEditorView };
+  /**
+   * 换预览模板或语言（3.6-04）。它不碰文档、不产生撤销单元，所以"切模板丢数据"在这套形状里无从发生。
+   * 两个参数都不给就是只刷新读数；未知模板 id 以 `RESUME_EDITOR_TEMPLATE_UNKNOWN` 失败。
+   */
+  'resume.editor.use': {
+    args: [docId: string, templateId?: string, locale?: ResumeLocaleView];
+    returns: ResumeEditorView;
+  };
+  /**
+   * 当前 draft 的预览 HTML（3.6-01「松开即预览更新」的数据源）：与 `resume.export.preview` 用
+   * **同一份** builder 与同一个字体 base，区别只在这里喂的是**未保存**的那一份文档。
+   */
+  'resume.editor.preview': { args: [docId: string]; returns: string };
+  /** 回退一步（3.6-03）：返回新的投影，`canUndo` / `isDirty` 一起更新。 */
+  'resume.editor.undo': { args: [docId: string]; returns: ResumeEditorView };
+  /** 重做一步（3.6-03）。 */
+  'resume.editor.redo': { args: [docId: string]; returns: ResumeEditorView };
+  /**
+   * 保存（3.6-09 的另一半）：把当前 draft 交给 `resume.doc` 那唯一的写入入口，成功后 dirty 归零、
+   * 撤销历史照旧保留。界面**不**直接调 `resume.doc.save`——正文不过界，它手里也没有正文。
+   */
+  'resume.editor.save': { args: [docId: string]; returns: ResumeEditorView };
   /**
    * 列出某文档的导出快照历史（spec 3.7-01 的读数，界面「比哪两版」的选择器数据源）：最新的在前，只回摘要不回正文。
    */

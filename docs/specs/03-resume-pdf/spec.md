@@ -220,6 +220,16 @@ U/C 可现在兑现的六条：
   `3.6-04` 的"数据一字不变"（模板与语言活在历史栈与文档之外，切换在结构上不碰一个字节）。
   没过的仍是**每一行的 V**：拖拽前后截图、界外提示截图、连续操作截图、双语截图、目视、计时截图、拦截提示截图——都在 3.6-c 界面腿，要真实窗口与你在场（§7.1 不允许用单测替代可视项）。
   本片**不新增 service、不新增白名单行、不新增迁移**（`resume.editor` 与其白名单是 3.6-b 契约腿；裁定⑨「只拦不存」使 3.6 全程不碰迁移台账）。逐条读数写在 plan §8.6。
+- **3.6-b 契约腿已落地（2026-10-05），九条状态位仍然一条都不动、仍全 `[ ]`**：`resume.editor` 服务（`packages/resume-doc/src/editor-service.ts`，包内 124 → **136 例**）、
+  注册表与 `cordis.yml` 各一行（且 `resume-editor` 排在 `resume-doc` / `resume-print` 之后，§9 的 5.1-c）、渲染层白名单**九行**与同名签名、
+  四张错误码（`RESUME_EDITOR_NOT_OPEN` / `_DOC_UNAVAILABLE` / `_TEMPLATE_UNKNOWN` / `_EDIT_REJECTED`，后者的六种界外子原因进 `details.reason`，
+  口径照 `PDF_EDIT_SAVE_FAILED`：界面处置相同就共用一支码），接线判据在 `packages/main/src/editor-link.test.ts`（8 例，包内 70 → **78**）。
+  收掉的是 §8.4 那行的"3.6-02 的界外拒绝跨进程不丢 message + 3.6-05/06/07 的 C 半边"：经网关切分后界外值仍带键名、越界值与界表两端，
+  而 `metricBounds` 随投影过界（界面不再抄第二份界表，§2.5）；`3.6-09` 的服务侧形状是"重新 open 就放弃未保存 draft"加 `markSaved()`
+  （存完 `isDirty=false` 而 `canUndo` 仍 `true`）。**正文仍然不过界**：投影里只有 `docId`、区块 `{ id, kind, entryIds }`、度量数与三位读数，
+  接线用例把经网关拿到的那份再过一次 `structuredClone` 后断言串里没有任何简历原文；界面也没有 `resume.doc.*` 的任何一条口。
+  仍然没过的还是**每一行的 V**（拖拽、提示、双语、目视、计时、拦截），加上 3.6-08 那两只阈值配置键按字面留给界面腿（此刻接上是无人读的死配置，§2.4）。
+  与 plan §8.3 的四处偏离（多一行 `.use`、码开四支、会话三个变更方法从 `boolean` 改 `EditorOutcome`、08 的配置键顺延）逐条写了理由，见 plan §8.7。
 
 ## 3.7 版本与快照
 

@@ -346,6 +346,14 @@ plugins:
   - id: resume-export
     dependsOn: [resume-doc, resume-print, resume-snapshot, config]
 
+  # 排版编辑器（spec 3.6 / plan §8.3）：`resume.editor` 持有"正在编辑的那一份 draft + 撤销历史"，
+  # 因为简历正文不过进程边界（见 `bridge.ts` 里 3.3 那段注释立的口径），编辑动作只能发生在主进程这一侧。
+  # 它不建表、不落盘：draft 只活在内存里，重启即失（plan §8.5 裁定⑨「只拦不存」），保存走 `resume.doc` 那唯一的写入入口。
+  # 排在 `resume-doc` 之后是 §9 的 5.1-c（清单顺序就是挂载顺序）；摘掉这一行，界面九条 `resume.editor.*`
+  # 得到「服务未挂载」的结构化失败，而预览与导出照旧——「排一版」与「印一版」分属两件事。
+  - id: resume-editor
+    dependsOn: [resume-doc, resume-print]
+
   # 简历导入（spec 4.1-06 / 07 / 09 / 10）：`resume_imports` 表由本服务自己把迁移推进（号段 10，
   # delivery_records 是 9），也是 PDF / DOCX / Markdown 三条输入腿在桌面端的唯一入口。
   # `maxBytes` 是单次导入的字节上限（防误选大文件把主进程吃掉），显式写在这里而不是藏在代码默认值里，

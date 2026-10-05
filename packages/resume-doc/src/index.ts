@@ -53,6 +53,9 @@ export {
   type ResumeEditorSession,
   type ResumeEditorSessionOptions,
 } from './editor-session.js';
+// 3.6-b 契约腿：`resume.editor` 服务（会话持有者 + 投影）。导出口径照 `doc-store` / `snapshot-store`
+// 那两行：类 + 配置类型 + 读数类型；空配置的 schema 常量留在文件内部（`static Config` 自己用）。
+export { ResumeEditorService, type ResumeEditorConfig, type ResumeEditorState } from './editor-service.js';
 export {
   ResumeDocService,
   RESUME_DOC_MIGRATION_VERSION,

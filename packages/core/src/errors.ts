@@ -102,6 +102,16 @@ export type AppErrorCode =
   // 而这条码存在的全部意义是陪着一条硬约束：抛它的时候磁盘上没有半成品（plan §7.10，3.5-05 转移来的精神）。
   // 具体子原因在 `details.code` 里（`invalid-pdf` / `encrypted` / `too-many` / `out-of-page` / `text-not-supported` / …）。
   | 'PDF_EDIT_SAVE_FAILED'
+  // 排版编辑器（spec 3.6，plan §8.3 的 `resume.editor`）。三条码各对应一种**界面处置不同**的失败，
+  // 所以不合并：未开会话要重新 open、文档读不到要先修数据或换 docId、模板 id 过期要刷新下拉。
+  | 'RESUME_EDITOR_NOT_OPEN'
+  | 'RESUME_EDITOR_DOC_UNAVAILABLE'
+  | 'RESUME_EDITOR_TEMPLATE_UNKNOWN'
+  // 一次编辑被拒（3.6-02 的"非法值被拒"跨进程那半边）：沿用 `PDF_EDIT_SAVE_FAILED` 的口径——
+  // 码只一支（处置都是"改动没生效，改完再试"），**子原因进 `details.code`**（`out-of-bounds` /
+  // `not-a-number` / `unknown-metric` / `unknown-section` / `unknown-entry` / `index-out-of-range`），
+  // 界面按子原因选 i18n 文案，界值本身由 `ResumeEditorView.metricBounds` 给（滑杆要摆的就是同一份表）。
+  | 'RESUME_EDITOR_EDIT_REJECTED'
   // 知识库实体（spec 4.2-01 / 4.2-02）。两个码的处置不同所以不合并：
   // 前者是「还没有可派生的简历」（引导用户先导入），后者是「界面按下的卡片已经过期」（重读列表即可）。
   | 'KB_SOURCE_MISSING'

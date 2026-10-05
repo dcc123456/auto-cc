@@ -18,7 +18,7 @@ import { createSnapshotStack, DEFAULT_SNAPSHOT_HISTORY } from '@auto-cc/core/sna
 import type { ResumeDocument } from './model.js';
 import { contentHash } from './normalize.js';
 import type { TemplateLocale } from './template.js';
-import { planEntryMove, planMetric, planSectionMove, type MetricKey } from './editor-ops.js';
+import { planEntryMove, planMetric, planSectionMove, type EditorOutcome, type MetricKey } from './editor-ops.js';
 
 /** 建会话时需要的读数。 */
 export interface ResumeEditorSessionOptions {
@@ -57,9 +57,10 @@ export interface ResumeEditorSession {
    * 区块重排（spec 3.6-01）。
    * @param sectionId 被拖的区块 id
    * @param toIndex 落点下标（结果序列里的位置）
-   * @returns 真的推进了一步才 true；id 查无、下标越界、拖回原地都返回 false 且不入栈
+   * @returns 通过给**动作之后**的文档：真的改了什么就是新文档，拖回原地则是当前文档（不另入栈）；
+   *          id 查无、下标越界则给 `editor-ops` 那份拒绝项（原样转发，不在这里造第二种失败形状）
    */
-  moveSection(sectionId: string, toIndex: number): boolean;
+  moveSection(sectionId: string, toIndex: number): EditorOutcome<ResumeDocument>;
   /**
    * 条目重排，作用域限在其所属区块内。
    * @param sectionId 条目所属区块 id
@@ -67,18 +68,24 @@ export interface ResumeEditorSession {
    * @param toIndex 该区块内的目标下标
    * @returns 同 `moveSection`
    */
-  moveEntry(sectionId: string, entryId: string, toIndex: number): boolean;
+  moveEntry(sectionId: string, entryId: string, toIndex: number): EditorOutcome<ResumeDocument>;
   /**
    * 改一条度量（spec 3.6-02）。
    * @param key 度量键（`baseFontPt` / `lineHeight` / 边距四条之一）
    * @param value 新值（单位随键；界外与非有限数都拒）
-   * @returns 真的推进了一步才 true；界外与"就是现值"都返回 false
+   * @returns 同 `moveSection`；界外给 `out-of-bounds`，非有限数给 `not-a-number`
    */
-  setMetric(key: MetricKey, value: number): boolean;
+  setMetric(key: MetricKey, value: number): EditorOutcome<ResumeDocument>;
   /** 回退一步；栈空返回 false 且文档不变。 */
   undo(): boolean;
   /** 重做一步；没有可重做的返回 false。 */
   redo(): boolean;
+  /**
+   * 把"打开时那份"重新基线化成当前内容——**保存成功之后**调它。
+   * 不调的话刚存完的 draft 仍与旧基线不同，`isDirty()` 会一直返回 true，
+   * 于是 3.6-09 的未保存拦截会在用户刚刚保存之后又拦一次（撤销历史照旧保留，退得回去）。
+   */
+  markSaved(): void;
 }
 
 /**
@@ -93,19 +100,19 @@ export function createResumeEditorSession(
   options: ResumeEditorSessionOptions,
 ): ResumeEditorSession {
   const stack = createSnapshotStack(initial, structuredClone, options.historyCeiling ?? DEFAULT_SNAPSHOT_HISTORY);
-  const openedHash = contentHash(initial);
+  let openedHash = contentHash(initial);
   let templateId = options.templateId;
   let locale: TemplateLocale = options.locale ?? 'zh-CN';
 
   /**
    * 候选文档真的改了才进栈。
    * @param next 动作产出的新文档
-   * @returns 推进了历史才 true
+   * @returns 通过给"现在就是 present"的那一份：真的推进了历史是新文档，内容与现值相同（空编辑）则是原样
    */
-  const commit = (next: ResumeDocument): boolean => {
-    if (contentHash(next) === contentHash(stack.present())) return false;
+  const apply = (next: ResumeDocument): EditorOutcome<ResumeDocument> => {
+    if (contentHash(next) === contentHash(stack.present())) return { ok: true, value: stack.present() };
     stack.commit(next);
-    return true;
+    return { ok: true, value: next };
   };
 
   return {
@@ -136,27 +143,30 @@ export function createResumeEditorSession(
     moveSection(sectionId, toIndex) {
       const current = stack.present();
       const moved = planSectionMove(current.sections, sectionId, toIndex);
-      // 拒绝腿不动栈，也不报错：界面读的是 `planSectionMove` 的 code（会话只回答"进没进一步"）。
-      if (!moved.ok) return false;
-      return commit({ ...current, sections: moved.value });
+      // 拒绝腿原样转发：判据只有一份（`editor-ops`），会话不造第二种失败形状。
+      if (!moved.ok) return moved;
+      return apply({ ...current, sections: moved.value });
     },
     moveEntry(sectionId, entryId, toIndex) {
       const current = stack.present();
       const moved = planEntryMove(current.sections, sectionId, entryId, toIndex);
-      if (!moved.ok) return false;
-      return commit({ ...current, sections: moved.value });
+      if (!moved.ok) return moved;
+      return apply({ ...current, sections: moved.value });
     },
     setMetric(key, value) {
       const current = stack.present();
       const planned = planMetric(current.layout, key, value);
-      if (!planned.ok) return false;
-      return commit({ ...current, layout: planned.value });
+      if (!planned.ok) return planned;
+      return apply({ ...current, layout: planned.value });
     },
     undo() {
       return stack.undo();
     },
     redo() {
       return stack.redo();
+    },
+    markSaved() {
+      openedHash = contentHash(stack.present());
     },
   };
 }

@@ -46,7 +46,12 @@ import {
   JdStoreService,
 } from '@auto-cc/plugin-platform-boss';
 import { PluginsService } from '@auto-cc/plugin-plugins';
-import { ResumeDocService, ResumeExportService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
+import {
+  ResumeDocService,
+  ResumeEditorService,
+  ResumeExportService,
+  ResumeSnapshotService,
+} from '@auto-cc/plugin-resume-doc';
 import { KbGapService, KbProfileService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { ScheduleRegistryService } from '@auto-cc/plugin-scheduler';
 import { SessionsService } from '@auto-cc/plugin-sessions';
@@ -142,6 +147,11 @@ export const REGISTRY: Registry = {
   // 导出编排（spec 3.3-11）：把「读合法文档 → 装配打印请求 → 交给打印轨 → 落盘 + 回写页数」串成 `resume.export` 服务，
   // 自身不认识 Electron，只经 `resume.print` 端口消费打印能力（ports-and-adapters，见 plan §3.3 分层落点）。
   'resume-export': ResumeExportService,
+  // 排版编辑器（spec 3.6 / plan §8.3）：编辑会话的持有者。它在 `cordis.yml` 里必须排在 `resume-doc` 之后
+  // （§9 的 5.1-c：清单顺序就是挂载顺序，早挂的问不到晚注册的），且**不登记为 agent 工具**——改版面是人对"投出去的那份"的表态。
+  // 摘掉这一行，界面九条 `resume.editor.*` 全部得到「服务未挂载」的结构化失败，而预览/导出照旧：
+  // 「排一版」与「印一版」分属两件事（草稿不落库，见 plan §8.5 裁定⑨）。
+  'resume-editor': ResumeEditorService,
   // 导出快照（spec 3.7-01）：`resume_snapshots` 表的唯一落点，迁移号段 8。每次 `resume.export` 成功后记一行不可变快照，
   // 供 3.7-04 的按 id 还原与后续 3.7-02 的投递追溯读取。摘掉它，`resume-export` 连同进 PENDING（它的 `inject` 里有它），
   // 界面点「导出 PDF」给出结构化错误——「导出」与「导出即留档」因此是可分别摘除的两件事，而不是悄悄少记一份历史。
