@@ -35,11 +35,11 @@
 > 本节由 `tsx scripts/check-licenses.ts --write` 生成，请勿手改；正文其余部分是人工记账。
 > 取数口：`pnpm licenses list --json --prod`（与安装事实同源，不另写依赖解析）。
 
-**生产依赖合计 83 个包条目**，按许可分组：
+**生产依赖合计 82 个包条目**，按许可分组：
 
 | 许可                      | 包数 |
 | ------------------------- | ---- |
-| MIT                       | 57   |
+| MIT                       | 56   |
 | ISC                       | 13   |
 | BSD-2-Clause              | 4    |
 | Apache-2.0                | 2    |
@@ -52,91 +52,92 @@
 
 **逐包清单**（版本 = 锁定的实际解析版本）：
 
-| 包                               | 版本        | 许可                      |
-| -------------------------------- | ----------- | ------------------------- |
-| `pako`                           | 1.0.11      | (MIT AND Zlib)            |
-| `jszip`                          | 3.10.2      | (MIT OR GPL-3.0-or-later) |
-| `pdfjs-dist`                     | 6.3.289     | Apache-2.0                |
-| `typescript`                     | 5.9.3       | Apache-2.0                |
-| `sax`                            | 1.6.1       | BlueOak-1.0.0             |
-| `duck`                           | 0.1.12      | BSD                       |
-| `dingbat-to-unicode`             | 1.0.2       | BSD-2-Clause              |
-| `lop`                            | 0.4.2       | BSD-2-Clause              |
-| `mammoth`                        | 1.13.0      | BSD-2-Clause              |
-| `option`                         | 0.2.4       | BSD-2-Clause              |
-| `d3-ease`                        | 3.0.1       | BSD-3-Clause              |
-| `sprintf-js`                     | 1.0.3       | BSD-3-Clause              |
-| `d3-color`                       | 3.1.0       | ISC                       |
-| `d3-dispatch`                    | 3.0.1       | ISC                       |
-| `d3-drag`                        | 3.0.0       | ISC                       |
-| `d3-interpolate`                 | 3.0.1       | ISC                       |
-| `d3-selection`                   | 3.0.0       | ISC                       |
-| `d3-timer`                       | 3.0.1       | ISC                       |
-| `d3-transition`                  | 3.0.1       | ISC                       |
-| `d3-zoom`                        | 3.0.0       | ISC                       |
-| `graceful-fs`                    | 4.2.11      | ISC                       |
-| `inherits`                       | 2.0.4       | ISC                       |
-| `lucide-react`                   | 0.544.0     | ISC                       |
-| `semver`                         | 7.7.4       | ISC                       |
-| `yaml`                           | 2.9.1       | ISC                       |
-| `@babel/runtime`                 | 7.29.7      | MIT                       |
-| `@napi-rs/canvas`                | 1.0.9       | MIT                       |
-| `@napi-rs/canvas-win32-x64-msvc` | 1.0.9       | MIT                       |
-| `@standard-schema/spec`          | 1.1.0       | MIT                       |
-| `@types/d3-color`                | 3.1.3       | MIT                       |
-| `@types/d3-drag`                 | 3.0.7       | MIT                       |
-| `@types/d3-interpolate`          | 3.0.4       | MIT                       |
-| `@types/d3-selection`            | 3.0.12      | MIT                       |
-| `@types/d3-transition`           | 3.0.9       | MIT                       |
-| `@types/d3-zoom`                 | 3.0.9       | MIT                       |
-| `@types/react`                   | 19.3.0      | MIT                       |
-| `@types/react-dom`               | 19.3.0      | MIT                       |
-| `@xmldom/xmldom`                 | 0.8.15      | MIT                       |
-| `@xyflow/react`                  | 12.12.0     | MIT                       |
-| `@xyflow/system`                 | 0.0.83      | MIT                       |
-| `argparse`                       | 1.0.10      | MIT                       |
-| `base64-js`                      | 1.5.1       | MIT                       |
-| `builder-util-runtime`           | 9.7.0       | MIT                       |
-| `classcat`                       | 5.0.5       | MIT                       |
-| `cordis`                         | 4.0.0-rc.10 | MIT                       |
-| `core-util-is`                   | 1.0.3       | MIT                       |
-| `cosmokit`                       | 1.8.1       | MIT                       |
-| `cron-parser`                    | 5.10.1      | MIT                       |
-| `csstype`                        | 3.2.3       | MIT                       |
-| `debug`                          | 4.4.3       | MIT                       |
-| `electron-updater`               | 6.8.9       | MIT                       |
-| `fs-extra`                       | 10.1.0      | MIT                       |
-| `html-parse-stringify`           | 3.1.0       | MIT                       |
-| `i18next`                        | 25.10.10    | MIT                       |
-| `immediate`                      | 3.0.6       | MIT                       |
-| `isarray`                        | 1.0.0       | MIT                       |
-| `js-yaml`                        | 4.3.2       | MIT                       |
-| `jsonfile`                       | 6.2.1       | MIT                       |
-| `lazy-val`                       | 1.0.5       | MIT                       |
-| `lie`                            | 3.3.0       | MIT                       |
-| `lodash.escaperegexp`            | 4.1.2       | MIT                       |
-| `lodash.isequal`                 | 4.5.0       | MIT                       |
-| `luxon`                          | 3.7.2       | MIT                       |
-| `ms`                             | 2.1.3       | MIT                       |
-| `process-nextick-args`           | 2.0.1       | MIT                       |
-| `react`                          | 19.3.0      | MIT                       |
-| `react-dom`                      | 19.3.0      | MIT                       |
-| `react-i18next`                  | 15.7.4      | MIT                       |
-| `readable-stream`                | 2.3.8       | MIT                       |
-| `safe-buffer`                    | 5.1.2       | MIT                       |
-| `scheduler`                      | 0.28.0      | MIT                       |
-| `setimmediate`                   | 1.0.5       | MIT                       |
-| `string_decoder`                 | 1.1.1       | MIT                       |
-| `tiny-typed-emitter`             | 2.1.0       | MIT                       |
-| `underscore`                     | 1.13.8      | MIT                       |
-| `universalify`                   | 2.0.1       | MIT                       |
-| `use-sync-external-store`        | 1.7.0       | MIT                       |
-| `util-deprecate`                 | 1.0.2       | MIT                       |
-| `void-elements`                  | 3.1.0       | MIT                       |
-| `xmlbuilder`                     | 10.1.1      | MIT                       |
-| `zod`                            | 4.6.5       | MIT                       |
-| `zustand`                        | 4.5.7       | MIT                       |
-| `argparse`                       | 2.0.1       | Python-2.0                |
+| 包                        | 版本        | 许可                      |
+| ------------------------- | ----------- | ------------------------- |
+| `pako`                    | 1.0.11      | (MIT AND Zlib)            |
+| `jszip`                   | 3.10.2      | (MIT OR GPL-3.0-or-later) |
+| `pdfjs-dist`              | 6.3.289     | Apache-2.0                |
+| `typescript`              | 5.9.3       | Apache-2.0                |
+| `sax`                     | 1.6.1       | BlueOak-1.0.0             |
+| `duck`                    | 0.1.12      | BSD                       |
+| `dingbat-to-unicode`      | 1.0.2       | BSD-2-Clause              |
+| `lop`                     | 0.4.2       | BSD-2-Clause              |
+| `mammoth`                 | 1.13.0      | BSD-2-Clause              |
+| `option`                  | 0.2.4       | BSD-2-Clause              |
+| `d3-ease`                 | 3.0.1       | BSD-3-Clause              |
+| `sprintf-js`              | 1.0.3       | BSD-3-Clause              |
+| `d3-color`                | 3.1.0       | ISC                       |
+| `d3-dispatch`             | 3.0.1       | ISC                       |
+| `d3-drag`                 | 3.0.0       | ISC                       |
+| `d3-interpolate`          | 3.0.1       | ISC                       |
+| `d3-selection`            | 3.0.0       | ISC                       |
+| `d3-timer`                | 3.0.1       | ISC                       |
+| `d3-transition`           | 3.0.1       | ISC                       |
+| `d3-zoom`                 | 3.0.0       | ISC                       |
+| `graceful-fs`             | 4.2.11      | ISC                       |
+| `inherits`                | 2.0.4       | ISC                       |
+| `lucide-react`            | 0.544.0     | ISC                       |
+| `semver`                  | 7.7.4       | ISC                       |
+| `yaml`                    | 2.9.1       | ISC                       |
+| `@babel/runtime`          | 7.29.7      | MIT                       |
+| `@napi-rs/canvas`         | 1.0.9       | MIT                       |
+| `@standard-schema/spec`   | 1.1.0       | MIT                       |
+| `@types/d3-color`         | 3.1.3       | MIT                       |
+| `@types/d3-drag`          | 3.0.7       | MIT                       |
+| `@types/d3-interpolate`   | 3.0.4       | MIT                       |
+| `@types/d3-selection`     | 3.0.12      | MIT                       |
+| `@types/d3-transition`    | 3.0.9       | MIT                       |
+| `@types/d3-zoom`          | 3.0.9       | MIT                       |
+| `@types/react`            | 19.3.0      | MIT                       |
+| `@types/react-dom`        | 19.3.0      | MIT                       |
+| `@xmldom/xmldom`          | 0.8.15      | MIT                       |
+| `@xyflow/react`           | 12.12.0     | MIT                       |
+| `@xyflow/system`          | 0.0.83      | MIT                       |
+| `argparse`                | 1.0.10      | MIT                       |
+| `base64-js`               | 1.5.1       | MIT                       |
+| `builder-util-runtime`    | 9.7.0       | MIT                       |
+| `classcat`                | 5.0.5       | MIT                       |
+| `cordis`                  | 4.0.0-rc.10 | MIT                       |
+| `core-util-is`            | 1.0.3       | MIT                       |
+| `cosmokit`                | 1.8.1       | MIT                       |
+| `cron-parser`             | 5.10.1      | MIT                       |
+| `csstype`                 | 3.2.3       | MIT                       |
+| `debug`                   | 4.4.3       | MIT                       |
+| `electron-updater`        | 6.8.9       | MIT                       |
+| `fs-extra`                | 10.1.0      | MIT                       |
+| `html-parse-stringify`    | 3.1.0       | MIT                       |
+| `i18next`                 | 25.10.10    | MIT                       |
+| `immediate`               | 3.0.6       | MIT                       |
+| `isarray`                 | 1.0.0       | MIT                       |
+| `js-yaml`                 | 4.3.2       | MIT                       |
+| `jsonfile`                | 6.2.1       | MIT                       |
+| `lazy-val`                | 1.0.5       | MIT                       |
+| `lie`                     | 3.3.0       | MIT                       |
+| `lodash.escaperegexp`     | 4.1.2       | MIT                       |
+| `lodash.isequal`          | 4.5.0       | MIT                       |
+| `luxon`                   | 3.7.2       | MIT                       |
+| `ms`                      | 2.1.3       | MIT                       |
+| `process-nextick-args`    | 2.0.1       | MIT                       |
+| `react`                   | 19.3.0      | MIT                       |
+| `react-dom`               | 19.3.0      | MIT                       |
+| `react-i18next`           | 15.7.4      | MIT                       |
+| `readable-stream`         | 2.3.8       | MIT                       |
+| `safe-buffer`             | 5.1.2       | MIT                       |
+| `scheduler`               | 0.28.0      | MIT                       |
+| `setimmediate`            | 1.0.5       | MIT                       |
+| `string_decoder`          | 1.1.1       | MIT                       |
+| `tiny-typed-emitter`      | 2.1.0       | MIT                       |
+| `underscore`              | 1.13.8      | MIT                       |
+| `universalify`            | 2.0.1       | MIT                       |
+| `use-sync-external-store` | 1.7.0       | MIT                       |
+| `util-deprecate`          | 1.0.2       | MIT                       |
+| `void-elements`           | 3.1.0       | MIT                       |
+| `xmlbuilder`              | 10.1.1      | MIT                       |
+| `zod`                     | 4.6.5       | MIT                       |
+| `zustand`                 | 4.5.7       | MIT                       |
+| `argparse`                | 2.0.1       | Python-2.0                |
+
+**平台专属可选包的记账口径（2026-10-05 登记，见 plan §7.7.3 的 5.9-c 补记）**：名字以 `-<平台>-<架构>` 结尾的可选二进制包（`@napi-rs/canvas-darwin-arm64` 这类）**不进上面的表**——`pnpm licenses list` 读的是本机安装树，可选依赖只装当前平台那一份，把它们写进文档会让同一份 lockfile 在 win / mac / linux 上各生成一行不同的记录，记账表因此逐台漂、`pnpm lint` 在换宿主的当天必红。它们的许可与版本由**父包那一行**代表（`@napi-rs/canvas` 就在表里），而 copyleft 闸门、非商用闸门、搬运层在册核对**仍旧扫全量条目**（含这些平台包）：这里省的是记账行，不是检查。
 
 **随包运行时**：
 

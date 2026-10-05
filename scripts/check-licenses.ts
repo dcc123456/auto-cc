@@ -67,6 +67,33 @@ const COPYLEFT_DISPOSITIONS: Readonly<Record<string, string>> = {
 const COPYLEFT_PATTERN = /(AGPL|LGPL|GPL-3|GPLv3|SSPL|QPL|CDDL|MPL|CECILL)/i;
 
 /**
+ * 平台专属可选二进制包的名字形状（`@napi-rs/canvas-darwin-arm64`、`lightningcss-win32-x64-msvc` 这类）。
+ *
+ * 为什么单把它们挑出来：`pnpm licenses list` 读的是**本机安装树**，可选依赖只装当前平台那一份，
+ * 于是同一份 lockfile 在 win / mac / linux 上扫出来的表逐行差一行——记账文档因此逐台漂，
+ * `pnpm lint` 在换宿主的当天必红（本项目 2026-10-04 起在 macOS 上撞的就是这一条）。
+ * 省掉的只是**记账行**（父包那一行已经把名字 / 版本 / 许可都记了），不是检查：
+ * copyleft、非商用、搬运层在册三道闸门仍旧扫**全部**条目，含这些平台包。
+ */
+const PLATFORM_OPTIONAL_PATTERN =
+  /-(darwin|win32|linux|freebsd|android|netbsd|openbsd)-(x64|ia32|arm64|arm|universal|riscv64|ppc64|s390x|mips)(-.*)?$/;
+
+/**
+ * 把扫描结果分成「进记账表的」与「平台专属可选包」。
+ * @param entries 全量扫描条目（三道闸门用的就是这份全量）
+ * @returns `table` 进文档的条目，`platformOnly` 被父包行代表、不单独进表的那些
+ */
+function splitPlatformOptional(entries: readonly LicenseEntry[]): {
+  table: LicenseEntry[];
+  platformOnly: LicenseEntry[];
+} {
+  const table: LicenseEntry[] = [];
+  const platformOnly: LicenseEntry[] = [];
+  for (const entry of entries) (PLATFORM_OPTIONAL_PATTERN.test(entry.name) ? platformOnly : table).push(entry);
+  return { table, platformOnly };
+}
+
+/**
  * 跑 `pnpm licenses list --json --prod` 并解析成扁平条目列表。
  * @returns 按「许可 → 包」分组展平后的条目（已按许可、包名排序，输出稳定可 diff）
  * @throws pnpm 不可用或输出不是合法 JSON 时抛错——宁可不通过，也不要把"没扫到"当成"没有依赖"
@@ -144,6 +171,15 @@ function renderGenerated(
     '| 包 | 版本 | 许可 |',
     '| -- | ---- | ---- |',
     ...entries.map((e) => `| \`${e.name}\` | ${e.versions.join(' / ') || '(未知)'} | ${e.license} |`),
+    '',
+    '**平台专属可选包的记账口径（2026-10-05 登记，见 plan §7.7.3 的 5.9-c 补记）**：' +
+      '名字以 `-<平台>-<架构>` 结尾的可选二进制包（`@napi-rs/canvas-darwin-arm64` 这类）**不进上面的表**——' +
+      '`pnpm licenses list` 读的是本机安装树，可选依赖只装当前平台那一份，' +
+      '把它们写进文档会让同一份 lockfile 在 win / mac / linux 上各生成一行不同的记录，' +
+      '记账表因此逐台漂、`pnpm lint` 在换宿主的当天必红。' +
+      '它们的许可与版本由**父包那一行**代表（`@napi-rs/canvas` 就在表里），' +
+      '而 copyleft 闸门、非商用闸门、搬运层在册核对**仍旧扫全量条目**（含这些平台包）：' +
+      '这里省的是记账行，不是检查。',
     '',
     '**随包运行时**：',
     '',
@@ -230,6 +266,15 @@ const failures: string[] = [];
 const entries = scanProductionLicenses();
 const scannedNames = new Set(entries.map((entry) => entry.name));
 const electron = readElectronRuntime();
+// 记账表只放平台无关的那部分（口径见 `PLATFORM_OPTIONAL_PATTERN` 的注释），三道闸门用全量 `entries`。
+const { table: tableEntries, platformOnly } = splitPlatformOptional(entries);
+if (platformOnly.length > 0) {
+  console.log(
+    `  · 本机扫到 ${String(platformOnly.length)} 条平台专属可选包（${platformOnly
+      .map((entry) => `${entry.name}@${entry.versions.join('/') || '未知版本'}`)
+      .join('、')}），按登记的口径由父包行代表、不进记账表；copyleft / 非商用 / 搬运层三道闸门仍按全量核对`,
+  );
+}
 
 // 2. 搬运层交叉核对：进了 asar 的包必须在这张表里。
 const vendored = resolveRuntimeDeps();
@@ -286,7 +331,7 @@ if (missingWiring.length > 0) {
 }
 
 // 4. 文档对齐。
-const generated = renderGenerated(entries, electron, missingLicenseText);
+const generated = renderGenerated(tableEntries, electron, missingLicenseText);
 if (!existsSync(LICENSE_DOC)) {
   failures.push(`缺少 ${path.basename(LICENSE_DOC)}`);
 } else {
@@ -370,7 +415,8 @@ if (failures.length > 0) {
 {
   const groups = new Set(entries.map((entry) => entry.license)).size;
   console.log(
-    `✔ 许可证记账检查通过（生产依赖 ${String(entries.length)} 个包条目 / ${String(groups)} 种许可；` +
+    `✔ 许可证记账检查通过（生产依赖 ${String(entries.length)} 个包条目 / 记账表 ${String(tableEntries.length)} 行` +
+      `（其余 ${String(platformOnly.length)} 行是平台专属可选包，由父包代表）/ ${String(groups)} 种许可；` +
       `搬运层 ${String(vendored.length)} 个包全部在册，其中 ${String(missingLicenseText.length)} 个上游无许可全文、已登记处置；` +
       `copyleft 命中 ${String(hitNames.size)} 条且都有处置）`,
   );
