@@ -486,6 +486,7 @@ P4 71 行（65 / 6 / 0）、P5 121 行（111 / 4 / **2 未做** + 4 条 C 半边
   `3.5-07` 的 U 半边过、截图半边仍 `[ ]`（页序控件要等 c₂ 的会话面），`3.5-08` 的前件（`createSnapshotStack<T>`，commit `4db0fb0`）已就位而实现随 c₂。
   **本轮一个状态位都没翻，P3 未做仍 14 条、全局仍 16 条**；逐条读数与两处改名见 `docs/plans/03-resume-pdf/plan.md` §7.13。）
   （**同日 3.5-c₂ 会话腿落地**：`edit-session.ts` 的 `createPdfEditSession()` 把覆盖区列表与页序合成一份 draft 喂给 `@auto-cc/core` 的 `createSnapshotStack`（全仓仍只有那一份 past/present/future），六个动作都只在真的改了 draft 时长出撤销单元，判据的合法性复用另存那同一份 `planOverlays` / `planPageOrder`；形态按 §7.1 的存储行定为**纯模型**而非 service，所以本轮不新增白名单行。`3.5-08` 转 `[x]`，**P3 未做 14 → 13 条、全局 16 → 15 条**；逐条读数与那条「不许 import Node 能力」的约束见 `docs/plans/03-resume-pdf/plan.md` §7.14。）
+  （**同日 3.6-a 模型腿落地**：`packages/resume-doc/src/editor-ops.ts`（度量界表 + 区块/条目重排的落点数学，界加在编辑器这一层而**不加进 `layoutSchema`**，以免用今天新立的滑杆范围追改 3.1/3.2 已验收的判据）+ `editor-session.ts`（`createResumeEditorSession`，仍走 `@auto-cc/core` 那唯一一份 `createSnapshotStack`；空编辑按 `contentHash` 不进栈，于是撤销回原样自动不再 dirty；模板与语言放在历史栈与文档之外，`3.6-04` 的"切换不丢数据"成了结构上不可能失败）。包内 106 → **124 例**；不新增 service、不新增白名单行、不新增迁移（裁定⑨「只拦不存」）。**本轮一个状态位都没翻**——3.6 九条的验收方式每条都带 V，P3 未做仍 13 条、全局仍 15 条；剩余实现面是 3.6-b 契约腿（离线可收）与 3.6-c 界面腿（要你在场），逐条读数见 `docs/plans/03-resume-pdf/plan.md` §8.6。）
   （10-05 的这一次进位来自 5.10-k：`5.10-08` / `5.10-09` 的 V 半边由真实画布上那张 7 节点分支图跑出来并转 `[x]`，
   `5.10-13` 转 `[!]`——它的"kill 后从中断节点继续"这一条在界面上到不了（重启后 runner 的当前计划回到 `config.planId`，
   自定义计划那条 interrupted run 没有续跑入口），其余三条判据活体已过，缺口转 5.10-j 待裁；

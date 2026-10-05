@@ -37,6 +37,22 @@ export {
 export { contentHash, normalizeDocument } from './normalize.js';
 export { diff, type ChangeType, type DocDiff, type EntryChange, type FieldChange, type SectionChange } from './diff.js';
 export { importExternal, type ImportResult, type ImportWarning } from './import.js';
+// 3.6-a 排版编辑器的模型腿：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。
+export {
+  EDITOR_METRIC_BOUNDS,
+  planEntryMove,
+  planMetric,
+  planSectionMove,
+  type EditorOutcome,
+  type EditorRejectionCode,
+  type MetricBound,
+  type MetricKey,
+} from './editor-ops.js';
+export {
+  createResumeEditorSession,
+  type ResumeEditorSession,
+  type ResumeEditorSessionOptions,
+} from './editor-session.js';
 export {
   ResumeDocService,
   RESUME_DOC_MIGRATION_VERSION,
