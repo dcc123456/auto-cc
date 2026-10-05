@@ -2366,6 +2366,28 @@ join 排在两支之后"，不写"同时 running"）、`5.10-13`（DAG 下重验
 它只在"同一个进程里已经点过一次开始"之后成立。裁的时候一并处理：是给下拉加一次 `plan.select`，
 还是把"续哪条 run"改成按 run 自己的快照续（后者会拆掉 2.4-05 已验收的那道串档安全网，代价要写清楚）。
 
+**裁定七（2026-10-05 由你给出，本节只登记、不落码）：加 `plan.select`。**
+选前者——给面板下拉补一次真实的选计划动作，而不是把续跑改成按 run 快照续。理由就是你当时挑它的那句话的反面：
+2.4-05 那道「当前计划与要续的 run 不是同一条就拒绝」的护栏是**已验收**的安全网（防串档），
+按快照续等于拆掉它，代价大于收益。三条落点写在这里，实现另起一片（AGENTS.md §0 一次只推进一个子计划）：
+
+1. `workflow.runner` 新增一只 **`plan.select(planId)`**：只把 `this.plan` 换成 `planById/planStore` 里的那条，
+   **不开 run、不写 `workflow_runs`、不动任何推进态**。它必须与 `start` 区分开——`start` 的语义是"照这条计划起一条新的"，
+   续跑要的是"我现在认这条计划为当前计划"。方法名与返回回执里都要能看出这一点（返回切过去后的 `{planId, fingerprint}`，
+   供界面回读）。
+2. 进 IPC 白名单（`packages/shared/src/bridge.ts`）加一项 `workflow.plan.select`，并补 `RequestMap` 条。
+   **是否同时登记为 agent 工具**留给那一片裁定：切当前计划是改变后续动作走向的状态写入，按 §5.9 与 5.3 的
+   "不可自提升"口径，我倾向**只给人按、不登记成工具**（与 `resume.generate.accept` 同一条口径，见 `bridge.ts` 行 266 的注释）。
+3. `WorkflowPanel.tsx` 的下拉 `onChange` 从"只改本地 state"改成"先 `plan.select` 成功、再落本地 state"；
+   `[data-action="resume-workflow-run"]` 那条按钮序列变成 **select → resumeRun**，
+   于是被 kill 的自定义计划 run 在重启后终于有界面入口。护栏照旧：select 之后 fingerprint 仍与那条 run 不符，
+   `resumeRun` 依旧拒绝，2.4-05 的测试不许改。
+
+验收腿（那一片要一并补的）：U——`plan.select` 切完 `storedPlan()` 得到自定义计划且 `workflow_runs` 零新增行；
+C——白名单与 `RequestMap` 对齐（`pnpm lint` 链内的工具契约检）；V——活体里 kill 一条**自定义计划**的 run →
+重启 app → 在下拉里选中那条计划 → 点续跑 → 从中断那格继续（这条正是 `5.10-13` 现在 `[!]` 的那半边，
+补齐后 5.10-13 才转 `[x]`，缺口 5.10-j 同时收口）。
+
 **两条界面事实（本片没修，取证据时绕开了）**
 ① `[data-testid="operator-param-form"]` 在同一个 `workflow-canvas` 区块里按选点次数累积（实测 9→35 张，
 单一 React 根、单一画布实例，硬刷新后从 1 张重新起算），会把下面的「运行读数」卡推出画面；
