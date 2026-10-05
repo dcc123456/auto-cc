@@ -167,7 +167,7 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 |     | ⑦ 提交与推送是否完成（§1.6），commit message 是否符合 §1                                                                                                                                                                                                                           | `[机检]`                                     |
 |     | ⑧ 暂存区里有没有测试临时产物（截图、探针输出、一次性素材）？只允许 §7.5 的两类路径                                                                                                                                                                                                 | `[机检]`                                     |
 
-`[!]` 是合法状态——环境不具备（例如本机为 Windows、无法验证 macOS 运行期）时**如实标 BLOCKED**，
+`[!]` 是合法状态——环境不具备（例如本机是 macOS arm64、无法验证 Windows 运行期）时**如实标 BLOCKED**，
 禁止用推测写成 `[x]`。诚实的空项比虚假的全绿有用。
 
 ---
@@ -186,24 +186,31 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
 
 ## 9. 环境事实（已实测，勿重复试错）
 
-- 本机 **Windows**，Git Bash。**macOS / Linux 的运行期验证在本机无法完成**，相关条目一律标 BLOCKED，不做推测。
+- **实测（2026-10-06）本机是 macOS（Apple Silicon，`Darwin arm64`），终端 shell 是 zsh 5.9，不是 Git Bash**。
+  因此**Windows / Linux 的运行期验证在本机无法完成**，相关条目一律标 BLOCKED，不做推测（原先这条写反了：它写的是
+  "本机 Windows、macOS/Linux 无法验证"，从 5.x 那批窗口起就不成立，且已经让若干 macOS 条目被错标）。
+  两条随之换边的旧实测：① **zsh 里未加引号的 glob 会让整条链式命令当场中止**——`grep --include=*.tsx` 这种写法报
+  `no matches found`，而 `&&` 后面那串门禁根本不跑（Git Bash 是把它当字面量传下去）；要么用 Glob/Grep 工具，要么加引号。
+  ② 下面那条"443 端口推送"与"Windows 上句柄延迟释放挡住删目录"是**那台 Windows 机器的实测**，回到那种机器才适用，本机不适用。
 - 网络对 GitHub 直连与 `git clone` 不稳定；npm 走镜像；Electron 二进制镜像走 `.npmrc` 的
   `electron_mirror`。**实测更正（1.2）**：Electron 44 起包内**没有 install 脚本**，只暴露
   `install-electron` bin，`pnpm-workspace.yaml` 的 `onlyBuiltDependencies` 对它空转；
   二进制由根 `package.json` 的 `postinstall` 显式调用 `install.js` 拉取。
-- **实测（5.7-d-2）推送走的不是 22 端口**：`ssh -T git@ssh.github.com` 的 22 端口本机直接超时，
-  而 `git push origin main`（远端写作 `git@github.com:...`）会被 `Connection reset by 20.205.243.160 port 443`
-  反复拒掉（同一分钟里试过四次）。可用的写法是把远端展开成 443 的 URL 形式一次性推：
-  `git push ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main`，推完用
-  `git ls-remote ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main` 复核远端 ref。
+- **实测（2026-10-06，本机 macOS）推送走默认远端就行**：`git push origin main`（`origin` 写作
+  `git@github.com:dcc123456/auto-cc.git`，即普通 SSH）直接成功，推完 `git status -sb` 与
+  `git rev-parse refs/remotes/origin/main` 都对得上，**不需要任何 URL 展开，也不需要 `git update-ref`**。
+  **这条原先写的是"推送走的不是 22 端口"**：那是 5.7-d-2 在那台 Windows 机器上的网络事实（22 端口超时、
+  `git push origin main` 被 `Connection reset by 20.205.243.160 port 443` 同一分钟里拒四次）。可用的写法当时是
+  `git push ssh://git@ssh.github.com:443/dcc123456/auto-cc.git main`，推完用 `git ls-remote` 复核远端 ref；
   **推到裸 URL 不会更新 `refs/remotes/origin/main`**，复核一致后要手动
   `git update-ref refs/remotes/origin/main <远端 sha>`，否则 `git status -sb` 会一直假报"领先 N 个提交"。
-  不要为了这条去改 `remote.origin.url`（本文件禁止动 git 配置），也不要把它当成稳定通道——它也会抖。
+  两条在任何机器上都仍然成立：不要为了推送去改 `remote.origin.url`（本文件禁止动 git 配置），
+  也不要把任何一条推送通道当成稳定通道——它都会抖，所以每次都要**复核远端 ref**再声称已推送（§1.6）。
 - npm 生命周期脚本在本环境**可能被禁用**：不要依赖 husky/commitlint 安装期钩子，钩子用
   `core.hooksPath` + 纯 shell 实现（已在 `.githooks/`）。根 `prepare` 在非 git 目录里会失败，
   临时目录装依赖时要先 `git init`。
-- **实测（2.5-d）单实例锁按 userData 目录算**：装机版 app 在跑（默认 userData
-  `%APPDATA%\auto-cc`）时，`pnpm dev` 会**静默退出 0**、CDP 端口根本不监听——不是崩溃，别按报错找。
+- **实测（2.5-d）单实例锁按 userData 目录算**：装机版 app 在跑（默认 userData 在 Windows 是
+  `%APPDATA%\auto-cc`，在本机 macOS 是 `~/Library/Application Support/auto-cc`）时，`pnpm dev` 会**静默退出 0**、CDP 端口根本不监听——不是崩溃，别按报错找。
   正确做法是给 dev 换一份 userData（`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`，
   `scripts/dev.ts` 已支持），**不要为了跑测试去杀用户正在用的 app**。
 - **实测（2.5-d）fixture 服务是长驻进程且模板内联在代码里**：`/chat/frame` 的 HTML 写在
@@ -242,7 +249,9 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `schema_migrations` 台账里"这一版记过账没有"，不是 DDL 幂等——`CREATE TABLE IF NOT EXISTS` 塞进已应用的
   版本号里，在老库（含本机开发实例）上根本执行不到，运行期才以 `no such table` 失败。
   **单测同样看不见**：每个用例都从空库起，所有迁移都是头一回跑。加表前先 `SELECT version FROM schema_migrations`
-  看台账最高值，取下一号段（本项目当前到 17）。
+  看台账最高值，取下一号段（**2026-10-06 实测：本项目最高已用到 29**，`packages/workflow/src/run-store.ts:123`
+  的 `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`；原先这条写的是"当前到 17"，那是 5.3-a 窗口的读数，此后 21～29 九支已陆续落地。
+  **30 已被 plan §8.3 预留给 3.6 的草稿表，但裁定⑨ 判的是"只拦不存"，所以 30 当前未启用**——占号前先看这份清单，别撞号）。
 - **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe
