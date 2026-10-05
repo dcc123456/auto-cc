@@ -4,9 +4,9 @@
  *
  * 产物断言走的是**内容流原文**而不是渲染像素：这片没有位图渲染（plan §7.1 的读侧选型），
  * 而「只追加、不改写」这件事在内容流里是可直接观测的——旧的那行 `(Jane Doe) Tj` 必须还在，
- * 新画的那笔必须是 `re`+`f`（填充）而不是 `re`+`S`（描边，那说明 `borderWidth: 0` 写漏了）。
+ * 新画的那笔必须是**闭合路径 + 填充**（`h` 后跟 `f`）而不是描边（跟 `S`/`B` 就说明 `borderWidth: 0` 写漏了）。
  * 读内容流统一经 `@auto-cc/testing` 的 `pdfContentText`：实测 `pdf-lib` 把新落笔写进**新建的 Flate 流**，
- * 直接在字节里找子串会得到假阴性。三条实测口径决定了下面断言的写法（都记在 plan §7.11）：
+ * 直接在字节里找子串会得到假阴性。三条实测口径决定了下面断言的写法（都记在 plan §7.12）：
  * 落笔不写 `re` 操作符，而是 `cm` 平移 + `m/l/h` 折线；文字写十六进制串而不是字面串；操作符逐条换行。
  * 按 plan §7.6 的反伪装口径，本文件的断言与文案里都不出现"删除/涂黑/不可恢复"这类说法。
  */
@@ -45,8 +45,23 @@ function putFile(dir: string, name: string, bytes: Uint8Array): string {
   return filePath;
 }
 
-/** 另存腿的四条尺度：测试里显式写全（`.default()` 出现在输出类型里，调用点必须给，见 AGENTS.md §9）。 */
-const config: PdfExportConfig = { maxBytes: 5_242_880, maxOverlays: 3, defaultTextSizePt: 11, minAreaRatio: 0.0001 };
+/** 另存腿的五条尺度：测试里显式写全（`.default()` 出现在输出类型里，调用点必须给，见 AGENTS.md §9）。 */
+const config: PdfExportConfig = {
+  maxBytes: 5_242_880,
+  maxOverlays: 3,
+  maxPages: 64,
+  defaultTextSizePt: 11,
+  minAreaRatio: 0.0001,
+};
+
+/**
+ * "不重排"的写法：页序是必填入参，所以原样另存也要显式给出 `1…n`（空数组在边界上算非法，见 `page-ops.ts`）。
+ * @param pageCount 源文件的页数
+ * @returns 逐页指向自身那一页的页序
+ */
+function keepPages(pageCount: number): number[] {
+  return Array.from({ length: pageCount }, (_, index) => index + 1);
+}
 
 /**
  * 挂起一份 `pdf.export`。
@@ -84,7 +99,7 @@ describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流
   it('产物里同时有旧文字与新文字，且新矩形是填充（re f）而不是描边', async () => {
     const dir = tempDir();
     const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
-    const receipt = await (await boot()).saveAs(sourcePath, [box], join(dir, 'out.pdf'));
+    const receipt = await (await boot()).saveAs(sourcePath, [box], keepPages(1), join(dir, 'out.pdf'));
 
     const content = pdfContentText(new Uint8Array(readFileSync(receipt.outPath)));
     expect(content.startsWith('%PDF-')).toBe(true);
@@ -106,20 +121,20 @@ describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流
     const dir = tempDir();
     const sourcePath = putFile(dir, 'three.pdf', minimalMultiPagePdf(3));
     const outPath = join(dir, 'out.pdf');
-    const receipt = await (await boot()).saveAs(sourcePath, [{ ...box, pageNumber: 2 }], outPath);
+    const receipt = await (await boot()).saveAs(sourcePath, [{ ...box, pageNumber: 2 }], keepPages(3), outPath);
 
     expect(receipt.pageCount).toBe(3);
     const reloaded = await PdfEditDocument.load(new Uint8Array(readFileSync(outPath)));
     if (reloaded.status !== 'loaded') throw new Error(reloaded.detail);
     expect(reloaded.document.pageCount).toBe(3);
-    expect(reloaded.document.pageMetrics()[1]).toEqual({ number: 2, widthPt: 595, heightPt: 842 });
+    expect(reloaded.document.sourcePageMetrics()[1]).toEqual({ number: 2, widthPt: 595, heightPt: 842 });
   });
 
   it('回执里的 sha256 就是产物字节的摘要，且与源文件哈希不同（产物是新文件）', async () => {
     const dir = tempDir();
     const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
     const outPath = join(dir, 'out.pdf');
-    const receipt = await (await boot()).saveAs(sourcePath, [box], outPath);
+    const receipt = await (await boot()).saveAs(sourcePath, [box], keepPages(1), outPath);
 
     expect(receipt.sha256).toBe(sha256Hex(new Uint8Array(readFileSync(outPath))));
     expect(receipt.sha256).not.toBe(sha256Hex(readFileSync(sourcePath)));
@@ -129,7 +144,7 @@ describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流
     const dir = tempDir();
     const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Fudan University']));
     const outPath = join(dir, 'out.pdf');
-    await (await boot()).saveAs(sourcePath, [{ ...box, text: undefined }], outPath);
+    await (await boot()).saveAs(sourcePath, [{ ...box, text: undefined }], keepPages(1), outPath);
 
     const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
     expect(content).toMatch(/h\s+f/);
@@ -144,7 +159,7 @@ describe('3.5-09：另存不污染源文件', () => {
     const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
     const before = sha256Hex(readFileSync(sourcePath));
 
-    await (await boot()).saveAs(sourcePath, [box], join(dir, 'out.pdf'));
+    await (await boot()).saveAs(sourcePath, [box], keepPages(1), join(dir, 'out.pdf'));
     expect(sha256Hex(readFileSync(sourcePath))).toBe(before);
   });
 
@@ -155,7 +170,7 @@ describe('3.5-09：另存不污染源文件', () => {
     const error = (await (
       await boot()
     )
-      .saveAs(sourcePath, [box], sourcePath)
+      .saveAs(sourcePath, [box], keepPages(1), sourcePath)
       .catch((caught: unknown) => caught)) as AppError;
 
     expect(error).toBeInstanceOf(AppError);
@@ -166,13 +181,71 @@ describe('3.5-09：另存不污染源文件', () => {
   });
 });
 
+describe('3.5-07 的另存半边：页数与顺序符合操作，覆盖区跟着来源页走', () => {
+  /**
+   * 逐页写着自己页号的三页源档（"顺序对不对"就只有可直接观测的答案：内容流里那行 `page N`）。
+   * @param dir 哪个沙箱
+   * @returns 源文件的绝对路径
+   */
+  function threePageSource(dir: string): string {
+    return putFile(dir, 'three.pdf', minimalMultiPagePdf(3));
+  }
+
+  it('删页：页序里缺的那一项不出现，产物页数随之变少', async () => {
+    const dir = tempDir();
+    const sourcePath = threePageSource(dir);
+    const outPath = join(dir, 'out.pdf');
+    const receipt = await (await boot()).saveAs(sourcePath, [box], [3, 1], outPath);
+
+    expect(receipt.pageCount).toBe(2);
+    const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
+    expect(content).toContain('(page 3) Tj');
+    expect(content).toContain('(page 1) Tj');
+    expect(content).not.toContain('(page 2) Tj');
+    // 顺序也是判据的一部分：只数页数会放过一份"删对了但顺序乱了"的产物。
+    expect(content.indexOf('(page 3) Tj')).toBeLessThan(content.indexOf('(page 1) Tj'));
+  });
+
+  it('增页（同一源的副本）：页数变多，且覆盖区画在**每一份**副本上', async () => {
+    const dir = tempDir();
+    const sourcePath = threePageSource(dir);
+    const outPath = join(dir, 'out.pdf');
+    // 覆盖区按来源页绑：[1,1,2] 里第 1 页有两张副本，那一句"改过了"必须两张都有，
+    // 否则产物里就还留着一张带旧话的页面（plan §7.6 的反伪装精神）。
+    const receipt = await (await boot()).saveAs(sourcePath, [box], [1, 1, 2], outPath);
+    expect(receipt.pageCount).toBe(3);
+
+    const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
+    expect((content.match(new RegExp(`<${hexOf('REDACTED')}> Tj`, 'g')) ?? []).length).toBe(2);
+    // 没被指派覆盖区的那一页（来源第 2 页）不该跟着吃一笔。
+    expect((content.match(/\(page 2\) Tj/g) ?? []).length).toBe(1);
+  });
+
+  it('重排后重新装载：产物逐页宽高仍是源档那三页的量得（拷贝保留 MediaBox）', async () => {
+    const dir = tempDir();
+    const sourcePath = threePageSource(dir);
+    const outPath = join(dir, 'out.pdf');
+    await (await boot()).saveAs(sourcePath, [], [3, 2, 1], outPath);
+
+    const reloaded = await PdfEditDocument.load(new Uint8Array(readFileSync(outPath)));
+    if (reloaded.status !== 'loaded') throw new Error(reloaded.detail);
+    expect(reloaded.document.pageCount).toBe(3);
+    expect(reloaded.document.sourcePageMetrics()).toEqual([
+      { number: 1, widthPt: 595, heightPt: 842 },
+      { number: 2, widthPt: 595, heightPt: 842 },
+      { number: 3, widthPt: 595, heightPt: 842 },
+    ]);
+  });
+});
+
 describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙箱里不留半成品', () => {
-  /** 七条失败腿：三条"文件没法用"、三条"覆盖区非法"、一条"写不进去"。 */
+  /** 十一条失败腿：四条"覆盖区非法"、四条"页序非法"、一条"源文件读不出"、两条"产物写不了"。 */
   const cases: readonly {
     name: string;
     source?: Uint8Array;
     config?: Partial<PdfExportConfig>;
     overlays?: readonly PdfOverlayInput[];
+    pageOrder?: readonly number[];
     outPath: (dir: string) => string;
     code: string;
   }[] = [
@@ -208,6 +281,26 @@ describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙�
     },
     { name: '产物路径不是绝对路径', outPath: () => 'out.pdf', code: 'out-path-not-absolute' },
     { name: '产物目录不存在', outPath: (dir) => join(dir, 'missing-dir', 'out.pdf'), code: 'write-failed' },
+    { name: '页序为空', pageOrder: [], outPath: (dir) => join(dir, 'out.pdf'), code: 'empty-order' },
+    {
+      name: '页序指向不存在的页',
+      pageOrder: [1, 7],
+      outPath: (dir) => join(dir, 'out.pdf'),
+      code: 'page-out-of-range',
+    },
+    {
+      name: '页序里有非整数',
+      pageOrder: [1.5],
+      outPath: (dir) => join(dir, 'out.pdf'),
+      code: 'page-out-of-range',
+    },
+    {
+      name: '产物页数超上限',
+      config: { maxPages: 2 },
+      pageOrder: [1, 1, 1],
+      outPath: (dir) => join(dir, 'out.pdf'),
+      code: 'too-many-pages',
+    },
   ];
 
   for (const item of cases) {
@@ -217,7 +310,7 @@ describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙�
       const error = (await (
         await boot(item.config)
       )
-        .saveAs(sourcePath, item.overlays ?? [box], item.outPath(dir))
+        .saveAs(sourcePath, item.overlays ?? [box], item.pageOrder ?? keepPages(1), item.outPath(dir))
         .catch((caught: unknown) => caught)) as AppError;
 
       expect(error).toBeInstanceOf(AppError);

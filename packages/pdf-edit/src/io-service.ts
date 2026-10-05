@@ -72,8 +72,9 @@ export class PdfIoService extends Service {
     }
     return {
       sourceHash: loaded.sourceHash,
-      pageCount: loaded.document.pageCount,
-      pages: loaded.document.pageMetrics(),
+      // 打开的是源文件，所以回执报的是源档页数与源档逐页度量（还没排过页）。
+      pageCount: loaded.document.sourcePageCount,
+      pages: loaded.document.sourcePageMetrics(),
     };
   }
 }

@@ -16,6 +16,7 @@ import { readBoundedFile, sha256Hex } from '@auto-cc/core/file-read';
 import { z } from 'zod';
 import { PdfEditDocument } from './pdf-document.js';
 import { planOverlays, type OverlayRejection, type PdfOverlayInput } from './overlay-writer.js';
+import { planPageOrder, type PageOrderRejection } from './page-ops.js';
 
 /** `pdf.export` 的可调项：一条尺度一个键，代码内不留魔法数。 */
 export const pdfExportSchema = z.strictObject({
@@ -23,6 +24,8 @@ export const pdfExportSchema = z.strictObject({
   maxBytes: z.number().int().min(1024).max(52_428_800).default(5_242_880),
   /** 单次另存允许的覆盖区条数：超出即拒，不做「画到第 N 区为止」这种半成品。 */
   maxOverlays: z.number().int().min(1).max(200).default(50),
+  /** 产物允许的页数上限：页序是渲染层给的外部输入，不设界等于让它用一只数组把主进程的内存顶满。 */
+  maxPages: z.number().int().min(1).max(500).default(64),
   /** 覆盖区没自带字号时的默认字号（pt）。 */
   defaultTextSizePt: z.number().min(1).max(96).default(11),
   /** 覆盖区的最小面积（比例）：细到看不见的框多半是拖拽出错，拒掉比画上去好。 */
@@ -47,6 +50,7 @@ type SaveFailureCode =
   | 'out-path-not-absolute'
   | 'out-is-source'
   | OverlayRejection['code']
+  | PageOrderRejection['code']
   | 'invalid-pdf'
   | 'encrypted'
   | 'empty'
@@ -74,14 +78,21 @@ export class PdfExportService extends Service {
   }
 
   /**
-   * 另存一份带覆盖区的 PDF。
+   * 另存一份带覆盖区与页序的 PDF。
    * @param filePath 源文件的**绝对路径**（只读，本方法不打开它第二回、不写它一个字节）
    * @param overlays 渲染层 draft 里的覆盖区（不可信输入：越界、超量、非拉丁文字都在这里被挡下）
+   * @param pageOrder 产物的逐页来源页号（1 起；重复＝增页、缺项＝删页、换序＝重排，见 `page-ops.ts`）。
+   *                  不许给空数组：空数组既读成"删光"又读成"没想重排"，两种意思都拒（不重排请显式给 `[1…n]`）。
    * @param outPath 产物路径（**绝对**，且不许等于源文件）
-   * @returns 产物路径、产物 sha256 与页数
+   * @returns 产物路径、产物 sha256 与**产物**页数
    * @throws `AppError('PDF_EDIT_SAVE_FAILED')`——上述任何一种失败；抛出时磁盘上没有 `<outPath>` 也没有 `<outPath>.part`
    */
-  async saveAs(filePath: string, overlays: readonly PdfOverlayInput[], outPath: string): Promise<PdfSaveAsReceipt> {
+  async saveAs(
+    filePath: string,
+    overlays: readonly PdfOverlayInput[],
+    pageOrder: readonly number[],
+    outPath: string,
+  ): Promise<PdfSaveAsReceipt> {
     // 先判"别把产物写到源文件上"，再去读文件：这条是 3.5-09 的第一道闸，代价只是一次字符串比较。
     if (!isAbsolute(outPath))
       throw this.failure('out-path-not-absolute', `产物路径必须是绝对路径：${outPath}`, outPath);
@@ -100,7 +111,7 @@ export class PdfExportService extends Service {
       );
     }
 
-    const planned = planOverlays(overlays, loaded.document.pageMetrics(), {
+    const planned = planOverlays(overlays, loaded.document.sourcePageMetrics(), {
       maxOverlays: this.options.maxOverlays,
       defaultTextSizePt: this.options.defaultTextSizePt,
       minAreaRatio: this.options.minAreaRatio,
@@ -108,13 +119,22 @@ export class PdfExportService extends Service {
     if (!planned.ok) {
       throw this.failure(planned.code, `这些覆盖区没法画上去：${planned.detail}`, outPath, planned.detail);
     }
+    // 页序在这里只**判**不改：换算覆盖区要先有源页度量（上面那一句），落盘更要先有完整产物，
+    // 所以"校验全在碰磁盘之前"这条顺序（3.5-05 转移来的精神）在这里不能为了省事打乱。
+    const order = planPageOrder(pageOrder, loaded.document.sourcePageCount, this.options.maxPages);
+    if (!order.ok) {
+      throw this.failure(order.code, `这份页序没法用：${order.detail}`, outPath, order.detail);
+    }
 
-    // 绘制 + 生成合在一个 try 里：pdf-lib 在 `save()` 时才把内容流拼出来，
+    // 排页 + 绘制 + 生成合在一个 try 里：pdf-lib 在 `save()` 时才把内容流拼出来，
     // 任何一步抛错都必须在落盘之前，这样"失败不落半成品"不需要额外的清理逻辑。
     let product: Uint8Array;
+    let pageCount: number;
     try {
-      await loaded.document.applyOverlays(planned.overlays);
-      product = await loaded.document.save();
+      const target = await loaded.document.arrange(order.order);
+      await target.applyOverlays(planned.overlays);
+      pageCount = target.pageCount;
+      product = await target.save();
     } catch (error) {
       throw this.failure(
         'draw-failed',
@@ -140,7 +160,7 @@ export class PdfExportService extends Service {
       );
     }
 
-    return { outPath, sha256: sha256Hex(product), pageCount: loaded.document.pageCount };
+    return { outPath, sha256: sha256Hex(product), pageCount };
   }
 
   /**

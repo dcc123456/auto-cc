@@ -25,6 +25,7 @@ async function bootEditTrack(): Promise<{ ctx: Context; lookup: (name: string) =
     await ctx.plugin(PdfExportService, {
       maxBytes: 5242880,
       maxOverlays: 50,
+      maxPages: 64,
       defaultTextSizePt: 11,
       minAreaRatio: 0.0001,
     }),
@@ -71,8 +72,10 @@ describe('编辑轨两条口都走真装配（plan §7.3 的挂载 + §7.4 的�
     expect(resolution).toMatchObject({ ok: true, service: 'pdf.export', method: 'saveAs' });
     if (!resolution.ok) throw new Error('should not reach');
     // 源文件读不出即结构化失败，且用的另存腿那一个码（`PDF_EDIT_READ_FAILED` 是打开腿的话术，两者不混）。
+    // 四个实参按 `saveAs(filePath, overlays, pageOrder, outPath)` 给全：页序给空数组就够，因为这一条只测
+    // "失败落到了编辑轨的码上"，而源文件不存在那一条腿在读文件时就先撞上了。
     const failure = await Promise.resolve(
-      resolution.invoke('/tmp/auto-cc-不存在的那份.pdf', [], '/tmp/auto-cc-产物.pdf'),
+      resolution.invoke('/tmp/auto-cc-不存在的那份.pdf', [], [], '/tmp/auto-cc-产物.pdf'),
     ).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(AppError);
     expect(AppError.from(failure).code).toBe('PDF_EDIT_SAVE_FAILED');

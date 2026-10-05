@@ -16,7 +16,7 @@ describe('3.4-03 装载腿：把最小 PDF 读成一份可编辑文档', () => {
     if (loaded.status !== 'loaded') throw new Error(`应当装载成功，实际是 ${loaded.reason}`);
 
     expect(loaded.document.pageCount).toBe(1);
-    expect(loaded.document.pageMetrics()).toEqual([{ number: 1, widthPt: 595, heightPt: 842 }]);
+    expect(loaded.document.sourcePageMetrics()).toEqual([{ number: 1, widthPt: 595, heightPt: 842 }]);
     expect(loaded.sourceHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -25,7 +25,7 @@ describe('3.4-03 装载腿：把最小 PDF 读成一份可编辑文档', () => {
     if (loaded.status !== 'loaded') throw new Error(`应当装载成功，实际是 ${loaded.reason}`);
 
     expect(loaded.document.pageCount).toBe(3);
-    expect(loaded.document.pageMetrics().map((page) => page.number)).toEqual([1, 2, 3]);
+    expect(loaded.document.sourcePageMetrics().map((page) => page.number)).toEqual([1, 2, 3]);
   });
 });
 
@@ -40,7 +40,7 @@ describe('3.4-03 生成腿：save 出去的字节要能被重新装载', () => {
     const reloaded = await PdfEditDocument.load(saved);
     if (reloaded.status !== 'loaded') throw new Error(`产物应当是合法 PDF，实际是 ${reloaded.reason}`);
     expect(reloaded.document.pageCount).toBe(2);
-    expect(reloaded.document.pageMetrics()).toEqual(loaded.document.pageMetrics());
+    expect(reloaded.document.sourcePageMetrics()).toEqual(loaded.document.sourcePageMetrics());
   });
 
   it('同一份文档连存两次各自独立，且源字节始终是同一份（3.5-09 的半边）', async () => {
@@ -90,13 +90,13 @@ describe('3.5-02 的绘制半边：applyOverlays 只追加，页号越界当场�
       loaded.document.applyOverlays([
         { id: 'box-9', pageNumber: 3, xPt: 0, yBottomPt: 0, widthPt: 10, heightPt: 10, sizePt: 11 },
       ]),
-    ).rejects.toThrow(/box-9.*第 3 页.*只有 2 页/);
+    ).rejects.toThrow(/box-9.*源档第 3 页.*没有来自它的页/);
   });
 
   it('画过覆盖区的文档页数与每页宽高都不变——页面树没被动过（结构上必然的「非文本元素原样保留」）', async () => {
     const loaded = await PdfEditDocument.load(minimalMultiPagePdf(2));
     if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
-    const before = loaded.document.pageMetrics();
+    const before = loaded.document.sourcePageMetrics();
 
     await loaded.document.applyOverlays([
       {
@@ -111,8 +111,44 @@ describe('3.5-02 的绘制半边：applyOverlays 只追加，页号越界当场�
         textBaselinePt: 25,
       },
     ]);
-    expect(loaded.document.pageMetrics()).toEqual(before);
+    expect(loaded.document.sourcePageMetrics()).toEqual(before);
     // 实测：新落的文字在产物里是十六进制串（`<4F4B> Tj`），不是字面串，所以按同样的口径算出期望值。
     expect(pdfContentText(await loaded.document.save())).toContain('<4F4B> Tj');
+  });
+});
+
+describe('3.5-07 的引擎半边：按页序拷出新的页树', () => {
+  it('页序就是 `1…n` 时直通返回自身，不重拷一遍文档', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(3));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    expect(await loaded.document.arrange([1, 2, 3])).toBe(loaded.document);
+  });
+
+  it('排过页的文档带得出逐页来源：重复项在产物的两份位置上都算数', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(3));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const arranged = await loaded.document.arrange([2, 2, 1]);
+
+    expect(arranged.pageCount).toBe(3);
+    // 源档页数不因排页而变——覆盖区的页号上界一直是它。
+    expect(arranged.sourcePageCount).toBe(3);
+    expect(arranged.outputPageSources()).toEqual([2, 2, 1]);
+    // 没进页序的那一页**根本不进产物**：新文档是逐页拷出来的，不是删出来的，
+    // 所以这里断言的是"少了那一页的内容流"，而不是"某个对象被标记为删除"。
+    const content = pdfContentText(await arranged.save());
+    expect(content).toContain('(page 1) Tj');
+    expect(content).not.toContain('(page 3) Tj');
+  });
+
+  it('覆盖区指向的源页在这一份页序里根本不存在：抛错而不是只画得到的那几页', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(3));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const arranged = await loaded.document.arrange([1, 1]);
+
+    await expect(
+      arranged.applyOverlays([
+        { id: 'box-2', pageNumber: 3, xPt: 0, yBottomPt: 0, widthPt: 10, heightPt: 10, sizePt: 11 },
+      ]),
+    ).rejects.toThrow(/box-2.*源档第 3 页.*没有来自它的页/);
   });
 });

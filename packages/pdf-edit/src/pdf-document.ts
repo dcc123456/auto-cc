@@ -12,6 +12,7 @@
 import { sha256Hex } from '@auto-cc/core/file-read';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import type { PlannedOverlay } from './overlay-writer.js';
+import { isIdentityOrder } from './page-ops.js';
 
 /** 装载不了的三种确定态（plan §7.10：加密文档与结构损坏都不试图绕过，也不产出半成品）。 */
 export type PdfLoadFailure = 'empty' | 'encrypted' | 'invalid';
@@ -30,16 +31,22 @@ export type PdfLoadOutcome =
   | { readonly status: 'failed'; readonly reason: PdfLoadFailure; readonly detail: string };
 
 /**
- * 一份被装载起来、等着叠加内容的 PDF。
+ * 一份被装载起来、等着叠加内容与重排页序的 PDF。
  *
- * 它**不是**会话模型：3.5-b 的 `edit-session` 才持有覆盖区列表与页面顺序，这一层只保证
- * 「读得进来、写得出去、读得出每页多大、把换算好的覆盖区追加到页上」——前人是 3.4-03 的判据，
- * 后一条是 3.5-02 的绘制半边。
+ * 它**不是**会话模型：3.5-c 的编辑会话才持有覆盖区列表与页序草稿，这一层只保证
+ * 「读得进来、按页序拷得出、写得出去、读得出每页多大、把换算好的覆盖区追加到页上」——
+ * 前人是 3.4-03 的判据，叠加是 3.5-02 的绘制半边，页序是 3.5-07 的引擎半边。
  */
 export class PdfEditDocument {
   private constructor(
     private readonly pdf: PDFDocument,
-    private readonly metrics: readonly PdfPageMetric[],
+    /** 源档逐页度量（`arrange()` 之后仍然指源档那一份：同一源的副本共用同一份量得）。 */
+    private readonly sourceMetrics: readonly PdfPageMetric[],
+    /**
+     * 本文档逐页的**来源页号**（1 起）。装载时就是 `1…n`，`arrange()` 之后会带上重复项或缺项。
+     * 覆盖区按它来认目标页，而不是按产物第几页——见 `page-ops.ts` 头部那条"同一源的副本都要盖上"。
+     */
+    private readonly pageSources: readonly number[],
   ) {}
 
   /**
@@ -60,26 +67,78 @@ export class PdfEditDocument {
       // 结构探针：实测（本机 pdf-lib 1.17.1）一份 `%PDF-1.4` 开头、后面全是垃圾字节的文件**装得上**，
       // 崩的是下一步取页对象。所以"能不能读"必须在这里当场量一遍，量不出页面的文件一律算 `invalid`——
       // 放一份「装得上但没有页」的文档走出去，3.5-b 就会在另存时产出半成品（plan §7.10 要拦的正是这个）。
-      const metrics = pdf
-        .getPages()
-        .map((page, index) => ({ number: index + 1, widthPt: page.getWidth(), heightPt: page.getHeight() }));
-      return { status: 'loaded', document: new PdfEditDocument(pdf, metrics), sourceHash };
+      const pages = pdf.getPages();
+      const metrics = pages.map((page, index) => ({
+        number: index + 1,
+        widthPt: page.getWidth(),
+        heightPt: page.getHeight(),
+      }));
+      return {
+        status: 'loaded',
+        document: new PdfEditDocument(
+          pdf,
+          metrics,
+          metrics.map((metric) => metric.number),
+        ),
+        sourceHash,
+      };
     } catch (error) {
       return { status: 'failed', reason: 'invalid', detail: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  /** 这份文档的页数（与 `pageMetrics()` 同源：度量在装载时就量好了，这里不再解析第二遍）。 */
+  /** 产物的页数（`arrange()` 之后可以比源档多、也可以比源档少：一项对应一页，重复项对应副本）。 */
   get pageCount(): number {
-    return this.metrics.length;
+    return this.pageSources.length;
+  }
+
+  /** 源档的页数：覆盖区的页号与页序里的页号都以它为上界，`arrange()` 不改这个数。 */
+  get sourcePageCount(): number {
+    return this.sourceMetrics.length;
   }
 
   /**
-   * 逐页量出的宽高。
-   * @returns 按页序排列的度量，页号从 1 开始
+   * **源档**逐页量出的宽高（不是产物逐页：产物里同一源的副本共用同一份量得）。
+   * @returns 按源页序排列的度量，页号从 1 开始
    */
-  pageMetrics(): readonly PdfPageMetric[] {
-    return this.metrics;
+  sourcePageMetrics(): readonly PdfPageMetric[] {
+    return this.sourceMetrics;
+  }
+
+  /**
+   * 产物逐页的来源页号（3.5-07 判据里"顺序符合操作"就是拿它比）。
+   * @returns 长度等于 `pageCount` 的页号数组，1 起
+   */
+  outputPageSources(): readonly number[] {
+    return this.pageSources;
+  }
+
+  /**
+   * 按页序拷出一份新文档（增页/删页/重排的引擎半边，spec 3.5-07）。
+   *
+   * 直通情形（页序就是 `1…n`）直接返回 `this`：`copyPages` 会把整份文档重嵌一遍资源，
+   * 白拷一次不只是慢，还会让"没改页序的产物"与源档的字节结构无谓地不同。
+   * @param order 逐页的来源页号（**已由 `planPageOrder` 校验过**：非空、每项落在 1…`sourcePageCount`）
+   * @returns 页序生效后的新文档（源度量原样带过去，覆盖区的换算口径不变）；直通则返回自身
+   * @throws `pdf-lib` 拷贝失败时抛出，由服务层收敛成 `PDF_EDIT_SAVE_FAILED`，**不落半成品**
+   */
+  async arrange(order: readonly number[]): Promise<PdfEditDocument> {
+    if (isIdentityOrder(order, this.sourcePageCount)) return this;
+    const target = await PDFDocument.create();
+    // 实测（本机 `pdf-lib` 1.17.1）：`copyPages` 逐指标取一份新拷贝、对重复指标不设限，所以 `[0, 0, 1]` 得到三页
+    // 而不是两页——这正是"同一页的副本内容流相同"这条覆盖区语义所要求的。它也不拦源与目标是同一份文档。
+    const copied = await target.copyPages(
+      this.pdf,
+      order.map((pageNumber) => pageNumber - 1),
+    );
+    for (const page of copied) target.addPage(page);
+    // 度量继续用源档那一份：`copyPages` 保留 MediaBox（这条不由注释说了算，
+    // 由 `pdf-document.test.ts` 里"排完再存再装载，逐页宽高仍是源档的量得"那条用例钉住）。
+    return new PdfEditDocument(
+      target,
+      this.sourceMetrics,
+      order.map((pageNumber) => pageNumber),
+    );
   }
 
   /**
@@ -92,8 +151,8 @@ export class PdfEditDocument {
    *    不收 `StandardFonts` 枚举，所以标准字体也要先 `embedFont` 一次拿到句柄——整场只嵌一次，
    *    不是因为嵌多次会坏，而是因为一次都不该多。越界的中文早在 `planOverlays` 就被挡下了，
    *    这里不再校验字形覆盖（plan §7.2 结论③：标准字体没有 CJK 字形，硬画得到豆腐块）。
-   * @param plans `planOverlays` 通过校验并换算好的覆盖区（PDF 坐标，页号从 1 起）
-   * @throws 页号越界时抛普通 `Error`（那是调用方拿了别的文档的计划过来，属编程错误）；
+   * @param plans `planOverlays` 通过校验并换算好的覆盖区（PDF 坐标，页号是**源页号**，从 1 起）
+   * @throws 页号在本文档里没有任何落点时抛普通 `Error`（那是调用方拿了别的文档的计划过来，属编程错误）；
    *         连同 `pdf-lib` 自己的绘制异常一起由服务层收敛成 `PDF_EDIT_SAVE_FAILED`，**不落半成品**
    */
   async applyOverlays(plans: readonly PlannedOverlay[]): Promise<void> {
@@ -102,20 +161,31 @@ export class PdfEditDocument {
       ? await this.pdf.embedFont(StandardFonts.Helvetica)
       : undefined;
     for (const plan of plans) {
-      const page = pages[plan.pageNumber - 1];
+      // 一个来源页对应产物里的所有位置：排过页（3.5-07）之后同一源可能有副本，
+      // 只盖第一处就等于"改了一份、另一份还露着那段旧话"（plan §7.6 的反伪装精神）。
+      const targets = this.pageSources
+        .map((source, position) => (source === plan.pageNumber ? position : -1))
+        .filter((position) => position >= 0);
       // 越界一律抛，不许静默跳过：跳过等于产出一份「看似改过实则少画几区」的文件（3.5-05 转移来的那条精神）。
-      if (page === undefined)
-        throw new Error(`覆盖区 ${plan.id} 指向第 ${String(plan.pageNumber)} 页，本档只有 ${String(pages.length)} 页`);
-      page.drawRectangle({
-        x: plan.xPt,
-        y: plan.yBottomPt,
-        width: plan.widthPt,
-        height: plan.heightPt,
-        color: rgb(1, 1, 1),
-        borderWidth: 0,
-      });
-      if (plan.text !== undefined && plan.textBaselinePt !== undefined && latinFont !== undefined) {
-        page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font: latinFont });
+      if (targets.length === 0)
+        throw new Error(`覆盖区 ${plan.id} 指向源档第 ${String(plan.pageNumber)} 页，本文档的页序里没有来自它的页`);
+      for (const position of targets) {
+        const page = pages[position];
+        if (page === undefined)
+          throw new Error(
+            `覆盖区 ${plan.id} 落到产物第 ${String(position + 1)} 页，本档只有 ${String(pages.length)} 页`,
+          );
+        page.drawRectangle({
+          x: plan.xPt,
+          y: plan.yBottomPt,
+          width: plan.widthPt,
+          height: plan.heightPt,
+          color: rgb(1, 1, 1),
+          borderWidth: 0,
+        });
+        if (plan.text !== undefined && plan.textBaselinePt !== undefined && latinFont !== undefined) {
+          page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font: latinFont });
+        }
       }
     }
   }

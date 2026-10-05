@@ -1122,7 +1122,7 @@ export interface PdfOverlayRectView {
 export interface PdfOverlayInputView {
   /** 界面给的稳定标识：错误信息里用它指认是哪一区 */
   id: string;
-  /** 页号，从 1 起（与 `PdfPageMetricView.number` 同一个口径） */
+  /** **源**页号，从 1 起（与 `PdfPageMetricView.number` 同一个口径；排过页之后同一源可以对应产物的多页） */
   pageNumber: number;
   rect: PdfOverlayRectView;
   /** 叠加文字：本片只放拉丁，含中文以 `text-not-supported` 结构化失败（中文腿按裁定⑧ 随字体资产再落） */
@@ -2006,15 +2006,18 @@ export interface BridgeSignatures {
    */
   'pdf.io.open': { args: [filePath: string]; returns: PdfOpenReceiptView };
   /**
-   * 另存一份带覆盖区的 PDF（spec 3.5-02 / 3.5-09，plan §7.4 的 `pdf.export`）：
+   * 另存一份带覆盖区与页序的 PDF（spec 3.5-02 / 3.5-07 / 3.5-09，plan §7.4 的 `pdf.export`）：
    * 源文件只读，覆盖区以比例坐标进、以内容流里的新笔画出，产物写到 `outPath`。
+   * `pageOrder` 是产物的逐页来源页号（1 起）：重复一项即增一页（副本）、缺一项即删一页、换序即重排，
+   * 覆盖区跟着**来源页**走——同一源的每一张副本都会盖上，不留"改了一份、另一份还露着旧话"的口子。
    * 失败以 `AppErrorPayload`（`PDF_EDIT_SAVE_FAILED`）上浮，`details.code` 说清是哪一种
-   * （`out-is-source` / `invalid-pdf` / `too-many` / `out-of-page` / `out-of-bounds` / `too-small` /
-   * `bad-size` / `text-not-supported` / `draw-failed` / `write-failed`），
+   * （`out-is-source` / `out-path-not-absolute` / `invalid-pdf` / `encrypted` / `empty` /
+   * `too-many` / `out-of-page` / `out-of-bounds` / `too-small` / `bad-size` / `text-not-supported` /
+   * `empty-order` / `page-out-of-range` / `too-many-pages` / `draw-failed` / `write-failed`），
    * 而抛出时磁盘上既没有 `outPath` 也没有 `outPath.part`（plan §7.10 的「失败不落半成品」）。
    */
   'pdf.export.saveAs': {
-    args: [filePath: string, overlays: PdfOverlayInputView[], outPath: string];
+    args: [filePath: string, overlays: PdfOverlayInputView[], pageOrder: number[], outPath: string];
     returns: PdfSaveAsReceiptView;
   };
   /**
