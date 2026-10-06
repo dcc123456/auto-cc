@@ -42,7 +42,8 @@ export type WritableFrame = {
  * 而 `browser.act` 一次动作要在同一帧里连跑等待 → 定位 → 动作 → 回读四样，
  * 所以替身必须按源码认出手里拿的是哪一种。
  */
-export type ScriptKind = 'locate' | 'fingerprint' | 'wait' | 'domAction' | 'valueRead' | 'iframeRects';
+export type ScriptKind =
+  'locate' | 'fingerprint' | 'wait' | 'domAction' | 'valueRead' | 'iframeRects' | 'clickArm' | 'clickReceipt';
 
 /**
  * 从注入脚本源码认出它是哪一类。
@@ -56,6 +57,8 @@ export function scriptKindOf(source: string): ScriptKind {
   if (source.includes("'fingerprint'")) return 'fingerprint';
   if (source.includes('const kind =')) return 'wait';
   if (source.includes('const action =')) return 'domAction';
+  if (source.includes("const receiptKind = 'arm'")) return 'clickArm';
+  if (source.includes("const receiptKind = 'read'")) return 'clickReceipt';
   if (source.includes('const target = findNode(')) return 'valueRead';
   if (source.includes("'iframe, frame'")) return 'iframeRects';
   return 'locate';

@@ -30,11 +30,14 @@ import {
 import { dispatchClick, dispatchType, dispatchUpload, viewportPointOf } from './input-channel.js';
 import {
   DEFAULT_SCRIPT_LIMITS,
+  buildClickArmScript,
+  buildClickReceiptReadScript,
   buildDomActionScript,
   buildNodeHandleScript,
   buildUploadReadbackFunction,
   buildValueReadScript,
   buildWaitScript,
+  toClickReceiptReading,
   toDomActionReading,
   toWaitReading,
 } from './locator-script.js';
@@ -55,6 +58,10 @@ export const browserActSchema = z.strictObject({
   uploadReadbackMs: z.number().int().min(100).max(30_000).default(1500),
   /** 回读的轮询步长（毫秒）。`setFileInputFiles` 回包时 change 未必已派发完，只能轮（plan §13.2 第 2 条）。 */
   uploadReadbackStepMs: z.number().int().min(10).max(2_000).default(50),
+  /** 点击派发后等页面回执的上限（毫秒）；页面答得上来却没回执，`status` 就给 `timeout`（裁定⑰ / plan §16.1）。 */
+  clickReadbackMs: z.number().int().min(100).max(30_000).default(600),
+  /** 点击回执的轮询步长（毫秒）。与 `uploadReadbackStepMs` 同形：事件派发是异步的，只能轮。 */
+  clickReadbackStepMs: z.number().int().min(10).max(2_000).default(50),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -129,9 +136,11 @@ export class BrowserActService extends Service {
   }
 
   /**
-   * 点击声明指向的元素。
+   * 点击声明指向的元素（裁定⑰：`done` 从此要求页面自己回执）。
    * @param spec 定位声明
-   * @returns 动作结局；`channel` 与 `trusted` 说明事件是怎么产生的
+   * @returns 动作结局；`channel` 与 `trusted` 说明事件是怎么产生的；`status` 为 `timeout` 表示
+   *          「派发没报错但页面答『没收到』」——窗口不在前台时 CDP 的鼠标事件会被合成器丢掉；
+   *          页面答不上来（节点换掉、脚本不通）仍给 `done`，这条判据不外扩成假阴性
    * @throws 等不到可点 `WAIT_TIMEOUT`、定位未过线 `LOCATE_FAILED`、动作被页面拒绝 `ACT_FAILED`（三者都带 spec 与快照引用）
    */
   click = async (spec: LocateSpec): Promise<ActResultView> => this.perform('click', spec);
@@ -270,10 +279,19 @@ export class BrowserActService extends Service {
       });
     }
     const point = await this.viewportPoint(contents, result.chosen);
+    // 回执必须挂在派发**之前**：事后装的监听看不见已经发生的事件（裁定⑰ / plan §16.1）。
+    const armed = action === 'click' ? await this.armClickReceipt(spec, result.chosen) : null;
     const outcome = await this.dispatch(action, spec, result.chosen, payload, point, contents);
+    let status: ActResultView['status'] = 'done';
+    if (armed && !(await this.clickConfirmed(armed.url, result.chosen))) {
+      status = 'timeout';
+      this.ctx.logger.warn(
+        `点击「${spec.description}」派发完但页面没有回执（事件被丢弃或落到了别处），本次动作按超时报告而不是已完成`,
+      );
+    }
     return {
       action,
-      status: 'done',
+      status,
       waitedMs: Date.now() - startedAt,
       channel: outcome.channel,
       trusted: outcome.trusted,
@@ -281,6 +299,50 @@ export class BrowserActService extends Service {
       valueAfter: outcome.valueAfter,
       predicate: null,
     };
+  }
+
+  /**
+   * 在派发之前把一次点击的回执挂到胜出节点上（plan §16.1 第一段）。
+   * @param spec 定位声明（找回节点要用）
+   * @param chosen 胜出候选
+   * @returns 挂表成功时的基准（当时的文档地址）；节点已不在、脚本不通时返回 null 表示「页面答不上来」
+   */
+  private async armClickReceipt(spec: LocateSpec, chosen: LocatedView): Promise<{ url: string } | null> {
+    try {
+      const raw = (await this.frameOf(chosen).executeJavaScript(
+        buildClickArmScript(spec.candidates, identityOf(chosen), DEFAULT_SCRIPT_LIMITS),
+        true,
+      )) as Record<string, unknown>;
+      return raw && raw.ok === true ? { url: typeof raw.url === 'string' ? raw.url : '' } : null;
+    } catch {
+      // 挂不上不是动作失败：这条判据只在页面能回答时才是决定性的，不能反过来把动作链路打断。
+      return null;
+    }
+  }
+
+  /**
+   * 有界轮询页面对这一次点击的回执（plan §16.1 第三段）。
+   * @param armedUrl 挂表那一刻的文档地址；与当前地址不同即「这次点击把页面导航走了」
+   * @param chosen 胜出候选（回执要在同一帧里读）
+   * @returns 页面确认收到过为 true；**探针始终答不上来也算 true**，只有页面明确答「没收到」才是 false
+   */
+  private async clickConfirmed(armedUrl: string, chosen: LocatedView): Promise<boolean> {
+    const deadline = Date.now() + this.config.clickReadbackMs;
+    let isProbeAnswering = false;
+    for (;;) {
+      let reading = { available: false, received: false, url: '' };
+      try {
+        reading = toClickReceiptReading(
+          await this.frameOf(chosen).executeJavaScript(buildClickReceiptReadScript(armedUrl), true),
+        );
+      } catch {
+        // 帧正在跳转：这一轮读不到，下一轮再看。
+      }
+      if (reading.received) return true;
+      isProbeAnswering = isProbeAnswering || reading.available;
+      if (Date.now() >= deadline) return !isProbeAnswering;
+      await new Promise((resolve) => setTimeout(resolve, this.config.clickReadbackStepMs));
+    }
   }
 
   /**
@@ -489,7 +551,7 @@ export class BrowserActService extends Service {
         run: async ({ spec }) => {
           const result = await this.click(spec);
           return toolResult(result, {
-            summary: `点击「${spec.description}」${result.status === 'done' ? '已完成' : '等待超时'}（事件通道 ${result.channel} · ${String(result.waitedMs)} 毫秒）`,
+            summary: `点击「${spec.description}」${result.status === 'done' ? '已完成' : '页面未回执'}（事件通道 ${result.channel} · ${String(result.waitedMs)} 毫秒）`,
             evidenceRefs: result.located ? [`frame:${result.located.frameUrl}`] : [],
           });
         },

@@ -587,6 +587,85 @@ ${buildPrelude(limits)}
   })()`;
 }
 
+/**
+ * 点击回执探针挂在页面 `globalThis` 上的键（挂表与读表两段脚本共用，必须只有一个名字）。
+ *
+ * 它是裁定⑰的落点：`click` 的 `done` 从此要求页面自己承认收到过这一次事件，
+ * 而不是「命令没报错」（plan §16.1）。
+ */
+export const CLICK_RECEIPT_KEY = '__autoCcClickReceipt';
+
+/**
+ * 生成「在胜出节点上挂一次 capture 阶段点击回执」的脚本源码（plan §16.1 第一段，派发之前跑）。
+ *
+ * 挂的是**目标节点自己**而不是 `document`：真实站点常在整个页面上转发 `click`，
+ * 挂在 document 上会把「事件落到别处」也报成回执，那正是这条判据要防的假阳性。
+ * 计数只增不减、基准在挂表时抄一份，所以同一页面连点多次不会互相盖掉读数。
+ * @param candidates 定位时的候选声明（找回节点要用，与 `buildValueReadScript` 同一套身份号）
+ * @param chosen 胜出候选的 `candidateIndex` 与 `nodeIndex`
+ * @param limits 取回上限
+ * @returns 单个表达式源码，求值得到 `{ ok, url, count, error }`；`url` 是挂表那一刻的文档地址，导航出口要用
+ */
+export function buildClickArmScript(
+  candidates: unknown[],
+  chosen: { candidateIndex: number; nodeIndex: number },
+  limits: ScriptLimits = DEFAULT_SCRIPT_LIMITS,
+): string {
+  return `(() => {
+${buildPrelude(limits)}
+    const receiptKind = 'arm';
+    const target = findNode(${JSON.stringify(candidates)}, ${JSON.stringify(chosen)});
+    if (!target) return { ok: false, url: '', count: 0, error: '目标节点已不在当前帧里，回执挂不上' };
+    const state = globalThis.${CLICK_RECEIPT_KEY} || (globalThis.${CLICK_RECEIPT_KEY} = { count: 0, baseline: 0, node: null, handler: null, url: '' });
+    if (state.node && state.handler) state.node.removeEventListener('click', state.handler, true);
+    state.baseline = state.count;
+    state.url = document.URL;
+    state.node = target;
+    state.handler = () => { state.count += 1; };
+    target.addEventListener('click', state.handler, true);
+    return { ok: true, url: state.url, count: state.count, error: '' };
+  })()`;
+}
+
+/**
+ * 生成「读一次点击回执并把监听摘掉」的脚本源码（plan §16.1 第三段，派发之后轮）。
+ *
+ * 两条确认出口缺一不可，而且第二条不是可选项：点击把页面导航走时，挂表的那个 JS world 会整个销毁，
+ * 探针随之读不到——只有「文档地址变了」这条出口能让这种点击仍然算确认。
+ * 反过来，探针还在、计数没涨、地址也没变，就是那一次实测抓到的场景（窗口不在前台，
+ * 合成器把 CDP 的鼠标事件丢掉），必须判未确认。
+ * @param armedUrl 挂表那一刻的文档地址
+ * @returns 单个表达式源码，求值得到 `{ available, received, url, error }`；`available` 为 false 表示页面答不上来
+ */
+export function buildClickReceiptReadScript(armedUrl: string): string {
+  return `(() => {
+    const receiptKind = 'read';
+    const url = document.URL;
+    const navigated = url !== ${JSON.stringify(armedUrl)};
+    const state = globalThis.${CLICK_RECEIPT_KEY};
+    if (!state) return { available: false, received: navigated, url, error: '探针不在了（页面已跳转或世界被重建）' };
+    if (state.node && state.handler) { state.node.removeEventListener('click', state.handler, true); state.handler = null; }
+    return { available: true, received: state.count > state.baseline || navigated, url, error: '' };
+  })()`;
+}
+
+/**
+ * 把回执脚本的原始求值结果收成判定用的形状。
+ *
+ * 脏值与 `undefined`（替身帧没供这一类脚本时就是它）一律归为「页面答不上来」，
+ * **不当成失败**——这条判据只在页面能回答时才是决定性的（plan §16.1 的放软取舍）。
+ * @param raw 页面回来的未知值
+ * @returns `{ available, received, url }`
+ */
+export function toClickReceiptReading(raw: unknown): { available: boolean; received: boolean; url: string } {
+  const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  return {
+    available: record.available === true,
+    received: record.received === true,
+    url: typeof record.url === 'string' ? record.url : '',
+  };
+}
+
 /** 注入探针挂在隔离世界 `globalThis` 上的键（取节点与回读两段脚本共用，必须只有一个名字）。 */
 export const UPLOAD_PROBE_KEY = '__autoCcUploadProbe';
 

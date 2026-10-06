@@ -37,6 +37,8 @@ const DEFAULT_ACT_CONFIG: BrowserActConfig = {
   cdpInputEnabled: true,
   uploadReadbackMs: 1500,
   uploadReadbackStepMs: 50,
+  clickReadbackMs: 600,
+  clickReadbackStepMs: 50,
 };
 
 const fibers: Fiber[] = [];
@@ -134,6 +136,41 @@ describe('动作骨架的顺序与通道（spec 2.2-03 / 2.2-12）', () => {
     expect(view.log.commands[1]!.params).toMatchObject({ x: 60, y: 40, buttons: 1 });
     expect(result.located).toMatchObject({ score: 100, frameUrl });
     expect(page.snapshotCalls).toBe(0);
+  });
+
+  it('页面回执到了这次点击才算 done：回执计数涨了（裁定⑰）', async () => {
+    const view = labView({
+      ...readyScripts,
+      clickArm: { ok: true, url: frameUrl, count: 0, error: '' },
+      clickReceipt: { available: true, received: true, url: frameUrl, error: '' },
+    });
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched();
+    expect(await act.click(spec)).toMatchObject({ action: 'click', status: 'done', channel: 'cdp' });
+  });
+
+  it('派发没报错但页面答「没收到」时是 timeout，而不是 done', async () => {
+    const view = labView({
+      ...readyScripts,
+      clickArm: { ok: true, url: frameUrl, count: 0, error: '' },
+      clickReceipt: { available: true, received: false, url: frameUrl, error: '' },
+    });
+    const { act, locate } = await boot({ clickReadbackMs: 120, clickReadbackStepMs: 20 }, view.contents);
+    locate.result = matched();
+    const result = await act.click(spec);
+    expect(result).toMatchObject({ action: 'click', status: 'timeout', channel: 'cdp', trusted: true });
+    // 事件确实下发过：这一条判据否定的是「页面收到没有」，不是「我们点没点」。
+    expect(view.log.commands.map((item) => item.params.type)).toEqual(['mouseMoved', 'mousePressed', 'mouseReleased']);
+  });
+
+  it('回执挂不上时不外扩成假阴性：页面答不上来仍然按 done 报告', async () => {
+    const view = labView({
+      ...readyScripts,
+      clickArm: { ok: false, url: '', count: 0, error: '目标节点已不在当前帧里，回执挂不上' },
+    });
+    const { act, locate } = await boot({ clickReadbackMs: 120, clickReadbackStepMs: 20 }, view.contents);
+    locate.result = matched();
+    expect(await act.click(spec)).toMatchObject({ action: 'click', status: 'done', channel: 'cdp' });
   });
 
   it('输入是「先点落焦点再插字」，且 valueAfter 取自页面回读而不是发出去的那个串', async () => {
