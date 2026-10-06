@@ -47,8 +47,8 @@
 | 6.2-11 | 白名单「加白」按 08 稿走**两步 armed**（09 稿形态⑤′）：第一颗只武装（`data-armed="true"` + 4 秒倒计时），第二颗才写库；「撤销」保持一次点（撤回是安全方向，不该加摩擦） | V | 第十一片只把颜色归属换到位（`add-exempt`=seal、`revoke-exempt`=amber，活体计算色见 `6.2-06-chat-agent-readings.txt`②），两步点击**没做**——它改的是点击语义（一颗键从一次点变成两次点），与样式片混在一次提交里违反 §1.4，且判据要另取（第一次点之后 `policy.exemptList` 读数必须不变）。原件 `ArmButton` 已在 `ui/controls.tsx` 待命，本片起它是唯一没有消费者的形态原件。**第十六片已落地**：`add-exempt` 换成 `ArmButton`（`action="add-exempt"` + `confirmAction="add-exempt-confirm"`），真点一次之后 DOM 里长出 `data-armed="true"` 的那只、`data-action` 已改名、文案变「再点一次才写入」、倒计时条 `wash 4s linear`，而 `data-exempt-count` 仍是 0、回执行不存在；等过四秒自动解除且名单仍为 0（`6.2-11-arm-button-readings.txt`②，双主题截图两张）。第二颗真写库那一腿**没按**（第五节第 1 条：按一次会往这台机器的免确认名单写进一条豁免，与"不为了读数改写用户实例"的口径冲突），`revoke-exempt` 仍是一次点的普通 `DeskButton`。**状态标 `[!]` 而不是 `[x]`**：「第一次点不写库」这一半已经活体取到，「第二次点会写库」那一半按下去就会往这台机器的名单里留下痕迹，按 §7.4 的"环境不具备就如实标 BLOCKED、禁止用推测写成 [x]"处理，等用户指名要免确认某只手时一并兑现 | [!] |
 | 6.2-12 | toast 的第二段动作「在访达 / 资源管理器中显示」要有真实去处：一条 `shell.showItemInFolder` 口 + 点击可达，而不是只报一个路径字符串 | C+V | 待做：`RENDERER_ALLOWLIST` 里没有这一条（第二十四片因此只报落点路径，没假装能打开，见 `6.2-04-toast-readings.txt`⑧）。补它要动主进程 shell service 与 IPC 白名单（不是样式片），顺带把 ⑧ 第 4 条欠的 toast 宽度上限一并定口径 | [ ] |
 | 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | 待做：第二十五片的负腿反而把这一条暴露出来了——切走视图时遮罩虽然画不出来，但渲染层目前没有 `inert`，键盘 Tab 仍能走进被盖住的表单格。补它要同时定「弹窗打开时哪一格拿焦点、关掉后焦点还给谁」，与 6.2-04 形态③④ 一起收 | [ ] |
-| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**进 48 / 54**（第二十七片 45 + 第二十八片 3：两只行内披露键与自治档位那一支 JSX）：`src/ui/**` 之外新增七件原件（表单五件 `DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange` + 形态两件 `DeskSegmented` / `DeskDisclosure`）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：当下剩 11 处——基线内 6 处 = `App` 导航页签 1（缺页签原件，即 6.2-15 未做完的那一件）+ `ChatPanel` 输入区 1（**待用户表态**：并入 `FIELD_CLASS` 档还是自成一档）+ `MetricsPanel` 4 处（撞已落地机检 5.8-02 的进口白名单，**待用户表态**）；基线外新出的 5 处 = 并行会话刚落地的 `ModelSettingsPanel.tsx`（`select` 2 + `input` 3），它要走的原件已经齐了。画布 `<Controls>` 的 Tailwind 覆盖未动；机检按裁定仍未写入，故本条当下仍是 `[纪律]` |
-| 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的裸 `<button>` | C+V | **第二十八片落了后两件**：`DeskSegmented`（消费者 = `ChatPanel` 自治档位三格）与 `DeskDisclosure`（消费者 = `GapPanel` 证据行、`GeneratePanel` 出处行）。活体三档全到账（`6.2-15-segmented-disclosure-readings.txt`）：选中·非风险 `bg rgb(24,35,43)`、未选中 `bg rgba(0,0,0,0)` + `rgb(108,128,145)`、**选中·风险 `bg rgba(226,84,58,.13)` + `ring-inset seal/35`**（只有"选上它就把风险抬高"那一格涂朱砂），毡案同一条原件翻面；全 app `button:not([data-action])` **3 → 0**，渲染层最后一处原生 `disabled`（那三格原先走原生禁用，鼠标事件不派发、`title` 里的理由读不到）随之消失。**两处如实欠着**：① `DeskDisclosure` 的活体腿受阻——`gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"`，开发实例知识库是空的，正文一行都渲染不出来，补它要往用户的库里同步一份简历文档（不改写用户实例；受阻态画面 `6.2-15-disclosure-gap-blocked-dark.png`）；② `DeskSegmented` 的**在途档**取不到——纯本机 IPC 在 4ms 内返回（1/4/10ms 三张快照全为静止态），没有为了这一帧去发一条会写进会话的消息，改由第十五片同款"实现只有一条出路"的证据覆盖。**页签那件未做**（`App.tsx` 本轮之前被并行的模型设置改动占着，不动他人当场在改的文件） | [!] |
+| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**进 49 / 54**（第二十七片 45 + 第二十八片 3 + 第二十九片 1：两只行内披露键、自治档位那一支 JSX、左轨页签那一支）：`src/ui/**` 之外新增七件原件（表单五件 `DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange` + 形态两件 `DeskSegmented` / `DeskDisclosure`）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：当下剩 10 处——基线内 5 处 = `ChatPanel` 输入区 1（**待用户表态**：并入 `FIELD_CLASS` 档还是自成一档）+ `MetricsPanel` 4 处（撞已落地机检 5.8-02 的进口白名单，**待用户表态**）；基线外新出的 5 处 = 并行会话刚落地的 `ModelSettingsPanel.tsx`（`select` 2 + `input` 3），它要走的原件已经齐了。画布 `<Controls>` 的 Tailwind 覆盖未动；机检按裁定仍未写入，故本条当下仍是 `[纪律]` |
+| 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的裸 `<button>` | C+V | **第二十八片落了后两件**：`DeskSegmented`（消费者 = `ChatPanel` 自治档位三格）与 `DeskDisclosure`（消费者 = `GapPanel` 证据行、`GeneratePanel` 出处行）。活体三档全到账（`6.2-15-segmented-disclosure-readings.txt`）：选中·非风险 `bg rgb(24,35,43)`、未选中 `bg rgba(0,0,0,0)` + `rgb(108,128,145)`、**选中·风险 `bg rgba(226,84,58,.13)` + `ring-inset seal/35`**（只有"选上它就把风险抬高"那一格涂朱砂），毡案同一条原件翻面；全 app `button:not([data-action])` **3 → 0**，渲染层最后一处原生 `disabled`（那三格原先走原生禁用，鼠标事件不派发、`title` 里的理由读不到）随之消失。**两处如实欠着**：① `DeskDisclosure` 的活体腿受阻——`gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"`，开发实例知识库是空的，正文一行都渲染不出来，补它要往用户的库里同步一份简历文档（不改写用户实例；受阻态画面 `6.2-15-disclosure-gap-blocked-dark.png`）；② `DeskSegmented` 的**在途档**取不到——纯本机 IPC 在 4ms 内返回（1/4/10ms 三张快照全为静止态），没有为了这一帧去发一条会写进会话的消息，改由第十五片同款"实现只有一条出路"的证据覆盖。**第三件页签已在第二十九片落地**：`DeskTab`（上一轮 `App.tsx` 被并行的模型设置改动占着，不动他人当场在改的文件，故顺延一片）。三件形态原件至此**齐**（页签 / 分段 / 行内披露），`src/ui/**` 之外的裸 `<button>` **5 → 0**。页签的活体腿一次取全（`6.2-15-tab-nav-readings.txt`）：选中 = 贴在轨道左缘的 `3×17` 短线（`translate: 0px -50%` 与按钮中线逐位重合）+ 底色提一档 + 文字提亮，短线走 **celadon 不走稿上的朱砂**（plan §5 归属表：seal 只给外发/风险，"此刻在哪一格"不是风险），低一档那格用 `slate-500`；未选中档短线是透明而非不渲染，所以六格文字起始位一字不移；`data-view` / `data-action` / `[data-testid="view-tabs"]` 三支旧锚点逐字保留，新增 `data-selected` 与 `aria-current="page"`；导航六格里 `borderLeftWidth !== 0px` 的是 **0 只**（旧的 `border-l-2` 没有与新短线并存）。双主题四档计算色 + 八支对比度全过（毡案短线 3.58:1 是六条里最紧的一支，另有底色与文字两条冗余通道）。**本条仍 `[!]`**，欠的两支都不是几何问题：① `DeskDisclosure` 的活体正腿（知识库为空，见上）；② `DeskSegmented` 的在途档（4ms 内返回，见上）。另记一条刻意没照稿写的：稿上 `.nav-item:active { translateY(1px) }` 属 6.2-01 五态规则，那一整条还欠真鼠标腿，单独给页签加 `active:` 会把 6.2-01 拆成半件，故记在 6.2-01 名下一起收 | [!] |
 
 ## 6.3 外壳与信息架构（01–06 稿）
 
@@ -1462,3 +1462,46 @@ offset:2px` ↔ 未选中 `none 3px rgb(107,118,129) offset:0px`；墨案 `oklab
    （全 app 四条首次全绿——并行会话的 `packages/config/src/settings.test.ts` 已在他们那一边修好）、
    eslint(renderer) `ESLINT=0`、`check-renderer-conventions` `CONV=0`。本片**零新增文案**（纯换件，i18n 面不动），
    四张画面 md5 互不相同（`349ce006…` / `77979ff9…` / `880a3182…` / `990c0d54…`）。
+
+## 6.2 第二十九片落地记录（2026-10-07，第三件形态原件：页签 `DeskTab`，裸 `<button>` 5 → 0）
+
+> 这一片只有一支 JSX 换件，但它把 6.2-15 三件形态原件收齐，也让 6.2-14 的"裸控件"这一腿第一次出现
+> **零**这个数字（`src/ui/**` 之外的 `<button>`）。全文读数在 `6.2-15-tab-nav-readings.txt`，本节只记结论。
+
+1. **`DeskTab` 是第三种按钮形态，不是 `DeskButton` 的第七档**：导航那一格的语义是"此刻在哪一张工作台"，
+   选中态按稿上是**贴在轨道左缘的一道 3×17 短线** + 底色提一档 + 文字提亮，而不是"变成一颗实底按钮"。
+   硬塞进六档里就会造出第七种按钮画法，正是 6.2-14 要消掉的东西。接口照第二十七片立的三条规矩：
+   `action` 必填、`className` 只放宽度/外边档、原生属性 rest 透传，所以
+   `[data-testid="view-tabs"]` / `[data-view="chat"]` / `[data-view="workflow"]` / `[data-action="nav-*"]`
+   四支旧锚点**逐字保留**（第一~二十六片与 `scripts/smoke-dist.ts` 的选择器照旧指得到东西）。
+   新增两支：`data-selected="true|false"` 与 `aria-current="page"`（只有选中格带后者）。
+2. **图标尺寸归原件管，不归面板管**：`tier="primary" | "muted"` 一档同时决定字号（12px/500 ↔ 11px/400）、
+   图标（15 ↔ 12）与短线颜色（celadon ↔ slate-500）。这三件事在改造前是 `App.tsx` 里一个
+   `entryClass()` 函数手写的，同一段字面量抄了两遍（primary 与 muted 各一份）——按 §2.2 已经是第二次，
+   本片把它整支删掉搬进原件。6.3-02 那条"诊断视图低一档"的验收从此由一个参数兑现，不靠注释提醒。
+3. **一处刻意不照抄稿子：短线走 celadon 不走朱砂**。稿上写的是 `--seal`，而 plan §5 的归属表把 seal
+   钉给"外发 / 不可逆 / 风险"，"我在哪一格"不是风险；同一份 plan 第十片早有同向裁定（选中色走 celadon
+   不走 jade，"人挑了这一行"只是当前指向）。这条差异写在读数文件里而不是悄悄改，因为它是**设计稿自己
+   与归属表冲突**的第一例，后面 07/08 稿复核时还会遇到。
+4. **另一处刻意不照抄：选中底色保留 `ink-800` 而不换成稿上的 `ink-750`**。稿上选中与 hover 同色
+   （靠文字色区分），现状是两档分开（`bg-ink-800` / `hover:bg-ink-850`），而这组数在 6.3-01/02 已按
+   `[x]` 收过；换色要重取那两整条的活体读数，不属本片射程。本片只补"稿上写了、代码里没兑现"的那半句几何。
+5. **稿上的第三段 `.nav-item:active { translateY(1px) }` 明确不写**：它属于 6.2-01 的五态规则，
+   那一整条（hover 无位移 / 按下下沉 / 在途锁宽 / 结果态）还欠真鼠标活体腿，单独给页签加一支 `active:`
+   会把 6.2-01 拆成半件、并且造出"只有导航有按下态"的不一致。记在 6.2-01 名下一起收。
+6. **短线是不是真的居中了，用可算的判据而不是眼睛**：`::before` 的 `top` 解析成 15.07px、`height` 17px、
+   `translate: 0px -50%`，三者合出的中线与按钮 `rect.height/2 = 15.07px` 逐位重合。
+   未选中档的短线是 `rgba(0,0,0,0)` 而**不是不渲染**，所以选中/切换时六格文字的起始位置一字不移
+   （这条若写成条件渲染，切一次视图导航就抖一次）。
+7. **两条普查证明"没有两种画法并存"**：导航六格里 `borderLeftWidth !== 0px` 的 **0 只**（旧的
+   `border-l-2` 已彻底让位）；全 DOM `button:not([data-action])` 仍是 **0**、原生 `disabled` 节点 **0**。
+   双主题各量四档计算色 + 八支对比度全过（毡案短线 3.58:1 是六条里最紧的一支，另有底色与文字两条冗余通道）。
+8. **6.2-14 走到 49 / 54，基线内只剩 5 处且两处待表态**：`ChatPanel` 输入区 1（尺寸档并入还是自成一档）、
+   `MetricsPanel` 4（撞已落地机检 5.8-02 的进口白名单），两处都**没有**被自行改判据绕开；基线外新出 5 处
+   （`ModelSettingsPanel.tsx`）要走的原件已经齐了。**机检按裁定仍未写入**（「全换完再上机检」+ 不留基线豁免清单），
+   所以 6.2-14 当下仍是 `[纪律]`，④⑤靠人工核对。画布 `<Controls>` 的 Tailwind 覆盖（裁定 2）未动。
+9. **门禁**：`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`、`pnpm test` `TEST=0`、`pnpm format:check` `FORMAT=0`
+   （首轮 `FORMAT=1` 出在本片自己的 `ui/controls.tsx`，`prettier --write` 后复绿，未代改他人文件）。
+   本片**零新增文案**（纯换件，i18n 面不动）。两张画面 md5 互异：`beabff2a…`（墨案，诊断选中）/
+   `8175742f…`（毡案，对话选中）。开发实例末态：`theme: dark`（`localStorage` 同步）、选中视图 `chat`、
+   无隐私遮罩、`body.overflow: visible`。
