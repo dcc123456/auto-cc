@@ -796,7 +796,8 @@
       },
       "operator": {
         "paletteHeading": "Operators",
-        "editHint": "Cells added from the library stay on the canvas until you press Save to store; edges work and undo removes one at a time.",
+        "editHint": "Click a cell or drag it onto the canvas to add a step; a dragged cell lands where you release it. New cells live only on the canvas until you press Save to store; edges work and undo removes one at a time.",
+        "dropFrameHint": "Release to drop here · Esc cancels",
         "readOnlyHint": "A run is in progress, so the canvas is read-only: editing changes the fingerprint and that run could no longer be resumed.",
         "paramHeading": "Parameters",
         "paramHint": "Fields are generated from this operator's parameter schema",

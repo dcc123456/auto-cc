@@ -16,12 +16,14 @@
  *   决定（图标、危险度徽标、出口句柄数、表单字段），这里没有 per-算子 的分支。
  *
  * - **位置是视图层**：拖完之后位置由画布自己持有，不进命令栈、不参与指纹（5.10-06 已把这条钉成测试）。
+ * - **算子从调色板拖进来时，落点也走这一条视图层通道**（6.5-04）：松手才建格，落点写进 `dragOffsets`，
+ *   命令栈拿到的仍是那七字段、没有 position——所以"拖到哪儿"这件事在结构上够不到执行身份。
  * - **边是执行顺序**：库里的边照画，镜像里多出的那几格（图上没有）按镜像顺序补一条链。
  * - **合法性规则不在这里长第二份**：五条保存前校验读 `@auto-cc/core/graph-check`（渲染层与 L3 的保存口
  *   同一份规则，plan 裁定九），界面只按 `code` 取文案、按 `nodeIds` 落红环。
  * - **配色与步骤行同源**：`STEP_STATUS_STYLE` 与工作流面板共用一份，同一状态在两处必须同色。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Background,
@@ -37,6 +39,7 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
+  type XYPosition,
 } from '@xyflow/react';
 import {
   WORKFLOW_OPERATORS,
@@ -80,6 +83,68 @@ const EDGE_STYLE = { stroke: 'var(--color-line-strong)', strokeWidth: 1.5 } as c
 /** 在跑的边描青瓷（进行中档），与格子的 running 同色。 */
 const RUNNING_EDGE_STYLE = { stroke: 'var(--color-celadon)', strokeWidth: 1.5 } as const;
 
+/** 按下之后要挪动这么多像素才算"拖"；没越过就仍按 5.10-03 的点击建格走（那条通路一字未改）。 */
+const PALETTE_DRAG_THRESHOLD_PX = 4;
+
+/** 落点预览框那一只节点的 id：固定值，harness 按它断言"此刻有没有落点框"。 */
+const DROP_FRAME_NODE_ID = 'palette-drop-frame';
+
+/**
+ * 落点框的画法（10 稿⑧）：青瓷虚线一圈，**不用整块高亮**——铺满的半透明遮罩会让用户以为
+ * 整个画布都是一个投放区，而这里要说的是"松手之后这一格落在这儿"。
+ */
+const DROP_FRAME_CLASS = 'flex h-[68px] w-[210px] -translate-x-1/2 -translate-y-1/2 items-center justify-center';
+
+/**
+ * 一次"从调色板拖进画布"的读数（spec 6.5-04）。
+ *
+ * 为什么整份存进 state 而不是拆成 ref：松手那一刻要拿**最新**的落点建格，而监听器挂在 window 上、
+ * 闭包里的值必须是最新的——放进 state 又每次改动都重挂监听，这条 effect 因此按"每次移动重挂"写，
+ * 一次手势几十次重挂的成本远低于养一份会过期的第二事实（§2.5）。
+ */
+interface PaletteDragState {
+  /** 被拖走的那只算子的整份描述（建格时按它派生 id/参数/危险度） */
+  descriptor: OperatorDescriptor;
+  /** 起手时的屏幕坐标，用来算"挪了多少像素" */
+  origin: XYPosition;
+  /** 光标此刻的屏幕坐标 */
+  cursor: XYPosition;
+  /** 是否已越过拖拽阈值（没越过就什么都不做，交给 click） */
+  isDragging: boolean;
+  /** 光标是否落在画布那块矩形里（在里头才谈得上落点） */
+  isOverCanvas: boolean;
+  /** 落点在 flow 坐标系里的位置；不在画布内时为 null */
+  flowPosition: XYPosition | null;
+}
+
+/** 落点预览那一只节点要显示的东西——它不属于图，只是"松手会落在这儿"的一圈线。 */
+interface DropFrameData extends Record<string, unknown> {
+  /** 将被建出来的那一格的展示标签（来自描述表的标题键） */
+  label: string;
+}
+
+type DropFrameNode = Node<DropFrameData, 'dropFrame'>;
+
+/**
+ * 落点框：一只不可拖、不可选、不带连接点的虚线框，位置由库自己摆（所以这里没有任何坐标样式）。
+ * @param data 该节点的读数
+ * @returns 虚线框
+ */
+function DropFrameNodeCard({ data }: NodeProps<DropFrameNode>) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className={`${DROP_FRAME_CLASS} rounded-lg border-2 border-dashed border-celadon/70`}
+      data-testid="canvas-drop-frame"
+    >
+      <span className="break-all px-2 text-center text-[11px] leading-tight text-celadon">
+        {data.label}
+        <span className="mt-0.5 block text-[10px] text-slate-400">{t('workflow.operator.dropFrameHint')}</span>
+      </span>
+    </div>
+  );
+}
+
 /** 节点卡片要显示的读数——运行态取步骤镜像，编辑态取算子描述。 */
 interface OperatorData extends Record<string, unknown> {
   /** 节点 id：harness 按它定位格子，必须是稳定值而不是译文 */
@@ -97,6 +162,9 @@ interface OperatorData extends Record<string, unknown> {
 }
 
 type OperatorNode = Node<OperatorData, 'operator'>;
+
+/** 画布上会出现的两类节点：图上那一格，与拖拽期间的落点框（6.5-04）。 */
+type CanvasNode = OperatorNode | DropFrameNode;
 
 /**
  * 画布上一格格子的读数——图上的格子与运行镜像补的格子统一成这一个形状，
@@ -184,7 +252,7 @@ function OperatorNodeCard({ data }: NodeProps<OperatorNode>) {
 }
 
 /** `nodeTypes` 必须在组件外定义：每次渲染新建对象会让 react-flow 重建所有节点。 */
-const NODE_TYPES = { operator: OperatorNodeCard } as const;
+const NODE_TYPES = { operator: OperatorNodeCard, dropFrame: DropFrameNodeCard } as const;
 
 export interface WorkflowCanvasProps {
   /** 当前 run 的步骤镜像（`workflow/progress` 推来的那份，不是画布自己读的）；没有 run 时是空表 */
@@ -239,6 +307,10 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   const [loaded, setLoaded] = useState<{ planId: string; revision: number } | null>(null);
   /** 拖拽后的落点（视图层）：图上格子与镜像补的格子都按这一份覆盖初始摆放。 */
   const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
+  /** 此刻正从调色板拖出来的一格（spec 6.5-04）；null = 没有在拖。 */
+  const [paletteDrag, setPaletteDrag] = useState<PaletteDragState | null>(null);
+  /** 画布那块矩形的引用：拖拽时要按它判"光标进来了没有"，落点框也挂在它里面的 flow 坐标系里。 */
+  const canvasHolderRef = useRef<HTMLDivElement | null>(null);
   /** 图变过一次就自增一次，让下面的 effect 重新贴合视口（0 = 还没变过，不该动用户的视野）。 */
   const [fitRequestId, setFitRequestId] = useState(0);
   const bridge = window.autoCC;
@@ -326,32 +398,42 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
     return [...graphCells, ...mirrorCells];
   }, [snapshot, steps, statusById, t]);
 
-  const nodes = useMemo<OperatorNode[]>(
-    () =>
-      canvasCells.map((cell, index) => ({
-        id: cell.id,
-        type: 'operator' as const,
-        // 位置不进命令栈（5.10-06）：栈里那份没有 position 字段，初始落点由下标现算，
-        // 拖过的落点存在视图层的 `dragOffsets` 里（库里存过的落点也在这一份里）——撤销一条边不会把格子弹回原位。
-        position: dragOffsets[cell.id] ?? { x: index * NODE_GAP_X, y: 0 },
-        data: {
-          stepId: cell.id,
-          label: cell.label,
-          status: cell.status,
-          order: index + 1,
-          kind: cell.kind,
-          hasIssue: issueNodeIds.has(cell.id),
-        },
-      })),
-    [canvasCells, dragOffsets, issueNodeIds],
-  );
+  const nodes = useMemo<CanvasNode[]>(() => {
+    const cells: CanvasNode[] = canvasCells.map<OperatorNode>((cell, index) => ({
+      id: cell.id,
+      type: 'operator' as const,
+      // 位置不进命令栈（5.10-06）：栈里那份没有 position 字段，初始落点由下标现算，
+      // 拖过的落点存在视图层的 `dragOffsets` 里（库里存过的落点也在这一份里）——撤销一条边不会把格子弹回原位。
+      position: dragOffsets[cell.id] ?? { x: index * NODE_GAP_X, y: 0 },
+      data: {
+        stepId: cell.id,
+        label: cell.label,
+        status: cell.status,
+        order: index + 1,
+        kind: cell.kind,
+        hasIssue: issueNodeIds.has(cell.id),
+      },
+    }));
+    // 拖拽中且光标已在画布内，才长出落点框（10 稿⑧）：它不是图上的一格，不进命令栈、不参与校验。
+    if (paletteDrag?.isDragging && paletteDrag.flowPosition) {
+      cells.push({
+        id: DROP_FRAME_NODE_ID,
+        type: 'dropFrame',
+        position: paletteDrag.flowPosition,
+        draggable: false,
+        selectable: false,
+        data: { label: t(paletteDrag.descriptor.titleKey) },
+      });
+    }
+    return cells;
+  }, [canvasCells, dragOffsets, issueNodeIds, paletteDrag, t]);
 
   /**
    * 只接住位置变更：`nodes` 是受控的，落点回到 state 才拖得住；
    * 其余变更（select/dragging/remove）要么由 UI 自己走 `onNodeClick`，要么本片不开放删除。
    * @param changes react-flow 本轮报出的变更
    */
-  const onNodesChange = useCallback((changes: NodeChange<OperatorNode>[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     setDragOffsets((previous) => {
       const next = { ...previous };
       let moved = false;
@@ -368,15 +450,92 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   /**
    * 从算子库加一格：id 由 kind 派生保证可读，参数初值只带 schema 里声明过的默认值。
    * @param descriptor 被点中的算子描述（整份从描述表来，画布不认识任何一只算子）
+   * @param dropPosition 拖进来时的落点（flow 坐标系）；省略 = 点击建格，按下标摆
    */
-  function addOperatorNode(descriptor: OperatorDescriptor) {
+  function addOperatorNode(descriptor: OperatorDescriptor, dropPosition?: XYPosition) {
     const sameKindCount = snapshot.nodes.filter((draft) => draft.kind === descriptor.kind).length;
     const draftId = `${descriptor.kind.replaceAll('.', '-')}-draft-${String(sameKindCount + 1)}`;
     if (!editorRef.current?.addNode(draftNodeSpec(descriptor, draftId))) return;
+    // 落点写的是视图层那一份（`dragOffsets`），命令栈里仍是无 position 的七字段——位置不进指纹因此破不了。
+    if (dropPosition) setDragOffsets((previous) => ({ ...previous, [draftId]: dropPosition }));
     sync();
     setSelectedNodeId(draftId);
-    setFitRequestId((previous) => previous + 1);
+    // 拖进来的那一格就在松手的地方，重新贴合视口反而会把它挪走；只有点击建格才需要镜头跟上。
+    if (!dropPosition) setFitRequestId((previous) => previous + 1);
   }
+
+  /**
+   * 把一次屏幕坐标折算成这一手势的读数（阈值、是否进画布、flow 坐标系落点）。
+   * @param state 起手时那一份（descriptor 与 origin 从这里带）
+   * @param client 光标此刻的屏幕坐标（`clientX` / `clientY`，像素）
+   * @returns 新的拖拽读数；不在画布内时 `flowPosition` 为 null
+   */
+  function readPaletteDrag(state: PaletteDragState, client: XYPosition): PaletteDragState {
+    const rect = canvasHolderRef.current?.getBoundingClientRect();
+    const isOverCanvas =
+      rect !== undefined &&
+      client.x >= rect.left &&
+      client.x <= rect.right &&
+      client.y >= rect.top &&
+      client.y <= rect.bottom;
+    return {
+      ...state,
+      cursor: client,
+      isDragging: Math.hypot(client.x - state.origin.x, client.y - state.origin.y) > PALETTE_DRAG_THRESHOLD_PX,
+      isOverCanvas,
+      // 只有进了画布才换算落点：库在拿不到 domNode 时会原样退回屏幕坐标（`dist/esm/index.mjs:559-563`），
+      // 那种读数当落点用会把格子甩到画面外。
+      flowPosition: isOverCanvas ? flow.screenToFlowPosition(client) : null,
+    };
+  }
+
+  /**
+   * 起手：记下从哪一格、在哪按下，之后的移动与松手由下面那条 effect 挂在 window 上跟。
+   * @param descriptor 被按下的算子描述
+   * @param event 起手的鼠标按下事件（只取左键与屏幕坐标）
+   */
+  function beginPaletteDrag(descriptor: OperatorDescriptor, event: ReactMouseEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    const origin = { x: event.clientX, y: event.clientY };
+    setPaletteDrag(
+      readPaletteDrag(
+        { descriptor, origin, cursor: origin, isDragging: false, isOverCanvas: false, flowPosition: null },
+        origin,
+      ),
+    );
+  }
+
+  /**
+   * 拖拽期间的三条 window 监听（`mousemove` / `mouseup` / `keydown`）。
+   *
+   * 挂在 window 而不是挂在画布上：指针会离开那一格、也会掠过画布外的地方，只有 window 能一直跟到松手。
+   * 依赖里有 `paletteDrag`，所以每次移动都重挂一次——一次手势几十次，代价远低于让闭包读到过期的落点。
+   * 卸载时三条一起摘，运行期不留句柄（与 5.10-11 的"离开画布无残留"同一口径）。
+   */
+  useEffect(() => {
+    if (paletteDrag === null) return;
+    const onMove = (event: MouseEvent) =>
+      setPaletteDrag(readPaletteDrag(paletteDrag, { x: event.clientX, y: event.clientY }));
+    const onUp = (event: MouseEvent) => {
+      const final = readPaletteDrag(paletteDrag, { x: event.clientX, y: event.clientY });
+      setPaletteDrag(null);
+      // 松手才建（08 稿）：没越过阈值就什么都不做，让浏览器的 click 去走原来的点击建格；
+      // 落在画布外则整次取消——半途而废的手势不该凭空多出一格。
+      if (!final.isDragging || final.flowPosition === null) return;
+      addOperatorNode(final.descriptor, final.flowPosition);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPaletteDrag(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  });
 
   /**
    * 加完草稿重新贴合一次视口。
@@ -536,7 +695,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   const selectedDescriptor = selectedSpec ? operatorByKind(selectedSpec.kind) : undefined;
 
   return (
-    <div className="mt-3" data-testid="workflow-canvas">
+    <div className="mt-3" data-testid="workflow-canvas" data-palette-drag={paletteDrag?.descriptor.kind ?? ''}>
       <h3 className="text-xs font-semibold text-slate-300">{t('workflow.canvas.heading')}</h3>
       <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('workflow.canvas.hint')}</p>
       {/* 画布照的是哪一份要说出来（2.4-05 的口径：内存里那次 run 与库里那条计划是两件事，界面不替用户混着说）。 */}
@@ -554,7 +713,12 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           {graphNotice}
         </p>
       ) : null}
-      <OperatorPalette onAdd={addOperatorNode} isReadOnly={isReadOnly} />
+      <OperatorPalette
+        onAdd={addOperatorNode}
+        onDragStart={beginPaletteDrag}
+        draggingKind={paletteDrag?.isDragging ? paletteDrag.descriptor.kind : undefined}
+        isReadOnly={isReadOnly}
+      />
       {/* 命令栈与校验的读数条：图上格子数、撤销/重做是否可用、校验按钮。
           按钮的禁用态直接读 canUndo/canRedo，不让界面自己数历史（那会是第二份事实，§2.5）；
           运行时只读再叠一层（5.10-11）——改图会换指纹，续跑的老 run 就此作废，这条路不该在运行期间存在。 */}
@@ -630,8 +794,13 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           )}
         </ul>
       ) : null}
-      {/* react-flow 需要一个有高度的容器，否则视口量到 0 宽高（隐藏视图宽高为 0 会让点击落空，同一类坑） */}
-      <div className="mt-2 h-[420px] w-full overflow-hidden rounded-xl border border-line bg-ink-850/60">
+      {/* react-flow 需要一个有高度的容器，否则视口量到 0 宽高（隐藏视图宽高为 0 会让点击落空，同一类坑）。
+          这一只 div 同时是拖拽的命中区：光标进了它的矩形才算"要落在这张图上"（6.5-04）。 */}
+      <div
+        className="mt-2 h-[420px] w-full overflow-hidden rounded-xl border border-line bg-ink-850/60"
+        data-testid="canvas-holder"
+        ref={canvasHolderRef}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}

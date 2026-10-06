@@ -1,0 +1,97 @@
+6.5-04 算子从调色板拖进画布 —— 活体取证读数（第十八片，2026-10-06）
+===================================================================
+
+取证环境：dev 实例（`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`，CDP 10222 / vite 5173 /
+fixture 10233），视口 1200×772，`document.visibilityState` 全程 `visible`（真实指针事件能落页，
+见 AGENTS.md §9 的 2.1-12 补窗那条）。
+
+取证方法：全部鼠标事件走**同一条 CDP WebSocket** 的 `Input.dispatchMouseEvent`，
+中间 `mouseMoved` 一律带 `buttons: 1`（不带就等于告诉浏览器左键已松开，拖拽会话当场结束）。
+脚本：`tmp/v6b/drag-probe.mjs`（六条腿）+ `tmp/v6b/drag-shot.mjs`（双主题截图）。
+读数原始输出：`tmp/v6b/rp50.out` / `tmp/v6b/rp51.out`。
+
+滚动作前提：画布 holder 在页面文档的 y=1290 处、视口只有 772 高，端点全在视口外
+（`cdp.ts` 的 `drag` 对越界端点直接抛错）。取证前把右栏 `overflow-y-auto` 容器 `scrollTop` 推到 700，
+此后调色板格子（y≈321）与画布上半部（y≈590 起）同时可见——**这是取证的步骤，不是页面缺陷**。
+
+
+一、正腿：拖 `resume.customize` 落到画布内（10 稿⑤⑧ 三态一次跑完）
+-------------------------------------------------------------------
+起点：调色板 `[data-action="palette-add"][data-kind="resume.customize"]`，中心 (383.5, 333.3)。
+落点：画布内 (522.3, 700.2)。
+
+| 时刻 | 读数 |
+| --- | --- |
+| 拖之前 | `data-palette-drag=""`、`canvas-drop-frame` 0 只、`canvas-node` 3、`canvas-draft-count`「图上 0 格」 |
+| 越过 4px 阈值、光标仍在画布外 | `data-palette-drag="resume.customize"`；原槽位计算样式 `outline-style: dashed` / `outline-color: rgb(192, 57, 31)`（= 朱砂令牌）/ `outline-width: 2px`、`opacity: 0.4`；`canvas-drop-frame` **0 只**（画布外不给落点提示） |
+| 光标进画布 | `canvas-drop-frame` 1 只，`border: dashed oklab(0.554606 -0.0677615 -0.00587878 / 0.7)`（= 青瓷令牌），文案「定制简历（占位）松手放在这里 · Esc 取消」；原槽位残影读数不变；`canvas-node` 仍 3、仍「图上 0 格」（**松手才建**） |
+| 松手之后 | `data-palette-drag=""`、`canvas-drop-frame` 0 只、`canvas-node` **4**、`canvas-draft-count`「图上 **1** 格」 |
+
+落点等值核对（"拖进来的落在松手那个位置"）：新格子的 `getBoundingClientRect()` 是
+`cx=567.55, cy=722.12, w=91.11, h=44.25`（画布当前缩放 <1，故宽度小于未缩放的格子本体）。
+`cx - w/2 = 522.00` 对松手 x=522.32、`cy - h/2 = 700.00` 对松手 y=700.23——
+**格子的左上角落在松手点上，误差 0.3px**，即 `screenToFlowPosition` 的读数没有被
+`domNode` 缺失时的「原样返回 client 坐标」兜底污染（该兜底见 plan §3.7）。
+
+「拖完撤销一次，格子数回到拖之前」（plan §3.7 明写不能破的那条复核口）：
+点 `[data-action="canvas-undo"]` 之后 `canvas-node` 回到 3、`canvas-draft-count` 回到「图上 0 格」。
+位置只活在视图层 `dragOffsets`，命令栈收到的是 `draftNodeSpec` 的七个字段（没有 `position`），
+因此这一腿验的是"拖入这一格本身可撤销"，与 5.10-03 的点击建格走同一栈。
+
+
+二、Esc 取消腿（08 稿「中途 Esc 取消」）
+---------------------------------------
+拖 `jd.capture`：越过阈值且光标进画布后读数为 `data-palette-drag="jd.capture"`、
+`canvas-drop-frame` 1 只、原槽位 `dashed rgb(192,57,31)` + `opacity 0.4`、`canvas-node` 3、「图上 0 格」。
+派发 `Input.dispatchKeyEvent` 的 Escape（keyDown + keyUp）之后：`data-palette-drag=""`、
+`canvas-drop-frame` 0 只、原槽位残影与描边同时消失（`outline: null` / `opacity: null`）、
+`canvas-node` 仍 3、仍「图上 0 格」。**Esc 之后再松手也不建格**（`afterRelease` 与 `afterEsc` 逐字相同）。
+
+
+三、松手在画布外 → 取消
+----------------------
+拖 `demo.flaky` 到 holder 左外 40px 处（画布外）：中途读数 `data-palette-drag="demo.flaky"`、
+原槽位朱砂虚线 + 40% 残影都在，`canvas-drop-frame` **0 只**（画布外不画落点框）。
+在画布外松手之后：`data-palette-drag=""`、`canvas-node` 仍 3、「图上 0 格」——没有凭空多一格。
+
+
+四、回归腿：点击仍然直接加一格（5.10-03 的旧通路没被拖拽抢掉）
+-------------------------------------------------------------
+对 `[data-kind="greeting.send"]` 走一次「不动的按下-松开」（与 `harness click` 同形：
+mouseMoved / mousePressed / mouseReleased 同点）：`canvas-node` 3 → 4、`canvas-draft-count`
+「图上 0 格」→「图上 1 格」，且全程 `data-palette-drag` 保持空串（未越阈值不算拖）。
+这条是 08 稿「点一格 = 加一格」与本片共存的直接证据：`click` 只在按下与松开同处一元素时派发，
+所以拖拽与点击两条腿共用一只 `DeskButton` 而不互相抢。
+
+
+五、双主题（Q5：深浅双主题一起做）
+---------------------------------
+同一手势（拖 `demo.branch` 到画布内 (488.3, 712)）在两份主题下各跑一遍，
+截图 `6.5-04-drag-light.png` / `6.5-04-drag-dark.png`（2400×1544，md5 与全目录其余图片逐张不同）：
+
+| 项 | 浅色（毡案） | 深色（墨案） |
+| --- | --- | --- |
+| 落点框描边 | `dashed oklab(0.554606 -0.0677615 -0.00587878 / 0.7)` | `dashed oklab(0.7354 -0.0589094 -0.00346506 / 0.7)` |
+| 原槽位描边 | `dashed rgb(192, 57, 31)` | `dashed rgb(226, 84, 58)` |
+| 原槽位透明度 | `0.4` | `0.4` |
+
+两份读数**只差在令牌值上**：渲染层没有一处 `theme ===` 分支，色由 `outline-seal` /
+`border-celadon/70` 两个语义类各自现读当前主题的令牌（06 稿 §5 的归属：朱砂=不可逆那一档的
+"正在被拿走"，青瓷=系统指向"可以放这里"）。截图里两张都能看到：原槽位的朱砂虚线残影 +
+画布内的青瓷虚线框（框内两行：算子名 + 「松手放在这里 · Esc 取消」）。
+
+取证结束已把主题切回浅色、把取证期间产生的草稿逐条撤销到「图上 0 格」
+（`canvas-undo` 回到 `aria-disabled="true"`），未点「保存到库」，用户的开发档草稿没被改写。
+
+
+六、本片取到但没取到的
+----------------------
+取到：10 稿⑤ 的三态（阈值后残影 / 画布外无落点框 / 画布内青瓷框）、⑧ 的"落在松手处"、
+08 稿的"松手才建"与 Esc 取消、点击通路回归、撤销复核、双主题计算色。
+未取到（照实记，不推测）：
+① **运行中整体禁用时拖不动**——`isReadOnly` 分支在 `onMouseDown` 第一行 `return`，
+   只有静态读数（`OperatorPalette.tsx` 的 `if (isReadOnly) return;` + `dead('READ_ONLY')`），
+   活体那一腿要一条真在跑的 run，与 6.5-05 的 `READ_ONLY` 同一受阻原因；
+② **10 稿⑧ 的"自动接上被穿过的那条边（插队）"没做**，plan §3.7 已写否决理由
+   （那要改命令栈的建格语义，不是样式换装）；
+③ **↑↓ 键在画布上选格**不属于本片（08 稿那条挂在 JD 列表上，见 6.4-04 的仍欠清单）。
