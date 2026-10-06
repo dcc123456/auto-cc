@@ -375,15 +375,6 @@ const fieldClass = (isInvalid: boolean): string =>
   `min-w-0 rounded-md border ${isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong'} ` +
   'bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60';
 
-/**
- * 面板表单控件（输入框 / 下拉 / 日期）的常态 class：青瓷描边只在获得焦点时亮起，
- * 它是「这一格现在归你敲」的唯一信号。各面板只在它前面加自己的宽度档（`flex-1`、`w-24`）。
- *
- * 还没迁进原件的那几处（`MetricsPanel`，见 plan §3.9 的豁免）用的就是这一串，
- * 原件与它同源，描边/底色/字号不在两处各写一遍（§2.2）。
- */
-export const FIELD_CLASS = fieldClass(false);
-
 /** 行内编辑的输入框 class：青瓷描边是「正在编辑」的唯一信号，不加阴影不放大。 */
 const EDIT_INPUT =
   'w-full rounded-chip border border-celadon/60 bg-ink-900 px-2 py-1 text-xs text-slate-50 ' +

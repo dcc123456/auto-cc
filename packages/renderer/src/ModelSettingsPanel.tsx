@@ -2,7 +2,7 @@ import { Eraser, PlugZap, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { LlmCheckView, LlmLegName, LlmProviderView, LlmSettingsView } from '@auto-cc/shared';
-import { Banner, DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect, deskReason } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -111,66 +111,56 @@ export function ModelSettingsPanel() {
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('settings.model.legLabel')}</span>
-          <select
-            data-action="settings-model-leg"
-            value={leg}
-            onChange={(event) => switchLeg(event.target.value as LlmLegName)}
-            className={FIELD_CLASS}
-          >
+          <DeskSelect action="settings-model-leg" value={leg} onValueChange={(value) => switchLeg(value as LlmLegName)}>
             <option value="chat">{t('settings.model.leg.chat')}</option>
             <option value="embed">{t('settings.model.leg.embed')}</option>
-          </select>
+          </DeskSelect>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('settings.model.providerLabel')}</span>
-          <select
-            data-action="settings-model-provider"
-            value={providerId}
-            onChange={(event) => pickProvider(event.target.value)}
-            className={FIELD_CLASS}
-          >
+          <DeskSelect action="settings-model-provider" value={providerId} onValueChange={pickProvider}>
             {!providers.some((item) => item.id === providerId) && <option value={providerId}>{providerId}</option>}
             {providers.map((item) => (
               <option key={item.id} value={item.id}>
                 {t(providerKey(item.id))}
               </option>
             ))}
-          </select>
+          </DeskSelect>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('settings.model.baseUrlLabel')}</span>
-          <input
-            data-action="settings-model-base-url"
+          <DeskField
+            action="settings-model-base-url"
             value={baseUrl}
-            onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
+            onValueChange={(value) => setDraft({ ...draft, baseUrl: value })}
             placeholder={t('settings.model.baseUrlPlaceholder')}
-            className={`min-w-0 ${FIELD_CLASS}`}
+            className="min-w-0"
           />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('settings.model.modelLabel')}</span>
-          <input
-            data-action="settings-model-name"
+          <DeskField
+            action="settings-model-name"
             value={model}
-            onChange={(event) => setDraft({ ...draft, model: event.target.value })}
+            onValueChange={(value) => setDraft({ ...draft, model: value })}
             placeholder={t('settings.model.modelPlaceholder')}
-            className={`min-w-0 ${FIELD_CLASS}`}
+            className="min-w-0"
           />
         </label>
         <label className="flex flex-col gap-1 sm:col-span-2">
           <span className="text-[10px] text-slate-400">{t('settings.model.keyLabel')}</span>
           {/* type=password + 永不回填：`read()` 只回末 4 位，界面拿不到明文，也就无从显示明文。 */}
-          <input
-            data-action="settings-model-key"
+          <DeskField
+            action="settings-model-key"
             type="password"
             value={keyDraft}
-            onChange={(event) => setKeyDraft(event.target.value)}
+            onValueChange={setKeyDraft}
             placeholder={
               legView?.key.present
                 ? t('settings.model.keyPlaceholderStored', { tail: legView.key.tail })
                 : t('settings.model.keyPlaceholderEmpty')
             }
-            className={`min-w-0 ${FIELD_CLASS}`}
+            className="min-w-0"
           />
           <span className="text-[10px] text-slate-400" data-testid="settings-model-key-source">
             {keySourceLine(legView, t)}
