@@ -6,6 +6,7 @@ import {
   GitCompareArrows,
   History,
   ListChecks,
+  Pencil,
   RefreshCw,
   SlidersHorizontal,
   Upload,
@@ -22,6 +23,7 @@ import type {
   SnapshotDiffView,
   SnapshotMetaView,
 } from '@auto-cc/shared';
+import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
 import { useBridgeAction } from './useBridgeAction';
 
@@ -81,6 +83,8 @@ export function ResumePanel() {
   const [pending, setPending] = useState<PendingImportRowView[]>([]);
   /** 打开的编辑器文档 id（裁定⑩：编辑器是另起一只组件，由这一颗按钮进入，不占首页位）。 */
   const [editorDocId, setEditorDocId] = useState<string>();
+  /** 编辑轨那块视图的开合（裁定⑩ 同一取向：另起组件、按钮进入，不占首页位；它编辑的是用户手里的文件，与种子文档无关）。 */
+  const [pdfEditOpen, setPdfEditOpen] = useState(false);
   const bridge = window.autoCC;
 
   /**
@@ -381,6 +385,16 @@ export function ResumePanel() {
           <SlidersHorizontal size={12} />
           {t('resume.editor.enter')}
         </button>
+        <button
+          type="button"
+          data-action="open-pdf-edit"
+          disabled={!!busy || pdfEditOpen}
+          onClick={() => setPdfEditOpen(true)}
+          className="flex items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+        >
+          <Pencil size={12} />
+          {t('pdfEdit.enter')}
+        </button>
       </div>
 
       {notice && (
@@ -401,6 +415,10 @@ export function ResumePanel() {
       {/* 编辑器一旦打开就摆在面板预览之上：3.6 的判据要看的是"改完立刻在编辑器自己的预览里见效"，
           与本面板那份 `resume.export.preview`（已存的那份）分开摆，免得两张图分不清谁是谁。 */}
       {editorDocId && <ResumeEditor docId={editorDocId} onClose={() => setEditorDocId(undefined)} />}
+
+      {/* 编辑轨那块视图（plan §7.5 的第三视图，裁定⑩ 同一形态：另起组件、由一颗按钮进入、不占首页位）。
+          与排版编辑器同一层摆在生成轨预览之上：它编辑的是用户手里的文件，与本面板的种子文档/预览互不相干。 */}
+      {pdfEditOpen && <PdfEditPanel onClose={() => setPdfEditOpen(false)} />}
 
       {previewHtml ? (
         <iframe

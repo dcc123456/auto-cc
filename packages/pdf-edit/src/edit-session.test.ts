@@ -9,6 +9,8 @@
  * - 页序同理走 `planPageOrder`；
  * - 夹具用二进制精确的比例（0.25 / 0.5 / 0.125），免得断言在测浮点而不是测语义。
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { createPdfEditSession, type PdfEditDraft, type PdfEditSession } from './edit-session.js';
@@ -164,5 +166,40 @@ describe('读数不可写穿', () => {
     expect(session.draft()).toEqual({ overlays: [box('a')], pageOrder: [1, 2, 3] });
     // 嵌套那份也要另拷：只拷数组而把元素按引用搬过去，界面改一个框就写穿了历史。
     expect(snapshot.overlays[0]).not.toBe(session.draft().overlays[0]);
+  });
+});
+
+/**
+ * 窄出口的纯度（3.5-e 面板开始真的取这条出口，所以 §7.14 那条注释约束从此有了强制手段）。
+ *
+ * 为什么要钉：渲染层取的是 `@auto-cc/plugin-pdf-edit/edit-session` 这一条**子路径**，
+ * 一旦被引进来一条 Node 内置模块或 `pdf-lib`，Vite 就会把整支 PDF 引擎打前端 bundle——
+ * 表现不是报错而是首屏体积暴涨，等发现时已经进了主干。这条用例是唯一能在提交前拦住它的东西。
+ * @param text 源码文本
+ * @returns 运行期真的会执行的 import 的模块说明符（`import type` 那些擦除后不存在，不计）
+ */
+function runtimeSpecifiers(text: string): string[] {
+  return [...text.matchAll(/import\s+(?!type\s)[^;]*?\sfrom\s*'([^']+)'/g)].map((match) => match[1] as string);
+}
+
+describe('窄出口的纯度：渲染层取 `./edit-session` 不该把 PDF 引擎与 Node 能力一起拖进 bundle', () => {
+  /** 闭包内三个模块的运行期说明符写法（`edit-session.ts` 自己 + 它真的算进来的两只纯模块）。 */
+  const closureFiles = ['edit-session.ts', 'page-ops.ts', 'overlay-writer.ts'];
+  /**
+   * 允许的运行期依赖：只有那条纯历史栈的窄子路径，加闭包内部的相对模块。
+   * 写成正向白名单而不是禁止清单——新增一条越界依赖（`pdf-lib`、`node:fs`、带 `readBoundedFile` 的服务文件）
+   * 会让这一句直接红，而禁止清单总会漏掉没想到的新名字。
+   */
+  const allowedRuntime = [
+    '@auto-cc/core/snapshot-stack',
+    ...closureFiles.map((name) => `./${name.replace('.ts', '.js')}`),
+  ];
+
+  it('闭包里每一条运行期 import 都在白名单上（`import type` 擦除后不存在，不计）', () => {
+    for (const name of closureFiles) {
+      const text = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
+      const offenders = runtimeSpecifiers(text).filter((specifier) => !allowedRuntime.includes(specifier));
+      expect(offenders, `${name} 越界的运行期依赖`).toEqual([]);
+    }
   });
 });

@@ -418,6 +418,9 @@ importers:
 
   packages/renderer:
     dependencies:
+      '@auto-cc/plugin-pdf-edit':
+        specifier: workspace:*
+        version: link:../pdf-edit
       '@auto-cc/shared':
         specifier: workspace:*
         version: link:../shared

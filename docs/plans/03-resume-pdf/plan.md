@@ -564,6 +564,58 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 `createPdfEditSession` 在渲染层拿 draft、`pdf.export.saveAs` 落盘），下一片就是把它拼起来，连 `@auto-cc/plugin-pdf-edit` 的窄出口
 `"./edit-session"`（§7.14 顺延①）一并给；③ `3.5-06` 的中文腿随字体资产那条裁定不动。
 
+### 7.16 3.5-e 面板腿落地记录（2026-10-06，§7.5 的第三视图进主干；状态位照旧不动）
+
+**落点**：`packages/renderer/src/PdfEditPanel.tsx`（新组件）+ `ResumePanel.tsx` 的入口按钮与挂载两处 +
+两份语言包的 `pdfEdit.*` 命名空间（42 键 × 2）。接线两处：`packages/pdf-edit/package.json` 的窄出口
+`"./edit-session"`（§7.14 顺延① 那条，至此才登记，因为直到本轮它才有真的调用点）与 `packages/renderer/package.json`
+对 `@auto-cc/plugin-pdf-edit` 的 workspace 依赖。链路与 §7.5 一致：键绝对路径 → `pdf.io.open` → 页面列表 →
+`pdf.layout.textItems` 的线框 → 拖框进会话 → 页序/撤销重做 → `pdf.export.saveAs`。
+
+**本片没有新增任何 IPC 白名单行**：§7.8 的表里那句"`pdf.edit.*` 的白名单行随渲染层那一片"按 §7.14 的裁定**落空了**——
+会话既然是渲染层的纯模型，就不存在 `pdf.edit.*` 这六条通道，再开一条正是 §2.5 禁止的"两个都能用"。
+`pdf-link.test.ts` 那条「`pdf.*` 精确等于三项」照旧成立，一行未动。
+
+**尺度从主进程现读，界面上不写死第二个数**：会话要 `maxOverlays / maxPages / defaultTextSizePt / minAreaRatio` 才建得起来，
+取值走**已有**的 `plugins.readConfig('pdf-export')`（内核的生效配置，schema 默认值已补在里面），
+没有为此新增一只 `pdf.export.limits`——§7.14 那句"界面从配置读来传进来"至此落实。
+**一条已知偏差**：热改 `pdf-export` 配置会重建注入它的下游服务（§9 的 2.5 那条），而界面里的会话不会跟着换尺度；
+本轮的处理是"尺度真的变了才重建会话"（重建会丢撤销历史，所以不做每次动作都重建）。判据的权威始终在另存那一侧，
+界面放行而另存被拒时，主进程那句中文原样摆在界面上，界面不自己解释。
+
+**与 §7.5 的一处偏离（改的是"用什么画"，不是"画什么"）**：§7.5 写的是"线框与覆盖框全是绝对定位 + utility 类"，落码换成了 `<canvas>`。
+那条路在本仓走不通：线框位置是**那份文件算出来的数据**（任意小数），而 Tailwind 只认源码里逐字出现的静态类，
+§5.1 又禁内联 `style`（`RENDERER_SYNTAX` 第一条就是机检），既拼不出类、也不许写 style。
+canvas 的宽高取 `width`/`height` **属性**（不是样式），页面比例按那份文件的 pt 等比换算，换算比例 `CANVAS_SCALE` 只影响清晰度、不参与任何判定。
+副作用如实记在这里，别到验收时才发觉：**线框层不再是 DOM 节点**，harness 对它能取的证据只有截图（§7.1 两种都收，够判 `3.5-01` 的 V），
+而覆盖区列表、页序行、提示行、回执仍是 DOM，`data-testid`（`pdf-edit-*`）与 `data-action`（同样加 `pdf-edit-` 前缀，
+避免与 `ResumeEditor` 的 `undo`/`redo` 同名——§9 的 5.4-b ⑦ 那条命中隐藏同名元素的坑）一应俱全。
+
+**§7.6 的反伪装口径落成常驻文案**：`pdfEdit.coverHint`（"覆盖是白底加新字：原文字仍在文件里，只是被盖住了"）
+只要打开过文件就一直挂在界面上。文案里不出现涂黑/删除原文那类字样，删区的按钮写的是"撤掉这一区"。
+
+**`moveOverlay` 这一片故意没接**：会话六个动作里只有它没有界面调用点——§7.5 列的图标是加框/删框/上移下移/撤销重做/导出，
+"拖拽改位置"不在其中。按 §2.4 不为接而接；这条腿等 `3.5-03` 那条截图腿的真人在场验收里长出来再说。
+
+**纯度从此有机检**：`edit-session.test.ts` 最后一节扫 `edit-session.ts` / `page-ops.ts` / `overlay-writer.ts` 三个文件的
+**运行期** import（`import type` 擦除后不算），走正向白名单：只许 `@auto-cc/core/snapshot-stack` 加闭包内相对模块。
+这一条在本轮写的时候就抓到我自己把 `./page-ops.js` 漏在白名单外而先红一次——它确实拦得住东西。
+比这条更硬的读数在构建产物里（下面那段）。
+
+**这轮的闸门读数**：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 四道 EXIT=0
+（`pdf-edit` 99 → **100** 例，就是那条纯度用例；`main` 79 例未动、`resume-doc` 136、`workflow` 214、`core` 52）；
+`pnpm app:build` EXIT=0，`build/app/main.cjs` 仍是 4,028,770 字节（主进程一侧一字未增），
+渲染层产物 `build/app/renderer/assets/index-*.js` 939,925 字节，其中 `pdf-lib` / `PDFDocument` / `pdfjs` / `readBoundedFile`
+各搜 **0 次命中**、`pdf-edit-panel` 有命中——这就是 §7.14 那条"零 Node 依赖"约束真正要的读数：
+窄出口确实把引擎留在了主进程。`LICENSES.md` 无需重跑（包集合没添新条目，`pdf-edit` 对 `pdf-lib`/`pdfjs-dist` 的声明早已在册）。
+
+**状态机读数**：一个 `[x]` 都没新增、一个 `[!]` 都没动（P3 未做仍 **4 条**、全局 `[ ]` 仍 **6 条**，`447 / 32 / 6`）。
+`3.5-01` / `3.5-03` / `3.5-07` 三行的界面落点至此全部就位，欠的只有"真实窗口 + 你在场"那一段（§7.9 第 3 条）。
+
+**顺延（别在下一轮被当成"顺手补齐"）**：① 三条截图腿要你在场，一次跑完；② `moveOverlay` 的界面调用点；
+③ 拖框精度与"画布上点不动"这类只有活体才暴露的坑（§9 的 5.10-a ⑩ 一族）——第一次在场跑就要按 ⑩ 那条写法核，
+不要相信 `pointerdown` 的返回值；④ `3.5-06` 的中文腿随字体资产那条裁定不动。
+
 ---
 
 ## 8. 排版编辑器（3.6 的九条）的实现面计划（2026-10-05，先 plan 再落码，`AGENTS.md` §0）

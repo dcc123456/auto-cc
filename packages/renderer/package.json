@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@auto-cc/plugin-pdf-edit": "workspace:*",
     "@auto-cc/shared": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "i18next": "^25.0.0",

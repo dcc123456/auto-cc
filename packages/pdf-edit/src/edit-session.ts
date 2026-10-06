@@ -11,7 +11,8 @@
  * 同一件事开第二条通道就是 §2.5 禁止的"两个都能用"。因此本文件**一条 Node 能力都不许 import**：
  * 没有 `node:fs`、没有 `pdf-lib`、连服务层那些带 `readBoundedFile` 的文件都不碰，
  * 否则渲染层将来取它就要把整支 PDF 引擎打进 Vite 的 bundle（`@auto-cc/core/snapshot-stack` 那条窄出口
- * 就是为这一步加的；本包自己的窄出口 `./edit-session` 等面板落地再登记，与 §7.12 顺延④ 同一口径）。
+ * 就是为这一步加的；本包自己的窄出口 `./edit-session` 已随 3.5-e 面板登记，
+ * 取它的是 `packages/renderer/src/PdfEditPanel.tsx`——本文件因此**必须**一直保持零 Node 依赖）。
  *
  * 历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`（3.5-08 原文就写着"不引入第二套历史栈"）。
  */
