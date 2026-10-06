@@ -662,14 +662,33 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 **闸门读数（断言轮）**：`pnpm format:check` / `pnpm typecheck` / `pnpm lint` / `pnpm test` 四道 EXIT=0，
 `pdf-edit` 100 → **102 例**、`main` 79 例未动，`lint` 链里的许可证记账仍是 87 行。
 
-**仍欠的半边（不在 `3.5-06` 的 C 判据里，别把它当这一行的尾巴挂着）**：
-"随包资产目录读数"没核。顺带记下这一轮看到的一条**待查线索**（不是本轮要修的）：
-`electron-builder.yml` 的 `extraResources` 里**没有 fonts 条目**，而 `fontBaseUrl()` 的打包态指向
-`process.resourcesPath/fonts`——生成轨（3.3 的 3.3-05/06/07）与编辑轨在这一条上同生共死，
-要核就一起核，**不要只给编辑轨单开一条通道**（§2.5）。
+**同一条线索的后续（同日已核掉，落点与读数见 §7.18）**：`extraResources` 里确实没有 fonts 条目，
+所以缺的不是"读数"而是**装机产物里根本没有那批字体**。补法一行、两条轨一起补，不为编辑轨单开通道。
 
-**顺延**：① `extraResources` 的字体条目——要的是装机产物里的目录读数，属于打包态核对，与 3.3 一起排；
-② 界面上的中文目视随 `3.5-03` 那三条截图腿一起在场跑。
+**顺延**：界面上的中文目视随 `3.5-03` 那三条截图腿一起在场跑；装机版里真跑一次导出取字形读数是同一批事项。
+
+### 7.18 随包字体进装机产物（§7.17 那条待查线索的核对与修法，2026-10-06）
+
+**读数（先拿事实再动手）**：`electron-builder.yml` 的 `directories.app` 是 `build/app`，`files: '**/*'` 只覆盖那份 staging，
+所以仓库的 `resources/fonts` 不会自己进包。按 10-05 那次的装机产物核对：`dist/mac-arm64/auto-cc.app/Contents/Resources/`
+里只有 `cordis.yml`、`icon.png`、`LICENSES.md`、`THIRD-PARTY-NOTICES.txt` 与 Electron 的两份许可，**没有 `fonts` 目录**；
+`npx asar list …/app.asar | grep -i font` 只命中 `node_modules/pdfjs-dist/standard_fonts`。
+而 `fontBaseUrl()`（`packages/shell/src/print-executor.ts`）打包态读的是 `join(process.resourcesPath, 'fonts')`——
+于是装机版打印会退回系统字体（与 `3.3-05` 那句「无系统字体依赖」相悖），编辑轨的中文叠加则以 `font-unavailable` 失败。
+`3.3-05` 的 `[x]` 当初是在**开发态**取的（`file://` base 指向仓库目录），所以这条不是判据写错，是打包态那一半没核过。
+
+**修法（一条 `extraResources`，两条轨共用）**：`electron-builder.yml` 追加
+`- from: resources/fonts` / `to: fonts`。整目录带上、连同 `OFL.txt`（§8.7：随副本分发许可全文），
+不为编辑轨另起第二份字体路径或第二条通道（§2.5）——生成轨与编辑轨要的就是同一个目录读数。
+
+**验证**：`pnpm dist` EXIT=0（`packaging platform=darwin arch=arm64 electron=44.4.5`，签名按既有口径跳过），
+产物侧 `Contents/Resources/fonts/` 现有 **5 个文件**：`OFL.txt` 4,314、`noto-sans-sc-chinese-simplified-400-normal.woff2`
+1,142,552、`-700-` 1,172,244、`noto-sans-sc-latin-400-normal.woff2` 13,304、`-700-` 13,416——
+逐份字节数与仓库那份完全相同（不是转换后的产物）。`pnpm lint` EXIT=0，其中 `check-licenses.ts` 的产物侧核对照旧三端齐备。
+
+**边界（本轮不声称的部分）**：只核到**产物目录**这一层。装机版里真点一次导出、取内嵌字形读数属于 §7.4 的 V 类，
+要你在场，与 `3.5-01` / `3.5-03` / `3.5-07` 三条截图腿排同一批；`dist:win` / `dist:linux` 的对应目录也未重跑，
+它们走的是同一句 `extraResources`，但按 §9 的口径"未实测就不写"。
 
 ---
 

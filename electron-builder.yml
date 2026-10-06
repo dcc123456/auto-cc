@@ -45,6 +45,12 @@ extraResources:
     to: THIRD-PARTY-NOTICES.txt
   - from: LICENSES.md
     to: LICENSES.md
+  # 随包字体（spec 3.3-05 / 3.5-06）：`resume.print` 的 `fontBaseUrl()` 打包态读
+  # `process.resourcesPath/fonts`，而 `directories.app` 是 `build/app`（`files: '**/*'` 只覆盖那份 staging），
+  # 所以仓库里的 `resources/fonts` 不会自己进包——不补这一条，装机版打印会退回系统字体、
+  # 编辑轨的中文叠加则以 `font-unavailable` 失败。整目录带上，连同 OFL 许可全文（§8.7）。
+  - from: resources/fonts
+    to: fonts
 
 win:
   icon: resources/icon.png
