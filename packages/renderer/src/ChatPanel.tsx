@@ -30,6 +30,7 @@ import { DeskButton } from './ui/controls';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
+import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
 import { useWorkflowRun } from './useWorkflowRun';
@@ -127,7 +128,11 @@ export function ChatPanel() {
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
-    if (reply?.ok) setSnapshot(reply.value);
+    if (reply?.ok) {
+      setSnapshot(reply.value);
+      // 档位是会话上的一项读数，本面板重读时顺手报给状态条：状态条不另开一条调用（spec 6.3-05）。
+      reportDeskTier(reply.value.session.autonomy);
+    }
   }, [bridge]);
 
   /** 读注册表声明（卡片上的副作用分级由主进程给，界面不自己标）。 */

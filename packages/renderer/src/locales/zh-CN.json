@@ -19,8 +19,17 @@
       "toDark": "墨案（深色）"
     },
     "statusbar": {
+      "run": "运行",
+      "auth": "登录态",
+      "quota": "额度",
+      "tier": "档位",
       "idle": "无运行",
-      "pointer": "登录态与额度读数在「信任」"
+      "authValue": "已登录 {{active}} / 共 {{total}}",
+      "authNone": "未配置平台",
+      "authExpired": "{{platform}} 刚失效",
+      "quotaValue": "{{action}} 剩 {{count}}",
+      "quotaUnlimited": "本地不限",
+      "quotaDenied": "{{action}} 已用完"
     },
     "desk": {
       "jobs": {

@@ -35,6 +35,7 @@ import { UsagePanel } from './UsagePanel';
 import { WorkflowLabPanel } from './WorkflowLabPanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
+import { tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton } from './ui/controls';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
@@ -71,6 +72,36 @@ const DESK_ENTRIES: DeskEntry[] = [
  */
 const deskKeys = (view: TopView) => ({ title: `desk.${view}.title`, hint: `desk.${view}.hint` });
 
+/** 状态条一格的档位：点色按 plan §5 的归属语言走（灰那一档含「还没读到」与「建议档」两种安静态）。 */
+type DeskSlotState = 'live' | 'ok' | 'warn' | 'ask' | 'none';
+
+/** 一格状态点：进行中=青瓷、已核=青玉、被拦下=朱砂、等人表态=琥珀、安静/未读=灰。 */
+const STATUS_DOT_CLASS: Record<DeskSlotState, string> = {
+  live: 'bg-celadon',
+  ok: 'bg-jade',
+  warn: 'bg-seal',
+  ask: 'bg-amber',
+  none: 'bg-slate-600',
+};
+
+/**
+ * 底部状态条的一格（06 稿 `.foot` 的画法：`标签 读数` + 一颗归属色点）。
+ * @param item 这一格是哪一项读数（harness 按它断言，不用译文）
+ * @param label 项名（已翻译）
+ * @param value 读数文本；还没读到时是「尚未读取」而不是 0
+ * @param state 归属档位，决定点色与 `data-state`
+ * @returns 一格 span
+ */
+function statusSlot(item: string, label: string, value: string, state: DeskSlotState) {
+  return (
+    <span className="flex items-center gap-1.5" data-testid="statusbar-item" data-item={item} data-state={state}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[state]}`} aria-hidden="true" />
+      <span className="text-slate-400">{label}</span>
+      <span>{value}</span>
+    </span>
+  );
+}
+
 /** 首页第一入口：1.11 起是对话面板，四张工作台紧随其后，诊断退到最后一档。 */
 export function App() {
   const { t, i18n } = useTranslation();
@@ -78,8 +109,32 @@ export function App() {
   // 5.9-06：首屏隐私声明。首启动由 localStorage 判定，之后靠标题栏那颗按钮重开，两处共用同一份状态。
   const privacy = usePrivacyNotice();
   const [theme, toggleTheme] = useDeskTheme();
-  // 底部状态条只报"有没有在跑、跑到哪一步"，读数来自既有订阅，不新开一条轮询（spec 6.3-05）。
+  // 「进行中运行」这一格由既有订阅推来（跑到哪一步、说什么），状态条不新开一条轮询（spec 6.3-05）。
   const { live } = useWorkflowRun();
+  // 其余三项各自由拥有它的面板报进汇流（`deskStatus.ts`）：状态条只读这一份，不自己去问第二遍（§2.5）。
+  const desk = useDeskStatus();
+  const activePlatformCount = desk.platforms?.filter((platform) => platform.auth === 'active').length ?? 0;
+  // 掉线优先于计数：这一格先说出的必须是「哪一只刚掉线」，计数等下一次快照自己补齐（朱砂那一档）。
+  const authValue = desk.expiredPlatform
+    ? t('statusbar.authExpired', { platform: desk.expiredPlatform })
+    : !desk.platforms
+      ? t('status.none')
+      : desk.platforms.length === 0
+        ? t('statusbar.authNone')
+        : t('statusbar.authValue', { active: activePlatformCount, total: desk.platforms.length });
+  const authState: DeskSlotState = desk.expiredPlatform ? 'warn' : activePlatformCount > 0 ? 'ok' : 'none';
+  const quota = tightestQuota(desk.quota);
+  const quotaValue = !quota
+    ? t('status.none')
+    : quota.isDenied
+      ? t('statusbar.quotaDenied', { action: quota.action })
+      : quota.remaining === null
+        ? t('statusbar.quotaUnlimited')
+        : t('statusbar.quotaValue', { action: quota.action, count: quota.remaining });
+  const quotaState: DeskSlotState = !quota ? 'none' : quota.isDenied ? 'warn' : 'ok';
+  const tierValue = desk.tier ? t(`agent.autonomy.${desk.tier}`) : t('status.none');
+  // 档位的点色按「谁替谁做主」：全自动=外发不再逐步问人（朱砂），半自动=每一步等表态（琥珀），建议=只出主意（灰）。
+  const tierState: DeskSlotState = desk.tier === 'auto' ? 'warn' : desk.tier === 'semi' ? 'ask' : 'none';
 
   /**
    * 左轨按钮的样式，按层级分两档。
@@ -195,14 +250,18 @@ export function App() {
         </aside>
       </div>
 
-      {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。 */}
-      <footer className="flex items-center gap-3 border-t border-line bg-ink-900 px-4 py-1.5 text-[11px] text-slate-400">
-        <span className="flex items-center gap-1.5">
-          <span className={`h-1.5 w-1.5 rounded-full ${live ? 'bg-celadon' : 'bg-slate-600'}`} aria-hidden="true" />
-          {live?.message ?? t('statusbar.idle')}
-        </span>
-        {live?.stepId ? <span className="font-mono text-slate-500">{live.stepId}</span> : null}
-        <span className="ml-auto text-slate-600">{t('statusbar.pointer')}</span>
+      {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。
+          四项读数全部来自既有 service 的那一次读取或那一条推送（spec 6.3-05）：运行由 `workflow/progress` 推来，
+          其余三项由 `SessionPanel` / `UsagePanel` / `ChatPanel` 各自重读后报进 `deskStatus` 汇流——这里零条定时器。 */}
+      <footer
+        data-testid="statusbar"
+        className="flex items-center gap-4 border-t border-line bg-ink-950 px-4 py-1.5 font-mono text-[10.5px] text-slate-500"
+      >
+        {statusSlot('run', t('statusbar.run'), live?.message ?? t('statusbar.idle'), live ? 'live' : 'none')}
+        {live?.stepId ? <span className="text-slate-600">{live.stepId}</span> : null}
+        {statusSlot('auth', t('statusbar.auth'), authValue, authState)}
+        {statusSlot('quota', t('statusbar.quota'), quotaValue, quotaState)}
+        {statusSlot('tier', t('statusbar.tier'), tierValue, tierState)}
       </footer>
 
       {/* 5.9-06：首屏隐私声明是盖在工作台上的覆盖层（fixed），首启动不表态就进不去；

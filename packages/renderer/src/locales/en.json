@@ -19,8 +19,17 @@
       "toDark": "Ink Desk (dark)"
     },
     "statusbar": {
+      "run": "Run",
+      "auth": "Login",
+      "quota": "Quota",
+      "tier": "Autonomy",
       "idle": "No run",
-      "pointer": "Login and quota live in Trust"
+      "authValue": "{{active}} of {{total}} signed in",
+      "authNone": "No platform",
+      "authExpired": "{{platform}} session just expired",
+      "quotaValue": "{{action}} left {{count}}",
+      "quotaUnlimited": "Unlimited locally",
+      "quotaDenied": "{{action}} exhausted"
     },
     "desk": {
       "jobs": {

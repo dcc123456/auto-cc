@@ -11,6 +11,7 @@ import type {
 } from '@auto-cc/shared';
 import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
+import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
 
 /** 失效事件最多留几条：面板是验收入口，不是历史库。 */
@@ -46,7 +47,11 @@ export function SessionPanel() {
 
   const read = useCallback(async () => {
     const [sessionsReply, shellReply] = await Promise.all([bridge?.sessions.status(), bridge?.shell.getStatus()]);
-    if (sessionsReply?.ok) setSnapshot(sessionsReply.value);
+    if (sessionsReply?.ok) {
+      setSnapshot(sessionsReply.value);
+      // 状态条那一项跟着本面板的读数走：这里报一次，界面就不必为它单开一条调用（spec 6.3-05）。
+      reportDeskPlatforms(sessionsReply.value.platforms);
+    }
     if (shellReply?.ok) {
       setShell(shellReply.value);
       setViewError(shellReply.value.kernelViewLoadError);

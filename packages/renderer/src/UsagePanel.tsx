@@ -12,6 +12,7 @@ import {
 import { AuditSection } from './AuditSection';
 import { DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
+import { reportDeskQuota } from './deskStatus';
 
 /** 这个动作能不能从面板代发（`search` 的账由 `jd.capture` 记，面板没有「发一次搜索」这种口）。 */
 const isSampleAction = (action: QuotaAction): action is OutboundSampleAction =>
@@ -54,11 +55,14 @@ export function UsagePanel() {
       // 一个动作读不到就整组丢掉：半屏额度数字比空白更容易骗人。
       if (!reply?.ok) {
         setDecisions(undefined);
+        reportDeskQuota(undefined);
         return;
       }
       decisions[action] = reply.value;
     }
     setDecisions(decisions);
+    // 状态条那一项读的就是这一份判定，本面板每次重读顺手报一次，不另开调用（spec 6.3-05）。
+    reportDeskQuota(decisions);
   }, [bridge]);
 
   useEffect(() => {
