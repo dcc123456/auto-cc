@@ -1,0 +1,119 @@
+5.10-13 的 V 半边：kill 一条自定义计划的 run → 重启 app → 下拉选中那条 → 续跑（2026-10-06 补窗）
+================================================================================================
+
+跑法与环境（先写清楚，否则读数复现不了）
+----------------------------------------
+- 没有用共享的那台 dev 实例（CDP 10222，userData `tmp/v6-userdata`）：它的 vite dev server 与另一个正在
+  改 6.x 的窗口共用，`scripts/dev.ts` 里 `electron.on('exit') → process.exit(0)`，杀掉主进程会把人家整条
+  dev 会话一起带走。所以另起一份**只属于本腿**的实例：
+    ELECTRON_RENDERER_URL=http://127.0.0.1:5173 \
+      packages/main/node_modules/.bin/electron packages/main/dist/main.cjs \
+      --remote-debugging-port=10299 --disable-features=CalculateNativeWinOcclusion \
+      --user-data-dir="$PWD/tmp/killleg-userdata"
+  （`tmp/killleg-userdata` 是 `tmp/v6-userdata` 的 rsync 副本，副本里删掉 SingletonLock/Socket/Cookie 才起得来；
+   不能直接跑第二份 `pnpm dev`——`packages/renderer/vite.config.ts` 是 `strictPort: true`，5173 被占就起不来。）
+- 靶计划是 `park-killleg3-muwbdxsu`（名字「kill 续跑腿 3」，3 只 `demo.flaky`，2 条线性边，指纹 ea6f783a）。
+  它由 `tmp/park/seed-plan3.mts` 经仓库自己的 `insertPlan` + `savePlanGraph` 写进**副本**库：这台机器的库里
+  一条自定义计划都没有，而渲染层没有「新建计划」入口（创建只能从对话沉淀，M6-02），所以先把声明面铺好再走界面。
+- 为了让 kill 落在一格「正在跑」的节点上，先用诊断页装配面板把 `workflow` 的配置改成
+  `retryBackoffMs: 5000 / retryBackoffCapMs: 30000`（那颗「配置」按钮 → textarea → 保存，界面回执「保存配置：成功」）。
+  不动配置的话 `READ_RETRY_CEILING = 2` 把非外发步压成 3 次尝试、退避 500/1000ms，整条 run 1.5s 就跑完了，
+  手速赶不上。配置只写运行期内存（§9 的 5.3-b 条），所以下面第 ③ 段重启之后退避回到默认值——这不影响判据。
+
+① kill 之前在跑的样子（真点「开始」，run 起来）
+------------------------------------------------
+- 真点：`harness click --port 10299 --url 5173 --selector '[data-testid=workflow-panel] [data-action=start]'`
+- 库里的即时快照（`tmp/park/killer.mjs` 每 80ms 读一次，读到 `flaky-2` 是 `running` 就 SIGKILL 主进程）：
+    run_id          07ed0144-6991-4aee-a880-4b85be737254
+    plan_id         park-killleg3-muwbdxsu
+    fingerprint     ea6f783a
+    status          running
+    node_index      1
+    last_error      null
+    flaky-1  done      attempts 1  started 1791269410298  finished 1791269410320
+             idempotency_key = 07ed0144-...|flaky-1|demo://flaky-1
+    flaky-2  running   attempts 1  started 1791269410321  finished null
+             idempotency_key = 07ed0144-...|flaky-2|demo://flaky-2
+             （`tmp/park/killer.mjs` 的快照列了 status/attempts/output_handle/idempotency_key/起止时间，
+              没有单独取 `side_effect` 那一列；④ 段服务侧原话「上次外发未观察到完成」就是那一行未结算的证据）
+    本地 fixture /api/fail-counter 的 hits = 2（flaky-1 一次 + flaky-2 第一次尝试）
+- kill：`process.kill(52826, 'SIGKILL')`，同一毫秒里打点；随后 `process.kill(pid, 0)` 回 ESRCH（进程确实没了，
+  不是优雅退出——没有跑 before-quit，也就没有谁会替我把那一格结算掉）。
+- 时刻：`kill3.out` 记的是 `2026-10-06T06:50:10.421Z`（本地 14:50:10），与点「开始」在同一分钟里；
+  随后 `process.kill(pid, 0)` 回 `ESRCH`（killer 的退出码 1 就是这一发探测，它反过来证明进程确实没了）。
+
+② 重启之后：库里判成 interrupted，界面上没有假装它还在跑（2.4-05 那条在 DAG + 自定义计划上重现）
+--------------------------------------------------------------------------------------------------
+- 同一条命令重启实例，等 CDP 起来后读库：
+    workflow_runs.status = **interrupted**，last_error = RUN_INTERRUPTED，node_index = 1
+    workflow_nodes：flaky-1 仍 done/attempts 1，flaky-2 仍 running/attempts 1/finished_at null
+- 渲染层读数（此刻 runner 的当前计划还是配置里那条 `boss-basic`）：
+    [data-testid=wf-lab-plan] 「当前计划 3 个节点：jd.capture → jd.list → demo.flaky」
+    runner.resumable() → run c4aa5abe（boss-basic 那条 failed 的旧 run）——**不是**本腿那条
+    runner.state() → null
+  也就是说：换了进程，界面认不出「库里那一次中断」属于谁，除非先把当前计划换成它。
+
+③ 下拉选中那条自定义计划 → 实验台认出 07ed0144（5.10-j 那颗 `runner.selectPlan` 的界面半边）
+----------------------------------------------------------------------------------------------
+- 界面操作：流程视图 → `[data-testid=workflow-plan-select]` 选中 `park-killleg3-muwbdxsu`
+  （harness 没有驱动原生下拉弹层的命令，这里是给真 `<select>` 赋 value 后派发 `change`，
+   进的仍是 `WorkflowPlans.tsx` 的 onChange → `pickPlan` → `workflow.runner.selectPlan`，没有走 IPC 后门）
+- 选中之后（`data-selected-plan` = park-killleg3-muwbdxsu，即 selectPlan 回执成功才落的那颗指针）：
+    wf-lab-plan 「当前计划 3 个节点：demo.flaky → demo.flaky → demo.flaky」
+    wf-lab-run-id 「计划 park-killleg3-muwbdxsu · run 07ed0144-... · 指纹 ea6f783a」
+    wf-lab-last-error 「RUN_INTERRUPTED」
+    runner.resumable() → { runId: 07ed0144-..., status: "interrupted" }
+    wf-lab-nodes 「1 · flaky-1 已完成 尝试 1 次；2 · flaky-2 执行中 尝试 1 次；3 · flaky-3 待执行」
+    [data-action=resume-workflow-run] 的 disabled = false
+- 截图 `5.10-13-killleg-interrupted-selected.png`（md5 cd38d25e15791a2e5a959ddcd0b26602）
+
+④ 点「从库里那次中断续跑」：没有盲重放那一格的外发，而是停在人面前（2.4-06 的幂等在 DAG 上仍然成立）
+------------------------------------------------------------------------------------------------------
+- 真点 `[data-action=resume-workflow-run]` 之后：
+    wf-lab-notice 「本次动作返回：运行中」
+    wf-lab-live   「最近播报：flaky-2 上次外发未观察到完成，拒绝自动重放」
+    runner.current().status = paused，steps = flaky-1:done / flaky-2:pending / flaky-3:pending
+    库里那一行一字未动（status 仍 interrupted、flaky-2 仍 running/attempts 1）
+  源码对应：`packages/workflow/src/index.ts:1016-1027` 的 `enterNode(...) === 'needs-human'` →
+  `stop({ reason: 'unobserved-side-effect' })`。也就是说续跑**认出了中断那一格**，但因为上一次尝试的副作用
+  没被观察到，它拒绝自己重放，把决定交回给人。
+- 流程视图里那一行的样子：`2 · flaky-2 / 等待你接管 / 待执行 / 重试`（`[data-step-id=flaky-2] [data-action=retry]`，
+  enabled、可见高度 24px）
+
+⑤ 人按下「重试」之后：从中断那一格继续，已完成的不重放
+------------------------------------------------------
+- 真点 `[data-step-id=flaky-2] [data-action=retry]`（14:57:46），4 秒后读库：
+    workflow_runs.status = **done**，node_index = 3，last_error = null，finished_at = 1791269867587
+    flaky-1  done  attempts **1**（与 kill 前逐字相同：idempotency_key 没变、started_at 1791269410298、
+             finished_at 1791269410320 都没被覆写）→ 已完成不重放
+    flaky-2  done  attempts **4**（kill 前那 1 次 + 续跑后这一执行的 3 次），started_at 1791269866048 /
+             finished_at 1791269867583 → 被停住那一格重新执行，且 attempts 是**跨进程累加**不是清零
+    flaky-3  done  attempts 1，started_at 1791269867584 → 只有在这一格之后才第一次跑
+- 本地 fixture `/api/fail-counter`：kill 时 hits=2 → 收尾 hits=6，**增量 4 = flaky-2 的 3 次 + flaky-3 的 1 次**，
+  flaky-1 一次都没有再打点 → 没有多余执行（2.4-06 的"不重放"在 DAG + 自定义计划上对得上账）。
+- 界面收尾读数：
+    面板三行 1 · flaky-1 已完成 22 毫秒 / 2 · flaky-2 **已人工接管** 4 毫秒 已完成 / 3 · flaky-3 已完成 3 毫秒
+    实验台 wf-lab-nodes 「flaky-1 尝试 1 次（重试 0）22 毫秒；flaky-2 尝试 4 次（重试 3）1535 毫秒；
+                        flaky-3 尝试 1 次（重试 0）3 毫秒」
+    runner.state() → { runId: 07ed0144-..., status: "done" }
+- 截图 `5.10-13-killleg-resumed-rows.png`（md5 ac91db272a8acff……）与 `5.10-13-killleg-lab-after-resume.png`
+  （md5 0a2114f9fc64f5e2……）。三张 md5 互不相同（§9 的 5.10-18 硬步骤：同批截图先跑一次 md5 去重）。
+
+这条腿证明了什么、没证明什么
+----------------------------
+- 证明了 spec 5.10-13 字面那条「kill 一条自定义计划的 run → 重启 app → 下拉里选中那条 → 点续跑 → 从中断那一格继续」
+  在真实界面上走得通，且 2.4-05（中断判据、不假装在跑）与 2.4-06（不重放、幂等键不动）在 DAG + 自定义计划下仍成立。
+- 顺带取到一条 5.10-k 那半边没取到的字面读数：**跨进程续跑遇到"上一次尝试的副作用没被观察到"时，
+  续跑停在人面前**（`needs-human` → 「拒绝自动重放」），由人按那一格的「重试」才继续。
+  这与 5.10-13 原文里「外发幂等仍成立」是同一件事的两面，之前只由 U 用例覆盖。
+- 没有证明的：这条图里 `effect` 是 read / local-write，**没有一只 `effect: outbound` 的节点**，
+  所以真实外发（打招呼 / 投递）的幂等仍由 2.4-06 与 2.5 / 2.6 的既有验收背着，本腿没有重跑（与 5.10-k 那句一致）。
+- 一条如实交代：`resumeRun` 那一下没有让 run 直接跑完，是「续跑 → 停在接管点 → 人按重试」三步。
+  spec 原文的「点续跑」之后还要人再表态一次，这是 §8.3「失败后禁止盲重放」的预期行为，不是缺陷。
+
+命令口径（复现用）
+------------------
+    pnpm harness <eval|click|shot> --port 10299 --url 5173 ...
+    node tmp/park/killer.mjs tmp/killleg-userdata/store.db killleg-userdata
+    node tmp/park/dump-run.cjs tmp/killleg-userdata/store.db 07ed0144-6991-4aee-a880-4b85be737254
+  脚本都是本腿的一次性产物，写在被忽略的 `tmp/park/` 里，不入库（AGENTS.md §7.5）。

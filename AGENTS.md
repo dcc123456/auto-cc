@@ -213,6 +213,19 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `%APPDATA%\auto-cc`，在本机 macOS 是 `~/Library/Application Support/auto-cc`）时，`pnpm dev` 会**静默退出 0**、CDP 端口根本不监听——不是崩溃，别按报错找。
   正确做法是给 dev 换一份 userData（`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`，
   `scripts/dev.ts` 已支持），**不要为了跑测试去杀用户正在用的 app**。
+- **实测（5.10-13 V 半边）并存第二个实例的可行配方**：`pnpm dev` 不能起第二个（vite `strictPort: true`），
+  所以直接 `spawn` electron，参数三件：`--remote-debugging-port=<自有端口>`、`--user-data-dir=<从开发实例 rsync 来的副本>`、
+  环境变量 `ELECTRON_RENDERER_URL` 指向**同一个** vite。副本里必须删掉 `SingletonLock`/`SingletonSocket`/`SingletonCookie`
+  才拿得到锁。**不要去杀共享的 10222 实例**：`scripts/dev.ts` 给 electron 挂的 `exit` 监听会 `process.exit(0)`，
+  一起 kill 会把别人正在跑的整个 dev 会话带走。同一份副本上另有两条实测：① 计划下拉只在**组件挂载**或收到
+  `workflow/plans-changed` 时重读 `runner.plans()`，视图间来回切不会重读，所以新种的计划要 reload 渲染层才出现；
+  ② `runner.selectPlan` 只在 `idle|done` 态放行，副本库里留着上一条 `failed` 的 run 时它会静默拒绝，
+  清掉内存镜像的办法是重启这个隔离实例。
+- **实测（5.10-13 V 半边）活体上"把 kill 窗口拉宽"不要改代码**：非外发节点的尝试次数被
+  `packages/workflow/src/retry-policy.ts` 的 `READ_RETRY_CEILING = 2` 硬顶到 3 次，节点自己声明的 `retryTimes`
+  再大也没用——想在一个节点的 `running` 里蹲到 SIGKILL 时机，改的是**退避**：装配面板里 `workflow.runner`
+  的配置键 `retryBackoffMs` / `retryBackoffCapMs` 拉大即可（配置层只写内存、重启即失，见 5.3-b 那条），
+  既不需要临时补丁也不需要新入口。
 - **实测（2.5-d）fixture 服务是长驻进程且模板内联在代码里**：`/chat/frame` 的 HTML 写在
   `scripts/fixture-server.ts` 里（父页 `chat-lab.html` 每次请求读磁盘），改了帧模板不重启
   `pnpm fixture` 会得到"半新半旧"的页面，表现为帧绑定到写死的默认 jobId 而不是 URL 参数。
