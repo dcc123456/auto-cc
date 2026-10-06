@@ -411,38 +411,48 @@ export function InlineEditField({
   );
 }
 
-/** armed 倒计时条的动画宽度：4 秒走满，走满即解除（09 稿形态⑤′）。 */
+/**
+ * 武装有效期。倒计时条与这张表必须是同一个数：条走满就是解除的那一刻（09 稿形态⑤′：4 秒）。
+ * 原先它是 `armMs` prop（默认 4000）而条的时长写死在 class 里——传别的数就会"条还在、闸已关"，
+ * 且没有任何调用方用过非默认值，所以收成模块常量（时长要由 Tailwind 扫得到，动态拼不出 class）。
+ */
+const ARM_MS = 4000;
+
+/** armed 倒计时条的动画宽度：与 `ARM_MS` 同步走满，走满即解除。 */
 const ARM_COUNTDOWN = 'h-0.5 rounded-chip bg-seal/70 origin-left animate-[wash_4s_linear_forwards]';
 
-export interface ArmButtonProps {
+/**
+ * 两步 armed 键的输入：除 `action` / `confirmAction` / `onConfirm` / `armedLabel` 四位，
+ * 其余（`variant`/`compact`/`busy`/禁用三件套/`className`/`markers`）**整份转给两态共用的 `DeskButton`**，
+ * 面板不必为第二步再写一遍样式。
+ */
+export interface ArmButtonProps extends Omit<DeskButtonProps, 'action' | 'onClick' | 'children'> {
   /** 第一步（进入 armed）的 `data-action`。 */
   action: string;
-  /** 第二步（真正执行）的 `data-action`，harness 要点这一只。 */
+  /** 第二步（真正执行）的 `data-action`：harness 与判据都点这一只。 */
   confirmAction: string;
   /** 第二步按下后真正执行的动作。 */
   onConfirm: () => void;
   /** 未武装时的文案。 */
   children: ReactNode;
-  /** 已武装时的文案（例如「再按一次确认」）。 */
+  /** 已武装时的文案（例如「再点一次才写入」）。 */
   armedLabel: ReactNode;
-  /** 武装有效期毫秒数，默认 4000（09 稿读数）。 */
-  armMs?: number;
-  /** 禁用原因码。 */
-  disabledReason?: string;
-  disabled?: boolean;
-  /** 语义档，默认朱砂（不可逆才用两步 armed）。 */
-  variant?: DeskVariant;
 }
 
 /**
  * 两步就地确认（09 稿形态⑤′）：轻率点一下只武装，四秒内再点一下才动手。
  * 用来替代弹窗——「不可逆但一眼看得清」的动作不该再盖一层遮罩。
- * @param action 武装动作的 `data-action`
- * @param confirmAction 确认动作的 `data-action`
+ *
+ * 两态的 `data-action` 是**两个值**（`action` → `confirmAction`）：判据要能单凭 DOM 断言
+ * 「第一次点没有执行」，同一只键换属性不够显眼，而 harness 点的必须是第二只。
+ * @param action 武装那一步的 `data-action`
+ * @param confirmAction 确认那一步的 `data-action`（武装后节点上同时挂 `data-armed="true"`）
  * @param onConfirm 真执行的动作
- * @param armedLabel 武装态文案
- * @param armMs 武装有效期
- * @returns 一只按钮；武装时附一条倒计时
+ * @param children 未武装时的文案
+ * @param armedLabel 武装时的文案
+ * @param markers 附加的 `data-*`（两态都带，armed 那位由本组件补）
+ * @param variant 语义档，默认朱砂（只有不可逆的动作才用两步 armed）
+ * @returns 一只按钮；武装时附一条四秒倒计时
  */
 export function ArmButton({
   action,
@@ -450,28 +460,21 @@ export function ArmButton({
   onConfirm,
   children,
   armedLabel,
-  armMs = 4000,
-  disabledReason,
-  disabled,
+  markers,
   variant = 'seal',
+  ...rest
 }: ArmButtonProps) {
   const [armed, setArmed] = useState(false);
 
   useEffect(() => {
     if (!armed) return;
-    const timer = setTimeout(() => setArmed(false), armMs);
+    const timer = setTimeout(() => setArmed(false), ARM_MS);
     return () => clearTimeout(timer);
-  }, [armed, armMs]);
+  }, [armed]);
 
   if (!armed) {
     return (
-      <DeskButton
-        action={action}
-        variant={variant}
-        disabled={disabled}
-        disabledReason={disabledReason}
-        onClick={() => setArmed(true)}
-      >
+      <DeskButton action={action} variant={variant} markers={markers} {...rest} onClick={() => setArmed(true)}>
         {children}
       </DeskButton>
     );
@@ -479,7 +482,18 @@ export function ArmButton({
 
   return (
     <span className="relative inline-flex">
-      <DeskButton action={confirmAction} markers={{ armed: 'true' }} variant={variant} onClick={onConfirm}>
+      <DeskButton
+        action={confirmAction}
+        variant={variant}
+        markers={{ ...markers, armed: 'true' }}
+        {...rest}
+        // 确认一次就解除武装：下一次写入必须重新武装一遍，
+        // 不然倒计时条走完后的那几帧里连点两下会写进两条。
+        onClick={() => {
+          setArmed(false);
+          onConfirm();
+        }}
+      >
         {armedLabel}
       </DeskButton>
       <span aria-hidden="true" className={`absolute -bottom-1 left-0 right-0 ${ARM_COUNTDOWN}`} />

@@ -1037,6 +1037,7 @@
         "revoke": "Revoke",
         "actionRevoke": "Revoke the exemption for {{tool}}",
         "add": "Allowlist",
+        "armedAdd": "Click once more to write it in",
         "actionAdd": "Add {{tool}} to the allowlist",
         "noCandidates": "Nothing left to allowlist (every approval-required action is already exempted)"
       },

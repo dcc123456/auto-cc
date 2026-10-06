@@ -10,7 +10,7 @@ import { ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AutonomyLevel, ExemptToolView, ToolDescriptorView } from '@auto-cc/shared';
-import { DeskButton, EffectChip } from './ui/controls';
+import { ArmButton, DeskButton, EffectChip } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -160,10 +160,12 @@ export function AgentPolicyPanel({
               <span className="text-[10px] text-slate-500">{t('agent.tool.needsConfirm')}</span>
               <span className="break-all font-mono text-[10px] text-slate-600">{tool.id}</span>
               {/* 加白把「每次都问人」这道闸松开掉：它按下时什么都不发，但它改变之后每一次外发要不要问你，
-                  所以按风险方向给朱（08 稿对该控件的规定）；它规定的两步 armed 是点击语义变更，
-                  不在样式片里夹带，另立条目（见 docs/specs/06-ui-ink-desk/spec.md 6.2-11）。 */}
-              <DeskButton
+                  所以按风险方向给朱（08 稿对该控件的规定）；08 稿同时规定它走**两步 armed**
+                  （spec 6.2-11）：第一颗只武装并长出四秒倒计时，四秒内再点第二颗才写库，
+                  倒计时走完自动解除。撤销保持一次点——撤回是安全方向，不该加摩擦。 */}
+              <ArmButton
                 action="add-exempt"
+                confirmAction="add-exempt-confirm"
                 variant="seal"
                 compact
                 busy={busy !== undefined}
@@ -171,7 +173,13 @@ export function AgentPolicyPanel({
                 disabledReason={busyReason}
                 disabledReasonLabel={busyLabel}
                 className="ml-auto"
-                onClick={() =>
+                armedLabel={
+                  <>
+                    <ShieldCheck size={10} />
+                    {t('agent.policy.armedAdd')}
+                  </>
+                }
+                onConfirm={() =>
                   void call(
                     t('agent.policy.actionAdd', { tool: tool.id }),
                     () => bridge?.agent['policy.setExempt'](tool.id),
@@ -181,7 +189,7 @@ export function AgentPolicyPanel({
               >
                 <ShieldCheck size={10} />
                 {t('agent.policy.add')}
-              </DeskButton>
+              </ArmButton>
             </li>
           ))}
         </ul>
