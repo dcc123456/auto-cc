@@ -41,3 +41,43 @@ fixture 站点 `http://127.0.0.1:10233`（`pnpm fixture`，HTTP 200）。全部�
   因此在同一条活体页面里连续测两只平台时，**登录动作会落进上一次 open 的那只分区**——
   上面的判定就是照这个事实写的（登录落进 `fixture-alt`，`boss` 保持空），不是笔误。
 - `sessions.status()` 的回值是 `{ ok, value: { platforms: [...] } }`，直接 JSON 打平成 `{}` 的写法读不到东西。
+
+## 四、2026-10-06 本窗补的格：跨重启登录态 + 抓取/定位链路重放（状态位仍不动）
+
+方法：用打包产物 `dist/mac-arm64/auto-cc.app` 起一份**专用 profile**（`--user-data-dir=tmp/2112/profile`、
+CDP `--port 10299`；10222 上那个实例没动、没杀），全程只打本地 fixture（AGENTS.md §7.2）。
+
+第一轮（开机即读）：`sessions.open('fixture')` → `browser.page.navigate('http://127.0.0.1:10233/login?next=/boss')` →
+`sessions.status()`：
+
+- `fixture`：`partition=persist:fixture`、`storagePath=<repo>/tmp/2112/profile/Partitions/fixture`、
+  `cookieNames=[autocc_session]`、`auth=active`、`expiresAt=1791341659667`
+- `fixture-alt`：`cookieNames=[]`、`auth=expired`、`expiresAt=null` → 分区隔离在同一份新 profile 上照样成立
+- 磁盘侧对应：`Partitions/fixture/Cookies` = 20480 B
+
+**跨重启那一格（此前 mac 唯一缺的硬判据）**：`pkill` 该实例（进程数归 0）→ 用**同一个 `--user-data-dir`** 再起一次 →
+**不重新登录**，`sessions.status()` 仍是 `cookieNames=[autocc_session] / auth=active / expiresAt` 与重启前同一个数；
+`/boss` 页面文本读到「当前登录状态：已登录 · 会话 cookie：autocc_session」。
+截图 `docs/acceptance/2.1/2.1-12-macos-kernel-fixture-logged-in.png`（内核视图此时是 `/json` 里一个独立 page target，
+`url=http://127.0.0.1:10233/boss`，所以 `shot --url 127.0.0.1:10233` 直接截到它；md5 与同目录其他图都不同）。
+
+抓取与定位链路：
+
+- `page.navigate` / `page.snapshot` 正常（`title/url/readyState/elementCount/textLength/bodyText/headings/partition` 齐）。
+- `page.extract` **通道在 mac 上通**（回值 `frames` 逐帧 `ok:true`），但本轮给的容器选择器对不上 fixture 列表页的真实 DOM，
+  `containers=0 / rows=[]` → 这一格记成"通道通、取数未取到"，**不写成通过**。
+- `locate.find`：`testId` 策略必须**同时给 `attribute` 与 `value`**，只给 `value` 会得到
+  `LOCATE_SPEC_INVALID：候选 0（testId）：属性名非法（空）`；给全之后 `status=matched`，
+  `chosen` 带 `frameUrl/candidateIndex/strategy/siblingCount/nodeIndex/hitIndex/visible/enabled/unobstructed/tagName/accessibleName`。
+- **`act.click` 这一格没取到**：把 `chosen` 原样传、或连同 `spec` 一起传，两次都是
+  `PAGE_SCRIPT_FAILED：scanCandidates 读到 undefined`，说明它的入参不是 `{spec, ref}` 这一族；
+  靶页的「命中回执」停在「（尚无点击）」。下一窗要补先读 act 契约的真实入参名，别再猜形状。
+
+**顺带一条证据完整性发现（不属本条，但必须记）**：`docs/acceptance/2.1/` 里有 5 张 png 字节完全相同
+（md5 `a6eedc5ea4c96a88a3e487e6350ba728`）——`2.1-01-kernel-view-1` / `2.1-03-kernel-page-2` /
+`2.1-04-alt-view-not-logged-in-3` / `2.1-07-after-logout-view-2` / `2.1-10-kernel-1200x800-4`，
+另有两对各自相同（`340c3358…` 两张、`fae122e0…` 两张）。打开看是同一张 fixture `/boss`「未登录」页。
+也就是说这些图**撑不起各自文件名所声称的场景**（最刺眼的是 900x600 与 1200x800 两档视口拿到同一张图）。
+这些行的判定实际是靠同目录的读数文本过的，图是无效的那一半；
+补法要么回 win 宿主重拍、要么在 mac 上按场景逐张重取，属独立一片，本窗不夹带。
+
