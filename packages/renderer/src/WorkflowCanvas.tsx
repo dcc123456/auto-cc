@@ -74,6 +74,13 @@ const SOURCE_HANDLE_CLASS = ['!top-1/2', '!top-[70%]', '!top-[88%]'] as const;
 /** 校验点名的格子加一圈朱砂环（seal=风险档）；状态色仍完全由 `STEP_STATUS_STYLE` 决定，这里不碰它。 */
 const ISSUE_RING_CLASS = 'ring-2 ring-seal/70';
 
+/**
+ * 此刻指向的那一格：外圈青瓷实线（03 稿的「此刻指向」，与 `ScriptPanel` 候选行、`JobLabPanel` 列表行同档色）。
+ * 画在 **outline** 而不是 border——那一圈是状态色（`stepStatusStyle.ts`），选中不能把「这一格在跑」改掉；
+ * running 与选中因此可以同框：内圈读状态，外圈读指针。
+ */
+const SELECTED_CELL_CLASS = 'outline-solid outline-2 outline-offset-2 outline-celadon/70';
+
 /** 连接点：描边用分隔线色、底用桌面色，深浅两主题都跟着 token 走（06 稿 10 的格子形状）。 */
 const HANDLE_CLASS = '!h-2 !w-2 !border-2 !border-line-strong !bg-ink-900';
 
@@ -159,6 +166,11 @@ interface OperatorData extends Record<string, unknown> {
   kind: string | null;
   /** 这只格子被保存前校验点名了吗（红环依据是它，不是那句文案） */
   hasIssue: boolean;
+  /**
+   * 这一格是不是检视器正在读的那一格（6.5-06）。
+   * 由视图层的 `selectedNodeId` 现算，不进命令栈——选中是镜头，不是图的一部分，撤销一条边不该把它清掉。
+   */
+  isSelected: boolean;
 }
 
 type OperatorNode = Node<OperatorData, 'operator'>;
@@ -223,9 +235,10 @@ function OperatorNodeCard({ data }: NodeProps<OperatorNode>) {
       data-node-status={data.status}
       data-kind={data.kind ?? ''}
       data-node-issue={data.hasIssue ? 'true' : 'false'}
+      data-node-selected={data.isSelected ? 'true' : 'false'}
       className={`rounded-lg border px-3 py-2 text-[11px] shadow-sm ${STEP_STATUS_STYLE[data.status]} ${
         data.hasIssue ? ISSUE_RING_CLASS : ''
-      }`}
+      } ${data.isSelected ? SELECTED_CELL_CLASS : ''}`}
     >
       <Handle type="target" position={Position.Left} id="default" className={HANDLE_CLASS} />
       <span className="flex items-center gap-1">
@@ -412,6 +425,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         order: index + 1,
         kind: cell.kind,
         hasIssue: issueNodeIds.has(cell.id),
+        isSelected: cell.id === selectedNodeId,
       },
     }));
     // 拖拽中且光标已在画布内，才长出落点框（10 稿⑧）：它不是图上的一格，不进命令栈、不参与校验。
@@ -426,7 +440,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
       });
     }
     return cells;
-  }, [canvasCells, dragOffsets, issueNodeIds, paletteDrag, t]);
+  }, [canvasCells, dragOffsets, issueNodeIds, paletteDrag, selectedNodeId, t]);
 
   /**
    * 只接住位置变更：`nodes` 是受控的，落点回到 state 才拖得住；
