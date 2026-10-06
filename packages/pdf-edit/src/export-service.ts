@@ -9,14 +9,29 @@
  * （plan §7.1 的存储行——覆盖区列表活在渲染层的 draft 里）。所以每次另存重新读一遍源文件，
  * 顺带把「源文件在此期间被人动过」这件事也读进来了。
  */
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { rename, rm, writeFile } from 'node:fs/promises';
-import { AppError, Service, type Context } from '@auto-cc/core';
+import { AppError, maybeService, Service, type Context } from '@auto-cc/core';
 import { readBoundedFile, sha256Hex } from '@auto-cc/core/file-read';
 import { z } from 'zod';
 import { PdfEditDocument } from './pdf-document.js';
-import { planOverlays, type OverlayRejection, type PdfOverlayInput } from './overlay-writer.js';
+import {
+  isLatinOnly,
+  planOverlays,
+  type OverlayRejection,
+  type PdfOverlayInput,
+  type PlannedOverlay,
+} from './overlay-writer.js';
 import { planPageOrder, type PageOrderRejection } from './page-ops.js';
+
+/**
+ * 随包中文字体的文件名（与生成轨打印用的是**同一份资产**，plan §7.1 的字体资产行）。
+ * 目录由 L1 的 `resume.print.fontBaseUrl()` 给（开发态仓库 `resources/fonts`、打包态 `process.resourcesPath/fonts`），
+ * 本层不猜第二份路径——同一件事在 `resume-doc` 的导出腿已经是这个形状（§2.2）。
+ */
+const CJK_FONT_FILE = 'noto-sans-sc-chinese-simplified-400-normal.woff2';
 
 /** `pdf.export` 的可调项：一条尺度一个键，代码内不留魔法数。 */
 export const pdfExportSchema = z.strictObject({
@@ -54,6 +69,7 @@ type SaveFailureCode =
   | 'invalid-pdf'
   | 'encrypted'
   | 'empty'
+  | 'font-unavailable'
   | 'draw-failed'
   | 'write-failed';
 
@@ -73,8 +89,36 @@ export class PdfExportService extends Service {
 
   [Service.init](): void {
     this.ctx.logger.info(
-      `[pdf-edit] pdf.export 就绪，单次上限 ${String(this.options.maxOverlays)} 个覆盖区、默认字号 ${String(this.options.defaultTextSizePt)} pt（中文叠加腿按裁定⑧ 未落）`,
+      `[pdf-edit] pdf.export 就绪，单次上限 ${String(this.options.maxOverlays)} 个覆盖区、默认字号 ${String(this.options.defaultTextSizePt)} pt（中文叠加经随包字体子集内嵌）`,
     );
+  }
+
+  /**
+   * 随包中文字体的字节，**只在真要画非拉丁文字时**才读。
+   * @param plans 已通过校验的覆盖区
+   * @returns 有中文字要画时给 woff2 字节；纯拉丁或只涂白底给 `undefined`（零内嵌成本，plan §7.2 结论③）
+   * @throws `AppError('PDF_EDIT_SAVE_FAILED')`（`font-unavailable`）——字体目录读不到时如实失败，绝不退化成豆腐块
+   */
+  private cjkFontBytes(plans: readonly PlannedOverlay[], outPath: string): Uint8Array | undefined {
+    if (!plans.some((plan) => plan.text !== undefined && !isLatinOnly(plan.text))) return undefined;
+    // 按名字现问（§9 的 2.5 那条：热改配置会重建下游，本地不该存第二份事实），询问面窄到只用得上一个读数。
+    // 按名字现问（§9 的 2.5 那条：热改配置会重建下游，本地不该存第二份事实）。询问面在这里只写成一个读数：
+    // `pdf-edit` 不依赖 `@auto-cc/shared`（plan §7.3 的依赖行），而 L1 那个端口结构上满足它就够了。
+    const printPort = maybeService<{ fontBaseUrl(): string }>(this.ctx, 'resume.print');
+    if (printPort === undefined)
+      throw this.failure('font-unavailable', `这份中文叠加画不出来：随包字体目录问不到（${CJK_FONT_FILE}）`, outPath);
+    const fontDir = fileURLToPath(printPort.fontBaseUrl());
+    try {
+      // 1.1 MB 的随包资产，不走 `readBoundedFile`：那套上限是给**用户手里的文件**设的，随包字体是我们自己的东西。
+      return readFileSync(join(fontDir, CJK_FONT_FILE));
+    } catch (error) {
+      throw this.failure(
+        'font-unavailable',
+        `这份中文叠加画不出来：随包字体没找到（${join(fontDir, CJK_FONT_FILE)}）`,
+        outPath,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   /**
@@ -125,6 +169,9 @@ export class PdfExportService extends Service {
     if (!order.ok) {
       throw this.failure(order.code, `这份页序没法用：${order.detail}`, outPath, order.detail);
     }
+    // 要画中文就先把随包字体读进来，位置仍然在碰磁盘之前：读不到以 `font-unavailable` 失败，
+    // 而不是画成豆腐块（那正是 plan §7.2 结论③ 反对的"看似改过实则不可读"）。
+    const cjkFontBytes = this.cjkFontBytes(planned.overlays, outPath);
 
     // 排页 + 绘制 + 生成合在一个 try 里：pdf-lib 在 `save()` 时才把内容流拼出来，
     // 任何一步抛错都必须在落盘之前，这样"失败不落半成品"不需要额外的清理逻辑。
@@ -132,7 +179,7 @@ export class PdfExportService extends Service {
     let pageCount: number;
     try {
       const target = await loaded.document.arrange(order.order);
-      await target.applyOverlays(planned.overlays);
+      await target.applyOverlays(planned.overlays, cjkFontBytes);
       pageCount = target.pageCount;
       product = await target.save();
     } catch (error) {

@@ -616,6 +616,47 @@ canvas 的宽高取 `width`/`height` **属性**（不是样式），页面比例
 ③ 拖框精度与"画布上点不动"这类只有活体才暴露的坑（§9 的 5.10-a ⑩ 一族）——第一次在场跑就要按 ⑩ 那条写法核，
 不要相信 `pointerdown` 的返回值；④ `3.5-06` 的中文腿随字体资产那条裁定不动。
 
+### 7.17 3.5-f 中文叠加腿（裁定⑮ 第二问"现在做中文叠加"，2026-10-06；`3.5-06` 仍 `[ ]`，见下面"还欠的半边"）
+
+**落点**：`@pdf-lib/fontkit@1.1.1` 进 `packages/pdf-edit` 的依赖（MIT，唯一传递依赖 `pako@1.0.11`，纯 JS 无安装脚本）；
+`pdf-document.ts` 长出私有 `embedCjkFont()`——先 `registerFontkit(fontkit)` 再 `embedFont(bytes, { subset: true })`，
+`applyOverlays()` 多收一个可选的字体字节参数；`overlay-writer.ts` 的闸门从"只放拉丁"放宽成
+**拉丁 + 中日韩**（`hasBundledGlyphCoverage`，白名单按那份 woff2 实际覆盖的区段挑），`isLatinOnly` 从"能不能画"
+降级成"用哪只字体"——掺一个非拉丁字符就**整条**改走随包字体，混排不拆两只字体分段画（基线与间距会各算一遍）。
+`LICENSES.md` 按 `project-license-table-regen` 那条口径重跑 `check-licenses.ts --write`：记账表 86 → **87 行**。
+
+**字体目录的读数从 L1 借，不在 L2 猜第二份路径**（§2.2/§2.5）：随包字体那份资产与生成轨**共用同一个文件**
+（`resources/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2`，SIL OFL 1.1，早已在册），
+目录由 `resume.print` 端口的 `fontBaseUrl()` 给——这正是 `resume-doc` 导出腿已经在用的形状。
+但**取的方式不同**：那边写进 `static inject`（那是它的必需依赖），这边按名字**现问**（`maybeService`），
+因为纯拉丁与只涂白底的另存根本用不到字体——把它声明成必需依赖会让每一次热改配置都重建这只服务（§9 的 2.5 那条），
+也会逼着所有另存用例先装一只打印服务。问不到就 `font-unavailable` 失败，**绝不退化成豆腐块**。
+
+**两处实测更正（§6.2 又抓到一个"文档转述"）**：① plan §7.2 凭 spike 记忆写的 `embedFont(bytes, { custom: true, … })`
+**没有这个键**——本机 `PDFDocumentOptions.d.ts` 里 `EmbedFontOptions` 只有 `subset` / `customName` / `features`，
+自定义字体靠的是先 `registerFontkit`，`subset: true` 才是硬要求（spike 第一轮：不子集化产物涨到 31 MB）；
+② `pdf-edit` **不依赖** `@auto-cc/shared`（§7.3 的依赖行是这么定的），所以那个询问面在这里写成窄结构形状
+`{ fontBaseUrl(): string }` 而不是引端口的类型——引了就是 `TS2307: Cannot find module '@auto-cc/shared'`。
+
+**这轮的闸门读数**：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 四道 EXIT=0，
+`pdf-edit` **仍是 100 例**（没添新例——原因见下一条，本轮只把"中文被拒"那三条判据改成了"白名单外码位被拒"，
+`emoji 🎉` 作反例）；`main` 79 例未动。`pnpm app:build` EXIT=0，`build/app/main.cjs` 4,028,770 → **5,728,318** 字节
+（fontkit + pako 都只进主进程那一份，27 处命中），渲染层产物 `index-BGBX5Zrh.js` 940,043 字节里
+`fontkit` / `pako` / `pdf-lib` / `PDFDocument` 各 **0** 命中而 `pdf-edit-panel` 有命中——
+§7.14 那条"窄出口零 Node"的约束在添了字体引擎之后仍然成立，这次是**真的添加了一次越界依赖的机会**去验它。
+
+**还欠的半边（所以 `3.5-06` 照旧 `[ ]`，别按"裁定给了"就当它过了）**：
+① 判据原文那两条断言——**文本层逐字符全等**与**字形数**——还没写。写它需要装一只假的 `resume.print` 供出字体目录，
+再在产物上跑 pdf.js 抽文本项；而 `pdf.layout.textItems` 是**脱敏**的（只回矩形不回 `str`，§7.15），
+所以这条断言不能复用编辑轨自己的读侧，要另起一条测试内的抽取。
+② "随包资产目录读数"没核。顺带记下这一轮看到的一条**待查线索**（不是本轮要修的）：
+`electron-builder.yml` 的 `extraResources` 里**没有 fonts 条目**，而 `fontBaseUrl()` 的打包态指向
+`process.resourcesPath/fonts`——生成轨（3.3 的 3.3-05/06/07）与编辑轨在这一条上同生共死，
+要核就一起核，**不要只给编辑轨单开一条通道**（§2.5）。
+
+**顺延**：① 上面那两条断言（C 类，可在离线补，是 `3.5-06` 唯一的收口路径）；② `extraResources` 的字体条目要活体产物读数；
+③ 界面上的中文目视随 `3.5-03` 那三条截图腿一起在场跑。
+
 ---
 
 ## 8. 排版编辑器（3.6 的九条）的实现面计划（2026-10-05，先 plan 再落码，`AGENTS.md` §0）

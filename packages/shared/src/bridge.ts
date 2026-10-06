@@ -1153,7 +1153,7 @@ export interface PdfOverlayInputView {
   /** **源**页号，从 1 起（与 `PdfPageMetricView.number` 同一个口径；排过页之后同一源可以对应产物的多页） */
   pageNumber: number;
   rect: PdfOverlayRectView;
-  /** 叠加文字：本片只放拉丁，含中文以 `text-not-supported` 结构化失败（中文腿按裁定⑧ 随字体资产再落） */
+  /** 叠加文字：拉丁与中日韩都能画（中文经随包 `Noto Sans SC` 子集内嵌）；白名单外的码位以 `text-not-supported` 结构化失败 */
   text?: string;
   /** 字号（pt），省略取服务配置的 `defaultTextSizePt` */
   sizePt?: number;

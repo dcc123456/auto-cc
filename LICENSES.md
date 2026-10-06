@@ -35,11 +35,11 @@
 > 本节由 `tsx scripts/check-licenses.ts --write` 生成，请勿手改；正文其余部分是人工记账。
 > 取数口：`pnpm licenses list --json --prod`（与安装事实同源，不另写依赖解析）。
 
-**生产依赖合计 86 个包条目**，按许可分组：
+**生产依赖合计 87 个包条目**，按许可分组：
 
 | 许可                      | 包数 |
 | ------------------------- | ---- |
-| MIT                       | 59   |
+| MIT                       | 60   |
 | ISC                       | 13   |
 | BSD-2-Clause              | 4    |
 | Apache-2.0                | 2    |
@@ -83,6 +83,7 @@
 | `yaml`                    | 2.9.1         | ISC                       |
 | `@babel/runtime`          | 7.29.7        | MIT                       |
 | `@napi-rs/canvas`         | 1.0.9         | MIT                       |
+| `@pdf-lib/fontkit`        | 1.1.1         | MIT                       |
 | `@pdf-lib/standard-fonts` | 1.0.0         | MIT                       |
 | `@pdf-lib/upng`           | 1.0.1         | MIT                       |
 | `@standard-schema/spec`   | 1.1.0         | MIT                       |

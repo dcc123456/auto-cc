@@ -10,8 +10,9 @@
  * 旧文字仍可被提取。于是「旧文字已删除」这类说法在本包的任何返回字段与错误文案里都不许出现。
  */
 import { sha256Hex } from '@auto-cc/core/file-read';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import type { PlannedOverlay } from './overlay-writer.js';
+import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
+import { isLatinOnly, type PlannedOverlay } from './overlay-writer.js';
 import { isIdentityOrder } from './page-ops.js';
 
 /** 装载不了的三种确定态（plan §7.10：加密文档与结构损坏都不试图绕过，也不产出半成品）。 */
@@ -142,24 +143,30 @@ export class PdfEditDocument {
   }
 
   /**
-   * 把换算好的覆盖区追加到各自那一页上（spec 3.5-02 的「叠加」半边）。
+   * 把换算好的覆盖区追加到各自那一页上（spec 3.5-02 的「叠加」半边 + 3.5-06 的中文半边）。
    *
-   * 只有这一处碰 `pdf-lib` 的绘制 API，因为它决定了两件必须写死的事：
+   * 只有这一处碰 `pdf-lib` 的绘制 API，因为它决定三件必须写死的事：
    * ① 白底矩形必须 `borderWidth: 0`——实测（本机 `pdf-lib` 1.17.1 的 `PDFPageOptions.d.ts`）
    *    `drawRectangle` 的默认描边宽是 1 pt，留着它就成了一圈黑框，而覆盖区的作用是垫一块干净的底；
-   * ② 文字走 `StandardFonts.Helvetica`（零内嵌成本）。**实测更正**：`drawText` 的 `font` 只收 `PDFFont`，
-   *    不收 `StandardFonts` 枚举，所以标准字体也要先 `embedFont` 一次拿到句柄——整场只嵌一次，
-   *    不是因为嵌多次会坏，而是因为一次都不该多。越界的中文早在 `planOverlays` 就被挡下了，
-   *    这里不再校验字形覆盖（plan §7.2 结论③：标准字体没有 CJK 字形，硬画得到豆腐块）。
+   * ② 字体按**整条文字**选，不按字符拆：全拉丁走 `StandardFonts.Helvetica`（零内嵌成本，plan §7.2 结论③），
+   *    掺一个非拉丁字符就整条走随包的 `Noto Sans SC`——混排（「2024 年经验」）拆成两只字体分段画会让基线与
+   *    间距各算一遍，而这只字体本来就带拉丁字形；
+   * ③ **两处实测更正**（都来自读三方库的 `.d.ts`，§6.2）：`drawText` 的 `font` 只收 `PDFFont` 不收枚举，
+   *    所以标准字体也要 `embedFont` 一次拿句柄（各嵌一次，多一次都不许）；`EmbedFontOptions` 只有
+   *    `subset` / `customName` / `features` 三个键，plan §7.2 凭 spike 记忆写的 `custom: true` **并不存在**——
+   *    嵌自定义字体靠的是先 `registerFontkit`，而 `subset: true` 是硬要求（spike 第一轮：不子集化产物涨到 31 MB）。
    * @param plans `planOverlays` 通过校验并换算好的覆盖区（PDF 坐标，页号是**源页号**，从 1 起）
-   * @throws 页号在本文档里没有任何落点时抛普通 `Error`（那是调用方拿了别的文档的计划过来，属编程错误）；
-   *         连同 `pdf-lib` 自己的绘制异常一起由服务层收敛成 `PDF_EDIT_SAVE_FAILED`，**不落半成品**
+   * @param cjkFontBytes 随包字体（woff2）字节，只在真有非拉丁叠加时才用得到；缺它又真要画中文就抛错，**不产豆腐块文件**
+   * @throws 页号在本文档里没有任何落点、要画中文却没拿到字体字节、以及 `pdf-lib` 自己的绘制异常（均为普通 `Error`），
+   *         连同服务层一起收敛成 `PDF_EDIT_SAVE_FAILED`，**不落半成品**
    */
-  async applyOverlays(plans: readonly PlannedOverlay[]): Promise<void> {
+  async applyOverlays(plans: readonly PlannedOverlay[], cjkFontBytes?: Uint8Array): Promise<void> {
     const pages = this.pdf.getPages();
-    const latinFont = plans.some((plan) => plan.text !== undefined)
+    const texts = plans.flatMap((plan) => (plan.text === undefined ? [] : [plan.text]));
+    const latinFont = texts.some((text) => isLatinOnly(text))
       ? await this.pdf.embedFont(StandardFonts.Helvetica)
       : undefined;
+    const cjkFont = texts.some((text) => !isLatinOnly(text)) ? await this.embedCjkFont(cjkFontBytes) : undefined;
     for (const plan of plans) {
       // 一个来源页对应产物里的所有位置：排过页（3.5-07）之后同一源可能有副本，
       // 只盖第一处就等于"改了一份、另一份还露着那段旧话"（plan §7.6 的反伪装精神）。
@@ -183,11 +190,28 @@ export class PdfEditDocument {
           color: rgb(1, 1, 1),
           borderWidth: 0,
         });
-        if (plan.text !== undefined && plan.textBaselinePt !== undefined && latinFont !== undefined) {
-          page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font: latinFont });
+        if (plan.text !== undefined && plan.textBaselinePt !== undefined) {
+          const font = isLatinOnly(plan.text) ? latinFont : cjkFont;
+          if (font !== undefined) {
+            page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font });
+          }
         }
       }
     }
+  }
+
+  /**
+   * 嵌入随包的那份中文字体并**子集化**（spec 3.5-06：中文要能嵌进去、可复制可搜索，而不是画成图片）。
+   * @param bytes `resources/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2` 的字节
+   * @returns 可交给 `drawText` 的字体句柄
+   * @throws 没拿到字节时抛普通 `Error`：那是调用方没把随包字体目录读到，绝不能退化成 tofu 文件
+   */
+  private async embedCjkFont(bytes?: Uint8Array): Promise<PDFFont> {
+    if (bytes === undefined) throw new Error('这条叠加含非拉丁字符，但没有拿到随包字体字节');
+    // 实测（spike 第二轮 + 本机 1.17.1 的 d.ts）：woff2 也吃得下（原以为只支持 TTF/OTF），
+    // 但 `subset: true` 关掉就是 44～557 倍膨胀，所以这里不给调用方关它的口子。
+    this.pdf.registerFontkit(fontkit);
+    return this.pdf.embedFont(bytes, { subset: true });
   }
 
   /**

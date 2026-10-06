@@ -122,9 +122,9 @@ describe('空编辑与非法输入都不该长出撤销单元', () => {
     expect(session.draft().overlays).toHaveLength(1);
   });
 
-  it('中文叠加：会话与另存共用同一份判据，所以在这里就被拦住（不是到落盘才发现）', () => {
+  it('白名单外的码位：会话与另存共用同一份判据，所以在这里就被拦住（不是到落盘才发现）', () => {
     const session = boot();
-    expect(session.addOverlay(box('cn', { text: '覆盖中文哨兵' }))).toBe(false);
+    expect(session.addOverlay(box('cn', { text: '覆盖 \ud83c\udf89' }))).toBe(false);
     expect(session.draft().overlays).toEqual([]);
     expect(session.canUndo()).toBe(false);
   });

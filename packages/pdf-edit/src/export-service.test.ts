@@ -251,7 +251,7 @@ describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙�
   }[] = [
     {
       name: '非拉丁文字',
-      overlays: [{ ...box, text: '覆盖中文哨兵' }],
+      overlays: [{ ...box, text: '覆盖 \ud83c\udf89' }],
       outPath: (dir) => join(dir, 'out.pdf'),
       code: 'text-not-supported',
     },

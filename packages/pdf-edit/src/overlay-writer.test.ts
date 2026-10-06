@@ -91,7 +91,7 @@ describe('3.5-02 / 3.5-03 的边界校验：非法输入一条也不放过，且
       code: 'too-small',
     },
     { name: '字号越界', inputs: [overlay({ sizePt: 500 })], code: 'bad-size' },
-    { name: '文字含中文', inputs: [overlay({ text: '覆盖中文哨兵' })], code: 'text-not-supported' },
+    { name: '文字含随包字体没有的码位', inputs: [overlay({ text: '覆盖 \ud83c\udf89' })], code: 'text-not-supported' },
   ];
 
   for (const item of cases) {
@@ -112,7 +112,7 @@ describe('3.5-02 / 3.5-03 的边界校验：非法输入一条也不放过，且
   });
 });
 
-describe('isLatinOnly：中文那条腿的闸门（裁定⑧ 未落，故必须先挡住）', () => {
+describe('isLatinOnly：按整条文字选字体的判据（全拉丁走标准字体，掺非拉丁整条走随包字体）', () => {
   it('拉丁、数字、标点、Latin-1 补充都放过', () => {
     for (const text of ['Jane Doe', '2024.03 - present', 'Fudan Univ. (CS) ©±£', '']) {
       expect(isLatinOnly(text)).toBe(true);

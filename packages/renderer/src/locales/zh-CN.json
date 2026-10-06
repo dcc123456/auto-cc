@@ -526,7 +526,7 @@
       "pageReading": "第 {{page}} / {{count}} 页 · 线框 {{boxes}} 块",
       "pageMetricMissing": "这一页量不到宽高，先重新打开文件",
       "wireframeFailed": "这一页的线框取不到：{{message}}",
-      "overlayText": "叠加文字（拉丁）",
+      "overlayText": "叠加文字（中文与拉丁）",
       "dragHint": "在页面上按住拖动即可框出一区；文字留空即只铺白底",
       "overlayRejected": "这一区被拒了（超条数、越出页面、面积过小或文字不受支持）",
       "overlayRow": "源第 {{page}} 页 · 起点 {{x}}%,{{y}}% · 尺寸 {{w}}%×{{h}}% · {{text}}",

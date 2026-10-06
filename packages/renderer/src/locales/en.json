@@ -526,7 +526,7 @@
       "pageReading": "Page {{page}} of {{count}} · {{boxes}} wireframe blocks",
       "pageMetricMissing": "This page has no measurable size; reopen the file",
       "wireframeFailed": "Wireframe unavailable for this page: {{message}}",
-      "overlayText": "Overlay text (Latin)",
+      "overlayText": "Overlay text (Chinese or Latin)",
       "dragHint": "Drag on the page to draw a region; leave the text empty for a plain white box",
       "overlayRejected": "Region rejected (too many, off page, too small, or unsupported text)",
       "overlayRow": "Source page {{page}} · at {{x}}%,{{y}}% · size {{w}}%×{{h}}% · {{text}}",

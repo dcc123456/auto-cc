@@ -27,7 +27,7 @@ export interface PdfOverlayInput {
   /** 页号，**从 1 起**（人看到的是「第几页」，见 `PdfPageMetric.number`） */
   readonly pageNumber: number;
   readonly rect: PdfOverlayRect;
-  /** 叠加文字；本片的闸门只放拉丁（见 `isLatinOnly` 的注释） */
+  /** 叠加文字；闸门放拉丁与中日韩（见 `hasBundledGlyphCoverage` 的注释） */
   readonly text?: string;
   /** 字号（pt），省略取服务配置的 `defaultTextSizePt` */
   readonly sizePt?: number;
@@ -75,14 +75,30 @@ export interface OverlayLimits {
 /**
  * 判断一段文字是否只含拉丁字形可画的字符（Basic Latin + Latin-1 Supplement）。
  *
- * 为什么必须在边界上挡掉中文而不是"画出来看看"：`StandardFonts` 那 14 只标准字体**没有 CJK 字形**，
- * 硬画会产出豆腐块甚至空白（plan §7.2 结论③）——那就是"看似改过实则不可读"的坏文件。
- * 中文那条腿走 `@pdf-lib/fontkit` + 随包字体，按裁定⑧（2026-10-05）与资产路径一起再落。
+ * 它现在只回答**用哪只字体**这一件事：全拉丁的叠加走 `StandardFonts`（零内嵌成本，plan §7.2 结论③），
+ * 只要掺一个非拉丁字符就整条改走随包的 Noto Sans SC——混排（"2024 年经验"这类）不许拆成两只字体分段画，
+ * 那会让基线与间距各算一遍。
  * @param text 界面给的叠加文字
  * @returns 全部字符都在拉丁范围内为 true
  */
 export function isLatinOnly(text: string): boolean {
   return /^[\u0020-\u007e\u00a0-\u00ff]*$/.test(text);
+}
+
+/**
+ * 随包那一份 `Noto Sans SC` 覆盖得到的字符集白名单（拉丁 + 中日韩与常见标点）。
+ *
+ * 为什么仍然要在边界上挡而不是"画出来看看"：字库之外的码位（emoji、西里尔、阿拉伯…）画出来是
+ * `.notdef` 豆腐块，产物**看着改过了、其实那一句不可读**——与 plan §7.2 结论③ 反对的是同一种坏文件。
+ * 白名单按 `resources/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2` 实际覆盖的区段挑：
+ * 拉丁两段 + 通用标点 + CJK 符号与标点 + 中日韩基本区/扩展 A + 半全角与兼容区。
+ * @param text 界面给的叠加文字
+ * @returns 每个字符都有字形可画为 true；掺了白名单外的码位为 false（该区的中文提示由服务层给）
+ */
+export function hasBundledGlyphCoverage(text: string): boolean {
+  return /^[\u0020-\u007e\u00a0-\u00ff\u2000-\u206f\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]*$/.test(
+    text,
+  );
 }
 
 /**
@@ -150,10 +166,10 @@ export function planOverlays(
     if (!Number.isFinite(sizePt) || sizePt <= 0 || sizePt > 96) {
       return reject('bad-size', `覆盖区 ${input.id} 的字号 ${String(sizePt)} pt 不在 0..96`);
     }
-    if (input.text !== undefined && !isLatinOnly(input.text)) {
+    if (input.text !== undefined && !hasBundledGlyphCoverage(input.text)) {
       return reject(
         'text-not-supported',
-        `覆盖区 ${input.id} 的文字含非拉丁字符，中文叠加腿按裁定⑧ 随字体资产一起再落`,
+        `覆盖区 ${input.id} 的文字含随包字体没有的字符（中文与拉丁可画，emoji 等白名单外的码位不画）`,
       );
     }
     const pageRect = toPageRect(rect, metric);

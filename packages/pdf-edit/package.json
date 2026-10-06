@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@auto-cc/core": "workspace:*",
+    "@pdf-lib/fontkit": "1.1.1",
     "cordis": "4.0.0-rc.10",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
