@@ -34,6 +34,8 @@
 
 - [x] ① 四条门禁全绿（2026-10-06 本机 macOS，结论重定向到文件再看 `EXIT=`）：
       `pnpm typecheck` EXIT=0 / `pnpm lint` EXIT=0 / `pnpm format:check` EXIT=0 / `pnpm test` EXIT=0（2048 条通过，逐包核对无 failed）
+      收口后再跑一遍 `format:check` 时唯一告警是另一窗口当时正在写的 `packages/renderer/src/ui/controls.tsx`（本切片未碰它）；
+      本片的文件单独 `prettier --check` 仍 EXIT=0
 - [x] ② V 类条目逐条对应截图或 DOM 读数，本目录归档：
       01→`7.1-01-secret-file.txt`；02→`7.1-02-ciphertext.txt`；05→`7.1-05-restart-{before,after}.png` + `7.1-05-restart-readings.txt`；
       06→`7.1-06-no-plaintext-readings.txt`；08→`7.1-08-hot-apply-readings.txt`；09/10→`7.1-09-10-check-and-legs.txt`；
@@ -51,7 +53,10 @@
       取证过程中删掉了 fixture 里重复的 `/v1/chat/completions` 路由与 `chatCompletionsReply` 辅助函数（59c109b）
 - [x] ⑥ Tailwind / lucide / i18n：分区只用 utility 与既有 `FIELD_CLASS`；图标全取 lucide 现有（Save/Plug/KeyRound/…）；
       41 条文案全走 `shell.settings.model.*`，`zh-CN` 与 `en` 键对齐、占位符实参齐备（`pnpm lint` 的裸文案 + 键对齐校验 EXIT=0）
-- [ ] ⑦ 提交 + 推送（§1.6）：远端 `origin` → `git@github.com:dcc123456/auto-cc.git`，推完复核 `git ls-remote`
+- [x] ⑦ 提交 + 推送（§1.6）：两个提交按 pathspec 分开提——`3b3857c`（config 的两处形状缺陷 + AGENTS.md 实测）、
+      `2fcb171`（7.1-d 渲染层分区与全部验收证据）。推 `git push origin main` 成功（`be76a88..2fcb171`），
+      复核 `git ls-remote origin main` 与 `git rev-parse HEAD` / `refs/remotes/origin/main` 三处 sha 一致
+      （均为 `2fcb171681104387a0cbf4e4c01efff539cfdf6e`）；同一工作树里另一窗口正在写的四个渲染层文件未被吞进提交
 - [x] ⑧ 暂存区无测试临时产物：探针脚本与原始日志留在 `tmp/71d/`（gitignored），
       入库图片只有 `docs/acceptance/07-model-settings/**` 且文件名逐条对应 spec ID；
       密钥文件与那份明文备份（`tmp/71d-plaintext-secrets.bin.bak`）都在 tmp 下，不进仓库
