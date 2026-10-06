@@ -1,0 +1,130 @@
+第七片活体读数 —— 简历屏剩下三块面板（KbPanel / GapPanel / GeneratePanel）换装
+====================================================================
+
+取数时间：2026-10-06T06:40Z（本机 macOS arm64，dev 实例：`packages/main/dist/main.cjs
+--remote-debugging-port=10222 --user-data-dir=tmp/v6-userdata`，渲染层走 5173 HMR）
+取数口径：`pnpm harness eval --url 5173 --expr-file tmp/p6/<脚本>.mjs`，全部读数只读
+`getComputedStyle` 与 `data-*`；两次探针期间 `document.visibilityState = hidden`（窗口被遮挡），
+因此本片**没有任何一条"真点中了什么"的判据**，功能往返只以程序化 `element.click()` 记账（见第 5 节）。
+
+--------------------------------------------------------------------
+1. 十只顶层按钮的当次读数（库为空态、输入框全空时拍的，见 tmp/p6/kb-read2.out）
+--------------------------------------------------------------------
+| data-kb-action | data-effect | disabledReason | aria-disabled | cursor | color | bg |
+|---|---|---|---|---|---|---|
+| sync    | amber | DOC_ID_EMPTY        | true  | not-allowed | rgb(108,128,145) | rgb(15,22,28) |
+| lookup  | line  | CLAIM_EMPTY         | true  | not-allowed | rgb(108,128,145) | rgb(15,22,28) |
+| search  | line  | SEARCH_EMPTY        | true  | not-allowed | rgb(108,128,145) | rgb(15,22,28) |
+| export  | amber | BACKUP_PATH_EMPTY   | true  | not-allowed | rgb(108,128,145) | rgb(15,22,28) |
+| import  | amber | BACKUP_PATH_EMPTY   | true  | not-allowed | rgb(108,128,145) | rgb(15,22,28) |
+| new     | solid | （活按钮）           | null  | default     | rgb(232,238,243) | rgb(24,35,43)  |
+
+缺口屏与生成屏的读入口（同一轮，tmp/p6/kb-read2.out 的 gap / generate 段）：
+- `gap analyze`       = line / JD_EMPTY / aria=true / not-allowed / rgb(108,128,145) on rgb(15,22,28)
+  提示语「先粘一份 JD 原文，分析才知道比什么」
+- `generate run`      = line / JD_EMPTY / 同上
+  提示语「先粘一份 JD 原文，生成才知道按什么改写」
+- `generate accept`   = amber（代码位；库里无提议态时 `NO_PREVIEW`，需要先生成一次才出得来，见第 6 节）
+- `kb delete`         = seal（代码位；实体行存在时才渲染，见第 5 节实测）
+
+`new` 是唯一一只"输入框全空也照样能按"的按钮，这是刻意的：新建手工实体不依赖任何前置输入，
+把它的种类与载荷写成必填，等于要求用户先填一份自己不打算用的表单。
+
+--------------------------------------------------------------------
+2. 本片抓到并修掉的一个真缺陷（活体读数抓出来的，不是单测）
+--------------------------------------------------------------------
+第一轮探针 `tmp/p6/kb-read.out` 得到的是这样一行：
+  sync = amber / reason=DOC_ID_EMPTY / **aria=null / cursor=default / color=rgb(224,163,63)**
+也就是说：按钮上挂着"为什么不能按"的理由码，但按钮本身是**能按的**，而且涂着可用的琥珀色。
+原因是 `DeskButton` 的 `disabledReason` 只负责把 `data-disabled-reason` 与 `title` 渲染出来，
+**它不代替 `disabled` 实参**——`disabled` 仍由调用方给。我在三块面板里只传了 reason。
+
+修法：所有转换过的按钮补 `disabled={xReason !== undefined}`（`delete` / `new` / `save` 这三只的
+理由位只有 `busy`，写成 `disabled={busy !== undefined}`）。第二轮 `kb-read2.out` 的读数就是
+第 1 节那张表：aria=true、not-allowed、灰字 rgb(108,128,145) 落在 rgb(15,22,28) 上。
+
+这条留档的意义：`[!]/[x]` 之外的第三种情况是"代码位看着齐了、活体上在说谎"。只有数色值的
+单测看不到它，因为 React 的 `disabled` 与 `data-disabled-reason` 在 JSX 里是两个独立实参。
+
+--------------------------------------------------------------------
+3. 形（禁用态收敛为同一档底色）
+--------------------------------------------------------------------
+五只禁用态按钮的 bg 全部是 rgb(15,22,28) = `ink-850`，与它们各自的语义色（amber / line）无关。
+这是 `DeskButton` 的既有口径（第六片已记录过同一现象）：**语义色说"该由谁来做"，禁用态说"现在做不了"，
+后者覆盖前者**。界面因此不会出现"红字但按不动"这种读不出原因的按钮。
+
+--------------------------------------------------------------------
+4. 编辑器与表单件（tmp/p6/kb-editor.out）
+--------------------------------------------------------------------
+- `save`   = amber / 活按钮：color rgb(224,163,63)，bg oklab(0.756171 0.03215 0.13024 / 0.14)，
+  border 同色 /0.4 —— 与第六片之前那颗 emerald「保存」的区别在于：保存是**往本机库里写一条**，
+  属于 amber（本机写入），不属于 jade（已核/成功）。旧写法把"写本机"和"办完了"涂成同一个颜色。
+- `cancel` = ghost / 活按钮：color rgb(164,182,195) = slate-400，bg 与 border 皆 `rgba(0,0,0,0)`
+  —— 什么都不做的动作不留任何色带，这一条与 08 稿的「取消 = 无回执」对得上。
+- 载荷 textarea（`data-kb-field="editPayload"`）：border rgba(150,178,196,.26) = `line-strong`，
+  bg rgb(8,12,16) = ink-950，color rgb(194,209,220)，radius 6px（`FIELD_CLASS`）
+- 种类 select（`data-kb-field="editKind"`）：同一组 border/bg/color 读数（`FIELD_CLASS`）
+- 面板容器：bg oklab(.../0.6) = `ink-950/60`，border rgba(150,178,196,.14) = `line`，radius 8px
+- `editorGone = true`：cancel 点完之后编辑器确实收起，且没有产生任何写入（前后实体计数见第 5 节）
+
+--------------------------------------------------------------------
+5. 实体行三件套 + 一次create/delete 往返（tmp/p6/kb-row.out）
+--------------------------------------------------------------------
+程序化建一条手工实体（`title=墨案验收探针`）→ 读行 → 删除。计数轨迹：
+  before=0 → after=1 → cleared=0，`data-kb-notice` = 「已新建 kb-ba8da998-ddeb-4179-a35e-019bf0962f0e」
+写完即删，dev 库（`tmp/v6-userdata`）回到取数前的 0 条；**没有对装机版 app 的库做过任何写入**。
+
+行与行的按钮读数：
+- 卡片：bg oklab(.../0.4) = `ink-900/40`，border rgba(150,178,196,.14) = `line`，radius 6px
+- 种类 chip：bg rgb(19,28,35) = `ink-800`，border-radius 4px（`rounded-chip`），color rgb(164,182,195)
+- `evidence` = line / 活按钮：color rgb(219,228,236) = slate-100，bg rgb(19,28,35) = ink-900，
+  border rgba(150,178,196,.26) = line-strong —— 反查是**只读**动作，所以它永远是 line，不给 jade
+  （jade 在 07 稿的口径是"已核/成功"，一个入口按钮不该自称已核）
+- `edit`     = solid / 活按钮：color rgb(232,238,243) = ink-50(=slate-50)，bg rgb(24,35,43) = ink-750，
+  border rgb(85,103,122)
+- `delete`   = seal / 活按钮：color rgb(226,84,58) = seal，bg oklab(0.631608 0.15341 0.09781 / 0.18)，
+  border 同色 /0.45 —— 不可逆外发/删除类一律盖章色。
+- 证据链块 `[data-kb-evidence]` 当轮**没有出现**（`evidenceBlock = null`）：这条临时实体在 0→1 的库
+  里没有可反查的邻居，`profile.evidenceFor` 回 0 条命中，于是 `lookUpEvidence` 走空态分支
+  （`setExpandedId(undefined)`）。这是**空态的既有口径**，不是换装缺陷；但也就是这一条让
+  证据链展开块的那道 `border-t border-line` 分隔线本片只拿到代码位、没拿到活体读数。
+
+--------------------------------------------------------------------
+6. 只有代码位、没有活体读数的条目（如实标注）
+--------------------------------------------------------------------
+| 条目 | 代码位 | 没取到的原因 |
+|---|---|---|
+| `generate accept` 的 amber 与四种禁用理由（NO_PREVIEW / OUTCOME_REJECTED / NOTHING_SELECTED / ACTION_BUSY） | 已写 | 取它要先真跑一次定向生成（会调模型腿），本片不做未经用户在场的生成动作 |
+| `gap` 三栏色带（jade/amber/seal 的 wash）与 `generate` 三种结局色带（jade/celadon/amber 的 wash） | 已写 | 要出读数必须真跑一次缺口分析/生成，同上；截图里能看到的是面板容器与按钮，不是栏 |
+| `ACTION_BUSY`（三块面板共 8 处） | 已写 | fixture 侧动作在 <25ms 内返回，取不到"在途"那一帧；按 §7.2 不去打真实平台凑这一帧 |
+| 证据链展开块的分隔线 | 已写 | 见第 5 节：当轮 0 条命中，块未渲染 |
+| 缺口屏「库缺失」空态、生成屏写盘后的 accepted 回执 | 未改文案 | 分别要求无库与真接受一次提议态 |
+
+--------------------------------------------------------------------
+7. 深浅双主题（spec 6.1-04 / 6.4-02 的同一判据：组件里没有一处主题分支）
+--------------------------------------------------------------------
+- `6.2-06-kb-desk-dark.png`（md5 16c95c71f3bf7522c4699f95184411e8）：墨案下的知识库面板
+  ——五只禁用态灰按钮 + `new` 的可用实心 + 空态文案「库里还没有实体：先在上方填简历文档 id 做一次同步。」
+- `6.2-06-gap-generate-desk-dark.png`（md5 b9198a5bf70bf0abab318c86c14b2aad）：缺口屏与生成屏的
+  输入区、读入口按钮、以及两块面板的容器换色
+- `6.1-04-kb-gap-desk-light.png`（md5 5d09471d1e88f1233bc6f47637ca9346）：**毡案（浅色）**下同一屏。
+  这三个文件的 md5 各不相同（`md5 -q | sort | uniq -c` 全为 1），所以三张都是有效证据。
+- 换主题用的是 `[data-action="theme-toggle"]` 一发一收；第一轮点过一次没生效（`dataset.theme` 没变），
+  于是改用 `tmp/p6/goto-theme.mjs`：点完轮询 `document.documentElement.dataset.theme` 直到真的变了为止，
+  取完数再切回 `dark`。收尾状态读数：`{"theme":"dark","view":"chat","bodyBg":"rgb(8, 12, 16)"}`。
+- 三块面板新增的 class 里没有出现 `[data-theme=` 或第二套色值：浅色下的所有变化都来自
+  `@theme` 里那批 token 变量，这是 §6.1-04 的正判据。
+
+--------------------------------------------------------------------
+8. 门禁（每条都落到独立日志，不用管道读数，见 §9 的 5.4-c 那条）
+--------------------------------------------------------------------
+`pnpm format` → tmp/p6/fmt28.log … FMT=0
+`pnpm typecheck` → tmp/p6/tc28.log … TC=0
+`pnpm lint` → tmp/p6/lint28.log … LINT=0（含 `check-renderer-conventions`：Tailwind-only /
+  lucide-only / i18n 裸文案 + 占位符实参对齐；含 `check-tool-contract`；含 `check-dashboard-readonly`）
+`pnpm test` → tmp/p6/test28.log … TEST=0（禁用位补完 + 建删往返探针之后重跑）
+  逐包通过数（`sed -E 's/\x1b\[[0-9;]*m//g'` 去色后读数）：
+  testing 4/32、core 6/52、config 3/17、pdf-edit 8/102、devtools 1/3、ipc 2/14、llm 3/31、
+  kernel 3/23、shell 2/20、store 2/21、logger 2/13、resume-doc 13/136、entitlement 1/18、
+  sessions 2/15、scheduler 1/21、plugins 1/5、workflow 12/214、agent 8/223、browser 16/258、
+  outbound 9/186 —— 无 FAIL 行。

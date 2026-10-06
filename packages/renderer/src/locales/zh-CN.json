@@ -1181,7 +1181,14 @@
       "vectorStatusOk": "本次已把语义相近度并入排序。",
       "vectorStatusUnavailable": "没有可用的向量服务，本次只按词面排序。",
       "vectorStatusNoVectors": "当前模型还没有生成向量，本次只按词面排序（补建之后才会参与融合）。",
-      "vectorStatusFailed": "本次向量的编码没有成功，已退回只按词面排序。"
+      "vectorStatusFailed": "本次向量的编码没有成功，已退回只按词面排序。",
+      "reason": {
+        "ACTION_BUSY": "上一条动作还没回来",
+        "DOC_ID_EMPTY": "先填简历文档 id，同步才知道从哪一份派生",
+        "CLAIM_EMPTY": "先写一句陈述，反查才知道拿哪句话去查",
+        "SEARCH_EMPTY": "先输入关键词或一句话，检索才有查询",
+        "BACKUP_PATH_EMPTY": "先填备份文件的绝对路径，导出与导入才知道写到哪、读哪份"
+      }
     },
     "gap": {
       "heading": "岗位缺口报告",
@@ -1228,6 +1235,10 @@
         "yearsNoPeriod": "建议：「{{label}}」JD 要 {{required}} 年，但库里一条带起止时间的经历都没有——先把工作经历的起止月份录进简历，年限才谈得上比对，这不是判定你不够。",
         "educationGap": "建议：「{{required}}」比库里已录的学历高（库里只到第 {{have}} 档）；补学位证明或已修课程比改写措辞有用。",
         "educationMissing": "建议：库里没有学历区块，所以「{{label}}」只能判缺失——先把学历那段录进简历。"
+      },
+      "reason": {
+        "ACTION_BUSY": "上一条动作还没回来",
+        "JD_EMPTY": "先粘一份 JD 原文，分析才知道比什么"
       }
     },
     "generate": {
@@ -1272,7 +1283,14 @@
       "errorMissing": "那份提议态已经不在了（服务重启过或超出保留窗口）：重新生成一次再逐项接受。本次没有写任何内容。",
       "errorStale": "生成之后你自己改过这份简历：两份改动叠在一起是谁都没法解释的产物。先按现在这一版重新生成，本次没有写任何内容。",
       "errorCheck": "这次选中的组合没过事实校验，本次没有写入工作副本：{{message}}",
-      "errorOther": "接受失败：{{message}}"
+      "errorOther": "接受失败：{{message}}",
+      "reason": {
+        "ACTION_BUSY": "上一条动作还没回来",
+        "JD_EMPTY": "先粘一份 JD 原文，生成才知道按什么改写",
+        "NO_PREVIEW": "先生成一次，界面上才有可以接受的改写",
+        "OUTCOME_REJECTED": "这次没过事实校验，没有可以写入的内容——先看违规清单",
+        "NOTHING_SELECTED": "至少勾一条改写，或者勾上「应用重排」"
+      }
     },
     "script": {
       "heading": "打招呼话术候选",

@@ -1181,7 +1181,14 @@
       "vectorStatusOk": "Semantic similarity is folded into this ranking.",
       "vectorStatusUnavailable": "No embedding service is available, so this ranking is lexical only.",
       "vectorStatusNoVectors": "No vectors exist for the current model yet, so this ranking is lexical only (fusion starts after a backfill).",
-      "vectorStatusFailed": "Embedding this query failed, so the ranking fell back to lexical only."
+      "vectorStatusFailed": "Embedding this query failed, so the ranking fell back to lexical only.",
+      "reason": {
+        "ACTION_BUSY": "The previous action hasn’t returned yet",
+        "DOC_ID_EMPTY": "Enter a resume doc id so sync knows which document to derive from",
+        "CLAIM_EMPTY": "Write a claim first so the evidence lookup has a sentence to match",
+        "SEARCH_EMPTY": "Type a keyword or a sentence first so search has a query",
+        "BACKUP_PATH_EMPTY": "Enter the absolute path of a backup file so export knows where to write and import where to read"
+      }
     },
     "gap": {
       "heading": "Job gap report",
@@ -1228,6 +1235,10 @@
         "yearsNoPeriod": "Suggestion: “{{label}}” asks for {{required}} years, but the library holds no experience with dated start and end — record those months first; this is a missing record, not a verdict on you.",
         "educationGap": "Suggestion: “{{required}}” is above the education recorded in your library (currently tier {{have}}); adding the degree certificate or completed coursework helps more than rewording.",
         "educationMissing": "Suggestion: the library has no education section, so “{{label}}” can only be judged missing — record that part of your résumé first."
+      },
+      "reason": {
+        "ACTION_BUSY": "The previous action hasn’t returned yet",
+        "JD_EMPTY": "Paste a JD first so the analysis has something to compare against"
       }
     },
     "generate": {
@@ -1272,7 +1283,14 @@
       "errorMissing": "That proposal is gone (the service restarted or the retention window passed): generate again before accepting. Nothing was written.",
       "errorStale": "You edited this résumé after the generation: stacking the two changes produces something nobody can explain. Generate again from the current version. Nothing was written.",
       "errorCheck": "The combination you selected failed the fact check, so nothing was written: {{message}}",
-      "errorOther": "Accept failed: {{message}}"
+      "errorOther": "Accept failed: {{message}}",
+      "reason": {
+        "ACTION_BUSY": "The previous action hasn’t returned yet",
+        "JD_EMPTY": "Paste a JD first so generation knows what to rewrite against",
+        "NO_PREVIEW": "Run a generation first — there is nothing to accept yet",
+        "OUTCOME_REJECTED": "This run failed the fact check, so there is nothing to write — see the violation list",
+        "NOTHING_SELECTED": "Tick at least one rewrite, or tick “apply reorder”"
+      }
     },
     "script": {
       "heading": "Greeting script candidates",

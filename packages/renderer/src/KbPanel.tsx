@@ -10,6 +10,7 @@ import type {
   KbSearchRowResult,
 } from '@auto-cc/shared';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 反查命中理由 → 文案键（`contains` 与 `overlap` 在界面是两句不同的话，分数只是它们共同的强度读数）。 */
@@ -278,6 +279,18 @@ export function KbPanel() {
     vectorStatus === undefined || vectorStatus === 'not_attempted' ? null : t(VECTOR_STATUS_LABEL_KEY[vectorStatus]);
 
   /**
+   * 禁用原因码从当下读数推：在途那一拍压在任何一条「缺输入」之上（07 稿④：按不动就得说得出为什么）。
+   * 界面不猜主进程为什么拒绝——它只看得见哪个框还是空的。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  /** 原因码 → 人话（只给码不给这句话就是谎报，见 `DeskButton` 的 props 注释）。 */
+  const reasonLabel = (code?: string): string | undefined => (code === undefined ? undefined : t(`kb.reason.${code}`));
+  const docIdReason = docId.trim() === '' ? 'DOC_ID_EMPTY' : busyReason;
+  const claimReason = claim.trim() === '' ? 'CLAIM_EMPTY' : busyReason;
+  const searchReason = searchText.trim() === '' ? 'SEARCH_EMPTY' : busyReason;
+  const backupReason = backupPath.trim() === '' ? 'BACKUP_PATH_EMPTY' : busyReason;
+
+  /**
    * 渲染一行实体卡片（含展开态）。
    * @param entity 实体读数
    * @param depth 缩进层级（根为 0，下属为 1）
@@ -291,12 +304,10 @@ export function KbPanel() {
         data-kb-row={entity.entityId}
         data-kb-kind={entity.kind}
         data-kb-source={entity.sourceDocId ?? 'manual'}
-        className={`flex flex-col gap-2 rounded-md border border-slate-800 bg-slate-900/40 p-3 ${
-          depth > 0 ? 'ml-6' : ''
-        }`}
+        className={`flex flex-col gap-2 rounded-md border border-line bg-ink-900/40 p-3 ${depth > 0 ? 'ml-6' : ''}`}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
+          <span className="rounded-chip bg-ink-800 px-2 py-0.5 text-xs text-slate-300">
             {t(ENTITY_KIND_LABEL_KEY[entity.kind])}
           </span>
           <span className="text-sm text-slate-200">{primaryTextOf(entity)}</span>
@@ -308,43 +319,51 @@ export function KbPanel() {
           {isDerived ? t('kb.derivedFrom', { docId: entity.sourceDocId ?? '' }) : t('kb.manualEntity')}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            data-kb-action="evidence"
+          {/* 行内三只按"动到谁"分档：反查证据是只读（line），打开编辑器是视图推进（solid），
+              删除手工实体回不去（seal）。派生实体不给删除按钮——挂一只必然失败的按钮比不挂更坏（4.2-04）。 */}
+          <DeskButton
+            action="evidence"
+            markers={{ 'kb-action': 'evidence' }}
+            variant="line"
+            compact
             onClick={() =>
               expanded ? setExpandedId(undefined) : lookUpEvidence(primaryTextOf(entity), entity.entityId)
             }
-            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
-            <Search className="h-3 w-3" />
+            <Search size={12} />
             {t('kb.evidence')}
-          </button>
+          </DeskButton>
           {!isDerived && (
             <>
-              <button
-                type="button"
-                data-kb-action="edit"
+              <DeskButton
+                action="edit"
+                markers={{ 'kb-action': 'edit' }}
+                variant="solid"
+                compact
                 onClick={() => openEditor(entity)}
-                className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
               >
-                <Pencil className="h-3 w-3" />
+                <Pencil size={12} />
                 {t('kb.edit')}
-              </button>
-              <button
-                type="button"
-                data-kb-action="delete"
-                onClick={() => removeEntity(entity.entityId)}
+              </DeskButton>
+              <DeskButton
+                action="delete"
+                markers={{ 'kb-action': 'delete' }}
                 disabled={busy !== undefined}
-                className="flex items-center gap-1 rounded border border-rose-900 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40"
+                variant="seal"
+                compact
+                busy={!!busy}
+                disabledReason={busyReason}
+                disabledReasonLabel={reasonLabel(busyReason)}
+                onClick={() => removeEntity(entity.entityId)}
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash2 size={12} />
                 {t('kb.delete')}
-              </button>
+              </DeskButton>
             </>
           )}
         </div>
         {expanded && (
-          <div data-kb-evidence={entity.entityId} className="flex flex-col gap-1 border-t border-slate-800 pt-2">
+          <div data-kb-evidence={entity.entityId} className="flex flex-col gap-1 border-t border-line pt-2">
             {evidence.length === 0 ? (
               <p className="text-xs text-slate-500">{t('kb.evidenceEmpty')}</p>
             ) : (
@@ -366,7 +385,7 @@ export function KbPanel() {
   };
 
   return (
-    <div data-testid="kb-panel" className="flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+    <div data-testid="kb-panel" className="flex flex-col gap-4 rounded-lg border border-line bg-ink-950/60 p-4">
       <div className="flex items-center gap-2">
         <Database className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('kb.heading')}</h2>
@@ -379,18 +398,22 @@ export function KbPanel() {
           value={docId}
           onChange={(event) => setDocId(event.target.value)}
           placeholder={t('kb.docIdPlaceholder')}
-          className="min-w-40 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`${FIELD_CLASS} min-w-40 flex-1`}
         />
-        <button
-          type="button"
-          data-kb-action="sync"
+        <DeskButton
+          action="sync"
+          markers={{ 'kb-action': 'sync' }}
+          disabled={docIdReason !== undefined}
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabledReason={docIdReason}
+          disabledReasonLabel={reasonLabel(docIdReason)}
           onClick={syncFromDoc}
-          disabled={busy !== undefined || docId.trim() === ''}
-          className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
-          <RefreshCw className="h-3 w-3" />
+          <RefreshCw size={12} />
           {t('kb.sync')}
-        </button>
+        </DeskButton>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -399,18 +422,22 @@ export function KbPanel() {
           value={claim}
           onChange={(event) => setClaim(event.target.value)}
           placeholder={t('kb.claimPlaceholder')}
-          className="min-w-40 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`${FIELD_CLASS} min-w-40 flex-1`}
         />
-        <button
-          type="button"
-          data-kb-action="lookup"
+        <DeskButton
+          action="lookup"
+          markers={{ 'kb-action': 'lookup' }}
+          disabled={claimReason !== undefined}
+          variant="line"
+          compact
+          busy={!!busy}
+          disabledReason={claimReason}
+          disabledReasonLabel={reasonLabel(claimReason)}
           onClick={() => lookUpEvidence(claim.trim())}
-          disabled={busy !== undefined || claim.trim() === ''}
-          className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
-          <Search className="h-3 w-3" />
+          <Search size={12} />
           {t('kb.evidence')}
-        </button>
+        </DeskButton>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -420,18 +447,22 @@ export function KbPanel() {
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}
             placeholder={t('kb.searchPlaceholder')}
-            className="min-w-40 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+            className={`${FIELD_CLASS} min-w-40 flex-1`}
           />
-          <button
-            type="button"
-            data-kb-action="search"
+          <DeskButton
+            action="search"
+            markers={{ 'kb-action': 'search' }}
+            disabled={searchReason !== undefined}
+            variant="line"
+            compact
+            busy={!!busy}
+            disabledReason={searchReason}
+            disabledReasonLabel={reasonLabel(searchReason)}
             onClick={runSearch}
-            disabled={busy !== undefined || searchText.trim() === ''}
-            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
-            <Search className="h-3 w-3" />
+            <Search size={12} />
             {t('kb.search')}
-          </button>
+          </DeskButton>
         </div>
         {/* 向量腿的当次状态单独一行（spec 4.3-08）：命中数不变，但「只有词面结果」这件事必须读得出原因。 */}
         {vectorStatusHint !== null && (
@@ -476,33 +507,43 @@ export function KbPanel() {
           value={backupPath}
           onChange={(event) => setBackupPath(event.target.value)}
           placeholder={t('kb.backupPathPlaceholder')}
-          className="min-w-40 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`${FIELD_CLASS} min-w-40 flex-1`}
         />
-        <button
-          type="button"
-          data-kb-action="export"
+        {/* 导出与导入都只在这台机器上读写文件，所以两只是琥珀而不是朱砂——
+            备份不会离开本机，涂朱砂等于谎报"这一步要签字"。 */}
+        <DeskButton
+          action="export"
+          markers={{ 'kb-action': 'export' }}
+          disabled={backupReason !== undefined}
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabledReason={backupReason}
+          disabledReasonLabel={reasonLabel(backupReason)}
           onClick={exportBackup}
-          disabled={busy !== undefined || backupPath.trim() === ''}
-          className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
-          <Download className="h-3 w-3" />
+          <Download size={12} />
           {t('kb.export')}
-        </button>
-        <button
-          type="button"
-          data-kb-action="import"
+        </DeskButton>
+        <DeskButton
+          action="import"
+          markers={{ 'kb-action': 'import' }}
+          disabled={backupReason !== undefined}
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabledReason={backupReason}
+          disabledReasonLabel={reasonLabel(backupReason)}
           onClick={importBackup}
-          disabled={busy !== undefined || backupPath.trim() === ''}
-          className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
-          <Upload className="h-3 w-3" />
+          <Upload size={12} />
           {t('kb.import')}
-        </button>
+        </DeskButton>
         <select
           data-kb-field="importMode"
           value={importMode}
           onChange={(event) => setImportMode(event.target.value as KbImportModeView)}
-          className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300"
+          className={FIELD_CLASS}
         >
           <option value="skip">{t('kb.modeSkip')}</option>
           <option value="overwrite">{t('kb.modeOverwrite')}</option>
@@ -528,17 +569,22 @@ export function KbPanel() {
         </ul>
       )}
 
-      <div className="flex flex-col gap-2 border-t border-slate-800 pt-2">
-        <button
-          type="button"
-          data-kb-action="new"
-          onClick={() => openEditor()}
+      <div className="flex flex-col gap-2 border-t border-line pt-2">
+        <DeskButton
+          action="new"
+          markers={{ 'kb-action': 'new' }}
           disabled={busy !== undefined}
-          className="flex items-center gap-1 self-start rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          variant="solid"
+          compact
+          busy={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
+          className="self-start"
+          onClick={() => openEditor()}
         >
-          <Plus className="h-3 w-3" />
+          <Plus size={12} />
           {t('kb.create')}
-        </button>
+        </DeskButton>
         {editing && (
           <div className="flex flex-col gap-2" data-kb-editor={editing.entityId ?? 'new'}>
             <select
@@ -546,7 +592,7 @@ export function KbPanel() {
               value={editing.kind}
               onChange={(event) => setEditing({ ...editing, kind: event.target.value as KbEntityKindView })}
               disabled={editing.entityId !== null}
-              className="self-start rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 disabled:opacity-40"
+              className={`${FIELD_CLASS} self-start`}
             >
               {(Object.keys(ENTITY_KIND_LABEL_KEY) as KbEntityKindView[]).map((kind) => (
                 <option key={kind} value={kind}>
@@ -559,27 +605,34 @@ export function KbPanel() {
               rows={4}
               value={editing.lines}
               onChange={(event) => setEditing({ ...editing, lines: event.target.value })}
-              className="rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-xs text-slate-200"
+              className={`${FIELD_CLASS} font-mono`}
             />
             <p className="text-xs text-slate-500">{t('kb.payloadHint')}</p>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-kb-action="save"
-                onClick={saveDraft}
+              {/* 保存往库里写一条（琥珀），取消什么都不动（ghost）——旧写法给保存涂了 emerald，
+                  于是"写本机"与"已经办完"在界面上是同一个颜色，读不出归属。 */}
+              <DeskButton
+                action="save"
+                markers={{ 'kb-action': 'save' }}
                 disabled={busy !== undefined}
-                className="rounded border border-emerald-900 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-950/40 disabled:opacity-40"
+                variant="amber"
+                compact
+                busy={!!busy}
+                disabledReason={busyReason}
+                disabledReasonLabel={reasonLabel(busyReason)}
+                onClick={saveDraft}
               >
                 {t('kb.save')}
-              </button>
-              <button
-                type="button"
-                data-kb-action="cancel"
+              </DeskButton>
+              <DeskButton
+                action="cancel"
+                markers={{ 'kb-action': 'cancel' }}
+                variant="ghost"
+                compact
                 onClick={() => setEditing(undefined)}
-                className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
               >
                 {t('kb.cancel')}
-              </button>
+              </DeskButton>
             </div>
           </div>
         )}

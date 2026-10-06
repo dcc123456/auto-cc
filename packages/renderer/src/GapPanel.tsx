@@ -11,6 +11,7 @@ import type {
   GapSuggestionRow,
 } from '@auto-cc/shared';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 三栏的栏序（spec 4.4-03）：栏是**状态**不是要求种类，一栏里的行序等于拆解的稳定序，界面不再二次排序。 */
@@ -25,9 +26,9 @@ const STATE_LABEL_KEY: Record<GapStateView, string> = {
 
 /** 状态 → 行的色带（颜色的唯一凭据是 `state`）：年限那行的 `score` 是「占总时长比例」，与词面覆盖不同量纲，拿它上色就会把"够了"画成红的。 */
 const STATE_TONE: Record<GapStateView, string> = {
-  matched: 'border-emerald-900 bg-emerald-950/30',
-  partial: 'border-amber-900 bg-amber-950/30',
-  missing: 'border-rose-900 bg-rose-950/30',
+  matched: 'border-jade/40 bg-jade-wash',
+  partial: 'border-amber/40 bg-amber-wash',
+  missing: 'border-seal/45 bg-seal-wash',
 };
 
 /** 四类**要求** → 文案键（英文串不直接上界面，对齐 §5.5）。注意与 `ENTITY_KIND_LABEL_KEY` 是两套种类：那套是库内实体，这套是 JD 要求。 */
@@ -41,8 +42,8 @@ const REQUIREMENT_KIND_LABEL_KEY: Record<GapRequirementKindView, string> = {
 /** 模型腿结局 → 行的色调（五态五句文案，但"是好消息还是坏消息"只有三档）。 */
 const MODEL_TONE: Record<GapModelStatusView, string> = {
   merged: 'text-slate-400',
-  rejected: 'text-amber-400',
-  failed: 'text-amber-400',
+  rejected: 'text-amber',
+  failed: 'text-amber',
   unavailable: 'text-slate-500',
   disabled: 'text-slate-500',
 };
@@ -84,6 +85,11 @@ export function GapPanel() {
   }, []);
 
   const { busy, notice, run, setNotice } = useBridgeAction(read);
+
+  /** 分析按不动只有两种原因：JD 那栏还空着，或上一条动作在途（07 稿④）。 */
+  const analyzeReason = jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
+  /** 原因码 → 人话（只给码不给这句话就是谎报）。 */
+  const reasonLabel = (code?: string): string | undefined => (code === undefined ? undefined : t(`gap.reason.${code}`));
 
   /**
    * 库被改过之后上一份报告就是陈旧的（比对的据已经变了），所以清掉而不是留着让用户读旧读数。
@@ -230,7 +236,7 @@ export function GapPanel() {
                 type="button"
                 data-gap-evidence={evidence.id}
                 onClick={() => toggleEvidence(evidence)}
-                className="text-left text-[11px] text-slate-400 hover:text-slate-200"
+                className="text-left text-[11px] text-slate-400 hover:text-celadon"
               >
                 {t('gap.evidenceLine', {
                   id: evidence.id,
@@ -257,7 +263,7 @@ export function GapPanel() {
   );
 
   return (
-    <div data-testid="gap-panel" className="flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+    <div data-testid="gap-panel" className="flex flex-col gap-4 rounded-lg border border-line bg-ink-950/60 p-4">
       <div className="flex items-center gap-2">
         <ScanSearch className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('gap.heading')}</h2>
@@ -271,19 +277,23 @@ export function GapPanel() {
           onChange={(event) => setJdText(event.target.value)}
           rows={6}
           placeholder={t('gap.jdPlaceholder')}
-          className="min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`${FIELD_CLASS} min-w-0`}
         />
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-gap-action="analyze"
+          <DeskButton
+            action="analyze"
+            markers={{ 'gap-action': 'analyze' }}
+            disabled={analyzeReason !== undefined}
+            variant="line"
+            compact
+            busy={!!busy}
+            disabledReason={analyzeReason}
+            disabledReasonLabel={reasonLabel(analyzeReason)}
             onClick={analyze}
-            disabled={busy !== undefined || jdText.trim() === ''}
-            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
-            <ScanSearch className="h-3 w-3" />
+            <ScanSearch size={12} />
             {t('gap.analyze')}
-          </button>
+          </DeskButton>
           {report && (
             <span
               data-gap-model={report.modelStatus}
@@ -297,7 +307,7 @@ export function GapPanel() {
 
       {libraryMissing && (
         // 与"JD 太短"分开的确定空态：没有库就没有"缺口"这回事，这时候说"你不合格"是最坏的假读数。
-        <p data-gap-library-missing className="text-xs leading-relaxed text-amber-300">
+        <p data-gap-library-missing className="text-xs leading-relaxed text-amber">
           {t('gap.libraryMissing')}
         </p>
       )}
@@ -310,7 +320,7 @@ export function GapPanel() {
 
       {report && report.entityCount === 0 && report.rows.length > 0 && (
         // 缺失一片时先问"库是不是空的"：0 条实体的报告里每条缺失都不说明能力，只说明还没录简历。
-        <p data-gap-empty="no_entities" className="text-xs leading-relaxed text-amber-300">
+        <p data-gap-empty="no_entities" className="text-xs leading-relaxed text-amber">
           {t('gap.noEntities')}
         </p>
       )}
@@ -334,7 +344,7 @@ export function GapPanel() {
                 <div
                   key={state}
                   data-gap-column={state}
-                  className="flex min-w-0 flex-col gap-2 rounded border border-slate-800 p-2"
+                  className="flex min-w-0 flex-col gap-2 rounded border border-line p-2"
                 >
                   <p className="text-xs font-semibold text-slate-300">
                     {t(STATE_LABEL_KEY[state])} · {report.counts[state]}

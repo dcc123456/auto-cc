@@ -8,22 +8,23 @@ import type {
   GenerationRewriteRowView,
   GenerationRunRowView,
 } from '@auto-cc/shared';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
 const MODEL_TONE: Record<GapModelStatusView, string> = {
   merged: 'text-slate-400',
-  rejected: 'text-amber-400',
-  failed: 'text-amber-400',
+  rejected: 'text-amber',
+  failed: 'text-amber',
   unavailable: 'text-slate-500',
   disabled: 'text-slate-500',
 };
 
 /** 三种结局的色带（`rejected` 是这条链的正常结局之一，不是故障，所以给提醒色而不是错误色）。 */
 const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], string> = {
-  rewritten: 'border-emerald-900 bg-emerald-950/30',
-  reorder_only: 'border-sky-900 bg-sky-950/30',
-  rejected: 'border-amber-900 bg-amber-950/30',
+  rewritten: 'border-jade/40 bg-jade-wash',
+  reorder_only: 'border-celadon/40 bg-celadon-wash',
+  rejected: 'border-amber/45 bg-amber-wash',
 };
 
 /**
@@ -165,7 +166,7 @@ export function GeneratePanel() {
                 type="button"
                 data-generate-source={evidenceId}
                 onClick={() => toggleSource(evidenceId)}
-                className="text-left text-[11px] text-slate-400 hover:text-slate-200"
+                className="text-left text-[11px] text-slate-400 hover:text-celadon"
               >
                 {t('generate.sourceLine', { id: evidenceId })}
               </button>
@@ -213,7 +214,7 @@ export function GeneratePanel() {
    * @returns 行节点
    */
   const renderReorder = (basis: GenerationReorderRowView) => (
-    <li key={`${basis.level}-${basis.id}`} className="rounded border border-slate-800 p-2">
+    <li key={`${basis.level}-${basis.id}`} className="rounded border border-line p-2">
       <p data-generate-reorder={basis.level} className="text-xs text-slate-200">
         <span className="text-slate-400">
           {t(basis.level === 'section' ? 'generate.levelSection' : 'generate.levelEntry')}
@@ -238,12 +239,28 @@ export function GeneratePanel() {
   const selectedCount = checked.filter((isChecked) => isChecked).length;
   const canAccept =
     preview !== undefined && preview.receipt.outcome !== 'rejected' && (selectedCount > 0 || applyReorder);
+  /**
+   * 「接受」按不动的原因分三句说（07 稿④）：还没有产物、产物被事实校验拒了、有产物但一条都没勾——
+   * 合成一句「现在不能接受」就等于让人猜该先做哪一步。
+   */
+  const acceptReason =
+    busy !== undefined
+      ? 'ACTION_BUSY'
+      : preview === undefined
+        ? 'NO_PREVIEW'
+        : preview.receipt.outcome === 'rejected'
+          ? 'OUTCOME_REJECTED'
+          : !canAccept
+            ? 'NOTHING_SELECTED'
+            : undefined;
+  /** 原因码 → 人话。 */
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`generate.reason.${code}`);
+  /** 生成按不动的两种原因：JD 那栏还空着，或上一条动作在途。 */
+  const runReason = jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
 
   return (
-    <div
-      data-testid="generate-panel"
-      className="flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4"
-    >
+    <div data-testid="generate-panel" className="flex flex-col gap-4 rounded-lg border border-line bg-ink-950/60 p-4">
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('generate.heading')}</h2>
@@ -257,19 +274,23 @@ export function GeneratePanel() {
           onChange={(event) => setJdText(event.target.value)}
           rows={6}
           placeholder={t('generate.jdPlaceholder')}
-          className="min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`${FIELD_CLASS} min-w-0`}
         />
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-generate-action="run"
+          <DeskButton
+            action="run"
+            markers={{ 'generate-action': 'run' }}
+            disabled={runReason !== undefined}
+            variant="line"
+            compact
+            busy={!!busy}
+            disabledReason={runReason}
+            disabledReasonLabel={reasonLabel(runReason)}
             onClick={generate}
-            disabled={busy !== undefined || jdText.trim() === ''}
-            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
-            <Sparkles className="h-3 w-3" />
+            <Sparkles size={12} />
             {t('generate.run')}
-          </button>
+          </DeskButton>
           {preview && (
             <span
               data-generate-model={preview.receipt.modelStatus}
@@ -283,11 +304,8 @@ export function GeneratePanel() {
 
       {accepted && (
         // 写盘之后的读数留在界面上：接受用掉了提议态，没有这一行用户就看不见"到底写了几处"。
-        <div
-          data-generate-accepted
-          className="flex flex-col gap-1 rounded border border-emerald-900 bg-emerald-950/30 p-2"
-        >
-          <p className="text-xs text-emerald-200">
+        <div data-generate-accepted className="flex flex-col gap-1 rounded border border-jade/40 bg-jade-wash p-2">
+          <p className="text-xs text-jade">
             {t('generate.accepted', {
               applied: accepted.appliedRewrites,
               sections: accepted.movedSections,
@@ -300,7 +318,7 @@ export function GeneratePanel() {
       )}
 
       {blocked && (
-        <p data-generate-blocked className="text-xs leading-relaxed text-amber-300">
+        <p data-generate-blocked className="text-xs leading-relaxed text-amber">
           {blocked}
         </p>
       )}
@@ -324,7 +342,7 @@ export function GeneratePanel() {
       {preview && preview.receipt.outcome === 'rejected' && (
         // 拒绝产出这条路径不给"接受"按钮：这时候连产物都没有，按下去只能失败（4.5-05 的界面口径）。
         <div data-generate-rejected className="flex flex-col gap-1">
-          <p className="text-xs leading-relaxed text-amber-300">{t('generate.needsHuman')}</p>
+          <p className="text-xs leading-relaxed text-amber">{t('generate.needsHuman')}</p>
           <ul className="flex flex-col gap-1">
             {preview.checks.violations.map((violation) => (
               <li key={violation} data-generate-violation className="text-[11px] leading-relaxed text-slate-300">
@@ -356,7 +374,7 @@ export function GeneratePanel() {
                 {preview.rewrites.map((row, index) => (
                   <li
                     key={`${row.sectionId}-${row.entryId}-${row.fieldKey}`}
-                    className="rounded border border-slate-800 bg-slate-900/40 p-2"
+                    className="rounded border border-line bg-ink-900/40 p-2"
                   >
                     <label className="flex items-start gap-2">
                       <input
@@ -414,16 +432,22 @@ export function GeneratePanel() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-generate-action="accept"
+            {/* 全 app 只有这一口会改那份工作副本，所以它是琥珀（本机写入）而不是描边；
+                按不动的三种原因各说一句不同的话，见 `acceptReason`。 */}
+            <DeskButton
+              action="accept"
+              markers={{ 'generate-action': 'accept' }}
+              disabled={acceptReason !== undefined}
+              variant="amber"
+              compact
+              busy={!!busy}
+              disabledReason={acceptReason}
+              disabledReasonLabel={reasonLabel(acceptReason)}
               onClick={accept}
-              disabled={busy !== undefined || !canAccept}
-              className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
-              <ShieldAlert className="h-3 w-3" />
+              <ShieldAlert size={12} />
               {t('generate.accept')}
-            </button>
+            </DeskButton>
             <span data-generate-selected-count className="text-[11px] text-slate-500">
               {t('generate.selectedCount', { selected: selectedCount, total: preview.rewrites.length })}
             </span>
