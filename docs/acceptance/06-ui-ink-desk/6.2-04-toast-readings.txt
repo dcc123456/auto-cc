@@ -1,0 +1,144 @@
+═══════════════════════════════════════════════════════════════════════════════
+6.2-04 形态① 的 1-B —— 左下角浮层 toast：口径、读数与画面（第二十四片）
+═══════════════════════════════════════════════════════════════════════════════
+
+① 这一片只干一件事
+───────────────────────────────────────────────────────────────────────────────
+09 稿形态① 有两条腿：1-A 是按钮自带回执（转针 → 对勾 → 回落，第二十二片已经接上），
+1-B 是**左下角那一只 toast**。稿里给它的入场条件写得很死：
+"只有当结果需要离开当前视野才能看到时，才在左下角补一只 toast"，
+并且"不抢焦点、8 秒自动消失、同一时刻只允许一只（后来的顶掉先来的）、鼠标移上去计时暂停"。
+
+本轮之前 `overlays.tsx` 里那只叫 `Toast` 的原件是**贴在控件旁边的一行 inline span**——
+它既不是 1-A（1-A 由 `useDeskResult` 长在按钮身上）也不是 1-B（不贴左下角、不会自己消失、
+没有单例），而且**零消费者**。所以这一片把它换成稿子真正画的那一只，并接上两条真实消费者。
+
+
+② 通道与前提
+───────────────────────────────────────────────────────────────────────────────
+- 活体面：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`，CDP 10222，渲染层 5173，
+  视口 1200×772 / dpr 2。全程 `document.visibilityState = hidden`（用户不在场，窗口没带到前台）。
+- 触发口只用本机演示文档（`resume.export.seedDemo` → `resume.export.toPdf`，落
+  `tmp/v6-userdata/exports/`）与知识库备份（`kb.profile.exportBackup`，落被忽略的 `tmp/v6c/`），
+  外加既有的「注入失败导出」入口（对不存在的文档调 `toPdf`，主进程回 `AppErrorPayload`）。
+  不碰任何真实平台（§7.2）。
+- 探针：`tmp/v6c/toast24.mjs`（六条行为判据）/ `toast24b.mjs`（计时 + 悬停 + 八张画面）/
+  `toast24c.mjs`（导出 PDF 那一路）。三份都在工作区之外，不进仓库（§6.4）。
+
+
+③ 测量口径（两条，都是这一片新学到的）
+───────────────────────────────────────────────────────────────────────────────
+1. **动画冻结会让 toast 在截图里根本不存在**。窗口 hidden 时动画时钟不推进，
+   `animate-rise` 卡在 from 帧（`translateY(6px)` + `opacity: 0`）。第一轮读数因此拿到
+   `offsetBottomFromMain = 8`（少 6px）而不是 14，画面里也拍不到它。
+   处置与第二十三片同一条：注入 `*,*::before,*::after{transition:none!important;animation:none!important}`
+   后再量再拍。自证读数：注入前 `document.getAnimations().length = 12`，注入后 `animation` 计算值 `none 0s`。
+2. **`DeskButton` 的门禁不走原生 `disabled`**。它渲染 `aria-disabled="true"` +
+   `data-disabled-reason="<码>"`，所以 `node.disabled` 读回来是 **false**，
+   而 `node.click()` 被组件自己挡在门口、什么都不发生。
+   第一轮据此误判成"导出 PDF 没长出 toast 是界面缺陷"，实际是**没有演示文档**（`NO_SEED_DOC`）。
+   判闸门要看 `data-disabled-reason`，不要看 `.disabled`。
+3. 隐藏页的 `setTimeout` 被浏览器按 1 秒粒度节流，所以下面那条"8 秒"的实测是 8.5 秒
+   （含 CDP 轮询自身 150–200ms 的粒度）。这一片不拿这个差值当缺陷。
+
+
+④ 落点与外观（毡案 / 墨案各一次，同一探针）
+───────────────────────────────────────────────────────────────────────────────
+两色 × 两主题四组读数完全同构，只有令牌换档：
+
+  条目                     毡案 (light)                墨案 (dark)
+  position / z-index       absolute / 30               absolute / 30
+  距主区左缘                18px                        18px
+  距状态条上缘              14px                        14px
+  字号 / 圆角 / 内边距       12px / 7px / 8px 13px       同左
+  卡片底色 bg-ink-800       rgb(242, 239, 230)          rgb(19, 28, 35)
+  jade 文案                rgb(31, 98, 68)  = jade-ink  rgb(79, 183, 138) = jade-ink
+  seal 文案                rgb(150, 41, 15) = seal-ink  rgb(239, 122, 85) = seal-ink
+  jade 描边（/50 压在卡底）  rgba(141, 180, 159)         rgba(49, 106, 86)
+  seal 描边（/50 压在卡底）  rgba(217, 148, 131)         rgba(122, 56, 46)
+
+- 与稿子的差异只有一处，且是**上一片立的规矩压过来的**：09 稿写 `color: var(--jade)`，
+  实现走 `text-jade-ink` / `text-seal-ink`。toast 是 12px 文案，按 spec 6.1-06 的档位判据
+  （≥12px 吃 4.5:1）色相档在毡案只有 3.2~3.7，够不到门槛；`-ink` 档在卡底上是 5.0 以上。
+  描边仍走色相档（它是线，不是字）。
+- 动效：稿子给 toast 写 180ms 上滑，仓库里 `--animate-rise` 是 0.22s 一条关键帧
+  （spec 6.2-09 规定动效只在 `globals.css` 定义一处）。这一片复用同一条，不为 40ms 再造一帧。
+
+
+⑤ 六条行为判据（09 稿形态① 1-B + 浮层纪律表）
+───────────────────────────────────────────────────────────────────────────────
+1. 长出来了（jade）：点「导出 PDF」→ `[data-action=resume-export-toast]`，
+   文案 `已导出 PDF · /Users/dcc/…/tmp/v6-userdata/exports/resume-demo-classic.pdf`，
+   `count = 1`、`opacity = 1`、`fontSize 12px`、`color rgb(79, 183, 138)`（墨案）。
+2. 8 秒自动回落：从看见到节点消失实测 **8500ms**（含 ③-3 的节流与轮询粒度）。
+3. 悬停暂停：第 3 秒把指针移上去，再等 9 秒（累计 12 秒 > 8 秒）节点**仍在**；
+   移开后实测 **5910ms** 收起 ≈ 剩下的那一截 5 秒，而不是重新发 8 秒。
+   派发的是页面内 `pointerover` / `mouseover`（窗口 hidden 时 CDP 可信输入不落页，§9 2.1-12 那条），
+   React 的 `onMouseEnter` 认这套合成事件——判据看的是计时行为，不是返回值。
+4. 同一时刻只 1 只：先顶一只 jade、立刻点「注入失败导出」顶一只 seal，
+   `document.querySelectorAll('[data-toast]').length` 恒为 **1**，且 `data-action` 已是 `resume-fail-toast`。
+5. seal 不自动收：seal 那一只挂到 **11 秒**仍在（`sealStillUpAfter11s` 与原读数逐位一致）。
+   这条与 spec 6.2-02 的结果态同一条理由：失败必须人读过。
+6. Esc 关掉：`window` 上派发 `keydown: Escape` → 250ms 后 `[data-toast]` 为 null。
+   层级由 `overlays.tsx` 新加的 `escLayers` 表管：toast 10 < 抽屉 20 < 弹窗 30，
+   一次 Esc 只放最上层那一只（纪律表第 4 行）。抽屉与弹窗原先各自 `window.addEventListener`，
+   再加第三只就会一次 Esc 全塌，这一片把三者收进同一张表（§2.2）。
+   **注**：抽屉/弹窗当下仍零消费者，所以"分层"只有 toast 这一层是活体取到的，
+   两层互斥那一条只能等 6.2-05 落地后复跑。
+
+- 复跑（改完 `Modal` 的 Esc 语义与 `neverClose` 之后，同一探针换名 `toast24d.mjs`）：几何 `leftGap 18 / bottomGap 14`、
+  `position absolute`、`zIndex 30`、`fontSize 12px`、jade 墨案 `rgb(79, 183, 138)`、`bg rgb(19, 28, 35)`、
+  `count = 1`、`activeElement = BODY`，Esc 之后 `[data-toast]` 回 null ——即上面 1/4/6 三条判据在收拢之后仍成立。
+  收尾把这一轮自己注入的抑制样式摘掉（`style` 节点回到 2 份）、主题留墨案、页面无残留 toast。
+
+不抢焦点这条按稿子的意思验到能验的边界：toast 节点 `role="status"`、无 `autoFocus`，
+实测 `document.activeElement.tagName = BODY`（渲染前后焦点没被抢走）。
+
+
+⑥ 改动清单
+───────────────────────────────────────────────────────────────────────────────
+A. `packages/renderer/src/deskToast.ts`（新）：模块级汇流（`pushDeskToast` / `clearDeskToast` /
+   `useDeskToast`），画法照 `deskStatus.ts` 与 `theme.ts`。只存"当前那一只"，不做队列——
+   单例由通道自己保证，而不是靠每只面板自觉。
+B. `ui/overlays.tsx`：`Toast` 换成 1-B 那一只（不接受 props，内容现读汇流；jade 8 秒、
+   seal 不自动收、悬停暂停记剩余、Esc 关掉、`absolute bottom-[14px] left-[18px] z-30`）。
+   同时把 Esc 收拢成 `escLayers` 层级表，`useOverlayBehavior` 多一个 `lockScroll` 参数：
+   弹窗锁底层滚动、**抽屉不锁**（纪律表第 3 行"边看边改"），原先两者都锁。
+   另一处顺带纠偏：`Modal` 的 Esc 现在跟着 `dismissOnScrim` 走（不许点掉也就不许按掉），
+   原先无论点不点得掉 Esc 都收。两者当下零消费者，此改动无活体影响。
+C. `App.tsx`：`<main>` 加 `relative` 并挂 `<Toast />` 一只——六张视图共用同一个出口，
+   面板不许各自长 toast 容器。
+D. 两条消费者（都是稿子"适用"清单里的"导出"）：
+   `ResumePanel.exportPdf` 成功 → jade，文案 `resume.exportToast`（带落点路径）；
+   `ResumePanel.injectFailure` 结构化失败 → seal，文案 `resume.failToast`（带主进程原因）；
+   `KbPanel.exportBackup` 成功 → jade，复用既有 `kb.exportDone` 那一句（`backupLine` 抽出来
+   给状态行与 toast 共用，不留第二份文案）。
+E. 文案四键补齐 zh-CN / en：`resume.exportToast`、`resume.failToast`（新增），
+   `kb.exportDone`（沿用）。占位符实参齐备，`pnpm lint` 第 3 节机检过。
+
+
+⑦ 画面证据（8 张，md5 互异）
+───────────────────────────────────────────────────────────────────────────────
+整窗（1200×772 @2 = 2400×1544）看位置，裁切（toast 外扩 12px @2）看颜色与文案：
+  6.2-04-toast-jade-light.png          936a4dfd…  整窗，毡案
+  6.2-04-toast-jade-light-detail.png   c9619c1e…  裁切，毡案 jade：BadgeCheck + 已导出 0 条到 tmp/v6c/kb-backup-toast.json
+  6.2-04-toast-jade-dark.png           bdbed8f4…  整窗，墨案
+  6.2-04-toast-jade-dark-detail.png    eade300c…  裁切，墨案 jade
+  6.2-04-toast-seal-light.png          f7be27d5…  整窗，毡案
+  6.2-04-toast-seal-light-detail.png   c129b9bd…  裁切，毡案 seal：CircleAlert + 导出失败 · 简历文档不存在：resume-fail-injected
+  6.2-04-toast-seal-dark.png           5e728b96…  整窗，墨案
+  6.2-04-toast-seal-dark-detail.png    6c93e922…  裁切，墨案 seal
+（md5 前缀见 `md5 -q` 输出，收尾时按 §9 5.10-18 那条跑过一遍去重：八张互不相同。）
+
+
+⑧ 未覆盖 / 立条目跟踪
+───────────────────────────────────────────────────────────────────────────────
+- 稿子 1-B 那句文案的第二段是"· 在访达中显示"——它要一条 reveal 口
+  （`shell.showItemInFolder`），**当前 `RENDERER_ALLOWLIST` 里没有**，加它要动 IPC 白名单
+  与主进程 service，不属于样式片。本轮 toast 只报落点路径，不假装能打开。立 **6.2-12** 跟踪。
+- 抽屉 / 弹窗仍零消费者 → 形态③④⑤ 那三格还欠（6.2-04 保持 `[!]`），
+  Esc 分层的"两层互斥"也只能等它们有消费者再取活体。
+- 悬停暂停用的是页面内合成事件（窗口不在前台时拿不到可信鼠标），
+  真实鼠标那一帧仍等用户在场（与第二十二片按下态同一批欠账，记在 6.2-01）。
+- toast 的宽度由文案撑开（备份路径长 → 542px 两行），稿子没给上限。
+  本轮不加 `max-w`，等 6.2-12 那条 reveal 口一起做时一并定口径。
