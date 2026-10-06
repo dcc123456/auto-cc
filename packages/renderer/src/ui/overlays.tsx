@@ -146,6 +146,21 @@ export interface ModalProps {
   dismissOnScrim?: boolean;
   /** 风险级：seal 时卡片描边换朱砂，只用于外发/清空这类签字。 */
   tone?: 'neutral' | 'seal';
+  /**
+   * 挂在 dialog 节点上的 `data-testid`：迁移到本原件之前的旧验收断言指着各自的测试名
+   * （如 spec 5.9-06 的 `privacy-notice`），换形状不许把别人的验收通道弄断。
+   */
+  testId?: string;
+  /**
+   * 附加的 `data-*` 读数（与 `Banner` 的 `markers` 同形）：弹窗常常要带状态位，
+   * 让 harness 直接断言，而不是靠调用方在 children 里塞一个隐藏节点。
+   */
+  markers?: Record<string, string>;
+  /**
+   * 右上角 ✕ 的无障碍名（调用方翻译好传入）。标题常常带图标、不是一个字符串，
+   * 原件从 `title` 里推不出名字，而这只 ✕ 是弹窗唯一的一条"关掉算了"退路，读屏必须能报出它。
+   */
+  closeLabel?: string;
   /** 底部按钮区（由调用方放 DeskButton，保证五态规则只有一个实现）。 */
   footer?: ReactNode;
   children: ReactNode;
@@ -164,6 +179,9 @@ const neverClose = (): void => {};
  * @param width 尺寸档
  * @param dismissOnScrim 点遮罩是否收起（同时决定 Esc 是否收得掉：不许点掉也就不许按掉）
  * @param tone 是否风险级
+ * @param testId 附加的 `data-testid`（迁移旧验收用）
+ * @param markers 附加 `data-*` 读数
+ * @param closeLabel ✕ 的无障碍名
  * @param footer 底部按钮区
  * @param children 正文
  */
@@ -175,11 +193,18 @@ export function Modal({
   width = '560',
   dismissOnScrim = false,
   tone = 'neutral',
+  testId,
+  markers,
+  closeLabel,
   footer,
   children,
 }: ModalProps) {
   useOverlayBehavior(open, ESC_MODAL, dismissOnScrim ? onClose : neverClose);
   if (!open) return null;
+  const headingId = `${action}-modal-title`;
+  const markerAttrs = Object.fromEntries(
+    Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
+  ) as Record<string, string>;
   return (
     <>
       <div className={SCRIM} {...(dismissOnScrim ? { onClick: onClose } : {})} />
@@ -187,19 +212,25 @@ export function Modal({
         <div
           role="dialog"
           aria-modal="true"
+          aria-labelledby={headingId}
           data-action={`${action}-modal`}
+          {...markerAttrs}
+          {...(testId ? { 'data-testid': testId } : {})}
           className={`flex max-h-full max-w-full ${MODAL_WIDTH[width]} flex-col overflow-hidden rounded-sheet border bg-ink-850 shadow-sheet animate-rise ${
             tone === 'seal' ? 'border-seal/55' : 'border-line-strong'
           }`}
         >
           <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-3">
-            <h3 className="text-sm font-semibold text-slate-50">{title}</h3>
+            <h3 id={headingId} className="text-sm font-semibold text-slate-50">
+              {title}
+            </h3>
             {/* 关掉那颗只在"可安全取消"的弹窗上出现：`dismissOnScrim` 一只 prop 同时管三条退路
                 （点遮罩 / 按 Esc / 按右上角的 ✕），必须表态的那几只因此一条退路都不留（09 稿⑤-1/⑤-5）。 */}
             {dismissOnScrim ? (
               <button
                 type="button"
                 data-action={`${action}-close`}
+                aria-label={closeLabel ?? (typeof title === 'string' ? title : undefined)}
                 onClick={onClose}
                 className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
               >

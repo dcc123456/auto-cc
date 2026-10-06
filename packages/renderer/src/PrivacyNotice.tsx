@@ -4,7 +4,12 @@
  * 为什么是"补一屏"而不是给 `ConsentCard` 加两句：2.7-e 那张卡的判据是**某个平台的自动化风险**，
  * 由"要动手了"这个事件触发、签字写进 `automation_consents` 表、作用域跟着 platform 走——它回答不了
  * "这个 app 把我的数据放在哪儿、什么时候会离开本机"。5.9-06 要的正是后者，而且要出现在**首屏**，
- * 所以这是一层独立的、第一次启动就挡在工作台前面的声明；两处共用卡片形状，不共用事实（plan §7.7.1 F24）。
+ * 所以这是一层独立的、第一次启动就挡在工作台前面的声明；两处共用 `Modal` 原件（同一套遮罩、Esc 层级、
+ * 滚动锁、footer 装配），不共用事实（plan §7.7.1 F24）。
+ *
+ * 它**不占 09 稿"全 app 只允许 5 只弹窗"的那笔预算**：这一屏本来就是 `role="dialog"` + `aria-modal` 的
+ * 挡路浮层，只是自己手搓了一套 `fixed inset-0 z-50`——换到原件上是把第二套基础设施删掉，不是新增第 6 只
+ * 弹窗（判据同一句："不做完阅读就无法负责"）。记录见 plan §3.9。
  *
  * 确认状态落在渲染层 localStorage 而不是新开一张表：与 `auto-cc.lang`、`auto-cc.metrics.range`
  * 同一条判据（plan §7.6.2 决策十八）——它不驱动任何业务动作，主进程不需要知道它，为"看过没有"
@@ -16,6 +21,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatClock } from './format';
 import { DeskButton } from './ui/controls';
+import { Modal } from './ui/overlays';
 
 /** 确认标记键：与 `auto-cc.lang` 同一份 localStorage，前缀同为 `auto-cc.`。 */
 const PRIVACY_ACK_STORAGE_KEY = 'auto-cc.privacy.acknowledged';
@@ -131,52 +137,55 @@ export function PrivacyNotice({ onClose, isReopened }: PrivacyNoticeProps) {
   const termsLines = [t('privacy.termsSelfUse'), t('privacy.termsNoWarranty'), t('privacy.termsUpdateChoice')];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/95 p-6"
-      data-testid="privacy-notice"
-      data-reopened={isReopened ? 'true' : 'false'}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('privacy.heading')}
-    >
-      <div className="my-auto w-full max-w-2xl rounded-xl border border-line-strong bg-ink-900 p-5">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-          <ShieldCheck size={16} className="text-jade" />
+    <Modal
+      action="privacy"
+      open
+      width="640"
+      testId="privacy-notice"
+      markers={{ reopened: isReopened ? 'true' : 'false' }}
+      // 重看那一次只是关掉一屏，三条退路全给；首启动那一次是"在本机写下表态"，一条都不留（09 稿⑤ 的入场判据）。
+      dismissOnScrim={isReopened}
+      closeLabel={t('privacy.close')}
+      onClose={onClose}
+      title={
+        <span className="flex items-center gap-2">
+          <ShieldCheck size={16} aria-hidden="true" className="text-jade" />
           {t('privacy.heading')}
-        </h2>
-        <p className="mt-1 text-[11px] text-slate-500">{t('privacy.intro')}</p>
-
-        <div className="mt-3 rounded-md border border-jade/40 bg-jade-wash px-3 py-2">
-          <p className="text-[11px] font-semibold text-jade">{t('privacy.keyPromise')}</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-slate-300">{t('privacy.keyPromiseDetail')}</p>
-        </div>
-
-        <Section title={t('privacy.dataTitle')} lines={dataLines} />
-        <Section title={t('privacy.netTitle')} lines={networkLines} />
-        <Section title={t('privacy.resumeTitle')} lines={resumeLines} />
-        <Section title={t('privacy.riskTitle')} lines={riskLines} />
-        <Section title={t('privacy.termsTitle')} lines={termsLines} />
-
-        <p className="mt-3 flex items-center gap-1 text-[11px] text-slate-500">
-          <FileText size={12} />
-          {t('privacy.licensesPointer')}
-        </p>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {/* 首启动那一次是"在本机写下表态"（localStorage 的确认标记），归 amber；重看那一次只是关掉这一屏。 */}
-          <DeskButton action="privacy-acknowledge" variant={isReopened ? 'ghost' : 'amber'} onClick={onClose}>
-            <ShieldCheck size={14} />
-            {isReopened ? t('privacy.close') : t('privacy.acknowledge')}
-          </DeskButton>
+        </span>
+      }
+      footer={
+        <>
           {isReopened && (
-            <p className="text-[11px] text-slate-500" data-testid="privacy-already-acknowledged">
+            <p className="mr-auto text-[11px] text-slate-500" data-testid="privacy-already-acknowledged">
               {t('privacy.acknowledgedRow', {
                 time: formatClock(readAcknowledgedAt(), t('privacy.never')),
               })}
             </p>
           )}
-        </div>
+          <DeskButton action="privacy-acknowledge" variant={isReopened ? 'ghost' : 'amber'} onClick={onClose}>
+            <ShieldCheck size={14} />
+            {isReopened ? t('privacy.close') : t('privacy.acknowledge')}
+          </DeskButton>
+        </>
+      }
+    >
+      <p className="text-[11px] text-slate-500">{t('privacy.intro')}</p>
+
+      <div className="mt-3 rounded-md border border-jade/40 bg-jade-wash px-3 py-2">
+        <p className="text-[11px] font-semibold text-jade">{t('privacy.keyPromise')}</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-300">{t('privacy.keyPromiseDetail')}</p>
       </div>
-    </div>
+
+      <Section title={t('privacy.dataTitle')} lines={dataLines} />
+      <Section title={t('privacy.netTitle')} lines={networkLines} />
+      <Section title={t('privacy.resumeTitle')} lines={resumeLines} />
+      <Section title={t('privacy.riskTitle')} lines={riskLines} />
+      <Section title={t('privacy.termsTitle')} lines={termsLines} />
+
+      <p className="mt-3 flex items-center gap-1 text-[11px] text-slate-500">
+        <FileText size={12} />
+        {t('privacy.licensesPointer')}
+      </p>
+    </Modal>
   );
 }
