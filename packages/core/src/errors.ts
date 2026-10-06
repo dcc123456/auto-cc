@@ -86,6 +86,11 @@ export type AppErrorCode =
   // 由调用方决定是否重试。合成一个码会让界面对两者说同一句谎话。
   | 'LLM_UNAVAILABLE'
   | 'LLM_REQUEST_FAILED'
+  // 模型设置与密钥保管（spec 7.1-04 / 7.1-08）。两个码都不该被折进 `INVALID_ARGUMENT`：
+  // `SECRET_UNREADABLE` 是「文件在但我解不开」（换机 / Keychain 变、口令换），处置是让人重填一次且**保留原文件**；
+  // `SETTING_NOT_ALLOWED` 是「这个键不允许从界面写盘」，属于装配缺陷，处置是改代码而不是改输入。
+  | 'SECRET_UNREADABLE'
+  | 'SETTING_NOT_ALLOWED'
   // 简历导出（spec 3.3-11）：文档缺失 / 非法、内核打印失败（字体缺失、printToPDF 抛错）、落盘不可写
   // 都归这一个码——三者在界面上的处置相同（一句可读中文提示 + 可重试），所以不拆成三个码让界面重复劳动。
   | 'RESUME_EXPORT_FAILED'

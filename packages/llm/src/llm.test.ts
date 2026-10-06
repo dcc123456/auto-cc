@@ -48,7 +48,13 @@ async function boot(config: Partial<LlmConfig> = {}, key = 'sk-test-abcdef'): Pr
 describe('llm.chat 的可用性判定（spec 2.5-01 前提：回落必须是可测的）', () => {
   it('配置齐全：status 报可用，端点由前缀拼出且不带重复斜杠', async () => {
     const { llm } = await boot();
-    expect(llm.status()).toEqual({ available: true, missing: [], model: 'test-model', endpoint: ENDPOINT });
+    expect(llm.status()).toEqual({
+      available: true,
+      missing: [],
+      model: 'test-model',
+      endpoint: ENDPOINT,
+      keySource: 'env',
+    });
   });
 
   it('baseUrl 带尾斜杠时不拼出双斜杠', async () => {

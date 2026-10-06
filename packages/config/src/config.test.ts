@@ -35,9 +35,10 @@ describe('config 服务（四层配置）', () => {
     config.setRuntime('logger', { buffer: 50 });
 
     const trace = config.trace('logger', { schema: LoggerConfig, envMap: ENV_MAP });
-    expect(trace.layers.map((layer) => layer.scope)).toEqual(['default', 'file', 'env', 'runtime']);
+    expect(trace.layers.map((layer) => layer.scope)).toEqual(['default', 'file', 'persisted', 'env', 'runtime']);
     expect(trace.layers[1]?.values).toEqual({ level: 'info', buffer: 10 });
-    expect(trace.layers[2]?.values).toEqual({ level: 'warn' });
+    expect(trace.layers[2]?.values).toEqual({});
+    expect(trace.layers[3]?.values).toEqual({ level: 'warn' });
     expect(trace.value).toEqual({ level: 'warn', buffer: 50 });
   });
 

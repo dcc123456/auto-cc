@@ -65,6 +65,7 @@ describe('llm.embed 的可用性判定（spec 4.3-08：降级必须是可测的�
       model: 'BAAI/bge-m3',
       endpoint: ENDPOINT,
       dimensions: null,
+      keySource: 'env',
     });
   });
 

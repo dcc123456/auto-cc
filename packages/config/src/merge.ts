@@ -1,11 +1,11 @@
 /**
- * 配置分层合并（spec 1.3-02）：默认 < 文件 < 环境变量 < 运行时覆盖。
+ * 配置分层合并（spec 1.3-02 + 7.1-05）：默认 < 文件 < 持久层 < 环境变量 < 运行时覆盖。
  *
  * 纯函数、不读磁盘也不碰 process，因此三端行为可用单测覆盖，
  * 挂载期的 IO 留给 `@auto-cc/plugin-config` 的 service 部分。
  */
 
-export type ConfigScope = 'default' | 'file' | 'env' | 'runtime';
+export type ConfigScope = 'default' | 'file' | 'persisted' | 'env' | 'runtime';
 
 export interface ConfigLayer {
   scope: ConfigScope;

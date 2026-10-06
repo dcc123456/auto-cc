@@ -19,8 +19,14 @@ import { filesIn, isTestOnlyModule, packageDirs, relative } from './internal/sca
 
 /** 唯一的模型出口包：只有这里的源码允许出现下列痕迹。 */
 const LLM_PACKAGE = 'llm';
-/** 允许的 `llm.*` provider 名（超出即视为第二套客户端）。 */
+/** 模型出口（真正发请求的那两只）。 */
 const ALLOWED_PROVIDERS = ['chat', 'embed'];
+/**
+ * `llm.settings` 是 7.1 加的配置模块，不是第三个出口：它一个字节都不发，连通性测试走 `llm.chat`。
+ * 所以白名单给它单开一格，并额外守一条下面那个「不许碰传输骨架」的断言——
+ * 哪天它 import 了 `http.js` 或自己 `fetch`，禁令就破功了，这里立刻红。
+ */
+const SETTINGS_PROVIDER = 'settings';
 
 /**
  * 只服务于测试的文件（`.test.ts` / `.spec.ts` / `test-doubles.ts`）不算"真实实现"。
@@ -50,6 +56,8 @@ const allFiles = (
 
 /** 每个 `llm.<name>` provider 的声明者位置，用于「每个名字只允许一个声明者」的断言。 */
 const providerDeclarations = new Map<string, string[]>();
+/** 声明 `llm.settings` 的那个文件的**源码路径**（绝对），供下面「不许自己够传输层」那条断言读文件。 */
+const settingsSources: string[] = [];
 
 for (const file of allFiles) {
   const source = await readFile(file, 'utf8');
@@ -66,6 +74,7 @@ for (const file of allFiles) {
         ...(providerDeclarations.get(declared) ?? []),
         `${relative(file)}:${String(index + 1)}`,
       ]);
+      if (declared === SETTINGS_PROVIDER) settingsSources.push(file);
     }
     if (isLlmPackage) return;
     for (const [pattern, label] of MODEL_TRACES) {
@@ -80,10 +89,10 @@ for (const file of allFiles) {
 }
 
 for (const [name, declarations] of providerDeclarations) {
-  if (!ALLOWED_PROVIDERS.includes(name)) {
+  if (!ALLOWED_PROVIDERS.includes(name) && name !== SETTINGS_PROVIDER) {
     failures.push(
       `出现了白名单外的 llm.${name} 服务（${declarations.join('、')}）：` +
-        `模型出口只允许 ${ALLOWED_PROVIDERS.map((allowed) => `llm.${allowed}`).join(' / ')}，` +
+        `模型出口只允许 ${ALLOWED_PROVIDERS.map((allowed) => `llm.${allowed}`).join(' / ')}（外加不发请求的 llm.settings），` +
         '新增能力请扩展这两个服务而不是再开一套（AGENTS.md §2.7）',
     );
     continue;
@@ -94,9 +103,23 @@ for (const [name, declarations] of providerDeclarations) {
     );
   }
 }
-// 两个都必须存在：少了任何一个就是「机检在守一条已经不成立的规则」，而不是「仓库变干净了」。
-for (const name of ALLOWED_PROVIDERS) {
+// 三个都必须存在：少了任何一个就是「机检在守一条已经不成立的规则」，而不是「仓库变干净了」。
+for (const name of [...ALLOWED_PROVIDERS, SETTINGS_PROVIDER]) {
   if (!providerDeclarations.has(name)) failures.push(`provider 名 llm.${name} 一个声明者都没有。`);
+}
+
+/**
+ * `llm.settings` 的额外一条（spec 7.1-10 的机检化）：连通性测试必须**经 `llm.chat` 要结果**，
+ * 所以它不许 import 传输骨架 `http.js`——碰了它就从"配置模块"变成第二个客户端，白名单白开。
+ */
+for (const file of settingsSources) {
+  const importLine = (await readFile(file, 'utf8')).split('\n').find((line) => /['"]\.\/http\.js['"]/.test(line));
+  if (importLine) {
+    failures.push(
+      `llm.settings 的实现 import 了传输骨架：${importLine.trim()}（${relative(file)}）——` +
+        '连通性测试请经 `llm.chat.complete()` 要结果（AGENTS.md §2.7 / spec 7.1-10）',
+    );
+  }
 }
 
 if (failures.length) {
@@ -106,5 +129,5 @@ if (failures.length) {
 }
 console.log(
   `✔ LLM 入口唯一性检查通过（扫描 ${String(allFiles.length)} 个文件，` +
-    `llm.${ALLOWED_PROVIDERS.join(' / llm.')} 各自声明者唯一，模型端点只在 packages/${LLM_PACKAGE}）`,
+    `llm.${ALLOWED_PROVIDERS.join(' / llm.')} 各自声明者唯一且未碰传输骨架，模型端点只在 packages/${LLM_PACKAGE}）`,
 );

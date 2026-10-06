@@ -17,6 +17,7 @@
 import { AppError, Service, redactText, type Context } from '@auto-cc/core';
 import { z } from 'zod';
 import { joinEndpoint, postJson } from './http.js';
+import { readModelKey, type KeyProbe } from './key.js';
 
 /** 消息角色：P2 的话术生成只用 system + user，assistant/tool 留给 P5 的对话循环。 */
 export const chatRoleSchema = z.enum(['system', 'user']);
@@ -42,7 +43,10 @@ export const llmSchema = z.strictObject({
   baseUrl: z.url().nullable().default(null),
   /** 模型名，`null` = 未配置（与 `baseUrl` 同等对待：未配置即不可用，不做默认值猜测）。 */
   model: z.string().min(1).nullable().default(null),
-  /** API key 所在的**环境变量名**（默认 `AUTO_CC_LLM_API_KEY`）；清单里只写变量名，不写 key 本身。 */
+  /**
+   * API key 的**兜底环境变量名**（默认 `AUTO_CC_LLM_API_KEY`）；清单里只写变量名，不写 key 本身。
+   * 读取顺序是「密钥库 → 这个变量」（spec 7.1-07）：界面上填的走密钥库，这条口子留给 CI 与验收复跑。
+   */
   keyEnv: z.string().min(1).default('AUTO_CC_LLM_API_KEY'),
   /** 单次请求的超时（毫秒）。取 `AbortSignal.timeout`，到点以 `LLM_REQUEST_FAILED` 失败而不是吊死。 */
   timeoutMs: z.number().int().min(1000).max(120000).default(8000),
@@ -76,6 +80,11 @@ export interface LlmStatus {
   missing: Array<'baseUrl' | 'model' | 'apiKey'>;
   model: string | null;
   endpoint: string | null;
+  /**
+   * 当前这把 key 从哪来（spec 7.1-07）：密钥库（界面里存的）> 环境变量（`keyEnv` 兜底口子）> 没有。
+   * 报出来是为了让界面能说清"这次用的是你填的那把还是终端里 export 的那把"。
+   */
+  keySource: 'secret' | 'env' | 'none';
 }
 
 /**
@@ -100,11 +109,12 @@ export class LlmChatService extends Service {
   }
 
   /**
-   * 读取 API key（环境变量）。
-   * @returns 密钥明文；未设置时为空串，交由 `status()` 判为不可用
+   * 读取 API key：**先问密钥库**（`config` 那一格，界面上填的），`keyEnv` 指向的环境变量只作兜底
+   * （CI 与验收复跑的口子和 AGENTS.md §8.6 的"本地配置文件"两条都靠它）。
+   * @returns 明文与出处；两处都没有时 `value` 是空串，交由 `status()` 判为不可用
    * @throws 不抛异常
    */
-  private readKey = (): string => process.env[this.options.keyEnv]?.trim() ?? '';
+  private readKey = (): KeyProbe => readModelKey(this.ctx, 'llm.chat', this.options.keyEnv);
 
   /**
    * 当前是否可用，以及不可用时缺了哪几样。**纯本地判定，不发任何网络请求。**
@@ -114,12 +124,14 @@ export class LlmChatService extends Service {
     const missing: LlmStatus['missing'] = [];
     if (!this.options.baseUrl) missing.push('baseUrl');
     if (!this.options.model) missing.push('model');
-    if (!this.readKey()) missing.push('apiKey');
+    const key = this.readKey();
+    if (!key.value) missing.push('apiKey');
     return {
       available: missing.length === 0,
       missing,
       model: this.options.model,
       endpoint: this.options.baseUrl ? completionsUrl(this.options.baseUrl) : null,
+      keySource: key.source,
     };
   };
 
@@ -134,9 +146,9 @@ export class LlmChatService extends Service {
     if (!status.available) {
       throw new AppError(
         'LLM_UNAVAILABLE',
-        `模型服务未配置，缺 ${status.missing.join(' / ')}（key 从环境变量 ${this.options.keyEnv} 读取）`,
+        `模型服务未配置，缺 ${status.missing.join(' / ')}（key 可在「信任」工作台里填，也可从环境变量 ${this.options.keyEnv} 兜底）`,
         'llm.chat',
-        { missing: status.missing, keyEnv: this.options.keyEnv },
+        { missing: status.missing, keyEnv: this.options.keyEnv, keySource: status.keySource },
       );
     }
     const parsed = chatRequestSchema.safeParse(request);
@@ -159,7 +171,7 @@ export class LlmChatService extends Service {
     // 传输骨架与 `llm.embed` 共用（§2.2）：这里只负责「请求体长什么样」和「回复怎么读」。
     const payload = (await postJson({
       endpoint: status.endpoint as string,
-      apiKey: this.readKey(),
+      apiKey: this.readKey().value,
       body,
       timeoutMs: this.options.timeoutMs,
       source: 'llm.chat',
@@ -208,3 +220,6 @@ declare module '@auto-cc/core' {
 
 /** 同包的向量出口（spec 4.3-07 / 08）：包外只经这一个入口用它（§4.2）。 */
 export * from './embed.js';
+
+/** 同包的模型配置模块（spec 7.1-07 ~ 7.1-10）：服务商目录、掩码读数、保存与连通性测试。 */
+export * from './settings.js';

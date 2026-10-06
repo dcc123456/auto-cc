@@ -17,6 +17,7 @@
 import { AppError, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
 import { joinEndpoint, postJson } from './http.js';
+import { readModelKey, type KeyProbe } from './key.js';
 
 /**
  * `llm.embed` 的可调项。
@@ -60,6 +61,8 @@ export interface LlmEmbedStatus {
   endpoint: string | null;
   /** 配置里显式要求的维度，`null` = 用模型默认维度（不等于「维度未知所以不可用」）。 */
   dimensions: number | null;
+  /** 当前这把 key 从哪来（spec 7.1-07）：密钥库（界面上存的）> 环境变量（`keyEnv`）> 没有。 */
+  keySource: 'secret' | 'env' | 'none';
 }
 
 /** 一次编码的结果。 */
@@ -119,11 +122,11 @@ export class LlmEmbedService extends Service {
   }
 
   /**
-   * 读取 API key（环境变量）。
-   * @returns 密钥明文；未设置时为空串，交由 `status()` 判为不可用
+   * 读取 API key：先问密钥库（界面上填的那把），`keyEnv` 的环境变量只作兜底（spec 7.1-07）。
+   * @returns 明文与出处；两处都没有时 `value` 是空串
    * @throws 不抛异常
    */
-  private readKey = (): string => process.env[this.options.keyEnv]?.trim() ?? '';
+  private readKey = (): KeyProbe => readModelKey(this.ctx, 'llm.embed', this.options.keyEnv);
 
   /**
    * 当前是否可用，以及不可用时缺了哪几样。**纯本地判定，不发任何网络请求。**
@@ -133,13 +136,15 @@ export class LlmEmbedService extends Service {
     const missing: LlmEmbedStatus['missing'] = [];
     if (!this.options.baseUrl) missing.push('baseUrl');
     if (!this.options.model) missing.push('model');
-    if (!this.readKey()) missing.push('apiKey');
+    const key = this.readKey();
+    if (!key.value) missing.push('apiKey');
     return {
       available: missing.length === 0,
       missing,
       model: this.options.model,
       endpoint: this.options.baseUrl ? joinEndpoint(this.options.baseUrl, 'embeddings') : null,
       dimensions: this.options.dimensions,
+      keySource: key.source,
     };
   };
 
@@ -161,7 +166,7 @@ export class LlmEmbedService extends Service {
     if (!status.available) {
       throw new AppError(
         'LLM_UNAVAILABLE',
-        `向量服务未配置，缺 ${status.missing.join(' / ')}（key 从环境变量 ${this.options.keyEnv} 读取）`,
+        `向量服务未配置，缺 ${status.missing.join(' / ')}（key 可在「信任」工作台里填，也可从环境变量 ${this.options.keyEnv} 兜底）`,
         'llm.embed',
         { missing: status.missing, keyEnv: this.options.keyEnv },
       );
@@ -178,7 +183,7 @@ export class LlmEmbedService extends Service {
       if (this.options.dimensions !== null) body.dimensions = this.options.dimensions;
       const payload = await postJson({
         endpoint,
-        apiKey: this.readKey(),
+        apiKey: this.readKey().value,
         body,
         timeoutMs: this.options.timeoutMs,
         source: 'llm.embed',
