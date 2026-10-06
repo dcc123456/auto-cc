@@ -1,0 +1,43 @@
+# 2.1-12 macOS / Linux 运行期同表现（C）—— 本文件只记 **mac 半边已取到的读数**
+
+判据原文要求"macOS / Linux 运行期同表现"。`docs/plans/05-chat-agent/plan.md` §7.8.3 对这一行的处置是
+"mac 半边前置已具备；Linux 半边仍缺；Windows 半边现在是新缺口"，并且平台换边的裁定明写**不自行翻状态位**，
+所以本行的状态位保持 `[!]`，本文件只是把 mac 那半的实测读数落档，免得下个窗口从零再探一遍。
+
+宿主：macOS 24.6.0 / arm64，Electron 44.4.5（UA 读数 `auto-cc/44.4.5 Chrome/152.0.7977.130`），CDP 10222，
+fixture 站点 `http://127.0.0.1:10233`（`pnpm fixture`，HTTP 200）。全部操作只走 `window.autoCC` 白名单口
+（`sessions.*` / `browser.page.*` / `shell.*`），没有第二条通道，也没碰真实平台（§7.2）。
+
+## 一、取到的 mac 半边读数（都算"与 Windows 同表现"的正向证据）
+
+1. **会话分区表在 mac 上是同一形状**：`sessions.status()` 回三只平台，`partition` 分别
+   `persist:fixture` / `persist:fixture-alt` / `persist:boss`，`isPersistent: true`，
+   `storagePath` 落在 mac 的 userData 下 `…/tmp/v6-userdata/Partitions/<id>`（Windows 那轮的读数同一表达式）。
+2. **分区隔离在 mac 上成立（这条是本行的核心）**：在视图里导航 `/login?next=/boss`（fixture 写带 Max-Age 的
+   `autocc_session` 持久 cookie）之后，逐平台读数是
+   `fixture-alt = active / cookies=autocc_session` 而 `boss = expired / cookies 无`、`fixture = expired / cookies 无`。
+   三个 `startUrl` 同属一个 origin、cookie 同名，所以"B 读不到 A 的登录态"只能由分区隔离解释——
+   与 Windows 那轮的判定表达式逐字同构（对照 `docs/acceptance/2.1/2.1-04-partition-isolation-1.txt`）。
+3. **内核视图能开能导航能读**：`shell.setKernelViewVisible(true)` + `browser.page.navigate(url)` 后
+   `shell.getStatus().kernelViewUrl = http://127.0.0.1:10233/boss`，`browser.page.snapshot` 与
+   `sessions.probe` 都返回 ok（不是静默失败）。
+
+## 二、没取到的那一半（如实记，不粉饰）
+
+- **跨重启登录态**（Windows 那轮的 2.1-05）：要拿同一份 userData 重启一次才能证。CDP 10222 上活着的实例
+  用的是 `tmp/v6-userdata`，**不是**本轮我为它起的 `tmp/2112/userdata`——按 §9 记过的单实例锁陷阱，
+  后起的那个 `pnpm dev` 静默退出 0、端口根本没换。我没有去杀那个已在跑的实例（它可能是别人正在用的 app），
+  所以 mac 侧的重启那一格**空白**。要补的话：确认没有别的实例占 10222 之后，
+  `AUTO_CC_USER_DATA_DIR=<一份专用目录> pnpm dev` → 登录 → 退出 → 同一份 userData 再起 → 读 `sessions.status()`。
+- **抓取链路（2.3 那一路的 `browser.page.extract` + 入库）在 mac 上没复跑**；
+  `browser.act.*` / `locate.*` 同样只核过白名单在位，没在 mac 上逐项重放。
+- **Linux 半边**：本机没有 Linux userland，仍按字面 BLOCKED。
+- **Windows 半边现在是新缺口**（换边后本机不是 win），这条在 §7.8.3 已经登记。
+
+## 三、顺带记两条活体坑（本窗踩到，属 §9 那一类）
+
+- `browser.page.navigate` 的实参是**一个 URL**（位置参），平台由"当前 `sessions.open` 绑定的那只"决定；
+  把平台名当第一个实参传会得到 `NAVIGATE_URL_REJECTED / 地址无法解析：boss`。
+  因此在同一条活体页面里连续测两只平台时，**登录动作会落进上一次 open 的那只分区**——
+  上面的判定就是照这个事实写的（登录落进 `fixture-alt`，`boss` 保持空），不是笔误。
+- `sessions.status()` 的回值是 `{ ok, value: { platforms: [...] } }`，直接 JSON 打平成 `{}` 的写法读不到东西。
