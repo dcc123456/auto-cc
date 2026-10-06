@@ -81,3 +81,54 @@ CDP `--port 10299`；10222 上那个实例没动、没杀），全程只打本�
 这些行的判定实际是靠同目录的读数文本过的，图是无效的那一半；
 补法要么回 win 宿主重拍、要么在 mac 上按场景逐张重取，属独立一片，本窗不夹带。
 
+
+## 五、2026-10-06 第二次补格：抓取行读数取到了，act.click 的真点仍取不到（原因已定位）
+
+实例写法（`pnpm dev` 起第二份必失败）：`ELECTRON_RENDERER_URL=http://127.0.0.1:5173 Electron packages/main/dist/main.cjs
+--remote-debugging-port=10299 --user-data-dir=$PWD/tmp/2112-c`。原因：`pnpm dev` 自己会拉 vite，而 5173 已被前一份 dev 占用，
+它以 `Error: Port 5173 is already in use` 退出（实测），所以要**复用已在跑的 vite**、只换 CDP 端口与 userData。
+
+三条口径纠正（上一窗按猜的形状作废）：
+1. **bridge 是位置实参**：`browser.act.click` 的 args 声明是 `[spec: LocateSpec]`（`packages/shared/src/bridge.ts:1786`）。
+   把 `{ spec }` 整包传进去，`spec.candidates` 就是 undefined，于是页面里报
+   `PAGE_SCRIPT_FAILED: scanCandidates … reading 'length' of undefined`。`{ spec }` 那个形状属于 **agent 工具层**
+   （`packages/browser/src/act-service.ts:484` 的 `input: z.strictObject({ spec: locateSpecSchema })`），不是 IPC 层。
+2. **返回值是 `{ok:true,value}` / `{ok:false,error}` 信封**（`packages/ipc/src/gateway.ts:69`），渲染层不会 throw，
+   所以"没报错"不等于成功，必须现读 `ok`。
+3. `LocateResultView` 里的候选列表字段名是 **`ranked`**（`bridge.ts:2524`），**没有 `matches`**。
+   上一窗数 `matches` 因此白等 6 秒并把"有没有命中"读成 null。
+
+### 抓取链路（2.3-01 的「容器 × 字段」批量抽取）——本窗取到
+- 声明与 `packages/platform-boss/src/knowledge/boss.json` 的 `capture.list` 同源（容器 `li.card[data-testid=jd-card]`，
+  字段 `a[data-field=title]` 取 href、`data-field=company|salary` 取正文）。
+- 结局：`containers=5`、`rows=5`、`truncated=false`、`frames=[{url:'http://127.0.0.1:10233/boss', ok:true, error:null}]`。
+- 第一行：title「桌面端前端工程师（Electron）」+ attribute `/boss/detail?jobId=1001`（matched:true）、company「星桥科技」、
+  salary「25-40K·14薪」；第二行「React 前端工程师」/`jobId=1002`/「云栖数据」/「30-45K」。
+- 页面自述（内核视图自己的 target 里读）：状态行「状态：已渲染 5 张卡 · 命中 12 条 · 继续滚动可加载更多」、`li.card` 计数 5。
+- 截图 `2.1-12-macos-boss-extract-cards.png`（md5 `d04ce93cb0dd4e1cf573daa97e354dc4`，与批内其他图不同字节）。
+- 一条必须写的坑：**首抽拿到 `containers=0`**。`page.navigate` 与内核视图的首屏装载相撞，返回信封
+  `(-3) loading 'http://127.0.0.1:10233/boss'`（ERR_ABORTED），而卡片是 `/api/jobs` 异步长出来的。
+  判据要写成"先等 `li.card` 出现再抽"，**不许把抽到的 0 行读成"页面没有卡"**。
+- 另一条：拿知识包那条 `cardinality:'many'` 的容器声明去 `locate.find`，返回 `status:'ambiguous'`
+  （reason「与次优候选只差 0 分，小于最小分差 12」）、`chosen:null`。多条同分是 many 容器的常态，
+  所以抓取路径只能用 `page.extract`，不能用 `locate.find` 选容器——不是缺陷，但下一窗别误报成缺陷。
+
+### act.click 的真点——仍没取到，原因定位清楚了
+- 连点三次（含把内核视图显式切到可见之后），服务一律返回 `status:'done' / channel:'cdp' / trusted:true`，
+  `waitedMs` 落在 5346–6005ms，`located.rect` 是 `{x:29, y:337.74, width:61, height:32.09}`、`frameUrl` 为
+  `http://127.0.0.1:10233/locator`（与页面里 `getBoundingClientRect()` 的读数逐位一致，所以坐标没算错）。
+- 但页面自己的两套读数都说"没有点击"：
+  ① `[data-testid="hit-log"]` 仍是「（尚无点击）」、`hit-placeholder` 还在；
+  ② 在 document 的 capture 阶段挂 pointerdown/mousedown/mouseup/click 四个监听，**计数全 0**。
+- "事件是不是发到了别的文档"也排除了：同一份探针挂在 app 渲染层（127.0.0.1:5173）上，一次求值里点完再看自己的计数，
+  仍是 `eventsInAppDocument: []`。
+- 决定性读数是可见性：内核视图页 `document.visibilityState === 'hidden'`（`hasFocus:true`）、
+  app 渲染层 `hidden` 且 `hasFocus:false`。也就是整个 app 窗口在 macOS 下处于被遮挡/非前台，
+  合成器不给隐藏帧派发输入，CDP 的 `Input.dispatchMouseEvent` 就这么被丢掉。
+  `shell.setKernelViewVisible(true)` 回 `{kernelViewVisible:true}` 救不了它——那管的是视图挂载，不是窗口遮挡。
+- 所以这一格现在欠的是**「窗口在前台」这个环境条件**（§7.1 的真实窗口），要用户在场把 app 窗口点到前台再重放一次；
+  不是本机的逻辑缺陷——同一份 `browser.act` 在 Windows 那轮取到过真点。
+- 顺带一条**可报告的设计事实（本窗不改代码）**：`click` 的 `done` 是「派发完」而不是「页面确认收到」。
+  `type` 有 `valueAfter` 回读、`upload` 有 `changeCount` + 文件名/字节数回读，`click` 没有任何页面侧回读，
+  于是 `trusted:true` 只在"事件通道是 cdp"这个意义上为真，在"页面收到过这次点击"的意义上未经证实。
+  要不要给 `click` 补一条页面侧确认（等回执文本/`textAppears` 类谓词），是 P2 的一条独立待裁，不要顺手夹带。

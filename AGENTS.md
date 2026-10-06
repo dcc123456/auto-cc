@@ -313,6 +313,21 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   （度量行与紧挨其下的计时行各截一张，两张字节完全相同），要独立画面就在页面里 `scrollIntoView({ block: 'start' })`
   后不带 `--reveal` 重拍。第②条与 §9 的 5.10-18 是同一条硬步骤：收截图前对整批跑 `md5 -q | sort | uniq -c`。
 
+- **实测（2.1-12 补窗）`window.autoCC` 的调用口径有两条必须照 bridge 声明写**：① **实参是位置实参**——
+  `browser.act.click` 的 args 是 `[spec]`（`packages/shared/src/bridge.ts` 的 `BridgeCalls`），把 agent 工具层那个
+  `{ spec }` 形状（`act-service.ts` 的 `input: z.strictObject({ spec })`）整包传给 bridge，`spec.candidates` 就是 undefined，
+  表现为页面里 `PAGE_SCRIPT_FAILED: scanCandidates … reading 'length' of undefined`，看着像页面缺陷；
+  ② **返回值是 `{ok:true,value}` / `{ok:false,error}` 信封**（`packages/ipc/src/gateway.ts`），渲染层不 throw，
+  所以"没报错"不等于成功，判据要现读 `ok`。另记一条：`LocateResultView` 的候选列表字段叫 `ranked`，**没有 `matches`**，
+  数错字段会把"有没有命中"读成 null 而白等到超时。
+- **实测（2.1-12 补窗）窗口不在前台时 CDP 输入不落页，而 `browser.act.click` 照样回成功**：本机 app 窗口被遮挡时
+  两份文档的 `document.visibilityState` 都是 `hidden`，此时 `act.click` 返回 `status:'done' / channel:'cdp' / trusted:true`、
+  `rect` 与页面 `getBoundingClientRect()` 逐位一致，但页面 capture 阶段挂的 pointerdown/mousedown/mouseup/click 计数全 0、
+  靶页回执停在「尚无点击」。所以 **V 类"点中了什么"的判据必须以页面自己的回执为准，不能以 act 的返回值为凭**；
+  要取真点必须用户在场把窗口带到前台（`shell.setKernelViewVisible(true)` 只管视图挂载，不解决遮挡）。
+  同一轮还有一条抓取口径：`page.extract` 在 `navigate` 刚返回时就抽会拿到 `containers=0`（卡片是 `/api/jobs` 异步长出来的，
+  而 navigate 常与首屏装载相撞返回信封 `(-3) loading`），**必须先等容器出现再抽**。
+
 ---
 
 ## 10. 机检落地状态（避免误以为规则已被工具强制执行）
