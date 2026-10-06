@@ -53,6 +53,8 @@ import {
   type WorkflowStepView,
 } from '@auto-cc/shared';
 import { STEP_STATUS_STYLE } from './stepStatusStyle';
+import { EffectChip } from './ui/controls';
+import { currentTheme } from './theme';
 import { OperatorPalette } from './OperatorPalette';
 import { OperatorParamForm } from './OperatorParamForm';
 import { WorkflowNodeDetail } from './WorkflowNodeDetail';
@@ -65,8 +67,17 @@ const NODE_GAP_X = 260;
 /** 多出口算子的源句柄纵向落点——用 Tailwind 任意值而不是手写 CSS（AGENTS.md §5.1）。 */
 const SOURCE_HANDLE_CLASS = ['!top-1/2', '!top-[70%]', '!top-[88%]'] as const;
 
-/** 校验点名的格子加一圈红环；状态色仍完全由 `STEP_STATUS_STYLE` 决定，这里不碰它。 */
-const ISSUE_RING_CLASS = 'ring-2 ring-rose-500';
+/** 校验点名的格子加一圈朱砂环（seal=风险档）；状态色仍完全由 `STEP_STATUS_STYLE` 决定，这里不碰它。 */
+const ISSUE_RING_CLASS = 'ring-2 ring-seal/70';
+
+/** 连接点：描边用分隔线色、底用桌面色，深浅两主题都跟着 token 走（06 稿 10 的格子形状）。 */
+const HANDLE_CLASS = '!h-2 !w-2 !border-2 !border-line-strong !bg-ink-900';
+
+/** 连线的默认笔色：静止的边只是「先后顺序」，不该抢格子的颜色（06 稿 10 的③）。 */
+const EDGE_STYLE = { stroke: 'var(--color-line-strong)', strokeWidth: 1.5 } as const;
+
+/** 在跑的边描青瓷（进行中档），与格子的 running 同色。 */
+const RUNNING_EDGE_STYLE = { stroke: 'var(--color-celadon)', strokeWidth: 1.5 } as const;
 
 /** 节点卡片要显示的读数——运行态取步骤镜像，编辑态取算子描述。 */
 interface OperatorData extends Record<string, unknown> {
@@ -147,20 +158,15 @@ function OperatorNodeCard({ data }: NodeProps<OperatorNode>) {
         data.hasIssue ? ISSUE_RING_CLASS : ''
       }`}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="default"
-        className="!h-2 !w-2 !border-2 !border-slate-700 !bg-slate-950"
-      />
+      <Handle type="target" position={Position.Left} id="default" className={HANDLE_CLASS} />
       <span className="flex items-center gap-1">
         {Icon ? <Icon size={11} /> : <span className="font-mono text-xs opacity-60">{String(data.order)}</span>}
         <span className="break-all">{data.label}</span>
       </span>
       {/* 危险度徽标只说描述表里那一档，界面不给用户挑危险度的机会（闸门读的就是这一项）。 */}
       {descriptor ? (
-        <span className="mt-1 block text-[10px] text-slate-400">
-          {t(`workflow.operator.effect.${descriptor.effect}`)}
+        <span className="mt-1 block">
+          <EffectChip effect={descriptor.effect}>{t(`workflow.operator.effect.${descriptor.effect}`)}</EffectChip>
         </span>
       ) : null}
       {outputs.map((output, handleIndex) => (
@@ -169,9 +175,7 @@ function OperatorNodeCard({ data }: NodeProps<OperatorNode>) {
           type="source"
           position={Position.Right}
           id={output}
-          className={`!h-2 !w-2 !border-2 !border-slate-700 !bg-slate-950 ${
-            SOURCE_HANDLE_CLASS[Math.min(handleIndex, SOURCE_HANDLE_CLASS.length - 1)]
-          }`}
+          className={`${HANDLE_CLASS} ${SOURCE_HANDLE_CLASS[Math.min(handleIndex, SOURCE_HANDLE_CLASS.length - 1)]}`}
         />
       ))}
     </div>
@@ -480,6 +484,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         targetHandle: 'default',
         type: 'smoothstep',
         animated: cell.status === 'running',
+        style: cell.status === 'running' ? RUNNING_EDGE_STYLE : EDGE_STYLE,
       })),
       ...snapshot.edges.map((edge) => ({
         // 边的 id 与命令栈里那一份同源（`workflowEdgeIdOf` 的读法），撤销才认得回同一条线
@@ -490,6 +495,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         targetHandle: 'default',
         type: 'smoothstep',
         animated: statusById.get(edge.source) === 'running',
+        style: statusById.get(edge.source) === 'running' ? RUNNING_EDGE_STYLE : EDGE_STYLE,
       })),
     ];
   }, [canvasCells, snapshot, statusById]);
@@ -601,7 +607,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         </ul>
       ) : null}
       {/* react-flow 需要一个有高度的容器，否则视口量到 0 宽高（隐藏视图宽高为 0 会让点击落空，同一类坑） */}
-      <div className="mt-2 h-[420px] w-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40">
+      <div className="mt-2 h-[420px] w-full overflow-hidden rounded-xl border border-line bg-ink-850/60">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -611,10 +617,11 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
             setSelectedNodeId(node.id);
           }}
           nodeTypes={NODE_TYPES}
-          // 库自带明暗两套主题（`dist/style.css` 里的 `.react-flow.dark` 变量组）。本 app 只有深色一套
-          // 界面，所以显式走 dark：默认 light 下画布控件是一排白底按钮，与界面打架（5.10-a 实测截图）。
-          // 用库的主题开关而不是自己写样式覆盖——AGENTS.md §5.1 禁止渲染层手写 CSS。
-          colorMode="dark"
+          // 库自带明暗两套主题（`dist/style.css` 里的 `.react-flow.dark` 变量组），所以跟着 06 子计划的
+          // 材质走：现读 `currentTheme()`（localStorage 是主题的唯一事实，见 theme.ts），这里不再存一份
+          // state——自己翻面就会长出第二个真相（§2.5）。默认 light 时代画布控件是一排白底按钮，
+          // 与墨案打架（5.10-a 实测截图）；用库的主题开关而不是自己写样式覆盖（§5.1）。
+          colorMode={currentTheme()}
           fitView
           // 滚轮交给页面而不是交给画布：库默认截获画布上的 wheel 做缩放，于是 420px 高的画布成了
           // 工作流视图里的一段"滚动墙"。读 `@xyflow/system` 编译产物确认这条出口（§6.2）：
@@ -627,7 +634,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           // 库的署名浮标是一个外链，AGENTS.md §8.1 要求外链默认拒绝，所以关掉
           proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1e293b" />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-line-strong)" />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>

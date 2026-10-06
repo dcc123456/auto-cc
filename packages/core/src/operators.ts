@@ -15,7 +15,7 @@
  *   本片不假装已经对上。
  */
 import { z } from 'zod';
-import type { ToolEffect } from './events.js';
+import { TOOL_EFFECTS, type ToolEffect } from './events.js';
 
 /** 算子分类：调色板按它分组，界面文案取 `workflow.operator.category.<这里的一个>`。 */
 export const OPERATOR_CATEGORIES = ['discover', 'outbound', 'resume', 'demo'] as const;
@@ -210,6 +210,23 @@ export function groupOperatorsByCategory(
   return OPERATOR_CATEGORIES.map((category) => ({
     category,
     operators: descriptors.filter((descriptor) => descriptor.category === category),
+  })).filter((group) => group.operators.length > 0);
+}
+
+/**
+ * 按副作用分级分组，供调色板按「效果色」分区（plan 06 的 6.5-01：会不会离开这台机器，一眼分区）。
+ *
+ * 与 `groupOperatorsByCategory` 并列而不是替换它：分类回答「这只算子办哪类事」，效果档回答「这一步有多重」，
+ * 调色板的分区依据是后者，而算子格子上仍留分类标签（一条信息都不丢）。
+ * @param descriptors 描述表（默认内置这张；测试传「内置 + 一只 mock」来证「改一处多处生效」）
+ * @returns 按 `TOOL_EFFECTS` 从轻到重的分组，空分组不出现
+ */
+export function groupOperatorsByEffect(
+  descriptors: readonly OperatorDescriptor[] = WORKFLOW_OPERATORS,
+): readonly { effect: ToolEffect; operators: readonly OperatorDescriptor[] }[] {
+  return TOOL_EFFECTS.map((effect) => ({
+    effect,
+    operators: descriptors.filter((descriptor) => descriptor.effect === effect),
   })).filter((group) => group.operators.length > 0);
 }
 

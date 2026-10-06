@@ -1,0 +1,52 @@
+6.5-01 编排画布换装：活体计算色读数（第三片）
+=================================================
+
+取数方式：`pnpm harness eval --url 5173 --expr-file <脚本>`，在跑着的 dev 实例里打开画布
+（`[data-action=canvas-toggle]`）后现读 `getComputedStyle`。窗口此刻 `visibilityState=hidden`
+（§9 的实测：不在前台时 `Page.captureScreenshot` 不返帧），所以本片**只有计算色读数，没有截图**——
+不拿读数冒充截图。取数完已 `location.reload()` 把画布回到初始态（草稿节点未入库）。
+
+材质：`document.documentElement.dataset.theme = "dark"`（墨案）。
+
+## ① 调色板按效果档分区（三张分区，空分区不出现）
+
+| 分区 `data-effect` | 分区描边（计算值） | 分区底 | 区内分类行 `data-category` | 区内算子 |
+| --- | --- | --- | --- | --- |
+| `read` | jade 40% | jade-wash | `discover` / `resume` / `demo` | `jd.capture`、`jd.list` / `resume.customize` / `demo.branch` |
+| `local-write` | amber 40% | amber-wash | `demo` | `demo.flaky` |
+| `outbound` | `oklab(0.6316 0.1534 0.0978 / 0.45)` = `#e2543a`@45% | `rgba(226, 84, 58, 0.13)` = seal-wash | `outbound` | `greeting.send`、`resume.deliver` |
+
+（三张分区都由 `groupOperatorsByEffect` 派生，区内一行一个分类，仍由 `groupOperatorsByCategory` 排——
+描述表里 7 只算子的 `effect` 与 `category` 见 `packages/core/src/operators.ts`，本表照抄活体读数。）
+
+外发那一格里按钮的读数（这一档最该扎眼）：
+
+- `color: rgb(226, 84, 58)` = `--color-seal`
+- `border-top-color: oklab(0.6316 …/0.4)` = 同一只朱砂的 40%（按钮写 `border-current/40`，
+  颜色由分区继承下来，因此**没有第二份效果色表**——与 `EffectChip` 共用 `EFFECT_TONE_CLASS`）
+
+## ② 格子与连线
+
+- 新建的 `greeting.send` 格子里 `EffectChip`：`data-effect="outbound"`、文字 `rgb(226,84,58)`、
+  描边 seal@45%、文案「外发」——效果档由描述表带出，界面不给挑危险度的机会（闸门读的就是这一项）。
+- `pending` 格子：`border rgba(150,178,196,0.26)` = `--color-line-strong`、`bg rgb(15,22,28)` = `--color-ink-850`。
+  五态色全部换成语义令牌（`stepStatusStyle.ts`：running=celadon / done=jade / failed=seal / skipped=amber /
+  pending=line-strong），画布格子与工作流面板步骤行仍读同一份常量（§2.5）。
+- 连线：`stroke rgba(150,178,196,0.26)`（= line-strong，静止的边不抢格子的颜色）、`stroke-width 1.5px`；
+  在跑的边写 `var(--color-celadon)`。这两支都走 CSS 变量，毡案（浅色）覆盖块里 `--color-line-strong`
+  是 `rgba(38,44,48,0.3)`（globals.css 271–272 行），所以换主题时边与背景点自己翻面。
+- 画布容器：`border-line` + `bg-ink-850/60`；背景点 `color="var(--color-line-strong)"`（原来是写死的
+  `#1e293b`，浅色下会成一屏灰麻子）。
+- 校验点名的格子：`ring-2 ring-seal/70`（原来 `ring-rose-500`，rose 已被重映射成朱砂，这一改只是把
+  「玫瑰」这个假名字换成真实语义）。
+- react-flow 自带的主题开关现读 `currentTheme()`：`class="react-flow dark"`，与 localStorage 里的
+  `auto-cc.theme` 同源（此前是写死 `colorMode="dark"`，切到毡案后画布控件仍是一排深色按钮）。
+
+## ③ 本片没做的一半（如实标 BLOCKED）
+
+- **拖动态与落点提示线**（10 稿⑤⑧：拖动中朱砂虚线 + 原槽位残影、落点青瓷虚线框）**未落地**。
+  现通路是**点击算子即建格**（spec 5.10-03 定下的交互，`[data-action=palette-add]`），画布上根本没有
+  拖拽入嘴。补齐它属于**新增交互**而不是换装：要先按 AGENTS.md §6 做 react-flow 拖放的取证
+  （`screenToFlowPosition` 与命令栈、位置不进指纹这几条要对上），另立条目再动代码。
+- 画布上方那排工具按钮（贴合 / 撤销 / 重做 / 校验 / 保存到库）仍是各自手写的 `border-slate-700` 一类，
+  没换成 6.2 的 `DeskButton`——归 6.4 逐屏接入，与本片的效果色分区是两件事。

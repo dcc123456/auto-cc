@@ -132,6 +132,7 @@ export {
   OPERATOR_CATEGORIES,
   WORKFLOW_OPERATORS,
   groupOperatorsByCategory,
+  groupOperatorsByEffect,
   operatorByKind,
   operatorParamDefaults,
   operatorParamFields,

@@ -202,7 +202,8 @@ export function useDeskResult(doneMs = 2000): DeskResultState {
  */
 export type EffectTone = ToolEffect;
 
-const EFFECT_CLASS: Record<EffectTone, string> = {
+/** 效果色 → 描边/底色/文字：调色板分区与节点标签共用这一份，两处不许各写一档（§2.2）。 */
+export const EFFECT_TONE_CLASS: Record<EffectTone, string> = {
   read: 'border-jade/40 bg-jade-wash text-jade',
   'local-write': 'border-amber/40 bg-amber-wash text-amber',
   outbound: 'border-seal/45 bg-seal-wash text-seal',
@@ -229,7 +230,7 @@ export function EffectChip({ effect, children }: EffectChipProps) {
   return (
     <span
       data-effect={effect}
-      className={`inline-flex items-center gap-1 rounded-chip border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${EFFECT_CLASS[effect]}`}
+      className={`inline-flex items-center gap-1 rounded-chip border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${EFFECT_TONE_CLASS[effect]}`}
     >
       {EFFECT_ICON[effect]}
       {children}
