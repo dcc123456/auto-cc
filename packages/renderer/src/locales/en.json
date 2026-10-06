@@ -1315,6 +1315,12 @@
       }
     },
     "script": {
+      "reason": {
+        "ACTION_BUSY": "A generate or send call is still in flight; wait for it to land.",
+        "NO_TARGET": "No job in the store yet: run one fetch first, there is nothing to write about.",
+        "QUOTE_REQUIRED": "Follow-up and rejection scripts must quote the recruiter first, otherwise the draft invents a conversation.",
+        "NO_CANDIDATE_PICKED": "No candidate selected: picking one is what unlocks send."
+      },
       "heading": "Greeting script candidates",
       "hint": "Pick a stored JD, pull a few citable experiences from the knowledge base, then generate one candidate per experience. Each row states whether it came from the model or the local template, and which experience it cites. The send button only unlocks after you pick one — this step just generates text; the actual send still runs the greeting orchestration (quota gate, throttling, blocklist included).",
       "targetLabel": "Target role (from the JD store)",

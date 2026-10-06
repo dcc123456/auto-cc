@@ -12,6 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentCard } from './ConsentCard';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -106,6 +107,19 @@ export function ScriptPanel() {
   const drafts = bundle?.drafts ?? [];
   const selectedDraft = selected === undefined ? undefined : drafts[selected];
   const needsQuote = KINDS_NEEDING_QUOTE.includes(kind);
+  /**
+   * 归属色按「这个动作动到谁」分（plan §5），本屏两只动作口正好落在两端：
+   * `generate` 只是取证据 + 生成正文，一个字节都不离开这台机器、一行都不写 → `line`；
+   * `send` 走 `outbound.greet.perform`，那一条链上有闸门、频控与账本，发出去的是给陌生人的消息 → `seal`。
+   * 三类话术的切换键不写任何东西，选中态用 `solid`、未选中用 `ghost`（同一批数据的另一种画法）。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const noTargetReason = target === undefined ? 'NO_TARGET' : undefined;
+  const generateReason =
+    busyReason ?? noTargetReason ?? (needsQuote && quoteDraft.trim().length === 0 ? 'QUOTE_REQUIRED' : undefined);
+  const sendReason = busyReason ?? noTargetReason ?? (selectedDraft === undefined ? 'NO_CANDIDATE_PICKED' : undefined);
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`script.reason.${code}`);
 
   /**
    * 平台专名 → 页面上那三个字。
@@ -229,12 +243,9 @@ export function ScriptPanel() {
   };
 
   return (
-    <div
-      data-testid="script-panel"
-      className="flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4"
-    >
+    <div data-testid="script-panel" className="flex flex-col gap-4 rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center gap-2">
-        <MessageSquare className="h-4 w-4 text-slate-300" />
+        <MessageSquare size={16} className="text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('script.heading')}</h2>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">{t('script.hint')}</p>
@@ -253,7 +264,7 @@ export function ScriptPanel() {
             data-script-field="target"
             value={String(target?.id ?? '')}
             onChange={(event) => setTargetId(Number(event.target.value))}
-            className="min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+            className={`w-full ${FIELD_CLASS}`}
           >
             {rows.map((row) => (
               <option key={`${row.platform}-${row.id}`} value={String(row.id)}>
@@ -269,20 +280,17 @@ export function ScriptPanel() {
 
         <div className="flex items-center gap-2" data-script-field="kind">
           {KIND_ORDER.map((option) => (
-            <button
+            <DeskButton
               key={option}
-              type="button"
-              data-script-kind={option}
+              action={`script-kind-${option}`}
+              markers={{ 'script-kind': option }}
+              variant={option === kind ? 'solid' : 'ghost'}
+              compact
               aria-pressed={option === kind}
               onClick={() => setKind(option)}
-              className={`rounded border px-2 py-1 text-[11px] ${
-                option === kind
-                  ? 'border-sky-800 bg-sky-950 text-sky-200'
-                  : 'border-slate-700 text-slate-400 hover:bg-slate-800'
-              }`}
             >
               {t(`script.kind.${option}`)}
-            </button>
+            </DeskButton>
           ))}
         </div>
 
@@ -292,7 +300,7 @@ export function ScriptPanel() {
           value={quoteDraft}
           onChange={(event) => setQuoteDraft(event.target.value)}
           placeholder={t('script.quotePlaceholder')}
-          className="min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`w-full ${FIELD_CLASS}`}
         />
         {!needsQuote && (
           <p data-script-quote-hint className="text-[11px] leading-relaxed text-slate-500">
@@ -305,21 +313,26 @@ export function ScriptPanel() {
           value={keywordsDraft}
           onChange={(event) => setKeywordsDraft(event.target.value)}
           placeholder={t('script.keywordsPlaceholder')}
-          className="min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className={`w-full ${FIELD_CLASS}`}
         />
 
-        <button
-          type="button"
-          data-script-action="generate"
+        <DeskButton
+          action="script-generate"
+          markers={{ 'script-action': 'generate' }}
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={generateReason !== undefined}
+          disabledReason={generateReason}
+          disabledReasonLabel={reasonLabel(generateReason)}
+          className="self-start"
           onClick={generate}
-          disabled={busy !== undefined || target === undefined || (needsQuote && quoteDraft.trim().length === 0)}
-          className="flex items-center gap-1 self-start rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
-          <Sparkles className="h-3 w-3" />
+          <Sparkles size={12} />
           {t('script.actionGenerate')}
-        </button>
+        </DeskButton>
         {needsQuote && quoteDraft.trim().length === 0 && (
-          <p data-script-quote-required className="text-[11px] leading-relaxed text-amber-300">
+          <p data-script-quote-required className="text-[11px] leading-relaxed text-amber">
             {t('script.quoteRequired')}
           </p>
         )}
@@ -339,7 +352,7 @@ export function ScriptPanel() {
       {bundle && (
         <div className="flex flex-col gap-2">
           <p className="flex items-center gap-1 text-xs font-semibold text-slate-300">
-            <ListChecks className="h-3 w-3" />
+            <ListChecks size={12} />
             {t('script.candidatesHeading', { count: bundle.drafts.length })}
           </p>
           {bundle.search && (
@@ -359,8 +372,8 @@ export function ScriptPanel() {
                   data-script-candidate={index}
                   data-script-origin={draft.origin}
                   data-script-selected={selected === index ? 'true' : 'false'}
-                  className={`rounded border p-2 ${
-                    selected === index ? 'border-sky-800 bg-sky-950/30' : 'border-slate-800 bg-slate-900/40'
+                  className={`rounded-md border p-2 ${
+                    selected === index ? 'border-celadon/50 bg-celadon-wash' : 'border-line bg-ink-950/70'
                   }`}
                 >
                   <label className="flex items-start gap-2">
@@ -375,10 +388,10 @@ export function ScriptPanel() {
                       <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                         <span
                           data-script-badge={draft.origin}
-                          className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                          className={`rounded-chip border px-1.5 py-0.5 text-[11px] ${
                             draft.origin === 'template'
-                              ? 'border-amber-800 bg-amber-950/40 text-amber-200'
-                              : 'border-emerald-800 bg-emerald-950/40 text-emerald-200'
+                              ? 'border-amber/50 bg-amber-wash text-amber'
+                              : 'border-jade/45 bg-jade-wash text-jade'
                           }`}
                         >
                           {t(`script.origin.${draft.origin}`)}
@@ -399,7 +412,7 @@ export function ScriptPanel() {
                         {draft.text}
                       </span>
                       {draft.fallbackReason && (
-                        <span data-script-fallback={index} className="text-[11px] leading-relaxed text-amber-300">
+                        <span data-script-fallback={index} className="text-[11px] leading-relaxed text-amber">
                           {t('script.fallback', { reason: draft.fallbackReason })}
                         </span>
                       )}
@@ -411,19 +424,23 @@ export function ScriptPanel() {
           )}
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-script-action="send"
+            <DeskButton
+              action="script-send"
+              markers={{ 'script-action': 'send' }}
+              variant="seal"
+              compact
+              busy={!!busy}
+              disabled={sendReason !== undefined}
+              disabledReason={sendReason}
+              disabledReasonLabel={reasonLabel(sendReason)}
               onClick={send}
-              disabled={busy !== undefined || selectedDraft === undefined || target === undefined}
-              className="flex items-center gap-1 rounded border border-sky-800 px-2 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
             >
-              <Send className="h-3 w-3" />
+              <Send size={12} />
               {t('script.actionSend', {
                 platform: target ? platformName(target.platform) : '-',
                 title: target?.title ?? '-',
               })}
-            </button>
+            </DeskButton>
             {selectedDraft === undefined && (
               <span data-script-pick-hint className="text-[11px] text-slate-500">
                 {t('script.pickHint')}
@@ -437,7 +454,7 @@ export function ScriptPanel() {
         <div
           data-script-receipt
           data-origin={lastGreet.origin}
-          className="rounded border border-emerald-900 bg-emerald-950/30 p-2 text-[11px] leading-relaxed text-emerald-200"
+          className="rounded-md border border-jade/45 bg-jade-wash p-2 text-[11px] leading-relaxed text-jade"
         >
           {t('script.receiptRow', {
             jobId: lastGreet.jobId,
@@ -453,7 +470,7 @@ export function ScriptPanel() {
         <div
           data-script-error
           data-error-code={bridgeError.code}
-          className="rounded border border-rose-900 bg-rose-950/40 p-2 text-[11px] leading-relaxed text-rose-300"
+          className="rounded-md border border-seal/50 bg-seal-wash p-2 text-[11px] leading-relaxed text-seal"
         >
           {t('script.errorRow', { code: bridgeError.code, message: bridgeError.message })}
         </div>

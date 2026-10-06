@@ -1,0 +1,60 @@
+6.2-06 话术候选面板（第十片）活体读数 — 2026-10-06，macOS arm64
+运行实例：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`，CDP 10222，渲染层 target `--url 5173`
+探针：`tmp/v6b/probe-script.js`（零写入：只读 `getComputedStyle` / `data-*`；整轮 `visibilityState=visible`）
+截图（本目录，3 张 `md5 -q` 互不相同）：
+- `6.2-06-script-panel-dark.png` — 毡墨基线（开场白选中）
+- `6.2-06-script-panel-followup-dark.png` — 切到「追问」：solid 跟着走 + 琥珀的必填原话提示行
+- `6.2-06-script-panel-light.png` — 毡案同一处
+取景位由 `[data-view-scroll=jobs].scrollTop` 设到面板顶部（544），`panelTop` 复核为 370px。
+
+一、四只渲出的键位（dark，`script1.raw`；`h` = `getBoundingClientRect().height`）
+
+| data-action | data-effect | aria-pressed | 禁用原因码 | h | color / border / bg |
+| --- | --- | --- | --- | --- | --- |
+| `script-kind-greeting` | solid | true | — | 24 | `rgb(232,238,243)` / `rgb(85,103,122)` / `rgb(24,35,43)` |
+| `script-kind-follow-up` | ghost | false | — | 24 | `rgb(164,182,195)` / 透明 / 透明 |
+| `script-kind-rejection` | ghost | false | — | 24 | 同上 |
+| `script-generate` | line | — | `NO_TARGET` | 24 | `rgb(108,128,145)` / `rgba(150,178,196,0.26)` / `rgb(15,22,28)` |
+
+`data-script-kind` 与 `aria-pressed` 两个既有锚点原样保留（走 `markers`），旧的裸 `<button>` 类名全部撤掉。
+面板容器：`border rgba(150,178,196,0.14)`（line）/ `bg oklab(0.173835 … / 0.6)`（ink-900/60）/ `radius 12px`（sheet）。
+
+二、归属色：这一屏两只动作口正好落在规则的两端
+- `script-generate` = **`line`**：它只做「取证据 + 生成正文」，一个字节都不离开这台机器、一行都不写库
+  （面板头注第 4 条：选中不等于发送，这条口不产生任何离开 app 的字节）。
+- `script-send` = **`seal`**：走 `outbound.greet.perform`，那条链上有幂等 → 黑名单 → 额度 → 频控 → 发送 → 落账，
+  发出去的是给陌生人的消息（§7.3 的必经闸门就在它后面）。
+- 三类话术的切换键不写任何东西：选中 `solid`、未选中 `ghost`（同一批数据的另一种画法，不是又一个动作）。
+- 候选行的选中态用 celadon（`border-celadon/50 bg-celadon-wash`）而不是 jade：jade 是"已核/办成了"，
+  而"人挑了这一条"只是当前指向。`origin` 徽标分两档：`template` 走 amber（模板回落 = 要人看一眼的理由），
+  模型产出走 jade（这一条是真按证据写出来的）。回执块 jade、结构化错误块 seal、必填提示行 amber。
+
+三、禁用态：一只取到整条活体读数，另外三支只有代码位
+- 活体：`script-generate` → `data-disabled-reason="NO_TARGET"` + `title="库里还没有岗位：先抓一轮 JD，这一屏才有话可写。"`
+  + `aria-disabled="true"` + `cursor:not-allowed` + 底色收敛到 `rgb(15,22,28)`（ink-850）。
+  JD 库当前为空，所以这一支在两种界面态下都是同一个码：把话术切到「追问」（必填原话为空）后复测，
+  原因码**仍是** `NO_TARGET` 而不是 `QUOTE_REQUIRED`——这正好是 `generateReason` 那条优先级链
+  （`busy → noTarget → quoteRequired`）按书写顺序命中的活体证明。
+- 代码位（当轮渲不出）：`QUOTE_REQUIRED`（要有目标岗位且原话为空）、`NO_CANDIDATE_PICKED`（要有候选并取消选中）、
+  `ACTION_BUSY`（在途窗口毫秒级）；`script-send` 整只也要先有一次成功生成才会出现。
+  取它们要么得先抓一轮真 JD（§7.2 禁止自动化打真实平台），要么得改写用户实例的数据。
+
+四、毡案（浅色）同四处读数（`script3.raw`）
+`solid` 选中键 `rgb(27,34,40)` / `rgb(125,136,146)` / `rgb(212,206,189)`；`ghost` `rgb(74,87,98)`；
+禁用的 `line` 键 `rgb(107,118,129)` / `rgba(38,44,48,0.3)` / `rgb(224,219,205)`；容器 `rgba(38,44,48,0.15)` /
+`oklab(0.915929 … / 0.6)` / 12px。四只高度仍为 24，`legacyClassHits` 仍为空。
+组件里**没有任何 `theme ===` 分支**——同一批 class 靠 `[data-theme='light']` 覆盖块翻 token。
+
+五、旧调色板清扫与一处跨屏不一致（本片只记录，未改）
+- 清掉的：容器 `border-slate-800 bg-slate-950/60`、表单域 `border-slate-700 bg-slate-900`（改 `FIELD_CLASS`）、
+  话术键 `sky-800/sky-950/sky-200`、候选行 `sky-950/30`、`origin` 徽标 `amber-800/emerald-800` 系、
+  回执 `emerald-900/emerald-200`、错误 `rose-900/rose-300`、图标 `h-3 w-3` 类名（改 `size={12}`）。
+  复测 `legacyClassHits`（射程：整个 jobs 视图的 `[class]`）在深浅两轮均为空数组。
+- **发现的一条跨屏不一致**（`ui/controls.tsx`，本片未动）：禁用态的底色与文字确实收敛到 ink-850 / slate-500，
+  但**描边只有 `line` 档收敛失败**——它的语义档 class 里带 `border-line-strong`（.26），
+  在生成的样式表里排在禁用分支的 `border-line`（.14）之后，于是同一片禁用按钮里
+  `line` 档的边框比其他四档亮一档（本片的 `script-generate` 与第九片的 `pause`/`resume` 对照即得：.26 vs .14）。
+  07 稿对禁用的原话是"只降透明度到 .38 且必须旁边给出原因"，本项目的实现换成了"底色/文字/描边三件一起收敛"，
+  那么描边就该五档同色。修法是在 `buttonClass` 里让禁用分支不带语义档描边（一行），
+  但它会同时改变 seal/jade/amber/ghost/solid 五档禁用按钮的边框读数，**已入库的第六~九片禁用读数需一并重取**，
+  所以另立一片做，不夹进本片。
