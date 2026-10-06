@@ -13,7 +13,9 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
+import { AppError, asApp, Context, Service, type Context as CoreContext, type Fiber } from '@auto-cc/core';
+import { pathToFileURL } from 'node:url';
+import { z } from 'zod';
 import { sha256Hex } from '@auto-cc/core/file-read';
 import { afterAll, describe, expect, it } from 'vitest';
 import { minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
@@ -328,4 +330,106 @@ describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙�
 afterAll(async () => {
   for (const fiber of fibers) await fiber.dispose();
   for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * 随包字体目录的替身（3.5-06 的中文半边要它）。
+ *
+ * 另存腿按名字**现问** `resume.print` 的 `fontBaseUrl()`（`export-service.ts` 的 `cjkFontBytes`），
+ * 所以这里只装一只提供那一个读数的假服务，指向仓库里真正随包的那份 woff2——
+ * 判据要的是「中文真的嵌得进去、抽得出来」，用假字节就把它测成了空气。
+ */
+class FakePrintFontPort extends Service {
+  static provide = 'resume.print';
+  static Config = z.strictObject({});
+
+  constructor(ctx: CoreContext, _options: z.infer<typeof FakePrintFontPort.Config>) {
+    super(ctx, 'resume.print');
+  }
+
+  /** @returns 仓库 `resources/fonts` 的 `file://` base（与打包态由 shell 给的那一句同一形状） */
+  fontBaseUrl(): string {
+    return pathToFileURL(new URL('../../../resources/fonts/', import.meta.url).pathname).href;
+  }
+}
+
+/**
+ * 挂起一份带字体目录的 `pdf.export`。
+ * @returns 服务实例
+ */
+async function bootWithFont(): Promise<PdfExportService> {
+  const ctx = new Context();
+  // 顺序按 §9 的 5.1-c：字体端口先装，另存这一侧是按名字现问，装配清单里 `pdf-export` 也排在 `resume-print` 之后。
+  fibers.push(await ctx.plugin(FakePrintFontPort, {}));
+  fibers.push(await ctx.plugin(PdfExportService, config));
+  return asApp(ctx)['pdf.export'];
+}
+
+/**
+ * 在产物上跑 pdf.js 抽文本项（判据原文的"文本层"就是这里，不能用 `pdf.layout.textItems`——它脱敏，只回矩形）。
+ * @param filePath 产物路径
+ * @returns 第一页的文本项（`str` / `width` / `height` / `transform`）
+ */
+async function textItemsOf(filePath: string): Promise<{ str: string; width: number; height: number }[]> {
+  const pdfModule = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as {
+    getDocument(source: unknown): {
+      promise: Promise<{
+        numPages: number;
+        getPage(n: number): Promise<{
+          getTextContent(): Promise<{ items: { str?: unknown; width?: unknown; height?: unknown }[] }>;
+          cleanup(): void;
+        }>;
+      }>;
+    };
+  };
+  const task = pdfModule.getDocument({
+    data: new Uint8Array(readFileSync(filePath)),
+    isEvalSupported: false,
+    useSystemFonts: true,
+    disableFontFace: true,
+    verbosity: 0,
+  });
+  const doc = await task.promise;
+  const page = await doc.getPage(1);
+  try {
+    return (await page.getTextContent()).items.map((item) => ({
+      str: typeof item.str === 'string' ? item.str : '',
+      width: typeof item.width === 'number' ? item.width : 0,
+      height: typeof item.height === 'number' ? item.height : 0,
+    }));
+  } finally {
+    page.cleanup();
+  }
+}
+
+describe('3.5-06 的中文半边：CJK 子集内嵌后，文本层逐字符全等且按全角推进算得出字形数', () => {
+  it('中文叠加抽回来与写进去逐字符全等，宽度是七个全角推进（不是豆腐块、也不是空白）', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const sentinel = '覆盖中文哨兵甲乙丙';
+    const receipt = await (
+      await bootWithFont()
+    ).saveAs(sourcePath, [{ ...box, text: sentinel }], keepPages(1), join(dir, 'cn.pdf'));
+
+    const items = await textItemsOf(receipt.outPath);
+    const drawn = items.filter((item) => item.str.includes(sentinel));
+    // 逐字符全等：判据原文要的是"可复制可搜索"，抽回来的字符串必须一字不差（spike 第三轮的读数就是这个形状）。
+    expect(drawn.map((item) => item.str)).toEqual([sentinel]);
+    // 字形数：拿装配清单里的默认字号去除整条推进量，得到七个字（宽度为 0 就是空白或豆腐块，这里要的是非零推进）。
+    expect(Math.round(drawn[0]!.width / config.defaultTextSizePt)).toBe(sentinel.length);
+    expect(drawn[0]!.height).toBeGreaterThan(0);
+    // 反伪装（plan §7.6）：覆盖上去的中文之下，源文件那句话仍读得出来——我们只追加，不删除。
+    expect(items.some((item) => item.str.includes('Jane Doe'))).toBe(true);
+  });
+
+  it('没装字体端口时中文另存以 font-unavailable 失败，磁盘上不留半成品', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const outPath = join(dir, 'cn.pdf');
+    const service = await boot();
+    await expect(
+      service.saveAs(sourcePath, [{ ...box, text: '中文哨兵' }], keepPages(1), outPath),
+    ).rejects.toMatchObject({ code: 'PDF_EDIT_SAVE_FAILED', details: { code: 'font-unavailable' } });
+    expect(readdirSync(dir).filter((name) => name.endsWith('.pdf') || name.endsWith('.part'))).toEqual(['resume.pdf']);
+  });
 });
