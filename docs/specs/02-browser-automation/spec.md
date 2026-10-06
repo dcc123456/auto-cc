@@ -163,6 +163,16 @@
   没有逃逸到外部浏览器。读数见 `2.2-11-takeover-readouts.txt`。
 - **2.2-12**：CDP 输入通道点击后页面读回 `event.isTrusted === true`（`2.2-12-api-trust.txt`），
   而 `element.click()` 直塞的对照路径读回 false——这条差异是「受信」唯一的可证形式。
+- **2.2-12 口径加严（裁定⑰，2026-10-06 落码 `f2e081d`）**：上面那条只证明「事件到达页面时是受信的」，
+  不证明「页面收到过」。mac 活体实测到反面：窗口不在前台时 CDP 的鼠标事件被合成器丢掉，
+  `click` 连回三次 `status:'done' / trusted:true`，而靶页四个 capture 监听的计数全 0
+  （读数在 `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第五节）。
+  从此 `browser.act.click` 的 `done` 表示**页面回执过这一次事件**：派发前在胜出节点上挂 capture 阶段监听，
+  派发后有界轮询（`clickReadbackMs` 默认 600 毫秒），计数涨了、或文档地址变了（点击把页面导航走，
+  挂表的世界随之销毁）才算确认；两者都不是则 `status` 给 `timeout`（不抛异常，界面摘要文案随之从
+  「已完成」改口为「页面未回执」）。**探针答不上来仍按 `done`**——这条判据不外扩成假阴性，
+  否则 iframe 链路与显式降级到 DOM 通道的用例会整片被打成超时（取舍写在 `act-service.ts` 的注释里）。
+  `type` / `upload` 的回读骨架不动，它们本来就有页面侧回读。
 - **2.2-08 更正（2.7-a，2026-10-01）**：当年验收的「频控参数为数据」里，**节奏那半已经搬家**。
   知识包的 `pacing` 段（`minActionGapMs: 5000` / `maxDailyActions: 20`）整体删除：运行期零消费者
   （plan §14.2 E 条实测）就是 AGENTS.md §2.4 的死代码，而它声明的两件事分别已由 `entitlement.gate`
