@@ -1,0 +1,53 @@
+6.5 第二片取证：画布工具条与检视器换装后的活体读数
+====================================================
+
+时间：2026-10-06 05:49 UTC（脚本 `tmp/p6/probe-canvas.mjs`，读完立刻把画布收起、导航切回 `chat`，
+见 `tmp/p6/restore-canvas.mjs` 的回读 `{"canvasOpen":false,"backTo":"chat"}`——没把用户的实例留在展开态）
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/dev-userdata`，CDP 10222），`--url 5173`
+
+同样只有读数、没有截图：`document.visibilityState` 是 `hidden`（窗口被遮挡 → Chromium 不产出帧，
+`harness shot` 挂住不返回）。本轮**没有点任何写入口**：撤销/重做/校验/保存四只都只读属性与 `title`，
+一次点击都没派给它们（`aria-disabled` 那三只本来也按不动，`canvas-validate` 是唯一可点的，点它会改写
+"上次校验结果"的显示态——那是用户的界面状态，无人验收时不动）。
+
+一、工具条四只（`WorkflowCanvas.tsx`）
+--------------------------------------
+
+画布照的是**运行镜像**（`canvas-graph-source`：「没有选中计划，格子只按本次运行的步骤镜像摆；这不是库里的图。」），
+`canvas-draft-count` = 「图上 0 格」——这两条读数直接决定了下面两支按钮的原因码取值，界面没自己数一遍。
+
+| 按钮 | `data-effect` | `data-disabled-reason` | `title`（人话） | 计算色 |
+| --- | --- | --- | --- | --- |
+| `canvas-undo` | `ghost` | `NOTHING_TO_UNDO` | 命令栈是空的：还没有可退的改动 | `color rgb(108,128,145)`、`bg rgba(0,0,0,0)`、`border rgba(0,0,0,0)` |
+| `canvas-redo` | `ghost` | `NOTHING_TO_REDO` | 没有可重做的改动：先退一步再看 | 同上 |
+| `canvas-validate` | `line` | 无（此刻可点） | — | `color rgb(219,228,236)`、`bg rgb(19,28,35)`（`ink-900`）、`border rgba(150,178,196,.26)`（`line-strong`） |
+| `canvas-save` | `amber` | `MIRROR_ONLY` | 画布此刻照的是内存里那次运行，不是库里的计划：先在上方选中一条流程才能存 | `color rgb(108,128,145)`、`bg rgb(15,22,28)`、`border rgba(150,178,196,.14)` |
+
+**为什么保存涂琥珀**：它写的是本机的库（`workflow.store`），不碰外面——琥珀在这套语言里正是"本机写入"。
+撤销/重做退成 `ghost`：它们是命令栈的辅助动作，不该与"存进库"争同一种视觉重量。
+**原因码的优先级写在代码里**（先说这一条路不存在，再说这一步没内容）：`isReadOnly` → `READ_ONLY`，
+其后 undo/redo 取命令栈、save 取 `loaded === null` → `MIRROR_ONLY`、空格子 → `EMPTY_GRAPH`。
+本轮画布不是运行期（`isReadOnly` 为假），所以 `READ_ONLY` 那一支**没有活体读数**，只有静态映射。
+
+二、检视器（`OperatorParamForm.tsx` / `WorkflowNodeDetail.tsx`）
+---------------------------------------------------------------
+
+`paramForm: null`、`nodeDetail: null`——**这一片的两只检视器都没有活体读数**：
+图上 0 格（画布照的是运行镜像，本次运行没有步骤可镜像），没有格子就选不出节点，
+而"为了读数往图上加一格"会改写用户 dev 实例的草稿（6.5 第一片已经为这件事付过一次代价：
+加完必须 reload 才能不留痕）。这一片的改动因此**只有静态 class**：
+容器 `border-slate-800 / bg-slate-950` → `border-line / bg-ink-950/40`；
+必填星号、校验失败、拒绝读数 `text-rose-*` → `text-seal`；保存成功 `text-emerald-*` → `text-jade`；
+只读提示 `text-amber-300` → `text-amber`；输入控件 `bg-slate-900` + `focus:border-sky-700` →
+`bg-ink-900` + `focus:border-celadon/60`；非法字段描边 `border-rose-500 ring-rose-500/40` →
+`border-seal ring-seal/40`；「保存参数」那只 `border-sky-900 / text-sky-300`（蓝=进行中的旧语义）
+→ `DeskButton variant="amber"` + `READ_ONLY` 原因码。
+`data-action="param-save"` 与四个 `data-testid`（`operator-param-form` / `param-form-readonly` /
+`param-form-saved` / `param-form-rejected`）逐字保留，5.10 那批活体断言仍解得开。
+
+三、门禁
+--------
+
+`pnpm format:check` → `FMT=0`、`pnpm typecheck` → `TC=0`、`pnpm lint` → `LINT=0`、
+`pnpm test` → `TEST=0`（23 个包全过）。退出码用重定向读取（§9 的 5.4-c）。
+新增 i18n：`workflow.canvas.reason.*` 五支 + `workflow.operator.reason.READ_ONLY` 一支，zh-CN 与 en 同时补齐。

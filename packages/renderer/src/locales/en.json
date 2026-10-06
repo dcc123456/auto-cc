@@ -634,6 +634,13 @@
           "duration": "{{durationMs}} ms",
           "durationPending": "Duration — (not finished yet)",
           "error": "Error {{error}}"
+        },
+        "reason": {
+          "READ_ONLY": "The flow is running or paused, so this graph is read-only: editing it changes the fingerprint and invalidates the resumable run",
+          "NOTHING_TO_UNDO": "Command stack is empty: nothing to undo yet",
+          "NOTHING_TO_REDO": "Nothing to redo: undo a step first",
+          "MIRROR_ONLY": "The canvas mirrors an in-memory run, not a saved plan: pick a plan above before saving",
+          "EMPTY_GRAPH": "The graph has no cells: an empty graph cannot be stored"
         }
       },
       "status": {
@@ -780,6 +787,9 @@
           "branch": {
             "title": "Conditional branch demo (value ≥ threshold takes yes)"
           }
+        },
+        "reason": {
+          "READ_ONLY": "Parameters are locked while the run is active: editing them would break this step’s fingerprint"
         }
       },
       "param": {

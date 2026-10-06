@@ -47,7 +47,7 @@ export function WorkflowNodeDetail({ nodeId, label }: WorkflowNodeDetailProps) {
 
   return (
     <div
-      className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-[11px] text-slate-300"
+      className="mt-3 rounded-xl border border-line bg-ink-950/40 p-3 text-[11px] text-slate-300"
       data-testid="canvas-node-detail"
       data-node-id={nodeId}
       data-node-source={reading?.source ?? 'none'}
@@ -74,7 +74,7 @@ export function WorkflowNodeDetail({ nodeId, label }: WorkflowNodeDetailProps) {
               : t('workflow.canvas.detail.duration', { durationMs: row.durationMs })}
           </span>
           {row.error ? (
-            <span className="text-rose-300" data-testid="detail-error">
+            <span className="text-seal" data-testid="detail-error">
               {t('workflow.canvas.detail.error', { error: row.error })}
             </span>
           ) : null}

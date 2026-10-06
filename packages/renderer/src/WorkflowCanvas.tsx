@@ -59,6 +59,7 @@ import { OperatorPalette } from './OperatorPalette';
 import { OperatorParamForm } from './OperatorParamForm';
 import { WorkflowNodeDetail } from './WorkflowNodeDetail';
 import { operatorIconOf } from './operator-icons';
+import { DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 格子的初始摆放间距（像素）；库里存过落点时以落点为准（裁定三）。 */
@@ -509,6 +510,19 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
    */
   const canSave = loaded !== null && !isReadOnly && snapshot.nodes.length > 0;
   /**
+   * 四只工具按钮各自的"为什么按不动"（6.2-06：禁用必须说得出原因，且原因取现成的判据，不另数一遍）。
+   * 排列按"离手最近"：先说这一条路根本不存在（运行期只读），再说这一步没内容。
+   */
+  const undoReason = isReadOnly ? 'READ_ONLY' : !canUndo ? 'NOTHING_TO_UNDO' : undefined;
+  const redoReason = isReadOnly ? 'READ_ONLY' : !canRedo ? 'NOTHING_TO_REDO' : undefined;
+  const saveReason = isReadOnly
+    ? 'READ_ONLY'
+    : loaded === null
+      ? 'MIRROR_ONLY'
+      : snapshot.nodes.length === 0
+        ? 'EMPTY_GRAPH'
+        : undefined;
+  /**
    * 点开的那一格。从 `canvasCells` 找而不是再算一次标签：标签规则只在那一份里（§2.2），
    * 且这一格被撤销 / 换一条计划之后可能已经不在了，找不到就是"它不在这张图上"。
    */
@@ -535,7 +549,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           : t('workflow.canvas.graphSourceMirror')}
       </p>
       {graphNotice ? (
-        <p className="mt-1 text-[11px] text-amber-300" data-testid="canvas-graph-notice">
+        <p className="mt-1 text-[11px] text-amber" data-testid="canvas-graph-notice">
           {graphNotice}
         </p>
       ) : null}
@@ -547,44 +561,53 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         <span data-testid="canvas-draft-count" className="text-slate-500">
           {t('workflow.canvas.draftCount', { nodeCount: snapshot.nodes.length })}
         </span>
-        <button
-          type="button"
-          data-testid="canvas-undo"
+        <DeskButton
+          action="canvas-undo"
+          markers={{ testid: 'canvas-undo' }}
+          variant="ghost"
           onClick={undoEdit}
           disabled={!canUndo || isReadOnly}
-          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
+          disabledReason={undoReason}
+          disabledReasonLabel={undoReason ? t(`workflow.canvas.reason.${undoReason}`) : undefined}
         >
           {t('workflow.canvas.undo')}
-        </button>
-        <button
-          type="button"
-          data-testid="canvas-redo"
+        </DeskButton>
+        <DeskButton
+          action="canvas-redo"
+          markers={{ testid: 'canvas-redo' }}
+          variant="ghost"
           onClick={redoEdit}
           disabled={!canRedo || isReadOnly}
-          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
+          disabledReason={redoReason}
+          disabledReasonLabel={redoReason ? t(`workflow.canvas.reason.${redoReason}`) : undefined}
         >
           {t('workflow.canvas.redo')}
-        </button>
-        <button
-          type="button"
-          data-testid="canvas-validate"
+        </DeskButton>
+        <DeskButton
+          action="canvas-validate"
+          markers={{ testid: 'canvas-validate' }}
+          variant="line"
           onClick={validateDraft}
           disabled={isReadOnly}
-          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
+          disabledReason={isReadOnly ? 'READ_ONLY' : undefined}
+          disabledReasonLabel={isReadOnly ? t('workflow.canvas.reason.READ_ONLY') : undefined}
         >
           {t('workflow.canvas.validate')}
-        </button>
+        </DeskButton>
         {/* 写入口（5.10-10）：一次点击一次覆盖保存，画布不自动存草稿——"改了就进库"会让 5.10-07 的
-            指纹续跑判据在用户不知情时生效，那比丢掉未入库的编辑更糟。 */}
-        <button
-          type="button"
-          data-testid="canvas-save"
+            指纹续跑判据在用户不知情时生效，那比丢掉未入库的编辑更糟。
+            这一档涂琥珀而不是青瓷：它写的是本机的库，不碰外面（03 稿的三色效果归属）。 */}
+        <DeskButton
+          action="canvas-save"
+          markers={{ testid: 'canvas-save' }}
+          variant="amber"
           onClick={saveDraft}
           disabled={!canSave}
-          className="rounded-md border border-slate-700 px-2 py-1 text-slate-300 enabled:hover:border-slate-500 disabled:opacity-40"
+          disabledReason={saveReason}
+          disabledReasonLabel={saveReason ? t(`workflow.canvas.reason.${saveReason}`) : undefined}
         >
           {t('workflow.canvas.save')}
-        </button>
+        </DeskButton>
       </div>
       {issues !== null ? (
         <ul

@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { operatorParamFields, validateOperatorParams, type OperatorDescriptor } from '@auto-cc/shared';
+import { DeskButton } from './ui/controls';
 
 export interface OperatorParamFormProps {
   /** 该节点的算子描述（字段、必填、枚举候选都由它来） */
@@ -78,13 +79,13 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
   }
 
   return (
-    <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3" data-testid="operator-param-form">
+    <div className="mt-3 rounded-xl border border-line bg-ink-950/40 p-3" data-testid="operator-param-form">
       <h4 className="text-xs font-semibold text-slate-300">{t('workflow.operator.paramHeading')}</h4>
       <p className="mt-1 text-[11px] text-slate-500">
         {t(descriptor.titleKey)} · {t('workflow.operator.paramHint')}
       </p>
       {isReadOnly ? (
-        <p className="mt-1 text-[11px] text-amber-300" data-testid="param-form-readonly">
+        <p className="mt-1 text-[11px] text-amber" data-testid="param-form-readonly">
           {t('workflow.operator.readOnlyHint')}
         </p>
       ) : null}
@@ -92,7 +93,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
         {fields.map((field) => {
           const isInvalid = invalidFields.includes(field.name);
           const label = t(`workflow.param.${descriptor.kind}.${field.name}`, { defaultValue: field.name });
-          const borderClass = isInvalid ? 'border-rose-500 ring-1 ring-rose-500/40' : 'border-slate-700';
+          const borderClass = isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong';
           return (
             <label
               key={field.name}
@@ -103,7 +104,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
             >
               <span className="flex items-center gap-1">
                 {label}
-                {field.required ? <span className="text-rose-400">*</span> : null}
+                {field.required ? <span className="text-seal">*</span> : null}
               </span>
               {/* 控件按派生出来的类型三选一：布尔走勾选框、枚举走 select（候选来自 schema，
                   界面不另存一份平台名）、其余走文本/数字输入。加一只算子不需要动这几行。 */}
@@ -113,7 +114,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                   disabled={isReadOnly}
                   checked={draft[field.name] === 'true'}
                   onChange={(event) => edit(field.name, event.target.checked ? 'true' : 'false')}
-                  className="mt-1 h-3.5 w-3.5 rounded border-slate-700 bg-slate-900"
+                  className="mt-1 h-3.5 w-3.5 rounded border-line-strong bg-ink-900"
                 />
               ) : field.type === 'enum' ? (
                 <select
@@ -121,7 +122,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                   disabled={isReadOnly}
                   aria-invalid={isInvalid}
                   onChange={(event) => edit(field.name, event.target.value)}
-                  className={`mt-1 w-full rounded-md border bg-slate-900 px-2 py-1 text-[11px] text-slate-100 ${borderClass}`}
+                  className={`mt-1 w-full rounded-md border bg-ink-900 px-2 py-1 text-[11px] text-slate-100 ${borderClass}`}
                 >
                   {field.options.map((option) => (
                     <option key={option} value={option}>
@@ -136,33 +137,36 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                   disabled={isReadOnly}
                   aria-invalid={isInvalid}
                   onChange={(event) => edit(field.name, event.target.value)}
-                  className={`mt-1 w-full rounded-md border bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-700 ${borderClass}`}
+                  className={`mt-1 w-full rounded-md border bg-ink-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-celadon/60 ${borderClass}`}
                 />
               )}
               {isInvalid ? (
-                <span className="mt-1 block text-[10px] text-rose-400">{t('workflow.operator.rejectRequired')}</span>
+                <span className="mt-1 block text-[10px] text-seal">{t('workflow.operator.rejectRequired')}</span>
               ) : null}
             </label>
           );
         })}
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          data-action="param-save"
-          disabled={isReadOnly}
+        {/* 参数落到的是这张图（本机），不是外面：琥珀档。 */}
+        <DeskButton
+          action="param-save"
+          variant="amber"
+          compact
           onClick={commit}
-          className="rounded-md border border-sky-900 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
+          disabled={isReadOnly}
+          disabledReason={isReadOnly ? 'READ_ONLY' : undefined}
+          disabledReasonLabel={isReadOnly ? t('workflow.operator.reason.READ_ONLY') : undefined}
         >
           {t('workflow.operator.save')}
-        </button>
+        </DeskButton>
         {isSaved ? (
-          <span className="text-[10px] text-emerald-400" data-testid="param-form-saved">
+          <span className="text-[10px] text-jade" data-testid="param-form-saved">
             {t('workflow.operator.savedHint')}
           </span>
         ) : null}
         {invalidFields.length > 0 ? (
-          <span className="text-[10px] text-rose-400" data-testid="param-form-rejected">
+          <span className="text-[10px] text-seal" data-testid="param-form-rejected">
             {t('workflow.operator.rejectedHint')}
           </span>
         ) : null}

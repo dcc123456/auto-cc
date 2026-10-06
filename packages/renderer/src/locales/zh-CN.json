@@ -634,6 +634,13 @@
           "duration": "耗时 {{durationMs}} 毫秒",
           "durationPending": "耗时 —（尚未结束）",
           "error": "错误 {{error}}"
+        },
+        "reason": {
+          "READ_ONLY": "流程正在运行 / 暂停，这张图是只读的：改图会换指纹，续跑的老 run 就此作废",
+          "NOTHING_TO_UNDO": "命令栈是空的：还没有可退的改动",
+          "NOTHING_TO_REDO": "没有可重做的改动：先退一步再看",
+          "MIRROR_ONLY": "画布此刻照的是内存里那次运行，不是库里的计划：先在上方选中一条流程才能存",
+          "EMPTY_GRAPH": "图上一格都没有：空格子存不进库"
         }
       },
       "status": {
@@ -780,6 +787,9 @@
           "branch": {
             "title": "条件分支演示（数值 ≥ 阈值走 yes）"
           }
+        },
+        "reason": {
+          "READ_ONLY": "运行期间参数不可改：改了会让这一步的指纹对不上"
         }
       },
       "param": {
