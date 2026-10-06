@@ -188,20 +188,24 @@ export function Modal({
           role="dialog"
           aria-modal="true"
           data-action={`${action}-modal`}
-          className={`flex max-h-full w-full ${MODAL_WIDTH[width]} flex-col overflow-hidden rounded-sheet border bg-ink-850 shadow-sheet animate-rise ${
+          className={`flex max-h-full max-w-full ${MODAL_WIDTH[width]} flex-col overflow-hidden rounded-sheet border bg-ink-850 shadow-sheet animate-rise ${
             tone === 'seal' ? 'border-seal/55' : 'border-line-strong'
           }`}
         >
           <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-3">
             <h3 className="text-sm font-semibold text-slate-50">{title}</h3>
-            <button
-              type="button"
-              data-action={`${action}-close`}
-              onClick={onClose}
-              className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
-            >
-              <X size={14} />
-            </button>
+            {/* 关掉那颗只在"可安全取消"的弹窗上出现：`dismissOnScrim` 一只 prop 同时管三条退路
+                （点遮罩 / 按 Esc / 按右上角的 ✕），必须表态的那几只因此一条退路都不留（09 稿⑤-1/⑤-5）。 */}
+            {dismissOnScrim ? (
+              <button
+                type="button"
+                data-action={`${action}-close`}
+                onClick={onClose}
+                className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-xs leading-relaxed text-slate-200">
             {children}

@@ -280,11 +280,14 @@
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",
+      "mustRead": "签字之前，请先逐条读完下面这几条",
       "riskSearch": "本应用会代你在 {{platform}} 上搜索岗位并逐条读取详情",
       "riskGreet": "会代你自动生成话术并打招呼",
       "riskDeliver": "会在你确认之后自动投递简历附件",
       "riskAccount": "这些动作由脚本发起，平台风控可能把它判成异常行为，后果（警告、限流、封号）由这个账号自己承担。",
+      "riskFact": "简历里的公司、职位、时间这些事实由你锁死，生成文案不会替你编造。",
       "once": "确认之后不会每次重复询问：签字写进本地库的那一行，重启也还在。",
+      "checkbox": "我已逐条读过上面这些风险，愿意由这个账号承担后果",
       "scopeRow": "写入的是库里这一行：{{scope}}",
       "readUnknown": "读不到签字状态（不在 Electron 宿主里？），本次不会放行动作。",
       "errorRow": "确认没能写入：{{code}} · {{message}}",
@@ -294,7 +297,8 @@
       "statusUnsigned": "{{platform}} 尚未确认自动化风险，动作会先等你点头",
       "never": "无时刻",
       "reason": {
-        "ACTION_BUSY": "签字那一次写入还在飞，先等它落地"
+        "ACTION_BUSY": "签字那一次写入还在飞，先等它落地",
+        "CONSENT_NOT_CHECKED": "还没勾选「我已读完风险」，签字按钮不放行"
       }
     },
     "privacy": {

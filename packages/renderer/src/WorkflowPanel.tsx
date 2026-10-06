@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowRunView } from '@auto-cc/shared';
-import { ConsentCard, ConsentStatusRow } from './ConsentCard';
+import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
 import { ScheduleSection } from './SchedulePanel';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -250,16 +250,7 @@ export function WorkflowPanel() {
       {/* 定时任务紧跟计划库（spec 5.7-05）：一条任务就是"这条已保存计划 + 这个时刻"，隔开放要跨面板对计划名。 */}
       <ScheduleSection />
 
-      {consent.request && (
-        <ConsentCard
-          platform={consent.request.platform}
-          view={consent.request.view}
-          busy={consent.busy}
-          error={consent.error}
-          onGrant={() => void consent.grant()}
-          onDeny={consent.deny}
-        />
-      )}
+      <ConsentOverlay consent={consent} />
       {planPlatforms.map((platform) => (
         <ConsentStatusRow key={platform} view={consent.views[platform]} />
       ))}

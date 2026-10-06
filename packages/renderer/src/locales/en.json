@@ -280,11 +280,14 @@
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
+      "mustRead": "Read every line below before you sign",
       "riskSearch": "This app will search jobs on {{platform}} for you and open each one to read its details",
       "riskGreet": "It will generate chat scripts and send greetings on your behalf",
       "riskDeliver": "After you confirm, it will attach and deliver your resume file automatically",
       "riskAccount": "These actions come from a script, so the platform may flag them as abnormal behaviour. The consequences (warnings, throttling, account bans) fall on this account.",
+      "riskFact": "Facts in your resume — companies, titles, dates — stay locked to what you wrote; generated copy will not invent them.",
       "once": "Confirming does not ask again on every run: the signature is one row in the local database and survives a restart.",
+      "checkbox": "I have read each of these risks and accept the consequences on this account",
       "scopeRow": "The row it writes: {{scope}}",
       "readUnknown": "Consent status could not be read (not inside the Electron host?), so this action stays blocked.",
       "errorRow": "Consent was not recorded: {{code}} · {{message}}",
@@ -294,7 +297,8 @@
       "statusUnsigned": "{{platform}} automation risk not acknowledged; actions wait for your confirmation",
       "never": "no timestamp",
       "reason": {
-        "ACTION_BUSY": "The consent write is still in flight — wait for it"
+        "ACTION_BUSY": "The consent write is still in flight — wait for it",
+        "CONSENT_NOT_CHECKED": "Tick the acknowledgement first — the signature button stays closed until you do"
       }
     },
     "privacy": {

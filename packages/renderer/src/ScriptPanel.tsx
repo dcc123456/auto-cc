@@ -11,7 +11,7 @@ import type {
   ScriptGenerateRequestView,
   ScriptKindView,
 } from '@auto-cc/shared';
-import { ConsentCard } from './ConsentCard';
+import { ConsentOverlay } from './ConsentModal';
 import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -338,16 +338,7 @@ export function ScriptPanel() {
         )}
       </div>
 
-      {consent.request && (
-        <ConsentCard
-          platform={consent.request.platform}
-          view={consent.request.view}
-          busy={consent.busy}
-          error={consent.error}
-          onGrant={() => void consent.grant()}
-          onDeny={consent.deny}
-        />
-      )}
+      <ConsentOverlay consent={consent} />
 
       {bundle && (
         <div className="flex flex-col gap-2">
