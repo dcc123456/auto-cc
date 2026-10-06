@@ -42,6 +42,7 @@ import {
   toWaitReading,
 } from './locator-script.js';
 import { locateSpecSchema } from './platform-contract.js';
+import { assertSpecValid } from './locator-spec.js';
 import type { BrowserLocateService } from './locate-service.js';
 import type { BrowserPageService } from './index.js';
 
@@ -237,6 +238,7 @@ export class BrowserActService extends Service {
    * @throws 没有已挂载会话 `NO_KERNEL_SESSION`；所有帧读取失败 `PAGE_SCRIPT_FAILED`
    */
   waitFor = async (predicate: WaitPredicate): Promise<ActResultView> => {
+    assertSpecValid(predicate.spec, 'browser.act');
     const startedAt = Date.now();
     const satisfied = await this.waitSatisfied(predicate.spec, predicate.kind);
     return {
@@ -264,6 +266,9 @@ export class BrowserActService extends Service {
     spec: LocateSpec,
     payload?: string,
   ): Promise<ActResultView> {
+    // 声明本身合不合法必须排在碰会话与闸门之前：非法形状若在页内脚本里读到零条候选，
+    // 五秒后会以 WAIT_TIMEOUT 报出，把调用方引向「页面不可点」这个错方向（plan §16.3）。
+    assertSpecValid(spec, 'browser.act');
     const contents = requireKernelContents(this.host, 'browser.act');
     const startedAt = Date.now();
     if (!(await this.waitSatisfied(spec, 'clickable'))) {

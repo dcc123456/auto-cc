@@ -9,7 +9,7 @@
  * 与 `browser.page` 的分工：页面服务只读「整页长什么样」，这里读「我要的那个东西在哪」。
  * 两者共用 `frame-channel`（同一块视图、同一条多帧求值通道），不存在第二套取句柄逻辑。
  */
-import { AppError, asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
+import { asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
 import type { ElementFingerprint, LocateResultView, LocateSpec, LocateStatusView, LocatedView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { evaluateInFrames, readingsFromFrames, requireKernelContents, type KernelHost } from './frame-channel.js';
@@ -25,7 +25,7 @@ import {
   rankScored,
   scoreByFingerprint,
   toRankedCandidates,
-  validateSpec,
+  assertSpecValid,
   type LocateDecision,
 } from './locator-spec.js';
 import { locateSpecSchema } from './platform-contract.js';
@@ -71,13 +71,7 @@ export class BrowserLocateService extends Service {
    * @throws 声明非法 `LOCATE_SPEC_INVALID`；没有已挂载会话 `NO_KERNEL_SESSION`；所有帧读取失败 `PAGE_SCRIPT_FAILED`
    */
   find = async (spec: LocateSpec, lastKnown?: ElementFingerprint): Promise<LocateResultView> => {
-    const problems = validateSpec(spec);
-    if (problems.length > 0) {
-      throw new AppError('LOCATE_SPEC_INVALID', `定位声明不可用：${problems.join('；')}`, 'browser.locate', {
-        problems,
-        spec,
-      });
-    }
+    assertSpecValid(spec, 'browser.locate');
     const contents = requireKernelContents(this.host, 'browser.locate');
     const readings = readingsFromFrames(
       await evaluateInFrames(contents, buildLocateScript(spec.candidates, this.limits)),

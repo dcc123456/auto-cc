@@ -2235,7 +2235,11 @@ spec 侧只补 2.2-12 的「两条通道如实报告」一句：`click` 的 `don
 
 1. **反腿的场地条件与正腿相反**：要"派发了但页面没收到"，需要窗口**不在前台**（把 app 切到别的应用后面再放）。
    下一窗别再按"等用户在场"安排它。
-2. **一条真实的接口不一致（登记，未改）**：同一个非法 spec，`browser.locate.find` 回 `LOCATE_SPEC_INVALID`，
+2. **一条真实的接口不一致（本窗已落码修掉）**：同一个非法 spec，`browser.locate.find` 回 `LOCATE_SPEC_INVALID`，
    `browser.act.click` 却照跑到闸门再以 `WAIT_TIMEOUT` 报出，把调用方往"页面不可点"的方向带。
-   修法是让 `perform` 在等待之前走同一支 `validateSpec`（`locate.find` 已有的那个入口，符合 §2.5"合并到一个入口"），
-   并补一条单测（非法形状必须报 `LOCATE_SPEC_INVALID`，不许是 `WAIT_TIMEOUT`）。**这属新增面，另起一片，不夹带进裁定⑰。**
+   修法是让动作口在碰会话与闸门之前走与 `locate.find` **同一支**校验器：新增 `assertSpecValid(spec, source)`
+   （`locator-spec.ts`，非法即抛 `LOCATE_SPEC_INVALID` + `details.problems`），`locate-service.find` 由原来的
+   就地抛错改为调它（消息与 code 一字不动，老用例仍绿），`perform`（click / type / select）与 `waitFor`
+   四道口各调一次——**校验排在 `requireKernelContents` 之前**，因为非法声明不该先撞上会话缺失那条码。
+   新文件 `packages/browser/src/act-service-validation.test.ts` 三条用例把顺序钉住（包内 255→258 例）：
+   缺属性名的 `testId`、缺可读名的 `role`，以及 `waitFor` 不许把非法声明报告成「未满足」。

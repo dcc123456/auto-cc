@@ -9,6 +9,7 @@
  * 达不到就 **fail closed**（宁可报「不确定」也不猜一个点下去）。数值来自 plan §9.1 的取证，
  * 但阈值本身走配置（`browser.locate` 的 `minScore` / `minMargin`），代码里不写死（AGENTS.md §2.7）。
  */
+import { AppError } from '@auto-cc/core';
 import type {
   ElementFingerprint,
   LocateCandidate,
@@ -109,6 +110,21 @@ export function validateSpec(spec: LocateSpec): string[] {
     if (!candidate.value) problems.push(`${label}：缺少 value`);
   });
   return problems;
+}
+
+/**
+ * 校验一份定位声明，非法就当场失败——把「声明本身不合法」和「页面等不到」分成两种结局。
+ * @param spec 待校验的定位声明（界面/知识包传来的不可信输入）
+ * @param source 出错归属的服务名，进 `AppError.source` 与日志（`browser.locate` / `browser.act`）
+ * @returns 无返回值：合法即静默通过，供调用方继续走闸门
+ * @throws 非法时 `LOCATE_SPEC_INVALID`，逐条原因放在 `details.problems`。
+ *   动作口必须先过这一道：否则一份缺 `strategy` 的声明会在页内脚本里读到零条候选，
+ *   五秒后以 `WAIT_TIMEOUT` 报出，把调用方引向「页面不可点」这个错方向（plan §16.3）
+ */
+export function assertSpecValid(spec: LocateSpec, source: string): void {
+  const problems = validateSpec(spec);
+  if (problems.length === 0) return;
+  throw new AppError('LOCATE_SPEC_INVALID', `定位声明不可用：${problems.join('；')}`, source, { problems, spec });
 }
 
 /** 一条候选的「匹配值」——打分时判断它像不像生成串用的那个串。 */
