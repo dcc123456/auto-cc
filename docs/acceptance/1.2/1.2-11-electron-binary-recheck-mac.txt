@@ -1,0 +1,30 @@
+复验 1.1-02 / 1.2-11「Electron 二进制由 install 自动就位」—— 判据原文留的那句解除条件是
+"待有网环境复验"（原 `[!]` 的成因是沙箱拉不到 Electron 发布源，SHASUMS 失败），本文件就是那次复验。
+plan §7.8.3 已把这两行显式列为"成因与宿主平台无关、别被平台换边顺带误翻"，因此这里的翻位只认本文件的读数。
+
+宿主：macOS 24.6.0 / arm64，pnpm 10.12.1，Node 24.18.0，仓库 `main` = `2abbc21`。
+
+一、取一份**纯净副本**（不是 worktree，不共享 `node_modules`）
+  git archive HEAD | tar -x -C <仓库外的 .research-repos/auto-cc-fresh>
+  cd <那份副本> && git init -q .          # §9：根 prepare 在非 git 目录会失败
+  pnpm install                            → INSTALL=0
+  . postinstall$ node packages/main/node_modules/electron/install.js
+  . postinstall: Done
+  读数：packages/main/node_modules/electron/dist/ 里是 Electron.app（mtime 当天），
+        ./dist/Electron.app/Contents/MacOS/Electron --version → v44.4.5
+
+二、**冷缓存**复验（这一条才是原 `[!]` 缺的那一半：证明确实走网络、不是蹭本机既有缓存）
+  mv ~/Library/Caches/electron → 移开，只留一个空目录
+  在副本里 rm -rf node_modules/.pnpm/electron@44.4.5* packages/main/node_modules
+  pnpm install                            → COLD_INSTALL=0，日志里 0 处 error/fail
+  读数：@electron/get 的缓存目录里当场落 electron-v44.4.5-darwin-arm64.zip（124 MB，mtime 与本次安装同分钟），
+        走的是 .npmrc 的 electron_mirror=https://registry.npmmirror.com/-/binary/electron/；
+        dist/ 重新出现（mtime 同分钟），--version 仍是 v44.4.5
+  复验后已把移开的原缓存目录还原（~/Library/Caches/electron 内容完好），本次下载的 zip 留在 /tmp 里未回写缓存。
+
+三、如实记录的边界
+  - 只验了 **darwin-arm64** 这一端。win / linux 的自动就位没在本机验过，也不许由本文件推出来。
+  - `pnpm install` 尾讯有一条 "Ignored build scripts: electron-winstaller"：那是 electron-builder 的
+    Windows 侧依赖，与主进程用的 Electron 二进制无关；根 `postinstall`（显式跑 install.js）才是这条判据的落点，
+    它由 pnpm 自动执行，无需任何手动 `node install.js`——这正是判据要的东西。
+  - 副本目录在仓库外的 `.research-repos/`（AGENTS.md §6.4），未进 auto-cc 仓库；本文件只归档读数。
