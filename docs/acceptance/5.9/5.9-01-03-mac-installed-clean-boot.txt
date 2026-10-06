@@ -1,0 +1,118 @@
+=== 5.9-01 / 02 / 03 的 mac 半边：装进 /Applications 后全新启动（macOS arm64，2026-10-06）===
+
+子计划：5.9。三条各欠的那格在 spec 里写的是同一句「在 mac / linux 各跑一次打包并手动启动安装包」，
+所以这一轮把 mac 那半的**装机 → 首次启动 → 主界面 → 更新通道**四步一次跑完，三条共用同一次运行。
+**状态位不动**：三条的 `[!]` 仍按裁定⑭（换边后的平台条目先列读数、不自行翻位）维持，Linux 侧启动那一格本机仍无 userland。
+
+采集时间：2026-10-06T02:44Z–02:47Z（同一次开机，两次启动，见第 3 部分）
+宿主：macOS 24.6.0 / arm64；仓库 sha `076e283`；产物 `dist/auto-cc-0.1.0-mac-arm64.dmg` = 146590778 B（`34781d7` 那轮 `pnpm dist:mac` 的完整 target，非 `--dir`）
+
+------------------------------------------------------------------
+第 1 部分：装机这一步是真的（5.9-01 那格「拖进 /Applications 装好再启动」）
+------------------------------------------------------------------
+    hdiutil attach -nobrowse -readonly dist/auto-cc-0.1.0-mac-arm64.dmg
+      → 已验证 CRC32 $AADCF2EA；挂载点 /Volumes/auto-cc 0.1.0-arm64
+      → 卷内三件：auto-cc.app、Applications → /Applications 软链、.background.tiff/.VolumeIcon.icns
+    ditto "/Volumes/auto-cc 0.1.0-arm64/auto-cc.app" /Applications/auto-cc.app
+      → DITTO=0，装机后体积 341 MB；无 com.apple.quarantine（本地 dmg，不经浏览器下载），
+        codesign -dv：Format=app bundle with Mach-O thin (arm64) / Signature=adhoc（未签名如实记在 1.7-09）
+    /Applications 原本没有 auto-cc.app（先探过：ls -d 报 No such file，写入权限 touch 探针通过）
+      → 所以这一步没有覆盖任何用户已有的安装。
+
+------------------------------------------------------------------
+第 2 部分：主界面读数（装机版，CDP --port 10299，target = app.asar/renderer）
+------------------------------------------------------------------
+    启动命令（两条硬条件一起造出来）：
+      env HOME=<tmp/59-mac-clean/home> PATH=/usr/bin:/bin \
+        /Applications/auto-cc.app/Contents/MacOS/auto-cc \
+        --remote-debugging-port=10299 --user-data-dir=<tmp/59-mac-clean/profile> \
+        --proxy-server="http=127.0.0.1:9;https=127.0.0.1:9;socks=127.0.0.1:9"
+    - PATH 只有 /usr/bin:/bin → 里面**没有 node**（开发用的 node 在 ~/.nvm 下），app 照常起来 = 自包含（5.9-02 的"无 Node"）
+    - --proxy-server 指向 127.0.0.1:9（discard 端口，没有任何监听）→ 任何外发连接必然失败 = 5.9-02/03 的"无外网"代理黑洞
+      **口径要写清**：这不是接口级断网（不动网卡、不 sudo 改路由），是"把出口堵死"的等价环境；
+      且 5.9-03 的失败面本来就与网络无关——见第 4 部分，产物里的更新源是 .invalid 域，任何环境都解析不出来。
+    - CDP 用 10299：10222 归开发实例（pid 43792，另一份 userData），没有动它、也没有杀它。
+
+    eval 读数（首屏，全新 profile）：
+      title=auto-cc  url=file:///Applications/auto-cc.app/Contents/Resources/app.asar/renderer/index.html
+      tabs=[chat, workflow, diagnostics]  ·  chat 按钮 height=26（可见）
+      首屏中文 1485 字 / body 2204 字  ·  window.autoCC 命名空间 24 个
+      主进程日志：ipc-gateway-service "IPC 网关就绪：cordis:call / cordis:event（能力 139 项，事件 15 项）"
+                  devtools-service "自测通道读数就绪：… 打包态 true"
+    截图：
+      docs/acceptance/5.9/5.9-01-mac-installed-app-launch.png   （对话视图，md5 3c209d94ebd743c66dfaa54dbfb1954a）
+      docs/acceptance/5.9/5.9-02-mac-clean-profile-launch.png   （诊断视图，md5 b5966024fc29066bda1fe3dbdada1b16）
+      两张 md5 不同（同批去重检查跑过）。
+
+------------------------------------------------------------------
+第 3 部分：一处必须记下的副作用与一条本机环境事实
+------------------------------------------------------------------
+    **mac 上 Electron 不认 HOME 覆盖。** 第一次启动只换了 HOME（想造"全新账户"），日志里的
+    store 落点仍然是 `~/Library/Application Support/auto-cc/store.db`（`base::mac::GetUserLibraryPath()`
+    走 NSHomeDirectory，不看 $HOME）；只有 `Library/Logs/auto-cc/` 跟到了新 HOME。
+    → 那一次**打开了默认 profile**（本机这一份是既有装机/开发轮次留下的，schema_migrations 记到 29、36 张表）。
+      该实例只挂载服务：没有任何外发、没有页面动作、没有跑 run，约 30 秒后 SIGTERM 终止，进程数归 0。
+      这一格如实记在这里，不写成"未触碰用户数据"。
+    → 换账户的正确写法是 Chromium 的 `--user-data-dir=<空目录>`（第二次启动就是这么做的）：
+      新 profile 里 store.db 从 0 长出来，`tables=36 / user_version=29`，
+      日志行：`store 就绪：<repo>/tmp/59-mac-clean/profile/store.db｜node:sqlite / sqlite 3.53.4｜schema 0→0`
+      → "全新账户"那一格由这条读数承担，而不是由 HOME 承担。
+
+    清理（机器恢复原状）：pkill 该 app（进程数 0）→ hdiutil detach（disk8 ejected）→
+    rm -rf /Applications/auto-cc.app（ls 报 No such file）。dmg 与 zip 仍在 dist/（被忽略，不入库）。
+
+------------------------------------------------------------------
+第 4 部分：更新通道（5.9-03）——零请求这一面在 mac 上是**更强**的成立
+------------------------------------------------------------------
+    首屏（还没有任何人点过）：autoCC.update.status() =
+      { state: 'idle', currentVersion: '', latestVersion: null, detail: null }   → 首启动一次请求都没发
+    update 命名空间方法 = status / check / download / install（下载与安装各要点一次才动，状态机在主进程一侧）
+    点「检查更新」之后（脚本派发 pointerdown/mousedown/pointerup/mouseup/click 五发并显式带 buttons，
+      因为 harness 的 bridge.click 不带 buttons 时**点了没反应**——同一页面上先踩过一次：
+      `[data-view="diagnostics"]` 用 bridge.click 之后截图与上一张字节完全相同，换五发才切过去）：
+      autoCC.update.status() = { state: 'no-feed', currentVersion: '', latestVersion: null, detail: null }
+      页面文案：「更新只在被点的时候才发生：本应用不会在后台下载、不会静默安装，也不会替你安排重启。」
+                「没有配置更新源，所以一次请求都没有发出去。」
+      同屏其他面板照常可用（诊断视图其余段正常渲染，切回对话的入口在位）→ 不阻塞使用
+    截图：docs/acceptance/5.9/5.9-03-mac-no-feed-zero-request.png
+
+    为什么是 `no-feed` 而不是 win 那轮的 `failed`：产物里 `Contents/Resources/app-update.yml` 写的是
+    `provider: generic / url: https://update.auto-cc.invalid/`，但服务读的是插件配置 `shell.update.feedUrl`
+    （`packages/shell/src/update.ts:13`，zod 里 `.optional()` 且**刻意无默认值**；`cordis.yml:574-576` 记的就是这条决定），
+    打包版随 asar 的那份 cordis.yml 没有 feedUrl → 走 `!this.options.feedUrl` 分支 → `no-feed`、零请求。
+    **mac 侧因此没取到的是 `failed` 那一格**（要它得给 cordis.yml 临时补 feedUrl 再重打一次 mac 包，
+    那是"为凑状态改产物配置"，不属于本轮；win 侧四态读数已在 `5.9-03-request-log.txt` 与那三张 png 里）。
+
+------------------------------------------------------------------
+第 5 部分：三条各自还欠什么（收口口径，别把本轮读成"mac 已全绿"）
+------------------------------------------------------------------
+    - 5.9-01：mac 那半**这轮补完**（装机 + 启动到主界面 + 截图）；仍欠 linux 侧启动（本机无 Linux userland）。
+      x64 档仍需 Rosetta 一次（1.7-09 已记）。
+    - 5.9-02：mac 的"无 Node + 全新 profile + 出口堵死仍能进主界面"这轮取到；
+      "无系统 Chrome"在 mac 上的对应证据继承 1.7 那轮的 asar 审计（本轮 asar 内没有再核第二套内核痕迹，
+      只核了运行期没有 dev server：url 是 file:///…app.asar/renderer/index.html，5173 从未被请求）。
+    - 5.9-03：mac 取到 idle → no-feed 零请求 + 不阻塞；`available/downloading/downloaded/failed` 四格仍是 win 独有。
+    - M1-01：它自己列的"未收"四格里，"拖进 /Applications 装好再启动"这一格本轮做掉了；
+      剩 x64/Rosetta、linux 运行期、win 运行期（本机非 Windows）。
+
+------------------------------------------------------------------
+第 6 部分：三张截图的口径（首屏同意卡在最上层，脚本没有替人按）
+------------------------------------------------------------------
+    三张 png 里都能看到「隐私声明与使用条款」的首屏卡盖在主界面之上（左半的诊断面板是透过半透明遮罩看到的）。
+    这不是取景失误，而是**全新 profile 的正常首屏**——它本身就是 5.9-02"全新账户"成立的一格旁证：
+    装机版在一个从没跑过的 profile 上起来，第一件事是要求人读同意卡，而不是直接进工作区。
+    脚本**没有**去点那张卡的同意按钮：那一条是人对隐私与账号风险的表态，属于留给人的闸门（与 5.3 定的
+    "不可自提升"同一类），拿它当"取景障碍"绕掉是不诚实的。
+    因此三张图的读法要按这里写：
+      5.9-01 = 装机版启动后主窗口已绘出（标题栏、三个视图 tab、诊断段骨架都在）；
+      5.9-02 = 同一窗口切到诊断视图（tab 高亮与段落内容都换了，md5 与上一张不同），同意卡仍在最上层；
+      5.9-03 = `--reveal '[data-action="update-check"]'` 把更新段滚进画面，
+               「没有配置更新源，所以一次请求都没有发出去」那一句在左下角可见（被遮罩压暗）。
+    一条由此带出的技术事实（与 §9 的 5.10-a 第⑩条同源，本轮再撞实一次）：
+    `harness click`（bridge.click 的 mousedown/mouseup 不带 `buttons`）在这两份产物上**点了没有反应**——
+    表现就是"切了视图再 shot，两张 png 字节完全相同"。换成脚本自己派发的
+    pointerdown/mousedown/pointerup/mouseup/click 五发（显式 `buttons:1/0`）之后视图才真的切。
+    所以第 4 部分那次「检查更新」是**合成事件打到被遮罩盖住的元素上**：状态机在主进程一侧，
+    `update.status()` 从 `idle` 变 `no-feed` 是真的，但它不等于"人在页面上点了一颗看得见的按钮"。
+    这一格如实记在这里，留给在场那一轮补真点。
+
