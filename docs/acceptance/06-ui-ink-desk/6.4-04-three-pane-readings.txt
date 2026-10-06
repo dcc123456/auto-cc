@@ -1,0 +1,215 @@
+6.4-04 岗位屏「列表 / 详情 / 动作」三段式 —— 活体读数档案
+====================================================================
+子计划：06-ui-ink-desk（第十七片）
+判据：spec 6.4-04（V）"点一行出详情、动作区跟着那一行走，不再是一列 12 行行内按钮"
+窗口：2026-10-06，macOS arm64，dev 实例（AUTO_CC_USER_DATA_DIR=tmp/v6-userdata，CDP 10222 / vite 5173）
+探针与日志：tmp/v6b/rp28~rp43（不进仓库）
+
+
+--------------------------------------------------------------------
+第一节  落了什么
+--------------------------------------------------------------------
+1. `packages/renderer/src/JobLabPanel.tsx`：最后那一段"库内清单"从**一列 12 行、每行两只朱砂键**
+   改成三段：
+   - 第一段 列表：每行是一只 radio（`name="jd-row"`、`data-jd-row="<jobId>"`），行上只留
+     `jd.rowMain` 一行读数与「对方已回 N 条」；`data-job-selected` / `data-replied` 两个属性各就各位。
+   - 第二段 详情：`[data-testid="jd-detail"]`，读的是**同一行 `JobRowView` 已经带回的字段**
+     （title / company / city / experience / education / salary / description / requirements /
+     sourceUrl / capturedAt / detailCapturedAt），不新增 IPC、不新增读路径（plan §3.6）。
+   - 第三段 动作：`greet-<jobId>` 与 `deliver-<jobId>` 两只 `DeskButton variant="seal"`
+     **字符串一字未改**，位置从行内搬到详情卡的页脚，前面常驻一句
+     `jd.actionTarget`「下面两个动作只作用于这一行：…」；上面一条 `border-line-strong` 分隔线。
+2. 选中态走 **celadon**（`border-celadon/50 bg-celadon-wash` + `accent-celadon`），与
+   `ScriptPanel` 候选行同一套画法（§2.2/§2.5：同一件事不长第二套）；不走 jade（jade 是"已核"）。
+3. **没选中时详情与动作段一起不出现**，只留一行 `jd.detailIdle` 提示——不是摆两只按不动的朱砂键，
+   因此本片不新增原因码（plan §3.6 第 4 条）。
+4. 清单那一段成为**查询容器**（section 上 `@container`，grid 上 `@2xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]`）：
+   并排还是上下走，看的是这一列自己的宽度，不是视口宽度。起因见第六节的实测读数。
+5. 新增 10 支双语键（`jd.detailIdle / detailCaptured / detailByline / detailPartial /
+   detailDescriptionHeading / detailDescriptionEmpty / detailRequirementsHeading /
+   detailRequirementsEmpty / detailSourceUrl / actionTarget`），`pnpm lint` 的缺翻译校验通过。
+
+
+--------------------------------------------------------------------
+第二节  取证前置：库里没有一行，而我不替用户签字
+--------------------------------------------------------------------
+`tmp/v6b/rp28.out`（渲染层现读，非 SQL 旁路）：
+
+    { theme: light, listOk: true, total: 0, rowCount: 0,
+      status: { total: 0, withDetail: 0, schemaVersion: 29, newestSourceUrl: null } }
+
+要让"点一行出详情"有活体行，只有两条路：
+- 跑一轮抓取。`packages/platform-boss/src/knowledge/boss.json` 的 `startUrl` 是
+  `http://127.0.0.1:10233/boss`（本地仿站，§7.2 要求的那一路，fixture 服务当轮在跑、`/boss` 回 200），
+  但那份开发档的 `automation_consents` 表**为空**（`select * from automation_consents` → `[]`），
+  界面的拦截点 ① 会先长风险确认卡。**签字是人的表态**，无人在场我不替用户签
+  （§8.3 与 5.3「不可自提升」同一口径），故不走这一条。
+- 采用：往那份**被 git 忽略的开发档 SQLite**（`tmp/v6-userdata/store.db`）直接插两条演示行
+  （`job_id` 前缀 `v6-6404-demo-`，标题里写明"取证演示行"），取证后由同一支脚本删回去。
+  绕过的只是抓取流水线（不在 6.4-04 射程内），`jd.store.list → JobRowView → 渲染层` 这条读路径全是真的。
+
+两条演示行是刻意配出来的两种形态：
+- A 行：有详情（`detail_captured_at` 非空、正文 42 字三段、硬性要求 3 条、薪资可归一化）
+  + 1 条 `direction='recruiter'` 的会话消息 → 走"已回复"那一支。
+- B 行：`detail_captured_at IS NULL`、`description=''`、`requirements_json='[]'`、面议 → 走"只有摘要"那一支。
+
+**末态复核（`tmp/v6b/rp42-clean.out` + `rp43.out`）**：
+`deletedJobs=2 / deletedMessages=1`，SQL 侧 `jobs=0 / conversation_messages=0 /
+automation_consents=0 / usage_ledger=0`，渲染层再读一次 `jd.store.list` 回
+`total=0 rowCount=0`，界面提示行回到「画出最近 0 行 · 库内共 0 条」、`jd-detail-idle` 重新出现、
+`data-job-selected="true"` 计数 0、免确认名单 `data-exempt-count` 仍是 0、主题回到 `light`（起始就是 light）。
+全程零外发、零额度消耗（`usage_ledger` 前后都是 0 行）。
+
+
+--------------------------------------------------------------------
+第三节  未选中那一腿（毡案 / 清单已点开、还没挑行）
+--------------------------------------------------------------------
+`tmp/v6b/rp32-before.out`（视口 1200，岗位工作台已切到前台）：
+
+    rowCount            2
+    rowSelectedAttrs    ["false/true", "false/false"]      # data-job-selected / data-replied
+    rowBorder           ["rgba(38,44,48,0.15)", 同]         # line（毡案）
+    rowBg               ["oklab(0.867244 … / 0.6)", 同]     # ink-950/60
+    firstRowText        "#1 高级前端工程师（取证演示行 A） · 演示科技（本地仿站） · 25–40 K/月 · 14 薪（原文「25-40K·14薪」）"
+    firstRowReplied     "1"                                  # data-inbound
+    detailIdlePresent   true
+    detailIdleText      "点左边任意一行，这里就换成它的详情与可做的动作；没选中之前，打招呼与投递都不上屏"
+    detailPresent       false
+    actionCount         0                                    # 整段清单里没有 greet- / deliver-
+    radioCount          2   radioAccent  rgb(63,128,120)     # accent-celadon（毡案）
+
+`actionCount: 0` 是本条判据的**反面证据**：没挑行之前，两只外发键根本不在 DOM 里。
+
+
+--------------------------------------------------------------------
+第四节  选中 A 行：详情与动作段双主题读数
+--------------------------------------------------------------------
+点击通道：`pnpm harness click --url 5173 --selector '[data-jd-row="v6-6404-demo-1"]'`
+→「已点击 <input>（原生鼠标事件）」，且当轮 `document.visibilityState === 'visible'`，
+所以这是**真鼠标点出来的选中**，不是 `element.click()`（`rp35.out` 的 `radioChecked` 对上）。
+
+    项目                     毡案 light                          墨案 dark
+    data-job-selected        ["true","false"]                    同
+    选中行 border-top-color  oklab(0.554606 … / 0.5)（celadon/50）  oklab(0.7354 … / 0.5)
+    选中行 background-color  rgba(63,128,120,0.12)（celadon-wash） rgba(127,182,173,0.12)
+    未选行 border-top-color  rgba(38,44,48,0.15)                  rgba(150,178,196,0.14)
+    radio accent-color       rgb(63,128,120)                     rgb(127,182,173)
+    详情卡 border/bg         rgba(38,44,48,0.15) / ink-950/70     rgba(150,178,196,0.14) / 同族
+    详情卡圆角               6px（rounded-md）                    6px
+    正文 white-space         pre-line                            pre-line
+    正文 color               rgb(51,60,68)                       rgb(194,209,220)
+    动作段分隔线 border-top  rgba(38,44,48,0.3)（line-strong）    rgba(150,178,196,0.26)
+    greet / deliver          data-effect=seal、h=24              同
+      border / bg            oklab(0.542214 … / 0.45) / (… / 0.18)  oklab(0.631608 … / 0.45) / (… / 0.18)
+      color                  rgb(192,57,31)                      rgb(226,84,58)
+
+详情段文案逐条现读（毡案，`rp35.out`）：
+
+    标题      高级前端工程师（取证演示行 A）
+    captured  JD · 来自 boss · 摘要入库 2026/10/6 18:03:59
+    byline    演示科技（本地仿站） · 上海 · 3 年以上 · 本科 · 25–40 K/月 · 14 薪
+    meta      上海 / 3 年以上 / 本科 · 发布 2026/10/4 18:13:59 · 摘要入库 2026/10/6 18:03:59 · 详情 2026/10/6 18:05:39 · 正文 42 字
+    正文      负责控制台前端架构与性能优化。/ 主导组件库建设并制定规范。/ 参与服务端渲染方案选型。（三行原样，pre-line 生效）
+    要求      React / TypeScript 3 年以上 · 大型组件库主导经验 · 有可上线的 WebRTC 项目（页签写「硬性要求（3 条）」）
+    来源      来源 http://127.0.0.1:10233/boss/detail?id=demo-a
+    动作声明  下面两个动作只作用于这一行：高级前端工程师（取证演示行 A） · 演示科技（本地仿站）
+    动作键    greet-v6-6404-demo-1 / deliver-v6-6404-demo-1
+
+
+--------------------------------------------------------------------
+第五节  换到 B 行：动作区真的跟着那一行走（判据的正腿）
+--------------------------------------------------------------------
+`rp36.out`（同一次点击通道，点 `[data-jd-row="v6-6404-demo-2"]`）：
+
+    selectedAttrs   ["false","true"]                      # 指向整条搬过去了
+    actionTarget    "…只作用于这一行：前端开发工程师（取证演示行 B，只有摘要） · 演示数据（本地仿站）"
+    actions         ["greet-v6-6404-demo-2", "deliver-v6-6404-demo-2"]   # 键随行走，不是留在原地指 A
+    partial         "详情还没抓：下面只是列表页读到的摘要，正文与硬性要求要抓过详情页才有"
+    descriptionEmpty "库里这一行没有正文"
+    requirementsEmpty "库里这一行没解析出硬性要求"（页签读数「硬性要求（0 条）」）
+    meta            "远程 /  /  · 发布 … · 详情 只有摘要 · 正文 0 字"
+
+`meta` 那一行在字段为空时长出两个连续分隔符（`远程 /  /  ·`）——这是**既有的 `jd.rowMeta` 文案**
+（换装前它就在行内同一画法），本片只是把它从行里搬到详情段，没有改它；记在这里，不当成本片的缺陷修，
+也不顺手改（§1.4 不许夹带）。
+
+
+--------------------------------------------------------------------
+第六节  窄/宽两腿：为什么并排要挂在查询容器上
+--------------------------------------------------------------------
+`tmp/v6b/rp33.out`（视口 1200 的实际列宽链）：
+
+    innerWidth 1200 → main 560 → 面板 section 520 → 清单 grid 486
+    aside（内嵌内核视图槽位）456 = w-(--kernel-view-width)，**不可收起**（宽度与
+      KERNEL_VIEW_WIDTH_RATIO 机检同源，App.tsx 里那一句注释就是这个约束）
+    第一版按视口断点（lg:）量出来的列：gridTemplateColumns = "272px 202px"
+
+202px 的详情栏放不下正文与两只朱砂键，而视口断点救不了它——视口 1200 已经算"宽"，
+被内核视图吃掉的是**这一列自己的宽度**。所以换成容器断点：
+`@container`（section）+ `@2xl:`（672px 容器宽）才并排，窄时退回"列表→详情→动作"的纵向读序。
+
+两腿都取了活体：
+- 窄腿（真实窗口 1200）：`gridTemplateColumns: "486px"`（单列，rp35/rp40），截图见第七节四张。
+- 宽腿（`tmp/v6b/wide-shot.mjs`，CDP `Emulation.setDeviceMetricsOverride` 1600×1000，
+  放大→量→截图→复位在同一条 WebSocket 里做完，§9 的 5.4-b ⑥）：
+
+      innerWidth 1600 / containerWidth 768 / cols "272px 450px"
+      listWidth 272 / detailWidth 450 / detailLeftOfList 284 / sameRow true / actionCount 2
+
+  也就是 02 稿的横向骨架在宽窗口下确实兑现，且详情卡与清单**同一行**（`sameRow: true`）。
+
+
+--------------------------------------------------------------------
+第七节  截图（五张，md5 两两不同）
+--------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.4-04-jobs-three-pane-light.png  fa72cf2b2e251025a7a399eee90a6ce2
+docs/acceptance/06-ui-ink-desk/6.4-04-jobs-actions-light.png     a722ece04600992a3295e013abe0ba3b
+docs/acceptance/06-ui-ink-desk/6.4-04-jobs-three-pane-dark.png   b94fa860eeaf8a412923e19d6733e9a2
+docs/acceptance/06-ui-ink-desk/6.4-04-jobs-actions-dark.png      fc8d06af132e2fb032eb56c73ce217cc
+docs/acceptance/06-ui-ink-desk/6.4-04-jobs-wide-split-light.png   30bc9bc0251bcb462b204ccc956e0bfc
+
+五张都按 §9 的 5.10-18 带 `--url 5173`，且成对帧之间先 `scrollIntoView` 再不带 `--reveal` 重拍
+（§9 的 3.6-c ⑭：相邻元素用 `--reveal` 不产生新滚动位）。
+入库前对整批跑过 `md5 -q | sort | uniq -c`，无重复。
+
+
+--------------------------------------------------------------------
+第八节  没取到的（[!]）
+--------------------------------------------------------------------
+1. **08 稿那一行的"双击 = 跳简历区并带面包屑"没做**——它是跨区跳转（形态 ⑥），
+   要新增"带着某个岗位进简历屏"的状态传递，不在 6.4-04 的判据里，另立条目。
+2. **↑↓ 换行的键盘等价没敲过**：radio group 原生支持方向键换选，但本轮取的是鼠标那一腿，
+   键盘那一腿按 §7.1 的 V 口径不算已证。
+3. **`jd.detailPartial` 那一支只取了文案，没单独读它的 `text-amber` 色值**（同一档色值已由
+   第六~九片取过）；`jd.descriptionEmpty` / `requirementsEmpty` 同理。
+4. **02 稿的匹配分 / 缺口三栏 / 骑缝章 / 四页签（缺口报告·话术·改简历·抓取证据）都没落地**：
+   它们要的是 GapPanel 的比对结果与话术候选，属于"另一屏的数据挂到这一屏"，
+   判据只要求三段骨架，不在此片扩张（§2.6）。
+5. **抓取那一路的活体行仍然没有**：`automation_consents` 空，签字要人来做（第二节）。
+   所以"抓完一轮之后清单长出新行、选中它看详情"这条端到端链，仍等用户在场的窗口。
+
+**附记一条画面里看得见、但不在本片射程内的读数**：宽腿那张截图
+（`6.4-04-jobs-wide-split-light.png`）下方「打招呼话术候选」的目标岗位段写着「JD 库还是空的」，
+而同一画面里上方清单明显有两条演示行。查了源码，这不是文案说谎而是**它的那份读数停在挂载时刻**：
+`ScriptPanel` 只在 `useEffect` 里读一遍 `jd.store.list`，之后只有收到 `jd/progress` 的 `done` 才重读
+（`ScriptPanel.tsx:71-102`），而本片的演示行是从 SQL 侧插进去的、不经过抓取流水线，
+所以没有 progress 事件可等。清单那一段是我在种完之后才按「读取」键现读的，两边才不一致。
+**结论：这条是取证方法带出来的，不是界面缺陷**，但顺带显出一个真实的失效面——
+任何不经 `jd/progress` 就写入 `jobs` 的路径（工作流节点直接落库、外部导入）都会让话术面板的下拉变陈旧。
+本片不动它（§1.4 不许夹带），记在这里作为下一条待办的出处。
+
+
+--------------------------------------------------------------------
+第九节  §7.4 收尾自检
+--------------------------------------------------------------------
+① typecheck / lint / format:check / test 见提交说明里的命令与退出码。
+② V 判据：本档案第三~七节（DOM 断言 + 五张截图，逐条对应 6.4-04）。
+③ spec 状态位：6.4-04 由 `[ ]` 改 `[!]`（理由见第八节第 1/2/5 条），6.4-02 的三段式那半边由本条接上。
+④ 复用：详情读的是既有 `jd.store.list` 载荷，未新增 service/IPC；选中画法复用 `ScriptPanel`
+   候选行同一套 celadon 档；`rowKey()` 一处来源供列表 key、选中态与反查三处用。
+⑤ 死代码：行内两只按钮的 JSX 整段搬走、无残留；`isActionDisabled` / `greet` / `deliver` 仍各有一处消费者。
+⑥ 前端三项：Tailwind utility（含 `@container`/`@2xl:`，无手写 CSS、无内联 style）；图标零新增（沿用
+   Send/FileUp/MessageSquare，§5.3 满足）；10 支新键双语齐，`pnpm lint` 的缺翻译校验通过。
+⑦ 提交与推送：见提交说明；本仓库有远端，按 §1.6 推 origin/main 并复核远端 ref。
+⑧ 暂存区：只有 3 份源码/语言包 + 1 份档案 + 5 张 `docs/acceptance/06-ui-ink-desk/6.4-04-*.png` +
+   两份文档；探针、seed 脚本与日志全在被忽略的 `tmp/v6b/`（§7.5）。
