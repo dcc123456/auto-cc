@@ -454,6 +454,7 @@ export type ShellStatus = {
   nodeVersion: string;
   platform: NodeJS.Platform;
   windowVisible: boolean;
+  /** 内核视图当下在不在界面上：默认 false（裁定⑱），只有装着真实站点时才是 true。 */
   kernelViewVisible: boolean;
   kernelViewBounds: { x: number; y: number; width: number; height: number };
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
@@ -2357,6 +2358,8 @@ export const RENDERER_EVENTS = [
   'log/line',
   'session/expired',
   'shell/view-error',
+  // 内核视图可见性（裁定⑱）：默认收起的那一栏要随主进程的挂载/收回自己长回来，界面不轮询。
+  'shell/kernel-view-visible',
   'workflow/progress',
   'chat/delta',
   // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
@@ -2390,6 +2393,8 @@ export interface RendererEventSignatures {
   'log/line': LogLineView;
   'session/expired': SessionExpiredEvent;
   'shell/view-error': KernelViewLoadError;
+  /** 载荷就是 `ShellStatus.kernelViewVisible` 那一个布尔，不另包一层（§2.7）。 */
+  'shell/kernel-view-visible': boolean;
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;

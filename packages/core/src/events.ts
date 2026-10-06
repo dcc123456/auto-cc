@@ -1719,6 +1719,13 @@ declare module 'cordis' {
      */
     'shell/view-error'(error: KernelViewLoadError): void;
     /**
+     * 内嵌内核视图的可见性发生变化时由 `shell` 发出（裁定⑱：默认不展示，只在挂载真实站点时展示）。
+     * 界面那一栏的宽度必须由这一条推过来，而不是自己轮询 `shell.getStatus` 去猜——收起的是主进程摆位的
+     * 原生视图，渲染层只有跟着同步才谈得上"把右侧那 38% 还给主区"（AGENTS.md §2.7 的第二份事实）。
+     * 只在值真的变了的时候发：挂载与重建会重复落到同一个可见性上，幂等的那几次不叫醒订阅方。
+     */
+    'shell/kernel-view-visible'(visible: boolean): void;
+    /**
      * 工作流每推进一次（起步 / 步骤开始 / 步骤结束 / 暂停 / 续跑）由 `workflow.runner` 发出
      * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
      */

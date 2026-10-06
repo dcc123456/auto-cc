@@ -1,0 +1,95 @@
+裁定⑱（2026-10-06 用户表态）：右侧内嵌内核视图默认不展示，只有需要时才展示
+================================================================================
+
+判据口径（AGENTS.md §7.1 的 V 类）：活体主窗口 + 真实鼠标点击，走的是界面自己的
+「打开站点 / 关闭内核视图」两颗按钮，不是直接调 IPC。
+实例：本机 10222 上那只在跑的 dev 实例（`pnpm dev`，userData 在 `tmp/v6-userdata`）。
+主进程改动由 `scripts/dev.ts` 的 esbuild watch 自动重启生效（ `[dev] 主进程重启` ），
+渲染层走 Vite HMR；未杀任何共享进程。
+站点是本地 fixture（`http://127.0.0.1:10233/`，`pnpm fixture`），不碰真实平台（§7.2）。
+
+冻结动画自证（§9 第二十三/二十四片口径①）：探针注入 `transition/animation:none` 前
+`document.getAnimations().length` 读数为 1，探针结束时把那支 `<style>` 摘掉。
+主窗口那份文档的 `visibilityState` 三次探针都是 `visible`，所以 CDP 的鼠标事件是真的落页了
+（§9 2.1-12 那条：窗口不在前台时输入不落页，而 `act.click` 照样回成功）。
+
+--------------------------------------------------------------------------------
+① 冷启动默认态（未挂载任何站点）——视图收起、界面那一栏不存在
+--------------------------------------------------------------------------------
+$ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/probe-default.js
+
+{"animationsBefore":0,"freezeApplied":"none","shellOk":true,
+ "kernelViewVisible":false,
+ "kernelViewBounds":{"x":744,"y":0,"width":456,"height":772},
+ "kernelViewPartition":"","kernelViewUrl":"data:text/html;charset=utf-8,…placeholder…",
+ "slotPresent":false,"slotWidth":0,"mainWidth":1016,"innerWidth":1200,
+ "visibilityState":"visible"}
+
+读数：`kernelViewVisible=false`、`[data-testid=kernel-view-slot]` 不存在、
+主区宽度 1016 = 1200 − 184（左轨）——那 38%（456px）**整个还给了主区**，
+而主进程侧的视图仍然挂着占位页（容器没被摘掉，1.2-12 的原判据不动）。
+截图：`1.2-12b-kernel-collapsed-by-default.png`（信任屏，整幅无右栏）
+
+--------------------------------------------------------------------------------
+② 真实点击「打开站点」——这就是"需要"，视图与那一栏同时出现
+--------------------------------------------------------------------------------
+$ pnpm harness click --url 5173 --selector '[data-action=nav-trust]'
+已点击 <button>（原生鼠标事件）
+$ pnpm harness click --url 5173 --selector '[data-session-id=fixture] [data-action=open]'
+已点击 <button>（原生鼠标事件）
+$ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/probe-status.js
+
+{"animationsBefore":1,"ok":true,
+ "kernelViewVisible":true,"kernelViewPartition":"persist:fixture",
+ "kernelViewUrl":"http://127.0.0.1:10233/","activeKernelViewUrl":"http://127.0.0.1:10233/",
+ "kernelViewBounds":{"x":744,"y":0,"width":456,"height":772},"kernelViewLoadError":null,
+ "slotPresent":true,"slotWidth":456,"mainWidth":560}
+
+读数：可见性翻成 true、分区 `persist:fixture`、装载无失败；界面那一栏 456px（=38%）回来，
+主区退回 560px。截图两张：
+  `1.2-12b-kernel-shown-when-site-mounted.png`（`--url 5173`：右栏槽位 + 「打开平台 fixture：成功」+ 视图分区 persist:fixture）
+  `1.2-12b-kernel-view-page-content.png`（`--url 127.0.0.1:10233`：视图自己那条 target 里的
+    fixture 页「auto-cc 会话实验台 · 分区 A」——§9 2.1 补片口径①：主窗口截图截不到原生子视图内容，
+    「视图区域渲染了页面」这一格只能由视图自己的 target 兑现）
+
+--------------------------------------------------------------------------------
+③ 真实点击「关闭内核视图」——不再需要，于是又收起（分区与登录态不动）
+--------------------------------------------------------------------------------
+$ pnpm harness click --url 5173 --selector '[data-action=close-view]'
+已点击 <button>（原生鼠标事件）
+$ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/probe-status.js
+
+{"animationsBefore":1,"ok":true,"kernelViewVisible":false,"kernelViewPartition":"",
+ "kernelViewUrl":"data:text/html;charset=utf-8,…placeholder…",
+ "kernelViewBounds":{"x":744,"y":0,"width":456,"height":772},"kernelViewLoadError":null,
+ "slotPresent":false,"slotWidth":0,"mainWidth":1016}
+
+截图：`1.2-12b-kernel-collapsed-after-close.png`（与①同一形态）
+
+--------------------------------------------------------------------------------
+④ 四道门禁（退出码按 §9 5.4-c 的口径重定向后读，不接管道）
+--------------------------------------------------------------------------------
+$ pnpm typecheck   → TYPECHECK_EXIT=0
+$ pnpm lint        → LINT_EXIT=1（**不是本片引入**：`en.json 缺少 key：
+  shell.consent.reason.CONSENT_NOT_CHECKED`，落在同机另一窗口正在写的
+  `packages/renderer/src/ConsentModal.tsx` + 两份语言包上；本片的文件不在报错清单里）
+$ pnpm format:check → FORMAT_EXIT=1（同上：唯一的 [warn] 是 `ConsentModal.tsx`）
+$ npx prettier --check <本片 7 个文件> → MINE_FORMAT_EXIT=0（All matched files use Prettier code style）
+$ pnpm test        → TEST_EXIT=0，逐包全绿（含 `packages/shell 20 passed` /
+  `packages/ipc 14 passed` / `packages/sessions 15 passed`）
+
+--------------------------------------------------------------------------------
+⑤ 收尾自检（§7.4）
+--------------------------------------------------------------------------------
+① 四道门禁：见④。两条红的是**别人未收口的改动**，本片不代改、不代提交（§1.4）。
+② V 类：①②③三张主窗口截图 + 一张视图 target 内容图，逐条对应上文读数。
+③ spec 状态位：`01-framework/spec.md` 的 1.2-12 追加 dated 更正（原判据不动），
+   `06-ui-ink-desk/spec.md` 的 6.2-04「右栏替换」缺件条目补一条 dated 更正。
+④ 复用检查：可见性落点抽成 `applyKernelViewVisible` 一处（`setKernelViewVisible` 与
+   `createKernelView` 两条路都走它），渲染层不自己推「现在该不该有右栏」，
+   只读 `shell.getStatus` + 订阅 `shell/kernel-view-visible`（§2.5 / §2.7）。
+⑤ 死代码：无新增未调用导出；`KERNEL_VIEW_WIDTH_RATIO` / `--kernel-view-width` 两侧同源仍被机检。
+⑥ 前端三件：右栏条件渲染只用 Tailwind utility；图标沿用 lucide `PanelRight`；
+   未新增任何页面文案（槽位文案沿用 `shell.kernel.*` 两份语言包已有的键）。
+⑦ 提交与推送：见本次收口的 commit；远端 `origin` 推送后复核 `git ls-remote`。
+⑧ 暂存区：截图只落在 `docs/acceptance/1.2/`（§7.5 白名单第一条），探针脚本留在被忽略的 `tmp/`。

@@ -61,7 +61,9 @@ export function ShellPanel() {
   };
 
   const toggleKernel = async () => {
-    await bridge?.shell.setKernelViewVisible(!(status?.kernelViewVisible ?? true));
+    // 兜底值跟主进程一致（裁定⑱ 之后默认是收起的）：还没读到状态时按「现在看不见」算，
+    // 于是这一颗按下是展开而不是把一个已经展开的视图再展开一次。
+    await bridge?.shell.setKernelViewVisible(!(status?.kernelViewVisible ?? false));
     await readStatus();
   };
 

@@ -27,7 +27,7 @@ import type {
   SalaryView,
 } from '@auto-cc/shared';
 import { formatClock } from './format';
-import { ConsentCard, ConsentStatusRow } from './ConsentCard';
+import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
 import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -343,16 +343,7 @@ export function JobLabPanel() {
         {captureStatus && <ConsentStatusRow view={consent.views[captureStatus.platform]} />}
       </section>
 
-      {consent.request && (
-        <ConsentCard
-          platform={consent.request.platform}
-          view={consent.request.view}
-          busy={consent.busy}
-          error={consent.error}
-          onGrant={() => void consent.grant()}
-          onDeny={consent.deny}
-        />
-      )}
+      <ConsentOverlay consent={consent} />
 
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
@@ -668,9 +659,9 @@ export function JobLabPanel() {
       </section>
 
       {/* 清单这一段是**查询容器**：三段式到底并排还是上下走，取决于这一列自己的宽度，而不是视口宽度——
-          右栏的内核视图槽位恒占 38%（`--kernel-view-width` 与 KERNEL_VIEW_WIDTH_RATIO 机检同源，且不可收起），
-          1200 宽的窗口在这里只剩 486px，并排会把详情压到 202px（实测读数），所以窄时退回"列表→详情→动作"的
-          纵向读序，宽窗口才兑现 02 稿的横向骨架。 */}
+          右栏的内核视图槽位默认整条不存在（裁定⑱），展开时才占 38%（`--kernel-view-width` 与
+          KERNEL_VIEW_WIDTH_RATIO 机检同源），1200 宽的窗口在展开态只剩 486px，并排会把详情压到 202px
+          （实测读数），所以窄时退回"列表→详情→动作"的纵向读序，宽窗口才兑现 02 稿的横向骨架。 */}
       <section className="@container rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.listHeading')}</h3>
         {!jobList ? (

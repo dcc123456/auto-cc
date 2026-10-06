@@ -60,7 +60,11 @@ export class ShellService extends Service {
    */
   private takeoverViews: WebContentsView[] = [];
   private tray: Tray | undefined;
-  private kernelViewVisible = true;
+  /**
+   * 内核视图当下在不在界面上。**默认 false**（裁定⑱，2026-10-06 用户表态：右侧那一条默认不展示，
+   * 只有需要时才展示）；「需要」由视图里装的是不是真实站点决定，见 `createKernelView` 末尾那一句。
+   */
+  private kernelViewVisible = false;
   /** 内核视图当前所用的会话分区；占位页用默认会话，此处为空串。 */
   private kernelViewPartition = '';
   private kernelViewError: KernelViewLoadError | null = null;
@@ -100,7 +104,8 @@ export class ShellService extends Service {
   };
 
   /**
-   * 让内嵌内核视图按指定会话分区加载站点（spec 1.8-02 / 1.8-08）。
+   * 让内嵌内核视图按指定会话分区加载站点（spec 1.8-02 / 1.8-08），并把那一条视图展示出来——
+   * 这就是裁定⑱ 里说的"需要"：用户或 agent 要在一块真实页面上干活了。
    *
    * 分区在 `WebContentsView` 构造后不可改，所以「换平台」= 销毁旧视图 + 按新分区重建，
    * 这也是 `sessions` 只调这一个方法、不自己碰 electron 的原因（视图宿主唯一，见 §8.3 决策 1）。
@@ -112,7 +117,7 @@ export class ShellService extends Service {
   };
 
   /**
-   * 收回内嵌内核视图里的站点页面，退回占位页（spec 2.1-11 的「关」）。
+   * 收回内嵌内核视图里的站点页面，退回占位页（spec 2.1-11 的「关」），于是那一条视图也收起（裁定⑱）。
    *
    * 用「重建为占位页」而不是「摘掉视图」：视图槽位是界面布局的一部分（1.2-12），
    * 摘掉之后 resize 就无处摆位，重新打开还得再走一遍创建逻辑。
@@ -142,16 +147,34 @@ export class ShellService extends Service {
 
   /**
    * 显示/隐藏内嵌内核视图（连同其上的接管子视图，它们是同一块槽位里的页面）。
+   *
+   * 这是**人用的那只口**（诊断面板的显隐按钮）：默认收起之后它仍然是唯一的越权口子，
+   * 允许在挂载着真实站点时把视图暂时收掉；重新挂载站点会把它推回展示（`createKernelView`）。
    * @param visible 目标可见性
    * @returns 生效后的可见性
    */
   setKernelViewVisible = (visible: boolean): { kernelViewVisible: boolean } => {
-    this.kernelViewVisible = Boolean(visible);
-    this.kernelView?.setVisible(this.kernelViewVisible);
-    // 子视图不跟着隐藏的话，隐藏内核视图后新标签还浮在界面上，等于一个关不掉的浮层。
-    this.takeoverViews.forEach((view) => view.setVisible(this.kernelViewVisible));
-    this.layoutKernelView();
+    this.applyKernelViewVisible(Boolean(visible));
     return { kernelViewVisible: this.kernelViewVisible };
+  };
+
+  /**
+   * 把目标可见性落到视图上，并在值真的变了时推一条 `shell/kernel-view-visible`。
+   *
+   * 可见性只有这一处出口：`setKernelViewVisible`（人按的）与 `createKernelView`（装的是什么）
+   * 都会走到这里，界面那一栏才知道该收起还是该让出那 38%（AGENTS.md §2.2，同一逻辑的第二处必须抽）。
+   * @param visible 目标可见性
+   */
+  private applyKernelViewVisible = (visible: boolean): void => {
+    const changed = this.kernelViewVisible !== visible;
+    this.kernelViewVisible = visible;
+    this.kernelView?.setVisible(visible);
+    // 子视图不跟着隐藏的话，隐藏内核视图后新标签还浮在界面上，等于一个关不掉的浮层。
+    this.takeoverViews.forEach((view) => view.setVisible(visible));
+    // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，所以摆位跟着可见性一起落，不等 resize 来救。
+    this.layoutKernelView();
+    // 幂等的那几次不叫醒订阅方：界面读数与状态条不需要为同一次挂载重画两遍。
+    if (changed) this.ctx.emit('shell/kernel-view-visible', visible);
   };
 
   /** 仅开发态可用：在主进程内抛一次异常，用于验收「主进程出错不静默死窗」。 */
@@ -262,8 +285,8 @@ export class ShellService extends Service {
   }
 
   /**
-   * 建立或重建内嵌内核视图。
-   * @param partition 会话分区名；省略则用非持久会话（占位页不需要落盘）
+   * 建立或重建内嵌内核视图，并顺手把可见性落到「装的是不是真实站点」上（裁定⑱）。
+   * @param partition 会话分区名；省略就是占位页（非持久会话，不需要落盘），此时视图收起
    * @param url 要加载的地址，默认还是 1.2 的占位页
    */
   private createKernelView(partition?: string, url = kernelViewPlaceholder) {
@@ -293,7 +316,9 @@ export class ShellService extends Service {
     this.kernelViewPartition = partition ?? '';
     this.kernelViewError = null;
     win.contentView.addChildView(view);
-    view.setVisible(this.kernelViewVisible);
+    // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。
+    // 规则写在视图的拥有者这里，而不是让每个挂载方各补一句 `setKernelViewVisible(true)`（§2.5）。
+    this.applyKernelViewVisible(this.kernelViewPartition !== '');
     // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，只有 resize 才会救回来。
     this.layoutKernelView();
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。

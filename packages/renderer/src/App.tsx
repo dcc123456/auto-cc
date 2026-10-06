@@ -35,6 +35,7 @@ import { UsagePanel } from './UsagePanel';
 import { WorkflowLabPanel } from './WorkflowLabPanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
+import { useKernelViewVisible } from './useKernelViewVisible';
 import { tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton } from './ui/controls';
 import { Toast } from './ui/overlays';
@@ -136,6 +137,8 @@ export function App() {
   const tierValue = desk.tier ? t(`agent.autonomy.${desk.tier}`) : t('status.none');
   // 档位的点色按「谁替谁做主」：全自动=外发不再逐步问人（朱砂），半自动=每一步等表态（琥珀），建议=只出主意（灰）。
   const tierState: DeskSlotState = desk.tier === 'auto' ? 'warn' : desk.tier === 'semi' ? 'ask' : 'none';
+  // 右栏那一槽位默认不占位（裁定⑱）：只有主进程的内核视图装着真实站点时它才存在，收起时那 38% 还给主区。
+  const kernelViewVisible = useKernelViewVisible();
 
   /**
    * 左轨按钮的样式，按层级分两档。
@@ -244,15 +247,22 @@ export function App() {
           <Toast />
         </main>
 
-        {/* 槽位宽度与主进程摆位同源：`--kernel-view-width` 必须等于 KERNEL_VIEW_WIDTH_RATIO（1.2-12） */}
-        <aside className="flex w-(--kernel-view-width) flex-col border-l border-line bg-ink-900 p-4">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-            <PanelRight size={13} />
-            {t('kernel.heading')}
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-400">{t('kernel.hint')}</p>
-          <p className="mt-4 font-mono text-[11px] text-slate-600">{KERNEL_VIEW_WIDTH_RATIO * 100}%</p>
-        </aside>
+        {/* 裁定⑱：这一栏默认**不存在**——内核视图没装着站点时整条收起，`flex-1` 的主区拿回那 38%。
+            展开时原生视图盖的正是这一栏的矩形，所以两边的可见性必须是同一个数（`useKernelViewVisible`），
+            而槽位宽度依旧与主进程摆位同源：`--kernel-view-width` 必须等于 KERNEL_VIEW_WIDTH_RATIO（1.2-12）。 */}
+        {kernelViewVisible ? (
+          <aside
+            data-testid="kernel-view-slot"
+            className="flex w-(--kernel-view-width) flex-col border-l border-line bg-ink-900 p-4"
+          >
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+              <PanelRight size={13} />
+              {t('kernel.heading')}
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-400">{t('kernel.hint')}</p>
+            <p className="mt-4 font-mono text-[11px] text-slate-600">{KERNEL_VIEW_WIDTH_RATIO * 100}%</p>
+          </aside>
+        ) : null}
       </div>
 
       {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。
