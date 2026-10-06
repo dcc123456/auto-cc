@@ -1,0 +1,73 @@
+6.4 第四片取证：对话屏（6.4-01）与岗位屏（6.4-02）换装后的活体读数
+================================================================
+
+时间：2026-10-06 05:39 UTC（一轮 `harness eval` 同时读两屏，脚本 `tmp/p6/probe-desk.mjs`）
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/dev-userdata`，CDP 10222），目标页 `--url 5173`
+方式：页面里 `getComputedStyle()` + `data-*` 属性现读；切屏走导航按钮 `[data-view]` 的程序化 click，
+只读不改数据（岗位清单没点开、没有真抓取、没有外发）。
+
+**为什么这一片只有读数、没有截图**（与 6.4 第二片同一条硬约束）：
+本轮读到的 `document.visibilityState` 是 `hidden`（本机窗口被其他应用遮挡）。Chromium 在隐藏页上
+不再产出帧，`harness shot` 挂住不返回（§9 的 5.4-b ⑤/2.1 补窗 ① 同一族）；而 §9 的 2.1-12 补窗另一条说
+不在前台时 CDP 输入不落页，所以**点了也白点**——本轮只读属性，不取"按下去会发生什么"那半边证据。
+按 AGENTS.md §7 的口径，缺的就是 V 半边，**不拿计算色读数冒充截图**。
+
+令牌基线（深色，墨案；下面的"对上"都以这几个值为尺）：
+`ink-950 = rgb(8,12,16)`、`ink-900 = rgb(19,28,35)`、`ink-750 = rgb(24,35,43)`、
+`slate-100 = rgb(219,228,236)`、`slate-500 = rgb(108,128,145)`（禁用/未选中那一支墨色）、
+`line = rgba(150,178,196,.14)`、`line-strong = rgba(150,178,196,.26)`。
+
+一、对话屏（`ChatPanel`，还的是 6.4-01 欠的那两半）
+----------------------------------------------------
+
+| 读数项 | 选择器 | 活体计算值 | 对上的口径 |
+| --- | --- | --- | --- |
+| 档位托盘 | `[data-testid="chat-autonomy-switch"]` | `bg rgb(8,12,16)` / `border rgba(150,178,196,.26)` | `ink-950` + `line-strong`：三档关进一只托盘，不再散落一行 |
+| 选中档（建议） | `[data-autonomy="suggest"]` | `bg rgb(24,35,43)` / `color rgb(219,228,236)` | `ink-750` + `slate-100`；**未选中**那两档是 `rgb(108,128,145)` 且无底 |
+| 发送（空草稿） | `[data-action="send"]` | `data-effect="solid"`、`aria-disabled="true"`、`data-disabled-reason="INPUT_EMPTY"`、`title="先写一句要说的话"`、`color rgb(108,128,145)`、`bg rgb(15,22,28)` | 6.2-06 的原因码 + 人话版 tooltip；实心档禁用后退成中性墨，**不保留主操作的高对比** |
+| 停止（未流式） | `[data-action="stop"]` | `data-effect="line"`、`aria-disabled="true"`、`data-disabled-reason="NOT_STREAMING"`、`title="此刻没有正在生成的回复可停"` | 同上；line 与 solid 在禁用态共用同一支墨色 |
+
+输入框那一层：对话屏 `[data-testid="chat-input"]` 与岗位屏 `[data-testid="jd-keyword"]` 都换成
+`border-line-strong bg-ink-950 + focus:border-celadon/60`（岗位屏那只本轮单读到
+`border rgba(150,178,196,.26)` = `line-strong`；对话屏那只**只改了 class、没有单读计算值**，
+焦点环那一态要真实聚焦才看得到，留同在场的截图一轮）。
+
+消息流按 01 稿换成**扁平行**（`data-message-role` 保留、新增 `data-message-who`，头像格 `ink-700` 底 +
+助手一侧 `celadon/40` 描边），但这一轮 `[data-testid="chat-messages"]` 里 `messageCount: 0`：
+当前会话一句都没有，所以两支气泡**只有静态 class，没有活体计算色**。
+补证动作是"发一句普通对话"——那会写进用户这一段会话的真实记录，无人验收时不动它（§7.2 的同一族纪律）。
+
+二、岗位屏（`JobLabPanel`，6.4-02 的动作区那一半）
+-------------------------------------------------
+
+| 读数项 | 选择器 | 活体计算值 | 对上的口径 |
+| --- | --- | --- | --- |
+| 分区容器 | `[data-testid="job-lab"] section` | `bg oklab(0.173835 -0.0061756 -0.0125822 / 0.6)`、`border rgba(150,178,196,.14)` | `ink-900/60` + `line`；`border-slate-800 / bg-slate-900` 那类**容器**写法在本屏清零 |
+| 抓取（空关键词） | `[data-action="capture"]` | `data-effect="solid"`、`aria-disabled="true"`、`data-disabled-reason="KEYWORD_EMPTY"`、`title="先写关键词，抓取才知道搜什么"` | 主操作用实心；**不涂朱砂**（它的效果档是"读"，02 稿的动作区分级）。旧写法是 `border-sky-800 / text-sky-300`——蓝色在这套语言里只说"进行中"，不该拿来标一只主操作 |
+| 读库 | `[data-action="list"]` | `data-effect="line"`、`color rgb(219,228,236)`、`bg rgb(19,28,35)`、`border rgba(150,178,196,.26)` | `DeskButton variant="line"`（旧写法 `border-slate-700 / text-slate-300`：与抓取那只蓝按钮摆在一起时读不出"哪个是主操作"，现在靠实心/描边分级） |
+| 重新读取 | `[data-action="refresh"]` | 同上一行（`data-effect="line"`） | 同上 |
+| 确认投递（卡片上） | `[data-action^="approve"]` | **本轮 `null`**（无待确认单） | 旧写法是 `border-emerald-800 / text-emerald-300`（绿=成功）。点它**就是外发**，所以换 `variant="seal"`：绿色会把"这会发出去"读成"已经成功了" |
+| 拒绝（卡片上） | `[data-action^="deny"]` | **本轮 `null`** | 保持 `variant="line"` **不涂红**（两枚红按钮并排会让人分不出哪一枚会把简历发出去） |
+| 打招呼 / 投递（行内） | `[data-action^="greet"] / ^="deliver"` | **本轮 `null`**：`rowCount: 0`，清单未点开，按钮不在 DOM 里 | 两只都是 `variant="seal"`；旧写法一只 `sky-300` 一只 `amber-300`，见下一段 |
+
+**为什么打招呼 / 投递这两只的颜色变了**（一条误读的修正，写在 02 稿的动作区口径里）：
+此前一只涂 `sky`（青瓷）一只涂 `amber`（琥珀），在这套系统的界面语言里读起来就是"一个安全、一个只写本机"——
+而这两只是**唯一需要朱砂**的那一档（外发）。现在两只都 `variant="seal"`；
+确认卡片上的"拒绝"**保持 `line` 不涂红**，因为两枚红按钮并排会让人分不出哪一枚会把简历发出去。
+
+三、未取到的证据（诚实记录，因此 6.4-01 / 6.4-02 都停在 `[!]` 而不是 `[x]`）
+-----------------------------------------------------------------------------
+
+1. `rowCount: 0`：seal 两支与"拒绝不涂红"那一支只有静态 class，**没有活体计算色**；补它需要先有库内行。
+2. 截图整批缺：窗口不在前台（同上）。
+3. 02 稿的**列表 / 详情 / 动作区三段**没有落地：现通路是单列 12 行清单 + 行内按钮。
+   那是信息架构改动（新增分区、改 `jd.store.list` 的展示形状），按 §6 要先补取证与 plan 再动，本片没顺手改。
+4. 档位指示的 `auto` 那一档（朱砂 wash + `ring-seal/35`）没读到——当前会话是 `suggest` 档，
+   切档会改写用户会话的自治级别（那是真实授权范围，不是样式），无人验收时不动它。
+
+四、门禁
+--------
+
+`pnpm format:check` → `FMT=0`；`pnpm typecheck` → `TC=0`；`pnpm lint` → `LINT=0`；
+`pnpm test` → `TEST=0`（23 个包全过）。退出码一律以重定向读取
+（`pnpm test > tmp/p6/test15.log 2>&1; echo "TEST=$?"`），不接 `tail`（§9 的 5.4-c：管道接出的 0 属于 `tail`）。

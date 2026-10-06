@@ -173,6 +173,9 @@
       "specMissing": "Non-existent selector (failure-state demo)"
     },
     "jd": {
+      "reasonKeywordEmpty": "Type a keyword first — capture needs something to search for",
+      "reasonBusy": "The previous action hasn't returned yet",
+      "reasonApprovalBusy": "A pending approval is still awaiting your call",
       "heading": "JD capture & storage lab (local fixture only)",
       "refresh": "Re-read capture and store readings",
       "config": "Target {{targetCount}} jobs · up to {{maxRounds}} rounds · randomized pause between rounds",
@@ -836,6 +839,12 @@
       "streaming": "Reply is being generated…",
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
+      "reason": {
+        "BUSY": "The previous action hasn't returned yet",
+        "STREAMING": "A reply is still streaming — press Stop first",
+        "INPUT_EMPTY": "Write a message first",
+        "NOT_STREAMING": "Nothing is streaming right now"
+      },
       "workflowMirror": "Same runner: {{status}}",
       "workflowRun": {
         "heading": "Workflow progress",

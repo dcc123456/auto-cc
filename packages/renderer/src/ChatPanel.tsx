@@ -26,6 +26,7 @@ import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
+import { DeskButton } from './ui/controls';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -53,10 +54,12 @@ type LiveStream = { sessionId: string; messageId: string; text: string; tool?: C
 const RUN_COMMAND_PREFIX = '/run';
 
 /**
- * 一条消息：用户右对齐、助手左对齐，`parts[]` 按顺序渲染（文本段 + 工具卡片段）。
+ * 一条消息：01 稿的画法是**平铺在桌面上**，不画聊天软件的圆角气泡——两条消息的唯一区别是
+ * 那一枚 24px 的「谁在说」方印（我=桌面亮底 / AI=青瓷描边），正文靠左对齐成同一列，
+ * 读一屏对话时视线不用来回跳。`parts[]` 按顺序渲染（文本段 + 工具卡片段）。
  * @param message 主进程返回的消息视图
  * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
- * @returns 气泡节点
+ * @returns 消息节点
  */
 function MessageBubble({
   message,
@@ -67,15 +70,16 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   return (
-    <li
-      data-message-id={message.id}
-      data-message-role={message.role}
-      className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}
-    >
-      <span className="mt-1 shrink-0 text-slate-500">{isUser ? <User size={14} /> : <Bot size={14} />}</span>
-      <div
-        className={`max-w-[85%] rounded-xl border px-3 py-2 text-xs ${isUser ? 'border-sky-900 bg-sky-950/40 text-sky-100' : 'border-slate-800 bg-slate-900/70 text-slate-200'}`}
+    <li data-message-id={message.id} data-message-role={message.role} className="flex gap-2.5">
+      <span
+        data-message-who={isUser ? 'user' : 'assistant'}
+        className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border text-[10px] ${
+          isUser ? 'border-line-strong bg-ink-700 text-slate-100' : 'border-celadon/40 text-celadon'
+        }`}
       >
+        {isUser ? <User size={12} /> : <Bot size={12} />}
+      </span>
+      <div className={`min-w-0 flex-1 space-y-2 text-xs ${isUser ? 'text-slate-300' : 'text-slate-100'}`}>
         {message.parts.map((part, index) =>
           part.kind === 'text' ? (
             <p
@@ -203,6 +207,14 @@ export function ChatPanel() {
   };
 
   /**
+   * 发送按钮按不动的原因是哪一个：三个判据按"离手最近"排（先说在飞的这条，再说没内容）。
+   * 原因码进 `data-disabled-reason`，同一句话的人话版走语言包（6.2-06：禁用必须说得出为什么）。
+   */
+  const sendReason =
+    busy !== undefined ? 'BUSY' : isStreaming ? 'STREAMING' : draft.trim() === '' ? 'INPUT_EMPTY' : undefined;
+  const isSendDisabled = sendReason !== undefined;
+
+  /**
    * 回车发送、Shift+回车换行（spec 1.11-02）。
    * @param event 键盘事件
    */
@@ -214,11 +226,8 @@ export function ChatPanel() {
   };
 
   return (
-    <section
-      data-testid="chat-panel"
-      className="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/60"
-    >
-      <header className="flex items-center gap-2 border-b border-slate-800 px-4 py-3">
+    <section data-testid="chat-panel" className="flex h-full flex-col rounded-xl border border-line bg-ink-900/60">
+      <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Bot size={16} />
           {t('chat.heading')}
@@ -227,7 +236,7 @@ export function ChatPanel() {
           {workflowRun ? (
             <span
               data-testid="chat-workflow-mirror"
-              className="flex items-center gap-1 rounded-md border border-slate-800 px-2 py-1 text-[10px] text-slate-400"
+              className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10px] text-slate-400"
             >
               <WorkflowIcon size={11} />
               {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
@@ -244,31 +253,40 @@ export function ChatPanel() {
           与消息流、与会话操作带都不是同一件事，画成一条假消息会让人以为模型说过那句话。 */}
       <ChatCompactionBanner compaction={snapshot?.compaction} />
 
-      <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
           <Gauge size={11} />
           {t('agent.autonomy.heading')}
         </span>
-        {AUTONOMY_OPTIONS.map((level) => (
-          <button
-            key={level}
-            type="button"
-            data-autonomy={level}
-            disabled={busy !== undefined}
-            onClick={() =>
-              void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
-                bridge?.chat['session.setAutonomy'](level),
-              )
-            }
-            className={`rounded-md border px-2 py-0.5 text-[11px] disabled:opacity-40 ${
-              snapshot?.session.autonomy === level
-                ? 'border-sky-800 bg-sky-950/40 text-sky-200'
-                : 'border-slate-800 text-slate-400 hover:bg-slate-800'
-            }`}
-          >
-            {t(`agent.autonomy.${level}`)}
-          </button>
-        ))}
+        <span
+          className="inline-flex gap-0.5 rounded-lg border border-line-strong bg-ink-950 p-0.5"
+          data-testid="chat-autonomy-switch"
+        >
+          {AUTONOMY_OPTIONS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              data-autonomy={level}
+              data-autonomy-on={String(snapshot?.session.autonomy === level)}
+              disabled={busy !== undefined}
+              onClick={() =>
+                void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
+                  bridge?.chat['session.setAutonomy'](level),
+                )
+              }
+              className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 disabled:opacity-40 ${
+                snapshot?.session.autonomy === level
+                  ? // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
+                    level === 'auto'
+                    ? 'bg-seal-wash text-seal ring-1 ring-inset ring-seal/35'
+                    : 'bg-ink-750 text-slate-100'
+                  : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300'
+              }`}
+            >
+              {t(`agent.autonomy.${level}`)}
+            </button>
+          ))}
+        </span>
         <span className="ml-auto text-[10px] text-slate-500" data-testid="chat-autonomy-current">
           {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
         </span>
@@ -307,12 +325,15 @@ export function ChatPanel() {
                 data-testid="chat-streaming-message"
                 data-message-id={liveStream.messageId}
                 data-message-role="assistant"
-                className="flex gap-2"
+                className="flex gap-2.5"
               >
-                <span className="mt-1 shrink-0 text-slate-500">
-                  <Bot size={14} />
+                <span
+                  data-message-who="assistant"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-celadon/40 text-[10px] text-celadon"
+                >
+                  <Bot size={12} />
                 </span>
-                <div className="max-w-[85%] rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-xs text-slate-200">
+                <div className="min-w-0 flex-1 space-y-2 text-xs text-slate-100">
                   <p className="whitespace-pre-wrap break-words" data-part-kind="text">
                     {liveStream.text}
                   </p>
@@ -374,7 +395,7 @@ export function ChatPanel() {
 
       {isStreaming ? (
         <p
-          className="flex items-center gap-2 border-t border-slate-800 px-4 py-1.5 text-[10px] text-slate-400"
+          className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-[10px] text-celadon"
           data-testid="chat-running"
         >
           <LoaderCircle size={11} className="animate-spin" />
@@ -384,7 +405,7 @@ export function ChatPanel() {
 
       {notice ? (
         <p
-          className="border-t border-slate-800 bg-slate-950/70 px-4 py-2 text-[11px] text-slate-300"
+          className="border-t border-line bg-ink-950/70 px-4 py-2 text-[11px] text-slate-300"
           data-testid="chat-notice"
         >
           {notice}
@@ -392,7 +413,7 @@ export function ChatPanel() {
       ) : null}
 
       {/* 流式期间只禁用发送按钮，输入区一直能用（spec 1.11-13：运行中要能打出「停一下」）。 */}
-      <footer className="border-t border-slate-800 px-4 py-3">
+      <footer className="border-t border-line px-4 py-3">
         <textarea
           data-testid="chat-input"
           rows={2}
@@ -400,29 +421,33 @@ export function ChatPanel() {
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={t('chat.inputPlaceholder')}
-          className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-800"
+          className="w-full resize-none rounded-lg border border-line-strong bg-ink-950/60 px-3 py-2 text-xs text-slate-100 outline-none focus:border-celadon/60"
         />
         <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            data-action="send"
-            disabled={busy !== undefined || isStreaming || draft.trim() === ''}
+          <DeskButton
+            action="send"
+            variant="solid"
+            busy={busy !== undefined}
+            disabled={isSendDisabled}
+            disabledReason={sendReason}
+            disabledReasonLabel={sendReason ? t(`chat.reason.${sendReason}`) : undefined}
             onClick={submit}
-            className="flex items-center gap-1 rounded-md border border-sky-800 px-3 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
           >
             <Send size={12} />
             {t('chat.send')}
-          </button>
-          <button
-            type="button"
-            data-action="stop"
-            disabled={busy !== undefined || !isStreaming}
+          </DeskButton>
+          <DeskButton
+            action="stop"
+            variant="line"
+            busy={busy !== undefined}
+            disabled={!isStreaming}
+            disabledReason={!isStreaming ? 'NOT_STREAMING' : undefined}
+            disabledReasonLabel={!isStreaming ? t('chat.reason.NOT_STREAMING') : undefined}
             onClick={() => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']())}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
             <Square size={12} />
             {t('chat.stop')}
-          </button>
+          </DeskButton>
           <p className="ml-auto text-[10px] text-slate-500" data-testid="chat-hint">
             {t('chat.toolHint')}
           </p>

@@ -28,6 +28,7 @@ import type {
 } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { ConsentCard, ConsentStatusRow } from './ConsentCard';
+import { DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -286,23 +287,24 @@ export function JobLabPanel() {
   };
 
   const okLabel = (flag: boolean): string => (flag ? t('jd.yes') : t('jd.no'));
+  /**
+   * 行内动作（打招呼 / 投递 / 读库）此刻按不动的唯一原因：上一笔动作还挂着。
+   * 原因码与人在的话一起给（6.2-06），"灰掉但不说为什么"在这里算缺陷。
+   */
+  const isActionDisabled = busy !== undefined;
+  const isListEnabled = !isActionDisabled;
   return (
     <div className="flex flex-col gap-4" data-testid="job-lab">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <Briefcase size={16} />
             {t('jd.heading')}
           </h2>
-          <button
-            type="button"
-            data-action="refresh"
-            onClick={() => void read()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            <RefreshCw size={14} />
+          <DeskButton action="refresh" variant="line" compact busy={!!busy} onClick={() => void read()}>
+            <RefreshCw size={12} />
             {t('jd.refresh')}
-          </button>
+          </DeskButton>
         </div>
 
         <p className="mt-2 text-[11px] text-slate-500" data-testid="jd-config">
@@ -339,7 +341,7 @@ export function JobLabPanel() {
         />
       )}
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
         <div className="mt-2 flex flex-col gap-2">
           <input
@@ -348,7 +350,7 @@ export function JobLabPanel() {
             value={keywordDraft}
             onChange={(event) => setKeywordDraft(event.target.value)}
             placeholder={t('jd.keywordPlaceholder')}
-            className="min-w-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+            className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
           />
           <div className="flex gap-2">
             <input
@@ -357,7 +359,7 @@ export function JobLabPanel() {
               value={cityDraft}
               onChange={(event) => setCityDraft(event.target.value)}
               placeholder={t('jd.cityPlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+              className="min-w-0 flex-1 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
             />
             <input
               type="text"
@@ -365,7 +367,7 @@ export function JobLabPanel() {
               value={experienceDraft}
               onChange={(event) => setExperienceDraft(event.target.value)}
               placeholder={t('jd.experiencePlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+              className="min-w-0 flex-1 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
             />
             <input
               type="number"
@@ -374,36 +376,43 @@ export function JobLabPanel() {
               value={limitDraft}
               onChange={(event) => setLimitDraft(event.target.value)}
               placeholder={t('jd.limitPlaceholder')}
-              className="w-24 min-w-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+              className="w-24 min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
             />
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-action="capture"
-              disabled={!!busy || !keywordDraft.trim()}
+            {/* 抓取走实心（它是这一屏的主操作，效果档是读）；外发那两只才是朱砂 */}
+            <DeskButton
+              action="capture"
+              variant="solid"
+              compact
+              busy={!!busy}
+              disabled={!keywordDraft.trim()}
+              disabledReason={!keywordDraft.trim() ? 'KEYWORD_EMPTY' : undefined}
+              disabledReasonLabel={!keywordDraft.trim() ? t('jd.reasonKeywordEmpty') : undefined}
               onClick={capture}
-              className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
             >
               <Search size={12} />
               {t('jd.captureButton')}
-            </button>
-            <button
-              type="button"
-              data-action="list"
-              disabled={!!busy}
+            </DeskButton>
+            <DeskButton
+              action="list"
+              variant="line"
+              compact
+              busy={!!busy}
+              disabled={!isListEnabled}
+              disabledReason={!isListEnabled ? 'ACTION_BUSY' : undefined}
+              disabledReasonLabel={!isListEnabled ? t('jd.reasonBusy') : undefined}
               onClick={listJobs}
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
               <Database size={12} />
               {t('jd.listButton')}
-            </button>
+            </DeskButton>
           </div>
         </div>
 
         {notice && (
           <p
-            className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
             data-testid="jd-notice"
           >
             {notice}
@@ -412,7 +421,7 @@ export function JobLabPanel() {
 
         {lastGreet && (
           <div
-            className="mt-2 rounded-md border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-[11px] text-emerald-200"
+            className="mt-2 rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
             data-testid="jd-greet-receipt"
             data-origin={lastGreet.origin}
           >
@@ -435,7 +444,7 @@ export function JobLabPanel() {
 
         {bridgeError && (
           <div
-            className="mt-2 rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-[11px] text-rose-300"
+            className="mt-2 rounded-md border border-seal/55 bg-seal-wash px-3 py-2 text-[11px] text-seal"
             data-testid="jd-error"
             data-error-code={bridgeError.code}
           >
@@ -447,7 +456,7 @@ export function JobLabPanel() {
               {t('jd.errorRow', { code: bridgeError.code, message: bridgeError.message })}
             </p>
             {bridgeError.code === 'NO_KERNEL_SESSION' && (
-              <p className="mt-1 text-amber-300" data-testid="jd-error-hint">
+              <p className="mt-1 text-amber" data-testid="jd-error-hint">
                 {t('jd.errNoSession')}
               </p>
             )}
@@ -455,7 +464,7 @@ export function JobLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
           <FileUp size={14} />
           {t('deliver.heading')}
@@ -467,7 +476,7 @@ export function JobLabPanel() {
           value={resumePathDraft}
           onChange={(event) => setResumePathDraft(event.target.value)}
           placeholder={t('deliver.resumePathPlaceholder')}
-          className="mt-2 w-full min-w-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+          className="mt-2 w-full min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
         />
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
@@ -480,10 +489,10 @@ export function JobLabPanel() {
             {pendingApprovals.map((approval) => (
               <li
                 key={approval.approvalId}
-                className="rounded-md border border-amber-900 bg-amber-950/40 px-3 py-1.5"
+                className="rounded-md border border-amber/45 bg-amber-wash px-3 py-1.5"
                 data-approval-id={approval.approvalId}
               >
-                <p className="break-all text-[11px] text-amber-100">
+                <p className="break-all text-[11px] text-slate-100">
                   {t('deliver.pendingRow', {
                     jobId: approval.jobId,
                     title: approval.title,
@@ -496,26 +505,34 @@ export function JobLabPanel() {
                   })}
                 </p>
                 <div className="mt-1 flex items-center gap-2">
-                  <button
-                    type="button"
-                    data-action={`approve-${approval.approvalId}`}
+                  {/* 确认=签字，走朱砂（seal 的第二义就是"人在这件事上盖了印"）；
+                      拒绝不涂红——两枚红按钮并排会让人分不出哪一枚会发出去。 */}
+                  <DeskButton
+                    action={`approve-${approval.approvalId}`}
+                    variant="seal"
+                    compact
+                    busy={!!approvalBusy}
                     disabled={!!approvalBusy}
+                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
+                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
                     onClick={() => resolve(approval, true)}
-                    className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                   >
                     <Check size={12} />
                     {t('deliver.approve')}
-                  </button>
-                  <button
-                    type="button"
-                    data-action={`deny-${approval.approvalId}`}
+                  </DeskButton>
+                  <DeskButton
+                    action={`deny-${approval.approvalId}`}
+                    variant="line"
+                    compact
+                    busy={!!approvalBusy}
                     disabled={!!approvalBusy}
+                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
+                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
                     onClick={() => resolve(approval, false)}
-                    className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                   >
                     <X size={12} />
                     {t('deliver.deny')}
-                  </button>
+                  </DeskButton>
                 </div>
               </li>
             ))}
@@ -524,7 +541,7 @@ export function JobLabPanel() {
 
         {lastDeliver && (
           <div
-            className="mt-2 rounded-md border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-[11px] text-emerald-200"
+            className="mt-2 rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
             data-testid="deliver-receipt"
             data-committed={lastDeliver.committed ? 'true' : 'false'}
           >
@@ -549,7 +566,7 @@ export function JobLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
           <ScrollText size={14} />
           {t('jd.progressHeading')}
@@ -581,7 +598,7 @@ export function JobLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.outcomeHeading')}</h3>
         {!lastRun ? (
           <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-outcome-idle">
@@ -622,7 +639,7 @@ export function JobLabPanel() {
                 {lastRun.skipped.map((failure, index) => (
                   <li
                     key={`${failure.sourceUrl}-${String(index)}`}
-                    className="break-all rounded-md border border-amber-900 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-200"
+                    className="break-all rounded-md border border-amber/45 bg-amber-wash px-3 py-1.5 text-[11px] text-amber"
                   >
                     {t('jd.skippedRow', {
                       title: failure.title,
@@ -637,7 +654,7 @@ export function JobLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.listHeading')}</h3>
         {!jobList ? (
           <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-list-idle">
@@ -648,7 +665,7 @@ export function JobLabPanel() {
             {jobList.rows.map((row) => (
               <li
                 key={`${row.platform}-${String(row.id)}`}
-                className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-1.5"
+                className="rounded-md border border-line bg-ink-950/60 px-3 py-1.5"
                 data-replied={row.replied ? 'true' : 'false'}
               >
                 <p className="break-all text-[11px] text-slate-200">
@@ -675,7 +692,7 @@ export function JobLabPanel() {
                   <span
                     className={
                       row.replied
-                        ? 'flex items-center gap-1 text-[11px] text-emerald-300'
+                        ? 'flex items-center gap-1 text-[11px] text-jade'
                         : 'flex items-center gap-1 text-[11px] text-slate-500'
                     }
                     data-testid={`jd-row-replied-${row.jobId}`}
@@ -685,26 +702,34 @@ export function JobLabPanel() {
                     {row.replied ? t('jd.rowReplied', { inbound: row.inboundCount }) : t('jd.rowNotReplied')}
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      data-action={`greet-${row.jobId}`}
-                      disabled={!!busy}
+                    {/* 打招呼与投递都是**会离开这台机器**的动作，一律朱砂——此前它们一只涂青瓷、
+                        一只涂琥珀，读起来像"一个安全一个只写本机"，正是要避免的误读（§8.3 的界面表达）。 */}
+                    <DeskButton
+                      action={`greet-${row.jobId}`}
+                      variant="seal"
+                      compact
+                      busy={!!busy}
+                      disabled={isActionDisabled}
+                      disabledReason={isActionDisabled ? 'ACTION_BUSY' : undefined}
+                      disabledReasonLabel={isActionDisabled ? t('jd.reasonBusy') : undefined}
                       onClick={() => greet(row)}
-                      className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
                     >
                       <Send size={12} />
                       {t('jd.greetButton')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action={`deliver-${row.jobId}`}
-                      disabled={!!busy}
+                    </DeskButton>
+                    <DeskButton
+                      action={`deliver-${row.jobId}`}
+                      variant="seal"
+                      compact
+                      busy={!!busy}
+                      disabled={isActionDisabled}
+                      disabledReason={isActionDisabled ? 'ACTION_BUSY' : undefined}
+                      disabledReasonLabel={isActionDisabled ? t('jd.reasonBusy') : undefined}
                       onClick={() => deliver(row)}
-                      className="flex items-center gap-1 rounded-md border border-amber-800 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-950 disabled:opacity-40"
                     >
                       <FileUp size={12} />
                       {t('deliver.rowButton')}
-                    </button>
+                    </DeskButton>
                   </div>
                 </div>
               </li>

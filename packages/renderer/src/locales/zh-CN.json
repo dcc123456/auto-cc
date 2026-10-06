@@ -173,6 +173,9 @@
       "specMissing": "不存在的选择器（演示失败态）"
     },
     "jd": {
+      "reasonKeywordEmpty": "先写关键词，抓取才知道搜什么",
+      "reasonBusy": "上一条动作还没回来",
+      "reasonApprovalBusy": "上一张确认单还在等你表态",
       "heading": "JD 抓取与入库实验台（只打本地仿站）",
       "refresh": "重新读取抓取与库内读数",
       "config": "目标 {{targetCount}} 条 · 轮次上限 {{maxRounds}} 轮 · 轮间停顿随机（由 outbound.throttle 给）",
@@ -836,6 +839,12 @@
       "streaming": "回复生成中…",
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
+      "reason": {
+        "BUSY": "上一条动作还没回来",
+        "STREAMING": "回复还在生成中，要改写就先按停止",
+        "INPUT_EMPTY": "先写一句要说的话",
+        "NOT_STREAMING": "此刻没有正在生成的回复可停"
+      },
       "workflowMirror": "同一个 runner：{{status}}",
       "workflowRun": {
         "heading": "工作流进度",
