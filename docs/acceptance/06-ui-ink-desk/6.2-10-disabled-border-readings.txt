@@ -1,0 +1,109 @@
+第十五片取证：禁用态描边五档同色（spec 6.2-10）
+时间：2026-10-06　宿主：`pnpm dev`（AUTO_CC_USER_DATA_DIR=tmp/v6-userdata）+ CDP 10222 / vite 5173
+边界：全程只做「切视图」「切主题」「读计算样式」三种动作。零外发（不碰打招呼/投递/真实平台）、
+零写库（不点任何 amber/seal 键，它们全是禁用态本来就点不动）、不落任何测试产物到仓库
+（探针脚本在 tmp/v6b/，入库图片只有本目录的四张 6.2-10-* 截图）。
+
+================================================================================================
+一、修复前的活体对照（一次普查覆盖全部六张视图，因为它们同时挂载，隐藏面板只是 rect=0x0）
+------------------------------------------------------------------------------------------------
+探针 rp18-dead-census.js（深色，theme=dark），命令：
+  pnpm harness eval --url 5173 --expr-file tmp/v6b/rp18-dead-census.js
+挂载 DOM 里 aria-disabled="true" 的 DeskButton 共 27 只，去重后 26 个 (action|effect|reason) 组合，
+同一件「按不动」画成四种描边：
+
+  档      只数  修复前 border            修复前 bg            等于哪个令牌
+  line     9   rgba(150,178,196,0.26)  rgb(15,22,28)        line-strong（比别的档亮一档）
+  solid    4   rgb(85,103,122)         rgb(15,22,28)        slate-600（第三种框）
+  amber   11   rgba(150,178,196,0.14)  rgb(15,22,28)        line（只有这一档是对的）
+  ghost    2   rgba(0,0,0,0)           rgba(0,0,0,0)        连框都不画，底色也塌成透明
+
+同一次普查还读出：27 只里 hoverClass 全部为 true —— 因为组件用的是 aria-disabled 而不是原生
+disabled（原生禁用不派发鼠标事件，tooltip 就出不来），CSS 的 :hover 对它们照样生效，
+于是「按不动的键移上去会提亮」，与 buttonClass 注释里那句「禁用时不提亮」相反。
+这是同一个根因的第二条症状，不是第二条缺陷：语义档的 class 无条件拼在禁用分支后面。
+
+------------------------------------------------------------------------------------------------
+二、修复（packages/renderer/src/ui/controls.tsx 的 buttonClass，禁用时整档语义色都不拼）
+------------------------------------------------------------------------------------------------
+原来：base（含禁用分支的 border-line/bg-ink-850/text-slate-500）+ tone（各档的 border/bg/text/hover）
+现在：`const tone = disabled ? '' : <按 variant 取档>`，禁用的画法只由 base 的禁用分支给一份。
+为什么不是「只去掉 tone 里的描边」：Tailwind 生成的样式表里同类工具的排序不由 class 字符串顺序决定，
+活体上 bg 那一路恰好是禁用分支赢了（bg 全收敛到 ink-850）、text 那一路也是禁用分支赢、
+border 那一路三档输——同一个「拼在后面」在三件事上给出三种结果，逐件打补丁只会再来一次。
+整档不拼之后：禁用态与 variant 无关（一条代码路径），hover 类也随 tone 一起消失。
+
+------------------------------------------------------------------------------------------------
+三、修复后的读数（双主题，同一支探针）
+------------------------------------------------------------------------------------------------
+浅色（毡案，theme=light，也是本次取证开始时 app 所处的主题）：
+  全部 27 只（含隐藏面板）+ 简历屏 13 只可见 + 编排屏 7 只可见，border 一律
+    rgba(38,44,48,0.15) = 浅色的 line
+  bg 一律 rgb(224,219,205) = 浅色的 ink-850，color 一律 rgb(107,118,129) = slate-500
+  hoverClass 全部 false
+深色（墨案，theme=dark）：
+  简历屏可见 13 只（import/preview/export/open-editor/snapshots/diff/sync/lookup/search/export/
+    import/analyze/run；effect 覆盖 amber×5、line×6、solid×2）：
+    border rgba(150,178,196,0.14) = 深色的 line，bg rgb(15,22,28)，color rgb(108,128,145)
+  编排屏可见 7 只（pause/resume/abort/schedule-create/canvas-save = amber，
+    canvas-undo/canvas-redo = ghost）：
+    border rgba(150,178,196,0.14)，bg rgb(15,22,28)
+  浅色那次的 ghost 读数（canvas-undo / canvas-redo 70x30、canvas-save 94x30）与深色同形，
+    只有令牌换面 —— 这是第十三片记的「ghost 那一档连按不动的框都不画」的正面兑现。
+
+对照「只降一档」（07 稿对禁用的要求，同一屏内，浅色，探针 rp24-alive-check.js）：
+  canvas-validate  line  未禁用  border rgba(38,44,48,0.30)（line-strong） bg rgb(242,239,230)
+  canvas-save      amber 已禁用  border rgba(38,44,48,0.15)（line）         bg rgb(224,219,205)
+同一次读数里未禁用的三档语义键取色没有受影响（这一条是「修复没有波及可点态」的反证）：
+  palette-add jd.capture    jade  border oklab(... /0.4)  bg oklab(... /0.14) color rgb(47,143,102)
+  palette-add demo.flaky    amber border oklab(... /0.4)  bg oklab(... /0.14) color rgb(161,112,15)
+  palette-add greeting.send seal  border oklab(... /0.45) bg oklab(... /0.18) color rgb(192,57,31)
+（Chromium 对 Tailwind v4 的 color-mix 结果报 oklab，换算回 sRGB 就是第十四片记过的那批浅色令牌值，
+ 两处逐位对得上。）
+
+------------------------------------------------------------------------------------------------
+四、覆盖矩阵与「seal/jade 无活体禁用样本」这条诚实话
+------------------------------------------------------------------------------------------------
+探针 rp25-matrix.js（浅色）数出带 data-effect 的键共 263 只节点（含隐藏面板，死键 27 只与第一节同数）：
+  line 81 活 / 9 死，ghost 7 活 / 2 死，solid 12 活 / 4 死，amber 108 活 / 12 死，
+  seal 24 活 / 0 死，jade 4 活 / 0 死
+  另有 7 只 data-action 键没有 data-effect（App 导航条、ChatPanel 档位开关、GapPanel/GeneratePanel
+  的证据 chip、MetricsPanel 的 refresh —— 都在第十四片就登记为「不换装」的名单里）
+所以 seal / jade 两档这次**没有活体禁用样本可拍**：它们的禁用只由「动作在途」（busy → ACTION_BUSY）
+或「选中态/计划态」驱动，取证期间没有任何请求在飞，也没有一条已确认的计划。
+补一条 DOM 级的等价证明（探针 rp26-classstring.js）：取四种档的死键各一只，读它们自己的 class 列表——
+  canvas-undo  ghost | border ['border','border-line'] | bg ['bg-ink-850'] | hover [] | active []
+  canvas-save  amber | border ['border','border-line'] | bg ['bg-ink-850'] | hover [] | active []
+  open-editor  solid | border ['border','border-line'] | bg ['bg-ink-850'] | hover [] | active []
+  preview      line  | border ['border','border-line'] | bg ['bg-ink-850'] | hover [] | active []
+  navigate     solid | border ['border','border-line'] | bg ['bg-ink-850'] | hover [] | active []
+四档的死键节点上**根本没有档位色类**（text-[11px] 与 text-xs 的差是 compact 属性，不是档位），
+而 buttonClass 在禁用时不读 variant —— 所以 seal/jade 走的是同一条路径，不需要各拍一次才算数。
+这一格因此按「构造 + 四档活体」判过，seal/jade 那一格标的是「无样本」而不是「通过」。
+
+------------------------------------------------------------------------------------------------
+五、被本次修复取代的历史读数（档案留原文，不涂改）
+------------------------------------------------------------------------------------------------
+以下行记录的是修复前的描边，现由本文件的第三节取代：
+  6.2-06-script-panel-readings.txt:44（禁用 line 键 rgba(38,44,48,0.3)）
+  6.2-06-resume-desk-readings.txt:68（禁用 preview border rgba(38,44,48,.3)）
+  6.2-06-resume-editor-readings.txt 第七/八节的 ghost 与 amber 禁用描边
+  6.2-06-diagnostics-desk-readings.txt 的那一处边框读数（禁用那支）
+以下行只记了禁用态的 bg / color，本次修复不改变它们，复核一致（第一/三节的新读数是同一批值）：
+  6.2-06-kb-gap-generate-readings.txt:52（五只禁用键 bg 全部 rgb(15,22,28)）
+  6.2-06-trust-desk-readings.txt:56（color/bg = rgb(108,128,145) / rgb(15,22,28)）
+重取方式是「全量死键普查（27 只 × 双主题）」而不是「逐屏重拍」：本条修复只可能改到禁用态的外观，
+可点态的反证在第三节末尾那次读数里，所以一次普查覆盖的屏数多于逐屏重拍，截图只补了能同时容纳
+三～四档死键的简历屏与编排屏（各双主题，共四张）。
+
+------------------------------------------------------------------------------------------------
+六、截图与校验
+------------------------------------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.2-10-disabled-border-resume-light.png
+docs/acceptance/06-ui-ink-desk/6.2-10-disabled-border-resume-dark.png
+docs/acceptance/06-ui-ink-desk/6.2-10-disabled-border-workflow-light.png
+docs/acceptance/06-ui-ink-desk/6.2-10-disabled-border-workflow-dark.png
+md5 -q 四张互不相同（§9 的 5.10-18 去重步骤）：
+  ab23212e9b7e5950a9fb093a0c30ec97  b78c53d87b81ed1b41e0f2a45513d4d4
+  d5a68d77924b0648e12466255332babf  ff6dea82aa6b01735bae788f73fa15be
+取证结束时把主题翻回开始时的浅色（theme=light 已复核），视图停在编排屏。

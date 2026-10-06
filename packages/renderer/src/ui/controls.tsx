@@ -33,8 +33,16 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
       ? 'cursor-not-allowed border-line bg-ink-850 text-slate-500 '
       : // 默认 → 悬停（提亮一档、无位移）→ 按下（下移 1px + 回到 ink-800）
         'active:translate-y-px active:bg-ink-800 ');
-  const tone =
-    variant === 'seal'
+  // 禁用时**整档语义色都不拼**（spec 6.2-10）。两条原因都在这一行里：
+  // ① 描边——原先 `base` 给 `border-line`、`tone` 又给 `border-line-strong` / `border-slate-600` /
+  //   `border-transparent`，而 Tailwind 生成的样式表按它自己的顺序排，`border-line` 排在后面就赢不了，
+  //   活体读数因此是"同一屏三种按不动的边框"（amber `.14`、line `.26`、solid `rgb(85,103,122)`、ghost 透明）。
+  // ② 悬停——这里用的是 `aria-disabled` 而不是原生 `disabled`（原生禁用不派发鼠标事件，tooltip 就没了），
+  //   于是 `:hover` 照样生效，留着 `hover:bg-*` 等于"按不动却会提亮"。
+  // 禁用的画法只由 `base` 的禁用分支给一份，五档必然同色。
+  const tone = disabled
+    ? ''
+    : variant === 'seal'
       ? 'border-seal/45 bg-seal/18 text-seal hover:border-seal/70 hover:bg-seal/28 hover:text-slate-50'
       : variant === 'jade'
         ? 'border-jade/40 bg-jade/14 text-jade hover:border-jade/65 hover:bg-jade/24 hover:text-slate-50'
