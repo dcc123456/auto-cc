@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import type { ScheduleJobView, ScheduleTriggerView, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 
 /** 快捷档位 → cron 表达式（5.7-05 判据原文的"每日 / 工作日 / 自定义"三种）。 */
 const PRESET_EXPRESSIONS = {
@@ -68,6 +69,23 @@ export function ScheduleSection() {
   }, [bridge]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
+  /**
+   * 归属色照流程屏那一条规则（plan §5 / §8.3）：`trigger-now` 让这条会外发的流程**立刻**动一次 → `seal`；
+   * 新建任务、启停开关都只往本机的调度表里写 → `amber`；刷新只读 → `line`；
+   * 删除的**入口**不涂朱砂（它只是把这一行换成确认态），落刀的是「确认删除」。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`schedule.reason.${code}`);
+  const createReason =
+    busyReason ??
+    (name.trim().length === 0
+      ? 'NAME_EMPTY'
+      : planId === ''
+        ? 'PLAN_MISSING'
+        : expression.trim().length === 0
+          ? 'EXPRESSION_EMPTY'
+          : undefined);
 
   useEffect(() => {
     void read();
@@ -104,7 +122,7 @@ export function ScheduleSection() {
   const planName = (id: string): string => plans.find((plan) => plan.id === id)?.name ?? t('schedule.planMissing');
 
   return (
-    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2" data-testid="schedule-panel">
+    <div className="mt-3 rounded-lg border border-line bg-ink-950/40 px-3 py-2" data-testid="schedule-panel">
       <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
         <CalendarClock size={13} />
         {t('schedule.heading')}
@@ -119,7 +137,7 @@ export function ScheduleSection() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder={t('schedule.namePlaceholder')}
-            className="min-w-32 rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+            className={`min-w-32 ${FIELD_CLASS}`}
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -128,7 +146,7 @@ export function ScheduleSection() {
             data-testid="schedule-plan-select"
             value={planId}
             onChange={(event) => setPlanId(event.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+            className={FIELD_CLASS}
           >
             <option value="">{t('schedule.planDefault')}</option>
             {plans.map((plan) => (
@@ -149,7 +167,7 @@ export function ScheduleSection() {
             data-testid="schedule-preset-select"
             value={preset}
             onChange={(event) => applyPreset(event.target.value as PresetKey)}
-            className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+            className={FIELD_CLASS}
           >
             <option value="daily">{t('schedule.presetDaily')}</option>
             <option value="weekdays">{t('schedule.presetWeekdays')}</option>
@@ -166,13 +184,17 @@ export function ScheduleSection() {
               setExpression(event.target.value);
               setPreset('custom');
             }}
-            className="min-w-28 rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none focus:border-sky-800"
+            className={`min-w-28 ${FIELD_CLASS} font-mono`}
           />
         </label>
-        <button
-          type="button"
-          data-action="schedule-create"
-          disabled={busy !== undefined || name.trim().length === 0 || planId === '' || expression.trim().length === 0}
+        <DeskButton
+          action="schedule-create"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={createReason !== undefined}
+          disabledReason={createReason}
+          disabledReasonLabel={reasonLabel(createReason)}
           onClick={() =>
             void call(
               t('schedule.actionCreate', { name: name.trim(), expression: expression.trim() }),
@@ -186,21 +208,23 @@ export function ScheduleSection() {
               setName('');
             })
           }
-          className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
         >
           <Plus size={11} />
           {t('schedule.createButton')}
-        </button>
-        <button
-          type="button"
-          data-action="schedule-refresh"
-          disabled={busy !== undefined}
+        </DeskButton>
+        <DeskButton
+          action="schedule-refresh"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={busyReason !== undefined}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onClick={() => void read()}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
           <RefreshCw size={11} />
           {t('schedule.refresh')}
-        </button>
+        </DeskButton>
       </div>
 
       {jobs.length === 0 ? (
@@ -216,26 +240,27 @@ export function ScheduleSection() {
                 key={job.id}
                 data-job-id={job.id}
                 data-job-enabled={job.isEnabled ? 'true' : 'false'}
-                className="flex flex-col gap-1 rounded-md border border-slate-800 px-2 py-1 text-[11px]"
+                className="flex flex-col gap-1 rounded-md border border-line px-2 py-1 text-[11px]"
               >
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="break-all text-slate-200">{job.name}</span>
                   <span className="text-slate-500">{planName(job.planId)}</span>
                   <span className="font-mono text-slate-500">{job.expression}</span>
-                  <span
-                    className={job.isEnabled ? 'text-emerald-300' : 'text-slate-500'}
-                    data-job-next={job.nextRunAt ?? ''}
-                  >
+                  <span className={job.isEnabled ? 'text-jade' : 'text-slate-500'} data-job-next={job.nextRunAt ?? ''}>
                     {job.isEnabled
                       ? t('schedule.nextRun', { when: formatClock(job.nextRunAt, t('schedule.none')) })
                       : t('schedule.disabled')}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
-                    <button
-                      type="button"
-                      data-action="schedule-trigger-now"
-                      data-job-id={job.id}
-                      disabled={busy !== undefined}
+                    <DeskButton
+                      action="schedule-trigger-now"
+                      markers={{ 'job-id': job.id }}
+                      variant="seal"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() =>
                         void call(
                           t('schedule.actionTriggerNow', { name: job.name }),
@@ -243,16 +268,19 @@ export function ScheduleSection() {
                           { describe: (view) => t(RESULT_NOTICES[view.result], { reason: view.reason ?? '' }) },
                         )
                       }
-                      className="flex items-center gap-1 rounded-md border border-sky-800 px-1.5 py-0.5 text-[10px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
                     >
                       <Play size={10} />
                       {t('schedule.triggerNow')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action="schedule-toggle"
-                      data-job-id={job.id}
-                      disabled={busy !== undefined}
+                    </DeskButton>
+                    <DeskButton
+                      action="schedule-toggle"
+                      markers={{ 'job-id': job.id }}
+                      variant="amber"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() =>
                         void call(
                           job.isEnabled
@@ -267,33 +295,39 @@ export function ScheduleSection() {
                           },
                         )
                       }
-                      className="flex items-center gap-1 rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                     >
                       <Ban size={10} />
                       {job.isEnabled ? t('schedule.disable') : t('schedule.enable')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action="schedule-remove"
-                      data-job-id={job.id}
-                      disabled={busy !== undefined}
+                    </DeskButton>
+                    <DeskButton
+                      action="schedule-remove"
+                      markers={{ 'job-id': job.id }}
+                      variant="line"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() => setConfirmRemove(job.id)}
-                      className="flex items-center gap-1 rounded-md border border-rose-900 px-1.5 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                     >
                       <Trash2 size={10} />
                       {t('schedule.remove')}
-                    </button>
+                    </DeskButton>
                   </span>
                 </span>
 
                 {confirmRemove === job.id ? (
                   <span className="flex flex-wrap items-center gap-1" data-testid="schedule-remove-confirm">
-                    <span className="break-all text-amber-300">{t('schedule.confirmRemove', { name: job.name })}</span>
-                    <button
-                      type="button"
-                      data-action="schedule-remove-confirm"
-                      data-job-id={job.id}
-                      disabled={busy !== undefined}
+                    <span className="break-all text-amber">{t('schedule.confirmRemove', { name: job.name })}</span>
+                    <DeskButton
+                      action="schedule-remove-confirm"
+                      markers={{ 'job-id': job.id }}
+                      variant="seal"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() =>
                         void call(
                           t('schedule.actionRemove', { name: job.name }),
@@ -301,18 +335,17 @@ export function ScheduleSection() {
                           { describe: () => t('schedule.removed', { name: job.name }) },
                         ).then(() => setConfirmRemove(undefined))
                       }
-                      className="rounded-md border border-rose-800 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                     >
                       {t('schedule.confirmButton')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action="schedule-remove-cancel"
+                    </DeskButton>
+                    <DeskButton
+                      action="schedule-remove-cancel"
+                      variant="ghost"
+                      compact
                       onClick={() => setConfirmRemove(undefined)}
-                      className="rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800"
                     >
                       {t('schedule.cancel')}
-                    </button>
+                    </DeskButton>
                   </span>
                 ) : null}
 
@@ -333,10 +366,10 @@ export function ScheduleSection() {
                         <span
                           className={
                             trigger.result === 'started'
-                              ? 'text-emerald-300'
+                              ? 'text-jade'
                               : trigger.result === 'skipped'
-                                ? 'text-amber-300'
-                                : 'text-rose-300'
+                                ? 'text-amber'
+                                : 'text-seal'
                           }
                         >
                           {t(RESULT_KEYS[trigger.result])}
@@ -372,7 +405,7 @@ export function ScheduleSection() {
 
       {notice ? (
         <p
-          className="mt-2 break-all rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-300"
+          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
           data-testid="schedule-notice"
         >
           {notice}

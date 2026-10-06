@@ -18,6 +18,7 @@ import { ScheduleSection } from './SchedulePanel';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
+import { DeskButton } from './ui/controls';
 import { NodeEvidenceSection } from './WorkflowEvidence';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowPlansSection } from './WorkflowPlans';
@@ -36,7 +37,7 @@ import { STEP_STATUS_STYLE } from './stepStatusStyle';
  * 等人来做一次人工动作」，底下的四种状态一个都没变。改 border 会和状态自己的颜色打架（Tailwind
  * 两条 border-color 谁生效取决于样式表顺序），ring 是另一层，永远画得出来。
  */
-const TAKEOVER_OVERLAY = 'ring-1 ring-inset ring-amber-500/70';
+const TAKEOVER_OVERLAY = 'ring-1 ring-inset ring-amber/70';
 
 /**
  * 工作流面板：`workflow.runner` 的界面镜像（spec 1.10 / 2.4-02）。
@@ -125,81 +126,114 @@ export function WorkflowPanel() {
   const status = current?.status;
   // idle（挂载后还没跑过）和 done（跑完一轮）都允许再起一次；中间态必须先暂停/重试。
   const canStart = !current || status === 'idle' || status === 'done';
+  /** 在途那一拍共用的原因码：六只动作口都靠它挡重复触发。 */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  /**
+   * 归属色按「这个动作动到谁」分，一句规则管整屏（plan §5 / §8.3）：
+   * `start` 与 `retry` 是这条链上唯二会真的动到平台的口 → `seal`；
+   * `pause` / `resume` / `abort` 只改本机那份 run 的状态（含库里那一行 `USER_ABORT`）→ `amber`；
+   * `refresh` 什么都不写 → `line`；开合画布是同一批节点的另一种画法 → `solid`。
+   * 「中止」看着危险，但它做的是**把外发拦住**，涂朱砂就等于让保护动作与风险动作同一个色。
+   */
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`workflow.reason.${code}`);
+  const refreshReason = busyReason;
+  const startReason = busyReason ?? (canStart ? undefined : 'RUN_IN_FLIGHT');
+  const pauseReason = busyReason ?? (status === 'running' ? undefined : 'NOT_RUNNING');
+  const resumeReason = busyReason ?? (status === 'paused' ? undefined : 'NOT_PAUSED');
+  const canAbort = status === 'running' || status === 'paused';
+  const abortReason = busyReason ?? (canAbort ? undefined : 'NO_RUN_TO_ABORT');
 
   return (
-    <section data-testid="workflow-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <section data-testid="workflow-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <WorkflowIcon size={16} />
           {t('workflow.heading')}
         </h2>
-        <button
-          type="button"
-          data-action="refresh"
+        <DeskButton
+          action="refresh"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={refreshReason !== undefined}
+          disabledReason={refreshReason}
+          disabledReasonLabel={reasonLabel(refreshReason)}
           onClick={() => void read()}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
         >
           <RefreshCw size={14} />
           {t('workflow.refresh')}
-        </button>
+        </DeskButton>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-action="start"
-          disabled={busy !== undefined || !canStart}
+        <DeskButton
+          action="start"
+          variant="seal"
+          compact
+          busy={!!busy}
+          disabled={startReason !== undefined}
+          disabledReason={startReason}
+          disabledReasonLabel={reasonLabel(startReason)}
           onClick={() =>
             void consent.ensure(planPlatforms, () =>
               act(t('workflow.actionStart'), () => bridge?.workflow['runner.start'](selectedPlanId)),
             )
           }
-          className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
         >
           <Play size={12} />
           {t('workflow.start')}
-        </button>
-        <button
-          type="button"
-          data-action="pause"
-          disabled={busy !== undefined || status !== 'running'}
+        </DeskButton>
+        <DeskButton
+          action="pause"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={pauseReason !== undefined}
+          disabledReason={pauseReason}
+          disabledReasonLabel={reasonLabel(pauseReason)}
           onClick={() => act(t('workflow.actionPause'), () => bridge?.workflow['runner.pause']())}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
           <Pause size={12} />
           {t('workflow.pause')}
-        </button>
-        <button
-          type="button"
-          data-action="resume"
-          disabled={busy !== undefined || status !== 'paused'}
+        </DeskButton>
+        <DeskButton
+          action="resume"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={resumeReason !== undefined}
+          disabledReason={resumeReason}
+          disabledReasonLabel={reasonLabel(resumeReason)}
           onClick={() => act(t('workflow.actionResume'), () => bridge?.workflow['runner.resume']())}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
           <Play size={12} />
           {t('workflow.resume')}
-        </button>
-        <button
-          type="button"
-          data-action="abort"
-          disabled={busy !== undefined || (status !== 'running' && status !== 'paused')}
+        </DeskButton>
+        <DeskButton
+          action="abort"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={abortReason !== undefined}
+          disabledReason={abortReason}
+          disabledReasonLabel={reasonLabel(abortReason)}
           onClick={() => act(t('workflow.actionAbort'), () => bridge?.workflow['runner.abort']())}
-          className="flex items-center gap-1 rounded-md border border-rose-900 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
         >
           <Ban size={12} />
           {t('workflow.abort')}
-        </button>
+        </DeskButton>
         {/* 画布开关放在动作行末尾而不是新起一行：它切换的是同一批节点的另一种画法，不是又一个 runner 动作。 */}
-        <button
-          type="button"
-          data-action="canvas-toggle"
+        <DeskButton
+          action="canvas-toggle"
+          variant="solid"
+          compact
           aria-pressed={isCanvasOpen}
           onClick={() => setIsCanvasOpen((open) => !open)}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
         >
           <Network size={12} />
           {t(isCanvasOpen ? 'workflow.canvas.close' : 'workflow.canvas.open')}
-        </button>
+        </DeskButton>
         {current ? (
           <span className="ml-auto text-[11px] text-slate-500" data-testid="workflow-state">
             {t(`workflow.status.${current.status}`)}
@@ -232,7 +266,7 @@ export function WorkflowPanel() {
 
       {notice && (
         <p
-          className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
           data-testid="workflow-notice"
         >
           {notice}
@@ -241,7 +275,7 @@ export function WorkflowPanel() {
 
       {current?.requiresHuman && (
         <div
-          className="mt-2 rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-[11px] text-amber-200"
+          className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-slate-100"
           data-testid="workflow-takeover"
           data-takeover-subject={current.requiresHuman.subject}
           data-takeover-reason={current.requiresHuman.reason}
@@ -294,7 +328,7 @@ export function WorkflowPanel() {
                     {t(`workflow.step.${step.id}`, step.id)}
                     {step.error ? (
                       <span
-                        className="ml-1 inline-flex items-center gap-1 break-all text-rose-300"
+                        className="ml-1 inline-flex items-center gap-1 break-all text-seal"
                         data-step-error={step.error}
                       >
                         <AlertCircle size={12} />
@@ -303,7 +337,7 @@ export function WorkflowPanel() {
                     ) : null}
                     {isTakeoverStep ? (
                       <span
-                        className="ml-1 inline-flex items-center gap-1 text-amber-300"
+                        className="ml-1 inline-flex items-center gap-1 text-amber"
                         data-testid="workflow-step-takeover-badge"
                       >
                         <ShieldAlert size={12} />
@@ -312,7 +346,7 @@ export function WorkflowPanel() {
                     ) : null}
                     {isHandledStep ? (
                       <span
-                        className="ml-1 inline-flex items-center gap-1 text-emerald-300"
+                        className="ml-1 inline-flex items-center gap-1 text-jade"
                         data-testid="workflow-step-takeover-handled"
                       >
                         <ShieldCheck size={12} />
@@ -330,21 +364,24 @@ export function WorkflowPanel() {
                     {/* 两种「停在这一步」都要能从这一步出去：普通失败，以及挂着接管点的暂停
                         （spec 2.4-06 的未观察外发只有从这里走，否则用户在界面上只剩重新开跑一条路）。 */}
                     {step.status === 'failed' || isTakeoverStep ? (
-                      <button
-                        type="button"
-                        data-action="retry"
-                        data-step={step.id}
-                        disabled={busy !== undefined}
+                      <DeskButton
+                        action="retry"
+                        markers={{ step: step.id }}
+                        variant="seal"
+                        compact
+                        busy={!!busy}
+                        disabled={busyReason !== undefined}
+                        disabledReason={busyReason}
+                        disabledReasonLabel={reasonLabel(busyReason)}
                         onClick={() =>
                           act(t('workflow.actionRetry', { step: t(`workflow.step.${step.id}`, step.id) }), () =>
                             bridge?.workflow['runner.retryStep'](step.id),
                           )
                         }
-                        className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-0.5 text-rose-200 hover:bg-rose-950 disabled:opacity-40"
                       >
                         <RotateCw size={12} />
                         {t('workflow.retry')}
-                      </button>
+                      </DeskButton>
                     ) : null}
                   </span>
                 </div>

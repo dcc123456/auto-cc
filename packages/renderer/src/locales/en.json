@@ -269,7 +269,10 @@
       "deny": "Not yet",
       "statusGranted": "{{platform}} automation risk acknowledged ({{time}})",
       "statusUnsigned": "{{platform}} automation risk not acknowledged; actions wait for your confirmation",
-      "never": "no timestamp"
+      "never": "no timestamp",
+      "reason": {
+        "ACTION_BUSY": "The consent write is still in flight — wait for it"
+      }
     },
     "privacy": {
       "heading": "Privacy statement and terms of use",
@@ -748,7 +751,11 @@
         "selected": "Current plan is {{planId}} (fingerprint {{fingerprint}})",
         "alreadyGone": "That plan is already gone: the list is re-read every time, there is no second copy of the truth",
         "builtinReadonly": "Built-in plans are read-only — duplicate one to change it",
-        "empty": "No custom plans yet: finish a run in the chat and press Save as workflow"
+        "empty": "No custom plans yet: finish a run in the chat and press Save as workflow",
+        "reason": {
+          "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+          "NAME_EMPTY": "Type a name first: rename and duplicate both write a new name into the store"
+        }
       },
       "operator": {
         "paletteHeading": "Operators",
@@ -848,6 +855,13 @@
             "threshold": "Threshold"
           }
         }
+      },
+      "reason": {
+        "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+        "RUN_IN_FLIGHT": "This run has not settled: pause or abort it before starting another",
+        "NOT_RUNNING": "Only a running workflow can be paused",
+        "NOT_PAUSED": "Nothing is paused right now, so there is nothing to resume",
+        "NO_RUN_TO_ABORT": "There is no in-flight run to abort"
       }
     },
     "chat": {
@@ -1376,7 +1390,13 @@
       "created": "Created \"{{name}}\", next {{next}}",
       "enabled": "Enabled, next {{next}}",
       "disabledNotice": "Disabled \"{{name}}\"",
-      "removed": "Deleted \"{{name}}\""
+      "removed": "Deleted \"{{name}}\"",
+      "reason": {
+        "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+        "NAME_EMPTY": "Give this job a name — the list identifies it by that name",
+        "PLAN_MISSING": "Pick a saved plan from the dropdown so the job knows what to run",
+        "EXPRESSION_EMPTY": "The cron expression cannot be empty: the schedule lives in this line"
+      }
     },
     "metrics": {
       "heading": "Metrics dashboard",

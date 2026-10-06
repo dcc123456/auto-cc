@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 
 /** 一行的编辑态：`rename` / `duplicate` 带名字草稿，`remove` 只等一次确认。 */
 type PlanEdit = { planId: string; mode: 'rename' | 'duplicate' | 'remove'; draft: string };
@@ -40,6 +41,10 @@ export function WorkflowPlansSection({
   }, [bridge]);
 
   const { busy, notice, run: call } = useBridgeAction(read);
+  /** 在途那一拍：这一节里六只手都靠它挡重复触发（改名与复制还会叠一条空名判据）。 */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`workflow.plans.reason.${code}`);
 
   useEffect(() => {
     void read();
@@ -133,7 +138,7 @@ export function WorkflowPlansSection({
   };
 
   return (
-    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2" data-testid="workflow-plans">
+    <div className="mt-3 rounded-lg border border-line bg-ink-950/40 px-3 py-2" data-testid="workflow-plans">
       <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
         <Layers size={13} />
         {t('workflow.plans.heading')}
@@ -147,7 +152,7 @@ export function WorkflowPlansSection({
           value={selectedId ?? ''}
           disabled={busy !== undefined}
           onChange={(event) => void pickPlan(event.target.value)}
-          className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800 disabled:opacity-40"
+          className={`${FIELD_CLASS} disabled:opacity-40`}
         >
           <option value="">{t('workflow.plans.selectDefault')}</option>
           {plans.map((plan) => (
@@ -170,13 +175,18 @@ export function WorkflowPlansSection({
         <ul className="mt-2 flex flex-col gap-1" data-testid="workflow-plans-list">
           {plans.map((plan) => {
             const isEditing = edit?.planId === plan.id;
+            /** 名字空着的时候保存键按不动：计划名要在库里落一行，空名等于落一条读不出来的记录。 */
+            const nameReason =
+              edit !== undefined && edit.planId === plan.id && edit.draft.trim().length === 0
+                ? 'NAME_EMPTY'
+                : busyReason;
             return (
               <li
                 key={plan.id}
                 data-plan-id={plan.id}
                 data-plan-source={plan.source}
                 data-plan-edit={isEditing ? edit?.mode : ''}
-                className="flex flex-col gap-1 rounded-md border border-slate-800 px-2 py-1 text-[11px]"
+                className="flex flex-col gap-1 rounded-md border border-line px-2 py-1 text-[11px]"
               >
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="break-all text-slate-200">{plan.name}</span>
@@ -192,41 +202,52 @@ export function WorkflowPlansSection({
                   <span className="ml-auto flex items-center gap-1">
                     {plan.source === 'custom' ? (
                       <>
-                        <button
-                          type="button"
-                          data-action="plan-rename"
-                          data-plan-id={plan.id}
-                          disabled={busy !== undefined}
+                        <DeskButton
+                          action="plan-rename"
+                          markers={{ 'plan-id': plan.id }}
+                          variant="solid"
+                          compact
+                          busy={!!busy}
+                          disabled={busyReason !== undefined}
+                          disabledReason={busyReason}
+                          disabledReasonLabel={reasonLabel(busyReason)}
                           onClick={() => startEdit(plan, 'rename')}
-                          className="flex items-center gap-1 rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                         >
                           <Pencil size={10} />
                           {t('workflow.plans.rename')}
-                        </button>
-                        <button
-                          type="button"
-                          data-action="plan-remove"
-                          data-plan-id={plan.id}
-                          disabled={busy !== undefined}
+                        </DeskButton>
+                        {/* 删除的**入口**不涂朱砂：它只是把这一行换成确认态，什么都没删。
+                            涂色给那只真正落刀的「确认删除」——08 稿的「入口轻、落刀重」。 */}
+                        <DeskButton
+                          action="plan-remove"
+                          markers={{ 'plan-id': plan.id }}
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={busyReason !== undefined}
+                          disabledReason={busyReason}
+                          disabledReasonLabel={reasonLabel(busyReason)}
                           onClick={() => startEdit(plan, 'remove')}
-                          className="flex items-center gap-1 rounded-md border border-rose-900 px-1.5 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                         >
                           <Trash2 size={10} />
                           {t('workflow.plans.remove')}
-                        </button>
+                        </DeskButton>
                       </>
                     ) : null}
-                    <button
-                      type="button"
-                      data-action="plan-duplicate"
-                      data-plan-id={plan.id}
-                      disabled={busy !== undefined}
+                    <DeskButton
+                      action="plan-duplicate"
+                      markers={{ 'plan-id': plan.id }}
+                      variant="solid"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() => startEdit(plan, 'duplicate')}
-                      className="flex items-center gap-1 rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                     >
                       <Copy size={10} />
                       {t('workflow.plans.duplicate')}
-                    </button>
+                    </DeskButton>
                   </span>
                 </span>
 
@@ -238,43 +259,47 @@ export function WorkflowPlansSection({
                       value={edit.draft}
                       onChange={(event) => setEdit({ ...edit, draft: event.target.value })}
                       placeholder={t('workflow.plans.namePlaceholder')}
-                      className="min-w-32 rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+                      className={`min-w-32 ${FIELD_CLASS}`}
                     />
-                    <button
-                      type="button"
-                      data-action={edit.mode === 'rename' ? 'plan-rename-save' : 'plan-duplicate-save'}
-                      disabled={busy !== undefined || edit.draft.trim().length === 0}
+                    {/* 落名那一下写的是计划表 → amber（本机写入）。旧写法涂 emerald，那是 jade 族
+                        「已经核过」的颜色，一个还没落笔的保存键不该自称已核（与知识库「保存」同一处纠偏）。 */}
+                    <DeskButton
+                      action={edit.mode === 'rename' ? 'plan-rename-save' : 'plan-duplicate-save'}
+                      variant="amber"
+                      compact
+                      busy={!!busy}
+                      disabled={nameReason !== undefined}
+                      disabledReason={nameReason}
+                      disabledReasonLabel={reasonLabel(nameReason)}
                       onClick={() => saveName(plan, edit.draft)}
-                      className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                     >
                       <Check size={10} />
                       {t('workflow.plans.save')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action="plan-edit-cancel"
-                      onClick={() => setEdit(undefined)}
-                      className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800"
-                    >
+                    </DeskButton>
+                    <DeskButton action="plan-edit-cancel" variant="ghost" compact onClick={() => setEdit(undefined)}>
                       <X size={10} />
                       {t('workflow.plans.cancel')}
-                    </button>
+                    </DeskButton>
                   </span>
                 ) : null}
 
                 {isEditing && edit?.mode === 'remove' ? (
                   <span className="flex flex-wrap items-center gap-1" data-testid="workflow-plan-remove-confirm">
-                    <span className="break-all text-amber-300">
+                    <span className="break-all text-amber">
                       {t('workflow.plans.confirmRemove', { name: plan.name })}
                     </span>
                     <span className="break-all text-[10px] text-slate-500">
                       {t('workflow.plans.confirmRemoveHint')}
                     </span>
-                    <button
-                      type="button"
-                      data-action="plan-remove-confirm"
-                      data-plan-id={plan.id}
-                      disabled={busy !== undefined}
+                    <DeskButton
+                      action="plan-remove-confirm"
+                      markers={{ 'plan-id': plan.id }}
+                      variant="seal"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() =>
                         void runPlanAction(
                           t('workflow.plans.actionRemove', { name: plan.name }),
@@ -286,19 +311,13 @@ export function WorkflowPlansSection({
                           plan.id,
                         )
                       }
-                      className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                     >
                       <Trash2 size={10} />
                       {t('workflow.plans.confirmButton')}
-                    </button>
-                    <button
-                      type="button"
-                      data-action="plan-remove-cancel"
-                      onClick={() => setEdit(undefined)}
-                      className="rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800"
-                    >
+                    </DeskButton>
+                    <DeskButton action="plan-remove-cancel" variant="ghost" compact onClick={() => setEdit(undefined)}>
                       {t('workflow.plans.cancel')}
-                    </button>
+                    </DeskButton>
                   </span>
                 ) : null}
               </li>
@@ -309,7 +328,7 @@ export function WorkflowPlansSection({
 
       {notice ? (
         <p
-          className="mt-2 break-all rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-300"
+          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
           data-testid="workflow-plans-notice"
         >
           {notice}

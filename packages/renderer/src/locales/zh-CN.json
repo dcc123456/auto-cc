@@ -269,7 +269,10 @@
       "deny": "先不启用",
       "statusGranted": "{{platform}} 已确认自动化风险（{{time}}）",
       "statusUnsigned": "{{platform}} 尚未确认自动化风险，动作会先等你点头",
-      "never": "无时刻"
+      "never": "无时刻",
+      "reason": {
+        "ACTION_BUSY": "签字那一次写入还在飞，先等它落地"
+      }
     },
     "privacy": {
       "heading": "隐私声明与使用条款",
@@ -748,7 +751,11 @@
         "selected": "当前计划已是 {{planId}}（指纹 {{fingerprint}}）",
         "alreadyGone": "这条计划已经不在了：列表按当下重读，没有第二份事实",
         "builtinReadonly": "内置计划只读，要改就先复制一份",
-        "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条"
+        "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条",
+        "reason": {
+          "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+          "NAME_EMPTY": "先写一个名字：改名与复制都要在库里落一行新名字"
+        }
       },
       "operator": {
         "paletteHeading": "算子库",
@@ -848,6 +855,13 @@
             "threshold": "阈值"
           }
         }
+      },
+      "reason": {
+        "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+        "RUN_IN_FLIGHT": "这一轮还没收尾：先暂停或中止，再起新一轮",
+        "NOT_RUNNING": "只有正在推进的流程能暂停",
+        "NOT_PAUSED": "当前不是暂停态，没有可续跑的流程",
+        "NO_RUN_TO_ABORT": "没有在途流程可中止"
       }
     },
     "chat": {
@@ -1376,7 +1390,13 @@
       "created": "已建立「{{name}}」，下次 {{next}}",
       "enabled": "已启用，下次 {{next}}",
       "disabledNotice": "已停用「{{name}}」",
-      "removed": "已删除「{{name}}」"
+      "removed": "已删除「{{name}}」",
+      "reason": {
+        "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+        "NAME_EMPTY": "先给这条任务起个名字，列表里要认它",
+        "PLAN_MISSING": "下拉里挑一条已保存的计划，任务才知道到点跑什么",
+        "EXPRESSION_EMPTY": "cron 表达式不能空着：到点的判据就在这一行里"
+      }
     },
     "metrics": {
       "heading": "指标看板",

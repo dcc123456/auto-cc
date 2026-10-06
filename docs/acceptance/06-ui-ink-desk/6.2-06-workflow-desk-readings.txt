@@ -1,0 +1,154 @@
+第八片活体取证：流程屏（`WorkflowPanel` + `WorkflowPlans` + `SchedulePanel` + `ConsentCard` + `WorkflowEvidence`）
+================================================================================
+取证时刻：2026-10-06 07:00Z（本机 macOS arm64，`pnpm dev` 实例，userData=`tmp/v6-userdata`）
+取法：`pnpm harness eval --url 5173 --expr-file tmp/p8/probe-*.mjs`（脚本原文留在 tmp/，不进仓库）
+本轮 `document.visibilityState` 全程 `visible`（用户在场，窗口在前台），所以计算色与 `cursor` 都是真渲染读数。
+本轮**零写入**：所有探针只改界面态（输入框值、下拉值、就地编辑草稿、主题开关），
+没有点过 `start` / `retry` / `trigger-now` / `plan-remove-confirm` / `schedule-create` 任何一只会动库或动平台的口。
+
+--------------------------------------------------------------------------------
+① 禁用态整条读数（7 只，覆盖 4 支原因码 + 3 支流程状态码）
+--------------------------------------------------------------------------------
+读数取自 `probe-workflow.mjs`（页面初始态：`workflow-state` = 「未开始 · pending」，无在途 run，定时任务 0 条）
+与 `probe-disabled.mjs` / `probe-expression.mjs`（只改界面态后重读同一只按钮）。
+
+| # | 按钮（`data-action`）  | `data-effect` | `data-disabled-reason` | tooltip（中文原话）                                  | aria-disabled | 原生 disabled | cursor       | color           | bg           |
+|---|------------------------|---------------|------------------------|------------------------------------------------------|---------------|---------------|--------------|-----------------|--------------|
+| 1 | `pause`                | amber         | `NOT_RUNNING`          | 只有正在推进的流程能暂停                             | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 2 | `resume`               | amber         | `NOT_PAUSED`           | 当前不是暂停态，没有可续跑的流程                     | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 3 | `abort`                | amber         | `NO_RUN_TO_ABORT`      | 没有在途流程可中止                                   | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 4 | `schedule-create`      | amber         | `NAME_EMPTY`           | 先给这条任务起个名字，列表里要认它                   | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 5 | `schedule-create`      | amber         | `PLAN_MISSING`         | 下拉里挑一条已保存的计划，任务才知道到点跑什么       | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 6 | `schedule-create`      | amber         | `EXPRESSION_EMPTY`     | cron 表达式不能空着：到点的判据就在这一行里           | true          | false         | not-allowed  | rgb(108,128,145) | rgb(15,22,28) |
+| 7 | `plan-rename-save`     | amber         | `NAME_EMPTY`           | 先写一个名字：改名与复制都要在库里落一行新名字        | true          | false         | not-allowed  | rgb(112,129,142) | oklab(0.1986… / 0.9725) |
+
+三条要点：
+- 第 4/5/6 行是**同一只按钮在三种界面态下的三次现读**，用来证明 `createReason` 的优先级链
+  （busy → 名字 → 计划 → 表达式）真的按书写顺序命中：填名字后跳到 `PLAN_MISSING`，
+  名字留着再清空表达式仍是 `PLAN_MISSING`（计划那一档先命中），名字清空后回到 `NAME_EMPTY`。
+- 第 1/2/3 行的 `bg` 与 `color` 与「未禁用」的 amber 完全不同（收敛到 ink-850 + slate-500），
+  即禁用态**不靠 opacity 蒙一层**，而是整档换成中性色——效果色只留给「能按下去会发生什么」。
+- 第 7 行的底色与 1～6 不同（`oklab(0.1986…)` = amber 档自己的 disabled 底），
+  因为它嵌在计划行内的紧凑档（`compact`）里，容器底色不同、令牌同一套。
+
+原生 `disabled` 全为 `false` 是刻意的（`ui/controls.tsx:126`）：原生禁用会让 tooltip 不派发，
+人只会看到"按不动"而看不到为什么按不动。挡下的是 `onClick`（`isDead` 时根本不挂）。
+
+--------------------------------------------------------------------------------
+② 归属色档位（24 只 `DeskButton`，按「这个动作动到谁」分）
+--------------------------------------------------------------------------------
+`grep -c '<DeskButton'` 逐文件：`WorkflowPanel` 7 + `WorkflowPlans` 7 + `SchedulePanel` 7 + `ConsentCard` 2 + `WorkflowEvidence` 1 = **24 只**。
+按 variant 汇总：seal 6 / amber 6 / line 5 / ghost 4 / solid 3（合计 24，与逐文件计数对得上）。
+
+一句规则（写在 `WorkflowPanel.tsx` 的 `busyReason` 上方注释里，整屏共用）：
+动到平台的是 `start` / `retry` / `schedule-trigger-now` / `consent-grant` / `*-remove-confirm` / `plan-remove-confirm`
+→ `seal`；只改本机那份 run 的状态或只写本机的表（`pause` / `resume` / `abort` / 建任务 / 启停 / 落计划名）→ `amber`；
+什么都不写（`refresh` / `schedule-refresh` / 删除的**入口** / 证据展开）→ `line`；
+开合画布这种"同一批数据的另一种画法"→ `solid`；取消 → `ghost`。
+
+活体计算色（`probe-workflow.mjs`，深色主题）：
+
+| 按钮                | variant | color            | bg                          | border                      |
+|---------------------|---------|------------------|-----------------------------|-----------------------------|
+| `refresh`           | line    | rgb(219,228,236) | rgb(19,28,35)               | rgba(150,178,196,.26)       |
+| `start`             | seal    | rgb(226,84,58)   | oklab(0.6316… / 0.18)       | oklab(0.6316… / 0.45)       |
+| `canvas-toggle`     | solid   | rgb(232,238,243) | rgb(24,35,43)               | rgb(85,103,122)             |
+| `plan-rename`       | solid   | rgb(232,238,243) | rgb(24,35,43)               | rgb(85,103,122)             |
+| `plan-remove`       | line    | rgb(219,228,236) | rgb(19,28,35)               | rgba(150,178,196,.26)       |
+| `plan-duplicate`    | solid   | rgb(232,238,243) | rgb(24,35,43)               | rgb(85,103,122)             |
+| `schedule-refresh`  | line    | rgb(219,228,236) | rgb(19,28,35)               | rgba(150,178,196,.26)       |
+
+`plan-rename-save` 填上名字之后（`probe-disabled.mjs` 的 `saveFilled`）：
+`aria-disabled=null` / `data-disabled-reason=null` / `title=null` / `cursor=default` /
+`color=rgb(221,162,65)` / `bg=oklab(0.6647 0.0258 0.1066 / 0.1629)` —— 即 amber 档的"能按"那一格，
+与同一只按钮在 ① 第 7 行的读数构成一对**同按钮、两态**的对照。
+
+两条纠偏（都是"旧写法自己跟自己打架"）：
+- `plan-rename-save` / `plan-duplicate-save` 旧写 emerald（= jade 族「已经核过」），改 `amber`：
+  一个还没落笔的保存键不该自称已核。`ChatSessionBar` 的 `save-title` 同一处纠偏（jade → amber），
+  全仓 grep 过：除文档提过这个名字之外没有任何判据依赖它，属于**跨屏一致性**改动而非功能改动。
+- `consent-grant` 旧写 emerald，改 `seal`：这张卡片从来没有"办成了"的语义，它只有一个待表态的风险，
+  且签完紧接着就重放那一次外发。`consent-deny` 从 rose 退成 `ghost`——拒绝不该被涂成危险色。
+
+--------------------------------------------------------------------------------
+③ 就地编辑这一条链（09 稿②的口径，零写入走通再原样收回）
+--------------------------------------------------------------------------------
+`probe-disabled.mjs` 读数：
+- 点 `[data-action=plan-rename]` → 该行 `data-plan-edit="rename"`、`[data-testid=workflow-plan-name-input]` 出现（`editorPresent: true`）；
+- 草稿敲成三个空格 → 保存键 `data-disabled-reason="NAME_EMPTY"` + 中文 tooltip + `not-allowed`（① 第 7 行）；
+- 草稿敲成「探针改名回滚」→ 同一只按钮三件都清掉（② 末段）；
+- 点 `[data-action=plan-edit-cancel]` → `afterCancelEditor: false`（编辑态收起，**库里那条名字没变**：
+  全程没有派发过 `plan-rename-save` 的 onClick，`runner.renamePlan` 一次都没被调用）。
+计划行数前后都是 14 个 `[data-plan-id]` 节点（5 条计划 × 行 + 行内按钮的 marker），未增未减。
+
+--------------------------------------------------------------------------------
+④ 容器与字段令牌读数
+--------------------------------------------------------------------------------
+`probe-workflow.mjs` 的 `surfaces`：
+
+| `data-testid`      | border                     | bg                                   | radius |
+|--------------------|----------------------------|--------------------------------------|--------|
+| `workflow-plans`   | rgba(150,178,196,.14)      | oklab(0.1518… / 0.4)（= ink-950/40） | 8px    |
+| `schedule-panel`   | rgba(150,178,196,.14)      | oklab(0.1518… / 0.4)                 | 8px    |
+| `workflow-notice`  | 不在场（当前无提示行）     | —                                    | —      |
+| `schedule-notice`  | 不在场                     | —                                    | —      |
+| `workflow-plans-notice` | 不在场                | —                                    | —      |
+
+三张提示行（`workflow-notice` / `workflow-plans-notice` / `schedule-notice`）本轮没有活体：
+取它必须真跑一次动作（会点 `start`），按 §7.2 与"用户不在场不动外发"的纪律不取，
+只在代码位（三处都是 `border-line bg-ink-950/70`，与 ④ 的两张容器同一套令牌）。
+
+字段（`FIELD_CLASS`）替换掉的是旧写法 `border-slate-700 bg-slate-950/60 … focus:border-sky-800`，
+共 6 处：`schedule-name-input` / `schedule-plan-select` / `schedule-preset-select` /
+`schedule-expression-input` / `workflow-plan-select` / `workflow-plan-name-input`。
+其中 `min-w-32`、`min-w-28 font-mono`、`disabled:opacity-40` 三条是**尺寸/排版**用途，原样拼在 `FIELD_CLASS` 外面。
+
+`grep 'border-slate\|bg-slate'` 在这五个文件里的剩余数：**0**（`WorkflowEvidence.tsx` 里证据截图 `<img>`
+的 `border-slate-800` 也在收尾时改成 `border-line`）。
+`panel.innerHTML` 的旧色名扫描（`rose-*` / `emerald-*` / `sky-*` / `amber-*00` / `slate-700/800/900`）读数 `legacyColors: 0`。
+
+--------------------------------------------------------------------------------
+⑤ 只有代码位、没有活体的条目（以及为什么）
+--------------------------------------------------------------------------------
+| 条目 | 为什么本轮取不到 |
+|------|------------------|
+| `start` 的 `RUN_IN_FLIGHT` | 要有一条真在跑的 run。`start` 会经 `entitlement.gate` 打到 BOSS，§7.2 禁止自动化碰真实平台 |
+| `retry`（seal）与 `evidence` 展开块（celadon 底 + `evidence-code` 朱砂） | 要有一个失败节点，同样要先跑一轮 |
+| 接管横幅 `workflow-takeover`（`border-amber/45 bg-amber-wash`）与步骤行的接管/已处理徽标 | 要有人工接管点被触发 |
+| `ConsentCard` 整张（amber wash + `consent-grant` seal） | 要有一个未签字的平台 + 一次被拦下的动作 |
+| `ACTION_BUSY`（四个命名空间共用一支码） | 在途那一拍只有 ~25ms，`eval` 往返抓不到（与信任屏、简历屏同一结论） |
+| `schedule-trigger-now` / `schedule-toggle` / `schedule-remove*` 行内三键 | 定时任务 0 条（`jobRows: []`），行本身不存在；建行要写库 |
+| 三张提示行 | 见 ④ |
+
+`[!]` 是合法状态：以上条目在代码里都改到位了，缺的只是活体证据，不推测为通过。
+
+--------------------------------------------------------------------------------
+⑥ 探针留下的界面态复位（用户实例不是沙盒）
+--------------------------------------------------------------------------------
+`restore.mjs` 末读：`{"preset":"daily","expression":"0 9 * * *","name":"","plan":""}`
+（任务名清空、计划下拉回到「沿用 runner 当前装载的那份」、快捷档位回到每日、表达式回到 `0 9 * * *`）。
+`toggle-theme.mjs` 两次：`{"theme":"light"}` → 截毡案那张 → `{"theme":"dark"}`，收尾主题回到深色。
+`scroll-top.mjs`：主视口滚动位停在 `scrollTop=0`（截图取景位），未改动任何数据。
+计划库 5 条、定时任务 0 条，与取证前一致。
+
+--------------------------------------------------------------------------------
+⑦ 截图（三张，`md5 -q` 互不相同，且与 `docs/acceptance/06-ui-ink-desk/` 全部既有图无重复）
+--------------------------------------------------------------------------------
+- `6.2-06-workflow-desk-dark.png` — `b6298bedad6c782537791a0d13995f18`（墨案：动作行五键 + 计划库 + 定时任务表）
+- `6.2-06-workflow-plans-schedule-dark.png` — `e7b27f4a24bcfb37585190c0e0ee24a3`（墨案：计划库 + 定时任务 + 步骤行）
+- `6.1-04-workflow-desk-light.png` — `d303b861b6bab380189844161ff2e941`（毡案：同一屏、同一批 class，组件里零 `theme ===` 分支）
+两张深色图是**同一滚动容器的两个取景位**（`scrollTop` 0 与 169），不是同一张复制两份。
+
+--------------------------------------------------------------------------------
+⑧ 门禁（结论不接管道，逐条 `> log 2>&1; echo "X=$?"`）
+--------------------------------------------------------------------------------
+`pnpm format` → `FMT=0`；`pnpm typecheck` → `TC=0`；`pnpm lint` → `LINT=0`；`pnpm test` → `TEST=0`。
+`pnpm test` 逐包通过数（23 个包，全部 0 failed）：
+agent 8 / browser 16 / config 3 / core 6 / devtools 1 / entitlement 1 / ipc 2 / kernel 3 / llm 3 /
+logger 2 / main 12 / outbound 9 / pdf-edit 8 / platform-boss 6 / plugins 1 / resume-doc 13 /
+resume-kb 19 / scheduler 1 / sessions 2 / shell 2 / store 2 / testing 4 / workflow 12。
+
+首轮门禁红过一次，是真缺陷不是环境噪声，记在这里：`WorkflowEvidence.tsx` 把 `{/* 注释 */}`
+塞进了 `{open && ( … )}` 的**表达式位**（`&&` 右边只能是一个表达式），
+prettier 报 `SyntaxError: ')' expected`、`tsc` 报 5 条 TS1005/TS1382/TS1128。
+移到父 div 的子节点位后四道门禁一次过。

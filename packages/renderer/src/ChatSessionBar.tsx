@@ -92,9 +92,11 @@ export function ChatSessionBar({
                 onCancel={() => setEditing(false)}
               />
             </div>
+            {/* 存标题写的是本机那半张会话表 → amber，不是 jade：jade 只给「读过了 / 核过了」，
+                一个还没落笔的保存键不该自称已核（流程屏的计划保存同一口径）。 */}
             <DeskButton
               action="save-title"
-              variant="jade"
+              variant="amber"
               compact
               busy={isBusy}
               disabled={!titleDraft.trim()}

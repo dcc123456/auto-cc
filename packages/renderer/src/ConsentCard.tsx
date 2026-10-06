@@ -10,6 +10,7 @@ import { Check, ShieldAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AppErrorPayload, SessionConsentView } from '@auto-cc/shared';
 import { formatClock } from './format';
+import { DeskButton } from './ui/controls';
 
 /** `ConsentCard` 的输入。 */
 export interface ConsentCardProps {
@@ -35,7 +36,7 @@ export function ConsentCard({ platform, view, busy, error, onGrant, onDeny }: Co
   const { t } = useTranslation();
   return (
     <div
-      className="mt-2 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-100"
+      className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-slate-100"
       data-testid="consent-card"
       data-consent-platform={platform}
     >
@@ -49,46 +50,42 @@ export function ConsentCard({ platform, view, busy, error, onGrant, onDeny }: Co
         <li>{t('consent.riskDeliver')}</li>
       </ul>
       <p className="mt-1">{t('consent.riskAccount')}</p>
-      <p className="mt-1 text-amber-200/80">{t('consent.once')}</p>
+      <p className="mt-1 text-slate-300">{t('consent.once')}</p>
       {view ? (
-        <p className="mt-1 break-all text-[11px] text-amber-200/70" data-testid="consent-scope">
+        <p className="mt-1 break-all text-[11px] text-slate-300" data-testid="consent-scope">
           {t('consent.scopeRow', { scope: view.scope })}
         </p>
       ) : (
-        <p className="mt-1 text-[11px] text-rose-300" data-testid="consent-read-unknown">
+        <p className="mt-1 text-[11px] text-seal" data-testid="consent-read-unknown">
           {t('consent.readUnknown')}
         </p>
       )}
       {error && (
-        <p
-          className="mt-1 break-all text-[11px] text-rose-300"
-          data-testid="consent-error"
-          data-error-code={error.code}
-        >
+        <p className="mt-1 break-all text-[11px] text-seal" data-testid="consent-error" data-error-code={error.code}>
           {t('consent.errorRow', { code: error.code, message: error.message })}
         </p>
       )}
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          data-action="consent-grant"
+        {/* 「我承担」签完之后紧接着就是重放那一次外发，所以它是 `seal` 而不是旧写法的 emerald：
+            这张卡片从来没有"已经办成"的语义，它只有一个待表态的风险。
+            「先不启用」什么都不发，所以退成 ghost——拒绝不该被涂成危险色（与岗位屏的拒绝同一口径）。 */}
+        <DeskButton
+          action="consent-grant"
+          variant="seal"
+          compact
+          busy={busy}
           disabled={busy}
+          disabledReason={busy ? 'ACTION_BUSY' : undefined}
+          disabledReasonLabel={busy ? t('consent.reason.ACTION_BUSY') : undefined}
           onClick={onGrant}
-          className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
         >
           <Check size={12} />
           {t('consent.grant')}
-        </button>
-        <button
-          type="button"
-          data-action="consent-deny"
-          disabled={busy}
-          onClick={onDeny}
-          className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
-        >
+        </DeskButton>
+        <DeskButton action="consent-deny" variant="ghost" compact disabled={busy} onClick={onDeny}>
           <X size={12} />
           {t('consent.deny')}
-        </button>
+        </DeskButton>
       </div>
     </div>
   );
@@ -103,7 +100,7 @@ export function ConsentStatusRow({ view }: { view: SessionConsentView | undefine
   if (!view) return null;
   return (
     <p
-      className={view.granted ? 'mt-1 text-[11px] text-emerald-300' : 'mt-1 text-[11px] text-amber-300'}
+      className={view.granted ? 'mt-1 text-[11px] text-jade' : 'mt-1 text-[11px] text-amber'}
       data-testid={`consent-status-${view.platform}`}
       data-granted={view.granted ? 'true' : 'false'}
     >
