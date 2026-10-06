@@ -12,13 +12,14 @@
  * 这一条取数规则抽在 `runStateReading.ts`、那句来源提示抽在 `NodeRunSourceLine.tsx`
  * （画布的点格弹层两处都用同一份，AGENTS.md §2.2）。
  */
-import { ScanLine } from 'lucide-react';
+import { RefreshCw, ScanLine } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UsageSummaryView } from '@auto-cc/shared';
 import { NodeRunSourceLine } from './NodeRunSourceLine';
 import { formatClock } from './format';
 import { readNodeRunState, type NodeRunReading } from './runStateReading';
+import { DeskButton } from './ui/controls';
 
 /** 账本侧一次列多少行：用量面板那 5 行是给「今天用了多少」看的，这里要给「都干了什么」看。 */
 const AUDIT_LEDGER_LIMIT = 20;
@@ -46,21 +47,17 @@ export function AuditSection() {
   }, [read]);
 
   return (
-    <div className="mt-4 border-t border-slate-800 pt-3" data-testid="audit-section">
+    <div className="mt-4 border-t border-line pt-3" data-testid="audit-section">
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
           <ScanLine size={14} />
           {t('audit.heading')}
         </h3>
-        <button
-          type="button"
-          data-action="audit-refresh"
-          onClick={() => void read()}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
-        >
-          <ScanLine size={12} />
+        {/* 重读两份既有事实是只读动作，因此描边档（§5 的 line=只读）。 */}
+        <DeskButton action="audit-refresh" variant="line" compact onClick={() => void read()}>
+          <RefreshCw size={11} />
           {t('audit.refresh')}
-        </button>
+        </DeskButton>
       </div>
 
       <h4 className="mt-2 text-[11px] font-semibold text-slate-400">

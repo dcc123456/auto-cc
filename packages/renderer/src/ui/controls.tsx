@@ -250,6 +250,16 @@ export const EFFECT_TONE_CLASS: Record<EffectTone, string> = {
   outbound: 'border-seal/45 bg-seal-wash text-seal',
 };
 
+/**
+ * 效果档 → 按钮语义档：算子调色板里每一颗「加入画布」的键必须与它所在分区同色（6.5-01 的归属规则），
+ * 分区色与键色由同一份映射给出，不在调色板里另写一遍三档对应关系（§2.2）。
+ */
+export const EFFECT_BUTTON_VARIANT: Record<EffectTone, DeskVariant> = {
+  read: 'jade',
+  'local-write': 'amber',
+  outbound: 'seal',
+};
+
 const EFFECT_ICON: Record<EffectTone, ReactNode> = {
   read: <BadgeCheck size={11} aria-hidden="true" />,
   'local-write': <Stamp size={11} aria-hidden="true" />,

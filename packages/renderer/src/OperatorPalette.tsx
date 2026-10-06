@@ -10,7 +10,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { groupOperatorsByCategory, groupOperatorsByEffect, type OperatorDescriptor } from '@auto-cc/shared';
-import { EffectChip, EFFECT_TONE_CLASS } from './ui/controls';
+import { DeskButton, EffectChip, EFFECT_BUTTON_VARIANT, EFFECT_TONE_CLASS, deskReason } from './ui/controls';
 import { operatorIconOf } from './operator-icons';
 
 export interface OperatorPaletteProps {
@@ -27,6 +27,7 @@ export interface OperatorPaletteProps {
  */
 export function OperatorPalette({ onAdd, isReadOnly }: OperatorPaletteProps) {
   const { t } = useTranslation();
+  const { dead } = deskReason(t, 'workflow.operator');
   return (
     <div className="mt-3 rounded-xl border border-line bg-ink-850/60 p-3" data-testid="operator-palette">
       <h4 className="text-xs font-semibold text-slate-300">{t('workflow.operator.paletteHeading')}</h4>
@@ -60,18 +61,19 @@ export function OperatorPalette({ onAdd, isReadOnly }: OperatorPaletteProps) {
                   {categoryGroup.operators.map((descriptor) => {
                     const Icon = operatorIconOf(descriptor.icon);
                     return (
-                      <button
+                      // 键色跟随所在分区的效果档（jade/amber/seal），归属规则与分区色同源一份映射（§5、§2.2）。
+                      <DeskButton
                         key={descriptor.kind}
-                        type="button"
-                        data-action="palette-add"
-                        data-kind={descriptor.kind}
-                        disabled={isReadOnly}
+                        action="palette-add"
+                        variant={EFFECT_BUTTON_VARIANT[descriptor.effect]}
+                        compact
+                        markers={{ kind: descriptor.kind }}
+                        {...dead(isReadOnly ? 'READ_ONLY' : undefined)}
                         onClick={() => onAdd(descriptor)}
-                        className="flex items-center gap-1 rounded-md border border-current/40 bg-ink-900/70 px-2 py-1 text-[11px] transition-[filter,transform] duration-150 enabled:hover:brightness-125 enabled:active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Icon size={11} />
                         {t(descriptor.titleKey)}
-                      </button>
+                      </DeskButton>
                     );
                   })}
                 </div>

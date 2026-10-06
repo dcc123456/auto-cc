@@ -983,7 +983,12 @@
         "saved": "Stored as plan {{name}} ({{count}} nodes)",
         "savedHint": "Pick it in the Plan library dropdown of the workflow view and press start — it runs as is, no second conversion.",
         "actionPreview": "preview the sedimentation readout",
-        "actionSave": "save workflow {{name}}"
+        "actionSave": "save workflow {{name}}",
+        "reason": {
+          "ACTION_BUSY": "The previous action hasn't come back yet",
+          "NOT_SEDIMENTABLE": "This segment isn't eligible — handle the blocking reason above first",
+          "NAME_REQUIRED": "No name yet: fill one in before it can be stored"
+        }
       },
       "takeover": {
         "notHeld": "The agent holds the page",

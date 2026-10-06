@@ -9,6 +9,7 @@
 import { Bookmark, Check, Save, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, SavedWorkflowPlanView, SedimentPreviewView } from '@auto-cc/shared';
+import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -64,6 +65,10 @@ export function SedimentCard({
   const isSettled = SETTLED_RUN_STATUSES.has(runStatus);
   /** 名字必填的判据只看 trim 后空不空；「超长 / 有非法字符」那一道的真相在服务侧，拒了会写进提示行。 */
   const nameMissing = nameDraft.trim().length === 0;
+  /** 在途那一档压过本卡自己的前置条件（与第十二/十三片同一优先级写法），三件套走 `deskReason`。 */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const { dead, reason: afterBusy } = deskReason(t, 'chat.sediment', busyReason);
+  const saveReason = afterBusy(!view?.canSediment, 'NOT_SEDIMENTABLE') ?? (nameMissing ? 'NAME_REQUIRED' : undefined);
 
   return (
     <li
@@ -71,21 +76,24 @@ export function SedimentCard({
       data-run-id={runId}
       data-run-status={runStatus}
       data-has-preview={String(!!view)}
-      className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-300"
+      className="rounded-xl border border-line bg-ink-900/60 px-3 py-2 text-[11px] text-slate-300"
     >
       <div className="flex items-center gap-2">
         <Bookmark size={13} />
         <h4 className="text-xs font-semibold text-slate-200">{t('chat.sediment.heading')}</h4>
         {view ? (
-          <button
-            type="button"
-            data-action="sediment-close"
+          <DeskButton
+            action="sediment-close"
+            variant="ghost"
+            compact
+            className="ml-auto"
+            busy={!!busy}
+            {...dead(busyReason)}
             onClick={onClose}
-            className="ml-auto flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800"
           >
             <X size={11} />
             {t('chat.sediment.close')}
-          </button>
+          </DeskButton>
         ) : null}
       </div>
 
@@ -93,16 +101,17 @@ export function SedimentCard({
         <>
           <p className="mt-1 text-slate-400">{t('chat.sediment.hint')}</p>
           {isSettled ? (
-            <button
-              type="button"
-              data-action="sediment-open"
-              disabled={busy !== undefined}
+            <DeskButton
+              action="sediment-open"
+              variant="solid"
+              className="mt-2"
+              busy={!!busy}
+              {...dead(busyReason)}
               onClick={onOpen}
-              className="mt-2 flex items-center gap-1 rounded-md border border-sky-800 px-3 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
             >
               <Workflow size={12} />
               {t('chat.sediment.open')}
-            </button>
+            </DeskButton>
           ) : (
             <p className="mt-1 text-slate-500" data-testid="sediment-not-settled">
               {t('chat.sediment.notSettled')}
@@ -117,7 +126,7 @@ export function SedimentCard({
           <p
             data-testid="sediment-verdict"
             data-can-sediment={String(view.canSediment)}
-            className={view.canSediment ? 'text-emerald-300' : 'text-rose-300'}
+            className={view.canSediment ? 'text-jade' : 'text-seal'}
           >
             {view.canSediment ? (
               t('chat.sediment.canSediment', { count: view.steps.length })
@@ -139,8 +148,8 @@ export function SedimentCard({
                 data-step-tool-id={step.toolId}
                 data-step-status={step.stepStatus}
                 data-step-sedimentable={String(step.sedimentable)}
-                className={`rounded-lg border px-2 py-1 ${
-                  step.sedimentable ? 'border-emerald-900 bg-emerald-950/30' : 'border-rose-900 bg-rose-950/30'
+                className={`rounded-md border px-2 py-1 ${
+                  step.sedimentable ? 'border-jade/40 bg-jade-wash' : 'border-seal/45 bg-seal-wash'
                 }`}
               >
                 <span className="flex flex-wrap items-center gap-2">
@@ -156,7 +165,7 @@ export function SedimentCard({
                   ) : null}
                 </span>
                 {!step.sedimentable ? (
-                  <span className="mt-0.5 block break-all text-rose-300" data-step-reason={step.reason ?? ''}>
+                  <span className="mt-0.5 block break-all text-seal" data-step-reason={step.reason ?? ''}>
                     {step.reason}
                   </span>
                 ) : null}
@@ -167,7 +176,11 @@ export function SedimentCard({
                         key={`${param.nodeId}-${param.paramKey}`}
                         data-param-key={param.paramKey}
                         data-param-variable={String(param.isVariable)}
-                        className={param.isVariable ? 'text-sky-300' : 'rounded bg-rose-950/60 px-1 text-rose-300'}
+                        className={
+                          param.isVariable
+                            ? 'text-celadon'
+                            : 'rounded-chip border border-seal/45 bg-seal-wash px-1 text-seal'
+                        }
                       >
                         {param.isVariable
                           ? t('chat.sediment.paramVariable', { key: param.paramKey, value: String(param.value) })
@@ -188,26 +201,20 @@ export function SedimentCard({
               value={nameDraft}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder={t('chat.sediment.namePlaceholder')}
-              className="rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-800"
+              className={FIELD_CLASS}
             />
           </label>
           {nameMissing ? (
-            <p className="text-[10px] text-amber-300" data-testid="sediment-name-required">
+            <p className="text-[10px] text-amber" data-testid="sediment-name-required">
               {t('chat.sediment.nameRequired')}
             </p>
           ) : null}
 
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              data-action="sediment-save"
-              disabled={busy !== undefined || !view.canSediment || nameMissing}
-              onClick={onSave}
-              className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
-            >
+            <DeskButton action="sediment-save" variant="amber" busy={!!busy} {...dead(saveReason)} onClick={onSave}>
               <Save size={12} />
               {t('chat.sediment.save')}
-            </button>
+            </DeskButton>
             {!view.canSediment ? (
               <span className="text-[10px] text-slate-500">{t('chat.sediment.saveBlocked')}</span>
             ) : null}
@@ -215,7 +222,7 @@ export function SedimentCard({
 
           {saved ? (
             <p
-              className="flex flex-wrap items-center gap-1 text-emerald-300"
+              className="flex flex-wrap items-center gap-1 text-jade"
               data-testid="sediment-saved"
               data-plan-id={saved.id}
             >
@@ -229,7 +236,7 @@ export function SedimentCard({
 
       {notice ? (
         <p
-          className="mt-1 break-all rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-300"
+          className="mt-1 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
           data-testid="sediment-notice"
         >
           {notice}

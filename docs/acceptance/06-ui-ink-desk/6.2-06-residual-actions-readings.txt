@@ -1,0 +1,115 @@
+第十四片活体读数（2026-10-06，残余动作键 7 只：SedimentCard / AuditSection / EvidenceRefButton / OperatorPalette / PrivacyNotice）
+================================================================================
+
+取证通道：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev` 的活体 app（CDP 10222、页面 5173），
+`pnpm harness eval/shot --url 5173`。视口 1200×772，中文，末态主题回到墨案（dark）。
+本轮**零外发、零写盘**：只点过 `privacy-open` / `privacy-acknowledge`（重看那一支，不写确认标记）、
+`canvas-toggle`（展开算子图）、`shell-theme-toggle`（翻面）、视图切换；账本里没有新的外发回执。
+
+一、主题令牌基线（本轮现取，与第六~十三片同值）
+------------------------------------------------
+
+- 墨案：seal `rgb(226,84,58)`、amber `rgb(224,163,63)`、jade `rgb(79,183,138)`、
+  line `rgba(150,178,196,.14)`、line-strong `.26`、ink-900 半透壳 `oklab(0.173835 …/0.6)`
+- 毡案：seal `rgb(192,57,31)`、amber `rgb(161,112,15)`、jade `rgb(47,143,102)`、
+  line `rgba(38,44,48,.15)`、line-strong `.30`、ink-900 半透壳 `oklab(0.915929 …/0.6)`
+- 五处改造**没有一处 `theme ===` 分支**：全部由令牌随 `data-theme` 翻面（§5 的 Q5 双主题一起做）。
+
+二、OperatorPalette 的 7 只 `palette-add`（流程视图 → 点「算子图」展开后）
+--------------------------------------------------------------------------
+
+分区色与键色同源一份映射（`EFFECT_BUTTON_VARIANT`：read→jade / local-write→amber / outbound→seal）：
+
+| 分区 effect | 键（`data-kind`） | `data-effect` | 墨案文字/描边色 | 毡案同色 | 宽 × 高 | 裁切 |
+| --- | --- | --- | --- | --- | --- | --- |
+| read | `jd.capture` | jade | `rgb(79,183,138)` | `rgb(47,143,102)` | 118×24 | 无 |
+| read | `jd.list` | jade | 同上 | 同上 | 136×24 | 无 |
+| read | `resume.customize` | jade | 同上 | 同上 | 141×24 | 无 |
+| read | `demo.branch` | jade | 同上 | 同上 | 233×24 | 无 |
+| local-write | `demo.flaky` | amber | `rgb(224,163,63)` | `rgb(161,112,15)` | 119×24 | 无 |
+| outbound | `greeting.send` | seal | `rgb(226,84,58)` | `rgb(192,57,31)` | 141×24 | 无 |
+| outbound | `resume.deliver` | seal | 同上 | 同上 | 97×24 | 无 |
+
+- 圆角一律 `7px`（`rounded-control`），高一律 24（compact 档 + 第十一轮的 `h-6` 口径）。
+- 外壳：`rounded-xl border-line`、半径 12、`w 486 / h 364`、`scrollWidth` 未超宽。
+- 三分区的分区框描边与底色（`EFFECT_TONE_CLASS`）逐位沿用第 6.5-01 片的读数，键色换档后分区色未被顶动。
+- `data-kind` 标记仍在（走 DeskButton 的 `markers`），`[data-action="palette-add"]` 计数 7，harness 选择器不变。
+- `isReadOnly` 那一档（`READ_ONLY` 原因 + title）本轮**没取到**：要有一条真 run 在飞才置位，见第六节。
+
+三、AuditSection 的 1 只 `audit-refresh`（信任视图，用量面板下方那段）
+----------------------------------------------------------------------
+
+- 段分隔线 `border-t border-line` = `rgba(150,178,196,.14)`（原 `border-slate-800` 是写死的旧阶）。
+- 键：`data-effect=line`（只读重读，§5 的 line=只读），描边 `rgba(150,178,196,.26)`（line-strong）、
+  底 `rgb(19,28,35)`（ink-800）、字 `rgb(219,228,236)`（slate-100）、半径 7、**宽 75 / 高 24 / scrollWidth 73**（不裁切）。
+- 图标从重复用的 `ScanLine` 换成 `RefreshCw`（lucide 现有图标，§5.3；段首那颗仍是 `ScanLine`，两处不再同形）。
+- 段内文案档：标题 slate-300、事实源行 slate-500，未改语义；账本这一轮是空态（`audit-rows` 与 `audit-by-action` 均不在 DOM），
+  所以行级颜色由第 6.2-10 片那一份全 app 普查兜着。
+
+四、PrivacyNotice 的 1 只 `privacy-acknowledge`（首屏声明，`privacy-open` 重看那一支）
+--------------------------------------------------------------------------------------
+
+| 部位 | 墨案 | 毡案 |
+| --- | --- | --- |
+| 遮罩 | `bg-ink-950/95` = `oklab(0.151798 …/0.95)` | `oklab(0.867244 …/0.95)` |
+| 卡片 | 描边 line-strong、底 `rgb(11,17,22)`、半径 **12** | 描边 `rgba(38,44,48,.30)`、底 `rgb(231,227,216)`、半径 12 |
+| 标题图标 | jade `rgb(79,183,138)`（原 `text-emerald-400`） | jade `rgb(47,143,102)` |
+| 核心承诺块 | `border-jade/40 bg-jade-wash`、半径 6、`630×76` | `rgba(47,143,102,.12)` 底 |
+| 承诺首行 | `text-jade` | `text-jade` |
+| 小节标题 / 正文行 | slate-200 / slate-400（中性档，不随翻面变语义） | 同档 |
+| 那颗键 | **`data-effect=ghost`**、透明描边、字 slate-400、`124×30`、不裁切 | 字 `rgb(74,87,98)` |
+
+- 归属是按 plan §5 判的，两档不同：**首启动**那一次要写本机确认标记（localStorage）→ **amber**（本机写入/等人表态）；
+  **重看**这一支只是关掉这一屏 → **ghost**（只收画面）。本轮取到的是重看那一支。
+- 零写入核验：点完之后 `localStorage.getItem('auto-cc.privacy.acknowledged')` 仍是
+  `{"acknowledgedAt":1791244122560}`（上一窗留下的旧值，未刷新）。
+- 卡片高 877 > 视口 772，遮罩自己带 `overflow-y-auto`，所以截图取的是首屏那一段（首屏即"承诺 + 数据"两节）。
+
+五、SedimentCard 的壳（对话视图，流里那只 `proposed` 的卡）
+---------------------------------------------------------
+
+- 外壳：`rounded-xl border-line bg-ink-900/60`（半径 12）、`486×96`；毡案同一只卡描边 `rgba(38,44,48,.15)`、底 `oklab(0.915929 …/0.6)`。
+- 标题 slate-200、提示行 slate-400、"这条 run 还没收口"行 slate-500；子树 6 个节点、旧调色板 **0 命中**。
+- 这一支没有按钮（`proposed` 不算收口，所以 `sediment-open` 不画），因此三只键的活体色值本轮没取到，见第六节。
+
+六、没取到的（诚实记账，`[!]`）
+------------------------------
+
+1. `sediment-close` / `sediment-open` / `sediment-save` 三只键的活体色值与 `aria-disabled`/`title` 读数：
+   要把卡从 `proposed` 推到收口（`paused/completed/failed`）才长出来，而按 `confirm-run` 就等于
+   **由脚本替人确认一条不属于本轮的计划**（§9 的 5.3「不可自提升」），且它在建议档下点名的手是否全为只读
+   在 DOM 里读不出来（`workflow-steps` 那一段取到 0 条），§7.2 又不许拿真实平台赌。
+   代码位与三件套齐：`sediment-open` solid（中性强调，与第十一片的 `open-editor` 同档）、
+   `sediment-save` amber（写进计划库=本机写入）、`sediment-close` ghost；
+   原因码 `ACTION_BUSY` / `NOT_SEDIMENTABLE` / `NAME_REQUIRED`，zh/en 两份语言包各补齐 3 键。
+2. `evidence-ref` 那只键：要有一条**步记录带 evidenceRefs** 的 run 才进对话流，与第 1 条同因未取到。
+   改造位齐（`variant=line` compact、`markers={{ref, step}}`、展开框 `border-line bg-ink-950/70`、
+   loading 走 celadon、失败行走 seal），`data-ref` / `data-step` 两个断言锚点保持不变。
+3. `palette-add` 的 `READ_ONLY` 禁用档（title「正在跑的时候不许改图」）：同上，要有一条在飞的 run。
+4. 四张"点击之后"的结果态角标（`useDeskResult`）：这五处都没有接 `result`，回执走各自的语言行，与前十二片同口径。
+5. Windows / linux 运行期：本机 macOS arm64，不适用（AGENTS.md §9）。
+
+七、旧色阶普查（源码级，五份文件）
+--------------------------------
+
+`Grep` 五份文件对 `indigo|emerald|rose|violet|purple|blue-|green-|red-|yellow-|sky-|teal-|slate-(700|800|900|950)`：
+**No matches found**（改造前 `SedimentCard` 里是 `sky-800/sky-300/sky-950`、`emerald-*/rose-*`、`amber-300`，
+`PrivacyNotice` 里是 `emerald-400/200/950`，`AuditSection`/`EvidenceRefButton` 里是 `slate-700/800/950`）。
+
+八、截图（八张，`md5 -q` 逐张互不相同）
+--------------------------------------
+
+- `6.2-06-palette-dark.png` / `6.2-06-palette-light.png` — 算子调色板：三分区七键（jade/amber/seal 三档键色）
+- `6.2-06-audit-dark.png` / `6.2-06-audit-light.png` — 信任视图审计回看段与那颗 line 档重读键
+- `6.2-06-privacy-dark.png` / `6.2-06-privacy-light.png` — 首屏声明双主题：jade 承诺块 + ghost 那颗键
+- `6.2-06-sediment-dark.png` / `6.2-06-sediment-light.png` — 对话流里那只 `proposed` 沉淀卡（外壳双档）
+
+md5（与上面四行一一对上）：palette `3a6f2583…`/`4c3ea0ac…`、audit `e0d99fa6…`/`10c9aea0…`、
+privacy `d1aa1b4f…`/`a9217190…`、sediment `138e1bf4…`/`349bc4f6…`
+（§9 的 5.10-18 硬步骤：同批先跑一次 `md5 -q` 去重，八张两两不同，即每张都真截到了目标视图。）
+
+九、门禁
+--------
+
+`pnpm typecheck` = 0、`pnpm lint` = 0、`pnpm format:check` = 0、`pnpm test` = 0（四道都落 `tmp/v6b/tc15.log` 等日志，
+按 §9 的不许管道接 `tail` 读退出码写法逐道现取）。

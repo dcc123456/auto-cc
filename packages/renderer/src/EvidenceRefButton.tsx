@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { EvidenceRefView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton } from './ui/controls';
 
 /**
  * 一格证据引用。
@@ -57,25 +58,33 @@ export function EvidenceRefButton({
 
   return (
     <li data-evidence-ref={evidenceRef} className="w-full break-all">
-      <button
-        type="button"
-        data-action="evidence-ref"
-        data-ref={evidenceRef}
-        data-step={planStepIndex}
+      <DeskButton
+        action="evidence-ref"
+        variant="line"
+        compact
+        className="font-mono"
+        markers={{ ref: evidenceRef, step: String(planStepIndex) }}
         onClick={toggle}
-        className="flex items-center gap-1 rounded-md border border-slate-700 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 hover:bg-slate-800"
       >
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         {evidenceRef}
-      </button>
+      </DeskButton>
 
       {open && (
         <div
-          className="mt-1 rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-[11px]"
+          className="mt-1 rounded-md border border-line bg-ink-950/70 px-2.5 py-1.5 text-[11px]"
           data-evidence-outcome={outcome}
         >
-          {busy && <p data-testid="evidence-ref-loading">{t('chat.evidence.loading')}</p>}
-          {!busy && !view && notice && <p data-testid="evidence-ref-error">{notice}</p>}
+          {busy && (
+            <p data-testid="evidence-ref-loading" className="text-celadon">
+              {t('chat.evidence.loading')}
+            </p>
+          )}
+          {!busy && !view && notice && (
+            <p data-testid="evidence-ref-error" className="break-words text-seal">
+              {notice}
+            </p>
+          )}
           {view && (
             <div className="flex flex-col gap-1">
               <p className="flex items-center gap-1 font-medium text-slate-200" data-testid="evidence-ref-title">

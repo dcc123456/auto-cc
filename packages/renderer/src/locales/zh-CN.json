@@ -983,7 +983,12 @@
         "saved": "已存为计划 {{name}}（{{count}} 个节点）",
         "savedHint": "在工作流面板的「计划库」下拉里挑中它，点开始就直接跑，无需二次转换。",
         "actionPreview": "预览沉淀读数",
-        "actionSave": "保存工作流 {{name}}"
+        "actionSave": "保存工作流 {{name}}",
+        "reason": {
+          "ACTION_BUSY": "上一条动作还没回来",
+          "NOT_SEDIMENTABLE": "这一段还不合格，先照上面的拒因处理",
+          "NAME_REQUIRED": "名字还没填：填好才能落库"
+        }
       },
       "takeover": {
         "notHeld": "页面在 agent 手里",

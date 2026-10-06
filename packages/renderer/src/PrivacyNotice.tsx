@@ -15,6 +15,7 @@ import { FileText, ShieldCheck } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatClock } from './format';
+import { DeskButton } from './ui/controls';
 
 /** 确认标记键：与 `auto-cc.lang` 同一份 localStorage，前缀同为 `auto-cc.`。 */
 const PRIVACY_ACK_STORAGE_KEY = 'auto-cc.privacy.acknowledged';
@@ -131,23 +132,23 @@ export function PrivacyNotice({ onClose, isReopened }: PrivacyNoticeProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/95 p-6"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/95 p-6"
       data-testid="privacy-notice"
       data-reopened={isReopened ? 'true' : 'false'}
       role="dialog"
       aria-modal="true"
       aria-label={t('privacy.heading')}
     >
-      <div className="my-auto w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-5">
+      <div className="my-auto w-full max-w-2xl rounded-xl border border-line-strong bg-ink-900 p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-          <ShieldCheck size={16} className="text-emerald-400" />
+          <ShieldCheck size={16} className="text-jade" />
           {t('privacy.heading')}
         </h2>
         <p className="mt-1 text-[11px] text-slate-500">{t('privacy.intro')}</p>
 
-        <div className="mt-3 rounded-md border border-emerald-900 bg-emerald-950/40 px-3 py-2">
-          <p className="text-[11px] font-semibold text-emerald-200">{t('privacy.keyPromise')}</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-emerald-100/80">{t('privacy.keyPromiseDetail')}</p>
+        <div className="mt-3 rounded-md border border-jade/40 bg-jade-wash px-3 py-2">
+          <p className="text-[11px] font-semibold text-jade">{t('privacy.keyPromise')}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-300">{t('privacy.keyPromiseDetail')}</p>
         </div>
 
         <Section title={t('privacy.dataTitle')} lines={dataLines} />
@@ -161,16 +162,12 @@ export function PrivacyNotice({ onClose, isReopened }: PrivacyNoticeProps) {
           {t('privacy.licensesPointer')}
         </p>
 
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            data-action="privacy-acknowledge"
-            onClick={onClose}
-            className="flex items-center gap-1 rounded-md border border-emerald-800 bg-emerald-950/60 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-950"
-          >
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {/* 首启动那一次是"在本机写下表态"（localStorage 的确认标记），归 amber；重看那一次只是关掉这一屏。 */}
+          <DeskButton action="privacy-acknowledge" variant={isReopened ? 'ghost' : 'amber'} onClick={onClose}>
             <ShieldCheck size={14} />
             {isReopened ? t('privacy.close') : t('privacy.acknowledge')}
-          </button>
+          </DeskButton>
           {isReopened && (
             <p className="text-[11px] text-slate-500" data-testid="privacy-already-acknowledged">
               {t('privacy.acknowledgedRow', {
