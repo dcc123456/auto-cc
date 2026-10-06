@@ -9,6 +9,7 @@ import { Check, ListChecks, Play, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, ToolDescriptorView } from '@auto-cc/shared';
 import { ToolCard, stepToToolPart } from './ToolCard';
+import { DeskButton } from './ui/controls';
 
 /**
  * 计划卡 + 卡片流面板。
@@ -54,6 +55,11 @@ export function AgentRunPanel({
   // 镜像一个数字到这里就是第二份事实（plan 5.2-a 的更正）。
   const outboundCount = run.plan.filter((step) => step.effect === 'outbound').length;
   const isProposed = run.status === 'proposed';
+  // 「按不动」必须带上原因码：不禁用的按钮与禁用但无说的按钮，对人的欺骗程度一样（07 稿④）。
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const confirmReason = busyReason ?? (run.plan.length === 0 ? 'EMPTY_PLAN' : undefined);
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`agent.run.reason.${code}`);
 
   return (
     <li
@@ -61,28 +67,25 @@ export function AgentRunPanel({
       data-run-id={run.runId}
       data-run-status={run.status}
       data-run-stop-reason={run.stopReason ?? ''}
-      className="rounded-xl border border-slate-700 bg-slate-900/80"
+      className="rounded-xl border border-line bg-ink-900/60"
     >
-      <header className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+      <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <ListChecks size={14} />
         <h3 className="text-xs font-semibold text-slate-200">{t('agent.run.heading')}</h3>
+        {/* 待确认 = 等人表态（琥珀），其余状态是读数（描边）：琥珀不留给"进行中"，那由转针说。 */}
         <span
           data-run-status-label
-          className={`rounded-md border px-2 py-0.5 text-[10px] ${
-            isProposed ? 'border-sky-800 text-sky-300' : 'border-slate-700 text-slate-400'
+          className={`rounded-chip border px-2 py-0.5 text-[10px] ${
+            isProposed ? 'border-amber/45 bg-amber-wash text-amber' : 'border-line text-slate-400'
           }`}
         >
           {t(`agent.run.status.${run.status}`)}
         </span>
-        <button
-          type="button"
-          data-action="dismiss-run"
-          onClick={onDismiss}
-          className="ml-auto flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800"
-        >
+        {/* 收起只是换画法，库里一行都不动，所以它不跟着 busy 禁用（与「叫停」同一口径）。 */}
+        <DeskButton action="dismiss-run" variant="ghost" compact className="ml-auto" onClick={onDismiss}>
           <X size={11} />
           {t('agent.run.dismiss')}
-        </button>
+        </DeskButton>
       </header>
 
       <div className="px-3 py-2 text-[11px] text-slate-300">
@@ -108,7 +111,7 @@ export function AgentRunPanel({
         {/* 档位是「用的时候现问」，所以降档只在下一次判定生效；这一句把 5.2-c 待办①说到人面前。 */}
         {run.status === 'running' ? <p className="mt-1 text-[10px] text-slate-500">{t('agent.run.tierNote')}</p> : null}
         {run.plan.length === 0 ? (
-          <p className="mt-1 text-rose-300" data-run-empty-plan>
+          <p className="mt-1 text-seal" data-run-empty-plan>
             {t('agent.run.emptyPlan')}
           </p>
         ) : null}
@@ -124,7 +127,10 @@ export function AgentRunPanel({
                 data-plan-step={String(index)}
                 data-plan-tool-id={step.toolId}
                 data-plan-effect={step.effect ?? 'unknown'}
-                className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-[11px]"
+                // 外发步整行描一道朱砂左边线（01 稿第 3 条）：确认之前就该看出哪几步会离开本机。
+                className={`mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] ${
+                  step.effect === 'outbound' ? 'border-l-2 border-l-seal/70' : ''
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-slate-500">{t('agent.run.stepIndex', { index: index + 1 })}</span>
@@ -159,34 +165,40 @@ export function AgentRunPanel({
       </div>
 
       {notice ? (
-        <p className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-300" data-testid="agent-run-notice">
+        <p className="border-t border-line px-3 py-2 text-[11px] text-slate-300" data-testid="agent-run-notice">
           {notice}
         </p>
       ) : null}
 
-      <footer className="flex items-center gap-2 border-t border-slate-800 px-3 py-2">
+      <footer className="flex items-center gap-2 border-t border-line px-3 py-2">
         {isProposed ? (
           <>
-            <button
-              type="button"
-              data-action="confirm-run"
-              disabled={busy !== undefined || run.plan.length === 0}
+            {/* 「确认并执行」是让这一步真的动手的那道口：按下去之后循环就可能外发，
+                所以它是 `seal` 而不是旧写法的 emerald（emerald 在墨案里是"已经办成"的读数色）。 */}
+            <DeskButton
+              action="confirm-run"
+              variant="seal"
+              busy={!!busy}
+              disabled={confirmReason !== undefined}
+              disabledReason={confirmReason}
+              disabledReasonLabel={reasonLabel(confirmReason)}
               onClick={onConfirm}
-              className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
             >
               <Check size={12} />
               {t('agent.run.confirm')}
-            </button>
-            <button
-              type="button"
-              data-action="cancel-run"
-              disabled={busy !== undefined}
+            </DeskButton>
+            <DeskButton
+              action="cancel-run"
+              variant="ghost"
+              busy={!!busy}
+              disabled={busyReason !== undefined}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
               onClick={onStop}
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
               <X size={12} />
               {t('agent.run.cancel')}
-            </button>
+            </DeskButton>
             {/* 确认前零动作这句话是给**人**看的承诺，也是 5.2-03 的判据本身。 */}
             <span className="ml-auto text-[10px] text-slate-500" data-run-before-confirm>
               {t('agent.run.beforeConfirm')}
@@ -199,17 +211,12 @@ export function AgentRunPanel({
                 于是整个 run 期间 busy 一直挂着——若照上面两个按钮的写法禁用，
                 用户唯一需要按的那一颗恰好在他唯一需要按的时候按不到（5.2-c 实测：两次点停都落在禁用态上）。
                 主进程侧 `stop()` 对任何状态都不抛错（终态原样返回读数），重复按也只是再置一次信号。 */}
-            <button
-              type="button"
-              data-action="stop-run"
-              onClick={onStop}
-              className="flex items-center gap-1 rounded-md border border-amber-800 px-3 py-1 text-xs text-amber-300 hover:bg-amber-950"
-            >
+            <DeskButton action="stop-run" variant="amber" onClick={onStop}>
               <Square size={12} />
               {t('agent.run.stopNow')}
-            </button>
+            </DeskButton>
             {stopAccepted ? (
-              <span className="text-[10px] text-amber-300" data-run-stop-accepted>
+              <span className="text-[10px] text-amber" data-run-stop-accepted>
                 {t('agent.run.stopAccepted')}
               </span>
             ) : (
@@ -224,16 +231,18 @@ export function AgentRunPanel({
             那句原话落在下面的提示行里。把拒绝藏起来，界面上就只剩一个按了没反应的按钮（§2.6）。 */}
         {run.status === 'paused' && run.stopReason === 'TAKEOVER_HELD' ? (
           <>
-            <button
-              type="button"
-              data-action="resume-run"
-              disabled={busy !== undefined}
+            <DeskButton
+              action="resume-run"
+              variant="amber"
+              busy={!!busy}
+              disabled={busyReason !== undefined}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
               onClick={onResume}
-              className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
             >
               <Play size={12} />
               {t('agent.run.resume')}
-            </button>
+            </DeskButton>
             <span className="ml-auto text-[10px] text-slate-500" data-run-resume-hint={pageHeld ? 'held' : 'free'}>
               {t(pageHeld ? 'agent.run.resumeHeldHint' : 'agent.run.resumeHint')}
             </span>

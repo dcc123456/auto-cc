@@ -999,6 +999,9 @@
         "auto": "Full-auto"
       },
       "policy": {
+        "reason": {
+          "ACTION_BUSY": "Another action is in flight: edit the allowlist once its reply lands back."
+        },
         "heading": "Confirmation-free allowlist",
         "exemptCount": "{{total}} exempted",
         "onlyAuto": "Current tier is {{level}}, so the allowlist does not change execution yet",
@@ -1013,6 +1016,10 @@
         "noCandidates": "Nothing left to allowlist (every approval-required action is already exempted)"
       },
       "pause": {
+        "reason": {
+          "ACTION_BUSY": "Another action is in flight: answer once its reply lands back, while the deadline keeps running.",
+          "SUPPLEMENT_EMPTY": "The supplement is still empty: fill in the missing field (a raw JSON snippet works too)."
+        },
         "heading": "Waiting for you",
         "pendingCount": "{{total}} ticket(s) waiting for you",
         "hint": "Approval and supplements are pressed only by you: timeout = unconfirmed = not executed, and the entitlement gate and rate limits still apply",
@@ -1082,6 +1089,10 @@
         }
       },
       "run": {
+        "reason": {
+          "ACTION_BUSY": "Another action is in flight: press once its reply lands back in the card stream.",
+          "EMPTY_PLAN": "This plan has no step, so confirming would run nothing - let the agent redraft it."
+        },
         "heading": "Task plan",
         "dismiss": "Collapse",
         "dismissed": "Panel hidden; the stored run was not changed",

@@ -1,0 +1,65 @@
+6.2-06 / 6.1-04 对话屏 agent 三块（第十一片）活体读数
+=====================================================
+
+取证时间：2026-10-06 08:01（本机 macOS Apple Silicon，墨案深色 + 毡案浅色各一轮）
+运行实例：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`（CDP 10222 / vite 5173）
+取证面：对话屏（`ChatPanel`）里的 `AgentRunPanel`（任务计划卡）、`AgentPolicyPanel`（免确认白名单带）
+截图：`6.2-06-chat-agent-run-dark.png`、`6.2-06-chat-agent-policy-dark.png`、
+      `6.2-06-chat-agent-run-light.png`、`6.2-06-chat-agent-policy-light.png`（四张 md5 互不相同）
+
+## 0. 这一片为了拿到读数做了什么（如实记录）
+
+- 在对话输入框敲了一条 `/run kb.profile.list then kb.gap.report then kb.profile.syncVectors`，
+  让计划卡长出来。`agent.loop.propose` 的承诺是「确认之前主进程一步都没跑」（spec 5.2-03），
+  所以这一步只起草、不执行：**没有按过 `confirm-run`，也没有按过任何一颗动作键**。
+  落点读数：`loop.latestRun()` 在收起之后回 `{ok:true, value:null}`，`steps=0`、`tokens=0`。
+- 视图切换：只在对话屏内滚动（`[data-testid=chat-scroll]` 与白名单带各自的 `scrollTop`），
+  主题在墨案/毡案之间来回各一次（末态 = 墨案深色），最后按了一次 `dismiss-run`（只收面板，不改库）。
+
+## 1. 计划卡（`AgentRunPanel`，status=proposed，3 步计划 / 其中 1 步外发）
+
+外壳与抬头（深色 → 浅色）：
+- 面板外框 `bg=oklab(0.173835 …/0.6)`（ink-900/60）→ `oklab(0.915929 …/0.6)`，`border=rgba(150,178,196,.14)` → `rgba(38,44,48,.15)`，圆角 12px（sheet 档）
+- 状态徽标「待确认」：`color=rgb(224,163,63)`（amber）→ `rgb(161,112,15)`（毡案 amber），底 `rgba(224,163,63,.13)`（amber-wash），圆角 4px（chip 档）
+- 页脚读数「其中 1 步会离开本机」「确认之前不执行任何动作」原样在位
+
+计划行（未开始的三步，圆角 6px = 与 `ConsentCard` / `ScriptPanel` 的内层卡片同一档）：
+- `effect=read` 两行：左边线 `1px rgba(150,178,196,.14)`（与普通描边同色，不抢色）
+- `effect=outbound` 一行：左边线 **`2px oklab(0.631608 …/0.7)`（朱砂）** → 毡案 `2px oklab(0.542214 …/0.7)`
+  —— 01 稿第 3 条「外发步整行描朱砂左边线」落地，且浅色下同一道线仍然成立（零 `theme ===` 分支）
+
+按钮（`DeskButton`，五态原件）：
+| 键位 | variant | 深色读数 |
+| --- | --- | --- |
+| `confirm-run` | seal | `color=rgb(226,84,58)` `bg=…seal/0.18` `border=…seal/0.45` 圆角 7px 高 30px |
+| `cancel-run` | ghost | `color=rgb(164,182,195)` `bg=rgba(0,0,0,0)` `border=rgba(0,0,0,0)` 圆角 7px 高 30px |
+| `dismiss-run` | ghost | 同上，`compact` 高 24px |
+- 毡案下 `confirm-run` 的朱是 `rgb(192,57,31)`（与深色同一令牌的另一档）
+- `stop-run`（amber）与 `resume-run`（amber）：**只有代码位**。前者要 run 在 `running`、后者要 `paused + TAKEOVER_HELD`，
+  取到就得真跑一轮循环（§7.2 禁止外发腿，且接管需要用户在场的真实页面）
+
+## 2. 免确认白名单带（`AgentPolicyPanel`，10 只候选 / 已免确认 0 项）
+
+- 档位提示行「当前档位是建议模式，名单暂不影响执行」：`color=rgb(224,163,63)`（amber，等人表态那一档）
+- 候选行：`effect=outbound` 的 7 行 `opacity=0.7`，`effect=local-write` 的 3 行 `opacity=1`
+  —— 05 稿第 1 条「外发行默认半透明，需显式操作」落地（逐行读数见 `probe-agent2`）
+- `add-exempt`：variant=`seal`，深色 `rgb(226,84,58)` / 毡案 `rgb(192,57,31)`，圆角 7px，`compact` 高 24px
+- `revoke-exempt`（amber）：**只有代码位**——名单为空（`已免确认 0 项`），要长出这一行必须先按一次加白，
+  那是往库里写人的表态，不在零写入取证的范围里
+- 效果芯片 `data-effect=outbound`：`color=rgb(226,84,58)` 圆角 4px（`EffectChip` 原件，本片未动）
+
+## 3. 表态卡片带（`AgentPauseCards`）——本片只有代码位
+
+`approval` / `elicitation` / 投递确认单三张卡都要 `agent.pause.pending()` 或 `outbound.deliver.pending()`
+真的长出单来才画：前者要按 `confirm-run` 把循环推到安全点（半自动档）并让某一步真的待批，
+后者要一次真实投递。两者都撞 §7.2，因此与 6.4 前几片同口径挂着。
+代码位读数（写死在源码里的归属）：`pause-approve`=seal、`pause-deny`=ghost、`pause-supply`=amber、
+批准/投递卡外壳=`border-amber/45 bg-amber-wash`（与 `ConsentCard` 同一片琥珀），补充信息单外壳=`border-celadon/40 bg-celadon-wash`。
+
+## 4. 禁用原因码（本片新增的 5 支键位全部带码）
+
+- `agent.run.reason.ACTION_BUSY` / `agent.run.reason.EMPTY_PLAN`
+- `agent.pause.reason.ACTION_BUSY` / `agent.pause.reason.SUPPLEMENT_EMPTY`
+- `agent.policy.reason.ACTION_BUSY`
+活体取到的禁用态：无（`busy` 只在动作在飞的窗口里非空，本片的计划卡停在 proposed、没有动作在飞）。
+`stop-run` 与 `resume-run` 在页面接管未解除时**故意不禁用**（原注释保留），因此它们不带原因码。

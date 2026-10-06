@@ -10,7 +10,7 @@ import { ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AutonomyLevel, ExemptToolView, ToolDescriptorView } from '@auto-cc/shared';
-import { EffectChip } from './ui/controls';
+import { DeskButton, EffectChip } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -52,13 +52,15 @@ export function AgentPolicyPanel({
   const { busy, notice, run: call } = useBridgeAction(read);
   const exemptIds = new Set((exempt ?? []).map((row) => row.toolId));
   const candidates = tools.filter((tool) => tool.requiresConfirmation && !exemptIds.has(tool.id));
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
   // 整带限高且自带滚动：窗口矮时这一带让位给消息流，而不是把任务卡挤出可视区（5.7-d 实测过
   // 737px 高的窗口里它长到 191px，消息流被挤成 24px 的一条缝）。带内两张清单仍各自限高。
   return (
     <div
       data-testid="agent-policy-panel"
-      className="max-h-20 min-h-[56px] shrink overflow-y-auto border-b border-slate-800 px-4 py-2"
+      className="max-h-20 min-h-[56px] shrink overflow-y-auto border-b border-line px-4 py-2"
     >
       <div className="flex items-center gap-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
@@ -69,7 +71,7 @@ export function AgentPolicyPanel({
           {t('agent.policy.exemptCount', { total: exempt?.length ?? 0 })}
         </span>
         {autonomy !== undefined && autonomy !== 'auto' ? (
-          <span className="text-[10px] text-amber-300" data-policy-tier-note>
+          <span className="text-[10px] text-amber" data-policy-tier-note>
             {t('agent.policy.onlyAuto', { level: t(`agent.autonomy.${autonomy}`) })}
           </span>
         ) : null}
@@ -92,7 +94,7 @@ export function AgentPolicyPanel({
               key={row.toolId}
               data-exempt-tool-id={row.toolId}
               data-exempt-effect={row.descriptor?.effect ?? 'unknown'}
-              className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1 text-[11px]"
+              className="flex items-center gap-2 rounded-control border border-line bg-ink-950/70 px-2 py-1 text-[11px]"
             >
               <span className="font-medium text-slate-300">
                 {t(row.descriptor?.titleKey ?? 'agent.tool.unregistered')}
@@ -109,10 +111,17 @@ export function AgentPolicyPanel({
               <span className="text-[10px] text-slate-500" data-exempt-added-at={String(row.addedAt)}>
                 {t('agent.policy.addedAt', { time: formatAddedAt(row.addedAt) })}
               </span>
-              <button
-                type="button"
-                data-action="revoke-exempt"
-                disabled={busy !== undefined}
+              {/* 撤销只是把本机那张表改回去（问人这道闸重新装上），所以是 amber 而不是朱：
+                  安全方向的动作不该抢危险色（与岗位屏的拒绝、投递确认单的「先不发」同一口径）。 */}
+              <DeskButton
+                action="revoke-exempt"
+                variant="amber"
+                compact
+                busy={busy !== undefined}
+                disabled={busyReason !== undefined}
+                disabledReason={busyReason}
+                disabledReasonLabel={busyLabel}
+                className="ml-auto"
                 onClick={() =>
                   void call(
                     t('agent.policy.actionRevoke', { tool: row.toolId }),
@@ -120,11 +129,10 @@ export function AgentPolicyPanel({
                     { apply: setExempt },
                   )
                 }
-                className="ml-auto flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
               >
                 <X size={10} />
                 {t('agent.policy.revoke')}
-              </button>
+              </DeskButton>
             </li>
           ))}
         </ul>
@@ -141,17 +149,28 @@ export function AgentPolicyPanel({
               key={tool.id}
               data-candidate-tool-id={tool.id}
               data-candidate-effect={tool.effect}
-              className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/20 px-2 py-1 text-[11px]"
+              // 外发候选行默认压暗一档（05 稿第 1 条）：加白之前先看清这只手会不会离开本机。
+              className={`flex items-center gap-2 rounded-control border border-line bg-ink-950/40 px-2 py-1 text-[11px] ${
+                tool.effect === 'outbound' ? 'opacity-70' : ''
+              }`}
             >
               <span className="font-medium text-slate-300">{t(tool.titleKey)}</span>
               {/* 归属色由原件负责，面板只报注册表里那一份读数（§2.7：界面不留第二套事实） */}
               <EffectChip effect={tool.effect}>{t(`agent.tool.effect.${tool.effect}`)}</EffectChip>
               <span className="text-[10px] text-slate-500">{t('agent.tool.needsConfirm')}</span>
               <span className="break-all font-mono text-[10px] text-slate-600">{tool.id}</span>
-              <button
-                type="button"
-                data-action="add-exempt"
-                disabled={busy !== undefined}
+              {/* 加白把「每次都问人」这道闸松开掉：它按下时什么都不发，但它改变之后每一次外发要不要问你，
+                  所以按风险方向给朱（08 稿对该控件的规定）；它规定的两步 armed 是点击语义变更，
+                  不在样式片里夹带，另立条目（见 docs/specs/06-ui-ink-desk/spec.md 6.2-11）。 */}
+              <DeskButton
+                action="add-exempt"
+                variant="seal"
+                compact
+                busy={busy !== undefined}
+                disabled={busyReason !== undefined}
+                disabledReason={busyReason}
+                disabledReasonLabel={busyLabel}
+                className="ml-auto"
                 onClick={() =>
                   void call(
                     t('agent.policy.actionAdd', { tool: tool.id }),
@@ -159,11 +178,10 @@ export function AgentPolicyPanel({
                     { apply: setExempt },
                   )
                 }
-                className="ml-auto flex items-center gap-1 rounded-md border border-sky-800 px-2 py-0.5 text-[10px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
               >
                 <ShieldCheck size={10} />
                 {t('agent.policy.add')}
-              </button>
+              </DeskButton>
             </li>
           ))}
         </ul>

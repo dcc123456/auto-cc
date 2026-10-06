@@ -18,38 +18,51 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
 import { formatClock } from './format';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
 
 /**
  * 「是 / 否」那一对按钮（`approval` 暂停单与投递确认单共用，同一逻辑不写第二遍）。
+ *
+ * 归属：批准那颗是 `seal`——按下之后这一步就可能真的动到平台（与 `consent-grant` 同一口径，
+ * 08 稿原先给它的是 jade，那是"已经办成"的读数色，不给待表态的按钮）；
+ * 拒绝那颗退成 `ghost`——拒绝什么都不发，不该被涂成危险色。
  * @param busy 正在执行的动作标签；非空时两颗都禁用，防止同一张单被按两次
  * @param onDecide 把人按下的那颗交出去（`approve` / `deny`）
  * @returns 一行两颗按钮
  */
 function ApproveDenyButtons({ busy, onDecide }: { busy?: string; onDecide: (decision: 'approve' | 'deny') => void }) {
   const { t } = useTranslation();
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const busyLabel = busyReason === undefined ? undefined : t('agent.pause.reason.ACTION_BUSY');
   return (
     <div className="mt-2 flex items-center gap-2">
-      <button
-        type="button"
-        data-action="pause-approve"
-        disabled={busy !== undefined}
+      <DeskButton
+        action="pause-approve"
+        variant="seal"
+        compact
+        busy={!!busy}
+        disabled={busyReason !== undefined}
+        disabledReason={busyReason}
+        disabledReasonLabel={busyLabel}
         onClick={() => onDecide('approve')}
-        className="flex items-center gap-1 rounded-md border border-emerald-800 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
       >
         <Check size={12} />
         {t('agent.pause.approve')}
-      </button>
-      <button
-        type="button"
-        data-action="pause-deny"
-        disabled={busy !== undefined}
+      </DeskButton>
+      <DeskButton
+        action="pause-deny"
+        variant="ghost"
+        compact
+        busy={!!busy}
+        disabled={busyReason !== undefined}
+        disabledReason={busyReason}
+        disabledReasonLabel={busyLabel}
         onClick={() => onDecide('deny')}
-        className="flex items-center gap-1 rounded-md border border-rose-800 px-3 py-1 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-40"
       >
         <X size={12} />
         {t('agent.pause.deny')}
-      </button>
+      </DeskButton>
     </div>
   );
 }
@@ -104,9 +117,9 @@ function ApprovalCard({
       data-pause-request-id={card.requestId}
       data-pause-kind={card.kind}
       data-pause-expires-at={String(card.expiresAt)}
-      className="mt-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2"
+      className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-200">
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber">
         <ShieldQuestion size={12} />
         {t('agent.pause.approvalHeading')}
       </p>
@@ -152,9 +165,9 @@ function DeliverApprovalCard({
       data-pause-origin="deliver"
       data-deliver-job-id={approval.jobId}
       data-pause-expires-at={String(approval.expiresAt)}
-      className="mt-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2"
+      className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-200">
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber">
         <ShieldCheck size={12} />
         {t('agent.pause.deliverHeading')}
       </p>
@@ -201,6 +214,11 @@ function ElicitationCard({
 }) {
   const { t } = useTranslation();
   const [supplement, setSupplement] = useState('');
+  // 「缺字段」是工具现报的，这张卡在墨案里属于「系统在说话」那一档（青瓷），与琥珀的待批准卡分开画法；
+  // 提交那颗只是把人写的补充交回去让判定再跑一次，本身不外发，所以是 amber 而不是 seal。
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const busyLabel = busyReason === undefined ? undefined : t('agent.pause.reason.ACTION_BUSY');
+  const supplyReason = busyReason ?? (supplement.trim() === '' ? 'SUPPLEMENT_EMPTY' : undefined);
   return (
     <div
       data-testid="agent-pause-elicitation"
@@ -209,9 +227,9 @@ function ElicitationCard({
       data-pause-round={String(card.round)}
       data-pause-missing={card.missing.join(',')}
       data-pause-expires-at={String(card.expiresAt)}
-      className="mt-2 rounded-lg border border-sky-900/70 bg-sky-950/20 px-3 py-2"
+      className="mt-2 rounded-md border border-celadon/40 bg-celadon-wash px-3 py-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-sky-200">
+      <p className="flex items-center gap-1 text-[11px] font-semibold text-celadon">
         <ShieldQuestion size={12} />
         {t('agent.pause.elicitationHeading')}
       </p>
@@ -232,33 +250,39 @@ function ElicitationCard({
         value={supplement}
         onChange={(event) => setSupplement(event.target.value)}
         placeholder={t('agent.pause.supplyPlaceholder')}
-        className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-800"
+        className={`mt-2 w-full resize-none ${FIELD_CLASS}`}
       />
       <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
         <Clock size={10} />
         {t('agent.pause.timeoutNote')}
       </p>
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          data-action="pause-supply"
-          disabled={busy !== undefined || supplement.trim() === ''}
+        <DeskButton
+          action="pause-supply"
+          variant="amber"
+          compact
+          busy={busy !== undefined}
+          disabled={supplyReason !== undefined}
+          disabledReason={supplyReason}
+          disabledReasonLabel={supplyReason === undefined ? undefined : t(`agent.pause.reason.${supplyReason}`)}
           onClick={() => onRespond(card, { decision: 'supply', text: supplement })}
-          className="flex items-center gap-1 rounded-md border border-sky-800 px-3 py-1 text-xs text-sky-300 hover:bg-sky-950 disabled:opacity-40"
         >
           <Check size={12} />
           {t('agent.pause.submit')}
-        </button>
-        <button
-          type="button"
-          data-action="pause-deny"
-          disabled={busy !== undefined}
+        </DeskButton>
+        <DeskButton
+          action="pause-deny"
+          variant="ghost"
+          compact
+          busy={busy !== undefined}
+          disabled={busyReason !== undefined}
+          disabledReason={busyReason}
+          disabledReasonLabel={busyLabel}
           onClick={() => onRespond(card, { decision: 'deny' })}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
         >
           <X size={12} />
           {t('agent.pause.giveUp')}
-        </button>
+        </DeskButton>
       </div>
     </div>
   );
@@ -301,9 +325,9 @@ export function AgentPauseCards({
       data-testid="agent-pause-band"
       data-pause-count={String(count)}
       data-pause-deliver-count={String(deliverCount)}
-      className="rounded-xl border border-slate-700 bg-slate-900/80"
+      className="rounded-xl border border-line bg-ink-900/60"
     >
-      <header className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+      <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <ShieldQuestion size={14} />
         <h3 className="text-xs font-semibold text-slate-200">{t('agent.pause.heading')}</h3>
         <span className="text-[10px] text-slate-400" data-pause-pending-count={String(count)}>
