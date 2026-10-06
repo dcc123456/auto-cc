@@ -356,6 +356,11 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   `rect` 与页面 `getBoundingClientRect()` 逐位一致，但页面 capture 阶段挂的 pointerdown/mousedown/mouseup/click 计数全 0、
   靶页回执停在「尚无点击」。所以 **V 类"点中了什么"的判据必须以页面自己的回执为准，不能以 act 的返回值为凭**；
   要取真点必须用户在场把窗口带到前台（`shell.setKernelViewVisible(true)` 只管视图挂载，不解决遮挡）。
+  **同一遮挡下的两条补充实测（裁定⑱ 补窗）**：① `harness click` 在 hidden 窗口里不只是不落页，第二次调用会
+  把 CDP 请求挂住不返回（本机挂过 300s+，只能终止），所以别把它当成"重试就好"；② 只想验**处理器有没有跑**
+  （而不是"真实鼠标能不能命中"）时用 `eval` 里的 `node.click()`——它跳过命中测试、直接派 `click`，React 监听照跑，
+  拿到的是逻辑层的真相；读数前先按口径② 看 `data-disabled-reason`，别把门禁当成缺陷。
+  两条要分清：这一格换通道只解决"处理器跑不跑"，**"人点得动点不动"仍然必须等用户在场**。
   同一轮还有一条抓取口径：`page.extract` 在 `navigate` 刚返回时就抽会拿到 `containers=0`（卡片是 `/api/jobs` 异步长出来的，
   而 navigate 常与首屏装载相撞返回信封 `(-3) loading`），**必须先等容器出现再抽**。
 

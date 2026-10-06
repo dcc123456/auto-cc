@@ -10,8 +10,10 @@
 
 冻结动画自证（§9 第二十三/二十四片口径①）：探针注入 `transition/animation:none` 前
 `document.getAnimations().length` 读数为 1，探针结束时把那支 `<style>` 摘掉。
-主窗口那份文档的 `visibilityState` 三次探针都是 `visible`，所以 CDP 的鼠标事件是真的落页了
-（§9 2.1-12 那条：窗口不在前台时输入不落页，而 `act.click` 照样回成功）。
+主窗口那份文档的 `visibilityState` 三段取证（①②③）当时都是 `visible`，所以那三次的 CDP 鼠标
+事件是真的落页了（§9 2.1-12 那条：窗口不在前台时输入不落页，而 `act.click` 照样回成功）。
+**补窗那一段（下面的⑥）不是**：同一实例在同一轮里窗口已被遮挡，读数 `hidden`，判据因此换了通道，
+详见⑥的自证——两处不是同一环境，不要按同一口径读。
 
 --------------------------------------------------------------------------------
 ① 冷启动默认态（未挂载任何站点）——视图收起、界面那一栏不存在
@@ -67,7 +69,42 @@ $ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/probe-status.js
 截图：`1.2-12b-kernel-collapsed-after-close.png`（与①同一形态）
 
 --------------------------------------------------------------------------------
-④ 四道门禁（退出码按 §9 5.4-c 的口径重定向后读，不接管道）
+④ 桌面面板的「切换内核视图显隐」——人的显式覆盖（补窗，另一环境读数）
+--------------------------------------------------------------------------------
+这一段是收口之后补的：窗口已被遮挡，`document.visibilityState` 读回 `hidden`，
+于是**第一次**用 `harness click`（原生鼠标事件）得到的是假象——命令回报
+「已点击 <button>（原生鼠标事件）」，但 `shell.getStatus()` 仍然 `kernelViewVisible:false`、
+`slotPresent:false`、`mainWidth:1016`，第二次点击则直接把 CDP 调用挂住（超过 300s 未返回，已终止）。
+这正是 §9 的 2.1-12 那条：隐藏窗口里 CDP 的**输入**不落页，而派发命令自己照样报成功。
+所以这一格的判据换成页面内自发的 `node.click()`（它跳过命中测试、直接派 `click`，React 的监听会跑），
+并先读那只按钮的门禁位，把「被组件挡在门口」这种可能排除掉（§9 第二十三/二十四片口径②）：
+
+$ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/probe-toggle.js
+
+{"clickReport":{"found":true,"tag":"button","ariaDisabled":null,"disabledReason":null,"nativeDisabled":false},
+ "visibilityState":"hidden",
+ "beforeOk":true,"beforeVisible":false,
+ "afterOk":true,"afterVisible":true,
+ "kernelViewPartition":"",
+ "slotPresent":true,"slotWidth":456,"mainWidth":560}
+
+再点一次回到默认态，并顺手把探针注入的那支冻结动画的 `<style>` 摘掉（口径① 的收尾义务）：
+
+$ pnpm harness eval --url 5173 --expr-file tmp/goal-kernel/cleanup-and-collapse.js
+
+{"freezeRemoved":true,"clicked":true,"visibleAfterSecondClick":false,
+ "slotPresent":false,"mainWidth":1016,"innerWidth":1200}
+
+读数：双向都动得了。`afterVisible:true` 时 `kernelViewPartition` 仍是空串——占位页被人为掀开，
+这是**覆盖**而不是判据（判据依然是"装的是真实站点才展示"），所以它不改分区、不动登录态；
+再点一次即回到裁定⑱ 的默认收起形态（`mainWidth` 1016 = 1200 − 184）。
+截图：`1.2-12b-kernel-toggled-by-desk.png`（展开态，右栏 456px 槽位；与①③的 1016px 形态互斥）
+冻结动画自证：注入前 `document.getAnimations().length` 读数为 0（该屏此刻没有在飞的动画），
+注入后槽位 `opacity:1`、`height:691`，探针结束时 `<style>` 已摘（`freezeRemoved:true`）。
+md5 去重（§9 5.10-18）：本张 `cebbafd4…` 与①②③四张 `ee96afe7 / df98ed5a / 1d5f6a8f / a30fd37d` 全不同。
+
+--------------------------------------------------------------------------------
+⑤ 四道门禁（退出码按 §9 5.4-c 的口径重定向后读，不接管道）
 --------------------------------------------------------------------------------
 $ pnpm typecheck   → TYPECHECK_EXIT=0
 $ pnpm lint        → LINT_EXIT=1（**不是本片引入**：`en.json 缺少 key：
@@ -79,10 +116,10 @@ $ pnpm test        → TEST_EXIT=0，逐包全绿（含 `packages/shell 20 passe
   `packages/ipc 14 passed` / `packages/sessions 15 passed`）
 
 --------------------------------------------------------------------------------
-⑤ 收尾自检（§7.4）
+⑥ 收尾自检（§7.4）
 --------------------------------------------------------------------------------
-① 四道门禁：见④。两条红的是**别人未收口的改动**，本片不代改、不代提交（§1.4）。
-② V 类：①②③三张主窗口截图 + 一张视图 target 内容图，逐条对应上文读数。
+① 四道门禁：见⑤。两条红的是**别人未收口的改动**，本片不代改、不代提交（§1.4）。
+② V 类：①②③④四段共四张主窗口截图 + 一张视图 target 内容图，逐条对应上文读数。
 ③ spec 状态位：`01-framework/spec.md` 的 1.2-12 追加 dated 更正（原判据不动），
    `06-ui-ink-desk/spec.md` 的 6.2-04「右栏替换」缺件条目补一条 dated 更正。
 ④ 复用检查：可见性落点抽成 `applyKernelViewVisible` 一处（`setKernelViewVisible` 与

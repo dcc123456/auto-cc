@@ -604,5 +604,7 @@ Q1 剩下的部分（同一只容器、随分区换内容、形态③右栏替�
 
 ### 10.5 验收
 
-`docs/acceptance/1.2/1.2-12b-kernel-view-default-hidden.txt`（三段活体读数 + 四张截图 + 四道门禁），
+`docs/acceptance/1.2/1.2-12b-kernel-view-default-hidden.txt`（四段活体读数 + 五张截图 + 四道门禁），
 对应 `docs/specs/01-framework/spec.md` 的 1.2-12 追加条目。
+第四段是 §10.3 那句"人手动收起（诊断面板那颗按钮）仍然是唯一越权口子"的实测：双向都翻得动，
+且覆盖态下 `kernelViewPartition` 仍为空串（只掀容器，不改判据、不动登录态）。
