@@ -173,6 +173,15 @@
   「已完成」改口为「页面未回执」）。**探针答不上来仍按 `done`**——这条判据不外扩成假阴性，
   否则 iframe 链路与显式降级到 DOM 通道的用例会整片被打成超时（取舍写在 `act-service.ts` 的注释里）。
   `type` / `upload` 的回读骨架不动，它们本来就有页面侧回读。
+- **2.2-04 口径补片（2026-10-06，落码 `fb8233b`）**：「失败是结构化的」现在还管**失败的先后**。
+  一份不合法的定位声明（候选缺 `strategy`、`testId` 缺 `attribute`、`role` 缺可读名那一类）过去只在
+  `browser.locate.find` 那一路被拒；动作口不校验，于是它带着一条页内脚本读不出任何候选的声明去等闸门，
+  五秒后报 `WAIT_TIMEOUT`——活体取证就这么被引到「页面不可点」上去查了半天
+  （证据 `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第六、七节）。
+  从此四道口（`click` / `type` / `select` / `waitFor`）与 `locate.find` 走**同一支** `assertSpecValid`，
+  且排在碰会话之前：声明本身不合法即时 `LOCATE_SPEC_INVALID`（逐条原因在 `details.problems`），
+  不许伪装成超时，也不许先撞上 `NO_KERNEL_SESSION`。`locate-service` 就地抛错的那段删掉了——
+  校验器仍只有一支（AGENTS.md §2.5），报错的 code 与消息一字未动，老用例照绿。
 - **2.2-08 更正（2.7-a，2026-10-01）**：当年验收的「频控参数为数据」里，**节奏那半已经搬家**。
   知识包的 `pacing` 段（`minActionGapMs: 5000` / `maxDailyActions: 20`）整体删除：运行期零消费者
   （plan §14.2 E 条实测）就是 AGENTS.md §2.4 的死代码，而它声明的两件事分别已由 `entitlement.gate`
