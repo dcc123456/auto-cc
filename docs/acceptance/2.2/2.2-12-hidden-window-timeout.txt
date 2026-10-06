@@ -1,0 +1,49 @@
+2.2-12 裁定⑰的**反腿**活体读数（2026-10-06，本机 macOS arm64，dev 实例 CDP 10222）
+================================================================================
+
+## 一、这条腿判的是什么
+
+裁定⑰（落码 `f2e081d`）把 `browser.act.click` 的 `done` 从「派发完了」改成「页面确认收到过」。
+于是两腿必须成对：
+
+- **正腿** = 页面确实收到 → 报 `done`，且回执计数为 1。已在 `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt`
+  第七节取到（`status:'done' / waitedMs:110`、页面四通道计数各 0→1、`hit-log` 变「命中：testid」、
+  `__autoCcClickReceipt.count:1`）。
+- **反腿（本文件）** = 派发**没**落地 → **不许报 `done`**，要如实报超时。场地条件与正腿相反：
+  app 窗口不在前台（两份文档 `visibilityState` 都是 `hidden`），此时合成器不给隐藏帧派发输入。
+
+## 二、场地与前置
+
+- `sessions.open('fixture')` → 分区 `persist:fixture`；`browser.page.navigate('http://127.0.0.1:10233/locator')`
+  → `readyState:'complete'`、`elementCount:61`、标题「auto-cc 定位实验台 · 多策略靶页（本地 fixture）」。
+  **全程只打本地 fixture，不碰真实平台（AGENTS.md §7.2）。**
+- 装探针前（基线）：内核视图文档 `visibility:'hidden'` / `hasFocus:false`，
+  我自己的 capture 阶段计数 `{pointerdown:0, mousedown:0, mouseup:0, click:0}`，
+  靶页 `[data-testid="hit-log"]` = 「（尚无点击）」，`__autoCcClickReceipt` 尚不存在（`null`）。
+- app 文档 `document.visibilityState` 整轮都是 `hidden`（终端在前台，无人把 app 带到前面）。
+- 入参按契约的 `strategy` 形状给（`{strategy:'testId', attribute:'data-testid', value:'greet-button'}`），
+  即正腿那一颗按钮；`{selector:…}` 的错形状会在闸门前超时，与本轮判据无关（同文件第七节记过）。
+
+## 三、两次派发的读数（可复现，不是一次巧合）
+
+| 次序 | 服务侧 `browser.act.click` | 页面侧独立计数 | 裁定⑰的回执表 |
+| --- | --- | --- | --- |
+| 第 1 次 | `status:'timeout'` / `channel:'cdp'` / `trusted:true` / `waitedMs:6355`（整趟 6356ms） | `{pointerdown:0, mousedown:0, mouseup:0, click:0}` | `__autoCcClickReceipt = {count:0}` |
+| 第 2 次 | `status:'timeout'` / `channel:'cdp'` / `trusted:true` / `waitedMs:6551`（整趟 6552ms） | 同上，四通道仍全 0 | 同上，`count:0` |
+
+第 2 次之后回读靶页：`visibility:'hidden'`、`hit-log` 仍是「（尚无点击）」、`receipt:{count:0}`。
+返回值携带的键是 `[action, status, waitedMs, channel, trusted, located, valueAfter, predicate]`
+（`status` 就是超时那一支，`predicate` 是它卡在哪个前置判据）。
+
+## 四、结论与两条如实的保留
+
+1. **反腿通过**：派发没落地时服务**不再报 `done`**，两律一致地报 `timeout`，且页面侧三条独立证据
+   （我自己的计数、靶页回执文案、裁定⑰自己的 `__autoCcClickReceipt.count`）都停在 0——
+   服务读数与页面事实互不采信却对得上，这正是裁定⑰要的口径。
+2. **`trusted:true` 与 `timeout` 并存是如实的**：它说的是「若派发成功将是受信事件」，
+   不再被读成「点到了」；把 `done` 与 `trusted` 解耦正是这条裁定改的东西。
+3. **一条没取到的对照**：窗口在**前台**时同一条腿的反例（即 `visible` 却仍 `timeout`）不属于本判据，
+   正腿已经覆盖 `visible → done` 的那一侧。
+4. **截图这一格没取到**：`harness shot --url 10233` 在这一带会挂住不返回（AGENTS.md §9 记过同类现象：
+   视图 target 的 `shot` 不稳，而 `--url 5173` 又截不到内嵌内核视图的内容）。
+   本条按 §7.1 的「截图 / DOM 断言」二选一以**机读断言**兑现，不拿无关画面的截图冒充。

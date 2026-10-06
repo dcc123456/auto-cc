@@ -173,6 +173,16 @@
   「已完成」改口为「页面未回执」）。**探针答不上来仍按 `done`**——这条判据不外扩成假阴性，
   否则 iframe 链路与显式降级到 DOM 通道的用例会整片被打成超时（取舍写在 `act-service.ts` 的注释里）。
   `type` / `upload` 的回读骨架不动，它们本来就有页面侧回读。
+- **裁定⑰的活体两腿至此齐了（2026-10-06 第二次补窗）**：正腿（`visible` → `done` 且页面计数 0→1）在
+  `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第七节；**反腿（派发没落地时不许报 `done`）**在
+  `docs/acceptance/2.2/2.2-12-hidden-window-timeout.txt`——app 窗口不在前台（两份文档 `visibilityState` 都是
+  `hidden`）时对同一颗 `data-testid="greet-button"` 连派两次，服务两律回
+  **`status:'timeout'` / `channel:'cdp'` / `trusted:true` / `waitedMs:6355`、`6551`**，而页面侧三条互不采信的独立证据
+  全停在 0（我自己的 capture 计数、靶页 `hit-log` 仍是「（尚无点击）」、裁定⑰自己的 `__autoCcClickReceipt.count`）。
+  也就是说 `done` 从此不会在「没点到」的时候说谎。两条如实保留：`trusted:true` 与 `timeout` 并存是设计如此
+  （它说的是"若落地将是受信事件"，不是"点到了"）；这一格的**截图没取到**——`harness shot --url 10233` 在视图
+  target 上挂住不返回，而 `--url 5173` 截不到内嵌内核视图（§9 的两条既有实测），故按 §7.1 的「截图 / DOM 断言」
+  以机读断言兑现，未拿无关画面冒充。
 - **2.2-04 口径补片（2026-10-06，落码 `fb8233b`）**：「失败是结构化的」现在还管**失败的先后**。
   一份不合法的定位声明（候选缺 `strategy`、`testId` 缺 `attribute`、`role` 缺可读名那一类）过去只在
   `browser.locate.find` 那一路被拒；动作口不校验，于是它带着一条页内脚本读不出任何候选的声明去等闸门，
