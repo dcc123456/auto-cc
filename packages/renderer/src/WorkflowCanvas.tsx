@@ -54,7 +54,7 @@ import {
 } from '@auto-cc/shared';
 import { STEP_STATUS_STYLE } from './stepStatusStyle';
 import { EffectChip } from './ui/controls';
-import { currentTheme } from './theme';
+import { useDeskThemeValue } from './theme';
 import { OperatorPalette } from './OperatorPalette';
 import { OperatorParamForm } from './OperatorParamForm';
 import { WorkflowNodeDetail } from './WorkflowNodeDetail';
@@ -206,6 +206,7 @@ export interface WorkflowCanvasProps {
  */
 function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps) {
   const { t } = useTranslation();
+  const deskTheme = useDeskThemeValue();
   const flow = useReactFlow<OperatorNode>();
 
   /**
@@ -641,10 +642,12 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           }}
           nodeTypes={NODE_TYPES}
           // 库自带明暗两套主题（`dist/style.css` 里的 `.react-flow.dark` 变量组），所以跟着 06 子计划的
-          // 材质走：现读 `currentTheme()`（localStorage 是主题的唯一事实，见 theme.ts），这里不再存一份
+          // 材质走：订阅 `useDeskThemeValue()`（localStorage 是主题的唯一事实，见 theme.ts），这里不再自己存一份
           // state——自己翻面就会长出第二个真相（§2.5）。默认 light 时代画布控件是一排白底按钮，
           // 与墨案打架（5.10-a 实测截图）；用库的主题开关而不是自己写样式覆盖（§5.1）。
-          colorMode={currentTheme()}
+          // 为什么不是 `currentTheme()`：本组件挂在 App.tsx 的模块常量 PANELS 下，主题开关改的是 App 自己的
+          // state，子树拿到的还是同一个元素引用、不会重渲染，现读到的色就停在翻面之前那一档。
+          colorMode={deskTheme}
           fitView
           // 滚轮交给页面而不是交给画布：库默认截获画布上的 wheel 做缩放，于是 420px 高的画布成了
           // 工作流视图里的一段"滚动墙"。读 `@xyflow/system` 编译产物确认这条出口（§6.2）：

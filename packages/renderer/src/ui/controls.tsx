@@ -113,6 +113,9 @@ export function DeskButton({
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
   ) as Record<string, string>;
+  // 根节点**不带** `overflow-hidden`：flex 子项的自动最小尺寸在 overflow 非 visible 时会塌成 0，
+  // 于是窄列里的按钮会被压成"只剩内边距的空壳"（活体读数：页序行那颗页码键宽 30px、文字整条裁掉）。
+  // 结果态 wash 因此自己带一份圆角，不靠父级裁切。
   return (
     <button
       type="button"
@@ -125,11 +128,14 @@ export function DeskButton({
       // 人只会看到"按不动"而看不到为什么按不动（07 稿④）。改走 aria-disabled + 这里挡下 onClick。
       {...(isDead ? {} : { onClick })}
       {...(isDead && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-      className={`relative overflow-hidden rounded-control ${buttonClass(variant, isDead, compact)} ${className}`}
+      className={`relative rounded-control ${buttonClass(variant, isDead, compact)} ${className}`}
       {...rest}
     >
-      {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标 */}
-      {result && !busy ? <span className={`pointer-events-none absolute inset-0 ${RESULT_WASH[result]}`} /> : null}
+      {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标。
+          圆角自己带一份——根节点不裁切（见下面那条注释），不裁就得自己贴合。 */}
+      {result && !busy ? (
+        <span className={`pointer-events-none absolute inset-0 rounded-control ${RESULT_WASH[result]}`} />
+      ) : null}
       <span className={SPINNER_SLOT}>
         {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
       </span>
