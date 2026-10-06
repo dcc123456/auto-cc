@@ -2222,3 +2222,20 @@ spec 侧只补 2.2-12 的「两条通道如实报告」一句：`click` 的 `don
 `evaluateInFrames` 收到的帧与我探针挂的那个 target 不是同一个；② `stableCheckSamples` 要求的连续样本
 在这一轮根本没攒够（脚本内部轮询与 `waitCheckMs` 的配合），与可见性无关。
 **不要**为了绕过这一格去把动作性判据放松——那是 §8.3 意义上的降低安全边际，属另一条待裁。
+
+### 16.3 §16.2 那条矛盾已自解（2026-10-06 同日第四次补格，读数在证据文件第七节）
+
+不用做那条决定性检查了：**卡点是我喂给闸门的候选形状**。`{selector:…}` 不是 `locateCandidateSchema` 的形状，
+页内脚本按 `candidate.strategy` 取匹配器（`locator-script.ts:290`），拿不到 strategy 就一条读数都不产，
+于是 `clickable` 永不满足。换成 `{strategy:'testId', attribute:'data-testid', value:'greet-button'}` 后
+`act.click` 立刻 `done / cdp / trusted:true / waitedMs:110`，且页面独立计数四路各 +1、
+`__autoCcClickReceipt` 从 `null` 变成 `{count:1, baseline:0}`——**裁定⑰ 的正腿（活体 done）至此取到**。
+
+两条从此留下的口径：
+
+1. **反腿的场地条件与正腿相反**：要"派发了但页面没收到"，需要窗口**不在前台**（把 app 切到别的应用后面再放）。
+   下一窗别再按"等用户在场"安排它。
+2. **一条真实的接口不一致（登记，未改）**：同一个非法 spec，`browser.locate.find` 回 `LOCATE_SPEC_INVALID`，
+   `browser.act.click` 却照跑到闸门再以 `WAIT_TIMEOUT` 报出，把调用方往"页面不可点"的方向带。
+   修法是让 `perform` 在等待之前走同一支 `validateSpec`（`locate.find` 已有的那个入口，符合 §2.5"合并到一个入口"），
+   并补一条单测（非法形状必须报 `LOCATE_SPEC_INVALID`，不许是 `WAIT_TIMEOUT`）。**这属新增面，另起一片，不夹带进裁定⑰。**

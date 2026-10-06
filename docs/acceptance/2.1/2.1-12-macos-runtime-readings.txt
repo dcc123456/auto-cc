@@ -171,3 +171,30 @@ CDP `--port 10299`；10222 上那个实例没动、没杀），全程只打本�
 - 一条可复用的坑：`sessions.open` 之后立刻 `page.navigate` 会得到 `(-3) loading 'http://127.0.0.1:10233/'`
   的信封（首屏装载与导航相撞，与第四节同源），**但目标页其实照常装载完成**（下一格 snapshot 就是
   `/locator / readyState:complete / elementCount:61`）。别把这条信封读成"导航失败"，更不要因此重试导航。
+
+
+## 七、2026-10-06 第四次补格：真点取到了，卡点是候选形状，不是可见性
+
+第六节末尾留下的那对矛盾（页面自证可点、服务读成不可点）**本窗自解**，答案就写在本文件第四节：
+候选必须用契约的 `strategy` 形状，`{selector: …}` 不是合法写法。
+
+- 页内脚本按 `candidate.strategy` 取匹配器（`locator-script.ts:290` 起：`testId`/`id`/`name`/`role`/`text`/`css`/`xpath`），
+  传 `{selector}` 时 `strategy` 是 undefined → 每个候选的匹配器都返回 null → `scanCandidates` 得**零条读数** →
+  `clickable` 永远不满足 → 5000ms 后 `WAIT_TIMEOUT / 等待「clickable」超时`。**服务侧没错，是我喂错了形状。**
+- 一条**真实存在的接口不一致**（登记，本窗不改）：同一个非法对象交给 `browser.locate.find` 是
+  `LOCATE_SPEC_INVALID`，交给 `browser.act.click` 却是"照跑，然后在闸门前超时"。
+  调用方拿到 `WAIT_TIMEOUT` 会去找页面的毛病，而毛病其实在自己手里。修法（`perform` 开头走同一支
+  `validateSpec`，与 `locate.find` 同一个入口）属新增面，按 §6 先登记再动。
+- 换成合法形状 `{strategy:'testId', attribute:'data-testid', value:'greet-button'}` 后的四格读数：
+  ① `locate.find` → `status:'matched'`、`strategy:'testId'`、`rect {29, 337.7421875, 61, 32.09375}`；
+  ② `browser.act.click` → **`status:'done' / channel:'cdp' / trusted:true / waitedMs:110`**；
+  ③ **页面自己的独立计数**（与裁定⑰ 的探针互不采信）：`pointerdown 0→1 / mousedown 0→1 / mouseup 0→1 / click 0→1`，
+     靶页 `[data-testid="hit-log"]` 从「（尚无点击）」变成「命中：testid」；
+  ④ 裁定⑰ 新挂的回执表：`__autoCcClickReceipt = {count:1, baseline:0, url:'http://127.0.0.1:10233/locator', hasNode:true}`。
+- 环境读数（把第六节那句"欠前台"钉死为**不再成立**）：`appDocument.visibilityState:'visible'`、
+  内核视图页 `visible / hasFocus:true`、视口 `456x772 dpr:2`。真点这一格**不需要用户在场**。
+- 截图 `docs/acceptance/2.1/2.1-12-macos-act-click-receipt.png`，md5 `09b2e53cf8981a144f84312be0f7af69`，
+  与批内另一张 `2.1-12-macos-boss-extract-cards.png`（`d04ce93cb0dd4e1cf573daa97e354dc4`）不同字节。
+- **裁定⑰ 的活体两腿至此只欠反腿**：正腿（`done` 且页面收到）就是本节 ②+③；反腿要的是"派发发了、页面没收到"，
+  而那恰好需要**窗口不在前台**（第五节那个环境）——也就是说反腿与正腿的场地条件是相反的，
+  下一窗把 app 切到别的应用后面再放一次即可，同样不需要用户在场合眼。
