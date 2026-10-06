@@ -226,6 +226,13 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   再大也没用——想在一个节点的 `running` 里蹲到 SIGKILL 时机，改的是**退避**：装配面板里 `workflow.runner`
   的配置键 `retryBackoffMs` / `retryBackoffCapMs` 拉大即可（配置层只写内存、重启即失，见 5.3-b 那条），
   既不需要临时补丁也不需要新入口。
+- **实测（5.10-13 收口）同一个工作树里有第二个窗口在改东西，`git commit` 会把人家刚 `git add` 的脏区一起吞掉**：
+  本机实测过一次——我只 `git add` 了 6 个文件，提交里却变成 20 个（另一个窗口在那同一秒把它正在写的
+  渲染层文件与 6.x 证据图全量暂存了），提交信息还写着我的。所以 §1.4「一个提交只做一件事」在这种机器上必须靠命令保证：
+  **提交时用 pathspec 形式** `git commit -m … -- <我的路径列表>`，它只取这些路径、无视索引里别人的暂存内容
+  （新建的文件先 `git add` 再进 pathspec 列表，否则报 pathspec 不匹配）。吞了之后补救是
+  `git reset --mixed HEAD~1`（未推送才行；工作树内容一字不动，人家的编辑回到未暂存的原样），再按 pathspec 重提。
+  提交完必须 `git show --stat --name-only HEAD` 逐行数文件，只看 `git status` 看不出问题。
 - **实测（2.5-d）fixture 服务是长驻进程且模板内联在代码里**：`/chat/frame` 的 HTML 写在
   `scripts/fixture-server.ts` 里（父页 `chat-lab.html` 每次请求读磁盘），改了帧模板不重启
   `pnpm fixture` 会得到"半新半旧"的页面，表现为帧绑定到写死的默认 jobId 而不是 URL 参数。
