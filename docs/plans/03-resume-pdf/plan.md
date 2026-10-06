@@ -521,6 +521,51 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 
 ---
 
+### 7.15 3.5-d 线框腿落地记录（2026-10-06，`pdf.layout.textItems`：`3.5-01` 的非可视半边有了，状态位照旧不动）
+
+**落点**：`packages/pdf-edit/src/text-layout.ts`（纯换算，16 例）+ `packages/pdf-edit/src/layout-service.ts`（`pdf.layout` 服务，12 例），包内 71 → **99 例**。
+接线四处：`packages/shared/src/bridge.ts` 的白名单第三行 + `RequestMap` 一条 + 两只视图类型（`PdfTextBoxView` / `PdfTextItemsView`）、
+`packages/main/src/registry.ts` 的 `'pdf-layout'` 行、根 `cordis.yml` 的 `- id: pdf-layout` 行（与上面两行一样不 inject、不 `dependsOn`，`pdf.*` 仍不登记 agent 工具）、
+以及装配对账那一份（`packages/main/src/pdf-link.test.ts`）78 → **79 例**——那条「`pdf.*` 精确等于两项」的断言按字面改成三项，
+`isAllowedCall('pdf.layout.textItems')` 从 `false` 翻成 `true`，同时补了 `pdf.layout.items` 与 `pdf.layout` 两条"抄错的名字进不来"。
+
+**为什么这一片现在能做、不等裁定**：§7.9 第 1 条欠的是"**位图级**真实渲染要不要为 pdfjs worker 动 CSP"那一条表态，
+而它给的默认读法（文本项线框）本身就写在 §7.3 的包图（`src/text-layout.ts`）与 §7.4 的表（`pdf.layout` 那一行）里，没有欠东西。
+这条腿落的正是**默认读法的非可视半边**；`3.5-01` 那行的 V（样例 PDF 截图含高亮）仍归 §7.9 第 3 条那个在场时段，所以状态位是 `[ ]` 原地不动。
+
+**与 §7.4 那张表的一处偏离（只收窄读数，不动签名）**：表里原本写「带 `transform/width/height/str` 的文本项（脱敏：只回坐标与命中框，整页原文不进渲染层）」。
+落码时按后半句的字面把 `str` 摘了，三条理由：① 判据要的是"看得见有哪些块"，线框自己就够了；
+② 覆盖式轻编辑下框选是**人工画的**（降级裁定对 3.5-01 的改写原文），界面上没有一处需要原文；
+③ 搬原文过界就是 §8.5 那条默认脱敏的反面，而 §2.6 不许为假想的将来留通道。
+`textItemRect` 只用 `str` 判"这一项有没有可画的东西"，判完就丢。钉住这件事的用例是把读数 `JSON.stringify` 之后搜 `Jane` / `Doe` / `138` 全搜不到、而 `xRatio` 在（口径照 3.6-b 那条 `structuredClone` 断言）。
+
+**页面宽高只问 pdf-lib 一份**（§2.5 的"一个入口"）：`pdf.io.open` 报的、另存腿 `toPageRect` 换算用的、线框换算用的必须是同一个数，
+否则会出现"框看得见但盖上去偏了"。pdf.js 在这里只干"取文本项"这一件事，**不用它的 viewport 当尺寸**。
+**由此继承一条限制**（写在这里以免被当成新缺陷）：换算按 MediaBox、假定原点 (0,0)、旋转不参与——与 `overlay-writer.ts` 完全同一条口径，
+所以 CropBox≠MediaBox、MediaBox 原点非零、页面带旋转这三类文档上线框与覆盖区**要么一起对、要么一起偏**；要修就两条一起修（另裁一片，不在这里单改一侧）。
+
+**实测读数（§6.2：框架 API 形态以真库为准，不信文档转述）**：`minimalPdf(['Jane Doe','Zurich'])` 那份 A4（595×842，基线 y=800、每行 −20 Td）
+经**真的** pdf.js 6.3.289 抽出两项——`transform[4]` 就是左边距 50、`transform[5]` 就是基线、`width`/`height` 是 pt 而不是像素。
+用例三条硬断言分别钉：左边距 `50/595`、两行 `yRatio` 之差 ×842 正好 20（这一步同时证明轴没翻反、步进没被缩放吃掉）、
+以及"第一行 `yRatio` 小于 0.5"（没翻轴会报成 0.95 附近）；项高落在 6…40pt 的合理带内。图片型那一类（`minimalPdf([])`）回空数组而不是失败，与 4.1 的扫描件判定同一口径。
+
+**这轮的闸门读数**：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 四道 EXIT=0
+（`pdf-edit` 99 / `main` 79 / `resume-doc` 136 / `workflow` 214 / `core` 52）；`pnpm app:build` EXIT=0，
+产物 `build/app/main.cjs` 4,028,770 字节（上一轮 4,003,604），`pdfjs-dist` 在产物里只以**外置 require** 出现——
+`RUNTIME_EXTERNAL_ROOTS` 早已含它（第 19 行），第 173 行那条"子路径必须单列"也是 4.1 那份动态 import 立下的，本片直接复用同一份 externals，
+**外置资源目录没有新增一支**（§1.4 的"用户零手动下载"照旧）。`LICENSES.md` 按裁定③ 跑过 `check-licenses.ts --write` 后**字节未变**：
+包集合没添新条目，只是 `pdf-edit` 多了一条对同一版本的声明。
+
+**状态机读数**：一个 `[x]` 都没新增、一个 `[!]` 都没动（P3 未做仍 **4 条**、全局 `[ ]` 仍 **6 条**，`447 / 32 / 6`）——
+新增的是 `3.5-01` 的 C/U 半边证据，那行的验收方式写的是 V。
+
+**顺延（别在下一轮被当成"顺手补齐"）**：① `3.5-01` 的线框截图与 `3.5-03` / `3.5-07` 的截图腿一起等 §7.9 第 3 条那个在场时段；
+② §7.5 那块「在既有 PDF 上改」的第三视图——它现在**两头都齐了**（`pdf.io.open` 报页数、`pdf.layout.textItems` 报线框、
+`createPdfEditSession` 在渲染层拿 draft、`pdf.export.saveAs` 落盘），下一片就是把它拼起来，连 `@auto-cc/plugin-pdf-edit` 的窄出口
+`"./edit-session"`（§7.14 顺延①）一并给；③ `3.5-06` 的中文腿随字体资产那条裁定不动。
+
+---
+
 ## 8. 排版编辑器（3.6 的九条）的实现面计划（2026-10-05，先 plan 再落码，`AGENTS.md` §0）
 
 **为什么这一片现在可动**：3.5 余下的四条 `[ ]` 全卡在裁定或在场（§7.9 三条 + 裁定⑧ 未落的字体半边），

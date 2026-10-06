@@ -480,6 +480,14 @@ plugins:
       defaultTextSizePt: 11
       minAreaRatio: 0.0001
 
+  # 轻编辑的文本块线框腿（spec 3.5-01 / plan §7.4 的 `pdf.layout`）：源路径 + 页号 → 这一页的矩形列表。
+  # 同样**不建表、不 inject、不登记 agent 工具**；页面宽高继续问 pdf-lib 那一份，pdf.js 只用来取文本项，
+  # 于是线框与覆盖区永远对得上（plan §7.15 第 3 条）。回传里没有原文，`str` 在主进程侧判完空就丢。
+  # 摘掉本行：`pdf.layout.textItems` 给出「服务未挂载」的结构化失败，界面上看不见线框，而打开与另存照旧。
+  - id: pdf-layout
+    config:
+      maxBytes: 5242880
+
   # 对话式主界面的另一半（spec 1.11）：会话 / 消息 / 档位。`agent`（工具注册表）排在更上面，
   # 因为 2.8-08 之后登记工具的是 L2 的能力包，注册表必须比它们先挂载——理由写在那一行的注释里。
   # 演示流式速度：在装配面板改 chunkChars / chunkIntervalMs（不重启 app）。
