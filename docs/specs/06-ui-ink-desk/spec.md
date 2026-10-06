@@ -5,7 +5,7 @@
 > **C** = 命令/脚本机检；**U** = 单元/集成测试。状态：`[ ]` 未验 / `[x]` PASS / `[!]` BLOCKED（必须写原因）。
 > 证据归档：`docs/acceptance/06-ui-ink-desk/<条目ID>-*.png`；V 项无截图不得置 `[x]`（AGENTS.md §7.1/§7.4②）。
 
-> **条目统计**：41 条（6.1×9 / 6.2×14 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 24 `[x]` / 14 `[!]` / 3 `[ ]`。
+> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 24 `[x]` / 14 `[!]` / 4 `[ ]`。
 > 立计划时是 31 条（6.2×9 / 6.4×3 / 6.5×3），后八条是逐片验收里补出来的（6.2-10/11/12、6.4-04、6.5-04/05/06、6.1-09）。
 >
 > **本计划总基调**：验收的不是"能不能跑"，而是"界面有没有说谎"——
@@ -47,7 +47,8 @@
 | 6.2-11 | 白名单「加白」按 08 稿走**两步 armed**（09 稿形态⑤′）：第一颗只武装（`data-armed="true"` + 4 秒倒计时），第二颗才写库；「撤销」保持一次点（撤回是安全方向，不该加摩擦） | V | 第十一片只把颜色归属换到位（`add-exempt`=seal、`revoke-exempt`=amber，活体计算色见 `6.2-06-chat-agent-readings.txt`②），两步点击**没做**——它改的是点击语义（一颗键从一次点变成两次点），与样式片混在一次提交里违反 §1.4，且判据要另取（第一次点之后 `policy.exemptList` 读数必须不变）。原件 `ArmButton` 已在 `ui/controls.tsx` 待命，本片起它是唯一没有消费者的形态原件。**第十六片已落地**：`add-exempt` 换成 `ArmButton`（`action="add-exempt"` + `confirmAction="add-exempt-confirm"`），真点一次之后 DOM 里长出 `data-armed="true"` 的那只、`data-action` 已改名、文案变「再点一次才写入」、倒计时条 `wash 4s linear`，而 `data-exempt-count` 仍是 0、回执行不存在；等过四秒自动解除且名单仍为 0（`6.2-11-arm-button-readings.txt`②，双主题截图两张）。第二颗真写库那一腿**没按**（第五节第 1 条：按一次会往这台机器的免确认名单写进一条豁免，与"不为了读数改写用户实例"的口径冲突），`revoke-exempt` 仍是一次点的普通 `DeskButton`。**状态标 `[!]` 而不是 `[x]`**：「第一次点不写库」这一半已经活体取到，「第二次点会写库」那一半按下去就会往这台机器的名单里留下痕迹，按 §7.4 的"环境不具备就如实标 BLOCKED、禁止用推测写成 [x]"处理，等用户指名要免确认某只手时一并兑现 | [!] |
 | 6.2-12 | toast 的第二段动作「在访达 / 资源管理器中显示」要有真实去处：一条 `shell.showItemInFolder` 口 + 点击可达，而不是只报一个路径字符串 | C+V | 待做：`RENDERER_ALLOWLIST` 里没有这一条（第二十四片因此只报落点路径，没假装能打开，见 `6.2-04-toast-readings.txt`⑧）。补它要动主进程 shell service 与 IPC 白名单（不是样式片），顺带把 ⑧ 第 4 条欠的 toast 宽度上限一并定口径 | [ ] |
 | 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | 待做：第二十五片的负腿反而把这一条暴露出来了——切走视图时遮罩虽然画不出来，但渲染层目前没有 `inert`，键盘 Tab 仍能走进被盖住的表单格。补它要同时定「弹窗打开时哪一格拿焦点、关掉后焦点还给谁」，与 6.2-04 形态③④ 一起收 | [ ] |
-| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 第一腿已到账：手搓遮罩 **2 → 0**（`PrivacyNotice` 于第二十六片收进 `Modal`，grep `fixed inset-` 在 `src/ui/**` 之外只剩一条注释），`Modal` 的旋钮补齐 （`testId` / `markers` / `closeLabel` / `aria-labelledby`）；欠 54 处原生控件与 L1 缺的四件表单原件（`DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheckbox`）与画布 `<Controls>` 的 Tailwind 覆盖 → `[!]` |
+| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**第二十七片进 45 / 54**：`src/ui/**` 之外新增五件表单原件（`DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange`）并在 16 个文件换掉 45 处裸控件（`input` 28 / `select` 12 / `textarea` 5 / `button` 0）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：剩 9 处不是体力收尾而是缺件——5 只 `<button>` 要先长三种 L1 形态原件（新立 **6.2-15**）、`MetricsPanel` 4 处撞已落地机检 5.8-02 的进口白名单（**待用户表态**）、`ChatPanel` 输入区需要哪个尺寸档（**待用户表态**）；画布 `<Controls>` 的 Tailwind 覆盖未动；机检按裁定仍未写入，故本条当下仍是 `[纪律]` |
+| 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的 5 只裸 `<button>` | C+V | 待做：第二十七片的源码账暴露出这 5 只在语义上不属于 `DeskButton` 的任何一档——硬塞会让"按钮长得像文字链"（违反 plan §5 的归属色与 07 稿五态），留在面板里手写则是本片正要消掉的东西。落点：`ui/controls.tsx` 新增三件 + `App.tsx` 导航、`ChatPanel.tsx` 自治档位、`GeneratePanel.tsx` / `GapPanel.tsx` 的证据键换装，双主题活体读数各一份 | [ ] |
 
 ## 6.3 外壳与信息架构（01–06 稿）
 
@@ -1363,3 +1364,60 @@ offset:2px` ↔ 未选中 `none 3px rgb(107,118,129) offset:0px`；墨案 `oklab
    取证为取 first-run 那一态 reload 过两次共享的开发实例，末态已还原：theme 墨案、探针 `<style>` 摘净
    （`kill:0`）、无遗留遮罩、`body.overflow:visible`、隐私声明为已确认态。
    三条画面 md5 互不相同（`087b2b77…` / `ba4260ec…` / `895ac743…`）。
+
+## 6.2 第二十七片落地记录（2026-10-07，表单五件原件落地：54 处裸控件换掉 45 处）
+
+> 判据、活体普查、逐件计算值与画面全在 `6.2-14-deskfield-unify-readings.txt` 与
+> `6.2-14-deskfield-{resume-dark,trust-dark,resume-light}.png`，本节只记结论、接口口径与欠账。
+
+1. **这一片一次走完 plan §3.9 的两步**（「先补齐 L1 缺的四件表单原件……再按面板分批改 54 处原生控件」）。
+   之所以不分片：只补原件不动面板，54 还在原地；只动面板不补原件，就得让每个面板各抄一份 `FIELD_CLASS`
+   字面量——那正是 §2.2 要禁的第三次复制。两步是同一件事的两半。
+2. **原件接口是从 54 处的真实普查里长出来的**，不是凭 taste 定的：`action` **必填**（沿用 `DeskButton` 与
+   `InlineEditField` 的先例，AGENTS §9 第④条：每只可点控件都要有 `data-action`，harness 才有定位凭据）；
+   `className` **只许放宽度/外边档**（`flex-1`、`w-24`、`mt-2`），描边/底色/字号一律在原件里；
+   `label` 可省（贴在行里的紧凑档不需要）；其余原生属性走 rest 透传，于是**旧的 `data-testid` / `data-*` /
+   `id` 锚点逐字保留**——第一~二十六片入库的验收选择器至今仍然指得到东西。
+3. **第五件是 `DeskRange`，不在 plan 那四件里**：滑杆吃不了带框档（`border` + `bg-ink-950` + `padding`
+   套上去是一只有框的滑杆，活体读数 `129×6` 那条只证明 `accent-color` 与 `cursor` 对，尺寸档完全错），
+   所以它是独立一件而不是 `DeskField` 的一个 `type`。**第四件实名 `DeskCheck`**（plan 写的是 `DeskCheckbox`）：
+   它同担 `radio`，名字里留 `box` 会读成"只有复选"。
+4. **`isInvalid` 必须写成"换掉"而不是"追加"**（本片最容易踩的一条）：`border-line-strong` 与 `border-seal`
+   是同族 utility，Tailwind 生成的样式表按它自己的顺序排，追加的那条赢不了（第十五片的禁用描边收敛
+   撞过同一个坑）。所以 `fieldClass(isInvalid)` 是一个**函数**，非法时整条边框档替换掉；
+   `export const FIELD_CLASS = fieldClass(false)` 保留，**字节不变**，`MetricsPanel` 与并行会话的
+   `ModelSettingsPanel` 那两处手抄继续能用，本片不顺手改它们的进口（见第 7 条）。
+5. **活体核心读数只有一条**：全 DOM 29 只字段里 **28 只塌成同一个计算签名**
+   （`rgba(150,178,196,.26)` / `6px` / `rgb(8,12,16)` / `11px` / `4px/8px`）。改造前不可能同桶——那时
+   一部分面板手抄 `FIELD_CLASS`、一部分用浏览器默认描边。另两条配套读数：268 只按钮**没有一只**用原生
+   `disabled`，`type=number` 与 `type=text`、`select-one`、`textarea` 四件读数逐位一致（§2.3"扩展现有接口"
+   在样式面上的证据）。毡案那半边同一条 class 翻面：`rgba(38,44,48,.3)` / `rgb(216,211,198)` / `rgb(51,60,68)`。
+6. **迁移账**：45 / 54（16 个文件）。`input` 30 → 迁 28、`select` 13 → 迁 12、`textarea` 6 → 迁 5、
+   `button` 5 → **迁 0**。最后那一档不是漏掉，是缺件（第 8 条）。并行会话的未跟踪新文件
+   `ModelSettingsPanel.tsx`（`select` 2 + `input` 3）**不在基线里、本片不碰**。
+7. **两处冲突如实挂起，没有自行改判据也没有为了清零硬绕**：
+   ① `MetricsPanel` 的 4 处（区间下拉 + 两只日期 + 那只重读键）撞**已落地的**机检 5.8-02
+   （`scripts/check-dashboard-readonly.ts` 判据 1 把进口白名单钉成四个包，引 `./ui/controls` 即红；
+   判据 4 又要求 `<button` 恰好一处且 `onClick` 只能 `void read()`）。让看板吃原件要放宽判据 1 那句
+   "引不到能力包就引不到第二条能力通道"——**裁定级，待用户表态**。
+   ② `ChatPanel` 输入区要的是 12px / `8px/12px` 的尺寸档，与 `FIELD_CLASS` 的 11px 元信息档不同族，
+   并入还是自成一档是设计判断，**待用户表态**。
+8. **新立 6.2-15** `[ ]`：页签 / 分段控件 / 行内披露三种按钮形态原件——这是 5 只裸 `<button>` 的唯一出路
+   （硬塞进 `DeskButton` 会造出"按钮长得像文字链"的第四种画法，留在面板里手写正是本片要消掉的东西）。
+   条目统计 41 → 42，状态位 24 `[x]` / 14 `[!]` / 4 `[ ]`；**6.2-14 仍是 `[!]`**。
+9. **机检按裁定仍不上**：「全换完再上机检」（2026-10-07 用户选定，逐字），且**不留基线豁免清单**。
+   所以 `check-renderer-conventions.ts` 里"禁止 `src/ui/**` 之外的 `<button>/<input>/<select>/<textarea>`"
+   这一条**没有写入**，6.2-14 在当下仍是 `[纪律]`，收尾自检的④⑤人工核对，不许声称"工具会拦"。
+10. **迁移期撞到的两类失误（都已修，值得留作口径）**：① 换开标签不换闭标签会写出
+    `TS17002: Expected corresponding JSX closing tag`——批量换件必须连闭标签一起换并**断言计数**
+    （本片 `</select>` → `</DeskSelect>` 在 5 个文件分别 2/1/3/2/1 处）；② 更危险的是**静默语义降级**：
+    `DeskCheck` 默认 `type="checkbox"`，把 `JobLabPanel` 的行内单选直接换上去会**拆掉同 `name` 归组**，
+    类型不报错、界面不报错、只在真点时才露。凡是"原件有默认值而调用点依赖另一种语义"的换件，
+    换完必须回头逐字读一遍 `type` / `name` / `tone` 三档。
+11. **门禁与还原**：`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`、`pnpm test` `TEST=0`（逐包全绿）、
+    `npx eslint --max-warnings 0 packages/renderer` `ESLINT=0`、`pnpm tsx scripts/check-renderer-conventions.ts`
+    `CONV=0`（62 个源文件）。`pnpm format:check` 全 app 只因并行会话当场在改的
+    `packages/config/src/settings.test.ts` 为红，本片 17 支文件 + 证据文件单独 `prettier --check` 回 `FMT_MINE=0`，
+    不代改他人文件。开发实例末态：theme 墨案、无注入 `<style>`（`styles:0`）、无探针残留（`probes:0`）、
+    无遮罩、`body.overflow:visible`、知识库编辑卡已收回。三份截图 md5 互不相同
+    （`0e31ddbf…` / `3f528343…` / `636b60ff…`）。

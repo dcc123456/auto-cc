@@ -1,0 +1,146 @@
+6.2 第二十七片取证：表单原件落地，54 处裸原生控件换掉 45 处
+================================================================
+
+时间：2026-10-07 00:28–00:48 UTC（脚本 `tmp/v6c/s27a.mjs` / `s27b.mjs`，全文读数 `tmp/v6c/s27a.out` / `s27b.out`）
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata`，CDP 10222），页面 target `--url 5173`，视口 1200×772 / dpr 2
+画面：`6.2-14-deskfield-{resume-dark,trust-dark,resume-light}.png`（墨案两份 + 毡案一份）
+
+一、这一片要证的是什么
+----------------------
+
+判据是 6.2-14 那条总目的第二腿：**"渲染层只留一套 UI 基础设施"**。它的可信读法不是"我数了源码里有几处
+`<input>`"，而是**活体页面上所有字段节点是不是算出同一个签名**——源码可以写得像一套，浏览器只认最终样式。
+所以本轮取三条腿：A) 全 DOM 字段普查（同一签名 = 真统一），B) 每只原件逐件计算值（原件自己的档确实用上了），
+C) 两处真实挂载的几何 + 一支 CSS 落地探针（新 utility 真的进了样式表）。
+
+plan §3.9 定的迁移顺序原文是「先补齐 L1 缺的四件表单原件（`DeskField` / `DeskSelect` / `DeskTextarea` /
+`DeskCheckbox`），再按面板分批改 54 处原生控件」。本片一次做完这两步，因为原件与调用点是同一条判据的两半：
+只补原件不动面板，54 还在；只动面板不补原件，就得在面板里各写一份 `FIELD_CLASS`（§2.2 禁止的正是这个）。
+
+二、A 腿：全 DOM 字段普查（墨案，所有工作台同时挂在 DOM 里）
+------------------------------------------------------------
+
+| 读数位 | 数值 | 含义 |
+| --- | --- | --- |
+| `fieldTotal` | **29** | 页面上所有 `input / select / textarea` 节点（含被隐藏视图里宽高为 0 的那些，见 §9 的 5.4-b ⑦） |
+| `fieldWithAction` | **27** | 带 `data-action` 凭据的字段——即经原件挂出来的（原件强制 `action`，见下第七节） |
+| `fieldRaw` | **2** | 只有两只例外：`textarea[data-testid="chat-input"]`（对话输入区）、`select[data-testid="metrics-preset"]`（看板区间下拉） |
+| `boxedStyles` 分桶 | **1 桶 × 28** | 除对话输入区之外，28 只带框字段的计算值全部塌成同一签名：`rgba(150,178,196,0.26) \| 6px \| rgb(8,12,16) \| 11px \| 4px/8px` |
+| 另一桶 | 1 × 1 | 对话输入区自己那一份：`… 0.26 \| 8px \| oklab(…)/0.6 \| 12px \| 8px/12px`（尺寸档不同，色族与描边同源） |
+| `buttonTotal` | **268** | 全 app 按钮总数（活体，非源码） |
+| `buttonWithoutAction` | **3** | 全在对话屏的自治档位分段控件——第五节说明为什么不是本片能收的 |
+| `rawButtonsNativeDisabled` / `deskButtonsNativeDisabled` | **0 / 0** | 268 只按钮里没有一只用原生 `disabled`（AGENTS §9 第④条 + 6.2 第十五片的 `aria-disabled` 口径全站成立） |
+
+**"28 只塌成 1 桶"是这一片唯一的核心读数**：统一不统一的判据就是它。改造前这些字段各写各的
+（`FIELD_CLASS` 字符串在若干面板里是手抄的字面量，另有若干面板干脆用浏览器默认描边），不可能同桶。
+
+三、B 腿：原件逐件计算值（墨案；`visible:false` 的件属于未展开视图，样式照样算得出）
+--------------------------------------------------------------------------------------
+
+| 选择器 | 件 | border | radius | bg | color | font | pad |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `input[data-action=kb-search]` | `DeskField` | `rgba(150,178,196,.26)` | 6px | `rgb(8,12,16)` | `rgb(194,209,220)` | 11px | 4px/8px |
+| `input[data-action=jd-limit]`（`type=number`） | `DeskField` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `input[data-action=schedule-expression]` | `DeskField` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `input[data-action=navigate-url]` | `DeskField` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `select[data-action=kb-import-mode]` | `DeskSelect` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `select[data-action=schedule-plan]` | `DeskSelect` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `select[data-action=resume-locale]` | `DeskSelect` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+| `textarea[data-action=gap-jd]` | `DeskTextarea` | 同上 | 6px | 同上 | 同上 | 11px | 4px/8px |
+
+`type=number` 与 `type=text`、`select-one`、`textarea` 四件的读数**逐位一致**——这就是"扩展现有接口而不是
+再写一套"（§2.3）在样式面上的证据：`FIELD_CLASS` 只有一份，四件都从它长出来。
+`param-platform` / `kb-edit-payload` / `assembly-config` / `consent-accept` / `resume-editor-*` 这几只在 A 腿里
+`missing:true`，因为它们的宿主那一态当时没打开；C 腿专门把它们打开重取（下一节）。
+
+四、C 腿：真实挂载的几何（把编辑态开出来量，避免只量到隐藏节点）
+------------------------------------------------------------------
+
+| 腿 | 读数 |
+| --- | --- |
+| 知识库新建卡（点 `[data-action=new]`） | `select[data-action=kb-edit-kind]` **60×27**、`textarea[data-action=kb-edit-payload]` **942×82**、字体 `"IBM Plex Mono"`（`className="font-mono"` 是宽度/字体档，描边仍在原件里）；两者 border/radius/bg/font/pad 与第三节同签名 → 挂进 DOM 的原件与隐藏视图里的原件是同一套档 |
+| 取消那张卡 | 返回 `cancelled`，卡收回 |
+| 简历排版编辑器 | 那颗 `[data-action=open-editor]` 是 `aria-disabled="true"` + `data-disabled-reason="NO_SEED_DOC"` + `title="先落一份文档，预览与导出才知道拿哪一份"`——**三件套齐**，所以 `input[type=range]` 与两张 `DeskSelect` 这一轮取不到（编辑器进不去）。`DeskRange` 的活体几何因此改由 C-3 的 CSS 探针兑现 |
+
+这里要留一句：`NO_SEED_DOC` 是**真实的前置条件**，不是取证工具的失败。本轮没有为了量到滑杆去伪造一份种子文档，
+也没有绕闸门；滑杆的档改由探针页内实测（第五节），并在第九节如实标为"半腿"。
+
+五、C-3：CSS 落地探针（新写进原件的 utility 有没有真的进样式表）
+------------------------------------------------------------------
+
+在页面里挂一份最小探针（不注入真面板，`probes` 量完即摘），六件读数：
+
+| 探针 | 读数 | 判的是什么 |
+| --- | --- | --- |
+| `DeskCheck` 默认档（celadon） | 14×14、`accent-color rgb(127,182,173)` | 勾选框的归属色不是浏览器那支蓝（6.1-06 普查里它是全 app 唯一的离色控件） |
+| `DeskCheck` `tone="seal"` | 14×14、`accent-color rgb(226,84,58)` | 签字类勾选与朱砂档同色；`ConsentModal` 的 `[data-action=consent-accept]` 就吃这一档 |
+| `DeskField isInvalid` | `border rgb(226,84,58)` + `box-shadow` 第 4 层朱砂环、136×28 | 非法态是**换掉** `border-line-strong`（同族 utility 追加不生效，见 AGENTS §9 补片），不是叠上去 |
+| `DeskField` 正常 | `border rgba(150,178,196,.26)`、`box-shadow none` | 与非法件同尺寸，只有色与环的差 → 非法不长高不抖动 |
+| `DeskRange` | 129×6、`accent-color rgb(127,182,173)`、`cursor pointer` | 滑杆不吃带框档（所以它是第五件原件而不是 `DeskField` 的一个 `type`） |
+| `probeLeft` | `0` | 探针节点摘干净，开发实例没留样式垃圾 |
+
+六、毡案（浅色）那半边
+----------------------
+
+theme 切到 `light` 后，同一只字段：**`border rgba(38,44,48,0.3)` / `bg rgb(216,211,198)` / `color rgb(51,60,68)`**——
+即毡案的 `line-strong` / `ink-950` / `slate-700` 档，与墨案同一条 class（色阶翻面由 L0 令牌负责，原件里
+没有一处写死十六进制）。画面 `6.2-14-deskfield-resume-light.png`。
+切回墨案后末态：`{"theme":"dark","bodyOverflow":"visible","probes":0,"styles":0}`。
+
+七、源码账：54 → 45 迁移，剩 9 处，另有 5 处不归本片
+------------------------------------------------------
+
+| 项 | 数值 |
+| --- | --- |
+| 改造前普查（plan §3.9） | **54** = `<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5 |
+| 本片迁进原件 | **45** 处 / 16 个文件（`KbPanel` 7、`JobLabPanel` 6、`ScriptPanel` 4、`SchedulePanel` 4、`ResumePanel` 4、`GeneratePanel` 3、`ResumeEditor` 3、`PdfEditPanel` 3、`OperatorParamForm` 3、`WorkflowPlans` 2、`SessionPanel` 1、`SedimentCard` 1、`GapPanel` 1、`AssemblyPanel` 1、`ConsentModal` 1、`AgentPauseCards` 1） |
+| 剩余 | **9** = `<button>` 5（`App` 导航 1、`GeneratePanel` 行内披露 1、`GapPanel` 行内披露 1、`ChatPanel` 自治分段 1 处 JSX 长 3 只、`MetricsPanel` 重读 1）+ `<textarea>` 1（`ChatPanel` 输入区）+ `MetricsPanel` 字段 3（`select` 区间 1 + `input` 日期 2） |
+| 校验 | 45 + 9 = 54；逐 tag 也对得上：`input` 30 → **迁 28 / 剩 2**，`select` 13 → **迁 12 / 剩 1**，`textarea` 6 → **迁 5 / 剩 1**，`button` 5 → **迁 0 / 剩 5**（28+12+5+0 = 45） |
+| 不计入本片的 5 处 | `ModelSettingsPanel.tsx`（`select` 2 + `input` 3）是**并行会话的未跟踪新文件**，不在 54 的基线里，也不归我改；它落地后要走同一批原件，账记在欠账里 |
+
+`button` 那一档 0 迁移**不是漏掉**，是缺 L1 形态原件（第八节第 1 条）。这一点必须写清楚，否则"45/54"会被
+读成"剩下 9 处是收尾的体力活"，而实际上下面的 5 只按钮要先长三件新原件。
+
+八、为什么这 9 处不是"顺手一起换掉"，以及它们各自缺什么
+--------------------------------------------------------
+
+1. **`<button>` 5 处缺的是三种新形态原件**，不是缺一次 import：导航页签（`App.tsx`：选中态是下边线 + 文字提亮，
+   `DeskButton` 的六档里没有"页签"这一档）、分段控件（`ChatPanel` 自治档位：三只互斥、选中实底、组内共边）、
+   行内披露（`GeneratePanel` / `GapPanel` 的"看证据"：只有下划线文案，无框无底）。
+   按 §2.6/§2.7 不能为了清零把它们硬塞进 `DeskButton`（那会造出"按钮长得像文字链"的第四种画法），
+   也不能在各面板里继续手写（那正是本片要消掉的东西）。**下一片的落点是先补这三件原件。**
+2. **`MetricsPanel` 的 4 处撞上一条已落地的机检**：`scripts/check-dashboard-readonly.ts` 判据 1 把看板组件的
+   进口白名单钉成 `react / react-i18next / lucide-react / @auto-cc/shared` 四个包，引 `./ui/controls` 即红；
+   判据 4 又要求该文件里 `<button` 恰好一处且 `onClick` 只能是 `void read()`。让看板吃原件需要**放宽判据 1**
+   （"引不到能力包"这条最硬的防线的措辞要重写），这是裁定级的改动，**待用户表态**，本片没有自行放宽。
+   看板的区间下拉与两只日期输入因此仍用手抄 `FIELD_CLASS`（活体读数已落在第六节之外的例外桶里）。
+3. **`ChatPanel` 输入区**要的是另一个尺寸档（12px 正文、`8px/12px` 内边距、可自适应高度），与 `FIELD_CLASS`
+   的 11px 元信息档不同族。并入还是自成一档属于设计判断，**待用户表态**。
+
+九、还欠什么（本片不声称已完成的部分）
+--------------------------------------
+
+- **`DeskRange` 的活体几何是半腿**：真实挂载被 `NO_SEED_DOC` 挡住（第四节），只有 CSS 探针那份读数。
+  补齐需要在开发档里先落一份种子文档，那会改写用户实例的状态——按 §7.2 与本窗一贯口径不做。
+- **`<Controls>` 的 Tailwind 覆盖**（裁定 2）没动，画布 chrome 仍是第三方默认色。
+- **机检不上**：按裁定「全换完再上机检」，`check-renderer-conventions.ts` 里"禁止 `src/ui/**` 之外的
+  `<button>/<input>/<select>/<textarea>`"这条**仍未写入**，也没留基线豁免清单。所以 6.2-14 在当下**仍是
+  `[纪律]`**，收尾自检的④⑤靠人工核对，不许声称"工具会拦"。
+- **条件态（`:focus` / 非法环 / 勾选变色）无 DOM 测试可替代**：`packages/renderer` 里没有 jsdom/vitest 测试环境
+  （无 `*.test.tsx`），这类状态只有活体一条取证路，本轮全部按 C 腿取。
+
+十、门禁与还原
+--------------
+
+`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`（链内含 `check-renderer-conventions.ts` 与
+`check-tool-contract.ts`，末行读数：许可证记账通过 / 生产依赖 88 包在册）、`pnpm test` `TEST=0`
+（逐包全绿，含 `resume-kb 398` / `platform-boss 139` / `main 79`）、
+`npx eslint --max-warnings 0 packages/renderer` `ESLINT=0`、`pnpm tsx scripts/check-renderer-conventions.ts`
+`CONV=0`（2 个语言包 / 62 个源文件 / 派生文案 50 条齐备）。
+`pnpm format:check` **全 app 为红一条**：`[warn] packages/config/src/settings.test.ts`——那是**并行会话当场在改的
+文件**，不在本片、不代改；本片 17 支文件 + 本证据文件单独跑 `prettier --check` 回
+`All matched files use Prettier code style!`（`FMT_MINE=0`）。日志 `tmp/v6c/s27-final-*.log`。
+开发实例末态：theme 墨案、无注入 `<style>`（`styles:0`）、无探针残留（`probes:0`）、无遮罩、
+`body.overflow:visible`、知识库编辑卡已收回。
+三份截图 md5 互不相同：`0e31ddbf988f634dfc9ec5f53ba2fc24`（resume-dark，316954 B）/
+`3f5283436e5739dee5ce59fc70d9c3f8`（resume-light，308229 B）/ `636b60ffa9cb37437990051df5cfbb20`（trust-dark，281985 B）。
