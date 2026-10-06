@@ -215,19 +215,22 @@ export function MetricsPanel() {
   const quota = view?.quota;
 
   return (
-    <section data-testid="metrics-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <section data-testid="metrics-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <BarChart3 size={16} />
           {t('metrics.heading')}
         </h2>
+        {/* 墨案的描边档样式只能整串写在这里：`check-dashboard-readonly.ts` 判据 1 把本文件的
+            进口钉死在四个包（引不到能力包就引不到第二条外发通道），所以不能改用 `DeskButton`。
+            判据 4 同时要求全文件恰好一只按钮，且它的 onClick 只能是 `void read()`。 */}
         <button
           type="button"
           data-action="refresh"
           onClick={() => void read()}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border border-line-strong bg-ink-800 px-2 py-0.5 text-[11px] font-medium text-slate-100 transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-slate-500 hover:bg-ink-750 hover:text-slate-50 active:translate-y-px active:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={12} />
           {t('metrics.refresh')}
         </button>
       </div>
@@ -243,7 +246,7 @@ export function MetricsPanel() {
           data-testid="metrics-preset"
           value={pref.preset}
           onChange={(event) => applyPreference({ ...pref, preset: event.target.value as RangePreset })}
-          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300"
+          className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
         >
           <option value="last7">{t('metrics.presetLast7')}</option>
           <option value="last30">{t('metrics.presetLast30')}</option>
@@ -259,7 +262,7 @@ export function MetricsPanel() {
                 type="date"
                 value={pref.fromDay}
                 onChange={(event) => applyPreference({ ...pref, fromDay: event.target.value })}
-                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300"
+                className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
               />
             </label>
             <label className="flex items-center gap-1" htmlFor="metrics-to">
@@ -270,7 +273,7 @@ export function MetricsPanel() {
                 type="date"
                 value={pref.toDay}
                 onChange={(event) => applyPreference({ ...pref, toDay: event.target.value })}
-                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300"
+                className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
               />
             </label>
           </>
@@ -285,7 +288,7 @@ export function MetricsPanel() {
       {notice && (
         <p
           data-testid="metrics-notice"
-          className="mt-2 flex items-start gap-1 rounded-md border border-amber-900 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200"
+          className="mt-2 flex items-start gap-1 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-amber"
         >
           <CircleAlert size={14} className="mt-0.5 shrink-0" />
           {notice}
@@ -304,7 +307,7 @@ export function MetricsPanel() {
             key={level.level}
             data-funnel-level={level.level}
             data-funnel-count={level.count ?? 'null'}
-            className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+            className="rounded-lg border border-line bg-ink-950/60 px-3 py-2"
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[11px] text-slate-300">{t(LEVEL_KEYS[level.level])}</span>
@@ -317,12 +320,12 @@ export function MetricsPanel() {
                 className={`h-2 rounded-full ${
                   level.count === null
                     ? 'w-0 bg-slate-700'
-                    : `${BAR_STEPS[barStepOf(level.count, maxCount)]} bg-sky-500`
+                    : `${BAR_STEPS[barStepOf(level.count, maxCount)]} bg-celadon`
                 }`}
               />
             </div>
             {level.unavailableReason && (
-              <p data-funnel-reason={level.level} className="mt-1 text-[11px] text-amber-300">
+              <p data-funnel-reason={level.level} className="mt-1 text-[11px] text-amber">
                 {t('metrics.noSource', { reason: level.unavailableReason })}
               </p>
             )}
@@ -339,7 +342,7 @@ export function MetricsPanel() {
         ) : (
           <>
             {quota.mode === null ? (
-              <p data-testid="metrics-gate-missing" className="mt-1 text-[11px] text-amber-300">
+              <p data-testid="metrics-gate-missing" className="mt-1 text-[11px] text-amber">
                 {t('metrics.gateMissing')}
               </p>
             ) : (

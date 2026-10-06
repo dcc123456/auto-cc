@@ -1,0 +1,113 @@
+信任屏换装 + 禁用原因码：活体读数（spec 6.2-06 / 6.4 第五片）
+=====================================================================
+
+时间：2026-10-06 06:05~06:07（本机 macOS arm64，app 由 `pnpm dev` 常驻，CDP 10222）
+取法：`pnpm harness eval --url 5173 --expr-file tmp/p6/trust-read{,2,3,4}.mjs`
+      每次读前点 `[data-view="trust"]`，读完点回原视图——三次读数末尾都是
+      `"restoredTo": "chat"`，用户的视图没被我留在信任屏。
+
+**同样只有读数、没有截图**：`visibilityState: "hidden"`（窗口不在前台，CDP 不出帧，
+本轮也没有真点输入落页）。§7.1 的 V 半边仍待用户在场把窗口带到前台补，见 spec 行 6.2-01。
+
+---------------------------------------------------------------------
+① 令牌基线（从活体计算色反推，与 globals.css 逐位对得上）
+---------------------------------------------------------------------
+ink-950 = rgb(8,12,16)          ink-900 = rgb(19,28,35)
+ink-850 = rgb(15,22,28)         ink-750 = rgb(24,35,43)
+slate-50 = rgb(232,238,243)     slate-100 = rgb(219,228,236)
+slate-400 = rgb(164,182,195)    slate-500 = rgb(108,128,145)
+line = rgba(150,178,196,.14)    line-strong = rgba(150,178,196,.26)
+seal = rgb(226,84,58)           jade = rgb(79,183,138)
+amber = rgb(224,163,63)         celadon = rgb(127,182,173)
+jade-wash = rgba(79,183,138,.12)   amber-wash = rgba(224,163,63,.13)
+seal / jade / amber 的描边在活体里报成 oklab 形式（Tailwind 的 `/40`、`/45` 透明度落进
+oklab 通道），本轮读到的三个 oklab 串各自与 `--color-seal`/`--color-jade`/`--color-amber` 同色相。
+
+---------------------------------------------------------------------
+② 会话区（`SessionPanel.tsx`）：11 只 `[data-effect]` 节点，档位逐个对上
+---------------------------------------------------------------------
+容器：border = rgba(150,178,196,.14)（`line`）、bg = ink-900 @ .6 —— 旧的
+      `border-slate-800 bg-slate-900/60` 已不存在（全文件 grep `border-slate-8` 零命中）。
+`data-session-id` 行数 = 3（fixture / fixture-alt / boss），每行 open·probe·logout 三只：
+  open    → data-effect="solid"  color rgb(232,238,243) bg rgb(24,35,43) border rgb(85,103,122)
+  probe   → data-effect="line"   color rgb(219,228,236) bg rgb(19,28,35)  border rgba(150,178,196,.26)
+  logout  → data-effect="seal"   color rgb(226,84,58)   bg seal/18        border seal/45
+  refresh → data-effect="line"（区头那只）
+  close-view → data-effect="ghost" color rgb(164,182,195) bg/border 全透明
+`effectAttrs` 原样清单（11 项）：refresh=line, open=solid, probe=line, logout=seal ×3 行, close-view=ghost。
+—— 退出登录走朱砂是设计稿的"不可逆"归属（清的是本机那份会话），不是随手涂红。
+
+登录态标签两档（`AUTH_CLASS`）活体：
+  「已登录」→ color rgb(79,183,138)（jade）+ bg rgba(79,183,138,.12) + border jade/40 —— 只读已核
+  「未登录」→ color rgb(224,163,63)（amber）+ bg rgba(224,163,63,.13) + border amber/45 —— 等人来扫码
+  （旧写法是 emerald/amber 的 Tailwind 原生色阶；换装后两档都只吃语义令牌，浅色主题跟着 `--color-*` 翻。）
+
+内核页面区（`[data-testid="kernel-page"]`）地址输入框：
+  border rgba(150,178,196,.26)（`line-strong`）、bg rgb(8,12,16)（`ink-950`）、radius 6px（`rounded-md`）。
+
+---------------------------------------------------------------------
+③ 禁用原因码：机制整条活体取到（这是 6.2-06 欠的那一笔）
+---------------------------------------------------------------------
+地址草稿为空时的「导航」按钮（`[data-testid="kernel-page"] [data-action="navigate"]`）：
+  data-disabled-reason = "URL_EMPTY"
+  title                = "先填地址，导航才知道去哪儿"
+  aria-disabled        = "true"
+  computed cursor      = "not-allowed"
+  color / bg           = rgb(108,128,145) / rgb(15,22,28)（slate-500 on ink-850：禁用不提亮）
+=> 07 稿④"按不动必须说得出为什么"在信任屏兑现了：属性、tooltip、光标、底色四项同时在节点上。
+
+`ACTION_BUSY` 那一支**没取到活体**，原因如实记：`busy` 只在动作在途时才为真，而本地仿站的
+`probe` 在 25ms 内就返回（`inFlight` 六只按钮全为 null，`settled.notice` = "探测平台 fixture：成功"），
+抓不到那一拍；真实平台的探测不许自动打（§7.2）。它与 URL_EMPTY 走的是同一只 `DeskButton` 的
+同两个 prop（`disabledReason` + `disabledReasonLabel`），所以这一格记"机制已过、码未取证"。
+副产物一行提示「探测平台 fixture：成功」留在界面上，是只读探测的正常回执，人再动一次就被覆盖。
+
+---------------------------------------------------------------------
+④ 用量面板（`UsagePanel.tsx`）：闸门判定的三档色跟着语义走
+---------------------------------------------------------------------
+refresh → data-effect="line"（color rgb(219,228,236) / bg rgb(19,28,35) / border line-strong）
+send ×2（greet、deliver；search 那行按口径只有"由抓取编排消费"的说明，没有代发口）
+      → data-effect="seal"，color rgb(226,84,58)，bg seal/18，border seal/45
+      —— 旧写法是 `border-sky-800 text-sky-300 hover:bg-sky-950 disabled:opacity-40`：
+         外发按钮涂青瓷是串色，且原生 `disabled` 让 tooltip 出不来。现在 `markers` 把
+         `data-send-action` 逐字保住（`data-send-action="greet"` / `"deliver"`），5.x 的验收通道没拆。
+闸门判定行 `textClip`：三行都是 rgb(79,183,138)（jade），文案「本地无限额度（当前阶段不花钱）」。
+      旧映射 `text-rose-300 / text-emerald-300` → 现 `text-seal / text-jade`（拒绝=朱砂、无限/已核=青碧）。
+      **本轮额度未耗尽**，所以 `text-seal` 那一支只有静态映射，没有活体计算色。
+行的容器（`[data-gate-action]` 的 li）本轮只读了文字色，没读 border/bg——留一条待补，不猜。
+
+---------------------------------------------------------------------
+⑤ 看板（`MetricsPanel.tsx`）：一只按机检要求"自带样式"的按钮
+---------------------------------------------------------------------
+漏斗条填充：4 级 count=0 的填充都是 rgb(127,182,173)（`celadon`，旧 `bg-sky-500` = rgb(103,160,150)）；
+  `interview`（count=null，无数据源）填充 rgb(30,42,51)（slate-700 中性档）——没有数据就不许长出颜色。
+卡片容器：border rgba(150,178,196,.14)（line）、bg ink-950 @ .6。
+筛选下拉：border line-strong、bg rgb(8,12,16)。
+重读按钮：`data-effect` 为 **null**，这是本文件里唯一一只没走 `DeskButton` 的按钮，原因是
+  `scripts/check-dashboard-readonly.ts` 判据 1 把本文件的进口钉死在
+  react / react-i18next / lucide-react / @auto-cc/shared 四个包（"引不到能力包就引不到第二条外发通道"），
+  判据 4 还要求全文件恰好一只按钮、onClick 只能是 `void read()`。所以墨案描边档在这里写成整串字面量，
+  并在源码里留了这条原因。**没有为了过样式去改那条机检。**
+  活体色：color rgb(219,228,236) / bg rgb(19,28,35) / border rgba(150,178,196,.26) / radius 7px
+  —— 与 ② 那只 `line` 档 DeskButton 逐位相同（rounded-control = 7px）。
+
+---------------------------------------------------------------------
+⑥ 顺手抽的一层公共（§2.2）
+---------------------------------------------------------------------
+`ui/controls.tsx` 新增导出 `FIELD_CLASS`（表单控件共用那一串）。替换点：SessionPanel 1 处、
+JobLabPanel 5 处、MetricsPanel 0 处（⑤ 的机检不许它 import）。此前这串字面量已在两个文件里
+数到第三次出现，按 §2.2 必须抽；ChatPanel 的多行输入框是另一档形状（`rounded-lg px-3 py-2 text-xs`），
+不并进来。
+
+---------------------------------------------------------------------
+⑦ 四道门禁（不接管道读，按 §7.4① 落盘再取退出码）
+---------------------------------------------------------------------
+pnpm format > tmp/p6/fmt19.log        → FMT=0
+pnpm format:check > tmp/p6/fc19.log   → FC=0（"All matched files use Prettier code style!"）
+pnpm typecheck > tmp/p6/tc19.log      → TC=0
+pnpm lint > tmp/p6/lint20.log         → LINT=0（含 check-dashboard-readonly / 渲染层规范 58 源文件 /
+                                          工具契约 17×2 语言包 / 许可证记账 88 包）
+pnpm test > tmp/p6/test19.log         → TEST=0（23 个包 "Test Files … passed"，日志里零 failed；
+                                          尾部读数：resume-kb 398、platform-boss 139、main 79）
+中途 LINT 红过两次，都是⑤ 那条机检拦的：第一次报"引了 ./ui/controls"，第二次报"<button> 数量是 2"
+（我在注释里写了那一串的原文，被当成第二只按钮）。两次都按机检的意图修组件，**没有改机检**。

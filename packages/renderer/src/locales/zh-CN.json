@@ -95,6 +95,8 @@
         "missing": "会话 cookie 不存在",
         "expired": "会话 cookie 已过期"
       },
+      "reasonBusy": "上一条动作还没回来",
+      "reasonUrlEmpty": "先填地址，导航才知道去哪儿",
       "auth": {
         "active": "已登录",
         "expired": "未登录"
@@ -419,6 +421,7 @@
       "heading": "额度闸门与用量账本",
       "refresh": "重新读取用量",
       "send": "发一条样例外发",
+      "reasonBusy": "上一条动作还没回来",
       "actionSend": "外发 {{action}}",
       "sampleMessage": "来自 auto-cc 用量面板的样例外发（{{action}}）",
       "receipt": "已送达：账本行 {{id}} · 对端累计收到 {{count}} 条",

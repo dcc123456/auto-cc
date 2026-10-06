@@ -95,6 +95,8 @@
         "missing": "session cookie absent",
         "expired": "session cookie expired"
       },
+      "reasonBusy": "The previous action hasn't returned yet",
+      "reasonUrlEmpty": "Enter a URL first so navigation has a target",
       "auth": {
         "active": "signed in",
         "expired": "signed out"
@@ -419,6 +421,7 @@
       "heading": "Quota gate & usage ledger",
       "refresh": "Reload usage",
       "send": "Send a sample",
+      "reasonBusy": "The previous action hasn't returned yet",
       "actionSend": "Send {{action}}",
       "sampleMessage": "Sample outbound from the usage panel ({{action}})",
       "receipt": "Delivered: ledger row {{id}} · peer holds {{count}} in total",

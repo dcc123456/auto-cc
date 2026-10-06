@@ -9,16 +9,21 @@ import type {
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { formatClock } from './format';
 
 /** 失效事件最多留几条：面板是验收入口，不是历史库。 */
 const EXPIRED_LIMIT = 3;
 
-/** 登录态 → 颜色：只用 Tailwind 静态类名，运行期拼类名会让样式缺失。 */
+/**
+ * 登录态 → 语义色（03 稿的四色归属）：已核到登录态是"读回来的好消息"= 青玉，
+ * 失效是"这件事现在得人来办"= 琥珀；不用 rose，朱砂只留给外发与不可逆。
+ * 只用 Tailwind 静态类名，运行期拼类名会让样式缺失。
+ */
 const AUTH_CLASS: Record<SessionPlatformView['auth'], string> = {
-  active: 'bg-emerald-950 text-emerald-300 border-emerald-800',
-  expired: 'bg-amber-950 text-amber-300 border-amber-800',
+  active: 'border-jade/40 bg-jade-wash text-jade',
+  expired: 'border-amber/45 bg-amber-wash text-amber',
 };
 
 /**
@@ -112,23 +117,30 @@ export function SessionPanel() {
       apply: setPage,
     });
 
+  /**
+   * 「导航」按不动的原因是哪一个（6.2-06）：先说在飞的这一条，再说地址没填。
+   * 判据直接取调用点已有的两个条件，不在界面另数一遍（§2.5）。
+   */
+  const navigateReason = busy !== undefined ? 'ACTION_BUSY' : urlDraft.trim() === '' ? 'URL_EMPTY' : undefined;
+  const navigateReasonLabel =
+    navigateReason === 'ACTION_BUSY'
+      ? t('session.reasonBusy')
+      : navigateReason === 'URL_EMPTY'
+        ? t('session.reasonUrlEmpty')
+        : undefined;
+
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <KeyRound size={16} />
             {t('session.heading')}
           </h2>
-          <button
-            type="button"
-            data-action="refresh"
-            onClick={() => void read()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-          >
+          <DeskButton action="refresh" variant="line" onClick={() => void read()}>
             <RefreshCw size={14} />
             {t('session.refresh')}
-          </button>
+          </DeskButton>
         </div>
 
         {/* 内核视图地址是 percent-encoded 的长串，没有断行点：不 break-all 就会把整页撑出横向滚动条。 */}
@@ -142,7 +154,7 @@ export function SessionPanel() {
 
         {viewError && (
           <p
-            className="mt-2 break-all rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-[11px] text-rose-300"
+            className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
             data-stat="view-error"
           >
             {t('session.viewError', { code: viewError.code, description: viewError.description, url: viewError.url })}
@@ -155,7 +167,7 @@ export function SessionPanel() {
               <li
                 key={`${event.platform}-${String(index)}`}
                 data-expired-platform={event.platform}
-                className="flex items-center gap-2 rounded-md border border-amber-800 bg-amber-950 px-3 py-2 text-[11px] text-amber-300"
+                className="flex items-center gap-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-amber"
               >
                 <ShieldAlert size={12} />
                 {t('session.expiredBanner', {
@@ -170,7 +182,7 @@ export function SessionPanel() {
 
         {notice && (
           <p
-            className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
             data-testid="session-notice"
           >
             {notice}
@@ -182,7 +194,7 @@ export function SessionPanel() {
             <li
               key={platform.id}
               data-session-id={platform.id}
-              className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+              className="rounded-lg border border-line bg-ink-950/60 px-3 py-2"
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -195,36 +207,43 @@ export function SessionPanel() {
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    data-action="open"
+                  <DeskButton
+                    action="open"
+                    variant="solid"
+                    compact
                     disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     onClick={() => open(platform.id)}
-                    className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
                   >
                     <KeyRound size={12} />
                     {t('session.open')}
-                  </button>
-                  <button
-                    type="button"
-                    data-action="probe"
+                  </DeskButton>
+                  <DeskButton
+                    action="probe"
+                    variant="line"
+                    compact
                     disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     onClick={() => probe(platform.id)}
-                    className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                   >
                     <Radar size={12} />
                     {t('session.probe')}
-                  </button>
-                  <button
-                    type="button"
-                    data-action="logout"
+                  </DeskButton>
+                  {/* 退出登录清的是本机那份会话，动完就回不去——朱砂那一档正是"风险/不可逆"。 */}
+                  <DeskButton
+                    action="logout"
+                    variant="seal"
+                    compact
                     disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     onClick={() => logout(platform.id)}
-                    className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                   >
                     <LogOut size={12} />
                     {t('session.logout')}
-                  </button>
+                  </DeskButton>
                 </div>
               </div>
               <p className="mt-1 break-all text-[11px] text-slate-500">
@@ -245,35 +264,39 @@ export function SessionPanel() {
         </ul>
 
         <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            data-action="close-view"
+          <DeskButton
+            action="close-view"
+            variant="ghost"
+            compact
             disabled={!!busy}
+            disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+            disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
             onClick={closeView}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
             <LogOut size={12} />
             {t('session.close')}
-          </button>
+          </DeskButton>
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4" data-testid="kernel-page">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4" data-testid="kernel-page">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <ScanText size={16} />
             {t('session.pageHeading')}
           </h2>
-          <button
-            type="button"
-            data-action="snapshot"
+          <DeskButton
+            action="snapshot"
+            variant="line"
+            compact
             disabled={!!busy}
+            disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+            disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
             onClick={readPage}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
           >
             <RefreshCw size={14} />
             {t('session.snapshot')}
-          </button>
+          </DeskButton>
         </div>
 
         <div className="mt-3 flex items-center gap-2">
@@ -283,18 +306,20 @@ export function SessionPanel() {
             value={urlDraft}
             onChange={(event) => setUrlDraft(event.target.value)}
             placeholder={t('session.navigatePlaceholder')}
-            className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+            className={`${FIELD_CLASS} flex-1`}
           />
-          <button
-            type="button"
-            data-action="navigate"
+          <DeskButton
+            action="navigate"
+            variant="solid"
+            compact
             disabled={!!busy || urlDraft.trim() === ''}
+            disabledReason={navigateReason}
+            disabledReasonLabel={navigateReasonLabel}
             onClick={navigate}
-            className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
           >
             <Compass size={12} />
             {t('session.navigate')}
-          </button>
+          </DeskButton>
         </div>
 
         {page ? (
@@ -322,7 +347,7 @@ export function SessionPanel() {
               </p>
             )}
             <pre
-              className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-800 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-400"
+              className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[11px] text-slate-400"
               data-page-body={String(page.bodyText.length)}
             >
               {page.bodyText}

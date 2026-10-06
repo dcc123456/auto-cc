@@ -10,6 +10,7 @@ import {
   type UsageSummaryView,
 } from '@auto-cc/shared';
 import { AuditSection } from './AuditSection';
+import { DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 这个动作能不能从面板代发（`search` 的账由 `jd.capture` 记，面板没有「发一次搜索」这种口）。 */
@@ -86,26 +87,21 @@ export function UsagePanel() {
     );
 
   return (
-    <section data-testid="usage-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <section data-testid="usage-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Gauge size={16} />
           {t('usage.heading')}
         </h2>
-        <button
-          type="button"
-          data-action="refresh"
-          onClick={() => void read()}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-        >
-          <RefreshCw size={14} />
+        <DeskButton action="refresh" variant="line" compact busy={!!busy} onClick={() => void read()}>
+          <RefreshCw size={12} />
           {t('usage.refresh')}
-        </button>
+        </DeskButton>
       </div>
 
       {notice && (
         <p
-          className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
           data-testid="usage-notice"
         >
           {notice}
@@ -120,14 +116,14 @@ export function UsagePanel() {
             <li
               key={action}
               data-gate-action={action}
-              className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg border border-line bg-ink-950/60 px-3 py-2"
             >
               <span
                 className={`break-all text-[11px] ${
                   decision && !decision.allowed
-                    ? 'text-rose-300'
+                    ? 'text-seal'
                     : decision?.remaining === null
-                      ? 'text-emerald-300'
+                      ? 'text-jade'
                       : 'text-slate-300'
                 }`}
               >
@@ -142,17 +138,20 @@ export function UsagePanel() {
                       : t('usage.remaining', { count: decision.remaining })}
               </span>
               {canSend ? (
-                <button
-                  type="button"
-                  data-action="send"
-                  data-send-action={action}
+                <DeskButton
+                  action="send"
+                  markers={{ sendAction: action }}
+                  variant="seal"
+                  compact
+                  busy={!!busy}
                   disabled={!!busy}
+                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                  disabledReasonLabel={busy !== undefined ? t('usage.reasonBusy') : undefined}
                   onClick={() => send(action)}
-                  className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
                 >
                   <Send size={12} />
                   {t('usage.send')}
-                </button>
+                </DeskButton>
               ) : (
                 <span className="text-[11px] text-slate-500" data-gate-note={action}>
                   {t('usage.consumedByCapture')}

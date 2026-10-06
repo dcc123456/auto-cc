@@ -28,7 +28,7 @@ import type {
 } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { ConsentCard, ConsentStatusRow } from './ConsentCard';
-import { DeskButton } from './ui/controls';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -350,7 +350,7 @@ export function JobLabPanel() {
             value={keywordDraft}
             onChange={(event) => setKeywordDraft(event.target.value)}
             placeholder={t('jd.keywordPlaceholder')}
-            className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+            className={FIELD_CLASS}
           />
           <div className="flex gap-2">
             <input
@@ -359,7 +359,7 @@ export function JobLabPanel() {
               value={cityDraft}
               onChange={(event) => setCityDraft(event.target.value)}
               placeholder={t('jd.cityPlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+              className={`${FIELD_CLASS} flex-1`}
             />
             <input
               type="text"
@@ -367,7 +367,7 @@ export function JobLabPanel() {
               value={experienceDraft}
               onChange={(event) => setExperienceDraft(event.target.value)}
               placeholder={t('jd.experiencePlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+              className={`${FIELD_CLASS} flex-1`}
             />
             <input
               type="number"
@@ -376,7 +376,7 @@ export function JobLabPanel() {
               value={limitDraft}
               onChange={(event) => setLimitDraft(event.target.value)}
               placeholder={t('jd.limitPlaceholder')}
-              className="w-24 min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+              className={`${FIELD_CLASS} w-24`}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -476,7 +476,7 @@ export function JobLabPanel() {
           value={resumePathDraft}
           onChange={(event) => setResumePathDraft(event.target.value)}
           placeholder={t('deliver.resumePathPlaceholder')}
-          className="mt-2 w-full min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+          className={`${FIELD_CLASS} mt-2 w-full`}
         />
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
