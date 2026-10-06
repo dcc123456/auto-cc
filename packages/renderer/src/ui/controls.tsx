@@ -20,10 +20,11 @@ const SPINNER_SLOT = 'inline-flex w-3.5 shrink-0 items-center justify-center';
  * 拼出来的 class 不会生成。悬停一律「提亮一档、无位移」，位移只允许出现在按下瞬间。
  * @param variant 语义档
  * @param disabled 是否禁用（禁用时不提亮，靠 ring 属性把原因带在节点上）
+ * @param compact 窄档：贴在行内的小按钮用，字号与内边距都收一档
  */
-const buttonClass = (variant: DeskVariant, disabled: boolean): string => {
+const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean): string => {
   const base =
-    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border px-3 py-1.5 text-xs font-medium ' +
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'} font-medium ` +
     'transition-[background-color,border-color,color,box-shadow] duration-150 ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70 ' +
     (disabled
@@ -69,6 +70,13 @@ export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   /** 禁用时挂到节点上的原因码（`NO_CONSENT` / `ENTITLEMENT_EXHAUSTED` / …），harness 与读屏都取这一项。 */
   disabledReason?: string;
   /**
+   * 原因码对人说的话（调用方负责翻译）。只给码不给这句话，禁用就成了"界面不说谎"的反例：
+   * 人只知道按不动，不知道为什么按不动（07 稿④）。
+   */
+  disabledReasonLabel?: string;
+  /** 窄档：贴在列表行内的小按钮（07 稿的 .btn-sm）。 */
+  compact?: boolean;
+  /**
    * 附加的 `data-*` 标记（例如 armed 状态），供 harness 断言。
    * 组件 props 上没有 data-* 的索引签名，所以调用方不能直接写 `data-armed`——走这里。
    */
@@ -82,6 +90,7 @@ export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
  * @param busy 是否进行中
  * @param result 结果态（done 两秒回落 / failed 常亮）
  * @param disabledReason 禁用原因码
+ * @param disabledReasonLabel 禁用原因的人话（只禁用而不解释是谎报，见 props 注释）
  * @returns 可直接替换存量 `<button>` 的按钮元素；点击行为与文案由调用方给
  */
 export function DeskButton({
@@ -90,9 +99,12 @@ export function DeskButton({
   busy = false,
   result,
   disabledReason,
+  disabledReasonLabel,
+  compact = false,
   markers,
   disabled,
   className = '',
+  onClick,
   children,
   ...rest
 }: DeskButtonProps) {
@@ -108,8 +120,11 @@ export function DeskButton({
       {...markerAttrs}
       {...(disabledReason ? { 'data-disabled-reason': disabledReason } : {})}
       aria-disabled={isDead || undefined}
-      disabled={isDead}
-      className={`relative overflow-hidden rounded-control ${buttonClass(variant, isDead)} ${className}`}
+      // 不用原生 `disabled`：Chromium 对禁用控件不派发鼠标事件，title 提示也就不会出现，
+      // 人只会看到"按不动"而看不到为什么按不动（07 稿④）。改走 aria-disabled + 这里挡下 onClick。
+      {...(isDead ? {} : { onClick })}
+      {...(isDead && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
+      className={`relative overflow-hidden rounded-control ${buttonClass(variant, isDead, compact)} ${className}`}
       {...rest}
     >
       {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标 */}
@@ -261,11 +276,13 @@ const EDIT_INPUT =
 export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
   /** 该字段的 `data-action` 值（保存那一下的凭据）。 */
   action: string;
-  /** 当前值。 */
+  /** 当前值，由调用方持有——输入框自己不留草稿，否则「按钮读的那份」和「人敲的那份」会分家。 */
   value: string;
-  /** 保存回调；空字符串也照原样交给调用方判断，组件不做业务校验。 */
-  onSave: (next: string) => void;
-  /** 还原回调（Esc）；不给就只读退出编辑态。 */
+  /** 每次敲键回报当前值。 */
+  onValueChange: (next: string) => void;
+  /** 保存（Enter）；空串一类的业务校验由调用方判。 */
+  onSave: () => void;
+  /** 还原（Esc）；退出编辑态由调用方决定草稿怎么收。 */
   onCancel?: () => void;
   /** 编辑提示文案（例如「Enter 保存 · Esc 还原」），由调用方翻译。 */
   hint?: ReactNode;
@@ -274,33 +291,35 @@ export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInput
 /**
  * 就地编辑（09 稿的形态②）：点「修改」不长弹窗，字段原地变输入框。
  * Enter 保存、Esc 还原；这两个键是设计稿承诺的键盘等价，不是可选增强。
- * @param action 保存动作的 `data-action`
- * @param value 初始值
+ * @param action 输入框的 `data-action`
+ * @param value 当前值（受控）
+ * @param onValueChange 敲键回报
  * @param onSave 保存回调
  * @param onCancel 还原回调
  * @param hint 提示行
  * @returns 一个自动聚焦的输入框加一行提示
  */
-export function InlineEditField({ action, value, onSave, onCancel, hint, ...rest }: InlineEditFieldProps) {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => setDraft(value), [value]);
-
+export function InlineEditField({
+  action,
+  value,
+  onValueChange,
+  onSave,
+  onCancel,
+  hint,
+  ...rest
+}: InlineEditFieldProps) {
   return (
     <div className="flex flex-col gap-1">
       <input
         data-action={action}
         data-editing="true"
         className={EDIT_INPUT}
-        value={draft}
+        value={value}
         autoFocus
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') onSave(draft);
-          else if (event.key === 'Escape') {
-            setDraft(value);
-            onCancel?.();
-          }
+          if (event.key === 'Enter') onSave();
+          else if (event.key === 'Escape') onCancel?.();
         }}
         {...rest}
       />

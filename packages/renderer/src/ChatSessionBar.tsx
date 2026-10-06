@@ -7,10 +7,11 @@
  * 恢复途径为什么是一栏而不是一句「撤销」提示：撤销一旦只存在于内存里，重启之后那行数据就再没有途径捞回来，
  * 「软删」在用户眼里就等同于硬删——判据要防的正是这个。
  */
-import { Check, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatSessionView } from '@auto-cc/shared';
+import { DeskButton, InlineEditField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -73,54 +74,39 @@ export function ChatSessionBar({
     });
   };
 
-  /**
-   * 改名输入框的键盘语义：回车提交、Esc 放弃（与发送框那套一致，不另立规则）。
-   * @param event 键盘事件
-   */
-  const onTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      saveTitle();
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setEditing(false);
-    }
-  };
-
   return (
     <div data-testid="chat-session-bar" className="border-b border-slate-800">
       <div className="flex items-center gap-2 px-4 py-2">
         {editing ? (
           <>
-            <input
-              data-testid="chat-session-title-input"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              onKeyDown={onTitleKeyDown}
-              placeholder={t('chat.session.titlePlaceholder')}
-              disabled={isBusy}
-              className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-200"
-            />
-            <button
-              type="button"
-              data-action="save-title"
-              disabled={isBusy || !titleDraft.trim()}
+            {/* 形态②「就地编辑」（09 稿）：标题原地变输入框，Enter 提交 / Esc 还原由原件负责，本组件不再自己长一套键盘语义 */}
+            <div className="min-w-0 flex-1">
+              <InlineEditField
+                action="edit-session-title"
+                data-testid="chat-session-title-input"
+                value={titleDraft}
+                onValueChange={setTitleDraft}
+                placeholder={t('chat.session.titlePlaceholder')}
+                disabled={isBusy}
+                onSave={saveTitle}
+                onCancel={() => setEditing(false)}
+              />
+            </div>
+            <DeskButton
+              action="save-title"
+              variant="jade"
+              compact
+              busy={isBusy}
+              disabled={!titleDraft.trim()}
+              disabledReason={!titleDraft.trim() ? 'INPUT_EMPTY' : undefined}
+              disabledReasonLabel={titleDraft.trim() ? undefined : t('chat.session.reasonEmptyTitle')}
               onClick={saveTitle}
-              className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
             >
-              <Check size={11} />
               {t('chat.session.saveTitle')}
-            </button>
-            <button
-              type="button"
-              data-action="cancel-rename"
-              onClick={() => setEditing(false)}
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800"
-            >
-              <X size={11} />
+            </DeskButton>
+            <DeskButton action="cancel-rename" variant="ghost" compact onClick={() => setEditing(false)}>
               {t('chat.session.cancel')}
-            </button>
+            </DeskButton>
           </>
         ) : (
           <>
@@ -131,44 +117,49 @@ export function ChatSessionBar({
             >
               {session?.title ?? t('chat.session.untitled', { code })}
             </span>
-            <button
-              type="button"
-              data-action="rename-session"
+            <DeskButton
+              action="rename-session"
+              compact
               disabled={session === undefined || isBusy}
+              disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
+              disabledReasonLabel={session === undefined ? t('chat.session.reasonNoSession') : undefined}
               onClick={() => {
                 setTitleDraft(session?.title ?? '');
                 setEditing(true);
               }}
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
               <Pencil size={11} />
               {t('chat.session.rename')}
-            </button>
-            <button
-              type="button"
-              data-action="delete-session"
-              disabled={session === undefined || isBusy}
+            </DeskButton>
+            <DeskButton
+              action="delete-session"
+              variant="ghost"
+              compact
+              busy={isBusy}
+              disabled={session === undefined}
+              disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
+              disabledReasonLabel={session === undefined ? t('chat.session.reasonNoSession') : undefined}
               onClick={() =>
                 void call(t('chat.session.actionDelete', { code }), () => bridge?.chat['session.remove'](), {
                   apply: () => setEditing(false),
                   describe: (view) => t('chat.session.deleted', { code: shortCode(view.id) }),
                 })
               }
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
               <Trash2 size={11} />
               {t('chat.session.delete')}
-            </button>
-            <button
-              type="button"
-              data-action="new-session"
-              disabled={isBusy}
+            </DeskButton>
+            <DeskButton
+              action="new-session"
+              variant="solid"
+              compact
+              busy={isBusy}
+              className="ml-auto"
               onClick={() => void call(t('chat.actionNewSession'), () => bridge?.chat['session.startSession']())}
-              className="ml-auto flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
               <Plus size={12} />
               {t('chat.newSession')}
-            </button>
+            </DeskButton>
           </>
         )}
       </div>
@@ -198,20 +189,21 @@ export function ChatSessionBar({
                 <span className="min-w-0 max-w-[50%] truncate text-slate-400">
                   {row.title ?? t('chat.session.untitled', { code: shortCode(row.id) })}
                 </span>
-                <button
-                  type="button"
-                  data-action="restore-session"
-                  disabled={isBusy}
+                <DeskButton
+                  action="restore-session"
+                  variant="amber"
+                  compact
+                  busy={isBusy}
+                  className="ml-auto"
                   onClick={() =>
                     void call(t('chat.session.actionRestore', { code: shortCode(row.id) }), () =>
                       bridge?.chat['session.restore'](row.id),
                     )
                   }
-                  className="ml-auto flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                 >
                   <RotateCcw size={10} />
                   {t('chat.session.restore')}
-                </button>
+                </DeskButton>
               </li>
             ))}
           </ul>

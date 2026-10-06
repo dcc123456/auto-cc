@@ -862,7 +862,9 @@
         "actionDelete": "删除会话 {{code}}",
         "actionRestore": "恢复会话 {{code}}",
         "deleted": "会话 {{code}} 已收起，在「已删除的会话」那一栏里可以恢复",
-        "restored": "会话 {{code}} 已恢复，它就是当前会话"
+        "restored": "会话 {{code}} 已恢复，它就是当前会话",
+        "reasonNoSession": "还没有当前会话：先新建一条，再改名或删除",
+        "reasonEmptyTitle": "名字还是空的：先写几个字，Enter 或按「保存名字」都算"
       },
       "compress": {
         "covered": "较早的 {{total}} 条消息已折成一行摘要，原文一条都没删",

@@ -862,7 +862,9 @@
         "actionDelete": "delete session {{code}}",
         "actionRestore": "restore session {{code}}",
         "deleted": "Session {{code}} is folded away; restore it from the Deleted sessions list",
-        "restored": "Session {{code}} is back and is now the current one"
+        "restored": "Session {{code}} is back and is now the current one",
+        "reasonNoSession": "No current session yet: start one before renaming or deleting",
+        "reasonEmptyTitle": "The name is still empty: type something, then Enter or press Save name"
       },
       "compress": {
         "covered": "The earlier {{total}} messages are folded into one summary line — nothing was deleted",
