@@ -1016,37 +1016,6 @@ function sendHtml(response: ServerResponse, html: string, status = 200): void {
 }
 
 /**
- * OpenAI 兼容的 chat completions 靶端点（spec 7.1-10 的 V 半边依据）。
- *
- * 为什么必须有：AGENTS.md §7.2 禁止自动化打真实模型端点，而"测试连接按下去真的走通了一次请求"
- * 是可视判据，不能用单测替代。于是这里按 `packages/llm` 消费的同一套契约回形：
- * `choices[0].message.content` + `model` + `usage`。**没带 Bearer 就回 401**，
- * 让"界面上说的那把 key 有没有真的发出去"这一条可判（掩码只露末 4 位，凭这次才算证实）。
- * @param request 入站请求（读取 JSON 体）
- * @param response 出站响应
- */
-async function chatCompletionsReply(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  const body = await readJson(request, response);
-  if (body === null) return; // 超限，readJson 已就地回了 413
-  const auth = request.headers.authorization ?? '';
-  if (!auth.startsWith('Bearer ') || auth.slice(7).trim() === '') {
-    response.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-    response.end(JSON.stringify({ error: { message: 'fixture 要求 Authorization: Bearer <key>' } }));
-    return;
-  }
-  // 体不是合法 JSON（body 为 undefined）时仍回 200 形状，让调用方以"连上了但回执奇怪"暴露，而不是连接层报错。
-  const model = typeof body?.model === 'string' ? body.model : 'fixture-model';
-  response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-  response.end(
-    JSON.stringify({
-      model,
-      choices: [{ index: 0, message: { role: 'assistant', content: 'fixture 回声：连通正常' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
-    }),
-  );
-}
-
-/**
  * 处理一次实验台请求。
  * @param request 进来的请求（`/api/outbound` 需要先读完请求体，所以是 async）
  * @param response 待写的响应
@@ -1323,9 +1292,35 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     if (body === null) return;
     const targets = body === undefined ? null : readGenerateTargets(body);
     if (targets === null || targets.length === 0) {
+      // P7 · 7.1-10：带 `messages` 而不带改写清单的那一发，就是模型设置面板上「测试连接」发的 ping。
+      // 判据是「界面里那把 key 有没有真的发出去」，所以没带 Bearer 就 401；带了就回一份 OpenAI 形状的最小回执。
+      if (body !== undefined && Array.isArray(body['messages'])) {
+        const auth = request.headers.authorization ?? '';
+        if (!auth.startsWith('Bearer ') || auth.slice(7).trim() === '') {
+          response.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: { message: 'fixture 的 ping 腿要求 Authorization: Bearer <key>' } }));
+          return;
+        }
+        const pingModel = body['model'];
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(
+          JSON.stringify({
+            id: 'fixture-ping',
+            object: 'chat.completion',
+            model: typeof pingModel === 'string' ? pingModel : 'fixture-ping-model',
+            choices: [
+              { index: 0, message: { role: 'assistant', content: 'fixture 回声：连通正常' }, finish_reason: 'stop' },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
+          }),
+        );
+        return;
+      }
       response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
       response.end(
-        JSON.stringify({ error: { message: 'fixture 的 chat 端点只应答简历改写腿：请求里读不出待改写清单' } }),
+        JSON.stringify({
+          error: { message: 'fixture 的 chat 端点只应答简历改写腿与连通 ping：请求里既读不出清单也不是 ping' },
+        }),
       );
       return;
     }
@@ -1509,12 +1504,6 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       ? '该岗位已下架，简历不会送达'
       : '等待投递';
     sendHtml(response, deliverPageHtml.replaceAll('{{initialStatus}}', initialStatus));
-    return;
-  }
-
-  if (url.pathname === '/v1/chat/completions') {
-    // P7 · 7.1-10：模型设置面板上「测试连接」打的就是这一条（配 `baseUrl: http://127.0.0.1:10233/v1`）。
-    await chatCompletionsReply(request, response);
     return;
   }
 
