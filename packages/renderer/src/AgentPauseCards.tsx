@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
 import { formatClock } from './format';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskTextarea } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
 
 /**
@@ -244,13 +244,14 @@ function ElicitationCard({
       <p className="mt-1 text-[10px] text-slate-500" data-pause-round-label={String(card.round)}>
         {t('agent.pause.round', { round: card.round })}
       </p>
-      <textarea
+      <DeskTextarea
+        action="agent-pause-supply"
         data-testid="agent-pause-supply-input"
         rows={2}
         value={supplement}
-        onChange={(event) => setSupplement(event.target.value)}
+        onValueChange={setSupplement}
         placeholder={t('agent.pause.supplyPlaceholder')}
-        className={`mt-2 w-full resize-none ${FIELD_CLASS}`}
+        className="mt-2 w-full"
       />
       <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
         <Clock size={10} />

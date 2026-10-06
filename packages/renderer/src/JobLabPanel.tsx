@@ -28,7 +28,7 @@ import type {
 } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskCheck, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -348,39 +348,39 @@ export function JobLabPanel() {
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
         <div className="mt-2 flex flex-col gap-2">
-          <input
-            type="text"
+          <DeskField
+            action="jd-keyword"
             data-testid="jd-keyword"
             value={keywordDraft}
-            onChange={(event) => setKeywordDraft(event.target.value)}
+            onValueChange={setKeywordDraft}
             placeholder={t('jd.keywordPlaceholder')}
-            className={FIELD_CLASS}
           />
           <div className="flex gap-2">
-            <input
-              type="text"
+            <DeskField
+              action="jd-city"
               data-testid="jd-city"
               value={cityDraft}
-              onChange={(event) => setCityDraft(event.target.value)}
+              onValueChange={setCityDraft}
               placeholder={t('jd.cityPlaceholder')}
-              className={`${FIELD_CLASS} flex-1`}
+              className="flex-1"
             />
-            <input
-              type="text"
+            <DeskField
+              action="jd-experience"
               data-testid="jd-experience"
               value={experienceDraft}
-              onChange={(event) => setExperienceDraft(event.target.value)}
+              onValueChange={setExperienceDraft}
               placeholder={t('jd.experiencePlaceholder')}
-              className={`${FIELD_CLASS} flex-1`}
+              className="flex-1"
             />
-            <input
+            <DeskField
+              action="jd-limit"
               type="number"
               min={1}
               data-testid="jd-limit"
               value={limitDraft}
-              onChange={(event) => setLimitDraft(event.target.value)}
+              onValueChange={setLimitDraft}
               placeholder={t('jd.limitPlaceholder')}
-              className={`${FIELD_CLASS} w-24`}
+              className="w-24"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -474,13 +474,13 @@ export function JobLabPanel() {
           {t('deliver.heading')}
         </h3>
         <p className="mt-1 text-[11px] text-slate-500">{t('deliver.hint')}</p>
-        <input
-          type="text"
+        <DeskField
+          action="deliver-resume-path"
           data-testid="deliver-resume-path"
           value={resumePathDraft}
-          onChange={(event) => setResumePathDraft(event.target.value)}
+          onValueChange={setResumePathDraft}
           placeholder={t('deliver.resumePathPlaceholder')}
-          className={`${FIELD_CLASS} mt-2 w-full`}
+          className="mt-2 w-full"
         />
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
@@ -685,12 +685,12 @@ export function JobLabPanel() {
                     data-replied={row.replied ? 'true' : 'false'}
                   >
                     <label className="flex items-start gap-2">
-                      <input
+                      <DeskCheck
+                        action={`jd-row-${row.jobId}`}
                         type="radio"
                         name="jd-row"
-                        className="mt-0.5 accent-celadon"
                         checked={isRowSelected}
-                        onChange={() => setSelectedRowKey(rowKey(row))}
+                        onCheckedChange={() => setSelectedRowKey(rowKey(row))}
                         data-jd-row={row.jobId}
                       />
                       <span className="min-w-0 flex-1">

@@ -9,7 +9,7 @@
 import { Bookmark, Check, Save, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, SavedWorkflowPlanView, SedimentPreviewView } from '@auto-cc/shared';
-import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
+import { DeskButton, DeskField, deskReason } from './ui/controls';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -196,12 +196,12 @@ export function SedimentCard({
 
           <label className="mt-1 flex flex-col gap-1">
             <span className="text-[10px] text-slate-400">{t('chat.sediment.nameLabel')}</span>
-            <input
+            <DeskField
+              action="sediment-name"
               data-testid="sediment-name"
               value={nameDraft}
-              onChange={(event) => onNameChange(event.target.value)}
+              onValueChange={onNameChange}
               placeholder={t('chat.sediment.namePlaceholder')}
-              className={FIELD_CLASS}
             />
           </label>
           {nameMissing ? (

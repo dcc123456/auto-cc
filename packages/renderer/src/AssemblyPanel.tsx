@@ -12,7 +12,7 @@ import type {
   PluginTreeSnapshot,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskTextarea } from './ui/controls';
 
 /**
  * 插件状态 → 徽标配色，按「这一格现在系统在做什么」分四族（plan §5）：
@@ -362,11 +362,12 @@ export function AssemblyPanel() {
               {' · '}
               {editing.mounted ? t('assembly.editorMounted') : t('assembly.editorUnmounted')}
             </p>
-            <textarea
+            <DeskTextarea
+              action="assembly-config"
               data-editor="config"
-              className={`mt-2 h-32 w-full p-2 font-mono text-[11px] ${FIELD_CLASS}`}
+              className="mt-2 h-32 w-full px-2 py-2 font-mono"
               value={editing.text}
-              onChange={(event) => setEditing({ ...editing, text: event.target.value })}
+              onValueChange={(value) => setEditing({ ...editing, text: value })}
               spellCheck={false}
             />
             <div className="mt-2 flex items-center gap-2">

@@ -11,7 +11,7 @@ import type {
   GapSuggestionRow,
 } from '@auto-cc/shared';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 三栏的栏序（spec 4.4-03）：栏是**状态**不是要求种类，一栏里的行序等于拆解的稳定序，界面不再二次排序。 */
@@ -271,13 +271,13 @@ export function GapPanel() {
       <p className="text-xs leading-relaxed text-slate-400">{t('gap.hint')}</p>
 
       <div className="flex flex-col gap-2">
-        <textarea
+        <DeskTextarea
+          action="gap-jd"
           data-gap-field="jd"
           value={jdText}
-          onChange={(event) => setJdText(event.target.value)}
+          onValueChange={setJdText}
           rows={6}
           placeholder={t('gap.jdPlaceholder')}
-          className={`${FIELD_CLASS} min-w-0`}
         />
         <div className="flex items-center gap-2">
           <DeskButton

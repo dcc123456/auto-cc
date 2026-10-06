@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditorMetricKeyView, ResumeEditorView, ResumeLocaleView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
+import { DeskButton, DeskRange, DeskSelect, deskReason } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -287,32 +287,32 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
         </span>
         <label className="flex items-center gap-1 text-slate-400">
           {t('resume.editor.template')}
-          <select
+          <DeskSelect
+            action="resume-editor-template"
             data-testid="resume-editor-template"
             value={view.templateId}
             disabled={!!busy}
-            onChange={(event) => useTemplate(event.target.value)}
-            className={FIELD_CLASS}
+            onValueChange={(value) => useTemplate(value)}
           >
             {view.templates.map((template) => (
               <option key={template} value={template}>
                 {template}
               </option>
             ))}
-          </select>
+          </DeskSelect>
         </label>
         <label className="flex items-center gap-1 text-slate-400">
           {t('resume.editor.previewLocale')}
-          <select
+          <DeskSelect
+            action="resume-editor-locale"
             data-testid="resume-editor-locale"
             value={view.locale}
             disabled={!!busy}
-            onChange={(event) => useTemplate(undefined, event.target.value as ResumeLocaleView)}
-            className={FIELD_CLASS}
+            onValueChange={(value) => useTemplate(undefined, value as ResumeLocaleView)}
           >
             <option value="zh-CN">zh-CN</option>
             <option value="en">en</option>
-          </select>
+          </DeskSelect>
         </label>
       </div>
 
@@ -417,16 +417,16 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
               <span data-testid={`resume-editor-metric-label-${row.key}`} className="w-28 shrink-0">
                 {t(`resume.editor.units.${row.key}`)}
               </span>
-              <input
+              <DeskRange
+                action={`resume-editor-metric-${row.key}`}
                 data-testid={`resume-editor-metric-${row.key}`}
-                type="range"
                 min={Number((bound.min - reach).toFixed(2))}
                 max={Number((bound.max + reach).toFixed(2))}
                 step={row.step}
                 value={current}
                 disabled={!!busy}
-                onChange={(event) => setMetric(row.key, Number(event.target.value))}
-                className="w-44 accent-celadon"
+                onValueChange={(value) => setMetric(row.key, Number(value))}
+                className="w-44"
               />
               <span data-testid={`resume-editor-metric-value-${row.key}`} className="w-16 text-slate-300">
                 {current} {t(`resume.editor.unit.${row.unit}`)}

@@ -12,7 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskCheck, DeskField, DeskSelect } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -259,12 +259,13 @@ export function ScriptPanel() {
             {t('script.targetEmpty')}
           </p>
         ) : (
-          <select
+          <DeskSelect
+            action="script-target"
             id="script-target"
             data-script-field="target"
             value={String(target?.id ?? '')}
-            onChange={(event) => setTargetId(Number(event.target.value))}
-            className={`w-full ${FIELD_CLASS}`}
+            onValueChange={(value) => setTargetId(Number(value))}
+            className="w-full"
           >
             {rows.map((row) => (
               <option key={`${row.platform}-${row.id}`} value={String(row.id)}>
@@ -275,7 +276,7 @@ export function ScriptPanel() {
                 })}
               </option>
             ))}
-          </select>
+          </DeskSelect>
         )}
 
         <div className="flex items-center gap-2" data-script-field="kind">
@@ -294,26 +295,26 @@ export function ScriptPanel() {
           ))}
         </div>
 
-        <input
-          type="text"
+        <DeskField
+          action="script-quote"
           data-script-field="quote"
           value={quoteDraft}
-          onChange={(event) => setQuoteDraft(event.target.value)}
+          onValueChange={setQuoteDraft}
           placeholder={t('script.quotePlaceholder')}
-          className={`w-full ${FIELD_CLASS}`}
+          className="w-full"
         />
         {!needsQuote && (
           <p data-script-quote-hint className="text-[11px] leading-relaxed text-slate-500">
             {t('script.quoteHintGreeting')}
           </p>
         )}
-        <input
-          type="text"
+        <DeskField
+          action="script-keywords"
           data-script-field="keywords"
           value={keywordsDraft}
-          onChange={(event) => setKeywordsDraft(event.target.value)}
+          onValueChange={setKeywordsDraft}
           placeholder={t('script.keywordsPlaceholder')}
-          className={`w-full ${FIELD_CLASS}`}
+          className="w-full"
         />
 
         <DeskButton
@@ -368,12 +369,13 @@ export function ScriptPanel() {
                   }`}
                 >
                   <label className="flex items-start gap-2">
-                    <input
+                    <DeskCheck
+                      action={`script-pick-${index}`}
                       type="radio"
                       name="script-candidate"
                       data-script-pick={index}
                       checked={selected === index}
-                      onChange={() => setSelected(index)}
+                      onCheckedChange={() => setSelected(index)}
                     />
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">

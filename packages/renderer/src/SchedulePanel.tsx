@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import type { ScheduleJobView, ScheduleTriggerView, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 快捷档位 → cron 表达式（5.7-05 判据原文的"每日 / 工作日 / 自定义"三种）。 */
 const PRESET_EXPRESSIONS = {
@@ -132,21 +132,22 @@ export function ScheduleSection() {
       <div className="mt-2 flex flex-wrap items-end gap-2" data-testid="schedule-create">
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('schedule.nameLabel')}</span>
-          <input
+          <DeskField
+            action="schedule-name"
             data-testid="schedule-name-input"
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onValueChange={setName}
             placeholder={t('schedule.namePlaceholder')}
-            className={`min-w-32 ${FIELD_CLASS}`}
+            className="min-w-32"
           />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('schedule.planLabel')}</span>
-          <select
+          <DeskSelect
+            action="schedule-plan"
             data-testid="schedule-plan-select"
             value={planId}
-            onChange={(event) => setPlanId(event.target.value)}
-            className={FIELD_CLASS}
+            onValueChange={setPlanId}
           >
             <option value="">{t('schedule.planDefault')}</option>
             {plans.map((plan) => (
@@ -159,32 +160,33 @@ export function ScheduleSection() {
                 })}
               </option>
             ))}
-          </select>
+          </DeskSelect>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('schedule.presetLabel')}</span>
-          <select
+          <DeskSelect
+            action="schedule-preset"
             data-testid="schedule-preset-select"
             value={preset}
-            onChange={(event) => applyPreset(event.target.value as PresetKey)}
-            className={FIELD_CLASS}
+            onValueChange={(value) => applyPreset(value as PresetKey)}
           >
             <option value="daily">{t('schedule.presetDaily')}</option>
             <option value="weekdays">{t('schedule.presetWeekdays')}</option>
             <option value="custom">{t('schedule.presetCustom')}</option>
-          </select>
+          </DeskSelect>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('schedule.expressionLabel')}</span>
-          <input
+          <DeskField
+            action="schedule-expression"
             data-testid="schedule-expression-input"
             data-schedule-preset={preset}
             value={expression}
-            onChange={(event) => {
-              setExpression(event.target.value);
+            onValueChange={(value) => {
+              setExpression(value);
               setPreset('custom');
             }}
-            className={`min-w-28 ${FIELD_CLASS} font-mono`}
+            className="min-w-28 font-mono"
           />
         </label>
         <DeskButton

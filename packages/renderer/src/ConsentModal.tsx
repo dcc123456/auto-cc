@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { AppErrorPayload, SessionConsentView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import type { ConsentFacade } from './useConsent';
-import { DeskButton } from './ui/controls';
+import { DeskButton, DeskCheck } from './ui/controls';
 import { Modal } from './ui/overlays';
 
 /** `ConsentModal` 的输入（与原行内卡片一致：三块面板各自持有 `useConsent` 的那一面）。 */
@@ -119,14 +119,13 @@ export function ConsentModal({ platform, view, busy, error, onGrant, onDeny }: C
           className="mt-3 flex cursor-pointer items-start gap-2 rounded-control border border-line bg-ink-950/70 px-3 py-2"
           htmlFor="consent-accept"
         >
-          <input
+          <DeskCheck
+            action="consent-accept"
             id="consent-accept"
-            type="checkbox"
             checked={isAccepted}
-            onChange={(event) => setIsAccepted(event.target.checked)}
-            className="mt-0.5 size-3.5 shrink-0 accent-seal"
+            onCheckedChange={setIsAccepted}
+            tone="seal"
             data-testid="consent-accept"
-            data-checked={isAccepted ? 'true' : 'false'}
           />
           <span className={isAccepted ? 'text-jade-ink' : 'text-slate-200'}>{t('consent.checkbox')}</span>
         </label>

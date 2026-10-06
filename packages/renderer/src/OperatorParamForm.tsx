@@ -9,7 +9,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { operatorParamFields, validateOperatorParams, type OperatorDescriptor } from '@auto-cc/shared';
-import { DeskButton } from './ui/controls';
+import { DeskButton, DeskCheck, DeskField, DeskSelect } from './ui/controls';
 
 export interface OperatorParamFormProps {
   /** 该节点的算子描述（字段、必填、枚举候选都由它来） */
@@ -93,7 +93,6 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
         {fields.map((field) => {
           const isInvalid = invalidFields.includes(field.name);
           const label = t(`workflow.param.${descriptor.kind}.${field.name}`, { defaultValue: field.name });
-          const borderClass = isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong';
           return (
             <label
               key={field.name}
@@ -109,35 +108,39 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
               {/* 控件按派生出来的类型三选一：布尔走勾选框、枚举走 select（候选来自 schema，
                   界面不另存一份平台名）、其余走文本/数字输入。加一只算子不需要动这几行。 */}
               {field.type === 'boolean' ? (
-                <input
-                  type="checkbox"
+                <DeskCheck
+                  action={`param-${field.name}`}
                   disabled={isReadOnly}
                   checked={draft[field.name] === 'true'}
-                  onChange={(event) => edit(field.name, event.target.checked ? 'true' : 'false')}
-                  className="mt-1 h-3.5 w-3.5 rounded border-line-strong bg-ink-900"
+                  onCheckedChange={(isChecked) => edit(field.name, isChecked ? 'true' : 'false')}
+                  className="mt-1"
                 />
               ) : field.type === 'enum' ? (
-                <select
+                <DeskSelect
+                  action={`param-${field.name}`}
                   value={draft[field.name] ?? ''}
                   disabled={isReadOnly}
                   aria-invalid={isInvalid}
-                  onChange={(event) => edit(field.name, event.target.value)}
-                  className={`mt-1 w-full rounded-md border bg-ink-900 px-2 py-1 text-[11px] text-slate-100 ${borderClass}`}
+                  onValueChange={(value) => edit(field.name, value)}
+                  isInvalid={isInvalid}
+                  className="mt-1 w-full"
                 >
                   {field.options.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
                   ))}
-                </select>
+                </DeskSelect>
               ) : (
-                <input
+                <DeskField
+                  action={`param-${field.name}`}
                   type={field.type === 'number' ? 'number' : 'text'}
                   value={draft[field.name] ?? ''}
                   disabled={isReadOnly}
                   aria-invalid={isInvalid}
-                  onChange={(event) => edit(field.name, event.target.value)}
-                  className={`mt-1 w-full rounded-md border bg-ink-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-celadon/60 ${borderClass}`}
+                  onValueChange={(value) => edit(field.name, value)}
+                  isInvalid={isInvalid}
+                  className="mt-1 w-full"
                 />
               )}
               {isInvalid ? (

@@ -1,6 +1,12 @@
 import { BadgeCheck, CircleAlert, LoaderCircle, Send, Stamp } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from 'react';
 import type { TFunction } from 'i18next';
 import type { ToolEffect } from '@auto-cc/shared';
 
@@ -358,17 +364,291 @@ export function Banner({ tone, reason, markers, className = '', children }: Bann
 }
 
 /**
- * 面板表单控件（输入框 / 下拉 / 日期）的共用 class：青瓷描边只在获得焦点时亮起，
- * 它是「这一格现在归你敲」的唯一信号。各面板只在它前面加自己的宽度档（`flex-1`、`w-24`）。
+ * 校验失败必须**换掉**描边而不是在后面追加一条：Tailwind 生成的样式表按它自己的顺序排，
+ * `border-seal` 与 `border-line-strong` 谁赢取决于令牌声明顺序，写在 class 属性里的先后不作数
+ * （6.4 第十片量到的正是这一类「同族两条互相覆盖」）。
+ * @param isInvalid 该格是否处于「必填未填 / 未过契约」那一态
+ * @returns 完整 class 串
  */
-export const FIELD_CLASS =
-  'min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 ' +
-  'outline-none focus:border-celadon/60';
+const fieldClass = (isInvalid: boolean): string =>
+  `min-w-0 rounded-md border ${isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong'} ` +
+  'bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60';
+
+/**
+ * 面板表单控件（输入框 / 下拉 / 日期）的常态 class：青瓷描边只在获得焦点时亮起，
+ * 它是「这一格现在归你敲」的唯一信号。各面板只在它前面加自己的宽度档（`flex-1`、`w-24`）。
+ *
+ * 还没迁进原件的那几处（`MetricsPanel`，见 plan §3.9 的豁免）用的就是这一串，
+ * 原件与它同源，描边/底色/字号不在两处各写一遍（§2.2）。
+ */
+export const FIELD_CLASS = fieldClass(false);
 
 /** 行内编辑的输入框 class：青瓷描边是「正在编辑」的唯一信号，不加阴影不放大。 */
 const EDIT_INPUT =
   'w-full rounded-chip border border-celadon/60 bg-ink-900 px-2 py-1 text-xs text-slate-50 ' +
   'focus:outline-none focus:ring-1 focus:ring-celadon/70';
+
+/**
+ * 表单五件原件（输入框 / 下拉 / 文本域 / 勾选 / 滑杆）共用的外档。`action` 强制（6.2-03：无 `action` 不可编译），
+ * `className` **只许放宽度与外边档**（`flex-1`、`w-24`、`mt-2`），描边/底色/字号一律在原件里——
+ * 面板再各写一遍 `FIELD_CLASS` 就是回到 54 处裸控件的老路（§2.2）。
+ */
+interface DeskFieldShell {
+  /** `data-action` 值：harness 定位这只控件的凭据。 */
+  action: string;
+  /** 控件上方的说明文案（调用方翻译好传入）；不传就只出控件本身，用于贴在行里的紧凑档。 */
+  label?: ReactNode;
+  /** 宽度/外边档，追加在原件样式之后。 */
+  className?: string;
+  /** 该格处于「必填未填 / 没过大写约束」那一态：整圈朱砂，见 `fieldClass`。 */
+  isInvalid?: boolean;
+}
+
+/** 带 label 那一档的排法：文案在上、控件在下，11px 的元信息档。 */
+const STACK_LABEL = 'flex flex-col gap-1 text-[11px] text-slate-400';
+
+export interface DeskFieldProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'className'>, DeskFieldShell {
+  /** 当前值（数字档也是字符串草稿，解析由调用方在提交时做）。 */
+  value: string;
+  /** 取值回调：原件已经把 `event.target.value` 收掉。 */
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * 单行输入框（`type` 覆盖 text / number / date 等原生档）。
+ * @param action `data-action` 凭据
+ * @param label 上方说明文案（可省）
+ * @param className 宽度/外边档
+ * @param isInvalid 校验失败档（整圈朱砂，见 `fieldClass`）
+ * @param value 当前值
+ * @param onValueChange 取值回调
+ * @param rest 其余原生属性照旧透传（`placeholder`/`min`/`step`/`disabled`/`data-*`/`onKeyDown`……）
+ * @returns 输入框；带 `label` 时套一层 `<label>`
+ */
+export function DeskField({ action, label, className = '', isInvalid, value, onValueChange, ...rest }: DeskFieldProps) {
+  const field = (
+    <input
+      data-action={action}
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+      className={`${fieldClass(isInvalid === true)} ${className}`}
+      {...rest}
+    />
+  );
+  return label ? (
+    <label className={STACK_LABEL}>
+      {label}
+      {field}
+    </label>
+  ) : (
+    field
+  );
+}
+
+export interface DeskSelectProps
+  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange' | 'value' | 'className'>, DeskFieldShell {
+  /** 当前选中值。 */
+  value: string;
+  /** 选中回调（收人话签名）。 */
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * 下拉框：`children` 由调用方给 `<option>` 列表（选项常常是动态的，不在原件里造数据）。
+ * @param action `data-action` 凭据
+ * @param label 上方说明文案（可省）
+ * @param className 宽度/外边档
+ * @param isInvalid 校验失败档（整圈朱砂）
+ * @param value 当前值
+ * @param onValueChange 选中回调
+ * @param rest 原生 select 属性透传
+ * @returns 下拉框；带 `label` 时套一层 `<label>`
+ */
+export function DeskSelect({
+  action,
+  label,
+  className = '',
+  isInvalid,
+  value,
+  onValueChange,
+  children,
+  ...rest
+}: DeskSelectProps) {
+  const field = (
+    <select
+      data-action={action}
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+      className={`${fieldClass(isInvalid === true)} ${className}`}
+      {...rest}
+    >
+      {children}
+    </select>
+  );
+  return label ? (
+    <label className={STACK_LABEL}>
+      {label}
+      {field}
+    </label>
+  ) : (
+    field
+  );
+}
+
+export interface DeskTextareaProps
+  extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'value' | 'className'>, DeskFieldShell {
+  /** 当前文本。 */
+  value: string;
+  /** 取值回调（收人话签名）。 */
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * 多行文本域：与 `DeskField` 同一支 `FIELD_CLASS`，只多一条「不许斜着拖坏布局」。
+ * @param action `data-action` 凭据
+ * @param label 上方说明文案（可省）
+ * @param className 宽度/高度档
+ * @param isInvalid 校验失败档（整圈朱砂）
+ * @param value 当前文本
+ * @param onValueChange 取值回调
+ * @param rest 原生 textarea 属性透传（`rows`/`spellCheck`/`data-*`……）
+ * @returns 文本域；带 `label` 时套一层 `<label>`
+ */
+export function DeskTextarea({
+  action,
+  label,
+  className = '',
+  isInvalid,
+  value,
+  onValueChange,
+  ...rest
+}: DeskTextareaProps) {
+  const field = (
+    <textarea
+      data-action={action}
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+      className={`${fieldClass(isInvalid === true)} resize-none leading-relaxed ${className}`}
+      {...rest}
+    />
+  );
+  return label ? (
+    <label className={STACK_LABEL}>
+      {label}
+      {field}
+    </label>
+  ) : (
+    field
+  );
+}
+
+/** 勾选档的归属色：celadon=系统里的常态选择，seal=签字类，jade=已读类，amber=本机写入类。 */
+const CHECK_TONE = {
+  celadon: 'accent-celadon',
+  seal: 'accent-seal',
+  jade: 'accent-jade',
+  amber: 'accent-amber',
+} as const;
+
+export interface DeskCheckProps
+  extends
+    Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'checked' | 'className'>,
+    Omit<DeskFieldShell, 'isInvalid'> {
+  /** 是否勾上。 */
+  checked: boolean;
+  /** 勾选回调（收人话签名：布尔，不是事件）。 */
+  onCheckedChange: (checked: boolean) => void;
+  /** 归属色档，默认青瓷——默认值刻意不给浏览器那支蓝（6.1-06 普查里勾选框是全 app 唯一的离色控件）。 */
+  tone?: keyof typeof CHECK_TONE;
+  /** 复选还是单选：两者只差在原生 `type` 与语义（单选靠同 `name` 归组），样式同源。 */
+  type?: 'checkbox' | 'radio';
+}
+
+/**
+ * 勾选控件（复选 / 单选同一件）：`data-checked` 由原件统一写，面板不再各自抹一遍。
+ * @param action `data-action` 凭据
+ * @param label 旁边的文案（可省；需要"勾选后变色"这类判据时由调用方自己配 `<label htmlFor>`）
+ * @param className 追加档（`mt-0.5` 这类对齐微调）
+ * @param checked 当前勾选态
+ * @param onCheckedChange 勾选回调
+ * @param tone 归属色档
+ * @param type 复选 / 单选
+ * @param rest 原生 input 属性透传（`name`/`id`/`disabled`/`data-*`……）
+ * @returns 勾选框；带 `label` 时套一层横排的 `<label>`
+ */
+export function DeskCheck({
+  action,
+  label,
+  className = '',
+  checked,
+  onCheckedChange,
+  tone = 'celadon',
+  type = 'checkbox',
+  ...rest
+}: DeskCheckProps) {
+  const box = (
+    <input
+      type={type}
+      data-action={action}
+      data-checked={checked ? 'true' : 'false'}
+      checked={checked}
+      onChange={(event) => onCheckedChange(event.target.checked)}
+      className={`mt-0.5 size-3.5 shrink-0 ${CHECK_TONE[tone]} ${className}`}
+      {...rest}
+    />
+  );
+  return label ? (
+    <label className="flex items-start gap-2 text-xs text-slate-300">
+      {box}
+      {label}
+    </label>
+  ) : (
+    box
+  );
+}
+
+export interface DeskRangeProps
+  extends
+    Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'checked' | 'className'>,
+    Omit<DeskFieldShell, 'isInvalid'> {
+  /** 当前读数（草稿也是字符串，解析与夹取由调用方做）。 */
+  value: string | number;
+  /** 拖动回调（收人话签名：字符串读数，与 `DeskField` 同一条口径）。 */
+  onValueChange: (value: string) => void;
+}
+
+/**
+ * 滑杆（`type="range"`）：与勾选框同族——两者都不吃 `fieldClass` 那套描边，
+ * 只把归属色交给原生的 `accent`，所以它独立一件而不是 `DeskField` 的一个 `type` 档。
+ * @param action `data-action` 凭据
+ * @param label 上方说明文案（可省）
+ * @param className 宽度档（滑杆的长短是这一屏唯一的排布变量）
+ * @param value 当前读数
+ * @param onValueChange 拖动回调
+ * @param rest 原生 input 属性透传（`min`/`max`/`step`/`disabled`/`data-*`……）
+ * @returns 滑杆；带 `label` 时套一层 `<label>`
+ */
+export function DeskRange({ action, label, className = '', value, onValueChange, ...rest }: DeskRangeProps) {
+  const slider = (
+    <input
+      type="range"
+      data-action={action}
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+      className={`h-1.5 shrink-0 cursor-pointer accent-celadon ${className}`}
+      {...rest}
+    />
+  );
+  return label ? (
+    <label className={STACK_LABEL}>
+      {label}
+      {slider}
+    </label>
+  ) : (
+    slider
+  );
+}
 
 export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
   /** 该字段的 `data-action` 值（保存那一下的凭据）。 */

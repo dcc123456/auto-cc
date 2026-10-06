@@ -8,7 +8,7 @@ import type {
   GenerationRewriteRowView,
   GenerationRunRowView,
 } from '@auto-cc/shared';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskCheck, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
@@ -268,13 +268,13 @@ export function GeneratePanel() {
       <p className="text-xs leading-relaxed text-slate-400">{t('generate.hint')}</p>
 
       <div className="flex flex-col gap-2">
-        <textarea
+        <DeskTextarea
+          action="generate-jd"
           data-generate-field="jd"
           value={jdText}
-          onChange={(event) => setJdText(event.target.value)}
+          onValueChange={setJdText}
           rows={6}
           placeholder={t('generate.jdPlaceholder')}
-          className={`${FIELD_CLASS} min-w-0`}
         />
         <div className="flex items-center gap-2">
           <DeskButton
@@ -377,14 +377,12 @@ export function GeneratePanel() {
                     className="rounded border border-line bg-ink-900/40 p-2"
                   >
                     <label className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
+                      <DeskCheck
+                        action={`generate-check-${index}`}
                         data-generate-check={index}
                         checked={checked[index] === true}
-                        onChange={(event) =>
-                          setChecked((current) =>
-                            current.map((isChecked, i) => (i === index ? event.target.checked : isChecked)),
-                          )
+                        onCheckedChange={(isChecked) =>
+                          setChecked((current) => current.map((previous, i) => (i === index ? isChecked : previous)))
                         }
                       />
                       <span className="flex min-w-0 flex-col gap-1">
@@ -418,11 +416,11 @@ export function GeneratePanel() {
             ) : (
               <>
                 <label className="flex items-center gap-2 text-xs text-slate-300">
-                  <input
-                    type="checkbox"
+                  <DeskCheck
+                    action="generate-reorder-apply"
                     data-generate-reorder-apply
                     checked={applyReorder}
-                    onChange={(event) => setApplyReorder(event.target.checked)}
+                    onCheckedChange={setApplyReorder}
                   />
                   {t('generate.reorderApply', { count: preview.reorderBases.length })}
                 </label>

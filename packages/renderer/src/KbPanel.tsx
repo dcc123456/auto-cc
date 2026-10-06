@@ -12,7 +12,7 @@ import type {
 } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskField, DeskSelect, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 反查命中理由 → 文案键（`contains` 与 `overlap` 在界面是两句不同的话，分数只是它们共同的强度读数）。 */
@@ -407,12 +407,13 @@ export function KbPanel() {
       <p className="text-xs leading-relaxed text-slate-400">{t('kb.hint')}</p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <DeskField
+          action="kb-doc-id"
           data-kb-field="docId"
           value={docId}
-          onChange={(event) => setDocId(event.target.value)}
+          onValueChange={setDocId}
           placeholder={t('kb.docIdPlaceholder')}
-          className={`${FIELD_CLASS} min-w-40 flex-1`}
+          className="min-w-40 flex-1"
         />
         <DeskButton
           action="sync"
@@ -431,12 +432,13 @@ export function KbPanel() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <DeskField
+          action="kb-claim"
           data-kb-field="claim"
           value={claim}
-          onChange={(event) => setClaim(event.target.value)}
+          onValueChange={setClaim}
           placeholder={t('kb.claimPlaceholder')}
-          className={`${FIELD_CLASS} min-w-40 flex-1`}
+          className="min-w-40 flex-1"
         />
         <DeskButton
           action="lookup"
@@ -456,12 +458,13 @@ export function KbPanel() {
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <DeskField
+            action="kb-search"
             data-kb-field="search"
             value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
+            onValueChange={setSearchText}
             placeholder={t('kb.searchPlaceholder')}
-            className={`${FIELD_CLASS} min-w-40 flex-1`}
+            className="min-w-40 flex-1"
           />
           <DeskButton
             action="search"
@@ -516,12 +519,13 @@ export function KbPanel() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <DeskField
+          action="kb-backup-path"
           data-kb-field="backupPath"
           value={backupPath}
-          onChange={(event) => setBackupPath(event.target.value)}
+          onValueChange={setBackupPath}
           placeholder={t('kb.backupPathPlaceholder')}
-          className={`${FIELD_CLASS} min-w-40 flex-1`}
+          className="min-w-40 flex-1"
         />
         {/* 导出与导入都只在这台机器上读写文件，所以两只是琥珀而不是朱砂——
             备份不会离开本机，涂朱砂等于谎报"这一步要签字"。 */}
@@ -553,15 +557,15 @@ export function KbPanel() {
           <Upload size={12} />
           {t('kb.import')}
         </DeskButton>
-        <select
+        <DeskSelect
+          action="kb-import-mode"
           data-kb-field="importMode"
           value={importMode}
-          onChange={(event) => setImportMode(event.target.value as KbImportModeView)}
-          className={FIELD_CLASS}
+          onValueChange={(value) => setImportMode(value as KbImportModeView)}
         >
           <option value="skip">{t('kb.modeSkip')}</option>
           <option value="overwrite">{t('kb.modeOverwrite')}</option>
-        </select>
+        </DeskSelect>
       </div>
 
       {entities.length === 0 ? (
@@ -601,25 +605,27 @@ export function KbPanel() {
         </DeskButton>
         {editing && (
           <div className="flex flex-col gap-2" data-kb-editor={editing.entityId ?? 'new'}>
-            <select
+            <DeskSelect
+              action="kb-edit-kind"
               data-kb-field="editKind"
               value={editing.kind}
-              onChange={(event) => setEditing({ ...editing, kind: event.target.value as KbEntityKindView })}
+              onValueChange={(value) => setEditing({ ...editing, kind: value as KbEntityKindView })}
               disabled={editing.entityId !== null}
-              className={`${FIELD_CLASS} self-start`}
+              className="self-start"
             >
               {(Object.keys(ENTITY_KIND_LABEL_KEY) as KbEntityKindView[]).map((kind) => (
                 <option key={kind} value={kind}>
                   {t(ENTITY_KIND_LABEL_KEY[kind])}
                 </option>
               ))}
-            </select>
-            <textarea
+            </DeskSelect>
+            <DeskTextarea
+              action="kb-edit-payload"
               data-kb-field="editPayload"
               rows={4}
               value={editing.lines}
-              onChange={(event) => setEditing({ ...editing, lines: event.target.value })}
-              className={`${FIELD_CLASS} font-mono`}
+              onValueChange={(value) => setEditing({ ...editing, lines: value })}
+              className="font-mono"
             />
             <p className="text-xs text-slate-400">{t('kb.payloadHint')}</p>
             <div className="flex items-center gap-2">

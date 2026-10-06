@@ -9,7 +9,7 @@ import type {
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
@@ -324,13 +324,13 @@ export function SessionPanel() {
         </div>
 
         <div className="mt-3 flex items-center gap-2">
-          <input
-            type="text"
+          <DeskField
+            action="navigate-url"
             data-testid="navigate-url"
             value={urlDraft}
-            onChange={(event) => setUrlDraft(event.target.value)}
+            onValueChange={setUrlDraft}
             placeholder={t('session.navigatePlaceholder')}
-            className={`${FIELD_CLASS} flex-1`}
+            className="flex-1"
           />
           <DeskButton
             action="navigate"

@@ -26,7 +26,7 @@ import type {
 import { pushDeskToast } from './deskToast';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskField, DeskSelect } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -251,26 +251,27 @@ export function ResumePanel() {
         </h2>
         <label className="flex items-center gap-1 text-[11px] text-slate-400">
           {t('resume.locale')}
-          <select
+          <DeskSelect
+            action="resume-locale"
             data-testid="resume-locale"
             value={locale}
-            onChange={(event) => setLocale(event.target.value as ResumeLocaleView)}
-            className={FIELD_CLASS}
+            onValueChange={(value) => setLocale(value as ResumeLocaleView)}
           >
             <option value="zh-CN">zh-CN</option>
             <option value="en">en</option>
-          </select>
+          </DeskSelect>
         </label>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="flex flex-1 items-center gap-1 text-[11px] text-slate-400">
           {t('resume.importPath')}
-          <input
+          <DeskField
+            action="resume-import-path"
             data-testid="resume-import-path"
             value={importPath}
-            onChange={(event) => setImportPath(event.target.value)}
-            className={`${FIELD_CLASS} min-w-[240px] flex-1`}
+            onValueChange={setImportPath}
+            className="min-w-[240px] flex-1"
           />
         </label>
         {/* 导入落的是本机库里那份脱敏文档：琥珀那一档（本机写入）。 */}
@@ -530,39 +531,41 @@ export function ResumePanel() {
         <div className="mt-2 flex flex-wrap gap-3" data-testid="snapshot-list">
           <label className="flex items-center gap-1 text-[11px] text-slate-400">
             {t('resume.diffFrom')}
-            <select
+            <DeskSelect
+              action="snapshot-diff-from"
               data-testid="snapshot-diff-from"
               value={fromId}
-              onChange={(event) => {
-                setFromId(event.target.value);
+              onValueChange={(value) => {
+                setFromId(value);
                 setDiff(undefined);
               }}
-              className={`${FIELD_CLASS} max-w-[260px]`}
+              className="max-w-[260px]"
             >
               {snapshots.map((item) => (
                 <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
                   {snapshotLabel(item)}
                 </option>
               ))}
-            </select>
+            </DeskSelect>
           </label>
           <label className="flex items-center gap-1 text-[11px] text-slate-400">
             {t('resume.diffTo')}
-            <select
+            <DeskSelect
+              action="snapshot-diff-to"
               data-testid="snapshot-diff-to"
               value={toId}
-              onChange={(event) => {
-                setToId(event.target.value);
+              onValueChange={(value) => {
+                setToId(value);
                 setDiff(undefined);
               }}
-              className={`${FIELD_CLASS} max-w-[260px]`}
+              className="max-w-[260px]"
             >
               {snapshots.map((item) => (
                 <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
                   {snapshotLabel(item)}
                 </option>
               ))}
-            </select>
+            </DeskSelect>
           </label>
         </div>
       )}

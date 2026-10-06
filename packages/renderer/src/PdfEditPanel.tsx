@@ -11,7 +11,7 @@ import type {
 import { createPdfEditSession } from '@auto-cc/plugin-pdf-edit/edit-session';
 import type { AppErrorPayload, PdfOpenReceiptView, PdfSaveAsReceiptView, PdfTextBoxView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
+import { DeskButton, DeskField, deskReason } from './ui/controls';
 import { useDeskThemeValue } from './theme';
 
 /** 覆盖区的入参类型从会话自己的签名取：本包对外只开 `./edit-session` 一条窄出口，不再把 `overlay-writer` 也开出去。 */
@@ -502,12 +502,13 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
         {t('pdfEdit.pathHint')}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <input
+        <DeskField
+          action="pdf-edit-path"
           data-testid="pdf-edit-path"
           value={filePath}
-          onChange={(event) => setFilePath(event.target.value)}
+          onValueChange={setFilePath}
           placeholder={t('pdfEdit.pathPlaceholder')}
-          className={`min-w-[280px] flex-1 ${FIELD_CLASS}`}
+          className="min-w-[280px] flex-1"
         />
         <DeskButton
           action="pdf-edit-open"
@@ -614,11 +615,12 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
 
               <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                 {t('pdfEdit.overlayText')}
-                <input
+                <DeskField
+                  action="pdf-edit-overlay-text"
                   data-testid="pdf-edit-overlay-text"
                   value={overlayText}
-                  onChange={(event) => setOverlayText(event.target.value)}
-                  className={`w-[180px] ${FIELD_CLASS}`}
+                  onValueChange={setOverlayText}
+                  className="w-[180px]"
                 />
                 <span className="text-slate-500">{t('pdfEdit.dragHint')}</span>
               </label>
@@ -781,13 +783,14 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                   {t('pdfEdit.outPathLabel')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    id="pdfEdit-out-path"
+                  <DeskField
+                    action="pdf-edit-out-path"
+                    id="pdf-edit-out-path"
                     data-testid="pdf-edit-out-path"
                     value={outPath}
-                    onChange={(event) => setOutPath(event.target.value)}
+                    onValueChange={setOutPath}
                     placeholder={t('pdfEdit.outPathPlaceholder')}
-                    className={`min-w-[220px] flex-1 ${FIELD_CLASS}`}
+                    className="min-w-[220px] flex-1"
                   />
                   <DeskButton
                     action="pdf-edit-save-as"

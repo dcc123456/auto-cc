@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 一行的编辑态：`rename` / `duplicate` 带名字草稿，`remove` 只等一次确认。 */
 type PlanEdit = { planId: string; mode: 'rename' | 'duplicate' | 'remove'; draft: string };
@@ -146,13 +146,14 @@ export function WorkflowPlansSection({
 
       <label className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-[10px] text-slate-400">{t('workflow.plans.selectLabel')}</span>
-        <select
+        <DeskSelect
+          action="workflow-plan-select"
           data-testid="workflow-plan-select"
           data-selected-plan={selectedId ?? ''}
           value={selectedId ?? ''}
           disabled={busy !== undefined}
-          onChange={(event) => void pickPlan(event.target.value)}
-          className={`${FIELD_CLASS} disabled:opacity-40`}
+          onValueChange={(value) => void pickPlan(value)}
+          className="disabled:opacity-40"
         >
           <option value="">{t('workflow.plans.selectDefault')}</option>
           {plans.map((plan) => (
@@ -164,7 +165,7 @@ export function WorkflowPlansSection({
               })}
             </option>
           ))}
-        </select>
+        </DeskSelect>
       </label>
 
       {plans.length === 0 ? (
@@ -253,13 +254,14 @@ export function WorkflowPlansSection({
 
                 {isEditing && edit && edit.mode !== 'remove' ? (
                   <span className="flex flex-wrap items-center gap-1" data-testid="workflow-plan-name-editor">
-                    <input
+                    <DeskField
+                      action="plan-name-input"
                       data-testid="workflow-plan-name-input"
                       data-plan-edit-mode={edit.mode}
                       value={edit.draft}
-                      onChange={(event) => setEdit({ ...edit, draft: event.target.value })}
+                      onValueChange={(value) => setEdit({ ...edit, draft: value })}
                       placeholder={t('workflow.plans.namePlaceholder')}
-                      className={`min-w-32 ${FIELD_CLASS}`}
+                      className="min-w-32"
                     />
                     {/* 落名那一下写的是计划表 → amber（本机写入）。旧写法涂 emerald，那是 jade 族
                         「已经核过」的颜色，一个还没落笔的保存键不该自称已核（与知识库「保存」同一处纠偏）。 */}
