@@ -2,6 +2,7 @@ import { BadgeCheck, CircleAlert, LoaderCircle, Send, Stamp } from 'lucide-react
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
+  ComponentType,
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
@@ -779,6 +780,69 @@ export function DeskSegmented<T extends string>({
         );
       })}
     </span>
+  );
+}
+
+/**
+ * 页签的尺寸档。`muted` 不是"次要按钮"，而是 6.3-02 那条「诊断视图低一档」的兑现：
+ * 图标、字号、字重与选中描线一起降一档，让导航六格里有一格在视觉上退后。
+ */
+export type DeskTabTier = 'primary' | 'muted';
+
+export interface DeskTabProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
+  /** 这一格的 `data-action`（导航档固定 `nav-<view>`，是 harness 与冒烟脚本的既有凭据）。 */
+  action: string;
+  /** 这一格承载的视图 id，原样挂到 `data-view`（`chat` / `workflow` 两支锚点不许改名）。 */
+  view: string;
+  /** 是否是当前视图：选中只改「一道短线 + 文字提亮 + 底色提一档」，不换成实底按钮。 */
+  selected: boolean;
+  /** 图标组件。尺寸由档位决定（原件唯一出路：调用方各抄 15/12 就会长回两套）。 */
+  icon: ComponentType<{ size?: number; className?: string }>;
+  /** 尺寸档，默认 `primary`。 */
+  tier?: DeskTabTier;
+  /** 只放宽度/外边档；描边、底色、字号一律在原件里。 */
+  className?: string;
+}
+
+/**
+ * 导航页签（01 稿左栏那一格）：非六档按钮语义，所以不进 `DeskButton`。
+ * 选中态按稿上是「贴在轨道左缘的一道 3×17 短线」而不是整块高亮——一眼知道我在哪，又不抢内容；
+ * 短线颜色走 **celadon 不走 seal**（plan §5 的归属表：seal 只给外发/不可逆/风险，
+ * "此刻指向哪一格"不是风险）。低一档那格的短线用 slate-500，与已入库的 6.3-02 读数一致。
+ */
+export function DeskTab({
+  action,
+  view,
+  selected,
+  icon: Icon,
+  tier = 'primary',
+  className = '',
+  children,
+  ...rest
+}: DeskTabProps) {
+  const isMuted = tier === 'muted';
+  const marker = selected ? (isMuted ? 'before:bg-slate-500' : 'before:bg-celadon') : 'before:bg-transparent';
+  return (
+    <button
+      type="button"
+      data-action={action}
+      data-view={view}
+      data-selected={selected ? 'true' : 'false'}
+      aria-current={selected ? 'page' : undefined}
+      className={`relative flex items-center rounded-control before:absolute before:-left-2 before:top-1/2 before:h-[17px] before:w-[3px] before:-translate-y-1/2 before:rounded-r-[2px] before:content-[''] ${marker} ${
+        isMuted
+          ? `gap-2 px-2.5 py-1.5 text-[11px] ${
+              selected ? 'bg-ink-800 text-slate-300' : 'text-slate-500 hover:bg-ink-850 hover:text-slate-400'
+            }`
+          : `gap-2.5 px-2.5 py-2 text-xs font-medium ${
+              selected ? 'bg-ink-800 text-slate-50' : 'text-slate-400 hover:bg-ink-850 hover:text-slate-100'
+            }`
+      } ${className}`}
+      {...rest}
+    >
+      <Icon size={isMuted ? 12 : 15} className="shrink-0" />
+      {children}
+    </button>
   );
 }
 

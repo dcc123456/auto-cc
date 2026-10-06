@@ -38,7 +38,7 @@ import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
 import { tightestQuota, useDeskStatus } from './deskStatus';
-import { DeskButton } from './ui/controls';
+import { DeskButton, DeskTab } from './ui/controls';
 import { Toast } from './ui/overlays';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
@@ -142,27 +142,6 @@ export function App() {
   const kernelViewVisible = useKernelViewVisible();
 
   /**
-   * 左轨按钮的样式，按层级分两档。
-   * @param entry 该按钮代表的工作台
-   * @returns 完整字面量的 class（Tailwind 扫得到），诊断档刻意比工作台低一档
-   */
-  const entryClass = (entry: DeskEntry) => {
-    const isSelected = entry.view === view;
-    if (!entry.primary) {
-      return `flex items-center gap-2 rounded-control border-l-2 px-2.5 py-1.5 text-[11px] ${
-        isSelected
-          ? 'border-l-slate-500 bg-ink-800 text-slate-300'
-          : 'border-l-transparent text-slate-500 hover:bg-ink-850 hover:text-slate-400'
-      }`;
-    }
-    return `flex items-center gap-2.5 rounded-control border-l-2 px-2.5 py-2 text-xs font-medium ${
-      isSelected
-        ? 'border-l-celadon bg-ink-800 text-slate-50'
-        : 'border-l-transparent text-slate-400 hover:bg-ink-850 hover:text-slate-100'
-    }`;
-  };
-
-  /**
    * 一张工作台的容器：标题 + 说明 + 面板堆。
    * @param target 该容器承载的视图
    * @returns section 元素，隐藏时用 `hidden` 而不是不渲染（1.10-01）
@@ -214,23 +193,20 @@ export function App() {
           aria-label={t('nav.aria')}
           className="flex w-[184px] shrink-0 flex-col gap-0.5 border-r border-line bg-ink-900 p-2"
         >
-          {DESK_ENTRIES.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <button
-                key={entry.view}
-                type="button"
-                // `chat` / `workflow` 两个值是 harness 与 smoke 脚本的既有凭据，改名等于拆掉验收通道
-                data-view={entry.view}
-                data-action={`nav-${entry.view}`}
-                className={entryClass(entry)}
-                onClick={() => setView(entry.view)}
-              >
-                <Icon size={entry.primary ? 15 : 12} className="shrink-0" />
-                {t(`nav.${entry.view}`)}
-              </button>
-            );
-          })}
+          {DESK_ENTRIES.map((entry) => (
+            <DeskTab
+              key={entry.view}
+              // `chat` / `workflow` 两个值是 harness 与 smoke 脚本的既有凭据，改名等于拆掉验收通道
+              view={entry.view}
+              action={`nav-${entry.view}`}
+              selected={entry.view === view}
+              icon={entry.icon}
+              tier={entry.primary ? 'primary' : 'muted'}
+              onClick={() => setView(entry.view)}
+            >
+              {t(`nav.${entry.view}`)}
+            </DeskTab>
+          ))}
         </nav>
 
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
