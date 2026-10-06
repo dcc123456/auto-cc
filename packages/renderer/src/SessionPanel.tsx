@@ -58,7 +58,21 @@ export function SessionPanel() {
     }
   }, [bridge]);
 
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, resultOf, run } = useBridgeAction(read);
+
+  /**
+   * 六只动作的标签。这一串同时是 `run` 的提示文案凭据**与**结果态的归属键（07 稿五态的第四、五态），
+   * 所以两处必须取同一个串——写成一份，按钮那边只问不猜（§2.2）。
+   * 平台名进标签，于是「探测 fixture-alt 成功」只点亮那一行的按钮，不点亮别的平台。
+   */
+  const actionLabel = {
+    open: (id: string) => t('session.actionOpen', { id }),
+    probe: (id: string) => t('session.actionProbe', { id }),
+    logout: (id: string) => t('session.actionLogout', { id }),
+    close: () => t('session.actionClose'),
+    snapshot: () => t('session.actionSnapshot'),
+    navigate: () => t('session.actionNavigate'),
+  };
 
   useEffect(() => {
     void read();
@@ -88,23 +102,23 @@ export function SessionPanel() {
     }));
 
   const open = (platform: string) =>
-    void run(t('session.actionOpen', { id: platform }), () => bridge?.sessions.open(platform), {
+    void run(actionLabel.open(platform), () => bridge?.sessions.open(platform), {
       apply: setSnapshot,
     });
 
   const probe = (platform: string) =>
-    void run(t('session.actionProbe', { id: platform }), () => bridge?.sessions.probe(platform), {
+    void run(actionLabel.probe(platform), () => bridge?.sessions.probe(platform), {
       apply: mergePlatform,
     });
 
   const logout = (platform: string) =>
-    void run(t('session.actionLogout', { id: platform }), () => bridge?.sessions.logout(platform), {
+    void run(actionLabel.logout(platform), () => bridge?.sessions.logout(platform), {
       apply: mergePlatform,
     });
 
   /** 收回站点页面：分区读数归快照，页面读数则当场作废——视图里已经换回占位页了。 */
   const closeView = () =>
-    void run(t('session.actionClose'), () => bridge?.sessions.close(), {
+    void run(actionLabel.close(), () => bridge?.sessions.close(), {
       apply: (value) => {
         setSnapshot(value);
         setPage(null);
@@ -112,13 +126,13 @@ export function SessionPanel() {
     });
 
   const readPage = () =>
-    void run(t('session.actionSnapshot'), () => bridge?.browser['page.snapshot'](), {
+    void run(actionLabel.snapshot(), () => bridge?.browser['page.snapshot'](), {
       apply: setPage,
     });
 
   /** 导航成功后返回的就是落地页的快照，直接落进本面板，省掉一次「点了但看不见」的等待。 */
   const navigate = () =>
-    void run(t('session.actionNavigate'), () => bridge?.browser['page.navigate'](urlDraft.trim()), {
+    void run(actionLabel.navigate(), () => bridge?.browser['page.navigate'](urlDraft.trim()), {
       apply: setPage,
     });
 
@@ -219,6 +233,7 @@ export function SessionPanel() {
                     disabled={!!busy}
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.open(platform.id))}
                     onClick={() => open(platform.id)}
                   >
                     <KeyRound size={12} />
@@ -231,6 +246,7 @@ export function SessionPanel() {
                     disabled={!!busy}
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.probe(platform.id))}
                     onClick={() => probe(platform.id)}
                   >
                     <Radar size={12} />
@@ -244,6 +260,7 @@ export function SessionPanel() {
                     disabled={!!busy}
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.logout(platform.id))}
                     onClick={() => logout(platform.id)}
                   >
                     <LogOut size={12} />
@@ -276,6 +293,7 @@ export function SessionPanel() {
             disabled={!!busy}
             disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
             disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+            result={resultOf(actionLabel.close())}
             onClick={closeView}
           >
             <LogOut size={12} />
@@ -297,6 +315,7 @@ export function SessionPanel() {
             disabled={!!busy}
             disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
             disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+            result={resultOf(actionLabel.snapshot())}
             onClick={readPage}
           >
             <RefreshCw size={14} />
@@ -320,6 +339,7 @@ export function SessionPanel() {
             disabled={!!busy || urlDraft.trim() === ''}
             disabledReason={navigateReason}
             disabledReasonLabel={navigateReasonLabel}
+            result={resultOf(actionLabel.navigate())}
             onClick={navigate}
           >
             <Compass size={12} />

@@ -132,6 +132,7 @@ export function DeskButton({
       data-effect={variant}
       {...markerAttrs}
       {...(disabledReason ? { 'data-disabled-reason': disabledReason } : {})}
+      {...(result ? { 'data-result': result } : {})}
       aria-disabled={isDead || undefined}
       // 不用原生 `disabled`：Chromium 对禁用控件不派发鼠标事件，title 提示也就不会出现，
       // 人只会看到"按不动"而看不到为什么按不动（07 稿④）。改走 aria-disabled + 这里挡下 onClick。
@@ -141,30 +142,33 @@ export function DeskButton({
       {...rest}
     >
       {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标。
-          圆角自己带一份——根节点不裁切（见下面那条注释），不裁就得自己贴合。 */}
+          圆角自己带一份——根节点不裁切（见上面那条注释），不裁就得自己贴合。 */}
       {result && !busy ? (
         <span className={`pointer-events-none absolute inset-0 rounded-control ${RESULT_WASH[result]}`} />
       ) : null}
+      {/* 转针与结果角标共用这一格预留位（`w-3.5`）：07 稿④ 的「宽度锁死不跳版」管的正是进行中与结果
+          这两态。活体差值原先是 109 → 127px（角标挤在文案后面长出 18px），挪进已有的状态位后五态同宽。 */}
       <span className={SPINNER_SLOT}>
         {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
-      </span>
-      <span className="relative flex items-center gap-1">
-        {children}
         {result && !busy ? RESULT_ICON[result] : null}
       </span>
+      <span className="relative flex items-center gap-1">{children}</span>
     </button>
   );
 }
 
-/** `useDeskResult` 的返回：读数 + 两个落点 + 手动清除。 */
+/** `useDeskResult` 的返回：按动作标签取结果态 + 三个落点。 */
 export interface DeskResultState {
-  /** 当前结果态，undefined 表示无结果或已回落。 */
-  result?: DeskResult;
+  /**
+   * 这一格动作的结果态；一屏同时只有**最近那一次动作**带结果，所以按标签问。
+   * @param label 与 `useBridgeAction` 的 `run` 同一个动作标签
+   */
+  resultOf: (label: string) => DeskResult | undefined;
   /** 置为成功态并在 `doneMs` 后自动回落（07 稿：jade 只闪一下，不占着界面）。 */
-  markDone: () => void;
+  markDone: (label: string) => void;
   /** 置为失败态并**不**自动回落，等用户再动一次。 */
-  markFailed: () => void;
-  /** 清除结果态；下一次点击前组件自己调，用户不需要看见这个动作。 */
+  markFailed: (label: string) => void;
+  /** 清除结果态；下一次动作开始时由外壳自己调，用户不需要看见这个动作。 */
   clearResult: () => void;
 }
 
@@ -206,32 +210,40 @@ export function deskReason(
  * 结果态的计时回落。jade 是「已经办完」的回执，留久了会被误读成常驻状态；
  * seal 是「办砸了」，自动消失等于谎报，所以只有成功一侧挂定时器。
  * @param doneMs 成功态停留毫秒数，默认 2000（07 稿读数）
- * @returns 结果态读数与三个动作
+ * @returns 按动作标签取结果态的读数器，与三个落点
  */
 export function useDeskResult(doneMs = 2000): DeskResultState {
-  const [result, setResult] = useState<DeskResult>();
+  const [current, setCurrent] = useState<{ kind: DeskResult; label: string }>();
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const clearResult = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = undefined;
-    setResult(undefined);
+    setCurrent(undefined);
   }, []);
 
-  const markDone = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    setResult('done');
-    timer.current = setTimeout(() => {
-      timer.current = undefined;
-      setResult(undefined);
-    }, doneMs);
-  }, [doneMs]);
+  const markDone = useCallback(
+    (label: string) => {
+      if (timer.current) clearTimeout(timer.current);
+      setCurrent({ kind: 'done', label });
+      timer.current = setTimeout(() => {
+        timer.current = undefined;
+        setCurrent(undefined);
+      }, doneMs);
+    },
+    [doneMs],
+  );
 
-  const markFailed = useCallback(() => {
+  const markFailed = useCallback((label: string) => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = undefined;
-    setResult('failed');
+    setCurrent({ kind: 'failed', label });
   }, []);
+
+  const resultOf = useCallback(
+    (label: string): DeskResult | undefined => (current?.label === label ? current.kind : undefined),
+    [current],
+  );
 
   // 卸载时必须清掉，否则残留定时器会在组件销毁后 setState（本项目的句柄判据：不许变多）。
   useEffect(
@@ -241,7 +253,7 @@ export function useDeskResult(doneMs = 2000): DeskResultState {
     [],
   );
 
-  return { result, markDone, markFailed, clearResult };
+  return { resultOf, markDone, markFailed, clearResult };
 }
 
 /**
