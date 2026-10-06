@@ -1,0 +1,70 @@
+$ node tmp/v6c/bar05.mjs tmp/v6c/bar05-light.png tmp/v6c/bar05-dark.png tmp/v6c/bar05-probe.png        → EXIT=0
+$ node tmp/v6c/bar05b.mjs tmp/v6c/bar05-warn.png tmp/v6c/bar05-restored.png                             → EXIT=0
+
+活体环境：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`（CDP 10222 / vite 5173 / fixture 10233），
+窗口 hidden → 一律页内 `.click()`（React 收得到），截图由 `Page.captureScreenshot` 出帧（视口 1200×772，dpr 2）。
+探针脚本 `tmp/v6c/bar05.mjs` 与 `bar05b.mjs` 不进仓库（AGENTS.md §7.5）。
+
+判据读法：`[data-testid="statusbar"]` 是状态条本身，`[data-testid="statusbar-item"]` 是四格，
+每格带 `data-item` / `data-state`，`dotBg` 是那颗点的 `backgroundColor` 计算值。
+
+== 1) 首屏四格齐（浅色 / 毡案）==
+foot   font-family "IBM Plex Mono" / font-size 10.5px / background rgb(216,211,198) / border-top 1px rgba(38,44,48,0.15)
+run    state=none  text="运行无运行"           dotBg rgb(125,136,146)  灰——没有运行就报没有运行，不画一格绿的
+auth   state=ok    text="登录态已登录 1 / 共 3" dotBg rgb(47,143,102)   青玉（`sessions.status()` 那份读数里三只有一只在 active）
+quota  state=ok    text="额度本地不限"          dotBg rgb(47,143,102)   青玉（闸门对 search/greet/deliver 的判定，不是界面猜的）
+tier   state=none  text="档位建议模式"          dotBg rgb(125,136,146)  灰（建议档只出主意、不动手）
+→ 截图 `6.3-05-statusbar-light.png`（底部一栏四格齐，等宽 10.5px）
+
+== 2) 额度那一格跟着既有面板的重读到货，状态条没有为它单开一次调用 ==
+点 `[data-testid="usage-panel"] [data-action="refresh"]`（用量面板自己的通路）→ quota 仍是
+state=ok text="额度本地不限"，且 `deskStatus.ts` 里零条 `bridge` 调用、零条定时器（见第 5 段）。
+
+== 3) 档位那一格是推来的，不是界面自己存的第二份 ==
+点 `[data-autonomy="semi"]`    → tier state=ask  text="档位半自动"   dotBg rgb(161,112,15)  琥珀（每一步等表态）
+点回 `[data-autonomy="suggest"]` → tier state=none text="档位建议模式" dotBg rgb(125,136,146) 灰
+来源是 `ChatPanel` 改档之后那次 `read()` 报进汇流的（`reportDeskTier`）。
+
+== 4) 深色 / 墨案：同一栏换色不换语义 ==
+foot   font-family "IBM Plex Mono" / font-size 10.5px / background rgb(8,12,16) / border-top 1px rgba(150,178,196,0.14)
+auth   dotBg rgb(79,183,138)   青玉（浅色 47,143,102：两主题各取自己的 token，档位语义同一格）
+run/tier dotBg rgb(85,103,122) 灰
+→ 截图 `6.3-05-statusbar-dark.png`；收尾 `localStorage['auto-cc.theme'] = light`（回到取证前那一面）
+
+== 5) 「不新增长轮询」是结构判据 ==
+$ grep -rn "setInterval\|setTimeout" packages/renderer/src/deskStatus.ts packages/renderer/src/App.tsx
+（无输出——新代码一条定时器都没有）
+$ grep -n "window.autoCC\|bridge\." packages/renderer/src/deskStatus.ts
+（无输出——汇流不自己去问 service；四项读数各自由本来就拥有它的面板在既有 `read()` 之后推进来）
+
+== 6) 负对照：从没登录过的平台不算刚掉线 ==
+切到信任台，逐只点 `[data-action="probe"]`（`sessions.probe` 只读 cookie、不发站点请求，§7.2 安全）：
+index=0 row="fixture未登录持久分区…"    → auth 仍 state=ok text="登录态已登录 1 / 共 3"
+index=1 row="fixture-alt已登录持久分区…" → auth 仍 state=ok（主进程判定 active，根本不推 `session/expired`）
+index=2 row="boss未登录持久分区…"       → auth 仍 state=ok
+→ 截图 `6.3-05-probe-never-logged-in.png`
+读数说明：fixture 与 boss 的判定载荷是 `reason:'missing'`（分区里从来没有会话 cookie = 还没登录），
+状态条**没有**因此翻朱砂报「刚失效」。这一格的判据是快照之间的变化（上一份里 active、这一份里不再 active），
+不是「读回 expired」——见 `deskStatus.ts` 的 `reportDeskPlatforms`。
+
+== 7) 正腿：真掉一次线，那一格翻朱砂并点名；重新登录之后自己撤回去 ==
+（顺序刻意反过来：先证明恢复的门是开的，再动登录态。全程只碰本地 fixture 站点，§7.2。）
+before    auth state=ok   text="登录态已登录 1 / 共 3"      dotBg rgb(47,143,102)
+doorOpen  点 `[data-action="open"]`（fixture-alt）→ 地址栏写 `http://127.0.0.1:10233/login?next=/alt`
+          → 点 `[data-action="navigate"]` → 点探测 → 提示行「探测平台 fixture-alt：成功」，auth 仍 ok
+          （= `/login` 会重新发 `autocc_session`，撤销取证这一步是可行的，先验证再往下走）
+logout    点 `[data-action="logout"]`（fixture-alt）→ 提示行「退出平台 fixture-alt：成功」
+          → **auth state=warn text="登录态fixture-alt 刚失效" dotBg rgb(192,57,31) 朱砂**
+          → 截图 `6.3-05-statusbar-warn.png`
+probe2    再点一次探测（这一次主进程给的 reason 是 `missing`）→ 朱砂**不撤**：
+          这一格跟着快照走，而它在最新快照里仍不在 active；面板横幅同时长出
+          「平台 fixture-alt 的登录态已失效（会话 cookie 不存在），需重新登录 · 20:03:32」（1.8-06 既有通路）
+restored  再走一次 `/login` + 探测 → **auth 回到 state=ok text="登录态已登录 1 / 共 3" dotBg rgb(47,143,102)**
+          → 截图 `6.3-05-statusbar-restored.png`
+          撤朱砂的凭据只有「这一平台又读回 active」，开发实例的登录态已还原成取证前的样子。
+
+== 8) 「进行中运行」那一格：本次只取到静止态，活体进度另有出处 ==
+四格里 run 报的是 `无运行`（灰）——这是 `useWorkflowRun` 的当下真相，不是缺读。
+进度推来时的青瓷那一档不在本片重取：状态条直接吃 `useWorkflowRun` 的 `live`（`live.message` + `live.stepId`），
+而这条 `workflow/progress` 通路已经活体验证过（spec 5.10-11 画布进度只由事件推、spec 1.10-08 两侧镜像一致）。
+本片新增的只有把 `live` 画进底栏那三行，没有新开一条订阅、也没有第二份 runner 状态。
