@@ -11,7 +11,7 @@ import type {
 import { createPdfEditSession } from '@auto-cc/plugin-pdf-edit/edit-session';
 import type { AppErrorPayload, PdfOpenReceiptView, PdfSaveAsReceiptView, PdfTextBoxView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
 import { useDeskThemeValue } from './theme';
 
 /** 覆盖区的入参类型从会话自己的签名取：本包对外只开 `./edit-session` 一条窄出口，不再把 `overlay-writer` 也开出去。 */
@@ -398,26 +398,10 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
   /**
    * 「按不动」必须带上原因码（07 稿④）。`busy` 排在每一条链首：在途时任何一颗都轮不到人按，
    * 这一档优先于该键自己的前置条件，和界面给出的转针读数一致。
+   * 三件套的实现在 `deskReason`（墨案控件原件）——本面板与排版编辑器共用那一份，不各写一遍（§2.2）。
    */
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
-  const reasonLabel = (code?: string): string | undefined =>
-    code === undefined ? undefined : t(`pdfEdit.reason.${code}`);
-  /**
-   * 在途优先的禁用理由链：有动作在飞一律 `ACTION_BUSY`，否则看这一颗自己的前置条件。
-   * @param blocked 该键自己的前置条件是否不成立
-   * @param code 不成立时的原因码
-   */
-  const afterBusy = (blocked: boolean, code: string): string | undefined => busyReason ?? (blocked ? code : undefined);
-  /**
-   * 一条理由摊成 DeskButton 的三个 props。**`disabled` 必须跟 `disabledReason` 一起给**——
-   * 只挂码不挡点击是 6.4 第七片活体抓到过的谎报（按钮挂着"不能按"的理由却照样能按）。
-   * @param reason 禁用原因码，undefined 表示这一颗现在能按
-   */
-  const dead = (reason?: string) => ({
-    disabled: reason !== undefined,
-    disabledReason: reason,
-    disabledReasonLabel: reasonLabel(reason),
-  });
+  const { label: reasonLabel, reason: afterBusy, dead } = deskReason(t, 'pdfEdit', busyReason);
   const openReason = afterBusy(filePath.trim() === '', 'PATH_EMPTY');
   /** 另存的理由链三档：在途 → 尺度没读到（会话根本建不起来）→ 产物路径为空。顺序即优先级。 */
   const saveAsReason =

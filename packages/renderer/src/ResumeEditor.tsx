@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditorMetricKeyView, ResumeEditorView, ResumeLocaleView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { DeskButton, FIELD_CLASS, deskReason } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -246,18 +246,11 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
   const isLargeDocument = rowCount > view.timing.largeDocumentSectionCount;
   /** 在途那一档优先级最高：这时任何键的理由都是"上一趟还没回来"，而不是它自己的业务条件。 */
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
-  const reasonLabel = (code?: string): string | undefined =>
-    code === undefined ? undefined : t(`resume.editor.reason.${code}`);
-  /** 把「禁用 + 原因码 + 人话版」一次配齐：漏掉 `disabled` 就等于挂个说法明的理由却照样能按（第九片实测过）。 */
-  const dead = (reason?: string) => ({
-    disabled: reason !== undefined,
-    disabledReason: reason,
-    disabledReasonLabel: reasonLabel(reason),
-  });
+  const { dead, reason: afterBusy } = deskReason(t, 'resume.editor', busyReason);
   /** 各键的禁用理由：在途优先，其次才是它自己的业务条件（顺序即优先级，与第十二片同一条写法）。 */
-  const undoReason = busyReason ?? (view.canUndo ? undefined : 'NOTHING_TO_UNDO');
-  const redoReason = busyReason ?? (view.canRedo ? undefined : 'NOTHING_TO_REDO');
-  const saveReason = busyReason ?? (view.isDirty ? undefined : 'NOTHING_TO_SAVE');
+  const undoReason = afterBusy(!view.canUndo, 'NOTHING_TO_UNDO');
+  const redoReason = afterBusy(!view.canRedo, 'NOTHING_TO_REDO');
+  const saveReason = afterBusy(!view.isDirty, 'NOTHING_TO_SAVE');
 
   return (
     <section data-testid="resume-editor" className="rounded-xl border border-line bg-ink-900/60 p-4">

@@ -103,3 +103,25 @@
 - `busy` 转针态：本面板每一趟往返都在一次 eval 的间隙里回来了，没抓到 `aria-busy` 那一帧；组件侧 `busy={!!busy}` 已接。
 - 结果态角标（`useDeskResult` 的 done/failed wash）：本面板没有接 `result`，与第十二片同口径（回执走 `notice` 行）。
 - Windows / linux 运行期：本机 macOS arm64，不适用（AGENTS.md §9）。
+
+八、抽公共层的复测（收尾自检④ 抓到的第二处复制，AGENTS.md §2.2）
+----------------------------------------------------------------
+
+第十三片收尾自检④ 查到「禁用三件套」（`reasonLabel` + 在途优先链 + `dead` 摊三个 props）
+在 `PdfEditPanel.tsx`（第十二片）与 `ResumeEditor.tsx`（本片）各写了一份，按 §2.2 必须抽层。
+抽进 `ui/controls.tsx` 的 `deskReason(translate, reasonNamespace, busyReason)`，两个面板各取自己的
+命名空间（`resume.editor` / `pdfEdit`）与 `busyReason`，调用点靠解构别名不变（`dead` / `afterBusy` / `reasonLabel`）。
+复测走活体（dev app 热改后重开编辑器，末态干净、`close-editor` 直接卸载，本轮零写入）：
+
+```
+close-editor | ghost | dead no   | why                    | title                     | w 109 h 24
+undo         | ghost | dead true | why NOTHING_TO_UNDO    | title 没有可撤销的编辑了   | w 76  h 24
+redo         | ghost | dead true | why NOTHING_TO_REDO    | title 没有可重做的编辑了   | w 76  h 24
+save-editor  | amber | dead true | why NOTHING_TO_SAVE    | title 草稿与库里的一致…    | w 76  h 24
+```
+
+与第十三片收口时那份逐位一致（`aria-disabled` / `data-disabled-reason` / `title` 三条腿都在，
+宽度 109/76/76/76、高一律 24），即抽层没有改变任何一条可见行为。
+门禁：typecheck / lint / format:check / test 四道 0。
+`PdfEditPanel` 那一侧没有重开活体（它调的是同一个工厂、传参形状与本地别名逐字相同，且 `dead` 的
+14 个调用点未动），故那一屏的复测记为「按构造等价」，不计为活体读数。

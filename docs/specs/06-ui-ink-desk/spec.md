@@ -665,3 +665,11 @@
 9. **没取到的**：`redo` 的可用态（要"撤销之后再重做"那一发，为保持末态干净没走）、把手按下档与落点虚线
    （要真实指针拖拽，属 **6.5-04**）、`busy` 转针那一帧（每趟往返都在两次 eval 之间回来了，与前十二片同一结论）、
    结果态角标（本面板不接 `result`，回执走 `notice` 行，与第十二片同口径）；Windows / linux 本机不适用。
+10. **收尾自检④ 抓到并还掉的一处复制（§2.2）**：「禁用三件套」——`reasonLabel`（码→话）、在途优先的理由链、
+    `dead`（摊成 `disabled` + `disabledReason` + `disabledReasonLabel`）——在第十二片的 `PdfEditPanel`
+    与本片 `ResumeEditor` 各写了一份。抽进控件原件 `ui/controls.tsx` 的 `deskReason(translate, reasonNamespace, busyReason)`
+    （命名空间当参数传，两侧文案键仍各自是 `pdfEdit.reason.*` / `resume.editor.reason.*`），两个面板靠解构别名接回
+    （`dead` / `afterBusy` / `reasonLabel`），**调用点一行未动**。抽层后活体复测与第十三片收口读数逐位一致
+    （`undo`/`redo`/`save-editor` 三颗的 `aria-disabled` + 原因码 + `title` 齐全，宽 109/76/76/76、高 24），
+    四道门禁 0。`PdfEditPanel` 那一侧只按构造等价记账，没重开活体。
+    这一条同时给出**第十四片的口径**：残余键位一律走 `deskReason`，不再在各面板手写三件套。

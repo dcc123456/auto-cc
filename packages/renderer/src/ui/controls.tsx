@@ -1,6 +1,7 @@
 import { BadgeCheck, CircleAlert, LoaderCircle, Send, Stamp } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import type { TFunction } from 'i18next';
 import type { ToolEffect } from '@auto-cc/shared';
 
 /**
@@ -157,6 +158,40 @@ export interface DeskResultState {
   markFailed: () => void;
   /** 清除结果态；下一次点击前组件自己调，用户不需要看见这个动作。 */
   clearResult: () => void;
+}
+
+/** `deskReason` 摊给 DeskButton 的那三个 props。 */
+export type DeskDisabledProps = Pick<DeskButtonProps, 'disabled' | 'disabledReason' | 'disabledReasonLabel'>;
+
+/**
+ * 「按不动」三件套的唯一工厂：把原因码翻成人话、再摊成 DeskButton 的三个 props。
+ * 只挂 `disabledReason` 不挂 `disabled` 是 6.4 第七片活体抓到的谎报（按钮挂着说法明的理由却照样能按），
+ * 所以这三项必须一次给齐、不许在各面板各写一份（§2.2）。
+ * @param translate 调用方的翻译函数（`useTranslation` 的那个 `t`）
+ * @param reasonNamespace 原因码文案的命名空间，键形如 `<reasonNamespace>.reason.<CODE>`
+ * @param busyReason 在途那一档的原因码；有它时它压过该键自己的前置条件，与转针读数一致
+ * @returns `label`（码→话）、`reason`（在途优先的理由链）、`dead`（摊成三个 props，直接 spread）
+ */
+export function deskReason(
+  translate: TFunction,
+  reasonNamespace: string,
+  busyReason?: string,
+): {
+  label: (code?: string) => string | undefined;
+  reason: (blocked: boolean, code: string) => string | undefined;
+  dead: (reason?: string) => DeskDisabledProps;
+} {
+  const label = (code?: string): string | undefined =>
+    code === undefined ? undefined : translate(`${reasonNamespace}.reason.${code}`);
+  return {
+    label,
+    reason: (blocked, code) => busyReason ?? (blocked ? code : undefined),
+    dead: (reason) => ({
+      disabled: reason !== undefined,
+      disabledReason: reason,
+      disabledReasonLabel: label(reason),
+    }),
+  };
 }
 
 /**
