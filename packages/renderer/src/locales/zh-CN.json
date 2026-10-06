@@ -1536,6 +1536,61 @@
         "up-to-date": "已经是最新版本。",
         "downloading": "正在下载安装包……"
       }
+    },
+    "settings": {
+      "model": {
+        "heading": "模型",
+        "note": "这一格配的是「这台机器替谁说话」：端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
+        "legLabel": "模型腿",
+        "leg": {
+          "chat": "对话（话术生成）",
+          "embed": "向量（知识库检索）"
+        },
+        "providerLabel": "服务商",
+        "provider": {
+          "deepseek": "DeepSeek",
+          "volc-ark": "火山引擎 · 方舟",
+          "openai": "OpenAI",
+          "siliconflow": "硅基流动",
+          "siliconflow-embed": "硅基流动（向量）",
+          "custom": "自定义（任何 OpenAI 兼容端点）"
+        },
+        "baseUrlLabel": "端点 baseUrl",
+        "baseUrlPlaceholder": "https://…/v1",
+        "modelLabel": "模型名",
+        "modelPlaceholder": "该家的模型名",
+        "keyLabel": "API key",
+        "keyPlaceholderStored": "已存 ····{{tail}}（留空＝不改这一把）",
+        "keyPlaceholderEmpty": "尚未填写",
+        "keySource": {
+          "waiting": "正在读主进程的密钥库……",
+          "secret": "现在这一把来自界面（密钥库，末 4 位 {{tail}}）",
+          "env": "现在这一把来自环境变量 {{env}}（界面里还没存过）",
+          "none": "这一把还没有：既没在界面里存过，环境变量也没设。"
+        },
+        "save": "保存",
+        "check": "测试连接",
+        "clearKey": "清除密钥",
+        "noteHotApply": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+        "missingHeading": "还缺：",
+        "field": {
+          "baseUrl": "端点",
+          "model": "模型名",
+          "apiKey": "API key"
+        },
+        "checkOk": "连通：{{model}} 在 {{elapsedMs}}ms 内回了话。",
+        "checkFailed": "没连通（{{reason}}，{{elapsedMs}}ms）：{{message}}",
+        "storageEncrypted": "密钥以系统密钥库加密存放。",
+        "storagePlain": "未加密存储：本机没有可用的系统密钥库，密钥文件以 0600 权限明文落在 userData 下。",
+        "storageUnreadable": "密钥库里的这一份解不开（换机或系统密钥环变动所致）：原文件仍保留，重新填一次即可。",
+        "reason": {
+          "ACTION_BUSY": "上一次动作还在飞，先等它落地再按下一次",
+          "BRIDGE_MISSING": "这个窗口里没有桥接，模型设置够不到主进程",
+          "LEG_INCOMPLETE": "端点、模型名与密钥还没配齐，测试连接必然失败，先补齐这三格",
+          "CHECK_NOT_SUPPORTED": "向量腿的连通性测试尚未实现，这一按不会发任何请求",
+          "NO_KEY_STORED": "这一条腿在本机没存过密钥，没有可清除的东西"
+        }
+      }
     }
   }
 }

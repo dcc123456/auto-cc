@@ -25,6 +25,7 @@ import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
+import { ModelSettingsPanel } from './ModelSettingsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
 import { UpdateSection } from './UpdateSection';
 import { ResumePanel } from './ResumePanel';
@@ -316,6 +317,9 @@ const PANELS: Record<TopView, ReactNode> = {
       {/* 5.8-b 的指标看板排在用量面板前面：五级漏斗是「转化到哪一级」，下面那块是「今天还剩多少额度」 */}
       <MetricsPanel />
       <UsagePanel />
+      {/* P7 · 7.1-11 的模型设置分区排在最后一格：信任这一栏讲的是"这台机器替谁说话"，
+          而模型 key 就是那份凭证——它必须在人能看到登录态与额度的同一栏里，而不是新开一视。 */}
+      <ModelSettingsPanel />
     </>
   ),
   diagnostics: (

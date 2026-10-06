@@ -1,0 +1,30 @@
+# 7.1-06 活体读数：明文 key 不出现在四个可见面（spec 7.1-06）
+# 探针串：sk-cipher-71d-9001（自测假值，见 7.1-02 说明）。写入之后在终端扫整个 userData 与两个进程的 stdout。
+# 命令与本机原始输出：
+
+```
+$ grep -rl 'sk-cipher-71d-9001' tmp/71d-userdata
+（无输出：整棵树 0 命中，包括 secrets.bin 本身——它现在是密文，见 7.1-02）
+
+$ grep -ac 'sk-cipher-71d-9001' tmp/71d-userdata/settings.json
+0
+
+$ grep -ac 'sk-cipher-71d-9001' tmp/71d-userdata/store.db
+0
+
+$ grep -rl 'sk-cipher-71d-9001' tmp/71d-electron*.log tmp/71d-fixture.log
+（无输出）
+```
+
+# 四面逐条对号：
+# ① settings.json 内容 → 0 命中；里面只有 baseUrl / model / providerId（整份 dump 见 7.1-01）。
+# ② 日志文件 → 本机没有落 logs 目录（`find tmp/71d-userdata -maxdepth 2 -type d -name logs` 空），
+#    因此改查两个进程的 stdout（主进程 + fixture），同样 0 命中。
+#    注：这一条只证明「当前实现不打 key」；日志脱敏的正面判据在 §8.5 对应的计划里，不在本处重复取证。
+# ③ 渲染层回包 → `llm.settings.read()` 的整份 JSON 见 7.1-05-restart-readings.txt，
+#    key 那一格只有 { present, tail, source, keyEnv }，没有 value；
+#    页面 body 里也 grep 不到明文（bodyHasPlaintextKey=false，input 的 value 长度恒为 0）。
+# ④ config.trace() 返回值 → 该面没有渲染层入口（bridge 未暴露 trace），因此由单测兑现：
+#    packages/config/src/settings.test.ts:134「密钥经服务读写：trace 与 settings.json 里都没有明文（spec 7.1-06）」
+#    断言 JSON.stringify(config.trace(...).layers) 不含写入的明文值。
+#    这一条是 U 不是 V，如实记在此处，不冒充截图证据。

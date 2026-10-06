@@ -27,8 +27,9 @@ plugins:
   # 模型出口（spec 2.5-12）：全仓**唯一**的 LLM 请求通道，`pnpm lint` 里的 `check-llm-single-entry` 守这条。
   # 默认留空 = 「未配置」：`complete()` 以 `LLM_UNAVAILABLE` 结构化失败，且一次网络都不发，
   # 所以话术生成的模板回落是**可测的**（spec 2.5-01），不是碰运气。
-  # 这里不写 key：清单是入库文件，AGENTS.md §8.6 禁止把密钥写进仓库。key 只从环境变量读。
-  # 要真跑模型就补两行（并导出 `AUTO_CC_LLM_API_KEY`）：
+  # 这里不写 key：清单是入库文件，AGENTS.md §8.6 禁止把密钥写进仓库。key 的读取链是「密钥库优先 → 环境变量兜底」
+  # （界面里填过一次就归密钥库，见 spec 7.1-07；不装界面时导出环境变量同样算数，脚本化配置路径没有被界面取代）。
+  # 要真跑模型就补两行（或直接在「信任」工作台的模型分区里填，那两行会被持久层覆盖）：
   #   baseUrl: https://api.deepseek.com
   #   model: deepseek-chat
   - id: llm
@@ -37,7 +38,7 @@ plugins:
   # DeepSeek 没有 embeddings 端点而硅基流动有，绑在一起配就会变成「为了要向量而把话术生成改地址」
   # （plan §4.3-d 证据 [4]）。默认留空 = 未配置：`embed()` 以 `LLM_UNAVAILABLE` 结构化失败且一次网络都不发，
   # 于是知识库检索自动退回「词面 + 倒排」而不产生伪向量，4.3-04 的断网/无 key 可用因此是可测的。
-  # key 同样不进清单（§8.6），只从环境变量 `AUTO_CC_SILICONFLOW_API_KEY` 读。要真跑向量就补两行：
+  # key 同样不进清单（§8.6），走上面那条「密钥库优先 → `AUTO_CC_SILICONFLOW_API_KEY` 兜底」的读取链。要真跑向量就补两行：
   #   baseUrl: https://api.siliconflow.cn/v1
   #   model: BAAI/bge-m3
   # 维度不写在这里：bge-m3 的 1024 只是文档读数，实际维度以响应为准并落进 `kb_vectors.dim`（4.3-03 无魔法数口径）。

@@ -1536,6 +1536,61 @@
         "up-to-date": "You are on the latest version.",
         "downloading": "Downloading the installer…"
       }
+    },
+    "settings": {
+      "model": {
+        "heading": "Model",
+        "note": "This section is about who this machine speaks for: base URL and model name go to the persisted layer under userData, the key goes to the secret store, and the UI only ever shows its last 4 characters.",
+        "legLabel": "Model leg",
+        "leg": {
+          "chat": "Chat (script generation)",
+          "embed": "Embeddings (knowledge-base retrieval)"
+        },
+        "providerLabel": "Provider",
+        "provider": {
+          "deepseek": "DeepSeek",
+          "volc-ark": "Volcano Engine · Ark",
+          "openai": "OpenAI",
+          "siliconflow": "SiliconFlow",
+          "siliconflow-embed": "SiliconFlow (embeddings)",
+          "custom": "Custom (any OpenAI-compatible endpoint)"
+        },
+        "baseUrlLabel": "Base URL",
+        "baseUrlPlaceholder": "https://…/v1",
+        "modelLabel": "Model name",
+        "modelPlaceholder": "the model name of that provider",
+        "keyLabel": "API key",
+        "keyPlaceholderStored": "stored ····{{tail}} (leave empty to keep this one)",
+        "keyPlaceholderEmpty": "not filled in yet",
+        "keySource": {
+          "waiting": "Reading the secret store in the main process…",
+          "secret": "The current key comes from this UI (secret store, last 4 characters {{tail}}).",
+          "env": "The current key comes from the {{env}} environment variable (nothing stored from the UI yet).",
+          "none": "There is no key yet: nothing was stored here and no environment variable is set."
+        },
+        "save": "Save",
+        "check": "Test connection",
+        "clearKey": "Clear key",
+        "noteHotApply": "Saving rebuilds this leg at once (no restart needed) and closes any open browser session view along the way — reopen it if you need it.",
+        "missingHeading": "Still missing:",
+        "field": {
+          "baseUrl": "base URL",
+          "model": "model name",
+          "apiKey": "API key"
+        },
+        "checkOk": "Connected: {{model}} replied within {{elapsedMs}}ms.",
+        "checkFailed": "Not connected ({{reason}}, {{elapsedMs}}ms): {{message}}",
+        "storageEncrypted": "Keys are stored encrypted in the system keychain.",
+        "storagePlain": "Unencrypted storage: this machine has no usable system keychain, so the key file sits in plaintext under userData with mode 0600.",
+        "storageUnreadable": "The stored blob cannot be decrypted (a machine move or a keychain change): the original file is kept, so filling it in once is enough.",
+        "reason": {
+          "ACTION_BUSY": "The previous action is still in flight; wait for it before pressing again",
+          "BRIDGE_MISSING": "This window has no bridge, so the model settings cannot reach the main process",
+          "LEG_INCOMPLETE": "Base URL, model name and key are not complete, so a connection test would only fail — fill those three first",
+          "CHECK_NOT_SUPPORTED": "A connection test for the embeddings leg is not implemented; this press sends no request",
+          "NO_KEY_STORED": "This leg has no stored key on this machine, so there is nothing to clear"
+        }
+      }
     }
   }
 }

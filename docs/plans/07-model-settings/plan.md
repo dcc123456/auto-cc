@@ -70,6 +70,17 @@
 - **同一次 spike 的第二条实测（决定单测怎么写）**：纯 Node 里 `require('electron')` 返回的是**二进制路径字符串**，
   `.safeStorage` 是 `undefined`。所以密钥库用「特性探测」而不是 try/catch 包 import——
   vitest 下必然走明文回退分支（确定性、可断言），加密分支由注入的假加密器覆盖。
+- **补记（2026-10-06，7.1-d 收口时活体取证撞出来的，两处都已修）**：上面那条 spike 用 `require` 量到的
+  `isEncryptionAvailable=true` 是对的，错的是 app 里那段探测代码本身：
+  ① `safeStorage` 是 `import('electron')` 返回值上的**成员**，对模块对象直接解构那三个方法永远拿到 undefined，
+  于是加密分支静默失效、每个平台都走明文回退（界面倒是如实说"未加密存储"，所以从界面上看不出是缺陷）；
+  ② 同一台机器同一份 Electron 44.4.5，`isEncryptionAvailable()` 在 `app.whenReady()` **之前一律回 false**
+  （before-ready=false / after-ready=true，换两个目录各跑一次结论一致），而密钥库是在装配期装载的——
+  所以 `resolveCipher()` 现在先 `await app.whenReady()` 再问可用性。
+  **这条补记要留下的教训**：假加密器是直接塞进 `SecretStore` 构造器的，绕过了真正出问题的 `resolveCipher()`，
+  所以四道门禁全绿也拦不住它；探测类代码的可测面必须自己露出一半——现已抽出纯函数 `cipherFromElectronModule(mod)`，
+  两种互操作落点（`mod.safeStorage` / `mod.default.safeStorage`）与"摊在模块本身"的错形状各有断言。
+  完整来龙去脉见 `docs/acceptance/07-model-settings/7.1-02-ciphertext.txt`。
 
 ### 3.2 设置怎么持久：给四层合并插进第五层 `persisted`
 

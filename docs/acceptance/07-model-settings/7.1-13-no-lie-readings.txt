@@ -1,0 +1,56 @@
+# 7.1-13 活体读数：界面不说谎的三态（spec 7.1-13）
+# 三条判据分别对应：① 未配置时「测试连接」禁用并给原因码；② 保存后输入框显示掩码且**不回填**明文；
+# ③ encrypted:false 时状态行明写"未加密存储"（并且 encrypted:true 时这句话必须收回去）。
+
+## ① 未配置态（本机第一次装载、库里还没有这把 key 时）
+
+```
+check 的 data-disabled-reason = "LEG_INCOMPLETE"   aria-disabled = "true"
+clear-key 的 data-disabled-reason = "NO_KEY_STORED" aria-disabled = "true"
+missing 行 = "还缺：端点模型名API key"
+keySource 行 = "这一把还没有：既没在界面里存过，环境变量也没设。"
+```
+> 按 §9 的 6.2 口径②：`DeskButton` 的门禁不是原生 `disabled` 而是 `aria-disabled` + `data-disabled-reason`，
+> 所以判"点不动"必须先读 `data-disabled-reason`；这两只都是前置数据缺失，不是界面缺陷。
+> 清库后再点一次同一只键，读数一字不变（`checkStillBlocked=true`，见 7.1-09-10-check-and-legs.txt）——禁用是真的 inert。
+
+## ② 保存后（掩码态，密文分支）
+
+```
+{
+ "keyInputLength": 0,
+ "keyPlaceholder": "已存 ····9001（留空＝不改这一把）",
+ "keySource": "现在这一把来自界面（密钥库，末 4 位 9001）",
+ "bodyHasPlaintextKey": false,
+ "notice": "save：成功",
+ "checkDisabledReason": null,
+ "clearDisabledReason": null
+}
+```
+> `input[type=password]` 的 `value` 长度恒为 0：主进程只交末 4 位，界面把掩码写在 placeholder 上，
+> 所以"看得见存过什么"与"拿得到明文"是两件事。`bodyHasPlaintextKey` 是 `document.body.innerText.includes(探针串)`。
+
+## ③ 降级分支（encrypted:false 时那句"未加密存储"）
+
+```
+{
+ "encrypted": "false",
+ "storageBanner": "未加密存储：本机没有可用的系统密钥库，密钥文件以 0600 权限明文落在 userData 下。"
+}
+```
+> 这份读数来自本机修好加密探测**之前**的那版构建（缺陷来龙去脉见 7.1-02）——当时 `encrypted` 确实是 false，
+> 横幅如实说出来，这一条因此也算被真实状态验过了一次。回退分支本身的判据在单测：
+> `settings.test.ts` 的「恒等端口下如实报 encrypted:false，并且仍然只有一份文件（spec 7.1-03）」。
+> 反向的一半（密文分支里这句话必须消失）也读了：修好之后同一格的 `storageBanner=null`，
+> 取而代之的是状态行「密钥以系统密钥库加密存放。」——两句都由 `view.storage.encrypted` 这一个事实驱动，界面不自己猜。
+
+## 附：装载解不开时（SECRET_UNREADABLE）
+
+```
+"unreadableBanner": "密钥库里的这一份解不开（换机或系统密钥环变动所致）：原文件仍保留，重新填一次即可。"
+```
+> 这一态在本机是**真实发生过**的：明文时代写下的 secrets.bin 在换成 safeStorage 之后解不开。
+> 原文件确实还在（`tmp/71d-plaintext-secrets.bin.bak`，80 字节明文，被改名保留而非删除），
+> 重填一次之后横幅随整库重写成功而消失（这条行为在 7.1-02 的"顺带修的第二条"里，单测有断言）。
+
+# 截图：7.1-13-key-masked.png（②那一态，画面中心是 API key 那一格）。

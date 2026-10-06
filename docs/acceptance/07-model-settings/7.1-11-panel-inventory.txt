@@ -1,0 +1,59 @@
+# 7.1-11 活体读数：「信任」工作台的模型分区控件清单（spec 7.1-11）
+# 取法：隔离实例（--remote-debugging-port=10225 / --user-data-dir=tmp/71d-userdata，从 tmp/v6-userdata rsync 而来并删掉 Singleton*），
+#       共享的 10222 实例一字未动；harness eval --port 10225 --url 5173。
+# 前置：先点 privacy-acknowledge 再切 nav-trust（§9 3.6-c 第⑬条：遮罩会接走可信鼠标事件）。
+# animationsBefore/After=0 的说明：探针跑在页面已经落定之后，入场动画早已跑完，所以时间轴上句柄为 0；
+#       冻结样式仍按 §9 的口径注入了（注入后 animation 计算值为 none 0s），几何与颜色不是旧帧。
+# 两份读数分别覆盖两种前置态：A 是"什么都没配"（禁用理由必须说出来），B 是"配齐并连通"。
+
+## A · 未配置态（check 带 LEG_INCOMPLETE、clear-key 带 NO_KEY_STORED，两只都是 aria-disabled=true）
+
+```
+{
+ "animationsBefore": 0, "animationsAfter": 0, "sectionPresent": true,
+ "leg": "chat", "encrypted": "false",
+ "keySource": "这一把还没有：既没在界面里存过，环境变量也没设。",
+ "missing": "还缺：端点模型名API key",
+ "hotApplyNote": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+ "storageBanner": "未加密存储：本机没有可用的系统密钥库，密钥文件以 0600 权限明文落在 userData 下。",
+ "controls": [
+  { "action": "settings-model-leg",          "tag": "select", "value": "chat",  "disabledReason": null,            "ariaDisabled": null },
+  { "action": "settings-model-provider",     "tag": "select", "value": "custom","disabledReason": null,            "ariaDisabled": null },
+  { "action": "settings-model-base-url",     "tag": "input",  "value": 0,       "placeholder": "https://…/v1",     "disabledReason": null },
+  { "action": "settings-model-name",         "tag": "input",  "value": 0,       "placeholder": "该家的模型名",     "disabledReason": null },
+  { "action": "settings-model-key",          "tag": "input",  "type": "password", "value": 0, "placeholder": "尚未填写", "disabledReason": null },
+  { "action": "settings-model-save",         "tag": "button", "disabledReason": null,            "ariaDisabled": null },
+  { "action": "settings-model-check",        "tag": "button", "disabledReason": "LEG_INCOMPLETE","ariaDisabled": "true" },
+  { "action": "settings-model-clear-key",    "tag": "button", "disabledReason": "NO_KEY_STORED", "ariaDisabled": "true" }
+ ]
+}
+```
+
+> 这一份里 `encrypted:"false"` 与那条「未加密存储」横幅是**当时那版构建的真实状态**，不是探针读错：
+> `resolveCipher()` 探测 safeStorage 的形状写错了（详见 7.1-02 与本片收尾的 §9 记录），修好之后同一格变成 B。
+
+## B · 已配置并连通态（修好加密探测之后重跑同一支探针）
+
+```
+{
+ "animationsBefore": 0, "animationsAfter": 0, "sectionPresent": true,
+ "leg": "chat", "encrypted": "true",
+ "keySource": "现在这一把来自界面（密钥库，末 4 位 9001）",
+ "missing": null,
+ "hotApplyNote": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+ "storageBanner": null,
+ "controls": [
+  { "action": "settings-model-leg",          "tag": "select", "value": "chat",   "disabledReason": null, "ariaDisabled": null },
+  { "action": "settings-model-provider",     "tag": "select", "value": "custom", "disabledReason": null, "ariaDisabled": null },
+  { "action": "settings-model-base-url",     "tag": "input",  "value": 25,       "placeholder": "https://…/v1", "disabledReason": null },
+  { "action": "settings-model-name",         "tag": "input",  "value": 20,       "placeholder": "该家的模型名", "disabledReason": null },
+  { "action": "settings-model-key",          "tag": "input",  "type": "password", "value": 0, "placeholder": "已存 ····9001（留空＝不改这一把）", "disabledReason": null },
+  { "action": "settings-model-save",         "tag": "button", "disabledReason": null, "ariaDisabled": null },
+  { "action": "settings-model-check",        "tag": "button", "disabledReason": null, "ariaDisabled": null },
+  { "action": "settings-model-clear-key",    "tag": "button", "disabledReason": null, "ariaDisabled": null }
+ ]
+}
+```
+
+# 八只控件全在、每只都带 data-action；三格输入 + 两颗动作键 + 一只清除键 + 两条下拉（模型腿 / 服务商）。
+# 截图：7.1-11-model-settings-{light,dark}.png（同一分区、两套主题，深浅各一张，md5 互异）。

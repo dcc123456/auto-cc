@@ -1,0 +1,34 @@
+# 7.1-08 活体读数：保存后无需重启即生效（spec 7.1-08）
+# 取法：隔离实例（PID 44619，CDP 10225）上一次连贯探针——
+#       改「模型名」输入框（HTMLInputElement 原生 setter + input 事件，React 才收）→ 点保存 →
+#       立刻现读 llm.settings.read()（该回包来自主进程的 kernel.effectiveConfig，不是渲染层缓存）→
+#       再点「测试连接」，看 fixture 回显的是哪一个模型名。全程没有 reload、没有换进程。
+# 隐藏页的 setTimeout 被 1s 节流（§9 6.2 口径③），所以两处等待都取 2000ms，读数不是抢跑出来的。
+
+{
+ "改之前": {
+  "model": "fixture-ping-model-2",
+  "notice": null
+ },
+ "点保存之后": {
+  "notice": "save：成功",
+  "nameFieldValue": "fixture-ping-model-3"
+ },
+ "主进程视图里的chat腿": {
+  "leg": "chat",
+  "pluginId": "llm",
+  "providerId": "custom",
+  "baseUrl": "http://127.0.0.1:10246/v1",
+  "model": "fixture-ping-model-3",
+  "key": { "present": true, "tail": "4321", "source": "secret", "keyEnv": "AUTO_CC_LLM_API_KEY" },
+  "missing": [],
+  "available": true
+ },
+ "连通读数": "连通：fixture-ping-model-3 在 20ms 内回了话。"
+}
+
+# 为什么这一份算热改的凭据：最后一行是 fixture 原样回显「这次请求里发来的 model」，
+# 拿到的是 -3 而不是进程启动时的 -2 —— 说明 llm.chat 这条腿已经被 kernel.applyConfig 重建过，
+# 新值真的进了下一次请求，而不只是写进了文件。
+# 顺带一句播报（界面上明写，见 7.1-11 的 hotApplyNote 读数）：配置改动会重建下游插件，
+# 已打开的浏览器会话视图会被关掉（AGENTS.md §9 的 2.5 实测），所以分区里那句话不是客套，是提醒。

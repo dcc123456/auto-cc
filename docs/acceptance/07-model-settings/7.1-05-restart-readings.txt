@@ -1,0 +1,53 @@
+# 7.1-05 活体读数：重启后一切仍然算数（spec 7.1-05）
+# 取法：同一份 userData（tmp/71d-userdata）上把隔离实例整个换了一轮进程——
+#       kill PID 55173 → 同一命令行重新拉起 PID 55868（CDP 仍是 10225，新 browser 会话）→
+#       重新点 privacy-acknowledge → nav-trust → 读 DOM 与 llm.settings.read()，并现点一次「测试连接」。
+# 「after」那份读数不是缓存：新进程、新 CDP target、渲染层重新挂载，页面上那三格值是主进程回给的。
+# 这一轮跑在密文形态上（见 7.1-02），所以"重启后还在"同时兑现了两件事：
+# persisted 层的 baseUrl/模型名还在，且**密钥经系统密钥库重新解得开**——解不开的话连通测试不可能成功。
+
+{
+ "before（PID 55173）": {
+  "storage": { "encrypted": true, "unreadable": false, "file": "…/tmp/71d-userdata/secrets.bin" },
+  "输入框": {
+   "baseUrl": "http://127.0.0.1:10246/v1",
+   "model": "fixture-ping-model-3",
+   "provider": "custom",
+   "keyInputLength": 0,
+   "keyPlaceholder": "已存 ····9001（留空＝不改这一把）"
+  },
+  "文案": {
+   "keySource": "现在这一把来自界面（密钥库，末 4 位 9001）",
+   "encryptedLine": "密钥以系统密钥库加密存放。",
+   "plaintextBanner": null,
+   "unreadableBanner": null,
+   "bodyHasPlaintextKey": false
+  },
+  "连通读数": "连通：fixture-ping-model-3 在 30ms 内回了话。"
+ },
+ "after（PID 55868，重启后）": {
+  "storage": { "encrypted": true, "unreadable": false, "file": "…/tmp/71d-userdata/secrets.bin" },
+  "输入框": {
+   "baseUrl": "http://127.0.0.1:10246/v1",
+   "model": "fixture-ping-model-3",
+   "provider": "custom",
+   "keyInputLength": 0,
+   "keyPlaceholder": "已存 ····9001（留空＝不改这一把）"
+  },
+  "文案": {
+   "keySource": "现在这一把来自界面（密钥库，末 4 位 9001）",
+   "encryptedLine": "密钥以系统密钥库加密存放。",
+   "plaintextBanner": null,
+   "unreadableBanner": null,
+   "bodyHasPlaintextKey": false
+  },
+  "连通读数": "连通：fixture-ping-model-3 在 29ms 内回了话。"
+ }
+}
+
+# 三条来源各对上一次：baseUrl/模型名/providerId 来自 settings.json 的 persisted 层（见 7.1-01 那份 dump），
+# key 来自 secrets.bin（密文；界面只露末 4 位，input 的 value 长度恒为 0 = 不回填明文），
+# 最后一行是 fixture 原样回显本次请求带出去的 model —— 证明这一发真经过了主进程那条腿。
+# 单测那半边（装载 → 写入 → 重新 new Context() 装载第二次，trace() 的 persisted 层含该值）：
+# packages/config/src/settings.test.ts 的「重新装载后持久层与密钥都还在（spec 7.1-05 的重启半边）」。
+# 截图：7.1-05-restart-{before,after}.png（同一分区、两个进程，md5 互异）。

@@ -1,0 +1,62 @@
+# 7.1-09 / 7.1-10 活体读数：任意 OpenAI 兼容端点 + 一次最小请求（spec 7.1-09 / 7.1-10）
+# baseUrl 填的是本机 fixture（http://127.0.0.1:10246/v1，私有端口，未打任何真实模型端点，§7.2）。
+# checkOk 那句「fixture-ping-model 在 26ms 内回了话」里的模型名是请求里发出去的那一份，
+# 由 fixture 原样回显 —— 证明真有一次请求往返，而不是界面自己拼的话。
+# afterClear 之后 checkStillBlocked=true：清掉 key 之后这条腿回到 LEG_INCOMPLETE，再点同一只键读数不变（禁用是真的 inert）。
+
+{
+ "连通测试": {
+  "checkOk": "连通：fixture-ping-model 在 26ms 内回了话。",
+  "afterClear": {
+   "keyPlaceholder": "尚未填写",
+   "keySource": "这一把还没有：既没在界面里存过，环境变量也没设。",
+   "checkDisabledReason": "LEG_INCOMPLETE",
+   "clearDisabledReason": "NO_KEY_STORED"
+  },
+  "checkStillBlocked": true
+ },
+ "两条腿与目录过滤": {
+  "before": {
+   "leg": "chat",
+   "providerValue": "custom",
+   "providerOptions": [
+    "deepseek",
+    "volc-ark",
+    "openai",
+    "siliconflow",
+    "custom"
+   ],
+   "baseUrl": "http://127.0.0.1:10246/v1",
+   "model": "fixture-ping-model",
+   "keyPlaceholder": "已存 ····4321（留空＝不改这一把）",
+   "checkReason": null
+  },
+  "embed": {
+   "leg": "embed",
+   "providerValue": "custom",
+   "providerOptions": [
+    "siliconflow-embed",
+    "custom"
+   ],
+   "baseUrl": "",
+   "model": "",
+   "keyPlaceholder": "尚未填写",
+   "checkReason": "CHECK_NOT_SUPPORTED"
+  },
+  "afterSave": {
+   "leg": "chat",
+   "providerValue": "custom",
+   "providerOptions": [
+    "deepseek",
+    "volc-ark",
+    "openai",
+    "siliconflow",
+    "custom"
+   ],
+   "baseUrl": "http://127.0.0.1:10246/v1",
+   "model": "fixture-ping-model-2",
+   "keyPlaceholder": "已存 ····4321（留空＝不改这一把）",
+   "checkReason": null
+  }
+ }
+}
