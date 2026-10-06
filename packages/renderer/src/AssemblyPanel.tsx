@@ -1,4 +1,4 @@
-import { Boxes, Play, RefreshCw, Repeat, ScrollText, ShieldCheck, SlidersHorizontal, Square } from 'lucide-react';
+import { Boxes, Play, RefreshCw, Repeat, Save, ScrollText, ShieldCheck, SlidersHorizontal, Square } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -12,15 +12,21 @@ import type {
   PluginTreeSnapshot,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 
-/** 状态 → 颜色：只有 Tailwind 静态类名，避免运行期拼类名导致样式缺失。 */
+/**
+ * 插件状态 → 徽标配色，按「这一格现在系统在做什么」分四族（plan §5）：
+ * `active`（已挂上、正常）= 玉；`loading` / `unloading`（正在挂或正在卸）= 青瓷——进行中的系统动作，
+ * 和步骤行 `running` 同一档；`failed` = 朱砂；`pending` / `disposed` 都还没有任何事在发生 = 中性灰。
+ * 原先 `disposed` 与 `unloading` 共用一套灰，看起来像「卸载早就完了」，现在把在卸的那一档分开画。
+ */
 const STATE_CLASS: Record<PluginNodeView['state'], string> = {
-  active: 'bg-emerald-950 text-emerald-300 border-emerald-800',
-  pending: 'bg-amber-950 text-amber-300 border-amber-800',
-  failed: 'bg-rose-950 text-rose-300 border-rose-800',
-  loading: 'bg-sky-950 text-sky-300 border-sky-800',
-  disposed: 'bg-slate-800 text-slate-400 border-slate-700',
-  unloading: 'bg-slate-800 text-slate-400 border-slate-700',
+  active: 'border-jade/45 bg-jade-wash text-jade',
+  pending: 'border-line-strong bg-ink-850 text-slate-500',
+  failed: 'border-seal/55 bg-seal-wash text-seal',
+  loading: 'border-celadon/50 bg-celadon-wash text-slate-100',
+  disposed: 'border-line-strong bg-ink-850 text-slate-500',
+  unloading: 'border-celadon/50 bg-celadon-wash text-slate-100',
 };
 
 /** 日志区最多显示的行数，事件推送时按此截断。 */
@@ -142,28 +148,41 @@ export function AssemblyPanel() {
     );
   };
 
+  /**
+   * 在途那一拍的原因码：这一屏五只动作口（配置 / 停用 / 启用 / 巡检 / 保存）都走
+   * `useBridgeAction`，跑着的时候再按一次会把插件树搅成半新半旧，所以整屏共用一支码。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`assembly.reason.${code}`);
+
   const metrics = status?.metrics;
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <Boxes size={16} />
             {t('assembly.heading')}
           </h2>
-          <button
-            type="button"
+          <DeskButton
+            action="assembly-refresh"
+            variant="line"
+            compact
+            busy={!!busy}
+            disabled={busyReason !== undefined}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
             onClick={() => void read()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
             <RefreshCw size={14} />
             {t('assembly.refresh')}
-          </button>
+          </DeskButton>
         </div>
 
         {tree?.manifestError && (
-          <p className="mt-3 rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-xs text-rose-300">
+          <p className="mt-3 rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-xs text-seal">
             {t('assembly.manifestError', { message: tree.manifestError })}
           </p>
         )}
@@ -179,7 +198,7 @@ export function AssemblyPanel() {
 
         {/* 自测通道读数（spec 1.6-01 / 1.6-06 / 1.6-12）：harness 用 data-stat 锚点读它，
             因此这里刻意不用 data-row-id——那个选择器必须只命中插件行。 */}
-        <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+        <div className="mt-2 rounded-lg border border-line bg-ink-950/60 px-3 py-2">
           <p className="text-[11px] font-semibold text-slate-300">{t('assembly.channelHeading')}</p>
           <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500" data-stat="ipc">
             <span>
@@ -215,7 +234,7 @@ export function AssemblyPanel() {
 
         {notice && (
           <p
-            className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
             data-testid="action-notice"
           >
             {notice}
@@ -229,11 +248,7 @@ export function AssemblyPanel() {
             // data-row-id / data-action 是给 harness 的机读锚点：脚本按插件 id 与动作定位，
             // 不依赖可见文案，所以切到英文界面后同一套命令仍然命中（spec 1.6-13）。
             return (
-              <li
-                key={node.id}
-                data-row-id={node.id}
-                className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
-              >
+              <li key={node.id} data-row-id={node.id} className="rounded-lg border border-line bg-ink-950/60 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-slate-200">{node.id}</span>
@@ -248,57 +263,73 @@ export function AssemblyPanel() {
                     )}
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      data-action="config"
-                      disabled={!!busy}
+                    {/* 归属色按「这个动作动到谁」：整屏没有任何一步离开这台机器，所以**零朱砂**——
+                        「配置」只是把当前生效值读进编辑框，一行都不写 → `line`；
+                        「停用 / 启用 / 巡检」改的是本机运行期的插件树 → `amber`；
+                        「保存」写运行期配置（§9：配置层从不落盘）→ 同一档 `amber`。 */}
+                    <DeskButton
+                      action="config"
+                      variant="line"
+                      compact
+                      busy={!!busy}
+                      disabled={busyReason !== undefined}
+                      disabledReason={busyReason}
+                      disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() => void openEditor(node.id)}
-                      className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                     >
                       <SlidersHorizontal size={12} />
                       {t('assembly.editConfig')}
-                    </button>
+                    </DeskButton>
                     {mounted && !guarded && (
-                      <button
-                        type="button"
-                        data-action="stop"
-                        disabled={!!busy}
+                      <DeskButton
+                        action="stop"
+                        variant="amber"
+                        compact
+                        busy={!!busy}
+                        disabled={busyReason !== undefined}
+                        disabledReason={busyReason}
+                        disabledReasonLabel={reasonLabel(busyReason)}
                         onClick={() =>
                           void run(t('assembly.actionStop', { id: node.id }), () => bridge?.plugins.stop(node.id))
                         }
-                        className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                       >
                         <Square size={12} />
                         {t('assembly.stop')}
-                      </button>
+                      </DeskButton>
                     )}
                     {(node.state === 'disposed' || node.state === 'failed') && (
-                      <button
-                        type="button"
-                        data-action="start"
-                        disabled={!!busy}
+                      <DeskButton
+                        action="start"
+                        variant="amber"
+                        compact
+                        busy={!!busy}
+                        disabled={busyReason !== undefined}
+                        disabledReason={busyReason}
+                        disabledReasonLabel={reasonLabel(busyReason)}
                         onClick={() =>
                           void run(t('assembly.actionStart', { id: node.id }), () => bridge?.plugins.start(node.id), {
                             describe: failedNotice,
                           })
                         }
-                        className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                       >
                         <Play size={12} />
                         {t('assembly.start')}
-                      </button>
+                      </DeskButton>
                     )}
                     {mounted && !guarded && (
-                      <button
-                        type="button"
-                        data-action="cycle"
-                        disabled={!!busy}
+                      <DeskButton
+                        action="cycle"
+                        variant="amber"
+                        compact
+                        busy={!!busy}
+                        disabled={busyReason !== undefined}
+                        disabledReason={busyReason}
+                        disabledReasonLabel={reasonLabel(busyReason)}
                         onClick={() => void runCycle(node.id)}
-                        className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                       >
                         <Repeat size={12} />
                         {t('assembly.cycle')}
-                      </button>
+                      </DeskButton>
                     )}
                   </div>
                 </div>
@@ -315,7 +346,7 @@ export function AssemblyPanel() {
                     num: metrics?.effects.find((item) => item.id === node.id)?.effects ?? 0,
                   })}
                 </p>
-                {node.error && <p className="mt-1 break-all text-[11px] text-rose-300">{node.error}</p>}
+                {node.error && <p className="mt-1 break-all text-[11px] text-seal">{node.error}</p>}
               </li>
             );
           })}
@@ -325,7 +356,7 @@ export function AssemblyPanel() {
         {editing && (
           // 编辑框在行之外，所以给它自己的锚点 data-editor-for 来标明归属；
           // 刻意不复用 data-row-id，否则 `dom --selector '[data-row-id]'` 会多出一行、与主进程 id 集合不再相等（spec 1.6-03 / 1.6-13）。
-          <div data-editor-for={editing.id} className="mt-3 rounded-lg border border-slate-700 bg-slate-950/80 p-3">
+          <div data-editor-for={editing.id} className="mt-3 rounded-lg border border-line bg-ink-950/80 p-3">
             <p className="text-[11px] text-slate-400">
               {t('assembly.editorHeading', { id: editing.id })}
               {' · '}
@@ -333,37 +364,35 @@ export function AssemblyPanel() {
             </p>
             <textarea
               data-editor="config"
-              className="mt-2 h-32 w-full rounded-md border border-slate-700 bg-slate-900 p-2 font-mono text-[11px] text-slate-200"
+              className={`mt-2 h-32 w-full p-2 font-mono text-[11px] ${FIELD_CLASS}`}
               value={editing.text}
               onChange={(event) => setEditing({ ...editing, text: event.target.value })}
               spellCheck={false}
             />
             <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                data-action="save"
-                disabled={!!busy}
+              <DeskButton
+                action="save"
+                variant="amber"
+                compact
+                busy={!!busy}
+                disabled={busyReason !== undefined}
+                disabledReason={busyReason}
+                disabledReasonLabel={reasonLabel(busyReason)}
                 onClick={() => void saveConfig()}
-                className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
               >
-                <Play size={12} />
+                <Save size={12} />
                 {t('assembly.saveConfig')}
-              </button>
-              <button
-                type="button"
-                data-action="cancel"
-                onClick={() => setEditing(undefined)}
-                className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
-              >
+              </DeskButton>
+              <DeskButton action="cancel" variant="ghost" compact onClick={() => setEditing(undefined)}>
                 {t('assembly.cancel')}
-              </button>
+              </DeskButton>
             </div>
           </div>
         )}
 
         {cycle && (
           <p
-            className="mt-3 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            className="mt-3 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
             data-testid="cycle-report"
           >
             {t('assembly.cycleReport', {
@@ -379,7 +408,7 @@ export function AssemblyPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <ShieldCheck size={16} />
           {t('assembly.errorHeading', { num: status?.errorCount ?? 0 })}
@@ -387,8 +416,8 @@ export function AssemblyPanel() {
         <ul className="mt-2 flex flex-col gap-1">
           {(status?.errors ?? []).map((error, index) => (
             <li key={`${error.id}-${String(index)}`}>
-              <details className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
-                <summary className="cursor-pointer text-[11px] text-rose-300">
+              <details className="rounded-md border border-line bg-ink-950/60 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] text-seal">
                   <span className="font-mono">{error.id}</span> · {error.message}
                 </summary>
                 <p className="mt-1 text-[11px] text-slate-500">{new Date(error.at).toLocaleTimeString()}</p>
@@ -402,20 +431,16 @@ export function AssemblyPanel() {
         </ul>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <ScrollText size={16} />
             {t('assembly.logHeading')}
           </h2>
-          <button
-            type="button"
-            onClick={() => void probeRedact()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-          >
+          <DeskButton action="assembly-probe-redact" variant="line" compact onClick={() => void probeRedact()}>
             <ShieldCheck size={14} />
             {t('assembly.probeRedact')}
-          </button>
+          </DeskButton>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
           {logStatus?.file ? t('assembly.logFile', { path: logStatus.file }) : t('assembly.logNoFile')}

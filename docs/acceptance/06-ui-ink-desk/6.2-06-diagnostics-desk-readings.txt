@@ -1,0 +1,88 @@
+6.2-06 诊断屏（第九片）活体读数 — 2026-10-06，macOS arm64
+运行实例：`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata pnpm dev`，CDP 10222，渲染层 target `--url 5173`
+探针：`tmp/v6b/probe-diagnostics.js`（零写入：只读 `getComputedStyle` / `data-*` / `offsetTop`，未按下任何动作口）
+截图（本目录）：
+- `6.2-06-diagnostics-shell-update-dark.png` — 主进程状态 / 桥接与挂载自检 / 最近一次调用结果 / 更新
+- `6.2-06-diagnostics-labs-dark.png` — 定位实验台 + 工作流执行器
+- `6.2-06-diagnostics-assembly-dark.png` — 插件装配行（状态胶囊 + 三只动作口）
+- `6.2-06-diagnostics-shell-update-light.png` / `6.2-06-diagnostics-labs-light.png` — 毡案同两处
+同批 5 张 `md5 -q | sort | uniq -c` 全部计数为 1（无重复，§9 的 5.10-18 那条已核）。
+滚动位置由 `[data-view-scroll=diagnostics].scrollTop` 分别设为 0 / 760 / 2400 取得（不用 `scrollIntoView`，
+也不用 `shot --reveal`：§9 的 3.6-c ⑭ 说相邻元素拿不到新滚动位）。
+
+一、屏内 18 只键位的归属读数（dark，探针 probe2.json；`h` 为 `getBoundingClientRect().height`）
+
+| 面板 | data-action | data-effect | h | 禁用原因码 |
+| --- | --- | --- | --- | --- |
+| 主进程状态 | status-refresh | line | 24 | — |
+| 桥接与挂载自检 | probe-increment | solid | 24 | — |
+| 桥接与挂载自检 | probe-illegal-call | line | 24 | — |
+| 桥接与挂载自检 | probe-main-crash | seal | 24 | — |
+| 桥接与挂载自检 | probe-kernel-toggle | amber | 24 | — |
+| 更新 | update-check | line | 24 | — |
+| 定位实验台 | refresh | line | 24 | — |
+| 定位实验台 | locate | line | 24 | — |
+| 定位实验台 | click | seal | 24 | — |
+| 工作流执行器 | refresh | line | 24 | — |
+| 工作流执行器 | run-once | seal | 24 | — |
+| 工作流执行器 | pause | amber | 24 | NOT_RUNNING |
+| 工作流执行器 | resume-workflow-run | amber | 24 | NO_RUN_TO_RESUME |
+| 插件装配 | assembly-refresh | line | 24 | — |
+| 插件装配 | config | line | 24 | — |
+| 插件装配 | stop | amber | 24 | — |
+| 插件装配 | cycle | amber | 24 | — |
+| 主进程日志 | assembly-probe-redact | line | 24 | — |
+
+计数：`line` 9 / `amber` 5 / `seal` 3 / `solid` 1（按去重后的键位算；屏上控件总数 177，多出来的是逐插件行重复的
+`config`/`stop`/`cycle` 与逐声明行重复的 `locate`/`click`）。整屏**零 `jade`**：这一屏没有任何「已核/办完」类动作，
+`jade` 只出现在状态胶囊上（见第四节），与 plan §5 的「`jade` 只给已读/已核」一致。
+
+①末段补：本屏代码位共 **23 只键位**（line 9 / amber 8 / seal 4 / solid 1 / ghost 1），当轮渲出 18 只。
+未渲出的 5 只及其条件（均为代码位，无活体计算色）：
+- `update-download`（amber）/ `update-install`（seal）——要先真查到一版上游才会长出这两只；
+- 装配行 `start`（amber）——当前所有插件行都是「已就绪」，行内长的是 `stop` 而不是 `start`；
+- 编辑器 `save`（amber）/ `cancel`（ghost）——要展开某一行的配置编辑器。
+`update-install` 与 `probe-main-crash` 同档（seal）的理由写在 `UpdateSection.tsx` 注释里：安装要退出进程再重启，
+与打死主进程是同一种不可回；`assembly save` 反而只有 amber，因为它写的运行期配置从不落盘、重启即失。
+
+二、朱砂只给「动到不可回的东西」——三处 seal 的实测色值（dark → light）
+- `probe-main-crash`（打死整个主进程）：`rgb(226, 84, 58)` → `rgb(192, 57, 31)`
+- `locator-lab click`（把真实鼠标事件派发进页面）：同上 seal 档
+- `workflow-lab run-once`（起一条会写库、可能外发的 run）：同上 seal 档
+边框/底色同档不同透明度：`oklab(0.631608 0.153413 0.0978069 / 0.45)` 边框、`/ 0.18` 底（light 为
+`oklab(0.542214 …)`）。三条同色即同义，没有把「保护性动作」涂成朱砂：`abort` 类语义在本屏不存在。
+
+三、禁用态：原因码 + 人话同时落在节点上（07 稿④）
+本轮活体拿到 2 只禁用口（工作流当前没有 run）：
+- `pause` → `data-disabled-reason="NOT_RUNNING"`，`title="只有正在推进的流程能暂停"`
+- `resume-workflow-run` → `data-disabled-reason="NO_RUN_TO_RESUME"`，`title="屏幕上没有这次 run：内存和库里都没有可续的那一行"`
+两者的计算样式：`color=rgb(108, 128, 145)`（slate-500）、`border=rgba(150, 178, 196, 0.14)`（line）、
+`bg=rgb(15, 22, 28)`（ink-850）、`cursor=not-allowed`，且 `aria-disabled="true"` 而**不是**原生 `disabled`
+——原生禁用会让 Chromium 不派发鼠标事件，`title` 就永远不出现（`ui/controls.tsx` 的注释那条）。
+其余 4 只原因码（`ACTION_BUSY` / `BRIDGE_MISSING` / `RUN_IN_FLIGHT` / `NO_CONSENT` 系）本轮拿不到活体读数：
+`ACTION_BUSY` 的在途窗口只有毫秒级，`RUN_IN_FLIGHT` 要先有一条真 run，`BRIDGE_MISSING` 只在非 Electron 宿主里成立。
+这四条按代码路径记为已实现、**不标 [x] 的活体证据**（§7.4 的②不允许用推测冒充实测）。
+
+四、状态胶囊与容器 token
+- 插件行的「已就绪」：`color=rgb(79, 183, 138)`（jade）/ `border oklab(0.705821 …/0.45)` / `bg rgba(79, 183, 138, 0.12)`；
+  light 下为 `rgb(47, 143, 102)` / `rgba(47, 143, 102, 0.12)`。
+- 容器（各 section）：`border=rgba(150, 178, 196, 0.14)`（line）/ `bg=oklab(0.173835 … / 0.6)`（ink-900/60）/
+  `radius=12px`（sheet）；light 下 `border=rgba(38, 44, 48, 0.15)`、`bg=oklab(0.915929 … / 0.6)`。
+- 按钮圆角 7px（`radius-control`），毡案下 `bg=rgb(242, 239, 230)`（line 档底）。
+- 浅色主题**没有任何组件级分支**：同一份 class 靠 `[data-theme=light]` 翻转 token 得到上表 light 列（6.1-04 的判据）。
+
+五、旧调色板清扫
+`legacyClassHits`（对 `rose-|emerald-|violet-|indigo-|sky-[0-9]|amber-[0-9]|slate-700|slate-800|slate-900` 的
+`[class]` 全文匹配）在 dark 与 light 两次探针里均为**空数组**。本屏五个组件
+（`ShellPanel` / `UpdateSection` / `LocatorLabPanel` / `WorkflowLabPanel` / `AssemblyPanel`）
+改后 `grep` 同样 0 命中。
+顺带修掉一处 §2.2/§2.5 的真重复实现：`WorkflowLabPanel` 里的 `NODE_STATUS_STYLE`（五状态 → 配色）与
+`stepStatusStyle.ts` 的 `STEP_STATUS_STYLE` 是同一件事的两份事实，已删除前者、复用后者
+（`WorkflowStepStatus` 与 `WorkflowNodeStatus` 是同一个五元联合，类型层可直接套用）。
+`AssemblyPanel` 的 `STATE_CLASS` 同时把 `unloading` 从 `disposed` 的灰里拆出来（改用 celadon）：
+「正在退」与「已经退了」画成同色，就等于告诉用户这一行什么都没发生。
+
+六、本屏补的两条口径（写进代码注释）
+- 整屏零外发：装配屏的「保存」写的是运行期配置，而配置层从不落盘（§9 的 5.3-b 那条），所以它归 `amber` 而不是 `seal`。
+- 诊断档比主视图低一档：本屏所有键位统一 `compact`（h=24），与主视图按钮（h=30）拉开一层
+  ——日常使用不该进这一屏（spec 1.10-07）。首轮探针拿到 24/30 混排，补齐后复测 heights 只剩 `[24]`。

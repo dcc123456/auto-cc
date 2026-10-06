@@ -13,6 +13,7 @@ import type {
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 import { formatClock } from './format';
+import { DeskButton } from './ui/controls';
 
 /** 自愈播报最多留几条：面板是验收入口，不是历史库（与会话面板的失效横幅同一形状）。 */
 const RELOCATED_LIMIT = 3;
@@ -70,12 +71,16 @@ const LAB_SPECS: LocateSpec[] = [
   },
 ];
 
-/** 定位结局 → 颜色：只用 Tailwind 静态类名，运行期拼类名会让样式缺失。 */
+/**
+ * 定位结局 → 颜色，四态各占一条语义（plan §5）：`matched` 是唯一的好消息 → 玉；
+ * `ambiguous` / `below-score` 都是「有候选但闸门没敢动」，要人看一眼才能继续 → 同一档琥珀；
+ * `not-found` 是终局失败 → 朱砂。原先给 `ambiguous` 的紫在本项目调色板上没有语义位，删掉。
+ */
 const STATUS_CLASS: Record<LocateResultView['status'], string> = {
-  matched: 'bg-emerald-950 text-emerald-300 border-emerald-800',
-  ambiguous: 'bg-violet-950 text-violet-300 border-violet-800',
-  'below-score': 'bg-amber-950 text-amber-300 border-amber-800',
-  'not-found': 'bg-rose-950 text-rose-300 border-rose-800',
+  matched: 'border-jade/45 bg-jade-wash text-jade',
+  ambiguous: 'border-amber/50 bg-amber-wash text-amber',
+  'below-score': 'border-amber/50 bg-amber-wash text-amber',
+  'not-found': 'border-seal/55 bg-seal-wash text-seal',
 };
 
 /**
@@ -175,23 +180,37 @@ export function LocatorLabPanel() {
 
   const okLabel = (flag: boolean): string => (flag ? t('locator.yes') : t('locator.no'));
 
+  /**
+   * 在途那一拍共用的原因码与人话。
+   *
+   * 文案走 `locator.reasonBusy` 这一条扁平键而不是 `locator.reason.<码>`：本命名空间里已经有一条
+   * `reason`（「判定理由：{{reason}}」），再挂一个同名对象键就成了重复键、后一份把前一份吃掉（§2.5）。
+   * 这一屏也只有这一支码，所以不做按码查表的假通用。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const busyReasonLabel = busyReason === undefined ? undefined : t('locator.reasonBusy');
+
   return (
     <div className="flex flex-col gap-4" data-testid="locator-lab">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
             <Crosshair size={16} />
             {t('locator.heading')}
           </h2>
-          <button
-            type="button"
-            data-action="refresh"
+          <DeskButton
+            action="refresh"
+            variant="line"
+            compact
+            busy={!!busy}
+            disabled={busyReason !== undefined}
+            disabledReason={busyReason}
+            disabledReasonLabel={busyReasonLabel}
             onClick={() => void read()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
             <RefreshCw size={14} />
             {t('locator.refresh')}
-          </button>
+          </DeskButton>
         </div>
 
         <p className="mt-2 text-[11px] text-slate-500" data-testid="locator-thresholds">
@@ -212,7 +231,7 @@ export function LocatorLabPanel() {
             {(statusView?.recentFailures ?? []).map((failure, index) => (
               <li
                 key={`${failure.description}-${String(index)}`}
-                className="rounded-md border border-rose-900 bg-rose-950/40 px-3 py-1.5 text-[11px] text-rose-200"
+                className="rounded-md border border-seal/45 bg-seal-wash px-3 py-1.5 text-[11px] text-seal"
               >
                 {t('locator.failureRow', {
                   description: t(failure.description),
@@ -226,14 +245,14 @@ export function LocatorLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('locator.specsHeading')}</h3>
         <ul className="mt-2 flex flex-col gap-2">
           {LAB_SPECS.map((spec) => (
             <li
               key={spec.description}
               data-lab-spec={spec.description}
-              className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg border border-line bg-ink-950/60 px-3 py-2"
             >
               <div className="min-w-0">
                 <p className="truncate text-xs text-slate-200">{t(spec.description)}</p>
@@ -244,26 +263,35 @@ export function LocatorLabPanel() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  data-action="locate"
-                  disabled={!!busy}
+                {/* 「定位」只把页面扫一遍，一行都不写 → `line`；
+                    「点击」经 CDP 把真实鼠标事件派发进页面——页面是仿站时它落在本机，
+                    是真实平台时这一下就到了别人服务器上 → 整条动作链同一档朱砂（§8.3 的界面表达）。 */}
+                <DeskButton
+                  action="locate"
+                  variant="line"
+                  compact
+                  busy={!!busy}
+                  disabled={busyReason !== undefined}
+                  disabledReason={busyReason}
+                  disabledReasonLabel={busyReasonLabel}
                   onClick={() => locate(spec)}
-                  className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
                 >
                   <Crosshair size={12} />
                   {t('locator.locateButton')}
-                </button>
-                <button
-                  type="button"
-                  data-action="click"
-                  disabled={!!busy}
+                </DeskButton>
+                <DeskButton
+                  action="click"
+                  variant="seal"
+                  compact
+                  busy={!!busy}
+                  disabled={busyReason !== undefined}
+                  disabledReason={busyReason}
+                  disabledReasonLabel={busyReasonLabel}
                   onClick={() => click(spec)}
-                  className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
                 >
                   <MousePointerClick size={12} />
                   {t('locator.clickButton')}
-                </button>
+                </DeskButton>
               </div>
             </li>
           ))}
@@ -271,7 +299,7 @@ export function LocatorLabPanel() {
 
         {notice && (
           <p
-            className="mt-2 rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
             data-testid="locator-notice"
           >
             {notice}
@@ -280,7 +308,7 @@ export function LocatorLabPanel() {
 
         {bridgeError && (
           <div
-            className="mt-2 rounded-md border border-rose-800 bg-rose-950 px-3 py-2 text-[11px] text-rose-300"
+            className="mt-2 rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
             data-testid="locator-error"
             data-error-code={bridgeError.code}
           >
@@ -292,7 +320,7 @@ export function LocatorLabPanel() {
               {t('locator.errorRow', { code: bridgeError.code, message: bridgeError.message })}
             </p>
             {bridgeError.code === 'NO_KERNEL_SESSION' && (
-              <p className="mt-1 break-all text-amber-300" data-testid="locator-error-hint">
+              <p className="mt-1 break-all text-amber" data-testid="locator-error-hint">
                 {t('locator.errNoSession')}
               </p>
             )}
@@ -300,7 +328,7 @@ export function LocatorLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('locator.resultHeading')}</h3>
         {!lastLocate && !lastAct && <p className="mt-1 text-[11px] text-slate-500">{t('locator.resultIdle')}</p>}
 
@@ -316,7 +344,7 @@ export function LocatorLabPanel() {
               </span>
               <span className="text-[11px] text-slate-400">{t(lastLocate.spec.description)}</span>
               {lastLocate.relocated && (
-                <span className="rounded border border-emerald-800 bg-emerald-950 px-1.5 py-0.5 text-[11px] text-emerald-300">
+                <span className="rounded border border-jade/45 bg-jade-wash px-1.5 py-0.5 text-[11px] text-jade">
                   {t('locator.relocatedFlag')}
                 </span>
               )}
@@ -385,7 +413,7 @@ export function LocatorLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
           <Sparkles size={14} />
           {t('locator.relocatedHeading')}
@@ -399,7 +427,7 @@ export function LocatorLabPanel() {
             {(relocated ?? []).map((event, index) => (
               <li
                 key={`${event.description}-${String(index)}`}
-                className="rounded-md border border-emerald-900 bg-emerald-950/40 px-3 py-1.5 text-[11px] text-emerald-300"
+                className="rounded-md border border-jade/40 bg-jade-wash px-3 py-1.5 text-[11px] text-jade"
               >
                 {t('locator.relocatedRow', {
                   description: t(event.description),

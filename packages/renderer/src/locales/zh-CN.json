@@ -58,6 +58,9 @@
       "idle": "尚未读取"
     },
     "probe": {
+      "reason": {
+        "BRIDGE_MISSING": "这个窗口里没有桥接（不在 Electron 宿主里），按下去什么都不会发生"
+      },
       "heading": "桥接与挂载自检",
       "increment": "变更一次本地状态",
       "count": "本地状态已变更 {{count}} 次",
@@ -128,6 +131,7 @@
       "navigatePlaceholder": "已登记平台同源地址，如 http://127.0.0.1:10233/boss"
     },
     "locator": {
+      "reasonBusy": "上一次定位或点击还在飞，先等它落地再按下一次",
       "heading": "定位实验台（失败态与自愈可视化）",
       "refresh": "重新读取定位层状态",
       "thresholds": "打分线 minScore {{minScore}} · 歧义余量 minMargin {{minMargin}} · 候选上限 {{candidateLimit}}",
@@ -327,6 +331,9 @@
       "noLedger": "不落账"
     },
     "assembly": {
+      "reason": {
+        "ACTION_BUSY": "上一次插件动作还在飞，先等它落地再按下一次"
+      },
       "heading": "插件装配（cordis.yml）",
       "refresh": "重新读取装配状态",
       "empty": "插件树为空：清单没有启用的插件，或内核未挂载",
@@ -861,7 +868,8 @@
         "RUN_IN_FLIGHT": "这一轮还没收尾：先暂停或中止，再起新一轮",
         "NOT_RUNNING": "只有正在推进的流程能暂停",
         "NOT_PAUSED": "当前不是暂停态，没有可续跑的流程",
-        "NO_RUN_TO_ABORT": "没有在途流程可中止"
+        "NO_RUN_TO_ABORT": "没有在途流程可中止",
+        "NO_RUN_TO_RESUME": "屏幕上没有这次 run：内存和库里都没有可续的那一行"
       }
     },
     "chat": {
@@ -1438,6 +1446,10 @@
       "readOnly": "只读聚合，无任何外发口"
     },
     "update": {
+      "reason": {
+        "ACTION_BUSY": "上一次更新动作还在飞，先等它落地再按下一次",
+        "BRIDGE_MISSING": "这个窗口里没有桥接，更新通道够不到主进程"
+      },
       "heading": "更新",
       "note": "更新只在被点的时候才发生：本应用不会在后台下载、不会静默安装，也不会替你安排重启。",
       "check": "检查更新",

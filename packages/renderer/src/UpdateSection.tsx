@@ -2,6 +2,7 @@ import { Download, RefreshCw, Rocket } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UpdateState, UpdateView } from '@auto-cc/shared';
+import { DeskButton } from './ui/controls';
 
 /**
  * 状态枚举 → 语言包键后缀。
@@ -53,48 +54,70 @@ export function UpdateSection() {
     return t(stateKey(view.state));
   };
 
+  /**
+   * 三条口共用的禁用码。`run` 在桥接缺席时是直接 `return`，按钮按下去一个字都不发生，
+   * 所以这一条必须挂在节点上而不是留给用户猜（07 稿④「禁用要说得出原因」）。
+   * 下载/安装两只在状态机没走到那一步时根本不渲染，不需要状态类的原因码。
+   */
+  const busyReason = busy ? 'ACTION_BUSY' : undefined;
+  const bridgeReason = !bridge ? 'BRIDGE_MISSING' : undefined;
+  const disabledReason = busyReason ?? bridgeReason;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`update.reason.${code}`);
+
   return (
     <section
-      className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"
+      className="rounded-xl border border-line bg-ink-900/60 p-4"
       data-testid="update-section"
       data-update-state={view?.state ?? 'idle'}
     >
       <h2 className="text-sm font-semibold text-slate-200">{t('update.heading')}</h2>
       <p className="mt-1 text-xs text-slate-500">{t('update.note')}</p>
+      {/* 归属色按「这个动作动到谁」：查询只是读一次上游，一行都不写 → `line`；
+          下载把包落到本机磁盘 → `amber`；安装要退出进程再重启，本机这一轮会话回不来 → `seal`。 */}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          data-action="update-check"
-          disabled={busy}
+        <DeskButton
+          action="update-check"
+          variant="line"
+          compact
+          busy={busy}
+          disabled={disabledReason !== undefined}
+          disabledReason={disabledReason}
+          disabledReasonLabel={reasonLabel(disabledReason)}
           onClick={() => void run('check')}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
         >
           <RefreshCw size={14} />
           {t('update.check')}
-        </button>
+        </DeskButton>
         {view?.state === 'available' && (
-          <button
-            type="button"
-            data-action="update-download"
-            disabled={busy}
+          <DeskButton
+            action="update-download"
+            variant="amber"
+            compact
+            busy={busy}
+            disabled={disabledReason !== undefined}
+            disabledReason={disabledReason}
+            disabledReasonLabel={reasonLabel(disabledReason)}
             onClick={() => void run('download')}
-            className="flex items-center gap-1 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
           >
             <Download size={14} />
             {t('update.download')}
-          </button>
+          </DeskButton>
         )}
         {view?.state === 'downloaded' && (
-          <button
-            type="button"
-            data-action="update-install"
-            disabled={busy}
+          <DeskButton
+            action="update-install"
+            variant="seal"
+            compact
+            busy={busy}
+            disabled={disabledReason !== undefined}
+            disabledReason={disabledReason}
+            disabledReasonLabel={reasonLabel(disabledReason)}
             onClick={() => void run('install')}
-            className="flex items-center gap-1 rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
           >
             <Rocket size={14} />
             {t('update.install')}
-          </button>
+          </DeskButton>
         )}
       </div>
       <ul className="mt-3 space-y-1 text-xs text-slate-400">
@@ -102,7 +125,7 @@ export function UpdateSection() {
         {/* 版本号只在真的问过运行期之后才有值：`no-feed` 与 `idle` 两态下更新器单连都没解析，
             此时渲染一条「当前版本 」空尾巴看起来像坏了，所以没值就不出现。 */}
         {!!view?.currentVersion && <li>{t('update.currentVersion', { version: view.currentVersion })}</li>}
-        {failure && <li className="break-all text-rose-300">{t('update.rejected', { message: failure })}</li>}
+        {failure && <li className="break-all text-seal">{t('update.rejected', { message: failure })}</li>}
       </ul>
     </section>
   );

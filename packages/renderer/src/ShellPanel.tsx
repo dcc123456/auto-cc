@@ -2,6 +2,7 @@ import { Bug, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldAlert } fr
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RENDERER_ALLOWLIST, type AppErrorPayload, type RendererBridge, type ShellStatus } from '@auto-cc/shared';
+import { Banner, DeskButton } from './ui/controls';
 
 /** 统计 `window.autoCC` 上真实存在的函数数量，用于对照白名单长度。 */
 const countBridgeMethods = (bridge: RendererBridge): number =>
@@ -64,19 +65,32 @@ export function ShellPanel() {
     await readStatus();
   };
 
+  /**
+   * 桥接缺席（不在 Electron 宿主里渲染）时，四只动作口都会**静默**不动——`bridge?.x()` 拿到
+   * undefined，界面上什么也没发生，看起来像按钮坏了。禁用并把原因挂到节点上，才算说了实话。
+   * 「加一」不吃这个码：它只改本地 state，没有桥接照样能用。
+   */
+  const bridgeReason = bridge === undefined ? 'BRIDGE_MISSING' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`probe.reason.${code}`);
+
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-200">{t('status.heading')}</h2>
-          <button
-            type="button"
+          <DeskButton
+            action="status-refresh"
+            variant="line"
+            compact
+            disabled={bridgeReason !== undefined}
+            disabledReason={bridgeReason}
+            disabledReasonLabel={reasonLabel(bridgeReason)}
             onClick={() => void readStatus()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
             <RefreshCw size={14} />
             {t('status.refresh')}
-          </button>
+          </DeskButton>
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400">
           <dt>{t('status.app')}</dt>
@@ -103,42 +117,59 @@ export function ShellPanel() {
         </dl>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h2 className="text-sm font-semibold text-slate-200">{t('probe.heading')}</h2>
-        {!bridge && <p className="mt-2 text-xs text-amber-400">{t('probe.bridgeMissing')}</p>}
+        {!bridge && (
+          <Banner tone="amber" className="mt-2">
+            {t('probe.bridgeMissing')}
+          </Banner>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setCount((value) => value + 1)}
-            className="flex items-center gap-1 rounded-md bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
-          >
+          {/* 归属色按「这个动作动到谁」分，与流程屏同一句规则（plan §5）：
+              加一只纯本地计数器 → `solid`（中性强调，不带语义）；
+              「非法调用」只是请主进程演示它自己的拒绝，一行都不写 → `line`；
+              内核视图显隐改的是本机运行期状态 → `amber`；
+              「主进程崩溃」打死整个进程，这一轮会话再也回不来 → `seal`（本屏唯一给朱砂的口）。 */}
+          <DeskButton action="probe-increment" variant="solid" compact onClick={() => setCount((value) => value + 1)}>
             <Plus size={14} />
             {t('probe.increment')}
-          </button>
-          <button
-            type="button"
+          </DeskButton>
+          <DeskButton
+            action="probe-illegal-call"
+            variant="line"
+            compact
+            disabled={bridgeReason !== undefined}
+            disabledReason={bridgeReason}
+            disabledReasonLabel={reasonLabel(bridgeReason)}
             onClick={() => void callIllegal()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
           >
             <ShieldAlert size={14} />
             {t('probe.illegalCall')}
-          </button>
-          <button
-            type="button"
+          </DeskButton>
+          <DeskButton
+            action="probe-main-crash"
+            variant="seal"
+            compact
+            disabled={bridgeReason !== undefined}
+            disabledReason={bridgeReason}
+            disabledReasonLabel={reasonLabel(bridgeReason)}
             onClick={() => void crashMain()}
-            className="flex items-center gap-1 rounded-md border border-rose-800 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-950"
           >
             <Bug size={14} />
             {t('probe.mainCrash')}
-          </button>
-          <button
-            type="button"
+          </DeskButton>
+          <DeskButton
+            action="probe-kernel-toggle"
+            variant="amber"
+            compact
+            disabled={bridgeReason !== undefined}
+            disabledReason={bridgeReason}
+            disabledReasonLabel={reasonLabel(bridgeReason)}
             onClick={() => void toggleKernel()}
-            className="flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
           >
             {status?.kernelViewVisible === false ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} />}
             {status?.kernelViewVisible === false ? t('probe.kernelShow') : t('probe.kernelHide')}
-          </button>
+          </DeskButton>
         </div>
         <ul className="mt-3 space-y-1 text-xs text-slate-400">
           <li>{t('probe.count', { count })}</li>
@@ -147,15 +178,11 @@ export function ShellPanel() {
         </ul>
       </section>
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h2 className="text-sm font-semibold text-slate-200">{t('result.heading')}</h2>
         <p
           className={`mt-2 break-all text-xs ${
-            reply?.kind === 'captured'
-              ? 'text-rose-300'
-              : reply?.kind === 'escaped'
-                ? 'text-amber-400'
-                : 'text-slate-400'
+            reply?.kind === 'captured' ? 'text-seal' : reply?.kind === 'escaped' ? 'text-amber' : 'text-slate-400'
           }`}
         >
           {reply ? t(`result.${reply.kind}`, { message: reply.message }) : t('result.idle')}
