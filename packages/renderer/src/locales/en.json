@@ -567,6 +567,20 @@
       }
     },
     "pdfEdit": {
+      "reason": {
+        "ACTION_BUSY": "An action is still in flight; this key is yours again once its receipt lands in the notice line.",
+        "PATH_EMPTY": "No absolute source PDF path yet: the renderer cannot read files, so the path must come from you.",
+        "FIRST_PAGE": "Already the first page; there is nothing before it.",
+        "LAST_PAGE": "Already the last page; there is nothing after it.",
+        "NOTHING_TO_UNDO": "Nothing to undo yet: draw a region on the page or change the page order first.",
+        "NOTHING_TO_REDO": "Nothing to redo: the undo chain is exhausted.",
+        "FIRST_ROW": "This page is already first in the output.",
+        "LAST_ROW": "This page is already last in the output.",
+        "AT_PAGE_CAP": "Output page cap reached (pdf-export maxPages): remove a page before duplicating.",
+        "LAST_PAGE_REMAINING": "The output keeps at least one page: this last one cannot be removed.",
+        "LIMITS_PENDING": "Editing limits not read from the main process yet (pdf-export unmounted): no session, nothing to validate a save against.",
+        "OUT_PATH_EMPTY": "No absolute output path yet: the source stays read-only, so the product must go to a different path."
+      },
       "enter": "Edit an existing PDF",
       "heading": "Edit an existing PDF (overlay-style light editing)",
       "close": "Close",

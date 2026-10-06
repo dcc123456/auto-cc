@@ -11,6 +11,8 @@ import type {
 import { createPdfEditSession } from '@auto-cc/plugin-pdf-edit/edit-session';
 import type { AppErrorPayload, PdfOpenReceiptView, PdfSaveAsReceiptView, PdfTextBoxView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
+import { useDeskThemeValue } from './theme';
 
 /** 覆盖区的入参类型从会话自己的签名取：本包对外只开 `./edit-session` 一条窄出口，不再把 `overlay-writer` 也开出去。 */
 type PdfOverlaySeed = Parameters<PdfEditSession['addOverlay']>[0];
@@ -131,6 +133,7 @@ function isSameLimits(left: PdfEditSessionLimits, right: PdfEditSessionLimits): 
  */
 export function PdfEditPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  const deskTheme = useDeskThemeValue();
   const bridge = window.autoCC;
   const [filePath, setFilePath] = useState('');
   const [receipt, setReceipt] = useState<PdfOpenReceiptView>();
@@ -393,8 +396,40 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
   const isAtPageCap = !limits || draft.pageOrder.length >= limits.maxPages;
 
   /**
+   * 「按不动」必须带上原因码（07 稿④）。`busy` 排在每一条链首：在途时任何一颗都轮不到人按，
+   * 这一档优先于该键自己的前置条件，和界面给出的转针读数一致。
+   */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`pdfEdit.reason.${code}`);
+  /**
+   * 在途优先的禁用理由链：有动作在飞一律 `ACTION_BUSY`，否则看这一颗自己的前置条件。
+   * @param blocked 该键自己的前置条件是否不成立
+   * @param code 不成立时的原因码
+   */
+  const afterBusy = (blocked: boolean, code: string): string | undefined => busyReason ?? (blocked ? code : undefined);
+  /**
+   * 一条理由摊成 DeskButton 的三个 props。**`disabled` 必须跟 `disabledReason` 一起给**——
+   * 只挂码不挡点击是 6.4 第七片活体抓到过的谎报（按钮挂着"不能按"的理由却照样能按）。
+   * @param reason 禁用原因码，undefined 表示这一颗现在能按
+   */
+  const dead = (reason?: string) => ({
+    disabled: reason !== undefined,
+    disabledReason: reason,
+    disabledReasonLabel: reasonLabel(reason),
+  });
+  const openReason = afterBusy(filePath.trim() === '', 'PATH_EMPTY');
+  /** 另存的理由链三档：在途 → 尺度没读到（会话根本建不起来）→ 产物路径为空。顺序即优先级。 */
+  const saveAsReason =
+    busyReason ?? (!limits ? 'LIMITS_PENDING' : undefined) ?? (outPath.trim() === '' ? 'OUT_PATH_EMPTY' : undefined);
+
+  /**
    * 把「这一页的线框 + 这一页的覆盖区 + 正在拖的橡皮筋」画到画布上。
    * 只由数据变化触发重绘，不做动画、不轮询（§7.10 的"画布进度只由事件推"同一取向）。
+   *
+   * 三种描边现取主题令牌（amber=将写进产物的草稿区、celadon=系统正跟你的手、slate-400=量到的原文），
+   * 不在这里另留一套色阶；唯独纸面白与新字墨色**跟着产物走、不跟主题走**——画面上所见即另存所得，
+   * 这两笔若随毡案翻浅，人和主进程看到的就是两份东西（spec 3.5-02）。
    */
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -403,11 +438,15 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
     if (!painter) return;
     const width = canvas.width;
     const height = canvas.height;
+    const tone = getComputedStyle(canvas);
+    const wireframeTone = tone.getPropertyValue('--color-slate-400');
+    const draftTone = tone.getPropertyValue('--color-amber');
+    const draggingTone = tone.getPropertyValue('--color-celadon');
     painter.clearRect(0, 0, width, height);
     painter.fillStyle = '#ffffff';
     painter.fillRect(0, 0, width, height);
     // 线框：主进程量到的文本块位置，只描边不填，让人看清底下是原页面。
-    painter.strokeStyle = '#94a3b8';
+    painter.strokeStyle = wireframeTone;
     painter.lineWidth = 1;
     for (const box of boxes) {
       painter.strokeRect(
@@ -426,7 +465,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
       const boxHeight = overlay.rect.heightRatio * height;
       painter.fillStyle = '#ffffff';
       painter.fillRect(x, y, boxWidth, boxHeight);
-      painter.strokeStyle = '#0284c7';
+      painter.strokeStyle = draftTone;
       painter.setLineDash([4, 3]);
       painter.strokeRect(x, y, boxWidth, boxHeight);
       painter.setLineDash([]);
@@ -438,7 +477,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
       }
     }
     if (rubber) {
-      painter.strokeStyle = '#f59e0b';
+      painter.strokeStyle = draggingTone;
       painter.setLineDash([3, 3]);
       painter.strokeRect(
         rubber.xRatio * width,
@@ -448,25 +487,31 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
       );
       painter.setLineDash([]);
     }
-  }, [boxes, draft, limits, page, rubber]);
+    // deskTheme 只是翻面后重画一次的扳机：取色一律走 getComputedStyle，这里不存第二份色值读数。
+    // 为什么不能写成 `currentTheme()` 放进依赖数组：本面板挂在 App.tsx 的模块常量 PANELS 下，
+    // 主题那颗开关改的是 App 自己的 state，子树拿到的是同一个元素引用、根本不重渲染（活体实测翻面后画布仍是旧色）。
+  }, [boxes, draft, limits, page, rubber, deskTheme]);
 
   return (
-    <section data-testid="pdf-edit-panel" className="mt-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <section data-testid="pdf-edit-panel" className="mt-4 rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Pencil size={16} />
           {t('pdfEdit.heading')}
         </h3>
-        <button
-          type="button"
-          data-action="pdf-edit-close"
-          disabled={!!busy}
+        <DeskButton
+          action="pdf-edit-close"
+          variant="ghost"
+          compact
+          busy={!!busy}
+          disabled={busyReason !== undefined}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onClick={onClose}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <X size={12} />
           {t('pdfEdit.close')}
-        </button>
+        </DeskButton>
       </div>
 
       <p className="mt-1 text-[11px] text-slate-500" data-testid="pdf-edit-path-hint">
@@ -478,33 +523,37 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           value={filePath}
           onChange={(event) => setFilePath(event.target.value)}
           placeholder={t('pdfEdit.pathPlaceholder')}
-          className="min-w-[280px] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+          className={`min-w-[280px] flex-1 ${FIELD_CLASS}`}
         />
-        <button
-          type="button"
-          data-action="pdf-edit-open"
-          disabled={filePath.trim() === '' || !!busy}
+        <DeskButton
+          action="pdf-edit-open"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={openReason !== undefined}
+          disabledReason={openReason}
+          disabledReasonLabel={reasonLabel(openReason)}
           onClick={openPdf}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <Pencil size={12} />
           {t('pdfEdit.open')}
-        </button>
+        </DeskButton>
       </div>
 
       {openError && (
         <p
           data-testid="pdf-edit-open-error"
-          className="mt-2 break-all rounded-md border border-rose-900 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200"
+          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
         >
           {t('pdfEdit.failed', { code: openError.code, message: openError.message })}
         </p>
       )}
 
+      {/* 提示行留中性档：它是全 app 共用 `useBridgeAction.notice` 的那一句，别的面板都这个画法，不在这里单独翻成青瓷。 */}
       {notice && (
         <p
           data-testid="pdf-edit-notice"
-          className="mt-2 break-all rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
         >
           {notice}
         </p>
@@ -523,11 +572,11 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
             {t('pdfEdit.pageCount', { count: receipt.pageCount })}
           </p>
           {/* §7.6 的反伪装口径：这一句常驻，说"改"就必须同时说"原文仍在文件里"。 */}
-          <p className="mt-1 text-[11px] text-amber-300" data-testid="pdf-edit-cover-hint">
+          <p className="mt-1 text-[11px] text-amber" data-testid="pdf-edit-cover-hint">
             {t('pdfEdit.coverHint')}
           </p>
           {!limits && (
-            <p className="mt-1 text-[11px] text-rose-300" data-testid="pdf-edit-limits-pending">
+            <p className="mt-1 text-[11px] text-celadon" data-testid="pdf-edit-limits-pending">
               {t('pdfEdit.limitsPending')}
             </p>
           )}
@@ -535,31 +584,33 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start">
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <button
-                  type="button"
-                  data-action="pdf-edit-page-prev"
-                  disabled={page <= 1 || !!busy}
+                <DeskButton
+                  action="pdf-edit-page-prev"
+                  variant="line"
+                  compact
+                  busy={!!busy}
+                  {...dead(afterBusy(page <= 1, 'FIRST_PAGE'))}
                   onClick={() => showPage(page - 1)}
-                  className="rounded-md border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   {t('pdfEdit.prev')}
-                </button>
+                </DeskButton>
                 <span data-testid="pdf-edit-page-reading" className="text-slate-300">
                   {t('pdfEdit.pageReading', { page, count: receipt.pageCount, boxes: boxes.length })}
                 </span>
-                <button
-                  type="button"
-                  data-action="pdf-edit-page-next"
-                  disabled={page >= receipt.pageCount || !!busy}
+                <DeskButton
+                  action="pdf-edit-page-next"
+                  variant="line"
+                  compact
+                  busy={!!busy}
+                  {...dead(afterBusy(page >= receipt.pageCount, 'LAST_PAGE'))}
                   onClick={() => showPage(page + 1)}
-                  className="rounded-md border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   {t('pdfEdit.next')}
-                </button>
+                </DeskButton>
               </div>
 
               {wireframeError && (
-                <p data-testid="pdf-edit-wireframe-error" className="break-all text-[11px] text-rose-300">
+                <p data-testid="pdf-edit-wireframe-error" className="break-all text-[11px] text-seal">
                   {t('pdfEdit.wireframeFailed', { message: wireframeError })}
                 </p>
               )}
@@ -571,7 +622,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                   width={canvasWidthPt}
                   height={canvasHeightPt}
                   onPointerDown={startOverlayDrag}
-                  className="rounded-md border border-slate-700 bg-white"
+                  className="rounded-md border border-line-strong bg-white"
                 />
               ) : (
                 <p className="text-[11px] text-slate-500">{t('pdfEdit.pageMetricMissing')}</p>
@@ -583,32 +634,34 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                   data-testid="pdf-edit-overlay-text"
                   value={overlayText}
                   onChange={(event) => setOverlayText(event.target.value)}
-                  className="w-[180px] rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-slate-200"
+                  className={`w-[180px] ${FIELD_CLASS}`}
                 />
                 <span className="text-slate-500">{t('pdfEdit.dragHint')}</span>
               </label>
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  data-action="pdf-edit-undo"
-                  disabled={!canUndo}
+                {/* 撤销 / 重做是本地同步动作，不挂 busy：它们在桥调用在途时照样按得动（原样保留，
+                    唯一变化是"没步可退"现在说得出原因）。 */}
+                <DeskButton
+                  action="pdf-edit-undo"
+                  variant="ghost"
+                  compact
+                  {...dead(canUndo ? undefined : 'NOTHING_TO_UNDO')}
                   onClick={() => stepHistory('undo')}
-                  className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   <Undo2 size={12} />
                   {t('pdfEdit.undo')}
-                </button>
-                <button
-                  type="button"
-                  data-action="pdf-edit-redo"
-                  disabled={!canRedo}
+                </DeskButton>
+                <DeskButton
+                  action="pdf-edit-redo"
+                  variant="ghost"
+                  compact
+                  {...dead(canRedo ? undefined : 'NOTHING_TO_REDO')}
                   onClick={() => stepHistory('redo')}
-                  className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
                 >
                   <Redo2 size={12} />
                   {t('pdfEdit.redo')}
-                </button>
+                </DeskButton>
               </div>
             </div>
 
@@ -625,7 +678,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                       <li
                         key={overlay.id}
                         data-testid={`pdfEdit-overlay-${overlay.id}`}
-                        className="flex items-center justify-between gap-2 text-[11px] text-slate-300"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line bg-ink-950/70 px-2 py-1 text-[11px] text-slate-300"
                       >
                         <span className="break-all">
                           {t('pdfEdit.overlayRow', {
@@ -637,16 +690,17 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                             text: overlay.text ?? t('pdfEdit.overlayBlank'),
                           })}
                         </span>
-                        <button
-                          type="button"
-                          data-action={`pdf-edit-remove-overlay-${overlay.id}`}
-                          disabled={!!busy}
+                        <DeskButton
+                          action={`pdf-edit-remove-overlay-${overlay.id}`}
+                          variant="ghost"
+                          compact
+                          busy={!!busy}
+                          {...dead(busyReason)}
                           onClick={() => removeOverlay(overlay.id)}
-                          className="flex items-center gap-1 rounded-md border border-rose-800 px-1 py-0.5 text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                         >
                           <Trash2 size={11} />
                           {t('pdfEdit.removeOverlay')}
-                        </button>
+                        </DeskButton>
                       </li>
                     ))}
                   </ul>
@@ -661,43 +715,55 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                     <li
                       key={`${index}-${sourcePage}`}
                       data-testid={`pdfEdit-page-row-${index}`}
-                      className="flex items-center justify-between gap-2 text-[11px] text-slate-300"
+                      // 窄列里让图标簇换到第二排：这一行的页码文案是**数据**（产物第几页对源第几页），
+                      // 裁掉就等于把判定依据藏起来，比多出一排高更糟。
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line bg-ink-950/70 px-2 py-1 text-[11px] text-slate-300"
                     >
-                      <button
-                        type="button"
-                        data-action={`pdf-edit-view-page-${sourcePage}`}
-                        disabled={!!busy}
+                      <DeskButton
+                        action={`pdf-edit-view-page-${sourcePage}`}
+                        variant="line"
+                        compact
+                        busy={!!busy}
+                        className="justify-start"
+                        {...dead(busyReason)}
                         onClick={() => showPage(sourcePage)}
-                        className="text-left hover:text-slate-100"
                       >
                         {t('pdfEdit.pageRow', { out: index + 1, source: sourcePage })}
-                      </button>
+                      </DeskButton>
                       <span className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          data-action={`pdf-edit-move-up-${index}`}
+                        {/* 四只图标键没有文字，compact 的字号撑不出行高（活体读数 17px），显式对齐到同行那档 24px。 */}
+                        <DeskButton
+                          action={`pdf-edit-move-up-${index}`}
+                          variant="solid"
+                          compact
+                          className="h-6"
+                          busy={!!busy}
                           aria-label={t('pdfEdit.moveUp')}
-                          disabled={index === 0 || !!busy}
+                          {...dead(afterBusy(index === 0, 'FIRST_ROW'))}
                           onClick={() => setPageOrder(swapOrder(draft.pageOrder, index, index - 1))}
-                          className="rounded-md border border-slate-700 px-1 py-0.5 hover:bg-slate-800 disabled:opacity-40"
                         >
                           <ArrowUp size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          data-action={`pdf-edit-move-down-${index}`}
+                        </DeskButton>
+                        <DeskButton
+                          action={`pdf-edit-move-down-${index}`}
+                          variant="solid"
+                          compact
+                          className="h-6"
+                          busy={!!busy}
                           aria-label={t('pdfEdit.moveDown')}
-                          disabled={index === draft.pageOrder.length - 1 || !!busy}
+                          {...dead(afterBusy(index === draft.pageOrder.length - 1, 'LAST_ROW'))}
                           onClick={() => setPageOrder(swapOrder(draft.pageOrder, index, index + 1))}
-                          className="rounded-md border border-slate-700 px-1 py-0.5 hover:bg-slate-800 disabled:opacity-40"
                         >
                           <ArrowDown size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          data-action={`pdf-edit-duplicate-${index}`}
+                        </DeskButton>
+                        <DeskButton
+                          action={`pdf-edit-duplicate-${index}`}
+                          variant="solid"
+                          compact
+                          className="h-6"
+                          busy={!!busy}
                           aria-label={t('pdfEdit.duplicatePage')}
-                          disabled={isAtPageCap || !!busy}
+                          {...dead(afterBusy(isAtPageCap, 'AT_PAGE_CAP'))}
                           onClick={() =>
                             setPageOrder(
                               draft.pageOrder.flatMap((candidate, position) =>
@@ -705,20 +771,21 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                               ),
                             )
                           }
-                          className="rounded-md border border-slate-700 px-1 py-0.5 hover:bg-slate-800 disabled:opacity-40"
                         >
                           <Copy size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          data-action={`pdf-edit-remove-page-${index}`}
+                        </DeskButton>
+                        <DeskButton
+                          action={`pdf-edit-remove-page-${index}`}
+                          variant="ghost"
+                          compact
+                          className="h-6"
+                          busy={!!busy}
                           aria-label={t('pdfEdit.removePage')}
-                          disabled={draft.pageOrder.length <= 1 || !!busy}
+                          {...dead(afterBusy(draft.pageOrder.length <= 1, 'LAST_PAGE_REMAINING'))}
                           onClick={() => setPageOrder(draft.pageOrder.filter((_, position) => position !== index))}
-                          className="rounded-md border border-rose-800 px-1 py-0.5 text-rose-300 hover:bg-rose-950 disabled:opacity-40"
                         >
                           <Trash2 size={11} />
-                        </button>
+                        </DeskButton>
                       </span>
                     </li>
                   ))}
@@ -736,18 +803,19 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                     value={outPath}
                     onChange={(event) => setOutPath(event.target.value)}
                     placeholder={t('pdfEdit.outPathPlaceholder')}
-                    className="min-w-[220px] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+                    className={`min-w-[220px] flex-1 ${FIELD_CLASS}`}
                   />
-                  <button
-                    type="button"
-                    data-action="pdf-edit-save-as"
-                    disabled={outPath.trim() === '' || !!busy || !limits}
+                  <DeskButton
+                    action="pdf-edit-save-as"
+                    variant="amber"
+                    compact
+                    busy={!!busy}
+                    {...dead(saveAsReason)}
                     onClick={saveAs}
-                    className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
                   >
                     <Save size={12} />
                     {t('pdfEdit.saveAs')}
-                  </button>
+                  </DeskButton>
                 </div>
                 <p className="text-[11px] text-slate-500">{t('pdfEdit.outPathHint')}</p>
               </div>
@@ -757,7 +825,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           {saveError && (
             <p
               data-testid="pdf-edit-save-error"
-              className="mt-2 break-all rounded-md border border-rose-900 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200"
+              className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
             >
               {t('pdfEdit.failed', { code: saveError.code, message: saveError.message })}
             </p>
@@ -766,7 +834,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           {saved && (
             <p
               data-testid="pdf-edit-saved"
-              className="mt-2 break-all rounded-md border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-[11px] text-emerald-200"
+              className="mt-2 break-all rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
             >
               {t('pdfEdit.saved', {
                 path: saved.outPath,

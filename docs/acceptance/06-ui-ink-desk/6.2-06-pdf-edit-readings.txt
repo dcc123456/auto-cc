@@ -1,0 +1,117 @@
+6.2 第十二片取证：`PdfEditPanel`（在既有 PDF 上改）换装后的活体读数
+====================================================================
+
+时间：2026-10-06 08:34–08:41 UTC
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata`，CDP 10222），目标页 `--url 5173`
+方式：页面里 `getComputedStyle()` / `data-*` / 画布 `getImageData()` 现读；夹具是仓库内手写的
+`tmp/v6b/fixture-4page.pdf`（4 页 A4，`io.open` 回执 `sourceHash = 2fddfc8d2831fc4d88d5bc908c0093ce21dd708f6fdb728453e677b113266fc4`）。
+**没有点过「另存为」**：那是本面板唯一的外发写盘动作，无人在场时不落任何文件（§7.2 同一取向）；
+draft 只活在内存，收尾已按 `pdf-edit-close` 弃掉（复测 `panelPresent: false`、`legacyHits: 0`）。
+
+一、十三颗键的归属与禁用原因（深色墨案）
+----------------------------------------
+
+| `data-action` | `data-effect` | 禁用时 `data-disabled-reason` | `title`（人话版） | 光标 |
+| --- | --- | --- | --- | --- |
+| `pdf-edit-close` | `ghost` | — | — | `pointer` |
+| `pdf-edit-open` | `line` | `PATH_EMPTY` | 路径为空时给一句 | `not-allowed` |
+| `pdf-edit-page-prev` | `line` | `FIRST_PAGE` | 已在第一页 | `not-allowed` |
+| `pdf-edit-page-next` | `line` | `LAST_PAGE` | 已在最后一页 | `not-allowed` |
+| `pdf-edit-view-page-N` | `line` | — | — | `pointer` |
+| `pdf-edit-undo` / `-redo` | `ghost` | `NOTHING_TO_UNDO` / `NOTHING_TO_REDO` | 给一句 | `not-allowed` |
+| `pdf-edit-move-up-I` / `-move-down-I` | `solid` | `FIRST_ROW` / `LAST_ROW` | 给一句 | `not-allowed` |
+| `pdf-edit-duplicate-I` | `solid` | `AT_PAGE_CAP` | 指到 `pdf-export.maxPages` | `not-allowed` |
+| `pdf-edit-remove-page-I` | `ghost` | `LAST_PAGE_REMAINING` | 给一句 | `not-allowed` |
+| `pdf-edit-remove-overlay-<id>` | `ghost` | — | — | `pointer` |
+| `pdf-edit-save-as` | `amber` | `OUT_PATH_EMPTY`（尺度没读到时先 `LIMITS_PENDING`） | 给一句 | `not-allowed` |
+
+归属口径（plan §5）：**这一屏零朱砂、零翡翠**——它没有外发腿，「另存为」是本机写盘，落 `amber`；
+页序/复制是草稿重排，落 `solid`；只读翻页落 `line`；撤销、关掉、去掉一页落 `ghost`。
+换装前这些键的禁用态是 `rose-900/rose-950` 一排红边——把"可撤销的草稿编辑"画成了"办砸了"，本片修掉的就是这处串色。
+
+其余画法读数（同一轮）：外壳 `rounded-xl`(12px) + `border-line`；行卡 `rounded-control`(7px) +
+`bg-ink-950/70`；输入框走 `FIELD_CLASS`（`line-strong` 描边、`bg-ink-950`、聚焦才亮青瓷）；
+提示行留**中性**档（`border-line bg-ink-950/70 text-slate-300`）——它是全 app 共用 `useBridgeAction.notice`
+那一句，另 15 块面板都这么画，不在这里单独翻成青瓷；错误行 `seal` wash、成功行 `jade` wash；
+`legacyClassHits: []`（旧 `rose-/emerald-/slate-900` 一类色阶一颗不剩）。
+
+二、画布跟着材质翻面（`--url 5173`，同一份 draft、同一次挂载）
+--------------------------------------------------------------
+
+覆盖区描边取 `--color-amber`、线框取 `--color-slate-400`、橡皮筋取 `--color-celadon`，全部在**画的那一刻**
+用 `getComputedStyle(canvas)` 现读；纸面白 `#ffffff` 与新字墨色 `#0f172a` **不跟主题走**（画面上所见即
+另存所得，spec 3.5-02）。全画布像素普查（脚本 `tmp/v6b/pdf12-scan.js`，按暖色像素的明度分档）：
+
+| 状态 | `data-theme` | `--color-amber` | 非白像素 | 深档暖色（`#e0a33f` 族） | 浅档暖色（`#a1700f` 族） |
+| --- | --- | --- | --- | --- | --- |
+| 浅色下挂载 | `light` | `#a1700f` | 1520 | 85 | **258** |
+| 翻到墨案后（未改任何数据） | `dark` | `#e0a33f` | 1520 | **343** | **0** |
+
+`非白像素`两档完全相等（1520）＝几何一点没动，只有颜色换了档——这就是"重画一次"而不是"重排一次"。
+纸面采样点仍是 `255,255,255`（`paperStaysWhite`）。
+
+**为什么这里必须订阅、不能把 `currentTheme()` 写进依赖数组**（本轮踩到才查清的一条 app 级事实）：
+`App.tsx` 的 `PANELS` 是**模块常量**，`<ResumePanel />` 这些元素在模块求值时就造好了；主题开关改的是
+App 自己的 state，App 重渲染时子树拿到的是**同一个元素引用**，React 直接跳过整棵子树。
+实测：把 `currentTheme()` 放进画布 effect 的依赖数组后翻面，画布像素逐位不变
+（`darkAmber 342 / lightAmber 0` 在浅色下依旧），也就是**画布停在旧材质上**。
+因此在 `theme.ts` 落一条唯一的订阅腿（`themeListeners` + `useDeskThemeValue()`，`applyTheme` 负责报），
+`useDeskTheme` 改为建在它上面（不再自己存第二份 state，也不再有那条重复的 `applyTheme` effect）。
+`WorkflowCanvas` 的 `colorMode` 同一族（它也在 `PANELS` 底下），一并换成订阅读数。
+
+三、修掉的一处控件级缺陷：`DeskButton` 的 `overflow-hidden` 把标签裁没了
+--------------------------------------------------------------------
+
+现象（换装后、修复前的两张截图都拍到了）：页序行最左那颗页码键塌成 30px 空壳，
+「产物第 1 页 ← 源第 1 页」整条看不见。原因不是文案长，而是 flex 子项的**自动最小尺寸**
+在 `overflow` 非 `visible` 时按 0 算（CSS Flexbox §4.5）——`DeskButton` 根节点为了裁结果态 wash
+带了 `overflow-hidden`，于是任何被挤的按钮都会缩到只剩内边距，把数据藏起来。
+
+修法在公共组件里（一处，不在各面板打补丁）：根节点去掉 `overflow-hidden`，wash 那一层自己带 `rounded-control`。
+窄列里的页序行同时改 `flex-wrap`：页码文案是**数据**，宁可多一排高也不裁。
+
+修复后读数（`tmp/v6b/pdf16-labels.js`，深色，夹具 4 页）：
+
+```
+rowWidth 260 / rowScrollWidth 258（不再顶出容器）
+pdf-edit-view-page-1  w=157 h=24 overflow=visible scrollOverflow=false label="产物第 1 页 ← 源第 1 页"
+pdf-edit-move-up-0    w=49  h=24 overflow=visible scrollOverflow=false（图标键，靠 aria-label）
+pdf-edit-move-down-0  w=49  h=24 …（第四行的 down 是禁用态：`LAST_ROW` + `not-allowed`）
+pdf-edit-duplicate-0  w=49  h=24 …
+pdf-edit-remove-page-0 w=49 h=24 …
+```
+
+顺带一条：图标-only 的 compact 键行高撑不出 24px（实测 17px），这四颗显式补了 `h-6` 与同行对齐。
+
+**全 app 裁切普查**（`tmp/v6b/pdf17-overflow.js`，逐屏跑一次，只统计 `height>0` 的键）：
+
+| 屏 | `[data-action]` 总数 | 被截断的按钮 | 横向溢出的行 |
+| --- | --- | --- | --- |
+| 简历（本片） | 286 | 0 | 0 |
+| 岗位 | 286 | 0 | 0 |
+| 信任 | 286 | 0 | 0 |
+| 流程 | 286 | 0 | 0 |
+| 对话 | 286 | 0 | 0 |
+
+（六屏的面板是**常驻挂载**的，未激活那一屏的键宽高为 0，故普查按宽高过滤；286 是全量节点数，不是可见数。）
+这一条同时回头核验了第 6～11 片：去掉 `overflow-hidden` 之后没有任何一行被顶宽。
+
+四、截图（四张，`md5 -q | sort | uniq -c` 逐张不同，非重复帧）
+--------------------------------------------------------------
+
+- `6.2-06-pdf-edit-panel-dark.png` / `6.2-06-pdf-edit-panel-light.png`：外壳、路径行、画布、页序标题段
+- `6.2-06-pdf-edit-rows-dark.png` / `6.2-06-pdf-edit-rows-light.png`：页序四行（含 `LAST_ROW` 禁用态）
+  + 产物路径 + 禁用中的「另存为」
+
+`shot --reveal` 在这一屏不可用：面板比视口高，工具直接报「已经滚到边界但 … 仍不在视口内」（§9 的 3.6-c ⑭
+同族），改为页面里 `scrollIntoView({block:'start'})` 后不带 `--reveal` 重拍。
+
+五、没取到的（诚实记账）
+------------------------
+
+- `WorkflowCanvas` 的 `colorMode` 订阅：机制与本片画布同一条、且本片已取到活体证据，但**流程屏这一轮没有
+  任何计划可摆**，`.react-flow` 根本不在 DOM（`flowPresent: false`），所以那一腿算 `[!]` 未取到，不算通过。
+- 「另存为」的真实落盘与失败半成品：本片纯换画法，不动 `pdf.export.saveAs`（3.5-02/09 的验收在 3.x 那批）。
+- 拖出覆盖区的**真鼠标**腿：本轮那一区是脚本派发 PointerEvent 落进 draft 的（取的是画法，不是输入通道）；
+  真实拖拽要窗口在前台，见 §9 的 5.4-b ⑩。
+- Windows / linux：本机是 macOS arm64，不适用。

@@ -567,6 +567,20 @@
       }
     },
     "pdfEdit": {
+      "reason": {
+        "ACTION_BUSY": "还有动作在飞：等它的回执落回提示行，这一颗才轮得到你按。",
+        "PATH_EMPTY": "还没键入源 PDF 的绝对路径：渲染层没有读文件的通道，路径必须由你给。",
+        "FIRST_PAGE": "已经是第一页，往前没有页了。",
+        "LAST_PAGE": "已经是最后一页，往后没有页了。",
+        "NOTHING_TO_UNDO": "还没有可撤销的改动：先在页面上框出一区或动一次页序。",
+        "NOTHING_TO_REDO": "没有可重做的步：撤销链已经到头。",
+        "FIRST_ROW": "这一页已经排在产物最前面。",
+        "LAST_ROW": "这一页已经排在产物最后面。",
+        "AT_PAGE_CAP": "已到产物页数上限（pdf-export 的 maxPages）：先去掉一页再复制。",
+        "LAST_PAGE_REMAINING": "产物至少要留一页：只剩这一页时去不掉。",
+        "LIMITS_PENDING": "还没从主进程读到编辑尺度（pdf-export 未挂载）：此时会话建不起来，另存也无从判起。",
+        "OUT_PATH_EMPTY": "还没键入产物的绝对路径：源文件全程只读，产物必须写到另一条路径上。"
+      },
       "enter": "在既有 PDF 上改",
       "heading": "在既有 PDF 上改（覆盖式轻编辑）",
       "close": "关闭",
