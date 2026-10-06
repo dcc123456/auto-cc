@@ -5,7 +5,7 @@
 > **C** = 命令/脚本机检；**U** = 单元/集成测试。状态：`[ ]` 未验 / `[x]` PASS / `[!]` BLOCKED（必须写原因）。
 > 证据归档：`docs/acceptance/06-ui-ink-desk/<条目ID>-*.png`；V 项无截图不得置 `[x]`（AGENTS.md §7.1/§7.4②）。
 
-> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 24 `[x]` / 14 `[!]` / 4 `[ ]`。
+> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 24 `[x]` / 15 `[!]` / 3 `[ ]`。
 > 立计划时是 31 条（6.2×9 / 6.4×3 / 6.5×3），后八条是逐片验收里补出来的（6.2-10/11/12、6.4-04、6.5-04/05/06、6.1-09）。
 >
 > **本计划总基调**：验收的不是"能不能跑"，而是"界面有没有说谎"——
@@ -47,8 +47,8 @@
 | 6.2-11 | 白名单「加白」按 08 稿走**两步 armed**（09 稿形态⑤′）：第一颗只武装（`data-armed="true"` + 4 秒倒计时），第二颗才写库；「撤销」保持一次点（撤回是安全方向，不该加摩擦） | V | 第十一片只把颜色归属换到位（`add-exempt`=seal、`revoke-exempt`=amber，活体计算色见 `6.2-06-chat-agent-readings.txt`②），两步点击**没做**——它改的是点击语义（一颗键从一次点变成两次点），与样式片混在一次提交里违反 §1.4，且判据要另取（第一次点之后 `policy.exemptList` 读数必须不变）。原件 `ArmButton` 已在 `ui/controls.tsx` 待命，本片起它是唯一没有消费者的形态原件。**第十六片已落地**：`add-exempt` 换成 `ArmButton`（`action="add-exempt"` + `confirmAction="add-exempt-confirm"`），真点一次之后 DOM 里长出 `data-armed="true"` 的那只、`data-action` 已改名、文案变「再点一次才写入」、倒计时条 `wash 4s linear`，而 `data-exempt-count` 仍是 0、回执行不存在；等过四秒自动解除且名单仍为 0（`6.2-11-arm-button-readings.txt`②，双主题截图两张）。第二颗真写库那一腿**没按**（第五节第 1 条：按一次会往这台机器的免确认名单写进一条豁免，与"不为了读数改写用户实例"的口径冲突），`revoke-exempt` 仍是一次点的普通 `DeskButton`。**状态标 `[!]` 而不是 `[x]`**：「第一次点不写库」这一半已经活体取到，「第二次点会写库」那一半按下去就会往这台机器的名单里留下痕迹，按 §7.4 的"环境不具备就如实标 BLOCKED、禁止用推测写成 [x]"处理，等用户指名要免确认某只手时一并兑现 | [!] |
 | 6.2-12 | toast 的第二段动作「在访达 / 资源管理器中显示」要有真实去处：一条 `shell.showItemInFolder` 口 + 点击可达，而不是只报一个路径字符串 | C+V | 待做：`RENDERER_ALLOWLIST` 里没有这一条（第二十四片因此只报落点路径，没假装能打开，见 `6.2-04-toast-readings.txt`⑧）。补它要动主进程 shell service 与 IPC 白名单（不是样式片），顺带把 ⑧ 第 4 条欠的 toast 宽度上限一并定口径 | [ ] |
 | 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | 待做：第二十五片的负腿反而把这一条暴露出来了——切走视图时遮罩虽然画不出来，但渲染层目前没有 `inert`，键盘 Tab 仍能走进被盖住的表单格。补它要同时定「弹窗打开时哪一格拿焦点、关掉后焦点还给谁」，与 6.2-04 形态③④ 一起收 | [ ] |
-| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**第二十七片进 45 / 54**：`src/ui/**` 之外新增五件表单原件（`DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange`）并在 16 个文件换掉 45 处裸控件（`input` 28 / `select` 12 / `textarea` 5 / `button` 0）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：剩 9 处不是体力收尾而是缺件——5 只 `<button>` 要先长三种 L1 形态原件（新立 **6.2-15**）、`MetricsPanel` 4 处撞已落地机检 5.8-02 的进口白名单（**待用户表态**）、`ChatPanel` 输入区需要哪个尺寸档（**待用户表态**）；画布 `<Controls>` 的 Tailwind 覆盖未动；机检按裁定仍未写入，故本条当下仍是 `[纪律]` |
-| 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的 5 只裸 `<button>` | C+V | 待做：第二十七片的源码账暴露出这 5 只在语义上不属于 `DeskButton` 的任何一档——硬塞会让"按钮长得像文字链"（违反 plan §5 的归属色与 07 稿五态），留在面板里手写则是本片正要消掉的东西。落点：`ui/controls.tsx` 新增三件 + `App.tsx` 导航、`ChatPanel.tsx` 自治档位、`GeneratePanel.tsx` / `GapPanel.tsx` 的证据键换装，双主题活体读数各一份 | [ ] |
+| 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上，在此之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**进 48 / 54**（第二十七片 45 + 第二十八片 3：两只行内披露键与自治档位那一支 JSX）：`src/ui/**` 之外新增七件原件（表单五件 `DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange` + 形态两件 `DeskSegmented` / `DeskDisclosure`）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：当下剩 11 处——基线内 6 处 = `App` 导航页签 1（缺页签原件，即 6.2-15 未做完的那一件）+ `ChatPanel` 输入区 1（**待用户表态**：并入 `FIELD_CLASS` 档还是自成一档）+ `MetricsPanel` 4 处（撞已落地机检 5.8-02 的进口白名单，**待用户表态**）；基线外新出的 5 处 = 并行会话刚落地的 `ModelSettingsPanel.tsx`（`select` 2 + `input` 3），它要走的原件已经齐了。画布 `<Controls>` 的 Tailwind 覆盖未动；机检按裁定仍未写入，故本条当下仍是 `[纪律]` |
+| 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的裸 `<button>` | C+V | **第二十八片落了后两件**：`DeskSegmented`（消费者 = `ChatPanel` 自治档位三格）与 `DeskDisclosure`（消费者 = `GapPanel` 证据行、`GeneratePanel` 出处行）。活体三档全到账（`6.2-15-segmented-disclosure-readings.txt`）：选中·非风险 `bg rgb(24,35,43)`、未选中 `bg rgba(0,0,0,0)` + `rgb(108,128,145)`、**选中·风险 `bg rgba(226,84,58,.13)` + `ring-inset seal/35`**（只有"选上它就把风险抬高"那一格涂朱砂），毡案同一条原件翻面；全 app `button:not([data-action])` **3 → 0**，渲染层最后一处原生 `disabled`（那三格原先走原生禁用，鼠标事件不派发、`title` 里的理由读不到）随之消失。**两处如实欠着**：① `DeskDisclosure` 的活体腿受阻——`gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"`，开发实例知识库是空的，正文一行都渲染不出来，补它要往用户的库里同步一份简历文档（不改写用户实例；受阻态画面 `6.2-15-disclosure-gap-blocked-dark.png`）；② `DeskSegmented` 的**在途档**取不到——纯本机 IPC 在 4ms 内返回（1/4/10ms 三张快照全为静止态），没有为了这一帧去发一条会写进会话的消息，改由第十五片同款"实现只有一条出路"的证据覆盖。**页签那件未做**（`App.tsx` 本轮之前被并行的模型设置改动占着，不动他人当场在改的文件） | [!] |
 
 ## 6.3 外壳与信息架构（01–06 稿）
 
@@ -1421,3 +1421,44 @@ offset:2px` ↔ 未选中 `none 3px rgb(107,118,129) offset:0px`；墨案 `oklab
     不代改他人文件。开发实例末态：theme 墨案、无注入 `<style>`（`styles:0`）、无探针残留（`probes:0`）、
     无遮罩、`body.overflow:visible`、知识库编辑卡已收回。三份截图 md5 互不相同
     （`0e31ddbf…` / `3f528343…` / `636b60ff…`）。
+
+## 6.2 第二十八片落地记录（2026-10-07，两种按钮形态原件：分段控件到货、行内披露接线但受阻）
+
+> 判据与读数全文在 `6.2-15-segmented-disclosure-readings.txt`，画面四张（`6.2-15-segmented-{chat-dark,chat-light,auto-risk-dark}.png`
+>
+> - `6.2-15-disclosure-gap-blocked-dark.png`），本节只记结论与欠账。
+
+1. **这一片收的是上一片源码账里"不是体力活"的那一档**：5 只裸 `<button>` 缺的是形态原件而不是 import。
+   落了其中两件——`DeskSegmented`（互斥档位、组内共边、选中实底）与 `DeskDisclosure`（只有下划线档的文案键）。
+   `DeskDisclosure` 有第二条来由：`GeneratePanel.tsx:165` 与 `GapPanel.tsx:235` 抄的是**同一条 class 字面量**
+   `text-left text-[11px] text-slate-400 hover:text-celadon`，同一逻辑第二次出现（§2.2）。
+2. **`DeskSegmented` 的一条设计约束写死在原件里**：`isRisk` 只给"选上它就把风险抬高"那一格涂朱砂，
+   普通选中不预支任何语气——否则"选中态"本身会被读成"已经在冒险"（plan §5 归属表）。
+   活体两半都取到了：`suggest` 选中是 `bg rgb(24,35,43)` 的实底，`auto` 选中是
+   `bg rgba(226,84,58,.13)` + 第 4 层 `ring-inset seal/35`；毡案同一条 class 翻面（组 `rgba(38,44,48,.3)`）。
+   为取风险那一档真实切了两次档位，**取完都还原**（末态 `建议模式`，`data-on` 序列与取证前逐位一致）。
+3. **顺手消掉渲染层最后一处原生 `disabled`**：那三格原先走原生禁用，而原生禁用不派发鼠标事件，
+   `title` 里那句"为什么按不动"就永远不出现（07 稿④、第十五片已把 `DeskButton` 收成 `aria-disabled` 三件套，
+   这一支是遗留）。原件改为 `aria-disabled` + 在途时不挂 `onClick` + 底色档由 JS 直接算（不依赖 `disabled:` 变体）。
+   全 app 的两条普查随之归零：`button:not([data-action])` **3 → 0**、原生 `disabled` 按钮 **0** 只。
+4. **一处受阻如实标出（`DeskDisclosure` 的活体腿）**：正文只在 `row.evidence.length > 0` 时长出来，而证据链要读
+   知识库实体；开发实例当下是 `gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"` +
+   `data-gap-model="unavailable"`（本机没配模型密钥）+ `generateRows 0`——**一行都渲染不出来**。
+   补齐只差一步（在知识库屏同步一份简历文档），但那会往用户实例的库里写实体，按本仓库一贯"不为读数改写用户实例"
+   的处置不做，受阻态画面入库。这一件的判据不是新画法（class 与改造前逐字相同），而是新凭据
+   （`data-open` / `aria-expanded` / `data-action`），等库里有实体时一并取。
+5. **另一处取不到也如实标出（`DeskSegmented` 的在途档）**：`chat.session.setAutonomy` 是纯本机 IPC，
+   4ms 内就返回并把 `busy` 收回，1 / 4 / 10ms 三张快照拿到的全是静止形状。没有为了造出这一帧去发一条会写进
+   会话的消息。替代证据按第十五片口径：这一档与 `DeskButton` 的在途档是同一实现（`aria-disabled` + 不挂 `onClick`），
+   且组件里 `busy` 只有这两条出路，没有第三态可走。
+6. **页签那件没做，原因不是忘了**：`App.tsx` 从本轮开始一直被并行的模型设置改动占着（当场在改的文件不动，
+   §1.4 不夹带、也不与他人抢同一支文件）。它现在干净了，**下一片的落点就是它**：补 `DeskTab`（选中 = 下边线 +
+   文字提亮）并换掉 `App.tsx` 导航那一支 JSX，6.2-15 只剩它一件。
+7. **6.2-14 的账更新为 48 / 54**（第二十七片 45 + 本片 3：两只披露键与自治档位那一支 JSX），
+   当下剩 11 处 = 基线内 6（`App` 页签 1、`ChatPanel` 输入区 1、`MetricsPanel` 4）+ 基线外 5
+   （并行会话刚落地的 `ModelSettingsPanel.tsx`，`select` 2 + `input` 3；它要走的原件已经齐了）。
+   两处待用户表态（看板的进口白名单、对话输入区的尺寸档）**没有一处被我自行改判据绕开**。
+8. **门禁**：`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`、`pnpm test` `TEST=0`、`pnpm format:check` **`FORMAT=0`**
+   （全 app 四条首次全绿——并行会话的 `packages/config/src/settings.test.ts` 已在他们那一边修好）、
+   eslint(renderer) `ESLINT=0`、`check-renderer-conventions` `CONV=0`。本片**零新增文案**（纯换件，i18n 面不动），
+   四张画面 md5 互不相同（`349ce006…` / `77979ff9…` / `880a3182…` / `990c0d54…`）。

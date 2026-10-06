@@ -1,0 +1,97 @@
+6.2 第二十八片取证：分段控件与行内披露两种形态原件落地
+======================================================
+
+时间：2026-10-07 01:00–01:05 UTC（脚本 `tmp/v6c/s28a.mjs` / `s28b.mjs` / `s28c.mjs` / `s28d.mjs`）
+宿主：`pnpm dev`（CDP 10222，页面 target 5173），视口 1200×772 / dpr 2
+画面：`6.2-15-segmented-{chat-dark,chat-light,auto-risk-dark}.png` + `6.2-15-disclosure-gap-blocked-dark.png`
+
+一、这一片要收的是什么
+--------------------
+
+第二十七片的源码账留下 9 处裸控件，其中 5 只 `<button>` 不是体力活而是**缺件**：页签 / 分段控件 / 行内披露
+三种形态在 `DeskButton` 的六档里都没有对应画法（硬塞就会造出"按钮长得像文字链"或"文字链长得像按钮"的
+第四种东西）。本片落其中两件：**`DeskSegmented`**（分段控件，第一只消费者 = `ChatPanel` 自治档位）与
+**`DeskDisclosure`**（行内披露，两只消费者 = `GapPanel` 证据行 / `GeneratePanel` 出处行）。
+页签那一件留给下一片（`App.tsx` 直到本轮之前一直被并行的模型设置改动占着，不能同时改）。
+
+行内披露这一件有第二条来由：`GeneratePanel.tsx:165` 与 `GapPanel.tsx:235` 原先抄的是**同一条 class 字面量**
+`text-left text-[11px] text-slate-400 hover:text-celadon`——同一逻辑第二次出现（AGENTS §2.2），
+不抽就得等第三处。
+
+二、分段控件：三档全部到账（墨案）
+----------------------------------
+
+组容器 `[data-testid="chat-autonomy-switch"]`（原件把它挂在组节点上，凭据一字未改）：
+`role="group"`、`border rgba(150,178,196,0.26)`（`line-strong`）、`radius 8px`、`bg rgb(8,12,16)`、`pad 2px/2px`。
+
+| 档 | 选择器 | 读数 | 判的是什么 |
+| --- | --- | --- | --- |
+| 选中·非风险 | `[data-action=chat-autonomy-suggest]`（当前档位） | `bg rgb(24,35,43)`（`ink-750`）、`color rgb(219,228,236)`（`slate-100`）、`box-shadow none`、`radius 6px`、`font 11px`、`data-on=true`、`aria-pressed=true` | 选中态不预支任何语气——只是实底 |
+| 未选中 | `[data-action=chat-autonomy-semi]` / `-auto` | `bg rgba(0,0,0,0)`、`color rgb(108,128,145)`（`slate-500`）、`opacity 1`、`data-on=false` | 未选中只提亮文字，靠 `:hover` 不靠底色 |
+| **选中·风险** | `[data-action=chat-autonomy-auto]`（点上去之后） | `bg rgba(226,84,58,0.13)`（`seal-wash`）、`color rgb(226,84,58)`（`seal`）、`box-shadow` 第 4 层 `oklab(0.631608 0.153413 0.0978069 / 0.35) 0 0 0 1px inset`（`ring-inset seal/35`） | 只有"选上它就把风险抬高"的那一格涂朱砂（plan §5 归属表）。**这是真实档位变化后取的读数**，取完立刻还原 |
+
+毡案同一条原件翻面：组 `border rgba(38,44,48,0.3)` / `bg rgb(216,211,198)`，选中格 `bg rgb(212,206,189)` /
+`color rgb(37,45,52)`，未选中格 `bg rgba(0,0,0,0)` / `color rgb(95,106,116)`。
+原件里**没有一处写死十六进制**，色阶全部由 L0 令牌给。
+
+三、这一片顺手消掉的一处规则违背
+------------------------------
+
+改造前那三格用的是**原生 `disabled={busy !== undefined}`** + `disabled:opacity-40`——这是整个渲染层最后一处
+"用原生 disabled 让按钮按不动"的写法（第十五片把 `DeskButton` 收成 `aria-disabled` 三件套之后遗留的这一支）。
+原生禁用不派发鼠标事件，`title` 里那句理由就不会出现，人只知道按不动不知道为什么按不动（07 稿④）。
+现在 `DeskSegmented` 走 `aria-disabled` + 可选 `data-disabled-reason` / `title`，并在在途时**不挂 `onClick`**，
+底色档由 JS 直接算（`opacity-40`），不依赖 `disabled:` 变体。
+
+活体自证（同一趟普查里数全 app 的按钮）：
+
+| 读数位 | 第二十七片 | 本片 |
+| --- | --- | --- |
+| `button:not([data-action])`（没有 harness 凭据的按钮） | **3** | **0** |
+| `button` 上仍在用的原生 `disabled` | 0（静止态本来就 undefined） | 0，且**代码里已无这条属性路径** |
+
+四、`DeskSegmented` 的在途那一档**没取到**，原因写清楚
+--------------------------------------------------
+
+档位写入是一次纯本机 IPC（`chat.session.setAutonomy`），点在之后 **4ms** 内就已经"读回报错 + `busy` 收回"：
+同帧读拿到的是 `ariaDisabled:null / opacity 1 / on true→false` 的静止形状（`s28d.mjs` 在 1 / 4 / 10ms 三个
+等待点各拍一张，三张都是静止态，其中 4ms 那张档位已经是 `semi`）。
+**没有为了拿到这一帧去制造一次慢调用**（发一条对话消息能让 `busy` 挂住几秒，但那会往用户的会话里写一条消息，
+并且要真打模型端点）。这一档因此由两条替代证据覆盖，与第十五片"四档死键没有活体禁用样本 → 以 class 列表证据
+覆盖同一分支"同一口径：① `DeskButton` 的在途档已有第二十二片的活体读数，这一支走的是同一套
+`aria-disabled` + 不挂 `onClick` 的实现；② 组件里 `busy` 只有两条出路（挂 `aria-disabled`、去掉 `onClick`），
+没有第三态可走。
+
+五、行内披露：两只消费者已接线，但**活体没有可展开的行**（受阻）
+--------------------------------------------------------------
+
+`GapPanel` 的正文只在 `row.evidence.length > 0` 时长出来，而证据链要读知识库实体。开发实例当下的读数是：
+
+```
+gapRows 6 / gapSuggestion 6 / gapEvidence 0
+data-gap-empty = "no_entities"：「库里 0 条实体——这一栏里的每条缺失都只说明简历还没录进来，不说明你不合格。」
+data-gap-model = "unavailable"（本机没配模型密钥）
+kb-empty = 「库里还没有实体：先在上方填简历文档 id 做一次同步。」
+generateRows 0
+```
+
+也就是说这一屏的六行缺失**全部没有证据引用**，`DeskDisclosure` 一行都渲染不出来。
+**没有为了读数往用户的库里同步一份简历文档**（那会改写用户实例的知识库，与本片一贯的口径冲突；
+与本仓库前二十六片"草稿一个字节都不改写"的处置同形）。
+画面 `6.2-15-disclosure-gap-blocked-dark.png` 拍的就是这个受阻态（六行 + 那一行 `no_entities` 说明）。
+补齐这一腿只需要一步：**在知识库屏填一份简历文档 id 点同步**，缺口屏随即长出带证据的行；
+届时取的判据是 `data-open` 从 `false` 翻到 `true`、`aria-expanded` 同步、正文 `[data-gap-evidence-body]` 出现，
+以及这只键的计算值仍是 `text-[11px] / rgb(108,128,145)→hover 青瓷 / 无框无底`（class 与改造前逐字相同，
+所以这一档不是"新画法要验收"，而是"新凭据要验收"）。
+
+六、还原与门禁
+--------------
+
+末态（`s28d.mjs` / `s28c.mjs` 各读一次）：theme `dark`、自治档位 `建议模式`（`data-on` 序列
+`true,false,false`，与取证前逐位一致）、`body.overflow:visible`、全 app `button:not([data-action]) = 0`、
+原生 `disabled` 按钮 0 只。档位被真实切过两次（`semi`、`auto`）用于取选中档，**两次都还原**。
+门禁：`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`、`pnpm test` `TEST=0`、`pnpm format:check` **`FORMAT=0`
+（全 app 首次四条全绿——并行会话的 `settings.test.ts` 已在他们那一边修好）**、
+`npx eslint --max-warnings 0 packages/renderer` `ESLINT=0`、`pnpm tsx scripts/check-renderer-conventions.ts`
+`CONV=0`（62 源文件 / 2 语言包 / 派生文案 50 条）。本片**零新增文案**（纯换件，i18n 面不动）。
+四张画面 md5 互不相同：`349ce006…` / `77979ff9…` / `880a3182…` / `990c0d54…`。
