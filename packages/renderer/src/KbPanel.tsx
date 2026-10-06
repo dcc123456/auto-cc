@@ -4,11 +4,13 @@ import { useTranslation } from 'react-i18next';
 import type {
   KbEntityKindView,
   KbEntityRowView,
+  KbExportRowResult,
   KbEvidenceRowView,
   KbImportModeView,
   KbSearchRowHit,
   KbSearchRowResult,
 } from '@auto-cc/shared';
+import { pushDeskToast } from './deskToast';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
 import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
@@ -218,11 +220,23 @@ export function KbPanel() {
     });
 
   /**
+   * 把一次备份的读数拼成人话（面板状态行与左下角 toast 共用，§2.5 不留第二份文案）。
+   * @param value `kb.profile.exportBackup` 的读数（条数 + 落点路径）
+   * @returns 已翻译的一句话
+   */
+  const backupLine = (value: KbExportRowResult) =>
+    t('kb.exportDone', { exported: value.exported, filePath: value.filePath });
+
+  /**
    * 导出全库为本地 JSON 备份（4.2-08）：路径由用户给，父目录必须已存在，写不出去以结构化失败上浮。
    */
   const exportBackup = () =>
     void run(t('kb.export'), () => bridge?.kb['profile.exportBackup'](backupPath.trim()), {
-      describe: (value) => t('kb.exportDone', { exported: value.exported, filePath: value.filePath }),
+      // 同一句话只算一次：面板状态行与左下角 toast 共用这份文案，不留第二份副本（§2.5）。
+      describe: (value) => backupLine(value),
+      apply: (value) =>
+        // 09 稿形态① 1-B：备份写在磁盘上，当前视野里翻不到，才在按钮自带回执之外补一只 toast。
+        pushDeskToast({ action: 'kb-export-toast', tone: 'jade', message: backupLine(value) }),
     });
 
   /**

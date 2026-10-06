@@ -546,6 +546,8 @@
       "previewDone": "预览已刷新",
       "previewEmpty": "尚未预览：先载入演示内容再点预览",
       "exportReceipt": "导出成功：{{pages}} 页 · {{bytes}} 字节",
+      "exportToast": "已导出 PDF · {{path}}",
+      "failToast": "导出失败 · {{message}}",
       "seedEdited": "载入第二版演示内容",
       "snapshots": "快照历史",
       "snapshotCount": "读到 {{count}} 份快照",

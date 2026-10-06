@@ -23,6 +23,7 @@ import type {
   SnapshotDiffView,
   SnapshotMetaView,
 } from '@auto-cc/shared';
+import { pushDeskToast } from './deskToast';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
 import { DeskButton, FIELD_CLASS } from './ui/controls';
@@ -156,7 +157,16 @@ export function ResumePanel() {
    */
   const exportPdf = (docId: string) =>
     void run(t('resume.export'), () => bridge?.resume['export.toPdf'](docId, TEMPLATE_ID, locale), {
-      apply: (value) => setReceipt(value),
+      apply: (value) => {
+        setReceipt(value);
+        // 09 稿形态① 1-B：产物是磁盘上的一份 PDF，当前视野里翻不到它，所以除了按钮自带的那格回执，
+        // 还要在左下角补一只 toast 把落点说清楚——稿子里"结果不在视野才配 toast"指的就是这一类。
+        pushDeskToast({
+          action: 'resume-export-toast',
+          tone: 'jade',
+          message: t('resume.exportToast', { path: value.path }),
+        });
+      },
       describe: (value) => t('resume.exportReceipt', { pages: value.pages, bytes: value.bytes }),
     });
 
@@ -165,7 +175,16 @@ export function ResumePanel() {
    * `run` 外壳显示为可读中文提示——spec 3.3-11「注入失败 → 截图错误态，主进程不崩」的界面入口。
    */
   const injectFailure = () =>
-    void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, TEMPLATE_ID, locale));
+    void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, TEMPLATE_ID, locale), {
+      onError: (error) =>
+        // 失败那一只不许 8 秒就收（09 稿 1-A 写的"失败不自动回落，必须人读过"，与 spec 6.2-02 同一条）：
+        // 只能由人再动一次或按 Esc 撤掉。
+        pushDeskToast({
+          action: 'resume-fail-toast',
+          tone: 'seal',
+          message: t('resume.failToast', { message: error.message }),
+        }),
+    });
 
   /**
    * 读回该文档的快照历史（spec 3.7-01 的列表），并把起点/终点预置成「最旧 ↔ 最新」——

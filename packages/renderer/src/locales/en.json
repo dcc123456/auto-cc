@@ -487,6 +487,8 @@
       "previewDone": "Preview refreshed",
       "previewEmpty": "No preview yet: load demo content, then press Preview",
       "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes",
+      "exportToast": "PDF exported · {{path}}",
+      "failToast": "Export failed · {{message}}",
       "seedEdited": "Load revised demo content",
       "snapshots": "Snapshot history",
       "snapshotCount": "Read {{count}} snapshots",

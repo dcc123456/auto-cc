@@ -37,6 +37,7 @@ import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton } from './ui/controls';
+import { Toast } from './ui/overlays';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
 
@@ -228,7 +229,7 @@ export function App() {
           })}
         </nav>
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {/* 对话是第一入口：它自己不套工作台标题头，输入区直接贴着桌面（§5.9）。 */}
           <section
             data-view-scroll="chat"
@@ -237,6 +238,10 @@ export function App() {
             <ChatPanel />
           </section>
           {(['jobs', 'resume', 'workflow', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
+
+          {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，六张视图切来切去都只有这一只通道，
+              各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
+          <Toast />
         </main>
 
         {/* 槽位宽度与主进程摆位同源：`--kernel-view-width` 必须等于 KERNEL_VIEW_WIDTH_RATIO（1.2-12） */}
