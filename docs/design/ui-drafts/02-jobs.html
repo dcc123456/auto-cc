@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>02 · 岗位流水线 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap,
+      .notes {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        flex: 1;
+        min-height: 0;
+      }
+      .list {
+        border-right: 1px solid var(--line);
+        overflow: auto;
+      }
+      .searchbox {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 11px 12px;
+        padding: 6px 9px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-md);
+        background: var(--ink-950);
+        font-size: 12px;
+        color: var(--fg-3);
+      }
+      .filters {
+        display: flex;
+        gap: 5px;
+        padding: 0 12px 10px;
+        flex-wrap: wrap;
+      }
+      .job {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 3px 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        cursor: default;
+        position: relative;
+      }
+      .job:hover {
+        background: var(--ink-850);
+      }
+      .job.on {
+        background: var(--ink-750);
+      }
+      .job.on::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--seal);
+      }
+      .job-t {
+        font-size: 12.5px;
+        color: var(--fg);
+      }
+      .job-c {
+        font-size: 11.5px;
+        color: var(--fg-3);
+      }
+      .job-s {
+        font-family: var(--f-mono);
+        font-size: 11.5px;
+        color: var(--jade);
+        text-align: right;
+      }
+      .job-st {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 5px;
+        margin-top: 3px;
+      }
+      .detail {
+        overflow: auto;
+      }
+      .jd-sheet {
+        padding: 20px 24px;
+      }
+      .jd-meta {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px 8px;
+        margin: 14px 0 16px;
+      }
+      .jd-meta .paper-h {
+        font-size: 17px;
+      }
+      .gap-col {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .gap-list {
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--ink-850);
+      }
+      .gap-h {
+        padding: 8px 11px;
+        border-bottom: 1px solid var(--line);
+        font-size: 11.5px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .gap-i {
+        padding: 8px 11px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--fg-2);
+      }
+      .gap-i:last-child {
+        border-bottom: 0;
+      }
+      /* .tabs/.tab（或 .seg）已提到 assets/shared.css 的原语区，此处只留屏内差异 */
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 02</span>
+      <span class="sheet-name">岗位</span>
+      <span class="sheet-desc"
+        >六步闭环的落地点：JD 库 → 缺口 → 话术，三段同屏（原 JobLab / Gap / Script 三块面板合并）</span
+      >
+    </div>
+
+    <div class="wrap">
+      <div class="app">
+        <header class="bar">
+          <span class="wordmark"
+            >auto<b>·</b>cc
+            <span style="font-family: var(--f-cjk); font-size: 12px; color: var(--fg-3); font-weight: 400"
+              >桌面工作台</span
+            ></span
+          >
+          <span class="bar-sub"
+            >搜岗位 · 生成话术 · 按岗位优化简历 ·
+            <b style="color: var(--seal); font-weight: 400">由你确认后投递</b></span
+          >
+          <div class="bar-right">
+            <div class="tier">
+              <span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+              ><span class="tier-opt">全自动</span>
+            </div>
+            <span class="btn btn-ghost btn-sm">EN</span><span class="btn btn-ghost btn-sm">隐私与条款</span>
+          </div>
+        </header>
+
+        <nav class="rail">
+          <div class="rail-label">工作面</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+            >对话<span class="nav-count">3</span>
+          </div>
+          <div class="nav-item on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg
+            >岗位<span class="nav-count">28</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M15 2v5h5M8 13h8M8 17h5" /></svg
+            >简历<span class="nav-count">4</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="3" y="3" width="6" height="6" rx="1" />
+              <rect x="15" y="15" width="6" height="6" rx="1" />
+              <path d="M9 6h6a2 2 0 0 1 2 2v6M6 9v6a2 2 0 0 0 2 2h6" /></svg
+            >流程<span class="nav-count">6</span>
+          </div>
+          <div class="rail-label">系统</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+            >信任与安全<span class="nav-count">12</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z"
+              /></svg
+            >工程台
+          </div>
+        </nav>
+
+        <main class="main">
+          <div class="view-head">
+            <div>
+              <div class="view-title">岗位<i class="an">1</i></div>
+              <div class="view-note">28 条在库 · 5 条已打招呼 · 抓取于 01:07</div>
+            </div>
+            <div class="view-actions">
+              <span class="btn btn-sm btn-line"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="12" height="12">
+                  <path d="M3 12a9 9 0 1 1 9 9 9 9 0 0 1-6.4-2.6L3 21" />
+                  <path d="M21 12h-6" /></svg
+                >再抓一轮</span
+              >
+              <span class="btn btn-sm btn-line"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="12" height="12">
+                  <path d="M12 5v14M5 12h14" /></svg
+                >入库</span
+              >
+              <span class="btn btn-sm seal" style="padding: 4px 10px; font-size: 11.5px">批量打招呼 · 需盖印</span>
+            </div>
+          </div>
+
+          <!-- ② 六步闭环做成常驻进度脊柱：任何一条岗位都看得出现在卡在第几步 -->
+          <div style="padding: 12px 20px 0">
+            <div class="pipe">
+              <div class="pipe-step done">
+                <div class="n">01</div>
+                <div class="t">搜索 JD</div>
+                <div class="v">31</div>
+              </div>
+              <div class="pipe-step done">
+                <div class="n">02</div>
+                <div class="t">读详情建档</div>
+                <div class="v">28</div>
+              </div>
+              <div class="pipe-step done">
+                <div class="n">03</div>
+                <div class="t">比对缺口</div>
+                <div class="v">28</div>
+              </div>
+              <div class="pipe-step hot">
+                <div class="n">04</div>
+                <div class="t">生成话术</div>
+                <div class="v">12</div>
+              </div>
+              <div class="pipe-step hot">
+                <div class="n">05</div>
+                <div class="t">打招呼</div>
+                <div class="v">5</div>
+              </div>
+              <div class="pipe-step wait">
+                <div class="n">06</div>
+                <div class="t">投递</div>
+                <div class="v">2</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="split" style="margin-top: 12px">
+            <!-- 左：岗位清单 -->
+            <div class="list">
+              <div class="searchbox">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="13" height="13">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" /></svg
+                >搜索岗位 / 公司 / 技能<span class="spacer kbd">/</span>
+              </div>
+              <div class="filters">
+                <span class="tag celadon">全部 28</span><span class="tag">待话术 7</span
+                ><span class="tag amber">待表态 3</span><span class="tag seal">已外发 5</span
+                ><span class="tag">已投递 2</span>
+              </div>
+              <div class="job on">
+                <div class="job-t">高级前端工程师</div>
+                <div class="job-s">命中 82</div>
+                <div class="job-c">某云计算公司 · 上海静安</div>
+                <div class="job-c" style="font-family: var(--f-mono); font-size: 11px">25–40k · 3 年+</div>
+                <div class="job-st">
+                  <span class="tag seal">已打招呼 01:08</span><span class="tag">招聘方未读</span>
+                </div>
+              </div>
+              <div class="job">
+                <div class="job-t">前端开发工程师（可视化）</div>
+                <div class="job-s" style="color: var(--amber)">部分 61</div>
+                <div class="job-c">某数据服务公司 · 上海徐汇</div>
+                <div class="job-c" style="font-family: var(--f-mono); font-size: 11px">20–32k · 1–3 年</div>
+                <div class="job-st"><span class="tag amber">话术待确认</span></div>
+              </div>
+              <div class="job">
+                <div class="job-t">Web 前端 · React</div>
+                <div class="job-s">命中 74</div>
+                <div class="job-c">某跨境电商 · 上海浦东</div>
+                <div class="job-c" style="font-family: var(--f-mono); font-size: 11px">18–30k</div>
+                <div class="job-st"><span class="tag">待处理</span></div>
+              </div>
+              <div class="job">
+                <div class="job-t">全栈工程师（Node）</div>
+                <div class="job-s" style="color: var(--seal)">缺口 38</div>
+                <div class="job-c">某 SaaS 创业公司 · 远程</div>
+                <div class="job-c" style="font-family: var(--f-mono); font-size: 11px">22–35k</div>
+                <div class="job-st"><span class="tag">缺 3 项技能</span></div>
+              </div>
+              <div class="job">
+                <div class="job-t">前端架构师</div>
+                <div class="job-s" style="color: var(--fg-4)">—</div>
+                <div class="job-c">某券商 IT · 上海陆家嘴</div>
+                <div class="job-c" style="font-family: var(--f-mono); font-size: 11px">45–70k · 8 年+</div>
+                <div class="job-st"><span class="tag">经验不符 · 已排除</span></div>
+              </div>
+            </div>
+
+            <!-- 右：选中岗位的一张"纸" + 三段下钻 -->
+            <div class="detail">
+              <div style="padding: 16px 20px 0">
+                <div class="paper-sheet jd-sheet">
+                  <div class="row" style="align-items: flex-start">
+                    <div style="min-width: 0">
+                      <div class="paper-k">JD · 抓取自 BOSS 直聘 · 01:07</div>
+                      <div class="paper-h" style="font-size: 19px; margin-top: 3px">高级前端工程师</div>
+                      <div style="font-size: 12px; color: var(--paper-ink-2); margin-top: 2px">
+                        某云计算公司 · 上海 · 静安区 · 25–40k · 3 年以上 · 本科
+                      </div>
+                    </div>
+                    <span class="spacer"></span>
+                    <!-- 印章落在纸上：外发状态用"骑缝章"表达，读列表时一眼扫到 -->
+                    <div
+                      style="
+                        text-align: center;
+                        border: 2px solid var(--seal);
+                        color: var(--seal);
+                        border-radius: 4px;
+                        padding: 6px 10px;
+                        font-family: var(--f-cjk-display);
+                        font-weight: 700;
+                        font-size: 11px;
+                        line-height: 1.35;
+                        transform: rotate(-4deg);
+                        opacity: 0.9;
+                        white-space: nowrap;
+                      "
+                    >
+                      已打招呼<i class="an">3</i><br /><span
+                        style="font-family: var(--f-mono); font-weight: 400; font-size: 9.5px"
+                        >10-06 01:08</span
+                      >
+                    </div>
+                  </div>
+                  <div class="jd-meta">
+                    <div class="stat">
+                      <span class="paper-k">技能命中</span
+                      ><span class="paper-h num" style="font-size: 22px">11 / 14</span>
+                    </div>
+                    <div class="stat">
+                      <span class="paper-k">缺口</span><span class="paper-h num" style="font-size: 22px">3</span>
+                    </div>
+                    <div class="stat">
+                      <span class="paper-k">匹配分</span><span class="paper-h num" style="font-size: 22px">82</span>
+                    </div>
+                    <div class="stat">
+                      <span class="paper-k">薪资对表</span
+                      ><span class="paper-h" style="font-size: 14px; padding-top: 6px">高于期望</span>
+                    </div>
+                  </div>
+                  <div class="paper-rule"></div>
+                  <div
+                    style="
+                      margin-top: 12px;
+                      display: grid;
+                      grid-template-columns: 1fr 1fr;
+                      gap: 18px;
+                      font-size: 11.5px;
+                      color: var(--paper-ink);
+                    "
+                  >
+                    <div>
+                      <div class="paper-k" style="margin-bottom: 5px">岗位职责（原文摘录）</div>
+                      <div style="line-height: 1.9">
+                        · 负责控制台前端架构与性能优化<br />· 主导组件库建设，制定规范<br />· 参与服务端渲染方案选型
+                      </div>
+                    </div>
+                    <div>
+                      <div class="paper-k" style="margin-bottom: 5px">硬性要求</div>
+                      <div style="line-height: 1.9">
+                        · React / TypeScript 3 年以上<br />·
+                        <span style="background: rgba(226, 84, 58, 0.18); border-bottom: 1.5px solid var(--seal)"
+                          >WebRTC 经验（库内无证据）</span
+                        ><br />·
+                        <span style="background: rgba(224, 163, 63, 0.2); border-bottom: 1.5px solid #b8860b"
+                          >大型组件库主导（仅参与）</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                  <div style="margin-top: 14px; font-size: 10.5px; color: var(--paper-ink-2); display: flex; gap: 14px">
+                    <span>源 URL <span style="font-family: var(--f-mono)">/job/88213</span></span
+                    ><span>快照哈希 <span style="font-family: var(--f-mono)">a7f3…9c</span></span
+                    ><span class="spacer"></span><span>原文一字未改，缺口判定见下<i class="an">4</i></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tabs" style="margin-top: 16px">
+                <span class="tab on">缺口报告</span><span class="tab">打招呼话术</span
+                ><span class="tab">按这个岗位改简历</span><span class="tab">抓取证据</span>
+              </div>
+
+              <div style="padding: 16px 20px 24px">
+                <!-- ⑤ 三栏缺口：命中 / 部分命中 / 缺失，与 GapPanel 的既有语义一一对应 -->
+                <div class="gap-col">
+                  <div class="gap-list">
+                    <div class="gap-h" style="color: var(--jade)">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="12"
+                        height="12"
+                      >
+                        <path d="M20 6 9 17l-5-5" /></svg
+                      >命中 11 项
+                    </div>
+                    <div class="gap-i">React 状态管理 <span class="spacer evidence">简历 P.2</span></div>
+                    <div class="gap-i">TypeScript <span class="spacer evidence">项目 3</span></div>
+                    <div class="gap-i">前端性能优化 <span class="spacer evidence">成果 +38%</span></div>
+                  </div>
+                  <div class="gap-list">
+                    <div class="gap-h" style="color: var(--amber)">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="12"
+                        height="12"
+                      >
+                        <path d="M12 9v4M12 17h.01" />
+                        <circle cx="12" cy="12" r="10" /></svg
+                      >部分命中 3 项
+                    </div>
+                    <div class="gap-i">组件库主导 <span class="spacer hint">仅参与</span></div>
+                    <div class="gap-i">Node 中间层 <span class="spacer hint">写过 BFF</span></div>
+                  </div>
+                  <div class="gap-list" style="border-color: rgba(226, 84, 58, 0.35)">
+                    <div class="gap-h" style="color: var(--seal)">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        width="12"
+                        height="12"
+                      >
+                        <path d="M18 6 6 18M6 6l12 12" /></svg
+                      >缺失 3 项
+                    </div>
+                    <div class="gap-i">WebRTC</div>
+                    <div class="gap-i">微前端隔离方案</div>
+                  </div>
+                </div>
+
+                <div class="card" style="margin-top: 14px">
+                  <div class="card-head">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--celadon)"
+                      stroke-width="1.7"
+                      width="14"
+                      height="14"
+                    >
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                    <span class="card-title">知识库给出的建议<i class="an">5</i></span>
+                    <span class="spacer"></span><span class="tag">事实锁定：不会替你编经历</span>
+                  </div>
+                  <div class="card-body" style="font-size: 12.5px; color: var(--fg-2); line-height: 1.8">
+                    缺失的 3 项里，<b style="color: var(--fg)">WebRTC</b> 与
+                    <b style="color: var(--fg)">微前端</b>
+                    在知识库中无任何证据条目，因此建议只在话术里坦白这一点、不要在简历里补写。组件库主导可以用<b
+                      style="color: var(--fg)"
+                      >「参与并负责其中 4 个组件」</b
+                    >这一已有事实的更强表述替换。
+                  </div>
+                  <div class="card-foot">
+                    <span class="btn btn-sm btn-line">复制这句话术</span>
+                    <span class="btn btn-sm btn-line">按此改简历 →</span>
+                    <span class="spacer"></span>
+                    <span class="seal" style="padding: 5px 11px; font-size: 11.5px"
+                      ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5" /></svg
+                      >就发这条招呼</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <aside class="kernel">
+          <div class="kernel-head">
+            <span class="dot" style="background: var(--jade)"></span><span class="kernel-title">内核 · 原页面快照</span
+            ><span class="spacer"></span><span class="btn btn-sm btn-ghost">我来接管</span>
+          </div>
+          <div class="kernel-body">
+            <div class="page">
+              <div class="page-bar"><span class="page-url">fixture.local/boss/job/88213</span></div>
+              <div class="page-body">
+                <div style="font-weight: 600; margin-bottom: 5px">高级前端工程师</div>
+                <div style="color: #5b6770; margin-bottom: 8px">某云计算公司 · 25-40k</div>
+                <div
+                  style="
+                    border: 1.5px solid var(--seal);
+                    padding: 6px;
+                    border-radius: 3px;
+                    background: rgba(226, 84, 58, 0.05);
+                    font-size: 10px;
+                  "
+                >
+                  该段落被抽取器框选 · 与纸面摘录逐字一致
+                </div>
+              </div>
+            </div>
+            <hr class="hr" />
+            <div class="col" style="gap: 8px">
+              <div class="row">
+                <span class="stat-k">抓取质量</span><span class="spacer tag jade">选择器 9 中 9</span>
+              </div>
+              <div class="row">
+                <span class="stat-k">站点适配器</span><span class="spacer mono">platform-boss v3</span>
+              </div>
+              <div class="row"><span class="stat-k">风控信号</span><span class="spacer tag">未触发</span></div>
+            </div>
+            <div class="banner celadon" style="margin-top: 12px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+              >检测到验证码即暂停并通知你，绝不做识别<i class="an">6</i>
+            </div>
+          </div>
+        </aside>
+
+        <footer class="foot">
+          <span><b>jd</b> 28 条</span><span><b>kb</b> BM25 就绪 · 向量 412/412</span><span><b>gate</b> 招呼 8/20</span>
+          <span class="spacer"></span><span>zh-CN</span><span>0.5.3</span>
+        </footer>
+      </div>
+    </div>
+
+    <ol class="notes">
+      <li>
+        <b>四个区里的"岗位"。</b>把抓取、入库、缺口、话术四件事收进一个视图；用户不需要知道 JobLabPanel / GapPanel /
+        ScriptPanel 是三块面板。
+      </li>
+      <li><b>六步闭环进度条。</b>产品的主流程第一次成为界面脊柱，每段一个数字；点击任一段等于筛选该状态的岗位。</li>
+      <li>
+        <b>列表右侧的匹配分。</b>命中=青、部分=琥珀、缺口=朱砂，与纸面上的下划线配色同一套语义，扫列表即可完成取舍。
+      </li>
+      <li>
+        <b>JD 画成一张纸。</b>强调"原文一字未改"——这是 §8.4
+        事实锁定在视觉层的对应物；纸角盖骑缝章表示已外发，外发状态因此在列表与详情都可见。
+      </li>
+      <li>
+        <b>缺口三栏 + 建议卡。</b
+        >建议卡明确"缺证据的部分不许编"，并把"就发这条招呼"的盖印按钮放在话术旁边而不是别的面板里。
+      </li>
+      <li><b>风控红线常驻。</b>合规声明从隐私弹窗里摘一条钉在这里：遇到验证码即停，不做识别。</li>
+    </ol>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

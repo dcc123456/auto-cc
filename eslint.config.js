@@ -92,6 +92,8 @@ export default tseslint.config(
       // staging 与安装包产物是构建输出，不是源码；esbuild 的注释排版交给构建器而不是 lint。
       'build/**',
       'docs/acceptance/**',
+      // 设计稿（P6 的评审素材）：独立 HTML/JS，不属于任何 tsconfig 工程，也不进 app 构建产物。
+      'docs/design/**',
       'tmp/**',
       // §6.4 的一次性 spike 副本（结论进文档、代码不进主干），不参与主干 lint。
       '.research-repos/**',

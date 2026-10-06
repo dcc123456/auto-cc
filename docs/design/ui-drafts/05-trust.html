@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>05 · 信任与安全 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap,
+      .notes {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+      .trust {
+        display: grid;
+        grid-template-columns: 214px minmax(0, 1fr);
+        flex: 1;
+        min-height: 0;
+      }
+      .subnav {
+        border-right: 1px solid var(--line);
+        padding: 12px 10px;
+        overflow: auto;
+      }
+      .sub-item {
+        padding: 7px 9px;
+        border-radius: var(--r-md);
+        font-size: 12px;
+        color: var(--fg-2);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .sub-item svg {
+        width: 13px;
+        height: 13px;
+        stroke-width: 1.7;
+      }
+      .sub-item.on {
+        background: var(--ink-750);
+        color: var(--fg);
+      }
+      .risk-row {
+        display: grid;
+        grid-template-columns: 22px 1fr auto auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .risk-row:last-child {
+        border-bottom: 0;
+      }
+      .sign {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-lg);
+        background: linear-gradient(var(--paper), var(--paper-2));
+        color: var(--paper-ink);
+        padding: 18px 20px;
+        position: relative;
+        overflow: hidden;
+      }
+      .sign::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: var(--noise);
+        opacity: 0.07;
+        mix-blend-mode: multiply;
+        pointer-events: none;
+      }
+      .sign-line {
+        border-bottom: 1.5px solid rgba(28, 26, 23, 0.4);
+        height: 40px;
+        display: flex;
+        align-items: flex-end;
+      }
+      .sign-hand {
+        font-family: var(--f-cjk-display);
+        font-weight: 700;
+        font-size: 20px;
+        transform: rotate(-3deg);
+        color: #23201c;
+      }
+      .wl {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .wl:last-child {
+        border-bottom: 0;
+      }
+      .ledger td.seal-cell {
+        color: var(--seal);
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 05</span>
+      <span class="sheet-name">信任与安全</span>
+      <span class="sheet-desc"
+        >把散落的风险确认 / 白名单 / 额度闸门 / 审计 / 脱敏 / 条款
+        收进一个区：所有"凭什么让它替你发"的答案都在一处</span
+      >
+    </div>
+
+    <div class="wrap">
+      <div class="app no-kernel">
+        <header class="bar">
+          <span class="wordmark"
+            >auto<b>·</b>cc
+            <span style="font-family: var(--f-cjk); font-size: 12px; color: var(--fg-3); font-weight: 400"
+              >桌面工作台</span
+            ></span
+          >
+          <span class="bar-sub"
+            >搜岗位 · 生成话术 · 按岗位优化简历 ·
+            <b style="color: var(--seal); font-weight: 400">由你确认后投递</b></span
+          >
+          <div class="bar-right">
+            <div class="tier">
+              <span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+              ><span class="tier-opt">全自动</span>
+            </div>
+            <span class="btn btn-ghost btn-sm">EN</span
+            ><span class="btn btn-ghost btn-sm" style="color: var(--fg)">隐私与条款</span>
+          </div>
+        </header>
+
+        <nav class="rail">
+          <div class="rail-label">工作面</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+            >对话
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg
+            >岗位<span class="nav-count">28</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M15 2v5h5M8 13h8M8 17h5" /></svg
+            >简历<span class="nav-count">4</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="3" y="3" width="6" height="6" rx="1" />
+              <rect x="15" y="15" width="6" height="6" rx="1" />
+              <path d="M9 6h6a2 2 0 0 1 2 2v6M6 9v6a2 2 0 0 0 2 2h6" /></svg
+            >流程<span class="nav-count">6</span>
+          </div>
+          <div class="rail-label">系统</div>
+          <div class="nav-item on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+            >信任与安全<span class="nav-count">12</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z"
+              /></svg
+            >工程台
+          </div>
+          <div class="spacer" style="margin-top: auto"></div>
+          <div style="border-top: 1px solid var(--line); padding-top: 10px" class="col">
+            <div class="row">
+              <span class="dot" style="background: var(--jade)"></span><span class="hint">风险签字 已生效</span>
+            </div>
+            <div class="row">
+              <span class="dot" style="background: var(--amber)"></span
+              ><span class="hint">白名单 3 只工具 · 仅全自动</span>
+            </div>
+          </div>
+        </nav>
+
+        <main class="main">
+          <div class="view-head">
+            <div>
+              <div class="view-title">信任与安全<i class="an">1</i></div>
+              <div class="view-note">这里的每一条都对应一次"外发前的凭什么"，改动一律留痕</div>
+            </div>
+            <div class="view-actions">
+              <span class="btn btn-sm btn-line">导出我的数据</span><span class="btn btn-sm btn-line">导入备份</span>
+            </div>
+          </div>
+
+          <div class="trust">
+            <div class="subnav">
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                  <path d="M14 2v6h6" /></svg
+                >声明与条款
+              </div>
+              <div class="sub-item on">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+                >平台风险签字<span class="spacer tag seal">3 项</span>
+              </div>
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></svg
+                >自治与白名单
+              </div>
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M3 3v18h18" />
+                  <path d="M7 14l3-4 3 3 4-6" /></svg
+                >额度与用量账本
+              </div>
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="3" y="11" width="18" height="10" rx="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg
+                >数据与脱敏
+              </div>
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg
+                >动作审计回看
+              </div>
+              <div class="sub-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M21 12a9 9 0 1 1-9-9" />
+                  <path d="M9 12l2 2 4-4" /></svg
+                >更新与许可
+              </div>
+              <hr class="hr" />
+              <div class="hint" style="font-size: 11px; padding: 0 9px">
+                工程台里的会话分区、定位实验台等调试工具不在这一栏：它们只读、不外发。<i class="an">2</i>
+              </div>
+            </div>
+
+            <div class="scroll" style="padding: 18px 20px 26px">
+              <!-- ③ 风险签字：白纸 + 手写体 + 骑缝章，把"签字落库"这件抽象事做成有重量的动作 -->
+              <div class="sign">
+                <div class="row" style="align-items: flex-start">
+                  <div style="min-width: 0">
+                    <div class="paper-k">风险确认书 · 启用外部站点自动化之前</div>
+                    <div class="paper-h" style="font-size: 17px; margin-top: 4px">我知道这些动作会发生什么</div>
+                  </div>
+                  <span class="spacer"></span>
+                  <div
+                    style="
+                      text-align: center;
+                      border: 2px solid var(--seal);
+                      color: var(--seal);
+                      border-radius: 4px;
+                      padding: 5px 9px;
+                      font-family: var(--f-cjk-display);
+                      font-weight: 900;
+                      font-size: 11px;
+                      line-height: 1.3;
+                      transform: rotate(-6deg);
+                    "
+                  >
+                    已签字<i class="an">3</i><br /><span
+                      style="font-family: var(--f-mono); font-weight: 400; font-size: 9px"
+                      >2026-10-05 23:41</span
+                    >
+                  </div>
+                </div>
+                <div style="margin: 14px 0 4px; font-size: 11.5px; line-height: 1.8; color: #3a352e">
+                  未签字时，app 仍可用：搜索、建档、话术、简历都能做，只是<b>任何一步都不会向招聘平台发出动作</b>。
+                </div>
+                <div class="paper-rule" style="margin: 12px 0"></div>
+                <div class="risk-row">
+                  <span style="font-family: var(--f-mono); font-size: 11px; color: #8a7f6f">01</span>
+                  <div>
+                    <b style="font-size: 12.5px">搜索与抓取 JD</b>
+                    <div style="font-size: 11px; color: #6b6155">账号可能被平台限流；抓取频率已按人类节奏节流</div>
+                  </div>
+                  <span class="effect read">只读外部</span><span class="tag jade">已同意</span>
+                </div>
+                <div class="risk-row">
+                  <span style="font-family: var(--f-mono); font-size: 11px; color: #8a7f6f">02</span>
+                  <div>
+                    <b style="font-size: 12.5px">发送打招呼</b>
+                    <div style="font-size: 11px; color: #6b6155">以你的真实账号向招聘方发消息，内容发出后不可撤回</div>
+                  </div>
+                  <span class="effect outbound">外发</span><span class="tag jade">已同意</span>
+                </div>
+                <div class="risk-row">
+                  <span style="font-family: var(--f-mono); font-size: 11px; color: #8a7f6f">03</span>
+                  <div>
+                    <b style="font-size: 12.5px">投递简历</b>
+                    <div style="font-size: 11px; color: #6b6155">
+                      把你的简历文件送给第三方公司，落库记录含岗位与时间
+                    </div>
+                  </div>
+                  <span class="effect outbound">外发</span><span class="tag jade">已同意</span>
+                </div>
+                <div class="risk-row" style="background: rgba(226, 84, 58, 0.05)">
+                  <span style="font-family: var(--f-mono); font-size: 11px; color: #8a7f6f">04</span>
+                  <div>
+                    <b style="font-size: 12.5px">遇到验证码或风控信号</b>
+                    <div style="font-size: 11px; color: #6b6155">
+                      立即暂停并通知你本人；本软件不做识别、不做规避<i class="an">4</i>
+                    </div>
+                  </div>
+                  <span class="tag celadon">不可关闭</span><span class="tag">系统保证</span>
+                </div>
+                <div class="paper-rule" style="margin: 14px 0 10px"></div>
+                <div class="row" style="align-items: flex-end; gap: 26px">
+                  <div style="flex: 1">
+                    <div class="sign-line"><span class="sign-hand">陈某某</span></div>
+                    <div class="paper-k" style="margin-top: 4px">签署人（本机账户名）</div>
+                  </div>
+                  <div style="width: 200px">
+                    <div class="sign-line">
+                      <span style="font-family: var(--f-mono); font-size: 11px; color: #6b6155; align-self: flex-end"
+                        >sha256 7f3a…c04</span
+                      >
+                    </div>
+                    <div class="paper-k" style="margin-top: 4px">签字落库哈希</div>
+                  </div>
+                </div>
+                <div class="row" style="margin-top: 14px">
+                  <span class="btn btn-sm btn-ghost" style="border-color: rgba(28, 26, 23, 0.3); color: #6b6155"
+                    >撤回签字并停用外发</span
+                  ><span class="spacer"></span
+                  ><span style="font-size: 11px; color: #8a7f6f">撤回后所有外发工具立刻从档位白名单中移除</span>
+                </div>
+              </div>
+
+              <!-- ⑤ 免确认白名单：只在全自动生效，必须写在这颗开关旁边 -->
+              <div class="grid-2" style="margin-top: 18px">
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">免确认白名单</span>
+                    <span class="tag">仅「全自动」档生效<i class="an">5</i></span>
+                    <span class="spacer"></span><span class="hint">17 只工具中 3 只</span>
+                  </div>
+                  <div>
+                    <div class="wl">
+                      <div>打开平台会话 <span class="tool-id">sessions.open</span></div>
+                      <span class="effect read">只读</span
+                      ><span class="btn btn-sm btn-ghost" style="color: var(--seal)">撤销</span>
+                    </div>
+                    <div class="wl">
+                      <div>搜索并抓取 JD <span class="tool-id">jd.capture.run</span></div>
+                      <span class="effect local">本地写</span
+                      ><span class="btn btn-sm btn-ghost" style="color: var(--seal)">撤销</span>
+                    </div>
+                    <div class="wl">
+                      <div>比对岗位缺口 <span class="tool-id">kb.gap.report</span></div>
+                      <span class="effect read">只读</span
+                      ><span class="btn btn-sm btn-ghost" style="color: var(--seal)">撤销</span>
+                    </div>
+                    <div class="wl" style="opacity: 0.55">
+                      <div>发送打招呼 <span class="tool-id">outbound.greet.perform</span></div>
+                      <span class="effect outbound">外发</span><span class="btn btn-sm btn-ghost">加白</span>
+                    </div>
+                  </div>
+                  <div class="card-foot">
+                    <span class="hint">白名单落 SQLite，重启仍算数；配置键会在重启即失<i class="an">6</i></span>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">额度闸门</span><span class="spacer"></span
+                    ><span class="tag jade">今日未触限</span>
+                  </div>
+                  <div class="card-body col" style="gap: 13px">
+                    <div
+                      class="gate"
+                      style="display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; font-size: 12px"
+                    >
+                      <span>打招呼</span><span class="num">8 / 20</span>
+                      <div class="bar-track" style="grid-column: 1/-1">
+                        <div class="bar-fill" style="width: 40%"></div>
+                      </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; font-size: 12px">
+                      <span>投递简历</span><span class="num">2 / 10</span>
+                      <div class="bar-track" style="grid-column: 1/-1">
+                        <div class="bar-fill" style="width: 20%"></div>
+                      </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; font-size: 12px">
+                      <span>抓取 JD</span><span class="num">31 / 120</span>
+                      <div class="bar-track" style="grid-column: 1/-1">
+                        <div class="bar-fill" style="width: 26%"></div>
+                      </div>
+                    </div>
+                    <div
+                      style="
+                        display: grid;
+                        grid-template-columns: 1fr auto;
+                        gap: 5px 10px;
+                        font-size: 12px;
+                        color: var(--amber);
+                      "
+                    >
+                      <span>单站点最小间隔</span><span class="num">45 s</span>
+                    </div>
+                    <hr class="hr" style="margin: 2px 0" />
+                    <div class="hint" style="font-size: 11px">
+                      闸门结论：<b style="color: var(--fg-2)">允许</b> · 拒绝时会返回原因码并停在计划卡，不静默跳过<i
+                        class="an"
+                        >7</i
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ⑧ 账本 + 审计：同一张表，两处入口共用，不再各写一份 -->
+              <div class="card" style="margin-top: 18px">
+                <div class="card-head">
+                  <span class="card-title">用量账本 · 动作审计</span>
+                  <span class="spacer"></span>
+                  <span class="tag">近 7 天</span><span class="btn btn-sm btn-ghost">只看外发</span
+                  ><span class="btn btn-sm btn-ghost">导出 CSV</span>
+                </div>
+                <table class="tbl ledger">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>动作</th>
+                      <th>效果</th>
+                      <th>目标</th>
+                      <th>谁批的</th>
+                      <th>证据</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="mono">01:08:12</td>
+                      <td>发送打招呼</td>
+                      <td><span class="effect outbound">外发</span></td>
+                      <td>高级前端工程师 · 某云计算</td>
+                      <td>你（盖印）</td>
+                      <td class="mono" style="color: var(--celadon)">快照 a7f3 · 回执</td>
+                    </tr>
+                    <tr>
+                      <td class="mono">01:07:55</td>
+                      <td>生成话术</td>
+                      <td><span class="effect local">本地写</span></td>
+                      <td>5 条候选</td>
+                      <td>计划内</td>
+                      <td class="mono">—</td>
+                    </tr>
+                    <tr>
+                      <td class="mono">01:07:31</td>
+                      <td>搜索并抓取 JD</td>
+                      <td><span class="effect read">只读</span></td>
+                      <td>BOSS · 上海 前端</td>
+                      <td>计划内</td>
+                      <td class="mono" style="color: var(--celadon)">列表截图</td>
+                    </tr>
+                    <tr>
+                      <td class="mono">01:06:40</td>
+                      <td>按 JD 定制简历</td>
+                      <td><span class="effect local">本地写</span></td>
+                      <td>v3 草稿</td>
+                      <td>你（盖印）</td>
+                      <td class="mono seal-cell" style="color: var(--seal)">事实校验失败 ×1</td>
+                    </tr>
+                    <tr>
+                      <td class="mono">00:52:03</td>
+                      <td>投递简历</td>
+                      <td><span class="effect outbound">外发</span></td>
+                      <td>某跨境电商</td>
+                      <td>你（盖印）</td>
+                      <td class="mono" style="color: var(--celadon)">PDF 指纹 3d1b</td>
+                    </tr>
+                    <tr>
+                      <td class="mono">00:51:44</td>
+                      <td>抓取 JD</td>
+                      <td><span class="effect read">只读</span></td>
+                      <td>杭州 · 前端</td>
+                      <td>定时任务</td>
+                      <td class="mono">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div class="card-foot">
+                  <span class="hint"
+                    >"谁批的"这一列是这套界面的核心：任何一行都能回答"这台机器替你发了东西吗、谁同意的"<i class="an"
+                      >8</i
+                    ></span
+                  >
+                </div>
+              </div>
+
+              <div class="grid-2" style="margin-top: 18px">
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">数据与脱敏</span><span class="spacer"></span
+                    ><span class="tag jade">默认开启</span>
+                  </div>
+                  <div class="card-body col" style="gap: 11px; font-size: 12px">
+                    <div class="row">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--jade)"
+                        stroke-width="1.7"
+                        width="13"
+                        height="13"
+                      >
+                        <path d="M20 6 9 17l-5-5" /></svg
+                      >Cookie 从不写入日志<span class="spacer tag">系统保证</span>
+                    </div>
+                    <div class="row">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--jade)"
+                        stroke-width="1.7"
+                        width="13"
+                        height="13"
+                      >
+                        <path d="M20 6 9 17l-5-5" /></svg
+                      >截图对手机号 / 姓名打码<span class="spacer btn btn-sm btn-ghost">查看样例</span>
+                    </div>
+                    <div class="row">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--jade)"
+                        stroke-width="1.7"
+                        width="13"
+                        height="13"
+                      >
+                        <path d="M20 6 9 17l-5-5" /></svg
+                      >LLM key 存系统安全存储<span class="spacer tag">不可导出</span>
+                    </div>
+                    <div class="row">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--jade)"
+                        stroke-width="1.7"
+                        width="13"
+                        height="13"
+                      >
+                        <path d="M20 6 9 17l-5-5" /></svg
+                      >渲染层 sandbox 开启<span class="spacer tag">不可关闭</span>
+                    </div>
+                    <hr class="hr" style="margin: 2px 0" />
+                    <span
+                      class="btn btn-sm btn-line"
+                      style="justify-content: center; color: var(--seal); border-color: rgba(226, 84, 58, 0.4)"
+                      >清空本机所有简历与岗位数据<i class="an">9</i></span
+                    >
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head">
+                    <span class="card-title">更新与许可</span><span class="spacer"></span
+                    ><span class="mono" style="font-size: 10.5px; color: var(--fg-4)">0.5.3</span>
+                  </div>
+                  <div class="card-body col" style="gap: 10px; font-size: 12px">
+                    <div class="row">
+                      <span class="stat-k">检查更新</span
+                      ><span class="spacer"><span class="tag jade">已是最新</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="stat-k">下载方式</span
+                      ><span class="spacer"><span class="tag">仅官方源 · 校验签名</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="stat-k">内置浏览器内核</span
+                      ><span class="spacer"><span class="tag">首次使用时自动拉取</span></span>
+                    </div>
+                    <div class="row">
+                      <span class="stat-k">许可证</span
+                      ><span class="spacer"><span class="evidence">查看 LICENSES</span></span>
+                    </div>
+                    <hr class="hr" style="margin: 2px 0" />
+                    <div class="hint" style="font-size: 11px">
+                      非商用许可依赖已被门禁拒绝入库；随包字体为 Noto SC 子集（OFL）。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <footer class="foot">
+          <span><b>consent</b> 已签字 3 项 · 哈希 7f3a…c04</span><span><b>whitelist</b> 3 / 17</span
+          ><span><b>gate</b> 允许</span><span class="spacer"></span><span>zh-CN</span><span>0.5.3</span>
+        </footer>
+      </div>
+    </div>
+
+    <ol class="notes">
+      <li>
+        <b>信任层自成一区。</b>今天这些内容散在 PrivacyNotice、ConsentCard、AgentPolicyPanel、UsagePanel、AuditSection
+        五处；用户想知道"它到底能替我做什么"时必须一跳一跳找。
+      </li>
+      <li><b>调试工具与信任设置分开。</b>工程台只读、不外发，因此不混进这一栏，避免"设置页很危险"的错觉。</li>
+      <li>
+        <b>签字落在纸上。</b>暖纸 + 手写字 +
+        骑缝朱砂章，与对话屏的盖印同一套材质语言：外发是同一种"按下去就有后果"的动作，视觉上也该是同一类。
+      </li>
+      <li><b>风控那条写成"不可关闭"。</b>§8.3 的红线要在界面上表现为没有开关，而不是一个默认勾选的复选框。</li>
+      <li><b>白名单每行都带效果芯片。</b>加白之前就知道这是只读还是外发；外发行默认半透明，需显式操作。</li>
+      <li><b>写明"落 SQLite 而非配置键"。</b>这条约束（配置层重启即失）直接印在页脚，防止后来者把它改回配置项。</li>
+      <li><b>闸门拒绝必须返回原因码</b>并在计划卡上停下——把这条行为写进界面文案，UI 与实现对得上。</li>
+      <li><b>账本与审计合并成一张表</b>，新增"谁批的"列。这是全套设计里最实用的一列：出事时先看这列。</li>
+      <li><b>危险操作留在信任区并标朱砂</b>，二次确认；不在对话里用一个"删掉所有数据"的自然语言指令就能触发。</li>
+    </ol>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

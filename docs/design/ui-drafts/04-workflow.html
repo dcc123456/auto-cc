@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>04 · 流程（工作流 / 定时 / 指标 / 审计）— auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap,
+      .notes {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+      .wf {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        flex: 1;
+        min-height: 0;
+      }
+      .plans {
+        border-right: 1px solid var(--line);
+        overflow: auto;
+      }
+      .plan-i {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .plan-i.on {
+        background: var(--ink-750);
+      }
+      .plan-i .t {
+        font-size: 12.5px;
+      }
+      .plan-i .m {
+        font-size: 10.5px;
+        color: var(--fg-4);
+        font-family: var(--f-mono);
+        display: flex;
+        gap: 8px;
+        margin-top: 2px;
+      }
+      .canvas-wrap {
+        position: relative;
+        min-width: 0;
+      }
+      .edges {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .runbar {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 16px;
+        border-top: 1px solid var(--line);
+        background: var(--ink-850);
+        flex-wrap: wrap;
+      }
+      .runbar .mono {
+        white-space: nowrap;
+      }
+      .six {
+        display: flex;
+        gap: 4px;
+      }
+      .six span {
+        font-size: 10.5px;
+        padding: 1px 7px;
+        border-radius: 20px;
+        border: 1px solid var(--line-strong);
+        color: var(--fg-4);
+        white-space: nowrap;
+      }
+      .six span.hit {
+        color: var(--fg);
+        border-color: var(--fg-3);
+        background: var(--ink-750);
+      }
+      .detail {
+        padding: 13px;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 5px 10px;
+        font-size: 11.5px;
+      }
+      .kv dt {
+        color: var(--fg-4);
+      }
+      .kv dd {
+        margin: 0;
+        color: var(--fg-2);
+      }
+      /* 浅色下连线与端点换深灰，否则 rgba(150,178,196) 在毡底上看不见 */
+      [data-theme='light'] .edges g[stroke] {
+        stroke: rgba(38, 44, 48, 0.38);
+      }
+      [data-theme='light'] .edges g[fill] {
+        fill: rgba(38, 44, 48, 0.6);
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 04</span>
+      <span class="sheet-name">流程</span>
+      <span class="sheet-desc">画布 · 计划库 · 定时 · 指标 · 审计 五件事，用"一条运行"把它们串起来而不是五块面板</span>
+    </div>
+
+    <div class="wrap">
+      <div class="app">
+        <header class="bar">
+          <span class="wordmark"
+            >auto<b>·</b>cc
+            <span style="font-family: var(--f-cjk); font-size: 12px; color: var(--fg-3); font-weight: 400"
+              >桌面工作台</span
+            ></span
+          >
+          <span class="bar-sub"
+            >搜岗位 · 生成话术 · 按岗位优化简历 ·
+            <b style="color: var(--seal); font-weight: 400">由你确认后投递</b></span
+          >
+          <div class="bar-right">
+            <div class="tier">
+              <span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+              ><span class="tier-opt">全自动</span>
+            </div>
+            <span class="btn btn-ghost btn-sm">EN</span><span class="btn btn-ghost btn-sm">隐私与条款</span>
+          </div>
+        </header>
+
+        <nav class="rail">
+          <div class="rail-label">工作面</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+            >对话<span class="nav-count">3</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg
+            >岗位<span class="nav-count">28</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M15 2v5h5M8 13h8M8 17h5" /></svg
+            >简历<span class="nav-count">4</span>
+          </div>
+          <div class="nav-item on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="3" y="3" width="6" height="6" rx="1" />
+              <rect x="15" y="15" width="6" height="6" rx="1" />
+              <path d="M9 6h6a2 2 0 0 1 2 2v6M6 9v6a2 2 0 0 0 2 2h6" /></svg
+            >流程<span class="nav-count">6</span>
+          </div>
+          <div class="rail-label">系统</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+            >信任与安全<span class="nav-count">12</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z"
+              /></svg
+            >工程台
+          </div>
+        </nav>
+
+        <main class="main">
+          <div class="view-head">
+            <div>
+              <div class="view-title">流程<i class="an">1</i></div>
+              <div class="view-note">运行中 · 第 4 / 7 步 · 已跑 02:11</div>
+            </div>
+            <div class="view-actions">
+              <span class="btn btn-sm btn-line">校验</span>
+              <span class="btn btn-sm btn-line">保存</span>
+              <span class="btn btn-sm btn-ghost">撤销 / 重做</span>
+              <span class="tag" style="border-color: rgba(224, 163, 63, 0.4); color: var(--amber)"
+                >运行中 · 画布只读<i class="an">2</i></span
+              >
+            </div>
+          </div>
+
+          <div class="wf">
+            <!-- 左：计划库 + 定时，两者本来就是"什么时候跑这条计划"的同一件事 -->
+            <div class="plans">
+              <div class="rail-label" style="padding: 10px 12px 6px">计划库<i class="an">3</i></div>
+              <div class="plan-i on">
+                <div class="t">找岗 → 打招呼（半自动）</div>
+                <div class="m"><span>7 节点</span><span>跑过 12 次</span></div>
+              </div>
+              <div class="plan-i">
+                <div class="t">每日早班扫岗</div>
+                <div class="m"><span>4 节点</span><span>定时 08:30</span></div>
+              </div>
+              <div class="plan-i">
+                <div class="t">按 JD 定制并投递</div>
+                <div class="m"><span>9 节点</span><span>外发 3 步</span></div>
+              </div>
+              <div class="plan-i">
+                <div class="t">内置 · 抓取并入库</div>
+                <div class="m"><span>3 节点</span><span style="color: var(--fg-4)">只读</span></div>
+              </div>
+              <div class="rail-label" style="padding: 14px 12px 6px">计划操作</div>
+              <div class="col" style="padding: 0 12px; gap: 6px">
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start">重命名</span>
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start">复制一份</span>
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start; color: var(--seal)"
+                  >删除（二次确认）</span
+                >
+              </div>
+              <hr class="hr" style="margin: 12px" />
+              <div class="rail-label" style="padding: 0 12px 6px">定时任务<i class="an">4</i></div>
+              <div style="padding: 0 12px" class="col">
+                <div class="row">
+                  <span class="dot" style="background: var(--jade)"></span
+                  ><span style="font-size: 11.5px">早班扫岗</span
+                  ><span class="spacer mono" style="font-size: 10px; white-space: nowrap">30 8 * * 1-5</span>
+                </div>
+                <div class="hint" style="font-size: 10.5px">下次：明天 08:30 · 上次已起跑</div>
+                <div class="row">
+                  <span class="dot" style="background: var(--fg-4)"></span
+                  ><span style="font-size: 11.5px; color: var(--fg-3)">周复盘报告</span
+                  ><span class="spacer mono" style="font-size: 10px">已停用</span>
+                </div>
+                <span class="btn btn-sm btn-line" style="justify-content: center">＋ 新建计划</span>
+              </div>
+            </div>
+
+            <!-- 中：算子图画布（三列摆放，节点坐标即连线坐标） -->
+            <div class="canvas-wrap canvas" style="overflow: auto">
+              <div style="position: relative; width: 492px; height: 470px">
+                <svg class="edges" style="width: 492px; height: 470px">
+                  <g stroke="rgba(150,178,196,.4)" stroke-width="1.4" fill="none">
+                    <path d="M156 59 H 168" />
+                    <path d="M316 59 H 328" />
+                    <path d="M402 82 V 112" />
+                    <path d="M402 174 V 210" />
+                    <path d="M156 233 H 168" />
+                    <path d="M316 233 H 328" />
+                    <path d="M242 272 V 300" />
+                    <path d="M242 362 V 392" />
+                    <path d="M82 82 C 82 150 82 150 82 210" />
+                  </g>
+                  <g stroke="var(--seal)" stroke-width="1.6" fill="none" stroke-dasharray="5 4">
+                    <path d="M402 256 V 300" />
+                  </g>
+                  <g fill="rgba(150,178,196,.65)">
+                    <circle cx="168" cy="59" r="2.6" />
+                    <circle cx="328" cy="59" r="2.6" />
+                    <circle cx="402" cy="112" r="2.6" />
+                    <circle cx="402" cy="210" r="2.6" />
+                    <circle cx="168" cy="233" r="2.6" />
+                    <circle cx="328" cy="233" r="2.6" />
+                    <circle cx="242" cy="300" r="2.6" />
+                    <circle cx="242" cy="392" r="2.6" />
+                    <circle cx="82" cy="210" r="2.6" />
+                  </g>
+                </svg>
+
+                <div class="node ok" style="left: 8px; top: 36px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--jade)"></span>打开平台会话</div>
+                  <div class="nid">sessions.open · 只读</div>
+                </div>
+                <div class="node ok" style="left: 168px; top: 36px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--jade)"></span>搜索并抓取 JD</div>
+                  <div class="nid">jd.capture.run · 4.2s</div>
+                </div>
+                <div class="node ok" style="left: 328px; top: 36px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--jade)"></span>读取详情入库</div>
+                  <div class="nid">browser.page.snapshot</div>
+                </div>
+                <div class="node running" style="left: 328px; top: 112px; width: 148px">
+                  <div class="nh">
+                    <span class="dot" style="background: var(--celadon)"></span>比对缺口 <i class="an">5</i>
+                  </div>
+                  <div class="nid">kb.gap.report · 00:14</div>
+                  <div style="margin-top: 6px" class="bar-track">
+                    <div class="bar-fill" style="width: 64%; background: var(--celadon)"></div>
+                  </div>
+                </div>
+                <div class="node" style="left: 8px; top: 210px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--fg-4)"></span>列出知识库实体</div>
+                  <div class="nid">kb.profile.list</div>
+                </div>
+                <div class="node on" style="left: 168px; top: 210px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--fg-2)"></span>生成打招呼话术</div>
+                  <div class="nid">outbound.script.generate</div>
+                  <div class="hint" style="font-size: 10.5px; margin-top: 4px">语气=克制 · ≤60 字</div>
+                </div>
+                <!-- 外发节点：朱砂虚线边框 + 停靠审批标记，画布上绝不会被误认为普通节点 -->
+                <div class="node gate" style="left: 328px; top: 210px; width: 148px; border-color: var(--seal)">
+                  <div class="nh"><span class="dot" style="background: var(--seal)"></span>发送打招呼</div>
+                  <div class="nid">outbound.greet.perform</div>
+                  <div class="tag seal" style="margin-top: 4px">停靠：需你盖印</div>
+                </div>
+                <div class="node gate" style="left: 328px; top: 300px; width: 148px; border-color: var(--seal)">
+                  <div class="nh"><span class="dot" style="background: var(--seal)"></span>投递简历</div>
+                  <div class="nid">outbound.deliver.perform</div>
+                  <div class="tag seal" style="margin-top: 4px">停靠：需你盖印</div>
+                </div>
+                <div class="node fail" style="left: 168px; top: 300px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--seal)"></span>按 JD 定制简历</div>
+                  <div class="nid">resume.generate.run · 失败</div>
+                  <div style="margin-top: 5px; font-size: 10.5px; color: var(--seal)">
+                    FACT_CHECK_FAILED<i class="an">6</i>
+                  </div>
+                </div>
+                <div class="node" style="left: 168px; top: 392px; width: 148px">
+                  <div class="nh"><span class="dot" style="background: var(--fg-4)"></span>导出 PDF</div>
+                  <div class="nid">resume.export</div>
+                </div>
+
+                <div style="position: absolute; left: 16px; bottom: 14px; display: flex; gap: 6px; align-items: center">
+                  <span class="btn btn-sm btn-ghost" style="background: var(--ink-800)">－</span>
+                  <span class="btn btn-sm btn-ghost" style="background: var(--ink-800)">＋</span>
+                  <span class="btn btn-sm btn-ghost" style="background: var(--ink-800)">适应</span>
+                  <span class="mono" style="font-size: 10px; color: var(--fg-4); margin-left: 4px"
+                    >78%<i class="an">7</i></span
+                  >
+                </div>
+
+                <div style="position: absolute; left: 8px; top: 296px; width: 148px" class="card">
+                  <div class="card-body" style="padding: 10px 12px; font-size: 11px; color: var(--fg-3)">
+                    <div class="row" style="gap: 6px">
+                      <span class="dot" style="background: var(--jade)"></span>成功
+                    </div>
+                    <div class="row" style="gap: 6px">
+                      <span class="dot" style="background: var(--celadon)"></span>运行中
+                    </div>
+                    <div class="row" style="gap: 6px">
+                      <span class="dot" style="background: var(--seal)"></span>失败 / 外发停靠
+                    </div>
+                    <div class="row" style="gap: 6px">
+                      <span class="dot" style="background: var(--fg-4)"></span>待运行
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ⑧ 运行控制条：runner 的五个动作 + 六态读数，永远在画布下面 -->
+          <div class="runbar">
+            <span class="btn btn-sm seal" style="padding: 4px 11px; font-size: 11.5px">盖印并继续（下一步外发）</span>
+            <span class="btn btn-sm btn-warn">暂停</span>
+            <span class="btn btn-sm btn-line">重试失败节点</span>
+            <span class="btn btn-sm btn-ghost" style="color: var(--seal)">中止</span>
+            <span class="spacer"></span>
+            <div class="six">
+              <span class="hit">就绪</span><span>排队</span><span>运行中</span><span>停靠待批</span><span>成功</span
+              ><span style="color: var(--seal); border-color: rgba(226, 84, 58, 0.4)">失败</span>
+            </div>
+            <span class="mono" style="font-size: 10.5px; color: var(--fg-4)">节点 4/7 · 重试 0 · 停因 —</span>
+          </div>
+        </main>
+
+        <aside class="kernel">
+          <div class="kernel-head">
+            <span class="dot" style="background: var(--celadon)"></span><span class="kernel-title">选中节点详情</span
+            ><span class="spacer"></span><span class="btn btn-sm btn-ghost">内核页面</span>
+          </div>
+          <div class="kernel-body">
+            <div class="detail card" style="padding: 0">
+              <div class="card-head">
+                <span class="card-title">比对岗位缺口</span><span class="effect read">只读</span
+                ><span class="spacer"></span><span class="tag celadon">运行中</span>
+              </div>
+              <div class="card-body">
+                <dl class="kv">
+                  <dt>节点 id</dt>
+                  <dd class="mono">kb.gap.report</dd>
+                  <dt>算子版本</dt>
+                  <dd class="mono">operator v3 · 入参 4 / 出参 2</dd>
+                  <dt>耗时</dt>
+                  <dd class="num">00:14（预算 00:60）</dd>
+                  <dt>重试</dt>
+                  <dd class="num">0 / 2</dd>
+                  <dt>停靠审批</dt>
+                  <dd>不需要（只读）</dd>
+                  <dt>输出</dt>
+                  <dd>缺口 3 项 → 下游 话术生成</dd>
+                </dl>
+                <hr class="hr" />
+                <div class="row">
+                  <span class="evidence"
+                    ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                      <path d="M14 2v6h6" /></svg
+                    >本节点证据 ref</span
+                  ><span class="spacer"></span><span class="btn btn-sm btn-line">看单节点回放</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑨ 失败节点就在同一栏长出证据，不需要跳去审计面板 -->
+            <div class="card" style="margin-top: 12px; border-color: rgba(226, 84, 58, 0.4)">
+              <div class="card-head">
+                <span class="card-title" style="color: var(--seal)">resume.generate.run 失败</span
+                ><span class="spacer"></span><span class="mono" style="font-size: 10px; color: var(--fg-4)">01:19</span>
+              </div>
+              <div class="card-body" style="font-size: 11.5px; color: var(--fg-2); line-height: 1.75">
+                <span class="mono" style="color: var(--seal)">FACT_CHECK_FAILED</span
+                >：拟稿里出现「主导组件库建设」，知识库证据只支持「参与，负责 4 个组件」。<i class="an">10</i>
+                <div class="row" style="margin-top: 9px">
+                  <span class="btn btn-sm btn-line">改写为有据的表述</span
+                  ><span class="btn btn-sm btn-ghost">跳过这段</span>
+                </div>
+              </div>
+            </div>
+
+            <hr class="hr" />
+            <div class="card-title" style="margin-bottom: 9px">五级漏斗 · 近 7 天<i class="an">11</i></div>
+            <div class="funnel">
+              <div class="funnel-row">
+                <span>搜索到岗位</span>
+                <div class="funnel-bar" style="width: 100%"></div>
+                <span class="num" style="text-align: right">214</span
+                ><span class="num" style="color: var(--fg-4)">100%</span>
+              </div>
+              <div class="funnel-row">
+                <span>打招呼</span>
+                <div class="funnel-bar" style="width: 38%"></div>
+                <span class="num" style="text-align: right">81</span
+                ><span class="num" style="color: var(--fg-4)">38%</span>
+              </div>
+              <div class="funnel-row heat">
+                <span>招聘方回复</span>
+                <div class="funnel-bar" style="width: 17%"></div>
+                <span class="num" style="text-align: right">22</span
+                ><span class="num" style="color: var(--seal)">27%</span>
+              </div>
+              <div class="funnel-row">
+                <span>投递成功</span>
+                <div class="funnel-bar" style="width: 9%"></div>
+                <span class="num" style="text-align: right">12</span
+                ><span class="num" style="color: var(--fg-4)">55%</span>
+              </div>
+              <div class="funnel-row">
+                <span>约面</span>
+                <div class="funnel-bar" style="width: 4%"></div>
+                <span class="num" style="text-align: right">3</span
+                ><span class="num" style="color: var(--fg-4)">25%</span>
+              </div>
+            </div>
+            <div class="hint" style="margin-top: 8px; font-size: 11px">
+              回复率是唯一被标红的环节 → 值得改的是话术，不是搜索条件<i class="an">12</i>
+            </div>
+          </div>
+        </aside>
+
+        <footer class="foot">
+          <span><b>runner</b> 运行中 · 4/7</span><span><b>sched</b> 2 条 · 1 启用</span
+          ><span><b>audit</b> 今日 37 行动作</span><span class="spacer"></span><span>zh-CN</span><span>0.5.3</span>
+        </footer>
+      </div>
+    </div>
+
+    <ol class="notes">
+      <li>
+        <b>"流程"这一个区收五块面板</b>：WorkflowPanel / WorkflowLabPanel / WorkflowPlans / SchedulePanel / MetricsPanel
+        / AuditSection。左栏是"什么时候跑什么"，中间是"怎么跑"，右栏是"跑得怎么样"。
+      </li>
+      <li><b>运行中画布只读</b>沿用既有约束，并把它写成一颗看得见的芯片而不是只在 tooltip 里。</li>
+      <li><b>计划库自带节点数 / 跑过几次 / 外发步数</b>，选择计划时就完成风险预判；内置计划显式标"只读"。</li>
+      <li>
+        <b>定时任务与计划库并列同栏</b>：cron 是"这条计划什么时候跑"，不该是独立面板。停用 /
+        删除走二次确认，按钮文案直说。
+      </li>
+      <li><b>节点可观测四要素</b>（状态、耗时、失败原因、可重试）在画布上就可见一部分，点选后右栏给全。</li>
+      <li><b>失败码直接印在节点上</b>，人不需要点进去才知道哪一步断了。</li>
+      <li><b>镜头控制 + "进度只由事件推"</b>：5.10-11 的机检条目对应的界面承诺——不许节点自己轮询 runner.state()。</li>
+      <li><b>运行控制条固定在画布下方</b>：开始 / 暂停 / 续跑 / 重试 / 中止 + 六态读数，永远在同一位置。</li>
+      <li><b>节点详情 + 失败证据同栏</b>，审计回看因此可以从"独立面板"降级为"任意节点的历史"。</li>
+      <li><b>失败原因写成人类语言</b>：先说结论（编造了"主导"），再说证据支持什么，最后给两个可执行动作。</li>
+      <li><b>漏斗只读、贴在运行旁边</b>：跑完一轮就地看转化，不需要切去诊断。</li>
+      <li><b>漏斗给结论句</b>：指出唯一标红的环节，并把"该改什么"说出来——指标面板最容易变成一堆没人看的数字。</li>
+    </ol>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

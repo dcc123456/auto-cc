@@ -1,0 +1,160 @@
+# P6 · 界面设计系统落地（墨案 / Ink Desk）— 实施计划
+
+> 版本：v1.0　状态：**进行中**
+> 设计基线：`docs/design/ui-drafts/**`（10 张画面稿 + 控件状态机 + 逐控件点击后果表 + 浮层画面稿 + 编排画面稿），
+> 评审裁定 Q1–Q6 见 `docs/design/ui-drafts/README.md` 的裁定回执表。
+> 本计划把已评审的设计稿翻译成可执行的代码改动，**不新增任何业务逻辑**：
+> 面板的数据来源、IPC 调用、闸门判定一律保持原样，只改视觉层与信息架构。
+
+---
+
+## 1. 目标与边界
+
+**目标**：让 app 的界面达到设计稿的四件事——
+
+1. 一套有材质的配色（墨案深色 / 毡案浅色），三色效果归属贯穿全 app；
+2. 一条清晰的分区导航（对话是第一入口，岗位 / 简历 / 流程 / 信任是四张工作台，诊断低一档）；
+3. 一套统一的控件行为（五态：默认 / 悬停 / 按下 / 进行中 / 结果），点击后果只允许六种形态；
+4. 每个可点的东西都有 `data-action` 与键盘等价，harness 能点到、能截图取证。
+
+**边界（明确不做）**：
+
+- 不改 `packages/**` 里除 `renderer` 之外的任何包；不动 service、IPC 契约、工具注册表。
+- 不新增页面能力、不新增数据源；设计稿里有但当前没有后端支撑的控件（例如"批量外发确认"的批量选择）
+  只在**已有能力**的范围内做样式，能力缺失的条目在 spec 里标 `[ ]` 而不是伪造。
+- 不引入 CSS-in-JS、不引入第二套样式入口（AGENTS.md §5.1，机检在 `scripts/check-renderer-conventions.ts` 第 1 节）。
+
+---
+
+## 2. 设计基线 → 代码的对应关系
+
+| 设计稿                   | 落地位置                                                                        | 片号 |
+| ------------------------ | ------------------------------------------------------------------------------- | ---- |
+| `assets/shared.css`      | `packages/renderer/src/globals.css` 的 `@theme` 令牌块 + 极小组件层             | 6.1  |
+| 浅色（毡案）token 块     | 同文件 `[data-theme='light']` 覆盖块                                            | 6.1  |
+| `07-controls.html`       | `packages/renderer/src/ui/` 控件原件（Button / IconButton / Tag / Effect / …）  | 6.2  |
+| `09-dialogs.html`        | `ui/` 浮层原件（InlineEdit / Receipt / SidePanel / Drawer / Modal / ArmButton） | 6.2  |
+| `01`–`06` 外壳与信息架构 | `App.tsx`（导航 + 四张工作台归位 + 底部状态条 + 右栏）                          | 6.3  |
+| `01-chat.html` 对话屏    | `ChatPanel.tsx` 视觉层换装                                                      | 6.4  |
+| `02/03` 岗位·简历屏      | `JobLabPanel` / `ResumePanel` 等归位后的头部与列表样式                          | 6.4  |
+| `10-orchestration`       | `WorkflowCanvas` / `OperatorPalette` / `WorkflowNodeDetail` 的画布与检视器样式  | 6.5  |
+
+---
+
+## 3. 选型与证据（AGENTS.md §6.1/§6.2）
+
+### 3.1 令牌怎么进 Tailwind：`@theme` + 运行时覆盖，实测过
+
+- **候选**：① 手写 `theme.css` 第二份入口；② `@theme` 定义令牌；③ JS 侧 `tailwind.config` 的 `theme.extend`。
+- **否决 ①**：`scripts/check-renderer-conventions.ts:52` 只允许 `globals.css` 一个样式文件，第二份入口直接 lint 失败。
+- **否决 ③**：当前装的是 Tailwind v4（`packages/renderer/package.json` 的 `tailwindcss ^4.0.0` + `@tailwindcss/vite`），
+  v4 的官方口径是把令牌写进 CSS 的 `@theme`，JS 配置不再是主路径；项目里没有 `tailwind.config.*` 文件。
+- **采用的机制**：`@theme` 里的 `--color-*` 会同时生成 utility **并**以 CSS 变量形式被 utility 引用。
+  因此 `[data-theme='light']` 里重新赋值同一批变量，就能在不改一行业务 class 的前提下整屏换主题。
+- **本机实测（2026-10-06，非文档转述）**：现有构建产物 `packages/renderer/dist/assets/index-fEm4nybQ.css` 里
+  可以 grep 到 `var(--color-slate-900)` / `var(--color-slate-950)`——证明 utility 走的是变量间接引用，
+  运行时覆盖成立。这条是 6.1 全部做法的前提，若在后续版本失效，验收以 `grep` 该产物为判据。
+
+### 3.2 存量 class 的处理：重映射色阶，不逐文件重写
+
+全 app 的面板现在都用 `slate-*` 阶（约 20 个面板文件）。两条路：
+
+- **A**：逐文件把 `slate-*` 换成 `ink-*`——一次改动两千多处，diff 淹没真实变更，且极易漏。
+- **B（采用）**：把设计稿的墨案色阶**映射到 slate 阶上**（`--color-slate-50…950` 重新定义为 ink 的等亮度档），
+  同时新增语义令牌 `--color-seal / jade / amber / celadon / paper`。整个 app 一次换装，
+  新代码用语义令牌，存量代码不动。AGENTS.md §2 的"以逻辑复用为荣"在这里读作"不复制两千处 class"。
+- 代价与补偿：`slate` 这个名字不再表达真实色相，读代码时靠 6.1 的注释与 spec 的映射表对齐；
+  语义色（三色效果归属）必须走新令牌，不许再用 slate 表达风险。
+
+### 3.3 图标：lucide-react 现有组件，逐个核对过名字
+
+设计稿的"盖章"材质语言需要的图标，已在 `packages/renderer/node_modules/lucide-react/dist/lucide-react.d.ts`
+里逐个 grep 确认存在（§6.2 要求读 `.d.ts` 而不是抄博客）：
+
+| 设计稿语义  | 采用                      | 备选（同类，若视觉不合可换）    |
+| ----------- | ------------------------- | ------------------------------- |
+| 盖章 / 签字 | `Stamp` ✅                | `BadgeCheck` / `FileCheck`      |
+| 风险确认    | `ShieldAlert` ✅          | `ShieldCheck` / `TriangleAlert` |
+| 外发 / 投递 | `Send`（存量已在用）      | `Inbox` / `Mail`                |
+| 已读 / 已核 | `BadgeCheck` ✅           | `FileCheck` / `CircleCheck`     |
+| 等人 / 待办 | `UserCheck` ✅            | `ListChecks` / `Inbox`          |
+| 进行中      | `LoaderCircle`（spinner） | `Activity`                      |
+| 右栏收起    | `PanelRight`              | `SidebarRight` / `Rows3`        |
+
+**核对结果里三个名字不存在，已按 §5.4 换候选而非自绘 SVG**：`LoaderHistory`、`PanelRightLeft`、
+`SplitSquareHorizontal`——这三个是设计稿绘制阶段的草拟名，代码里一律用上表的实存名。
+禁止手写 SVG / 自绘 path 由 eslint 机检（`eslint.config.js`，§10 表已落地）。
+
+### 3.4 主题偏好的存储：localStorage，与隐私声明同一条路
+
+- 候选：① 新配置键走 `plugins.saveConfig`；② localStorage。
+- **否决 ①**：AGENTS.md §9 已实测——配置层只写内存运行时层，**从不落盘**（重启即失），
+  且任何配置变更都会重建注入它的下游服务。主题偏好是"跨重启仍然算数的人的表态"，配置层给不了。
+- **采用 ②**：与 `usePrivacyNotice` 同一存法（`PrivacyNotice.tsx`），不构成"第二套状态存储"，
+  因为它只是渲染层 UI 偏好，不是业务事实；不新增迁移号段。
+
+### 3.5 原件放哪：`src/ui/` 一个目录，不新增包
+
+AGENTS.md §4.3 要求新功能先归入已有包——全部落在 `packages/renderer`。
+目录内固定分区（`src/index.ts` 是唯一出口的规则针对跨包，渲染层是应用本体，`ui/` 只被同包引用）。
+五态与浮层的**动画关键帧**只能写在 `globals.css`（Tailwind 的 `--animate-*` 需要 `@keyframes` 同处定义），
+这是 §5.2 允许的那一个 `@layer` 例外，在 plan 里登记、在 spec 里逐条验收，不得扩散成第二份样式文件。
+
+---
+
+## 4. 分片与落点
+
+| 片号 | 内容                                                                              | 文件                                                                  |
+| ---- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 6.1  | 令牌层：墨案 / 毡案、三色效果归属、字体阶、圆角与阴影、`--kernel-view-width` 保留 | `globals.css`                                                         |
+| 6.2  | 控件与浮层原件：五态按钮、Tag、Banner、Toast、Drawer、Modal、行内编辑、两步 armed | 新增 `packages/renderer/src/ui/*.tsx`                                 |
+| 6.3  | 外壳：四张工作台归位 + 底部状态条 + 主题切换 + 右栏收/开                          | `App.tsx`、`locales/{zh-CN,en}.json`                                  |
+| 6.4  | 主视口换装：对话屏（第一入口）+ 岗位屏头部                                        | `ChatPanel.tsx`、`JobLabPanel.tsx`                                    |
+| 6.5  | 编排画布换装：调色板按效果色分组、检视器、问题条                                  | `OperatorPalette.tsx`、`WorkflowCanvas.tsx`、`WorkflowNodeDetail.tsx` |
+
+**执行顺序**：6.1 → 6.2 → 6.3 是一个整体（令牌没有原件就无处可用，原件没有外壳就看不见），
+6.4 / 6.5 是逐屏换装，可以在 6.1–6.3 收口后分开走。一片一提交（§1.4），不夹带。
+
+> **执行状态（2026-10-06）**：6.1 / 6.2 / 6.3 已落地并按条目验收（读数与 `[!]` 原因见 spec 的落地记录）；
+> 6.4 / 6.5 未开始。6.2 的原件目前只有 `DeskButton` 有消费者，其余原件的接入是 6.4 的第一件事——
+> 若 6.4 长期不落地，这些未接入的原件按 AGENTS.md §2.4 应当删除，不许长期挂着。
+
+---
+
+## 5. 设计不变式 → 代码不变式
+
+| 设计稿不变式                 | 代码侧要求                                                                   |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| 对话是第一入口               | `App.tsx` 默认 view 仍是 `chat`（§5.9，spec 1.11-01 不许回退）               |
+| 切换视图不卸载               | 每个工作台一个 `<section>`，只改 `display`（spec 1.10-01）                   |
+| 诊断比主视图低一档           | 诊断入口的字号 / 对比度低于四张工作台（spec 1.10-07）                        |
+| 外发必经闸门                 | 外发按钮只做样式，点击仍走既有 `useBridgeAction` → `entitlement.gate`        |
+| 档位不可自提升               | 档位指示是只读展示，不新增任何"提升档位"的样式入口（spec 5.3）               |
+| 六类点击后果，不许第七类     | 浮层只用 `ui/` 里的原件组件，禁止就地散落 `alert` / 自制遮罩                 |
+| 每只可点控件有 `data-action` | 原件组件强制要求 `action` prop；存量按钮逐个补                               |
+| 三色效果归属不许串           | seal=外发/风险/签字，jade=已读已核，amber=本机写入/等人，celadon=进行中/证据 |
+
+---
+
+## 6. 风险与回退
+
+1. **slate 重映射会影响所有存量截图**（`docs/acceptance/**` 是历史证据，不重拍、不改写）。
+   判据只看当前视口，历史证据按 §7.5 保持原样。
+2. **浅色主题在嵌内核视图槽位上会露白**：视图槽位是占位文案，不是我们的 DOM；
+   槽位背景跟随 token，内核真实页面内容不受控（§9 的 2.1 补片：`shot --url 5173` 截不到原生子视图）。
+3. **信息架构改动会打到 harness 选择器**：`scripts/smoke-dist.ts` 依赖 `[data-view="chat"]`（第 270/276 行）。
+   本片保留 `data-view` 属性名与 `chat` 取值，四张工作台用新 `data-view` 值追加，不重命名既有的。
+4. **i18n 缺键即 lint 失败**（§10 已落地）：新增文案必须 zh-CN + en 同时补齐，占位符实参齐不齐也查。
+5. 若 6.1 的运行时覆盖在某次 Tailwind 升级后失效：回退方案是两套 `@theme` 由构建期切换，
+   但那会引入第二份样式入口 → 触发 §5.1 例外申请，届时先停下来提冲突，不自行打破规则（文件头约定）。
+
+---
+
+## 7. 验收方式
+
+- 门禁四件套：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`，
+  输出重定向到 `tmp/` 再看退出码（§9 的 5.4-c：门禁结论不许管道接 `tail`）。
+- V 类条目走 `pnpm harness`（CDP 10222），`shot/eval/click` 一律带 `--url 5173`（§9），
+  深浅两主题各取一遍，收图前 `md5 -q | sort | uniq -d` 去重（§9 的 5.10-18）。
+- 正式证据只入 `docs/acceptance/06-ui-ink-desk/<条目ID>-*.png`。
+- 真实招聘平台不进测试面（§7.2）；主题与外壳的验收用本地页面即可。

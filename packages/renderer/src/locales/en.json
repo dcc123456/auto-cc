@@ -7,8 +7,42 @@
     },
     "nav": {
       "chat": "Chat",
-      "workflow": "Workflow",
-      "diagnostics": "Diagnostics"
+      "jobs": "Jobs",
+      "resume": "Resume",
+      "workflow": "Flows",
+      "trust": "Trust",
+      "diagnostics": "Diagnostics",
+      "aria": "Workspace navigation"
+    },
+    "theme": {
+      "toLight": "Felt Desk (light)",
+      "toDark": "Ink Desk (dark)"
+    },
+    "statusbar": {
+      "idle": "No run",
+      "pointer": "Login and quota live in Trust"
+    },
+    "desk": {
+      "jobs": {
+        "title": "Jobs",
+        "hint": "Search listings, read them, pick the few worth a message"
+      },
+      "resume": {
+        "title": "Resume",
+        "hint": "Local resume and knowledge base, filled against each job"
+      },
+      "workflow": {
+        "title": "Flows",
+        "hint": "One line from search to delivery, pausable and resumable"
+      },
+      "trust": {
+        "title": "Trust",
+        "hint": "Sessions, quota, funnel and audit — check before anything leaves this machine"
+      },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "hint": "Self-test benches: bridge, assembly, locator lab. You do not need this daily"
+      }
     },
     "status": {
       "heading": "Main process status",

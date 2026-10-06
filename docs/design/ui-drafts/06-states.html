@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>06 · 状态与断点 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap,
+      .notes {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .tile {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        background: var(--ink-900);
+      }
+      .tile-cap {
+        padding: 9px 13px;
+        border-bottom: 1px solid var(--line);
+        background: var(--ink-850);
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .tile-num {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--seal);
+      }
+      .tile-t {
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+      .tile-when {
+        font-size: 10.5px;
+        color: var(--fg-4);
+        margin-left: auto;
+        font-family: var(--f-mono);
+      }
+      .tile-body {
+        padding: 16px;
+        position: relative;
+        min-height: 236px;
+      }
+      .frame {
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--ink-850);
+        overflow: hidden;
+      }
+      .frame-bar {
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--ink-800);
+        font-size: 10.5px;
+        color: var(--fg-4);
+        display: flex;
+        gap: 7px;
+        align-items: center;
+      }
+      .frame-body {
+        padding: 12px;
+      }
+      .rule {
+        font-size: 11px;
+        color: var(--fg-3);
+        padding: 9px 13px;
+        border-top: 1px solid var(--line);
+        background: linear-gradient(var(--ink-850), var(--ink-900));
+        line-height: 1.7;
+      }
+      .rule b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .why {
+        font-family: var(--f-cjk-display);
+        color: var(--celadon);
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 06</span>
+      <span class="sheet-name">状态与断点</span>
+      <span class="sheet-desc">十个"不出事就看不到"的面：可用性成色全在这张稿上，主流程只是它的背景</span>
+    </div>
+
+    <div class="wrap">
+      <div class="tiles">
+        <!-- 1 首启动 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 01</span><span class="tile-t">首启动 · 隐私声明未表态</span
+            ><span class="tile-when">冷启动</span>
+          </div>
+          <div class="tile-body">
+            <div class="scrim" style="border-radius: var(--r-md)">
+              <div class="dialog" style="width: 400px">
+                <div class="dialog-head"><div class="dialog-title">在你把简历交给我之前</div></div>
+                <div class="dialog-body" style="font-size: 12px; color: var(--fg-2); line-height: 1.8">
+                  <div class="row" style="gap: 6px; margin-bottom: 8px">
+                    <span class="effect read">只读</span><span class="effect local">本地写</span
+                    ><span class="effect outbound">外发</span
+                    ><span class="hint">三档效果从此贯穿整个 app<i class="an">1</i></span>
+                  </div>
+                  · 简历、岗位、日志全存本机，不上传<br />· LLM 只读你显式勾选的知识库条目<br />·
+                  所有外发动作必须你亲自盖印<i class="an">2</i>
+                </div>
+                <div class="dialog-foot">
+                  <span class="btn btn-sm btn-ghost">读全文</span
+                  ><span class="seal" style="padding: 5px 12px; font-size: 11.5px">我已了解，进入</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>为什么盖住：</b
+            >不表态就进不去（5.9-06）。但这一层必须同时完成一件事——教会用户后面每一个界面都会看到的三色效果芯片，否则第一屏只是合规仪式。
+          </div>
+        </div>
+
+        <!-- 2 内核待下载 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 02</span><span class="tile-t">浏览器内核待下载</span
+            ><span class="tile-when">首次用自动化</span>
+          </div>
+          <div class="tile-body">
+            <div class="frame">
+              <div class="frame-bar"><span class="dot" style="background: var(--amber)"></span>准备自动化能力</div>
+              <div class="frame-body">
+                <div style="font-size: 12.5px; margin-bottom: 6px">内置内核 62.4 MB · 下载中<i class="an">3</i></div>
+                <div class="bar-track" style="height: 6px"><div class="bar-fill amber" style="width: 57%"></div></div>
+                <div class="row" style="margin-top: 6px">
+                  <span class="mono" style="font-size: 10.5px">57% · 约 40 s</span><span class="spacer"></span
+                  ><span class="mono" style="font-size: 10.5px; color: var(--jade)">签名校验通过</span>
+                </div>
+                <hr class="hr" />
+                <div class="hint" style="font-size: 11px">
+                  下载期间这几件事照常能用：<span class="tag">知识库</span><span class="tag">按 JD 定制简历</span
+                  ><span class="tag">导出 PDF</span>
+                </div>
+                <div class="banner warn" style="margin-top: 10px">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="14" height="14">
+                    <path d="M12 9v4M12 17h.01" />
+                    <circle cx="12" cy="12" r="10" /></svg
+                  >网络失败会自动重试 3 次，之后给你离线包路径
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>用户零手动下载</b
+            >是主计划定的硬约束（§1.4）。界面要同时说清两件事：不需要你操作，以及<b>现在还有什么能玩</b>，避免首启动看到进度条就以为整机卡住。
+          </div>
+        </div>
+
+        <!-- 3 登录过期 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 03</span><span class="tile-t">登录态过期</span
+            ><span class="tile-when">跑到一半</span>
+          </div>
+          <div class="tile-body">
+            <div class="banner seal" style="margin-bottom: 10px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                <path d="M12 9v4M12 17h.01" /></svg
+              >任务已在安全点停下：第 3 / 5 步未发出<i class="an">4</i>
+            </div>
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="dot" style="background: var(--seal)"></span>内核 · BOSS 直聘 · 分区 persist:boss
+              </div>
+              <div class="frame-body" style="display: flex; gap: 12px; align-items: center">
+                <div
+                  style="
+                    width: 96px;
+                    height: 96px;
+                    border: 1px solid var(--line-strong);
+                    border-radius: 6px;
+                    background: repeating-linear-gradient(45deg, #1a232a, #1a232a 4px, #141c22 4px, #141c22 8px);
+                    display: grid;
+                    place-items: center;
+                    font-size: 10px;
+                    color: var(--fg-4);
+                  "
+                >
+                  二维码
+                </div>
+                <div style="min-width: 0; font-size: 12px; line-height: 1.8; color: var(--fg-2)">
+                  请你本人扫码。<br /><span class="hint">我不会代你登录，也不会保存你的密码。</span>
+                  <div class="row" style="margin-top: 8px">
+                    <span class="btn btn-sm btn-line">已扫好，继续第 3 步</span
+                    ><span class="btn btn-sm btn-ghost">今天先不弄</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>过期不是错误，是交接。</b
+            >界面必须说清"停在哪、还能不能续上"，并把"不代登录"写在最显眼处；续跑按钮直接回到那一步，不用重新起计划。
+          </div>
+        </div>
+
+        <!-- 4 风控 / 验证码 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 04</span><span class="tile-t">遇到验证码 / 风控信号</span
+            ><span class="tile-when">抓取或外发中</span>
+          </div>
+          <div class="tile-body">
+            <div
+              class="kernel takeover"
+              style="
+                border: 1px solid var(--seal);
+                border-radius: var(--r-md);
+                padding: 0;
+                box-shadow: inset 3px 0 0 var(--seal);
+              "
+            >
+              <div class="kernel-head" style="border-radius: 0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--seal)" stroke-width="1.8" width="14" height="14">
+                  <path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8" />
+                  <path
+                    d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"
+                  /></svg
+                ><span class="kernel-title" style="color: var(--seal)">已交给你 · 00:41</span
+                ><span class="spacer"></span><span class="btn btn-sm btn-ghost">交还页面</span>
+              </div>
+              <div style="padding: 12px">
+                <div class="hint" style="font-size: 11px">
+                  原因：<span class="mono">risk-captcha</span> · agent 已暂停全部动作<i class="an">5</i>
+                </div>
+                <div class="banner seal" style="margin-top: 9px">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4M12 16h.01" /></svg
+                  >我不识别、不规避验证码。你处理完点"交还"，我从停下的那一步接着看。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>这是整套 UI 唯一一次"机器主动认输"</b>，所以要做成物理可见的状态：右栏整条描朱砂、计时、agent
+            全停。任何"自动尝试通过"的实现都必须在这里被界面拒绝。
+          </div>
+        </div>
+
+        <!-- 5 闸门拒绝 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 05</span><span class="tile-t">额度闸门拒绝</span
+            ><span class="tile-when">按下盖印之后</span>
+          </div>
+          <div class="tile-body">
+            <div class="frame">
+              <div class="frame-bar"><span class="dot" style="background: var(--seal)"></span>打招呼 · 第 21 位</div>
+              <div class="frame-body">
+                <div class="row" style="align-items: flex-start; gap: 10px">
+                  <div class="seal off" style="padding: 5px 11px; font-size: 11.5px; text-decoration: none">
+                    已被闸门拦下<i class="an">6</i>
+                  </div>
+                  <div style="font-size: 11.5px; color: var(--fg-2); line-height: 1.75">
+                    今日打招呼上限 <b class="num">20</b> 已用完。<br /><span
+                      class="mono"
+                      style="font-size: 10.5px; color: var(--fg-4)"
+                      >ENTITLEMENT_EXHAUSTED · 重置 00:00</span
+                    >
+                  </div>
+                </div>
+                <hr class="hr" />
+                <div class="row wrap" style="gap: 6px">
+                  <span class="btn btn-sm btn-line">排进明天 08:30 的定时</span>
+                  <span class="btn btn-sm btn-line">只生成话术，你自己发</span>
+                  <span class="btn btn-sm btn-ghost">跳过这位</span>
+                </div>
+                <div class="hint" style="margin-top: 10px; font-size: 11px">
+                  闸门从不静默跳过：这一行的三个候选，就是这次拒绝的全部出路。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>拒绝必须带出路。</b>频率上限是平台风控的一部分、不是可选项（§8.3）；界面把它写成"今天不能，但有 3
+            条明天能"，用户才不会去点第五次重试。
+          </div>
+        </div>
+
+        <!-- 6 节点失败 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 06</span><span class="tile-t">节点失败 · 带证据</span
+            ><span class="tile-when">工作流 / agent 都通用</span>
+          </div>
+          <div class="tile-body">
+            <div class="tool outbound">
+              <div class="tool-head">
+                <span class="tool-name">按这份 JD 定制简历</span><span class="tool-id">resume.generate.run</span
+                ><span class="spacer"></span
+                ><span class="tag" style="color: var(--seal); border-color: rgba(226, 84, 58, 0.4)">失败 00:31</span>
+              </div>
+              <div class="tool-detail" style="flex-direction: column; align-items: flex-start; gap: 7px">
+                <div>
+                  <span class="mono" style="color: var(--seal)">FACT_CHECK_FAILED</span> —
+                  拟稿写了「主导组件库建设」，知识库证据只支持「参与，负责 4 个组件」<i class="an">7</i>
+                </div>
+                <div class="row wrap" style="gap: 6px; width: 100%">
+                  <span class="btn btn-sm btn-line">改成有据的表述</span>
+                  <span class="btn btn-sm btn-ghost">删掉这句</span>
+                  <span class="btn btn-sm btn-ghost">我手改</span>
+                  <span class="evidence" style="margin-left: auto">看证据条目 · 项目 3</span>
+                </div>
+              </div>
+            </div>
+            <div class="hint" style="margin-top: 9px; font-size: 11px">
+              失败原因永远是"哪句话、违反了哪条事实、可以怎么改"，而不是堆栈。
+            </div>
+          </div>
+          <div class="rule">
+            <b>简历内容事实锁定</b>（§8.4）在界面上的落点。三个动作里必须包含"删掉"，否则用户会以为改表述=继续夸大。
+          </div>
+        </div>
+
+        <!-- 7 空态 + stale -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 07</span><span class="tile-t">空态 / 索引过期</span
+            ><span class="tile-when">第一次用 · 或刚导入简历</span>
+          </div>
+          <div class="tile-body">
+            <div class="grid-2" style="gap: 10px">
+              <div class="frame">
+                <div class="frame-bar"><span class="dot" style="background: var(--fg-4)"></span>岗位库</div>
+                <div class="frame-body">
+                  <div class="empty" style="padding: 20px 10px">
+                    <div class="mark">空</div>
+                    <div style="font-size: 12px; color: var(--fg-2)">还没有抓过岗位</div>
+                    <div class="hint" style="margin: 6px 0 10px; font-size: 11px">说一句你想要什么样的工作就行</div>
+                    <span class="btn btn-sm btn-line" style="margin: 0 auto">找找「上海 前端 3 年」</span>
+                  </div>
+                </div>
+              </div>
+              <div class="frame">
+                <div class="frame-bar"><span class="dot" style="background: var(--amber)"></span>知识库索引</div>
+                <div class="frame-body" style="font-size: 11.5px; color: var(--fg-2); line-height: 1.8">
+                  BM25 就绪 · <span style="color: var(--amber)">向量落后 1 份</span><i class="an">8</i><br />
+                  <span class="hint" style="font-size: 11px">缺口比对会用旧向量结果，可能漏匹配。</span>
+                  <div class="row" style="margin-top: 8px">
+                    <span class="btn btn-sm btn-line">补建向量</span
+                    ><span class="mono" style="font-size: 10px; color: var(--fg-4)">kb.profile.syncVectors</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>空态给一句话入口、stale 给一句结论。</b>"落后 1 份"必须翻译为"结果可能漏"，否则用户不知道该不该管它。
+          </div>
+        </div>
+
+        <!-- 8 无内核会话 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 08</span><span class="tile-t">NO_KERNEL_SESSION</span
+            ><span class="tile-when">改了配置之后</span>
+          </div>
+          <div class="tile-body">
+            <div class="frame">
+              <div class="frame-bar"><span class="dot" style="background: var(--amber)"></span>页面动作不可用</div>
+              <div class="frame-body">
+                <div class="mono" style="font-size: 11px; color: var(--amber)">
+                  NO_KERNEL_SESSION<i class="an">9</i>
+                </div>
+                <div class="hint" style="font-size: 11.5px; margin-top: 5px">
+                  上一次改动配置把内核视图关掉了（改配置会重建下游服务）。动作没有丢，页面没开而已。
+                </div>
+                <div class="row" style="margin-top: 10px">
+                  <span class="btn btn-sm btn-line">重开会话并继续</span
+                  ><span class="btn btn-sm btn-ghost">先看做到哪了</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>本项目实测踩过的坑</b>（配置热改 → 会话关闭 →
+            页面操作全失败）。错误文案直接把因果说出来，比让人去猜"是不是登录掉了"省一整轮排查。
+          </div>
+        </div>
+
+        <!-- 9 暂停超时 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 09</span><span class="tile-t">等人表态超时</span
+            ><span class="tile-when">半自动 · 你去倒水了</span>
+          </div>
+          <div class="tile-body">
+            <div
+              class="pause-card banner warn"
+              style="flex-direction: column; align-items: stretch; gap: 8px; background: var(--amber-wash)"
+            >
+              <div class="row">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="14" height="14">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" /></svg
+                ><span style="font-size: 12px">已暂停 · <span class="mono">PAUSE_TIMEOUT</span>（等了 90 s）</span
+                ><span class="spacer mono" style="font-size: 10.5px">01:09:14</span>
+              </div>
+              <div class="hint" style="font-size: 11.5px">
+                停在"向第 1 / 5 位发送打招呼"之前。什么都没发出去。<i class="an">10</i>
+              </div>
+              <div class="row">
+                <span class="seal" style="padding: 5px 11px; font-size: 11.5px">同意这一步</span
+                ><span class="btn btn-sm btn-warn">继续等我看看</span
+                ><span class="btn btn-sm btn-ghost" style="color: var(--seal)">叫停</span>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>超时是"安全"而不是"失败"。</b
+            >文案必须先给结论（没发出去），再给三个动作；"继续等我看看"把计时器重置权交回人。
+          </div>
+        </div>
+
+        <!-- 10 LLM 不可达 -->
+        <div class="tile">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 10</span><span class="tile-t">LLM 不可达 / 额度用尽</span
+            ><span class="tile-when">起草计划时</span>
+          </div>
+          <div class="tile-body">
+            <div class="frame">
+              <div class="frame-bar"><span class="dot" style="background: var(--fg-4)"></span>模型连接</div>
+              <div class="frame-body">
+                <div class="row">
+                  <span class="tag" style="color: var(--seal); border-color: rgba(226, 84, 58, 0.4)">请求失败 ×3</span
+                  ><span class="mono" style="font-size: 10.5px; color: var(--fg-4)">退避中 · 下一次 00:24</span>
+                </div>
+                <div class="hint" style="font-size: 11.5px; margin-top: 8px">
+                  起草计划需要模型，但<b style="color: var(--fg-2)">本地功能全都能用</b>：抓来的 JD 还在库里，简历排版与
+                  PDF 轻编辑不依赖模型<i class="an">11</i>。
+                </div>
+                <div class="row" style="margin-top: 10px">
+                  <span class="btn btn-sm btn-line">手动挑 5 条继续</span
+                  ><span class="btn btn-sm btn-ghost">换一份 key</span><span class="btn btn-sm btn-ghost">看诊断</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rule">
+            <b>把"什么还能用"说清楚</b
+            >是这类工具的底线：模型掉线不等于整机报废，退避读数（含句柄类判据）也应该在这一层可见。
+          </div>
+        </div>
+
+        <!-- 工程台入口 -->
+        <div class="tile" style="grid-column: 1/-1">
+          <div class="tile-cap">
+            <span class="tile-num">STATE 11</span><span class="tile-t">工程台（原「诊断」视图）· 默认折叠</span
+            ><span class="tile-when">只有出问题才进</span>
+          </div>
+          <div class="tile-body">
+            <div class="grid-3" style="gap: 10px">
+              <div class="frame">
+                <div class="frame-bar">桥接自检台</div>
+                <div class="frame-body">
+                  <div class="row wrap" style="gap: 5px">
+                    <span class="tag jade">window.autoCC</span><span class="tag jade">白名单 24</span
+                    ><span class="tag">ipc 往返 12 ms</span>
+                  </div>
+                  <div class="hint" style="margin-top: 7px; font-size: 11px">原 ShellPanel + UpdateSection</div>
+                </div>
+              </div>
+              <div class="frame">
+                <div class="frame-bar">定位实验台</div>
+                <div class="frame-body">
+                  <div class="row wrap" style="gap: 5px">
+                    <span class="tag jade">选择器 9 / 9</span><span class="tag amber">2 条待观察</span>
+                  </div>
+                  <div class="hint" style="margin-top: 7px; font-size: 11px">
+                    原 LocatorLabPanel · 站点适配器腐化预警
+                  </div>
+                </div>
+              </div>
+              <div class="frame">
+                <div class="frame-bar">插件装配 · 内核日志</div>
+                <div class="frame-body">
+                  <div class="row wrap" style="gap: 5px">
+                    <span class="tag">24 已挂载</span><span class="tag">清单顺序 = 挂载顺序</span
+                    ><span class="tag jade">cookie 已脱敏</span>
+                  </div>
+                  <div class="hint" style="margin-top: 7px; font-size: 11px">
+                    原 AssemblyPanel / SessionPanel / JobLabPanel
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="banner celadon" style="margin-top: 12px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" /></svg
+              >这一栏里没有任何一个能触发外发的按钮：所有外发只能在对话与流程里经闸门盖印<i class="an">12</i>
+            </div>
+          </div>
+          <div class="rule">
+            <b>13 块面板 vs 1 个工程台。</b
+            >它必须比主视图低一档（字号、对比度、入口深度），并且显式声明"这里不能对外发包"——这条既是可用性也是合规边界（§5.9：不给绕过主流程的捷径）。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ol class="notes">
+      <li><b>三色效果芯片在首屏就教一次。</b>后面每个工具卡、每个节点、每行账本都靠它，值这个位置。</li>
+      <li><b>第一屏就把"外发必由你盖印"讲出来</b>，这是本产品的信任契约核心。</li>
+      <li><b>零手动下载</b>：进度、签名校验、可重试次数都在界面里，且明确说"你不需要操作"。</li>
+      <li><b>过期即交接，任务停在安全点</b>并写清停在哪一步——续跑按钮必须回到那一步，而不是重启计划。</li>
+      <li><b>风控状态下 agent 全停 + 计时可见</b>；界面不提供任何"帮我通过"的入口。</li>
+      <li><b>被闸门拦下的盖印按钮变成"无色的章"</b>，视觉上直接表达"这件事现在不成立"。</li>
+      <li><b>失败三要素</b>：哪句话、违反哪条事实、可以怎么改；含"删掉"这个诚实的选项。</li>
+      <li><b>索引落后必须给结论句</b>，而不是只报一个数字。</li>
+      <li><b>错误码保留在界面上</b>（NO_KERNEL_SESSION 等），但紧跟一句人话解释与一个恢复动作。</li>
+      <li><b>超时文案第一句永远是"什么都没发出去"</b>。</li>
+      <li><b>模型掉线时列出还能做的事</b>，并显示退避读数。</li>
+      <li><b>工程台零外发按钮</b>——这是设计约束，需要写进验收条目。</li>
+    </ol>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

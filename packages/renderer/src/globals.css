@@ -1,8 +1,140 @@
 @import 'tailwindcss';
 
+/* ══════════════════════════════════════════════════════════════════════
+   墨案 / Ink Desk —— P6 设计系统的令牌层（docs/plans/06-ui-ink-desk/plan.md）
+
+   为什么所有颜色都写成 `@theme` 变量而不是散落的 hex：
+   Tailwind v4 生成的 utility 引用的是 `var(--color-*)` 本身（plan §3.1 已用构建产物实测），
+   所以只要在最外层重新赋值同一批变量，就能**不改一行业务 class** 整屏换主题。
+   这就是下面 `[data-theme='light']`（毡案）那块的工作原理。
+
+   为什么存量 `slate-*` 也一起改：全 app 约 20 个面板都在用 slate 阶，
+   逐文件改写成两千多处 diff 会淹没真实变更（plan §3.2 选的 B 方案）。
+   读代码时把 `slate-*` 当作「墨案的中性阶」来理解：
+   950/900/800/700 是桌面与卡片（chrome），100–500 是文字与图标（fg 阶）。
+   新增代码请优先用下面的语义令牌（seal / jade / amber / celadon / paper / ink）。
+
+   语义色串色即缺陷：seal=动作会离开这台机器（外发、风险、签字）；
+   jade=只读与已核实；amber=本机写入与等待人的表态；celadon=进行中、系统与证据。
+   ══════════════════════════════════════════════════════════════════════ */
+@theme {
+  /* — 墨（chrome）：设计稿 --ink-* 原值 — */
+  --color-ink-950: #080c10;
+  --color-ink-900: #0b1116;
+  --color-ink-850: #0f161c;
+  --color-ink-800: #131c23;
+  --color-ink-750: #18232b;
+  --color-ink-700: #1e2a33;
+
+  /* — 中性阶：slate 名字不变，值换成墨案等亮度档（见上方说明） — */
+  --color-slate-50: #e8eef3;
+  --color-slate-100: #dbe4ec;
+  --color-slate-200: #c2d1dc;
+  --color-slate-300: #a4b6c3;
+  --color-slate-400: #8598a8;
+  --color-slate-500: #6c8091;
+  --color-slate-600: #55677a;
+  --color-slate-700: #1e2a33;
+  --color-slate-800: #131c23;
+  --color-slate-900: #0b1116;
+  --color-slate-950: #080c10;
+
+  /* — 纸（文档面）：简历、JD 正文这类"打印物"才用，chrome 不许用 — */
+  --color-paper: #f2ece0;
+  --color-paper-2: #e5ddcd;
+  --color-paper-ink: #1c1a17;
+  --color-paper-ink-2: #6b6155;
+
+  /* — 三色效果归属 + 青瓷（进行中/系统） — */
+  --color-seal: #e2543a;
+  --color-seal-deep: #b93b26;
+  --color-seal-wash: rgba(226, 84, 58, 0.13);
+  --color-jade: #4fb78a;
+  --color-jade-wash: rgba(79, 183, 138, 0.12);
+  --color-amber: #e0a33f;
+  --color-amber-wash: rgba(224, 163, 63, 0.13);
+  --color-celadon: #7fb6ad;
+  --color-celadon-wash: rgba(127, 182, 173, 0.12);
+
+  /* — 线与阴影 — */
+  --color-line: rgba(150, 178, 196, 0.14);
+  --color-line-strong: rgba(150, 178, 196, 0.26);
+  --color-scrim: rgba(4, 7, 10, 0.66);
+  --shadow-lift: 0 10px 26px -14px rgba(0, 0, 0, 0.75);
+  --shadow-card: 0 1px 0 rgba(150, 178, 196, 0.06) inset;
+  --shadow-sheet: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+
+  /* — 圆角：4 芯片 / 7 控件 / 12 纸面（设计稿 --r-sm/md/lg） — */
+  --radius-chip: 4px;
+  --radius-control: 7px;
+  --radius-sheet: 12px;
+
+  /* — 字族：只用本机字体，不联网取字体包（§1.4 零前置依赖） — */
+  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+  --font-display: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* — 动效：控件的"进行中/结果"两态靠这几个动画表达 — */
+  --animate-needle: needle 0.9s linear infinite;
+  --animate-pop: pop 0.18s ease-out;
+  --animate-rise: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-wash: wash 2s ease-out forwards;
+  --animate-caret: caret 1.1s steps(1) infinite;
+}
+
+/* plan §3.5 登记的那一个 `@layer` 例外：关键帧只能在此定义（Tailwind 的 --animate-* 要求同文件）。
+   除关键帧外这里不放任何选择器——组件样式一律走 ui/ 原件里的 Tailwind class 组合。 */
+@keyframes needle {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes rise {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+/* 结果态：jade 成功 2 秒自行回落；seal 失败不回落，靠的是组件不挂这个动画 */
+@keyframes wash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
 :root {
   /* 与主进程 KERNEL_VIEW_WIDTH_RATIO 同源；scripts/check-renderer-conventions.ts 会校验一致性 */
   --kernel-view-width: 38%;
+
+  color-scheme: dark;
 }
 
 html,
@@ -13,5 +145,61 @@ body,
 
 body {
   margin: 0;
-  @apply bg-slate-950 text-slate-100 antialiased;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.65;
+  @apply bg-ink-950 text-slate-50 antialiased;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   毡案 / Felt Desk —— 浅色主题（Q5 裁定：深浅双主题一起做）
+   材质从「墨桌面」换成「浅灰毡桌面」：纸面仍是全画面最白的一层，
+   分层靠阴影而不是明度差；朱砂仍是唯一的外发色，只是加深到能在浅底撑住对比度。
+   切主题只换 token，不换任何布局与组件——所以这一块只允许出现变量赋值。
+   这里不加 `!important`、不写在 @layer 内：未分层的规则天然压过分层的 `@theme` 输出。
+   ══════════════════════════════════════════════════════════════════════ */
+[data-theme='light'] {
+  --color-ink-950: #d8d3c6;
+  --color-ink-900: #e7e3d8;
+  --color-ink-850: #e0dbcd;
+  --color-ink-800: #f2efe6;
+  --color-ink-750: #d4cebd;
+  --color-ink-700: #c9c2ae;
+
+  /* 文字阶整体翻成深色：utility 名（text-slate-300 这类）不变，语义随主题翻转。
+     400/500 两档刻意比"等比翻转"更深：毡案下它们是次级文案，翻浅就掉到 3:1 以下（spec 6.1-06）。 */
+  --color-slate-50: #1b2228;
+  --color-slate-100: #252d34;
+  --color-slate-200: #333c44;
+  --color-slate-300: #4a5762;
+  --color-slate-400: #56626c;
+  --color-slate-500: #6b7681;
+  --color-slate-600: #7d8892;
+  /* 桌面与卡片：950 最深毡 → 这里是"最浅"的方向，靠 line 与 shadow 分层 */
+  --color-slate-700: #b3ab98;
+  --color-slate-800: #d4cebd;
+  --color-slate-900: #e7e3d8;
+  --color-slate-950: #d8d3c6;
+
+  --color-paper: #fdfbf5;
+  --color-paper-2: #f3eee1;
+
+  --color-seal: #c0391f;
+  --color-seal-deep: #96290f;
+  --color-seal-wash: rgba(192, 57, 31, 0.1);
+  --color-jade: #2f8f66;
+  --color-jade-wash: rgba(47, 143, 102, 0.12);
+  --color-amber: #a1700f;
+  --color-amber-wash: rgba(161, 112, 15, 0.13);
+  --color-celadon: #3f8078;
+  --color-celadon-wash: rgba(63, 128, 120, 0.12);
+
+  --color-line: rgba(38, 44, 48, 0.15);
+  --color-line-strong: rgba(38, 44, 48, 0.3);
+  --color-scrim: rgba(38, 44, 48, 0.5);
+  --shadow-lift: 0 8px 20px -12px rgba(38, 44, 48, 0.35);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+  --shadow-sheet: 0 24px 60px -24px rgba(38, 44, 48, 0.4);
+
+  color-scheme: light;
 }

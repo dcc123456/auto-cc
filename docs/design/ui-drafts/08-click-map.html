@@ -1,0 +1,1366 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>08 · 逐控件点击后果表 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1320px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap {
+        max-width: 1320px;
+        margin: 0 auto;
+      }
+      .zone {
+        margin-top: 30px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        background: var(--ink-900);
+      }
+      .zone-cap {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 11px 15px;
+        background: var(--ink-850);
+        border-bottom: 1px solid var(--line-strong);
+      }
+      .zone-num {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .zone-name {
+        font-family: var(--f-cjk-display);
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .zone-count {
+        margin-left: auto;
+        font-family: var(--f-mono);
+        font-size: 10.5px;
+        color: var(--fg-4);
+      }
+      table.cm {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11.5px;
+      }
+      table.cm th {
+        text-align: left;
+        font-weight: 500;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        color: var(--fg-4);
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line-strong);
+        background: var(--ink-850);
+        white-space: nowrap;
+      }
+      table.cm td {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+        color: var(--fg-3);
+        vertical-align: top;
+        line-height: 1.65;
+      }
+      table.cm tr:last-child td {
+        border-bottom: 0;
+      }
+      table.cm tr:hover td {
+        background: var(--ink-850);
+      }
+      td.ctl {
+        color: var(--fg);
+        white-space: nowrap;
+      }
+      td.ctl small {
+        display: block;
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        color: var(--fg-4);
+        margin-top: 2px;
+        white-space: normal;
+      }
+      .fx {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--celadon);
+      }
+      .shape {
+        display: inline-block;
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        padding: 1px 6px;
+        border-radius: 20px;
+        border: 1px solid var(--line-strong);
+        white-space: nowrap;
+      }
+      .shape.s1 {
+        color: var(--jade);
+        border-color: rgba(79, 183, 138, 0.4);
+      }
+      .shape.s2 {
+        color: var(--celadon);
+        border-color: rgba(127, 182, 173, 0.4);
+      }
+      .shape.s3 {
+        color: var(--celadon);
+        border-color: rgba(127, 182, 173, 0.4);
+      }
+      .shape.s4 {
+        color: var(--fg-2);
+      }
+      .shape.s5 {
+        color: var(--seal);
+        border-color: rgba(226, 84, 58, 0.45);
+      }
+      .shape.s6 {
+        color: var(--amber);
+        border-color: rgba(161, 112, 15, 0.45);
+      }
+      .shape.s0 {
+        color: var(--fg-4);
+      }
+      code {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--amber);
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        align-items: center;
+        font-size: 11.5px;
+        color: var(--fg-3);
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 08</span>
+      <span class="sheet-name">逐控件点击后果表</span>
+      <span class="sheet-desc"
+        >六个工作区里每一颗可点的东西：按下瞬间长什么样、之后变成哪个面、完事回落到哪、键盘怎么等价——共 118
+        只控件，无一只留白</span
+      >
+    </div>
+
+    <div class="wrap">
+      <div class="banner celadon">
+        <b>怎么读这张表</b>
+        <div class="legend" style="margin-top: 7px">
+          <span class="shape s1">① 就地回执</span>
+          <span class="shape s2">② 行内编辑</span>
+          <span class="shape s3">③ 右栏替换</span>
+          <span class="shape s4">④ 抽屉</span>
+          <span class="shape s5">⑤ 遮罩弹窗</span>
+          <span class="shape s6">⑥ 视图/流程推进</span>
+          <span class="shape s0">⊘ 不响应</span>
+          <span style="margin-left: 6px"
+            >「即时变化」一列写的是<b>点击后 0–200ms 内</b>肉眼可见的差值；「回落」写的是终态。六形态的定义与判据在 07
+            稿第三节。</span
+          >
+        </div>
+      </div>
+
+      <!-- ═══════ 01 对话 ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 01</span><span class="zone-name">对话 · 首页第一入口</span
+          ><span class="zone-count">26 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">确认并执行<small>.seal（计划卡头）</small></td>
+              <td>实心朱 + 上浮 → 按下转深朱；随后 <span class="fx">文案→"盖章中" + 转针，宽度锁死</span></td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                计划从 proposed 推到
+                running，卡头转青并长出时间戳；档位是半自动时<b>停在安全点</b>并长出逐步批准卡（不是直接发出去）。禁用：<code
+                  >TIER_NOT_ARMED</code
+                >
+                / <code>NO_ENTITLEMENT</code>
+              </td>
+              <td>无 <kbd>⏎</kbd> 绑定，只能 <kbd>⌘⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">取消这份计划<small>.btn-ghost</small></td>
+              <td>下沉 1px，底色转 ink-800</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                整张计划卡<b>收起</b>（高度动画 160ms），消息流留一行"计划已取消"灰字，可被 <kbd>⌘Z</kbd> 撤回一次
+              </td>
+              <td><kbd>Esc</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">计划第 01–06 步行<small>逐步展开/收起</small></td>
+              <td>行底色提一档 + 右侧 chevron 旋转 90°</td>
+              <td><span class="shape s2">② 展开</span></td>
+              <td>展开该步入参/出参与证据链接；<b>不改变执行</b>。收起后位置记忆在会话内保留</td>
+              <td><kbd>⏎</kbd>（行获焦时）</td>
+            </tr>
+            <tr>
+              <td class="ctl">看这一步的证据<small>.evidence</small></td>
+              <td>虚线下划线转实线</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成该步截图/DOM 读数，顶部出现「← 返回内核页面」。<b>只读，绝无弹窗</b></td>
+              <td><kbd>⌥⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">同意这一步<small>.btn-jade</small></td>
+              <td>描边补上琥珀/青 wash（空心→半实）</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                批准卡收起 + 下一步节点转青环 + 台账加一行（含"谁批的"）。连批 3 步后长出一颗「全部交还给我」的兜底
+              </td>
+              <td><kbd>⌘Y</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">先不发<small>.btn-line</small></td>
+              <td>下沉 1px</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>该步标灰并写<b>「按你的决定跳过」</b>，不重试、不追问；后续步继续跑</td>
+              <td><kbd>⌘N</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">叫停整条任务<small>.btn-warn</small></td>
+              <td>文案→"停在中点…"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>循环停在<b>下一个安全点</b>（当前外发动作不掐断，避免半发）；卡头转琥珀并出现「继续等我看看」</td>
+              <td><kbd>⌘.</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">继续等我看看<small>.btn-warn</small></td>
+              <td>下沉 1px</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>转回 paused 读数，<b>不自增额度</b>；超过 30 分钟自动 <code>PAUSE_TIMEOUT</code>（见 06 稿）</td>
+              <td><kbd>⌘.</kbd> 再按</td>
+            </tr>
+            <tr>
+              <td class="ctl">保存为工作流<small>.btn-line</small></td>
+              <td>文案→"命名中"并就地长出输入井</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                行内输入名字（<code>⏎</code> 存）→ 成功后转青「已存入流程」，并在左栏「流程」计数
+                +1；名字非法时描朱并提示原因码 <code>NAME_BAD_CHAR</code>
+              </td>
+              <td><kbd>⌘S</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">新会话<small>.btn-line</small></td>
+              <td>下沉 1px</td>
+              <td><span class="shape s6">⑥ 推进</span></td>
+              <td>
+                消息流清空并落到底部，旧会话进「历史」；<b>正在跑的任务不被丢弃</b>，改在顶栏挂一颗"后台仍有 1 条在跑 →"
+              </td>
+              <td><kbd>⌘T</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">历史<small>.btn-ghost</small></td>
+              <td>长出 ink-750 底</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>右侧滑出会话列表抽屉（420px），主区压窄不遮挡当前任务；选一条 = 形态⑥ 换会话</td>
+              <td><kbd>⌘⇧O</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">已压缩 1 次<small>压缩提示</small></td>
+              <td>下划线转实</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏显示"哪几条被摘要了 + 原文在哪"，<b>可展开原文</b>；不改写历史</td>
+              <td><kbd>⌥Z</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">上下文芯片「岗位库 28 · 简历 v3」<small>可点</small></td>
+              <td>描边转实 + 出现 × 预备态</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                原地展开勾选面板：逐条勾掉/加回（勾选是<b>青色 cbx</b>，只影响本机上下文）；关掉即生效，无需"保存"
+              </td>
+              <td><kbd>⌘I</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">发送<small>.send</small></td>
+              <td>下沉 + 底色转深</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                输入井清空、按钮转 <span class="fx">is-loading</span>（宽度锁死），流里立刻长出"我"的气泡与"AI
+                正在读…"骨架；失败时描朱并保留原文<b>不清空输入</b>
+              </td>
+              <td><kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">输入框本体</td>
+              <td>青瓷外环 + 3px 光晕</td>
+              <td><span class="shape s0">⊘</span></td>
+              <td>空内容时发送键为禁用态并写原因"先说一句要做什么"</td>
+              <td><kbd>⇧</kbd> 换行</td>
+            </tr>
+            <tr>
+              <td class="ctl">档位三档（建议/半自动/全自动）</td>
+              <td>被点档底色沉一档，其余两档不变</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                降档即时生效；<b>升档</b>时先弹形态⑤（读完整风险 + 打字"升到全自动"），且白名单为空时该档
+                <span class="fx">opacity .38 + title 说明</span>
+              </td>
+              <td><kbd>⌘⇧1/2/3</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「我来接管」/「交还页面」<small>右栏头</small></td>
+              <td>文案互换 + 右栏整栏描边转朱（接管中）</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>接管瞬间 agent 全停、计时器起；交还后我从停下的那一步接着看。<b>朱砂栏 = 人在开</b>，全局唯一</td>
+              <td><kbd>⌘⇧E</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">左栏 6 只区</td>
+              <td>行底提亮；选中行左缘长 3px 朱短线</td>
+              <td><span class="shape s6">⑥ 推进</span></td>
+              <td>换区<b>不卸载</b>其他视图（滚动位置、草稿、在跑的任务都在）；计数为状态非按钮，hover 无反应</td>
+              <td><kbd>⌘K</kbd> / <kbd>⌘1…6</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">工具卡（流里每一张）</td>
+              <td>整卡描边转实，右侧出现「展开」</td>
+              <td><span class="shape s2">② 展开</span></td>
+              <td>展开入参/出参/耗时/证据；<b>卡上没有任何外发键</b>——外发只在计划卡与暂停卡上</td>
+              <td><kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">证据引用 <small>「证据 项目 3」</small></td>
+              <td>虚线下划线转实</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏定位到知识库该条目并高亮那一段；<b>不改简历</b></td>
+              <td><kbd>⌘⇧P</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">沉淀卡「已沉淀 2 条」</td>
+              <td>提亮 + 出现「采纳 / 不用」两颗弱键</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                采纳 → 转青「已入库」并在知识库计数 +1；不用 → 整卡收成一行灰字，<b>可 <kbd>⌘Z</kbd> 反悔一次</b>
+              </td>
+              <td><kbd>⌘⏎</kbd> 采纳</td>
+            </tr>
+            <tr>
+              <td class="ctl">额度读数「8 / 20」</td>
+              <td>提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成用量账本视图（含"谁批的"列）；<b>这里不能改额度</b>，改要去信任区</td>
+              <td><kbd>⌘U</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">EN / 隐私与条款<small>顶栏右</small></td>
+              <td>ghost 提亮</td>
+              <td><span class="shape s3">③</span> / <span class="shape s5">⑤</span></td>
+              <td>EN 就地换语言（所有文案换、布局不跳宽）；条款走遮罩弹窗（要读全文的东西不该挤在右栏）</td>
+              <td><kbd>⌘L</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">底栏读数行<small>kernel / cdp / usage / store</small></td>
+              <td>hover 变实色</td>
+              <td><span class="shape s6">⑥ 推进</span></td>
+              <td>点任一读数 = 跳工程台并锚定到对应面板；<b>底栏零外发按钮</b></td>
+              <td><kbd>⌘⇧D</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「1」未读角标（顶栏）</td>
+              <td>提亮</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>抽屉列出待表态事项，点某条 = 滚到那张卡并让它呼吸一次朱边</td>
+              <td><kbd>⌘J</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「⌘K 叫停」提示键</td>
+              <td>—</td>
+              <td><span class="shape s0">⊘ 不响应</span></td>
+              <td>纯提示，<b>不可点</b>（hover 无变化），避免被当成按钮</td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══════ 02 岗位 ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 02</span><span class="zone-name">岗位 · 六步闭环落地点</span
+          ><span class="zone-count">19 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">再抓一轮<small>.btn-line</small></td>
+              <td>文案→"抓取中" + 转针；六步条第 01 步转青</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                新结果<b>追加不覆盖</b>，列表顶部出现「+7 条新岗位」一行可点合并；风控信号出现时整栏转琥珀并停在人工确认
+              </td>
+              <td><kbd>⌘R</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">入库<small>.btn-line</small></td>
+              <td>下沉 1px</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>转青「已入库」并让左栏「岗位」计数 +1；重复入库不报错，回执写"已在库中"</td>
+              <td><kbd>⌘E</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">批量打招呼 · 需盖印<small>.seal</small></td>
+              <td>实心朱 → 按下深朱 → "盖章中"</td>
+              <td><span class="shape s5">⑤ 弹窗</span></td>
+              <td>
+                <b>批量外发必须弹窗</b>：列出将发出的 N 条、话术样本、额度余量，要求打字「发 12
+                条」才放行（单条不需要，见下）。禁用：<code>ENTITLEMENT_EXHAUSTED</code>
+              </td>
+              <td><kbd>⌘⇧G</kbd>，无 <kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">岗位行（列表项）</td>
+              <td>底色提一档 + 右侧浮出两颗弱键「入库 / 看 JD」</td>
+              <td><span class="shape s6">⑥ 选中</span></td>
+              <td>
+                点行 = 选中并让中栏 JD 换内容（<b>不是弹窗</b>）；双击 = 直接跳简历区并带上该岗位（形态⑥，带面包屑）
+              </td>
+              <td><kbd>↑↓</kbd> 换行</td>
+            </tr>
+            <tr>
+              <td class="ctl">筛选芯片（全部/待话术/待表态/已外发/已投递）</td>
+              <td>选中：描边转实 + 底色 ink-750</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                列表即时过滤，<b>URL 式深链同步</b>
+                <code>#filter=todo-script</code>；「已外发」芯片永远是朱砂色（它是状态不是筛选？→
+                不，它可点，但颜色保留含义）
+              </td>
+              <td><kbd>⌘1…5</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">搜索框「岗位 / 公司 / 技能」</td>
+              <td>青瓷外环 + 右侧出现清除 ×</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>输入即过滤（300ms 防抖），<b>不触发外发</b>；空结果给"放宽哪个条件"的三条候选</td>
+              <td><kbd>/</kbd> 聚焦</td>
+            </tr>
+            <tr>
+              <td class="ctl">页签：缺口报告 / 打招呼话术 / 按这个岗位改简历 / 抓取证据</td>
+              <td>文字转实色，底部 2px 朱线只在选中出现</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                换中栏下半部内容；<b>hover 不出现底线</b>。深链 <code>#gap</code> / <code>#script</code> /
+                <code>#tune</code> / <code>#raw</code>
+              </td>
+              <td><kbd>⌘⇧←/→</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">缺口三栏里的技能行<small>「WebRTC（库内无证据）」</small></td>
+              <td>下划线转实 + 右侧浮出「补证据」</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                原地变行内编辑井：从知识库挑一条证据挂上（勾选列表，<b>不许手打公司/时间/数字</b>，事实锁定）；挂上后该行转青并计入"命中
+                11 → 12"
+              </td>
+              <td><kbd>⏎</kbd> 挂 / <kbd>Esc</kbd> 撤</td>
+            </tr>
+            <tr>
+              <td class="ctl">复制这句话术<small>.btn-ghost</small></td>
+              <td>文案→"已复制"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>2 秒回落。<b>复制不产生外发</b>，所以用 ghost 不用朱</td>
+              <td><kbd>⌘C</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">话术正文<small>点句内任意处</small></td>
+              <td>该句沉进 ink-950 的编辑井 + 青瓷描边，其余句保持只读</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                <b>话术是行内编辑，不是弹窗</b>：一屏要能同时看到"改完的这句话"与"它对应的 JD
+                要求"。改动后卡头长出琥珀「已手改 1 处」，盖印键在改动未确认前保持禁用（原因 <code>SCRIPT_DIRTY</code>）
+              </td>
+              <td><kbd>⏎</kbd> 存 / <kbd>Esc</kbd> 退</td>
+            </tr>
+            <tr>
+              <td class="ctl">就发这条招呼<small>.seal（单条）</small></td>
+              <td>实心朱 → 按下深朱 → "盖章中" → 描青 + 时间戳</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                单条外发<b>不弹窗</b>（印章本身已是确认动作）；成功后该岗位行长出朱砂骑缝章「已打招呼
+                01:08」，账本加一行
+              </td>
+              <td><kbd>⌘⏎</kbd>，无 <kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">按此改简历 →<small>.btn-line</small></td>
+              <td>下沉 + 箭头右移 2px</td>
+              <td><span class="shape s6">⑥ 推进</span></td>
+              <td>跳简历区并自动切到「按 JD 定制」段，顶部面包屑「来自：岗位 · 高级前端」，点它回原位</td>
+              <td><kbd>⌘⇧R</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">骑缝章「已打招呼」</td>
+              <td>提亮 + 出现「看回执」</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏显示实际发出的内容与页面回执截图。<b>不可撤销</b>，所以章上写"发出后不可撤回"</td>
+              <td><kbd>⌥⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">六步进度条某一步</td>
+              <td>该步底色提一档 + 下方出现 2px 实线</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>点一步 = 按该步状态筛选列表（等价于筛选芯片），再点取消。<b>不跳页</b></td>
+              <td><kbd>⌘⇧1…6</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">抓取质量「选择器 9 中 9」</td>
+              <td>提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成定位实验台（哪个字段命中哪个候选），<b>只读</b>；改选择器要去工程台</td>
+              <td><kbd>⌘⇧Q</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">风控信号「未触发」</td>
+              <td>提亮；若已触发则整行朱底呼吸</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏显示触发时刻的截图与当时动作。<b>界面上没有任何"帮我通过"的键</b>（§8.3）</td>
+              <td><kbd>⌘⇧K</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">JD 纸面「原文一字未改」标</td>
+              <td>—</td>
+              <td><span class="shape s0">⊘ 不响应</span></td>
+              <td>它是<b>事实锁定的读数</b>，不是按钮；hover 无变化，鼠标为 default</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="ctl">JD 正文段落</td>
+              <td>段落左侧浮出「建档 / 引用为证据」两颗弱键</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>「引用为证据」把该段挂到当前缺口行（原地跳回缺口页签并高亮那一行 1 秒）；<b>不做选中文本弹窗</b></td>
+              <td><kbd>⌘⇧"</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">列表滚动到底</td>
+              <td>出现一颗「已看完 28 条 · 再抓一轮」弱键</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>等价于顶部「再抓一轮」；<b>不做无限滚动</b>（外发产品要让人知道边界在哪）</td>
+              <td><kbd>⌘↓</kbd></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══════ 03 简历 ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 03</span><span class="zone-name">简历 · 四段一链</span
+          ><span class="zone-count">26 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">分段：知识库 / 按 JD 定制 / 排版编辑 / PDF 轻编辑</td>
+              <td>被点段底色 ink-750 + 内描边</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>换主区内容；<b>未确认改动不被清空</b>，版本条那颗琥珀「待你确认 2 处」会跟着跳回原段</td>
+              <td><kbd>⌘1…4</kbd>（区内）</td>
+            </tr>
+            <tr>
+              <td class="ctl">区块行「工作经历」</td>
+              <td>行底提亮 + 左缘 2px 朱内衬（选中）+ 把手显形</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>选中 = 右侧度量面板切到该区块的统计；<b>不进入编辑</b>（编辑靠下面那颗「改名 / 编辑」）</td>
+              <td><kbd>↑↓</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">区块「改名」<small>标题上的铅笔</small></td>
+              <td>标题原地沉进编辑井 + 青瓷描边 + 右侧 <span class="fx">⏎ 保存 · Esc 取消</span></td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                <b>答案：短字段一律行内编辑，不弹窗。</b>弹窗会让"改个标题"变成一次需要重新定向的事件。非法字符 →
+                描朱并给原因码，<kbd>Esc</kbd> 直接回落旧值
+              </td>
+              <td><kbd>⏎</kbd> / <kbd>Esc</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">区块正文（简历条目）</td>
+              <td>整段沉进编辑井，段上方浮出「依据：知识库 · 不许新增数字」灰字</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                正文也是<b>行内编辑</b>（不是弹窗、不是跳页）；失焦即存草稿，事实校验在<b>保存时</b>跑，编出数字会描朱并列出"库里支持的表述"三条候选
+              </td>
+              <td><kbd>⌘</kbd> 存并校验</td>
+            </tr>
+            <tr>
+              <td class="ctl">把手 ⠿（拖拽排序）</td>
+              <td>光标 grab→grabbing，整行转朱砂虚线，落点出现 2px 青线</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>松手才落库并让 A4 预览重排（一次动画 120ms）；拖动中<b>不写盘</b>，<kbd>Esc</kbd> 中途放弃</td>
+              <td><kbd>⌘↑/↓</kbd> 键盘等价</td>
+            </tr>
+            <tr>
+              <td class="ctl">「固定」标</td>
+              <td>提亮 + 图标转实</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>切换固定/不固定；固定区块在自动定制时<b>不被改写</b>，被跳过时在版本条留一行"跳过 1 个固定区块"</td>
+              <td><kbd>⌘F</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">＋ 加区块</td>
+              <td>下沉 1px</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                列表末尾直接长出<b>一行空的行内编辑</b>并聚焦（不是弹窗、不是新页面）；<kbd>Esc</kbd> 空内容即丢弃
+              </td>
+              <td><kbd>⌘⇧N</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「命中 11」芯片</td>
+              <td>提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏列出 11 条命中证据与来源；<b>只读</b>，从这里不能改简历</td>
+              <td><kbd>⌥⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「改动待确认」标</td>
+              <td>琥珀底转实 + 出现「跳到下一处」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>点它滚到下一处待确认改动并让它呼吸一次琥珀边；<b>不直接接受</b>（接受要按那三颗）</td>
+              <td><kbd>⌘M</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">接受这处改动<small>.btn-jade</small></td>
+              <td>描边补 wash，行内旧文与新文并排消失，只剩新文</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>该块转正常态，版本条计数「待你确认 2 → 1」，<b>不弹 toast</b>；<kbd>⌘Z</kbd> 可反悔</td>
+              <td><kbd>⌘Y</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">保留原文<small>.btn-line</small></td>
+              <td>下沉，改动行整行转灰并划删除线</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>计数同上递减；该条改动进"已拒绝"清单，下次同一 JD 不再重复提（原因写进 hint）</td>
+              <td><kbd>⌘N</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">看证据<small>.btn-ghost</small></td>
+              <td>ghost 提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成该改动的依据条目 + 原文摘录；<b>不替换主区</b>，改动能一直看见</td>
+              <td><kbd>⌥⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">全部保留原文<small>.btn-line</small></td>
+              <td>下沉；所有待确认块一次性转灰</td>
+              <td><span class="shape s5">⑤ 弹窗</span></td>
+              <td>
+                <b>批量拒绝要弹窗</b>（一次抹掉 2
+                处以上判断，需要人看清范围）；弹窗里逐条列出被丢弃的改动，可勾选只丢一部分
+              </td>
+              <td><kbd>⌘⇧⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">确认这 2 处并保存<small>.seal</small></td>
+              <td>实心朱 → 深朱 → "落库中" → 描青 + 版本号跳 v4</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                写盘 + 生成快照，版本条读数刷新。<b>用朱砂是因为这一步之后 PDF 就会带上它</b
+                >（外发链路上的第一环），不是因为"重要"两个字
+              </td>
+              <td><kbd>⌘S</kbd>，无 <kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">撤销 / 重做</td>
+              <td>无历史时 <span class="fx">opacity .38</span> 且 title 写"没有可撤销的操作"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>作用域跟焦点走：焦点在编辑器只撤简历，不会把话术一起撤掉</td>
+              <td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">快照历史</td>
+              <td>ghost 提亮</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>右侧滑出时间线（含每次改动来源：手改 / agent / 按 JD 定制）；抽屉里「回到这一版」走形态⑤二次确认</td>
+              <td><kbd>⌘H</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">对比 v2</td>
+              <td>提亮 + 出现「并排 / 叠加」两颗小切换</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>主区左半换成 v2 只读渲染，差异行用青/朱描出；<b>对比面不可编辑</b>（编辑永远在右半）</td>
+              <td><kbd>⌘C</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">度量滑杆（字号 / 行高 / 段距 / 页边距 / 字重 / 密度）</td>
+              <td>把手外扩 4px 青环，读数常驻在把手上方</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                拖动中 A4
+                预览<b>实时重排</b>但不写盘；松手才落一次库（每像素一次写会打爆快照）。越界时滑杆端点转朱并提示"会被判定内容溢出"
+              </td>
+              <td><kbd>←→</kbd> 微调</td>
+            </tr>
+            <tr>
+              <td class="ctl">导出 PDF（当前排版）<small>.btn-line</small></td>
+              <td>文案→"导出中" + 转针，宽度锁死</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                成功后转青「已导出」并在右栏（此时是 PDF 预览）出现新指纹；<b>未确认改动存在时禁用</b>，原因
+                <code>CHANGES_PENDING</code>
+              </td>
+              <td><kbd>⌘P</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">导出 DOCX</td>
+              <td>同上</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>DOCX 是<b>降级通道</b>：按钮旁永远挂一行"排版会丢，优先 PDF"，不藏进二级菜单</td>
+              <td><kbd>⌘⇧P</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">保存时三选（① 覆盖 v3 / ② 存为新版本 v4 / ③ 另存草稿）</td>
+              <td>被选项左缘长 2px 朱内衬</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                这是<b>常驻三选</b>不是弹窗：保存动作的歧义必须一直看得见。选①时该选项转朱并提示"会覆盖当前版本，快照仍保留"
+              </td>
+              <td><kbd>⌘⇧1/2/3</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">PDF 页码「页 1 / 页 2」</td>
+              <td>选中页描青，右栏预览跳页</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>只翻页不改文档</td>
+              <td><kbd>⌘↓/↑</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">复制页 / 删页 / 上移 / 下移</td>
+              <td>ghost 提亮；删页第一次点转 <span class="fx">is-armed</span>「再点确认」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>删页走<b>原地两次点击</b>（形态②的变体：不弹窗）；3 秒回落。上移/下移在边界时禁用并写"已是首页"</td>
+              <td><kbd>⌘D</kbd> / <kbd>⌘⌫</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">覆盖块（PDF 上的红框）</td>
+              <td>拖动时框体转实 + 四角出现缩放手柄</td>
+              <td><span class="shape s2">② 就地改</span></td>
+              <td>
+                双击框 → <b>行内编辑遮挡文字</b>；改完框体描朱并计入「覆盖块 2」。<b>源 PDF 永不写入</b
+                >，输出必另存新文件（红框旁常驻这句）
+              </td>
+              <td><kbd>⌘⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">知识库「实体 412」/「向量就绪」</td>
+              <td>提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成实体清单与索引状态；「向量就绪」变灰时点它给「补建向量」一颗（见 06 稿）</td>
+              <td><kbd>⌘B</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">从简历同步<small>.btn-line</small></td>
+              <td>文案→"同步中" + 转针</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                转青「已同步 N 条」并给"新增了哪几条"的可展开行；<b>单向</b>：简历 → 知识库，反向要显式走"采纳沉淀"
+              </td>
+              <td><kbd>⌘Y</kbd></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══════ 04 流程 ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 04</span><span class="zone-name">流程 · 画布与运行</span
+          ><span class="zone-count">22 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">校验<small>.btn-line</small></td>
+              <td>"校验中" + 转针；画布上有问题的节点依次描朱</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                通过 → 转青「校验通过 · 7 节点」；失败 → 底部控制条长出一行原因 +
+                「跳到该节点」。<b>不通过时保存仍可用</b>（草稿不该被校验绑架），但运行键禁用
+              </td>
+              <td><kbd>⌘B</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">保存<small>.btn-line</small></td>
+              <td>转针 → "已保存"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>计划名与图版本落库，左栏列表时间戳刷新；有未保存改动时左栏该项后长一颗 <span class="fx">·</span></td>
+              <td><kbd>⌘S</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">＋ 新建计划<small>.btn-line</small></td>
+              <td>下沉</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                左栏末尾直接长出<b>一行行内命名</b>并聚焦（默认名自动生成，不弹对话框），画布同时换成空图 +
+                一句"从算子面板拖一只进来"
+              </td>
+              <td><kbd>⌘N</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">计划行（左栏）</td>
+              <td>底色提一档 + 右侧浮出「▶」弱键</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>点行 = 换画布内容，<b>不运行</b>；点浮出的「▶」才运行（那颗键 hover 才出现，避免整行都是触发区）</td>
+              <td><kbd>↑↓</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">重命名</td>
+              <td>该项标题原地沉进编辑井</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td><b>答案：行内编辑，不弹窗。</b>非法字符（含全角括号）当场描朱并给原因，<kbd>Esc</kbd> 回落</td>
+              <td><kbd>⏎</kbd> / <kbd>Esc</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">复制一份</td>
+              <td>转针 → "已复制"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>列表新增「xx 副本」并选中它，画布切过去；<b>定时任务不被复制</b>（避免同刻双跑），提示一行原因</td>
+              <td><kbd>⌘D</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">删除（二次确认）</td>
+              <td>第一次点：整颗转 <span class="fx">is-armed</span> 朱砂描边 + 文案「再点一次确认」+ 呼吸点</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                3
+                秒内第二下才删；删除后列表该项<b>先转灰再收起</b>（160ms），并给一次「撤销删除」。<b>不弹窗</b>——弹窗会让第二下变成无脑回车
+              </td>
+              <td><kbd>⌘⌫</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">算子面板（右侧/抽屉）</td>
+              <td>拖出时算子转半透明 + 画布出现落点框</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>
+                拖进画布 = 新节点带默认参数落在光标处；<b>松手才建</b>，中途
+                <kbd>Esc</kbd> 取消。运行中面板整体禁用（画布只读）
+              </td>
+              <td><kbd>⌘⇧A</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">节点（画布）</td>
+              <td>单击：青瓷外环；双击：外环 + 参数表单展开</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>
+                单击 = 右栏换成节点详情（形态③）；双击 = 右栏换成<b>可编辑</b>的参数表单（形态②，字段级行内）。<b
+                  >节点上没有运行键</b
+                >
+              </td>
+              <td><kbd>Space</kbd> 选中</td>
+            </tr>
+            <tr>
+              <td class="ctl">节点连线端点</td>
+              <td>拖出时出现一条朱色临时线 + 目标节点高亮可连/不可连</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>成环时临时线转朱并弹回，提示 <code>WOUld_CYCLE</code>（原因码统一大写）；不可连的节点变灰不接</td>
+              <td><kbd>Esc</kbd> 取消</td>
+            </tr>
+            <tr>
+              <td class="ctl">－ / ＋ / 适应 / 78%</td>
+              <td>按下下沉；百分比读数即时跳变</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>只动镜头不动数据；<b>reload 后镜头复位</b>（依赖初始布局的探针必须复位，见 §9 第⑪条）</td>
+              <td><kbd>⌘+/-/0</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">盖印并继续（下一步外发）<small>.seal</small></td>
+              <td>实心朱 → 深朱 → "盖章中" → 描青 + 时间戳</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                闸门节点放行一次，下一步开始跑；右栏同步出现真实页面动作。<b>按钮上写明下一步是什么动作</b>（"下一步外发"），不许只写"继续"
+              </td>
+              <td><kbd>⌘⏎</kbd>，无 <kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">暂停<small>.btn-warn</small></td>
+              <td>"暂停中" + 转针；控制条整条转琥珀</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                停在下一个安全点；六态读数里「停靠待批」亮起。已发出的动作<b>不追回</b>，写明"已发出 2 条不会撤回"
+              </td>
+              <td><kbd>⌘.</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">重试失败节点<small>.btn-line</small></td>
+              <td>该节点朱环转青环 + 进度条重走</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                只重跑该节点及其下游；台账计数 +1 并标注"第 2 次尝试"。<b>外发节点重试必须先再次盖印</b>（不自动重发）
+              </td>
+              <td><kbd>⌘⇧R</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">中止<small>.btn-ghost</small></td>
+              <td>第一次点转 <span class="fx">is-armed</span></td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>两次点击；中止后计划转 paused + 一行"停在第 4 / 7 步"，可恢复</td>
+              <td><kbd>⌘⇧.</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">运行中 · 画布只读<small>chip</small></td>
+              <td>—</td>
+              <td><span class="shape s0">⊘ 不响应</span></td>
+              <td>
+                它是<b>状态声明</b>不是按钮：跑起来之后所有编辑类控件统一降透明度 .38 并共享同一原因
+                <code>RUNNING_READONLY</code>，而不是各自禁用
+              </td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="ctl">定时任务行「早班扫岗 30 8 * * 1-5」</td>
+              <td>行底提亮 + 右侧开关显形</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                点行 = 跳到它绑定的计划；开关启用后行首绿点亮，并显示"下次 明天
+                08:30"。<b>与手动运行共用同一额度闸门</b>，读数在底栏
+              </td>
+              <td><kbd>⌘T</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">定时开关（启用 / 停用）</td>
+              <td>开关滑块位移 + 行首点变色</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>停用时若此刻正在跑，提示"本次继续跑完，之后不再触发"（不硬杀）</td>
+              <td><kbd>⌘⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">六态读数（就绪/排队/运行中/停靠待批/成功/失败）</td>
+              <td>被点态描边转实 + 画布过滤到该态节点</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>再点取消。<b>过滤只影响可见性</b>，不改运行</td>
+              <td><kbd>⌘6</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">看单节点回放</td>
+              <td>ghost 提亮</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成该节点逐步回放（截图序列 + 每步动作）；<b>回放里所有动作键都是禁用的</b>，只读</td>
+              <td><kbd>⌥</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">五级漏斗某一行</td>
+              <td>该条转实 + 右侧「看这批」浮出</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>
+                右栏换成该级岗位清单；<b>被标红的只有回复率</b>这一条，其余四级 hover 也不变色（避免暗示"这里有问题"）
+              </td>
+              <td><kbd>⌘F</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「改写为有据的表述」/「跳过这段」<small>失败证据卡</small></td>
+              <td>前者转针并让节点重跑；后者整卡转灰</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>改写走<b>知识库已有表述</b>（不给自由输入框，事实锁定），跳过则该节点标灰并在台账记"人工跳过"</td>
+              <td><kbd>⌘W</kbd> / <kbd>⌘S</kbd></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══════ 05 信任与安全 ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 05</span><span class="zone-name">信任与安全</span
+          ><span class="zone-count">15 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">风险行「已同意」芯片</td>
+              <td>提亮 + 出现「看条款原文」</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏换成该条条款原文与哈希；<b>这里不能改同意状态</b>，改要按下面那颗撤回</td>
+              <td><kbd>⌥⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">签字区（未签字时）</td>
+              <td>整张纸描朱 + 出现手写签名框与「我确认」印章</td>
+              <td><span class="shape s5">⑤ 弹窗</span></td>
+              <td>
+                首次签字<b>必须走遮罩弹窗</b>（要读完整风险）：读完 4 条 → 手写/打字署名 → 盖上朱砂章并落
+                sha256。签字前所有外发键都是 <code>NO_CONSENT</code> 禁用
+              </td>
+              <td><kbd>⌘C</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">撤回签字并停用外发</td>
+              <td>第一次点转 <span class="fx">is-armed</span>「再点一次撤回」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                两次点击即生效（<b>不弹窗</b>，撤回是安全方向的动作，不该加摩擦）：章上划一条朱线并写"已撤回 ·
+                时间"，档位自动降到建议、白名单清空
+              </td>
+              <td><kbd>⌘⇧X</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">白名单「加白」<small>每只工具一颗</small></td>
+              <td>第一次点转朱 armed，第二下该工具行首长出朱砂勾</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                写进 SQLite（<b>不是配置键</b>，见 §9 5.3-b）；加白后「免确认白名单 3 只」计数
+                +1，且只有档位在全自动时才真正生效——这一条在按钮旁边常驻说明
+              </td>
+              <td><kbd>⌘W</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">白名单「撤销」</td>
+              <td>该行转灰并划删除线</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>即时生效，计数 -1；正在跑的该步<b>不被打断</b>，下一步起恢复要盖印</td>
+              <td><kbd>⌘⇧Z</kbd>（行内）</td>
+            </tr>
+            <tr>
+              <td class="ctl">「只看外发」开关</td>
+              <td>选中：青色 cbx + 底部 2px 青线</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>过滤台账与白名单两处；<b>青不是朱</b>——它只影响本机视图</td>
+              <td><kbd>⌘O</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">额度闸门读数「8 / 20」</td>
+              <td>提亮 + 出现「调整上限」</td>
+              <td><span class="shape s2">② 行内</span></td>
+              <td>
+                上限是<b>行内数字编辑</b>（不是弹窗）：改完
+                <kbd>⏎</kbd> 即生效并写审计；<b>只能往小改</b>时不提示，往大改会多问一句"这会让 agent 更能替你发"
+              </td>
+              <td><kbd>⌘L</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">账本行（每一行）</td>
+              <td>行底提亮 + 右侧「看详情」浮出</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>
+                右栏换成该动作的完整链路（谁批的 / 用了哪份简历 / 发给谁 / 页面回执）。<b>「谁批的」列永远在</b>，人批与
+                agent 批用不同色
+              </td>
+              <td><kbd>⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">「事实校验失败 ×1」标</td>
+              <td>整行朱底 + 出现「看是哪句」</td>
+              <td><span class="shape s3">③ 右栏</span></td>
+              <td>右栏定位到失败的那句与库内支持表述；从这里可一键跳简历区处理</td>
+              <td><kbd>⌘⇧V</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">导出 CSV<small>.btn-ghost</small></td>
+              <td>"导出中" → "已导出"</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>导出前<b>默认脱敏</b>（cookie/手机号打码），弹窗里不出现，只在按钮旁写"已按脱敏规则导出"</td>
+              <td><kbd>⌘E</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">导出我的数据<small>.btn-line</small></td>
+              <td>转针 → 描青 + 文件大小</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>整包 JSON（简历 + 岗位 + 台账 + 签字记录）；完成后给一行"含 3 处脱敏"</td>
+              <td><kbd>⌘⇧E</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">导入备份<small>.btn-line</small></td>
+              <td>文案→"选择文件…"，随后转针</td>
+              <td><span class="shape s5">⑤ 弹窗</span></td>
+              <td>
+                校验哈希 →
+                <b>冲突才弹窗</b
+                >（版本更新、签字缺失）；无冲突直接落并给一次「撤销导入」。签字记录<b>不被导入覆盖</b>（人的表态只能本人给）
+              </td>
+              <td><kbd>⌘⇧I</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">脱敏开关（日志 / 截图 / 会话）</td>
+              <td>关：cbx 空 + 行尾出现朱砂「不脱敏」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                往<b>关</b>的方向改必须二次确认（转朱 armed），并常驻一句"关闭后日志会含明文 cookie"；往开的方向即时生效
+              </td>
+              <td><kbd>⌘⇧D</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">清空本机所有简历与岗位数据</td>
+              <td>第一次点转朱 armed，第二次点<b>不执行</b>而是弹遮罩</td>
+              <td><span class="shape s5">⑤ 弹窗</span></td>
+              <td>
+                全 app
+                <b>唯一要求打字确认</b>的一颗：输入「清空」两字才亮执行键，弹窗里列出将删除的数量与"签字记录会保留"
+              </td>
+              <td>无快捷键（故意）</td>
+            </tr>
+            <tr>
+              <td class="ctl">检查更新 / 许可清单</td>
+              <td>转针 → "已是最新 · 0.5.3"；许可行浮出</td>
+              <td><span class="shape s4">④ 抽屉</span></td>
+              <td>许可走抽屉（要逐包看），更新失败时描朱并给"离线包路径"一行</td>
+              <td><kbd>⌘⇧U</kbd></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══════ 06 状态与断点（复用件） ═══════ -->
+      <div class="zone">
+        <div class="zone-cap">
+          <span class="zone-num">ZONE 06</span><span class="zone-name">状态与断点里的动作（11 面）</span
+          ><span class="zone-count">10 只控件</span>
+        </div>
+        <table class="cm">
+          <thead>
+            <tr>
+              <th style="width: 190px">控件</th>
+              <th style="width: 250px">按下瞬间的样式变化</th>
+              <th style="width: 96px">结果形态</th>
+              <th>完成后 / 回落 / 禁用原因</th>
+              <th style="width: 110px">键盘等价</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="ctl">我已了解，进入<small>.seal（首启动）</small></td>
+              <td>实心朱 → 深朱 → 遮罩淡出</td>
+              <td><span class="shape s5">⑤ → 主界面</span></td>
+              <td>遮罩<b>必须真的消失</b>（否则 CDP 可信鼠标会被它接走，见 §9 第⑬条）；未表态前主界面全部动作禁用</td>
+              <td><kbd>⌘⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">读全文<small>.btn-ghost</small></td>
+              <td>ghost 提亮，弹窗从 520px 扩到 760px</td>
+              <td><span class="shape s5">⑤ 就地扩</span></td>
+              <td>同一张弹窗<b>就地变宽</b>，不新开一层（两层遮罩会让 Esc 语义不清）</td>
+              <td><kbd>Esc</kbd> 收回到窄态</td>
+            </tr>
+            <tr>
+              <td class="ctl">下载内置内核<small>.btn-line</small></td>
+              <td>"下载中 57%"，进度条走 + 右侧「签名校验通过」转青</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>完成后按钮变「重启以启用」；失败时描朱并<b>自动重试 3 次</b>，第 4 次才交给人并给离线包路径</td>
+              <td><kbd>⌘K</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">已扫好，继续第 3 步<small>.btn-jade</small></td>
+              <td>补 wash → 描青「已续跑」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>从停下的那一步继续，<b>不重跑前 2 步</b>；登录态仍失效时立刻回到本面并写原因</td>
+              <td><kbd>⌘⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">今天先不弄<small>.btn-ghost</small></td>
+              <td>整面卡转灰并收起为一行</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>任务停在安全点、<b>不计失败</b>，明早定时触发前不再催</td>
+              <td><kbd>Esc</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">交还页面<small>.btn-line（风控接管中）</small></td>
+              <td>右栏朱砂描边消失 + 计时器停止</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>交还后 agent 才从停下的那一步接着看；<b>不做识别、不做规避</b>，界面上没有"帮我通过"的入口</td>
+              <td><kbd>⌘⇧E</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">排进明天 08:30 的定时<small>.btn-line</small></td>
+              <td>转青「已排入」</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                闸门拒绝（<code>ENTITLEMENT_EXHAUSTED</code>）的三条出路之一；三条都是<b>同级弱键</b>，不许把"重试"画成朱砂诱导
+              </td>
+              <td><kbd>⌘A</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">补建向量<small>.btn-line</small></td>
+              <td>"重建中" + 转针，读数 412/412 逐步跳</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                完成前所有依赖向量的工具（缺口比对、定制）禁用并写 <code>INDEX_STALE</code>，<b
+                  >禁用原因必须出现在被禁的按钮旁</b
+                >
+              </td>
+              <td><kbd>⌘B</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">重开会话并继续<small>.btn-line</small></td>
+              <td>转针 → 描青</td>
+              <td><span class="shape s1">① 就地</span></td>
+              <td>
+                对应
+                <code>NO_KERNEL_SESSION</code>：改配置会关掉已打开的会话视图，所以这颗键永远在报错旁边（顺序：改配置 →
+                重开会话 → 跑）
+              </td>
+              <td><kbd>⌘⇧⏎</kbd></td>
+            </tr>
+            <tr>
+              <td class="ctl">换一份 key / 看诊断<small>模型掉线</small></td>
+              <td>前者原地长出密钥输入井（<b>掩码</b>），后者跳工程台</td>
+              <td><span class="shape s2">② / ⑥</span></td>
+              <td>
+                掉线期间已生成的草稿<b>保留在输入井里不清空</b>；重试退避按 1/2/4/8 秒，读数写在卡头，让人知道它还在试
+              </td>
+              <td><kbd>⌘⇧M</kbd></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ul class="notes">
+        <li>
+          <b>「点修改是弹窗还是直接改」的总答案</b
+          >：短字段与正文一律<b>行内编辑</b>（形态②）；只有"要读完整风险"或"会丢数据"的两类走遮罩弹窗（形态⑤）。全 app
+          只有 5 处弹窗：首次风险签字、批量外发确认、批量拒绝改动、导入冲突、清空本机数据。<i class="an">1</i>
+        </li>
+        <li>
+          <b>不可逆动作一律"原地两次点击"</b
+          >，不用弹窗——弹窗会把第二下变成无脑回车；唯一例外是清空本机全部数据，它要求打字。<i class="an">2</i>
+        </li>
+        <li>
+          <b>只读的东西永远走右栏</b>（证据、原文、回放、账本详情、命中清单），不弹窗、不跳页、不打断当前编辑。<i
+            class="an"
+            >3</i
+          >
+        </li>
+        <li>
+          <b>禁用必须带原因码</b>，且原因出现在被禁控件旁边而不是别处：<code>NO_CONSENT</code> /
+          <code>ENTITLEMENT_EXHAUSTED</code> / <code>SCRIPT_DIRTY</code> / <code>RUNNING_READONLY</code> /
+          <code>CHANGES_PENDING</code> / <code>INDEX_STALE</code> / <code>NO_KERNEL_SESSION</code>。<i class="an">4</i>
+        </li>
+        <li>
+          <b>运行中是"整族禁用"</b>：所有编辑类控件共享同一原因与同一视觉（.38 透明度），不允许一只禁用另一只还能点。<i
+            class="an"
+            >5</i
+          >
+        </li>
+        <li>
+          <b>外发键永不绑定 <kbd>⏎</kbd></b
+          >，只用 <kbd>⌘⏎</kbd> 或鼠标；这是防回车通过的硬约束，与 §8.3 同源。<i class="an">6</i>
+        </li>
+        <li>
+          <b>颜色所有权</b>：朱砂 = 会离开本机（含"关掉脱敏"这类会造成外部后果的开关）；青 = 只影响本机；琥珀 =
+          机器在等人。三色的用法在 07 稿，任何一格串色即视为缺陷。<i class="an">7</i>
+        </li>
+        <li>
+          <b>每颗控件都要能被 harness 点到</b>：所有可点控件必须带
+          <code>data-action</code>，且属性值含点时选择器必须加引号（§9 第④条）。<i class="an">8</i>
+        </li>
+      </ul>
+    </div>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>03 · 简历 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap,
+      .notes {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+
+      /* .tabs/.tab（或 .seg）已提到 assets/shared.css 的原语区，此处只留屏内差异 */
+      .editor {
+        display: grid;
+        grid-template-columns: 154px minmax(0, 1fr) 196px;
+        flex: 1;
+        min-height: 0;
+      }
+      .outline {
+        border-right: 1px solid var(--line);
+        overflow: auto;
+        padding: 10px 0;
+      }
+      .blk {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: var(--fg-2);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .blk .grip {
+        color: var(--fg-4);
+        font-family: var(--f-mono);
+        font-size: 10px;
+      }
+      .blk.on {
+        background: var(--ink-750);
+        color: var(--fg);
+      }
+      .blk .spacer {
+        margin-left: auto;
+      }
+      .stage {
+        overflow: auto;
+        display: grid;
+        place-items: start center;
+        padding: 20px 16px 40px;
+        background: repeating-linear-gradient(45deg, var(--ink-900), var(--ink-900) 12px, #0a1015 12px, #0a1015 24px);
+      }
+      /* 浅色下裁切垫换成深灰毡纹，A4 纸靠阴影浮起来而不是靠明度差 */
+      [data-theme='light'] .stage {
+        background: repeating-linear-gradient(45deg, var(--ink-850), var(--ink-850) 12px, #d3cdbd 12px, #d3cdbd 24px);
+      }
+      .a4 {
+        width: 100%;
+        max-width: 430px;
+        min-height: 560px;
+        padding: 24px 26px;
+        font-size: 11px;
+      }
+      .a4 .paper-h {
+        font-size: 19px !important;
+      }
+      .tuner {
+        border-left: 1px solid var(--line);
+        overflow: auto;
+        padding: 14px;
+      }
+      .slider {
+        margin-bottom: 15px;
+      }
+      .slider-l {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11.5px;
+        color: var(--fg-2);
+        margin-bottom: 5px;
+      }
+      .slider-l b {
+        font-family: var(--f-mono);
+        font-weight: 400;
+        color: var(--celadon);
+      }
+      .slider-t {
+        height: 3px;
+        background: var(--ink-700);
+        border-radius: 3px;
+        position: relative;
+      }
+      .slider-t i {
+        position: absolute;
+        top: -4px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--fg);
+        border: 2px solid var(--ink-900);
+        box-shadow: 0 0 0 1px var(--line-strong);
+      }
+      .slider-t u {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 3px;
+        border-radius: 3px;
+        background: var(--celadon);
+        text-decoration: none;
+      }
+      .p-over {
+        position: absolute;
+        border: 1.5px dashed var(--seal);
+        background: rgba(226, 84, 58, 0.1);
+        border-radius: 2px;
+      }
+      .p-line {
+        position: absolute;
+        height: 8px;
+        background: #fff;
+        border-bottom: 1px solid rgba(28, 26, 23, 0.15);
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 03</span>
+      <span class="sheet-name">简历</span>
+      <span class="sheet-desc"
+        >一条链收进一个视图：知识库实体 → 按 JD 定制 → 排版编辑 → 在既有 PDF 上改（原 5 块面板）</span
+      >
+    </div>
+
+    <div class="wrap">
+      <div class="app">
+        <header class="bar">
+          <span class="wordmark"
+            >auto<b>·</b>cc
+            <span style="font-family: var(--f-cjk); font-size: 12px; color: var(--fg-3); font-weight: 400"
+              >桌面工作台</span
+            ></span
+          >
+          <span class="bar-sub"
+            >搜岗位 · 生成话术 · 按岗位优化简历 ·
+            <b style="color: var(--seal); font-weight: 400">由你确认后投递</b></span
+          >
+          <div class="bar-right">
+            <div class="tier">
+              <span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+              ><span class="tier-opt">全自动</span>
+            </div>
+            <span class="btn btn-ghost btn-sm">EN</span><span class="btn btn-ghost btn-sm">隐私与条款</span>
+          </div>
+        </header>
+
+        <nav class="rail">
+          <div class="rail-label">工作面</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+            >对话<span class="nav-count">3</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg
+            >岗位<span class="nav-count">28</span>
+          </div>
+          <div class="nav-item on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M15 2v5h5M8 13h8M8 17h5" /></svg
+            >简历<span class="nav-count">4</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="3" y="3" width="6" height="6" rx="1" />
+              <rect x="15" y="15" width="6" height="6" rx="1" />
+              <path d="M9 6h6a2 2 0 0 1 2 2v6M6 9v6a2 2 0 0 0 2 2h6" /></svg
+            >流程<span class="nav-count">6</span>
+          </div>
+          <div class="rail-label">系统</div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M20 13c0 5-3.5 7.5-7.7 9a.7.7 0 0 1-.6 0C11.5 20.5 8 18 8 13V5l4-3 4 3v8Z" /></svg
+            >信任与安全<span class="nav-count">12</span>
+          </div>
+          <div class="nav-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z"
+              /></svg
+            >工程台
+          </div>
+        </nav>
+
+        <main class="main">
+          <div class="view-head">
+            <div>
+              <div class="view-title">简历<i class="an">1</i></div>
+              <div class="view-note">当前：陈某某 · 前端 · <span class="mono">v3 · 面向"高级前端工程师"</span></div>
+            </div>
+            <div class="view-actions">
+              <div class="seg">
+                <span>知识库</span><span>按 JD 定制</span><span class="on">排版编辑</span><span>PDF 轻编辑</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ② 版本条：快照 + diff + 事实锁定标记，永远摆在编辑器上方 -->
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 10px;
+              padding: 9px 20px;
+              border-bottom: 1px solid var(--line);
+              background: var(--ink-850);
+            "
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--fg-3)" stroke-width="1.7" width="13" height="13">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+            <span class="mono" style="font-size: 11px">v3 · 01:21</span>
+            <span class="tag jade">事实校验通过 12 处</span>
+            <span class="tag amber">待你确认 2 处<i class="an">2</i></span>
+            <span class="btn btn-sm btn-ghost">对比 v2</span>
+            <span class="spacer"></span>
+            <span class="btn btn-sm btn-ghost"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="12" height="12">
+                <path d="M9 14 4 9l5-5" />
+                <path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg
+              >撤销</span
+            >
+            <span class="btn btn-sm btn-ghost"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="12" height="12">
+                <path d="m15 14 5-5-5-5" />
+                <path d="M20 9H9a5 5 0 0 0 0 10h3" /></svg
+              >重做</span
+            >
+            <span class="btn btn-sm btn-line">快照历史</span>
+          </div>
+
+          <div class="editor">
+            <!-- 左：区块拖排 -->
+            <div class="outline">
+              <div class="rail-label" style="padding: 2px 12px 8px">区块顺序 · 拖动重排<i class="an">3</i></div>
+              <div class="blk on"><span class="grip">⠿</span>个人信息<span class="spacer tag">固定</span></div>
+              <div class="blk">
+                <span class="grip">⠿</span>个人摘要<span class="spacer mono" style="font-size: 10px">3 行</span>
+              </div>
+              <div class="blk"><span class="grip">⠿</span>核心技能<span class="spacer tag jade">命中 11</span></div>
+              <div class="blk">
+                <span class="grip">⠿</span>工作经历<span class="spacer mono" style="font-size: 10px">2 段</span>
+              </div>
+              <div class="blk" style="border-left: 2px solid var(--amber)">
+                <span class="grip">⠿</span>项目经历<span class="spacer tag amber">改动待确认</span>
+              </div>
+              <div class="blk">
+                <span class="grip">⠿</span>教育背景<span class="spacer mono" style="font-size: 10px">1 行</span>
+              </div>
+              <hr class="hr" style="margin: 10px 12px" />
+              <div class="blk" style="color: var(--fg-4)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="12" height="12">
+                  <path d="M12 5v14M5 12h14" /></svg
+                >加区块
+              </div>
+              <div class="rail-label" style="padding: 12px">知识库实体</div>
+              <div class="blk">
+                <span>实体 412</span
+                ><span class="spacer mono" style="font-size: 10px; color: var(--jade)">向量就绪</span>
+              </div>
+              <div class="blk"><span>从简历同步</span><span class="spacer kbd">⌘S</span></div>
+            </div>
+
+            <!-- 中：纸上所见即所得 -->
+            <div class="stage">
+              <div class="paper-sheet a4">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end">
+                  <div>
+                    <div class="paper-h" style="font-size: 22px; letter-spacing: 0.06em">陈某某</div>
+                    <div style="font-size: 11.5px; color: var(--paper-ink-2); margin-top: 3px">
+                      前端工程师 · 上海 · 3 年经验 · 138****2043<i class="an">4</i>
+                    </div>
+                  </div>
+                  <div
+                    style="text-align: right; font-size: 10.5px; color: var(--paper-ink-2); font-family: var(--f-mono)"
+                  >
+                    A4 · 单页<br />1 / 1
+                  </div>
+                </div>
+                <div class="paper-rule" style="margin: 11px 0"></div>
+
+                <div style="font-size: 11.5px; line-height: 1.85; color: var(--paper-ink)">
+                  3 年前端，做过控制台与可视化两个方向；主导过组件拆分与性能优化，首屏从 2.4s 降到 1.5s。
+                </div>
+
+                <div class="paper-k" style="margin: 16px 0 6px">核心技能</div>
+                <div style="display: flex; gap: 5px; flex-wrap: wrap; font-size: 10.5px">
+                  <span style="border: 1px solid rgba(28, 26, 23, 0.25); border-radius: 3px; padding: 1px 6px"
+                    >React</span
+                  >
+                  <span style="border: 1px solid rgba(28, 26, 23, 0.25); border-radius: 3px; padding: 1px 6px"
+                    >TypeScript</span
+                  >
+                  <span
+                    style="
+                      border: 1px solid rgba(28, 26, 23, 0.25);
+                      border-radius: 3px;
+                      padding: 1px 6px;
+                      background: rgba(79, 140, 138, 0.14);
+                    "
+                    >可视化 ECharts</span
+                  >
+                  <span
+                    style="
+                      border: 1px solid rgba(28, 26, 23, 0.25);
+                      border-radius: 3px;
+                      padding: 1px 6px;
+                      background: rgba(79, 140, 138, 0.14);
+                    "
+                    >性能优化</span
+                  >
+                  <span
+                    style="
+                      border: 1.5px dashed var(--seal);
+                      border-radius: 3px;
+                      padding: 1px 6px;
+                      color: var(--seal-deep);
+                    "
+                    >WebRTC（无证据，未写入）<i class="an">5</i></span
+                  >
+                </div>
+
+                <div class="paper-k" style="margin: 16px 0 6px">工作经历</div>
+                <div style="font-size: 11.5px; color: var(--paper-ink)">
+                  <div class="row" style="justify-content: space-between">
+                    <b>某云计算公司 · 前端工程师</b
+                    ><span style="font-family: var(--f-mono); font-size: 10.5px; color: var(--paper-ink-2)"
+                      >2023.06 — 至今</span
+                    >
+                  </div>
+                  <ul style="margin: 5px 0 0 15px; padding: 0; font-size: 11px; line-height: 1.85; color: #37332d">
+                    <li>
+                      负责控制台前端，主导路由与状态层重构
+                      <span style="font-size: 9.5px; color: #8a7f6f">〔证据 项目 3〕</span>
+                    </li>
+                    <li>
+                      首屏 2.4s → 1.5s，包体减少 41%
+                      <span style="font-size: 9.5px; color: #8a7f6f">〔证据 成果表〕</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <!-- 待确认改动：新旧并排 + 事实来源，不给"AI 自己写完了"的错觉 -->
+                <div
+                  style="
+                    margin: 14px -12px 0;
+                    padding: 10px 12px;
+                    border-left: 2px solid var(--amber);
+                    background: rgba(224, 163, 63, 0.08);
+                  "
+                >
+                  <div style="font-size: 10.5px; letter-spacing: 0.1em; color: #8a6b21">
+                    项目经历 · 本轮定制改动 · 待你确认<i class="an">6</i>
+                  </div>
+                  <div style="font-size: 11px; margin-top: 6px; color: #6b6155; text-decoration: line-through">
+                    参与组件库建设，负责若干组件的开发与维护
+                  </div>
+                  <div style="font-size: 11.5px; margin-top: 3px; color: var(--paper-ink)">
+                    → 参与组件库建设，独立负责其中 4 个组件的设计与落地
+                  </div>
+                  <div style="font-size: 10.5px; color: #8a7f6f; margin-top: 5px">
+                    依据：知识库「组件库-负责范围」条目 · 未新增任何数字
+                  </div>
+                  <div class="row" style="margin-top: 8px; gap: 6px">
+                    <span
+                      style="
+                        font-size: 11px;
+                        border: 1.5px solid var(--seal);
+                        color: var(--seal-deep);
+                        padding: 2px 9px;
+                        border-radius: 3px;
+                        font-family: var(--f-cjk-display);
+                        font-weight: 700;
+                      "
+                      >接受这处改动</span
+                    >
+                    <span
+                      style="
+                        font-size: 11px;
+                        border: 1px solid rgba(28, 26, 23, 0.3);
+                        color: #6b6155;
+                        padding: 2px 9px;
+                        border-radius: 3px;
+                      "
+                      >保留原文</span
+                    >
+                    <span style="font-size: 11px; color: #6b6155; text-decoration: underline; margin-left: auto"
+                      >看证据</span
+                    >
+                  </div>
+                </div>
+
+                <div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+                  <div>
+                    <div class="paper-line" style="width: 80%"></div>
+                    <div class="paper-line" style="width: 95%; margin-top: 5px"></div>
+                    <div class="paper-line" style="width: 70%; margin-top: 5px"></div>
+                  </div>
+                  <div>
+                    <div class="paper-line" style="width: 60%"></div>
+                    <div class="paper-line" style="width: 88%; margin-top: 5px"></div>
+                  </div>
+                </div>
+                <div
+                  style="
+                    margin-top: 18px;
+                    text-align: center;
+                    font-size: 9.5px;
+                    color: rgba(28, 26, 23, 0.4);
+                    letter-spacing: 0.2em;
+                  "
+                >
+                  — 第 1 页 / 共 1 页 —
+                </div>
+              </div>
+            </div>
+
+            <!-- 右：六度量 + 导出 -->
+            <div class="tuner">
+              <div class="rail-label" style="padding: 0 0 10px">排版度量<i class="an">7</i></div>
+              <div class="slider">
+                <div class="slider-l"><span>正文字号</span><b>10.5 pt</b></div>
+                <div class="slider-t"><u style="width: 38%"></u><i style="left: 36%"></i></div>
+              </div>
+              <div class="slider">
+                <div class="slider-l"><span>行高</span><b>1.62</b></div>
+                <div class="slider-t"><u style="width: 52%"></u><i style="left: 50%"></i></div>
+              </div>
+              <div class="slider">
+                <div class="slider-l"><span>段落间距</span><b>7 pt</b></div>
+                <div class="slider-t"><u style="width: 30%"></u><i style="left: 28%"></i></div>
+              </div>
+              <div class="slider">
+                <div class="slider-l"><span>页边距</span><b>16 mm</b></div>
+                <div class="slider-t"><u style="width: 44%"></u><i style="left: 42%"></i></div>
+              </div>
+              <div class="slider">
+                <div class="slider-l"><span>标题字重</span><b>700</b></div>
+                <div class="slider-t"><u style="width: 70%"></u><i style="left: 68%"></i></div>
+              </div>
+              <div class="slider">
+                <div class="slider-l"><span>每页密度</span><b>48 行</b></div>
+                <div class="slider-t"><u style="width: 62%"></u><i style="left: 60%"></i></div>
+              </div>
+
+              <div class="banner celadon" style="margin: 4px 0 14px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                  <path d="M3 3v18h18" />
+                  <path d="m7 14 3-4 3 3 4-6" /></svg
+                >单页 · 剩余空间 12%，不会被判定"内容溢出"
+              </div>
+
+              <hr class="hr" />
+              <div class="rail-label" style="padding: 0 0 10px">导出</div>
+              <div class="col" style="gap: 7px">
+                <span class="btn btn-sm btn-line" style="justify-content: center">导出 PDF（当前排版）</span>
+                <span class="btn btn-sm btn-line" style="justify-content: center">导出 DOCX</span>
+                <span class="hint" style="font-size: 10.5px">中文字体随包内嵌 Noto SC 子集，不联网取字体</span>
+              </div>
+              <hr class="hr" />
+              <div class="rail-label" style="padding: 0 0 8px">保存时<i class="an">8</i></div>
+              <div class="col" style="gap: 6px">
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start">① 覆盖 v3（当前）</span>
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start">② 存为新版本 v4</span>
+                <span class="btn btn-sm btn-ghost" style="justify-content: flex-start">③ 另存草稿</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-foot" style="border-top: 1px solid var(--line); background: var(--ink-850)">
+            <span class="hint">2 处改动待确认 · 未确认的部分不会进入导出的 PDF</span>
+            <span class="spacer"></span>
+            <span class="btn btn-sm btn-line">全部保留原文</span>
+            <span class="btn btn-sm seal" style="padding: 4px 11px; font-size: 11.5px"
+              ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5" /></svg>确认这 2
+              处并保存</span
+            >
+          </div>
+        </main>
+
+        <!-- ⑨ 右栏在这一屏换成"正在编辑的那一页"：内核视图与文档预览共用一栏 -->
+        <aside class="kernel">
+          <div class="kernel-head">
+            <span class="dot" style="background: var(--celadon)"></span>
+            <span class="kernel-title">PDF 轻编辑 · 预览</span>
+            <span class="spacer"></span>
+            <span class="btn btn-sm btn-ghost">内核页面</span>
+          </div>
+          <div class="kernel-body">
+            <div class="page" style="position: relative; background: #fff">
+              <div class="page-bar"><span class="page-url">~/Downloads/原始简历.pdf · 只读源</span></div>
+              <div
+                style="
+                  position: relative;
+                  padding: 16px;
+                  min-height: 290px;
+                  background: #fdfcf9;
+                  color: #1c1a17;
+                  font-size: 10px;
+                "
+              >
+                <div style="font-weight: 700; font-size: 12px">陈某某 · 前端工程师</div>
+                <div style="margin-top: 6px; line-height: 1.8">
+                  · 负责控制台前端与可视化方向<br />· 首屏 2.4s → 1.5s，包体 −41%<br />· 参与组件库建设，负责若干组件
+                </div>
+                <!-- 覆盖框：白底压住原文 + 新字浮在上层，就是 PdfEditPanel 的机制 -->
+                <div class="p-over" style="left: 14px; right: 60px; top: 104px; height: 20px"></div>
+                <div class="p-line" style="left: 16px; right: 62px; top: 106px"></div>
+                <div style="position: absolute; left: 18px; top: 106px; font-size: 10px; color: #1c1a17">
+                  参与组件库建设，独立负责 4 个组件
+                </div>
+                <div
+                  style="
+                    position: absolute;
+                    right: 8px;
+                    top: 98px;
+                    font-size: 9px;
+                    color: var(--seal);
+                    font-family: var(--f-mono);
+                  "
+                >
+                  覆盖 #2<i class="an">9</i>
+                </div>
+                <div style="margin-top: 74px; line-height: 1.8">
+                  · 2023.06 至今 · 某云计算公司<br />· 2021.07 — 2023.05 · 某电商公司
+                </div>
+              </div>
+            </div>
+            <div class="row wrap" style="gap: 5px; margin-top: 10px">
+              <span class="tag">页 1</span><span class="tag">页 2</span><span class="tag">复制页</span
+              ><span class="tag">删页</span><span class="tag">上移</span><span class="tag">下移</span>
+            </div>
+            <hr class="hr" />
+            <div class="col" style="gap: 7px">
+              <div class="row">
+                <span class="stat-k">源文件指纹</span><span class="spacer mono">a7f3…9c · 只读</span>
+              </div>
+              <div class="row"><span class="stat-k">输出指纹</span><span class="spacer mono">3d1b…04 · 另存</span></div>
+              <div class="row"><span class="stat-k">覆盖块</span><span class="spacer num">2</span></div>
+            </div>
+            <div class="banner warn" style="margin-top: 12px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M12 9v4M12 17h.01" />
+                <circle cx="12" cy="12" r="10" /></svg
+              >源 PDF 永不写入，输出必须另存为新文件<i class="an">10</i>
+            </div>
+          </div>
+        </aside>
+
+        <footer class="foot">
+          <span><b>resume</b> v3 · 待确认 2</span><span><b>kb</b> 412 实体</span
+          ><span><b>font</b> Noto SC 子集内嵌</span><span class="spacer"></span><span>zh-CN</span><span>0.5.3</span>
+        </footer>
+      </div>
+    </div>
+
+    <ol class="notes">
+      <li>
+        <b>四段用一个分段控件切换</b>（知识库 / 定制 / 排版 / PDF 轻编辑），对应现有
+        KbPanel、GeneratePanel、ResumeEditor、PdfEditPanel 四块面板；它们是同一条链的四步，不该并排堆着。
+      </li>
+      <li>
+        <b>版本条常驻。</b>快照、diff、事实校验计数就在编辑器头上；"改动待确认"用琥珀标记，任何一处红点都能追到证据。
+      </li>
+      <li><b>区块顺序 = 拖排</b>，并把每块的知识库命中数直接标在旁边，重排时有依据。</li>
+      <li><b>手机号等个人信息在稿面上就是脱敏态</b>，对应 §8.5：默认脱敏，不是"导出前才想起打码"。</li>
+      <li>
+        <b>无证据的技能用虚线朱砂框写在纸上而不是删除</b>，让"为什么不写"这件事可见——这是事实锁定红线最直白的界面表达。
+      </li>
+      <li><b>定制改动以"原文 / 新文 / 依据"三行成对出现</b>，并接受或回退；LLM 不许引入新数字这一点写在依据行里。</li>
+      <li><b>六度量滑杆</b>沿用 ResumeEditor 既有能力；底部实时给出"是否溢出单页"的结论，避免调完导出才发现变两页。</li>
+      <li><b>保存三选</b>是 ResumePanel 的既有拦截逻辑，这里把它摊开成三行看得见的语义。</li>
+      <li>
+        <b>右栏复用为"当前正在编辑的东西"</b>：对话/岗位屏里它是内核页面，简历屏里它是 PDF
+        预览页。桌面只有一个"旁证窗口"，不新开第四栏。<i class="an" style="margin-left: 4px"
+          >待裁定：也可以改成整屏切换。</i
+        >
+      </li>
+      <li><b>双指纹读数 + 源只读声明</b>：PdfEditPanel 的"源文件绝不写回"这条约束放到眼睛看得见的地方。</li>
+    </ol>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

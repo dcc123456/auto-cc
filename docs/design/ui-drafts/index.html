@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-cc 界面设计稿 · 评审板（墨案 v1）</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+      }
+      .hero {
+        padding: 60px 28px 34px;
+        border-bottom: 1px solid var(--line);
+      }
+      .hero-in {
+        max-width: 1140px;
+        margin: 0 auto;
+      }
+      .eyebrow {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        color: var(--seal);
+      }
+      h1 {
+        font-family: var(--f-cjk-display);
+        font-size: 46px;
+        font-weight: 900;
+        line-height: 1.2;
+        margin: 14px 0 0;
+        letter-spacing: 0.01em;
+      }
+      h1 em {
+        font-family: var(--f-latin-display);
+        font-style: italic;
+        font-weight: 400;
+        color: var(--celadon);
+      }
+      .lede {
+        max-width: 66ch;
+        color: var(--fg-2);
+        font-size: 14.5px;
+        line-height: 1.95;
+        margin-top: 18px;
+      }
+      .concept {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 30px;
+      }
+      .concept > div {
+        border: 1px solid var(--line);
+        border-radius: var(--r-lg);
+        padding: 15px 16px;
+        background: var(--ink-850);
+      }
+      .concept .n {
+        font-family: var(--f-cjk-display);
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--fg);
+      }
+      .concept .d {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.8;
+        margin-top: 6px;
+      }
+      .sec {
+        max-width: 1140px;
+        margin: 0 auto;
+        padding: 42px 28px;
+      }
+      .sec-h {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .sec-sub {
+        font-size: 12.5px;
+        color: var(--fg-3);
+        margin-bottom: 22px;
+        max-width: 78ch;
+        line-height: 1.85;
+      }
+      .sw {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+        gap: 10px;
+      }
+      .sw > div {
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        padding: 11px 12px;
+      }
+      .sw .chip {
+        height: 34px;
+        border-radius: 5px;
+        margin-bottom: 9px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .type-row {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .type-row .lab {
+        width: 190px;
+        font-family: var(--f-mono);
+        font-size: 10.5px;
+        color: var(--fg-4);
+        flex-shrink: 0;
+      }
+      .gal {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+      .gal a {
+        text-decoration: none;
+        color: inherit;
+        display: block;
+      }
+      .gal a:hover .shot {
+        border-color: var(--seal);
+      }
+      .shot-cap {
+        padding: 12px 14px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .shot-open {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--celadon);
+      }
+      .map {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .map th {
+        text-align: left;
+        font-weight: 500;
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        color: var(--fg-4);
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line-strong);
+      }
+      .map td {
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--line);
+        color: var(--fg-2);
+        vertical-align: top;
+      }
+      .map td:first-child {
+        color: var(--fg-3);
+        font-family: var(--f-mono);
+        font-size: 11px;
+        white-space: normal;
+        line-height: 1.9;
+        width: 34%;
+      }
+      .map td.to {
+        color: var(--fg);
+      }
+      .q {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr) auto;
+        gap: 14px;
+        padding: 14px 0;
+        border-bottom: 1px solid var(--line);
+        align-items: start;
+      }
+      .q .qn {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        padding-top: 3px;
+      }
+      .q .qt {
+        font-size: 13.5px;
+        color: var(--fg);
+      }
+      .q .qd {
+        font-size: 12px;
+        color: var(--fg-3);
+        margin-top: 5px;
+        line-height: 1.8;
+      }
+      .q .verd {
+        margin-top: 7px;
+        font-size: 11.5px;
+        line-height: 1.8;
+        padding: 6px 9px;
+        border-left: 2px solid var(--jade);
+        background: var(--jade-wash);
+        color: var(--fg-2);
+      }
+      .q.ruled .qn {
+        color: var(--jade);
+      }
+      .inv {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 26px;
+      }
+      .inv li {
+        list-style: none;
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.8;
+        padding-left: 20px;
+        position: relative;
+      }
+      .inv li::before {
+        content: '§';
+        position: absolute;
+        left: 2px;
+        color: var(--celadon);
+        font-family: var(--f-mono);
+        font-size: 11px;
+      }
+      .inv li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body class="desk" data-propagate-theme>
+    <div class="hero">
+      <div class="hero-in">
+        <div class="eyebrow">AUTO-CC 桌面工作台 · 界面设计稿 v1.2（双主题 + 交互层 + 编排台）· 2026-10-06</div>
+        <h1>墨案<em> / Ink Desk</em></h1>
+        <p class="lede">
+          石墨色的桌面上摊着几张纸，纸角盖着朱砂印。<b>这套界面只表达一件事：哪些动作只在这台机器里发生，哪些动作会替你走出去。</b>朱砂色在全
+          app 只用于后者——凡是会离开本机的，都必须像盖章一样有重量、有留痕、有可撤回的签字。浅色主题另起一张桌面叫<b
+            >毡案 / Felt Desk</b
+          >：桌面从墨换成浅灰毡，纸面换成更白的纸，靠阴影而不是明度差分层——右下角的浮标整板切换，十张稿与本页同时换装。
+        </p>
+        <div class="concept">
+          <div>
+            <div class="n">墨 · 桌面</div>
+            <div class="d">
+              石墨灰蓝的 chrome
+              承担结构与读数，永远不与内容抢注意力（浅色主题里这张桌面换成浅灰毡，角色不变）。工程类读数压到底栏一行，诊断面板因此可以折叠。
+            </div>
+          </div>
+          <div>
+            <div class="n">纸 · 文档</div>
+            <div class="d">
+              JD、简历、PDF 一律画成桌上的暖纸，与 chrome
+              形成材质对比。纸面的"原文一字未改"就是事实锁定红线的视觉对应物。
+            </div>
+          </div>
+          <div>
+            <div class="n">印 · 外发</div>
+            <div class="d">
+              朱砂只属于外发：盖印执行、风险签字、状态骑缝章、风控接管。普通按钮没有这个颜色，用户不可能把"确认"看成"保存"。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 一、十张稿 ═══ -->
+    <div class="sec">
+      <div class="sec-h">一 · 十张稿（7 张屏幕 + 3 张交互规格）</div>
+      <div class="sec-sub">
+        01–06 与 10 都是 1440 × 900 的完整应用外壳（不是组件拼贴），下方带编号注释，与稿面里的角标一一对应；07–09 是<b
+          style="color: var(--fg-2)"
+          >交互规格稿</b
+        >：控件五态、逐控件点击后果、结果形态实尺画面。缩略预览若被浏览器拦下，点标题直接打开原稿。
+      </div>
+      <div class="gal">
+        <a href="01-chat.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="01-chat.html" title="对话"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">01</span><span class="card-title">对话 · 首页第一入口</span
+              ><span class="hint">计划卡 / 盖印 / 逐步批准 / 档位常驻</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="02-jobs.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="02-jobs.html" title="岗位"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">02</span><span class="card-title">岗位 · 六步闭环流水线</span
+              ><span class="hint">JD 纸面 / 缺口三栏 / 话术盖印</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="03-resume.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="03-resume.html" title="简历"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">03</span><span class="card-title">简历 · 四段一链</span
+              ><span class="hint">排版度量 / 定制待确认 / PDF 覆盖块</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="04-workflow.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="04-workflow.html" title="流程"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">04</span><span class="card-title">流程 · 画布与运行</span
+              ><span class="hint">计划库 + 定时同栏 / 节点证据 / 漏斗</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="05-trust.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="05-trust.html" title="信任与安全"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">05</span><span class="card-title">信任与安全</span
+              ><span class="hint">风险签字纸 / 白名单 / 闸门 / 账本</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="06-states.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="06-states.html" title="状态与断点"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">06</span><span class="card-title">状态与断点 · 11 面</span
+              ><span class="hint">冷启动 / 过期 / 风控 / 闸门拒绝 / 失败</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="10-orchestration.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="10-orchestration.html" title="工作流编排台"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">10</span><span class="card-title">工作流编排台（补你提的那一页）</span
+              ><span class="hint">算子面板 / 画布编辑态 / 检查器 / 问题条</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="07-controls.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="07-controls.html" title="控件状态机"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">07</span><span class="card-title">控件状态机 · 五态总则</span
+              ><span class="hint">默认 / 悬停 / 按下 / 进行中 / 结果 + 键盘等价</span
+              ><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="08-click-map.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="08-click-map.html" title="逐控件点击后果"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">08</span><span class="card-title">逐控件点击后果表 · 118 只</span
+              ><span class="hint">按下瞬间的样式差值 → 结果形态 → 回落 / 禁用原因</span
+              ><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+        <a href="09-dialogs.html"
+          ><div class="shot">
+            <div class="shot-frame"><iframe src="09-dialogs.html" title="结果形态画面稿"></iframe></div>
+            <div class="shot-cap">
+              <span class="sheet-num">09</span><span class="card-title">结果形态画面稿 · 六种</span
+              ><span class="hint">「点修改」= 行内编辑；弹窗全 app 只留 5 只</span><span class="shot-open">打开 ↗</span>
+            </div>
+          </div></a
+        >
+      </div>
+    </div>
+
+    <!-- ═══ 二、信息架构：40 个组件去哪了 ═══ -->
+    <div class="sec" style="border-top: 1px solid var(--line)">
+      <div class="sec-h">二 · 信息架构：现有 40 个组件去哪了</div>
+      <div class="sec-sub">
+        核心问题不是"不好看"，而是<b style="color: var(--fg-2)">三个视图里 1.1 号视图后面堆了 13 块面板</b
+        >，用户必须自己从面板名反推产品流程。这一版把它们折成
+        <b style="color: var(--fg-2)">4 个工作区 + 2 个系统区</b>，对话仍是第一入口（不违反 P1.11 与 §5.9）。
+      </div>
+      <div class="card">
+        <table class="map">
+          <thead>
+            <tr>
+              <th>现状（诊断视图里平铺）</th>
+              <th class="to">去处</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                ChatPanel / AgentRunPanel / AgentPauseCards / AgentPolicyPanel / ToolCard / SedimentCard /
+                ChatSessionBar / ChatCompactionBanner / EvidenceRefButton
+              </td>
+              <td class="to">对话（01）</td>
+              <td>计划、表态、白名单、证据都长在同一条消息流上，不该各自成面板；白名单另在信任区留一份只读视图。</td>
+            </tr>
+            <tr>
+              <td>JobLabPanel / GapPanel / ScriptPanel</td>
+              <td class="to">岗位（02）</td>
+              <td>抓取 → 缺口 → 话术是同一条链的三段，本项目自己在 4.6-d 就写过"隔开放就要跨面板对目标"。</td>
+            </tr>
+            <tr>
+              <td>ResumePanel / ResumeEditor / GeneratePanel / KbPanel / PdfEditPanel / AssemblyPanel(导出)</td>
+              <td class="to">简历（03）</td>
+              <td>四段用分段控件切换；知识库是简历的数据来源，不该和用户心智里的"我的简历"平级并列。</td>
+            </tr>
+            <tr>
+              <td>
+                WorkflowPanel / WorkflowLabPanel / WorkflowCanvas / WorkflowNodeDetail / WorkflowPlans /
+                WorkflowEvidence / WorkflowRunCard / NodeRunSourceLine / OperatorPalette / OperatorParamForm /
+                SchedulePanel / MetricsPanel / AuditSection
+              </td>
+              <td class="to">流程（04）</td>
+              <td>画布 = 怎么跑，计划库 + 定时 = 什么时候跑，节点详情 + 漏斗 + 审计 = 跑得怎么样，三栏一次给完。</td>
+            </tr>
+            <tr>
+              <td>SessionPanel / TakeoverBanner / ConsentCard / PrivacyNotice / UsagePanel</td>
+              <td class="to">内核栏（常驻）＋ 信任与安全（05）</td>
+              <td>内核视图与会话状态是"看着它干活"，常驻右栏；签字、额度、接管记录属于信任层。</td>
+            </tr>
+            <tr>
+              <td>ShellPanel / LocatorLabPanel / UpdateSection / ScriptPanel(调试面)</td>
+              <td class="to">工程台（06 STATE 11）</td>
+              <td>调试入口必须比主视图低一档（1.10-07），且这一栏不允许出现任何外发按钮。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ 三、交互层 ═══ -->
+    <div class="sec" style="border-top: 1px solid var(--line)">
+      <div class="sec-h">三 · 交互层：每只按钮点下去发生什么</div>
+      <div class="sec-sub">
+        这一节是 v1.2 新增的主体（07 / 08 / 09 三张稿的索引）。<b style="color: var(--fg-2)"
+          >先回答你举的那个例子：点「修改」是直接编辑，不是弹窗。</b
+        >短字段就地变输入框（<span class="kbd">Enter</span> 保存 /
+        <span class="kbd">Esc</span> 还原），正文直接进可编辑态；弹窗全 app 只留 5
+        只，判据是"做了撤不回"或"不读完整风险就无法负责"。
+      </div>
+      <div class="card">
+        <table class="map">
+          <thead>
+            <tr>
+              <th style="width: 130px">结果形态（打扰度递增）</th>
+              <th class="to" style="width: 210px">什么时候用它</th>
+              <th>画面代价与硬约束</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>① 就地回执</td>
+              <td class="to">低风险、可逆、结果一句话说得清</td>
+              <td>
+                控件自己走完 转针 → 对勾 → 2 秒回落；不新增浮层。失败态（朱砂）<b>不自动回落</b>，必须人读过。toast
+                同时只允许 1 只、不抢焦点。
+              </td>
+            </tr>
+            <tr>
+              <td>② 行内编辑</td>
+              <td class="to">改一个字段 / 改一段正文</td>
+              <td>
+                青瓷描边 +
+                外发光标记编辑态，<b>不换底色</b>（换底色就看不出改的是原文哪一句）。失焦不自动保存。改完整屏不跳。
+              </td>
+            </tr>
+            <tr>
+              <td>③ 右栏替换</td>
+              <td class="to">要看细节又不肯离开列表</td>
+              <td>右栏一栏多用（裁定一）：把内核视图藏在后面，<b>不卸载</b>（1.10-01）；列表滚动位置不动。</td>
+            </tr>
+            <tr>
+              <td>④ 抽屉</td>
+              <td class="to">要横向对照 / 要一次改一批</td>
+              <td>420px（批量编辑 520px），遮罩只盖主区、不盖左栏；有未保存改动时关闭先行内确认，不直接丢。</td>
+            </tr>
+            <tr>
+              <td>⑤ 遮罩弹窗</td>
+              <td class="to">不可逆，或必须先读完整风险</td>
+              <td>
+                盖整窗含左栏、焦点锁死。<b>全 app 只 5 只</b>：首次风险签字 / 批量外发确认 / 批量拒绝改动 / 导入冲突 /
+                清空本机数据。只有 5-1 与 5-5 需要打字或勾满。
+              </td>
+            </tr>
+            <tr>
+              <td>⑤′ 两步就地</td>
+              <td class="to">不可逆但影响面只有一条</td>
+              <td>
+                同一只按钮按两次：第一次进 armed 态（朱砂底 + 文案换动词 + 4
+                秒倒计时、整行其他控件暂时失效），第二次才真做。<b>比弹窗的一次性「确认」更安全</b>。
+              </td>
+            </tr>
+            <tr>
+              <td>⑥ 视图推进</td>
+              <td class="to">跨工作区跳转 / 进入编排</td>
+              <td>
+                必须带面包屑且「返回」回到原位；按下瞬间<b>不给 loading</b
+                >（目标是本地已渲染视图，出现转针说明实现走错路）。
+              </td>
+            </tr>
+            <tr>
+              <td>⊘ 不响应</td>
+              <td class="to">前置条件没满足</td>
+              <td>
+                禁用态旁边<b>必须挂原因码</b>（<span class="mono">NO_CONSENT</span>
+                <span class="mono">ENTITLEMENT_EXHAUSTED</span> <span class="mono">SCRIPT_DIRTY</span>
+                <span class="mono">RUNNING_READONLY</span> …），且给一条解除路径。只灰不给码视为缺陷。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="banner celadon" style="margin-top: 16px">
+        <b>覆盖度与一致性</b>
+        <div class="hint" style="font-size: 11.5px; color: var(--fg-2); line-height: 1.8">
+          08 稿逐只列了 <b>118 只控件</b>（对话 26 / 岗位 19 / 简历 26 / 流程 22 / 信任 15 / 状态
+          10），每只写四项：按下瞬间的样式差值、结果形态、完成后与回落与禁用原因、键盘等价。07 稿给出五态总则与 8
+          类控件的差值表——<b>悬停只提亮一档、不位移；按下才 translateY(1px)</b>，这条在全 app
+          一致，避免"按钮跳一下"的廉价感。实现层的收口条件是：<b>归不进这六类的交互，说明交互本身没想清楚</b>。
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 四、设计系统 ═══ -->
+    <div class="sec" style="border-top: 1px solid var(--line)">
+      <div class="sec-h">四 · 设计系统</div>
+      <div class="sec-sub">
+        色、字、形三条都够"认得出是这款产品"，同时全部能落到 Tailwind 主题扩展与 lucide 现有图标上——不新增 CSS
+        文件、不引入图标库、不写内联样式。
+      </div>
+      <div class="sw">
+        <div>
+          <div class="chip" style="background: var(--seal)"></div>
+          <div class="mono">seal / 朱砂</div>
+          <div class="hint" style="font-size: 10.5px">外发 · 风险 · 签字 · 接管</div>
+        </div>
+        <div>
+          <div class="chip" style="background: var(--jade)"></div>
+          <div class="mono">jade</div>
+          <div class="hint" style="font-size: 10.5px">只读 · 校验通过</div>
+        </div>
+        <div>
+          <div class="chip" style="background: var(--amber)"></div>
+          <div class="mono">amber</div>
+          <div class="hint" style="font-size: 10.5px">本地写入 · 待确认 · 等待表态</div>
+        </div>
+        <div>
+          <div class="chip" style="background: var(--celadon)"></div>
+          <div class="mono">celadon</div>
+          <div class="hint" style="font-size: 10.5px">运行中 · 系统信息 · 证据</div>
+        </div>
+        <div>
+          <div class="chip" style="background: var(--ink-900); border: 1px solid var(--line-strong)"></div>
+          <div class="mono">ink-900 / 墨</div>
+          <div class="hint" style="font-size: 10.5px">chrome 底色（非纯黑）</div>
+        </div>
+        <div>
+          <div class="chip" style="background: linear-gradient(var(--paper), var(--paper-2))"></div>
+          <div class="mono">paper / 纸</div>
+          <div class="hint" style="font-size: 10.5px">JD · 简历 · PDF 文档面</div>
+        </div>
+      </div>
+      <div class="banner celadon" style="margin-top: 16px">
+        <b>双主题（Q5 已裁定：一起做）</b>
+        <div class="hint" style="font-size: 11.5px; color: var(--fg-2); line-height: 1.8">
+          右下角的浮标可整板切换：<b>墨案</b>（石墨桌面 + 暖纸）与<b>毡案</b>（浅灰毡桌面 + 更白的纸 +
+          收紧要的阴影）。两套只换 <span class="mono">assets/shared.css</span> 的一段
+          token，布局、组件、字号、效果三色语义一条都不动——这也是这套稿子给实现层的约束：主题必须是 token
+          层的开关，不是第二套样式。
+        </div>
+      </div>
+      <div style="margin-top: 26px">
+        <div class="type-row">
+          <span class="lab">显示 · Noto Serif SC 900</span
+          ><span style="font-family: var(--f-cjk-display); font-size: 26px; font-weight: 900">信任与安全</span>
+        </div>
+        <div class="type-row">
+          <span class="lab">视图标题 · Noto Serif SC 700</span><span class="view-title">岗位</span>
+        </div>
+        <div class="type-row">
+          <span class="lab">正文 · Noto Sans SC 400 13/1.6</span
+          ><span style="font-size: 13px">我按「上海 / 前端 / ≤3 年 / 20k+」起草了这条计划。</span>
+        </div>
+        <div class="type-row">
+          <span class="lab">读数 · IBM Plex Mono</span><span class="num" style="font-size: 19px">8 / 20</span
+          ><span class="mono" style="font-size: 11px">outbound.greet.perform</span>
+        </div>
+        <div class="type-row">
+          <span class="lab">标识 · Instrument Serif（仅拉丁）</span
+          ><span style="font-family: var(--f-latin-display); font-size: 22px">auto·cc</span>
+        </div>
+        <div class="type-row" style="border-bottom: 0">
+          <span class="lab">效果芯片（全 app 统一）</span
+          ><span class="row wrap" style="gap: 7px"
+            ><span class="effect read">只读</span><span class="effect local">本地写入</span
+            ><span class="effect outbound">外发</span
+            ><span class="tier"
+              ><span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+              ><span class="tier-opt seal-tone">全自动</span></span
+            ></span
+          >
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 五、落地不变式 ═══ -->
+    <div class="sec" style="border-top: 1px solid var(--line)">
+      <div class="sec-h">五 · 实现时必须守住的不变式（对着 AGENTS.md 逐条过）</div>
+      <div class="sec-sub">
+        这页是给"评审通过之后谁来写代码"看的：设计稿里每一个元素都有对应的约束，评审时请一并确认这张表没有被破的地方。
+      </div>
+      <ul class="inv">
+        <li>
+          <b>对话仍是第一入口</b>，工作流是第二视图，工程台是第三档（§5.9、P1.11）。四区之间不许长出"绕过主流程的捷径"。
+        </li>
+        <li>
+          <b>样式全部映射到 Tailwind 主题扩展</b>：本稿的 CSS 变量与 shared.css 只是设计令牌的定义方式，落地时写进
+          tailwind 配置与 utility 组合，不留 .module.css（§5.1）。
+        </li>
+        <li>
+          <b>图标全部是 lucide-react 现有件</b>：MessageSquare / Briefcase / FileText / Workflow / ShieldCheck / Wrench
+          / Stamp / Hand / Clock / AlertTriangle / Scale / Landmark；稿内 SVG 就是这些图标的 path，不新增自绘（§5.3）。
+        </li>
+        <li>
+          <b>每一条可见文案走 i18n</b>，键名沿用 <span class="mono">shell.*</span> 现有层级并补齐 en；本稿文案可直接作为
+          zh-CN 语言包初稿（§5.5 / 5.6）。
+        </li>
+        <li>
+          <b>三色效果芯片 = 工具契约的 effect 字段</b>（read / local-write / outbound），由
+          <span class="mono">check-tool-contract.ts</span> 供数，前端不得自己判色。
+        </li>
+        <li><b>档位指示常驻，且不可程序自升</b>；全自动档必须与白名单状态同屏出现（5.3 的"不可自提升"）。</li>
+        <li><b>画布进度只由事件推</b>，节点不许自轮询 runner.state()（5.10-11 已机检）。</li>
+        <li>
+          <b>渲染层不碰 Node</b>：右栏内核视图、截图、账本一律经 <span class="mono">window.autoCC</span> 白名单（§5.8 /
+          §8.1-8.2）。
+        </li>
+        <li><b>白名单与签字落 SQLite</b>，不做配置键（配置层重启即失，§9 的 5.3-b 实测）。</li>
+        <li><b>个人信息在 UI 上就是脱敏态</b>（手机号、姓名、cookie），不是导出前才处理（§8.5）。</li>
+        <li><b>工程台零外发按钮</b>；检测到验证码/风控只暂停不识别，界面上不留任何"帮我通过"的入口（§8.3）。</li>
+        <li>
+          <b>空态、stale、拒绝、失败四类文案必须给出路</b>，且带原因码——与 §7.4 的自检清单同源，评审时按 06 稿逐面打勾。
+        </li>
+        <li>
+          <b>交互结果只有六形态</b>（就地回执 / 行内编辑 / 右栏替换 / 抽屉 / 遮罩弹窗 / 视图推进，外加"不响应 +
+          原因码"），<b>遮罩弹窗全 app 限 5 只</b>；新增第七种浮层或给短字段开编辑弹窗，都算破坏本稿（07 / 08 / 09）。
+        </li>
+        <li>
+          <b>每一只可点控件带 <span class="mono">data-action</span> 且有键盘等价</b>（§9 harness
+          的活体断言依赖它）；禁用态必须同时给出原因码属性，便于断言"灰得有理由"。
+        </li>
+      </ul>
+    </div>
+
+    <!-- ═══ 六、待你裁定 ═══ -->
+    <div class="sec" style="border-top: 1px solid var(--line)">
+      <div class="sec-h">六 · 裁定回执（2026-10-06 已逐条表态）</div>
+      <div class="sec-sub">
+        六条都已裁定或已补稿，稿面已按裁定调整；Q5 的浅色主题就是右下角那颗浮标，两套共用同一份 token 表。
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q1</span>
+        <div>
+          <div class="qt">右栏到底是不是"常驻一栏"？</div>
+          <div class="qd">
+            稿里右栏在对话/岗位屏是内核页面，在简历屏是 PDF
+            预览，在流程屏是节点详情。备选：内核视图严格常驻不可替换，简历与节点详情改为主区内的抽屉。前者一栏多用、心智要教一次；后者更贴近现有
+            KERNEL_VIEW_WIDTH_RATIO 的摆位实现。
+          </div>
+          <div class="verd">
+            已裁定（2026-10-06）：<b>一栏多用、可替换</b>。落地时右栏是一个容器组件，内容按当前工作区切换，内核实页仍走现有
+            <span class="mono">KERNEL_VIEW_WIDTH_RATIO</span> 的摆位；首屏用一行提示教会"这一栏随分区换脸"。
+          </div>
+        </div>
+        <span class="tag">01 / 03 / 04</span>
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q2</span>
+        <div>
+          <div class="qt">四区命名是否用「岗位 / 简历 / 流程」这套用户语言？</div>
+          <div class="qd">
+            现语言包用的是"诊断"与面板级命名。四区命名会牵动 i18n 键与既有验收条目的文案断言，需要你确认改名范围。
+          </div>
+          <div class="verd">
+            已裁定（2026-10-06）：<b>全用用户语言</b>（岗位 / 简历 / 流程 / 信任）。落地时
+            <span class="mono">nav.*</span> 新增六支键并同时补齐 <span class="mono">zh-CN</span> 与
+            <span class="mono">en</span>（§5.5/5.6），旧面板名降级为区内的卡片标题，不再出现在顶栏。
+          </div>
+        </div>
+        <span class="tag">§5.6</span>
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q3</span>
+        <div>
+          <div class="qt">"盖章"这套材质语言要不要一路走到底？</div>
+          <div class="qd">
+            朱砂方章 + 骑缝章 + 手写签字，辨识度极高但带明显中式文书气质。备选：更中性的"审批"图形（对勾 +
+            印章轮廓），跨语言（en）语境更稳。
+          </div>
+          <div class="verd">
+            已裁定（2026-10-06）：<b>一路走到底</b>。en
+            语境靠文案解释（章即"批准并外发"），图形不做分支；朱砂色仍然只出现在外发动作上，与
+            <span class="mono">effect.outbound</span> 一一对应。
+          </div>
+        </div>
+        <span class="tag">02 / 05</span>
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q4</span>
+        <div>
+          <div class="qt">13 块诊断面板折进三区之后，验收证据怎么对？</div>
+          <div class="qd">
+            现有 spec 条目按面板 ID 断言 testid 与文案（例如 1.10-01 视图不卸载、1.10-07
+            降级一档）。合并视图需要重列条目，但"三视图常驻挂载"这条行为不变式我建议原样保留。
+          </div>
+          <div class="verd">
+            已裁定（2026-10-06）：<b>设计稿阶段不动 spec</b>。等真按新分区落地时再一次性对账；在此之前本稿只是视觉与 IA
+            的候选，不作为验收依据。
+          </div>
+        </div>
+        <span class="tag">§7 / §4.5</span>
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q5</span>
+        <div>
+          <div class="qt">深浅双主题要不要一起做？</div>
+          <div class="qd">
+            本稿只有墨色深主题。纸面元素在浅主题里会失去对比优势，需要为浅色另设一套"桌面材质"（例如灰毡），属于额外一份设计。
+          </div>
+          <div class="verd">
+            已裁定（2026-10-06）：<b>一并出浅色稿</b>。落地为「毡案」：<span class="mono">[data-theme='light']</span>
+            一整段 token 覆盖（毡底 / 更白的纸 / 收紧的阴影 /
+            语义色加深一档），十张稿与总览板都能整板切换；布局与组件零分支。
+          </div>
+        </div>
+        <span class="tag">已落地</span>
+      </div>
+      <div class="q ruled">
+        <span class="qn">Q6</span>
+        <div>
+          <div class="qt">"还有一个工作流编排页面没有看到设计稿"</div>
+          <div class="qd">
+            你在上一轮点出的缺口。04 画的是"跑起来看"的流程视图（画布只读 + 计划库 +
+            定时），确实没有交代<b>怎么把一条流程搭出来</b>：算子从哪来、怎么连线、参数在哪填、校验错误在哪看。
+          </div>
+          <div class="verd">
+            已补稿（2026-10-06）：新增
+            <b>10 · 工作流编排台</b
+            >。裁定为"同一视图的两个相位"而不是第三个页面——进入编排的唯一路径是计划卡上的「编排」，右上角「退出编排」回来，因此不存在"编辑完不知道去哪跑"。四件事同屏：算子面板（按效果三色分组）·
+            画布编辑态（端口 / 把手 / 拖入落点 / 右键菜单）· 检查器（输入映射 / 失败策略 / 停靠）·
+            底部问题条（错误与警告可定位到节点）。
+          </div>
+        </div>
+        <span class="tag">10</span>
+      </div>
+    </div>
+
+    <div
+      style="
+        max-width: 1140px;
+        margin: 0 auto;
+        padding: 0 28px 60px;
+        color: var(--fg-4);
+        font-size: 11.5px;
+        display: flex;
+        gap: 18px;
+      "
+    >
+      <span>文件位置：<span class="mono">docs/design/ui-drafts/</span></span>
+      <span>未改动 <span class="mono">packages/**</span> 任何代码</span>
+      <span class="spacer"></span>
+      <span>打开方式：浏览器直接打开本文件，或逐张点 01–10</span>
+    </div>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

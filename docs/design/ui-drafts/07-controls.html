@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>07 · 控件状态机 — auto-cc 设计稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/shared.css" />
+    <style>
+      body {
+        background: var(--ink-950);
+        padding: 34px 30px 70px;
+      }
+      .sheet-label {
+        max-width: 1280px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .sheet-num {
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--seal);
+        letter-spacing: 0.1em;
+      }
+      .sheet-name {
+        font-family: var(--f-cjk-display);
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sheet-desc {
+        color: var(--fg-3);
+        font-size: 12.5px;
+      }
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .sec {
+        margin-top: 34px;
+      }
+      .sec-h {
+        font-family: var(--f-cjk-display);
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .sec-sub {
+        font-size: 12px;
+        color: var(--fg-3);
+        margin-bottom: 16px;
+      }
+      .an {
+        font-family: var(--f-mono);
+        font-style: normal;
+        font-size: 9px;
+        color: var(--seal);
+        border: 1px solid rgba(226, 84, 58, 0.35);
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-left: 5px;
+        vertical-align: 1px;
+        background: var(--seal-wash);
+      }
+      .head-row {
+        display: grid;
+        grid-template-columns: 168px repeat(5, minmax(0, 1fr)) 300px;
+        gap: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line-strong);
+        margin-bottom: 6px;
+      }
+      .head-row span {
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        color: var(--fg-4);
+        text-align: center;
+      }
+      .head-row span:first-child {
+        text-align: left;
+      }
+      .head-row span:last-child {
+        text-align: left;
+      }
+      .prow {
+        display: grid;
+        grid-template-columns: 168px repeat(5, minmax(0, 1fr)) 300px;
+        gap: 10px;
+        align-items: stretch;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .prow .who {
+        font-size: 12px;
+        color: var(--fg);
+      }
+      .prow .who small {
+        display: block;
+        font-family: var(--f-mono);
+        font-size: 9.5px;
+        color: var(--fg-4);
+        margin-top: 3px;
+        line-height: 1.6;
+      }
+      .prow .why {
+        font-size: 11px;
+        color: var(--fg-3);
+        line-height: 1.75;
+      }
+      .prow .why b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+      .prow .why code {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--celadon);
+      }
+      .tax {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .tax .card {
+        position: relative;
+      }
+      .tax .num {
+        font-family: var(--f-mono);
+        font-size: 10px;
+        color: var(--seal);
+      }
+      .mini {
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--ink-900);
+        padding: 12px;
+        position: relative;
+        overflow: hidden;
+        min-height: 118px;
+      }
+      .kb {
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        gap: 8px 14px;
+        font-size: 12px;
+        color: var(--fg-3);
+      }
+      .kb dt {
+        text-align: right;
+      }
+      .notes {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 30px;
+      }
+      .notes li {
+        font-size: 12px;
+        color: var(--fg-3);
+        line-height: 1.75;
+        list-style: none;
+        padding-left: 22px;
+        position: relative;
+      }
+      .notes li b {
+        color: var(--fg-2);
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body class="desk">
+    <div class="sheet-label">
+      <span class="sheet-num">SCREEN 07</span>
+      <span class="sheet-name">控件状态机</span>
+      <span class="sheet-desc"
+        >每一类可点的东西长什么样、鼠标按下去变成什么样、点完之后变成什么样——一张表说死，实现层不再自行发明</span
+      >
+    </div>
+
+    <div class="wrap">
+      <!-- ═══ 总则 ═══ -->
+      <div class="banner celadon">
+        <b>五态总则</b>
+        <div class="delta" style="color: var(--fg-2); margin-top: 6px">
+          ① <b>默认</b>：底色 ink-750、描边 line-strong、无阴影。<br />
+          ② <b>悬停</b>：底色提一档到
+          ink-700，描边转实——<b>不做位移</b>（位移只属于"按下"，两者混用会让人以为已经点了）。<br />
+          ③ <b>按下</b>：<code>translateY(1px)</code> + 底色回落到 ink-800 + 阴影清零，手上有"沉下去"的一格。<br />
+          ④ <b>进行中</b>：文案换成进行时 + 转针，<b>宽度锁死</b>不跳版；此时整颗视为已禁用，重复点击无效。<br />
+          ⑤ <b>结果</b>：成功描青（jade）并把文案换成完成态，2
+          秒后自动回落；失败描朱（seal）且<b>不自动回落</b>，必须人处理。<br />
+          另有一条硬规矩：<b>不可点的元素绝不长出 hover</b
+          >（效果芯片、标签、读数都不响应鼠标），"看起来能点"在这套界面里是缺陷。
+        </div>
+      </div>
+
+      <!-- ═══ 一、按钮族状态矩阵 ═══ -->
+      <div class="sec">
+        <div class="sec-h">一 · 按钮族：五态逐一画出来</div>
+        <div class="sec-sub">
+          同一列 =
+          同一个状态。朱砂（盖印）与其余四类的区别不是尺寸，是<b>颜色所有权</b>：只有"动作会离开这台机器"的才允许用朱砂。
+        </div>
+
+        <div class="head-row">
+          <span>原语 / 用在哪</span><span>默认</span><span>悬停</span><span>按下</span><span>禁用</span
+          ><span>进行中 → 结果</span><span>样式差值与点击后果</span>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            普通动作<small>.btn-line<br />保存 / 校验 / 导出 CSV</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line">保存</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line" data-st="hover">保存</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line" data-st="active">保存</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line" disabled>保存</span></div>
+          </div>
+          <div>
+            <div class="state-cell col" style="gap: 6px">
+              <span class="btn btn-line is-loading">保存中</span><span class="btn btn-line is-done">已保存</span>
+            </div>
+          </div>
+          <div class="why">
+            差值：<code>bg ink-750 → ink-700 → ink-800</code>；禁用只降透明度到
+            <code>.38</code> 且必须旁边给出原因。<b>点击后果</b>：就地转针 → 文案变"已保存"→ 2 秒回落。<b>不弹 toast</b
+            >。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            弱动作<small>.btn-ghost<br />撤销 / 重做 / 跳过这段</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-ghost btn-sm">撤销</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-ghost btn-sm" data-st="hover">撤销</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-ghost btn-sm" data-st="active">撤销</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-ghost btn-sm" disabled>撤销</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-ghost btn-sm is-done">已撤销</span></div>
+          </div>
+          <div class="why">
+            默认<b>无描边</b>，hover 才长出 ink-750
+            底——用来把"可有可无"的动作压到视线边缘。点击后不转针（本地即时生效），只把文案换 2 秒。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            需要人表态<small>.btn-warn<br />暂停 / 继续等我看看</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-warn btn-sm">暂停</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-warn btn-sm" data-st="hover">暂停</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-warn btn-sm" data-st="active">暂停</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-warn btn-sm" disabled>暂停</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-warn btn-sm is-loading">暂停中</span></div>
+          </div>
+          <div class="why">
+            琥珀 = "机器在等人或人可以让它停"。hover 时把琥珀底 wash 补上（<code>bg amber-wash</code
+            >），因为它平时是空心描边，提亮一档不够认。<b>点击后果</b>：整条任务停在安全点，长出一张逐步批准卡。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            通过 / 放行<small>.btn-jade<br />同意这一步</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-jade btn-sm">同意这一步</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-jade btn-sm" data-st="hover">同意这一步</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-jade btn-sm" data-st="active">同意这一步</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-jade btn-sm" disabled>同意这一步</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-jade btn-sm is-done">已放行 1 步</span></div>
+          </div>
+          <div class="why">
+            青 = 只读或放行后不产生外部影响。它的 hover 与 warn 同一套（补
+            wash）。<b>点击后果</b>：卡片自身收起并把下一步推成 running，画布对应节点转青环。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            盖印（外发确认）<small>.seal<br />确认并执行 / 就发这条招呼 / 盖印并继续</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="seal">确认并执行</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="seal" data-st="hover">确认并执行</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="seal" data-st="active">确认并执行</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="seal off">确认并执行</span></div>
+          </div>
+          <div>
+            <div class="state-cell col" style="gap: 6px">
+              <span class="seal is-loading">盖章中</span><span class="seal is-done">已盖印 01:07</span>
+            </div>
+          </div>
+          <div class="why">
+            唯一一颗<b>反色</b>的按钮：hover 直接实心朱砂 + 上浮 1px +
+            外发光，按下改成深朱砂——因为它一次都不能被误点。<br />禁用态（<code>.off</code>）=
+            未签字或额度用尽，描边退回灰、<b>hover 完全无效</b>，旁边必须写原因码。<br /><b>点击后果</b>：转针 → 描青 +
+            盖上时间戳 → 该步进入执行，右栏同步出现真实页面动作。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">
+            不可逆动作<small>.btn → .is-armed<br />删除计划 / 清空本机数据 / 撤回签字</small>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line btn-sm">删除</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line btn-sm" data-st="hover">删除</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn is-armed btn-sm">再点一次确认</span></div>
+            <div class="state-cap">第一次点击后</div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn btn-line btn-sm" disabled>删除</span></div>
+          </div>
+          <div>
+            <div class="state-cell"><span class="btn is-failed btn-sm">删除失败 · 查看</span></div>
+          </div>
+          <div class="why">
+            <b>两次点击</b>，不弹窗：第一次原地转朱砂描边 + 文案换成"再点一次确认" + 呼吸点，<code>3s</code>
+            内不点第二下就自动回落。<br />理由：弹窗会让人养成"回车通过"的肌肉记忆，反而不过脑；原地变色强制视线回到那颗按钮上。<b>只有"清空本机全部数据"这一颗例外</b>，它走遮罩弹窗并要求打字确认。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">档位开关<small>.tier-opt（三档物理开关）</small></div>
+          <div>
+            <div class="state-cell">
+              <span class="tier"
+                ><span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+                ><span class="tier-opt">全自动</span></span
+              >
+            </div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="tier"
+                ><span class="tier-opt" data-st="hover">建议</span><span class="tier-opt on">半自动</span
+                ><span class="tier-opt seal-tone" data-st="hover">全自动</span></span
+              >
+            </div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="tier"
+                ><span class="tier-opt">建议</span><span class="tier-opt" data-st="active">半自动</span
+                ><span class="tier-opt seal-tone">全自动</span></span
+              >
+            </div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="tier"
+                ><span class="tier-opt on">建议</span><span class="tier-opt">半自动</span
+                ><span class="tier-opt" style="opacity: 0.38">全自动</span></span
+              >
+            </div>
+            <div class="state-cap">白名单为空 → 全自动不可点</div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="tier"
+                ><span class="tier-opt">建议</span><span class="tier-opt on">半自动</span
+                ><span class="tier-opt seal-tone">全自动</span></span
+              >
+            </div>
+            <div class="state-cap">选中"全自动"时</div>
+          </div>
+          <div class="why">
+            降档（全自动→半自动）<b>立即生效</b>，只把当前这颗转朱并让底栏读数刷新；升档必须经安全确认——<b>程序不可自升</b>（5.3
+            的不变式）。<br />禁用态不给 hover，且 hover 到它上面时 <code>title</code> 写"白名单为空，无可免确认动作"。
+          </div>
+        </div>
+
+        <div class="prow">
+          <div class="who">左栏区切换<small>.nav-item（6 只）</small></div>
+          <div>
+            <div class="state-cell" style="width: 100%">
+              <span class="nav-item" style="width: 100%">岗位<span class="nav-count">28</span></span>
+            </div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="nav-item" data-st="hover" style="width: 100%">岗位<span class="nav-count">28</span></span>
+            </div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="nav-item on" style="width: 100%">岗位<span class="nav-count">28</span></span>
+            </div>
+            <div class="state-cap">选中态（左缘朱砂短线）</div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="nav-item alert" style="width: 100%">信任与安全<span class="nav-count">12</span></span>
+            </div>
+            <div class="state-cap">有未处理事项 → 计数转朱</div>
+          </div>
+          <div>
+            <div class="state-cell">
+              <span class="nav-item" style="width: 100%"
+                >岗位<span class="nav-count" style="color: var(--celadon)">●</span></span
+              >
+            </div>
+            <div class="state-cap">该区内有任务在跑</div>
+          </div>
+          <div class="why">
+            切换<b>不卸载</b>其他视图（1.10-01 的行为不变式），所以切回来的滚动位置、输入草稿、正在跑的任务都还在。<br />计数是状态不是按钮：hover
+            计数本身无反应，点整行才切。
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 二、非按钮控件 ═══ -->
+      <div class="sec">
+        <div class="sec-h">二 · 选择类控件：选中怎么表达</div>
+        <div class="sec-sub">
+          统一用「描边转实 + 底色提一档 +
+          一条朱砂/青瓷内衬」表达选中，<b>绝不用改变尺寸</b>表达——尺寸变化会推挤相邻行，是全稿禁止的手法。
+        </div>
+        <div class="grid-3">
+          <div class="card">
+            <div class="card-head"><span class="card-title">区内页签 .tab</span></div>
+            <div class="card-body col">
+              <div class="row">
+                <span class="tab on">缺口报告</span><span class="tab" data-st="hover">打招呼话术</span
+                ><span class="tab">抓取证据</span>
+              </div>
+              <div class="delta">
+                选中：文字转实色 + 底部 2px
+                实线。悬停：只提亮文字，<b>不出现底线</b>（否则分不清哪个是选中）。点击后果：换内容区，URL
+                式深链同步（<code>#gap</code> / <code>#script</code>），从对话跳进来能落到对应页签。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">分段控件 .seg</span></div>
+            <div class="card-body col">
+              <div class="row">
+                <span class="seg"><span class="on">排版编辑</span><span>PDF 轻编辑</span></span>
+              </div>
+              <div class="delta">
+                选中段：底色 ink-750 + 文字转实。切换四段<b>不清空未保存改动</b>，改为在版本条上长出一颗琥珀"有 2
+                处待确认"，点它跳回原段。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">复选 .cbx</span></div>
+            <div class="card-body col">
+              <div class="row"><span class="cbx on">✓</span><span class="hint">筛选：只看外发（青）</span></div>
+              <div class="row">
+                <span class="cbx grant on">✓</span><span class="hint">授权：加入免确认白名单（朱）</span>
+              </div>
+              <div class="delta">
+                同一个方框两种填充色：<b>青 = 只影响本机视图</b>，<b>朱 = 影响 agent 能不能替你发</b
+                >。勾选授权框时右侧立刻长出「谁批的 · 时间」两列读数，取消勾选走二次确认（原地转朱）。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">计划行 .plan-i</span></div>
+            <div class="card-body col">
+              <div class="plan-i on">
+                <div class="t">找岗 → 打招呼（半自动）</div>
+                <div class="m"><span>7 节点</span><span>跑过 12 次</span></div>
+              </div>
+              <div class="delta">
+                悬停：底色提一档 + 右侧浮出「▶
+                运行」一颗弱按钮。点击：换画布内容，<b>不自动运行</b>。双击：进入行内改名（见 08 稿"重命名"条目）。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">简历区块行 .blk + 拖拽</span></div>
+            <div class="card-body col">
+              <div class="blk on">
+                <span class="grip">⠿</span>项目经历<span class="tag amber" style="margin-left: auto">改动待确认</span>
+              </div>
+              <div class="blk"><span class="grip" data-st="hover">⠿</span>工作经历</div>
+              <div class="blk dragging"><span class="grip">⠿</span>教育背景</div>
+              <div class="drop-line"></div>
+              <div class="delta">
+                把手平时 <code>opacity .35</code>，行 hover 才显形。拖动中：整行转朱砂虚线，落点用一条 2px
+                青瓷线表示，<b>松手才落库</b>（拖动过程不写盘、不重排其他行动画）。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">画布节点 .node</span></div>
+            <div class="card-body col">
+              <div class="row wrap">
+                <span class="node" style="position: static; width: auto">待运行</span
+                ><span class="node running" style="position: static; width: auto">运行中</span
+                ><span class="node fail" style="position: static; width: auto">失败</span>
+              </div>
+              <div class="row wrap">
+                <span class="node gate" style="position: static; width: auto">闸门 · 虚线</span
+                ><span class="node on" style="position: static; width: auto">选中 · 外环</span>
+              </div>
+              <div class="delta">
+                单击选中（青瓷外环，右栏换成节点详情）；双击进入该节点的参数表单；悬停 300ms
+                出证据浮层。<b>节点本身没有"运行"按钮</b>——运行只从控制条发起，避免在图上误触。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 三、点击后果的六种形态 ═══ -->
+      <div class="sec">
+        <div class="sec-h">三 · 点击之后发生什么：只有这六种形态</div>
+        <div class="sec-sub">
+          这是"点修改是弹窗还是直接改"这类问题的总答案。全 app
+          的每一个控件都必须落进下面六格之一，<b>不允许出现第七种</b>（比如"点了没反应，等 3
+          秒后页面自己变了"）。逐控件归属见 08 稿。
+        </div>
+        <div class="tax">
+          <div class="card">
+            <div class="card-head"><span class="num">形态 ①</span><span class="card-title">就地回执</span></div>
+            <div class="card-body">
+              <div class="mini">
+                <span class="btn btn-line is-done">已保存</span>
+                <div class="delta" style="margin-top: 10px">
+                  用于：保存、复制、加入白名单、导出。按钮自己变青换文案，2 秒回落，<b>页面不滚动、不弹层</b>。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="num">形态 ②</span><span class="card-title">行内编辑（不弹窗）</span>
+            </div>
+            <div class="card-body">
+              <div class="mini">
+                <div class="row">
+                  <span class="edit-field">项目经历</span><span class="edit-field-hint">⏎ 保存 · Esc 取消</span>
+                </div>
+                <div class="delta" style="margin-top: 10px">
+                  用于：<b>改名类</b>（计划重命名、区块标题、话术微调）。原地沉进 ink-950 的"井"里 + 青瓷描边；<code
+                    >⏎</code
+                  >
+                  存、<code>Esc</code> 退，Esc 时若内容有变，长按 1 秒才真丢弃。<b>超过 3 行的正文不用行内</b>，见 09
+                  稿。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="num">形态 ③</span><span class="card-title">右栏替换</span></div>
+            <div class="card-body">
+              <div class="mini">
+                <div class="row">
+                  <span class="tag celadon">右栏 → 快照回放</span><span class="hint">主区不动</span>
+                </div>
+                <div class="delta" style="margin-top: 10px">
+                  用于：看证据、节点详情、抓取原文、PDF
+                  预览。<b>只读的东西一律不弹窗</b>——它不该打断你正在做的事。右栏顶部出现"← 返回内核页面"一颗。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="num">形态 ④</span><span class="card-title">抽屉（对照着看）</span></div>
+            <div class="card-body">
+              <div class="mini" style="padding: 0; min-height: 118px">
+                <div style="position: relative; height: 118px">
+                  <div
+                    style="
+                      position: absolute;
+                      inset: 0;
+                      background: var(--ink-850);
+                      padding: 8px 10px;
+                      font-size: 10.5px;
+                      color: var(--fg-4);
+                    "
+                  >
+                    主区内容被压窄
+                  </div>
+                  <div
+                    style="
+                      position: absolute;
+                      top: 0;
+                      right: 0;
+                      bottom: 0;
+                      width: 110px;
+                      background: var(--ink-800);
+                      border-left: 1px solid var(--line-strong);
+                      padding: 8px;
+                      font-size: 10px;
+                      color: var(--fg-3);
+                    "
+                  >
+                    v2 对照
+                  </div>
+                </div>
+              </div>
+              <div class="delta" style="margin-top: 10px">
+                用于：版本对照、快照历史、算子面板。<b>需要"两边同时看"</b>的才用抽屉；抽屉里的动作（如"回到这一版"）仍走形态
+                ① 或 ⑥。
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="num">形态 ⑤</span><span class="card-title">遮罩弹窗（只留给两件事）</span>
+            </div>
+            <div class="card-body">
+              <div class="mini">
+                <div class="row"><span class="tag seal">不可逆</span><span class="tag seal">要读完整风险</span></div>
+                <div class="delta" style="margin-top: 10px">
+                  用于：清空本机全部数据（要打字确认）、首次风险签字、导入备份冲突。<b>判据</b>：这件事做错了会丢数据或替你发出东西，才配得上遮住整屏。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="num">形态 ⑥</span><span class="card-title">视图/流程推进</span></div>
+            <div class="card-body">
+              <div class="mini">
+                <div class="row"><span class="tag">当前</span><span class="hint">对话 → 岗位（带筛选条件）</span></div>
+                <div class="delta" style="margin-top: 10px">
+                  用于：换区、"按此改简历 →"、"批量打招呼"。跨区跳转<b>必须带着上下文走</b>（岗位
+                  id、筛选条件），落地后顶部出现一条"来自：岗位 · 高级前端"的可回退面包屑。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 四、键盘与焦点 ═══ -->
+      <div class="sec">
+        <div class="sec-h">四 · 键盘等价与焦点次序</div>
+        <div class="sec-sub">
+          每一颗鼠标动作都要有键盘等价，否则自动化测试无法覆盖（§7.1 的 V 类靠 harness 点，也靠这条）。
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <dl class="kb">
+              <dt><span class="kbd">⌘K</span></dt>
+              <dd>全局命令面板：输入区名 / 岗位标题 / 工具 id 直接跳，等价于点左栏。</dd>
+              <dt><span class="kbd">⏎</span> / <span class="kbd">Esc</span></dt>
+              <dd>
+                行内编辑保存 / 取消；弹窗里 <code>⏎</code> 只作用于<b>安全</b>那颗按钮，盖印与删除永远不接
+                <code>⏎</code>（防回车通过）。
+              </dd>
+              <dt><span class="kbd">⇧</span></dt>
+              <dd>输入框换行不发送（发送口只认 <code>⏎</code>）。</dd>
+              <dt><span class="kbd">⌘Z</span> / <span class="kbd">⇧⌘Z</span></dt>
+              <dd>撤销 / 重做，作用域<b>跟着焦点走</b>：焦点在简历编辑器就只撤简历，不会把话术改动一起撤掉。</dd>
+              <dt><span class="kbd">Tab</span></dt>
+              <dd>
+                次序固定为 左栏 → 主区 → 右栏 → 底栏；遮罩弹窗打开时焦点<b>锁在弹窗内</b>，关掉后回到唤起它的那颗控件。
+              </dd>
+              <dt><span class="kbd">Space</span></dt>
+              <dd>画布节点获得焦点后按空格 = 选中并替换右栏（等价于单击），不会触发运行。</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <ul class="notes">
+        <li>
+          <b>hover 与 active 不共用视觉</b>：位移只属于按下。这条来自实测习惯——用户分不清"悬停即生效"和"要点一下"。<i
+            class="an"
+            >1</i
+          >
+        </li>
+        <li>
+          <b>禁用必须带原因</b>：只降透明度而不写原因的按钮视为缺陷；原因写进 <code>title</code> 与旁边的
+          hint，且用原因码（<span class="mono">ENTITLEMENT_EXHAUSTED</span>）与 06 稿对齐。<i class="an">2</i>
+        </li>
+        <li>
+          <b>加载不跳版</b>：转针态锁最小宽度，文案换进行时动词（保存中 / 盖章中 / 校验中），完成后换结果态。<i
+            class="an"
+            >3</i
+          >
+        </li>
+        <li>
+          <b>结果态的回落时间统一 2 秒</b>，失败态永不自动回落；这套时间是全 app 常量，不在组件里各写各的。<i class="an"
+            >4</i
+          >
+        </li>
+        <li>
+          <b>不可逆动作用原地两次点击，不用弹窗</b>；唯一例外是"清空本机全部数据"与首次风险签字，它们要打字/要读全文。<i
+            class="an"
+            >5</i
+          >
+        </li>
+        <li>
+          <b>只读的东西永远不打断</b>：证据、原文、回放、预览都往右栏放，弹窗只留给"会丢数据或会发出去"两类。<i
+            class="an"
+            >6</i
+          >
+        </li>
+        <li>
+          <b>跨区跳转必须带上下文</b>并长出可回退面包屑，否则用户不知道自己是"新开了一个页面"还是"换了个筛选"。<i
+            class="an"
+            >7</i
+          >
+        </li>
+        <li><b>每颗按钮都要有键盘等价</b>，且盖印 / 删除这类绝不绑定 <code>⏎</code>。<i class="an">8</i></li>
+      </ul>
+    </div>
+
+    <script src="assets/theme-toggle.js"></script>
+  </body>
+</html>

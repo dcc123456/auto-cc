@@ -7,8 +7,42 @@
     },
     "nav": {
       "chat": "对话",
-      "workflow": "工作流",
-      "diagnostics": "诊断"
+      "jobs": "岗位",
+      "resume": "简历",
+      "workflow": "流程",
+      "trust": "信任",
+      "diagnostics": "诊断",
+      "aria": "工作台导航"
+    },
+    "theme": {
+      "toLight": "毡案（浅色）",
+      "toDark": "墨案（深色）"
+    },
+    "statusbar": {
+      "idle": "无运行",
+      "pointer": "登录态与额度读数在「信任」"
+    },
+    "desk": {
+      "jobs": {
+        "title": "岗位",
+        "hint": "搜岗位、读 JD、挑出值得打招呼的那几个"
+      },
+      "resume": {
+        "title": "简历",
+        "hint": "本机简历与知识库，按岗位补齐缺口"
+      },
+      "workflow": {
+        "title": "流程",
+        "hint": "一条线跑完搜索到投递，随时可停可续"
+      },
+      "trust": {
+        "title": "信任",
+        "hint": "登录态、额度、漏斗与审计——动作离开这台机器之前先看这里"
+      },
+      "diagnostics": {
+        "title": "诊断",
+        "hint": "自测台：桥接、装配、定位实验室。日常使用不需要进来"
+      }
     },
     "status": {
       "heading": "主进程状态",
