@@ -8,7 +8,7 @@ import type {
   GenerationRewriteRowView,
   GenerationRunRowView,
 } from '@auto-cc/shared';
-import { DeskButton, DeskCheck, DeskTextarea } from './ui/controls';
+import { DeskButton, DeskCheck, DeskDisclosure, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
@@ -162,14 +162,14 @@ export function GeneratePanel() {
         <ul className="mt-1 flex flex-wrap gap-1">
           {row.sourceEvidenceIds.map((evidenceId) => (
             <li key={evidenceId}>
-              <button
-                type="button"
+              <DeskDisclosure
+                action={`generate-source-${evidenceId}`}
                 data-generate-source={evidenceId}
+                open={evidenceId in bodies}
                 onClick={() => toggleSource(evidenceId)}
-                className="text-left text-[11px] text-slate-400 hover:text-celadon"
               >
                 {t('generate.sourceLine', { id: evidenceId })}
-              </button>
+              </DeskDisclosure>
               {evidenceId in bodies && (
                 <p data-generate-source-body={evidenceId} className="text-[11px] leading-relaxed text-slate-500">
                   {bodies[evidenceId] ?? t('generate.sourceGone')}

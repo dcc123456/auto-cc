@@ -26,7 +26,7 @@ import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
-import { DeskButton } from './ui/controls';
+import { DeskButton, DeskSegmented } from './ui/controls';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -263,35 +263,24 @@ export function ChatPanel() {
           <Gauge size={11} />
           {t('agent.autonomy.heading')}
         </span>
-        <span
-          className="inline-flex gap-0.5 rounded-lg border border-line-strong bg-ink-950 p-0.5"
-          data-testid="chat-autonomy-switch"
-        >
-          {AUTONOMY_OPTIONS.map((level) => (
-            <button
-              key={level}
-              type="button"
-              data-autonomy={level}
-              data-autonomy-on={String(snapshot?.session.autonomy === level)}
-              disabled={busy !== undefined}
-              onClick={() =>
-                void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
-                  bridge?.chat['session.setAutonomy'](level),
-                )
-              }
-              className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 disabled:opacity-40 ${
-                snapshot?.session.autonomy === level
-                  ? // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
-                    level === 'auto'
-                    ? 'bg-seal-wash text-seal ring-1 ring-inset ring-seal/35'
-                    : 'bg-ink-750 text-slate-100'
-                  : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300'
-              }`}
-            >
-              {t(`agent.autonomy.${level}`)}
-            </button>
-          ))}
-        </span>
+        <DeskSegmented
+          action="chat-autonomy"
+          markers={{ testid: 'chat-autonomy-switch' }}
+          value={snapshot?.session.autonomy}
+          busy={busy !== undefined}
+          onSelect={(level) =>
+            void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
+              bridge?.chat['session.setAutonomy'](level),
+            )
+          }
+          options={AUTONOMY_OPTIONS.map((level) => ({
+            value: level,
+            label: t(`agent.autonomy.${level}`),
+            // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
+            isRisk: level === 'auto',
+            markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
+          }))}
+        />
         <span className="ml-auto text-[10px] text-slate-500" data-testid="chat-autonomy-current">
           {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
         </span>

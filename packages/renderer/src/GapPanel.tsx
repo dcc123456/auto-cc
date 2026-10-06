@@ -11,7 +11,7 @@ import type {
   GapSuggestionRow,
 } from '@auto-cc/shared';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
-import { DeskButton, DeskTextarea } from './ui/controls';
+import { DeskButton, DeskDisclosure, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 三栏的栏序（spec 4.4-03）：栏是**状态**不是要求种类，一栏里的行序等于拆解的稳定序，界面不再二次排序。 */
@@ -232,11 +232,11 @@ export function GapPanel() {
         <ul className="mt-1 flex flex-col gap-1">
           {row.evidence.map((evidence) => (
             <li key={evidence.id}>
-              <button
-                type="button"
+              <DeskDisclosure
+                action={`gap-evidence-${evidence.id}`}
                 data-gap-evidence={evidence.id}
+                open={evidence.id in bodies}
                 onClick={() => toggleEvidence(evidence)}
-                className="text-left text-[11px] text-slate-400 hover:text-celadon"
               >
                 {t('gap.evidenceLine', {
                   id: evidence.id,
@@ -244,7 +244,7 @@ export function GapPanel() {
                   score: evidence.score.toFixed(2),
                 })}
                 {evidence.matchedTokens.length > 0 && <> · {evidence.matchedTokens.join(' / ')}</>}
-              </button>
+              </DeskDisclosure>
               {evidence.id in bodies && (
                 <p data-gap-evidence-body={evidence.id} className="mt-1 text-[11px] leading-relaxed text-slate-500">
                   {bodies[evidence.id] ?? t('gap.evidenceGone')}

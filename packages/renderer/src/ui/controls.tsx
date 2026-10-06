@@ -650,6 +650,138 @@ export function DeskRange({ action, label, className = '', value, onValueChange,
   );
 }
 
+export interface DeskDisclosureProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** `data-action` 值：harness 定位这只披露键的凭据。 */
+  action: string;
+  /** 正文当前在不在页面上。原件只负责把它挂成 `data-open` 与 `aria-expanded`，正文本身归调用方持有。 */
+  open: boolean;
+}
+
+/**
+ * 行内披露（"看证据 / 看出处"那一类）：只有下划线档的文案，无框无底——它展开的是紧挨其下的一小段正文，
+ * 不是一次动作，所以既不能涂 `DeskButton` 的六档（那会造出"按钮长得像文字链"的第四种画法），
+ * 也不许留在面板里各写一遍 class（`GeneratePanel` 与 `GapPanel` 原先抄的是同一条字面量，§2.2 的第二 occurrence）。
+ * @param action `data-action` 凭据
+ * @param open 正文此刻在不在（由调用方判，例如"这一条的正文有没有取回来"）
+ * @param className 追加档（一般是行内对齐的微调，不写颜色与字号）
+ * @param rest 原生 button 属性透传（`onClick`、`data-*`、`disabled`……）
+ * @returns 一只可展开/收起的文字键
+ */
+export function DeskDisclosure({ action, open, className = '', ...rest }: DeskDisclosureProps) {
+  return (
+    <button
+      type="button"
+      data-action={action}
+      data-open={open ? 'true' : 'false'}
+      aria-expanded={open}
+      className={`text-left text-[11px] text-slate-400 hover:text-celadon ${className}`}
+      {...rest}
+    />
+  );
+}
+
+/** `DeskSegmented` 的一格。类型参数是这一组取值的联合（调用方不必再把回调实参断言回去）。 */
+export interface DeskSegmentOption<T extends string = string> {
+  /** 该格的值（回报给 `onSelect`，同时是 `data-action` 后缀）。 */
+  readonly value: T;
+  /** 该格的文案（调用方翻译好传入）。 */
+  readonly label: ReactNode;
+  /**
+   * 选中那一格涂朱砂。**只有"选上它就把风险抬高"的档才给**（plan §5 的归属表：朱砂=外发与不可逆），
+   * 普通选中不给这一档，否则"选中态"本身会被读成"已经在冒险"。
+   */
+  readonly isRisk?: boolean;
+  /** 附加 `data-*` 读数（迁移旧消费者时保住既有验收凭据，照 `Banner` 的 `markers` 同形）。 */
+  readonly markers?: Record<string, string>;
+}
+
+export interface DeskSegmentedProps<T extends string = string> {
+  /** 这一组的 `data-action` 前缀：每格拿到 `<action>-<value>`。 */
+  action: string;
+  /** 互斥的若干格，顺序即从左到右。 */
+  options: readonly DeskSegmentOption<T>[];
+  /** 当前选中值；`undefined` 表示还没有读数（一格都不涂选中档）。 */
+  value: T | undefined;
+  /** 选中回调（收人话签名：值，不是事件）。 */
+  onSelect: (value: T) => void;
+  /** 在途：整组按不动，且**不**派发 `onSelect`。 */
+  busy?: boolean;
+  /** 按不动时挂到每只格上的原因码（与 `DeskButton` 同一口径）。 */
+  disabledReason?: string;
+  /** 原因码对人说的话（只给码不给这句话就是谎报，见 `DeskButton` 的 props 注释）。 */
+  disabledReasonLabel?: string;
+  /** 整组的外边/对齐档。 */
+  className?: string;
+  /** 挂在组容器上的附加 `data-*`（旧消费者常拿它当 testid）。 */
+  markers?: Record<string, string>;
+}
+
+/**
+ * 分段控件：N 只互斥格共用一个框，选中那一格实底。
+ * 它存在的理由是档位这类"选一档"的形态在 07 稿里既不是按钮也不是页签；
+ * 「按不动」走 `aria-disabled` 而不是原生 `disabled`（原生禁用不派发鼠标事件，`title` 就不出现）。
+ * @param action 每只格的 `data-action` 前缀
+ * @param options 互斥格列表
+ * @param value 当前选中值
+ * @param onSelect 选中回调
+ * @param busy 是否在途
+ * @param disabledReason 禁用原因码（可选）
+ * @param disabledReasonLabel 禁用原因的人话（可选）
+ * @param className 整组的外边/对齐档
+ * @param markers 组容器上的附加 `data-*`
+ * @returns 一条带框的分段控件
+ */
+export function DeskSegmented<T extends string>({
+  action,
+  options,
+  value,
+  onSelect,
+  busy = false,
+  disabledReason,
+  disabledReasonLabel,
+  className = '',
+  markers,
+}: DeskSegmentedProps<T>) {
+  const groupAttrs = Object.fromEntries(
+    Object.entries(markers ?? {}).map(([name, attr]) => [`data-${name}`, attr]),
+  ) as Record<string, string>;
+  return (
+    <span
+      role="group"
+      {...groupAttrs}
+      className={`inline-flex gap-0.5 rounded-lg border border-line-strong bg-ink-950 p-0.5 ${className}`}
+    >
+      {options.map((option) => {
+        const isSelected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            data-action={`${action}-${option.value}`}
+            data-on={isSelected ? 'true' : 'false'}
+            aria-pressed={isSelected}
+            {...Object.fromEntries(Object.entries(option.markers ?? {}).map(([name, attr]) => [`data-${name}`, attr]))}
+            {...(busy
+              ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
+              : { onClick: () => onSelect(option.value) })}
+            {...(busy && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
+            // 选中档按"是不是风险档"分两支；未选中档永远只提亮文字，不预支任何语气。
+            className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${busy ? 'opacity-40 ' : ''}${
+              isSelected
+                ? option.isRisk
+                  ? 'bg-seal-wash text-seal ring-1 ring-inset ring-seal/35'
+                  : 'bg-ink-750 text-slate-100'
+                : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </span>
+  );
+}
+
 export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
   /** 该字段的 `data-action` 值（保存那一下的凭据）。 */
   action: string;
