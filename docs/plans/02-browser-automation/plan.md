@@ -2171,3 +2171,34 @@ zh-CN / en 两份语言包同时补齐，复跑 `pnpm lint`（eslint + `check-re
 **都等用户在场时一起跑**——前者要真改操作系统窗口尺寸，后者要把 app 窗口带到前台，
 离线一律不得用 `Emulation.setDeviceMetricsOverride` 这类替身伪造对照。
 因此本裁定的实现范围只到「代码 + 单测 + 文档口径」，**V 半边仍然欠着**，状态位保持 `[!]` 不动。
+
+### 16.1 裁定⑰的实现设计（下一窗照这一节直接落码，别再重新设计）
+
+**三段式，中间那段（下发）一行都不动**：
+
+1. **挂回执（arm）**：`perform` 在 `locate.find` 之后、`dispatch` 之前，往胜出节点所在那一帧注入一段脚本——
+   按 `candidateIndex` + `nodeIndex`（`findNode`，与 `buildValueReadScript` 同一套身份号）找回同一个节点，
+   在它上面挂一个 **capture 阶段的 `click` 监听**，把计数与 `document.URL` 存进页面 `globalThis` 上的一支探针
+   （键名导出成常量，与 `UPLOAD_PROBE_KEY` 同一条纪律）。挂不到节点（节点已被换掉）就当探针不可用。
+2. **下发**：`dispatch(...)` 原样，CDP 与 DOM 两条通道都不改。
+3. **读回执（read）**：有界轮询（`clickReadbackMs` 默认 600、`clickReadbackStepMs` 默认 50，与 upload 那一对同形）：
+   - 计数涨了 → **确认**；
+   - 探针不在了但 `document.URL` 与挂表时不同 → **确认**（这一次点击把页面导航走了，世界随之销毁——
+     这是必须留的出口，否则「点一个会跳转的按钮」会被判成失败，那是比原缺陷更糟的假阴性）；
+   - 探针在、计数没涨、URL 也没变 → **未确认**，`status` 给 `timeout`（`ActResultView.status` 本来就有这一支，
+     界面与 agent 摘要那句「已完成」自然跟着翻成「等待超时」）；
+   - 探针读不回来（脚本执行失败、隔离世界注入不通、**替身帧没供这一类脚本**）→ 记为「不可用」，
+     **按今天的行为给 `done`**，只在 `ctx.logger.warn` 里留一句未确认。
+
+**为什么最后一条要放软**：判据要抓的是那一次实测——窗口不在前台、CDP 事件被合成器丢弃、
+而页面监听计数停在 0。那种场景里探针**一定挂得上**（挂表走的是 DOM 通道，与遮挡无关），所以放软不会放过它；
+反过来若把「探针不可用」也判失败，2.2-10 的 iframe 链路与显式降级到 DOM 通道的那些用例会被整片打成超时，
+是拿新的假阴性换旧的假阳性。**这条取舍写进注释，别留给下一个人重新猜。**
+
+**落地清单（五处，一次提交做完）**：`packages/browser/src/locator-script.ts`（`buildClickArmScript` +
+`buildClickReceiptReadScript` + `CLICK_RECEIPT_KEY`）、`act-service.ts`（`perform` 的三段与两条配置键）、
+`test-doubles.ts`（`ScriptKind` 加 `'clickArm' | 'clickReceipt'` 两条，认法照现有 `scriptKindOf` 的独有条句）、
+`act-service.test.ts`（**新增三条**：回执涨了给 done、停在 0 给 timeout、探针不可用仍给 done）、
+`packages/renderer` 的 `agent.tool.labels.actClick` 摘要文案（两份语言包一起改，缺一份 lint 即红）。
+spec 侧只补 2.2-12 的「两条通道如实报告」一句：`click` 的 `done` 从此表示「页面回执过」，
+而 `2.1-12` / `2.1-10` 的 V 半边**不因这次改动而解除**——它们欠的是在场环境，不是代码。
