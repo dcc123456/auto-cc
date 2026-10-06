@@ -359,6 +359,12 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   同一轮还有一条抓取口径：`page.extract` 在 `navigate` 刚返回时就抽会拿到 `containers=0`（卡片是 `/api/jobs` 异步长出来的，
   而 navigate 常与首屏装载相撞返回信封 `(-3) loading`），**必须先等容器出现再抽**。
 
+- **实测（6.5-05 第十九片补窗）窗口 hidden 时“拍不到帧”这条要收窄**：`document.visibilityState === 'hidden'`
+  时 CDP 的**输入**不落页（上面 2.1-12 那条仍然成立，指针手势类判据必须等用户在场把窗口带到前台），
+  但 `Page.captureScreenshot` **照样出帧**——本轮在同一 hidden 状态下取到深浅两张 2400×1544、字节与 md5 互异的
+  真实画面（`docs/acceptance/06-ui-ink-desk/6.5-05-inspector-{light,dark}.png`）。所以“V 类截图受阻”不再是 hidden
+  的必然结论：先分清这一条判据要的是**画面长什么样**（可以直接拍）还是**指针有没有落页**（必须用户在场）。
+
 ---
 
 ## 10. 机检落地状态（避免误以为规则已被工具强制执行）

@@ -1,0 +1,105 @@
+6.5 第十九片取证：检视器（参数卡 + 运行读数卡）的活体读数
+==========================================================
+
+时间：2026-10-06 11:22 UTC（脚本 `tmp/v6b/insp05.mjs`，读数全文 `tmp/v6b/insp05.out`）
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata`，CDP 10222），页面 target `--url 5173`
+起点：画布照的是**运行镜像**（`canvas-graph-source`：「没有选中计划，格子只按本次运行的步骤镜像摆；这不是库里的图。」），
+`canvas-draft-count` = 「图上 0 格」——所以本轮往图上加的每一格都只在命令栈里，撤销掉就归零，
+**用户开发档里那条计划的草稿一个字节都没被改写**（写盘只发生在「保存到库」那一刻，本轮一只没按）。
+
+一、为什么这一片现在才取得到
+----------------------------
+
+第二片那轮（`6.5-05-canvas-toolbar-readings.txt`）把两只检视器标成受阻，理由是「图上 0 格选不出节点，
+而为读数加格子会改写用户实例的草稿」。第十八片把这条前提否掉了：加格 + 撤销不碰库，
+所以这一片照着走一遍就行。**建格走调色板那只按钮**（`addOperatorNode` 末尾就把新建的那格选中，
+`WorkflowCanvas.tsx:462`），不需要在画布上点中它。
+
+另有一条通道口径：本窗 `document.visibilityState` 是 `hidden`（窗口被遮挡 → CDP 鼠标事件不落页，
+AGENTS.md §9 的 2.1-12），所以本轮的点击与输入全走页内 `.click()` 与 `HTMLInputElement` 的原生 setter。
+这不影响读数的可信度——要量的是组件算出来的样式与状态位，不是指针手势。
+
+二、检视器整块（毡案 = 浅色，`theme: light`）
+--------------------------------------------
+
+| 读数位 | 选择器 / 属性 | 毡案读数 | 墨案读数 |
+| --- | --- | --- | --- |
+| 参数卡容器 | `[data-testid="operator-param-form"]` | `border solid rgba(38,44,48,.15)`（`line`）、`bg oklab(0.867244 .0002 .0185 / .4)`、`radius 12px` | 同结构，边框换成 `line` 的深色档 |
+| 卡头 | `h4` / `p` | 「参数」/「抓取 JD 入库 · 字段由该算子的参数 schema 生成」 | 同文案 |
+| 字段清单 | `[data-field-name]` | `query,city,target`（**全部由 zod 派生**，界面里没有一只 per-算子 表单） | 同 |
+| 必填标记 | `label .text-seal` | `*`（关键词后面） | 同 |
+| 字段输入框（静止） | `[data-testid="param-field"] input` | `border solid rgba(38,44,48,.3)`、`radius 6px`、`box-shadow none` | `border solid rgba(150,178,196,.26)`（`line-strong`） |
+| 字段输入框（**光标落在里面**） | 同上，`:focus` | `border solid oklab(0.554606 -0.0678 -0.0059 / .6)` = **青瓷** | 同一条 `focus:border-celadon/60` |
+| 「保存参数」 | `[data-action="param-save"]` | `data-effect="amber"`、`border oklab(0.581231 .0262 .1144 / .4)`、`bg …/.14`、`color rgb(161,112,15)` | **同一支琥珀**（档位色不随主题翻，6.2 原件的口径） |
+
+**为什么参数落库涂琥珀不涂朱砂**：`commitNodeParams` 写的是**这台机器上的这张图**（命令栈），
+一次都不离开本机；朱砂只留给外发与不可逆（plan §5 的归属表）。焦点描边用青瓷而不是青玉：
+青玉是"已经读回来/已经办成"，青瓷才是"此刻指向"——与 `ScriptPanel` 候选行、`JdPanel` 列表行同一画法（§2.2）。
+
+三、拒绝与回执两行（同一张卡上的两种说法）
+------------------------------------------
+
+| 腿 | 读数 |
+| --- | --- |
+| 必填留空直接点「保存参数」 | `label[data-invalid="true"]`、输入框 `box-shadow` 第 4 层 = `oklab(0.542214 .1478 .0956 / .4) 0 0 0 1px`（**朱砂环**）、`[data-testid="param-form-rejected"]` = 「必填项没填，已拒绝保存」`color rgb(192,57,31)`；`canvas-draft-count` 仍是「图上 1 格」且参数没写回（界面上不存在"红着也能保存"这条路） |
+| 填上「杭州 后端 应届」再点 | `data-invalid` 回到 `false`、朱砂环退成 `none`（红标的含义是"上一次被拒"，用户在改就不该留着） |
+| 校验通过那一次 | `[data-testid="param-form-saved"]` = 「已写回画布上的这一格」`color rgb(47,143,102)`（**青玉 = 办成了**） |
+| 参数真的进了命令栈 | 先点中镜像格、再点回这一格：表单重挂载后输入框读回 `value="杭州 后端 应届"`——它不是留在草稿里，是从 `snapshot.nodes` 那一份重新派生出来的 |
+
+四、"单选才有检查器"这一条是活的
+--------------------------------
+
+| 腿 | `operator-param-form` | `canvas-node-detail` 的 `data-node-id` |
+| --- | --- | --- |
+| 选中图上新建的那格 | 1 | `jd-capture-draft-1`（`data-node-source="none"`，文案「本次进程没有 run，库里也没有可续的 run，所以这一格没有落库读数。」） |
+| 点中镜像格 `jd-capture` | **0**（镜像格不在图上，没有可编辑的参数——参数卡整块不出现，而不是摆两只按不动的键） | `jd-capture`（读数卡跟着换人） |
+| 点回图上那一格 | 1 | `jd-capture-draft-1` |
+| 撤销两次之后 | 0 | 0，`canvas-draft-count` 回到「图上 0 格」，`canvas-undo` 的 `data-disabled-reason` = `NOTHING_TO_UNDO` |
+
+五、本轮顺手挖出来并修掉的缺陷（提交 `578f73d`）
+-------------------------------------------------
+
+第一版探针在**一页干净的页面**上量到 `operator-param-form` 会长兄弟：建格 1 张 → 翻一次主题 2 张 →
+再翻 3 张，而撤销掉那一格之后三张仍堆在页面上（`y=1022/1247/1472`，全部可见）。
+`parentChildTags` 与 React 的子 fiber 链对不上，控制台报的是：
+
+```
+Encountered two children with the same key, `jd-capture-draft-1`.
+Keys should be unique so that components maintain their identity across updates.
+Non-unique keys may cause children to be duplicated and/or omitted.
+```
+
+根因是**两张卡是同一个 children 数组里的兄弟，而两者的 `key` 都直接取节点 id**——
+参数卡 `key={selectedSpec.id}` 与读数卡 `key={selectedCell.id}` 说的本来就是同一格，键值必然相同。
+React 遇到同键会复制出它自己不再管的 DOM。修法两支键各加一个前缀（`params:` / `detail:`），
+"换一格就重挂载"的语义一字未改。复核（`tmp/v6b/rp72.mjs`）：建格 1 张 → 深浅各翻一次仍是 1 张 →
+撤销回到「图上 0 格」且表单归 0，控制台不再出现同键报错。
+
+六、没取到的（如实留着）
+------------------------
+
+1. **`READ_ONLY` 那一支仍只有静态映射**：要它得让 run 真在跑（`isReadOnly` 由运行期推来），
+   为一条颜色读数去起一次自治运行会写库、会外发，不值当。参数卡上的只读提示行
+   （`param-form-readonly`，琥珀）与调色板那一条同理由，见 `6.5-04-drag-readings.txt` 第 9 条。
+2. **选中那一张格在画布上看不出来**：`[data-testid="canvas-node"]` 上没有 `data-node-selected`，
+   `OperatorNodeCard` 不画选中态，只有 react-flow 自己那一个 `selected` 类，而计算样式读出来是
+   `outline: none 3px rgb(27,34,40)`（也就是不画）。10 稿 ⑨ 要求"选中态 = 描边 + 四角把手 + 检查器同步"，
+   三件里只有"检查器同步"这一件成立（见第四节）。**这条已另立 6.5-06**，不在本行射程内。
+3. `busy` 转针那一帧（每次往返都在两次 eval 之间回来，与前十八片同一结论）。
+4. 截图里画布那一段是空的（节点在 flow 视口的当前变换之外）——本轮的验收对象是检视器那两张卡，
+   它们在画面里完整可读；格子本身的画法见 `6.5-01`/`6.5-04` 那两张。
+
+七、末态
+--------
+
+`canvas-draft-count` 「图上 0 格」、`operator-param-form` 0 张、画布收回（`canvas-holder` 不存在）、
+主题回到本轮起点（`storedTheme: light`）。本轮**没有点过**「保存到库」「校验」以外的任何写入口，
+`canvas-validate` 也没点（那是用户的界面状态）。
+
+八、入库的两张图
+----------------
+
+`6.5-05-inspector-light.png`（毡案：参数卡 + 运行读数卡，关键词已填、保存键琥珀）
+`6.5-05-inspector-dark.png`（墨案：同一条腿）
+两张 2400×1544，`md5` 分别是 `511fdf3a74f2c4e29ade240338a21ec0` / `e4f19f611b1680f48e4b33623a1f3c57`，
+与本目录其余全部图片逐张比对**互不相同**（§9 的 5.10-18 那条硬步骤）。
