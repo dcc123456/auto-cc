@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditorMetricKeyView, ResumeEditorView, ResumeLocaleView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -233,7 +234,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
     return (
       <section
         data-testid="resume-editor"
-        className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-[11px] text-slate-400"
+        className="rounded-xl border border-line bg-ink-900/60 p-4 text-[11px] text-slate-400"
       >
         {t('resume.editor.loading')}
       </section>
@@ -243,25 +244,40 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
   const rowCount = view.sections.length;
   const overThreshold = previewMs !== undefined && previewMs > view.timing.maxPreviewResponseMs;
   const isLargeDocument = rowCount > view.timing.largeDocumentSectionCount;
+  /** 在途那一档优先级最高：这时任何键的理由都是"上一趟还没回来"，而不是它自己的业务条件。 */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`resume.editor.reason.${code}`);
+  /** 把「禁用 + 原因码 + 人话版」一次配齐：漏掉 `disabled` 就等于挂个说法明的理由却照样能按（第九片实测过）。 */
+  const dead = (reason?: string) => ({
+    disabled: reason !== undefined,
+    disabledReason: reason,
+    disabledReasonLabel: reasonLabel(reason),
+  });
+  /** 各键的禁用理由：在途优先，其次才是它自己的业务条件（顺序即优先级，与第十二片同一条写法）。 */
+  const undoReason = busyReason ?? (view.canUndo ? undefined : 'NOTHING_TO_UNDO');
+  const redoReason = busyReason ?? (view.canRedo ? undefined : 'NOTHING_TO_REDO');
+  const saveReason = busyReason ?? (view.isDirty ? undefined : 'NOTHING_TO_SAVE');
 
   return (
-    <section data-testid="resume-editor" className="rounded-xl border border-indigo-900 bg-slate-900/60 p-4">
+    <section data-testid="resume-editor" className="rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <GripVertical size={16} />
           {t('resume.editor.heading')}
           <span className="break-all text-[11px] font-normal text-slate-500">{view.docId}</span>
         </h3>
-        <button
-          type="button"
-          data-action="close-editor"
-          disabled={!!busy}
+        <DeskButton
+          action="close-editor"
+          variant="ghost"
+          compact
+          busy={!!busy}
+          {...dead(busyReason)}
           onClick={requestClose}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <X size={12} />
           {t('resume.editor.close')}
-        </button>
+        </DeskButton>
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
@@ -270,8 +286,8 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
           data-dirty={String(view.isDirty)}
           className={
             view.isDirty
-              ? 'rounded border border-amber-800 px-1 text-amber-300'
-              : 'rounded border border-slate-700 px-1 text-slate-400'
+              ? 'rounded-chip border border-amber/45 px-1 text-amber'
+              : 'rounded-chip border border-line px-1 text-slate-400'
           }
         >
           {t(view.isDirty ? 'resume.editor.dirty' : 'resume.editor.clean')}
@@ -283,7 +299,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
             value={view.templateId}
             disabled={!!busy}
             onChange={(event) => useTemplate(event.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+            className={FIELD_CLASS}
           >
             {view.templates.map((template) => (
               <option key={template} value={template}>
@@ -299,7 +315,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
             value={view.locale}
             disabled={!!busy}
             onChange={(event) => useTemplate(undefined, event.target.value as ResumeLocaleView)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+            className={FIELD_CLASS}
           >
             <option value="zh-CN">zh-CN</option>
             <option value="en">en</option>
@@ -310,43 +326,34 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       {confirmClose && (
         <div
           data-testid="resume-editor-close-confirm"
-          className="mt-2 rounded-md border border-amber-900 bg-amber-950/30 p-3"
+          className="mt-2 rounded-md border border-amber/45 bg-amber-wash p-3"
         >
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
             <AlertTriangle size={14} />
             {t('resume.editor.closeConfirmTitle')}
           </p>
-          <p className="mt-1 text-[11px] text-amber-200/70">{t('resume.editor.closeConfirmHint')}</p>
+          <p className="mt-1 text-[11px] text-slate-300">{t('resume.editor.closeConfirmHint')}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              data-action="close-save"
-              disabled={!!busy}
+            <DeskButton
+              action="close-save"
+              variant="amber"
+              compact
+              busy={!!busy}
+              {...dead(busyReason)}
               onClick={() => {
                 // 先等保存那一趟跨进程往返真落地，再卸载：反过来会留下一份"看起来存了其实没存"的草稿
                 // （裁定⑨ 之后界面没有第二次恢复入口，所以这一步的顺序不能马虎）。
                 void bridge?.resume['editor.save'](docId).then(() => onClose());
               }}
-              className="rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
             >
               {t('resume.editor.saveAndLeave')}
-            </button>
-            <button
-              type="button"
-              data-action="close-discard"
-              onClick={() => onClose()}
-              className="rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950"
-            >
+            </DeskButton>
+            <DeskButton action="close-discard" variant="seal" compact onClick={() => onClose()}>
               {t('resume.editor.discardAndLeave')}
-            </button>
-            <button
-              type="button"
-              data-action="close-stay"
-              onClick={() => setConfirmClose(false)}
-              className="rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
-            >
+            </DeskButton>
+            <DeskButton action="close-stay" variant="ghost" compact onClick={() => setConfirmClose(false)}>
               {t('resume.editor.keepEditing')}
-            </button>
+            </DeskButton>
           </div>
         </div>
       )}
@@ -360,7 +367,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
             data-testid="resume-editor-section"
             data-section-id={section.id}
             data-index={index}
-            className="flex items-center gap-2 rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5"
+            className="flex items-center gap-2 rounded-control border border-line bg-ink-950/70 px-2 py-1.5"
           >
             <span
               data-testid="resume-editor-handle"
@@ -371,8 +378,8 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
               }}
               className={
                 drag?.fromIndex === index
-                  ? 'cursor-grabbing rounded border border-indigo-600 px-1 text-indigo-300'
-                  : 'cursor-grab rounded border border-slate-700 px-1 text-slate-400 hover:bg-slate-800'
+                  ? 'cursor-grabbing rounded-chip border border-celadon/70 px-1 text-celadon'
+                  : 'cursor-grab rounded-chip border border-line-strong px-1 text-slate-400 hover:bg-ink-800'
               }
             >
               <GripVertical size={14} />
@@ -385,8 +392,8 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
               }}
               className={
                 drag?.overIndex === index && drag?.fromIndex !== index
-                  ? 'flex-1 rounded border border-dashed border-indigo-500 px-1 py-0.5'
-                  : 'flex-1 rounded border border-transparent px-1 py-0.5'
+                  ? 'flex-1 rounded-chip border border-dashed border-celadon/70 px-1 py-0.5'
+                  : 'flex-1 rounded-chip border border-transparent px-1 py-0.5'
               }
             >
               <p className="text-[11px] text-slate-300">
@@ -426,7 +433,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
                 value={current}
                 disabled={!!busy}
                 onChange={(event) => setMetric(row.key, Number(event.target.value))}
-                className="w-44 accent-indigo-500"
+                className="w-44 accent-celadon"
               />
               <span data-testid={`resume-editor-metric-value-${row.key}`} className="w-16 text-slate-300">
                 {current} {t(`resume.editor.unit.${row.unit}`)}
@@ -444,42 +451,38 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-action="undo"
-          disabled={!view.canUndo || !!busy}
+        <DeskButton
+          action="undo"
+          variant="ghost"
+          compact
+          busy={!!busy}
+          {...dead(undoReason)}
           onClick={() => stepHistory('undo')}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <Undo2 size={12} />
           {t('resume.editor.undo')}
-        </button>
-        <button
-          type="button"
-          data-action="redo"
-          disabled={!view.canRedo || !!busy}
+        </DeskButton>
+        <DeskButton
+          action="redo"
+          variant="ghost"
+          compact
+          busy={!!busy}
+          {...dead(redoReason)}
           onClick={() => stepHistory('redo')}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <Redo2 size={12} />
           {t('resume.editor.redo')}
-        </button>
-        <button
-          type="button"
-          data-action="save-editor"
-          disabled={!view.isDirty || !!busy}
-          onClick={save}
-          className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
-        >
+        </DeskButton>
+        <DeskButton action="save-editor" variant="amber" compact busy={!!busy} {...dead(saveReason)} onClick={save}>
           <Save size={12} />
           {t('resume.editor.save')}
-        </button>
+        </DeskButton>
       </div>
 
       {rejected && (
         <p
           data-testid="resume-editor-rejected"
-          className="mt-2 break-all rounded-md border border-rose-900 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200"
+          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
         >
           {t('resume.editor.rejected', { message: rejected })}
         </p>
@@ -488,7 +491,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       {notice && (
         <p
           data-testid="resume-editor-notice"
-          className="mt-2 break-all rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
         >
           {notice}
         </p>
@@ -500,8 +503,8 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
           data-over={String(overThreshold)}
           className={
             overThreshold
-              ? 'flex items-center gap-1 rounded border border-amber-800 px-1 text-amber-300'
-              : 'flex items-center gap-1 rounded border border-slate-700 px-1 text-slate-400'
+              ? 'flex items-center gap-1 rounded-chip border border-amber/45 px-1 text-amber'
+              : 'flex items-center gap-1 rounded-chip border border-line px-1 text-slate-400'
           }
         >
           <Timer size={12} />
@@ -512,20 +515,21 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
         {isLargeDocument && (
           <span
             data-testid="resume-editor-large-document"
-            className="rounded border border-amber-900 px-1 text-[11px] text-amber-300"
+            className="rounded-chip border border-amber/45 px-1 text-[11px] text-amber"
           >
             {t('resume.editor.largeDocument', { count: rowCount, threshold: view.timing.largeDocumentSectionCount })}
           </span>
         )}
       </div>
 
+      {/* 纸面在两套主题下都保持白：预览给的是"打印出来长什么样"，它不是 app 的表皮（03 稿的纸面规则）。 */}
       {previewHtml ? (
         <iframe
           data-testid="resume-editor-preview"
           title={t('resume.editor.heading')}
           sandbox=""
           srcDoc={previewHtml}
-          className="mt-3 h-[520px] w-full rounded-md border border-slate-800 bg-white"
+          className="mt-3 h-[520px] w-full rounded-md border border-line-strong bg-white"
         />
       ) : (
         <p className="mt-3 text-[11px] text-slate-500" data-testid="resume-editor-preview-empty">

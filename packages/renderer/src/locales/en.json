@@ -563,7 +563,13 @@
         "timing": "Preview took {{ms}} ms (threshold {{max}} ms)",
         "timingOver": "Preview took {{ms}} ms, over the {{max}} ms threshold",
         "largeDocument": "{{count}} sections exceed the large-document threshold of {{threshold}}; preview will be slower",
-        "previewEmpty": "Preview unavailable"
+        "previewEmpty": "Preview unavailable",
+        "reason": {
+          "ACTION_BUSY": "The previous action hasn't come back yet",
+          "NOTHING_TO_UNDO": "No edit left to undo",
+          "NOTHING_TO_REDO": "No edit left to redo",
+          "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save"
+        }
       }
     },
     "pdfEdit": {

@@ -501,7 +501,13 @@
         "timing": "预览耗时 {{ms}} ms（阈值 {{max}} ms）",
         "timingOver": "预览耗时 {{ms}} ms 已超过阈值 {{max}} ms",
         "largeDocument": "区块数 {{count}} 已超过大文档阈值 {{threshold}}，预览会更慢",
-        "previewEmpty": "预览暂时取不到"
+        "previewEmpty": "预览暂时取不到",
+        "reason": {
+          "ACTION_BUSY": "上一条动作还没回来",
+          "NOTHING_TO_UNDO": "没有可撤销的编辑了",
+          "NOTHING_TO_REDO": "没有可重做的编辑了",
+          "NOTHING_TO_SAVE": "草稿与库里的一致，没有要保存的改动"
+        }
       },
       "locale": "语言",
       "seed": "载入演示内容",

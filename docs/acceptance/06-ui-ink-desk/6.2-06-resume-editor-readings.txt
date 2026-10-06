@@ -1,0 +1,105 @@
+6.2-06 第十三片取证：排版编辑器（`ResumeEditor`）换装后的活体读数
+================================================================
+
+时间：2026-10-06 09:00–09:06 UTC（一轮 `harness eval` / `shot`，脚本 `tmp/v6b/re1-*.js … re17-*.js`）
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/v6-userdata`，CDP 10222），目标页 `--url 5173`
+可见性：`document.visibilityState = visible`、`hasFocus = true`（所以截图与属性读数是同一轮取的，不是"只读数没画面"那一族）
+方式：页面里 `getComputedStyle()` + `data-*` 现读；切主题走 `[data-action=shell-theme-toggle]`。
+
+令牌基线（下面的"对上"都以这几个值为尺）：
+墨案 `seal = rgb(226,84,58)`、`amber = rgb(224,163,63)`、`celadon = rgb(127,182,173)`、
+`line = rgba(150,178,196,.14)`、`line-strong = …/.26`、`ink-950 = rgb(8,12,16)`；
+毡案 `seal = rgb(192,57,31)`、`amber = rgb(161,112,15)`、`celadon = rgb(63,128,120)`、
+`line = rgba(38,44,48,.15)`、`line-strong = …/.30`。
+**组件里零 `theme ===` 分支**：两套读数是同一份 class 在两个 `data-theme` 下的结果。
+
+一、七只键位的归属与禁用理由（墨案，进入编辑器时的初始态 → 改动后）
+--------------------------------------------------------------------
+
+| `data-action` | `data-effect` | 归属理由 | 禁用态读数 | 可用态读数 |
+| --- | --- | --- | --- | --- |
+| `close-editor` | `ghost` | 干净时只是卸载组件，什么都不发 | 在途才禁（`ACTION_BUSY`） | 边框/底 `rgba(0,0,0,0)`、字 `rgb(164,182,195)`，w 109 / scrollWidth 107（不裁字） |
+| `close-save` | `amber` | 写的是本机库里的那一份草稿 | — | 边框 `oklab(0.756171 …/0.4)`、底 `…/0.14`、字 `rgb(224,163,63)` |
+| `close-discard` | `seal` | 不可逆：丢掉的是内存里唯一的一份（裁定⑨ 之后没有第二次入口） | — | 边框 `oklab(0.631608 …/0.45)`、底 `…/0.18`、字 `rgb(226,84,58)` |
+| `close-stay` | `ghost` | 只把确认卡收回去 | — | 全透明底 + `rgb(164,182,195)` |
+| `undo` | `ghost` | 回退是本机内存动作 | `aria-disabled=true`、`data-disabled-reason=NOTHING_TO_UNDO`、`title="没有可撤销的编辑了"`、字退成 `rgb(108,128,145)` | 改动一步之后同一颗转亮 `rgb(164,182,195)` |
+| `redo` | `ghost` | 同上 | `NOTHING_TO_REDO` + 人话版 title | 本片未取到可用态（没有"撤销之后再重做"这一发） |
+| `save-editor` | `amber` | 唯一的写库口 `resume.editor.save` | `NOTHING_TO_SAVE` + `title="草稿与库里的一致，没有要保存的改动"`、禁用态退成中性墨（边框 `rgba(150,178,196,.14)`、底 `rgb(15,22,28)`、字 `rgb(108,128,145)`） | dirty 后转 amber 档：边框 `…/0.4`、底 `…/0.14`、字 `rgb(224,163,63)` |
+
+另有 3 只 `[data-action=drag-section]` 把手（非按钮，`data-effect` 空）：静置 `border rgba(150,178,196,.26)` = `line-strong`、
+字 `rgb(133,152,168)`、圆角 4px；按下那一档（`celadon/70` + `text-celadon`）要真实拖拽才看得到，属 6.5-04 那一条。
+
+**为什么 `save-editor` 从 emerald 换 amber**（照 08 稿的口径往下改，不是照抄旧 class）：
+墨案里 jade/emerald 是"已经办成"的读数色，只能给已读/已核；按下这颗之后才发生写入，风险方向是"要动到库"，
+与第十二片 `pdf-edit-save-as`、第十一片 `pause-supply` 同一条归属。08 稿的逐控件表没有列到本面板这三颗
+（`docs/design/ui-drafts/08-click-map.html` 里搜 `save-editor` / `close-discard` 无命中），
+所以这一档是按 plan §5 的归属表定的，不是按稿抄的。
+
+二、外壳与非按钮控件（同一轮，两套主题各读一次）
+------------------------------------------------
+
+| 读数项 | 墨案 | 毡案 | 口径 |
+| --- | --- | --- | --- |
+| 面板外壳 | 边框 `rgba(150,178,196,.14)`、底 `oklab(0.173835 …/0.6)`、圆角 12px | `rgba(38,44,48,.15)` / `oklab(0.915929 …/0.6)` / 12px | sheet 档 12px + `border-line` |
+| dirty 徽标（false） | `border-line` + 字 `rgb(133,152,168)`、圆角 4px | 同族浅档 | 未脏不涂色 |
+| dirty 徽标（true） | 边框 `oklab(0.756171 …/0.45)`、字 `rgb(224,163,63)` | `…/0.45` + `rgb(161,112,15)` | 有未保存改动 = amber（本机写入待落） |
+| 模板 / 预览语言下拉 | 边框 `…/.26`、底 `rgb(8,12,16)`、圆角 6px | `rgba(38,44,48,.3)` / `rgb(216,211,198)` | 两只都换成共用 `FIELD_CLASS` |
+| 六只度量滑杆 | `accent-color rgb(127,182,173)` | `rgb(63,128,120)` | 原 `accent-indigo-500` → `accent-celadon`（"这一格现在归你敲"是系统在让位，不是风险） |
+| 区块行 | 边框 `…/.14`、底 `oklab(0.151798 …/0.7)`、圆角 7px | `rgba(38,44,48,.15)` / `oklab(0.867244 …/0.7)` | 行 = `rounded-control` + `bg-ink-950/70`，与第十二片的页序行同档 |
+| 计时徽标 | `border-line` + 字 `rgb(133,152,168)`、圆角 4px | 同族浅档 | 未超阈值不涂色（超阈值那一档是 amber，本轮读数 1 ms / 阈值 1200 ms，`data-over=false`） |
+| 被拒提示行 | 边框 `oklab(0.631608 …/0.5)`、底 `rgba(226,84,58,.13)`、字 `rgb(226,84,58)` | `…/0.5` + `rgba(192,57,31,.1)` + `rgb(192,57,31)` | 主进程拒绝 = seal（原 rose-900/rose-200 全退） |
+| 回执行 | 边框 `…/.14`、底 `oklab(0.151798 …/0.7)`、字 `rgb(164,182,195)` | 同族浅档 | 与全屏 ~15 块面板的 `notice` 中性档一致 |
+| 预览纸面 | 边框 `…/.26` + 底 `rgb(255,255,255)` | `rgba(38,44,48,.3)` + **仍是** `rgb(255,255,255)` | 纸面不跟主题翻：预览回答的是"打印出来长什么样" |
+
+圆角四档各就位数：4（徽标/把手/条目 chip）· 6（下拉、提示行、纸面）· 7（按钮、区块行）· 12（外壳）。
+
+三、确认卡（`close-editor` 在 dirty 时长出来的那一块）
+------------------------------------------------------
+
+外壳：墨案 `border oklab(0.756171 …/0.45)` + `bg rgba(224,163,63,.13)`；毡案同族浅档（`rgb(161,112,15)` 那支）。
+标题行字色走 `text-slate-100`（墨案 `rgb(219,228,236)` / 毡案 `rgb(37,45,52)`），提示行走 `text-slate-300`——
+**卡片靠外壳那一片琥珀表达"等人表态"，正文不再整片涂琥珀**，与 `ConsentCard` / 第十一片的两种表态卡同一档。
+三颗键的活体尺寸 93 / 115 / 82 px，`scrollWidth` 各自 −2px，无一裁字。
+
+四、行为半边（V 判据取的是页面自己的回执，不是命令返回值）
+----------------------------------------------------------
+
+1. `seed` → `open-editor` 从 `aria-disabled=true / NO_SEED_DOC`（title「先落一份文档，预览与导出才知道拿哪一份」）转为可点；
+   编辑器挂上 `docId=resume-demo`、3 只区块行。
+2. 正文字号 10.5 → 11（界内）：`data-dirty` 转 `true`、`undo` 转亮、`save-editor` 从 `NOTHING_TO_SAVE` 转为可用 amber 档。
+3. 同一只滑杆拖到最左端 1.5pt（界表下限是 6）：主进程拒 → 被拒行出现，
+   读数 `这次改动被拒：out-of-bounds：baseFontPt=1.5 不在 6…24 之内`，而**值仍是 11**（拒的那一发没落到草稿上）。
+4. dirty 下点 `close-editor`：只长出确认卡，编辑器仍在（`editorStillThere: true`）——拦截生效在卸载这一层。
+5. 点 `close-stay`：`cardAfterStay: false`、`editorStill: true`、`dirty` 仍是 `true`（收卡片不动数据）。
+6. 再点 `close-editor` → `close-discard`：编辑器卸载。重新 `open-editor` 后直接读到
+   `baseFontPt: "10.5 pt"`、`data-dirty=false`（文案「与库里的一致」）、`save-editor` 回到 `NOTHING_TO_SAVE`——
+   即"只拦不存"（裁定⑨/⑪）在界面上兑现：丢掉的那一步从未落库，界面上也没有留下任何"看起来存了"的读数。
+7. 干净态再点 `close-editor`：确认卡**没有**长出（`close-confirm` 不在 DOM），编辑器直接卸载
+   （`editorStill: false`）——拦截只做在有未保存改动的那一档。
+8. 全程 `save-editor` / `close-save` 一只没按：`resume-notice` 到最后仍是 `已载入演示文档 resume-demo`，没有保存回执。
+   本轮写进磁盘的只有第 1 条那一份演示文档（`seed`，落在被 git 忽略的 `tmp/v6-userdata` 开发档里）。
+
+五、死代码与残留色阶
+--------------------
+
+编辑器子树 `nodesScanned: 128`、`legacyHits: 0`（扫 `indigo|emerald|rose|violet|purple|blue-|green-|red-|yellow-|sky-|teal-|slate-700..950`）。
+本文件改完之后 `ResumeEditor.tsx` 里 `indigo|emerald|rose-|slate-700/800/900|bg-slate|border-slate` 全文 0 命中（Grep 复核）。
+
+六、截图（四张，`md5 -q` 互不相同）
+----------------------------------
+
+- `6.2-06-resume-editor-dark.png` — 墨案初始态：外壳 + 三档徽标 + 两只下拉 + 区块行
+- `6.2-06-resume-editor-light.png` — 毡案同一画面（`191282` vs `189820` 字节，两张 md5 不同）
+- `6.2-06-resume-editor-actions-dark.png` — 墨案 dirty 态：撤销/重做/保存三颗 + 被拒行 + 回执行 + 白面纸
+- `6.2-06-resume-editor-confirm-light.png` — 毡案确认卡：amber 外壳里 amber / seal / ghost 三颗并排
+
+四张各自先在页面里 `scrollIntoView({block:'start'})` 再 `shot`（不带 `--reveal`，§9 的 3.6-c ⑭ 同族）。
+
+七、没取到的（诚实记账）
+------------------------
+
+- `redo` 的可用态：要"撤销一步之后再重做"才长，本轮为保持末态干净没有走那一发；代码位与原因码齐（`NOTHING_TO_REDO`）。
+- 把手按下那一档（`celadon/70`）与落点虚线（`border-dashed border-celadon/70`）：需要真实指针拖拽，属 **6.5-04** 那一条。
+- `busy` 转针态：本面板每一趟往返都在一次 eval 的间隙里回来了，没抓到 `aria-busy` 那一帧；组件侧 `busy={!!busy}` 已接。
+- 结果态角标（`useDeskResult` 的 done/failed wash）：本面板没有接 `result`，与第十二片同口径（回执走 `notice` 行）。
+- Windows / linux 运行期：本机 macOS arm64，不适用（AGENTS.md §9）。
