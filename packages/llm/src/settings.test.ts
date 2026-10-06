@@ -17,7 +17,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import { LlmChatService } from './index.js';
-import { PROVIDER_CATALOG, LlmSettingsService, type ModelSettingsView } from './settings.js';
+import type { LlmSettingsView } from '@auto-cc/shared';
+import { PROVIDER_CATALOG, LlmSettingsService } from './settings.js';
 
 const CHAT_ENV = 'AUTO_CC_LLM_API_KEY';
 const EMBED_ENV = 'AUTO_CC_SILICONFLOW_API_KEY';
@@ -32,7 +33,7 @@ interface BootOptions {
 }
 
 /** 一条腿的读数（按腿取，避免各处写下标）。 */
-const legOf = (view: ModelSettingsView, leg: 'chat' | 'embed') => view.legs.find((item) => item.leg === leg)!;
+const legOf = (view: LlmSettingsView, leg: 'chat' | 'embed') => view.legs.find((item) => item.leg === leg)!;
 
 /** boot 出来的读法：设置服务、模型出口、配置服务、内核替身的调用记录、本次的 userData 目录。 */
 interface Harness {

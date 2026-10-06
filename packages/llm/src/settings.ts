@@ -15,30 +15,26 @@
  */
 import { AppError, Service, maybeService, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
+import type {
+  LlmCheckView,
+  LlmLegName,
+  LlmLegView,
+  LlmProviderView,
+  LlmSettingsApplyInput,
+  LlmSettingsView,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import type { LlmChatService } from './index.js';
 
 /** 两条模型腿：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
 export const llmLegSchema = z.enum(['chat', 'embed']);
 
-/** 服务商目录里的一条：`models` 只是候选，不限制用户填别的。 */
-export interface ProviderDescriptor {
-  id: string;
-  /** 端点前缀（不含 `/chat/completions`）；自定义项是空串。 */
-  baseUrl: string;
-  models: string[];
-  /** 文档地址：界面上作为链接参数出现，不进翻译句。 */
-  docsUrl: string;
-  /** 这条预设适用于哪几条腿（向量腿只有硅基流动实测过端点）。 */
-  legs: Array<'chat' | 'embed'>;
-}
-
 /**
  * OpenAI 兼容端点目录。`baseUrl` 与路径的判据来自本机实测（plan §3.3：无 key 直连均回 401，
  * 说明到达了鉴权层），不是文档转述；`api.openai.com` 本机不可达（000）是网络事实，仍留在目录里。
  * 名称不进 i18n：它们是专名，界面按 `id` 取显示名。
  */
-export const PROVIDER_CATALOG: ProviderDescriptor[] = [
+export const PROVIDER_CATALOG: LlmProviderView[] = [
   {
     id: 'deepseek',
     baseUrl: 'https://api.deepseek.com/v1',
@@ -99,66 +95,21 @@ export const applySettingsSchema = z.strictObject({
 });
 
 export type LlmSettingsConfig = z.output<typeof llmSettingsSchema>;
-export type ApplySettingsInput = z.input<typeof applySettingsSchema>;
-
-/** 密钥的掩码读数（明文永不出现，spec 7.1-06）。 */
-export interface KeyReading {
-  present: boolean;
-  /** 明文末 4 位；未存时为空串。 */
-  tail: string;
-  /** 现在这一把 key 从哪来：密钥库 / 环境变量 / 没有。 */
-  source: 'secret' | 'env' | 'none';
-  /** 环境变量名（兜底口子的名字，界面把它当参数说，不硬编进句子）。 */
-  keyEnv: string;
-}
-
-/** 一条腿的完整读数。 */
-export interface LegReading {
-  leg: 'chat' | 'embed';
-  /** 装配里的插件 id（持久层的键空间）。 */
-  pluginId: string;
-  providerId: string;
-  baseUrl: string | null;
-  model: string | null;
-  key: KeyReading;
-  /** 端点/模型名/key 三项齐不齐：界面据此决定"测试连接"是禁用还是能点。 */
-  available: boolean;
-  /** 缺哪几项（`apiKey` / `baseUrl` / `model`），与 `llm.chat.status()` 同一套词。 */
-  missing: Array<'baseUrl' | 'model' | 'apiKey'>;
-}
-
-/** 整个配置模块的读数：腿 + 密钥存储的事实陈述（是否加密、是否解不开）。 */
-export interface ModelSettingsView {
-  legs: LegReading[];
-  storage: { encrypted: boolean; unreadable: boolean; file: string | null };
-}
-
-/** 一次连通性测试的结果：失败也回结构化读数，不抛给界面去猜。 */
-export interface CheckResult {
-  ok: boolean;
-  /** 成功时的模型回执（对端没回报就是请求里那个）。 */
-  model: string | null;
-  /** 失败原因码：直接用模型腿的错误码，界面不再造一套。 */
-  reason: string | null;
-  /** 人可读的一句原因（技术原文，界面只在诊断档显示）。 */
-  message: string | null;
-  elapsedMs: number;
-}
 
 /** 腿 → 装配里的插件 id。 */
-const LEG_PLUGIN: Record<'chat' | 'embed', string> = { chat: 'llm', embed: 'llm-embed' };
+const LEG_PLUGIN: Record<LlmLegName, string> = { chat: 'llm', embed: 'llm-embed' };
 
 /** 腿 → 密钥库里的路径（与服务名一致）。 */
-const LEG_SECRET: Record<'chat' | 'embed', string> = { chat: 'llm.chat', embed: 'llm.embed' };
+const LEG_SECRET: Record<LlmLegName, string> = { chat: 'llm.chat', embed: 'llm.embed' };
 
 /** 腿 → `llm-settings` 那一格里记录服务商的键名。 */
-const LEG_PROVIDER_KEY: Record<'chat' | 'embed', 'providerId' | 'embedProviderId'> = {
+const LEG_PROVIDER_KEY: Record<LlmLegName, 'providerId' | 'embedProviderId'> = {
   chat: 'providerId',
   embed: 'embedProviderId',
 };
 
 /** 腿 → 兜底环境变量名（与各自 schema 的 `keyEnv` 默认值同词，界面当参数显示）。 */
-const LEG_KEY_ENV: Record<'chat' | 'embed', string> = {
+const LEG_KEY_ENV: Record<LlmLegName, string> = {
   chat: 'AUTO_CC_LLM_API_KEY',
   embed: 'AUTO_CC_SILICONFLOW_API_KEY',
 };
@@ -176,7 +127,7 @@ interface KernelReader {
  * @param leg 哪条腿
  * @returns 命中的描述符；不命中或不适用这条腿时给 `custom`
  */
-function providerOf(id: string, leg: 'chat' | 'embed'): ProviderDescriptor {
+function providerOf(id: string, leg: LlmLegName): LlmProviderView {
   const found = PROVIDER_CATALOG.find((item) => item.id === id && item.legs.includes(leg));
   return found ?? PROVIDER_CATALOG.find((item) => item.id === 'custom')!;
 }
@@ -197,7 +148,7 @@ export class LlmSettingsService extends Service {
    * 服务商目录（纯数据，不发请求）。
    * @returns 全部预设；界面按腿过滤
    */
-  catalog = (): ProviderDescriptor[] => PROVIDER_CATALOG;
+  catalog = (): LlmProviderView[] => PROVIDER_CATALOG;
 
   /**
    * 当前配置读数：两条腿的端点/模型名/密钥状态，加密钥存储的事实。
@@ -205,7 +156,7 @@ export class LlmSettingsService extends Service {
    * 全部现问（不在本服务里存第二份事实，AGENTS.md §9 实测 2.5 那条），所以界面每次刷新都是真的当下值。
    * @returns 掩码读数；密钥库未装载时按"没存"处置而不抛
    */
-  read = (): ModelSettingsView => {
+  read = (): LlmSettingsView => {
     const legs = (['chat', 'embed'] as const).map((leg) => this.readLeg(leg));
     const config = maybeService<ConfigService>(this.ctx, 'config');
     return { legs, storage: config?.secretStorage() ?? { encrypted: false, unreadable: false, file: null } };
@@ -230,7 +181,7 @@ export class LlmSettingsService extends Service {
    * @param leg 哪条模型腿
    * @returns 该腿的读数，含"这把 key 现在从哪来"
    */
-  private readLeg = (leg: 'chat' | 'embed'): LegReading => {
+  private readLeg = (leg: LlmLegName): LlmLegView => {
     const pluginId = LEG_PLUGIN[leg];
     const config = maybeService<ConfigService>(this.ctx, 'config');
     const effective = this.effectiveOf(pluginId);
@@ -270,7 +221,7 @@ export class LlmSettingsService extends Service {
    * @returns 保存后的读数（同 `read()`，界面不用再补一刀）
    * @throws 入参不合法 `INVALID_ARGUMENT`；`config` 未装载 `SETTING_NOT_ALLOWED`
    */
-  apply = async (input: ApplySettingsInput): Promise<ModelSettingsView> => {
+  apply = async (input: LlmSettingsApplyInput): Promise<LlmSettingsView> => {
     const parsed = applySettingsSchema.safeParse(input);
     if (!parsed.success) {
       throw new AppError(
@@ -308,7 +259,7 @@ export class LlmSettingsService extends Service {
    * @param leg 哪条模型腿
    * @returns 清除后的读数
    */
-  clearKey = (leg: 'chat' | 'embed'): ModelSettingsView => {
+  clearKey = (leg: LlmLegName): LlmSettingsView => {
     maybeService<ConfigService>(this.ctx, 'config')?.clearSecret(LEG_SECRET[leg]);
     return this.read();
   };
@@ -321,7 +272,7 @@ export class LlmSettingsService extends Service {
    * @param leg 目前只支持 `chat`（向量腿要的是 embeddings 端点，判据不同且暂无消费者）
    * @returns 结构化结果；失败不抛，界面按 `reason` 说话
    */
-  check = async (leg: 'chat' | 'embed' = 'chat'): Promise<CheckResult> => {
+  check = async (leg: LlmLegName = 'chat'): Promise<LlmCheckView> => {
     if (leg !== 'chat') {
       return {
         ok: false,

@@ -28,7 +28,7 @@ import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
 import type { Registry } from '@auto-cc/plugin-kernel';
-import { LlmChatService, LlmEmbedService } from '@auto-cc/plugin-llm';
+import { LlmChatService, LlmEmbedService, LlmSettingsService } from '@auto-cc/plugin-llm';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
   DeliveryRecordService,
@@ -76,6 +76,9 @@ export const REGISTRY: Registry = {
   // 端点而硅基流动有，绑在一起配就会变成「为了向量增强改坏话术生成」（plan §4.3-d 证据 [4]）。
   // 未配置时它照样挂载且一次网络都不发，知识库因此能纯词面 + 倒排检索（4.3-04 的离线可用）。
   'llm-embed': LlmEmbedService,
+  // 模型设置模块（spec 7.1-07 ~ 10）：界面里填端点/模型名/key 的那只手，本身不发请求——
+  // 连通性测试经上面两只出口要结果，所以 `check-llm-single-entry.ts` 给它开的白名单格还额外守着「不许碰 http.js」。
+  'llm-settings': LlmSettingsService,
   // 账本与闸门是同一个域的两个服务，所以各占一个清单 id：`gate` 能单独被摘掉，
   // 1.9-05 的「闸门缺席即拦不住就不许装」才有可演示的形态（摘掉闸门时账本还活着）。
   usage: UsageLedgerService,

@@ -422,6 +422,13 @@ export const RENDERER_ALLOWLIST = [
   'update.check',
   'update.download',
   'update.install',
+  // P7 · 7.1 的模型设置面（spec 7.1-07 ~ 10）：五条口的形状与「为什么不登记为 agent 工具」
+  // 写在下面 `BridgeSignatures` 的同名条目上。
+  'llm.settings.catalog',
+  'llm.settings.read',
+  'llm.settings.apply',
+  'llm.settings.check',
+  'llm.settings.clearKey',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -1720,6 +1727,76 @@ export type ScheduleJobCreateInput = {
   isEnabled?: boolean;
 };
 
+/**
+ * 模型设置面的跨进程读数（spec 7.1-07 ~ 10）。
+ *
+ * 与 `ScheduleJobView` 同一口径：类型在本契约包**定型一次**，生产方 `packages/llm` 经
+ * `@auto-cc/shared` 取同一份（`shared` 在 L1，不许反向依赖 L2 能力包，镜像一份就是第二个真相源，§2.5）。
+ * 三条刻意的形状约束：① 只有掩码末 4 位（`tail`）过进程边界，明文 key 永不出现在任何出参里；
+ * ② `apply` 的入参带明文 key 是**单向**的（写入口），返回值里只剩掩码；
+ * ③ `missing` 与 `llm.chat.status()` 用同一套词，界面不必再学一套原因码。
+ */
+export type LlmLegName = 'chat' | 'embed';
+
+/** 服务商目录里的一条预设（`baseUrl` 为空 = 自定义端点，任何 OpenAI 兼容地址都走这一条）。 */
+export type LlmProviderView = {
+  id: string;
+  baseUrl: string;
+  /** 该家的模型名候选；不限制用户填别的。 */
+  models: string[];
+  docsUrl: string;
+  legs: LlmLegName[];
+};
+
+/** 一条腿的密钥读数（掩码，不含明文）。 */
+export type LlmKeyReadingView = {
+  present: boolean;
+  /** 明文末 4 位；未存时为空串。 */
+  tail: string;
+  /** 现在这一把 key 从哪来：密钥库（界面里填的）/ 环境变量兜底 / 没有。 */
+  source: 'secret' | 'env' | 'none';
+  /** 兜底环境变量名，界面把它当参数说（§5.7）。 */
+  keyEnv: string;
+};
+
+/** 一条模型腿的完整读数。 */
+export type LlmLegView = {
+  leg: LlmLegName;
+  /** 装配里的插件 id（`llm` / `llm-embed`）。 */
+  pluginId: string;
+  providerId: string;
+  baseUrl: string | null;
+  model: string | null;
+  key: LlmKeyReadingView;
+  /** 端点 / 模型名 / key 三项齐不齐：界面据此决定「测试连接」是禁用还是能点。 */
+  available: boolean;
+  missing: Array<'baseUrl' | 'model' | 'apiKey'>;
+};
+
+/** 整个设置面的读数：两条腿 + 密钥存储的事实陈述（是否加密、是否解不开、文件在哪）。 */
+export type LlmSettingsView = {
+  legs: LlmLegView[];
+  storage: { encrypted: boolean; unreadable: boolean; file: string | null };
+};
+
+/** 一次保存的入参；`apiKey` 省略或空串 = 不动已存的那条（掩码框的语义）。 */
+export type LlmSettingsApplyInput = {
+  leg?: LlmLegName;
+  providerId?: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string | null;
+};
+
+/** 一次连通性测试的结果：失败也是结构化读数，不让界面去猜抛错。 */
+export type LlmCheckView = {
+  ok: boolean;
+  model: string | null;
+  reason: string | null;
+  message: string | null;
+  elapsedMs: number;
+};
+
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
@@ -1841,6 +1918,22 @@ export interface BridgeSignatures {
   'update.download': { args: []; returns: UpdateView };
   /** 用户主动重启并安装；上一态不是 `downloaded` 即拒绝。 */
   'update.install': { args: []; returns: UpdateView };
+  /**
+   * 模型设置面五条口（spec 7.1-07 ~ 10）：两条只读（目录、当前读数）+ 一条写（保存）
+   * + 一条连通性测试 + 一条删密钥。
+   *
+   * 刻意**不登记为 agent 工具**（plan §1 边界第 3 条）：模型若能自己换推理后端、自己清掉凭证，
+   * 5.3 定的「不可自提升」就出现了一个它能自行改写的运行时——而且这四条口的返回里也没有明文 key。
+   */
+  'llm.settings.catalog': { args: []; returns: LlmProviderView[] };
+  /** 两条腿的端点 / 模型名 / 掩码密钥读数，加密钥存储的事实（未加密、解不开都要播出来）。 */
+  'llm.settings.read': { args: []; returns: LlmSettingsView };
+  /** 保存：写持久层 + 写密钥库 + 热改运行时，回的是保存后的读数（明文只进不出）。 */
+  'llm.settings.apply': { args: [input: LlmSettingsApplyInput]; returns: LlmSettingsView };
+  /** 连通性测试：经 `llm.chat` 发一次最小请求，失败也回结构化原因。 */
+  'llm.settings.check': { args: [leg?: LlmLegName]; returns: LlmCheckView };
+  /** 删掉某条腿已存的密钥（界面上的「删除密钥」），端点与模型名不动。 */
+  'llm.settings.clearKey': { args: [leg: LlmLegName]; returns: LlmSettingsView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
   /**
