@@ -11,6 +11,7 @@
 import { Hand, MousePointerClick } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TakeoverStateView } from '@auto-cc/shared';
+import { Banner, DeskButton } from './ui/controls';
 import { formatElapsed } from './format';
 
 /**
@@ -45,54 +46,49 @@ export function TakeoverBanner({
 
   return (
     <>
-      <div
-        data-testid="takeover-banner"
-        data-takeover-held={String(held !== undefined)}
-        data-takeover-reason={held?.reason ?? ''}
-        data-takeover-elapsed={held ? formatElapsed(elapsedMs) : ''}
-        className={`flex items-center gap-2 border-b px-4 py-2 text-[11px] ${
-          held ? 'border-amber-900 bg-amber-950/40 text-amber-200' : 'border-slate-800 text-slate-500'
-        }`}
-      >
-        <Hand size={12} />
-        {held ? (
-          <>
-            <span className="font-semibold" data-takeover-heading>
-              {t('chat.takeover.held')}
-            </span>
-            <span data-takeover-reason-label>
-              {t(held.reason ? `chat.takeover.reason.${held.reason}` : 'chat.takeover.reason.unknown')}
-            </span>
-            <span data-takeover-duration>{t('chat.takeover.since', { duration: formatElapsed(elapsedMs) })}</span>
-            <span className="ml-auto text-[10px] text-amber-400/70">{t('chat.takeover.heldHint')}</span>
-            <button
-              type="button"
-              data-action="takeover-release"
-              disabled={busy !== undefined}
-              onClick={onRelease}
-              className="flex items-center gap-1 rounded-md border border-amber-800 px-2 py-0.5 text-[11px] text-amber-200 hover:bg-amber-900/40 disabled:opacity-40"
-            >
-              <MousePointerClick size={11} />
-              {t('chat.takeover.release')}
-            </button>
-          </>
-        ) : (
-          <>
-            <span>{t('chat.takeover.notHeld')}</span>
-            <span className="ml-auto text-[10px] text-slate-500">{t('chat.takeover.notHeldHint')}</span>
-            <button
-              type="button"
-              data-action="takeover-hold"
-              disabled={busy !== undefined}
-              onClick={onHold}
-              className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
-            >
-              <Hand size={11} />
-              {t('chat.takeover.hold')}
-            </button>
-          </>
-        )}
-      </div>
+      {held ? (
+        // 接管中 = 这台机器在等人表态，按设计口径是琥珀那一档；通栏贴边（去掉圆角与左右边框）保持横幅的位置感。
+        <Banner
+          tone="amber"
+          reason={held.reason ?? 'unknown'}
+          markers={{
+            testid: 'takeover-banner',
+            'takeover-held': 'true',
+            'takeover-reason': held.reason ?? '',
+            'takeover-elapsed': formatElapsed(elapsedMs),
+          }}
+          className="rounded-none border-x-0 border-t-0 px-4 py-2 text-[11px]"
+        >
+          <span className="font-semibold" data-takeover-heading>
+            {t('chat.takeover.held')}
+          </span>
+          <span data-takeover-reason-label>
+            {t(held.reason ? `chat.takeover.reason.${held.reason}` : 'chat.takeover.reason.unknown')}
+          </span>
+          <span data-takeover-duration>{t('chat.takeover.since', { duration: formatElapsed(elapsedMs) })}</span>
+          <span className="ml-auto text-[10px] opacity-80">{t('chat.takeover.heldHint')}</span>
+          <DeskButton action="takeover-release" variant="amber" compact busy={busy !== undefined} onClick={onRelease}>
+            <MousePointerClick size={11} />
+            {t('chat.takeover.release')}
+          </DeskButton>
+        </Banner>
+      ) : (
+        <div
+          data-testid="takeover-banner"
+          data-takeover-held="false"
+          data-takeover-reason=""
+          data-takeover-elapsed=""
+          className="flex items-center gap-2 border-b border-slate-800 px-4 py-2 text-[11px] text-slate-500"
+        >
+          <Hand size={12} />
+          <span>{t('chat.takeover.notHeld')}</span>
+          <span className="ml-auto text-[10px]">{t('chat.takeover.notHeldHint')}</span>
+          <DeskButton action="takeover-hold" compact busy={busy !== undefined} onClick={onHold}>
+            <Hand size={11} />
+            {t('chat.takeover.hold')}
+          </DeskButton>
+        </div>
+      )}
       {/* 提示行跟着横幅：按「交还」被主进程拒掉时（例如它已经不认这一轮），那句原话得留在截图里。 */}
       {notice ? (
         <p

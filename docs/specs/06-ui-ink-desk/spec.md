@@ -170,3 +170,8 @@
    留给用户在场的活体一轮：对话屏（工具卡片 + 候选栏）、岗位屏、诊断屏（`MetricsPanel` / `UsagePanel` 换色后的读数）。
 6. **门禁实跑**：`pnpm --filter @auto-cc/renderer typecheck` → `TC=0`；`pnpm exec eslint packages/renderer` → `ESLINT=0`；
    全量 `pnpm lint` / `pnpm format:check` / `pnpm test` 见收尾记录（退出码用重定向读，§9 的 5.4-c）。
+7. **顺带一条（同一片收进来的）**：`TakeoverBanner` 的两只裸按钮换成 `DeskButton`，接管中那一档改用
+   `Banner tone="amber"`（"这台机器在等你"正是琥珀的语义），`data-testid="takeover-banner"` 与
+   `data-takeover-held/reason/elapsed` 三个读数原样保留（`Banner` 因此补了 `markers`/`className` 两个入参）。
+   活体只取到**未接管**那一支（`held="false"`、按钮 `data-effect="line"`、底色 `rgb(19,28,35)` = `--color-ink-800`）；
+   **接管中那一支没取证**——它要先有一次真实接管，而 §7.2 规定无人验收时不去动真实页面。

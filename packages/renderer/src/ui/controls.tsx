@@ -252,6 +252,10 @@ export interface BannerProps {
   tone: BannerTone;
   /** 挂在节点上的原因码，方便 harness 直接断言（09 稿的 ⊘ 类控件全靠它） */
   reason?: string;
+  /** 附加的 `data-*` 标记（横幅常常要带读数：接管原因、时长、条数……） */
+  markers?: Record<string, string>;
+  /** 追加 class（贴在整条横幅外框上，例如去掉圆角改成通栏） */
+  className?: string;
   children: ReactNode;
 }
 
@@ -259,16 +263,22 @@ export interface BannerProps {
  * 常驻提示条。设计稿规定：可逆的动作只用提示条，不用遮罩弹窗（09 稿 RULE）。
  * @param tone 语气档
  * @param reason 原因码（可选）
+ * @param markers 附加 `data-*` 读数（可选）
+ * @param className 追加在外框上的 class（可选）
  * @param children 文案（调用方负责 i18n）
  */
-export function Banner({ tone, reason, children }: BannerProps) {
+export function Banner({ tone, reason, markers, className = '', children }: BannerProps) {
+  const markerAttrs = Object.fromEntries(
+    Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
+  ) as Record<string, string>;
   return (
     <div
+      {...markerAttrs}
       {...(reason ? { 'data-reason': reason } : {})}
-      className={`flex items-start gap-2 rounded-control border px-3 py-2 text-xs leading-relaxed ${BANNER_CLASS[tone]}`}
+      className={`flex items-start gap-2 rounded-control border px-3 py-2 text-xs leading-relaxed ${BANNER_CLASS[tone]} ${className}`}
     >
       <CircleAlert size={13} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
     </div>
   );
 }
