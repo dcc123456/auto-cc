@@ -681,14 +681,17 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 `- from: resources/fonts` / `to: fonts`。整目录带上、连同 `OFL.txt`（§8.7：随副本分发许可全文），
 不为编辑轨另起第二份字体路径或第二条通道（§2.5）——生成轨与编辑轨要的就是同一个目录读数。
 
-**验证**：`pnpm dist` EXIT=0（`packaging platform=darwin arch=arm64 electron=44.4.5`，签名按既有口径跳过），
+**验证（三端都重跑了，不是只验 mac）**：`pnpm dist` EXIT=0（`packaging platform=darwin arch=arm64 electron=44.4.5`，签名按既有口径跳过），
 产物侧 `Contents/Resources/fonts/` 现有 **5 个文件**：`OFL.txt` 4,314、`noto-sans-sc-chinese-simplified-400-normal.woff2`
 1,142,552、`-700-` 1,172,244、`noto-sans-sc-latin-400-normal.woff2` 13,304、`-700-` 13,416——
-逐份字节数与仓库那份完全相同（不是转换后的产物）。`pnpm lint` EXIT=0，其中 `check-licenses.ts` 的产物侧核对照旧三端齐备。
+逐份字节数与仓库那份完全相同（不是转换后的产物）。
+另跑 `electron-builder --linux --dir` 与 `--win --dir`（都 EXIT=0，走的是同一句 `extraResources`）：
+`dist/linux-arm64-unpacked/resources/fonts/` 与 `dist/win-arm64-unpacked/resources/fonts/` 各自也是这 5 个文件，
+`pnpm lint` 里 `check-licenses.ts` 的产物侧核对随新目录一并过（现在报四份产物：win-arm64-unpacked / linux-unpacked / linux-arm64-unpacked / mac-arm64）。
+`dist/linux-unpacked`（x64，10-05 那次的旧产物）**没有** fonts——它是**改动之前**建的，不是缺陷；重跑会补上，本轮不拿旧目录充当读数。
 
 **边界（本轮不声称的部分）**：只核到**产物目录**这一层。装机版里真点一次导出、取内嵌字形读数属于 §7.4 的 V 类，
-要你在场，与 `3.5-01` / `3.5-03` / `3.5-07` 三条截图腿排同一批；`dist:win` / `dist:linux` 的对应目录也未重跑，
-它们走的是同一句 `extraResources`，但按 §9 的口径"未实测就不写"。
+要你在场，与 `3.5-01` / `3.5-03` / `3.5-07` 三条截图腿排同一批。
 
 ---
 
