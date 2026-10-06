@@ -299,6 +299,17 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   而且**不报错**——表现为同一批里两张"不同场景"的截图字节完全相同（本项目 5.10-18 就入库过一次这样的无效证据，
   两张 md5 都是 `8e7eb712029f90052267a29aad1de922`）。所以 §7.4 的②在收截图之前要对同批图片跑一次 `md5 -q` 去重，
   相同即说明有一张根本没截到目标视图。
+- **实测（2.1 补片）三条活体取证口径**：① `harness shot --url 5173` **截不到内嵌内核视图的内容**——
+  CDP 的 `Page.captureScreenshot` 是逐页的，不含 Electron 原生子视图那一层，主窗口截图里视图槽位永远是
+  「内嵌内核视图槽位」占位文案。所以「视图区域渲染了页面」这类 V 判据只能由视图自己的 target 兑现
+  （`harness shot --url 127.0.0.1:10233`），而 app 侧文案（接管卡、面板读数）才用 `--url 5173`；
+  ② `sessions.status()` 每行的键是 `id / partition / startUrl / isPersistent / storagePath / cookieNames /
+sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `auth`**，按 `item.platform` / `item.status`
+  取回 `undefined`，`JSON.stringify` 会把 undefined 键整个丢掉，看起来就像"状态行里没有平台"；
+  ③ `browser.page.navigate` 回 `UNKNOWN / (-3) loading '<地址>'` 里的地址是**上一笔仍在飞的导航**，
+  302 跳转与竞态都走这条，判"导航有没有成"看 `page.snapshot()` 的 `url` 与 `readyState`，不看返回码。
+  另：`shot --url 127.0.0.1:10233` 在视图**正在导航**时会挂住不返回（本窗实测挂过 60s+），等 `readyState=complete`
+  再拍。
 - **实测（5.10-18）半自动档下点了「确认并执行」之后还要再点 `pause-approve`**：`agent.loop.confirm` 只把计划从
   proposed 推到 running，循环随即**停在安全点**长出逐步批准卡（可见 `[data-action=pause-approve]` / `pause-deny` /
   `stop-run`），活体验收必须点这一颗才真动手——只点 confirm 会得到"返回成功但库里不增行"的假象。

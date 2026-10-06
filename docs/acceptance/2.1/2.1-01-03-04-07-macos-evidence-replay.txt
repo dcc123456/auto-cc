@@ -1,0 +1,121 @@
+2.1 无效证据批次的 mac 重放（2026-10-06，CDP 10222 上那一份 dev 实例）
+================================================================
+
+背景（为什么重放）
+------------------
+`docs/acceptance/2.1/` 里 15 张截图有 **9 张是重复的**：
+
+- 5 张字节完全相同（97210 B，md5 `a6eedc5ea4c96a88a3e487e6350ba728`）：
+  `2.1-01-kernel-view-1.png`、`2.1-03-kernel-page-2.png`、`2.1-04-alt-view-not-logged-in-3.png`、
+  `2.1-07-after-logout-view-2.png`、`2.1-10-kernel-1200x800-4.png`——同一张仿站页面被五条验收行
+  同时引用，其中 `2.1-10` 那两张还各自声称了一个视口尺寸。
+- 另两组重复对：`2.1-04-boss-logged-in-2.png` = `2.1-05-after-restart-logged-in-1.png`
+  （96970 B / `9a…`→实测 `340c3358d03f893659b8f551c59fc7ad`），
+  `2.1-08-takeover-zh.png` = `2.1-10-window-1200x800-3.png`（106946 B / `fae122e014e13f3cdea474f3651bfb6e`）。
+
+这些行当年是靠**读数文本**过的，图只是配图，所以缺陷在页面上看不见。本轮按每行字面判据把
+读数在 mac 上重放一遍，并把能重拍的图换掉。
+
+运行环境（如实交代）
+--------------------
+- 驱动对象是**本机上一早已在跑的 `pnpm dev` 实例**（CDP 10222，userData `tmp/v6-userdata`）。
+  它不是本窗起的；前几窗刻意不碰它，这一窗为了拿活体读数打了进去。
+  **副作用**：它的 `fixture` 分区被写入过 `autocc_session`（登录）又被 `sessions.logout` 清除，
+  内核视图被导航过三次（`/login?next=%2F` → `/` → `/`（boss 分区）→ `/`）。
+  该实例**未被 kill**（不是本窗的进程，按纪律不动）。
+- 站点侧全程 `127.0.0.1:10233` 本地 fixture（AGENTS.md §7.2），未碰真实平台。
+- 驱动方式：`pnpm harness eval --url 5173 --expr-file <脚本>`（页面里敲 `window.autoCC.*`），
+  截图 `pnpm harness shot`。
+
+一、`sessions.status()` 的真实行形状（前几窗按 `platform` / `status` 取，读回 undefined）
+------------------------------------------------------------------------------------------
+逐行键集合（实测）：`id`、`partition`、`startUrl`、`isPersistent`、`storagePath`、
+`cookieNames`、`sessionCookieName`、`auth`、`expiresAt`。
+**平台名在 `id`，登录态在 `auth`**（`active` / `expired`），没有 `platform` 也没有 `status` 键。
+
+清除 A 分区 cookie **之前**（三行全文）：
+
+    {id:fixture,     partition:persist:fixture,     startUrl:http://127.0.0.1:10233/,
+     isPersistent:true, storagePath:…/Partitions/fixture,     cookieNames:[autocc_session],
+     sessionCookieName:autocc_session, auth:active,  expiresAt:1791344032489}
+    {id:fixture-alt, partition:persist:fixture-alt, startUrl:http://127.0.0.1:10233/alt,
+     isPersistent:true, storagePath:…/Partitions/fixture-alt, cookieNames:[autocc_session],
+     sessionCookieName:autocc_session, auth:active,  expiresAt:1791340727068}
+    {id:boss,        partition:persist:boss,        startUrl:http://127.0.0.1:10233/boss,
+     isPersistent:true, storagePath:…/Partitions/boss,        cookieNames:[],
+     sessionCookieName:autocc_session, auth:expired, expiresAt:null}
+
+二、2.1-04（方式 C：「平台 A 写 cookie 后平台 B 读不到」）
+---------------------------------------------------------
+判据是 C，不是 V，所以这一条的主体证据是下面这组**同 URL、不同分区**的对端读数：
+
+- A：`sessions.open('fixture')` → `/login?next=%2F`（写带 `Max-Age` 的持久 cookie）→ `/`
+  `page.snapshot()`：`url=http://127.0.0.1:10233/`、`title=auto-cc 会话实验台 · 分区 A`、
+  **`partition=persist:fixture`**、`readyState=complete`、`elementCount=25`
+  正文回读：「登录态：**已登录** … 页面侧 document.cookie：`autocc_session`=`<fixture 常量>`」
+- B：`sessions.open('boss')` → **同一个地址** `http://127.0.0.1:10233/`
+  `page.snapshot()`：`url` 与 `title` 与 A 逐字相同、**`partition=persist:boss`**、`elementCount=25`
+  正文回读：「登录态：**未登录** … 页面侧 document.cookie：（空）
+  服务端按请求 cookie 判定：`{"loggedIn":false,"cookieNames":[]}`」
+
+也就是：三个平台的 `startUrl` 同属 `http://127.0.0.1:10233`、cookie 名同为 `autocc_session`，
+换分区后同一个页面模板自己判成「未登录」——隔离发生在分区而不是域名，与 2026-10-04 那批读数的
+结论一致（`2.1-04-partition-isolation-1.txt`），只是这次在 mac 上重放、且分区身份由
+`snapshot.partition` 与 `status[].partition` 点名（前几窗只按数组顺序猜）。
+
+三、2.1-07（方式 U+C：「清 cookie 后状态翻转，不抛异常」）
+----------------------------------------------------------
+`sessions.logout('fixture')` 的返回值与随后的 `status()` / `probe()`（**没有异常**）：
+
+    loggedOut → {id:fixture, partition:persist:fixture, cookieNames:[], auth:expired, expiresAt:null}
+    status 后 → fixture: cookieNames=[] / auth=expired / expiresAt=null
+                fixture-alt: cookieNames=[autocc_session] / auth=active（**没被牵连**）
+                boss: cookieNames=[] / auth=expired
+    probe('fixture') → {auth:expired, cookieNames:[], expiresAt:null}
+
+页面侧对照（视图带回 `persist:fixture` 后重载 `/`）：
+「登录态：**未登录** … document.cookie：（空）… `{"loggedIn":false,"cookieNames":[]}`」。
+U 侧（过期判定的单测）不在本窗范围，仍由 `packages/sessions` 的用例覆盖。
+
+四、2.1-01 / 2.1-03（V 半边）与一条新的截图口径
+------------------------------------------------
+**实测：`harness shot --url 5173` 截不到内核视图的内容。** 拿到的那张 229 KB 图里，右侧
+「内嵌内核视图槽位 / 此区域由主进程的 WebContentsView 覆盖渲染 / 38%」还是**占位文案**——
+CDP 的 `Page.captureScreenshot` 是**逐页**的，Electron 的原生子视图不在那一层的合成结果里。
+所以「截图显示视图区域渲染了页面」这句话只能由**视图自己的 target** 来兑现：
+`harness shot --url 127.0.0.1:10233`（视图一旦导航过，它就是 CDP 表里独立的一只 page target）。
+
+- `2.1-01-macos-kernel-view-page.png`（本窗重拍，md5 `a30fd37dca0af1997a26b4cad794b561`）：
+  视图 target 里的 fixture 页面正文（会话实验台 A）。拍摄时刻 `fixture` 分区**还没有** cookie，
+  所以横幅是「未登录」——这一条判据只要「视图区域渲染了页面」，与登录态无关。
+- `2.1-03-macos-navigate-snapshot.png`（本窗重拍，md5 `705641dd9ff7971fd4b0dfc694243e33`）：
+  `page.navigate('http://127.0.0.1:10233/boss?query=%E5%89%8D%E7%AB%AF%E5%B7%A5%E7%A8%8B%E5%B8%88&city=%E4%B8%8A%E6%B5%B7')`
+  之后同一时刻的 `page.snapshot()`：`title=求职仿站 · 职位搜索（本地 fixture）`、`elementCount=42`，
+  与图里的搜索页一致。
+- `2.1-08-macos-takeover-card.png`（本批重拍，md5 `ecdc52dcbb5e39ccf54b3c989b9ece6d`）：
+  app 主窗口（5173 target）里长出的「已人工接管 · 登录态已失效，需要重新登录 · 交还页面」卡片。
+  **它不是本窗这次登出造成的**：卡片上写着「已接管 60:37」，而拍摄时刻 `fixture` 分区刚刚登录成功
+  （`auth=active`）——也就是说这是**更早一次失效**留下的接管卡，登录之后并没有自动收起。
+  本窗只把它当作两件事的证据用：① 接管卡文案确实渲染在主窗口里（2.1-08 的 V 半边）；
+  ② 右侧视图槽位仍是「内嵌内核视图槽位 / 此区域由主进程的 WebContentsView 覆盖渲染 / 38%」
+  占位文案，即上面那条「5173 target 截不到视图内容」的口径。**接管卡为何不随登录收起**
+  这一条本窗没有判据，登记为待查而不是结论。
+
+五、没有重拍的两格（如实登记）
+------------------------------
+- **2.1-10**（「内核视图随窗口尺寸变化正确重排，无空白/错位」，V）：需要**改操作系统窗口尺寸**。
+  `Emulation.setDeviceMetricsOverride` 只改页面视口、不改 `WebContentsView` 的 bounds，
+  用它拍出来的「1200×800 / 900×600 对照」是**伪造的**，所以本窗不重拍。
+  旧那四张里 `2.1-10-kernel-1200x800-4.png` 与 `2.1-01/03/04/07` 四张同字节、
+  `2.1-10-window-1200x800-3.png` 与 `2.1-08-takeover-zh.png` 同字节——**这两对的声称尺寸不可信**。
+- **2.1-05**（跨重启，V）：mac 侧的跨重启那一格已在 2.1-12 用**打包产物 + 专用 `--user-data-dir`**
+  取到（`2.1-12-macos-kernel-fixture-logged-in.png`）；本窗为了不再动别人的实例没有重复重启流程。
+  `2.1-05-after-restart-logged-in-1.png` 与 `2.1-04-boss-logged-in-2.png` 同字节这一事实照旧登记。
+
+六、`navigate` 的 `(-3) loading` 读数（一条会反复咬人的口径）
+-------------------------------------------------------------
+`browser.page.navigate` 走 302（`/login?next=%2F`）或撞上上一次未结束的导航时，回的是
+`UNKNOWN / (-3) loading 'http://127.0.0.1:10233/boss'`——**里面那个地址是上一笔还在飞的导航**，
+不是失败目标。本轮两次都拿到了这个返回，而 `page.snapshot()` 显示导航**实际成功**
+（`url` 已是目标、`readyState=complete`、cookie 也确实写进了分区）。
+所以判「导航有没有成」要看 `snapshot.url`，不能看 `navigate` 的返回码。

@@ -98,6 +98,24 @@
   `2.1-10-kernel-1200x800-4`，md5 `a6eedc5e…`），另有两对各自相同。打开是同一张 fixture `/boss`「未登录」页，
   即这些图撑不起文件名声称的场景（900x600 与 1200x800 两档视口拿到同一张）。**这些行的实际判据是同目录的读数文本**，
   图是无效的那一半；补拍要按场景逐张重来（`harness shot` 必须带 `--url`，且同批跑 `md5 -q` 去重），属独立一片。
+- **证据完整性·补片（2026-10-06 同日第二窗，mac 活体重放）**：上面那句「属独立一片」已经做完能诚实做的半边，
+  全量读数在 `2.1-01-03-04-07-macos-evidence-replay.txt`。逐条落点：
+  **2.1-04 / 2.1-07 的方式本来就是 C 而不是 V**，所以这两条的主体证据是**对端读数**——本轮在同一路径
+  `http://127.0.0.1:10233/` 上先以 `persist:fixture` 读到「已登录 + `document.cookie` 有会话 cookie」，
+  再以 `persist:boss` 读到「未登录 + `{"loggedIn":false,"cookieNames":[]}`」，`sessions.status()` 三行的
+  `auth`/`cookieNames`/`expiresAt` 前后对照齐（顺带一条口径更正：**状态行的键是 `id` 与 `auth`，
+  没有 `platform` 与 `status`**，前几窗按后者取回的是 `undefined`）；清 cookie 后 `logout`/`probe` 均不抛异常。
+  **2.1-01 / 2.1-03 / 2.1-08 各换到一张本窗真拍图**：`2.1-01-macos-kernel-view-page.png`、
+  `2.1-03-macos-navigate-snapshot.png`、`2.1-08-macos-takeover-card.png`（三张 md5 互不相同，也不与旧批次任何一张相同）。
+  **旧的无效图一张都没有删**——它们仍是那五条行的历史配图，只是撑不住声称的场景，以本条登记为准。
+  两条新的硬口径同时落地（已写进 AGENTS.md §9）：① `harness shot --url 5173` **截不到内核视图的内容**，
+  主窗口那张图里视图槽位永远是占位文案（CDP 逐页截图不含 Electron 原生子视图），所以「视图渲染了页面」只能由
+  视图自己的 target（`--url 127.0.0.1:10233`）兑现；② `page.navigate` 回 `UNKNOWN / (-3) loading '<上一个地址>'`
+  不等于导航失败，判据要看 `snapshot.url` 与 `readyState`。
+  **仍没补的一格如实登记**：`2.1-10`（视图随窗口尺寸重排）需要真的改操作系统窗口尺寸，
+  `Emulation.setDeviceMetricsOverride` 只改页面视口、不改 `WebContentsView` 的 bounds，用它拍出来的两档对照是伪造的，
+  所以本窗不拍；`2.1-05` 的 mac 跨重启半边已由 `2.1-12` 用打包产物 + 专用 `--user-data-dir` 取到，
+  本窗不为重复取证去重启别人那份实例。
 
 **过程中发现并就地修掉的偏差**：验收开始时 `10233` 上站着上一轮会话遗留的旧 fixture 服务
 （有 `/api/outbox`、无 `/boss` 路由），内核视图被导航过去渲染成了 `not found`。
