@@ -72,7 +72,7 @@ export function UpdateSection() {
       data-update-state={view?.state ?? 'idle'}
     >
       <h2 className="text-sm font-semibold text-slate-200">{t('update.heading')}</h2>
-      <p className="mt-1 text-xs text-slate-500">{t('update.note')}</p>
+      <p className="mt-1 text-xs text-slate-400">{t('update.note')}</p>
       {/* 归属色按「这个动作动到谁」：查询只是读一次上游，一行都不写 → `line`；
           下载把包落到本机磁盘 → `amber`；安装要退出进程再重启，本机这一轮会话回不来 → `seal`。 */}
       <div className="mt-3 flex flex-wrap gap-2">

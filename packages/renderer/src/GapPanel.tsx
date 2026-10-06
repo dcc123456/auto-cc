@@ -268,7 +268,7 @@ export function GapPanel() {
         <ScanSearch className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('gap.heading')}</h2>
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">{t('gap.hint')}</p>
+      <p className="text-xs leading-relaxed text-slate-400">{t('gap.hint')}</p>
 
       <div className="flex flex-col gap-2">
         <textarea
@@ -313,7 +313,7 @@ export function GapPanel() {
       )}
 
       {report && report.rows.length === 0 && !libraryMissing && (
-        <p data-gap-empty="no_requirements" className="text-xs leading-relaxed text-slate-500">
+        <p data-gap-empty="no_requirements" className="text-xs leading-relaxed text-slate-400">
           {t('gap.noRequirements', { chars: report.inputChars })}
         </p>
       )}
@@ -327,7 +327,7 @@ export function GapPanel() {
 
       {report && report.rows.length > 0 && (
         <>
-          <p data-gap-summary className="text-xs text-slate-500">
+          <p data-gap-summary className="text-xs text-slate-400">
             {t('gap.summary', {
               entities: report.entityCount,
               months: report.totalExperienceMonths,

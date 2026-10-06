@@ -311,11 +311,11 @@ export function KbPanel() {
             {t(ENTITY_KIND_LABEL_KEY[entity.kind])}
           </span>
           <span className="text-sm text-slate-200">{primaryTextOf(entity)}</span>
-          <span className="text-xs text-slate-500" data-kb-entity-id={entity.entityId}>
+          <span className="text-xs text-slate-400" data-kb-entity-id={entity.entityId}>
             {entity.entityId}
           </span>
         </div>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-400">
           {isDerived ? t('kb.derivedFrom', { docId: entity.sourceDocId ?? '' }) : t('kb.manualEntity')}
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -365,7 +365,7 @@ export function KbPanel() {
         {expanded && (
           <div data-kb-evidence={entity.entityId} className="flex flex-col gap-1 border-t border-line pt-2">
             {evidence.length === 0 ? (
-              <p className="text-xs text-slate-500">{t('kb.evidenceEmpty')}</p>
+              <p className="text-xs text-slate-400">{t('kb.evidenceEmpty')}</p>
             ) : (
               evidence.map((hit) => (
                 <p key={hit.entityId} data-kb-hit={hit.entityId} className="text-xs text-slate-400">
@@ -375,7 +375,7 @@ export function KbPanel() {
                 </p>
               ))
             )}
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-slate-400">
               {t('kb.updatedAt', { time: new Date(entity.updatedAt).toISOString() })}
             </p>
           </div>
@@ -390,7 +390,7 @@ export function KbPanel() {
         <Database className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('kb.heading')}</h2>
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">{t('kb.hint')}</p>
+      <p className="text-xs leading-relaxed text-slate-400">{t('kb.hint')}</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -466,24 +466,24 @@ export function KbPanel() {
         </div>
         {/* 向量腿的当次状态单独一行（spec 4.3-08）：命中数不变，但「只有词面结果」这件事必须读得出原因。 */}
         {vectorStatusHint !== null && (
-          <p data-kb-search="vector-status" className="text-xs leading-relaxed text-slate-500">
+          <p data-kb-search="vector-status" className="text-xs leading-relaxed text-slate-400">
             {vectorStatusHint}
           </p>
         )}
         {searchResult &&
           (searchResult.status === 'no_query_tokens' ? (
             // 确定空态之一：这句查询里切不出可检索的词（全是标点或空白）。不返回随机结果，也不报「检索失败」。
-            <p data-kb-search="no_tokens" className="text-xs leading-relaxed text-slate-500">
+            <p data-kb-search="no_tokens" className="text-xs leading-relaxed text-slate-400">
               {t('kb.searchNoTokensHint')}
             </p>
           ) : searchResult.hits.length === 0 ? (
             // 确定空态之二：库里确实没有沾边的内容——建议给出下一步（先同步、或换个更短的关键词、或补一条实体）。
-            <p data-kb-search="empty" className="text-xs leading-relaxed text-slate-500">
+            <p data-kb-search="empty" className="text-xs leading-relaxed text-slate-400">
               {t('kb.searchNoHitsHint')}
             </p>
           ) : (
             <>
-              <p data-kb-search="ok" className="text-xs text-slate-500">
+              <p data-kb-search="ok" className="text-xs text-slate-400">
                 {t('kb.searchTokens', { tokens: searchResult.queryTokens.join(' / ') })}
               </p>
               <ul className="flex flex-col gap-1">
@@ -551,7 +551,7 @@ export function KbPanel() {
       </div>
 
       {entities.length === 0 ? (
-        <p data-kb-empty className="text-xs text-slate-500">
+        <p data-kb-empty className="text-xs text-slate-400">
           {t('kb.empty')}
         </p>
       ) : (
@@ -607,7 +607,7 @@ export function KbPanel() {
               onChange={(event) => setEditing({ ...editing, lines: event.target.value })}
               className={`${FIELD_CLASS} font-mono`}
             />
-            <p className="text-xs text-slate-500">{t('kb.payloadHint')}</p>
+            <p className="text-xs text-slate-400">{t('kb.payloadHint')}</p>
             <div className="flex items-center gap-2">
               {/* 保存往库里写一条（琥珀），取消什么都不动（ghost）——旧写法给保存涂了 emerald，
                   于是"写本机"与"已经办完"在界面上是同一个颜色，读不出归属。 */}

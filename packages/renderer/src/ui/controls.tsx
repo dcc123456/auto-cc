@@ -30,7 +30,7 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
     'transition-[background-color,border-color,color,box-shadow] duration-150 ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70 ' +
     (disabled
-      ? 'cursor-not-allowed border-line bg-ink-850 text-slate-500 '
+      ? 'cursor-not-allowed border-line bg-ink-850 text-slate-400 '
       : // 默认 → 悬停（提亮一档、无位移）→ 按下（下移 1px + 回到 ink-800）
         'active:translate-y-px active:bg-ink-800 ');
   // 禁用时**整档语义色都不拼**（spec 6.2-10）。两条原因都在这一行里：
@@ -40,14 +40,16 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
   // ② 悬停——这里用的是 `aria-disabled` 而不是原生 `disabled`（原生禁用不派发鼠标事件，tooltip 就没了），
   //   于是 `:hover` 照样生效，留着 `hover:bg-*` 等于"按不动却会提亮"。
   // 禁用的画法只由 `base` 的禁用分支给一份，五档必然同色。
+  // 三档语义按钮的**文案用 `-ink` 档**，描边与淡洗仍用色相档：同色文字压在 14~18% 的同色淡洗上
+  // 只剩 3.3~3.7，够不到 12px 的 4.5:1（spec 6.1-06 普查实测，两个主题都中招）。
   const tone = disabled
     ? ''
     : variant === 'seal'
-      ? 'border-seal/45 bg-seal/18 text-seal hover:border-seal/70 hover:bg-seal/28 hover:text-slate-50'
+      ? 'border-seal/45 bg-seal/18 text-seal-ink hover:border-seal/70 hover:bg-seal/28 hover:text-slate-50'
       : variant === 'jade'
-        ? 'border-jade/40 bg-jade/14 text-jade hover:border-jade/65 hover:bg-jade/24 hover:text-slate-50'
+        ? 'border-jade/40 bg-jade/14 text-jade-ink hover:border-jade/65 hover:bg-jade/24 hover:text-slate-50'
         : variant === 'amber'
-          ? 'border-amber/40 bg-amber/14 text-amber hover:border-amber/65 hover:bg-amber/24 hover:text-slate-50'
+          ? 'border-amber/40 bg-amber/14 text-amber-ink hover:border-amber/65 hover:bg-amber/24 hover:text-slate-50'
           : variant === 'solid'
             ? 'border-slate-600 bg-ink-750 text-slate-50 hover:bg-ink-700 hover:border-slate-500'
             : variant === 'ghost'

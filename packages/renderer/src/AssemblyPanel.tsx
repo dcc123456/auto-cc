@@ -350,7 +350,7 @@ export function AssemblyPanel() {
               </li>
             );
           })}
-          {(tree?.nodes.length ?? 0) === 0 && <li className="text-xs text-slate-500">{t('assembly.empty')}</li>}
+          {(tree?.nodes.length ?? 0) === 0 && <li className="text-xs text-slate-400">{t('assembly.empty')}</li>}
         </ul>
 
         {editing && (

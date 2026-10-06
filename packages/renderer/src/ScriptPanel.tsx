@@ -248,7 +248,7 @@ export function ScriptPanel() {
         <MessageSquare size={16} className="text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('script.heading')}</h2>
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">{t('script.hint')}</p>
+      <p className="text-xs leading-relaxed text-slate-400">{t('script.hint')}</p>
 
       <div className="flex flex-col gap-2">
         <label className="text-[11px] text-slate-400" htmlFor="script-target">

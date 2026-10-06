@@ -282,7 +282,7 @@ export function SessionPanel() {
               </p>
             </li>
           ))}
-          {(snapshot?.platforms.length ?? 0) === 0 && <li className="text-xs text-slate-500">{t('session.empty')}</li>}
+          {(snapshot?.platforms.length ?? 0) === 0 && <li className="text-xs text-slate-400">{t('session.empty')}</li>}
         </ul>
 
         <div className="mt-3 flex items-center gap-2">

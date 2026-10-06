@@ -47,11 +47,17 @@
 
   /* — 三色效果归属 + 青瓷（进行中/系统） — */
   --color-seal: #e2543a;
-  --color-seal-deep: #b93b26;
+  /* `-ink` 是**文字档**：色相档写在 14~18% 的同色淡洗上必然掉对比（普查 spec 6.1-06 实测
+     墨案 seal 3.99、毡案三档 3.32/3.49/3.70，都够不到 12px 的 4.5:1），文案一律走 `-ink`，
+     描边、淡洗、图标仍走色相档。墨案只有朱砂需要提亮，青玉与琥珀本来就够亮——
+     同值也保留键名，为的是组件侧只有一条写法（`text-*-ink`），不分叉。 */
+  --color-seal-ink: #ef7a55;
   --color-seal-wash: rgba(226, 84, 58, 0.13);
   --color-jade: #4fb78a;
+  --color-jade-ink: #4fb78a;
   --color-jade-wash: rgba(79, 183, 138, 0.12);
   --color-amber: #e0a33f;
+  --color-amber-ink: #e0a33f;
   --color-amber-wash: rgba(224, 163, 63, 0.13);
   --color-celadon: #7fb6ad;
   --color-celadon-wash: rgba(127, 182, 173, 0.12);
@@ -241,14 +247,21 @@ body {
   --color-ink-700: #c9c2ae;
 
   /* 文字阶整体翻成深色：utility 名（text-slate-300 这类）不变，语义随主题翻转。
-     400/500 两档刻意比"等比翻转"更深：毡案下它们是次级文案，翻浅就掉到 3:1 以下（spec 6.1-06）。 */
+     这一条阶梯是「越往下越浅」，而浅底上的浅色就是低对比，所以 300~600 不能等比翻转。
+     逐屏普查（spec 6.1-06）量出毡案的可用带，并据此定下**档位与字号的对应关系**：
+     · ≥12px（`text-xs` 及以上）走 4.5:1 的正文门槛 → 只能用 slate-400 及更深，
+       slate-400 从 #56626c 加深到 #4f5a64（最深桌面 #d8d3c6 上 4.18 → 4.72），
+       slate-300 同时从 #4a5762 提到 #414c56，让这两档之间还留得住肉眼看得出的差；
+     · ≤11px 的元信息/读数走 3:1 门槛 → slate-500（3.70）、slate-600（3.26）胜任，
+       它们不许出现在 12px 的说明文案上（普查里毡案 17 行 12px 失守全是这一处错位）。
+     500 与 600 曾经比 500 还深（顺序反了），现在保持 300 < 400 < 500 < 600 单调。 */
   --color-slate-50: #1b2228;
   --color-slate-100: #252d34;
   --color-slate-200: #333c44;
-  --color-slate-300: #4a5762;
-  --color-slate-400: #56626c;
-  --color-slate-500: #6b7681;
-  --color-slate-600: #7d8892;
+  --color-slate-300: #414c56;
+  --color-slate-400: #4f5a64;
+  --color-slate-500: #5f6a74;
+  --color-slate-600: #6b7681;
   /* 桌面与卡片：950 最深毡 → 这里是"最浅"的方向，靠 line 与 shadow 分层 */
   --color-slate-700: #b3ab98;
   --color-slate-800: #d4cebd;
@@ -259,12 +272,20 @@ body {
   --color-paper-2: #f3eee1;
 
   --color-seal: #c0391f;
-  --color-seal-deep: #96290f;
+  /* 三档文字档按「写在自家淡洗上过 4.5」反推：seal-ink 4.88、jade-ink 4.79、amber-ink 5.08
+     （淡洗底各为 18%/14%/14% 压在纸面 #e7e3d8 上）。朱砂这一档接手了原 `--color-seal-deep` 的位
+     ——那个键在渲染层从来没有消费者，留着只会和 `-ink` 长成两个都能用的色（§2.5）。 */
+  --color-seal-ink: #96290f;
   --color-seal-wash: rgba(192, 57, 31, 0.1);
-  --color-jade: #2f8f66;
-  --color-jade-wash: rgba(47, 143, 102, 0.12);
-  --color-amber: #a1700f;
-  --color-amber-wash: rgba(161, 112, 15, 0.13);
+  /* 青玉与琥珀在毡案下同样按「次级 3:1」反推加深：普查实测 jade 58/58、amber 114/117 行
+     不到 3:1（最低 2.45）。朱砂按同一门槛只有 3.00，但它已是多份验收证据里的读数，暂不动。
+     wash 的 rgb 必须跟着各自 token 走，否则「底色是这一色相的淡洗」这条材质语言会失配。 */
+  --color-jade: #287957;
+  --color-jade-ink: #1f6244;
+  --color-jade-wash: rgba(40, 121, 87, 0.12);
+  --color-amber: #8a5f0a;
+  --color-amber-ink: #6f4c06;
+  --color-amber-wash: rgba(138, 95, 10, 0.13);
   --color-celadon: #3f8078;
   --color-celadon-wash: rgba(63, 128, 120, 0.12);
 

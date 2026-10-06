@@ -245,7 +245,7 @@ export function App() {
             <PanelRight size={13} />
             {t('kernel.heading')}
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('kernel.hint')}</p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">{t('kernel.hint')}</p>
           <p className="mt-4 font-mono text-[11px] text-slate-600">{KERNEL_VIEW_WIDTH_RATIO * 100}%</p>
         </aside>
       </div>

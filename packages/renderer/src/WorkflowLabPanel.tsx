@@ -239,7 +239,8 @@ export function WorkflowLabPanel() {
                 >
                   <span className="flex items-center justify-between gap-2">
                     <span className="break-all">
-                      <span className="font-mono text-xs">{String(node.index + 1)}</span>
+                      {/* 同 WorkflowPanel：序号跟着 11px 的行走，见 spec 6.1-06 的档位与字号对应。 */}
+                      <span className="font-mono">{String(node.index + 1)}</span>
                       {' · '}
                       {/* 节点 id 是计划数据：语言包缺条目时退回 id 本身，不漏出键名。 */}
                       {t(`workflow.step.${node.nodeId}`, node.nodeId)}

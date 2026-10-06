@@ -322,7 +322,9 @@ export function WorkflowPanel() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="break-all">
-                    <span className="font-mono text-xs">{String(index + 1)}</span>
+                    {/* 序号跟着这一行的字号（11px），不单独放大：整行是元信息档（slate-500 只过 3:1），
+                        一到 12px 就落进正文的 4.5 门槛，同一个数字在两档之间会假失守（spec 6.1-06）。 */}
+                    <span className="font-mono">{String(index + 1)}</span>
                     {' · '}
                     {/* 节点 id 是计划数据（外部输入）：语言包缺条目时退回显示 id 本身，而不是漏出 `workflow.step.xxx` 这种键名。 */}
                     {t(`workflow.step.${step.id}`, step.id)}

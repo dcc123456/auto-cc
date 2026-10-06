@@ -265,7 +265,7 @@ export function GeneratePanel() {
         <Sparkles className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('generate.heading')}</h2>
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">{t('generate.hint')}</p>
+      <p className="text-xs leading-relaxed text-slate-400">{t('generate.hint')}</p>
 
       <div className="flex flex-col gap-2">
         <textarea
