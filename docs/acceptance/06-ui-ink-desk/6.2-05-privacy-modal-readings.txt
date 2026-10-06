@@ -1,0 +1,84 @@
+6.2 第二十六片（2026-10-07）：隐私首屏收进 Modal 原件 —— 活体读数
+=====================================================================
+
+目标页：开发实例（CDP 10222 / vite 5173 / 视口 1200×772，截图 2400×1544）
+取证脚本：tmp/v6c/s26a.mjs（墨案 reopened + 首启动清标记）、s26b.mjs（毡案 reopened + 还原）、
+s26c.mjs（探针样式摘除核验）、s26d.mjs（墨案 reopened 全量几何/配色/对比度）、s26e.mjs（✕ 无障碍名与阴影）。
+本轮全部走本地开发实例与 localStorage，未写任何业务库、未访问真实平台（§7.2）。
+
+---------------------------------------------------------------------
+① 手搓浮层清零（本片的判据本体）
+---------------------------------------------------------------------
+`grep -rn "fixed inset-" packages/renderer/src --include=*.tsx | grep -v src/ui/`
+→ **只剩一条注释**（`PrivacyNotice.tsx` 第 11 行，写的是"曾经手搓过什么"）。
+即：`src/ui/**` 之外的自绘全屏遮罩 **0 处**（上一片普查为 2 处：`PrivacyNotice` + `ConsentCard`）。
+`Modal` 原件的消费者从 0 → **2**（⑤-1 风险签字 + 首屏声明），
+"零消费者的原件等于没写过的原件"（AGENTS.md §9 的 6.2-25 ①）这一条从此有了第二张真实读数。
+
+---------------------------------------------------------------------
+② 墨案（深色）· reopened=true 的几何与配色
+---------------------------------------------------------------------
+data-testid=privacy-notice / data-action=privacy-modal / data-reopened=true /
+role=dialog / aria-modal=true / **aria-labelledby="privacy-modal-title"**（读屏报得出"隐私声明与使用条款"）
+- 卡片：width **640** · height **724** · left 280 · top 24 · z 由外层 wrapper 的 z-50 承担（节点自身 `zIndex: auto`）
+- 圆角 12px（`rounded-sheet`）· 描边 rgba(150,178,196,0.26)（line-strong）· 底 rgb(15,22,28)（ink-850）
+- 阴影实层：`rgba(0,0,0,0.8) 0 24px 60px -24px`（前四层是 Tailwind 栈里的透明占位，不是四份阴影）
+- 遮罩：`.z-40` **rgba(4,7,10,0.66)** —— 与 ⑤-1 完全同一支 `SCRIM` 常量，工作台在浮层期间仍看得见读数
+- 底层滚动：`document.body.overflow = hidden`（弹窗锁，Esc 收起后回 `visible`，见 ④）
+- 正文 `li`：11px / rgb(133,152,168) / 压在卡片底上 **6.12:1**（≤11px 走 3:1 门槛，富余）
+- 小节标题 `section h3`：12px / rgb(194,209,220) / **11.67:1**（≥12px 走 4.5:1，过）
+- 右上角 ✕：宽 24 · **aria-label="回到工作台"**（新增的 `closeLabel` 旋钮；标题是"图标 + 文案"的 ReactNode，
+  原件从 `title` 推不出名字，而这只 ✕ 是唯一那条"关掉算了"的退路，必须有名字）
+- footer 只有一只键：`privacy-acknowledge`（文案"回到工作台"，ghost 档：透明底 + rgb(164,182,195)）
+- `data-testid=privacy-already-acknowledged` 一行读数在（"本机已在 2026/10/7 00:15:58 确认过这份声明"），
+  用 `mr-auto` 顶到左侧，右侧留给动作键
+- 内容确实需要滚：body `scrollH 854 > clientH 618`（原件自带的内滚容器接管，外层不再有 `overflow-y-auto`）
+- `dialogCount = 1`、`activeElement = BODY`（这一屏不抢焦点，符合"唯一退路是表态"的那一档）
+
+---------------------------------------------------------------------
+③ 毡案（浅色 / 纸面）· reopened=true
+---------------------------------------------------------------------
+theme 经 `[data-action=shell-theme-toggle]` 切到 light 后：
+- 同一套几何：640×724 · left 280 · top 24（**宽度档与主题无关**，这是令牌层与原件层分层的直接受益）
+- 卡片底 rgb(224,219,205)（毡案 ink-850）· 描边 rgba(38,44,48,0.3) · 遮罩 **rgba(38,44,48,0.5)**
+- 正文 `li`：11px / rgb(79,90,100) / **5.10:1**；小节标题 12px / rgb(51,60,68) / **8.12:1**
+- 关键承诺块：`bg-jade-wash` = rgba(40,121,87,0.12)，文字 11px / rgb(40,121,87)（jade 色相档，≤11px 判 3:1）
+- footer 动作键（ghost）：文字 rgb(65,76,86)，毡案下压在 ink-850 纸面上
+- `body.overflow=hidden`、`dialogCount=1`、`activeElement=BODY` 与墨案逐位一致
+
+---------------------------------------------------------------------
+④ 三条退路的分档（09 稿⑤ 的判据在第二只消费者上复现）
+---------------------------------------------------------------------
+| 状态 | ✕ | 点遮罩 | Esc | 实测 |
+| --- | --- | --- | --- | --- |
+| first-run（清掉 `auto-cc.privacy.acknowledged` 后 reload） | **无** | 不关 | 不关 | `closeBtn: null`；`scrim.click()` 后 `stillThere: true`；派发 Escape 后 `stillThere: true`；唯一出口是 `privacy-acknowledge`（文案"我已阅读并同意，进入工作台"，amber 档：底 oklab(0.756,0.032,0.130)/0.14 + 文字 rgb(224,163,63)） |
+| reopened（`[data-action=privacy-open]`） | **有**（24px，带 aria-label） | 关 | 关 | Esc 后 400ms 复测：`notice:false / scrim:0 / bodyOverflow:"visible"` —— 滚动锁随卸载还原 |
+判定语义与改造前**一字未动**：`usePrivacyNotice` 的三态枚举、`first-run` 那一次写 localStorage、
+重看那一次只收起，全在 `usePrivacyNotice` 里，本片没有碰。
+确认标记被本轮改写一次（`{"acknowledgedAt":1791303358432}` = 2026-10-06T16:15:58Z）——
+那是首启动态取证点击 acknowledge 的自然结果，与用户本来的"已确认"状态等价。
+
+---------------------------------------------------------------------
+⑤ 负腿与还原
+---------------------------------------------------------------------
+- `data-reopened` 仍挂在 dialog 节点上（`markers` 旋钮），5.9-06 与 6.2-06 的旧断言口径不变；
+  `scripts/smoke-dist.ts` 用的 `[data-testid="privacy-notice"]` 与 `[data-action="privacy-acknowledge"]`
+  两只凭据都在（分别由 `testId` 与 footer 里的 `DeskButton` 提供），装机冒烟不受影响。
+- 画面三张，md5 **互不相同**（§9 的 5.10-18 / 2.1 补片那条去重步骤）：
+  `6.2-05-privacy-modal-reopened-dark.png` 087b2b771cad4fcd123531ba09cd27d1
+  `6.2-05-privacy-modal-first-run-dark.png` ba4260ecc23b386786adcd339e28bfb4
+  `6.2-05-privacy-modal-light.png` 895ac7435ce82116608bc66bd0ffc293
+- 末态开发实例：theme 回 **dark（墨案）**，探针注入的抑制动画 `<style>` 已摘（`kill: 0`），
+  无遗留遮罩（`scrim: 0`），`body.overflow: visible`，隐私声明为已确认态。
+  本轮动过两次 `location.reload()`（取首启动那一态），这是与另一路取证共享实例的代价，已如实记在这里。
+
+---------------------------------------------------------------------
+⑥ 本片暴露的两条原件缺口（已在本片内补掉）
+---------------------------------------------------------------------
+1. `Modal` 缺 `data-testid` / `markers` 两个旋钮：`Banner` 早就有 `markers`，原件之间口径不齐就是
+   第二套的雏形 → 补成同形（`markers` 展成 `data-*`，`testId` 单独一条）。
+2. `Modal` 缺**无障碍名的来源**：改造前的 `PrivacyNotice` 自带 `aria-label`，而原件只把标题渲染成 `h3`，
+   既没有 `aria-labelledby`、✕ 也没有名字 → 补 `aria-labelledby={action}-modal-title`（弹窗与抽屉共用
+   "标题即名字"这条口径的起点），并加 `closeLabel`。
+   顺带记一条读数事实：`shadow-sheet` 在计算值里是**五层栈、前四层透明**，只有最后一层是实的
+   （`0 24px 60px -24px`），量阴影时别按四层去理解。
