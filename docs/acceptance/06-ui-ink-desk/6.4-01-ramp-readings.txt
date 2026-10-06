@@ -1,0 +1,58 @@
+6.4-01 / 6.1-03 补片读数：默认色阶收编进墨案四族（2026-10-06 05:07 +08:00）
+================================================================================
+
+取数方式（活体，用户自己的 dev 实例：5173 / CDP 10222，`harness eval --url 5173`）：
+读 `getComputedStyle(document.documentElement).getPropertyValue('--color-<族>-<档>')`，
+并用一个临时节点读 `text-rose-300` 的**计算色**（证明 utility 走的是变量间接引用，不是写死的十六进制）。
+截图这一路此刻取不到：`document.visibilityState === "hidden"`（窗口被遮挡/最小化），
+Chromium 不再产出帧，`Page.captureScreenshot` 挂住不返回（同一约束见 AGENTS.md §9 的 2.1-12 补窗：
+窗口不在前台时 CDP 输入不落页）。因此本条读数按**机检 C**记账，V 半边的截图留给用户在场的活体一轮。
+
+深色（`[data-theme]` 缺省 = dark）
+---------------------------------
+  rose-300    #ef9a86   ← 墨案 seal 族的浅档（文字用）
+  rose-950    #2b0f0b   ← seal 族的深档（底色用）
+  emerald-300 #7fd0ac   ← jade
+  emerald-950 #0c2119   ← jade
+  sky-300     #94c7c0   ← celadon
+  sky-800     #2d4a46   ← celadon
+  amber-300   #eac36d   ← amber
+  amber-950   #271a09   ← amber
+  violet-300  #94c7c0   ← celadon（与 sky 同族：设计口径里没有第五种"系统色"）
+  indigo-800  #2d4a46   ← celadon
+
+  计算色核对：`.text-rose-300` → rgb(239, 154, 134) = #ef9a86；`.bg-emerald-950` → rgb(12, 33, 25) = #0c2119。
+  （`.bg-sky-800` 读出来是 transparent：源码里没有 `bg-sky-800` 这个字面量，Tailwind 扫不到就不生成——
+   是扫描器的既定行为，不是变量没生效。同一档作为 `border-sky-800` 出现在源码里，因此边框是有色的。）
+
+浅色（`[data-theme='light']`，整条色阶反向）
+-------------------------------------------
+  rose-300    #9f3323   ← 低号变深：给人当文字要够暗
+  rose-950    #fdf1ee   ← 高号变浅：当底色
+  emerald-300 #2f7a5b
+  emerald-950 #eefaf4
+  sky-300     #406761
+  sky-800     #b2d8d3
+  amber-300   #9a6a22
+  amber-950   #fdf7ea
+  violet-300  #406761
+  indigo-800  #b2d8d3
+
+  取完两档后已把主题切回 dark（`localStorage["auto-cc.theme"] = "dark"`），没有把用户的实例留在浅色态。
+
+归属标签（`EffectChip` 的第二、三个消费者）
+-------------------------------------------
+  信任面板「可加白的工具」那一栏 10 行，逐行读 `[data-effect]` 与计算色：
+    local-write → color rgb(224, 163, 63) / bg rgba(224, 163, 63, 0.13) = amber 族（本机写入）
+    outbound    → color rgb(226, 84, 58) / bg rgba(226, 84, 58, 0.13) = seal 族（外发）
+  文案仍来自 `agent.tool.effect.*`（zh-CN：本地写入 / 外发），颜色不再由面板自己挑。
+
+为什么这一步是"收编"而不是"再画一套"
+-------------------------------------
+  收编前实测 tally：源码里 450 处默认色阶用法，rose 125 / emerald 115 / amber 101 / sky 91 / indigo 11 / violet 6 / red 1。
+  这六族覆盖了两类语义——"红=失败、绿=成功、蓝=进行中"，与设计口径的 seal/jade/celadon 一一对上；
+  剩下的 indigo/violet 只用在 17 处标签与拖拽把手上，归入 celadon（系统/证据）而不是新造第五族；
+  唯一一处 `text-red-300`（ShellPanel 的"上一次错误"）直接在调用点改成 `text-seal`，
+  并顺手修掉一处说谎：那一行没有错误时显示"无"，原先也用失败色画——现在只有真有错误才染朱砂。
+  图表侧确认没有依赖这六族区分品类：`MetricsPanel` 的漏斗条全是 `bg-sky-500` + 深浅档（单色分级），
+  `UsagePanel` 的 rose/emerald 本来就是"超额/未超额"的语义色——收编后语义反而更准。

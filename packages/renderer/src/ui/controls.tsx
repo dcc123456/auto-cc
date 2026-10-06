@@ -1,6 +1,7 @@
 import { BadgeCheck, CircleAlert, LoaderCircle, Send, Stamp } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import type { ToolEffect } from '@auto-cc/shared';
 
 /**
  * 墨案控件的六个档：描边、实底、幽灵、以及三个语义档（效果归属色）。
@@ -194,18 +195,22 @@ export function useDeskResult(doneMs = 2000): DeskResultState {
   return { result, markDone, markFailed, clearResult };
 }
 
-/** 副作用归属三档（工具卡片、算子标签、闸门提示都用这一套配色）。 */
-export type EffectTone = 'read' | 'localWrite' | 'outbound';
+/**
+ * 副作用归属三档（工具卡片、算子标签、闸门提示都用这一套配色）。
+ * 直接取 `@auto-cc/shared` 的 `ToolEffect`：注册表里是 `read / local-write / outbound`，
+ * 界面自己另起一套驼峰命名就会出现"同一个概念两个名字"（§3.6 术语一致）。
+ */
+export type EffectTone = ToolEffect;
 
 const EFFECT_CLASS: Record<EffectTone, string> = {
   read: 'border-jade/40 bg-jade-wash text-jade',
-  localWrite: 'border-amber/40 bg-amber-wash text-amber',
+  'local-write': 'border-amber/40 bg-amber-wash text-amber',
   outbound: 'border-seal/45 bg-seal-wash text-seal',
 };
 
 const EFFECT_ICON: Record<EffectTone, ReactNode> = {
   read: <BadgeCheck size={11} aria-hidden="true" />,
-  localWrite: <Stamp size={11} aria-hidden="true" />,
+  'local-write': <Stamp size={11} aria-hidden="true" />,
   outbound: <Send size={11} aria-hidden="true" />,
 };
 

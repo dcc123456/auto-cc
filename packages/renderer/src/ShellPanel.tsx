@@ -96,7 +96,10 @@ export function ShellPanel() {
             {status ? `${status.kernelViewBounds.width}x${status.kernelViewBounds.height}` : t('status.idle')}
           </dd>
           <dt>{t('status.lastError')}</dt>
-          <dd className="text-right text-red-300">{status?.lastError ?? t('status.none')}</dd>
+          {/* 「没有错误」不能用失败色画：那是把安全说成风险，同一行两种意思要两种颜色 */}
+          <dd className={`text-right ${status?.lastError ? 'text-seal' : 'text-slate-200'}`}>
+            {status?.lastError ?? t('status.none')}
+          </dd>
         </dl>
       </section>
 

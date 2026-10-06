@@ -10,6 +10,7 @@ import { ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AutonomyLevel, ExemptToolView, ToolDescriptorView } from '@auto-cc/shared';
+import { EffectChip } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -96,9 +97,14 @@ export function AgentPolicyPanel({
               <span className="font-medium text-slate-300">
                 {t(row.descriptor?.titleKey ?? 'agent.tool.unregistered')}
               </span>
-              <span className="text-slate-500">
-                {t(row.descriptor ? `agent.tool.effect.${row.descriptor.effect}` : 'agent.run.effectUnregistered')}
-              </span>
+              {row.descriptor ? (
+                <EffectChip effect={row.descriptor.effect}>
+                  {t(`agent.tool.effect.${row.descriptor.effect}`)}
+                </EffectChip>
+              ) : (
+                // 未登记的工具没有归属色可画——它连副作用是哪一档都不知道，硬涂一色就是谎报。
+                <span className="text-slate-500">{t('agent.run.effectUnregistered')}</span>
+              )}
               <span className="break-all font-mono text-[10px] text-slate-500">{row.toolId}</span>
               <span className="text-[10px] text-slate-500" data-exempt-added-at={String(row.addedAt)}>
                 {t('agent.policy.addedAt', { time: formatAddedAt(row.addedAt) })}
@@ -138,7 +144,8 @@ export function AgentPolicyPanel({
               className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/20 px-2 py-1 text-[11px]"
             >
               <span className="font-medium text-slate-300">{t(tool.titleKey)}</span>
-              <span className="text-slate-500">{t(`agent.tool.effect.${tool.effect}`)}</span>
+              {/* 归属色由原件负责，面板只报注册表里那一份读数（§2.7：界面不留第二套事实） */}
+              <EffectChip effect={tool.effect}>{t(`agent.tool.effect.${tool.effect}`)}</EffectChip>
               <span className="text-[10px] text-slate-500">{t('agent.tool.needsConfirm')}</span>
               <span className="break-all font-mono text-[10px] text-slate-600">{tool.id}</span>
               <button

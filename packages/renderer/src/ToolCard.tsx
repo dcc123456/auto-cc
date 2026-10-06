@@ -8,15 +8,20 @@
 import { Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
+import { EffectChip } from './ui/controls';
 import { EvidenceRefButton } from './EvidenceRefButton';
 
-/** 工具卡片的状态配色；状态本身来自主进程写的那一份读数。 */
-export const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
-  running: 'border-amber-900 bg-amber-950/30 text-amber-200',
-  done: 'border-emerald-900 bg-emerald-950/30 text-emerald-300',
-  failed: 'border-rose-900 bg-rose-950/40 text-rose-200',
+/**
+ * 工具卡片的状态配色：四态全部走墨案的语义令牌，不再用 Tailwind 默认的 emerald/rose/amber 三原色。
+ * 默认色阶不在设计系统的口径里（浅色主题下也不会跟着翻面），而且它们把"进行中"画成琥珀色，
+ * 与「等人表态」撞色——进行中是青瓷，琥珀只说"这台机器在等你"。
+ */
+const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
+  running: 'border-celadon/45 bg-celadon-wash text-slate-100',
+  done: 'border-jade/45 bg-jade-wash text-slate-100',
+  failed: 'border-seal/50 bg-seal-wash text-slate-100',
   // 跳过用中性偏冷的色：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
-  skipped: 'border-slate-700 bg-slate-900/40 text-slate-300',
+  skipped: 'border-line-strong bg-ink-850 text-slate-300',
 };
 
 /**
@@ -118,7 +123,7 @@ export function ToolCard({
           跳过那一格与成功同色：它说的是一句已成的事实（人做完了），不是一处需要修的错（5.5-08）。 */}
       {step && step.observation ? (
         <p
-          className={`mt-1 break-words ${step.status === 'failed' || step.status === 'refused' ? 'text-rose-200' : 'text-slate-300'}`}
+          className={`mt-1 break-words ${step.status === 'failed' || step.status === 'refused' ? 'text-seal' : 'text-slate-300'}`}
           data-step-observation={step.observation}
         >
           {step.observation}
@@ -137,7 +142,7 @@ export function ToolCard({
         {part.durationMs !== null ? (
           <span data-tool-duration={String(part.durationMs)}>{t('agent.tool.duration', { ms: part.durationMs })}</span>
         ) : null}
-        {meta ? <span>{t(`agent.tool.effect.${meta.effect}`)}</span> : null}
+        {meta ? <EffectChip effect={meta.effect}>{t(`agent.tool.effect.${meta.effect}`)}</EffectChip> : null}
         {meta?.requiresConfirmation ? <span data-tool-needs-approval>{t('agent.tool.needsConfirm')}</span> : null}
         {part.errorText ? (
           <span className="break-all text-rose-300" data-tool-error={part.errorText}>
