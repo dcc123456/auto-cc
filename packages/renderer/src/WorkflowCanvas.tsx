@@ -835,8 +835,10 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
       </div>
       {selectedSpec && selectedDescriptor ? (
         <OperatorParamForm
-          // 换一格就重挂载：未提交的草稿文本属于那一格，不该跟着跳过去
-          key={selectedSpec.id}
+          // 换一格就重挂载：未提交的草稿文本属于那一格，不该跟着跳过去。
+          // 键必须带前缀：这两张卡是同一个 children 数组里的兄弟，同键会让 React 复制出孤儿 DOM
+          // （实测：翻一次主题多一张表单，控制台报 "Encountered two children with the same key"）
+          key={`params:${selectedSpec.id}`}
           descriptor={selectedDescriptor}
           params={selectedSpec.params}
           isReadOnly={isReadOnly}
@@ -845,8 +847,8 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
       ) : null}
       {selectedCell ? (
         <WorkflowNodeDetail
-          // 同理：读数属于那一格，换格子必须重新去库里问一次
-          key={selectedCell.id}
+          // 同理：读数属于那一格，换格子必须重新去库里问一次（前缀同上，两张卡不能同键）
+          key={`detail:${selectedCell.id}`}
           nodeId={selectedCell.id}
           label={selectedCell.label}
         />
