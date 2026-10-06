@@ -14,7 +14,14 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ConfigService } from './index.js';
 import { SettingsStore } from './persist.js';
-import { SecretStore, maskSecret, plainCipher, resolveCipher, type Cipher } from './secret.js';
+import {
+  SecretStore,
+  cipherFromElectronModule,
+  maskSecret,
+  plainCipher,
+  resolveCipher,
+  type Cipher,
+} from './secret.js';
 
 /** 假加密器：整段做 base64 包装——够证明"落盘的不是明文"，同时可逆。 */
 const fakeCipher: Cipher = {
@@ -55,6 +62,9 @@ describe('SecretStore 密钥库', () => {
     expect(broken.get('llm.chat')).toBe('');
     // 原文件必须还在且完好：静默清空等于把用户唯一的凭证抹掉。
     expect(Buffer.from(readFileSync(broken.filePath(), 'utf8'), 'base64').toString('utf8')).toContain('sk-a-1111');
+    // 重填一次之后「解不开」必须撤掉：那条横幅自己写着"重新填一次即可"，填完了还挂着就是界面说谎。
+    broken.set('llm.chat', 'sk-b-2222');
+    expect(broken.unreadable).toBe(false);
   });
 
   it('清除是幂等的，掩码只交末 4 位', () => {
@@ -70,6 +80,30 @@ describe('SecretStore 密钥库', () => {
   it('非 Electron 运行时（纯 Node）探测回恒等端口，不抛（plan §3.1 实测）', async () => {
     const cipher = await resolveCipher();
     expect(cipher.encrypted).toBe(false);
+  });
+
+  it('safeStorage 是模块上的一个成员：认对形状才启用加密（spec 7.1-02）', () => {
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (plain: string) => Buffer.from(`enc:${plain}`, 'utf8'),
+      decryptString: (blob: Buffer) => blob.toString('utf8').slice(4),
+    };
+    // ESM 命名空间的直接成员与 CJS 互操作下的 default，两种形状都必须认。
+    for (const mod of [{ safeStorage }, { default: { safeStorage } }]) {
+      const cipher = cipherFromElectronModule(mod);
+      expect(cipher.encrypted).toBe(true);
+      expect(cipher.encrypt('sk-a-1111').toString('utf8')).toBe('enc:sk-a-1111');
+      expect(cipher.decrypt(Buffer.from('enc:sk-a-1111', 'utf8'))).toBe('sk-a-1111');
+    }
+    // 把三个方法摊在模块本身（修掉的那份写法）与纯 Node 拿到的二进制路径字符串，都判为不可用而不是抛。
+    expect(
+      cipherFromElectronModule({ isEncryptionAvailable: () => true, encryptString: () => Buffer.alloc(0) }).encrypted,
+    ).toBe(false);
+    expect(cipherFromElectronModule({ default: '/Applications/Electron.app/Contents/MacOS/Electron' }).encrypted).toBe(
+      false,
+    );
+    expect(cipherFromElectronModule({ safeStorage: { isEncryptionAvailable: () => false } }).encrypted).toBe(false);
+    expect(cipherFromElectronModule(null).encrypted).toBe(false);
   });
 });
 

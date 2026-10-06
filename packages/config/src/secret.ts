@@ -50,26 +50,60 @@ function fromSafeStorage(safeStorage: SafeStorageLike): Cipher {
   };
 }
 
+/** `import('electron')` 在本模块眼里的那点形状（ESM 命名空间与 CJS 互操作两种落点）。 */
+interface ElectronModuleShape {
+  safeStorage?: SafeStorageLike;
+  app?: { whenReady?: () => Promise<unknown> };
+  default?: { safeStorage?: SafeStorageLike; app?: { whenReady?: () => Promise<unknown> } };
+}
+
+/**
+ * 把模块对象摊成 `{ safeStorage, app }`：两种互操作落点归到一处，判定与等待都只认这一份形状。
+ * @param mod `import('electron')` 的返回值（纯 Node 下是二进制路径字符串的命名空间）
+ */
+function electronParts(mod: unknown): { safeStorage?: SafeStorageLike; app?: ElectronModuleShape['app'] } {
+  const holder = mod as ElectronModuleShape | null;
+  return { safeStorage: holder?.safeStorage ?? holder?.default?.safeStorage, app: holder?.app ?? holder?.default?.app };
+}
+
+/**
+ * 从「Electron 模块对象」判定能不能用系统安全存储，能则给 safeStorage 端口。
+ *
+ * 单独成函数是为了让这条判定能被单测钉住：`safeStorage` 挂在模块的 `.safeStorage` 上，
+ * 对模块本身解构 `isEncryptionAvailable` 永远拿到 undefined，于是加密分支静默失效、
+ * 所有平台都走明文回退（本机 spike 实测：`isEncryptionAvailable()=true`，密文 35 字节且 grep 不到明文）。
+ * @param mod `import('electron')` 的返回值
+ * @returns 可用则 safeStorage 端口，否则恒等端口
+ */
+export function cipherFromElectronModule(mod: unknown): Cipher {
+  const { safeStorage } = electronParts(mod);
+  if (safeStorage?.isEncryptionAvailable() === true) {
+    return fromSafeStorage(safeStorage);
+  }
+  return plainCipher;
+}
+
 /**
  * 探测本进程能不能用系统安全存储。
  *
  * 用**变量 specifier** 做动态 import：`electron` 不是本包的依赖，打包后也不在 node_modules 里，
  * 它只在真正运行于 Electron 主进程时才可解析；写成字面量会让 TS 与 esbuild 都去解析它而报错。
+ *
+ * 问可用性之前必须先等 `app.whenReady()`：本机实测 ready 之前 `isEncryptionAvailable()` 一律回
+ * false（before-ready=false / after-ready=true），而密钥库是在装配期装载的——不等这一步，
+ * 每台机器都会静默退回明文，界面上永远挂着「未加密存储」。
  * @returns 可用则返回 safeStorage 端口，否则返回恒等端口（不抛，调用方读 `encrypted` 播报）
  */
 export async function resolveCipher(): Promise<Cipher> {
   const specifier = 'electron';
   try {
-    const mod = (await import(specifier)) as Partial<SafeStorageLike> & { default?: Partial<SafeStorageLike> };
-    const candidate: Partial<SafeStorageLike> = mod?.default ?? mod ?? {};
-    const { isEncryptionAvailable, encryptString, decryptString } = candidate;
-    if (isEncryptionAvailable?.() === true && encryptString && decryptString) {
-      return fromSafeStorage({ isEncryptionAvailable, encryptString, decryptString });
-    }
+    const mod = (await import(specifier)) as ElectronModuleShape;
+    await electronParts(mod).app?.whenReady?.();
+    return cipherFromElectronModule(mod);
   } catch {
     // 非 Electron 运行时（纯 Node / vitest）与打包态都在这里收敛成恒等端口。
+    return plainCipher;
   }
-  return plainCipher;
 }
 
 /** 一条密钥的掩码读数：只够界面说"存过、末四位是什么、什么时候写的"。 */
@@ -102,7 +136,7 @@ interface SecretEntry {
 /**
  * 密钥库本体：持有内存副本 + 一个 0600 文件。
  *
- * 写盘走「临时文件 → rename」，避免半截写入把好数据顶掉；每条值单独加密，
+ * 写盘走「临时文件 → rename」，避免半截写入把好数据顶掉；整库一次加密后写出，
  * 于是密钥文件里任何一处都 grep 不到明文（spec 7.1-02）。
  */
 export class SecretStore {
@@ -195,5 +229,7 @@ export class SecretStore {
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.filePath());
     chmodSync(this.filePath(), 0o600);
+    // 整库重写成功之后「解不开」就不再成立：那条横幅自己写着"重新填一次即可"，填完还挂着就是界面说谎。
+    this.unreadableFlag = false;
   }
 }

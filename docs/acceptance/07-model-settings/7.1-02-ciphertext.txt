@@ -1,0 +1,43 @@
+# 7.1-02 活体读数：safeStorage 可用时密钥以密文落盘（spec 7.1-02）
+# 探针串：sk-cipher-71d-9001（本次自测造的假值，不对应任何真实凭证；baseUrl 指向本机 fixture，§7.2）。
+# 取法：隔离实例（CDP 10225 / tmp/71d-userdata）→ 界面填 key → 保存 → 终端 grep 整个 userData。
+
+{
+ "storage.encrypted（界面与回包读到的）": true,
+ "分区里的状态行": "密钥以系统密钥库加密存放。",
+ "「未加密存储」横幅": null,
+ "secrets.bin": {
+  "mode": "0600",
+  "size": "99 bytes（明文时同一格是 80 bytes）",
+  "头 16 字节": "7631 3069 ff4e 0888 3fda 7276 455a 53e2（`v10` = macOS Keychain 包装前缀）"
+ },
+ "grep 明文": {
+  "grep -ac 'sk-cipher-71d-9001' tmp/71d-userdata/secrets.bin": 0,
+  "grep -rl 'sk-cipher-71d-9001' tmp/71d-userdata": "无输出（整棵树 0 命中）",
+  "grep -rl 'sk-cipher-71d-9001' tmp/71d-electron*.log tmp/71d-fixture.log": "无输出"
+ },
+ "重启后仍然解得开": "见 7.1-05-restart-readings.txt：新进程读到 ····9001 掩码，且「测试连接」拿这条 key 真发了一次请求并成功"
+}
+
+## 本片修掉的一个真实缺陷（必须留档，否则下一个人还会踩）
+
+第一条活体读数**不是**密文，而是 `encrypted:false` + 明文落盘。查下来是两个形状问题叠在一起，
+都在 `packages/config/src/secret.ts` 的 `resolveCipher()`：
+
+1. **读错了挂载点**：`safeStorage` 是 `import('electron')` 返回值上的一个**成员**，
+   而旧写法直接对模块对象解构 `isEncryptionAvailable / encryptString / decryptString` —— 永远是 undefined，
+   于是判定式永远不成立，**每个平台都会静默走明文回退**（界面倒是如实说"未加密存储"，所以从界面上看不出是缺陷）。
+2. **问得太早**：本机 spike 实测 `isEncryptionAvailable()` 在 `app.whenReady()` **之前一律回 false**
+   （before-ready=false / after-ready=true，同一台机器、同一份 Electron 44.4.5，两个目录各跑一次结论一致）。
+   密钥库是在装配期装载的，所以即便形状修对了、ready 之前那一问还是 false。
+   现在 `resolveCipher()` 先 `await app.whenReady()` 再问可用性。
+
+**为什么四道门禁全绿也没拦住它**：vitest 跑在纯 Node 里，`import('electron')` 拿到的是二进制路径字符串，
+必然走恒等端口分支（plan §3.1 当初就是照这条写的测试策略），所以加密分支只能靠注入的假 `Cipher` 覆盖——
+而假 `Cipher` 是**直接塞进 `SecretStore` 构造器**的，绕过了 `resolveCipher()` 这段真正出问题的探测代码。
+补了一条单测把形状钉住：`settings.test.ts` 的「safeStorage 是模块上的一个成员：认对形状才启用加密」，
+用两种互操作落点（`mod.safeStorage` 与 `mod.default.safeStorage`）各验一次，并把"摊在模块本身"的旧形状判为不可用。
+
+**顺带修的第二条**：装载解不开时挂出的 `SECRET_UNREADABLE` 横幅，文案写着"重新填一次即可"，
+但旧实现里 `unreadableFlag` 只在 `load()` 里复位——重填之后横幅还挂着，等于界面说谎（活体实测到一次）。
+现在整库重写成功（`flush()` 走完 rename + chmod）即复位，单测同一条用例补了断言。

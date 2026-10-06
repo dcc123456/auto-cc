@@ -370,6 +370,16 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   真实画面（`docs/acceptance/06-ui-ink-desk/6.5-05-inspector-{light,dark}.png`）。所以“V 类截图受阻”不再是 hidden
   的必然结论：先分清这一条判据要的是**画面长什么样**（可以直接拍）还是**指针有没有落页**（必须用户在场）。
 
+- **实测（7.1-d 收口）Electron `safeStorage` 的两条形状事实**（活体取证才发现，四道门禁全绿时它躲过了全部单测）：
+  ① `safeStorage` 是 `import('electron')` 返回值上的**成员**（`mod.safeStorage`，CJS 互操作下也在
+  `mod.default.safeStorage`），对模块对象本身解构 `isEncryptionAvailable/encryptString/decryptString`
+  永远拿到 undefined，于是加密分支静默失效、**每个平台都走明文回退**——而界面上只是一句如实的"未加密存储"，
+  从界面看不出这是缺陷；② `isEncryptionAvailable()` 在 `app.whenReady()` **之前一律回 false**
+  （本机同版本 Electron 44.4.5 实测：before-ready=false / after-ready=true，换两个目录各跑一次结论一致），
+  所以装配期探测密钥库能力的代码必须先 `await app.whenReady()` 再问。
+  **由此加一条测试口径**：注入假实现时不许绕过探测函数本身（把假 cipher 直接塞进构造器，
+  那段"怎么拿到真 cipher"的逻辑就永远没跑过）；探测类逻辑抽成纯函数，对它的输入形状
+  （真模块 / 错形状 / 纯 Node 下那个二进制路径字符串）各留一条断言。
 - **实测（6.2 第二十三/二十四片）读渲染层"当下长什么样"的三条口径**（前两条各自已咬过两次）：
   ① 窗口 hidden 时 **CSS 动画与过渡的时间轴不推进**，入场动画永远停在 from 帧——表现为刚挂上的节点
   `opacity: 0` + 一个位移量（`animate-rise` 卡在 `translateY(6px)`），于是"截图里元素根本不存在"、
