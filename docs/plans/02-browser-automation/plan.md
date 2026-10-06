@@ -2141,3 +2141,25 @@ zh-CN / en 两份语言包同时补齐，复跑 `pnpm lint`（eslint + `check-re
 **验收方式**：`pnpm dev`（CDP 10222）+ 仿站 10233，用 `plugins.saveConfig('workflow', {planId:'boss-e2e'})`
 热切计划，在首页面板里跑完整链；关键节点各一张截图，外加「接管前 / 人工处理后 / 恢复后」三张，
 跑完把 `planId` 切回 `boss-basic` 并复跑一次原路径，确认默认计划没被这次验收弄脏。全程只打本地仿站（§7.2）。
+
+## 16. 2.1-12 补窗发现的一条待裁（2026-10-06，动代码前要先裁）
+
+**事实**（读数在 `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第五节）：mac 活体里 `browser.act.click` 连点三次
+一律回 `status:'done' / channel:'cdp' / trusted:true`，`located.rect` 与页面 `getBoundingClientRect()` 逐位一致，
+而靶页自己的 `[data-testid="hit-log"]` 停在「尚无点击」、capture 阶段挂的 pointerdown/mousedown/mouseup/click 计数全 0。
+原因是那一份窗口 `document.visibilityState === 'hidden'`（macOS 遮挡计算没关，`--disable-features=CalculateNativeWinOcclusion`
+只对 Windows 有效），合成器不给隐藏帧派发输入。
+
+**待裁的就一句话**：`click` 的 `done` 要不要升级成「页面确认收到过」。现在的三条动作里
+`type` 有 `valueAfter` 回读、`upload` 有 `changeCount` + 文件名/字节数回读，**只有 `click` 是派发即算成功**——
+所以界面与 agent 摘要那句「点击已完成」在证据强度上比另外两条弱一档（§2.6 的边界校验、§7.1 的 V 判据都碰得到）。
+
+- 候选 A（最小）：`click` 之后复用 `buildWaitScript` 的 `textAppears` / `domChanged` 谓词做一次有界回读，
+  回读不到就把 `status` 写成 `timeout` 并带快照——不加新通道、不加新依赖，改的是 `act-service.ts` 一处判定。
+- 候选 B（只改口径）：代码不动，把 `ActResultView` 的注释、`agent.tool.labels.actClick` 的文案与 spec 2.2-12 的
+  「两条通道如实报告」补一句「click 的 `done` 表示派发完成，不表示页面收到」，并在 §7.1 明确要求 V 证据取页面回执。
+- 候选 C：都不做，维持现状（那么 2.1-12 的 act 那一格在 mac 上永远只能靠"窗口在前台 + 页面回执"来收）。
+
+**本窗按裁定⑭ 什么都没改**：状态位、代码、文案一律不动，只把这条待裁登记在计划树里。
+顺带登记两条活体口径（已进 AGENTS.md §9）：`window.autoCC` 是**位置实参 + `{ok,value}` 信封**（`{spec}` 那个形状属于 agent 工具层），
+以及 `LocateResultView` 只有 `ranked` 没有 `matches`。
