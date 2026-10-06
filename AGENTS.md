@@ -365,6 +365,20 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   真实画面（`docs/acceptance/06-ui-ink-desk/6.5-05-inspector-{light,dark}.png`）。所以“V 类截图受阻”不再是 hidden
   的必然结论：先分清这一条判据要的是**画面长什么样**（可以直接拍）还是**指针有没有落页**（必须用户在场）。
 
+- **实测（6.2 第二十三/二十四片）读渲染层"当下长什么样"的三条口径**（前两条各自已咬过两次）：
+  ① 窗口 hidden 时 **CSS 动画与过渡的时间轴不推进**，入场动画永远停在 from 帧——表现为刚挂上的节点
+  `opacity: 0` + 一个位移量（`animate-rise` 卡在 `translateY(6px)`），于是"截图里元素根本不存在"、
+  `getBoundingClientRect()` 少 6px，甚至把上一主题的 `color` 当成当前主题读出 1.33 这种不可能的对比度。
+  量几何/拍图/读色之前先注入 `*,*::before,*::after{transition:none !important;animation:none !important}`，
+  自证两条：注入前 `document.getAnimations().length` 非 0（本轮读数 12/14），注入后该节点
+  `animation` 计算值变成 `none 0s`；**收尾必须把这支 `<style>` 摘掉**，否则用户的
+  dev 实例从此没有动效。② `DeskButton` 的门禁**不是原生 `disabled`** 而是 `aria-disabled="true"` +
+  `data-disabled-reason="<码>"`，所以 `node.disabled` 读回 **false**、而 `node.click()` 被组件自己挡在门口
+  什么都不发生——判"这颗按不动是界面缺陷"之前必须先看 `data-disabled-reason`（本项目据此误判过两次，
+  实际是前置数据缺失如 `NO_SEED_DOC`）。③ 隐藏页的 `setTimeout` 被 Chromium 按 **1 秒粒度节流**，
+  所以"8 秒自动消失"实测 8500ms 是环境读数不是产品缺陷；判时长类行为要写成区间而不是相等（§9 的 5.4-b 那条
+  "基线里含别的句柄、判据写 <= 不写 ==" 是同一条教训的另一种形态）。
+
 ---
 
 ## 10. 机检落地状态（避免误以为规则已被工具强制执行）
