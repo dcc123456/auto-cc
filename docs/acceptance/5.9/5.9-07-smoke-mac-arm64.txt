@@ -1,0 +1,15 @@
+auto-cc 发布冒烟 · 2026-10-06T01:26:57.987Z
+平台=darwin · 产物=/Users/dcc/deepseek-harness-workspece/auto-cc/dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc · userData=/Users/dcc/deepseek-harness-workspece/auto-cc/tmp/smoke-dist/userdata-2026-10-06T01-26-57 · CDP=10266 · 计划=boss-basic
+PASS · 冒烟 1/6 产物存在 —— /Users/dcc/deepseek-harness-workspece/auto-cc/dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc
+PASS · 冒烟 1/6 随包文件齐 —— resources=/Users/dcc/deepseek-harness-workspece/auto-cc/dist/mac-arm64/auto-cc.app/Contents/Resources → app-update.yml:在 / LICENSES.md:在 / THIRD-PARTY-NOTICES.txt:在
+PASS · 冒烟 2/6 fixture 站点可用 —— 复用已在听的 http://127.0.0.1:10233（未新起，§7.2 零出网）
+PASS · 冒烟 3/6 产物已启动并进渲染层 —— target 里出现 app.asar 页面，CDP=10266
+PASS · 冒烟 4/6 首屏与主界面都在 —— 隐私首屏出现过=true · 视图切换口出现=true
+PASS · 冒烟 4/6 进对话 —— 对话输入框可见=true
+PASS · 冒烟 5/6 内置计划在产物里在册 —— boss-basic(3), boss-deliver(2), boss-e2e(5)
+· 起跑 runId=e46c67b5-52b8-49d9-a570-fff099a8ecbe status=running
+PASS · 冒烟 5/6 占位工作流跑通 —— status=done requiresHuman=null 节点=jd-capture=done / jd-list=done / flaky=done
+· 产物进程退出 code=0 signal=null
+PASS · 冒烟 6/6 干净退出 —— Browser.close 后进程自行退出 code=0
+· 附读：app.asar 不在
+冒烟结论：六步全过，产物可发。

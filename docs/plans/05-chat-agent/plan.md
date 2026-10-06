@@ -1796,6 +1796,14 @@ CDP 10255、全新 `tmp/dist-update-userdata7`、更新源是本机 `scripts/upd
 `tmp/smoke-dist/userdata-<时间戳>` 且**留着不删**（删了每轮都假装首启动，掩盖真实状态）；
 未跟踪的日志与 userdata 全在被忽略的 `tmp/`，入库只有按条目 ID 命名的两份文字证据。
 
+**mac 半边补跑（2026-10-06，本机已是 macOS arm64）**：`pnpm dist:mac` 出 dmg + zip（arm64 与 x64 各一对）后
+`pnpm smoke:dist --exe dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc` 六步全过、退出码 0，
+日志归档 `docs/acceptance/5.9/5.9-07-smoke-mac-arm64.txt`；fixture 站点当时已在听，按"先探测再复用"那条口径复用了它。
+**冒烟对象必须是完整 target，不是 `--dir`**：第一轮用 `--dir` 的解包目录跑，第 1 步「随包文件齐」直接判 FAIL——
+`electron-builder --dir` 在 mac 与 win 那一支**不生成 `app-update.yml`**（`--linux --dir` 反倒会写），
+而这个文件是 5.9-03 下载半边的前置（`updaterCacheDirName` 就从它读）。先前那批 mac 产物里有它，是因为当时出过 dmg/zip。
+linux 半边仍取不到：本机跑不了 linux 的 ELF 载荷，只能等 linux 宿主。
+
 ### 7.8 5.10 画布编辑器的落点与切片（2026-10-04 现场读码后定，逐片独立跑门禁、独立提交）
 
 §5.10 那张设计表是 2026-09-30 写的，当时只做了外部取证。开工前按 §6.2 重新对着**当前代码**量一遍，
