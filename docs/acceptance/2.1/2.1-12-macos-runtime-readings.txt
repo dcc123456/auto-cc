@@ -132,3 +132,42 @@ CDP `--port 10299`；10222 上那个实例没动、没杀），全程只打本�
   `type` 有 `valueAfter` 回读、`upload` 有 `changeCount` + 文件名/字节数回读，`click` 没有任何页面侧回读，
   于是 `trusted:true` 只在"事件通道是 cdp"这个意义上为真，在"页面收到过这次点击"的意义上未经证实。
   要不要给 `click` 补一条页面侧确认（等回执文本/`textAppears` 类谓词），是 P2 的一条独立待裁，不要顺手夹带。
+
+
+## 六、2026-10-06 第三次补格：窗口已经在前台了，但 click 连派发都没走到（第五节的结论要改一半）
+
+这一轮是在裁定⑰ 落码（`f2e081d`）之后跑的，用的仍是那台**已在跑的 10222 dev 实例**
+（`ps` 读数：`scripts/dev.ts` 起了约 4 分钟，`packages/main/dist/main.cjs` 的 mtime 与进程启动时间同分钟，
+产物里含 `clickReadbackMs` 两处命中——所以加载的是新代码；实例未被杀，跑完仍留着）。fixture 服务在 10233 正常监听。
+
+读数按四格走（探针脚本与原始输出写在 `tmp/c17/`，收窗即清理，按 §7.5 不入库）：
+
+1. **可见性条件已经不成立了**：`appDocument.visibilityState === 'visible'`、内核视图页
+   `visibility:'visible' / hasFocus:true`，视口 `456x772 dpr:2`。也就是说第五节钉的那个环境缺口
+   （"整个窗口被遮挡、合成器丢输入"）这一轮**不存在**。
+2. **但 `browser.act.click` 根本没派发**：两次（带 `role+name` 的候选 / 只给 `selector` 的候选）都在
+   5000ms 后返回信封 `{ok:false,error:{code:'WAIT_TIMEOUT',message:'等待「clickable」超时（5000ms 内未满足）'}}`。
+   这一条是派发**之前**的动作性闸门（`act-service.ts:269`），不是派发之后的回执。
+3. **同一时刻页面自己的地面真值说"该点能点"**：`[data-testid="greet-button"]` 存在、
+   `getBoundingClientRect()` = `{x:29,y:338,width:61,height:32}`（滚动前后一样，几何稳定），
+   `document.elementFromPoint(中心)` 回的就是这只按钮本身（`isTopmostAtCenter:true`、
+   `topmostTag:'BUTTON[greet-button]'`），按钮没有 `disabled`。而服务侧的 `clickable` 判据是
+   `visible && enabled && unobstructed` 三者齐备（`locator-script.ts:471`）——**三项在页面上都能自证成立，
+   服务却读成不满足**，这一对矛盾是本窗留下的唯一待查线索。
+4. **回执机制这一轮没被考验到**：派发没发生，所以 `armClickReceipt` 从未运行——页面里
+   `globalThis.__autoCcClickReceipt` 为 `null`，与"服务返回的是 WAIT_TIMEOUT 而不是 `status:'timeout'`"互相印证。
+   我自己的 capture 计数（pointerdown/mousedown/mouseup/click）四个字段全程 0，靶页 `[data-testid="hit-log"]`
+   仍只有那条「（尚无点击）」占位——**没有任何一次事件到达页面**，与"未派发"一致。
+
+对本窗三条判定口径的影响（状态位一律不动，按裁定⑭）：
+- 第五节那句"这一格欠的是窗口在前台"**要改**：前台条件满足后仍然拿不到真点，缺口挪到了动作性闸门前面。
+  下一窗别按"让用户把窗口点到前台就能过"来安排。
+- 裁定⑰ 的 V 半边（活体 `done` 与活体 `timeout` 两腿）**都还没有取到**，代码/单测/文档口径三件已在
+  `f2e081d` + `2a0fa66` 落定，活体腿仍挂在 `2.1-12` / `2.2-12` 的 `[!]` 上。
+- 一条**没查清的形状读数**（登记，不当缺陷）：同一个对象传给 `browser.act.click` 能通过校验、
+  传给 `browser.locate.find` 返回 `LOCATE_SPEC_INVALID`。本窗没有去核 `locate.find` 那一路的实参形状声明
+  （很可能是它自己的 query 形状而非 `LocateSpec`，那就是我用错了形状而不是接口不一致）。下一窗要动 `locate.find`
+  取证时先读 `packages/shared/src/bridge.ts` 里那一行的 `args`，别再猜。
+- 一条可复用的坑：`sessions.open` 之后立刻 `page.navigate` 会得到 `(-3) loading 'http://127.0.0.1:10233/'`
+  的信封（首屏装载与导航相撞，与第四节同源），**但目标页其实照常装载完成**（下一格 snapshot 就是
+  `/locator / readyState:complete / elementCount:61`）。别把这条信封读成"导航失败"，更不要因此重试导航。

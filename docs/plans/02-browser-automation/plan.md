@@ -2202,3 +2202,24 @@ zh-CN / en 两份语言包同时补齐，复跑 `pnpm lint`（eslint + `check-re
 `packages/renderer` 的 `agent.tool.labels.actClick` 摘要文案（两份语言包一起改，缺一份 lint 即红）。
 spec 侧只补 2.2-12 的「两条通道如实报告」一句：`click` 的 `done` 从此表示「页面回执过」，
 而 `2.1-12` / `2.1-10` 的 V 半边**不因这次改动而解除**——它们欠的是在场环境，不是代码。
+
+### 16.2 裁定⑰落码后的第一次活体尝试（2026-10-06，读数在 `2.1-12-macos-runtime-readings.txt` 第六节）
+
+上面那句"欠的是在场环境"**本轮被自己的读数推翻了**，下一窗按这一节安排，不要再等前台：
+
+- 环境这一轮已经满足（两份文档 `visibilityState:'visible'`、视图 `hasFocus:true`、视口 `456x772 dpr:2`），
+  而 `browser.act.click` **连派发都没发生**：两次都在 5000ms 后以 `WAIT_TIMEOUT / 等待「clickable」超时` 返回。
+  挡住的是 `perform` 第一段之前的动作性闸门（`act-service.ts:269`），不是新加的回执段。
+- 页面侧地面真值与它矛盾：按钮存在、`rect {29,338,61,32}` 滚动前后不变、
+  `elementFromPoint(中心)` 回的就是按钮本身、没有 `disabled`——`visible && enabled && unobstructed`
+  三项都能自证成立，服务却读成不满足（`locator-script.ts:471`）。
+- 于是回执两腿（活体 `done` / 活体 `timeout`）**都还没取到**：派发没跑，`__autoCcClickReceipt` 停在 `null`，
+  页面自己的四个 capture 计数全程 0。代码与单测那半边不受影响（`f2e081d`，包内 255 例绿）。
+
+**下一窗的一条决定性检查（做完再谈别的）**：把 `waitSatisfied` 里那段 `buildWaitScript('clickable', …)` 的
+**返回读数原样打出来**（`visible/enabled/unobstructed/rect/frameUrl` 逐条），看它究竟评在哪一份文档上。
+两个候选解释按优先级排：① 它评的是**另一份同名文档**（未激活视图宽高为 0 那一类，AGENTS.md §9 的 5.4-b ⑦），
+`evaluateInFrames` 收到的帧与我探针挂的那个 target 不是同一个；② `stableCheckSamples` 要求的连续样本
+在这一轮根本没攒够（脚本内部轮询与 `waitCheckMs` 的配合），与可见性无关。
+**不要**为了绕过这一格去把动作性判据放松——那是 §8.3 意义上的降低安全边际，属另一条待裁。
+
