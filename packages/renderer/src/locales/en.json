@@ -445,6 +445,15 @@
       "preview": "Preview",
       "export": "Export PDF",
       "fail": "Inject export failure",
+      "reason": {
+        "ACTION_BUSY": "The previous action hasn't returned yet",
+        "IMPORT_PATH_EMPTY": "Enter the resume file's absolute path first",
+        "NO_SEED_DOC": "Write a document first so preview and export know which one to take",
+        "EDITOR_OPEN": "The layout editor is already open; only one at a time",
+        "PDF_EDIT_OPEN": "The PDF edit view is already open",
+        "SNAPSHOT_MISSING": "Pick one snapshot in each of the two selectors",
+        "SNAPSHOT_SAME": "Start and end are the same snapshot, nothing to compare"
+      },
       "seedReceipt": "Loaded demo document {{docId}}",
       "previewDone": "Preview refreshed",
       "previewEmpty": "No preview yet: load demo content, then press Preview",

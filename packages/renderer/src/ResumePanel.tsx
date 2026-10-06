@@ -25,6 +25,7 @@ import type {
 } from '@auto-cc/shared';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
+import { DeskButton, FIELD_CLASS } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -206,8 +207,24 @@ export function ResumePanel() {
       hash: item.hash.slice(0, 8),
     });
 
+  /** 上一条动作还在途——这一档原因是本面板十只按钮共用的那一条。 */
+  const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
+
+  /**
+   * 原因码对人说的话（07 稿④：只给码不给这句话，禁用就成了"界面不说谎"的反例）。
+   * @param code 该按钮当下的原因码，可用时为 undefined
+   */
+  const reasonLabel = (code?: string): string | undefined =>
+    code === undefined ? undefined : t(`resume.reason.${code}`);
+
+  const importReason = importPath.trim() === '' ? 'IMPORT_PATH_EMPTY' : busyReason;
+  const noSeedReason = seed === undefined ? 'NO_SEED_DOC' : busyReason;
+  const editorReason = editorDocId !== undefined ? 'EDITOR_OPEN' : noSeedReason;
+  const pdfEditReason = pdfEditOpen ? 'PDF_EDIT_OPEN' : busyReason;
+  const diffReason = fromId === '' || toId === '' ? 'SNAPSHOT_MISSING' : fromId === toId ? 'SNAPSHOT_SAME' : busyReason;
+
   return (
-    <section data-testid="resume-panel" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <section data-testid="resume-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
       <div className="flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
           <FileText size={16} />
@@ -219,7 +236,7 @@ export function ResumePanel() {
             data-testid="resume-locale"
             value={locale}
             onChange={(event) => setLocale(event.target.value as ResumeLocaleView)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+            className={FIELD_CLASS}
           >
             <option value="zh-CN">zh-CN</option>
             <option value="en">en</option>
@@ -234,19 +251,23 @@ export function ResumePanel() {
             data-testid="resume-import-path"
             value={importPath}
             onChange={(event) => setImportPath(event.target.value)}
-            className="min-w-[240px] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+            className={`${FIELD_CLASS} min-w-[240px] flex-1`}
           />
         </label>
-        <button
-          type="button"
-          data-action="import"
-          disabled={importPath.trim() === '' || !!busy}
+        {/* 导入落的是本机库里那份脱敏文档：琥珀那一档（本机写入）。 */}
+        <DeskButton
+          action="import"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={importReason !== undefined}
+          disabledReason={importReason}
+          disabledReasonLabel={reasonLabel(importReason)}
           onClick={importResume}
-          className="flex items-center gap-1 rounded-md border border-indigo-800 px-2 py-1 text-[11px] text-indigo-300 hover:bg-indigo-950 disabled:opacity-40"
         >
           <Upload size={12} />
           {t('resume.import')}
-        </button>
+        </DeskButton>
       </div>
 
       <p className="mt-1 text-[11px] text-slate-500" data-testid="resume-import-hint">
@@ -255,7 +276,7 @@ export function ResumePanel() {
 
       {importError && (
         <p
-          className="mt-2 break-all rounded-md border border-rose-900 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-200"
+          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
           data-testid="resume-import-error"
         >
           {t('resume.importError', { code: importError.code, message: importError.message })}
@@ -268,7 +289,7 @@ export function ResumePanel() {
             <span
               key={section.kind}
               data-testid="resume-import-section"
-              className="rounded border border-slate-700 px-1 text-[11px] text-slate-400"
+              className="rounded border border-line px-1 text-[11px] text-slate-400"
             >
               {t(`resume.kind.${section.kind}`)} · {section.entries}
             </span>
@@ -281,7 +302,7 @@ export function ResumePanel() {
           {t('resume.pendingEmpty')}
         </p>
       ) : (
-        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/60 p-3" data-testid="resume-pending-list">
+        <div className="mt-2 rounded-md border border-line bg-ink-950/60 p-3" data-testid="resume-pending-list">
           <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
             <ListChecks size={14} />
             {t('resume.pending')} · {t('resume.pendingCount', { count: pending.length })}
@@ -292,7 +313,7 @@ export function ResumePanel() {
                 key={row.sourceHash}
                 data-testid="resume-pending-row"
                 data-status={row.status}
-                className="rounded border border-slate-800 px-2 py-1.5"
+                className="rounded border border-line px-2 py-1.5"
               >
                 <p className="text-[11px] text-slate-400">
                   {t('resume.pendingRow', {
@@ -310,7 +331,7 @@ export function ResumePanel() {
                       data-testid="resume-pending-issue"
                       className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
                     >
-                      <span className="rounded border border-amber-900 px-1 text-amber-300">
+                      <span className="rounded border border-amber/45 px-1 text-amber">
                         {t(ISSUE_LABEL_KEY[issue.code])}
                       </span>
                       <span>{issue.sectionKind ?? '-'}</span>
@@ -325,81 +346,104 @@ export function ResumePanel() {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-action="seed"
+        {/* 写本机的只有这三只（种子两版 + 导出落 userData），统一琥珀；预览是只读渲染、
+            注入失败只是让主进程回一个错误载荷，都不许占外发那一档的朱砂。 */}
+        <DeskButton
+          action="seed"
+          variant="amber"
+          compact
+          busy={!!busy}
           disabled={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onClick={() => loadDemo('base')}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <RefreshCw size={12} />
           {t('resume.seed')}
-        </button>
-        <button
-          type="button"
-          data-action="seed-edited"
+        </DeskButton>
+        <DeskButton
+          action="seed-edited"
+          variant="amber"
+          compact
+          busy={!!busy}
           disabled={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onClick={() => loadDemo('edited')}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <FileText size={12} />
           {t('resume.seedEdited')}
-        </button>
-        <button
-          type="button"
-          data-action="preview"
-          disabled={!seed || !!busy}
+        </DeskButton>
+        <DeskButton
+          action="preview"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={noSeedReason !== undefined}
+          disabledReason={noSeedReason}
+          disabledReasonLabel={reasonLabel(noSeedReason)}
           onClick={() => seed && renderPreview(seed.docId)}
-          className="flex items-center gap-1 rounded-md border border-sky-800 px-2 py-1 text-[11px] text-sky-300 hover:bg-sky-950 disabled:opacity-40"
         >
           <Eye size={12} />
           {t('resume.preview')}
-        </button>
-        <button
-          type="button"
-          data-action="export"
-          disabled={!seed || !!busy}
+        </DeskButton>
+        <DeskButton
+          action="export"
+          variant="amber"
+          compact
+          busy={!!busy}
+          disabled={noSeedReason !== undefined}
+          disabledReason={noSeedReason}
+          disabledReasonLabel={reasonLabel(noSeedReason)}
           onClick={() => seed && exportPdf(seed.docId)}
-          className="flex items-center gap-1 rounded-md border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-950 disabled:opacity-40"
         >
           <FileDown size={12} />
           {t('resume.export')}
-        </button>
-        <button
-          type="button"
-          data-action="fail"
+        </DeskButton>
+        <DeskButton
+          action="fail"
+          variant="ghost"
+          compact
+          busy={!!busy}
           disabled={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onClick={injectFailure}
-          className="flex items-center gap-1 rounded-md border border-rose-800 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950 disabled:opacity-40"
         >
           <Ban size={12} />
           {t('resume.fail')}
-        </button>
-        <button
-          type="button"
-          data-action="open-editor"
-          disabled={!seed || !!busy || !!editorDocId}
+        </DeskButton>
+        <DeskButton
+          action="open-editor"
+          variant="solid"
+          compact
+          busy={!!busy}
+          disabled={editorReason !== undefined}
+          disabledReason={editorReason}
+          disabledReasonLabel={reasonLabel(editorReason)}
           onClick={() => seed && setEditorDocId(seed.docId)}
-          className="flex items-center gap-1 rounded-md border border-indigo-800 px-2 py-1 text-[11px] text-indigo-300 hover:bg-indigo-950 disabled:opacity-40"
         >
           <SlidersHorizontal size={12} />
           {t('resume.editor.enter')}
-        </button>
-        <button
-          type="button"
-          data-action="open-pdf-edit"
-          disabled={!!busy || pdfEditOpen}
+        </DeskButton>
+        <DeskButton
+          action="open-pdf-edit"
+          variant="solid"
+          compact
+          busy={!!busy}
+          disabled={pdfEditReason !== undefined}
+          disabledReason={pdfEditReason}
+          disabledReasonLabel={reasonLabel(pdfEditReason)}
           onClick={() => setPdfEditOpen(true)}
-          className="flex items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <Pencil size={12} />
           {t('pdfEdit.enter')}
-        </button>
+        </DeskButton>
       </div>
 
       {notice && (
         <p
-          className="mt-2 break-all rounded-md border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300"
+          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
           data-testid="resume-notice"
         >
           {notice}
@@ -426,7 +470,7 @@ export function ResumePanel() {
           title={t('resume.heading')}
           sandbox=""
           srcDoc={previewHtml}
-          className="mt-3 h-[520px] w-full rounded-md border border-slate-800 bg-white"
+          className="mt-3 h-[520px] w-full rounded-md border border-line bg-white"
         />
       ) : (
         <p className="mt-3 text-[11px] text-slate-500" data-testid="resume-preview-empty">
@@ -435,26 +479,32 @@ export function ResumePanel() {
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-action="snapshots"
-          disabled={!seed || !!busy}
+        <DeskButton
+          action="snapshots"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={noSeedReason !== undefined}
+          disabledReason={noSeedReason}
+          disabledReasonLabel={reasonLabel(noSeedReason)}
           onClick={() => seed && loadSnapshots(seed.docId)}
-          className="flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
         >
           <History size={12} />
           {t('resume.snapshots')}
-        </button>
-        <button
-          type="button"
-          data-action="diff"
-          disabled={!fromId || !toId || fromId === toId || !!busy}
+        </DeskButton>
+        <DeskButton
+          action="diff"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={diffReason !== undefined}
+          disabledReason={diffReason}
+          disabledReasonLabel={reasonLabel(diffReason)}
           onClick={compareSnapshots}
-          className="flex items-center gap-1 rounded-md border border-violet-800 px-2 py-1 text-[11px] text-violet-300 hover:bg-violet-950 disabled:opacity-40"
         >
           <GitCompareArrows size={12} />
           {t('resume.diff')}
-        </button>
+        </DeskButton>
       </div>
 
       {snapshots.length > 0 && (
@@ -468,7 +518,7 @@ export function ResumePanel() {
                 setFromId(event.target.value);
                 setDiff(undefined);
               }}
-              className="max-w-[260px] rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+              className={`${FIELD_CLASS} max-w-[260px]`}
             >
               {snapshots.map((item) => (
                 <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
@@ -486,7 +536,7 @@ export function ResumePanel() {
                 setToId(event.target.value);
                 setDiff(undefined);
               }}
-              className="max-w-[260px] rounded-md border border-slate-700 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-200"
+              className={`${FIELD_CLASS} max-w-[260px]`}
             >
               {snapshots.map((item) => (
                 <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
@@ -499,7 +549,7 @@ export function ResumePanel() {
       )}
 
       {diff && (
-        <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/60 p-3" data-testid="snapshot-diff">
+        <div className="mt-3 rounded-md border border-line bg-ink-950/60 p-3" data-testid="snapshot-diff">
           {diff.isEmpty ? (
             <p className="text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
               {t('resume.diffEmpty')}
@@ -529,13 +579,11 @@ export function ResumePanel() {
                                 {field.before ?? t('resume.valueAbsent')}
                               </span>
                               <span className="text-slate-600">→</span>
-                              <span className="break-all text-emerald-300">
-                                {field.after ?? t('resume.valueAbsent')}
-                              </span>
+                              <span className="break-all text-jade">{field.after ?? t('resume.valueAbsent')}</span>
                               {field.locked && (
                                 <span
                                   data-testid="diff-field-locked"
-                                  className="rounded border border-amber-800 px-1 text-amber-300"
+                                  className="rounded border border-amber/45 px-1 text-amber"
                                 >
                                   {t('resume.fieldLocked')}
                                 </span>

@@ -498,6 +498,15 @@
       "preview": "预览",
       "export": "导出 PDF",
       "fail": "注入失败导出",
+      "reason": {
+        "ACTION_BUSY": "上一条动作还没回来",
+        "IMPORT_PATH_EMPTY": "先填简历文件的绝对路径",
+        "NO_SEED_DOC": "先落一份文档，预览与导出才知道拿哪一份",
+        "EDITOR_OPEN": "排版编辑器已经开着，同一时间只开一份",
+        "PDF_EDIT_OPEN": "PDF 编辑视图已经开着",
+        "SNAPSHOT_MISSING": "先在上下两个选择器里各挑一份快照",
+        "SNAPSHOT_SAME": "起点与终点是同一份快照，比不出差异"
+      },
       "seedReceipt": "已载入演示文档 {{docId}}",
       "previewDone": "预览已刷新",
       "previewEmpty": "尚未预览：先载入演示内容再点预览",

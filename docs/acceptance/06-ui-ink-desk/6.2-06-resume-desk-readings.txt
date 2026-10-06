@@ -1,0 +1,111 @@
+简历屏换装 + 禁用原因码：活体读数（spec 6.2-06 / 6.1 / 6.2-01 第六片）
+=====================================================================
+
+时间：2026-10-06 06:10~06:21（本机 macOS arm64，app 由 `pnpm dev` 常驻，CDP 10222）
+取法：`pnpm harness eval --url 5173 --expr-file tmp/p6/resume-read.mjs`（墨案）
+      `pnpm harness eval --url 5173 --expr-file tmp/p6/resume-light.mjs`（毡案）
+      两趟都是「点 `[data-view="resume"]` → 读 → 回原视图」，末尾读数分别为
+      `"restoredTo": "chat"` 与 `"restored": {"theme":"dark","view":"chat"}`——
+      主题与视图都被我复原了，没有留在浅色或简历屏。
+
+**这一片是有截图的**：本轮窗口一度 `visibilityState: "visible"`（上一片全是 hidden），
+所以 6.2-01 的「五态画面」半边与 6.1 的「深浅双主题」半边第一次同时取到。
+截图见 ⑤，逐张跑过 `md5 -q`，五张各不相同（§9 的 5.10-18 硬步骤）。
+
+---------------------------------------------------------------------
+① 生成轨 10 只按钮：档位与原因码逐个对上（墨案活体）
+---------------------------------------------------------------------
+`data-action` → `data-effect` / `data-disabled-reason` / `title` / cursor / color / bg
+
+  import          amber   IMPORT_PATH_EMPTY   「先填简历文件的绝对路径」        not-allowed  rgb(108,128,145)  rgb(15,22,28)
+  seed            amber   —                   —                                 default      rgb(224,163,63)   amber/14
+  seed-edited     amber   —                   —                                 default      rgb(224,163,63)   amber/14
+  preview         line    NO_SEED_DOC         「先落一份文档，预览与导出才知道拿哪一份」 not-allowed rgb(108,128,145) rgb(15,22,28)
+  export          amber   NO_SEED_DOC         同上                              not-allowed  rgb(108,128,145)  rgb(15,22,28)
+  fail            ghost   —                   —                                 default      rgb(164,182,195)  透明
+  open-editor     solid   NO_SEED_DOC         同上                              not-allowed  rgb(108,128,145)  rgb(15,22,28)
+  open-pdf-edit   solid   —                   —                                 default      rgb(232,238,243)  rgb(24,35,43)
+  snapshots       line    NO_SEED_DOC         同上                              not-allowed  rgb(108,128,145)  rgb(15,22,28)
+  diff            line    SNAPSHOT_MISSING    「先在上下两个选择器里各挑一份快照」   not-allowed  rgb(108,128,145)  rgb(15,22,28)
+
+amber 的活体底色报成 `oklab(0.756171 0.0321504 0.130235 / 0.14)`——Tailwind 的 `/14` 透明度
+落进 oklab 通道，色相与 `--color-amber` rgb(224,163,63) 同。
+分档理由（07 稿④ + 08 稿逐控件后果表）：
+  - **amber = 本机写入**：载入演示内容、载入第二版、导出 PDF、导入简历都在往 userData 落东西，
+    所以四只都是琥珀；旧的「导入=indigo、导出=emerald、种子=slate」是随手涂色，不携带信息。
+  - **ghost = 注入失败导出**：它是给 harness/开发用的错误态入口，不该抢主流程的视觉重量。
+  - **solid = 进入另一块视图**（排版编辑器 / PDF 编辑视图）：那是视图推进，不是写盘也不是外发。
+  - 这一屏**没有一只 seal**：简历生成轨全部动作都留在本机，没有任何一步会离开这台机器（§8.3）。
+
+---------------------------------------------------------------------
+② 禁用态：三件事同时成立才算过
+---------------------------------------------------------------------
+每只禁用按钮的活体读数都是 `aria-disabled="true"` + `cursor: not-allowed` +
+color rgb(108,128,145)（slate-500）+ bg rgb(15,22,28)（ink-850）+ 非空中文 `title`。
+两条由此直接可读的推论：
+  - **禁用时四档底色收敛成同一档**（amber/line/solid 的禁用态逐位相同）——这是有意的：
+    禁用不是某个语义档的状态，而是「这只按钮此刻不参与」，语义色留着会在人眼里变成
+    「琥珀色按不动了」这种误读。
+  - 走 `aria-disabled` 而不是原生 `disabled`（`ui/controls.tsx` 里注释了原因）：
+    Chromium 对原生禁用控件不派发鼠标事件，`title` 就不出现，人只知道按不动、不知道为什么。
+    本轮 7 只禁用按钮全部取到了非空 `title`，这条实现路线在活体上成立。
+
+原因码是从**当下读数**推出来的，不是写死的枚举：`busyReason`（ACTION_BUSY）叠在
+`importReason` / `noSeedReason` / `editorReason` / `pdfEditReason` / `diffReason` 之上，
+先到先得。`resume.reason.*` 七支在 zh-CN 与 en 两份语言包里都有（缺翻译即 lint 失败）。
+
+**ACTION_BUSY 仍只有代码、没有活体读数**：fixture 侧的动作在 25ms 内就回来了，
+`busy` 那一档抓不住；真平台的按钮不许自动去点（§7.2）。这一条在 spec 6.2-06 里显式标着。
+
+---------------------------------------------------------------------
+③ 毡案（浅色）同一屏的读数
+---------------------------------------------------------------------
+body bg rgb(216,211,198)（毡案纸面）；面板容器 bg `oklab(0.915929 … / 0.6)`、
+border rgba(38,44,48,.15)——与墨案是**同一批 class**，靠 `[data-theme='light']` 翻 token，
+组件里没有任何一处 `theme ===` 分支。
+  seed(amber)   color rgb(161,112,15)  bg amber/14        ← 琥珀在浅底上换成深一档，可读
+  import(禁用)  color rgb(107,118,129) bg rgb(224,219,205)
+  preview(禁用) color rgb(107,118,129) bg rgb(224,219,205) border rgba(38,44,48,.3)
+  fail(ghost)   color rgb(74,87,98)    bg/border 全透明
+  表单域        bg rgb(216,211,198)    border rgba(38,44,48,.3)  color rgb(51,60,68)
+禁用档在浅色下同样是**四档收敛一色**（rgb(224,219,205)），与墨案行为对称。
+
+---------------------------------------------------------------------
+④ 容器与文案的换色（同一屏里剩下的旧色）
+---------------------------------------------------------------------
+全文件 grep `border-slate-700|border-slate-800|bg-slate-9|rose-|emerald-|sky-|violet-|indigo-`
+→ **零命中**（只剩 1 处 `text-slate-200` 是区头标题，与 ChatPanel 等已换装屏同档）。
+替换点：区头容器 `border-line bg-ink-900/60`、待确认清单 `border-line bg-ink-950/60`、
+导入错误 `border-seal/50 bg-seal-wash text-seal`（旧 rose-900/rose-200）、
+待确认与「已锁定」标记 `border-amber/45 text-amber`、回执条 `border-line bg-ink-950/70`、
+diff 的改后值 `text-jade`、预览 iframe `border-line bg-white`（白底是纸张本身，不跟着主题翻）。
+表单域共用 `FIELD_CLASS`（1 只路径输入 + 语言选择 + 上下两只快照选择器 = 4 处）。
+
+---------------------------------------------------------------------
+⑤ 截图（本批七张，md5 互不相同）
+---------------------------------------------------------------------
+`6.2-06-resume-desk-dark.png`   墨案简历屏：10 只按钮档位可见（琥珀两只种子、
+                                禁用三只灰到读得出「按不动」、ghost 那只注入失败入口）
+                                同屏下半是尚未换装的「知识库实体」——那是下一片的现场
+`6.1-04-resume-desk-light.png`     毡案同一屏（6.1 的深浅双主题半边）
+`6.2-06-trust-desk-dark.png`    墨案信任屏（补上一片只有读数的缺口）
+`6.4-02-trust-desk-light.png`   毡案信任屏
+`6.2-01-hover-line-btn.png`     悬停态：line 档从 ink-900 rgb(19,28,35) 提到
+                                ink-750 rgb(24,35,43)，**无位移**（位移只在按下瞬间）
+`6.4-01-chat-desk-light.png`    毡案对话屏：档位托盘、免确认白名单的 amber 文案、接管横幅、
+                                空消息态「还没有消息」都可读——**注意这一屏没有气泡**，
+                                该会话 `messageCount: 0`，所以 6.4-01 的气泡两色仍未兑现
+`6.4-02-jobs-desk-light.png`    毡案岗位屏：抓取/读库/刷新/打招呼/投递/确认那一排按钮的浅色档
+取法：`pnpm harness shot --url 5173 --reveal <目标>`；`--url` 不带时截的是内嵌内核视图（§9 5.10-18）。
+
+---------------------------------------------------------------------
+⑥ 门禁（不接管道读，按 §7.4① 落盘再取退出码）
+---------------------------------------------------------------------
+pnpm format > tmp/p6/fmt22.log            → FMT=0
+pnpm format:check > tmp/p6/fc22.log       → FC=0（"All matched files use Prettier style!"）
+pnpm typecheck > tmp/p6/tc22.log          → TC=0
+pnpm lint > tmp/p6/lint22.log             → LINT=0（含渲染层规范 / i18n 双语键对齐 / 工具契约 / 许可证记账）
+pnpm test > tmp/p6/test22.log             → TEST=0（日志里零 failed；尾部读数 resume-doc 136、pdf-edit 102、core 52）
+活体副作用清单：本轮只做了「切视图、切主题、读样式」，
+**没有**点任何一只会写盘或外发的按钮（seed / export / import 全部只读色不读行为），
+也没有发消息、没有改自治档位、没有动画布。
