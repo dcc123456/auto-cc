@@ -1,0 +1,100 @@
+6.2-14 第三十二片：对话输入区 composer 换进 `DeskTextarea`（54 / 54 清零）+ 机检落地
+生成时间：2026-10-07（本机 macOS / Apple Silicon，CDP 10222，渲染层 target `--url 5173`，视口 1200×772）
+被检改动：packages/renderer/src/ui/controls.tsx、packages/renderer/src/ChatPanel.tsx、scripts/check-renderer-conventions.ts
+裁定依据：用户 2026-10-06 表态「原件加一个尺寸档」（composer 不并入元信息档）+「全换完再上机检」
+
+────────────────────────────────────────────
+一、原件改了什么（只加一档，不改别人）
+────────────────────────────────────────────
+`fieldClass(isInvalid)` → `fieldClass(isInvalid, size = 'meta')`，尺寸档由 `FIELD_SIZE` 一张表给：
+
+  meta     `rounded-md bg-ink-950        px-2 py-1 text-[11px]`   ← 28 只字段一直在的这一档，一字未动
+  composer `rounded-lg bg-ink-950/60     px-3 py-2 text-xs`      ← 对话输入区专用
+
+**尺寸档是在同一条 class 串里换掉的，不是往串尾再拼一条 `rounded-lg`**：Tailwind 的样式表先后不由
+class 属性里的顺序决定，追加同族工具就是 6.2-10 那类"两条互相覆盖"的坑，所以 `rounded-md` / `bg-ink-950` /
+`px-2 py-1` / `text-[11px]` 四组在 composer 档里根本不出现。
+描边色、文字色、聚焦环一律共用（`border-line-strong` / `text-slate-200` / `focus:border-celadon/60`）——
+`size` 只管几何与底材，不管语义色。
+只有 `DeskTextarea` 暴露 `size`（其余四件表单原件没有第二档的需求，按 §2.6 不预留）。
+
+────────────────────────────────────────────
+二、活体读数：几何逐位不变，两处刻意归一
+────────────────────────────────────────────
+调用点：`ChatPanel.tsx` 的 composer（`[data-testid="chat-input"]`，`rows={2}`，`placeholder` 走
+`chat.inputPlaceholder`，`onKeyDown` 走 rest 透传）。
+
+  属性            BEFORE（墨案）                        AFTER（墨案）
+  圆角            8px                                   8px                       不变
+  底色            oklab(0.151798 … / 0.6)               oklab(0.151798 … / 0.6)   不变
+  字号            12px                                  12px                      不变
+  内边距          8px/12px                              8px/12px                  不变
+  宽              942                                   942                       不变
+  描边            rgba(150,178,196,0.26)                rgba(150,178,196,0.26)    不变
+  resize          none                                  none                      不变
+  行数 / 占位文案  2 / 想聊什么？回车发送，Shift+Enter 换行   同左                    不变
+  ── 文字色       rgb(219,228,236) slate-100  →  rgb(194,209,220) slate-200   【刻意归一 ①】
+  ── 行高         16px normal             →  19.5px leading-relaxed          【刻意归一 ②】
+  ── 高           50px                    →  57px（+7px，由 ② 带来）
+  ── data-action  无                       →  `chat-input`                    【新增凭据】
+
+两条刻意的变化都不是"顺手改"：
+① 文字色：全渲染层 28 只字段都是 `text-slate-200`，composer 是唯一的 `slate-100`。留着它就得在尺寸档里
+   再开一条颜色档，而颜色不属于"尺寸"——那正是这一片要消掉的那类例外。
+② 行高：`DeskTextarea` 的 `leading-relaxed` 是全部文本域共用的一条，其余四只多行框一直是这一档。
+   代价是输入区长高 7px（画面见截图，页脚与两颗按钮未被挤走）。
+
+对比度（6.1-06：≥12px 正文要 4.5:1）——算法：把 `oklab(...)/0.6` 沿祖先链合成到最近的不透明底
+（墨案 `rgb(8,12,16)`、毡案 `rgb(216,211,198)`），再用 WCAG 相对亮度算：
+  墨案 合成后字段底 `rgb(8,12,17)`，文字 `rgb(194,209,220)` → **12.56:1**（改前 slate-100 更高，两条都远超门槛）
+  毡案 合成后字段底 `rgb(217,212,198)`，文字 `rgb(51,60,68)` → **7.58:1**
+描边对底 1.62 / 1.75 未变（这条 hairline 一直靠底色台阶成形，本片没碰它）。
+
+统一桶普查（全 DOM `input,select,textarea` 共 29 只）：
+  墨案 28 只塌在 `rgba(150,178,196,.26)｜6px｜rgb(8,12,16)｜11px`，离桶 1 只 = `textarea[chat-input]`
+  毡案 28 只塌在 `rgba(38,44,48,.3)｜6px｜rgb(216,211,198)｜11px`，离桶 1 只 = 同一只
+⇒ 剩下的那一只离桶是**用户裁定要留的那一档**，不是漏网的复制。
+
+────────────────────────────────────────────
+三、行为腿（换件最容易撞坏的是回调，不是样式）
+────────────────────────────────────────────
+1. **取值链**：用 `HTMLTextAreaElement` 的原生 setter 写入「统一原件的回执测试」+ 派发 `input` →
+   第二次 eval 读到 `value` 回显该串，且 `[data-action="send"]` 的 `aria-disabled` 由有到无（发送键被点亮）。
+   ⇒ `onValueChange={setDraft}` 与 `sendReason` 那条链在原件里接得通。
+2. **回车链**：清空草稿后派发 `KeyboardEvent('keydown', {key:'Enter', cancelable:true})` →
+   `defaultPrevented === true`，而 `[data-message-id]` 计数仍是 0。
+   ⇒ `onKeyDown` 经 rest 透传仍然挂在 textarea 上、Enter 分支确实跑到了；`submit()` 在
+   `if (!text || isStreaming) return;` 处返回，所以这一发**没有发出任何消息**（不往用户的会话里写东西）。
+   Shift+Enter 换行那一支不单独取——它与这一支共用同一个 handler，差别只在 `!event.shiftKey`。
+
+────────────────────────────────────────────
+四、机检落地（第 10 节，写在 `scripts/check-renderer-conventions.ts`）
+────────────────────────────────────────────
+判据：`packages/renderer/src/**` 里 `src/ui/**` **整棵子树之外**不许出现 `<(button|input|select|textarea)`。
+口径：先剥 `/* */`（含跨行的 JSX `{/* … */}`）再丢掉行首 `//` 的整行，与 `check-dashboard-readonly.ts` 同一条；
+豁免只给原件目录，且写成"子树"而不是"平铺一层"（原件以后按形态分子目录时不该顺手把禁令解开）。
+
+**不需要任何豁免名单**：画布的 `<Controls>` 是 react-flow 的组件标签（首字母大写），不是原生 `<button>`，
+这条禁令天然管不到它——用户裁定里"不留基线豁免清单"那一句因此在形状上就成立了。
+
+跑通与反向验证（注入探针建在被检目录里、跑完即删）：
+  真组件 `npx tsx scripts/check-renderer-conventions.ts` → EXIT=0
+    ✔ 渲染层规范检查通过（2 个语言包，62 个源文件，派生文案 50 条逐包齐备；src/ui/** 之外裸原生控件 0 只）
+  P-A `tmp` 内联一份含四只裸控件的探针文件（`packages/renderer/src/probe32a.tsx`）→ **EXIT=1**，四条各自报出：
+    - packages/renderer/src/probe32a.tsx 里有 1 只裸 <button>：渲染层的控件只许出自 src/ui/** 原件（6.2-14）
+    - …<input>… / …<select>… / …<textarea>…（同一文件四条，逐 tag 报，便于直接定位该换成哪件原件）
+  P-B 探针文件里把四只 tag 全写在注释里（块注释、行注释、JSX 注释各一）→ **EXIT=0**（注释不算违规）
+  P-C 原件本体（`src/ui/controls.tsx`、`src/ui/overlays.tsx`）本来就有裸控件而整体绿 → 豁免腿成立
+  两条退出码都按 `> log 2>&1; echo EXIT=$?` 读，不走管道（§9 的 5.4-c 条）。
+这一条已在 `pnpm lint` 链内（上面那行 ✔ 就是 lint 跑出来的），从此 6.2-14 由 `[纪律]` 升成 `[机检]`。
+
+────────────────────────────────────────────
+五、门禁与末态
+────────────────────────────────────────────
+`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`（含第 10 节）、`pnpm test` `TEST=0`、
+`pnpm format:check` `FORMAT=0`。零新增文案（`chat.inputPlaceholder` 是既有键，本片只换 JSX）。
+两张画面 md5 互异：`c08f2a32…`（`-dark.png`，墨案）/ `fb675d3e…`（`-light.png`，毡案）。
+
+末态开发实例：主题回到墨案、视图 `chat`、composer 草稿已清空（`value: ""`）、会话消息数未变（0 条
+`[data-message-id]`）、无遮罩。本片对活体的全部动作：切视图 1 次、切主题 2 次、往输入框写并清空 1 次、
+派发一次空草稿的 Enter（被 `submit()` 的前置判据挡回，未外发）。
