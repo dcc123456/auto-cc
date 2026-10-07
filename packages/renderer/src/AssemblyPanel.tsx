@@ -12,7 +12,7 @@ import type {
   PluginTreeSnapshot,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskTextarea } from './ui/controls';
 
 /**
  * 插件状态 → 徽标配色，按「这一格现在系统在做什么」分四族（plan §5）：
@@ -182,9 +182,9 @@ export function AssemblyPanel() {
         </div>
 
         {tree?.manifestError && (
-          <p className="mt-3 rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-xs text-seal">
+          <Banner tone="seal" className="mt-3">
             {t('assembly.manifestError', { message: tree.manifestError })}
-          </p>
+          </Banner>
         )}
 
         <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">

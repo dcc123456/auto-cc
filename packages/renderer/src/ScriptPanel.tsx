@@ -12,7 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
-import { DeskButton, DeskCheck, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskCheck, DeskField, DeskSelect } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -444,11 +444,7 @@ export function ScriptPanel() {
       )}
 
       {lastGreet && (
-        <div
-          data-script-receipt
-          data-origin={lastGreet.origin}
-          className="rounded-md border border-jade/45 bg-jade-wash p-2 text-[11px] leading-relaxed text-jade"
-        >
+        <Banner tone="jade" markers={{ 'script-receipt': '', origin: lastGreet.origin }}>
           {t('script.receiptRow', {
             jobId: lastGreet.jobId,
             ledgerId: lastGreet.ledgerId,
@@ -456,17 +452,13 @@ export function ScriptPanel() {
             origin: t(`script.origin.${lastGreet.origin}`),
             reason: lastGreet.reason,
           })}
-        </div>
+        </Banner>
       )}
 
       {bridgeError && (
-        <div
-          data-script-error
-          data-error-code={bridgeError.code}
-          className="rounded-md border border-seal/50 bg-seal-wash p-2 text-[11px] leading-relaxed text-seal"
-        >
+        <Banner tone="seal" markers={{ 'script-error': '', 'error-code': bridgeError.code }}>
           {t('script.errorRow', { code: bridgeError.code, message: bridgeError.message })}
-        </div>
+        </Banner>
       )}
 
       {notice && (

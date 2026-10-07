@@ -1,9 +1,9 @@
-import { AlertTriangle, GripVertical, Redo2, Save, Timer, Undo2, X } from 'lucide-react';
+import { GripVertical, Redo2, Save, Timer, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditorMetricKeyView, ResumeEditorView, ResumeLocaleView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, DeskRange, DeskSelect, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskRange, DeskSelect, deskReason } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -317,38 +317,34 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       </div>
 
       {confirmClose && (
-        <div
-          data-testid="resume-editor-close-confirm"
-          className="mt-2 rounded-md border border-amber/45 bg-amber-wash p-3"
-        >
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
-            <AlertTriangle size={14} />
-            {t('resume.editor.closeConfirmTitle')}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-300">{t('resume.editor.closeConfirmHint')}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <DeskButton
-              action="close-save"
-              variant="amber"
-              compact
-              busy={!!busy}
-              {...dead(busyReason)}
-              onClick={() => {
-                // 先等保存那一趟跨进程往返真落地，再卸载：反过来会留下一份"看起来存了其实没存"的草稿
-                // （裁定⑨ 之后界面没有第二次恢复入口，所以这一步的顺序不能马虎）。
-                void bridge?.resume['editor.save'](docId).then(() => onClose());
-              }}
-            >
-              {t('resume.editor.saveAndLeave')}
-            </DeskButton>
-            <DeskButton action="close-discard" variant="seal" compact onClick={() => onClose()}>
-              {t('resume.editor.discardAndLeave')}
-            </DeskButton>
-            <DeskButton action="close-stay" variant="ghost" compact onClick={() => setConfirmClose(false)}>
-              {t('resume.editor.keepEditing')}
-            </DeskButton>
+        <Banner tone="amber" markers={{ testid: 'resume-editor-close-confirm' }} className="mt-2">
+          <div className="w-full">
+            <p className="text-xs font-semibold">{t('resume.editor.closeConfirmTitle')}</p>
+            <p className="mt-1 text-xs opacity-80">{t('resume.editor.closeConfirmHint')}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <DeskButton
+                action="close-save"
+                variant="amber"
+                compact
+                busy={!!busy}
+                {...dead(busyReason)}
+                onClick={() => {
+                  // 先等保存那一趟跨进程往返真落地，再卸载：反过来会留下一份"看起来存了其实没存"的草稿
+                  // （裁定⑨ 之后界面没有第二次恢复入口，所以这一步的顺序不能马虎）。
+                  void bridge?.resume['editor.save'](docId).then(() => onClose());
+                }}
+              >
+                {t('resume.editor.saveAndLeave')}
+              </DeskButton>
+              <DeskButton action="close-discard" variant="seal" compact onClick={() => onClose()}>
+                {t('resume.editor.discardAndLeave')}
+              </DeskButton>
+              <DeskButton action="close-stay" variant="ghost" compact onClick={() => setConfirmClose(false)}>
+                {t('resume.editor.keepEditing')}
+              </DeskButton>
+            </div>
           </div>
-        </div>
+        </Banner>
       )}
 
       <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('resume.editor.sections')}</h4>
@@ -473,12 +469,9 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       </div>
 
       {rejected && (
-        <p
-          data-testid="resume-editor-rejected"
-          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-        >
+        <Banner tone="seal" markers={{ testid: 'resume-editor-rejected' }} className="mt-2 break-all">
           {t('resume.editor.rejected', { message: rejected })}
-        </p>
+        </Banner>
       )}
 
       {notice && (

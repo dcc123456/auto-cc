@@ -11,7 +11,7 @@ import type {
 import { createPdfEditSession } from '@auto-cc/plugin-pdf-edit/edit-session';
 import type { AppErrorPayload, PdfOpenReceiptView, PdfSaveAsReceiptView, PdfTextBoxView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, DeskField, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskField, deskReason } from './ui/controls';
 import { useDeskThemeValue } from './theme';
 
 /** 覆盖区的入参类型从会话自己的签名取：本包对外只开 `./edit-session` 一条窄出口，不再把 `overlay-writer` 也开出去。 */
@@ -526,12 +526,9 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {openError && (
-        <p
-          data-testid="pdf-edit-open-error"
-          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-        >
+        <Banner tone="seal" markers={{ testid: 'pdf-edit-open-error' }} className="mt-2 break-all">
           {t('pdfEdit.failed', { code: openError.code, message: openError.message })}
-        </p>
+        </Banner>
       )}
 
       {/* 提示行留中性档：它是全 app 共用 `useBridgeAction.notice` 的那一句，别的面板都这个画法，不在这里单独翻成青瓷。 */}
@@ -810,25 +807,19 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           {saveError && (
-            <p
-              data-testid="pdf-edit-save-error"
-              className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-            >
+            <Banner tone="seal" markers={{ testid: 'pdf-edit-save-error' }} className="mt-2 break-all">
               {t('pdfEdit.failed', { code: saveError.code, message: saveError.message })}
-            </p>
+            </Banner>
           )}
 
           {saved && (
-            <p
-              data-testid="pdf-edit-saved"
-              className="mt-2 break-all rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
-            >
+            <Banner tone="jade" markers={{ testid: 'pdf-edit-saved' }} className="mt-2 break-all">
               {t('pdfEdit.saved', {
                 path: saved.outPath,
                 count: saved.pageCount,
                 hash: saved.sha256.slice(0, 12),
               })}
-            </p>
+            </Banner>
           )}
         </>
       )}

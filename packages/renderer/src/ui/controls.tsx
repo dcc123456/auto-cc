@@ -1,4 +1,4 @@
-import { BadgeCheck, CircleAlert, LoaderCircle, Send, Stamp } from 'lucide-react';
+import { BadgeCheck, CircleAlert, Info, LoaderCircle, Send, Stamp, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
@@ -9,6 +9,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react';
 import type { TFunction } from 'i18next';
+import type { LucideIcon } from 'lucide-react';
 import type { ToolEffect } from '@auto-cc/shared';
 
 /**
@@ -321,11 +322,29 @@ export function EffectChip({ effect, children }: EffectChipProps) {
 /** 横幅的四档底色：celadon=系统在说话，amber=等人，seal=风险，jade=办好了。 */
 export type BannerTone = 'celadon' | 'amber' | 'seal' | 'jade';
 
+/**
+ * 语气档决定三件事：洗底、描边、**文字色**（稿 `assets/shared.css:1102-1116` 的 `.banner` 就是这么写的：
+ * `background: var(--*-wash)` + `border-color: 同色 35%` + `color: var(--*)`）。
+ * 文字按语气着色不是装饰：这四档在毡案被专门压深过（`globals.css:274-290`），就是为"当文字用"准备的，
+ * 而统一成中性灰会把"系统在担心什么"这层信息只留给底色——色盲与低亮度下那条提示条就读不出来了。
+ */
 const BANNER_CLASS: Record<BannerTone, string> = {
-  celadon: 'border-celadon/40 bg-celadon-wash text-slate-100',
-  amber: 'border-amber/45 bg-amber-wash text-slate-100',
-  seal: 'border-seal/50 bg-seal-wash text-slate-100',
-  jade: 'border-jade/45 bg-jade-wash text-slate-100',
+  celadon: 'border-celadon/40 bg-celadon-wash text-celadon',
+  amber: 'border-amber/45 bg-amber-wash text-amber',
+  seal: 'border-seal/50 bg-seal-wash text-seal',
+  jade: 'border-jade/45 bg-jade-wash text-jade',
+};
+
+/**
+ * 图标跟着语气走，不给调用方旋钮：语气到图标是这条形状的固有部分，
+ * 开一个 `icon` 入参就是允许下一档自己挑图标（那才是第二套）。
+ * `jade` 用 `BadgeCheck` 与结果态（本文件 `RESULT_ICON`）同一只——同一份事实只该有一张脸。
+ */
+const BANNER_ICON: Record<BannerTone, LucideIcon> = {
+  celadon: Info,
+  amber: CircleAlert,
+  seal: TriangleAlert,
+  jade: BadgeCheck,
 };
 
 export interface BannerProps {
@@ -342,13 +361,16 @@ export interface BannerProps {
 
 /**
  * 常驻提示条。设计稿规定：可逆的动作只用提示条，不用遮罩弹窗（09 稿 RULE）。
+ * 洗底、描边、文字色、图标四件都由 `tone` 一档决定（见 `BANNER_CLASS` / `BANNER_ICON`），
+ * 调用方只喂文案与外边档。
  * @param tone 语气档
  * @param reason 原因码（可选）
  * @param markers 附加 `data-*` 读数（可选）
- * @param className 追加在外框上的 class（可选）
+ * @param className 追加在外框上的 class（可选，只放外边/宽度档）
  * @param children 文案（调用方负责 i18n）
  */
 export function Banner({ tone, reason, markers, className = '', children }: BannerProps) {
+  const Icon = BANNER_ICON[tone];
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
   ) as Record<string, string>;
@@ -358,7 +380,7 @@ export function Banner({ tone, reason, markers, className = '', children }: Bann
       {...(reason ? { 'data-reason': reason } : {})}
       className={`flex items-start gap-2 rounded-control border px-3 py-2 text-xs leading-relaxed ${BANNER_CLASS[tone]} ${className}`}
     >
-      <CircleAlert size={13} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
+      <Icon size={13} className="mt-0.5 shrink-0 opacity-80" aria-hidden="true" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
     </div>
   );

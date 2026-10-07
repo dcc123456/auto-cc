@@ -8,7 +8,7 @@ import type {
   GenerationRewriteRowView,
   GenerationRunRowView,
 } from '@auto-cc/shared';
-import { DeskButton, DeskCheck, DeskDisclosure, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskCheck, DeskDisclosure, DeskTextarea } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
@@ -304,17 +304,19 @@ export function GeneratePanel() {
 
       {accepted && (
         // 写盘之后的读数留在界面上：接受用掉了提议态，没有这一行用户就看不见"到底写了几处"。
-        <div data-generate-accepted className="flex flex-col gap-1 rounded border border-jade/40 bg-jade-wash p-2">
-          <p className="text-xs text-jade">
-            {t('generate.accepted', {
-              applied: accepted.appliedRewrites,
-              sections: accepted.movedSections,
-              entries: accepted.movedEntries,
-              at: accepted.updatedAt,
-            })}
-          </p>
-          <p className="text-[11px] leading-relaxed text-slate-400">{t('generate.acceptedRebind')}</p>
-        </div>
+        <Banner tone="jade" markers={{ 'generate-accepted': '' }}>
+          <div className="w-full">
+            <p>
+              {t('generate.accepted', {
+                applied: accepted.appliedRewrites,
+                sections: accepted.movedSections,
+                entries: accepted.movedEntries,
+                at: accepted.updatedAt,
+              })}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{t('generate.acceptedRebind')}</p>
+          </div>
+        </Banner>
       )}
 
       {blocked && (

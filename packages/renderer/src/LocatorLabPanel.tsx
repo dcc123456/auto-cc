@@ -1,4 +1,4 @@
-import { Crosshair, MousePointerClick, RefreshCw, SearchX, Sparkles } from 'lucide-react';
+import { Crosshair, MousePointerClick, RefreshCw, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -13,7 +13,7 @@ import type {
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 import { formatClock } from './format';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 
 /** 自愈播报最多留几条：面板是验收入口，不是历史库（与会话面板的失效横幅同一形状）。 */
 const RELOCATED_LIMIT = 3;
@@ -307,24 +307,19 @@ export function LocatorLabPanel() {
         )}
 
         {bridgeError && (
-          <div
-            className="mt-2 rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-            data-testid="locator-error"
-            data-error-code={bridgeError.code}
-          >
-            <p className="flex items-center gap-1 font-semibold">
-              <SearchX size={12} />
-              {t('locator.errorHeading')}
-            </p>
-            <p className="mt-1 break-all">
-              {t('locator.errorRow', { code: bridgeError.code, message: bridgeError.message })}
-            </p>
-            {bridgeError.code === 'NO_KERNEL_SESSION' && (
-              <p className="mt-1 break-all text-amber" data-testid="locator-error-hint">
-                {t('locator.errNoSession')}
+          <Banner tone="seal" markers={{ testid: 'locator-error', 'error-code': bridgeError.code }} className="mt-2">
+            <div className="w-full">
+              <p className="font-semibold">{t('locator.errorHeading')}</p>
+              <p className="mt-1 break-all">
+                {t('locator.errorRow', { code: bridgeError.code, message: bridgeError.message })}
               </p>
-            )}
-          </div>
+              {bridgeError.code === 'NO_KERNEL_SESSION' && (
+                <p className="mt-1 break-all text-amber" data-testid="locator-error-hint">
+                  {t('locator.errNoSession')}
+                </p>
+              )}
+            </div>
+          </Banner>
         )}
       </section>
 

@@ -26,7 +26,7 @@ import type {
 import { pushDeskToast } from './deskToast';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
-import { DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -298,12 +298,9 @@ export function ResumePanel() {
       </p>
 
       {importError && (
-        <p
-          className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-          data-testid="resume-import-error"
-        >
+        <Banner tone="seal" markers={{ testid: 'resume-import-error' }} className="mt-2 break-all">
           {t('resume.importError', { code: importError.code, message: importError.message })}
-        </p>
+        </Banner>
       )}
 
       {lastImport && (

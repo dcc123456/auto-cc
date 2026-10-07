@@ -18,7 +18,7 @@ import { ScheduleSection } from './SchedulePanel';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 import { NodeEvidenceSection } from './WorkflowEvidence';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowPlansSection } from './WorkflowPlans';
@@ -265,25 +265,28 @@ export function WorkflowPanel() {
       )}
 
       {current?.requiresHuman && (
-        <div
-          className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-slate-100"
-          data-testid="workflow-takeover"
-          data-takeover-subject={current.requiresHuman.subject}
-          data-takeover-reason={current.requiresHuman.reason}
-          data-takeover-step={current.requiresHuman.stepId}
+        <Banner
+          tone="amber"
+          reason={current.requiresHuman.reason}
+          markers={{
+            testid: 'workflow-takeover',
+            'takeover-subject': current.requiresHuman.subject,
+            'takeover-reason': current.requiresHuman.reason,
+            'takeover-step': current.requiresHuman.stepId,
+          }}
+          className="mt-2"
         >
-          <p className="flex items-center gap-1 font-semibold">
-            <ShieldAlert size={12} />
-            {t('workflow.takeoverTitle')}
-          </p>
-          <p className="mt-1 break-all">
-            {/* 接管原因有会话类与节点类两种，句子形状不同，所以按 reason 取条目而不是拼一句通用模板。 */}
-            {t(`workflow.takeoverBody.${current.requiresHuman.reason}`, {
-              subject: current.requiresHuman.subject,
-              step: t(`workflow.step.${current.requiresHuman.stepId}`, current.requiresHuman.stepId),
-            })}
-          </p>
-        </div>
+          <div className="w-full">
+            <p className="font-semibold">{t('workflow.takeoverTitle')}</p>
+            <p className="mt-1 break-all">
+              {/* 接管原因有会话类与节点类两种，句子形状不同，所以按 reason 取条目而不是拼一句通用模板。 */}
+              {t(`workflow.takeoverBody.${current.requiresHuman.reason}`, {
+                subject: current.requiresHuman.subject,
+                step: t(`workflow.step.${current.requiresHuman.stepId}`, current.requiresHuman.stepId),
+              })}
+            </p>
+          </div>
+        </Banner>
       )}
 
       {live?.message && (

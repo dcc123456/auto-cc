@@ -7,7 +7,6 @@ import {
   RefreshCw,
   ScrollText,
   Search,
-  SearchX,
   Send,
   X,
 } from 'lucide-react';
@@ -28,7 +27,7 @@ import type {
 } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
-import { DeskButton, DeskCheck, DeskField } from './ui/controls';
+import { Banner, DeskButton, DeskCheck, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -424,47 +423,37 @@ export function JobLabPanel() {
         )}
 
         {lastGreet && (
-          <div
-            className="mt-2 rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
-            data-testid="jd-greet-receipt"
-            data-origin={lastGreet.origin}
-          >
-            <p className="flex items-center gap-1 font-semibold">
-              <Send size={12} />
-              {t('jd.greetReceiptHeading')}
-            </p>
-            <p className="mt-1 break-all">
-              {t('jd.greetReceiptRow', {
-                jobId: lastGreet.jobId,
-                ledgerId: lastGreet.ledgerId,
-                waitedMs: lastGreet.waitedMs,
-                source: lastGreet.source,
-                origin: t(`jd.origin.${lastGreet.origin}`),
-                reason: lastGreet.reason,
-              })}
-            </p>
-          </div>
+          <Banner tone="jade" markers={{ testid: 'jd-greet-receipt', origin: lastGreet.origin }} className="mt-2">
+            <div className="w-full">
+              <p className="font-semibold">{t('jd.greetReceiptHeading')}</p>
+              <p className="mt-1 break-all">
+                {t('jd.greetReceiptRow', {
+                  jobId: lastGreet.jobId,
+                  ledgerId: lastGreet.ledgerId,
+                  waitedMs: lastGreet.waitedMs,
+                  source: lastGreet.source,
+                  origin: t(`jd.origin.${lastGreet.origin}`),
+                  reason: lastGreet.reason,
+                })}
+              </p>
+            </div>
+          </Banner>
         )}
 
         {bridgeError && (
-          <div
-            className="mt-2 rounded-md border border-seal/55 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-            data-testid="jd-error"
-            data-error-code={bridgeError.code}
-          >
-            <p className="flex items-center gap-1 font-semibold">
-              <SearchX size={12} />
-              {t('jd.errorHeading')}
-            </p>
-            <p className="mt-1 break-all">
-              {t('jd.errorRow', { code: bridgeError.code, message: bridgeError.message })}
-            </p>
-            {bridgeError.code === 'NO_KERNEL_SESSION' && (
-              <p className="mt-1 text-amber" data-testid="jd-error-hint">
-                {t('jd.errNoSession')}
+          <Banner tone="seal" markers={{ testid: 'jd-error', 'error-code': bridgeError.code }} className="mt-2">
+            <div className="w-full">
+              <p className="font-semibold">{t('jd.errorHeading')}</p>
+              <p className="mt-1 break-all">
+                {t('jd.errorRow', { code: bridgeError.code, message: bridgeError.message })}
               </p>
-            )}
-          </div>
+              {bridgeError.code === 'NO_KERNEL_SESSION' && (
+                <p className="mt-1 text-amber" data-testid="jd-error-hint">
+                  {t('jd.errNoSession')}
+                </p>
+              )}
+            </div>
+          </Banner>
         )}
       </section>
 
@@ -544,29 +533,28 @@ export function JobLabPanel() {
         )}
 
         {lastDeliver && (
-          <div
-            className="mt-2 rounded-md border border-jade/45 bg-jade-wash px-3 py-2 text-[11px] text-jade"
-            data-testid="deliver-receipt"
-            data-committed={lastDeliver.committed ? 'true' : 'false'}
+          <Banner
+            tone="jade"
+            markers={{ testid: 'deliver-receipt', committed: lastDeliver.committed ? 'true' : 'false' }}
+            className="mt-2"
           >
-            <p className="flex items-center gap-1 font-semibold">
-              <FileUp size={12} />
-              {t('deliver.receiptHeading')}
-            </p>
-            <p className="mt-1 break-all">
-              {t('deliver.receiptRow', {
-                jobId: lastDeliver.jobId,
-                fileName: lastDeliver.attachment.fileName,
-                sizeBytes: lastDeliver.attachment.sizeBytes,
-                sha: lastDeliver.attachment.sha256.slice(0, 12),
-                state: t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged'),
-                ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
-                waitedMs: lastDeliver.waitedMs,
-                source: lastDeliver.source,
-                reason: lastDeliver.reason,
-              })}
-            </p>
-          </div>
+            <div className="w-full">
+              <p className="font-semibold">{t('deliver.receiptHeading')}</p>
+              <p className="mt-1 break-all">
+                {t('deliver.receiptRow', {
+                  jobId: lastDeliver.jobId,
+                  fileName: lastDeliver.attachment.fileName,
+                  sizeBytes: lastDeliver.attachment.sizeBytes,
+                  sha: lastDeliver.attachment.sha256.slice(0, 12),
+                  state: t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged'),
+                  ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
+                  waitedMs: lastDeliver.waitedMs,
+                  source: lastDeliver.source,
+                  reason: lastDeliver.reason,
+                })}
+              </p>
+            </div>
+          </Banner>
         )}
       </section>
 

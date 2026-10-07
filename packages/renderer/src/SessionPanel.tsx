@@ -9,7 +9,7 @@ import type {
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
-import { DeskButton, DeskField } from './ui/controls';
+import { Banner, DeskButton, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
@@ -172,12 +172,9 @@ export function SessionPanel() {
         </p>
 
         {viewError && (
-          <p
-            className="mt-2 break-all rounded-md border border-seal/50 bg-seal-wash px-3 py-2 text-[11px] text-seal"
-            data-stat="view-error"
-          >
+          <Banner tone="seal" markers={{ stat: 'view-error' }} className="mt-2 break-all">
             {t('session.viewError', { code: viewError.code, description: viewError.description, url: viewError.url })}
-          </p>
+          </Banner>
         )}
 
         {(expired?.length ?? 0) > 0 && (

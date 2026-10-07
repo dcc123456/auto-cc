@@ -1,4 +1,4 @@
-import { BarChart3, CalendarClock, CircleAlert, RefreshCw } from 'lucide-react';
+import { BarChart3, CalendarClock, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,7 +9,7 @@ import {
   type FunnelRange,
   type FunnelView,
 } from '@auto-cc/shared';
-import { DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 区间档位：两个预设 + 自定义（spec 5.8-04）。localStorage 里存的就是这个判别式。 */
 type RangePreset = 'last7' | 'last30' | 'custom';
@@ -279,13 +279,9 @@ export function MetricsPanel() {
       </div>
 
       {notice && (
-        <p
-          data-testid="metrics-notice"
-          className="mt-2 flex items-start gap-1 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-amber"
-        >
-          <CircleAlert size={14} className="mt-0.5 shrink-0" />
+        <Banner tone="amber" markers={{ testid: 'metrics-notice' }} className="mt-2">
           {notice}
-        </p>
+        </Banner>
       )}
 
       {isEmpty && (

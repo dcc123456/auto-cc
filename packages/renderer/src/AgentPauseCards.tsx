@@ -13,12 +13,12 @@
  * 卡片**由读数驱动**：事件只负责提醒去读（见 `useAgentPause`），所以刷新、错过的推送、
  * 甚至表态之后的那张卡，走的都是同一条路——界面上不存在「以为还有卡片」的余地。
  */
-import { Check, CircleAlert, Clock, ShieldQuestion, ShieldCheck, X } from 'lucide-react';
+import { Check, CircleAlert, Clock, ShieldQuestion, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
 import { formatClock } from './format';
-import { DeskButton, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskTextarea } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
 
 /**
@@ -112,28 +112,30 @@ function ApprovalCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div
-      data-testid="agent-pause-approval"
-      data-pause-request-id={card.requestId}
-      data-pause-kind={card.kind}
-      data-pause-expires-at={String(card.expiresAt)}
-      className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2"
+    <Banner
+      tone="amber"
+      markers={{
+        testid: 'agent-pause-approval',
+        'pause-request-id': card.requestId,
+        'pause-kind': card.kind,
+        'pause-expires-at': String(card.expiresAt),
+      }}
+      className="mt-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber">
-        <ShieldQuestion size={12} />
-        {t('agent.pause.approvalHeading')}
-      </p>
-      <PauseHeader card={card} meta={meta} />
-      {/* 判定口的原话是人唯一会读到的下一步指引，界面不复述、不改写。 */}
-      <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
-        {card.reason}
-      </p>
-      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-        <Clock size={10} />
-        {t('agent.pause.timeoutNote')}
-      </p>
-      <ApproveDenyButtons busy={busy} onDecide={(decision) => onRespond(card, { decision })} />
-    </div>
+      <div className="w-full">
+        <p className="text-xs font-semibold">{t('agent.pause.approvalHeading')}</p>
+        <PauseHeader card={card} meta={meta} />
+        {/* 判定口的原话是人唯一会读到的下一步指引，界面不复述、不改写。 */}
+        <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
+          {card.reason}
+        </p>
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+          <Clock size={10} />
+          {t('agent.pause.timeoutNote')}
+        </p>
+        <ApproveDenyButtons busy={busy} onDecide={(decision) => onRespond(card, { decision })} />
+      </div>
+    </Banner>
   );
 }
 
@@ -158,37 +160,39 @@ function DeliverApprovalCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div
-      data-testid="agent-pause-approval"
-      data-pause-request-id={approval.approvalId}
-      data-pause-kind="approval"
-      data-pause-origin="deliver"
-      data-deliver-job-id={approval.jobId}
-      data-pause-expires-at={String(approval.expiresAt)}
-      className="mt-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2"
+    <Banner
+      tone="amber"
+      markers={{
+        testid: 'agent-pause-approval',
+        'pause-request-id': approval.approvalId,
+        'pause-kind': 'approval',
+        'pause-origin': 'deliver',
+        'deliver-job-id': approval.jobId,
+        'pause-expires-at': String(approval.expiresAt),
+      }}
+      className="mt-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-amber">
-        <ShieldCheck size={12} />
-        {t('agent.pause.deliverHeading')}
-      </p>
-      <p className="mt-1 break-words text-[11px] text-slate-300">
-        {t('deliver.pendingRow', {
-          jobId: approval.jobId,
-          title: approval.title,
-          company: approval.company,
-          fileName: approval.attachment.fileName,
-          sizeBytes: approval.attachment.sizeBytes,
-          sha: approval.attachment.sha256.slice(0, 12),
-          requestedAt: formatClock(approval.requestedAt, t('jd.none')),
-          expiresAt: formatClock(approval.expiresAt, t('jd.none')),
-        })}
-      </p>
-      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-        <Clock size={10} />
-        {t('agent.pause.timeoutNote')}
-      </p>
-      <ApproveDenyButtons busy={busy} onDecide={(decision) => onDecide({ decision })} />
-    </div>
+      <div className="w-full">
+        <p className="text-xs font-semibold">{t('agent.pause.deliverHeading')}</p>
+        <p className="mt-1 break-words text-[11px] text-slate-300">
+          {t('deliver.pendingRow', {
+            jobId: approval.jobId,
+            title: approval.title,
+            company: approval.company,
+            fileName: approval.attachment.fileName,
+            sizeBytes: approval.attachment.sizeBytes,
+            sha: approval.attachment.sha256.slice(0, 12),
+            requestedAt: formatClock(approval.requestedAt, t('jd.none')),
+            expiresAt: formatClock(approval.expiresAt, t('jd.none')),
+          })}
+        </p>
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+          <Clock size={10} />
+          {t('agent.pause.timeoutNote')}
+        </p>
+        <ApproveDenyButtons busy={busy} onDecide={(decision) => onDecide({ decision })} />
+      </div>
+    </Banner>
   );
 }
 
@@ -220,72 +224,74 @@ function ElicitationCard({
   const busyLabel = busyReason === undefined ? undefined : t('agent.pause.reason.ACTION_BUSY');
   const supplyReason = busyReason ?? (supplement.trim() === '' ? 'SUPPLEMENT_EMPTY' : undefined);
   return (
-    <div
-      data-testid="agent-pause-elicitation"
-      data-pause-request-id={card.requestId}
-      data-pause-kind={card.kind}
-      data-pause-round={String(card.round)}
-      data-pause-missing={card.missing.join(',')}
-      data-pause-expires-at={String(card.expiresAt)}
-      className="mt-2 rounded-md border border-celadon/40 bg-celadon-wash px-3 py-2"
+    <Banner
+      tone="celadon"
+      markers={{
+        testid: 'agent-pause-elicitation',
+        'pause-request-id': card.requestId,
+        'pause-kind': card.kind,
+        'pause-round': String(card.round),
+        'pause-missing': card.missing.join(','),
+        'pause-expires-at': String(card.expiresAt),
+      }}
+      className="mt-2"
     >
-      <p className="flex items-center gap-1 text-[11px] font-semibold text-celadon">
-        <ShieldQuestion size={12} />
-        {t('agent.pause.elicitationHeading')}
-      </p>
-      <PauseHeader card={card} meta={meta} />
-      <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
-        {card.reason}
-      </p>
-      {/* 「还缺哪些字段」由工具的 strict schema 现报（`agent.tools.validateInput`），界面只列名字。 */}
-      <p className="mt-1 break-all text-[11px] text-slate-400">
-        {t('agent.pause.missing', { fields: card.missing.join('、') })}
-      </p>
-      <p className="mt-1 text-[10px] text-slate-500" data-pause-round-label={String(card.round)}>
-        {t('agent.pause.round', { round: card.round })}
-      </p>
-      <DeskTextarea
-        action="agent-pause-supply"
-        data-testid="agent-pause-supply-input"
-        rows={2}
-        value={supplement}
-        onValueChange={setSupplement}
-        placeholder={t('agent.pause.supplyPlaceholder')}
-        className="mt-2 w-full"
-      />
-      <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-        <Clock size={10} />
-        {t('agent.pause.timeoutNote')}
-      </p>
-      <div className="mt-2 flex items-center gap-2">
-        <DeskButton
-          action="pause-supply"
-          variant="amber"
-          compact
-          busy={busy !== undefined}
-          disabled={supplyReason !== undefined}
-          disabledReason={supplyReason}
-          disabledReasonLabel={supplyReason === undefined ? undefined : t(`agent.pause.reason.${supplyReason}`)}
-          onClick={() => onRespond(card, { decision: 'supply', text: supplement })}
-        >
-          <Check size={12} />
-          {t('agent.pause.submit')}
-        </DeskButton>
-        <DeskButton
-          action="pause-deny"
-          variant="ghost"
-          compact
-          busy={busy !== undefined}
-          disabled={busyReason !== undefined}
-          disabledReason={busyReason}
-          disabledReasonLabel={busyLabel}
-          onClick={() => onRespond(card, { decision: 'deny' })}
-        >
-          <X size={12} />
-          {t('agent.pause.giveUp')}
-        </DeskButton>
+      <div className="w-full">
+        <p className="text-xs font-semibold">{t('agent.pause.elicitationHeading')}</p>
+        <PauseHeader card={card} meta={meta} />
+        <p className="mt-1 break-words text-[11px] text-slate-300" data-pause-reason={card.reason}>
+          {card.reason}
+        </p>
+        {/* 「还缺哪些字段」由工具的 strict schema 现报（`agent.tools.validateInput`），界面只列名字。 */}
+        <p className="mt-1 break-all text-[11px] text-slate-400">
+          {t('agent.pause.missing', { fields: card.missing.join('、') })}
+        </p>
+        <p className="mt-1 text-[10px] text-slate-500" data-pause-round-label={String(card.round)}>
+          {t('agent.pause.round', { round: card.round })}
+        </p>
+        <DeskTextarea
+          action="agent-pause-supply"
+          data-testid="agent-pause-supply-input"
+          rows={2}
+          value={supplement}
+          onValueChange={setSupplement}
+          placeholder={t('agent.pause.supplyPlaceholder')}
+          className="mt-2 w-full"
+        />
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+          <Clock size={10} />
+          {t('agent.pause.timeoutNote')}
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <DeskButton
+            action="pause-supply"
+            variant="amber"
+            compact
+            busy={busy !== undefined}
+            disabled={supplyReason !== undefined}
+            disabledReason={supplyReason}
+            disabledReasonLabel={supplyReason === undefined ? undefined : t(`agent.pause.reason.${supplyReason}`)}
+            onClick={() => onRespond(card, { decision: 'supply', text: supplement })}
+          >
+            <Check size={12} />
+            {t('agent.pause.submit')}
+          </DeskButton>
+          <DeskButton
+            action="pause-deny"
+            variant="ghost"
+            compact
+            busy={busy !== undefined}
+            disabled={busyReason !== undefined}
+            disabledReason={busyReason}
+            disabledReasonLabel={busyLabel}
+            onClick={() => onRespond(card, { decision: 'deny' })}
+          >
+            <X size={12} />
+            {t('agent.pause.giveUp')}
+          </DeskButton>
+        </div>
       </div>
-    </div>
+    </Banner>
   );
 }
 
