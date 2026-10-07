@@ -1,0 +1,119 @@
+6.2-14 第三十一片：指标看板（MetricsPanel）的 4 处裸控件迁进 L1 原件
+生成时间：2026-10-07（本机 macOS / Apple Silicon，CDP 10222，渲染层 target `--url 5173`，视口 1200×772）
+被检改动：packages/renderer/src/MetricsPanel.tsx、scripts/check-dashboard-readonly.ts、packages/renderer/src/ui/controls.tsx（仅注释）
+裁定依据：用户 2026-10-06 表态「放宽判据 1，允许引原件」（AskUserQuestion 选项原文）
+
+────────────────────────────────────────────
+一、这一片换的是哪四只
+────────────────────────────────────────────
+1. 头部「重新读取看板」`<button>` → `<DeskButton action="refresh" variant="line" compact>`
+2. 时间范围下拉 `<select id="metrics-preset">` → `<DeskSelect action="metrics-preset">`（id / data-testid 原样透传）
+3. 「起」`<input type="date" id="metrics-from">` → `<DeskField action="metrics-from" type="date">`
+4. 「止」`<input type="date" id="metrics-to">` → `<DeskField action="metrics-to" type="date">`
+
+三只字段的 className 整串删掉（原先手写的 `min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1
+text-[11px] text-slate-200 outline-none focus:border-celadon/60` 与原件的 `fieldClass` 逐字同源，
+所以这一改是可证明的 no-op —— 见下面第三节的读数对照）。
+
+────────────────────────────────────────────
+二、判据放宽后的五条（scripts/check-dashboard-readonly.ts）
+────────────────────────────────────────────
+判据 1：进口清单 = react / react-i18next / lucide-react / @auto-cc/shared / **./ui/controls**（新增的最后一条就是这次裁定放开的口子）
+判据 2：桥接口只许 `funnel.query` 一处
+判据 3：网络与动态装载出口 0 处
+判据 4：动作口计数改为 `<(?:button|DeskButton)`，仍要求恰好 1 只；onClick 仍只许 `void read()`；
+        重读凭证认 `data-action="refresh"` 或 `action="refresh"` 两种写法（原件把 action 渲染成 data-action）
+判据 5（新增）：**被放开的这条通道本身要钉住** —— ui/controls.tsx 本体不许出现网络出口、不许碰桥接口
+        （`bridge?.` / `window.autoCC`）、进口只许 react / react-i18next / lucide-react / @auto-cc/shared。
+        这条是判据 1 放开的对价：看板引得到原件，就必须保证原件里没有任何第二条外发通道。
+
+真组件跑一次（通过）：
+  $ npx tsx scripts/check-dashboard-readonly.ts
+  ✔ 看板保持只读（packages/renderer/src/MetricsPanel.tsx：5 条 import 全在清单里（含放开给原件的那一条）、
+    桥接口只有 funnel.query 一处、0 处网络/动态装载出口、恰好 1 只按钮且它的 onClick 只是重读；
+    原件本体 packages/renderer/src/ui/controls.tsx 无桥接口与网络口）
+
+────────────────────────────────────────────
+三、反向验证（AGENTS §6.5 / spec 5.8-c 的口径：判据必须证明真的会拦）
+────────────────────────────────────────────
+方法：把真组件复制成 tmp/ 下的**故意违规副本**，用脚本的 argv[2] 换被检文件；判据 5 用一份把
+UI_PRIMITIVES 指向违规原件副本的检查器副本（都在 tmp/，跑完即删，真组件一字未动）。
+退出码一律 `> log 2>&1; echo EXIT=$?` 读，不走管道（§9 的 5.4-c 条）。
+
+P-A 判据 1（副本里加 `import { DeskCard } from './ui/card';`）→ EXIT=1
+  - tmp/31/violent-import.tsx 引了 ./ui/card：看板的进口只允许 react / react-i18next / lucide-react / @auto-cc/shared / ./ui/controls（判据 1）
+  ⇒ 放开的是**一条**具名通道，不是"渲染层随便引"。
+
+P-B 判据 4 + 判据 3（副本里加第二只 `<DeskButton action="rerun" onClick={() => void rerun()} />` 与一句 `void fetch('/x')`）→ EXIT=1
+  - tmp/31/violent-button.tsx:394 的 onClick 是 () => void rerun()：看板的点击只允许重读（void read()）（判据 4）
+  - tmp/31/violent-button.tsx:398 命中 /\bfetch\s*\(/：渲染层自己出网（§8.1 的隔离与 §7.2 的零出网都不复存在）
+  - 看板里的 <button> 数量是 2，判据要求"只有一只重读按钮"= 恰好 1 处（判据 4）
+  ⇒ 只读语义没有因为"改用原件"而松动：原件的按钮同样被数、onClick 同样只许重读。
+
+P-C 判据 5（违规原件副本里放 `import axios from 'axios'` / `void fetch('/api')` / `window.autoCC.anything()`）→ EXIT=1
+  - tmp/31/controls-violent.tsx 命中 /\bfetch\s*\(/：渲染层自己出网（判据 5）
+  - tmp/31/controls-violent.tsx 里出现了桥接口：判据 1 放开的是一条只画界面的通道（判据 5）
+  - tmp/31/controls-violent.tsx 引了 axios：原件只许引 react / 图标 / 类型包（判据 5）
+
+────────────────────────────────────────────
+四、活体读数（迁移后 AFTER ↔ 迁移前 BEFORE，墨案）
+────────────────────────────────────────────
+BEFORE 值取自本片动手之前在同一只面板上的量（记录在 tmp/31-metrics-before.js 的输出）。
+作用域：全部读数只在 `[data-testid="metrics-panel"]` 里取，见第六节的坑。
+
+1) 重新读取看板（DeskButton，line + compact）
+   AFTER  border rgba(150, 178, 196, 0.26) | radius 7px | bg rgb(19, 28, 35) | color rgb(219, 228, 236) | 11px/500 | padding 2px/8px | 120×24
+   BEFORE border rgba(150, 178, 196, 0.26) | radius 7px | bg rgb(19, 28, 35) | color rgb(219, 228, 236) | 11px/500 | padding 2px/8px
+   ⇒ 逐位一致（这条不是巧合：原件的 line 档描边/淡洗就是照着这一串抄的那一份）。
+   新增可机读属性：`data-effect="line"`（六.2-01 的"点了会怎样"靠它，之前手写按钮没有）。
+
+2) 时间范围下拉 #metrics-preset（DeskSelect）
+   AFTER  rgba(150, 178, 196, 0.26) | 6px | rgb(8, 12, 16) | rgb(194, 209, 220) | 11px/400 | 4px/8px | 81×27
+   BEFORE rgba(150, 178, 196, 0.26) | 6px | rgb(8, 12, 16) | rgb(194, 209, 220) | 11px/400 | 4px/8px
+   ⇒ 逐位一致，且落进统一字段桶（与其余 28 只字段同一签名）。
+
+3) 「起」#metrics-from / 4) 「止」#metrics-to（DeskField，type=date）
+   BEFORE：未挂载（预设停在 last7，自定义区间那一对不渲染）
+   AFTER  rgba(150, 178, 196, 0.26) | 6px | rgb(8, 12, 16) | 11px/400 | 4px/8px | 113×28（两只同值）
+   取法：把下拉切到 custom（原生 setter + `change` 事件，第二次 eval 才读到重渲染）→ 读数 → **切回 last7**（末态已核验）。
+
+锚点存活核对（迁移最容易撞坏的就是这个）：`#metrics-preset` / `#metrics-from` / `#metrics-to` 三个 id 与
+同名 data-testid 全部解析得到、`type="date"` 原样保留、`data-action` 四只全在（AGENTS §9 ④ 的活体凭证）。
+
+毡案（浅色）同一批：
+   三只字段 rgba(38, 44, 48, 0.3) | 6px | rgb(216, 211, 198) | 11px —— 毡案统一桶
+   按钮     rgba(38, 44, 48, 0.3) | 7px | rgb(242, 239, 230) | 11px
+
+────────────────────────────────────────────
+五、源码侧的裸控件计数（6.2-14 的正腿）
+────────────────────────────────────────────
+口径：`packages/renderer/src/**/*.tsx`，排除 `src/ui/**` 本体；先剥掉 `/* */` 与 `//` 注释再数
+`<(button|input|select|textarea)\b`。
+
+  1  ./ChatPanel.tsx      ← 只剩这一处：对话输入区的 composer（用户裁定「原件加一个尺寸档」，下一片动）
+
+即 54 → 1。看板这一半（4 处）在本片清零，"卡在待表态"的那一条已经解掉。
+
+────────────────────────────────────────────
+六、这一片的探针口径坑（写下来免得下一片再撞）
+────────────────────────────────────────────
+1. `MetricsPanel` 挂在**信任**这一栏（App.tsx 的 `PANELS.trust`），不是诊断栏。停在诊断栏时它虽然挂在 DOM 里，
+   但祖先 `section` 是 `display:none`，宽高 0×0 —— 样式照样解析，看起来却像"控件没渲染"。
+2. 全页 `[data-action="refresh"]` 有 **7 只**（登录态、用量、模型设置、更新通道……都叫这个名字）。
+   不限定作用域就会量到别的面板那只，本片的 BEFORE 第一次就被它骗过（量到 0×0 且文案是"重新读取抓取与库内读数"）。
+   凡是量面板内的控件，一律 `panel.querySelector(...)`。
+3. `harness eval` 的返回若是普通对象，某些形状会被序列化成 `{}`；判据脚本一律 `JSON.stringify(...)` 自己转。
+4. 本机 app 窗口被遮挡时 `document.visibilityState` 是 `hidden`（本片所有读数都在这种状态下取）——
+   计算样式与 rect 不受影响，但"点了有没有反应"这类判据不能在这一状态下收（§9 的 2.1-12 补窗条）。
+
+────────────────────────────────────────────
+七、截图与末态
+────────────────────────────────────────────
+docs/acceptance/06-ui-ink-desk/6.2-14-metrics-panel-dark.png   md5 9f75ff312ec18518a997fcb56b0bbcaf
+docs/acceptance/06-ui-ink-desk/6.2-14-metrics-panel-light.png  md5 2787a2ff85f63433ce37383b72dbf9b4
+（两条 md5 不同 ⇒ 不是同一张画面被截两次，§9 的 5.10-18 / 3.6-c 第②条硬步骤已跑）
+画面内容：指标看板整块 —— 标题行右侧的「重新读取看板」、时间范围「自定义」下拉、起/止两只日期框，
+两只日期框与下拉同桶（11px、6px 圆角、ink-950 底），漏斗五级与额度块未受影响。
+
+末态（已核验）：主题回到墨案（dark）、导航回到信任栏、时间范围预设回到 last7、无遮罩、未写任何用户数据。
+本片对活体实例只做了三类可逆动作：切主题（两次）、切视图（一次）、切筛选预设（custom→last7，已还原）。
