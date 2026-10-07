@@ -9,6 +9,7 @@ import {
   type FunnelRange,
   type FunnelView,
 } from '@auto-cc/shared';
+import { DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 区间档位：两个预设 + 自定义（spec 5.8-04）。localStorage 里存的就是这个判别式。 */
 type RangePreset = 'last7' | 'last30' | 'custom';
@@ -221,18 +222,10 @@ export function MetricsPanel() {
           <BarChart3 size={16} />
           {t('metrics.heading')}
         </h2>
-        {/* 墨案的描边档样式只能整串写在这里：`check-dashboard-readonly.ts` 判据 1 把本文件的
-            进口钉死在四个包（引不到能力包就引不到第二条外发通道），所以不能改用 `DeskButton`。
-            判据 4 同时要求全文件恰好一只按钮，且它的 onClick 只能是 `void read()`。 */}
-        <button
-          type="button"
-          data-action="refresh"
-          onClick={() => void read()}
-          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border border-line-strong bg-ink-800 px-2 py-0.5 text-[11px] font-medium text-slate-100 transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-slate-500 hover:bg-ink-750 hover:text-slate-50 active:translate-y-px active:bg-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
-        >
+        <DeskButton action="refresh" variant="line" compact onClick={() => void read()}>
           <RefreshCw size={12} />
           {t('metrics.refresh')}
-        </button>
+        </DeskButton>
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('metrics.hint')}</p>
 
@@ -241,39 +234,39 @@ export function MetricsPanel() {
           <CalendarClock size={14} />
           {t('metrics.filterLabel')}
         </label>
-        <select
+        <DeskSelect
+          action="metrics-preset"
           id="metrics-preset"
           data-testid="metrics-preset"
           value={pref.preset}
-          onChange={(event) => applyPreference({ ...pref, preset: event.target.value as RangePreset })}
-          className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+          onValueChange={(value) => applyPreference({ ...pref, preset: value as RangePreset })}
         >
           <option value="last7">{t('metrics.presetLast7')}</option>
           <option value="last30">{t('metrics.presetLast30')}</option>
           <option value="custom">{t('metrics.presetCustom')}</option>
-        </select>
+        </DeskSelect>
         {pref.preset === 'custom' && (
           <>
             <label className="flex items-center gap-1" htmlFor="metrics-from">
               {t('metrics.from')}
-              <input
+              <DeskField
+                action="metrics-from"
                 id="metrics-from"
                 data-testid="metrics-from"
                 type="date"
                 value={pref.fromDay}
-                onChange={(event) => applyPreference({ ...pref, fromDay: event.target.value })}
-                className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+                onValueChange={(value) => applyPreference({ ...pref, fromDay: value })}
               />
             </label>
             <label className="flex items-center gap-1" htmlFor="metrics-to">
               {t('metrics.to')}
-              <input
+              <DeskField
+                action="metrics-to"
                 id="metrics-to"
                 data-testid="metrics-to"
                 type="date"
                 value={pref.toDay}
-                onChange={(event) => applyPreference({ ...pref, toDay: event.target.value })}
-                className="min-w-0 rounded-md border border-line-strong bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60"
+                onValueChange={(value) => applyPreference({ ...pref, toDay: value })}
               />
             </label>
           </>

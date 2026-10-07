@@ -11,15 +11,23 @@
  * 这里补的是界面半边。
  *
  * 四条判据，各拦一种绕法：
- * 1. **进口只有四个包**（`react` / `react-i18next` / `lucide-react` / `@auto-cc/shared`）：
- *    引不到能力包就引不到第二条能力通道，这一条最硬，所以先判它。
+ * 1. **进口只有四个包 + 一条 UI 原件相对路径**（`react` / `react-i18next` / `lucide-react` /
+ *    `@auto-cc/shared` / `./ui/controls`）：引不到能力包就引不到第二条能力通道，这一条最硬，所以先判它。
+ *    2026-10-07 用户裁定放开 `./ui/controls` 这一条（06-ui-ink-desk 第三十片的活体读数证明看板那几处
+ *    手写的 class 与原件同源、换件不动画面），但**放开的只是这一条相对路径**，不是"引 UI 层没关系"：
+ *    原件自己有没有偷偷开口子，由判据 5 直接检它本体。
  * 2. **桥接口只有一句 `funnel.query`**：`window.autoCC` 上是白名单生成的命名空间，
  *    看板只能碰 `funnel` 那一只，而且只调 `query`；出现别的命名空间或第二次调用点即失败。
  * 3. **没有任何网络与进程出口**：`fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` /
  *    `sendBeacon` / `import()` / `require(` 一个都不许出现（渲染层本来就在 sandbox 里，
  *    这几条钉的是"别把口子开回来"）。
- * 4. **按钮只有一只、且它的 onClick 只是重读**：`<button` 恰好一处，`onClick` 只允许 `void read()`。
- *    区间下拉与两个日期输入是筛选器不是动作按钮，所以按 `<button` 计数、不按"可交互元素"计数。
+ * 4. **动作键只有一只、且它的 onClick 只是重读**：`<button` 与 `<DeskButton` 合计恰好一处，
+ *    `onClick` 只允许 `void read()`。区间下拉与两个日期输入是筛选器不是动作按钮，所以按"按钮开标签"计数、
+ *    不按"可交互元素"计数；换进原件之后 `<button` 这个字面量会消失，所以计数必须同时认得两种写法，
+ *    否则判据会在"什么都没多出来"的那一次提交上假红。
+ * 5. **被放开的进口自己也要被钉住**：`packages/renderer/src/ui/controls.tsx` 本体不许出现
+ *    桥接口、网络出口或能力包进口——判据 1 放开的是一条"只画界面"的通道，
+ *    如果哪天原件里长出了 `window.autoCC`，这条口子就不再是样式口了。
  *
  * 命令：`pnpm lint` 里倒数第二条，或单独 `tsx scripts/check-dashboard-readonly.ts`。
  * 注释行不参与判定（与调度器那条同一口径）：本项目的注释会写"不发一个动作"这类话。
@@ -38,8 +46,17 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  */
 const TARGETS = process.argv[2] === undefined ? ['packages/renderer/src/MetricsPanel.tsx'] : [process.argv[2]];
 
-/** 允许的进口（模块说明符 → 为什么允许）。 */
-const ALLOWED_MODULES: readonly string[] = ['react', 'react-i18next', 'lucide-react', '@auto-cc/shared'];
+/** 允许的进口（模块说明符 → 为什么允许）。`./ui/controls` 是判据 5 单独钉住的样式口。 */
+const ALLOWED_MODULES: readonly string[] = [
+  'react',
+  'react-i18next',
+  'lucide-react',
+  '@auto-cc/shared',
+  './ui/controls',
+];
+
+/** 判据 5：被放开的这条进口本体（它一旦长出桥接口或网络口，判据 1 的放开就变成了开能力口）。 */
+const UI_PRIMITIVES = 'packages/renderer/src/ui/controls.tsx';
 
 /** 桥接口上唯一允许的服务命名空间与方法（`window.autoCC.funnel.query`）。 */
 const ALLOWED_BRIDGE_PATH = 'funnel.query';
@@ -141,8 +158,8 @@ for (const relPath of TARGETS) {
       if (ban.pattern.test(code)) problems.push(`${where} 命中 ${ban.pattern}：${ban.reason}`);
     }
 
-    // —— 判据 4：按钮计数与它的 onClick ——
-    buttonCount += (code.match(/<button\b/g) ?? []).length;
+    // —— 判据 4：按钮计数与它的 onClick（换进原件之后 `<button` 这个字面量会消失，两种写法都要认） ——
+    buttonCount += (code.match(/<(?:button|DeskButton)\b/g) ?? []).length;
     for (const match of code.matchAll(/onClick=\{([^}]*)\}/g)) {
       const handler = match[1]?.trim() ?? '';
       if (!ALLOWED_ON_CLICK.test(handler)) {
@@ -153,8 +170,29 @@ for (const relPath of TARGETS) {
 
   // JSX 的属性是跨行写的（`<button` 与 `data-action` 通常不在同一行），所以整段文本里核一次：
   // 全仓已经钉住"只有一只按钮"（下面 `buttonCount !== 1`），于是这句原话挂的就是那只按钮。
-  if (text.includes('<button') && !/data-action="refresh"/.test(text)) {
-    problems.push(`${relPath} 里有 <button> 但找不到 data-action="refresh"：看板只允许那只重读按钮（判据 4）`);
+  // 换进 `DeskButton` 之后凭据写作 `action="refresh"`（原件自己把它渲染成 `data-action`），两种都认。
+  const hasActionButton = /<(?:button|DeskButton)\b/.test(text);
+  const hasRefreshCredential = /data-action="refresh"/.test(text) || /action="refresh"/.test(text);
+  if (hasActionButton && !hasRefreshCredential) {
+    problems.push(`${relPath} 里有按钮但找不到 refresh 那只的 data-action：看板只允许那只重读按钮（判据 4）`);
+  }
+}
+
+// —— 判据 5：被放开的这条进口本体必须只是"画界面"的 ——
+{
+  const filePath = path.join(repoRoot, UI_PRIMITIVES);
+  const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
+  const code = lines.map((line) => (isCommentLine(line.trimStart()) ? '' : line)).join('\n');
+  for (const ban of OUTBOUND_BANS) {
+    if (ban.pattern.test(code)) problems.push(`${UI_PRIMITIVES} 命中 ${ban.pattern}：${ban.reason}（判据 5）`);
+  }
+  if (/\bwindow\.autoCC\b/.test(code) || /\bbridge\s*\??\./.test(code)) {
+    problems.push(`${UI_PRIMITIVES} 里出现了桥接口：判据 1 放开的是一条只画界面的通道（判据 5）`);
+  }
+  for (const specifier of importSpecifiersOf(code)) {
+    if (!['react', 'i18next', 'lucide-react', '@auto-cc/shared'].includes(specifier)) {
+      problems.push(`${UI_PRIMITIVES} 引了 ${specifier}：原件只许引 react / 图标 / 类型包（判据 5）`);
+    }
   }
 }
 
@@ -176,6 +214,7 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `✔ 看板保持只读（${TARGETS.join('、')}：${String(importStatementCount)} 条 import 全在四个允许模块里、` +
-    `桥接口只有 ${ALLOWED_BRIDGE_PATH} 一处、0 处网络/动态装载出口、恰好 1 只按钮且它的 onClick 只是重读）`,
+  `✔ 看板保持只读（${TARGETS.join('、')}：${String(importStatementCount)} 条 import 全在清单里（含放开给原件的那一条）、` +
+    `桥接口只有 ${ALLOWED_BRIDGE_PATH} 一处、0 处网络/动态装载出口、恰好 1 只按钮且它的 onClick 只是重读；` +
+    `原件本体 ${UI_PRIMITIVES} 无桥接口与网络口）`,
 );
