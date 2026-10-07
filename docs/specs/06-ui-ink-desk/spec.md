@@ -5,7 +5,7 @@
 > **C** = 命令/脚本机检；**U** = 单元/集成测试。状态：`[ ]` 未验 / `[x]` PASS / `[!]` BLOCKED（必须写原因）。
 > 证据归档：`docs/acceptance/06-ui-ink-desk/<条目ID>-*.png`；V 项无截图不得置 `[x]`（AGENTS.md §7.1/§7.4②）。
 
-> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 27 `[x]` / 14 `[!]` / 1 `[ ]`（第三十三片关掉 6.2-14、第三十四片关掉 6.2-13、第三十五片关掉 6.2-12，读数按表内实际状态位逐行数过。当下唯一那格 `[ ]` 是 6.1-09）。
+> **条目统计**：44 条（6.1×9 / 6.2×17 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 28 `[x]` / 14 `[!]` / 2 `[ ]`（第三十六片关掉 6.2-16 后是 28/14/1；新立 **6.2-17**（中性手搓长条 12 处，同一形状、语气归属待裁定）作 `[ ]`，读数按表内实际状态位逐行数过（`node tmp/36-count.mjs` → rows 44 / 28 / 14 / 2）。另一格 `[ ]` 是 6.1-09）。
 > 立计划时是 31 条（6.2×9 / 6.4×3 / 6.5×3），后八条是逐片验收里补出来的（6.2-10/11/12、6.4-04、6.5-04/05/06、6.1-09）。
 >
 > **本计划总基调**：验收的不是"能不能跑"，而是"界面有没有说谎"——
@@ -49,6 +49,8 @@
 | 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | **第三十四片 closed**，走判据自己给的第二个口子（等价焦点陷阱），`inert` **不做**：它必须挂在背景容器上，那就要把浮层提到顶层（Portal），而"同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（§3.8 的落点裁定 + 第二十五片那条负腿实测）。Esc 与 Tab 从此共用**同一张层级表**（`overlayLayers`：层级 → `{close, node}`），焦点只锁最高那一级**带节点**的浮层；toast 那一级不带节点 ⇒ 稿上"toast 不抢焦点"由形状自己成立，不加开关。三条通道各自有主：鼠标 = 遮罩（命中测试实读 `fixed inset-0 z-40 bg-scrim`）/ 键盘 = 环（一律先 `preventDefault` 再自己 `focus()`：浏览器的 Tab 顺序按**整份文档**排，放过去就会跨出浮层）/ 滚轮 = 弹窗那层的滚动锁。「哪一格拿焦点、关掉后还给谁」两条同时定下：**落点**由调用方在安全动作上挂 `autoFocus`（`ConsentModal` 的 deny 早就有；第 6 只 `PrivacyNotice` 本片补 `autoFocus={isReopened}`，**首启动那一次不给**——那一屏唯一的动作就是写下表态，把焦点自动交给它等于允许一次误按 Enter 替用户点头）；**归还**的触发者在**渲染阶段**记进 ref（等 effect 现读已经晚了，`autoFocus` 早把焦点带进弹窗），且只在 `activeElement === body` 那一刻还 ——于是同时躲开 StrictMode 那次假卸载的 cleanup（实测：那一趟会把 `autoFocus` 拽回背景并清空触发者，真关时谁也没还）与人已经自己走开两种情况。活体两轮：第 6 只弹窗环 2 只、背景可 Tab 格子 **44 只**，正反向各 ×8 步全部 `inDialog=true` 且 `defaultPrevented=true`；⑤-1 签字弹窗环 3 只（含 `consent-grant` 那只 **aria-disabled 键刻意留在环里**：本项目不用原生 `disabled`，踢出环就等于让"按不动"退化成"摸不到"，人读不到原因）、背景 23 只一次都没走进去、Esc 与点遮罩都收不掉（三条退路一律不给那一只照旧）；换语言（整棵树重渲染、弹窗不重挂）焦点不动；关掉后 `returnedToTrigger=true`、overflow 复位；关掉后连按 Tab 不再被吃掉（那条全局监听摘干净）。毡案复测 `tabStillTrapped={prevented:true, stillInDialog:true}`。**顺手当场修掉两条原件缺陷**：① 居中那一层 `fixed inset-0 z-50` 压在遮罩之上、把整窗指针事件整个接走 ⇒ **「点遮罩收起」在真鼠标下从来没通过**（旧证据那格「点遮罩：关」是按 `scrim.click()` 记的，那方法测的是 onClick 挂没挂、测不到命中测试这一层；更正记在本片读数，旧文件不改），改成居中层 `pointer-events-none` + 卡片 `pointer-events-auto` 之后命中测试回到 `.bg-scrim`、真点可收；② 旧注释把焦点这条写成"纪律表第 5 行"，按 09 稿表格的实际行序它是**第 2 行**。抽屉那一侧共用同一条 hook，但 `Drawer` 至今零消费者 ⇒ 只有弹窗这一侧有活体，形态③④ 照旧欠（见 6.2-04）。全在 `6.2-13-focus-trap-readings.txt` + 两张画面（md5 `d9308a29…` 墨案 / `e382d4ff…` 毡案；程序化 `focus()` 在 Chromium 不保证命中 `:focus-visible`，实测 `focusVisible=false`，所以画面里没有那圈环，焦点归属一律以 `activeElement` 读数为凭） | [x] |
 | 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上（已于第三十二片 54/54 清零后写入 `check-renderer-conventions.ts` 第 10 节），在那之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**进 54 / 54 清零**（第二十七片 45 + 第二十八片 3 + 第二十九片 1 + 第三十一片 4 + **第三十二片 1**：两只行内披露键、自治档位那一支 JSX、左轨页签那一支、看板那四只、对话输入区 composer）：`src/ui/**` 之外新增七件原件（表单五件 `DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange` + 形态两件 `DeskSegmented` / `DeskDisclosure`）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：卡住的那两条**待用户表态已在 2026-10-06 由用户逐字裁定**——看板 =「放宽判据 1，允许引原件」（→ 第三十一片把那 4 处全部迁完，机检 5.8-02 同步改成五条并补三条反向验证）+ 对话输入区 =「原件加一个尺寸档」（→ 下一片动）；基线外新出的 5 处（并行会话落地的 `ModelSettingsPanel.tsx`，`select` 2 + `input` 3）**已在第三十片全部迁完 → 0**，并当场拆掉 `ui/controls.tsx` 的 `export const FIELD_CLASS`（换完最后五处后它零消费者，§2.4 即删；手抄档口物理消失，第三份复制再也写不出来）。**当下渲染层剩下的裸控件 = 0 处**（composer 已在第三十二片接进 `DeskTextarea` 的 `size="composer"` 档，几何逐位不变、两处刻意归一与两条行为腿全在 `6.2-14-chat-composer-readings.txt`）；逐文件复算口径（剥注释后 `src/ui/**` 之外只命中 `ChatPanel.tsx` 1 处）见 `6.2-14-metrics-panel-readings.txt` 第五节。即"54 处清零"这一腿已清零。机检**已按裁定在第三十二片写入**（`check-renderer-conventions.ts` 第 10 节，在 `pnpm lint` 链内；三条注入探针各自验证：四只裸控件 → 逐 tag 报出 `EXIT=1`、四个 tag 全写在注释里 → `EXIT=0`、原件子树本来就带裸控件而整体绿 → 豁免腿成立），本条从此是 `[机检]`，收尾自检的④不再靠人工声称。**最后一条已到货（第三十三片）**：画布 `<Controls>` 按裁定 2 保留组件，只用 Tailwind 的任意属性把库自己的 `--xy-controls-*` 变量出口按回令牌层——两套主题各取一次"把 class 摘掉再读回来"的 BEFORE/AFTER（按钮底 `#2b2b2b` / `#fefefe` → `--color-ink-800`，分隔线 `#5b5b5b` / `#eee` → `--color-line-strong`，外框圆角 0 → 6px，阴影 → `--shadow-lift`），几何 26×26 一根手指没动，三只按钮的行为腿逐条兑现（视口缩放 1.374 → 1.6488 → 1.374 → fitView 1.374）。顺带补上取证逼出的一条 §5.5 缺口：chrome 的悬停 `title` 原本写死在库里（活体读到 Zoom In / Zoom Out / Fit View），现经 `ariaLabelConfig` 走双语四键（缩放控件 / 放大 / 缩小 / 适应视图 ↔ Zoom controls / Zoom in / Zoom out / Fit view）。读数与画面见 `6.2-14-canvas-controls-readings.txt` + `6.2-14-canvas-controls-{dark,light}.png`（md5 `ff86cb89…` 墨案 / `d8bd43ec…` 毡案，互异）。**本条至此四条腿齐**：自绘遮罩 2 → 0、裸控件 54 → 0、机检落地、第三方 chrome 归位；仍留的相邻事项都不在本条射程（`node.a11yDescription.*` 那五条屏幕阅读器说明仍是库内英文，另开一片；库在触到 min/max zoom 时用原生 `disabled`，那是能力边界不是权限闸门，归 6.2-01 口径） | [x] |
 | 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的裸 `<button>` | C+V | **第二十八片落了后两件**：`DeskSegmented`（消费者 = `ChatPanel` 自治档位三格）与 `DeskDisclosure`（消费者 = `GapPanel` 证据行、`GeneratePanel` 出处行）。活体三档全到账（`6.2-15-segmented-disclosure-readings.txt`）：选中·非风险 `bg rgb(24,35,43)`、未选中 `bg rgba(0,0,0,0)` + `rgb(108,128,145)`、**选中·风险 `bg rgba(226,84,58,.13)` + `ring-inset seal/35`**（只有"选上它就把风险抬高"那一格涂朱砂），毡案同一条原件翻面；全 app `button:not([data-action])` **3 → 0**，渲染层最后一处原生 `disabled`（那三格原先走原生禁用，鼠标事件不派发、`title` 里的理由读不到）随之消失。**两处如实欠着**：① `DeskDisclosure` 的活体腿受阻——`gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"`，开发实例知识库是空的，正文一行都渲染不出来，补它要往用户的库里同步一份简历文档（不改写用户实例；受阻态画面 `6.2-15-disclosure-gap-blocked-dark.png`）；② `DeskSegmented` 的**在途档**取不到——纯本机 IPC 在 4ms 内返回（1/4/10ms 三张快照全为静止态），没有为了这一帧去发一条会写进会话的消息，改由第十五片同款"实现只有一条出路"的证据覆盖。**第三件页签已在第二十九片落地**：`DeskTab`（上一轮 `App.tsx` 被并行的模型设置改动占着，不动他人当场在改的文件，故顺延一片）。三件形态原件至此**齐**（页签 / 分段 / 行内披露），`src/ui/**` 之外的裸 `<button>` **5 → 0**。页签的活体腿一次取全（`6.2-15-tab-nav-readings.txt`）：选中 = 贴在轨道左缘的 `3×17` 短线（`translate: 0px -50%` 与按钮中线逐位重合）+ 底色提一档 + 文字提亮，短线走 **celadon 不走稿上的朱砂**（plan §5 归属表：seal 只给外发/风险，"此刻在哪一格"不是风险），低一档那格用 `slate-500`；未选中档短线是透明而非不渲染，所以六格文字起始位一字不移；`data-view` / `data-action` / `[data-testid="view-tabs"]` 三支旧锚点逐字保留，新增 `data-selected` 与 `aria-current="page"`；导航六格里 `borderLeftWidth !== 0px` 的是 **0 只**（旧的 `border-l-2` 没有与新短线并存）。双主题四档计算色 + 八支对比度全过（毡案短线 3.58:1 是六条里最紧的一支，另有底色与文字两条冗余通道）。**本条仍 `[!]`**，欠的两支都不是几何问题：① `DeskDisclosure` 的活体正腿（知识库为空，见上）；② `DeskSegmented` 的在途档（4ms 内返回，见上）。另记一条刻意没照稿写的：稿上 `.nav-item:active { translateY(1px) }` 属 6.2-01 五态规则，那一整条还欠真鼠标腿，单独给页签加 `active:` 会把 6.2-01 拆成半件，故记在 6.2-01 名下一起收 | [!] |
+| 6.2-16 | 常驻提示条只许有一只原件：`src/ui/**` 之外不许再把手搓的 wash 长条当提示条用（普查到的条一律收进 `Banner`），且 `Banner` 自己要先按稿的样子说话 | C+V | **第三十六片 closed**。数法见 plan §3.11（脚本 `tmp/36-census2.js`，只走 `packages/renderer/src/**.tsx\|.ts`、排除 `src/ui/**` 与 `*.test.ts`）：收敛前带 `-wash` 的行 **59**、收敛后 **39** ⇒ 收掉 **20 处**，与 `<Banner>` 调用点的增量逐位对得上（HEAD 4 处 → 现在 24 处，24−4=20）。**初数的「条 26 / 其余 33」在逐处看过源码后更正为「条 20 / 其余 39」**：从"条"里挪出去的是五处 `<li>` 列表行（`LocatorLabPanel:234/425`、`SessionPanel:186`、`JobLabPanel:485/634`——重复项不是"一条通知"）与两处内容卡（`PrivacyNotice:181`、`WorkflowEvidence:57`——装正文不装回执）。三件事按裁定顺序做完：① **先纠正封装**——稿 `assets/shared.css:1102-1116` 的 `.banner` 第三条是 `color: var(--*)`（文字按语气着色），而 `BANNER_CLASS` 四档一律 `text-slate-100` ⇒ 偏离基线的是那一只封装，所以收敛方向是"把封装改成稿的样子"而不是把 20 处对的改成 1 处错的（§2.5）；四档现在 `border-*/4x + bg-*-wash + text-*` 三件同档。② **图标按语气分派、不做入参**：`celadon`→`Info` / `amber`→`CircleAlert` / `seal`→`TriangleAlert` / `jade`→`BadgeCheck`（与 6.2-01 结果态同一只图标、同一份事实），开 `icon` 旋钮等于允许第 5 种语气自己挑图标。③ **尺寸口径定死**：`text-xs`（散条里的 `text-[11px]` 一律升档）+ `px-3 py-2` + `rounded-control` + `items-start`，超出外框只走 `className` 的外边档（`mt-2`/`mt-3`/`break-all`），多子节点靠 `<div class="w-full">` 包住而不另长第二种形状；**harness 锚点全部经 `markers` 逐字保留**（`testid`/`error-code`/`stat`/`script-receipt`/`takeover-*`/`pause-*`/`origin`），旧选择器一条没断。**活体证据**：真模块探针（页面里 `await import('/src/ui/controls.tsx')` 取 app 用的那一份 `Banner`，四档各渲一次）双主题四组读数——墨案 celadon `rgb(127,182,173)` / amber `rgb(224,163,63)` / seal `rgb(226,84,58)` / jade `rgb(79,183,138)`，毡案对应 `rgb(63,128,120)` / `rgb(138,95,10)` / `rgb(192,57,31)` / `rgb(40,121,87)`（正是 `globals.css:274-290` 压深后的四色，文字着色不靠运气过对比度，6.1-06 已 `[x]`），四档**形状签名逐位相同**（radius 7px / pad 8px 12px / font 12px / align-items `flex-start` / 图标 svg 13px 且 `aria-hidden`），四只图标 path 各不相同。真消费者两档双主题：seal = `ResumePanel` 导入失败（`RESUME_IMPORT_FAILED`，class 里 `border-seal/50 bg-seal-wash text-seal` 三件同档、`data-testid="resume-import-error"` 在位），amber = `ResumeEditor` 关闭确认（把 `lineHeight` 滑杆抬一档派发 `input` 令 `data-dirty=true` 再点关闭；Banner 内三键 `close-save`/`close-discard`/`close-stay` 都在，收尾只点 discard 不写盘）。**如实记的边界**：jade / celadon **无真消费者活体**——celadon 唯一消费者是补充信息单（要真跑一轮 agent 让入参校验失败），jade 四处全挂在外发或写盘上（§7.2 不许自动化碰真实平台、也不为截图写库），两档改由"真模块探针 + 20/20 静态普查"覆盖，与 6.2-10 那条"无活体样本改以 class 证据"同一口径。**本片不上机检**（照 §3.9 裁定 1「全换完再上机检」）：`bg-*-wash` 本身不是坏味道，靠 padding 签名近似会漏 `p-2`/`p-3` 又误伤读数块；等 6.2-17 那一族也收进 L1 后写成"`bg-*-wash` 只许出现在 `src/ui/**`"一句且不留豁免清单。读数全在 `6.2-16-banner-consolidation-readings.txt` + 六张画面（seal / amber / four-tones 各双主题，md5 `96f82b60…` `1fce19f2…` `6a356a19…` `fb900f62…` `ae2e51d6…` `eea1cc93…` 各 1 无重复）。**顺带普查出的口径外新族**见 6.2-17 | [x] |
+| 6.2-17 | 同一形状的**中性**手搓长条也要收进 `Banner`：`src/ui/**` 之外不许再有 `rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300` 这种"第二种提示条"（普查 12 处） | C | **待裁定后起片**（第三十六片普查发现，plan §3.11 第五节）。这 12 处与 6.2-16 那 20 条是**同一个形状、不同的语气归属**（"系统在说一件普通的事"，既不是等人在动也不是风险）：`UsagePanel:108`、`WorkflowLabPanel:179`、`LocatorLabPanel:302`、`SessionPanel:201`、`ResumeEditor:480`、`PdfEditPanel:538`、`ResumePanel:466`、`AgentRunPanel:131`、`AssemblyPanel:237`、`AssemblyPanel:396`、`JobLabPanel:418`、`WorkflowPanel:260`。**卡住的是语义不是几何**：稿 `assets/shared.css:1102-1116` 的 `.banner` 只有 warn/seal/celadon 三档、没有中性档，于是收它们必须先答"中性回执算第 5 档 `neutral`，还是并入 celadon（系统在说话）"——并入会让"等人在动"与"系统在说"共用一档色，新增第 5 档又等于给封装开一条稿上没有的口子（§2.6 不做超出需求的抽象）。这是**语气归属裁定**，按 §0「先停下来提出冲突」不自决，故本条只登记不落地；裁定到手后一片收完，并把 `Banner` 的 `BannerTone` 与 `BANNER_CLASS`/`BANNER_ICON` 一起补齐，机检仍按裁定 1 留到两族都清零之后 | [ ] |
 
 ## 6.3 外壳与信息架构（01–06 稿）
 
@@ -1766,3 +1768,61 @@ bg-ink-950 px-2 py-1 text-[11px]` 与原件内部 `fieldClass` 同源，所以 c
     用户数据零改写——只碰被 git 忽略的
     scratch 实例 `tmp/v6-userdata`（种一份示例简历、写又删它的 PDF），装机版 app 未动。
     末态开发实例：墨案、语言 zh-CN、视图 `workflow`、`toastPresent=false`、`probePresent=false`。
+
+## 6.2 第三十六片落地记录（6.2-16：提示条只留一只原件 = 先纠正 `Banner`，再收 20 只手搓条）
+
+1. **收敛方向由普查决定，而不是由"谁看起来更新"决定**：`node tmp/36-census2.js` 数下来，收敛前
+   `src/ui/**` 之外带 `-wash` 的行是 59，收敛后 39 ⇒ 这一片收掉 20 处，且 `<Banner>` 的调用点从 4 涨到 24
+   （24 − 4 = 20，两条数互相咬合，不是各说各话）。**先纠正封装再收散条**：稿 `assets/shared.css:1102-1116`
+   的 `.banner` 第三条规则是 `color: var(--*)`（文字按语气着色），而 `BANNER_CLASS` 四档原本一律
+   `text-slate-100`——偏离基线的是那一只封装，20 只手搓条绝大多数本来就写 `text-seal/jade/amber`。
+   反过来做（把 20 处对的改成 1 处错的）才是 §2.5 要防的那种"统一"。
+2. **初数更正**：plan §3.11 里那句「条 26 / 其余 33」是形状判据没跑完就写的。逐处看过源码后改成
+   **条 20 / 其余 39**，被挪出去的五处是 `<li>` 列表行（`LocatorLabPanel:234/425`、`SessionPanel:186`、
+   `JobLabPanel:485/634`）——重复项的每一条不是"一条通知"，归属是列表行的选中/状态档；两处内容卡
+   （`PrivacyNotice:181`、`WorkflowEvidence:57`）装的是正文不是回执。判据写成"块级 + 通栏 + 装一句话"，
+   数的时候必须按这个判据逐处点头，不能按"它也是 wash"点头。
+3. **图标按语气分派，且不给入参**：`BANNER_ICON` = celadon→`Info` / amber→`CircleAlert` /
+   seal→`TriangleAlert` / jade→`BadgeCheck`（`jade` 与 6.2-01 结果态同一只，同一份事实只该有一张脸）。
+   探针里四档的 path 签名逐档不同（seal 是那条三角 `m21.73 18-8-14…`，jade 是花环 + `m9 12 2 2 4-4`），
+   所以"一条已办好的绿条挂着警告圈"这种自相矛盾从此画不出来。**不做成 `icon` 旋钮**：语气到图标是这条
+   形状的固有部分，开了旋钮就是允许第 5 种语气自己挑图标，那才是第二套（§2.5）。
+4. **形状口径由活体定死**：四档共用的签名逐位相同——radius `7px`（`rounded-control`）、pad `8px 12px`
+   （`py-2 px-3`）、font `12px`（`text-xs`，散条里的 `text-[11px]` 一律升这一档）、
+   align-items `flex-start`（长句换行时图标不跟着往下掉）、图标 `svg` 宽 13px 且 `aria-hidden="true"`
+   （装饰件不进无障碍树）。超出外框的东西只走 `className`（`mt-2`/`mt-3`/`break-all`），
+   与 §3.9 第 35 片那条"className 只许放宽度/外边档"同一口径。
+5. **多子节点不另长第二种形状**：`ResumeEditor` 的关闭确认条里是"标题 + 说明 + 三只按钮"，
+   `AgentPauseCards` 的三张卡里是"抬头 + 读数 + 文本域 + 按钮"——一律用 `<div class="w-full">` 包住 children
+   塞进同一条 flex 外框。活体读到 Banner 内部 `[close-save, close-discard, close-stay]` 三只都在，
+   外框 class 与单行条逐字相同。
+6. **harness 锚点一条没断**：`Banner` 的 `markers` 就是为这一条开的口——`testid`、`error-code`、`stat`、
+   `script-receipt`、`takeover-subject/reason/step`、`pause-request-id/kind/round/missing/expires-at`、
+   `origin`、`deliver-job-id` 全部逐字保留（`WorkflowPanel` 那一条同时带 `reason=` 与 `markers`，
+   旧的 `data-takeover-reason` 没有因为换封装而消失）。改形状不改锚点是这条片子的硬约束：
+   断一条锚点就会让历史上所有 V 证据不可复核。
+7. **取证边界如实记下**：jade / celadon 两档**没有真消费者活体**。celadon 的唯一消费者是补充信息单
+   （要真跑一轮 agent 让入参校验失败才长出来），jade 四处全挂在外发或写盘动作上——§7.2 不许自动化碰真实
+   平台，也不许为了截图往这台机器写库。两档改由"页面里 `await import('/src/ui/controls.tsx')` 取 app 用的
+   那一份 `Banner` 渲四档各一次"的真模块探针 + 20/20 静态普查覆盖，与 6.2-10 当年"seal/jade 无活体样本、
+   改以 class 列表证据"同一条口径，不拿推测冒充按到过的按钮。
+8. **毡案那一侧的文字色不是运气**：四档探针读数在毡案是 `rgb(63,128,120)` / `rgb(138,95,10)` /
+   `rgb(192,57,31)` / `rgb(40,121,87)`，正是 `globals.css:274-290` 为"当文字用"压深后的四色；
+   真消费者两条（seal 导入失败 / amber 关闭确认）双主题各取一次，class 一字不差、翻面全由 token 决定。
+   对比度那条 6.1-06 已经 `[x]`，本片不重述。
+9. **本片不上机检**（照 §3.9 裁定 1「全换完再上机检」，且此刻也写不出干净规则）：`bg-*-wash` 本身不是
+   坏味道（芯片、选中行都要它），要禁的是"在 `src/ui/**` 之外把 wash 拼成横幅形状"，只能靠 `px-3 py-2`
+   这类 padding 签名近似——它会漏 `p-2`/`p-3`、又会误伤读数块。等 6.2-17 那一族也收进 L1，wash 的合法
+   引用点只剩 `src/ui/**`，机检才写成一句"`bg-*-wash` 只许出现在 `src/ui/**`"，且不留豁免清单。
+10. **普查顺出来的一族在射程外，另立 6.2-17**：同一形状还有一批**不带 wash 的中性手搓长条**
+    （`rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300`）**12 处**。
+    收它们要先答"中性回执算第 5 档 `neutral`，还是并入 celadon"——并入会让"等人在动"与"系统在说"共用一档色，
+    新增第 5 档又是给封装开一条稿上没有的口子（§2.6）。那是**语气归属裁定**不是样式改动，按 §0
+    「先停下来提出冲突」不自决，故只登记为 `[ ]`。
+11. **门禁与末态**：`pnpm typecheck` `TYPECHECK_EXIT=0`、`pnpm lint` `LINT_EXIT=0`（顺带清掉四只因换封装而
+    失去消费者的 lucide import：`JobLabPanel`/`LocatorLabPanel` 的 `SearchX`、`MetricsPanel` 的 `CircleAlert`、
+    `ResumeEditor` 的 `AlertTriangle`，§2.4）、`pnpm format:check` `FORMAT_EXIT=0`、`pnpm test` `TEST_EXIT=0`
+    （逐包核对通过数，无 failed）。六张成图入库前 `md5 -q | sort | uniq -c` 各 1、无重复。
+    取证期间注入的探针容器（`#probe-36-banner-grid`）收尾已移除（`probeGone=true`），编辑器只点 discard
+    不写盘，最后 reload 复位（`importErrorStill=false`）。全部动作只落在被 git 忽略的开发实例
+    `tmp/v6-userdata`，装机版未动。末态：墨案、zh-CN、视图 `workflow`。
