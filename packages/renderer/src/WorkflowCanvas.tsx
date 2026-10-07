@@ -291,6 +291,22 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   const flow = useReactFlow<OperatorNode>();
 
   /**
+   * 画布 chrome 的文案出口：库里那三只按钮的 `title`（悬停可见）与 `aria-label` 同源，
+   * 只认 `ariaLabelConfig` 这一条（`Controls` 没有 `labels` 参数，读 12.12.0 的编译产物确认）。
+   * 不传就是硬编码英文（实测：Zoom In / Zoom Out / Fit View），违反 §5.5；
+   * 记忆一份是因为库对每个变化的 prop 都重放一次 `store.setState`。
+   */
+  const chromeLabels = useMemo(
+    () => ({
+      'controls.ariaLabel': t('workflow.canvas.controls.panel'),
+      'controls.zoomIn.ariaLabel': t('workflow.canvas.controls.zoomIn'),
+      'controls.zoomOut.ariaLabel': t('workflow.canvas.controls.zoomOut'),
+      'controls.fitView.ariaLabel': t('workflow.canvas.controls.fitView'),
+    }),
+    [t],
+  );
+
+  /**
    * 命令栈只在 ref 里活着一份：它是可变对象（`undo` 会改内部指针），放进 state 会让每次编辑
    * 都新建一个实例、历史在两次渲染之间被丢掉。真正驱动渲染的是下面那份快照。
    */
@@ -831,6 +847,7 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           // 为什么不是 `currentTheme()`：本组件挂在 App.tsx 的模块常量 PANELS 下，主题开关改的是 App 自己的
           // state，子树拿到的还是同一个元素引用、不会重渲染，现读到的色就停在翻面之前那一档。
           colorMode={deskTheme}
+          ariaLabelConfig={chromeLabels}
           fitView
           // 滚轮交给页面而不是交给画布：库默认截获画布上的 wheel 做缩放，于是 420px 高的画布成了
           // 工作流视图里的一段"滚动墙"。读 `@xyflow/system` 编译产物确认这条出口（§6.2）：
@@ -844,7 +861,13 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-line-strong)" />
-          <Controls showInteractive={false} />
+          {/* 裁定 2：画布 chrome 保留库的 `<Controls>`，只用 Tailwind 把它按回令牌层——不自绘一套缩放按钮。
+              走的是库自己的变量出口（`dist/style.css` 里 `--xy-controls-*` 那一组，读编译产物确认），
+              而不是后代选择器硬盖：变量定在容器上、按钮继承，主题翻转由令牌自己完成，一份覆盖两套主题。 */}
+          <Controls
+            showInteractive={false}
+            className="[--xy-controls-button-background-color:var(--color-ink-800)] [--xy-controls-button-background-color-hover:var(--color-ink-750)] [--xy-controls-button-color:var(--color-slate-200)] [--xy-controls-button-color-hover:var(--color-slate-200)] [--xy-controls-button-border-color:var(--color-line-strong)] [--xy-controls-box-shadow:var(--shadow-lift)] overflow-hidden rounded-md"
+          />
         </ReactFlow>
       </div>
       {selectedSpec && selectedDescriptor ? (

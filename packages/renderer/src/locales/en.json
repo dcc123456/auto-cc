@@ -677,6 +677,12 @@
         "hint": "Node positions are placement only and never change plan semantics; pan and zoom with the canvas controls.",
         "open": "Operator graph",
         "close": "Hide operator graph",
+        "controls": {
+          "panel": "Zoom controls",
+          "zoomIn": "Zoom in",
+          "zoomOut": "Zoom out",
+          "fitView": "Fit view"
+        },
         "undo": "Undo",
         "redo": "Redo",
         "validate": "Validate before save",
