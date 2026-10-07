@@ -224,11 +224,43 @@ for (const name of localeNames) {
   }
 }
 
+// 10) 渲染层只留一套 UI 基础设施：`src/ui/**` 之外不许有裸原生控件（spec 6.2-14 的机检半边）
+//     按 2026-10-06 裁定，这条**等到 54 处全部迁完才写**（「全换完再上机检」+ 不留基线豁免清单）。
+//     第三十二片把最后一处（对话输入区 composer）接进 `DeskTextarea` 之后，全渲染层的裸控件归零，
+//     于是这一条从 `[纪律]` 升成 `[机检]`，从这片起不再有"某面板又长出一只手写 `<input>`"的余地。
+//     判据是 C 类而不是跑出来的：裸控件在运行期没有任何负面信号——它照样能点、照样能输入，
+//     只是那一格的描边/字号/焦点环由面板自己说了算，直到下一次令牌改档才集体露馅（6.2-10 正是这么爆的）。
+//     第三方 chrome 不落在这一条射程里：画布的 `<Controls>` 是 react-flow 的**组件标签**，
+//     不是原生 `<button>`，所以这条禁令天然不需要任何豁免名单（裁定原文要求的就是"不留基线豁免清单"）。
+const RAW_CONTROL_TAGS = ['button', 'input', 'select', 'textarea'] as const;
+const uiDir = path.join(rendererRoot, 'ui');
+for (const file of tsxFiles) {
+  // 原件目录**整棵子树**豁免（不是只豁免平铺的一层）：原件以后按形态分子目录，不该顺手把禁令解开。
+  if (!path.relative(uiDir, file).startsWith('..')) continue;
+  const raw = await readFile(file, 'utf8');
+  // 注释不参与判定（与 `check-dashboard-readonly.ts` 同一口径）：本项目的注释会写"不许再用裸 input"这类话。
+  // 先去块注释（含 JSX 的 `{/* … */}`，它常常跨行），再整行丢掉行注释。
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+  for (const tag of RAW_CONTROL_TAGS) {
+    const count = (code.match(new RegExp(`<(?:${tag})[\\s/>]`, 'g')) ?? []).length;
+    if (count > 0) {
+      failures.push(
+        `${path.relative(repoRoot, file)} 里有 ${String(count)} 只裸 <${tag}>：渲染层的控件只许出自 src/ui/** 原件（6.2-14）`,
+      );
+    }
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 console.log(
-  `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备）`,
+  `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
+    `src/ui/** 之外裸原生控件 0 只）`,
 );

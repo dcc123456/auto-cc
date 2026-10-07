@@ -365,15 +365,34 @@ export function Banner({ tone, reason, markers, className = '', children }: Bann
 }
 
 /**
+ * 字段档的尺寸档。**只有 `DeskTextarea` 用得上第二档**（用户 2026-10-06 裁定：对话输入区
+ * 「原件加一个尺寸档」而不是并入元信息档）——composer 是全渲染层唯一让人连续打字的格子，
+ * 11px 的元信息档读着像表格、敲着像填错地方，所以它单独占一档而不改别人。
+ * 这一档只换几何与底材（圆角 / 内边距 / 字号 / 底色），描边色、文字色、聚焦环一律共用，
+ * 否则同一件事又会长出两种画法（§2.5）。
+ */
+const FIELD_SIZE = {
+  /** 元信息档：面板里绝大多数格子，与 6.1 普查的统一桶同一签名。 */
+  meta: 'rounded-md bg-ink-950 px-2 py-1 text-[11px]',
+  /** 对话输入区那一档：8px 圆角、12px 字号、半透底（它压在聊天面板的底色上）。 */
+  composer: 'rounded-lg bg-ink-950/60 px-3 py-2 text-xs',
+} as const;
+
+/** 尺寸档的名字，也是对外接口。 */
+export type DeskFieldSize = keyof typeof FIELD_SIZE;
+
+/**
  * 校验失败必须**换掉**描边而不是在后面追加一条：Tailwind 生成的样式表按它自己的顺序排，
  * `border-seal` 与 `border-line-strong` 谁赢取决于令牌声明顺序，写在 class 属性里的先后不作数
- * （6.4 第十片量到的正是这一类「同族两条互相覆盖」）。
+ * （6.4 第十片量到的正是这一类「同族两条互相覆盖」）。同一道理，尺寸档也是在这**一条**串里换档，
+ * 不是往串尾再拼一条 `rounded-lg`——那等于把 6.2-10 的坑原地复现一次。
  * @param isInvalid 该格是否处于「必填未填 / 未过契约」那一态
+ * @param size 尺寸档，默认元信息档（只有文本域有第二档）
  * @returns 完整 class 串
  */
-const fieldClass = (isInvalid: boolean): string =>
-  `min-w-0 rounded-md border ${isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong'} ` +
-  'bg-ink-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-celadon/60';
+const fieldClass = (isInvalid: boolean, size: DeskFieldSize = 'meta'): string =>
+  `min-w-0 border ${isInvalid ? 'border-seal ring-1 ring-seal/40' : 'border-line-strong'} ` +
+  `${FIELD_SIZE[size]} text-slate-200 outline-none focus:border-celadon/60`;
 
 /** 行内编辑的输入框 class：青瓷描边是「正在编辑」的唯一信号，不加阴影不放大。 */
 const EDIT_INPUT =
@@ -494,16 +513,19 @@ export interface DeskTextareaProps
   value: string;
   /** 取值回调（收人话签名）。 */
   onValueChange: (value: string) => void;
+  /** 尺寸档，默认 `meta`；对话输入区用 `composer`（见 `FIELD_SIZE`）。 */
+  size?: DeskFieldSize;
 }
 
 /**
- * 多行文本域：与 `DeskField` 同一支 `FIELD_CLASS`，只多一条「不许斜着拖坏布局」。
+ * 多行文本域：与 `DeskField` 同一支 `fieldClass`，只多一条「不许斜着拖坏布局」与一档尺寸。
  * @param action `data-action` 凭据
  * @param label 上方说明文案（可省）
  * @param className 宽度/高度档
  * @param isInvalid 校验失败档（整圈朱砂）
  * @param value 当前文本
  * @param onValueChange 取值回调
+ * @param size 尺寸档（`meta` 元信息 / `composer` 对话输入区）
  * @param rest 原生 textarea 属性透传（`rows`/`spellCheck`/`data-*`……）
  * @returns 文本域；带 `label` 时套一层 `<label>`
  */
@@ -514,6 +536,7 @@ export function DeskTextarea({
   isInvalid,
   value,
   onValueChange,
+  size = 'meta',
   ...rest
 }: DeskTextareaProps) {
   const field = (
@@ -521,7 +544,7 @@ export function DeskTextarea({
       data-action={action}
       value={value}
       onChange={(event) => onValueChange(event.target.value)}
-      className={`${fieldClass(isInvalid === true)} resize-none leading-relaxed ${className}`}
+      className={`${fieldClass(isInvalid === true, size)} resize-none leading-relaxed ${className}`}
       {...rest}
     />
   );

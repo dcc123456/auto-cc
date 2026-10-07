@@ -26,7 +26,7 @@ import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
-import { DeskButton, DeskSegmented } from './ui/controls';
+import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -408,14 +408,16 @@ export function ChatPanel() {
 
       {/* 流式期间只禁用发送按钮，输入区一直能用（spec 1.11-13：运行中要能打出「停一下」）。 */}
       <footer className="border-t border-line px-4 py-3">
-        <textarea
+        <DeskTextarea
+          action="chat-input"
+          size="composer"
           data-testid="chat-input"
           rows={2}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onValueChange={setDraft}
           onKeyDown={onKeyDown}
           placeholder={t('chat.inputPlaceholder')}
-          className="w-full resize-none rounded-lg border border-line-strong bg-ink-950/60 px-3 py-2 text-xs text-slate-100 outline-none focus:border-celadon/60"
+          className="w-full"
         />
         <div className="mt-2 flex items-center gap-2">
           <DeskButton
