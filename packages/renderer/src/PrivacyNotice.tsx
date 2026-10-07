@@ -162,7 +162,14 @@ export function PrivacyNotice({ onClose, isReopened }: PrivacyNoticeProps) {
               })}
             </p>
           )}
-          <DeskButton action="privacy-acknowledge" variant={isReopened ? 'ghost' : 'amber'} onClick={onClose}>
+          <DeskButton
+            action="privacy-acknowledge"
+            variant={isReopened ? 'ghost' : 'amber'}
+            // 09 稿浮层纪律第 2 行的"焦点落在默认安全动作"只在**重看**那一次给：
+            // 首启动那一屏唯一的动作就是写下表态，把焦点自动交给它等于允许一次误按 Enter 替用户点头。
+            autoFocus={isReopened}
+            onClick={onClose}
+          >
             <ShieldCheck size={14} />
             {isReopened ? t('privacy.close') : t('privacy.acknowledge')}
           </DeskButton>

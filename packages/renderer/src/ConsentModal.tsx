@@ -75,7 +75,7 @@ export function ConsentModal({ platform, view, busy, error, onGrant, onDeny }: C
       tone="seal"
       footer={
         <>
-          {/* 焦点落在默认安全动作（09 稿浮层纪律第 5 行）：没读清楚之前唯一不该发生的是一次外发。
+          {/* 焦点落在默认安全动作（09 稿浮层纪律表第 2 行）：没读清楚之前唯一不该发生的是一次外发。
               「先不启用」什么都不发，所以退成 ghost——拒绝不该被涂成危险色（与岗位屏的拒绝同一口径）。 */}
           <DeskButton action="consent-deny" variant="ghost" autoFocus disabled={busy} onClick={onDeny}>
             <X size={14} />

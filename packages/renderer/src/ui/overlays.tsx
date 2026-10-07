@@ -1,6 +1,6 @@
 import { BadgeCheck, CircleAlert, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { clearDeskToast, useDeskToast } from '../deskToast';
 
 /**
@@ -14,63 +14,169 @@ const MODAL_WIDTH = { '480': 'w-[480px]', '560': 'w-[560px]', '640': 'w-[640px]'
 const SCRIM = 'fixed inset-0 z-40 bg-scrim';
 
 /**
- * 浮层层级（09 稿「打扰度递增」那条序）：一次 Esc 只关最上层那一只，不许一塌到底（纪律表第 4 行）。
- * toast 10 < 抽屉 20 < 弹窗 30。数值本身就是关闭优先级，谁都不许绕开这张表自己挂监听。
+ * 浮层层级（09 稿「打扰度递增」那条序）：一次 Esc 只关最上层那一只，不许一塌到底（纪律表第 4 行），
+ * 焦点环同样只属于最上层那一层（第 2 行）。toast 10 < 抽屉 20 < 弹窗 30。
+ * 数值既是关闭优先级也是焦点归属，谁都不许绕开这张表自己挂监听。
  */
-const ESC_TOAST = 10;
-const ESC_DRAWER = 20;
-const ESC_MODAL = 30;
-
-/** 当下挂着的 Esc 层：层级 → 收起动作。同一层只允许一只（抽屉/弹窗各自 ≤1 只，纪律表第 1 行）。 */
-const escLayers = new Map<number, () => void>();
-
-/** 全渲染层唯一的那只 keydown 监听；没有浮层挂着时必须摘掉，否则留着一条空转的全局监听。 */
-let escListener: ((event: KeyboardEvent) => void) | undefined;
+const LAYER_TOAST = 10;
+const LAYER_DRAWER = 20;
+const LAYER_MODAL = 30;
 
 /**
- * 登记一层 Esc 收起动作。
+ * 当下挂着的浮层：层级 → 收起动作 + 对话节点。同一层只允许一只（纪律表第 1 行）。
+ * `node` 为空的那一层不参与焦点环——09 稿把 toast 写成"通知不是对话框：不抢焦点"，
+ * 它没有对话节点，于是 Esc 归它收，Tab 不归它管。
+ */
+const overlayLayers = new Map<number, { close: () => void; node: HTMLElement | null }>();
+
+/**
+ * 焦点环里能站的格子：与浏览器默认 Tab 口径一致的那几类原生可聚焦元素。
+ * 本项目**不用原生 `disabled`**（按不动走 `aria-disabled` 三件套），所以闸门挡住的按钮**刻意留在环里**——
+ * 稿上要求人能把焦点停在那颗键上读到原因，把它踢出环就等于"按不动"退化成"摸不到"。
+ */
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
+
+/**
+ * 列出某个对话节点内可 Tab 到的元素，按 DOM 顺序（焦点环就按这个顺序转）。
+ * @param node 对话节点（`role="dialog"` 那一层）
+ * @returns 可聚焦元素列表；被卸载中、隐藏、`tabindex="-1"`、原生 `disabled`（第三方 chrome 的能力边界）都剔掉
+ */
+function focusableWithin(node: HTMLElement): HTMLElement[] {
+  const ring: HTMLElement[] = [];
+  for (const element of node.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+    if (element.tabIndex < 0 || element.hasAttribute('disabled')) continue;
+    if (element.getClientRects().length === 0) continue;
+    ring.push(element);
+  }
+  return ring;
+}
+
+/**
+ * 取当前最高那一级**带对话节点**的浮层：Tab 只往这一层里锁，比它低的层此时正被盖住。
+ * @returns 该节点；只有 toast 挂着时返回 null（不接管 Tab）
+ */
+function topmostTrappedNode(): HTMLElement | null {
+  let best: HTMLElement | null = null;
+  let bestLayer = 0;
+  for (const [layer, entry] of overlayLayers) {
+    if (entry.node && layer > bestLayer) {
+      bestLayer = layer;
+      best = entry.node;
+    }
+  }
+  return best;
+}
+
+/** 全渲染层唯一的那只 keydown 监听；没有浮层挂着时必须摘掉，否则留着一条空转的全局监听。 */
+let overlayListener: ((event: KeyboardEvent) => void) | undefined;
+
+/**
+ * 登记一层浮层（收起动作 + 可选的对话节点），并把那条全局监听立起来。
+ * Esc 与 Tab 共用同一张层级表：层级数字既是关闭优先级（纪律表第 4 行），也是焦点环的主人（第 2 行）。
  * @param layer 层级（上面那三个常量之一）
  * @param close 这一层被 Esc 命中时的动作
+ * @param node 这一层的对话节点；传空表示这层不管焦点（toast）
  * @returns 注销函数；层级空了就把全局监听一起摘掉
  */
-function registerEscLayer(layer: number, close: () => void): () => void {
-  escLayers.set(layer, close);
-  if (!escListener) {
-    escListener = (event) => {
-      if (event.key !== 'Escape' || escLayers.size === 0) return;
-      // 只放最上层那一只：低层留给人再按一次。
-      escLayers.get(Math.max(...escLayers.keys()))?.();
+function registerOverlayLayer(layer: number, close: () => void, node: HTMLElement | null = null): () => void {
+  overlayLayers.set(layer, { close, node });
+  if (!overlayListener) {
+    overlayListener = (event) => {
+      if (overlayLayers.size === 0) return;
+      if (event.key === 'Escape') {
+        // 只放最上层那一只：低层留给人再按一次。
+        overlayLayers.get(Math.max(...overlayLayers.keys()))?.close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = topmostTrappedNode();
+      if (!dialog) return;
+      const ring = focusableWithin(dialog);
+      // 环空（正文只读、一颗键都没有）：Tab 哪里都不去，否则默认口径会走进被盖住的背景。
+      // 非空时同样一律吃掉默认动作——浏览器的顺序按**整份文档**排，放过去就会跨出浮层。
+      event.preventDefault();
+      if (ring.length === 0) return;
+      const current = ring.indexOf(document.activeElement as HTMLElement);
+      const step = event.shiftKey ? -1 : 1;
+      // current 是 -1 表示焦点已经不在这一层里（环里那格刚被卸载、焦点掉回文档）：从端点重新起步。
+      const nextIndex =
+        current === -1 ? (event.shiftKey ? ring.length - 1 : 0) : (current + step + ring.length) % ring.length;
+      ring[nextIndex]?.focus();
     };
-    window.addEventListener('keydown', escListener);
+    window.addEventListener('keydown', overlayListener);
   }
   return () => {
-    escLayers.delete(layer);
-    if (escLayers.size === 0 && escListener) {
-      window.removeEventListener('keydown', escListener);
-      escListener = undefined;
+    overlayLayers.delete(layer);
+    if (overlayLayers.size === 0 && overlayListener) {
+      window.removeEventListener('keydown', overlayListener);
+      overlayListener = undefined;
     }
   };
 }
 
 /**
- * 浮层期间的公共副作用：按层级挂 Esc，弹窗那一层另外锁掉背后滚动。
+ * 浮层期间的公共副作用：按层级挂 Esc + 焦点环，弹窗那一层另外锁掉背后滚动，收起时把焦点还给触发它的控件。
+ *
+ * 「背后摸不到」走的是 09 稿给的第二个口子（等价的焦点陷阱）而不是 `inert`：
+ * `inert` 要挂在**背景容器**上，就得把浮层从面板里提到顶层（Portal），而第二十五片已经用活体判据确认
+ * 「`display:none` 的祖先把 `fixed` 后代一起藏掉」正是"同一时刻 ≤1 只遮罩"的保证（§3.8 的落点选择）。
+ * 鼠标这一路本来就摸不到——遮罩是 `fixed inset-0`，命中测试落在遮罩上；本片补的是键盘那一路。
  * @param open 是否开着（关了就不挂监听）
- * @param layer 这一层的 Esc 优先级
+ * @param layer 这一层的 Esc / 焦点优先级
  * @param onClose 收起动作
  * @param lockScroll 是否锁底层滚动——09 稿纪律表第 3 行只给弹窗锁，抽屉**不许锁**（要边看边改）
+ * @param dialogRef 对话节点的 ref；节点没挂上就不接管 Tab
  * @returns 无；只产生副作用
  */
-function useOverlayBehavior(open: boolean, layer: number, onClose: () => void, lockScroll = true) {
+function useOverlayBehavior(
+  open: boolean,
+  layer: number,
+  onClose: () => void,
+  lockScroll: boolean,
+  dialogRef: RefObject<HTMLElement | null>,
+) {
+  /**
+   * 触发这一层浮层的那格控件，**在渲染阶段**记下（只在开→关、关→开那一刻换值）。
+   * 等到 effect 里再读 `document.activeElement` 已经晚了：环里那格 `autoFocus`（纪律表第 2 行前半句）
+   * 早已把焦点带进弹窗，届时只能拿到一个马上要被卸载的节点，焦点还得回去。
+   * 键在 `open` 的跳变上而不是"取到一次就清一次"：StrictMode 的假卸载会跑一遍 effect 的 cleanup，
+   * 在那里清空就等于把触发者丢掉，真关的时候谁也还不了焦点。
+   */
+  const triggerRef = useRef<{ open: boolean; element: HTMLElement | null }>({ open: false, element: null });
+  if (triggerRef.current.open !== open) {
+    const focused = document.activeElement;
+    triggerRef.current = open
+      ? { open: true, element: focused instanceof HTMLElement && focused !== document.body ? focused : null }
+      : { open: false, element: null };
+  }
+
   useEffect(() => {
     if (!open) return;
-    const unregister = registerEscLayer(layer, onClose);
+    const unregister = registerOverlayLayer(layer, onClose, dialogRef.current);
     const previousOverflow = lockScroll ? document.body.style.overflow : '';
     if (lockScroll) document.body.style.overflow = 'hidden';
     return () => {
       unregister();
       if (lockScroll) document.body.style.overflow = previousOverflow;
     };
-  }, [open, layer, onClose, lockScroll]);
+  }, [open, layer, onClose, lockScroll, dialogRef]);
+
+  /**
+   * 纪律表第 2 行的后半句：关掉后焦点还给**触发它的那只控件**，否则人的位置随弹窗一起没了。
+   * 只在"文档已经没了焦点"时才还——`activeElement === body` 正是环内那格被卸载后的读数，
+   * 而 StrictMode 那次假卸载的 cleanup 里焦点还稳稳地在弹窗内，于是那一趟什么都不做（还早了就会把
+   * `autoFocus` 拽回背景，第二十五片的落点腿会被这条抵消）。
+   * 也不跟着 onClose 的引用变化重放：人正在环内走 Tab 时父层一次普通重渲染不该把焦点拽回背景。
+   */
+  useEffect(() => {
+    if (!open) return;
+    // 触发者在闭包里存住：cleanup 跑的时候渲染层已经把 triggerRef 换成"关"那一档了，现读会读到空。
+    const trigger = triggerRef.current.element;
+    return () => {
+      if (document.activeElement !== document.body) return;
+      trigger?.focus();
+    };
+  }, [open]);
 }
 
 export interface DrawerProps {
@@ -99,12 +205,14 @@ export interface DrawerProps {
  * @param children 内容
  */
 export function Drawer({ action, open, title, subtitle, onClose, width = '420', children }: DrawerProps) {
-  useOverlayBehavior(open, ESC_DRAWER, onClose, false);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useOverlayBehavior(open, LAYER_DRAWER, onClose, false, dialogRef);
   if (!open) return null;
   return (
     <>
       <div className={SCRIM} onClick={onClose} />
       <aside
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         data-action={`${action}-drawer`}
@@ -199,7 +307,8 @@ export function Modal({
   footer,
   children,
 }: ModalProps) {
-  useOverlayBehavior(open, ESC_MODAL, dismissOnScrim ? onClose : neverClose);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useOverlayBehavior(open, LAYER_MODAL, dismissOnScrim ? onClose : neverClose, true, dialogRef);
   if (!open) return null;
   const headingId = `${action}-modal-title`;
   const markerAttrs = Object.fromEntries(
@@ -208,15 +317,20 @@ export function Modal({
   return (
     <>
       <div className={SCRIM} {...(dismissOnScrim ? { onClick: onClose } : {})} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+      {/* 居中这一层是**整窗矩形**且压在遮罩之上（z-50 > z-40），默认会把指针事件整个接走：
+          于是 `dismissOnScrim` 那条退路只有 `element.click()` 走得通（合成 click 跳过命中测试），
+          真鼠标落在它身上而什么都不做（活体命中测试读数：背景点的 hit 就是这一层，不是 `.bg-scrim`）。
+          它自己不吃事件、只让卡片吃——遮罩重新拿回命中，背景那层依旧被遮罩盖死。 */}
+      <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-6">
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby={headingId}
           data-action={`${action}-modal`}
           {...markerAttrs}
           {...(testId ? { 'data-testid': testId } : {})}
-          className={`flex max-h-full max-w-full ${MODAL_WIDTH[width]} flex-col overflow-hidden rounded-sheet border bg-ink-850 shadow-sheet animate-rise ${
+          className={`pointer-events-auto flex max-h-full max-w-full ${MODAL_WIDTH[width]} flex-col overflow-hidden rounded-sheet border bg-ink-850 shadow-sheet animate-rise ${
             tone === 'seal' ? 'border-seal/55' : 'border-line-strong'
           }`}
         >
@@ -291,7 +405,8 @@ export function Toast() {
 
   useEffect(() => {
     if (!toast) return;
-    return registerEscLayer(ESC_TOAST, clearDeskToast);
+    // 只登记收起动作、**不传对话节点**：稿上写明 toast 不抢焦点，所以它进不了 Tab 环。
+    return registerOverlayLayer(LAYER_TOAST, clearDeskToast);
   }, [toast]);
 
   if (!toast) return null;
