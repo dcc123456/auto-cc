@@ -1,0 +1,88 @@
+6.2-14 第三十三片：画布 chrome 收进令牌层（裁定 2 的最后一腿）+ chrome 文案补 i18n
+生成时间：2026-10-07（本机 macOS / Apple Silicon，CDP 10222，渲染层 target `--url 5173`，视口 1200×772）
+被检改动：packages/renderer/src/WorkflowCanvas.tsx、packages/renderer/src/locales/{zh-CN,en}.json
+裁定依据：用户 2026-10-06 表态「保留 `<Controls>`，只用 Tailwind 覆盖它的样式」（plan §3.8 裁定 2）
+
+────────────────────────────────────────────
+一、取证（读编译产物，不读博客转述 · §6.2）
+────────────────────────────────────────────
+包：`@xyflow/react@12.12.0`（`node_modules/.pnpm/@xyflow+react@12.12.0_…/dist`）
+
+1. **样式出口是 CSS 变量，不是选择器**：`dist/style.css` 第 407–443、498–506 行里，
+   `.react-flow__controls-button` 的底/字/描边与 `.react-flow__controls` 的阴影一律写成
+   `var(--xy-controls-…, var(--xy-controls-…-default))` 的双层回退。因此 Tailwind 的
+   **任意属性**（`[--xy-controls-button-background-color:var(--color-ink-800)]` 这一类）定在容器上、
+   按钮继承，就是官方出口——不需要 `@layer`、不需要后代选择器硬盖，也不写一行 `.css`（§5.1）。
+2. **`className` 落在哪**：`dist/esm/index.js:4622` 把 `className` 并进外层
+   `Panel`（`.react-flow__controls`），按钮自己的 class 由 `ControlButton` 拼（4588 行）。
+   所以变量定义点与继承链都对。
+3. **文案出口只有一条**：同一行里三只按钮的 `title` 与 `aria-label` **同源**，
+   取的是 store 里的 `ariaLabelConfig['controls.zoomIn.ariaLabel']` 那一组；`ControlsProps`
+   （`dist/esm/types/component-props.d.ts:646`：`ariaLabelConfig?: Partial<AriaLabelConfig>`）
+   **没有** `labels` 参数，`children` 是**追加**而不是替换。默认值在
+   `@xyflow/system@0.0.83` 的 `defaultAriaLabelConfig`（`controls.ariaLabel: 'Control Panel'` 等，
+   键是**扁平的点号串**而不是嵌套对象）。⇒ 想把悬停文案变成中文，只有这一条路。
+4. **一条口径**：库对每个变化的 prop 会重放 `store.setState({ariaLabelConfig: merge(...)})`
+   （`index.js:314-315`，比较是引用比较），所以那份配置按 `t` 记忆（`useMemo`），
+   不每次渲染现造对象。
+
+────────────────────────────────────────────
+二、活体 BEFORE / AFTER（同一帧、同一元素，把 Tailwind 那串摘掉再读回来）
+────────────────────────────────────────────
+"BEFORE" 不是换代码拿的：探针先把 `.react-flow__controls` 的 className 还原成库自己的四个类名，
+读一次计算值，再原样写回（`restored:true` 两次都成立），所以两套主题都取到了真实的库默认值。
+
+墨案：
+  按钮底   rgb(43,43,43)  #2b2b2b（库的深色档）  →  rgb(19,28,35)   = `--color-ink-800` #131c23
+  按钮字   rgb(248,248,248)                      →  rgb(194,209,220) = `--color-slate-200` #c2d1dc
+  分隔线   1px rgb(91,91,91)                     →  1px rgba(150,178,196,.26) = `--color-line-strong`
+  外框阴影 rgba(0,0,0,.08) 0 0 2px 1px           →  0 10px 26px -14px rgba(0,0,0,.75) = `--shadow-lift`
+  外框圆角 0px                                  →  6px（= 字段桶那一只 `rounded-md`）
+毡案：
+  按钮底   rgb(254,254,254) #fefefe              →  rgb(242,239,230) = `--color-ink-800` #f2efe6
+  按钮字   rgb(27,34,40)（`color: inherit` 从 `.react-flow` 继承）→ rgb(51,60,68) = `--color-slate-200`
+  分隔线   1px rgb(238,238,238) #eee             →  1px rgba(38,44,48,.3) = 毡案 `--color-line-strong`
+  外框阴影 同墨案那条库默认                       →  0 8px 20px -12px rgba(38,44,48,.35) = 毡案 `--shadow-lift`
+  外框圆角 0px                                  →  6px
+
+**六个变量在两套主题下都逐位等于令牌**（`getComputedStyle(container).getPropertyValue('--xy-…')`
+对 `getComputedStyle(documentElement).getPropertyValue('--color-…')`）：
+  background=#131c23 / #f2efe6、hover=#18232b / #d4cebd（`--color-ink-750`）、
+  color=#c2d1dc / #333c44、hover 字色同基色（不做颜色跳变）、border=两条 line-strong、
+  box-shadow=两条 shadow-lift。
+尺寸未动：按钮 26×26、三只竖排、外层 26×78（库自己的几何，覆盖只换材质）。
+
+对比度（6.1-06）：图标字色对按钮底 **墨案 11.04:1 / 毡案 9.76:1**，悬停档 10.23 / 7.14，
+全部高于 ≥12px 正文的 4.5:1 门槛（这一档本来就不是正文，取它是为了以后有人换底时有基线可退）。
+
+────────────────────────────────────────────
+三、行为腿（覆盖样式之后按钮还得是能用的那三只）
+────────────────────────────────────────────
+视口缩放矩阵的 `a` 分量（`.react-flow__viewport` 的 computed transform）：
+  基线 1.374 → 点 `zoomin` 1.6488 → 点 `zoomout` 1.374 → 点 `fitview` 1.374（本来就已 fit）
+末态回到基线，未留下缩放偏移。三只按钮的 `disabled` 全 false（库在触到 min/max zoom 时会用
+**原生 `disabled`**，与本项目"按不动"三件套不同口径——那是能力边界而不是权限闸门，本片不改，
+记为 6.2-01 的相邻事项）。
+
+────────────────────────────────────────────
+四、chrome 文案补 i18n（取证第 3 条逼出来的，不是顺手加）
+────────────────────────────────────────────
+改造前（活体实测）：外层 `aria-label="Control Panel"`，三只 `title`/`aria-label` 为
+`Zoom In` / `Zoom Out` / `Fit View` —— 悬停可见的英文，违反 §5.5。
+改造后（`ariaLabelConfig` 只给 `controls.*` 四键，其余键保持库默认）：
+  zh-CN：缩放控件 / 放大 / 缩小 / 适应视图
+  en：  Zoom controls / Zoom in / Zoom out / Fit view
+（同一只 app 里点标题栏那颗语言开关来回各读一次，两次都是当前语言的文案。）
+新增 4 键 × 2 份语言包，`pnpm lint` 的键对齐与占位符校验同时通过。
+**仍留英文的一条**（记为待办，不在本片射程）：`node.a11yDescription.*` 与
+`edge.a11yDescription.default` 是屏幕阅读器朗读的节点/边操作说明，同一条出口、同样能覆盖，
+但那是 5 条要重新措辞的说明文，且不可见——按 §1.4 另开一片。
+
+────────────────────────────────────────────
+五、门禁与末态
+────────────────────────────────────────────
+`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`（含语言包键对齐与第 10 节裸控件禁令）、
+`pnpm test` `TEST=0`、`pnpm format:check` `FORMAT=0`——四道一次过，无首轮红。
+两张画面 md5 互异：`ff86cb89…`（`-dark.png`，墨案）/ `d8bd43ec…`（`-light.png`，毡案）。
+末态开发实例：墨案、语言 zh-CN、视图 `workflow`、算子图展开、视口缩放回到 1.374、无遮罩、
+未写任何用户数据（对活体的全部动作：切主题两次、切语言两次、开合算子图、点三只缩放按钮）。
