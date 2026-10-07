@@ -1,7 +1,10 @@
-import { BadgeCheck, CircleAlert, X } from 'lucide-react';
+import { BadgeCheck, CircleAlert, FolderOpen, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clearDeskToast, useDeskToast } from '../deskToast';
+import { useBridgeAction } from '../useBridgeAction';
+import { DeskButton } from './controls';
 
 /**
  * 浮层的两档宽度（09 稿「浮层纪律」表：420/520 给抽屉，480/560/640 给弹窗）。
@@ -368,6 +371,19 @@ export function Modal({
 const TOAST_LINGER_MS = 8000;
 
 /**
+ * 那颗 reveal 按钮文案里的系统目标名（spec 6.2-12）。稿上写「在访达 / 资源管理器中显示」，
+ * 而那是张不知道跑在哪个系统上的静态图；app 侧按 §5.7 把平台名当参数，只出现当前那一个名字。
+ * 现推自 `navigator.userAgent`，不为此多问一次 `shell.getStatus()`——那颗读数已由状态条的通道在报（§2.5）。
+ * @returns 语言包 `desk.revealTarget` 下的那一级键名
+ */
+function revealTargetKey(): 'macos' | 'windows' | 'linux' {
+  const agent = navigator.userAgent;
+  if (agent.includes('Mac OS X')) return 'macos';
+  if (agent.includes('Windows')) return 'windows';
+  return 'linux';
+}
+
+/**
  * 左下角浮层 toast（09 稿形态① 的 1-B）：贴在主区左下角的一行颜色，**不抢焦点**、同时只 1 只。
  *
  * 判据是稿里那句"只有当结果需要离开当前视野才能看到时"——产物是磁盘上的一份文件、
@@ -376,22 +392,34 @@ const TOAST_LINGER_MS = 8000;
  *
  * 三条行为各有出处：jade 8 秒自动收、seal 不收（等人读过，与 spec 6.2-02 的结果态同一条理由）、
  * 鼠标悬停暂停计时（稿里"鼠标移上去计时暂停"）、Esc 关掉（纪律表第 4 行，层级最低）。
+ * 宽度上限 420px 与抽屉最窄那一档同源，超长路径靠 `break-words` 折行而不是省略号——
+ * seal 那一格装的是失败原因，"必须人读过"不许被截掉（第二十四片 ⑧ 第 4 条欠的口径）。
  * @returns 当前那一只 toast；通道为空时不渲染任何东西
  */
 export function Toast() {
   const toast = useDeskToast();
+  const { t } = useTranslation();
   const [isHovered, setHovered] = useState(false);
+  // reveal 失败的那一句话挂在按钮的 `title` 上（悬停同时把计时钉住，与 6.2-02 同一条理由）。
+  const [revealError, setRevealError] = useState<string>();
   // 暂停时要记住还剩多少，恢复不许把 8 秒重新发一遍——否则悬停一次就等于不消失。
   const remainingRef = useRef(TOAST_LINGER_MS);
   const deadlineRef = useRef(0);
+  const revealLabel = t('desk.reveal', { target: t(`desk.revealTarget.${revealTargetKey()}`) });
+  // `read` 这一格传空 Promise：reveal 不回读数、toast 也没有要重读的面板状态，
+  // 但五态（转针 / 结果 / 回落）必须继续走 `useBridgeAction` 那一份实现，不在这里另长一套（§2.5）。
+  const { busy, resultOf, clearResult, run } = useBridgeAction(() => Promise.resolve());
 
-  // 新的一只顶上来：计时从头算（后来者顶掉先来的，稿里同一时刻只允许一只）。
+  // 新的一只顶上来：计时从头算（后来者顶掉先来的，稿里同一时刻只允许一只），
+  // 上一颗键的读数也跟着撤掉——结果态是按标签归属的，不清就会让新 toast 顶着旧 toast 的朱砂底。
   useEffect(() => {
     remainingRef.current = TOAST_LINGER_MS;
-  }, [toast]);
+    setRevealError(undefined);
+    clearResult();
+  }, [toast, clearResult]);
 
   useEffect(() => {
-    if (!toast || toast.tone !== 'jade' || isHovered) return;
+    if (!toast || toast.tone !== 'jade' || isHovered || revealError) return;
     deadlineRef.current = Date.now() + remainingRef.current;
     const timer = window.setTimeout(() => {
       remainingRef.current = TOAST_LINGER_MS;
@@ -401,7 +429,7 @@ export function Toast() {
       window.clearTimeout(timer);
       remainingRef.current = Math.max(0, deadlineRef.current - Date.now());
     };
-  }, [toast, isHovered]);
+  }, [toast, isHovered, revealError]);
 
   useEffect(() => {
     if (!toast) return;
@@ -409,15 +437,27 @@ export function Toast() {
     return registerOverlayLayer(LAYER_TOAST, clearDeskToast);
   }, [toast]);
 
+  /**
+   * 点第二段动作：把产物在系统文件管理器里选中（`shell.revealInFolder`，spec 6.2-12）。
+   * 五态全部复用 `useBridgeAction` 那一套，不为这颗键另长一份状态机（§2.5）。
+   */
+  const reveal = () => {
+    setRevealError(undefined);
+    void run(revealLabel, () => window.autoCC?.shell.revealInFolder(toast?.revealPath ?? ''), {
+      onError: (error) => setRevealError(error.message),
+    });
+  };
+
   if (!toast) return null;
   return (
     <div
       data-action={toast.action}
       data-toast={toast.tone}
+      {...(toast.revealPath ? { 'data-reveal-path': toast.revealPath } : {})}
       role="status"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`absolute bottom-[14px] left-[18px] z-30 flex items-center gap-2 rounded-control bg-ink-800 px-[13px] py-2 text-xs shadow-sheet animate-rise ${
+      className={`absolute bottom-[14px] left-[18px] z-30 flex max-w-[420px] items-center gap-2 rounded-control break-words bg-ink-800 px-[13px] py-2 text-xs shadow-sheet animate-rise ${
         toast.tone === 'jade' ? 'border border-jade/50 text-jade-ink' : 'border border-seal/50 text-seal-ink'
       }`}
     >
@@ -426,7 +466,25 @@ export function Toast() {
       ) : (
         <CircleAlert size={14} aria-hidden="true" />
       )}
-      {toast.message}
+      <span className="min-w-0">{toast.message}</span>
+      {/* 稿上 1-B 的第二段动作。只由通道里带了 `revealPath` 的那一只长出来：路径是主进程自己写的产物
+          才配这颗键，用户敲进来的任意路径归面板自己的回执管（plan §3.10）。`shrink-0` 保证窄容器里
+          被挤掉的永远是文案而不是这颗键。 */}
+      {toast.revealPath ? (
+        <DeskButton
+          action={`${toast.action}-reveal`}
+          variant="line"
+          compact
+          busy={busy === revealLabel}
+          result={resultOf(revealLabel)}
+          {...(revealError ? { title: revealError } : {})}
+          className="shrink-0"
+          onClick={reveal}
+        >
+          <FolderOpen size={12} aria-hidden="true" />
+          {revealLabel}
+        </DeskButton>
+      ) : null}
     </div>
   );
 }

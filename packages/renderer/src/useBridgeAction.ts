@@ -25,7 +25,7 @@ export interface BridgeActionHooks<T> {
  * 结果态（07 稿五态的最后两态）也挂在这一层而不是各面板自己计时：成功还是失败这里已经判过了
  * （`reply.ok`），再让每只按钮各长一套就是同一份事实的第二份副本（§2.5）。
  * @param read 本面板的快照读取函数；每个动作结束后都会调一次，界面不猜主进程当下的状态
- * @returns `busy`（正在执行的动作标签，用来禁用按钮防止重复触发）、`notice`、`setNotice`、`resultOf`（按标签取结果态）、`run`
+ * @returns `busy`（正在执行的动作标签，用来禁用按钮防止重复触发）、`notice`、`setNotice`、`resultOf`（按标签取结果态）、`clearResult`、`run`
  */
 export function useBridgeAction(read: () => Promise<unknown>) {
   const { t } = useTranslation();
@@ -65,5 +65,5 @@ export function useBridgeAction(read: () => Promise<unknown>) {
     [clearResult, markDone, markFailed, read, t],
   );
 
-  return { busy, notice, resultOf, run, setNotice };
+  return { busy, notice, resultOf, clearResult, run, setNotice };
 }

@@ -165,6 +165,9 @@ export function ResumePanel() {
           action: 'resume-export-toast',
           tone: 'jade',
           message: t('resume.exportToast', { path: value.path }),
+          // 稿上 1-B 的第二段动作（spec 6.2-12）：PDF 是主进程自己写进 userData/exports 的产物，
+          // 正好落在 reveal 口的边界内。备份那一只不挂这颗键——它的路径是用户敲的。
+          revealPath: value.path,
         });
       },
       describe: (value) => t('resume.exportReceipt', { pages: value.pages, bytes: value.bytes }),

@@ -32,6 +32,12 @@
       "quotaDenied": "{{action}} exhausted"
     },
     "desk": {
+      "reveal": "Show in {{target}}",
+      "revealTarget": {
+        "macos": "Finder",
+        "windows": "File Explorer",
+        "linux": "Files"
+      },
       "jobs": {
         "title": "Jobs",
         "hint": "Search listings, read them, pick the few worth a message"

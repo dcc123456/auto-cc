@@ -32,6 +32,12 @@
       "quotaDenied": "{{action}} 已用完"
     },
     "desk": {
+      "reveal": "在{{target}}中显示",
+      "revealTarget": {
+        "macos": "访达",
+        "windows": "资源管理器",
+        "linux": "文件管理器"
+      },
       "jobs": {
         "title": "岗位",
         "hint": "搜岗位、读 JD、挑出值得打招呼的那几个"

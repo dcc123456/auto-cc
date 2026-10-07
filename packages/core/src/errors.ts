@@ -164,6 +164,11 @@ export type AppErrorCode =
   // 不复用 `INVALID_ARGUMENT`，是因为这条的界面处置是「区间选择器回到上一档 + 上屏这一句原话」，
   // 而泛用的入参错通常只有一句提示；让非法区间静默查出 0，会让人把「这段时间没干活」当成读数。
   | 'FUNNEL_RANGE_INVALID'
+  // 在文件管理器里显示产物（spec 6.2-12）。两个码分开，因为界面的两句话不一样：
+  // 越界是「这颗键不该出现在这里」（入参不属于主进程写的产物），缺失是「产物已经不在了」（可以重新导出一次）。
+  // 不复用 `INVALID_ARGUMENT`：Electron 44 的 `showItemInFolder` 返回 `void`，成功与否只能由我们自己判。
+  | 'REVEAL_OUTSIDE_USER_DATA'
+  | 'REVEAL_TARGET_MISSING'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

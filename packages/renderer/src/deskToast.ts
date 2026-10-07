@@ -18,6 +18,13 @@ export interface DeskToastReading {
   tone: 'jade' | 'seal';
   /** 已翻译好的一句话（调用方把 i18n 结果递进来，界面不自己拼句子，§5.7）。 */
   message: string;
+  /**
+   * 产物在磁盘上的落点（spec 6.2-12：稿上那句「在访达 / 资源管理器中显示」的真去处）。
+   * 只该由**主进程自己写出来的产物**填（`userData/exports/**` 这一类）——`shell.revealInFolder`
+   * 的边界认这条路径，用户在输入框里敲的任意路径不该挂这颗键（越界是常态，
+   * 给一颗经常失败的按钮就是 6.2-06 那条"要说话"的反面，见 plan §3.10）。
+   */
+  revealPath?: string;
 }
 
 let current: DeskToastReading | undefined;

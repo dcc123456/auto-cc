@@ -1,8 +1,18 @@
 import path from 'node:path';
-import { app, BrowserWindow, Menu, nativeImage, Tray, WebContentsView, type WebContents } from 'electron';
-import { Service, type Context } from '@auto-cc/core';
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  nativeImage,
+  shell as electronShell,
+  Tray,
+  WebContentsView,
+  type WebContents,
+} from 'electron';
+import { AppError, Service, type Context } from '@auto-cc/core';
 import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
+import { resolveRevealTarget } from './reveal-target.js';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
 import { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema } from './update.js';
 import type {
@@ -156,6 +166,22 @@ export class ShellService extends Service {
   setKernelViewVisible = (visible: boolean): { kernelViewVisible: boolean } => {
     this.applyKernelViewVisible(Boolean(visible));
     return { kernelViewVisible: this.kernelViewVisible };
+  };
+
+  /**
+   * 在系统文件管理器里选中主进程刚写出来的那份产物（spec 6.2-12，09 稿 1-B 的第二段动作）。
+   *
+   * 这是全项目唯一一条"参数指向磁盘"的白名单口，所以边界判定写在 `reveal-target.ts`：
+   * 只认 `userData` 之内、且磁盘上真存在的路径。`showItemInFolder` 在 Electron 44 返回 `void`，
+   * 成功与否拿不到库的读数，因此判不过就抛结构化错误，而不是静默返回成功让界面按了什么都没发生。
+   * @param filePath 渲染层递来的绝对路径（只该是导出 PDF 这类主进程自己写的产物）
+   * @returns `{ revealed: true }`；越界 → `REVEAL_OUTSIDE_USER_DATA`，文件已不在 → `REVEAL_TARGET_MISSING`
+   */
+  revealInFolder = (filePath: string): { revealed: true } => {
+    const target = resolveRevealTarget(filePath, app.getPath('userData'));
+    if (!target.isAccepted) throw new AppError(target.code, target.reason, 'shell.revealInFolder', {});
+    electronShell.showItemInFolder(target.resolvedPath);
+    return { revealed: true };
   };
 
   /**

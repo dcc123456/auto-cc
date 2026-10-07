@@ -161,6 +161,7 @@ export type {
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
+  'shell.revealInFolder',
   'shell.probeMainCrash',
   'shell.probeRedact',
   'kernel.tree',
@@ -1800,6 +1801,13 @@ export type LlmCheckView = {
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
+  /**
+   * 在系统文件管理器里选中某个产物（09 稿 1-B 那句「在访达 / 资源管理器中显示」的去处，spec 6.2-12）。
+   * 实参必须是**主进程自己写出来的**产物绝对路径：边界只在 `app.getPath('userData')` 之内，
+   * 越界与目标不存在都以结构化失败上浮（`REVEAL_OUTSIDE_USER_DATA` / `REVEAL_TARGET_MISSING`），
+   * 因为 Electron 44 的 `showItemInFolder` 返回 `void`，成功与否拿不到库的读数。
+   */
+  'shell.revealInFolder': { args: [filePath: string]; returns: { revealed: true } };
   'shell.probeMainCrash': { args: []; returns: never };
   /** 仅开发态：写一条含敏感字段的日志，回读走 `log.tail` 与事件推送。 */
   'shell.probeRedact': { args: []; returns: { written: true } };
