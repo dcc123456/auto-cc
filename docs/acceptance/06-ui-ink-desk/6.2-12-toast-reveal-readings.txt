@@ -1,0 +1,91 @@
+6.2-12 toast 的第二段动作「在访达 / 资源管理器中显示」· 活体读数
+宿主：本机 macOS（Apple Silicon）dev 实例，AUTO_CC_USER_DATA_DIR=tmp/v6-userdata
+CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 2400×1544）
+落点：`packages/shared/src/bridge.ts`（白名单 + 签名）→ `packages/core/src/errors.ts`（两条码）
+      → `packages/shell/src/reveal-target.ts`（新纯模块）+ `packages/shell/src/index.ts`（`revealInFolder`）
+      → `packages/renderer/src/deskToast.ts` + `ui/overlays.tsx`（`Toast`）+ `ResumePanel.tsx` + 两份语言包
+真点口径：reveal 走的是 `electronShell.showItemInFolder`，**Electron 44 该 API 返回 `void`**
+      （`node_modules/electron/electron.d.ts:14042` 实测读数），成功与否拿不到库的读数，
+      所以"存在性 + 边界"这两判必须由我们自己判，界面这侧的凭据只能是**按钮自己的五态**与结构化错误。
+
+─────────────────────────────────────────────────────────────────────────────
+① 单测（纯模块 `resolveRevealTarget`，不碰 Electron）
+─────────────────────────────────────────────────────────────────────────────
+命令：`pnpm --filter @auto-cc/shell test` → `tmp/35-shell-test.log`
+│ ✓ src/reveal-target.test.ts (4 tests) —— `Tests 4 passed (4)`
+│ 四条分别覆盖：userData 内的真实文件被接纳；**同前缀兄弟目录** `<root>-evil` 被拒
+│   （这条是刻意的：判包含用 `path.relative`，不用 `startsWith`——`…/auto-cc` 会把 `…/auto-cc-evil` 一起放行）；
+│   userData 根目录本身 / 相对路径 / 空串 / 非字符串（`42`）一律拒；
+│   userData 内但磁盘上已不存在 → `REVEAL_TARGET_MISSING`（与越界的码分开，因为两句话不一样）。
+
+─────────────────────────────────────────────────────────────────────────────
+② 白名单与闸门（主进程侧，真 app 里跑）
+─────────────────────────────────────────────────────────────────────────────
+命令：`pnpm harness eval --url 5173 --expr-file tmp/35-reveal.js` → `tmp/35-reveal.log`
+│ 导出键在未播种时 `aria-disabled=true` · `data-disabled-reason=NO_SEED_DOC`；
+│   往 scratch 实例（`tmp/v6-userdata`，被 git 忽略，**未碰装机版用户数据**）种一份示例简历后 → 两个属性都变 null。
+│ 三条越界/缺参反例（直接经 `window.autoCC.shell.revealInFolder` 打）全部以**结构化失败**上浮，不抛穿 IPC：
+│   `/etc/hosts` → `REVEAL_OUTSIDE_USER_DATA`「只允许显示本机应用目录内的产物：/etc/hosts」
+│   `/tmp/auto-cc-evil/x.pdf` → `REVEAL_OUTSIDE_USER_DATA`（同句，带原地址）
+│   空串 → `REVEAL_OUTSIDE_USER_DATA`「没有要显示的文件」
+│ 三条都带 `path: "shell.revealInFolder"`，`ok:false` ⇒ §8.2 的白名单没有因为新键破口，
+│   且渲染层拿的是信封而不是异常（§9 的 2.1-12 补窗口径：`ok` 要现读）。
+
+─────────────────────────────────────────────────────────────────────────────
+③ toast 画面与五态（墨案）
+─────────────────────────────────────────────────────────────────────────────
+│ toast 本体：`data-toast="jade"` · `data-reveal-path="<userData>/exports/resume-demo-classic.pdf"`
+│ 尺寸：**宽 420 / 高 66**（420 = 09 稿浮层纪律表里抽屉最窄那一档同源，不是新造的数字；
+│   超长路径靠 `break-words` 折行，实测文案在容器里被 `…resume-dem` 处截断的是**探针读 textContent 的长度**，
+│   画面里是折成两行而不是省略号 —— 不用 `truncate`：seal 那一格装的是失败原因，"必须人读过"不许被截掉）
+│ 第二格键文案：`在访达中显示`（`desk.reveal` + `desk.revealTarget.macos`，平台名走插值，§5.7；
+│   语言名由 `navigator.userAgent` 现推，不额外开一条 `shell.getStatus()` 状态通道，§2.5）
+│ 真点成功那一腿（`afterRevealClick`）：`result="done"` · `busySpin=false` · `toastStillThere=true` ·
+│   `titleOnButton=null` · `activeBeforeClick="BODY"` —— **toast 不抢焦点**（09 稿第 517 行那句），
+│   点完键之后焦点仍在 body，没有被 reveal 按钮夺走。
+│ ⚠ 诚实边界：`showItemInFolder` 是否真的开出一扇访达窗口是**操作系统侧**的事实，
+│   CDP 与页面都度量不到，本片验收判据因此只写到"`result=done` 且没有结构化错误"为止，
+│   不声称"访达窗口已打开"。人要在场才能核的那一条留给装机版手动过一遍。
+
+─────────────────────────────────────────────────────────────────────────────
+④ 失败态：洗色 + 钉住（琥珀计时不走）
+─────────────────────────────────────────────────────────────────────────────
+命令：`tmp/35-fail-a.js`（把已导出的 PDF 从 scratch 目录删掉，制造 MISSING）→ `tmp/35-fail-a.log`
+      `tmp/35-fail-b.js`（点 reveal 后读数，再等过 8s 复读）→ `tmp/35-fail-b.log`
+│ `atClick`：`result="failed"` · `title="产物已不在磁盘上：…/resume-demo-classic.pdf"` ·
+│   `washBackground="rgba(226, 84, 58, 0.13)"`（`-wash` 的失败档，与五态那三件套同源）· `activeElement="body"`
+│ `after9s`：**逐字段与 atClick 完全相同** —— toast 仍在、失败原因仍在。
+│   09 稿 1-B「失败就把计时停掉，原因必须人读过」这条从此在 toast 上成立（原来只会 8s 后自己消失）。
+
+─────────────────────────────────────────────────────────────────────────────
+⑤ 本轮抓到并修掉的一个真缺陷：新 toast 继承了上一只的 failed 洗色
+─────────────────────────────────────────────────────────────────────────────
+现象：结果态按**动作标签**归属，而每只导出 toast 的标签一模一样（`在访达中显示`）。
+      于是一只失败的 toast 关掉后，下一只全新成功的 toast 一挂上，reveal 键直接是红的、
+      `title` 里还写着上一只那个已消失的路径 —— 界面在替一件没发生过的事说话。
+修法：`useBridgeAction` 把 `clearResult` 一并返回（此前只在内部用），`Toast` 在 `[toast]` 变化时
+      `setRevealError(undefined) + clearResult()`。仍是那一份五态实现，没有在 toast 里另长一套（§2.5）。
+命令：`tmp/35-inherit2.js`（一条脚本里连跑三腿：导出 → 删文件 → 点 reveal → 再导出）→ `tmp/35-inherit2.log`
+│ `toast1_success`：`tone="jade"` · `result=null` · `title=null`
+│ `toast1_afterReveal`：`result="failed"` · `title="产物已不在磁盘上：…"`（④ 那条现象在本腿复现）
+│ `toast2_fresh`：**`result=null` · `title=null` · `tone="jade"`** —— 继承没有了
+│ 反证（改之前）：`toast2_fresh` 那两格读到的是 `failed` 与上一只的路径，同一份探针脚本，只换实现。
+
+─────────────────────────────────────────────────────────────────────────────
+⑥ 截图口径两条（与 §9 的既有实测对上，不是本片的新发现）
+─────────────────────────────────────────────────────────────────────────────
+│ 窗口不在前台时 `animate-rise` 会把元素留在 `opacity:0`，于是"有 toast"和"没 toast"两张截图字节相同
+│   （本片撞过一次：`1a7a85f2…` 同时是失败态与成功态的读数）。取证据期间临时注入
+│   `<style id="probe-no-animation">`（`animation/transition: none !important`），**收尾已移除**：
+│   末态复读 `probePresent=false` · `toastPresent=false` · `theme="dark"` · `lang="zh-CN"` · `nav-workflow` 为 `aria-current="page"`。
+│ 成图入库前对同批跑 `md5 -q | sort | uniq -c`：三张各 1，无重复。
+│ 毡案那一张是**失败态**的毡案（`6.2-12-toast-reveal-failed-light.png`）：洗色在两套主题下都要成立，
+│   而成功态的毡案在视觉上与墨案只差底色，⑤ 的三腿读数是主题无关的。
+
+─────────────────────────────────────────────────────────────────────────────
+⑦ 落点边界：为什么知识库备份的那只 toast 不带 revealPath
+─────────────────────────────────────────────────────────────────────────────
+reveal 只服务**主进程自己写出来的产物路径**（PDF 导出：路径由 app 拼、由 app 落盘）。
+知识库恢复/备份的目标目录是**用户在输入框里敲的**，把它交给 `showItemInFolder` 等于把
+"选一条本机路径并打开它"这个能力接到一个用户可控的字符串上——那已经不是"显示我的产物"，
+边界与判据都得重写，所以那一只 toast 明确不带这个键（plan §3.10 第 4 段）。
