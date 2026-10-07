@@ -5,7 +5,7 @@
 > **C** = 命令/脚本机检；**U** = 单元/集成测试。状态：`[ ]` 未验 / `[x]` PASS / `[!]` BLOCKED（必须写原因）。
 > 证据归档：`docs/acceptance/06-ui-ink-desk/<条目ID>-*.png`；V 项无截图不得置 `[x]`（AGENTS.md §7.1/§7.4②）。
 
-> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 24 `[x]` / 15 `[!]` / 3 `[ ]`。
+> **条目统计**：42 条（6.1×9 / 6.2×15 / 6.3×8 / 6.4×4 / 6.5×6），当下状态位 26 `[x]` / 14 `[!]` / 2 `[ ]`（第三十三片关掉 6.2-14、第三十四片关掉 6.2-13，这一行的读数此前一直停在第二十九片的 24/15/3，按表内实际状态位逐行数过更正）。
 > 立计划时是 31 条（6.2×9 / 6.4×3 / 6.5×3），后八条是逐片验收里补出来的（6.2-10/11/12、6.4-04、6.5-04/05/06、6.1-09）。
 >
 > **本计划总基调**：验收的不是"能不能跑"，而是"界面有没有说谎"——
@@ -46,7 +46,7 @@
 
 | 6.2-11 | 白名单「加白」按 08 稿走**两步 armed**（09 稿形态⑤′）：第一颗只武装（`data-armed="true"` + 4 秒倒计时），第二颗才写库；「撤销」保持一次点（撤回是安全方向，不该加摩擦） | V | 第十一片只把颜色归属换到位（`add-exempt`=seal、`revoke-exempt`=amber，活体计算色见 `6.2-06-chat-agent-readings.txt`②），两步点击**没做**——它改的是点击语义（一颗键从一次点变成两次点），与样式片混在一次提交里违反 §1.4，且判据要另取（第一次点之后 `policy.exemptList` 读数必须不变）。原件 `ArmButton` 已在 `ui/controls.tsx` 待命，本片起它是唯一没有消费者的形态原件。**第十六片已落地**：`add-exempt` 换成 `ArmButton`（`action="add-exempt"` + `confirmAction="add-exempt-confirm"`），真点一次之后 DOM 里长出 `data-armed="true"` 的那只、`data-action` 已改名、文案变「再点一次才写入」、倒计时条 `wash 4s linear`，而 `data-exempt-count` 仍是 0、回执行不存在；等过四秒自动解除且名单仍为 0（`6.2-11-arm-button-readings.txt`②，双主题截图两张）。第二颗真写库那一腿**没按**（第五节第 1 条：按一次会往这台机器的免确认名单写进一条豁免，与"不为了读数改写用户实例"的口径冲突），`revoke-exempt` 仍是一次点的普通 `DeskButton`。**状态标 `[!]` 而不是 `[x]`**：「第一次点不写库」这一半已经活体取到，「第二次点会写库」那一半按下去就会往这台机器的名单里留下痕迹，按 §7.4 的"环境不具备就如实标 BLOCKED、禁止用推测写成 [x]"处理，等用户指名要免确认某只手时一并兑现 | [!] |
 | 6.2-12 | toast 的第二段动作「在访达 / 资源管理器中显示」要有真实去处：一条 `shell.showItemInFolder` 口 + 点击可达，而不是只报一个路径字符串 | C+V | 待做：`RENDERER_ALLOWLIST` 里没有这一条（第二十四片因此只报落点路径，没假装能打开，见 `6.2-04-toast-readings.txt`⑧）。补它要动主进程 shell service 与 IPC 白名单（不是样式片），顺带把 ⑧ 第 4 条欠的 toast 宽度上限一并定口径 | [ ] |
-| 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | 待做：第二十五片的负腿反而把这一条暴露出来了——切走视图时遮罩虽然画不出来，但渲染层目前没有 `inert`，键盘 Tab 仍能走进被盖住的表单格。补它要同时定「弹窗打开时哪一格拿焦点、关掉后焦点还给谁」，与 6.2-04 形态③④ 一起收 | [ ] |
+| 6.2-13 | 遮罩弹窗打开时背后那一层要**摸不到**：`inert`（或等价的焦点陷阱）+ Tab 走不进被盖住的控件，Shift+Tab 也回不去 | C+V | **第三十四片 closed**，走判据自己给的第二个口子（等价焦点陷阱），`inert` **不做**：它必须挂在背景容器上，那就要把浮层提到顶层（Portal），而"同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（§3.8 的落点裁定 + 第二十五片那条负腿实测）。Esc 与 Tab 从此共用**同一张层级表**（`overlayLayers`：层级 → `{close, node}`），焦点只锁最高那一级**带节点**的浮层；toast 那一级不带节点 ⇒ 稿上"toast 不抢焦点"由形状自己成立，不加开关。三条通道各自有主：鼠标 = 遮罩（命中测试实读 `fixed inset-0 z-40 bg-scrim`）/ 键盘 = 环（一律先 `preventDefault` 再自己 `focus()`：浏览器的 Tab 顺序按**整份文档**排，放过去就会跨出浮层）/ 滚轮 = 弹窗那层的滚动锁。「哪一格拿焦点、关掉后还给谁」两条同时定下：**落点**由调用方在安全动作上挂 `autoFocus`（`ConsentModal` 的 deny 早就有；第 6 只 `PrivacyNotice` 本片补 `autoFocus={isReopened}`，**首启动那一次不给**——那一屏唯一的动作就是写下表态，把焦点自动交给它等于允许一次误按 Enter 替用户点头）；**归还**的触发者在**渲染阶段**记进 ref（等 effect 现读已经晚了，`autoFocus` 早把焦点带进弹窗），且只在 `activeElement === body` 那一刻还 ——于是同时躲开 StrictMode 那次假卸载的 cleanup（实测：那一趟会把 `autoFocus` 拽回背景并清空触发者，真关时谁也没还）与人已经自己走开两种情况。活体两轮：第 6 只弹窗环 2 只、背景可 Tab 格子 **44 只**，正反向各 ×8 步全部 `inDialog=true` 且 `defaultPrevented=true`；⑤-1 签字弹窗环 3 只（含 `consent-grant` 那只 **aria-disabled 键刻意留在环里**：本项目不用原生 `disabled`，踢出环就等于让"按不动"退化成"摸不到"，人读不到原因）、背景 23 只一次都没走进去、Esc 与点遮罩都收不掉（三条退路一律不给那一只照旧）；换语言（整棵树重渲染、弹窗不重挂）焦点不动；关掉后 `returnedToTrigger=true`、overflow 复位；关掉后连按 Tab 不再被吃掉（那条全局监听摘干净）。毡案复测 `tabStillTrapped={prevented:true, stillInDialog:true}`。**顺手当场修掉两条原件缺陷**：① 居中那一层 `fixed inset-0 z-50` 压在遮罩之上、把整窗指针事件整个接走 ⇒ **「点遮罩收起」在真鼠标下从来没通过**（旧证据那格「点遮罩：关」是按 `scrim.click()` 记的，那方法测的是 onClick 挂没挂、测不到命中测试这一层；更正记在本片读数，旧文件不改），改成居中层 `pointer-events-none` + 卡片 `pointer-events-auto` 之后命中测试回到 `.bg-scrim`、真点可收；② 旧注释把焦点这条写成"纪律表第 5 行"，按 09 稿表格的实际行序它是**第 2 行**。抽屉那一侧共用同一条 hook，但 `Drawer` 至今零消费者 ⇒ 只有弹窗这一侧有活体，形态③④ 照旧欠（见 6.2-04）。全在 `6.2-13-focus-trap-readings.txt` + 两张画面（md5 `d9308a29…` 墨案 / `e382d4ff…` 毡案；程序化 `focus()` 在 Chromium 不保证命中 `:focus-visible`，实测 `focusVisible=false`，所以画面里没有那圈环，焦点归属一律以 `activeElement` 读数为凭） | [x] |
 | 6.2-14 | 渲染层只留**一套** UI 基础设施：`src/ui/**` 之外不许有自绘全屏遮罩，普查到的 54 处裸原生控件（`<input>` 30 / `<select>` 13 / `<textarea>` 6 / `<button>` 5）全部迁进原件，第三方 chrome 只留画布 `<Controls>`（保留组件、只用 Tailwind 覆盖样式）；机检按 2026-10-07 裁定**在全部迁完之后**才上（已于第三十二片 54/54 清零后写入 `check-renderer-conventions.ts` 第 10 节），在那之前这一条是 `[纪律]` + 本表逐片读数 | C+V | 遮罩腿 **2 → 0**（第二十六片，`PrivacyNotice` 收进 `Modal`，`Modal` 消费者 0 → 2）。控件腿**进 54 / 54 清零**（第二十七片 45 + 第二十八片 3 + 第二十九片 1 + 第三十一片 4 + **第三十二片 1**：两只行内披露键、自治档位那一支 JSX、左轨页签那一支、看板那四只、对话输入区 composer）：`src/ui/**` 之外新增七件原件（表单五件 `DeskField` / `DeskSelect` / `DeskTextarea` / `DeskCheck` / `DeskRange` + 形态两件 `DeskSegmented` / `DeskDisclosure`）。核心判据由活体兑现：全 DOM 29 只字段里 **28 只的计算值塌成同一签名** `rgba(150,178,196,.26)\|6px\|rgb(8,12,16)\|11px\|4px/8px`，268 只按钮**没有一只用原生 `disabled`**（`6.2-14-deskfield-unify-readings.txt`）。**仍 `[!]`**：卡住的那两条**待用户表态已在 2026-10-06 由用户逐字裁定**——看板 =「放宽判据 1，允许引原件」（→ 第三十一片把那 4 处全部迁完，机检 5.8-02 同步改成五条并补三条反向验证）+ 对话输入区 =「原件加一个尺寸档」（→ 下一片动）；基线外新出的 5 处（并行会话落地的 `ModelSettingsPanel.tsx`，`select` 2 + `input` 3）**已在第三十片全部迁完 → 0**，并当场拆掉 `ui/controls.tsx` 的 `export const FIELD_CLASS`（换完最后五处后它零消费者，§2.4 即删；手抄档口物理消失，第三份复制再也写不出来）。**当下渲染层剩下的裸控件 = 0 处**（composer 已在第三十二片接进 `DeskTextarea` 的 `size="composer"` 档，几何逐位不变、两处刻意归一与两条行为腿全在 `6.2-14-chat-composer-readings.txt`）；逐文件复算口径（剥注释后 `src/ui/**` 之外只命中 `ChatPanel.tsx` 1 处）见 `6.2-14-metrics-panel-readings.txt` 第五节。即"54 处清零"这一腿已清零。机检**已按裁定在第三十二片写入**（`check-renderer-conventions.ts` 第 10 节，在 `pnpm lint` 链内；三条注入探针各自验证：四只裸控件 → 逐 tag 报出 `EXIT=1`、四个 tag 全写在注释里 → `EXIT=0`、原件子树本来就带裸控件而整体绿 → 豁免腿成立），本条从此是 `[机检]`，收尾自检的④不再靠人工声称。**最后一条已到货（第三十三片）**：画布 `<Controls>` 按裁定 2 保留组件，只用 Tailwind 的任意属性把库自己的 `--xy-controls-*` 变量出口按回令牌层——两套主题各取一次"把 class 摘掉再读回来"的 BEFORE/AFTER（按钮底 `#2b2b2b` / `#fefefe` → `--color-ink-800`，分隔线 `#5b5b5b` / `#eee` → `--color-line-strong`，外框圆角 0 → 6px，阴影 → `--shadow-lift`），几何 26×26 一根手指没动，三只按钮的行为腿逐条兑现（视口缩放 1.374 → 1.6488 → 1.374 → fitView 1.374）。顺带补上取证逼出的一条 §5.5 缺口：chrome 的悬停 `title` 原本写死在库里（活体读到 Zoom In / Zoom Out / Fit View），现经 `ariaLabelConfig` 走双语四键（缩放控件 / 放大 / 缩小 / 适应视图 ↔ Zoom controls / Zoom in / Zoom out / Fit view）。读数与画面见 `6.2-14-canvas-controls-readings.txt` + `6.2-14-canvas-controls-{dark,light}.png`（md5 `ff86cb89…` 墨案 / `d8bd43ec…` 毡案，互异）。**本条至此四条腿齐**：自绘遮罩 2 → 0、裸控件 54 → 0、机检落地、第三方 chrome 归位；仍留的相邻事项都不在本条射程（`node.a11yDescription.*` 那五条屏幕阅读器说明仍是库内英文，另开一片；库在触到 min/max zoom 时用原生 `disabled`，那是能力边界不是权限闸门，归 6.2-01 口径） | [x] |
 | 6.2-15 | 三种按钮形态要有 L1 原件，不许在面板里各写一份：**页签**（导航档：选中是下边线 + 文字提亮，非六档按钮语义）、**分段控件**（互斥档位、组内共边、选中实底）、**行内披露**（只有下划线文案的"看证据"那类，无框无底）。补齐这三件才能清零 6.2-14 剩下的裸 `<button>` | C+V | **第二十八片落了后两件**：`DeskSegmented`（消费者 = `ChatPanel` 自治档位三格）与 `DeskDisclosure`（消费者 = `GapPanel` 证据行、`GeneratePanel` 出处行）。活体三档全到账（`6.2-15-segmented-disclosure-readings.txt`）：选中·非风险 `bg rgb(24,35,43)`、未选中 `bg rgba(0,0,0,0)` + `rgb(108,128,145)`、**选中·风险 `bg rgba(226,84,58,.13)` + `ring-inset seal/35`**（只有"选上它就把风险抬高"那一格涂朱砂），毡案同一条原件翻面；全 app `button:not([data-action])` **3 → 0**，渲染层最后一处原生 `disabled`（那三格原先走原生禁用，鼠标事件不派发、`title` 里的理由读不到）随之消失。**两处如实欠着**：① `DeskDisclosure` 的活体腿受阻——`gapRows 6 / gapEvidence 0` + `data-gap-empty="no_entities"`，开发实例知识库是空的，正文一行都渲染不出来，补它要往用户的库里同步一份简历文档（不改写用户实例；受阻态画面 `6.2-15-disclosure-gap-blocked-dark.png`）；② `DeskSegmented` 的**在途档**取不到——纯本机 IPC 在 4ms 内返回（1/4/10ms 三张快照全为静止态），没有为了这一帧去发一条会写进会话的消息，改由第十五片同款"实现只有一条出路"的证据覆盖。**第三件页签已在第二十九片落地**：`DeskTab`（上一轮 `App.tsx` 被并行的模型设置改动占着，不动他人当场在改的文件，故顺延一片）。三件形态原件至此**齐**（页签 / 分段 / 行内披露），`src/ui/**` 之外的裸 `<button>` **5 → 0**。页签的活体腿一次取全（`6.2-15-tab-nav-readings.txt`）：选中 = 贴在轨道左缘的 `3×17` 短线（`translate: 0px -50%` 与按钮中线逐位重合）+ 底色提一档 + 文字提亮，短线走 **celadon 不走稿上的朱砂**（plan §5 归属表：seal 只给外发/风险，"此刻在哪一格"不是风险），低一档那格用 `slate-500`；未选中档短线是透明而非不渲染，所以六格文字起始位一字不移；`data-view` / `data-action` / `[data-testid="view-tabs"]` 三支旧锚点逐字保留，新增 `data-selected` 与 `aria-current="page"`；导航六格里 `borderLeftWidth !== 0px` 的是 **0 只**（旧的 `border-l-2` 没有与新短线并存）。双主题四档计算色 + 八支对比度全过（毡案短线 3.58:1 是六条里最紧的一支，另有底色与文字两条冗余通道）。**本条仍 `[!]`**，欠的两支都不是几何问题：① `DeskDisclosure` 的活体正腿（知识库为空，见上）；② `DeskSegmented` 的在途档（4ms 内返回，见上）。另记一条刻意没照稿写的：稿上 `.nav-item:active { translateY(1px) }` 属 6.2-01 五态规则，那一整条还欠真鼠标腿，单独给页签加 `active:` 会把 6.2-01 拆成半件，故记在 6.2-01 名下一起收 | [!] |
 
@@ -1662,3 +1662,54 @@ bg-ink-950 px-2 py-1 text-[11px]` 与原件内部 `fieldClass` 同源，所以 c
    `pnpm test` `TEST=0`、`pnpm format:check` `FORMAT=0`，四道一次过。画面两张 md5 互异
    （`ff86cb89…` 墨案 / `d8bd43ec…` 毡案）。末态开发实例：墨案、语言 zh-CN、视图 `workflow`、
    算子图展开、视口缩放回到 1.374、无遮罩、未写任何用户数据。
+
+## 6.2 第三十四片落地记录（6.2-13：遮罩期背后摸不到 = 焦点陷阱 + 焦点归还）
+
+1. **判据走的是它自己给的第二个口子**：`inert` **不做**。理由是结构性的而不是偏好——`inert` 必须挂在
+   **背景容器**上，而浮层按 §3.8 的裁定就渲染在面板里（不提 `App.tsx`、不引 Portal），因为
+   "同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（第二十五片负腿实测）。
+   三条通道各自有主：鼠标 = 遮罩（`fixed inset-0`，命中测试实读 `.bg-scrim`）、键盘 = 本片的环、
+   滚轮 = 弹窗那层的滚动锁。
+2. **Esc 与 Tab 合成同一张层级表**（`overlayLayers`：层级 → `{close, node}`，取代原先只装收起动作的
+   `escLayers`）：焦点只锁**最高那一级带节点**的浮层，toast 那一级**不带节点** ⇒ 稿上"toast 不抢焦点"
+   由形状自己成立，不需要开关，也不留第二条全局监听（§2.5）。三个 `ESC_*` 常量随之改名 `LAYER_*`。
+3. **环的三条口径**：一律先 `preventDefault` 再自己 `focus()`（浏览器的 Tab 顺序按**整份文档**排，
+   放过去就会跨出浮层）；焦点掉回文档（环内那格被卸载）时按端点重新起步；环的名单**不排除
+   `aria-disabled` 那几只**——本项目不用原生 `disabled`，闸门挡住的键留在环里人才停得上去读 `title`
+   里那句原因（07 稿④），踢出环就等于让"按不动"退化成"摸不到"。
+4. **「哪一格拿焦点、关掉后还给谁」两条同时定下**：落点 = 调用方在安全动作上挂 `autoFocus`
+   （`ConsentModal` 的 deny 早就有；第 6 只 `PrivacyNotice` 本片补 `autoFocus={isReopened}`，
+   **首启动那一次不给**——那一屏唯一的动作就是写下表态，把焦点自动交给它等于允许一次误按 Enter
+   替用户点头）；归还 = 触发者在**渲染阶段**记进 ref（等 effect 现读已经晚了，`autoFocus` 早已把焦点
+   带进弹窗），且只在 `activeElement === body` 那一刻还。
+5. **StrictMode 那一腿是本轮踩出来的真缺陷**：第一版把归还写在同一条 effect 的 cleanup 里，
+   于是 React 19 dev 那次假卸载的 cleanup ① 把 `autoFocus` 刚带进弹窗的焦点拽回背景、
+   ② 把记下的触发者清空，真关时谁也没还。活体读数：`landing.active = button:privacy-open`
+   （而不是 `privacy-acknowledge`）、`afterClose.active = body`。修法两半：
+   触发者换成键在 `open` 跳变上的 `{open, element}`（假卸载不清空），归还单独立一条 `[open]` 的 effect
+   并加 `activeElement === body` 那道闸（假卸载那一趟焦点还在弹窗内，于是什么都不做）。
+   修完 `landing.active = button:privacy-acknowledge`、`returnedToTrigger=true`。
+6. **顺手当场修掉一条原件缺陷：「点遮罩收起」在真鼠标下从来没通过**。居中那一层
+   `fixed inset-0 z-50 flex items-center justify-center p-6` 是**整窗矩形**且压在遮罩之上（z-50 > z-40），
+   默认把指针事件整个接走，而它自己没有 `onClick` ⇒ 遮罩那只 `onClick` 永远收不到真鼠标。
+   命中测试实读背景点的 hit 就是这一层。改成居中层 `pointer-events-none` + 卡片 `pointer-events-auto`
+   之后背景点的 hit 回到 `fixed inset-0 z-40 bg-scrim`，轮 B 对"真鼠标会命中的那只元素"派发 click →
+   `closed=true`。旧证据 `6.2-05-privacy-modal-readings.txt` 第④节那格「点遮罩：关」是按
+   `scrim.click()` 记的——方法测的是"这只元素挂没挂 onClick"，测不到命中测试那一层（§9 ⑬），
+   更正记在这里、旧文件不改。这一条与第二十五片那条「`w-[560px]` 从来没有生效过」同形。
+7. **活体两轮 + 毡案复测**（`6.2-13-focus-trap-readings.txt`）：第 6 只弹窗环 2 只、背景可 Tab 格子
+   **44 只**，正反向各 ×8 步全部 `inDialog=true` 且 `defaultPrevented=true`；⑤-1 签字弹窗环 3 只
+   （`consent-accept` + `consent-deny` + `aria-disabled=true` 的 `consent-grant`）、背景 23 只一次都没
+   走进去、`closeX=false`、Esc 与点遮罩都收不掉（三条退路一律不给那一只照旧成立）；换语言（整棵树
+   重渲染、弹窗不重挂）焦点不动；关掉后 `returnedToTrigger=true` 且 overflow 复位；关掉后连按 Tab
+   不再被吃掉（那条全局监听摘干净）。毡案 `tabStillTrapped={prevented:true, stillInDialog:true}`。
+   画面两张 md5 互异（`d9308a29…` 墨案 / `e382d4ff…` 毡案）；程序化 `focus()` 不保证命中
+   `:focus-visible`（实测 `focusVisible=false`、`boxShadow=none`），所以画面里没有那圈环，
+   焦点归属一律以 `activeElement` 读数为凭。
+8. **门禁与射程**：`pnpm typecheck` `TC=0`、`pnpm lint` `LINT=0`、`pnpm format:check` `FORMAT=0`、
+   `pnpm test` `TEST=0`（各包通过数逐包核对，无 failed）。零新增文案（本片不写界面文字，
+   `autoFocus` 是行为不是文案）；顺带更正一处旧引用：`ConsentModal` 的注释把焦点这条写成
+   "纪律表第 5 行"，按 09 稿表格实际行序是**第 2 行**。抽屉那一侧共用同一条 hook，但 `Drawer`
+   至今零消费者 ⇒ 只有弹窗这一侧有活体，形态③④ 照旧欠（6.2-04）。
+   末态开发实例：墨案、语言 zh-CN、视图 `workflow`、无遗留遮罩（`scrim=0`）、`body.overflow` 空、
+   探针填过的关键词草稿已清回空串、BOSS 仍未签字、隐私声明的确认时间戳未被改写。

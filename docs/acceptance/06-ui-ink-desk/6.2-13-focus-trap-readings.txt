@@ -1,0 +1,98 @@
+6.2-13 遮罩弹窗打开时背后那一层摸不到（焦点陷阱 + 焦点归还）· 活体读数
+宿主：本机 macOS（Apple Silicon）dev 实例，AUTO_CC_USER_DATA_DIR=tmp/v6-userdata
+CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 2400×1544）
+落点：`packages/renderer/src/ui/overlays.tsx`（`Modal` 与 `Drawer` 共用的那一只 hook），零主进程能力。
+命令：`pnpm harness eval --url 5173 --expr-file tmp/34-focus.js`（第 6 只弹窗 PrivacyNotice，Esc 与点遮罩两条收法）
+      `pnpm harness eval --url 5173 --expr-file tmp/34-consent.js`（⑤-1 风险签字弹窗，三条退路一律不给那一档）
+判据口径：环的移动由原件自己显式 `focus()` 完成、不吃浏览器默认口径，所以 Tab 用**合成 keydown** 派发即可复现；
+每次派发同时读 `defaultPrevented`（证明原件确实吃掉了"按文档顺序走出去"那条路）。
+
+─────────────────────────────────────────────────────────────────────────────
+① BEFORE（改之前同一条探针的实测，两轮）
+─────────────────────────────────────────────────────────────────────────────
+第二十五片那条负腿在这一片被复现成"缺陷本体"，另加两条当场暴露的：
+│ 落点：`landing.active = button:privacy-open` —— 焦点根本没进弹窗（`PrivacyNotice` 那一只没有 `autoFocus`）
+│ Tab：正向 8 步全部 `inDialog=true` 是**改完之后**的读数；改之前焦点停在弹窗外，第一次 Tab 就走进背景
+│ 命中测试：背景点的 hit = `fixed inset-0 z-50 flex items-center justify-center p-6`（居中容器，**不是** `.bg-scrim`）
+│           ⇒ `dismissOnScrim` 那条退路只有 `element.click()` 走得通（合成 click 跳过命中测试，§9 ⑬），
+│             真鼠标落在居中容器上而它没有 onClick ⇒ **点遮罩收起从来没通过**
+│           这一条与第二十五片那条「`w-[560px]` 从来没有生效过」同形：零消费者的判据等于没写过的判据。
+│           旧证据 `6.2-05-privacy-modal-readings.txt` 第④节那格「点遮罩：关」是按 `scrim.click()` 记的，
+│           方法本身没错（它测的是"这只元素挂没挂 onClick"），但它测不到命中测试这一层——更正记在这里，旧文件不改。
+│ 焦点归还：`afterClose.active = body`（`returnedToTrigger: false`）——还焦点这件事压根没有实现
+│ StrictMode 那一腿：`autoFocus` 加上之后仍然 `landing.active = button:privacy-open`。原因是 React 19 dev 的
+│   假卸载会跑一遍 effect cleanup，那一趟把焦点拽回背景（正好抵消 `commitMount` 的 `autoFocus`），
+│   并且把记下的触发者清空 ⇒ 真关的时候谁也没还。修法见下面第⑤节。
+
+─────────────────────────────────────────────────────────────────────────────
+② 轮 A：第 6 只弹窗（`PrivacyNotice` 重看态，三条退路全给）· AFTER
+─────────────────────────────────────────────────────────────────────────────
+│ 落点：`active = button:privacy-acknowledge` · `inDialog = true`（重看态那一只脚注键就是它的安全动作）
+│       `body.style.overflow = "hidden"`（滚动锁不变）· `dialog = privacy-modal`
+│ 环：2 只 = [`privacy-close`(✕), `privacy-acknowledge`]；**背景可 Tab 格子 44 只**
+│ 正向 Tab ×8：`allInsideDialog=true` · `allPrevented=true` · 路径 close→acknowledge 交替两圈半
+│ 反向 Shift+Tab ×8：同上，`allInsideDialog=true` · `allPrevented=true`
+│ 命中测试：背景点 hit = `fixed inset-0 z-40 bg-scrim`（遮罩自己）；卡片中心 hit 在 dialog 内（`privacy-modal`）
+│ 父层重渲染：换语言（zh-CN→en，整棵树重渲染、弹窗不重挂）→ `before=after=button:privacy-acknowledge`
+│       `unchanged=true` · `dialogStillOpen=true`（归还逻辑不跟着 `onClose` 的引用变化重放）
+│ Esc 关：`dialog=false` · `active=button:privacy-open` · `returnedToTrigger=true` · overflow 复位为空
+│ 反证（监听摘干净）：关掉后连按三次 Tab → `anyPrevented=false` · `anyForcedIntoDialog=false`
+│ 点遮罩那一路（轮 B）：对"真鼠标会命中的那只元素"（`.bg-scrim`）派发 click → `closed=true`
+│       且 `returnedToTrigger=true` —— 修完之后这条退路在命中测试层面也成立了
+
+─────────────────────────────────────────────────────────────────────────────
+③ 轮 C：⑤-1 风险签字弹窗（三条退路一律不给那一档，环里有闸门键与勾选框）
+─────────────────────────────────────────────────────────────────────────────
+触发路径全程未写库：岗位屏 → 关键词「前端」→ 点「抓取」→ `consent.ensure(['boss'])` 读到未签 → 挂起并亮弹窗；
+末态按「先不启用」退出，BOSS 仍 `granted=false`，探针写进关键词框的草稿在取画面前清回空串。
+│ 落点：`active = button:consent-deny` · `inDialog=true` · `closeX=false`（✕ 不存在，与第二十五片一致）
+│ 环：3 只 = [`input:consent-accept`(aria-disabled=null), `button:consent-deny`(null), `button:consent-grant`(**aria-disabled=true**)]
+│       `grantInRing=true` —— 这是刻意的：本项目不用原生 `disabled`，闸门挡住的键**留在环里**，
+│       人才能把焦点停上去读到 `title` 里那句原因（07 稿④「按不动 ≠ 摸不到」）。把它踢出环就等于替界面说谎。
+│ 正向 Tab ×7 / 反向 Shift+Tab ×7：`allInsideDialog=true` · `allPrevented=true`，路径在 3 只里整圈转
+│ 背景可 Tab 格子 23 只，一次都没走进去
+│ 命中测试：背景点 hit = `fixed inset-0 z-40 bg-scrim`
+│ Esc：`escDoesNotClose=true`；点遮罩（对 hit 那只派发 click）：`scrimDoesNotClose=true` —— 唯一出口仍是脚注两只
+│ 「先不启用」→ `dialog=false` · `active=button:capture` · `returnedToTrigger=true` · overflow 复位
+
+─────────────────────────────────────────────────────────────────────────────
+④ 毡案同一只的读数
+─────────────────────────────────────────────────────────────────────────────
+│ `theme=light` · `active=button:privacy-acknowledge` · 卡片底 `rgb(224,219,205)`（ink-850 毡案）
+│ 遮罩 `rgba(38,44,48,0.5)` · `tabStillTrapped = { prevented: true, stillInDialog: true }`
+│ ⇒ 焦点环与主题无关（它不吃颜色令牌），两套主题下同一份判据逐位一致——与第二十六片那条同源。
+
+─────────────────────────────────────────────────────────────────────────────
+⑤ 实现口径（为什么是焦点陷阱而不是 `inert`）
+─────────────────────────────────────────────────────────────────────────────
+│ 判据给的是「`inert`（**或等价的焦点陷阱**）」。选后者的理由是第一线的结构事实：
+│   `inert` 必须挂在**背景容器**上，而浮层按 §3.8 的裁定就渲染在面板里（不提到 `App.tsx`、不引 Portal），
+│   因为"同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（第二十五片负腿）。
+│   要 `inert` 就得把浮层提到顶层，那是拿一条已验收的保证去换另一条写法，不值。
+│ 三条通道各自有主：鼠标 = 遮罩（`fixed inset-0`，命中测试实测）；键盘 = 本片的环；滚轮 = 弹窗那层的滚动锁。
+│ 环的实现要点：
+│   · Esc 与 Tab 共用**同一张层级表**（`overlayLayers`：层级 → { close, node }），toast 那一级不带节点
+│     ⇒ 稿上「toast 不抢焦点」由形状自己成立，不需要额外开关。
+│   · 焦点只锁**最高那一级带节点的浮层**（`topmostTrappedNode`），抽屉在下弹窗在上时 Tab 归弹窗。
+│   · 一律 `preventDefault` 后自己 `focus()`：浏览器的 Tab 顺序按整份文档排，放过去就会跨出浮层。
+│   · 焦点掉回文档（环内那格被卸载）时 `current=-1`，从端点重新起步而不是放任走出。
+│   · 触发者在**渲染阶段**记进 ref、键在 `open` 的跳变上；归还只在 `activeElement === body` 那一刻做
+│     ——这一条同时躲开 StrictMode 的假卸载（那时焦点还稳稳在弹窗里）与人已经自己走开（那时不该拽回来）。
+│ 落点腿（纪律表第 2 行前半句）由调用方的 `autoFocus` 承担：`ConsentModal` 早就有（deny），
+│   `PrivacyNotice` 本片补 `autoFocus={isReopened}`——**首启动那一次不给**：那一屏唯一的动作就是写下表态，
+│   把焦点自动交给它等于允许一次误按 Enter 替用户点头（⑤ 的入场判据不许破）。
+│ 顺带更正一处旧引用：`ConsentModal` 的注释与第二十五片记录把焦点这条写成"纪律表第 5 行"，
+│   按 09 稿表格的实际行序它是**第 2 行**（1 同屏数量 / 2 焦点 / 3 滚动锁 / 4 Esc 层级 / 5 尺寸）；代码注释已改。
+
+─────────────────────────────────────────────────────────────────────────────
+⑥ 画面与末态
+─────────────────────────────────────────────────────────────────────────────
+两张 md5 **互不相同**（§9 的 5.10-18 去重步骤）：
+  6.2-13-focus-trap-dark.png  d9308a2919eb8cdfb0547b51c9835e4e
+  6.2-13-focus-trap-light.png e382d4ff5832ac1507c1916f2bbea944
+画面证明的是形状（遮罩盖住工作台、左轨与状态条仍读得到、卡片 640×724 视口居中、`scrimCount=1`）；
+**焦点归属以 `activeElement` 读数为准**——程序化 `focus()` 在 Chromium 不保证命中 `:focus-visible`
+（实测 `focusVisible=false`、`boxShadow=none`），所以画面里那圈聚焦环不出现，这不是缺陷。
+末态开发实例：theme 回 **墨案**、语言回 **zh-CN**、视图 **workflow**、无遗留遮罩（`scrim=0`）、
+`body.overflow` 空、关键词草稿已清回空串、BOSS 未签字、隐私声明的确认时间戳未被改写
+（画面里那行「本机已在 2026/10/7 00:15:58 确认过这份声明」仍是第二十六片那一次的数）。
