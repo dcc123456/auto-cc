@@ -247,6 +247,39 @@ function stripComments(source: string): string {
     .join('\n');
 }
 
+/**
+ * 与 `stripComments` 同一口径的去注释，但**保留行号**（第 13 节②的报错必须指得准：
+ * 直接复用 `stripComments` 会把整片注释行删掉，报出来的行号就飘到别的元素上——探针实测过一次，
+ * 注入在第 82 行、报在第 54 行）。跨行的块注释按空行处理，行注释只在**整行**以 `//` 开头时切，
+ * 免得把字符串里的 `https://` 一起吃掉。
+ * @param source 源文件原文
+ * @returns 与原文行数一一对应的代码行数组
+ */
+function commentBlanked(source: string): string[] {
+  let inBlock = false;
+  return source.split(/\r?\n/).map((rawLine) => {
+    let line = rawLine;
+    if (inBlock) {
+      const end = line.indexOf('*/');
+      if (end < 0) return '';
+      inBlock = false;
+      line = line.slice(end + 2);
+    }
+    for (;;) {
+      const start = line.indexOf('/*');
+      if (start < 0) break;
+      const close = line.indexOf('*/', start + 2);
+      if (close < 0) {
+        inBlock = true;
+        line = line.slice(0, start);
+        break;
+      }
+      line = line.slice(0, start) + line.slice(close + 2);
+    }
+    return line.trimStart().startsWith('//') ? '' : line;
+  });
+}
+
 const RAW_CONTROL_TAGS = ['button', 'input', 'select', 'textarea'] as const;
 const uiDir = path.join(rendererRoot, 'ui');
 for (const file of tsxFiles) {
@@ -490,6 +523,55 @@ if (lightBlockStart < 0) {
   }
 }
 
+/**
+ * 13. hover 只许长在"这一格真能点"上（spec 6.2-25，07 稿第 199 行那条硬规矩：
+ *     「不可点的元素绝不长出 hover（效果芯片、标签、读数都不响应鼠标）」）。两条判据各拦一种回归：
+ *     ① 同格共存：一个 class 串（=一只元素的 class 集）里既给 `hover:` 又给按不动画法（`opacity-40` /
+ *        `cursor-not-allowed`），就是「按不动却会提亮」。07 稿对 seal 档写的"未签字/额度用尽时 hover 完全
+ *        无效"与 6.2-10 在 `DeskButton` 上钉的那条是同一件事，而原件层这次普查又在 `DeskSegmented` 抓到第二处
+ *        （在途整组走 `aria-disabled`，`:hover` 照样生效）——所以判据要求两态的画法**分属两条字面量**。
+ *     ② 面板层（`src/ui/**` 之外）的 hover 必须与一张交互凭据同格。面板给读数/标签/行底挂 hover 是最顺手的
+ *        一种"界面说谎"：看着可点，点了什么都没有。凭据按本项目既有口径取——`data-action`（§9 第④条：
+ *        每只可点控件都要有）、鼠标/键盘处理器、`draggable`，以及 `cursor-pointer`/`cursor-grab` 这两档光标承诺。
+ *     判据 ② 是**行窗口级**而不是 JSX 元素级：拿 hover 那一行上下各 10 行找凭据。代价写清楚——相邻元素自带
+ *     凭据时会误放行（窗口不等于元素边界），但"给一只静态读数挂 hover"必红，正是这条要拦的方向。
+ *     `--xy-controls-button-background-color-hover` 这类第三方 CSS 变量名不在射程里：`hover:` 前面没有空白，
+ *     而它本来就是 react-flow 自己那颗 `<Controls>` 按钮的悬停色（不是面板手写的悬停画法）。
+ */
+const HOVER_PATTERN = /(?:^|\s)hover:/;
+const DEAD_CLASS_PATTERN = /(?:^|\s)(?:opacity-40|cursor-not-allowed)(?:\s|$)/;
+const INTERACTIVE_CREDENTIAL =
+  /(?:^|[\s{<])(?:data-action|action=|onClick|onDoubleClick|onPointerDown|onKeyDown|draggable|cursor-pointer|cursor-grab)(?:$|[\s=:>"'{])/;
+
+for (const file of tsxFiles) {
+  const code = stripComments(await readFile(file, 'utf8'));
+  for (const cls of stringLiterals(code)) {
+    if (HOVER_PATTERN.test(cls) && DEAD_CLASS_PATTERN.test(cls)) {
+      failures.push(
+        `${path.relative(repoRoot, file)} 里有一格同时给了 hover 与按不动画法：` +
+          '「不可点的元素绝不长出 hover」，两态的画法必须分属两条字面量（spec 6.2-25）',
+      );
+    }
+  }
+}
+
+for (const file of tsxFiles) {
+  // 原件层豁免这一条，与 §10 的 6.2-14 是同一条豁免逻辑：可交互控件本来就只长在 `src/ui/**`，
+  // 那里的 hover 归判据 ① 与各原件自己的档位表管；面板要悬停就得把那一格交给原件。
+  if (!path.relative(uiDir, file).startsWith('..')) continue;
+  const lines = commentBlanked(await readFile(file, 'utf8'));
+  lines.forEach((line, index) => {
+    if (!HOVER_PATTERN.test(line)) return;
+    const neighbourhood = lines.slice(Math.max(0, index - 10), index + 11).join('\n');
+    if (!INTERACTIVE_CREDENTIAL.test(neighbourhood)) {
+      failures.push(
+        `${path.relative(repoRoot, file)}:${String(index + 1)} 有一格长不出交互凭据却挂了 hover：` +
+          '面板的悬停只许出现在带 `data-action`／事件处理器／`draggable`／指针光标的那一格上（spec 6.2-25）',
+      );
+    }
+  });
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -497,6 +579,6 @@ if (failures.length) {
 }
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
-    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处，' +
+    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处，' +
     '四档语气文字档 × 两案 × 五级承载面 × 两种同色底全部 ≥4.5:1）',
 );

@@ -880,6 +880,24 @@ export interface DeskSegmentedProps<T extends string = string> {
 }
 
 /**
+ * 分段控件一只格的画法。**必须写成完整字面量**——Tailwind 只扫源码里出现的字符串。
+ * 把它拆成函数而不是在 JSX 里现拼三元，是为了钉住 07 稿那条「不可点的元素绝不长出 hover」：
+ * 在途时整组按不动（走 `aria-disabled`，原生 `disabled` 会吃掉 `title` 提示），而 `:hover` 照样生效，
+ * 于是"提亮一档"就成了对一句"这一格点不动"的谎报——`DeskButton` 上按同一口径修过一次（spec 6.2-10）。
+ * 分属两条字面量之后，机检（`check-renderer-conventions.ts` 第 13 节）才看得住"按不动态不许留 hover"。
+ * @param isSelected 是否是当前选中格
+ * @param isRisk 选中格是否涂风险档（只有选中档才吃语气色，未选中永远只提亮文字）
+ * @param busy 整组是否在途（按不动）
+ * @returns 该格的 class 串；按不动态里不含任何 `hover:`
+ */
+const segmentCellClass = (isSelected: boolean, isRisk: boolean, busy: boolean): string => {
+  if (isSelected) {
+    return isRisk ? 'bg-seal-wash text-seal-ink ring-1 ring-inset ring-seal/35' : 'bg-ink-750 text-slate-100';
+  }
+  return busy ? 'text-slate-500' : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300';
+};
+
+/**
  * 分段控件：N 只互斥格共用一个框，选中那一格实底。
  * 它存在的理由是档位这类"选一档"的形态在 07 稿里既不是按钮也不是页签；
  * 「按不动」走 `aria-disabled` 而不是原生 `disabled`（原生禁用不派发鼠标事件，`title` 就不出现）。
@@ -928,14 +946,11 @@ export function DeskSegmented<T extends string>({
               ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
               : { onClick: () => onSelect(option.value) })}
             {...(busy && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-            // 选中档按"是不是风险档"分两支；未选中档永远只提亮文字，不预支任何语气。
-            className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${busy ? 'opacity-40 ' : ''}${
-              isSelected
-                ? option.isRisk
-                  ? 'bg-seal-wash text-seal-ink ring-1 ring-inset ring-seal/35'
-                  : 'bg-ink-750 text-slate-100'
-                : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300'
-            }`}
+            // 档位画法交给 `segmentCellClass`：按不动态（上面那层透明度）与 hover 分属两条字面量，
+            // 未选中档永远只提亮文字，不预支任何语气。
+            className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${
+              busy ? 'opacity-40' : ''
+            } ${segmentCellClass(isSelected, option.isRisk === true, busy)}`}
           >
             {option.label}
           </button>
