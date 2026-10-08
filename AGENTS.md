@@ -457,7 +457,7 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
 | 6.2-20 语气 wash 只归 `src/ui/**` 原件持有 | `check-renderer-conventions.ts` 第 9 节 | **已落地（6.2 第四十片）** | `scripts/check-renderer-conventions.ts`（`bg-*-wash` 命中 `src/ui/**` 之外即失败；探针：注入 `zzWashProbe.ts` → exit 1，删除 → 0；`globals.css` 的 `--color-*-wash` 令牌声明不误伤） |
 | §5.1/§5.2 同源那条：渲染层控件只出自 `src/ui/**` 原件（spec 6.2-14） | `check-renderer-conventions.ts` 第 10 节（拦裸 `<button>`/`<input>`/`<select>`/`<textarea>`） | **已落地（6.2 第三十二片）** | `scripts/check-renderer-conventions.ts`（在 `pnpm lint` 链内；三条探针：含四只裸控件 → exit 1 且逐 tag 各报一行、同名 tag 全写在注释里 → exit 0、`src/ui/**` 整棵子树自带裸控件 → 放行） |
 | 6.1-09 灰阶半边：`slate-500/600` 只许配 ≤11px | `check-renderer-conventions.ts` 第 11 节 | **已落地（6.1 第四十一片）** | `scripts/check-renderer-conventions.ts`（判据取**字符串字面量级**：一个 `className` 串就是一个元素的 class 集，跨串配对不误报；`text-[11px]` 这类任意值也认） |
-| 6.1-09 色相半边：语气档当文字用必须过 AA | `check-renderer-conventions.ts` 第 12 节（读 `globals.css` 令牌，不在消费侧打补丁） | **已落地（6.1 第四十二片）** | `scripts/check-renderer-conventions.ts`（判据在令牌层：`--color-<tone>-ink` 对自己的 `-wash`、五档面板色阶、以及 jade/amber/seal 实底 14%/18% 上都要 ≥4.5；同时钉住 wash 的 rgb 必须与 token 同色） |
+| 6.1-09 色相半边：语气档当文字用必须过 AA | `check-renderer-conventions.ts` 第 12 节（读 `globals.css` 令牌，不在消费侧打补丁） | **已落地（6.1 第四十二片）** | `scripts/check-renderer-conventions.ts`（判据在令牌层：`--color-<tone>-ink` 对自己的 `-wash`、五档面板色阶、以及 jade/amber/seal 实底 14%/18% 上都要 ≥4.5；同时钉住 wash 的 rgb 必须与 token 同色。6.2 第五十片在同节补 `SOLID_FILL_PAIRS`：「整颗填色 + 稿钉死字色」那一族（印章键的悬停/按下底）逐案核两件事——该档在该案必须有声明（只在 `@theme` 声明会静默不生成 utility），且对给定字色 ≥4.5；两条注入探针各自 EXIT=1（报 3.77:1 / 毡案块缺 `--color-seal-deep`）、还原后负对照 0） |
 
 > 待落地项都有对应的 spec 验收 ID。**在它们变成 `[机检]` 之前，AGENTS.md 是唯一防线**，
 > 所以 §7.4 的自检清单里 ④⑤⑥ 三条不许跳过。
