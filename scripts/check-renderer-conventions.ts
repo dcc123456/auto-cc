@@ -283,6 +283,64 @@ for (const file of tsxFiles) {
   }
 }
 
+/**
+ * 11. 字号与灰阶档的配对纪律（spec 6.1-09 的灰阶半边）。
+ *     6.1 第二十三片把"档位按字号分配"定成组织原则：**`slate-500`/`slate-600` 只属于 ≤11px 的读数**，
+ *     ≥12px 的正文/说明文字只许 `slate-400` 及更深——因为毡案的灰阶是等比翻出来的，500 比 400 还浅，
+ *     挂到 12px 正文上直接跌破 6.1-06 的 4.5:1 门槛（那轮普查失守 46/46 全在这一档）。
+ *     判据落在**字符串字面量级**而不是行级：一个 `className` 串就是一个元素的 class 集，
+ *     把 size 与 color 拆进不同串（如 `stepStatusStyle` 交色、消费者给 `text-[11px]`）不误报，
+ *     代价是跨串配对看不见——那属于"某处把 slate-500 与 text-xs 写进了同一格"这一类回归，正是这条要拦的。
+ *     色相档（`text-celadon` 等）的 ≥12px 半边**不在这一节**：它牵动 `Banner`/`Tag` 是否把语气文字改挂
+ *     `-ink`（controls.tsx:327-330 记了一条相反的设计取舍），属令牌层待裁定项，裁定后另起一节补上。
+ */
+const SIZE_PX: Record<string, number> = {
+  'text-xs': 12,
+  'text-sm': 14,
+  'text-base': 16,
+  'text-lg': 18,
+  'text-xl': 20,
+  'text-2xl': 24,
+  'text-3xl': 30,
+};
+const ARB_SIZE_PATTERN = /\btext-\[(\d+(?:\.\d+)?)px\]/g;
+const SMALL_GRAY_PATTERN = /\btext-slate-[56]00\b/;
+
+/** 抽出一段源码里的所有字符串字面量内容（单/双引号不跨行，反引号可跨行）。 */
+function stringLiterals(src: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"\n]*)"|'([^'\n]*)'|`([\s\S]*?)`/g;
+  for (let m = re.exec(src); m; m = re.exec(src)) out.push(m[1] ?? m[2] ?? m[3] ?? '');
+  return out;
+}
+
+/** 一个 class 串里出现的最小字号（像素）；没有显式字号返回 null（继承来的看不见，不误判）。 */
+function largestPx(cls: string): number | null {
+  let max: number | null = null;
+  for (const [token, px] of Object.entries(SIZE_PX)) {
+    if (new RegExp(`(^|\\s)${token}(\\s|$)`).test(cls)) max = max === null ? px : Math.max(max, px);
+  }
+  for (let m = ARB_SIZE_PATTERN.exec(cls); m; m = ARB_SIZE_PATTERN.exec(cls)) {
+    const px = Number.parseFloat(m[1]);
+    max = max === null ? px : Math.max(max, px);
+  }
+  ARB_SIZE_PATTERN.lastIndex = 0;
+  return max;
+}
+
+for (const file of tsxFiles) {
+  const code = stripComments(await readFile(file, 'utf8'));
+  for (const cls of stringLiterals(code)) {
+    const px = largestPx(cls);
+    if (px !== null && px >= 12 && SMALL_GRAY_PATTERN.test(cls)) {
+      failures.push(
+        `${path.relative(repoRoot, file)} 里有一格 ${String(px)}px 文案挂了 slate-500/600：` +
+          '灰阶 500/600 只属于 ≤11px 读数，≥12px 用 slate-400 及更深（spec 6.1-09）',
+      );
+    }
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -290,5 +348,5 @@ if (failures.length) {
 }
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
-    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处）',
+    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处）',
 );
