@@ -63,6 +63,7 @@ afterAll(() => {
 
 /** 模型侧固定「未配置」：`complete()` 在 fetch 之前就失败，回落因此是可测的。 */
 const LLM_BASE: LlmConfig = {
+  providerId: null,
   baseUrl: null,
   model: null,
   keyEnv: 'AUTO_CC_GREET_TEST_KEY',

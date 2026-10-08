@@ -31,6 +31,8 @@ process.env[KEY_ENV] = 'unit-test-key-value';
 
 /** 模型侧的默认配置：`ready` 里按需覆盖，缺 baseUrl 即"未配置"。 */
 const LLM_BASE: LlmConfig = {
+  // 未绑定池实例（spec 7.2-12 的兜底态）：这一路读的就是下面那个 `baseUrl`。
+  providerId: null,
   baseUrl: null,
   model: null,
   keyEnv: KEY_ENV,

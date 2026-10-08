@@ -1283,6 +1283,41 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  // P7 · 7.2-c：`GET /v1/models` 的本地靶端点（spec 7.2-05 / 07，plan §7.8）。
+  // 三条失败态用查询参数开关，让「获取模型」的四种播报都能在自动化里各取一次读数：
+  // `?fail=auth` 非 2xx、`?fail=empty` 200 但 `data` 为空、`?fail=timeout` 拖到客户端超时之后才回。
+  // 清单里特意夹一条没有 `id` 的脏项：`readModelIds` 的容错半边（逐项判定）要有可读的证据。
+  if (url.pathname === '/v1/models' && request.method === 'GET') {
+    const writeJson = (status: number, value: unknown): void => {
+      response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify(value));
+    };
+    const fail = url.searchParams.get('fail');
+    if (fail === 'timeout') {
+      // 20 秒：客户端默认超时 8 秒（`llmSchema.timeoutMs`），所以这一发在界面上必定表现为超时而不是慢。
+      setTimeout(() => writeJson(200, { object: 'list', data: [] }), 20_000);
+      return;
+    }
+    const auth = request.headers.authorization ?? '';
+    if (fail === 'auth' || !auth.startsWith('Bearer ') || auth.slice(7).trim() === '') {
+      writeJson(401, { error: { message: 'fixture 的模型清单要求 Authorization: Bearer <key>' } });
+      return;
+    }
+    writeJson(200, {
+      object: 'list',
+      data:
+        fail === 'empty'
+          ? []
+          : [
+              { id: 'fixture-chat-model', object: 'model', owned_by: 'fixture' },
+              { id: 'fixture-embed-model', object: 'model', owned_by: 'fixture' },
+              { id: 'fixture-second-model', object: 'model', owned_by: 'fixture' },
+              { object: 'model', owned_by: 'fixture' },
+            ],
+    });
+    return;
+  }
+
   // OpenAI 信封的本地靶端点（`llm.baseUrl` 指到 `http://127.0.0.1:<port>/v1` 时打的就是这里）。
   // 只应答改写腿，别的提示词一律 400 并说清原因：话术腿、拆解腿的答案这里给不出，
   // 假装给得出就会把「模型腿跑通了」的假证据留在截图里。
@@ -1519,7 +1554,7 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   // 路由清单打在启动日志里：验收脚本按这份列表逐条 curl，不用回头翻代码。
   console.log(
-    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/risk-mode · /api/generate-mode · /v1/chat/completions · /api/deliveries（cookie ${cookieName}）`,
+    `[fixture] 实验台已启动：http://${host}:${String(port)}/ · /alt · /boss · /locator · /chat · /newtab · /trusted · /deliver · /api/fail-counter · /api/risk-mode · /api/generate-mode · /v1/chat/completions · /v1/models · /api/deliveries（cookie ${cookieName}）`,
   );
 });
 

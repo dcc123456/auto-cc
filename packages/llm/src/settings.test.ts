@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import { LlmChatService } from './index.js';
 import type { LlmSettingsView } from '@auto-cc/shared';
-import { providerSecretPath } from './provider-pool.js';
+import { providerSecretPath, type LlmProviderInstanceView } from './provider-pool.js';
 import { LlmSettingsService } from './settings.js';
 import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 
@@ -36,6 +36,8 @@ interface BootOptions {
   model?: string | null;
   /** 复用上一次 boot 的 userData（"重启仍然算数"那类用例的入口，spec 7.2-02 的持久半边） */
   userData?: string;
+  /** 把绑定直接写进 `llm.chat` 的配置格（spec 7.2-12 绑定态的入口：内核是替身，热改不会重建服务，只能第二次装载时给） */
+  chatProviderId?: string | null;
 }
 
 /** 一条腿的读数（按腿取，避免各处写下标）。 */
@@ -65,10 +67,11 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
   const userData = options.userData ?? mkdtempSync(join(tmpdir(), 'auto-cc-71b-'));
   const baseUrl = options.baseUrl === undefined ? BASE_URL : options.baseUrl;
   const model = options.model === undefined ? 'test-model' : options.model;
+  const chatProviderId = options.chatProviderId ?? null;
 
   // 内核替身：只实现 `llm.settings` 会用到的三件事，且行为与真内核一致（补丁写进生效值）。
   const effective = new Map<string, Record<string, unknown>>([
-    ['llm', { baseUrl, model }],
+    ['llm', { providerId: chatProviderId, baseUrl, model }],
     ['llm-embed', {}],
   ]);
   const applied: Harness['applied'] = [];
@@ -89,6 +92,7 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
   });
   await ctx.plugin(StoreService, { dir: userData, file: 'store.db', journal: 'delete' });
   await ctx.plugin(LlmChatService, {
+    providerId: chatProviderId,
     baseUrl,
     model,
     keyEnv: CHAT_ENV,
@@ -486,13 +490,13 @@ describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', (
       apiKey: 'sk-pool-7777',
     });
     settings.addModels({ providerId: saved.id, models: ['a-model'] });
-    expect(settings.deleteProvider(saved.id)).toEqual([]);
+    expect(await settings.deleteProvider(saved.id)).toEqual([]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM llm_models WHERE provider_id = ?').get(saved.id)).toMatchObject({
       n: 0,
     });
     expect(config.getSecret(providerSecretPath(saved.id))).toBe('');
     // 删不存在的 id 要说清，不能静默成功（界面上那行是刚被别人删掉的话，刷新一次就得报出来）。
-    expect(errorOf(() => settings.deleteProvider('不存在的 id'))).toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
+    await expect(settings.deleteProvider('不存在的 id')).rejects.toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
   });
 
   it('迁移落在 31 / 32，回滚到 30 两张表一起消失（spec 7.2-08）', async () => {
@@ -556,5 +560,219 @@ describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', (
       code: 'LLM_PROVIDER_NOT_FOUND',
     });
     expect(db.prepare('SELECT COUNT(*) AS n FROM llm_providers').get()).toMatchObject({ n: 0 });
+  });
+});
+
+describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 12）', () => {
+  /** 池实例的端点前缀：与 `BASE_URL` 刻意不同名，"腿读到的是池那个地址"才量得出来。 */
+  const POOL_URL = 'https://gw.test.invalid/v1';
+  const POOL_KEY = 'sk-pool-7777';
+
+  /**
+   * 起一家已入库两条模型的实例（清单获取与绑定的用例都从这一格开始）。
+   * @param settings 已装载的配置服务
+   * @returns 实例读数（id 是随机的，密钥与清单由本用例填）
+   */
+  const seededProvider = (settings: LlmSettingsService): LlmProviderInstanceView => {
+    const saved = settings.saveProvider({
+      presetId: 'deepseek',
+      label: 'DeepSeek',
+      baseUrl: POOL_URL,
+      apiKey: POOL_KEY,
+    });
+    settings.addModels({ providerId: saved.id, models: ['a-model', 'b-model'] });
+    return saved;
+  };
+
+  it('获取清单：两种信封都认、脏项逐条跳过，发的是 GET 且带的是那家自己的 key', async () => {
+    let reply: () => Promise<Response> = () => Promise.resolve(json({ object: 'list', data: [] }));
+    const fixture = stubFetch(() => reply());
+    try {
+      const { settings } = await boot();
+      const saved = seededProvider(settings);
+
+      reply = () =>
+        Promise.resolve(json({ data: [{ id: 'a-model' }, { object: 'model' }, { id: 'z-model' }, { id: '' }] }));
+      const reading = await settings.fetchModels(saved.id);
+      expect(reading).toMatchObject({ ok: true, models: ['a-model', 'z-model'], reason: null, message: null });
+      expect(reading.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(fixture.requests).toHaveLength(1);
+      expect(fixture.requests[0]).toMatchObject({ url: `${POOL_URL}/models`, init: { method: 'GET' } });
+      // 掩码末 4 位与实发的 Bearer 对得上，才算"界面上说的那把就是这次发出去的那把"；GET 不许带请求体。
+      expect(fixture.requests[0]?.init.headers).toMatchObject({ authorization: `Bearer ${POOL_KEY}` });
+      expect(fixture.requests[0]?.init.body).toBeUndefined();
+
+      // 部分网关把清单放在 `models[]` 而不是 `data[]`：只认一种就会让用户看到"这家没给清单"。
+      reply = () => Promise.resolve(json({ models: [{ id: 'c-model' }, { id: 'd-model' }] }));
+      expect((await settings.fetchModels(saved.id)).models).toEqual(['c-model', 'd-model']);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('拉取失败只播报：非 2xx / 空清单 / 超时 / 认不出这家 四种读法，已入库的行一条都不动', async () => {
+    let reply: () => Promise<Response> = () => Promise.resolve(json({ object: 'list', data: [] }));
+    const fixture = stubFetch(() => reply());
+    try {
+      const { settings } = await boot();
+      const saved = seededProvider(settings);
+
+      reply = () => Promise.resolve(json({ error: { message: 'bad key' } }, 401));
+      expect(await settings.fetchModels(saved.id)).toMatchObject({
+        ok: false,
+        models: [],
+        reason: 'LLM_REQUEST_FAILED',
+      });
+
+      // 拿到了但一条都没有：这是"这份清单是空的"，与"发不出去"是两个播报，界面文案不能混。
+      reply = () => Promise.resolve(json({ object: 'list', data: [] }));
+      expect(await settings.fetchModels(saved.id)).toMatchObject({
+        ok: false,
+        models: [],
+        reason: 'EMPTY',
+        message: '这家回给的模型清单是空的',
+      });
+
+      // 超时由传输骨架变成结构化失败，读法与非 2xx 同一个码、靠 message 分派。
+      reply = () => Promise.reject(Object.assign(new Error('The operation was timed out'), { name: 'TimeoutError' }));
+      const timedOut = await settings.fetchModels(saved.id);
+      expect(timedOut).toMatchObject({ ok: false, reason: 'LLM_REQUEST_FAILED' });
+      expect(timedOut.message).toContain('超时');
+
+      expect(await settings.fetchModels('不在池里的 id')).toMatchObject({
+        ok: false,
+        reason: 'LLM_PROVIDER_NOT_FOUND',
+      });
+      // 四条失败态合起来判的是 spec 7.2-07 那一句：一次网络抖动不许让用户丢掉整家清单。
+      expect(settings.listModels(saved.id).map((item) => item.model)).toEqual(['a-model', 'b-model']);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('绑定角色：持久层与热改都只写两格、不复制 baseUrl，腿读回的是池那个地址', async () => {
+    const { settings, config, applied } = await boot();
+    const saved = seededProvider(settings);
+    const view = await settings.bindRole({ leg: 'chat', providerId: saved.id, model: 'a-model' });
+
+    // 端点不落持久层：用户改了那家的地址，这条腿下一次就该跟着变（§2.5 不存第二份事实）。
+    expect(config.persisted('llm')).toEqual({ providerId: saved.id, model: 'a-model' });
+    expect(applied).toEqual([{ id: 'llm', patch: { providerId: saved.id, model: 'a-model' } }]);
+    expect(legOf(view, 'chat')).toMatchObject({
+      baseUrl: POOL_URL,
+      model: 'a-model',
+      available: true,
+      key: { present: true, source: 'secret', tail: '7777' },
+    });
+    // 另一腿不受这次绑定影响（一次绑定只动一格，风险表里"重建两次"那一条的读法）。
+    expect(legOf(view, 'embed').missing).toEqual(['baseUrl', 'model', 'apiKey']);
+  });
+
+  it('绑定只认已入库的那条模型，三条负腿各报自己的码且一次落盘都没有', async () => {
+    const { settings, config, applied } = await boot();
+    const saved = seededProvider(settings);
+
+    await expect(settings.bindRole({ leg: 'chat', providerId: saved.id, model: '没勾过的模型' })).rejects.toMatchObject(
+      {
+        code: 'INVALID_ARGUMENT',
+        details: { reason: 'MODEL_NOT_ADDED' },
+      },
+    );
+    await expect(
+      settings.bindRole({ leg: 'chat', providerId: '不在池里的 id', model: 'a-model' }),
+    ).rejects.toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
+    await expect(
+      settings.bindRole({ leg: 'voice' as 'chat', providerId: saved.id, model: 'a-model' }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', details: { issues: ['leg'] } });
+    expect(config.persisted('llm')).toEqual({});
+    expect(applied).toHaveLength(0);
+  });
+
+  it('解析顺序三条读数：绑定盖过配置格，回落时照用兜底，两边都没有就报未配置（spec 7.2-12）', async () => {
+    const first = await boot();
+    const saved = seededProvider(first.settings);
+    await first.settings.bindRole({ leg: 'chat', providerId: saved.id, model: 'a-model' });
+
+    // ① 绑定态：客户端自己那一份读数也走池（第二次装载 = 热改重建后的等价形态，端点与密钥路径都来自那一家）。
+    const bound = await boot({ userData: first.userData, chatProviderId: saved.id, model: 'a-model' });
+    expect(bound.llm.status()).toMatchObject({
+      available: true,
+      model: 'a-model',
+      endpoint: `${POOL_URL}/chat/completions`,
+      keySource: 'secret',
+      origin: 'pool',
+      providerId: saved.id,
+    });
+
+    // ② 兜底态：没有绑定时用配置格自己的端点，key 走 `keyEnv` 那一路（7.1-07 那条链原样不动）。
+    const fallback = await boot({ envKey: 'sk-env-9900' });
+    expect(fallback.llm.status()).toMatchObject({
+      available: true,
+      keySource: 'env',
+      endpoint: `${BASE_URL}/chat/completions`,
+      origin: 'config',
+      providerId: null,
+    });
+
+    // ③ 未配置：一次请求都不发，缺项照实列全（界面上的"测试连接"据此给锁定原因码）。
+    // 上一条设的环境变量要到 `afterEach` 才清，所以这里先手动撤掉——"两处都没有"必须是真没有。
+    delete process.env[CHAT_ENV];
+    const none = await boot({ baseUrl: null, model: null });
+    expect(none.llm.status()).toMatchObject({
+      available: false,
+      missing: ['baseUrl', 'model', 'apiKey'],
+      endpoint: null,
+      origin: 'none',
+    });
+
+    // 向量腿共用同一条解析（`resolveLeg` 抽在这里的理由）：绑定 embed 后它读的也是池那个地址。
+    await first.settings.bindRole({ leg: 'embed', providerId: saved.id, model: 'b-model' });
+    expect(legOf(first.settings.read(), 'embed')).toMatchObject({ baseUrl: POOL_URL, model: 'b-model' });
+  });
+
+  it('删掉正被绑定的实例：那条腿回落到兜底、热改一次 null，并报出缺的那一格', async () => {
+    const { settings, config, applied } = await boot();
+    const saved = seededProvider(settings);
+    await settings.bindRole({ leg: 'chat', providerId: saved.id, model: 'a-model' });
+    expect(applied).toHaveLength(1);
+
+    await settings.deleteProvider(saved.id);
+    // 悬空绑定必须当场撤掉：留着的话这条腿每次请求都要先解析一次才发现"这一行没有了"。
+    expect(applied.at(-1)).toEqual({ id: 'llm', patch: { providerId: null, model: null } });
+    // 绑定是一条原子表态（实例 + 模型名一起写的），所以撤它也是两条一起撤——
+    // 留着那个模型名，界面就会拿着一个候选清单里已经不存在的值。
+    expect(config.persisted('llm')).toEqual({ providerId: null, model: null });
+    const chat = legOf(settings.read(), 'chat');
+    // 端点回到配置格那一格（yml/env 兜底原样不动），缺的是模型名与那把随实例一起清掉的 key。
+    expect(chat).toMatchObject({ baseUrl: BASE_URL, model: null, missing: ['model', 'apiKey'] });
+  });
+
+  it('测某一家连通性按实例点名探测，不碰全局绑定（spec 7.2-04）', async () => {
+    const fixture = stubFetch(() =>
+      Promise.resolve(json({ model: 'probe-model', choices: [{ message: { content: 'pong' } }] })),
+    );
+    try {
+      const { settings, config, applied } = await boot();
+      const saved = seededProvider(settings);
+      const result = await settings.checkProvider(saved.id, 'probe-model');
+      expect(result).toMatchObject({ ok: true, model: 'probe-model', reason: null });
+      expect(fixture.requests[0]?.url).toBe(`${POOL_URL}/chat/completions`);
+      expect(fixture.requests[0]?.init.headers).toMatchObject({ authorization: `Bearer ${POOL_KEY}` });
+      // 探测点名哪条模型就是哪条，不拿绑定里那条去猜（用户此刻正决定要不要勾它）。
+      expect(JSON.parse(bodyText(fixture.requests[0]!.init))).toMatchObject({ model: 'probe-model', max_tokens: 8 });
+
+      expect(applied).toHaveLength(0);
+      expect(config.persisted('llm')).toEqual({});
+
+      // 负腿：点名了池里没有的实例，报"这一家没有"而不是发一次注定失败的请求。
+      const requestsBefore = fixture.requests.length;
+      expect(await settings.checkProvider('不在池里的 id', 'm')).toMatchObject({
+        ok: false,
+        reason: 'LLM_PROVIDER_NOT_FOUND',
+      });
+      expect(fixture.requests).toHaveLength(requestsBefore);
+    } finally {
+      fixture.restore();
+    }
   });
 });

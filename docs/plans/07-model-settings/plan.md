@@ -274,8 +274,8 @@ CREATE TABLE llm_models (
 | ----- | -------------------------------------------------------------------------------------------------------------------------------- | ---- |
 | 7.2-a | `llm`：预设目录 19 家（含端点变体）+ `normalizeBaseUrl` + zod 形状 + 单测                                                        | 无   |
 | 7.2-b | `llm`：迁移 31/32 与池的 CRUD（`inject=['store']`，`migrations.push` → `upgrade()`，与 resume-kb 同一模式）+ 密钥路径派生 + 单测 | a    |
-| 7.2-c | `llm.chat` 收成"显式目标"客户端 + `listModels` 解析（fixture 的 `/v1/models`）+ 删除旧 `apply()` + 解析顺序与兜底链单测          | b    |
-| 7.2-d | IPC 契约（`bridge.llm` 新增动作 + `LlmProviderView`/`LlmModelView`）+ 渲染层三段 + 双语                                          | c    |
+| 7.2-c | `llm.chat` 收成"显式目标"客户端 + `listModels` 解析（fixture 的 `/v1/models`）+ 解析顺序与兜底链单测                             | b    |
+| 7.2-d | IPC 契约（`bridge.llm` 新增动作 + `LlmProviderView`/`LlmModelView`）+ 渲染层三段 + 双语 + **删除旧 `apply()`**（从 c 接手）      | c    |
 | 7.2-e | 活体验收：10225 隔离实例跑三段，截图 + DOM 读数；三面 grep 证明新密钥路径也不落明文；`AGENTS.md` §9 更新那条迁移台账读数         | d    |
 
 > **7.2-a 收口补记（2026-10-08，spec 7.2-01 / 7.2-03 已 `[x]`，读数见 `7.2-01-03-catalog-readings.txt`）**：
@@ -306,6 +306,36 @@ CREATE TABLE llm_models (
 > `packages/core/src/errors.ts` 的一只新错误码、`cordis.yml` 的 `llm-settings` 一行 `dependsOn: [store]`
 > （口径同 `browser-takeover`：`static inject` 必须配清单里这一行，见 §9 实测 5.1-c 的"清单顺序就是挂载顺序"）。
 > `shared/src/bridge.ts` 与渲染层三段留给 7.2-d。
+>
+> **7.2-c 收口补记（2026-10-08，spec 7.2-07 / 12 / 13 已 `[x]`，读数见 `7.2-04-05-07-12-client-readings.txt`）**：
+>
+> **一条改判**：这一行里的"删除旧 `apply()`"**挪到 7.2-d**（表格下一行已接手）。原因是现读而不是偏好——
+> `packages/renderer/src/ModelSettingsPanel.tsx` 的「保存这一腿」走的是 `llm.settings.apply`，而进程契约（`shared/src/bridge.ts`）
+> 与界面三段都在 7.2-d 才换；在 7.2-c 删掉它，主干就会留下一段"点了没反应"的界面回归，
+> 而那条回归既不属于本片要验的东西，也不会在本片里被活体取到。spec 7.2-15（反向验证"只剩一个入口"）因此仍 `[ ]`。
+>
+> 五条落在本片当场、写给 7.2-d/e 与后来人：
+>
+> 1. **测试装配里的环境变量不会在同一条用例的两次装载之间清掉**（`afterEach` 只跑在用例之间）。
+>    "两处都没有 key"那类读数必须显式 `delete process.env[...]`，否则 `missing` 少一项，看着像实现缺陷、实际是取证通道脏了。
+> 2. **内核换成替身之后，热改不会重建 `llm.chat`**，所以"绑定态"有两条不同的读数通道：
+>    `llm.settings.read()` 现问 `kernel.effectiveConfig`（当场就能变），`llm.chat.status()` 读构造期拿到的配置格（只有重装才变）。
+>    断言客户端读数要用第二次装载点名实例 id，不要把两者写成同一条期望——真实装配里它们由 `applyConfig` 的重建串成一个瞬间。
+> 3. **GET 与 POST 共用骨架时，`body` 只在非 undefined 才挂**：fetch 对 GET 带 body 是直接 `TypeError`，
+>    抽错的表现为清单探测全红而不是编译期报错（`requestJson` 里那条展开写的 `...(body === undefined ? {} : {…})`）。
+> 4. **给已有配置格的 schema 加一个带 `.default()` 的键，会波及包外的直接调用点**：本片加 `llm.providerId` 之后，
+>    `packages/outbound` 两处 `LlmConfig` 字面量当场 typecheck 红（§9 实测 1.3 那条在测试常量上同样成立——
+>    output 里带缺省的键是必填）。这类跨包形状改动**先跑 typecheck 再收尾**，别指望四道门禁会替你在写的时候提醒。
+> 5. **"回落到未绑定"判的是整个绑定，不是半个**：`deleteProvider` 第一版只撤 `providerId`、留着 `model`，
+>    实测读数（spec 7.2-09 那句 `missing` 含 `model`）把它改成了两条键一起撤——留着那个模型名，
+>    7.2-d 的候选清单里已经没有它了，界面会拿着一个选不到的值显示"当前用它"。
+>    随之记一条配置层语义：持久层写 `null` 会**盖过** `cordis.yml`（`mergeDeep` 后层赢，null 是值不是删除），
+>    所以"删掉一家之后 yml 的模型名不会自己回来"是当前行为，不是丢配置（yml 没动，重新绑定或保存一次即覆盖）。
+>
+> 本片动的面：`packages/llm/**`（新文件 `binding.ts`；`http.ts` 的 GET 半边；`index.ts` 的探测态与 `listModels`；
+> `embed.ts` 换用同一条解析；`settings.ts` 的 `fetchModels`/`checkProvider`/`bindRole` 与 `deleteProvider` 的绑定回落；
+> 单测 +7 条）、`packages/outbound/src/{greet,script}.test.ts` 的两条配置字面量、
+> `scripts/fixture-server.ts` 的 `/v1/models`（三条失败态按 `?fail=` 开关）。
 
 ### 7.8 测试与取证口径（§7.2 / §7.1 的硬边界）
 

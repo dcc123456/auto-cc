@@ -1,7 +1,8 @@
 /**
  * `llm.chat` 与 `llm.embed` 共用的 HTTP 骨架（spec 2.5-12 / 4.3-08）。
  *
- * 两个服务做的是**同一件事**：带 Bearer 头 POST 一段 JSON、按超时掐断、把失败变成结构化错误。
+ * 两个服务做的是**同一件事**：带 Bearer 头发一段 JSON、按超时掐断、把失败变成结构化错误
+ * （POST 是补全与向量，GET 是 `/models` 清单探测，共用同一具骨架）。
  * AGENTS.md §2.2 要求「同一逻辑出现第二次就抽公共层」，而 §2.7 禁的是**第二个客户端**，
  * 不是同一个客户端的第二个方法——所以这里抽的是传输骨架，端点与响应解析仍各自留在两个服务里。
  *
@@ -56,39 +57,49 @@ export function describeError(status: number, body: string): string {
   return `对端返回 ${String(status)}：${clipped}`;
 }
 
-/** 一次 JSON POST 的实参。 */
-export interface JsonPost {
+/** 一次 JSON 请求的实参（`method` 省略时是 POST）。 */
+export interface JsonRequest {
   /** 完整地址（由 `joinEndpoint` 拼出），也进错误详情，便于界面指出打的是哪个端点。 */
   readonly endpoint: string;
   /** Bearer 头的值；由调用方从环境变量读，未配置时应在调用本函数之前就短路。 */
   readonly apiKey: string;
-  /** 请求体（会被 `JSON.stringify`）。 */
-  readonly body: unknown;
+  /** 请求体（会被 `JSON.stringify`）；GET 不带。 */
+  readonly body?: unknown;
   /** 超时毫秒数，取 `AbortSignal.timeout`。 */
   readonly timeoutMs: number;
   /** 错误归属（`llm.chat` / `llm.embed`），进 `AppError.path`。 */
   readonly source: string;
   /** 文案里的动作名：chat 侧「模型请求」、embed 侧「向量请求」，用户看到的是一句能分清的事。 */
   readonly label: string;
+  /** 动作名，默认 `POST`；`GET` 目前只用于 `/models` 清单探测（spec 7.2-05）。 */
+  readonly method?: 'GET' | 'POST';
 }
 
+/** 一次 JSON POST 的实参。 */
+export type JsonPost = JsonRequest & { body: unknown; method?: 'POST' };
+
+/** 一次 JSON GET 的实参（没有请求体）。 */
+export type JsonGet = JsonRequest & { body?: undefined; method?: 'GET' };
+
 /**
- * 发一次 JSON POST 并取回解析后的响应体。
+ * 发一次带 Bearer 头的 JSON 请求并取回解析后的响应体。
  *
  * 只负责「发出去、拿到 JSON」这一段：非 2xx、发不出去、超时都变成结构化错误，
  * 而**响应内容合不合契约**（缺字段、空数组、维度不齐）归调用方判——那属于各端点的语义，
  * 抽到这里就会把两种完全不同的「不合约定」压成同一个错误。
- * @param request 见 `JsonPost`；`apiKey` 不进任何错误详情，只在头里出现
+ * @param request 见 `JsonRequest`；`apiKey` 不进任何错误详情，只在头里出现
  * @returns 对端 JSON（已 `JSON.parse`）
  * @throws 非 2xx / 发不出去 / 超时 / 响应不是 JSON 时 `LLM_REQUEST_FAILED`（`details.reason` 区分形态）
  */
-export async function postJson(request: JsonPost): Promise<unknown> {
+export async function requestJson(request: JsonRequest): Promise<unknown> {
+  const method = request.method ?? 'POST';
   let response: Response;
   try {
     response = await fetch(request.endpoint, {
-      method: 'POST',
+      method,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${request.apiKey}` },
-      body: JSON.stringify(request.body),
+      // GET 带 body 在 fetch 里是直接 TypeError，所以只有真有 body 时才挂上（POST 那一路形状不变）。
+      ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       signal: AbortSignal.timeout(request.timeoutMs),
     });
   } catch (cause) {
@@ -118,4 +129,27 @@ export async function postJson(request: JsonPost): Promise<unknown> {
     });
   }
   return payload;
+}
+
+/**
+ * 发一次 JSON POST（chat completion 与 embeddings 那两条腿）。
+ * @param request 见 `JsonPost`
+ * @returns 对端 JSON
+ * @throws 同 `requestJson`
+ */
+export async function postJson(request: JsonPost): Promise<unknown> {
+  return requestJson({ ...request, method: 'POST' });
+}
+
+/**
+ * 发一次 JSON GET（目前只有 `/models` 清单探测，spec 7.2-05）。
+ *
+ * 与 POST 共用同一具骨架是硬要求：`scripts/check-llm-single-entry.ts` 守的就是"这一个客户端"，
+ * 为清单探测另写一遍 fetch/超时/错误信封会把那条机检变成摆设（AGENTS.md §2.7）。
+ * @param request 见 `JsonGet`
+ * @returns 对端 JSON
+ * @throws 同 `requestJson`
+ */
+export async function getJson(request: JsonGet): Promise<unknown> {
+  return requestJson({ ...request, method: 'GET' });
 }

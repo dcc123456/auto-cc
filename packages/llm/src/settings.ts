@@ -25,6 +25,7 @@ import type {
   LlmSettingsView,
 } from '@auto-cc/shared';
 import { z } from 'zod';
+import { resolveLeg } from './binding.js';
 import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 import {
   addModelsSchema,
@@ -67,6 +68,22 @@ export const applySettingsSchema = z.strictObject({
 
 export type LlmSettingsConfig = z.output<typeof llmSettingsSchema>;
 
+/**
+ * 角色绑定的入参（spec 7.2-11）：把一条腿指到池里某个实例、以及它已入库的某条模型。
+ *
+ * 两处都叫 `providerId` 是暂时的、也是必须看清的：这里绑的是**实例 id**（`llm_providers.id`），
+ * 写进 `llm` / `llm-embed` 那格；而 `applySettingsSchema` 的那个是**预设 id**，写进 `llm-settings` 那格（7.1 的语义）。
+ * 7.2-d 删掉 `apply()` 之后只剩前一种读法。
+ */
+export const bindRoleSchema = z.strictObject({
+  leg: llmLegSchema,
+  providerId: z.string().min(1),
+  model: z.string().min(1),
+});
+
+/** 一次角色绑定的入参形状（`origin` 之类没有缺省键，所以 input 与 output 同形）。 */
+export type BindRoleInput = z.output<typeof bindRoleSchema>;
+
 /** 腿 → 装配里的插件 id。 */
 const LEG_PLUGIN: Record<LlmLegName, string> = { chat: 'llm', embed: 'llm-embed' };
 
@@ -84,6 +101,23 @@ const LEG_KEY_ENV: Record<LlmLegName, string> = {
   chat: 'AUTO_CC_LLM_API_KEY',
   embed: 'AUTO_CC_SILICONFLOW_API_KEY',
 };
+
+/**
+ * 一次模型清单拉取的读数（spec 7.2-05 / 07）。
+ *
+ * 失败也回结构化结果而不抛：这一条的判据是"播报一句、已入库的行不动"，
+ * 抛错会让界面写成 try/catch，而 catch 里最容易顺手做的事就是清空清单。
+ */
+export interface LlmFetchModelsView {
+  ok: boolean;
+  /** 候选模型名（`ok` 为假时是空数组） */
+  models: string[];
+  /** 失败原因码：`EMPTY`（拿到了但一条都没有）/ `LLM_REQUEST_FAILED` / `LLM_PROVIDER_NOT_FOUND` / `LLM_UNAVAILABLE` */
+  reason: string | null;
+  message: string | null;
+  /** 这次探测花了多少毫秒 */
+  elapsedMs: number;
+}
 
 /** 内核那一格里可见的最小读法（装没装、生效值是什么、怎么热改）。 */
 interface KernelReader {
@@ -145,18 +179,26 @@ export class LlmSettingsService extends Service {
   }
 
   /**
-   * 读一条腿。
+   * 读一条腿（spec 7.2-12 的读数半边）：先按「绑定 > 兜底 > 未配置」解析，再照实报这一腿当下用什么。
    * @param leg 哪条模型腿
-   * @returns 该腿的读数，含"这把 key 现在从哪来"
+   * @returns 该腿的读数，含"这把 key 现在从哪来"——绑定时问的是那家实例自己的密钥格
    */
   private readLeg = (leg: LlmLegName): LlmLegView => {
     const pluginId = LEG_PLUGIN[leg];
     const config = maybeService<ConfigService>(this.ctx, 'config');
     const effective = this.effectiveOf(pluginId);
-    const baseUrl = typeof effective.baseUrl === 'string' ? effective.baseUrl : null;
-    const model = typeof effective.model === 'string' ? effective.model : null;
     const keyEnv = LEG_KEY_ENV[leg];
-    const storedKey = config?.getSecret(LEG_SECRET[leg]) ?? '';
+    // 端点、模型名与密钥路径都按解析顺序现算：绑定了实例就报实例的地址，读的是 `llm.provider:<id>` 那一格，
+    // 界面看到的才是"这次真的在用什么"（spec 7.2-11 的判据）。
+    const resolved = resolveLeg(this.ctx, leg, {
+      providerId: typeof effective.providerId === 'string' ? effective.providerId : null,
+      baseUrl: typeof effective.baseUrl === 'string' ? effective.baseUrl : null,
+      model: typeof effective.model === 'string' ? effective.model : null,
+      keyEnv,
+    });
+    const baseUrl = resolved.baseUrl;
+    const model = resolved.model;
+    const storedKey = config?.getSecret(resolved.secretPath) ?? '';
     const envKey = (process.env[keyEnv] ?? '').trim();
     const savedProvider = this.options[LEG_PROVIDER_KEY[leg]];
     // 存着的服务商只有在端点确实对得上时才继续算数（端点变体也算）：用户手改过 baseUrl 就该改口成「自定义」，
@@ -228,20 +270,31 @@ export class LlmSettingsService extends Service {
   };
 
   /**
-   * 删一个提供商实例：清单连带删、密钥库那一把一起清（spec 7.2-09 的存储半边）。
+   * 删一个提供商实例：清单连带删、密钥库那一把一起清、引用它的角色绑定回落到未绑定（spec 7.2-09 的三条）。
    *
-   * 两条都必须在这里做，缺一条就留下孤儿：行删了而 `llm_models` 留着是孤儿清单，密钥留着是孤儿凭证。
-   * 第三条"引用它的角色绑定回落到未绑定"随 7.2-c 的 `bindRole` 到货——那之前配置格里的 `providerId`
-   * 记的还是**预设 id**（7.1 的语义），与实例 id 不是一个命名空间，现在去撤它只会撤错。
+   * 三条都必须在这里做，缺一条就留下孤儿：行删了而 `llm_models` 留着是孤儿清单，密钥留着是孤儿凭证，
+   * 绑定还指着它则是**悬空绑定**——那条腿每次请求都要先解析一次才发现"这一行没有了"，界面上看着像端点坏了。
+   * 回落之后那条腿按 7.2-12 的顺序重解析（有 yml/env 兜底就用兜底），缺项由 `read()` 照报
+   * （`missing` 里会重新长出 `model` / `apiKey`），所以界面不用自己拼这句话。
    * @param id 实例 id
    * @returns 删完之后剩下的实例（界面不用再补一刀）
    * @throws id 不在池里 `LLM_PROVIDER_NOT_FOUND`
    */
-  deleteProvider = (id: string): LlmProviderInstanceView[] => {
+  deleteProvider = async (id: string): Promise<LlmProviderInstanceView[]> => {
     if (!deleteProviderRow(this.store.db, id)) {
       throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${id}`, 'llm.settings', { id });
     }
     maybeService<ConfigService>(this.ctx, 'config')?.clearSecret(providerSecretPath(id));
+    const kernel = maybeService<KernelReader>(this.ctx, 'kernel');
+    for (const leg of ['chat', 'embed'] as const) {
+      const pluginId = LEG_PLUGIN[leg];
+      if (this.effectiveOf(pluginId).providerId !== id) continue;
+      // 绑定是一次原子表态（实例 + 模型名两条键一起写），撤它就得两条一起撤：只撤 `providerId`
+      // 会让这条腿挂着一个已经不存在的模型名，而界面的候选出自 `llm_models`，那一格里再也没有它。
+      const unset = { providerId: null, model: null };
+      maybeService<ConfigService>(this.ctx, 'config')?.setPersisted(pluginId, unset, ['providerId', 'model']);
+      if (kernel) await kernel.applyConfig(pluginId, unset);
+    }
     return this.listProviders();
   };
 
@@ -295,6 +348,114 @@ export class LlmSettingsService extends Service {
   removeModel = (providerId: string, model: string): LlmModelView[] => {
     removeModelRow(this.store.db, providerId, model);
     return this.listModels(providerId);
+  };
+
+  /**
+   * 问一家网关要它的模型清单（spec 7.2-05）：本服务一个字节都不发，转调 `llm.chat.listModels`。
+   *
+   * 失败**绝不清空**已入库的清单（spec 7.2-07）：这一条只读数、只播报，唯一的写路径是界面上随后的
+   * 「添加所选」（`addModels`）。把"拉取失败"顺手变成"清空重来"会让用户一次网络抖动就丢掉整家清单。
+   * @param providerId 池实例 id
+   * @returns 结构化结果：`ok` 是否拿到、`models` 候选、`reason` 失败码（`EMPTY` = 拿到了但一条都没有）
+   * @throws 不抛——失败以 `reason` 回给界面，与非 2xx / 超时同一套读法
+   */
+  fetchModels = async (providerId: string): Promise<LlmFetchModelsView> => {
+    const started = Date.now();
+    const chat = maybeService<LlmChatService>(this.ctx, 'llm.chat');
+    if (!chat) {
+      return { ok: false, models: [], reason: 'LLM_UNAVAILABLE', message: '模型出口未装载', elapsedMs: 0 };
+    }
+    try {
+      // `model` 这一格清单探测用不上，但连通测试与它共用同一个目标形状（`LlmProbeTarget`），所以照样点名。
+      const listing = await chat.listModels({ providerId, model: '' });
+      if (listing.models.length === 0) {
+        return {
+          ok: false,
+          models: [],
+          reason: 'EMPTY',
+          message: '这家回给的模型清单是空的',
+          elapsedMs: Date.now() - started,
+        };
+      }
+      return { ok: true, models: listing.models, reason: null, message: null, elapsedMs: Date.now() - started };
+    } catch (error) {
+      const payload = AppError.from(error, 'LLM_REQUEST_FAILED');
+      return { ok: false, models: [], reason: payload.code, message: payload.message, elapsedMs: Date.now() - started };
+    }
+  };
+
+  /**
+   * 测某一家实例的连通性（spec 7.2-04）：发**一次**最小 chat 请求，判据与生产路径完全一致。
+   * @param providerId 池实例 id
+   * @param model 这次探测点名用哪条模型名（界面上「测试连通」旁边那条）
+   * @returns 结构化结果；失败不抛，界面按 `reason` 说话
+   */
+  checkProvider = async (providerId: string, model: string): Promise<LlmCheckView> => {
+    const started = Date.now();
+    const chat = maybeService<LlmChatService>(this.ctx, 'llm.chat');
+    if (!chat) return { ok: false, model: null, reason: 'LLM_UNAVAILABLE', message: '模型出口未装载', elapsedMs: 0 };
+    try {
+      const completion = await chat.complete(
+        { messages: [{ role: 'user', content: 'ping' }], maxTokens: 8 },
+        { providerId, model },
+      );
+      return { ok: true, model: completion.model, reason: null, message: null, elapsedMs: Date.now() - started };
+    } catch (error) {
+      const payload = AppError.from(error, 'LLM_REQUEST_FAILED');
+      return {
+        ok: false,
+        model: null,
+        reason: payload.code,
+        message: payload.message,
+        elapsedMs: Date.now() - started,
+      };
+    }
+  };
+
+  /**
+   * 角色绑定：把一条腿指到池里某个实例的某条**已入库**模型（spec 7.2-11）。
+   *
+   * 候选只出自 `llm_models`，所以"能选到的就一定已经在清单里"——这条硬约束是为了不让界面长出一个
+   * 可以手敲任意模型名的口子（那会让 7.2-12 的解析顺序变成猜）。
+   * 落盘走 `config` 的持久层 + `kernel.applyConfig` 热改，所以保存后**不用重启**就生效（spec 7.1-08 同一条链）。
+   * @param input 哪条腿、哪个实例、哪条模型
+   * @returns 绑定后的读数（两条腿都重算，界面不用再补一刀）
+   * @throws 入参不合法 `INVALID_ARGUMENT`；实例不在池里 `LLM_PROVIDER_NOT_FOUND`；模型没入库 `INVALID_ARGUMENT`（`details.reason = 'MODEL_NOT_ADDED'`）
+   */
+  bindRole = async (input: BindRoleInput): Promise<LlmSettingsView> => {
+    const parsed = bindRoleSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `角色绑定不合法：${parsed.error.issues[0]?.message ?? ''}`,
+        'llm.settings',
+        { issues: parsed.error.issues.map((issue) => issue.path.join('.')) },
+      );
+    }
+    const { leg, providerId, model } = parsed.data;
+    if (!providerRowOf(this.store.db, providerId)) {
+      throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${providerId}`, 'llm.settings', {
+        providerId,
+      });
+    }
+    if (!modelRowsOf(this.store.db, providerId).some((row) => row.model === model)) {
+      throw new AppError('INVALID_ARGUMENT', `这条模型还没有入库：${model}`, 'llm.settings', {
+        providerId,
+        model,
+        reason: 'MODEL_NOT_ADDED',
+      });
+    }
+    const config = maybeService<ConfigService>(this.ctx, 'config');
+    if (!config) {
+      throw new AppError('SETTING_NOT_ALLOWED', '配置服务未装载，角色绑定无处落盘', 'llm.settings', { leg });
+    }
+    const pluginId = LEG_PLUGIN[leg];
+    // 只写 `providerId` 与 `model` 两个键，**不复制 baseUrl**：端点当场向池问（`resolveLeg`），
+    // 否则用户改了那家的地址，这条腿还会拿着旧地址打（AGENTS.md §2.5）。
+    config.setPersisted(pluginId, { providerId, model }, ['providerId', 'model']);
+    const kernel = maybeService<KernelReader>(this.ctx, 'kernel');
+    if (kernel) await kernel.applyConfig(pluginId, { providerId, model });
+    return this.read();
   };
 
   /**

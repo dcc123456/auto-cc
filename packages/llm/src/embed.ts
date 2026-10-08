@@ -16,6 +16,7 @@
  */
 import { AppError, Service, type Context } from '@auto-cc/core';
 import { z } from 'zod';
+import { resolveLeg, type ResolvedLeg } from './binding.js';
 import { joinEndpoint, postJson } from './http.js';
 import { readModelKey, type KeyProbe } from './key.js';
 
@@ -26,6 +27,11 @@ import { readModelKey, type KeyProbe } from './key.js';
  * 4.3-04 的「无 key、断网时检索照常」靠的就是这一条，而不是靠调用方记得判空。
  */
 export const llmEmbedSchema = z.strictObject({
+  /**
+   * 角色绑定指向的**池实例 id**（spec 7.2-11 的向量腿）。`null` = 没绑定，走下面这个 `baseUrl`。
+   * 与 `llm.chat` 同一个解析顺序（`resolveLeg`），所以"绑了哪家"与"这条腿自己配的端点"不会两套判法。
+   */
+  providerId: z.string().min(1).nullable().default(null),
   /**
    * 端点前缀（不含 `/embeddings`），例如 `https://api.siliconflow.cn/v1`。
    * `null` = 未配置；**不复用** `llm.chat` 的 `baseUrl`，理由见文件头证据 [4]。
@@ -63,6 +69,10 @@ export interface LlmEmbedStatus {
   dimensions: number | null;
   /** 当前这把 key 从哪来（spec 7.1-07）：密钥库（界面上存的）> 环境变量（`keyEnv`）> 没有。 */
   keySource: 'secret' | 'env' | 'none';
+  /** 这一腿的端点是谁给的（spec 7.2-12）：池实例 / 自己的配置格 / 两边都没有。 */
+  origin: ResolvedLeg['origin'];
+  /** 生效的绑定实例 id；没绑定或绑定已回落时为 null。 */
+  providerId: string | null;
 }
 
 /** 一次编码的结果。 */
@@ -122,31 +132,47 @@ export class LlmEmbedService extends Service {
   }
 
   /**
-   * 读取 API key：先问密钥库（界面上填的那把），`keyEnv` 的环境变量只作兜底（spec 7.1-07）。
+   * 解析这一腿打哪儿（spec 7.2-12 的顺序：绑定 > 自己的配置格 > 未配置）。
+   * @returns 端点前缀、模型名、该问密钥库哪一格
+   */
+  private resolve = (): ResolvedLeg => resolveLeg(this.ctx, 'embed', this.options);
+
+  /**
+   * 读取 API key：先问密钥库（界面上填的那把或绑定实例的那把），`keyEnv` 的环境变量只作兜底（spec 7.1-07）。
+   * @param resolved 这一腿解析出来的目标，决定问密钥库哪一格
    * @returns 明文与出处；两处都没有时 `value` 是空串
    * @throws 不抛异常
    */
-  private readKey = (): KeyProbe => readModelKey(this.ctx, 'llm.embed', this.options.keyEnv);
+  private readKey = (resolved: ResolvedLeg): KeyProbe => readModelKey(this.ctx, resolved.secretPath, resolved.keyEnv);
+
+  /**
+   * 把一个解析好的目标收成可用性读数（`status()` 与 `embed()` 共用，§2.2）。
+   * @param resolved 见 `resolve`
+   * @returns 缺项、完整端点与 key 出处；纯本地，一次网络都不发
+   */
+  private readiness = (resolved: ResolvedLeg): LlmEmbedStatus => {
+    const missing: LlmEmbedStatus['missing'] = [];
+    if (!resolved.baseUrl) missing.push('baseUrl');
+    if (!resolved.model) missing.push('model');
+    const key = this.readKey(resolved);
+    if (!key.value) missing.push('apiKey');
+    return {
+      available: missing.length === 0,
+      missing,
+      model: resolved.model,
+      endpoint: resolved.baseUrl ? joinEndpoint(resolved.baseUrl, 'embeddings') : null,
+      dimensions: this.options.dimensions,
+      keySource: key.source,
+      origin: resolved.origin,
+      providerId: resolved.providerId,
+    };
+  };
 
   /**
    * 当前是否可用，以及不可用时缺了哪几样。**纯本地判定，不发任何网络请求。**
    * @returns 可用性读数
    */
-  status = (): LlmEmbedStatus => {
-    const missing: LlmEmbedStatus['missing'] = [];
-    if (!this.options.baseUrl) missing.push('baseUrl');
-    if (!this.options.model) missing.push('model');
-    const key = this.readKey();
-    if (!key.value) missing.push('apiKey');
-    return {
-      available: missing.length === 0,
-      missing,
-      model: this.options.model,
-      endpoint: this.options.baseUrl ? joinEndpoint(this.options.baseUrl, 'embeddings') : null,
-      dimensions: this.options.dimensions,
-      keySource: key.source,
-    };
-  };
+  status = (): LlmEmbedStatus => this.readiness(this.resolve());
 
   /**
    * 把若干段文本编成向量，按 `batchSize` 切批、逐批串行发。
@@ -158,7 +184,8 @@ export class LlmEmbedService extends Service {
    * @throws 未配置时 `LLM_UNAVAILABLE`（且不发请求）；网络 / 超时 / 非 2xx / 响应不合约定时 `LLM_REQUEST_FAILED`
    */
   embed = async (texts: readonly string[]): Promise<LlmEmbeddings> => {
-    const status = this.status();
+    const resolved = this.resolve();
+    const status = this.readiness(resolved);
     if (texts.length === 0) {
       // 空输入不是错误：调用方（向量同步）在「没有待补切片」时也走这条路，为它发一个空请求毫无意义。
       return { model: (status.model as string) ?? '', dim: null, vectors: [] };
@@ -183,7 +210,7 @@ export class LlmEmbedService extends Service {
       if (this.options.dimensions !== null) body.dimensions = this.options.dimensions;
       const payload = await postJson({
         endpoint,
-        apiKey: this.readKey().value,
+        apiKey: this.readKey(resolved).value,
         body,
         timeoutMs: this.options.timeoutMs,
         source: 'llm.embed',

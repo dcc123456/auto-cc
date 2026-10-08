@@ -1,0 +1,126 @@
+7.2-c 显式目标客户端 —— 读数与取证（spec 7.2-05 / 07 / 12 / 13 的 U+C 半边，并记下 04 / 06 / 09 / 11 已到的一半）
+日期：2026-10-08 · 平台：macOS（Apple Silicon）· 测试面：`packages/llm/src/settings.test.ts` + `scripts/fixture-server.ts`
+
+# 一、四道门禁（结论重定向到文件再看 EXIT，§9 实测 5.4-c）
+
+    pnpm typecheck      → TYPECHECK_EXIT=0
+    pnpm lint           → LINT_EXIT=0（13 项：eslint + 12 只 scripts/check-*.ts）
+    pnpm format:check   → FMTCHECK_EXIT=0
+    pnpm test           → TEST_EXIT=0（23 个包逐包 `Tests  N passed`，汇总 2079 条、0 条失败）
+
+`pnpm --filter @auto-cc/plugin-llm test`：4 个文件 66 条全绿
+（quota-boundary 2 / llm 13 / embed 16 / settings 35，settings 里本片新增的一节是 7 条）。
+
+typecheck 第一次是红的（TYPECHECK_EXIT=2），报在**包外**：`packages/outbound` 的两处 `LlmConfig` 字面量
+（`greet.test.ts:65`、`script.test.ts:33`）缺 `providerId`。原因不是写错，而是 §9 实测 1.3 那条的另一副面孔——
+schema 里带 `.default()` 的键在 **output 类型**里是必填，所以给 `llmSchema` 加 `providerId` 会直接波及所有
+"手工递一份配置"的调用点。两处各补 `providerId: null`（= 未绑定态，读这条腿自己的 `baseUrl`），
+不改 schema、也不把该键做成 optional（那会让兜底链在类型层失去"必须表态过一次"的约束）。
+
+lint 里与本片直接相关的三条：
+- `check-llm-single-entry.ts`：绿。本片的 `/models` 走的是 `llm.chat` 的**第三个方法**，
+  `llm.settings` 一个字节都不发（见第四条的 grep 读数），没有长出第三个 `llm.*` 服务。
+- `check-compliance-redlines.ts`：绿。测试面地址仍是 RFC-2606 保留名（`gw.test.invalid` / `model.test.invalid`）
+  与 `127.0.0.1` fixture，没有写死任何一家真实端点。
+- `check-renderer-conventions.ts` / i18n 键对齐：绿（本片不动渲染层）。
+
+# 二、7.2-05「自动获取模型列表」的 U 半边
+
+单测两条正向 + 一条负向，全部走 `stubFetch`（AGENTS.md §7.2）：
+
+- 标准信封 `{"data":[{"id":"a-model"},{"object":"model"},{"id":"z-model"},{"id":""}]}`
+  → `models: ['a-model','z-model']`：**脏项逐条跳过**（没有 `id` 的那条、`id` 是空串的那条都不进候选），
+  而不是整包判坏。判定写在 `readModelIds` 里按项做（`typeof id === 'string' && id !== ''`）。
+- 变体信封 `{"models":[{...}]}` → `['c-model','d-model']`。两家都认是同一条函数的两个分支，不是两份实现。
+- 实发的形状：`url === 'https://gw.test.invalid/v1/models'`、`init.method === 'GET'`、
+  `init.body === undefined`（GET 带 body 在 fetch 里是直接 TypeError），
+  `authorization === 'Bearer sk-pool-7777'` —— **带的是那家实例自己的密钥格**（`llm.provider:<id>`），
+  不是全局那一条。掩码末 4 位与实发 Bearer 对得上，"界面上说的那把就是这次发出去的那把"才成立。
+- `LlmFetchModelsView.elapsedMs` 是这次探测的毫秒数（进界面文案），断言 `>= 0` 而不是相等（§9 实测 6.2-25 的第三条：
+  计时类读数写区间）。
+
+**真实靶端点的读数**（§6.2「文档转述不可信」）：`scripts/fixture-server.ts` 加了 `GET /v1/models`，
+在 10243 上起一份**自有端口**的 fixture（不动另一窗口在用的 10233），curl 五种开关：
+
+    无 Bearer            → 401
+    Bearer sk-probe-1111 → {"object":"list","data":[3 条带 id + 1 条不带 id]}
+    ?fail=auth + key     → 401
+    ?fail=empty          → {"object":"list","data":[]}
+    ?fail=timeout -m 1   → curl exit 28（挂到 20s 才回，客户端默认 8s 必先超时）
+
+即 fixture 的真回包正是单测里那条 `data[]` + 夹带脏项的形状，`readModelIds` 对它拿到 3 条。
+取证后已 `kill` 掉 10243 那个实例，10233 仍在（未动别人的会话）。
+
+# 三、7.2-07「拉取失败绝不清空」的三条读法
+
+一条用例里连查四种失败态，**每一种之后都重读一次已入库清单**：
+
+- 非 2xx（401）→ `{ ok:false, reason:'LLM_REQUEST_FAILED' }`
+- 200 但 `data:[]` → `{ ok:false, reason:'EMPTY', message:'这家回给的模型清单是空的' }`
+  —— 与"发不出去"分两个码：界面上的处置不一样（前者是换一家/手敲，后者是重试）。
+- 超时（`TimeoutError` reject）→ 同一个码 `LLM_REQUEST_FAILED`，`message` 含「超时」，靠文案分派。
+- `providerId` 不在池里 → `reason:'LLM_PROVIDER_NOT_FOUND'`，且**一次请求都不发**（`fixture.requests` 长度不变）。
+
+四种读法之后 `listModels(saved.id)` 仍是 `['a-model','b-model']` —— `fetchModels` 里没有任何写路径，
+入库只发生在随后的 `addModels`（用户点「添加所选」）。这条是硬约束而不是副产品：一次网络抖动不许让用户丢掉整家清单。
+
+# 四、7.2-12 解析顺序「绑定 > 兜底 > 未配置」的三条读数
+
+`resolveLeg`（`packages/llm/src/binding.ts`）是 chat 与 embed 共用的**唯一一处**判法：
+
+- ① 绑定态：第二次装载点名 `chatProviderId` → `llm.chat.status()` 回
+  `{ available:true, endpoint:'https://gw.test.invalid/v1/chat/completions', keySource:'secret', origin:'pool', providerId:<实例 id> }`。
+  端点来自池那一行、密钥路径来自 `llm.provider:<id>`，**配置格里的 `baseUrl` 没有被复制进绑定**（见下条）。
+- ② 兜底态：没有绑定 → `endpoint:'https://model.test.invalid/v1/chat/completions'`、`origin:'config'`、
+  `keySource:'env'`（7.1-07 那条链原样不动，spec 7.2-15 的反向验证半边）。
+- ③ 未配置：两边都没有 → `missing:['baseUrl','model','apiKey']`、`endpoint:null`、`origin:'none'`，
+  且 `complete()` 在 fetch 之前就抛 `LLM_UNAVAILABLE`（不发请求）。
+- 向量腿同一条函数：绑定 embed 后 `read().legs[embed]` 读的也是池那个地址 —— 这条是"抽出来"的全部理由，
+  否则会长出"只有聊天腿听绑定"。
+
+一条取证口径（写进 plan §7.7 第 1、2 条）：本用例的内核是**替身**，热改只写生效值、不会重建 `llm.chat`，
+所以"绑定态的客户端读数"必须由第二次装载取；`settings.read()` 现问 `kernel.effectiveConfig`，两条通道别混成一条断言。
+另一条：`boot({ envKey })` 设的环境变量要等 `afterEach` 才清，同一条用例里紧接着查"两处都没有"会读到假读数
+（第一次红就是这么来的：`missing` 少了 `apiKey`）。
+
+# 五、7.2-11 角色绑定 / 7.2-09 删除回落（U 半边）
+
+- `bindRole({ leg:'chat', providerId, model })`：
+  - 持久层 `config.persisted('llm')` **恰好等于** `{ providerId:<实例 id>, model:'a-model' }` —— 没有 `baseUrl` 这一项
+    （§2.5：端点当场向池问，复制一份就永远会漂）。
+  - 热改补丁 `applied` **一条**：`{ id:'llm', patch:{ providerId, model } }`。一次绑定只动受影响的那条腿，
+    风险表里"重建两次"那一条按这个形状兑现。
+  - 读回的腿：`baseUrl` 是池地址、`key.tail` 是 `7777`、`available:true`；另一条腿 `embed` 的 `missing` 仍是三项（没被牵连）。
+  - 三条负腿：模型没入库 → `INVALID_ARGUMENT` + `details.reason:'MODEL_NOT_ADDED'`（候选只出自 `llm_models`，
+    界面不长手敲口子）；实例不在池里 → `LLM_PROVIDER_NOT_FOUND`；腿名不合法 → `INVALID_ARGUMENT` + `issues:['leg']`。
+    三条之后 `persisted('llm')` 仍是 `{}`、`applied` 长度 0（校验早于任何写）。
+- `deleteProvider` 撤悬空绑定：删掉正被 chat 绑着的那条之后 ——
+  - `applied.at(-1)` 是 `{ id:'llm', patch:{ providerId:null, model:null } }`（当场撤，不留"每次请求先解析一次才发现这一行没了"）；
+  - `persisted('llm')` 变 `{ providerId:null, model:null }` —— **两条键一起撤**，因为绑定是一次原子表态：
+    只撤 `providerId` 会让这条腿挂着一个已经不存在的模型名，而 7.2-d 的候选出自 `llm_models`，那一格里再也没有它
+    （第一版实现就是这么写的，实测读数把这条改了过来 —— spec 7.2-09 那句"回落到未绑定"判的是整个绑定，不是半个）；
+  - 腿回落：`baseUrl` 回到配置格那一个（`model.test.invalid`），`model` 为 null，`missing` 是 `['model','apiKey']`
+    （key 随实例一起清了）。缺哪一格由 `read()` 照报，界面不用自己拼。
+  - 一条随之而来的口径记在这里：持久层写 `null` 会**盖过** `cordis.yml` 里那一格（`mergeDeep` 后层赢，null 是值不是"删除"）。
+    所以"删掉一家之后 yml 的模型名不会自己回来"是当前语义 —— yml 本身没动，重新绑定或界面保存一次就覆盖掉这个 null。
+- `checkProvider(providerId, model)`（7.2-04 的 U 半边）：一发 `POST <池地址>/chat/completions`，
+  body 里 `model` 是**点名那一条**、`max_tokens:8`；`applied` 长度 0 且 `persisted('llm')` 仍是 `{}` ——
+  探测不改全局绑定。点名池里没有的实例时 `reason:'LLM_PROVIDER_NOT_FOUND'` 且请求数不变。
+
+# 六、7.2-13 出口唯一（C 半边）
+
+现读 `packages/llm/src` 的落点：`fetch(` 只有 **1 处**（`http.ts:98`，`requestJson` 内部），
+`from './http.js'` 只有 **2 处**（`index.ts:21` 的 chat、`embed.ts:20` 的 embed）。
+`settings.ts` / `binding.ts` / `provider-pool.ts` 都不 import 它，`scripts/check-llm-single-entry.ts` 在 `pnpm lint` 链内为绿。
+GET 与 POST 共用同一具骨架（`requestJson` + 两支薄封装），而不是为清单探测另写一遍 fetch/超时/错误信封。
+
+# 七、本片没做的事（留给 7.2-d / 7.2-e，防止被当成已完成）
+
+- **旧的 `apply()` 仍在**（改判：删除挪到 7.2-d）。原因是现读而非偏好——`ModelSettingsPanel.tsx` 的「保存这一腿」
+  走的就是 `llm.settings.apply`，而进程契约（`shared/src/bridge.ts`）与渲染层三段都在 7.2-d 才换；
+  在本片删掉它主干会留下一段"点了没反应"的界面回归。因此 **spec 7.2-15 仍 `[ ]`**。
+- 所有 U+V 条目的 **V 半边**（活体点「获取模型」看候选数、勾两条重读、改绑后 `status().model` 立刻为新、
+  深浅两主题截图）随 7.2-d 的界面与 7.2-e 的活体验收兑现。
+- `llm.provider:<id>` 的**四面 grep**（`trace()` / `settings.json` / 日志 / 渲染层回包）与 `stat` 0600 复核在 7.2-e 重取
+  （7.2-b 只取了单测侧的"扫 userData 目录除 `secrets.bin` 都 grep 不到"）。
+- 渲染层三段与 `bridge.ts` 的新动作、双语键：7.2-d。

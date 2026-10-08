@@ -18,6 +18,7 @@ const ENDPOINT = 'https://model.test.invalid/v1/chat/completions';
 
 /** 完整可用配置（带 `.default()` 的键在直接调用点必须显式给出，见 AGENTS.md §9）。 */
 const CONFIG: LlmConfig = {
+  providerId: null,
   baseUrl: BASE_URL,
   model: 'test-model',
   keyEnv: KEY_ENV,
@@ -48,12 +49,15 @@ async function boot(config: Partial<LlmConfig> = {}, key = 'sk-test-abcdef'): Pr
 describe('llm.chat 的可用性判定（spec 2.5-01 前提：回落必须是可测的）', () => {
   it('配置齐全：status 报可用，端点由前缀拼出且不带重复斜杠', async () => {
     const { llm } = await boot();
+    // 这一条同时是 spec 7.2-12 的第二条读数：没有绑定时端点来自配置格（`origin: 'config'`），key 来自环境变量。
     expect(llm.status()).toEqual({
       available: true,
       missing: [],
       model: 'test-model',
       endpoint: ENDPOINT,
       keySource: 'env',
+      origin: 'config',
+      providerId: null,
     });
   });
 
