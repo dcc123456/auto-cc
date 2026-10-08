@@ -28,20 +28,27 @@ const SPINNER_SLOT = 'inline-flex w-3.5 shrink-0 items-center justify-center';
 
 /**
  * 各 variant 的静态 class。**必须写成完整字面量**——Tailwind 只扫源码里出现的字符串，
- * 拼出来的 class 不会生成。悬停一律「提亮一档、无位移」，位移只允许出现在按下瞬间。
+ * 拼出来的 class 不会生成。悬停一律「提亮一档」，位移只允许出现在按下瞬间；
+ * 唯一例外是 `seal`：稿上它是六档里唯一一颗反色键，`.seal:hover` 自带 1px 上浮（`shared.css:439-444`）。
  * @param variant 语义档
  * @param disabled 是否禁用（禁用时不提亮，靠 ring 属性把原因带在节点上）
  * @param compact 窄档：贴在行内的小按钮用，字号与内边距都收一档
  */
 const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean): string => {
+  // 朱砂键的字形按稿上「方框 + 宋体 + 朱砂」走（`shared.css:417-433` 的 `.seal`：`--f-cjk-display`
+  // + 700 + `letter-spacing:.06em`），其余五档共用 sans 中字重。字体、字重与字距挂在 base 而不是档位串里，
+  // 是因为它跟"可点不可点"无关：稿 `.seal.off` 仍是宋体，只是描边退回灰。
+  const font = variant === 'seal' ? 'font-display font-bold tracking-[0.06em] ' : 'font-medium ';
   const base =
-    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'} font-medium ` +
-    'transition-[background-color,border-color,color,box-shadow] duration-150 ' +
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'} ` +
+    font +
+    'transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70 ' +
     (disabled
       ? 'cursor-not-allowed border-line bg-ink-850 text-slate-400 '
-      : // 默认 → 悬停（提亮一档、无位移）→ 按下（下移 1px + 回到 ink-800）
-        'active:translate-y-px active:bg-ink-800 ');
+      : // 按下那一下的下沉位移全档共用；**底色按档分岔**。原先这里挂着 `active:bg-ink-800`，于是印章键
+        // 按下去画成一块中性灰——而稿上它是六档里唯一一颗反色键，按下必须进深朱砂。
+        'active:translate-y-px ');
   // 禁用时**整档语义色都不拼**（spec 6.2-10）。两条原因都在这一行里：
   // ① 描边——原先 `base` 给 `border-line`、`tone` 又给 `border-line-strong` / `border-slate-600` /
   //   `border-transparent`，而 Tailwind 生成的样式表按它自己的顺序排，`border-line` 排在后面就赢不了，
@@ -54,16 +61,27 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
   const tone = disabled
     ? ''
     : variant === 'seal'
-      ? 'border-seal/45 bg-seal/18 text-seal-ink hover:border-seal/70 hover:bg-seal/28 hover:text-slate-50'
+      ? // 稿上唯一的反色键：`.seal:hover` 把整颗填成朱砂、字转白、带一圈光晕并上浮 1px
+        // （`shared.css:439-444`），按下再进 `--seal-deep` 并缩回（`shared.css:1423-1426`、
+        // `shared.css:1785-1790` 的 pressed 演示）。填色取 `seal-deep` 而不是稿上那档 `--seal`：
+        // 墨案 `#e2543a` 压白字只有 3.61:1，够不到本项目自己那条 4.5 墙（spec 6.1-06 / §12），
+        // 而 `#b93b26` 是稿自己给按下态的那一档（`shared.css:29`），拿它当悬停底正好两案都过（5.65 / 13.14）。
+        // 字色**不能沿用其余五档的 `slate-50`**：那是一只会随主题翻面的"最亮文字"档（墨案 #e8eef3 /
+        // 毡案 #1b2228），压在深朱砂底上毡案只有 1.22:1——反色键上的字必须跟着稿固定为白。
+        'border-seal/45 bg-seal/18 text-seal-ink ' +
+        'hover:bg-seal-deep hover:border-seal-deep hover:text-white hover:shadow-seal-glow hover:-translate-y-px ' +
+        'active:bg-seal-deep active:border-seal-deep active:text-white active:brightness-[0.82] active:shadow-none active:scale-[0.985]'
       : variant === 'jade'
-        ? 'border-jade/40 bg-jade/14 text-jade-ink hover:border-jade/65 hover:bg-jade/24 hover:text-slate-50'
+        ? 'border-jade/40 bg-jade/14 text-jade-ink hover:border-jade/65 hover:bg-jade/24 hover:text-slate-50 active:bg-ink-800'
         : variant === 'amber'
-          ? 'border-amber/40 bg-amber/14 text-amber-ink hover:border-amber/65 hover:bg-amber/24 hover:text-slate-50'
+          ? 'border-amber/40 bg-amber/14 text-amber-ink hover:border-amber/65 hover:bg-amber/24 hover:text-slate-50 active:bg-ink-800'
           : variant === 'solid'
-            ? 'border-slate-600 bg-ink-750 text-slate-50 hover:bg-ink-700 hover:border-slate-500'
+            ? 'border-slate-600 bg-ink-750 text-slate-50 hover:bg-ink-700 hover:border-slate-500 active:bg-ink-800'
             : variant === 'ghost'
-              ? 'border-transparent bg-transparent text-slate-300 hover:bg-ink-800 hover:text-slate-50'
-              : 'border-line-strong bg-ink-800 text-slate-100 hover:bg-ink-750 hover:border-slate-500 hover:text-slate-50';
+              ? // 稿 `.btn-ghost:hover` 的底色是 `--ink-750`（`shared.css:393-396`），原先写成 `ink-800`
+                // 与 idle 的 `line` 档同色，悬停等于没提亮。
+                'border-transparent bg-transparent text-slate-300 hover:bg-ink-750 hover:text-slate-50 active:bg-ink-800'
+              : 'border-line-strong bg-ink-800 text-slate-100 hover:bg-ink-750 hover:border-slate-500 hover:text-slate-50 active:bg-ink-800';
   return `${base}${tone}`;
 };
 

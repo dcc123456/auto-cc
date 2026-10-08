@@ -56,6 +56,11 @@
      所以「文字档」在两案里都是**一只可读的色**，消费侧写法不变。 */
   --color-seal-ink: #ef7a55;
   --color-seal-wash: rgba(226, 84, 58, 0.13);
+  /* 朱砂的“再深一档”：给印章键的悬停与按下当实心底（07 稿 `.seal:hover` 的填充意图 +
+     `[data-st=pressed]` / `.seal:active`，稿值 `shared.css:29` #b93b26）。稿上悬停填的是 `--seal` 本身，
+     但墨案 #e2543a 压白字只有 3.61:1，够不到本项目自己的 4.5 墙（spec 6.1-06 / §12），所以悬停与按下
+     共用这一档。它是底、不是文案色，所以不在 §12 的四档文字档判据里。 */
+  --color-seal-deep: #b93b26;
   --color-jade: #4fb78a;
   --color-jade-ink: #4fb78a;
   --color-jade-wash: rgba(79, 183, 138, 0.12);
@@ -73,6 +78,11 @@
   --shadow-lift: 0 10px 26px -14px rgba(0, 0, 0, 0.75);
   --shadow-card: 0 1px 0 rgba(150, 178, 196, 0.06) inset;
   --shadow-sheet: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  /* 印章键悬停的那圈朱砂光晕：稿面值逐字搬（`shared.css:442` 的 `.seal:hover`），
+     两主题同值——稿自己就没按主题分岔（它是外发动作的确认键，光晕要刺眼才成立），
+     而 `shadow-seal-glow` 这只 utility 存在的唯一理由是让 `hover:` 挂得上一条 class 串，
+     不在面板里写 box-shadow 字面量（§5.1）。 */
+  --shadow-seal-glow: 0 6px 20px -6px rgba(226, 84, 58, 0.7);
 
   /* — 圆角：4 芯片 / 7 控件 / 12 纸面（设计稿 --r-sm/md/lg） — */
   --radius-chip: 4px;
@@ -291,6 +301,10 @@ body {
      `--seal-deep` 同一级（`shared.css:1206` #96290f ↔ 这里 #802615）。 */
   --color-seal-ink: #802615;
   --color-seal-wash: rgba(128, 38, 21, 0.1);
+  /* 稿上毡案那档是 #96290f（`shared.css:1206`），但毡案的色相档已被 6.1-09 裁定压深到 #802615——
+     稿的 deep 在它之上（更浅），按下必须比悬停更深，所以这一档沿同一方向再压，取 6.1-09 读数文件里
+     点名过的 #5a1b0f（对稿上那档白字 13.14:1）。 */
+  --color-seal-deep: #5a1b0f;
   --color-jade: #1c543d;
   --color-jade-ink: #1c543d;
   --color-jade-wash: rgba(28, 84, 61, 0.12);
