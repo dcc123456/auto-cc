@@ -58,7 +58,7 @@ export function SessionPanel() {
     }
   }, [bridge]);
 
-  const { busy, notice, resultOf, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, resultOf, run } = useBridgeAction(read);
 
   /**
    * 六只动作的标签。这一串同时是 `run` 的提示文案凭据**与**结果态的归属键（07 稿五态的第四、五态），
@@ -197,7 +197,7 @@ export function SessionPanel() {
         )}
 
         {notice && (
-          <Banner tone="celadon" markers={{ testid: 'session-notice' }} className="mt-2">
+          <Banner tone={noticeTone} markers={{ testid: 'session-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}

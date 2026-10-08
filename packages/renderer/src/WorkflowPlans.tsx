@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BridgeReply, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 一行的编辑态：`rename` / `duplicate` 带名字草稿，`remove` 只等一次确认。 */
 type PlanEdit = { planId: string; mode: 'rename' | 'duplicate' | 'remove'; draft: string };
@@ -40,7 +40,7 @@ export function WorkflowPlansSection({
     if (reply?.ok) setPlans(reply.value);
   }, [bridge]);
 
-  const { busy, notice, run: call } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run: call } = useBridgeAction(read);
   /** 在途那一拍：这一节里六只手都靠它挡重复触发（改名与复制还会叠一条空名判据）。 */
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const reasonLabel = (code?: string): string | undefined =>
@@ -329,12 +329,14 @@ export function WorkflowPlansSection({
       )}
 
       {notice ? (
-        <p
-          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
-          data-testid="workflow-plans-notice"
+        <Banner
+          tone={noticeTone}
+          size="compact"
+          markers={{ testid: 'workflow-plans-notice' }}
+          className="mt-2 break-all"
         >
           {notice}
-        </p>
+        </Banner>
       ) : null}
     </div>
   );

@@ -97,7 +97,7 @@ export function ResumePanel() {
     const reply = await bridge?.resume['parse.pending']();
     if (reply?.ok) setPending(reply.value);
   }, [bridge]);
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
   /**
    * 导入一份简历文件（spec 4.1-06 / 07）：把绝对路径交给主进程 `resume.parse.fromFile`，
@@ -462,7 +462,7 @@ export function ResumePanel() {
       </div>
 
       {notice && (
-        <Banner tone="celadon" markers={{ testid: 'resume-notice' }} className="mt-2 break-all">
+        <Banner tone={noticeTone} markers={{ testid: 'resume-notice' }} className="mt-2 break-all">
           {notice}
         </Banner>
       )}

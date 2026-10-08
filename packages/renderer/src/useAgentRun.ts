@@ -17,7 +17,7 @@ import { useBridgeAction } from './useBridgeAction';
  * 挂一次 agent 循环的界面状态。
  * @param sessionId 当前会话 id（来自 `chat.session.current()`，未回来时为 undefined）——
  *   挂载回看按它认领「这一段对话的最近一次 run」，不传就不回看（免得在快照之前猜一个会话）
- * @returns `run`（当前这条 run 的读数，没起草过为 undefined）、`notice`、`propose` / `confirm` / `stop` /
+ * @returns `run`（当前这条 run 的读数，没起草过为 undefined）、`notice` 与它的 `noticeTone`、`propose` / `confirm` / `stop` /
  *   `resume` / `dismiss` 五个动作，以及 `stopAccepted`（点过叫停但 `paused` 还没落进来——界面此刻只能说「已受理」，不能说「已停止」）
  */
 export function useAgentRun(sessionId?: string) {
@@ -143,5 +143,16 @@ export function useAgentRun(sessionId?: string) {
     action.setNotice(t('agent.run.dismissed'));
   }, [action, t]);
 
-  return { run, busy: action.busy, notice: action.notice, stopAccepted, propose, confirm, stop, resume, dismiss };
+  return {
+    run,
+    busy: action.busy,
+    notice: action.notice,
+    noticeTone: action.noticeTone,
+    stopAccepted,
+    propose,
+    confirm,
+    stop,
+    resume,
+    dismiss,
+  };
 }

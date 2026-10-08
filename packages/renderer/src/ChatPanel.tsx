@@ -344,6 +344,7 @@ export function ChatPanel() {
                 toolMetas={toolMetas}
                 busy={agentRun.busy}
                 notice={agentRun.notice}
+                noticeTone={agentRun.noticeTone}
                 stopAccepted={agentRun.stopAccepted}
                 pageHeld={takeover.state?.isHeld ?? false}
                 onConfirm={() => void agentRun.confirm()}
@@ -363,6 +364,7 @@ export function ChatPanel() {
                 nameDraft={sediment.nameDraft}
                 busy={sediment.busy}
                 notice={sediment.notice}
+                noticeTone={sediment.noticeTone}
                 onNameChange={sediment.setNameDraft}
                 onOpen={() => void sediment.open(agentRunView.runId)}
                 onSave={() => void sediment.save(agentRunView.runId, sediment.nameDraft)}

@@ -111,7 +111,7 @@ export function LocatorLabPanel() {
     if (reply?.ok) setStatusView(reply.value);
   }, [bridge]);
 
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
   useEffect(() => {
     void read();
@@ -298,7 +298,7 @@ export function LocatorLabPanel() {
         </ul>
 
         {notice && (
-          <Banner tone="celadon" markers={{ testid: 'locator-notice' }} className="mt-2">
+          <Banner tone={noticeTone} markers={{ testid: 'locator-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}

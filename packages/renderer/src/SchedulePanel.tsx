@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import type { ScheduleJobView, ScheduleTriggerView, WorkflowPlanOptionView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
 
 /** 快捷档位 → cron 表达式（5.7-05 判据原文的"每日 / 工作日 / 自定义"三种）。 */
 const PRESET_EXPRESSIONS = {
@@ -68,7 +68,7 @@ export function ScheduleSection() {
     if (planReply.ok) setPlans(planReply.value);
   }, [bridge]);
 
-  const { busy, notice, run: call } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run: call } = useBridgeAction(read);
   /**
    * 归属色照流程屏那一条规则（plan §5 / §8.3）：`trigger-now` 让这条会外发的流程**立刻**动一次 → `seal`；
    * 新建任务、启停开关都只往本机的调度表里写 → `amber`；刷新只读 → `line`；
@@ -406,12 +406,9 @@ export function ScheduleSection() {
       )}
 
       {notice ? (
-        <p
-          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
-          data-testid="schedule-notice"
-        >
+        <Banner tone={noticeTone} size="compact" markers={{ testid: 'schedule-notice' }} className="mt-2 break-all">
           {notice}
-        </p>
+        </Banner>
       ) : null}
     </div>
   );

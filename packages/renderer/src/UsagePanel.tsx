@@ -69,7 +69,7 @@ export function UsagePanel() {
     void read();
   }, [read]);
 
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
   /**
    * 走一次真实外发样例：过闸门、打本地 fixture、落账，然后重读判定与账本。
@@ -104,7 +104,7 @@ export function UsagePanel() {
       </div>
 
       {notice && (
-        <Banner tone="celadon" markers={{ testid: 'usage-notice' }} className="mt-2">
+        <Banner tone={noticeTone} markers={{ testid: 'usage-notice' }} className="mt-2">
           {notice}
         </Banner>
       )}

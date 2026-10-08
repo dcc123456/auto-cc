@@ -77,7 +77,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
     await refreshPreview();
   }, [bridge, docId, refreshPreview]);
 
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
   /**
    * 挂起时开一次会话（`open` 会放弃上一份未保存的 draft，正是裁定⑨"只拦不存"的另一半）。
@@ -475,7 +475,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       )}
 
       {notice && (
-        <Banner tone="celadon" markers={{ testid: 'resume-editor-notice' }} className="mt-2 break-all">
+        <Banner tone={noticeTone} markers={{ testid: 'resume-editor-notice' }} className="mt-2 break-all">
           {notice}
         </Banner>
       )}

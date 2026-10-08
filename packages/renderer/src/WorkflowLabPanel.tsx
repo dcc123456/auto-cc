@@ -51,7 +51,7 @@ export function WorkflowLabPanel() {
     if (nodesReply?.ok) setPlanNodes(nodesReply.value);
   }, [bridge]);
 
-  const { busy, notice, run: call } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run: call } = useBridgeAction(read);
 
   useEffect(() => {
     void read();
@@ -175,7 +175,7 @@ export function WorkflowLabPanel() {
         </div>
 
         {notice && (
-          <Banner tone="celadon" markers={{ testid: 'wf-lab-notice' }} className="mt-2">
+          <Banner tone={noticeTone} markers={{ testid: 'wf-lab-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}

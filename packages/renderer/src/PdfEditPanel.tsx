@@ -187,7 +187,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
     await loadWireframe();
   }, [loadWireframe]);
 
-  const { busy, notice, run, setNotice } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 
   /**
    * 建 / 必要时重建编辑会话。
@@ -325,7 +325,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
       ...(text === '' ? {} : { text }),
     });
     syncFromSession();
-    if (!ok) setNotice(t('pdfEdit.overlayRejected'));
+    if (!ok) setNotice(t('pdfEdit.overlayRejected'), 'seal');
   };
 
   /**
@@ -345,7 +345,7 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
     if (!session) return;
     const ok = session.setPageOrder(order);
     syncFromSession();
-    setNotice(ok ? t('pdfEdit.pageOrderDone') : t('pdfEdit.pageOrderRejected'));
+    setNotice(ok ? t('pdfEdit.pageOrderDone') : t('pdfEdit.pageOrderRejected'), ok ? 'celadon' : 'seal');
   };
 
   /**
@@ -531,9 +531,10 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
         </Banner>
       )}
 
-      {/* 提示行是全 app 共用 `useBridgeAction.notice` 的那一句，按 6.2-17 裁定归 celadon 信息档，形状只有一只原件。 */}
+      {/* 提示行是全 app 共用 `useBridgeAction.notice` 的那一句，语气按 6.2-18 裁定① 由同一层给出
+          （成功青瓷、失败朱红、桥接缺失琥珀），形状只有一只原件。 */}
       {notice && (
-        <Banner tone="celadon" markers={{ testid: 'pdf-edit-notice' }} className="mt-2 break-all">
+        <Banner tone={noticeTone} markers={{ testid: 'pdf-edit-notice' }} className="mt-2 break-all">
           {notice}
         </Banner>
       )}

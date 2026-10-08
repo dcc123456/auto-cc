@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AppErrorPayload, BridgeReply } from '@auto-cc/shared';
+import type { BannerTone } from './ui/controls';
 import { useDeskResult } from './ui/controls';
 
 /** `run` 拿到成功返回值之后的两个可选挂钩。 */
@@ -24,19 +25,32 @@ export interface BridgeActionHooks<T> {
  * harness 的截图才拿得到证据（AGENTS.md §7.1）。
  * 结果态（07 稿五态的最后两态）也挂在这一层而不是各面板自己计时：成功还是失败这里已经判过了
  * （`reply.ok`），再让每只按钮各长一套就是同一份事实的第二份副本（§2.5）。
+ * 同一份判断还要决定提示条的语气（6.2-18 裁定：失败不许穿信息档的皮），所以语气和文字在这里
+ * 一起 set，面板只拿现成的两样——到各面板自己挑语气就是第三套判定。
  * @param read 本面板的快照读取函数；每个动作结束后都会调一次，界面不猜主进程当下的状态
- * @returns `busy`（正在执行的动作标签，用来禁用按钮防止重复触发）、`notice`、`setNotice`、`resultOf`（按标签取结果态）、`clearResult`、`run`
+ * @returns `busy`（正在执行的动作标签，用来禁用按钮防止重复触发）、`notice`、`noticeTone`（与 `notice` 同批写，喂 `Banner` 的 `tone`）、`setNotice`、`resultOf`（按标签取结果态）、`clearResult`、`run`
  */
 export function useBridgeAction(read: () => Promise<unknown>) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<string>();
-  const [notice, setNotice] = useState<string>();
+  const [notice, setNoticeState] = useState<string>();
+  const [noticeTone, setNoticeTone] = useState<BannerTone>('celadon');
   const { resultOf, markDone, markFailed, clearResult } = useDeskResult();
 
   /**
-   * 跑一次白名单调用并把结果写成一行提示，同时给刚动过的那只按钮落一个结果态。
+   * 面板自己写一行提示（不由 `run` 派生时用它，比如异步事件到达、本地校验失败）。
+   * @param text 提示文案（undefined = 清空这一行，此时语气不参与渲染）
+   * @param tone 语气档，默认信息档；失败/驳回那一类必须显式给 `seal`
+   */
+  const setNotice = useCallback((text: string | undefined, tone: BannerTone = 'celadon'): void => {
+    setNoticeState(text);
+    setNoticeTone(tone);
+  }, []);
+
+  /**
+   * 跑一次白名单调用并把结果写成一行提示（连同它的语气档），同时给刚动过的那只按钮落一个结果态。
    * @param label 动作标签（禁用按钮的凭据、结果态的归属，也拼进提示文案）
-   * @param call 实际调用；不在 Electron 宿主里时返回 undefined，此时提示桥接不可用
+   * @param call 实际调用；不在 Electron 宿主里时返回 undefined，此时提示桥接不可用并归琥珀档
    * @param hooks 成功后的落值、文案覆盖，与结构化错误的落点
    */
   const run = useCallback(
@@ -50,7 +64,7 @@ export function useBridgeAction(read: () => Promise<unknown>) {
       clearResult();
       const reply = await call();
       setBusy(undefined);
-      if (!reply) setNotice(t('action.noBridge'));
+      if (!reply) setNotice(t('action.noBridge'), 'amber');
       else if (reply.ok) {
         markDone(label);
         hooks.apply?.(reply.value);
@@ -58,12 +72,12 @@ export function useBridgeAction(read: () => Promise<unknown>) {
       } else {
         markFailed(label);
         hooks.onError?.(reply.error);
-        setNotice(t('action.failed', { action: label, message: reply.error.message }));
+        setNotice(t('action.failed', { action: label, message: reply.error.message }), 'seal');
       }
       await read();
     },
-    [clearResult, markDone, markFailed, read, t],
+    [clearResult, markDone, markFailed, read, setNotice, t],
   );
 
-  return { busy, notice, resultOf, clearResult, run, setNotice };
+  return { busy, notice, noticeTone, resultOf, clearResult, run, setNotice };
 }

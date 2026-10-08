@@ -114,7 +114,7 @@ export function JobLabPanel() {
     await refreshConsent([...platforms]);
   }, [bridge, refreshConsent]);
 
-  const { busy, notice, run } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run } = useBridgeAction(read);
   /**
    * 确认 / 拒绝两个按钮用**另一个**忙碌态实例（spec 2.6-01）。
    *
@@ -414,7 +414,7 @@ export function JobLabPanel() {
         </div>
 
         {notice && (
-          <Banner tone="celadon" markers={{ testid: 'jd-notice' }} className="mt-2">
+          <Banner tone={noticeTone} markers={{ testid: 'jd-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}

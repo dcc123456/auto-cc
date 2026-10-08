@@ -78,7 +78,7 @@ export function WorkflowPanel() {
    */
   const [isCanvasOpen, setIsCanvasOpen] = useState(false);
 
-  const { busy, notice, run: call } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run: call } = useBridgeAction(read);
   const { refresh: refreshConsent, ...consent } = useConsent();
   /**
    * 当前计划要动的平台（从 `runner.nodes()` 的 `params.platform` 里数出来）。
@@ -256,7 +256,7 @@ export function WorkflowPanel() {
       ))}
 
       {notice && (
-        <Banner tone="celadon" markers={{ testid: 'workflow-notice' }} className="mt-2">
+        <Banner tone={noticeTone} markers={{ testid: 'workflow-notice' }} className="mt-2">
           {notice}
         </Banner>
       )}

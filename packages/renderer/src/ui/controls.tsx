@@ -347,9 +347,29 @@ const BANNER_ICON: Record<BannerTone, LucideIcon> = {
   jade: BadgeCheck,
 };
 
+/**
+ * 提示条的尺寸档（6.2-18 裁定②：给 `Banner` 加一档，而不是让紧凑的条继续自己手写皮）。
+ * 与 `FIELD_SIZE` 同一做法：**只换几何**（圆角 / 内边距 / 字号 / 图标边长），洗底、描边、
+ * 文字色、图标形状一律由 `tone` 决定，两档共用——紧凑档不是第五种语气。
+ */
+const BANNER_SIZE = {
+  /** 整条档：面板里绝大多数提示行，与 6.2 已验收的读数同一签名（7px 圆角 / 8px·12px 内边距 / 12px 字号）。 */
+  full: 'rounded-control px-3 py-2 text-xs',
+  /** 紧凑档：夹在列表与按钮之间的那几行，读起来贴着它所属的那一格，所以缩一档几何而不换皮。 */
+  compact: 'rounded-md px-2 py-1 text-[10px]',
+} as const;
+
+/** 尺寸档的名字，也是对外接口。 */
+export type BannerSize = keyof typeof BANNER_SIZE;
+
+/** 图标边长跟着尺寸档走：写死 13 会让紧凑档的文字比图标还矮。 */
+const BANNER_ICON_SIZE: Record<BannerSize, number> = { full: 13, compact: 11 };
+
 export interface BannerProps {
   /** 语气档 */
   tone: BannerTone;
+  /** 尺寸档，默认整条档；只换几何，不换语气（见 `BANNER_SIZE`） */
+  size?: BannerSize;
   /** 挂在节点上的原因码，方便 harness 直接断言（09 稿的 ⊘ 类控件全靠它） */
   reason?: string;
   /** 附加的 `data-*` 标记（横幅常常要带读数：接管原因、时长、条数……） */
@@ -362,14 +382,15 @@ export interface BannerProps {
 /**
  * 常驻提示条。设计稿规定：可逆的动作只用提示条，不用遮罩弹窗（09 稿 RULE）。
  * 洗底、描边、文字色、图标四件都由 `tone` 一档决定（见 `BANNER_CLASS` / `BANNER_ICON`），
- * 调用方只喂文案与外边档。
+ * 圆角、内边距、字号、图标边长由 `size` 一档决定，调用方只喂文案与外边档。
  * @param tone 语气档
+ * @param size 尺寸档（可选，默认整条档）
  * @param reason 原因码（可选）
  * @param markers 附加 `data-*` 读数（可选）
  * @param className 追加在外框上的 class（可选，只放外边/宽度档）
  * @param children 文案（调用方负责 i18n）
  */
-export function Banner({ tone, reason, markers, className = '', children }: BannerProps) {
+export function Banner({ tone, size = 'full', reason, markers, className = '', children }: BannerProps) {
   const Icon = BANNER_ICON[tone];
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
@@ -378,9 +399,9 @@ export function Banner({ tone, reason, markers, className = '', children }: Bann
     <div
       {...markerAttrs}
       {...(reason ? { 'data-reason': reason } : {})}
-      className={`flex items-start gap-2 rounded-control border px-3 py-2 text-xs leading-relaxed ${BANNER_CLASS[tone]} ${className}`}
+      className={`flex items-start gap-2 border leading-relaxed ${BANNER_SIZE[size]} ${BANNER_CLASS[tone]} ${className}`}
     >
-      <Icon size={13} className="mt-0.5 shrink-0 opacity-80" aria-hidden="true" />
+      <Icon size={BANNER_ICON_SIZE[size]} className="mt-0.5 shrink-0 opacity-80" aria-hidden="true" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
     </div>
   );

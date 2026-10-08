@@ -15,7 +15,7 @@ import { useBridgeAction } from './useBridgeAction';
 /**
  * 挂一张沉淀卡的界面状态。
  * @returns `preview`（这一次投影的逐格读数，没点开过为 undefined）、`saved`（刚落库的计划读数）、
- *   `nameDraft` / `setNameDraft`（名字那一格）、`busy` / `notice`、`open` / `save` / `close`
+ *   `nameDraft` / `setNameDraft`（名字那一格）、`busy` / `notice`（连同 `noticeTone`）、`open` / `save` / `close`
  */
 export function useSediment() {
   const { t } = useTranslation();
@@ -71,5 +71,16 @@ export function useSediment() {
     setNameDraft('');
   }, []);
 
-  return { preview, saved, nameDraft, setNameDraft, busy: action.busy, notice: action.notice, open, save, close };
+  return {
+    preview,
+    saved,
+    nameDraft,
+    setNameDraft,
+    busy: action.busy,
+    notice: action.notice,
+    noticeTone: action.noticeTone,
+    open,
+    save,
+    close,
+  };
 }

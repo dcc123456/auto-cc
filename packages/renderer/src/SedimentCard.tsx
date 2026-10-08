@@ -9,7 +9,7 @@
 import { Bookmark, Check, Save, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, SavedWorkflowPlanView, SedimentPreviewView } from '@auto-cc/shared';
-import { DeskButton, DeskField, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskField, deskReason, type BannerTone } from './ui/controls';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -28,6 +28,7 @@ const SETTLED_RUN_STATUSES = new Set<AgentRunView['status']>(['paused', 'complet
  * @param nameDraft 名字输入框的原值
  * @param busy 正在执行的动作标签；非空时按钮全禁用
  * @param notice 动作提示行（失败原因留在界面上，截图才拿得到证据）
+ * @param noticeTone 那一行的语气档，与 `notice` 同源（6.2-18 裁定①：判定只在 `useBridgeAction` 做一次）
  * @param onNameChange 名字输入
  * @param onOpen 点「保存为工作流」（只要读数，不写库）
  * @param onSave 点「存为自定义计划」（人按的那一格）
@@ -42,6 +43,7 @@ export function SedimentCard({
   nameDraft,
   busy,
   notice,
+  noticeTone,
   onNameChange,
   onOpen,
   onSave,
@@ -54,6 +56,7 @@ export function SedimentCard({
   nameDraft: string;
   busy?: string;
   notice?: string;
+  noticeTone: BannerTone;
   onNameChange: (value: string) => void;
   onOpen: () => void;
   onSave: () => void;
@@ -235,12 +238,9 @@ export function SedimentCard({
       )}
 
       {notice ? (
-        <p
-          className="mt-1 break-all rounded-md border border-line bg-ink-950/70 px-2 py-1 text-[10px] text-slate-300"
-          data-testid="sediment-notice"
-        >
+        <Banner tone={noticeTone} size="compact" markers={{ testid: 'sediment-notice' }} className="mt-1 break-all">
           {notice}
-        </p>
+        </Banner>
       ) : null}
     </li>
   );

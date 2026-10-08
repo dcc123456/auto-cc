@@ -82,7 +82,7 @@ export function AssemblyPanel() {
     if (devtoolsReply?.ok) setDevtools(devtoolsReply.value);
   }, [bridge]);
 
-  const { busy, notice, run, setNotice } = useBridgeAction(read);
+  const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 
   /** 面板读数要随调用变化（spec 1.6-12）：harness 发完调用得能在界面上读到新值，所以按固定间隔重读。 */
   useEffect(() => {
@@ -132,11 +132,11 @@ export function AssemblyPanel() {
       parsed = JSON.parse(editing.text);
     } catch (error) {
       // 解析失败根本不该发进主进程：先把原因留在界面上，省得用户以为已经保存了。
-      setNotice(t('assembly.jsonInvalid', { message: error instanceof Error ? error.message : String(error) }));
+      setNotice(t('assembly.jsonInvalid', { message: error instanceof Error ? error.message : String(error) }), 'seal');
       return;
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      setNotice(t('assembly.jsonInvalid', { message: t('assembly.jsonRootObject') }));
+      setNotice(t('assembly.jsonInvalid', { message: t('assembly.jsonRootObject') }), 'seal');
       return;
     }
     await run(
@@ -233,7 +233,7 @@ export function AssemblyPanel() {
         </div>
 
         {notice && (
-          <Banner tone="celadon" markers={{ testid: 'action-notice' }} className="mt-2">
+          <Banner tone={noticeTone} markers={{ testid: 'action-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}

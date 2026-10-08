@@ -9,7 +9,7 @@ import { Check, ListChecks, Play, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, ToolDescriptorView } from '@auto-cc/shared';
 import { ToolCard, stepToToolPart } from './ToolCard';
-import { Banner, DeskButton } from './ui/controls';
+import { Banner, DeskButton, type BannerTone } from './ui/controls';
 
 /**
  * 计划卡 + 卡片流面板。
@@ -17,6 +17,7 @@ import { Banner, DeskButton } from './ui/controls';
  * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级与标题
  * @param busy 正在执行的动作标签；非空时两个表态按钮都禁用，防止重复触发
  * @param notice 动作提示行（失败原因留在界面上，截图才拿得到证据）
+ * @param noticeTone 那一行的语气档，与 `notice` 同源（6.2-18 裁定①：判定只在 `useBridgeAction` 做一次）
  * @param stopAccepted 已按叫停但 `paused` 还没落进来（此时只能说「已受理」）
  * @param pageHeld 页面此刻是否在人工接管中（`browser.takeover` 那份读数的界面侧）；只用于提示行
  * @param onConfirm 人按下「确认并执行」——确认之前主进程一步都没跑
@@ -30,6 +31,7 @@ export function AgentRunPanel({
   toolMetas,
   busy,
   notice,
+  noticeTone,
   stopAccepted,
   pageHeld,
   onConfirm,
@@ -41,6 +43,7 @@ export function AgentRunPanel({
   toolMetas: Map<string, ToolDescriptorView>;
   busy?: string;
   notice?: string;
+  noticeTone: BannerTone;
   stopAccepted: boolean;
   pageHeld: boolean;
   onConfirm: () => void;
@@ -165,7 +168,7 @@ export function AgentRunPanel({
       </div>
 
       {notice ? (
-        <Banner tone="celadon" markers={{ testid: 'agent-run-notice' }} className="mt-2">
+        <Banner tone={noticeTone} markers={{ testid: 'agent-run-notice' }} className="mt-2">
           {notice}
         </Banner>
       ) : null}
