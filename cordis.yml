@@ -210,7 +210,9 @@ plugins:
       minScore: 70
       readMinScore: 30
       minMargin: 12
-      candidateLimit: 5
+      # 原值 5 与真 BOSS 会话面的现读行数撞成同一个数（证据 8.4-04 第一、三节），
+      # 于是第 6 位往后的联系人既读不回也点不到，而且不报错。20 是 schema 上限（裁定：本轮先抬）。
+      candidateLimit: 20
       textNormalizationLimit: 80
 
   # 动作层（spec 2.2-03 / 2.2-10 / 2.2-12 / 2.2-13）：等待 → 定位 → 折算坐标 → 下发 → 回读。
