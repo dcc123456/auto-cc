@@ -291,8 +291,8 @@ for (const file of tsxFiles) {
  *     判据落在**字符串字面量级**而不是行级：一个 `className` 串就是一个元素的 class 集，
  *     把 size 与 color 拆进不同串（如 `stepStatusStyle` 交色、消费者给 `text-[11px]`）不误报，
  *     代价是跨串配对看不见——那属于"某处把 slate-500 与 text-xs 写进了同一格"这一类回归，正是这条要拦的。
- *     色相档（`text-celadon` 等）的 ≥12px 半边**不在这一节**：它牵动 `Banner`/`Tag` 是否把语气文字改挂
- *     `-ink`（controls.tsx:327-330 记了一条相反的设计取舍），属令牌层待裁定项，裁定后另起一节补上。
+ *     色相档的 ≥12px 半边按第四十二片的裁定落在**下一节**（令牌层），不在这一节：原件的字号与颜色
+ *     分在两个常量里（`BANNER_SIZE.full` 给 12px、`BANNER_CLASS` 给色），字符串级判据看不见那对配对。
  */
 const SIZE_PX: Record<string, number> = {
   'text-xs': 12,
@@ -341,6 +341,155 @@ for (const file of tsxFiles) {
   }
 }
 
+/**
+ * 12. 语气色当文字用必须过 AA（spec 6.1-09 的色相半边，第四十二片按 2026-10-08 裁定
+ *     「令牌层再压深毡案语气色」落地）。
+ *     判据放在**令牌层**而不是消费层，有两个理由：
+ *     ① 原件把字号与颜色分在两个常量里（`BANNER_SIZE.full` 给 12px、`BANNER_CLASS` 给色），
+ *        第 11 节那种"同一个 class 串里配对"的字符串级判据看不见这一对，写出来只会误报或漏报；
+ *     ② 裁定要的是"一处改、全族受益"——只要每档的**文字档** `--color-<tone>-ink` 压在自己的淡洗上、
+ *        对该主题最浅的一级面板也过 4.5，那么引用它的每一只载体（`Banner`/`Tag`/`EffectChip`/
+ *        按钮结果态/风险档选中键）都跟着过，消费侧永远只有一条写法，不需要按主题分支。
+ *     同一节还钉住两条令牌纪律：四档在两案里都必须有 `-ink`（缺键=那一档当文字用没人管），
+ *     以及 `--color-<tone>-wash` 的 rgb 必须与 `--color-<tone>` 同色（`globals.css` 里那条
+ *     「wash 的 rgb 必须跟着各自 token 走」——改了色相档忘了淡洗，材质语言就失配，且肉眼难查）。
+ */
+const TONE_NAMES = ['celadon', 'jade', 'amber', 'seal'] as const;
+/** 语气载体可能落上的承载面：桌面与导航用 950/900、区块用 850、选中与悬停用 800、中性长条与底栏用 750
+ *  （750 在这一族里不是纯中性面：活体普查实测到一格 11px 琥珀文案压在 ink-750 上的自家 wash 里，
+ *  读数 4.18 —— 所以它是最差的那一面，必须进判据。见 docs/acceptance/06-ui-ink-desk/6.1-09-tone-token-readings.txt）。 */
+const PANEL_INK_NAMES = ['ink-750', 'ink-950', 'ink-900', 'ink-850', 'ink-800'] as const;
+/** 除自家淡洗之外，语义按钮三档还把同色实底压到 14%/18%（`controls.tsx:57-61`），
+ *  文字档在这些底上同样必须过 AA——不然"改令牌一次受益全族"这句话就只兑现了一半。
+ *  青瓷没有按钮档（那一族只有 jade/amber/seal 三档语义按钮），所以不在表里。 */
+const SOLID_TONE_ALPHA: Record<(typeof TONE_NAMES)[number], number | null> = {
+  celadon: null,
+  jade: 0.14,
+  amber: 0.14,
+  seal: 0.18,
+};
+const AA_NORMAL_TEXT = 4.5;
+
+interface Rgba {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/** 把一个 CSS 颜色字面量（`#rrggbb` 或 `rgba(r, g, b, a)`）解析成 rgba；解析不出返回 null。 */
+function parseCssColor(value: string): Rgba | null {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value.trim());
+  if (hex) {
+    const body = hex[1];
+    return {
+      r: Number.parseInt(body.slice(0, 2), 16),
+      g: Number.parseInt(body.slice(2, 4), 16),
+      b: Number.parseInt(body.slice(4, 6), 16),
+      a: 1,
+    };
+  }
+  const fn = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[,/\s]+([\d.]+))?\s*\)$/i.exec(value.trim());
+  if (fn) return { r: Number(fn[1]), g: Number(fn[2]), b: Number(fn[3]), a: fn[4] === undefined ? 1 : Number(fn[4]) };
+  return null;
+}
+
+/** WCAG 相对亮度。 */
+function relativeLuminance(c: Rgba): number {
+  const channel = (v: number) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+}
+
+/** WCAG 对比度（1 = 完全不可分辨）。 */
+function contrastRatio(fore: Rgba, back: Rgba): number {
+  const a = relativeLuminance(fore);
+  const b = relativeLuminance(back);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/** 半透明色压在**不透明**底上得到的合成色（淡洗就是这么读的）。 */
+function compositeOn(overlay: Rgba, backdrop: Rgba): Rgba {
+  return {
+    r: overlay.r * overlay.a + backdrop.r * (1 - overlay.a),
+    g: overlay.g * overlay.a + backdrop.g * (1 - overlay.a),
+    b: overlay.b * overlay.a + backdrop.b * (1 - overlay.a),
+    a: 1,
+  };
+}
+
+/** 取一段 CSS 文本里 `--color-<名>: <值>;` 的声明表（同名取先出现的那条）。 */
+function colorTokenTable(css: string): Map<string, string> {
+  const table = new Map<string, string>();
+  const re = /--color-([a-z0-9-]+)\s*:\s*([^;]+);/g;
+  for (let m = re.exec(css); m; m = re.exec(css)) if (!table.has(m[1])) table.set(m[1], m[2].trim());
+  return table;
+}
+
+const globalsSource = await readFile(path.join(rendererRoot, 'globals.css'), 'utf8');
+// 只认**选择器行**上那一次出现：文件顶部的说明注释里也提到 `[data-theme='light']`，
+// 用 indexOf 会把墨案块切在注释中间，读到一个空表。
+const lightBlockStart = globalsSource.search(/^\[data-theme='light'\]\s*\{/m);
+if (lightBlockStart < 0) {
+  failures.push(
+    "globals.css 里找不到 `[data-theme='light']` 那一块：毡案令牌读不到了，第 12 节无法核验（spec 6.1-09）",
+  );
+} else {
+  for (const [案名, block] of [
+    ['墨案', globalsSource.slice(0, lightBlockStart)],
+    ['毡案', globalsSource.slice(lightBlockStart)],
+  ] as const) {
+    const tokens = colorTokenTable(block);
+    const panels = PANEL_INK_NAMES.map((name) => parseCssColor(tokens.get(name) ?? ''));
+    if (panels.some((p) => p === null)) {
+      failures.push(`globals.css 的${案名}块里读不到面板面色阶（${PANEL_INK_NAMES.join('/')}），第 12 节无法核验`);
+      continue;
+    }
+    for (const tone of TONE_NAMES) {
+      const hue = parseCssColor(tokens.get(tone) ?? '');
+      const textTier = parseCssColor(tokens.get(`${tone}-ink`) ?? '');
+      const wash = parseCssColor(tokens.get(`${tone}-wash`) ?? '');
+      if (!hue) {
+        failures.push(`globals.css 的${案名}块缺 --color-${tone}（色相档）`);
+        continue;
+      }
+      if (!textTier) {
+        failures.push(
+          `globals.css 的${案名}块缺 --color-${tone}-ink：语气档的文字档没声明，` +
+            '组件侧就只有色相档可挂，而色相档压在自己淡洗上过不了 AA（spec 6.1-09）',
+        );
+        continue;
+      }
+      if (!wash) {
+        failures.push(`globals.css 的${案名}块缺 --color-${tone}-wash`);
+        continue;
+      }
+      if (hue.r !== wash.r || hue.g !== wash.g || hue.b !== wash.b) {
+        failures.push(
+          `globals.css 的${案名} --color-${tone}-wash 的 rgb 是 rgba(${String(wash.r)}, ${String(wash.g)}, ${String(wash.b)})，` +
+            `与 --color-${tone}（${[hue.r, hue.g, hue.b].join(', ')}）不同色：淡洗必须跟着色相档走，否则「底色是这一色相的淡洗」失配`,
+        );
+      }
+      const solid = SOLID_TONE_ALPHA[tone];
+      const backdrops = [
+        { label: '自家淡洗', alpha: wash.a },
+        ...(solid === null ? [] : [{ label: '语义按钮的同色实底', alpha: solid }]),
+      ];
+      for (const back of backdrops) {
+        const worst = Math.min(
+          ...(panels as Rgba[]).map((panel) => contrastRatio(textTier, compositeOn({ ...hue, a: back.alpha }, panel))),
+        );
+        if (worst < AA_NORMAL_TEXT) {
+          failures.push(
+            `${案名}的 ${tone} 文字档压在${back.label}（${String(Math.round(back.alpha * 100))}%）上，` +
+              `对五级承载面里最差的那一面只有 ${worst.toFixed(2)}:1（门槛 ${String(AA_NORMAL_TEXT)}:1）：` +
+              '语气档当文字用的载体（Banner/Tag/EffectChip/按钮结果态）全都吃这一档，改令牌层而不是逐点打补丁（spec 6.1-09）',
+          );
+        }
+      }
+    }
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -348,5 +497,6 @@ if (failures.length) {
 }
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
-    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处）',
+    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处，' +
+    '四档语气文字档 × 两案 × 五级承载面 × 两种同色底全部 ≥4.5:1）',
 );

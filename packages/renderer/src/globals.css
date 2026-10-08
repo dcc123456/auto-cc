@@ -47,10 +47,13 @@
 
   /* — 三色效果归属 + 青瓷（进行中/系统） — */
   --color-seal: #e2543a;
-  /* `-ink` 是**文字档**：色相档写在 14~18% 的同色淡洗上必然掉对比（普查 spec 6.1-06 实测
-     墨案 seal 3.99、毡案三档 3.32/3.49/3.70，都够不到 12px 的 4.5:1），文案一律走 `-ink`，
-     描边、淡洗、图标仍走色相档。墨案只有朱砂需要提亮，青玉与琥珀本来就够亮——
-     同值也保留键名，为的是组件侧只有一条写法（`text-*-ink`），不分叉。 */
+  /* `-ink` 是这一色相的**文字档**：色相档写在 10~18% 的同色淡洗上必然掉对比（普查 spec 6.1-06 实测
+     墨案 seal 3.99、毡案三档 3.32/3.49/3.70，都够不到 12px 的 4.5:1），语气文案一律走 `-ink`，
+     描边、淡洗仍走色相档；与文案同处一只载体的图标（按钮结果态那一枚）跟着文案走 `-ink`，
+     同一只载体上不长出两张脸（§2.5）。墨案只有朱砂需要提亮，青玉与琥珀本来就够亮——
+     同值也保留键名，为的是组件侧只有一条写法（`text-*-ink`），不分叉。
+     四档在毡案的同名键已被裁定压深到与色相档同值（见 `[data-theme='light']` 那条注释），
+     所以「文字档」在两案里都是**一只可读的色**，消费侧写法不变。 */
   --color-seal-ink: #ef7a55;
   --color-seal-wash: rgba(226, 84, 58, 0.13);
   --color-jade: #4fb78a;
@@ -60,6 +63,7 @@
   --color-amber-ink: #e0a33f;
   --color-amber-wash: rgba(224, 163, 63, 0.13);
   --color-celadon: #7fb6ad;
+  --color-celadon-ink: #7fb6ad;
   --color-celadon-wash: rgba(127, 182, 173, 0.12);
 
   /* — 线与阴影 — */
@@ -271,23 +275,26 @@ body {
   --color-paper: #fdfbf5;
   --color-paper-2: #f3eee1;
 
-  --color-seal: #c0391f;
-  /* 三档文字档按「写在自家淡洗上过 4.5」反推：seal-ink 4.88、jade-ink 4.79、amber-ink 5.08
-     （淡洗底各为 18%/14%/14% 压在纸面 #e7e3d8 上）。朱砂这一档接手了原 `--color-seal-deep` 的位
-     ——那个键在渲染层从来没有消费者，留着只会和 `-ink` 长成两个都能用的色（§2.5）。 */
-  --color-seal-ink: #96290f;
-  --color-seal-wash: rgba(192, 57, 31, 0.1);
-  /* 青玉与琥珀在毡案下同样按「次级 3:1」反推加深：普查实测 jade 58/58、amber 114/117 行
-     不到 3:1（最低 2.45）。朱砂按同一门槛只有 3.00，但它已是多份验收证据里的读数，暂不动。
-     wash 的 rgb 必须跟着各自 token 走，否则「底色是这一色相的淡洗」这条材质语言会失配。 */
-  --color-jade: #287957;
-  --color-jade-ink: #1f6244;
-  --color-jade-wash: rgba(40, 121, 87, 0.12);
-  --color-amber: #8a5f0a;
-  --color-amber-ink: #6f4c06;
-  --color-amber-wash: rgba(138, 95, 10, 0.13);
-  --color-celadon: #3f8078;
-  --color-celadon-wash: rgba(63, 128, 120, 0.12);
+  --color-seal: #802615;
+  /* 裁定「毡案语气色在令牌层再压深」落地：毡案四档的**色相档=文字档**（`-ink` 与 token 同值），
+     一次改值让 `Banner`/`Tag`/`EffectChip`/语义按钮四条载体同时过 AA，不必逐点改写消费者。
+     压深的程度不是拍脑袋：四档都按「写在自己淡洗（或语义按钮那一档 14~18% 的同色实底）上、
+     对毡案五级承载面里最差的一只（中性长条 `bg-ink-750` #d4cebd）对比 ≥4.55」反推
+     （spec 6.1-09 色相半边；求解与活体复测读数见 docs/acceptance/06-ui-ink-desk/6.1-09-tone-token-readings.txt）。
+     旧值（seal #c0391f / jade #287957 / amber #8a5f0a / celadon #3f8078）在 ink-750 上的自家 wash 只有
+     3.07 / 2.96 / 3.11 / 2.61，够不到 12px 文案的 4.5。压深后落到的深度与稿上
+     `--seal-deep` 同一级（`shared.css:1206` #96290f ↔ 这里 #802615）。 */
+  --color-seal-ink: #802615;
+  --color-seal-wash: rgba(128, 38, 21, 0.1);
+  --color-jade: #1c543d;
+  --color-jade-ink: #1c543d;
+  --color-jade-wash: rgba(28, 84, 61, 0.12);
+  --color-amber: #654507;
+  --color-amber-ink: #654507;
+  --color-amber-wash: rgba(101, 69, 7, 0.13);
+  --color-celadon: #2a544f;
+  --color-celadon-ink: #2a544f;
+  --color-celadon-wash: rgba(42, 84, 79, 0.12);
 
   --color-line: rgba(38, 44, 48, 0.15);
   --color-line-strong: rgba(38, 44, 48, 0.3);

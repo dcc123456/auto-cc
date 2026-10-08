@@ -75,8 +75,8 @@ const RESULT_WASH: Record<DeskResult, string> = {
 
 /** 结果态的图标：成功盖一个 jade 的对勾，失败盖一枚朱砂印章（失败要显眼到必须处理）。 */
 const RESULT_ICON: Record<DeskResult, ReactNode> = {
-  done: <BadgeCheck size={14} className="text-jade" aria-hidden="true" />,
-  failed: <Stamp size={14} className="text-seal" aria-hidden="true" />,
+  done: <BadgeCheck size={14} className="text-jade-ink" aria-hidden="true" />,
+  failed: <Stamp size={14} className="text-seal-ink" aria-hidden="true" />,
 };
 
 export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-disabled'> {
@@ -274,11 +274,13 @@ export function useDeskResult(doneMs = 2000): DeskResultState {
  */
 export type EffectTone = ToolEffect;
 
-/** 效果色 → 描边/底色/文字：调色板分区与节点标签共用这一份，两处不许各写一档（§2.2）。 */
+/** 效果色 → 描边/底色/文字：调色板分区与节点标签共用这一份，两处不许各写一档（§2.2）。
+ *  文字取色相的**文字档** `-ink`：这三条都是「同色文字压在自己淡洗上」的载体，色相档在墨案朱砂
+ *  那一档上只有 4.0（spec 6.1-06/6.1-09 普查），描边与淡洗继续走色相档。 */
 export const EFFECT_TONE_CLASS: Record<EffectTone, string> = {
-  read: 'border-jade/40 bg-jade-wash text-jade',
-  'local-write': 'border-amber/40 bg-amber-wash text-amber',
-  outbound: 'border-seal/45 bg-seal-wash text-seal',
+  read: 'border-jade/40 bg-jade-wash text-jade-ink',
+  'local-write': 'border-amber/40 bg-amber-wash text-amber-ink',
+  outbound: 'border-seal/45 bg-seal-wash text-seal-ink',
 };
 
 /**
@@ -326,14 +328,17 @@ export type BannerTone = 'celadon' | 'amber' | 'seal' | 'jade';
 /**
  * 语气档决定三件事：洗底、描边、**文字色**（稿 `assets/shared.css:1102-1116` 的 `.banner` 就是这么写的：
  * `background: var(--*-wash)` + `border-color: 同色 35%` + `color: var(--*)`）。
- * 文字按语气着色不是装饰：这四档在毡案被专门压深过（`globals.css:274-290`），就是为"当文字用"准备的，
+ * 文字按语气着色不是装饰：这四档在毡案被专门压深过（`globals.css:274-291`），就是为"当文字用"准备的，
  * 而统一成中性灰会把"系统在担心什么"这层信息只留给底色——色盲与低亮度下那条提示条就读不出来了。
+ * **文字色取的是各档的「文字档」`-ink`，不是色相档**（6.1-09 色相半边裁定：先在令牌层把毡案四档压深，
+ * 使文字档与色相档在毡案同值；墨案只有朱砂两档不同值，文案走浅一档的 `-ink`）。
+ * 于是这条载体在两案里都过 AA，消费侧不需要按主题分支。
  */
 const BANNER_CLASS: Record<BannerTone, string> = {
-  celadon: 'border-celadon/40 bg-celadon-wash text-celadon',
-  amber: 'border-amber/45 bg-amber-wash text-amber',
-  seal: 'border-seal/50 bg-seal-wash text-seal',
-  jade: 'border-jade/45 bg-jade-wash text-jade',
+  celadon: 'border-celadon/40 bg-celadon-wash text-celadon-ink',
+  amber: 'border-amber/45 bg-amber-wash text-amber-ink',
+  seal: 'border-seal/50 bg-seal-wash text-seal-ink',
+  jade: 'border-jade/45 bg-jade-wash text-jade-ink',
 };
 
 /**
@@ -416,10 +421,10 @@ export function Banner({ tone, size = 'full', reason, markers, className = '', c
  * 实现取 `/40` 一支共用——它同时是现状多数芯片已经在用的读数，为 0.1 的 alpha 开一条主题分支不值。
  */
 const TAG_TONE_CLASS: Record<BannerTone, string> = {
-  celadon: 'border-celadon/40 bg-celadon-wash text-celadon',
-  amber: 'border-amber/40 bg-amber-wash text-amber',
-  seal: 'border-seal/40 bg-seal-wash text-seal',
-  jade: 'border-jade/40 bg-jade-wash text-jade',
+  celadon: 'border-celadon/40 bg-celadon-wash text-celadon-ink',
+  amber: 'border-amber/40 bg-amber-wash text-amber-ink',
+  seal: 'border-seal/40 bg-seal-wash text-seal-ink',
+  jade: 'border-jade/40 bg-jade-wash text-jade-ink',
 };
 
 /** 稿上 `.tag` 本体（不点语气档那一档）：`--ink-750` 底 + `--fg-2` 文字，即中性回执档。 */
@@ -905,7 +910,7 @@ export function DeskSegmented<T extends string>({
             className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${busy ? 'opacity-40 ' : ''}${
               isSelected
                 ? option.isRisk
-                  ? 'bg-seal-wash text-seal ring-1 ring-inset ring-seal/35'
+                  ? 'bg-seal-wash text-seal-ink ring-1 ring-inset ring-seal/35'
                   : 'bg-ink-750 text-slate-100'
                 : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300'
             }`}
