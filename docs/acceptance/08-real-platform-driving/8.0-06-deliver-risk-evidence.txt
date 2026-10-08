@@ -1,0 +1,52 @@
+8.0-06 真实投递口与风控文案证据（V-人工，本机 macOS，2026-10-08，真实账号在场）—— 部分完成，标 [!]
+
+一、投递口的真实形状（与仿站根本不是同一个形状，这条要先进 8.5 的判据再进代码）
+  网页端没有"岗位页一个投递按钮"这种东西。实测到的投递链是：
+    会话页（`/web/geek/chat`）里的一枚入口 `a.btn.btn-primary.btn-file`，文本「上传附件简历」
+    —— 投递＝在当前会话里把附件简历作为消息发出去。
+  另有两处简历维护入口（不是投递）：`a.fl` → `/web/geek/resume`（「完善在线简历」）、`a.fr`（「新增附件简历」，href=javascript:;）。
+  详情页/面板侧的相邻动作键实测：`a.btn.btn-startchat`（「立即沟通」）、`a.btn.btn-interest`（「感兴趣」）——外发前还有一层会话建立。
+
+二、`input[type=file]` 实测（plan 里那条 `requireActionable:false` 的预测在此坐实）
+  全页命中数：**1** 枚（`document.querySelectorAll('input[type="file"]')`）
+  位置：嵌在入口内部 —— 父节点就是 `a.btn.btn-primary.btn-file`（即"点按钮=点开文件框"，不是独立控件）
+  属性：无 `name`、无 `id`、无 `multiple`（单文件），`accept`＝
+    image/jpg, image/jpeg, image/png, application/vnd.ms-powerpoint, application/pdf,
+    application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document,
+    application/vnd.openxmlformats-officedocument.presentationml.presentation, .doc, .docx, .pdf
+    ⇒ 我们生成的 PDF 在 accept 白名单内（这条决定了 8.5 可以真投递，不需要换格式）
+  计算样式与几何：`display:block` / `visibility:visible` / **`opacity:0`** / rect **[0,0,0,0]**
+    ⇒ 三条可点性判据（可见、启用、中心点不被遮挡）对它全都不成立：可见性读回是"隐藏"（零尺寸），中心点无从谈起。
+      知识包里这一条必须带 `requireActionable:false`，否则永远 `below-score`；而关掉之后仍要靠声明的策略权重过线——
+      它没有 name/id/testid，能写的候选只有 `a.btn-file input[type=file]`（css，35 分）。这是第六节的冲突。
+
+三、送达凭据（"投出去没有"以页面自己的回执为凭，§9 的 2.1-12）
+  实测到的状态标记族（同一形状既在消息区也在列表预览里）：
+    `i.message-status.status-delivery` 文本「[送达]」
+    `i.message-status.status-read`     文本「[已读]」
+  ⇒ `deliver.sentPattern` 的候选词应当取这两条真实措辞（`[送达]` 作为"已投递"的凭据，`[已读]` 作为"对方看过"的凭据），
+     而不是仿站里自造的那句。`offlinePattern` 未取到（本次会话内没有离线态样本）。
+
+四、风控文案样本：**未采集，且是故意不采集**
+  按 AGENTS.md §8.3「检测到验证码/风控即暂停并通知用户，不做识别与规避」——主动去撞风控页、反复触发验证以收集文案，
+  本身就是对抗行为，也是拿真实账号冒险。本片因此**不声称**拿到 `risk.riskPattern` 的真实措辞样本。
+  可登记的相邻事实（登录现场，见 8.0-02）：BOSS 网页登录挂着网易易盾（类名 `yidun_smsbox-text--qr`、
+  `yidun_smsbox-manual--qr`，文案「扫描二维码发送验证短信」）——这说明站点确实在关键动作前置风控，
+  但它不是"投递/沟通"环节的风控文案，不能拿来充当。
+  解除条件：风控页只能在真实运行中**自然遇到**时录；遇到时按 `browser.risk-signal` → 人工接管，由人把页面带过去，程序不识别、不绕过。
+
+五、没有做的动作（诚实边界）
+  未按「上传附件简历」、未选文件、未发任何消息、未点「立即沟通」。
+  原因：这些是不可撤回的外发动作，会真实触达第三方招聘方；8.5 做真投递验收前必须先取得用户明确同意，
+  并且这一发必须经 `entitlement.gate` 记账（§7.3），不能在取证阶段绕过闸门。
+
+六、本片暴露的 8.1 冲突（与 8.0-03 第六节同一条，这里补投递侧）
+  投递链上的三处控件在真实站点的候选形状：
+    文件框   无 name/id/testid → 只有 css（35）
+    入口键   `a.btn-file`（文本「上传附件简历」）→ role+accessible name（85）可过线，但它是 `<a>`，
+             `role` 计算值需实测确认（本次未验，因为不点）
+    会话行   身份属性 `d-c` 取值在 4 行上相同（不是身份）→ 没有过线候选
+  结论：真站点上能稳定过 70 分线的只有「表单 name」和「role/text + 稳定 accessible name」两类；
+  凡是"每条都不同的动态文本"（岗位名、联系人、预览）都不能进静态知识包。
+  抓取容器与投递控件这两类**都不是**这两类 ⇒ 8.1 必须对「无副作用通道」与「外发通道」给出分档的最低可用分，
+  否则真实站点一条动作都发不出去。本文件只登记事实，裁决留给 8.1 与用户。

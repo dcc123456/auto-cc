@@ -1,0 +1,44 @@
+8.0-04 真实岗位详情 DOM 证据（V-人工，本机 macOS，2026-10-08，真实账号在场）
+
+一、真站点的"详情"是**两种形状**，仿站只有一种（这是本条最重要的结论）
+  形状 A：同页右侧面板（列表页内，点卡片即换内容，URL 不变）
+    根容器：`div.job-detail-body`（实测 `document.querySelector('div.job-detail-body')` 命中 1）
+    外层：`div.job-detail-container`（**自身是滚动容器**：scrollHeight 1376 / clientHeight 446 / scrollTop 547）
+    字段实测：
+      操作条        div.job-detail-operate > a.link-report-new（举报）、div.wechat-share > a.link-wechat-share（微信扫码分享）
+      正文标题      h3.title                文本「职位描述」
+      技能标签      ul.job-label-list > li  逐条明文（例：Vue / K8S / Kubernetes）
+      正文          p.desc                  ⚠ textContent 脏，必须 innerText（见 8.0-03 第五节第 2 条）
+      招聘方        div.job-boss-info > h2.name（招聘人姓名，**PII，本文件不落原文**）、
+                    span.boss-active-time（活跃时间，例「刚刚活跃」）、div.boss-info-attr（企业 · 职务）
+      引导下载      div.job-search-scan（「去App 与BOSS随时沟通」+ 二维码 div.qrcode-container）
+      工作地址      div.job-address > span.job-address-title（「工作地址」）、p.job-address-desc（明文三段地址）
+      出口链接      a.more-job-btn          文本「查看更多信息」，href＝/job_detail/<jobId>.html?securityId=…
+    面板内动作键：a.op-btn.op-btn-chat（文本「立即沟通」，rect [1024,232,104,34]）、a.op-btn.op-btn-like（「收藏」）
+    面板内**没有薪资节点**（`[class*="salar"]` 在面板里 0 命中）。
+  形状 B：完整详情页（真·独立 URL）
+    落地：`https://www.zhipin.com/job_detail/<jobId>.html?securityId=<…>&ka=company_more_job_<jobId>`
+    `securityId` 实测长度 **416** 个字符的不透明串，只能从列表/面板链接里带出来，**不可自拼、不可复用**；
+    按 §8.5 本文件只记长度与参数名，不记值。
+    字段实测：
+      div.job-banner   hits=1  innerText 起首＝「招聘中 <岗位名> 10-12K」（**状态行 + 明文薪资同源**）
+      .salary          hits=37 明文（含相似职位列表；主岗位那枚在 banner 内），码点为正常数字
+      .company-info    hits=2  「<岗位名> 10-12K」
+      .location-address hits=1 「上海浦东新区兴业银行(来安路)」
+      动作键           a.btn.btn-startchat（「立即沟通」）、a.btn.btn-interest（「感兴趣」）、a.btn→/web/geek/guide（「开始完善」）
+      简历入口         a.fl→/web/geek/resume（「完善在线简历」）、a.fr（「新增附件简历」，href=javascript:;）
+    iframe 数：2（about:blank / 空 src，同源）
+
+二、到达形状 B 的手法与它的真实障碍（8.5/8.4 都会撞同一条）
+  `a.more-job-btn` 的 rect 在文档 y≈953，而视图视口高 654 → 第一次 `browser.act.click` 报 `WAIT_TIMEOUT`（clickable 等待超时）。
+  用产品自己的 `browser.page.scroll` 滚三次：读数 `scrollY 1780 / scrollHeight 2434 / atBottom true` —— 滚的是 **window**，
+  而目标在 `div.job-detail-container` 这个**内部滚动容器**里，window 滚到底也到不了它 ⇒ 仍然 WAIT_TIMEOUT。
+  在页面里对该节点做一次 `scrollIntoView({block:'center'})` 后复测：rect 回到 [684,395,184,36]，
+  `elementFromPoint(776,413)` 命中的就是它自己（`isSelfOrChild:true`），此时同一条候选 `role`+「查看更多信息」一次点中并落地形状 B。
+  ⇒ 能力缺口（登记进 plan 08 §7 后续缺件）：**滚动口只能整屏滚 window，不能"把某个定位结果滚进画面"**。
+     真实站点的详情面板、投递控件都在内部滚动容器里，这一格不补，8.4/8.5 的外发动作会在"元素存在但点不到"上静默超时。
+
+三、诚实边界
+  - 本片只到"读"为止：`立即沟通 / 感兴趣 / 上传附件简历` 这些外发口一个都没按（按了就是对真实招聘方发消息，必须先取得用户的明确同意，见 8.0-06）。
+  - 形状 A 的面板在进列表页时就已经带着第一张卡的 `active` 态渲染出来，所以"点卡片才出详情"在真站点上不成立——
+    抓取实现不能假设有一次点击；面板内容与选中态是页面自己推的。

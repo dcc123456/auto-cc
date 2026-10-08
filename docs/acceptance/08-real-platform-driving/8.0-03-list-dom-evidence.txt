@@ -1,0 +1,68 @@
+8.0-03 真实搜索与列表页 DOM 证据（V-人工，本机 macOS，2026-10-08，真实账号在场）
+
+取证口径
+  - 驱动全部走产品自己的通道：`sessions.open('boss')` → `browser.act.type` / `browser.act.click`（CDP `Input.*`，`isTrusted:true`），
+    harness 只对真实 target `attach + 读 DOM`，不碰 navigate（plan 08 §6 冲突声明第 1 条的裁定）。
+  - 判"有没有真的落到页上"一律以页面自己的读数为准，不看 act 的返回值（§9 的 2.1-12）。
+  - 原始读数留在被忽略的 `tmp/80/`（homepage.json / searchform.json / list-page.out / card-html.out / salary.out），本文件只收结论与脱敏样本。
+
+一、装载与登录态
+  target：`https://www.zhipin.com/shanghai/?seoRefer=index`（BOSS 首页，城市=上海）
+  分区：`persist:boss`；`sessions.status()` 的 `cookieNames` 里 `wt2 / bst / zp_at` 在场（登录态标志族，见 8.0-02）
+  而 `auth` 仍报 `"expired"` —— 因为判定只认仿站的 `autocc_session`。这一格是 8.2 的直接动因，不是本次取证的缺陷。
+
+二、搜索入口（`search.params` 的一手证据）
+  容器：`<form action="/web/geek/jobs" method="get">`（该 form 自身 rect 高度为 0，子元素绝对定位，量几何要量子节点）
+  字段（逐个实测，顺序即候选优先级）：
+    query     input[type=text]  class=ipt-search  placeholder=「搜索职位、公司」  rect [284,75,662,50]
+    city      input[type=hidden] class=city-code   value=101020100（上海的城市码，站点侧写死在页面里）
+    industry  input[type=hidden] class=industry-code  value 空
+    position  input[type=hidden] class=position-code  value 空
+  提交键：`button.btn-search`，accessible name =「搜索」（注意：登录弹层里另有同名隐藏按钮，`button` 全页 7 命中）
+  另一条真实入口形状（必须与 form 分开登记）：首页热门词链接是城市页
+    `/c101020100/?query=JavaScript&industry=&position=` —— 同参数名、不同落地页。
+
+三、真实一次搜索的闭环证据（act 通道，人在场）
+  `browser.act.type` 用 `{strategy:'name', value:'query'}` 命中（name 基线 80 分，过线）→ 写「前端开发工程师」
+    页面回读：`input.ipt-search.value === "前端开发工程师"`（这是判据，不是 act 的返回值）
+  `browser.act.click` 第一次失败：`WAIT_TIMEOUT`「等待 clickable 超时」
+    当时视图宽 659 CSS px，而按钮 rect 中心 x=998 → **控件根本在画面外**。`document.elementFromPoint(998,100)` 回 null。
+    展开视图到 1015 CSS px（8.8 的 `kernel-slot-expand`）后同一条候选直接成功。
+    结论：8.8 的视图几何不是体验优化，是真实站点能不能被驱动的**前置条件**；两片的因果关系在此坐实。
+  落点 URL（GET 参数与表单四键逐一对上）：
+    `https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=`
+  页面标题：「上海招聘」-2026年上海人才招聘信息 - BOSS直聘
+
+四、列表容器与卡片（`capture.list`）
+  真实命中数（同选择器在全页的计数，写在括号里）：
+    div.job-list-container (1)  >  ul.rec-job-list (1)  >  div.card-area  >  div.job-card-wrap (15)  >  li.job-card-box (15)
+  六字段逐条（选择器都是真站点自己的类名，仿站那套 `data-testid` 在这里一个都不存在）：
+    title      a.job-name          (15)  文本＝岗位名明文           href＝/job_detail/<jobId>.html（**相对地址**，拼绝对要带 origin）
+    salary     span.job-salary     (15)  ⚠ 见第五节，明文不可得
+    company    a.boss-info > span.boss-name (15)  文本＝企业名（已脱敏不落原文）
+    city       span.company-location (15)  文本形如「上海·浦东新区·张江」（市·区·商圈三段，中点分隔）
+    experience ul.tag-list > li[0]  (15×2)  文本形如「3-5年」「经验不限」「1-3年」
+    education  ul.tag-list > li[1]  (15×2)  文本形如「本科」「学历不限」
+    detail href 见 title 行；另有企业页 `a.boss-info` href＝/gongsi/<id>.html?from=top-card，且带属性 ka="company_logo_click_<id>"
+  卡片自身属性只有 `class="job-card-box"` 与 Vue 作用域属性 `data-v-6460f456`（**每次构建都会变，不可当身份**），
+  岗位 id 只在 `a.job-name` 的 href 里 —— 这是唯一可用的去重键。
+  抓取到的真实卡片数：15 张（≥10 的判据在页面上成立；入库那半属于 8.3，本片不声称）
+
+五、两条会改变产品形状的实测（不是实现细节，必须裁定后才能写 8.1）
+  (1) **列表薪资是私用区字形混淆**：`span.job-salary` 的 textContent 看着是空串，逐码点读回 `e03a 4b` 这类 PUA 码位，
+      计算样式 font-family = `kanzhun-mix, kanzhun-Regular`。同一格在完整详情页里是**明文**
+      （`.salary` 读回 "11-16K"，码点 `31 31 2d 31 36 4b`，字体 `kanzhun-Regular`）。
+      ⇒ 结论：薪资必须从详情页取，列表页那一格只能如实报缺；做字体映射表＝反爬对抗，按 §8.3 红线不做。
+  (2) **详情页正文 `p.desc` 的 textContent 是脏的**：里面塞了 `<style>`（混淆类的 `display:inline-block;font-size:0`）
+      和若干随机类名 span（水印词）。同一节点用 `innerText` 读回的是干净正文。
+      ⇒ 结论：真实包的正文字段必须走 `innerText` 口径；`textContent` 会抓到 CSS 源码和水印词。
+
+六、定位阈值与真实站点的结构性冲突（8.1 的承重事实，实测三条）
+  现有权重：testId 100 / id 90 / role 85 / name 80 / text 70 / css 35 / xpath 25；`minScore` 默认 70（`locator-spec.ts:27-31`、`locate-service.ts:39`）。
+    A. 容器与卡片只有类名可选 → css 35 分 → **恒 fail-closed**。实测：点第一张卡标题报
+       `LOCATE_FAILED：最优候选 35 分低于最低可用分 70`。仿站能过是因为它满页 `data-testid`（100 分）。
+    B. `name`（80）只在表单控件上成立——搜索输入框正是靠它过线的，这是真实站点上最可靠的一类候选。
+    C. `role`+accessible name（85）在按钮/链接上成立（「搜索」「查看更多信息」都走这条），但列表卡片标题的
+       accessible name 就是岗位名本身，**每条都不同且会随翻页变**，无法进静态知识包。
+  ⇒ 这不是"选择器写错了"，是阈值标定本身按仿站的富 testid 环境定的。8.1 必须在「抓取通道」上给出裁决，
+     否则真实站点的抓取一条都发不出去。本文件不替 8.1 做决定。

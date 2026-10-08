@@ -1,0 +1,54 @@
+8.0-05 真实会话页 DOM 证据（V-人工，本机 macOS，2026-10-08，真实账号在场）—— 部分完成，标 [!]
+
+取证方式
+  `browser.page.navigate('https://www.zhipin.com/web/geek/chat')` 一次落地（导航许可按 startUrl 同源取白名单，
+  cordis.yml 的 boss.startUrl 已是真站，所以同源放行；见 §9 的 2.1-12 关于 navigate 返回码不作判据——
+  判据取 `page.snapshot()` 的 `url`/`readyState`：落地 `https://www.zhipin.com/web/geek/chat` / `complete`）。
+  原始读数在 `tmp/80/chat-keys.out`、`chat-list.js`、`chat-item.js`、`li-text.js`，本文件收结论，PII 已脱敏。
+
+一、已经取到的键（会话页外壳与列表侧）
+  页面标题：BOSS直聘；iframe 3 枚（about:blank / 空 src，均同源，无跨域帧）
+  真站点自带聊天推送：`shared_worker` 目标 `https://www.zhipin.com/web/socket-worker/assets/sdk/geek-chat/js/socket-worker.2.0.3.min.js?t=v4`
+    ⇒ 消息是 WebSocket 推的，DOM 不是唯一事实源（8.4 的回复监听要按这条形状设计）
+  筛选标签：`div.label-list > ul > li`，文本逐枚实测为「全部」「未读」「新招呼」「仅沟通」「更多」
+    （「新招呼」正是 2.5 回复监听要用的入口，形状在页面上真实存在）
+  联系人搜索：`input.boss-search-input`，placeholder「搜索30天内的联系人」，rect [40,78,328,30]，属性只有 type/placeholder
+  列表结构：`div.chat-content > div.user-list > div.user-list-content > ul[role="thead"] + ul[role="group"]`
+    会话项：`ul[role="group"] > li[role="listitem"] > div.friend-content-warp > div.friend-content[d-c]`
+      div.figure > img.image-circle（头像）
+      div.text > span.time（「09月28日」）
+               > div.title-box > span.name-box > span.name-text（联系人姓名，**PII 已脱敏**）
+                                     + span（企业名，已脱敏）+ i.vline + span（职务）
+               > div.gray.last-msg > span.last-msg-text（最后一条预览，不落原文）
+                                   + div.user-operation > img.icon-operate / icon-operater-hover
+    列表尾部：`div.boss-list-footer > div.finished` 文本「没有更多了」 ⇒ **虚拟滚动列表，没有分页**
+  状态行标记（本次最有价值的一格，8.4 的"发出/送达/已读"页面自证就长在这里）：
+    `i.message-status.status-read`     文本「[已读]」
+    `i.message-status.status-delivery` 文本「[送达]」
+    同一个状态在列表预览里是**前缀进文本**的：`div.gray.last-msg` 读回「[已读] 您好，…」「[送达] 您好，…」
+    ⇒ `sentPattern` 的候选词应当是 `[送达]` / `[已读]` 这两个中括号短语，而不是仿站里那句自造文案。
+
+二、没有取到的键，以及它们为什么取不到（按条目要求逐键写明）
+  入口（岗位→会话的手法）：**部分**，详情页有 `a.op-btn.op-btn-chat` / `a.btn.btn-startchat`（文本「立即沟通」，href=javascript:;），
+    但按下去是一次**外发动作**（向真实招聘方发起沟通），本次没有按（见"三、边界"）。
+  输入框：未取得。实测未选中会话时整个页面只有 `input.boss-search-input` 一枚输入（`textarea / contenteditable / input[type=text]` 全查）
+    ⇒ 真站点的消息输入框只在选中会话后才挂载，不是常驻节点。
+  发送键：未取得，同上原因（实测可见按钮里只有「上传附件简历」与「搜索」这类）。
+  messageItem / messageBody / messageIdAttribute / directionAttribute / inboundValue：未取得，同上原因（消息区在未选中会话时是 `div.chat-no-data` 空态）。
+    另有一条已经能确定的负结论：**`d-c` 不是会话身份**——实测 4 个不同会话行上 `d-c` 取值完全相同（都是同一枚短数字），
+    把它当 `messageIdAttribute` 或会话主键会直接串号。真站点在 DOM 上不给会话级稳定 id。
+
+  两次尝试打开既有会话都被自家判据挡下（这本身就是 8.1 的证据）：
+    1) `{strategy:'testId', attribute:'d-c', value:'<短数字>'}` → `LOCATE_FAILED：最优候选 -15 分`
+       原因可复算：testId 基线 100，但 `looksGenerated()` 判该值"像生成串"封顶 10（`locator-spec.ts:150-153`），
+       再叠 `AMBIGUOUS_HIT_PENALTY` 25（同值命中 4 个）→ −15。
+    2) `{strategy:'text', value:<整行文本>, exact:true}` → `WAIT_TIMEOUT：等待 clickable 超时`
+       该行是虚拟列表里的重渲染节点，且文本含会变的预览与 PII；即便过线也不能进静态知识包。
+
+三、边界与解除条件
+  - 本片**故意没有**做外发动作：不按「立即沟通」、不按「上传附件简历」、不发送任何消息。
+    向真实第三方发消息不可撤回，必须先取得用户点头（AGENTS.md §7.3 的外发必经闸门在产品侧同样成立）。
+  - 打开一条既有会话会把该会话置为**已读**（招聘方可见），这是取证的真实副作用，所以这一步同样要人先同意。
+  - 解除条件（8.0-05 收口需要什么）：① 用户同意"打开某条指定会话取 DOM，接受已读副作用"，或
+    ② 8.1 给出能过 70 分线的会话定位方案（现在已知 DOM 里没有 testid/id/name 三类可用来源，
+       只剩 role+动态 accessible name 与 text，两者都进不了静态包）。
