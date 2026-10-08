@@ -185,10 +185,10 @@ spec 8.2-03 已按实测收窄，不是让步。
     两只定位名，配齐才合法、只声明一只报错、**既没有 `targetParam` 又没有选行也报错**（三种形状各有用例）；
     真包 `boss.json` 按证据 8.4-04 登记了 `chatConversationRow`（hits=5）与 `chatConversationLabel`
     （`.name-box > span:nth-child(2)`，hits=5，`effect:'read'`），仿站包靠既有的 `targetParam` 过同一条规则。
-  - **缺口一还差适配器那一半**（`selectConversation` 是 `chat` 与 `readReplies` 的共同前置）、**缺口三未裁**：
-    按本节上面的口径等用户的表态，不在这里替它决定。同一处还带着一条读数上限：
-    `browser.locate.candidateLimit` 现值 5 ⇒ 会话面一次最多读回 5 行，超过 5 家联系人时寻址够不着
-    （解除条件见证据 8.4-04 第三节）。
+  - **缺口一还差适配器那一半**（`selectConversation` 是 `chat` 与 `readReplies` 的共同前置）：
+    缺口三已随**裁定⑲** 定下（另立 `conversationTarget`，不占 `jobId`），落点见下面那条 8.4-C 的链。
+    同一处还带着一条读数上限：`browser.locate.candidateLimit` 当时取 5，正好等于会话面的现读行数
+    ⇒ 超过 5 家联系人时寻址够不着（解除条件见证据 8.4-04 第三节；**已由裁定⑳ 抬到 20**）。
   - **8.4-C 的落点链（裁定⑲/⑳ 之后现读的形状，动代码前照这一串改，别在别处另立形状）**：
     ① `packages/core/src/events.ts:546` 的 `GreetChannelSource.send(targetId, text)` 加第三个入参
     `conversationTarget?: string`；② `packages/browser/src/platform-contract.ts:634/648` 的
