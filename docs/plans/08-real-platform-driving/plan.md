@@ -189,6 +189,25 @@ spec 8.2-03 已按实测收窄，不是让步。
     按本节上面的口径等用户的表态，不在这里替它决定。同一处还带着一条读数上限：
     `browser.locate.candidateLimit` 现值 5 ⇒ 会话面一次最多读回 5 行，超过 5 家联系人时寻址够不着
     （解除条件见证据 8.4-04 第三节）。
+  - **8.4-C 的落点链（裁定⑲/⑳ 之后现读的形状，动代码前照这一串改，别在别处另立形状）**：
+    ① `packages/core/src/events.ts:546` 的 `GreetChannelSource.send(targetId, text)` 加第三个入参
+    `conversationTarget?: string`；② `packages/browser/src/platform-contract.ts:634/648` 的
+    `PlatformAdapter.chat/readReplies` 同一形状（会话面用它选行，岗位面继续用 `jobId` 拼地址）；
+    ③ `packages/browser/src/platform-registry.ts:97` 的窄投影把这一位透下去（`ledgerKey` 丢弃的那条注释不动）；
+    ④ `packages/platform-boss/src/adapter.ts` 新增 `selectConversation(conversationTarget)`：
+    按 `chat.conversationRow` 等列表、按 `chat.conversationRowLabel` 读回 `ranked` 找文本相符的那一格，
+    再用 8.4-A 的 `click(spec, {candidateIndex, hitIndex, expectText})` 点它，**文本对不上或找不到就
+    `CONVERSATION_TARGET_NOT_FOUND` 停下**（不点、不读，也不许退化成"读当前选中的那条"）；
+    `chat` 与 `readReplies` 都以它为前置；⑤ `packages/outbound/src/greet.ts:172` 的请求解构加
+    `conversationTarget`，幂等键与额度目标（`:194` 的 `countFor` 与 `:240` 的 `enforce`）改用
+    `conversationTarget ?? jobId`——**这是裁定⑲ 的唯一语义变更点**，包里有 `targetParam` 的站点走不到这一格；
+    ⑥ `packages/platform-boss/src/conversation-store.ts` 加迁移 **33**（新列 `conversation_target` +
+    唯一索引换成 `(platform, job_id, conversation_target, dedupe_key)`；§9 实测 5.3-a：改老迁移的 up 不会重跑，
+    且本仓没有一处 `PRAGMA foreign_keys = ON`，重建索引要显式在同一条事务里做）；
+    ⑦ `packages/shared/src/bridge.ts:773` 的 `GreetRequestView` 与外发工具的 `input` schema 同步补这一位。
+    仿站侧**不改行为**：`boss-fixture.json` 有 `targetParam`，`conversationTarget` 一路都是 undefined。
+
+## 6. 与 AGENTS.md 的冲突声明（按本文件前言：先停下来提出冲突，不自行打破规则继续写）
 
 ## 6. 与 AGENTS.md 的冲突声明（按本文件前言：先停下来提出冲突，不自行打破规则继续写）
 
