@@ -1,5 +1,5 @@
 import { ArrowUpDown, ListChecks, ShieldAlert, Sparkles } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   GapModelStatusView,
@@ -19,6 +19,7 @@ import {
   type BannerTone,
 } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
+import { useViewTrail } from './viewTrail';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
 const MODEL_TONE: Record<GapModelStatusView, string> = {
@@ -51,6 +52,24 @@ export function GeneratePanel() {
   const { t } = useTranslation();
   const bridge = window.autoCC;
   const [jdText, setJdText] = useState('');
+  /**
+   * 09 稿形态⑥（spec 6.2-24 + 6.4-05）：从岗位屏双击跳过来时带上那一条 JD。
+   * 这一跳只做两件事——把正文落进下面那只本来就接受自由文本的输入框、把这一段滚进画面。
+   * 生成仍然只有人按「生成定制版」才发起，本面板不写任何简历内容（「正文不过界」）。
+   * 依赖写成整个 `trail`：它的身份每跳变一次，同一行双击第二次也要重新落文本与重新滚。
+   */
+  const trail = useViewTrail();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!trail || trail.targetView !== 'resume') return;
+    if (trail.seedJdText !== undefined) setJdText(trail.seedJdText);
+    // 切格发生在父组件（App）的 effect 里，子先父后，所以本帧这段还挂在 `hidden` 下面，
+    // 滚进画面要推到下一帧（否则是一次无效滚动，表现为"跳过去还在列表顶上"）。
+    const frame = requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: 'start' }));
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [trail]);
   const [preview, setPreview] = useState<GenerationRunRowView>();
   /** 与 `preview.rewrites` 等长同序的勾选态：下标就是接受时回传的那份下标（界面看见哪行勾哪行）。 */
   const [checked, setChecked] = useState<boolean[]>([]);
@@ -269,7 +288,12 @@ export function GeneratePanel() {
   const runReason = jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
 
   return (
-    <div data-testid="generate-panel" className="flex flex-col gap-4 rounded-lg border border-line bg-ink-950/60 p-4">
+    <div
+      ref={panelRef}
+      data-testid="generate-panel"
+      data-generate-seed={trail && trail.targetView === 'resume' ? (trail.sourceDetail ?? 'none') : 'none'}
+      className="flex flex-col gap-4 rounded-lg border border-line bg-ink-950/60 p-4"
+    >
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('generate.heading')}</h2>

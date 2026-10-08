@@ -33,6 +33,8 @@
     },
     "desk": {
       "reveal": "在{{target}}中显示",
+      "trailFrom": "来自",
+      "trailBack": "返回{{view}}",
       "revealTarget": {
         "macos": "访达",
         "windows": "资源管理器",

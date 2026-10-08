@@ -38,6 +38,7 @@ import {
 } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
+import { advanceViewTrail } from './viewTrail';
 
 /** 进度播报最多留几条：面板是验收入口，不是历史库（与定位实验台的自愈播报同一形状）。 */
 const PROGRESS_LIMIT = 4;
@@ -671,11 +672,28 @@ export function JobLabPanel() {
                 return (
                   <li
                     key={rowKey(row)}
-                    className={`rounded-md border px-2 py-1.5 ${
+                    // 08 稿那行：单击=选中并让中栏换内容，双击=直接跳简历区并带上该岗位（形态⑥，带面包屑）。
+                    // `select-none` 是因为双击默认会把那一行文字选中，跳过去之后岗位屏上还挂着一块蓝。
+                    className={`select-none rounded-md border px-2 py-1.5 ${
                       isRowSelected ? BLOCK_SELECTED_CLASS : 'border-line bg-ink-950/60 hover:bg-ink-850'
                     }`}
                     data-job-selected={isRowSelected ? 'true' : 'false'}
                     data-replied={row.replied ? 'true' : 'false'}
+                    data-job-trail={row.jobId}
+                    onDoubleClick={() => {
+                      setSelectedRowKey(rowKey(row));
+                      advanceViewTrail({
+                        sourceView: 'jobs',
+                        sourceTitle: t('desk.jobs.title'),
+                        sourceDetail: row.title,
+                        targetView: 'resume',
+                        targetTitle: t('desk.resume.title'),
+                        targetDetail: t('generate.heading'),
+                        // 只抓到摘要的行没有正文可带（`detailCapturedAt` 为 null），跳过这一格即可，
+                        // 不拿空字符串去把人已经打好的正文擦掉。
+                        seedJdText: row.description.length > 0 ? row.description : undefined,
+                      });
+                    }}
                   >
                     <label className="flex items-start gap-2">
                       <DeskCheck

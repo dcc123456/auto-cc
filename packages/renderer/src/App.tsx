@@ -10,7 +10,7 @@ import {
   Sun,
   Workflow as WorkflowIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { switchLanguage, type SupportedLanguage } from './i18n';
@@ -37,17 +37,18 @@ import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
 import { tightestQuota, useDeskStatus } from './deskStatus';
-import { DeskButton, DeskTab } from './ui/controls';
+import { DeskButton, DeskTab, DeskViewTrail } from './ui/controls';
 import { Toast } from './ui/overlays';
+/**
+ * 顶层视图的名字由 `viewTrail.ts` own：跨视图推进（09 稿形态⑥）是全 app 唯一一处要同时认识
+ * 两个视图的契约，联合类型放在那儿才不会长第二份（§2.5）。
+ * AGENTS.md §5.9 定的顺序：对话是第一入口；其后四张工作台按用户语言命名（岗位 / 简历 / 流程 /
+ * 信任，评审裁定 Q2）；诊断面板再低一档（spec 1.10-07）。六个视图都常驻挂载，切换只改 display，
+ * 所以来回切不丢滚动位置也不丢状态（spec 1.10-01）——形态⑥ 的「返回时滚动位置不变」靠的正是这一条。
+ */
+import { clearViewTrail, useViewTrail, type TopView } from './viewTrail';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
-
-/**
- * 顶层视图。AGENTS.md §5.9 定的顺序：对话是第一入口；其后四张工作台按用户语言命名
- * （岗位 / 简历 / 流程 / 信任，评审裁定 Q2）；诊断面板再低一档（spec 1.10-07）。
- * 六个视图都常驻挂载，切换只改 display，所以来回切不丢滚动位置也不丢状态（spec 1.10-01）。
- */
-type TopView = 'chat' | 'jobs' | 'resume' | 'workflow' | 'trust' | 'diagnostics';
 
 /** 左轨导航的一项。 */
 interface DeskEntry {
@@ -108,6 +109,14 @@ function statusSlot(item: string, label: string, value: string, state: DeskSlotS
 export function App() {
   const { t, i18n } = useTranslation();
   const [view, setView] = useState<TopView>('chat');
+  /**
+   * 09 稿形态⑥（spec 6.2-24）：跨视图推进的那一跳。切格只改 `hidden`，六个容器都不卸载，
+   * 所以「返回」时来源视图的滚动位置原样还在——这一条不是本片新加的机制，是 1.10-01 已有的画法。
+   */
+  const trail = useViewTrail();
+  useEffect(() => {
+    if (trail) setView(trail.targetView);
+  }, [trail]);
   // 5.9-06：首屏隐私声明。首启动由 localStorage 判定，之后靠标题栏那颗按钮重开，两处共用同一份状态。
   const privacy = usePrivacyNotice();
   const [theme, toggleTheme] = useDeskTheme();
@@ -154,6 +163,24 @@ export function App() {
       data-view-scroll={target}
       className={`${target === view ? 'block' : 'hidden'} min-w-0 flex-1 overflow-y-auto p-5`}
     >
+      {/* 只在"这一跳的目标正是这一格"时长出来；手动切视图不带面包屑（09 稿：同视图内锚点跳转也不需要）。 */}
+      {trail && trail.targetView === target ? (
+        <div className="mb-4">
+          <DeskViewTrail
+            action={`trail-${trail.sourceView}-to-${target}`}
+            fromLabel={t('desk.trailFrom')}
+            sourceTitle={trail.sourceTitle}
+            sourceDetail={trail.sourceDetail}
+            targetTitle={trail.targetTitle}
+            targetDetail={trail.targetDetail}
+            backLabel={t('desk.trailBack', { view: trail.sourceTitle })}
+            onBack={() => {
+              setView(trail.sourceView);
+              clearViewTrail();
+            }}
+          />
+        </div>
+      ) : null}
       <header className="mb-4 border-b border-line pb-3">
         <h2 className="text-sm font-semibold text-slate-50">{t(deskKeys(target).title)}</h2>
         <p className="mt-1 text-xs text-slate-400">{t(deskKeys(target).hint)}</p>
@@ -205,7 +232,11 @@ export function App() {
               selected={entry.view === view}
               icon={entry.icon}
               tier={entry.primary ? 'primary' : 'muted'}
-              onClick={() => setView(entry.view)}
+              onClick={() => {
+                // 人自己切格就不带来源了：面包屑只属于"那一跳"，留着它会指向一条已经走不通的回程。
+                clearViewTrail();
+                setView(entry.view);
+              }}
             >
               {t(`nav.${entry.view}`)}
             </DeskTab>

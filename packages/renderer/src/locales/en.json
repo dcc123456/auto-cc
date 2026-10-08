@@ -33,6 +33,8 @@
     },
     "desk": {
       "reveal": "Show in {{target}}",
+      "trailFrom": "from",
+      "trailBack": "Back to {{view}}",
       "revealTarget": {
         "macos": "Finder",
         "windows": "File Explorer",

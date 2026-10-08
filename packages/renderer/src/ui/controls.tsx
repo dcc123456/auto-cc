@@ -1130,3 +1130,74 @@ export function ArmButton({
     </span>
   );
 }
+
+/** `DeskViewTrail` 的入参：所有文案都是调用方翻好的字符串（§5.7，原件不拼句子）。 */
+export interface DeskViewTrailProps {
+  /** 面包屑条的 harness 凭据；「返回」那颗渲染成 `<action>-back`。 */
+  action: string;
+  /** 「来自」这一格的标签文案。 */
+  fromLabel: string;
+  /** 来源视图的标题（第一只 chip，稿上吃 celadon——是系统在说话）。 */
+  sourceTitle: string;
+  /** 来源视图里被带走的那个对象（岗位标题、会话标题），可缺。 */
+  sourceDetail?: string;
+  /** 目标视图的标题（第二只 chip，稿上是中性档）。 */
+  targetTitle: string;
+  /** 目标视图里落到的那一段，可缺。 */
+  targetDetail?: string;
+  /** 「返回〈来源〉」的已翻译整句。 */
+  backLabel: string;
+  /** 返回回调：切回来源视图并收起这一跳。 */
+  onBack: () => void;
+}
+
+/**
+ * 跨视图推进顶上的来源面包屑（09 稿形态⑥，spec 6.2-24）。
+ *
+ * 稿上的规则只有两句：**跨视图跳转一定要长这条**（同视图内的锚点跳转不需要，所以它只由
+ * `viewTrail.ts` 那一跳的存在与否决定，不由视图决定），以及**「返回」回来源视图时滚动位置不变**
+ * （视图靠 `hidden` 收起、从不卸载，这里因此只负责清掉这一跳，不做任何恢复动作）。
+ * 推进类控件按下瞬间不给 loading——目标是本地已渲染的视图，出现转针就说明实现走错了路。
+ *
+ * @param props 见 `DeskViewTrailProps`
+ * @returns 一条 42px 高的横栏，返回键贴右
+ */
+export function DeskViewTrail({
+  action,
+  fromLabel,
+  sourceTitle,
+  sourceDetail,
+  targetTitle,
+  targetDetail,
+  backLabel,
+  onBack,
+}: DeskViewTrailProps) {
+  return (
+    <div
+      data-view-trail={action}
+      className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-ink-850 px-3 py-2"
+    >
+      <span className="font-mono text-[11px] text-slate-500">{fromLabel}</span>
+      <Tag tone="celadon" data-trail-segment="source">
+        {sourceTitle}
+      </Tag>
+      {sourceDetail ? (
+        <span data-trail-segment="source-detail" className="max-w-[18rem] min-w-0 truncate text-[11px] text-slate-300">
+          {sourceDetail}
+        </span>
+      ) : null}
+      <span aria-hidden="true" className="font-mono text-[11px] text-slate-500">
+        ›
+      </span>
+      <Tag data-trail-segment="target">{targetTitle}</Tag>
+      {targetDetail ? (
+        <span data-trail-segment="target-detail" className="font-mono text-[11px] text-slate-300">
+          {targetDetail}
+        </span>
+      ) : null}
+      <DeskButton action={`${action}-back`} variant="line" compact className="ml-auto" onClick={onBack}>
+        {backLabel}
+      </DeskButton>
+    </div>
+  );
+}
