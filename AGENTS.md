@@ -269,9 +269,15 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `schema_migrations` 台账里"这一版记过账没有"，不是 DDL 幂等——`CREATE TABLE IF NOT EXISTS` 塞进已应用的
   版本号里，在老库（含本机开发实例）上根本执行不到，运行期才以 `no such table` 失败。
   **单测同样看不见**：每个用例都从空库起，所有迁移都是头一回跑。加表前先 `SELECT version FROM schema_migrations`
-  看台账最高值，取下一号段（**2026-10-06 实测：本项目最高已用到 29**，`packages/workflow/src/run-store.ts:123`
-  的 `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`；原先这条写的是"当前到 17"，那是 5.3-a 窗口的读数，此后 21～29 九支已陆续落地。
+  看台账最高值，取下一号段（**2026-10-08 登记：本项目最高已用到 32**——29 之前是各包的号段，
+  **31 / 32 是 `packages/llm/src/provider-pool.ts` 的提供商实例池与模型清单两张表（spec 7.2-08）**，
+  号段来源读数见 `docs/acceptance/07-model-settings/7.2-02-08-pool-readings.txt`。
+  原先这条写的是"当前到 17"和"最高已用到 29"（`packages/workflow/src/run-store.ts:123` 的
+  `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`），那是 5.3-a / 7.2-a 窗口的读数，此后 21～29 九支已陆续落地。
   **30 已被 plan §8.3 预留给 3.6 的草稿表，但裁定⑨ 判的是"只拦不存"，所以 30 当前未启用**——占号前先看这份清单，别撞号）。
+  顺带一条同片实测：`store` 开连接时**全仓没有一处设 `PRAGMA foreign_keys = ON`**，所以 DDL 里的
+  `ON DELETE CASCADE` 是装饰性的，删父行必须显式在同一条事务里删子表（先例：`packages/store/src/migrate.ts:100`、
+  `packages/llm/src/provider-pool.ts` 的 `deleteProviderRow`）。
 - **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe
