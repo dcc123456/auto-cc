@@ -1,4 +1,4 @@
-8.0-05 真实会话页 DOM 证据（V-人工，本机 macOS，2026-10-08，真实账号在场）—— 部分完成，标 [!]
+8.0-05 真实会话页 DOM 证据（V-人工，本机 macOS，2026-10-08，真实账号在场）—— 已收口（第二节的六个"未取得"由第四节补录）
 
 取证方式
   `browser.page.navigate('https://www.zhipin.com/web/geek/chat')` 一次落地（导航许可按 startUrl 同源取白名单，
@@ -52,3 +52,44 @@
   - 解除条件（8.0-05 收口需要什么）：① 用户同意"打开某条指定会话取 DOM，接受已读副作用"，或
     ② 8.1 给出能过 70 分线的会话定位方案（现在已知 DOM 里没有 testid/id/name 三类可用来源，
        只剩 role+动态 accessible name 与 text，两者都进不了静态包）。
+
+四、补录（裁定 ⑥ 之后同窗第二次取证，05:16Z —— 第二节的六个"未取得"在这一节兑现）
+  手法与它的诚实代价
+    - 按裁定「我自己挑一条老会话」，挑的是列表第一条 2026-09-28 的老线程；打开后该会话被置为已读、招聘方可见。
+      这一发不可隐藏，所以是先取得同意、后动手（PII 已脱敏：联系人姓名只在被忽略的 `tmp/80/` 里作为瞬时候选值出现，本文件不落）。
+    - 过线候选：`{strategy:'text', value:<联系人姓名>, exact:true}` → 70 分，`status:done / trusted:true`。
+      命中的是行内的 `span.name-text`，**不是整行**：整行文本候选（同样 70 分）报的是 `WAIT_TIMEOUT`——
+      那一行是虚拟列表里的重渲染节点，且中心被 `div.user-operation` 的操作图盖住。
+      ⇒ 真站点的会话行只能按"行内某个稳定小节点"定位，不能按整行定位。这一条要进 8.1 的真实包写法。
+    - 前两次的失败读数（`d-c` 封顶 −15、整行文本 WAIT_TIMEOUT）原样保留在第二节，它们正是裁定 ⑤ 的证据。
+  消息区五键（逐键实测）
+    容器           `div.chat-conversation > div.message-content > div.chat-record > ul.im-list`
+                   相邻两条：`div.pre-loading > span.loading-more`（上滑加载历史）、`div.message-tip-bar`
+    messageItem    `ul.im-list > li.message-item`，实测命中 2（该线程只有两条，都是对方发的）
+    messageIdAttribute **`data-mid`** —— 真站点给消息 id。实测两枚 …666 / …682，15 位数字、同线程内单调增
+                   ⇒ 可直接当去重键与排序键，2.5 的回复监听不必再靠文本猜。
+    messageBody    自由文本消息：`div.message-content > div.text > p > span.text-content`
+                   结构化卡片消息：`div.articles-center > div.message-card-wrap.blue`
+                     （内含 `div.message-card-top-content` 与 `div.message-card-buttons > span.card-btn`）
+                   ⇒ 抓取正文必须两条分支都写；只认 `span.text-content` 会把卡片消息读成空。
+    时间戳         `div.item-time > span.time`，形如「09-28 22:1x」
+    directionAttribute **显式缺席**：真站点没有"方向属性"，方向长在 **class token** 上（实测 `item-friend`）
+                   ⇒ 知识包这一键要么改成"class 前缀判定"，要么如实标无此形状，**不许伪造属性名**。
+    inboundValue   实测值 = `item-friend`；**我方值未取得**（该老线程里两条都是对方发的）
+                   解除条件：8.4 在闸门内 + 人确认下发出第一句时补录（裁定 ⑦ 已允许这一发）。
+  输入与发送（逐键实测）
+    输入框         `div#chat-input.chat-input[contenteditable="true"]`，rect [422,517,752,79]
+                   —— 是 contenteditable 的 **div**，不是 textarea/input：写内容要按 §9 的 5.3-b ⑤ 走原生 setter + `input` 事件。
+                      它带 **id** ⇒ `{strategy:'id', value:'chat-input'}` 基线 90 分，是真站点上最可靠的一枚候选（比 text/role 都稳）。
+    发送键         `button.btn-v2.btn-sure-v2.btn-send`，文本「发送」；空内容时挂 `.disabled` **class**，
+                   而 `button.disabled === false`、`aria-disabled` 缺席 —— 与 §9 的 6.2 二三片口径② 同一条形状：
+                   **判"点不动"必须读类名/文案，读原生 disabled 会得到假的"按钮没坏"**。
+    工具条         `.chat-controls [aria-label]` 实测「表情」「常用语」「发送图片」（另有三枚空 label）
+                   —— 「常用语」就是打招呼语的站点自带格子，8.4 的文案候选来源。
+  与 8.8 直接相关的一条硬事实
+    发送键 rect 的 x=1112，而当前展开态视图只有 **1015** CSS px 宽 ⇒ **发送键在画面外**。
+    同一类事实在 8.0-03 已经咬过一次（搜索按钮 x=998 / 当时视图 659）。
+    ⇒ 8.4/8.5 的活体验收必须把窗口带到 ≥1410 宽（阈值来源 `8.8-05-real-viewport.txt`），
+       否则拿到的会是 `WAIT_TIMEOUT` 这种"不是缺陷的点不动"，把几何问题误读成选择器问题。
+  仍然没做
+    未发送任何消息、未点「上传附件简历」（那是 8.5 闸门内的动作）；"发出去了没有"仍只以页面自己的 `[送达]`/`[已读]` 为凭。
