@@ -218,6 +218,11 @@
   /* 与主进程 KERNEL_VIEW_WIDTH_RATIO 同源；scripts/check-renderer-conventions.ts 会校验一致性 */
   --kernel-view-width: 38%;
 
+  /* 左栏导航的宽度。抽屉的遮罩要从这一档之后才开始盖（09 稿形态④：「遮罩只盖住主区、
+     不盖左栏导航（人随时能切走）」），所以宽度必须是一个能被浮层原件引用的数，
+     而不是写在 App.tsx 里的一次性 class。 */
+  --desk-nav-width: 184px;
+
   color-scheme: dark;
 }
 

@@ -194,7 +194,7 @@ export function App() {
         <nav
           data-testid="view-tabs"
           aria-label={t('nav.aria')}
-          className="flex w-[184px] shrink-0 flex-col gap-0.5 border-r border-line bg-ink-900 p-2"
+          className="flex w-(--desk-nav-width) shrink-0 flex-col gap-0.5 border-r border-line bg-ink-900 p-2"
         >
           {DESK_ENTRIES.map((entry) => (
             <DeskTab

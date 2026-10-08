@@ -26,7 +26,8 @@ import type {
 import { pushDeskToast } from './deskToast';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
-import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
+import { Drawer } from './ui/overlays';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
@@ -41,6 +42,18 @@ const CHANGE_LABEL_KEY = {
   removed: 'resume.changeRemoved',
   modified: 'resume.changeModified',
 } as const;
+
+/**
+ * 变更类型 → 芯片语气档，照稿 `docs/design/ui-drafts/09-dialogs.html` 形态④ 4-A 那一栏：
+ * 新增涂青玉、删除涂朱砂、改述走中性回执档（稿上那一格就是不带语气的 `.tag`）。
+ * 这三档说的是"这一条是加/删/改"，不是"办好了/有风险"——`Tag` 的语气档在这里借的是稿上同一张脸，
+ * 判定语义仍由主进程的 diff 给出，界面不改判（AGENTS.md §2.5）。
+ */
+const CHANGE_TONE: Record<keyof typeof CHANGE_LABEL_KEY, 'jade' | 'seal' | undefined> = {
+  added: 'jade',
+  removed: 'seal',
+  modified: undefined,
+};
 
 /** 待确认标记的种类 → 文案键（五种标记在 4.1-04 的清单里各有一句人话，界面按它分列）。 */
 const ISSUE_LABEL_KEY = {
@@ -79,6 +92,12 @@ export function ResumePanel() {
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
   const [diff, setDiff] = useState<SnapshotDiffView>();
+  /**
+   * 快照历史/版本对照抽屉的开合（09 稿形态④ 4-A：对照要"两边同时看"，所以它是一只从右栏滑出的抽屉，
+   * 而不是压在面板底下的一截长条）。只记开合，数据仍由 `snapshot.list` / `snapshot.diff` 现读，
+   * 抽屉里不存第二份事实（§2.5）。
+   */
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [importPath, setImportPath] = useState('');
   const [lastImport, setLastImport] = useState<ImportReceiptView>();
   const [importError, setImportError] = useState<AppErrorPayload>();
@@ -504,7 +523,10 @@ export function ResumePanel() {
           disabled={noSeedReason !== undefined}
           disabledReason={noSeedReason}
           disabledReasonLabel={reasonLabel(noSeedReason)}
-          onClick={() => seed && loadSnapshots(seed.docId)}
+          onClick={() => {
+            setSnapshotsOpen(true);
+            if (seed) loadSnapshots(seed.docId);
+          }}
         >
           <History size={12} />
           {t('resume.snapshots')}
@@ -517,108 +539,143 @@ export function ResumePanel() {
           disabled={diffReason !== undefined}
           disabledReason={diffReason}
           disabledReasonLabel={reasonLabel(diffReason)}
-          onClick={compareSnapshots}
+          onClick={() => {
+            setSnapshotsOpen(true);
+            compareSnapshots();
+          }}
         >
           <GitCompareArrows size={12} />
           {t('resume.diff')}
         </DeskButton>
       </div>
 
-      {snapshots.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-3" data-testid="snapshot-list">
-          <label className="flex items-center gap-1 text-[11px] text-slate-400">
-            {t('resume.diffFrom')}
-            <DeskSelect
-              action="snapshot-diff-from"
-              data-testid="snapshot-diff-from"
-              value={fromId}
-              onValueChange={(value) => {
-                setFromId(value);
-                setDiff(undefined);
-              }}
-              className="max-w-[260px]"
+      <Drawer
+        action="snapshots"
+        open={snapshotsOpen}
+        title={t('resume.snapshots')}
+        subtitle={snapshots.length > 0 ? t('resume.snapshotCount', { count: snapshots.length }) : undefined}
+        onClose={() => setSnapshotsOpen(false)}
+      >
+        {snapshots.length > 0 && (
+          <div className="flex flex-wrap gap-3" data-testid="snapshot-list">
+            <label className="flex items-center gap-1 text-[11px] text-slate-400">
+              {t('resume.diffFrom')}
+              <DeskSelect
+                action="snapshot-diff-from"
+                data-testid="snapshot-diff-from"
+                value={fromId}
+                onValueChange={(value) => {
+                  setFromId(value);
+                  setDiff(undefined);
+                }}
+                className="max-w-[260px]"
+              >
+                {snapshots.map((item) => (
+                  <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
+                    {snapshotLabel(item)}
+                  </option>
+                ))}
+              </DeskSelect>
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-slate-400">
+              {t('resume.diffTo')}
+              <DeskSelect
+                action="snapshot-diff-to"
+                data-testid="snapshot-diff-to"
+                value={toId}
+                onValueChange={(value) => {
+                  setToId(value);
+                  setDiff(undefined);
+                }}
+                className="max-w-[260px]"
+              >
+                {snapshots.map((item) => (
+                  <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
+                    {snapshotLabel(item)}
+                  </option>
+                ))}
+              </DeskSelect>
+            </label>
+            {/* 换完版本对就在栏内重比（09 稿形态④ 4-A 的对照动作与选择器同在一栏）。
+                不在 onValueChange 里即时重比：连改两只选择器时，前一条还在途的差异会贴到新版本对上，
+                界面就成了说谎；按一次比一次，且"上一条还在途"由原因码说给人听（07 稿④）。 */}
+            <DeskButton
+              action="snapshot-compare"
+              variant="line"
+              compact
+              busy={!!busy}
+              disabled={diffReason !== undefined}
+              disabledReason={diffReason}
+              disabledReasonLabel={reasonLabel(diffReason)}
+              onClick={compareSnapshots}
             >
-              {snapshots.map((item) => (
-                <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
-                  {snapshotLabel(item)}
-                </option>
-              ))}
-            </DeskSelect>
-          </label>
-          <label className="flex items-center gap-1 text-[11px] text-slate-400">
-            {t('resume.diffTo')}
-            <DeskSelect
-              action="snapshot-diff-to"
-              data-testid="snapshot-diff-to"
-              value={toId}
-              onValueChange={(value) => {
-                setToId(value);
-                setDiff(undefined);
-              }}
-              className="max-w-[260px]"
-            >
-              {snapshots.map((item) => (
-                <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
-                  {snapshotLabel(item)}
-                </option>
-              ))}
-            </DeskSelect>
-          </label>
-        </div>
-      )}
+              <GitCompareArrows size={12} />
+              {t('resume.diff')}
+            </DeskButton>
+          </div>
+        )}
 
-      {diff && (
-        <div className="mt-3 rounded-md border border-line bg-ink-950/60 p-3" data-testid="snapshot-diff">
-          {diff.isEmpty ? (
-            <p className="text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
-              {t('resume.diffEmpty')}
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {diff.sections.map((section) => (
-                <li key={section.sectionId} data-testid="diff-section">
-                  <p className="text-[11px] font-semibold text-slate-300" data-testid="diff-section-heading">
-                    {t(`resume.kind.${section.kind}`)} · {t(CHANGE_LABEL_KEY[section.change])}
-                  </p>
-                  <ul className="mt-1 space-y-1 pl-3">
-                    {section.entries.map((entry) => (
-                      <li key={entry.entryId} data-testid="diff-entry">
-                        <p className="text-[11px] text-slate-500">
-                          {entry.entryId} · {t(CHANGE_LABEL_KEY[entry.change])}
-                        </p>
-                        <ul className="mt-0.5 space-y-0.5 pl-3">
-                          {entry.fields.map((field) => (
-                            <li
-                              key={field.key}
-                              data-testid="diff-field"
-                              className="flex flex-wrap items-baseline gap-1 text-[11px]"
-                            >
-                              <span className="text-slate-500">{field.key}</span>
-                              <span className="break-all text-slate-400 line-through">
-                                {field.before ?? t('resume.valueAbsent')}
-                              </span>
-                              <span className="text-slate-600">→</span>
-                              <span className="break-all text-jade">{field.after ?? t('resume.valueAbsent')}</span>
-                              {field.locked && (
-                                <span
-                                  data-testid="diff-field-locked"
-                                  className="rounded border border-amber/45 px-1 text-amber"
-                                >
-                                  {t('resume.fieldLocked')}
+        {diff && (
+          <div className="mt-3 border-t border-line" data-testid="snapshot-diff">
+            {diff.isEmpty ? (
+              <p className="py-2.5 text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
+                {t('resume.diffEmpty')}
+              </p>
+            ) : (
+              <ul>
+                {diff.sections.map((section) => (
+                  <li
+                    key={section.sectionId}
+                    data-testid="diff-section"
+                    className="border-b border-line py-2.5 last:border-b-0"
+                  >
+                    <p
+                      className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-300"
+                      data-testid="diff-section-heading"
+                    >
+                      <Tag tone={CHANGE_TONE[section.change]}>{t(CHANGE_LABEL_KEY[section.change])}</Tag>
+                      {t(`resume.kind.${section.kind}`)}
+                    </p>
+                    <ul className="mt-1 space-y-1 pl-3">
+                      {section.entries.map((entry) => (
+                        <li key={entry.entryId} data-testid="diff-entry">
+                          <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                            <Tag tone={CHANGE_TONE[entry.change]}>{t(CHANGE_LABEL_KEY[entry.change])}</Tag>
+                            {entry.entryId}
+                          </p>
+                          <ul className="mt-0.5 space-y-0.5 pl-3">
+                            {entry.fields.map((field) => (
+                              <li
+                                key={field.key}
+                                data-testid="diff-field"
+                                className="flex flex-wrap items-baseline gap-1 text-[11px]"
+                              >
+                                <span className="text-slate-500">{field.key}</span>
+                                <span className="break-all text-slate-400 line-through">
+                                  {field.before ?? t('resume.valueAbsent')}
                                 </span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+                                <span className="text-slate-600">→</span>
+                                <span className="break-all text-jade-ink">
+                                  {field.after ?? t('resume.valueAbsent')}
+                                </span>
+                                {field.locked && (
+                                  <Tag tone="amber" data-testid="diff-field-locked">
+                                    {t('resume.fieldLocked')}
+                                  </Tag>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Drawer>
     </section>
   );
 }

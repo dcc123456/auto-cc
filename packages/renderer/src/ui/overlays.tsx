@@ -17,6 +17,13 @@ const MODAL_WIDTH = { '480': 'w-[480px]', '560': 'w-[560px]', '640': 'w-[640px]'
 const SCRIM = 'fixed inset-0 z-40 bg-scrim';
 
 /**
+ * 抽屉的遮罩（09 稿形态④：「遮罩只盖住主区、不盖左栏导航（人随时能切走）」）。
+ * 与 `SCRIM` 唯一的差别是起点让给左栏；弹窗仍用全屏那一档（形态⑤ 的入场条件就是"躲不掉"）。
+ * 起点引用 `--desk-nav-width` 而不是抄一个 `184px`：左栏宽度改了，这条口径不会静默失配（§2.5）。
+ */
+const DRAWER_SCRIM = 'fixed inset-y-0 right-0 left-(--desk-nav-width) z-40 bg-scrim';
+
+/**
  * 浮层层级（09 稿「打扰度递增」那条序）：一次 Esc 只关最上层那一只，不许一塌到底（纪律表第 4 行），
  * 焦点环同样只属于最上层那一层（第 2 行）。toast 10 < 抽屉 20 < 弹窗 30。
  * 数值既是关闭优先级也是焦点归属，谁都不许绕开这张表自己挂监听。
@@ -123,7 +130,8 @@ function registerOverlayLayer(layer: number, close: () => void, node: HTMLElemen
  * 「背后摸不到」走的是 09 稿给的第二个口子（等价的焦点陷阱）而不是 `inert`：
  * `inert` 要挂在**背景容器**上，就得把浮层从面板里提到顶层（Portal），而第二十五片已经用活体判据确认
  * 「`display:none` 的祖先把 `fixed` 后代一起藏掉」正是"同一时刻 ≤1 只遮罩"的保证（§3.8 的落点选择）。
- * 鼠标这一路本来就摸不到——遮罩是 `fixed inset-0`，命中测试落在遮罩上；本片补的是键盘那一路。
+ * 鼠标这一路弹窗本来就摸不到——遮罩是 `fixed inset-0`，命中测试落在遮罩上；抽屉的遮罩让出左栏（形态④），
+ * 那一条鼠标路是**故意留开的**，键盘这一路仍按纪律表「焦点」行锁在浮层内。所以这里补的是键盘那一路。
  * @param open 是否开着（关了就不挂监听）
  * @param layer 这一层的 Esc / 焦点优先级
  * @param onClose 收起动作
@@ -199,6 +207,11 @@ export interface DrawerProps {
 /**
  * 抽屉（09 稿形态④）：从右栏滑出的**读与对照**容器——版本对照、算子参数、清单表。
  * 不用它做"确认"，确认走两步 armed 或遮罩弹窗。
+ *
+ * 与弹窗的两条行为分界都写在稿的纪律表上：遮罩让出左栏（`DRAWER_SCRIM`，鼠标随时能切走），
+ * 底层滚动不锁（`lockScroll=false`，边看边改）；焦点环这一条**两者相同**（纪律表「焦点」行
+ * 把抽屉与弹窗并列写："Tab 在浮层内循环不出来"），所以左栏在键盘那一路是摸不到的，
+ * 稿上"人随时能切走"指的是鼠标。窄窗（<1120px）按尺寸档那条改为全宽覆盖。
  * @param action 关闭动作前缀
  * @param open 是否展开
  * @param title 标题
@@ -213,13 +226,13 @@ export function Drawer({ action, open, title, subtitle, onClose, width = '420', 
   if (!open) return null;
   return (
     <>
-      <div className={SCRIM} onClick={onClose} />
+      <div className={DRAWER_SCRIM} onClick={onClose} />
       <aside
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         data-action={`${action}-drawer`}
-        className={`fixed inset-y-0 right-0 z-50 flex ${DRAWER_WIDTH[width]} flex-col border-l border-line-strong bg-ink-850 shadow-sheet animate-rise`}
+        className={`fixed inset-y-0 right-0 z-50 flex ${DRAWER_WIDTH[width]} max-[1120px]:w-full flex-col border-l border-line-strong bg-ink-850 shadow-sheet animate-rise`}
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0">
