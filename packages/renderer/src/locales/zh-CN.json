@@ -1254,6 +1254,7 @@
       "created": "已新建 {{entityId}}",
       "save": "保存",
       "saved": "已更新 {{entityId}}",
+      "factPending": "事实待校验",
       "cancel": "取消",
       "edit": "编辑",
       "delete": "删除",

@@ -1254,6 +1254,7 @@
       "created": "Created {{entityId}}",
       "save": "Save",
       "saved": "Updated {{entityId}}",
+      "factPending": "fact check pending",
       "cancel": "Cancel",
       "edit": "Edit",
       "delete": "Delete",

@@ -12,7 +12,7 @@ import type {
 } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
-import { DeskButton, DeskField, DeskSelect, DeskTextarea } from './ui/controls';
+import { DeskButton, DeskField, DeskSelect, DeskTextarea, Tag } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 反查命中理由 → 文案键（`contains` 与 `overlap` 在界面是两句不同的话，分数只是它们共同的强度读数）。 */
@@ -120,6 +120,14 @@ export function KbPanel() {
   const [docId, setDocId] = useState('');
   const [backupPath, setBackupPath] = useState('');
   const [importMode, setImportMode] = useState<KbImportModeView>('skip');
+  /**
+   * 本次会话里"改过事实源、而简历工作副本还不知道"的那几条实体 id（09 稿② 的「事实待校验」）。
+   * 判定只认保存回执：`kb.profile.update` 返回的新 `normalizedHash` 与保存前那一行不同才算一次改动，
+   * 逐字相同（打开又原样存一次）不挂标记。界面这边拿不到工作副本的落盘时刻——契约里没有任何
+   * 持久的 doc 时间戳过界（「正文不过界」），所以这一位只在本次会话成立、刷新即空；
+   * 跨重启那一半欠一条持久读口，记在 plan §3.17，不在界面上假装它还认得。
+   */
+  const [pendingFactCheckIds, setPendingFactCheckIds] = useState<ReadonlySet<string>>(new Set());
   const bridge = window.autoCC;
 
   /**
@@ -204,8 +212,15 @@ export function KbPanel() {
       return;
     }
     const entityId = draft.entityId;
+    // 保存前那一行的载荷摘要：新旧逐字相同（打开又原样存一次）就不算一次改动，不该挂标记
+    const beforeHash = entities.find((item) => item.entityId === entityId)?.normalizedHash ?? null;
     void run(t('kb.save'), () => bridge?.kb['profile.update'](entityId, payload), {
-      apply: () => setEditing(undefined),
+      apply: (view) => {
+        setEditing(undefined);
+        if (beforeHash !== null && view.normalizedHash !== beforeHash) {
+          setPendingFactCheckIds((current) => new Set([...current, view.entityId]));
+        }
+      },
       describe: (view) => t('kb.saved', { entityId: view.entityId }),
     });
   };
@@ -325,6 +340,13 @@ export function KbPanel() {
             {t(ENTITY_KIND_LABEL_KEY[entity.kind])}
           </span>
           <span className="text-sm text-slate-200">{primaryTextOf(entity)}</span>
+          {/* 09 稿② 的「事实待校验」：语气取 amber（等一个人去看），不取 seal——
+              改动本身不是风险，把它放过着不动才是等人的事（§5 的效果归属表）。 */}
+          {pendingFactCheckIds.has(entity.entityId) ? (
+            <Tag tone="amber" data-testid="kb-fact-pending">
+              {t('kb.factPending')}
+            </Tag>
+          ) : null}
           <span className="text-xs text-slate-400" data-kb-entity-id={entity.entityId}>
             {entity.entityId}
           </span>
@@ -625,6 +647,12 @@ export function KbPanel() {
               rows={4}
               value={editing.lines}
               onValueChange={(value) => setEditing({ ...editing, lines: value })}
+              // 09 稿形态② 的「Esc 还原」在这一档走的是与「先不改」同一条出路（§2.5 不留第二套取消）。
+              // Enter 在这一档**故意不保存**：载荷是一行一条事实的多行文本，换行必须留给打字；
+              // 单行才用 `InlineEditField` 的 Enter 保存（会话改名是它现有的消费者）。
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setEditing(undefined);
+              }}
               className="font-mono"
             />
             <p className="text-xs text-slate-400">{t('kb.payloadHint')}</p>
