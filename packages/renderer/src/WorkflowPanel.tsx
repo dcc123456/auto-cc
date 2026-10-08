@@ -256,12 +256,9 @@ export function WorkflowPanel() {
       ))}
 
       {notice && (
-        <p
-          className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-          data-testid="workflow-notice"
-        >
+        <Banner tone="celadon" markers={{ testid: 'workflow-notice' }} className="mt-2">
           {notice}
-        </p>
+        </Banner>
       )}
 
       {current?.requiresHuman && (

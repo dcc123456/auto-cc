@@ -475,12 +475,9 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
       )}
 
       {notice && (
-        <p
-          data-testid="resume-editor-notice"
-          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-        >
+        <Banner tone="celadon" markers={{ testid: 'resume-editor-notice' }} className="mt-2 break-all">
           {notice}
-        </p>
+        </Banner>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">

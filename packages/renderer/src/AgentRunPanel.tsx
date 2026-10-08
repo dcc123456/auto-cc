@@ -9,7 +9,7 @@ import { Check, ListChecks, Play, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, ToolDescriptorView } from '@auto-cc/shared';
 import { ToolCard, stepToToolPart } from './ToolCard';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 
 /**
  * 计划卡 + 卡片流面板。
@@ -165,9 +165,9 @@ export function AgentRunPanel({
       </div>
 
       {notice ? (
-        <p className="border-t border-line px-3 py-2 text-[11px] text-slate-300" data-testid="agent-run-notice">
+        <Banner tone="celadon" markers={{ testid: 'agent-run-notice' }} className="mt-2">
           {notice}
-        </p>
+        </Banner>
       ) : null}
 
       <footer className="flex items-center gap-2 border-t border-line px-3 py-2">

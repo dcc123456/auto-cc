@@ -233,12 +233,9 @@ export function AssemblyPanel() {
         </div>
 
         {notice && (
-          <p
-            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-            data-testid="action-notice"
-          >
+          <Banner tone="celadon" markers={{ testid: 'action-notice' }} className="mt-2">
             {notice}
-          </p>
+          </Banner>
         )}
 
         <ul className="mt-3 flex flex-col gap-2">
@@ -392,10 +389,7 @@ export function AssemblyPanel() {
         )}
 
         {cycle && (
-          <p
-            className="mt-3 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-            data-testid="cycle-report"
-          >
+          <Banner tone="celadon" markers={{ testid: 'cycle-report' }} className="mt-3">
             {t('assembly.cycleReport', {
               id: cycle.id,
               rounds: cycle.rounds,
@@ -405,7 +399,7 @@ export function AssemblyPanel() {
               before: cycle.before.registrySize,
               after: cycle.after.registrySize,
             })}
-          </p>
+          </Banner>
         )}
       </section>
 

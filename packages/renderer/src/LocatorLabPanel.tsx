@@ -298,12 +298,9 @@ export function LocatorLabPanel() {
         </ul>
 
         {notice && (
-          <p
-            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-            data-testid="locator-notice"
-          >
+          <Banner tone="celadon" markers={{ testid: 'locator-notice' }} className="mt-2">
             {notice}
-          </p>
+          </Banner>
         )}
 
         {bridgeError && (

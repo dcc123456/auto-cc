@@ -531,14 +531,11 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
         </Banner>
       )}
 
-      {/* 提示行留中性档：它是全 app 共用 `useBridgeAction.notice` 的那一句，别的面板都这个画法，不在这里单独翻成青瓷。 */}
+      {/* 提示行是全 app 共用 `useBridgeAction.notice` 的那一句，按 6.2-17 裁定归 celadon 信息档，形状只有一只原件。 */}
       {notice && (
-        <p
-          data-testid="pdf-edit-notice"
-          className="mt-2 break-all rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-        >
+        <Banner tone="celadon" markers={{ testid: 'pdf-edit-notice' }} className="mt-2 break-all">
           {notice}
-        </p>
+        </Banner>
       )}
 
       {!receipt && (

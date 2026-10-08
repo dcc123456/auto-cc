@@ -10,7 +10,7 @@ import {
   type UsageSummaryView,
 } from '@auto-cc/shared';
 import { AuditSection } from './AuditSection';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskQuota } from './deskStatus';
 
@@ -104,12 +104,9 @@ export function UsagePanel() {
       </div>
 
       {notice && (
-        <p
-          className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-          data-testid="usage-notice"
-        >
+        <Banner tone="celadon" markers={{ testid: 'usage-notice' }} className="mt-2">
           {notice}
-        </p>
+        </Banner>
       )}
 
       <ul className="mt-3 flex flex-col gap-2">

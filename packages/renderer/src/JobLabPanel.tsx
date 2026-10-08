@@ -414,12 +414,9 @@ export function JobLabPanel() {
         </div>
 
         {notice && (
-          <p
-            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-            data-testid="jd-notice"
-          >
+          <Banner tone="celadon" markers={{ testid: 'jd-notice' }} className="mt-2">
             {notice}
-          </p>
+          </Banner>
         )}
 
         {lastGreet && (

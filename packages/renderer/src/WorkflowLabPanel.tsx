@@ -5,7 +5,7 @@ import type { WorkflowNodeRunView, WorkflowNodeSpec, WorkflowRunStateView } from
 import { displayStepNumber } from './format';
 import { useBridgeAction } from './useBridgeAction';
 import { useWorkflowRun } from './useWorkflowRun';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 /**
  * 节点行的配色与第二视图的步骤行、画布节点卡片共用同一份映射（`stepStatusStyle`）：
  * 这一块面板画的是 `workflow_nodes` 表里的行，状态整份抄自 `workflow.runner`，
@@ -175,12 +175,9 @@ export function WorkflowLabPanel() {
         </div>
 
         {notice && (
-          <p
-            className="mt-2 rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300"
-            data-testid="wf-lab-notice"
-          >
+          <Banner tone="celadon" markers={{ testid: 'wf-lab-notice' }} className="mt-2">
             {notice}
-          </p>
+          </Banner>
         )}
         {live?.message && (
           <p className="mt-2 text-[11px] text-slate-400" data-testid="wf-lab-live">
