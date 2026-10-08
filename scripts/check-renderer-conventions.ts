@@ -383,9 +383,10 @@ for (const file of tsxFiles) {
  *     ② 裁定要的是"一处改、全族受益"——只要每档的**文字档** `--color-<tone>-ink` 压在自己的淡洗上、
  *        对该主题最浅的一级面板也过 4.5，那么引用它的每一只载体（`Banner`/`Tag`/`EffectChip`/
  *        按钮结果态/风险档选中键）都跟着过，消费侧永远只有一条写法，不需要按主题分支。
- *     同一节还钉住两条令牌纪律：四档在两案里都必须有 `-ink`（缺键=那一档当文字用没人管），
- *     以及 `--color-<tone>-wash` 的 rgb 必须与 `--color-<tone>` 同色（`globals.css` 里那条
- *     「wash 的 rgb 必须跟着各自 token 走」——改了色相档忘了淡洗，材质语言就失配，且肉眼难查）。
+ *     同一节还钉住三条令牌纪律：四档在两案里都必须有 `-ink`（缺键=那一档当文字用没人管），
+ *     `--color-<tone>-wash` 的 rgb 必须与 `--color-<tone>` 同色（`globals.css` 里那条
+ *     「wash 的 rgb 必须跟着各自 token 走」——改了色相档忘了淡洗，材质语言就失配，且肉眼难查），
+ *     以及 `SOLID_FILL_PAIRS` 那张"整颗填色 + 钉死字色"的配对表在两案里都必须 ≥4.5（spec 6.2-26）。
  */
 const TONE_NAMES = ['celadon', 'jade', 'amber', 'seal'] as const;
 /** 语气载体可能落上的承载面：桌面与导航用 950/900、区块用 850、选中与悬停用 800、中性长条与底栏用 750
@@ -401,6 +402,16 @@ const SOLID_TONE_ALPHA: Record<(typeof TONE_NAMES)[number], number | null> = {
   amber: 0.14,
   seal: 0.18,
 };
+/**
+ * "整颗填色"那一族：悬停／按下把控件填死的**实底档**，字色不是本档的 `-ink` 而是稿钉死的那一只
+ * （07 稿 `.seal:hover{color:#fff}`，`docs/design/ui-drafts/assets/shared.css:439-444`）。
+ * 上面那条判据只管"文字档压在淡洗上"，看不见这种"底=色相、字=固定色"的组合，所以单列一张配对表：
+ * 每一行的底必须在**两案都声明**（只在一案声明则 Tailwind 不生成 utility，见 spec 6.1 二十一片第 7 条），
+ * 且对给定字色 ≥4.5。新档进表时把判据出处写进 `spec`，报错才会指回人的裁定而不是指回代码。
+ */
+const SOLID_FILL_PAIRS: ReadonlyArray<{ fill: string; text: string; spec: string }> = [
+  { fill: 'seal-deep', text: '#ffffff', spec: 'spec 6.2-26（07 稿 `.seal` 反色键）' },
+];
 const AA_NORMAL_TEXT = 4.5;
 
 interface Rgba {
@@ -520,6 +531,33 @@ if (lightBlockStart < 0) {
         }
       }
     }
+    // 实底档这一族（见 `SOLID_FILL_PAIRS`）：6.2-26 撞上的两件事都在这条里钉住——
+    // 稿给悬停的那档 `--seal`（墨案 #e2543a）配白字只有 3.61:1，而沿用其余五档的 `slate-50` 作字色时
+    // 毡案更低到 1.22:1（那一档随主题翻面）。所以判据按**两案分别**核，缺一案即红。
+    for (const pair of SOLID_FILL_PAIRS) {
+      const fillValue = tokens.get(pair.fill);
+      const fill = parseCssColor(fillValue ?? '');
+      if (!fill) {
+        failures.push(
+          `globals.css 的${案名}块缺 --color-${pair.fill}（实底档）：只在另一案声明时 Tailwind 根本不生成 utility，` +
+            `而 ${pair.text} 这一档字色是按下它算过 AA 的（${pair.spec}）`,
+        );
+        continue;
+      }
+      const textColor = parseCssColor(pair.text);
+      if (!textColor) {
+        failures.push(`SOLID_FILL_PAIRS 里 ${pair.fill} 的字色 ${pair.text} 解析不出：判据写错了，修表不是修令牌`);
+        continue;
+      }
+      const pairRatio = contrastRatio(textColor, fill);
+      if (pairRatio < AA_NORMAL_TEXT) {
+        failures.push(
+          `${案名}的 ${pair.fill} 实底（${fillValue}）配稿上钉死的字色 ${pair.text} 只有 ${pairRatio.toFixed(2)}:1` +
+            `（门槛 ${String(AA_NORMAL_TEXT)}:1）：这是"整颗填色"那一族的底，要么在令牌层压深浅底，` +
+            `要么换字色档，不要在消费者里按主题分岔（${pair.spec}）`,
+        );
+      }
+    }
   }
 }
 
@@ -580,5 +618,5 @@ if (failures.length) {
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
     'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处，' +
-    '四档语气文字档 × 两案 × 五级承载面 × 两种同色底全部 ≥4.5:1）',
+    '四档语气文字档 × 两案 × 五级承载面 × 两种同色底、实底档 × 两案 × 钉死字色全部 ≥4.5:1）',
 );
