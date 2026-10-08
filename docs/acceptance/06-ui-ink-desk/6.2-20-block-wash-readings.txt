@@ -1,0 +1,80 @@
+6.2-20 行/卡片去语气洗底 —— 探针 + 活体读数（本机 macOS，CDP 10222，渲染层 --url 5173）
+
+判定：行/卡片族把「语气」从**底材**挪到**描边**。收敛前那批行把 `bg-*-wash` 拼在行上，
+      一次 run 里 pending/running/done/failed/skipped 会各自长出不同底色（色斑列）；
+      稿上的行/卡片从不这样画——状态只上描边，底材恒为墨面档。
+      本片把这条收进 L1（`BLOCK_EDGE_CLASS` / `BLOCK_SURFACE_CLASS` / `BLOCK_SELECTED_CLASS`），
+      面板只交语气档名，`bg-*-wash` 在 `src/ui/**` 之外归零，并补上机检。
+
+取色口径：Tailwind v4 的 `getComputedStyle` 回 `oklab(... / a)`，正则解析失败；
+          用 1×1 canvas（fillStyle + getImageData）解任意 CSS 色，
+          半透明 wash 先沿祖先链累加到首个不透明底再合成，才拿到落点色（不是 wash 自己的色值）。
+          `toneTinted` = 该行合成底材是否偏离 `bg-ink-850` 参考面；false 即「底材没跟语气走」。
+
+════════════════════════════════════════════════════════════════════════
+墨案（dark，surface bg-ink-850 = rgb(15, 22, 28)）
+════════════════════════════════════════════════════════════════════════
+slot              bgRendered(合成)   toneTinted  borderOnBg        b/b    t/b    尺寸
+BEFORE jade       rgb(20, 37, 36)    true        rgb(44, 95, 77)   6.37   6.43   452×32
+BEFORE celadon    rgb(25, 37, 40)    true        rgb(66, 95, 93)   6.89   12.22  452×32
+BEFORE amber      rgb(39, 36, 27)    true        rgb(122, 94, 43)  7.07   7.02   452×32
+BEFORE seal       rgb(39, 26, 27)    true        rgb(123, 52, 41)  4.46   4.46   452×32
+BEFORE 选中       rgb(25, 37, 40)    true        rgb(77, 109, 107) 6.84   12.22  452×32
+AFTER  jade       rgb(15, 22, 28)    false       rgb(48, 103, 83)  7.36   7.36   452×32
+AFTER  celadon    rgb(15, 22, 28)    false       rgb(72, 102, 101) 7.93   7.98   452×32
+AFTER  amber      rgb(15, 22, 28)    false       rgb(109, 86, 43)  8.29   8.23   452×32
+AFTER  seal       rgb(15, 22, 28)    false       rgb(120, 53, 43)  4.80   4.83   452×32
+AFTER  选中       rgb(19, 28, 35)    true*       rgb(121, 136,147) 8.26   13.40  452×32
+
+* AFTER 选中行的 toneTinted=true 是**中性底材升档**（ink-850 rgb(15,22,28) → ink-800 rgb(19,28,35)），
+  对应稿 `.node.on` 的前景色描边 + 升一档底，不是语气洗底。四色语气档的 toneTinted 全部为 false。
+
+════════════════════════════════════════════════════════════════════════
+毡案（light，surface bg-ink-850 = rgb(224, 219, 205)）
+════════════════════════════════════════════════════════════════════════
+slot              bgRendered(合成)   toneTinted  borderOnBg        b/b    t/b    尺寸
+BEFORE jade       rgb(208, 214, 201) true        rgb(141,177, 155) 3.62   3.58   452×32
+BEFORE celadon    rgb(211, 215, 205) true        rgb(151,180, 171) 3.16   9.59   452×32
+BEFORE amber      rgb(219, 210, 189) true        rgb(182,158, 109) 3.76   3.74   452×32
+BEFORE seal       rgb(227, 210, 197) true        rgb(212,141, 122) 3.67   3.72   452×32
+BEFORE 选中       rgb(211, 215, 205) true        rgb(137,172, 162) 3.15   9.59   452×32
+AFTER  jade       rgb(224, 219, 205) false       rgb(132,170, 146) 3.78   3.83   452×32
+AFTER  celadon    rgb(224, 219, 205) false       rgb(144,173, 162) 3.32   3.32   452×32
+AFTER  amber      rgb(224, 219, 205) false       rgb(185,163, 118) 4.10   4.08   452×32
+AFTER  seal       rgb(224, 219, 205) false       rgb(207,138, 118) 3.95   3.95   452×32
+AFTER  选中       rgb(242, 239, 230) true*       rgb(118,125, 128) 7.62   12.15  452×32
+
+（毡案四色语气档 toneTinted 同样全 false；AFTER 选中行 ink-850→ink-800 rgb(242,239,230) 是中性升档。）
+
+════════════════════════════════════════════════════════════════════════
+对照结论
+════════════════════════════════════════════════════════════════════════
+1. 去洗底达成：两主题下 AFTER 四色语气档的 toneTinted 全部 false，底材锁死在 bg-ink-850，
+   语气只由描边（BLOCK_EDGE_CLASS[tone]）承载——一次 run 不再长出五颜六色的行底。
+2. 对比度顺带改善（墨案）：seal 行文字/底从 4.46 → 4.83（越过 AA 4.5）；
+   jade 6.43→7.36、celadon（原 slate-100 白字 12.22，改语气字后 7.98）、amber 7.02→8.23。
+   描边对底：seal 4.46→4.80、jade 6.37→7.36、amber 7.07→8.29 均升。
+3. 毡案语气作字仍偏低（jade 3.83 / celadon 3.32 / amber 4.08 / seal 3.95，AA 4.5 以下）——
+   这条与本片无关，是**令牌层**的既有待表态项（毡案 tone-as-text 加深 / 或接受稿值），
+   本片不逐点打补丁；记录在案，见 plan §3.13 与本文件末尾。
+
+活体消费者普查（tmp/40-live.js，非探针、真实挂载的行）：
+  工作流步骤行 [data-step-status]：可见 3 只（流程视图 pending × 3），
+    墨案 bgRendered=rgb(15,22,28)=ink-850、border=rgb(151,178,197)=line-strong、washClass=false；
+    毡案 bgRendered=rgb(224,219,205)=ink-850、border=rgb(36,43,46)、washClass=false。
+    → 真实行已按「底材恒墨面、语气不上底」渲染，与探针 AFTER 一致。
+  其余锚点（工具卡 / 沉淀步骤 / 节点行 / 岗位行 / 差距行 / 生成结局块 / 登录过期行 / 密钥承诺块）
+    本窗活体不可达（需真实登录态、跑批或弹窗态），与 6.2-19 同一处理：
+    由探针的 AFTER 档 + `Record<BannerTone,…>` 穷尽（缺键即 typecheck 红）覆盖，不伪造截图。
+
+机检（scripts/check-renderer-conventions.ts 第 9 节）：
+  `bg-(celadon|amber|seal|jade)-wash` 只许出现在 src/ui/** 之内。
+  探针验证：CLEAN=0 → 注入 packages/renderer/src/zzWashProbe.ts PROBE=1 → 删探针 AFTER=0。
+  无需豁免清单：globals.css 的 9 支 `--color-*-wash` 是令牌定义、不匹配 `bg-*-wash`。
+
+截图（本目录）：
+  6.2-20-block-probe-dark.png   墨案 探针块（BEFORE 洗底 vs AFTER 只描边）
+  6.2-20-block-probe-light.png  毡案 探针块
+  6.2-20-live-rows-dark.png     墨案 活体工作流步骤行
+  6.2-20-live-rows-light.png    毡案 活体工作流步骤行
+  md5 四张互不相同（014747a9 / 0b0cdc4a / 3e56fab0 / 9f82c132）。
