@@ -146,9 +146,9 @@ plugins:
   # `fixture` / `fixture-alt` 两个分区指向同一个本地服务的两条路径，用来证明 cookie 互不共享，
   # 也是自动化验收面（AGENTS.md §7.2：测试一律打本地站点，本条不因下面的改动而松动）。
   # `boss` 自 2026-10-08 起指向**真实站点**（P8）：这就是 145 行原来那句"届时改这一行 startUrl 即可，
-  # 代码路径不变"的兑现。导航许可按已登记平台的 startUrl 同源取白名单（`navigate-policy.ts`），
-  # 所以这一行同时是"真域名可导航"的开关；而选择器仍来自本地仿站的知识包，
-  # 对着真站点动手会以定位失败收场（8.0 在场取证 → 8.1 发布真实包之后才谈得上自动化）。
+  # 代码路径不变"的兑现。**这一行只是首屏地址**，不再是导航许可的来源：可导航的源集合出自平台知识包
+  # 的 `origins`，真源还要求该平台有一份 `automation:<platform>` 签字（`navigate-policy.ts`，spec 8.1-05）。
+  # 于是「装好就能开真站」与「没确认过风险就一步都不发」同时成立。
   - id: sessions
     dependsOn: [shell]
     config:
@@ -166,8 +166,10 @@ plugins:
   # 页面操作入口（spec 2.1）：导航与快照，2.2 起在同一条注入通道上加点击/输入/定位。
   # 排在 sessions 之后：它不拥有分区，只在「会话已经打开」的那块视图上做事（未打开时结构化失败）。
   # 服务名是 `browser.page`（`域.能力` 约定），清单 id 用短名 `browser`——与 usage/entitlement 同一种关系。
+  # 自 P8 8.1-05 起还要 `platform.registry`：导航许可的名单来源从「sessions 那条 startUrl 的源」
+  # 换成「适配器知识包声明的 origins」，于是摘掉登记处 = 名单为空 = 任何地址都进不去（宁可全拒）。
   - id: browser
-    dependsOn: [sessions]
+    dependsOn: [sessions, platform-registry]
     config:
       navigateTimeoutMs: 10000
       snapshotTextLimit: 4000
@@ -179,10 +181,14 @@ plugins:
   # 定位层（spec 2.2-01…05）：页面只回读候选，打分、去重、判歧义、指纹自愈全在这条服务里。
   # 阈值写成配置而不是常量：2.2-02 要能在装配面板上把 `minScore` 调到 100 看界面如何拒绝猜测。
   # 注掉这一行后，`browser-act` 连同进 PENDING（它的 `inject` 里有 `browser.locate`）。
+  # `minScore` / `readMinScore` 是两个通道档（P8 裁定⑤）：外发（打招呼、投递）保持 70 的 fail-closed，
+  # 只读定位（看有没有出现某个控件、读状态行）降到 30——真站点的容器多是 css 级候选（35 分），
+  # 按 70 判就等于"读不到"，而读不到不伤人；点错才伤人，所以点的那一档不降。
   - id: browser-locate
     dependsOn: [browser]
     config:
       minScore: 70
+      readMinScore: 30
       minMargin: 12
       candidateLimit: 5
       textNormalizationLimit: 80
@@ -268,14 +274,21 @@ plugins:
       timing:
         enabled: true
 
-  # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/boss.json`，
+  # BOSS 适配器（spec 2.2-06 / 2.2-08）：站点知识全在 `packages/platform-boss/src/knowledge/*.json`，
   # 本包挂起来时把自己 `register` 进上一行——`browser` 与 `workflow` 因此一行代码都不改。
   # 注掉这一行，界面上的平台清单立刻少一项，`platform.registry.get('boss')` 得到 `PLATFORM_NOT_REGISTERED`，
   # 打招呼那一路也同时失去渠道（`outbound.greet` 现问现取，返回 `OUTBOUND_CHANNEL_MISSING`）。
   # 想用外部知识文件验证「改数据不改代码」：给 `packFile` 填一个绝对路径（2.6 走这条口）。
   # 2.5-d 起它还要 `browser.act` 那三只手（敲字 / 点击 / 等文本变化）才打得招呼，只读定位不再够用。
+  # `pack` 是 P8 8.1-07 的两份包开关：`real` = 随 app 发布、在真站点上动手的那一份（每条候选都带
+  # 8.0 的在场取证凭据），`fixture` = 永远只指向 10233 仿站的自动化验收面。这里把它**写出来**而不是
+  # 吃缺省，因为这一行决定的正是"这个实例会不会往真实域名发动作"，读配置的人应该一眼看到。
+  # 自动化面（`scripts/smoke-dist.ts`、单测）各自显式要 `fixture`；要在本机对着仿站手测界面，
+  # 就在装配面板里把这一行改成 `fixture`（配置只写内存、重启即失）。
   - id: platform-boss
     dependsOn: [platform-registry, browser, browser-act]
+    config:
+      pack: real
 
   # 会话消息库（spec 2.5-07）：`conversation_messages` 表由本服务自己把迁移 push 进 `store.migrations`，
   # 号段取 5（账本 1、agent 会话 2、jobs 3、workflow run 4）。表形状是通用的，读它的那只手是平台的，

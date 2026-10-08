@@ -1,0 +1,70 @@
+P8 8.1-09（裁定⑤补条）· 定位最低可用分按通道分档 —— 读数
+取证时间：2026-10-08（本机 macOS arm64）
+方式：U（单测）+ C（装载期机检）
+
+═══════════════════════════════════════════════════════════════════════
+一、这一条为什么必须单独立一条验收（它不在原 plan 的 8.1 清单里）
+═══════════════════════════════════════════════════════════════════════
+
+用户裁定的原话口径：**按通道分档——读取/抓取降档，外发保持严的那一档 fail-closed。**
+
+落到 8.0 的证据上是硬需求，不是优化：真 BOSS 全站没有 `data-testid`、没有稳定的 `id`，抓取容器只能靠 class
+（证据 8.0-03 第六节）。class 候选在 `locator-spec.ts` 的权重表里是 35 分，而缺省 `minScore` 是 70 ——
+不分档的话，**真实站点的每一次列表与详情读取都会在定位阶段被判「低于最低可用分」而拒掉**，
+M3 那条「搜到 ≥10 条入库」在代码层面永远走不到。
+
+同一件事的另一半：`chatStatus`（发送状态行）在真站点上也只是一枚 class（证据 8.0-05 第四节），
+而 `chat()` 在点完发送键以后**必须**等它、读它。状态行不是"动手的那只控件"，
+把它留在 70 分那一档 = 每次打招呼都 `WAIT_TIMEOUT`。所以 8.1-09 的判据要写成三件事同时成立：
+
+  ① 降档只降**分数下限**，不降**歧义判据**（同一条页面里两条候选分数相近仍判 ambiguous——读错一条也是假数据）；
+  ② 降档必须在**数据里写明**（`LocateSpec.effect: 'read'`），省略 effect 就是外发档；
+  ③ 装载期不许有人把**动手**那条定位标成 `effect:'read'` 想去够低阈值。
+
+═══════════════════════════════════════════════════════════════════════
+二、①②的半边：`packages/browser/src/locate-service.test.ts`（27 例，含本组 5 例）
+═══════════════════════════════════════════════════════════════════════
+
+组名「阈值按通道分档（P8 裁定⑤ / spec 8.1-09）」，被测对象是同一条 css 候选（35 分）：
+
+  1) `effect:'read'` → 判 matched：35 分的 class 候选在读取档里够格被读。
+  2) 省略 `effect` → 判 below-score，失败原因里带「低于最低可用分 70」——
+     降档不是默认待遇，必须在知识包里写明才享受。
+  3) 把配置 `readMinScore` 拉回 70 → 读取档立刻回到拒绝：分档数只认配置，代码里没有第二个硬编码阈值；
+     同时断言 `locate.status().readMinScore === 70`（界面读的那一口径跟着配置走）。
+  4) 读取档里两条同分候选（css 35 与 xpath 25，差 10 分 < `minMargin` 12）→ 仍判 ambiguous：
+     **降档不降歧义判据**。
+     （这条用例本身也修过一处：`toRankedCandidates` 按 `${frameUrl}#${nodeIndex}` 去重，
+       两条读数都写 `nodeIndex:0` 会被折成一条而假判 matched，所以第二条要带自己的 `nodeIndex:1`。）
+  5) 指纹自愈（fingerprint 基分 60）在 `effect:'read'` 下仍然按 `minScore` 硬顶过线：
+     低阈值不该让「只有标签名相同」的陌生人够格——自愈是**猜**出来的定位，按最严的那一档算。
+
+═══════════════════════════════════════════════════════════════════════
+三、③的半边：装载期闸门 + 档位归属在数据里
+═══════════════════════════════════════════════════════════════════════
+
+· `packages/browser/src/platform-contract.ts` 的 `parseKnowledgePack` 逐条查外发段引用的定位声明：
+  `chat.input` / `chat.sendButton` / `deliver.uploadInput` / `deliver.sendButton` 这四条**不许**声明 `effect:'read'`，
+  违反即以 `KNOWLEDGE_PACK_INVALID` 拒包（用例在 `platform-contract.test.ts`，34 例组内）。
+· **状态行不在这份名单里**（`chat.statusLine` / `deliver.statusLine` 不参与动手，只被读），
+  所以 `boss.json` 给 `chatStatus` 写了 `effect:'read'`。这条不是漏洞，是判据的正确切法：
+  `sent` 仍然要求回读到的文本**含**知识包声明的 `sentPattern`（8.0-05 的 `[送达]`），
+  低阈值只是让"读得到这一行"成为可能，并不放松"读到什么才算发出去"。
+  同一段注释直接写在这四行代码上面，防止后来人把状态行加回去图省事。
+· 配置面：`cordis.yml` 的 `browser-locate` 一行显式给出 `minScore: 70, readMinScore: 30`
+  （把两档都写在装配清单里，界面与验收都能现读，不靠注释维持）。
+· 知识包面：`boss.json` 里 `jobCard` / `jobTitle` / `jobCompany` / `jobSalary` / `jobCity` / `jobExperience` /
+  `jobEducation` / `detailRoot` / `detailDescription` / `detailRequirement` / `chatStatus` / `replyItem` /
+  `chatMessageBody` 各带 `effect:'read'`；`chatInput` / `chatSendButton` **不带** effect（即外发档，70 分 fail-closed）。
+
+═══════════════════════════════════════════════════════════════════════
+四、门禁
+═══════════════════════════════════════════════════════════════════════
+
+$ pnpm typecheck    → EXIT=0
+$ pnpm lint         → EXIT=0（含 `check-knowledge-pack.ts`：选择器只在 `src/knowledge/**` 里）
+$ pnpm format:check → EXIT=0
+$ pnpm test         → EXIT=0（packages/browser 16 文件 / 276 例，其中 locate-service 27 例）
+
+真站点那一侧的分档效果目前**只是代码与单测在位**：M3 的实跑属 8.3（V-人工，需用户在场），
+本条不声称已在真站点上读到过一条 JD。

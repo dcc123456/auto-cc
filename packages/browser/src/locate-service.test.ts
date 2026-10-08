@@ -6,7 +6,7 @@
  * 视图用替身，所以这三条分支不需要开 Electron 窗口就能机检。
  */
 import { AppError, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
-import type { ElementFingerprint, LocateSpec } from '@auto-cc/shared';
+import type { ElementFingerprint, LocateEffect, LocateSpec } from '@auto-cc/shared';
 import type { WebContents } from 'electron';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserLocateService, type BrowserLocateConfig } from './locate-service.js';
@@ -26,6 +26,7 @@ const frameUrl = 'http://127.0.0.1:10233/locator';
 /** 服务配置的默认值（zod schema 会补齐，但直接调用点的类型是补齐**之后**的形状，所以这里显式写全）。 */
 const DEFAULT_LOCATE_CONFIG: BrowserLocateConfig = {
   minScore: 70,
+  readMinScore: 30,
   minMargin: 12,
   candidateLimit: 5,
   textNormalizationLimit: 80,
@@ -291,6 +292,93 @@ describe('指纹自愈（spec 2.2-05）', () => {
     expect(missing.status).toBe('below-score');
     expect(missing.relocated).toBe(false);
     expect(missing.ranked[0]!.score).toBe(0);
+  });
+});
+
+describe('阈值按通道分档（P8 裁定⑤ / spec 8.1-09）', () => {
+  /**
+   * 一条只有 class 候选的声明：真 BOSS 全页没有 testid/id，抓取容器只能靠 class（证据 8.0-03 第六节）。
+   * @param effect 通道归属；省略即落在缺省的那一档（外发）
+   * @returns 定位声明
+   */
+  const cssSpec = (effect?: LocateEffect): LocateSpec => ({
+    description: '岗位卡片',
+    cardinality: 'many',
+    candidates: [{ strategy: 'css', value: 'li.job-card-box' }],
+    ...(effect ? { effect } : {}),
+  });
+
+  /** 起一只「页面里有一条 css 命中」的定位服务。 */
+  const bootCssHit = async (config: Partial<BrowserLocateConfig> = {}) =>
+    boot(config, labView({ locate: [fakeReading(frameUrl, { strategy: 'css' })] }));
+
+  it('声明 effect:"read" 时按 readMinScore 判：35 分的 class 候选够格被读', async () => {
+    const { locate } = await bootCssHit();
+    const result = await locate.find(cssSpec('read'));
+    expect(result.status).toBe('matched');
+    expect(result.chosen).toMatchObject({ strategy: 'css', score: 35 });
+  });
+
+  it('省略 effect 就落在严的那一档：同一条候选仍然 below-score，降档必须在数据里写明', async () => {
+    const { locate } = await bootCssHit();
+    const result = await locate.find(cssSpec());
+    expect(result.status).toBe('below-score');
+    expect(result.reason).toContain('低于最低可用分 70');
+  });
+
+  it('分档数只认配置：把 readMinScore 拉回 70，读取档也立刻回到拒绝猜测', async () => {
+    const { locate } = await bootCssHit({ readMinScore: 70 });
+    expect((await locate.find(cssSpec('read'))).status).toBe('below-score');
+    expect(locate.status().readMinScore).toBe(70);
+  });
+
+  it('降档不降歧义判据：读取档里两条同分候选仍然判 ambiguous（读错一条也是假数据）', async () => {
+    const { locate } = await boot(
+      {},
+      labView({
+        locate: [
+          fakeReading(frameUrl, { strategy: 'css' }),
+          fakeReading(frameUrl, { strategy: 'xpath', candidateIndex: 1, nodeIndex: 1 }),
+        ],
+      }),
+    );
+    const result = await locate.find({
+      description: '岗位卡片',
+      cardinality: 'many',
+      effect: 'read',
+      candidates: [
+        { strategy: 'css', value: 'li.job-card-box' },
+        { strategy: 'xpath', value: '//li[contains(@class,"job-card")]' },
+      ],
+    });
+    // css 35 与 xpath 25 差 10 分，小于 minMargin 12 → 即便在低档里也不许猜一条。
+    expect(result.status).toBe('ambiguous');
+  });
+
+  it('指纹自愈永远按 minScore 过线：低阈值不该让「只有标签名相同」的陌生人够格', async () => {
+    // 与 2.2-05 那条同一份读数（自愈分 60，够 read 档的 30、不够外发档的 70）：
+    // 声明写成 effect:"read" 之后它仍然不许命中——自愈是「点下去」的前摇，不是读数。
+    const { locate } = await boot(
+      {},
+      labView({
+        locate: [],
+        fingerprint: [
+          fakeReading(frameUrl, {
+            strategy: 'fingerprint',
+            candidateIndex: -1,
+            role: '',
+            accessibleName: '关闭弹窗',
+            text: '关闭',
+            attributes: {},
+          }),
+        ],
+      }),
+    );
+    const result = await locate.find(
+      { ...testIdSpec, effect: 'read' },
+      greetFingerprint({ ancestorRoles: [], nearbyTexts: [] }),
+    );
+    expect(result.relocated).toBe(false);
   });
 });
 

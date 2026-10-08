@@ -19,14 +19,15 @@ import type {
   LocateSpec,
   PlatformMetaView,
 } from '@auto-cc/shared';
-import type {
-  JobDetail,
-  JobSearchCriteria,
-  JobSummary,
-  KnowledgePack,
-  OutboundResult,
-  PlatformAdapter,
-  ReplyMessage,
+import {
+  outboundCandidates,
+  type JobDetail,
+  type JobSearchCriteria,
+  type JobSummary,
+  type KnowledgePack,
+  type OutboundResult,
+  type PlatformAdapter,
+  type ReplyMessage,
 } from '@auto-cc/plugin-browser';
 import { cleanText, splitRequirements } from './normalize.js';
 
@@ -134,6 +135,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     id: pack.platform,
     displayName: pack.displayName,
     startUrl: pack.startUrl,
+    // 导航许可的唯一来源（spec 8.1-05）：知识包声明的源集合，不是 startUrl 那一行的源。
+    origins: [...pack.origins],
     // 拷一份：登记表面向渲染层，不能让界面读数跟着知识包对象的后续修改漂移。
     capabilities: [...pack.capabilities],
   };
@@ -158,6 +161,31 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   const locatorFor = (name: string): LocateSpec => pack.locators[name]!;
 
   /**
+   * 取**外发**通道要用的定位声明：把知识包里显式标成「未取证」的候选摘掉，一条不剩就当场失败（spec 8.1-04）。
+   *
+   * 为什么只拦外发：打招呼与投递是撤不回来的动作，拿一条没在真站点上录过证据的候选去点，
+   * 点中的可能是页面上任何一个东西；而抓取/读状态行没有副作用，未取证的候选可以试，
+   * 试不出来如实回「读不到」。这条分界与 `LocateSpec.effect` 的分档是同一件事的两个侧面。
+   * @param name 定位语义名（会话页输入框 / 发送键 / 上传控件 / 投递确认键）
+   * @returns 只含已取证候选的定位声明
+   * @throws 全部候选都标了 `unverified` 时 `LOCATOR_UNVERIFIED`——要的是补取证，不是重试，
+   *         所以它必须是独立错误码，不能混进 `LOCATE_FAILED`（后者意味着「到页面上试过没打过线」）
+   */
+  const outboundLocator = (name: string): LocateSpec => {
+    const spec = locatorFor(name);
+    const verified = outboundCandidates(spec);
+    if (verified.length === 0) {
+      throw new AppError(
+        'LOCATOR_UNVERIFIED',
+        `定位「${name}」没有一条已取证的候选，外发通道不试未录过真站点证据的控件`,
+        'platform.boss',
+        { platform: pack.platform, locator: name },
+      );
+    }
+    return { ...spec, candidates: verified };
+  };
+
+  /**
    * 按知识包的抓取声明拼抽取请求（选择器仍然只来自数据）。
    * @param section 列表还是详情
    * @returns `browser.page.extract` 的请求体
@@ -176,15 +204,24 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   };
 
   /**
-   * 拼搜索页地址：起始地址 + 知识包登记的查询参数名。
+   * 拼搜索页地址：起始地址（或知识包登记的搜索入口路径）+ 那一站点的查询参数名。
+   *
+   * `entryPath` 这一支是 8.0-03 的读数逼出来的：真 BOSS 的搜索表单 action 是 `/web/geek/jobs`，
+   * 而 `startUrl` 是站点根——只往根上拼参数，站点会整段忽略参数并把首页当结果页回，
+   * 表现为「搜了，但列表还是默认岗位」这种最难查的失败。
    * @param criteria 搜索条件（关键词必填，城市与经验可省）
    * @returns 可直接导航的绝对地址
    */
   const searchUrl = (criteria: JobSearchCriteria): string => {
-    const target = new URL(pack.startUrl);
+    const base = new URL(pack.startUrl);
+    const target = pack.search.entryPath ? new URL(pack.search.entryPath, base.origin) : base;
     target.searchParams.set(pack.search.params.keyword, criteria.keyword);
     if (criteria.city) target.searchParams.set(pack.search.params.city, criteria.city);
-    if (criteria.experience) target.searchParams.set(pack.search.params.experience, criteria.experience);
+    // 经验这一维不是每个站都有查询参数（真 BOSS 把它做成页面上的筛选控件，不在地址里，证据 8.0-03）：
+    // 包里没登记参数名时，这一维就不进 URL，而不是编一个假的出来。
+    if (criteria.experience && pack.search.params.experience) {
+      target.searchParams.set(pack.search.params.experience, criteria.experience);
+    }
     return target.href;
   };
 
@@ -344,6 +381,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * @returns 外发结局；`ledgerKey` 恒为 null——计量凭证由编排层（2.5-e 的 `outbound.greet`）盖，
    *          适配器不碰额度也不记账（AGENTS.md §7.3 的必经口只有一处）
    * @throws 正文为空 `INVALID_ARGUMENT`（空话术不向页面发出任何动作）；缺会话段 `KNOWLEDGE_PACK_INVALID`；
+   *         输入框或发送键未取证 `LOCATOR_UNVERIFIED`（连会话页都不打开）；
    *         定位/动作自身的失败照 `browser.act` 的原样抛出（`LOCATE_FAILED` / `ACT_FAILED` / `WAIT_TIMEOUT`）
    */
   const chat = async (jobId: string, text: string): Promise<OutboundResult> => {
@@ -354,9 +392,13 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     if (!text.trim()) {
       throw new AppError('INVALID_ARGUMENT', '打招呼正文为空，不向页面发出任何动作', 'platform.boss', { jobId });
     }
+    // 两道定位先验票，再看页面：一条没取证的候选就足以让整次外发不该发生，
+    // 那就连「打开会话页」这一步都不做（spec 8.1-04 的「不发起任何动作」含导航）。
+    const inputSpec = outboundLocator(knowledge.input);
+    const sendSpec = outboundLocator(knowledge.sendButton);
     const url = pageUrlFor(knowledge, jobId);
     if (url) await page.navigate(url);
-    const typed = await act.type(locatorFor(knowledge.input), text);
+    const typed = await act.type(inputSpec, text);
     if (typed.valueAfter !== text) {
       return {
         sent: false,
@@ -366,7 +408,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     }
     // 等待要在点击之前起：`textChanges` 的基线是脚本启动那一刻的文本，点完再等就永远「没有变化」。
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
-    await act.click(locatorFor(knowledge.sendButton));
+    await act.click(sendSpec);
     const wait = await changed;
     const status = await readStatusLine(knowledge.statusLine);
     if (status.includes(knowledge.sentPattern)) {
@@ -399,13 +441,17 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * @param attachment 编排层已校验（存在 / pdf / 大小上限）并算好 sha256 的简历文件
    * @returns 外发结局；`ledgerKey` 恒为 null，理由与 `chat` 同一条——计量归编排层
    * @throws 目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮）；jobId 为空 `INVALID_ARGUMENT`；
-   *         缺投递段 `KNOWLEDGE_PACK_INVALID`；定位/注入自身的失败照 `browser.act` 原样抛出
+   *         缺投递段 `KNOWLEDGE_PACK_INVALID`；上传控件或确认键未取证 `LOCATOR_UNVERIFIED`（不打开上传页）；
+   *         定位/注入自身的失败照 `browser.act` 原样抛出
    */
   const sendResume = async (jobId: string, attachment: ResumeAttachment): Promise<OutboundResult> => {
     const knowledge = deliverKnowledge();
     if (!jobId.trim()) {
       throw new AppError('INVALID_ARGUMENT', '投递必须给出目标岗位', 'platform.boss', { platform: pack.platform });
     }
+    // 与 `chat` 同一条纪律：两条要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
+    const uploadSpec = outboundLocator(knowledge.uploadInput);
+    const sendSpec = outboundLocator(knowledge.sendButton);
     const url = pageUrlFor(knowledge, jobId);
     if (url) await page.navigate(url);
     const before = await readStatusLine(knowledge.statusLine);
@@ -420,7 +466,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         },
       );
     }
-    const injected = await act.upload(locatorFor(knowledge.uploadInput), attachment.path);
+    const injected = await act.upload(uploadSpec, attachment.path);
     if (injected.valueAfter !== attachment.fileName) {
       return {
         sent: false,
@@ -430,7 +476,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     }
     // 与打招呼同一条时序：等待在点击之前起，否则基线就是点击后的文本，永远等不到变化。
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
-    await act.click(locatorFor(knowledge.sendButton));
+    await act.click(sendSpec);
     const wait = await changed;
     const status = await readStatusLine(knowledge.statusLine);
     if (status.includes(knowledge.sentPattern)) {
@@ -471,9 +517,24 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         // 正文只认知识包声明的那个节点（scope 默认 subtree），id 与方向仍在容器自身上，所以三条不同源。
         { name: 'text', candidates: locatorFor(knowledge.messageBody).candidates },
         { name: 'externalId', candidates: [], scope: 'self', attribute: knowledge.messageIdAttribute },
-        { name: 'direction', candidates: [], scope: 'self', attribute: knowledge.directionAttribute },
+        // 方向在真实站点上有两种形状：写成属性（本地仿站的 `data-direction`）或只写成 class token
+        // （真 BOSS 的 `item-friend`，证据 8.0-05 第四节：那条消息行上没有任何方向属性）。
+        // 后者要读的是容器自己的 class 串，所以知识包里选哪种，抽取的字段名就跟着换。
+        ...(knowledge.directionAttribute
+          ? [{ name: 'direction', candidates: [], scope: 'self' as const, attribute: knowledge.directionAttribute }]
+          : [{ name: 'rowClass', candidates: [], scope: 'self' as const, attribute: 'class' }]),
       ],
     });
+    /**
+     * 判定读到的这一行是不是「对方发来的」。
+     * @param fields 这一行的字段读数
+     * @returns 属性形状按值比对，class 形状按**整词**比对（`item-friend` 不该撞到 `not-item-friend`）
+     */
+    const isInboundRow = (fields: FieldReadings): boolean => {
+      if (knowledge.directionAttribute) return attributeOf(fields, 'direction') === knowledge.inboundValue;
+      const token = knowledge.inboundClassToken;
+      return token !== undefined && attributeOf(fields, 'rowClass').split(/\s+/).includes(token);
+    };
     const readAt = Date.now();
     const messages: ReplyMessage[] = [];
     for (const row of result.rows) {
@@ -483,7 +544,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       messages.push({
         platform: pack.platform,
         jobId,
-        from: attributeOf(fields, 'direction') === knowledge.inboundValue ? 'recruiter' : 'self',
+        from: isInboundRow(fields) ? 'recruiter' : 'self',
         text,
         at: readAt,
         externalId: attributeOf(fields, 'externalId') || null,

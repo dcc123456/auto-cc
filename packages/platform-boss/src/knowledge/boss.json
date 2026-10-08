@@ -1,191 +1,307 @@
 {
   "platform": "boss",
   "displayName": "BOSS 直聘",
-  "startUrl": "http://127.0.0.1:10233/boss",
-  "capabilities": ["search", "detail", "chat", "sendResume", "readReplies"],
+  "startUrl": "https://www.zhipin.com/",
+  "packStatus": "shipped",
+  "origins": ["https://www.zhipin.com"],
+  "capabilities": ["search", "detail", "chat", "readReplies"],
   "locators": {
     "jobCard": {
-      "description": "列表页（本地仿站 /boss）里的一条职位卡片，卡片内的字段都在它子树里",
+      "description": "搜索结果页的一张岗位卡片。真站点全页没有 data-testid / id / name 可用（证据 8.0-03 第六节），容器只能靠类名，因此这一条走读取档的低阈值（effect:'read'，P8 裁定⑤）。卡片链是 div.job-list-container > ul.rec-job-list > div.card-area > div.job-card-wrap > li.job-card-box，两条候选各命中 15 枚",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "jd-card" },
-        { "strategy": "css", "value": "li.card" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']" }
+        {
+          "strategy": "css",
+          "value": "li.job-card-box",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "div.job-card-wrap",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        }
       ]
     },
     "jobTitle": {
-      "description": "职位标题（列表页是可点的链接、详情页是 h1）；它的 href 就是详情页地址",
+      "description": "卡片上的岗位名链接；href 是相对地址（/job_detail/<jobId>.html），岗位 id 只在这条链接里，是唯一的去重键。accessible name 就是岗位名本身、每条都不同，所以 role+名字那类候选进不了静态包（证据 8.0-03 第四节与第六节 C 条）",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "title" },
-        { "strategy": "css", "value": "a.title" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/a" }
+        {
+          "strategy": "css",
+          "value": "a.job-name",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        }
       ]
     },
     "jobCompany": {
-      "description": "公司名称",
+      "description": "企业名（卡片右上角 boss-info 区里的 span.boss-name）",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "company" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[@data-field='company']" }
+        {
+          "strategy": "css",
+          "value": "a.boss-info > span.boss-name",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        }
       ]
     },
     "jobSalary": {
-      "description": "薪资原文（「25-40K·14薪」「面议」），归一化属 2.3，这里只负责取到节点",
+      "description": "列表页的薪资那一格：节点在页面上真实存在，但 textContent 是私用区字形混淆（逐码点读回 e03a 4b 这类，字体 kanzhun-mix），明文不可得（证据 8.0-03 第五节第 1 条）。做字体映射表就是反爬对抗，按 AGENTS.md §8.3 不做——所以这一格只能如实报缺，明文薪资的唯一来源是详情页",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "salary" },
-        { "strategy": "css", "value": ".card .salary" }
+        {
+          "strategy": "css",
+          "value": "span.job-salary",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        }
       ]
     },
     "jobCity": {
-      "description": "城市与工作地址（「上海 · 浦东新区」是一个字段，不拆）",
+      "description": "城市段（「上海·浦东新区·张江」，中点分隔的市·区·商圈三段，是一个字段不拆）",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "city" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[3]" }
+        {
+          "strategy": "css",
+          "value": "span.company-location",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 15
+          }
+        }
       ]
     },
     "jobExperience": {
-      "description": "经验要求（「3-5 年」「经验不限」）",
+      "description": "经验要求（「3-5年」「经验不限」）。证据里记的是 ul.tag-list 的第 0 个 li，这里写成它的 CSS 同义式 :first-child；每卡两枚标签，所以全页计数是 15×2",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "experience" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[4]" }
+        {
+          "strategy": "css",
+          "value": "ul.tag-list > li:first-child",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 30
+          }
+        }
       ]
     },
     "jobEducation": {
-      "description": "学历要求（「本科」「硕士」）",
+      "description": "学历要求（「本科」「学历不限」），即 ul.tag-list 的第 1 个 li（CSS 里是 :nth-child(2)，因为 :first-child 那条已经被经验占掉）",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "education" },
-        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[5]" }
-      ]
-    },
-    "detailDescription": {
-      "description": "详情页（本地仿站 /boss/detail）的岗位职责正文",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "description" },
-        { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/following-sibling::p[1]" }
+        {
+          "strategy": "css",
+          "value": "ul.tag-list > li:nth-child(2)",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 30
+          }
+        }
       ]
     },
     "detailRoot": {
-      "description": "详情页正文根节点：详情字段都在它子树里抽，避免把页头页脚读成岗位描述",
+      "description": "详情正文的根容器。真站点有**两种形状**而仿站只有一种（证据 8.0-04 第一节，本条最重要的结论）：形状 A 是列表页右侧同页面板 div.job-detail-body（外层 div.job-detail-container 自己是滚动容器），形状 B 是真·独立详情页，那里取证到的只有状态行 div.job-banner。两条候选各命中 1，抽取时谁在场用谁",
       "cardinality": "single",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "jd-detail" },
-        { "strategy": "css", "value": "article.detail" },
-        { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/parent::section" }
+        {
+          "strategy": "css",
+          "value": "div.job-detail-body",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000,
+            "hits": 1
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "div.job-banner",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
+            "url": "https://www.zhipin.com/job_detail/<jobId>.html?securityId=<…>",
+            "verifiedAt": 1791417600000,
+            "hits": 1
+          }
+        }
       ]
     },
-    "detailPosted": {
-      "description": "详情页的发布时间原文（「3 天前」「刚刚发布」），归一化属 2.3-03",
+    "detailDescription": {
+      "description": "职位描述正文 p.desc（形状 A 面板实测）。两条硬事实：① textContent 是脏的（里面塞了混淆类的 <style> 与水印 span），必须走 innerText 口径，抽取脚本已经是 innerText 优先（证据 8.0-03 第五节第 2 条）；② 形状 B（独立详情页）的正文节点本次**没有取证**，那里只读到状态行与明文薪资，所以从列表 href 直达时这一条可能读空",
       "cardinality": "single",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "posted" },
-        { "strategy": "css", "value": "span.posted" }
+        {
+          "strategy": "css",
+          "value": "p.desc",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000
+          }
+        }
       ]
     },
     "detailRequirement": {
-      "description": "详情页的任职要求正文，`JobDetail.requirements` 的原文来源",
-      "cardinality": "single",
+      "description": "技能标签逐条明文（ul.job-label-list > li，例：Vue / K8S / Kubernetes），是 JobDetail.requirements 的原文来源；发布时间那一格本次没有取证，所以详情字段里不声明它",
+      "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-field", "value": "requirement" },
-        { "strategy": "xpath", "value": "//h2[contains(., '任职要求')]/following-sibling::p[1]" }
-      ]
-    },
-    "authBanner": {
-      "description": "登录状态横幅（`data-logged-in` 是仿站现渲的读数，供 2.3 判定会话是否还有效）",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "id", "value": "auth-banner" },
-        { "strategy": "css", "value": "p.notice[data-logged-in]" }
-      ]
-    },
-    "loginLink": {
-      "description": "「在仿站登录」入口，登录失效时界面引导用户点的就是它（spec 2.1-04）",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "id", "value": "login-link" },
-        { "strategy": "text", "value": "在仿站登录", "exact": true },
-        { "strategy": "css", "value": "a[href='/login']" }
-      ]
-    },
-    "applyButton": {
-      "description": "投递按钮【未实测】真实站点的投递入口，仿站里对应的是 /deliver 上的 resumeSendButton（2.6-c 已落地），本条留给真实站点在场校准时用",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "jd-apply" },
-        { "strategy": "role", "role": "button", "name": "投递", "exact": false },
-        { "strategy": "css", "value": "button[data-action='apply']" }
+        {
+          "strategy": "css",
+          "value": "ul.job-label-list > li",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
+            "verifiedAt": 1791417600000
+          }
+        }
       ]
     },
     "chatInput": {
-      "description": "打招呼输入框：本地仿站 /chat 的同源 iframe（帧内 /chat/frame 的 textarea），取自 scripts/fixture-server.ts 的现页 HTML",
+      "description": "会话页的消息输入框：div#chat-input.chat-input，是 contenteditable 的 **div**（不是 textarea/input），写内容要走原生 setter + input 事件。它带 id，所以 {strategy:'id'} 基线 90 分——真站点上最可靠的一枚候选（证据 8.0-05 第四节）。只在选中会话后才挂载，未选中时整页只有联系人搜索框",
       "cardinality": "single",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "chat-input" },
-        { "strategy": "role", "role": "textbox", "name": "输入打招呼文案", "exact": false },
-        { "strategy": "css", "value": "textarea" }
+        {
+          "strategy": "id",
+          "value": "chat-input",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000,
+            "hits": 1
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "div#chat-input.chat-input[contenteditable=\"true\"]",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000,
+            "hits": 1
+          }
+        }
       ]
     },
     "chatSendButton": {
-      "description": "发送打招呼的按钮：同上，帧内 button[data-testid=chat-send]，文案「发送打招呼」",
+      "description": "发送键 button.btn-v2.btn-sure-v2.btn-send，文本「发送」。两条实测：① 空内容时挂的是 **.disabled 类名**，button.disabled 读回 false、aria-disabled 缺席（AGENTS.md §9 的 6.2 二三片口径②），判「点不动」要读类名；② 取证那屏它 rect x=1112 而视图只有 1015 CSS px，即在画面外——活体验收必须把窗口带到 ≥1410 宽（证据 8.0-05 第四节末）",
       "cardinality": "single",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "chat-send" },
-        { "strategy": "role", "role": "button", "name": "发送", "exact": false },
-        { "strategy": "text", "value": "发送打招呼", "exact": true }
+        {
+          "strategy": "role",
+          "role": "button",
+          "name": "发送",
+          "exact": true,
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "button.btn-v2.btn-sure-v2.btn-send",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000
+          }
+        }
       ]
     },
     "chatStatus": {
-      "description": "帧内发送状态行：外发要「回读到成功态才算 sent」，读的就是它（data-testid=chat-frame-status）",
-      "cardinality": "single",
+      "description": "送达凭据：i.message-status.status-delivery 文本「[送达]」（同一形状还有 status-read「[已读]」）。它挂在每条已发消息上而不是页面顶部，所以 cardinality 是 many；读到的行里含 [送达] 才算发出去（证据 8.0-05 第一节，仿站那句自造文案不作数）",
+      "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "chat-frame-status" },
-        { "strategy": "xpath", "value": "//strong[@data-testid='chat-frame-status']" }
+        {
+          "strategy": "css",
+          "value": "i.message-status.status-delivery",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000
+          }
+        }
       ]
     },
     "replyItem": {
-      "description": "帧内消息记录里的一条：ul[data-testid=chat-log] 下动态插入的 li（2.5 读回复的落点；from 的角色区分由页面侧判定）",
+      "description": "一条消息项 ul.im-list > li.message-item（容器链 div.chat-conversation > div.message-content > div.chat-record > ul.im-list）。取证那条老线程实测命中 2；消息 id 是 data-mid（15 位数字、同线程内单调增），可直接当去重与排序键。方向**没有属性**，长在 class token 上（item-friend），所以 chat 段填的是 inboundClassToken（证据 8.0-05 第四节）",
       "cardinality": "many",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-item" },
-        { "strategy": "xpath", "value": "//ul[@data-testid='chat-log']/li" }
+        {
+          "strategy": "css",
+          "value": "ul.im-list > li.message-item",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000,
+            "hits": 2
+          }
+        }
       ]
     },
     "chatMessageBody": {
-      "description": "一条消息里只装正文的那个节点：方向标记（对方：/我：）在兄弟节点里，读回来的文本因此不带标记（2.5-08）",
+      "description": "一条消息里只装正文的节点，真站点有**两种消息形状**、两条分支都得写：自由文本是 div.message-content > div.text > p > span.text-content；结构化卡片消息是 div.articles-center > div.message-card-wrap.blue（只认前一种会把卡片读成空）。时间戳在兄弟节点 div.item-time > span.time，不进正文（证据 8.0-05 第四节）",
       "cardinality": "single",
+      "effect": "read",
       "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-body" },
-        { "strategy": "css", "value": "[data-message-body]" }
-      ]
-    },
-    "resumeUploadInput": {
-      "description": "简历上传控件【仿站已就位·真实站点未实测】本地仿站 /deliver?targetId= 的隐藏 input[type=file]（display:none，人的入口做在 label 上）已按这两条候选落地，并页面实测过「注入 → change 回读文件名与字节数」；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉",
-      "cardinality": "single",
-      "requireActionable": false,
-      "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "resume-upload-input" },
-        { "strategy": "css", "value": "input[type=file][name=resume]" }
-      ]
-    },
-    "resumeSendButton": {
-      "description": "确认投递按钮【仿站已就位·真实站点未实测】仿站 /deliver 上是 button[data-testid=resume-send]，文案「发送简历」，所以 role+可读名那条候选同源可用；那一行「已送达」只在服务端收讫这份字节之后才画出来，点按钮本身不构成成功",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "resume-send" },
-        { "strategy": "role", "role": "button", "name": "发送简历", "exact": false }
-      ]
-    },
-    "resumeDeliverStatus": {
-      "description": "投递状态行【仿站已就位·真实站点未实测】仿站 /deliver 上同一条 p 同时带 data-testid 与 data-role=deliver-status，两条候选指向同一节点；sentPattern 与「岗位已下架」两种结局都从这一行回读，所以它既是成功判据也是二次校验的读数来源",
-      "cardinality": "single",
-      "candidates": [
-        { "strategy": "testId", "attribute": "data-testid", "value": "resume-deliver-status" },
-        { "strategy": "css", "value": "p[data-role=deliver-status]" }
+        {
+          "strategy": "css",
+          "value": "div.message-content > div.text > p > span.text-content",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "div.articles-center > div.message-card-wrap",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-05-chat-dom-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791436560000
+          }
+        }
       ]
     }
   },
@@ -206,42 +322,27 @@
       "container": "detailRoot",
       "fields": [
         { "name": "description", "locator": "detailDescription", "required": true },
-        { "name": "requirement", "locator": "detailRequirement" },
-        { "name": "posted", "locator": "detailPosted" }
+        { "name": "requirement", "locator": "detailRequirement" }
       ]
     }
   },
   "search": {
+    "entryPath": "/web/geek/jobs",
     "params": {
       "keyword": "query",
-      "city": "city",
-      "experience": "experience"
+      "city": "city"
     }
   },
   "chat": {
-    "entryPath": "/chat",
-    "targetParam": "targetId",
+    "entryPath": "/web/geek/chat",
     "input": "chatInput",
     "sendButton": "chatSendButton",
     "statusLine": "chatStatus",
-    "sentPattern": "已送达服务端",
+    "sentPattern": "[送达]",
     "messageItem": "replyItem",
     "messageBody": "chatMessageBody",
-    "messageIdAttribute": "data-message-id",
-    "directionAttribute": "data-direction",
-    "inboundValue": "inbound"
-  },
-  "deliver": {
-    "entryPath": "/deliver",
-    "targetParam": "targetId",
-    "uploadInput": "resumeUploadInput",
-    "sendButton": "resumeSendButton",
-    "statusLine": "resumeDeliverStatus",
-    "sentPattern": "简历已送达",
-    "offlinePattern": "岗位已下架"
-  },
-  "risk": {
-    "riskPattern": "安全验证|访问验证|人机验证|访问受限|操作频繁"
+    "messageIdAttribute": "data-mid",
+    "inboundClassToken": "item-friend"
   },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"]
 }

@@ -66,7 +66,10 @@ const PACING_ALLOWLIST: readonly RegExp[] = [/\.default\(/, /MAX_[A-Z_]*MS\b/];
  */
 const TEST_REAL_HOST_ALLOWLIST: readonly (readonly [RegExp, string])[] = [
   [/^schemas\.openxmlformats\.org$/, 'OOXML 命名空间标识符（只比对字符串，不发请求）'],
-  [/^(?:www\.)?zhipin\.com$/, '导航策略与知识包契约用例的"被判拒绝域名"（真域名才能判出登记表之外）'],
+  [
+    /^(?:www\.)?zhipin\.com$/,
+    '导航策略与知识包契约用例里的"被判定字符串"（许可名单与包数据都取真域名才判得出两侧：已登记源放行 / 未登记源仍拒）。P8 8.1 起真实域名也是发布包的取值面，但**测试面判据不变**：这些用例不发请求、不 attach 真 target，自动化仍然只打 10233',
+  ],
 ];
 
 /** 边界文件必须从 `@auto-cc/core` 把 redact 那一份请进来（跨行的 `import { … }` 也算）。 */
@@ -153,7 +156,9 @@ function scanTestSurfaceHosts(rel: string, lines: string[]): void {
   lines.forEach((line, index) => {
     // 注释里的 URL 不参与判定：注释发不出请求，而本仓的 JSDoc 惯例是把真实端点写清楚当证据（§6.1）。
     const code = line.replace(/^\s*(?:\/\/|\*|\/\*).*$/, '');
-    for (const match of code.matchAll(/(?:https?|wss?):\/\/([^\s'"`/?#\\]+)/g)) {
+    // 主机名到 CJK 标点为止：本仓的判据字符串是中文，紧跟在地址后的全角括号与「」不是主机名字符，
+    // 把它们算进主机段就匹配不上许可名单，于是"被判定字符串"会被当成违规地址假报一次。
+    for (const match of code.matchAll(/(?:https?|wss?):\/\/([^\s'"`/?#\\\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]+)/g)) {
       const violation = hostViolation(match[1] ?? '');
       if (violation) failures.push(`${rel}:${String(index + 1)} ${violation}`);
     }

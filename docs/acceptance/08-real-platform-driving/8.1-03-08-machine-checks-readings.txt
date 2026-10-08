@@ -1,0 +1,132 @@
+P8 8.1 · 知识包契约扩展 / 真实包与仿站包拆分 / 外发闸门 —— 机检与单侧读数
+条目：8.1-01 ~ 8.1-08
+取证时间：2026-10-08（本机 macOS arm64，仓库工作树 `/Users/dcc/deepseek-harness-workspece/auto-cc`）
+方式：U（单测）+ C（机检）。本节**没有**任何真实站点请求：取证面全部是解析器、闸门与假手。
+
+═══════════════════════════════════════════════════════════════════════
+一、两份知识包的当前形状（spec 8.1-07）
+═══════════════════════════════════════════════════════════════════════
+
+`packages/platform-boss/src/knowledge/` 下现在有两份，缺省装载的是**上线包**：
+
+  文件                packStatus  startUrl                      origins                  capabilities
+  boss.json           shipped     https://www.zhipin.com/       https://www.zhipin.com    search/detail/chat/readReplies
+  boss-fixture.json   draft       http://127.0.0.1:10233/boss   http://127.0.0.1:10233    search/detail/chat/sendResume/readReplies
+
+上线包逐键的来源（全部取自 8.0 的在场证据，没有任何一条是推测出来的；下面每一条写 **缺席 / 省略** 的，都是**用数据表达出来的"没取证"**，而不是漏写）：
+
+  · `search.entryPath = /web/geek/jobs`、参数名 `query` / `city`     ← 8.0-03 第一节（真 BOSS 搜索表单 action）
+  · `search.params.experience` **省略**                               ← 8.0-03：表单上取证到的只有 query/city/industry/position，
+                                                                     经验是页面上的筛选控件、不在地址里。省略 = 适配器不带这个参数，
+                                                                     界面上如实报「本次未按经验过滤」。
+  · 列表七字段（容器 `li.job-card-box` 等）                          ← 8.0-03 第二~五节，每条候选带 evidence{ref,url,verifiedAt,hits}
+  · `capture.detail` 只声明 description / requirement                 ← 8.0-04 只取了这两处的证据；`posted` **没有取证**，
+                                                                     所以这一条字段根本不声明（声明一条读不到的定位=假证据）。
+  · `chat` 段 12 键：`data-mid` 作 id、`item-friend` 作方向 token      ← 8.0-05 第四节
+  · `chat.targetParam` **省略**                                       ← 8.0-05：会话页不能靠 URL 参数切对象，
+                                                                     所以 `chat`/`readReplies` 只能作用于当前已打开的那一条会话。
+  · `deliver` 段 **整段缺席** + capabilities 去掉 `sendResume`         ← 8.0-06 只坐实了投递口的位置，`sentPattern`/`offlinePattern`
+                                                                     两句文案**没录**（没在场点过一次真实投递，就不能声称知道成功样式）。
+                                                                     装载期判据：capabilities 不含 sendResume → 包合法；
+                                                                     运行期判据：`outbound.deliver` 现问渠道 → `OUTBOUND_CHANNEL_MISSING`。
+                                                                     解除条件：8.5 在场跑通一次投递后补这两句并把能力加回来。
+  · `risk` 段 **整段缺席**                                            ← 8.0-06 裁定：风控文案**故意不采集**（主动撞风控即对抗，
+                                                                     §8.3）。缺段 = 这个平台只按 HTTP 状态判风控，`browser.risk` 读不到 pattern
+                                                                     就走状态码那一支。这一条不是待补的缺口，是不打算补的边界。
+  · 详情段**没有薪资字段**                                            ← 三种形状里没有一格是"证据支持的单点"：列表那格是 PUA 字形混淆、
+                                                                     形状A 面板 `[class*="salar"]` 0 命中、形状B 的 `.salary` hits=37（歧义），
+                                                                     主岗位那一枚只存在于 `div.job-banner` 的整句 innerText 里。
+                                                                     处置与 8.3 的两条分叉写在 `docs/plans/08-real-platform-driving/plan.md` §7 第 7 条。
+
+═══════════════════════════════════════════════════════════════════════
+二、逐条单测（U 半边）
+═══════════════════════════════════════════════════════════════════════
+
+packages/browser（16 文件 / 276 例全过，EXIT=0）：
+  · src/platform-contract.test.ts   34 例  —— 8.1-01（缺 origins / 空数组 / origin 带路径 / 名单不含 startUrl 之源自侧）、
+                                              8.1-02（shipped 包里既无 evidence 又没标 unverified 的候选被逐条点名；
+                                                    整条定位全标 unverified **仍合法**——装载期不许因一处没测通把整站带走）
+  · src/navigate-policy.test.ts     10 例  —— 8.1-05（许可来源=登记平台的 origins：已登记真源放行 / 未登记第三方源仍拒 /
+                                                    loopback 仿站照旧放行）、8.1-06（真源无 `automation:<platform>` 签字 →
+                                                    `CONSENT_REQUIRED`，注入两份 store 各判一侧，签字表复用 `consent-store.ts` 未新增）
+  · src/platform-registry.test.ts    9 例  —— 登记表把 `origins` 原样带进 `PlatformMetaView`（许可名单的唯一取用口）
+  · src/page-service.test.ts        14 例  —— 8.1-05 的运行期半边：`browser.page.navigate` 的拒导航判据跟着换到新来源
+
+packages/platform-boss（6 文件 / 152 例全过，EXIT=0）：
+  · src/index.test.ts               13 例  —— 8.1-01/02/03/07：上线包 shipped、origins 覆盖 startUrl 之源、
+                                                    每条候选「有证据或显式 unverified」且 `evidence.ref` 必须落在 `docs/acceptance/`、
+                                                    两份 JSON 里 `未实测` 出现 0 次、仿站包 origin 仍必须是 127.0.0.1:10233 且
+                                                    包内不许出现真域名（原 G4 的意图由这一组保住）
+  · src/adapter.test.ts             49 例  —— 8.1-04：见下节
+
+═══════════════════════════════════════════════════════════════════════
+三、8.1-04 外发遇未取证定位（`LOCATOR_UNVERIFIED`，六个用例）
+═══════════════════════════════════════════════════════════════════════
+
+用例组「未取证定位：外发停手、读取照试（spec 8.1-04）」，`adapter.test.ts` 里把某条定位的候选标成
+`unverified` 后交给适配器，断言的是**它一个动作都不发**：
+
+  1) 发送键一条证据都没有 → `LOCATOR_UNVERIFIED`（path `platform.boss`，details `{platform:'boss', locator:'chatSendButton'}`），
+     且 `page.navigated === []`、`page.kinds === []`、`act.typed/clicked === []`、`act.waitsStarted === 0`
+     —— 「不发起任何动作」含**导航**：连会话页都不打开。
+  2) 输入框未取证 → 同样整条停手（另一半还能用也不发半截话）。
+  3) 只有部分候选未取证 → 交给 `browser.act.click` 的声明 = 声明里去掉被标那条（`candidates` 逐条比），
+     本次外发照旧 `sent:true`；模块级那份知识包**没被改坏**（第一条候选仍是已取证）。
+  4) 上传控件未取证 → `LOCATOR_UNVERIFIED`，`page.navigated/kinds` 皆空、`act.uploaded === []`
+     —— 下架二次校验那次状态行读取都不发生。
+  5) **读取通道仍然试未取证的候选**：把抓取用的 `jobSalary` 整条标 unverified，`search()` 递给 `page.extract` 的
+     候选列表仍是原对象（未经筛选），薪资照常读回来。读错一条只是少一条数据，点错一下撤不回来——
+     这条分界与 `LocateSpec.effect` 的分档是同一件事的两个侧面。
+  6) 状态行属于读取通道：`chatStatus` 全标 unverified 时 `chat()` 仍起等待、仍回 `sent:true`，
+     `act.waitFor` 拿到的就是知识包那一个对象（`toBe` 判同一实例，不是筛过的拷贝）。
+
+═══════════════════════════════════════════════════════════════════════
+四、C 半边：机检读数与一处**扫描器修正**（spec 8.1-03 / 8.1-08）
+═══════════════════════════════════════════════════════════════════════
+
+$ grep -c '未实测' packages/platform-boss/src/knowledge/*.json
+  packages/platform-boss/src/knowledge/boss-fixture.json:0
+  packages/platform-boss/src/knowledge/boss.json:0
+→ 8.1-03 达成：「没测通」从一句【未实测】注释变成 `unverified: true` 这个机器字段（装载期与外发期都读得到）。
+
+$ pnpm lint   （EXIT=0，链内 11 项机检全过）
+  ✔ 站点知识包检查通过（扫描 1 个平台包，选择器只在知识包目录里）
+  ✔ 合规护栏机检通过（…测试面 URL 判据…）
+→ 8.1-08：`check-compliance-redlines.ts` 的**判据集合**（哪些主机名允许出现、哪些判违规）一字未动；
+  动的是两处，且都不是判据：
+  ① `TEST_REAL_HOST_ALLOWLIST` 里 `zhipin.com` 那条的**理由文案**（按 plan 要求补一句：发布包取值面扩大，
+     但测试面判据不变——这些用例不发请求、不 attach 真 target）。
+  ② 主机名**提取**的字符类补上 CJK 范围（`\u3000-\u303f\u4e00-\u9fff\uff00-\uffef`）。
+     原写法 `[^\s'"`/?#\\]+` 会把紧跟在地址后面的全角 `）」` 一起吃进主机段，于是
+     `origin 不许带路径、查询或锚（形如 https://example.com）` 这类**被测中文字符串**里的保留域名匹配不上
+     RFC 名单、许可域名匹配不上许可名单，假报成违规。这不是判据松动，是提取层的一处假阳性。
+
+  探针（`packages/browser/src/zzRedlineProbe.test.ts`，跑完即删，未入库）：
+    const requested = 'https://acme-recruiter.com/jobs';                      → 判违规 ✓（第 1 行）
+    const adjacent  = '…源「https://acme-recruiter.com」';                     → 判违规 ✓（第 2 行：主机段剥掉 CJK 后
+                                                                                   仍是未登记的真域名，照样拦）
+    const trailingFullwidth = '形如 https://example.com）';                    → 不判（RFC 保留文档域名，正是上面那条假阳性）
+  $ pnpm exec tsx scripts/check-compliance-redlines.ts   → 探针在位时 EXIT=1 且逐行点名，删除后 EXIT=0。
+  → 结论：一个不在许可名单里的真实域名，**无论后面跟不跟中文标点**都照样被拦；被修掉的只有假阳性。
+
+═══════════════════════════════════════════════════════════════════════
+五、四条门禁（§7.4 的①，各自重定向到文件再看 EXIT，不接管道）
+═══════════════════════════════════════════════════════════════════════
+
+$ pnpm typecheck    → TYPECHECK_EXIT=0（全部包 Done）
+$ pnpm lint         → LINT_EXIT=0
+$ pnpm format:check → FORMAT_EXIT=0（All matched files use Prettier code style!）
+$ pnpm test         → TEST_EXIT=0，22 个包全 Done；本片涉及的逐包读数：
+    core 52 / browser 276 / platform-boss 152 / outbound 186 / workflow 214 / agent 223 / main 79 / sessions 15 / testing 32
+
+═══════════════════════════════════════════════════════════════════════
+六、装配面（`cordis.yml`）与冒烟面（`scripts/smoke-dist.ts`）
+═══════════════════════════════════════════════════════════════════════
+
+· `sessions.platforms[]` 的 `boss` 一行 startUrl 已是 `https://www.zhipin.com/`（只是首屏地址，不再是导航许可的来源）。
+· `platform-boss` 一行**显式写出** `config.pack: real`，不吃缺省：这一行决定的正是「这个实例会不会往真实域名发动作」。
+· `scripts/smoke-dist.ts` 在进主界面之后、跑占位工作流之前插入一步 `plugins.saveConfig('platform-boss', { pack: 'fixture' })`，
+  并把 `platform.registry.list()` 的 `origins` 读回来当一条机检判据（每一条都必须是 loopback），
+  配置只写内存、重启即失（§9 的 5.3-b），所以冒烟既不改产物载荷也不落盘。
+  → 冒烟六步需要装机产物，本窗**未跑**（没有 `dist/` 载荷）；这一行判据留 `[!] 待发布冒烟窗口`，
+    代码路径与判据本身已在位（8.1-07 的 C 半边不依赖它）。

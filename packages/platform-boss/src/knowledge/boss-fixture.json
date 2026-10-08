@@ -1,0 +1,240 @@
+{
+  "platform": "boss",
+  "displayName": "BOSS 直聘（本地仿站）",
+  "startUrl": "http://127.0.0.1:10233/boss",
+  "packStatus": "draft",
+  "origins": ["http://127.0.0.1:10233"],
+  "capabilities": ["search", "detail", "chat", "sendResume", "readReplies"],
+  "locators": {
+    "jobCard": {
+      "description": "列表页（本地仿站 /boss）里的一条职位卡片，卡片内的字段都在它子树里",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "jd-card" },
+        { "strategy": "css", "value": "li.card" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']" }
+      ]
+    },
+    "jobTitle": {
+      "description": "职位标题（列表页是可点的链接、详情页是 h1）；它的 href 就是详情页地址",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "title" },
+        { "strategy": "css", "value": "a.title" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/a" }
+      ]
+    },
+    "jobCompany": {
+      "description": "公司名称",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "company" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[@data-field='company']" }
+      ]
+    },
+    "jobSalary": {
+      "description": "薪资原文（「25-40K·14薪」「面议」），归一化属 2.3，这里只负责取到节点",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "salary" },
+        { "strategy": "css", "value": ".card .salary" }
+      ]
+    },
+    "jobCity": {
+      "description": "城市与工作地址（「上海 · 浦东新区」是一个字段，不拆）",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "city" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[3]" }
+      ]
+    },
+    "jobExperience": {
+      "description": "经验要求（「3-5 年」「经验不限」）",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "experience" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[4]" }
+      ]
+    },
+    "jobEducation": {
+      "description": "学历要求（「本科」「硕士」）",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "education" },
+        { "strategy": "xpath", "value": "//li[@data-testid='jd-card']/span[5]" }
+      ]
+    },
+    "detailDescription": {
+      "description": "详情页（本地仿站 /boss/detail）的岗位职责正文",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "description" },
+        { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/following-sibling::p[1]" }
+      ]
+    },
+    "detailRoot": {
+      "description": "详情页正文根节点：详情字段都在它子树里抽，避免把页头页脚读成岗位描述",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "jd-detail" },
+        { "strategy": "css", "value": "article.detail" },
+        { "strategy": "xpath", "value": "//h2[contains(., '岗位职责')]/parent::section" }
+      ]
+    },
+    "detailPosted": {
+      "description": "详情页的发布时间原文（「3 天前」「刚刚发布」），归一化属 2.3-03",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "posted" },
+        { "strategy": "css", "value": "span.posted" }
+      ]
+    },
+    "detailRequirement": {
+      "description": "详情页的任职要求正文，`JobDetail.requirements` 的原文来源",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-field", "value": "requirement" },
+        { "strategy": "xpath", "value": "//h2[contains(., '任职要求')]/following-sibling::p[1]" }
+      ]
+    },
+    "authBanner": {
+      "description": "登录状态横幅（`data-logged-in` 是仿站现渲的读数，供 2.3 判定会话是否还有效）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "id", "value": "auth-banner" },
+        { "strategy": "css", "value": "p.notice[data-logged-in]" }
+      ]
+    },
+    "loginLink": {
+      "description": "「在仿站登录」入口，登录失效时界面引导用户点的就是它（spec 2.1-04）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "id", "value": "login-link" },
+        { "strategy": "text", "value": "在仿站登录", "exact": true },
+        { "strategy": "css", "value": "a[href='/login']" }
+      ]
+    },
+    "chatInput": {
+      "description": "打招呼输入框：本地仿站 /chat 的同源 iframe（帧内 /chat/frame 的 textarea），取自 scripts/fixture-server.ts 的现页 HTML",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-input" },
+        { "strategy": "role", "role": "textbox", "name": "输入打招呼文案", "exact": false },
+        { "strategy": "css", "value": "textarea" }
+      ]
+    },
+    "chatSendButton": {
+      "description": "发送打招呼的按钮：同上，帧内 button[data-testid=chat-send]，文案「发送打招呼」",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-send" },
+        { "strategy": "role", "role": "button", "name": "发送", "exact": false },
+        { "strategy": "text", "value": "发送打招呼", "exact": true }
+      ]
+    },
+    "chatStatus": {
+      "description": "帧内发送状态行：外发要「回读到成功态才算 sent」，读的就是它（data-testid=chat-frame-status）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-frame-status" },
+        { "strategy": "xpath", "value": "//strong[@data-testid='chat-frame-status']" }
+      ]
+    },
+    "replyItem": {
+      "description": "帧内消息记录里的一条：ul[data-testid=chat-log] 下动态插入的 li（2.5 读回复的落点；from 的角色区分由页面侧判定）",
+      "cardinality": "many",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-item" },
+        { "strategy": "xpath", "value": "//ul[@data-testid='chat-log']/li" }
+      ]
+    },
+    "chatMessageBody": {
+      "description": "一条消息里只装正文的那个节点：方向标记（对方：/我：）在兄弟节点里，读回来的文本因此不带标记（2.5-08）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "chat-log-body" },
+        { "strategy": "css", "value": "[data-message-body]" }
+      ]
+    },
+    "resumeUploadInput": {
+      "description": "简历上传控件：本地仿站 /deliver?targetId= 的隐藏 input[type=file]（display:none，人的入口做在 label 上）；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉（2.6-c 已在该页实测「注入 → change 回读文件名与字节数」）",
+      "cardinality": "single",
+      "requireActionable": false,
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-upload-input" },
+        { "strategy": "css", "value": "input[type=file][name=resume]" }
+      ]
+    },
+    "resumeSendButton": {
+      "description": "确认投递按钮：仿站 /deliver 上是 button[data-testid=resume-send]，文案「发送简历」，所以 role+可读名那条候选同源可用；那一行「已送达」只在服务端收讫这份字节之后才画出来，点按钮本身不构成成功（2.6-c 实测）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-send" },
+        { "strategy": "role", "role": "button", "name": "发送简历", "exact": false }
+      ]
+    },
+    "resumeDeliverStatus": {
+      "description": "投递状态行：仿站 /deliver 上同一条 p 同时带 data-testid 与 data-role=deliver-status，两条候选指向同一节点；sentPattern 与「岗位已下架」两种结局都从这一行回读，所以它既是成功判据也是二次校验的读数来源（2.6-c 实测）",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-deliver-status" },
+        { "strategy": "css", "value": "p[data-role=deliver-status]" }
+      ]
+    }
+  },
+  "capture": {
+    "list": {
+      "container": "jobCard",
+      "fields": [
+        { "name": "title", "locator": "jobTitle", "required": true },
+        { "name": "company", "locator": "jobCompany" },
+        { "name": "salary", "locator": "jobSalary" },
+        { "name": "city", "locator": "jobCity" },
+        { "name": "experience", "locator": "jobExperience" },
+        { "name": "education", "locator": "jobEducation" },
+        { "name": "detailHref", "locator": "jobTitle", "attribute": "href", "required": true }
+      ]
+    },
+    "detail": {
+      "container": "detailRoot",
+      "fields": [
+        { "name": "description", "locator": "detailDescription", "required": true },
+        { "name": "requirement", "locator": "detailRequirement" },
+        { "name": "posted", "locator": "detailPosted" }
+      ]
+    }
+  },
+  "search": {
+    "params": {
+      "keyword": "query",
+      "city": "city",
+      "experience": "experience"
+    }
+  },
+  "chat": {
+    "entryPath": "/chat",
+    "targetParam": "targetId",
+    "input": "chatInput",
+    "sendButton": "chatSendButton",
+    "statusLine": "chatStatus",
+    "sentPattern": "已送达服务端",
+    "messageItem": "replyItem",
+    "messageBody": "chatMessageBody",
+    "messageIdAttribute": "data-message-id",
+    "directionAttribute": "data-direction",
+    "inboundValue": "inbound"
+  },
+  "deliver": {
+    "entryPath": "/deliver",
+    "targetParam": "targetId",
+    "uploadInput": "resumeUploadInput",
+    "sendButton": "resumeSendButton",
+    "statusLine": "resumeDeliverStatus",
+    "sentPattern": "简历已送达",
+    "offlinePattern": "岗位已下架"
+  },
+  "risk": {
+    "riskPattern": "安全验证|访问验证|人机验证|访问受限|操作频繁"
+  },
+  "fieldOrder": ["title", "company", "salary", "city", "experience", "education"]
+}

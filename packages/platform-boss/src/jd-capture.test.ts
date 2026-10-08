@@ -61,7 +61,8 @@ import {
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
-const pack = loadBossKnowledgePack();
+// 本文件读的是本地仿站那份知识包（AGENTS.md §7.2）：自 P8 8.1 起缺省是上线包（真 BOSS）。
+const pack = loadBossKnowledgePack({ pack: 'fixture' });
 
 /** 进度事件读数（与 `core` 的 `jd/progress` 声明同形）。 */
 type ProgressEvent = {
@@ -129,7 +130,7 @@ async function boot(
   fibers.push(await ctx.plugin(EntitlementGateService, gate));
   fibers.push(await ctx.plugin(JdStoreService, {}));
   // 真实适配器：`browser.page` 那一步取到的是上面那只替身。
-  fibers.push(await ctx.plugin(BossPlatformService, {}));
+  fibers.push(await ctx.plugin(BossPlatformService, { pack: 'fixture' }));
   const captureFiber = await ctx.plugin(JdCaptureService, captureConfig(config));
   fibers.push(captureFiber);
 
@@ -425,7 +426,7 @@ describe('抓取占的是 search 那一条额度（spec 2.7-03，并更正 2.3-1
     await ctx.plugin(PlatformRegistryService, NO_CONFIG);
     await ctx.plugin(UsageLedgerService, {});
     await ctx.plugin(JdStoreService, {});
-    await ctx.plugin(BossPlatformService, {});
+    await ctx.plugin(BossPlatformService, { pack: 'fixture' });
     const captureFiber = await ctx.plugin(JdCaptureService, captureConfig());
     fibers.push(captureFiber);
     expect(fiberState(captureFiber.state)).toBe('pending');

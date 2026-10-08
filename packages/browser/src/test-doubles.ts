@@ -21,7 +21,13 @@ import {
   type ToolEffect,
   type ToolResult,
 } from '@auto-cc/core';
-import type { LocateResultView, LocatedReading, KernelPageSnapshotView, SessionsStatusView } from '@auto-cc/shared';
+import type {
+  KernelPageSnapshotView,
+  LocateResultView,
+  LocatedReading,
+  PlatformMetaView,
+  PlatformRegistryView,
+} from '@auto-cc/shared';
 import type { MainFrameResponseReading } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents, WebFrameMain } from 'electron';
 import { z } from 'zod';
@@ -381,8 +387,8 @@ export class FakeShellService extends Service {
 /**
  * `sessions` 替身：凑齐 `browser.page` 的 `static inject`，并替 `browser.risk` 演「分区里来了一条响应」。
  *
- * 页面服务只经它读「已登记平台的起始地址」（导航许可名单的唯一来源），所以这里就给一条
- * fixture 平台的地址——测试用不到登录判定，而 `ctx.plugin` 会按 inject 名单要求服务先就位。
+ * 页面服务只经它问「这个平台签过自动化风险确认没有」（导航许可的第二道闸门），所以这里给一个
+ * 可写的签字集合——默认一个都没签，用例要放行真源就自己往里加。
  * 观测那条口子在真实现里挂在 Electron 分区上，替身把它降级成「记下来，等用例手动喂一条读数」，
  * 于是风控用例不需要 Electron 也能演完整条「响应 → 判据 → 事件」。
  */
@@ -394,6 +400,8 @@ export class FakeSessionsService extends Service {
   observeCalls = 0;
   /** 摘除函数被调用的次数。 */
   unobserveCalls = 0;
+  /** 已签字的平台名集合：用例直接往这里写，模拟「用户在风险确认卡上按过」。 */
+  readonly consented = new Set<string>();
 
   private listener: ((reading: MainFrameResponseReading) => void) | null = null;
 
@@ -401,24 +409,12 @@ export class FakeSessionsService extends Service {
     super(ctx, 'sessions');
   }
 
-  /** @returns 只有 fixture 一条平台的会话读数（其余字段按界面要的形状给固定值） */
-  status = (): Promise<SessionsStatusView> =>
-    Promise.resolve({
-      platforms: [
-        {
-          id: 'fixture',
-          partition: 'persist:fixture',
-          startUrl: 'http://127.0.0.1:10233/boss',
-          isPersistent: true,
-          storagePath: null,
-          cookieNames: [],
-          sessionCookieName: 'fixture_session',
-          auth: 'active' as const,
-          expiresAt: null,
-        },
-      ],
-      activePlatform: 'fixture',
-    });
+  /**
+   * 契约见 `ConsentGate.hasConsent`：库里有没有这一行签字。
+   * @param platform 平台标识
+   * @returns 用例把它写进 `consenteds` 才是 true（默认全没签）
+   */
+  hasConsent = (platform: string): boolean => this.consented.has(platform);
 
   /**
    * 与真实现同形的观测口：只留最后一次挂进来的 listener，摘除时清空。
@@ -449,9 +445,10 @@ export class FakeSessionsService extends Service {
 }
 
 /**
- * `platform.registry` 替身：风控观测层只经它取「这个平台的风控文案判据」（spec 2.7-01）。
+ * `platform.registry` 替身：风控观测层只经它取「这个平台的风控文案判据」（spec 2.7-01），
+ * 页面服务经它取导航许可名单（spec 8.1-05），所以这里给一个可写的平台清单。
  *
- * 真登记处的规则与渠道投影由 `platform-registry.test.ts` 覆盖，这里只给一个可写的判据，
+ * 真登记处的规则与渠道投影由 `platform-registry.test.ts` 覆盖，这里只给两个可写的读数，
  * 让风控用例能演「有判据 → 读页面」与「没判据 → 只按状态码判」两条分支。
  */
 export class FakePlatformRegistryService extends Service {
@@ -461,12 +458,18 @@ export class FakePlatformRegistryService extends Service {
   /** 可写的风控判据；null 表示「这个平台没声明文案判据」。 */
   riskPattern: string | null = null;
 
+  /** 可写的平台清单：用例直接往这里 push，模拟「某个平台包登记进来了」。 */
+  readonly platforms: PlatformMetaView[] = [];
+
   constructor(ctx: Context) {
     super(ctx, 'platform.registry');
   }
 
   /** @param platform 平台标识 @returns 替身预设的判据（不区分平台） */
   riskPatternOf = (): string | null => this.riskPattern;
+
+  /** @returns 替身当前那份可写清单（与真实现同形：只读投影、不含选择器） */
+  list = (): PlatformRegistryView => ({ platforms: this.platforms });
 }
 
 /**

@@ -11,7 +11,7 @@
  * 第二套同类基础设施（AGENTS.md §2.5）。所以本包只**取用** shell 交出来的视图句柄。
  *
  * 两条边界：
- * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（只允许已登记平台的同源地址）；
+ * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（只允许已登记平台声明的源，且真源要签字）；
  * 2. 页面内容只在页面里读（注入脚本），主进程不解析 HTML 字符串，因此不引入第二套 DOM 实现。
  */
 import { Service, asApp, AppError, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
@@ -37,14 +37,15 @@ import {
   toSnapshotReading,
 } from './page-script.js';
 import { resolveNavigableUrl } from './navigate-policy.js';
+import type { PlatformRegistryService } from './platform-registry.js';
 
 /**
- * 本包对 `sessions` 的全部诉求：读已登记平台的起始地址（导航许可名单的唯一来源）。
+ * 本包对 `sessions` 的全部诉求：**这个平台有没有一份自动化风险确认**（导航许可的第二道闸门）。
  *
  * 与 `sessions` 用 `Pick` 收 `shell` 同一条路：把「跨包能做什么」在类型上收成有限集，
  * 想加能力就得先改这一行，改动就会被看见（AGENTS.md §4.1 的分层方向）。
  */
-type SessionRegistry = Pick<SessionsService, 'status'>;
+type ConsentRegistry = Pick<SessionsService, 'hasConsent'>;
 
 export const browserPageSchema = z.strictObject({
   /** 一次导航等待页面装载完成的上限（毫秒）；超时不报错，由快照读数如实反映 `readyState`。 */
@@ -92,7 +93,7 @@ export type PageScreenshotView = {
 export class BrowserPageService extends Service {
   static provide = 'browser.page';
   static Config = browserPageSchema;
-  static inject = ['shell', 'sessions'];
+  static inject = ['shell', 'sessions', 'platform.registry'];
 
   constructor(
     ctx: Context,
@@ -102,15 +103,24 @@ export class BrowserPageService extends Service {
   }
 
   /**
-   * 让内核视图导航到同源的新地址，并在装载结束（或超时）后回一份快照。
-   * @param url 目标地址（不可信输入）；协议必须 http/https，且源要属于已登记平台的起始地址同源
+   * 让内核视图导航到已登记平台内的新地址，并在装载结束（或超时）后回一份快照。
+   * @param url 目标地址（不可信输入）；协议必须 http/https，源必须出自该平台知识包的 `origins`，
+   *        且非回环源要求该平台已签过 `automation:<platform>` 风险确认
    * @returns 导航落定后的页面快照
-   * @throws 目标被许可判定拒绝时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
+   * @throws 目标被许可判定拒绝时 `NAVIGATE_URL_REJECTED`；源已登记但没签字时 `CONSENT_REQUIRED`；
+   *         没有已挂载会话时 `NO_KERNEL_SESSION`
    */
   navigate = async (url: string): Promise<KernelPageSnapshotView> => {
     const contents = requireKernelContents(this.host, 'browser.page');
-    const startUrls = (await this.sessions.status()).platforms.map((platform) => platform.startUrl);
-    const target = resolveNavigableUrl(url, startUrls);
+    // 名单现问现取：登记处由平台包在自己的 init 里往里塞，缓存一份本地副本会在热改配置后变空表
+    // （AGENTS.md §9 的 2.5 实测条）。没挂登记处时拿到空名单，于是任何地址都进不去——宁可全拒。
+    const platforms = this.registry
+      .list()
+      .platforms.map((platform) => ({ id: platform.id, origins: platform.origins }));
+    const consented = platforms
+      .filter((platform) => this.sessions.hasConsent(platform.id))
+      .map((platform) => platform.id);
+    const target = resolveNavigableUrl(url, platforms, consented);
     const settled = settleLoad(contents, this.config.navigateTimeoutMs);
     await contents.loadURL(target.href);
     const outcome = await settled;
@@ -287,11 +297,19 @@ export class BrowserPageService extends Service {
   }
 
   /**
-   * 会话服务的登记面（见 `SessionRegistry` 注释：只读平台清单，不碰分区）。
+   * 会话服务的签字面（见 `ConsentRegistry` 注释：只问「这个平台签过字没有」，不碰分区）。
    * @returns sessions 服务实例
    */
-  private get sessions(): SessionRegistry {
+  private get sessions(): ConsentRegistry {
     return asApp(this.ctx).sessions;
+  }
+
+  /**
+   * 平台登记处：导航许可名单的唯一来源（`meta.origins`，出自各平台的知识包）。
+   * @returns platform.registry 服务实例
+   */
+  private get registry(): Pick<PlatformRegistryService, 'list'> {
+    return asApp(this.ctx)['platform.registry'];
   }
 
   /**
@@ -399,6 +417,7 @@ export { PlatformRegistryService } from './platform-registry.js';
 export {
   knowledgePackSchema,
   parseKnowledgePack,
+  outboundCandidates,
   type JobDetail,
   type JobSearchCriteria,
   type JobSummary,

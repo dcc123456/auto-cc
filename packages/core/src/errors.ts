@@ -59,6 +59,10 @@ export type AppErrorCode =
   | 'WAIT_TIMEOUT'
   | 'LOCATE_FAILED'
   | 'ACT_FAILED'
+  // 外发通道撞上显式标记为「未取证」的定位（P8 8.1-04）。它与 `LOCATE_FAILED` 必须分开：
+  // 后者是「到页面上试过没打过线」，这一条是「压根没试」——数据里就写着这条定位没在真站点上录过证据，
+  // 要的是补取证，不是重试。
+  | 'LOCATOR_UNVERIFIED'
   // 站点知识包（spec 2.2-08）与适配器登记（spec 2.2-07）：前者是数据不合法，后者是装配缺包。
   | 'KNOWLEDGE_PACK_INVALID'
   | 'PLATFORM_NOT_REGISTERED'

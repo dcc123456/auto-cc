@@ -2583,7 +2583,19 @@ export interface LocateSpec {
    * 所以这条不是「放松定位」，是「按用途取用对应的判据」（见 plan §13.3 第 4 条）。
    */
   requireActionable?: boolean;
+  /**
+   * 这条声明用在哪个通道上，决定它适用哪一档最低可用分（P8 裁定⑤）。
+   *
+   * 真实站点没有 `data-testid`，可稳定过 70 分的只有「表单 name」与「role/text + 稳定可读名」两类
+   * （证据 `docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt` 第六节）；
+   * 抓取容器与面板节点只能靠 class，按 70 分一律 `below-score`。分档是把「无副作用的读取」与
+   * 「撤不回来的外发」分开标定，**省略即 `outbound`**：默认落在严的那一档，谁要降档必须在数据里写明。
+   */
+  effect?: LocateEffect;
 }
+
+/** 定位声明适用的通道（`read` = 不改变页面状态，`outbound` = 打招呼 / 投递那一路）。 */
+export type LocateEffect = 'read' | 'outbound';
 
 /** 元素在所属帧视口里的位置（CSS 像素，与 CDP 输入同一坐标系）。 */
 export interface ElementRect {
@@ -2703,6 +2715,14 @@ export interface PlatformMetaView {
   startUrl: string;
   /** 该适配器声明支持的能力名（`search` / `detail` / `chat` / `sendResume` / `readReplies`） */
   capabilities: string[];
+  /**
+   * 该平台**允许导航到**的源集合（来自站点知识包的 `origins`，P8 8.1-05）。
+   *
+   * 导航许可的名单来源从「startUrl 的 origin」换到这里：真站点的登录域、主域、支付/验证页
+   * 常常不同源而 startUrl 只有一个，用 startUrl 折 origin 会把正常工作流挡在门外，
+   * 而把许可放宽到「同源以内」的口径不变——不在名单里的一律拒。
+   */
+  origins: string[];
 }
 
 /** `platform.registry` 的只读清单。 */
@@ -2953,7 +2973,14 @@ export interface JobSearchCriteriaView {
 
 /** 定位层读数：当期阈值配置 + 最近几次判定摘要（界面解释「为什么这条不确定」用）。 */
 export interface LocateStatusView {
+  /** 外发档（也是省略 `effect` 时的缺省档）的最低可用分 */
   minScore: number;
+  /**
+   * 读取档的最低可用分（P8 裁定⑤）。
+   *
+   * 界面上"这条为什么没过线"必须能说出用的是哪一档，否则读数看着像配置坏了。
+   */
+  readMinScore: number;
   minMargin: number;
   candidateLimit: number;
   recentFailures: { description: string; status: LocateStatus; reason: string; at: number }[];

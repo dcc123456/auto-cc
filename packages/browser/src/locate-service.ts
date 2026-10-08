@@ -10,7 +10,14 @@
  * 两者共用 `frame-channel`（同一块视图、同一条多帧求值通道），不存在第二套取句柄逻辑。
  */
 import { asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
-import type { ElementFingerprint, LocateResultView, LocateSpec, LocateStatusView, LocatedView } from '@auto-cc/shared';
+import type {
+  ElementFingerprint,
+  LocateEffect,
+  LocateResultView,
+  LocateSpec,
+  LocateStatusView,
+  LocatedView,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import { evaluateInFrames, readingsFromFrames, requireKernelContents, type KernelHost } from './frame-channel.js';
 import {
@@ -35,8 +42,19 @@ import type { BrowserPageService } from './index.js';
 const RECENT_FAILURE_LIMIT = 8;
 
 export const browserLocateSchema = z.strictObject({
-  /** 候选最低可用分；最优候选低于它一律判 `below-score`（spec 2.2-02 的 fail closed）。 */
+  /** 外发档（声明省略 `effect` 时的缺省档）的最低可用分；低于它一律判 `below-score`（spec 2.2-02 的 fail closed）。 */
   minScore: z.number().int().min(0).max(100).default(70),
+  /**
+   * 读取档的最低可用分（P8 裁定⑤：定位阈值按通道分档）。
+   *
+   * 70 分那一档是按**仿站富 `data-testid`** 的环境标定的；真 BOSS 全页没有 testid/id，抓取容器与面板
+   * 节点只能靠 class（35 分），于是"读一页岗位列表"这种零副作用的动作会被自己的判定打掉
+   * （证据 `docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt` 第六节）。
+   * 默认 30：正好接住 class 选择器那一档（35 分）而仍然把裸 xpath（25 分）与"像生成串"的候选（封顶 10 分）
+   * 挡在外面。**外发通道不走这一档**（`chat` / `deliver` 引用的定位在装载期就被禁止声明 `effect:'read'`）。
+   * 另有一条不松口的地方：指纹自愈过线**永远只认 `minScore`**，见 `healByFingerprint`。
+   */
+  readMinScore: z.number().int().min(0).max(100).default(30),
   /** 最优与次优的最小分差；小于它判 `ambiguous`，即「两条都点得下去时宁可不动」。 */
   minMargin: z.number().int().min(0).max(100).default(12),
   /** 一次 `find` 回传的 top-N，同时也是每条候选从页面最多回读几个命中。 */
@@ -78,7 +96,7 @@ export class BrowserLocateService extends Service {
       toLocatedReadings,
     );
     const ranked = toRankedCandidates(readings, spec.candidates, spec.requireActionable !== false);
-    const decision = decideLocate(ranked, this.thresholds);
+    const decision = decideLocate(ranked, this.thresholds(spec.effect));
     if (decision.status === 'matched' || !lastKnown) {
       return this.finish(spec, ranked, decision, false, null, contents.getURL());
     }
@@ -129,6 +147,7 @@ export class BrowserLocateService extends Service {
    */
   status = (): LocateStatusView => ({
     minScore: this.config.minScore,
+    readMinScore: this.config.readMinScore,
     minMargin: this.config.minMargin,
     candidateLimit: this.config.candidateLimit,
     recentFailures: [...this.recentFailures],
@@ -152,7 +171,9 @@ export class BrowserLocateService extends Service {
     );
     const scored = readings.map((reading) => scoreByFingerprint(target, reading));
     const ranked = rankScored(scored).slice(0, this.config.candidateLimit);
-    return { ranked, decision: decideLocate(ranked, this.thresholds) };
+    // 自愈这一路**恒用外发档的下限**，不看声明里的 `effect`：`FINGERPRINT_BASE_SCORE` 是 60，
+    // 读档下限（30）一进来，「标签名相同的任意元素」就自动过线了——那正是 spec 2.2-05 要 fail closed 的场景。
+    return { ranked, decision: decideLocate(ranked, this.thresholds()) };
   }
 
   /**
@@ -219,9 +240,16 @@ export class BrowserLocateService extends Service {
     };
   }
 
-  /** 判定阈值（来自配置，不写在代码里）。 */
-  private get thresholds(): { minScore: number; minMargin: number } {
-    return { minScore: this.config.minScore, minMargin: this.config.minMargin };
+  /**
+   * 判定阈值（来自配置，不写在代码里），按通道取用哪一档最低可用分。
+   * @param effect 本次声明的通道归属；省略与 `'outbound'` 都用严的那一档 `minScore`（裁定⑤）
+   * @returns 交给 `decideLocate` 的阈值对
+   */
+  private thresholds(effect?: LocateEffect): { minScore: number; minMargin: number } {
+    return {
+      minScore: effect === 'read' ? this.config.readMinScore : this.config.minScore,
+      minMargin: this.config.minMargin,
+    };
   }
 
   /** 壳层的视图宿主句柄（见 `KernelHost`：这里刻意只取两个方法）。 */

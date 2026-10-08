@@ -14,6 +14,30 @@ import type { PlatformMetaView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { validateSpec } from './locator-spec.js';
 
+/**
+ * 一条候选在**真站点上**的取证凭据（P8 8.1-02）。
+ *
+ * 为什么要把证据写进数据而不是写在注释里：`docs/plans/02-browser-automation/plan.md:1036` 禁止发布
+ * 未实测的选择器，而注释没人读、也没人机检。写成字段之后「这条定位录过证据没有」变成装载期就能判的事，
+ * 也能让 `packStatus:'shipped'`（真要发给用户上线的那一份）在缺证据时直接挂不上线。
+ */
+const locatorEvidenceSchema = z.strictObject({
+  /** 证据文件的仓库内相对路径（`docs/acceptance/08-real-platform-driving/8.0-03-…txt`） */
+  ref: z.string().min(1),
+  /** 取证时那一屏的地址（同一个 class 在不同页面上含义不同，只留选择器不够） */
+  url: z.string().min(1),
+  /** 取证时刻（毫秒）；改版检测与「证据多久没更新了」按它排 */
+  verifiedAt: z.number().int().nonnegative(),
+  /**
+   * 当时该条件在页面上命中几个元素（1 是唯一寻址，>1 说明要靠更小的子节点）。
+   *
+   * **没数过就省略**：在场取证的窗口里有些选择器只记了「在页面上存在、形状如何」，没逐条数过命中数
+   * （证据 8.0-04 / 8.0-05 第四节）。补一个猜出来的数字比留空更糟——这个字段的用途是防猜测，
+   * 它自己不能是猜的。省略时外发通道照常按 `unverified` 那条纪律走，与命中数无关。
+   */
+  hits: z.number().int().nonnegative().optional(),
+});
+
 /** 定位声明的线格式：与 `shared` 的 `LocateSpec` 同构，用于校验外部 JSON（知识包是不可信输入）。 */
 const locateCandidateSchema = z.strictObject({
   strategy: z.enum(['testId', 'id', 'name', 'role', 'text', 'css', 'xpath', 'fingerprint']),
@@ -22,6 +46,15 @@ const locateCandidateSchema = z.strictObject({
   role: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   exact: z.boolean().optional(),
+  /** 这条候选的在场取证凭据；与 `unverified` 二者必居其一（`packStatus:'shipped'` 时强制） */
+  evidence: locatorEvidenceSchema.optional(),
+  /**
+   * 显式声明「这条候选没在目标站点上实测过」，而不是靠一段【未实测】的注释表达同样的意思。
+   *
+   * 它是有语义的：外发通道（打招呼 / 投递）遇到它就直接以 `LOCATOR_UNVERIFIED` 失败，一个动作都不发
+   * （8.1-04）；抓取与读取通道仍然会试它——读错一条只是少一条数据，点错一下撤不回来。
+   */
+  unverified: z.boolean().optional(),
 });
 
 export const locateSpecSchema = z.strictObject({
@@ -30,7 +63,18 @@ export const locateSpecSchema = z.strictObject({
   candidates: z.array(locateCandidateSchema).min(1),
   /** 注入类定位（如隐藏的 `input[type=file]`）设 false，见 `LocateSpec.requireActionable`。 */
   requireActionable: z.boolean().optional(),
+  /** 通道归属，决定适用哪一档最低可用分（见 `LocateSpec.effect` 与 P8 裁定⑤）。 */
+  effect: z.enum(['read', 'outbound']).optional(),
 });
+
+/** 一个知识包「允许可导航到」的源：必须是完整 origin（协议 + 主机 + 端口），不许带路径。 */
+const originSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+$/i.test(value),
+    'origin 不许带路径、查询或锚（形如 https://example.com）',
+  );
 
 /**
  * 抓取字段声明：语义名 → 从哪个定位取，取正文还是取属性。
@@ -63,8 +107,14 @@ const searchParamsSchema = z.strictObject({
   keyword: z.string().min(1),
   /** 城市参数名（如 `city`） */
   city: z.string().min(1),
-  /** 经验筛选参数名（如 `experience`） */
-  experience: z.string().min(1),
+  /**
+   * 经验筛选参数名；**站点没有这个维度时省略**（P8 8.0-03：真 BOSS 搜索表单上取证到的只有
+   * `query` / `city` / `industry` / `position` 四项，没有一个"经验"参数名）。
+   *
+   * 这条从必填改成可选，是为了让"没取证到"在数据里看得出来：省略时适配器不带这个参数，
+   * 而界面据 `null` 报"本次未按经验过滤"，比拿一个猜出来的参数名去真站点上撞要诚实。
+   */
+  experience: z.string().min(1).optional(),
 });
 
 /** 站点知识包：平台自己声明的「页面长什么样、动作怎么打、节奏怎么控」。 */
@@ -72,7 +122,23 @@ export const knowledgePackSchema = z.strictObject({
   platform: z.string().regex(/^[a-z][a-z0-9-]*$/, '平台标识要用小写字母开头的短名'),
   displayName: z.string().min(1),
   startUrl: z.url(),
+  /**
+   * 包的状态（P8 8.1-02）：`shipped` 表示这份包是要随 app 发给用户、在真实站点上动手的，
+   * 于是每条定位候选必须**要么带在场取证凭据、要么显式 `unverified`**；`draft` 不查这一条
+   * （本地仿站那份的证据来自历次自动化验收，形状与真站点无关，硬要求它带 verifiedAt 只会逼出假证据）。
+   *
+   * 默认 `draft` 是刻意的：新增一份包的人默认落在「不上线」这一档，要上线必须写出来。
+   */
+  packStatus: z.enum(['draft', 'shipped']).default('draft'),
+  /**
+   * 这个平台允许导航到的源集合（P8 8.1-01 / 8.1-05：导航许可的名单来源）。
+   *
+   * 必须包含 `startUrl` 的 origin；真站点的登录页、会话页常常与起始页不同源，
+   * 只按 startUrl 折 origin 会把正常工作流挡在门外，所以这份名单由平台自己声明。
+   */
+  origins: z.array(originSchema).min(1),
   capabilities: z.array(z.enum(['search', 'detail', 'chat', 'sendResume', 'readReplies'])).min(1),
+
   /** 语义名 → 定位声明。适配器只按语义名取用，源码里不出现任何选择器。 */
   locators: z.record(z.string().min(1), locateSpecSchema),
   /** 抓取声明（2.3）：列表与详情各一处「容器 + 字段」。 */
@@ -80,8 +146,15 @@ export const knowledgePackSchema = z.strictObject({
     list: captureSectionSchema,
     detail: captureSectionSchema,
   }),
-  /** 搜索 URL 的参数名（2.3-01）。拼 URL 的代码是通用的，参数名是站点知识。 */
+  /** 搜索 URL 的参数名与入口路径（2.3-01 / P8 8.0-03）。拼 URL 的代码是通用的，参数名是站点知识。 */
   search: z.strictObject({
+    /**
+     * 搜索页的路径（按 `startUrl` 折算）；省略就用 `startUrl` 自己的路径。
+     *
+     * 真 BOSS 的搜索表单 action 是 `/web/geek/jobs`，而 `startUrl` 是站点根（证据 8.0-03 第一节）——
+     * 没有这个键，拼出来的搜索地址会落在首页上，参数被站点整个忽略，表现为"搜了但列表还是默认岗位"。
+     */
+    entryPath: z.string().min(1).optional(),
     params: searchParamsSchema,
   }),
   /**
@@ -119,10 +192,24 @@ export const knowledgePackSchema = z.strictObject({
       messageBody: z.string().min(1),
       /** 消息项上携带平台侧稳定标识的属性名，落库时按它去重 */
       messageIdAttribute: z.string().min(1),
-      /** 消息项上区分方向的属性名 */
-      directionAttribute: z.string().min(1),
+      /**
+       * 消息项上区分方向的属性名，与 `inboundValue` 同现（本地仿站是 `data-direction="inbound"`）。
+       *
+       * 真站点常常**没有**方向属性——方向是挂在 class token 上（P8 8.0-05 实测：BOSS 的对方消息项带
+       * `item-friend` 这个类名，属性上一个方向标记都没有）。那种站点填 `inboundClassToken`，
+       * 两个键都没有就在 `parseKnowledgePack` 判包不合法：没有方向的判据就把整条会话读成"都是对方发的"，
+       * 那是假证据而不是缺数据。
+       */
+      directionAttribute: z.string().min(1).optional(),
       /** `directionAttribute` 里表示「对方发的」那个值，其余值都算自己发的 */
-      inboundValue: z.string().min(1),
+      inboundValue: z.string().min(1).optional(),
+      /**
+       * 「对方发的」那条 class token（按空白切词整词比对，不是子串）。
+       *
+       * 与上面那一对互斥必居其一：`readReplies` 因此在两种页面形状上都只有一条「读容器属性 → 比对」的路径，
+       * 而不是各写一遍判定（AGENTS.md §2.2）。
+       */
+      inboundClassToken: z.string().min(1).optional(),
     })
     .optional(),
   /**
@@ -178,11 +265,33 @@ export const knowledgePackSchema = z.strictObject({
 export type KnowledgePack = z.output<typeof knowledgePackSchema>;
 
 /**
+ * 一条定位声明在校验后的形状。
+ *
+ * 它比 `shared` 的 `LocateSpec` 多出取证那几个键，所以适配器上的外发闸门要按这个类型读
+ * （按 `LocateSpec` 读看不见 `unverified`，判定就静默失效了）。
+ */
+export type LocateDeclaration = z.output<typeof locateSpecSchema>;
+
+/**
+ * 取外发通道**可以用**的候选：把显式标了 `unverified` 的那几条剔掉。
+ *
+ * 为什么在这里筛而不是让 `browser.locate` 认这个字段：打分与自愈是内核的通用能力，
+ * 它不该知道"知识包有没有取证过"这件事（那是平台侧的发布纪律，plan §3 规则 1）。
+ * 筛完一条都不剩时由调用方抛 `LOCATOR_UNVERIFIED`（spec 8.1-04）。
+ * @param spec 知识包里的定位声明（校验后的那份）
+ * @returns 有取证凭据（或至少没自称未取证）的候选，声明顺序即优先级不变
+ */
+export function outboundCandidates(spec: LocateDeclaration): LocateDeclaration['candidates'] {
+  return spec.candidates.filter((candidate) => candidate.unverified !== true);
+}
+
+/**
  * 校验一份知识包：结构过 zod，再逐条跑定位声明的语义校验，然后查抓取/会话/投递引用的定位名是否存在，
+ * 然后查上线包取证（P8 8.1-02）、方向判据、外发通道的档位归属与许可名单（8.1-01/05），
  * 最后编译一次风控正则。
  * @param raw 从 JSON 读出来的未知值（外部数据，一律视为不可信）
  * @returns 校验通过的知识包
- * @throws 结构、声明或引用非法时 `KNOWLEDGE_PACK_INVALID`，`details.problems` 逐条指出是哪一层的哪一条
+ * @throws 结构、声明、引用、取证或许可非法时 `KNOWLEDGE_PACK_INVALID`，`details.problems` 逐条指出是哪一层的哪一条
  */
 export function parseKnowledgePack(raw: unknown): KnowledgePack {
   const parsed = knowledgePackSchema.safeParse(raw);
@@ -192,8 +301,22 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
     });
   }
   const problems: string[] = [];
+  const shipped = parsed.data.packStatus === 'shipped';
   for (const [name, spec] of Object.entries(parsed.data.locators)) {
     for (const problem of validateSpec(spec)) problems.push(`${name}：${problem}`);
+    // 上线包逐条查证据：没取证过的候选不许混在真要动手的那一份包里而不留记号。
+    // 「有证据」与「显式 unverified」必须有一个，两者都没有就是「写的时候没看过页面」。
+    if (shipped) {
+      spec.candidates.forEach((candidate, index) => {
+        if (candidate.evidence || candidate.unverified === true) return;
+        problems.push(
+          `${name} 候选 ${String(index)}（${candidate.strategy}）：上线包里的每条候选要么带 evidence，要么显式 unverified:true`,
+        );
+      });
+      // 整条定位的所有候选都标 unverified 是**合法**数据（那个通道的页面知识还没录到），装载期不许
+      // 因此拒整个包——那会让一处没测通的通道把整站抓取一起带走。停手长在外发通道自己那一侧：
+      // `LOCATOR_UNVERIFIED`（spec 8.1-04）。
+    }
   }
   // 抓取声明只引用定位名，所以名字拼错必须在加载时发现——否则要到抓取时才表现为「某字段永远读不到」，
   // 那种错误界面上一句「没抓到」就盖过去了。
@@ -237,6 +360,44 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   } else if (parsed.data.capabilities.includes('sendResume')) {
     // 与 chat 段同一处判据：声明了投递能力却没有上传页知识，真到页面上只能靠猜，那就别让这份包上线。
     problems.push('deliver：capabilities 含 sendResume，但知识包没有 deliver 段（页面知识不能靠猜）');
+  }
+  // 方向判据（2026-10-08 在场补录）：真站点的消息方向是 class token，仿站的是属性，两种形状都必须能表达，
+  // 但**一种都不许缺**——没有方向判据时 `readReplies` 会把整条会话读成「都是对方发的」，那是假证据。
+  if (chat) {
+    const hasAttribute = Boolean(chat.directionAttribute && chat.inboundValue);
+    const hasToken = Boolean(chat.inboundClassToken);
+    if (!hasAttribute && !hasToken) {
+      problems.push('chat：方向判据缺失（必须给 directionAttribute + inboundValue，或 inboundClassToken）');
+    } else if (hasAttribute && hasToken) {
+      problems.push('chat：directionAttribute 与 inboundClassToken 只能填一种（两种方向形状同时声明无从判定用哪个）');
+    } else if (hasAttribute && (!chat.directionAttribute || !chat.inboundValue)) {
+      problems.push('chat：directionAttribute 与 inboundValue 必须成对出现');
+    }
+  }
+  // 裁定⑤（2026-10-08）：最低可用分按通道分档，读取/抓取降档、外发保持严的那一档。
+  // 于是「外发用哪几条定位」必须在装载期就锁死通道归属：谁把发送键标成 read 想去拿低阈值，这里就拦下。
+  //
+  // 名单里**只有真的会动手的那三只**（输入框、发送键、上传控件）。状态行不在名单里是刻意的：
+  // 它只被读、不被点，而真站点上它常常只有 class 可选（真 BOSS 是 `i.message-status.status-delivery`，
+  // 35 分）——把它钉在 70 分档等于「真实站点永远等不到状态行变化」，那条外发反而变成必失败。
+  // 读错状态行的代价由另一半判据兜着：`sent` 要求回读文本**含**成功样式，不是「读到了东西」。
+  const outboundNames = new Set(
+    [
+      ...(chat ? [chat.input, chat.sendButton] : []),
+      ...(deliver ? [deliver.uploadInput, deliver.sendButton] : []),
+    ].filter((name): name is string => Boolean(name)),
+  );
+  for (const name of outboundNames) {
+    const spec = parsed.data.locators[name];
+    if (spec?.effect === 'read') {
+      problems.push(`${name}：外发通道引用的定位不许声明 effect:'read'（那是去够读档的低阈值，与裁定⑤ 相反）`);
+    }
+  }
+  // 许可名单的来源就是这份声明（8.1-01 / 8.1-05）：startUrl 的 origin 必须在里面，
+  // 否则适配器第一个导航动作就会被自己的包拒掉。
+  const startOrigin = new URL(parsed.data.startUrl).origin;
+  if (!parsed.data.origins.includes(startOrigin)) {
+    problems.push(`origins：不含 startUrl 的源「${startOrigin}」（许可名单必须覆盖自己的起始页）`);
   }
   // 风控判据是页面文字正则：写坏了不会报错，只会「永远不命中」，于是风控页被当成正常页面继续跑。
   // 那种失败静默且危险，所以必须在加载时就编译一次确认它至少是个合法正则。

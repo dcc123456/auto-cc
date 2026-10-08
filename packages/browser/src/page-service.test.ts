@@ -18,6 +18,7 @@ import { BrowserPageService, type BrowserPageConfig } from './index.js';
 import {
   FAKE_PNG_BYTES,
   FakeAgentToolsService,
+  FakePlatformRegistryService,
   FakeSessionsService,
   FakeShellService,
   fakeFrame,
@@ -41,23 +42,28 @@ const DEFAULT_PAGE_CONFIG: BrowserPageConfig = {
 const fibers: Fiber[] = [];
 
 /**
- * 起一套「shell / sessions 替身 + 真页面服务」。
+ * 起一套「shell / sessions / platform.registry 替身 + 真页面服务」。
  * @param view 内核视图替身；null 表示还没有挂载会话
  * @param overrides 只覆盖要测的那一两个配置项，其余用默认值
  * @param withTools 是否先挂注册表替身（spec 2.8-08 的登记用例要它，其余用例不需要）
- * @returns 真的 `browser.page` 实例、它的 fiber，以及注册表替身（没挂就是 null）
+ * @returns 真的 `browser.page` 实例、它的 fiber，以及两个替身（导航许可要现写清单与签字）
  */
 async function boot(view: WebContents | null = null, overrides: Partial<BrowserPageConfig> = {}, withTools = false) {
   const ctx = new Context();
   // 注册表排在最前：登记发生在后挂的能力包里，顺序反了就是「界面上有工具、清单是空的」（plan §15.7 落点 2）。
   if (withTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
-  fibers.push(await ctx.plugin(FakeShellService, NO_CONFIG), await ctx.plugin(FakeSessionsService, NO_CONFIG));
+  fibers.push(await ctx.plugin(FakeShellService, NO_CONFIG));
+  const registryFiber = await ctx.plugin(FakePlatformRegistryService, NO_CONFIG);
+  const sessionsFiber = await ctx.plugin(FakeSessionsService, NO_CONFIG);
+  fibers.push(registryFiber, sessionsFiber);
   const pageFiber = await ctx.plugin(BrowserPageService, { ...DEFAULT_PAGE_CONFIG, ...overrides });
   fibers.push(pageFiber);
   (ctx.get('shell') as unknown as FakeShellService).contents = view;
   return {
     page: ctx.get('browser.page') as BrowserPageService,
     pageFiber,
+    registry: ctx.get('platform.registry') as unknown as FakePlatformRegistryService,
+    sessions: ctx.get('sessions') as unknown as FakeSessionsService,
     tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
@@ -148,6 +154,43 @@ describe('截图前遮罩（spec 2.7-07）', () => {
     const { page } = await boot(piiView(calls), { maskSensitiveInShots: false });
     await expect(page.screenshot()).resolves.toMatchObject({ width: 800, height: 600 });
     expect(steps(calls)).toEqual(['capture']);
+  });
+});
+
+/**
+ * 导航许可的名单来源（spec 8.1-05）。
+ *
+ * 只演「拦下来」这一侧：判定放行之后要真走到内核装载，那是 harness 打 fixture 站点的 V 类条目
+ * （spec 2.1），在替身视图上演成功分支只会断言替身自己回的值（本文件头部的取舍）。
+ * 而「码是 CONSENT_REQUIRED / NAVIGATE_URL_REJECTED」这件事本身就证明了没碰内核——
+ * 替身视图根本没有 `loadURL`，真往下走拿到的是 TypeError。
+ */
+describe('导航许可的名单来源（spec 8.1-05）', () => {
+  /** 一个把真域名声明进 `origins` 的平台读数（形状取自 `platform.registry.list()`）。 */
+  const realPlatform = {
+    id: 'boss',
+    displayName: 'BOSS 直聘',
+    startUrl: 'https://www.zhipin.com/',
+    origins: ['https://www.zhipin.com'],
+    capabilities: ['search'],
+  };
+
+  it('会话里登记着回环地址也不作数：许可名单只认平台登记处声明的源', async () => {
+    // 这条正是换口径的证明：旧口径读 `sessions.status()` 的 startUrl，这个地址当时是放行的。
+    const { page } = await boot(fakeView(null, []));
+    await expect(page.navigate('http://127.0.0.1:10233/boss')).rejects.toMatchObject({
+      code: 'NAVIGATE_URL_REJECTED',
+    });
+  });
+
+  it('真源已登记但平台没签字：以 CONSENT_REQUIRED 失败，签字集合空着就是空着', async () => {
+    const { page, registry, sessions } = await boot(fakeView(null, []));
+    registry.platforms.push(realPlatform);
+    await expect(page.navigate('https://www.zhipin.com/web/geek/jobs')).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+      details: { platform: 'boss' },
+    });
+    expect(sessions.consented.size).toBe(0);
   });
 });
 

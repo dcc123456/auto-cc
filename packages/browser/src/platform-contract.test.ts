@@ -26,6 +26,8 @@ function minimalPack(overrides: Record<string, unknown> = {}): Record<string, un
     platform: 'boss',
     displayName: 'BOSS 直聘',
     startUrl: 'https://www.zhipin.com',
+    // 许可名单的来源（spec 8.1-01）：默认与 startUrl 同源，用例只在自己关心的那一项上写坏它。
+    origins: ['https://www.zhipin.com'],
     capabilities: ['search'],
     locators: {
       searchInput: {
@@ -503,3 +505,189 @@ describe('风控文案判据段（spec 2.7-01：那句拦下页的话是站点�
     }
   });
 });
+
+/**
+ * 上线包与许可名单（P8 8.1-01 / 8.1-02）。
+ *
+ * 这一组是「真实站点驱动」的地基：`origins` 是导航许可的唯一来源，`packStatus` 决定
+ * 「写这份包的人到底看过页面没有」能不能机检。两者的失败都必须落在加载期，
+ * 而不是到了真站点上以「读不到 / 点不动」的形式出现。
+ */
+describe('上线包与许可名单（spec 8.1-01 / 8.1-02）', () => {
+  /** 一份合格的在场取证读数（字段形状取自 `locatorEvidenceSchema`）。 */
+  const evidence = {
+    ref: 'docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt',
+    url: 'https://www.zhipin.com/web/geek/jobs?query=前端',
+    verifiedAt: 1,
+    hits: 1,
+  };
+
+  it('缺 origins 或空数组都不合法：许可名单不能靠代码里的默认值兜', () => {
+    const missing = errorOf(() => parseKnowledgePack({ ...minimalPack(), origins: undefined })) as AppError;
+    expect(missing.code).toBe('KNOWLEDGE_PACK_INVALID');
+    expect(String(errorDetails(missing).problems)).toContain('origins');
+    const empty = errorOf(() => parseKnowledgePack(minimalPack({ origins: [] }))) as AppError;
+    expect(String(errorDetails(empty).problems)).toContain('origins');
+  });
+
+  it('origin 写成带路径的地址被拒：那是把「源」与「页面」混成一件东西', () => {
+    const error = errorOf(() => parseKnowledgePack(minimalPack({ origins: ['https://www.zhipin.com/web/geek'] })));
+    expect(errorDetails(error as AppError).problems).toEqual([
+      'origins.0：origin 不许带路径、查询或锚（形如 https://example.com）',
+    ]);
+  });
+
+  it('名单不含 startUrl 自己的源时拒收：否则适配器第一个导航动作就会被自己的包挡掉', () => {
+    try {
+      parseKnowledgePack(minimalPack({ origins: ['https://fixture.example.com'] }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'origins：不含 startUrl 的源「https://www.zhipin.com」（许可名单必须覆盖自己的起始页）',
+      ]);
+    }
+  });
+
+  it('缺省 packStatus 是 draft：仿站包与取证中的包不该被证据判据挡住', () => {
+    expect(parseKnowledgePack(minimalPack()).packStatus).toBe('draft');
+  });
+
+  it('shipped 包里既没证据又没标 unverified 的候选逐条点名（spec 8.1-02）', () => {
+    try {
+      parseKnowledgePack(minimalPack({ packStatus: 'shipped' }));
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('KNOWLEDGE_PACK_INVALID');
+      expect(errorDetails(error).problems).toEqual([
+        'searchInput 候选 0（testId）：上线包里的每条候选要么带 evidence，要么显式 unverified:true',
+      ]);
+    }
+  });
+
+  it('shipped 包两种记号都认：有证据的过，显式未取证的也过（后者由外发通道自己停手）', () => {
+    const pack = parseKnowledgePack(
+      minimalPack({
+        packStatus: 'shipped',
+        locators: {
+          searched: {
+            description: '已录证据的容器',
+            cardinality: 'single',
+            candidates: [{ strategy: 'css', value: '.card-area', evidence }],
+          },
+          guessed: {
+            description: '还没录证据的控件',
+            cardinality: 'single',
+            candidates: [{ strategy: 'css', value: '.not-tested', unverified: true }],
+          },
+        },
+      }),
+    );
+    expect(pack.locators.searched!.candidates[0]!.evidence).toEqual(evidence);
+    expect(pack.locators.guessed!.candidates[0]!.unverified).toBe(true);
+  });
+
+  it('外发通道引用的定位声明 effect:"read" 时拒收：那是去够读档的低阈值，与裁定⑤ 相反', () => {
+    try {
+      parseKnowledgePack(
+        minimalPack({
+          capabilities: ['search', 'chat', 'readReplies'],
+          locators: {
+            chatInput: {
+              description: '输入框',
+              cardinality: 'single',
+              candidates: [{ strategy: 'css', value: '.chat-input' }],
+            },
+            chatSend: {
+              description: '发送键',
+              cardinality: 'single',
+              effect: 'read',
+              candidates: [{ strategy: 'css', value: '.btn-send' }],
+            },
+            chatStatus: {
+              description: '状态行',
+              cardinality: 'single',
+              candidates: [{ strategy: 'css', value: '.status' }],
+            },
+            chatMessage: {
+              description: '消息项',
+              cardinality: 'many',
+              candidates: [{ strategy: 'css', value: '.message-item' }],
+            },
+            chatMessageBody: {
+              description: '消息正文',
+              cardinality: 'single',
+              candidates: [{ strategy: 'css', value: '.text' }],
+            },
+          },
+          chat: chatSection,
+        }),
+      );
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(String(errorDetails(error).problems)).toContain(
+        "chatSend：外发通道引用的定位不许声明 effect:'read'（那是去够读档的低阈值，与裁定⑤ 相反）",
+      );
+    }
+  });
+
+  it('方向判据两种形状都合法，但只能填一种、且不许都不填', () => {
+    const tokenPack = {
+      ...chatSection,
+      directionAttribute: undefined,
+      inboundValue: undefined,
+      inboundClassToken: 'item-friend',
+    };
+    expect(
+      parseKnowledgePack(
+        minimalPack({ capabilities: ['search', 'chat', 'readReplies'], locators: chatLocators(), chat: tokenPack }),
+      ).chat?.inboundClassToken,
+    ).toBe('item-friend');
+
+    const both = errorOf(() =>
+      parseKnowledgePack(
+        minimalPack({
+          capabilities: ['search', 'chat', 'readReplies'],
+          locators: chatLocators(),
+          chat: { ...chatSection, inboundClassToken: 'item-friend' },
+        }),
+      ),
+    ) as AppError;
+    expect(String(errorDetails(both).problems)).toContain('只能填一种');
+
+    const neither = errorOf(() =>
+      parseKnowledgePack(
+        minimalPack({
+          capabilities: ['search', 'chat', 'readReplies'],
+          locators: chatLocators(),
+          chat: { ...chatSection, directionAttribute: undefined, inboundValue: undefined },
+        }),
+      ),
+    ) as AppError;
+    expect(String(errorDetails(neither).problems)).toContain('方向判据缺失');
+  });
+});
+
+/**
+ * 造一组会话页定位声明（方向判据那两条用例要用，形状与被 `chat` 段引用的五处一致）。
+ * @returns 五个定位名的声明表
+ */
+function chatLocators(): Record<string, unknown> {
+  /**
+   * 造一条 css 级的单节点声明。
+   * @param many 页面里有多个这样的节点（消息项）还是只有一个
+   * @returns 合法的定位声明
+   */
+  const pageLocator = (many: boolean) => ({
+    description: '会话页节点',
+    cardinality: many ? 'many' : 'single',
+    candidates: [{ strategy: 'css', value: '.node' }],
+  });
+  return {
+    searchInput: pageLocator(false),
+    chatInput: pageLocator(false),
+    chatSend: pageLocator(false),
+    chatStatus: pageLocator(false),
+    chatMessage: pageLocator(true),
+    chatMessageBody: pageLocator(false),
+  };
+}

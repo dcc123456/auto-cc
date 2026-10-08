@@ -42,22 +42,39 @@ import {
   type PageScript,
 } from './test-doubles.js';
 
-const pack = loadBossKnowledgePack();
+// 本文件全部打在本地仿站那份知识包上（AGENTS.md §7.2）：自 P8 8.1 起缺省是**上线包**（真 BOSS），
+// 漏写这一行就会让单测去断言真站点的类名。
+const pack = loadBossKnowledgePack({ pack: 'fixture' });
 const fibers: Fiber[] = [];
+
+/**
+ * 投递用例共用的简历附件（编排层已校验存在 / pdf / 大小上限并算好 sha256 的四要素）。
+ *
+ * 适配器不重复校验，只照它注入；8.1-04 那组也要拿同一份去敲 `sendResume`，所以放在模块级而不是
+ * 某个 describe 里各写一遍（AGENTS.md §2.2）。
+ */
+const RESUME = {
+  path: '/tmp/resume-2026.pdf',
+  fileName: 'resume-2026.pdf',
+  sizeBytes: 204800,
+  sha256: 'a'.repeat(64),
+};
 
 /**
  * 用一份读数脚本造适配器（连同两只假手，用例可以回头看调用记录）。
  * @param script 页面读数脚本
  * @param actScript 动作脚本（敲字回读值、等待结局、点击是否失败）
+ * @param packIn 知识包（缺省是仿站那份；8.1-04 的用例要递一份把某条定位标成 `unverified` 的包）
  * @returns 适配器、假页面手与假动作手
  */
 function withScript(
   script: PageScript,
   actScript: ActScript = {},
+  packIn: KnowledgePack = pack,
 ): { adapter: PlatformAdapter; page: FakePage; act: FakeAct } {
   const page = createFakePage(script);
   const act = createFakeAct(actScript);
-  return { adapter: createBossAdapter(pack, page, act), page, act };
+  return { adapter: createBossAdapter(packIn, page, act), page, act };
 }
 
 afterAll(async () => {
@@ -77,11 +94,13 @@ const standardScript = (): PageScript => ({
 describe('BOSS 适配器的自我声明（spec 2.2-06）', () => {
   const { adapter } = withScript(standardScript());
 
-  it('meta 完全来自知识包：标识、显示名、起始地址与能力集', () => {
+  it('meta 完全来自知识包：标识、显示名、起始地址、许可源集合与能力集', () => {
     expect(adapter.meta).toEqual({
       id: 'boss',
-      displayName: 'BOSS 直聘',
+      displayName: 'BOSS 直聘（本地仿站）',
       startUrl: LIST_URL,
+      // 导航许可的唯一来源是知识包登记的 origins（P8 8.1-05），不是 startUrl 折算出来的那一个源。
+      origins: ['http://127.0.0.1:10233'],
       capabilities: ['search', 'detail', 'chat', 'sendResume', 'readReplies'],
     });
   });
@@ -312,9 +331,11 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
     });
     // 目标地址由 `chat.targetParam` 拼出来：不同 jobId 落在不同会话线程上。
     expect(page.navigated).toEqual([chatUrlOf('1001')]);
-    expect(act.typed[0]!.spec).toBe(pack.locators.chatInput);
+    // 外发那两只拿到的不是知识包里的那个对象，而是**筛过候选的那一份拷贝**（`outboundLocator`）：
+    // 内容与声明一致，未取证的候选不在里面（spec 8.1-04）。所以这里断言相等而不是同一。
+    expect(act.typed[0]!.spec).toEqual(pack.locators.chatInput);
     expect(act.typed[0]!.text).toBe(TEXT);
-    expect(act.clicked[0]).toBe(pack.locators.chatSendButton);
+    expect(act.clicked[0]).toEqual(pack.locators.chatSendButton);
     // 等待必须起在点击**之前**：基线取的是脚本启动那一刻的文本，点完再等永远读不到变化。
     expect(act.waitedFor[0]!.spec).toBe(pack.locators.chatStatus);
     expect(act.waitsAtClick).toEqual([1]);
@@ -431,14 +452,6 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
 });
 
 describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07）', () => {
-  // 附件是编排层（`outbound.deliver`）已经算好的四要素；适配器不重复校验，只照它注入。
-  const RESUME = {
-    path: '/tmp/resume-2026.pdf',
-    fileName: 'resume-2026.pdf',
-    sizeBytes: 204800,
-    sha256: 'a'.repeat(64),
-  };
-
   it('成功那条：导航到投递页 → 注文件 → 点击前先起等待 → 状态行回读到成功样式', async () => {
     // 两次读状态行：第一次是「还在不在招」，第二次是「点完以后变成了什么」。
     const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递', '简历已送达，等待回复']));
@@ -449,9 +462,10 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
       ledgerKey: null,
     });
     expect(page.navigated).toEqual([deliverUrlOf('1001')]);
-    // 定位声明全部来自知识包：代码里出现一条写死的选择器，这里的 `toBe` 就对不上。
+    // 外发定位是 `outboundLocator` 筛过候选的那一份拷贝（内容与声明一致，因为仿站包没有未取证候选）：
+    // 所以断言用 `toEqual`；代码里若混进一条写死的选择器，它立刻对不上。
     expect(act.uploaded).toEqual([{ spec: pack.locators.resumeUploadInput, filePath: RESUME.path }]);
-    expect(act.uploaded[0]!.spec).toBe(pack.locators.resumeUploadInput);
+    expect(act.uploaded[0]!.spec).toEqual(pack.locators.resumeUploadInput);
     expect(act.waitedFor).toEqual([{ kind: 'textChanges', spec: pack.locators.resumeDeliverStatus }]);
     expect(act.clicked).toEqual([pack.locators.resumeSendButton]);
     // 时序判据（与打招呼同一条）：等待必须起在点击之前，否则基线就是点击后的文本，永远等不到变化。
@@ -543,6 +557,109 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
   });
 });
 
+describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () => {
+  /**
+   * 把某条定位的前若干条候选标成「未取证」，得到一份只服务本组用例的包。
+   * @param name 定位语义名
+   * @param count 标几条；省略表示整条定位一条证据都没有
+   * @returns 新的知识包（浅拷贝 `locators`：模块级那份被其他用例共用，不许就地改）
+   */
+  const packWithUnverified = (name: string, count?: number): KnowledgePack => {
+    const spec = pack.locators[name]!;
+    return {
+      ...pack,
+      locators: {
+        ...pack.locators,
+        [name]: {
+          ...spec,
+          candidates: spec.candidates.map((candidate, index) =>
+            count === undefined || index < count ? { ...candidate, unverified: true } : candidate,
+          ),
+        },
+      },
+    };
+  };
+
+  it('发送键一条证据都没有 → LOCATOR_UNVERIFIED，连会话页都不打开', async () => {
+    const { adapter, page, act } = withScript(
+      chatScript(pack, '第 3 条已送达服务端'),
+      {},
+      packWithUnverified('chatSendButton'),
+    );
+    const error = asErr(await adapter.chat('1001', '您好').catch((reason: unknown) => reason));
+    expect(error.code).toBe('LOCATOR_UNVERIFIED');
+    expect(error.path).toBe('platform.boss');
+    expect(error.message).toContain('没有一条已取证的候选');
+    expect(error.details).toEqual({ platform: 'boss', locator: 'chatSendButton' });
+    // 「不发起任何动作」含导航：一条没取证的候选就足以让整次外发不该发生（spec 8.1-04）。
+    expect(page.navigated).toEqual([]);
+    expect(page.kinds).toEqual([]);
+    expect(act.typed).toEqual([]);
+    expect(act.clicked).toEqual([]);
+    expect(act.waitsStarted).toBe(0);
+  });
+
+  it('输入框未取证同样整条停手：另一半还能用也不许发出去半截话', async () => {
+    const { adapter, page, act } = withScript(
+      chatScript(pack, '第 3 条已送达服务端'),
+      {},
+      packWithUnverified('chatInput'),
+    );
+    const error = asErr(await adapter.chat('1001', '您好').catch((reason: unknown) => reason));
+    expect(error.code).toBe('LOCATOR_UNVERIFIED');
+    expect(error.details).toEqual({ platform: 'boss', locator: 'chatInput' });
+    expect(page.navigated).toEqual([]);
+    expect(act.typed).toEqual([]);
+  });
+
+  it('只有部分候选未取证时，交给动作通道的声明里只剩已取证那几条，且原包一字未动', async () => {
+    const bare = packWithUnverified('chatSendButton', 1);
+    const { adapter, act } = withScript(chatScript(bare, '第 3 条已送达服务端'), {}, bare);
+    expect(await adapter.chat('1001', '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
+    const handed = act.clicked[0]!;
+    // 断言对象是**筛过的声明**（`LocateSpec` 的线上形状里没有取证那几个键，所以拿筛前那份去比）：
+    // 交给动作通道的候选 = 声明里去掉被标未取证的那条。
+    const declared = bare.locators.chatSendButton!.candidates;
+    expect(handed.candidates).toEqual(declared.filter((candidate) => candidate.unverified !== true));
+    expect(handed.candidates).toHaveLength(declared.length - 1);
+    // 判定只作用于这一次外发要用的那份拷贝：知识包本身不能被测试改坏（第一条候选仍是已取证）。
+    expect(pack.locators.chatSendButton!.candidates[0]!.unverified).toBeUndefined();
+  });
+
+  it('上传控件未取证 → LOCATOR_UNVERIFIED，不打开上传页也不读状态行', async () => {
+    const { adapter, page, act } = withScript(
+      deliverScript(pack, ['等待投递']),
+      {},
+      packWithUnverified('resumeUploadInput'),
+    );
+    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    expect(error.code).toBe('LOCATOR_UNVERIFIED');
+    expect(error.details).toEqual({ platform: 'boss', locator: 'resumeUploadInput' });
+    expect(page.navigated).toEqual([]);
+    expect(page.kinds).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+  });
+
+  it('抓取通道仍然试未取证的候选：读错一条只是少一条数据，不是撤不回来的动作', async () => {
+    const bare = packWithUnverified('jobSalary');
+    const { adapter, page } = withScript(standardScript(), {}, bare);
+    const summaries = await adapter.search({ keyword: '前端' });
+    // 候选列表原样递给了抽取（没有筛），并且薪资照常读回来了。
+    expect(page.requests[0]!.fields.find((field) => field.name === 'salary')!.candidates).toBe(
+      bare.locators.jobSalary!.candidates,
+    );
+    expect(summaries[0]!.salaryText).not.toBe('');
+  });
+
+  it('状态行属于读取通道：标了未取证也照样等、照样回读，sent 判据不受影响', async () => {
+    const bare = packWithUnverified('chatStatus');
+    const { adapter, act } = withScript(chatScript(bare, '第 3 条已送达服务端'), {}, bare);
+    expect(await adapter.chat('1001', '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
+    // 等待用的就是知识包那一个对象（未经筛选），这条是「读取通道不筛」的直接证据。
+    expect(act.waitedFor[0]!.spec).toBe(bare.locators.chatStatus);
+  });
+});
+
 describe('platform.boss 挂载即登记（spec 2.2-07）', () => {
   it('服务 init 把自己登记进 platform.registry，登记表按名取回的就是它', async () => {
     const ctx = new Context();
@@ -553,7 +670,7 @@ describe('platform.boss 挂载即登记（spec 2.2-07）', () => {
     fibers.push(await ctx.plugin(StubBrowserPageService, { fake }));
     fibers.push(await ctx.plugin(StubBrowserActService, { fake: createFakeAct() }));
     fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
-    fibers.push(await ctx.plugin(BossPlatformService, {}));
+    fibers.push(await ctx.plugin(BossPlatformService, { pack: 'fixture' }));
     const registry = asApp(ctx)['platform.registry'];
     expect(registry.list().platforms.map((platform) => platform.id)).toEqual(['boss']);
     expect(registry.get('boss').meta).toEqual(createBossAdapter(pack, fake, createFakeAct()).meta);

@@ -30,7 +30,8 @@ import {
   type PageScript,
 } from './test-doubles.js';
 
-const pack = loadBossKnowledgePack();
+// 本文件读的是本地仿站那份知识包（AGENTS.md §7.2）：自 P8 8.1 起缺省是上线包（真 BOSS）。
+const pack = loadBossKnowledgePack({ pack: 'fixture' });
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
 
@@ -57,7 +58,7 @@ async function boot(script: PageScript, dir = tempDir(), platform = 'boss') {
   fibers.push(await ctx.plugin(StubBrowserPageService, { fake: createFakePage(script) }));
   fibers.push(await ctx.plugin(StubBrowserActService, { fake: createFakeAct() }));
   fibers.push(await ctx.plugin(PlatformRegistryService, NO_CONFIG));
-  fibers.push(await ctx.plugin(BossPlatformService, {}));
+  fibers.push(await ctx.plugin(BossPlatformService, { pack: 'fixture' }));
   const conversationFiber = await ctx.plugin(ConversationStoreService, { platform });
   fibers.push(conversationFiber);
   const app = asApp(ctx);

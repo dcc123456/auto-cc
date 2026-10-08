@@ -186,7 +186,7 @@ async function waitForPageTarget(port: number, timeoutMs = 60_000): Promise<void
  * 端口上是否已经有一个 fixture 站点在听（认它自己的 JSON 接口，不认"能连上"）。
  *
  * 为什么要这一条：占位工作流的 `startUrl` 写死在 `http://127.0.0.1:10233/boss`
- * （`packages/platform-boss/src/knowledge/boss.json`），冒烟不能换个端口就跑，
+ * （P8 8.1-07 起这一份知识包叫 `knowledge/boss-fixture.json`，随包发布的那一份指向真站点），冒烟不能换个端口就跑，
  * 而 10233 上很可能已经有上一轮 dev/harness 起的那台在听——直接 `import` 会得到
  * `EADDRINUSE` 未处理异常（实测），脚本连一步判据都留不下。
  * @returns 已有一个能回 `/api/jobs` JSON 的站点时为 true（此时复用，不再起第二台）
@@ -276,6 +276,24 @@ async function main(): Promise<void> {
   await bridge.click({ selector: '[data-view="chat"]' });
   const chatVisible = await waitForSelector(bridge, '[data-testid="chat-panel"] [data-testid="chat-input"]');
   requireStep('冒烟 4/6 进对话', chatVisible, `对话输入框可见=${String(chatVisible)}`);
+
+  // ④.5 把适配器切回**仿站**知识包（P8 8.1-07）：随包发布的 `platform.boss` 从 8.1 起缺省是真站点那一份，
+  // 而冒烟是自动化面，按 §7.2 只许打本机 fixture。配置只写内存、重启即失（§9 的 5.3-b），
+  // 所以这一步既不动产物载荷，也不留下任何落盘痕迹。紧跟着把登记源读回来当一条机检判据。
+  await callBridge(bridge, 'plugins.saveConfig', ['platform-boss', { pack: 'fixture' }]);
+  const registered = await callBridge<{ platforms: { id: string; startUrl: string; origins?: string[] }[] }>(
+    bridge,
+    'platform.registry.list',
+  );
+  const originReading = registered.platforms
+    .map((platform) => `${platform.id}:${(platform.origins ?? [platform.startUrl]).join('|')}`)
+    .join(', ');
+  const loopbackOnly = registered.platforms.every((platform) =>
+    (platform.origins ?? [platform.startUrl]).every((origin) =>
+      /^https?:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d+)?$/i.test(origin),
+    ),
+  );
+  requireStep('冒烟 4/6 自动化面只在 loopback', loopbackOnly, `已登记的导航许可来源=${originReading || '无平台'}`);
 
   // ⑤ 跑占位工作流：内置 `boss-basic`（3 节点，全部指向本机 fixture，无外发动作）。
   const plans = await callBridge<{ id: string; name: string; nodeCount: number }[]>(bridge, 'workflow.runner.plans');

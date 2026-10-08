@@ -70,6 +70,8 @@ function fakeAdapter(
       id,
       displayName: `${id} 站`,
       startUrl: 'https://example.com',
+      // 导航许可的名单来源（P8 8.1-05）：替身也得带源集合，否则「未登记源被拒」这条判据无从建立。
+      origins: ['https://example.com'],
       capabilities: ['search', 'detail', 'chat', 'sendResume', 'readReplies'],
       ...overrides,
     },
@@ -147,8 +149,20 @@ describe('平台登记处（spec 2.2-07）', () => {
     registry.register(fakeAdapter('boss', { capabilities: ['search', 'chat'] }));
 
     expect(registry.list().platforms).toEqual([
-      { id: 'liepin', displayName: '猎聘', startUrl: 'https://example.com', capabilities: ['search'] },
-      { id: 'boss', displayName: 'boss 站', startUrl: 'https://example.com', capabilities: ['search', 'chat'] },
+      {
+        id: 'liepin',
+        displayName: '猎聘',
+        startUrl: 'https://example.com',
+        origins: ['https://example.com'],
+        capabilities: ['search'],
+      },
+      {
+        id: 'boss',
+        displayName: 'boss 站',
+        startUrl: 'https://example.com',
+        origins: ['https://example.com'],
+        capabilities: ['search', 'chat'],
+      },
     ]);
   });
 
