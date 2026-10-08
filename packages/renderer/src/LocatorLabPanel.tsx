@@ -13,7 +13,7 @@ import type {
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 import { formatClock } from './format';
-import { Banner, DeskButton, Tag, type BannerTone } from './ui/controls';
+import { Banner, BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, DeskButton, Tag, type BannerTone } from './ui/controls';
 
 /** 自愈播报最多留几条：面板是验收入口，不是历史库（与会话面板的失效横幅同一形状）。 */
 const RELOCATED_LIMIT = 3;
@@ -232,7 +232,7 @@ export function LocatorLabPanel() {
             {(statusView?.recentFailures ?? []).map((failure, index) => (
               <li
                 key={`${failure.description}-${String(index)}`}
-                className="rounded-md border border-seal/45 bg-seal-wash px-3 py-1.5 text-[11px] text-seal"
+                className={`rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.seal} ${BLOCK_SURFACE_CLASS} text-seal`}
               >
                 {t('locator.failureRow', {
                   description: t(failure.description),
@@ -414,7 +414,7 @@ export function LocatorLabPanel() {
             {(relocated ?? []).map((event, index) => (
               <li
                 key={`${event.description}-${String(index)}`}
-                className="rounded-md border border-jade/40 bg-jade-wash px-3 py-1.5 text-[11px] text-jade"
+                className={`rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS} text-jade`}
               >
                 {t('locator.relocatedRow', {
                   description: t(event.description),

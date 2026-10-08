@@ -11,7 +11,14 @@ import type {
   GapSuggestionRow,
 } from '@auto-cc/shared';
 import { ENTITY_KIND_LABEL_KEY } from './entity-kind-labels';
-import { DeskButton, DeskDisclosure, DeskTextarea } from './ui/controls';
+import {
+  BLOCK_EDGE_CLASS,
+  BLOCK_SURFACE_CLASS,
+  DeskButton,
+  DeskDisclosure,
+  DeskTextarea,
+  type BannerTone,
+} from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 三栏的栏序（spec 4.4-03）：栏是**状态**不是要求种类，一栏里的行序等于拆解的稳定序，界面不再二次排序。 */
@@ -24,11 +31,11 @@ const STATE_LABEL_KEY: Record<GapStateView, string> = {
   missing: 'gap.stateMissing',
 };
 
-/** 状态 → 行的色带（颜色的唯一凭据是 `state`）：年限那行的 `score` 是「占总时长比例」，与词面覆盖不同量纲，拿它上色就会把"够了"画成红的。 */
-const STATE_TONE: Record<GapStateView, string> = {
-  matched: 'border-jade/40 bg-jade-wash',
-  partial: 'border-amber/40 bg-amber-wash',
-  missing: 'border-seal/45 bg-seal-wash',
+/** 状态 → 行的语气档（颜色的唯一凭据是 `state`）：年限那行的 `score` 是「占总时长比例」，与词面覆盖不同量纲，拿它上色就会把"够了"画成红的。 */
+const STATE_TONE: Record<GapStateView, BannerTone> = {
+  matched: 'jade',
+  partial: 'amber',
+  missing: 'seal',
 };
 
 /** 四类**要求** → 文案键（英文串不直接上界面，对齐 §5.5）。注意与 `ENTITY_KIND_LABEL_KEY` 是两套种类：那套是库内实体，这套是 JD 要求。 */
@@ -215,7 +222,7 @@ export function GapPanel() {
   const renderRow = (row: GapRequirementRowView) => (
     <li
       key={`${row.item.kind}-${row.item.start}-${row.item.label}`}
-      className={`rounded border p-2 ${STATE_TONE[row.state]}`}
+      className={`rounded border p-2 ${BLOCK_EDGE_CLASS[STATE_TONE[row.state]]} ${BLOCK_SURFACE_CLASS}`}
     >
       <p data-gap-row={row.state} className="text-xs text-slate-200">
         <span className="text-slate-400">{t(REQUIREMENT_KIND_LABEL_KEY[row.item.kind])}</span> · {row.item.quote}

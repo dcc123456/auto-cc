@@ -9,7 +9,16 @@
 import { Bookmark, Check, Save, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, SavedWorkflowPlanView, SedimentPreviewView } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField, Tag, deskReason, type BannerTone } from './ui/controls';
+import {
+  Banner,
+  BLOCK_EDGE_CLASS,
+  BLOCK_SURFACE_CLASS,
+  DeskButton,
+  DeskField,
+  Tag,
+  deskReason,
+  type BannerTone,
+} from './ui/controls';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -151,8 +160,8 @@ export function SedimentCard({
                 data-step-tool-id={step.toolId}
                 data-step-status={step.stepStatus}
                 data-step-sedimentable={String(step.sedimentable)}
-                className={`rounded-md border px-2 py-1 ${
-                  step.sedimentable ? 'border-jade/40 bg-jade-wash' : 'border-seal/45 bg-seal-wash'
+                className={`rounded-md border px-2 py-1 ${BLOCK_SURFACE_CLASS} ${
+                  step.sedimentable ? BLOCK_EDGE_CLASS.jade : BLOCK_EDGE_CLASS.seal
                 }`}
               >
                 <span className="flex flex-wrap items-center gap-2">

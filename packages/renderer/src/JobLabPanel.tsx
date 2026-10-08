@@ -27,7 +27,15 @@ import type {
 } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
-import { Banner, DeskButton, DeskCheck, DeskField } from './ui/controls';
+import {
+  Banner,
+  BLOCK_EDGE_CLASS,
+  BLOCK_SELECTED_CLASS,
+  BLOCK_SURFACE_CLASS,
+  DeskButton,
+  DeskCheck,
+  DeskField,
+} from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -479,7 +487,7 @@ export function JobLabPanel() {
             {pendingApprovals.map((approval) => (
               <li
                 key={approval.approvalId}
-                className="rounded-md border border-amber/45 bg-amber-wash px-3 py-1.5"
+                className={`rounded-md border px-3 py-1.5 ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS}`}
                 data-approval-id={approval.approvalId}
               >
                 <p className="break-all text-[11px] text-slate-100">
@@ -628,7 +636,7 @@ export function JobLabPanel() {
                 {lastRun.skipped.map((failure, index) => (
                   <li
                     key={`${failure.sourceUrl}-${String(index)}`}
-                    className="break-all rounded-md border border-amber/45 bg-amber-wash px-3 py-1.5 text-[11px] text-amber"
+                    className={`break-all rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
                   >
                     {t('jd.skippedRow', {
                       title: failure.title,
@@ -664,7 +672,7 @@ export function JobLabPanel() {
                   <li
                     key={rowKey(row)}
                     className={`rounded-md border px-2 py-1.5 ${
-                      isRowSelected ? 'border-celadon/50 bg-celadon-wash' : 'border-line bg-ink-950/60 hover:bg-ink-850'
+                      isRowSelected ? BLOCK_SELECTED_CLASS : 'border-line bg-ink-950/60 hover:bg-ink-850'
                     }`}
                     data-job-selected={isRowSelected ? 'true' : 'false'}
                     data-replied={row.replied ? 'true' : 'false'}

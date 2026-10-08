@@ -8,7 +8,7 @@
 import { Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
-import { EffectChip } from './ui/controls';
+import { BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, EffectChip } from './ui/controls';
 import { EvidenceRefButton } from './EvidenceRefButton';
 
 /**
@@ -17,11 +17,11 @@ import { EvidenceRefButton } from './EvidenceRefButton';
  * 与「等人表态」撞色——进行中是青瓷，琥珀只说"这台机器在等你"。
  */
 const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
-  running: 'border-celadon/45 bg-celadon-wash text-slate-100',
-  done: 'border-jade/45 bg-jade-wash text-slate-100',
-  failed: 'border-seal/50 bg-seal-wash text-slate-100',
+  running: `${BLOCK_EDGE_CLASS.celadon} ${BLOCK_SURFACE_CLASS} text-slate-100`,
+  done: `${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS} text-slate-100`,
+  failed: `${BLOCK_EDGE_CLASS.seal} ${BLOCK_SURFACE_CLASS} text-slate-100`,
   // 跳过用中性偏冷的色：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
-  skipped: 'border-line-strong bg-ink-850 text-slate-300',
+  skipped: `border-line-strong ${BLOCK_SURFACE_CLASS} text-slate-300`,
 };
 
 /**

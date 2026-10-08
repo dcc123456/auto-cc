@@ -8,7 +8,16 @@ import type {
   GenerationRewriteRowView,
   GenerationRunRowView,
 } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskCheck, DeskDisclosure, DeskTextarea } from './ui/controls';
+import {
+  Banner,
+  BLOCK_EDGE_CLASS,
+  BLOCK_SURFACE_CLASS,
+  DeskButton,
+  DeskCheck,
+  DeskDisclosure,
+  DeskTextarea,
+  type BannerTone,
+} from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
@@ -20,11 +29,11 @@ const MODEL_TONE: Record<GapModelStatusView, string> = {
   disabled: 'text-slate-500',
 };
 
-/** 三种结局的色带（`rejected` 是这条链的正常结局之一，不是故障，所以给提醒色而不是错误色）。 */
-const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], string> = {
-  rewritten: 'border-jade/40 bg-jade-wash',
-  reorder_only: 'border-celadon/40 bg-celadon-wash',
-  rejected: 'border-amber/45 bg-amber-wash',
+/** 三种结局的语气档（`rejected` 是这条链的正常结局之一，不是故障，所以给提醒色而不是错误色）。 */
+const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], BannerTone> = {
+  rewritten: 'jade',
+  reorder_only: 'celadon',
+  rejected: 'amber',
 };
 
 /**
@@ -328,7 +337,7 @@ export function GeneratePanel() {
       {preview && (
         <div
           data-generate-outcome={preview.receipt.outcome}
-          className={`flex flex-col gap-2 rounded border p-2 ${OUTCOME_TONE[preview.receipt.outcome]}`}
+          className={`flex flex-col gap-2 rounded border p-2 ${BLOCK_EDGE_CLASS[OUTCOME_TONE[preview.receipt.outcome]]} ${BLOCK_SURFACE_CLASS}`}
         >
           <p className="text-xs text-slate-200">{outcomeText(preview)}</p>
           <p data-generate-receipt className="text-[11px] leading-relaxed text-slate-500">

@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import type { WorkflowEvidenceView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { useBridgeAction } from './useBridgeAction';
-import { DeskButton } from './ui/controls';
+import { BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, DeskButton } from './ui/controls';
 
 /**
  * 一格失败节点的证据。首次展开才去主进程读，之后复用读到的那份（证据文件写完就不再变）。
@@ -54,7 +54,9 @@ export function NodeEvidenceSection({ runId, nodeId }: { runId: string; nodeId: 
       {/* 证据块是「这一步为什么停」的真相，属 celadon 族（进行中/系统/证据），
           不是错误块——错误已经在标题那行的 `evidence-code` 上涂过朱砂了，整块再涂红就没人读得出层级。 */}
       {open && (
-        <div className="mt-1 rounded-md border border-celadon/40 bg-celadon-wash px-3 py-2 text-[11px] text-slate-100">
+        <div
+          className={`mt-1 rounded-md border px-3 py-2 text-[11px] ${BLOCK_EDGE_CLASS.celadon} ${BLOCK_SURFACE_CLASS} text-slate-100`}
+        >
           {busy && <p data-testid="evidence-loading">{t('workflow.evidence.loading')}</p>}
           {!busy && !evidence && notice && <p data-testid="evidence-error">{notice}</p>}
           {evidence && (

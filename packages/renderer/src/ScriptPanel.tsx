@@ -12,7 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
-import { Banner, DeskButton, DeskCheck, DeskField, DeskSelect, Tag } from './ui/controls';
+import { Banner, BLOCK_SELECTED_CLASS, DeskButton, DeskCheck, DeskField, DeskSelect, Tag } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -365,7 +365,7 @@ export function ScriptPanel() {
                   data-script-origin={draft.origin}
                   data-script-selected={selected === index ? 'true' : 'false'}
                   className={`rounded-md border p-2 ${
-                    selected === index ? 'border-celadon/50 bg-celadon-wash' : 'border-line bg-ink-950/70'
+                    selected === index ? BLOCK_SELECTED_CLASS : 'border-line bg-ink-950/70'
                   }`}
                 >
                   <label className="flex items-start gap-2">

@@ -9,7 +9,15 @@ import type {
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField, Tag, type BannerTone } from './ui/controls';
+import {
+  Banner,
+  BLOCK_EDGE_CLASS,
+  BLOCK_SURFACE_CLASS,
+  DeskButton,
+  DeskField,
+  Tag,
+  type BannerTone,
+} from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
@@ -184,7 +192,7 @@ export function SessionPanel() {
               <li
                 key={`${event.platform}-${String(index)}`}
                 data-expired-platform={event.platform}
-                className="flex items-center gap-2 rounded-md border border-amber/45 bg-amber-wash px-3 py-2 text-[11px] text-amber"
+                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
               >
                 <ShieldAlert size={12} />
                 {t('session.expiredBanner', {

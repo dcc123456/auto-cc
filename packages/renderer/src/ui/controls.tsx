@@ -456,6 +456,36 @@ export function Tag({ tone, className = '', ...rest }: TagProps) {
 }
 
 /**
+ * 块级语气（列表行、内容卡片、读数块）的描边档——**这一族在稿上从不吃 wash**。
+ * 四档 alpha 逐条对稿：jade 0.5 = `.node.ok`（`shared.css:888-890`），amber 0.45 = `.btn-warn`（`469-473`），
+ * celadon 0.5 = `.composer:focus-within`（`911-913`）；seal 在稿上是满色 + 一圈光（`.node.fail`），
+ * 而这里的块级没有那圈光，就取面板现用区间（0.45~0.55）的中值 0.5，不开主题分支。
+ * 面板要表状态就交 `BannerTone` 档名过来拼这一张表，不许在自己文件里写 `bg-*-wash`（§2.5）。
+ */
+export const BLOCK_EDGE_CLASS: Record<BannerTone, string> = {
+  celadon: 'border-celadon/50',
+  amber: 'border-amber/45',
+  seal: 'border-seal/50',
+  jade: 'border-jade/50',
+};
+
+/**
+ * 块级的底材：墨面 `--ink-850` 那一档（稿上 `.tool` 与 `.card-foot` 用的都是它，
+ * 见 `shared.css:660-667`、`357-362`）。语气**不上底材**——底材一旦跟着语气走，
+ * 一块面板里三行不同状态就会长出三块色斑，读起来比描边慢。
+ */
+export const BLOCK_SURFACE_CLASS = 'bg-ink-850';
+
+/**
+ * 块级的「选中」档：稿上选中态不借语气色，而是把描边升到前景色第二档并提一层墨面
+ * （`.node.on` = `border-color: var(--fg-2)`，`shared.css:898-901`）。
+ * 所以"被选中"与"这一格在跑"可以同屏共存，而不是互相涂掉。
+ * 一条如实的偏离：稿上还补了一圈 2px 的浅环，实现没有加——`ring-*` 会与画布节点已有的
+ * `shadow-sm`、校验点的 `outline` 打架，那一圈留给画布自己的选中逻辑（`WorkflowCanvas.tsx:74-79`）。
+ */
+export const BLOCK_SELECTED_CLASS = 'border-slate-300/70 bg-ink-800';
+
+/**
  * 字段档的尺寸档。**只有 `DeskTextarea` 用得上第二档**（用户 2026-10-06 裁定：对话输入区
  * 「原件加一个尺寸档」而不是并入元信息档）——composer 是全渲染层唯一让人连续打字的格子，
  * 11px 的元信息档读着像表格、敲着像填错地方，所以它单独占一档而不改别人。

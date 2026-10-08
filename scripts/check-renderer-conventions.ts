@@ -232,19 +232,27 @@ for (const name of localeNames) {
 //     只是那一格的描边/字号/焦点环由面板自己说了算，直到下一次令牌改档才集体露馅（6.2-10 正是这么爆的）。
 //     第三方 chrome 不落在这一条射程里：画布的 `<Controls>` 是 react-flow 的**组件标签**，
 //     不是原生 `<button>`，所以这条禁令天然不需要任何豁免名单（裁定原文要求的就是"不留基线豁免清单"）。
+/**
+ * 去掉注释后再做 class 串的判定（与 `check-dashboard-readonly.ts` 同一口径）：
+ * 本项目的注释里就会写"不许再用裸 input""不许再拼 bg-*-wash"这类话，不去注释等于自己判自己。
+ * 先去块注释（含 JSX 的 `{/* … *\/}`，它常常跨行），再整行丢掉行注释。
+ * @param source 源文件原文
+ * @returns 只留代码行的文本（下面两条禁令都以它为射程）
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+}
+
 const RAW_CONTROL_TAGS = ['button', 'input', 'select', 'textarea'] as const;
 const uiDir = path.join(rendererRoot, 'ui');
 for (const file of tsxFiles) {
   // 原件目录**整棵子树**豁免（不是只豁免平铺的一层）：原件以后按形态分子目录，不该顺手把禁令解开。
   if (!path.relative(uiDir, file).startsWith('..')) continue;
-  const raw = await readFile(file, 'utf8');
-  // 注释不参与判定（与 `check-dashboard-readonly.ts` 同一口径）：本项目的注释会写"不许再用裸 input"这类话。
-  // 先去块注释（含 JSX 的 `{/* … */}`，它常常跨行），再整行丢掉行注释。
-  const code = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(/\r?\n/)
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n');
+  const code = stripComments(await readFile(file, 'utf8'));
   for (const tag of RAW_CONTROL_TAGS) {
     const count = (code.match(new RegExp(`<(?:${tag})[\\s/>]`, 'g')) ?? []).length;
     if (count > 0) {
@@ -255,6 +263,26 @@ for (const file of tsxFiles) {
   }
 }
 
+/**
+ * 9. 语气洗底（`bg-*-wash`）只许出现在 `src/ui/**`（spec 6.2-20，第四十片）。
+ *    这条等的从来不是写法，而是**归属先定完**：提示条（6.2-16/17/18）与芯片（6.2-19）收进原件之后，
+ *    剩下的行/卡片/选中行按稿改成"语气只上描边、底材留墨面"（`shared.css:861-900`），
+ *    全渲染层的 wash 字面量就只剩原件自己在读的那四档。此刻才写得出一句不留豁免清单的禁令：
+ *    `globals.css` 里那 9 行是 `--color-*-wash` 的**令牌声明**，不带 `bg-` 前缀，天然不在射程里，
+ *    而面板要表状态就交 `BannerTone` 档名去拼 `BLOCK_EDGE_CLASS` / `TAG_TONE_CLASS`（§2.5 的"一份事实一张脸"）。
+ */
+const TONE_WASH_PATTERN = /bg-(?:celadon|amber|seal|jade)-wash/g;
+for (const file of tsxFiles) {
+  if (!path.relative(uiDir, file).startsWith('..')) continue;
+  const hits = stripComments(await readFile(file, 'utf8')).match(TONE_WASH_PATTERN);
+  if (hits) {
+    failures.push(
+      `${path.relative(repoRoot, file)} 里有 ${String(hits.length)} 处 \`${hits[0]}\` 这类的语气洗底：` +
+        'wash 只许由 src/ui/** 的原件持有，面板交语气档名（spec 6.2-20）',
+    );
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -262,5 +290,5 @@ if (failures.length) {
 }
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
-    `src/ui/** 之外裸原生控件 0 只）`,
+    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处）',
 );
