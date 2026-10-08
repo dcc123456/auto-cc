@@ -1,0 +1,162 @@
+6.2-18 提示条语气随判定走 + Banner 紧凑尺寸档——活体与探针读数
+取证时间：2026-10-08（macOS Apple Silicon，开发实例 userData = tmp/v6-userdata）
+命令口径：CDP 10222 / 应用页 --url 5173；渲染层由 Vite HMR 带上新代码（无重启）
+        腿脚本 tmp/38-legA.js / tmp/38-legB.js / tmp/38-light2.js，探针 tmp/38-probe.js
+
+────────────────────────────────────────
+一、裁定（用户 2026-10-08 两条 AskUserQuestion 表态，逐字）
+────────────────────────────────────────
+① 「失败改 seal，成功留 celadon（推荐）」——`useBridgeAction` 交出的那句提示必须带语气：
+   成功 → celadon、失败 → seal、桥接不可用 → amber。
+② 「给 Banner 加一档尺寸，只收紧凑那 8 处（推荐）」——紧凑提示条并进原件的一档尺寸，
+   贴边底栏条与裸文本行不收。
+
+────────────────────────────────────────
+二、① 的落地：判定还是那一处，语气不再由面板自己挑
+────────────────────────────────────────
+`useBridgeAction.ts` 新增 `noticeTone` 状态，与 `notice` **同批 set**（React 一次渲染里成对更新，
+不存在"文字是失败、颜色是信息"的中间帧）：
+  · 桥接缺失（`!reply`）        → amber（useBridgeAction.ts:67）
+  · 成功（`reply.ok`）          → celadon，含 `describe()` 覆盖的成功回执（同一调用不传第二实参）
+  · 失败（`ok:false`）          → seal（useBridgeAction.ts:75）
+`setNotice(text, tone?)` 的第二实参给面板自己写的那一句用，默认 celadon。
+显式改判的四处（都是"面板知道这是驳回"的本地校验，同一条 Banner 上）：
+  PdfEditPanel.tsx:328 overlayRejected → seal；PdfEditPanel.tsx:348 页序成功/驳回 → celadon/seal
+  AssemblyPanel.tsx:135、139 jsonInvalid → seal
+其余 `setNotice` 调用点（KbPanel、GeneratePanel、GapPanel、useAgentRun.dismiss）显示的是**裸文本行**
+（6.2-18 射程外，按裁定② 不收），传语气就是造一个没人消费的值，故不动。
+12 处原硬编码 `tone="celadon"` 的提示条改成 `tone={noticeTone}`：
+  SessionPanel 200、PdfEditPanel 537、ResumeEditor 478、ResumePanel 465、WorkflowPanel 259、
+  JobLabPanel 417、UsagePanel 107、LocatorLabPanel 301、WorkflowLabPanel 178、AssemblyPanel 236
+  这 10 处直接消费 hook 的 `noticeTone`；
+  AgentRunPanel 171 与 SedimentCard 241 的 `notice` 是**按 prop 传进来的**，所以 tone 同路透传
+  （useAgentRun.ts:150 / useSediment.ts:74-86 多带一个 `noticeTone`，ChatPanel.tsx:347、367 各多一个实参）。
+两处**留在固定档不改**并记下理由：
+  AssemblyPanel.tsx:392 `cycle-report` 装的是插件循环的报表读数，不是动作回执，没有"失败"这一支；
+  AgentPauseCards.tsx:227 补充信息卡（`<Banner` 开标签行）是"系统在说话"的固定画法（第三十六片已验收），与 notice 无关。
+
+────────────────────────────────────────
+三、② 的落地与一条普查纠正（裁定里的「8 处」实际是 3 条提示条）
+────────────────────────────────────────
+`Banner` 新增 `size` 一档（controls.tsx:355-366），与 `FIELD_SIZE`（6.1「原件加一个尺寸档」）同一做法：
+  full    rounded-control px-3 py-2 text-xs，图标 13px（原样，第三十六/七片已验收的读数一字不动）
+  compact rounded-md px-2 py-1 text-[10px]，图标 11px
+**只换几何**：洗底、描边、文字色、图标形状仍由 `tone` 独占——紧凑不是一档新语气。
+
+裁定② 的选项文案写的是"紧凑那 8 处"，逐处打开看之后（第五节那张表就是复查脚本 tmp/37-census.mjs 的输出）：
+  真提示条 3 处 → SchedulePanel 409（schedule-notice）、SedimentCard 241（sediment-notice）、
+                 WorkflowPlans 332（workflow-plans-notice）——本片全部收进 size="compact"
+  非提示条 5 处 → AgentPolicyPanel 97 / PdfEditPanel 662 / PdfEditPanel 701 / ResumeEditor 359 都是
+                 重复列表行（`<li>`，一次渲染 N 条），SessionPanel 369 是页面正文 `<pre>`
+                 按 §3.11 判据（独立成块 + 通栏 + 装一句话）不合格，重复项归列表行那一族，不收。
+所以 8 是**按 class 串数出来的行数**，3 才是提示条的条数；纠正同时写进 6.2-17 那份读数的第五节。
+收完之后同一脚本数 `px-2 py-1` 剩 5 处，正是上面那 5 处非提示条——数与判据互相咬住。
+
+────────────────────────────────────────
+四、普查咬合（tmp/37-census.mjs，本片前后各跑一次）
+────────────────────────────────────────
+`<Banner>` 调用处数：36 → **39**（+3，逐处对应上面那三处紧凑条）
+`src/ui/**` 之外带 `-wash` 的行数：**39 → 39**（语气由 tone 名换掉，wash 串本身只在原件里）
+6.2-17 中性手搓长条签名仍存：**0 处**
+行内紧凑档 `px-2 py-1`：8 → **5 处**（减掉的 3 处 = 三张提示条；余下 5 处是列表行与正文）
+`tone="celadon"` 硬编码：12 → **2 处**（cycle-report 与补充信息卡，见第二节）
+未收的两族（按裁定② 不动）：贴边底栏条 11 行、裸文本提示行 9 行——这两栏是普查脚本的
+**宽正则行号口径**（裸文本那栏按 `data-testid="…notice"` 收），与第三十七片手写的"6 处"不同判据，
+元素级逐处点名留给下一片，见那份读数的第七节。
+
+────────────────────────────────────────
+五、真消费者活体三条腿（墨案 + 毡案，全部零写入）
+────────────────────────────────────────
+腿一 · 失败句 → seal（整条档）：信任屏 `[data-action="snapshot"]` → `browser.page.snapshot`，
+内核视图未挂载时回 `NO_KERNEL_SESSION`；`[data-testid="session-notice"]`。
+墨案（6.2-18-tone-seal-full-dark.png）：
+  class `flex items-start gap-2 border leading-relaxed rounded-control px-3 py-2 text-xs
+         border-seal/50 bg-seal-wash text-seal mt-2`
+  color rgb(226,84,58)  bg rgba(226,84,58,0.13)  border oklab(0.631608 0.153413 0.0978069 / 0.5) 1px
+  radius 7px  pad 8px/12px  font 12px  align flex-start  图标 13px / aria-hidden=true
+  图标形状 = m21.73 18-8-14… + M12 9v4 + M12 17h.01（lucide `TriangleAlert`，与 seal 档同一只）
+  文本「已读取页面快照 失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面」
+毡案（6.2-18-tone-seal-full-light.png）：同一条 class 一字不差，color rgb(192,57,31) /
+  bg rgba(192,57,31,0.1) / border oklab(0.542214 … / 0.5) / radius 7px / font 12px。
+对照第三十六、三十七片：同一条腿当时拿到的是 celadon 皮 + 失败话——这正是 6.2-18 要修的那件事，
+现在按裁定换成了 seal，形状档（7px / 8·12px / 12px / 13px 图标）与 celadon 完全同一只原件。
+
+腿二 · 成功句 → celadon（整条档）：岗位屏 `[data-action="list"]` → `jd.store.list`（纯本地读，
+`describe()` 走的是成功回执那一支），`[data-testid="jd-notice"]`。
+墨案（6.2-18-tone-celadon-full-dark.png）：border-celadon/40 bg-celadon-wash text-celadon，
+  color rgb(127,182,173) / bg rgba(127,182,173,0.12) / radius 7px / pad 8px/12px / font 12px / 图标 13px，
+  图标形状 = circle + M12 16v-4 + M12 8h.01（lucide `Info`），文本「画出最近 0 行 · 库内共 0 条」
+毡案（6.2-18-tone-celadon-full-light.png）：color rgb(63,128,120) / bg rgba(63,128,120,0.12) /
+  border oklab(0.554606 … / 0.4)，其余同墨案。
+⇒ 同一屏两条腿拿到的是**两个语气、一只形状**：tone 跟着 `reply.ok` 走，几何不再跟着面板走。
+
+腿三 · 紧凑档 + 失败句 → seal（size="compact"）：流程屏定时区填 61 字任务名（过客户端闸门
+`NAME_EMPTY`，不过 `createJobSchema.max(60)`），点 `[data-action="schedule-create"]` →
+`[data-testid="schedule-notice"]`。零写入的依据：packages/scheduler/src/registry.ts:172-189 里
+`safeParse` 在 `requireKnownPlan` 与 `INSERT` 之前抛出，所以这一条只留话、不落行。
+墨案（6.2-18-size-compact-seal-dark.png）：
+  class `… border leading-relaxed rounded-md px-2 py-1 text-[10px] border-seal/50 bg-seal-wash text-seal mt-2 break-all`
+  color rgb(226,84,58)  radius 6px  pad 4px/8px  font 10px  图标 11px（TriangleAlert）  align flex-start
+毡案读数（同一条腿，切换主题后现取）：color rgb(192,57,31) / bg rgba(192,57,31,0.1) /
+  radius 6px / pad 4px/8px / font 10px；
+成图 6.2-18-size-compact-seal-light.png。
+
+────────────────────────────────────────
+六、BEFORE / AFTER 同帧对照（真模块探针，两主题各一次）
+────────────────────────────────────────
+探针容器 `#probe-38-compact-grid`（inline style 定住，不依赖只在探针里出现的 Tailwind class），
+四行：① 旧手搓紧凑条（class 逐字照抄那三处）② Banner celadon×compact ③ Banner seal×compact
+④ Banner seal×full（只为看两档之间到底差了什么）。
+成图 `6.2-18-size-compact-before-after-dark.png` / `-light.png`（八张成图 md5 互异）。
+取模块要写 `import('/src/ui/controls.tsx?t=' + Date.now())`：不带 `?t=` 的裸路径命中浏览器里
+**上一版**的模块缓存，第一次跑就拿到收敛前的 class 串（`rounded-control px-3 py-2 text-xs`），
+而同一时刻活体那条 `schedule-notice` 已经是紧凑串——两者一比就知道是探针读错了源，不是页面错。
+
+墨案读数：
+  BEFORE  color rgb(164,182,195)  bg oklab(0.151798 …/0.7)  radius 6px  pad 4px/8px  font 10px
+          align normal  无图标
+  AFTER(compact)  radius 6px  pad 4px/8px  font 10px  图标 11px  align flex-start
+          celadon color rgb(127,182,173) / bg rgba(127,182,173,0.12)
+          seal    color rgb(226,84,58) / bg rgba(226,84,58,0.13)
+  AFTER(full)     radius 7px  pad 8px/12px  font 12px  图标 13px（同 seal 色）
+毡案读数：BEFORE color rgb(65,76,86) / bg oklab(0.867244 …/0.7)，其余几何与墨案逐位相同；
+  AFTER(compact) celadon rgb(63,128,120)/0.12、seal rgb(192,57,31)/0.1。
+一条要点：**尺寸档没有改动几何**——6px 圆角、4·8px 内边距、10px 字号是从那三处旧条原样搬进原件的，
+本片换掉的只有底材（中性半透底 → 语气 wash）、文字色（slate → 语气色）与多出来的一只装饰图标。
+两档之间差的确实只有几何（7↔6px、8·12↔4·8px、12↔10px、13↔11px）。
+
+────────────────────────────────────────
+七、活体取不到的一支（如实标，不拿推测充当[x]的一半）
+────────────────────────────────────────
+`!reply`（桥接不可用）→ amber 这一支在开发实例的活体窗口里**不可达**：`window.autoCC` 由 preload
+恒等注入，面板拿到的 `bridge` 永远存在，所以没有任何一条本地路径能让 `call()` 返回 undefined。
+它的依据只有两条：分支代码（useBridgeAction.ts:67）与 6.2-16 已验收的 amber 档原件读数
+（同一只 `Banner`、同一套 wash/描边/图标 `CircleAlert`）。本片不把它写成活体证据。
+
+────────────────────────────────────────
+八、门禁与终态
+────────────────────────────────────────
+`pnpm format` / `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`
+（日志 tmp/38-format.log、tmp/38-typecheck.log、tmp/38-lint.log、tmp/38-formatcheck.log、
+ tmp/38-test.log；test 按 §9 的写法先看退出码再剥 ANSI 数 failed：`EXIT=0`、清洗后 "failed" 计数 0）
+终态：探针节点已从 DOM 移除（`[data-probe]` 计数 0）、主题回到墨案、任务名输入框已清空、
+`window.autoCC` 一次写调用都没走过（三条腿分别是纯读、纯读、被 schema 拒掉的建任务）。
+残留：流程屏那条 seal 紧凑提示行仍挂在组件 state 里（组件内状态，重启即清，库里没有它）。
+
+────────────────────────────────────────
+九、改完文档后的第二次门禁（含一条必须如实记下的红）
+────────────────────────────────────────
+plan / spec 落笔后按 §9 的口径重跑四道（日志 tmp/38d-format.log、tmp/38d-typecheck.log、
+tmp/38d-lint.log、tmp/38d-formatcheck.log、tmp/38d-test.log）：
+  FORMAT=0  TYPECHECK=0  FORMAT:CHECK=0  TEST=0（剥 ANSI 后 "failed" 计数 0）
+  LINT=1 ← **红在本片射程之外**：链内 `check-compliance-redlines.ts` 报的 15 行全部指向
+  `packages/llm/src/settings.test.ts:146-166`（真实域名 api.deepseek.com / api.siliconflow.cn /
+  ark.cn-beijing.volces.com / api.z.ai / api.minimax.io 写进了测试面，§7.2 / spec 4.4-08）。
+  这一支是**并行会话尚未提交的改动**，两条证明：`git show HEAD:packages/llm/src/settings.test.ts`
+  里这些域名计数 **0**，工作区计数 6；本片提交面的 19 只文件一只 `packages/llm/**` 都不含。
+  因此不写进自己的提交、也不替别人改判据或加豁免名单（那是把红线自己拆掉）。
+  其余各道逐条复跑证明本片自己干净：`eslint .` 通过（链能走到第 4 道即为证），
+  `check-renderer-conventions`（含"src/ui/** 之外裸原生控件 0 只"）/ `check-knowledge-pack` /
+  `check-llm-single-entry` / `check-dependency-floor` / `check-prompts` /
+  `check-agent-model-authority` / `check-tool-contract` / `check-scheduler-no-external-cron` /
+  `check-dashboard-readonly` / `check-licenses` 各 EXIT=0。
