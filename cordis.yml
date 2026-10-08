@@ -50,7 +50,10 @@ plugins:
   # 它自己一个字节都不发：`check()` 经 `llm.chat.complete()` 要结果，所以这不算第三套模型客户端
   # （`scripts/check-llm-single-entry.ts` 为这一条单独开了白名单格，并守住「settings 不许 import http.js」）。
   # 不写任何配置：`providerId` / `embedProviderId` 由界面保存时写进 userData/settings.json 的持久层。
+  # 7.2-b 起它有了必需依赖：提供商池的两张表（`llm_providers` / `llm_models`，号段 31/32）由本服务
+  # 自己 push 进 `store.migrations` 并建表，口径同 `browser-takeover`（`static inject = ['store']` 配这一行）。
   - id: llm-settings
+    dependsOn: [store]
 
   # 外发额度骨架（spec 1.9）：账本与闸门各占一条，因为 1.9-05 要能**只摘掉闸门**而账本还活着。
   # `mode: unlimited` 是当前产品阶段的 shipped 默认——不收费、不登录、不联网校验（1.9-02 / 1.9-09）。

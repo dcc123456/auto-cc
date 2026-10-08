@@ -218,6 +218,9 @@ importers:
       '@auto-cc/plugin-config':
         specifier: workspace:*
         version: link:../config
+      '@auto-cc/plugin-store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/logger:
     dependencies:

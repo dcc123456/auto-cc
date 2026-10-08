@@ -11,13 +11,16 @@
  */
 import { asApp, Context } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { StoreService } from '@auto-cc/plugin-store';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import { LlmChatService } from './index.js';
 import type { LlmSettingsView } from '@auto-cc/shared';
+import { providerSecretPath } from './provider-pool.js';
 import { LlmSettingsService } from './settings.js';
 import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 
@@ -31,6 +34,8 @@ interface BootOptions {
   envKey?: string;
   baseUrl?: string | null;
   model?: string | null;
+  /** 复用上一次 boot 的 userData（"重启仍然算数"那类用例的入口，spec 7.2-02 的持久半边） */
+  userData?: string;
 }
 
 /** 一条腿的读数（按腿取，避免各处写下标）。 */
@@ -41,18 +46,23 @@ interface Harness {
   settings: LlmSettingsService;
   llm: LlmChatService;
   config: ConfigService;
+  store: StoreService;
+  db: DatabaseSync;
   applied: Array<{ id: string; patch: Record<string, unknown> }>;
   userData: string;
 }
 
 /**
- * 起一个「config + llm.chat + llm.settings（+ 内核读法替身）」的最小装配。
+ * 起一个「config + store + llm.chat + llm.settings（+ 内核读法替身）」的最小装配。
+ *
+ * `store` 挂真身而不替身：7.2 的池与清单就住在它的连接里，"迁移号段、连带删除、跨重启"这三件事
+ * 换成替身全都判不出来（口径同 `packages/resume-kb/src/profile-service.test.ts`）。
  * @param options 见 {@link BootOptions}
- * @returns 三只服务与调用记录
+ * @returns 四只服务与调用记录
  */
 async function boot(options: BootOptions = {}): Promise<Harness> {
   if (options.envKey) process.env[CHAT_ENV] = options.envKey;
-  const userData = mkdtempSync(join(tmpdir(), 'auto-cc-71b-'));
+  const userData = options.userData ?? mkdtempSync(join(tmpdir(), 'auto-cc-71b-'));
   const baseUrl = options.baseUrl === undefined ? BASE_URL : options.baseUrl;
   const model = options.model === undefined ? 'test-model' : options.model;
 
@@ -77,6 +87,7 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
     appName: 'auto-cc',
     paths: { userDataDir: userData, logDir: join(userData, 'logs') },
   });
+  await ctx.plugin(StoreService, { dir: userData, file: 'store.db', journal: 'delete' });
   await ctx.plugin(LlmChatService, {
     baseUrl,
     model,
@@ -87,7 +98,15 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
   });
   await ctx.plugin(LlmSettingsService, { providerId: 'deepseek', embedProviderId: 'custom' });
   const app = asApp(ctx);
-  return { settings: app['llm.settings'], llm: app['llm.chat'], config: app.config, applied, userData };
+  return {
+    settings: app['llm.settings'],
+    llm: app['llm.chat'],
+    config: app.config,
+    store: app.store,
+    db: app.store.db,
+    applied,
+    userData,
+  };
 }
 
 afterEach(() => {
@@ -326,5 +345,216 @@ describe('check()：连通性测试复用模型出口（spec 7.1-10）', () => {
   it('向量腿本轮明确回 CHECK_NOT_SUPPORTED，而不是假称可用', async () => {
     const { settings } = await boot({ envKey: 'sk-env-9900' });
     expect(await settings.check('embed')).toMatchObject({ ok: false, reason: 'CHECK_NOT_SUPPORTED' });
+  });
+});
+
+describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', () => {
+  /** 取某家预设的一条端点变体地址：字面量重敲一遍就是抄第二份事实，且会随目录漂掉（§2.5）。 */
+  const variantOf = (presetId: string, endpointId: string): string => {
+    const found = presetOf(presetId).endpoints?.find((item) => item.id === endpointId);
+    if (!found) throw new Error(`目录里没有这条端点变体：${endpointId}`);
+    return found.baseUrl;
+  };
+
+  /** 取一次同步调用的抛错：本包的入参校验都在同步路径上，`rejects` 那套用不上。 */
+  const errorOf = (call: () => unknown): { code?: string; details?: Record<string, unknown> } => {
+    try {
+      call();
+      return { code: 'NO_THROW' };
+    } catch (error) {
+      return error as { code?: string; details?: Record<string, unknown> };
+    }
+  };
+
+  it('同一家可以同时存在两条实例，id 不撞（方舟标准 + Coding Plan）', async () => {
+    const { settings, db } = await boot();
+    const standard = settings.saveProvider({
+      presetId: 'ark',
+      label: '方舟 · 标准',
+      baseUrl: presetOf('ark').baseUrl,
+    });
+    const codingPlan = settings.saveProvider({
+      presetId: 'ark',
+      label: '方舟 · Coding Plan',
+      baseUrl: variantOf('ark', 'ark-coding-plan'),
+    });
+    expect(standard.id).not.toBe(codingPlan.id);
+    expect(settings.listProviders()).toHaveLength(2);
+    // 变体不是一格独立的表态，而是从地址认出来的：选了 Coding Plan 就记它，界面不会再指回标准端点。
+    expect(codingPlan).toMatchObject({ endpointId: 'ark-coding-plan', presetId: 'ark' });
+    expect(standard.endpointId).toBe('ark-standard');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM llm_providers').get()).toMatchObject({ n: 2 });
+  });
+
+  it('改一条实例是就地改：id 与添加时间不动，端点变体跟着新地址重认', async () => {
+    const { settings, db } = await boot();
+    const saved = settings.saveProvider({ presetId: 'ark', label: '方舟', baseUrl: variantOf('ark', 'ark-standard') });
+    expect(settings.listProviders()).toHaveLength(1);
+    const createdBefore = db.prepare('SELECT created_at FROM llm_providers WHERE id = ?').get(saved.id) as unknown as {
+      created_at: number;
+    };
+
+    const edited = settings.saveProvider({
+      id: saved.id,
+      presetId: 'ark',
+      label: '方舟 · 换成 Coding Plan',
+      baseUrl: variantOf('ark', 'ark-coding-plan'),
+    });
+    // 同一家换端点不算新增：id 是密钥路径与外键的锚，换了 id 就等于把已勾的清单和那把 key 都丢了。
+    expect(edited.id).toBe(saved.id);
+    expect(settings.listProviders()).toHaveLength(1);
+    expect(edited).toMatchObject({ label: '方舟 · 换成 Coding Plan', endpointId: 'ark-coding-plan' });
+    const createdAfter = db.prepare('SELECT created_at FROM llm_providers WHERE id = ?').get(saved.id) as unknown as {
+      created_at: number;
+    };
+    expect(createdAfter.created_at).toBe(createdBefore.created_at);
+    // id 给了但池里没有：报"这一行没有"，而不是悄悄当新增插一条。
+    expect(
+      errorOf(() =>
+        settings.saveProvider({
+          id: '没有这个 id',
+          presetId: 'ark',
+          label: '方舟',
+          baseUrl: variantOf('ark', 'ark-standard'),
+        }),
+      ),
+    ).toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
+    expect(settings.listProviders()).toHaveLength(1);
+  });
+
+  it('明文 key 只进派生路径那一格：表文件与 settings.json 里都 grep 不到', async () => {
+    const { settings, config, db, userData } = await boot();
+    const saved = settings.saveProvider({
+      presetId: 'deepseek',
+      label: 'DeepSeek',
+      baseUrl: 'https://gw.test.invalid/v1',
+      apiKey: 'sk-pool-7777',
+    });
+    expect(saved).toMatchObject({ hasKey: true, keyTail: '7777' });
+    expect(config.getSecret(providerSecretPath(saved.id))).toBe('sk-pool-7777');
+    expect(JSON.stringify(saved)).not.toContain('sk-pool-7777');
+    // 整个 userData 里除密钥库那一格以外都 grep 不到明文（表文件、settings.json、日志都在这一次扫描里）：
+    // `llm_providers` 一个密钥字节都不该有（spec 7.2-10），而这一条判据必须写成"扫目录"而不是"读某个文件名"——
+    // 只添加提供商而不保存设置时 `settings.json` 根本还没被创建，按固定文件名去读会得到 ENOENT。
+    const filesWithPlaintext = readdirSync(userData)
+      .filter((name) => name !== 'secrets.bin')
+      .filter((name) => {
+        try {
+          return readFileSync(join(userData, name)).includes('sk-pool-7777');
+        } catch {
+          // 子目录（logs/）不是文件，读它会抛 EISDIR；这一条的判据范围是 userData 下的落盘文件。
+          return false;
+        }
+      });
+    expect(filesWithPlaintext).toEqual([]);
+    expect(JSON.stringify(db.prepare('SELECT * FROM llm_providers WHERE id = ?').get(saved.id))).not.toContain(
+      'sk-pool-7777',
+    );
+  });
+
+  it('勾选入库：勾了的才落，重复勾同一条是幂等的', async () => {
+    const { settings } = await boot();
+    const saved = settings.saveProvider({
+      presetId: 'deepseek',
+      label: 'DeepSeek',
+      baseUrl: 'https://gw.test.invalid/v1',
+    });
+    expect(settings.addModels({ providerId: saved.id, models: ['a-model', 'b-model'] })).toHaveLength(2);
+    // 再拉一遍并全勾上（含一条新的）：已有的不重复、没勾的一条不落。
+    const after = settings.addModels({ providerId: saved.id, models: ['a-model', 'b-model', 'c-model'] });
+    expect(after.map((item) => item.model)).toEqual(['a-model', 'b-model', 'c-model']);
+    expect(after.every((item) => item.origin === 'fetched')).toBe(true);
+    expect(settings.addModels({ providerId: saved.id, models: ['a-model'] })).toHaveLength(3);
+    expect(settings.listProviders()[0]?.modelCount).toBe(3);
+  });
+
+  it('手工敲的那条记 origin=manual，与自动获取的分得开', async () => {
+    const { settings } = await boot();
+    const saved = settings.saveProvider({ presetId: 'custom', label: '本地', baseUrl: 'http://localhost:11434/v1' });
+    expect(settings.addModels({ providerId: saved.id, models: ['qwen3:8b'], origin: 'manual' })).toMatchObject([
+      { model: 'qwen3:8b', origin: 'manual' },
+    ]);
+    expect(settings.removeModel(saved.id, 'qwen3:8b')).toEqual([]);
+  });
+
+  it('删实例是连带的：模型清单清零、密钥库那一把也清掉', async () => {
+    const { settings, config, db } = await boot();
+    const saved = settings.saveProvider({
+      presetId: 'deepseek',
+      label: 'DeepSeek',
+      baseUrl: 'https://gw.test.invalid/v1',
+      apiKey: 'sk-pool-7777',
+    });
+    settings.addModels({ providerId: saved.id, models: ['a-model'] });
+    expect(settings.deleteProvider(saved.id)).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM llm_models WHERE provider_id = ?').get(saved.id)).toMatchObject({
+      n: 0,
+    });
+    expect(config.getSecret(providerSecretPath(saved.id))).toBe('');
+    // 删不存在的 id 要说清，不能静默成功（界面上那行是刚被别人删掉的话，刷新一次就得报出来）。
+    expect(errorOf(() => settings.deleteProvider('不存在的 id'))).toMatchObject({ code: 'LLM_PROVIDER_NOT_FOUND' });
+  });
+
+  it('迁移落在 31 / 32，回滚到 30 两张表一起消失（spec 7.2-08）', async () => {
+    const { store, db } = await boot();
+    expect(store.migrations.map((item) => item.version)).toEqual([31, 32]);
+    expect(store.migrationResult.applied).toEqual([31, 32]);
+    const tableNames = (): string[] =>
+      (
+        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'llm_%' ORDER BY name").all() as {
+          name: string;
+        }[]
+      ).map((item) => item.name);
+    expect(tableNames()).toEqual(['llm_models', 'llm_providers']);
+    expect(store.rollback(30).reverted).toEqual([32, 31]);
+    expect(tableNames()).toEqual([]);
+    // 倒回去之后再 `upgrade()` 必须能把两张表建回来（`down` 写歪了的迁移在这里就会露出来）。
+    expect(store.upgrade().applied).toEqual([31, 32]);
+    expect(tableNames()).toEqual(['llm_models', 'llm_providers']);
+  });
+
+  it('跨重启仍然算数：同一目录第二次装载，实例与清单都还在', async () => {
+    const first = await boot();
+    const saved = first.settings.saveProvider({
+      presetId: 'ark',
+      label: '方舟',
+      baseUrl: variantOf('ark', 'ark-coding-plan'),
+      apiKey: 'sk-pool-7777',
+    });
+    first.settings.addModels({ providerId: saved.id, models: ['doubao-seed-code'] });
+
+    const again = await boot({ userData: first.userData });
+    expect(again.settings.listProviders()).toMatchObject([
+      {
+        id: saved.id,
+        presetId: 'ark',
+        label: '方舟',
+        endpointId: 'ark-coding-plan',
+        hasKey: true,
+        keyTail: '7777',
+        modelCount: 1,
+      },
+    ]);
+    expect(again.settings.listModels(saved.id)).toMatchObject([{ model: 'doubao-seed-code', origin: 'fetched' }]);
+  });
+
+  it('入参不合法以 INVALID_ARGUMENT 失败，池里什么都没多出来', async () => {
+    const { settings, db } = await boot();
+    expect(
+      errorOf(() => settings.saveProvider({ presetId: 'ark', label: '', baseUrl: 'https://gw.test.invalid/v1' })),
+    ).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      details: { issues: ['label'] },
+    });
+    expect(
+      errorOf(() => settings.saveProvider({ presetId: 'ark', label: '方舟', baseUrl: 'not-a-url' })),
+    ).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      details: { issues: ['baseUrl'] },
+    });
+    expect(errorOf(() => settings.addModels({ providerId: '不在池里的 id', models: ['m'] }))).toMatchObject({
+      code: 'LLM_PROVIDER_NOT_FOUND',
+    });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM llm_providers').get()).toMatchObject({ n: 0 });
   });
 });

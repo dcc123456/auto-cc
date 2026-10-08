@@ -13,8 +13,9 @@
  * 3. **密钥不进配置层**：只经 `config` 的密钥库那一格（`secret.ts`），所以它既不在 `trace()` 里，
  *    也不在 `settings.json` 里，更不会回传给渲染层（spec 7.1-06）。
  */
-import { AppError, Service, maybeService, type Context } from '@auto-cc/core';
+import { AppError, asApp, Service, maybeService, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
+import type { StoreService } from '@auto-cc/plugin-store';
 import type {
   LlmCheckView,
   LlmLegName,
@@ -25,6 +26,25 @@ import type {
 } from '@auto-cc/shared';
 import { z } from 'zod';
 import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
+import {
+  addModelsSchema,
+  deleteProviderRow,
+  saveProviderSchema,
+  llmModelMigration,
+  llmProviderMigration,
+  modelRowsOf,
+  providerRowOf,
+  providerRowsOf,
+  providerSecretPath,
+  removeModelRow,
+  saveProviderRow,
+  addModelRows,
+  type AddModelsInput,
+  type LlmModelView,
+  type LlmProviderInstanceView,
+  type ProviderRow,
+  type SaveProviderInput,
+} from './provider-pool.js';
 import type { LlmChatService } from './index.js';
 
 /** 两条模型腿：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
@@ -75,6 +95,9 @@ interface KernelReader {
 export class LlmSettingsService extends Service {
   static provide = 'llm.settings';
   static Config = llmSettingsSchema;
+  // 必需依赖写进 inject（`@auto-cc/core` 的分工口径）：池的两张表住 `store` 那条连接里，
+  // 没有它这些方法无处落盘；`config` / `kernel` / `llm.chat` 仍是用的时候现问，免得热改把本服务一起重建。
+  static inject = ['store'];
 
   private readonly options: LlmSettingsConfig;
 
@@ -82,6 +105,11 @@ export class LlmSettingsService extends Service {
     // 必须接住第二个实参：cordis 递的是校验后的配置（AGENTS.md §9 实测 1.3）。
     super(ctx, 'llm.settings');
     this.options = options;
+  }
+
+  /** `store` 句柄（连接与迁移清单的唯一来源，不在本地存第二份表结构事实）。 */
+  private get store(): StoreService {
+    return asApp(this.ctx).store;
   }
 
   /**
@@ -152,6 +180,139 @@ export class LlmSettingsService extends Service {
         ...(storedKey || envKey ? [] : (['apiKey'] as const)),
       ],
       available: Boolean(baseUrl) && Boolean(model) && (storedKey !== '' || envKey !== ''),
+    };
+  };
+
+  /**
+   * 池里全部提供商实例，按添加先后（spec 7.2-02）。
+   * @returns 每行带掩码末 4 位与「已入库几条模型」；明文 key 不在这份读数的任何一格里
+   */
+  listProviders = (): LlmProviderInstanceView[] => providerRowsOf(this.store.db).map((row) => this.providerView(row));
+
+  /**
+   * 添加或修改一个提供商实例：地址归一后进表，key 只进密钥库那格（spec 7.2-10）。
+   *
+   * 表里一个密钥字节都没有，是这一条的判据而不是副产品——删提供商要连带清的就是这条派生路径，
+   * 若把 key 也存进表，那条清理就会漏掉一份真相（AGENTS.md §2.5）。
+   * @param input 预设 id、显示名、端点地址，以及可选的 key 明文（空/省略 = 不动已存的那把）
+   * @returns 落库后的那一行读数
+   * @throws 入参不合法 `INVALID_ARGUMENT`；`id` 给了但池里没有 `LLM_PROVIDER_NOT_FOUND`
+   */
+  saveProvider = (input: SaveProviderInput): LlmProviderInstanceView => {
+    const parsed = saveProviderSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `提供商入参不合法：${parsed.error.issues[0]?.message ?? ''}`,
+        'llm.settings',
+        {
+          issues: parsed.error.issues.map((issue) => issue.path.join('.')),
+        },
+      );
+    }
+    const baseUrl = normalizeBaseUrl(parsed.data.baseUrl);
+    const preset = presetOf(parsed.data.presetId);
+    const row = saveProviderRow(
+      this.store.db,
+      { ...parsed.data, baseUrl, presetId: preset.id },
+      endpointOf(preset, baseUrl) ?? null,
+    );
+    if (!row)
+      throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${parsed.data.id ?? ''}`, 'llm.settings', {
+        id: parsed.data.id,
+      });
+    const trimmedKey = parsed.data.apiKey?.trim() ?? '';
+    if (trimmedKey !== '')
+      maybeService<ConfigService>(this.ctx, 'config')?.setSecret(providerSecretPath(row.id), trimmedKey);
+    return this.providerView(row);
+  };
+
+  /**
+   * 删一个提供商实例：清单连带删、密钥库那一把一起清（spec 7.2-09 的存储半边）。
+   *
+   * 两条都必须在这里做，缺一条就留下孤儿：行删了而 `llm_models` 留着是孤儿清单，密钥留着是孤儿凭证。
+   * 第三条"引用它的角色绑定回落到未绑定"随 7.2-c 的 `bindRole` 到货——那之前配置格里的 `providerId`
+   * 记的还是**预设 id**（7.1 的语义），与实例 id 不是一个命名空间，现在去撤它只会撤错。
+   * @param id 实例 id
+   * @returns 删完之后剩下的实例（界面不用再补一刀）
+   * @throws id 不在池里 `LLM_PROVIDER_NOT_FOUND`
+   */
+  deleteProvider = (id: string): LlmProviderInstanceView[] => {
+    if (!deleteProviderRow(this.store.db, id)) {
+      throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${id}`, 'llm.settings', { id });
+    }
+    maybeService<ConfigService>(this.ctx, 'config')?.clearSecret(providerSecretPath(id));
+    return this.listProviders();
+  };
+
+  /**
+   * 某家已经入库的模型清单（界面上「添加所选」之后的那份，也是角色绑定的候选源）。
+   * @param providerId 实例 id
+   * @returns 按模型名排的清单；这一格还没入库东西时是空数组
+   */
+  listModels = (providerId: string): LlmModelView[] =>
+    modelRowsOf(this.store.db, providerId).map((row) => ({
+      providerId: row.provider_id,
+      model: row.model,
+      origin: row.origin === 'manual' ? 'manual' : 'fetched',
+      addedAt: Number(row.added_at),
+    }));
+
+  /**
+   * 勾选入库：只有勾了的进表，重复勾同一条是幂等的（spec 7.2-06）。
+   * @param input 实例 id 与勾中的模型名（`origin` 省略时记 `fetched`，手工敲的那条走 `manual`）
+   * @returns 这家现在的清单
+   * @throws 入参不合法 `INVALID_ARGUMENT`；实例不在池里 `LLM_PROVIDER_NOT_FOUND`
+   */
+  addModels = (input: AddModelsInput): LlmModelView[] => {
+    const parsed = addModelsSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `模型清单入参不合法：${parsed.error.issues[0]?.message ?? ''}`,
+        'llm.settings',
+        {
+          issues: parsed.error.issues.map((issue) => issue.path.join('.')),
+        },
+      );
+    }
+    const { providerId, models, origin } = parsed.data;
+    if (!providerRowOf(this.store.db, providerId)) {
+      throw new AppError('LLM_PROVIDER_NOT_FOUND', `池里没有这个提供商实例：${providerId}`, 'llm.settings', {
+        providerId,
+      });
+    }
+    addModelRows(this.store.db, providerId, models, origin);
+    return this.listModels(providerId);
+  };
+
+  /**
+   * 从清单里摘掉一条模型。
+   * @param providerId 实例 id
+   * @param model 模型名（原样匹配）
+   * @returns 这家剩下的清单
+   */
+  removeModel = (providerId: string, model: string): LlmModelView[] => {
+    removeModelRow(this.store.db, providerId, model);
+    return this.listModels(providerId);
+  };
+
+  /**
+   * 一行实例 → 界面读数：掩码末 4 位现问密钥库，条数现数表。
+   * @param row `llm_providers` 的一行
+   * @returns 可以过进程边界的那份
+   */
+  private providerView = (row: ProviderRow): LlmProviderInstanceView => {
+    const storedKey = maybeService<ConfigService>(this.ctx, 'config')?.getSecret(providerSecretPath(row.id)) ?? '';
+    return {
+      id: row.id,
+      presetId: row.preset_id,
+      endpointId: row.endpoint_id,
+      label: row.label,
+      baseUrl: row.base_url,
+      hasKey: storedKey !== '',
+      keyTail: storedKey.slice(-4),
+      modelCount: modelRowsOf(this.store.db, row.id).length,
     };
   };
 
@@ -243,12 +404,27 @@ export class LlmSettingsService extends Service {
   };
 
   [Service.init](): void {
+    this.ensureSchema();
     const chat = this.readLeg('chat');
     this.ctx.logger.info(
       chat.available
         ? `模型设置已装载：${String(chat.model)} @ ${String(chat.baseUrl)} · key 来自 ${chat.key.source}`
         : `模型尚未配置完整：缺 ${chat.missing.join(' / ')}`,
     );
+  }
+
+  /**
+   * 把提供商池的两支迁移登记进 `store.migrations` 并建表（号段 31 / 32，plan §7.3）。
+   *
+   * 幂等 push 是硬要求：插件重启会重新构造本服务，无条件 push 会在共享清单里留下两个 `version: 31`，
+   * 之后任何一次 `upgrade()` 都直接抛「迁移版本重复」（口径同 `packages/scheduler/src/registry.ts`）。
+   */
+  private ensureSchema(): void {
+    const { migrations } = this.store;
+    for (const migration of [llmProviderMigration, llmModelMigration]) {
+      if (!migrations.some((item) => item.version === migration.version)) migrations.push(migration);
+    }
+    this.store.upgrade();
   }
 }
 

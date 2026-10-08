@@ -19,6 +19,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@auto-cc/plugin-config": "workspace:*"
+    "@auto-cc/plugin-config": "workspace:*",
+    "@auto-cc/plugin-store": "workspace:*"
   }
 }

@@ -1,0 +1,103 @@
+7.2-b 实例池的存储半边 —— 读数与取证（spec 7.2-02 / 7.2-08，并记下 06 / 09 / 10 已到的一半）
+日期：2026-10-08 · 平台：macOS（Apple Silicon）· 测试面：`packages/llm/src/settings.test.ts`
+
+# 一、四道门禁（结论重定向到文件再看 EXIT，§9 实测 5.4-c）
+
+    pnpm typecheck      → TYPECHECK_EXIT=0
+    pnpm lint           → LINT_EXIT=0（13 项：eslint + 12 只 scripts/check-*.ts）
+    pnpm format:check   → FORMAT_EXIT=0
+    pnpm test           → TEST_EXIT=0（逐包 `Tests  N passed` 汇总 2072 条、0 条失败；这条是全仓总数，不只是 llm）
+
+`pnpm --filter @auto-cc/plugin-llm test`：4 个文件 59 条全绿
+（quota-boundary 2 / llm 13 / embed 16 / settings 28，settings 里新增的一节是 9 条）。
+
+lint 里与本片直接相关的三条：
+- `check-llm-single-entry.ts`：扫描 444 个文件仍判"入口唯一"——本片只加了一张表和一只服务方法组，
+  没有新增 `llm.*` 服务，`llm.settings` 也没碰 `http.js`（spec 7.2-13 的判据，等 7.2-c 的 `/models` 到货后重取一次）。
+- `check-compliance-redlines.ts`：测试面真实域名单前 2 条豁免之外没有出网地址。本片的地址全部来自
+  `PROVIDER_PRESETS` 或 RFC-2606 保留名（`gw.test.invalid`），没有写死任何一家真实端点。
+- `check-licenses.ts`：新增的是 `@auto-cc/plugin-store`（workspace 内部包），依赖表无变化。
+
+# 二、7.2-02「实例池」的读数
+
+同一 `presetId: 'ark'` 连存两条实例（标准端点 + Coding Plan 端点）：
+- `listProviders()` 长度 2，两条 `id` 不同（`randomUUID()`，界面不按它拼文案）；
+- `endpointId` 不是入参而是**从地址认出来的**：`{ presetId: 'ark', endpointId: 'ark-coding-plan' }`、
+  另一条 `ark-standard`。这条形状决定写进 `saveProviderRow` 的注释——让人分两格表态就会长出
+  "地址是 Coding Plan、变体记成标准"的自相矛盾行。
+- 表里 `COUNT(*) FROM llm_providers` = 2。
+- 改：`saveProvider` 带 `id` 走 UPDATE —— 单测读回 `edited.id === saved.id`、`listProviders()` 仍是 1 行、
+  `created_at` 一字不变（id 是密钥路径与外键的锚，换 id 等于把已勾的清单和那把 key 一起丢掉），
+  `endpointId` 跟着新地址重认成 `ark-coding-plan`；带池里没有的 `id` 回 `LLM_PROVIDER_NOT_FOUND` 且不静默当新增。
+  （错误码新增在 `packages/core/src/errors.ts` 的 7.1 那一组旁边，没有折进 `INVALID_ARGUMENT`——
+  后者是"你填的东西不合法"，处置是改输入；前者是"这一行没有"，处置是重读列表。）
+- 删：见第四条。
+
+# 三、密钥的落点（spec 7.2-10 的 U 半边）
+
+写入探针 key `sk-pool-7777` 后：
+- `config.getSecret('llm.provider:<新实例 id>')` 读回原文 —— 路径由 id 派生（`providerSecretPath`），
+  没有第二份映射表；
+- 视图 `LlmProviderInstanceView` 只有 `hasKey: true` + `keyTail: '7777'`，`JSON.stringify(view)` grep 不到明文；
+- **扫 userData 目录下除 `secrets.bin` 之外的每个文件**（含 `store.db`、`settings.json`、logs/ 之外的一切）：
+  命中明文的文件列表 = `[]`；
+- `SELECT * FROM llm_providers` 那一行 `JSON.stringify` 后 grep 不到明文。
+
+一条取证口径的教训（本片当场撞上）：这条原本写成 `readFileSync(join(userData,'settings.json'))`，
+在"只添加提供商、没有保存过任何设置"的场景下直接 **ENOENT** —— `config` 是在第一次 `setPersisted` 时才建那支文件。
+所以"某个文件里没有明文"必须写成**扫目录**而不是按固定文件名读，否则判据会在没有该文件的合法形态上碎掉，
+而那种形态恰恰是本片新增的路径（池 CRUD 不碰持久层）。
+
+还没到货的另一半：`stat` 复核 0600、`trace()` 与渲染层回包两面，等 7.2-d 的 IPC 形状落地后按 7.1-06 的口径重取。
+
+# 四、删除的原子性（spec 7.2-09 的存储半边）
+
+`deleteProviderRow` 在**同一条事务**里做两次 DELETE（先 `llm_models`、后 `llm_providers`），
+COMMIT 失败则 ROLLBACK。
+- 为什么不只靠 DDL 里的 `ON DELETE CASCADE`：全仓 grep `PRAGMA foreign_keys` **0 处命中**（`store` 开连接时没设这个
+  pragma，`packages/store/src/*.ts` 里没有一行），SQLite 默认 `foreign_keys = OFF`，于是外键约束与 CASCADE 都是
+  装饰性的——只写 DDL 就会长出孤儿清单行。DDL 里那句仍然保留，是为了 pragma 一旦开起来两侧行为一致。
+  同仓先例：`packages/store/src/migrate.ts:100`、`packages/resume-kb/src/profile-service.ts:557` 都是显式多语句删。
+- 读数：删一家有清单有 key 的实例后 `modelRowsOf(...)` 长度 0、`getSecret(providerSecretPath(id))` 回空串、
+  `listProviders()` 里不再有此 id；删一个不存在的 id 回 `LLM_PROVIDER_NOT_FOUND` 且池子不变。
+- 第三条"引用它的角色绑定回落到未绑定"随 7.2-c 的 `bindRole` 到货：现在配置格里的 `providerId` 记的还是**预设 id**
+  （7.1 语义），与实例 id 不是一个命名空间，此刻去撤它只会撤错。这条写在 `deleteProvider` 的注释里。
+
+# 五、7.2-08 号段与回滚的读数
+
+    store.migrations.map(m => m.version) → [31, 32]
+    store.upgrade() → applied: [31, 32]
+    store.rollback(30) → reverted: [32, 31]
+    回滚后 SELECT ... FROM sqlite_master → llm_providers / llm_models 均不存在
+    再 upgrade() → 两张表回来
+
+号段依据：AGENTS.md §9 实测 5.3-a 记的本机台账最高 29，30 被 plan §8.3 预留给 3.6 的草稿表（裁定⑨ 只拦不存，
+所以 30 当前未启用），本片取 31/32 并在此登记。
+"老库只跑新 up"这一条没有造真老库（每个用例从空目录起），它是按两条间接判据证的：
+① 新表挂在**从未记过账**的版本号上；② `跨重启仍然算数` 那条用例在同一份 userData 上第二次装载，
+实例行与清单行都还在、`upgrade()` 没有重建表——即台账里已记的版本不会被重跑。
+另记一条与 `packages/workflow/src/run-store.ts:260` 同源的纪律：`ensureSchema()` 往 `store.migrations` 里
+**push 前必须按 version 判重**，插件重启会重新构造本服务，无条件 push 会在共享清单里留下两个 `version: 31`。
+
+# 六、跨重启（"跨重启仍然算数"这条为什么必须有）
+
+角色的绑定要落 SQLite 而不是配置键（§9 实测 5.3-b：配置层只写内存、重启即失）。本片的表因此必须证明
+同一目录第二次装载后实例与清单都还在 —— 用例 `跨重启仍然算数` 把第一次 boot 的 `userData` 递给第二次 boot，
+读回同样的实例 id 与同样的清单条数。
+
+# 七、入参校验（7.2 一片的 zod 落点，接 7.2-a 收口补记的口径）
+
+三条失败读数，各自只报自己那条路径（`details.issues` 逐条给 `issue.path`，不合并成一句人话）：
+- `saveProvider({ presetId:'ark', label:'', baseUrl:'https://gw.test.invalid/v1' })` → `INVALID_ARGUMENT` + `['label']`；
+- `saveProvider({ presetId:'ark', label:'方舟', baseUrl:'not-a-url' })` → `INVALID_ARGUMENT` + `['baseUrl']`；
+- `addModels({ providerId:'不在池里的 id', models:['m'] })` → `LLM_PROVIDER_NOT_FOUND`（这一条不是"填错了"而是"没有这一行"）。
+三条之后 `COUNT(*) FROM llm_providers` = 0 —— 校验失败不落半行。
+
+# 八、本片没做的事（留给相邻条目）
+
+- 7.2-04 / 05 / 07：连通测试、`GET <baseUrl>/models` 的三种返回形状与三条失败态 —— 7.2-c。
+- 7.2-11 / 12：`bindRole` 与「绑定 > yml/env 兜底 > 未配置」的解析顺序 —— 7.2-c。
+- 7.2-14：三段界面 + 双语键；`LlmProviderInstanceView` / `LlmModelView` 目前还在 `packages/llm`，
+  过进程边界时搬进 `packages/shared` —— 7.2-d。（本片刻意不动 `shared/bridge.ts` 与渲染层：
+  同一工作树有另一个窗口正在改这两处，见 §9 实测 5.10-13。）
+- 7.2-06 / 09 / 10 的 V 半边（活体勾选、活体删除、四面的 keyPath 换路径取证）—— 7.2-e。

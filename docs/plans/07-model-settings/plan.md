@@ -287,6 +287,25 @@ CREATE TABLE llm_models (
 > 一条随本片撞出来的口径，写给 7.2-b/c/d：`check-compliance-redlines.ts` 规则三的射程含测试文件，**测试面出现真实域名一律 exit 1**。
 > 正确处置不是加豁免，而是①与主机无关的判据改用 `*.test.invalid` / `localhost`，②与目录本身有关的判据从 `PROVIDER_PRESETS` 现取地址——
 > 在测试里重敲目录字面量既是 §2.5 的第二个真相，也正是机检判出的那个形态。
+>
+> **7.2-b 收口补记（2026-10-08，spec 7.2-02 / 7.2-08 已 `[x]`，读数见 `7.2-02-08-pool-readings.txt`）**：
+> 四条落在本片当场、写给 7.2-c/d 与后来人：
+>
+> 1. **`ON DELETE CASCADE` 在本项目是装饰性的**——全仓没有一处 `PRAGMA foreign_keys = ON`，删父行必须显式在同一条事务里删子表。
+>    这条已从计划升级成环境事实，登记在 `AGENTS.md` §9 的迁移台账那一条里（同处并登记号段 31/32 已被占用）。
+> 2. **带 `.default()` 的 zod 入参，服务方法的形参取 `z.input` 而不是 `z.output`**：output 里带缺省的键是必填，
+>    于是 `addModels({ providerId, models })` 这种"省略即 `fetched`"的调用点在类型层就写不出来（编译期报缺参）。
+>    校验仍然落在边界内（`safeParse` 之后读 `parsed.data`），只是对外形状要允许人少说一句。
+>    与 §9 实测 1.3 那条（插件配置构造器取 output）不冲突：那一条判的是"装配递进来的配置已经补过缺省"，这里判的是"界面上的调用方还没有"。
+> 3. **判"某个文件里没有明文"要写成扫目录**，不要按固定文件名读：池的 CRUD 不碰持久层，`settings.json` 在这种形态下还没被创建，
+>    按名字读会 ENOENT，而 ENOENT 会被当成"测试挂了"而不是"判据写窄了"。
+> 4. 行层（`provider-pool.ts`）不抛错，只回 `undefined`；`AppError` 一律由服务层抬起。
+>    否则 IPC 网关拿到的是非 `AppError`，界面上就是一条没有码的失败，`deskReason` 无从分派。
+>
+> 本片动的面：`packages/llm/**`（新文件 `provider-pool.ts` + `settings.ts` 的方法组 + 单测 + 一条 devDependency）、
+> `packages/core/src/errors.ts` 的一只新错误码、`cordis.yml` 的 `llm-settings` 一行 `dependsOn: [store]`
+> （口径同 `browser-takeover`：`static inject` 必须配清单里这一行，见 §9 实测 5.1-c 的"清单顺序就是挂载顺序"）。
+> `shared/src/bridge.ts` 与渲染层三段留给 7.2-d。
 
 ### 7.8 测试与取证口径（§7.2 / §7.1 的硬边界）
 
