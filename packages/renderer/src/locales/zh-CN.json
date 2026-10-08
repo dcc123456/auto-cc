@@ -1001,7 +1001,10 @@
         "deleted": "会话 {{code}} 已收起，在「已删除的会话」那一栏里可以恢复",
         "restored": "会话 {{code}} 已恢复，它就是当前会话",
         "reasonNoSession": "还没有当前会话：先新建一条，再改名或删除",
-        "reasonEmptyTitle": "名字还是空的：先写几个字，Enter 或按「保存名字」都算"
+        "reasonEmptyTitle": "名字还是空的：先写几个字，Enter 或按「保存名字」都算",
+        "reason": {
+          "ACTION_BUSY": "上一条动作还没回来：标题等它的回执落回再改。"
+        }
       },
       "compress": {
         "covered": "较早的 {{total}} 条消息已折成一行摘要，原文一条都没删",
@@ -1310,6 +1313,7 @@
         "ACTION_BUSY": "上一条动作还没回来",
         "DOC_ID_EMPTY": "先填简历文档 id，同步才知道从哪一份派生",
         "CLAIM_EMPTY": "先写一句陈述，反查才知道拿哪句话去查",
+        "ENTITY_KIND_LOCKED": "这条已经在库里了：类型换不得，要换类型就新建一条。",
         "SEARCH_EMPTY": "先输入关键词或一句话，检索才有查询",
         "BACKUP_PATH_EMPTY": "先填备份文件的绝对路径，导出与导入才知道写到哪、读哪份"
       }

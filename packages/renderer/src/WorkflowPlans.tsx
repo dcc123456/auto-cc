@@ -151,9 +151,10 @@ export function WorkflowPlansSection({
           data-testid="workflow-plan-select"
           data-selected-plan={selectedId ?? ''}
           value={selectedId ?? ''}
-          disabled={busy !== undefined}
+          disabled={busyReason !== undefined}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
           onValueChange={(value) => void pickPlan(value)}
-          className="disabled:opacity-40"
         >
           <option value="">{t('workflow.plans.selectDefault')}</option>
           {plans.map((plan) => (

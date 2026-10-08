@@ -610,6 +610,36 @@ for (const file of tsxFiles) {
   });
 }
 
+/**
+ * 14) 按不动必须说得出为什么（spec 6.2-06）：面板里每一格 `disabled=` 都要在同格带上原因码。
+ *     稿上这条不是审美：禁用态是界面在说"这一步现在不许"，而不说为什么的禁用与"控件坏了"在人的眼睛里
+ *     是同一件事——与 6.2-10 的"禁用态五档同色"、6.2-25 的"不可点不许长 hover"同族，都是谎报。
+ *     凭据取三种既有写法（都在 `ui/controls.tsx` 的口径内）：直接挂 `disabledReason`／`disabledReasonLabel`、
+ *     条件展开 `{...(cond ? { disabledReason: … } : {})}`、以及 `deskReason().dead(code)` 与 `readOnlyDead`
+ *     这一类**整份摊开**的对象（名字里带 `dead`／`Dead`）。判据同样是行窗口级（±10 行），代价与第 13 节②
+ *     逐字相同：相邻元素自带凭据会误放行，但"新写一只挂着常亮禁用却不给理由的格子"必红。
+ */
+const DISABLED_ATTR = /(?:^|[\s<])disabled=\{|(?:^|[\s<])aria-disabled=\{/;
+const DEAD_REASON_EVIDENCE = /disabledReason|\.\.\.\w*[Dd]ead\w*/;
+
+for (const file of tsxFiles) {
+  // 原件层豁免：`src/ui/**` 里的 `disabled=` 是在将判据**摊给原生控件**（`deskFieldDead` / `DeskButton`
+  // 的 props 解构），那里没有"人要看的那句人话"，人话由消费者在格子外给。
+  if (!path.relative(uiDir, file).startsWith('..')) continue;
+  const lines = commentBlanked(await readFile(file, 'utf8'));
+  lines.forEach((line, index) => {
+    if (!DISABLED_ATTR.test(line)) return;
+    const neighbourhood = lines.slice(Math.max(0, index - 10), index + 11).join('\n');
+    if (!DEAD_REASON_EVIDENCE.test(neighbourhood)) {
+      failures.push(
+        `${path.relative(repoRoot, file)}:${String(index + 1)} 有一格按不动却不带原因码：` +
+          '`disabled` 必须与 `disabledReason`／`disabledReasonLabel`（或 `dead(…)`、`…Dead` 这一份整摊的对象）同格，' +
+          '只禁用而不解释是谎报（spec 6.2-06）',
+      );
+    }
+  });
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -617,6 +647,7 @@ if (failures.length) {
 }
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
-    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处，' +
+    'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处、' +
+    '按不动却不带原因码那一格 0 处，' +
     '四档语气文字档 × 两案 × 五级承载面 × 两种同色底、实底档 × 两案 × 钉死字色全部 ≥4.5:1）',
 );

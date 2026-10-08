@@ -579,10 +579,58 @@ interface DeskFieldShell {
   className?: string;
   /** 该格处于「必填未填 / 没过大写约束」那一态：整圈朱砂，见 `fieldClass`。 */
   isInvalid?: boolean;
+  /** 按不动的原因码（挂成 `data-disabled-reason`，harness 据此判「点不动是门禁还是缺陷」）。 */
+  disabledReason?: string;
+  /**
+   * 原因码对人说的话（挂成 `title`）。原件在按不动时改走 `aria-disabled` 而**不**摊原生 `disabled`：
+   * Chromium 对原生禁用的表单控件不派发鼠标事件，`title` 就永远不出现，人只看见"按不动"（spec 6.2-06）。
+   */
+  disabledReasonLabel?: string;
 }
 
 /** 带 label 那一档的排法：文案在上、控件在下，11px 的元信息档。 */
 const STACK_LABEL = 'flex flex-col gap-1 text-[11px] text-slate-400';
+
+/** 按不动的表单原件要摊给原生控件的那几个属性（`disabled` 本身不在其中，见上）。 */
+interface DeskFieldDeadAttrs {
+  'aria-disabled'?: boolean;
+  'data-disabled-reason'?: string;
+  title?: string;
+}
+
+/** 表单五件 + 行内编辑共用的按不动读数。 */
+interface DeskFieldDeadRead {
+  /** 该不该吃掉这一次回调（受控组件吞掉回调，页面读数就不动）。 */
+  isDead: boolean;
+  /** 摊给原生控件的附加属性。 */
+  attrs: DeskFieldDeadAttrs;
+  /** 按不动档的追加 class（提暗 + 不给手型），与 `buttonClass` 的禁用分支同值。 */
+  deadClass: string;
+}
+
+/**
+ * 「表单原件按不动」这件事的唯一一份画法。
+ * @param disabled 调用方给出的按不动判据
+ * @param disabledReason 原因码（可省：没有门禁就不该挂着常亮的 `data-disabled-reason`）
+ * @param disabledReasonLabel 原因的人话（可省：只给码不给话是谎报，见 props 注释）
+ * @returns 回调闸门 + 摊给原生控件的属性 + 档位 class
+ */
+const deskFieldDead = (
+  disabled: boolean | undefined,
+  disabledReason: string | undefined,
+  disabledReasonLabel: string | undefined,
+): DeskFieldDeadRead =>
+  disabled === true
+    ? {
+        isDead: true,
+        attrs: {
+          'aria-disabled': true,
+          ...(disabledReason === undefined ? {} : { 'data-disabled-reason': disabledReason }),
+          ...(disabledReasonLabel === undefined ? {} : { title: disabledReasonLabel }),
+        },
+        deadClass: 'cursor-not-allowed opacity-40 ',
+      }
+    : { isDead: false, attrs: {}, deadClass: '' };
 
 export interface DeskFieldProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'className'>, DeskFieldShell {
@@ -600,16 +648,31 @@ export interface DeskFieldProps
  * @param isInvalid 校验失败档（整圈朱砂，见 `fieldClass`）
  * @param value 当前值
  * @param onValueChange 取值回调
- * @param rest 其余原生属性照旧透传（`placeholder`/`min`/`step`/`disabled`/`data-*`/`onKeyDown`……）
+ * @param rest 其余原生属性照旧透传（`placeholder`/`min`/`step`/`data-*`/`onKeyDown`……；`disabled` 由原件改成按不动档）
  * @returns 输入框；带 `label` 时套一层 `<label>`
  */
-export function DeskField({ action, label, className = '', isInvalid, value, onValueChange, ...rest }: DeskFieldProps) {
+export function DeskField({
+  action,
+  label,
+  className = '',
+  isInvalid,
+  value,
+  onValueChange,
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
+  ...rest
+}: DeskFieldProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   const field = (
     <input
       data-action={action}
       value={value}
-      onChange={(event) => onValueChange(event.target.value)}
-      className={`${fieldClass(isInvalid === true)} ${className}`}
+      onChange={(event) => {
+        if (!dead.isDead) onValueChange(event.target.value);
+      }}
+      className={`${fieldClass(isInvalid === true)} ${dead.deadClass}${className}`}
+      {...dead.attrs}
       {...rest}
     />
   );
@@ -639,7 +702,7 @@ export interface DeskSelectProps
  * @param isInvalid 校验失败档（整圈朱砂）
  * @param value 当前值
  * @param onValueChange 选中回调
- * @param rest 原生 select 属性透传
+ * @param rest 原生 select 属性透传（`disabled` 由原件改成按不动档）
  * @returns 下拉框；带 `label` 时套一层 `<label>`
  */
 export function DeskSelect({
@@ -649,15 +712,22 @@ export function DeskSelect({
   isInvalid,
   value,
   onValueChange,
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
   children,
   ...rest
 }: DeskSelectProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   const field = (
     <select
       data-action={action}
       value={value}
-      onChange={(event) => onValueChange(event.target.value)}
-      className={`${fieldClass(isInvalid === true)} ${className}`}
+      onChange={(event) => {
+        if (!dead.isDead) onValueChange(event.target.value);
+      }}
+      className={`${fieldClass(isInvalid === true)} ${dead.deadClass}${className}`}
+      {...dead.attrs}
       {...rest}
     >
       {children}
@@ -692,7 +762,7 @@ export interface DeskTextareaProps
  * @param value 当前文本
  * @param onValueChange 取值回调
  * @param size 尺寸档（`meta` 元信息 / `composer` 对话输入区）
- * @param rest 原生 textarea 属性透传（`rows`/`spellCheck`/`data-*`……）
+ * @param rest 原生 textarea 属性透传（`rows`/`spellCheck`/`data-*`……；`disabled` 改成按不动档）
  * @returns 文本域；带 `label` 时套一层 `<label>`
  */
 export function DeskTextarea({
@@ -703,14 +773,21 @@ export function DeskTextarea({
   value,
   onValueChange,
   size = 'meta',
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
   ...rest
 }: DeskTextareaProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   const field = (
     <textarea
       data-action={action}
       value={value}
-      onChange={(event) => onValueChange(event.target.value)}
-      className={`${fieldClass(isInvalid === true, size)} resize-none leading-relaxed ${className}`}
+      onChange={(event) => {
+        if (!dead.isDead) onValueChange(event.target.value);
+      }}
+      className={`${fieldClass(isInvalid === true, size)} ${dead.deadClass}resize-none leading-relaxed ${className}`}
+      {...dead.attrs}
       {...rest}
     />
   );
@@ -755,7 +832,7 @@ export interface DeskCheckProps
  * @param onCheckedChange 勾选回调
  * @param tone 归属色档
  * @param type 复选 / 单选
- * @param rest 原生 input 属性透传（`name`/`id`/`disabled`/`data-*`……）
+ * @param rest 原生 input 属性透传（`name`/`id`/`data-*`……；`disabled` 改成按不动档）
  * @returns 勾选框；带 `label` 时套一层横排的 `<label>`
  */
 export function DeskCheck({
@@ -766,16 +843,23 @@ export function DeskCheck({
   onCheckedChange,
   tone = 'celadon',
   type = 'checkbox',
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
   ...rest
 }: DeskCheckProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   const box = (
     <input
       type={type}
       data-action={action}
       data-checked={checked ? 'true' : 'false'}
       checked={checked}
-      onChange={(event) => onCheckedChange(event.target.checked)}
-      className={`mt-0.5 size-3.5 shrink-0 ${CHECK_TONE[tone]} ${className}`}
+      onChange={(event) => {
+        if (!dead.isDead) onCheckedChange(event.target.checked);
+      }}
+      className={`mt-0.5 size-3.5 shrink-0 ${dead.deadClass}${CHECK_TONE[tone]} ${className}`}
+      {...dead.attrs}
       {...rest}
     />
   );
@@ -807,17 +891,31 @@ export interface DeskRangeProps
  * @param className 宽度档（滑杆的长短是这一屏唯一的排布变量）
  * @param value 当前读数
  * @param onValueChange 拖动回调
- * @param rest 原生 input 属性透传（`min`/`max`/`step`/`disabled`/`data-*`……）
+ * @param rest 原生 input 属性透传（`min`/`max`/`step`/`data-*`……；`disabled` 改成按不动档）
  * @returns 滑杆；带 `label` 时套一层 `<label>`
  */
-export function DeskRange({ action, label, className = '', value, onValueChange, ...rest }: DeskRangeProps) {
+export function DeskRange({
+  action,
+  label,
+  className = '',
+  value,
+  onValueChange,
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
+  ...rest
+}: DeskRangeProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   const slider = (
     <input
       type="range"
       data-action={action}
       value={value}
-      onChange={(event) => onValueChange(event.target.value)}
-      className={`h-1.5 shrink-0 cursor-pointer accent-celadon ${className}`}
+      onChange={(event) => {
+        if (!dead.isDead) onValueChange(event.target.value);
+      }}
+      className={`h-1.5 shrink-0 accent-celadon ${dead.isDead ? dead.deadClass : 'cursor-pointer '}${className}`}
+      {...dead.attrs}
       {...rest}
     />
   );
@@ -1054,6 +1152,10 @@ export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInput
   onCancel?: () => void;
   /** 编辑提示文案（例如「Enter 保存 · Esc 还原」），由调用方翻译。 */
   hint?: ReactNode;
+  /** 按不动的原因码（挂成 `data-disabled-reason`，与表单五件同一口径）。 */
+  disabledReason?: string;
+  /** 原因码对人说的话（挂成 `title`；原生 `disabled` 会让它永远不出现，见 `deskFieldDead`）。 */
+  disabledReasonLabel?: string;
 }
 
 /**
@@ -1065,6 +1167,9 @@ export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInput
  * @param onSave 保存回调
  * @param onCancel 还原回调
  * @param hint 提示行
+ * @param disabled 按不动（在途时不许敲进去也不许提交）
+ * @param disabledReason 按不动的原因码
+ * @param disabledReasonLabel 原因码对人说的话
  * @returns 一个自动聚焦的输入框加一行提示
  */
 export function InlineEditField({
@@ -1074,21 +1179,30 @@ export function InlineEditField({
   onSave,
   onCancel,
   hint,
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
+  className,
   ...rest
 }: InlineEditFieldProps) {
+  const dead = deskFieldDead(disabled, disabledReason, disabledReasonLabel);
   return (
     <div className="flex flex-col gap-1">
       <input
         data-action={action}
         data-editing="true"
-        className={EDIT_INPUT}
+        className={`${EDIT_INPUT} ${dead.deadClass}${className ?? ''}`}
         value={value}
         autoFocus
-        onChange={(event) => onValueChange(event.target.value)}
+        onChange={(event) => {
+          if (!dead.isDead) onValueChange(event.target.value);
+        }}
         onKeyDown={(event) => {
+          if (dead.isDead) return;
           if (event.key === 'Enter') onSave();
           else if (event.key === 'Escape') onCancel?.();
         }}
+        {...dead.attrs}
         {...rest}
       />
       {hint ? <span className="text-[10px] text-slate-500">{hint}</span> : null}

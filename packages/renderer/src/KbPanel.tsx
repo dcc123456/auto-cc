@@ -633,6 +633,9 @@ export function KbPanel() {
               value={editing.kind}
               onValueChange={(value) => setEditing({ ...editing, kind: value as KbEntityKindView })}
               disabled={editing.entityId !== null}
+              // 改类型等于把这条实体挪到另一张表，编辑中途换不得：锁住它的判据是"已经在库里"。
+              disabledReason={editing.entityId !== null ? 'ENTITY_KIND_LOCKED' : undefined}
+              disabledReasonLabel={reasonLabel(editing.entityId !== null ? 'ENTITY_KIND_LOCKED' : undefined)}
               className="self-start"
             >
               {(Object.keys(ENTITY_KIND_LABEL_KEY) as KbEntityKindView[]).map((kind) => (

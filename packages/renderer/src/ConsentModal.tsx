@@ -77,7 +77,15 @@ export function ConsentModal({ platform, view, busy, error, onGrant, onDeny }: C
         <>
           {/* 焦点落在默认安全动作（09 稿浮层纪律表第 2 行）：没读清楚之前唯一不该发生的是一次外发。
               「先不启用」什么都不发，所以退成 ghost——拒绝不该被涂成危险色（与岗位屏的拒绝同一口径）。 */}
-          <DeskButton action="consent-deny" variant="ghost" autoFocus disabled={busy} onClick={onDeny}>
+          <DeskButton
+            action="consent-deny"
+            variant="ghost"
+            autoFocus
+            disabled={busy}
+            // 签字那次写入还在飞时「先不启用」也按不动——它要丢弃的正是同一次表态。
+            {...(busy ? { disabledReason: 'ACTION_BUSY', disabledReasonLabel: t('consent.reason.ACTION_BUSY') } : {})}
+            onClick={onDeny}
+          >
             <X size={14} />
             {t('consent.deny')}
           </DeskButton>

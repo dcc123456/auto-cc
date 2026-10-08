@@ -88,6 +88,8 @@ export function ChatSessionBar({
                 onValueChange={setTitleDraft}
                 placeholder={t('chat.session.titlePlaceholder')}
                 disabled={isBusy}
+                disabledReason={isBusy ? 'ACTION_BUSY' : undefined}
+                disabledReasonLabel={isBusy ? t('chat.session.reason.ACTION_BUSY') : undefined}
                 onSave={saveTitle}
                 onCancel={() => setEditing(false)}
               />

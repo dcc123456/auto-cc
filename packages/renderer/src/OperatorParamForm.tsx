@@ -78,6 +78,12 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
     onCommit(result.params);
   }
 
+  // 只读档的原因码挂到每一格上：上方那条 `readOnlyHint` 说的是整张表单，而 harness 判「点不动是门禁
+  // 还是缺陷」读的是格上的 `data-disabled-reason`（与 `KernelViewSlot` 同一口径：只在该挡的时候挂）。
+  const readOnlyDead = isReadOnly
+    ? { disabledReason: 'READ_ONLY', disabledReasonLabel: t('workflow.operator.reason.READ_ONLY') }
+    : {};
+
   return (
     <div className="mt-3 rounded-xl border border-line bg-ink-950/40 p-3" data-testid="operator-param-form">
       <h4 className="text-xs font-semibold text-slate-300">{t('workflow.operator.paramHeading')}</h4>
@@ -114,6 +120,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                 <DeskCheck
                   action={`param-${field.name}`}
                   disabled={isReadOnly}
+                  {...readOnlyDead}
                   checked={draft[field.name] === 'true'}
                   onCheckedChange={(isChecked) => edit(field.name, isChecked ? 'true' : 'false')}
                   className="mt-1"
@@ -123,6 +130,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                   action={`param-${field.name}`}
                   value={draft[field.name] ?? ''}
                   disabled={isReadOnly}
+                  {...readOnlyDead}
                   aria-invalid={isInvalid}
                   onValueChange={(value) => edit(field.name, value)}
                   isInvalid={isInvalid}
@@ -140,6 +148,7 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
                   type={field.type === 'number' ? 'number' : 'text'}
                   value={draft[field.name] ?? ''}
                   disabled={isReadOnly}
+                  {...readOnlyDead}
                   aria-invalid={isInvalid}
                   onValueChange={(value) => edit(field.name, value)}
                   isInvalid={isInvalid}

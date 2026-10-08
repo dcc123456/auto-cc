@@ -1001,7 +1001,10 @@
         "deleted": "Session {{code}} is folded away; restore it from the Deleted sessions list",
         "restored": "Session {{code}} is back and is now the current one",
         "reasonNoSession": "No current session yet: start one before renaming or deleting",
-        "reasonEmptyTitle": "The name is still empty: type something, then Enter or press Save name"
+        "reasonEmptyTitle": "The name is still empty: type something, then Enter or press Save name",
+        "reason": {
+          "ACTION_BUSY": "The previous action hasn’t returned yet: the title waits for its receipt before you edit again."
+        }
       },
       "compress": {
         "covered": "The earlier {{total}} messages are folded into one summary line — nothing was deleted",
@@ -1310,6 +1313,7 @@
         "ACTION_BUSY": "The previous action hasn’t returned yet",
         "DOC_ID_EMPTY": "Enter a resume doc id so sync knows which document to derive from",
         "CLAIM_EMPTY": "Write a claim first so the evidence lookup has a sentence to match",
+        "ENTITY_KIND_LOCKED": "This record is already in the library: its kind cannot be switched here, create a new one.",
         "SEARCH_EMPTY": "Type a keyword or a sentence first so search has a query",
         "BACKUP_PATH_EMPTY": "Enter the absolute path of a backup file so export knows where to write and import where to read"
       }

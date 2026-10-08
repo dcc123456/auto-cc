@@ -291,7 +291,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
             action="resume-editor-template"
             data-testid="resume-editor-template"
             value={view.templateId}
-            disabled={!!busy}
+            {...dead(busyReason)}
             onValueChange={(value) => useTemplate(value)}
           >
             {view.templates.map((template) => (
@@ -307,7 +307,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
             action="resume-editor-locale"
             data-testid="resume-editor-locale"
             value={view.locale}
-            disabled={!!busy}
+            {...dead(busyReason)}
             onValueChange={(value) => useTemplate(undefined, value as ResumeLocaleView)}
           >
             <option value="zh-CN">zh-CN</option>
@@ -420,7 +420,7 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
                 max={Number((bound.max + reach).toFixed(2))}
                 step={row.step}
                 value={current}
-                disabled={!!busy}
+                {...dead(busyReason)}
                 onValueChange={(value) => setMetric(row.key, Number(value))}
                 className="w-44"
               />
