@@ -175,6 +175,7 @@ export function ModelSettingsPanel() {
           compact
           busy={busy === 'save'}
           result={resultOf('save')}
+          doneLabel={t('desk.done.saved')}
           {...saveDead}
           onClick={() =>
             void run(
@@ -200,6 +201,7 @@ export function ModelSettingsPanel() {
           compact
           busy={busy === 'check'}
           result={resultOf('check')}
+          doneLabel={t('desk.done.checked')}
           {...checkDead}
           onClick={() =>
             void run('check', () => bridge?.llm['settings.check'](leg), {
@@ -216,6 +218,7 @@ export function ModelSettingsPanel() {
           compact
           busy={busy === 'clear-key'}
           result={resultOf('clear-key')}
+          doneLabel={t('desk.done.clearedKey')}
           {...clearDead}
           onClick={() =>
             void run('clear-key', () => bridge?.llm['settings.clearKey'](leg), {

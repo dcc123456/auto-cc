@@ -35,6 +35,18 @@
       "reveal": "在{{target}}中显示",
       "trailFrom": "来自",
       "trailBack": "返回{{view}}",
+      "done": {
+        "revealed": "已显示",
+        "saved": "已保存",
+        "checked": "已连通",
+        "clearedKey": "已清除密钥",
+        "opened": "已打开",
+        "probed": "已读登录态",
+        "loggedOut": "已退出",
+        "closedView": "已关闭视图",
+        "snapshotted": "已存快照",
+        "navigated": "已跳转"
+      },
       "revealTarget": {
         "macos": "访达",
         "windows": "资源管理器",

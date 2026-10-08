@@ -35,6 +35,18 @@
       "reveal": "Show in {{target}}",
       "trailFrom": "from",
       "trailBack": "Back to {{view}}",
+      "done": {
+        "revealed": "Revealed",
+        "saved": "Saved",
+        "checked": "Reachable",
+        "clearedKey": "Key cleared",
+        "opened": "Opened",
+        "probed": "Login read",
+        "loggedOut": "Logged out",
+        "closedView": "View closed",
+        "snapshotted": "Snapshot saved",
+        "navigated": "Navigated"
+      },
       "revealTarget": {
         "macos": "Finder",
         "windows": "File Explorer",

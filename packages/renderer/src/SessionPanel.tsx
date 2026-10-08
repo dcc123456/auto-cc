@@ -238,6 +238,7 @@ export function SessionPanel() {
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     result={resultOf(actionLabel.open(platform.id))}
+                    doneLabel={t('desk.done.opened')}
                     onClick={() => open(platform.id)}
                   >
                     <KeyRound size={12} />
@@ -251,6 +252,7 @@ export function SessionPanel() {
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     result={resultOf(actionLabel.probe(platform.id))}
+                    doneLabel={t('desk.done.probed')}
                     onClick={() => probe(platform.id)}
                   >
                     <Radar size={12} />
@@ -265,6 +267,7 @@ export function SessionPanel() {
                     disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                     disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
                     result={resultOf(actionLabel.logout(platform.id))}
+                    doneLabel={t('desk.done.loggedOut')}
                     onClick={() => logout(platform.id)}
                   >
                     <LogOut size={12} />
@@ -301,6 +304,7 @@ export function SessionPanel() {
             disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
             disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
             result={resultOf(actionLabel.close())}
+            doneLabel={t('desk.done.closedView')}
             onClick={closeView}
           >
             <LogOut size={12} />
@@ -323,6 +327,7 @@ export function SessionPanel() {
             disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
             disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
             result={resultOf(actionLabel.snapshot())}
+            doneLabel={t('desk.done.snapshotted')}
             onClick={readPage}
           >
             <RefreshCw size={14} />
@@ -347,6 +352,7 @@ export function SessionPanel() {
             disabledReason={navigateReason}
             disabledReasonLabel={navigateReasonLabel}
             result={resultOf(actionLabel.navigate())}
+            doneLabel={t('desk.done.navigated')}
             onClick={navigate}
           >
             <Compass size={12} />

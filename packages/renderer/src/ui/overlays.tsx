@@ -500,6 +500,7 @@ export function Toast() {
           compact
           busy={busy === revealLabel}
           result={resultOf(revealLabel)}
+          doneLabel={t('desk.done.revealed')}
           {...(revealError ? { title: revealError } : {})}
           className="shrink-0"
           onClick={reveal}

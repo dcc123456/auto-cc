@@ -98,6 +98,12 @@ export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   /** 窄档：贴在列表行内的小按钮（07 稿的 .btn-sm）。 */
   compact?: boolean;
   /**
+   * 完成态文案（07 稿⑤「成功描青并把文案换成完成态」）。给了它，`result === 'done'` 那一格
+   * 就换成这句话；不给则结果态只加 wash 与角标（多数按钮不需要——"保存"按完仍写"保存"是缺陷，
+   * 但"下一页"这类瞬时动作没有完成态可言）。调用方负责翻译（§5.5：文案不许长在组件里）。
+   */
+  doneLabel?: string;
+  /**
    * 附加的 `data-*` 标记（例如 armed 状态），供 harness 断言。
    * 组件 props 上没有 data-* 的索引签名，所以调用方不能直接写 `data-armed`——走这里。
    */
@@ -122,6 +128,7 @@ export function DeskButton({
   disabledReason,
   disabledReasonLabel,
   compact = false,
+  doneLabel,
   markers,
   disabled,
   className = '',
@@ -163,7 +170,22 @@ export function DeskButton({
         {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
         {result && !busy ? RESULT_ICON[result] : null}
       </span>
-      <span className="relative flex items-center gap-1">{children}</span>
+      <span className="relative flex items-center gap-1">
+        {doneLabel ? (
+          // 完成态换文案（07 稿⑤）与「宽度锁死不跳版」（④）是同一条规矩的两半，所以两句话叠在同一个
+          // 网格里同时参与排版：不可见那一句照样占宽，按钮的宽度因此是两态里的较长者，按下去不会自己变宽也不会变窄。
+          <span className="grid items-center" data-result-text={result === 'done' && !busy ? 'done' : 'idle'}>
+            <span className={`row-start-1 col-start-1 ${result === 'done' && !busy ? 'invisible' : ''}`}>
+              {children}
+            </span>
+            <span className={`row-start-1 col-start-1 ${result === 'done' && !busy ? '' : 'invisible'}`}>
+              {doneLabel}
+            </span>
+          </span>
+        ) : (
+          children
+        )}
+      </span>
     </button>
   );
 }
