@@ -12,21 +12,22 @@ import type {
   PluginTreeSnapshot,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { Banner, DeskButton, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskTextarea, Tag, type BannerTone } from './ui/controls';
 
 /**
- * 插件状态 → 徽标配色，按「这一格现在系统在做什么」分四族（plan §5）：
- * `active`（已挂上、正常）= 玉；`loading` / `unloading`（正在挂或正在卸）= 青瓷——进行中的系统动作，
- * 和步骤行 `running` 同一档；`failed` = 朱砂；`pending` / `disposed` 都还没有任何事在发生 = 中性灰。
+ * 插件状态 → 语气档，按「这一格现在系统在做什么」分四族（plan §5）：`active`（已挂上、正常）= 玉；
+ * `loading` / `unloading`（正在挂或正在卸）= 青瓷——进行中的系统动作，和步骤行 `running` 同一档；
+ * `failed` = 朱砂；`pending` / `disposed` 都还没有任何事在发生 = 不给档位（`Tag` 的中性回执档）。
  * 原先 `disposed` 与 `unloading` 共用一套灰，看起来像「卸载早就完了」，现在把在卸的那一档分开画。
+ * 这里存 tone 名而不是 class 串：wash 只在 `src/ui/**` 里拼（6.2-19），面板只声明档位。
  */
-const STATE_CLASS: Record<PluginNodeView['state'], string> = {
-  active: 'border-jade/45 bg-jade-wash text-jade',
-  pending: 'border-line-strong bg-ink-850 text-slate-500',
-  failed: 'border-seal/55 bg-seal-wash text-seal',
-  loading: 'border-celadon/50 bg-celadon-wash text-slate-100',
-  disposed: 'border-line-strong bg-ink-850 text-slate-500',
-  unloading: 'border-celadon/50 bg-celadon-wash text-slate-100',
+const STATE_TONE: Record<PluginNodeView['state'], BannerTone | undefined> = {
+  active: 'jade',
+  pending: undefined,
+  failed: 'seal',
+  loading: 'celadon',
+  disposed: undefined,
+  unloading: 'celadon',
 };
 
 /** 日志区最多显示的行数，事件推送时按此截断。 */
@@ -249,9 +250,7 @@ export function AssemblyPanel() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-slate-200">{node.id}</span>
-                    <span className={`rounded border px-1.5 py-0.5 text-[11px] ${STATE_CLASS[node.state]}`}>
-                      {t(`state.${node.state}`)}
-                    </span>
+                    <Tag tone={STATE_TONE[node.state]}>{t(`state.${node.state}`)}</Tag>
                     {guarded && (
                       <span className="flex items-center gap-1 text-[11px] text-slate-500">
                         <ShieldCheck size={12} />

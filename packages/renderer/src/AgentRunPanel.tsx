@@ -9,7 +9,7 @@ import { Check, ListChecks, Play, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, ToolDescriptorView } from '@auto-cc/shared';
 import { ToolCard, stepToToolPart } from './ToolCard';
-import { Banner, DeskButton, type BannerTone } from './ui/controls';
+import { Banner, DeskButton, Tag, type BannerTone } from './ui/controls';
 
 /**
  * 计划卡 + 卡片流面板。
@@ -75,15 +75,10 @@ export function AgentRunPanel({
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <ListChecks size={14} />
         <h3 className="text-xs font-semibold text-slate-200">{t('agent.run.heading')}</h3>
-        {/* 待确认 = 等人表态（琥珀），其余状态是读数（描边）：琥珀不留给"进行中"，那由转针说。 */}
-        <span
-          data-run-status-label
-          className={`rounded-chip border px-2 py-0.5 text-[10px] ${
-            isProposed ? 'border-amber/45 bg-amber-wash text-amber' : 'border-line text-slate-400'
-          }`}
-        >
+        {/* 待确认 = 等人表态（琥珀），其余状态是读数（稿上 `.tag` 的中性回执档）。琥珀不留给"进行中"，那由转针说。 */}
+        <Tag data-run-status-label tone={isProposed ? 'amber' : undefined}>
           {t(`agent.run.status.${run.status}`)}
-        </span>
+        </Tag>
         {/* 收起只是换画法，库里一行都不动，所以它不跟着 busy 禁用（与「叫停」同一口径）。 */}
         <DeskButton action="dismiss-run" variant="ghost" compact className="ml-auto" onClick={onDismiss}>
           <X size={11} />

@@ -9,7 +9,7 @@ import type {
   SessionsStatusView,
   ShellStatus,
 } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField } from './ui/controls';
+import { Banner, DeskButton, DeskField, Tag, type BannerTone } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
@@ -18,13 +18,14 @@ import { formatClock } from './format';
 const EXPIRED_LIMIT = 3;
 
 /**
- * 登录态 → 语义色（03 稿的四色归属）：已核到登录态是"读回来的好消息"= 青玉，
+ * 登录态 → 语气档（03 稿的四色归属）：已核到登录态是"读回来的好消息"= 青玉，
  * 失效是"这件事现在得人来办"= 琥珀；不用 rose，朱砂只留给外发与不可逆。
- * 只用 Tailwind 静态类名，运行期拼类名会让样式缺失。
+ * 存 tone 名而不是 class 串：wash 字面量从此只在 `src/ui/**` 里（6.2-19），
+ * 面板只负责说"这一格是哪一档"。
  */
-const AUTH_CLASS: Record<SessionPlatformView['auth'], string> = {
-  active: 'border-jade/40 bg-jade-wash text-jade',
-  expired: 'border-amber/45 bg-amber-wash text-amber',
+const AUTH_TONE: Record<SessionPlatformView['auth'], BannerTone> = {
+  active: 'jade',
+  expired: 'amber',
 };
 
 /**
@@ -212,9 +213,7 @@ export function SessionPanel() {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs text-slate-200">{platform.id}</span>
-                  <span className={`rounded border px-1.5 py-0.5 text-[11px] ${AUTH_CLASS[platform.auth]}`}>
-                    {t(`session.auth.${platform.auth}`)}
-                  </span>
+                  <Tag tone={AUTH_TONE[platform.auth]}>{t(`session.auth.${platform.auth}`)}</Tag>
                   <span className="text-[11px] text-slate-500">
                     {platform.isPersistent ? t('session.persistent') : t('session.inMemory')}
                   </span>

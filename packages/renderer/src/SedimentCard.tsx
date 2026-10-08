@@ -9,7 +9,7 @@
 import { Bookmark, Check, Save, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentRunView, SavedWorkflowPlanView, SedimentPreviewView } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField, deskReason, type BannerTone } from './ui/controls';
+import { Banner, DeskButton, DeskField, Tag, deskReason, type BannerTone } from './ui/controls';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -174,22 +174,28 @@ export function SedimentCard({
                 ) : null}
                 {step.params.length > 0 ? (
                   <span className="mt-0.5 flex flex-wrap gap-2" data-testid="sediment-params">
-                    {step.params.map((param) => (
-                      <span
-                        key={`${param.nodeId}-${param.paramKey}`}
-                        data-param-key={param.paramKey}
-                        data-param-variable={String(param.isVariable)}
-                        className={
-                          param.isVariable
-                            ? 'text-celadon'
-                            : 'rounded-chip border border-seal/45 bg-seal-wash px-1 text-seal'
-                        }
-                      >
-                        {param.isVariable
-                          ? t('chat.sediment.paramVariable', { key: param.paramKey, value: String(param.value) })
-                          : t('chat.sediment.paramResidual', { key: param.paramKey, value: String(param.value) })}
-                      </span>
-                    ))}
+                    {step.params.map((param) =>
+                      param.isVariable ? (
+                        <span
+                          key={`${param.nodeId}-${param.paramKey}`}
+                          data-param-key={param.paramKey}
+                          data-param-variable={String(param.isVariable)}
+                          className="text-celadon"
+                        >
+                          {t('chat.sediment.paramVariable', { key: param.paramKey, value: String(param.value) })}
+                        </span>
+                      ) : (
+                        // 「残留参数」是要人补的洞：语气档交进 `Tag`，wash 从此不在面板里拼（6.2-19）。
+                        <Tag
+                          key={`${param.nodeId}-${param.paramKey}`}
+                          tone="seal"
+                          data-param-key={param.paramKey}
+                          data-param-variable={String(param.isVariable)}
+                        >
+                          {t('chat.sediment.paramResidual', { key: param.paramKey, value: String(param.value) })}
+                        </Tag>
+                      ),
+                    )}
                   </span>
                 ) : null}
               </li>

@@ -2,7 +2,7 @@ import { Eraser, PlugZap, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { LlmCheckView, LlmLegName, LlmProviderView, LlmSettingsView } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField, DeskSelect, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect, Tag, deskReason } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -234,9 +234,9 @@ export function ModelSettingsPanel() {
           <li className="text-amber" data-testid="settings-model-missing">
             {t('settings.model.missingHeading')}
             {legView.missing.map((field) => (
-              <span key={field} className="mr-1 rounded-chip border border-amber/45 bg-amber-wash px-1.5 py-0.5">
+              <Tag key={field} tone="amber" className="mr-1">
                 {t(`settings.model.field.${field}`)}
-              </span>
+              </Tag>
             ))}
           </li>
         )}

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
   ComponentType,
+  HTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
@@ -404,6 +405,53 @@ export function Banner({ tone, size = 'full', reason, markers, className = '', c
       <Icon size={BANNER_ICON_SIZE[size]} className="mt-0.5 shrink-0 opacity-80" aria-hidden="true" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
     </div>
+  );
+}
+
+/**
+ * 语气档 → 芯片的描边 / 洗底 / 文字（稿 `assets/shared.css:521-551` 的 `.tag.<tone>` 就这三件）。
+ * **全渲染层只有 `src/ui/**` 里写 `*-wash` 字面量**：面板要读状态色就交一个 tone 名出去，
+ * 不再自己拼 class（§2.5，也是 6.2-19 之后那条机检能成立的前提）。
+ * 一条刻意的偏离写在这里而不是悄悄改：稿上墨案描边是 0.3、毡案是 0.4（`shared.css:1287-1296`），
+ * 实现取 `/40` 一支共用——它同时是现状多数芯片已经在用的读数，为 0.1 的 alpha 开一条主题分支不值。
+ */
+const TAG_TONE_CLASS: Record<BannerTone, string> = {
+  celadon: 'border-celadon/40 bg-celadon-wash text-celadon',
+  amber: 'border-amber/40 bg-amber-wash text-amber',
+  seal: 'border-seal/40 bg-seal-wash text-seal',
+  jade: 'border-jade/40 bg-jade-wash text-jade',
+};
+
+/** 稿上 `.tag` 本体（不点语气档那一档）：`--ink-750` 底 + `--fg-2` 文字，即中性回执档。 */
+const TAG_NEUTRAL_CLASS = 'border-line bg-ink-750 text-slate-300';
+
+export interface TagProps extends HTMLAttributes<HTMLSpanElement> {
+  /**
+   * 语气档；不给就是中性回执档。与 `Banner` 共用同一套四档名，界面不许发明第五档。
+   * 语义按 §5 的效果归属：celadon=系统在说话，amber=等人，seal=风险/失败，jade=办好了。
+   */
+  tone?: BannerTone;
+  /** 追加 class（只放外边与宽度档：`mr-1`、`mt-2` 这类，颜色与几何由原件管） */
+  className?: string;
+}
+
+/**
+ * 状态芯片（稿上的 `.tag`）：读"这一格/这一条此刻是什么状态"的那颗小标签。
+ * 它与 `EffectChip` 是稿上两种形状，不是同一件事的两份实现——`EffectChip` 画"会不会离开这台机器"
+ * （带前置点与 `data-effect`），`Tag` 画"此刻的状态"；两者都只有一只入口（§2.5）。
+ * 行与卡片的语气**不归它管**：稿上行与卡片用描边表状态、底材留在墨面上（`shared.css:861-900`），
+ * 那一族是 6.2-20 的射程。
+ * @param tone 语气档（可选，不给走中性档）
+ * @param className 只放外边/宽度档的追加 class
+ * @param rest 透传给 `span` 的原生属性（harness 的 `data-*` 锚点从这里逐字过）
+ */
+export function Tag({ tone, className = '', ...rest }: TagProps) {
+  return (
+    <span
+      {...(tone ? { 'data-tone': tone } : {})}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-chip border px-[7px] py-px text-[10.5px] ${tone ? TAG_TONE_CLASS[tone] : TAG_NEUTRAL_CLASS} ${className}`}
+      {...rest}
+    />
   );
 }
 

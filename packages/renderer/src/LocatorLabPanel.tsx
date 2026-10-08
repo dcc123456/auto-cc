@@ -13,7 +13,7 @@ import type {
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
 import { formatClock } from './format';
-import { Banner, DeskButton } from './ui/controls';
+import { Banner, DeskButton, Tag, type BannerTone } from './ui/controls';
 
 /** 自愈播报最多留几条：面板是验收入口，不是历史库（与会话面板的失效横幅同一形状）。 */
 const RELOCATED_LIMIT = 3;
@@ -72,15 +72,16 @@ const LAB_SPECS: LocateSpec[] = [
 ];
 
 /**
- * 定位结局 → 颜色，四态各占一条语义（plan §5）：`matched` 是唯一的好消息 → 玉；
+ * 定位结局 → 语气档，四态各占一条语义（plan §5）：`matched` 是唯一的好消息 → 玉；
  * `ambiguous` / `below-score` 都是「有候选但闸门没敢动」，要人看一眼才能继续 → 同一档琥珀；
  * `not-found` 是终局失败 → 朱砂。原先给 `ambiguous` 的紫在本项目调色板上没有语义位，删掉。
+ * 存 tone 名而不是 class 串：wash 只在 `src/ui/**` 里拼（6.2-19）。
  */
-const STATUS_CLASS: Record<LocateResultView['status'], string> = {
-  matched: 'border-jade/45 bg-jade-wash text-jade',
-  ambiguous: 'border-amber/50 bg-amber-wash text-amber',
-  'below-score': 'border-amber/50 bg-amber-wash text-amber',
-  'not-found': 'border-seal/55 bg-seal-wash text-seal',
+const STATUS_TONE: Record<LocateResultView['status'], BannerTone> = {
+  matched: 'jade',
+  ambiguous: 'amber',
+  'below-score': 'amber',
+  'not-found': 'seal',
 };
 
 /**
@@ -331,15 +332,9 @@ export function LocatorLabPanel() {
             data-locate-status={lastLocate.status}
           >
             <div className="flex items-center gap-2">
-              <span className={`rounded border px-1.5 py-0.5 text-[11px] ${STATUS_CLASS[lastLocate.status]}`}>
-                {t(`locator.status.${lastLocate.status}`)}
-              </span>
+              <Tag tone={STATUS_TONE[lastLocate.status]}>{t(`locator.status.${lastLocate.status}`)}</Tag>
               <span className="text-[11px] text-slate-400">{t(lastLocate.spec.description)}</span>
-              {lastLocate.relocated && (
-                <span className="rounded border border-jade/45 bg-jade-wash px-1.5 py-0.5 text-[11px] text-jade">
-                  {t('locator.relocatedFlag')}
-                </span>
-              )}
+              {lastLocate.relocated && <Tag tone="jade">{t('locator.relocatedFlag')}</Tag>}
             </div>
             <p className="break-all text-[11px] text-slate-400">{t('locator.reason', { reason: lastLocate.reason })}</p>
             {lastLocate.chosen && (

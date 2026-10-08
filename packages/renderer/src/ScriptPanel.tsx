@@ -12,7 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
-import { Banner, DeskButton, DeskCheck, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskCheck, DeskField, DeskSelect, Tag } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -379,16 +379,9 @@ export function ScriptPanel() {
                     />
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-                        <span
-                          data-script-badge={draft.origin}
-                          className={`rounded-chip border px-1.5 py-0.5 text-[11px] ${
-                            draft.origin === 'template'
-                              ? 'border-amber/50 bg-amber-wash text-amber'
-                              : 'border-jade/45 bg-jade-wash text-jade'
-                          }`}
-                        >
+                        <Tag data-script-badge={draft.origin} tone={draft.origin === 'template' ? 'amber' : 'jade'}>
                           {t(`script.origin.${draft.origin}`)}
-                        </span>
+                        </Tag>
                         <span data-script-refs={draft.evidenceRefs.length}>
                           {draft.evidenceRefs.length > 0
                             ? t('script.refs', {
