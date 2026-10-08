@@ -356,6 +356,15 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   （度量行与紧挨其下的计时行各截一张，两张字节完全相同），要独立画面就在页面里 `scrollIntoView({ block: 'start' })`
   后不带 `--reveal` 重拍。第②条与 §9 的 5.10-18 是同一条硬步骤：收截图前对整批跑 `md5 -q | sort | uniq -c`。
 
+- **实测（8.3-01 补窗）harness 再补两条**：⑮ `eval` 取脚本的入参名是 **`--expr-file`**，写成 `--file` **不报错**——
+  未知参数被吃掉后落回 `expression('1')`（`packages/testing/src/cli.ts:172`），于是每条探针都稳定回一个 `1`，
+  看上去像"页面返回了 1"。本轮有三份读数因此作废。探针返回值不合逻辑时第一步是核对参数名，不是怀疑页面。
+  ⑯ **真实抓取在跑的时候不许改主进程射程内的源码**：`scripts/dev.ts` 的 esbuild watch 见到 `packages/platform-boss/**`
+  （它被 `dist/main.cjs` 打进主进程）就重启 Electron，表现为那一轮**被 SIGTERM 掐在半页**——视图停在
+  `data:text/html…`、`jd.capture.status().lastRun` 回 `null`（内存态整个丢了）、harness 那侧 exit 13
+  「unsettled top-level await」。这不是抓取失败，是进程被换掉，**不能把它当产品结局写进读数**；
+  顺序一律排成「先跑完 → 再改代码/写文档」，改配置那一条（§9 的 2.5）同理。
+
 - **实测（2.1-12 补窗）`window.autoCC` 的调用口径有两条必须照 bridge 声明写**：① **实参是位置实参**——
   `browser.act.click` 的 args 是 `[spec]`（`packages/shared/src/bridge.ts` 的 `BridgeCalls`），把 agent 工具层那个
   `{ spec }` 形状（`act-service.ts` 的 `input: z.strictObject({ spec })`）整包传给 bridge，`spec.candidates` 就是 undefined，

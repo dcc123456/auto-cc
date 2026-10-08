@@ -1,0 +1,180 @@
+真实搜索、抽取时序、详情页形状：8.3 的现场读数（spec 8.3-01 / 8.3-02）
+
+取证时间：2026-10-08 17:2x–18:0x（本轮）。通道
+`pnpm harness eval --port 10222 --url <5173|zhipin> --expr-file tmp/83/<脚本>.js`。
+页面是**用户正在使用的** dev 实例（CDP 10222，userData `tmp/v6-userdata`）里的 BOSS 内核视图。
+本片对该视图**只 attach 读取，不 navigate**：所有出导航都由 app 自己的口发起
+（`jd.capture.run` → 适配器 → `browser.page.navigate`），渲染层白名单里根本没有 `browser.page.navigate`
+（`packages/shared/src/bridge.ts` 的调用表白名单），所以界面也替我导航不了。
+原始 stdout 留在 `tmp/83/*.out`（不进 git，§7.5）。
+
+## 一、真实搜索确实按知识包的参数映射发了出去
+
+人在界面上打的关键词是「前端开发工程师」、城市那一格打的是**人话**「上海」，
+`tmp/83/count-cards.js` 在搜索页现读的地址与卡片数：
+
+    { "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100",
+      "liJobCardBox": 15, "divJobCardWrap": 15, "aJobName": 15, "jobSalary": 16,
+      "firstHref": "/job_detail/fca7854dd39fa1f70nN93t6_EVNU.html",
+      "scroll": { "y": 0, "docH": 2434 } }
+
+三条要分开读：
+1. `city=101020100` —— 8.3-05 那条换算口在活体上闭环了（人打「上海」，出去的是站点认的码）；
+2. 卡片三种数法都是 **15 枚**，与知识包 `jobCard` 两条候选的 `hits: 15` 逐字对上；
+3. `jobSalary: 16` 比卡片多一枚 —— 顶部还有一条薪资节点不属于卡片，抽取按容器子树解析所以不受影响，
+   记在这里是为了下一次读数别再把它当"卡片少了一枚"。
+4. `firstHref` 是 `/job_detail/<jobId>.html`、**不带 `securityId`**，这条直接喂给第四节。
+
+## 二、缺陷：导航返回得太早，抽取抽到的是真空
+
+修之前跑的第一轮（`tmp/83/run-capture.out`）：
+
+    "startedRun": { "platform": "boss", "keyword": "前端开发工程师", "city": "上海",
+                    "rounds": 1, "containers": 0, "stored": 0, "captured": [], "skipped": [],
+                    "stoppedBy": "no-new-content" }
+
+同一时刻页面自己报的是 **15 张卡片在场**（第一节的读数）。也就是说：卡片长出来了，抽取读到 0 个容器，
+编排层据此判「没有新内容」而停 —— 结局字段是 `no-new-content`，界面会显示"滚了一轮没长东西"，
+而真相是我们的时序错了。这不是新坑，AGENTS.md §9 的 2.1-12 补窗最后一条早就写明
+「`page.extract` 在 `navigate` 刚返回时就抽会拿到 `containers: 0`（卡片是 `/api/jobs` 异步长出来的，
+而 navigate 常与首屏装载相撞返回信封 `(-3) loading`），**必须先等容器出现再抽**」——
+那一片是靠人在测试里手动等，抓取这条路径没有把这一步立进代码，所以这一轮又撞了一次。
+
+**修法（只改适配器那一侧，不新增机制）**：抽取之前先 `browser.act.waitFor({ kind: 'appear', spec })`，
+等的就是这一段知识包声明的那条容器定位（`pack.capture.list.container` / `pack.capture.detail.container`）：
+
+    const waitForContainers = async (section: 'list' | 'detail'): Promise<ActReadback> =>
+      act.waitFor({ kind: 'appear', spec: locatorFor(pack.capture[section].container) });
+    const readListing = async (): Promise<JobSummary[]> => {
+      await waitForContainers('list');
+      return toSummaries(await page.extract(requestFor('list')));
+    };
+
+三条刻意的取舍：
+- **不写 `setTimeout`**：等待上限与 MutationObserver 提前结束都归 `browser.act` 的配置说话
+  （缺省 5000ms），在适配器里再放一只定时器就是第二套节奏（AGENTS.md §2.7）。
+- **`appear` 那一支不打分**：`locator-script.ts` 的 `buildWaitScript` 用
+  `scanCandidates(candidates).length > 0` 直接判存在，所以裁定⑤ 降档到 30 的读档阈值、
+  以及多候选并列的歧义罚分，都不可能把"已经长出来了"判成"没长出来"（这是这一支能当闸门用的原因）。
+- **等不到也照样抽**：`waitFor` 的超时是结局不是异常，抽取自己会回 `containers: 0`，
+  编排层照常停在 `no-new-content` 并把原因留给界面——比在这里编一个"等到了"的假象诚实。
+
+`BossActionHand.waitFor` 的类型随之从 `'textChanges'` 放宽到 `'appear' | 'textChanges'`
+（外发那两条用 `textChanges`，抓取这两条用 `appear`），仿站替身 `FakeAct.waitedFor` 同步放宽。
+
+单测读数（`pnpm -F @auto-cc/plugin-platform-boss test`）：**EXIT=0 / 157 passed**，其中新增三条：
+1. 读列表的调用序 `['navigate','wait:appear','extract']`，且 `act.waitedFor` 逐字等于
+   `[{ kind: 'appear', spec: pack.locators.jobCard }]`（等的是知识包那一条，不是写死的选择器）；
+2. 读详情同样先等，等的是 `detailRoot`（`waitedFor` 长两条：`search()` 那一轮先等过 list）；
+3. `waitStatus:'timeout'` 时抽取照跑、`summaries` 回空数组，调用序不变（等不是判据）。
+
+## 三、修完之后：12 行真入库，字段完整率按字段报
+
+`tmp/83/quick-status2.js` 读 `jd.capture.status().lastRun`：
+
+    rounds 1 · containers 12 · stored 12 · stoppedBy target-count · total 12
+    skipped: 12 条，reason 逐字都是「详情页读不到岗位职责正文」
+
+**`containers: 12` 不是"页面只有 12 张卡"**：第一节的页面读数是 15 枚，而 `cordis.yml:198` 的
+`browser.page.extractRowLimit: 12` 把单次抽取截到 12 条，`page.extract()` 带回的 `truncated: true`
+在适配器的 `toSummaries()` 那一层被丢掉了 —— 抓取结局里没有任何一格说"这一轮被截断过"。
+这正是 8.3-03 要拦的形态（"界面报被截断而不是谎报全量"），本轮把它**证实在**而没有修，
+欠项进 plan §7 第 12 条。顺带一条对不上的数：本轮界面上那格"目标 12 条"与截断上限 12 撞成同一个数，
+所以 `stoppedBy: target-count` 看着像是"够数了"，实际是"读不满 15 就先够 12"。
+
+字段完整率（`tmp/83/field-completeness.js` → `jd.store.list(30)`，当时库内 **19 行**）：
+
+    title 19/19 · company 19/19 · city 19/19 · experience 19/19 · education 19/19 · sourceUrl 19/19
+    salaryText 0/19 · description 0/19 · requirements 0/19 · postedText 0/19
+
+⇒ 8.3-02 的"≥10 条入库"这一半是**真到货**；"字段完整率如实播报"这一半报的是上面这四个 0。
+两个 0 的原因不同，不能混着说：
+- `salaryText` 空是**已知且刻意**的：列表那一格是私用区字形混淆（`font-family: kanzhun-mix`，
+  逐码点 `e03a 4b` 这类），做字体映射就是反爬对抗，按 §8.3 红线不做（8.0-03 第五节第 1 条）。
+  明文薪资在现场读到了，在详情页的 `div.info-primary` / `div.job-banner` 那一句里（第四节）。
+- `description` / `requirements` 空是**定位未取证**：上线包声明的是形状A 面板的 `p.desc` 与
+  `ul.job-label-list > li`，而抓取走的是形状B 独立详情页，那两条在那里 0 命中。第四节记现场读到的节点。
+- `postedText` 空：知识包从来没声明过发布时间字段（8.0-04 写明"那一格本次没有取证"），属于欠项不是缺陷。
+
+## 四、详情页形状分叉（plan §7 第 8 条）——答案：能打开，但正文节点要另取一条
+
+plan 里那两条分叉的前置问题是"不带 `securityId` 的 `/job_detail/<jobId>.html` 从来没实测过"。
+实测结论：**打得开，而且是完整的一页**（`tmp/83/detail-text.js`，
+`url=https://www.zhipin.com/job_detail/7c8908889d563aed0nNz3NS5ElJV.html`、
+`readyState=complete`、`bodyLen 1507`、`htmlLen 449542`，title「「快游戏前端工程师招聘」_来远电子招聘-BOSS直聘」）。
+所以抓取代码维持 `navigate(detailUrl)` 的节奏是对的，不需要改成"读面板 → 换卡"。
+
+正文为什么读不到，节点级读数如下（`tmp/83/detail-nodes.js`，同一页）：
+
+    div.job-detail                 count 1 · innerText 1360 字 · head「微信 扫 码分享 举报 职位描述 .精通快游戏开发流程…」
+    div.detail-content-header      内含 h3「职位描述」（`innerText` 恰为 4 字），父级 div.job-detail-section
+    div.job-sec-text               count 2：
+      [0] cls="job-sec-text"            len 148 · 7 个子节点 · head「.精通快游戏开发流程，负责快游戏各种接口设计、开…」 ← 职位描述正文
+      [1] cls="job-sec-text fold-text"  len 391 · 11 个子节点 · head「公司简介：\n上海来远电子成立于2018年…」        ← 公司介绍正文
+    ul.job-label-list > li         0 命中（形状B 没有技能标签这一列）
+    div.job-banner                 count 1 · innerText 103 字 · head「最新 快游戏前端工程师 20-30K  上海 1-3年 学历不限」
+    div.info-primary               count 1 · innerText 56 字 · 同一句明文薪资在里面
+    p.desc / div.job-detail-body / div.job-detail-container   0 命中（那是形状A 面板的节点）
+
+三条结论，都带"不许越过"的边界：
+1. **`div.job-sec-text` 有两条**，正文那条是**不带 `fold-text` 的那一条**。所以将来声明形状B 的
+   `detailDescription` 只能用 `.job-sec-text:not(.fold-text)` 这类**排他**写法，
+   写成 `.job-sec-text` 会把公司介绍当岗位职责入库（这是会污染简历的事实错误，不是显示瑕疵）。
+2. **形状B 没有 `ul.job-label-list`** ⇒ `detailRequirement` 在独立详情页**没有对应节点**。
+   页面上另有的 `div.tag-all.job-tags`（16 枚，「就近租房补贴年度体检…」）是**福利标签**，
+   语义不是任职要求，不能拿来冒充。这一格在形状B 就是读不到，只能报缺。
+3. 明文薪资在 banner 那一格，且是「状态行 + 岗位名 + 薪资 + 城市 + 经验 + 学历」混成的一句话
+   （plan §7 第 7 条已经预见过这一形状）。要走"解析 banner 文本"那条，得连 `salaryText` 一起裁，
+   属于 8.3 之后的独立一片，**本片没动代码**。
+
+## 五、本片没修的一处界面缺陷（已进 plan §7 第 11 条）
+
+`tmp/83/modal-vs-slot.js`（窗口 1200 宽）：`consent-card` x341 w518（右缘 859）·
+`consent-grant` x651 w208 y563 h30 · `kernel-view-slot` x745 w455 h654 ⇒ `grantOverlapsSlot: true`，
+重叠的是 grant 右侧 **114×30** 那一条。`WebContentsView` 画在 DOM 之上，所以那张签字遮罩在重叠区
+盖不住真实站点。本轮的处置是绕开：签字期先 `sessions.close()` 卸载视图，签完再重开
+（用户那句「我没有看到我能在哪里确认」就是这一条的现场表现）。真修属于渲染层 6.2 的遮罩互斥族，不在 P8 顺手改。
+
+## 六、还欠着的读数（写清楚，免得下一片以为是做过了）
+
+- 8.3-03「滚动加载真跑 + `extractRowLimit` 截断时界面报被截断」：**前半没验、后半已证实在缺**（见第三节）。
+  滚动本身这一轮没跑到第二轮就停是因为第一轮已经够 12 条（`stoppedBy: target-count`），
+  所以"滚一下真长出下一屏"这条还得单独跑；而截断信号 `truncated` 在适配器那一层就被丢了，
+  界面上根本没有可以报的那一格。调低 `extractRowLimit` 另起一轮才干净
+  （改配置会重建服务并关掉已挂载的会话视图，按 §9 的「改配置 → 重开会话 → 跑」）。
+- 城市码表其余城市（8.3-05 承诺"随 8.3-01 在搜索页筛选器上现读现录"）：**本轮没录**，
+  目前表里仍只有 `上海: 101020100` 一枚；界面填别的城市就是当场 `INVALID_ARGUMENT`（刻意）。
+- 页面侧登录信号（plan §7 第 9 条的前置动作，`authMinPresence` 能否放松到 1）：探针
+  `tmp/83/page-auth-signal.js` 已备好，等视图落在真实页面上再读；在那之前配置维持保守档 2。
+- **`经验` 那一维在界面上填了会静默失效**（8.3-01 的第三条字段撞出来的，已进 plan §7 第 13 条）：
+  `JobLabPanel.tsx:376` 确实有 `jd-experience` 那只输入框、`:193` 也真的把它塞进 `criteria.experience`，
+  但 `boss.json` 的 `search.params` 只登记了 `keyword` / `city` 两个参数名，于是 `searchUrl`
+  （`adapter.ts:234`）按"包里没登记就不进 URL"把它整条丢掉。代码注释写的是"不编一个假参数名"，
+  这条纪律没错，但**结果是用户打了一格字而结果集没筛**，与 8.3-05 修掉的 `city=上海` 是同一类静默。
+  两条出路都在下一片：① 现场取到 BOSS 的经验筛选控件，把它做成"页面动作"而不是 URL 参数；
+  ② 在界面那一格上明说"这一维本站点不经地址筛"，或直接拒收非空值。本片只把事实记下来，没动代码。
+- 第二枚详情页的节点级双证：见第七节（补录）。
+
+## 七、补录：第二枚详情页的节点读数（同一支探针，隔一轮再跑）
+
+`tmp/83/detail-nav-run3.js` 走 app 自己的口（`sessions.open('boss')` → `jd.capture.run({keyword:'Vue 前端',
+city:'上海', limit:3})`，结局 `rounds 1 · containers 12 · stored 12 · stoppedBy target-count · total 24`），
+视图落在 `https://www.zhipin.com/job_detail/24a7c9117fbb2cd00nNy2NW9EFpV.html`（岗位「高级前端开发」，
+公司「上海松间听溪网络科技」）。`tmp/83/detail-nodes.js` 在同一页重跑：
+
+    div.job-sec-text        count 1 · len 401 · head「任职要求：\n1、重点要求：必须要有熟…」
+    div.job-detail          count 1 · len 1353 · head「微信扫码分享 举报\n职位描述\n技术博…」
+    div.detail-content-header > h3   文本恰为「职位描述」（与第一枚逐字同形）
+    div.job-banner          count 1 · len 64 · 「最新\n高级前端开发 10-13K」 ← 明文薪资
+    div.info-primary        count 1 · len 55 · 同一句在里面
+    ul.job-label-list > li  0 命中
+
+⇒ 第四节那三条在**两枚不同公司的页面**上各自成立，并把第一条收紧成一句可以直接写进知识包的话：
+**`.job-sec-text` 在形状B 上枚数是 1 或 2（有公司介绍时才是 2），公司介绍那枚多带一个 `fold-text` 类**，
+所以 `.job-sec-text:not(.fold-text)` 在两枚页面上都是 **hits=1**。
+另有一条第一枚看不出来的形状：这一页的正文节点里**岗位职责与任职要求混排在同一块**（开头就是「任职要求：」），
+所以 `JobDetail.requirements` 在形状B 根本没有独立来源，只能作为 `description` 的一部分进来——
+下一片若要把 `detailRequirement` 声明成形状B 的某一条，就是编节点，不许。
+
+**这一节只是取证，本片没有动 `boss.json`**：按 `docs/plans/02-browser-automation/plan.md:1036`
+（禁止发布未实测的选择器）与裁定②，取证与发布可以分片，但不能反过来。
