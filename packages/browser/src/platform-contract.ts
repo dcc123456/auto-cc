@@ -200,6 +200,21 @@ export const knowledgePackSchema = z.strictObject({
       /** 一条消息项的定位名（读回复时的容器） */
       messageItem: z.string().min(1),
       /**
+       * 会话列表里「一行 = 一个联系人」的定位名（spec 8.4-05，证据 8.4-04 第一节）。
+       *
+       * 与下面那只成对出现，且只在 `targetParam` 缺席时才是必需的：真 BOSS 的会话页不给可直接拼的
+       * 地址（`/web/geek/chat` 后面挂什么都没用），未选中会话时输入框根本不挂载，
+       * 所以「先选中哪一行」是打招呼的前置，不是可选优化。
+       */
+      conversationRow: z.string().min(1).optional(),
+      /**
+       * 会话行上**用于认出目标**的那个小节点的定位名（真 BOSS 实测是公司名那一格，证据 8.4-04 第二节）。
+       *
+       * 必须是小节点而不是整行：整行的中心被行右侧的操作图盖住，且行本身是虚拟列表的重渲染节点，
+       * 按整行点会得到 `WAIT_TIMEOUT` 或点错行（同一条实测负结论记在 8.0-05 第四节）。
+       */
+      conversationRowLabel: z.string().min(1).optional(),
+      /**
        * 消息正文在容器**里面**的定位名。
        *
        * 必须是数据而不是代码里的一句 `textContent`：页面上的方向标记（「对方：」这类）与正文常在同一个
@@ -387,17 +402,32 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
       }
     }
   }
-  // 会话页的五处定位名同理：拼错的名字必须在加载时发现，而不是等打招呼时点到一个不存在的按钮。
+  // 会话页的各处定位名：拼错的名字必须在加载时发现，而不是等打招呼时点到一个不存在的按钮。
   const chat = parsed.data.chat;
   if (chat) {
-    for (const [key, name] of [
+    // 选行那两只只在声明了才查——它们是可选形状（仿站靠 URL 参数切会话，根本没有列表行）。
+    const chatLocatorKeys: [string, string][] = [
       ['input', chat.input],
       ['sendButton', chat.sendButton],
       ['statusLine', chat.statusLine],
       ['messageItem', chat.messageItem],
       ['messageBody', chat.messageBody],
-    ] as const) {
+    ];
+    if (chat.conversationRow) chatLocatorKeys.push(['conversationRow', chat.conversationRow]);
+    if (chat.conversationRowLabel) chatLocatorKeys.push(['conversationRowLabel', chat.conversationRowLabel]);
+    for (const [key, name] of chatLocatorKeys) {
       if (!locatorNames.has(name)) problems.push(`chat.${key}：引用了不存在的定位名「${name}」`);
+    }
+    // 成对规则：只声明一只选不出目标（有行没标签=不知道认哪个字，有标签没行=等不到列表长出来）。
+    if (Boolean(chat.conversationRow) !== Boolean(chat.conversationRowLabel)) {
+      problems.push('chat：conversationRow 与 conversationRowLabel 必须成对出现（选行这一步两只都要用）');
+    }
+    // 「按 URL 切会话」与「按列表行选会话」必须至少有一种，否则 `chat` / `readReplies` 只能对着
+    // **当时屏幕上恰好选中的那条**动手——那既是发错人，也是把别人的消息记成调用方要的那个 jobId。
+    if (!chat.targetParam && !chat.conversationRow) {
+      problems.push(
+        'chat：既没有 targetParam（URL 能直接定位会话）也没有 conversationRow/conversationRowLabel（按列表行选中），无法确定动作要落在哪条会话上',
+      );
     }
   } else if (parsed.data.capabilities.some((item) => item === 'chat' || item === 'readReplies')) {
     // 声明了会话能力却没有会话知识 = 到了真实页面上只能靠猜，所以这里就判包不合法。

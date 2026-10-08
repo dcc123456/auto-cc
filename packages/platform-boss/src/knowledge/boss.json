@@ -303,6 +303,40 @@
           }
         }
       ]
+    },
+    "chatConversationRow": {
+      "description": "会话列表里的一行 = 一个联系人。**只当行容器用**（等列表长出来、数有几行），不当认目标的字：整行文本是「角标+时间+姓名+公司+职位+最后一句」的拼接，没法用来比对目标（证据 8.4-04 第一节）。行上没有任何可用主键——逐行枚举属性只拿到 role=listitem 与空 class，子节点上只有值为空的 Vue data-v-* 散列，8.0-05 那条「d-c 不是会话身份」的负结论在第二批行上再次成立",
+      "cardinality": "many",
+      "effect": "read",
+      "candidates": [
+        {
+          "strategy": "css",
+          "value": "ul[role=\"group\"] > li[role=\"listitem\"]",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.4-04-conversation-selection-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791455460000,
+            "hits": 5
+          }
+        }
+      ]
+    },
+    "chatConversationLabel": {
+      "description": "会话行上**用于认出目标**的那个小节点：真 BOSS 是公司名那一格。两条实测约束：① 它在 span.name-box 里没有自己的类名，是按位置（第二个子节点）命中的，站点插一枚新图标就会错位——兜法不是猜，而是「读时整串比对目标 + 点时把它读回的文本作为 expectText 交给动作层再比一次」（证据 8.4-04 第三节）；② 必须按这种小节点定位而不是按整行：宽视图里整行中心被行右侧的 div.user-operation 盖住，且行本身是虚拟列表的重渲染节点，按整行点实测过 WAIT_TIMEOUT（证据 8.0-05 第四节）。同一屏另两条已否决：span:not(.name-text) 命中 10 条（把职位也算进去）、span.name-text 命中 5 条但装的是联系人姓名（PII，不做定位标签）",
+      "cardinality": "many",
+      "effect": "read",
+      "candidates": [
+        {
+          "strategy": "css",
+          "value": ".friend-content-warp .title-box .name-box > span:nth-child(2)",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.4-04-conversation-selection-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791455460000,
+            "hits": 5
+          }
+        }
+      ]
     }
   },
   "capture": {
@@ -338,6 +372,8 @@
   },
   "chat": {
     "entryPath": "/web/geek/chat",
+    "conversationRow": "chatConversationRow",
+    "conversationRowLabel": "chatConversationLabel",
     "input": "chatInput",
     "sendButton": "chatSendButton",
     "statusLine": "chatStatus",

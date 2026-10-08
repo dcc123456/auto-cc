@@ -304,25 +304,15 @@ describe('会话页知识（spec 2.5-05）', () => {
    * @returns 交给 `parseKnowledgePack` 的未知值
    */
   function chatPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    /**
-     * 造一条只写 css 的定位声明（会话页控件的候选顺序不是本条验收的对象）。
-     * @param many 页面里有多个这样的节点（消息项）还是只有一个
-     * @returns 合法的定位声明
-     */
-    const pageLocator = (many: boolean) => ({
-      description: '会话页节点',
-      cardinality: many ? 'many' : 'single',
-      candidates: [{ strategy: 'css', value: '.node' }],
-    });
     return minimalPack({
       capabilities: ['search', 'chat', 'readReplies'],
       locators: {
-        searchInput: pageLocator(false),
-        chatInput: pageLocator(false),
-        chatSend: pageLocator(false),
-        chatStatus: pageLocator(false),
-        chatMessage: pageLocator(true),
-        chatMessageBody: pageLocator(false),
+        searchInput: chatLocator(false),
+        chatInput: chatLocator(false),
+        chatSend: chatLocator(false),
+        chatStatus: chatLocator(false),
+        chatMessage: chatLocator(true),
+        chatMessageBody: chatLocator(false),
       },
       chat: chatSection,
       ...overrides,
@@ -371,6 +361,56 @@ describe('会话页知识（spec 2.5-05）', () => {
       expect(errorDetails(error).problems).toEqual([
         'chat.input：引用了不存在的定位名「ghostInput」',
         'chat.statusLine：引用了不存在的定位名「ghostStatus」',
+      ]);
+    }
+  });
+
+  it('配齐选行那两只时原样落地，两条定位名都参与存在性检查（spec 8.4-01）', () => {
+    const pack = chatPack({
+      locators: {
+        ...chatLocators(),
+        chatRow: chatLocator(true),
+        chatRowLabel: chatLocator(true),
+      },
+      chat: { ...chatSection, conversationRow: 'chatRow', conversationRowLabel: 'chatRowLabel' },
+    });
+    expect(pack.chat).toMatchObject({ conversationRow: 'chatRow', conversationRowLabel: 'chatRowLabel' });
+  });
+
+  it('选行只声明一只时拒收：有行没标签不知道认哪个字，有标签没行等不到列表长出来', () => {
+    const rowOnly = {
+      capabilities: ['search', 'chat', 'readReplies'],
+      locators: { ...chatLocators(), chatRow: chatLocator(true) },
+      chat: { ...chatSection, conversationRow: 'chatRow' },
+    };
+    const labelOnly = {
+      capabilities: ['search', 'chat', 'readReplies'],
+      locators: { ...chatLocators(), chatRowLabel: chatLocator(true) },
+      chat: { ...chatSection, conversationRowLabel: 'chatRowLabel' },
+    };
+    for (const overrides of [rowOnly, labelOnly]) {
+      try {
+        parseKnowledgePack(chatPack(overrides));
+        expect.unreachable('应当抛出结构化错误');
+      } catch (error) {
+        expect(errorDetails(error).problems).toEqual([
+          'chat：conversationRow 与 conversationRowLabel 必须成对出现（选行这一步两只都要用）',
+        ]);
+      }
+    }
+  });
+
+  it('既不能按 URL 切会话、也不能按列表行选会话时拒收：动作只能落在屏幕恰好选中的那条上', () => {
+    try {
+      parseKnowledgePack(
+        chatPack({
+          chat: { ...chatSection, targetParam: undefined, conversationRow: undefined, conversationRowLabel: undefined },
+        }),
+      );
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(errorDetails(error).problems).toEqual([
+        'chat：既没有 targetParam（URL 能直接定位会话）也没有 conversationRow/conversationRowLabel（按列表行选中），无法确定动作要落在哪条会话上',
       ]);
     }
   });
@@ -668,27 +708,30 @@ describe('上线包与许可名单（spec 8.1-01 / 8.1-02）', () => {
 });
 
 /**
+ * 造一条 css 级的定位声明（会话页控件的候选顺序不是本组用例的对象）。
+ * @param many 页面里有多个这样的节点（消息项、列表行）还是只有一个
+ * @returns 合法的定位声明
+ */
+function chatLocator(many: boolean): Record<string, unknown> {
+  return {
+    description: '会话页节点',
+    cardinality: many ? 'many' : 'single',
+    candidates: [{ strategy: 'css', value: '.node' }],
+  };
+}
+
+/**
  * 造一组会话页定位声明（方向判据那两条用例要用，形状与被 `chat` 段引用的五处一致）。
  * @returns 五个定位名的声明表
  */
 function chatLocators(): Record<string, unknown> {
-  /**
-   * 造一条 css 级的单节点声明。
-   * @param many 页面里有多个这样的节点（消息项）还是只有一个
-   * @returns 合法的定位声明
-   */
-  const pageLocator = (many: boolean) => ({
-    description: '会话页节点',
-    cardinality: many ? 'many' : 'single',
-    candidates: [{ strategy: 'css', value: '.node' }],
-  });
   return {
-    searchInput: pageLocator(false),
-    chatInput: pageLocator(false),
-    chatSend: pageLocator(false),
-    chatStatus: pageLocator(false),
-    chatMessage: pageLocator(true),
-    chatMessageBody: pageLocator(false),
+    searchInput: chatLocator(false),
+    chatInput: chatLocator(false),
+    chatSend: chatLocator(false),
+    chatStatus: chatLocator(false),
+    chatMessage: chatLocator(true),
+    chatMessageBody: chatLocator(false),
   };
 }
 

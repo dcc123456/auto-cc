@@ -1,0 +1,74 @@
+8.4-04 真 BOSS 会话列表行的定位证据（V-人工，本机 macOS，2026-10-08，真实账号在场）
+  取证方式：内核视图停在 `https://www.zhipin.com/web/geek/chat`（**是用户自己在界面上点进「消息」留下的**，
+  这一轮我没有经任何产品口导航——两次尝试经 `conversation.store.syncFrom` 过去都因为探针自己的键写错而没成，见第五节）。
+  我只 attach 读取（`harness eval --url zhipin --expr-file …`），一次导航、一次点击、一条消息都没有发生。
+  原始读数在 `tmp/84/chat-shape.out`、`tmp/84/chat-row-nodes.out`、`tmp/84/company-selector-check.out`、`tmp/84/jd-rows.out`，
+  本文件收结论。PII 口径同 8.0-05：联系人姓名只在被忽略的 `tmp/84/` 里作为瞬时读数出现，本文件不落。
+
+一、会话面的整屏形状（现读，视图 `clientWidth=455` 即收窄档）
+  - 列表：`ul[role="group"] > li[role="listitem"]` → **hits=5**，每行 rect 形如 `[20,167,368,78]`（行高 78、行间距 78）。
+  - 行内叶子节点（逐行读回，每行结构一致）：
+      `div.friend-content-warp > div.friend-content`
+        ├─ `div.figure > span.notice-badge`（未读角标，只有第一行有，文本「1」）
+        ├─ `div.text > div > span.time`（形如「09月21日」，rect `[313,184,55,20]`）
+        ├─ `div.text > div.title-box > span.name-box > span.name-text`（**联系人姓名，PII，不落**）
+        ├─ `div.text > div.title-box > span.name-box > span`（**公司名**，第一条 rect `[138,185,117,16]`）
+        ├─ `div.text > div.title-box > span.name-box > span`（职位/title，如「招聘经理」「HR」）
+        └─ `div.text > div.gray.last-msg > span.last-msg-text`（会话最后一句，PII 级别，不落全文）
+      另有一枚 `div.friend-content-warp > div.friend-content > div.user-operation`（行右侧操作图）在 455 宽时 **rect 全 0×0**
+      （窄视图里不显示），所以本轮的中心命中测试全过；但 8.0-05 第四节在宽视图实测过「整行中心被它盖住」，
+      ⇒ 结论不变：**按整行定位不可靠，必须按行内小节点**。
+  - 行上**没有任何可用主键**：逐行枚举属性只拿到 `role=listitem` 与空 `class`，子节点上只有 Vue 的
+    `data-v-<散列>=`（值为空）。8.0-05 那条「`d-c` 不是会话身份」的负结论在第二批行上再次成立。
+  - 未选中会话时：`div#chat-input.chat-input[contenteditable="true"]` 挂载数 **0**，消息区是 `.chat-no-data` 空态。
+    ⇒ 输入框与发送键**只在选中会话之后存在**，所以「选中哪一行」不是可选项，是 8.4 打招呼与 `readReplies` 的共同前置。
+
+二、候选逐条实测（同屏一次跑完，四条候选各自的 hits / 文本 / 矩形）
+  1) `ul[role="group"] > li[role="listitem"]` → hits **5**，文本是整行拼接（角标+时间+姓名+公司+职位+最后一句），
+     即 8.0-05 说的「整行文本没法用来认目标」那一形状。⇒ 只当**行容器**用（等列表长出来、数有几行），不当认目标的字。
+  2) `.friend-content-warp .title-box .name-box > span:nth-child(2)` → hits **5**，
+     文本逐条 = `上海肯德基有限公司 / 紫川软件 / 上海坤亿 / 巨闲网络 / 子雄科技`，
+     矩形逐条 = `[138,185,117,16] / [153,263,52,16] / [153,341,52,16] / [153,419,52,16] / [153,497,52,16]`。
+     顺序核对：`eachRowHasOne=[1,1,1,1,1]`、`companiesInsideRows=5` ⇒ **每行恰好一条、且按文档顺序与行对齐**。
+     中心命中测试：五条全部 `hitIsSelfOrAncestorInRow=true`（点得到，没有被操作图或遮罩接走）。
+     ⇒ 这一条是 `chatConversationLabel` 到货的那一枚候选（读回公司名、并按它的 `hitIndex` 点第 N 行）。
+  3) `.friend-content-warp .title-box .name-box span:not(.name-text)` → hits **10**（公司名 + 职位各 5，
+     文本交替「上海肯德基有限公司 / 经理 / 紫川软件 / 招聘经理 / …」）⇒ **不能用**，它把职位也读成目标。
+  4) `span.name-text` → hits **5**（联系人姓名）。形状上同样能选行，但它装的是 **PII**，
+     而库里与界面上能对上的都是公司名 ⇒ 不作为定位标签，只在需要时作为读数。
+  5) `.gray.last-msg > span.last-msg-text` → hits **5**（每行一条「最后一句」预览）。装的是对话内容而不是目标名，
+     且同一页里两家都是「您好，可以和您聊聊吗？」这种站点自带的第一句 ⇒ 不能当目标标签（认不出是谁、也会两行同字）。
+  被否决的自造形状（写在这里防止下一轮再试）：`.company-text / .job-text / .item-company / .friend-company`
+  在真 BOSS 的会话行上 **hits 全 0**（这些是经验里别的站点的类名，不是这一页的事实）。
+
+三、`nth-child(2)` 这一条的诚实代价（必须随包一起记下）
+  公司名那一格**没有自己的类名**，它在 `span.name-box` 里是第二个子节点。所以这一条是**按位置**而不是按语义命中：
+  站点若把姓名那一格挪走或插进一枚新图标，第 2 格就成了别的内容。兜法不是猜，而是两层拒止：
+  - 读的时候按整串文本比对目标公司名（对不上就 `CONVERSATION_NOT_FOUND`，不发）；
+  - 点的时候把读回的那串文本作为 `expectText` 交给 `browser.act.click`，
+    动作层在派发前重新定位并整串比对（重排即 `LOCATE_FAILED`，见 plan 08 §5 缺口二）。
+  另有一条已知的读回上限：`browser.locate` 的 `candidateLimit` 当期是 **5**，
+  即选行只能在看回的这 5 条里认人。会话多于 5 条时目标是**读不到而拒发**，不是猜一条，
+  这一格欠一次读数（解除条件：在场时把列表滚到底或把 `candidateLimit` 调到 20 再取一次 hits）。
+
+四、库里 `jobId` 的现读形状（同一窗，经产品口 `jd.store.status` / `jd.store.list` 读回）
+  - `total=24 / withDetail=0 / schemaVersion=32`。
+  - `jobId` **全部**是详情页地址的 basename，形如 `<hash>.html`（`bareHash=0 / other=24`），
+    来源是 `https://www.zhipin.com/job_detail/<hash>.html`。
+  - 与会话面的交集：库里 23 个去重公司名（忆伯科技 / 枫果信息 / … / 润和软件）与第一节那 5 家
+    **零重合**。原因很直白——库里是本轮新搜的前端岗，联系人是 9 月手动投过的那批。
+  ⇒ 直接结论：路线 A（打给既有联系人）的目标**只能从会话面取**，不能从库里取；
+  而 `jobId` 这一格同时是幂等键（`greet.ts:194`）、额度目标（`greet.ts:240`）与会话表唯一索引的一列
+  （`conversation-store.ts:56`），所以「拿什么串当目标」属 plan 08 §5 缺口三那条**待裁定**，本片不自定。
+
+五、探针缺陷一条（不是产品缺陷，但它改变了这一节的取证路线）
+  `jd.store.list` 的返回体里那批行叫 **`jobs`**，我头两次探针按 `rows` 取，拿到 undefined，
+  于是 `conversation.store.syncFrom(null,'boss')` 回 `INVALID_ARGUMENT`——看起来像「产品口进不去会话页」，
+  实际是探针自己拼错键。产品口本身是通的：同一条 `store.list` 用对键就读回 24 行。
+  顺带证实：`conversation.store` 的每一条入口都按 jobId 寻址，没有「按联系人」的那一只。
+
+六、仍然没取（都要等裁定与在场，不许推测成 `[x]`）
+  - 选中某一行之后 `div#chat-input` 挂载数是否变成 1、发送键 rect 是多少（8.0-05 记的是 1015 宽视图里 x=1112，
+    本轮 455 宽根本没进画面）。
+  - 8.0-05 欠的 `inboundValue` 另一半：**我方**消息行的 class token（只有真发出一条之后才长在页面上）。
+  - 「常用语」格子（`.chat-controls [aria-label="常用语"]`）里站点自带的打招呼语——8.4 的文案候选来源，本轮没点开。

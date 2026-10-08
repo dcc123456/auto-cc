@@ -258,6 +258,84 @@ describe('不猜坐标（spec 2.2-09 / 2.2-10 的 iframe 与跳转）', () => {
   });
 });
 
+describe('按命中序号寻址点第 N 格（spec 8.4-01 / plan 08 §5 缺口二）', () => {
+  /**
+   * 造一份「一条候选命中多格、并且胜不出唯一一格」的定位结局——真 BOSS 会话列表的形状。
+   * @param texts 每一格此刻的文本，下标即 `hitIndex`
+   * @returns 定位替身要回读的结局（`status` 是 ambiguous、`chosen` 为 null，但每一格都能按地址取回）
+   */
+  function manyRows(texts: string[]): LocateResultView {
+    const ranked: LocatedView[] = texts.map((text, index) => ({
+      ...fakeReading(frameUrl, {
+        hitIndex: index,
+        text,
+        accessibleName: text,
+        rect: { x: 10, y: 20 + index * 100, width: 100, height: 40 },
+      }),
+      score: 35,
+      reasons: ['css 基线 35'],
+    }));
+    return {
+      status: 'ambiguous',
+      spec,
+      chosen: null,
+      ranked,
+      reason: `${String(ranked.length)} 格同分，胜不出唯一一格`,
+      relocated: false,
+      snapshotRef: `${frameUrl}@1`,
+      snapshot: null,
+      at: 1,
+    };
+  }
+
+  it('给了地址就点那一格：坐标取自那一格的 rect，而不是胜出的第一格', async () => {
+    const view = labView(readyScripts);
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = manyRows(['甲', '乙', '丙']);
+    const result = await act.click(spec, { candidateIndex: 0, hitIndex: 1 });
+    // 第二格的中心是 (60, 140)；点成第一格的话打到的是「甲」——这一条判据就是防这个。
+    expect(view.log.commands[1]!.params).toMatchObject({ x: 60, y: 140, buttons: 1 });
+    expect(result).toMatchObject({ status: 'done', channel: 'cdp', trusted: true });
+    expect(result.located).toMatchObject({ hitIndex: 1, text: '乙' });
+  });
+
+  it('期望文本与页面此刻那一格对不上时不点：这是重排，不是同一格', async () => {
+    const view = labView(readyScripts);
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = manyRows(['甲', '乙', '丙']);
+    try {
+      await act.click(spec, { candidateIndex: 0, hitIndex: 1, expectText: '丙' });
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('LOCATE_FAILED');
+      expect(errorDetails(error).observedText).toBe('乙');
+    }
+    expect(view.log.commands).toHaveLength(0);
+  });
+
+  it('文本只差首尾与行间空白仍算同一格（真页面的名字带换行）', async () => {
+    const view = labView(readyScripts);
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = manyRows(['甲', ' 上海 某某\n公司 ', '丙']);
+    const result = await act.click(spec, { candidateIndex: 0, hitIndex: 1, expectText: '上海 某某 公司' });
+    expect(result).toMatchObject({ status: 'done', channel: 'cdp' });
+  });
+
+  it('寻址的那一格已经不在读数里时同样不点，并把读数条数交回去', async () => {
+    const view = labView(readyScripts);
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = manyRows(['甲', '乙']);
+    try {
+      await act.click(spec, { candidateIndex: 0, hitIndex: 7 });
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect((error as AppError).code).toBe('LOCATE_FAILED');
+      expect(errorDetails(error).rankedCount).toBe(2);
+    }
+    expect(view.log.commands).toHaveLength(0);
+  });
+});
+
 describe('等待类结局（spec 2.2-03）', () => {
   it('等不到时 waitFor 返回 timeout 结局而不是抛错，且 trusted 恒为 false', async () => {
     const view = labView({ wait: { satisfied: false, waitedMs: 5000, readings: [] } });

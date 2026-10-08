@@ -173,6 +173,20 @@ spec 8.2-03 已按实测收窄，不是让步。
   **窗口拉到 ≥1410 并带到前台**是 8.4-01 的硬前置（AGENTS.md §9 的 2.1-12：hidden 窗口里 CDP 输入不落页，
   `act.click` 会回成功而页面根本没收到）。plan §7 第 5 条那条"注入通道能不能落到 contenteditable"
   也只能在这一轮现场验（代码侧两条分支都在：`locator-script.ts:554` 的 DOM 兜底 + CDP `Input.insertText`）。
+  **落地记录（2026-10-08，8.4-A / 8.4-B）**：
+  - **缺口二已拿掉**（8.4-A）：`browser.act.click` 加第二个实参 `target?: HitAddress`
+    （`{candidateIndex, hitIndex, expectText?}`，与 `upload` 既有的索引寻址同一个形状，§2.3 扩接口）。
+    地址不在读回的 `ranked` 里、或 `expectText` 与页面此刻那一格的文本折叠空白后不等，都以 `LOCATE_FAILED`
+    停下且**一条输入事件都不下发**（拒错的代价是"这一发没发出去"，猜错的代价是"发给了另一家公司"）。
+    不传 target 时行为与改动前逐字一致，`agent.tools` 那条登记没动。
+  - **缺口一的知识包那一半已到货**（8.4-B）：包契约的 `chat` 段新增 `conversationRow` / `conversationRowLabel`
+    两只定位名，配齐才合法、只声明一只报错、**既没有 `targetParam` 又没有选行也报错**（三种形状各有用例）；
+    真包 `boss.json` 按证据 8.4-04 登记了 `chatConversationRow`（hits=5）与 `chatConversationLabel`
+    （`.name-box > span:nth-child(2)`，hits=5，`effect:'read'`），仿站包靠既有的 `targetParam` 过同一条规则。
+  - **缺口一还差适配器那一半**（`selectConversation` 是 `chat` 与 `readReplies` 的共同前置）、**缺口三未裁**：
+    按本节上面的口径等用户的表态，不在这里替它决定。同一处还带着一条读数上限：
+    `browser.locate.candidateLimit` 现值 5 ⇒ 会话面一次最多读回 5 行，超过 5 家联系人时寻址够不着
+    （解除条件见证据 8.4-04 第三节）。
 
 ## 6. 与 AGENTS.md 的冲突声明（按本文件前言：先停下来提出冲突，不自行打破规则继续写）
 

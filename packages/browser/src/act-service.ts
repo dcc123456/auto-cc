@@ -15,7 +15,14 @@
  * 于是等待用 `appear`、并且不受 iframe 偏移折算成败的影响。
  */
 import { AppError, asApp, Service, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
-import type { ActResultView, LocatedView, LocateSpec, WaitPredicate } from '@auto-cc/shared';
+import type {
+  ActResultView,
+  HitAddress,
+  LocateResultView,
+  LocatedView,
+  LocateSpec,
+  WaitPredicate,
+} from '@auto-cc/shared';
 import type { WebContents } from 'electron';
 import { basename, isAbsolute } from 'node:path';
 import { statSync } from 'node:fs';
@@ -70,6 +77,18 @@ export type BrowserActConfig = z.output<typeof browserActSchema>;
 
 /** 一次动作在页面里的结局：走哪条通道、事件是否受信、回读到什么值。 */
 type ActionOutcome = { channel: 'cdp' | 'dom'; trusted: boolean; valueAfter: string | null };
+
+/**
+ * 漂移比对用的文本归一：把连续空白并成一个空格再去首尾。
+ *
+ * 页面读数在注入脚本里已经折叠过一次空白，这一句兜的是**调用方**那一侧（名字是从上一轮读数抄来的，
+ * 也可能来自界面输入），两边归一到同一形状才谈得上「整串相等」。
+ * @param value 任一侧的文本
+ * @returns 折叠空白并修剪后的串
+ */
+function normalizeHitText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
 
 /** 待注入的本地文件读数（路径与字节数都要交给页面比对）。 */
 type UploadableFile = { path: string; name: string; size: number };
@@ -139,12 +158,18 @@ export class BrowserActService extends Service {
   /**
    * 点击声明指向的元素（裁定⑰：`done` 从此要求页面自己回执）。
    * @param spec 定位声明
+   * @param target 「点第 N 个命中」的寻址键（spec 8.4-04）；省略就点打分胜出的那一个。
+   *        给定时**不再要求过最低可用分**（同一批命中的分数本来就彼此接近，虚拟列表里第 3 行与第 4 行
+   *        没有谁更"该点"），但要求 `expectText` 与现场读数一致——对不上就拒点，因为序号会随重排漂到邻居身上
    * @returns 动作结局；`channel` 与 `trusted` 说明事件是怎么产生的；`status` 为 `timeout` 表示
    *          「派发没报错但页面答『没收到』」——窗口不在前台时 CDP 的鼠标事件会被合成器丢掉；
    *          页面答不上来（节点换掉、脚本不通）仍给 `done`，这条判据不外扩成假阴性
-   * @throws 等不到可点 `WAIT_TIMEOUT`、定位未过线 `LOCATE_FAILED`、动作被页面拒绝 `ACT_FAILED`（三者都带 spec 与快照引用）
+   * @throws 等不到可点 `WAIT_TIMEOUT`、定位未过线 `LOCATE_FAILED`、动作被页面拒绝 `ACT_FAILED`（三者都带 spec 与快照引用）；
+   *         给了 `target` 而那一格已不在、或文本与 `expectText` 不符时同样是 `LOCATE_FAILED`（带现场读数，
+   *         因为「排到别人身上」必须让调用方看得见，不能默默点中隔壁那家公司）
    */
-  click = async (spec: LocateSpec): Promise<ActResultView> => this.perform('click', spec);
+  click = async (spec: LocateSpec, target?: HitAddress): Promise<ActResultView> =>
+    this.perform('click', spec, undefined, target);
 
   /**
    * 往声明指向的输入控件里写文本（中文与 emoji 原样送入，spec 2.2-13）。
@@ -259,12 +284,14 @@ export class BrowserActService extends Service {
    * @param action 动作类型
    * @param spec 定位声明
    * @param payload 输入文本或选项值（点击为 undefined）
+   * @param target 索引寻址（只有 `click` 会传）：按「候选下标 + 命中序号」取那一格，绕开打分胜出者
    * @returns 界面与适配器共用的动作读数
    */
   private async perform(
     action: 'click' | 'type' | 'select',
     spec: LocateSpec,
     payload?: string,
+    target?: HitAddress,
   ): Promise<ActResultView> {
     // 声明本身合不合法必须排在碰会话与闸门之前：非法形状若在页内脚本里读到零条候选，
     // 五秒后会以 WAIT_TIMEOUT 报出，把调用方引向「页面不可点」这个错方向（plan §16.3）。
@@ -275,7 +302,8 @@ export class BrowserActService extends Service {
       throw await this.waitTimeout(spec, 'clickable', Date.now() - startedAt, contents);
     }
     const result = await this.locate.find(spec);
-    if (!result.chosen) {
+    const chosen = target ? this.hitAt(result, target, spec) : result.chosen;
+    if (!chosen) {
       throw new AppError('LOCATE_FAILED', `定位未过线，动作没有执行：${result.reason}`, 'browser.act', {
         spec,
         status: result.status,
@@ -283,12 +311,12 @@ export class BrowserActService extends Service {
         snapshot: result.snapshot,
       });
     }
-    const point = await this.viewportPoint(contents, result.chosen);
+    const point = await this.viewportPoint(contents, chosen);
     // 回执必须挂在派发**之前**：事后装的监听看不见已经发生的事件（裁定⑰ / plan §16.1）。
-    const armed = action === 'click' ? await this.armClickReceipt(spec, result.chosen) : null;
-    const outcome = await this.dispatch(action, spec, result.chosen, payload, point, contents);
+    const armed = action === 'click' ? await this.armClickReceipt(spec, chosen) : null;
+    const outcome = await this.dispatch(action, spec, chosen, payload, point, contents);
     let status: ActResultView['status'] = 'done';
-    if (armed && !(await this.clickConfirmed(armed.url, result.chosen))) {
+    if (armed && !(await this.clickConfirmed(armed.url, chosen))) {
       status = 'timeout';
       this.ctx.logger.warn(
         `点击「${spec.description}」派发完但页面没有回执（事件被丢弃或落到了别处），本次动作按超时报告而不是已完成`,
@@ -300,10 +328,57 @@ export class BrowserActService extends Service {
       waitedMs: Date.now() - startedAt,
       channel: outcome.channel,
       trusted: outcome.trusted,
-      located: result.chosen,
+      located: chosen,
       valueAfter: outcome.valueAfter,
       predicate: null,
     };
+  }
+
+  /**
+   * 从一次定位的 `ranked` 里按地址取出要点的那一格（spec 8.4-04）。
+   * @param result 刚跑完的那次定位结局（`ranked` 已按服务配置 `candidateLimit` 截断）
+   * @param target 调用方给的地址：候选下标 + 命中序号，可带期望文本
+   * @param spec 定位声明（随错误交回调用方，让界面能看到是哪一条声明）
+   * @returns 地址指向的那一格读数
+   * @throws 地址越界或文本对不上时 `LOCATE_FAILED`（两种都是「两次读数之间页面重排了」，
+   *          宁可不点也不把动作落到隔壁那一家身上）
+   */
+  private hitAt(result: LocateResultView, target: HitAddress, spec: LocateSpec): LocatedView {
+    const hit = result.ranked.find(
+      (entry) => entry.candidateIndex === target.candidateIndex && entry.hitIndex === target.hitIndex,
+    );
+    if (!hit) {
+      throw new AppError(
+        'LOCATE_FAILED',
+        `寻址的那一格命中已不在读回的 ${String(result.ranked.length)} 条里（候选 ${String(target.candidateIndex)} / 序号 ${String(target.hitIndex)}），需要重新定位`,
+        'browser.act',
+        {
+          spec,
+          address: target,
+          rankedCount: result.ranked.length,
+          status: result.status,
+          snapshotRef: result.snapshotRef,
+        },
+      );
+    }
+    // 漂移比对只比**整串相等**：页面读数被截断时期望文本若更长就对不上，那条动作于是被拒——
+    // 拒错的代价是「这一发没发出去」，猜错的代价是「发给了另一家公司」，两个方向不对称。
+    if (target.expectText !== undefined && normalizeHitText(hit.text) !== normalizeHitText(target.expectText)) {
+      throw new AppError(
+        'LOCATE_FAILED',
+        `页面在两次读数之间重排了：第 ${String(target.hitIndex)} 格现在是「${hit.text}」，不是要动的「${target.expectText}」，这一格不点`,
+        'browser.act',
+        {
+          spec,
+          address: target,
+          observedText: hit.text,
+          status: result.status,
+          snapshotRef: result.snapshotRef,
+          snapshot: result.snapshot,
+        },
+      );
+    }
+    return hit;
   }
 
   /**

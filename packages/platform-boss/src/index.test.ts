@@ -112,6 +112,17 @@ describe('上线知识包装载（真 BOSS，spec 8.1-01 / 8.1-02 / 8.1-07）', 
     expect(pack.chat?.targetParam).toBeUndefined();
     expect(pack.chat?.directionAttribute).toBeUndefined();
   });
+
+  it('上线包把「按列表行选中会话」这两只登记齐了（spec 8.4-01：没有 targetParam 就必须有选行）', () => {
+    const pack = loadBossKnowledgePack(REAL);
+    // 真 BOSS 的会话页不按 URL 参数切对象，所以选行那两只是这条链路上唯一的寻址依据。
+    expect(pack.chat).toMatchObject({
+      conversationRow: 'chatConversationRow',
+      conversationRowLabel: 'chatConversationLabel',
+    });
+    expect(pack.locators.chatConversationRow).toMatchObject({ cardinality: 'many', effect: 'read' });
+    expect(pack.locators.chatConversationLabel).toMatchObject({ cardinality: 'many', effect: 'read' });
+  });
 });
 
 describe('仿站知识包装载（loopback 验收面，spec 8.1-07 保住原 G4 的意图）', () => {

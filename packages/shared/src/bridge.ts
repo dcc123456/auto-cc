@@ -1901,7 +1901,7 @@ export interface BridgeSignatures {
   /** 定位层的当期读数：阈值配置与最近几次失败，供界面解释「为什么这条不确定」。 */
   'browser.locate.status': { args: []; returns: LocateStatusView };
   /** 真实点击：定位 → 算视口坐标 → CDP `Input.dispatchMouseEvent`（spec 2.2-12）。 */
-  'browser.act.click': { args: [spec: LocateSpec]; returns: ActResultView };
+  'browser.act.click': { args: [spec: LocateSpec, target?: HitAddress]; returns: ActResultView };
   /** 文本输入：定位 → 聚焦 → CDP `Input.insertText`（中文/emoji 不乱码，spec 2.2-13）。 */
   'browser.act.type': { args: [spec: LocateSpec, text: string]; returns: ActResultView };
   /** 下拉选择：定位 → 页面内设值并派发 change。通道在结果里如实标注为 `dom`。 */
@@ -2659,6 +2659,26 @@ export interface LocatedReading extends ElementFingerprint {
 export interface LocatedView extends LocatedReading {
   score: number;
   reasons: string[];
+}
+
+/**
+ * 「点这一批命中里的第 N 个」的寻址键（spec 8.4-04）。
+ *
+ * 两个键与 `browser.act.upload` 交给 CDP 的那对地址同源（`LocatedReading.hitIndex` 是跨 world
+ * 唯一可用的寻址键），所以调用方不需要第二条寻址口径。**它不是选择器**：候选仍只出自站点知识包，
+ * 这里选的只是「同一条候选命中的哪一个」，因此运行时不会从页面里的文字拼出选择器（AGENTS.md §8 红线）。
+ *
+ * `expectText` 是动手前的漂移比对基准：真实站点的会话列表是虚拟列表，同一个序号在重排后
+ * 常常指向另一行（证据 8.0-05 第四节：整行文本候选点到的是一次性的重渲染节点）。
+ * 对不上就拒点，而不是把话发给排错位的那家公司。
+ */
+export interface HitAddress {
+  /** 该命中来自 spec 里的第几条候选（声明顺序） */
+  candidateIndex: number;
+  /** 该命中在「这条候选在本帧里命中的元素列表」里的下标，从 0 起 */
+  hitIndex: number;
+  /** 期望文本（与定位读数同形，归一化后全等）；省略就只按地址取，不做漂移比对 */
+  expectText?: string;
 }
 
 /** 一次定位的结局。`ambiguous` 与 `below-score` 都是**拒绝猜测**，不是失败重试的理由。 */
