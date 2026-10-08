@@ -161,6 +161,7 @@ export type {
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
+  'shell.setKernelViewBounds',
   'shell.revealInFolder',
   'shell.probeMainCrash',
   'shell.probeRedact',
@@ -464,7 +465,8 @@ export type ShellStatus = {
   windowVisible: boolean;
   /** 内核视图当下在不在界面上：默认 false（裁定⑱），只有装着真实站点时才是 true。 */
   kernelViewVisible: boolean;
-  kernelViewBounds: { x: number; y: number; width: number; height: number };
+  /** 内核视图当下的几何（DIP，客户区坐标）：由渲染层实测槽位报来，未报时为兜底比例位。 */
+  kernelViewBounds: KernelViewRect;
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
   kernelViewPartition: string;
   /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
@@ -924,10 +926,20 @@ export type DeliverReceiptView = {
 };
 
 /**
- * 内嵌内核视图占位区宽度占客户区宽度的比例。
- * 主进程用它摆 `WebContentsView`，渲染层用它摆对应的 Tailwind 槽位，两侧必须同源。
+ * 内嵌内核视图的**兜底**宽度比例：渲染层还没把实测槽位报上来时（首帧、或槽位被隐藏），
+ * 主进程按这个比例摆位。真实几何由 `shell.setKernelViewBounds` 报来的那份说了算（spec 8.8-01）——
+ * 固定比例铺不出真实站点的桌面布局，1200 宽的窗口只有 456px，BOSS 这类站点必然显示不全。
  */
 export const KERNEL_VIEW_WIDTH_RATIO = 0.38;
+
+/**
+ * 渲染层实测出来的内核视图槽位矩形（DIP，原点是客户区左上角）。
+ *
+ * 为什么由渲染层报：只有它知道自己的布局（导航栏、状态条、展开态、宽度档），
+ * 主进程按固定比例硬铺会盖住顶部标题栏与底部状态条，而且永远追不上界面改动（6.2-04 记的正是这条）。
+ * 数值来自 `getBoundingClientRect()`，在缩放比为 1 的窗口里与 DIP 逐位相等。
+ */
+export type KernelViewRect = { x: number; y: number; width: number; height: number };
 
 /**
  * app 界面自己占的会话分区。
@@ -1812,6 +1824,11 @@ export type LlmCheckView = {
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
+  /**
+   * 报一次槽位的实测几何（spec 8.8-01）。返回值就是 `shell.getStatus()` 的那份快照，
+   * 让渲染层不用再追一次读——摆位有没有落地，调用方当场就能核对。
+   */
+  'shell.setKernelViewBounds': { args: [rect: KernelViewRect]; returns: ShellStatus };
   /**
    * 在系统文件管理器里选中某个产物（09 稿 1-B 那句「在访达 / 资源管理器中显示」的去处，spec 6.2-12）。
    * 实参必须是**主进程自己写出来的**产物绝对路径：边界只在 `app.getPath('userData')` 之内，

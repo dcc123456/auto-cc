@@ -5,7 +5,6 @@ import {
   Languages,
   MessageSquare,
   Moon,
-  PanelRight,
   ScrollText,
   ShieldCheck,
   Sun,
@@ -14,7 +13,6 @@ import {
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KERNEL_VIEW_WIDTH_RATIO } from '@auto-cc/shared';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { useDeskTheme } from './theme';
 import { AssemblyPanel } from './AssemblyPanel';
@@ -23,6 +21,7 @@ import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
 import { JobLabPanel } from './JobLabPanel';
 import { KbPanel } from './KbPanel';
+import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
 import { ModelSettingsPanel } from './ModelSettingsPanel';
@@ -138,8 +137,12 @@ export function App() {
   const tierValue = desk.tier ? t(`agent.autonomy.${desk.tier}`) : t('status.none');
   // 档位的点色按「谁替谁做主」：全自动=外发不再逐步问人（朱砂），半自动=每一步等表态（琥珀），建议=只出主意（灰）。
   const tierState: DeskSlotState = desk.tier === 'auto' ? 'warn' : desk.tier === 'semi' ? 'ask' : 'none';
-  // 右栏那一槽位默认不占位（裁定⑱）：只有主进程的内核视图装着真实站点时它才存在，收起时那 38% 还给主区。
+  // 右栏那一槽位默认不占位（裁定⑱）：只有主进程的内核视图装着真实站点时它才存在，收起时那一条宽度还给主区。
   const kernelViewVisible = useKernelViewVisible();
+  // 8.8-02 的展开态与宽度档：主区让不让位由这里判，可见性是它的前置条件——
+  // 站点被收回右栏时如果还认着"展开"，主区就藏在一栏根本不存在的位置后面，界面等于空白。
+  const kernelLayout = useKernelSlotLayout();
+  const kernelExpanded = kernelViewVisible && kernelLayout.isExpanded;
 
   /**
    * 一张工作台的容器：标题 + 说明 + 面板堆。
@@ -209,37 +212,31 @@ export function App() {
           ))}
         </nav>
 
-        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* 对话是第一入口：它自己不套工作台标题头，输入区直接贴着桌面（§5.9）。 */}
-          <section
-            data-view-scroll="chat"
-            className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
-          >
-            <ChatPanel />
-          </section>
-          {(['jobs', 'resume', 'workflow', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
+        {/* 裁定⑱：内核视图没装着站点时这一栏整个**不存在**，`flex-1` 的主区拿回那一条宽度。
+            展开态（8.8-02）把主区整个让出去：主区是同一棵 flex 里的兄弟，留着它就量不进右栏该占的矩形；
+            收起时它原样回来，不销毁、各视图的滚动位置也不丢。
+            `kernelExpanded` 必须同时看可见性——站点被收回时只认偏好，主区就藏在一栏不存在的位置后面。 */}
+        {kernelExpanded ? null : (
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* 对话是第一入口：它自己不套工作台标题头，输入区直接贴着桌面（§5.9）。 */}
+            <section
+              data-view-scroll="chat"
+              className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
+            >
+              <ChatPanel />
+            </section>
+            {(['jobs', 'resume', 'workflow', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
 
-          {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，六张视图切来切去都只有这一只通道，
-              各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
-          <Toast />
-        </main>
+            {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，六张视图切来切去都只有这一只通道，
+                各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
+            <Toast />
+          </main>
+        )}
 
-        {/* 裁定⑱：这一栏默认**不存在**——内核视图没装着站点时整条收起，`flex-1` 的主区拿回那 38%。
-            展开时原生视图盖的正是这一栏的矩形，所以两边的可见性必须是同一个数（`useKernelViewVisible`），
-            而槽位宽度依旧与主进程摆位同源：`--kernel-view-width` 必须等于 KERNEL_VIEW_WIDTH_RATIO（1.2-12）。 */}
-        {kernelViewVisible ? (
-          <aside
-            data-testid="kernel-view-slot"
-            className="flex w-(--kernel-view-width) flex-col border-l border-line bg-ink-900 p-4"
-          >
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-              <PanelRight size={13} />
-              {t('kernel.heading')}
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-400">{t('kernel.hint')}</p>
-            <p className="mt-4 font-mono text-[11px] text-slate-600">{KERNEL_VIEW_WIDTH_RATIO * 100}%</p>
-          </aside>
-        ) : null}
+        {/* 槽位的几何由这一栏自己量、并报给主进程（`KernelViewSlot` / spec 8.8-01）：原生视图只铺报来的那一块，
+            于是既盖不住顶部标题栏与底部状态条，也铺得出真实站点的桌面宽度。
+            最窄那一档仍是 `--kernel-view-width`，与主进程的兜底比例同源（1.2-12 的机检照旧）。 */}
+        {kernelViewVisible ? <KernelViewSlot layout={kernelLayout} /> : null}
       </div>
 
       {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。

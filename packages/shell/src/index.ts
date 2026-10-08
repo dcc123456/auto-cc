@@ -10,9 +10,16 @@ import {
   type WebContents,
 } from 'electron';
 import { AppError, Service, type Context } from '@auto-cc/core';
-import { APP_PARTITION, KERNEL_VIEW_WIDTH_RATIO, type KernelViewLoadError, type ShellStatus } from '@auto-cc/shared';
+import {
+  APP_PARTITION,
+  KERNEL_VIEW_WIDTH_RATIO,
+  type KernelViewLoadError,
+  type KernelViewRect,
+  type ShellStatus,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import { resolveRevealTarget } from './reveal-target.js';
+import { clampSlotRect, fallbackSlotRect } from './slot-bounds.js';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
 import { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema } from './update.js';
 import type {
@@ -78,6 +85,11 @@ export class ShellService extends Service {
   /** 内核视图当前所用的会话分区；占位页用默认会话，此处为空串。 */
   private kernelViewPartition = '';
   private kernelViewError: KernelViewLoadError | null = null;
+  /**
+   * 渲染层报来的槽位矩形（spec 8.8-01）；null = 还没报过，摆位回落到 `KERNEL_VIEW_WIDTH_RATIO` 兜底那份。
+   * 只存这一份而不另立"视图应在哪儿"的第二套事实：真正的布局永远在渲染层，这里只是它的一次转述。
+   */
+  private slotRect: KernelViewRect | null = null;
   private quitting = false;
   private lastError: string | undefined;
 
@@ -166,6 +178,33 @@ export class ShellService extends Service {
   setKernelViewVisible = (visible: boolean): { kernelViewVisible: boolean } => {
     this.applyKernelViewVisible(Boolean(visible));
     return { kernelViewVisible: this.kernelViewVisible };
+  };
+
+  /**
+   * 接住渲染层实测的内核视图槽位几何，立刻按它摆位（spec 8.8-01）。
+   *
+   * 摆位的权威从「主进程按固定比例硬铺」换成「渲染层量出来的那一块」：原生视图只有铺在渲染层
+   * 真正为它留的位置上，才既盖不住顶部标题栏与底部状态条，也才铺得出真实站点的桌面布局
+   * （6.2-04 / 6.4-04 记的就是这块：右栏 456px 且没有调整口，界面侧改不动，得主进程配合）。
+   * @param rect 渲染层 `getBoundingClientRect()` 的读数（DIP，原点是客户区左上角）
+   * @returns 摆位之后的状态快照，调用方当场核对 `kernelViewBounds` 有没有落成自己报的那块
+   * @throws 读数非有限、尺寸非正、或与客户区无交集时 `KERNEL_VIEW_BOUNDS_INVALID`（保留上一份摆位，不铺 0×0）
+   */
+  setKernelViewBounds = (rect: KernelViewRect): ShellStatus => {
+    const win = this.mainWindow;
+    const content = win?.getContentBounds() ?? { width: 0, height: 0 };
+    const clamped = clampSlotRect(rect, { width: content.width, height: content.height });
+    if (!clamped) {
+      throw new AppError(
+        'KERNEL_VIEW_BOUNDS_INVALID',
+        `槽位几何不合法：x=${String(rect.x)} y=${String(rect.y)} ${String(rect.width)}×${String(rect.height)}`,
+        'shell',
+        { rect, content: { width: content.width, height: content.height } },
+      );
+    }
+    this.slotRect = clamped;
+    this.layoutKernelView();
+    return this.getStatus();
   };
 
   /**
@@ -459,16 +498,24 @@ export class ShellService extends Service {
     return candidate && !candidate.isDestroyed() ? candidate : null;
   }
 
-  /** 按固定比例给内核视图摆位，与渲染层槽位共用 `KERNEL_VIEW_WIDTH_RATIO`；接管子视图铺同一块槽位。 */
+  /**
+   * 给内核视图摆位：渲染层报过槽位就按那块铺（并夹进当前客户区），没报过才退回固定比例兜底；
+   * 接管子视图铺同一块槽位。
+   *
+   * 窗口尺寸变了要重新夹一次：报来的槽位是那一刻的布局，窗口缩小后它可能整块跑到外面去，
+   * 夹不住就干脆用兜底那份，也不能让视图停在旧尺寸上露馅（resize 之后渲染层会再报来新读数）。
+   */
   private layoutKernelView = () => {
     const win = this.mainWindow;
     if (!win || !this.kernelView) return;
     const { width, height } = win.getContentBounds();
-    const viewWidth = Math.round(width * KERNEL_VIEW_WIDTH_RATIO);
-    const bounds = { x: width - viewWidth, y: 0, width: viewWidth, height };
-    this.kernelView.setBounds(bounds);
+    const content = { width, height };
+    const slot =
+      (this.slotRect ? clampSlotRect(this.slotRect, content) : null) ??
+      fallbackSlotRect(content, KERNEL_VIEW_WIDTH_RATIO);
+    this.kernelView.setBounds(slot);
     // 接管的子视图是「同一个槽位里的新标签」：不跟着摆位的话，resize 后它就停在旧尺寸上露馅。
-    this.takeoverViews.forEach((view) => view.setBounds(bounds));
+    this.takeoverViews.forEach((view) => view.setBounds(slot));
   };
 
   /**

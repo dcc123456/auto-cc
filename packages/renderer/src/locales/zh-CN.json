@@ -96,7 +96,13 @@
     },
     "kernel": {
       "heading": "内嵌内核视图槽位",
-      "hint": "此区域由主进程的 WebContentsView 覆盖渲染"
+      "hint": "此区域由主进程的 WebContentsView 覆盖渲染",
+      "narrow": "收窄",
+      "widen": "加宽",
+      "expand": "展开",
+      "collapse": "收起",
+      "atMax": "已是最宽档",
+      "atMin": "已是最窄档"
     },
     "session": {
       "heading": "内置内核会话（分区与登录态）",

@@ -91,6 +91,9 @@ export type AppErrorCode =
   // `SETTING_NOT_ALLOWED` 是「这个键不允许从界面写盘」，属于装配缺陷，处置是改代码而不是改输入。
   | 'SECRET_UNREADABLE'
   | 'SETTING_NOT_ALLOWED'
+  // 提供商实例池（spec 7.2-06 / 08）：按 id 找不到那一行。独立于 `SERVICE_NOT_FOUND`（那是装配缺陷），
+  // 处置是"界面重读列表、这条操作什么也没做"，所以不折进 `INVALID_ARGUMENT`（那是"你填的东西不合法"）。
+  | 'LLM_PROVIDER_NOT_FOUND'
   // 简历导出（spec 3.3-11）：文档缺失 / 非法、内核打印失败（字体缺失、printToPDF 抛错）、落盘不可写
   // 都归这一个码——三者在界面上的处置相同（一句可读中文提示 + 可重试），所以不拆成三个码让界面重复劳动。
   | 'RESUME_EXPORT_FAILED'
@@ -169,6 +172,10 @@ export type AppErrorCode =
   // 不复用 `INVALID_ARGUMENT`：Electron 44 的 `showItemInFolder` 返回 `void`，成功与否只能由我们自己判。
   | 'REVEAL_OUTSIDE_USER_DATA'
   | 'REVEAL_TARGET_MISSING'
+  // 内核视图槽位几何（spec 8.8-01）：渲染层报来的读数过不了「有限、为正、与客户区有交集」这三条。
+  // 不复用 `INVALID_ARGUMENT`，因为界面处置是这一条独有的——「保留上一份摆位，什么都不改」，
+  // 静默铺成 0×0 会让用户以为视图整个消失了，而真正的现象只是那一次上报无效。
+  | 'KERNEL_VIEW_BOUNDS_INVALID'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {
