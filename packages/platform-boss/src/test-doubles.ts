@@ -25,6 +25,7 @@ import type {
   ExtractRequest,
   ExtractResultView,
   ExtractRowReading,
+  HitAddress,
   KernelPageSnapshotView,
   LocateSpec,
   PageScrollReading,
@@ -146,7 +147,7 @@ export function snapshotOf(url: string): KernelPageSnapshotView {
 }
 
 /** 假手某一次抽取服务的是哪一类页面（用例靠它断言阶段先后，不必自己辨认容器）。 */
-export type PageKind = 'list' | 'detail' | 'status' | 'messages' | 'deliver-status';
+export type PageKind = 'list' | 'detail' | 'status' | 'messages' | 'conversation' | 'deliver-status';
 
 /**
  * 会话页的读数脚本（spec 2.5-06 / 2.5-07）。
@@ -163,6 +164,10 @@ export type ChatScript = {
   messageContainer?: LocateSpec;
   /** 消息条的读数（每次读都是页面的全量可见消息） */
   messages?: ExtractResultView;
+  /** 会话标签那一格的定位声明（`chat.conversationRowLabel`）：与请求容器内容相同即判为读会话列表 */
+  conversationContainer?: LocateSpec;
+  /** 会话列表的读数（一行一个联系人的标签文本） */
+  conversations?: ExtractResultView;
 };
 
 /**
@@ -245,6 +250,11 @@ export function createFakePage(script: PageScript): FakePage {
     if (chat.messageContainer && sameLocator(request.container, chat.messageContainer)) {
       kinds.push('messages');
       return chat.messages ?? extractOf(navigated.at(-1) ?? LIST_URL, []);
+    }
+    // 会话列表按「标签那一格」的容器身份路由：`selectConversation` 读的就是这一类（spec 8.4-02）。
+    if (chat.conversationContainer && sameLocator(request.container, chat.conversationContainer)) {
+      kinds.push('conversation');
+      return chat.conversations ?? extractOf(navigated.at(-1) ?? LIST_URL, []);
     }
     return null;
   };
@@ -402,8 +412,8 @@ export type ActScript = {
 export type FakeAct = BossActionHand & {
   /** 按顺序记录敲过哪些（定位声明，文本） */
   typed: { spec: LocateSpec; text: string }[];
-  /** 按顺序记录点过哪些定位声明 */
-  clicked: LocateSpec[];
+  /** 按顺序记录点过哪些定位声明，以及**点的是哪一格**（8.4-A 的索引寻址要能被断言） */
+  clicked: { spec: LocateSpec; target?: HitAddress }[];
   /** 按顺序记录往哪些声明注过哪个文件（投递的回读判据从这里取） */
   uploaded: { spec: LocateSpec; filePath: string }[];
   /** 等待起过几次，以及**第几次点击之前**已经起好（2.5-06 的时序判据） */
@@ -424,7 +434,7 @@ export type FakeAct = BossActionHand & {
  */
 export function createFakeAct(script: ActScript = {}): FakeAct {
   const typed: { spec: LocateSpec; text: string }[] = [];
-  const clicked: LocateSpec[] = [];
+  const clicked: { spec: LocateSpec; target?: HitAddress }[] = [];
   const uploaded: { spec: LocateSpec; filePath: string }[] = [];
   const waitsAtClick: number[] = [];
   const waitedFor: { kind: 'appear' | 'textChanges'; spec: LocateSpec }[] = [];
@@ -446,9 +456,9 @@ export function createFakeAct(script: ActScript = {}): FakeAct {
         valueAfter: 'typedValue' in script ? (script.typedValue ?? '') : text,
       });
     },
-    click: (spec: LocateSpec) => {
+    click: (spec: LocateSpec, target?: HitAddress) => {
       if (script.clickError) return Promise.reject(script.clickError);
-      clicked.push(spec);
+      clicked.push({ spec, target });
       waitsAtClick.push(waitsStarted);
       return Promise.resolve({ status: 'done' as const, waitedMs: 0, valueAfter: null });
     },
@@ -516,10 +526,11 @@ export class StubBrowserActService extends Service {
   /**
    * 记一次点击；脚本给了 `clickError` 时按原样失败。
    * @param spec 按钮定位声明
+   * @param target 索引寻址的那一格（8.4-A 的第二实参，必须原样透给假手，否则寻址断言拿不到读数）
    * @returns 动作回读
    */
-  click(spec: LocateSpec): Promise<ActReadback> {
-    return this.options.fake.click(spec);
+  click(spec: LocateSpec, target?: HitAddress): Promise<ActReadback> {
+    return this.options.fake.click(spec, target);
   }
 
   /**
@@ -665,13 +676,29 @@ export function messageRow(
 }
 
 /**
- * 造一份会话页脚本（状态行与消息条各按自己的容器身份回话）。
- * @param pack 知识包（三条定位声明都从它取，用例因此仍然「代码里没有选择器」）
+ * 造一条会话列表行的抽取读数（只带标签那一格的正文，`selectConversation` 就按它认人）。
+ * @param index 容器序号（= 页面上的行序，也是点击时要寻址的那个 `hitIndex`）
+ * @param text 标签文本；给 `null` 表示这一格读不到
+ * @returns 一行抽取读数，字段名与适配器请求里的 `target` 对齐
+ */
+export function conversationRow(index: number, text: string | null): ExtractRowReading {
+  return rowOf(index, chatUrlOf('1001'), [text === null ? fieldMiss('target') : fieldHit('target', text)]);
+}
+
+/**
+ * 造一份会话页脚本（状态行、消息条、会话列表行各按自己的容器身份回话）。
+ * @param pack 知识包（定位声明都从它取，用例因此仍然「代码里没有选择器」）
  * @param status 状态行正文；给 `null` 表示这一行读不到（页面没渲染或定位失配）
  * @param messages 消息条的行
+ * @param conversations 会话列表标签的行（省略即页面没脚本这一类，读成一行都没有）
  * @returns 只服务会话页的假手脚本
  */
-export function chatScript(pack: KnowledgePack, status: string | null, messages: ExtractRowReading[] = []): PageScript {
+export function chatScript(
+  pack: KnowledgePack,
+  status: string | null,
+  messages: ExtractRowReading[] = [],
+  conversations: ExtractRowReading[] = [],
+): PageScript {
   const url = chatUrlOf('1001');
   return {
     listContainer: pack.locators.jobCard!,
@@ -682,6 +709,8 @@ export function chatScript(pack: KnowledgePack, status: string | null, messages:
       status: extractOf(url, status === null ? [] : [rowOf(0, url, [fieldHit('status', status)])]),
       messageContainer: pack.locators.replyItem!,
       messages: extractOf(url, messages),
+      conversationContainer: pack.locators.chatConversationLabel,
+      conversations: extractOf(url, conversations),
     },
   };
 }

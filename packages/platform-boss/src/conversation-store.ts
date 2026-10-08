@@ -8,14 +8,9 @@
  * 去重靠**唯一索引**而不是「先查再插」：`readReplies` 每次都是全量读页面（真实平台不给游标，
  * §12.6.2 第 3 条），所以同一条消息会被读到第二次，这是预期用法而不是异常。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import type {
-  ConversationListResultView,
-  ConversationRowView,
-  ConversationStatusView,
-  ConversationSyncView,
-  FunnelRange,
-} from '@auto-cc/shared';
+import { AppError, asApp, Service, type Context, type GreetTarget } from '@auto-cc/core';
+import { greetTargetLabel, type ConversationListResultView } from '@auto-cc/shared';
+import type { ConversationRowView, ConversationStatusView, ConversationSyncView, FunnelRange } from '@auto-cc/shared';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -85,11 +80,51 @@ export const conversationTimeIndexMigration = {
   },
 };
 
+/**
+ * 会话坐标列的迁移号段：**33**（此前最大是 7.2 提供商实例池的 32，号段全局、撞号在运行期才炸）。
+ *
+ * 为什么必须新起一支而不是改号段 5 那支的 `up`：老库记过「5 已应用」就永远不会重跑它，
+ * 列只会在新增库上长出来，装机用户的库到第一次按会话落库时以 `no such column` 失败
+ * （§9 的 5.3-a 实测，这一条就是照着它写的）。
+ *
+ * 那一格为什么是 `TEXT NOT NULL DEFAULT ''` 而不是 NULL：SQLite 的唯一索引把 NULL 彼此判成**不相等**，
+ * `(platform, job_id, conversation_target, dedupe_key)` 里只要有一格是 NULL 就再也不拦重复行，
+ * 而真实平台的会话页每次都是全量读——去重会静默失效，每轮都重新插一遍（2.5-07 的反面）。
+ * 空串读回视图时归 null（见 `toRowView`）。
+ *
+ * 建列与重建唯一索引写在同一支里：本表没有外键，`ALTER TABLE ADD COLUMN` 与索引重建各自即时生效，
+ * 但顺序是硬的——索引定义里引用了新列，列必须先存在。
+ */
+export const CONVERSATION_TARGET_MIGRATION_VERSION = 33;
+
+/** 见 `CONVERSATION_TARGET_MIGRATION_VERSION`：加一列 + 把去重索引换成带那一格的形状。 */
+export const conversationTargetMigration = {
+  version: CONVERSATION_TARGET_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec("ALTER TABLE conversation_messages ADD COLUMN conversation_target TEXT NOT NULL DEFAULT ''");
+    db.exec('DROP INDEX IF EXISTS conversation_dedupe');
+    db.exec(
+      'CREATE UNIQUE INDEX conversation_dedupe ON conversation_messages (platform, job_id, conversation_target, dedupe_key)',
+    );
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP INDEX IF EXISTS conversation_dedupe');
+    // 带会话坐标的那些行**必须一起删掉**：旧索引是 `(platform, job_id, dedupe_key)`，而按会话落库的行
+    // 岗位格是空串、多条联系人共用同一种 `dedupe_key` 形状，把它们留在表里再重建旧索引会以
+    // `UNIQUE constraint failed` 当场崩（本轮补片实测）。回滚本来就是「退回这支功能之前的状态」，
+    // 号段 5 的 `down` 直接 `DROP TABLE` 是同一条语义（plan §8.4 裁定⑲）。
+    db.exec("DELETE FROM conversation_messages WHERE conversation_target <> ''");
+    db.exec('ALTER TABLE conversation_messages DROP COLUMN conversation_target');
+    db.exec('CREATE UNIQUE INDEX conversation_dedupe ON conversation_messages (platform, job_id, dedupe_key)');
+  },
+};
+
 /** 库里一行的原始读数（列名与视图的驼峰字段不同，转换收在 `toRowView`）。 */
 type ConversationRow = {
   id: number | bigint;
   platform: string;
   job_id: string;
+  conversation_target: string;
   direction: string;
   text: string;
   external_id: string | null;
@@ -108,6 +143,9 @@ function dedupeKeyOf(message: ReplyMessage): string {
   return `t:${createHash('sha1').update(`${message.from}:${message.text}`).digest('hex')}`;
 }
 
+/** 库里那一格的空串读回视图时归 null：跨进程一侧只需要知道"这一行没有那个坐标"（裁定⑲）。 */
+const coordinateOf = (stored: string): string | null => (stored === '' ? null : stored);
+
 /**
  * 把数据库行转成跨进程视图。
  * @param row 库里的一行（列名是下划线）
@@ -117,11 +155,12 @@ function toRowView(row: ConversationRow): ConversationRowView {
   return {
     id: Number(row.id),
     platform: row.platform,
-    jobId: row.job_id,
+    jobId: coordinateOf(row.job_id),
     from: row.direction === 'recruiter' ? 'recruiter' : 'self',
     text: row.text,
     externalId: row.external_id,
     at: Number(row.read_at),
+    conversationTarget: coordinateOf(row.conversation_target),
   };
 }
 
@@ -156,20 +195,21 @@ export class ConversationStoreService extends Service {
   }
 
   /**
-   * 落库一条消息（幂等键：`platform + job_id + dedupe_key`）。
+   * 落库一条消息（幂等键：`platform + job_id + conversation_target + dedupe_key`）。
    * @param message 适配器从页面读到的一条消息
    * @returns 本次是新建行还是「已经见过」；合并分支什么都不做，因为消息不改写
    */
   record = (message: ReplyMessage): boolean => {
     const changes = this.store.db
       .prepare(
-        `INSERT INTO conversation_messages (platform, job_id, direction, text, external_id, dedupe_key, read_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (platform, job_id, dedupe_key) DO NOTHING`,
+        `INSERT INTO conversation_messages (platform, job_id, conversation_target, direction, text, external_id, dedupe_key, read_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (platform, job_id, conversation_target, dedupe_key) DO NOTHING`,
       )
       .run(
         message.platform,
-        message.jobId,
+        message.jobId ?? '',
+        message.conversationTarget ?? '',
         message.from,
         message.text,
         message.externalId,
@@ -184,26 +224,35 @@ export class ConversationStoreService extends Service {
    *
    * 编排只有「读 + 逐条 record」两行，因此就地写完不再起一个 `conversation.capture` 服务：
    * 它与 `jd.capture` 的差别是会话页一屏就是全量，没有滚动攒批那件事要做（AGENTS.md §2.6）。
-   * @param jobId 目标岗位标识
+   * @param target 目标坐标：岗位或会话对象，两者至少给一只（P8 裁定⑲）
    * @param platform 平台标识；省略时取配置 `platform`
    * @returns 本次读到多少行、新增多少行、按去重键跳过多少行——第二遍轮询应当 `inserted:0`
-   * @throws 目标未登记 `PLATFORM_NOT_REGISTERED`；jobId 为空 `INVALID_ARGUMENT`；
-   *         页面读不到由适配器照 `browser.act` / `browser.page` 的原样抛出
+   * @throws 两种坐标都没给 `INVALID_ARGUMENT`；目标未登记 `PLATFORM_NOT_REGISTERED`；
+   *         页面读不到由适配器照 `browser.act` / `browser.page` 的原样抛出（含 `CONVERSATION_TARGET_NOT_FOUND`）
    */
-  syncFrom = async (jobId: string, platform?: string): Promise<ConversationSyncView> => {
-    const target = jobId?.trim();
-    if (!target) throw new AppError('INVALID_ARGUMENT', '同步会话必须给出目标岗位', 'conversation.store');
+  syncFrom = async (target: GreetTarget, platform?: string): Promise<ConversationSyncView> => {
+    const jobId = target.jobId?.trim() ?? '';
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    if (!jobId && !conversationTarget) {
+      throw new AppError('INVALID_ARGUMENT', '同步会话必须给出目标岗位或会话对象', 'conversation.store');
+    }
     const key = platform?.trim() || this.config.platform;
-    const messages = await this.registry.get(key).readReplies(target);
+    // 缺的那一格归 null（空串只在库里用，见 `conversationTargetMigration`）：日志与回执行都用
+    // 同一个 `greetTargetLabel` 取"这一轮读的是谁"，不在三处各写一遍取舍。
+    const coordinates = { jobId: jobId || null, conversationTarget: conversationTarget || null };
+    const messages = await this.registry.get(key).readReplies({
+      ...(jobId ? { jobId } : {}),
+      ...(conversationTarget ? { conversationTarget } : {}),
+    });
     let inserted = 0;
     for (const message of messages) if (this.record(message)) inserted += 1;
     const at = Date.now();
     this.ctx.logger.info(
-      `同步会话 ${key}/${target}：页面读到 ${String(messages.length)} 条 · 新增 ${String(inserted)} 条 · 已见过 ${String(messages.length - inserted)} 条`,
+      `同步会话 ${key}/${greetTargetLabel(coordinates)}：页面读到 ${String(messages.length)} 条 · 新增 ${String(inserted)} 条 · 已见过 ${String(messages.length - inserted)} 条`,
     );
     return {
       platform: key,
-      jobId: target,
+      ...coordinates,
       read: messages.length,
       inserted,
       duplicate: messages.length - inserted,
@@ -213,22 +262,27 @@ export class ConversationStoreService extends Service {
 
   /**
    * 列出某个目标已落库的消息（按读取时间升序，即页面的时间线方向）。
-   * @param jobId 目标岗位标识
+   * @param target 目标坐标：按哪一路读的就按哪一路查，另一格当空串查（裁定⑲ 的两格是同一行的两个坐标）
    * @param limit 条数（钳到 1～500，省略用 50）
    * @returns 该目标的总条数（不受 limit 影响）与行；只查配置里那个平台，跨平台看数走 `status`
    */
-  list = (jobId: string, limit?: number): ConversationListResultView => {
+  list = (target: GreetTarget, limit?: number): ConversationListResultView => {
     const requested = typeof limit === 'number' && Number.isFinite(limit) ? Math.trunc(limit) : LIST_LIMIT.fallback;
     const capped = Math.min(Math.max(requested, LIST_LIMIT.min), LIST_LIMIT.max);
-    const target = jobId?.trim() ?? '';
+    // 两格一起作键：只按 job_id 查会把"同一岗位名下的会话行"与"岗位行"混进同一条时间线。
+    const jobId = target.jobId?.trim() ?? '';
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
     const total = this.store.db
-      .prepare('SELECT COUNT(*) AS n FROM conversation_messages WHERE platform = ? AND job_id = ?')
-      .get(this.config.platform, target) as { n?: number | bigint };
+      .prepare(
+        'SELECT COUNT(*) AS n FROM conversation_messages WHERE platform = ? AND job_id = ? AND conversation_target = ?',
+      )
+      .get(this.config.platform, jobId, conversationTarget) as { n?: number | bigint };
     const rows = this.store.db
       .prepare(
-        'SELECT * FROM conversation_messages WHERE platform = ? AND job_id = ? ORDER BY read_at ASC, id ASC LIMIT ?',
+        `SELECT * FROM conversation_messages WHERE platform = ? AND job_id = ? AND conversation_target = ?
+         ORDER BY read_at ASC, id ASC LIMIT ?`,
       )
-      .all(this.config.platform, target, capped) as unknown as ConversationRow[];
+      .all(this.config.platform, jobId, conversationTarget, capped) as unknown as ConversationRow[];
     return { total: Number(total?.n ?? 0), rows: rows.map(toRowView) };
   };
 
@@ -241,7 +295,7 @@ export class ConversationStoreService extends Service {
       .prepare(
         `SELECT COUNT(*) AS n,
                 SUM(CASE WHEN direction = 'recruiter' THEN 1 ELSE 0 END) AS inbound,
-                COUNT(DISTINCT platform || '|' || job_id) AS jobs
+                COUNT(DISTINCT platform || '|' || job_id || '|' || conversation_target) AS jobs
          FROM conversation_messages`,
       )
       .get() as { n?: number | bigint; inbound?: number | bigint; jobs?: number | bigint };
@@ -251,9 +305,10 @@ export class ConversationStoreService extends Service {
     return {
       total: Number(counts?.n ?? 0),
       recruiterMessages: Number(counts?.inbound ?? 0),
+      // 目标数按两格坐标一起去重：只数 job_id 会把「同一个联系人的两条会话」并成一个岗位（裁定⑲）。
       jobs: Number(counts?.jobs ?? 0),
       schemaVersion: this.store.version,
-      newestJobId: newest?.job_id ?? null,
+      newestJobId: newest?.job_id || null,
     };
   };
 
@@ -265,15 +320,15 @@ export class ConversationStoreService extends Service {
    * 那是把同一个岗位重复计进分子（plan §7.6.2 决策十六）。
    * 时刻列取 `read_at`（本表只有这一列时刻——它是"读到的时刻"，不是"对方发出的时刻"，页面不给后者），
    * 区间含头不含尾，走号段 26 那条 `conversation_read_at` 索引。
-   * 去重键取 `(platform, job_id)` 而不是裸 `job_id`：与 `status().jobs` 同一个口径（§2.5 只留一条数法），
-   * 两个平台的同一个岗位 id 是两次不同的回复。
+   * 去重键取 `(platform, job_id, conversation_target)` 而不是裸 `job_id`：与 `status().jobs` 同一个口径
+   * （§2.5 只留一条数法），而裁定⑲ 之后"一个目标"可以是岗位、也可以是按列表行选中的那个联系人。
    * @param range 半开区间毫秒时间戳，`fromMs` 含、`toMs` 不含
    * @returns 该区间内至少有一条招聘方消息的目标数；库里没有回复为 0
    */
   repliedJobCount = (range: FunnelRange): number => {
     const row = this.store.db
       .prepare(
-        `SELECT COUNT(DISTINCT platform || '|' || job_id) AS n FROM conversation_messages
+        `SELECT COUNT(DISTINCT platform || '|' || job_id || '|' || conversation_target) AS n FROM conversation_messages
          WHERE direction = 'recruiter' AND read_at >= ? AND read_at < ?`,
       )
       .get(range.fromMs, range.toMs) as { n?: number | bigint };
@@ -284,11 +339,11 @@ export class ConversationStoreService extends Service {
    * 登记迁移并把表建出来。
    *
    * 幂等 push 是硬要求：插件重启会重新构造本服务，无条件 push 会在共享清单里留下两个 `version: 5`。
-   * 两条迁移各自守自己的号（表 5、时间索引 26），老库升级时只有第二条会跑。
+   * 三条迁移各自守自己的号（表 5、时间索引 26、会话坐标列 33），老库升级时只跑没记过账的那几支。
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    for (const migration of [conversationMigration, conversationTimeIndexMigration]) {
+    for (const migration of [conversationMigration, conversationTimeIndexMigration, conversationTargetMigration]) {
       if (!migrations.some((item) => item.version === migration.version)) {
         migrations.push(migration);
       }

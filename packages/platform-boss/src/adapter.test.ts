@@ -13,6 +13,7 @@
  * 假手替身见 `test-doubles.ts`；测试不访问真实平台（AGENTS.md §7.2）。
  */
 import { AppError, asApp, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
+import type { ExtractRowReading } from '@auto-cc/shared';
 import type { PlatformAdapter } from '@auto-cc/plugin-browser';
 import { PlatformRegistryService } from '@auto-cc/plugin-browser';
 import type { JobDetail, JobSummary, KnowledgePack } from '@auto-cc/plugin-browser';
@@ -23,6 +24,7 @@ import {
   cardRow,
   chatScript,
   chatUrlOf,
+  conversationRow,
   createFakeAct,
   createFakePage,
   deliverScript,
@@ -42,8 +44,9 @@ import {
   type PageScript,
 } from './test-doubles.js';
 
-// 本文件全部打在本地仿站那份知识包上（AGENTS.md §7.2）：自 P8 8.1 起缺省是**上线包**（真 BOSS），
-// 漏写这一行就会让单测去断言真站点的类名。
+// 本文件**缺省**打在本地仿站那份知识包上（AGENTS.md §7.2）：自 P8 8.1 起缺省是**上线包**（真 BOSS），
+// 漏写就会让单测去断言真站点的类名。唯一的例外是「按会话坐标选中联系人」那一组——会话列表那一双定位
+// 只在真包登记（仿站页没有那一屏，它靠 `targetParam` 直接拼地址），而那组仍然打假手、一次网络都不发。
 const pack = loadBossKnowledgePack({ pack: 'fixture' });
 const fibers: Fiber[] = [];
 
@@ -323,7 +326,7 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
 
   it('三段判据齐全才判发出，并说清回读到了什么', async () => {
     const { adapter, page, act } = withScript(chatScript(pack, '第 3 条已送达服务端'));
-    const result = await adapter.chat('1001', TEXT);
+    const result = await adapter.chat({ jobId: '1001' }, TEXT);
     expect(result).toEqual({
       sent: true,
       reason: expect.stringContaining('已送达服务端'),
@@ -335,7 +338,7 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
     // 内容与声明一致，未取证的候选不在里面（spec 8.1-04）。所以这里断言相等而不是同一。
     expect(act.typed[0]!.spec).toEqual(pack.locators.chatInput);
     expect(act.typed[0]!.text).toBe(TEXT);
-    expect(act.clicked[0]).toEqual(pack.locators.chatSendButton);
+    expect(act.clicked[0]!.spec).toEqual(pack.locators.chatSendButton);
     // 等待必须起在点击**之前**：基线取的是脚本启动那一刻的文本，点完再等永远读不到变化。
     expect(act.waitedFor[0]!.spec).toBe(pack.locators.chatStatus);
     expect(act.waitsAtClick).toEqual([1]);
@@ -345,7 +348,7 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
     const { adapter, act } = withScript(chatScript(pack, '第 3 条已送达服务端'), {
       typedValue: '您好，我对这个岗位很感',
     });
-    const result = await adapter.chat('1001', TEXT);
+    const result = await adapter.chat({ jobId: '1001' }, TEXT);
     expect(result.sent).toBe(false);
     expect(result.reason).toContain('输入框回读');
     // 一个点击都不该发生：字没进对，点发送只会发出一条半截话。
@@ -355,20 +358,20 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
 
   it('状态行变了但不含知识包声明的成功样式 → sent:false', async () => {
     const { adapter } = withScript(chatScript(pack, '第 3 条已发送，等待对方回复'));
-    const result = await adapter.chat('1001', TEXT);
+    const result = await adapter.chat({ jobId: '1001' }, TEXT);
     expect(result).toEqual({ sent: false, reason: expect.stringContaining('不含成功样式'), ledgerKey: null });
   });
 
   it('状态行在超时窗口内没有变化 → sent:false 并如实报出等了多久', async () => {
     const { adapter } = withScript(chatScript(pack, null), { waitStatus: 'timeout', waitedMs: 5000 });
-    const result = await adapter.chat('1001', TEXT);
+    const result = await adapter.chat({ jobId: '1001' }, TEXT);
     expect(result.sent).toBe(false);
     expect(result.reason).toContain('5000ms 内状态行没有变化');
   });
 
   it('正文为空时结构化失败，一个页面动作都不发', async () => {
     const { adapter, page, act } = withScript(chatScript(pack, '第 3 条已送达服务端'));
-    await expect(adapter.chat('1001', '   ')).rejects.toMatchObject({
+    await expect(adapter.chat({ jobId: '1001' }, '   ')).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
       path: 'platform.boss',
     });
@@ -378,25 +381,25 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
 
   it('目标为空时同样拒绝——空 jobId 会拼出一个「谁的会话都不是」的地址', async () => {
     const { adapter, page } = withScript(chatScript(pack, '第 3 条已送达服务端'));
-    await expect(adapter.chat('', TEXT)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(adapter.chat({ jobId: '' }, TEXT)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(page.navigated).toEqual([]);
   });
 
   it('知识包没有 chat 段时拒绝打招呼，而不是拿空定位去点', async () => {
     const withoutChat: KnowledgePack = { ...pack, chat: undefined };
     const adapter = createBossAdapter(withoutChat, createFakePage(standardScript()), createFakeAct());
-    await expect(adapter.chat('1001', TEXT)).rejects.toMatchObject({
+    await expect(adapter.chat({ jobId: '1001' }, TEXT)).rejects.toMatchObject({
       code: 'KNOWLEDGE_PACK_INVALID',
       message: expect.stringContaining('chat 段'),
     });
-    await expect(adapter.readReplies('1001')).rejects.toMatchObject({ code: 'KNOWLEDGE_PACK_INVALID' });
+    await expect(adapter.readReplies({ jobId: '1001' })).rejects.toMatchObject({ code: 'KNOWLEDGE_PACK_INVALID' });
   });
 });
 
 describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', () => {
   it('抽取请求的容器、属性名与「读自身」全部来自知识包', async () => {
     const { adapter, page } = withScript(chatScript(pack, null, [messageRow(0)]));
-    await adapter.readReplies('1001');
+    await adapter.readReplies({ jobId: '1001' });
     const request = page.requests.at(-1)!;
     expect(request.container).toBe(pack.locators.replyItem);
     expect(request.fields.map((field) => field.name)).toEqual(['text', 'externalId', 'direction']);
@@ -417,7 +420,7 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
         messageRow(2, { text: '方便，请问期望薪资？', direction: 'outbound' }),
       ]),
     );
-    const messages = await adapter.readReplies('1001');
+    const messages = await adapter.readReplies({ jobId: '1001' });
     expect(messages.map((message) => message.from)).toEqual(['recruiter', 'self', 'self']);
     expect(messages[0]).toMatchObject({
       platform: 'boss',
@@ -432,7 +435,7 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
 
   it('页面没带稳定 id 时 externalId 为 null，交给库按方向+正文去重', async () => {
     const { adapter } = withScript(chatScript(pack, null, [messageRow(0, { externalId: null })]));
-    const [message] = await adapter.readReplies('1001');
+    const [message] = await adapter.readReplies({ jobId: '1001' });
     expect(message!.externalId).toBeNull();
   });
 
@@ -440,14 +443,123 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
     const { adapter } = withScript(
       chatScript(pack, null, [messageRow(0, { text: null }), messageRow(1, { text: '' })]),
     );
-    expect(await adapter.readReplies('1001')).toEqual([]);
+    expect(await adapter.readReplies({ jobId: '1001' })).toEqual([]);
   });
 
   it('每次读都先导航到该目标的会话页（不同 jobId 不会读到同一个线程）', async () => {
     const { adapter, page } = withScript(chatScript(pack, null, [messageRow(0)]));
-    await adapter.readReplies('1001');
-    await adapter.readReplies('2002');
+    await adapter.readReplies({ jobId: '1001' });
+    await adapter.readReplies({ jobId: '2002' });
     expect(page.navigated).toEqual([chatUrlOf('1001'), chatUrlOf('2002')]);
+  });
+});
+
+describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话面寻址）', () => {
+  // 这一组打在**上线知识包**的声明上，但两只手仍然是假的（`withScript` 造的 `createFakePage` /
+  // `createFakeAct`）：会话列表那一双定位只在真包里登记（仿站页没有那一屏），而 AGENTS.md §7.2 禁的是
+  // 访问真实平台，不是读一份 JSON 声明。整组用例一次网络都不发。
+  const realPack = loadBossKnowledgePack({ pack: 'real' });
+  /** 会话列表的三行读数（第 2 行带首尾空格，用来验比对前两边都折叠过空白）。 */
+  const companyRows = (): ExtractRowReading[] => [
+    conversationRow(0, '甲公司'),
+    conversationRow(1, '乙公司'),
+    conversationRow(2, '  丙公司  '),
+  ];
+
+  it('选中成功：等行出现 → 按标签那一格读 → 按命中序号点那一格，且绝不拼岗位地址', async () => {
+    const { adapter, page, act } = withScript(chatScript(realPack, null, [messageRow(0)], companyRows()), {}, realPack);
+    const messages = await adapter.readReplies({ conversationTarget: '丙公司' });
+    // 会话坐标这一路只打开**入口页**：真包没有 `chat.targetParam`，所以既不会拼 `targetId=`，
+    // 也绝不把联系人名字当岗位参数塞进地址（那是"谁的会话"两回事）。
+    expect(page.navigated).toHaveLength(1);
+    expect(page.navigated[0]).not.toContain('targetId');
+    expect(page.navigated[0]).not.toContain('丙公司');
+    expect(act.waitedFor[0]).toEqual({ kind: 'appear', spec: realPack.locators.chatConversationRow });
+    // 读的是标签那一格（`scope:'self'`），不是整行——整行文本是「角标+时间+姓名+公司+职位+末句」的拼接。
+    const request = page.requests[0]!;
+    expect(request.container).toEqual(realPack.locators.chatConversationLabel);
+    expect(request.fields).toEqual([{ name: 'target', candidates: [], scope: 'self' }]);
+    // 点击带的是**索引寻址**：候选序号 0（标签声明只有一条候选）+ 命中行序号 + 期望文本。
+    expect(act.clicked[0]!.spec).toEqual(realPack.locators.chatConversationLabel);
+    expect(act.clicked[0]!.target).toEqual({ candidateIndex: 0, hitIndex: 2, expectText: '丙公司' });
+    // 落库两侧的形状：会话坐标那一路填 conversationTarget，岗位格如实留 null（裁定⑲）。
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ jobId: null, conversationTarget: '丙公司' });
+  });
+
+  it('列表里没有那一条时停下：不点、也不读当前选中的那条', async () => {
+    const { adapter, page, act } = withScript(chatScript(realPack, null, [messageRow(0)], companyRows()), {}, realPack);
+    const error = asErr(await adapter.readReplies({ conversationTarget: '丁公司' }).catch((reason: unknown) => reason));
+    expect(error.code).toBe('CONVERSATION_TARGET_NOT_FOUND');
+    expect(error.details).toMatchObject({ conversationTarget: '丁公司', matched: 0, rows: 3, truncated: false });
+    expect(act.clicked).toEqual([]);
+    // 消息条根本没读：退化成"读页面当前选中的那条"会把上一个联系人的话记到这一行名下。
+    expect(page.kinds).toEqual(['conversation']);
+  });
+
+  it('同一家公司的两个联系人撞成同名时同样停下（认不出该选哪一条就不点）', async () => {
+    const { adapter, act } = withScript(
+      chatScript(realPack, null, [messageRow(0)], [conversationRow(0, '甲公司'), conversationRow(1, '甲公司')]),
+      {},
+      realPack,
+    );
+    const error = asErr(await adapter.readReplies({ conversationTarget: '甲公司' }).catch((r: unknown) => r));
+    expect(error.code).toBe('CONVERSATION_TARGET_NOT_FOUND');
+    expect(error.details).toMatchObject({ matched: 2, rows: 2 });
+    expect(act.clicked).toEqual([]);
+  });
+
+  it('标签声明有多条候选时整条停手：抽取行的序号不等于任何一条的命中序号', async () => {
+    const label = realPack.locators.chatConversationLabel!;
+    const doubled: KnowledgePack = {
+      ...realPack,
+      locators: {
+        ...realPack.locators,
+        chatConversationLabel: { ...label, candidates: [label.candidates[0]!, label.candidates[0]!] },
+      },
+    };
+    const { adapter, page, act } = withScript(chatScript(realPack, null, [messageRow(0)], companyRows()), {}, doubled);
+    const error = asErr(await adapter.readReplies({ conversationTarget: '甲公司' }).catch((r: unknown) => r));
+    expect(error.code).toBe('LOCATE_SPEC_INVALID');
+    expect(error.details).toEqual({ platform: 'boss', locator: 'chatConversationLabel' });
+    // 停在门口：连「等列表出现」都没起，更没点过任何东西。
+    expect(act.waitedFor).toEqual([]);
+    expect(act.clicked).toEqual([]);
+    expect(page.kinds).toEqual([]);
+  });
+
+  it('打招呼也先选行：选中之后才敲字、点发送', async () => {
+    const { adapter, page, act } = withScript(
+      chatScript(realPack, '第 3 条[送达]', [messageRow(0)], companyRows()),
+      {},
+      realPack,
+    );
+    const outcome = await adapter.chat({ conversationTarget: '乙公司' }, '您好 🙂');
+    expect(outcome).toMatchObject({ sent: true, ledgerKey: null });
+    expect(act.clicked.map((call) => call.spec)).toEqual([
+      realPack.locators.chatConversationLabel,
+      realPack.locators.chatSendButton,
+    ]);
+    expect(act.clicked[0]!.target).toEqual({ candidateIndex: 0, hitIndex: 1, expectText: '乙公司' });
+    // 入口页只开一次（选行那一步开的），发送那一步不再导航。
+    expect(page.navigated).toHaveLength(1);
+    expect(page.navigated[0]).not.toContain('targetId');
+  });
+
+  it('两种坐标都没给 → INVALID_ARGUMENT；仿站包没声明这一双定位 → KNOWLEDGE_PACK_INVALID', async () => {
+    const { adapter, page, act } = withScript(chatScript(realPack, null, [messageRow(0)], companyRows()), {}, realPack);
+    await expect(adapter.readReplies({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(adapter.chat({ conversationTarget: '   ' }, '您好')).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+    });
+    expect(page.navigated).toEqual([]);
+    expect(act.clicked).toEqual([]);
+    // 仿站包只声明了 `targetParam` 那一路：拿会话坐标去打它是以"这条包不能按会话寻址"失败的，
+    // 而不是静默按岗位名去拼地址。
+    const fixtureAdapter = withScript(chatScript(pack, null, [messageRow(0)]), {}).adapter;
+    await expect(fixtureAdapter.readReplies({ conversationTarget: '甲公司' })).rejects.toMatchObject({
+      code: 'KNOWLEDGE_PACK_INVALID',
+    });
   });
 });
 
@@ -467,7 +579,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(act.uploaded).toEqual([{ spec: pack.locators.resumeUploadInput, filePath: RESUME.path }]);
     expect(act.uploaded[0]!.spec).toEqual(pack.locators.resumeUploadInput);
     expect(act.waitedFor).toEqual([{ kind: 'textChanges', spec: pack.locators.resumeDeliverStatus }]);
-    expect(act.clicked).toEqual([pack.locators.resumeSendButton]);
+    expect(act.clicked.map((call) => call.spec)).toEqual([pack.locators.resumeSendButton]);
     // 时序判据（与打招呼同一条）：等待必须起在点击之前，否则基线就是点击后的文本，永远等不到变化。
     expect(act.waitsAtClick).toEqual([act.waitsStarted]);
   });
@@ -586,7 +698,7 @@ describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () =>
       {},
       packWithUnverified('chatSendButton'),
     );
-    const error = asErr(await adapter.chat('1001', '您好').catch((reason: unknown) => reason));
+    const error = asErr(await adapter.chat({ jobId: '1001' }, '您好').catch((reason: unknown) => reason));
     expect(error.code).toBe('LOCATOR_UNVERIFIED');
     expect(error.path).toBe('platform.boss');
     expect(error.message).toContain('没有一条已取证的候选');
@@ -605,7 +717,7 @@ describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () =>
       {},
       packWithUnverified('chatInput'),
     );
-    const error = asErr(await adapter.chat('1001', '您好').catch((reason: unknown) => reason));
+    const error = asErr(await adapter.chat({ jobId: '1001' }, '您好').catch((reason: unknown) => reason));
     expect(error.code).toBe('LOCATOR_UNVERIFIED');
     expect(error.details).toEqual({ platform: 'boss', locator: 'chatInput' });
     expect(page.navigated).toEqual([]);
@@ -615,8 +727,8 @@ describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () =>
   it('只有部分候选未取证时，交给动作通道的声明里只剩已取证那几条，且原包一字未动', async () => {
     const bare = packWithUnverified('chatSendButton', 1);
     const { adapter, act } = withScript(chatScript(bare, '第 3 条已送达服务端'), {}, bare);
-    expect(await adapter.chat('1001', '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
-    const handed = act.clicked[0]!;
+    expect(await adapter.chat({ jobId: '1001' }, '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
+    const handed = act.clicked[0]!.spec;
     // 断言对象是**筛过的声明**（`LocateSpec` 的线上形状里没有取证那几个键，所以拿筛前那份去比）：
     // 交给动作通道的候选 = 声明里去掉被标未取证的那条。
     const declared = bare.locators.chatSendButton!.candidates;
@@ -654,7 +766,7 @@ describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () =>
   it('状态行属于读取通道：标了未取证也照样等、照样回读，sent 判据不受影响', async () => {
     const bare = packWithUnverified('chatStatus');
     const { adapter, act } = withScript(chatScript(bare, '第 3 条已送达服务端'), {}, bare);
-    expect(await adapter.chat('1001', '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
+    expect(await adapter.chat({ jobId: '1001' }, '您好，我对这个岗位很感兴趣 🙂')).toMatchObject({ sent: true });
     // 等待用的就是知识包那一个对象（未经筛选），这条是「读取通道不筛」的直接证据。
     expect(act.waitedFor[0]!.spec).toBe(bare.locators.chatStatus);
   });

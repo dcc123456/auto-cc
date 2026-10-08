@@ -111,6 +111,7 @@ function seedTenThousandRows(): void {
         platform: 'boss',
         // 每条消息一个目标岗位：这一级数的是「有多少个岗位被回复过」，去重键在这里必须真的生效。
         jobId: `scale-c-${String(index)}`,
+        conversationTarget: null,
         from: 'recruiter',
         text: '方便聊聊',
         externalId: `scale-r-${String(index)}`,
@@ -262,7 +263,7 @@ describe('5.8-05 万级记录下的计时与不做无界全表扫描', () => {
       {
         name: 'conversation.store.repliedJobCount',
         source: '../../platform-boss/src/conversation-store.ts',
-        sql: `SELECT COUNT(DISTINCT platform || '|' || job_id) AS n FROM conversation_messages
+        sql: `SELECT COUNT(DISTINCT platform || '|' || job_id || '|' || conversation_target) AS n FROM conversation_messages
               WHERE direction = 'recruiter' AND read_at >= ? AND read_at < ?`,
         index: 'conversation_read_at',
       },

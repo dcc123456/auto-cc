@@ -63,6 +63,10 @@ export type AppErrorCode =
   // 后者是「到页面上试过没打过线」，这一条是「压根没试」——数据里就写着这条定位没在真站点上录过证据，
   // 要的是补取证，不是重试。
   | 'LOCATOR_UNVERIFIED'
+  // 会话目标选不出来（P8 8.4 路线 A，spec 8.4-02）。它与 `LOCATE_FAILED` 必须分开：后者是「定位没打过线」，
+  // 这一条是「列表里按声明的那一格认不出唯一目标」（一行都没有，或多行同名）。两种都不点、不读，
+  // 也不许退化成"操作当前选中的那条"——那等于把话发给另一个人。
+  | 'CONVERSATION_TARGET_NOT_FOUND'
   // 站点知识包（spec 2.2-08）与适配器登记（spec 2.2-07）：前者是数据不合法，后者是装配缺包。
   | 'KNOWLEDGE_PACK_INVALID'
   | 'PLATFORM_NOT_REGISTERED'

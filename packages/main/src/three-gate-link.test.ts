@@ -31,7 +31,9 @@ import {
   type Fiber,
   type GreetChannel,
   type GreetChannelSource,
+  type GreetTarget,
 } from '@auto-cc/core';
+import { greetTargetLabel } from '@auto-cc/shared';
 import {
   AgentLoopService,
   AgentPauseService,
@@ -108,8 +110,10 @@ class FakePlatformRegistryService extends Service implements GreetChannelSource 
   greetChannel = (platform: string): GreetChannel | null => {
     if (platform !== PLATFORM) return null;
     return {
-      send: (targetId: string, text: string) => {
-        this.calls.push({ targetId, text });
+      send: (target: GreetTarget, text: string) => {
+        // 落点标签与编排层用同一个 helper 取（§2.5）：这一格记的是「发给了谁」，
+        // 岗位那一路与会话那一路在断言里都只有一条形状。
+        this.calls.push({ targetId: greetTargetLabel(target), text });
         return Promise.resolve({ sent: true, reason: 'fixture 页面已确认发出' });
       },
     };

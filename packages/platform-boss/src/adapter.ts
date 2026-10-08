@@ -10,11 +10,12 @@
  * 编排层（2.5-e 的 `outbound.greet`），适配器只管「把这段文字打进这个会话并按页面回读判定结果」。
  * 把闸门写在这里会让「从界面点一次发送」与「从工作流跑一次发送」走两条不同的计量路（AGENTS.md §7.3）。
  */
-import { AppError, type ResumeAttachment } from '@auto-cc/core';
+import { AppError, type GreetTarget, type ResumeAttachment } from '@auto-cc/core';
 import type {
   ExtractFieldReading,
   ExtractRequest,
   ExtractResultView,
+  HitAddress,
   KernelPageSnapshotView,
   LocateSpec,
   PlatformMetaView,
@@ -54,8 +55,8 @@ export type BossPageHand = {
 export type BossActionHand = {
   /** 往定位声明指向的控件里写文本，回读页面里的当前值 */
   type(spec: LocateSpec, text: string): Promise<ActReadback>;
-  /** 点击定位声明指向的元素 */
-  click(spec: LocateSpec): Promise<ActReadback>;
+  /** 点击定位声明指向的元素；带 `target` 时点的是那一格里第 `hitIndex` 个命中（spec 8.4-01） */
+  click(spec: LocateSpec, target?: HitAddress): Promise<ActReadback>;
   /**
    * 只等不动手：超时是结局（`status:'timeout'`），不是异常。
    *
@@ -374,15 +375,16 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   /**
    * 拼某个目标页面的地址。
    * @param entry 该段知识里的入口声明（`chat` 或 `deliver` 的 `entryPath` / `targetParam`）
-   * @param jobId 目标岗位标识
+   * @param jobId 目标岗位标识；**null 表示这次没有岗位坐标**（按会话列表行选中目标那一类），
+   *               此时绝不把任何东西写进 `targetParam`——参数名是站点的，值却不是岗位，页面会静默停在错误的那条会话
    * @returns 绝对地址；知识包没声明 `entryPath` 时为 null，表示「当前页就是那页」
    *          （真实平台从岗位卡点进会话/上传，不给可直接拼的地址，那种站点由调用方先打开再动作）
    */
-  const pageUrlFor = (entry: PageEntry, jobId: string): string | null => {
+  const pageUrlFor = (entry: PageEntry, jobId: string | null): string | null => {
     if (!entry.entryPath) return null;
     const target = new URL(entry.entryPath, pack.startUrl);
     // 参数名是站点知识：换平台只改 `targetParam`，这一段代码不用动。
-    if (entry.targetParam) target.searchParams.set(entry.targetParam, jobId);
+    if (entry.targetParam && jobId !== null) target.searchParams.set(entry.targetParam, jobId);
     return target.href;
   };
 
@@ -401,33 +403,135 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
   };
 
   /**
+   * 取「按会话列表行选中目标」那一双定位（行容器 + 页面上用来认目标的那一格）。
+   * @returns 两个语义名
+   * @throws 任一只缺失时 `KNOWLEDGE_PACK_INVALID`。`parseKnowledgePack` 已保证两者成对出现，
+   *         所以走到这里只剩一种可能：这份包根本没声明按行选中的能力（仿站包就是这种，它有 `targetParam`），
+   *         而那种站点不该被会话坐标寻址——静默默认值会把话发给页面上恰好选中的另一个人
+   */
+  const conversationLocators = (): { row: string; label: string } => {
+    const knowledge = chatKnowledge();
+    if (!knowledge.conversationRow || !knowledge.conversationRowLabel) {
+      throw new AppError(
+        'KNOWLEDGE_PACK_INVALID',
+        '知识包没有声明 chat.conversationRow / chat.conversationRowLabel，这份包不能按会话坐标寻址',
+        'platform.boss',
+        { platform: pack.platform },
+      );
+    }
+    return { row: knowledge.conversationRow, label: knowledge.conversationRowLabel };
+  };
+
+  /**
+   * 在会话列表里选中目标联系人（spec 8.4-02，P8 路线 A 的前置：`chat` 与 `readReplies` 都以它为前置）。
+   *
+   * 三步都不可省：等行出现（列表是异步长出来的，与 8.3 那批卡片同一形态）→ 按声明的那一格读文本并**整串比对**
+   * → 按命中序号点那一格。比对不中就多行同名时一律停下，不做"取第一条"这种猜测。
+   * @param conversationTarget 目标标识（真 BOSS 是行上的公司名那一格，证据 8.4-04 第三节）
+   * @returns 无返回值：选中成功就是"页面上现在停在这条会话上"，失败一律以结构化错误上浮
+   * @throws 目标为空 `INVALID_ARGUMENT`；包没声明这一双定位 `KNOWLEDGE_PACK_INVALID`；
+   *         标签声明有多条候选 `LOCATE_SPEC_INVALID`（多候选时抽取行的序号不等于任何一条的命中序号，
+   *         按它点会点到别的候选身上，而这一格错 = 把话发给另一个人）；
+   *         列表里认不出唯一目标 `CONVERSATION_TARGET_NOT_FOUND`（读到的行数与同名行数进 details）；
+   *         点击时那一格的文本与读回来的对不上 `LOCATE_FAILED`（动作层在点之前再比一次）
+   */
+  const selectConversation = async (conversationTarget: string): Promise<void> => {
+    const knowledge = chatKnowledge();
+    if (!conversationTarget.trim()) {
+      throw new AppError('INVALID_ARGUMENT', '按会话寻址必须给出目标联系人', 'platform.boss', {
+        platform: pack.platform,
+      });
+    }
+    const { row: rowName, label: labelName } = conversationLocators();
+    const labelSpec = locatorFor(labelName);
+    if (labelSpec.candidates.length !== 1) {
+      throw new AppError(
+        'LOCATE_SPEC_INVALID',
+        `会话标签「${labelName}」有 ${String(labelSpec.candidates.length)} 条候选，抽取行的序号与命中的序号对不上，不该按序号点`,
+        'platform.boss',
+        { platform: pack.platform, locator: labelName },
+      );
+    }
+    // 会话坐标这一路没有岗位，绝不能把联系人的名字写进 `targetParam`（那是给岗位用的）。
+    const url = pageUrlFor(knowledge, null);
+    if (url) await page.navigate(url);
+    await act.waitFor({ kind: 'appear', spec: locatorFor(rowName) });
+    const reading = await page.extract({
+      container: labelSpec,
+      fields: [
+        // scope:self：读容器自身那一格的正文。整行的文本是「角标+时间+姓名+公司+职位+末句」的拼接，
+        // 拿它比对目标会把同一家公司的不同联系人一起撞进来（证据 8.4-04 第一节）。
+        { name: 'target', candidates: [], scope: 'self' },
+      ],
+    });
+    const wanted = cleanText(conversationTarget);
+    const hits = reading.rows.filter((row) => textOf(fieldsByName(row.fields), 'target') === wanted);
+    // 命中必须**唯一**：行数不等于 1 时不点（0 行是认不出，>1 行是同一家公司的两个联系人，猜哪个
+    // 都是把话发给另一个人）。
+    const hit = hits.length === 1 ? hits[0] : undefined;
+    if (!hit) {
+      throw new AppError(
+        'CONVERSATION_TARGET_NOT_FOUND',
+        hits.length === 0
+          ? `会话列表里没有「${conversationTarget}」这一条，不点也不读当前选中的那条`
+          : `会话列表里有 ${String(hits.length)} 行都写着「${conversationTarget}」，认不出该选哪一条`,
+        'platform.boss',
+        {
+          conversationTarget,
+          matched: hits.length,
+          rows: reading.rows.length,
+          truncated: reading.truncated,
+        },
+      );
+    }
+    // 点的是那一格而不是整行：整行中心被右侧操作区盖住、且行本身是虚拟列表的重渲染节点，
+    // 按整行点实测过 WAIT_TIMEOUT（证据 8.0-05 第四节）。`expectText` 把「读到的那一格」与
+    // 「点下去的那一格」锁成同一格——两次寻址之间页面重排了就 LOCATE_FAILED 停下，不会点到邻居。
+    await act.click(labelSpec, { candidateIndex: 0, hitIndex: hit.containerIndex, expectText: wanted });
+  };
+
+  /**
    * 把一段话术打进目标会话，并按**页面回读**判定有没有发出去（spec 2.5-06）。
    *
    * 三段判据缺一不可：输入框回读等于发出文本（中文与 emoji 原样落框）→ 状态行文本发生变化 →
    * 变化后的文本里含知识包声明的成功样式。任何一段不成立就返回 `sent:false` 并说明卡在哪一段，
    * 因为「点了按钮」离「对方收到了」之间还隔着页面自己的校验与网络请求。
-   * @param jobId 目标岗位标识
+   * @param target 目标坐标：岗位（可用 `targetParam` 直接拼地址的站点）或会话对象（按列表行选中的站点，裁定⑲）
    * @param text 话术正文（可含中文与 emoji）
    * @returns 外发结局；`ledgerKey` 恒为 null——计量凭证由编排层（2.5-e 的 `outbound.greet`）盖，
    *          适配器不碰额度也不记账（AGENTS.md §7.3 的必经口只有一处）
-   * @throws 正文为空 `INVALID_ARGUMENT`（空话术不向页面发出任何动作）；缺会话段 `KNOWLEDGE_PACK_INVALID`；
+   * @throws 两种坐标都没给 `INVALID_ARGUMENT`（空目标不向页面发出任何动作）；缺会话段 `KNOWLEDGE_PACK_INVALID`；
    *         输入框或发送键未取证 `LOCATOR_UNVERIFIED`（连会话页都不打开）；
+   *         会话坐标选不出目标 `CONVERSATION_TARGET_NOT_FOUND`；
    *         定位/动作自身的失败照 `browser.act` 的原样抛出（`LOCATE_FAILED` / `ACT_FAILED` / `WAIT_TIMEOUT`）
    */
-  const chat = async (jobId: string, text: string): Promise<OutboundResult> => {
+  const chat = async (target: GreetTarget, text: string): Promise<OutboundResult> => {
     const knowledge = chatKnowledge();
-    if (!jobId.trim()) {
-      throw new AppError('INVALID_ARGUMENT', '打招呼必须给出目标岗位', 'platform.boss', { platform: pack.platform });
-    }
+    // 正文为空这条判据留在**验票之前**（spec 8.1-04「不发起任何动作」含导航）：
+    // 旧实现把它放在导航之后，于是空正文也会先打开会话页再抛错。
     if (!text.trim()) {
-      throw new AppError('INVALID_ARGUMENT', '打招呼正文为空，不向页面发出任何动作', 'platform.boss', { jobId });
+      throw new AppError('INVALID_ARGUMENT', '打招呼正文为空，不向页面发出任何动作', 'platform.boss', {
+        platform: pack.platform,
+      });
     }
     // 两道定位先验票，再看页面：一条没取证的候选就足以让整次外发不该发生，
     // 那就连「打开会话页」这一步都不做（spec 8.1-04 的「不发起任何动作」含导航）。
     const inputSpec = outboundLocator(knowledge.input);
     const sendSpec = outboundLocator(knowledge.sendButton);
-    const url = pageUrlFor(knowledge, jobId);
-    if (url) await page.navigate(url);
+    // 会话坐标优先（与编排层的幂等键同一个取舍，裁定⑲）：按行选中是"改页面状态"，
+    // 而岗位地址是"换一页"，两者同时给时以人认出的那一条为准。
+    if (target.conversationTarget) {
+      await selectConversation(target.conversationTarget);
+    } else {
+      const jobId = (target.jobId ?? '').trim();
+      if (!jobId) {
+        throw new AppError('INVALID_ARGUMENT', '打招呼必须给出目标岗位或会话对象', 'platform.boss', {
+          platform: pack.platform,
+        });
+      }
+      const url = pageUrlFor(knowledge, jobId);
+      if (url) await page.navigate(url);
+    }
     const typed = await act.type(inputSpec, text);
     if (typed.valueAfter !== text) {
       return {
@@ -530,17 +634,28 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * 「这条见过没有」交给 `conversation_messages` 的唯一索引按 `externalId` 判（§12.6.2 第 3 条）。
    * 正文取知识包 `chat.messageBody` 声明的那个节点，所以页面上的方向标记（本地仿站的「对方：/我：」）
    * 不会混进正文（spec 2.5-08）——标记本身仍然画在页面上给人看，只是不入库。
-   * @param jobId 目标岗位标识
+   * @param target 目标坐标：岗位或会话对象（两者至少一只，裁定⑲）
    * @returns 按页面顺序的消息列表；正文为空的行不算消息（分割线与引导气泡），一条都没有是空数组
-   * @throws 缺会话段 `KNOWLEDGE_PACK_INVALID`；jobId 为空 `INVALID_ARGUMENT`
+   * @throws 缺会话段 `KNOWLEDGE_PACK_INVALID`；两种坐标都没给 `INVALID_ARGUMENT`；
+   *         会话坐标选不出目标 `CONVERSATION_TARGET_NOT_FOUND`（绝不退化成"读当前选中的那条"）
    */
-  const readReplies = async (jobId: string): Promise<ReplyMessage[]> => {
+  const readReplies = async (target: GreetTarget): Promise<ReplyMessage[]> => {
     const knowledge = chatKnowledge();
-    if (!jobId.trim()) {
-      throw new AppError('INVALID_ARGUMENT', '读会话必须给出目标岗位', 'platform.boss', { platform: pack.platform });
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = target.jobId?.trim() ?? '';
+    // 读之前先把页面落到那一条会话上（与 `chat` 同一个前置，spec 8.4-02）：
+    // 真实平台的会话页没有可直接拼的地址，不选中就读等于把上一个人说的话记到这一行名下。
+    if (conversationTarget) {
+      await selectConversation(conversationTarget);
+    } else {
+      if (!jobId) {
+        throw new AppError('INVALID_ARGUMENT', '读会话必须给出目标岗位或会话对象', 'platform.boss', {
+          platform: pack.platform,
+        });
+      }
+      const url = pageUrlFor(knowledge, jobId);
+      if (url) await page.navigate(url);
     }
-    const url = pageUrlFor(knowledge, jobId);
-    if (url) await page.navigate(url);
     const result = await page.extract({
       container: locatorFor(knowledge.messageItem),
       fields: [
@@ -573,7 +688,9 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       if (!text) continue;
       messages.push({
         platform: pack.platform,
-        jobId,
+        // 两种坐标按哪一路读的就填哪一路，另一路如实留 null（落库才写空串，裁定⑲）。
+        jobId: jobId || null,
+        conversationTarget: conversationTarget || null,
         from: isInboundRow(fields) ? 'recruiter' : 'self',
         text,
         at: readAt,

@@ -206,6 +206,22 @@ spec 8.2-03 已按实测收窄，不是让步。
     且本仓没有一处 `PRAGMA foreign_keys = ON`，重建索引要显式在同一条事务里做）；
     ⑦ `packages/shared/src/bridge.ts:773` 的 `GreetRequestView` 与外发工具的 `input` schema 同步补这一位。
     仿站侧**不改行为**：`boss-fixture.json` 有 `targetParam`，`conversationTarget` 一路都是 undefined。
+  - **8.4-C 落地记录（2026-10-08，七条链全部到货；`[ ]` 只剩活体那一半）**：
+    落点链上的形状按原文逐条改完，另外三条现场发现要记下来：
+    ① **取号 33 之后 `store.version` 的水位就从 26 抬到 33**（`refreshVersion` 写的是「已应用的最大号」），
+    于是`conversation.status().schemaVersion` 与 5.8-05 那条「四条计数 SQL 逐字对源码」的机检一起被推着改——
+    这两处都是**故意用源码文本作判据**的（`metrics-scale.test.ts:266`），加列时必须同步它，否则红的是判据而不是产品。
+    ② **33 的 `down` 必须先删带会话坐标的行**：旧索引 `(platform, job_id, dedupe_key)` 装不下它们
+    （按会话落库的行岗位格都是空串、去重键同形），留着再重建旧索引会当场以 `UNIQUE constraint failed` 崩
+    （本轮补片实测）。回滚本来就是「退回这支功能之前的状态」，号段 5 的 `down` 直接 `DROP TABLE` 是同一条语义。
+    那条「老库只跑到 26 时把 33 升上来」的用例（内存库逐个跑 `up`）就是为这一条建的，否则它只在装机用户的库上炸。
+    ③ **`up`/`down` 不必自己写事务**：`runMigrations`/`rollbackMigrations` 已经把每支迁移整段包在
+    `BEGIN`/`COMMIT` 里（`packages/store/src/migrate.ts:100` 与 `:147`），落点链 ⑥ 那句"显式在同一条事务里做"
+    由装配层兑现，迁移体内再写 `BEGIN` 反而会以「事务已在进行中」失败。
+    同一处还加了一条比原文更硬的判据：`selectConversation` 在**标签定位有多条候选**时以 `LOCATE_SPEC_INVALID`
+    停下（不点）——抽取行的 `containerIndex` 是跨候选全局重排出来的，多候选时它不等于任何一条的命中序号，
+    按它点会点到别的候选身上，而这一格错的代价是"把话发给另一家公司"。仿站包没声明这一双定位，
+    所以按会话坐标寻址在仿站上如实报 `KNOWLEDGE_PACK_INVALID`（`conversationTarget` 一路 undefined 的那条不变）。
 
 ## 6. 与 AGENTS.md 的冲突声明（按本文件前言：先停下来提出冲突，不自行打破规则继续写）
 

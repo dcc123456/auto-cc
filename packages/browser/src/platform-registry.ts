@@ -94,9 +94,9 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
     const adapter = this.adapters.get(platform);
     if (!adapter?.meta.capabilities.includes('chat')) return null;
     return {
-      send: async (targetId, text) => {
+      send: async (target, text) => {
         // `ledgerKey` 在这里被有意丢掉：计量凭证由 `entitlement.gate` 落账时生成，适配器不算数。
-        const outcome = await adapter.chat(targetId, text);
+        const outcome = await adapter.chat(target, text);
         return { sent: outcome.sent, reason: outcome.reason };
       },
     };

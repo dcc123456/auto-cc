@@ -19,6 +19,7 @@ import type {
   DeliverAttachmentView,
   EvidenceRefView,
   ExemptToolView,
+  GreetTarget,
   JdProgressEvent,
   KbEntitiesChangedEvent,
   KernelViewLoadError,
@@ -773,8 +774,16 @@ export type ScriptProvenanceView = {
 export type GreetRequestView = {
   /** 平台标识，决定向 `platform.registry` 问哪个平台的打招呼渠道（问不到即 `OUTBOUND_CHANNEL_MISSING`） */
   platform: string;
-  /** 会话目标（P2 起是平台侧 jobid） */
-  jobId: string;
+  /**
+   * 岗位标识（真 BOSS 是 `/job_detail/<hash>.html` 里的那个 hash）。
+   *
+   * 与 `conversationTarget` **至少给一只**：会话类站点（按列表行选中会话）没有岗位坐标可给，
+   * 把公司名塞进这一格会让同一列同时装"岗位"和"联系人"两种实体，而它同时是幂等键与额度目标
+   * （P8 裁定⑲）。
+   */
+  jobId?: string;
+  /** 会话对象标识（按列表行选中时用它认目标，真 BOSS 是行内公司名那一格）；见 `jobId` 那条说明 */
+  conversationTarget?: string;
   /** 现成文案（用户改过的）；省略时按 `script` 生成 */
   text?: string;
   /**
@@ -810,7 +819,10 @@ export type GreetRequestView = {
  */
 export type GreetReceiptView = {
   platform: string;
-  jobId: string;
+  /** 这一发打的**岗位**坐标；会话类外发没有岗位时是 null（不拿会话标识冒充岗位，裁定⑲） */
+  jobId: string | null;
+  /** 这一发打的**会话**坐标；按岗位地址切会话的站点是 null */
+  conversationTarget: string | null;
   /** 页面是怎么确认这条发送的（状态行回读到的原文） */
   reason: string;
   /** 本次落账的账本行 id */
@@ -825,6 +837,16 @@ export type GreetReceiptView = {
   /** 内容来源：模型产出 / 模板回落 / 用户手改 */
   origin: 'model' | 'template' | 'manual';
 };
+
+/**
+ * 回执上那句「这一发打在哪个对象上」的读数（界面、日志、幂等键与额度目标共用，别在消费侧各写一遍取舍）。
+ * @param target 带两只坐标的任意外发请求/回执（`GreetReceiptView` / `DeliverReceiptView` 的形状都接）
+ * @returns 会话坐标优先：按列表行选中会话时，这一发作用到的实体就是那个联系人，而不是任何岗位。
+ *          岗位类站点上 `conversationTarget` 一路为空，读数就退回岗位坐标（P8 裁定⑲）。
+ */
+export function greetTargetLabel(target: { jobId?: string | null; conversationTarget?: string | null }): string {
+  return target.conversationTarget ?? target.jobId ?? '';
+}
 
 /**
  * 一次话术生成的入参（镜像 `outbound.script` 的 `scriptRequestSchema`，spec 4.6-01 / 02）。
@@ -1927,10 +1949,12 @@ export interface BridgeSignatures {
   /**
    * 读某个目标的会话页并落库（spec 2.5-07）。只读动作：不点发送、不进额度闸门，
    * 所以它可以摆在界面上反复按——第二遍全是 `duplicate` 正是这条验收要的读数。
+   * 目标两种坐标至少给一只（P8 裁定⑲）：岗位地址能定位会话的站点给 `jobId`，
+   * 按列表行选中的站点给 `conversationTarget`。
    */
-  'conversation.store.syncFrom': { args: [jobId: string, platform?: string]; returns: ConversationSyncView };
-  /** 某个目标已落库的消息，按读取时间升序（默认最近 50 条）。 */
-  'conversation.store.list': { args: [jobId: string, limit?: number]; returns: ConversationListResultView };
+  'conversation.store.syncFrom': { args: [target: GreetTarget, platform?: string]; returns: ConversationSyncView };
+  /** 某个目标已落库的消息，按读取时间升序（默认最近 50 条）。目标同 `syncFrom`，两只坐标按哪一路读的就查哪一路。 */
+  'conversation.store.list': { args: [target: GreetTarget, limit?: number]; returns: ConversationListResultView };
   /** 会话库概况与 schema 版本。 */
   'conversation.store.status': { args: []; returns: ConversationStatusView };
   /**
@@ -2898,7 +2922,8 @@ export interface JdStoreStatusView {
 export interface ConversationRowView {
   id: number;
   platform: string;
-  jobId: string;
+  /** 这一行属于哪个**岗位**（P8 裁定⑲）；按会话列表行选中的那一路是 null（库里同样写空串，见下面那条） */
+  jobId: string | null;
   /** 这条是谁说的：招聘者 / 求职者自己 */
   from: 'recruiter' | 'self';
   text: string;
@@ -2906,6 +2931,13 @@ export interface ConversationRowView {
   externalId: string | null;
   /** 读到这行的时间戳（毫秒），不是页面给的发送时间 */
   at: number;
+  /**
+   * 这一行属于哪个**会话**对象（P8 裁定⑲ 的另一只坐标）；按岗位地址切会话的站点是 null。
+   *
+   * 库里那两列都是 `''` 而不是 NULL（SQLite 的唯一索引把 NULL 彼此判成不相等，
+   * 用 NULL 会让去重静默失效），空串在这一层读回 null：界面只需要知道"这一行没有那一格的坐标"。
+   */
+  conversationTarget: string | null;
 }
 
 /** `conversation.store.list` 的返回值。 */
@@ -2917,7 +2949,10 @@ export interface ConversationListResultView {
 /** 一次「读页面 → 落库」的结局（spec 2.5-07 的判据就落在这三个数上）。 */
 export interface ConversationSyncView {
   platform: string;
-  jobId: string;
+  /** 这次读的是哪个岗位（裁定⑲）；按会话对象读时是 null */
+  jobId: string | null;
+  /** 这次读的是哪个会话对象；按岗位地址读时是 null。两者至少有一只非空，与入参同形 */
+  conversationTarget: string | null;
   /** 页面上读到多少行消息 */
   read: number;
   /** 本次新增多少行 */

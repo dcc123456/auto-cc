@@ -14,8 +14,10 @@ import {
   type Fiber,
   type GreetChannel,
   type GreetChannelSource,
+  type GreetTarget,
   type WorkflowNodeSpec,
 } from '@auto-cc/core';
+import { greetTargetLabel } from '@auto-cc/shared';
 import { ConfigService } from '@auto-cc/plugin-config';
 import {
   DEFAULT_DAILY_LIMITS,
@@ -184,8 +186,9 @@ function fakeChannel(sent = true): { channel: GreetChannel; calls: SentCall[] } 
   return {
     calls,
     channel: {
-      send: (targetId: string, text: string) => {
-        calls.push({ targetId, text });
+      send: (target: GreetTarget, text: string) => {
+        // 读数记成 `greetTargetLabel`：渠道手上实际作用的目标实体，与账本 targetId 同一把键（裁定⑲）。
+        calls.push({ targetId: greetTargetLabel(target), text });
         return Promise.resolve({
           sent,
           reason: sent ? '状态行回读到成功样式：第 1 条已送达' : '状态行未变化，页面没有确认送达',
@@ -196,9 +199,17 @@ function fakeChannel(sent = true): { channel: GreetChannel; calls: SentCall[] } 
 }
 
 /** 一条合法的打招呼请求（默认手改文案那一路）。 */
-const request = (over: Partial<{ jobId: string; text: string; workflowRunId: string | null }> = {}) => ({
+const request = (
+  over: Partial<{
+    jobId: string | undefined;
+    conversationTarget: string;
+    text: string;
+    workflowRunId: string | null;
+  }> = {},
+) => ({
   platform: 'boss',
-  jobId: over.jobId ?? 'job-1001',
+  jobId: 'jobId' in over ? over.jobId : 'job-1001',
+  conversationTarget: over.conversationTarget,
   text: over.text ?? '您好，看到贵司在招前端工程师，想进一步沟通。',
   workflowRunId: over.workflowRunId ?? null,
   nowMs: T0,
@@ -345,7 +356,7 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     const { greet, ledger } = await boot({ channel: hand.channel });
     await expect(greet.perform(request())).rejects.toMatchObject({
       code: 'OUTBOUND_NOT_DELIVERED',
-      details: { jobId: 'job-1001' },
+      details: { targetId: 'job-1001' },
     });
     expect(hand.calls).toHaveLength(1);
     expect(ledger.count()).toBe(0);
@@ -373,7 +384,7 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }));
     await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { jobId: 'job-1001', workflowRunId: 'run-1' },
+      details: { targetId: 'job-1001', workflowRunId: 'run-1' },
     });
     await greet.perform(request({ jobId: 'job-2002', workflowRunId: 'run-1' }));
     await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-2' }));
@@ -395,9 +406,43 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     await expect(greet.perform(request({ jobId: 'job-3003' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
       message: '目标 job-3003 在此前那些未挂工作流的发送里已经打过招呼，不再重复发送',
-      details: { jobId: 'job-3003', workflowRunId: null },
+      details: { targetId: 'job-3003', workflowRunId: null },
     });
     expect(hand.calls).toHaveLength(2);
+  });
+
+  it('会话坐标那一维（P8 裁定⑲）：幂等键、额度目标与渠道读数都跟着它走，回执里岗位是 null', async () => {
+    const hand = fakeChannel();
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    const receipt = await greet.perform(
+      request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-1' }),
+    );
+
+    expect(receipt).toMatchObject({ jobId: null, conversationTarget: '示例公司' });
+    expect(hand.calls).toEqual([{ targetId: '示例公司', text: request().text }]);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: GREET_ACTION, targetId: '示例公司' });
+
+    // 同一会话在同一 run 里再发一次：拦下来的是它自己，不是任何岗位——幂等键与额度目标用的是同一把键。
+    await expect(
+      greet.perform(request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-1' })),
+    ).rejects.toMatchObject({
+      code: 'OUTBOUND_ALREADY_SENT',
+      details: { targetId: '示例公司', workflowRunId: 'run-1' },
+    });
+    // 同一会话换一个 run 仍可发；换成另一家公司也是另一个目标。
+    await greet.perform(request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-2' }));
+    expect(hand.calls).toHaveLength(2);
+  });
+
+  it('两只坐标都没给：入站就拒，渠道一次都没被调、账本一行都不增（裁定⑲ 的缺目标形态）', async () => {
+    const hand = fakeChannel();
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    await expect(greet.perform(request({ jobId: undefined }))).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('jobId 与 conversationTarget 至少给一只'),
+    });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
   });
 
   it('换个进程重挂同一份库：重复发送防护照样成立——判据在账本里，不在内存集合里（2.5-13）', async () => {

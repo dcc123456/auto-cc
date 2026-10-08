@@ -6,7 +6,7 @@
  * 「外发侧现问渠道、答案永远跟着当前活着的那份适配器」，
  * 再加一条白名单断言——适配器实例能被渲染层拿到的话，就等于把主进程能力递出了进程边界。
  */
-import type { AppError, ResumeAttachment } from '@auto-cc/core';
+import type { AppError, GreetTarget, ResumeAttachment } from '@auto-cc/core';
 import { Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import { RENDERER_ALLOWLIST, isAllowedCall } from '@auto-cc/shared';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -30,6 +30,18 @@ const RESUME: ResumeAttachment = {
   sizeBytes: 204800,
   sha256: 'a'.repeat(64),
 };
+
+/**
+ * 把一条打招呼目标的两种坐标记成一行。
+ * @param target 岗位坐标 / 会话坐标（裁定⑲：二者至少有一只在）
+ * @returns `job:<岗位>`、`conv:<会话>` 或两者相连；用来在调用账本里看出投影把哪一维递到了手上
+ */
+function targetMark(target: GreetTarget): string {
+  const marks: string[] = [];
+  if (target.jobId) marks.push(`job:${target.jobId}`);
+  if (target.conversationTarget) marks.push(`conv:${target.conversationTarget}`);
+  return marks.join('+');
+}
 
 /**
  * 起一个空的登记处。
@@ -98,9 +110,9 @@ function fakeAdapter(
         postedText: '3 天前',
       } satisfies JobDetail);
     },
-    chat: (jobId: string, text: string) => {
+    chat: (target: GreetTarget, text: string) => {
       // 连要发的文字一起记账：外发侧的投影有没有把 text 原样递到适配器手上，只有这里能看出来。
-      calls.push(`chat:${jobId} ${text}`);
+      calls.push(`chat:${targetMark(target)} ${text}`);
       return Promise.resolve({ sent: true, reason: '回读到成功态', ledgerKey: `${id}:chat` } satisfies OutboundResult);
     },
     sendResume: (jobId: string, attachment: ResumeAttachment) => {
@@ -112,10 +124,18 @@ function fakeAdapter(
         ledgerKey: null,
       } satisfies OutboundResult);
     },
-    readReplies: (jobId: string) => {
-      calls.push(`readReplies:${jobId}`);
+    readReplies: (target: GreetTarget) => {
+      calls.push(`readReplies:${targetMark(target)}`);
       return Promise.resolve([
-        { platform: id, jobId, from: 'recruiter', text: '方便聊聊吗', at: 2, externalId: 'reply-1' },
+        {
+          platform: id,
+          jobId: target.jobId ?? null,
+          conversationTarget: target.conversationTarget ?? null,
+          from: 'recruiter',
+          text: '方便聊聊吗',
+          at: 2,
+          externalId: 'reply-1',
+        },
       ] satisfies ReplyMessage[]);
     },
   };
@@ -138,9 +158,12 @@ describe('平台登记处（spec 2.2-07）', () => {
 
     expect(registry.get('boss')).toBe(adapter);
     await expect(adapter.search({ keyword: '前端' })).resolves.toHaveLength(1);
-    await expect(adapter.chat('job-1', '你好')).resolves.toMatchObject({ sent: true, ledgerKey: 'boss:chat' });
+    await expect(adapter.chat({ jobId: 'job-1' }, '你好')).resolves.toMatchObject({
+      sent: true,
+      ledgerKey: 'boss:chat',
+    });
     await expect(adapter.sendResume('job-1', RESUME)).resolves.toMatchObject({ sent: false, ledgerKey: null });
-    expect(adapter.calls).toEqual(['search:前端', 'chat:job-1 你好', 'sendResume:job-1:resume.pdf:204800']);
+    expect(adapter.calls).toEqual(['search:前端', 'chat:job:job-1 你好', 'sendResume:job-1:resume.pdf:204800']);
   });
 
   it('只读清单原样回显适配器的自我声明，不含任何定位信息', async () => {
@@ -200,8 +223,15 @@ describe('平台登记处（spec 2.2-07）', () => {
     const channel = registry.greetChannel('boss');
     expect(channel).not.toBeNull();
     // `ledgerKey` 被有意丢掉：额度凭证由 `entitlement.gate` 落账时生成，适配器那份不算数。
-    await expect(channel?.send('job-9', '您好')).resolves.toEqual({ sent: true, reason: '回读到成功态' });
-    expect(boss.calls).toEqual(['chat:job-9 您好']);
+    await expect(channel?.send({ jobId: 'job-9' }, '您好')).resolves.toEqual({ sent: true, reason: '回读到成功态' });
+    expect(boss.calls).toEqual(['chat:job:job-9 您好']);
+
+    // 会话坐标（裁定⑲）同样原样递到适配器手上：投影不许只认岗位那一维。
+    await expect(channel?.send({ conversationTarget: '示例公司' }, '第二条')).resolves.toEqual({
+      sent: true,
+      reason: '回读到成功态',
+    });
+    expect(boss.calls).toEqual(['chat:job:job-9 您好', 'chat:conv:示例公司 第二条']);
 
     // 没 chat 能力 / 不认识的平台上问到 null 而不是抛——缺渠道是外发侧能处置的失败。
     expect(registry.greetChannel('liepin')).toBeNull();
@@ -210,11 +240,11 @@ describe('平台登记处（spec 2.2-07）', () => {
     // 适配器换人之后，下一次问到的就是新那份：编排层缓存不了旧的。
     const replaced = fakeAdapter('boss', { displayName: 'BOSS 直聘 v2' });
     registry.register(replaced);
-    await expect(registry.greetChannel('boss')?.send('job-9', '换人之后的一条')).resolves.toMatchObject({
+    await expect(registry.greetChannel('boss')?.send({ jobId: 'job-9' }, '换人之后的一条')).resolves.toMatchObject({
       sent: true,
     });
-    expect(replaced.calls).toEqual(['chat:job-9 换人之后的一条']);
-    expect(boss.calls).toHaveLength(1);
+    expect(replaced.calls).toEqual(['chat:job:job-9 换人之后的一条']);
+    expect(boss.calls).toHaveLength(2);
   });
 
   it('投递渠道问的是 sendResume 能力，与打招呼那条是两份清单（spec 2.6-05）', async () => {

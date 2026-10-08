@@ -9,7 +9,7 @@
  * 频控参数**全部是数据**。站点改版改的是数据，适配器代码不动——这也是 2.2-08 能被机检的原因
  * （`scripts/check-knowledge-pack.ts` 扫的就是「适配器源码里不许出现选择器字面量」）。
  */
-import { AppError, type ResumeAttachment } from '@auto-cc/core';
+import { AppError, type GreetTarget, type ResumeAttachment } from '@auto-cc/core';
 import type { PlatformMetaView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { validateSpec } from './locator-spec.js';
@@ -562,7 +562,13 @@ export type OutboundResult = {
 /** 会话里读到的一条回复。 */
 export type ReplyMessage = {
   platform: string;
-  jobId: string;
+  /**
+   * 这一行属于哪个**岗位**（P8 裁定⑲）：按会话列表行选中的站点没有岗位坐标，是 null。
+   *
+   * 落库时它进 `conversation_messages.job_id`，缺坐标那一格写**空串而不是 NULL**——见下面
+   * `conversationTarget` 那条：唯一索引不拦 NULL，NULL 会让每轮全量读都重新插一遍。
+   */
+  jobId: string | null;
   /** 发送方角色：招聘者或求职者自己 */
   from: 'recruiter' | 'self';
   text: string;
@@ -576,6 +582,14 @@ export type ReplyMessage = {
    * （那种行每次都会重新插入，所以知识包必须把属性名配对）。
    */
   externalId: string | null;
+  /**
+   * 这一行属于哪个**会话对象**（P8 裁定⑲ 的另一只坐标）：按岗位地址切会话的站点是 null。
+   *
+   * 落库时它进 `conversation_messages.conversation_target`，**空串而不是 NULL**——SQLite 的唯一索引把
+   * NULL 彼此视为不相等，那一格若为 NULL，`(platform, job_id, conversation_target, dedupe_key)`
+   * 就再也不拦重复行，每轮全量读都会重新插一遍（2.5-07 的去重从此静默失效）。
+   */
+  conversationTarget: string | null;
 };
 
 /**
@@ -627,11 +641,12 @@ export interface PlatformAdapter {
   detail(jobId: string): Promise<JobDetail>;
   /**
    * 打招呼 / 发送一段话术（外发动作，必经额度闸门）。
-   * @param jobId 目标岗位
+   * @param target 落点坐标（岗位 / 会话，见 `GreetTarget`）：知识包有 `targetParam` 时按 `jobId` 拼地址，
+   *        只有选行那两只定位时按 `conversationTarget` 先选中会话
    * @param text 话术正文
    * @returns 外发结局
    */
-  chat(jobId: string, text: string): Promise<OutboundResult>;
+  chat(target: GreetTarget, text: string): Promise<OutboundResult>;
   /**
    * 发送简历附件（外发动作，必经额度闸门——但闸门在编排层，适配器一次都不进）。
    * @param jobId 目标岗位
@@ -642,8 +657,8 @@ export interface PlatformAdapter {
   sendResume(jobId: string, attachment: ResumeAttachment): Promise<OutboundResult>;
   /**
    * 读取会话里的新回复。
-   * @param jobId 目标岗位
+   * @param target 落点坐标；与 `chat` 用**同一只**判据选中会话，否则读到的就是"屏幕上恰好选中的那条"
    * @returns 按时间升序的回复列表
    */
-  readReplies(jobId: string): Promise<ReplyMessage[]>;
+  readReplies(target: GreetTarget): Promise<ReplyMessage[]>;
 }

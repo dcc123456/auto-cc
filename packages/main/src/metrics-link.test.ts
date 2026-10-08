@@ -81,6 +81,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
     conversation.record({
       platform: 'boss',
       jobId: 'j-1',
+      conversationTarget: null,
       from: 'recruiter',
       text: '方便聊聊',
       externalId: 'r-1',
@@ -90,6 +91,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
     conversation.record({
       platform: 'boss',
       jobId: 'j-1',
+      conversationTarget: null,
       from: 'recruiter',
       text: '我们在上海',
       externalId: 'r-2',
@@ -98,6 +100,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
     conversation.record({
       platform: 'boss',
       jobId: 'j-2',
+      conversationTarget: null,
       from: 'recruiter',
       text: '发份简历看看',
       externalId: 'r-3',
@@ -106,6 +109,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
     conversation.record({
       platform: 'boss',
       jobId: 'j-3',
+      conversationTarget: null,
       from: 'recruiter',
       text: '窗口外的那条',
       externalId: 'r-4',
@@ -114,6 +118,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
     conversation.record({
       platform: 'boss',
       jobId: 'j-9',
+      conversationTarget: null,
       from: 'self',
       text: '自己发出去的不算回复',
       externalId: 'r-5',

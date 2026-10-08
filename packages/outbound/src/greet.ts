@@ -29,7 +29,7 @@ import {
   registerAgentTools,
   toolResult,
 } from '@auto-cc/core';
-import type { GreetReceiptView, GreetRequestView } from '@auto-cc/shared';
+import { greetTargetLabel, type GreetReceiptView, type GreetRequestView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { gapRemainingMs } from './deliver-timing.js';
 import { SCRIPT_KINDS, scriptRequestSchema } from './script.js';
@@ -74,23 +74,37 @@ export type GreetConfig = z.infer<typeof greetSchema>;
  * `provenance` 只在 `text` 那一路有意义：界面上"选中一条候选再发送"的内容是现成的，
  * 但它的来源（版本 / 类型 / 引用的经历）不该就此丢掉（spec 4.6-02 与 M4 的"留生成来源"）。
  * `nowMs` 是判定与落账的基准，单测靠它造「刚发过一次」而不必真等 45 秒。
+ *
+ * `jobId` / `conversationTarget` 至少给一只（P8 裁定⑲）：按岗位 URL 定位的站点给前者，
+ * 按会话列表行选中的站点给后者。两只都空就没有目标实体，幂等键与额度目标都无从算起，
+ * 所以在入站这一层就拒，而不是等到页面上找不到东西再说。
  */
-const greetRequestSchema = z.strictObject({
-  platform: z.string().min(1),
-  jobId: z.string().min(1),
-  text: z.string().min(1).optional(),
-  script: scriptRequestSchema.optional(),
-  provenance: z
-    .strictObject({
-      jdId: z.string().min(1),
-      kind: z.enum(SCRIPT_KINDS),
-      scriptVersion: z.string().min(1),
-      evidenceRefs: z.array(z.string().min(1)),
-    })
-    .optional(),
-  workflowRunId: z.string().min(1).nullish(),
-  nowMs: z.number().int().positive().optional(),
-});
+const greetRequestSchema = z
+  .strictObject({
+    platform: z.string().min(1),
+    jobId: z.string().min(1).optional(),
+    conversationTarget: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    script: scriptRequestSchema.optional(),
+    provenance: z
+      .strictObject({
+        jdId: z.string().min(1),
+        kind: z.enum(SCRIPT_KINDS),
+        scriptVersion: z.string().min(1),
+        evidenceRefs: z.array(z.string().min(1)),
+      })
+      .optional(),
+    workflowRunId: z.string().min(1).nullish(),
+    nowMs: z.number().int().positive().optional(),
+  })
+  .superRefine((request, ctx) => {
+    if (!request.jobId && !request.conversationTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'jobId 与 conversationTarget 至少给一只：前者是岗位坐标，后者是会话坐标（P8 裁定⑲）',
+      });
+    }
+  });
 
 /**
  * 拼账本 `source` 列那条可追溯链（spec 2.5-09 + 4.6-02）。
@@ -169,9 +183,13 @@ export class OutboundGreetService extends Service {
         'outbound.greet',
       );
     }
-    const { platform, jobId, text, script, provenance, workflowRunId } = parsed.data;
+    const { platform, jobId, conversationTarget, text, script, provenance, workflowRunId } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = workflowRunId ?? null;
+    // 幂等键与额度目标用哪一维（P8 裁定⑲ 的唯一语义变更点）：读数收在 `greetTargetLabel`，
+    // 界面显示的是同一个目标。岗位类站点上 `conversationTarget` 一路是 undefined（仿站知识包有
+    // `targetParam`），于是仍旧等于原来的 `jobId`，行为一字不变。
+    const targetKey = greetTargetLabel({ jobId, conversationTarget });
 
     // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
     // 界面那条确认卡片只是第一道，工作流节点与 agent 工具这两条入口都从这里出去，漏了就是静默绕过。
@@ -191,13 +209,14 @@ export class OutboundGreetService extends Service {
     // 重复发送防护 = 幂等键 + 账本按 target 计数（spec 2.5-13）：内存里没有「已发送集合」，
     // 所以重启后依然成立，而判据就是「这条 (action, target, run) 有没有落成过一行」。
     const ledger = asApp(this.ctx)['usage.ledger'];
-    if (ledger.countFor(GREET_ACTION, jobId, runId) > 0) {
+    if (ledger.countFor(GREET_ACTION, targetKey, runId) > 0) {
       throw new AppError(
         'OUTBOUND_ALREADY_SENT',
-        `目标 ${jobId} ${alreadySentScope(runId)}已经打过招呼，不再重复发送`,
+        `目标 ${targetKey} ${alreadySentScope(runId)}已经打过招呼，不再重复发送`,
         'outbound.greet',
         {
-          jobId,
+          // 键名跟着"这一发作用到的实体"走，不再固定叫 jobId（裁定⑲：会话类外发的目标是联系人）。
+          targetId: targetKey,
           workflowRunId: runId,
         },
       );
@@ -215,12 +234,12 @@ export class OutboundGreetService extends Service {
       origin = 'manual';
       source = provenance
         ? ledgerSource(true, provenance.scriptVersion, provenance.kind, provenance.jdId, provenance.evidenceRefs)
-        : `manual:${script?.jdId ?? jobId}`;
+        : `manual:${script?.jdId ?? targetKey}`;
     } else {
       if (!script) {
         throw new AppError(
           'INVALID_ARGUMENT',
-          `打招呼要么带现成文案，要么带话术生成入参（岗位名与公司名缺一不可），目标 ${jobId} 两者都没给`,
+          `打招呼要么带现成文案，要么带话术生成入参（岗位名与公司名缺一不可），目标 ${targetKey} 两者都没给`,
           'outbound.greet',
         );
       }
@@ -237,7 +256,7 @@ export class OutboundGreetService extends Service {
     const gate = asApp(this.ctx)['entitlement.gate'];
     // 先查额度再等间隔：到量即停的意思就是「别让用户白等一个频控周期」（spec 2.5-04）。
     // 走 `enforce` 而不是自己比对 `check`：被拦下要留一条被拒流水（spec 5.3-12），而留痕只在闸门那一处。
-    gate.enforce(GREET_ACTION, { targetId: jobId, workflowRunId: runId, nowMs });
+    gate.enforce(GREET_ACTION, { targetId: targetKey, workflowRunId: runId, nowMs });
 
     // 频控的钟是账本里最近一条 greet，不是本服务的内存字段：跨重启成立，也不是第二套状态存储（§2.7）。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();
@@ -255,20 +274,30 @@ export class OutboundGreetService extends Service {
 
     const { value, ledgerId } = await gate.perform(
       GREET_ACTION,
-      { targetId: jobId, workflowRunId: runId, nowMs: nowMs + waitedMs, source },
+      { targetId: targetKey, workflowRunId: runId, nowMs: nowMs + waitedMs, source },
       async () => {
-        const outcome = await channel.send(jobId, finalText);
+        // 两种坐标原样递给适配器：谁在页面上定位会话由站点知识包决定，编排层不做映射（裁定⑲）。
+        const outcome = await channel.send({ jobId, conversationTarget }, finalText);
         // 页面没确认发送成功就不该有账：闸门只在 task 成功后落账，抛在这里正好复用那条性质。
         if (!outcome.sent) {
-          throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.greet', { jobId });
+          throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.greet', { targetId: targetKey });
         }
         return outcome.reason;
       },
     );
     this.ctx.logger.info(
-      `打招呼已发出并落账：目标 ${jobId} · 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)}`,
+      `打招呼已发出并落账：目标 ${targetKey} · 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)}`,
     );
-    return { platform, jobId, reason: value, ledgerId, waitedMs, source, origin };
+    return {
+      platform,
+      jobId: jobId ?? null,
+      conversationTarget: conversationTarget ?? null,
+      reason: value,
+      ledgerId,
+      waitedMs,
+      source,
+      origin,
+    };
   };
 
   /**
@@ -321,10 +350,13 @@ export class OutboundGreetService extends Service {
         id: 'outbound.greet.perform',
         titleKey: 'agent.tool.labels.greetPerform',
         description: '向指定岗位的目标发送一句打招呼文案，经闸门判定并落一条 greet 账',
+        // 两只坐标都是可选项：**"至少给一只"这条判据只在 `greetRequestSchema` 一处**（AGENTS.md §2.5），
+        // 工具面缺目标时 `perform` 会以 INVALID_ARGUMENT 拒下，不会多发一条口子。
         input: z.strictObject({
           request: z.strictObject({
             platform: z.string().min(1),
-            jobId: z.string().min(1),
+            jobId: z.string().min(1).optional(),
+            conversationTarget: z.string().min(1).optional(),
             text: z.string().min(1),
           }),
         }),
@@ -348,9 +380,15 @@ export class OutboundGreetService extends Service {
         // 账本行 id 是最硬的一条证据引用——它同时是额度闸门记下的那一笔（§7.3）。
         run: async ({ request }) => {
           const receipt = await this.perform(request);
+          // 证据引用里只挂**解析得了的那一维**：`job:<平台>/<岗位 id>` 由 `agent.loop` 拿去 jd.store 现读，
+          // 纯会话外发没有岗位坐标，硬拼一个 `job:boss/undefined` 只会长成一条永远读不到的悬空引用。
+          const refs = [`ledger:${String(receipt.ledgerId)}`];
+          if (receipt.jobId) refs.push(`job:${receipt.platform}/${receipt.jobId}`);
           return toolResult(receipt, {
-            summary: `已向 ${receipt.platform} 的岗位 ${receipt.jobId} 发出打招呼（账本第 ${String(receipt.ledgerId)} 行 · 内容来源 ${receipt.origin}）`,
-            evidenceRefs: [`ledger:${String(receipt.ledgerId)}`, `job:${receipt.platform}/${receipt.jobId}`],
+            summary: `已向 ${receipt.platform} 的 ${greetTargetLabel(receipt)} 发出打招呼（账本第 ${String(
+              receipt.ledgerId,
+            )} 行 · 内容来源 ${receipt.origin}）`,
+            evidenceRefs: refs,
           });
         },
       }),

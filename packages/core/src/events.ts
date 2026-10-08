@@ -519,6 +519,23 @@ export type GreetOutcome = {
 };
 
 /**
+ * 一次外发 / 读回复的落点（P8 裁定⑲）。
+ *
+ * 两只坐标各自只表示一件事：`jobId` 是**岗位**（真 BOSS 是 `/job_detail/<hash>.html` 的那个 hash），
+ * `conversationTarget` 是**会话行上的那个对象**（真 BOSS 是行内公司名那一格）。
+ * **Why:** 站点不是都能用岗位地址直接切会话的——真 BOSS 的会话页不给可直接拼的地址（证据 8.4-04 第一节），
+ * 于是"打给既有联系人"这一发根本没有 jobId 可填。把公司名塞进 `jobId` 会让同一列装两种实体，
+ * 而那只列同时是幂等键与额度目标，所以用户裁定另立一只而不是复用。
+ * 两者至少要有一只，具体哪只够用由平台知识包说（有 `targetParam` 的站点用 jobId，有选行那两只的用 conversationTarget）。
+ */
+export type GreetTarget = {
+  /** 平台侧岗位标识；会话类外发可以不带 */
+  jobId?: string;
+  /** 会话对象标识（按列表行选中时用它认目标）；岗位地址能定位会话的站点可以不带 */
+  conversationTarget?: string;
+};
+
+/**
  * 平台侧的打招呼渠道：编排层只需要「把这个目标发这段文字」。
  *
  * 它是 `PlatformAdapter.chat` 的**窄化投影**，不是第二套外发接口 —— core 是 L0，
@@ -527,11 +544,11 @@ export type GreetOutcome = {
 export type GreetChannel = {
   /**
    * 往指定目标的会话里发一条文本。
-   * @param targetId 会话对象标识（P2 是平台侧 jobid）
+   * @param target 落点坐标（岗位 / 会话，见 `GreetTarget`）
    * @param text 将要离开 app 的文本（编排层已在外面过过黑名单）
    * @returns 页面回读出的结局；传输层异常由实现方抛结构化错误，不用 `sent:false` 表达
    */
-  send(targetId: string, text: string): Promise<GreetOutcome>;
+  send(target: GreetTarget, text: string): Promise<GreetOutcome>;
 };
 
 /**
