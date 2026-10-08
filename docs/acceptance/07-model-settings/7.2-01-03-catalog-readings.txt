@@ -1,0 +1,64 @@
+7.2-a 收口读数 —— 预设目录 19 家 + 地址归一（spec 7.2-01 / 7.2-03）
+本机 macOS（Apple Silicon），2026-10-08。命令结论一律重定向到文件再看 `EXIT=`（§9 实测 5.4-c：管道接 `tail` 拿到的退出码不属于门禁）。
+
+## 1. 四条门禁（AGENTS.md §7.4 ①）
+
+    pnpm typecheck    tmp/72a-typecheck.log   EXIT=0
+    pnpm lint         tmp/72a-lint.log        EXIT=0
+    pnpm format:check tmp/72a-format.log      EXIT=0
+    pnpm test         tmp/72a-test-all.log    EXIT=0   逐包核对：Test Files 全 passed，Tests 合计 2056 passed，无 failed
+    pnpm --filter @auto-cc/plugin-llm test    EXIT=0   Test Files 4 passed (4) / Tests 50 passed (50)
+
+`pnpm lint` 链内的 `check-llm-single-entry.ts` 仍绿（扫描 440 个文件，`llm.chat` / `llm.embed` 各自声明者唯一，
+`llm.settings` 未碰 `http.js`）——本片只动目录数据与 `apply()` 的入库前置归一，没有新开第三条 HTTP 腿（spec 7.2-13 的前半边）。
+
+## 2. 7.2-01：19 家逐条比对（一手来源 = `browser-copilot/src/lib/providers.ts:71-271`，本机现读）
+
+对来源实现同一段落 grep 出 `id` / `baseUrl` / `defaultModel` / `docsUrl` 四类字段，与 `packages/llm/src/presets.ts` 逐条对：
+
+- 条数与 id 全集一致（19 条）：`deepseek` `ark` `openai` `openrouter` `moonshot` `dashscope` `siliconflow` `ollama`
+  `lmstudio` `zhipu` `minimax` `stepfun` `qianfan` `githubmodels` `groq` `mistral` `xai` `nvidia` `custom`。
+  唯一差别是 `custom` 在本项目里固定收口在末尾（来源实现把它排在 `lmstudio` 之后），由单测断言这个顺序。
+- `baseUrl` / `defaultModel` / `docsUrl` 三条字段逐字一致；`lmstudio` 与 `custom` 两边都没有 `docsUrl`（本地端点与通用正门没有厂商控制台），
+  类型因此把它写成可选。
+- 端点变体一并搬入，共 11 条：方舟 2（`ark-standard` / `ark-coding-plan`）、月之暗面 2、百炼 2、智谱 3、MiniMax 2。
+  来源实现给变体带的 `title`（"Standard" / "中国大陆" / "国际"）**没有搬**：那是界面文案，进数据就是第二份事实且破 §5.5，
+  界面上的名字出自语言包。
+
+单测 `packages/llm/src/settings.test.ts`「服务商目录（spec 7.2-01：参考实现的全部 19 家）」两条：
+①id 全集与顺序逐条比对 + `custom` 三项皆空；②全目录地址去重（同一地址不得出现两次，`siliconflow-embed` 那只同址条目随之删掉）、
+每条预设的 `endpoints[0].baseUrl` 必须等于它自身的 `baseUrl`（否则"选第一家"与"选标准端点"指向两处）、且不再有任何一条声明 `legs`。
+
+## 3. 7.2-03：地址归一（`normalizeBaseUrl`）与端点归属（`endpointOf`）
+
+四种输入形状收成同一前缀（单测断言，主机名用 RFC 2606 保留名 `gw.test.invalid`）：
+`https://…/v1`、`  https://…/v1  `（前后空格）、`https://…/v1///`（多尾斜杠）、`https://…/v1/chat/completions` 与 `/embeddings`（误粘整条动作路径）。
+空串回空串；`http://localhost:11434/v1/` 收成 `http://localhost:11434/v1`——本地端点就是 http，函数不校验协议，
+强行"必须 https"会把 Ollama / LM Studio 两家挡在门外。
+
+入库的是归一值：`apply()` 在 `config.setPersisted` 与 `kernel.applyConfig` 之前先 `normalizeBaseUrl`，
+单测「误粘整条动作路径时入库的是归一后的前缀」断言持久层与回显读数都是前缀（留着动作路径会被 `joinEndpoint` 再拼一次，成双段路径）。
+
+端点归属：`endpointOf` 认地址不认腿——预设自身地址命中时回 `endpoints[0].id ?? preset.id`
+（方舟回 `ark-standard`、DeepSeek 回 `deepseek`，界面上不许多出一格"标准"），
+变体命中回该变体的 id，认不出回 undefined（读数改口 `custom`）。
+单测对全目录每一条变体断言"这一家认得出自己的变体"，并断言认不出的地址与认不出的 id 都不冒充。
+
+## 4. 本片撞上的一条口径（写给 7.2-b/c/d，别再撞一次）
+
+`scripts/check-compliance-redlines.ts` 规则三的射程含 `*.test.ts`，**测试面出现真实域名一律 exit 1**。
+本片第一版把目录里的真端点当字面量敲进用例（判 `normalizeBaseUrl` 与 `endpointOf`），`pnpm lint` 直接拦下 15 条。
+正解不是往 `TEST_REAL_HOST_ALLOWLIST` 里加豁免，而是两条：
+① 与主机无关的判据（归一）改用 `*.test.invalid` / `localhost`；
+② 与目录本身有关的判据（端点归属、"每个地址已是前缀"）**从 `PROVIDER_PRESETS` 现取地址**——
+在测试里重敲目录字面量既是 §2.5 的第二个真相（目录一改用例就漂），又恰好是被机检判出的那个形态。
+门槛照那张豁免表自己的话：只有"确属被判读的字符串而非被请求的地址"才允许真实域名进测试面。
+
+## 5. 尚未到货的相邻条目（不要误记成已完成）
+
+7.2-02（实例池 CRUD）与 7.2-08（迁移 31/32）属于 7.2-b；7.2-04/05/06/07 属于 7.2-c；
+7.2-11/12 的绑定与解析顺序、删旧 `apply()` 属于 7.2-c/d；V 类（7.2-04/05/06/09/11/14/15）一律 `[ ]`，
+本片没有任何活体界面改动（`ModelSettingsPanel` 只跟着目录去掉了按腿过滤那一行）。
+
+`docsUrl` 这一格本片只是**带过边界、界面还没用**：spec 7.2-01 要求它与来源实现逐条对得上，消费点是 7.2-d 添加提供商
+弹窗里那句"去哪拿 key"。写在这里是为了它将来出现在界面上时，能被认回本片而不是"临时补的字段"。

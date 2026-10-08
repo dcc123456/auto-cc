@@ -24,60 +24,11 @@ import type {
   LlmSettingsView,
 } from '@auto-cc/shared';
 import { z } from 'zod';
+import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 import type { LlmChatService } from './index.js';
 
 /** 两条模型腿：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
 export const llmLegSchema = z.enum(['chat', 'embed']);
-
-/**
- * OpenAI 兼容端点目录。`baseUrl` 与路径的判据来自本机实测（plan §3.3：无 key 直连均回 401，
- * 说明到达了鉴权层），不是文档转述；`api.openai.com` 本机不可达（000）是网络事实，仍留在目录里。
- * 名称不进 i18n：它们是专名，界面按 `id` 取显示名。
- */
-export const PROVIDER_CATALOG: LlmProviderView[] = [
-  {
-    id: 'deepseek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
-    docsUrl: 'https://api-docs.deepseek.com/zh-cn/',
-    legs: ['chat'],
-  },
-  {
-    id: 'volc-ark',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    models: ['doubao-pro-32k', 'doubao-1-5-pro-32k-250115'],
-    docsUrl: 'https://www.volcengine.com/docs/82379/1298454',
-    legs: ['chat'],
-  },
-  {
-    id: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-4o-mini', 'gpt-4.1-mini'],
-    docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
-    legs: ['chat'],
-  },
-  {
-    id: 'siliconflow',
-    baseUrl: 'https://api.siliconflow.cn/v1',
-    models: ['deepseek-ai/DeepSeek-V3'],
-    docsUrl: 'https://docs.siliconflow.cn/cn/api/api/chat-completions',
-    legs: ['chat'],
-  },
-  {
-    id: 'siliconflow-embed',
-    baseUrl: 'https://api.siliconflow.cn/v1',
-    models: ['BAAI/bge-m3'],
-    docsUrl: 'https://docs.siliconflow.cn/cn/api/api/create-embedding',
-    legs: ['embed'],
-  },
-  {
-    id: 'custom',
-    baseUrl: '',
-    models: [],
-    docsUrl: 'https://platform.openai.com/docs/api-reference',
-    legs: ['chat', 'embed'],
-  },
-];
 
 /** 本插件的配置格：两条腿各自记住"用户选的是哪家"（扁平键，持久层不收嵌套对象）。 */
 export const llmSettingsSchema = z.strictObject({
@@ -121,17 +72,6 @@ interface KernelReader {
   applyConfig(id: string, patch: Record<string, unknown>): Promise<unknown>;
 }
 
-/**
- * 按 id 取目录里的一条，并按腿找到它。
- * @param id 服务商 id（可能来自旧一次保存，目录此后变过）
- * @param leg 哪条腿
- * @returns 命中的描述符；不命中或不适用这条腿时给 `custom`
- */
-function providerOf(id: string, leg: LlmLegName): LlmProviderView {
-  const found = PROVIDER_CATALOG.find((item) => item.id === id && item.legs.includes(leg));
-  return found ?? PROVIDER_CATALOG.find((item) => item.id === 'custom')!;
-}
-
 export class LlmSettingsService extends Service {
   static provide = 'llm.settings';
   static Config = llmSettingsSchema;
@@ -146,9 +86,9 @@ export class LlmSettingsService extends Service {
 
   /**
    * 服务商目录（纯数据，不发请求）。
-   * @returns 全部预设；界面按腿过滤
+   * @returns 全部 19 条预设；两条腿都能选其中任何一条（不再有 `legs` 过滤）
    */
-  catalog = (): LlmProviderView[] => PROVIDER_CATALOG;
+  catalog = (): LlmProviderView[] => PROVIDER_PRESETS;
 
   /**
    * 当前配置读数：两条腿的端点/模型名/密钥状态，加密钥存储的事实。
@@ -191,9 +131,9 @@ export class LlmSettingsService extends Service {
     const storedKey = config?.getSecret(LEG_SECRET[leg]) ?? '';
     const envKey = (process.env[keyEnv] ?? '').trim();
     const savedProvider = this.options[LEG_PROVIDER_KEY[leg]];
-    // 存着的服务商只有在端点确实对得上时才继续算数：用户手改过 baseUrl 就该改口成「自定义」，
+    // 存着的服务商只有在端点确实对得上时才继续算数（端点变体也算）：用户手改过 baseUrl 就该改口成「自定义」，
     // 否则界面会指着一家它已经没在用的提供商。
-    const providerId = providerOf(savedProvider, leg).baseUrl === baseUrl ? savedProvider : 'custom';
+    const providerId = endpointOf(presetOf(savedProvider), baseUrl ?? '') ? savedProvider : 'custom';
     return {
       leg,
       pluginId,
@@ -233,14 +173,16 @@ export class LlmSettingsService extends Service {
         },
       );
     }
-    const { leg, providerId, baseUrl, model, apiKey } = parsed.data;
+    const { leg, providerId, baseUrl: rawBaseUrl, model, apiKey } = parsed.data;
+    // 入库前先收前缀：粘进来的整条 `/chat/completions` 会被 `joinEndpoint` 再拼一次，留着就是双段路径（spec 7.2-03）。
+    const baseUrl = normalizeBaseUrl(rawBaseUrl);
     const config = maybeService<ConfigService>(this.ctx, 'config');
     if (!config) {
       throw new AppError('SETTING_NOT_ALLOWED', '配置服务未装载，模型设置无处落盘', 'llm.settings', { leg });
     }
     const pluginId = LEG_PLUGIN[leg];
     config.setPersisted(pluginId, { baseUrl, model }, ['baseUrl', 'model']);
-    config.setPersisted('llm-settings', { [LEG_PROVIDER_KEY[leg]]: providerOf(providerId, leg).id }, [
+    config.setPersisted('llm-settings', { [LEG_PROVIDER_KEY[leg]]: presetOf(providerId).id }, [
       'providerId',
       'embedProviderId',
     ]);

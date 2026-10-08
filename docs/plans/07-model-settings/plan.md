@@ -278,6 +278,16 @@ CREATE TABLE llm_models (
 | 7.2-d | IPC 契约（`bridge.llm` 新增动作 + `LlmProviderView`/`LlmModelView`）+ 渲染层三段 + 双语                                          | c    |
 | 7.2-e | 活体验收：10225 隔离实例跑三段，截图 + DOM 读数；三面 grep 证明新密钥路径也不落明文；`AGENTS.md` §9 更新那条迁移台账读数         | d    |
 
+> **7.2-a 收口补记（2026-10-08，spec 7.2-01 / 7.2-03 已 `[x]`，读数见 `7.2-01-03-catalog-readings.txt`）**：
+> 这一行里的"zod 形状"按**边界**而不是按目录落：目录是仓内的静态数据，给它写一份运行时校验就是为不会发生的场景加防线（§2.6），
+> 所以入仓的形状是 `LlmProviderView`（`shared`，与其余 bridge 视图同一口径），校验落在**人敲的那一格**——
+> `applySettingsSchema` 的 `z.url()` 之后紧跟 `normalizeBaseUrl`，落盘与热改拿到的都是前缀。
+> 池实例真正的 zod 入参（`saveProvider` 的 label / baseUrl / endpointId 与 `/models` 回包的逐项 `typeof` 判定）分别随 7.2-b、7.2-c 到货。
+>
+> 一条随本片撞出来的口径，写给 7.2-b/c/d：`check-compliance-redlines.ts` 规则三的射程含测试文件，**测试面出现真实域名一律 exit 1**。
+> 正确处置不是加豁免，而是①与主机无关的判据改用 `*.test.invalid` / `localhost`，②与目录本身有关的判据从 `PROVIDER_PRESETS` 现取地址——
+> 在测试里重敲目录字面量既是 §2.5 的第二个真相，也正是机检判出的那个形态。
+
 ### 7.8 测试与取证口径（§7.2 / §7.1 的硬边界）
 
 - **`/models` 与连通测试在自动化里只打本地 fixture**：`scripts/fixture-server.ts` 现在只有 `/v1/chat/completions`

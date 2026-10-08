@@ -18,7 +18,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import { LlmChatService } from './index.js';
 import type { LlmSettingsView } from '@auto-cc/shared';
-import { PROVIDER_CATALOG, LlmSettingsService } from './settings.js';
+import { LlmSettingsService } from './settings.js';
+import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 
 const CHAT_ENV = 'AUTO_CC_LLM_API_KEY';
 const EMBED_ENV = 'AUTO_CC_SILICONFLOW_API_KEY';
@@ -95,25 +96,89 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('服务商目录（spec 7.1-09：支持所有 OpenAI 协议提供商）', () => {
-  it('收录 deepseek / 火山方舟 / openai / 硅基流动，并留一条自定义正门', () => {
-    expect(PROVIDER_CATALOG.map((item) => item.id)).toEqual([
+describe('服务商目录（spec 7.2-01：参考实现的全部 19 家）', () => {
+  it('收录 19 家预设，`custom` 收口在末尾', () => {
+    expect(PROVIDER_PRESETS.map((item) => item.id)).toEqual([
       'deepseek',
-      'volc-ark',
+      'ark',
       'openai',
+      'openrouter',
+      'moonshot',
+      'dashscope',
       'siliconflow',
-      'siliconflow-embed',
+      'ollama',
+      'lmstudio',
+      'zhipu',
+      'minimax',
+      'stepfun',
+      'qianfan',
+      'githubmodels',
+      'groq',
+      'mistral',
+      'xai',
+      'nvidia',
       'custom',
     ]);
     // 自定义项的端点必须为空：任何 OpenAI 兼容地址都走同一条路径，预设只是填格子的建议。
-    expect(PROVIDER_CATALOG.find((item) => item.id === 'custom')).toMatchObject({ baseUrl: '', models: [] });
+    expect(PROVIDER_PRESETS.at(-1)).toMatchObject({ id: 'custom', baseUrl: '', defaultModel: '' });
   });
 
-  it('向量腿只列实测过端点的那两家，其余预设不冒充支持 embeddings', () => {
-    expect(PROVIDER_CATALOG.filter((item) => item.legs.includes('embed')).map((item) => item.id)).toEqual([
-      'siliconflow-embed',
-      'custom',
-    ]);
+  it('目录不再声明腿，也不再出现同一个地址的第二条条目（§2.5 / plan §7.2 裁定②）', () => {
+    const seen = new Set<string>();
+    for (const item of PROVIDER_PRESETS) {
+      if (item.baseUrl === '') continue;
+      expect(seen.has(item.baseUrl), `重复端点：${item.baseUrl}`).toBe(false);
+      seen.add(item.baseUrl);
+      // 端点变体的首条必须就是预设自身的地址，否则"选第一家"与"选标准端点"会指向两处。
+      if (item.endpoints) expect(item.endpoints[0]?.baseUrl).toBe(item.baseUrl);
+      // 从第二条起才是"另一个地址"，首条上面已经按同一条断言查过了。
+      for (const endpoint of item.endpoints?.slice(1) ?? []) {
+        expect(seen.has(endpoint.baseUrl), `重复端点：${endpoint.baseUrl}`).toBe(false);
+        seen.add(endpoint.baseUrl);
+      }
+    }
+    expect('legs' in PROVIDER_PRESETS[0]!).toBe(false);
+  });
+});
+
+describe('地址归一与端点归属（spec 7.2-03）', () => {
+  it('四种输入形状都收成同一个前缀', () => {
+    // 主机名一律用 RFC 2606 保留名：归一与主机无关，而测试面不许出现真实域名（AGENTS.md §7.2 / spec 4.4-08）。
+    expect(normalizeBaseUrl('https://gw.test.invalid/v1')).toBe('https://gw.test.invalid/v1');
+    expect(normalizeBaseUrl('  https://gw.test.invalid/v1/  ')).toBe('https://gw.test.invalid/v1');
+    expect(normalizeBaseUrl('https://gw.test.invalid/v1///')).toBe('https://gw.test.invalid/v1');
+    // 把整条动作路径粘进来是真实误填：不剥掉就会被 joinEndpoint 再拼一次。
+    expect(normalizeBaseUrl('https://gw.test.invalid/v1/chat/completions')).toBe('https://gw.test.invalid/v1');
+    expect(normalizeBaseUrl('https://gw.test.invalid/v1/embeddings')).toBe('https://gw.test.invalid/v1');
+    expect(normalizeBaseUrl('')).toBe('');
+    // 本地端点（Ollama / LM Studio）就是 http，不许被"必须 https"挡在门外。
+    expect(normalizeBaseUrl('http://localhost:11434/v1/')).toBe('http://localhost:11434/v1');
+  });
+
+  it('目录里写着的每个地址本身已经是归一后的前缀', () => {
+    // 这一条判的是数据而不是函数：目录若混进带尾斜杠或整条动作路径的地址，界面上"选了哪家"就会读回 custom。
+    for (const preset of PROVIDER_PRESETS) {
+      expect(normalizeBaseUrl(preset.baseUrl), `${preset.id} 的地址不是前缀`).toBe(preset.baseUrl);
+      for (const endpoint of preset.endpoints ?? []) {
+        expect(normalizeBaseUrl(endpoint.baseUrl), `${endpoint.id} 的地址不是前缀`).toBe(endpoint.baseUrl);
+      }
+    }
+  });
+
+  it('端点变体也算"这一家"，认不出的一律回 custom', () => {
+    // 地址从目录里现取，不在用例里重敲字面量：重敲一遍就是抄第二份事实，且会随目录漂掉（§2.5）。
+    for (const preset of PROVIDER_PRESETS) {
+      for (const endpoint of preset.endpoints ?? []) {
+        expect(endpointOf(preset, endpoint.baseUrl), `${preset.id} 认不出自己的变体 ${endpoint.id}`).toBe(endpoint.id);
+      }
+    }
+    // 首条端点没有单独变体条目时，用预设自身的 id 作答（界面上不许多出一格"标准"）。
+    expect(endpointOf(presetOf('deepseek'), presetOf('deepseek').baseUrl)).toBe('deepseek');
+    expect(endpointOf(presetOf('openai'), 'https://evil.test.invalid/v1')).toBeUndefined();
+    // 认不出的提供商 id 回落 custom，而 custom 不冒充任何地址（它的 baseUrl 本来就是空串）。
+    expect(presetOf('不存在的 id').id).toBe('custom');
+    expect(endpointOf(presetOf('不存在的 id'), presetOf('deepseek').baseUrl)).toBeUndefined();
+    expect(endpointOf(presetOf('custom'), '')).toBeUndefined();
   });
 });
 
@@ -194,6 +259,17 @@ describe('apply()：写持久层 + 密钥库 + 热改运行时（spec 7.1-08 / 7
     expect(legOf(view, 'chat')).toMatchObject({ baseUrl: 'https://custom.test.invalid/v1', providerId: 'custom' });
     // 持久层记的是"下拉里选的那家"，两者不一致由 read() 自愈——规则只有一处。
     expect(config.persisted('llm-settings')).toEqual({ providerId: 'deepseek' });
+  });
+
+  it('误粘整条动作路径时入库的是归一后的前缀（spec 7.2-03）', async () => {
+    const { settings, config } = await boot();
+    const view = await settings.apply({
+      leg: 'chat',
+      baseUrl: 'https://gw.test.invalid/v1/chat/completions',
+      model: 'm',
+    });
+    expect(legOf(view, 'chat').baseUrl).toBe('https://gw.test.invalid/v1');
+    expect(config.persisted('llm')).toEqual({ baseUrl: 'https://gw.test.invalid/v1', model: 'm' });
   });
 
   it('clearKey 只清密钥，端点与模型名留着', async () => {

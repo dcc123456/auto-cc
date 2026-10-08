@@ -1739,14 +1739,25 @@ export type ScheduleJobCreateInput = {
  */
 export type LlmLegName = 'chat' | 'embed';
 
-/** 服务商目录里的一条预设（`baseUrl` 为空 = 自定义端点，任何 OpenAI 兼容地址都走这一条）。 */
+/**
+ * 服务商目录里的一条预设（spec 7.2-01）。
+ *
+ * 三条形状约束，都是与参考实现（`browser-copilot/src/lib/providers.ts`）不同的地方，理由见 plan §7.1/§7.2：
+ * - **不声明腿**：哪家能不能配 embedding 本机无法无 key 验证，写进目录就是拿文档转述当事实（AGENTS.md §6.2）；
+ *   用户绑谁就用谁，能不能通由那一次连通测试给真读数。
+ * - **不带显示名**：界面上的名字出自语言包（§5.5），数据里再存一份会漂（§2.5）。
+ * - **不带厂商说明**：那类英文说明进界面同样破 §5.5，取 key 的指引由语言包按 `id` 出。
+ */
 export type LlmProviderView = {
   id: string;
+  /** 预设首条端点前缀；`custom` 为空串，表示地址完全由人敲。 */
   baseUrl: string;
-  /** 该家的模型名候选；不限制用户填别的。 */
-  models: string[];
-  docsUrl: string;
-  legs: LlmLegName[];
+  /** 建议的模型名：预填用，永不构成约束（真正的清单来自 7.2-05 的自动获取）。 */
+  defaultModel: string;
+  /** 拿 key 的去处；没有就不显示（`lmstudio` / `custom` 这类本地或通用端点没有厂商控制台）。 */
+  docsUrl?: string;
+  /** 同一家暴露的多个端点前缀（方舟标准 / Coding Plan、智谱三条、MiniMax 双区域…）；首条即 `baseUrl`。 */
+  endpoints?: Array<{ id: string; baseUrl: string }>;
 };
 
 /** 一条腿的密钥读数（掩码，不含明文）。 */

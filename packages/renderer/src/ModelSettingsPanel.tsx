@@ -8,7 +8,7 @@ import { useBridgeAction } from './useBridgeAction';
 /**
  * 提供商 id → 语言包键后缀。
  *
- * 目录来自 `llm.settings.catalog()`，里面的 id 是闭合枚举（六家）；界面只给这些 id 配文案，
+ * 目录来自 `llm.settings.catalog()`，里面的 id 是闭合枚举（19 家，spec 7.2-01）；界面只给这些 id 配文案，
  * 读回未知 id 时原样显示 id 本身——那是数据不是文案（与 `UpdateSection` 对 `detail` 的口径一致）。
  * @param id 目录里的一条提供商 id
  * @returns `settings.model.provider.<id>` 形态的键
@@ -59,8 +59,8 @@ export function ModelSettingsPanel() {
   const providerId = draft?.providerId ?? legView?.providerId ?? 'custom';
   const baseUrl = draft?.baseUrl ?? legView?.baseUrl ?? '';
   const model = draft?.model ?? legView?.model ?? '';
-  /** 这一条腿能选的提供商：目录里 `legs` 含当前腿的那几项（向量腿只有硅基流动与自定义）。 */
-  const providers = (catalog ?? []).filter((item) => item.legs.includes(leg));
+  /** 可选的提供商：整份目录（spec 7.2 起不再按腿过滤——目录不声明谁能配 embedding，绑了才知道）。 */
+  const providers = catalog ?? [];
 
   /**
    * 换腿：草稿整份撤掉。两条腿的端点与模型名毫无关系，留着上一腿的草稿会让人以为已经填过了。
