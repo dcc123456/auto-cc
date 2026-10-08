@@ -161,3 +161,141 @@
 | 保存 baseUrl/model 触发下游重建，进而关掉已开的浏览器会话视图（§9 实测 2.5） | 界面对此播报一句，且验收顺序固定为"改配置 → 重开会话 → 跑"                                                     |
 | 渲染层把明文 key 带回来显示                                                  | `read()` 永不回明文，只回 `present` + 末 4 位指纹；`listSecrets` 同样；spec 7.1-09 用 trace/日志/grep 三面取证 |
 | 预设目录让人以为只支持这四家                                                 | 提供商选择必有「自定义」项，且 `baseUrl` 输入框始终可编辑；spec 7.1-13                                         |
+
+---
+
+## 7. P7 · 7.2 提供商池与模型清单（2026-10-07 立项，用户直接点名）
+
+**用户原话的三件事，按顺序就是界面的三段**：① 先添加模型提供商（可多个）；② 添加成功后**自动获取**该提供商的模型列表，
+并把自己需要的**勾进入库**；③ 之后从这份已入库的清单里分别绑定 **chat 模型**与 **embedding 模型**。
+7.1 只做到了"两条腿各填一份扁平配置 + 一家一个预设模型名"，做不到 ①② —— 它的数据形状装不下"任意多提供商 × 任意多模型"。
+
+### 7.1 参考实现的一手证据（browser-copilot，本机现读，路径 + 行号）
+
+| 事实                                                                     | 位置                                                  | 移植判定                                                                     |
+| ------------------------------------------------------------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 19 家预设 `{id,label,baseUrl,defaultModel,hint,docsUrl,endpoints?[]}`    | `src/lib/providers.ts:71-271`                         | **照搬数据**（端点变体一并搬：方舟/moonshot/百炼/智谱/MiniMax 各有 2～3 条） |
+| 提供商是**实例池** `ProviderProfile[]`，靠 `presetId` 记来源             | `src/lib/providers.ts:23-43`                          | 照搬形状；本项目把 `apiKey` 换成密钥库路径                                   |
+| 自动获取模型：`GET {normalizeBaseUrl}/models`，Bearer，解析 `data[].id`  | `src/lib/llm.ts:549-576`                              | 照搬协议；返回解析要比它更容错（见 §7.5）                                    |
+| 拉到的清单**只当 datalist 候选、不入库**（注释：便利清单，永不构成约束） | `src/lib/llm.ts:545-547`、`SettingsTab.tsx:1243-1256` | **按裁定④改掉**：勾选入库                                                    |
+| 连通测试刻意不打 `/models`：打 1 次 `chat/completions`，`max_tokens:1`   | `src/lib/llm.ts:581-614`                              | 照搬（7.1-10 已经是同一条形状）                                              |
+| key **明文**存 chrome.storage（注释自认 unencrypted on disk）            | `src/lib/storage.ts:9`、`fs-store.ts:602-639`         | **否决**：本项目 7.1 已有 safeStorage 密钥库，明文是倒退                     |
+| **没有 embedding 通道**，第二角色是 `VisionConfig={providerId,model}`    | `src/lib/vision.ts:23-51`                             | 借它的"池 + 二级引用"模式做 chat/embed 两个角色                              |
+| 无 schema 库，手写 `validateProfile` + 逐字段 `typeof` 兜底              | `providers.ts:296-323`、`366-483`                     | 本项目已有 zod，直接用（§2.1 复用）                                          |
+
+许可证：browser-copilot 是用户本人的项目，不存在 §8.7 的非商用来源问题；它的 `hint`/`docsUrl` 文案随预设一起搬，
+界面按 `zh-CN`/`en` 各自重写（§5.5）。
+
+### 7.2 四条裁定（用户 2026-10-07 答问，冲突时以本节为准）
+
+| #   | 裁定                                                                      | 后果                                                                                                                           |
+| --- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| ①   | 提供商与模型清单存 **SQLite 新表**，key 仍走 `secrets.bin`                | 新增迁移号段 **31/32**（30 已预留给 3.6 草稿表，29 是当前最高，见 §9）；界面可管任意多实例                                     |
+| ②   | **同一个池里选两个角色**，embed 用所选提供商的 `baseUrl` 打 `/embeddings` | `llm.embed` 不再有自己的 baseUrl，改为"引用提供商"；预设不再声明 `legs`（哪家能配 embedding 由用户绑定说了算，见 §7.6 不做项） |
+| ③   | `cordis.yml` / 环境变量的 `baseUrl`+`model` **保留为兜底**，池优先        | 解析顺序见 §7.4；老配置、现有 7.1 单测与 spec 7.1-14 那条反向验证都不破                                                        |
+| ④   | 拉回的模型清单**勾选入库**                                                | `llm_models` 是"我的模型"这份人的表态，跨重启算数；未勾选的一律不落库                                                          |
+
+### 7.3 数据模型（两张表，一个号段）
+
+```sql
+-- 31：用户添加的提供商实例。preset_id 只记来源，不参与解析。
+CREATE TABLE llm_providers (
+  id          TEXT PRIMARY KEY,          -- 短 id；密钥库路径由它派生：llm.provider:<id>
+  preset_id   TEXT NOT NULL,             -- 'deepseek' | 'ark' | ... | 'custom'
+  label       TEXT NOT NULL,             -- 界面显示名，用户可改
+  base_url    TEXT NOT NULL,             -- 到 /v1 为止的前缀，入库前先 normalizeBaseUrl
+  endpoint_id TEXT,                      -- 端点变体（方舟标准/Coding Plan、智谱三条等）；null = 预设首条
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+-- 32：勾选入库的模型清单。一条模型属于且仅属于一个提供商。
+CREATE TABLE llm_models (
+  provider_id TEXT NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+  model       TEXT NOT NULL,             -- 原样存服务端给的 id，不做任何大小写加工
+  origin      TEXT NOT NULL,             -- 'fetched' | 'manual'
+  added_at    INTEGER NOT NULL,
+  PRIMARY KEY (provider_id, model)
+);
+```
+
+三条口径：
+
+- **角色绑定不进这两张表**，仍是 `llm` / `llm-embed` 各自配置格里的扁平键（`providerId` 语义从"预设 id"改为"池实例 id"，
+  `model` 沿用）。7.1-05 已实测这条链跨重启算数，新开第三张表等于同一件事两个真相（§2.2）。
+- **`llm_providers` 里一个字节密钥都没有**，key 只在 `secrets.bin`；删提供商必须连带 `clearKey('llm.provider:<id>')`，
+  否则库里没了、密钥库里还留着（孤儿凭证）。
+- 主键就是 `(provider_id, model)`：重复入库走 upsert，所以"再拉一遍并全勾上"是幂等的。
+
+### 7.4 服务形状：扩展现有入口，不新开平行模块（§2.3 / §2.5）
+
+硬约束（现读）：`scripts/check-llm-single-entry.ts:25-27` 写明 **`llm.settings` 一个字节都不发，import `http.js` 即红**。
+所以"拉模型列表"不许新长第三条 HTTP 腿，只能经 `llm.chat` 那唯一客户端：
+
+- `llm.chat` 内部把请求收成"显式目标"一种形状：现有绑定态（读自己的配置格）与新的探测态
+  （`listModels(target)` / `complete(target)`，`target = { baseUrl, secretPath, timeoutMs }`）共用同一个客户端与同一条
+  `config` 密钥读取链。`llm.embed` 复用同一个 `listModels`（`/models` 与 embedding 无关，不许为它开第三个 `llm.*` 服务）。
+- `llm.settings` 增加的方法（都是"配置面"的动作，不发网络）：`presets()`、`listProviders()`、`listModels(providerId)`、
+  `saveProvider(...)`、`deleteProvider(id)`、`addModels(id, names[])`、`removeModel(id, name)`、
+  `fetchModels(id)`（→ 转调 `llm.chat.listModels`）、`bindRole({ leg, providerId, model })`、`checkProvider(id)`（→ 转调 `llm.chat.complete`）。
+- **旧的 `apply()` 删除**，不是一个新入口 + 一个旧入口并存（§2.5）：界面的保存只剩 `saveProvider` / `addModels` / `bindRole` 三个动作；
+  yml/env 那条兜底从此只是配置层本身，不再是 `llm.settings` 的方法。7.1-d 那块面板的"保存这一腿"按钮随之换成角色绑定。
+- **解析顺序**（chat 与 embed 各算一遍）：
+  `providerId` 有绑定 → 向池问 `{baseUrl}` + 密钥路径 `llm.provider:<id>`；
+  否则 → 配置格自己的 `baseUrl` + `keyEnv` 环境变量（7.1-07 那条链原样不动）；
+  两边都没有 → `missing` 里照实列出 `baseUrl / model / apiKey`，界面上的"测试连接"给锁定原因码。
+
+### 7.5 界面：一个分区里的三段（仍挂「信任」工作台，不新开视图）
+
+控件一律出自 `src/ui/**` 原件（§5.1/6.2-14 的第 10 节机检已落地，实测 `check-renderer-conventions.ts` 现在报
+"src/ui/\*\* 之外裸原生控件 0 只"，7.1-d 那块已被迁进 `DeskField`/`DeskSelect`）：
+
+1. **提供商**：`DeskDisclosure` 每行一个实例（label / baseUrl / 末 4 位掩码 / 已入库模型数 / 删除）；
+   「添加提供商」开 `Modal`：预设 `DeskSelect` → 端点变体 `DeskSelect`（预设没有变体时这一格不出现）→ `baseUrl`
+   `DeskField` → `apiKey` `DeskField`（password）→ 「测试连通」`DeskButton`（原因码沿用 7.1-13 那套）。
+2. **模型清单**：选中一个提供商 → 「获取模型」→ 返回的 id 渲染成 `DeskCheck` 列表，**已入库的预选中** →
+   「添加所选」入库。失败态（非 2xx / 空数组 / 超时）只播报一次，**绝不清空已入库清单**。
+3. **角色绑定**：两个 `DeskSelect`（chat 模型 / embedding 模型），候选=已入库清单；「保存」走 `bindRole` →
+   `kernel.applyConfig` 热改，并沿用 7.1 那句"配置改动会重建下游、浏览器会话需重开"的播报。
+   待核（7.2-d 到货时先看原件签名，不要为它新写控件）：`DeskSelect` 能否渲染按提供商分组的候选（`optgroup`），
+   不能就用 `<providerLabel> · <model>` 单行标签。
+
+### 7.6 不做项（写明是为了防止被当成缺口）
+
+- **不为预设声明 embedding 能力**（裁定②删掉了 `legs`，也删掉 `siliconflow-embed` 这只同址重复条目）：本项目无法在本机
+  无 key 验证"某家到底提不提供 `/embeddings`"，写进目录就是拿文档转述当事实（§6.2）。界面按用户绑定走，
+  绑错了就在连通测试里以可读失败回出来——那是**真读数**，不是猜测。
+- 不做提供商级自定义请求头（参考实现有 `headers`，OpenRouter 归因头是它那边的用法）、不做模型元数据
+  （价格/上下文长度）、不做 vision/接管角色（本项目没有这条腿）。
+- 不做多 key 轮询与配额分摊；一个提供商一把 key。
+
+### 7.7 片序（一次一片，每片自带验收）
+
+| 片    | 内容                                                                                                                             | 依赖 |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 7.2-a | `llm`：预设目录 19 家（含端点变体）+ `normalizeBaseUrl` + zod 形状 + 单测                                                        | 无   |
+| 7.2-b | `llm`：迁移 31/32 与池的 CRUD（`inject=['store']`，`migrations.push` → `upgrade()`，与 resume-kb 同一模式）+ 密钥路径派生 + 单测 | a    |
+| 7.2-c | `llm.chat` 收成"显式目标"客户端 + `listModels` 解析（fixture 的 `/v1/models`）+ 删除旧 `apply()` + 解析顺序与兜底链单测          | b    |
+| 7.2-d | IPC 契约（`bridge.llm` 新增动作 + `LlmProviderView`/`LlmModelView`）+ 渲染层三段 + 双语                                          | c    |
+| 7.2-e | 活体验收：10225 隔离实例跑三段，截图 + DOM 读数；三面 grep 证明新密钥路径也不落明文；`AGENTS.md` §9 更新那条迁移台账读数         | d    |
+
+### 7.8 测试与取证口径（§7.2 / §7.1 的硬边界）
+
+- **`/models` 与连通测试在自动化里只打本地 fixture**：`scripts/fixture-server.ts` 现在只有 `/v1/chat/completions`
+  （现读 `:1289`），本片加 `/v1/models`（OpenAI 信封 `{"object":"list","data":[{"id":...}]}`）并留三条失败态：非 2xx、空 `data`、超时。
+- 19 家真实端点只在**用户在场**时手动验证；无 key 探测的 401/000 只作为"能否到达鉴权层"的读数留档，
+  **不得**据此在目录里写"支持/不支持"（§6.2 已两次因文档转述翻车）。
+- 明文永不可见那条（spec 7.1-06）在本片要按新路径重取一遍：`trace()` / `settings.json` / 日志 / 渲染层回包 四面 grep
+  `llm.provider:<id>` 对应的探针 key。
+- V 类按 §9 的既有口径：先 `privacy-acknowledge`，注入禁动画再量几何，`shot`/`eval`/`click` 全带 `--url 5173`，
+  收图前整批 `md5 -q | sort | uniq -c`。
+
+### 7.9 风险与对策
+
+| 风险                                                                                 | 对策                                                                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| 各家 `/models` 返回形状不一（`data[]` / `models[]` / 夹带非 OpenAI 字段）            | 解析函数对两种键都试、逐项判 `typeof id === 'string'` 且非空，拉不到就报"这一家没给可解析的清单"，不猜 |
+| 拉取失败被误当成"用户没有模型了"                                                     | 清单是**已入库的那份**，fetch 只读远端不写本地；入库只发生在用户点「添加所选」之后                     |
+| 换 embedding 模型后旧向量与新查询不同源                                              | 4.3-d 已按 `model` 过滤（`kb_vectors.model`），本片只多一个"角色可以改绑"的入口，不改那条失效判据      |
+| 删提供商留下孤儿（密钥、清单、仍在引用它的角色绑定）                                 | 删除是一条事务：`llm_models` 连带清（外键 CASCADE）+ `clearKey` + 角色绑定回落到"未绑定"并播报缺哪一格 |
+| `llm` 在 `cordis.yml` 里排 `store` 之后才拿得到连接（§9 实测 5.1-c：顺序即挂载顺序） | 现读 `cordis.yml:21` 的 store 已在 `:35` 的 llm 之前；本片不动顺序，若动则同片补一条顺序机检           |
+| 一次绑定改两格 → 下游插件重建两次（§9 实测 2.5）                                     | `bindRole` 一次 `applyConfig` 只写受影响的那条腿，界面把两腿合并成一次保存动作，保存后只播报一句       |

@@ -1,4 +1,4 @@
-# 计划七 · 模型设置与密钥保管 — 验收 Spec（7.1）
+# 计划七 · 模型设置与密钥保管 — 验收 Spec（7.1 / 7.2）
 
 > 实施计划：`docs/plans/07-model-settings/plan.md`
 > 方式：**V** = 可视验收（CDP harness 打开 app、截图、读 DOM 断言，一律带 `--url 5173`，须留证据）；
@@ -63,7 +63,48 @@
 
 ## 与本计划相邻但**不属于**本片的两件事（避免被误记成已完成）
 
-- `ModelSettingsPanel` 目前仍用本片的 `FIELD_CLASS` + 裸 `<select>`/`<input>`；6.2-14 那只正在把各面板迁到
-  `DeskField`/`DeskSelect`/`DeskTextarea`（同一窗口在改 `KbPanel` 等），到货后按它的口径替换，本片不预支。
+- ~~`ModelSettingsPanel` 仍用本片的 `FIELD_CLASS` + 裸 `<select>`/`<input>`~~ **已收（2026-10-07 现读）**：6.2-14 到货，
+  本分区现出自 `DeskField`/`DeskSelect`/`DeskButton`，`check-renderer-conventions.ts` 第 10 节报
+  「src/ui/\*\* 之外裸原生控件 0 只」（62 个源文件，EXIT=0）。此后新增界面直接按这条口径写。
 - 向量腿（`llm.embed`）的连通性测试明确回 `CHECK_NOT_SUPPORTED`（按钮禁用并给同一原因码），
   不是"做了一半"，是这一按不发任何请求的如实读数；要真做属于 4.3 那条线。
+  **7.2 立项后这条要重看**：池化之后 embed 的角色绑定改用所选提供商的 `baseUrl`，连通探测能否复用量 7.2-c 的判定，见 plan §7.4。
+
+---
+
+# 7.2 提供商池与模型清单 — 验收 Spec
+
+> 实施计划：`docs/plans/07-model-settings/plan.md` §7（四条裁定在 §7.2 节，永不改写）
+> **条目统计**：15 条。**总基调**：7.1 验的是"凭证有没有被好好对待"，7.2 验的是
+> "用户能不能自己把一家提供商连同它的模型清单管起来，并且选中谁就真的用谁"。
+> 三条贯穿全片的负腿：① 自动化测试只打本地 fixture（§7.2）；② 明文 key 永不出现在四个面（§8.6）；
+> ③ 网络出口只有 `llm.chat` 那一个客户端（`scripts/check-llm-single-entry.ts`，§2.7）。
+
+| ID     | 验收标准                                                                                                              | 方式 | 验证操作                                                                                                                               | 状态 |
+| ------ | --------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 7.2-01 | 预设目录含参考实现的**全部 19 家**，`id`/`baseUrl`/`defaultModel` 逐条对得上，端点变体一并搬入                        | C+U  | 单测逐条比对（`browser-copilot/src/lib/providers.ts:71-271` 为本片的一手来源）；`pnpm lint` 绿                                         | [ ]  |
+| 7.2-02 | 提供商是**实例池**：可增、可改、可删，同一家可同时存在两条（如方舟标准 + Coding Plan）                                | U    | 单测：`saveProvider` 两次同 `presetId` 不同 `endpointId` → `listProviders()` 两行，id 不撞                                             | [ ]  |
+| 7.2-03 | `baseUrl` 归一：带/不带尾斜杠、误填 `/chat/completions` 都能收成同一前缀，入库的就是归一值                            | U    | 单测覆盖四种输入形状（照参考实现的 `normalizeBaseUrl` 口径，但以本项目 `.d.ts` 实测为准）                                              | [ ]  |
+| 7.2-04 | 添加提供商时可**测试连通**：只发一次最小 chat 请求，成功/失败都回结构化原因（超时/非 2xx/未配置）                     | U+V  | 打本地 fixture `/v1/chat/completions`；活体点一次「测试连通」读回文案（§7.2 不许打真实端点）                                           | [ ]  |
+| 7.2-05 | **自动获取模型列表**：`GET <baseUrl>/models`，解析 `data[].id`（同时容 `models[]` 这类变体），排序稳定                | U+V  | 单测：fixture 三种返回形状（标准信封 / `models[]` 变体 / 夹带非 OpenAI 字段）各一条；活体在隔离实例点「获取模型」看候选数              | [ ]  |
+| 7.2-06 | 清单**勾选入库**：只有勾了的写进 `llm_models`；重复入库幂等；未勾选的一条都不落库                                     | U+V  | 单测断言三态；活体勾两条 → 重新读取 → 行数为 2，`origin` 记 `fetched`                                                                  | [ ]  |
+| 7.2-07 | 拉取失败**绝不清空**已入库清单（非 2xx / 空数组 / 超时三态只播报）                                                    | U    | 三条失败态各一条单测，断言 `llm_models` 行数不变                                                                                       | [ ]  |
+| 7.2-08 | 迁移落在**新号段 31/32**（30 已预留给 3.6），老库升级只跑新 `up`，`down` 可完整回滚                                   | C+U  | `SELECT version FROM schema_migrations` 复核最高值；回滚测试断言两张表一起消失（§9 实测 5.3-a 那条教训）                               | [ ]  |
+| 7.2-09 | 删除提供商是原子的：连带清模型清单、清密钥库那一把、引用它的角色绑定回落到未绑定并播报缺哪一格                        | U+V  | 单测：删被 chat 绑着的提供商 → 三处读数为空 + `status().missing` 含 `model`；活体读数 `7.2-09-*.txt`                                   | [ ]  |
+| 7.2-10 | 密钥仍只走 `secrets.bin`，路径为 `llm.provider:<id>`；**四个面** grep 不到明文                                        | C+U  | 写入探针 key 后 grep `trace()` / `settings.json` / 日志 / 渲染层回包；`stat` 复核 0600（与 spec 7.1-06 同一取证口径，换路径重取）      | [ ]  |
+| 7.2-11 | 角色绑定：**chat 与 embedding 各选一**，候选只出自已入库清单；保存后无需重启即生效                                    | U+V  | 单测断言绑定读回；活体改绑 → `llm.chat.status().model` 立刻为新值（沿用 spec 7.1-08 的取证法）                                         | [ ]  |
+| 7.2-12 | 解析顺序为「绑定 > yml/env 兜底 > 未配置」，三条各有读数，`missing` 说得清缺哪一格                                    | U    | 三个用例：只绑定 / 只兜底 / 两者都有（绑定胜）；再加一条都没有时的 `missing`                                                           | [ ]  |
+| 7.2-13 | 网络出口仍**只有一个客户端**：`llm.settings` 不 import `http.js`，无第三个 `llm.*` 服务                               | C    | `pnpm lint` 链内的 `scripts/check-llm-single-entry.ts` 绿；再手动 grep 一遍 `fetch(` 在 `packages/llm/src` 的落点数                    | [ ]  |
+| 7.2-14 | 界面三段（提供商 / 模型清单 / 角色绑定）控件全部出自 `src/ui/**` 原件，文案齐双语                                     | C+V  | `check-renderer-conventions.ts` 第 10 节 + `pnpm lint` 键对齐；活体深浅两主题各一张（`7.2-14-*.png`），禁用态带 `data-disabled-reason` | [ ]  |
+| 7.2-15 | 反向验证（§6.5）：删掉旧的 `apply()` 入口后**没有留下第二入口**，且脚本化配置路径（env / `cordis.yml`）仍能装好模型腿 | C+V  | grep 界面动作清单里无 `llm.settings.apply`；活体：只用 yml+env 起一个隔离实例，`status()` 报 `keySource:"env"` 且连通成功              | [ ]  |
+
+## 收尾自检（AGENTS.md §7.4，7.2 收口时逐项回答）
+
+- [ ] ① `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 全绿（结论重定向到文件再看 `EXIT=`，不许管道接 `tail`）
+- [ ] ② V 类条目逐条对应截图或 DOM 读数，本目录归档，文件名对应条目 ID；同批截图先 `md5 -q | sort | uniq -c` 去重
+- [ ] ③ 上表状态位更新，`[!]` 必须写原因（真实端点的运行期验证属"用户在场"类，见 §7.8）
+- [ ] ④ 复用检查：`/models` 是否复用了那唯一客户端；预设目录是否与 7.1 的 `PROVIDER_CATALOG` 合并成一份（§2.5）
+- [ ] ⑤ 死代码检查：旧 `apply()` 及其 IPC 行、`legs` 字段与被替换的掩码读法是否删净
+- [ ] ⑥ Tailwind / lucide / i18n 三项（新增界面不许出裸控件、不许自绘图标、不许裸文案）
+- [ ] ⑦ 提交 + 推送（§1.6，按 pathspec 提交），推完复核 `git ls-remote`
+- [ ] ⑧ 暂存区无测试临时产物（截图只允许 `docs/acceptance/07-model-settings/**`，探针与日志留 `tmp/`）
