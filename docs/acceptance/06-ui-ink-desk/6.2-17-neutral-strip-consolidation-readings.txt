@@ -1,0 +1,97 @@
+6.2-17 中性手搓长条收进 Banner（并入 celadon 档）——活体与普查读数
+取证时间：2026-10-08（macOS Apple Silicon，开发实例 userData = tmp/v6-userdata）
+命令口径：CDP 10222 / 应用页 --url 5173；渲染层由 Vite HMR 带上新代码（无重启）
+
+────────────────────────────────────────
+一、裁定与射程
+────────────────────────────────────────
+用户 2026-10-08 裁定（AskUserQuestion 三选一）：**并入 celadon 档**——
+不新增第 5 档 `neutral`，中性回执与"系统在说一件普通的事"共用信息档。
+本片射程 = 第三十六片普查出的那一族形状（`rounded-md border border-line bg-ink-950/70 px-3 py-2 text-[11px] text-slate-300`）。
+
+落地 12 处（11 处该签名 + 1 处普查漏签的同内容画法）：
+  SessionPanel 201、PdfEditPanel 538、ResumeEditor 480、ResumePanel 466、WorkflowPanel 260、
+  JobLabPanel 418、UsagePanel 108、LocatorLabPanel 302、WorkflowLabPanel 179、
+  AssemblyPanel 237、AssemblyPanel 396（cycle-report）、AgentRunPanel 168（agent-run-notice）
+最后一条是**普查漏网**：它装的是同一个 `notice`，画法却是贴边线（`border-t border-line px-3 py-2`），
+不带 `rounded-md` 也不带底色，所以第三十六片那条按 `rounded-md … px-3 py-2` 写的正则没数到它。
+补它的理由与其余 11 处同一条：独立成块、自带描边与内边距的一句提示 = 提示条。
+
+一处**移出射程并记下理由**：`AgentRunPanel:131` 带着同一串 class，但它是计划卡的**步骤行**
+（`data-plan-step` / `data-plan-tool-id` / `data-plan-effect`，每条计划步重复一次，且里面是多行内容 +
+08 稿规定的 `border-l-seal` 外发左边线）。按 §3.11 的判据"块级 + 通栏 + 装一句话"它不合格——
+重复项的每一条归列表行那一族（与第三十六片挪出去的五处 `<li>` 同族），故保留原画法。
+
+────────────────────────────────────────
+二、普查咬合（tmp/37-census.mjs）
+────────────────────────────────────────
+`<Banner>` 调用处数：24 → **36**（+12，逐处对应上面那张表）
+`src/ui/**` 之外带 `-wash` 的行数：**39 → 39**（本片一条 wash 都没动，中性条本来就不带 wash）
+6.2-17 那条签名剩余：**0 处**
+⇒ 两条数互咬：新增的 12 只 Banner 全部来自"不带 wash"的那一族，wash 计数不动才对。
+
+────────────────────────────────────────
+三、真消费者活体（墨案 + 毡案）
+────────────────────────────────────────
+腿：信任屏「读取页面快照」（`[data-action="snapshot"]` → `browser.page.snapshot`，纯读、零写入）。
+内核视图未挂载时它回 `NO_KERNEL_SESSION`，`useBridgeAction` 把失败原因写进 `notice`，
+于是 `[data-testid="session-notice"]` 长出来——这一条正是被收进原件的那 12 处之一。
+
+墨案（`6.2-17-celadon-notice-dark.png`）：
+  class  `… rounded-control border px-3 py-2 text-xs leading-relaxed border-celadon/40 bg-celadon-wash text-celadon mt-2`
+  color  rgb(127,182,173)   bg rgba(127,182,173,0.12)   border oklab(0.7354 … / 0.4) 1px
+  radius 7px  pad 8px/12px  font 12px  align flex-start  图标 13px / aria-hidden=true / viewBox 0 0 24 24
+  文本   「已读取页面快照 失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面」
+毡案（`6.2-17-celadon-notice-light.png`）：同一条 class 一字不差，
+  color rgb(63,128,120) / bg rgba(63,128,120,0.12) / radius 7px / font 12px —— 翻面全由令牌决定。
+锚点 `data-testid="session-notice"` 逐字保留（走 `markers`），历史选择器照旧指得到。
+
+────────────────────────────────────────
+四、BEFORE / AFTER 同帧对照（真模块探针，两主题各一次）
+────────────────────────────────────────
+探针容器 `#probe-37-celadon-grid`（inline style 定住，不依赖只在探针里出现的 Tailwind class），
+三行：① 旧手搓条（class 逐字照抄）② 同一句话交给 `Banner tone="celadon"` ③ 失败句交给同一只原件。
+成图：`6.2-17-celadon-before-after-dark.png` / `-light.png`（四张成图 md5 互异）。
+
+墨案读数：
+  BEFORE  color rgb(164,182,195)  bg oklab(0.1518 …/0.7)  radius 6px  font 11px  align normal  无图标
+  AFTER   color rgb(127,182,173)  bg rgba(127,182,173,0.12) radius 7px  font 12px  align flex-start
+          图标 13px / aria-hidden=true / 形状 = circle + M12 16v-4 + M12 8h.01（lucide `Info`）
+毡案读数：
+  BEFORE  color rgb(65,76,86)  bg oklab(0.8672 …/0.7)  radius 6px  font 11px
+  AFTER   color rgb(63,128,120) bg rgba(63,128,120,0.12) radius 7px  font 12px
+逐位差：圆角 6→7px、字号 11→12px（与 6.2-16 那条"散条一律升 text-xs"同一档）、
+底材由中性半透底换成语气 wash、文字色换成语气色、多出一只按语气分派的装饰图标（不进无障碍树）。
+
+────────────────────────────────────────
+五、活体撞到的一条事实（另立 6.2-18，不在本片自决）
+────────────────────────────────────────
+`useBridgeAction` 的 `notice` 三种来源共用一个字符串（useBridgeAction.ts:53-61）：
+成功（`action.ok` / `describe(receipt)`）、失败（`action.failed`，含真实错误原因）、桥接不可用（`action.noBridge`）。
+于是"并入 celadon"之后，**一句失败原因会画在信息档上**——第三节那条活体读数就是这种情况
+（文本里明写"失败：…"，颜色是 celadon）。
+这不是样式改动，是"语气该不该跟着 reply 走"的语义裁定（跟走 = `notice` 要带 tone，
+`useBridgeAction` 得把 ok/failed 一并交出去，牵动 12 处调用点与语言包），按 §0 不自决，登记 6.2-18 `[ ]`。
+本片按裁定字面执行：形状归一、语气按裁定走，不改 notice 的语义。
+
+同一轮普查还顺出 `notice` 的另外三种画法（都在 6.2-17 射程外，一并进 6.2-18 的口径）：
+  行内紧凑档 `bg-ink-950/70 px-2 py-1 text-[10px]` 8 处（AgentPolicyPanel 97、PdfEditPanel 661/700、
+    ResumeEditor 359、SchedulePanel 410、SedimentCard 239、SessionPanel 369、WorkflowPlans 333）
+  贴边底栏条（border-t/b + px-4 py-2）11 处（ChatPanel 402、ChatSessionBar 217、TakeoverBanner 95 等）
+  裸文本提示行（无容器，只给字号色阶）6 处（GapPanel 394、GeneratePanel 459、ScriptPanel 465 等）
+它们要不要也收进原件，取决于"提示条"的判据是看**内容**（都是 notice 那一句）还是看**形状**
+（独立成块才算）——本片按形状判据走（与 6.2-16 同一判据），并把这条分叉留给 6.2-18。
+
+────────────────────────────────────────
+六、门禁与末态
+────────────────────────────────────────
+pnpm typecheck    → TYPECHECK_EXIT=0
+pnpm lint         → LINT_EXIT=0
+pnpm format       → FORMAT_EXIT=0（写完文档再跑一次 format:check）
+pnpm test         → TEST_EXIT=0（去色码后 `grep -c failed` = 0，逐包全 passed）
+成图 md5：172025c2… / 7bbe6600… / 810e17d7… / f183ec8a…（各 1，无重复）
+零写入：只打了一次只读的 `page.snapshot`（失败原因留在界面上，正是证据）；未开任何真实平台会话；
+  探针容器收尾移除（`probeGone=true`）；主题回到墨案（`theme=dark`）。
+末态开发实例：墨案、zh-CN、视图 `trust`，信任屏上留着探针触发的那条 celadon 提示行
+  （`notice` 是组件状态，切视图不卸载，重启即清；装机版未动）。
+工具面一条新实测：`pnpm harness reload` **不是子命令**（exit 1），要让 HMR 生效直接跑 eval 即可。
