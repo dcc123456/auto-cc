@@ -17,7 +17,7 @@ import type { PlatformAdapter } from '@auto-cc/plugin-browser';
 import { PlatformRegistryService } from '@auto-cc/plugin-browser';
 import type { JobDetail, JobSummary, KnowledgePack } from '@auto-cc/plugin-browser';
 import { afterAll, describe, expect, it } from 'vitest';
-import { createBossAdapter, resolveDetailUrl } from './adapter.js';
+import { createBossAdapter, resolveDetailUrl, type BossActionHand, type BossPageHand } from './adapter.js';
 import { BossPlatformService, loadBossKnowledgePack } from './index.js';
 import {
   cardRow,
@@ -705,3 +705,83 @@ describe('城市码换算进搜索地址（spec 8.3-05）', () => {
 function asErr(error: unknown): AppError {
   return error as AppError;
 }
+
+describe('抽取之前先等容器长出来（spec 8.3-01）', () => {
+  /**
+   * 把两只假手包一层调用流水，为的是断言**先后**这一半契约（等排在抽之前才有意义）。
+   * @param script 页面读数脚本
+   * @param actScript 动作脚本（等待结局等）
+   * @returns 适配器、两只假手与调用流水
+   */
+  function withCallLog(
+    script: PageScript,
+    actScript: ActScript = {},
+  ): { adapter: PlatformAdapter; act: FakeAct; calls: string[] } {
+    const calls: string[] = [];
+    const page = createFakePage(script);
+    const act = createFakeAct(actScript);
+    const loggedPage: BossPageHand = {
+      navigate: (url) => {
+        calls.push('navigate');
+        return page.navigate(url);
+      },
+      extract: (request) => {
+        calls.push('extract');
+        return page.extract(request);
+      },
+    };
+    const loggedAct: BossActionHand = {
+      type: (spec, text) => {
+        calls.push('type');
+        return act.type(spec, text);
+      },
+      click: (spec) => {
+        calls.push('click');
+        return act.click(spec);
+      },
+      waitFor: (predicate) => {
+        calls.push(`wait:${predicate.kind}`);
+        return act.waitFor(predicate);
+      },
+      upload: (spec, filePath) => {
+        calls.push('upload');
+        return act.upload(spec, filePath);
+      },
+    };
+    return { adapter: createBossAdapter(pack, loggedPage, loggedAct), act, calls };
+  }
+
+  it('读列表：导航 → 等 appear → 抽取，等的是知识包那条容器声明', async () => {
+    // 真站点的卡片是 load 之后再发一支 XHR 才长出来的（现场把这一格抽真空过：rounds=1 / containers=0 /
+    // stoppedBy=no-new-content，而同一时刻页面里 `li.job-card-box` 实测 15 枚）。
+    const { adapter, act, calls } = withCallLog(standardScript());
+    await adapter.openSearch({ keyword: '前端' });
+    const summaries = await adapter.readListing();
+    expect(calls).toEqual(['navigate', 'wait:appear', 'extract']);
+    expect(summaries).toHaveLength(2);
+    expect(act.waitedFor).toEqual([{ kind: 'appear', spec: pack.locators.jobCard }]);
+  });
+
+  it('读详情：同样先等，等的是 detailRoot 那一条', async () => {
+    const { adapter, act, calls } = withCallLog(standardScript());
+    await adapter.search({ keyword: '前端' });
+    calls.length = 0;
+    const detail = await adapter.detail('1002');
+    expect(detail.summary.jobId).toBe('1002');
+    expect(calls).toEqual(['navigate', 'wait:appear', 'extract']);
+    // 上面那次 `search` 已经为列表起过一轮等待，这里只看最近这一次等的是谁。
+    expect(act.waitedFor).toHaveLength(2);
+    expect(act.waitedFor[1]).toEqual({ kind: 'appear', spec: pack.locators.detailRoot });
+  });
+
+  it('等不到也照样抽：等待超时不是异常，结局由抽取读数说话（不许编一个"等到了"的假象）', async () => {
+    const { adapter, calls } = withCallLog(
+      { listContainer: pack.locators.jobCard!, list: [extractOf(LIST_URL, [])], detail: [] },
+      { waitStatus: 'timeout' },
+    );
+    await adapter.openSearch({ keyword: '前端' });
+    const summaries = await adapter.readListing();
+    expect(summaries).toEqual([]);
+    expect(calls).toEqual(['navigate', 'wait:appear', 'extract']);
+  });
+});

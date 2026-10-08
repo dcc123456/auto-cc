@@ -56,8 +56,16 @@ export type BossActionHand = {
   type(spec: LocateSpec, text: string): Promise<ActReadback>;
   /** 点击定位声明指向的元素 */
   click(spec: LocateSpec): Promise<ActReadback>;
-  /** 只等不动手：超时是结局（`status:'timeout'`），不是异常 */
-  waitFor(predicate: { kind: 'textChanges'; spec: LocateSpec }): Promise<ActReadback>;
+  /**
+   * 只等不动手：超时是结局（`status:'timeout'`），不是异常。
+   *
+   * `appear` 那一支是 P8 8.3 抽真空现场逼出来的：`browser.page.navigate` 在 `load` 事件就返回，
+   * 而真 BOSS 的卡片是 load 之后再发一支 XHR 才长出来的，所以抽取会拿到 `containers: 0`
+   * （读数 `8.3-01-real-search.txt` 第二节）。等的就是抽取要用的那条容器声明，
+   * 判据是候选选择器在页面上出现没有（`locator-script.ts` 的 `appear` 分支不做打分），
+   * 所以读档的低阈值与歧义罚分都不会把"已经长出来了"判成"没长出来"。
+   */
+  waitFor(predicate: { kind: 'appear' | 'textChanges'; spec: LocateSpec }): Promise<ActReadback>;
   /**
    * 把一份本地文件注入 `input[type=file]`（隐藏控件的声明必须带 `requireActionable: false`）。
    * `valueAfter` 是**那个 input 自己报上来的** `files[0].name`，不是请求路径的文件名——投递的回读判据就取它。
@@ -261,7 +269,23 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     return summaries;
   };
 
-  const readListing = async (): Promise<JobSummary[]> => toSummaries(await page.extract(requestFor('list')));
+  /**
+   * 抽一次之前先等容器长出来（P8 8.3-01）。
+   *
+   * 为什么不改成"多等一会儿"：等待上限由 `browser.act` 的配置说话（缺省 5000ms，页面上有 MutationObserver
+   * 提前结束），把 `setTimeout` 写进适配器等于第二套节奏（AGENTS.md §2.7 禁止第二份同类基础设施，
+   * 2.7-04 那条裁定过同一件事）。等不到也照样抽——抽取自己会回 `containers: 0`，
+   * 编排层据此停并在结局里写 `no-new-content`，比在这里编一个"等到了"的假象诚实。
+   * @param section 列表还是详情（等的就是那一段声明的容器定位）
+   * @returns 等待结局，调用方不据此分支（判据始终在抽取读数那一侧）
+   */
+  const waitForContainers = async (section: 'list' | 'detail'): Promise<ActReadback> =>
+    act.waitFor({ kind: 'appear', spec: locatorFor(pack.capture[section].container) });
+
+  const readListing = async (): Promise<JobSummary[]> => {
+    await waitForContainers('list');
+    return toSummaries(await page.extract(requestFor('list')));
+  };
 
   const detail = async (jobId: string): Promise<JobDetail> => {
     const summary = seen.get(jobId);
@@ -271,6 +295,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       });
     }
     await page.navigate(summary.detailUrl);
+    // 详情页同样是异步长正文（列表页已经因此抽真空过一次，见 `waitForContainers`）。
+    await waitForContainers('detail');
     const result = await page.extract(requestFor('detail'));
     // 详情页是单容器：命中多个容器（站点自己插的引导卡）时取第一个，其余不是这个岗位。
     const row = result.rows[0];

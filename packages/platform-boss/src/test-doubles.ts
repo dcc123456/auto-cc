@@ -410,8 +410,8 @@ export type FakeAct = BossActionHand & {
   waitsStarted: number;
   /** 点击发生时的等待已起次数：等于 `waitsStarted` 才说明等待起在点击之前 */
   waitsAtClick: number[];
-  /** 按顺序记录起过哪些等待谓词（用例断言等的确实是知识包那条状态行） */
-  waitedFor: { kind: 'textChanges'; spec: LocateSpec }[];
+  /** 按顺序记录起过哪些等待谓词（用例断言等的确实是知识包那条状态行 / 那条抓取容器） */
+  waitedFor: { kind: 'appear' | 'textChanges'; spec: LocateSpec }[];
 };
 
 /**
@@ -427,7 +427,7 @@ export function createFakeAct(script: ActScript = {}): FakeAct {
   const clicked: LocateSpec[] = [];
   const uploaded: { spec: LocateSpec; filePath: string }[] = [];
   const waitsAtClick: number[] = [];
-  const waitedFor: { kind: 'textChanges'; spec: LocateSpec }[] = [];
+  const waitedFor: { kind: 'appear' | 'textChanges'; spec: LocateSpec }[] = [];
   let waitsStarted = 0;
   return {
     typed,
@@ -524,7 +524,7 @@ export class StubBrowserActService extends Service {
 
   /**
    * 记一次等待并回传脚本里的结局。
-   * @param predicate 等待谓词（本用例只出现 `textChanges` 一种）
+   * @param predicate 等待谓词（外发路径用 `textChanges`，抓取路径用 `appear`，两种都只记账不动页面）
    * @returns 等待结局（`done` 或 `timeout`）
    */
   waitFor(predicate: Parameters<BossActionHand['waitFor']>[0]): Promise<ActReadback> {
