@@ -1,0 +1,51 @@
+8.0-01 真站点装载与登录前 cookie 名基线（V-人工，本机 macOS，2026-10-08）
+
+目的
+  证明「把生产装配指向真实招聘站」不需要改一行代码：`cordis.yml:143-145` 与
+  `docs/00-master-plan.md:477` 写的「届时改这一行 startUrl 即可，代码路径不变」是可兑现的，
+  而不是计划文档里的一句口头承诺。
+
+操作序列（全部经渲染层 bridge 现问，运行期配置只写内存、重启即失，AGENTS.md §9 实测 5.3-b）
+  1. `pnpm harness eval --url 5173` 读 `plugins.readConfig('sessions')` —— 现读三份平台配置
+  2. `plugins.saveConfig('sessions', { platforms })`，只把 `boss` 的 `startUrl` 从
+     `http://127.0.0.1:10233/boss` 改成 `https://www.zhipin.com/`（`fixture` / `fixture-alt` 原样保留）
+  3. `sessions.open('boss')` 挂载内核视图
+  4. `pnpm harness targets` 列可连接的页面 target
+
+读数一：改配置前的生效配置
+  {"ok":true,"value":{"id":"sessions","values":{"platforms":[
+    {"id":"fixture","startUrl":"http://127.0.0.1:10233/"},
+    {"id":"fixture-alt","startUrl":"http://127.0.0.1:10233/alt"},
+    {"id":"boss","startUrl":"http://127.0.0.1:10233/boss"}]},"mounted":true}}
+
+读数二：改配置 + 打开会话
+  {"savedOk":true,"savedState":"active","openedOk":true,"platforms":[
+    {"id":"fixture","auth":"expired","cookieCount":0},
+    {"id":"fixture-alt","auth":"expired","cookieCount":0},
+    {"id":"boss","startUrl":"https://www.zhipin.com/","auth":"expired","cookieCount":0}]}
+
+读数三：CDP target 清单（真站点确实装载了，且视图自己的 target 可按 url 子串 attach）
+  page   BOSS直聘-找工作BOSS直接谈！招聘求职找工作！  https://www.zhipin.com/shanghai/?seoRefer=index
+  page   auto-cc                                     http://127.0.0.1:5173/
+
+读数四：登录前 cookie 名基线（只记名字；cookie 值永不离开 electron 边界，AGENTS.md §8.5）
+  {"active":"boss","auth":"expired",
+   "cookieNames":["__a","__c","__g",
+     "Hm_lpvt_194df3105ad7148dcf2b98a91b5e727a",
+     "Hm_lvt_194df3105ad7148dcf2b98a91b5e727a",
+     "HMACCOUNT","HMACCOUNT_BFESS","isOHPC","lastCity"],
+   "sessionCookieName":"autocc_session",
+   "storagePath":"Partitions/boss"}
+
+四条被本条直接证实的判定
+  1. G2 / G3 是**配置事实**而非代码事实：真站装载、真站 target、真站分区落盘（`Partitions/boss`）全部就位，
+     代码路径一行未动（`browser.page.navigate` 的许可名单本来就是从 `sessions.platforms` 现读的）。
+  2. Electron 原生 UA（`auto-cc/44.4.5 Electron/44.4.5`）**未被首页拒绝**：AGENTS.md §8.3 的
+     「不伪造 UA」这条守得住。若后续深层页面（搜索/会话/上传）出现拒绝，处理方式是**报冲突**，
+     不是偷偷改 UA。
+  3. `harness targets` 能按 url 命中内嵌内核视图自己的 target：AGENTS.md §9 的 2.1-12 补片那条
+     「shot 截不到内嵌视图」只限**截图**（CDP 的 `Page.captureScreenshot` 不含 Electron 原生子视图那一层），
+     **DOM 读取不受这个限制**，所以 8.0 的取证通道不必新造任何工具。
+  4. G5 由读数四坐实：真实站上的 cookie 是 `__a/__c/__g` 这一族，而 `judgeAuth` 只认
+     `autocc_session`，于是登录态永远报 `expired` ⇒ `session/expired` ⇒ 接管循环。
+     8.2 的 `authCookieNames`/`guestCookieNames` 参数就差集取自 8.0-02 的登录后读数。

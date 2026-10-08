@@ -1,0 +1,36 @@
+8.0-02 登录前后 cookie 名差集（V-人工，本机 macOS，2026-10-08，真实账号）
+
+判定对象
+  G5 的实测坐实：真实站上的登录态信号是**一串** cookie，而 `judgeAuth`（`packages/sessions/src/probe.ts:26-33`）
+  只认配置里那**一枚** `autocc_session`——那是仿站自己 `Set-Cookie` 出来的名字，真站点上永远不会出现，
+  于是登录态恒判 `expired` ⇒ 发 `session/expired` ⇒ 接管循环。
+
+口径（三条来自 AGENTS.md 的硬约束）
+  - 只读 cookie 的**名字与过期时间**，值永不离开 electron 边界（§8.5）；`summarizeCookies` 在源头就把值丢掉。
+  - 判定路径**零出网**：不发任何站点探测请求（§8.3 决策 4）。本条差集来自 `sessions.status()`
+    里那句真实的 `partition.cookies.get({})`，不是新造的第二份事实。
+  - 登录这一步由用户本人完成：2026-10-08 的现场记录里，BOSS 网页登录挂着**网易易盾**
+    （登录页 DOM 类名 `yidun_smsbox-text--qr` / `yidun_smsbox-manual--qr`，文案「扫描二维码发送验证短信」），
+    按红线**不做任何识别与规避**；这条从此把"登录永远是人的动作"钉成了产品事实，不是实现偷懒。
+
+读数一：登录前基线（9 枚，见 `8.0-01-real-load-and-pre-login-cookies.txt`）
+  __a, __c, __g,
+  Hm_lpvt_194df3105ad7148dcf2b98a91b5e727a, Hm_lvt_194df3105ad7148dcf2b98a91b5e727a,
+  HMACCOUNT, HMACCOUNT_BFESS, isOHPC, lastCity
+
+读数二：登录后（cookieCount=18，`sessions.status()` 的 `cookieNames` 现读）
+  新增 8 枚：__l, __snaker__id, __zp_stoken__, bst, tgw_l7_route, wbg, wt2, zp_at
+  判定仍报：auth="expired"（因为 `sessionCookieName` 还是 `autocc_session`）——这就是 G5 的直接证据
+
+分档（8.2 的 `AuthSignals` 参数取值依据）
+  - `authCookieNames`（any-of，登录态标志）：**`wt2`、`bst`、`zp_at`**
+      依据：这三枚只在完成登录后出现，且都属于站点自己的会话票据族；`__zp_stoken__` **不进这一档**——
+      它是站点风控票据（名字即 stoken），把它当登录判据等于让判定跟着风控走。
+  - `authCookieNames` 次选：**`__l`**（登录后出现，但语义未从站点侧文档核实，8.2 里按"presence 计数"而非单枚判活使用）
+  - `guestCookieNames`（只有这些 ⇒ 游客态）：`__a`、`__c`、`__g`、`lastCity`、`isOHPC`、Hm_* / HMACCOUNT*（百度统计族）
+  - `authMinPresence`：≥1 命中 auth 族即视为候选 active，且必须**同时**没有"页面侧未登录文案"（见下条待定项）
+
+本条**没有**替 8.2 说谎的地方
+  上表是"presence 证据"，不是"充分判据"：登录态最终判定在 8.2 里要写成 `active|expired|unknown` 三态，
+  并且真账号的**页面侧信号**（header 是否还显示「登录/注册」）作为第二条读数留到 8.3-01 现场取——
+  取不到就把该平台标 `unknown`，不许凭 cookie 名直接谎报 active。
