@@ -8,7 +8,7 @@
  */
 import type { AppError } from '@auto-cc/core';
 import { describe, expect, it } from 'vitest';
-import { parseKnowledgePack } from './platform-contract.js';
+import { parseKnowledgePack, resolveCityParam } from './platform-contract.js';
 import { errorDetails } from './test-doubles.js';
 
 /**
@@ -691,3 +691,51 @@ function chatLocators(): Record<string, unknown> {
     chatMessageBody: pageLocator(false),
   };
 }
+
+describe('城市名 → 城市码（spec 8.3-05）', () => {
+  const table = { 上海: '101020100', 北京: '101010100' };
+
+  it('登记过的名字换成站点码', () => {
+    expect(resolveCityParam('上海', table, 'boss')).toBe('101020100');
+  });
+
+  it('纯数字原样传：表还没补全时，知道码的人不该被堵死', () => {
+    expect(resolveCityParam('101020100', table, 'boss')).toBe('101020100');
+    expect(resolveCityParam(' 101020100 ', table, 'boss')).toBe('101020100');
+  });
+
+  it('空值与全空白都回 undefined，调用方因此不带这个参数', () => {
+    expect(resolveCityParam(undefined, table, 'boss')).toBeUndefined();
+    expect(resolveCityParam('   ', table, 'boss')).toBeUndefined();
+  });
+
+  it('表为空的平台原样传值：未标定不等于标定失败（仿站那份包本来就没有城市码表）', () => {
+    expect(resolveCityParam('上海', {}, 'boss')).toBe('上海');
+  });
+
+  it('表非空却查不到这个名字 ⇒ 以 INVALID_ARGUMENT 停下，并把可填的名字交回去', () => {
+    // 这条是整张表的理由：把人话塞进 URL，站点不报错，它静默忽略参数按定位城市出结果，
+    // 于是"筛了上海"变成一句谎话。明知有表还查不到，就是明知故犯。
+    expect(() => resolveCityParam('杭州', table, 'boss')).toThrowError(/城市码表里没有/);
+    try {
+      resolveCityParam('杭州', table, 'boss');
+      expect.unreachable('上面那一句必须抛');
+    } catch (error) {
+      expect((error as AppError).code).toBe('INVALID_ARGUMENT');
+      expect(errorDetails(error).known).toEqual(['上海', '北京']);
+    }
+  });
+
+  it('search.cities 缺省是空表，城市码写成非数字在装载期就被拒', () => {
+    expect(parseKnowledgePack(minimalPack()).search.cities).toEqual({});
+    const error = errorOf(() =>
+      parseKnowledgePack(
+        minimalPack({ search: { params: { keyword: 'query', city: 'city' }, cities: { 上海: '沪' } } }),
+      ),
+    ) as AppError;
+    expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
+    // 报错要落在「哪一格」上：路径里带着 cities 与那枚键名，改包的人不必再猜。
+    expect(String(errorDetails(error).problems)).toContain('城市码');
+    expect(String(errorDetails(error).problems)).toContain('cities');
+  });
+});

@@ -21,6 +21,7 @@ import type {
 } from '@auto-cc/shared';
 import {
   outboundCandidates,
+  resolveCityParam,
   type JobDetail,
   type JobSearchCriteria,
   type JobSummary,
@@ -216,7 +217,10 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const base = new URL(pack.startUrl);
     const target = pack.search.entryPath ? new URL(pack.search.entryPath, base.origin) : base;
     target.searchParams.set(pack.search.params.keyword, criteria.keyword);
-    if (criteria.city) target.searchParams.set(pack.search.params.city, criteria.city);
+    // 城市那一栏收的是人话，站点要的是码（P8 8.3）：换算与「查不到就停下」都归 `resolveCityParam`，
+    // 这里不再原样塞值——原样塞会被站点静默忽略参数，"筛了上海"就成了谎话。
+    const cityParam = resolveCityParam(criteria.city, pack.search.cities, pack.platform);
+    if (cityParam !== undefined) target.searchParams.set(pack.search.params.city, cityParam);
     // 经验这一维不是每个站都有查询参数（真 BOSS 把它做成页面上的筛选控件，不在地址里，证据 8.0-03）：
     // 包里没登记参数名时，这一维就不进 URL，而不是编一个假的出来。
     if (criteria.experience && pack.search.params.experience) {

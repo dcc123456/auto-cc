@@ -213,7 +213,7 @@
       "newestSource": "Newest source URL {{url}}",
       "criteriaHeading": "Search criteria (keyword required, city and experience optional)",
       "keywordPlaceholder": "Keyword, e.g. \"frontend\"",
-      "cityPlaceholder": "City, e.g. \"Shanghai\" (optional)",
+      "cityPlaceholder": "City name or code, e.g. \"Shanghai\" or 101020100 (optional)",
       "experiencePlaceholder": "Experience, e.g. \"3-5 years\" (optional)",
       "limitPlaceholder": "Target count for this run",
       "captureButton": "Search and store",

@@ -681,6 +681,26 @@ describe('platform.boss 挂载即登记（spec 2.2-07）', () => {
   });
 });
 
+describe('城市码换算进搜索地址（spec 8.3-05）', () => {
+  /** 仿站包 + 一枚真站点坐实的城市码：只改这一处，好证明变的确实是地址上的那一个参数。 */
+  const withCities = { ...pack, search: { ...pack.search, cities: { 上海: '101020100' } } };
+
+  it('登记过的城市名在地址里换成站点码，而不是把人话原样塞进 URL', async () => {
+    const { adapter, page } = withScript(standardScript(), {}, withCities);
+    await adapter.search({ keyword: '前端工程师', city: '上海' });
+    expect(new URL(page.navigated[0]!).searchParams.get('city')).toBe('101020100');
+  });
+
+  it('表非空却查不到这个名字时当场停下，一次导航都不发', async () => {
+    // 把人话塞进真站点，它不报错，只是静默忽略这个参数按定位城市出结果——
+    // "筛了上海"就成了谎话，而且是最难查的那种（列表确实长出来了）。
+    const { adapter, page } = withScript(standardScript(), {}, withCities);
+    const failure = await adapter.search({ keyword: '前端工程师', city: '杭州' }).catch((error: unknown) => error);
+    expect(asErr(failure).code).toBe('INVALID_ARGUMENT');
+    expect(page.navigated).toEqual([]);
+  });
+});
+
 /** 把被拒的原因收成 `AppError`，好逐条断言码与 `details`（失败原因本身就是这条契约的一半）。 */
 function asErr(error: unknown): AppError {
   return error as AppError;

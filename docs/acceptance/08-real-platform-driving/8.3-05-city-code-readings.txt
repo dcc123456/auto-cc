@@ -1,0 +1,105 @@
+城市名 → 城市码：真站点的读数与本片落法（spec 8.3-05）
+
+取证时间：2026-10-08 16:44–17:0x（本轮），通道
+`pnpm harness eval --url www.zhipin.com --expr-file tmp/83/<脚本>.js`
+页面是**用户正在使用的** dev 实例（CDP 10222，userData `tmp/v6-userdata`）里已挂载的 BOSS 内核视图，
+`page.snapshot()` 现读 `url=https://www.zhipin.com/shanghai/?seoRefer=index`、`readyState=complete`。
+本片对该视图**只 attach 读取，不 navigate**（AGENTS.md §9 的 2.1-12 与红线原样遵守），
+唯一一次 `sessions.open('boss')` 是把视图重新挂上（上一窗它已被关掉，`activePlatform` 读到 `null`），
+落点是注册表里的 `startUrl`，不是本片自拼的地址。原始 stdout 留在 `tmp/83/probe-*.out`（不进 git，§7.5）。
+
+## 一、缺陷本身：地址里的 `city` 参数收的是码，不是城市名
+
+知识包早就写死了参数名映射（`packages/platform-boss/src/knowledge/boss.json`）：
+
+    "search": { "entryPath": "/web/geek/jobs", "params": { "keyword": "query", "city": "city" } }
+
+而抓取那条路径（`adapter.ts` 的 `searchUrl`，8.1 之前就在）把人话直接塞进去：
+`target.searchParams.set('city', criteria.city)`。后果不是报错，是**静默错**：
+站点认不出 `city=上海` 就当这个参数没写，把全国结果返回来，界面上却写着"筛了上海"。
+这是本轮做 8.3 前置检查时发现的，属于"结果看着对、其实是谎"那一类，所以先修契约再跑抓取。
+
+## 二、站点侧的码，现场读到的三条
+
+上海这一枚有**两条独立现场证据 + 一条上一窗的公开资料**，所以下面只写它：
+
+1. **站点自己的隐藏输入框**（`tmp/83/city-links.js`，读数 `probe-city-links.out`）：
+
+       { "visibility": "visible", "slugCount": 0, "slugs": [], "cityCodeInput": "101020100" }
+
+   取的是 `document.querySelector('input.city-code').value` —— `/shanghai/` 首页把当前城市码就存在这只框里。
+
+2. **同一页的热招职位链接**（`tmp/83/cities-aggregate.js`，读数 `probe-aggregate.out`）：
+   按 `/^\/c(\d{6,9})(?:[-/?]|$)/` 归组，整页只有**一个**码桶：
+
+       codes: [{ "code": "101020100", names: [ ... 697 个职位锚文本 ... ] }]
+
+   即 `/c101020100-<职位>…` 这类 href 用的城市段与第 1 条逐字相同。两条通道来自不同 DOM 位置、互相独立。
+
+3. 上一窗的一条公开资料读数（BOSS 搜索页 URL  schemes 里 `city=101020100` 对应上海）与上面两条对上；
+   **它单独不构成入库依据**（裁定②："公开资料/经验推测"明确被否），这里只作为双证之外的旁注。
+
+## 三、首页的城市切换面板拿不到城市级码（所以其余城市不能凭这里填）
+
+原本打算在首页的「城市」下拉里把整张表抄下来，两次尝试都不成立，读数如下：
+
+- 点开后再量面板（`tmp/83/open-city-picker.js`，`open-city-picker.out`）：
+  `span.switchover-city` 派发 click 后面板几何是空的——
+
+       { "height": 0, "innerTextSample": "", "childCounts": { "lis": 0, "anchors": 0, "dataCode": 0 } }
+
+  本轮同一状态又复现一次：`.dorpdown-city` 的 `getBoundingClientRect().height` 现读 **0**。
+- 面板结构扫描（`tmp/83/city-groups.js`，`probe-groups.out`）：`ul` 只长出一支 `.dorpdown-province`
+  （`display:block`），其中 `[data-code]` **0 枚**；城市/区县那两级 `ul.dropdown-list` 根本没有节点。
+- 全页扫 9 位码（`tmp/83/city-scan.js`，`probe-scan.out`）：
+
+       { "nineDigitCodes": 0, "sample": [], "beijingNodes": [], "openPanelHeight": 0 }
+
+  （上一窗按"省级锚点"口径读到过 34 枚 `data-code="10102xxxxx"` 形状的省级码，如上海省级码 101020000；
+  省级码**不能**当城市码用——第 1、2 条现场证据说明搜索要的是 101020100 那一级。那一轮的 stdout 没留下，
+  所以这一条只登记为"省级档存在、但与本片所需级别不同"，不作为任何一行的凭据。）
+
+### 顺带一条必须写下来的坑：首页的 `data-code` 不是城市码
+
+`probe-aggregate.out` 的 `attrNodes` 20 枚全是 **6 位**码：`100101 Java`、`100102 C/C++`、`100109 Python`……
+那是「职位类型」那一栏的类别码。如果不看位数就照 `data-code` 抓一份当城市表，会得到一张
+每一行都自洽、每一行都是错的表。这也是 `cityCodeSchema` 把值钉成 `/^\d{6,9}$/` 并在注释里
+写"真 BOSS 是 9 位"的原因——位数是现场读数的形状，不是随手写的正则。
+
+## 四、本片落的形状（契约 + 换算 + 装载期闸门）
+
+- 契约：`packages/browser/src/platform-contract.ts` 的 `search` 段新增 `cities`（`z.record(城市名, 城市码).default({})`，
+  值过 `cityCodeSchema`）。**缺席即"这家平台还没登记城市码表"**，是刻意允许的中间态（见下一小节）。
+- 换算：`resolveCityParam(city, cities, platform)` 四分支——
+  ① 空/纯空白 → `undefined`（这一栏根本不进 URL）；
+  ② 纯数字 → 原样透传（人直接填码也能用，界面 placeholder 已改口径）；
+  ③ 码表为空 → 原样透传（仿站包零行为变化，见第五节）；
+  ④ 有表而查不到 → **抛 `INVALID_ARGUMENT`**，`details.known` 带回表里已有的城市名。
+  第 ④ 分支是这片的目的本身：宁可当场停下并说"表里没有「杭州」"，也不发一条站点会静默忽略的 URL。
+- 调用点：`packages/platform-boss/src/adapter.ts` 的 `searchUrl`（唯一构造搜索地址的地方，没有第二处）。
+- 数据：`boss.json` 只登记现场双证的那一枚 `"上海": "101020100"`。
+- 界面：`jd.cityPlaceholder` 两份语言包同步改成"城市名或城市码，如「上海」或 101020100（可空）"（§5.5/5.6）。
+
+## 五、单测读数（都是本地 fixture，§7.2）
+
+命令与退出码按 §9 的 5.4-c 用重定向读，不接 `tail`：
+
+    pnpm -F @auto-cc/plugin-browser test      > tmp/83/browser-test.out       EXIT=0  → Test Files 16 passed (16) / Tests 282 passed (282)
+    pnpm -F @auto-cc/plugin-platform-boss test > tmp/83/boss-test.out          EXIT=0  → Test Files 6 passed (6)  / Tests 154 passed (154)
+
+新增用例：`platform-contract.test.ts` 的 `describe('城市名 → 城市码（spec 8.3-05）')` 六条
+（名→码、纯数字透传含带空格、空/空白→undefined、空表→透传、有表查不到→`INVALID_ARGUMENT` 且
+`details.known` 为 `['上海','北京']`、`search.cities` 缺省 `{}` 且非数字码在装载当场被拒）；
+`adapter.test.ts` 的 `describe('城市码换算进搜索地址（spec 8.3-05）')` 两条
+（真 URL 里出现 `city=101020100`；查不到时 `INVALID_ARGUMENT` 且 `page.navigated` 仍是空数组——即"没发出去"）。
+
+反向验证（§6.5 / 8.3-04 同源）：仿站包不带 `cities` ⇒ 走第 ③ 分支原样透传，
+2.3/2.5/2.6 那批断言 `city=上海` 出现在 URL 里的既有用例**一字未改**仍全绿（154 例内含）。
+
+## 六、还缺的那半张表，只能在搜索页现读
+
+整张城市级码表（其余城市）必须去**搜索页的城市筛选器**上读，而搜索页在 8.3-01 那一格——
+它前置需要「自动化风险确认」签字（`consentStatus('boss')` 本轮现读仍是 `granted:false`，
+`acknowledgedAt:null`，由用户自己在信任屏上点确认卡片，这是裁定的边界，不绕）。
+所以本片的交付是**机制 + 一枚双证数据**，不是整表；表里的下一枚只能在签字到货后随 8.3-01 一起录，
+届时读数追加进本文件（新取证轮次另起小节，历史读数不重写）。

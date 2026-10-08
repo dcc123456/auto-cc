@@ -418,6 +418,7 @@ export {
   knowledgePackSchema,
   parseKnowledgePack,
   outboundCandidates,
+  resolveCityParam,
   type JobDetail,
   type JobSearchCriteria,
   type JobSummary,

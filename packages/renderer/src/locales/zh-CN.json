@@ -213,7 +213,7 @@
       "newestSource": "最新一条来源 {{url}}",
       "criteriaHeading": "搜索条件（关键词必填，城市与经验可空）",
       "keywordPlaceholder": "关键词，如「前端」",
-      "cityPlaceholder": "城市，如「上海」（可空）",
+      "cityPlaceholder": "城市名或城市码，如「上海」或 101020100（可空）",
       "experiencePlaceholder": "经验要求，如「3-5 年」（可空）",
       "limitPlaceholder": "本次目标条数",
       "captureButton": "搜索并入库",

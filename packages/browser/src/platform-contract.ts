@@ -117,6 +117,21 @@ const searchParamsSchema = z.strictObject({
   experience: z.string().min(1).optional(),
 });
 
+/**
+ * 城市名 → 站点城市码（P8 8.3）。
+ *
+ * 为什么需要这张表：界面上那一栏收的是人话（占位符写着「城市，如『上海』」），
+ * 而真 BOSS 的 `city` 参数要的是**城市码**（`101020100`，证据 8.0-03 第一节：那一枚是页面自己
+ * 写在 `input[type=hidden].city-code` 里的）。原样把人话塞进 URL，站点不会报错，它会**忽略这个参数**
+ * 并按定位城市出结果——于是"筛了上海"是一句谎话，而这正是本项目最贵的一类缺陷（看起来通了）。
+ *
+ * 键的写法刻意用 `z.record(z.string(), cityCodeSchema)` 而不是枚举城市名：城市名是站点知识，
+ * 每登记一家平台就多一份，硬码进类型等于把知识搬回代码里（AGENTS.md §2.7 的反面）。
+ * 值的形状按实测的码位收窄（6～9 位数字），填不进猜得出来的东西。
+ */
+const cityCodeSchema = z.string().regex(/^\d{6,9}$/, '城市码是站点侧的数字码（真 BOSS 是 9 位，如 101020100）');
+const searchCitiesSchema = z.record(z.string().min(1), cityCodeSchema);
+
 /** 站点知识包：平台自己声明的「页面长什么样、动作怎么打、节奏怎么控」。 */
 export const knowledgePackSchema = z.strictObject({
   platform: z.string().regex(/^[a-z][a-z0-9-]*$/, '平台标识要用小写字母开头的短名'),
@@ -156,6 +171,8 @@ export const knowledgePackSchema = z.strictObject({
      */
     entryPath: z.string().min(1).optional(),
     params: searchParamsSchema,
+    /** 城市名 → 城市码；**缺席即「这家平台还没登记城市码表」**，此时 `resolveCityParam` 原样传值（见该函数）。 */
+    cities: searchCitiesSchema.default({}),
   }),
   /**
    * 打招呼与对话的页面声明（2.5-d）。缺段即「这个平台还没有会话页知识」，
@@ -283,6 +300,45 @@ export type LocateDeclaration = z.output<typeof locateSpecSchema>;
  */
 export function outboundCandidates(spec: LocateDeclaration): LocateDeclaration['candidates'] {
   return spec.candidates.filter((candidate) => candidate.unverified !== true);
+}
+
+/**
+ * 把人话城市名换成站点城市码（P8 8.3）。
+ *
+ * 四条分支，每条都对应一种"不能含糊"的情形：
+ * 1. 空值 ⇒ `undefined`，调用方不带这个参数（缺省城市是合法搜索，不是错误）；
+ * 2. 纯数字 ⇒ 原样传——**已经是码**，再查一遍表只会把「我知道码但表里还没有」这条路堵死
+ *    （8.3 这一窗只有上海一枚是双证坐实的，其余城市要在搜索页的筛选器上现读现补，那之前人得能用）；
+ * 3. 表里查得到 ⇒ 交出差额里那一枚码；
+ * 4. 表**空** ⇒ 原样传。这条是刻意的：未标定不等于标定失败，仿站那份包本来就没有城市码表，
+ *    而它要保住 2.3 那批已验收行为一字不变（§7.2 的自动化面）。
+ *    真正的兜底在下一格：表**非空**却查不到，说明这家平台已经登记过城市口径，
+ *    此时把人话塞进 URL 就是明知故犯——站点会静默忽略参数、按定位城市出结果，
+ *    "筛了上海"变成一句谎话。所以它必须以结构化失败停下，而不是继续发这一发。
+ * @param city 界面上那一栏的原文（可空）
+ * @param cities 该平台的 `search.cities` 表（缺席即空表）
+ * @param platform 平台标识，只用于报错文案与 `details`
+ * @returns 要写进 URL 的城市参数值；`undefined` 表示不带这个参数
+ * @throws `INVALID_ARGUMENT`（表非空但查不到这个名字，`details.known` 给出可填的名字清单）
+ */
+export function resolveCityParam(
+  city: string | undefined,
+  cities: KnowledgePack['search']['cities'],
+  platform: string,
+): string | undefined {
+  const trimmed = city?.trim() ?? '';
+  if (trimmed === '') return undefined;
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  const knownNames = Object.keys(cities);
+  if (knownNames.length === 0) return trimmed;
+  const code = cities[trimmed];
+  if (code === undefined) {
+    throw new AppError('INVALID_ARGUMENT', `平台 ${platform} 的城市码表里没有「${trimmed}」`, 'browser', {
+      city: trimmed,
+      known: knownNames.sort(),
+    });
+  }
+  return code;
 }
 
 /**

@@ -331,6 +331,9 @@
     "params": {
       "keyword": "query",
       "city": "city"
+    },
+    "cities": {
+      "上海": "101020100"
     }
   },
   "chat": {
