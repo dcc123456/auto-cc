@@ -29,6 +29,7 @@ import type {
   SavedWorkflowPlanView,
   SelectedWorkflowPlanView,
   SedimentPreviewView,
+  SessionAuthStatus,
   SessionExpiredEvent,
   WorkflowGraphLoadView,
   WorkflowGraphSaveInput,
@@ -497,10 +498,12 @@ export type SessionPlatformView = {
   /** 分区在磁盘上的实际目录；in-memory 会话为 null，用于证明「落盘了」。 */
   storagePath: string | null;
   cookieNames: string[];
-  /** 判定登录态所依据的 cookie 名。 */
-  sessionCookieName: string;
-  auth: 'active' | 'expired';
-  /** 该 cookie 的过期时间戳（毫秒）；会话型 cookie 与缺席时为 null。 */
+  /**
+   * 登录判定（8.2-01）：`unknown` 是「证据不够，我不说话」，它不等于 `expired`——
+   * 后者会推 `session/expired` 走重新登录，前者只让一切 `=== 'active'` 的判据停住。
+   */
+  auth: SessionAuthStatus;
+  /** 登录族的绑定约束时间戳（毫秒）；会话型 cookie、`unknown` 与缺席时为 null。 */
   expiresAt: number | null;
 };
 

@@ -123,7 +123,8 @@
       "reasonUrlEmpty": "先填地址，导航才知道去哪儿",
       "auth": {
         "active": "已登录",
-        "expired": "未登录"
+        "expired": "未登录",
+        "unknown": "判不准"
       },
       "persistent": "持久分区",
       "inMemory": "内存分区",
@@ -137,6 +138,7 @@
       "storagePath": "落盘路径 {{path}}",
       "cookieNames": "cookie 名 {{names}}",
       "expiresAt": "过期时间 {{time}}",
+      "unknownHint": "没有可判的登录信号（该平台未标定，或站点已改版）：既不当作已登录，也不催你重新登录",
       "noExpiry": "无期限",
       "close": "关闭内核视图",
       "actionClose": "已收回内核视图（分区与登录态保留）",

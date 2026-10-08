@@ -32,10 +32,22 @@ export interface PluginErrorView {
 }
 
 /**
+ * 一个平台登录态的三态（spec 8.2-01）。
+ *
+ * `unknown` 是这一片新增的诚实态：未标定的平台、或分区里的 cookie 与两套信号族都不沾时，
+ * 程序既不谎报「已登录」（一切判据都写 `=== 'active'`，于是不授权任何动作），
+ * 也不谎报「已失效」（那会推 `session/expired` 把人推进重新登录的接管循环）。
+ * 归属地选 `core` 是因为判定侧（`sessions`）与快照侧（`shared` 的 `SessionPlatformView`）都要用它，
+ * 三个字的枚举写两遍就会漂移（AGENTS.md §2.5）。
+ */
+export type SessionAuthStatus = 'active' | 'expired' | 'unknown';
+
+/**
  * 会话登录态失效事件（spec 1.8-06）。
  *
  * 只带平台名与判定原因：这条载荷会被推到渲染层、也可能被 harness 原样写进证据文件，
  * 一旦带上 cookie 值就等于把登录凭证抄进截图（AGENTS.md §8.5）。
+ * **`unknown` 不发这一条**：判不准的处置是"停下来问人"，不是"重登"。
  */
 export interface SessionExpiredEvent {
   platform: string;

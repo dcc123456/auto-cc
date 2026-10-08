@@ -34,6 +34,9 @@ const EXPIRED_LIMIT = 3;
 const AUTH_TONE: Record<SessionPlatformView['auth'], BannerTone> = {
   active: 'jade',
   expired: 'amber',
+  // 判不准不是"得人来办"（那一档是琥珀），也不是好消息；青玉/琥珀都不许借用，
+  // 否则界面上就把"程序没有证据说话"读成了"要么登录着、要么等人重登"（spec 8.2-01）。
+  unknown: 'celadon',
 };
 
 /**
@@ -277,9 +280,12 @@ export function SessionPanel() {
               <p className="mt-1 break-all text-[11px] text-slate-500">
                 {t('session.cookieNames', { names: platform.cookieNames.join(', ') || t('session.none') })}
                 {' · '}
-                {t('session.expiresAt', {
-                  time: formatClock(platform.expiresAt, t('session.noExpiry')),
-                })}
+                {/* `unknown` 没有期限可报：写成「无期限」会把"证据不够"谎报成"永远有效"（spec 8.2-01）。 */}
+                {platform.auth === 'unknown'
+                  ? t('session.unknownHint')
+                  : t('session.expiresAt', {
+                      time: formatClock(platform.expiresAt, t('session.noExpiry')),
+                    })}
               </p>
             </li>
           ))}

@@ -45,7 +45,7 @@ import {
   readConsentAt,
   writeConsent,
 } from './consent-store.js';
-import { judgeAuth, summarizeCookies, type AuthVerdict } from './probe.js';
+import { judgeAuth, sessionExpiredReason, summarizeCookies, type AuthVerdict } from './probe.js';
 
 /**
  * 本包对 `shell` 的全部诉求：把视图挂到某分区、读回窗口侧的分区名。
@@ -55,11 +55,24 @@ import { judgeAuth, summarizeCookies, type AuthVerdict } from './probe.js';
  */
 type KernelHost = Pick<ShellService, 'mountKernelSite' | 'unmountKernelSite' | 'getStatus'>;
 
-/** 一个平台的会话配置：P1 只有本地 fixture，P2 起在此加 boss / liepin。 */
+/**
+ * 一个平台的会话配置。
+ *
+ * 登录判定用的是**信号族**（8.2-01）：真实站点上登录态是一族 cookie，而仿站只发一枚，
+ * 单枚 cookie 名在真站恒判失效（`docs/acceptance/08-real-platform-driving/8.0-02-cookie-name-diff.txt`）。
+ * 三个键都带 `.default()`，为的是让"未标定"成为可直接省略的写法——省略即 `authCookieNames: []`，
+ * 判定得到 `unknown`：既不授权动作，也不谎报失效。族名单放在配置而不是代码里，是因为这份知识属于站点、
+ * 会随改版失效；写死就等于把"某天起真站恒判 unknown"藏进一次发版。
+ */
 const platformSchema = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9-]*$/, '平台标识要用小写字母开头的短名，它会直接成为分区名'),
   startUrl: z.url(),
-  sessionCookieName: z.string().min(1),
+  /** 登录票据族（any-of）；空数组 = 该平台未标定 ⇒ 判定只能是 `unknown`。 */
+  authCookieNames: z.array(z.string().min(1)).default([]),
+  /** 游客族：只有这些在场判 `expired`（游客态）。 */
+  guestCookieNames: z.array(z.string().min(1)).default([]),
+  /** 判活所需的登录族在场枚数；大于族名单长度时该平台永远判 `unknown`（保守，不是缺陷）。 */
+  authMinPresence: z.number().int().min(1).default(1),
 });
 
 export const sessionsSchema = z.strictObject({
@@ -234,19 +247,23 @@ export class SessionsService extends Service implements ConsentGate {
 
   /**
    * 只读 cookie 判登录态；判定为失效时顺带推 `session/expired`（spec 1.8-06）。
+   *
+   * `unknown` 这一态**刻意不推**（spec 8.2-01）：它说的是"我没有足够证据"，而这条事件的语义是
+   * "会话结束了，去重登"。真站上未标定/改版时推它，得到的就是 8.0-01 记下的那条假失效→接管循环。
    * @param platform 平台标识
    * @returns 该平台的会话读数
    */
   probe = async (platform: string): Promise<SessionPlatformView> => {
     const config = this.platformOrThrow(platform);
     const reading = await this.read(config);
-    if (reading.view.auth === 'expired' && reading.verdict.reason) {
-      this.ctx.emit('session/expired', {
-        platform: config.id,
-        reason: reading.verdict.reason,
-        at: Date.now(),
-      });
-      this.ctx.logger.warn(`会话失效：平台 ${config.id} 的原因 ${reading.verdict.reason}`);
+    if (reading.view.auth === 'expired') {
+      const reason = sessionExpiredReason(reading.verdict);
+      this.ctx.emit('session/expired', { platform: config.id, reason, at: Date.now() });
+      // 细分依据只进日志：事件的 reason 是界面与接管认得的两个码，而"到底是游客态还是全过期"
+      // 是排查标定名单是否该跟着站点改版时唯一有用的数。
+      this.ctx.logger.warn(
+        `会话失效：平台 ${config.id} · 事件原因 ${reason} · 判定依据 ${reading.verdict.reasons.join('、')}`,
+      );
     }
     return reading.view;
   };
@@ -327,7 +344,15 @@ export class SessionsService extends Service implements ConsentGate {
     const partition = partitionFor(config.id);
     const platformSession = session.fromPartition(partition);
     const cookies = summarizeCookies(await platformSession.cookies.get({}));
-    const verdict = judgeAuth(cookies, config.sessionCookieName, Date.now());
+    const verdict = judgeAuth(
+      cookies,
+      {
+        authCookieNames: config.authCookieNames,
+        guestCookieNames: config.guestCookieNames,
+        authMinPresence: config.authMinPresence,
+      },
+      Date.now(),
+    );
     return {
       verdict,
       view: {
@@ -337,7 +362,6 @@ export class SessionsService extends Service implements ConsentGate {
         isPersistent: platformSession.isPersistent(),
         storagePath: platformSession.getStoragePath() ?? null,
         cookieNames: cookies.map((cookie) => cookie.name),
-        sessionCookieName: config.sessionCookieName,
         auth: verdict.auth,
         expiresAt: verdict.expiresAt,
       },

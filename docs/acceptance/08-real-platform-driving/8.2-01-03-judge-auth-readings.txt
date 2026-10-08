@@ -1,0 +1,67 @@
+8.2-01 / 8.2-03 登录态多信号判定与 schema 扩展读数（U，本机 macOS，2026-10-08）
+
+判定对象
+  G5：`judgeAuth` 旧口径只认配置里那**一枚** `sessionCookieName`（值 `autocc_session`，仿站自己
+  `Set-Cookie` 出来的名字）。真实 BOSS 上它永远不出现 ⇒ 真账号恒判 `expired` ⇒ 推 `session/expired`
+  ⇒ 界面长出重新登录的接管循环。8.0-02 的差集证明真实登录态是**一串** cookie，不是单枚。
+  本片把它换成「信号族 + 三态」，参数取值全部来自 8.0-02 的现场读数，不含任何推测。
+
+落点（三处，没有新建第四处）
+  - `packages/sessions/src/probe.ts:25-30` `AuthSignals = { authCookieNames, guestCookieNames, authMinPresence }`
+  - `packages/sessions/src/probe.ts:80-110` `judgeAuth()`：三态判定本体
+  - `packages/sessions/src/probe.ts:121-123` `sessionExpiredReason()`：判定细分码 → 事件码（只有两个码）的收口
+  - `packages/core/src/events.ts` `SessionAuthStatus`（三态的唯一定义处，`probe.ts` 与 `bridge.ts` 都 type-only import 它，§2.5）
+  - `packages/sessions/src/index.ts:67-76` `platformSchema` 三键全部 `.default()`；`sessionCookieName` 退役
+
+判定顺序（读代码前先记住这条，它决定每条用例为什么落在那一格）
+  1. `authCookieNames` 为空 ⇒ `unknown / not_calibrated`（未标定不许谎报任何一种结论，包括"没登录"）
+  2. 登录族在场枚数（**按名字去重**）≥ `authMinPresence` ⇒ `active / auth_present`
+  3. 登录族在场但名字数不足 ⇒ `unknown / below_presence`（见过票据，不敢判活，也不敢说没登录）
+  4. 登录族全在但都过期 ⇒ `expired / expired`，`expiresAt` 取最晚那枚（人看得懂"什么时候没的"）
+  5. 分区里一条 cookie 都没有 ⇒ `expired / missing`
+  6. 只见游客族 ⇒ `expired / guest_only`
+  7. 有 cookie 但两族都不沾 ⇒ `unknown / unmapped`（站点改版的最常见形态）
+  去重那条是实测出来的必需项：同一枚票据可以同时挂在 `.zhipin.com` 与 `www.zhipin.com`，
+  直接数行数会让 `authMinPresence: 2` 被一个名字凑满，保守判据形同虚设（`probe.ts:86-88`）。
+
+读数一：表驱动矩阵（`pnpm -F @auto-cc/plugin-sessions test`，EXIT=0）
+  ✓ src/probe.test.ts (21 tests) 8ms
+  ✓ src/consent-store.test.ts (7 tests) 54ms
+  Test Files  2 passed (2)
+       Tests  28 passed (28)
+  矩阵里 14 行判定用例，其中四条是本片的承重墙：
+  - 真站登录前 9 枚（`__a/__c/__g/Hm_*/HMACCOUNT*/isOHPC/lastCity`）⇒ `expired / guest_only`
+    ——这是旧口径唯一能对真站说对的一次，靠的是游客族登记齐全，不是运气。
+  - 真站登录后 18 枚（新增 `__l/__snaker__id/__zp_stoken__/bst/tgw_l7_route/wbg/wt2/zp_at`）⇒ `active / auth_present`
+    ——G5 的正面判据，取值与 8.0-02 逐字一致。
+  - 未标定 + 同样那 18 枚 ⇒ `unknown / not_calibrated`——同一个输入，没标定就不给结论。
+  - 只有 `__zp_stoken__` 那一族（风控票据）⇒ 绝不进登录族，`unmapped / unknown`
+    ——把风控票据当登录判据等于让登录态跟着风控走（8.0-02 的裁定，此处钉成用例）。
+  另有一条反向验证（§6.5）：循环断言矩阵里**每一行非 active 的输入**都拿不到 `active`，
+  即"不许谎报已登录"是机器判据，不是注释里的期望。
+
+读数二：8.2-03 的 schema 侧（`pnpm typecheck` EXIT=0，`pnpm test` 全仓 EXIT=0）
+  三键都带 `.default()` ⇒ **调用点**（`cordis.yml` 之外构造 `SessionsConfig` 的地方）不写也能过类型；
+  但 `sessionCookieName` 是从 `z.strictObject` 里**删掉**的，而 strictObject 拒绝未知键 ⇒
+  `cordis.yml` 里那一行不改就会在挂载期直接失败。所以本条判据要收窄成两半：
+  - 「既有调用点不改也能挂」：成立（typecheck + 全部既有用例零改动通过）。
+  - 「`cordis.yml` 不改也能挂」：**不成立，且是刻意的**——退役一个键的代价就是让所有还在写它的
+    配置当场失败，而不是静默吃掉一个没人读的键。三平台的 `cordis.yml` 随本片同步改写，
+    真实标定见 `boss` 那一段（`authCookieNames: [wt2, bst, zp_at, __l]` + `authMinPresence: 2`）。
+  spec 8.2-03 的原文按这条收窄，不留"看起来过了"的模糊项。
+
+`authMinPresence: 2` 为什么取 2 而不是 8.0-02 里写的"≥1 即候选"
+  8.0-02 的原话是「≥1 命中 auth 族即视为候选 active，且必须**同时**没有页面侧未登录文案」。
+  页面侧那条读数要到 8.3-01 才取得到（现场看 header 是否还显示「登录/注册」）。
+  在它到货之前，把 1 枚写进配置就等于让"候选"直接冒充"结论"，所以取 2：
+  `wt2/bst/zp_at` 三枚都是站点自己的会话票据族，同时在场才是登录；`__l` 语义未核实，
+  只作为第四名分母进族（单独在场时凑不满 2，落 `below_presence / unknown`）。
+  8.3-01 的页面侧信号落地后，这一格应当复核并可以放松——这条是待办，不是终态。
+
+本条**没有**替后面说谎的地方
+  - 界面文案：三态标签是「已登录 / 未登录 / 判不准」，`unknown` 那一行不显示"过期时间"而显示
+    一句说明（写「无期限」会把"证据不够"谎报成"永远有效"）。措辞与 spec 原行的"未标定"不同，
+    以 8.2-02 的截图为准。
+  - `unknown` 的下游只有一处判据：所有消费方都写 `=== 'active'`（`App.tsx:118`、`deskStatus.ts:55-59`），
+    所以它天然拦下动作，不需要新增分支；它也**不发** `session/expired`（`index.ts` 的 `probe()` 里
+    判据是 `=== 'expired'`），因此不会长出假的重新登录卡片。

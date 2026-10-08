@@ -149,19 +149,39 @@ plugins:
   # 代码路径不变"的兑现。**这一行只是首屏地址**，不再是导航许可的来源：可导航的源集合出自平台知识包
   # 的 `origins`，真源还要求该平台有一份 `automation:<platform>` 签字（`navigate-policy.ts`，spec 8.1-05）。
   # 于是「装好就能开真站」与「没确认过风险就一步都不发」同时成立。
+  #
+  # 登录判定从"单枚 cookie 名"换成**信号族**（spec 8.2-01，取值凭据是
+  # `docs/acceptance/08-real-platform-driving/8.0-02-cookie-name-diff.txt` 的登录前后差集）：
+  # 仿站只发一枚 `autocc_session`，真站的登录态是 `wt2/bst/zp_at` 这一族，只认一枚在真站恒判失效，
+  # 于是界面上看到的是"永远要重新登录"的接管循环（8.0-01 读数四）。三个键都可省略，
+  # 省略即未标定 ⇒ 判定得到 `unknown`：既不授权动作，也不谎报失效（猎聘 8.9 到货前就是这一态）。
+  # `authMinPresence: 2` 是刻意保守的：`__l` 的语义没从站点侧核实过（读数里明写"次选、按在场计数用"），
+  # 单枚在场只算候选；页面侧那条读数（header 是否还显示「登录/注册」）留到 8.3-01 现场取，取到才谈放松。
+  # `__zp_stoken__` **不进登录族**：它是站点的风控票据，把它当登录判据等于让判定跟着风控走。
   - id: sessions
     dependsOn: [shell]
     config:
       platforms:
         - id: fixture
           startUrl: http://127.0.0.1:10233/
-          sessionCookieName: autocc_session
+          authCookieNames: [autocc_session]
         - id: fixture-alt
           startUrl: http://127.0.0.1:10233/alt
-          sessionCookieName: autocc_session
+          authCookieNames: [autocc_session]
         - id: boss
           startUrl: https://www.zhipin.com/
-          sessionCookieName: autocc_session
+          authCookieNames: [wt2, bst, zp_at, __l]
+          authMinPresence: 2
+          guestCookieNames:
+            - __a
+            - __c
+            - __g
+            - lastCity
+            - isOHPC
+            - HMACCOUNT
+            - HMACCOUNT_BFESS
+            - Hm_lvt_194df3105ad7148dcf2b98a91b5e727a
+            - Hm_lpvt_194df3105ad7148dcf2b98a91b5e727a
 
   # 页面操作入口（spec 2.1）：导航与快照，2.2 起在同一条注入通道上加点击/输入/定位。
   # 排在 sessions 之后：它不拥有分区，只在「会话已经打开」的那块视图上做事（未打开时结构化失败）。

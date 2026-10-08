@@ -1,0 +1,71 @@
+8.2-02 / 8.2-04 活体读数：三态同屏与判定路径零出网（V+C，本机 macOS，2026-10-08，真实账号在场）
+
+取证载体：用户**正在使用的** dev 实例（CDP 10222，userData = `tmp/v6-userdata`，渲染层 `--url 5173`）。
+没有起第二个实例、没有杀这个实例、没有改磁盘上的任何文件——三态那一格是用**运行期内存配置**
+（`plugins.saveConfig('sessions', …)`，重启即失）临时造出来的，测完当场复原并复核。
+脚本与原始输出都在工作区外的 `tmp/82/`（§7.5：探针产物不入库）。
+
+一、G5 在真账号上关闭（`tmp/82/status.out`、`tmp/82/patch-unknown.out`）
+  `sessions.status()` 现读，boss 那一行：
+    auth        = "active"
+    expiresAt   = 1792263599856（= 2026-10-18 02:59:59，界面按本地时区显示同一时刻）
+    cookieNames = __a, __snaker__id, __zp_stoken__, ab_guid, bst,
+                  Hm_lvt_194df3105ad7148dcf2b98a91b5e727a, HMACCOUNT_BFESS, isOHPC, lastCity, wbg, wt2, zp_at
+  判定走的是 `wt2 / bst / zp_at` 三枚里达标的那两枚（`authMinPresence: 2`）。
+  旧口径在这里报的是 `expired`，并且会跟着推一条 `session/expired`。
+  界面侧（`8.2-02-unknown-state.png`，md5 `71bb44b4bb3dd263a202d16fe57800b0`，同批唯一）：
+    boss 行标签 = 「已登录」，`border-jade/40 bg-jade-wash text-jade`，计算色 `rgb(79, 183, 138)`
+  同屏三行三种语气，正是本片要的形态：
+    fixture      「未登录」 amber  `rgb(224, 163, 63)`   （0 枚 cookie ⇒ `missing`）
+    fixture-alt  「判不准」 celadon `rgb(127, 182, 173)`   （未标定 ⇒ `not_calibrated`）
+    boss         「已登录」 jade   `rgb(79, 183, 138)`    （真账号 ⇒ `auth_present`）
+  底栏同步：登录态 已登录 1 / 共 3。
+  `unknown` 那一行的第二段落读回的是
+    「cookie 名 无 · 没有可判的登录信号（该平台未标定，或站点已改版）：既不当作已登录，也不催你重新登录」
+  ——不是"过期时间 无期限"。这一条是刻意做的：写"无期限"会把"证据不够"谎报成"永远有效"。
+
+二、三态在活体上真的能来回翻（`tmp/82/patch-unknown.out` → `tmp/82/restore-unknown.out`）
+  打桩：把 `fixture-alt` 的 `authCookieNames` 在运行期改成 `[]`（`patchOk: true`）→ 点该行**行内**的
+  「探测登录态」→ 服务侧 `status()` 报 `fixture-alt / unknown`，界面标签同步变「判不准」。
+  复原：把 `saveConfig` 前从 `plugins.readConfig('sessions')` 里读到的原始 `platforms` 整包写回
+  （`restoreOk: true`）→ 再点一次同一颗 → `status()` 回到 `fixture-alt / expired`，界面回到「未登录」，
+  boss 全程 `active` 未受影响。
+  两条顺手钉住的实测（写下来免得下个窗口重撞）：
+  - `plugins.readConfig` 的返回是 `{ok, value}` 信封，`value` 是 `PluginConfigView`，配置在
+    **`value.values`** 上（不是 `value.config`）；按后者取回 `undefined`，报错长得像"页面缺陷"。
+  - 会话屏上有**两只**「重新读取会话状态」（信任屏的那只与另一个未激活视图里的那只），
+    `document.querySelector('[data-action="refresh"]')` 会命中隐藏那份（§9 的 5.4-b ⑦ 同一形态）。
+    行级刷新要用行作用域的 `[data-session-id="<id>"] [data-action="probe"]`。
+  另记：`document.getAnimations().length` 打桩时读回 0、收尾 `freezeStylePresent: false`——
+  这一窗没有注入冻结动画的 `<style>`（无需冻结，且没留下残留）。
+
+三、旧键确实死了（`tmp/82/restore-unknown.out`）
+  boss 那行的键序现读：
+    id, partition, startUrl, isPersistent, storagePath, cookieNames, auth, expiresAt
+  **没有** `sessionCookieName`。渲染层与 `bridge.ts` 的类型同步收窄（typecheck EXIT=0 兜着）。
+  AGENTS.md §9 的「2.1 补片 ②」那条实测清单里还写着旧键，已在本片随附一次窄幅更正（历史读数不重写）。
+
+四、8.2-04 判定路径零出网（C：静态 + 活体两侧）
+  静态（grep 全 `packages/sessions/src`，非测试文件）：
+  - `probe.ts` 的**唯一** import 是 `import type { SessionAuthStatus, SessionExpiredEvent } from '@auto-cc/core'`
+    （`probe.ts:14`）——纯类型，运行时零依赖，结构上就不可能发请求。
+  - 整个包里没有 `fetch(` / `XMLHttpRequest` / `net.request` / `http.request`。
+  - 判定路径唯一碰 electron 的地方是 `index.ts:344` 的 `platformSession.cookies.get({})`——
+    读的是分区自己的 cookie 存储（本地），不是站点。
+  - 包内另一处 `webRequest` 是 `index.ts:307` 的 `onResponseStarted`，那是 2.7-01 就存在的**只读观测**
+    钩子（没有 callback，不拦不断），不属于判定路径，本片一行未动。
+  活体（`tmp/82/zero-outbound.out`）：
+    kernelViewPartition = ""（内核视图未挂载任何站点）
+    activePlatform      = null
+    perCallMs           = 0.21   ← 连发 20 次 `sessions.status()`（含真账号那 12 枚 cookie 的读取与判定）的均值
+    distinctVerdicts    = ["active/1792263599856/12"]  ← 20 次读数逐字相同
+  两条合起来才是这条判据的形状：**没有任何页面在场**（视图未挂载，没有可发请求的帧），
+  判定照样出结论，且每次 0.21ms。真发一次对 zhipin 的探测请求不可能落在这个量级上。
+  单测侧同一条读数：`probe.test.ts` 21 个用例整文件 8ms。
+  更强的一条（在已挂载的真实页面上看资源条目增量）留到 8.3-01 顺手取——那一格本来就要挂载真站点。
+
+本条**没有**说谎的地方
+  - 界面标签写的是「判不准」，spec 8.2-02 原行写的是"未标定"。以截图为准，spec 已按实际措辞记录。
+  - 真账号的**页面侧**登录信号（header 是否还显示「登录/注册」）这一窗**没有**取，
+    因此 `authMinPresence` 仍是 2 的保守档，8.0-02 里"≥1 只是候选"那句话还没有被页面侧证据替换掉。
+    它是 8.3-01 的活儿，不在这里预支。

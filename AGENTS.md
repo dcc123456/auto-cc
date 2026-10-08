@@ -331,7 +331,13 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   （`harness shot --url 127.0.0.1:10233`），而 app 侧文案（接管卡、面板读数）才用 `--url 5173`；
   ② `sessions.status()` 每行的键是 `id / partition / startUrl / isPersistent / storagePath / cookieNames /
 sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `auth`**，按 `item.platform` / `item.status`
-  取回 `undefined`，`JSON.stringify` 会把 undefined 键整个丢掉，看起来就像"状态行里没有平台"；
+  取回 `undefined`，`JSON.stringify` 会把 undefined 键整个丢掉，看起来就像"状态行里没有平台"。
+  **（8.2 收口更正，历史读数不重写）那份键清单里的 `sessionCookieName` 已退役**，现读是
+  `id / partition / startUrl / isPersistent / storagePath / cookieNames / auth / expiresAt`，且 `auth` 从两态变三态
+  （`active / expired / unknown`，`unknown` = 证据不够，界面标签「判不准」，**不发** `session/expired`）。
+  同一片补一条活体口径：会话屏上「重新读取会话状态」有**两只**（另一只在未激活视图里，宽高 0），
+  `document.querySelector('[data-action="refresh"]')` 会命中隐藏那份而什么都不刷新——**行级**刷新要用
+  `[data-session-id="<id>"] [data-action="probe"]`（本节 5.4-b 的⑦ 同一形态）；
   ③ `browser.page.navigate` 回 `UNKNOWN / (-3) loading '<地址>'` 里的地址是**上一笔仍在飞的导航**，
   302 跳转与竞态都走这条，判"导航有没有成"看 `page.snapshot()` 的 `url` 与 `readyState`，不看返回码。
   另：`shot --url 127.0.0.1:10233` 在视图**正在导航**时会挂住不返回（本窗实测挂过 60s+），等 `readyState=complete`

@@ -123,7 +123,8 @@
       "reasonUrlEmpty": "Enter a URL first so navigation has a target",
       "auth": {
         "active": "signed in",
-        "expired": "signed out"
+        "expired": "signed out",
+        "unknown": "undetermined"
       },
       "persistent": "persistent partition",
       "inMemory": "in-memory partition",
@@ -137,6 +138,7 @@
       "storagePath": "Storage path {{path}}",
       "cookieNames": "Cookie names {{names}}",
       "expiresAt": "Expires {{time}}",
+      "unknownHint": "No login signal to judge (this platform is uncalibrated, or the site changed): not treated as signed in, and no re-login prompted",
       "noExpiry": "no expiry",
       "close": "Close kernel view",
       "actionClose": "Kernel view released (partition and sign-in kept)",
