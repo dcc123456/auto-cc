@@ -840,6 +840,10 @@
         "savedHint": "已写回画布上的这一格",
         "rejectedHint": "必填项没填，已拒绝保存",
         "rejectRequired": "必填",
+        "outboundNotice": "本节点会真实对外发消息，运行前必须先过额度闸门。",
+        "validateOk": "这一格没有问题",
+        "validateIssues": "这一格有 {{num}} 项问题",
+        "validateView": "查看",
         "effect": {
           "read": "只读",
           "local-write": "本地写",

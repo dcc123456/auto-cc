@@ -89,7 +89,10 @@ export function OperatorParamForm({ descriptor, params, onCommit, isReadOnly }: 
           {t('workflow.operator.readOnlyHint')}
         </p>
       ) : null}
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      {/* 单列摆（09 稿 4-B 那一栏是一行一字段）：这张表单现在的宿主是 420px 抽屉，
+          旧的 `sm:grid-cols-2` 按**视口**断列，于是 1200px 窗口里它照样拆成两列、
+          每列只剩 177px，枚举候选与数字单位都被截断。 */}
+      <div className="mt-2 grid gap-2">
         {fields.map((field) => {
           const isInvalid = invalidFields.includes(field.name);
           const label = t(`workflow.param.${descriptor.kind}.${field.name}`, { defaultValue: field.name });

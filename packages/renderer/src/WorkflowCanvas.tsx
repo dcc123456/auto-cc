@@ -56,13 +56,13 @@ import {
   type WorkflowStepView,
 } from '@auto-cc/shared';
 import { STEP_STATUS_STYLE } from './stepStatusStyle';
-import { EffectChip } from './ui/controls';
+import { Banner, DeskButton, DeskDisclosure, EffectChip } from './ui/controls';
+import { Drawer } from './ui/overlays';
 import { useDeskThemeValue } from './theme';
 import { OperatorPalette } from './OperatorPalette';
 import { OperatorParamForm } from './OperatorParamForm';
 import { WorkflowNodeDetail } from './WorkflowNodeDetail';
 import { operatorIconOf } from './operator-icons';
-import { DeskButton } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 格子的初始摆放间距（像素）；库里存过落点时以落点为准（裁定三）。 */
@@ -320,10 +320,13 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
   /** 上一次"保存前校验"的结果；null = 还没校验过（不是"校验过且没问题"） */
   const [issues, setIssues] = useState<WorkflowGraphIssue[] | null>(null);
   /**
-   * 点开的格子（spec 5.10-12）：画布下方摆两张卡——参数卡（描述表派生）与运行读数卡（库里那一行）。
-   * 只有一格能选中，因为这两张卡说的都是"这一格"，同时选中两格会让用户分不清读数在讲谁。
+   * 点开的格子（spec 5.10-12）：参数卡（描述表派生）搬进右侧抽屉（09 稿形态④），
+   * 运行读数卡仍摆在画布下方——读数卡说的是"这一格跑成什么样"，稿上没有它的抽屉档。
+   * 只有一格能选中，因为这两处说的都是"这一格"，同时选中两格会让用户分不清读数在讲谁。
    */
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  /** 抽屉里「校验」那一行的问题清单展没展开（点开是镜头，不是图的一部分，不进命令栈）。 */
+  const [isIssueListOpen, setIsIssueListOpen] = useState(false);
   /**
    * 画布现在照的是库里哪条计划（5.10-02 的判据要在界面上认得出来源），以及覆盖保存要的版本号。
    * null = 没照库画（没选计划，或那次读数没成功），此时格子来自运行镜像，没有可写的对象。
@@ -723,6 +726,12 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
    */
   const selectedSpec = snapshot.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedDescriptor = selectedSpec ? operatorByKind(selectedSpec.kind) : undefined;
+  /**
+   * 上一次「保存前校验」里点到这一格的那几条（`issues` 是全图结果，抽屉只报本格的）。
+   * 只在人按过校验之后才有内容：`issues === null` 时抽屉里那行整个不出现（不给"通过"这种凭空读数）。
+   */
+  const selectedNodeIssues =
+    issues === null || selectedSpec === null ? [] : issues.filter((issue) => issue.nodeIds.includes(selectedSpec.id));
 
   return (
     <div className="mt-3" data-testid="workflow-canvas" data-palette-drag={paletteDrag?.descriptor.kind ?? ''}>
@@ -871,16 +880,84 @@ function WorkflowCanvasBoard({ steps, planId, isReadOnly }: WorkflowCanvasProps)
         </ReactFlow>
       </div>
       {selectedSpec && selectedDescriptor ? (
-        <OperatorParamForm
-          // 换一格就重挂载：未提交的草稿文本属于那一格，不该跟着跳过去。
-          // 键必须带前缀：这两张卡是同一个 children 数组里的兄弟，同键会让 React 复制出孤儿 DOM
-          // （实测：翻一次主题多一张表单，控制台报 "Encountered two children with the same key"）
-          key={`params:${selectedSpec.id}`}
-          descriptor={selectedDescriptor}
-          params={selectedSpec.params}
-          isReadOnly={isReadOnly}
-          onCommit={(params) => commitNodeParams(selectedSpec.id, params)}
-        />
+        // 09 稿形态④ 的第二只真身（4-C 清单里的「算子参数」）：参数卡搬进抽屉，
+        // 关闭规则按稿上那一档走「Esc / ✕ / 点遮罩」——它不做不可逆动作，所以不给遮罩弹窗。
+        <Drawer
+          action="node-params"
+          open
+          title={t('workflow.operator.paramHeading')}
+          headExtra={
+            // 稿上抽屉头部那一枚「外发」徽标读的还是描述表（不是用户挑的危险度），
+            // 与格子上的同一只 `EffectChip`，一份映射两处用（§2.5）。
+            <EffectChip effect={selectedDescriptor.effect}>
+              {t(`workflow.operator.effect.${selectedDescriptor.effect}`)}
+            </EffectChip>
+          }
+          subtitle={selectedCell?.label ?? selectedSpec.id}
+          onClose={() => setSelectedNodeId(null)}
+        >
+          {selectedDescriptor.effect === 'outbound' ? (
+            <Banner tone="seal" markers={{ testid: 'drawer-outbound-notice' }}>
+              {t('workflow.operator.outboundNotice')}
+            </Banner>
+          ) : null}
+          <OperatorParamForm
+            // 换一格就重挂载：未提交的草稿文本属于那一格，不该跟着跳过去。
+            // 键带 `params:` 前缀是原样留下的：读数卡 `detail:` 仍是这张画布的兄弟，
+            // 去掉前缀会让两次翻主题时 React 在同一个 children 数组里撞出同键孤儿 DOM。
+            key={`params:${selectedSpec.id}`}
+            descriptor={selectedDescriptor}
+            params={selectedSpec.params}
+            isReadOnly={isReadOnly}
+            onCommit={(params) => commitNodeParams(selectedSpec.id, params)}
+          />
+          {/* 校验读数只在人按过「保存前校验」之后才存在（`issues` 是那次点出来的结果）。
+              没按过时这一行整个不出现：稿上画的是「通过 · 2 项警告」，
+              但界面上凭空写一句"通过"就是假读数（与第四十三片"不装假按钮"同一条尺）。 */}
+          {issues === null ? null : (
+            <div
+              className="mt-3 rounded-md border border-line px-2.5 py-2"
+              data-testid="drawer-validate-row"
+              data-node-issue-count={selectedNodeIssues.length}
+            >
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-slate-400">{t('workflow.canvas.validate')}</span>
+                {selectedNodeIssues.length === 0 ? (
+                  <span className="text-jade-ink" data-testid="drawer-validate-ok">
+                    {t('workflow.operator.validateOk')}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-seal-ink" data-testid="drawer-validate-issues">
+                      {t('workflow.operator.validateIssues', { num: selectedNodeIssues.length })}
+                    </span>
+                    <DeskDisclosure
+                      action="drawer-issues"
+                      open={isIssueListOpen}
+                      onClick={() => setIsIssueListOpen((isOpen) => !isOpen)}
+                      className="ml-auto"
+                    >
+                      {t('workflow.operator.validateView')}
+                    </DeskDisclosure>
+                  </>
+                )}
+              </div>
+              {isIssueListOpen && selectedNodeIssues.length > 0 ? (
+                <ul className="mt-1.5 space-y-1" data-testid="drawer-issue-list">
+                  {selectedNodeIssues.map((issue) => (
+                    <li key={`${issue.code}:${issue.nodeIds.join(',')}`} className="text-[10px] text-seal-ink">
+                      {t(`workflow.canvas.issue.${issue.code}`, {
+                        nodeIds: issue.nodeIds.join(', '),
+                        // 兜底文案来自 core 的 message：语言包漏键时界面不至于显示一个空条目
+                        defaultValue: issue.message,
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
+        </Drawer>
       ) : null}
       {selectedCell ? (
         <WorkflowNodeDetail

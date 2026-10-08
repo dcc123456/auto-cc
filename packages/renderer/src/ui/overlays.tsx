@@ -194,10 +194,16 @@ export interface DrawerProps {
   /** 该抽屉的 `data-action` 凭据（关闭按钮用它 + `-close` 后缀）。 */
   action: string;
   open: boolean;
-  /** 抽屉标题（调用方翻译）。 */
-  title: ReactNode;
+  /** 抽屉标题（调用方翻译）。**保持字符串**才能给关闭键当无障碍名，状态徽标请放 `headExtra`。 */
+  title: string;
   /** 副标题一行，通常放对象身份（哪份简历 / 哪个算子）。 */
   subtitle?: ReactNode;
+  /**
+   * 标题右侧的一枚附属读数（09 稿 4-B 头部那枚「外发」徽标）。
+   * 为什么不塞进 `title`：`title` 一旦被包成节点，✕ 的 `aria-label` 就取不到字符串，
+   * 关闭键会在无障碍树里变成一只无名按钮——为了保住那条通道才单开一档。
+   */
+  headExtra?: ReactNode;
   onClose: () => void;
   /** 宽度档，默认 420。 */
   width?: keyof typeof DRAWER_WIDTH;
@@ -214,13 +220,14 @@ export interface DrawerProps {
  * 稿上"人随时能切走"指的是鼠标。窄窗（<1120px）按尺寸档那条改为全宽覆盖。
  * @param action 关闭动作前缀
  * @param open 是否展开
- * @param title 标题
+ * @param title 标题（字符串，同时给关闭键当无障碍名）
  * @param subtitle 副标题
+ * @param headExtra 标题右侧的附属读数（徽标一类）
  * @param onClose 收起动作
  * @param width 宽度档
  * @param children 内容
  */
-export function Drawer({ action, open, title, subtitle, onClose, width = '420', children }: DrawerProps) {
+export function Drawer({ action, open, title, subtitle, headExtra, onClose, width = '420', children }: DrawerProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   useOverlayBehavior(open, LAYER_DRAWER, onClose, false, dialogRef);
   if (!open) return null;
@@ -236,13 +243,16 @@ export function Drawer({ action, open, title, subtitle, onClose, width = '420', 
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-50">{title}</h3>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-50">
+              {title}
+              {headExtra}
+            </h3>
             {subtitle ? <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p> : null}
           </div>
           <button
             type="button"
             data-action={`${action}-close`}
-            aria-label={typeof title === 'string' ? title : undefined}
+            aria-label={title}
             onClick={onClose}
             className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
           >

@@ -840,6 +840,10 @@
         "savedHint": "Written back to this canvas cell",
         "rejectedHint": "A required field is empty, save refused",
         "rejectRequired": "required",
+        "outboundNotice": "This node really sends messages out; the entitlement gate must pass before it runs.",
+        "validateOk": "no issue on this node",
+        "validateIssues": "{{num}} issue(s) on this node",
+        "validateView": "view",
         "effect": {
           "read": "read",
           "local-write": "local write",
