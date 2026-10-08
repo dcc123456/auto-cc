@@ -140,9 +140,12 @@ plugins:
 
   # 内置内核会话（spec 1.8）：每个平台一份 `persist:<id>` 分区，登录态落 userData。
   # 排在 shell 之后：它要请 shell 按指定分区重建内嵌视图（视图宿主唯一，见 plan §8.3 决策 1）。
-  # 这里只配本地 fixture —— 三个分区指向同一个服务的三条路径，用来证明 cookie 互不共享；
-  # `boss` 的起始地址是**本地仿站**（`/boss`），不是 zhipin.com：AGENTS.md §7.2 规定自动化一律打本地站点，
-  # 真实平台只在用户在场时手动验证（spec 2.3-10），届时改这一行 startUrl 即可，代码路径不变。
+  # `fixture` / `fixture-alt` 两个分区指向同一个本地服务的两条路径，用来证明 cookie 互不共享，
+  # 也是自动化验收面（AGENTS.md §7.2：测试一律打本地站点，本条不因下面的改动而松动）。
+  # `boss` 自 2026-10-08 起指向**真实站点**（P8）：这就是 145 行原来那句"届时改这一行 startUrl 即可，
+  # 代码路径不变"的兑现。导航许可按已登记平台的 startUrl 同源取白名单（`navigate-policy.ts`），
+  # 所以这一行同时是"真域名可导航"的开关；而选择器仍来自本地仿站的知识包，
+  # 对着真站点动手会以定位失败收场（8.0 在场取证 → 8.1 发布真实包之后才谈得上自动化）。
   - id: sessions
     dependsOn: [shell]
     config:
@@ -154,7 +157,7 @@ plugins:
           startUrl: http://127.0.0.1:10233/alt
           sessionCookieName: autocc_session
         - id: boss
-          startUrl: http://127.0.0.1:10233/boss
+          startUrl: https://www.zhipin.com/
           sessionCookieName: autocc_session
 
   # 页面操作入口（spec 2.1）：导航与快照，2.2 起在同一条注入通道上加点击/输入/定位。
