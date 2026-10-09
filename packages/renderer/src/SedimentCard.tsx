@@ -19,6 +19,7 @@ import {
   deskReason,
   type BannerTone,
 } from './ui/controls';
+import { DeskExplainer } from './ui/disclosure';
 
 /**
  * 已经不再往前跑的 run 状态：只有收口了才有得沉淀。
@@ -111,7 +112,10 @@ export function SedimentCard({
 
       {!view ? (
         <>
-          <p className="mt-1 text-slate-400">{t('chat.sediment.hint')}</p>
+          {/* 55 字的教材按规则①从平铺位置撤进披露层：按钮自己已经把"下一步做什么"说完了。 */}
+          <DeskExplainer id="chat.sediment.how" className="mt-1" label={t('chat.sediment.howToggle')}>
+            {t('chat.sediment.hint')}
+          </DeskExplainer>
           {isSettled ? (
             <DeskButton
               action="sediment-open"

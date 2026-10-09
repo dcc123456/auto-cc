@@ -982,7 +982,7 @@
     },
     "chat": {
       "heading": "Chat",
-      "empty": "No messages yet. Tell the agent what kind of role you are looking for.",
+      "empty": "No messages yet: say what kind of role you want",
       "loading": "Reading the session from the main process…",
       "inputPlaceholder": "What do you want to do? Enter sends, Shift+Enter adds a line",
       "send": "Send",
@@ -1053,6 +1053,7 @@
       "sediment": {
         "heading": "Save as workflow",
         "hint": "Project the run you just finished into a reusable workflow. Whether it qualifies and which cells still hold last time's literal values are decided in the main process; this card only lays them out for you.",
+        "howToggle": "Where these readouts come from",
         "open": "Preview this sedimentation",
         "notSettled": "This run is still going or not confirmed yet: there is nothing to sediment until it settles (completed, failed or stopped)",
         "close": "Dismiss",
@@ -1077,7 +1078,7 @@
         "save": "Store as custom plan",
         "saveBlocked": "This segment is not eligible, so it cannot be stored: handle the reason above first",
         "saved": "Stored as plan {{name}} ({{count}} nodes)",
-        "savedHint": "Pick it in the Plan library dropdown of the workflow view and press start — it runs as is, no second conversion.",
+        "savedHint": "Pick it in the plan library and press start - it runs as is",
         "actionPreview": "preview the sedimentation readout",
         "actionSave": "save workflow {{name}}",
         "reason": {
@@ -1144,7 +1145,7 @@
         },
         "heading": "Waiting for you",
         "pendingCount": "{{total}} ticket(s) waiting for you",
-        "hint": "Approval and supplements are pressed only by you: timeout = unconfirmed = not executed, and the entitlement gate and rate limits still apply",
+        "hint": "Only you press approve or supply: a timeout means not executed, gates still apply",
         "empty": "No ticket is waiting right now",
         "step": "Step {{index}}",
         "approvalHeading": "This step needs your approval",
@@ -1472,7 +1473,7 @@
         "rejection": "After a decline"
       },
       "quotePlaceholder": "Their last message (required for follow-up and decline replies)",
-      "quoteHintGreeting": "An opening line ignores this box; only follow-up and decline replies depend on it.",
+      "quoteHintGreeting": "An opening line ignores this box; follow-up and decline replies need it",
       "quoteRequired": "This kind of script must refer to something they said: fill the box above or generation fails on validation.",
       "keywordsPlaceholder": "Direction keywords (optional, comma separated)",
       "actionGenerate": "Generate candidates",
@@ -1492,7 +1493,7 @@
       "fallback": "Fallback reason: {{reason}}",
       "actionSend": "Send this to \"{{title}}\" on {{platform}}",
       "sendButton": "Send this one",
-      "pickHint": "Pick a candidate above to enable sending; the candidate stage never leaves this machine.",
+      "pickHint": "Pick a candidate to enable sending; nothing here leaves the machine",
       "noticeGenerated": "{{count}} candidates, {{template}} of them from the template fallback",
       "receiptRow": "Sent: target {{jobId}} · ledger row {{ledgerId}} · source {{source}} · content {{origin}} · page confirmed \"{{reason}}\"",
       "errorRow": "{{code}}: {{message}}"

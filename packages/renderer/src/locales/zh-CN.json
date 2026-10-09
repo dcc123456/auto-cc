@@ -982,7 +982,7 @@
     },
     "chat": {
       "heading": "对话",
-      "empty": "还没有消息：说说你想找什么样的岗位，agent 会把每一步做在这条对话里。",
+      "empty": "还没有消息：说说你想找什么样的岗位",
       "loading": "正在读取主进程的会话…",
       "inputPlaceholder": "想聊什么？回车发送，Shift+Enter 换行",
       "send": "发送",
@@ -1053,6 +1053,7 @@
       "sediment": {
         "heading": "保存为工作流",
         "hint": "把这次跑通的那一段投成一条可复用的工作流：能不能投、哪几格还是上次的残留值，都由主进程算，这里只负责摆给你看。",
+        "howToggle": "这段读数是怎么来的",
         "open": "预览这次沉淀",
         "notSettled": "这条 run 还在跑或还没确认：等它收口（跑完、失败或叫停）之后才有得沉淀",
         "close": "收起",
@@ -1077,7 +1078,7 @@
         "save": "存为自定义计划",
         "saveBlocked": "这一段不合格，存不了：先照上面的拒因处理",
         "saved": "已存为计划 {{name}}（{{count}} 个节点）",
-        "savedHint": "在工作流面板的「计划库」下拉里挑中它，点开始就直接跑，无需二次转换。",
+        "savedHint": "在工作流面板的「计划库」里挑中它，点开始就直接跑",
         "actionPreview": "预览沉淀读数",
         "actionSave": "保存工作流 {{name}}",
         "reason": {
@@ -1144,7 +1145,7 @@
         },
         "heading": "等人表态",
         "pendingCount": "{{total}} 张单在等你",
-        "hint": "批准与补充都由你按下：超时＝未确认＝不执行，额度闸门与频控照旧",
+        "hint": "批准与补充都由你按下：超时即不执行，闸门照旧",
         "empty": "当前没有在等人的单",
         "step": "第 {{index}} 步",
         "approvalHeading": "这一步要你先批准",
@@ -1472,7 +1473,7 @@
         "rejection": "拒绝应对"
       },
       "quotePlaceholder": "对方最后一条消息原文（追问与拒绝应对必填）",
-      "quoteHintGreeting": "开场白不看这一格；只有追问与拒绝应对把它当成立的前提。",
+      "quoteHintGreeting": "开场白不看这一格，只有追问与拒绝应对才用它",
       "quoteRequired": "这一类话术必须指涉对方说过的话：先填上面那格，否则生成只会以入参错误失败。",
       "keywordsPlaceholder": "方向关键词（可选，逗号分隔）",
       "actionGenerate": "生成候选",
@@ -1492,7 +1493,7 @@
       "fallback": "回落原因：{{reason}}",
       "actionSend": "在 {{platform}} 给「{{title}}」发这条",
       "sendButton": "就这样发",
-      "pickHint": "选中上面任意一条才放开发送；候选阶段不产生任何离开本机的内容。",
+      "pickHint": "选中一条才放开发送，生成不离开本机",
       "noticeGenerated": "共 {{count}} 条候选，其中 {{template}} 条来自模板回落",
       "receiptRow": "已发送：目标 {{jobId}} · 账本行 {{ledgerId}} · 来源 {{source}} · 内容 {{origin}} · 页面确认「{{reason}}」",
       "errorRow": "{{code}}：{{message}}"
