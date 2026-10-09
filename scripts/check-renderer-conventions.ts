@@ -115,7 +115,7 @@ for (const file of tsxFiles) {
   }
 }
 
-// 4) 内核视图宽度两侧同源（1.2-12）
+// 4) 内核视图宽度两侧同源（1.2-12）+ 可拖宽度也只认这一支事实（1.2-17）
 const bridgeSource = await readFile(path.join(repoRoot, 'packages', 'shared', 'src', 'bridge.ts'), 'utf8');
 const cssSource = await readFile(path.join(rendererRoot, 'globals.css'), 'utf8');
 const ratio = Number(/KERNEL_VIEW_WIDTH_RATIO\s*=\s*([\d.]+)/.exec(bridgeSource)?.[1]);
@@ -124,6 +124,31 @@ if (!Number.isFinite(ratio) || !Number.isFinite(cssPercent)) {
   failures.push('无法解析内核视图宽度：KERNEL_VIEW_WIDTH_RATIO 或 --kernel-view-width 缺失');
 } else if (Math.abs(ratio * 100 - cssPercent) > 0.001) {
   failures.push(`内核视图宽度不一致：主进程 ${String(ratio * 100)}% ≠ 渲染层 ${String(cssPercent)}%`);
+}
+
+// 8.8-08 把"三档跳宽"换成"38…72 连续拖"之后，宽度这条事实多了两个挂点，它们必须仍然指回同一个数：
+// ① `--kernel-slot-width` 的**默认值**必须是 `var(--kernel-view-width)`——写成字面量百分比就等于
+//    在渲染层另存一份宽度事实，主进程改兜底比例时界面不会跟着动，§4 那条同源从此名存实亡；
+// ② 拖拽下界 `WIDTH_MIN` 必须等于 ratio × 100——它既是"最窄档"，也是主进程矩形被拒时的回落宽度，
+//    两边不一致会出现"人已经拖到最窄，视图还在按另一个宽度铺"的错位；
+// ③ 宽度 class 只能是那一枚引用变量的字面量（Tailwind 只生成它看得见的字符串，动态拼接类型过、画面空）。
+const slotCssDefault = /--kernel-slot-width:\s*([^;]+);/.exec(cssSource)?.[1]?.trim();
+if (slotCssDefault !== 'var(--kernel-view-width)') {
+  failures.push(
+    `--kernel-slot-width 的默认值必须解析到 --kernel-view-width（当前是 ${String(slotCssDefault)}）——宽度只许有一支事实`,
+  );
+}
+const slotSource = await readFile(path.join(rendererRoot, 'KernelViewSlot.tsx'), 'utf8');
+const dragMin = Number(/const WIDTH_MIN\s*=\s*([\d.]+)/.exec(slotSource)?.[1]);
+if (!Number.isFinite(dragMin)) {
+  failures.push('无法解析拖拽宽度下界：KernelViewSlot.tsx 里的 WIDTH_MIN 缺失');
+} else if (Number.isFinite(ratio) && Math.abs(dragMin - ratio * 100) > 0.001) {
+  failures.push(`拖拽最窄档与兜底比例不一致：KernelViewSlot ${String(dragMin)}% ≠ 主进程 ${String(ratio * 100)}%`);
+}
+if (!/const WIDTH_CLASS = 'w-\(--kernel-slot-width\)';/.test(slotSource)) {
+  failures.push(
+    'KernelViewSlot.tsx 的宽度 class 必须回到那一枚引用 --kernel-slot-width 的字面量（Tailwind 只认字面量）',
+  );
 }
 
 // 5) 工作流运行状态的来源唯一（spec 2.8-12）+ 进度靠事件而非轮询（spec 2.8-02）

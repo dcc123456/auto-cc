@@ -785,6 +785,142 @@ P2 删掉 `WorkflowPlans.tsx:154` 的两行直挂 attrs → EXIT=1，报出同�
 
 ---
 
+### 3.24 说人话、能收起、能拖宽：这一轮渲染层精修的画法与两处被实测推翻的假设（第五十二片起，6.1-10 / 6.2-27…32 / 6.4-06 / 8.8-08 / 8.8-09 / 1.2-17）
+
+**这一族的动机**（用户的原话是"当前界面是工程师视角的"）：岗位屏和对话屏打开就是六块/五块卡片堆到脚，
+语言包里有 63 条 ≥55 字的说明平铺在页面上（最长 `gap.hint` 236 字、旧 `deliver.receiptRow` 152 字），
+而按钮里的图标会在窄列中被压扁、把译文从中间断开。另一侧是真实几何缺陷：内嵌视图只有三档跳宽，
+380px 窄栏里三颗带文字的键会溢出。本轮范围按 2026-10-09 的四条裁定收窄为
+**岗位屏（`JobLabPanel` 与 `ScriptPanel`）、对话屏（`ChatPanel` 一族）、`KernelViewSlot`** 三块，
+并明确**保留墨案 / 毡案的令牌与字体**（力气全放在密度、层级、收纳、对齐）。
+
+#### 一条贯穿的收纳原则，以及它不管的两件
+
+用户给的判据是一句可执行的话：**「只要不涉及必须用户确认或者输入的文案，其他都可以收起来。必须用户确认的才放到明面上。」**
+这条比"越少越干净"硬，因此每一片的"永不收起"清单都直接由它推出来：抓取/运行主键与关键词框、待批准卡
+（建议档下不点 `pause-approve` 什么都不动，把待批准藏起来等于藏掉一次必须的人为表态）、状态条与额度读数、
+对话屏的输入区与消息流、`TakeoverBanner`（它回答"这块页面此刻在谁手里"，可隐藏就是谎）、暂停表态卡、在跑时的 `AgentRunPanel`。
+一条**必须一起收**：自治档行与免确认白名单是 `ChatPanel.tsx:262-265` 注释写明的"同一件事的两半"，
+拆开收违反 §5.10 的分组意图。§5.10 约束的是**功能与命名空间**，收进披露层满足它（组件仍在），删除或合并不满足。
+
+#### 文案规则手册（可机械审计的五条，规则①是这一族的尺子）
+
+- **①** 平铺在页面上的 hint ≤ **24 个汉字**、单句、不许 `·` 串、不许括号；超了就进 `DeskExplainer`。
+- **②** 界面上不出现开发者标识符（`jd/progress`、`outbound.deliver`、`schema v`、`sha256`、`ledgerId`、`{{jobId}}`）
+  ——移到 `data-*`（机器通道现成：`Banner` 的 `markers`、`DeskButton` 的 `markers`）或 explainer 正文。
+- **③** 带文案的按钮不许插值自由长句：`chat.actionSend`（30 字模板 + 岗位标题）换成 3–6 字动词，上下文显示在它上面那一行。
+- **④** ≥100 字的回执行拆成"一行一件事"的标签/值对，不再用 `·` 拼一行（落点见 `JobLabPanel.tsx:720` 与 `:863` 的注释）。
+- **⑤** 不能缩也不能收的，`truncate` + `title`，绝不在短语中间断行。
+
+四组 before → after（都取自真实 `zh-CN.json`）：`deliver.heading` 那句 45 字带五段管线的
+「简历投递（outbound.deliver：额度 → 频控 → 确认 → 页面 → 落账）」→ **「把简历递出去」**，管线进 explainer、
+summary 压成人话；152 字的 `deliver.receiptRow` 拆成两行（状态 + 文件名 / 等待毫秒 + 页面回读），
+标识符进 `data-*`；113 字的 `script.hint` 从平铺位置撤进披露层（`ScriptPanel.tsx:254-257`），
+明面只留一句 `script.lead` 说下一步；`kernel.heading`「内嵌内核视图槽位」→ **「网页窗口」**。
+**术语表这半边按裁定可偏**：界面文案说人话，允许偏离 AGENTS.md §3.6；代码标识符、docs、内部概念表一律不改，
+打招呼 / 投递保留原词。
+
+#### 三件新原件走的是"抽取"，不是新长一张脸（§2.2 / §2.3）
+
+新文件 `src/ui/disclosure.tsx`。`DeskSection`（默认收起的卡片，正文收起时**卸载**而不是 `hidden`——收起要真省出纵向空间）、
+`DeskExplainer`（长说明的容器，本次会话内保持打开，重启回落收起：它是教材不是工作台）、
+`DeskActionRow`（不换行的动作条）之所以现在才立，是因为 `WorkflowEvidence.tsx:30-52` 与
+`EvidenceRefButton.tsx:59-70` 已各自手搓 chevron 披露、`ToolCard.tsx:112-117` 是原生 `<details>` 先例——
+同一逻辑的第二次出现。`DeskDisclosure`（`controls.tsx:961`）**不扩展**：它是一根纯文字下划线链、没有正文槽、
+状态归调用方，硬塞卡片级容器 + 自持持久状态要加 `variant` 分支，两者并存而不是分叉。
+状态一支键 `auto-cc.desk.disclosure` = `Record<sectionId, boolean>`，合并写、防御读（非对象 / 非布尔 / JSON 抛错
+一律回落"全收起"），`id` 用稳定 ASCII，绝不用译文当键（§5.6）。
+
+#### 09 稿形态⑤ 的"必须先读完整风险"按本裁定收窄
+
+`ConsentModal.tsx:112-118` 落地的形状是：明面一句整合后的授权话（能力披露连同"签字管多久"那句持久性说明，
+它不是免责条款，收进披露层就等于让人签一份自己没读到的期限）+ 一只勾选 + 两只键，
+五条风险的展开连同首屏隐私声明已经写过的那几句（不识别验证码、不绕过风控、简历事实由你锁死）
+一起沉到最下面一格「风险详情」（`:157`，正文复用 `privacy.riskNoEvasion` 同一句，§2.5 不另存措辞）。
+这条与稿面冲突，用户在同一轮里连声确认（我提过合规异议五次，裁定不变），因此**在此登记为对稿的偏离**，
+而不是把弹窗改回明面清单。三条退路仍一律不给（`dismissOnScrim`）。
+
+#### 一条 §5.2 的刻意偏离：连续宽度只能命令式写在一个节点上
+
+`eslint.config.js:50-52` 拦 JSX 上的 `style` 属性（selector 只匹配 `JSXAttribute[name.name='style']`），
+而连续拖出来的百分比 Tailwind 本来就扫不见（`KernelViewSlot.tsx:21-22` 自己就写着这条：2% 一档要写 18 条字面量，
+而连续宽度根本不走 class 通道）。
+所以这一族的唯一写法是：`globals.css:236` 声明 `--kernel-slot-width: var(--kernel-view-width)`，
+`KernelViewSlot.tsx:189-195` 的 `useLayoutEffect` 与 `pointermove` 里只做
+`aside.style.setProperty('--kernel-slot-width', …)`——命令式改 CSS 变量、不落 JSX `style`，
+且**只覆盖 `<aside>` 这一个节点**（吸附 / 键盘 / 双击三条路径最后都汇到 `layout.ratio`，画面没有第二份宽度事实）。
+同目录先例是 `ui/overlays.tsx:167-171` 的 `document.body.style.overflow`。
+§5.2 要求这种自定义视觉在 PR 里显式说明，此处即登记处；机检 `1.2-17`（`check-renderer-conventions.ts` 第 4 节 `:118-152`）
+反过来把"只许一支事实"钉住：默认值必须逐字解析到 `--kernel-view-width`、`WIDTH_MIN` 必须等于
+`KERNEL_VIEW_WIDTH_RATIO × 100`、宽度 class 必须回到那一枚 `w-(--kernel-slot-width)` 字面量。
+`--kernel-view-width: 38%` 与 `KERNEL_VIEW_WIDTH_RATIO = 0.38` 一字未动，1.2-12 那条同源机检结构上仍然成立。
+
+#### 「缩放比」这个词的正确含义（防止下一轮把它当 DPR）
+
+`bridge.ts:983` 那句"在缩放比为 1 的窗口里与 DIP 逐位相等"**指的不是 devicePixelRatio**：
+CSS px 与 DIP 本来就恒等，与像素比无关（仓库内 `devicePixelRatio|zoomFactor|deviceScaleFactor` 零命中）。
+它指的是 Chromium 默认绑在 ⌘+/− 的**页面缩放**。本轮不加缩放功能；若将来加，上报矩形必须先除以缩放因子，
+否则拖宽与命中测试会一起偏。
+
+#### 8.8-08 期间被活体读数推翻的两条原判
+
+- **把手必须待在上报矩形之外**（`docs/acceptance/08-real-platform-driving/8.8-08-slot-drag-geometry.txt` 第一段）：
+  原计划把把手挂在 `<aside>` 左缘之内（`absolute inset-y-0 left-0`），实测 `handleRect.x + w = 1292 > slotRect.x = 1286`
+  ——**`p-4` 缩的是它的孩子，不是它的边框盒**，于是整条把手被原生视图盖住，人握的是网页不是把手。
+  改成同一条 flex 行的**前一个兄弟**后 `1279 + 6 = 1285 ≤ 1286`，判据换成 `handle.right <= slotRect.x`。
+  8.8-04 那条已 `[x]` 的"控件待在视图盖不到的行"因此**被补充而非被推翻**（横向也有一条命中测试边界），写法见 spec 的补段。
+- **旧下标不抹、换算回它自己那一档**：原判是"`auto-cc.kernel-slot-width` 从 `0|1|2` 改成 38…72，
+  两个值域算术上不相交，所以不需要兼容垫片"。本机活体读数是 `storedWidth:"1"`——**有人真的表达过宽度**。
+  直接把读不懂的形状回落最窄档等于替人改口，所以 `loadWidthRatio()` 把旧下标映射进 `WIDTH_ANCHORS`。
+  这条**登记为迁移路径**（一次换算、之后不再产生旧形状），不是常驻垫片。
+- 顺带一条否决：拖拽期间**不自造 `requestAnimationFrame` 合帧**。2.1-12 的实测是窗口被遮挡时 rAF 不跑，
+  把唯一的上报通道挂在 rAF 上会把"一条通道"变成"再也不报"；而 `pointermove` 里只 `setProperty`（不写 state、
+  不发 IPC）本身已经不新增逐帧流量，那一帧的 observer 一条通道照旧（8.8-09）。
+  同一片还补了 observer 的一个静默回归面：`ResizeObserver` 除槽位外**也盯工具行**——工具行长高一行时
+  `rect.y` 变了而尺寸没变，不重报就是 8.8-04 的无声回归。
+
+#### 顺序按裁定真搬 DOM，不用 CSS `order`
+
+岗位屏换成"任务优先"，落地的顺序是**状态与读数条（`:327`）→ 签字遮罩（`:362`）→ 搜索条件与抓取主键（`:364`）
+→ 挑岗位清单三段（`:485`）→ 投简历（`:681`，`defaultOpen`）→ 抓取进度（`:822`，收起）→ 这一轮的结果（`:891`，收起）**。
+用户裁定是**把 JSX 真的搬过去**（「按原计划重排 DOM：清单上移到第二块」），不是挂 `order-*` 让读屏顺序与画面打架。
+**批准计划里"抓取设置默认收起"那半条按上面的通则作废**：搜索条件与那颗主键是"必须用户输入"的一类，
+按通则必须在明面，收起它等于让人找不到开始的地方——所以实际交付的是三格收纳（投递默认展开、进度与结局收起），
+不是六格。`deliver` 那一块按同一原则处理：**默认展开**（它含必须点头的那一句），大段说明进披露层。
+
+#### 既有验收通道一律没拆，只把标识符搬了家
+
+`jd-notice` / `jd-greet-receipt`(+origin) / `jd-error`(+error-code) / `jd-progress` / `jd-outcome` / `jd-ledger-check` /
+`jd-skipped*` / `deliver-receipt`(+committed) / `kernel-slot-measured` / `consent-card` 与 `chat-tool-hint`、`chat-run-hint`
+这些 testid 一字未改（`ChatPanel.tsx:457-472` 的注释记的就是这条纪律：两支 testid 跟着正文一起搬进披露层，
+改名等于拆掉 5.2-03 的验收通道）。`data-action` 的 `kernel-slot-narrow/widen/expand` 同理保留，
+三颗档键的语义换成"吸附到最近锚点"，边界处 `WIDTH_MIN` / `WIDTH_MAX` 原因码原样。
+
+**退役键（§2.4，语言包里已删，不留两半用）**：`jd.progressRow`、`jd.outcomeRow`、`consent.mustRead`、
+`deliver.pendingRow`、`deliver.receiptRow`、`jd.greetReceiptRow`。
+仍在用的是另外命名空间的 `script.receiptRow` 与 `resume.pendingRow`，本轮没碰。
+
+#### 窄档断点是同一支数，不是两处各写一遍
+
+`--desk-nav-width` 的 1120 档（`globals.css:253`）、`NarrowLabel`（`controls.tsx:1102-1104`）、
+抽屉的 `max-[1120px]:w-full`（`overlays.tsx:242`）三处必须换档在同一格宽度上。
+媒体查询写成 `(width < 1120px)` 而不是 `(max-width: 1120px)`：Tailwind 的 `max-[1120px]` 编译成
+`not all and (min-width:1120px)`（**不含** 1120 这一格），用 max-width 会在 1120px 整窗宽上长出
+"导航已收窄、标签还没收"的半档。
+
+#### 本片没有的与还欠的
+
+- **窗口地板（6.4-06）的 `packages/shell` 半边不在本轮**：按裁定"先做渲染层，主进程那条最后动"，
+  且并行会话正在真实平台上跑抓取（§9 第⑯条：改主进程射程内文件会重启 Electron、把那一轮掐在半页）。
+  `minWidth: 1000` / `minHeight: 668` 的推导已记在批准计划里，等实例空档落。
+  系统边框的双向箭头由窗口管理器画，app 内可控的那一根是 8.8-08 的 `cursor-col-resize`——验收要如实这么写。
+- **V 半边欠项**（按 `[!]` 挂着，解除条件都写进 `8.8-08-slot-drag-geometry.txt` 第三段）：
+  指针真落页（本轮没在别人正在用的真实平台实例上搬视图，遮挡时 CDP 输入不落页）、
+  两套主题下折叠默认态的实际画面、"发送"那颗键在 369px 右栏里的实测宽度、
+  以及 6.2-06 / 6.2-25 那两族已有的浮层读数。Windows / Linux 窄宽行为在本机不可验（§9 第一条）。
+
+---
+
 ## 4. 分片与落点
 
 | 片号 | 内容                                                                              | 文件                                                                  |

@@ -250,8 +250,14 @@ spec 8.2-03 已按实测收窄，不是让步。
    BOSS 首页是 1224px 起铺的定宽布局，1200 宽的窗口即使展开也只有 1015px，仍差 209px（读数见
    `docs/acceptance/08-real-platform-driving/8.8-05-real-viewport.txt`）。要把这一格彻底拿掉，
    需要一只可单独最大化/全屏的窗口宿主——那会动到"视图宿主唯一"这条 §8.3 决策 1，得先立缺件再动。
-2. **拖宽（连续）而非档位**：现在只有三档 + 展开。用户如果要的是"鼠标拖着走"，那要在槽位左缘加一只把手，
-   并把 `WIDTH_CLASSES` 换成一个可拖出的像素值（同一份 localStorage 键）。8.8 先交付"看得见、点得动、铺得开"。
+2. ~~**拖宽（连续）而非档位**：现在只有三档 + 展开。~~ ⇒ **已交付（spec 8.8-08，2026-10-09）**，但**两条实现取向与这里原本的设想不同**，按实测改判：
+   ① 拖出来的是**百分比**而不是像素值——px 会让 `shrink-0` 的右栏变成定宽，缩窗口时把 `main` 挤死，而 8.8-01/03 的既有读数全是"行的比例"，
+   百分比与它回落的那支令牌（`--kernel-view-width`）同单位；localStorage 仍用同一支键 `auto-cc.kernel-slot-width`，值域从下标 `0|1|2` 换成整数 38…72，
+   旧下标**换算回它自己那一档**而不是抹掉（本机活体读到 `storedWidth:"1"`，有人真的表达过宽度）。
+   ② 把手**不能挂在槽位 `<aside>` 的左缘之内**：原设想 `absolute inset-y-0 left-0` 实测 `handle.right = 1292 > slotRect.x = 1286`
+   （`p-4` 缩的是它的孩子，不是它的边框盒），整条把手被原生视图盖住，人握的是网页不是把手。
+   交付的形状是同一条 flex 行的**前一个兄弟**，判据 `handle.right <= slotRect.x`（读数 `docs/acceptance/08-real-platform-driving/8.8-08-slot-drag-geometry.txt`）。
+   指针真落页那一半仍 `[!]`（遮挡时 CDP 输入不落页，§9 的 2.1-12），解除条件写在那份读数的第三段。
 3. **元素级滚进画面**：8.0-04 实测真站点的关键控件长在**内部滚动容器**里（`div.job-detail-container` scrollHeight 1376 /
    clientHeight 446），而 `browser.page.scroll` 滚的是 window——滚到底也到不了它，`browser.act.click` 因此在
    "元素确实存在"的情况下报 `WAIT_TIMEOUT`。8.4/8.5 的外发控件同样在面板内，这一格不补就会出现"选择器没错、就是点不到"的静默失败。
