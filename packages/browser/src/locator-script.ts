@@ -249,7 +249,23 @@ function buildPrelude(limits: ScriptLimits): string {
     const unobstructedOf = (node, rect) => {
       if (rect.width <= 0 || rect.height <= 0) return false;
       if (typeof document.elementFromPoint !== 'function') return true;
-      const point = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      /**
+       * 命中测试答不上来有两种，必须分开：视口尺寸读不到（0）时按「不知道」处理，退回原来的命中测试。
+       */
+      const viewportWidth = finite(globalThis.innerWidth);
+      const viewportHeight = finite(globalThis.innerHeight);
+      if (
+        viewportWidth > 0 &&
+        viewportHeight > 0 &&
+        (centerX < 0 || centerY < 0 || centerX > viewportWidth || centerY > viewportHeight)
+      ) {
+        // 这一点压根不在视口里 = 「还没滚进来」，不是「被盖住」：留给动作层滚进画面那一步，
+        // 滚不进会以 ACT_OUT_OF_VIEWPORT 停手且一条命令都不发（spec 8.4-06，证据 8.4-01 第一节）。
+        return true;
+      }
+      const point = document.elementFromPoint(centerX, centerY);
       if (!point) return false;
       return point === node || node.contains(point);
     };

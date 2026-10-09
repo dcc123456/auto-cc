@@ -1,0 +1,104 @@
+8.4-01 · 真实打招呼 1 条发出，以页面状态行回读到 sentPattern 为凭（不看 act.click 返回码）
+执行时间：2026-10-09 11:44–11:54（页面自己在气泡旁写的钟点是 11:53）
+现场条件：**用户在场**，本人账号；app 窗口 **1200×772，未最大化**；内核视图槽位与主进程摆位读数
+一致（`{x:337, y:88, width:863, height:654}`），加宽键带 `data-disabled-reason="WIDTH_MAX"`，
+即这一轮跑在三档 + 展开档都到不了 1224 的那个上限上。
+前置读数：boss 会话 `auth:"active"`（cookie 只列名字：`__a / __zp_stoken__ / bst / wbg / wt2 / zp_at` 等 12 只，值不出 electron 边界）；
+`sessions.consentStatus('boss')` = `{granted:true, acknowledgedAt:1791452031587}`；
+`entitlement.gate.check('greet')` = `{allowed:true, remaining:null, reason:null}`；
+发之前 `usage.ledger.summary` total=4、byAction 只有 `search×4`（**greet 零行**）。
+
+────────────────────────────────────────────────────────────────────────
+第一节 · 这一发是怎么出去的（全部走产品自己的通道）
+────────────────────────────────────────────────────────────────────────
+入口：渲染层白名单里那一只 `outbound.greet.perform`，位置实参一条：
+
+    { platform: 'boss', conversationTarget: '上海肯德基有限公司', text: '您好，我对贵司这个岗位很感兴趣，方便聊聊吗？' }
+
+- **没有 jobId**：目标走的是会话坐标那一维（裁定⑲），回执里 `jobId:null / conversationTarget:'上海肯德基有限公司'`。
+- 目标是谁不是脚本从页面里挑的：`browser.locate.find` 按知识包 `chatConversationLabel` 那一条候选读出五行
+  （0=上海肯德基有限公司 / 1=紫川软件 / 2=上海坤亿 / 3=巨闲网络 / 4=子雄科技，`hitIndex` 与文档顺序一致），
+  第 1 行是**用户在场时点名的那一条**（列表最上面那条），不是这里挑的。
+- 编排链一字未动：consent → 渠道 → 幂等 → 文案（`origin:'manual'`，本次没生成话术）→ 黑名单 →
+  `entitlement.gate.enforce` → 频控 → `gate.perform`。**绕开闸门的那条口不存在**（§7.3）。
+
+回执（`GreetReceiptView` 原样）：
+
+    { platform:'boss', jobId:null, conversationTarget:'上海肯德基有限公司',
+      reason:'状态行回读到成功样式「[送达]」：[送达]',
+      ledgerId:5, waitedMs:0, source:'manual:上海肯德基有限公司', origin:'manual' }
+
+`waitedMs:0` 是频控读数：账本里最近一条 greet 不存在，所以没有间隔要等，不是"跳过了频控"。
+整发耗时 61338ms，其中大头是页面侧的等待（等列表长出来、等输入框挂载、等状态行回读），不是额度也不是频控。
+
+────────────────────────────────────────────────────────────────────────
+第二节 · 凭的是页面自己的回读，不是 act.click 的返回码
+────────────────────────────────────────────────────────────────────────
+发完之后另开一条只读 attach 到真页面（harness 对真实 target 只读、不 navigate）：
+
+    statusNodes（`i.message-status` 全列，取末尾四条）:
+      {cls:'message-status status-delivery', text:'[送达]'}
+      {cls:'message-status status-delivery', text:'[送达]'}
+      {cls:'message-status status-read',    text:'[已读]'}
+      {cls:'message-status status-delivery', text:'送达'}     ← 这一条是刚发出去的
+    composer（`div[contenteditable="true"]` 的 textContent）: ""      ← 站点自己清空了输入框
+    body 末尾: 「… | 11:53 | 送达 | 您好，我对贵司这个岗位很感兴趣，方便聊聊吗？ | 发简历 | 换电话 …」
+
+`sentPattern` 是知识包登记的 `[送达]`（`chat.sentPattern`，来自 8.0-05 的在场读数），适配器拿它去问**状态行那一格**，
+回读到了才 `sent:true`；这一条判据与 `browser.act.click` 的返回值无关——第一条回执（第一次尝试）里
+`act.click` 压根没跑到，而第二次 `act.click` 就算回了 done 也不作数，作数的是上面这四行。
+
+────────────────────────────────────────────────────────────────────────
+第三节 · 「不最大化也能执行」在这一发上兑现（8.4-05 的活体半边）
+────────────────────────────────────────────────────────────────────────
+同一轮里读到的三条几何，构成一条完整因果链：
+
+    发送前：document.documentElement {scrollWidth:1224, clientWidth/innerWidth:863, scrollLeft:0}
+            button.btn-send rect {x:1112, y:601, width:62, height:28}   ← 1112 > 863，在画面外
+            document.elementFromPoint(1143, 615) = null
+    发送后：scrollLeft:361   （361 = 1224 − 863，正是那一屏的横向裁切量）
+            button.btn-send rect {x:751, y:601, width:62, height:28}    ← 复读后的新矩形，在 863 视口内
+            派发点取的是这份**复读后**的中心，不是 1112 那份
+
+结论：窗口 1200 宽、未最大化、视图停在 863 的界上，这一发仍然真把消息送到了。
+旧那句「活体验收必须把窗口带到 ≥1410 宽」从此作废——1410 是 `1224（站点最小布局）+ 185（app 左轨）` 的和，
+是动作层的缺口被误记成操作系统窗口的要求。知识包 `chatSendButton` 那条描述已按本节改写。
+仍然保留的另一条：`document.visibilityState==='hidden'` 时 CDP 输入不落页（§9 的 2.1-12），
+**那是"用户必须在场把窗口带到前台"这条义务，与宽度无关**；本轮两条读数都是在这一句成立之后取到的
+（发送前实测 `visibility:'visible'`，此前一次为 `hidden`）。
+
+────────────────────────────────────────────────────────────────────────
+第四节 · 第一次尝试死在哪里（这是本轮真正的缺陷，另立 8.4-06）
+────────────────────────────────────────────────────────────────────────
+第一次调用同一发，62003ms 后结构化失败：
+
+    { ok:false, code:'WAIT_TIMEOUT', message:'等待「clickable」超时（5000ms 内未满足）',
+      details:{ waitedMs:20206, snapshot:{ elementCount:543, bodyText:'…您好，我对贵司这个岗位很感兴趣，方便聊聊吗？\n按Enter键发送…' } } }
+
+那一轮里：**行选中成功了**（快照正文出现「朱梅 / 上海肯德基有限公司 / 经理 / 兼职·昌平兼职长期稳定服务员 / 查看职位」），
+**正文也真落页了**（快照正文末尾就是我要发的那句，输入框里挂着它 + 「按Enter键发送」提示），
+死在发送键的「等到可点」那一步。根因单独读过：
+
+    button.btn-send {found:true, cls:'btn-v2 btn-sure-v2 btn-send', disabledProp:false, ariaDisabled:null,
+                     rect x=1112, innerWidth 863, elementFromPoint(中心)=null, scrollLeft:0}
+
+也就是：`locator-script.ts` 的 `unobstructedOf` 用 `elementFromPoint` 判遮挡，而**命中测试在视口之外回的是 null**，
+于是"根本没在画面里"被读成了"被别的元素盖住"，`clickableStable` 的三条（visible+enabled+unobstructed）永远缺一条，
+等 20s 超时。这条等待排在定位与滚进画面**之前**，所以 8.4-05 那一步根本没被执行到。
+账本读数证明那一次什么都没发：total 4→4、byAction 无 greet、页面上也没有新气泡——**失败的一侧不落账**。
+修法（spec 8.4-06）：`unobstructedOf` 把"这一点在视口外"与"被盖住"分开——前者是"还没滚进来"，
+交给滚进画面那一步；视口尺寸读不到（0）时不吃这条快捷路径，仍按命中测试保守处理。
+
+────────────────────────────────────────────────────────────────────────
+第五节 · 这一格没有拿掉的东西
+────────────────────────────────────────────────────────────────────────
+- 真实投递（8.5-01/02/03）一行未动：`boss.json` 至今没有带在场读数的 `deliver` 段，
+  `deliverablePlatforms()` 仍然如实回"还不能递"。这一格只发了一句打招呼。
+- 风控/验证码整轮没长出，所以 8.4-03 标 `[!]`，读数另档（`8.4-03-risk-takeover.txt`），不推测。
+- 入库的图片这一轮**没有**：§7.1 的 V 判据这里走的是 DOM 断言（第一、二、三节全是页面自己回的字段）。
+  真页面截图会把招聘方姓名、联系方式与本人简历摘要一起带进 git，而这一格的凭据不需要它才成立。
+- 界面侧没有为"会话坐标打招呼"这一路长出确认卡：`JobLabPanel` / `ScriptPanel` 那两只「打招呼」按钮传的是
+  `jobId`，渲染层射程内**没有**任何一只按钮带 `conversationTarget`（grep 过 renderer，零命中）。
+  本轮走的是白名单里那一只 bridge 调用，与界面按钮同一条编排、同一个闸门；
+  "界面上按哪一颗来发这一发"因此仍是一格欠项（记在 plan §7 第 15 条）。
+- 人这一侧的点头是**这一发之前**给的（目标=列表第 1 行、文案逐字确认），不是事后追认。

@@ -221,7 +221,7 @@
       ]
     },
     "chatSendButton": {
-      "description": "发送键 button.btn-v2.btn-sure-v2.btn-send，文本「发送」。两条实测：① 空内容时挂的是 **.disabled 类名**，button.disabled 读回 false、aria-disabled 缺席（AGENTS.md §9 的 6.2 二三片口径②），判「点不动」要读类名；② 取证那屏它 rect x=1112 而视图只有 1015 CSS px，即在画面外——活体验收必须把窗口带到 ≥1410 宽（证据 8.0-05 第四节末）",
+      "description": "发送键 button.btn-v2.btn-sure-v2.btn-send，文本「发送」。两条实测：① 空内容时挂的是 **.disabled 类名**，button.disabled 读回 false、aria-disabled 缺席（AGENTS.md §9 的 6.2 二三片口径②），判「点不动」要读类名；② 取证那屏它 rect x=1112 而视图只有 1015 CSS px，即在画面外。**这一条不再要求人把窗口拉宽**（2026-10-09 复量：那句「≥1410」其实是 1224 站点最小布局 + 185 app 左轨的和，不是操作系统窗口的要求）——把目标滚进本帧视口并复读矩形是动作层的责任（spec 8.4-05 / 8.4-06），滚不进就以 ACT_OUT_OF_VIEWPORT 停手且一条命令都不发。活体实测（863 宽、未最大化）：这一发把 scrollLeft 从 0 滚到 361、矩形从 x=1112 复读成 x=751，页面状态行回读到「[送达]」（证据 8.4-01-greet-page-receipt.txt 第三节）",
       "cardinality": "single",
       "candidates": [
         {

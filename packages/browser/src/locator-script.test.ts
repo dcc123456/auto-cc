@@ -391,6 +391,35 @@ describe('定位读取脚本（spec 2.2-01）', () => {
     ).toMatchObject({ visible: false, unobstructed: false });
   });
 
+  it('被横向裁掉的目标不算「被盖住」（spec 8.4-06）：命中测试在视口外答不上来是「还没滚进来」', () => {
+    const offscreen = fakeNode('button', { attrs: { id: 'send-1' }, box: { x: 1112, y: 601, width: 62, height: 28 } });
+    const page = fakePage(fakeNode('body', { kids: [offscreen] }));
+    const world = { innerWidth: 863, innerHeight: 654 };
+    expect(scan([{ strategy: 'id', value: 'send-1' }], DEFAULT_SCRIPT_LIMITS, page, world)[0]).toMatchObject({
+      visible: true,
+      enabled: true,
+      unobstructed: true,
+    });
+
+    // 这一格放开的是「量不到」，不是「被盖住」：同一条候选在视口内被浮层压住时仍然是 false。
+    const covered = fakeNode('button', { attrs: { id: 'send-1' }, box: { x: 100, y: 600, width: 62, height: 28 } });
+    const mask = fakeNode('div', { attrs: { id: 'mask-1' }, box: { x: 0, y: 0, width: 863, height: 654 } });
+    expect(
+      scan(
+        [{ strategy: 'id', value: 'send-1' }],
+        DEFAULT_SCRIPT_LIMITS,
+        fakePage(fakeNode('body', { kids: [covered, mask] })),
+        world,
+      )[0],
+    ).toMatchObject({ visible: true, unobstructed: false });
+
+    // 视口尺寸读不到（0）时不吃这条快捷路径：仍然只信命中测试，答不上来就按未满足处理。
+    const blind = { ...page, elementFromPoint: () => null };
+    expect(scan([{ strategy: 'id', value: 'send-1' }], DEFAULT_SCRIPT_LIMITS, blind, {})[0]).toMatchObject({
+      unobstructed: false,
+    });
+  });
+
   it('像机器生成的属性值进不了指纹：下次构建它就变了，留着只会把自愈带偏', () => {
     const generated = fakeNode('button', {
       attrs: { id: 'btn-4711' },
@@ -549,6 +578,25 @@ describe('DOM 兜底与等待脚本（spec 2.2-03 / 2.2-12）', () => {
       ),
     );
     expect(reading.satisfied).toBe(false);
+  });
+
+  it('clickable 等得到被横向裁掉的那一格（spec 8.4-06）：这一格放行，滚不进来由动作层停手', async () => {
+    // 真站点那一发就死在这里：发送键 rect x=1112 而视图只有 863 宽，命中测试答不上来被当成「被盖住」，
+    // 于是等 20s 超时、一个动作都没派发。可点性只管「页面准备好了没」，把目标挪进画面是下一步的事。
+    const send = fakeNode('button', {
+      attrs: { id: 'send-1', class: 'btn-send' },
+      ownText: '发送',
+      box: { x: 1112, y: 601, width: 62, height: 28 },
+    });
+    const reading = toWaitReading(
+      await run(
+        buildWaitScript('clickable', [{ strategy: 'id', value: 'send-1' }], 30, 5),
+        fakePage(fakeNode('body', { kids: [send] })),
+        { innerWidth: 863, innerHeight: 654 },
+      ),
+    );
+    expect(reading.satisfied).toBe(true);
+    expect(reading.readings[0]).toMatchObject({ unobstructed: true, rect: { x: 1112, y: 601 } });
   });
 
   it('textChanges 以脚本自己取的基线为准，页面文本没变就不算等到', async () => {
