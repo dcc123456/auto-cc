@@ -1,0 +1,112 @@
+6.2-32 收口审计读数（第九片：两屏剩余平铺文案逐条对规则①、§2.4 死代码、披露层几何活体复量）
+================================================================================
+时间：2026-10-09。实例：`pnpm dev`（CDP 10222，渲染层 target `--url 5173`）。
+窗口 2072×773 CSS，`document.visibilityState === "visible"` —— 因此本轮的指针判据是真的落页，
+不是 `node.click()` 那一条逻辑层通道（`harness click` 回「已点击 <button>（原生鼠标事件）」，
+且页面读数随每一次真实点击改变，见下面第 4 段）。
+
+1. 平铺长文案扫描（规则①的界面半边，不是语言包半边）
+--------------------------------------------------
+探针 `tmp/32-flat-probe.js`：走 DOM 文本节点，取汉字数 ≥24 且**不在** `[data-explainer]` /
+`[data-section]` / `[role=dialog]` 之内、自身矩形非零的节点。
+
+- 对话屏：1 条命中——`<p class="whitespace-pre-wrap break-words">`，83 字，正文是
+  「已收到：「找前端岗位」。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；……」。
+  这是**消息正文**（`ChatPanel.tsx:89` 的气泡内容），不是界面文案，按规则①的射程外处理。
+- 岗位屏：0 条命中。
+
+即：两屏明面上已经没有任何一条 ≥24 汉字的平铺说明。
+
+2. 对话屏输入区那一行的实际几何
+----------------------------
+`tmp/32-composer-probe.js` 读数（行宽 668）：发送 86px（文案 2 字 + 图标 12）、停止 86px、
+披露层触发「这两条命令怎么用？」114px（8 字）。整格 footer 的汉字合计 12。
+用户那句「发送那颗键现在也长了，一条说明文案太显眼」在这一行已经落地：长说明撤进披露层，
+明面只剩动词。
+
+3. 三格收纳的默认态（DOM 直读，`tmp/32-disclosure-probe.js`）
+-----------------------------------------------------------
+| 段 | data-open | 收起高度 | summary 带回的读数 | 正文是否挂载 |
+| --- | --- | --- | --- | --- |
+| `agent.autonomy`（对话屏） | false | 62 | 「agent 替你做主到哪一步 / 建议模式」 | 否 |
+| `deliver.form`（岗位屏，默认展开） | true | 201 | 「把简历递出去 / 0 份在等你点头」 | 是 |
+| `jd.progress` | false | 62 | 「抓取进度 / 还没有抓取进度」 | 否 |
+| `jd.outcome` | false | 62 | 「这一轮的结果 / 还没有跑过抓取」 | 否 |
+
+四只披露层触发文案的汉字数：10 / 8 / 8 / 9（`chat.session.hints`、`chat.hints`、`deliver.how`、
+`script.how`），全部 `open=false` 且正文未挂载。收起态**没有**把"这一格此刻怎么样"一起收走。
+
+4. 真实鼠标点开的开合与持久化
+--------------------------
+`harness click --url 5173 --selector '[data-action="agent.autonomy-toggle"]'`：
+
+- 第一次点：`data-open` false → true，`h` 62 → 216，`[data-testid=chat-autonomy-switch]` 宽 180（挂载）。
+- 第二次点：回到 false / 62 / 正文卸载。
+- 第三次点（岗位屏那格同理，`jd.progress-toggle`）：`h` 62 → 105。
+- 落盘读数：`auto-cc.desk.disclosure` 先 `{"agent.autonomy":true}`，点过岗位屏那一格后是
+  `{"agent.autonomy":false,"jd.progress":true}` —— **合并写**成立（前一格没被清掉），
+  且收起态也显式落了 `false`（人关过与从没关过是两件事）。
+
+5. 缺陷 A：展开态的正文被静默裁掉一截（本轮活体复量才发现）
+-------------------------------------------------------
+`tmp/32-clip-probe.js` 第一版读数：`sectionH=216` 而 `62(段头)+261(正文)=323`——
+段落的盒子比自己的内容矮 107px，正文底部整行被 `overflow-hidden` 裁掉，且没有任何滚动口。
+根因与 `controls.tsx` 里那条 `overflow-hidden` 注释同源：段落在纵向 flex 列（对话屏
+`[data-testid=chat-panel]` 是 `flex h-full flex-col`）里是 flex 子项，而子项的自动最小尺寸在
+overflow 非 visible 时塌成 0，于是列不够高时被压扁的是这一段。
+
+6. 缺陷 B：把 `overflow-hidden` 摘掉之后，被顶出画面的是输入区
+----------------------------------------------------------
+只摘 `overflow-hidden`（让段落按内容长）后的读数（`tmp/32-band-probe.js` / `tmp/32-spill-probe.js`）：
+对话列各带合计 **733** 而面板只有 **652**，`[data-action=send]` 的 `bottom=817 > innerHeight=773`
+——发送那颗键整个跑到窗口之外。这正是本族要治的那条病（常驻带吃掉输入区）在展开态的复发。
+
+7. 落地修法与修后读数
+-----------------
+`ui/disclosure.tsx` 的 `DeskSection`：段 = `flex flex-col overflow-hidden`，段头 `shrink-0`（常驻），
+正文 = `min-h-0 flex-1 overflow-y-auto`（这一段里唯一可滚的一格）。
+
+- 对话屏展开态：列合计 733 → **626 ≤ 652**；`send.bottom` 817 → **710 ≤ 723（面板内）**；
+  段高 216 = 62 段头 + 154 正文，而正文 `scrollHeight=260` → 读不到的那 106px 由正文自己滚，
+  不再被裁、也不再顶掉输入区。
+- 岗位屏同一段不受影响：`deliver.form` 正文 `h=139 / scrollH=138` → `hasInnerScrollbar=false`
+  （外层列 `block min-w-0 flex-1 overflow-y-auto p-5` 在滚，内层不该长出第二条滚动条）。
+- 代价按实说：窗口很矮时展开的段落会短于其内容而需要内层滚动，段头仍常驻。窗口地板
+  （6.4-06 的 `packages/shell` 半边，`minWidth: 1000 / minHeight: 668`）不在本轮射程，
+  由并行会话落；落了之后这一格的可用高度才有下限保证。
+
+8. 语言包侧的规则①普查（本轮射程内命名空间）
+--------------------------------------
+`tmp/32-census.py`：`jd.*` / `deliver.*` / `script.*` / `chat.*` / `agent.*` / `kernel.*` 里
+≥24 汉字的条目 **26 支**（本轮收口后）。
+
+- 已进披露层（7）：`chat.compress.factsHeading`、`chat.sediment.hint`（本轮从平铺位置撤下）、
+  `chat.session.deleteHint`、`deliver.hint`、`deliver.pipeline`、`deliver.tiers`、`script.hint`。
+- 仍平铺但**不算 hint**（12）：`agent.pause.reason.ACTION_BUSY`、`agent.policy.reason.ACTION_BUSY`、
+  `agent.run.resumeHint`、`agent.run.stopAccepted`、`chat.evidence.hollow`、`chat.sediment.notSettled`、
+  `chat.sediment.residualHint`、`jd.errNoSession`、`script.evidenceNoHits`、`script.evidenceNoTokens`、
+  `script.quoteRequired` —— 逐条是错误、拒因、状态回执或「别信这个」的警告，按收纳通则必须在明面。
+  其中 `agent.policy.hint` 的 36 字说明由**消费者那一侧**收：`AgentPolicyPanel` 整体在
+  `ChatPanel.tsx:266` 的 `DeskSection id="agent.autonomy"` 正文里，收起态不挂载。
+- 动态拼接键（7，探针按字面量找不到引用点，不是死键）：`agent.pause.outcome.*`、
+  `agent.pause.reason.SUPPLEMENT_EMPTY`、`agent.run.reason.*`、`script.reason.QUOTE_REQUIRED`。
+
+本轮压到 ≤24 汉字的 5 条：`chat.empty`、`chat.sediment.savedHint`、`agent.pause.hint`、
+`script.quoteHintGreeting`、`script.pickHint`。
+
+9. §2.4 死代码普查
+--------------
+- 退役键（`jd.progressRow`、`jd.outcomeRow`、`consent.mustRead`、`deliver.pendingRow`、
+  `deliver.receiptRow`、`jd.greetReceiptRow`）与旧的 `WIDTH_CLASSES` 数组：全仓 grep **0 命中**，
+  没有留两半用。
+- 零消费者的槽位两条：`Banner` 的 `actions` 从写下到本轮没有任何调用点（6.2-25 那条教训的同一形状），
+  本轮由 `TakeoverBanner` 的「交还」那颗接上——那条横幅三行读数 + 一颗键同处一条 `flex-wrap` 行，
+  被挤的正是按钮，而这一格按裁定永不收起；接管态需要真实接管，本轮**未取**它的几何读数。
+  `DeskSection` 的 `actions` 槽位本轮**删除**：五只消费者没有一格需要在段头挂常驻键，
+  留着就是一支没有读数的原件。
+
+10. 仍未取的一腿
+------------
+拖拽把手的"人握得动"（8.8-08 的指针半边）本轮**不取**：窗口此刻可见、真实鼠标确实落页，
+但拖宽会改到内嵌视图的宽度，而并行会话正在真实平台上跑抓取（AGENTS.md §9 第⑯条同源的避让口径）。
+数值判据（`handle.right <= slotRect.x`）与键盘/双击三条路径的读数已在 8.8-08 那份文件里。
