@@ -240,11 +240,13 @@ export function SedimentCard({
 
           {saved ? (
             <p
-              className="flex flex-wrap items-center gap-1 text-jade"
+              // 回执行原来挂 `flex-wrap`，于是长句子换行时那只对勾会被单独留在上一行末尾——图标与它
+              // 说明的那句话是一件事，不该分家；改 `items-start` 让句子自己折，图标钉在第一行旁边。
+              className="flex items-start gap-1 text-jade"
               data-testid="sediment-saved"
               data-plan-id={saved.id}
             >
-              <Check size={12} />
+              <Check size={12} className="mt-0.5 shrink-0" />
               {t('chat.sediment.saved', { name: saved.name, count: saved.nodeCount })}
               <span className="text-[10px] text-slate-400">{t('chat.sediment.savedHint')}</span>
             </p>

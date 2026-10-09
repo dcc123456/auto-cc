@@ -39,8 +39,11 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
   // + 700 + `letter-spacing:.06em`），其余五档共用 sans 中字重。字体、字重与字距挂在 base 而不是档位串里，
   // 是因为它跟"可点不可点"无关：稿 `.seal.off` 仍是宋体，只是描边退回灰。
   const font = variant === 'seal' ? 'font-display font-bold tracking-[0.06em] ' : 'font-medium ';
+  // `[&_svg]:shrink-0` 挂在 base 而不是各调用点：调用方写的是「图标 + 译文」两个兄弟节点，
+  // 图标作为 flex 项默认能被压扁，窄列里就成了"图标瘦成一条、文字照旧"。取后代 `[&_svg]` 而不是 `[&>svg]`：
+  // 图标并不直接坐在 <button> 下，它在那层文案 `<span>` 里、带 `doneLabel` 时还要再深一层，`>` 两处都够不着。
   const base =
-    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-control border ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'} ` +
+    `inline-flex items-center gap-1.5 whitespace-nowrap [&_svg]:shrink-0 rounded-control border ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'} ` +
     font +
     'transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70 ' +
@@ -422,6 +425,12 @@ export interface BannerProps {
   markers?: Record<string, string>;
   /** 追加 class（贴在整条横幅外框上，例如去掉圆角改成通栏） */
   className?: string;
+  /**
+   * 条尾动作槽（例如「去看一眼」「再发一次」那颗键）。给它就在末尾另起一个 `shrink-0` 的格子渲染，
+   * 不再混进 `children`：正文与按钮同处一条 `flex-wrap` 行时，一条上百字的读数会把按钮整个挤到下一行，
+   * 而按钮自己不许被压扁（`DeskButton` 根节点刻意不裁切，见本文件那条 `overflow-hidden` 注释）。
+   */
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -434,9 +443,10 @@ export interface BannerProps {
  * @param reason 原因码（可选）
  * @param markers 附加 `data-*` 读数（可选）
  * @param className 追加在外框上的 class（可选，只放外边/宽度档）
+ * @param actions 条尾动作槽（可选；与正文争宽的那类按钮走这一格，见 BannerProps）
  * @param children 文案（调用方负责 i18n）
  */
-export function Banner({ tone, size = 'full', reason, markers, className = '', children }: BannerProps) {
+export function Banner({ tone, size = 'full', reason, markers, className = '', actions, children }: BannerProps) {
   const Icon = BANNER_ICON[tone];
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
@@ -449,6 +459,8 @@ export function Banner({ tone, size = 'full', reason, markers, className = '', c
     >
       <Icon size={BANNER_ICON_SIZE[size]} className="mt-0.5 shrink-0 opacity-80" aria-hidden="true" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
+      {/* 动作与正文分格：正文那一格带 `min-w-0` 由它自己换行，这一格永远保有自己的宽度。 */}
+      {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
     </div>
   );
 }
