@@ -116,3 +116,38 @@ a.btn.btn-primary.btn-file            文本「上传附件简历」，rect 0×0
 待裁的一格（不在本片里自行改）：`approveTimeoutMs` 出厂 120000（`cordis.yml` 的 `outbound-deliver`）
 对"发单 → 人读到 → 点下去"这一串够不够——本轮从发单到超时只有整整两分钟，而我一次读数往返就要几十秒。
 这一格要的是人的表态，不是代码默认值。
+
+---
+
+## 七、第二轮（同日 16:40–17:10，用户在场）：五张确认单全部空转，两条新根因 + 一条环境阻塞
+
+裁定㉓（`approveTimeoutMs` 120000 → **300000**）已按两条独立通道核过：
+`plugins.readConfig('outbound-deliver')` 现读 `approveTimeoutMs: 300000`（改前 120000、`mounted:true`），
+回执文案也跟着换边——`OUTBOUND_APPROVAL_DENIED / 未投递：等待确认超过 300000ms，按拒绝处理`
+（单号 `8045b4c9-…`，栈顶 `OutboundDeliverService.awaitApproval`）。**放宽的只有等人点头的时间，门禁一条没松。**
+
+这一轮连着发了五张单，**一张都没被点到**，全部按拒绝处理、`usage_ledger` 与 `delivery_records` 前后不增行：
+`8045b4c9`（到期）、`96bfd70b`（到期）、`2d919107`（到期）、`…692709`（到期前 6 秒被下面的遮罩挡住，回执未直取）。
+根因两条，都不是"可见性"：
+
+1. **两道视图里那两只同名按钮的文案不一样**，而我按字面指路指错了屏。
+   对话屏「等人表态」带里那张琥珀卡（抬头「投递要把简历发给这个岗位（outbound.deliver 自己的确认单）」，
+   含目标/文件/字节数/sha 前缀/申请时间与**「到点即拒 17:09:52」**），两颗键写着 **「批准」/「拒绝」**；
+   岗位屏 `[testid=job-lab] > [testid=deliver-pending]` 里那一只写着 **「确认投递」**。
+   我三次说"点『确认投递』"，人停在对话屏上就找不到那颗字。画面证据（脱敏前）：`tmp/p8-507-fired.png`。
+   ⇒ 第六节第 1 条要再加一句：两只按钮**同 `data-action`、异文案**，所以无论人点还是脚本找，
+   都必须先按"哪一屏有尺寸"定位，不能按文案。
+2. **有尺寸的那一只确实可点**（同轮实测：`rect (234,405,101,24)`、中心点命中测试 `isSelf:true`、
+   `scrollIntoView({block:'center'})` 不改变它），所以"看不见"这一说在本轮再次不成立。
+
+**环境阻塞（本轮收在这里，不是产品结局）：** 同一个工作树里的并行会话把
+`packages/renderer/src/JobLabPanel.tsx` 写到了 JSX 未闭合的中间态，vite 报
+`[plugin:vite:react-babel] … Expected corresponding JSX closing tag for <DeskSection>. (581:6)`，
+红色遮罩铺满整屏、`#root` 子节点数 0、`document.body.innerText` 为空，
+且**页面里的 `Runtime.evaluate` 全部挂住不返回**（同一条 CDP 通道上 `Page.captureScreenshot` 照样出帧）。
+由此两条口径：① 判"界面卡住了"之前先拍一张看有没有 overlay，不要拿挂住的 eval 当产品缺陷；
+② **本轮遮罩之后取到的 DOM 读数一律作废**（含 `approveTotal:1 / bandExists:false / sectionCount:0` 那几次），
+它们量的是坏掉的编译产物，不是渲染层的行为。
+
+⇒ 「注入之后页面长出什么」（`deliver.sendButton` / `sentPattern`，第五节第 ② 条）**这一轮仍然没拿到**，
+8.5-01 的活体半边保持 `[ ]`。下一刀的前提是渲染层能编译，且指路按当前屏的实际文案说。
