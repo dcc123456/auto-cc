@@ -1,0 +1,86 @@
+8.8-10 网页窗口控件换装 + 收起/全屏/拖拽三条腿（2026-10-09，窗口 visibilityState=visible，CDP 10222，全部 --url 5173）
+
+同一环境说明见 `6.2-33-35-copy-and-bubbles-readings.txt` 抬头（真指针、窗口在前台、量几何前注入无动效）。
+内容区 1200×742：左轨 184、主区从 184 起、把手 6、右栏从 744 起（38% 档）。
+
+────────────────────────────────────────────────────────────────────────
+【1】工具行控件清单（收窄 / 加宽已删，展开改成全屏，整栏可收起）
+
+  aside 内按钮：[data-action="kernel-slot-expand"]  文案/标题「全屏」
+                [data-action="kernel-slot-hide"]    文案/标题「收起」
+  收起态竖条：  [data-testid="kernel-slot-strip"] 内 [data-action="kernel-slot-show"]（aria-label「展开网页窗口」，只有图标）
+
+`kernel-slot-narrow` / `kernel-slot-widen` 在 DOM 里已经数不到（工具行只有上面两颗），
+语言包侧 `shell.kernel.narrow/widen/atMax/atMin` 五支同批删除（§2.4 不留两半用）。
+**随之退役的通道**：8.8-02 / 8.8-04 那两条 `data-disabled-reason=WIDTH_MIN/WIDTH_MAX` 读数没有替代按钮——
+同一件事的新通道是把手上的 `role="slider"` + `aria-valuemin=38 / aria-valuemax=72 / aria-valuenow=<当下值>`，
+以及拖到边界时的夹取（见下面【3】的 72 与【5】的 38 两个读数）。既有 `[x]` 条目一律不改写（§4.5）。
+
+  handle = { role: "slider", valuemin: "38", valuemax: "72", valuenow: "38", cursor: "col-resize" }
+
+────────────────────────────────────────────────────────────────────────
+【2】8.8-08 欠的那半条指针腿：真拖确实落页
+
+`harness drag --from-selector [data-action="kernel-resize-handle"] --to-selector [data-action="nav-jobs"]`
+（把手中心 741,396 → 91.5,109，负位移 = 变宽）：
+
+  aside   x=744 w=456  →  x=336 w=864
+  main    w=554        →  w=146
+  measured 455×654     →  863×654
+  aria-valuenow 38     →  72（夹在 WIDTH_MAX）
+  localStorage auto-cc.kernel-slot-width "38" → "72"
+  handle.right=336 = aside.x → 视图永远盖不到把手（8.8-04 的横向那条判据仍然成立）
+
+────────────────────────────────────────────────────────────────────────
+【3】整栏收起 → 竖条 → 重新展开（宽度不丢）
+
+  收起后：aside 就是那条竖条 x=1164 w=36 h=691，main 980，`kernel-slot-measured` 与把手都不在 DOM 里，
+          持久值仍是 "72"（收起不改宽度）。
+  展开后：aside x=336 w=864、`aria-valuenow=72`、`--kernel-slot-width: 72%` —— 回到人留下的那一档。
+
+这一格是本轮**修掉的第一个缺陷**：`useLayoutEffect` 原先只依赖 `layout.ratio`，收起态 aside 节点不存在、
+重新挂载时这一格不重跑，右栏于是落回 `:root` 的 38%（活体读数：拖到 66% 收起再打开，aside 量回 456px 而持久值是 66），
+画面上同时挂着"人存的宽度"和"渲染层画的宽度"两份事实。修法是把 `viewVisible` 放进依赖
+（与 `ResizeObserver` 那一格同一个道理，`KernelViewSlot.tsx:147`、`:160`）。
+
+────────────────────────────────────────────────────────────────────────
+【4】全屏 = 铺满整条工作区（渲染层就能做，不动操作系统窗口）
+
+`kernel-slot-expand` 真指针点下：
+
+  aside x=184 w=1016（= 整条工作区，主区不在布局里）、measured 1015×654
+  把手不上屏（全屏态没有"再拖回窄档"的语义）
+  那颗键的 title/文案翻成「退出全屏」，再点一次回到 aside x=336 w=864
+
+裁定记录：这一格"全屏"指的是**盖住主区**（用户在 2026-10-09 的三选一里选的正是这一档），
+不是 OS 级 maximize，因此 `packages/shell` 一行未改。
+
+────────────────────────────────────────────────────────────────────────
+【5】拖宽的尽头拖不回来：主区内容溢出把把手吃掉了（本轮修掉的第二个缺陷）
+
+现象：在 72% 档上再想往右拖回去，`aside` 一动不动（读数仍是 w=864 / valuenow=72 / stored=72）。
+命中测试读数：
+
+  把手 rect = x=330 w=6 → 中心 (333,396)
+  document.elementFromPoint(333,396) = `svg.lucide-hand`（same=false）
+  它的祖先链：svg → span.relative.flex → **button[data-action="takeover-hold"] rect=[294,389,97,24]**
+              → div → section → section(main) rect=[184,51,146,691]
+  main.right = 330，而这颗按钮 right=389 → 主区内容**溢出到自己的盒子之外**，画到了同一行更晚的兄弟身上
+
+事件计数腿（window 上的捕获监听）：`{down:1, move:13, up:1, targets:["null"]}` ——
+pointerdown 有发但 `target` 上没有 `data-action`，即压根没落在把手上，所以 `startResize` 没挂过监听。
+把手是 aside 的**前一个**兄弟，DOM 顺序在 main 之后 → 溢出内容画在它上面并赢下命中测试；
+aside 在更后面，所以溢出内容画不进右栏（那一截由原生视图盖住，人看不见）。
+
+修法：把手加 `relative z-10`（`KernelViewSlot.tsx:270`）。修后同一探针：
+
+  elementFromPoint(333,396) = `DIV.kernel-resize-handle`（same=true）
+  再拖一次（333,396 → 1043,69，正位移 = 变窄）：aside 864 → 456、valuenow 72 → 38、stored "72" → "38"
+
+也就是说：**加宽之后能不能拖回来，取决于把手在不在溢出内容之上**，而这条在只测 38%↔中等档的
+所有既有读数里都不会现身——它是 8.8-08 那条连续拖宽新长出来的可达状态（主区能被挤到 146px）。
+主区被挤瘪本身（内容溢出、按钮排到盒子外）不在本轮射程：窗口地板 `minWidth` 那一半在主进程侧，
+已记在 plan 06 §3.25 的欠项里。
+
+画面：`8.8-10-slot-normal.png`（38% 档，工具行两颗键）、`8.8-10-slot-collapsed.png`（36px 竖条）、
+`8.8-10-slot-fullscreen.png`（右栏铺满整条工作区）。三张 md5 互不相同（`md5 -q | sort | uniq -c` 每行都是 1）。

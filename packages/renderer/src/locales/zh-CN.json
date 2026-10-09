@@ -117,12 +117,10 @@
     "kernel": {
       "heading": "网页窗口",
       "hint": "这一格直接画着真实网页，不在界面这张图里。",
-      "narrow": "收窄",
-      "widen": "加宽",
-      "expand": "展开",
-      "collapse": "收起",
-      "atMax": "已经拉到最宽",
-      "atMin": "已经拉到最窄",
+      "expand": "全屏",
+      "collapse": "退出全屏",
+      "hide": "收起",
+      "show": "展开网页窗口",
       "resizeHandle": "拖动改宽度；双击回到最窄"
     },
     "session": {
@@ -175,7 +173,7 @@
       "navigatePlaceholder": "已登记平台同源地址，如 http://127.0.0.1:10233/boss"
     },
     "locator": {
-      "reasonBusy": "上一次定位或点击还在飞，先等它落地再按下一次",
+      "reasonBusy": "上一次定位或点击还没返回：等它跑完再按下一颗",
       "heading": "定位实验台（失败态与自愈可视化）",
       "refresh": "重新读取定位层状态",
       "thresholds": "打分线 minScore {{minScore}} · 歧义余量 minMargin {{minMargin}} · 候选上限 {{candidateLimit}}",
@@ -340,7 +338,7 @@
       "statusUnsigned": "{{platform}} 尚未确认自动化风险，动作会先等你点头",
       "never": "无时刻",
       "reason": {
-        "ACTION_BUSY": "签字那一次写入还在飞，先等它落地",
+        "ACTION_BUSY": "签字那一次还没写完：等它写完再改",
         "CONSENT_NOT_CHECKED": "还没勾选授权，签字按钮不放行"
       }
     },
@@ -407,7 +405,7 @@
     },
     "assembly": {
       "reason": {
-        "ACTION_BUSY": "上一次插件动作还在飞，先等它落地再按下一次"
+        "ACTION_BUSY": "上一次插件动作还没返回：等它跑完再按下一颗"
       },
       "heading": "插件装配（cordis.yml）",
       "refresh": "重新读取装配状态",
@@ -592,7 +590,8 @@
       "reason": {
         "ACTION_BUSY": "上一条动作还没回来",
         "IMPORT_PATH_EMPTY": "先填简历文件的绝对路径",
-        "NO_SEED_DOC": "先落一份文档，预览与导出才知道拿哪一份",
+        "NO_CURRENT_DOC": "先导入一份简历，或先载入演示内容，预览与导出才知道拿哪一份",
+        "TEMPLATE_LIST_PENDING": "模板清单还在主进程里读，稍等一下再设默认",
         "EDITOR_OPEN": "排版编辑器已经开着，同一时间只开一份",
         "PDF_EDIT_OPEN": "PDF 编辑视图已经开着",
         "SNAPSHOT_MISSING": "先在上下两个选择器里各挑一份快照",
@@ -619,8 +618,18 @@
       "changeRemoved": "删除",
       "changeModified": "修改",
       "import": "导入简历",
+      "pickFile": "选择文件",
+      "pickerTitle": "选择要导入的简历文件",
+      "pickerFilterResume": "简历文件",
+      "pickerFilterAll": "所有文件",
+      "pickerCanceled": "已取消选择，路径保持原样",
+      "pickerPicked": "已选中 {{path}}",
+      "templateLabel": "生成模板",
+      "templateCount": "共 {{count}} 套内置模板",
+      "setTemplate": "设为默认模板",
+      "templateSet": "默认模板已设为 {{template}}，之后导出与生成都用它",
       "importPath": "文件绝对路径",
-      "importHint": "渲染层不读文件：主进程按这个绝对路径打开，格式按魔数判定（PDF / DOCX / Markdown / 纯文本）",
+      "importHint": "按「选择文件」让系统弹面板，也可以直接填绝对路径；主进程按魔数判定格式（PDF / DOCX / Markdown / 纯文本）",
       "importDone": "已导入 {{docId}}：{{format}} · {{textLength}} 字 · {{count}} 条待确认",
       "importDup": "同一份文件已在库中（{{docId}}），行数不变、只更新时间",
       "importScanned": "疑似扫描件：只读到 {{textLength}} 字，不引入 OCR，请人工补录",
@@ -651,7 +660,7 @@
     },
     "pdfEdit": {
       "reason": {
-        "ACTION_BUSY": "还有动作在飞：等它的回执落回提示行，这一颗才轮得到你按。",
+        "ACTION_BUSY": "上一条还没跑完：等提示行报出结果，这颗才轮到你按。",
         "PATH_EMPTY": "还没键入源 PDF 的绝对路径：渲染层没有读文件的通道，路径必须由你给。",
         "FIRST_PAGE": "已经是第一页，往前没有页了。",
         "LAST_PAGE": "已经是最后一页，往后没有页了。",
@@ -701,6 +710,13 @@
       "pageOrderRejected": "这份页序被拒了（空、越界或超过页数上限）",
       "undo": "撤销",
       "redo": "重做",
+      "pickFile": "选择 PDF",
+      "pickSavePath": "选另存位置",
+      "pickerTitle": "选择要打开的 PDF",
+      "savePickerTitle": "另存为 PDF",
+      "pickerFilterPdf": "PDF 文档",
+      "pickerCanceled": "已取消选择，路径保持原样",
+      "pickerPicked": "已选中 {{path}}",
       "outPathLabel": "产物绝对路径",
       "outPathPlaceholder": "/绝对路径/产物.pdf",
       "outPathHint": "产物必须是与源文件不同的路径；源文件全程只读",
@@ -863,7 +879,7 @@
         "builtinReadonly": "内置计划只读，要改就先复制一份",
         "empty": "还没有自定义计划：在对话里跑通一段，用「保存为工作流」存一条",
         "reason": {
-          "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+          "ACTION_BUSY": "上一次调用还没返回：等它跑完再按下一颗",
           "NAME_EMPTY": "先写一个名字：改名与复制都要在库里落一行新名字"
         }
       },
@@ -972,7 +988,7 @@
         }
       },
       "reason": {
-        "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+        "ACTION_BUSY": "上一次调用还没返回：等它跑完再按下一颗",
         "RUN_IN_FLIGHT": "这一轮还没收尾：先暂停或中止，再起新一轮",
         "NOT_RUNNING": "只有正在推进的流程能暂停",
         "NOT_PAUSED": "当前不是暂停态，没有可续跑的流程",
@@ -1031,7 +1047,7 @@
         "reasonNoSession": "还没有当前会话：先新建一条，再改名或删除",
         "reasonEmptyTitle": "名字还是空的：先写几个字，Enter 或按「保存名字」都算",
         "reason": {
-          "ACTION_BUSY": "上一条动作还没回来：标题等它的回执落回再改。"
+          "ACTION_BUSY": "上一条动作还没回来：等它报出结果再改标题。"
         }
       },
       "compress": {
@@ -1093,8 +1109,8 @@
         "hold": "我来接管",
         "release": "交还页面",
         "since": "已接管 {{duration}}",
-        "notHeldHint": "接管只停住后面的动作，不打断正在飞的那一步",
-        "heldHint": "自动化已停在安全点；交还页面后由人决定是否继续",
+        "notHeldHint": "点了接管，后面的动作就停；已经在跑的这一步照常跑完",
+        "heldHint": "自动化已经停下；把页面交还之后由你决定要不要继续",
         "actionHold": "人工接管页面",
         "actionRelease": "交还页面",
         "reason": {
@@ -1118,11 +1134,22 @@
         "section": "agent 替你做主到哪一步",
         "suggest": "建议模式",
         "semi": "半自动",
-        "auto": "全自动"
+        "auto": "全自动",
+        "why": {
+          "suggest": "它只把计划写给你看，一步都不替你跑",
+          "semi": "看页面它自己跑；改本机、往外发都先问你",
+          "auto": "除了往外发消息的那几只手，其余都直接跑"
+        },
+        "compareToggle": "这三档到底差在哪",
+        "compare": {
+          "suggest": "建议档下它连读页面都不动手，只写出「打算做什么」给你看。想先看它怎么安排，就从这一档开始。",
+          "semi": "半自动档下，只读页面的手它自己跑（搜岗位、读详情）；凡要改本机文件、要往外发消息的，都停下来等你点确认。",
+          "auto": "全自动档下，除了往外发消息的那几只手，其余都直接跑。发外消息的手天生要你点头——要让它也不问，得把它加进下面那份免确认名单；额度、频控与每日上限在哪一档都照旧。"
+        }
       },
       "policy": {
         "reason": {
-          "ACTION_BUSY": "还有动作在飞：名单这一带的加与减，等它的回执落回来再按。"
+          "ACTION_BUSY": "上一条还没跑完：要往名单里加或减，等它报出结果再按。"
         },
         "heading": "免确认白名单",
         "exemptCount": "已免确认 {{total}} 项",
@@ -1140,7 +1167,7 @@
       },
       "pause": {
         "reason": {
-          "ACTION_BUSY": "还有动作在飞：这一张单的表态等它落回来再按，而到点的时间并不因此停下。",
+          "ACTION_BUSY": "上一条还没跑完：这张单的表态等它报出结果再按；到点的时间不会因此停下。",
           "SUPPLEMENT_EMPTY": "补充信息还是空的：把缺的字段填上（或原样贴一段 JSON）才提交得了。"
         },
         "heading": "等人表态",
@@ -1213,7 +1240,7 @@
       },
       "run": {
         "reason": {
-          "ACTION_BUSY": "还有动作在飞：等它的回执落回卡片流，这一颗才轮得到你按。",
+          "ACTION_BUSY": "上一条还没跑完：等卡片流报出结果，这颗才轮到你按。",
           "EMPTY_PLAN": "这份计划一步都没有：确认也不会执行任何动作，先让 agent 重新起草。"
         },
         "heading": "任务计划",
@@ -1234,8 +1261,8 @@
         "confirm": "确认并执行",
         "cancel": "取消这份计划",
         "stopNow": "叫停",
-        "stopAccepted": "已受理叫停：正在跑的那一步不被打断，停在下一个安全点",
-        "stopHint": "叫停在下一个安全点生效，不硬切在飞的动作",
+        "stopAccepted": "已叫停：正在跑的这一步先跑完，停在下一个不会丢东西的地方",
+        "stopHint": "叫停在下一步开头生效，正在跑的这一步会先跑完",
         "actionPropose": "起草任务计划",
         "actionConfirm": "确认并执行计划",
         "actionStop": "叫停任务",
@@ -1257,12 +1284,12 @@
           "PAUSE_DENIED": "你在卡片上拒绝了这一步",
           "PAUSE_TIMEOUT": "等人表态到点无人应答，未放行",
           "PAUSE_CANCELLED": "叫停或重建时收掉了在等的单，没人表过态",
-          "TAKEOVER_HELD": "被人工接管按住，停在安全点",
+          "TAKEOVER_HELD": "被你接管按住了，已经停下",
           "RESUMED_AFTER_TAKEOVER": "已交还页面，由人按下「继续」恢复",
           "REPLAN_UNCHANGED": "页面已改版，重新规划也换不出可用的一步",
-          "REPLAN_EXHAUSTED": "重规划的次数用尽，停在安全点",
+          "REPLAN_EXHAUSTED": "重规划次数用完，已经停下",
           "REREAD_UNAVAILABLE": "重读页面失败，没敢按旧快照继续",
-          "INTERRUPTED": "app 在跑的时候停过，已对账停在安全点（没人叫过停，也不会自动续跑）"
+          "INTERRUPTED": "app 之前是在跑着的时候断的：账已核对，停在原地；没人叫过停，它也不会自己续跑"
         },
         "resume": "继续这条任务",
         "actionResume": "继续被接管按住的任务",
@@ -1404,6 +1431,7 @@
       "hint": "贴一段 JD，主进程按相关性重排区块与条目、并在白名单字段上出改写建议，改完的那一份再过一遍确定性事实校验。产出的是「提议态」：公司 / 职位 / 时间 / 学历这些被锁定的事实只能原样引用，数值一处都不许多出来。只有你在下面勾过、并按了「接受选中的改写」的那几条，才会写进工作副本。",
       "jdPlaceholder": "贴上目标 JD 正文（与缺口报告同一份文本即可）",
       "run": "生成定制版",
+      "docLabel": "定制哪一份简历",
       "accept": "接受选中的改写",
       "stale": "知识库或工作副本刚被改过，这份产物的基线已经不成立：重新生成一次再逐项接受。",
       "outcomeRewritten": "产出了 {{count}} 处改写：逐条看过之后勾选，接受才会写进工作副本",
@@ -1445,6 +1473,7 @@
       "reason": {
         "ACTION_BUSY": "上一条动作还没回来",
         "JD_EMPTY": "先粘一份 JD 原文，生成才知道按什么改写",
+        "NO_DOC": "库里还没有可定制的简历：先在简历屏导入一份",
         "NO_PREVIEW": "先生成一次，界面上才有可以接受的改写",
         "OUTCOME_REJECTED": "这次没过事实校验，没有可以写入的内容——先看违规清单",
         "NOTHING_SELECTED": "至少勾一条改写，或者勾上「应用重排」"
@@ -1452,7 +1481,7 @@
     },
     "script": {
       "reason": {
-        "ACTION_BUSY": "上一次生成或发送还在飞，先等它落地再按下一次。",
+        "ACTION_BUSY": "上一次生成或发送还没返回：等它跑完再按下一颗。",
         "NO_TARGET": "库里还没有岗位：先抓一轮 JD，这一屏才有话可写。",
         "QUOTE_REQUIRED": "追问与拒绝这两类话术必须带上对方的原话，否则生成的句子是在凭空接话。",
         "NO_CANDIDATE_PICKED": "还没有选中任何一条候选：选中一条才会放开发送。"
@@ -1545,7 +1574,7 @@
       "disabledNotice": "已停用「{{name}}」",
       "removed": "已删除「{{name}}」",
       "reason": {
-        "ACTION_BUSY": "上一次调用还在飞，先等它落地再按下一次",
+        "ACTION_BUSY": "上一次调用还没返回：等它跑完再按下一颗",
         "NAME_EMPTY": "先给这条任务起个名字，列表里要认它",
         "PLAN_MISSING": "下拉里挑一条已保存的计划，任务才知道到点跑什么",
         "EXPRESSION_EMPTY": "cron 表达式不能空着：到点的判据就在这一行里"
@@ -1592,7 +1621,7 @@
     },
     "update": {
       "reason": {
-        "ACTION_BUSY": "上一次更新动作还在飞，先等它落地再按下一次",
+        "ACTION_BUSY": "上一次更新还没返回：等它跑完再按下一颗",
         "BRIDGE_MISSING": "这个窗口里没有桥接，更新通道够不到主进程"
       },
       "heading": "更新",
@@ -1729,7 +1758,7 @@
         "storagePlain": "未加密存储：本机没有可用的系统密钥库，密钥文件以 0600 权限明文落在 userData 下。",
         "storageUnreadable": "密钥库里的这一份解不开（换机或系统密钥环变动所致）：原文件仍保留，重新填一次即可。",
         "reason": {
-          "ACTION_BUSY": "上一次动作还在飞，先等它落地再按下一次",
+          "ACTION_BUSY": "上一次动作还没返回：等它跑完再按下一颗",
           "BRIDGE_MISSING": "这个窗口里没有桥接，模型设置够不到主进程",
           "LEG_INCOMPLETE": "端点、模型名与密钥还没配齐，测试连接必然失败，先补齐这三格",
           "CHECK_NOT_SUPPORTED": "向量腿的连通性测试尚未实现，这一按不会发任何请求",

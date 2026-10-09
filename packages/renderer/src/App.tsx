@@ -276,8 +276,10 @@ export function App() {
             于是既盖不住顶部标题栏与底部状态条，也铺得出真实站点的桌面宽度。
             宽度没拖过时仍是 `--kernel-view-width`（`--kernel-slot-width` 的默认值就是它），
             与主进程的兜底比例同源（1.2-12 的机检照旧）；拖过之后在 38…72 之间连续覆盖这一支变量，
-            覆盖只落在这一个节点上，画面里没有第二份宽度事实。 */}
-        {kernelViewVisible ? <KernelViewSlot layout={kernelLayout} /> : null}
+            覆盖只落在这一个节点上，画面里没有第二份宽度事实。
+            视图收掉时这一栏不再空着（裁定⑱ 的"默认不展示"仍然成立），但它换成右缘一条 36px 的竖条：
+            「网页窗口」这件事从此在界面上一直有个看得见的把手，不必绕到诊断面板里去开（spec 8.8-10）。 */}
+        <KernelViewSlot layout={kernelLayout} viewVisible={kernelViewVisible} />
       </div>
 
       {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。

@@ -4,7 +4,7 @@
  * 这里画的是**主进程那份会话**的镜像：消息一律来自 `chat.session.current()` 与 `chat/delta` 事件，
  * 组件不自己拼句子、不自己判进度。助手回复目前是本地确定性模板（P1 不接 LLM），
  * P5 换成真模型时改的是主进程的生成函数，这个文件一行不用改。
- * 5.2-c 起，`/run` 开头的那一句走 agent 循环：计划卡与逐步卡片流插在**同一段对话流**里
+ * 5.2-c 起，`/plan` 开头的那一句走 agent 循环：计划卡与逐步卡片流插在**同一段对话流**里
  * （plan 5.2-c 的切法），读数来自 `agent.loop.read` 与 `agent/run-progress`，同样不在这里推导。
  */
 import { Bot, Gauge, LoaderCircle, Send, Square, User, Workflow as WorkflowIcon } from 'lucide-react';
@@ -47,18 +47,31 @@ const AUTONOMY_OPTIONS = ['suggest', 'semi', 'auto'] as const satisfies readonly
 type LiveStream = { sessionId: string; messageId: string; text: string; tool?: ChatToolPart };
 
 /**
- * 交给 agent 循环的那一句的前缀：`/run` 之后是任务目标原文。
+ * 交给 agent 循环的那一句的前缀：`/plan` 之后是任务目标原文。
  *
  * 走前缀而不是加第三个输入框，是因为 5.2-c 要的判据形状就是「自然语言输入后先产出可见计划」——
  * 入口得还在对话里。它**不**进 `chat.session.send`：那条链会产出一句模板回复，
  * 于是同一句话既有对话答案又有计划，两个都能用就是 §2.5 禁的形态。
+ * 这个词从 `/run` 改成 `/plan`（用户 2026-10-09 裁定）：这条前缀真正买到的就是"先出一份看得见的计划"，
+ * 动手与否仍然由确认与档位决定，命令叫 run 会让人以为敲下去就发了。
+ * 历史验收读数里写的是旧词（§4.5 既有条目不改写），按新词复现那些条目时要读 `/plan`。
  */
-const RUN_COMMAND_PREFIX = '/run';
+const RUN_COMMAND_PREFIX = '/plan';
 
 /**
- * 一条消息：01 稿的画法是**平铺在桌面上**，不画聊天软件的圆角气泡——两条消息的唯一区别是
- * 那一枚 24px 的「谁在说」方印（我=桌面亮底 / AI=青瓷描边），正文靠左对齐成同一列，
- * 读一屏对话时视线不用来回跳。`parts[]` 按顺序渲染（文本段 + 工具卡片段）。
+ * 正文胶囊的画法，按"谁在说"分两侧（历史消息与正在累加的那条共用，§2.2 不在两处各写一遍）。
+ * 靠右一侧用亮一档的桌面底，靠左一侧压在更深的底上——左右之外还要能一眼分出是谁的话。
+ */
+const BUBBLE_CLASS = {
+  user: 'max-w-[85%] whitespace-pre-wrap break-words rounded-xl border border-line-strong bg-ink-800 px-3 py-2 leading-relaxed text-slate-200',
+  assistant:
+    'max-w-[85%] whitespace-pre-wrap break-words rounded-xl border border-line bg-ink-900/60 px-3 py-2 leading-relaxed text-slate-100',
+} as const;
+
+/**
+ * 一条消息：**你说的话在右、agent 回的在左**（聊天软件里人人都有的那条直觉），各自的正文收进一块
+ * 胶囊里，胶囊贴在 belong 的那一侧。`parts[]` 按顺序渲染（文本段 + 工具卡片段），
+ * 工具卡片仍然跟正文同一列——它是 agent 那一侧的东西，不因为换了左右就换行。
  * @param message 主进程返回的消息视图
  * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
  * @returns 消息节点
@@ -72,7 +85,11 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   return (
-    <li data-message-id={message.id} data-message-role={message.role} className="flex gap-2.5">
+    <li
+      data-message-id={message.id}
+      data-message-role={message.role}
+      className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}
+    >
       <span
         data-message-who={isUser ? 'user' : 'assistant'}
         className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border text-[10px] ${
@@ -81,12 +98,12 @@ function MessageBubble({
       >
         {isUser ? <User size={12} /> : <Bot size={12} />}
       </span>
-      <div className={`min-w-0 flex-1 space-y-2 text-xs ${isUser ? 'text-slate-300' : 'text-slate-100'}`}>
+      <div className={`flex min-w-0 flex-1 flex-col gap-2 text-xs ${isUser ? 'items-end' : 'items-start'}`}>
         {message.parts.map((part, index) =>
           part.kind === 'text' ? (
             <p
               key={`${message.id}-text-${String(index)}`}
-              className="whitespace-pre-wrap break-words"
+              className={isUser ? BUBBLE_CLASS.user : BUBBLE_CLASS.assistant}
               data-part-kind="text"
             >
               {part.text}
@@ -194,7 +211,7 @@ export function ChatPanel() {
 
   /**
    * 发送输入框里的话；流式期间不发（主进程会以 `CHAT_BUSY` 结构化拒绝，但按钮先禁用更清楚）。
-   * `/run` 开头那一句走 agent 循环：它不进对话表，只在同一段流里起一张计划卡（spec 5.2-03）。
+   * `/plan` 开头那一句走 agent 循环：它不进对话表，只在同一段流里起一张计划卡（spec 5.2-03）。
    */
   const submit = () => {
     const text = draft.trim();
@@ -297,6 +314,21 @@ export function ChatPanel() {
             markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
           }))}
         />
+        {/* 当下这一档"替我做主到哪一步"必须明面上说一句（档位是人选的，选错了界面不替他兜），
+            三档的完整对比进披露层——那是教材，不是此刻的读数。 */}
+        <p data-testid="chat-autonomy-why" className="mt-2 text-[11px] leading-relaxed text-slate-400">
+          {snapshot ? t(`agent.autonomy.why.${snapshot.session.autonomy}`) : t('chat.loading')}
+        </p>
+        <DeskExplainer id="agent.autonomy-compare" className="mt-1.5" label={t('agent.autonomy.compareToggle')}>
+          <span className="flex flex-col gap-1.5">
+            {AUTONOMY_OPTIONS.map((level) => (
+              <span key={level} className="flex gap-1.5">
+                <span className="shrink-0 font-semibold text-slate-200">{t(`agent.autonomy.${level}`)}</span>
+                <span className="min-w-0">{t(`agent.autonomy.compare.${level}`)}</span>
+              </span>
+            ))}
+          </span>
+        </DeskExplainer>
         <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
       </DeskSection>
 
@@ -337,8 +369,8 @@ export function ChatPanel() {
                 >
                   <Bot size={12} />
                 </span>
-                <div className="min-w-0 flex-1 space-y-2 text-xs text-slate-100">
-                  <p className="whitespace-pre-wrap break-words" data-part-kind="text">
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-2 text-xs">
+                  <p className={BUBBLE_CLASS.assistant} data-part-kind="text">
                     {liveStream.text}
                   </p>
                   {liveStream.tool ? (
@@ -466,7 +498,7 @@ export function ChatPanel() {
             markers={{ testid: 'chat-hint' }}
           >
             <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
-            {/* 循环入口写在提示里而不是加第三个输入框：`/run` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
+            {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
             <p className="mt-1" data-testid="chat-run-hint">
               {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
             </p>

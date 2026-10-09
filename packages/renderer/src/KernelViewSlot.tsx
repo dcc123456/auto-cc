@@ -1,4 +1,4 @@
-import { ChevronsLeft, ChevronsRight, Maximize2, Minimize2, PanelRight } from 'lucide-react';
+import { Maximize2, Minimize2, PanelRight, PanelRightClose } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,21 +7,13 @@ import { DeskButton, NarrowLabel } from './ui/controls';
 /**
  * 右栏可拖到的宽度区间（百分比）。下界与主进程的兜底比例同源（`--kernel-view-width` = 38% =
  * `KERNEL_VIEW_WIDTH_RATIO`），上界是人在界面侧能拉到的最宽——再宽就等于把工作台挤没了，
- * 那种需求属于「展开」那一颗键（`Maximize2`）。
+ * 那种需求属于「全屏」那一颗键（`Maximize2`）。
  *
  * 为什么不是 px 定宽：px 会让这条 `shrink-0` 的右栏在缩窗口时把主区挤死，而 8.8-01/03 的既有读数
  * 全部是"占这一行的比例"，百分比与它回落的那支令牌同单位，两套口径不会打架。
  */
 const WIDTH_MIN = 38;
 const WIDTH_MAX = 72;
-
-/**
- * 三颗档键的吸附点（从窄到宽）。
- * 写成固定数字而不是 `NN%` 的 class 阶梯：Tailwind 只生成它在源码里看得见的字符串，
- * 2% 一档要写 18 条 `w-[NN%]` 字面量，而今天的连续宽度根本不走 class 通道（走 CSS 变量），
- * 阶梯只会让「最窄档 = 兜底比例」这条可验收事实失去字面量引用。
- */
-const WIDTH_ANCHORS = [WIDTH_MIN, 55, WIDTH_MAX] as const;
 
 /** 键盘微调的步长（百分点）：`ArrowLeft` / `ArrowRight` 一次走这么多。 */
 const WIDTH_STEP = 2;
@@ -37,56 +29,29 @@ const WIDTH_CLASS = 'w-(--kernel-slot-width)';
  * @returns 合法的百分比；形状不对（手改、非数字）一律回落到最窄档，不炸首屏
  */
 function loadWidthRatio(): number {
-  const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
-  const stored = Number(raw);
+  const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY));
   if (Number.isInteger(stored) && stored >= WIDTH_MIN && stored <= WIDTH_MAX) return stored;
-  // 旧形状（8.8-02 那三档）存的是**下标** `0|1|2`，与百分比值域算术上不相交，所以新旧判得出来。
-  // 判出来是旧的不抹掉而是换算回它自己那一档：本轮活体读数就是 `storedWidth=1`（= 55%），
-  // 直接回落会把人已经表达过的宽度变成"界面自己忘了"，那比这三行映射贵。
-  // 落盘一次之后就再也不会走到这条分支（写的只有百分比），它是迁移路径，不是兼容垫片。
-  if (raw !== null && Number.isInteger(stored) && stored >= 0 && stored < WIDTH_ANCHORS.length) {
-    return WIDTH_ANCHORS[stored] ?? WIDTH_MIN;
-  }
+  // 旧形状（8.8-02 那三档）存的是**下标** `0|1|2`，与百分比值域算术上不相交，所以判得出来。
+  // 这一轮把三颗档键删掉之后"档"这个概念本身没有了（宽度只由拖拽与键盘方向键决定），
+  // 因此旧下标不再换算成某一档，直接落到下面的最窄档——它是一条迁移的终点，不是兼容垫片。
   return WIDTH_MIN;
 }
 
-/**
- * 当前宽度下方最近的吸附点。
- * @param ratio 此刻的百分比
- * @returns 比它小的最大锚点；已经在最窄档时回本档（调用方由 `canNarrow` 挡住，这里是兜底）
- */
-function anchorBelow(ratio: number): number {
-  return [...WIDTH_ANCHORS].reverse().find((anchor) => anchor < ratio) ?? WIDTH_MIN;
-}
-
-/**
- * 当前宽度上方最近的吸附点。
- * @param ratio 此刻的百分比
- * @returns 比它大的最小锚点；已经在最宽档时回本档（同上，兜底用）
- */
-function anchorAbove(ratio: number): number {
-  return WIDTH_ANCHORS.find((anchor) => anchor > ratio) ?? WIDTH_MAX;
-}
-
-/** 右栏槽位的布局状态与四只动作口（三只档键 + 一根把手），由 `App` 持有、`KernelViewSlot` 消费。 */
+/** 右栏槽位的布局状态与动作口（拖拽把手的宽度 + 全屏那一颗），由 `App` 持有、`KernelViewSlot` 消费。 */
 export interface KernelSlotLayout {
-  /** 当下宽度（百分比，38…72）：拖拽与三颗档键写的都是这一个数。 */
+  /** 当下宽度（百分比，38…72）：拖拽、键盘与双击写的都是这一个数。 */
   ratio: number;
-  /** 当下是不是展开态（盖住整个工作区）。 */
+  /** 当下是不是全屏态（整条右栏盖住主区）。 */
   isExpanded: boolean;
-  canNarrow: boolean;
-  canWiden: boolean;
-  narrow: () => void;
-  widen: () => void;
   /** 吸附与落盘都收在这一个口子里：拖拽、键盘、双击三条路径共用同一件事（§2.5）。 */
   setRatio: (next: number) => void;
   toggleExpanded: () => void;
 }
 
 /**
- * 内核视图槽位的布局偏好：宽度落 localStorage（整数百分比），展开态只活在本次会话。
+ * 内核视图槽位的布局偏好：宽度落 localStorage（整数百分比），全屏态只活在本次会话。
  *
- * 展开态不落盘是刻意的：开机就把主区整块盖住在网页里，而"收起"那颗键此刻在画面边上，
+ * 全屏态不落盘是刻意的：开机就把主区整块盖住在网页里，而"退出全屏"那颗键此刻在画面边上，
  * 不像宽度那样能一眼看出自己改过它。宽度没有这个问题（右栏一直在），所以值得留。
  * @returns 交给 `App` 与 `KernelViewSlot` 共用的布局状态
  */
@@ -112,12 +77,6 @@ export function useKernelSlotLayout(): KernelSlotLayout {
   return {
     ratio,
     isExpanded,
-    canNarrow: ratio > WIDTH_MIN,
-    canWiden: ratio < WIDTH_MAX,
-    // 三颗档键的语义从"下标 ±1"改成"吸附到当前宽度下方/上方的最近锚点"：
-    // 拖出锚点之间之后，画面上的宽度不再是某个下标，硬套下标会让「已经是最窄档」这条判据失去意义。
-    narrow: () => setRatio(anchorBelow(ratio)),
-    widen: () => setRatio(anchorAbove(ratio)),
     setRatio,
     toggleExpanded: () => setIsExpanded((previous) => !previous),
   };
@@ -125,19 +84,21 @@ export function useKernelSlotLayout(): KernelSlotLayout {
 
 /**
  * 内嵌内核视图的槽位：量出自己的几何报给主进程，把宽度摆在**视图盖不到的那一行**，
- * 并在这一行的左外侧挂一根可连续拖的把手。
+ * 并在这一行的左外侧挂一根可连续拖的把手。视图被收掉时它退成右缘一条竖条，人随时按得回来。
  *
  * 为什么要渲染层来量（spec 8.8-01）：原生 `WebContentsView` 铺在渲染层之上，主进程只能按固定比例硬铺，
  * 于是 38% 的宽度既铺不出真实站点的桌面布局（BOSS 在 456px 里必然显示不全），又会盖掉顶部标题栏与
  * 底部状态条。几何的权威从此在布局真正的主人手里。
  *
  * 控件必须留在上报矩形之外：盖在下面的渲染层节点点不动（原生视图吃走命中测试），
- * 所以"展开/宽窄"这三颗键摆在槽位上方。把手同理待在 aside **之外**（同一条 flex 行的前一个兄弟）——
+ * 所以「全屏 / 收起」这两颗键摆在槽位上方。把手同理待在 aside **之外**（同一条 flex 行的前一个兄弟）——
  * 上报矩形是槽位 div 的边框盒，`p-4` 只往里缩它的**孩子**、不缩它自己，所以挂在 aside 左缘的 6px
  * 会整个落在视图盖住的那一块里（本轮活体读数：slot x=1286，aside 内缘 x=1285，两者左缘同一条线）。
  * @param layout 槽位布局状态（由 `App` 持有，它还要用它决定主区让不让位）
+ * @param viewVisible 原生视图此刻在不在（唯一权威是主进程那份读数，见 `useKernelViewVisible`）：
+ *   不在时这一栏只画一条竖条，宽度与槽位都不存在，因此也没有几何可报
  */
-export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
+export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayout; viewVisible: boolean }) {
   const { t } = useTranslation();
   const asideRef = useRef<HTMLElement | null>(null);
   const slotRef = useRef<HTMLDivElement | null>(null);
@@ -181,17 +142,22 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
     if (slotRef.current) observer.observe(slotRef.current);
     if (toolbarRef.current) observer.observe(toolbarRef.current);
     return () => observer.disconnect();
-  }, [report]);
+    // `viewVisible` 必须在依赖里：收起态没有槽位节点可观察，重新打开时若这个 effect 不重跑，
+    // 原生视图就停在收起前那一块几何上，而右栏已经按持久宽度重画——两份宽度同时挂在画面上。
+  }, [report, viewVisible]);
 
   // 宽度落到 CSS 变量上：JSX 里不许出现 `style`（eslint），而连续拖出来的值 Tailwind 也扫不见，
   // 因此只能命令式写在**这一个节点**上（plan §3.24 记了这条对 §5.2 的刻意偏离）。
-  // 吸附、键盘、双击三条路径最后都汇到 `layout.ratio`，由这一处覆盖，画面不会有第二份宽度事实。
+  // 拖拽、键盘、双击三条路径最后都汇到 `layout.ratio`，由这一处覆盖，画面不会有第二份宽度事实。
   useLayoutEffect(() => {
     asideRef.current?.style.setProperty('--kernel-slot-width', `${layout.ratio}%`);
-    // 键盘与三颗档键都走 state，因此这里同时把 ref 对齐：拖拽与 `Arrow*` 读的是这支 ref，
-    // 不同步就会从上一次的拖拽值起步（那是一条只在"点过加宽再用键盘"时才现身的错位）。
+    // 键盘与双击都走 state，因此这里同时把 ref 对齐：拖拽与 `Arrow*` 读的是这支 ref，
+    // 不同步就会从上一次的拖拽值起步（那是一条只在"拖过再用键盘"时才现身的错位）。
     liveRatioRef.current = layout.ratio;
-  }, [layout.ratio]);
+    // `viewVisible` 也在依赖里（与上面那条观察器同一个道理）：收起态画的是竖条，aside 节点不存在，
+    // 这一格的写入空转；重新打开时若 effect 不重跑，右栏就回到 `:root` 的 38% 而人存过的是别的宽度
+    // ——本轮活体读数：拖到 66% 收起再打开，aside 量回 456px（= 38%）而持久值是 66。
+  }, [layout.ratio, viewVisible]);
 
   /**
    * 从把手起拖：整段拖拽只改一支 CSS 变量，收尾才落一次 state 与盘。
@@ -254,6 +220,28 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
     }
   };
 
+  // 收起态：整条右栏不存在，只留右缘一条竖条，竖条上那颗键把它带回来。
+  // 可见性的权威在主进程那一份读数上（`useKernelViewVisible`），这里只发指令、不自己记「我收过」。
+  if (!viewVisible) {
+    return (
+      <aside
+        data-testid="kernel-slot-strip"
+        className="flex w-9 shrink-0 flex-col items-center border-l border-line bg-ink-900 py-1.5"
+      >
+        <DeskButton
+          action="kernel-slot-show"
+          variant="ghost"
+          compact
+          aria-label={t('kernel.show')}
+          title={t('kernel.show')}
+          onClick={() => void bridge?.shell.setKernelViewVisible(true)}
+        >
+          <PanelRight size={13} />
+        </DeskButton>
+      </aside>
+    );
+  }
+
   return (
     <>
       {/* 这根 6px 的把手**必须待在 aside 之外**（同一条 flex 行的前一个兄弟）：上报矩形取的是槽位 div 的
@@ -263,7 +251,11 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
           挪到外侧之后把手右缘 1285 < slot x=1286，视图永远盖不到它。
           `cursor-col-resize` 是 app 自己画的那对双向箭头（系统边框的箭头属于窗口管理器，app 管不着）；
           `onPointerDown` + `onKeyDown` 同时是这条 `hover:` 的交互凭据（机检只认这些，`cursor-col-resize` 本身不算）。
-          展开态整条右栏不存在，把手跟着不上屏。 */}
+          全屏态整条右栏铺满工作区，把手跟着不上屏。
+          `relative z-10` 是活体逼出来的：拖到 72% 时主区只剩 146px，里面的接管按钮行**溢出到主区盒子之外**
+          （读数：`main.right=330` 而那颗按钮 `right=389`），而溢出内容画在同一行更早的兄弟（把手 330…336）之上，
+          于是 `elementFromPoint(333,396)` 回的是那枚按钮里的 `svg`——**加宽之后再也拖不回来**。
+          把手抬到 z-10 之后它在自己那 6px 上永远赢命中测试（aside 本来就画在 main 之后，不受这一条影响）。 */}
       {!layout.isExpanded && (
         <div
           role="slider"
@@ -279,7 +271,7 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
           onPointerDown={startResize}
           onKeyDown={resizeByKey}
           onDoubleClick={() => layout.setRatio(WIDTH_MIN)}
-          className="w-1.5 shrink-0 cursor-col-resize self-stretch bg-line transition-colors duration-150 hover:bg-celadon focus-visible:bg-celadon"
+          className="relative z-10 w-1.5 shrink-0 cursor-col-resize self-stretch bg-line transition-colors duration-150 hover:bg-celadon focus-visible:bg-celadon"
         />
       )}
       <aside
@@ -295,35 +287,9 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
           <span data-testid="kernel-slot-measured" className="ml-auto shrink-0 font-mono text-[10.5px] text-slate-600">
             {measured}
           </span>
-          <DeskButton
-            action="kernel-slot-narrow"
-            variant="line"
-            compact
-            disabled={!layout.canNarrow}
-            // 原因码只在该当被挡的时候挂：挂着常亮的 `data-disabled-reason` 是对界面的谎，
-            // 而 harness 正是按这个属性判"点不动是门禁还是缺陷"（§9 的 6.2 二三片②）。
-            // `title` 同一条规矩：能变窄时才用文案当悬停说明，被锁住时那句话必须是原因，两处不能同时占。
-            {...(layout.canNarrow
-              ? { title: t('kernel.narrow') }
-              : { disabledReason: 'WIDTH_MIN', disabledReasonLabel: t('kernel.atMin') })}
-            onClick={layout.narrow}
-          >
-            <ChevronsLeft size={13} />
-            <NarrowLabel>{t('kernel.narrow')}</NarrowLabel>
-          </DeskButton>
-          <DeskButton
-            action="kernel-slot-widen"
-            variant="line"
-            compact
-            disabled={!layout.canWiden}
-            {...(layout.canWiden
-              ? { title: t('kernel.widen') }
-              : { disabledReason: 'WIDTH_MAX', disabledReasonLabel: t('kernel.atMax') })}
-            onClick={layout.widen}
-          >
-            <ChevronsRight size={13} />
-            <NarrowLabel>{t('kernel.widen')}</NarrowLabel>
-          </DeskButton>
+          {/* 宽度只有把手与方向键这一个出口（用户 2026-10-09 裁：收窄/加宽两颗档键删掉）。
+              原先那两颗键的 `data-disabled-reason=WIDTH_MIN/WIDTH_MAX` 通道随之退役——
+              把手上的 `aria-valuemin/max/now` 与拖到边界时的夹取读数是同一件事的新通道（spec 8.8-10）。 */}
           <DeskButton
             action="kernel-slot-expand"
             variant="line"
@@ -333,6 +299,18 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
           >
             {layout.isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             <NarrowLabel>{t(layout.isExpanded ? 'kernel.collapse' : 'kernel.expand')}</NarrowLabel>
+          </DeskButton>
+          {/* 收起整栏：原生视图与右栏一起收掉，界面只留右缘那条竖条——那颗键就是它的回来口。
+              可见性写在主进程那一份读数上，这里只发指令，不自己记「我收过」。 */}
+          <DeskButton
+            action="kernel-slot-hide"
+            variant="line"
+            compact
+            title={t('kernel.hide')}
+            onClick={() => void bridge?.shell.setKernelViewVisible(false)}
+          >
+            <PanelRightClose size={13} />
+            <NarrowLabel>{t('kernel.hide')}</NarrowLabel>
           </DeskButton>
         </div>
 

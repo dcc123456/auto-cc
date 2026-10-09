@@ -117,12 +117,10 @@
     "kernel": {
       "heading": "Web page view",
       "hint": "This slot shows the real web page, painted above the desk.",
-      "narrow": "Narrow",
-      "widen": "Widen",
-      "expand": "Expand",
-      "collapse": "Collapse",
-      "atMax": "Already as wide as it goes",
-      "atMin": "Already as narrow as it goes",
+      "expand": "Fullscreen",
+      "collapse": "Exit fullscreen",
+      "hide": "Hide",
+      "show": "Show the web page view",
       "resizeHandle": "Drag to change the width; double-click goes back to the narrowest"
     },
     "session": {
@@ -175,7 +173,7 @@
       "navigatePlaceholder": "URL on a registered platform origin, e.g. http://127.0.0.1:10233/boss"
     },
     "locator": {
-      "reasonBusy": "The last locate or click is still in flight \u2014 wait for it before pressing again",
+      "reasonBusy": "The last locate or click has not come back yet \u2014 wait for it before pressing again",
       "heading": "Locator lab (failure states & self-heal trace)",
       "refresh": "Reload locator status",
       "thresholds": "minScore {{minScore}} · minMargin {{minMargin}} · candidateLimit {{candidateLimit}}",
@@ -340,7 +338,7 @@
       "statusUnsigned": "{{platform}} automation risk not acknowledged; actions wait for your confirmation",
       "never": "no timestamp",
       "reason": {
-        "ACTION_BUSY": "The consent write is still in flight — wait for it",
+        "ACTION_BUSY": "The consent write has not come back yet — wait for it",
         "CONSENT_NOT_CHECKED": "Tick the authorization first — the signature button stays closed until you do"
       }
     },
@@ -407,7 +405,7 @@
     },
     "assembly": {
       "reason": {
-        "ACTION_BUSY": "The last plugin action is still in flight \u2014 wait for it before pressing again"
+        "ACTION_BUSY": "The last plugin action has not come back yet \u2014 wait for it before pressing again"
       },
       "heading": "Plugin assembly (cordis.yml)",
       "refresh": "Re-read assembly state",
@@ -533,7 +531,8 @@
       "reason": {
         "ACTION_BUSY": "The previous action hasn't returned yet",
         "IMPORT_PATH_EMPTY": "Enter the resume file's absolute path first",
-        "NO_SEED_DOC": "Write a document first so preview and export know which one to take",
+        "NO_CURRENT_DOC": "Import a resume, or load the demo content, so preview and export know which one to take",
+        "TEMPLATE_LIST_PENDING": "The template list is still loading; try again in a moment",
         "EDITOR_OPEN": "The layout editor is already open; only one at a time",
         "PDF_EDIT_OPEN": "The PDF edit view is already open",
         "SNAPSHOT_MISSING": "Pick one snapshot in each of the two selectors",
@@ -560,8 +559,18 @@
       "changeRemoved": "removed",
       "changeModified": "modified",
       "import": "Import resume",
+      "pickFile": "Choose file",
+      "pickerTitle": "Choose a resume file to import",
+      "pickerFilterResume": "Resume files",
+      "pickerFilterAll": "All files",
+      "pickerCanceled": "Selection canceled; the path stays as it was",
+      "pickerPicked": "Selected {{path}}",
+      "templateLabel": "Template",
+      "templateCount": "{{count}} built-in templates",
+      "setTemplate": "Set as default",
+      "templateSet": "Default template is now {{template}}; exports and generation will use it",
       "importPath": "Absolute file path",
-      "importHint": "The renderer never reads files: the main process opens this absolute path and detects the format by magic bytes (PDF / DOCX / Markdown / plain text)",
+      "importHint": "Press Choose file to pick one in the system dialog, or type an absolute path; the main process detects the format by magic bytes (PDF / DOCX / Markdown / plain text)",
       "importDone": "Imported {{docId}}: {{format}} · {{textLength}} chars · {{count}} items to confirm",
       "importDup": "Same file already in store ({{docId}}): row count unchanged, only the timestamp moved",
       "importScanned": "Likely a scan: only {{textLength}} chars extracted — no OCR is bundled, please re-enter manually",
@@ -651,7 +660,7 @@
     },
     "pdfEdit": {
       "reason": {
-        "ACTION_BUSY": "An action is still in flight; this key is yours again once its receipt lands in the notice line.",
+        "ACTION_BUSY": "The last action has not come back yet; this key is yours again once the notice line reports it.",
         "PATH_EMPTY": "No absolute source PDF path yet: the renderer cannot read files, so the path must come from you.",
         "FIRST_PAGE": "Already the first page; there is nothing before it.",
         "LAST_PAGE": "Already the last page; there is nothing after it.",
@@ -701,6 +710,13 @@
       "pageOrderRejected": "Page order rejected (empty, out of range, or over the page cap)",
       "undo": "Undo",
       "redo": "Redo",
+      "pickFile": "Choose PDF",
+      "pickSavePath": "Choose save location",
+      "pickerTitle": "Choose a PDF to open",
+      "savePickerTitle": "Save PDF as",
+      "pickerFilterPdf": "PDF documents",
+      "pickerCanceled": "Selection canceled; the path stays as it was",
+      "pickerPicked": "Selected {{path}}",
       "outPathLabel": "Output absolute path",
       "outPathPlaceholder": "/absolute/path/output.pdf",
       "outPathHint": "The output path must differ from the source; the source file is read-only throughout",
@@ -863,7 +879,7 @@
         "builtinReadonly": "Built-in plans are read-only — duplicate one to change it",
         "empty": "No custom plans yet: finish a run in the chat and press Save as workflow",
         "reason": {
-          "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+          "ACTION_BUSY": "The last call has not come back yet — wait for it before pressing again",
           "NAME_EMPTY": "Type a name first: rename and duplicate both write a new name into the store"
         }
       },
@@ -972,7 +988,7 @@
         }
       },
       "reason": {
-        "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+        "ACTION_BUSY": "The last call has not come back yet — wait for it before pressing again",
         "RUN_IN_FLIGHT": "This run has not settled: pause or abort it before starting another",
         "NOT_RUNNING": "Only a running workflow can be paused",
         "NOT_PAUSED": "Nothing is paused right now, so there is nothing to resume",
@@ -1093,8 +1109,8 @@
         "hold": "Take over",
         "release": "Hand the page back",
         "since": "Held for {{duration}}",
-        "notHeldHint": "Taking over stops later actions only; the in-flight step is not interrupted",
-        "heldHint": "Automation stopped at a safe point; after handing the page back you decide whether to continue",
+        "notHeldHint": "Taking over stops the actions that come after; the step running now finishes",
+        "heldHint": "Automation has stopped; after handing the page back you decide whether to continue",
         "actionHold": "take over the page",
         "actionRelease": "hand the page back",
         "reason": {
@@ -1118,11 +1134,22 @@
         "section": "How much the agent decides for you",
         "suggest": "Suggest",
         "semi": "Semi-auto",
-        "auto": "Full-auto"
+        "auto": "Full-auto",
+        "why": {
+          "suggest": "It only writes the plan out for you; it runs nothing",
+          "semi": "It reads pages on its own; anything that writes or sends asks you first",
+          "auto": "Everything runs except the hands that send messages out"
+        },
+        "compareToggle": "What actually differs between the three",
+        "compare": {
+          "suggest": "On Suggest it does not even read a page: it only writes out what it plans to do. Start here if you want to see the arrangement first.",
+          "semi": "On Semi-auto the read-only hands run by themselves (search jobs, read details); anything that touches local files or sends something out stops for your confirmation.",
+          "auto": "On Full-auto everything runs except the hands that send messages out — those always ask unless you add them to the no-confirmation list below. Quota, throttling and daily caps apply on every tier."
+        }
       },
       "policy": {
         "reason": {
-          "ACTION_BUSY": "Another action is in flight: edit the allowlist once its reply lands back."
+          "ACTION_BUSY": "The last action has not come back yet: edit the allowlist once it reports back."
         },
         "heading": "Confirmation-free allowlist",
         "exemptCount": "{{total}} exempted",
@@ -1140,7 +1167,7 @@
       },
       "pause": {
         "reason": {
-          "ACTION_BUSY": "Another action is in flight: answer once its reply lands back, while the deadline keeps running.",
+          "ACTION_BUSY": "The last action has not come back yet: answer once it reports back; the deadline keeps running meanwhile.",
           "SUPPLEMENT_EMPTY": "The supplement is still empty: fill in the missing field (a raw JSON snippet works too)."
         },
         "heading": "Waiting for you",
@@ -1213,7 +1240,7 @@
       },
       "run": {
         "reason": {
-          "ACTION_BUSY": "Another action is in flight: press once its reply lands back in the card stream.",
+          "ACTION_BUSY": "The last action has not come back yet: press once the card stream reports back.",
           "EMPTY_PLAN": "This plan has no step, so confirming would run nothing - let the agent redraft it."
         },
         "heading": "Task plan",
@@ -1234,8 +1261,8 @@
         "confirm": "Confirm and run",
         "cancel": "Cancel this plan",
         "stopNow": "Stop",
-        "stopAccepted": "Stop accepted: the in-flight step finishes, then it halts",
-        "stopHint": "Stop applies at the next safe point",
+        "stopAccepted": "Stop accepted: the step running now finishes, then it halts",
+        "stopHint": "Stop applies at the start of the next step",
         "actionPropose": "draft the task plan",
         "actionConfirm": "confirm and run the plan",
         "actionStop": "stop the task",
@@ -1257,12 +1284,12 @@
           "PAUSE_DENIED": "you denied this step on the card",
           "PAUSE_TIMEOUT": "the wait reached its deadline with no answer, so it was not released",
           "PAUSE_CANCELLED": "a stop or rebuild closed the waiting ticket; nobody ever answered",
-          "TAKEOVER_HELD": "Held by manual takeover, stopped at a safe point",
+          "TAKEOVER_HELD": "Held by your takeover, and stopped",
           "RESUMED_AFTER_TAKEOVER": "Page handed back; a person pressed Continue to resume it",
           "REPLAN_UNCHANGED": "The page changed; replanning could not find a usable step",
-          "REPLAN_EXHAUSTED": "Out of replans, stopped at a safe point",
+          "REPLAN_EXHAUSTED": "Out of replans, and stopped",
           "REREAD_UNAVAILABLE": "Could not re-read the page, so the stale snapshot was not used",
-          "INTERRUPTED": "The app stopped mid-run; reconciled at a safe point (nobody stopped it, and it will not auto-resume)"
+          "INTERRUPTED": "The app stopped mid-run; the books were reconciled and it stayed put (nobody stopped it, and it will not auto-resume)"
         },
         "resume": "Resume this task",
         "actionResume": "resume the task held by takeover",
@@ -1404,6 +1431,7 @@
       "hint": "Paste a JD: the main process reorders sections and entries by relevance, proposes rewrites on allowlisted fields, then runs the deterministic fact check over the result. What you get is a proposal — locked facts (company, role, period, degree) stay verbatim and no number may appear out of thin air. Only the rows you tick and then accept are written into the working copy.",
       "jdPlaceholder": "Paste the JD body (the same text you feed the gap report)",
       "run": "Generate tailored version",
+      "docLabel": "Which resume to tailor",
       "accept": "Accept selected rewrites",
       "stale": "The library or the working copy changed, so this proposal's baseline no longer holds: generate again before accepting.",
       "outcomeRewritten": "{{count}} rewrite(s) proposed: review each row, tick it, and only then does accept write it into the working copy",
@@ -1445,6 +1473,7 @@
       "reason": {
         "ACTION_BUSY": "The previous action hasn’t returned yet",
         "JD_EMPTY": "Paste a JD first so generation knows what to rewrite against",
+        "NO_DOC": "No resume in the library to tailor yet — import one on the resume screen first",
         "NO_PREVIEW": "Run a generation first — there is nothing to accept yet",
         "OUTCOME_REJECTED": "This run failed the fact check, so there is nothing to write — see the violation list",
         "NOTHING_SELECTED": "Tick at least one rewrite, or tick “apply reorder”"
@@ -1452,7 +1481,7 @@
     },
     "script": {
       "reason": {
-        "ACTION_BUSY": "A generate or send call is still in flight; wait for it to land.",
+        "ACTION_BUSY": "A generate or send call has not come back yet; wait for it.",
         "NO_TARGET": "No job in the store yet: run one fetch first, there is nothing to write about.",
         "QUOTE_REQUIRED": "Follow-up and rejection scripts must quote the recruiter first, otherwise the draft invents a conversation.",
         "NO_CANDIDATE_PICKED": "No candidate selected: picking one is what unlocks send."
@@ -1545,7 +1574,7 @@
       "disabledNotice": "Disabled \"{{name}}\"",
       "removed": "Deleted \"{{name}}\"",
       "reason": {
-        "ACTION_BUSY": "The last call is still in flight — wait for it before pressing again",
+        "ACTION_BUSY": "The last call has not come back yet — wait for it before pressing again",
         "NAME_EMPTY": "Give this job a name — the list identifies it by that name",
         "PLAN_MISSING": "Pick a saved plan from the dropdown so the job knows what to run",
         "EXPRESSION_EMPTY": "The cron expression cannot be empty: the schedule lives in this line"
@@ -1592,7 +1621,7 @@
     },
     "update": {
       "reason": {
-        "ACTION_BUSY": "The last update action is still in flight \u2014 wait for it before pressing again",
+        "ACTION_BUSY": "The last update has not come back yet \u2014 wait for it before pressing again",
         "BRIDGE_MISSING": "No bridge in this window, the update channel cannot reach the main process"
       },
       "heading": "Updates",
@@ -1729,7 +1758,7 @@
         "storagePlain": "Unencrypted storage: this machine has no usable system keychain, so the key file sits in plaintext under userData with mode 0600.",
         "storageUnreadable": "The stored blob cannot be decrypted (a machine move or a keychain change): the original file is kept, so filling it in once is enough.",
         "reason": {
-          "ACTION_BUSY": "The previous action is still in flight; wait for it before pressing again",
+          "ACTION_BUSY": "The previous action has not come back yet; wait for it before pressing again",
           "BRIDGE_MISSING": "This window has no bridge, so the model settings cannot reach the main process",
           "LEG_INCOMPLETE": "Base URL, model name and key are not complete, so a connection test would only fail — fill those three first",
           "CHECK_NOT_SUPPORTED": "A connection test for the embeddings leg is not implemented; this press sends no request",

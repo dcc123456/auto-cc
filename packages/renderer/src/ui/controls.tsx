@@ -144,7 +144,7 @@ export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 export function DeskButton({
   action,
   variant = 'line',
-  busy = false,
+  busy: busyProp,
   result,
   disabledReason,
   disabledReasonLabel,
@@ -157,6 +157,13 @@ export function DeskButton({
   children,
   ...rest
 }: DeskButtonProps) {
+  const busy = busyProp === true;
+  // **只有真会进入进行中/结果态的按钮才预留那一格转针位**。原先它无条件渲染（`w-3.5` + `gap-1.5`
+  // = 20px），于是渲染层那 174 处 `<DeskButton` 里根本没有状态可进入的多数字键，文案前面都空出一大片。
+  // 判据取"调用方有没有把状态摊给这颗键"：`busy` 传了（哪怕是 false）、有结果态、或给了完成态文案，
+  // 三者之一成立才留位——这一格的预留是为了 07 稿④「进行中宽度锁死不跳版」，
+  // 一颗永远不会变忙、也永远不会盖章的键没有要锁死的第二条状态。
+  const holdsStateSlot = busyProp !== undefined || result !== undefined || doneLabel !== undefined;
   const isDead = disabled === true || busy;
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
@@ -186,11 +193,14 @@ export function DeskButton({
         <span className={`pointer-events-none absolute inset-0 rounded-control ${RESULT_WASH[result]}`} />
       ) : null}
       {/* 转针与结果角标共用这一格预留位（`w-3.5`）：07 稿④ 的「宽度锁死不跳版」管的正是进行中与结果
-          这两态。活体差值原先是 109 → 127px（角标挤在文案后面长出 18px），挪进已有的状态位后五态同宽。 */}
-      <span className={SPINNER_SLOT}>
-        {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
-        {result && !busy ? RESULT_ICON[result] : null}
-      </span>
+          这两态。活体差值原先是 109 → 127px（角标挤在文案后面长出 18px），挪进已有的状态位后五态同宽。
+          预留与否由 `holdsStateSlot` 判（见上面那条注释）：没有状态可锁的键不占这一格。 */}
+      {holdsStateSlot ? (
+        <span className={SPINNER_SLOT}>
+          {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
+          {result && !busy ? RESULT_ICON[result] : null}
+        </span>
+      ) : null}
       <span className="relative flex items-center gap-1">
         {doneLabel ? (
           // 完成态换文案（07 稿⑤）与「宽度锁死不跳版」（④）是同一条规矩的两半，所以两句话叠在同一个

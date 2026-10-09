@@ -1,0 +1,83 @@
+6.2-33 / 6.2-34 / 6.2-35 活体读数（2026-10-09，窗口 visibilityState=visible，CDP 10222，全部 --url 5173）
+
+环境：`pnpm dev` 在跑（本机 macOS arm64，内容区 1200×742）。指针类判据本轮全部用真实 CDP 鼠标事件
+（`harness click` / `harness drag`），窗口在前台所以输入落页（§9 的 2.1-12 那条遮挡条件不成立）。
+量几何前注入 `*,*::before,*::after{transition:none!important;animation:none!important}`，读完摘掉
+（注入前 `document.getAnimations().length` 读数 0，窗口可见时时间轴本来就在跑）。
+
+────────────────────────────────────────────────────────────────────────
+【1】6.2-33 按钮文案前面的空白：转针槽位只在状态可达时预留
+
+判据 = 文本左缘到按钮左缘的差（`Range` 量首个文本节点），以及按钮里有没有那支 `w-3.5` 的槽位 span。
+
+  [data-action="kernel-slot-expand"]  w=57  headGap=9   hasSpinnerSlot=false  aria-busy=null
+  [data-action="kernel-slot-hide"]    w=57  headGap=9   hasSpinnerSlot=false  aria-busy=null
+  [data-action="send"]                w=86  headGap=33  hasSpinnerSlot=true   data-disabled-reason=INPUT_EMPTY
+
+三条一起读出的分界正是修法的分界：前两颗键调用点没给 `busy` / `result` / `doneLabel`，
+所以不预留槽位（headGap 9 = `px-2.5` 的内边距，文案紧贴内边距起排）；
+`send` 那颗带 `busy={busy !== undefined}`，真会进入进行中态，槽位留着、宽度锁死（07 稿④原样成立）。
+修法在 `packages/renderer/src/ui/controls.tsx`：`holdsStateSlot = busyProp !== undefined || result !== undefined || doneLabel !== undefined`。
+
+画面：`6.2-34-35-chat-desk.png` 右上工具行（全屏 / 收起两颗键的文案前不再有一段空档）。
+
+────────────────────────────────────────────────────────────────────────
+【2】6.2-34 消息流左右分边（用户在右、助手在左）
+
+同一条会话两条消息，`li` 宽都量到 480；下表是文本块相对 `li` 左缘的偏移与自身宽度。
+
+  role=user        liW=480  textX=360  textW=86   borderRadius=12px  bg=rgb(19, 28, 35)（ink-800）
+  role=assistant   liW=480  textX=34   textW=379  borderRadius=12px  bg=oklab(0.173835 … / 0.6)（ink-900/60）
+
+判据：user 的 textX(360) + textW(86) = 446 ≈ 480 − 34（右侧留白与左侧对称），而 assistant 的 textX=34 贴在左缘；
+两者宽度都停在 `max-w-[85%]`（408）之内，长文本不会横穿整行。图标腿同向：`flex-row-reverse` 让头像走到右侧。
+既有 `data-message-role` / `data-part-kind` 通道一字未改（5.6-01、5.2-13 那批历史读数仍读得到同一格）。
+
+画面：`6.2-34-35-chat-desk.png`（助手气泡靠左、用户气泡靠右）。
+
+────────────────────────────────────────────────────────────────────────
+【3】6.2-35 自治三档说人话 + 术语普查
+
+当下档位 = 半自动。平铺那一行读数（`[data-testid="chat-autonomy-why"]`）：
+
+  text = 「看页面它自己跑；改本机、往外发都先问你」
+  fontSize=11px  color=rgb(133, 152, 168)（slate-400）  width=446
+
+三档对比收在披露层，触发文案「这三档到底差在哪」（`[data-explainer="agent.autonomy-compare"]` 已挂载），
+段容器 `data-open=true`。文案不是猜的：三条 one-liner 逐条对过 `packages/agent/src/loop/policy.test.ts` 的真值表
+（建议档所有外发/写入腿都是 `TIER_SUGGEST_READ_ONLY`；半自动只放行 `read` 且不要求确认；
+全自动放行除"要求确认的手"以外的一切，而免确认白名单只在 `auto` 档起作用）。
+
+普查（两份语言包，改写条数 zh 19 / en 18）：
+
+  「在飞」zh=0 en=0    「落回」zh=0 en=0    「安全点」zh=0 en=0
+  "still in flight" en=0    "at a safe point" en=0
+  保留：「回执」zh=2（打招呼 / 投递的回执标题）、「落账」zh=2（额度屏）
+  射程外：`en` 诊断屏 `metricIpc` 仍写 "gateway in flight {{inFlight}}"（技术屏，本轮不动）
+
+一条如实的欠项（**没改，写在这里**）：对话屏里那条助手骨架回复
+「已收到：…。这是对话骨架的本地确定性回复——不接 LLM、不发网络请求；以 /tool 开头的那条会真调注册表，
+外发级工具按 2.8-10 经额度闸门与账本。」硬编码在 `packages/agent/src/session.ts:996`（主进程侧固定文案，
+§5.5 的语言包机检照不到，spec 05 第 275 行早已记它"归 5.2"）。本轮没动它的理由是环境事实而不是遗漏：
+同一工作树里另一个窗口此刻正在改 `packages/shell` 与 `packages/resume-doc`（都在主进程射程内），
+我再改 `packages/agent` 会让 esbuild watch 重启 Electron，把人家的活体取证掐在半路（§9 的 ⑯ 同一条）。
+
+画面：`6.2-34-35-chat-desk.png`。
+
+────────────────────────────────────────────────────────────────────────
+【4】`/run` → `/plan`：分流仍然只走 agent 循环，不产出对话那一句
+
+输入框写 `/plan 找 3 个前端岗位` 后触发发送：
+
+  `[data-testid="agent-run-panel"]` 挂载，卡片文案「任务计划 / 待确认 / 目标：找 3 个前端岗位 / 起草时档位：半自动 /
+    其中 0 步会离开本机 / 步数上限 12 · token 预算 4000 / 已落 0 / 0 步」
+  `[data-message-role]` 条数 **仍是 2** —— 这一句没有走 `chat.session.send`，
+    spec 5.2-03 那条「同一句话既有对话答案又有计划 = §2.5 禁的形态」在新前缀下同样成立
+  卡片上 `confirm-run` 挂 `data-disabled-reason=EMPTY_PLAN`（起草回来 0 步），随后 `cancel-run` + `dismiss-run` 收干净
+
+**这一条的取法与上面三条不同，必须写清**：取读数时另一个窗口正在同一实例上跑简历导出
+（画面里读得到「导出成功：1 页 · 29911 字节」「已打开 1 页」），对话视图不在前台、发送键矩形 0×0，
+所以这里用的是 `element.click()`（§9 的 裁定⑱ 补窗②：它跳过命中测试、React 监听照跑，拿到的是**逻辑层的真相**）。
+也就是说这一条证明的是"分流走对了"，**不证明**"人拿鼠标点得动"——同一批里真指针那几条落在右栏控件上
+（`harness click` 打 `kernel-slot-hide / show / expand`、`harness drag` 打把手，读数见
+`../../08-real-platform-driving/8.8-10-slot-controls-readings.txt`【2】【3】【4】）。
