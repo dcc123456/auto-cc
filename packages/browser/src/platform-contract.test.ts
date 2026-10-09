@@ -504,6 +504,32 @@ describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
     expect(pack.deliver!.offlinePattern).toBeUndefined();
   });
 
+  it('缺 sendButton 与 sentPattern 也是合法的中间态：只注入不点（spec 8.5-01 的裁定）', () => {
+    // 真 BOSS 的投递口长在会话里，而"注完文件以后要点哪一颗"从来没有在场读数（证据 8.0-06 第五节）。
+    // 这两只从必填变可选，缺的那一格才在数据里看得出来：适配器停在注入之后，结局恒为 `sent:false`。
+    const pack = parseKnowledgePack(
+      deliverPack({ deliver: { uploadInput: deliverSection.uploadInput, statusLine: deliverSection.statusLine } }),
+    );
+    expect(pack.deliver!.uploadInput).toBe('resumeUploadInput');
+    expect(pack.deliver!.sendButton).toBeUndefined();
+    expect(pack.deliver!.sentPattern).toBeUndefined();
+  });
+
+  it('sendButton 与 sentPattern 只登记一只就拒包：半配的形状在页面上必输', () => {
+    // 只有键 = 点出去之后没有成功凭据（账却已经落了）；只有样式 = 永远不会去点（等一次不发生的变化）。
+    for (const half of ['sendButton', 'sentPattern'] as const) {
+      const other = half === 'sendButton' ? 'sentPattern' : 'sendButton';
+      try {
+        parseKnowledgePack(deliverPack({ deliver: { ...deliverSection, [other]: undefined } }));
+        expect.unreachable(`只登记 ${half} 应当拒包`);
+      } catch (error) {
+        expect(errorDetails(error).problems, `${half} 单独出现`).toEqual([
+          'deliver：sendButton 与 sentPattern 必须成对出现（只注入不点就两只都省，缺一不可）',
+        ]);
+      }
+    }
+  });
+
   it('只有 deliver.uploadInput 能用注入档：发送键借这一档降分即拒包（裁定㉑）', () => {
     try {
       parseKnowledgePack(

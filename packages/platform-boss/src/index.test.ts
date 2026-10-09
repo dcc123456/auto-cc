@@ -82,14 +82,27 @@ describe('上线知识包装载（真 BOSS，spec 8.1-01 / 8.1-02 / 8.1-07）', 
     expect(raw).not.toContain('未实测');
   });
 
-  it('上线包不声明 sendResume：投递页的 offlinePattern 没有在场证据，宁可让这一格停在能力缺席上', () => {
-    // 证据 8.0-06 第四节：`offlinePattern` 本次未取到（现场没有离线态样本），而第四节的 `riskPattern`
-    // 是**故意不采集**（主动撞风控就是对 §8.3 红线的对抗）。缺的是页面知识，不是代码——
-    // 所以这里删掉的是能力声明，不是猜一句「岗位已下架」填进上线包。补录了就把这一格加回来。
+  it('上线包声明 sendResume 但只登记注入半边：确认投递的按钮至今没有在场读数', () => {
+    // 证据 8.0-06 第五节：那一次在场**未按「上传附件简历」、未选文件**，所以"注完文件以后要点哪一颗、
+    // 还是站点自己就发出去了"这一格是空的（`offlinePattern` 同样未取到，第四节记的是**故意不采集**风控文案）。
+    // 8.5-01 的裁定把这一格变成数据里看得出来的一格：`sendButton` / `sentPattern` 省略 = 只注入不点，
+    // 适配器据此停在注入之后并如实回 `sent:false`（不落账）。补到读数了就成对登记回来。
     const pack = loadBossKnowledgePack(REAL);
-    expect(pack.capabilities).toEqual(['search', 'detail', 'chat', 'readReplies']);
-    expect(pack.deliver).toBeUndefined();
+    expect(pack.capabilities).toEqual(['search', 'detail', 'chat', 'sendResume', 'readReplies']);
+    expect(pack.deliver).toMatchObject({ uploadInput: 'deliverUploadInput', statusLine: 'chatStatus' });
+    expect(pack.deliver?.sendButton).toBeUndefined();
+    expect(pack.deliver?.sentPattern).toBeUndefined();
+    // 投递口长在会话里：既没有可直接拼的上传页路径，也没有岗位参数（8.0-06 第一节实测）。
+    expect(pack.deliver?.entryPath).toBeUndefined();
+    expect(pack.deliver?.targetParam).toBeUndefined();
     expect(pack.risk).toBeUndefined();
+  });
+
+  it('上线包的注入定位带齐了注入档那两条同现的形状（裁定㉑）', () => {
+    const pack = loadBossKnowledgePack(REAL);
+    // 隐藏的 `input[type=file]` 读不到盒模型、又只有 class 级候选可写：两条是同一件事，缺一条这一发就永远打不出去。
+    expect(pack.locators.deliverUploadInput).toMatchObject({ cardinality: 'single', effect: 'inject' });
+    expect(pack.locators.deliverUploadInput?.requireActionable).toBe(false);
   });
 
   it('上线包把「只有 class 可选」的抓取定位登记成 effect:"read"，外发那两只没有', () => {

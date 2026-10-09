@@ -4,7 +4,7 @@
   "startUrl": "https://www.zhipin.com/",
   "packStatus": "shipped",
   "origins": ["https://www.zhipin.com"],
-  "capabilities": ["search", "detail", "chat", "readReplies"],
+  "capabilities": ["search", "detail", "chat", "sendResume", "readReplies"],
   "locators": {
     "jobCard": {
       "description": "搜索结果页的一张岗位卡片。真站点全页没有 data-testid / id / name 可用（证据 8.0-03 第六节），容器只能靠类名，因此这一条走读取档的低阈值（effect:'read'，P8 裁定⑤）。卡片链是 div.job-list-container > ul.rec-job-list > div.card-area > div.job-card-wrap > li.job-card-box，两条候选各命中 15 枚",
@@ -337,6 +337,24 @@
           }
         }
       ]
+    },
+    "deliverUploadInput": {
+      "description": "投递用的文件控件：全页唯一一枚 input[type=file]，**嵌在入口内部**——父节点就是 a.btn.btn-primary.btn-file（文本「上传附件简历」），所以「点按钮=点开文件框」，注入要落在这枚 input 上而不是那枚 <a>（证据 8.0-06 第一节）。三条实测决定它的声明形状：① 无 name / 无 id / 无 multiple，能写的候选只剩 class 级（`a.btn-file input[type=file]`，35 分），因此必须走注入档 30 分而不是外发的 70 分（裁定㉑）；② 计算样式 display:block / visibility:visible 而 **opacity:0**、rect [0,0,0,0]，可点性三条判据（可见、启用、中心点不被遮挡）对它全不成立 ⇒ requireActionable 必须关掉，否则永远 below-score；③ accept 白名单含 application/pdf（同节），我们生成的 PDF 在列，不需要换格式。入口键本身没登记：它的 role 计算值需要实测而本次不点（8.0-06 第六节），而 CDP 直接往这枚 input 写文件不需要点它",
+      "cardinality": "single",
+      "effect": "inject",
+      "requireActionable": false,
+      "candidates": [
+        {
+          "strategy": "css",
+          "value": "a.btn-file input[type=file]",
+          "evidence": {
+            "ref": "docs/acceptance/08-real-platform-driving/8.0-06-deliver-risk-evidence.txt",
+            "url": "https://www.zhipin.com/web/geek/chat",
+            "verifiedAt": 1791434517000,
+            "hits": 1
+          }
+        }
+      ]
     }
   },
   "capture": {
@@ -382,6 +400,10 @@
     "messageBody": "chatMessageBody",
     "messageIdAttribute": "data-mid",
     "inboundClassToken": "item-friend"
+  },
+  "deliver": {
+    "uploadInput": "deliverUploadInput",
+    "statusLine": "chatStatus"
   },
   "fieldOrder": ["title", "company", "salary", "city", "experience", "education"]
 }

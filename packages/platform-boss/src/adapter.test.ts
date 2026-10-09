@@ -666,6 +666,49 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(act.clicked).toHaveLength(1);
   });
 
+  it('缺确认投递的按钮与成功样式：注完文件就停手，零点击零等待，结局写明「没有点出去」（spec 8.5-01）', async () => {
+    // 真 BOSS 的这一段就是缺读数（证据 8.0-06 第五节：那次在场未选文件、未按入口键），而契约允许它缺。
+    // 停手的形状必须是**动作序列里根本没有点击**：注入的页面回读（控件自己报上来的文件名）做到 ② 为止，
+    // ③④ 两段等确认键有读数才做得成。
+    const injectOnly: KnowledgePack = {
+      ...pack,
+      deliver: { ...pack.deliver!, sendButton: undefined, sentPattern: undefined },
+    };
+    const { adapter, act } = withScript(deliverScript(injectOnly, ['等待投递']), {}, injectOnly);
+    const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
+    expect(outcome.sent).toBe(false);
+    expect(outcome.reason).toContain('没有点出去');
+    expect(outcome.reason).toContain('控件自己回读到附件名「resume-2026.pdf」');
+    expect(act.uploaded).toHaveLength(1);
+    expect(act.clicked).toEqual([]);
+    expect(act.waitsStarted).toBe(0);
+  });
+
+  it('上线包那一发真形状（会话坐标 + 无投递页地址 + 无确认键）：选中行、注文件，到此为止', async () => {
+    // 这条是 8.5-01 活体那一跑的彩排：真 BOSS 的投递口长在会话里（`deliver` 段没有 `entryPath` /
+    // `targetParam`，证据 8.0-06 第一节），而确认键至今没有读数。于是页面上应当只发生三件事——
+    // 开到会话页、选中那一行、把文件注进控件；一次点击都不该有，一条岗位地址都不该拼。
+    const rows = [conversationRow(0, '甲公司'), conversationRow(1, '乙公司')];
+    const realShaped: KnowledgePack = {
+      ...rowAddressing,
+      deliver: { uploadInput: 'resumeUploadInput', statusLine: 'resumeDeliverStatus' },
+    };
+    const { adapter, page, act } = withScript(
+      { ...deliverScript(realShaped, ['等待投递']), chat: chatScript(realShaped, null, [], rows).chat },
+      {},
+      realShaped,
+    );
+    const outcome = await adapter.sendResume({ conversationTarget: '乙公司' }, RESUME);
+    expect(outcome.sent).toBe(false);
+    expect(outcome.reason).toContain('没有点出去');
+    expect(act.clicked.map((call) => call.spec)).toEqual([realShaped.locators.chatConversationLabel]);
+    expect(act.uploaded).toEqual([{ spec: realShaped.locators.resumeUploadInput, filePath: RESUME.path }]);
+    // 只起了"等列表长出来"那一次等待：`textChanges` 是为那一次点击准备的，点击没了它也不该存在。
+    expect(act.waitedFor).toEqual([{ kind: 'appear', spec: realShaped.locators.chatConversationRow }]);
+    expect(page.navigated).toHaveLength(1);
+    expect(page.navigated[0]).not.toContain('targetId');
+  });
+
   it('状态行变了但不含成功样式 → sent:false 并写明读到的是哪句', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递', '请先与招聘者沟通']));
     expect(await adapter.sendResume({ jobId: '1001' }, RESUME)).toMatchObject({

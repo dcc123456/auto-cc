@@ -266,12 +266,29 @@ export const knowledgePackSchema = z.strictObject({
        * 隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被 fail-closed 打掉（plan §13.6 第 1 条）。
        */
       uploadInput: z.string().min(1),
-      /** 确认投递的按钮定位名 */
-      sendButton: z.string().min(1),
+      /**
+       * 确认投递的按钮定位名。**可以是缺的**（P8 8.5-01 的裁定，2026-10-09）。
+       *
+       * 为什么这一格曾经必须是实的：`docs/plans/02-browser-automation/plan.md:1036` 禁止发布未实测的
+       * 选择器，而"注完文件以后要点哪一颗、还是站点自己就发出去了"在真 BOSS 上从来没读过
+       * （证据 8.0-06 第五节：那次在场**未按「上传附件简历」、未选文件**）。必填意味着
+       * 「没有这一格读数就整段登记不了」，于是整条注入通道被一起堵死——而注入本身是有读数的
+       * （8.0-06 第二节实测到那一枚 `input[type=file]` 与其宿主入口）。
+       *
+       * 缺它的语义是**只注入不点**：适配器把文件注进控件、以那个 input 自己报上来的文件名核对字节，
+       * 然后**在此停手**，结局恒为 `sent:false` 并写明没点出去（不落账、不扣额度）。
+       * 与 `offlinePattern` 同一条纪律：缺 = 「这一条做不了」，不是「默认做得成」。
+       */
+      sendButton: z.string().min(1).optional(),
       /** 投递状态行定位名：`sent` 由它回读；同一行也是「目标已下架」的读数来源 */
       statusLine: z.string().min(1),
-      /** 状态行里表示「简历已递出」的字样（各站点文案不同，所以是数据不是代码） */
-      sentPattern: z.string().min(1),
+      /**
+       * 状态行里表示「简历已递出」的字样（各站点文案不同，所以是数据不是代码）。
+       *
+       * 与 `sendButton` **成对出现**（见 `parseKnowledgePack` 的成对规则）：只登记确认键 = 点出去之后
+       * 没有成功凭据，只能靠猜；只登记成功样式 = 永远不会有那一次点击。
+       */
+      sentPattern: z.string().min(1).optional(),
       /**
        * 状态行里表示「这个岗位已经不收了」的字样（spec 2.6-07 的二次校验依据）。
        *
@@ -452,7 +469,14 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
       ['sendButton', deliver.sendButton],
       ['statusLine', deliver.statusLine],
     ] as const) {
-      if (!locatorNames.has(name)) problems.push(`deliver.${key}：引用了不存在的定位名「${name}」`);
+      if (name !== undefined && !locatorNames.has(name))
+        problems.push(`deliver.${key}：引用了不存在的定位名「${name}」`);
+    }
+    // 成对规则（与 `chat.conversationRow` 那一双同一条纪律）：确认键与成功样式要么都有、要么都没有。
+    // 半配的形状在页面上必输：只有键就没有凭据（点完不知道成没成，账却已经落了），
+    // 只有样式就永远不会去点（`sentPattern` 挂在那一行上等一个不发生的变化）。
+    if (Boolean(deliver.sendButton) !== Boolean(deliver.sentPattern)) {
+      problems.push('deliver：sendButton 与 sentPattern 必须成对出现（只注入不点就两只都省，缺一不可）');
     }
   } else if (parsed.data.capabilities.includes('sendResume')) {
     // 与 chat 段同一处判据：声明了投递能力却没有上传页知识，真到页面上只能靠猜，那就别让这份包上线。
@@ -474,7 +498,8 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   // 裁定⑤（2026-10-08）：最低可用分按通道分档，读取/抓取降档、外发保持严的那一档。
   // 于是「外发用哪几条定位」必须在装载期就锁死通道归属：谁把发送键标成 read 想去拿低阈值，这里就拦下。
   //
-  // 名单里**只有真的会动手的那三只**（输入框、发送键、上传控件）。状态行不在名单里是刻意的：
+  // 名单里**只有真的会动手的那几只**（输入框、发送键、上传控件；投递确认键没登记就不在名单里，
+  // 那一路是"只注入不点"，见 `deliver.sendButton` 的注释）。状态行不在名单里是刻意的：
   // 它只被读、不被点，而真站点上它常常只有 class 可选（真 BOSS 是 `i.message-status.status-delivery`，
   // 35 分）——把它钉在 70 分档等于「真实站点永远等不到状态行变化」，那条外发反而变成必失败。
   // 读错状态行的代价由另一半判据兜着：`sent` 要求回读文本**含**成功样式，不是「读到了东西」。

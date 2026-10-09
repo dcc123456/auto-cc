@@ -573,6 +573,11 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * ④ 变化后的文本里含知识包声明的成功样式。
    * ②③④ 任何一段不成立就返回 `sent:false`（编排层据此不落账）；①是抛错，因为它意味着
    *    「这个目标别再试了」，与「这条没发出去但目标还在」在界面上是两种处置（spec 2.6-07）。
+   *
+   * **③④ 可以整段缺席**（spec 8.5-01 的裁定，2026-10-09）：知识包没登记确认投递的按钮与成功样式时，
+   * 这一路只做到 ② 就停手并返回 `sent:false`，理由里写明「没有点出去」。这不是失败分支而是当前形状——
+   * 真 BOSS 的投递口长在会话里，"注完文件以后要点哪一颗、还是站点自己就发出去了"从来没有在场读数，
+   * 而 `docs/plans/02-browser-automation/plan.md:1036` 禁止把没实测过的选择器登记进上线包。
    * @param target 落点坐标：岗位（可用 `targetParam` 直接拼上传页地址的站点）或会话对象（真 BOSS 那一类，
    *        投递口长在会话里，先用 `selectConversation` 把页面落到那一条上；裁定⑲ 的同一形状，plan §7 第 14 条）
    * @param attachment 编排层已校验（存在 / pdf / 大小上限）并算好 sha256 的简历文件
@@ -594,9 +599,11 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         platform: pack.platform,
       });
     }
-    // 与 `chat` 同一条纪律：两条要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
+    // 与 `chat` 同一条纪律：要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
     const uploadSpec = outboundLocator(knowledge.uploadInput);
-    const sendSpec = outboundLocator(knowledge.sendButton);
+    // 确认键没登记 ⇒ 这一发只注入、不点（8.5-01 的裁定）：注完文件之后页面上长出什么从来没有在场读数，
+    // 而契约从此允许那一格缺席。`sentPattern` 与它成对（加载期就查死），所以下面只问一只。
+    const sendSpec = knowledge.sendButton ? outboundLocator(knowledge.sendButton) : null;
     // 缺下架文案时的补话，原样拼进结局：让"这一条判不了"随结果走，而不是只留在注释里。
     const skippedOfflineCheck = knowledge.offlinePattern
       ? ''
@@ -627,6 +634,18 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       return {
         sent: false,
         reason: `文件控件回读到的文件名与附件不一致：页面「${String(injected.valueAfter)}」/ 附件「${attachment.fileName}」`,
+        ledgerKey: null,
+      };
+    }
+    // 注入半边做完了就到站：没登记确认键时**一个点击都不发**，也不起 `textChanges` 等待
+    // （那只等待本来就是为那一次点击准备的）。回读在这里是够的：文件名由那个 input 自己报上来，
+    // 证明塞进控件的就是这份字节；而"有没有递出去"必须等确认键有读数才算得出。
+    if (!sendSpec || !knowledge.sentPattern) {
+      return {
+        sent: false,
+        reason:
+          `文件已注进上传控件、控件自己回读到附件名「${attachment.fileName}」，但没有点出去：` +
+          `知识包未登记确认投递的按钮与成功样式（注入之后页面上长出什么还没有在场读数）${skippedOfflineCheck}`,
         ledgerKey: null,
       };
     }

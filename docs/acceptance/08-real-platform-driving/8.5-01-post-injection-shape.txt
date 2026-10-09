@@ -1,0 +1,106 @@
+# 8.5-01 活体读数：真会话页在"投递"这一格上长出的形状（2026-10-09，用户在场）
+
+现场：本机 macOS，用户 dev 实例（未起第二实例），真 BOSS 账号，视图停在
+`https://www.zhipin.com/web/geek/chat`，`document.documentElement` 读数
+`clientWidth 1139 / scrollWidth 1224`（这一轮视图比 8.4-01 那次的 863 宽，仍低于站点最小布局 ⇒ 横向仍裁 85px）。
+
+附件：`丁某某-高级前端开发2026.pdf`（真名按 AGENTS.md §8.5 脱敏），`sizeBytes 334523`，
+`sha256` 前缀 `366c43b91025`。**该文件全程只作为 `deliver.perform` 的入参出现，没有任何一次送达**（见第三节）。
+
+取数方式：harness **只 attach 读取**（`eval --url zhipin`），没有对真实 target 做过一次 navigate，
+也没有用 CDP 往真实页面上派任何鼠标事件。页面动作全部由产品自己的白名单通道发起。
+
+---
+
+## 一、这一发是怎么停下的（fail-closed 的正面读数）
+
+从渲染层白名单发出：`window.autoCC.outbound['deliver.perform']({platform:'boss',
+conversationTarget:'上海肯德基有限公司', company:'上海肯德基有限公司', filePath:…})`。
+
+- 确认单 `6b99cc7a-1916-444e-8b77-41932bf4d440` 由**用户亲手点掉**（朱砂「确认投递」），
+  `outbound.deliver.pending()` 随后回空数组 ⇒ 闸门与人工确认这一段的顺序是对的。
+- 结局（`deliver.perform` 的信封，`ok:false`）：
+
+  ```
+  code    LOCATE_FAILED
+  message 定位未过线，上传没有执行：最优候选 10 分低于最低可用分 30
+  path    browser.act
+  details.status  below-score
+  details.spec    {cardinality:'single', effect:'inject', requireActionable:false,
+                   candidates:[css 'a.btn-file input[type=file]']}
+  ```
+
+- **这一发没有注文件、没有点任何键、没有落账**：抛点在 `channel.send` 之内、`gate.perform` 之前
+  （`packages/outbound/src/deliver.ts` 的 commit 顺序是 consent → 择机 → gate.enforce → 节流 →
+  等人表态 → `channel.send` → 记账/落记录），所以 `usage_ledger` 与 `delivery_records` 都不增行。
+  页面侧同一条自证：三枚 `input[type=file]` 的 `files.length` **全是 0**，
+  会话末尾那一条仍是 8.4-01 那发的 11:53「送达 您好，我对贵司这个岗位很感兴趣，方便聊聊吗？」，
+  没有长出任何附件消息。
+
+## 二、真会话页上 `input[type=file]` 的实测形状（**把 8.0-06 那句"全页唯一一枚"作废**）
+
+`document.querySelectorAll('input[type=file]')` 现读 **3 枚**：
+
+| # | 父节点 | `accept` | 收 PDF？ | 可见性 |
+| - | ------ | -------- | -------- | ------ |
+| 1 | `div.toolbar-btn-content.icon.btn-sendimg`（会话工具条「发简历」那一格自己带的一枚） | `image/gif,image/jpeg,image/jpg,image/png` | **否** | 可见 |
+| 2 | `a.btn.btn-primary.btn-file`（文本「上传附件简历」） | 含 `application/pdf`、`.doc/.docx`、ppt | 是 | **藏在关着的弹层里** |
+| 3 | 同上，逐字相同 | 同上 | 是 | 同上 |
+
+⇒ **能收 PDF 的那一枚不在工具条上**：工具条那格「发简历」走的是**图片简历**（只收 image/\*），
+附件简历（PDF）必须先让 `upload-resume-dialog` 那个弹层打开。
+
+## 三、那两枚为什么区分不了（本轮的定位挡路石）
+
+两枚的父链逐字相同，都是同一份对话框的两份 **teleport 副本**，且都直接挂在 `<body>` 下：
+
+```
+a.btn.btn-primary.btn-file            文本「上传附件简历」，rect 0×0，offsetParent=null
+  < div.btns
+  < div.upload-resume__old            [data-v-46c9e5e1=""] class="upload-resume__old"
+  < div.dialog-body
+  < div.dialog-container              style="display: none"
+  < div.dialog-wrap.upload-resume-dialog.v-trans   [data-v-46c9e5e1] [data-v-c18800fc] [data-transfer="true"] style="display: none"
+  < body
+```
+
+两份副本的内部文案也逐字相同：「拖拽文件到这里 / 简历建议使用 PDF 文件，也支持DOC、DOCX、JPG、PNG 格式 /
+文件大小不超过20M / 上传附件简历 / 没有附件简历 / 在线填写」。
+
+⇒ 结论三条，都是这一格真正的形状：
+1. `a.btn-file input[type=file]` 这条候选在**弹层关闭**的状态下必然命中 **2** 枚 ⇒ 歧义罚分把它从 35 分打到 **10 分**，
+   注入档 30 分（裁定㉑）过不了线 —— 这就是本轮 `LOCATE_FAILED` 的全部原因，不是选择器写错，是**页面状态没到位**。
+2. 因此 `cardinality:'single'` 这句声明只在"弹层已打开"的前提下成立；**打开弹层是投递链路的前置动作**，
+   而它此前没有被登记（`deliver` 段没有入口键，理由写在定位描述里："入口键本身没登记：它的 role 计算值需要实测而本次不点"）。
+3. 区分"哪一枚能用"的唯一实测依据是**可见性**（`display:none` 在祖先 `div.dialog-container` 上），
+   不是内容、不是顺序。任何"取第一枚 / 取最后一个"的写法都没有证据支持，不许进包。
+
+## 四、顺带抄到的两格（与投递无关但会咬人）
+
+- 会话右侧长着一张站点自己的推荐弹层：`div.dialog-center` @ (656,38,280,124)，
+  文案「我觉得你很适合我们的岗位，你可以直接跟我互换电话联系我 / 电话联系TA」；
+  `message-controls` 那一块里还预置了「换电话 / 换微信 / 确认与对方交换电话吗？取消 确定」等节点。
+  它们是**遮挡候选**：中心点命中测试会打到这些节点上（本轮 `发送` 键仍是 `button.btn-v2.btn-sure-v2.btn-send.disabled` @ (1112,602,62,28)）。
+- `document.querySelectorAll('div.dialog-wrap.upload-resume-dialog')` 有两份这件事本身说明：
+  真页面的组件副本数会随会话切换/路由变化增长。**"全页唯一一枚"这类断言必须每次现读**，
+  知识包里的 `hits` 只能代表取证那一刻的形状（8.1-02 的 `hits` 可选正是为此）。
+
+## 五、欠的那两次读数（下一刀的前提，不猜）
+
+1. **打开附件简历弹层以后的形状**：工具条那一格「发简历」(`div.toolbar-btn` @ (575,488,64,24)，
+   父链 `div.toolbar-btn-content < div.chat-controls < div.chat-im.chat-editor < div.message-controls < div.chat-conversation`)
+   点开以后，`upload-resume-dialog` 是否只让**一份**副本变成可见 ⇒ 才有资格写"唯一一枚"的那条候选。
+   这一格按 AGENTS.md §7.2「真实平台只在用户在场时手动验证」+ 裁定②，由用户亲手点一次、我只读地抄。
+2. **选完文件以后站点自己长出什么**：`deliver.sendButton`/`sentPattern` 那一格（"注入之后是还要点一枚确认，
+   还是站点 change 事件自己就把它发出去了"）。本轮停在定位，所以这一格**仍是空的**，
+   8.5-01 的活体半边不能标 `[x]`。
+
+## 六、界面侧同轮暴露的一条缺陷（与选择器无关，已登记 plan §7 第 17 条）
+
+第一张确认单 `be6c7f03-…` 超时被按拒绝处理（回执 `OUTBOUND_APPROVAL_DENIED`，前后账本不增行）。
+根因不是没人想点：那张卡只长在**岗位屏**的投递区，而首页第一入口是对话屏 ——
+用户停在对话屏时，`[data-approval-id]` 那一行量出来 **宽度 0**（`display:none` 的 section 包着），
+屏幕上根本看不见"有一张单在等你"。第二次我先把视图切到岗位屏、再把卡片 `scrollIntoView`
+（矩形 `y 34→405`，中心点命中测试从 `header` 变成那颗键自己 `isSelf:true`，因为它原先压在吸顶 header 底下），
+用户这才点得到。两条欠项：① 外发确认单在**默认视图**里不可见、对话屏只在 `agent-pause-notice` 那格事后补一句失败文案；
+② 卡片虽在 DOM 里但会被 sticky header 压住中心点，真实鼠标落不到它。
