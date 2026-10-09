@@ -273,7 +273,9 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   **31 / 32 是 `packages/llm/src/provider-pool.ts` 的提供商实例池与模型清单两张表（spec 7.2-08）**，
   号段来源读数见 `docs/acceptance/07-model-settings/7.2-02-08-pool-readings.txt`；
   **33 是 `packages/platform-boss/src/conversation-store.ts` 给 `conversation_messages` 加的 `conversation_target`
-  （裁定⑲ / spec 8.4-04）**，**34 本轮两种声明形状都 grep 过（`MIGRATION_VERSION = 34` 与字面 `version: 34`）确认未分配**，
+  （裁定⑲ / spec 8.4-04）**，**34 当前在工作树上未分配**（两种声明形状都 grep 过：`MIGRATION_VERSION = 34` 与字面
+  `version: 34` 全仓零命中——但同窗有一次搜索读数指向过一个随即消失的 `packages/resume-kb/src/internal/mcp-source.ts`
+  （`KB_MCP_SOURCE_MIGRATION_VERSION = 34`），共享工作树里并行会话随时可能把它落地，**所以别把 34 当成可占的空号**），
   **35 是 `packages/outbound/src/delivery-record-store.ts` 给 `delivery_records` 加的同名列（8.5-D / spec 8.5-05）**。
   原先这条写的是"当前到 17"和"最高已用到 29"（`packages/workflow/src/run-store.ts:123` 的
   `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`），那是 5.3-a / 7.2-a 窗口的读数，此后 21～29 九支已陆续落地。

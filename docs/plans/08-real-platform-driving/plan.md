@@ -347,11 +347,13 @@ spec 8.2-03 已按实测收窄，不是让步。
       **投递 = 在当前那条会话里把附件简历当消息发出去**（证据 8.0-06 第一、二节）。
       于是 `deliver.entryPath` / `targetParam` 在真包上都是缺的，动作必须落在**选中的那一条会话**上
       ⇒ 8.4-C 刚建好的 `selectConversation` 就是它的前置，`sendResume` 因此要走 `conversationTarget` 那一路
-      （现在签名仍是 `sendResume(jobId, attachment)`，`platform-registry.ts:128` 的窄投影也只透 `targetId: string`）。
+      （**下面这一句是 2026-10-09 摸底时的形状，代码半边到货后已不成立**：当时签名仍是 `sendResume(jobId, attachment)`，
+      `platform-registry.ts:128` 的窄投影也只透 `targetId: string`）。
       这一格是**代码半边**，不依赖新读数，落点顺序照 8.4-C 那条链改：契约签名 → registry 投影 →
       适配器（把 `selectConversation` 接成投递前置）→ `deliver.ts` 的幂等键与额度目标（复用 `greetTargetLabel`）→
-      `delivery_records` 加 `conversation_target` 那一列（**取迁移 35**：33 是会话表的同名列、**34 本轮 grep 过全部
-      `MIGRATION_VERSION` 与 `version:` 两种声明形状，确认未分配**，号段留空不占）→ `shared/bridge.ts` 的视图与工具 schema。
+      `delivery_records` 加 `conversation_target` 那一列（**取迁移 35**：33 是会话表的同名列、**34 在本工作树上未分配**
+      ——两种声明形状 `MIGRATION_VERSION = 34` 与字面 `version: 34` 全仓零命中，但见下面第三条，它可能是并行副本的号）
+      → `shared/bridge.ts` 的视图与工具 schema。
       - **2026-10-09 这一格的代码半边已到货**（spec 8.5-05，上面的落点六条逐条对上，读数见
         `docs/acceptance/08-real-platform-driving/8.5-05-conversation-delivery-code-half.txt`）：
         按会话坐标那一发先 `selectConversation` 选中行、再注文件，**一次都不拼岗位地址**；缺的那只坐标在两处换算
