@@ -314,14 +314,14 @@
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",
-      "mustRead": "签字之前，请先逐条读完下面这几条",
+      "capabilities": "本应用会代你在 {{platform}} 上搜索岗位并读取详情。签一次就够：之后不再每次问你，重启也还在。",
       "riskSearch": "本应用会代你在 {{platform}} 上搜索岗位并逐条读取详情",
       "riskGreet": "会代你自动生成话术并打招呼",
       "riskDeliver": "会在你确认之后自动投递简历附件",
       "riskAccount": "这些动作由脚本发起，平台风控可能把它判成异常行为，后果（警告、限流、封号）由这个账号自己承担。",
       "riskFact": "简历里的公司、职位、时间这些事实由你锁死，生成文案不会替你编造。",
-      "once": "确认之后不会每次重复询问：签字写进本地库的那一行，重启也还在。",
-      "checkbox": "我已逐条读过上面这些风险，愿意由这个账号承担后果",
+      "risksToggle": "风险详情",
+      "checkbox": "我授权这些动作，并由这个账号承担后果",
       "scopeRow": "写入的是库里这一行：{{scope}}",
       "readUnknown": "读不到签字状态（不在 Electron 宿主里？），本次不会放行动作。",
       "errorRow": "确认没能写入：{{code}} · {{message}}",
@@ -332,7 +332,7 @@
       "never": "无时刻",
       "reason": {
         "ACTION_BUSY": "签字那一次写入还在飞，先等它落地",
-        "CONSENT_NOT_CHECKED": "还没勾选「我已读完风险」，签字按钮不放行"
+        "CONSENT_NOT_CHECKED": "还没勾选授权，签字按钮不放行"
       }
     },
     "privacy": {
@@ -973,6 +973,9 @@
       "streaming": "回复生成中…",
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
+      "hints": {
+        "toggle": "这两条命令怎么用？"
+      },
       "reason": {
         "BUSY": "上一条动作还没回来",
         "STREAMING": "回复还在生成中，要改写就先按停止",
@@ -999,6 +1002,7 @@
         "cancel": "先不改",
         "delete": "删除会话",
         "deleteHint": "删除只是把这条会话收进下面那一栏，消息一条都没少，随时能恢复",
+        "hintsToggle": "改名和删除是怎么回事？",
         "trashHeading": "已删除的会话（{{total}} 条）",
         "restore": "恢复",
         "actionRename": "重命名会话 {{code}}",
@@ -1016,6 +1020,7 @@
         "covered": "较早的 {{total}} 条消息已折成一行摘要，原文一条都没删",
         "tokens": "长度估计 {{before}} → {{after}}（前后同一把尺）",
         "factsHeading": "此刻的关键事实（每一位都是现在问回来的，不是从旧消息里摘的）",
+        "section": "压缩后留下的关键事实",
         "autonomy": "当前档位：{{level}}",
         "quota": "{{action}} 今日还剩 {{remaining}} 条",
         "quotaUnlimited": "{{action}} 不限额",
@@ -1091,7 +1096,7 @@
     },
     "agent": {
       "autonomy": {
-        "heading": "自治档位",
+        "section": "agent 替你做主到哪一步",
         "suggest": "建议模式",
         "semi": "半自动",
         "auto": "全自动"

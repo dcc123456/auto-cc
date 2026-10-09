@@ -4,20 +4,22 @@
  * 它替代原先贴在面板里的行内卡片（`data-testid="consent-card"` 因此**保留**在同一块内容节点上：
  * 2.7-06 的验收通道指着这个名字，改名等于把已验收条目的断言拆掉，见 `App.tsx` 里 `data-view` 同一条纪律）。
  * 判定语义一字未动——照样是 `useConsent` 按平台读 `sessions.consentStatus`、读不到按"没签"处理，
- * 本片只把"等人表态"这一层的打扰度从形态① 升到形态⑤。为什么值得升：稿上那句门槛
- * "不可逆、或必须先读完整风险"，而这张卡要求的正是**读完四行风险再逐条授权一次外发能力**，
+ * 本片只把"等人表态"这一层的打扰度从形态① 升到形态⑤。为什么值得升：这一句要的是**一次不可逆的外发授权**，
  * 贴在面板里可以被滚动走过、可以被误当成一行提示，风险表态不该有这种走法。
+ * 明面只留授权那一句，风险清单收进「风险详情」（用户 2026-10-09 裁定，收窄稿上"必须先读完整风险"，
+ * 依据与范围见同文件正文注释与 plan §3.24）。
  *
  * 三条退路一律不给（`dismissOnScrim` 一只 prop 同时关掉点遮罩 / 按 Esc / 右上角 ✕）：
  * 没表态就关掉，等于让"没读"看起来像"不同意"。退出这条路只有脚注里那只安全动作。
  */
-import { Check, ShieldAlert, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AppErrorPayload, SessionConsentView } from '@auto-cc/shared';
 import { formatClock } from './format';
 import type { ConsentFacade } from './useConsent';
 import { DeskButton, DeskCheck } from './ui/controls';
+import { DeskExplainer } from './ui/disclosure';
 import { Modal } from './ui/overlays';
 
 /** `ConsentModal` 的输入（与原行内卡片一致：三块面板各自持有 `useConsent` 的那一面）。 */
@@ -107,21 +109,14 @@ export function ConsentModal({ platform, view, busy, error, onGrant, onDeny }: C
       }
     >
       <div data-testid="consent-card" data-consent-platform={platform}>
-        <p className="flex items-center gap-1.5 text-xs font-semibold text-seal-ink">
-          <ShieldAlert size={13} aria-hidden="true" />
-          {t('consent.mustRead')}
-        </p>
-        <ul className="mt-2 flex flex-col gap-1">
-          <li>{t('consent.riskSearch', { platform })}</li>
-          <li>{t('consent.riskGreet')}</li>
-          <li>{t('consent.riskDeliver')}</li>
-          <li>{t('consent.riskAccount')}</li>
-          {/* 「不识别验证码、不绕过风控」这条隐私屏已经写过一遍，这里现读同一句（§2.5）：
-              两处各存一份措辞，改一处漏一处，风险声明就会长成两个版本。 */}
-          <li>{t('privacy.riskNoEvasion')}</li>
-          <li>{t('consent.riskFact')}</li>
-        </ul>
-        <p className="mt-3 text-slate-400">{t('consent.once')}</p>
+        {/* 明面上只留"要不要点头"这一件（用户 2026-10-09 连声裁定）：能力披露连同那句持久性说明整合成
+            一句话——它是**签字管多久**，不是免责条款，收进披露层就等于让人签一份自己没读到的期限。
+            五条风险的展开连同首屏隐私声明已经讲过的那几句（不识别验证码、不绕过风控、简历事实由你锁死）
+            一起沉到最下面那一格「风险详情」。09 稿形态⑤ 的"必须先读完整风险"因此按本裁定收窄，
+            写进 docs/plans/06-ui-ink-desk/plan.md §3.24。
+            勾选那句也随之称了重量：原文「我已逐条读过上面这些风险」在清单收起后指不到东西，
+            改成只声明授权本身。 */}
+        <p>{t('consent.capabilities', { platform })}</p>
 
         <label
           className="mt-3 flex cursor-pointer items-start gap-2 rounded-control border border-line bg-ink-950/70 px-3 py-2"
@@ -156,6 +151,19 @@ export function ConsentModal({ platform, view, busy, error, onGrant, onDeny }: C
             {t('consent.errorRow', { code: error.code, message: error.message })}
           </p>
         ) : null}
+
+        {/* 「不识别验证码、不绕过风控」这条隐私屏已经写过一遍，这里现读同一句（AGENTS.md §2.5）：
+            两处各存一份措辞，改一处漏一处，风险声明就会长成两个版本。 */}
+        <DeskExplainer id="consent.risks" className="mt-3" label={t('consent.risksToggle')}>
+          <ul className="flex flex-col gap-1">
+            <li>{t('consent.riskSearch', { platform })}</li>
+            <li>{t('consent.riskGreet')}</li>
+            <li>{t('consent.riskDeliver')}</li>
+            <li>{t('consent.riskAccount')}</li>
+            <li>{t('privacy.riskNoEvasion')}</li>
+            <li>{t('consent.riskFact')}</li>
+          </ul>
+        </DeskExplainer>
       </div>
     </Modal>
   );

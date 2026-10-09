@@ -166,6 +166,8 @@ export interface DeskExplainerProps {
   label: ReactNode;
   /** 展开后的正文（可以是段落、列表、读数块）。 */
   children: ReactNode;
+  /** 挂在容器上的附加 `data-*`：既有验收通道（`data-testid`）跟着一起挪进来，不改名。 */
+  markers?: Record<string, string>;
   /** 追加 class（只放外边与宽度档）。 */
   className?: string;
 }
@@ -179,11 +181,16 @@ export interface DeskExplainerProps {
  * @param props 见 `DeskExplainerProps`
  * @returns 一行可点开的触发文案；展开时在下方画一块中性读数区
  */
-export function DeskExplainer({ id, label, className = '', children }: DeskExplainerProps) {
+export function DeskExplainer({ id, label, markers, className = '', children }: DeskExplainerProps) {
   const [open, setOpen] = useState(false);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div data-explainer={id} data-open={open ? 'true' : 'false'} className={`min-w-0 ${className}`}>
+    <div
+      {...markerAttrsOf(markers)}
+      data-explainer={id}
+      data-open={open ? 'true' : 'false'}
+      className={`min-w-0 ${className}`}
+    >
       <button
         type="button"
         data-action={`${id}-toggle`}

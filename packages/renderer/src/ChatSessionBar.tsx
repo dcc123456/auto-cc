@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatSessionView } from '@auto-cc/shared';
 import { DeskButton, InlineEditField } from './ui/controls';
+import { DeskExplainer } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -168,15 +169,21 @@ export function ChatSessionBar({
         )}
       </div>
 
-      {editing ? (
-        <p className="px-4 pb-2 text-[10px] text-slate-500" data-testid="chat-session-title-hint">
-          {t('chat.session.titleHint')}
-        </p>
-      ) : (
-        <p className="px-4 pb-2 text-[10px] text-slate-500" data-testid="chat-session-delete-hint">
-          {t('chat.session.deleteHint')}
-        </p>
-      )}
+      {/* 这两句规矩（改名 28 字 / 删除 30 字）原先常驻在会话条下面一行，把「名字 + 三颗键」这一条
+          撑成两行高。收进披露层：明面只留一行短问句，两支既有 testid 跟着搬进正文（不改名，
+          5.6-07 的读数还按同一支取）。 */}
+      <DeskExplainer
+        id="chat.session.hints"
+        className="px-4 pb-2"
+        label={t('chat.session.hintsToggle')}
+        markers={{ testid: 'chat-session-hints' }}
+      >
+        {editing ? (
+          <p data-testid="chat-session-title-hint">{t('chat.session.titleHint')}</p>
+        ) : (
+          <p data-testid="chat-session-delete-hint">{t('chat.session.deleteHint')}</p>
+        )}
+      </DeskExplainer>
 
       {trash && trash.length > 0 ? (
         <div data-testid="chat-session-trash" className="border-t border-slate-800 bg-slate-950/40 px-4 py-2">

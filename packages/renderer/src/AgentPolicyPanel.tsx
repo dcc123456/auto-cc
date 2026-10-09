@@ -1,5 +1,5 @@
 /**
- * 免确认白名单面板（spec 5.3-06 / 07）：挂在档位行下面，让「哪些动作已经免确认」在界面上读得出来。
+ * 免确认白名单面板（spec 5.3-06 / 07）：住在「谁替你做主」那一格里，让「哪些动作已经免确认」在界面上读得出来。
  *
  * 面板自己不判「这只手要不要确认」：名单来自 `agent.policy.exemptList`，副作用级与批准声明来自
  * `agent.tools.list` 那份注册表读数，两处都是主进程算好的（AGENTS.md §2.5）。
@@ -55,14 +55,12 @@ export function AgentPolicyPanel({
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
-  // 整带限高且自带滚动：窗口矮时这一带让位给消息流，而不是把任务卡挤出可视区（5.7-d 实测过
-  // 737px 高的窗口里它长到 191px，消息流被挤成 24px 的一条缝）。带内两张清单仍各自限高。
+  // 这块正文住在 `DeskSection`（档位那一格）里，收起时整个不挂载，所以不再自己限高抢消息流的空间
+  // （原先它是常驻带，`max-h-20` 是 5.7-d 那条「737px 窗口里它长到 191px」的对策；
+  // 现在默认收起，同一条空间预算还给了正文里的两张清单，各留 28 高的滚动区）。
   return (
-    <div
-      data-testid="agent-policy-panel"
-      className="max-h-20 min-h-[56px] shrink overflow-y-auto border-b border-line px-4 py-2"
-    >
-      <div className="flex items-center gap-2">
+    <div data-testid="agent-policy-panel" className="mt-3 min-w-0 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
           <ShieldCheck size={11} />
           {t('agent.policy.heading')}

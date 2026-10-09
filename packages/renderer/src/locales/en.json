@@ -314,14 +314,14 @@
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
-      "mustRead": "Read every line below before you sign",
+      "capabilities": "This app will search jobs on {{platform}} and open each one to read its details. Sign once — it will not ask again on every run, and the signature survives a restart.",
       "riskSearch": "This app will search jobs on {{platform}} for you and open each one to read its details",
       "riskGreet": "It will generate chat scripts and send greetings on your behalf",
       "riskDeliver": "After you confirm, it will attach and deliver your resume file automatically",
       "riskAccount": "These actions come from a script, so the platform may flag them as abnormal behaviour. The consequences (warnings, throttling, account bans) fall on this account.",
       "riskFact": "Facts in your resume — companies, titles, dates — stay locked to what you wrote; generated copy will not invent them.",
-      "once": "Confirming does not ask again on every run: the signature is one row in the local database and survives a restart.",
-      "checkbox": "I have read each of these risks and accept the consequences on this account",
+      "risksToggle": "Risk details",
+      "checkbox": "I authorize these actions and accept the consequences on this account",
       "scopeRow": "The row it writes: {{scope}}",
       "readUnknown": "Consent status could not be read (not inside the Electron host?), so this action stays blocked.",
       "errorRow": "Consent was not recorded: {{code}} · {{message}}",
@@ -332,7 +332,7 @@
       "never": "no timestamp",
       "reason": {
         "ACTION_BUSY": "The consent write is still in flight — wait for it",
-        "CONSENT_NOT_CHECKED": "Tick the acknowledgement first — the signature button stays closed until you do"
+        "CONSENT_NOT_CHECKED": "Tick the authorization first — the signature button stays closed until you do"
       }
     },
     "privacy": {
@@ -973,6 +973,9 @@
       "streaming": "Reply is being generated…",
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
+      "hints": {
+        "toggle": "How do these two commands work?"
+      },
       "reason": {
         "BUSY": "The previous action hasn't returned yet",
         "STREAMING": "A reply is still streaming — press Stop first",
@@ -999,6 +1002,7 @@
         "cancel": "Keep it",
         "delete": "Delete session",
         "deleteHint": "Deleting only folds this conversation into the list below: every message stays and can be restored",
+        "hintsToggle": "What renaming and deleting do",
         "trashHeading": "Deleted sessions ({{total}})",
         "restore": "Restore",
         "actionRename": "rename session {{code}}",
@@ -1016,6 +1020,7 @@
         "covered": "The earlier {{total}} messages are folded into one summary line — nothing was deleted",
         "tokens": "Estimated length {{before}} → {{after}} (same ruler both sides)",
         "factsHeading": "Key facts right now (each read live, not lifted from old messages)",
+        "section": "Key facts kept after compaction",
         "autonomy": "Current level: {{level}}",
         "quota": "{{action}}: {{remaining}} left today",
         "quotaUnlimited": "{{action}}: unlimited",
@@ -1091,7 +1096,7 @@
     },
     "agent": {
       "autonomy": {
-        "heading": "Autonomy",
+        "section": "How much the agent decides for you",
         "suggest": "Suggest",
         "semi": "Semi-auto",
         "auto": "Full-auto"

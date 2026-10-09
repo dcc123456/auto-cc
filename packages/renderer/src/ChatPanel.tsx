@@ -27,6 +27,7 @@ import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
+import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -258,11 +259,26 @@ export function ChatPanel() {
           与消息流、与会话操作带都不是同一件事，画成一条假消息会让人以为模型说过那句话。 */}
       <ChatCompactionBanner compaction={snapshot?.compaction} />
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-        <span className="flex items-center gap-1 text-[10px] text-slate-500">
-          <Gauge size={11} />
-          {t('agent.autonomy.heading')}
-        </span>
+      {/* 档位与「哪些动作已免确认」是同一件事的两半（spec 5.3-07），所以收成**同一格、一起开合**：
+          只收其中一半会让人读不出「这一档下这一步到底问不问我」，而这条常驻带原先要吃掉 90–116px 的
+          消息流空间。收起态仍把当下档位留在 summary 那一行（`chat-autonomy-current` 这支读数没挪走），
+          人不点开也知道此刻是谁在做主。 */}
+      <DeskSection
+        id="agent.autonomy"
+        markers={{ testid: 'chat-autonomy-section' }}
+        className="mx-4 my-3"
+        title={
+          <span className="flex items-center gap-1.5">
+            <Gauge size={12} />
+            {t('agent.autonomy.section')}
+          </span>
+        }
+        summary={
+          <span data-testid="chat-autonomy-current">
+            {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
+          </span>
+        }
+      >
         <DeskSegmented
           action="chat-autonomy"
           markers={{ testid: 'chat-autonomy-switch' }}
@@ -281,14 +297,8 @@ export function ChatPanel() {
             markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
           }))}
         />
-        <span className="ml-auto text-[10px] text-slate-500" data-testid="chat-autonomy-current">
-          {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
-        </span>
-      </div>
-
-      {/* 免确认白名单贴在档位行下方（spec 5.3-07）：档位与「哪些动作已免确认」是同一件事的两半，
-          分成两处看就没人能一眼读出「全自动档下这个动作到底会不会问我」。 */}
-      <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
+        <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
+      </DeskSection>
 
       {/* 接管横幅贴在档位/白名单之下、消息流之上（spec 5.5-01）：它说的是「这块页面此刻在谁手里」，
           与档位（授权范围）和卡片（某一步的等待）都不是一件事，塞进任何一张卡里都会让人漏看它。 */}
@@ -446,13 +456,21 @@ export function ChatPanel() {
             <Square size={12} />
             {t('chat.stop')}
           </DeskButton>
-          <p className="ml-auto text-[10px] text-slate-500" data-testid="chat-hint">
-            {t('chat.toolHint')}
-          </p>
-          {/* 循环入口写在提示里而不是加第三个输入框：`/run` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
-          <p className="text-[10px] text-slate-500" data-testid="chat-run-hint">
-            {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
-          </p>
+          {/* 两条命令说明原先平铺在动作行右侧（40 字 + 42 字），在 369px 的右栏宽度里会把整行撑到
+              换行、把发送键挤成半截。收进披露层：明面只留一行短问句，正文按需展开，
+              两支既有 testid 跟着搬进正文（改名等于拆掉 5.2-03 的验收通道）。 */}
+          <DeskExplainer
+            id="chat.hints"
+            className="ml-auto shrink-0"
+            label={t('chat.hints.toggle')}
+            markers={{ testid: 'chat-hint' }}
+          >
+            <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
+            {/* 循环入口写在提示里而不是加第三个输入框：`/run` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
+            <p className="mt-1" data-testid="chat-run-hint">
+              {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
+            </p>
+          </DeskExplainer>
         </div>
       </footer>
     </section>
