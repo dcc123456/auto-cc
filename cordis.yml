@@ -299,7 +299,11 @@ plugins:
     dependsOn: [entitlement, outbound-throttle, outbound-delivery-records, platform-registry]
     config:
       autonomy: semi
-      approveTimeoutMs: 120000
+      # 表态窗口从 120000 调到 300000（裁定㉓，2026-10-09）：活体那一发实测「发单 → 人读到 → 点下去」
+      # 一次往返就超过两分钟（第一张单 be6c7f03 就是这么空掉的，读数见
+      # docs/acceptance/08-real-platform-driving/8.5-01-post-injection-shape.txt 第六节）。
+      # 放宽的只是**等人点头的时间**，到期仍按拒绝处理、不放松任何门禁。
+      approveTimeoutMs: 300000
       maxResumeBytes: 5242880
       timing:
         enabled: true
