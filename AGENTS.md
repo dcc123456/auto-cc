@@ -282,9 +282,13 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   **30 已被 plan §8.3 预留给 3.6 的草稿表，但裁定⑨ 判的是"只拦不存"，所以 30 当前未启用**——占号前先看这份清单，别撞号）。
   **补一条同号段相关的实测（8.5-D 窗口）：登记"某个号已被用掉"之前必须两条独立通道核**——
   本轮写过一句"34 已被简历事实的「来源」那一格用掉"，依据是一条指向 `packages/resume-kb/src/internal/mcp-source.ts`
-  的搜索命中，而该文件在工作树上不存在（`ls` 报无此目录、`git log` 查不到、全仓 `grep -rn` 零命中，
-  同一窗口的并行会话也报"文件在磁盘上不存在"）。共享工作树里这类读数可能来自别人的暂存区或索引快照，
-  **不能当成号段占用登记进文档**；核实一律用 `grep -rn "<常量名>" packages/` + `git log -- <路径>` 两条一起看。
+  的搜索命中，而该文件在工作树上不存在（`ls` 报无此目录、`git log` 查不到、全仓 `grep -rn` 零命中）。
+  共享工作树里这类读数可能来自别人正在写、还没落到我这可见的那份改动，**不能当成号段占用登记进文档**；
+  核实一律两条一起看：`grep -rn "<常量名>" packages/`（常量声明）+ `grep -rn "version: <号>" packages/`（字面声明），
+  必要时 `find packages -name "<文件>"`。同一条口径也适用于提交号：并行会话消息里报出的 SHA 要用
+  `git merge-base --is-ancestor <sha> HEAD` 复核，本仓里曾报出过 `Not a valid object name`。
+  **反过来也有一条要记的：读不到 ≠ 没人用**——34 在本工作树读不到，但那个号可能正被另一份副本写着，
+  所以文档里写"本工作树未分配"而不是"不存在"，并且取号往后走而不是往回占。
   顺带一条同片实测：`store` 开连接时**全仓没有一处设 `PRAGMA foreign_keys = ON`**，所以 DDL 里的
   `ON DELETE CASCADE` 是装饰性的，删父行必须显式在同一条事务里删子表（先例：`packages/store/src/migrate.ts:100`、
   `packages/llm/src/provider-pool.ts` 的 `deleteProviderRow`）。
