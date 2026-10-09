@@ -2611,7 +2611,7 @@ export interface LocateSpec {
    */
   requireActionable?: boolean;
   /**
-   * 这条声明用在哪个通道上，决定它适用哪一档最低可用分（P8 裁定⑤）。
+   * 这条声明用在哪个通道上，决定它适用哪一档最低可用分（P8 裁定⑤ + ㉑）。
    *
    * 真实站点没有 `data-testid`，可稳定过 70 分的只有「表单 name」与「role/text + 稳定可读名」两类
    * （证据 `docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt` 第六节）；
@@ -2621,8 +2621,19 @@ export interface LocateSpec {
   effect?: LocateEffect;
 }
 
-/** 定位声明适用的通道（`read` = 不改变页面状态，`outbound` = 打招呼 / 投递那一路）。 */
-export type LocateEffect = 'read' | 'outbound';
+/**
+ * 定位声明适用的通道（`read` = 不改变页面状态，`outbound` = 打招呼 / 投递那一路，
+ * `inject` = 文件注入那一路，P8 裁定㉑）。
+ *
+ * `inject` 为什么单独是一档而不是并进 `read`：这一路**不指点坐标**（隐藏的 `input[type=file]`
+ * 读不到盒模型，坐标无从折算），而注入之后还有两条页面自己的回读兜着——控件报上来的文件名与字节数
+ * 必须与请求一致，否则 `browser.act.upload` 以 `ACT_FAILED` 终止（spec 2.6-04 的②）。
+ * 真实站点恰好只有 class 级候选可用（证据 `8.0-06-deliver-risk-evidence.txt` 第二节：那枚 input
+ * 无 name / 无 id / 无 testid，全页唯一），按 70 分判就是"简历永远投不出去"。
+ * 只有 `deliver.uploadInput` 一条被允许声明这一档，且必须同时带 `requireActionable: false`
+ * ——装载期拦住（`platform-contract.ts` 的通道归属闸门），谁把发送键标成 inject 想去拿低阈值就拒包。
+ */
+export type LocateEffect = 'read' | 'outbound' | 'inject';
 
 /** 元素在所属帧视口里的位置（CSS 像素，与 CDP 输入同一坐标系）。 */
 export interface ElementRect {
@@ -3039,6 +3050,13 @@ export interface LocateStatusView {
    * 界面上"这条为什么没过线"必须能说出用的是哪一档，否则读数看着像配置坏了。
    */
   readMinScore: number;
+  /**
+   * 注入档的最低可用分（P8 裁定㉑）。
+   *
+   * 界面上「这条为什么没过线」要能说出用的是哪一档，所以三档都必须在读数里现可见——
+   * 只把 inject 写在代码里就会得到"配置看着没变，行为却变了"。
+   */
+  injectMinScore: number;
   minMargin: number;
   candidateLimit: number;
   recentFailures: { description: string; status: LocateStatus; reason: string; at: number }[];

@@ -27,6 +27,7 @@ const frameUrl = 'http://127.0.0.1:10233/locator';
 const DEFAULT_LOCATE_CONFIG: BrowserLocateConfig = {
   minScore: 70,
   readMinScore: 30,
+  injectMinScore: 30,
   minMargin: 12,
   candidateLimit: 5,
   textNormalizationLimit: 80,
@@ -308,6 +309,19 @@ describe('阈值按通道分档（P8 裁定⑤ / spec 8.1-09）', () => {
     ...(effect ? { effect } : {}),
   });
 
+  /**
+   * 真站点那一枚隐藏文件框的形状：只有 class 候选（35 分）、读不到盒模型（豁免可点判据），
+   * 通道归属固定是 `inject`（裁定㉑ 那一档）。
+   * @returns 一条注入类定位声明
+   */
+  const injectSpec = (): LocateSpec => ({
+    description: '上传附件简历的文件框',
+    cardinality: 'single',
+    requireActionable: false,
+    effect: 'inject',
+    candidates: [{ strategy: 'css', value: 'a.btn-file input[type=file]' }],
+  });
+
   /** 起一只「页面里有一条 css 命中」的定位服务。 */
   const bootCssHit = async (config: Partial<BrowserLocateConfig> = {}) =>
     boot(config, labView({ locate: [fakeReading(frameUrl, { strategy: 'css' })] }));
@@ -330,6 +344,23 @@ describe('阈值按通道分档（P8 裁定⑤ / spec 8.1-09）', () => {
     const { locate } = await bootCssHit({ readMinScore: 70 });
     expect((await locate.find(cssSpec('read'))).status).toBe('below-score');
     expect(locate.status().readMinScore).toBe(70);
+  });
+
+  it('声明 effect:"inject" 时按 injectMinScore 判：只有 class 候选的隐藏文件框够格被注（裁定㉑）', async () => {
+    const { locate } = await bootCssHit();
+    const result = await locate.find(injectSpec());
+    expect(result.status).toBe('matched');
+    expect(result.chosen).toMatchObject({ strategy: 'css', score: 35 });
+    // 三档都在读数里现可见：界面解释「这条为什么没过线」要能说得出用的是哪一档。
+    expect(locate.status()).toMatchObject({ minScore: 70, readMinScore: 30, injectMinScore: 30 });
+  });
+
+  it('注入档与读取档各走各的旋钮：只动 readMinScore 时 inject 的分数线不变', async () => {
+    const { locate } = await bootCssHit({ readMinScore: 70, injectMinScore: 10 });
+    expect((await locate.find(injectSpec())).status).toBe('matched');
+    // 反过来把注入档拉到严的那一档，同一条候选立刻不够——降档是配置里的一个数，不是代码里的分支。
+    const strict = await bootCssHit({ injectMinScore: 70 });
+    expect((await strict.locate.find(injectSpec())).status).toBe('below-score');
   });
 
   it('降档不降歧义判据：读取档里两条同分候选仍然判 ambiguous（读错一条也是假数据）', async () => {

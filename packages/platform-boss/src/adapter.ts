@@ -564,7 +564,9 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    *
    * 四段判据，顺序不能换：
    * ① 先看状态行有没有「已下架」样式——岗位不收了就**一个动作都不做**，直接抛错。这一步放在最前面，
-   *    是因为库里那条 JD 是抓取那一刻的快照，只有页面能回答「现在还在不在招」（plan §13.4 第 3 条）；
+   *    是因为库里那条 JD 是抓取那一刻的快照，只有页面能回答「现在还在不在招」（plan §13.4 第 3 条）。
+   *    **知识包没登记下架文案时这一段跳过**（裁定㉒：真 BOSS 那次在场没有下架样本，编一条文案就是假判据），
+   *    跳过不等于默认在招——结局里如实写明「这一条没做在招校验」，给人看的那张确认卡与账本都读得到这句话；
    * ② 文件注入后由**那个 input 自己报上来**的文件名必须等于附件名——这证明「塞进控件的就是这份字节」，
    *    不是「我们请求塞了个文件」；
    * ③ 点击前起 `textChanges` 等待，点击后状态行必须真的变过；
@@ -574,7 +576,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * @param jobId 目标岗位标识
    * @param attachment 编排层已校验（存在 / pdf / 大小上限）并算好 sha256 的简历文件
    * @returns 外发结局；`ledgerKey` 恒为 null，理由与 `chat` 同一条——计量归编排层
-   * @throws 目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮）；jobId 为空 `INVALID_ARGUMENT`；
+   * @throws 目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮；知识包没登记下架文案时这一段不判）；
+   *         jobId 为空 `INVALID_ARGUMENT`；
    *         缺投递段 `KNOWLEDGE_PACK_INVALID`；上传控件或确认键未取证 `LOCATOR_UNVERIFIED`（不打开上传页）；
    *         定位/注入自身的失败照 `browser.act` 原样抛出
    */
@@ -586,10 +589,14 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     // 与 `chat` 同一条纪律：两条要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
     const uploadSpec = outboundLocator(knowledge.uploadInput);
     const sendSpec = outboundLocator(knowledge.sendButton);
+    // 缺下架文案时的补话，原样拼进结局：让"这一条判不了"随结果走，而不是只留在注释里。
+    const skippedOfflineCheck = knowledge.offlinePattern
+      ? ''
+      : '（下架文案未登记：这一条没做在招校验，页面自己说的是不是"还在招"只有你看得见）';
     const url = pageUrlFor(knowledge, jobId);
     if (url) await page.navigate(url);
     const before = await readStatusLine(knowledge.statusLine);
-    if (before.includes(knowledge.offlinePattern)) {
+    if (knowledge.offlinePattern && before.includes(knowledge.offlinePattern)) {
       throw new AppError(
         'DELIVER_TARGET_OFFLINE',
         `目标岗位已下架：状态行回读到「${knowledge.offlinePattern}」`,
@@ -614,15 +621,19 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const wait = await changed;
     const status = await readStatusLine(knowledge.statusLine);
     if (status.includes(knowledge.sentPattern)) {
-      return { sent: true, reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}`, ledgerKey: null };
+      return {
+        sent: true,
+        reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}${skippedOfflineCheck}`,
+        ledgerKey: null,
+      };
     }
     const reading = status || '（读不到状态行）';
     return {
       sent: false,
       reason:
-        wait.status === 'done'
+        (wait.status === 'done'
           ? `状态行文本变了但不含成功样式：${reading}`
-          : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化：${reading}`,
+          : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化：${reading}`) + skippedOfflineCheck,
       ledgerKey: null,
     };
   };

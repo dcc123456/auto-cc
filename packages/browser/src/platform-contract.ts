@@ -63,8 +63,13 @@ export const locateSpecSchema = z.strictObject({
   candidates: z.array(locateCandidateSchema).min(1),
   /** 注入类定位（如隐藏的 `input[type=file]`）设 false，见 `LocateSpec.requireActionable`。 */
   requireActionable: z.boolean().optional(),
-  /** 通道归属，决定适用哪一档最低可用分（见 `LocateSpec.effect` 与 P8 裁定⑤）。 */
-  effect: z.enum(['read', 'outbound']).optional(),
+  /**
+   * 通道归属，决定适用哪一档最低可用分（见 `LocateSpec.effect` 与 P8 裁定⑤ / ㉑）。
+   *
+   * 这一份枚举与 `@auto-cc/shared` 的 `LocateEffect` 是同一个口径的两处写法：装载期先按这里校验，
+   * 适配器拿到的才是收窄后的类型。**加一档必须两处同时加**，否则新档在校验门口就被判成非法值。
+   */
+  effect: z.enum(['read', 'outbound', 'inject']).optional(),
 });
 
 /** 一个知识包「允许可导航到」的源：必须是完整 origin（协议 + 主机 + 端口），不许带路径。 */
@@ -272,8 +277,14 @@ export const knowledgePackSchema = z.strictObject({
        *
        * 为什么不是 jobs 表上的一列：抓取那一刻的「在招」到投递这一刻早已过期，而库里没有状态列
        * （plan §13.4 第 3 条）——只有现问页面才是当时的真相，所以这份数据必须留在知识包里。
+       *
+       * **可以是缺的**（P8 裁定㉑ 之外的 ㉒，2026-10-09）：真 BOSS 的这一次在场取证没有下架样本可点
+       * （证据 `docs/acceptance/08-real-platform-driving/8.0-06-deliver-risk-evidence.txt` 第三节原话
+       * 「`offlinePattern` 未取到」），而编一条文案就等于拿假判据去拦真投递。缺这一格的语义是
+       * 「这一条判不了」，适配器据此**跳过预校验并在结局里如实写明**，不是「默认还在招」。
+       * 与 `search.cities` 的 `.default({})` 同一条纪律：没登记 = 合法的中间态，不许用猜测填满。
        */
-      offlinePattern: z.string().min(1),
+      offlinePattern: z.string().min(1).optional(),
     })
     .optional(),
   /**
@@ -467,16 +478,33 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   // 它只被读、不被点，而真站点上它常常只有 class 可选（真 BOSS 是 `i.message-status.status-delivery`，
   // 35 分）——把它钉在 70 分档等于「真实站点永远等不到状态行变化」，那条外发反而变成必失败。
   // 读错状态行的代价由另一半判据兜着：`sent` 要求回读文本**含**成功样式，不是「读到了东西」。
-  const outboundNames = new Set(
-    [
-      ...(chat ? [chat.input, chat.sendButton] : []),
-      ...(deliver ? [deliver.uploadInput, deliver.sendButton] : []),
-    ].filter((name): name is string => Boolean(name)),
-  );
-  for (const name of outboundNames) {
+  const actionNames = [
+    ...(chat ? [chat.input, chat.sendButton] : []),
+    ...(deliver ? [deliver.uploadInput, deliver.sendButton] : []),
+  ].filter((name): name is string => Boolean(name));
+  for (const name of actionNames) {
     const spec = parsed.data.locators[name];
     if (spec?.effect === 'read') {
       problems.push(`${name}：外发通道引用的定位不许声明 effect:'read'（那是去够读档的低阈值，与裁定⑤ 相反）`);
+    }
+  }
+  // 裁定㉑（2026-10-09）：**注入档只给 `deliver.uploadInput` 一条**，而且必须与 `requireActionable:false`
+  // 同现——这两件事在真站点上是同一件事：那一枚 `<input type=file>` 藏在「上传附件简历」的 `<a>` 里面，
+  // 既读不到盒模型（所以可点性三条判据对它没有意义）、又只有 class 级候选可写（所以 70 分永远不够）。
+  // 反过来，任何"点一下"的定位（输入框、两只发送键）都不许借这一档降分：注入有页面回读的文件名与字节数
+  // 兜底，点击没有，降了就是拿发错人的代价去换通过率。
+  const injectName = deliver?.uploadInput;
+  for (const name of actionNames) {
+    const spec = parsed.data.locators[name];
+    if (spec?.effect !== 'inject') continue;
+    if (name !== injectName) {
+      problems.push(
+        `${name}：effect:'inject' 是注入档，只有 deliver.uploadInput 一条能用（裁定㉑），点的那几只保持 70 分`,
+      );
+    } else if (spec.requireActionable !== false) {
+      problems.push(
+        `${name}：声明 effect:'inject' 必须同时带 requireActionable:false（隐藏的上传控件读不到盒模型，两条是同一件事）`,
+      );
     }
   }
   // 许可名单的来源就是这份声明（8.1-01 / 8.1-05）：startUrl 的 origin 必须在里面，

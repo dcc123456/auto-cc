@@ -55,6 +55,19 @@ export const browserLocateSchema = z.strictObject({
    * 另有一条不松口的地方：指纹自愈过线**永远只认 `minScore`**，见 `healByFingerprint`。
    */
   readMinScore: z.number().int().min(0).max(100).default(30),
+  /**
+   * 文件注入档的最低可用分（P8 裁定㉑，与 ⑤ 同一套分档纪律的另一格）。
+   *
+   * 真 BOSS 的 `<input type=file>` 藏在「上传附件简历」那个 `<a>` 里面，实测**无 name、无 id、无 testid**，
+   * 全页唯一一枚（证据 `docs/acceptance/08-real-platform-driving/8.0-06-deliver-risk-evidence.txt` 第二节），
+   * 于是可写的候选只有 class 级（35 分）——按外发档 70 判就是"简历永远投不出去"。
+   * 这一档敢降下来靠的不是"注入不算外发"，是另外两条更硬的回读：注入之后必须由**那个控件自己报上来**
+   * 的文件名与字节数与请求一致，否则以 `ACT_FAILED` 终止（spec 2.6-04 的②），而它压根不参与坐标折算
+   * （隐藏控件读不到盒模型）。装载期只允许 `deliver.uploadInput` 一条声明这一档，
+   * 且必须同时带 `requireActionable: false`，见 `platform-contract.ts` 的通道归属闸门。
+   * **指纹自愈不吃这一档**：自愈永远按 `minScore` 判（见 `healByFingerprint`）。
+   */
+  injectMinScore: z.number().int().min(0).max(100).default(30),
   /** 最优与次优的最小分差；小于它判 `ambiguous`，即「两条都点得下去时宁可不动」。 */
   minMargin: z.number().int().min(0).max(100).default(12),
   /** 一次 `find` 回传的 top-N，同时也是每条候选从页面最多回读几个命中。 */
@@ -148,6 +161,7 @@ export class BrowserLocateService extends Service {
   status = (): LocateStatusView => ({
     minScore: this.config.minScore,
     readMinScore: this.config.readMinScore,
+    injectMinScore: this.config.injectMinScore,
     minMargin: this.config.minMargin,
     candidateLimit: this.config.candidateLimit,
     recentFailures: [...this.recentFailures],
@@ -242,12 +256,19 @@ export class BrowserLocateService extends Service {
 
   /**
    * 判定阈值（来自配置，不写在代码里），按通道取用哪一档最低可用分。
-   * @param effect 本次声明的通道归属；省略与 `'outbound'` 都用严的那一档 `minScore`（裁定⑤）
+   * @param effect 本次声明的通道归属；省略与 `'outbound'` 都用严的那一档 `minScore`（裁定⑤），
+   *   `'inject'` 用裁定㉑ 那一档（只有 `deliver.uploadInput` 能在装载期过这道门）
    * @returns 交给 `decideLocate` 的阈值对
    */
   private thresholds(effect?: LocateEffect): { minScore: number; minMargin: number } {
+    const tier =
+      effect === 'read'
+        ? this.config.readMinScore
+        : effect === 'inject'
+          ? this.config.injectMinScore
+          : this.config.minScore;
     return {
-      minScore: effect === 'read' ? this.config.readMinScore : this.config.minScore,
+      minScore: tier,
       minMargin: this.config.minMargin,
     };
   }
@@ -285,9 +306,10 @@ export class BrowserLocateService extends Service {
       }),
     ]);
     this.ctx.logger.info(
-      `定位服务就绪：最低可用分 ${String(this.config.minScore)} · 最小分差 ${String(this.config.minMargin)} · top-${String(
-        this.config.candidateLimit,
-      )} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+      `定位服务就绪：最低可用分 ${String(this.config.minScore)}（读取 ${String(this.config.readMinScore)} / ` +
+        `注入 ${String(this.config.injectMinScore)}）· 最小分差 ${String(this.config.minMargin)} · top-${String(
+          this.config.candidateLimit,
+        )} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

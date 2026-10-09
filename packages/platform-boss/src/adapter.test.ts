@@ -614,6 +614,35 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(act.clicked).toEqual([]);
   });
 
+  it('知识包没登记下架文案时跳过预校验，但结局里如实写明「这一条没做在招校验」（裁定㉒）', async () => {
+    // 真 BOSS 那次在场没有下架样本（证据 8.0-06 第三节），所以上线包在这一格是缺的——缺的语义是
+    // 「判不了」，不是「默认在招」：这句话必须随结局走，界面与账本才读得到。
+    const noOffline: KnowledgePack = { ...pack, deliver: { ...pack.deliver!, offlinePattern: undefined } };
+    const { adapter, act } = withScript(deliverScript(noOffline, ['等待投递', '简历已送达，等待回复']), {}, noOffline);
+    const outcome = await adapter.sendResume('1001', RESUME);
+    expect(outcome.sent).toBe(true);
+    expect(outcome.reason).toContain('下架文案未登记：这一条没做在招校验');
+    expect(act.uploaded).toHaveLength(1);
+  });
+
+  it('缺判据时页面那句话写着「已下架」也不抛 DELIVER_TARGET_OFFLINE：没有凭据就不猜（裁定㉒ 的负腿）', async () => {
+    // 这一条钉的是"缺 offlinePattern 时代码自己编一句判据"这条路：文案是站点知识，
+    // 拿仿站那句「岗位已下架」去真页面上撞，撞中了就是拿假凭据拦下一次真投递。
+    const noOffline: KnowledgePack = { ...pack, deliver: { ...pack.deliver!, offlinePattern: undefined } };
+    const { adapter, act } = withScript(
+      deliverScript(noOffline, ['该岗位已下架，简历不会送达', '该岗位已下架，简历不会送达']),
+      {},
+      noOffline,
+    );
+    const outcome = await adapter.sendResume('1001', RESUME);
+    expect(outcome.sent).toBe(false);
+    expect(outcome.reason).toContain('不含成功样式');
+    expect(outcome.reason).toContain('下架文案未登记');
+    // 仍然走完四段判据（注文件、起等待、点确认），只是没有下架这一道门。
+    expect(act.uploaded).toHaveLength(1);
+    expect(act.clicked).toHaveLength(1);
+  });
+
   it('状态行变了但不含成功样式 → sent:false 并写明读到的是哪句', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递', '请先与招聘者沟通']));
     expect(await adapter.sendResume('1001', RESUME)).toMatchObject({

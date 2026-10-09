@@ -427,6 +427,18 @@ const deliverSection = {
   offlinePattern: '岗位已下架',
 };
 
+/**
+ * 造一条只写 css 的定位声明（候选顺序不是本组验收的对象）。
+ * @param actionable 是否需要「可被指点」判据（隐藏 input 必须豁免，plan §13.6 第 3 条）
+ * @returns 合法的定位声明
+ */
+const pageLocatorOf = (actionable: boolean): Record<string, unknown> => ({
+  description: '投递页节点',
+  cardinality: 'single',
+  ...(actionable ? {} : { requireActionable: false }),
+  candidates: [{ strategy: 'css', value: '.node' }],
+});
+
 describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
   /**
    * 造一份带完整投递页知识的知识包：三处被 `deliver` 段引用的定位名与那一段本身。
@@ -434,24 +446,13 @@ describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
    * @returns 交给 `parseKnowledgePack` 的未知值
    */
   function deliverPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    /**
-     * 造一条只写 css 的定位声明（上传控件的候选顺序不是本条验收的对象）。
-     * @param actionable 是否需要「可被指点」判据（隐藏 input 必须豁免，plan §13.6 第 3 条）
-     * @returns 合法的定位声明
-     */
-    const pageLocator = (actionable: boolean) => ({
-      description: '投递页节点',
-      cardinality: 'single',
-      ...(actionable ? {} : { requireActionable: false }),
-      candidates: [{ strategy: 'css', value: '.node' }],
-    });
     return minimalPack({
       capabilities: ['search', 'sendResume'],
       locators: {
-        searchInput: pageLocator(true),
-        resumeUploadInput: pageLocator(false),
-        resumeSend: pageLocator(true),
-        deliverStatus: pageLocator(true),
+        searchInput: pageLocatorOf(true),
+        resumeUploadInput: pageLocatorOf(false),
+        resumeSend: pageLocatorOf(true),
+        deliverStatus: pageLocatorOf(true),
       },
       deliver: deliverSection,
       ...overrides,
@@ -497,15 +498,65 @@ describe('投递页知识（spec 2.6-04 / 2.6-07）', () => {
     }
   });
 
-  it('缺 offlinePattern 直接判非法：「还在不在招」只能由页面数据回答，不给代码留默认值', () => {
+  it('缺 offlinePattern 是合法的中间态：这家平台还没登记下架文案，代码里不许有默认值（裁定㉑ 之外的 ㉒）', () => {
+    // 缺这一格**不是**「默认还在招」——适配器据此跳过预校验并在结局里如实写明，见 adapter 的那条用例。
+    const pack = parseKnowledgePack(deliverPack({ deliver: { ...deliverSection, offlinePattern: undefined } }));
+    expect(pack.deliver!.offlinePattern).toBeUndefined();
+  });
+
+  it('只有 deliver.uploadInput 能用注入档：发送键借这一档降分即拒包（裁定㉑）', () => {
     try {
-      parseKnowledgePack(deliverPack({ deliver: { ...deliverSection, offlinePattern: undefined } }));
+      parseKnowledgePack(
+        deliverPack({
+          locators: {
+            searchInput: { ...pageLocatorOf(true), effect: 'read' },
+            resumeUploadInput: { ...pageLocatorOf(false), effect: 'inject' },
+            resumeSend: { ...pageLocatorOf(true), effect: 'inject' },
+            deliverStatus: pageLocatorOf(true),
+          },
+        }),
+      );
       expect.unreachable('应当抛出结构化错误');
     } catch (error) {
-      expect(errorDetails(error).problems).toEqual([
-        'deliver.offlinePattern：Invalid input: expected string, received undefined',
-      ]);
+      expect(String(errorDetails(error).problems)).toContain(
+        "resumeSend：effect:'inject' 是注入档，只有 deliver.uploadInput 一条能用（裁定㉑）",
+      );
     }
+  });
+
+  it('声明注入档却不带 requireActionable:false 同样拒包：两条在真站点上是同一件事', () => {
+    try {
+      parseKnowledgePack(
+        deliverPack({
+          locators: {
+            searchInput: pageLocatorOf(true),
+            // 隐藏的上传控件读不到盒模型：只降分数不豁免可点判据，等于"过了线也注不进去"。
+            resumeUploadInput: { ...pageLocatorOf(true), effect: 'inject' },
+            resumeSend: pageLocatorOf(true),
+            deliverStatus: pageLocatorOf(true),
+          },
+        }),
+      );
+      expect.unreachable('应当抛出结构化错误');
+    } catch (error) {
+      expect(String(errorDetails(error).problems)).toContain(
+        "resumeUploadInput：声明 effect:'inject' 必须同时带 requireActionable:false",
+      );
+    }
+  });
+
+  it('uploadInput 的合法形状：注入档 + 可点豁免一起声明时原样落地', () => {
+    const pack = parseKnowledgePack(
+      deliverPack({
+        locators: {
+          searchInput: pageLocatorOf(true),
+          resumeUploadInput: { ...pageLocatorOf(false), effect: 'inject' },
+          resumeSend: pageLocatorOf(true),
+          deliverStatus: pageLocatorOf(true),
+        },
+      }),
+    );
+    expect(pack.locators.resumeUploadInput).toMatchObject({ effect: 'inject', requireActionable: false });
   });
 });
 
