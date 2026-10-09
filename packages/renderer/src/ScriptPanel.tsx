@@ -13,6 +13,7 @@ import type {
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
 import { Banner, BLOCK_SELECTED_CLASS, DeskButton, DeskCheck, DeskField, DeskSelect, Tag } from './ui/controls';
+import { DeskActionRow, DeskExplainer } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 
@@ -248,7 +249,12 @@ export function ScriptPanel() {
         <MessageSquare size={16} className="text-slate-300" />
         <h2 className="text-sm font-semibold text-slate-200">{t('script.heading')}</h2>
       </div>
-      <p className="text-xs leading-relaxed text-slate-400">{t('script.hint')}</p>
+      {/* 明面只留"下一步该做什么"那一句（用户 2026-10-09 的通则：不涉及要人确认或输入的文案都收起来）；
+          113 字那段怎么引用经历、过哪几道闸的讲法进披露层——它是教材，不是操作前提。 */}
+      <p className="text-xs leading-relaxed text-slate-300">{t('script.lead')}</p>
+      <DeskExplainer id="script.how" label={t('script.howToggle')}>
+        <p data-testid="script-hint">{t('script.hint')}</p>
+      </DeskExplainer>
 
       <div className="flex flex-col gap-2">
         <label className="text-[11px] text-slate-400" htmlFor="script-target">
@@ -409,7 +415,10 @@ export function ScriptPanel() {
             </ul>
           )}
 
-          <div className="flex items-center gap-2">
+          <DeskActionRow>
+            {/* 按钮只写动词（规则③：带文案的按钮不许插值自由长句）：发给谁、哪条岗位，
+                由上面那行 `script.targetRow` 与选中的候选正文承担。
+                `script.actionSend` 那支长句保留给动作日志与 notice（:207），那里越具体越好。 */}
             <DeskButton
               action="script-send"
               markers={{ 'script-action': 'send' }}
@@ -422,17 +431,14 @@ export function ScriptPanel() {
               onClick={send}
             >
               <Send size={12} />
-              {t('script.actionSend', {
-                platform: target ? platformName(target.platform) : '-',
-                title: target?.title ?? '-',
-              })}
+              {t('script.sendButton')}
             </DeskButton>
             {selectedDraft === undefined && (
               <span data-script-pick-hint className="text-[11px] text-slate-500">
                 {t('script.pickHint')}
               </span>
             )}
-          </div>
+          </DeskActionRow>
         </div>
       )}
 

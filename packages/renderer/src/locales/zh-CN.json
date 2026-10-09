@@ -1449,6 +1449,8 @@
         "NO_CANDIDATE_PICKED": "还没有选中任何一条候选：选中一条才会放开发送。"
       },
       "heading": "打招呼话术候选",
+      "lead": "先挑一行岗位，再生成话术；选中一条才发得出去。",
+      "howToggle": "这一步到底做了什么？",
       "hint": "选一行库内 JD，先向知识库要几条能引用的经历，再逐条生成候选：每条都写明它是模型产出还是模板回落、引用了哪条经历。选中一条才放开「打招呼」——这一步只生成内容，真正发送走的还是打招呼那条编排（闸门、频控、黑名单一个都不省）。",
       "targetLabel": "目标岗位（取自 JD 库）",
       "targetEmpty": "JD 库还是空的：先在上面的抓取面板跑一轮，再来生成话术。",
@@ -1481,6 +1483,7 @@
       "version": "版本 {{version}}",
       "fallback": "回落原因：{{reason}}",
       "actionSend": "在 {{platform}} 给「{{title}}」发这条",
+      "sendButton": "就这样发",
       "pickHint": "选中上面任意一条才放开发送；候选阶段不产生任何离开本机的内容。",
       "noticeGenerated": "共 {{count}} 条候选，其中 {{template}} 条来自模板回落",
       "receiptRow": "已发送：目标 {{jobId}} · 账本行 {{ledgerId}} · 来源 {{source}} · 内容 {{origin}} · 页面确认「{{reason}}」",

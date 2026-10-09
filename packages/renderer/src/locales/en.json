@@ -1449,6 +1449,8 @@
         "NO_CANDIDATE_PICKED": "No candidate selected: picking one is what unlocks send."
       },
       "heading": "Greeting script candidates",
+      "lead": "Pick a stored job first, then generate scripts; select one to unlock sending.",
+      "howToggle": "What does this step do?",
       "hint": "Pick a stored JD, pull a few citable experiences from the knowledge base, then generate one candidate per experience. Each row states whether it came from the model or the local template, and which experience it cites. The send button only unlocks after you pick one — this step just generates text; the actual send still runs the greeting orchestration (quota gate, throttling, blocklist included).",
       "targetLabel": "Target role (from the JD store)",
       "targetEmpty": "The JD store is empty: run the capture panel above first, then generate scripts.",
@@ -1481,6 +1483,7 @@
       "version": "Version {{version}}",
       "fallback": "Fallback reason: {{reason}}",
       "actionSend": "Send this to \"{{title}}\" on {{platform}}",
+      "sendButton": "Send this one",
       "pickHint": "Pick a candidate above to enable sending; the candidate stage never leaves this machine.",
       "noticeGenerated": "{{count}} candidates, {{template}} of them from the template fallback",
       "receiptRow": "Sent: target {{jobId}} · ledger row {{ledgerId}} · source {{source}} · content {{origin}} · page confirmed \"{{reason}}\"",
