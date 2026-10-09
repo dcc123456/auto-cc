@@ -2,6 +2,7 @@ import {
   Briefcase,
   Check,
   Database,
+  FileSearch,
   FileUp,
   MessageSquare,
   RefreshCw,
@@ -316,6 +317,11 @@ export function JobLabPanel() {
   const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
   const selectedRow = jobList?.rows.find((row) => rowKey(row) === selectedRowKey);
+  /**
+   * 最新一条进度：`progress` 是**新的在前**（推送时 prepend 并截到 `PROGRESS_LIMIT`），所以 [0] 就是"此刻"。
+   * 进度段默认收起之后，这一条还要在段头那一行读数里说话——收起不能把"跑到哪了"一起收走。
+   */
+  const latestProgress = progress?.[0];
   return (
     <div className="flex flex-col gap-4" data-testid="job-lab">
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
@@ -469,234 +475,6 @@ export function JobLabPanel() {
               )}
             </div>
           </Banner>
-        )}
-      </section>
-
-      {/* 投递这一格**默认展开**（用户 2026-10-09 裁定：必须用户确认的部分留在明面），
-          收起来的只有「这一步到底怎么走」那三句——它是教材，不是待办。 */}
-      <DeskSection
-        id="deliver.form"
-        defaultOpen
-        markers={{ testid: 'deliver-section' }}
-        title={
-          <span className="flex items-center gap-2">
-            <FileUp size={14} />
-            {t('deliver.heading')}
-          </span>
-        }
-        summary={
-          <span data-testid="deliver-summary">{t('deliver.summary', { pending: pendingApprovals.length })}</span>
-        }
-      >
-        <DeskField
-          action="deliver-resume-path"
-          data-testid="deliver-resume-path"
-          value={resumePathDraft}
-          onValueChange={setResumePathDraft}
-          placeholder={t('deliver.resumePathPlaceholder')}
-          className="w-full"
-        />
-
-        <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
-        {pendingApprovals.length === 0 ? (
-          <p className="mt-1 text-[11px] text-slate-500" data-testid="deliver-pending-empty">
-            {t('deliver.pendingEmpty')}
-          </p>
-        ) : (
-          <ul className="mt-1 flex flex-col gap-1" data-testid="deliver-pending">
-            {pendingApprovals.map((approval) => (
-              <li
-                key={approval.approvalId}
-                className={`rounded-md border px-3 py-1.5 ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS}`}
-                data-approval-id={approval.approvalId}
-                data-approval-job-id={approval.jobId}
-                data-approval-size-bytes={String(approval.attachment.sizeBytes)}
-                data-approval-sha={approval.attachment.sha256}
-              >
-                {/* 一行一件事（plan §3.24 规则④）：原先 133 字的单行把岗位、文件、字节数、
-                    sha、两个时刻用 `·` 串成一串，人读不出"我现在要点哪一颗"。
-                    对账用的标识符全部挪到上面那三个 data-*（harness 通道一字未改，只是换了挂法）。 */}
-                <p className="break-all text-[11px] text-slate-100">
-                  {t('deliver.pendingTitle', { title: approval.title, company: approval.company })}
-                </p>
-                <p className="mt-0.5 break-all text-[11px] text-slate-300">
-                  {t('deliver.pendingFile', { fileName: approval.attachment.fileName })}
-                </p>
-                <p className="mt-0.5 break-all text-[11px] text-slate-400">
-                  {t('deliver.pendingWhen', {
-                    requestedAt: formatClock(approval.requestedAt, t('jd.none')),
-                    expiresAt: formatClock(approval.expiresAt, t('jd.none')),
-                  })}
-                </p>
-                <DeskActionRow className="mt-1">
-                  {/* 确认=签字，走朱砂（seal 的第二义就是"人在这件事上盖了印"）；
-                      拒绝不涂红——两枚红按钮并排会让人分不出哪一枚会发出去。 */}
-                  <DeskButton
-                    action={`approve-${approval.approvalId}`}
-                    variant="seal"
-                    compact
-                    busy={!!approvalBusy}
-                    disabled={!!approvalBusy}
-                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
-                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
-                    onClick={() => resolve(approval, true)}
-                  >
-                    <Check size={12} />
-                    {t('deliver.approve')}
-                  </DeskButton>
-                  <DeskButton
-                    action={`deny-${approval.approvalId}`}
-                    variant="line"
-                    compact
-                    busy={!!approvalBusy}
-                    disabled={!!approvalBusy}
-                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
-                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
-                    onClick={() => resolve(approval, false)}
-                  >
-                    <X size={12} />
-                    {t('deliver.deny')}
-                  </DeskButton>
-                </DeskActionRow>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {lastDeliver && (
-          <Banner
-            tone="jade"
-            markers={{
-              testid: 'deliver-receipt',
-              committed: lastDeliver.committed ? 'true' : 'false',
-              'job-id': String(lastDeliver.jobId ?? ''),
-              sha: lastDeliver.attachment.sha256,
-              'size-bytes': String(lastDeliver.attachment.sizeBytes),
-              'ledger-id': String(lastDeliver.ledgerId ?? ''),
-              source: lastDeliver.source,
-            }}
-            className="mt-3"
-          >
-            <div className="w-full">
-              <p className="font-semibold">{t('deliver.receiptHeading')}</p>
-              <p className="mt-1 flex items-center gap-1.5 break-all">
-                <Tag tone={lastDeliver.committed ? 'jade' : 'amber'}>
-                  {t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged')}
-                </Tag>
-                {t('deliver.receiptFile', { fileName: lastDeliver.attachment.fileName })}
-              </p>
-              <p className="mt-1 break-all">
-                {t('deliver.receiptWait', { waitedMs: lastDeliver.waitedMs, reason: lastDeliver.reason })}
-              </p>
-              {/* 对账编号只有出问题要查库时才用得上，所以挂在披露层里；
-                  同一批值也已经在上面那组 `data-*` 上，这里给人读、那里给机器读，不是两份事实。 */}
-              <DeskExplainer id="deliver.receiptIds" className="mt-1" label={t('deliver.receiptIdsToggle')}>
-                <p className="break-all">
-                  {t('deliver.receiptIds', {
-                    jobId: lastDeliver.jobId,
-                    sizeBytes: lastDeliver.attachment.sizeBytes,
-                    sha: lastDeliver.attachment.sha256.slice(0, 12),
-                    ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
-                    source: lastDeliver.source,
-                  })}
-                </p>
-              </DeskExplainer>
-            </div>
-          </Banner>
-        )}
-
-        <DeskExplainer id="deliver.how" className="mt-3" label={t('deliver.howToggle')}>
-          <p data-testid="deliver-hint">{t('deliver.hint')}</p>
-          <p className="mt-1">{t('deliver.pipeline')}</p>
-          <p className="mt-1">{t('deliver.tiers')}</p>
-        </DeskExplainer>
-      </DeskSection>
-
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
-        <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-          <ScrollText size={14} />
-          {t('jd.progressHeading')}
-        </h3>
-        {(progress?.length ?? 0) === 0 ? (
-          <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-progress-empty">
-            {t('jd.progressIdle')}
-          </p>
-        ) : (
-          <ul className="mt-1 flex flex-col gap-0.5" data-testid="jd-progress">
-            {(progress ?? []).map((event, index) => (
-              <li
-                key={`${event.phase}-${String(event.round)}-${String(index)}`}
-                className="break-all text-[11px] text-slate-400"
-                data-progress-phase={event.phase}
-              >
-                {t('jd.progressRow', {
-                  round: event.round,
-                  phase: t(`jd.phase.${event.phase}`),
-                  stored: event.stored,
-                  target: event.target,
-                  containers: event.containers,
-                  currentTitle: event.currentTitle,
-                  time: formatClock(event.at, t('jd.none')),
-                })}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
-        <h3 className="text-xs font-semibold text-slate-300">{t('jd.outcomeHeading')}</h3>
-        {!lastRun ? (
-          <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-outcome-idle">
-            {t('jd.outcomeIdle')}
-          </p>
-        ) : (
-          <div className="mt-1 flex flex-col gap-1" data-testid="jd-outcome" data-stopped-by={lastRun.stoppedBy}>
-            <p className="break-all text-[11px] text-slate-300">
-              {t('jd.outcomeRow', {
-                platform: lastRun.platform,
-                keyword: lastRun.keyword,
-                city: lastRun.city ?? '-',
-                rounds: lastRun.rounds,
-                containers: lastRun.containers,
-                stored: lastRun.stored,
-                total: lastRun.total,
-                stoppedBy: t(`jd.stopped.${lastRun.stoppedBy}`),
-              })}
-            </p>
-            {/* 这两个读数取自闸门任务内部，因此不含本轮那条 search：相等只证明抓取没顺手记别的动作
-                （spec 2.3-11 原判据「抓取不入账」已按 2.7-03 更正）。 */}
-            <p className="text-[11px] text-slate-400" data-testid="jd-ledger-check">
-              {t('jd.ledger', {
-                before: lastRun.ledgerRowsBefore,
-                after: lastRun.ledgerRowsAfter,
-                noOtherAction: okLabel(lastRun.ledgerRowsBefore === lastRun.ledgerRowsAfter),
-              })}
-            </p>
-            <h4 className="mt-2 text-[11px] font-semibold text-slate-300">
-              {t('jd.skippedHeading', { count: lastRun.skipped.length })}
-            </h4>
-            {lastRun.skipped.length === 0 ? (
-              <p className="text-[11px] text-slate-500" data-testid="jd-skipped-empty">
-                {t('jd.skippedEmpty')}
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1" data-testid="jd-skipped">
-                {lastRun.skipped.map((failure, index) => (
-                  <li
-                    key={`${failure.sourceUrl}-${String(index)}`}
-                    className={`break-all rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
-                  >
-                    {t('jd.skippedRow', {
-                      title: failure.title,
-                      reason: failure.reason,
-                      sourceUrl: failure.sourceUrl,
-                    })}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         )}
       </section>
 
@@ -897,6 +675,310 @@ export function JobLabPanel() {
           </div>
         )}
       </section>
+
+      {/* 投递这一格**默认展开**（用户 2026-10-09 裁定：必须用户确认的部分留在明面），
+          收起来的只有「这一步到底怎么走」那三句——它是教材，不是待办。 */}
+      <DeskSection
+        id="deliver.form"
+        defaultOpen
+        markers={{ testid: 'deliver-section' }}
+        title={
+          <span className="flex items-center gap-2">
+            <FileUp size={14} />
+            {t('deliver.heading')}
+          </span>
+        }
+        summary={
+          <span data-testid="deliver-summary">{t('deliver.summary', { pending: pendingApprovals.length })}</span>
+        }
+      >
+        <DeskField
+          action="deliver-resume-path"
+          data-testid="deliver-resume-path"
+          value={resumePathDraft}
+          onValueChange={setResumePathDraft}
+          placeholder={t('deliver.resumePathPlaceholder')}
+          className="w-full"
+        />
+
+        <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
+        {pendingApprovals.length === 0 ? (
+          <p className="mt-1 text-[11px] text-slate-500" data-testid="deliver-pending-empty">
+            {t('deliver.pendingEmpty')}
+          </p>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-1" data-testid="deliver-pending">
+            {pendingApprovals.map((approval) => (
+              <li
+                key={approval.approvalId}
+                className={`rounded-md border px-3 py-1.5 ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS}`}
+                data-approval-id={approval.approvalId}
+                data-approval-job-id={approval.jobId}
+                data-approval-size-bytes={String(approval.attachment.sizeBytes)}
+                data-approval-sha={approval.attachment.sha256}
+              >
+                {/* 一行一件事（plan §3.24 规则④）：原先 133 字的单行把岗位、文件、字节数、
+                    sha、两个时刻用 `·` 串成一串，人读不出"我现在要点哪一颗"。
+                    对账用的标识符全部挪到上面那三个 data-*（harness 通道一字未改，只是换了挂法）。 */}
+                <p className="break-all text-[11px] text-slate-100">
+                  {t('deliver.pendingTitle', { title: approval.title, company: approval.company })}
+                </p>
+                <p className="mt-0.5 break-all text-[11px] text-slate-300">
+                  {t('deliver.pendingFile', { fileName: approval.attachment.fileName })}
+                </p>
+                <p className="mt-0.5 break-all text-[11px] text-slate-400">
+                  {t('deliver.pendingWhen', {
+                    requestedAt: formatClock(approval.requestedAt, t('jd.none')),
+                    expiresAt: formatClock(approval.expiresAt, t('jd.none')),
+                  })}
+                </p>
+                <DeskActionRow className="mt-1">
+                  {/* 确认=签字，走朱砂（seal 的第二义就是"人在这件事上盖了印"）；
+                      拒绝不涂红——两枚红按钮并排会让人分不出哪一枚会发出去。 */}
+                  <DeskButton
+                    action={`approve-${approval.approvalId}`}
+                    variant="seal"
+                    compact
+                    busy={!!approvalBusy}
+                    disabled={!!approvalBusy}
+                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
+                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
+                    onClick={() => resolve(approval, true)}
+                  >
+                    <Check size={12} />
+                    {t('deliver.approve')}
+                  </DeskButton>
+                  <DeskButton
+                    action={`deny-${approval.approvalId}`}
+                    variant="line"
+                    compact
+                    busy={!!approvalBusy}
+                    disabled={!!approvalBusy}
+                    disabledReason={approvalBusy ? 'APPROVAL_BUSY' : undefined}
+                    disabledReasonLabel={approvalBusy ? t('jd.reasonApprovalBusy') : undefined}
+                    onClick={() => resolve(approval, false)}
+                  >
+                    <X size={12} />
+                    {t('deliver.deny')}
+                  </DeskButton>
+                </DeskActionRow>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {lastDeliver && (
+          <Banner
+            tone="jade"
+            markers={{
+              testid: 'deliver-receipt',
+              committed: lastDeliver.committed ? 'true' : 'false',
+              'job-id': String(lastDeliver.jobId ?? ''),
+              sha: lastDeliver.attachment.sha256,
+              'size-bytes': String(lastDeliver.attachment.sizeBytes),
+              'ledger-id': String(lastDeliver.ledgerId ?? ''),
+              source: lastDeliver.source,
+            }}
+            className="mt-3"
+          >
+            <div className="w-full">
+              <p className="font-semibold">{t('deliver.receiptHeading')}</p>
+              <p className="mt-1 flex items-center gap-1.5 break-all">
+                <Tag tone={lastDeliver.committed ? 'jade' : 'amber'}>
+                  {t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged')}
+                </Tag>
+                {t('deliver.receiptFile', { fileName: lastDeliver.attachment.fileName })}
+              </p>
+              <p className="mt-1 break-all">
+                {t('deliver.receiptWait', { waitedMs: lastDeliver.waitedMs, reason: lastDeliver.reason })}
+              </p>
+              {/* 对账编号只有出问题要查库时才用得上，所以挂在披露层里；
+                  同一批值也已经在上面那组 `data-*` 上，这里给人读、那里给机器读，不是两份事实。 */}
+              <DeskExplainer id="deliver.receiptIds" className="mt-1" label={t('deliver.receiptIdsToggle')}>
+                <p className="break-all">
+                  {t('deliver.receiptIds', {
+                    jobId: lastDeliver.jobId,
+                    sizeBytes: lastDeliver.attachment.sizeBytes,
+                    sha: lastDeliver.attachment.sha256.slice(0, 12),
+                    ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
+                    source: lastDeliver.source,
+                  })}
+                </p>
+              </DeskExplainer>
+            </div>
+          </Banner>
+        )}
+
+        <DeskExplainer id="deliver.how" className="mt-3" label={t('deliver.howToggle')}>
+          <p data-testid="deliver-hint">{t('deliver.hint')}</p>
+          <p className="mt-1">{t('deliver.pipeline')}</p>
+          <p className="mt-1">{t('deliver.tiers')}</p>
+        </DeskExplainer>
+      </DeskSection>
+
+      {/* 进度与结局**默认收起**（用户 2026-10-09 的总原则：不涉及必须确认或输入的都可以收），
+          但段头必须留一行读数——人不必点开也要知道"这一轮跑到哪儿了"。
+          读数因此同时挂在 `data-*` 上：收起态下 harness 照样能量到同一批数字，不用先展开。 */}
+      <DeskSection
+        id="jd.progress"
+        markers={{ testid: 'jd-progress-section' }}
+        title={
+          <span className="flex items-center gap-2">
+            <ScrollText size={14} />
+            {t('jd.progressHeading')}
+          </span>
+        }
+        summary={
+          latestProgress ? (
+            <span
+              data-testid="jd-progress-summary"
+              data-round={String(latestProgress.round)}
+              data-stored={String(latestProgress.stored)}
+              data-target={String(latestProgress.target)}
+            >
+              {t('jd.progressHead', {
+                round: latestProgress.round,
+                phase: t(`jd.phase.${latestProgress.phase}`),
+                stored: latestProgress.stored,
+                target: latestProgress.target,
+              })}
+            </span>
+          ) : (
+            <span data-testid="jd-progress-summary">{t('jd.progressIdle')}</span>
+          )
+        }
+      >
+        {(progress?.length ?? 0) === 0 ? (
+          <p className="text-[11px] text-slate-500" data-testid="jd-progress-empty">
+            {t('jd.progressIdle')}
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1" data-testid="jd-progress">
+            {(progress ?? []).map((event, index) => (
+              <li
+                key={`${event.phase}-${String(event.round)}-${String(index)}`}
+                className="break-all text-[11px] text-slate-400"
+                data-progress-phase={event.phase}
+              >
+                {/* 一行一件事（plan §3.24 规则④）：原先 113 字用 `·` 把轮次、阶段、入库数、容器数、
+                    标题、时刻串成一串，人读不出该看哪个；现在拆成"跑到哪 + 此刻在读谁"两行。 */}
+                <span className="block">
+                  {t('jd.progressHead', {
+                    round: event.round,
+                    phase: t(`jd.phase.${event.phase}`),
+                    stored: event.stored,
+                    target: event.target,
+                  })}
+                </span>
+                <span className="block text-[11px] text-slate-500">
+                  {t('jd.progressDetail', {
+                    containers: event.containers,
+                    time: formatClock(event.at, t('jd.none')),
+                  })}
+                </span>
+                {/* 列表阶段 `currentTitle` 是空串（还没开始逐条读），因此这一行只在读详情时长出来。 */}
+                {event.currentTitle.length > 0 && (
+                  <span className="block text-[11px] text-slate-400">
+                    {t('jd.progressReading', { currentTitle: event.currentTitle })}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </DeskSection>
+
+      <DeskSection
+        id="jd.outcome"
+        markers={{ testid: 'jd-outcome-section' }}
+        title={
+          <span className="flex items-center gap-2">
+            <FileSearch size={14} />
+            {t('jd.outcomeHeading')}
+          </span>
+        }
+        summary={
+          lastRun ? (
+            <span
+              data-testid="jd-outcome-summary"
+              data-stored={String(lastRun.stored)}
+              data-total={String(lastRun.total)}
+              data-skipped={String(lastRun.skipped.length)}
+              data-stopped-by={lastRun.stoppedBy}
+            >
+              {t('jd.outcomeSummary', {
+                stored: lastRun.stored,
+                skipped: lastRun.skipped.length,
+                stoppedBy: t(`jd.stopped.${lastRun.stoppedBy}`),
+              })}
+            </span>
+          ) : (
+            <span data-testid="jd-outcome-summary">{t('jd.outcomeIdle')}</span>
+          )
+        }
+      >
+        {!lastRun ? (
+          <p className="text-[11px] text-slate-500" data-testid="jd-outcome-idle">
+            {t('jd.outcomeIdle')}
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1" data-testid="jd-outcome" data-stopped-by={lastRun.stoppedBy}>
+            <p className="break-all text-[11px] text-slate-300">
+              {t('jd.outcomeHead', {
+                platform: lastRun.platform,
+                keyword: lastRun.keyword,
+                city: lastRun.city ?? '-',
+                rounds: lastRun.rounds,
+              })}
+            </p>
+            <p className="break-all text-[11px] text-slate-300">
+              {t('jd.outcomeCount', {
+                containers: lastRun.containers,
+                stored: lastRun.stored,
+                total: lastRun.total,
+              })}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {t('jd.outcomeStop', { stoppedBy: t(`jd.stopped.${lastRun.stoppedBy}`) })}
+            </p>
+            <h4 className="mt-1 text-[11px] font-semibold text-slate-300">
+              {t('jd.skippedHeading', { count: lastRun.skipped.length })}
+            </h4>
+            {lastRun.skipped.length === 0 ? (
+              <p className="text-[11px] text-slate-500" data-testid="jd-skipped-empty">
+                {t('jd.skippedEmpty')}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1" data-testid="jd-skipped">
+                {lastRun.skipped.map((failure, index) => (
+                  <li
+                    key={`${failure.sourceUrl}-${String(index)}`}
+                    className={`break-all rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
+                  >
+                    {t('jd.skippedRow', {
+                      title: failure.title,
+                      reason: failure.reason,
+                      sourceUrl: failure.sourceUrl,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <DeskExplainer id="jd.outcomeMachine" className="mt-1" label={t('jd.outcomeMachineToggle')}>
+              <p className="break-all" data-testid="jd-ledger-check">
+                {t('jd.ledger', {
+                  before: lastRun.ledgerRowsBefore,
+                  after: lastRun.ledgerRowsAfter,
+                  noOtherAction: okLabel(lastRun.ledgerRowsBefore === lastRun.ledgerRowsAfter),
+                })}
+              </p>
+              {/* 这两个读数取自闸门任务内部，因此不含本轮那条 search：相等只证明抓取没顺手记别的动作
+                  （spec 2.3-11 原判据「抓取不入账」已按 2.7-03 更正）。 */}
+              <p className="mt-1 break-all">{t('jd.skippedNote')}</p>
+            </DeskExplainer>
+          </div>
+        )}
+      </DeskSection>
     </div>
   );
 }
