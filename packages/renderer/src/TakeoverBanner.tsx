@@ -58,6 +58,14 @@ export function TakeoverBanner({
             'takeover-elapsed': formatElapsed(elapsedMs),
           }}
           className="rounded-none border-x-0 border-t-0 px-4 py-2 text-[11px]"
+          actions={
+            // 「交还」那颗走条尾动作槽而不是 children：正文三行读数会换行，同处一条 flex-wrap 行时
+            // 被挤到下一行的是按钮，而这条横幅是「此刻页面在谁手里」的唯一读数，按钮必须常驻右上角。
+            <DeskButton action="takeover-release" variant="amber" compact busy={busy !== undefined} onClick={onRelease}>
+              <MousePointerClick size={11} />
+              {t('chat.takeover.release')}
+            </DeskButton>
+          }
         >
           <span className="font-semibold" data-takeover-heading>
             {t('chat.takeover.held')}
@@ -67,10 +75,6 @@ export function TakeoverBanner({
           </span>
           <span data-takeover-duration>{t('chat.takeover.since', { duration: formatElapsed(elapsedMs) })}</span>
           <span className="ml-auto text-[10px] opacity-80">{t('chat.takeover.heldHint')}</span>
-          <DeskButton action="takeover-release" variant="amber" compact busy={busy !== undefined} onClick={onRelease}>
-            <MousePointerClick size={11} />
-            {t('chat.takeover.release')}
-          </DeskButton>
         </Banner>
       ) : (
         <div

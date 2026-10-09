@@ -98,8 +98,6 @@ export interface DeskSectionProps {
    * 字号固定 11px：灰阶 `slate-500` 只属于 ≤11px 的读数，这是 6.1-09 的机检半边，`src/ui/**` 也不豁免。
    */
   summary?: ReactNode;
-  /** 段头右侧的动作槽（如「清空」那颗常驻键）：常驻可见，不跟着正文一起收。 */
-  actions?: ReactNode;
   /** 库里没有记录时是否展开。默认 false——本轮的诉求是"能收起就默认收起"。 */
   defaultOpen?: boolean;
   /** 挂在段容器上的附加 `data-*`（harness 常按 testid 找那一格）。 */
@@ -119,7 +117,6 @@ export function DeskSection({
   id,
   title,
   summary,
-  actions,
   defaultOpen = false,
   markers,
   className = '',
@@ -132,29 +129,28 @@ export function DeskSection({
       {...markerAttrsOf(markers)}
       data-section={id}
       data-open={open ? 'true' : 'false'}
-      className={`min-w-0 overflow-hidden rounded-xl border border-line bg-ink-900/60 ${className}`}
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-ink-900/60 ${className}`}
     >
-      {/* 段头是一行而不是一整颗按钮：动作槽里的键必须待在 toggle 之外，
-          嵌在 <button> 里等于嵌套交互元素，浏览器会把内层那颗的点击判给外层，
-          harness 也就再也按不到那颗自己的 `data-action`。 */}
-      <div className="flex items-center">
-        <button
-          type="button"
-          data-action={`${id}-toggle`}
-          aria-expanded={open}
-          onClick={toggle}
-          className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left transition-colors duration-150 hover:bg-ink-850"
-        >
-          <Chevron size={13} className="shrink-0 text-slate-500" aria-hidden="true" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-semibold text-slate-50">{title}</span>
-            {summary ? <span className="mt-0.5 block truncate text-[11px] text-slate-500">{summary}</span> : null}
-          </span>
-        </button>
-        {/* 动作槽不参与 flex-grow：标题再长也只截断自己，挤不走常驻的主键。 */}
-        {actions ? <span className="flex shrink-0 items-center gap-1.5 pr-4">{actions}</span> : null}
-      </div>
-      {open ? <div className="min-h-0 border-t border-line px-4 py-3">{children}</div> : null}
+      {/* 段头本身就是一颗按钮，且**不嵌**别的交互元素：嵌在 `<button>` 里等于嵌套交互元素，
+          浏览器会把内层那颗的点击判给外层，harness 就再也按不到那颗自己的 `data-action`。 */}
+      <button
+        type="button"
+        data-action={`${id}-toggle`}
+        aria-expanded={open}
+        onClick={toggle}
+        className="flex shrink-0 items-center gap-2 px-4 py-3 text-left transition-colors duration-150 hover:bg-ink-850"
+      >
+        <Chevron size={13} className="shrink-0 text-slate-500" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold text-slate-50">{title}</span>
+          {summary ? <span className="mt-0.5 block truncate text-[11px] text-slate-500">{summary}</span> : null}
+        </span>
+      </button>
+      {/* 正文是这一段里**唯一可滚**的一格：段落在纵向 flex 列（对话屏）里是 flex 子项，
+          而 `overflow-hidden` 让它的自动最小尺寸塌成 0，于是"给多少长多少"而不是把输入区顶出画面
+          （活体读数：对话列各带合计 733 而面板只有 652，展开的档位段把输入区整个顶到窗口之外）。
+          段头 `shrink-0` 因此常驻，被限高的是正文。 */}
+      {open ? <div className="min-h-0 flex-1 overflow-y-auto border-t border-line px-4 py-3">{children}</div> : null}
     </section>
   );
 }
