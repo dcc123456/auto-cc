@@ -61,6 +61,7 @@ export {
   RESUME_DOC_MIGRATION_VERSION,
   type LoadResult,
   type ResumeDocConfig,
+  type ResumeDocSummary,
   type SaveResult,
 } from './doc-store.js';
 export {

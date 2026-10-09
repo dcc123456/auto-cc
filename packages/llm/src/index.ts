@@ -58,8 +58,17 @@ export const llmSchema = z.strictObject({
    * 读取顺序是「密钥库 → 这个变量」（spec 7.1-07）：界面上填的走密钥库，这条口子留给 CI 与验收复跑。
    */
   keyEnv: z.string().min(1).default('AUTO_CC_LLM_API_KEY'),
-  /** 单次请求的超时（毫秒）。取 `AbortSignal.timeout`，到点以 `LLM_REQUEST_FAILED` 失败而不是吊死。 */
-  timeoutMs: z.number().int().min(1000).max(120000).default(8000),
+  /**
+   * 单次请求的超时（毫秒）。取 `AbortSignal.timeout`，到点以 `LLM_REQUEST_FAILED` 失败而不是吊死。
+   *
+   * 默认 180s。这个数是被活体读数逼出来的，不是估的（2026-10-09，本机对话腿绑 `ark-code-latest`）：
+   * ① 最小探测（`llm.settings.check('chat')`）3.7～7.5s——原先的 8s 连探测都贴着顶；
+   * ② 简历生成腿一次真实产出要 111～119s（回复上限 512 时 118.5s 回 3 处改写），
+   *   而 60s 与 120s 两档都把它掐成了 `reorder_only`（改写 0 处），也就是用户看到的"简历根本生成不出来"。
+   * 上限放到 600s：慢端点、长清单、走两轮重试的场合要有人能等得到的档位，缺省则不该假定机房内网。
+   * 代价说清楚：真·不可用时失败要等满这一格才报出来，所以界面那侧的忙态与"退回保守版"是必需项而非可选项。
+   */
+  timeoutMs: z.number().int().min(1000).max(600000).default(180000),
   /** 回复长度上限（`max_tokens`），话术只需一两句，默认给到 400。 */
   maxTokens: z.number().int().min(1).max(8192).default(400),
   /** 采样温度；话术生成要稳定，默认 0.7。 */

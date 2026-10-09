@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   app,
   BrowserWindow,
+  dialog,
   Menu,
   nativeImage,
   shell as electronShell,
@@ -18,6 +19,7 @@ import {
   type ShellStatus,
 } from '@auto-cc/shared';
 import { z } from 'zod';
+import { decideOpenPicker, decideSavePicker } from './file-picker.js';
 import { resolveRevealTarget } from './reveal-target.js';
 import { clampSlotRect, fallbackSlotRect } from './slot-bounds.js';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
@@ -221,6 +223,58 @@ export class ShellService extends Service {
     if (!target.isAccepted) throw new AppError(target.code, target.reason, 'shell.revealInFolder', {});
     electronShell.showItemInFolder(target.resolvedPath);
     return { revealed: true };
+  };
+
+  /**
+   * 请操作系统弹出「打开文件」面板，把人选中的那一条路径回给渲染层（简历导入与 PDF 打开的唯一入口）。
+   *
+   * 渲染层在 sandbox 下读不了文件系统（§8.1），而"敲绝对路径"这条路在界面上根本走不通——
+   * 路径打不出来，导入与打开就永远是禁用态。这里只回路径本身，不读文件内容、不返回目录、不允许多选。
+   * @param raw 未受信的渲染层实参：标题（已由 i18n 翻好）与筛选器；形状判定在 `file-picker.ts`
+   * @returns `{ filePath }`；人取消时为 null（取消不是失败，界面据此保持原状而不报错）
+   */
+  selectFile = async (raw: unknown): Promise<{ filePath: string | null }> => {
+    const decision = decideOpenPicker(raw, 3);
+    if (!decision.isAccepted)
+      throw new AppError('INVALID_ARGUMENT', `文件选择器参数不合法：${decision.reason}`, 'shell');
+    const win = this.mainWindow;
+    const reply =
+      win === undefined
+        ? await dialog.showOpenDialog({
+            properties: ['openFile'],
+            title: decision.options.title,
+            filters: decision.options.filters,
+          })
+        : await dialog.showOpenDialog(win, {
+            properties: ['openFile'],
+            title: decision.options.title,
+            filters: decision.options.filters,
+          });
+    return { filePath: reply.canceled ? null : (reply.filePaths[0] ?? null) };
+  };
+
+  /**
+   * 请操作系统弹出「另存为」面板，把人选中的落点回给渲染层（PDF 轻编辑的另存与备份导出用）。
+   * @param raw 未受信的渲染层实参：标题、筛选器与建议文件名（文件名不许带路径分隔符，判定在 `file-picker.ts`）
+   * @returns `{ filePath }`；人取消时为 null
+   */
+  selectSaveFile = async (raw: unknown): Promise<{ filePath: string | null }> => {
+    const decision = decideSavePicker(raw, 3);
+    if (!decision.isAccepted) throw new AppError('INVALID_ARGUMENT', `另存为参数不合法：${decision.reason}`, 'shell');
+    const win = this.mainWindow;
+    const reply =
+      win === undefined
+        ? await dialog.showSaveDialog({
+            defaultPath: decision.options.defaultPath,
+            title: decision.options.title,
+            filters: decision.options.filters,
+          })
+        : await dialog.showSaveDialog(win, {
+            defaultPath: decision.options.defaultPath,
+            title: decision.options.title,
+            filters: decision.options.filters,
+          });
+    return { filePath: reply.canceled ? null : (reply.filePath ?? null) };
   };
 
   /**
@@ -546,5 +600,7 @@ declare module '@auto-cc/core' {
 }
 
 export { ResumePrintService } from './print-executor.js';
+export { decideOpenPicker, decideSavePicker } from './file-picker.js';
+export type { FilePickerRequest, SaveFilePickerRequest } from './file-picker.js';
 export { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema };
 export type { AutopilotSwitches, UpdateActionName, UpdateCheckResultLike, UpdateConfig, UpdateRuntime, UpdaterLike };

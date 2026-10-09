@@ -7,6 +7,7 @@ import type {
   GenerationReorderRowView,
   GenerationRewriteRowView,
   GenerationRunRowView,
+  ResumeDocSummaryView,
 } from '@auto-cc/shared';
 import {
   Banner,
@@ -15,6 +16,7 @@ import {
   DeskButton,
   DeskCheck,
   DeskDisclosure,
+  DeskSelect,
   DeskTextarea,
   type BannerTone,
 } from './ui/controls';
@@ -80,12 +82,34 @@ export function GeneratePanel() {
   const [blocked, setBlocked] = useState<string>();
   /** 证据正文按需现取（同缺口面板）：`null` = 问过但库里已经没有这条了。 */
   const [bodies, setBodies] = useState<Record<string, string | null>>({});
+  /**
+   * 库里可定制的简历清单与当前选中的那一份。
+   * 这一栏存在的理由是主进程那条判据：`resume.generate.run` 在库里多于一份简历时要求显式 `docId`，
+   * 而界面此前没有列出文档的通道——于是"贴了 JD 也生成不了"（报的是「需指明 docId」）。
+   * 清单只含摘要（id / 姓名 / 时刻），正文仍只经主进程的 `load()` 读（§2.5 的单一真相源）。
+   */
+  const [docs, setDocs] = useState<ResumeDocSummaryView[]>([]);
+  const [docId, setDocId] = useState('');
 
+  /**
+   * 面板的"重读"只重读**候选清单**，不重读产物：
+   * 产物是一次生成的提议态，重读就等于让用户对着一份已经用掉的提议态再表态（这条口径不变）。
+   * 每条动作结束后由 `useBridgeAction` 调一次，所以刚导入的简历下一轮就出现在这一栏里。
+   */
   const read = useCallback(async () => {
-    // 面板没有"重读"：产物是一次生成的读数，重读就等于让用户对着一份已经用掉的提议态再表态。
-  }, []);
+    const reply = await bridge?.resume['doc.list']();
+    if (!reply?.ok) return;
+    const list = reply.value;
+    setDocs(list);
+    setDocId((current) => (list.some((item) => item.id === current) ? current : (list[0]?.id ?? '')));
+  }, [bridge]);
 
   const { busy, notice, run, setNotice } = useBridgeAction(read);
+
+  /** 挂载即读一次候选：这一栏空着的时候「生成」是锁住的，锁的理由必须当场就能说清。 */
+  useEffect(() => {
+    void read();
+  }, [read]);
 
   /**
    * 库或工作副本被改过之后，那份提议态的基线就不成立了（接受侧会以 stale 拒绝），
@@ -140,7 +164,7 @@ export function GeneratePanel() {
   const generate = () => {
     setBlocked(undefined);
     setAccepted(undefined);
-    void run(t('generate.run'), () => bridge?.resume['generate.run'](jdText.trim()), {
+    void run(t('generate.run'), () => bridge?.resume['generate.run'](jdText.trim(), { docId }), {
       apply: (value) => {
         setPreview(value);
         setChecked(value.rewrites.map(() => false));
@@ -284,8 +308,9 @@ export function GeneratePanel() {
   /** 原因码 → 人话。 */
   const reasonLabel = (code?: string): string | undefined =>
     code === undefined ? undefined : t(`generate.reason.${code}`);
-  /** 生成按不动的两种原因：JD 那栏还空着，或上一条动作在途。 */
-  const runReason = jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
+  /** 生成按不动的三种原因：还没选要定制哪一份（空库）、JD 那栏还空着、或上一条动作在途。 */
+  const runReason =
+    docId === '' ? 'NO_DOC' : jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
 
   return (
     <div
@@ -301,6 +326,24 @@ export function GeneratePanel() {
       <p className="text-xs leading-relaxed text-slate-400">{t('generate.hint')}</p>
 
       <div className="flex flex-col gap-2">
+        {/* 「定制哪一份」是一栏候选而不是一句提示：库里多份时主进程要求显式 docId，
+            界面给不出这一栏，用户就只剩「需指明 docId」这句看不懂的话。选项文字是数据（姓名 / id），不进翻译。 */}
+        <DeskSelect
+          action="generate-doc"
+          data-testid="generate-doc"
+          label={t('generate.docLabel')}
+          value={docId}
+          onValueChange={setDocId}
+          disabled={docs.length === 0}
+          disabledReason={docs.length === 0 ? 'NO_DOC' : undefined}
+          disabledReasonLabel={docs.length === 0 ? reasonLabel('NO_DOC') : undefined}
+        >
+          {docs.map((doc) => (
+            <option key={doc.id} value={doc.id}>
+              {doc.name ?? doc.id}
+            </option>
+          ))}
+        </DeskSelect>
         <DeskTextarea
           action="generate-jd"
           data-generate-field="jd"

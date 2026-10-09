@@ -11,6 +11,7 @@ import type {
 import { createPdfEditSession } from '@auto-cc/plugin-pdf-edit/edit-session';
 import type { AppErrorPayload, PdfOpenReceiptView, PdfSaveAsReceiptView, PdfTextBoxView } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
+import { FolderOpen } from 'lucide-react';
 import { Banner, DeskButton, DeskField, deskReason } from './ui/controls';
 import { useDeskThemeValue } from './theme';
 
@@ -267,6 +268,61 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
   };
 
   /**
+   * 请系统弹「打开文件」面板选人手里那份 PDF（spec 3.5-01 的入口半边）。
+   * 渲染层读不了文件系统（§8.1），而让人敲绝对路径时"打开 PDF"一直是禁用态——这一颗把选文件交回给操作系统。
+   * @returns 选中路径写回输入框；人取消时保持原状（取消不是失败）
+   */
+  const pickSourceFile = () =>
+    void run(
+      t('pdfEdit.pickFile'),
+      () =>
+        bridge?.shell.selectFile({
+          title: t('pdfEdit.pickerTitle'),
+          filters: [{ name: t('pdfEdit.pickerFilterPdf'), extensions: ['pdf'] }],
+        }),
+      {
+        apply: (value) => {
+          if (value.filePath !== null) setFilePath(value.filePath);
+        },
+        describe: (value) =>
+          value.filePath === null ? t('pdfEdit.pickerCanceled') : t('pdfEdit.pickerPicked', { path: value.filePath }),
+      },
+    );
+
+  /**
+   * 请系统弹「另存为」面板定产物落点（spec 3.5-09 的另存半边）。
+   * 默认名取自源文件名：渲染层只交一个不含路径分隔的名字，落点判定在主进程（`file-picker.ts`）。
+   */
+  const pickSavePath = () =>
+    void run(
+      t('pdfEdit.pickSavePath'),
+      () =>
+        bridge?.shell.selectSaveFile({
+          title: t('pdfEdit.savePickerTitle'),
+          defaultFileName: sourceFileName(),
+          filters: [{ name: t('pdfEdit.pickerFilterPdf'), extensions: ['pdf'] }],
+        }),
+      {
+        apply: (value) => {
+          if (value.filePath !== null) setOutPath(value.filePath);
+        },
+        describe: (value) =>
+          value.filePath === null ? t('pdfEdit.pickerCanceled') : t('pdfEdit.pickerPicked', { path: value.filePath }),
+      },
+    );
+
+  /**
+   * 从当前输入的路径里取文件名（只用于另存建议名，不做任何存在性判断）。
+   * @returns 末段文件名；路径为空时给一个固定建议名
+   */
+  function sourceFileName(): string {
+    const segments = filePath.trim().split(/[\\/]/);
+    return segments[segments.length - 1] !== '' && segments.length > 0
+      ? (segments[segments.length - 1] ?? 'edited.pdf')
+      : 'edited.pdf';
+  }
+
+  /**
    * 换到某一页：页号先落到 ref 再取线框，这样紧随其后的拖拽与另存用的就是人刚看的那一页。
    * @param pageNumber 目标**源页号**（1 起）
    */
@@ -510,6 +566,19 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
           placeholder={t('pdfEdit.pathPlaceholder')}
           className="min-w-[280px] flex-1"
         />
+        <DeskButton
+          action="pdf-edit-pick-file"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
+          onClick={pickSourceFile}
+        >
+          <FolderOpen size={12} />
+          {t('pdfEdit.pickFile')}
+        </DeskButton>
         <DeskButton
           action="pdf-edit-open"
           variant="line"
@@ -787,6 +856,19 @@ export function PdfEditPanel({ onClose }: { onClose: () => void }) {
                     placeholder={t('pdfEdit.outPathPlaceholder')}
                     className="min-w-[220px] flex-1"
                   />
+                  <DeskButton
+                    action="pdf-edit-pick-save-path"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={!!busy}
+                    disabledReason={busyReason}
+                    disabledReasonLabel={reasonLabel(busyReason)}
+                    onClick={pickSavePath}
+                  >
+                    <FolderOpen size={12} />
+                    {t('pdfEdit.pickSavePath')}
+                  </DeskButton>
                   <DeskButton
                     action="pdf-edit-save-as"
                     variant="amber"

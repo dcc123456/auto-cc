@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import type { ResumeDocService } from './doc-store.js';
 import { createEmptyDocument, makeField, type ResumeDocument, type Section } from './model.js';
 import { resumePrint } from './print.js';
+import { resumeTemplate } from './template.js';
 import type { ResumeSnapshotService } from './snapshot-store.js';
 import type { TemplateLocale } from './template.js';
 
@@ -92,6 +93,43 @@ export class ResumeExportService extends Service {
    * @param variant `base`（默认）或 `edited`（给 3.7-03 的 diff 界面准备的第二版内容）
    * @returns 种子文档的 id 与落库后的内容 hash
    */
+  /**
+   * 列出可给界面摆的模板（id + 展示名）：模板选择器唯一的数据源，界面不自己抄一份清单（§2.5）。
+   * @returns 按注册次序的模板摘要
+   */
+  templates = (): { id: string; name: string }[] =>
+    resumeTemplate.list().map((template) => ({ id: template.id, name: template.name }));
+
+  /**
+   * 读人设定的默认模板 id（spec 3.2-03 的「用户可设置用哪套生成」那半边的存储出口）。
+   * @returns 存过的模板 id；从没设定过时回退 `classic`（第一套内置模板，始终存在）
+   */
+  preference = (): { templateId: string } => ({
+    templateId: this.docStore.getPreference('defaultTemplateId') ?? 'classic',
+  });
+
+  /**
+   * 写下人设定的默认模板 id：之后 `preview` / `toPdf` 不给 templateId 时就用它。
+   * @param templateId 目标模板 id；不存在的 id 直接被拒（而不是存进去等渲染时炸）
+   * @throws AppError(`INVALID_ARGUMENT`) 模板 id 不在注册表里
+   */
+  setPreference = (templateId: string): { templateId: string } => {
+    if (resumeTemplate.get(templateId) === null) {
+      throw new AppError('INVALID_ARGUMENT', `未知模板 ${templateId}，不能作为默认模板设定`);
+    }
+    this.docStore.setPreference('defaultTemplateId', templateId, Date.now());
+    return { templateId };
+  };
+
+  /**
+   * 定下这次渲染用哪套模板：显式给的优先，没给就用人设定的默认值。
+   * @param templateId 调用方给的模板 id（可为 undefined）
+   * @returns 实际生效的模板 id
+   */
+  private resolveTemplateId(templateId: string | undefined): string {
+    return templateId ?? this.preference().templateId;
+  }
+
   seedDemo = (variant: ResumeSeedVariant = 'base'): { docId: string; hash: string } => {
     const saved = this.docStore.save(this.demoDocument(variant));
     return { docId: DEMO_DOC_ID, hash: saved.hash };
@@ -201,9 +239,9 @@ export class ResumeExportService extends Service {
    * @param locale 语言，默认 `zh-CN`
    * @returns 可直接塞进视图的完整 HTML 文档字符串
    */
-  preview = (docId: string, templateId: string, locale: TemplateLocale = 'zh-CN'): string => {
+  preview = (docId: string, templateId?: string, locale: TemplateLocale = 'zh-CN'): string => {
     const doc = this.requireDoc(docId);
-    return resumePrint.buildHtml(doc, templateId, locale, this.printPort.fontBaseUrl());
+    return resumePrint.buildHtml(doc, this.resolveTemplateId(templateId), locale, this.printPort.fontBaseUrl());
   };
 
   /**
@@ -216,9 +254,10 @@ export class ResumeExportService extends Service {
    * @param locale 语言，默认 `zh-CN`
    * @returns 导出回执（路径 / 页数 / 字节数 / 内容 hash）
    */
-  toPdf = async (docId: string, templateId: string, locale: TemplateLocale = 'zh-CN'): Promise<ExportReceipt> => {
+  toPdf = async (docId: string, templateId?: string, locale: TemplateLocale = 'zh-CN'): Promise<ExportReceipt> => {
     const doc = this.requireDoc(docId);
-    const request = resumePrint.toRequest(doc, templateId, locale, this.printPort.fontBaseUrl());
+    const usedTemplateId = this.resolveTemplateId(templateId);
+    const request = resumePrint.toRequest(doc, usedTemplateId, locale, this.printPort.fontBaseUrl());
 
     let pdf: Uint8Array;
     try {
@@ -236,7 +275,7 @@ export class ResumeExportService extends Service {
     }
 
     const dir = join(this.config.paths().userDataDir, EXPORTS_SUBDIR);
-    const target = join(dir, `${docId}-${templateId}.pdf`);
+    const target = join(dir, `${docId}-${usedTemplateId}.pdf`);
     try {
       await mkdir(dir, { recursive: true });
       await writeFile(target, pdf);
@@ -252,7 +291,7 @@ export class ResumeExportService extends Service {
     const saved = this.docStore.save(finalDoc);
     // 导出瞬间记一份不可变快照（3.7-01）：与上面那次 save 用的是同一份 `finalDoc`，
     // 所以快照 hash 与回执 hash 必然同源一致——「投出去的到底是哪一版」因此在库里留了不可变的一行。
-    const snapshot = this.snapshotStore.record(finalDoc, templateId, resumePrint.fontSet, Date.now());
+    const snapshot = this.snapshotStore.record(finalDoc, usedTemplateId, resumePrint.fontSet, Date.now());
 
     return {
       docId,

@@ -9,6 +9,7 @@
  * 无需英寸换算、不在打印选项里散落魔法数），字体随包内嵌经 `@font-face` 声明，Chromium 打印时按用到的字形自动子集内嵌。
  */
 import { resumeTemplate, type TemplateLocale } from '../template.js';
+import { PRINT_STYLESHEET } from './print-css.js';
 import type { ResumeDocument } from '../model.js';
 import type { ResumePrintRequest } from '@auto-cc/shared';
 
@@ -58,8 +59,14 @@ export function buildPrintHtml(
   const pageRule = `@page{size:${pageSize};margin:${margin.topMm}mm ${margin.rightMm}mm ${margin.bottomMm}mm ${margin.leftMm}mm;}`;
   // 分页护栏（3.3-08）：单条经历整体不跨页（break-inside:avoid），区块标题不被甩到页尾成孤儿（break-after:avoid）。
   const breakRule = '.resume-entry{break-inside:avoid;}h2{break-after:avoid;}';
+  // 最小归零（Tailwind preflight 的那一小截）：产物文档里没有 preflight，浏览器默认的 h1/h2/p 外边距
+  // 会把模板写的间距全部顶开，于是"每套模板画得不一样"这条判据根本量不出来。
+  const resetRule =
+    '*{box-sizing:border-box;margin:0;padding:0;}h1,h2,h3,p{font-size:inherit;font-weight:inherit;line-height:inherit;}ul,ol{list-style:none;}';
   const baseRule = `html{font-family:'${FONT_FAMILY}',sans-serif;font-size:${baseFontPt}pt;line-height:${lineHeight};-webkit-print-color-adjust:exact;print-color-adjust:exact;}body{margin:0;}`;
-  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${breakRule}${baseRule}</style></head><body>${body}</body></html>`;
+  // 工具类样式表排在最后：模板按 3.2-07 用 utility class 表达版面，而这份文档不经过渲染层那条编译链，
+  // class 只有在产物里带上对应规则才算数（缺它时三套模板导出像素相同，见 print-css.ts 文件头）。
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${breakRule}${baseRule}${resetRule}${PRINT_STYLESHEET}</style></head><body>${body}</body></html>`;
 }
 
 /**

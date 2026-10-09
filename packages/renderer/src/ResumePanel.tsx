@@ -1,6 +1,8 @@
 import {
   Ban,
+  BookmarkPlus,
   Eye,
+  FolderOpen,
   FileDown,
   FileText,
   GitCompareArrows,
@@ -11,15 +13,16 @@ import {
   SlidersHorizontal,
   Upload,
 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
   ExportReceiptView,
   ImportReceiptView,
   PendingImportRowView,
+  ResumeDocSummaryView,
   ResumeLocaleView,
-  ResumeSeedView,
+  ResumeTemplateSummaryView,
   SnapshotDiffView,
   SnapshotMetaView,
 } from '@auto-cc/shared';
@@ -29,9 +32,6 @@ import { ResumeEditor } from './ResumeEditor';
 import { Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
 import { Drawer } from './ui/overlays';
 import { useBridgeAction } from './useBridgeAction';
-
-/** 固定模板 id（3.2 落地的第一套；编辑轨 3.5 之后由用户选模板取代）。 */
-const TEMPLATE_ID = 'classic';
 
 /** 故意不存在的文档 id：供「注入失败导出」按钮触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
 const FAILURE_DOC_ID = 'resume-fail-injected';
@@ -84,7 +84,6 @@ const FORMAT_LABEL_KEY = {
  */
 export function ResumePanel() {
   const { t } = useTranslation();
-  const [seed, setSeed] = useState<ResumeSeedView>();
   const [locale, setLocale] = useState<ResumeLocaleView>('zh-CN');
   const [previewHtml, setPreviewHtml] = useState<string>();
   const [receipt, setReceipt] = useState<ExportReceiptView>();
@@ -99,6 +98,19 @@ export function ResumePanel() {
    */
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [importPath, setImportPath] = useState('');
+  /**
+   * 面板当下正在操作的那份文档 id。
+   *
+   * 它取代了原先"必须先按『载入示例』"这一道门：那份门把预览、导出、快照、编辑器四颗按钮全压在
+   * 一份虚构种子文档上，人真导入的简历反而一颗都点不动（禁用态的成因）。现在它的来源有三条——
+   * 导入回执、待确认清单里的已导入行、以及示例种子，按"最近一次成功"落定。
+   */
+  const [docId, setDocId] = useState<string>();
+  /** 库里的候选（只到摘要一层：id / 姓名 / 最后改动时刻），供上面那栏「当前简历」摆出来。 */
+  const [docs, setDocs] = useState<ResumeDocSummaryView[]>([]);
+  /** 可摆的模板清单与当前选择（3.2-03：数据源是 `resume.export.templates`，界面不抄第二份清单）。 */
+  const [templates, setTemplates] = useState<ResumeTemplateSummaryView[]>([]);
+  const [templateId, setTemplateId] = useState('classic');
   const [lastImport, setLastImport] = useState<ImportReceiptView>();
   const [importError, setImportError] = useState<AppErrorPayload>();
   const [pending, setPending] = useState<PendingImportRowView[]>([]);
@@ -116,6 +128,31 @@ export function ResumePanel() {
     const reply = await bridge?.resume['parse.pending']();
     if (reply?.ok) setPending(reply.value);
   }, [bridge]);
+
+  /**
+   * 进门先问三句：能摆哪些模板、人上次设定用哪一套（spec 3.2-03 的用户可设定半边）、
+   * 以及**库里已经有哪些简历**（`resume.doc.list`，只过 id / 姓名 / 时间）。
+   *
+   * 第三条是本轮整测补的：`docId` 过去只由「导入回执」和「种子回执」喂，于是**刷新一次页面**
+   * 预览 / 导出 / 进编辑器三颗就集体回到 `NO_CURRENT_DOC`——库里明明躺着刚导入的那份。
+   * 挂载时按「最近改动的那一份」把它接上，人也可以在上面那栏里换。只在挂载时问：清单是库读数，
+   * 面板这一层的动作要么自己写进 `docId`（导入/种子），要么不改它。
+   */
+  useEffect(() => {
+    void (async () => {
+      const [list, pref, docs] = await Promise.all([
+        bridge?.resume['export.templates'](),
+        bridge?.resume['export.preference'](),
+        bridge?.resume['doc.list'](),
+      ]);
+      if (list?.ok) setTemplates(list.value);
+      if (pref?.ok) setTemplateId(pref.value.templateId);
+      if (docs?.ok) {
+        setDocs(docs.value);
+        setDocId((current) => current ?? docs.value[0]?.id);
+      }
+    })();
+  }, [bridge]);
   const { busy, notice, noticeTone, run } = useBridgeAction(read);
 
   /**
@@ -128,6 +165,7 @@ export function ResumePanel() {
       apply: (value) => {
         setLastImport(value);
         setImportError(undefined);
+        setDocId(value.docId);
       },
       onError: setImportError,
       describe: (value) =>
@@ -144,6 +182,41 @@ export function ResumePanel() {
     });
 
   /**
+   * 请系统弹「打开文件」面板，把人选中的那条路径写进导入框（spec 4.1-01 的入口半边）。
+   *
+   * 渲染层在 sandbox 下没有读文件的通道（§8.1），所以这一步只能由主进程代问；
+   * 人取消时不报错也不改框里的内容——取消不是一次失败的动作。
+   */
+  const pickImportFile = () =>
+    void run(
+      t('resume.pickFile'),
+      () =>
+        bridge?.shell.selectFile({
+          title: t('resume.pickerTitle'),
+          filters: [
+            { name: t('resume.pickerFilterResume'), extensions: ['pdf', 'docx', 'md', 'txt'] },
+            { name: t('resume.pickerFilterAll'), extensions: ['*'] },
+          ],
+        }),
+      {
+        apply: (value) => {
+          if (value.filePath !== null) setImportPath(value.filePath);
+        },
+        describe: (value) =>
+          value.filePath === null ? t('resume.pickerCanceled') : t('resume.pickerPicked', { path: value.filePath }),
+      },
+    );
+
+  /**
+   * 把当前选中的模板写成人设定的默认模板（3.2-03：此后不给模板 id 的预览与导出都用它）。
+   * 写入走 `resume.export.setPreference`，未知 id 由主进程拒绝，界面不自己判模板存在性（§2.5）。
+   */
+  const rememberTemplate = () =>
+    void run(t('resume.setTemplate'), () => bridge?.resume['export.setPreference'](templateId), {
+      describe: (value) => t('resume.templateSet', { template: value.templateId }),
+    });
+
+  /**
    * 落一份演示文档（`base` 或 `edited`），成功后立刻按当前语言渲一次预览（种子与预览一次点到位）。
    * @param variant 种子的版本——`edited` 用来在同一 docId 上落第二版内容，好让 3.7-03 的 diff 有得比
    */
@@ -153,7 +226,7 @@ export function ResumePanel() {
       () => bridge?.resume['export.seedDemo'](variant),
       {
         apply: (value) => {
-          setSeed(value);
+          setDocId(value.docId);
           setReceipt(undefined);
         },
         describe: (value) => t('resume.seedReceipt', { docId: value.docId }),
@@ -162,20 +235,20 @@ export function ResumePanel() {
 
   /**
    * 拉取预览 HTML 并塞进 iframe——与导出走的是同一份打印 HTML 源（3.3-01）。
-   * @param docId 已落库的文档 id
+   * @param targetDocId 已落库的文档 id
    */
-  const renderPreview = (docId: string) =>
-    void run(t('resume.preview'), () => bridge?.resume['export.preview'](docId, TEMPLATE_ID, locale), {
+  const renderPreview = (targetDocId: string) =>
+    void run(t('resume.preview'), () => bridge?.resume['export.preview'](targetDocId, templateId, locale), {
       apply: (html) => setPreviewHtml(html),
       describe: () => t('resume.previewDone'),
     });
 
   /**
    * 导出 PDF：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，界面摆回执（3.3-04 / 05 / 09）。
-   * @param docId 已落库的文档 id
+   * @param targetDocId 已落库的文档 id
    */
-  const exportPdf = (docId: string) =>
-    void run(t('resume.export'), () => bridge?.resume['export.toPdf'](docId, TEMPLATE_ID, locale), {
+  const exportPdf = (targetDocId: string) =>
+    void run(t('resume.export'), () => bridge?.resume['export.toPdf'](targetDocId, templateId, locale), {
       apply: (value) => {
         setReceipt(value);
         // 09 稿形态① 1-B：产物是磁盘上的一份 PDF，当前视野里翻不到它，所以除了按钮自带的那格回执，
@@ -197,7 +270,7 @@ export function ResumePanel() {
    * `run` 外壳显示为可读中文提示——spec 3.3-11「注入失败 → 截图错误态，主进程不崩」的界面入口。
    */
   const injectFailure = () =>
-    void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, TEMPLATE_ID, locale), {
+    void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, templateId, locale), {
       onError: (error) =>
         // 失败那一只不许 8 秒就收（09 稿 1-A 写的"失败不自动回落，必须人读过"，与 spec 6.2-02 同一条）：
         // 只能由人再动一次或按 Esc 撤掉。
@@ -211,10 +284,10 @@ export function ResumePanel() {
   /**
    * 读回该文档的快照历史（spec 3.7-01 的列表），并把起点/终点预置成「最旧 ↔ 最新」——
    * 于是界面与 harness 都只需再点一次「比对」就能看到差异落在哪几行（3.7-03）。
-   * @param docId 已落库的文档 id
+   * @param targetDocId 已落库的文档 id
    */
-  const loadSnapshots = (docId: string) =>
-    void run(t('resume.snapshots'), () => bridge?.resume['snapshot.list'](docId), {
+  const loadSnapshots = (targetDocId: string) =>
+    void run(t('resume.snapshots'), () => bridge?.resume['snapshot.list'](targetDocId), {
       apply: (items) => {
         setSnapshots(items);
         setDiff(undefined);
@@ -259,9 +332,11 @@ export function ResumePanel() {
     code === undefined ? undefined : t(`resume.reason.${code}`);
 
   const importReason = importPath.trim() === '' ? 'IMPORT_PATH_EMPTY' : busyReason;
-  const noSeedReason = seed === undefined ? 'NO_SEED_DOC' : busyReason;
-  const editorReason = editorDocId !== undefined ? 'EDITOR_OPEN' : noSeedReason;
+  const noDocReason = docId === undefined ? 'NO_CURRENT_DOC' : busyReason;
+  const editorReason = editorDocId !== undefined ? 'EDITOR_OPEN' : noDocReason;
   const pdfEditReason = pdfEditOpen ? 'PDF_EDIT_OPEN' : busyReason;
+  const templateReason = templates.length === 0 ? 'TEMPLATE_LIST_PENDING' : busyReason;
+  const rememberReason = noDocReason !== undefined && busyReason !== undefined ? busyReason : templateReason;
   const diffReason = fromId === '' || toId === '' ? 'SNAPSHOT_MISSING' : fromId === toId ? 'SNAPSHOT_SAME' : busyReason;
 
   return (
@@ -297,6 +372,19 @@ export function ResumePanel() {
           />
         </label>
         {/* 导入落的是本机库里那份脱敏文档：琥珀那一档（本机写入）。 */}
+        <DeskButton
+          action="pick-file"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
+          onClick={pickImportFile}
+        >
+          <FolderOpen size={12} />
+          {t('resume.pickFile')}
+        </DeskButton>
         <DeskButton
           action="import"
           variant="amber"
@@ -384,6 +472,27 @@ export function ResumePanel() {
         </div>
       )}
 
+      {/* 「当前简历」是一栏而不是一个隐含状态：预览 / 导出 / 编辑器 / 快照四组动作都吃同一个 `docId`，
+          库里多份时没有这一栏，人就只能看到「先导入一份简历」那句已经过时的话。 */}
+      <div className="mt-3 flex items-center gap-2">
+        <DeskSelect
+          action="resume-doc"
+          data-testid="resume-doc"
+          label={t('resume.docLabel')}
+          value={docId ?? ''}
+          onValueChange={setDocId}
+          disabled={docs.length === 0}
+          disabledReason={docs.length === 0 ? 'NO_DOC' : undefined}
+          disabledReasonLabel={docs.length === 0 ? reasonLabel('NO_DOC') : undefined}
+        >
+          {docs.map((doc) => (
+            <option key={doc.id} value={doc.id}>
+              {doc.name ?? doc.id}
+            </option>
+          ))}
+        </DeskSelect>
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {/* 写本机的只有这三只（种子两版 + 导出落 userData），统一琥珀；预览是只读渲染、
             注入失败只是让主进程回一个错误载荷，都不许占外发那一档的朱砂。 */}
@@ -418,10 +527,10 @@ export function ResumePanel() {
           variant="line"
           compact
           busy={!!busy}
-          disabled={noSeedReason !== undefined}
-          disabledReason={noSeedReason}
-          disabledReasonLabel={reasonLabel(noSeedReason)}
-          onClick={() => seed && renderPreview(seed.docId)}
+          disabled={noDocReason !== undefined}
+          disabledReason={noDocReason}
+          disabledReasonLabel={reasonLabel(noDocReason)}
+          onClick={() => docId !== undefined && renderPreview(docId)}
         >
           <Eye size={12} />
           {t('resume.preview')}
@@ -431,10 +540,10 @@ export function ResumePanel() {
           variant="amber"
           compact
           busy={!!busy}
-          disabled={noSeedReason !== undefined}
-          disabledReason={noSeedReason}
-          disabledReasonLabel={reasonLabel(noSeedReason)}
-          onClick={() => seed && exportPdf(seed.docId)}
+          disabled={noDocReason !== undefined}
+          disabledReason={noDocReason}
+          disabledReasonLabel={reasonLabel(noDocReason)}
+          onClick={() => docId !== undefined && exportPdf(docId)}
         >
           <FileDown size={12} />
           {t('resume.export')}
@@ -460,7 +569,7 @@ export function ResumePanel() {
           disabled={editorReason !== undefined}
           disabledReason={editorReason}
           disabledReasonLabel={reasonLabel(editorReason)}
-          onClick={() => seed && setEditorDocId(seed.docId)}
+          onClick={() => docId !== undefined && setEditorDocId(docId)}
         >
           <SlidersHorizontal size={12} />
           {t('resume.editor.enter')}
@@ -478,6 +587,41 @@ export function ResumePanel() {
           <Pencil size={12} />
           {t('pdfEdit.enter')}
         </DeskButton>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1 text-[11px] text-slate-400">
+          {t('resume.templateLabel')}
+          <DeskSelect
+            action="resume-template"
+            data-testid="resume-template"
+            value={templateId}
+            onValueChange={setTemplateId}
+            className="max-w-[260px]"
+          >
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </DeskSelect>
+        </label>
+        <DeskButton
+          action="remember-template"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={rememberReason !== undefined}
+          disabledReason={rememberReason}
+          disabledReasonLabel={reasonLabel(rememberReason)}
+          onClick={rememberTemplate}
+        >
+          <BookmarkPlus size={12} />
+          {t('resume.setTemplate')}
+        </DeskButton>
+        <span className="text-[11px] text-slate-500" data-testid="resume-template-count">
+          {t('resume.templateCount', { count: templates.length })}
+        </span>
       </div>
 
       {notice && (
@@ -520,12 +664,12 @@ export function ResumePanel() {
           variant="line"
           compact
           busy={!!busy}
-          disabled={noSeedReason !== undefined}
-          disabledReason={noSeedReason}
-          disabledReasonLabel={reasonLabel(noSeedReason)}
+          disabled={noDocReason !== undefined}
+          disabledReason={noDocReason}
+          disabledReasonLabel={reasonLabel(noDocReason)}
           onClick={() => {
             setSnapshotsOpen(true);
-            if (seed) loadSnapshots(seed.docId);
+            if (docId !== undefined) loadSnapshots(docId);
           }}
         >
           <History size={12} />

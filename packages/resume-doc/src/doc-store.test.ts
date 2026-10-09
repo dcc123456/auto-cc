@@ -140,3 +140,27 @@ describe('3.1-08 文档 JSON 安全往返', () => {
     expect(loaded.status === 'found' && loaded.document.profile.name).toBe('李四');
   });
 });
+
+describe('文档清单（生成轨的选文档口）', () => {
+  it('空库返回空数组，不抛异常', async () => {
+    const { docs } = await boot();
+    expect(docs.list()).toEqual([]);
+  });
+
+  it('只给 id / 姓名 / 更新时间，按更新先后倒序，且不含正文', async () => {
+    const { docs } = await boot();
+    docs.save(sampleDoc({ id: 'older', profile: { ...sampleDoc().profile, name: '王五' }, updatedAt: 1000 }));
+    docs.save(sampleDoc({ id: 'newer', updatedAt: 2000 }));
+    expect(docs.list()).toEqual([
+      { id: 'newer', name: '张三', updatedAt: 2000 },
+      { id: 'older', name: '王五', updatedAt: 1000 },
+    ]);
+  });
+
+  it('profile.name 缺失时 name 为 null（界面回落到 id 显示）', async () => {
+    const { docs, db } = await boot();
+    docs.save(sampleDoc({ id: 'no-name' }));
+    db.prepare("UPDATE resume_docs SET doc_json = json_remove(doc_json, '$.profile.name') WHERE id = 'no-name'").run();
+    expect(docs.list()).toEqual([{ id: 'no-name', name: null, updatedAt: 1234 }]);
+  });
+});

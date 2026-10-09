@@ -337,6 +337,19 @@ function tableExists(db: DatabaseSync, name: string): boolean {
   return row?.name === name;
 }
 
+/**
+ * 从一次回滚的读数里只留下**本包号段**的那几版，按倒回顺序排列。
+ * `store.rollback` 走的是共享迁移账本，而装配脚手架里挂着 `resume.doc`（它最新的号段 36 比本包的四段都高），
+ * 于是别人那段也会一起出现在 `reverted` 最前面。这两条用例判的是「14 → 13 → 12 的倒序不能反」，
+ * 顺序仍然逐字校验，只是不把外包的版本号写进断言（写死了就等于要求全仓库永远不再有人加迁移）。
+ * @param reverted 回滚结果里的版本号序列
+ * @param within 本包号段的版本号集合
+ * @returns 只含本包号段的子序列，保持原顺序
+ */
+function revertedWithin(reverted: number[], within: number[]): number[] {
+  return reverted.filter((version) => within.includes(version));
+}
+
 /** `kb_chunks` 上是否存在某一列（迁移 13 的 `norm_text` 加减半边）。 */
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as readonly { name: string }[];
@@ -408,11 +421,14 @@ describe('建表与迁移', () => {
 
     const result = store.rollback(KB_PROFILE_MIGRATION_VERSION);
     // 倒序：14（向量表）→ 13（倒排表 + 归一列）→ 12（切片表），顺序反了会撞「表已不在」。
-    expect(result.reverted).toEqual([
-      KB_VECTOR_MIGRATION_VERSION,
-      KB_SEARCH_MIGRATION_VERSION,
-      KB_CHUNKS_MIGRATION_VERSION,
-    ]);
+    expect(
+      revertedWithin(result.reverted, [
+        KB_PROFILE_MIGRATION_VERSION,
+        KB_CHUNKS_MIGRATION_VERSION,
+        KB_SEARCH_MIGRATION_VERSION,
+        KB_VECTOR_MIGRATION_VERSION,
+      ]),
+    ).toEqual([KB_VECTOR_MIGRATION_VERSION, KB_SEARCH_MIGRATION_VERSION, KB_CHUNKS_MIGRATION_VERSION]);
     expect(tableExists(db, 'kb_chunks')).toBe(false);
     expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
     expect(tableExists(db, 'kb_vectors')).toBe(false);
@@ -441,7 +457,10 @@ describe('建表与迁移', () => {
     expect(vectorCount(db)).toBe(before);
 
     const result = store.rollback(KB_CHUNKS_MIGRATION_VERSION);
-    expect(result.reverted).toEqual([KB_VECTOR_MIGRATION_VERSION, KB_SEARCH_MIGRATION_VERSION]);
+    expect(revertedWithin(result.reverted, [KB_SEARCH_MIGRATION_VERSION, KB_VECTOR_MIGRATION_VERSION])).toEqual([
+      KB_VECTOR_MIGRATION_VERSION,
+      KB_SEARCH_MIGRATION_VERSION,
+    ]);
     expect(tableExists(db, 'kb_chunks_fts')).toBe(false);
     expect(tableExists(db, 'kb_vectors')).toBe(false);
     expect(hasColumn(db, 'kb_chunks', 'norm_text')).toBe(false);

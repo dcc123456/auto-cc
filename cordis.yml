@@ -508,14 +508,18 @@ plugins:
   # 只是 `modelStatus` 报 `disabled` 并一路带到界面上——降级必须看得见（与 4.6-06 同一口径）。
   # `modelTemperature` 取 0（不是话术那边的 0.7）：同一份简历 + 同一份 JD 两次生成必须出同一份改写清单，
   # 否则 4.5-10 的复盘分不清"模型改了"与"温度抖了"（理由与 `kb-gap` 那一处完全相同）。
-  # `modelMaxTokens` 2000 比拆解的 1200 宽一档：拆解只回一列短句，这里回的是**整段散文**，
-  # 而 `maxRewriteChars` 600 只管单段上限、不限段数。超限会被读成非法 JSON 而按 `failed` 回落成仅重排，
+  # `modelMaxTokens` 512：这一格原先写 2000，理由（"这里回的是整段散文，比拆解宽一档"）站得住，
+  # 但把这条腿关死了——活体实测（2026-10-09，对话腿绑 `ark-code-latest`）：2000 在 120s 超时顶下一次都不回，
+  # 结局恒为 `reorder_only`（改写 0 处），也就是用户报的"完全无法确认简历能不能自动生成"；
+  # 512 用 118.5s 回了 3 处改写并过了事实校验（256 回 2 处 / 111.5s）。端点的耗时随回复上限一起涨，
+  # 所以取"真拿得到改写行"的那一档，而不是"理论上够写完"的那一档。
+  # 跑飞另有 `maxRewriteChars` 600 管单段上限、不限段数；超限会被读成非法 JSON 而按 `failed` 回落成仅重排，
   # 也就是"最坏情况是这一次没有改写"，不是"这一份简历坏了"。
   # `maxRewriteChars` 600 是模型跑飞时的一句保险（一整段经历成果通常在 200 字以内）。
   - id: kb-generate
     config:
       allowModelLeg: true
-      modelMaxTokens: 2000
+      modelMaxTokens: 512
       modelTemperature: 0
       maxRewriteChars: 600
 

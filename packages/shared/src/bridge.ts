@@ -165,6 +165,10 @@ export const RENDERER_ALLOWLIST = [
   'shell.setKernelViewVisible',
   'shell.setKernelViewBounds',
   'shell.revealInFolder',
+  // 选文件口：渲染层在 sandbox 下读不了文件系统（§8.1），而"让人敲绝对路径"把简历导入与 PDF 打开
+  // 挡在了禁用态外面。这两条只回**人自己选中的那条路径**，主进程不代读内容、不返回目录。
+  'shell.selectFile',
+  'shell.selectSaveFile',
   'shell.probeMainCrash',
   'shell.probeRedact',
   'kernel.tree',
@@ -331,8 +335,16 @@ export const RENDERER_ALLOWLIST = [
   // 3.3 生成轨导出面：预览/导出只认 docId + 模板 + 语言，文档正文不过进程边界（编辑轨 3.5 才引入 resume.doc.* 写入面）。
   // seedDemo 是 3.5 之前给端到端自测喂一份固定内容文档的口（spec 3.3-10）。
   'resume.export.seedDemo',
+  // 模板选择面（3.2-03 的用户可设定半边）：过的只有 id 与展示名，正文依旧不过界。
+  'resume.export.templates',
+  'resume.export.preference',
+  'resume.export.setPreference',
   'resume.export.preview',
   'resume.export.toPdf',
+  // 「要定制哪一份」这一栏的候选（4.5-b 的 `resume.generate.run` 缺的那条腿：库里多于一份时它要求 `docId`，
+  // 而界面此前没有任何一条能列出文档的通道，于是自动生成在多份库里直接判死）。
+  // 过的只有 id / 姓名 / 时刻三样摘要：正文的唯一读取通道仍是带 Schema 复验的 `load()`，它不在允许清单里。
+  'resume.doc.list',
   // 3.6 排版编辑器的会话面（plan §8.3）：九行全是**人**在编辑器面板里的动作（打开、拖、推滑杆、换模板、
   // 撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
   // 与 §3 第 1 条的事实锁定同一条线（口径照 5.10-e 那四条写口与 `pdf.*` 那两行）。
@@ -1078,6 +1090,40 @@ export type DevtoolsStatusView = {
   targetCount: number;
   targets: DevtoolsTargetView[];
 };
+
+/** 一套模板在界面上的摘要（镜像 `resume.export.templates` 的返回：只过 id 与展示名）。 */
+export interface ResumeTemplateSummaryView {
+  id: string;
+  name: string;
+}
+
+/**
+ * 一份简历的摘要（镜像 `resume-doc` 的 `ResumeDocSummary`）：够界面问出「定制哪一份」，不含正文。
+ * `name` 为 null 时界面回退到 id 显示——宁可露出 id，也不给一个空白选项。
+ */
+export interface ResumeDocSummaryView {
+  id: string;
+  name: string | null;
+  /** 最后改动时刻（毫秒）。 */
+  updatedAt: number;
+}
+
+/** 一组文件筛选器（显示名由渲染层翻好，扩展名不含点）。 */
+export interface FileFilterView {
+  name: string;
+  extensions: string[];
+}
+
+/** 「打开文件」面板的参数（镜像 shell 的 `FilePickerRequest`）。 */
+export interface FilePickerRequestView {
+  title: string;
+  filters: FileFilterView[];
+}
+
+/** 「另存为」面板的参数（镜像 shell 的 `SaveFilePickerRequest`）。 */
+export interface SaveFilePickerRequestView extends FilePickerRequestView {
+  defaultFileName: string;
+}
 
 /**
  * 简历语言档（镜像 resume-doc 的 `TemplateLocale`）。
@@ -1957,6 +2003,10 @@ export interface BridgeSignatures {
    * 因为 Electron 44 的 `showItemInFolder` 返回 `void`，成功与否拿不到库的读数。
    */
   'shell.revealInFolder': { args: [filePath: string]; returns: { revealed: true } };
+  /** 打开面板选人手里的一份文件（标题与筛选器由渲染层按当前语言给，主进程不写界面文案）。 */
+  'shell.selectFile': { args: [request: FilePickerRequestView]; returns: { filePath: string | null } };
+  /** 另存为面板：同上，多一个建议文件名（不许带路径分隔符，判定在主进程）。 */
+  'shell.selectSaveFile': { args: [request: SaveFilePickerRequestView]; returns: { filePath: string | null } };
   'shell.probeMainCrash': { args: []; returns: never };
   /** 仅开发态：写一条含敏感字段的日志，回读走 `log.tail` 与事件推送。 */
   'shell.probeRedact': { args: []; returns: { written: true } };
@@ -2369,13 +2419,22 @@ export interface BridgeSignatures {
    * 渲染预览 HTML（spec 3.3-01「预览即导出所见」）：返回与 `toPdf` **同一份**打印 HTML 字符串，
    * 界面塞进 iframe 即可所见即所得。文档内容不过进程边界，只传 docId + 模板 + 语言。
    */
-  'resume.export.preview': { args: [docId: string, templateId: string, locale?: ResumeLocaleView]; returns: string };
+  'resume.export.preview': { args: [docId: string, templateId?: string, locale?: ResumeLocaleView]; returns: string };
+  /** 可摆的模板清单（spec 3.2-03 的 SPI 在界面上的那一栏；只过 id 与展示名，正文依旧不过界）。 */
+  'resume.export.templates': { args: []; returns: ResumeTemplateSummaryView[] };
+  /** 读人设定的默认模板（不给 templateId 时 preview/toPdf 就用它，spec 3.2-03 的用户可设定半边）。 */
+  'resume.export.preference': { args: []; returns: { templateId: string } };
+  /** 写人设定的默认模板；未知 id 结构化失败，不静默收下。 */
+  'resume.export.setPreference': { args: [templateId: string]; returns: { templateId: string } };
+  /** 列出库里每份简历的摘要，供「定制哪一份」那一栏选候选（只读，正文不过界）。 */
+  'resume.doc.list': { args: []; returns: ResumeDocSummaryView[] };
   /**
    * 导出 PDF（spec 3.3-04 / 05 / 09）：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，
    * 界面拿到的是产物回执（路径 / 页数 / 字节 / hash）或结构化失败。
+   * `templateId` 不给时用人设定的默认模板（`resume.export.preference`）。
    */
   'resume.export.toPdf': {
-    args: [docId: string, templateId: string, locale?: ResumeLocaleView];
+    args: [docId: string, templateId?: string, locale?: ResumeLocaleView];
     returns: ExportReceiptView;
   };
   /**

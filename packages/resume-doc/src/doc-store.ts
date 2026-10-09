@@ -40,6 +40,35 @@ const resumeDocMigration = {
   },
 };
 
+/**
+ * 迁移号段：**36**。
+ * 号段台账（AGENTS.md §9 的 5.3-a 那条）：29 之前是各包自有号段，31/32 是提供商池，
+ * 33 是 `conversation_target`，35 是投递记录的 `conversation_target`，30 预留给草稿表但未启用；
+ * **34 在本工作树读不到但不能当成空号**（并行会话随时可能落地）。所以这张表取 36，不回填 34。
+ *
+ * 为什么"用哪套模板"必须落库而不能做配置键（AGENTS.md §9 的 5.3-b）：配置层只写内存运行期，
+ * 重启即失；而模板选择是人对"我以后生成的简历长什么样"的表态，跨重启仍然算数才是它的全部意义。
+ */
+export const RESUME_PREFERENCE_MIGRATION_VERSION = 36;
+
+/** 一张键值表：目前只有 `defaultTemplateId` 一支键，后续界面偏好同表追加，不再另立存储（§2.7）。 */
+const resumePreferenceMigration = {
+  version: RESUME_PREFERENCE_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS resume_preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`);
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP TABLE IF EXISTS resume_preferences');
+  },
+};
+
+/** 可写的界面偏好键（新增一支键要在这里登记，避免出现第二种取法）。 */
+export type ResumePreferenceKey = 'defaultTemplateId';
+
 /** 无配置服务（文档存储不需要运行期配置，配置留空 schema 以走 cordis 的构造器第二参约定）。 */
 export const resumeDocSchema = z.strictObject({});
 export type ResumeDocConfig = z.infer<typeof resumeDocSchema>;
@@ -61,6 +90,15 @@ export interface SaveResult {
 /** load 的返回三态：命中 / 不存在 / 命中但内容已损坏（JSON 或 Schema 校验没过）。 */
 export type LoadResult =
   { status: 'found'; document: ResumeDocument } | { status: 'missing' } | { status: 'corrupt'; reason: string };
+
+/** 一份简历的摘要（够界面摆出「定制哪一份」那一栏，不含正文）。 */
+export interface ResumeDocSummary {
+  id: string;
+  /** 文档里的姓名；老库里存坏了或没填姓名时为 null，界面回退到 id。 */
+  name: string | null;
+  /** 最后改动时刻（毫秒），列表按它倒序排。 */
+  updatedAt: number;
+}
 
 /**
  * 简历文档存储服务。
@@ -87,6 +125,9 @@ export class ResumeDocService extends Service {
     const { migrations } = this.store;
     if (!migrations.some((item) => item.version === RESUME_DOC_MIGRATION_VERSION)) {
       migrations.push(resumeDocMigration);
+    }
+    if (!migrations.some((item) => item.version === RESUME_PREFERENCE_MIGRATION_VERSION)) {
+      migrations.push(resumePreferenceMigration);
     }
     this.store.upgrade();
   }
@@ -121,6 +162,34 @@ export class ResumeDocService extends Service {
       )
       .run(normalized.id, normalized.schemaVersion, hash, JSON.stringify(normalized), normalized.updatedAt);
     return { hash };
+  };
+
+  /**
+   * 读一支界面偏好的当前值。
+   * @param key 偏好键（目前只有 `defaultTemplateId`）
+   * @returns 存过的值；从没存过时返回 null（调用方决定缺省值，库里不塞假默认）
+   */
+  getPreference = (key: ResumePreferenceKey): string | null => {
+    const row = this.db.prepare('SELECT value FROM resume_preferences WHERE key = ?').get(key) as
+      { value: string | null } | undefined;
+    return row?.value ?? null;
+  };
+
+  /**
+   * 写一支界面偏好（存在即覆盖）。
+   * @param key 偏好键
+   * @param value 值（非空串；空串在这里没有语义，直接拒）
+   * @param nowMs 落库时刻（毫秒），由调用方给，避免同一份文档的 updated_at 与偏好时刻各取一次时钟
+   * @throws AppError(`INVALID_ARGUMENT`) 值为空串
+   */
+  setPreference = (key: ResumePreferenceKey, value: string, nowMs: number): void => {
+    if (value === '') throw new AppError('INVALID_ARGUMENT', `偏好「${key}」的值不能是空串`);
+    this.db
+      .prepare(
+        `INSERT INTO resume_preferences (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .run(key, value, nowMs);
   };
 
   /**
@@ -171,6 +240,24 @@ export class ResumeDocService extends Service {
       .prepare('SELECT id FROM resume_docs WHERE doc_json IS NOT NULL ORDER BY id')
       .all() as unknown as readonly { id: string }[];
     return rows.map((row) => row.id);
+  };
+
+  /**
+   * 列出库里每一份有正文的简历的**摘要**（id / 姓名 / 最后改动时刻），按最近改动排前面。
+   *
+   * 为什么只回摘要不回正文：界面要的是「定制哪一份」这一栏的候选，而不是原文——原文的唯一读取通道
+   * 仍是带 Schema 复验的 `load()`（plan §1.4 裁定一），这里开第二条正文出口就等于绕过它。
+   * 姓名用 `json_extract` 在 SQL 里取，因此不必把每份 `doc_json` 反序列化一遍。
+   * @returns 摘要列表；空库返回空数组，不抛错
+   */
+  list = (): ResumeDocSummary[] => {
+    const rows = this.db
+      .prepare(
+        `SELECT id, updated_at AS updatedAt, json_extract(doc_json, '$.profile.name') AS name
+         FROM resume_docs WHERE doc_json IS NOT NULL ORDER BY updated_at DESC, id`,
+      )
+      .all() as unknown as readonly { id: string; updatedAt: number | bigint; name: string | null }[];
+    return rows.map((row) => ({ id: row.id, name: row.name, updatedAt: Number(row.updatedAt) }));
   };
 
   [Service.init](): void {
