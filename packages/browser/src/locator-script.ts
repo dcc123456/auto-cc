@@ -666,6 +666,120 @@ export function toClickReceiptReading(raw: unknown): { available: boolean; recei
   };
 }
 
+/** 一次「把目标滚进本帧视口」的页面读数（spec 8.4-05）。 */
+export type RevealReading = {
+  /** 胜出节点还在这一帧里；为 false 时 `rect` 不可信，调用方按定位时那份读数继续走 */
+  found: boolean;
+  /** 是否真的动了页面：本来就在视口里时**不动**，免得每点一下就把人看着的画面推一次 */
+  moved: boolean;
+  /** 复读到的矩形中心是否落在本帧视口里——CDP 的鼠标坐标只有在这个前提下才点得到东西 */
+  inside: boolean;
+  /** 滚完并复读之后的帧内矩形（CSS 像素） */
+  rect: ElementRect;
+  /** 本帧视口宽（CSS 像素）；越界时界面要说「差多少」靠它 */
+  viewportWidth: number;
+  /** 本帧视口高（CSS 像素） */
+  viewportHeight: number;
+  /** 为什么没能进画面（`found` 为 true 且 `inside` 为 false 时才有内容） */
+  error: string;
+};
+
+/**
+ * 生成「把定位胜出的那一个节点滚进本帧视口，并**复读**一次矩形」的脚本源码（spec 8.4-05）。
+ *
+ * 为什么需要这一步：CDP 的鼠标事件是按**坐标**命中测试的，坐标在本帧视口之外就没有可命中的像素，
+ * 而派发那侧对此毫无察觉——实测真 BOSS 的会话页把整块版面撑到 `scrollWidth` 1224，
+ * 视图只有 863 宽时发送键长在裁掉的那 361px 里，`act.click` 照样回 `done`（证据 8.4-05 第一节）。
+ *
+ * 找回节点用的是与 `buildClickArmScript` 同一套 `candidateIndex + nodeIndex`，所以「读到的那一格」
+ * 与「滚进画面的那一格」在类型上就是同一个节点。矩形必须**复读**：平滑滚动容器里
+ * `scrollIntoView` 是一段动画，同一帧读回来还是旧位置（AGENTS.md §9 的 5.10-13 ⑪）。
+ * @param candidates 定位时的候选数组（找回节点要用，与 `locate.find` 那一次同一份）
+ * @param chosen 胜出候选的 `candidateIndex` 与 `nodeIndex`
+ * @param settleMs 复读的上限（毫秒）：到点就把当前读数交出去，不无限等
+ * @param stepMs 复读的步长（毫秒）
+ * @param limits 取回上限
+ * @returns 单个表达式源码，求值得到 `Promise<RevealReading 的页面形状>`（调用方必须按 Promise 求值）
+ */
+export function buildRevealScript(
+  candidates: unknown[],
+  chosen: { candidateIndex: number; nodeIndex: number },
+  settleMs: number,
+  stepMs: number,
+  limits: ScriptLimits = DEFAULT_SCRIPT_LIMITS,
+): string {
+  return `(() => {
+${buildPrelude(limits)}
+    const revealKind = 'reveal';
+    const settleMs = ${JSON.stringify(settleMs)};
+    const stepMs = ${JSON.stringify(stepMs)};
+    const viewportWidth = finite(globalThis.innerWidth);
+    const viewportHeight = finite(globalThis.innerHeight);
+    const insideOf = (box) => {
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      return cx >= 0 && cx <= viewportWidth && cy >= 0 && cy <= viewportHeight;
+    };
+    const answer = (found, moved, inside, rect, why) => ({
+      found: found, moved: moved, inside: inside, rect: rect,
+      viewportWidth: viewportWidth, viewportHeight: viewportHeight, error: flatten(why),
+    });
+    const node = findNode(${JSON.stringify(candidates)}, ${JSON.stringify(chosen)});
+    if (!node) {
+      return Promise.resolve(answer(false, false, false, { x: 0, y: 0, width: 0, height: 0 }, '胜出节点已不在这一帧里'));
+    }
+    const before = rectOf(node);
+    if (insideOf(before)) return Promise.resolve(answer(true, false, true, before, ''));
+    if (typeof node.scrollIntoView !== 'function') {
+      return Promise.resolve(answer(true, false, false, before, '这一帧里的节点没有 scrollIntoView'));
+    }
+    node.scrollIntoView({ block: 'center', inline: 'center' });
+    return new Promise((resolve) => {
+      let last = rectOf(node);
+      let stable = 0;
+      let waited = 0;
+      const tick = () => {
+        const next = rectOf(node);
+        if (next.x === last.x && next.y === last.y && next.width === last.width && next.height === last.height) {
+          stable += 1;
+        } else {
+          stable = 0;
+          last = next;
+        }
+        if (insideOf(last)) return resolve(answer(true, true, true, last, ''));
+        if (stable >= 2) return resolve(answer(true, true, false, last, '滚动已经停了，但目标仍在视口外'));
+        if (waited >= settleMs) return resolve(answer(true, true, false, last, '等滚动落定到了上限，目标位置还没稳'));
+        waited += stepMs;
+        setTimeout(tick, stepMs);
+      };
+      setTimeout(tick, stepMs);
+    });
+  })()`;
+}
+
+/**
+ * 钳制滚进画面脚本的原始求值结果。
+ *
+ * `undefined`（替身帧没供这一类脚本、或那一帧拒绝了脚本）归为 `found: false`——
+ * 这**不是**「目标在视口外」，调用方据此保留定位时的读数，不能拿零矩形去算派发点。
+ * @param raw 页面回来的未知值
+ * @returns 判定用的读数
+ */
+export function toRevealReading(raw: unknown): RevealReading {
+  const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const box = (record.rect && typeof record.rect === 'object' ? record.rect : {}) as Record<string, unknown>;
+  const number = (value: unknown): number => (typeof value === 'number' && isFinite(value) ? value : 0);
+  return {
+    found: record.found === true,
+    moved: record.moved === true,
+    inside: record.inside === true,
+    rect: { x: number(box.x), y: number(box.y), width: number(box.width), height: number(box.height) },
+    viewportWidth: number(record.viewportWidth),
+    viewportHeight: number(record.viewportHeight),
+    error: typeof record.error === 'string' ? record.error : '',
+  };
+}
+
 /** 注入探针挂在隔离世界 `globalThis` 上的键（取节点与回读两段脚本共用，必须只有一个名字）。 */
 export const UPLOAD_PROBE_KEY = '__autoCcUploadProbe';
 

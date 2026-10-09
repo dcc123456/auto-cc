@@ -49,7 +49,15 @@ export type WritableFrame = {
  * 所以替身必须按源码认出手里拿的是哪一种。
  */
 export type ScriptKind =
-  'locate' | 'fingerprint' | 'wait' | 'domAction' | 'valueRead' | 'iframeRects' | 'clickArm' | 'clickReceipt';
+  | 'locate'
+  | 'fingerprint'
+  | 'wait'
+  | 'domAction'
+  | 'valueRead'
+  | 'iframeRects'
+  | 'clickArm'
+  | 'clickReceipt'
+  | 'reveal';
 
 /**
  * 从注入脚本源码认出它是哪一类。
@@ -61,6 +69,7 @@ export type ScriptKind =
  */
 export function scriptKindOf(source: string): ScriptKind {
   if (source.includes("'fingerprint'")) return 'fingerprint';
+  if (source.includes("const revealKind = 'reveal'")) return 'reveal';
   if (source.includes('const kind =')) return 'wait';
   if (source.includes('const action =')) return 'domAction';
   if (source.includes("const receiptKind = 'arm'")) return 'clickArm';

@@ -39,6 +39,8 @@ const DEFAULT_ACT_CONFIG: BrowserActConfig = {
   uploadReadbackStepMs: 50,
   clickReadbackMs: 600,
   clickReadbackStepMs: 50,
+  revealSettleMs: 600,
+  revealStepMs: 50,
 };
 
 const fibers: Fiber[] = [];
@@ -123,6 +125,64 @@ const readyScripts = {
 
 afterAll(async () => {
   for (const fiber of fibers) await fiber.dispose();
+});
+
+describe('滚进视口再派发（spec 8.4-05）', () => {
+  /**
+   * 一条「滚了也滚不进来」的页面读数：真站把版面撑到 `scrollWidth` 1224 而内嵌视图只有 863 宽时，
+   * 发送键就长在被裁掉的那 361px 里（证据 8.4-05 第一节的实测形状）。
+   */
+  const outsideReading = {
+    found: true,
+    moved: true,
+    inside: false,
+    rect: { x: 1112, y: 300, width: 60, height: 30 },
+    viewportWidth: 863,
+    viewportHeight: 654,
+    error: '滚动已经停了，但目标仍在视口外',
+  };
+
+  it('滚不进画面就停下：以 ACT_OUT_OF_VIEWPORT 失败，一条鼠标命令都不发', async () => {
+    const view = labView({ ...readyScripts, reveal: outsideReading });
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched();
+    const error = await act.click(spec).catch((cause: unknown) => cause as AppError);
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe('ACT_OUT_OF_VIEWPORT');
+    expect(errorDetails(error)).toMatchObject({ viewportWidth: 863, moved: true });
+    expect(view.log.commands).toEqual([]);
+  });
+
+  it('派发点用的是复读后的矩形中心，界面读数也跟着换成那一份', async () => {
+    const view = labView({
+      ...readyScripts,
+      reveal: {
+        ...outsideReading,
+        inside: true,
+        moved: true,
+        rect: { x: 400, y: 300, width: 60, height: 30 },
+        error: '',
+      },
+    });
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched();
+    const result = await act.click(spec);
+    // 定位那一次看到的是 {10,20,100,40}（中心 60,40），滚动后页面把它推到了 {400,300,60,30}：
+    // 派发与报告都必须跟着走，否则点的是旧坐标、界面报的是旧几何。
+    expect(view.log.commands[1]!.params).toMatchObject({ x: 430, y: 315 });
+    expect(result.located).toMatchObject({ rect: { x: 400, y: 300, width: 60, height: 30 } });
+  });
+
+  it('那一帧没答上来时不把「读不到」当成「在视口外」：照定位时的矩形派发', async () => {
+    // 不给 `reveal` 这一类脚本，替身就回 undefined——站点自造的浮层帧拒绝脚本是常态，
+    // 那种情况下把每一发动作都拒掉是新造的假阴性，而不是诚实。
+    const view = labView(readyScripts);
+    const { act, locate } = await boot({}, view.contents);
+    locate.result = matched();
+    const result = await act.click(spec);
+    expect(result).toMatchObject({ channel: 'cdp', trusted: true });
+    expect(view.log.commands[1]!.params).toMatchObject({ x: 60, y: 40 });
+  });
 });
 
 describe('动作骨架的顺序与通道（spec 2.2-03 / 2.2-12）', () => {

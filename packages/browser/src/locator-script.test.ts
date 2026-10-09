@@ -8,6 +8,7 @@ import {
   buildIframeRectsScript,
   buildLocateScript,
   buildNodeHandleScript,
+  buildRevealScript,
   buildUploadReadbackFunction,
   buildValueReadScript,
   buildWaitScript,
@@ -15,6 +16,7 @@ import {
   toIframeRects,
   toLocatedReading,
   toLocatedReadings,
+  toRevealReading,
   toUploadReading,
   toWaitReading,
   type ScriptLimits,
@@ -34,6 +36,12 @@ type FakeNode = {
   box: ElementRect;
   clickCalls: number;
   dispatched: string[];
+  /**
+   * 页面侧「滚进画面」的那只手（spec 8.4-05）：注入脚本只在越界时才调它，
+   * 所以测试既能数它被调了几次，也能由它改写 `box` 来演「滚完之后矩形变了」这件事。
+   * 不给这个字段就是"这一帧的节点没有 scrollIntoView"那一条出口。
+   */
+  scrollIntoView?: (options: { block: string; inline: string }) => void;
   /** 按事件类型记下的监听器；`dispatchEvent` 会真的回调它们，注入探针那条断言才不是自说自话。 */
   listeners: Record<string, ((event: { type: string; isTrusted?: boolean }) => void)[]>;
   /** `input[type=file]` 的文件列表（只读的那个数，脚本伪造不了，测试里手工放进）。 */
@@ -743,6 +751,100 @@ describe('文件注入脚本（spec 2.6-04 / plan §13.3 第 4 条）', () => {
   });
 });
 
+describe('滚进视口脚本（spec 8.4-05）', () => {
+  /**
+   * 真 BOSS 会话页在开发实例最宽档上的实测视口（证据 8.4-05 第一节：站点把版面撑到
+   * `scrollWidth` 1224，而内嵌视图只有 863 宽，于是发送键长在裁掉的那 361px 里）。
+   * 它同时是脚本里 `globalThis.innerWidth/innerHeight` 的来源——那个对象就是页面的 world。
+   */
+  const VIEWPORT_WORLD = { innerWidth: 863, innerHeight: 654 };
+
+  /**
+   * 造一个「越界的发送键」并把它滚到指定落点。
+   * @param box 定位时看到的矩形（帧内 CSS 像素）
+   * @param landed 滚完之后的矩形；null 表示"这一帧滚到底也到不了"
+   * @returns 节点替身与 `scrollIntoView` 的调用参数记录
+   */
+  function sendButton(box: ElementRect, landed: ElementRect | null) {
+    const calls: string[] = [];
+    const node = fakeNode('button', { attrs: { id: 'send-1', class: 'btn-send' }, ownText: '发送', box });
+    node.scrollIntoView = (options) => {
+      calls.push(`${options.block}/${options.inline}`);
+      if (landed) node.box = landed;
+    };
+    return { node, calls };
+  }
+
+  /**
+   * 先定位（发身份号），再对同一格跑滚进画面脚本——与真实调用顺序一致。
+   * @param node 目标节点（它的 `box` 就是定位时看到的那一份矩形）
+   * @returns 脚本读数与定位时的那格身份
+   */
+  async function revealSendButton(node: FakeNode) {
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'send-1' }];
+    const page = fakePage(fakeNode('body', { kids: [node], box: { x: 0, y: 0, width: 1224, height: 654 } }));
+    const world: Record<string, unknown> = { ...VIEWPORT_WORLD };
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page, world)[0]!;
+    const reading = toRevealReading(
+      await run(
+        buildRevealScript(candidates, { candidateIndex: chosen.candidateIndex, nodeIndex: chosen.nodeIndex }, 100, 10),
+        page,
+        world,
+      ),
+    );
+    return { reading, chosen };
+  }
+
+  it('本来就在视口里时一次都不动页面——不能每点一下就把人看着的画面推一次', async () => {
+    const { node, calls } = sendButton({ x: 100, y: 300, width: 60, height: 30 }, null);
+    const { reading } = await revealSendButton(node);
+    expect(calls).toEqual([]);
+    expect(reading).toMatchObject({ found: true, moved: false, inside: true, error: '' });
+    expect([reading.viewportWidth, reading.viewportHeight]).toEqual([863, 654]);
+    expect(reading.rect).toEqual({ x: 100, y: 300, width: 60, height: 30 });
+  });
+
+  it('越界时交回的是滚完之后**复读**的那份矩形，不是定位时那一份', async () => {
+    // 平滑滚动容器里 scrollIntoView 是一段动画：同一帧读回来还是旧位置（AGENTS.md §9 的 5.10-13 ⑪），
+    // 所以这条断言盯的是「派发点用的坐标」——1112 与 400 差着整整一个裁切量，用错了就是点到画面外。
+    const { node, calls } = sendButton(
+      { x: 1112, y: 300, width: 60, height: 30 },
+      { x: 400, y: 300, width: 60, height: 30 },
+    );
+    const { reading } = await revealSendButton(node);
+    expect(calls).toEqual(['center/center']);
+    expect(reading).toMatchObject({ found: true, moved: true, inside: true, error: '' });
+    expect(reading.rect).toEqual({ x: 400, y: 300, width: 60, height: 30 });
+  });
+
+  it('滚到极限仍在视口外时 inside 为 false 并说清原因，同时把视口尺寸交回去', async () => {
+    const landed = { x: 900, y: 300, width: 60, height: 30 };
+    const { node, calls } = sendButton({ x: 1112, y: 300, width: 60, height: 30 }, landed);
+    const { reading } = await revealSendButton(node);
+    expect(calls).toEqual(['center/center']);
+    expect(reading).toMatchObject({ found: true, moved: true, inside: false, rect: landed, viewportWidth: 863 });
+    expect(reading.error).toContain('视口外');
+  });
+
+  it('节点在这一帧里没了就如实报 found:false，调用方据此保留定位时的读数', async () => {
+    const { node } = sendButton({ x: 1112, y: 300, width: 60, height: 30 }, null);
+    const candidates: LocateCandidate[] = [{ strategy: 'id', value: 'send-1' }];
+    const root = fakeNode('body', { kids: [node], box: { x: 0, y: 0, width: 1224, height: 654 } });
+    const page = fakePage(root);
+    const world: Record<string, unknown> = { ...VIEWPORT_WORLD };
+    const chosen = scan(candidates, DEFAULT_SCRIPT_LIMITS, page, world)[0]!;
+    root.kids.length = 0;
+    const reading = toRevealReading(
+      await run(
+        buildRevealScript(candidates, { candidateIndex: chosen.candidateIndex, nodeIndex: chosen.nodeIndex }, 100, 10),
+        page,
+        world,
+      ),
+    );
+    expect(reading).toMatchObject({ found: false, moved: false, inside: false });
+  });
+});
+
 describe('页面读数钳制（外部页面是不可信输入）', () => {
   it('非数组的返回值钳成空表，null 与非对象项被剔除', () => {
     expect(toLocatedReadings(null)).toEqual([]);
@@ -772,5 +874,20 @@ describe('页面读数钳制（外部页面是不可信输入）', () => {
       valueAfter: '',
       error: '',
     });
+  });
+
+  it('滚进画面的读数：页面答不上来就是 found:false，脏数字与脏矩形钳成 0', () => {
+    expect(toRevealReading(null)).toEqual({
+      found: false,
+      moved: false,
+      inside: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      viewportWidth: 0,
+      viewportHeight: 0,
+      error: '',
+    });
+    expect(
+      toRevealReading({ found: true, inside: true, rect: { x: '1112', y: Number.NaN, width: 60, height: 30 } }).rect,
+    ).toEqual({ x: 0, y: 0, width: 60, height: 30 });
   });
 });

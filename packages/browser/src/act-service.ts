@@ -41,12 +41,15 @@ import {
   buildClickReceiptReadScript,
   buildDomActionScript,
   buildNodeHandleScript,
+  buildRevealScript,
   buildUploadReadbackFunction,
   buildValueReadScript,
   buildWaitScript,
   toClickReceiptReading,
   toDomActionReading,
+  toRevealReading,
   toWaitReading,
+  type RevealReading,
 } from './locator-script.js';
 import { locateSpecSchema } from './platform-contract.js';
 import { assertSpecValid } from './locator-spec.js';
@@ -70,6 +73,10 @@ export const browserActSchema = z.strictObject({
   clickReadbackMs: z.number().int().min(100).max(30_000).default(600),
   /** 点击回执的轮询步长（毫秒）。与 `uploadReadbackStepMs` 同形：事件派发是异步的，只能轮。 */
   clickReadbackStepMs: z.number().int().min(10).max(2_000).default(50),
+  /** 滚进画面之后，等多久让矩形停止变化（毫秒）。平滑滚动容器里这一段是动画，只能有界地轮（spec 8.4-05）。 */
+  revealSettleMs: z.number().int().min(100).max(5_000).default(600),
+  /** 复读矩形的步长（毫秒）。 */
+  revealStepMs: z.number().int().min(10).max(500).default(50),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -280,7 +287,10 @@ export class BrowserActService extends Service {
   };
 
   /**
-   * 动作的公共骨架：等待 → 定位 → 折算坐标 → 下发 → 回读。
+   * 动作的公共骨架：等待 → 定位 → 滚进画面 → 折算坐标 → 下发 → 回读。
+   *
+   * 「滚进画面」排在折算坐标之前，因为坐标是派发那一条通道唯一的语言：目标在本帧视口之外时
+   * 那个坐标上没有可命中的像素，而 CDP 不会为此报任何错（spec 8.4-05）。
    * @param action 动作类型
    * @param spec 定位声明
    * @param payload 输入文本或选项值（点击为 undefined）
@@ -311,12 +321,37 @@ export class BrowserActService extends Service {
         snapshot: result.snapshot,
       });
     }
-    const point = await this.viewportPoint(contents, chosen);
+    const reveal = await this.revealIntoView(spec, chosen);
+    // 越界就停下：CDP 在视口外的坐标上派发，页面里没有可命中的像素，而**命令本身照样回成功**
+    // （实测证据 8.4-05 第一节：真站把版面撑到 1224 宽、视图只有 863 时发送键在裁掉的那一段里）。
+    // 这种时候退到 DOM 通道也不对——那会把「不受信」的一次点击说成一次动作，而人的画面里根本没发生什么。
+    if (reveal.found && !reveal.inside) {
+      throw new AppError(
+        'ACT_OUT_OF_VIEWPORT',
+        `滚进画面之后「${spec.description}」仍然在视口外（帧内矩形 ${String(reveal.rect.x)},${String(
+          reveal.rect.y,
+        )} / ${String(reveal.rect.width)}×${String(reveal.rect.height)}，视口 ${String(
+          reveal.viewportWidth,
+        )}×${String(reveal.viewportHeight)}）：${reveal.error}。这一格一个动作都没派发`,
+        'browser.act',
+        {
+          spec,
+          rect: reveal.rect,
+          viewportWidth: reveal.viewportWidth,
+          viewportHeight: reveal.viewportHeight,
+          moved: reveal.moved,
+        },
+      );
+    }
+    // 用复读到的矩形算派发点，也把它交回界面：滚动是真实发生过的几何变化，
+    // 报告里留着滚动前那份读数就等于撒了一个"界面报的是刚才那一格"的谎。
+    const aimed: LocatedView = reveal.found ? { ...chosen, rect: reveal.rect } : chosen;
+    const point = await this.viewportPoint(contents, aimed);
     // 回执必须挂在派发**之前**：事后装的监听看不见已经发生的事件（裁定⑰ / plan §16.1）。
-    const armed = action === 'click' ? await this.armClickReceipt(spec, chosen) : null;
-    const outcome = await this.dispatch(action, spec, chosen, payload, point, contents);
+    const armed = action === 'click' ? await this.armClickReceipt(spec, aimed) : null;
+    const outcome = await this.dispatch(action, spec, aimed, payload, point, contents);
     let status: ActResultView['status'] = 'done';
-    if (armed && !(await this.clickConfirmed(armed.url, chosen))) {
+    if (armed && !(await this.clickConfirmed(armed.url, aimed))) {
       status = 'timeout';
       this.ctx.logger.warn(
         `点击「${spec.description}」派发完但页面没有回执（事件被丢弃或落到了别处），本次动作按超时报告而不是已完成`,
@@ -328,10 +363,49 @@ export class BrowserActService extends Service {
       waitedMs: Date.now() - startedAt,
       channel: outcome.channel,
       trusted: outcome.trusted,
-      located: chosen,
+      located: aimed,
       valueAfter: outcome.valueAfter,
       predicate: null,
     };
+  }
+
+  /**
+   * 把要点的那一格滚进**它自己那一帧**的视口，并复读一次矩形（spec 8.4-05）。
+   *
+   * 三条出口各有各的处置，所以不合成一个布尔：`found:false` 是「这一帧里已经没有它了」——
+   * 滚动帮不上忙，但派发那侧的 DOM 兜底会自己按身份号再找一次，所以这里只保留定位时的读数继续走；
+   * `inside:true` 是本来的目的；`inside:false` 才是"滚了也滚不进来"，调用方必须停下。
+   * 帧拒绝脚本（站点自造的浮层帧常这样）也归 `found:false`：不能把"读不到"当成"在视口外"，
+   * 那会让每一发动作在那些帧里都被拒。
+   * @param spec 动作声明（找回节点要用它那份候选）
+   * @param chosen 胜出候选（帧地址 + 帧内身份号）
+   * @returns 钳制过的页面读数
+   */
+  private async revealIntoView(spec: LocateSpec, chosen: LocatedView): Promise<RevealReading> {
+    const zero: RevealReading = {
+      found: false,
+      moved: false,
+      inside: false,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      viewportWidth: 0,
+      viewportHeight: 0,
+      error: '',
+    };
+    try {
+      const raw = await this.frameOf(chosen).executeJavaScript(
+        buildRevealScript(
+          spec.candidates,
+          identityOf(chosen),
+          this.config.revealSettleMs,
+          this.config.revealStepMs,
+          DEFAULT_SCRIPT_LIMITS,
+        ),
+        true,
+      );
+      return toRevealReading(raw);
+    } catch {
+      return zero;
+    }
   }
 
   /**

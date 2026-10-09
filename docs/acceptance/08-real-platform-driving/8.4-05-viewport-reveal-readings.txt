@@ -1,0 +1,102 @@
+8.4-05 · 窄视图里目标被横向裁掉：这一格的三条读数（2026-10-09，用户在场，开发实例）
+================================================================================
+
+这一份记录的是**代码半边**的依据：为什么动作层必须在派发之前把目标滚进本帧视口，以及
+旧文档里那句「窗口拉到 ≥1410」到底是什么的换算。三条读数都来自同一分钟里的同一块视图，
+按 AGENTS.md §9 的口径：harness 对真实 target 只 attach 读取，一条 `navigate` 都没发。
+
+一、渲染层报的是哪一块（app 窗口 1200 宽，没有最大化）
+------------------------------------------------------
+`harness eval --url 5173`（脚本 tmp/84-live/state.js）：
+
+    app                    { "w": 1200, "h": 772 }
+    slotReadout            "863×654"          ← [data-testid="kernel-slot-measured"]
+    widenDisabledReason    "WIDTH_MAX"        ← 最宽档已经吃到头
+    narrowDisabledReason   null
+    snapshot               { url: "https://www.zhipin.com/web/geek/chat", ready: "complete" }
+    conversations          { total: 0, rows: [] }   ← 还没按会话坐标同步过，库是空的（正常）
+
+槽位的三档在 `packages/renderer/src/KernelViewSlot.tsx` 里是 `['w-(--kernel-view-width)'（38%）,
+'w-[55%]', 'w-[72%]']` + 展开档 `min-w-0 flex-1`：**1200 宽的窗口里连点两次「加宽」就到 863**，
+这是不碰操作系统窗口就能拿到的上限。展开档再宽也要先扣掉左轨（约 185px），拿不到 1224。
+
+二、真站那一侧：版面被横向裁掉 361px
+------------------------------------
+`harness eval --url zhipin`（脚本 tmp/84-live/measure.js，纯读）：
+
+    vw 863  vh 654
+    documentElement.scrollWidth  1224        ← 站点自己的最小布局宽度
+    documentElement.clientWidth   863
+    ⇒ 裁切量 1224 − 863 = **361px**，右侧那一整块会话面板在视口之外
+
+    会话列表（`ul[role="group"] > li[role="listitem"]`，五行，全在视口内）：
+      0  上海肯德基有限公司   x=20  y=167  368×78
+      1  紫川软件             x=20  y=245  368×78
+      2  上海坤亿             x=20  y=323  368×78
+      3  巨闲网络             x=20  y=401  368×78
+      4  子雄科技             x=20  y=479  368×78
+
+    editor    null      ← `div#chat-input[contenteditable="true"]` 还没挂上
+    sendBtn   null      ← 发送键同样没挂上
+    fileAnchor {x:0,y:0,w:0,h:0}  ← `a.btn-file`「上传附件简历」在页面上，但零几何（未选中会话）
+
+**这一节里没量到发送键的坐标**：真 BOSS 的输入区与发送键只在**选中某一条会话之后**才挂载
+（与 8.4 的 `selectConversation` 是同一条链），而这一格要等的正是 8.4-01 那一次活体。
+所以"选中之后发送键落在被裁掉的那 361px 里"这句，凭的是 8.0-05 第四节那条实测读数
+（`button.btn-send` 的矩形 x=1112，而当时视图只有 1015 CSS px），不是本轮的猜测。
+
+三、旧那句「窗口 ≥1410」是这条算式的和，不是一条窗口要求
+--------------------------------------------------------
+`docs/acceptance/08-real-platform-driving/8.8-05-real-viewport.txt` 第②条当时写的是
+"要完全不横向裁切，需要展开档 + 把 app 窗口拖到 ≥1410 宽（185 左轨 + 1224 站点最小布局）"。
+本轮把两个加数都现场复量了一遍：**1224（站点最小布局）+ 185（app 左轨）= 1409 ≈ 1410**。
+也就是说那一句从来不是"必须最大化窗口"，而是"动作层当时只会按坐标点，不会把目标滚进画面"
+这件事换算成了窗口尺寸要求。用户当场否掉了这个默认（"我希望不最大化也能执行"），
+而这条判据在 1200 宽的窗口上根本满足不了——所以补的是**动作层**这一格，不是用户的窗口。
+
+四、代码半边落点（本轮到货）
+----------------------------
+- `packages/browser/src/locator-script.ts` 新增 `buildRevealScript` / `toRevealReading` /
+  `RevealReading`：按 `candidateIndex + nodeIndex` 找回**定位胜出的那一个**节点（与
+  `buildClickArmScript` 同一套身份号），本来就在视口内就**一次都不动页面**；越界才
+  `scrollIntoView({block:'center', inline:'center'})`，然后**有界轮询到矩形连续两次一致再复读**
+  （平滑滚动容器里这一段是动画，同一帧读回来还是旧位置——AGENTS.md §9 的 5.10-13 ⑪），
+  回 `{found, moved, inside, rect, viewportWidth, viewportHeight, error}`。
+- `packages/browser/src/act-service.ts`：`perform()` 的骨架从「等待 → 定位 → 折算坐标 → 下发 → 回读」
+  改成「等待 → 定位 → **滚进画面** → 折算坐标 → 下发 → 回读」。滚了仍在视口外就
+  `ACT_OUT_OF_VIEWPORT` 停下，**一条鼠标命令都不发**（细节里带回与视口两份尺寸）；
+  滚成功了就用复读后的矩形算派发点，并把它作为 `located.rect` 交回界面。
+  读不到（那一帧拒绝脚本、`undefined`）时**按定位时的读数继续**——不能把"读不到"当成"在视口外"，
+  否则每一发动作在站点自造的浮层帧里都会被拒。
+- `packages/core/src/errors.ts`：加 `ACT_OUT_OF_VIEWPORT`。它与 `ACT_FAILED` 分开的理由是处置不同：
+  后者是"事件发出去了而页面没接住"，这一条是"事件根本没发"，要的是把视图开宽或换一条定位。
+- 配置两把（`browser.act`）：`revealSettleMs` 缺省 600、`revealStepMs` 缺省 50。
+
+五、门禁读数（本轮这一格）
+--------------------------
+- `packages/browser` `pnpm test`：EXIT=0，**16 files / 302 tests passed**（本格之前是 294，
+  新增 8 条：`locator-script.test.ts` 五条（含钳制一条）+ `act-service.test.ts` 三条）。
+- `npx tsc --noEmit`：`packages/browser` EXIT=0、`packages/core` EXIT=0。
+- `npx eslint packages/browser packages/core` EXIT=0；`npx prettier --check packages/browser/src packages/core/src` EXIT=0。
+- `pnpm lint` 整条链 EXIT=1：**两条 eslint 错误都在并行会话正在写的文件里**
+  （`packages/llm/src/settings.test.ts:15` `existsSync` 未使用、
+  `packages/renderer/src/ModelSettingsPanel.tsx:116` `await-thenable`），本格一行都没碰它们，
+  也没给它们加豁免。因为 `eslint .` 排在链首，后面 11 道机检在 `pnpm lint` 里没跑到，
+  所以逐个手跑了一遍，全部 EXIT=0：check-renderer-conventions / check-knowledge-pack /
+  check-llm-single-entry / check-compliance-redlines / check-dependency-floor / check-prompts /
+  check-agent-model-authority / check-tool-contract / check-scheduler-no-external-cron /
+  check-dashboard-readonly / check-licenses。
+- 测试面全程只打 loopback（10233 仿站与替身帧），真站那两条是 attach 读取（AGENTS.md §7.2 / §9 的 2.1-12）。
+
+六、这一格**没有**拿掉的东西
+----------------------------
+- **活体那一半还没兑现**：本轮没有发出任何真实外发，`outbound.greet.perform` 一次都没调，
+  `usage_ledger` 与 `delivery_records` 没有新行。8.4-01 / 8.4-02 / 8.4-03 仍是 `[ ]`，
+  「不最大化也能执行」这句话现在只有单测与几何读数撑着，**最终凭据是 8.4-01 那一次活体的
+  页面回执**（要在 863 宽的视图里把这一发发出去并回读到 `sentPattern`「已送达」）。
+- `packages/platform-boss/src/knowledge/boss.json` 里那条描述（"活体验收必须把窗口带到 ≥1410 宽"）
+  **本轮不改**：它绑的是取证现场的说法，要等 8.4-01 在 863 宽里真点着了一次，
+  才按 §6.2/§1036 那条纪律换成实测形状。
+- 垂直方向的同类缺口（元素长在内部滚动容器里、`browser.page.scroll` 滚的是 window）
+  这一格只解决了一半：`scrollIntoView` 会连带滚祖先容器，但**跨 iframe 时判的是"目标在自己那一帧的
+  视口里"**，iframe 元素本身被父帧裁掉那种形态仍未覆盖——留在 plan §7 第 3 条。

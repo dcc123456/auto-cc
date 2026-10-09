@@ -21,6 +21,8 @@ const ACT_CONFIG: BrowserActConfig = {
   uploadReadbackStepMs: 50,
   clickReadbackMs: 600,
   clickReadbackStepMs: 50,
+  revealSettleMs: 600,
+  revealStepMs: 50,
 };
 
 const fibers: Fiber[] = [];
