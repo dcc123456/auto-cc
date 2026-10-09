@@ -18,7 +18,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
 import { greetTargetLabel } from '@auto-cc/shared';
-import { formatClock } from './format';
 import { Banner, DeskButton, DeskTextarea } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
 
@@ -143,8 +142,9 @@ function ApprovalCard({
 /**
  * 投递服务自己的确认单（spec 5.7-14）：semi 档下对话那一路的第二道表态。
  *
- * 正文只列主进程读数里真有的东西——发哪个岗位、附的哪个文件、什么时候到点——
- * 措辞复用 `JobLabPanel` 那条 `deliver.pendingRow`（同一句话不翻译两遍，§2.1）。
+ * 正文只列主进程读数里真有的东西——发哪个岗位、附的哪个文件——
+ * 措辞复用 `JobLabPanel` 那两张卡片上的同一组键（`deliver.pendingTitle` / `deliver.pendingFile`，
+ * 同一句话不翻译两遍，§2.1）。到点时刻这里由下面那句 `timeoutNote` 承担，岗位与文件不重复列。
  * @param approval `outbound.deliver.pending()` 里的那份读数
  * @param busy 正在执行的动作标签；非空时两颗按钮禁用
  * @param onDecide 把「发 / 不发」交回上层（上层按来源送回 `deliver.resolveApproval`）
@@ -179,17 +179,11 @@ function DeliverApprovalCard({
     >
       <div className="w-full">
         <p className="text-xs font-semibold">{t('agent.pause.deliverHeading')}</p>
+        <p className="mt-1 break-words text-[11px] text-slate-100">
+          {t('deliver.pendingTitle', { title: approval.title, company: approval.company })}
+        </p>
         <p className="mt-1 break-words text-[11px] text-slate-300">
-          {t('deliver.pendingRow', {
-            jobId: targetLabel,
-            title: approval.title,
-            company: approval.company,
-            fileName: approval.attachment.fileName,
-            sizeBytes: approval.attachment.sizeBytes,
-            sha: approval.attachment.sha256.slice(0, 12),
-            requestedAt: formatClock(approval.requestedAt, t('jd.none')),
-            expiresAt: formatClock(approval.expiresAt, t('jd.none')),
-          })}
+          {t('deliver.pendingFile', { fileName: approval.attachment.fileName })}
         </p>
         <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
           <Clock size={10} />

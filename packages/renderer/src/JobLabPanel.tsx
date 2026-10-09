@@ -35,7 +35,9 @@ import {
   DeskButton,
   DeskCheck,
   DeskField,
+  Tag,
 } from './ui/controls';
+import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { advanceViewTrail } from './viewTrail';
@@ -334,13 +336,13 @@ export function JobLabPanel() {
             maxRounds: captureStatus?.maxRounds ?? '-',
           })}
         </p>
-        <p className="mt-1 text-[11px] text-slate-400" data-testid="jd-store-status">
+        <p
+          className="mt-1 text-[11px] text-slate-400"
+          data-testid="jd-store-status"
+          data-schema-version={String(storeStatus?.schemaVersion ?? '')}
+        >
           {storeStatus
-            ? t('jd.storeStatus', {
-                total: storeStatus.total,
-                withDetail: storeStatus.withDetail,
-                schemaVersion: storeStatus.schemaVersion,
-              })
+            ? t('jd.storeStatus', { total: storeStatus.total, withDetail: storeStatus.withDetail })
             : t('jd.storeIdle')}
         </p>
         {storeStatus?.newestSourceUrl && (
@@ -429,19 +431,26 @@ export function JobLabPanel() {
         )}
 
         {lastGreet && (
-          <Banner tone="jade" markers={{ testid: 'jd-greet-receipt', origin: lastGreet.origin }} className="mt-2">
+          <Banner
+            tone="jade"
+            markers={{
+              testid: 'jd-greet-receipt',
+              origin: lastGreet.origin,
+              'job-id': String(lastGreet.jobId ?? ''),
+              'ledger-id': String(lastGreet.ledgerId),
+              source: lastGreet.source,
+            }}
+            className="mt-2"
+          >
+            {/* 与投递回执同一个拆法（规则④）：100 字那一串 `·` 拆成"页面回了什么"和"等了多久"两行，
+                对账标识符挪到 markers——`jd-greet-receipt` 这根通道本身一字未改（8.4-01 的证据在读它）。 */}
             <div className="w-full">
               <p className="font-semibold">{t('jd.greetReceiptHeading')}</p>
-              <p className="mt-1 break-all">
-                {t('jd.greetReceiptRow', {
-                  jobId: lastGreet.jobId,
-                  ledgerId: lastGreet.ledgerId,
-                  waitedMs: lastGreet.waitedMs,
-                  source: lastGreet.source,
-                  origin: t(`jd.origin.${lastGreet.origin}`),
-                  reason: lastGreet.reason,
-                })}
+              <p className="mt-1 flex items-center gap-1.5 break-all">
+                <Tag tone="jade">{t(`jd.origin.${lastGreet.origin}`)}</Tag>
+                {t('jd.greetReceiptPage', { reason: lastGreet.reason })}
               </p>
+              <p className="mt-1 break-all">{t('jd.greetReceiptWait', { waitedMs: lastGreet.waitedMs })}</p>
             </div>
           </Banner>
         )}
@@ -463,19 +472,29 @@ export function JobLabPanel() {
         )}
       </section>
 
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
-        <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-          <FileUp size={14} />
-          {t('deliver.heading')}
-        </h3>
-        <p className="mt-1 text-[11px] text-slate-500">{t('deliver.hint')}</p>
+      {/* 投递这一格**默认展开**（用户 2026-10-09 裁定：必须用户确认的部分留在明面），
+          收起来的只有「这一步到底怎么走」那三句——它是教材，不是待办。 */}
+      <DeskSection
+        id="deliver.form"
+        defaultOpen
+        markers={{ testid: 'deliver-section' }}
+        title={
+          <span className="flex items-center gap-2">
+            <FileUp size={14} />
+            {t('deliver.heading')}
+          </span>
+        }
+        summary={
+          <span data-testid="deliver-summary">{t('deliver.summary', { pending: pendingApprovals.length })}</span>
+        }
+      >
         <DeskField
           action="deliver-resume-path"
           data-testid="deliver-resume-path"
           value={resumePathDraft}
           onValueChange={setResumePathDraft}
           placeholder={t('deliver.resumePathPlaceholder')}
-          className="mt-2 w-full"
+          className="w-full"
         />
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
@@ -490,20 +509,26 @@ export function JobLabPanel() {
                 key={approval.approvalId}
                 className={`rounded-md border px-3 py-1.5 ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS}`}
                 data-approval-id={approval.approvalId}
+                data-approval-job-id={approval.jobId}
+                data-approval-size-bytes={String(approval.attachment.sizeBytes)}
+                data-approval-sha={approval.attachment.sha256}
               >
+                {/* 一行一件事（plan §3.24 规则④）：原先 133 字的单行把岗位、文件、字节数、
+                    sha、两个时刻用 `·` 串成一串，人读不出"我现在要点哪一颗"。
+                    对账用的标识符全部挪到上面那三个 data-*（harness 通道一字未改，只是换了挂法）。 */}
                 <p className="break-all text-[11px] text-slate-100">
-                  {t('deliver.pendingRow', {
-                    jobId: approval.jobId,
-                    title: approval.title,
-                    company: approval.company,
-                    fileName: approval.attachment.fileName,
-                    sizeBytes: approval.attachment.sizeBytes,
-                    sha: approval.attachment.sha256.slice(0, 12),
+                  {t('deliver.pendingTitle', { title: approval.title, company: approval.company })}
+                </p>
+                <p className="mt-0.5 break-all text-[11px] text-slate-300">
+                  {t('deliver.pendingFile', { fileName: approval.attachment.fileName })}
+                </p>
+                <p className="mt-0.5 break-all text-[11px] text-slate-400">
+                  {t('deliver.pendingWhen', {
                     requestedAt: formatClock(approval.requestedAt, t('jd.none')),
                     expiresAt: formatClock(approval.expiresAt, t('jd.none')),
                   })}
                 </p>
-                <div className="mt-1 flex items-center gap-2">
+                <DeskActionRow className="mt-1">
                   {/* 确认=签字，走朱砂（seal 的第二义就是"人在这件事上盖了印"）；
                       拒绝不涂红——两枚红按钮并排会让人分不出哪一枚会发出去。 */}
                   <DeskButton
@@ -532,7 +557,7 @@ export function JobLabPanel() {
                     <X size={12} />
                     {t('deliver.deny')}
                   </DeskButton>
-                </div>
+                </DeskActionRow>
               </li>
             ))}
           </ul>
@@ -541,28 +566,51 @@ export function JobLabPanel() {
         {lastDeliver && (
           <Banner
             tone="jade"
-            markers={{ testid: 'deliver-receipt', committed: lastDeliver.committed ? 'true' : 'false' }}
-            className="mt-2"
+            markers={{
+              testid: 'deliver-receipt',
+              committed: lastDeliver.committed ? 'true' : 'false',
+              'job-id': String(lastDeliver.jobId ?? ''),
+              sha: lastDeliver.attachment.sha256,
+              'size-bytes': String(lastDeliver.attachment.sizeBytes),
+              'ledger-id': String(lastDeliver.ledgerId ?? ''),
+              source: lastDeliver.source,
+            }}
+            className="mt-3"
           >
             <div className="w-full">
               <p className="font-semibold">{t('deliver.receiptHeading')}</p>
-              <p className="mt-1 break-all">
-                {t('deliver.receiptRow', {
-                  jobId: lastDeliver.jobId,
-                  fileName: lastDeliver.attachment.fileName,
-                  sizeBytes: lastDeliver.attachment.sizeBytes,
-                  sha: lastDeliver.attachment.sha256.slice(0, 12),
-                  state: t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged'),
-                  ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
-                  waitedMs: lastDeliver.waitedMs,
-                  source: lastDeliver.source,
-                  reason: lastDeliver.reason,
-                })}
+              <p className="mt-1 flex items-center gap-1.5 break-all">
+                <Tag tone={lastDeliver.committed ? 'jade' : 'amber'}>
+                  {t(lastDeliver.committed ? 'deliver.stateCommitted' : 'deliver.stateStaged')}
+                </Tag>
+                {t('deliver.receiptFile', { fileName: lastDeliver.attachment.fileName })}
               </p>
+              <p className="mt-1 break-all">
+                {t('deliver.receiptWait', { waitedMs: lastDeliver.waitedMs, reason: lastDeliver.reason })}
+              </p>
+              {/* 对账编号只有出问题要查库时才用得上，所以挂在披露层里；
+                  同一批值也已经在上面那组 `data-*` 上，这里给人读、那里给机器读，不是两份事实。 */}
+              <DeskExplainer id="deliver.receiptIds" className="mt-1" label={t('deliver.receiptIdsToggle')}>
+                <p className="break-all">
+                  {t('deliver.receiptIds', {
+                    jobId: lastDeliver.jobId,
+                    sizeBytes: lastDeliver.attachment.sizeBytes,
+                    sha: lastDeliver.attachment.sha256.slice(0, 12),
+                    ledgerId: lastDeliver.ledgerId ?? t('deliver.noLedger'),
+                    source: lastDeliver.source,
+                  })}
+                </p>
+              </DeskExplainer>
             </div>
           </Banner>
         )}
-      </section>
+
+        <DeskExplainer id="deliver.how" className="mt-3" label={t('deliver.howToggle')}>
+          <p data-testid="deliver-hint">{t('deliver.hint')}</p>
+          <p className="mt-1">{t('deliver.pipeline')}</p>
+          <p className="mt-1">{t('deliver.tiers')}</p>
+        </DeskExplainer>
+      </DeskSection>
 
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="flex items-center gap-2 text-xs font-semibold text-slate-300">
