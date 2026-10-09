@@ -228,6 +228,13 @@
   /* 与主进程 KERNEL_VIEW_WIDTH_RATIO 同源；scripts/check-renderer-conventions.ts 会校验一致性 */
   --kernel-view-width: 38%;
 
+  /* 右栏槽位的**当下**宽度：默认解析到上面那一档兜底比例，人在界面上拖过之后由
+     `KernelViewSlot` 用命令式 `setProperty` 覆盖在 `<aside>` 自己身上（JSX 里不许出现 `style`，
+     见 plan §3.24 那条 §5.2 的偏离）。声明留在 `:root` 是为了"没拖过时窗口与主进程同一个宽度"。
+     这一支**不参与** §4 的同源机检：正则只比 `--kernel-view-width` 与 `KERNEL_VIEW_WIDTH_RATIO`，
+     所以新增它既不会误满足那条，也不会打破它。 */
+  --kernel-slot-width: var(--kernel-view-width);
+
   /* 左栏导航的宽度。抽屉的遮罩要从这一档之后才开始盖（09 稿形态④：「遮罩只盖住主区、
      不盖左栏导航（人随时能切走）」），所以宽度必须是一个能被浮层原件引用的数，
      而不是写在 App.tsx 里的一次性 class。 */

@@ -121,8 +121,9 @@
       "widen": "Widen",
       "expand": "Expand",
       "collapse": "Collapse",
-      "atMax": "Widest preset",
-      "atMin": "Narrowest preset"
+      "atMax": "Already as wide as it goes",
+      "atMin": "Already as narrow as it goes",
+      "resizeHandle": "Drag to change the width; double-click goes back to the narrowest"
     },
     "session": {
       "heading": "Embedded kernel sessions (partition & login state)",

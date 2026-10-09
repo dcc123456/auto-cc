@@ -274,7 +274,9 @@ export function App() {
 
         {/* 槽位的几何由这一栏自己量、并报给主进程（`KernelViewSlot` / spec 8.8-01）：原生视图只铺报来的那一块，
             于是既盖不住顶部标题栏与底部状态条，也铺得出真实站点的桌面宽度。
-            最窄那一档仍是 `--kernel-view-width`，与主进程的兜底比例同源（1.2-12 的机检照旧）。 */}
+            宽度没拖过时仍是 `--kernel-view-width`（`--kernel-slot-width` 的默认值就是它），
+            与主进程的兜底比例同源（1.2-12 的机检照旧）；拖过之后在 38…72 之间连续覆盖这一支变量，
+            覆盖只落在这一个节点上，画面里没有第二份宽度事实。 */}
         {kernelViewVisible ? <KernelViewSlot layout={kernelLayout} /> : null}
       </div>
 

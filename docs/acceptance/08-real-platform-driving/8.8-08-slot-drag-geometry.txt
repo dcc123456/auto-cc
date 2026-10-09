@@ -1,0 +1,58 @@
+8.8-08 · 内嵌视图槽位改成可连续拖：本轮在活体上能证与不能证的读数
+================================================================
+
+取证窗口：2026-10-09，`pnpm dev` 在跑，CDP 10222，渲染层 target `--url 5173`。
+探针：`tmp/8.8-08-probe.mjs`（只读，不改宽度、不动把手之外的任何东西）。
+参数名注意 `--expr-file`（写 `--file` 不报错、静默回 `1`，见 AGENTS.md §9 的 8.3-01⑮）。
+
+一、把手挂在 aside 之内时（本轮第一版实现，已被下面那版取代）
+
+  "asideRect":   { "x": 1285, "y": 51, "w": 787, "h": 692 }
+  "handleRect":  { "x": 1286, "y": 51, "w": 6,  "h": 692 }
+  "slotRect":    { "x": 1286, "y": 88, "w": 786, "h": 655 }
+  "handleInsideSlotLeft" 读回 false —— 即把手右缘 1292 **落在上报矩形 1286…2072 之内**
+
+  这条读数推翻了我自己的一个假设：原先以为槽位 div 的 `p-4` 会把上报矩形从左缘往里缩 16px。
+  `getBoundingClientRect()` 量的是**边框盒**，`p-4` 只往里缩它的孩子，不缩它自己，
+  所以 slot 的左缘与 aside 的内缘是同一条线（1285 边框 + 1 = 1286）。
+  挂在 aside 左缘的 6px 把手会整个被原生视图盖住——人握到的就是网页，那是 8.8-04 那条
+  "控件必须待在视图盖不到的行"的同一件事，只是换了个方向再犯一次。
+
+二、把手改成同一条 flex 行的**前一个兄弟**之后（当前实现）
+
+  "visibility":  "visible"
+  "asideVar":    "38%"                      // `<aside>` 自己身上解析到的 --kernel-slot-width
+  "asideRect":   { "x": 1285, "y": 51, "w": 787, "h": 692 }
+  "handleRect":  { "x": 1279, "y": 51, "w": 6,  "h": 692 }
+  "slotRect":    { "x": 1286, "y": 88, "w": 786, "h": 655 }
+  "handleClearOfView": true                 // 1279 + 6 = 1285 <= 1286，把手右缘在上报矩形之外
+  "handleHitTarget":   "kernel-resize-handle"
+  "cursor":            "col-resize"         // app 内自己画的那对双向箭头
+  "aria":  { "role": "slider", "min": "38", "max": "72", "now": "38", "tabindex": "0" }
+  "measured": "786×655"                     // 重构后 `report()` 仍然出数，8.8-01 那根通道没断
+  "rootVar":  "38%"                         // :root 的 --kernel-slot-width 默认解析到 --kernel-view-width
+  "storedWidth": "1"
+
+  `storedWidth: "1"` 是 8.8-02 那三档留下的**旧形状**（档位下标）。它同时证了两件事：
+  ① 新旧值域算术上不相交（1 不落在 38…72 里），所以读侧一眼能判出这是旧记录；
+  ② 这台机器上真有一份人表达过的宽度（下标 1 = 55%），所以本轮把读侧写成"换算回它自己那一档"
+     而不是"回落最窄"——直接回落等于界面替人忘掉了一次表态。
+     写侧从此只有百分比，落一次盘之后这条分支再也不会被走到（它是迁移路径，不是兼容垫片）。
+
+三、本轮**没有**在活体上做的两件事，以及为什么
+
+  ① 没有真拖把手，也没有点「加宽 / 收窄 / 展开」：这个 dev 实例的内嵌视图此刻停在
+     `https://www.zhipin.com/web/geek/chat`（真实平台，另一个会话正在用它）。改宽度会把那块
+     原生视图搬位，属于在别人正在跑的活体上动状态。AGENTS.md §7.2 的口径按最小影响执行：
+     只读取数，不改几何。
+  ② 指针手势真落页本来就必须用户在场（§9 的 2.1-12：窗口不在前台时 CDP 输入不落页，
+     而 `act.click` 照样回成功）。所以拖拽的"人握得住、拖得动、松手落定"这三条留 `[!]`，
+     等用户在场时按 spec 8.8-08 的步骤补：
+       pnpm harness click --url 5173 --selector '[data-action=privacy-acknowledge]'
+       pnpm harness drag  --url 5173 --from-selector '[data-action="kernel-resize-handle"]' \
+                          --to-selector '[data-testid="kernel-slot-measured"]'
+       再跑一次上面的探针，判据是 `ariaNow` 跟着变、`storedWidth` 落成新百分比、
+       `handleClearOfView` 在拖到最宽（72%）时仍然 true。
+
+  同理 `[!]`：系统窗口边框的那对双向箭头是窗口管理器画的，app 改不了它的样式；
+  Windows / Linux 的窄宽行为在本机（macOS arm64）无法验证。
