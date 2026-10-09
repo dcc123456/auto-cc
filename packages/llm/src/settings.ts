@@ -1,32 +1,34 @@
 /**
- * `llm.settings` —— 模型配置模块（spec 7.1-07 ~ 7.1-10）。
+ * `llm.settings` —— 模型配置模块（spec 7.1-07 ~ 10 与 7.2-02 ~ 12）。
  *
  * 它是"用户自己配模型"这件事的唯一入口，做四件事：给出 OpenAI 兼容服务商目录、
- * 读回当前配置与掩码密钥状态、把用户填的东西校验后**同时写持久层与热改运行时**、
- * 用一次最小请求验证连通性。
+ * 管**提供商实例池**（添加/改/删，每张提供商各自的 key 与已入库的模型清单）、
+ * 读回两条模型腿当下用什么（按「绑定 > 兜底 > 未配置」现算），以及用一次最小请求验证连通性。
  *
  * 三条刻意的取舍：
- * 1. **不自建 HTTP**：`check()` 走 `llm.chat.complete()`，所以 `scripts/check-llm-single-entry.ts`
- *    那道机检仍然成立——配置模块不是第二个 LLM 客户端（AGENTS.md §2.7）。
- * 2. **服务商目录只是数据**：预设的作用是把三个格子填上，`baseUrl`/模型名一律可改写，
+ * 1. **不自建 HTTP**：`check()` / `checkProvider()` / `fetchModels()` 都走 `llm.chat` 那唯一出口，
+ *    所以 `scripts/check-llm-single-entry.ts` 那道机检仍然成立——配置模块不是第二个 LLM 客户端（AGENTS.md §2.7）。
+ * 2. **服务商目录只是数据**：预设的作用是把格子填上，`baseUrl`/模型名一律可改写，
  *    自定义端点与预设走完全同一条代码路径（spec 7.1-09）。
- * 3. **密钥不进配置层**：只经 `config` 的密钥库那一格（`secret.ts`），所以它既不在 `trace()` 里，
- *    也不在 `settings.json` 里，更不会回传给渲染层（spec 7.1-06）。
+ * 3. **密钥不进配置层**：只经 `config` 的密钥库那几格（`secret.ts`：腿的兜底一格、每个提供商实例一格），
+ *    所以它既不在 `trace()` 里，也不在 `settings.json` 里，更不会回传给渲染层（spec 7.1-06 / 7.2-10）。
  */
 import { AppError, asApp, Service, maybeService, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type {
   LlmCheckView,
+  LlmFetchModelsView,
   LlmLegName,
   LlmLegView,
+  LlmModelView,
+  LlmProviderInstanceView,
   LlmProviderView,
-  LlmSettingsApplyInput,
   LlmSettingsView,
 } from '@auto-cc/shared';
 import { z } from 'zod';
 import { resolveLeg } from './binding.js';
-import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
+import { endpointOf, normalizeBaseUrl, presetIdOfBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 import {
   addModelsSchema,
   deleteProviderRow,
@@ -41,8 +43,6 @@ import {
   saveProviderRow,
   addModelRows,
   type AddModelsInput,
-  type LlmModelView,
-  type LlmProviderInstanceView,
   type ProviderRow,
   type SaveProviderInput,
 } from './provider-pool.js';
@@ -51,29 +51,11 @@ import type { LlmChatService } from './index.js';
 /** 两条模型腿：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
 export const llmLegSchema = z.enum(['chat', 'embed']);
 
-/** 本插件的配置格：两条腿各自记住"用户选的是哪家"（扁平键，持久层不收嵌套对象）。 */
-export const llmSettingsSchema = z.strictObject({
-  providerId: z.string().min(1).default('custom'),
-  embedProviderId: z.string().min(1).default('custom'),
-});
-
-/** 一次保存的入参：`apiKey` 省略或空串表示"不动已存的那条"（界面上的掩码框就是这个语义）。 */
-export const applySettingsSchema = z.strictObject({
-  leg: llmLegSchema.default('chat'),
-  providerId: z.string().min(1).default('custom'),
-  baseUrl: z.url(),
-  model: z.string().min(1),
-  apiKey: z.string().nullish(),
-});
-
-export type LlmSettingsConfig = z.output<typeof llmSettingsSchema>;
-
 /**
  * 角色绑定的入参（spec 7.2-11）：把一条腿指到池里某个实例、以及它已入库的某条模型。
  *
- * 两处都叫 `providerId` 是暂时的、也是必须看清的：这里绑的是**实例 id**（`llm_providers.id`），
- * 写进 `llm` / `llm-embed` 那格；而 `applySettingsSchema` 的那个是**预设 id**，写进 `llm-settings` 那格（7.1 的语义）。
- * 7.2-d 删掉 `apply()` 之后只剩前一种读法。
+ * 这里的 `providerId` 是**实例 id**（`llm_providers.id`），写进 `llm` / `llm-embed` 那格；
+ * 目录里的预设 id 只出现在读数里（`LlmLegView.providerId`，由地址反查），不再是一格配置。
  */
 export const bindRoleSchema = z.strictObject({
   leg: llmLegSchema,
@@ -87,37 +69,14 @@ export type BindRoleInput = z.output<typeof bindRoleSchema>;
 /** 腿 → 装配里的插件 id。 */
 const LEG_PLUGIN: Record<LlmLegName, string> = { chat: 'llm', embed: 'llm-embed' };
 
-/** 腿 → 密钥库里的路径（与服务名一致）。 */
+/** 腿 → 密钥库里的路径（与服务名一致）：这只在**兜底态**用得上，绑定态问的是 `llm.provider:<实例 id>`。 */
 const LEG_SECRET: Record<LlmLegName, string> = { chat: 'llm.chat', embed: 'llm.embed' };
-
-/** 腿 → `llm-settings` 那一格里记录服务商的键名。 */
-const LEG_PROVIDER_KEY: Record<LlmLegName, 'providerId' | 'embedProviderId'> = {
-  chat: 'providerId',
-  embed: 'embedProviderId',
-};
 
 /** 腿 → 兜底环境变量名（与各自 schema 的 `keyEnv` 默认值同词，界面当参数显示）。 */
 const LEG_KEY_ENV: Record<LlmLegName, string> = {
   chat: 'AUTO_CC_LLM_API_KEY',
   embed: 'AUTO_CC_SILICONFLOW_API_KEY',
 };
-
-/**
- * 一次模型清单拉取的读数（spec 7.2-05 / 07）。
- *
- * 失败也回结构化结果而不抛：这一条的判据是"播报一句、已入库的行不动"，
- * 抛错会让界面写成 try/catch，而 catch 里最容易顺手做的事就是清空清单。
- */
-export interface LlmFetchModelsView {
-  ok: boolean;
-  /** 候选模型名（`ok` 为假时是空数组） */
-  models: string[];
-  /** 失败原因码：`EMPTY`（拿到了但一条都没有）/ `LLM_REQUEST_FAILED` / `LLM_PROVIDER_NOT_FOUND` / `LLM_UNAVAILABLE` */
-  reason: string | null;
-  message: string | null;
-  /** 这次探测花了多少毫秒 */
-  elapsedMs: number;
-}
 
 /** 内核那一格里可见的最小读法（装没装、生效值是什么、怎么热改）。 */
 interface KernelReader {
@@ -128,17 +87,21 @@ interface KernelReader {
 
 export class LlmSettingsService extends Service {
   static provide = 'llm.settings';
-  static Config = llmSettingsSchema;
+  /**
+   * 本服务的配置格：一个键都不读（7.2-d 起）。7.1 那两格 `providerId` / `embedProviderId` 记的是
+   * 「界面上上一次保存选了哪家」，现在由池那一行与 `llm` / `llm-embed` 里的绑定代替了。
+   *
+   * 这里用 `z.object` 而不是同类插件的 `z.strictObject({})`（`shellSchema` / `platformRegistrySchema`）：
+   * 已经有人按 7.1 的界面存过那两个键，持久层是五层合并的一层，严格形状会让**所有装过 7.1 的机器**
+   * 在挂载期就变 FAILED。剥离而不是报错，是因为这些残留没有读者，留着与删掉在行为上等价。
+   */
+  static Config = z.object({});
   // 必需依赖写进 inject（`@auto-cc/core` 的分工口径）：池的两张表住 `store` 那条连接里，
   // 没有它这些方法无处落盘；`config` / `kernel` / `llm.chat` 仍是用的时候现问，免得热改把本服务一起重建。
   static inject = ['store'];
 
-  private readonly options: LlmSettingsConfig;
-
-  constructor(ctx: Context, options: LlmSettingsConfig) {
-    // 必须接住第二个实参：cordis 递的是校验后的配置（AGENTS.md §9 实测 1.3）。
+  constructor(ctx: Context) {
     super(ctx, 'llm.settings');
-    this.options = options;
   }
 
   /** `store` 句柄（连接与迁移清单的唯一来源，不在本地存第二份表结构事实）。 */
@@ -200,14 +163,18 @@ export class LlmSettingsService extends Service {
     const model = resolved.model;
     const storedKey = config?.getSecret(resolved.secretPath) ?? '';
     const envKey = (process.env[keyEnv] ?? '').trim();
-    const savedProvider = this.options[LEG_PROVIDER_KEY[leg]];
-    // 存着的服务商只有在端点确实对得上时才继续算数（端点变体也算）：用户手改过 baseUrl 就该改口成「自定义」，
-    // 否则界面会指着一家它已经没在用的提供商。
-    const providerId = endpointOf(presetOf(savedProvider), baseUrl ?? '') ? savedProvider : 'custom';
+    // 「这一腿看起来像哪家」出自解析结果而不是任何本地记忆：绑定态直读那一行的 `preset_id`（确切事实），
+    // 兜底态拿生效地址去目录里反查（端点变体也算），地址认不出就是「自定义」——
+    // 界面指着的必须是真在用的那一家（spec 7.1-09 同一条纪律，只是现在不再需要有人先把选择存下来）。
+    const db = maybeService<StoreService>(this.ctx, 'store')?.db;
+    const boundRow = resolved.providerId && db ? providerRowOf(db, resolved.providerId) : undefined;
+    const providerId = boundRow?.preset_id ?? presetIdOfBaseUrl(baseUrl ?? '');
     return {
       leg,
       pluginId,
       providerId,
+      boundProviderId: resolved.providerId,
+      origin: resolved.origin,
       baseUrl,
       model,
       key: {
@@ -475,47 +442,6 @@ export class LlmSettingsService extends Service {
       keyTail: storedKey.slice(-4),
       modelCount: modelRowsOf(this.store.db, row.id).length,
     };
-  };
-
-  /**
-   * 保存用户填的配置：先落盘（持久层 + 密钥库），再热改运行时让 `llm.chat` 立刻拿到新值。
-   * @param input 服务商 id、端点、模型名，以及可选的 key 明文（空/省略 = 不动已存的）
-   * @returns 保存后的读数（同 `read()`，界面不用再补一刀）
-   * @throws 入参不合法 `INVALID_ARGUMENT`；`config` 未装载 `SETTING_NOT_ALLOWED`
-   */
-  apply = async (input: LlmSettingsApplyInput): Promise<LlmSettingsView> => {
-    const parsed = applySettingsSchema.safeParse(input);
-    if (!parsed.success) {
-      throw new AppError(
-        'INVALID_ARGUMENT',
-        `模型配置不合法：${parsed.error.issues[0]?.message ?? ''}`,
-        'llm.settings',
-        {
-          issues: parsed.error.issues.map((issue) => issue.path.join('.')),
-        },
-      );
-    }
-    const { leg, providerId, baseUrl: rawBaseUrl, model, apiKey } = parsed.data;
-    // 入库前先收前缀：粘进来的整条 `/chat/completions` 会被 `joinEndpoint` 再拼一次，留着就是双段路径（spec 7.2-03）。
-    const baseUrl = normalizeBaseUrl(rawBaseUrl);
-    const config = maybeService<ConfigService>(this.ctx, 'config');
-    if (!config) {
-      throw new AppError('SETTING_NOT_ALLOWED', '配置服务未装载，模型设置无处落盘', 'llm.settings', { leg });
-    }
-    const pluginId = LEG_PLUGIN[leg];
-    config.setPersisted(pluginId, { baseUrl, model }, ['baseUrl', 'model']);
-    config.setPersisted('llm-settings', { [LEG_PROVIDER_KEY[leg]]: presetOf(providerId).id }, [
-      'providerId',
-      'embedProviderId',
-    ]);
-    const trimmedKey = apiKey?.trim() ?? '';
-    if (trimmedKey !== '') config.setSecret(LEG_SECRET[leg], trimmedKey);
-
-    // 热改：让正在跑的 `llm.chat` 立刻拿到新的端点与模型名（spec 7.1-08）。
-    // 走 kernel 而不是只写内存补丁——它会重建注入方，所以界面要播报一句"浏览器会话可能被关掉"（§9 实测 2.5）。
-    const kernel = maybeService<KernelReader>(this.ctx, 'kernel');
-    if (kernel) await kernel.applyConfig(pluginId, { baseUrl, model });
-    return this.read();
   };
 
   /**

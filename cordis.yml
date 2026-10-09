@@ -44,12 +44,13 @@ plugins:
   # 维度不写在这里：bge-m3 的 1024 只是文档读数，实际维度以响应为准并落进 `kb_vectors.dim`（4.3-03 无魔法数口径）。
   - id: llm-embed
 
-  # 模型设置模块（spec 7.1-07 ~ 10）：「信任」工作台里那三格（端点 / 模型名 / key）背后的那只手。
+  # 模型设置模块（spec 7.1-07 ~ 10 / 7.2-02 ~ 12）：「信任」工作台里那三段（提供商池 / 各家清单 / 两条腿的绑定）背后的那只手。
   # 必须排在 `llm` 与 `llm-embed` 之后（AGENTS.md §9 实测 5.1-c：清单顺序就是挂载顺序），
   # 因为它读的是那两只的**生效配置**——排在前面只会读到"还没挂上"的空读数。
   # 它自己一个字节都不发：`check()` 经 `llm.chat.complete()` 要结果，所以这不算第三套模型客户端
   # （`scripts/check-llm-single-entry.ts` 为这一条单独开了白名单格，并守住「settings 不许 import http.js」）。
-  # 不写任何配置：`providerId` / `embedProviderId` 由界面保存时写进 userData/settings.json 的持久层。
+  # 不写任何配置：两条腿各自的 `providerId` + `model` 由界面「保存绑定」时经 `settings.bindRole` 写进
+  # userData/settings.json 的持久层，池里的地址与清单当场供给，不在这里留第二份事实（spec 7.2-12）。
   # 7.2-b 起它有了必需依赖：提供商池的两张表（`llm_providers` / `llm_models`，号段 31/32）由本服务
   # 自己 push 进 `store.migrations` 并建表，口径同 `browser-takeover`（`static inject = ['store']` 配这一行）。
   - id: llm-settings

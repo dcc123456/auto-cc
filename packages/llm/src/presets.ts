@@ -177,6 +177,22 @@ export function endpointOf(preset: LlmProviderView, baseUrl: string): string | u
 }
 
 /**
+ * 这个地址是目录里哪家的（spec 7.2-12 的显示半边）。
+ *
+ * 用在"这条腿没绑实例、走的是 yml/env 兜底地址"那一种读数上：界面要能说出"这看着像 DeepSeek"，
+ * 而不是让人对着一条裸地址自己认亲。逐条比（含端点变体，同 `endpointOf` 的口径），认不出回 `custom`——
+ * 反查只是显示，不构成任何写入：写的那一次表态在池那一行里。
+ * @param baseUrl 归一后的地址（`normalizeBaseUrl` 的输出；空串表示根本没配）
+ * @returns 目录里的预设 id；不命中是 `custom`
+ */
+export function presetIdOfBaseUrl(baseUrl: string): string {
+  for (const preset of PROVIDER_PRESETS) {
+    if (endpointOf(preset, baseUrl)) return preset.id;
+  }
+  return CUSTOM_PRESET.id;
+}
+
+/**
  * 把用户敲的地址收成"前缀"：请求路径由 `joinEndpoint` 再拼，所以入库的必须是不带尾斜杠的前缀。
  *
  * 收的四种形状（spec 7.2-03）：带尾斜杠、不带、把整条 `/chat/completions` 或 `/embeddings` 粘进来、前后带空格。

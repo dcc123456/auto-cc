@@ -40,6 +40,12 @@
         "saved": "已保存",
         "checked": "已连通",
         "clearedKey": "已清除密钥",
+        "providerSaved": "已保存这一家",
+        "providerDeleted": "已删除这一家",
+        "modelsFetched": "已拉回清单",
+        "modelsAdded": "已入库",
+        "modelRemoved": "已移出清单",
+        "roleBound": "已绑定",
         "opened": "已打开",
         "probed": "已读登录态",
         "loggedOut": "已退出",
@@ -1583,8 +1589,7 @@
     "settings": {
       "model": {
         "heading": "模型",
-        "note": "这一格配的是「这台机器替谁说话」：端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
-        "legLabel": "模型腿",
+        "note": "这一格管三件事：把几家提供商同时收进来（火山引擎、OpenAI、DeepSeek 各占一行），从每家拉回模型清单勾进本机，再给对话与向量两条腿各挑一条。端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
         "leg": {
           "chat": "对话（话术生成）",
           "embed": "向量（知识库检索）"
@@ -1611,10 +1616,68 @@
           "nvidia": "NVIDIA NIM",
           "custom": "自定义（任何 OpenAI 兼容端点）"
         },
+        "providersHeading": "已添加的提供商",
+        "addProvider": "添加提供商",
+        "providersEmpty": "一家都还没添加。点上面「添加提供商」收进第一家。",
+        "customEndpoint": "自定义端点",
+        "labelField": "显示名",
+        "labelPlaceholder": "在这台机器上叫什么",
+        "endpointLabel": "端点变体",
+        "endpoint": {
+          "ark-standard": "标准端点",
+          "ark-coding-plan": "Coding Plan",
+          "moonshot-standard": "标准端点",
+          "moonshot-coding-plan": "Coding Plan",
+          "dashscope-standard": "标准端点",
+          "dashscope-coding-plan": "Coding Plan",
+          "zhipu-standard": "标准端点（国内）",
+          "zhipu-coding-plan": "Coding Plan（国内）",
+          "zhipu-global-coding-plan": "Coding Plan（海外）",
+          "minimax-cn": "国内站",
+          "minimax-global": "海外站"
+        },
+        "keyTail": "密钥 ····{{tail}}",
+        "keyNone": "还没有密钥",
+        "modelCount": "{{count}} 条模型",
+        "row": {
+          "fetchModels": "获取模型",
+          "check": "测这家",
+          "edit": "编辑",
+          "delete": "删除",
+          "remove": "移出清单"
+        },
+        "form": {
+          "titleAdd": "添加一家提供商",
+          "titleEdit": "改这一家提供商",
+          "save": "保存这一家",
+          "cancel": "取消"
+        },
+        "modelsHeading": "这一家的模型清单",
+        "modelsNeedProvider": "先在上一段点中一行，把它设为当前操作对象。",
+        "modelsOf": "现在操作的是 {{label}}。",
+        "noCandidates": "这家回来了 0 条模型名。",
+        "alreadyStored": "已在清单里",
+        "addSelected": "添加所选（{{count}}）",
+        "manualPlaceholder": "模型名（清单里没有的也能敲）",
+        "addManual": "手动添加这一条",
+        "storedEmpty": "这一家的清单还是空的。",
+        "origin": {
+          "fetched": "拉回来的",
+          "manual": "手敲的"
+        },
+        "modelsFetched": "{{label}} 回来了 {{count}} 条模型名。",
+        "fetchFailed": "没拉回来（{{reason}}）：{{message}}",
+        "modelsStored": "{{count}} 条已入库到 {{label}}。",
+        "bindingHeading": "两条腿各用哪一条",
+        "bindingEmpty": "还没有可挑的模型：先在上一段勾进至少一条。",
+        "bindingSave": "保存绑定",
+        "legOrigin": {
+          "pool": "由池里的 {{label}} 供给",
+          "config": "回落：直接读配置格（还没绑定实例）",
+          "none": "未配置"
+        },
         "baseUrlLabel": "端点 baseUrl",
         "baseUrlPlaceholder": "https://…/v1",
-        "modelLabel": "模型名",
-        "modelPlaceholder": "该家的模型名",
         "keyLabel": "API key",
         "keyPlaceholderStored": "已存 ····{{tail}}（留空＝不改这一把）",
         "keyPlaceholderEmpty": "尚未填写",
@@ -1624,10 +1687,9 @@
           "env": "现在这一把来自环境变量 {{env}}（界面里还没存过）",
           "none": "这一把还没有：既没在界面里存过，环境变量也没设。"
         },
-        "save": "保存",
         "check": "测试连接",
         "clearKey": "清除密钥",
-        "noteHotApply": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+        "noteHotApply": "保存绑定会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
         "missingHeading": "还缺：",
         "field": {
           "baseUrl": "端点",
@@ -1644,7 +1706,17 @@
           "BRIDGE_MISSING": "这个窗口里没有桥接，模型设置够不到主进程",
           "LEG_INCOMPLETE": "端点、模型名与密钥还没配齐，测试连接必然失败，先补齐这三格",
           "CHECK_NOT_SUPPORTED": "向量腿的连通性测试尚未实现，这一按不会发任何请求",
-          "NO_KEY_STORED": "这一条腿在本机没存过密钥，没有可清除的东西"
+          "NO_KEY_STORED": "这一条腿在本机没存过密钥，没有可清除的东西",
+          "FORM_ALREADY_OPEN": "上面已经摊着一张表单：先保存或取消那一张，同时只改一家",
+          "NO_MODEL_STORED": "这一家一条模型都还没入库，点名不出要测哪条，先去下一段勾几条",
+          "FORM_INCOMPLETE": "显示名与端点地址还缺着，这一格保存了也没法用",
+          "NOT_FETCHED": "还没点「获取模型」，此刻没有可勾的候选",
+          "NOTHING_TICKED": "一条都没勾中，添加动作没有可入库的东西",
+          "MANUAL_EMPTY": "模型名那一格是空的，先敲一条名字",
+          "MODEL_BOUND": "这条模型正被某条腿指着，先给那条腿换一条再移出清单",
+          "NO_STORED_MODEL": "两家都还没有已入库的模型，候选是空的，没什么可挑",
+          "BIND_INCOMPLETE": "这一格还没挑出「哪家的哪条模型」，保存绑定必然失败",
+          "BIND_UNCHANGED": "下拉里的就是这条腿现在指着的那一条，没有要改的东西"
         }
       }
     }

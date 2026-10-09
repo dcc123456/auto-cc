@@ -336,6 +336,38 @@ CREATE TABLE llm_models (
 > `embed.ts` 换用同一条解析；`settings.ts` 的 `fetchModels`/`checkProvider`/`bindRole` 与 `deleteProvider` 的绑定回落；
 > 单测 +7 条）、`packages/outbound/src/{greet,script}.test.ts` 的两条配置字面量、
 > `scripts/fixture-server.ts` 的 `/v1/models`（三条失败态按 `?fail=` 开关）。
+>
+> **7.2-d 收口补记（2026-10-09，spec 7.2-04 / 05 / 06 / 11 / 14 / 15 的 **C 半边**已取（V 半边全留 7.2-e），
+> 读数见 `7.2-d-ipc-and-ui-readings.txt`）**：
+> 这一行的四件事都到货了——`bridge.llm` 的 **13 条** `llm.settings.*`（`apply` 从 `RENDERER_ALLOWLIST` 与
+> `BridgeSignatures` 两份名单里同时消失）、渲染层三段、双语（`settings.model.*` 由 54 键扩到 110 键、两份包差集 0）、
+> 以及旧 `apply()` 连同它的 schema 与被替换的掩码读法删净（死符号核查在读数文件第三节）。
+> 四条落在本片当场、写给 7.2-e 与后来人：
+>
+> 1. **plan §7.5 那句「添加提供商开 `Modal`」实现成了一张内联表单**。依据是现读的遮罩预算（`ui/overlays.tsx`）：
+>    `Modal` 全 app 只留给"不可逆 / 必须读完整风险"（当下只有 `ConsentModal` 与 `PrivacyNotice` 在用），
+>    而换一家提供商两头都不占、随时可取消，于是落到 `settings-model-form` 那一格。附带好处：7.2-e 不必先揭遮罩再量几何。
+> 2. **`static Config` 删不得**（plan §7 决策③判错了，以现读为准）：内核 `PluginConstructor`
+>    （`packages/kernel/src/index.ts:35`）把 `Config` 列为必需成员，`schemaOf()`（同文件 :379）直接取 `impl.Config`，
+>    没有缺席回落——删掉之后 `packages/main/src/registry.ts:81` 立刻 `TS2741`。保留的那一格形状取 **`z.object({})`**
+>    而不是同类插件的 `z.strictObject({})`：7.1 期间界面**真的**往持久层写过 `providerId` / `embedProviderId` 两格，
+>    而持久层是五层合并里"那台机器上已有的事实"，严格形状会让每一台装过 7.1 的机器在挂载期就变 FAILED。
+>    随之两条：直接挂载点必须交 `NO_CONFIG`（复用 `@auto-cc/core` 已有的那一只，§2.2），否则 cordis 拿 schema 去解析
+>    `undefined`，29 条用例一起报 `invalid config`；`z.object` 是剥离而不是报错，因为那两格已经没有任何读者。
+> 3. **候选值写成扁平的 `<实例 id>::<模型名>`**（plan §7.5 那条"待核"的现读结论）：`DeskSelect` 的选项是 children，
+>    原件层没有 `optgroup` 先例；而 `llm_models` 的主键是 `(provider_id, model)`，同一条模型名可以在两家各存一份，
+>    只报名字挑不出"哪家的这一条"。实例 id 是 UUID、不含这串分隔符，按第一个分隔符切是唯一解，标签写「显示名 · 模型名」。
+> 4. **7.1 那句"界面指着的必须是真在用的那一家"续命了，且没有换来一格新的持久化**：绑定态直接读那一行的 `preset_id`，
+>    回落态用 `presetIdOfBaseUrl` 按地址反查目录（逐家逐端点变体，认不出与空地址一律回 `custom`）。
+>    `LlmLegView.providerId` 的语义因此**收窄成显示用的反查**，判定通道交给新增的 `boundProviderId` 与 `origin`——
+>    分两格写是为了让"回落态界面指着一家其实没配的 DeepSeek"这种读数能被 7.2-e 直接取到，而不是往持久层加一格没人读的"真值"（§2.6）。
+>
+> 本片动的面：`packages/shared/src/bridge.ts`（13 条动作 + 视图与入参类型单一来源）、
+> `packages/llm/src/{settings,presets,provider-pool}.ts` + `settings.test.ts`、
+> `packages/renderer/src/ModelSettingsPanel.tsx` 与两份语言包、根 `cordis.yml` 的 `llm-settings` 那两行注释。
+> **一条都没声称做完 V**：三段的真实几何与文案、四面明文 grep 的活体半边、只用 `cordis.yml`+env 起隔离实例
+> （spec 7.2-15 后半句）、以及"残留 7.1 两格 `settings.json` 的 userData 能否正常挂上 `llm-settings`"
+> 全部留给 7.2-e，五条清单在 `7.2-d-ipc-and-ui-readings.txt` 末尾。
 
 ### 7.8 测试与取证口径（§7.2 / §7.1 的硬边界）
 

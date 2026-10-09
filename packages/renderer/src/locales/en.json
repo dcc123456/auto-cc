@@ -40,6 +40,12 @@
         "saved": "Saved",
         "checked": "Reachable",
         "clearedKey": "Key cleared",
+        "providerSaved": "Provider saved",
+        "providerDeleted": "Provider deleted",
+        "modelsFetched": "List fetched",
+        "modelsAdded": "Added to the list",
+        "modelRemoved": "Removed from the list",
+        "roleBound": "Bound",
         "opened": "Opened",
         "probed": "Login read",
         "loggedOut": "Logged out",
@@ -1583,8 +1589,7 @@
     "settings": {
       "model": {
         "heading": "Model",
-        "note": "This section is about who this machine speaks for: base URL and model name go to the persisted layer under userData, the key goes to the secret store, and the UI only ever shows its last 4 characters.",
-        "legLabel": "Model leg",
+        "note": "This section does three things in one place: keep several providers at once (Volcano Engine, OpenAI and DeepSeek each get a row), fetch each one's model list and tick entries into this machine, then pick one for the chat leg and one for the embeddings leg. Base URL and model name go to the persisted layer under userData, the key goes to the secret store, and the UI only ever shows its last 4 characters.",
         "leg": {
           "chat": "Chat (script generation)",
           "embed": "Embeddings (knowledge-base retrieval)"
@@ -1611,10 +1616,68 @@
           "nvidia": "NVIDIA NIM",
           "custom": "Custom (any OpenAI-compatible endpoint)"
         },
+        "providersHeading": "Added providers",
+        "addProvider": "Add provider",
+        "providersEmpty": "Nothing added yet. Press \"Add provider\" above to bring in the first one.",
+        "customEndpoint": "Custom endpoint",
+        "labelField": "Display name",
+        "labelPlaceholder": "What to call it on this machine",
+        "endpointLabel": "Endpoint variant",
+        "endpoint": {
+          "ark-standard": "Standard endpoint",
+          "ark-coding-plan": "Coding Plan",
+          "moonshot-standard": "Standard endpoint",
+          "moonshot-coding-plan": "Coding Plan",
+          "dashscope-standard": "Standard endpoint",
+          "dashscope-coding-plan": "Coding Plan",
+          "zhipu-standard": "Standard endpoint (mainland)",
+          "zhipu-coding-plan": "Coding Plan (mainland)",
+          "zhipu-global-coding-plan": "Coding Plan (global)",
+          "minimax-cn": "Mainland site",
+          "minimax-global": "Global site"
+        },
+        "keyTail": "key ····{{tail}}",
+        "keyNone": "no key yet",
+        "modelCount": "{{count}} models",
+        "row": {
+          "fetchModels": "Fetch models",
+          "check": "Test this one",
+          "edit": "Edit",
+          "delete": "Delete",
+          "remove": "Remove"
+        },
+        "form": {
+          "titleAdd": "Add a provider",
+          "titleEdit": "Edit this provider",
+          "save": "Save provider",
+          "cancel": "Cancel"
+        },
+        "modelsHeading": "Model list of this provider",
+        "modelsNeedProvider": "Pick a row above first to make it the current one.",
+        "modelsOf": "Currently working on {{label}}.",
+        "noCandidates": "This provider returned 0 model names.",
+        "alreadyStored": "already in the list",
+        "addSelected": "Add selected ({{count}})",
+        "manualPlaceholder": "model name (even one the list doesn't have)",
+        "addManual": "Add it manually",
+        "storedEmpty": "The list of this provider is still empty.",
+        "origin": {
+          "fetched": "fetched",
+          "manual": "typed in"
+        },
+        "modelsFetched": "{{label}} returned {{count}} model names.",
+        "fetchFailed": "Fetch failed ({{reason}}): {{message}}",
+        "modelsStored": "{{count}} added to the list of {{label}}.",
+        "bindingHeading": "Which model each leg uses",
+        "bindingEmpty": "No model to offer yet: tick at least one in the section above.",
+        "bindingSave": "Save binding",
+        "legOrigin": {
+          "pool": "served by {{label}} in the pool",
+          "config": "fallback: read straight from the config fields (no instance bound yet)",
+          "none": "not configured"
+        },
         "baseUrlLabel": "Base URL",
         "baseUrlPlaceholder": "https://…/v1",
-        "modelLabel": "Model name",
-        "modelPlaceholder": "the model name of that provider",
         "keyLabel": "API key",
         "keyPlaceholderStored": "stored ····{{tail}} (leave empty to keep this one)",
         "keyPlaceholderEmpty": "not filled in yet",
@@ -1624,10 +1687,9 @@
           "env": "The current key comes from the {{env}} environment variable (nothing stored from the UI yet).",
           "none": "There is no key yet: nothing was stored here and no environment variable is set."
         },
-        "save": "Save",
         "check": "Test connection",
         "clearKey": "Clear key",
-        "noteHotApply": "Saving rebuilds this leg at once (no restart needed) and closes any open browser session view along the way — reopen it if you need it.",
+        "noteHotApply": "Saving a binding rebuilds that leg at once (no restart needed) and closes any open browser session view along the way — reopen it if you need it.",
         "missingHeading": "Still missing:",
         "field": {
           "baseUrl": "base URL",
@@ -1644,7 +1706,17 @@
           "BRIDGE_MISSING": "This window has no bridge, so the model settings cannot reach the main process",
           "LEG_INCOMPLETE": "Base URL, model name and key are not complete, so a connection test would only fail — fill those three first",
           "CHECK_NOT_SUPPORTED": "A connection test for the embeddings leg is not implemented; this press sends no request",
-          "NO_KEY_STORED": "This leg has no stored key on this machine, so there is nothing to clear"
+          "NO_KEY_STORED": "This leg has no stored key on this machine, so there is nothing to clear",
+          "FORM_ALREADY_OPEN": "A form is already open above: save or cancel it first, one provider at a time",
+          "NO_MODEL_STORED": "This provider has no models in its list yet, so there is nothing to name for the test — tick some below first",
+          "FORM_INCOMPLETE": "The display name and the base URL are still missing; saving this would leave an unusable row",
+          "NOT_FETCHED": "Nothing has been fetched yet, so there is no candidate to tick",
+          "NOTHING_TICKED": "No candidate is ticked, so the add action has nothing to store",
+          "MANUAL_EMPTY": "The model name field is empty; type one first",
+          "MODEL_BOUND": "A leg is pointing at this model; move that leg before removing it",
+          "NO_STORED_MODEL": "No provider has stored models yet, so the candidate list is empty",
+          "BIND_INCOMPLETE": "No \"which provider's which model\" has been picked yet, so saving the binding would only fail",
+          "BIND_UNCHANGED": "The dropdown already shows what this leg points at; there is nothing to change"
         }
       }
     }

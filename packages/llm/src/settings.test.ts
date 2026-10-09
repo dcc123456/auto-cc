@@ -1,28 +1,28 @@
 /**
- * `llm.settings` 的行为测试（spec 7.1-07 ~ 7.1-10）。
+ * `llm.settings` 的行为测试（spec 7.1-07 ~ 10 与 7.2-02 ~ 12）。
  *
- * 三条重点：key 的**优先级**（密钥库盖过环境变量，且 `status()` 说得出来源）、
- * 保存这条路径**只写持久层 + 密钥库**（明文不许进 `settings.json`，也不许回给界面），
- * 以及连通性测试**复用 `llm.chat` 的出口**（配置模块不能长成第二个 LLM 客户端，AGENTS.md §2.7）。
+ * 三条重点：key 的**优先级**（密钥库盖过环境变量，且读数说得出来源）、
+ * 提供商实例池与模型清单的写路径（**明文只进密钥库那一格**，表文件与 `settings.json` 里 grep 不到），
+ * 以及连通性测试与清单探测**复用 `llm.chat` 的出口**（配置模块不能长成第二个 LLM 客户端，AGENTS.md §2.7）。
  *
  * 装配替身只换 `kernel` 一只：`packages/llm` 不依赖 `packages/kernel`（层间边界），
  * 而"热改到底会不会让实例拿到新值"是 spec 1.5-06 在内核测试里已经兑现的判据，
  * 这里只需要断言**调用形态**（给哪一格、什么补丁）。网络一律走存根（AGENTS.md §7.2）。
  */
-import { asApp, Context } from '@auto-cc/core';
+import { asApp, Context, NO_CONFIG } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bodyText, json, stubFetch } from './fetch-stub.js';
 import { LlmChatService } from './index.js';
-import type { LlmSettingsView } from '@auto-cc/shared';
-import { providerSecretPath, type LlmProviderInstanceView } from './provider-pool.js';
+import type { LlmProviderInstanceView, LlmSettingsView } from '@auto-cc/shared';
+import { providerSecretPath } from './provider-pool.js';
 import { LlmSettingsService } from './settings.js';
-import { endpointOf, normalizeBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
+import { endpointOf, normalizeBaseUrl, presetIdOfBaseUrl, presetOf, PROVIDER_PRESETS } from './presets.js';
 
 const CHAT_ENV = 'AUTO_CC_LLM_API_KEY';
 const EMBED_ENV = 'AUTO_CC_SILICONFLOW_API_KEY';
@@ -42,6 +42,19 @@ interface BootOptions {
 
 /** 一条腿的读数（按腿取，避免各处写下标）。 */
 const legOf = (view: LlmSettingsView, leg: 'chat' | 'embed') => view.legs.find((item) => item.leg === leg)!;
+
+/**
+ * 取某家预设的一条端点变体地址：字面量重敲一遍就是抄第二份事实，且会随目录漂掉（§2.5）。
+ * @param presetId 目录里的预设 id
+ * @param endpointId 该预设的端点变体 id
+ * @returns 变体地址原文
+ * @throws 目录里没有这一条时抛（用例的期望写错了要立刻看见，不要静默回退到首条）
+ */
+const variantOf = (presetId: string, endpointId: string): string => {
+  const found = presetOf(presetId).endpoints?.find((item) => item.id === endpointId);
+  if (!found) throw new Error(`目录里没有这条端点变体：${endpointId}`);
+  return found.baseUrl;
+};
 
 /** boot 出来的读法：设置服务、模型出口、配置服务、内核替身的调用记录、本次的 userData 目录。 */
 interface Harness {
@@ -100,7 +113,9 @@ async function boot(options: BootOptions = {}): Promise<Harness> {
     maxTokens: 400,
     temperature: 0.7,
   });
-  await ctx.plugin(LlmSettingsService, { providerId: 'deepseek', embedProviderId: 'custom' });
+  // `llm.settings` 从 7.2-d 起不读自己的配置格（提供商与模型名的表态在池那一行与 `llm` / `llm-embed` 里），
+  // 但 `static Config` 是内核 `PluginConstructor` 的必需项，所以直接挂载点要交空实参（`NO_CONFIG` 那条口径）。
+  await ctx.plugin(LlmSettingsService, NO_CONFIG);
   const app = asApp(ctx);
   return {
     settings: app['llm.settings'],
@@ -203,6 +218,22 @@ describe('地址归一与端点归属（spec 7.2-03）', () => {
     expect(endpointOf(presetOf('不存在的 id'), presetOf('deepseek').baseUrl)).toBeUndefined();
     expect(endpointOf(presetOf('custom'), '')).toBeUndefined();
   });
+
+  it('按地址反查提供商：每家与每个变体都认得出自己，认不出和空地址都回 custom', () => {
+    // 这一条是"逐家自证"：兜底态那条腿显示的是反查结果，目录里任何一家认不出自己都会让它显示成「自定义」。
+    for (const preset of PROVIDER_PRESETS) {
+      if (preset.baseUrl !== '') {
+        expect(presetIdOfBaseUrl(preset.baseUrl), `${preset.id} 的反查落到了别家`).toBe(preset.id);
+      }
+      for (const endpoint of preset.endpoints ?? []) {
+        expect(presetIdOfBaseUrl(endpoint.baseUrl), `${preset.id} 的变体 ${endpoint.id} 反查落到了别家`).toBe(
+          preset.id,
+        );
+      }
+    }
+    expect(presetIdOfBaseUrl('https://evil.test.invalid/v1')).toBe('custom');
+    expect(presetIdOfBaseUrl('')).toBe('custom');
+  });
 });
 
 describe('read()：密钥来源与可用性读数（spec 7.1-07）', () => {
@@ -235,72 +266,60 @@ describe('read()：密钥来源与可用性读数（spec 7.1-07）', () => {
   });
 });
 
-describe('apply()：写持久层 + 密钥库 + 热改运行时（spec 7.1-08 / 7.1-06）', () => {
-  it('保存后端点生效、密钥只以掩码露面，明文不进 settings.json 也不进出参', async () => {
-    const { settings, config, applied, userData } = await boot();
-    const view = await settings.apply({
-      leg: 'chat',
+describe('read()：一条腿的来源读数（spec 7.2-12 的显示半边，7.2-d）', () => {
+  it('绑定态：origin=pool、boundProviderId 是那行实例，提供商名直取那一行记的预设', async () => {
+    const first = await boot();
+    const saved = first.settings.saveProvider({
+      presetId: 'deepseek',
+      label: 'DeepSeek',
+      baseUrl: 'https://ds.test.invalid/v1',
+    });
+    // 第二次装载把绑定写进配置格：内核是替身，热改不会重建服务，读不到当场绑好的那一条。
+    const { settings } = await boot({ userData: first.userData, chatProviderId: saved.id, model: 'deepseek-chat' });
+    expect(legOf(settings.read(), 'chat')).toMatchObject({
+      origin: 'pool',
+      boundProviderId: saved.id,
       providerId: 'deepseek',
-      baseUrl: BASE_URL,
-      model: 'test-model',
-      apiKey: 'sk-plain-5678',
+      baseUrl: 'https://ds.test.invalid/v1',
     });
-    expect(legOf(view, 'chat').key).toMatchObject({ present: true, source: 'secret', tail: '5678' });
-    expect(config.persisted('llm')).toEqual({ baseUrl: BASE_URL, model: 'test-model' });
-    expect(applied).toEqual([{ id: 'llm', patch: { baseUrl: BASE_URL, model: 'test-model' } }]);
-    expect(readFileSync(join(userData, 'settings.json'), 'utf8')).not.toContain('sk-plain-5678');
-    expect(JSON.stringify(view)).not.toContain('sk-plain-5678');
   });
 
-  it('apiKey 省略时不动已存的那把（掩码框的语义就是"不改"）', async () => {
-    const { settings } = await boot();
-    await settings.apply({ leg: 'chat', baseUrl: BASE_URL, model: 'm', apiKey: 'sk-a-aaaa' });
-    const view = await settings.apply({ leg: 'chat', baseUrl: BASE_URL, model: 'm2' });
-    expect(legOf(view, 'chat').key.tail).toBe('aaaa');
-  });
-
-  it('非法 baseUrl 以 INVALID_ARGUMENT 失败并点名路径，一次落盘与一次热改都没有', async () => {
-    const { settings, config, applied, userData } = await boot();
-    await expect(settings.apply({ leg: 'chat', baseUrl: 'not-a-url', model: 'm' })).rejects.toMatchObject({
-      code: 'INVALID_ARGUMENT',
-      details: { issues: ['baseUrl'] },
+  it('兜底态：origin=config，提供商名由生效地址反查（端点变体也算那一家）', async () => {
+    const codingPlan = variantOf('ark', 'ark-coding-plan');
+    const { settings } = await boot({ baseUrl: codingPlan, envKey: 'sk-env-9900' });
+    expect(legOf(settings.read(), 'chat')).toMatchObject({
+      origin: 'config',
+      boundProviderId: null,
+      providerId: 'ark',
+      baseUrl: codingPlan,
     });
-    expect(config.persisted('llm')).toEqual({});
-    expect(applied).toHaveLength(0);
-    // 校验必须早于任何写：半途落盘会让界面显示一个系统实际没在用的端点。
-    expect(existsSync(join(userData, 'settings.json'))).toBe(false);
   });
 
-  it('手改 baseUrl 让预设对不上时，读数改口为 custom（不指着一家没在用的）', async () => {
+  it('手改过、目录里没有的地址改口为 custom：界面不许指着一家它已经没在用的', async () => {
+    const { settings } = await boot({ baseUrl: 'https://gw.test.invalid/v1' });
+    expect(legOf(settings.read(), 'chat')).toMatchObject({ origin: 'config', providerId: 'custom' });
+  });
+
+  it('未配置：origin=none、providerId=custom，缺项由这一条说而不是界面拼', async () => {
+    const { settings } = await boot({ baseUrl: null, model: null });
+    delete process.env[CHAT_ENV];
+    expect(legOf(settings.read(), 'chat')).toMatchObject({
+      origin: 'none',
+      boundProviderId: null,
+      providerId: 'custom',
+      missing: ['baseUrl', 'model', 'apiKey'],
+    });
+  });
+});
+
+describe('clearKey()：只清这条腿兜底那一把（spec 7.1-09 的删除半边）', () => {
+  it('密钥清掉后端点与模型名留着，读数里没有一个明文字节', async () => {
     const { settings, config } = await boot();
-    const view = await settings.apply({
-      leg: 'chat',
-      providerId: 'deepseek',
-      baseUrl: 'https://custom.test.invalid/v1',
-      model: 'local-llama',
-    });
-    expect(legOf(view, 'chat')).toMatchObject({ baseUrl: 'https://custom.test.invalid/v1', providerId: 'custom' });
-    // 持久层记的是"下拉里选的那家"，两者不一致由 read() 自愈——规则只有一处。
-    expect(config.persisted('llm-settings')).toEqual({ providerId: 'deepseek' });
-  });
-
-  it('误粘整条动作路径时入库的是归一后的前缀（spec 7.2-03）', async () => {
-    const { settings, config } = await boot();
-    const view = await settings.apply({
-      leg: 'chat',
-      baseUrl: 'https://gw.test.invalid/v1/chat/completions',
-      model: 'm',
-    });
-    expect(legOf(view, 'chat').baseUrl).toBe('https://gw.test.invalid/v1');
-    expect(config.persisted('llm')).toEqual({ baseUrl: 'https://gw.test.invalid/v1', model: 'm' });
-  });
-
-  it('clearKey 只清密钥，端点与模型名留着', async () => {
-    const { settings } = await boot();
-    await settings.apply({ leg: 'chat', baseUrl: BASE_URL, model: 'm', apiKey: 'sk-x-abcd' });
+    config.setSecret('llm.chat', 'sk-x-abcd');
     const view = settings.clearKey('chat');
     expect(legOf(view, 'chat').key).toMatchObject({ present: false, source: 'none' });
     expect(legOf(view, 'chat').baseUrl).toBe(BASE_URL);
+    expect(JSON.stringify(view)).not.toContain('sk-x-abcd');
   });
 });
 
@@ -353,13 +372,6 @@ describe('check()：连通性测试复用模型出口（spec 7.1-10）', () => {
 });
 
 describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', () => {
-  /** 取某家预设的一条端点变体地址：字面量重敲一遍就是抄第二份事实，且会随目录漂掉（§2.5）。 */
-  const variantOf = (presetId: string, endpointId: string): string => {
-    const found = presetOf(presetId).endpoints?.find((item) => item.id === endpointId);
-    if (!found) throw new Error(`目录里没有这条端点变体：${endpointId}`);
-    return found.baseUrl;
-  };
-
   /** 取一次同步调用的抛错：本包的入参校验都在同步路径上，`rejects` 那套用不上。 */
   const errorOf = (call: () => unknown): { code?: string; details?: Record<string, unknown> } => {
     try {

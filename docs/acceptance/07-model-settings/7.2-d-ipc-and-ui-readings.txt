@@ -1,0 +1,161 @@
+auto-cc · 7.2-d 读数与取证（spec 7.2-02 ~ 12 的 C+U 半边 · 渲染层三段 · 删除旧 apply()）
+日期：2026-10-09 · 平台：macOS（Apple Silicon，Darwin arm64）· 分支 main
+测试面：`packages/llm/src/settings.test.ts`（本地临时目录 + `stubFetch` + RFC 2606 保留名）与四道门禁；
+**本片不动活体**：所有 V 半边留到 7.2-e，见文末"未验证清单"（AGENTS.md §7.1 的口径，禁止用单测冒充截图证据）。
+
+# 一、四道门禁（退出码逐条重定向到文件再回显，§9 实测 5.4-c）
+
+    pnpm typecheck      → TYPECHECK_EXIT=0
+    pnpm lint           → LINT_EXIT=0（eslint + 12 只 scripts/check-*.ts）
+    pnpm format:check   → FORMAT_EXIT=0
+    pnpm test           → TEST_EXIT=0（23 个包逐包 `Tests  N passed`，共 2182 条，0 条 failed / 0 条 skipped）
+
+分包通过数（`sed -E 's/\x1b\[[0-9;]*m//g' tmp/72d/test.log` 后逐包核对，不是只看总退出码）：
+
+    agent 223 · browser 302 · config 30 · core 52 · devtools 3 · entitlement 18 · ipc 14
+    kernel 23 · llm 66 · logger 13 · main 79 · outbound 197 · pdf-edit 102 · platform-boss 174
+    plugins 5 · resume-doc 136 · resume-kb 398 · scheduler 21 · sessions 28 · shell 31
+    store 21 · testing 32 · workflow 214
+
+`packages/llm`：4 个文件 66 条全绿，其中 `settings.test.ts` 35 条。**条数与 HEAD 相同（35 → 35），换了的是组成**：
+删掉 `apply()` 那一节的 6 条，换上本片新写的 6 条——`read()` 的来源读数 4 条（`origin` = pool / config（端点变体）/
+config（手改地址→custom）/ none，加 `boundProviderId`）、`clearKey()` 1 条（只清这条腿兜底那一把，且读数里
+不带明文）、`presetIdOfBaseUrl` 按地址反查 1 条（逐家 + 逐变体 + 认不出与空地址回 custom）。
+一条 `it` 都没被"顺手删掉"来凑数：两边各 6 条是同一件事的正反面（旧的单腿写口 ↔ 新的来源读法）。
+
+改完 spec / plan 的文案位之后，四道门禁**整链重跑一次**（`tmp/72d/{typecheck,lint,format,test2}.log`）：
+TYPECHECK_EXIT=0 / LINT_EXIT=0 / FORMAT_EXIT=0 / TEST_EXIT=0，分包通过数与上表逐包一字不差（合计仍是 2182 条），
+所以文档改动没有把任何一条判定改红。
+
+门禁第一次是红的，三处各自的真实原因（都不是"写错了"）：
+
+1. `packages/main/src/registry.ts:81` → `TS2741: Property 'Config' is missing in type 'typeof
+   LlmSettingsService' but required in type 'PluginConstructor'`。
+   plan §7 决策③原本写的是"整块删掉 `static Config`"，实测**删不得**：`packages/kernel/src/index.ts:35`
+   的 `PluginConstructor` 把 `Config` 列为必需成员，`schemaOf()`（同文件 :379）直接 `impl.Config as …`，
+   没有缺席回落。于是这一格保留，但形状从同类插件的 `z.strictObject({})` 换成 **`z.object({})`**：
+   `shellSchema` / `platformRegistrySchema` 那些没有残留的包可以严格，而 `llm-settings` 在 7.1 期间
+   **真的被界面写过** `providerId` / `embedProviderId` 两格，持久层是五层合并的一层，严格形状会让每一台
+   装过 7.1 的机器在挂载期就变 FAILED。`z.object` 是剥离而不是报错，因为这两格没有任何读者。
+2. 同一个原因带出的第二条：`ctx.plugin(LlmSettingsService)` 直接挂载点必须交空实参，否则 cordis 拿 schema
+   去解析 `undefined`，29 条用例一起报 `invalid config: Invalid input: expected object, received undefined`。
+   用的是 `@auto-cc/core` 已有的 `NO_CONFIG`（`packages/core/src/index.ts:50`，它的注释登记的正是 AGENTS.md
+   §9 的 1.3 类型坑），不在本包再写第二份（§2.2）。
+3. `ModelSettingsPanel.tsx` 三处 TS18048/TS2345：`setForm((current) => …)` 的 `current` 是
+   `ProviderForm | undefined`，展开后各键变可选；`bindingDraft` 同理。改成更新函数里先 `if (!current) return current`
+   与把草稿初值定为 `{}`（"没动过的腿"本就是缺键而不是 undefined 对象），不做非空断言。
+
+另外三条红**不是本片的**，登记下来是为了让下一次不要有人去"修"它们（共享工作树里有并行会话在同棵树提交，
+AGENTS.md §9 的 5.3-a 收口那条）：`packages/preload/src/PreloadApp.tsx` 一度引用 `'settings.apply'` 与一只
+没有导出的 `ModelSettingsPanel`，随后该文件从工作树上消失；`packages/testing/src/fixtures.test.ts` 的 200-vs-413、
+`packages/workflow/src/runner.test.ts` 各红过一次；`packages/llm` 的池用例红过两条，**同一份代码连跑三次 35/35 全绿**。
+处置一律是"复核而不是修复"：先把上面三处真实原因改掉，再整链重跑，最后用重复单文件运行证明本片自己的判定是稳定的。
+
+lint 里与本片直接相关的三条读数：
+
+- `check-renderer-conventions.ts`：**绿**。`✔ 渲染层规范检查通过（2 个语言包，64 个源文件，派生文案 50 条
+  逐包齐备；src/ui/** 之外裸原生控件 0 只 … 按不动却不带原因码那一格 0 处 …）`。三段里所有按钮/下拉/输入/勾选
+  都出自 `src/ui/**` 原件，且每一格按不动都带 `data-disabled-reason`（§6.2-06）。
+- `check-llm-single-entry.ts`：**绿**。`模型端点只在 packages/llm`，`llm.settings` 一个字节都不发；
+  本片的"测这家 / 测这条腿 / 获取模型"三条全部经 `llm.chat` 的出口（`listModels` / `complete` / 显式目标探测）。
+- `check-compliance-redlines.ts`：**绿**。测试面地址仍是 `*.test.invalid` 与 `127.0.0.1` fixture，
+  渲染层没有出网点（§7.2 / §8.1）。
+- i18n 半边：语言包键对齐与占位符实参齐不齐由同一条 lint 链守住（§5.5/5.6 已落地），绿。
+
+# 二、进程契约那半边（spec 7.2-02 ~ 11 的 C 条）
+
+`packages/shared/src/bridge.ts` 的 `RENDERER_ALLOWLIST` 里 `llm.settings.*` 共 **13 条**（:432-444），
+`BridgeSignatures` 逐条同数（:2086-2110）：
+
+    catalog · read · check · clearKey · listProviders · saveProvider · deleteProvider
+    listModels · fetchModels · addModels · removeModel · bindRole · checkProvider
+
+其中 `apply` 从两份名单里同时消失（spec 7.2-15 的前半句）。
+
+新增方法在渲染层的落地**不需要再写任何桥接代码**，机制是一条读数而不是断言：
+`packages/preload/src/index.ts:10-23` 的 `buildNamespaces()` 遍历的是同一个 `RENDERER_ALLOWLIST`，
+按**第一个点**切命名空间与方法（注释里点名了"用 split('.') 会把第三段之后静默丢掉"这条坑），
+所以 `window.autoCC.llm['settings.saveProvider']` 是名单的投影。网关（`packages/ipc/src/gateway.ts`）
+再独立校验一次作为纵深防御，不在名单里的能力在界面上根本不存在。
+
+类型单一来源：`LlmProviderInstanceView / LlmModelView / LlmFetchModelsView / LlmProviderSaveInput /
+LlmProviderAddModelsInput / LlmRoleBindInput / LlmLegOrigin` 只在 `shared` 声明一份，
+`packages/llm/src/provider-pool.ts` 与 `settings.ts` 改为**从 shared 取**（`SaveProviderInput =
+LlmProviderSaveInput` 这类别名而不是复刻形状），漂移会在调用点以 TS 错误暴露，不额外加断言（§2.6）。
+`LlmLegView` 新增两格：`boundProviderId`（池实例 id，回落态为 null）与 `origin: 'pool' | 'config' | 'none'`；
+原本的 `providerId` 语义收窄成**显示用的反查**（绑定态取那行的 `preset_id`，回落态取 `presetIdOfBaseUrl`），
+所以 7.1 shipped 的那句"界面指着的必须是真在用的那一家"仍然成立，而它没有换来任何一格新的持久化。
+
+# 三、死代码 / 第二入口核查（§7.4 ④⑤，源码与清单，dist 除外）
+
+被删符号在 `packages/*/src` 与 `cordis.yml` 里的命中（**只允许出现在解释性注释里**）：
+
+    settings.apply        → 1 命中：shared/src/bridge.ts:430（那条注释本身，说明为什么名单里再没有它）
+    applySettingsSchema   → 0
+    LlmSettingsApplyInput → 0
+    llmSettingsSchema     → 0
+    LEG_PROVIDER_KEY      → 0
+    embedProviderId       → 1 命中：llm/src/settings.ts:91（`static Config` 那段"为什么不是 strictObject"的注释）
+    7.1 那四格文案键（settings.model.save / legLabel / modelLabel / modelPlaceholder）在渲染层源码 → 0 命中
+
+渲染层用到的 `settings.*` 调用点逐个数（`grep -oh "settings\.[a-zA-Z]*" ModelSettingsPanel.tsx`）：
+13 个方法各 1 处，`settings.catalog` 2 处（一次初始重读、一次表单需要），三段共用的就是这一份契约，
+没有第二条通道（§2.5：界面不判"这家绑了哪条模型"、不拼端点、不猜清单）。
+
+# 四、渲染层三段的形状（两段实现期决策，plan §7 的原案在此被改）
+
+**决策①：添加/编辑提供商是一张内联表单，不是第六只遮罩。**
+plan §7.2-d 原案写的是"添加 `Modal`"。实现前读了 `packages/renderer/src/ui/overlays.tsx` 的纪律注释：
+`Modal` 全 app 的入场条件是**不可逆或必须读完整风险**（当下只有 ConsentModal 与 PrivacyNotice 在用），
+抽屉（`Drawer`）是"读与对照"容器。换一家提供商两头都不占、随时能取消，因此落到 `settings-model-form`
+那一格内联展开。这条改动让 7.2-e 的取证也更简单（不需要先把遮罩打开再量几何）。
+
+**决策②：候选值写成扁平的 `<实例 id>::<模型名>`。**
+`DeskSelect` 的选项是 children（原件层没有 `<optgroup>` 先例），而 `llm_models` 的主键是
+`(provider_id, model)`——同一条模型名可以在两家各存一份，只报名字挑不出"哪家的这一条"。
+实例 id 是 UUID，不含这串分隔符，按第一个分隔符切开是唯一解。标签写成「显示名 · 模型名」。
+
+三段暴露给 harness 的面（7.2-e 直接按这些凭据取数，不要再猜 testid）：
+
+    容器    data-testid="model-settings" + data-model-encrypted + data-provider-count
+    第一段  settings-model-providers（空态 -providers-empty）；每行 data-provider-id / data-provider-selected；
+            行内 data-testid 读数 -provider-key（末 4 位那一句）与 -provider-count
+    表单    settings-model-form；预设下拉 settings-model-form-preset、端点变体 -form-endpoint、
+            显示名 -form-label、地址 -form-base-url、密钥 -form-key（type=password）、-form-save / -form-cancel
+    第二段  settings-model-models（带 data-selected-provider-id）；空态 -no-provider；
+            候选 -candidates（每格 DeskCheck action="settings-model-tick" + data-model-name）；
+            已入库 -stored（每行 data-model-name + origin 徽标）；-already-stored
+    第三段  每腿 <li data-model-leg="chat|embed">；来源读数 settings-model-leg-origin；
+            密钥来源 -key-source-<leg>、缺项 -missing-<leg>；绑定/探测/清除四颗 action 都带腿名
+    播报    -hot-apply-note、-check-result、-notice、-storage-encrypted；明文/解不开两条走 Banner
+            （reason=STORAGE_PLAINTEXT / SECRET_UNREADABLE）
+
+每格按不动的原因码（`data-disabled-reason` 的取值，11 只新增）：
+`BRIDGE_MISSING · ACTION_BUSY · FORM_ALREADY_OPEN · NO_MODEL_STORED · FORM_INCOMPLETE · NOT_FETCHED ·
+NOTHING_TICKED · MANUAL_EMPTY · MODEL_BOUND · NO_STORED_MODEL · BIND_INCOMPLETE · BIND_UNCHANGED ·
+CHECK_NOT_SUPPORTED · LEG_INCOMPLETE · NO_KEY_STORED`（后四只沿用 7.1 那一格）。
+
+# 五、i18n 净增（两份语言包同步）
+
+`settings.model.*` 由 HEAD 的 **54 键扩到 110 键**（净增 60 条、删 4 条：`save / legLabel / modelLabel /
+modelPlaceholder`），`desk.done.*` 净增 6 条（`providerSaved / providerDeleted / modelsFetched /
+modelsAdded / modelRemoved / roleBound`）。新增里含 11 条端点变体名（`endpoint.<id>`，逐条对着
+`packages/llm/src/presets.ts` 的变体 id 枚举，不是手挑）与 15 条原因码（`reason.<码>`，本片新增 11 只）。
+两份包的差集实测为 **0**（`settings.model` 与 `desk.done` 各方向都是 0，脚本读的是
+`shell.settings.model` 那一条真实嵌套——语言包根键是 `shell`，`t()` 的 keyPrefix 由 i18n 配置给）；
+同一条对齐另由 lint 的键对齐 + 占位符实参检查机检（§5.5/5.6 已落地），本片绿。
+
+# 六、未验证清单（7.2-e 必须逐条取到，本片一条都不声称）
+
+1. 三段在真实窗口里的几何与文案（浅/深两案截图 + DOM 读数，`--url 5173`，先注入冻结动效那一条）。
+2. spec 7.2-10 的**四面**明文核查在活体上的半边：加一家带 key → 对 `llm.provider:<id>` 那一格
+   grep 表文件 / `settings.json` / 日志 / IPC 返回，并 `stat` 密钥文件权限 0600。
+3. spec 7.2-15 的后半句（§6.5 反向验证）：**只用 `cordis.yml` + 环境变量**起一个隔离实例，
+   读 `origin:'config'` + `keySource:'env'` 且连通成功，确认删掉 `apply()` 没有把脚本化配置那条路堵死。
+   同一次装载还要验一件新事：残留着 7.1 两格 `settings.json` 的 userData 能否正常挂上 `llm-settings`
+   （这正是上面 `z.object` 而非 `strictObject` 的判据，U 半边已经按同一条形状测过，活体未验）。
+4. 「获取模型」失败只播报不清空已入库那一条，要在活体上用 `http://127.0.0.1:10233/v1` 的 fixture 提供商点一次。
+5. 明文 key 那一格的**永不回填**在活体上的读法：编辑已有的一行时 `-form-key` 的值必须是空串。
+
+顺序约束（照 AGENTS.md §9 登记的两条）：7.2-e 用自有 CDP 端口 + rsync 来的独立 userData 副本起实例，
+**不去杀共享的 10222 dev 与 10233 fixture**（它们属于别的会话）；改主进程射程内的源码必须等真实抓取跑完。

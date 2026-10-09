@@ -1,9 +1,10 @@
 /**
- * `llm_providers` / `llm_models` —— 用户添加的提供商实例池，与它勾选入库的模型清单
- * （spec 7.2-02 / 06 / 08 / 09 的存储半边，plan §7.3 的两张表原文）。
+ * 提供商实例池的两张表：`llm_providers`（用户添加的每一家）与 `llm_models`（每家勾选入库的模型清单）
+ * （spec 7.2-02 / 06 / 08 / 09 / 10 的存储半边，plan §7.3 的两张表原文）。
  *
  * 这一层只有 SQL 与「行 ↔ 结构」的转换：这把 key 从哪来、这条腿绑了谁，一律留在 `llm.settings`
- * 现问现算（两处都能判就是第二个真相，AGENTS.md §2.5）。
+ * 现问现算（两处都能判就是第二个真相，AGENTS.md §2.5）。过进程边界的那几份视图与入参类型
+ * 出自 `@auto-cc/shared`（7.2-d），这里只做别名，不重抄字段。
  *
  * 号段 31 / 32 的由来：台账里已用过的最高值是 29，30 被 plan §8.3 预留给 3.6 的草稿表
  * （AGENTS.md §9 实测 5.3-a），所以加表只能另起号段——把 `CREATE TABLE` 塞进已记过账的老版本号里，
@@ -11,6 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import type { LlmModelOrigin, LlmProviderAddModelsInput, LlmProviderSaveInput } from '@auto-cc/shared';
 import { z } from 'zod';
 
 /** 添加/修改一个提供商实例的入参（`id` 省略 = 新增）。 */
@@ -26,14 +28,14 @@ export const saveProviderSchema = z.strictObject({
   apiKey: z.string().nullish(),
 });
 
-/** `saveProviderSchema` 校验后的形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
-export type SaveProviderInput = z.output<typeof saveProviderSchema>;
+/**
+ * `saveProviderSchema` 校验后的形状：**别名指向 `shared` 里的那份契约**，不在这里重抄字段。
+ * 一旦 schema 与契约漂移，`saveProviderRow(...)` 的实参处就会报 TS 错，不需要另写一层类型断言（AGENTS.md §2.6）。
+ */
+export type SaveProviderInput = LlmProviderSaveInput;
 
 /** 一条模型清单的来源：自动获取勾进来的 / 人手敲的。 */
 export const modelOriginSchema = z.enum(['fetched', 'manual']);
-
-/** 模型来源的两个取值（plan §7.3 的 `origin` 列语义）。 */
-export type LlmModelOrigin = z.output<typeof modelOriginSchema>;
 
 /** 勾选入库的入参：`models` 是界面上勾中的那几条，名字原样进表（不做大小写加工）。 */
 export const addModelsSchema = z.strictObject({
@@ -42,8 +44,8 @@ export const addModelsSchema = z.strictObject({
   origin: modelOriginSchema.default('fetched'),
 });
 
-/** `addModelsSchema` 的入参形状：`origin` 可省略（缺省由 schema 补成 `fetched`）。 */
-export type AddModelsInput = z.input<typeof addModelsSchema>;
+/** `addModelsSchema` 的入参形状：契约出自 `shared`，`origin` 可省略（缺省由 schema 补成 `fetched`）。 */
+export type AddModelsInput = LlmProviderAddModelsInput;
 
 /** `llm_providers` 一行（列名与视图字段不同名，转换收在 `providerRowOf` 一侧）。 */
 export type ProviderRow = {
@@ -256,32 +258,6 @@ export type ModelRow = {
   model: string;
   origin: string;
   added_at: number;
-};
-
-/**
- * 池里一个实例的界面读数（7.2-d 把它连同 `LlmModelView` 一起搬进 `shared` 过进程边界）。
- *
- * 形状上有两条硬约束：① key 只有末 4 位，明文一个字节都不出这个函数（spec 7.2-10 与 7.1-09 同一条纪律）；
- * ② `modelCount` 是"这家已经入库几条"的读数，不是远端清单的条数——后者只在点「获取模型」的那一刻存在。
- */
-export type LlmProviderInstanceView = {
-  id: string;
-  presetId: string;
-  /** 该实例地址在预设里对应的端点变体；手改过的地址为 null（界面因此显示「自定义端点」）。 */
-  endpointId: string | null;
-  label: string;
-  baseUrl: string;
-  hasKey: boolean;
-  keyTail: string;
-  modelCount: number;
-};
-
-/** 清单里一条已入库模型的读数。 */
-export type LlmModelView = {
-  providerId: string;
-  model: string;
-  origin: LlmModelOrigin;
-  addedAt: number;
 };
 
 /**

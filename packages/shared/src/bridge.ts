@@ -426,13 +426,22 @@ export const RENDERER_ALLOWLIST = [
   'update.check',
   'update.download',
   'update.install',
-  // P7 · 7.1 的模型设置面（spec 7.1-07 ~ 10）：五条口的形状与「为什么不登记为 agent 工具」
-  // 写在下面 `BridgeSignatures` 的同名条目上。
+  // P7 · 模型设置面（spec 7.1-07 ~ 10 的五条 + 7.2-02 ~ 11 的九条）：每条口的形状写在下面
+  // `BridgeSignatures` 的同名条目上。`llm.settings.apply` 是 7.1 那只「单腿编辑器」的写口，
+  // 7.2-d 起端点与 key 归提供商实例池、模型名归角色绑定，它就没有调用方了，随本片删净（spec 7.2-15）。
   'llm.settings.catalog',
   'llm.settings.read',
-  'llm.settings.apply',
   'llm.settings.check',
   'llm.settings.clearKey',
+  'llm.settings.listProviders',
+  'llm.settings.saveProvider',
+  'llm.settings.deleteProvider',
+  'llm.settings.listModels',
+  'llm.settings.fetchModels',
+  'llm.settings.addModels',
+  'llm.settings.removeModel',
+  'llm.settings.bindRole',
+  'llm.settings.checkProvider',
 ] as const;
 
 export type BridgeCallId = (typeof RENDERER_ALLOWLIST)[number];
@@ -1822,7 +1831,18 @@ export type LlmLegView = {
   leg: LlmLegName;
   /** 装配里的插件 id（`llm` / `llm-embed`）。 */
   pluginId: string;
+  /**
+   * 这一腿**看起来像哪家**（目录里的预设 id，只作显示）。
+   *
+   * 三种来源，按可信度排：绑定态取那行实例的 `presetId`（确切事实）；兜底态由生效地址在目录里
+   * 反查（含端点变体），认不出就是 `custom`；未配置也是 `custom`。它**不是**用户的那次表态——
+   * 表态是 `boundProviderId`，界面上「选哪家」的两只下拉写的是那一个。
+   */
   providerId: string;
+  /** 生效的池实例 id（spec 7.2-12 的"绑定态"）；没绑定或那一行读不到时为 null。 */
+  boundProviderId: string | null;
+  /** 端点是谁给的：池实例 / 这条腿自己的配置格（yml、env 兜底） / 两边都没有。 */
+  origin: LlmLegOrigin;
   baseUrl: string | null;
   model: string | null;
   key: LlmKeyReadingView;
@@ -1831,19 +1851,86 @@ export type LlmLegView = {
   missing: Array<'baseUrl' | 'model' | 'apiKey'>;
 };
 
+/** 一条腿的端点来源（与 `packages/llm/src/binding.ts` 的 `ResolvedLeg.origin` 同枚举，跨边界复用一名）。 */
+export type LlmLegOrigin = 'pool' | 'config' | 'none';
+
+/** 一条模型清单的来源：自动获取勾进来的 / 人手敲的（spec 7.2-06）。 */
+export type LlmModelOrigin = 'fetched' | 'manual';
+
+/**
+ * 池里一个提供商实例的读数（spec 7.2-02 / 10）。
+ *
+ * 两条硬约束：① key 只有末 4 位，明文一个字节都不出这一格；② `modelCount` 是"这家已入库几条"，
+ * 不是远端清单的条数——后者只在点「获取模型」的那一刻存在。
+ */
+export type LlmProviderInstanceView = {
+  id: string;
+  /** 目录里的预设 id；手改过地址的行仍记得自己是从哪家添加的。 */
+  presetId: string;
+  /** 该实例地址在预设里对应的端点变体；手改过的地址为 null（界面因此显示「自定义端点」）。 */
+  endpointId: string | null;
+  label: string;
+  baseUrl: string;
+  hasKey: boolean;
+  keyTail: string;
+  modelCount: number;
+};
+
+/** 清单里一条已入库模型的读数（角色绑定的候选源，spec 7.2-06 / 11）。 */
+export type LlmModelView = {
+  providerId: string;
+  model: string;
+  origin: LlmModelOrigin;
+  addedAt: number;
+};
+
+/**
+ * 一次模型清单拉取的读数（spec 7.2-05 / 07）：失败也回结构化结果而不抛。
+ *
+ * 判据是"播报一句、已入库的行不动"——抛错会让界面写 try/catch，而 catch 里最容易顺手做的事就是清空清单。
+ */
+export type LlmFetchModelsView = {
+  ok: boolean;
+  /** 候选模型名（`ok` 为假时是空数组） */
+  models: string[];
+  /** 失败原因码：`EMPTY`（拿到了但一条都没有）/ `LLM_REQUEST_FAILED` / `LLM_PROVIDER_NOT_FOUND` / `LLM_UNAVAILABLE` */
+  reason: string | null;
+  message: string | null;
+  /** 这次探测花了多少毫秒 */
+  elapsedMs: number;
+};
+
+/** 添加/修改一个提供商实例的入参（`id` 省略 = 新增）；`apiKey` 省略或空串 = 不动已存的那把。 */
+export type LlmProviderSaveInput = {
+  id?: string;
+  presetId: string;
+  /** 界面显示名，用户可改；名字不进目录数据（那是语言包的活，§5.5），所以这里必须给。 */
+  label: string;
+  /** 端点前缀；入库前由主进程归一（spec 7.2-03）。 */
+  baseUrl: string;
+  apiKey?: string | null;
+};
+
+/** 勾选入库的入参：`models` 是界面上勾中的那几条，名字原样进表（不做大小写加工）。 */
+export type LlmProviderAddModelsInput = {
+  providerId: string;
+  models: string[];
+  /** 省略 = `fetched`（缺省由主进程的 schema 补）。 */
+  origin?: LlmModelOrigin;
+};
+
+/** 一次角色绑定的入参（spec 7.2-11）：把一条腿指到池里某个实例、以及它已入库的某条模型。 */
+export type LlmRoleBindInput = {
+  leg: LlmLegName;
+  /** 池实例 id（`llm_providers.id`），不是目录里的预设 id。 */
+  providerId: string;
+  model: string;
+};
+
 /** 整个设置面的读数：两条腿 + 密钥存储的事实陈述（是否加密、是否解不开、文件在哪）。 */
 export type LlmSettingsView = {
   legs: LlmLegView[];
   storage: { encrypted: boolean; unreadable: boolean; file: string | null };
-};
-
-/** 一次保存的入参；`apiKey` 省略或空串 = 不动已存的那条（掩码框的语义）。 */
-export type LlmSettingsApplyInput = {
-  leg?: LlmLegName;
-  providerId?: string;
-  baseUrl: string;
-  model: string;
-  apiKey?: string | null;
 };
 
 /** 一次连通性测试的结果：失败也是结构化读数，不让界面去猜抛错。 */
@@ -1991,21 +2078,36 @@ export interface BridgeSignatures {
   /** 用户主动重启并安装；上一态不是 `downloaded` 即拒绝。 */
   'update.install': { args: []; returns: UpdateView };
   /**
-   * 模型设置面五条口（spec 7.1-07 ~ 10）：两条只读（目录、当前读数）+ 一条写（保存）
-   * + 一条连通性测试 + 一条删密钥。
+   * 模型设置面（spec 7.1-07 ~ 10 的四条 + 7.2-02 ~ 11 的九条）。
    *
    * 刻意**不登记为 agent 工具**（plan §1 边界第 3 条）：模型若能自己换推理后端、自己清掉凭证，
-   * 5.3 定的「不可自提升」就出现了一个它能自行改写的运行时——而且这四条口的返回里也没有明文 key。
+   * 5.3 定的「不可自提升」就出现了一个它能自行改写的运行时——而且这十三条口的返回里没有一处明文 key。
    */
   'llm.settings.catalog': { args: []; returns: LlmProviderView[] };
   /** 两条腿的端点 / 模型名 / 掩码密钥读数，加密钥存储的事实（未加密、解不开都要播出来）。 */
   'llm.settings.read': { args: []; returns: LlmSettingsView };
-  /** 保存：写持久层 + 写密钥库 + 热改运行时，回的是保存后的读数（明文只进不出）。 */
-  'llm.settings.apply': { args: [input: LlmSettingsApplyInput]; returns: LlmSettingsView };
-  /** 连通性测试：经 `llm.chat` 发一次最小请求，失败也回结构化原因。 */
+  /** 这条腿的连通性测试：经 `llm.chat` 发一次最小请求，失败也回结构化原因。 */
   'llm.settings.check': { args: [leg?: LlmLegName]; returns: LlmCheckView };
-  /** 删掉某条腿已存的密钥（界面上的「删除密钥」），端点与模型名不动。 */
+  /** 删掉某条腿**兜底那把**已存的密钥（`llm.chat` / `llm.embed` 那两格），端点与模型名不动。 */
   'llm.settings.clearKey': { args: [leg: LlmLegName]; returns: LlmSettingsView };
+  /** 池里全部提供商实例（spec 7.2-02）：每行带掩码末 4 位与已入库条数。 */
+  'llm.settings.listProviders': { args: []; returns: LlmProviderInstanceView[] };
+  /** 添加或修改一个实例（spec 7.2-03 / 10）：地址归一后进表，明文 key 只进密钥库那一格。 */
+  'llm.settings.saveProvider': { args: [input: LlmProviderSaveInput]; returns: LlmProviderInstanceView };
+  /** 删一个实例（spec 7.2-09）：连带删它的清单、清它的凭证、把引用它的腿回落成未绑定。 */
+  'llm.settings.deleteProvider': { args: [providerId: string]; returns: LlmProviderInstanceView[] };
+  /** 某家已入库的模型清单（角色绑定那两只下拉的候选源）。 */
+  'llm.settings.listModels': { args: [providerId: string]; returns: LlmModelView[] };
+  /** 问一家网关要它的模型清单（spec 7.2-05 / 07）：只播报，一个字节都不入库。 */
+  'llm.settings.fetchModels': { args: [providerId: string]; returns: LlmFetchModelsView };
+  /** 勾中的那几条入库（spec 7.2-06）：已在清单里的原样跳过，一家都没有勾就回空。 */
+  'llm.settings.addModels': { args: [input: LlmProviderAddModelsInput]; returns: LlmModelView[] };
+  /** 从清单里去掉一条（spec 7.2-06 的反向）；正被某条腿绑着的那条由界面先挡住。 */
+  'llm.settings.removeModel': { args: [providerId: string, model: string]; returns: LlmModelView[] };
+  /** 把一条腿指到某个实例的某条已入库模型（spec 7.2-11 / 12）：只写实例 id 与模型名两格，不复制地址。 */
+  'llm.settings.bindRole': { args: [input: LlmRoleBindInput]; returns: LlmSettingsView };
+  /** 点名测某一家连通性（spec 7.2-04）：打的是那个实例自己的地址与 key，不碰全局绑定。 */
+  'llm.settings.checkProvider': { args: [providerId: string, model: string]; returns: LlmCheckView };
   /** 外发样例：唯一经过闸门的外发入口，目标只有本地 fixture（AGENTS.md §7.2）。 */
   'outbound.sample.send': { args: [request: SendSampleRequest]; returns: SendReceiptView };
   /**
