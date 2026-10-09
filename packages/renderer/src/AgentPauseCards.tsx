@@ -17,6 +17,7 @@ import { Check, CircleAlert, Clock, ShieldQuestion, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentPauseAnswer, AgentPauseView, DeliverApprovalView, ToolDescriptorView } from '@auto-cc/shared';
+import { greetTargetLabel } from '@auto-cc/shared';
 import { formatClock } from './format';
 import { Banner, DeskButton, DeskTextarea } from './ui/controls';
 import type { PendingDecision, ResolvedPause } from './useAgentPause';
@@ -159,6 +160,10 @@ function DeliverApprovalCard({
   onDecide: (answer: AgentPauseAnswer) => void;
 }) {
   const { t } = useTranslation();
+  // 「这一发递给谁」收在同一个 `greetTargetLabel`（会话坐标优先，裁定⑲ 搬到投递）：
+  // 按岗位投递时它逐字等于 `approval.jobId`，按会话投递时它是那个联系人——摆 null 就是把
+  // 一次真实的投递画成人读不懂的一格。标记名 `deliver-job-id` 不改（spec 6.2 的 markers 逐字保留）。
+  const targetLabel = greetTargetLabel(approval);
   return (
     <Banner
       tone="amber"
@@ -167,7 +172,7 @@ function DeliverApprovalCard({
         'pause-request-id': approval.approvalId,
         'pause-kind': 'approval',
         'pause-origin': 'deliver',
-        'deliver-job-id': approval.jobId,
+        'deliver-job-id': targetLabel,
         'pause-expires-at': String(approval.expiresAt),
       }}
       className="mt-2"
@@ -176,7 +181,7 @@ function DeliverApprovalCard({
         <p className="text-xs font-semibold">{t('agent.pause.deliverHeading')}</p>
         <p className="mt-1 break-words text-[11px] text-slate-300">
           {t('deliver.pendingRow', {
-            jobId: approval.jobId,
+            jobId: targetLabel,
             title: approval.title,
             company: approval.company,
             fileName: approval.attachment.fileName,

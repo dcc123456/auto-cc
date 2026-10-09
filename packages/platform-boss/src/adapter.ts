@@ -573,18 +573,26 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * ④ 变化后的文本里含知识包声明的成功样式。
    * ②③④ 任何一段不成立就返回 `sent:false`（编排层据此不落账）；①是抛错，因为它意味着
    *    「这个目标别再试了」，与「这条没发出去但目标还在」在界面上是两种处置（spec 2.6-07）。
-   * @param jobId 目标岗位标识
+   * @param target 落点坐标：岗位（可用 `targetParam` 直接拼上传页地址的站点）或会话对象（真 BOSS 那一类，
+   *        投递口长在会话里，先用 `selectConversation` 把页面落到那一条上；裁定⑲ 的同一形状，plan §7 第 14 条）
    * @param attachment 编排层已校验（存在 / pdf / 大小上限）并算好 sha256 的简历文件
    * @returns 外发结局；`ledgerKey` 恒为 null，理由与 `chat` 同一条——计量归编排层
-   * @throws 目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮；知识包没登记下架文案时这一段不判）；
-   *         jobId 为空 `INVALID_ARGUMENT`；
+   * @throws 两种坐标都没给 `INVALID_ARGUMENT`（空目标不向页面发出任何动作）；
+   *         目标已下架 `DELIVER_TARGET_OFFLINE`（不注入文件、不点按钮；知识包没登记下架文案时这一段不判）；
    *         缺投递段 `KNOWLEDGE_PACK_INVALID`；上传控件或确认键未取证 `LOCATOR_UNVERIFIED`（不打开上传页）；
+   *         会话坐标选不出目标 `CONVERSATION_TARGET_NOT_FOUND`；
    *         定位/注入自身的失败照 `browser.act` 原样抛出
    */
-  const sendResume = async (jobId: string, attachment: ResumeAttachment): Promise<OutboundResult> => {
+  const sendResume = async (target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundResult> => {
     const knowledge = deliverKnowledge();
-    if (!jobId.trim()) {
-      throw new AppError('INVALID_ARGUMENT', '投递必须给出目标岗位', 'platform.boss', { platform: pack.platform });
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = target.jobId?.trim() ?? '';
+    // 与 `chat` / `readReplies` 同一道门口：两只坐标都没给就没有目标实体，
+    // 页面上下一步要动的每一条元素都不该被碰到（spec 8.1-04 的「不发起任何动作」含导航）。
+    if (!conversationTarget && !jobId) {
+      throw new AppError('INVALID_ARGUMENT', '投递必须给出目标岗位或会话对象', 'platform.boss', {
+        platform: pack.platform,
+      });
     }
     // 与 `chat` 同一条纪律：两条要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
     const uploadSpec = outboundLocator(knowledge.uploadInput);
@@ -593,8 +601,14 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const skippedOfflineCheck = knowledge.offlinePattern
       ? ''
       : '（下架文案未登记：这一条没做在招校验，页面自己说的是不是"还在招"只有你看得见）';
-    const url = pageUrlFor(knowledge, jobId);
-    if (url) await page.navigate(url);
+    // 会话坐标优先（与 `chat` 的取舍逐字同一句话）：按行选中是"改页面状态"，投递口就长在那条会话里，
+    // 而岗位地址那一路是"换一页"。走会话时**绝不**把联系人的名字写进 `deliver.targetParam`（那是岗位）。
+    if (conversationTarget) {
+      await selectConversation(conversationTarget);
+    } else {
+      const url = pageUrlFor(knowledge, jobId);
+      if (url) await page.navigate(url);
+    }
     const before = await readStatusLine(knowledge.statusLine);
     if (knowledge.offlinePattern && before.includes(knowledge.offlinePattern)) {
       throw new AppError(
@@ -602,7 +616,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         `目标岗位已下架：状态行回读到「${knowledge.offlinePattern}」`,
         'platform.boss',
         {
-          jobId,
+          jobId: jobId || null,
+          conversationTarget: conversationTarget || null,
           status: before,
         },
       );

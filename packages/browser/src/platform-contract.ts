@@ -677,12 +677,14 @@ export interface PlatformAdapter {
   chat(target: GreetTarget, text: string): Promise<OutboundResult>;
   /**
    * 发送简历附件（外发动作，必经额度闸门——但闸门在编排层，适配器一次都不进）。
-   * @param jobId 目标岗位
+   * @param target 落点坐标，与 `chat` 用**同一只** `GreetTarget`（裁定⑲ 的同一形状换到投递那一路，
+   *        落点链见 plan §7 第 14 条）：真 BOSS 的投递口长在会话里，那一发没有岗位坐标可填，只有会话对象；
+   *        知识包有 `deliver.targetParam` 的站点仍按 `jobId` 拼上传页地址
    * @param attachment 编排层已校验并算好 hash 的简历文件；传结构而不是只传路径，
    *        是为了让回读侧能直接比对「塞进控件的就是这几个字节」，不必再算一次（plan §13.3 第 1 条 / §2.2）
    * @returns 外发结局；目标已下架时抛 `DELIVER_TARGET_OFFLINE` 而不是回 `sent:false`（两者界面处置不同，spec 2.6-07）
    */
-  sendResume(jobId: string, attachment: ResumeAttachment): Promise<OutboundResult>;
+  sendResume(target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundResult>;
   /**
    * 读取会话里的新回复。
    * @param target 落点坐标；与 `chat` 用**同一只**判据选中会话，否则读到的就是"屏幕上恰好选中的那条"

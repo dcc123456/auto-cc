@@ -125,6 +125,7 @@ function seedTenThousandRows(): void {
         ledgerId: index + 1,
         platform: 'boss',
         jobId: `scale-d-${String(index)}`,
+        conversationTarget: null,
         snapshotId: 'scale-snap',
         ts: at,
       });

@@ -45,6 +45,7 @@ import type {
   DeliverReceiptView,
   DeliverRequestView,
 } from '@auto-cc/shared';
+import { greetTargetLabel } from '@auto-cc/shared';
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -127,18 +128,32 @@ export type DeliverConfig = z.output<typeof deliverSchema>;
  *
  * `title` / `company` 只服务于确认卡片：JD 行的查询面还没接（plan §13.7 第 1 条），
  * 所以「递给谁」这句话由调用方带进来，而不是这里去库里猜。
+ *
+ * `jobId` / `conversationTarget` 至少给一只（裁定⑲ 的同一形状搬到投递那一路，plan §7 第 14 条）：
+ * 真 BOSS 的投递口长在会话里，那一发只有会话坐标。判据只写在这一处，工具面与 `stage` 都从这里出去，
+ * 两只都空时 `perform` 会以 `INVALID_ARGUMENT` 拒下——一次页面动作都不发起。
  */
-const deliverRequestSchema = z.strictObject({
-  platform: z.string().min(1),
-  jobId: z.string().min(1),
-  filePath: z.string().min(1).optional(),
-  title: z.string().min(1).optional(),
-  company: z.string().min(1).optional(),
-  /** 这次用的是哪一版导出产物（`resume_snapshots.snapshot_id`）；省略表示只给了文件、没有导出上下文（spec 3.7-02） */
-  snapshotId: z.string().min(1).optional(),
-  workflowRunId: z.string().min(1).nullish(),
-  nowMs: z.number().int().positive().optional(),
-});
+const deliverRequestSchema = z
+  .strictObject({
+    platform: z.string().min(1),
+    jobId: z.string().min(1).optional(),
+    conversationTarget: z.string().min(1).optional(),
+    filePath: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    company: z.string().min(1).optional(),
+    /** 这次用的是哪一版导出产物（`resume_snapshots.snapshot_id`）；省略表示只给了文件、没有导出上下文（spec 3.7-02） */
+    snapshotId: z.string().min(1).optional(),
+    workflowRunId: z.string().min(1).nullish(),
+    nowMs: z.number().int().positive().optional(),
+  })
+  .superRefine((request, ctx) => {
+    if (!request.jobId && !request.conversationTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'jobId 与 conversationTarget 至少给一只：前者是岗位坐标，后者是会话坐标（P8 裁定⑲）',
+      });
+    }
+  });
 
 /**
  * 一次已备好、尚未发送的投递（`stage` 的产物，`commit` 的输入）。
@@ -148,7 +163,10 @@ const deliverRequestSchema = z.strictObject({
  */
 export type StagedDelivery = {
   platform: string;
-  jobId: string;
+  /** 岗位坐标；按会话列表行投递那一路是 null（裁定⑲） */
+  jobId: string | null;
+  /** 会话坐标；按岗位地址直接打开上传页那一路（仿站知识包有 `targetParam`）是 null */
+  conversationTarget: string | null;
   title: string;
   company: string;
   attachment: ResumeAttachment;
@@ -277,7 +295,10 @@ export class OutboundDeliverService extends Service {
     const decision = evaluateDeliverTiming(
       {
         nowMs: staged.nowMs,
-        replied: jdReplyStatusOf(this.ctx)?.replyStatus(staged.platform, staged.jobId) ?? null,
+        // 会话那一路（只有 `conversationTarget`）在 JD 库里没有行可问，读数因此是 `null` = 问不到，
+        // 由 `deliver-timing.ts` 的 null 分支判成"先不递"。这里不给它猜一个"已经回复过"：
+        // 无人值守时宁可押后一次，也不替页面编造判据（裁定⑲ 搬到投递，plan §7 第 14 条）。
+        replied: staged.jobId ? (jdReplyStatusOf(this.ctx)?.replyStatus(staged.platform, staged.jobId) ?? null) : null,
         gapRemainingMs: gapRemainingMs(
           this.ledger.latestActionTs(DELIVER_ACTION),
           asApp(this.ctx)['outbound.throttle'].nextGapMs(),
@@ -302,18 +323,18 @@ export class OutboundDeliverService extends Service {
    * 而两条路径必须给出**同一个**答案——占位格报出来的文件和真正递出去的文件不是同一份，
    * 那一格就成了摆设（AGENTS.md §2.2）。
    * @param requested 请求里显式给的路径（工具/界面入口用得上）
-   * @param jobId 只用于把错误说得清（哪个岗位等这份简历）
+   * @param targetLabel 只用于把错误说得清（这一发要递给哪个目标——岗位或会话对象，见 `greetTargetLabel`）
    * @returns 简历文件的绝对路径
    * @throws 两个来源都没给时 `INVALID_ARGUMENT`
    */
-  private resolveResumePath(requested: string | undefined, jobId: string): string {
+  private resolveResumePath(requested: string | undefined, targetLabel: string): string {
     const filePath = requested ?? this.config.resumeFile;
     if (!filePath) {
       throw new AppError(
         'INVALID_ARGUMENT',
         '没有要投递的简历文件：请求里没带 filePath，配置里也没设 resumeFile',
         'outbound.deliver',
-        { jobId },
+        { targetId: targetLabel },
       );
     }
     return filePath;
@@ -337,10 +358,14 @@ export class OutboundDeliverService extends Service {
         'outbound.deliver',
       );
     }
-    const { platform, jobId, title, company } = parsed.data;
+    const { platform, jobId, conversationTarget, title, company } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = parsed.data.workflowRunId ?? null;
-    const filePath = this.resolveResumePath(parsed.data.filePath, jobId);
+    // 幂等键与额度目标用哪一维：与打招呼收在同一个 `greetTargetLabel`（会话坐标优先），于是
+    // 「同一条会话里再递一遍」与「同一个岗位再递一遍」在库里都是同一个 target。
+    // 岗位类站点上 `conversationTarget` 一路是 undefined，读数退回 `jobId`，行为一字不变（裁定⑲）。
+    const targetKey = greetTargetLabel({ jobId, conversationTarget });
+    const filePath = this.resolveResumePath(parsed.data.filePath, targetKey);
 
     // 渠道在准备工作里就问（同打招呼的理由）：平台名写错要在**读文件、算 hash 之前**就失败，
     // 而不是让人在界面上确认完一份永远递不出去的简历。
@@ -354,17 +379,22 @@ export class OutboundDeliverService extends Service {
     const attachment = this.readAttachment(filePath);
 
     // 幂等判据与打招呼同一条：(action, target, run) 有没有落成过一行（spec 2.5-13 的口径搬到投递）。
-    if (this.ledger.countFor(DELIVER_ACTION, jobId, runId) > 0) {
+    if (this.ledger.countFor(DELIVER_ACTION, targetKey, runId) > 0) {
       throw new AppError(
         'OUTBOUND_ALREADY_SENT',
-        `目标 ${jobId} ${alreadySentScope(runId)}已经递过简历，不再重复发送`,
+        `目标 ${targetKey} ${alreadySentScope(runId)}已经递过简历，不再重复发送`,
         'outbound.deliver',
-        { jobId, workflowRunId: runId },
+        {
+          // 键名跟着「这一发作用到的实体」走，不再固定叫 jobId（同裁定⑲ 在打招呼那一路的改法）。
+          targetId: targetKey,
+          workflowRunId: runId,
+        },
       );
     }
     return {
       platform,
-      jobId,
+      jobId: jobId ?? null,
+      conversationTarget: conversationTarget ?? null,
       title: title ?? '',
       company: company ?? '',
       attachment,
@@ -445,7 +475,10 @@ export class OutboundDeliverService extends Service {
    *         `OUTBOUND_CHANNEL_MISSING`（stage 之后适配器被摘掉）
    */
   commit = async (staged: StagedDelivery, signal?: AbortSignal): Promise<DeliverReceiptView> => {
-    const { platform, jobId, workflowRunId, nowMs, source, snapshotId, attachment } = staged;
+    const { platform, jobId, conversationTarget, workflowRunId, nowMs, source, snapshotId, attachment } = staged;
+    // 额度目标与幂等键用同一个读数（`greetTargetLabel`，裁定⑲ 搬到投递）：两处各写一遍取舍，
+    // 迟早会漂成"账上记的是岗位、拦重复用的是联系人"。
+    const targetKey = greetTargetLabel(staged);
 
     // 风险确认在闸门之前（spec 2.7-06）：没签过字的人不该先看到「额度不足」，
     // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
@@ -465,7 +498,7 @@ export class OutboundDeliverService extends Service {
 
     // 到量即在等待之前停（spec 2.6 的同条判据）。留痕由闸门的 `enforce` 负责：
     // 被拒要进 `usage_denials`（spec 5.3-12），编排层自己比对 `check` 就把那条性质漏掉了。
-    this.gate.enforce(DELIVER_ACTION, { targetId: jobId, workflowRunId, nowMs });
+    this.gate.enforce(DELIVER_ACTION, { targetId: targetKey, workflowRunId, nowMs });
 
     // 频控的钟是账本里最近一条 deliver，与打招呼各数各的间隔（两套动作互不背锅）。
     // 减法抽在 `gapRemainingMs` 里（择机规则也算同一段，§2.2 不许留两份算术）；这里再掷一次间隔是
@@ -496,25 +529,31 @@ export class OutboundDeliverService extends Service {
 
     const { value, ledgerId } = await this.gate.perform(
       DELIVER_ACTION,
-      { targetId: jobId, workflowRunId, nowMs: nowMs + waitedMs, source },
+      { targetId: targetKey, workflowRunId, nowMs: nowMs + waitedMs, source },
       async () => {
-        const outcome = await channel.send(jobId, attachment);
+        // 两种坐标原样递给适配器：谁在页面上定位会话由站点知识包决定，编排层不做映射（裁定⑲ 同一条）。
+        // `GreetTarget` 用「省略」表达"这一发没有那个坐标"，本服务与库里用 null 表达，这里只做形状换算。
+        const outcome = await channel.send(
+          { jobId: jobId ?? undefined, conversationTarget: conversationTarget ?? undefined },
+          attachment,
+        );
         // 页面没确认递出去就不该有账：闸门只在 task 成功后落账，抛在这里正好复用那条性质（spec 2.6-03）。
         if (!outcome.sent) {
-          throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.deliver', { jobId });
+          throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.deliver', { targetId: targetKey });
         }
         return outcome.reason;
       },
     );
     // 落账之后立刻记一条经过（spec 3.7-02）：与账本行同一个 `ts` 基准、以 `ledgerId` 为主键一一对齐，
     // 于是「这份简历投给了哪个 JD、当时是哪一版」在库里问得出，而账本仍然只数额度。
-    this.deliveryRecords.record({ ledgerId, platform, jobId, snapshotId, ts: nowMs + waitedMs });
+    this.deliveryRecords.record({ ledgerId, platform, jobId, conversationTarget, snapshotId, ts: nowMs + waitedMs });
     this.ctx.logger.info(
-      `简历已投递并落账：目标 ${jobId} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)} · 快照 ${snapshotId ?? '（请求未带快照引用）'}`,
+      `简历已投递并落账：目标 ${targetKey} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)} · 快照 ${snapshotId ?? '（请求未带快照引用）'}`,
     );
     return {
       platform,
       jobId,
+      conversationTarget,
       title: staged.title,
       company: staged.company,
       attachment: attachmentView(attachment),
@@ -541,6 +580,7 @@ export class OutboundDeliverService extends Service {
       return {
         platform: staged.platform,
         jobId: staged.jobId,
+        conversationTarget: staged.conversationTarget,
         title: staged.title,
         company: staged.company,
         attachment: attachmentView(staged.attachment),
@@ -597,10 +637,14 @@ export class OutboundDeliverService extends Service {
    */
   private async awaitApproval(staged: StagedDelivery, waitedMs: number, signal?: AbortSignal): Promise<void> {
     const timeoutMs = this.config.approveTimeoutMs;
+    // 卡片与日志上那句「递给谁」用同一个 `greetTargetLabel`：这一发作用到的实体是会话对象时，
+    // 摆一个 null 岗位 id 出来就是让人对着空格做决定（裁定⑲）。
+    const targetKey = greetTargetLabel(staged);
     const ticket = this.approvals.open(
       {
         platform: staged.platform,
         jobId: staged.jobId,
+        conversationTarget: staged.conversationTarget,
         title: staged.title,
         company: staged.company,
         attachment: attachmentView(staged.attachment),
@@ -611,7 +655,7 @@ export class OutboundDeliverService extends Service {
     // 通道在 `open()` 返回之前就已经把它登记上了，所以这句话的顺序由类型保证，不需要额外判据。
     this.ctx.emit('outbound/approval-requested', approvalView(ticket.request));
     this.ctx.logger.info(
-      `等待投递确认：单 ${ticket.request.requestId} · 目标 ${staged.jobId} · 文件 ${staged.attachment.fileName} · 频控已等待 ${String(waitedMs)}ms`,
+      `等待投递确认：单 ${ticket.request.requestId} · 目标 ${targetKey} · 文件 ${staged.attachment.fileName} · 频控已等待 ${String(waitedMs)}ms`,
     );
     const outcome = await ticket.outcome;
     // 只有「人点了是」这一种定局放行；其余三条分支每一句都带「未投递」，与 §8 第 3 条的取向一致。
@@ -619,9 +663,9 @@ export class OutboundDeliverService extends Service {
     if (outcome.kind === 'answered') {
       throw new AppError(
         'OUTBOUND_APPROVAL_DENIED',
-        `未投递：用户在确认卡片上点了拒绝（目标 ${staged.jobId}）`,
+        `未投递：用户在确认卡片上点了拒绝（目标 ${targetKey}）`,
         'outbound.deliver',
-        { approvalId: ticket.request.requestId, jobId: staged.jobId },
+        { approvalId: ticket.request.requestId, targetId: targetKey },
       );
     }
     if (outcome.kind === 'timed-out') {
@@ -629,21 +673,21 @@ export class OutboundDeliverService extends Service {
         'OUTBOUND_APPROVAL_DENIED',
         `未投递：等待确认超过 ${String(timeoutMs)}ms，按拒绝处理`,
         'outbound.deliver',
-        { approvalId: ticket.request.requestId, jobId: staged.jobId },
+        { approvalId: ticket.request.requestId, targetId: targetKey },
       );
     }
     // `cancelled` 有两种来路且给用户的处置不同，所以不并成一句话：让出（人按了暂停）与等待方自己消失
     // （服务被热改配置重建）。后者原来的文案是「用户在确认卡片上点了拒绝」，那是句假话——没人点过任何东西。
     if (signal?.aborted) {
       throw new AppError('WORKFLOW_STEP_FAILED', '工作流已让出，投递等待中止，未发送', 'outbound.deliver', {
-        jobId: staged.jobId,
+        targetId: targetKey,
       });
     }
     throw new AppError(
       'OUTBOUND_APPROVAL_DENIED',
       '未投递：投递服务在这一次等待期间被重建，等待已按「未获批准」收掉',
       'outbound.deliver',
-      { approvalId: ticket.request.requestId, jobId: staged.jobId },
+      { approvalId: ticket.request.requestId, targetId: targetKey },
     );
   }
 
@@ -776,10 +820,13 @@ export class OutboundDeliverService extends Service {
         id: 'outbound.deliver.perform',
         titleKey: 'agent.tool.labels.deliverPerform',
         description: '向指定岗位投递简历附件，经闸门判定并按审批档位落一条 deliver 账',
+        // 两只坐标都是可选项：**"至少给一只"这条判据只在 `deliverRequestSchema` 一处**（AGENTS.md §2.5），
+        // 工具面缺目标时 `perform` 会以 INVALID_ARGUMENT 拒下，不会多发一次口子。
         input: z.strictObject({
           request: z.strictObject({
             platform: z.string().min(1),
-            jobId: z.string().min(1),
+            jobId: z.string().min(1).optional(),
+            conversationTarget: z.string().min(1).optional(),
             filePath: z.string().min(1).optional(),
             title: z.string().min(1).optional(),
             company: z.string().min(1).optional(),
@@ -807,12 +854,16 @@ export class OutboundDeliverService extends Service {
         run: async ({ request }) => {
           const receipt = await this.perform(request);
           return toolResult(receipt, {
+            // 「递给谁」这句读的是同一把键（`greetTargetLabel`）：会话那一路没有岗位 id，
+            // 摆成 `岗位 null` 就是把一次真实投递写成人看不懂的记录（裁定⑲）。
             summary:
-              `岗位 ${receipt.jobId} 的简历投递${receipt.committed ? '已发出' : '只暂存未发送（按当前审批档位）'}` +
+              `${greetTargetLabel(receipt)} 的简历投递${receipt.committed ? '已发出' : '只暂存未发送（按当前审批档位）'}` +
               (receipt.ledgerId === null ? '' : `，账本第 ${String(receipt.ledgerId)} 行`) +
               ` · 附件 ${receipt.attachment.fileName}`,
+            // 证据引用里只挂**解析得了的那一维**（与 `outbound.greet.perform` 同一条）：
+            // 纯会话投递没有岗位坐标，硬拼一个 `job:boss/null` 只会长成一条永远读不到的悬空引用。
             evidenceRefs: [
-              `job:${receipt.platform}/${receipt.jobId}`,
+              ...(receipt.jobId ? [`job:${receipt.platform}/${receipt.jobId}`] : []),
               ...(receipt.ledgerId === null ? [] : [`ledger:${String(receipt.ledgerId)}`]),
               ...(receipt.snapshotId === null ? [] : [`snapshot:${receipt.snapshotId}`]),
             ],

@@ -609,11 +609,13 @@ export type DeliverOutcome = GreetOutcome;
 export type ResumeDeliveryChannel = {
   /**
    * 往指定目标递一份简历文件。
-   * @param targetId 会话对象标识（P2 是平台侧 jobid）
+   * @param target 落点坐标（岗位 / 会话，与 `GreetChannel.send` 同一只 `GreetTarget`）：
+   *        真 BOSS 的投递口长在会话里，那一发只有会话坐标，把联系人名字写进 `jobId` 会让幂等键与
+   *        额度目标那一列同时装两种实体（裁定⑲ 的理由原样搬到投递，plan §7 第 14 条）
    * @param attachment 编排层已经校验过（存在、是 pdf、在大小上限内）并算好 hash 的文件
    * @returns 页面回读出的结局；「目标已下架」这类结构性失败由实现方抛 `DELIVER_TARGET_OFFLINE`，不用 `sent:false` 表达
    */
-  send(targetId: string, attachment: ResumeAttachment): Promise<DeliverOutcome>;
+  send(target: GreetTarget, attachment: ResumeAttachment): Promise<DeliverOutcome>;
 };
 
 /**
@@ -1672,7 +1674,10 @@ export interface DeliverAttachmentView {
 export interface DeliverApprovalView {
   approvalId: string;
   platform: string;
-  jobId: string;
+  /** 这一发要递的**岗位**坐标；按会话列表行投递那一路是 null（不拿联系人名字冒充 jobid，裁定⑲ 搬到投递） */
+  jobId: string | null;
+  /** 这一发要递的**会话**坐标；按岗位地址打开上传页那一路是 null */
+  conversationTarget: string | null;
   title: string;
   company: string;
   attachment: DeliverAttachmentView;

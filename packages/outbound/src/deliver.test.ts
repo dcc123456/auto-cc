@@ -17,11 +17,14 @@ import {
   type DeliverApprovalView,
   type DeliverOutcome,
   type Fiber,
+  type GreetTarget,
   type ResumeAttachment,
   type ResumeChannelSource,
   type ResumeDeliveryChannel,
+  type ToolResult,
   type WorkflowNodeSpec,
 } from '@auto-cc/core';
+import { greetTargetLabel } from '@auto-cc/shared';
 import { ConfigService } from '@auto-cc/plugin-config';
 import {
   DEFAULT_DAILY_LIMITS,
@@ -224,8 +227,9 @@ function fakeChannel(outcome: DeliverOutcome | Error = { sent: true, reason: '�
   return {
     calls,
     channel: {
-      send: (targetId: string, attachment: ResumeAttachment) => {
-        calls.push({ targetId, attachment });
+      send: (target: GreetTarget, attachment: ResumeAttachment) => {
+        // 读数记成 `greetTargetLabel`：渠道手上实际作用的目标实体，与账本 targetId 同一把键（裁定⑲ 搬到投递）。
+        calls.push({ targetId: greetTargetLabel(target), attachment });
         return outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome);
       },
     },
@@ -234,15 +238,24 @@ function fakeChannel(outcome: DeliverOutcome | Error = { sent: true, reason: '�
 
 /**
  * 一份合法的投递请求。
- * @param over 覆盖项（目标、文件路径、所属运行、快照引用）
+ * @param over 覆盖项（目标坐标、文件路径、所属运行、快照引用）
  * @returns 交给 `perform` / `stage` 的未知值
  */
 function request(
-  over: Partial<{ jobId: string; filePath: string | undefined; workflowRunId: string | null; snapshotId: string }> = {},
+  over: Partial<{
+    jobId: string | undefined;
+    conversationTarget: string | undefined;
+    filePath: string | undefined;
+    workflowRunId: string | null;
+    snapshotId: string;
+  }> = {},
 ) {
   return {
     platform: 'boss',
-    jobId: over.jobId ?? 'job-1001',
+    // 「没给岗位」和「给了 undefined」在这一路是同一件事，所以照 greet 用例写成 `in over`：
+    // 会话那一路要的就是这个区别，`?? 'job-1001'` 会把「不传岗位」永远变回默认岗位。
+    jobId: 'jobId' in over ? over.jobId : 'job-1001',
+    conversationTarget: over.conversationTarget,
     filePath: 'filePath' in over ? over.filePath : join('unused', 'resume.pdf'),
     title: '资深前端工程师',
     company: '示例科技',
@@ -324,6 +337,24 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
     expect(deliver.pending()).toEqual([]);
   });
 
+  it('会话那一发的确认单：jobId 是 null 而会话坐标带着走，界面因此不会对着空格做决定', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver } = await boot({ channel: hand.channel });
+    const filePath = writeResume(dir);
+    const inFlight = deliver.perform(request({ jobId: undefined, conversationTarget: '示例科技', filePath }));
+    await nap();
+
+    const card = deliver.pending()[0];
+    // 单子上两只坐标**都在**（这一路岗位那只是 null）：渲染层按 `greetTargetLabel` 拼文案，
+    // 只带一只就会画成空白，等于让人对着空白做决定。
+    expect(card).toMatchObject({ jobId: null, conversationTarget: '示例科技' });
+
+    deliver.resolveApproval(card!.approvalId, true);
+    const receipt = await inFlight;
+    expect(receipt).toMatchObject({ committed: true, jobId: null, conversationTarget: '示例科技' });
+    expect(hand.calls.map((call) => call.targetId)).toEqual(['示例科技']);
+  });
+
   it('等人表态是一次事件推送：载荷与 pending() 的读数逐字相同，定局后不再补发（spec 2.6-01）', async () => {
     const hand = fakeChannel();
     const { ctx, dir, deliver } = await boot({ channel: hand.channel });
@@ -370,7 +401,11 @@ describe('投递的档位与人工确认（spec 2.6-01 / 2.6-06）', () => {
     const pending = deliver.perform(request({ filePath: writeResume(dir) }));
     await nap();
     deliver.resolveApproval(deliver.pending()[0]!.approvalId, false);
-    await expect(pending).rejects.toMatchObject({ code: 'OUTBOUND_APPROVAL_DENIED', details: { jobId: 'job-1001' } });
+    // 拒因里的坐标键跟着「这一发作用到哪个实体」走：按岗位那一发读出来就是岗位 id，但键名不再固定叫 jobId。
+    await expect(pending).rejects.toMatchObject({
+      code: 'OUTBOUND_APPROVAL_DENIED',
+      details: { targetId: 'job-1001' },
+    });
     expect(hand.calls).toHaveLength(0);
     expect(ledger.count()).toBe(0);
     expect(deliver.pending()).toEqual([]);
@@ -546,7 +581,7 @@ describe('投递的账本、额度与频控（spec 2.6-02 / 03 / 05）', () => {
     const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
     await expect(deliver.perform(request({ filePath: writeResume(dir) }))).rejects.toMatchObject({
       code: 'OUTBOUND_NOT_DELIVERED',
-      details: { jobId: 'job-1001' },
+      details: { targetId: 'job-1001' },
     });
     expect(hand.calls).toHaveLength(1);
     expect(ledger.count()).toBe(0);
@@ -576,13 +611,63 @@ describe('投递的账本、额度与频控（spec 2.6-02 / 03 / 05）', () => {
     await deliver.perform(request({ filePath, workflowRunId: 'run-1' }));
     await expect(deliver.perform(request({ filePath, workflowRunId: 'run-1' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { jobId: 'job-1001', workflowRunId: 'run-1' },
+      details: { targetId: 'job-1001', workflowRunId: 'run-1' },
     });
     // 换一个 run 或换一个目标仍可递（与打招呼同一口径）。
     await deliver.perform(request({ filePath, jobId: 'job-2002', workflowRunId: 'run-1' }));
     await deliver.perform(request({ filePath, workflowRunId: 'run-2' }));
     expect(hand.calls).toHaveLength(3);
     expect(ledger.count()).toBe(3);
+  });
+
+  it('只有会话坐标那一发：额度目标与幂等键都是联系人本身，岗位维度是 null（裁定⑲ 搬到投递）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    const receipt = await deliver.perform(
+      request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-1', filePath }),
+    );
+    expect(receipt).toMatchObject({ jobId: null, conversationTarget: '示例科技', committed: true });
+    // 渠道手上拿到的是"这一发作用到哪个实体"的同一把键：会话坐标优先（`greetTargetLabel` 是唯一口径）。
+    expect(hand.calls).toEqual([
+      {
+        targetId: '示例科技',
+        attachment: {
+          path: filePath,
+          fileName: 'resume.pdf',
+          sizeBytes: RESUME_CONTENT.byteLength,
+          sha256: RESUME_SHA,
+        },
+      },
+    ]);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: '示例科技' });
+
+    // 同一条会话在同一 run 里再递一次：拦下来的是它自己，不是任何岗位。
+    await expect(
+      deliver.perform(request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-1', filePath })),
+    ).rejects.toMatchObject({
+      code: 'OUTBOUND_ALREADY_SENT',
+      details: { targetId: '示例科技', workflowRunId: 'run-1' },
+    });
+    // 同一会话换一个 run 仍可递；「示例科技」这个格子的岗位坐标也不该被顺手拦下。
+    await deliver.perform(
+      request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-2', filePath }),
+    );
+    await deliver.perform(request({ jobId: 'job-1001', conversationTarget: '示例科技', filePath }));
+    expect(hand.calls).toHaveLength(3);
+    expect(ledger.count()).toBe(3);
+  });
+
+  it('两只坐标都没给：INVALID_ARGUMENT 在 stage 就拒下，一次页面动作都不发（判据只在 schema 一处）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    const error = await deliver.perform(request({ jobId: undefined, filePath })).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe('INVALID_ARGUMENT');
+    expect((error as AppError).message).toContain('jobId 与 conversationTarget 至少给一只');
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
   });
 
   it('换个进程重挂同一份库：重复投递防护照样成立', async () => {
@@ -718,7 +803,7 @@ describe('投递前的文件校验与渠道现问（spec 2.6-06 / plan §12.13�
     expect(ledger.count()).toBe(1);
   });
 
-  it('入参不合法（缺 jobId / 带未知键）：INVALID_ARGUMENT，不读文件也不消耗额度', async () => {
+  it('入参不合法（两只坐标都没给 / 带未知键）：INVALID_ARGUMENT，不读文件也不消耗额度', async () => {
     const hand = fakeChannel();
     const { ctx, dir, deliver } = await boot({
       channel: hand.channel,
@@ -795,9 +880,11 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的投递侧）', (
  */
 describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', () => {
   /** 工具入参的形状：只带声明里有的那几样（`nowMs` / `workflowRunId` 是编排内部字段）。 */
-  const toolRequest = (over: { jobId?: string; filePath?: string } = {}) => ({
+  const toolRequest = (over: { jobId?: string | undefined; conversationTarget?: string; filePath?: string } = {}) => ({
     platform: 'boss',
-    jobId: over.jobId ?? 'job-1001',
+    // 与编排侧同一个口径：`jobId` 用「省略」表达没有岗位坐标，所以这里也必须能传进 undefined。
+    jobId: 'jobId' in over ? over.jobId : 'job-1001',
+    conversationTarget: over.conversationTarget,
     filePath: over.filePath,
     title: '资深前端工程师',
     company: '示例科技',
@@ -829,6 +916,25 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
     expect(hand.calls.map((call) => call.targetId)).toEqual(['job-1001']);
     expect(ledger.count()).toBe(1);
     expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: 'job-1001' });
+  });
+
+  it('工具路径上的会话那一发：摘要写的是联系人，证据引用里不长悬空的 job:boss/null', async () => {
+    const hand = fakeChannel();
+    const { dir, tools, ledger } = await boot({ channel: hand.channel, agentTools: true, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    const reply = await tools?.call('outbound.deliver.perform', {
+      request: toolRequest({ jobId: undefined, conversationTarget: '示例科技', filePath }),
+    });
+    expect(reply?.ok).toBe(true);
+    const result = (reply as { ok: true; result: ToolResult }).result;
+    const value = result.value as { ledgerId: number | null; jobId: string | null };
+    expect(value.jobId).toBeNull();
+    expect(result.value).toMatchObject({ committed: true, conversationTarget: '示例科技' });
+    expect(result.summary).toContain('示例科技 的简历投递已发出');
+    // 引用只挂解析得了的那一维：这条没有岗位坐标，凑一个 `job:boss/null` 就是永远读不到的假证据。
+    expect(result.evidenceRefs).toEqual([`ledger:${String(value.ledgerId)}`]);
+    expect(hand.calls.map((call) => call.targetId)).toEqual(['示例科技']);
+    expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: '示例科技' });
   });
 
   it('额度用尽时工具路径同样被闸门拦下：一次投递只记一条账，不会因为换了入口多扣', async () => {
@@ -989,6 +1095,8 @@ describe('投递记录与账本同生同灭（spec 3.7-02）', () => {
       ledgerId: receipt.ledgerId,
       platform: 'boss',
       jobId: 'job-1001',
+      // 岗位那一路没有会话坐标：库里存的是空串，读回来是 null（不编一个坐标出来）。
+      conversationTarget: null,
       snapshotId: 'snap-abc',
       // 与账本行同一个基准毫秒（`stage` 冻结的 nowMs + 频控实际等待），两张表的时间才认得出是同一次。
       ts: T0 + receipt.waitedMs,
@@ -1002,6 +1110,21 @@ describe('投递记录与账本同生同灭（spec 3.7-02）', () => {
     const receipt = await deliver.perform(request({ filePath: writeResume(dir) }));
     expect(receipt.snapshotId).toBeNull();
     expect(records.get(receipt.ledgerId!)?.snapshotId).toBeNull();
+  });
+
+  it('会话那一发记的是会话坐标：经过表里 job_id 是 null、conversation_target 落库（8.5-D，裁定⑲）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, records } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const receipt = await deliver.perform(
+      request({ jobId: undefined, conversationTarget: '示例科技', filePath: writeResume(dir), snapshotId: 'snap-abc' }),
+    );
+    expect(records.get(receipt.ledgerId!)).toMatchObject({
+      jobId: null,
+      conversationTarget: '示例科技',
+      snapshotId: 'snap-abc',
+    });
+    // 按岗位查的那一路查不到它——这一行不属于任何 JD 行，硬塞进 `listFor` 等于编一个岗位归属。
+    expect(records.listFor('job-1001')).toEqual([]);
   });
 
   it('suggest 档只准备：committed:false，账本与经过两张表都一行不增（2.6-06 的「到此为止」）', async () => {
@@ -1098,6 +1221,29 @@ describe('择机投递的接线（spec 5.7-03 的服务半边）', () => {
     expect((error as AppError).details).toMatchObject({
       blockers: ['问不到这条岗位的回复状态（库里没有它或平台层没挂载），先不递简历'],
     });
+    expect(hand.calls).toHaveLength(0);
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('会话那一发在 JD 库里没有行可问：择机按「问不到」推迟，且连一次都不去问（不替页面编判据）', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, jdStore, ledger } = await boot({
+      channel: hand.channel,
+      autonomy: 'auto',
+      // 替身里 'job-1001' 是「已回复」：如果编排层拿岗位坐标去猜，这一发就会被放行发出去。
+      replied: true,
+      timing: TIME_OPEN,
+    });
+    const filePath = writeResume(dir);
+    const error = await deliver
+      .perform(request({ jobId: undefined, conversationTarget: '示例科技', filePath, workflowRunId: 'run-1' }))
+      .catch((reason: unknown) => reason);
+    expect((error as AppError).code).toBe('OUTBOUND_DELIVER_DEFERRED');
+    expect((error as AppError).details).toMatchObject({
+      jobId: null,
+      blockers: ['问不到这条岗位的回复状态（库里没有它或平台层没挂载），先不递简历'],
+    });
+    expect(jdStore?.asks).toBe(0);
     expect(hand.calls).toHaveLength(0);
     expect(ledger.count()).toBe(0);
   });

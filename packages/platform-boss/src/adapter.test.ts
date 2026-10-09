@@ -48,6 +48,12 @@ import {
 // 漏写就会让单测去断言真站点的类名。唯一的例外是「按会话坐标选中联系人」那一组——会话列表那一双定位
 // 只在真包登记（仿站页没有那一屏，它靠 `targetParam` 直接拼地址），而那组仍然打假手、一次网络都不发。
 const pack = loadBossKnowledgePack({ pack: 'fixture' });
+/**
+ * 上线知识包（真 BOSS 的声明）：会话列表那一双定位只在真包里登记（仿站页没有那一屏，它靠
+ * `chat.targetParam` 直接拼地址），所以「按行选中目标」那一组用例与投递的会话那一腿都取它，
+ * 而两只手始终是 `createFakePage` / `createFakeAct`——读一份 JSON 声明不是访问真实平台（AGENTS.md §7.2）。
+ */
+const realPack = loadBossKnowledgePack({ pack: 'real' });
 const fibers: Fiber[] = [];
 
 /**
@@ -455,10 +461,9 @@ describe('读回复：页面全量读 + 稳定 id（spec 2.5-07、2.5-08）', ()
 });
 
 describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话面寻址）', () => {
-  // 这一组打在**上线知识包**的声明上，但两只手仍然是假的（`withScript` 造的 `createFakePage` /
-  // `createFakeAct`）：会话列表那一双定位只在真包里登记（仿站页没有那一屏），而 AGENTS.md §7.2 禁的是
-  // 访问真实平台，不是读一份 JSON 声明。整组用例一次网络都不发。
-  const realPack = loadBossKnowledgePack({ pack: 'real' });
+  // 这一组打在**上线知识包**的声明上（模块级那份 `realPack`），但两只手仍然是假的（`withScript` 造的
+  // `createFakePage` / `createFakeAct`）：会话列表那一双定位只在真包里登记（仿站页没有那一屏），而
+  // AGENTS.md §7.2 禁的是访问真实平台，不是读一份 JSON 声明。整组用例一次网络都不发。
   /** 会话列表的三行读数（第 2 行带首尾空格，用来验比对前两边都折叠过空白）。 */
   const companyRows = (): ExtractRowReading[] => [
     conversationRow(0, '甲公司'),
@@ -564,10 +569,28 @@ describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话�
 });
 
 describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07）', () => {
+  /**
+   * 一份「投递段来自仿站、会话列表那一双定位来自上线包」的组合知识包（8.5-D 的会话那一腿用它）。
+   *
+   * 为什么要拼：真包的投递段还没到货（8.5-C 缺的就是那一次在场读数），而这一组要演的是
+   * **按行选中的那一发在页面上怎么走**（先选中 → 再注文件 → 再点确认），不是真站点长什么样。
+   * 除这一双定位外全部沿用仿站声明，`targetParam` 也留着（仿站 chat 段有它），于是
+   * 「绝不把联系人名字写进岗位参数」这条判据在同一份 URL 形状上量得到。
+   */
+  const rowAddressing: KnowledgePack = {
+    ...pack,
+    chat: { ...pack.chat!, conversationRow: 'chatConversationRow', conversationRowLabel: 'chatConversationLabel' },
+    locators: {
+      ...pack.locators,
+      chatConversationRow: realPack.locators.chatConversationRow!,
+      chatConversationLabel: realPack.locators.chatConversationLabel!,
+    },
+  };
+
   it('成功那条：导航到投递页 → 注文件 → 点击前先起等待 → 状态行回读到成功样式', async () => {
     // 两次读状态行：第一次是「还在不在招」，第二次是「点完以后变成了什么」。
     const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递', '简历已送达，等待回复']));
-    const outcome = await adapter.sendResume('1001', RESUME);
+    const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
     expect(outcome).toEqual({
       sent: true,
       reason: '状态行回读到成功样式「简历已送达」：简历已送达，等待回复',
@@ -586,7 +609,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
 
   it('文件控件回读到的文件名与附件不一致 → sent:false 且不再点确认（防「定位到 A、文件塞进 B」）', async () => {
     const { adapter, act } = withScript(deliverScript(pack, ['等待投递']), { uploadedName: 'other-candidate.pdf' });
-    const outcome = await adapter.sendResume('1001', RESUME);
+    const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
     expect(outcome).toMatchObject({
       sent: false,
       reason: '文件控件回读到的文件名与附件不一致：页面「other-candidate.pdf」/ 附件「resume-2026.pdf」',
@@ -597,16 +620,16 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
 
   it('页面根本没收到文件（回读空名）同样判 sent:false，不猜成成功', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递']), { uploadedName: '' });
-    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({ sent: false });
+    expect(await adapter.sendResume({ jobId: '1001' }, RESUME)).toMatchObject({ sent: false });
   });
 
   it('状态行回读到「已下架」→ DELIVER_TARGET_OFFLINE，且一个动作都不做（spec 2.6-07）', async () => {
     const { adapter, page, act } = withScript(deliverScript(pack, ['该岗位已下架，简历不会送达']));
-    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    const error = asErr(await adapter.sendResume({ jobId: '1001' }, RESUME).catch((reason: unknown) => reason));
     expect(error).toBeInstanceOf(AppError);
     expect(error.code).toBe('DELIVER_TARGET_OFFLINE');
     expect(error.path).toBe('platform.boss');
-    expect(error.details).toEqual({ jobId: '1001', status: '该岗位已下架，简历不会送达' });
+    expect(error.details).toEqual({ jobId: '1001', conversationTarget: null, status: '该岗位已下架，简历不会送达' });
     // 只有「导航 + 读一次状态行」：下架的页面不该被注文件、也不该被点按钮。
     expect(page.navigated).toEqual([deliverUrlOf('1001')]);
     expect(page.kinds).toEqual(['deliver-status']);
@@ -619,7 +642,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     // 「判不了」，不是「默认在招」：这句话必须随结局走，界面与账本才读得到。
     const noOffline: KnowledgePack = { ...pack, deliver: { ...pack.deliver!, offlinePattern: undefined } };
     const { adapter, act } = withScript(deliverScript(noOffline, ['等待投递', '简历已送达，等待回复']), {}, noOffline);
-    const outcome = await adapter.sendResume('1001', RESUME);
+    const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
     expect(outcome.sent).toBe(true);
     expect(outcome.reason).toContain('下架文案未登记：这一条没做在招校验');
     expect(act.uploaded).toHaveLength(1);
@@ -634,7 +657,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
       {},
       noOffline,
     );
-    const outcome = await adapter.sendResume('1001', RESUME);
+    const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
     expect(outcome.sent).toBe(false);
     expect(outcome.reason).toContain('不含成功样式');
     expect(outcome.reason).toContain('下架文案未登记');
@@ -645,7 +668,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
 
   it('状态行变了但不含成功样式 → sent:false 并写明读到的是哪句', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递', '请先与招聘者沟通']));
-    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+    expect(await adapter.sendResume({ jobId: '1001' }, RESUME)).toMatchObject({
       sent: false,
       reason: '状态行文本变了但不含成功样式：请先与招聘者沟通',
     });
@@ -656,7 +679,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
       waitStatus: 'timeout',
       waitedMs: 8000,
     });
-    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+    expect(await adapter.sendResume({ jobId: '1001' }, RESUME)).toMatchObject({
       sent: false,
       reason: '点击后 8000ms 内状态行没有变化：等待投递',
     });
@@ -664,7 +687,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
 
   it('状态行读不到（一行都没有）→ sent:false，写成「读不到状态行」而不是猜', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递', null]));
-    expect(await adapter.sendResume('1001', RESUME)).toMatchObject({
+    expect(await adapter.sendResume({ jobId: '1001' }, RESUME)).toMatchObject({
       sent: false,
       reason: '状态行文本变了但不含成功样式：（读不到状态行）',
     });
@@ -674,26 +697,96 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     const page = createFakePage(deliverScript(pack, ['等待投递']));
     const act = createFakeAct();
     const bare = createBossAdapter({ ...pack, deliver: undefined }, page, act);
-    const error = asErr(await bare.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    const error = asErr(await bare.sendResume({ jobId: '1001' }, RESUME).catch((reason: unknown) => reason));
     expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
     expect(error.details).toEqual({ platform: 'boss' });
     expect(page.navigated).toEqual([]);
     expect(act.uploaded).toEqual([]);
   });
 
-  it('缺 jobId → INVALID_ARGUMENT，不导航也不注文件', async () => {
+  it('两只坐标都没给（或只给一串空格）→ INVALID_ARGUMENT，不导航也不注文件', async () => {
     const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递']));
-    const error = asErr(await adapter.sendResume('   ', RESUME).catch((reason: unknown) => reason));
-    expect(error.code).toBe('INVALID_ARGUMENT');
+    for (const target of [{}, { jobId: '   ', conversationTarget: '   ' }] as const) {
+      const error = asErr(await adapter.sendResume(target, RESUME).catch((reason: unknown) => reason));
+      expect(error.code).toBe('INVALID_ARGUMENT');
+      expect(error.details).toEqual({ platform: 'boss' });
+    }
     expect(page.navigated).toEqual([]);
     expect(act.uploaded).toEqual([]);
+    expect(act.clicked).toEqual([]);
+  });
+
+  it('仿站包没声明按行选中那一双定位 → 会话坐标那一路以 KNOWLEDGE_PACK_INVALID 停在门口', async () => {
+    // 与打招呼的同一条负腿（上方「两种坐标都没给」那组）：仿站页靠 `targetParam` 直接拼地址，
+    // 它没有会话列表那一屏。拿会话坐标去敲它，如果静默退化成"打开岗位地址栏"或"读当前选中的那条"，
+    // 递出去的就不再是人点的那一格（裁定⑲）。
+    const { adapter, page, act } = withScript(
+      { ...deliverScript(pack, ['等待投递', '简历已送达，等待回复']), ...chatScript(pack, null) },
+      {},
+    );
+    const error = asErr(await adapter.sendResume({ conversationTarget: '甲公司' }, RESUME).catch((r: unknown) => r));
+    expect(error.code).toBe('KNOWLEDGE_PACK_INVALID');
+    expect(page.navigated).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+    expect(act.clicked).toEqual([]);
+  });
+
+  it('按会话坐标投递：先选中那一行再注文件，一次都不拼岗位地址（8.5-D，裁定⑲ 搬到投递）', async () => {
+    const rows = [conversationRow(0, '甲公司'), conversationRow(1, '乙公司'), conversationRow(2, '丙公司')];
+    const { adapter, page, act } = withScript(
+      {
+        ...deliverScript(rowAddressing, ['等待投递', '简历已送达，等待回复']),
+        chat: chatScript(rowAddressing, null, [], rows).chat,
+      },
+      {},
+      rowAddressing,
+    );
+    const outcome = await adapter.sendResume({ conversationTarget: '乙公司' }, RESUME);
+    expect(outcome).toMatchObject({ sent: true, ledgerKey: null });
+    // 点击顺序就是这一路的因果：先选中那一行，再点确认；中间只注一次文件。
+    expect(act.clicked.map((call) => call.spec)).toEqual([
+      rowAddressing.locators.chatConversationLabel,
+      rowAddressing.locators.resumeSendButton,
+    ]);
+    expect(act.clicked[0]!.target).toEqual({ candidateIndex: 0, hitIndex: 1, expectText: '乙公司' });
+    expect(act.uploaded).toEqual([{ spec: rowAddressing.locators.resumeUploadInput, filePath: RESUME.path }]);
+    // 等待仍然起在点击之前（与岗位那一路同一条时序判据），且等的是**投递页**那一条状态行。
+    expect(act.waitedFor).toEqual([
+      { kind: 'appear', spec: rowAddressing.locators.chatConversationRow },
+      { kind: 'textChanges', spec: rowAddressing.locators.resumeDeliverStatus },
+    ]);
+    // 两次点击各自的"当时已起了几次等待"：选中那一行时是 1（等列表出现），点确认时是 2
+    // （等状态行变化起在它之前）——与岗位那一路 `[waitsStarted]` 是同一条时序判据的两次落点。
+    expect(act.waitsAtClick).toEqual([1, 2]);
+    // 页面只开到会话入口那一次：这一路没有岗位坐标，所以既没有 `targetId=`，更没有把联系人名字塞进参数里。
+    expect(page.navigated).toHaveLength(1);
+    expect(page.navigated[0]).not.toContain('targetId');
+    expect(page.navigated[0]).not.toContain('乙公司');
+  });
+
+  it('会话列表里认不出唯一目标时停手：不注文件、不点确认（这一格错 = 递到别人手里）', async () => {
+    const { adapter, act } = withScript(
+      {
+        ...deliverScript(rowAddressing, ['等待投递']),
+        chat: chatScript(rowAddressing, null, [], [conversationRow(0, '甲公司')]).chat,
+      },
+      {},
+      rowAddressing,
+    );
+    const error = asErr(await adapter.sendResume({ conversationTarget: '丁公司' }, RESUME).catch((r: unknown) => r));
+    expect(error.code).toBe('CONVERSATION_TARGET_NOT_FOUND');
+    expect(error.details).toMatchObject({ conversationTarget: '丁公司', matched: 0, rows: 1 });
+    // 停在"选中那一行"这一步就没往下走：下架校验要读的状态行、注文件、点确认，一次都没发生。
+    expect(act.uploaded).toEqual([]);
+    expect(act.clicked).toEqual([]);
+    expect(act.waitedFor).toEqual([{ kind: 'appear', spec: rowAddressing.locators.chatConversationRow }]);
   });
 
   it('注入自身的失败（定位失配 / 回读不符）原样上浮，不吞成 sent:false', async () => {
     const { adapter } = withScript(deliverScript(pack, ['等待投递']), {
       uploadError: new AppError('LOCATE_FAILED', '候选打分全部低于阈值', 'browser.act', { name: 'resumeUploadInput' }),
     });
-    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    const error = asErr(await adapter.sendResume({ jobId: '1001' }, RESUME).catch((reason: unknown) => reason));
     expect(error.code).toBe('LOCATE_FAILED');
   });
 });
@@ -773,7 +866,7 @@ describe('未取证定位：外发停手、读取照试（spec 8.1-04）', () =>
       {},
       packWithUnverified('resumeUploadInput'),
     );
-    const error = asErr(await adapter.sendResume('1001', RESUME).catch((reason: unknown) => reason));
+    const error = asErr(await adapter.sendResume({ jobId: '1001' }, RESUME).catch((reason: unknown) => reason));
     expect(error.code).toBe('LOCATOR_UNVERIFIED');
     expect(error.details).toEqual({ platform: 'boss', locator: 'resumeUploadInput' });
     expect(page.navigated).toEqual([]);

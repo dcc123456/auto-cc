@@ -123,9 +123,10 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
     const adapter = this.adapters.get(platform);
     if (!adapter?.meta.capabilities.includes('sendResume')) return null;
     return {
-      send: async (targetId, attachment) => {
+      send: async (target, attachment) => {
         // `ledgerKey` 同样被有意丢掉：计量凭证由 `entitlement.gate` 落账时生成，适配器不算数。
-        const outcome = await adapter.sendResume(targetId, attachment);
+        // 两只坐标原样透传，编排层与这里都不做"会话对象算哪个岗位"的映射（裁定⑲ 的同一形状，plan §7 第 14 条）。
+        const outcome = await adapter.sendResume(target, attachment);
         return { sent: outcome.sent, reason: outcome.reason };
       },
     };

@@ -350,8 +350,17 @@ spec 8.2-03 已按实测收窄，不是让步。
       （现在签名仍是 `sendResume(jobId, attachment)`，`platform-registry.ts:128` 的窄投影也只透 `targetId: string`）。
       这一格是**代码半边**，不依赖新读数，落点顺序照 8.4-C 那条链改：契约签名 → registry 投影 →
       适配器（把 `selectConversation` 接成投递前置）→ `deliver.ts` 的幂等键与额度目标（复用 `greetTargetLabel`）→
-      `delivery_records` 加 `conversation_target` 那一列（**取迁移 35**：33 是会话表、34 已被简历事实的
-      「来源」那一格用掉）→ `shared/bridge.ts` 的视图与工具 schema。
+      `delivery_records` 加 `conversation_target` 那一列（**取迁移 35**：33 是会话表的同名列、**34 本轮 grep 过全部
+      `MIGRATION_VERSION` 与 `version:` 两种声明形状，确认未分配**，号段留空不占）→ `shared/bridge.ts` 的视图与工具 schema。
+      - **2026-10-09 这一格的代码半边已到货**（spec 8.5-05，上面的落点六条逐条对上，读数见
+        `docs/acceptance/08-real-platform-driving/8.5-05-conversation-delivery-code-half.txt`）：
+        按会话坐标那一发先 `selectConversation` 选中行、再注文件，**一次都不拼岗位地址**；缺的那只坐标在两处换算
+        （`GreetTarget` 用省略表达、服务与库用 null，`?? ''` 只出现在 SQLite 边界）；幂等键、额度目标、账本 target、
+        确认单文案与经过表记的都是 `greetTargetLabel` 那一个实体。**工作流节点那一路有意仍按岗位键**
+        （节点参数里没有会话坐标可填，硬加就是替页面编坐标）。
+      - 这条落点里"34 已被简历事实的「来源」那一格用掉"是**我写错的一句**（同窗的 Grep 曾报出一个磁盘上不存在的
+        `packages/resume-kb/src/mcp-source.ts`，`git log` 与 `find` 都查不到该文件，`grep -rn` 全仓零命中）：
+        凡登记号段占用前必须用两条独立通道核（常量声明 + 字面 `version:`），单次工具读数不作凭（§9 的 2.1-12 同一条纪律）。
     - **注入之后长出什么，从来没看过**：`deliver.sendButton` 是契约必填项，而 8.0-06 第五节明写
       「未按「上传附件简历」、未选文件」，所以"注完文件以后要点哪一颗、还是站点自己就发出去了"这一格是空的。
       没有读数就不登记（裁定② + `docs/plans/02-browser-automation/plan.md:1036`），真包因此停在

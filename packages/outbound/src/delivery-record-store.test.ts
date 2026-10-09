@@ -10,9 +10,11 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import type { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  DELIVERY_CONVERSATION_TARGET_MIGRATION_VERSION,
   DELIVERY_RECORD_MIGRATION_VERSION,
   DELIVERY_TIME_INDEX_MIGRATION_VERSION,
   DeliveryRecordService,
@@ -32,19 +34,38 @@ function tempDir(): string {
 /**
  * 挂起 config + store + outbound.deliveries。
  * @param dir 复用哪个目录（演「换个进程重挂同一份库」时传同一个）
- * @returns 记录服务、裸连接与账本侧的同名读数入口（用来看两表是否真的一一对齐）
+ * @returns 记录服务、裸连接、账本侧的同名读数入口（用来看两表是否真的一一对齐），
+ *          以及上下文与本次挂载的目录与本服务的 `Fiber`（「老库升到 35」那条要摘掉重挂，必须能指名 dispose 哪一支）
  */
 async function boot(dir = tempDir()) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
-  fibers.push(await ctx.plugin(DeliveryRecordService, {}));
-  return { records: asApp(ctx)['outbound.deliveries'], db: asApp(ctx).store.db };
+  const recordsFiber = await ctx.plugin(DeliveryRecordService, {});
+  fibers.push(recordsFiber);
+  return {
+    ctx,
+    dir,
+    records: asApp(ctx)['outbound.deliveries'],
+    db: asApp(ctx).store.db,
+    recordsFiber,
+  };
+}
+
+/**
+ * 列出 `delivery_records` 现有的列名（「老库」那一形状的直接读数：列在不在，不靠报错猜）。
+ * @param db 裸连接
+ * @returns 列名数组，按建表顺序
+ */
+function columnNames(db: DatabaseSync): string[] {
+  return (db.prepare('PRAGMA table_info(delivery_records)').all() as { name?: string }[]).map((column) =>
+    String(column.name),
+  );
 }
 
 /**
  * 一条合法的投递记录读数。
- * @param overrides 覆盖项（账本行 id、目标、快照引用、时间）
+ * @param overrides 覆盖项（账本行 id、目标坐标、快照引用、时间）
  * @returns 交给 `record` 的入参
  */
 function record(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
@@ -52,6 +73,8 @@ function record(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
     ledgerId: 1,
     platform: 'boss',
     jobId: 'job-1001',
+    // 默认这一条走的是岗位坐标：会话坐标那一路在用例里显式覆盖（裁定⑲ 搬到投递）。
+    conversationTarget: null,
     snapshotId: 'snap-1',
     ts: 1_760_000_000_000,
     ...overrides,
@@ -101,6 +124,14 @@ describe('建表与迁移', () => {
       .prepare('EXPLAIN QUERY PLAN SELECT COUNT(*) FROM delivery_records WHERE ts >= ? AND ts < ?')
       .all(1, 2) as unknown as { detail?: string }[];
     expect(plan.some((row) => /idx_delivery_records_ts/i.test(row.detail ?? ''))).toBe(true);
+  });
+
+  it('号段 35 是「会话坐标列」这一条的新号，不与前面三十四撞（8.5-D，裁定⑲ 搬到投递）', () => {
+    // 已分配：1…8 见上面两条，9 是本表，10…25 是后续各包，26/27 是两张时间索引，28/29 是工作流图与节点输出，
+    // 30 按 plan §8.3 预留给 3.6 的草稿表（当前未启用），31/32 是提供商池与模型清单，33 是会话表的同名列。
+    const allocated = new Set(Array.from({ length: 34 }, (_entry, position) => position + 1));
+    expect(DELIVERY_CONVERSATION_TARGET_MIGRATION_VERSION).toBe(35);
+    expect(allocated.has(DELIVERY_CONVERSATION_TARGET_MIGRATION_VERSION)).toBe(false);
   });
 });
 
@@ -164,5 +195,41 @@ describe('3.7-02 记录的写入与读取', () => {
     for (const fiber of fibers.splice(0)) await fiber.dispose();
     const second = await boot(dir);
     expect(second.records.get(7)?.jobId).toBe('job-persist');
+  });
+
+  it('会话那一行只落会话坐标：job_id 那一格读回 null，按岗位查它不出现（裁定⑲ 搬到投递）', async () => {
+    const { records } = await boot();
+    records.record(record({ ledgerId: 21, jobId: null, conversationTarget: '示例科技' }));
+    expect(records.get(21)).toMatchObject({ jobId: null, conversationTarget: '示例科技' });
+    // 库里那一格是空串（列是 NOT NULL），读回视图时归 null：不给"这一列装两种实体"留第三种读数。
+    expect(records.listFor('job-1001').map((item) => item.ledgerId)).toEqual([]);
+    // 反查那一版递给了谁：这一行照常出现，带着它的会话坐标。
+    expect(records.listBySnapshot('snap-1')).toMatchObject([
+      { ledgerId: 21, jobId: null, conversationTarget: '示例科技' },
+    ]);
+  });
+
+  it('老库（已记 9 / 27、没有会话坐标那一列）重挂后列补得上，旧行读回 null 而不是空串', async () => {
+    // 这一条守的是 §9 实测 5.3-a 那一类缺陷：`runMigrations` 认的是 `schema_migrations` 台账，
+    // 把 `ALTER TABLE` 补进已经记过账的号段 9 里，老用户机上永远执行不到那一支，
+    // 列因此静默缺失、第一次按会话投递就以 `no such column` 失败。每个用例都从空库起，单测照不出这条腿。
+    const dir = tempDir();
+    const first = await boot(dir);
+    first.records.record(record({ ledgerId: 31, snapshotId: 'snap-old' }));
+    // 造出"老库"的真实形状：列还没有，台账里也没有 35 这一行。
+    first.db.exec('ALTER TABLE delivery_records DROP COLUMN conversation_target');
+    first.db
+      .prepare('DELETE FROM schema_migrations WHERE version = ?')
+      .run(DELIVERY_CONVERSATION_TARGET_MIGRATION_VERSION);
+    expect(columnNames(first.db)).not.toContain('conversation_target');
+
+    for (const fiber of fibers.splice(0)) await fiber.dispose();
+    const second = await boot(dir);
+    expect(columnNames(second.db)).toContain('conversation_target');
+    // 老行拿到的是列的默认空串，读回来是 null——「那一次记的是岗位，没有会话坐标」是实话，不是缺数据。
+    expect(second.records.get(31)).toMatchObject({ jobId: 'job-1001', conversationTarget: null });
+    // 新写入在升好列的库上落得下去（这就是运行期第一次按会话投递要走的那一步）。
+    second.records.record(record({ ledgerId: 32, jobId: null, conversationTarget: '示例科技' }));
+    expect(second.records.get(32)?.conversationTarget).toBe('示例科技');
   });
 });

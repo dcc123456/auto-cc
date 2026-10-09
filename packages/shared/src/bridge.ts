@@ -901,8 +901,14 @@ export type ScriptDraftRowView = {
 export type DeliverRequestView = {
   /** 平台标识，决定向 `platform.registry` 问哪个平台的投递渠道（问不到即 `OUTBOUND_CHANNEL_MISSING`） */
   platform: string;
-  /** 目标岗位（P2 起是平台侧 jobid），也是幂等键里的 target */
-  jobId: string;
+  /**
+   * 目标岗位（P2 起是平台侧 jobid）。
+   * 与 `conversationTarget` **至少给一只**（裁定⑲ 搬到投递，plan §7 第 14 条）：
+   * 真 BOSS 的投递口长在会话里，那一发只有会话坐标，硬要填岗位就是拿联系人名字冒充 jobid。
+   */
+  jobId?: string;
+  /** 会话坐标：按会话列表行选中目标那一路用它认目标，岗位地址那一路省略 */
+  conversationTarget?: string;
   /** 简历文件绝对路径；省略时用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口） */
   filePath?: string;
   /** 岗位名：只用于确认卡片与回执展示，不参与任何判据（JD 行的查询面还没接，见 plan §13.7 第 1 条） */
@@ -929,7 +935,10 @@ export type DeliverRequestView = {
  */
 export type DeliverReceiptView = {
   platform: string;
-  jobId: string;
+  /** 这一发递的**岗位**坐标；会话类投递没有岗位时是 null（不拿会话标识冒充岗位，裁定⑲） */
+  jobId: string | null;
+  /** 这一发递的**会话**坐标；按岗位地址打开上传页那一路是 null */
+  conversationTarget: string | null;
   title: string;
   company: string;
   attachment: DeliverAttachmentView;

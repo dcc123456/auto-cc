@@ -91,7 +91,14 @@ describe('3.7-02 投递记录 ↔ 快照的关联查询', () => {
   it('一次投递一行经过 JOIN 一行快照，答得出「递给了哪个 JD」与「当时是哪一版内容」', async () => {
     const { snapshots, records, db } = await bootTogether();
     const { snapshotId, hash } = snapshots.record(sampleDoc(), 'classic', resumePrint.fontSet, 1_760_000_000_000);
-    records.record({ ledgerId: 42, platform: 'boss', jobId: 'job-777', snapshotId, ts: 1_760_000_000_000 });
+    records.record({
+      ledgerId: 42,
+      platform: 'boss',
+      jobId: 'job-777',
+      conversationTarget: null,
+      snapshotId,
+      ts: 1_760_000_000_000,
+    });
 
     const joined = db
       .prepare(
@@ -135,6 +142,7 @@ describe('3.7-02 投递记录 ↔ 快照的关联查询', () => {
       ledgerId: 1,
       platform: 'boss',
       jobId: 'job-A',
+      conversationTarget: null,
       snapshotId: first.snapshotId,
       ts: 1_760_000_000_000,
     });
@@ -142,6 +150,7 @@ describe('3.7-02 投递记录 ↔ 快照的关联查询', () => {
       ledgerId: 2,
       platform: 'liepin',
       jobId: 'job-B',
+      conversationTarget: null,
       snapshotId: first.snapshotId,
       ts: 1_760_000_000_600,
     });
@@ -150,6 +159,7 @@ describe('3.7-02 投递记录 ↔ 快照的关联查询', () => {
       ledgerId: 3,
       platform: 'boss',
       jobId: 'job-C',
+      conversationTarget: null,
       snapshotId: second.snapshotId,
       ts: 1_760_000_002_000,
     });
@@ -166,6 +176,7 @@ describe('3.7-02 投递记录 ↔ 快照的关联查询', () => {
       ledgerId: 7,
       platform: 'boss',
       jobId: 'job-dangling',
+      conversationTarget: null,
       snapshotId: 'never-exported',
       ts: 1_760_000_000_000,
     });

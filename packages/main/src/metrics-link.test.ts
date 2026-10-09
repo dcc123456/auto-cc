@@ -130,6 +130,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
       ledgerId: 1,
       platform: 'boss',
       jobId: 'j-1',
+      conversationTarget: null,
       snapshotId: 'snap-1',
       ts: AS_OF_MS,
     });
@@ -137,6 +138,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
       ledgerId: 2,
       platform: 'boss',
       jobId: 'j-2',
+      conversationTarget: null,
       snapshotId: 'snap-1',
       ts: AS_OF_MS - DAY_MS,
     });
@@ -144,6 +146,7 @@ async function bootMetricsAssembly(options: { without?: string[] } = {}) {
       ledgerId: 3,
       platform: 'boss',
       jobId: 'j-3',
+      conversationTarget: null,
       snapshotId: 'snap-1',
       ts: BEFORE_WINDOW,
     });

@@ -115,9 +115,10 @@ function fakeAdapter(
       calls.push(`chat:${targetMark(target)} ${text}`);
       return Promise.resolve({ sent: true, reason: '回读到成功态', ledgerKey: `${id}:chat` } satisfies OutboundResult);
     },
-    sendResume: (jobId: string, attachment: ResumeAttachment) => {
+    sendResume: (target: GreetTarget, attachment: ResumeAttachment) => {
       // 附件整份记账：投递渠道的投影只递「这个文件」，编排层给的字节信息有没有原样到适配器手上，只有这里能看出来。
-      calls.push(`sendResume:${jobId}:${attachment.fileName}:${String(attachment.sizeBytes)}`);
+      // 坐标按 `targetMark` 记（与 `chat` 同一行读数）：两种坐标是不是都递到了手上，也只有这里看得出来。
+      calls.push(`sendResume:${targetMark(target)}:${attachment.fileName}:${String(attachment.sizeBytes)}`);
       return Promise.resolve({
         sent: false,
         reason: '页面出现验证码，已暂停',
@@ -162,8 +163,11 @@ describe('平台登记处（spec 2.2-07）', () => {
       sent: true,
       ledgerKey: 'boss:chat',
     });
-    await expect(adapter.sendResume('job-1', RESUME)).resolves.toMatchObject({ sent: false, ledgerKey: null });
-    expect(adapter.calls).toEqual(['search:前端', 'chat:job:job-1 你好', 'sendResume:job-1:resume.pdf:204800']);
+    await expect(adapter.sendResume({ jobId: 'job-1' }, RESUME)).resolves.toMatchObject({
+      sent: false,
+      ledgerKey: null,
+    });
+    expect(adapter.calls).toEqual(['search:前端', 'chat:job:job-1 你好', 'sendResume:job:job-1:resume.pdf:204800']);
   });
 
   it('只读清单原样回显适配器的自我声明，不含任何定位信息', async () => {
@@ -260,11 +264,12 @@ describe('平台登记处（spec 2.2-07）', () => {
 
     const channel = registry.deliverChannel('boss');
     expect(channel).not.toBeNull();
-    await expect(channel?.send('job-9', RESUME)).resolves.toEqual({
+    // 两只坐标一起给：投影必须**原样透传**，不在这层挑一维（谁在页面上定位会话由站点知识包决定，裁定⑲ 搬到投递）。
+    await expect(channel?.send({ jobId: 'job-9', conversationTarget: '示例科技' }, RESUME)).resolves.toEqual({
       sent: false,
       reason: '页面出现验证码，已暂停',
     });
-    expect(boss.calls).toEqual(['sendResume:job-9:resume.pdf:204800']);
+    expect(boss.calls).toEqual(['sendResume:job:job-9+conv:示例科技:resume.pdf:204800']);
 
     expect(registry.deliverChannel('liepin')).toBeNull();
     expect(registry.deliverChannel('lagou')).toBeNull();

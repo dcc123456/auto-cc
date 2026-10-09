@@ -1,0 +1,67 @@
+8.5-05 会话内投递寻址的代码半边（U+C，本机 macOS，2026-10-09）
+  这一格验的是"按会话列表行选中的那一次投递，整条落点链到底认的是哪一个实体"，全部在本地 fixture 与假手上跑
+  （AGENTS.md §7.2：测试面不碰真实站点；`localTestUrlViolation` 一字节未动）。
+  **它不含任何真站读数**——真包的 `deliver` 段仍然一行都登记不了（plan §7 第 14 条的两次在场欠项），
+  所以 8.5-01 / 8.5-02 在本格到货后仍是 `[ ]`，`deliverablePlatforms()` 对真 BOSS 仍如实回"还不能递"。
+
+一、落点六条（plan §7 第 14 条注册的顺序，逐条对上的文件与行）
+  1) 契约签名：`platform-contract.ts` 的 `sendResume(target: GreetTarget, attachment)`（与 `chat` 同一只坐标形状）。
+  2) registry 投影：`platform-registry.ts:129` 的 `deliverChannel(...).send(target, attachment)` 原样透传，
+     不再从 `targetId: string` 拼坐标。用例 › `投递渠道问的是 sendResume 能力，与打招呼那条是两份清单（spec 2.6-05）`
+     里 `channel.send({ jobId:'job-9', conversationTarget:'示例科技' }, RESUME)` 读回的调用记录是
+     `sendResume:job:job-9+conv:示例科技:resume.pdf:204800` ⇒ 两只坐标都到了适配器，投影没有吃掉任何一只。
+  3) 适配器：`adapter.ts` 的 `sendResume` 先做坐标校验（两只都没给或只给空格 → `INVALID_ARGUMENT`，不导航），
+     再按 `conversationTarget` 决定走 `selectConversation` 还是拼岗位地址；**有会话坐标时一次都不 navigate 岗位页**。
+     包没声明 `chat.conversationRow / conversationRowLabel` 那一双定位时以 `KNOWLEDGE_PACK_INVALID` 停在门口，
+     不静默取默认值（取默认值 = 把话发给页面上恰好选中的另一个人）。
+  4) 幂等键与额度：`deliver.ts` 一律用 `greetTargetLabel`（会话赢，裁定⑲ 搬到投递）——同一个读数同时用在
+     `ledger.countFor` 的重复判定、`gate.enforce/perform` 的 `targetId`、账本行、确认单文案与经过表。
+     键名跟着实体走：`details.jobId` 改成 `details.targetId`（与 `greet.ts:283` 同一形状，两处不再各叫一名）。
+  5) `delivery_records` 加 `conversation_target`：**取迁移 35**，`jobId` 与 `conversationTarget` 在类型上都是
+     `string | null`，库里缺的那一格写空串（列 `NOT NULL DEFAULT ''`，与 `conversation_messages` 的 33 同口径），
+     读回视图时经 `coordinateOf` 归 null——"这一行没有那个坐标"只有一种读数。
+  6) `shared/bridge.ts` 的视图与工具 schema：`DeliverApprovalView` 带两只坐标，工具入参 `.superRefine` 要求
+     「`jobId` 与 `conversationTarget` 至少给一只」，判据只在这一处（界面与节点路径都不再各自补校验）。
+
+二、新增/改写的用例（按包，全部为绿）
+  · `packages/browser`（294 passed / 16 files）：投递渠道的坐标原样透传一条（见第一节第 2 条）。
+  · `packages/platform-boss`（174 passed / 6 files）：
+      › `按会话坐标投递：先选中那一行再注文件，一次都不拼岗位地址（8.5-D，裁定⑲ 搬到投递）`
+        读数：点击序列 `[chatConversationLabel → resumeSendButton]`，第一击带
+        `target={candidateIndex:0, hitIndex:1, expectText:'乙公司'}`（按行序号点，不按名字点）；
+        `uploaded` 恰好一次；等待序列 `[appear chatConversationRow, textChanges resumeDeliverStatus]`，
+        两次等待分别起在两击之前；页面只开到会话入口那一次——`navigated[0]` 既不含 `targetId=`，也不含联系人名字。
+      › `会话列表里认不出唯一目标时停手…`：`CONVERSATION_TARGET_NOT_FOUND`，details `{matched:0, rows:1}`，
+        注文件与点确认一次都没发生。
+      › `两只坐标都没给（或只给一串空格）→ INVALID_ARGUMENT，不导航也不注文件`。
+      › `仿站包没声明按行选中那一双定位 → 会话坐标那一路以 KNOWLEDGE_PACK_INVALID 停在门口`。
+      › `DELIVER_TARGET_OFFLINE` 的 details 补成 `toEqual({jobId:'1001', conversationTarget:null, status:…})`
+        （整串比对，防"多塞一只键"从断言里溜走）。
+  · `packages/outbound`（197 passed / 9 files）：
+      › `只有会话坐标那一发：额度目标与幂等键都是联系人本身，岗位维度是 null（裁定⑲ 搬到投递）`——
+        回执 `{jobId:null, conversationTarget:'示例科技', committed:true}`，账本 `target_id='示例科技'`，
+        同 run 重递以 `OUTBOUND_ALREADY_SENT` 挡住且额度不重复扣；换 run、以及"岗位+会话两只都给"仍放行（共 3 次外发）。
+      › `会话那一发的确认单…` / `工具路径上的会话那一发…`（摘要写联系人，证据引用不长出悬空的 `job:boss/null`）/
+        `会话那一发在 JD 库里没有行可问…`（择机按「问不到」推迟，`jdStore.asks === 0`，不替页面编判据）/
+        `会话那一发记的是会话坐标…`（经过表 `job_id` 为 null、`conversation_target` 落库）/
+        `两只坐标都没给…INVALID_ARGUMENT`。
+  · `packages/outbound` 的存储半边：
+      › `号段 35 …不与前面三十四撞` + › `含会话坐标那一发读回两只坐标…` +
+        › `老库（已记 9 / 27、没有会话坐标那一列）重挂后列补得上，旧行读回 null 而不是空串`——
+        这条是 §9 实测 5.3-a 的直接回归：真机老库里 9 与 27 已记过账、新列必须靠**新号段**才补得上，
+        单测从空库起永远看不见这一类缺陷。断言里**不用 `DROP TABLE`**（那会连别人的行一起删），
+        用 `ALTER TABLE … DROP COLUMN` + 从台账抹掉 35 再重挂。
+  · `packages/main`（79 passed / 12 files）：三处 `DeliveryRecord` 字面量补 `conversationTarget: null`
+    （岗位那一路在库里就没有会话坐标，读回必须是 null 而不是空串——空串只在边界那一侧存在）。
+
+三、门禁（§7.4①，命令逐条跑、输出重定向到文件后读退出码，不接管道）
+  pnpm typecheck    > tmp/gates/typecheck-85d-3.txt   EXIT=0
+  pnpm lint         > tmp/gates/lint-85d.txt          EXIT=0（含 check-knowledge-pack / check-tool-contract）
+  pnpm format:check > tmp/gates/format-85d-2.txt      EXIT=0
+  pnpm test         > tmp/gates/test-85d-2.txt        EXIT=0（23 个包全部 Done）
+
+四、本格没有拿掉的格子（不冒充已做）
+  · 真包 `deliver` 段的 `sendButton`（注完文件点哪一颗、还是站点自己发出去）与 `offlinePattern`（那句「不收了」）
+    仍未现读 ⇒ 8.5-01 / 8.5-02 / 8.5-03 不动状态位。
+  · 8.4-01 / 02 / 03 的活体半边（真发一条打招呼并以页面回执为凭）仍等用户在场，本格没有发起任何真实外发。
+  · 工作流节点那一路**有意**仍按岗位键：节点参数里没有会话坐标可填，替它编一只就是拿假坐标寻人。
