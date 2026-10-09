@@ -276,7 +276,9 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   （裁定⑲ / spec 8.4-04）**，**34 当前在工作树上未分配**（两种声明形状都 grep 过：`MIGRATION_VERSION = 34` 与字面
   `version: 34` 全仓零命中——但同窗有一次搜索读数指向过一个随即消失的 `packages/resume-kb/src/internal/mcp-source.ts`
   （`KB_MCP_SOURCE_MIGRATION_VERSION = 34`），共享工作树里并行会话随时可能把它落地，**所以别把 34 当成可占的空号**），
-  **35 是 `packages/outbound/src/delivery-record-store.ts` 给 `delivery_records` 加的同名列（8.5-D / spec 8.5-05）**。
+  **35 是 `packages/outbound/src/delivery-record-store.ts` 给 `delivery_records` 加的同名列（8.5-D / spec 8.5-05）**，
+  **36 是 `packages/resume-doc/src/doc-store.ts` 的 `resume_preferences` 表（界面偏好键值表，目前只有
+  `defaultTemplateId` 一支；2026-10-09 简历轨整测那轮，取号 36 而不是回填 34，理由见上一条）**。
   原先这条写的是"当前到 17"和"最高已用到 29"（`packages/workflow/src/run-store.ts:123` 的
   `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`），那是 5.3-a / 7.2-a 窗口的读数，此后 21～29 九支已陆续落地。
   **30 已被 plan §8.3 预留给 3.6 的草稿表，但裁定⑨ 判的是"只拦不存"，所以 30 当前未启用**——占号前先看这份清单，别撞号）。
@@ -455,6 +457,29 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   的和——那是动作层的缺口被误记成操作系统窗口的要求。仍然成立的是另一条、与宽度无关的：
   `document.visibilityState==='hidden'` 时 CDP 输入不落页（上面 2.1-12），"点中了什么"必须以页面自己的回执为凭、
   要人把窗口带到前台。
+
+- **实测（简历轨整测 2026-10-09）四条会静默伪装成"功能不存在"或"成色薄"的形状事实**：
+  ① **打印 HTML 里没有 Tailwind utility 声明**：模板 `render` 按 spec 3.2-07 只挂 utility 类名（不写 `<style>`
+  与 `style="`），而 `resume.export.preview/toPdf` 载入的是**另一份 HTML**——渲染层那份 `globals.css` 编译产物
+  跟不到打印面，于是**所有模板渲染成同一个无样式文档**，界面与产物看起来像"模板成色薄"。
+  修法是打印面自带手写 utility 样式表（`packages/resume-doc/src/internal/print-css.ts`）+ preflight，
+  并用 `PRINT_UTILITY_KEYS` 与模板实际消费到的类名做集合机检（缺一个键 `pnpm lint` 即红）。
+  **判据写法**：模板类改动必须有"两套模板各导一次、产物 md5 互异"这一条几何/字节读数，
+  类型通过、单测全绿都不算数（3.2-02 那条"p2～p5 像素完全相同"的告警就是这么被当成成色薄记了五天的）。
+  ② `window.autoCC` 的命名空间按**第一个点**切（`packages/preload/src/index.ts` 的 `buildNamespaces`），
+  所以点号后面还带点的键只能写成 `resume['export.templates']`；写成 `resume.export.templates`
+  读回的是 `undefined` 而**不报错**，在探针里表现为"这条能力没上"。
+  ③ **`llm` 的 `timeoutMs` 缺省 8000ms 太紧，而端点的耗时随 `max_tokens` 一起涨**：本机对已配置的 ark 端点
+  跑连通探测（`llm.settings.check('chat')`）最小一次请求就花 3.7～7.5s，于是一切真实产出都以 `模型请求超时`
+  收场，而界面只显示保守版的诚实回落"本次没有采纳任何改写，只按缺省重排"——**看起来像功能没做，实际是超时壁**。
+  缺省现已提到 **180000ms**（Schema 上限放到 600s）。三轮活体读数（对话腿 `ark-code-latest`，同一份简历 + JD）：
+  60s 与 120s 两档都掐死、结局恒为 `reorder_only`（改写 0 处）；`modelMaxTokens` 2000 一次都不回；
+  512 用 **118.5s** 回 3 处改写并过事实校验；256 用 111.5s 回 2 处。口径两条：
+  一条腿的超时缺省必须用**真端点的实测延迟**来定，不许按"通常几百毫秒"拍；
+  **`cordis.yml` 里 pin 死的配置键会盖掉 Schema 缺省**——改 Schema 而不改清单，装机版仍是旧值（本轮就是
+  `kb-generate.modelMaxTokens` 在清单里写着 2000，Schema 改到 512 也不生效）。
+  ④ 渲染层在 `sandbox: true` 下**没有任何选文件口**，"导入本地文件"这类按钮在补出 `shell.selectFile`
+  （原生对话框由主进程弹，路径不过界）之前不是"禁用态写错"而是结构上不可能。
 
 ---
 
