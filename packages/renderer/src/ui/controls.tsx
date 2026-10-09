@@ -1089,6 +1089,21 @@ export function DeskSegmented<T extends string>({
 }
 
 /**
+ * 窄窗口档（<1120px）的文案格：**宽带文字、窄带图标**（用户 2026-10-09 裁的档）。
+ *
+ * 断点不是新数，它与两处共用同一格宽度：`globals.css` 里 `--desk-nav-width` 换成 56px 的那条媒体查询、
+ * `ui/overlays.tsx` 抽屉的 `max-[1120px]:w-full`。三处各写一遍就会在下一轮改档时散架，所以 class
+ * 只在原件层写一次，面板里写的是这一只。
+ * 用 `sr-only` 而不是不渲染：文字仍在 DOM 里，读屏软件的无障碍名与 harness 按文案取节点都不受影响，
+ * 只是画面上让位给图标；`position:absolute` 让它退出 flex 流，不会留下一个空槽。
+ * @param children 那颗控件的文字（调用方负责翻译，§5.5）
+ * @returns 窄档收进无障碍、宽档照排的文案格
+ */
+export function NarrowLabel({ children }: { children: ReactNode }) {
+  return <span className="max-[1120px]:sr-only">{children}</span>;
+}
+
+/**
  * 页签的尺寸档。`muted` 不是"次要按钮"，而是 6.3-02 那条「诊断视图低一档」的兑现：
  * 图标、字号、字重与选中描线一起降一档，让导航六格里有一格在视觉上退后。
  */
@@ -1134,7 +1149,7 @@ export function DeskTab({
       data-view={view}
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
-      className={`relative flex items-center rounded-control before:absolute before:-left-2 before:top-1/2 before:h-[17px] before:w-[3px] before:-translate-y-1/2 before:rounded-r-[2px] before:content-[''] ${marker} ${
+      className={`relative flex items-center rounded-control before:absolute before:-left-2 before:top-1/2 before:h-[17px] before:w-[3px] before:-translate-y-1/2 before:rounded-r-[2px] before:content-[''] ${marker} max-[1120px]:justify-center max-[1120px]:gap-0 ${
         isMuted
           ? `gap-2 px-2.5 py-1.5 text-[11px] ${
               selected ? 'bg-ink-800 text-slate-300' : 'text-slate-500 hover:bg-ink-850 hover:text-slate-400'
@@ -1146,7 +1161,7 @@ export function DeskTab({
       {...rest}
     >
       <Icon size={isMuted ? 12 : 15} className="shrink-0" />
-      {children}
+      <NarrowLabel>{children}</NarrowLabel>
     </button>
   );
 }

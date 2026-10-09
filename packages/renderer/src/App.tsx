@@ -37,7 +37,7 @@ import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
 import { tightestQuota, useDeskStatus } from './deskStatus';
-import { DeskButton, DeskTab, DeskViewTrail } from './ui/controls';
+import { DeskButton, DeskTab, DeskViewTrail, NarrowLabel } from './ui/controls';
 import { Toast } from './ui/overlays';
 /**
  * 顶层视图的名字由 `viewTrail.ts` own：跨视图推进（09 稿形态⑥）是全 app 唯一一处要同时认识
@@ -197,22 +197,30 @@ export function App() {
           <p className="text-[11px] text-slate-400">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-1.5">
-          <DeskButton action="shell-theme-toggle" variant="line" onClick={toggleTheme}>
+          {/* 三颗系统级键都是"宽带文字、窄带图标"（<1120px 退成纯图标）：窗口一窄，
+              最先被挤出标题栏的就是这一排，而它们各自只有一颗图标认得出来。 */}
+          <DeskButton
+            action="shell-theme-toggle"
+            variant="line"
+            title={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
+            onClick={toggleTheme}
+          >
             {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-            {t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
+            <NarrowLabel>{t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}</NarrowLabel>
           </DeskButton>
           <DeskButton
             action="shell-language-switch"
             variant="line"
+            title={t('language.switchTo')}
             onClick={() => switchLanguage(otherLanguage(i18n.resolvedLanguage ?? 'zh-CN'))}
           >
             <Languages size={13} />
-            {t('language.switchTo')}
+            <NarrowLabel>{t('language.switchTo')}</NarrowLabel>
           </DeskButton>
           {/* 5.9-06 的重入口：首屏那一层收起后必须还能一眼找回，否则"读过就再也看不见"是合规上的空洞 */}
-          <DeskButton action="privacy-open" variant="line" onClick={privacy.open}>
+          <DeskButton action="privacy-open" variant="line" title={t('privacy.entry')} onClick={privacy.open}>
             <ShieldCheck size={13} />
-            {t('privacy.entry')}
+            <NarrowLabel>{t('privacy.entry')}</NarrowLabel>
           </DeskButton>
         </div>
       </header>

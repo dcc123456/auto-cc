@@ -236,6 +236,19 @@
   color-scheme: dark;
 }
 
+/* 窄窗口档：左栏导航退成一条纯图标栏。断点不是新数——`ui/overlays.tsx` 的抽屉与 `NarrowLabel`
+   早就按 `max-[1120px]` 判档，两处必须换档在同一格宽度上，否则抽屉压过来时左栏还是 184px、
+   遮罩起点跟着 `--desk-nav-width` 走，两套窄窗口径会打架。
+   写成 `(width < 1120px)` 而不是 `(max-width: 1120px)`：Tailwind 的 `max-[1120px]` 编译成
+   `not all and (min-width:1120px)`，即**不含** 1120 这一格；用 max-width 会在 1120px 整窗宽上
+   出现"导航已收窄、标签还没收"的半档。这里只换宽度这一个数：布局全部引用变量，
+   没有第二处 184px 需要跟着改（§2.5）。 */
+@media (width < 1120px) {
+  :root {
+    --desk-nav-width: 56px;
+  }
+}
+
 html,
 body,
 #root {

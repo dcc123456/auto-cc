@@ -1,7 +1,7 @@
 import { ChevronsLeft, ChevronsRight, Maximize2, Minimize2, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DeskButton } from './ui/controls';
+import { DeskButton, NarrowLabel } from './ui/controls';
 
 /**
  * 右栏的三档宽度（从窄到宽）。第一档与主进程的兜底比例同源（`--kernel-view-width` = 38%），
@@ -138,26 +138,37 @@ export function KernelViewSlot({ layout }: { layout: KernelSlotLayout }) {
           disabled={!layout.canNarrow}
           // 原因码只在该当被挡的时候挂：挂着常亮的 `data-disabled-reason` 是对界面的谎，
           // 而 harness 正是按这个属性判"点不动是门禁还是缺陷"（§9 的 6.2 二三片②）。
-          {...(layout.canNarrow ? {} : { disabledReason: 'WIDTH_MIN', disabledReasonLabel: t('kernel.atMin') })}
+          // `title` 同一条规矩：能变窄时才用文案当悬停说明，被锁住时那句话必须是原因，两处不能同时占。
+          {...(layout.canNarrow
+            ? { title: t('kernel.narrow') }
+            : { disabledReason: 'WIDTH_MIN', disabledReasonLabel: t('kernel.atMin') })}
           onClick={layout.narrow}
         >
           <ChevronsLeft size={13} />
-          {t('kernel.narrow')}
+          <NarrowLabel>{t('kernel.narrow')}</NarrowLabel>
         </DeskButton>
         <DeskButton
           action="kernel-slot-widen"
           variant="line"
           compact
           disabled={!layout.canWiden}
-          {...(layout.canWiden ? {} : { disabledReason: 'WIDTH_MAX', disabledReasonLabel: t('kernel.atMax') })}
+          {...(layout.canWiden
+            ? { title: t('kernel.widen') }
+            : { disabledReason: 'WIDTH_MAX', disabledReasonLabel: t('kernel.atMax') })}
           onClick={layout.widen}
         >
           <ChevronsRight size={13} />
-          {t('kernel.widen')}
+          <NarrowLabel>{t('kernel.widen')}</NarrowLabel>
         </DeskButton>
-        <DeskButton action="kernel-slot-expand" variant="line" compact onClick={layout.toggleExpanded}>
+        <DeskButton
+          action="kernel-slot-expand"
+          variant="line"
+          compact
+          title={t(layout.isExpanded ? 'kernel.collapse' : 'kernel.expand')}
+          onClick={layout.toggleExpanded}
+        >
           {layout.isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          {t(layout.isExpanded ? 'kernel.collapse' : 'kernel.expand')}
+          <NarrowLabel>{t(layout.isExpanded ? 'kernel.collapse' : 'kernel.expand')}</NarrowLabel>
         </DeskButton>
       </div>
 
