@@ -17,17 +17,14 @@ import { switchLanguage, type SupportedLanguage } from './i18n';
 import { useDeskTheme } from './theme';
 import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
-import { GapPanel } from './GapPanel';
-import { GeneratePanel } from './GeneratePanel';
 import { JobLabPanel } from './JobLabPanel';
-import { KbPanel } from './KbPanel';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
 import { ModelSettingsPanel } from './ModelSettingsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
 import { UpdateSection } from './UpdateSection';
-import { ResumePanel } from './ResumePanel';
+import { ResumeDesk } from './ResumeDesk';
 import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
 import { ShellPanel } from './ShellPanel';
@@ -318,14 +315,7 @@ const PANELS: Record<TopView, ReactNode> = {
       <ScriptPanel />
     </>
   ),
-  resume: (
-    <>
-      <ResumePanel />
-      <KbPanel />
-      <GapPanel />
-      <GeneratePanel />
-    </>
-  ),
+  resume: <ResumeDesk />,
   workflow: <WorkflowPanel />,
   trust: (
     <>

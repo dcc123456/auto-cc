@@ -40,6 +40,33 @@ const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], BannerTon
 };
 
 /**
+ * 定向生成面板的对外输入（06 稿第五十六片：它从"自己问一遍库"改成受控件）。
+ *
+ * 改造前它自己发 `doc.list`、自己存一份 `docs` + `docId`，而简历屏的 desk 一层也持有同样的两份——
+ * 那就是 plan §3.26 风险① 点名的"两份事实"（同一件事在两个组件里各留一份，改一边就漂）。
+ * 现在候选清单与当前文档的**唯一持有者是 desk**，本面板只转述递进来的读数、把人的改动回报上去。
+ */
+export interface GeneratePanelProps {
+  /** 库里的候选摘要（id / 姓名 / 时刻），由父级从 `resume['doc.list']` 取来整份递入。 */
+  docs: readonly ResumeDocSummaryView[];
+  /** 这一屏正在定制的那一份；空串 = 库里还没有简历（「生成」因此按不动，原因码要说清）。 */
+  docId: string;
+  /** 人在这一栏换文档时回报（落不落"当前"由父级判，本面板不存第二份）。 */
+  onDocIdChange: (docId: string) => void;
+  /**
+   * 动作跑完后请父级重读一次快照。
+   * `useBridgeAction` 的既有纪律是"动作跑完一律重读"（界面不猜主进程当下的状态），
+   * 而这份读数现在归父级，所以重读的口也归它——不传就等于把那条纪律悄悄撤了。
+   */
+  refreshDocs: () => Promise<void>;
+  /**
+   * 一次接受写完工作副本之后的通知（plan §3.26 的反馈闭环）：
+   * 父级拿它把纸面重渲一次，人当场看见改写落在那张纸上，而不是只读一行成功提示。
+   */
+  onAccepted: () => void;
+}
+
+/**
  * 定向生成预览面板（spec 4.5-02 / 05 / 09 / 11 的界面化身，plan §4.5 判据一 / 三）。
  *
  * 四件事在界面上是刻意的，读代码的人不该重新推断：
@@ -49,8 +76,10 @@ const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], BannerTon
  * 3. **重排是整组接受 / 整组回退**，不给逐条开关：位置之间互相依赖，逐条回退会让"第几位"变成二次猜测。
  * 4. **改前那一栏是用户自己的话**：正文由主进程随改写行一起给（`originalText` 逐字取自工作副本），
  *    渲染层没有 `resume.doc.*` 口，也拿不到文档模型本体（判据二）。
+ * @param props 见 `GeneratePanelProps`（候选清单与当前文档都从父级递进来）
+ * @returns 一块 JD 输入 + 一次生成的提议态清单 + 接受那一步
  */
-export function GeneratePanel() {
+export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccepted }: GeneratePanelProps) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
   const [jdText, setJdText] = useState('');
@@ -82,34 +111,19 @@ export function GeneratePanel() {
   const [blocked, setBlocked] = useState<string>();
   /** 证据正文按需现取（同缺口面板）：`null` = 问过但库里已经没有这条了。 */
   const [bodies, setBodies] = useState<Record<string, string | null>>({});
-  /**
-   * 库里可定制的简历清单与当前选中的那一份。
-   * 这一栏存在的理由是主进程那条判据：`resume.generate.run` 在库里多于一份简历时要求显式 `docId`，
-   * 而界面此前没有列出文档的通道——于是"贴了 JD 也生成不了"（报的是「需指明 docId」）。
-   * 清单只含摘要（id / 姓名 / 时刻），正文仍只经主进程的 `load()` 读（§2.5 的单一真相源）。
-   */
-  const [docs, setDocs] = useState<ResumeDocSummaryView[]>([]);
-  const [docId, setDocId] = useState('');
 
   /**
    * 面板的"重读"只重读**候选清单**，不重读产物：
    * 产物是一次生成的提议态，重读就等于让用户对着一份已经用掉的提议态再表态（这条口径不变）。
    * 每条动作结束后由 `useBridgeAction` 调一次，所以刚导入的简历下一轮就出现在这一栏里。
+   * 读数是父级的（见 `GeneratePanelProps.docs`），所以这一口也归父级——本面板不再自己发 `doc.list`，
+   * 否则同一份清单在两处各存一遍就是 plan §3.26 风险① 要防的那份漂。
    */
   const read = useCallback(async () => {
-    const reply = await bridge?.resume['doc.list']();
-    if (!reply?.ok) return;
-    const list = reply.value;
-    setDocs(list);
-    setDocId((current) => (list.some((item) => item.id === current) ? current : (list[0]?.id ?? '')));
-  }, [bridge]);
+    await refreshDocs();
+  }, [refreshDocs]);
 
   const { busy, notice, run, setNotice } = useBridgeAction(read);
-
-  /** 挂载即读一次候选：这一栏空着的时候「生成」是锁住的，锁的理由必须当场就能说清。 */
-  useEffect(() => {
-    void read();
-  }, [read]);
 
   /**
    * 库或工作副本被改过之后，那份提议态的基线就不成立了（接受侧会以 stale 拒绝），
@@ -190,6 +204,9 @@ export function GeneratePanel() {
           // 提议态在一次接受之后就不在主进程里了（`accept()` 会把它删掉），留着界面只会诱导第二次失败。
           setPreview(undefined);
           setChecked([]);
+          // 写盘成功就请父级重渲纸面（plan §3.26 的反馈闭环）：改动的结果要出现在那张纸上，
+          // 而不是只剩一行「已接受」的小字——人核对的是纸，不是提示条。
+          onAccepted();
         },
         onError: (error) => {
           // 三个码各对应一句不同的话，处置也不同：重生成 / 先看用户自己改的那版 / 这条组合没过校验。
@@ -333,7 +350,7 @@ export function GeneratePanel() {
           data-testid="generate-doc"
           label={t('generate.docLabel')}
           value={docId}
-          onValueChange={setDocId}
+          onValueChange={onDocIdChange}
           disabled={docs.length === 0}
           disabledReason={docs.length === 0 ? 'NO_DOC' : undefined}
           disabledReasonLabel={docs.length === 0 ? reasonLabel('NO_DOC') : undefined}

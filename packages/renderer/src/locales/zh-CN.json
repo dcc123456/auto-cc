@@ -64,7 +64,21 @@
       },
       "resume": {
         "title": "简历",
-        "hint": "本机简历与知识库，按岗位补齐缺口"
+        "hint": "本机简历与知识库，按岗位补齐缺口",
+        "sectionDoc": "选简历",
+        "sectionDocEmpty": "库里还没有简历",
+        "sectionFacts": "事实核对",
+        "sectionFactsClean": "没有待确认的条目",
+        "sectionFactsPending": "{{count}} 条待确认",
+        "sectionGenerate": "定制生成",
+        "sectionGenerateFor": "为 {{doc}} 定制",
+        "sectionOutput": "出纸",
+        "sectionOutputWith": "{{template}} · {{locale}}",
+        "sectionOutputNone": "还没有可摆的版式",
+        "advanced": "高级：直接填绝对路径",
+        "fixtures": "开发夹具",
+        "fixturesHint": "取证入口，产品里没有这三步",
+        "fixturesBody": "这三颗只服务于 spec 3.3-10 / 3.3-11 的验收：种一份虚构简历做端到端种子、在同一份上落第二版内容让版本对照有得比、对不存在的文档注入一次导出失败看错误态。日常用真实简历不需要它们——上面那栏选一份、或按「从本机导入」即可。"
       },
       "workflow": {
         "title": "流程",
@@ -522,7 +536,14 @@
       "none": "无对象"
     },
     "resume": {
-      "heading": "简历生成轨自测",
+      "paper": {
+        "modePreview": "预览",
+        "modeLayout": "排版",
+        "modePdf": "PDF 编辑",
+        "aria": "简历预览",
+        "who": "{{doc}} · {{template}} · {{locale}}",
+        "receipt": "{{pages}} 页 · {{bytes}} 字节"
+      },
       "editor": {
         "enter": "进入排版编辑器",
         "heading": "排版编辑器",
@@ -600,7 +621,7 @@
       },
       "seedReceipt": "已载入演示文档 {{docId}}",
       "previewDone": "预览已刷新",
-      "previewEmpty": "尚未预览：先载入演示内容再点预览",
+      "previewEmpty": "这张纸还是空的：先在左边选一份或导入，再按「预览」出纸",
       "exportReceipt": "导出成功：{{pages}} 页 · {{bytes}} 字节",
       "exportToast": "已导出 PDF · {{path}}",
       "failToast": "导出失败 · {{message}}",
@@ -626,8 +647,6 @@
       "pickerCanceled": "已取消选择，路径保持原样",
       "pickerPicked": "已选中 {{path}}",
       "docLabel": "当前简历",
-      "templateLabel": "生成模板",
-      "templateCount": "共 {{count}} 套内置模板",
       "setTemplate": "设为默认模板",
       "templateSet": "默认模板已设为 {{template}}，之后导出与生成都用它",
       "importPath": "文件绝对路径",
@@ -658,6 +677,33 @@
         "skills": "技能",
         "project": "项目经历",
         "campus": "校园经历"
+      }
+    },
+    "shelf": {
+      "heading": "模板架",
+      "count": "共 {{total}} 套 · 当前筛选剩 {{shown}} 套",
+      "pick": "点小图就改用这一套出纸；等宽小字是版式轴的技术读数",
+      "pickCard": "用「{{name}}」这一套出纸",
+      "selected": "当前出纸：{{name}}",
+      "setDefault": "设为默认",
+      "busy": "上一条动作还在途，等它报出结果再挑",
+      "badge": {
+        "default": "默认"
+      },
+      "filter": {
+        "columns": "栏数",
+        "header": "抬头",
+        "heading": "标题",
+        "accent": "强调色",
+        "density": "密度"
+      },
+      "empty": {
+        "none": "模板清单还是空的：主进程读回内置模板后会自己摆出来",
+        "afterFilter": "这一筛选下一套都不剩（{{total}} 套全被筛掉了）；再点一次当前档就取消这一条"
+      },
+      "honest": {
+        "label": "小图画的是什么",
+        "body": "这些小图是按每套模板的版式骨架七条轴（栏数 / 抬头摆法 / 区块标题画法 / 条目行结构 / 密度 / 衬线 / 强调色）画出来的示意图：灰条只是占位，不是你简历的真实渲染。真实版面以右边纸上的预览与导出的 PDF 为准。"
       }
     },
     "pdfEdit": {

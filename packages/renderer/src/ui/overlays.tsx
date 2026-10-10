@@ -407,6 +407,18 @@ function revealTargetKey(): 'macos' | 'windows' | 'linux' {
 }
 
 /**
+ * 「在访达 / 资源管理器中显示」那一句的现成译文（把平台名与句子在语言包里拼好）。
+ *
+ * 它挂在原件层而不是各面板：toast 的 reveal 键与简历纸面的 reveal 键要的是同一句话，
+ * 而"按当前系统挑目标名"这一步在两处长出来就会漂（§2.2 / §2.5），所以连推导带组句只这一处。
+ * @returns reveal 按钮的文案（调用方直接拿去当 label）
+ */
+export function useRevealLabel(): string {
+  const { t } = useTranslation();
+  return t('desk.reveal', { target: t(`desk.revealTarget.${revealTargetKey()}`) });
+}
+
+/**
  * 左下角浮层 toast（09 稿形态① 的 1-B）：贴在主区左下角的一行颜色，**不抢焦点**、同时只 1 只。
  *
  * 判据是稿里那句"只有当结果需要离开当前视野才能看到时"——产物是磁盘上的一份文件、
@@ -428,7 +440,7 @@ export function Toast() {
   // 暂停时要记住还剩多少，恢复不许把 8 秒重新发一遍——否则悬停一次就等于不消失。
   const remainingRef = useRef(TOAST_LINGER_MS);
   const deadlineRef = useRef(0);
-  const revealLabel = t('desk.reveal', { target: t(`desk.revealTarget.${revealTargetKey()}`) });
+  const revealLabel = useRevealLabel();
   // `read` 这一格传空 Promise：reveal 不回读数、toast 也没有要重读的面板状态，
   // 但五态（转针 / 结果 / 回落）必须继续走 `useBridgeAction` 那一份实现，不在这里另长一套（§2.5）。
   const { busy, resultOf, clearResult, run } = useBridgeAction(() => Promise.resolve());

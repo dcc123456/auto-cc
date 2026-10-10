@@ -64,7 +64,21 @@
       },
       "resume": {
         "title": "Resume",
-        "hint": "Local resume and knowledge base, filled against each job"
+        "hint": "Local resume and knowledge base, filled against each job",
+        "sectionDoc": "Pick a resume",
+        "sectionDocEmpty": "No resume in the library yet",
+        "sectionFacts": "Check the facts",
+        "sectionFactsClean": "Nothing waiting for review",
+        "sectionFactsPending": "{{count}} items waiting for review",
+        "sectionGenerate": "Tailored generation",
+        "sectionGenerateFor": "Tailoring {{doc}}",
+        "sectionOutput": "Output",
+        "sectionOutputWith": "{{template}} · {{locale}}",
+        "sectionOutputNone": "No layout on the shelf yet",
+        "advanced": "Advanced: type an absolute path",
+        "fixtures": "Dev fixtures",
+        "fixturesHint": "Evidence entry points, not three product steps",
+        "fixturesBody": "These three keys only serve the acceptance rows of spec 3.3-10 / 3.3-11: seed a fictional resume as an end-to-end baseline, drop a second revision onto the same document so the version diff has something to compare, and inject one export failure against a missing document to capture the error state. Everyday work with a real resume needs none of them — pick one above, or press “Import from this machine”."
       },
       "workflow": {
         "title": "Flows",
@@ -522,7 +536,14 @@
       "none": "no target"
     },
     "resume": {
-      "heading": "Resume Generation Self-test",
+      "paper": {
+        "modePreview": "Preview",
+        "modeLayout": "Layout",
+        "modePdf": "PDF editing",
+        "aria": "Resume preview",
+        "who": "{{doc}} · {{template}} · {{locale}}",
+        "receipt": "{{pages}} pages · {{bytes}} bytes"
+      },
       "locale": "Locale",
       "seed": "Load demo content",
       "preview": "Preview",
@@ -541,7 +562,7 @@
       },
       "seedReceipt": "Loaded demo document {{docId}}",
       "previewDone": "Preview refreshed",
-      "previewEmpty": "No preview yet: load demo content, then press Preview",
+      "previewEmpty": "This sheet is blank: pick or import a resume on the left, then press Preview to put paper in",
       "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes",
       "exportToast": "PDF exported · {{path}}",
       "failToast": "Export failed · {{message}}",
@@ -567,8 +588,6 @@
       "pickerCanceled": "Selection canceled; the path stays as it was",
       "pickerPicked": "Selected {{path}}",
       "docLabel": "Current resume",
-      "templateLabel": "Template",
-      "templateCount": "{{count}} built-in templates",
       "setTemplate": "Set as default",
       "templateSet": "Default template is now {{template}}; exports and generation will use it",
       "importPath": "Absolute file path",
@@ -658,6 +677,33 @@
           "NOTHING_TO_REDO": "No edit left to redo",
           "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save"
         }
+      }
+    },
+    "shelf": {
+      "heading": "Template shelf",
+      "count": "{{total}} templates · {{shown}} match this filter",
+      "pick": "Click a thumbnail to print with that layout; the mono captions are raw layout-axis values",
+      "pickCard": "Print with {{name}}",
+      "selected": "Now on paper: {{name}}",
+      "setDefault": "Set as default",
+      "busy": "The previous action is still in flight; pick again once it reports",
+      "badge": {
+        "default": "Default"
+      },
+      "filter": {
+        "columns": "Columns",
+        "header": "Header",
+        "heading": "Heading",
+        "accent": "Accent",
+        "density": "Density"
+      },
+      "empty": {
+        "none": "The template list is still empty; built-in templates appear once the main process reads them back",
+        "afterFilter": "No template survives this filter (all {{total}} hidden); click the current value again to clear it"
+      },
+      "honest": {
+        "label": "What these thumbnails show",
+        "body": "Each thumbnail is a schematic drawn from the template's seven layout axes (columns / header / heading / entry / density / serif / accent). The grey bars are placeholders, not your real resume. The true result is what the paper on the right renders and the exported PDF."
       }
     },
     "pdfEdit": {

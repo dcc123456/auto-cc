@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { BLOCK_SURFACE_CLASS } from './controls';
 
@@ -64,9 +64,10 @@ function saveSectionOpen(id: string, open: boolean): void {
  * 一格的开合状态：初值从 localStorage 取，每次切换立即落盘。
  * @param id 段 id（见 `loadSectionOpen`）
  * @param defaultOpen 库里没有记录时的回落档
+ * @param openSignal 跨视图那一跳的 `requestId`（见 `DeskSectionProps.openSignal`）；undefined = 这一格没有被跳进
  * @returns 当前是否展开，与一个切换函数
  */
-function useSectionOpen(id: string, defaultOpen: boolean): [boolean, () => void] {
+function useSectionOpen(id: string, defaultOpen: boolean, openSignal?: number): [boolean, () => void] {
   const [open, setOpen] = useState(() => loadSectionOpen(id, defaultOpen));
   const toggle = useCallback(() => {
     setOpen((previous) => {
@@ -75,6 +76,14 @@ function useSectionOpen(id: string, defaultOpen: boolean): [boolean, () => void]
       return next;
     });
   }, [id]);
+  // 「跳进这一格」必须连带把它打开：正文收起时是真的卸载（见 `DeskSection` 那条注释），
+  // 于是面包屑把人送到了简历屏、那一格的输入框却整个不在 DOM 里——落点看不见，跳转等于没发生。
+  // `requestId` 是自增的，所以同一格被第二次跳进仍然会重新打开（人不认"上次我收起来了"）。
+  useEffect(() => {
+    if (openSignal === undefined) return;
+    setOpen(true);
+    saveSectionOpen(id, true);
+  }, [id, openSignal]);
   return [open, toggle];
 }
 
@@ -100,6 +109,12 @@ export interface DeskSectionProps {
   summary?: ReactNode;
   /** 库里没有记录时是否展开。默认 false——本轮的诉求是"能收起就默认收起"。 */
   defaultOpen?: boolean;
+  /**
+   * 跨视图那一跳的 `requestId`（09 稿形态⑥ / spec 6.4-05）。给了它（且这一格正是那一跳的落点）时，
+   * 这一格**强制打开**并落盘：收起态下正文是卸载的，人不该被送到一格看不见输入框的地方。
+   * 由调用方决定什么时候给——`undefined` 就是"这只是一次普通的展开偏好"。
+   */
+  openSignal?: number;
   /** 挂在段容器上的附加 `data-*`（harness 常按 testid 找那一格）。 */
   markers?: Record<string, string>;
   /** 追加 class（只放外边与宽度档）。 */
@@ -118,11 +133,12 @@ export function DeskSection({
   title,
   summary,
   defaultOpen = false,
+  openSignal,
   markers,
   className = '',
   children,
 }: DeskSectionProps) {
-  const [open, toggle] = useSectionOpen(id, defaultOpen);
+  const [open, toggle] = useSectionOpen(id, defaultOpen, openSignal);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <section
