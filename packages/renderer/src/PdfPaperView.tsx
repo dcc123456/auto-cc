@@ -6,6 +6,8 @@
  * 位置与眼睛对不上任何东西；现在位图来自 pdf.js 的真实渲染，行盒只在悬停时才描边、点下去就是那一行。
  * 3.5-14 补上另一半：提交上去的覆盖区**用这一页自己的底色**（从位图上量的，不是猜的白），
  * 并且提交态**不再描任何边**——那一圈常驻的琥珀虚线就是"这里有一块补丁"的自供状。
+ * 3.5-16 收掉最后一格：就地改的输入框**没有自己的底色**（那一行先在画布上盖好，框只是透明地坐在上面），
+ * 而它显示的字号/字族/墨色与另存出来的那行字共用同一份读数（3.5-15 量来的那三个数）。
  *
  * 三条不变量：
  * ① 槽里任何时刻只有一张画布（spec 6.4-08）——控件在左列，画面只在这里；
@@ -105,6 +107,19 @@ function putRectVars(node: HTMLElement, prefix: string, rect?: PdfPaperRect): vo
 }
 
 /**
+ * 就地改那一格的**字档**（字号 / 字族 / 墨色）写在同一个包裹节点上（§5.2：动态值不进内联 `style`，
+ * 也不散进多颗节点）。三个数全部来自被盖住的那一行与刚在画布上盖好的那块底色，输入框只是 `inherit`——
+ * 于是"人正在敲的那行字"与"另存出来那行字"出自同一份读数，不是两处各挑一次（spec 3.5-16）。
+ * @param node 承载变量的节点（纸的包裹层）
+ * @param font 字号（CSS px，按纸面当下的 CSS 宽度换算）、字族与墨色
+ */
+function putEditTypeVars(node: HTMLElement, font: { sizePx: number; family: string; inkHex: string }): void {
+  node.style.setProperty('--pdf-edit-size', `${font.sizePx.toFixed(2)}px`);
+  node.style.setProperty('--pdf-edit-font', font.family);
+  node.style.setProperty('--pdf-edit-ink', font.inkHex);
+}
+
+/**
  * 简历屏 PDF 档的那一张真纸。
  * @param model 这一轨的唯一模型（`usePdfEdit`，desk 持有）
  */
@@ -124,7 +139,27 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
   const [paintMs, setPaintMs] = useState(-1);
 
   /**
-   * 画这一页：先要位图（pdf.js），再把已提交的覆盖区叠上去（**这一页自己的底色** + 新字，不描边）。
+   * 把就地改那一格的字档（字号 / 字族 / 墨色）写成包裹节点上的三只变量。
+   * 两个时机各写一次：**渲染那一帧**（effect——不写的话首帧的字号是继承来的，要等一趟异步重画才对上）、
+   * 以及**重画之后**（`paintNow`——拖把手改的是 CSS 宽度，纸面缩放，字档必须跟着缩）。
+   * 判据只有一处：底色走 `sampleBackdrop`，两色走 `colorsOfOverlay`，与画布上那块垫底同源。
+   */
+  const writeEditTypeVars = useCallback(() => {
+    const node = wrapRef.current;
+    const canvas = canvasRef.current;
+    const page = model.paperPage;
+    const line = model.editing?.line;
+    if (!node || !canvas || !page || !line || canvas.clientWidth < 1) return;
+    putEditTypeVars(node, {
+      sizePx: (line.fontSizePt * canvas.clientWidth) / page.widthPt,
+      family: line.fontFamilyHint,
+      inkHex: colorsOfOverlay({ backdropHex: page.sampleBackdrop(line.rect) }).inkHex,
+    });
+  }, [model.editing?.line, model.paperPage]);
+
+  /**
+   * 画这一页：先要位图（pdf.js），再把已提交的覆盖区叠上去（**这一页自己的底色** + 新字，不描边），
+   * 最后把**正在就地改的那一行也先盖好**（spec 3.5-16：输入框从此透明地坐在自己那一行上）。
    * 覆盖区画进同一块画布是「所见即所得」的最低要求——另存产物里那一块就是这个样子（spec 3.5-02）；
    * 所以纸面图像、垫底颜色与新字墨色**一律跟着产物走**（`colorsOfOverlay`），不跟主题走。
    */
@@ -172,7 +207,24 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
         painter.fillText(overlay.text, x, baselineY);
       }
     }
-  }, [model.draft.overlays, model.limits, model.paperPage]);
+    // 就地改还没提交，但**这一行先在画布上盖好**（spec 3.5-16）：输入框从此透明地坐在自己那一行上，
+    // 而不是贴着一只 95% 不透明白盒子把原字压在底下。取色走同一句 `colorsOfOverlay`，
+    // 所以预览这块与提交后那块同色；字号/字族/墨色同时写成这个节点上的三只变量（§5.2）。
+    const editingLine = model.editing?.line;
+    if (editingLine) {
+      const rect = editingLine.rect;
+      const colors = colorsOfOverlay({ backdropHex: page.sampleBackdrop(rect) });
+      painter.fillStyle = colors.fillHex;
+      painter.fillRect(
+        rect.xRatio * canvas.width - 1,
+        rect.yRatio * canvas.height - 1,
+        rect.widthRatio * canvas.width + 2,
+        rect.heightRatio * canvas.height + 2,
+      );
+      // 墨色与这块垫底是同一句 `colorsOfOverlay` 的两侧，所以预览与产物同色；字档写成变量给 DOM 那一格用。
+      writeEditTypeVars();
+    }
+  }, [model.draft.overlays, model.editing?.line, model.limits, model.paperPage, writeEditTypeVars]);
 
   /**
    * 排一次重绘：挂载那一帧、观察器送来的第一帧、换页与翻主题会在同一刻各敲一次，
@@ -217,13 +269,15 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
   }, [repaint]);
 
   // 悬停 / 橡皮筋 / 就地改三只框的几何：都写在纸的包裹节点上，只有当下在场的那一格被画出来。
+  // 依赖收到 `?.line` 这一层：就地改的草稿每敲一键都换对象，但那不影响行盒与字档（省掉每帧一次量色）。
   useEffect(() => {
     const node = wrapRef.current;
     if (!node) return;
     putRectVars(node, 'pdf-hover', hovered?.rect);
     putRectVars(node, 'pdf-rubber', model.rubber);
     putRectVars(node, 'pdf-edit', model.editing?.line.rect);
-  }, [hovered, model.editing, model.rubber]);
+    writeEditTypeVars();
+  }, [hovered, model.editing?.line, model.rubber, writeEditTypeVars]);
 
   /**
    * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶腿）。
@@ -323,12 +377,15 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
             className="pointer-events-none absolute left-(--pdf-hover-left) top-(--pdf-hover-top) h-(--pdf-hover-height) w-(--pdf-hover-width) rounded-[2px] border border-amber"
           />
         )}
+        {/* 就地改那一格：**没有自己的底色**（spec 3.5-16）——画布上这一行已经先盖好了，
+            输入框透明地坐在上面，字号/字族/墨色一律继承这个节点上的三只变量。 */}
         {model.editing && (
           <div
             data-testid="pdf-edit-inline-wrap"
-            className="absolute left-(--pdf-edit-left) top-(--pdf-edit-top) flex min-w-[160px] items-start gap-1 bg-white/95"
+            className="absolute left-(--pdf-edit-left) top-(--pdf-edit-top) flex min-w-[160px] items-start gap-1 font-[family-name:var(--pdf-edit-font)] text-[color:var(--pdf-edit-ink)] text-[length:var(--pdf-edit-size)]"
           >
             <InlineEditField
+              bare
               action="pdf-edit-inline-text"
               value={model.editing.text}
               onValueChange={model.changeEditText}

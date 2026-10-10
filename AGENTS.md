@@ -407,6 +407,18 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   真实画面（`docs/acceptance/06-ui-ink-desk/6.5-05-inspector-{light,dark}.png`）。所以“V 类截图受阻”不再是 hidden
   的必然结论：先分清这一条判据要的是**画面长什么样**（可以直接拍）还是**指针有没有落页**（必须用户在场）。
 
+- **实测（3.5-16 片 3 补窗）窗口 hidden 挡的不只是 CSS 时间轴，还有 pdf.js 的分帧渲染；而 `harness shot` 恰好是逼帧的那只手**：
+  `document.visibilityState === 'hidden'` 时 `requestAnimationFrame` 在 1500ms 里只走 1 帧，于是 pdf.js 那一趟
+  `page.render().promise` **永不 resolve**——界面表现是"状态行已经回 `ready`、位图却整张白、读数停在「画了 -1 毫秒」"，
+  且 `unhandledrejection` / `error` 两类事件**一条都不发**（所以按"报错找根因"这条路会走进死胡同，本轮就在这里白查了一轮）。
+  解法不是等前台：**先跑一次 `harness shot --url 5173`**（CDP `Page.captureScreenshot` 会逼出一帧），渲染即跑完，
+  读数从 `-1 毫秒` 变 `49 毫秒`、位图非白像素从 `0/9241` 变 `9241/9241`。所以量画布像素之前把顺序写成
+  「shot 逼帧 → 看那个毫秒读数是否 ≥0 → 再 getImageData」，别把环境挡的当成产品缺陷。
+  同一条遮挡还挡掉另一类判据：hidden 时 **`:focus` 不匹配**（`document.activeElement === input` 为 true、
+  `input.matches(':focus')` 为 false、`document.hasFocus()` 为 false），于是"聚焦才长出来的那只边框"在无人值守的
+  活体上取不到像素证据——这一类只能退到规则层读数（读注入 `<style>` 原文里那条 `.focus\\:…:focus` 在不在、
+  以及基态那一条 computed 值），并把"敲一下看看"留给用户在场。
+
 - **实测（7.1-d 收口）Electron `safeStorage` 的两条形状事实**（活体取证才发现，四道门禁全绿时它躲过了全部单测）：
   ① `safeStorage` 是 `import('electron')` 返回值上的**成员**（`mod.safeStorage`，CJS 互操作下也在
   `mod.default.safeStorage`），对模块对象本身解构 `isEncryptionAvailable/encryptString/decryptString`

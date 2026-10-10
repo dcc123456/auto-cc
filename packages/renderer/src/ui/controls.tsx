@@ -588,6 +588,15 @@ const EDIT_INPUT =
   'focus:outline-none focus:ring-1 focus:ring-celadon/70';
 
 /**
+ * 画在**别人家的画面**上那一档（spec 3.5-16）：不铺自己的底色、平时不描边，focus 才长出琥珀描边。
+ * 纸面那一格要的正是"这里没有盒子"——底色、字号、字族一律 `inherit`，由调用方挂在包裹节点上
+ * （动态几何与量来的读数走一个节点上的 CSS 变量，§5.2 那条已登记口径）。
+ */
+const EDIT_INPUT_BARE =
+  'w-full rounded-[2px] border border-transparent bg-transparent px-0 py-0 text-inherit ' +
+  'outline-none focus:border-amber';
+
+/**
  * 表单五件原件（输入框 / 下拉 / 文本域 / 勾选 / 滑杆）共用的外档。`action` 强制（6.2-03：无 `action` 不可编译），
  * `className` **只许放宽度与外边档**（`flex-1`、`w-24`、`mt-2`），描边/底色/字号一律在原件里——
  * 面板再各写一遍这一串就是回到 54 处裸控件的老路（§2.2），所以它不导出。
@@ -1193,6 +1202,11 @@ export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInput
   disabledReason?: string;
   /** 原因码对人说的话（挂成 `title`；原生 `disabled` 会让它永远不出现，见 `deskFieldDead`）。 */
   disabledReasonLabel?: string;
+  /**
+   * 卸掉原件自己的底色与描边，只留"一只可敲的格子"（spec 3.5-16）：
+   * 画在真实页面上时，盒子底色会盖住那一页自己的颜色，看上去就是贴了一只白盒子。
+   */
+  bare?: boolean;
 }
 
 /**
@@ -1207,6 +1221,7 @@ export interface InlineEditFieldProps extends Omit<InputHTMLAttributes<HTMLInput
  * @param disabled 按不动（在途时不许敲进去也不许提交）
  * @param disabledReason 按不动的原因码
  * @param disabledReasonLabel 原因码对人说的话
+ * @param bare 卸掉底色与描边、字号字族颜色一律继承外层（画在真实页面上的那一格）
  * @returns 一个自动聚焦的输入框加一行提示
  */
 export function InlineEditField({
@@ -1219,6 +1234,7 @@ export function InlineEditField({
   disabled,
   disabledReason,
   disabledReasonLabel,
+  bare,
   className,
   ...rest
 }: InlineEditFieldProps) {
@@ -1228,7 +1244,7 @@ export function InlineEditField({
       <input
         data-action={action}
         data-editing="true"
-        className={`${EDIT_INPUT} ${dead.deadClass}${className ?? ''}`}
+        className={`${bare === true ? EDIT_INPUT_BARE : EDIT_INPUT} ${dead.deadClass}${className ?? ''}`}
         value={value}
         autoFocus
         onChange={(event) => {
