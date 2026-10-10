@@ -76,6 +76,9 @@
         "sectionOutputWith": "{{template}} · {{locale}}",
         "sectionOutputNone": "No layout on the shelf yet",
         "advanced": "Advanced: type an absolute path",
+        "paperHandle": "Drag to resize the paper, double-click to reset",
+        "paperFit": "Shrinks to fit, never crops",
+        "paperFitBody": "The paper's physical width is untouched — it is still A4 210mm; only the display scale changes, so line breaks, content and the exported file are unaffected. Drag this column wider (or focus the handle and use the arrow keys) to bring it back to 1:1.",
         "fixtures": "Dev fixtures",
         "fixturesHint": "Evidence entry points, not three product steps",
         "fixturesBody": "These three keys only serve the acceptance rows of spec 3.3-10 / 3.3-11: seed a fictional resume as an end-to-end baseline, drop a second revision onto the same document so the version diff has something to compare, and inject one export failure against a missing document to capture the error state. Everyday work with a real resume needs none of them — pick one above, or press “Import from this machine”."
@@ -542,7 +545,10 @@
         "modePdf": "PDF editing",
         "aria": "Resume preview",
         "who": "{{doc}} · {{template}} · {{locale}}",
-        "receipt": "{{pages}} pages · {{bytes}} bytes"
+        "receipt": "{{pages}} pages · {{bytes}} bytes",
+        "liveRendering": "Redrawing this page…",
+        "liveFresh": "Up to date · {{time}}",
+        "liveFailed": "This page could not be redrawn, showing the previous one: {{message}}"
       },
       "locale": "Locale",
       "seed": "Load demo content",
@@ -561,8 +567,7 @@
         "SNAPSHOT_SAME": "Start and end are the same snapshot, nothing to compare"
       },
       "seedReceipt": "Loaded demo document {{docId}}",
-      "previewDone": "Preview refreshed",
-      "previewEmpty": "This sheet is blank: pick or import a resume on the left, then press Preview to put paper in",
+      "previewEmpty": "This sheet is blank: pick or import a resume on the left, and it will put paper here by itself.",
       "exportReceipt": "Exported: {{pages}} pages · {{bytes}} bytes",
       "exportToast": "PDF exported · {{path}}",
       "failToast": "Export failed · {{message}}",

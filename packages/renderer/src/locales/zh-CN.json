@@ -76,6 +76,9 @@
         "sectionOutputWith": "{{template}} · {{locale}}",
         "sectionOutputNone": "还没有可摆的版式",
         "advanced": "高级：直接填绝对路径",
+        "paperHandle": "拖动改这张纸的宽度，双击回默认",
+        "paperFit": "装不下就整张缩小",
+        "paperFitBody": "纸的物理宽度一字未改（仍是 A4 的 210mm），缩的只是显示倍率：折行位置、内容与导出产物都和这一格无关。要看得更清就把右栏拖宽（或按把手后方向键），整张放大到 1:1 就不再缩。",
         "fixtures": "开发夹具",
         "fixturesHint": "取证入口，产品里没有这三步",
         "fixturesBody": "这三颗只服务于 spec 3.3-10 / 3.3-11 的验收：种一份虚构简历做端到端种子、在同一份上落第二版内容让版本对照有得比、对不存在的文档注入一次导出失败看错误态。日常用真实简历不需要它们——上面那栏选一份、或按「从本机导入」即可。"
@@ -542,7 +545,10 @@
         "modePdf": "PDF 编辑",
         "aria": "简历预览",
         "who": "{{doc}} · {{template}} · {{locale}}",
-        "receipt": "{{pages}} 页 · {{bytes}} 字节"
+        "receipt": "{{pages}} 页 · {{bytes}} 字节",
+        "liveRendering": "正在重出这张纸…",
+        "liveFresh": "已是最新 · {{time}}",
+        "liveFailed": "这一张没重出来，纸上还是上一版：{{message}}"
       },
       "editor": {
         "enter": "进入排版编辑器",
@@ -620,8 +626,7 @@
         "SNAPSHOT_SAME": "起点与终点是同一份快照，比不出差异"
       },
       "seedReceipt": "已载入演示文档 {{docId}}",
-      "previewDone": "预览已刷新",
-      "previewEmpty": "这张纸还是空的：先在左边选一份或导入，再按「预览」出纸",
+      "previewEmpty": "这张纸还是空的：先在左边选一份或导入一份简历，选好了它自己会出纸。",
       "exportReceipt": "导出成功：{{pages}} 页 · {{bytes}} 字节",
       "exportToast": "已导出 PDF · {{path}}",
       "failToast": "导出失败 · {{message}}",

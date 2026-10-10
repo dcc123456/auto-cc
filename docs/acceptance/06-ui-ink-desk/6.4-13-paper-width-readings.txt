@@ -1,0 +1,134 @@
+6.4-13 · 右栏宽度可拖拽并持久化（抽成 `src/ui/split.tsx` 一处实现）——活体读数
+================================================================================
+
+取证对象同 6.4-12（用户自己的 dev 实例，CDP 10222 / 5173，窗口 1200×772，容器实测 940）。
+三支脚本各管一腿：`tmp/57b/legs57.mjs`（合成 pointer 拖拽 + 边界 + 键盘）、
+`tmp/57b/reload57.mjs`（reload 持久化，**单独一条会话**：`Page.reload` 会打断这条 WebSocket 的
+Runtime 上下文，同一会话里等回执直接挂住——本轮第一版挂了两分钟）、
+`tmp/57b/kernel57.mjs`（内核视图那侧的回归负腿）。
+
+先记一条**读法**，否则下面的数字会被读反：把手长在纸栏的**左缘**，所以"向左拖是变宽"，
+与 `KernelViewSlot` 同一条口径（方向按**手势**不按"值变大"）。脚本里的参数因此写成
+"想要的纸栏百分比"，而不是"指针往哪边走"。
+
+还有一条：每一腿都读两遍——`…` 是同一任务里的即时读数，`afterFrame` 是**逼一帧之后**的读数。
+hidden 窗口里 `ResizeObserver` 排在帧末，即时读数拿到的是"宽度已改、倍率还没重算"的中间态
+（例如 `dragTo50` 的即时 `neverClipped:false` + `frameRectWidth:470`，逼帧后收敛成
+`neverClipped:true` + `414`）。**判据以 `afterFrame` 为准**，中间态留在这里说明为什么要隔一帧。
+
+----------------------------------------------------------------------
+① 判据①（C）：机检锚点没被抽走
+----------------------------------------------------------------------
+
+$ grep -n 'WIDTH_MIN = 38\|w-(--kernel-slot-width)' packages/renderer/src/KernelViewSlot.tsx
+18:const WIDTH_MIN = 38;
+31:const WIDTH_CLASS = 'w-(--kernel-slot-width)';
+
+→ `check-renderer-conventions.ts` 第 4 段钉的两条字面量仍在原位（抽原件不许把机检的锚点抽走），
+  `globals.css` 里 `--kernel-slot-width: var(--kernel-view-width)` 那条也仍在（同段第三条）。
+
+----------------------------------------------------------------------
+② 判据②（C）：宽度拖拽只有一个实现
+----------------------------------------------------------------------
+
+$ grep -rn "setProperty" packages/renderer/src/ui/split.tsx packages/renderer/src/ResumePaperStage.tsx packages/renderer/src/ResumeDesk.tsx
+packages/renderer/src/ui/split.tsx:134:    panelRef.current?.style.setProperty(cssVar, `${ratio}%`);
+packages/renderer/src/ui/split.tsx:162:      panel.style.setProperty(cfg.cssVar, `${clamped}%`);
+packages/renderer/src/ResumePaperStage.tsx:113:    slot.style.setProperty('--paper-scale', String(Math.min(1, availWidth / naturalWidth)));
+
+$ grep -rn "useSplitWidth\|SplitHandle" packages/renderer/src --include="*.tsx" | grep -v "ui/split.tsx"
+packages/renderer/src/KernelViewSlot.tsx:5:import { SplitHandle, useSplitWidth } from './ui/split';
+packages/renderer/src/KernelViewSlot.tsx:81:  const split = useSplitWidth({
+packages/renderer/src/KernelViewSlot.tsx:162:        <SplitHandle
+packages/renderer/src/ResumeDesk.tsx:40:import { SplitHandle, useSplitWidth } from './ui/split';
+packages/renderer/src/ResumeDesk.tsx:508:  const paperSplit = useSplitWidth<HTMLDivElement>({
+packages/renderer/src/ResumeDesk.tsx:886:          <SplitHandle
+
+→ 宽度这一族的 `setProperty` 只在 `ui/split.tsx` 两处（挂载写一次 + 拖拽过程写），两个消费者各自
+  只传配置；`ResumePaperStage` 那一处写的是**缩放倍率**，不是宽度。
+  **一条被活体推翻的判据（spec 行内同步更正）**：原先写成"`grep -rn pointermove` 在宽度这一族只命中
+  `ui/split.tsx` 一处"。实测 `pointermove` 还命中 `ResumeEditor.tsx:145/174`（区块顺序拖排）与
+  `PdfEditPanel.tsx:354/363`（覆盖区橡皮筋）——那是**另两件事**的手势，与宽度无关，不该为了凑 grep
+  归零去动它们。判据换成"宽度拖拽只有一个实现"这一条正面读数（上面两组 grep 就是它）。
+
+----------------------------------------------------------------------
+③ 判据③④⑤（V）：合成 pointer 三腿 + 键盘四件（`legs57.mjs`，窗口 1200×772）
+----------------------------------------------------------------------
+
+atDefault   {"ariaNow":"56","inlineVar":"56%","colWidth":526,"stored":null,"scale":"0.5919395465994962","frameRectWidth":470,"leftWidth":402}
+dragTo50    {"hitAtHandleCenter":"resume-paper-handle","wantedPercent":50,"ariaNow":"50","inlineVar":"50%","colWidth":470,"stored":"50",
+             "afterFrame":{"ariaNow":"50","inlineVar":"50%","colWidth":470,"stored":"50","scale":"0.5214105793450882","frameRectWidth":414,"neverClipped":true,"leftWidth":458}}
+dragBeyondMax {"wantedPercent":70,"ariaNow":"62","inlineVar":"62%","colWidth":583,"stored":"62",
+             "afterFrame":{"ariaNow":"62","colWidth":583,"scale":"0.663727959697733","frameRectWidth":527,"neverClipped":true,"leftWidth":345}}
+dragBeyondMin {"wantedPercent":20,"ariaNow":"40","inlineVar":"40%","colWidth":376,"stored":"40",
+             "afterFrame":{"ariaNow":"40","colWidth":376,"scale":"0.40302267002518893","frameRectWidth":320,"neverClipped":true,"leftWidth":552}}
+keyLeft   {"ariaNow":"42","inlineVar":"42%","colWidth":395,"stored":"42","afterFrame":{"ariaNow":"42","scale":"0.4269521410579345","frameRectWidth":339,"neverClipped":true}}
+keyRight  {"ariaNow":"40","inlineVar":"40%","colWidth":376,"stored":"40","afterFrame":{"ariaNow":"40","scale":"0.40302267002518893","neverClipped":true}}
+keyHome   {"ariaNow":"40","stored":"40","afterFrame":{"ariaNow":"40","colWidth":376,"neverClipped":true}}
+keyEnd    {"ariaNow":"62","stored":"62","afterFrame":{"ariaNow":"62","colWidth":583,"scale":"0.663727959697733","neverClipped":true,"leftWidth":345}}
+keyEscape {"ariaNow":"62","stored":"62","afterFrame":{"ariaNow":"62","colWidth":583,"neverClipped":true}}
+doubleClick {"ariaNow":"56","inlineVar":"56%","colWidth":526,"stored":"56","afterFrame":{"ariaNow":"56","scale":"0.5919395465994962","frameRectWidth":470,"neverClipped":true,"leftWidth":402}}
+
+→ 逐条对上判据：
+  · 拖到 50 → `aria-valuenow 50`、内联变量 `50%`、列宽 470、**盘里落成整数百分比 `stored:"50"`**（判据③）。
+  · 拖过界两条：想要 70 停在 **62**（上界）、想要 20 停在 **40**（下界）；上界那一腿同时是负腿——
+    拖到顶时左列仍 **345px ≥ 320**（三步的最小可读宽度），压不扁。
+  · 键盘等价：`ArrowLeft` 56→…→40→42（一步 2）、`ArrowRight` 42→40、`Home`→40、`End`→62、
+    `Escape`→回到持久值 62、双击→回默认 56（判据⑤）。
+  · 把手的无障碍读数：`{"role":"slider","min":"40","max":"62","now":"56","tabindex":"0"}`（6.4-12 的带几何里同一份）。
+  · `hitAtHandleCenter:"resume-paper-handle"`：命中测试落在把手自己身上（不是被谁盖住）。
+    注意这一腿量的是**把手顶部 +24px**，不是几何中心——把手 `self-stretch` 长在一根 ~2600px 的列里，
+    中心点在视口外，`elementFromPoint` 回 `null`（本轮第一版就被这个 `null` 骗过一次）。
+  · 拖的过程只改 CSS 变量：`pointermove` 里不 setState（判据④），这条的形状证据在
+    `ui/split.tsx:162`（移动只 `panel.style.setProperty`）与 `:174`（监听挂在 window 上），
+    落 state 与盘在 `pointerup`；`live57` 一轮里"连改五次只发一趟渲染"是同一件事的另一侧读数（见 6.4-14）。
+
+**真实鼠标那一腿未过**：窗口 `visibilityState:"hidden"`，CDP 输入不落页（§9 的 2.1-12），
+上面这一族是**页面里派发的合成 PointerEvent**，证明的是 `beginDrag` 的处理器逻辑，不是"人拖得动"。
+解除条件：用户在场、把 app 窗口带到前台，用真鼠标拖一次把手，判据读 `localStorage['auto-cc.resume-desk.paper-width']`
+与列宽（`hitAtHandleCenter` 已在证明命中测试这一半没问题）。
+
+----------------------------------------------------------------------
+④ 判据③ 的后半：reload 之后仍是那一档（`reload57.mjs`）
+----------------------------------------------------------------------
+
+$ node tmp/57b/reload57.mjs tmp/57b/persist 47
+BEFORE_RELOAD       {"mounted":true,"ariaNow":"56","inlineVar":"56%","colWidth":526,"stored":"47","direction":"row"}
+AFTER_RELOAD        {"mounted":true,"ariaNow":"47","inlineVar":"47%","colWidth":442,"stored":"47","direction":"row"}
+AFTER_CLEANUP_RELOAD{"mounted":true,"ariaNow":"56","inlineVar":"56%","colWidth":526,"stored":null,"direction":"row"}
+
+→ 把盘上写死成 47 再 reload：`aria-valuenow` 从 56 变成 **47**、列宽 526→**442**、内联变量 `47%`——
+  起手档是从 localStorage 读回来的，不是组件默认值。第三行是收尾：擦掉键再 reload，回到默认 56，
+  **用户的实例不留我拖过的那一档**（`stored:null`）。
+  `BEFORE_RELOAD` 那行的 `ariaNow:56 / stored:47` 是同一条判据的反面自证：DOM 还没重挂载时，
+  盘上的值与画面上的值可以不一致，所以判"持久化生效"必须看 reload **之后**。
+
+----------------------------------------------------------------------
+⑤ 判据⑥（V，回归负腿）：内核视图那侧逐条不变（`kernel57.mjs`）
+----------------------------------------------------------------------
+
+$ node tmp/57b/kernel57.mjs
+BEFORE        {"stripOnly":true,"storedKernelWidth":"38"}
+AFTER_SHOW    {"stripOnly":false,"asideWidth":456,"asideVar":"38%","slotMeasured":"455×654","slotRect":[745,455],
+               "handleAria":{"role":"slider","min":"38","max":"72","now":"38","tabindex":"0"},
+               "handleRect":[738,6],"handleHit":"kernel-resize-handle","storedKernelWidth":"38","expandTitle":"全屏"}
+KEY_LEFT      {"asideWidth":480,"asideVar":"40%","slotMeasured":"479×654","handleAria":{"…":"now 40"},"storedKernelWidth":"40","handleHit":"kernel-resize-handle"}
+KEY_END       {"asideWidth":864,"asideVar":"72%","slotMeasured":"863×654","handleAria":{"…":"now 72"},"storedKernelWidth":"72"}
+KEY_HOME      {"asideWidth":456,"asideVar":"38%","slotMeasured":"455×654","handleAria":{"…":"now 38"},"storedKernelWidth":"38"}
+AFTER_EXPAND  {"asideWidth":1016,"asideVar":"38%","slotMeasured":"1015×654","slotRect":[185,1015],"handleAria":null,"expandTitle":"退出全屏"}
+AFTER_COLLAPSE{"asideWidth":456,"asideVar":"38%","slotMeasured":"455×654","handleAria":{"…":"now 38"},"expandTitle":"全屏"}
+RESTORE       {"restoredKey":"38","clickedHide":true}
+FINAL         {"stripOnly":true,"storedKernelWidth":"38"}
+
+→ 8.8-02/04/10 的既有通道逐条对得上：`aria-valuenow` 仍在 **38…72** 之间（38→40→72→38），
+  拖/键之后 `--kernel-slot-width` 与实测列宽一致（38% → 456px、72% → 864px），
+  `kernel-slot-expand` 那颗键一字未改（`title` 在"全屏/退出全屏"两态之间翻），全屏态 1016px 且把手收起
+  （`handleAria:null` 是全屏时不画把手的既有行为），`slotMeasured` 说明 `ResizeObserver → shell.setKernelViewBounds`
+  那一段留在原地没被抽走（455×654 / 863×654 / 1015×654 随宽度连续变）。
+  把手右缘 738+6=744 < 槽左缘 745——抽原件之后把手仍在 aside 之外、不被原生视图抢命中。
+  收尾把可见性与宽度档都还原成进门那一份（`FINAL` 与 `BEFORE` 逐字段相同）。
+
+----------------------------------------------------------------------
+画面
+----------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.4-13-paper-width-persisted.png  reload 之后仍是 47% 那一档（1200×772）

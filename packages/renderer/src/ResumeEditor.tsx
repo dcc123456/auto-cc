@@ -39,14 +39,28 @@ interface DragState {
  * 拖拽用 pointer 把手而不是原生 HTML5 DnD 或 @dnd-kit，选型与否决理由见 plan §8.2：
  * 本仓唯一被活体证明能驱动的拖拽通道是 CDP 派发的可信鼠标事件，而它走的就是 pointer 这一路。
  *
- * @param docId 要编辑的简历文档 id（由 `ResumePanel` 的种子/导入结果给出）
+ * **画面不住在这里**（2026-10-10 起，spec 6.4-14 的④）：这一版编辑器只长在左列，出纸的那张 iframe
+ * 由纸面槽持有，本组件通过 `onPreview` 把 draft 的打印 HTML 交上去。理由是一条说谎的形状：
+ * 编辑器自己养一张预览时，同一屏上同时存在"库里那份的预览"与"draft 的预览"两张纸，
+ * 人改完滑杆要转到编辑器那一格才看得见结果（正是用户 2026-10-10 报的那件事）。
+ *
+ * @param docId 要编辑的简历文档 id（由 `ResumeDesk` 持有并传入）
  * @param onClose 人按"关闭编辑器"且拦截通过后要走的卸载动作（裁定⑪：拦截只做组件卸载这一层）
+ * @param onPreview 每一次 draft 重出之后把 HTML 交给父级（`undefined` = 这一版没渲出来，画空态不画残留）；
+ *   它是**单向的供料**，父级不回推，因此槽位里那张纸的身份仍由 desk 判
  */
-export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () => void }) {
+export function ResumeEditor({
+  docId,
+  onClose,
+  onPreview,
+}: {
+  docId: string;
+  onClose: () => void;
+  onPreview: (html: string | undefined) => void;
+}) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
   const [view, setView] = useState<ResumeEditorView>();
-  const [previewHtml, setPreviewHtml] = useState<string>();
   const [previewMs, setPreviewMs] = useState<number>();
   const [rejected, setRejected] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
@@ -61,14 +75,15 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
   /**
    * 拉一次当前 draft 的预览 HTML 并计时（3.6-08 的读数来源就是这一趟跨进程往返）。
    * 它不走 `run`：`run` 结束会调 `read`，而 `read` 里就要调它——绕成递归的话每次动作会翻倍发调用。
+   * 拿到之后**不在本组件里画**：交一份给 `onPreview`，由右栏那张纸去画（spec 6.4-14 的④）。
    */
   const refreshPreview = useCallback(async () => {
     if (!bridge) return;
     const started = performance.now();
     const reply = await bridge.resume['editor.preview'](docId);
     setPreviewMs(Math.round(performance.now() - started));
-    if (reply?.ok) setPreviewHtml(reply.value);
-  }, [bridge, docId]);
+    onPreview(reply?.ok ? reply.value : undefined);
+  }, [bridge, docId, onPreview]);
 
   /** 每个动作结束后一律重读投影 + 重取预览：界面不猜主进程当下的状态（AGENTS.md §2.5）。 */
   const read = useCallback(async () => {
@@ -504,21 +519,6 @@ export function ResumeEditor({ docId, onClose }: { docId: string; onClose: () =>
           </span>
         )}
       </div>
-
-      {/* 纸面在两套主题下都保持白：预览给的是"打印出来长什么样"，它不是 app 的表皮（03 稿的纸面规则）。 */}
-      {previewHtml ? (
-        <iframe
-          data-testid="resume-editor-preview"
-          title={t('resume.editor.heading')}
-          sandbox=""
-          srcDoc={previewHtml}
-          className="mt-3 h-[520px] w-full rounded-md border border-line-strong bg-white"
-        />
-      ) : (
-        <p className="mt-3 text-[11px] text-slate-500" data-testid="resume-editor-preview-empty">
-          {t('resume.editor.previewEmpty')}
-        </p>
-      )}
     </section>
   );
 }

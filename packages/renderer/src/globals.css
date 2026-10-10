@@ -240,6 +240,18 @@
      而不是写在 App.tsx 里的一次性 class。 */
   --desk-nav-width: 184px;
 
+  /* 简历屏右栏（那张纸）的**默认**宽度：56% 不是拍的——940px 容器里 56% 给纸栏 526px、
+     给左列留 940−526−6（把手）−12（gap）= 396px，正好接住 6.4-07 那批读数里的 400px 左列
+     （spec 6.4-12/13）。人拖过之后由 `useSplitWidth` 把持久值命令式覆盖在纸栏节点自己身上，
+     与 `--kernel-slot-width` 同一口径（plan §3.24 记的那条 §5.2 偏离）。 */
+  --resume-paper-width: 56%;
+
+  /* 纸面的显示倍率（无单位）。装不下 A4 时**整张缩小**而不是横向滚（spec 6.4-12 的③），
+     所以 `w-[210mm]` 这个物理宽度一字不改，只改这一支倍率；它必须由 `--paper-scale: 1` 起步，
+     否则 iframe 那两条引用它的 utility（`scale-(--paper-scale)` 与 `calc(100%/(var(--paper-scale)))`）
+     在首帧量到之前解析不出值，纸会既不等比也不铺满。真值写在 `ResumePaperStage` 的槽位节点上。 */
+  --paper-scale: 1;
+
   color-scheme: dark;
 }
 

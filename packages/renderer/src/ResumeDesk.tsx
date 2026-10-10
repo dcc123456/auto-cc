@@ -13,7 +13,7 @@ import {
   SlidersHorizontal,
   Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
@@ -32,16 +32,49 @@ import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
 import { PdfEditPanel } from './PdfEditPanel';
 import { ResumeEditor } from './ResumeEditor';
-import { ResumePaperStage, type ResumePaperMode } from './ResumePaperStage';
+import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
 import { Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
 import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { Drawer, useRevealLabel } from './ui/overlays';
+import { SplitHandle, useSplitWidth } from './ui/split';
 import { useBridgeAction } from './useBridgeAction';
 import { useViewTrail } from './viewTrail';
 
 /** 故意不存在的文档 id：供「注入失败导出」那颗键触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
 const FAILURE_DOC_ID = 'resume-fail-injected';
+
+/**
+ * 纸栏（右栏）可拖到的宽度区间与默认档（百分比），落盘键与内核视图那一支同形状、同一份 localStorage。
+ *
+ * 为什么是 40…62 而不是"随便拖"：这一档的两个端点都是算出来的，不是手感。
+ * - 62 的上界：940px 容器（用户日常那扇 1200 窗）里 62% 给纸栏 583px，对面左列拿到 940−583−6−12 = **339px**，
+ *   仍够摆"段头 + 一颗键 + 一行说明"（plan §3.27 裁定 2 因此不再为拖拽引第二道动态夹取）；
+ * - 40 的下界：736px 分栏档（`@[46rem]`）里 40% 给纸栏 294px，缩放倍率 k≈0.36，是"还读得出双列还是单列"的地板；
+ * - 默认 56：940 容器里正好复现 6.4-07 那批读数中的 400px 左列（526 + 6 + 12 + 396 ≈ 940）。
+ * 像素而不是"整屏宽度百分比"在这里没有意义：分母是这一行，行宽随窗口变，人拖的是"这张纸占多宽"。
+ */
+const PAPER_WIDTH_MIN = 40;
+const PAPER_WIDTH_MAX = 62;
+
+/** 键盘微调的步长（百分点），与 `KernelViewSlot` 那一支同一条手势。 */
+const PAPER_WIDTH_STEP = 2;
+
+/** 没拖过时的默认档（也是把手双击的落点）。 */
+const PAPER_WIDTH_DEFAULT = 56;
+
+/** 纸栏宽度落盘键：几何偏好进 localStorage、不进 SQLite（沿用 8.8-01 的裁定"为一只宽度档开表不值当"）。 */
+const PAPER_WIDTH_STORAGE_KEY = 'auto-cc.resume-desk.paper-width';
+
+/** 纸栏宽度写在哪一枚 CSS 变量上（class 里的字面量 `w-(--resume-paper-width)` 引用它）。 */
+const PAPER_WIDTH_VAR = '--resume-paper-width';
+
+/**
+ * 实时渲纸的尾随去抖窗口（ms）。取 `maxPreviewResponseMs: 1200`（spec 3.6-08 那档预算）的约 1/3：
+ * 比它短，人一次连续操作里改的几条会被合成一趟；比它长一半，"左边一动右边就翻面"就退化成手动预览。
+ * 收口时以活体读数校准，改这一格只改这里（全仓只有纸面用得到去抖，按 §2.7 不抽公共层）。
+ */
+const PAPER_DEBOUNCE_MS = 350;
 
 /** 待确认标记的种类 → 文案键（五种标记在 4.1-04 的清单里各有一句人话，界面按它分列）。 */
 const ISSUE_LABEL_KEY = {
@@ -97,7 +130,24 @@ export function ResumeDesk() {
   const revealLabel = useRevealLabel();
   const bridge = window.autoCC;
   const [locale, setLocale] = useState<ResumeLocaleView>('zh-CN');
-  const [previewHtml, setPreviewHtml] = useState<string>();
+  /**
+   * 右栏那张纸上此刻的内容——**desk 是唯一持有者**（§2.5）。
+   * 来源两路且互斥：`preview` 档是 `resume.export.preview` 的落库版，`layout` 档是编辑器递上来的 draft。
+   * `undefined` = 这一档此刻没有可画的那一张（槽位画空态，不画上一档的残留）。
+   */
+  const [paperHtml, setPaperHtml] = useState<string>();
+  /** 纸角读数条（`paper-live`）的唯一依据：在途还是已最新。 */
+  const [paperStatus, setPaperStatus] = useState<PaperStatus>('idle');
+  /** 最近一次纸面落定的时刻（毫秒）；V 判据读它，不靠截图对比。 */
+  const [paperUpdatedAt, setPaperUpdatedAt] = useState<number>();
+  /**
+   * "这张纸该重画了"的意图计数（spec 6.4-14）。左列四类改动都只写这一个数，
+   * 由下面那条 effect 去抖成一趟跨进程渲染——于是"改动 → 画面"只有一条路径，
+   * 而不是六颗键各调一次预览（那正是人必须自己按预览的原因）。
+   */
+  const [paperRevision, setPaperRevision] = useState(0);
+  /** 在途那一趟的序列号：只有最新一次的响应能落进纸上，过期的直接丢（1200ms 预算下不丢会闪现旧纸）。 */
+  const paperSeqRef = useRef(0);
   const [receipt, setReceipt] = useState<ExportReceiptView>();
   const [snapshots, setSnapshots] = useState<SnapshotMetaView[]>([]);
   const [fromId, setFromId] = useState('');
@@ -177,6 +227,8 @@ export function ResumeDesk() {
   /**
    * 换纸面档。**判门只在这一处**：排版那一档吃当前文档，没有文档就不换档、把原因说给人听，
    * 而不是把人送进一张空编辑器（页签点下去必须有回应，静默拒绝是说谎）。
+   * 换档同时**清空画面**：上一档的 HTML 留在槽里就会以另一档的身份挂在纸上（`preview` 档的落库版
+   * 挂在「排版」页签下面，是 §2.5 禁止的那两份事实）；清空之后由那一条去抖 effect 或编辑器重新供料。
    * @param next 目标档位
    */
   const requestPaperMode = (next: ResumePaperMode) => {
@@ -184,6 +236,9 @@ export function ResumeDesk() {
       setNotice(t('resume.reason.NO_CURRENT_DOC'), 'amber');
       return;
     }
+    if (next === paperMode) return;
+    setPaperHtml(undefined);
+    setPaperStatus('idle');
     setPaperMode(next);
   };
 
@@ -199,7 +254,8 @@ export function ResumeDesk() {
         setLastImport(value);
         setImportError(undefined);
         setDocId(value.docId);
-        setPreviewHtml(undefined);
+        // 清掉上一份的纸：新文档还没出过纸，留着的是一张挂着新身份的旧画面。
+        setPaperHtml(undefined);
       },
       onError: setImportError,
       describe: (value) =>
@@ -272,32 +328,57 @@ export function ResumeDesk() {
     );
 
   /**
-   * 拉取预览 HTML 进纸面——与导出走的是同一份打印 HTML 源（3.3-01「预览即导出所见」）。
+   * 纸面的唯一供料口（spec 6.4-14）：`preview` 档里「这份文档 + 这套版式 + 这个语言 + 第几次改动」一变，
+   * 就尾随去抖 350ms 发一次 `resume.export.preview`，与导出同一份打印 HTML 源（3.3-01「预览即导出所见」）。
    *
-   * 这是全屏唯一一处"内容变了要重新出纸"的落点：换文档、换模板、换语言、采纳改写都走它，
-   * 于是纸面永远跟着事实翻面，而不是停在人上一次按的那一版。
-   * @param targetDocId 已落库的文档 id
-   * @param atTemplateId 出纸用的模板 id；省略时吃当前选中的那一套。
-   *   **换版式那一跳必须显式传**：`setTemplateId` 在这一帧还没生效，不传就拿到上一次的那一套，
-   *   表现为"点了新模板、纸上还是旧版式"。
+   * 三条形状约束，都是这一条要成立才让"预览"那颗键降级成手动补同步的凭据：
+   * ① **只在 `preview` 档跑**——`layout` 档的纸由编辑器递 draft 上来，这里再发一次就把没保存的那份盖掉了
+   *    （两份事实），`pdf` 档画的是真实文件的覆盖层，更不该被生成轨的 HTML 顶掉；
+   * ② **不走 `run`**——`run` 收尾会调 `read`（重读待确认与库清单）并把 `busy` 挂上全屏，
+   *    于是每滑一次滑杆就禁掉整屏的键；先例是 `ResumeEditor.refreshPreview` 那条注释（§2.5）；
+   * ③ **序列号丢过期响应**——一次渲染在途时后面的改动会重新起一趟，回来的旧结果必须整条丢弃
+   *    （`maxPreviewResponseMs` 那档预算下不丢就等于闪现旧纸，连改五次之后纸上看到的是第三次）；
+   * ④ **去抖是尾随的**——每一次依赖变化都把上一趟还没起走的定时器 `clearTimeout` 掉，
+   *    所以连改五只在最后发一趟真渲染（spec 6.4-14 的③数的是桥接调用次数，不是画面次数）。
    */
-  const renderPreview = (targetDocId: string, atTemplateId: string = templateId) =>
-    void run(t('resume.preview'), () => bridge?.resume['export.preview'](targetDocId, atTemplateId, locale), {
-      apply: (html) => {
-        setPreviewHtml(html);
-        setPaperMode('preview');
-      },
-      describe: () => t('resume.previewDone'),
-    });
+  useEffect(() => {
+    if (paperMode !== 'preview') return;
+    if (docId === undefined) {
+      // 没有当前文档就没有这一张：清掉而不是留着上一份，否则身份读数与画面会各说各话。
+      setPaperHtml(undefined);
+      setPaperStatus('idle');
+      return;
+    }
+    const seq = paperSeqRef.current + 1;
+    paperSeqRef.current = seq;
+    setPaperStatus('rendering');
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const reply = await bridge?.resume['export.preview'](docId, templateId, locale);
+        if (seq !== paperSeqRef.current) return;
+        if (reply?.ok) {
+          setPaperHtml(reply.value);
+          setPaperUpdatedAt(Date.now());
+        } else if (reply) {
+          // 失败仍走 Banner（纸角那条只报"在途 / 已最新"两态，它不判成败）：这一张没重出来，
+          // 纸上留的是上一版，所以这句原因必须上屏，不能只活在控制台里。
+          setNotice(t('resume.paper.liveFailed', { message: reply.error.message }), 'seal');
+        }
+        setPaperStatus('idle');
+      })();
+    }, PAPER_DEBOUNCE_MS);
+    // 依赖只列这六个语义输入：`t` 与 `setNotice` 故意不进来——换 app 界面语言不该重出这张纸
+    // （纸上用哪种语言由 `resume-locale` 那一格自己管），而它们是每次渲染都可能换引用的壳，
+    // 进依赖会让这条 effect 在无关事件上也重发一趟跨进程渲染（先例：`ResumeEditor` 挂载那条只吃 `docId`）。
+    return () => window.clearTimeout(timer);
+  }, [paperMode, docId, templateId, locale, paperRevision, bridge]);
 
   /**
-   * 换一套版式：选中它并把这张纸立刻重渲一次（裁定② 的反馈闭环——选了就该看见）。
+   * 换一套版式：选中它。画面不用在这里显式重渲——`templateId` 是上面那条 effect 的依赖，
+   * 换档自己会走那趟去抖（原先这里是"点一下模板调一次预览"，那正是"预览键是唯一入口"的形状）。
    * @param id 目标模板 id（来自 `resume.export.templates`，界面不自造）
    */
-  const selectTemplate = (id: string) => {
-    setTemplateId(id);
-    if (docId !== undefined) renderPreview(docId, id);
-  };
+  const selectTemplate = (id: string) => setTemplateId(id);
 
   /**
    * 导出 PDF：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，回执摆到纸右下角（3.3-04 / 05 / 09）。
@@ -402,27 +483,58 @@ export function ResumeDesk() {
   const currentDoc = docs.find((doc) => doc.id === docId);
   const docLabel = currentDoc ? (currentDoc.name ?? currentDoc.id) : undefined;
   const templateName = templates.find((template) => template.id === templateId)?.name;
-  /** 采纳改写之后由 `GeneratePanel` 回调：纸面立刻重渲一次，人才看得见"改在那张纸上落定了"。 */
-  const rerenderPaper = () => {
-    if (docId !== undefined) renderPreview(docId);
-  };
+
+  /**
+   * "这张纸该重画了"：左列那些**不在上面六个依赖里**的改动（采纳一条改写、手动再同步一次）只写这一个意图，
+   * 由上面那条 effect 去抖成一趟渲染。原先这里是"每处改动各自调一次 `renderPreview`"，
+   * 于是同一屏有六条出纸的路径，而人不按预览就看不见结果（spec 6.4-14 要治的正是这一条）。
+   */
+  const bumpPaper = () => setPaperRevision((previous) => previous + 1);
+
+  /**
+   * 编辑器递上来的 draft：直接成为纸上这一刻的内容（`layout` 档里槽位自己不发起跨进程渲染）。
+   * @param html draft 的打印 HTML；undefined = 这一版没渲出来，画空态而不是留着上一版冒充 draft
+   */
+  const acceptDraft = useCallback((html: string | undefined) => {
+    setPaperHtml(html);
+    if (html !== undefined) setPaperUpdatedAt(Date.now());
+    setPaperStatus('idle');
+  }, []);
+
+  /**
+   * 右栏的宽度（拖拽、键盘、双击、持久化全在 `ui/split.tsx` 那一处实现，spec 6.4-13）。
+   * 与内核视图那一支共用原件而不是复刻一份，就是为了这里不必再写第二套越界夹取（§2.2/§2.5）。
+   */
+  const paperSplit = useSplitWidth<HTMLDivElement>({
+    storageKey: PAPER_WIDTH_STORAGE_KEY,
+    cssVar: PAPER_WIDTH_VAR,
+    minPercent: PAPER_WIDTH_MIN,
+    maxPercent: PAPER_WIDTH_MAX,
+    stepPercent: PAPER_WIDTH_STEP,
+    defaultPercent: PAPER_WIDTH_DEFAULT,
+  });
 
   return (
     // 查询容器必须挂在**祖先**上：元素自己的 `container-type` 不作为自己的查询容器（CSS Containment 把
     // 查询对象限定为最近的祖先容器）。这一条是活体量出来的：容器挂在自己身上时首读 `flexDirection`
-    // 仍是 `column`，而左栏（真·后代）已经按 400px 摆好了。
+    // 仍是 `column`，而左栏（真·后代）已经摆好了。
     // 用 `@container` 而不是视口断点：右栏内核视图展开时主区只剩 486px，按视口量会误判成"够宽"
     // （与 `JobLabPanel` 同一口径，spec 6.4-04）。
     //
-    // 换档点 **77rem = 1232px**，比抽屉/导航/键那条既有的 56rem 窄档（spec 6.4-06）**高一格**，
-    // 而且不是随手加的半档——它是纸面自己提出的硬算术：左栏 400 + 栏间距 12 + 纸面内边距 24 +
-    // A4 的 794px（`w-[210mm]` @96dpi）= **1230**。低于这一格还要分栏，528px 的槽位装不下 794px 的纸，
-    // 只能整页横向滚，等于把人刚要看的那张纸切掉三分之二（本屏首读就是这个半页）；
-    // 所以窄档退回单栏，把纸放在最上面按整宽摆——940px 的容器里 A4 完整可见，一行都不折。
-    // 两处共用一个物理条件（"纸面装得下"），不是两套断点各说各话。
+    // 换档点 **46rem = 736px**（spec 6.4-12；原先那一档是 77rem=1232，2026-10-10 被用户驳回：
+    // 他的 1200 窗口里容器实测 940px，77rem 意味着"左右布局"在这台机器上永远不发生）。
+    // 这一档同样是纸面给的算术，不是手感：**左列下限 320**（段头 + 一颗键 + 一行说明的最小可读宽度）
+    // + **把手 6** + **栏间距 12** + **纸栏下限 400**（k≈0.47，还读得出双列还是单列）= **738**，
+    // 断点取 736 那一格——差的 2px 由 `min-w-0` 吸收，活体在 736 档实测已进分栏（读数进 6.4-12）。
+    // 77rem 那条算式之所以不再成立，是因为它隐含了"装不下就横向滚"这个前提；
+    // 这一片把它换成**装不下就整张缩小**（`ResumePaperStage` 的 `--paper-scale`），
+    // 纸的物理宽度 `w-[210mm]` 一字未改，所以"纸不许被裁"这件物理条件仍然成立（3.3-01 同源）。
     <div className="@container min-w-0">
-      <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[77rem]:flex-row">
-        <div className="order-2 flex min-w-0 flex-col gap-3 @[77rem]:order-1 @[77rem]:w-[400px] @[77rem]:shrink-0">
+      <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[46rem]:flex-row">
+        {/* 左列：三步操作。宽度是**减出来的**（`flex-1`）而不是定死的——右栏那一格现在归人拖，
+            对面若还是 400px 定宽，纸拖到 62% 时整行就会溢出（940 容器里 400+6+12+583=1001）。
+            默认 56% 时这里量回 396px，与 6.4-07 那批读数的 400px 只差把手那 6px 的挤占。 */}
+        <div className="order-2 flex min-w-0 flex-col gap-3 @[46rem]:order-1 @[46rem]:flex-1">
           {notice && (
             <Banner tone={noticeTone} markers={{ testid: 'resume-notice' }} className="break-all">
               {notice}
@@ -601,7 +713,7 @@ export function ResumeDesk() {
               docId={docId ?? ''}
               onDocIdChange={setDocId}
               refreshDocs={refreshDocs}
-              onAccepted={rerenderPaper}
+              onAccepted={bumpPaper}
             />
           </DeskSection>
 
@@ -653,7 +765,7 @@ export function ResumeDesk() {
                   disabled={noDocReason !== undefined}
                   disabledReason={noDocReason}
                   disabledReasonLabel={reasonLabel(noDocReason)}
-                  onClick={() => docId !== undefined && renderPreview(docId)}
+                  onClick={bumpPaper}
                 >
                   <Eye size={12} />
                   {t('resume.preview')}
@@ -734,6 +846,15 @@ export function ResumeDesk() {
             </div>
           </DeskSection>
 
+          {/* 排版编辑器：只在「排版」这一档长出**控件**（区块顺序、字号、行距、页边距、语言），
+            画面不跟着搬进来——它仍画在右栏那一格里（spec 6.4-14 的④：同一屏不许有两份草稿预览）。
+            这是 2026-10-10 的一次形状更正：原先编辑器整块塞在纸面槽里（控件 + 它自己那张 iframe），
+            于是"改了滑杆要在那一格才看得见结果"，而它与右边那张落库版预览同时挂在屏上。
+            条件挂载而不是 `hidden`：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
+          {paperMode === 'layout' && docId !== undefined && (
+            <ResumeEditor docId={docId} onClose={() => requestPaperMode('preview')} onPreview={acceptDraft} />
+          )}
+
           {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
             spec 3.3-10 / 3.3-11 的取证通道因此不断；变的只是它们住在哪一格。 */}
           <DeskButton
@@ -748,32 +869,46 @@ export function ResumeDesk() {
           </DeskButton>
         </div>
 
-        {/* 右列：一张常驻的纸。宽档吸顶（左列滚到哪儿它都在），窄档整栏换到最上面——
-          纵向退让时把纸摆在动作之前，主视觉不再被 330 行控件埋住（病灶③）。 */}
-        <div className="order-1 min-w-0 flex-1 @[77rem]:sticky @[77rem]:top-0 @[77rem]:order-2">
-          <ResumePaperStage
-            mode={paperMode}
-            onModeChange={requestPaperMode}
-            previewHtml={previewHtml}
-            layoutView={
-              docId !== undefined ? (
-                <ResumeEditor
-                  docId={docId}
-                  onClose={() => {
-                    setPaperMode('preview');
-                    rerenderPaper();
-                  }}
-                />
-              ) : null
-            }
-            pdfView={<PdfEditPanel onClose={() => setPaperMode('preview')} />}
-            docLabel={docLabel}
-            templateName={templateName}
-            locale={locale}
-            receipt={receipt}
-            onReveal={revealReceipt}
-            busy={!!busy}
+        {/* 右栏：一根把手 + 一张常驻的纸。三种看法（预览 / 排版 / PDF 覆盖）都画在这一格里，
+          所以"编排显示在右侧边栏"与"实时看到变动"是同一件事的两个说法（用户 2026-10-10 的原话）。
+          窄档整栏换到最上面（`order-1`）：纵向退让时把纸摆在动作之前，主视觉不再被 330 行控件埋住（病灶③）；
+          把手在这一档不画（堆叠时没有"左右"可拖），宽度那一档仍照常持久化，够到 46rem 就回到人拖的位置上。
+
+          把手**挂在纸栏自己身上**（这一格的第一个孩子），而不是像 `KernelViewSlot` 那样挂在前一个兄弟上：
+          那边必须出去是因为原生 `WebContentsView` 会盖住 aside 内的命中测试（8.8-04），这里没有那一层，
+          留在内部才能让这一行只有一道 `gap`——三个平级的话 `gap-3` 会算出两道 12px，
+          上面那条 320+6+12+400 的算术就不成立了。拖拽的宽度分母取的仍是**整行**
+          （`ui/split.tsx` 里 `panel.parentElement`），不是这一格自己。
+
+          `self-start` 是 sticky 生效的前提：flex 项默认被 `align-items: stretch` 拉成整行高（左列实测 2673px），
+          拉满之后就没有可粘的余量——本轮活体拍到"滚到排版控件时右栏整格空白"正是这一条。 */}
+        <div
+          ref={paperSplit.panelRef}
+          className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
+        >
+          <SplitHandle
+            split={paperSplit}
+            label={t('desk.resume.paperHandle')}
+            action="resume-paper-handle"
+            testid="resume-paper-handle"
+            className="hidden @[46rem]:block"
           />
+          <div className="min-w-0 flex-1">
+            <ResumePaperStage
+              mode={paperMode}
+              onModeChange={requestPaperMode}
+              paperHtml={paperHtml}
+              paperStatus={paperStatus}
+              paperUpdatedAt={paperUpdatedAt}
+              pdfView={<PdfEditPanel onClose={() => requestPaperMode('preview')} />}
+              docLabel={docLabel}
+              templateName={templateName}
+              locale={locale}
+              receipt={receipt}
+              onReveal={revealReceipt}
+              busy={!!busy}
+            />
+          </div>
         </div>
 
         <Drawer

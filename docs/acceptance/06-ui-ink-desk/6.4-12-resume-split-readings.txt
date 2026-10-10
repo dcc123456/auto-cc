@@ -1,0 +1,158 @@
+6.4-12 · 简历屏左右分栏常驻（46rem 档）——活体读数
+=====================================================
+
+取证对象：用户自己的 dev 实例（`pnpm dev`，CDP 10222，渲染层 5173），窗口未动，视口用
+`Emulation.setDeviceMetricsOverride` 临时换档（Electron 的 endpoint 没有 Browser 域，且该覆写只在
+那条 WebSocket 存活期间有效——AGENTS.md §9 的 5.4-b ⑥），所以"换档 → 冻动效 → 逼帧 → 量几何 → 拍图 → 复位"
+全在一支脚本里做完：`tmp/57b/desk57.mjs`（暗色那张在 `tmp/57b/dark57.mjs`）。
+
+两条环境事实先记在开头，否则下面的数字会被读错：
+① `document.visibilityState` 全程 `hidden`（窗口没在前台）。hidden 时 Chromium **不产渲染帧**，
+   而 `ResizeObserver` 的回调排在帧末，所以换档之后必须先逼帧再读（脚本里 `settleScale()` 用
+   `Page.captureScreenshot` 当节拍器，判据是 `|--paper-scale 变量 − 现算值| < 0.005`）。
+   本轮第一版没逼帧，1600 档读到的是上一档（1200）的 0.5919——那是环境读数，不是产品读数。
+② 量几何前注入 `*,*::before,*::after{transition:none!important;animation:none!important}`，
+   收尾摘掉（§9 的 6.2 ①）。每支脚本最后一行 `ANIMATIONS_AFTER_UNFREEZE` 就是自证摘干净了。
+
+----------------------------------------------------------------------
+① 判据①（C 半边）：77rem 归零、46rem 挂在分栏的 section 与两个子上、@container 仍在祖先
+----------------------------------------------------------------------
+
+$ grep -c '@\[77rem\]' packages/renderer/src/ResumeDesk.tsx
+0
+
+$ grep -c '@\[46rem\]' packages/renderer/src/ResumeDesk.tsx
+5
+
+$ grep -n '@\[46rem\]' packages/renderer/src/ResumeDesk.tsx
+53: * - 40 的下界：736px 分栏档（`@[46rem]`）里 40% 给纸栏 294px，缩放倍率 k≈0.36，…（注释里那一处）
+533:      <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[46rem]:flex-row">
+537:        <div className="order-2 flex min-w-0 flex-col gap-3 @[46rem]:order-1 @[46rem]:flex-1">
+884:          className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
+891:            className="hidden @[46rem]:block"
+
+→ 5 处里 4 处是 class（`section` 一处、左列一处、纸栏一处、把手一处），第 5 处在注释里。
+  `@container` 标记仍在**祖先 div** 上，没有回退到被测元素自己：
+
+$ grep -n '@container' packages/renderer/src/ResumeDesk.tsx
+532:    <div className="@container min-w-0">
+
+----------------------------------------------------------------------
+② 判据②③：1200×772（用户日常那一档，容器实测 940）
+----------------------------------------------------------------------
+
+$ node tmp/57b/desk57.mjs tmp/57b/r-1200.png 1200 772
+PREPARED {"visibility":"hidden","theme":"light","hasPanel":true,"hostWidth":940,"previewMounted":true} SETTLED_IN 0
+READINGS {"innerWidth":1200,"visibility":"hidden","containerType":"inline-size","hostWidth":940,
+  "direction":"row",
+  "leftWidth":402,"leftTop":51,"paperColX":618,"leftRightEdge":606,"paperAtRightOfLeft":true,
+  "paperColWidth":526,"paperColPosition":"sticky","paperTop":71,"paperVarInline":"56%",
+  "slotWidth":494,"slotScrollWidth":818,"slotClientWidth":494,
+  "neverClipped":true,
+  "paperScale":"0.5919395465994962","frameScaleComputed":"0.59194",
+  "frameNaturalWidth":794,"frameRenderedWidth":470,
+  "mode":"preview","canvasesInSlot":1,"canvasesInDesk":1,
+  "liveStatus":"idle","liveText":"已是最新 · 14:35:09",
+  "handleWidth":6,"handleX":618,
+  "handleAria":{"role":"slider","min":"40","max":"62","now":"56","tabindex":"0"},
+  "storedPaperWidth":null,"deskHeight":2673,"notice":""}
+ANIMATIONS_AFTER_UNFREEZE 0
+
+→ `direction:"row"`：1200 窗口（容器 940）这一档**真的分栏了**——这正是 6.4-07 那 77rem 档在这台机器上
+  永远不发生的那件事。纸栏在左列右侧按横坐标判：`paperColX 618 ≥ leftRightEdge 606`（差 12 就是 `gap-3`）。
+  纸面不被裁的两条正腿：`paperScale 0.5919 ∈ (0,1]` 且 `neverClipped:true`（`frameRect.right ≤ slot.right`）。
+  `w-[210mm]` 一字未改：`frameNaturalWidth 794`，折完是 `frameRenderedWidth 470 ≤ slotWidth 494`。
+
+  **一条被活体推翻的判据（写在这里，spec 行内同步更正）**：原先第三条腿写的是"槽内
+  `scrollWidth ≤ clientWidth`"。实测三档的 `slotScrollWidth` 恒为 **818**（=794+2×12 的**变换前**布局溢出），
+  而 `slotClientWidth` 是 494/718/682——Tailwind v4 的 `scale-(…)` 写的是独立 CSS `scale` 属性
+  （`getComputedStyle(frame).scale === "0.59194"` 而 `transform` 为 `none`），`scrollWidth` 量的不是它的视觉结果。
+  所以那条换成 `scale` 计算值 + `neverClipped`（矩形右缘）这一对，`scrollWidth` 读数保留在此作为反例。
+
+----------------------------------------------------------------------
+③ 判据② 的第二档：1600×1000（容器 1340）
+----------------------------------------------------------------------
+
+$ node tmp/57b/desk57.mjs tmp/57b/r-1600.png 1600 1000
+READINGS {"innerWidth":1600,"containerType":"inline-size","hostWidth":1340,"direction":"row",
+  "leftWidth":578,"leftTop":51,"paperColX":794,"leftRightEdge":782,"paperAtRightOfLeft":true,
+  "paperColWidth":750,"paperColPosition":"sticky","paperTop":71,"paperVarInline":"56%",
+  "slotWidth":718,"slotScrollWidth":818,"slotClientWidth":718,"neverClipped":true,
+  "paperScale":"0.8740554156171285","frameScaleComputed":"0.874055",
+  "frameNaturalWidth":794,"frameRenderedWidth":694,
+  "canvasesInSlot":1,"canvasesInDesk":1,"handleWidth":6,"handleX":794,
+  "storedPaperWidth":null,"deskHeight":2595}
+ANIMATIONS_AFTER_UNFREEZE 0
+
+→ 同一份 56% 偏好、同一根 `w-[210mm]` 的纸，在 1600 里折成 0.874 倍（694px 落在 718px 槽内）。
+  宽度档不变而倍率随槽连续变化，就是"改的是显示倍率、不是纸的物理宽度"。
+
+----------------------------------------------------------------------
+④ 负腿：退到 46rem 以下（840×772，容器 708 < 736）
+----------------------------------------------------------------------
+
+$ node tmp/57b/desk57.mjs tmp/57b/r-840.png 840 772
+READINGS {"innerWidth":840,"hostWidth":708,"direction":"column",
+  "leftWidth":708,"leftTop":738,"paperColX":76,"leftRightEdge":784,"paperAtRightOfLeft":false,
+  "paperColWidth":708,"paperColPosition":"static","paperTop":48,"paperVarInline":"56%",
+  "slotWidth":682,"slotScrollWidth":818,"slotClientWidth":682,"neverClipped":true,
+  "paperScale":"0.8287153652392947","frameScaleComputed":"0.828715",
+  "frameNaturalWidth":794,"frameRenderedWidth":658,
+  "canvasesInSlot":1,"canvasesInDesk":1,
+  "handleWidth":0,"handleX":0,"storedPaperWidth":null,"deskHeight":3166}
+ANIMATIONS_AFTER_UNFREEZE 0
+
+→ 708 那一档**才**回到纵向：`direction:"column"`。堆叠时纸在上——`paperTop 48 < leftTop 738`；
+  把手在这一档不画（`handleWidth 0`），宽度偏好仍留在盘上（`paperVarInline "56%"` 仍写着，够宽就回到人拖的位置）。
+  纵向档同样不裁纸（`neverClipped:true`，658 落在 682 里）。
+
+----------------------------------------------------------------------
+⑤ 判据④：暗色（毡案）同档复测
+----------------------------------------------------------------------
+
+$ node tmp/57b/dark57.mjs tmp/57b/r-1200-dark.png 1200 772
+START_THEME light FROZEN_AT dark SETTLED_AT 0
+READINGS {"theme":"dark","visibility":"hidden","innerWidth":1200,"hostWidth":940,"direction":"row",
+  "paperColWidth":526,"paperVarInline":"56%","paperScale":"0.5919395465994962","frameScaleComputed":"0.59194",
+  "neverClipped":true,"frameRenderedWidth":470,"slotWidth":494,"canvasesInSlot":1,"paperAtRightOfLeft":true}
+RESTORED_THEME light
+
+→ 暗色与亮色拿到逐位一致的几何（0.59194 / 470 / 526），主题不参与布局；用户的主题在收尾点回 `light`
+  （进门读数 `START_THEME light`，`RESTORED_THEME light`）。
+
+----------------------------------------------------------------------
+⑥ 取证过程中改的一处产品代码（不是探针产物）
+----------------------------------------------------------------------
+
+第一版 `editor57.mjs` 拍到"滚到左列的排版控件时，右栏整格空白"：`slotTopInViewport:-2519`。
+根因是 `@[46rem]:sticky` 长在 flex 项上而 flex 项默认被 `align-items: stretch` 拉成整行高（左列实测
+2673px），拉满就没有可粘的余量。补 `@[46rem]:self-start` 之后同一支探针复跑：
+
+$ node tmp/57b/editor57.mjs tmp/57b/6-14-editor-in-left.png   （self-start 之前）
+READINGS {"slotTopInViewport":-2519, ...}
+$ node tmp/57b/editor57.mjs tmp/57b/6-14-editor-in-left.png   （self-start 之后）
+READINGS {"mode":"layout","editorMounted":true,"editorInsideLeftColumn":true,"editorControls":6,
+  "iframeInsideEditor":0,"canvasesInSlot":1,"canvasesInDesk":1,"frameTestId":"resume-editor-preview",
+  "editorTopInViewport":51,"slotTopInViewport":150,"slotRightOfEditor":true,
+  "paperScale":"0.5919395465994962","frameScaleComputed":"0.59194","frameNaturalWidth":794,
+  "neverClipped":true,"liveStatus":"idle","liveText":"已是最新 · 14:35:05"}
+
+→ 这条不在原计划里，但它是用户那句"可以实时看到变动"的物理前提：左列滚到多深，右栏那张纸都还在视野里。
+
+----------------------------------------------------------------------
+画面（同批，md5 互异）
+----------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.4-12-split-1200-light.png   1200×772（容器 940）墨案：纸在右栏
+docs/acceptance/06-ui-ink-desk/6.4-12-split-1600-light.png   1600×1000（容器 1340）墨案：同一档 56% 折成 0.874
+docs/acceptance/06-ui-ink-desk/6.4-12-split-1200-dark.png    1200×772 毡案：几何逐位一致
+docs/acceptance/06-ui-ink-desk/6.4-12-stack-840-light.png    840×772（容器 708）纵向退让档：纸在上、把手不画
+
+$ md5 -q docs/acceptance/06-ui-ink-desk/6.4-1[234]-*.png | sort | uniq -c
+   1 …（七条各 1，无重复——§9 的 5.10-18 / 3.6-c ⑭ 那条去重在此执行过）
+ea0dd943c14a89667ebb8308c876638d  6.4-12-split-1200-dark.png
+1a809c8e61f685cdf68efd8737ce2921  6.4-12-split-1200-light.png
+b50335a4118730660864abdba6ea5da5  6.4-12-split-1600-light.png
+d0d48a8a69eaff72f1110a2307ce8c8e  6.4-12-stack-840-light.png
+c2b4fb0e6039baa5b228d62d031116e3  6.4-13-paper-width-persisted.png
+7096173b6d5b16adafb7598516a02f7b  6.4-14-paper-live-editor.png
+1bd2a69e4527b586f1234c38d881c718  6.4-14-paper-live-preview.png

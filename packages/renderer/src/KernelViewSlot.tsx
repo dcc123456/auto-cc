@@ -1,8 +1,8 @@
 import { Maximize2, Minimize2, PanelRight, PanelRightClose } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, NarrowLabel } from './ui/controls';
+import { SplitHandle, useSplitWidth } from './ui/split';
 
 /**
  * 右栏可拖到的宽度区间（百分比）。下界与主进程的兜底比例同源（`--kernel-view-width` = 38% =
@@ -11,6 +11,9 @@ import { DeskButton, NarrowLabel } from './ui/controls';
  *
  * 为什么不是 px 定宽：px 会让这条 `shrink-0` 的右栏在缩窗口时把主区挤死，而 8.8-01/03 的既有读数
  * 全部是"占这一行的比例"，百分比与它回落的那支令牌同单位，两套口径不会打架。
+ * 这两个数是喂给 `useSplitWidth` 的配置，不是本文件的实现——拖拽模型 2026-10-10 起抽在 `ui/split.tsx`
+ * （简历纸栏是第二个消费者，§2.2）。`WIDTH_CLASS` 的字面量与 `WIDTH_MIN` 留在这里是机检第 4 段
+ * （1.2-17）钉着的两枚锚点，搬走了 `pnpm lint` 即红。
  */
 const WIDTH_MIN = 38;
 const WIDTH_MAX = 72;
@@ -21,63 +24,30 @@ const WIDTH_STEP = 2;
 /** 宽度偏好键：与 `auto-cc.lang`、`auto-cc.metrics.range`、`auto-cc.desk.disclosure` 同一份 localStorage。 */
 const WIDTH_STORAGE_KEY = 'auto-cc.kernel-slot-width';
 
+/** 命令式写在 `<aside>` 上的那一枚 CSS 变量名，值就是上面那个百分比。 */
+const WIDTH_VAR = '--kernel-slot-width';
+
 /** 非展开态挂在 `<aside>` 上的那一枚宽度 class：唯一的字面量，值由 CSS 变量给。 */
 const WIDTH_CLASS = 'w-(--kernel-slot-width)';
 
-/**
- * 读持久化的宽度。
- * @returns 合法的百分比；形状不对（手改、非数字）一律回落到最窄档，不炸首屏
- */
-function loadWidthRatio(): number {
-  const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY));
-  if (Number.isInteger(stored) && stored >= WIDTH_MIN && stored <= WIDTH_MAX) return stored;
-  // 旧形状（8.8-02 那三档）存的是**下标** `0|1|2`，与百分比值域算术上不相交，所以判得出来。
-  // 这一轮把三颗档键删掉之后"档"这个概念本身没有了（宽度只由拖拽与键盘方向键决定），
-  // 因此旧下标不再换算成某一档，直接落到下面的最窄档——它是一条迁移的终点，不是兼容垫片。
-  return WIDTH_MIN;
-}
-
-/** 右栏槽位的布局状态与动作口（拖拽把手的宽度 + 全屏那一颗），由 `App` 持有、`KernelViewSlot` 消费。 */
+/** 右栏槽位的布局状态（全屏那一颗），由 `App` 持有、`KernelViewSlot` 消费；宽度在下面自己长。 */
 export interface KernelSlotLayout {
-  /** 当下宽度（百分比，38…72）：拖拽、键盘与双击写的都是这一个数。 */
-  ratio: number;
   /** 当下是不是全屏态（整条右栏盖住主区）。 */
   isExpanded: boolean;
-  /** 吸附与落盘都收在这一个口子里：拖拽、键盘、双击三条路径共用同一件事（§2.5）。 */
-  setRatio: (next: number) => void;
   toggleExpanded: () => void;
 }
 
 /**
- * 内核视图槽位的布局偏好：宽度落 localStorage（整数百分比），全屏态只活在本次会话。
+ * 内核视图槽位的布局偏好：全屏态只活在本次会话，宽度那一档交给 `useSplitWidth` 落盘。
  *
  * 全屏态不落盘是刻意的：开机就把主区整块盖住在网页里，而"退出全屏"那颗键此刻在画面边上，
  * 不像宽度那样能一眼看出自己改过它。宽度没有这个问题（右栏一直在），所以值得留。
- * @returns 交给 `App` 与 `KernelViewSlot` 共用的布局状态
+ * @returns 交给 `App` 的展开态（它还要用它决定主区让不让位）
  */
 export function useKernelSlotLayout(): KernelSlotLayout {
-  const [ratio, setRatioState] = useState(loadWidthRatio);
   const [isExpanded, setIsExpanded] = useState(false);
-
-  /**
-   * 吸附到合法区间并落盘（取整：拖到 43.6% 存的是 44）。
-   * @param next 目标百分比（调用方给什么都行，越界由这里夹）
-   */
-  const setRatio = useCallback(
-    (next: number) => {
-      const clamped = Math.round(Math.max(WIDTH_MIN, Math.min(next, WIDTH_MAX)));
-      setRatioState(clamped);
-      localStorage.setItem(WIDTH_STORAGE_KEY, String(clamped));
-    },
-    // `setRatioState` 与 localStorage 都是稳定的，这个回调因此只创建一次；
-    // 拖拽里每帧都拿到同一个引用，不会因为重渲而换掉监听。
-    [],
-  );
-
   return {
-    ratio,
     isExpanded,
-    setRatio,
     toggleExpanded: () => setIsExpanded((previous) => !previous),
   };
 }
@@ -100,13 +70,24 @@ export function useKernelSlotLayout(): KernelSlotLayout {
  */
 export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayout; viewVisible: boolean }) {
   const { t } = useTranslation();
-  const asideRef = useRef<HTMLElement | null>(null);
   const slotRef = useRef<HTMLDivElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const bridge = window.autoCC;
   const [measured, setMeasured] = useState<string>('');
-  /** 拖拽进行中的即时宽度（百分比）：只写 CSS 变量与这支 ref，不落 React state。 */
-  const liveRatioRef = useRef(layout.ratio);
+  // 宽度那一整件事（拖拽、键盘、双击、持久化、把百分比写成 CSS 变量）都在 `ui/split.tsx`，
+  // 这里只给它这一栏的配置与落点。`active: viewVisible` 是活体逼出来的那一条：收起态画的是竖条，
+  // aside 节点不存在，重新打开时若 effect 不重跑，右栏就回到 `:root` 的 38% 而人存过的是别的宽度
+  // （本轮读数：拖到 66% 收起再打开，aside 量回 456px 而持久值是 66）。
+  const split = useSplitWidth({
+    storageKey: WIDTH_STORAGE_KEY,
+    cssVar: WIDTH_VAR,
+    minPercent: WIDTH_MIN,
+    maxPercent: WIDTH_MAX,
+    stepPercent: WIDTH_STEP,
+    // 双击回的是**最窄档**（8.8-10 的既有手势）；库里没有记录时同样落这一档。
+    defaultPercent: WIDTH_MIN,
+    active: viewVisible,
+  });
 
   /**
    * 把槽位当前的视口矩形报给主进程。
@@ -146,80 +127,6 @@ export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayo
     // 原生视图就停在收起前那一块几何上，而右栏已经按持久宽度重画——两份宽度同时挂在画面上。
   }, [report, viewVisible]);
 
-  // 宽度落到 CSS 变量上：JSX 里不许出现 `style`（eslint），而连续拖出来的值 Tailwind 也扫不见，
-  // 因此只能命令式写在**这一个节点**上（plan §3.24 记了这条对 §5.2 的刻意偏离）。
-  // 拖拽、键盘、双击三条路径最后都汇到 `layout.ratio`，由这一处覆盖，画面不会有第二份宽度事实。
-  useLayoutEffect(() => {
-    asideRef.current?.style.setProperty('--kernel-slot-width', `${layout.ratio}%`);
-    // 键盘与双击都走 state，因此这里同时把 ref 对齐：拖拽与 `Arrow*` 读的是这支 ref，
-    // 不同步就会从上一次的拖拽值起步（那是一条只在"拖过再用键盘"时才现身的错位）。
-    liveRatioRef.current = layout.ratio;
-    // `viewVisible` 也在依赖里（与上面那条观察器同一个道理）：收起态画的是竖条，aside 节点不存在，
-    // 这一格的写入空转；重新打开时若 effect 不重跑，右栏就回到 `:root` 的 38% 而人存过的是别的宽度
-    // ——本轮活体读数：拖到 66% 收起再打开，aside 量回 456px（= 38%）而持久值是 66。
-  }, [layout.ratio, viewVisible]);
-
-  /**
-   * 从把手起拖：整段拖拽只改一支 CSS 变量，收尾才落一次 state 与盘。
-   * @param event 把手上的 `pointerdown`
-   */
-  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const aside = asideRef.current;
-    // 比例的分母是**整行**的宽度，不是 aside 自己：`ratio` 的定义就是"占这一行多少"。
-    const row = aside?.parentElement;
-    if (!aside || !row) return;
-    const rowWidth = row.getBoundingClientRect().width;
-    if (rowWidth < 1) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    // 拖拽起点取的是**这一帧的 state 值**，不是 `liveRatioRef`：ref 在拖的过程中会被每帧覆盖，
-    // 而起点必须固定，否则位移会叠加自己。
-    const startRatio = layout.ratio;
-    // 监听在 `pointerdown` 当场挂上，不放进后续渲染的 effect（3.6 活体那条教训：
-    // harness 把 down/move/up 在几毫秒里派发完，effect 等渲染提交时 `pointerup` 早就过去了）。
-    const move = (moveEvent: PointerEvent) => {
-      // 把手在 aside 的左外侧，所以**往左拖是变宽**：位移取负号再换算成百分比。
-      const dragged = (((startRatio / 100) * rowWidth - (moveEvent.clientX - startX)) / rowWidth) * 100;
-      const clamped = Math.max(WIDTH_MIN, Math.min(dragged, WIDTH_MAX));
-      liveRatioRef.current = clamped;
-      aside.style.setProperty('--kernel-slot-width', `${clamped}%`);
-    };
-    const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      layout.setRatio(liveRatioRef.current);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-
-  /**
-   * 把手上的键盘微调：让"能拖"不是唯一的到达方式。
-   * @param event 把手（`role="slider"`）上的 `keydown`
-   */
-  const resizeByKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // 方向按**手势**而不是按"值变大"：把手在左缘，向左按是变宽，与拖拽同向。
-    const step = { ArrowLeft: WIDTH_STEP, ArrowUp: WIDTH_STEP, ArrowRight: -WIDTH_STEP, ArrowDown: -WIDTH_STEP }[
-      event.key
-    ];
-    if (step !== undefined) {
-      event.preventDefault();
-      layout.setRatio(liveRatioRef.current + step);
-      return;
-    }
-    if (event.key === 'Home') {
-      event.preventDefault();
-      layout.setRatio(WIDTH_MIN);
-    } else if (event.key === 'End') {
-      event.preventDefault();
-      layout.setRatio(WIDTH_MAX);
-    } else if (event.key === 'Escape') {
-      // 拖到一半不满意：回到持久化的那一档（拖完才会落盘，所以这里读的就是上一次人真正定下来的宽度）。
-      event.preventDefault();
-      layout.setRatio(loadWidthRatio());
-    }
-  };
-
   // 收起态：整条右栏不存在，只留右缘一条竖条，竖条上那颗键把它带回来。
   // 可见性的权威在主进程那一份读数上（`useKernelViewVisible`），这里只发指令、不自己记「我收过」。
   if (!viewVisible) {
@@ -249,33 +156,18 @@ export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayo
           aside x=1285、slot x=1286、把手 x=1286 w=6 → 把手右缘 1292 落在视图盖住的 1286…2072 里）。
           挂在 aside 里等于把人唯一那根抓手交给原生视图去吃命中测试（8.8-04 的同一件事），
           挪到外侧之后把手右缘 1285 < slot x=1286，视图永远盖不到它。
-          `cursor-col-resize` 是 app 自己画的那对双向箭头（系统边框的箭头属于窗口管理器，app 管不着）；
-          `onPointerDown` + `onKeyDown` 同时是这条 `hover:` 的交互凭据（机检只认这些，`cursor-col-resize` 本身不算）。
-          全屏态整条右栏铺满工作区，把手跟着不上屏。
-          `relative z-10` 是活体逼出来的：拖到 72% 时主区只剩 146px，里面的接管按钮行**溢出到主区盒子之外**
-          （读数：`main.right=330` 而那颗按钮 `right=389`），而溢出内容画在同一行更早的兄弟（把手 330…336）之上，
-          于是 `elementFromPoint(333,396)` 回的是那枚按钮里的 `svg`——**加宽之后再也拖不回来**。
-          把手抬到 z-10 之后它在自己那 6px 上永远赢命中测试（aside 本来就画在 main 之后，不受这一条影响）。 */}
+          形状、键盘四件与 `aria-valuemin/max/now` 都在 `ui/split.tsx` 的 `<SplitHandle>` 里（那里记着
+          `relative z-10` 与 `cursor-col-resize` 的来历）。全屏态整条右栏铺满工作区，把手跟着不上屏。 */}
       {!layout.isExpanded && (
-        <div
-          role="slider"
-          tabIndex={0}
-          aria-label={t('kernel.resizeHandle')}
-          aria-orientation="horizontal"
-          aria-valuemin={WIDTH_MIN}
-          aria-valuemax={WIDTH_MAX}
-          aria-valuenow={layout.ratio}
-          data-action="kernel-resize-handle"
-          data-testid="kernel-resize-handle"
-          title={t('kernel.resizeHandle')}
-          onPointerDown={startResize}
-          onKeyDown={resizeByKey}
-          onDoubleClick={() => layout.setRatio(WIDTH_MIN)}
-          className="relative z-10 w-1.5 shrink-0 cursor-col-resize self-stretch bg-line transition-colors duration-150 hover:bg-celadon focus-visible:bg-celadon"
+        <SplitHandle
+          split={split}
+          label={t('kernel.resizeHandle')}
+          action="kernel-resize-handle"
+          testid="kernel-resize-handle"
         />
       )}
       <aside
-        ref={asideRef}
+        ref={split.panelRef}
         className={`${
           layout.isExpanded ? 'min-w-0 flex-1' : `shrink-0 ${WIDTH_CLASS}`
         } flex flex-col border-l border-line bg-ink-900`}

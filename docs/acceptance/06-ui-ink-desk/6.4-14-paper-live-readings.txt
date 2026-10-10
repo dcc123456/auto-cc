@@ -1,0 +1,131 @@
+6.4-14 · 纸面实时跟着左列翻面，且同一屏只有一份画面——活体读数
+================================================================
+
+取证对象同 6.4-12/13（用户自己的 dev 实例，CDP 10222 / 5173，窗口 1200×772，容器 940，全程
+`visibilityState:"hidden"`）。两支脚本：`tmp/57b/live57b.mjs`（去抖与"画只画在一格里"）、
+`tmp/57b/latency57.mjs`（一次改动到落定的真实延迟）。
+
+----------------------------------------------------------------------
+① 计数通道为什么不是"桥接调用次数"（一条必须先说的形状事实）
+----------------------------------------------------------------------
+
+第一版想把 `window.autoCC.resume['export.preview']` 包一层数调用次数，**装不上**：预加载里那份命名空间
+是 `Object.freeze` 过的（本轮读数 `frozen:true / assignStuck:false`），页面里赋值**静默失败**——
+不报错，只是没生效，于是那一版的 `calls` 恒为 0，看起来像"根本没发渲染"（同批还有一条：页面里写 90×200ms
+的轮询循环，在 hidden 窗口一路挂到超时，因为 `setTimeout` 被按 1 秒粒度节流——§9 的 6.2 ③；轮询从此放 node 侧）。
+那一份读数**不作证据使用**，只留在这里说明计数通道为什么换了。
+
+换成的是一条**同样直接**的通道：给那张纸的 `srcdoc` 属性挂 `MutationObserver`。
+每一次真渲染落地都是一次 `srcdoc` 写入；五次连改若各发一趟，计数就是 5；去抖成一趟，计数就是 1。
+这一条比"包一层函数"更硬，因为它量的是**产物有没有被重写**，不是某个包装器有没有被调到。
+
+----------------------------------------------------------------------
+② 判据①②③（V）：五发同步连改，一趟都不碰"预览"那颗键
+----------------------------------------------------------------------
+
+$ node tmp/57b/live57b.mjs tmp/57b/live
+BOOT   {"panelFound":true} {"previewMounted":true,"selectedTemplateId":"modern"}
+BEFORE {"status":"idle","liveText":"已是最新 · 14:35:09","srcDocLength":33835,"srcDocMutations":0,
+        "selectedTemplateId":"modern","mode":"preview","canvasesInSlot":1,"canvasesInDesk":1,
+        "editorMounted":false,"editorInsideLeftColumn":false,"iframeInsideEditor":null}
+FIVE   {"clicked":5,"templateIds":["classic","minimal","executive-amber","legal-navy","designer-portfolio"],
+        "spanMs":1,"mutationsRightAfter":0}
+MID_FLIGHT {"status":"rendering","liveText":"正在重出这张纸…","srcDocLength":33835,"srcDocMutations":0,
+        "selectedTemplateId":"designer-portfolio","mode":"preview","canvasesInSlot":1,"canvasesInDesk":1}
+SETTLED_AT 1 {"status":"idle","liveText":"已是最新 · 14:37:00","srcDocLength":34045,"srcDocMutations":1,
+        "selectedTemplateId":"designer-portfolio","mode":"preview","canvasesInSlot":1,"canvasesInDesk":1}
+DONE   {"disconnected":true,"finalMutations":1}
+
+→ 逐条对上判据：
+  · **一次都没按"预览"**：五发全是架子上的模板卡片（`[data-action="shelf-card"]`），跨度 `spanMs:1`
+    （同步连点，远小于 350ms 去抖窗口）。
+  · `mutationsRightAfter:0` → 点击那一刻纸没动（去抖在挡），`MID_FLIGHT` 读到 `status:"rendering"` +
+    「正在重出这张纸…」——**在途态读得出来**（判据②，纸角那条 `data-testid="paper-live"` 就是判据本体）。
+  · 落定：`status:"idle"`、srcDoc `33835 → 34045`、**`srcDocMutations:1`**——五发改的确实都到了渲染层，
+    而真渲染只发了一趟（判据③）。
+  · 留在纸上的是**最后一次**的结果：`selectedTemplateId` 停在 `designer-portfolio`（第五颗），
+    不是中间任何一档；序列号那条挡的是"1200ms 预算下闪现旧纸"，这里正面读数是没有闪现。
+  · 全程 `canvasesInSlot:1 / canvasesInDesk:1`——槽内与整屏各只有那一枚 iframe，没有第二份预览。
+
+----------------------------------------------------------------------
+③ 判据③ 的耗时半边：一次改动到落定到底多久（`latency57.mjs`）
+----------------------------------------------------------------------
+
+$ node tmp/57b/latency57.mjs 3
+START   {"status":"idle","len":33835,"selected":"modern"}
+SAMPLES [{"templateId":"classic","clickToSettleMs":533,"renderingSeen":true,"srcDocLength":33784},
+         {"templateId":"modern","timeout":true,"renderingSeen":true},
+         {"templateId":"classic","clickToSettleMs":462,"renderingSeen":true,"srcDocLength":33784}]
+RESTORED{"status":"idle","len":33835,"selected":"modern"}
+
+→ 两条有效样本：**462ms / 533ms**（点一下 → 看见 `rendering` → 落回 `idle` 且 srcdoc 换掉）。
+  拆开就是"去抖 350ms + 一趟跨进程渲染 ≈ 110～185ms"——模板切换这一腿远没用掉 `maxPreviewResponseMs:1200`
+  那个预算，所以 350 的窗口不需要往下调（计划里"收口时以活体读数校准"就是为这一条留的）。
+  中间那条 `timeout:true` 是**探针的判据缺陷不是产品缺陷**：那一发点回 `modern`，srcdoc 长度回到与
+  起手相同的 33835，我拿"长度变了"当落定信号就永远等不齐（`renderingSeen:true` 说明渲染确实跑了一趟）。
+  读数保留在此，写判据的人不该再犯同一条：换档类延迟的落定信号要用**状态位**，不是内容指纹。
+  最后一行是自证收尾：用户的选中态点回起手那一套（`selected:"modern"`，与 `START` 逐字段相同）。
+
+----------------------------------------------------------------------
+④ 判据④（V）：三档下"画只画在一格里"，编辑器不再自己养一张 iframe
+----------------------------------------------------------------------
+
+（同一支 `live57b.mjs` 的 MODES 段：点一档 → 隔一个任务再读；同一任务里读 `data-stage-mode`
+ 拿到的是换档前的旧值——本轮第一版三条读数全成 `preview` 就是这么废的。）
+
+MODES {"layout":{"status":"idle","liveText":"已是最新 · 14:37:01","srcDocLength":33784,"srcDocMutations":1,
+                 "mode":"layout","canvasesInSlot":1,"canvasesInDesk":1,
+                 "editorMounted":true,"editorInsideLeftColumn":true,"iframeInsideEditor":0},
+       "pdf":{"status":"idle","liveText":"已是最新 · 14:37:01","srcDocLength":null,"srcDocMutations":1,
+              "mode":"pdf","canvasesInSlot":null,"canvasesInDesk":0},
+       "preview":{"status":"rendering","liveText":"正在重出这张纸…","srcDocLength":null,"srcDocMutations":1,
+                  "mode":"preview","canvasesInSlot":0,"canvasesInDesk":0}}
+
+→ 排版档：`editorMounted:true` 且 `editorInsideLeftColumn:true`（控件长在左列），
+  **`iframeInsideEditor:0`**（编辑器自己体内一张画都没有），而 `canvasesInSlot:1`——
+  画面仍画在右栏那一格里，`[data-stage-mode]="layout"` 时槽内计数继续是 1（判据④）。
+  PDF 档：`canvasesInDesk:0`（覆盖编辑器还没打开真 PDF 时不画任何纸，槽位整格缺席，`canvasesInSlot:null`），
+  这一档同样没有长出第二份预览。
+  回到预览档那一行读到 `status:"rendering" / canvasesInSlot:0` 是**换档瞬间的在途态**：
+  排版→预览会重出一趟，那一拍旧的画已经卸了、新的还没落地（`srcDocMutations` 仍是 1，没有多发）。
+
+同一件事的另一张画面（把左列滚到编辑器控件那一屏再量，`editor57.mjs`）：
+
+READINGS {"mode":"layout","editorMounted":true,"editorInsideLeftColumn":true,"editorControls":6,
+  "iframeInsideEditor":0,"canvasesInSlot":1,"canvasesInDesk":1,"frameTestId":"resume-editor-preview",
+  "editorTopInViewport":51,"slotTopInViewport":150,"slotRightOfEditor":true,
+  "paperScale":"0.5919395465994962","frameScaleComputed":"0.59194","frameNaturalWidth":794,
+  "neverClipped":true,"liveStatus":"idle","liveText":"已是最新 · 14:35:05"}
+
+→ 左列里 6 根滑杆（`input[type=range]`）+ 区块顺序把手，右栏同一格里是那张纸（通道名
+  `resume-editor-preview` 在这枚**共用的**物理 iframe 上按档切换——3.6-x 与 3.3-x 的既有取证通道名都没落空），
+  `slotRightOfEditor:true` 说明两者是同屏左右、不是上下。
+  `slotTopInViewport:150` 是 `self-start` 补上之后的读数（补之前同一支探针是 **-2519**，
+  即"滚到控件时右栏整格空白"，见 6.4-12 读数第⑥段）。
+
+----------------------------------------------------------------------
+⑤ 判据⑤（C）：`preview` 那颗键一字未改
+----------------------------------------------------------------------
+
+$ grep -n 'data-action="preview"' packages/renderer/src/ResumeDesk.tsx
+761:              action="preview"
+
+→ 键名与 `data-action` 值原样保留（`docs/acceptance/06-ui-ink-desk/6.4-08-paper-stage-readings.txt`
+  那批取证通道不断），语义从"唯一入口"降级成"手动再同步一次"：它现在走的是同一条
+  `bumpPaper()`（`ResumeDesk.tsx:492`），与换文档 / 换版式 / 采纳改写共用一个 `paperRevision`。
+  播报位置从 Banner 挪到纸角那条 `data-testid="paper-live"`（Banner 仍用于失败）。
+
+----------------------------------------------------------------------
+⑥ 未过的那一腿
+----------------------------------------------------------------------
+
+"点一行原文就地改"是片 58 的事，本片没有这一腿。本片**真实指针**相关的是拖把手那一腿（见 6.4-13 第③段末），
+不在这里。本片的五处读数全部来自页面自己的回执（`data-status` / `srcdoc` MutationObserver /
+`data-stage-mode`），不依赖 CDP 输入落页——`element.click()` 在 hidden 窗口里照样派发 React 监听
+（§9 的 2.1-12 补窗那条），所以"处理器跑不跑"这一半是真相；而"人点得动点不动"由 6.4-13 的 `[!]` 那一腿统一欠着。
+
+----------------------------------------------------------------------
+画面
+----------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.4-14-paper-live-preview.png  预览档：右栏那张纸 + 纸角「已是最新 · …」
+docs/acceptance/06-ui-ink-desk/6.4-14-paper-live-editor.png   排版档：控件在左列、画在右栏同一格（槽内计数 1）
