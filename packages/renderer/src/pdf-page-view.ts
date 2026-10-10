@@ -16,6 +16,12 @@
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import { backdropOfBand } from '@auto-cc/plugin-pdf-edit/overlay-colors';
+import {
+  ascentRatioOf,
+  fontFamilyHintOf,
+  fontHeightPt,
+  type FontFamilyHint,
+} from '@auto-cc/plugin-pdf-edit/text-metrics';
 import { PDFJS_ASSET_DIRS, PDFJS_PATH_PREFIX, PDFJS_WORKER_FILE } from './pdfjs-asset-tree';
 
 /**
@@ -33,14 +39,19 @@ export interface PdfPaperRect {
 
 /**
  * 一行可点原文。
- * `fontSizePt` 取该行最大的字号（PDF 用户空间单位），就地改时交给会话当 `sizePt`——
- * 新字要与被盖住的那一行一般大，否则「就地」就是假的。
+ * 三个字形读数（`fontSizePt` / `fontFamilyHint` / `baselineRatio`）合起来回答「这一行原来长什么样」，
+ * 就地改之后盖回去的新字就照这三样画（spec 3.5-15）——缺一样，"就地"就露馅一分。
  */
 export interface PdfTextLine {
   lineId: string;
   text: string;
   rect: PdfPaperRect;
+  /** 字高度（pt）：该行里最大的那一片段（一行混字号时人眼认大的那一种）。 */
   fontSizePt: number;
+  /** 字族（三种通用字族之一，由 pdf.js 的页级样式表归类而来）。 */
+  fontFamilyHint: FontFamilyHint;
+  /** 基线的视觉位置（0..1，原点左上）：新字与原文落在同一条线上，而不是矩形里竖向居中。 */
+  baselineRatio: number;
 }
 
 /**
@@ -121,13 +132,17 @@ function numberAt(value: unknown, index?: number): number | null {
 
 /**
  * 一行聚合过程中的可变态（同一基线上的若干文本项）。
+ * `dominant` 是这一行里**字高度最大**的那个片段所属的字族与基线——新字要照它画（一行里混两种字号时，
+ * 人眼认的是大的那一种；取第一个片段会让「小字打头」的行被当成小字行盖）。
  */
 interface LineAccumulator {
   baselinePt: number;
   leftPt: number;
   rightPt: number;
   topPt: number;
+  bottomPt: number;
   fontSizePt: number;
+  fontFamilyHint: FontFamilyHint;
   parts: string[];
 }
 
@@ -136,12 +151,27 @@ interface LineAccumulator {
  * 为什么要聚：pdf.js 给的是**片段**（同一行的中文常被拆成几段，跨字体还会再多几段），
  * 人眼的一行才是人要点的东西；聚完之后「点这一行」与「盖这一行」才是同一件事。
  * @param items 该页的文本项（只取真有文字的）
+ * @param styles 该页的字体样式表（`getTextContent().styles`，按 `fontName` 索引）
  * @param widthPt 页宽（pt）
  * @param heightPt 页高（pt）
- * @returns 自上而下的行盒列表
+ * @returns 自上而下的行盒列表（行盒含**降部**：`g`/`y`/`p` 的下半截也在里面，spec 3.5-15）
  */
-function linesOfItems(items: readonly PdfTextItemSlice[], widthPt: number, heightPt: number): PdfTextLine[] {
-  const measured: { baseline: number; left: number; right: number; top: number; size: number; str: string }[] = [];
+function linesOfItems(
+  items: readonly PdfTextItemSlice[],
+  styles: Record<string, PdfStyleSlice>,
+  widthPt: number,
+  heightPt: number,
+): PdfTextLine[] {
+  const measured: {
+    baseline: number;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    size: number;
+    hint: FontFamilyHint;
+    str: string;
+  }[] = [];
   for (const item of items) {
     if (item.str.trim() === '') continue;
     const left = numberAt(item.transform, 4);
@@ -149,15 +179,23 @@ function linesOfItems(items: readonly PdfTextItemSlice[], widthPt: number, heigh
     const width = numberAt(item.width);
     const height = numberAt(item.height);
     if (left === null || baseline === null || width === null || height === null) continue;
-    // 字号取矩阵的 (a,b) 长度：水平文字它就是 em 大小，比 `height`（含升部降部的字身高）更贴近人说的「字号」。
-    const a = numberAt(item.transform, 0) ?? 0;
-    const b = numberAt(item.transform, 1) ?? 0;
+    // 文本项的三个成员都是 `unknown`（pdf.js 的声明是 `Array<any>` 一级，本包 lint 开着 `no-unsafe-*`），
+    // 所以数值与矩阵一律现取现判，不接受 `any` 读数。
+    const transform: readonly unknown[] = Array.isArray(item.transform) ? (item.transform as readonly unknown[]) : [];
+    const style = styles[item.fontName];
+    // 字高度取矩阵第三、四列的长度（pdf.js TextLayer 的那一句），量不出（矩阵坏了）才回落到文本项高度。
+    const size = fontHeightPt(transform) || height;
+    const ratio = ascentRatioForFont(style);
     measured.push({
       baseline,
       left,
       right: left + width,
-      top: baseline + height,
-      size: Math.hypot(a, b) || height,
+      // 行顶 = 基线 + 升部、行底 = 基线 − 降部：原先的 `baseline + height` 用的是 pdf.js 的**字身盒**高度，
+      // 它把降部算在基线之上，于是降部永远露在覆盖区外面（「看到底部文字」的第三个来源，spec 3.5-15）。
+      top: baseline + size * ratio,
+      bottom: baseline - size * (1 - ratio),
+      size,
+      hint: fontFamilyHintOf(typeof style?.fontFamily === 'string' ? style.fontFamily : undefined),
       str: item.str,
     });
   }
@@ -170,7 +208,12 @@ function linesOfItems(items: readonly PdfTextItemSlice[], widthPt: number, heigh
       tail.leftPt = Math.min(tail.leftPt, piece.left);
       tail.rightPt = Math.max(tail.rightPt, piece.right);
       tail.topPt = Math.max(tail.topPt, piece.top);
-      tail.fontSizePt = Math.max(tail.fontSizePt, piece.size);
+      tail.bottomPt = Math.min(tail.bottomPt, piece.bottom);
+      if (piece.size > tail.fontSizePt) {
+        tail.fontSizePt = piece.size;
+        tail.fontFamilyHint = piece.hint;
+        tail.baselinePt = piece.baseline;
+      }
       tail.parts.push(piece.str);
       continue;
     }
@@ -179,7 +222,9 @@ function linesOfItems(items: readonly PdfTextItemSlice[], widthPt: number, heigh
       leftPt: piece.left,
       rightPt: piece.right,
       topPt: piece.top,
+      bottomPt: piece.bottom,
       fontSizePt: piece.size,
+      fontFamilyHint: piece.hint,
       parts: [piece.str],
     });
   }
@@ -188,21 +233,93 @@ function linesOfItems(items: readonly PdfTextItemSlice[], widthPt: number, heigh
     lineId: `L${index + 1}`,
     text: group.parts.join(''),
     fontSizePt: group.fontSizePt,
+    fontFamilyHint: group.fontFamilyHint,
+    // 基线的视觉位置：新字与它落在同一条线上（换算与"量不到就居中"那一档回落都在 `planOverlays` 一处）。
+    baselineRatio: (heightPt - group.baselinePt) / heightPt,
     rect: {
       xRatio: group.leftPt / widthPt,
       yRatio: (heightPt - group.topPt) / heightPt,
       widthRatio: (group.rightPt - group.leftPt) / widthPt,
-      heightRatio: (group.topPt - group.baselinePt) / heightPt,
+      heightRatio: (group.topPt - group.bottomPt) / heightPt,
     },
   }));
 }
 
-/** pdf.js 文本项里本模块真要用的四个成员（不依赖它的类型入口，跨版本漂移时这里自己判形状）。 */
+/** pdf.js 文本项里本模块真要用的五个成员（不依赖它的类型入口，跨版本漂移时这里自己判形状）。 */
 interface PdfTextItemSlice {
   str: string;
   transform: unknown;
   width: unknown;
   height: unknown;
+  /** 指向该页 `getTextContent().styles` 的那把键（字族与升降部都在样式表里，不在文本项上）。 */
+  fontName: string;
+}
+
+/** pdf.js 页级字体样式表的一项（`vertical` 本片刻意不处理：旋转文字在 3.5 这一轨按"量不出"走）。 */
+interface PdfStyleSlice {
+  fontFamily?: unknown;
+  ascent?: unknown;
+  descent?: unknown;
+}
+
+/**
+ * 量升部占比时用的字号（px）——**照抄 pdf.js 的 `DEFAULT_FONT_SIZE`**：
+ * 换字体量的比例与它画文本层时量的是同一件事，换个字号会量出另一个比例（fontBoundingBox 与 hinting 有关）。
+ */
+const ASCENT_MEASURE_FONT_SIZE_PX = 30;
+
+/** 按字族缓存的升部占比（与 pdf.js 的 `#ascentCache` 同一个键、同一份语义）。 */
+const ascentRatioByFamily = new Map<string, number>();
+/** 量字体用的那块画布（懒建；`measureText` 要的是 2D 上下文，不需要真的画东西）。 */
+let ascentCanvas: HTMLCanvasElement | undefined;
+
+/**
+ * 定出**这一支字体**的升部占比（spec 3.5-15 的基线半边）。
+ *
+ * 四档回落与画布那一句全部照抄 pdf.js 6.3 的 `TextLayer.#getAscent`（本机读的是 `pdfjs-dist@6.3.289`，
+ * §6.2）：先用 `measureText('')` 的 `fontBoundingBoxAscent/Descent` 反推，量不到才按样式表的 `ascent`、
+ * `1 + descent` 依次退，最后兜 0.8。判据本身在 `@auto-cc/plugin-pdf-edit/text-metrics` 里（那边可单测），
+ * 这里只负责"拿一只画布去量"这一件只有渲染层能做的事。
+ * @param style 该页样式表里对应那一项（可以是 undefined，即 pdf.js 根本没报这一支字体）
+ * @returns (0,1) 开区间里的比例
+ */
+function ascentRatioForFont(style: PdfStyleSlice | undefined): number {
+  const family = typeof style?.fontFamily === 'string' && style.fontFamily !== '' ? style.fontFamily : 'sans-serif';
+  const cached = ascentRatioByFamily.get(family);
+  if (cached !== undefined) return cached;
+  const painter = ascentPainter();
+  let measuredAscentPt: number | undefined;
+  let measuredDescentPt: number | undefined;
+  if (painter) {
+    ascentCanvas!.width = ASCENT_MEASURE_FONT_SIZE_PX;
+    ascentCanvas!.height = ASCENT_MEASURE_FONT_SIZE_PX;
+    painter.font = `${String(ASCENT_MEASURE_FONT_SIZE_PX)}px ${family}`;
+    const metrics = painter.measureText('');
+    measuredAscentPt = metrics.fontBoundingBoxAscent;
+    measuredDescentPt = Math.abs(metrics.fontBoundingBoxDescent);
+    ascentCanvas!.width = 0;
+    ascentCanvas!.height = 0;
+  }
+  const ratio = ascentRatioOf({
+    measuredAscentPt,
+    measuredDescentPt,
+    styleAscent: typeof style?.ascent === 'number' ? style.ascent : undefined,
+    styleDescent: typeof style?.descent === 'number' ? style.descent : undefined,
+  });
+  ascentRatioByFamily.set(family, ratio);
+  return ratio;
+}
+
+/**
+ * 取（必要时建）那块用来量字体的 2D 上下文。
+ * @returns 上下文；建不起来（无 DOM）时回 undefined，此时比例走样式表那一档
+ */
+function ascentPainter(): CanvasRenderingContext2D | null | undefined {
+  if (ascentCanvas === undefined) {
+    if (typeof document === 'undefined') return undefined;
+    ascentCanvas = document.createElement('canvas');
+  }
+  return ascentCanvas.getContext('2d');
 }
 
 /**
@@ -280,14 +397,22 @@ export async function loadPdfPaper(bytes: Uint8Array): Promise<PdfPaper> {
       // `'str' in item` 是 pdf.js 两种文本项（文字 / 标程内容）的分辨口，收窄后剩下的才是带坐标的那一种。
       const slices: PdfTextItemSlice[] = content.items
         .filter((item) => 'str' in item)
-        .map((item) => ({ str: item.str, transform: item.transform, width: item.width, height: item.height }));
+        .map((item) => ({
+          str: item.str,
+          transform: item.transform,
+          width: item.width,
+          height: item.height,
+          fontName: item.fontName,
+        }));
+      /** 该页的字体样式表（按 `fontName` 索引）：字族与升降部都只在这里，文本项上只有一个键。 */
+      const styles: Record<string, PdfStyleSlice> = content.styles;
       /** 这一页当下画在哪块画布上（`paint` 写、`sampleBackdrop` 读）；还没画过即 null。 */
       let paintedCanvas: HTMLCanvasElement | null = null;
       const built: PdfPaperPage = {
         pageNumber,
         widthPt: base.width,
         heightPt: base.height,
-        lines: linesOfItems(slices, base.width, base.height),
+        lines: linesOfItems(slices, styles, base.width, base.height),
         async paint(canvas, cssWidthPx) {
           if (cssWidthPx < 1) return -1;
           const dpr = window.devicePixelRatio || 1;

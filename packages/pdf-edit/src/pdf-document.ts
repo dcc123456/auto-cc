@@ -15,6 +15,7 @@ import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
 import { colorsOfOverlay } from './overlay-colors.js';
 import { isLatinOnly, type PlannedOverlay } from './overlay-writer.js';
 import { isIdentityOrder } from './page-ops.js';
+import type { FontFamilyHint } from './text-metrics.js';
 
 /** 装载不了的三种确定态（plan §7.10：加密文档与结构损坏都不试图绕过，也不产出半成品）。 */
 export type PdfLoadFailure = 'empty' | 'encrypted' | 'invalid';
@@ -150,9 +151,10 @@ export class PdfEditDocument {
    * ① 垫底矩形必须 `borderWidth: 0`——实测（本机 `pdf-lib` 1.17.1 的 `PDFPageOptions.d.ts`）
    *    `drawRectangle` 的默认描边宽是 1 pt，留着它就成了一圈黑框，而覆盖区的作用是垫一块干净的底；
    *    颜色不写死纯白：那是「能明显看到底部文字」的头一个来源（spec 3.5-14），一律走 `colorsOfOverlay` 的判据；
-   * ② 字体按**整条文字**选，不按字符拆：全拉丁走 `StandardFonts.Helvetica`（零内嵌成本，plan §7.2 结论③），
-   *    掺一个非拉丁字符就整条走随包的 `Noto Sans SC`——混排（「2024 年经验」）拆成两只字体分段画会让基线与
-   *    间距各算一遍，而这只字体本来就带拉丁字形；
+   * ② 字体按**整条文字**选，不按字符拆：全拉丁的叠加走 `StandardFonts` 里与之对应的那一只（零内嵌成本，
+   *    plan §7.2 结论③），字族由渲染层量来的 `fontFamilyHint` 决定（衬线→Times、等宽→Courier、其余→Helvetica，
+   *    见 `latinStandardFontOf`）；掺一个非拉丁字符就整条走随包的 `Noto Sans SC`——混排（「2024 年经验」）
+   *    拆成两只字体分段画会让基线与间距各算一遍，而这只字体本来就带拉丁字形；
    * ③ **两处实测更正**（都来自读三方库的 `.d.ts`，§6.2）：`drawText` 的 `font` 只收 `PDFFont` 不收枚举，
    *    所以标准字体也要 `embedFont` 一次拿句柄（各嵌一次，多一次都不许）；`EmbedFontOptions` 只有
    *    `subset` / `customName` / `features` 三个键，plan §7.2 凭 spike 记忆写的 `custom: true` **并不存在**——
@@ -164,11 +166,17 @@ export class PdfEditDocument {
    */
   async applyOverlays(plans: readonly PlannedOverlay[], cjkFontBytes?: Uint8Array): Promise<void> {
     const pages = this.pdf.getPages();
-    const texts = plans.flatMap((plan) => (plan.text === undefined ? [] : [plan.text]));
-    const latinFont = texts.some((text) => isLatinOnly(text))
-      ? await this.pdf.embedFont(StandardFonts.Helvetica)
-      : undefined;
-    const cjkFont = texts.some((text) => !isLatinOnly(text)) ? await this.embedCjkFont(cjkFontBytes) : undefined;
+    const latinPlans = plans.filter((plan) => plan.text !== undefined && isLatinOnly(plan.text));
+    const needsCjk = plans.some((plan) => plan.text !== undefined && !isLatinOnly(plan.text));
+    // 拉丁侧按**量到的字族**各嵌一次（spec 3.5-15）：同一份产物里最多三只标准字体，
+    // 嵌一只画三种是"字族对不上"的另一半来源；一只都不许多嵌（每只都是一条字体对象）。
+    const latinFonts = new Map<FontFamilyHint, PDFFont>();
+    for (const plan of latinPlans) {
+      const hint = plan.fontFamilyHint ?? 'sans-serif';
+      if (latinFonts.has(hint)) continue;
+      latinFonts.set(hint, await this.pdf.embedFont(latinStandardFontOf(hint)));
+    }
+    const cjkFont = needsCjk ? await this.embedCjkFont(cjkFontBytes) : undefined;
     for (const plan of plans) {
       // 一个来源页对应产物里的所有位置：排过页（3.5-07）之后同一源可能有副本，
       // 只盖第一处就等于"改了一份、另一份还露着那段旧话"（plan §7.6 的反伪装精神）。
@@ -196,7 +204,11 @@ export class PdfEditDocument {
           borderWidth: 0,
         });
         if (plan.text !== undefined && plan.textBaselinePt !== undefined) {
-          const font = isLatinOnly(plan.text) ? latinFont : cjkFont;
+          const font = isLatinOnly(plan.text)
+            ? latinFonts.get(plan.fontFamilyHint ?? 'sans-serif')
+            : // 中文侧只随包一只 Noto Sans SC（衬线中文要另算字体资产那笔账，见 plan §7.2 结论③）：
+              // 所以字族提示在这一支**不兑现**，界面上也不许诺"中文换衬线"。
+              cjkFont;
           if (font !== undefined) {
             page.drawText(plan.text, {
               x: plan.xPt,
@@ -233,5 +245,25 @@ export class PdfEditDocument {
    */
   async save(): Promise<Uint8Array> {
     return this.pdf.save();
+  }
+}
+
+/**
+ * 把量来的字族提示换成**这一版真能兑现**的那只标准字体（spec 3.5-15）。
+ *
+ * 为什么只此三种：本片刻意不引入字体资产（plan §7.2 结论③ 那笔账），而 `StandardFonts` 里
+ * 与三种通用字族对得上的就是 Times / Courier / Helvetica 这三支。源文档用的是 Calibri 时，
+ * 产物里是 Times 而不是 Calibri——**这是如实的欠项，不是"对上了"**，界面上那句"按原样式"要等族三才说得出。
+ * @param hint 渲染层量来的字族（`undefined` 由调用方先补成 `'sans-serif'`）
+ * @returns 交给 `embedFont` 的枚举
+ */
+export function latinStandardFontOf(hint: FontFamilyHint): StandardFonts {
+  switch (hint) {
+    case 'serif':
+      return StandardFonts.TimesRoman;
+    case 'monospace':
+      return StandardFonts.Courier;
+    case 'sans-serif':
+      return StandardFonts.Helvetica;
   }
 }

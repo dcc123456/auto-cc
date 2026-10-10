@@ -1359,6 +1359,16 @@ export interface PdfOverlayInputView {
    * 省略即"没量到"，主进程与画布一起按墨色垫底（判据只在 `overlay-colors` 那一处，两条腿不会分叉）。
    */
   backdropHex?: string;
+  /**
+   * 替换字要用的字族档（`serif` / `sans-serif` / `monospace`，spec 3.5-15）：取自**被盖住的那一行**的字体名，
+   * 于是新字与被它遮住的那一行同族。省略即没量到（覆盖区不是从某一行拖来的），两条腿一起走无衬线。
+   */
+  fontFamilyHint?: 'serif' | 'sans-serif' | 'monospace';
+  /**
+   * 基线落在覆盖区**竖向**的哪个位置（0=区顶、1=区底，spec 3.5-15）：新字压回原文那一行的基线，
+   * 而不是在矩形里居中——居中会让整串字上浮半个 x-height，看着就是"盖歪了"。省略即按居中排。
+   */
+  baselineRatio?: number;
 }
 
 /**

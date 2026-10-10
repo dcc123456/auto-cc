@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
 
-import { PdfEditDocument } from './pdf-document.js';
+import { latinStandardFontOf, PdfEditDocument } from './pdf-document.js';
+import type { PlannedOverlay } from './overlay-writer.js';
 
 describe('3.4-03 装载腿：把最小 PDF 读成一份可编辑文档', () => {
   it('单页：页数与 A4 宽高（pt）都读得出来，来源哈希是 sha256', async () => {
@@ -117,35 +118,53 @@ describe('3.5-02 的绘制半边：applyOverlays 只追加，页号越界当场�
   });
 });
 
+/**
+ * 一条覆盖区在测试里的缺省几何（夹具是单页 A4，页号固定 1；字号 11pt 与 `textBaselinePt: 25` 一起
+ * 构成"基线在矩形内"的形状，绘制侧照抄这两个数，不再自己算符号）。
+ */
+const overlayBase: PlannedOverlay = {
+  id: 'box-1',
+  pageNumber: 1,
+  xPt: 10,
+  yBottomPt: 20,
+  widthPt: 100,
+  heightPt: 30,
+  sizePt: 11,
+};
+
+/**
+ * 画完给定覆盖区后的**整份产物字节**。
+ * @param plans 要画的区，每条只写想改的字段（给两条就能演「同一页两种字族」）
+ * @returns 保存后的 PDF 字节
+ */
+async function drawn(...plans: readonly Partial<PlannedOverlay>[]): Promise<Uint8Array> {
+  const loaded = await PdfEditDocument.load(minimalPdf(['Jane Doe']));
+  if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+  await loaded.document.applyOverlays(
+    plans.map((plan, index): PlannedOverlay => {
+      const withGeometry = { ...overlayBase, id: `box-${String(index + 1)}`, ...plan };
+      return withGeometry.text === undefined || withGeometry.textBaselinePt !== undefined
+        ? withGeometry
+        : { ...withGeometry, textBaselinePt: 25 };
+    }),
+  );
+  return loaded.document.save();
+}
+
+/**
+ * 画完给定覆盖区后的内容流文本（3.5-14 那一族颜色断言看的就是它）。
+ * @param plans 同 `drawn`
+ */
+async function contentOf(...plans: readonly Partial<PlannedOverlay>[]): Promise<string> {
+  return pdfContentText(await drawn(...plans));
+}
+
 describe('3.5-14 的绘制半边：垫底矩形取量到的纸色，量不到才按墨色，纯白一个字都不许出现', () => {
   /** 三条实测形状（本机 `pdf-lib` 1.17.1 的 `rg` 写法是**全精度小数**，写断言前用 `tmp/35-14-color-probe.mjs` 现读过一遍）。 */
   const SAMPLED_FILL = '0.9411764705882353 0.8235294117647058 0.7058823529411765 rg'; // #f0d2b4
   const FALLBACK_FILL = '0.06666666666666667 0.06666666666666667 0.06666666666666667 rg'; // #111111
   const FALLBACK_INK = '0.9725490196078431 0.9803921568627451 0.9882352941176471 rg'; // #f8fafc
   const SAMPLED_INK = '0.058823529411764705 0.09019607843137255 0.16470588235294117 rg'; // #0f172a
-
-  /**
-   * 造一份只画一区覆盖区后的内容流文本。
-   * @param plan 这一区的几何与颜色（页号固定 1，夹具就是单页）
-   */
-  async function contentOf(plan: { backdropHex?: string; text?: string }): Promise<string> {
-    const loaded = await PdfEditDocument.load(minimalPdf(['Jane Doe']));
-    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
-    await loaded.document.applyOverlays([
-      {
-        id: 'box-1',
-        pageNumber: 1,
-        xPt: 10,
-        yBottomPt: 20,
-        widthPt: 100,
-        heightPt: 30,
-        sizePt: 11,
-        ...plan,
-        ...(plan.text === undefined ? {} : { textBaselinePt: 25 }),
-      },
-    ]);
-    return pdfContentText(await loaded.document.save());
-  }
 
   it('量到了底色：矩形填那一个色号，新字取默认墨色，产物里没有 `1 1 1 rg`', async () => {
     const content = await contentOf({ backdropHex: '#f0d2b4', text: 'OK' });
@@ -165,6 +184,74 @@ describe('3.5-14 的绘制半边：垫底矩形取量到的纸色，量不到才
     const content = await contentOf({});
     expect(content).toContain(FALLBACK_FILL);
     expect(content).not.toContain(FALLBACK_INK);
+  });
+});
+
+describe('3.5-15 的绘制半边：量到的字族决定嵌哪只标准字体', () => {
+  /**
+   * 画完给定区后的**整份产物文本**（解开压缩的那一份）。
+   * 为什么不是内容流单独看：`pdf-lib` 默认把字体字典写进**压缩的对象流**，而标准字体在资源表里的
+   * 键是 `<字族名>-<对象号>`（本机 `tmp/35-15-font-probe.log` 实测：`/Times-Roman-7098480789 11 Tf`），
+   * 所以判"嵌了哪只、被哪一笔用到"要解开之后整份看。
+   * @param plans 同 `drawn`
+   */
+  async function productTextOf(...plans: readonly Partial<PlannedOverlay>[]): Promise<string> {
+    return pdfContentText(await drawn(...plans));
+  }
+
+  /**
+   * 数出产物里每一处 `/BaseFont`（**不去重**：同一只字体出现两次就是嵌了两次）。
+   * @param text 解开压缩的产物文本
+   */
+  function baseFontsOf(text: string): string[] {
+    return [...text.matchAll(/\/BaseFont\s*\/([A-Za-z0-9+-]+)/g)].map((match) => match[1] as string);
+  }
+
+  /**
+   * 列出内容流里每一次 `Tf` 用到的资源键。
+   * @param text 解开压缩的产物文本
+   */
+  function textFontKeysOf(text: string): string[] {
+    return [...text.matchAll(/\/([A-Za-z0-9+-]+) [0-9.]+ Tf/g)].map((match) => match[1] as string);
+  }
+
+  it('三档各映射到一只标准字体（枚举值以 `pdf-lib` 的 `.d.ts` 为准，§6.2）', () => {
+    expect(latinStandardFontOf('serif')).toBe('Times-Roman');
+    expect(latinStandardFontOf('monospace')).toBe('Courier');
+    expect(latinStandardFontOf('sans-serif')).toBe('Helvetica');
+  });
+
+  it('量到 serif：嵌 Times 且**这一笔就用它**（嵌了却没用等于白嵌，字族还是对不上）', async () => {
+    const text = await productTextOf({ text: 'AAA', fontFamilyHint: 'serif' });
+    expect(baseFontsOf(text)).toContain('Times-Roman');
+    expect(textFontKeysOf(text).filter((key) => key.startsWith('Times-Roman')).length).toBe(1);
+  });
+
+  it('量到 monospace：嵌 Courier；没量到（拖框那一腿）按无衬线走且绝不长出衬线名', async () => {
+    const mono = await productTextOf({ text: 'AAA', fontFamilyHint: 'monospace' });
+    expect(baseFontsOf(mono)).toContain('Courier');
+    expect(textFontKeysOf(mono).filter((key) => key.startsWith('Courier')).length).toBe(1);
+
+    const plain = await productTextOf({ text: 'AAA' });
+    expect(plain).not.toContain('Times-Roman');
+    expect(plain).not.toContain('/Courier');
+  });
+
+  it('两区两种字族 → 两只字体各用一次；两区同一字族 → 只嵌一次但用两笔（多嵌就是产物虚胖）', async () => {
+    const mixed = await productTextOf(
+      { text: 'AAA', fontFamilyHint: 'serif' },
+      { text: 'BBB', fontFamilyHint: 'monospace', yBottomPt: 60 },
+    );
+    expect(baseFontsOf(mixed).filter((name) => name === 'Times-Roman').length).toBe(1);
+    expect(baseFontsOf(mixed).filter((name) => name === 'Courier').length).toBe(1);
+    expect(textFontKeysOf(mixed).length).toBe(3); // 夹具自己那一笔 + 新落的两笔
+
+    const twoSerif = await productTextOf(
+      { text: 'AAA', fontFamilyHint: 'serif' },
+      { text: 'BBB', fontFamilyHint: 'serif', yBottomPt: 60 },
+    );
+    expect(baseFontsOf(twoSerif).filter((name) => name === 'Times-Roman').length).toBe(1);
+    expect(textFontKeysOf(twoSerif).filter((key) => key.startsWith('Times-Roman')).length).toBe(2);
   });
 });
 

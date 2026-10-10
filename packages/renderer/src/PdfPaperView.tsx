@@ -30,6 +30,21 @@ import type { PdfPaperRect, PdfTextLine } from './pdf-page-view';
 const REPAINT_WIDTH_DELTA = 0.06;
 
 /**
+ * 「拖」的最小位移：起收点在比例坐标上的曼哈顿距离（横纵各占 0..1）不足这个数就算「点」。
+ * 0.004 在 1000px 宽的纸面上约等于 4px——比一次手抖大，比一行字窄。
+ */
+const DRAG_MIN_MANHATTAN = 0.004;
+
+/**
+ * 起收点之间算不算一次拖拽（`move` 的橡皮筋与 `up` 的落覆盖区共用这一个判据，§2.5）。
+ * @param from 起手点（比例）
+ * @param to 当下的点（比例）
+ */
+function hasDragged(from: { x: number; y: number }, to: { x: number; y: number }): boolean {
+  return Math.abs(to.x - from.x) + Math.abs(to.y - from.y) >= DRAG_MIN_MANHATTAN;
+}
+
+/**
  * 把指针位置换算成页面内的比例坐标（原点左上）。
  * @param clientX 指针视口横坐标（px）
  * @param clientY 指针视口纵坐标（px）
@@ -143,10 +158,18 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
       // 提交态**不描边**（spec 3.5-14）：那一圈琥珀虚线是"这里有一块补丁"的自供状，
       // 而拖拽中的那一只已经有 DOM 里的青瓷虚线框在说（`pdf-edit-rubber-box`），不重复挂。
       if (overlay.text && model.limits) {
+        const sizePt = overlay.sizePt ?? model.limits.defaultTextSizePt;
+        // 字族与基线都取自被盖住的那一行（spec 3.5-15）：原先写死的 `sans-serif` + `textBaseline='bottom'`
+        // 让替换字与原文在字族、基线两样上各差一截，那正是"一眼看出这里被动过"的那一截。
         painter.fillStyle = colors.inkHex;
-        painter.font = `${(overlay.sizePt ?? model.limits.defaultTextSizePt) * pxPerPt}px sans-serif`;
-        painter.textBaseline = 'bottom';
-        painter.fillText(overlay.text, x + 2, y + boxHeight - 2);
+        painter.font = `${String(sizePt * pxPerPt)}px ${overlay.fontFamilyHint ?? 'sans-serif'}`;
+        painter.textBaseline = 'alphabetic';
+        // 量到了基线就照那条线画；量不到（拖框那一腿没有行可依）才按 em 盒竖向居中。
+        const baselineY =
+          overlay.baselineRatio === undefined
+            ? y + boxHeight - (boxHeight - sizePt * pxPerPt) / 2
+            : overlay.baselineRatio * canvas.height;
+        painter.fillText(overlay.text, x, baselineY);
       }
     }
   }, [model.draft.overlays, model.limits, model.paperPage]);
@@ -204,7 +227,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
 
   /**
    * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶腿）。
-   * 分辨只看**位移**：起收点距离不足 3px 算点，落点又有行盒就进就地改；否则按拖出来的矩形交进会话。
+   * 分辨只看**起收点的位移**（`DRAG_MIN_MANHATTAN`）：够不上就当作点，那点上有行盒便进就地改；够上了按拖出来的矩形交进会话。
    * 监听在 `pointerdown` 当场挂上，不挂在后续渲染的 effect 里（3.6 活体那条教训：
    * harness 把 down/move/up 在几毫秒里派发完，effect 等渲染提交时 `pointerup` 早就过去了）。
    * @param event 画布上的 `pointerdown`
@@ -218,7 +241,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
       const current = dragStartRef.current;
       const point = ratioOfPointer(moveEvent.clientX, moveEvent.clientY, canvas);
       if (!current || !point) return;
-      if (Math.abs(point.x - current.x) + Math.abs(point.y - current.y) < 0.004) return;
+      if (!hasDragged(current, point)) return;
       setHovered(undefined);
       model.setRubber(rectOfPoints(current, point));
     };
@@ -229,7 +252,10 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
       const point = ratioOfPointer(upEvent.clientX, upEvent.clientY, canvas);
       dragStartRef.current = undefined;
       if (!current || !point) return;
-      const dragged = model.rubber !== undefined;
+      // 判"拖过没拖过"只看**这两点自己的位移**，不读 `model.rubber`：那个值是 pointerdown 那一次渲染的快照，
+      // 在同一趟手势里永远是 `undefined`（活体实测：拖框那条腿从不落覆盖区，见 plan §11.5）。
+      // 橡皮筋的显示仍然走 state，只是它不再是这条分支的判据（§2.5：一个判据一个出处）。
+      const dragged = hasDragged(current, point);
       model.setRubber(undefined);
       if (dragged) {
         // 旧流程（先写字、再框位置）原样保留，只是降到进阶。

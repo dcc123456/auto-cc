@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./edit-session": "./src/edit-session.ts",
-    "./overlay-colors": "./src/overlay-colors.ts"
+    "./overlay-colors": "./src/overlay-colors.ts",
+    "./text-metrics": "./src/text-metrics.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

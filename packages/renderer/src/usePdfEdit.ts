@@ -344,10 +344,11 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
    * 把一个矩形连同要写的字交进会话（就地改与进阶拖动落位共用这一条腿）。
    * 合法性一律由会话判——会话用的就是另存那一份 `planOverlays`，界面这里不写第二条规则（§2.5）。
    * @param rect 比例矩形
-   * @param text 要盖上去的新字；空串表示只涂白底（那时 `text` 这个键根本不出现）
-   * @param sizePt 字号（pt）；省略即用配置缺省
+   * @param text 要盖上去的新字；空串表示只涂底（那时 `text` 这个键根本不出现）
+   * @param line 就地改时的那一行原文（spec 3.5-15：字号、字族、基线三样都照它）；
+   *             拖框那一腿没有"一行"可依，省略即用缺省字号 + em 盒居中
    */
-  const commitRect = (rect: PdfPaperRect, text: string, sizePt?: number) => {
+  const commitRect = (rect: PdfPaperRect, text: string, line?: PdfTextLine) => {
     const session = sessionRef.current;
     if (!session) return;
     overlaySeqRef.current += 1;
@@ -359,7 +360,9 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
       pageNumber: pageRef.current,
       rect,
       ...(text === '' ? {} : { text }),
-      ...(sizePt === undefined ? {} : { sizePt }),
+      ...(line === undefined
+        ? {}
+        : { sizePt: line.fontSizePt, fontFamilyHint: line.fontFamilyHint, baselineRatio: line.baselineRatio }),
       ...(backdropHex === undefined ? {} : { backdropHex }),
     });
     syncFromSession();
@@ -376,13 +379,13 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
   const changeEditText = (text: string) => setEditing((current) => (current ? { ...current, text } : current));
 
   /**
-   * 提交就地改：覆盖区就是那一行的行盒，字号沿用那一行。
+   * 提交就地改：覆盖区就是那一行的行盒，字号/字族/基线三样沿用那一行（spec 3.5-15）。
    * 原文一个字都不删——界面上那句「原文仍在文件里」跟着常驻（§7.6 的反伪装口径）。
    */
   const commitEdit = () => {
     const target = editing;
     if (!target) return;
-    commitRect(target.line.rect, target.text.trim(), target.line.fontSizePt);
+    commitRect(target.line.rect, target.text.trim(), target.line);
     setEditing(undefined);
   };
 
@@ -391,6 +394,7 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
 
   /**
    * 进阶腿：拖完一只橡皮筋后交进会话，文字取左列那行输入框（旧流程原样保留，只是降到进阶）。
+   * 这一条**没有行可依**，所以字号走缺省、基线走 em 盒居中（`planOverlays` 里那一句回落）。
    * @param rect 拖出来的比例矩形
    */
   const commitOverlay = (rect: PdfPaperRect) => {

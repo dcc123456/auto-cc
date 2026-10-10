@@ -1380,8 +1380,58 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
 这与 §10.10 那条"监听必须在 `pointerdown` 当场挂上"是同一条教训的第二种形态——**当场挂上是事件层的快照问题，
 读 `model.rubber` 是状态层的快照问题**，两个都得防。
 
+**（2026-10-10 片 2 已按上面那条候选修法落地）**`up` 不再读渲染快照，改按**起收点的位移**判"算不算拖"：
+`DRAG_MIN_MANHATTAN = 0.004`（比例坐标上的曼哈顿距离，横纵各占 0..1；1000px 宽的纸面上约 4px——比一次手抖大、
+比一行字窄），`move` 的橡皮筋与 `up` 的落覆盖区共用同一个 `hasDragged()`（§2.5 一个判据）。
+活体读数：合成指针事件拖一次，`rubberShown=true`、覆盖区列表 1→2 条（`3.5-15-live-readings.txt` 第四节）。
+
 ### 11.6 本节仍欠的三件事
 
 - V 的**观感**半边：「人眼看不出是覆盖」要有你在场看一眼才算 `[x]`，现在整条 3.5-14 记 `[!]`（像素差值不等于观感结论）。
 - `pdfjs-dist` 在 `packages/pdf-edit/package.json` 里仍是**声明而未用**：族三给它归宿；若整轮停在族一，就按 §2.4 删掉这条声明。
 - 片 2（3.5-15 字族/字号/基线）与片 3（3.5-16 编辑框不再是白盒子）按裁定第 1 条的顺序往后走，本片不动那两处。
+
+  **（2026-10-10 片 2 补记，原三条不重写）**上面第二条仍然开着（`pdfjs-dist` 的归宿在族三）；第一条的观感半边
+  现在同时欠 3.5-14 与 3.5-15 两行，等你在场；第三条的片 2 已落地（见 §11.7），族一只剩片 3。
+
+### 11.7 片 2（3.5-15）：三个数从 pdf.js 现场量，两腿同源
+
+**口径来源**：几何与升降部**照抄 pdf.js 6.3.289 自己 TextLayer 的算法**，不按博客转述（§6.2 那条本项目已栽过两次）：
+
+- 字号 = `fontHeight = Math.hypot(transform[2], transform[3])`；量不到（0 或形状不合）才回落 `item.height`。
+- 升部占比四档回落，顺序与 pdf.js 一致：`canvas.measureText('')` 的 `fontBoundingBoxAscent / 30`
+  （`DEFAULT_FONT_SIZE = 30`，与 pdf.js 同一档）→ `style.ascent` → `1 + style.descent` → `0.8`。
+- 行盒 = **基线 + size·ratio → 基线 − size·(1−ratio)**。旧实现取的是 pdf.js 的**文本项盒**（只到 em 框），
+  降部那一截（g/y/p）在盒外，所以旧覆盖区会露字脚——这是"看到底部文字"的第四个来源，前三个由片 1 收掉。
+
+**四条实测形状事实**（都写进了代码注释，登记在此免得下次重推）：
+
+1. **`TextStyle` 没有 `color`**：`types/src/display/api.d.ts` 上那一条只有 `ascent / descent / vertical / fontFamily`
+   四件（实测版本 6.3.289）。字色只能从 `page.getOperatorList()` 里取，那是族二的射程 ⇒ 本片沿用片 1 的墨色估计，
+   并在 spec 行尾如实写成欠项，不许装作拿到了。
+2. **字族名带子集前缀**：源 PDF 常嵌子集，`fontName` / `fontFamily` 长成 `ABCDEF+TimesNewRomanPSMT`。
+   判族前先剥 `^[A-Z]{6}\+`；`sans` 必须先于 `serif` 试（"SansSerif" 里含 `serif` 子串，顺序反了三档全成衬线）。
+3. **`pdf-lib` 的 `save()` 写压缩对象流**：`/BaseFont` 在 raw latin1 里读不到，断言字族必须经
+   `pdfContentText` 这类展开 FlateDecode 的读法（本片的单测一开始按 raw 断言，三条全红）。
+4. **标准字体的资源键是 `<字族名>-<对象号>`**：实测 `Times-Roman-7098480789 15 Tf`，所以"用了哪只字族"要看
+   `Tf` 前缀而不是整串键名。副作用一条如实登记：新字那次 `embedFont` 会在资源字典里**另起一条**
+   `/BaseFont /Times-Roman`（源文档自己那条不合并——合并要改源页资源，超出覆盖式射程）；
+   标准字体不嵌字库，多出来的只是一条约百字节的资源项。单测里"两个覆盖区同一字族只嵌一次"管的是**新字之间**。
+
+**一处设计裁定（不新增拒绝码）**：`fontFamilyHint` / `baselineRatio` 与 `backdropHex` 用同一手法——
+**形状不合就当"没量到"**，走回落，而不是长出一个新的 `OVERLAY_*` 拒收码（§2.6 不为不会发生的输入加校验；
+且"量不到"是常态：拖框那一腿根本没有行可依）。基线只有落在 `rect` 的纵向区间内才认（`[yRatio, yRatio+heightRatio]`），
+越界、NaN、负数一律回落"行盒内按字号居中"。
+
+**两腿同源**：`packages/pdf-edit/src/text-metrics.ts`（新，纯函数、零依赖）持有度量口径，
+渲染层 `pdf-page-view.ts` 与写侧 `overlay-writer.ts` / `pdf-document.ts` 都从它拿；
+canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那一腿的 `Tf` 字号 / `Tm` 基线
+用的是**同一条 `PlannedOverlay`**——WYSIWYG 还是构造出来的，不是约定出来的（§11.2 同一条）。
+
+**活体主证**（`docs/acceptance/3.5/3.5-15-live-readings.txt`）：三族 × 三字号 × 每行带降部的夹具上，
+被盖那行 `/Times-Roman … 15 Tf … 50 746 Tm` 与新写那行 `/Times-Roman … 15 Tf … 50.00000000000001 746 Tm`
+同字族、同字号、同基线；行盒对墨迹是三行全包住（mono 那一行差 0.4 个位图像素的抗锯齿，容差内，如实写出）。
+
+**顺带收掉的一处旧措辞**（3.5-14 的账，被本片的活体读数抓出来）：覆盖区列表在文字留空时显示「只铺白底」、
+拖框提示显示「文字留空即只铺白底」——自片 1 起垫的是这一页自己的底色，"白"字已不符事实（§7.6 反伪装的同一条），
+现改为「只铺这一页的底色」/「文字留空即只铺这一页自己的底色」。

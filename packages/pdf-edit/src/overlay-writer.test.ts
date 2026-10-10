@@ -135,6 +135,52 @@ describe('3.5-14 的颜色半边：底色归一后带进计划，形状不对就
   });
 });
 
+describe('3.5-15 的几何半边：量来的基线与字族进计划，量不到就整个键不出现', () => {
+  it('基线比例换算成 PDF 的 y：视觉 0.21 那条基线落在 (1-0.21)×842，不再是矩形里竖向居中', () => {
+    const planned = planOverlays([overlay({ text: 'Jane Doe', baselineRatio: 0.21 })], [a4], limits);
+    if (!planned.ok) throw new Error(planned.detail);
+    // 居中回落会是 631.5 + (42.1-11)/2 = 647.05；量来的基线必须与它不同，否则「就地」是假的。
+    expect(planned.overlays[0]?.textBaselinePt).toBeCloseTo(0.79 * 842, 10);
+    expect(planned.overlays[0]?.textBaselinePt).not.toBeCloseTo(647.05, 6);
+  });
+
+  it('基线读到矩形外面（0.1 与 0.3）：这一区仍然合法，但按居中排——新字绝不画到补丁之外', () => {
+    for (const baselineRatio of [0.1, 0.3, Number.NaN, -0.01]) {
+      const planned = planOverlays([overlay({ text: 'Jane Doe', baselineRatio })], [a4], limits);
+      if (!planned.ok) throw new Error(`${String(baselineRatio)} 应当放行，实际是 ${planned.detail}`);
+      expect(planned.overlays[0]?.textBaselinePt).toBeCloseTo(631.5 + (42.1 - 11) / 2, 10);
+    }
+  });
+
+  it('基线落在矩形上下边界上仍然算数（那一行的墨迹正好贴边，不该因此丢掉量到的位置）', () => {
+    for (const baselineRatio of [0.2, 0.25]) {
+      const planned = planOverlays([overlay({ text: 'AB', baselineRatio })], [a4], limits);
+      if (!planned.ok) throw new Error(planned.detail);
+      expect(planned.overlays[0]?.textBaselinePt).toBeCloseTo((1 - baselineRatio) * 842, 10);
+    }
+  });
+
+  it('三种通用字族原样带过；越界的值（`Times New Roman`、数字、空）让整个键不出现', () => {
+    for (const hint of ['serif', 'sans-serif', 'monospace'] as const) {
+      const planned = planOverlays([overlay({ fontFamilyHint: hint })], [a4], limits);
+      if (!planned.ok) throw new Error(planned.detail);
+      expect(planned.overlays[0]?.fontFamilyHint).toBe(hint);
+    }
+    for (const hint of ['Times New Roman', 42, null, undefined]) {
+      const planned = planOverlays([overlay({ fontFamilyHint: hint as never })], [a4], limits);
+      if (!planned.ok) throw new Error(`${String(hint)} 应当放行，实际是 ${planned.detail}`);
+      expect('fontFamilyHint' in (planned.overlays[0] ?? {})).toBe(false);
+    }
+  });
+
+  it('既没量到基线也没量到字族（拖框那一腿的覆盖区）：区仍然合法，两条回落各自生效', () => {
+    const planned = planOverlays([overlay({ text: '拖出来的框' })], [a4], limits);
+    if (!planned.ok) throw new Error(planned.detail);
+    expect(planned.overlays[0]?.textBaselinePt).toBeCloseTo(647.05, 10);
+    expect('fontFamilyHint' in (planned.overlays[0] ?? {})).toBe(false);
+  });
+});
+
 describe('isLatinOnly：按整条文字选字体的判据（全拉丁走标准字体，掺非拉丁整条走随包字体）', () => {
   it('拉丁、数字、标点、Latin-1 补充都放过', () => {
     for (const text of ['Jane Doe', '2024.03 - present', 'Fudan Univ. (CS) ©±£', '']) {

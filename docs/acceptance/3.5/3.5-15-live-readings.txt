@@ -1,0 +1,93 @@
+spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一行的字族 / 字号 / 基线
+采集时间：2026-10-10 21:40–22:16（本机 macOS arm64，`pnpm dev` 在跑，CDP 10222，`--url 5173`）
+被改对象：`packages/renderer/src/pdf-page-view.ts`（把字族/字号/基线从 pdf.js 读进行数据）、
+`packages/renderer/src/usePdfEdit.ts`（提交时把三个数写进覆盖区）、
+`packages/renderer/src/PdfPaperView.tsx`（画布那一腿按三个数画字）、
+`packages/pdf-edit/src/text-metrics.ts`（新：字体度量口径，两腿共用）、
+`packages/pdf-edit/src/overlay-writer.ts`（计划层沿用或回落）、`packages/pdf-edit/src/pdf-document.ts`（出件按字族嵌标准字体）、
+`packages/shared/src/bridge.ts`（`PdfOverlayInput` 的同形镜像，两个可选键）
+
+一、夹具（刻意做成**三族 × 三字号 × 每行都带降部**，否则"跟着那一行走"和"写死无衬线"读不出差别）
+  文件：tmp/35-15-mixed.pdf（1160 B，1 页 595×842pt，米黄底 #f4ead6，墨色 #1f2937）
+  三行的字族/字号/基线（PDF 坐标，y 向上）就是这张表，读数按同一份表对：
+    sans  Helvetica   13pt  baseline y=780  "Jane Doe  Senior Frontend Engineer"
+    serif Times-Roman 15pt  baseline y=746  "Typography debugging legacy stacks"
+    mono  Courier     12pt  baseline y=712  "University  Computer Science 2015-2019"
+  界面读数（`pdf-edit-paper-state`）：第 1 页真纸 · 可点行 3 条 · 画了 1 毫秒
+  夹具与探针脚本全在被忽略的 tmp/ 下，不进仓库（AGENTS.md §7.5）。
+
+二、行盒含不含降部（主证一：`tmp/35-15-inkbox.js`，只读探针——派发 pointermove 读悬停行盒，不落覆盖区）
+  位图 740×1047（`dpr` 读数 1.988，即 CSS 372×526 那一格）。以下全是**比例坐标**（原点左上、y 向下）：
+    sans  基线 0.07363 · 墨迹 0.06208–0.07641 · 行盒 0.06187–0.07731 · coversInk=true
+    serif 基线 0.11401 · 墨迹 0.10124–0.11748 · 行盒 0.10044–0.11826 · coversInk=true
+    mono  基线 0.15439 · 墨迹 0.14518–0.15759 · 行盒 0.14299–0.15724 · coversInk=true
+  三行的基线都落在自己的行盒内部（`baselineInsideBox` 三行全 true）——这一条是旧实现的反面：
+  旧行盒取 pdf.js 的**文本项盒**（只到 em 框），降部那一截（g/y/p）在盒外，所以旧覆盖区会露出字脚。
+  诚实口径：`coversInk` 的容差是 0.0005 比例（约 0.5 个位图像素）。serif 那一行是严格包住；
+  mono 那一行的墨末在 0.15759、行盒下沿在 0.15724，**墨比盒多出 0.00035 比例 ≈ 0.4 个位图像素**，
+  那是抗锯齿的那一圈，不是漏字脚；sans 那一行严格包住。
+
+三、点那一腿沿用的是被盖行的三个数（主证二：`tmp/35-15-commit.js` → `tmp/35-15-save.js` 出的产物）
+  操作：在 serif 那一行的**降部**（比例 y=0.1172，即上一节量到的墨末 0.11748 之内）点一下
+    → 就地改输入框预填 `Typography debugging legacy stacks`（读数 `prefilled` 逐字相同，说明点中的是 serif 那一行而不是别的）
+    → 改成 `Gilded typography, page 7` → 提交（`pdf-edit-commit-inline`）
+  覆盖区列表行读数：源第 1 页 · 起点 8.4%,10.0% · 尺寸 37.6%×1.8%
+  底色读数（`pdf-edit-backdrop-reading`）：本页覆盖 2 区 · 底色取自这一页 2 处（data-overlays=2 data-sampled=2 data-unsampled=0）
+  产物 `tmp/35-15-out.pdf`（1701 B）的内容流读数（`pdfContentText` 展开对象流后再读；见第七节的两条字节形状事实）：
+    被盖那一行：  /Times-Roman-9742682568 15 Tf … 1 0 0 1 50 746 Tm      <Typography debugging legacy stacks>
+    新写那一行：  /Times-Roman-7098480789 15 Tf … 1 0 0 1 50.00000000000001 746 Tm  <Gilded typography, page 7>
+  三条对上：**同一字族（Times-Roman）、同一字号（15）、同一基线（746pt）**。
+  x 上那个 `50.00000000000001` 是比例→pt 往返的浮点尾差（50/595 再乘回来），5e-14pt，画不出来的差。
+  两条如实的观察：
+    ① 资源字典里因此有**两条** `/BaseFont /Times-Roman`（源文档自己那条 + 新字这次 `embedFont` 生成的），
+       标准字体不嵌字库，多出来的是一条约百字节的资源项，不是文件虚胖；单测里"两个覆盖区同一字族只嵌一次"
+       管的是**新字之间**不重复嵌，与源文档那一条不合并（合并要改源页资源，属族二/族三的射程）。
+    ② 上面那两行字号相同、字族相同，但**字面宽度**不会逐字节相同（Times 的 advance width 由渲染器给），
+       这正是 plan §11 第五节"补不齐的五条"里的第 ② 条。
+
+四、拖框那一腿现在落得下了（plan §11.5 登记的那条**先前就存在**的缺陷，本片一并修掉）
+  同一探针里接着做：pointerdown 于比例 (0.20,0.55) → pointermove 至 (0.50,0.60) → pointerup。
+    拖拽中 `pdf-edit-rubber-box` 存在：rubberShown=true
+    松手前覆盖区列表 1 条 → 松手后 2 条：新增 `源第 1 页 · 起点 20.0%,55.0% · 尺寸 30.0%×5.0% · 只铺这一页的底色`
+  根因与修法：`onPointerDown` 的 `up` 闭包读的是 pointerdown 那次渲染的 `model.rubber` 快照，
+  于是"算不算拖"恒为 false、拖框那条提交分支从不执行（3.5-14 读数第六节记的就是它）。
+  现在按**起收点的位移**判（`DRAG_MIN_MANHATTAN = 0.004`，比例曼哈顿距离；1000px 宽的纸面上约 4px），
+  与渲染快照无关。
+  诚实口径：探针是页面内 `dispatchEvent` 派发的合成指针事件——它证明的是**逻辑层的分支跑得通**，
+  不等于"真实鼠标拖得动"；后者仍属要人在场的那一条（见第八节）。
+
+五、画布那一腿（同一份三个数，两腿同源）
+  `PdfPaperView.tsx` 的绘制取 `overlay.fontFamilyHint ?? 'sans-serif'` 组 `font`、`textBaseline='alphabetic'`、
+  y 取 `baselineRatio × canvas.height`；量不到基线才回落到"行盒内按字号居中"。
+  上面第三节的截图（`3.5-15-styled-replacement.png`）就是这条腿画出来的：serif 那一行被换成的新字是衬线体，
+  与左右两行（sans / mono）的字族差异在图上直接可读。
+  对照图：`3.5-15-original-page.png` = 同一张活体、把两个覆盖区撤掉之后的原页面（同一裁剪框 745×1052 px @2x）。
+  两张图 md5 各出现 1 次（`md5 -q | sort | uniq -c`）：
+    555906dc1588354801aeaef150417da5 / 90baf886cd4d9efc65a64bac8ddfc42d
+
+六、措辞核对（plan §7.6 反伪装）
+  `pdf-edit-cover-hint` 活体文本仍是：覆盖是垫一层这一页自己的底色再加新字：原文字仍在文件里，只是被盖住了
+  「原文字仍在文件里，只是被盖住了」一字未改。没有出现「删除 / 涂黑 / 不可恢复 / 与原文完全一致」。
+  本片顺带修掉一处**上一片漏网的旧措辞**（是 3.5-14 的账，被本片的活体读数抓出来）：
+  覆盖区列表在文字留空时显示「只铺白底」、拖框提示显示「文字留空即只铺白底」——
+  而自 3.5-14 起垫的是**这一页自己的底色**，"白"字已经不符事实。现改为「只铺这一页的底色」/
+  「文字留空即只铺这一页自己的底色」（en：`page colour only` / `… back it with this page's own colour`）。
+
+七、两条字节形状事实（写单测时踩到，登记以免下次再按 raw 字节断言）
+  ① `pdf-lib` 的 `save()` 默认把对象写进**压缩对象流**，`/BaseFont` 在 raw latin1 里读不到，
+     必须经 `pdfContentText` 这类展开 FlateDecode 的读法；
+  ② 标准字体的资源项键名是 `<字族名>-<对象号>`（实测 `Times-Roman-7098480789 15 Tf`），
+     所以断言"用了哪只字族"要看 `Tf` 前缀而不是整串键名。
+  来源：tmp/35-15-font-probe.log、tmp/35-15-artifact3.log（一次性探针，跑完即删，日志留在 tmp/）。
+
+八、本片**没有**收掉的三条（如实登记）
+  ① 「人眼看不出是覆盖」这一半仍是要用户在场的 V 判据：上面量到的是**基线/字族/行盒的客观数**，
+     不是"看起来像不像"。等用户在场看一眼才算 [x]，整条 3.5-15 记 [!]。
+  ② **中文那一腿不认字族**：`pdf-document.ts` 的 CJK 一律用随包的 Noto Sans SC，量到的 `fontFamilyHint`
+     只作用于纯拉丁 run（`isLatinOnly`）。原因是随包只有 Noto **Sans** SC，没有中文字族可换。
+     这是有意的欠项，不是漏写：界面上如果哪天要"中文也跟原字族"，得先补一整套中文衬线/等宽随包。
+  ③ **颜色真值还没拿到**：pdf.js 6.3 的 `TextStyle` 没有 `color` 成员（`types/src/display/api.d.ts` 只有
+     `ascent/descent/vertical/fontFamily` 四条），字色只能从 `getOperatorList()` 取——那是族二的射程。
+     本片沿用 3.5-14 的墨色估计（量不到就回落 `#111111` / 深底反白 `#f8fafc`）。
+  另：`packages/pdf-edit/package.json` 里 `pdfjs-dist` 仍是**声明了但零使用**（本片的度量代码抽成了
+  `text-metrics.ts`，纯函数、不需要 pdf.js）；归宿仍在族三，若停在族一则按 §2.4 删掉那条声明。

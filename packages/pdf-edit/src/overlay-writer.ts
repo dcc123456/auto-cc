@@ -12,6 +12,8 @@
  */
 import { normalizeHexColor } from './overlay-colors.js';
 import type { PdfPageMetric } from './pdf-document.js';
+import type { FontFamilyHint } from './text-metrics.js';
+import { GENERIC_FONT_FAMILIES } from './text-metrics.js';
 
 /** 覆盖区的矩形，比例坐标（0..1），原点左上、y 向下。 */
 export interface PdfOverlayRect {
@@ -37,6 +39,17 @@ export interface PdfOverlayInput {
    * 省略或形状不对即"没量到"，两条腿一起按墨色垫底（见 `overlay-colors.ts` 的那句不许猜白）。
    */
   readonly backdropHex?: string;
+  /**
+   * 这一行的字族（spec 3.5-15，三种通用字族之一）：渲染层从 pdf.js 的页级字体样式表量出来带过来。
+   * 省略或值不在那三种里即"没量到"，两条腿一起按无衬线画（导出侧就是 Helvetica）。
+   */
+  readonly fontFamilyHint?: FontFamilyHint;
+  /**
+   * 基线在页面上的视觉位置（比例，0..1，原点左上，spec 3.5-15）：新字要落在被盖住那一行的**同一条基线**上，
+   * 而不是矩形里竖向居中——居中就是"字浮在半空"的那只来源。
+   * 省略、非有限数、或落在本区矩形之外都当"没量到"，回落到 em 盒竖向居中（拖框那一腿本来就没有行可依）。
+   */
+  readonly baselineRatio?: number;
 }
 
 /** 换算完成的覆盖区：矩形在 PDF 坐标里（原点左下，`y` 是底边），文字基线一并算好。 */
@@ -51,10 +64,15 @@ export interface PlannedOverlay {
   readonly text?: string;
   /** 字号（pt）：配置默认值或本区自带值，换算后总是确定的。 */
   readonly sizePt: number;
-  /** 文字基线的 `y`（pt，PDF 坐标）：只在有 `text` 时给出，绘制侧不再自己算符号。 */
+  /**
+   * 文字基线的 `y`（pt，PDF 坐标）：只在有 `text` 时给出，绘制侧不再自己算符号。
+   * 优先用渲染层量来的 `baselineRatio`（同一行同一条基线，spec 3.5-15），量不到才按 em 盒竖向居中。
+   */
   readonly textBaselinePt?: number;
   /** 量到的纸底颜色（已过 `normalizeHexColor`）；没量到时这个键根本不出现。 */
   readonly backdropHex?: string;
+  /** 量到的字族（已过 `isFontFamilyHint`）；没量到时这个键根本不出现，绘制侧按无衬线走。 */
+  readonly fontFamilyHint?: FontFamilyHint;
 }
 
 /**
@@ -182,18 +200,57 @@ export function planOverlays(
     }
     const pageRect = toPageRect(rect, metric);
     const backdropHex = normalizeHexColor(input.backdropHex);
+    const fontFamilyHint = isFontFamilyHint(input.fontFamilyHint) ? input.fontFamilyHint : undefined;
+    const measuredBaselinePt = measuredBaselinePtOf(input.baselineRatio, rect, metric);
     plans.push({
       id: input.id,
       pageNumber: input.pageNumber,
       ...pageRect,
       sizePt,
       ...(backdropHex === undefined ? {} : { backdropHex }),
+      ...(fontFamilyHint === undefined ? {} : { fontFamilyHint }),
       ...(input.text === undefined
         ? {}
-        : { text: input.text, textBaselinePt: baselinePt(pageRect.yBottomPt, pageRect.heightPt, sizePt) }),
+        : {
+            text: input.text,
+            // 量到了基线就用它（新字与被盖住那一行落在同一条线上，spec 3.5-15）；
+            // 量不到才退回 em 盒竖向居中——拖出来的框本来就没有"一行"可依。
+            textBaselinePt: measuredBaselinePt ?? baselinePt(pageRect.yBottomPt, pageRect.heightPt, sizePt),
+          }),
     });
   }
   return { ok: true, overlays: plans };
+}
+
+/**
+ * 判一个跨进程递来的字族值是不是那三种通用字族之一。
+ *
+ * 与 `normalizeHexColor` 同一个取向：**形状不合即"没量到"**，而不是照单画下去。
+ * 这里不新增拒绝种类——字族量不到不是用户的错，画成无衬线是可接受的回落（§2.6 不在不会发生的事上加关卡）。
+ * @param value 渲染层递来的 `unknown` 级读数
+ * @returns 是那三种之一为 true
+ */
+export function isFontFamilyHint(value: unknown): value is FontFamilyHint {
+  return (GENERIC_FONT_FAMILIES as readonly unknown[]).includes(value);
+}
+
+/**
+ * 把量来的基线比例换成 PDF 坐标的 `y`（pt，原点左下）。
+ * @param ratio 基线的视觉位置（0..1，原点左上）
+ * @param rect 本区的比例矩形：基线必须落在这块垫底矩形**之内**，否则新字会画到补丁外面去
+ * @param metric 那一页的宽高读数
+ * @returns PDF 坐标的基线 `y`；读数不可信（非有限数、出 0..1、出本区矩形）时回 undefined，由调用方走居中回落
+ */
+function measuredBaselinePtOf(
+  ratio: number | undefined,
+  rect: PdfOverlayRect,
+  metric: PdfPageMetric,
+): number | undefined {
+  if (ratio === undefined || !Number.isFinite(ratio)) return undefined;
+  const boxTop = rect.yRatio;
+  const boxBottom = rect.yRatio + rect.heightRatio;
+  if (ratio < boxTop || ratio > boxBottom) return undefined;
+  return (1 - ratio) * metric.heightPt;
 }
 
 /**
