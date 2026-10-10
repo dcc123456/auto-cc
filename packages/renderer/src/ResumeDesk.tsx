@@ -31,6 +31,7 @@ import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
 import { PdfEditPanel } from './PdfEditPanel';
+import { PdfPaperView } from './PdfPaperView';
 import { ResumeEditor } from './ResumeEditor';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
@@ -39,6 +40,7 @@ import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { Drawer, useRevealLabel } from './ui/overlays';
 import { SplitHandle, useSplitWidth } from './ui/split';
 import { useBridgeAction } from './useBridgeAction';
+import { usePdfEdit } from './usePdfEdit';
 import { useViewTrail } from './viewTrail';
 
 /** 故意不存在的文档 id：供「注入失败导出」那颗键触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
@@ -514,6 +516,12 @@ export function ResumeDesk() {
     defaultPercent: PAPER_WIDTH_DEFAULT,
   });
 
+  /**
+   * PDF 覆盖这一轨的唯一模型（spec 3.5-12）：控件长在左列、真纸画在右栏那一格，两边吃同一份 state。
+   * 之所以把它挂在 desk 而不是面板里：一拆两格就有两个消费者，state 留在任何一边都会让另一份成第二份事实（§2.5）。
+   */
+  const pdfEdit = usePdfEdit({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
+
   return (
     // 查询容器必须挂在**祖先**上：元素自己的 `container-type` 不作为自己的查询容器（CSS Containment 把
     // 查询对象限定为最近的祖先容器）。这一条是活体量出来的：容器挂在自己身上时首读 `flexDirection`
@@ -855,6 +863,10 @@ export function ResumeDesk() {
             <ResumeEditor docId={docId} onClose={() => requestPaperMode('preview')} onPreview={acceptDraft} />
           )}
 
+          {/* PDF 覆盖这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
+              与排版编辑器同一条形状：只有当前那一档在 DOM 里。 */}
+          {paperMode === 'pdf' && <PdfEditPanel model={pdfEdit} />}
+
           {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
             spec 3.3-10 / 3.3-11 的取证通道因此不断；变的只是它们住在哪一格。 */}
           <DeskButton
@@ -900,7 +912,7 @@ export function ResumeDesk() {
               paperHtml={paperHtml}
               paperStatus={paperStatus}
               paperUpdatedAt={paperUpdatedAt}
-              pdfView={<PdfEditPanel onClose={() => requestPaperMode('preview')} />}
+              pdfView={<PdfPaperView model={pdfEdit} />}
               docLabel={docLabel}
               templateName={templateName}
               locale={locale}

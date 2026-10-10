@@ -367,13 +367,14 @@ export const RENDERER_ALLOWLIST = [
   // 与上面 4.1 的导入腿同一口径），回执只有页数与每页宽高——整页原文不过进程边界。
   // `pdf.*` 一律**不登记为 agent 工具**（plan §7.4 末行）：编辑的是用户手里的文件，判据里没有「让模型改 PDF」这一条。
   'pdf.io.open',
+  // 3.5 编辑轨的字节腿（spec 3.5-12，2026-10-10 的真纸面形态）：绝对路径 → 整份文件的字节。
+  // 这是"渲染层自己把页面画成真实图像"唯一可能的取数形状——sandbox 下的渲染层读不了文件（§8.1），
+  // 而 pdf.js 画位图与取文本层都必须拿到字节。上限沿用 `pdf.io` 那一份 `maxBytes`，不另立第二档（§2.5）；
+  // 本机实测一次往返 1MB≈2ms、5MB≈4ms，所以不分块、不做缓存（plan §10.4）。
+  'pdf.io.bytes',
   // 3.5 编辑轨的另存腿（spec 3.5-02 / 3.5-09，plan §7.4）：源路径 + 覆盖区 + 产物路径 → 新文件。
-  // 边界上过的只有**比例坐标**与回执三个字段——整页原文与 PDF 字节都不过界（同上面 `pdf.io.open` 的取向）。
+  // 边界上过的只有**比例坐标**与回执三个字段——整页原文不过界（同上面 `pdf.io.open` 的取向）。
   'pdf.export.saveAs',
-  // 3.5 编辑轨的文本块线框腿（spec 3.5-01，plan §7.4 的 `pdf.layout`）：绝对路径 + 页号 → 这一页的矩形列表。
-  // **回传里没有任何原文**——`textItemRect` 只把 `transform/width/height` 换成视觉比例矩形，
-  // `str` 在主进程侧用完判空就丢掉（plan §7.15 记了这条相对 §7.4 原表的收窄）。
-  'pdf.layout.textItems',
   // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
   // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
@@ -1327,26 +1328,6 @@ export interface PdfSaveAsReceiptView {
   outPath: string;
   sha256: string;
   pageCount: number;
-}
-
-/**
- * 一个文本块的线框（镜像 `pdf-edit` 的 `PdfTextBox`，spec 3.5-01）：`index` 是主进程侧那份文本项的次序编号
- * （界面用它编号并做「第几块」的读数，跨页不连续——它只是这一页内的位置标识）。
- * `rect` 与覆盖区共用 `PdfOverlayRectView`，所以线框框住的地方直接就能变成人框的区（plan §7.5 第 2 行）。
- */
-export interface PdfTextBoxView {
-  index: number;
-  rect: PdfOverlayRectView;
-}
-
-/**
- * 一页文本块矩形（镜像 `pdf-edit` 的 `PdfTextItemsReading`）：**没有任何原文**，只有矩形与计数。
- * `pageCount` 回带是为了让界面在页号越界被拒之前先把「共几页」说对（同 `PdfOpenReceiptView` 的读数口径）。
- */
-export interface PdfTextItemsView {
-  pageNumber: number;
-  pageCount: number;
-  boxes: PdfTextBoxView[];
 }
 
 /** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
@@ -2547,6 +2528,14 @@ export interface BridgeSignatures {
    */
   'pdf.io.open': { args: [filePath: string]; returns: PdfOpenReceiptView };
   /**
+   * 取一份 PDF 的字节（spec 3.5-12 的真纸面半边）：入参照旧是**绝对路径**，回传是整份文件的字节。
+   * 这条口开的是"字节过一次界"而不是"原文过一次界"——渲染层拿到字节后自己用 pdf.js 画页面、自己读文本层，
+   * 一句原文都不会落进主进程的日志或库里（画面上看到的仍是用户自己那份文件）。
+   * 失败与 `pdf.io.open` 同一支码（`PDF_EDIT_READ_FAILED`，`details.code` 分 `empty` / `too-large` / 读不出），
+   * 因为界面上的处置完全相同：换一份文件或把上限改小。
+   */
+  'pdf.io.bytes': { args: [filePath: string]; returns: Uint8Array };
+  /**
    * 另存一份带覆盖区与页序的 PDF（spec 3.5-02 / 3.5-07 / 3.5-09，plan §7.4 的 `pdf.export`）：
    * 源文件只读，覆盖区以比例坐标进、以内容流里的新笔画出，产物写到 `outPath`。
    * `pageOrder` 是产物的逐页来源页号（1 起）：重复一项即增一页（副本）、缺一项即删一页、换序即重排，
@@ -2561,14 +2550,6 @@ export interface BridgeSignatures {
     args: [filePath: string, overlays: PdfOverlayInputView[], pageOrder: number[], outPath: string];
     returns: PdfSaveAsReceiptView;
   };
-  /**
-   * 量一份 PDF 某一页上的文本块矩形（spec 3.5-01 的线框半边，plan §7.4 的 `pdf.layout`）：
-   * 入参照旧是**绝对路径** + 页号（1 起），回传的每一项**只有比例矩形和一个次序编号**——
-   * 文本内容一个字都不过进程边界（同上面 `pdf.io.open` 的取向，界面画线框不需要知道写了什么）。
-   * 失败以 `AppErrorPayload`（`PDF_EDIT_READ_FAILED`）上浮，`details.code` 说清是哪一种
-   * （`empty` / `encrypted` / `invalid-pdf` / `page-out-of-range` / `layout-failed`）。
-   */
-  'pdf.layout.textItems': { args: [filePath: string, pageNumber: number]; returns: PdfTextItemsView };
   /**
    * 导入一份简历文件（spec 4.1-01 / 06 / 07）：主进程按绝对路径读字节、判格式、抽文本、幂等入库。
    * 失败以 `AppErrorPayload`（`RESUME_IMPORT_FAILED`）上浮，界面给一句中文；疑似扫描件不算失败，

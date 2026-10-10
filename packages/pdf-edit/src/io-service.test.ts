@@ -1,7 +1,7 @@
 /**
- * `pdf.io` 服务单元测试（spec 3.4-03 的打开腿 + plan §7.4 的第一条口 + §7.10 的确定态）。
+ * `pdf.io` 服务单元测试（spec 3.4-03 的打开腿 + 3.5-12 的字节腿 + plan §7.4 的第一条口 + §7.10 的确定态）。
  *
- * 判据面只有两件事：**读得到度量**与**读不到时给一个码**。文件一律写在系统临时目录里
+ * 判据面只有三件事：**读得到度量**、**搬得出字节**与**读不到时给一个码**。文件一律写在系统临时目录里
  * （AGENTS.md §7.5：测试产物不进仓库），路径是绝对路径——渲染层给的就是绝对路径，
  * 相对路径必须被拒（主进程的工作目录不是用户预期的那一个）。
  */
@@ -114,6 +114,55 @@ describe('plan §7.10 的确定态：读不出一律 PDF_EDIT_READ_FAILED', () =
       if (item.code !== undefined) expect(error.details).toMatchObject({ code: item.code });
     });
   }
+});
+
+describe('3.5-12 字节腿：pdf.io.bytes 把整份文件交给渲染层', () => {
+  it('回的是逐字相同的字节，且与 `open` 共用同一份上限（不另立第二档尺度）', async () => {
+    const dir = tempDir();
+    const bytes = minimalMultiPagePdf(3);
+    const filePath = writeFile(dir, 'three.pdf', bytes);
+
+    // `bytes` 是同步的读盘（网关那边 `await` 一个非 Promise 同样成立），所以这里不套 `await`。
+    const value = (await boot()).bytes(filePath);
+    expect(value).toBeInstanceOf(Uint8Array);
+    expect(sha256Hex(value)).toBe(sha256Hex(bytes));
+    expect(value.byteLength).toBe(bytes.byteLength);
+  });
+
+  it('字节腿只读不解析：结构损坏的文件照样把字节交出去，判"是不是 PDF"是渲染层 pdf.js 的事', async () => {
+    const dir = tempDir();
+    const broken = new Uint8Array(Buffer.from('%PDF-1.4\n这不是合法的 PDF 结构\n'));
+    const filePath = writeFile(dir, 'broken.pdf', broken);
+
+    // 同一份字节经 `open` 是被拒的（`invalid-pdf`）——两条口的分工就在这：一条量得出度量，一条只搬字节。
+    const io = await boot();
+    await expect(io.open(filePath)).rejects.toBeInstanceOf(AppError);
+    const value = io.bytes(filePath);
+    expect(sha256Hex(value)).toBe(sha256Hex(broken));
+  });
+
+  it('读不到字节那四条腿与 `open` 同码同话术：界面上的处置完全相同，就不另开支新码', async () => {
+    const cases: readonly { name: string; maxBytes?: number; prepare: (dir: string) => string }[] = [
+      { name: '相对路径', prepare: () => 'relative/resume.pdf' },
+      { name: '文件不存在', prepare: (dir) => join(dir, 'missing.pdf') },
+      { name: '是个目录', prepare: (dir) => dir },
+      { name: '超过字节上限', maxBytes: 1024, prepare: (dir) => writeFile(dir, 'big.pdf', new Uint8Array(4096)) },
+    ];
+    for (const item of cases) {
+      const dir = tempDir();
+      const io = await boot(item.maxBytes ?? 5_242_880);
+      // 同步腿就同步抛（网关那一侧的 try 同样接得住），所以这里不用 `.catch` 而是就地捕获。
+      let failure: unknown;
+      try {
+        io.bytes(item.prepare(dir));
+      } catch (caught) {
+        failure = caught;
+      }
+      expect(failure, item.name).toBeInstanceOf(AppError);
+      expect((failure as AppError).code, item.name).toBe('PDF_EDIT_READ_FAILED');
+      expect((failure as AppError).message).toMatch(/[\u4e00-\u9fa5]/);
+    }
+  });
 });
 
 afterAll(async () => {

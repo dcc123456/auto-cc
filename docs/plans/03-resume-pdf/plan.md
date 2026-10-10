@@ -1099,3 +1099,209 @@ CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内
 `harness drag` 只接受选择器，所以在 canvas 中心 + 偏移处挂一支 `position:fixed; pointer-events:none` 的记号，
 让 CDP 的命中测试穿过它落到 canvas 上——记号用完必须摘掉；② 导出 toast 约 8s 自收，
 `harness click` 单独去点`在访达中显示`会扑空，必须把"导出 → 等 2s → 点 reveal"串成一条命令。
+
+## 10. 真纸面渲染的选型与证据（2026-10-10，片 58 步骤 0 的 spike）
+
+计划书里把这一节写成"§7.16"，但 §7.16 与 §7.17、§7.18 已被 3.5-e / 3.5-f / 随包字体三条落地记录占号（§4.5：号一经分配不复用），
+所以落成本文件末端的 **§10**。spike 全在 `.research-repos/p58-pdf-spike/`（§6.4，不进仓库），
+读数是 `out/spike.json`（整轮）与 `out/spike2.json`（补枪两条）。
+
+**裁定㉕（2026-10-10，用户的两次原话：报障"这个 ui 交互完全不符合用户交互逻辑…要让这些术语都让用户易懂，并且简历生成的流程要简单"
+
+- 驳回"布局应该是左右布局…右侧边栏宽度可以拖拽调整"）四问四答**：① PDF 编辑**一步到位做真纸面**（渲染层把页面画成真实图像，在其上就地改），
+  **定向作废 2026-10-06 的裁定⑮**（那条挡的是"CSP 要为 worker 开口子"，本轮实测不需要开口子，见 §10.2）；
+  ② 术语与流程 = 改文案 + 收成三步（`data-action` / `data-testid` / `DeskSection id` 一字不改，取证通道不断）；
+  ③ 待确认清单降级成一句只读提醒（不加确认口、不删显示）；④ 布局 = 常驻左右分栏 + 右栏宽度可拖并持久化 + 左动右实时。
+  ②③④ 落在 spec 06 的 6.4-12～17，① 落在本文件的 3.5-12 / 3.5-13。
+
+### 10.1 spike 的形状（为什么这套读数算装机版而不算开发态）
+
+- CSP 取 `scripts/build.ts:25-35` 的 `RENDERER_CSP` **原文**，逐字写进 `page-prod.html` 的 `<meta>`；
+  另一份 `page-wasm.html` 只在 `script-src` 上加 `'wasm-unsafe-eval'`，用来对照"加这一项到底换来什么"。
+- 窗口参数取 `packages/shell/src/index.ts:355-367` 原文：`sandbox:true` + `contextIsolation:true` + `nodeIntegration:false` + preload 过一条口。
+- 页面用 `loadFile` 起 **`file://`**（装机版就是这样，`packages/shell/src/index.ts:403`），开发态的 5173 一句都没跑。
+- 字节走一条与桥接口同形的口：`{ok:true,value:Uint8Array}` / `{ok:false,error}`（`packages/ipc/src/gateway.ts` 的信封）。
+- 入口是 CJS（§9 的 2.4），`app.whenReady().then(() => import('./spike.mjs'))`。
+- 本机两条现场坑，写法已收敛进脚本：① `webRequest` 观察器在同一 session 上**重复注册**会打断上一窗口的在飞请求（得到过一条假的 `ERR_FAILED(-2)`），
+  所以只注册一次、按下标切片；② 同目录反复起停多只隐藏窗口会撞 Mach rendezvous 抖动、把主进程整个带走，所以**全程复用一只窗口靠导航换页**。
+
+### 10.2 S1：worker 在打包态站不站得住 —— **站得住，但 pdf.js 自己不知道**
+
+| 读数                                                         | 结果                                                                                                                                         |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `location.origin`（Electron 的 file:// 页）                  | `file://`（**不是 `null`**）→ pdf.js 的 `_isSameOrigin`（`build/pdf.mjs:16238-16251`）判同源                                                 |
+| 同源 file:// 的 module worker（自有 ping 脚本）              | `outcome:'message' / data:'pong'`，2–4ms                                                                                                     |
+| `blob:` worker（vite `?worker&inline` 那条）                 | 被挡：console 原文 `Creating a worker from 'blob:file:///…' violates … "script-src 'self'". Note that 'worker-src' was not explicitly set`   |
+| pdf.js 默认走位                                              | 仍然 `Warning: Setting up fake worker.` —— 它的能力探测（`createTestWorker`）用的正是 blob，于是被 CSP 挡下后**永久判定"本环境没有 worker"** |
+| 主线程 `import('…pdf.worker.mjs')`（假工作线程那一步依赖的） | 28ms，`exportKeys:'WorkerMessageHandler'` → 假线程这条路本身也**能跑通**                                                                     |
+
+修法只有一条，且**CSP 一字未改**：自己造同源 worker，把 port 交给 pdf.js（`GlobalWorkerOptions.workerPort`，`build/pdf.mjs:15481-15487` 那条 `if (!worker)` 分支就吃这一口）。
+两条决定性读数（`out/spike2.json`）：
+
+1. **先交 port、再把 `workerSrc` 换成不存在的地址**：渲染照样成功，且整页 console 里**一句 `Setting up fake worker` 都没有**——
+   假工作线程必须 `import(workerSrc)`，这条路走不通还出图，说明用的确实是 port 上那只 worker。
+2. **主线程忙等 300ms 的同时渲 JPX 页**：墙钟 361ms（自有导出那份 315ms）。假线程那一腿同一份 JPX 的解码是 687ms，
+   若真线程不存在，墙钟应≈ 300+687≈990ms。→ 解码确实发生在另一条线程上。
+
+### 10.3 S2：`'wasm-unsafe-eval'` 要不要加 —— **不加**
+
+| 读数                                                            | 结果                                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 主线程 `WebAssembly.compile/instantiate`（`script-src 'self'`） | `CompileError: … violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script`                   |
+| 同一份 CSP + port 路线下 pdf.js 的 openjpeg 腿                  | 请求了 `pdfjs-dist/wasm/openjpeg.wasm`、**没有 CompileError**、JPX 页 ~60ms → worker 那一格里 wasm 可用                                               |
+| 同一份 CSP + 假线程（pdf.js 自己退回主线程）                    | `Warning: #instantiateWasm: CompileError…` → 落 `openjpeg_nowasm_fallback.js`，JPX 页 **687ms/页**；连渲两次 687/686 → **不是冷启一次性，是常态价**   |
+| `script-src 'self' 'wasm-unsafe-eval'` 那一页                   | 主线程 `s2_wasm_instantiate` 报的已是 `TypeError: Imports argument must be present…`（CSP 那关过了，卡在链接参数）→ 证明这一项确实能放开主线程的 wasm |
+| cmaps / 标准字体 / wasm 三类资源在 file:// 下                   | `fetch` 与 `XHR` **都拿得到**：`UniGB-UCS2-H.bcmap` 43366、`FoxitSerif.pfb` 19469、`qcms_bg.wasm` 96589，全 200                                       |
+| `jbig2_nowasm_fallback.js` 能不能被 `import()`                  | 能（`exportKeys:'default'`）→ 就算某条腿彻底没有 wasm，也还有 JS 退路                                                                                 |
+
+结论：**走 worker 路线就一行 CSP都不用动**（`'wasm-unsafe-eval'` 只在"必须留在主线程"的世界里才需要，而 10.2 已证不必）。
+作废一条：我另写了一支"直接在 worker 里 fetch wasm 再 compile"的探针（`worker-wasm.mjs`），它报 `TypeError: Failed to fetch`，
+原因是相对路径写错（`wasm/…` 相对 worker 自己所在的 spike 根，指向了不存在的目录），**这一条作废、不作 S2 的凭据**；
+S2 的凭据是 pdf.js 自己那一腿（`openjpeg.wasm` 取到且无 CompileError）。
+"掩膜（SMask）"这一问没单独测：手上有 SMask 的样例做不出来，而 pdf.js 的 SMask 走的是与 DCT 同一条图像解码 + canvas 路、不经 wasm，
+所以不构成额外授权需求——**这条是结构推断，落码时要用一张带 SMask 的真图复核再算数**（§6.2）。
+
+### 10.4 S3：字节过界的形状 —— **不分块、不缓存**
+
+`{ok,value:Uint8Array}` 一条口实测：主进程 `readFile` 对 23KB/33KB/85KB/131KB/982KB 全是 **0–1ms**，
+到渲染层整趟 **1–2ms**；5MB 合成载荷 **4ms**。计划里"超过 300ms 就按 `sourceHash` 在同 session 内缓存"那条分支**作废**（差两个数量级）。
+`RENDERER_ALLOWLIST` 仍只扩一行 `pdf.io.bytes`，网关不动。
+
+### 10.5 真页与文本层的形状（直接决定 3.5-12 的交互判据）
+
+| 夹具                                         | 结构                                                                    | `textItems` | 中文                          | 首块盒           | 渲染                                         |
+| -------------------------------------------- | ----------------------------------------------------------------------- | ----------- | ----------------------------- | ---------------- | -------------------------------------------- |
+| `tmp/p3-leg/pdf/modern-long.pdf`（自有导出） | 5 页，`NotoSansSC` TTF 内嵌                                             | 132         | 是（`张三 / 邮箱: … / 电话`） | x45 y763 w42 h21 | 29ms（假线程）/ 11ms                         |
+| `fixtures/cjk.pdf`（CUPS 生成）              | Type0 + Identity-H + **CFF `CIDFontType0C`** + ToUnicode + **ICCBased** | 51          | 是                            | x17 y763 w24 h12 | 12ms                                         |
+| `fixtures/photo.pdf`                         | DCTDecode + ICCBased                                                    | **0**       | —                             | —                | 9ms                                          |
+| `fixtures/jpx.pdf`                           | **JPXDecode**                                                           | 0           | —                             | —                | 60ms（worker+wasm）/ 687ms（主线程 JS 回落） |
+| `fixtures/scan.pdf`                          | 1MB DCTDecode                                                           | 0           | —                             | —                | 64ms                                         |
+
+三条由此定的界面口径（都是读出来的，不是拍的）：
+
+1. **文本层给的是片段，不是行**：`求职意向：前端` / `⼯` / `程师` 是三个 item（同一行的 y 只差 1 像素级），
+   所以"可点行盒"必须按 y 容差聚合，一个 item 一行的画法会把一行切成三段。
+2. **预填的 `str` 不等于字形**：上面那个"工"落成了 `U+2F11`（康熙部首），因为 pdf.js 走的是 ToUnicode 而非视觉还原。
+   就地改的输入框照旧预填它（这是用户能核对的最小真相），但界面上**不许**说"这是原文的精确副本"，
+   提交以用户在框里看到的为准（这条进 3.5-12 的 V 判据）。
+3. **图片型页面 `textItems` 恒为 0**：三张含图的夹具全是 0，与 `PdfEditPanel` 现在的扫描页回落口径对得上，不许画假的可点行列表。
+4. 顺一条 API 事实：6.3.289 的 `PDFDocumentProxy` **没有 `destroy()`**，清理口是 `cleanup()`（`hasCleanup:true / hasDestroy:false`）——
+   写销毁时照 `cleanup` 走（§6.2：文档转述不如读 `.d.ts`/跑一遍）。
+
+### 10.6 回退门（本轮不启用，留在文档里）
+
+隐藏 `BrowserWindow` + 内建 PDFium + `webContents.capturePage()` 实测可用：`show:false` 的窗口里就拍得出真帧
+（PNG 103,672 字节、`size 2000×1544`、`inkedRatio 0.353`、`navigator.pdfViewerEnabled:true`、`pluginCount:5`）。
+一条使用注意：带 `#page=1&zoom=1.5&navpanes=0` 时 `did-finish-load` **不发**（这一腿读到 `settled:'timeout'`），
+回退路线要换别的路标（`did-frame-finish-load` 或轮询 `capturePage` 的字节变化），不能照搬 `loadFile` 的等待姿势。
+**S1/S2 两条都过 → 这条回退门不启用**；它存在的全部意义是"万一 pdf.js 那条 port 路在装机版炸了"，界面腿与写出腿的形状不受它影响。
+
+### 10.7 反向验证（§6.5：裁定⑮ 作废之后没有造成能力缺口）
+
+- **"覆盖不涂黑"的语义**原样：写出腿仍是 `createPdfEditSession.addOverlay`（`edit-session.ts:121`）+ `pdf.export.saveAs`，
+  `PdfEditPanel.tsx:130,623-626` 那两条反伪装提示一字不改；位图路线换的只是**看得见什么**，不是**改掉什么**。
+- **3.5-09 源文件只读**不受影响：渲染层拿到的是字节副本，写出口仍然只有 `saveAs`。
+- **3.5-f 中文叠加与随包字体**（§7.17 / §7.18）在**写出腿**，与本轮**读入渲染腿**无关；
+  且 spike 里我们的产物 `modern-long.pdf` 被 pdf.js 正常读出 132 条文本项与中文串，两侧对得上。
+- **CJK 抽文本资源**（cmaps / 标准字体）本来就随包（`scripts/vendor-runtime-deps.ts` 的 `PRUNED_PACKAGE_DIRS` 只裁 `web/` 与 `types/`），
+  本轮实测它们在 file:// 下 fetch 得到 → 裁定⑮ 作废后资源面没有新缺口。
+
+### 10.8 落码时必须兑现的一条未决项（不阻塞，但必须验）
+
+worker 与三类资源在**打包产物里的可达路径**还没走过真实 staging：本轮是把 `pdfjs-dist` 放在页面同级目录测的。
+落码定形为两条，且各配一条装机版读数：
+
+- worker：`import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'` → vite 把它产出成渲染层自己的 asset（`build/app/renderer/assets/*.js`），
+  与 `index.html` 同源同目录树，`new Worker(workerUrl, { type:'module' })` 在 dev 与装机版都成立；
+- cmaps / 标准字体 / wasm：vite 不会搬，必须由构建步骤把它们复制进 `build/app/renderer/pdfjs/`，
+  开发态走 `publicDir`（否则 5173 上这条路径 404，而 dev 无 CSP、**dev 过不算过**）。
+  这一条要在 3.5-12 收口时用装机产物（不是 dev）取一次"资源确实被请求到"的读数。
+
+### 10.9 落码时兑现的两条更正与那条装机读数（2026-10-10，片 58 落码当天）
+
+**更正①（形状）**：worker **不走** `?url`。上面那条写法会让 vite 把它改名成 `assets/pdf.worker-<hash>.js`，
+于是它和 `cmaps/`、`standard_fonts/`、`wasm/` 不再是兄弟，pdf.js 那几个 URL 参数就得各算各的——两条路径规则迟早漂（§2.5）。
+落码改成一棵固定目录树：`<渲染层根>/pdfjs/{build,cmaps,standard_fonts,wasm}`，运行期一律
+`new URL('pdfjs/…', document.baseURI)`。`document.baseURI` 在开发态是 `http://127.0.0.1:5173/`、
+在装机版是 `file://…/renderer/index.html`，同一个相对前缀在两种运行态各自落到正确位置，一条规则。
+搬运由 `packages/renderer/vite-pdfjs-assets.ts` 那支插件负责：开发态用中间件直接从包目录读（允许清单靠列目录得到，
+不接受任意路径拼接，所以 `..` 带不出去），构建态在 `closeBundle` 里搬进 `dist/pdfjs/`，再由既有的
+`cpSync(dist → appDir/renderer)` 一起进 staging——不新增构建步骤，也不往仓库里塞 3.5MB 二进制。
+裁掉的目录：`web/`（那是 pdf.js 自带的查看器 UI，本切片只要引擎）、`legacy/`（给无 module worker 的浏览器）、
+`image_decoders/` 与 `iccs/`（grep `pdf.worker.min.mjs` 里没有指向这两处的路径串，wasm 类文件名全部按 `wasmUrl` 拼）。
+
+**更正②（asar 这一层之前没问过）**：渲染层整页住在 `app.asar` 里，上面那棵树也在 asar 里面，
+所以"同源 file:// worker"这条腿必须在 **asar 内**再证一次，普通目录的读数不算数。
+补跑的 spike 在 `.research-repos/p58-asar-probe/`（§6.4，不进仓库），读数 `asar-pdf-out.json`：
+把 `index.html` + `pdfjs/{build,cmaps,standard_fonts,wasm}` + 三份夹具按产品布局装进一份 `app.asar`，
+窗口参数取 `packages/shell/src/index.ts:355-367`、CSP 取 `scripts/build.ts:24-35` 原文，页面里做完整一条腿：
+
+| 夹具                | 装载 | 画页     | 文本项 | 中文样本                            | 这一条在问什么                                                                     |
+| ------------------- | ---- | -------- | ------ | ----------------------------------- | ---------------------------------------------------------------------------------- |
+| 自有导出（5 页）    | 17ms | 23ms     | 132    | `张三 · 邮箱: zhangsan@example.com` | 我们自己的产物读得回来                                                             |
+| CUPS CJK（CID CFF） | 0ms  | 17ms     | 51     | `张伟 · 求职意向：前端 · ⼯`        | `cmaps/` 从 asar 里取到了                                                          |
+| JPXDecode           | 0ms  | **56ms** | 0      | —                                   | worker 里的 `openjpeg.wasm` 从 asar 取到并编好了（对照 §10.5 的 687ms 主线程回落） |
+
+三条决定性读数：`workerCreated:true`、整轮 console 里 **`fakeWorkerWarning` 为空数组**（即 pdf.js 用的确实是 port 上那只
+asar 内的 worker，不是假工作线程）、`hasCleanup:true`（销毁口按 `cleanup()` 走，§10.5 第 4 条）。
+`cspViolations` 里只有 `frame-ancestors` 那句"经 meta 下发时被忽略"的常规提示，**没有一条 Refused**：
+所以 §10.2 的结论在 asar 这一层同样成立，且 `asarUnpack` 不必为渲染层加任何一行。
+
+顺一条探针自身的读法陷阱（差点把它当成产品结论）：`performance.getEntriesByType('resource')` 在 `file://` 页里**恒为空数组**——
+连真实产物 `dist/mac-arm64` 的那份 asar 页面（React 已经挂上，`#root` 有子节点）也回空。
+所以"资源条目为 0"**不是**"脚本没跑"的证据，本项目差点据此判死整条真纸面路线；
+判"跑没跑"要看页面自己的读数（挂载点、`window.__probe`、渲染耗时），不看 resource timing。
+
+### 10.10 片 58 落码与活体收口（2026-10-10）：一份事实、两格消费者，以及那处只有活体能抓到的重绘竞态
+
+**形状最终落成了三块**（与 §10.5 那条"一次装载同时供位图与文本层"一致，没有第二份画纸）：
+
+| 落点                             | 只负责的事                                                                                                                                       |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `usePdfEdit.ts`                  | 这一轨**唯一**的事实：路径、打开回执、draft、页号、覆盖区清单、橡皮筋、就地改的草稿、`paperState`/`paperPage`。desk 持有它，两边只转述（§2.5）   |
+| `PdfEditPanel.tsx`（左列）       | 控件与清单。画布的活一个字都不碰——旧形状里"控件与画布同在一个组件"是这次拆分的直接原因                                                           |
+| `PdfPaperView.tsx`（右栏那一格） | 真纸面：位图 + 行盒命中 + 三只框（悬停 / 橡皮筋 / 就地改）的几何                                                                                 |
+| `pdf-page-view.ts`               | pdf.js 的那一条腿：`loadPdfPaper(bytes)` → 逐页 `{ paint(canvas, cssWidth), viewport, lines }`，**一只文档一只 worker**、销毁走 `task.destroy()` |
+
+三条落码期定下来的口径，写在这里免得下次重新推：
+
+- **退档即回收**。`usePdfEdit({active})` 在 `active` 转 false 时把 worker、draft、打开回执、`paperState` 一起清掉
+  （`usePdfEdit.ts:222-238`）。所以"预览 → PDF → 再回 PDF"之后纸面是 `idle` 而不是上一份，人重新按一次「打开」。
+  这不是缺陷而是选择：内存里留一份上一份的 worker 冒充"还能接着改"，与裁定⑨ 的"只拦不存"是同一种不诚实。
+- **重绘按阈值挑，不按帧挑**。拖右栏把手时每帧都在改画布宽度，`ResizeObserver` 只在相对变化超过 `REPAINT_WIDTH_DELTA`
+  时才重画一次（`PdfPaperView.tsx:176-192`）。宽度不足 1px（视图未激活）直接早退，不除零也不画。
+- **`pdf.io.bytes` 是同步的**。`require-await` 那条机检把它从 `async` 逼回同步读盘，而网关那条 `try` 两种都接得住
+  （`packages/ipc/src/gateway.ts:57-77` 里 `await target.invoke(...)` 在 `try` 内，同步抛与 reject 走同一支码）。
+  连带三处测试写法要换：`.catch(...)` 在**同步抛**面前根本接不到（抛出发生在 `Promise.resolve` 包上它之前），
+  一律改成 `try { … } catch (caught) { failure = caught; }`。这条坑对 `open` 不存在——那条腿先 `await` 过装载，本来就是 reject。
+
+**活体抓到并修掉的缺陷（四道门禁全绿时它躲过了所有单测）**：状态读数说 `ready`，纸上却整张透明、旁边写着「画了 -1 毫秒」，
+页面里捕获到 `rejection: Cannot use the same canvas during multiple render() operations. Use different canvas or ensure
+previous operations were cancelled or completed.`。成因是重绘有四路触发（挂载那一帧、观察器送来的第一帧、换页、翻主题），
+而 pdf.js 对同一块画布只允许一趟 `render()` 在跑；原先 `paintSeqRef` 只**丢弃过期结果**、不**排队**，于是第二趟当场被拒。
+修法是把四路汇成一条链（`paintChainRef`，§2.5 的"合并到一个入口"）：
+
+```ts
+paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
+```
+
+第二个 `paintNow` 不是笔误：链上任何一环 reject 而不接住，之后的每个 `.then` 都会被跳过，**纸就再也画不出来了**——
+这条吞掉的不是错误，是"下一趟还有机会画"。修后同一场景三次重绘 5 / 9 / 3 毫秒，`errs` 为空数组。
+
+**两条探针读法陷阱**（都不是产品缺陷，但都差点被当成缺陷写进读数）：
+
+1. 纸上的行盒是**画在 canvas 里的数据、不是 DOM 元素**，`harness click` 只会打元素中心，所以点不到；
+   第一版扫描把指针放在纸面左缘 +28px，那里是页边距、没有字形，扫满 100 格 `hoveredAt=null`。
+   换成纸宽 40% 那一列，第 11 格就命中并长出悬停框。判"点不到"之前先确认扫的那一列上有字。
+2. 窗口 `visibilityState==='hidden'` 时 CDP 输入不落页（AGENTS §9 的 2.1-12），本轮把窗口带到前台（`visible`）之后，
+   `Input.dispatchMouseEvent` 的 move/press/release 三发全部落页：悬停框、就地改输入框、`pdf-edit-commit-inline`、
+   `pdf-edit-undo`、`pdf-edit-save-as` 五处都是**真按下**取到的回执。这条从此不再需要标 `[!]`。
+
+**打包态这一腿的两条读数**（§10.8 那条未决项的兑现进度）：`pnpm --filter @auto-cc/renderer build` 之后
+`packages/renderer/dist/pdfjs/` 长出 `build/pdf.worker.min.mjs`（1.2M）+ `cmaps/`（1.6M）+ `standard_fonts/`（816K）+ `wasm/`（1.5M，
+含 `jbig2.wasm` / `openjpeg.wasm` 及各自 fallback），即 `vite-pdfjs-assets.ts` 的 `closeBundle` 搬运在构建态成立，
+且主线程用的 `pdf.mjs` 由 vite 打进 `assets/index-*.js`、不需要另拷一份。
+**仍然欠的那一条**：整棵 `pdfjs/` 树进 `app.asar` 之后、装机产物里的 worker 与三类资源是否各自取到——
+§10.9 的 asar spike 是在 `.research-repos/p58-asar-probe/` 里按产品布局**复刻**验的，不是真 staging。
+解除条件：跑一次 `scripts/build.ts` 出 `dist/mac-arm64`，从装机 app 的窗口里开一次 PDF 取同样的三条读数
+（`workerCreated` / `fakeWorkerWarning` 为空 / 画页耗时），本轮没做，写在这里而不是当成做过。

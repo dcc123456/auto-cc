@@ -1,0 +1,356 @@
+/**
+ * 真纸面视图（spec 3.5-12）：把用户手里那份 PDF 的那一页画成**它自己**，并在其上就地改。
+ *
+ * 这一格存在的理由就是那句报障：「希望 pdf 编辑可以直接在导入的 pdf 上进行编辑，而不是显示一堆框框」。
+ * 改造前的画布是一张**纯白底**（`fillStyle='#ffffff'` 之后只描文本项矩形），人看到的框里根本没有字，
+ * 位置与眼睛对不上任何东西；现在位图来自 pdf.js 的真实渲染，行盒只在悬停时才描边、点下去就是那一行。
+ *
+ * 三条不变量：
+ * ① 槽里任何时刻只有一张画布（spec 6.4-08）——控件在左列，画面只在这里；
+ * ② 装不下就整张缩小（spec 6.4-12）——画布挂 `w-full`，位图按量出的 CSS 宽度铺，永不横向裁；
+ * ③ 覆盖永远说「盖住」，不说「删掉原文」（§7.6 反伪装）：那两句提示原样留着。
+ */
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Check, X } from 'lucide-react';
+import { DeskButton, InlineEditField } from './ui/controls';
+import { useDeskThemeValue } from './theme';
+import type { PdfEditModel } from './usePdfEdit';
+import type { PdfPaperRect, PdfTextLine } from './pdf-page-view';
+
+/**
+ * 位图重画的宽度阈值：拖把手时 `pointermove` 每帧都在改布局，而一页渲染是几十毫秒量级的活。
+ * 变化不足这个比例就先用 CSS 拉伸既有位图（看着略糊），停手再重画清晰的那一张。
+ */
+const REPAINT_WIDTH_DELTA = 0.06;
+
+/**
+ * 把指针位置换算成页面内的比例坐标（原点左上）。
+ * @param clientX 指针视口横坐标（px）
+ * @param clientY 指针视口纵坐标（px）
+ * @param canvas 正在操作的那块画布；宽高为 0（视图未激活）时返回 undefined，不做除零
+ */
+function ratioOfPointer(clientX: number, clientY: number, canvas: HTMLCanvasElement) {
+  const box = canvas.getBoundingClientRect();
+  if (box.width === 0 || box.height === 0) return undefined;
+  const clamp = (value: number) => Math.min(1, Math.max(0, value));
+  return { x: clamp((clientX - box.left) / box.width), y: clamp((clientY - box.top) / box.height) };
+}
+
+/**
+ * 两点算一个矩形（拖拽的起点与落点谁在左上不限）。
+ * @param from 起手点（比例）
+ * @param to 落点（比例）
+ */
+function rectOfPoints(from: { x: number; y: number }, to: { x: number; y: number }): PdfPaperRect {
+  return {
+    xRatio: Math.min(from.x, to.x),
+    yRatio: Math.min(from.y, to.y),
+    widthRatio: Math.abs(to.x - from.x),
+    heightRatio: Math.abs(to.y - from.y),
+  };
+}
+
+/**
+ * 比例点是否落在这一行的行盒里（竖向放宽半个行高：人点的是字的中间，不必正好命中基线）。
+ * @param point 纸面上的比例点
+ * @param line 候选行
+ */
+function hitsLine(point: { x: number; y: number }, line: PdfTextLine): boolean {
+  const pad = line.rect.heightRatio / 2;
+  return (
+    point.x >= line.rect.xRatio &&
+    point.x <= line.rect.xRatio + line.rect.widthRatio &&
+    point.y >= line.rect.yRatio - pad &&
+    point.y <= line.rect.yRatio + line.rect.heightRatio + pad
+  );
+}
+
+/**
+ * 把比例矩形写成**某一个节点**上的四条 CSS 变量（§5.2 的那条已登记口径：动态几何不进内联 `style`，
+ * 也不散进多颗节点——写在一个节点上，消费它的那两格用 Tailwind 的 `left-(--…)` 取值）。
+ * @param node 承载变量的节点
+ * @param prefix 变量前缀（`--pdf-hover` / `--pdf-edit` / `--pdf-rubber`）
+ * @param rect 比例矩形；undefined = 这一格此刻不该画
+ */
+function putRectVars(node: HTMLElement, prefix: string, rect?: PdfPaperRect): void {
+  for (const [key, value] of [
+    ['left', rect === undefined ? '0%' : `${rect.xRatio * 100}%`],
+    ['top', rect === undefined ? '0%' : `${rect.yRatio * 100}%`],
+    ['width', rect === undefined ? '0%' : `${rect.widthRatio * 100}%`],
+    ['height', rect === undefined ? '0%' : `${rect.heightRatio * 100}%`],
+  ] as const) {
+    node.style.setProperty(`--${prefix}-${key}`, value);
+  }
+}
+
+/**
+ * 简历屏 PDF 档的那一张真纸。
+ * @param model 这一轨的唯一模型（`usePdfEdit`，desk 持有）
+ */
+export function PdfPaperView({ model }: { model: PdfEditModel }) {
+  const { t } = useTranslation();
+  const deskTheme = useDeskThemeValue();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** 上一次真画时量到的 CSS 宽度（px）；0 = 还没画过。 */
+  const paintedWidthRef = useRef(0);
+  /** 重画序号：连改两次宽度时，慢的那一趟回来要整条丢弃（否则会盖掉新宽度那一张）。 */
+  const paintSeqRef = useRef(0);
+  /** 上一趟重绘的尾巴：新的一次一律排在它后面（见 `repaint` 那条注释）。 */
+  const paintChainRef = useRef<Promise<void>>(Promise.resolve());
+  const dragStartRef = useRef<{ x: number; y: number } | undefined>(undefined);
+  const [hovered, setHovered] = useState<PdfTextLine>();
+  /** 最近一次真渲染的耗时（ms）；-1 = 这一页还没画。与行数一起是「纸上到底有没有东西」的读数。 */
+  const [paintMs, setPaintMs] = useState(-1);
+
+  /**
+   * 画这一页：先要位图（pdf.js），再把已提交的覆盖区叠上去（白底 + 虚线 + 新字）。
+   * 覆盖区画进同一块画布是「所见即所得」的最低要求——另存产物里那一块就是这个样子（spec 3.5-02）；
+   * 唯独纸面图像与新字墨色**跟着产物走、不跟主题走**，虚线框才取主题令牌。
+   */
+  const paintNow = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const page = model.paperPage;
+    if (!canvas || !page) return;
+    const cssWidth = Math.round(canvas.clientWidth);
+    if (cssWidth < 1) return;
+    const seq = paintSeqRef.current + 1;
+    paintSeqRef.current = seq;
+    const started = await page.paint(canvas, cssWidth);
+    if (seq !== paintSeqRef.current) return;
+    paintedWidthRef.current = cssWidth;
+    setPaintMs(started);
+    const painter = canvas.getContext('2d');
+    if (!painter) return;
+    const tone = getComputedStyle(canvas);
+    const draftTone = tone.getPropertyValue('--color-amber');
+    const pxPerPt = canvas.width / page.widthPt;
+    painter.setTransform(1, 0, 0, 1, 0, 0);
+    for (const overlay of model.draft.overlays) {
+      if (overlay.pageNumber !== page.pageNumber) continue;
+      const x = overlay.rect.xRatio * canvas.width;
+      const y = overlay.rect.yRatio * canvas.height;
+      const boxWidth = overlay.rect.widthRatio * canvas.width;
+      const boxHeight = overlay.rect.heightRatio * canvas.height;
+      painter.fillStyle = '#ffffff';
+      painter.fillRect(x, y, boxWidth, boxHeight);
+      painter.strokeStyle = draftTone;
+      painter.lineWidth = 1;
+      painter.setLineDash([4, 3]);
+      painter.strokeRect(x, y, boxWidth, boxHeight);
+      painter.setLineDash([]);
+      if (overlay.text && model.limits) {
+        painter.fillStyle = '#0f172a';
+        painter.font = `${(overlay.sizePt ?? model.limits.defaultTextSizePt) * pxPerPt}px sans-serif`;
+        painter.textBaseline = 'bottom';
+        painter.fillText(overlay.text, x + 2, y + boxHeight - 2);
+      }
+    }
+  }, [model.draft.overlays, model.limits, model.paperPage]);
+
+  /**
+   * 排一次重绘：挂载那一帧、观察器送来的第一帧、换页与翻主题会在同一刻各敲一次，
+   * 而 pdf.js 对同一块画布只允许一趟 `render()` 在跑——并发时第二趟当场被拒
+   *（活体实测拿到 `Cannot use the same canvas during multiple render() operations`，
+   * 表现就是"状态说这一页画好了、纸上却整张透明"，见 spec 3.5-12 的读数）。
+   * 这里把四路触发汇成一条队（§2.5 合并到一个入口），排在后面的自然就是画上最后那一张的人。
+   * 那条 `catch` 不是为了吞错，是为了**不让一段被拒的链条毒死后面的重绘**：
+   * 链上任何一环 reject 而不接住，之后的每个 `.then` 都会被跳过，纸就再也画不出来了。
+   */
+  const repaint = useCallback((): Promise<void> => {
+    paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
+    return paintChainRef.current;
+  }, [paintNow]);
+
+  // 换页 / 换覆盖区 / 翻主题都重画这一张（`repaint` 的引用随这三样换）。
+  // 宽度变化不走这里：拖把手时每帧都在改宽度，它由下面那条观察器按阈值挑一次重画。
+  // `deskTheme` 必须在依赖里——本视图挂在 `App.tsx` 的模块常量 PANELS 下，翻主题时子树拿到的是同一个
+  // 元素引用、并不重渲染，唯有把这个读数取进来才会让画布跟着翻（活体实测过不取就是旧色）。
+  useEffect(() => {
+    void repaint();
+  }, [repaint, deskTheme]);
+
+  // 槽宽变化（拖把手、缩窗口、展开内核视图）由观察器推：够一笔就重画清晰的那一张。
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => {
+      const cssWidth = Math.round(canvas.clientWidth);
+      if (
+        cssWidth < 1 ||
+        (paintedWidthRef.current > 0 &&
+          Math.abs(cssWidth - paintedWidthRef.current) / paintedWidthRef.current <= REPAINT_WIDTH_DELTA)
+      ) {
+        return;
+      }
+      void repaint();
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [repaint]);
+
+  // 悬停 / 橡皮筋 / 就地改三只框的几何：都写在纸的包裹节点上，只有当下在场的那一格被画出来。
+  useEffect(() => {
+    const node = wrapRef.current;
+    if (!node) return;
+    putRectVars(node, 'pdf-hover', hovered?.rect);
+    putRectVars(node, 'pdf-rubber', model.rubber);
+    putRectVars(node, 'pdf-edit', model.editing?.line.rect);
+  }, [hovered, model.editing, model.rubber, deskTheme]);
+
+  /**
+   * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶腿）。
+   * 分辨只看**位移**：起收点距离不足 3px 算点，落点又有行盒就进就地改；否则按拖出来的矩形交进会话。
+   * 监听在 `pointerdown` 当场挂上，不挂在后续渲染的 effect 里（3.6 活体那条教训：
+   * harness 把 down/move/up 在几毫秒里派发完，effect 等渲染提交时 `pointerup` 早就过去了）。
+   * @param event 画布上的 `pointerdown`
+   */
+  const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = event.currentTarget;
+    const startPoint = ratioOfPointer(event.clientX, event.clientY, canvas);
+    if (!startPoint) return;
+    dragStartRef.current = startPoint;
+    const move = (moveEvent: PointerEvent) => {
+      const current = dragStartRef.current;
+      const point = ratioOfPointer(moveEvent.clientX, moveEvent.clientY, canvas);
+      if (!current || !point) return;
+      if (Math.abs(point.x - current.x) + Math.abs(point.y - current.y) < 0.004) return;
+      setHovered(undefined);
+      model.setRubber(rectOfPoints(current, point));
+    };
+    const up = (upEvent: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const current = dragStartRef.current;
+      const point = ratioOfPointer(upEvent.clientX, upEvent.clientY, canvas);
+      dragStartRef.current = undefined;
+      if (!current || !point) return;
+      const dragged = model.rubber !== undefined;
+      model.setRubber(undefined);
+      if (dragged) {
+        // 旧流程（先写字、再框位置）原样保留，只是降到进阶。
+        model.commitOverlay(rectOfPoints(current, point));
+        return;
+      }
+      const line = model.paperPage?.lines.find((candidate) => hitsLine(point, candidate));
+      if (line) model.beginEdit(line);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  /** 悬停读数：只给"点得中的那一行"描边（§5.2「不可点的元素绝不长出 hover」的同一取向）。 */
+  const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (dragStartRef.current !== undefined) return;
+    const point = ratioOfPointer(event.clientX, event.clientY, event.currentTarget);
+    if (!point) return;
+    const line = model.paperPage?.lines.find((candidate) => hitsLine(point, candidate));
+    setHovered(line);
+  };
+
+  /** 这一页有没有读得出的文字（扫描型的判据：为空就走那句诚实回落，绝不画假的可点行列表）。 */
+  const lineCount = model.paperPage?.lines.length ?? 0;
+  const busyReason = model.busy !== undefined ? 'ACTION_BUSY' : undefined;
+
+  return (
+    <div data-testid="pdf-edit-paper" className="flex flex-col gap-2">
+      <p
+        className="font-mono text-[11px] text-slate-500"
+        data-testid="pdf-edit-paper-state"
+        data-state={model.paperState}
+      >
+        {model.paperState === 'idle'
+          ? t('pdfEdit.paperIdle')
+          : model.paperState === 'loading'
+            ? t('pdfEdit.paperLoading')
+            : model.paperState === 'failed'
+              ? t('pdfEdit.paperFailed', { message: model.paperError ?? '' })
+              : t('pdfEdit.paperReading', { page: model.page, lines: lineCount, ms: paintMs })}
+      </p>
+
+      {/* 纸本体：位图占满这一格（`w-full` + `h-auto` 保住页面自己的长宽比，装不下就是整张缩小）。
+          三只框（悬停 / 橡皮筋 / 就地改）都是**同一个节点上的变量**的消费方，不在 DOM 里堆盒子。 */}
+      <div ref={wrapRef} className="relative min-w-0">
+        <canvas
+          ref={canvasRef}
+          data-testid="pdf-edit-canvas"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerLeave={() => setHovered(undefined)}
+          className="block h-auto w-full cursor-crosshair rounded-md border border-line-strong bg-white shadow-sheet"
+        />
+        {hovered && !model.editing && (
+          <span
+            aria-hidden="true"
+            data-testid="pdf-edit-hover-box"
+            className="pointer-events-none absolute left-(--pdf-hover-left) top-(--pdf-hover-top) h-(--pdf-hover-height) w-(--pdf-hover-width) rounded-[2px] border border-amber"
+          />
+        )}
+        {model.editing && (
+          <div
+            data-testid="pdf-edit-inline-wrap"
+            className="absolute left-(--pdf-edit-left) top-(--pdf-edit-top) flex min-w-[160px] items-start gap-1 bg-white/95"
+          >
+            <InlineEditField
+              action="pdf-edit-inline-text"
+              value={model.editing.text}
+              onValueChange={model.changeEditText}
+              onSave={model.commitEdit}
+              onCancel={model.cancelEdit}
+              className="min-w-0 flex-1"
+            />
+            <DeskButton
+              action="pdf-edit-commit-inline"
+              variant="amber"
+              compact
+              className="h-6"
+              busy={!!model.busy}
+              disabled={!!model.busy}
+              disabledReason={busyReason}
+              disabledReasonLabel={busyReason ? t('resume.reason.ACTION_BUSY') : undefined}
+              onClick={model.commitEdit}
+            >
+              <Check size={11} />
+              {t('pdfEdit.commitInline')}
+            </DeskButton>
+            <DeskButton
+              action="pdf-edit-cancel-inline"
+              variant="ghost"
+              compact
+              className="h-6"
+              onClick={model.cancelEdit}
+              aria-label={t('pdfEdit.cancelInline')}
+            >
+              <X size={11} />
+            </DeskButton>
+          </div>
+        )}
+        {model.rubber && (
+          <span
+            aria-hidden="true"
+            data-testid="pdf-edit-rubber-box"
+            className="pointer-events-none absolute left-(--pdf-rubber-left) top-(--pdf-rubber-top) h-(--pdf-rubber-height) w-(--pdf-rubber-width) border border-dashed border-celadon"
+          />
+        )}
+      </div>
+
+      {/* 两句诚实读数：反伪装那条一个字不能改（3.5-04 已放弃字节级替换，覆盖永远不许说成涂黑），
+          扫描型那一页没字就直说没字，仍然可以拖框。 */}
+      <p className="text-[11px] text-amber" data-testid="pdf-edit-cover-hint">
+        {t('pdfEdit.coverHint')}
+      </p>
+      {model.paperState === 'ready' && lineCount === 0 && (
+        <p className="text-[11px] text-slate-400" data-testid="pdf-edit-scan-fallback">
+          {t('pdfEdit.scanFallback')}
+        </p>
+      )}
+      {model.paperState === 'ready' && lineCount > 0 && (
+        <p className="text-[11px] text-slate-500" data-testid="pdf-edit-inline-hint">
+          {t('pdfEdit.inlineHint')}
+        </p>
+      )}
+    </div>
+  );
+}

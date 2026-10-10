@@ -1,13 +1,15 @@
 /**
- * 编辑轨的**装配与 IPC 面**对账（spec 3.4-03 的接线半边 + 3.5-02 / 3.5-09 / 3.5-01 的接线半边，plan §7.4）。
+ * 编辑轨的**装配与 IPC 面**对账（spec 3.4-03 的接线半边 + 3.5-02 / 3.5-09 / 3.5-12 的接线半边，plan §7.4）。
  *
  * 为什么放在 `packages/main`：这里要同时读到注册表、`cordis.yml`、渲染层白名单与网关的 `resolveCall`
  * ——四样东西分属四个包，只有装配层认识它们全部（`graph-link.test.ts` 同一口径）。
- * 装载与叠加的语义本体（页数、宽高、坐标换算、内容流）在 `packages/pdf-edit/src/*.test.ts` 判，
- * 这里只钉「界面调得到的那三条路径确实切成服务 `pdf.io` / `pdf.export` / `pdf.layout`，且未登记的名字进不来」。
+ * 装载与叠加的语义本体（页数、宽高、字节、内容流）在 `packages/pdf-edit/src/*.test.ts` 判，
+ * 这里只钉「界面调得到的那三条路径确实切成服务 `pdf.io` / `pdf.export`，且未登记的名字进不来」。
+ * 第三条路径 `pdf.io.bytes` 是 2026-10-10 真纸面形态换来的（spec 3.5-12 / 退役核对 3.5-13）：
+ * 位图与文本层改由渲染层的 pdf.js 算，所以名单里少一只服务、多一条口——**总数仍是三**。
  */
 import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
-import { PdfExportService, PdfIoService, PdfLayoutService } from '@auto-cc/plugin-pdf-edit';
+import { PdfExportService, PdfIoService } from '@auto-cc/plugin-pdf-edit';
 import { resolveCall } from '@auto-cc/plugin-ipc';
 import { RENDERER_ALLOWLIST, isAllowedCall } from '@auto-cc/shared';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -15,7 +17,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 const fibers: Fiber[] = [];
 
 /**
- * 只挂编辑轨这三只服务（它们都不 inject 任何别的名字，所以这里不需要 store）。
+ * 只挂编辑轨这两只服务（它们都不 inject 任何别的名字，所以这里不需要 store）。
  * @returns 上下文与按名取实例的查找口（网关用的就是同一种查找）
  */
 async function bootEditTrack(): Promise<{ ctx: Context; lookup: (name: string) => object | undefined }> {
@@ -30,7 +32,6 @@ async function bootEditTrack(): Promise<{ ctx: Context; lookup: (name: string) =
       minAreaRatio: 0.0001,
     }),
   );
-  fibers.push(await ctx.plugin(PdfLayoutService, { maxBytes: 5242880 }));
   return {
     ctx,
     lookup: (name) => {
@@ -48,11 +49,10 @@ afterAll(async () => {
 });
 
 describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的白名单）', () => {
-  it('服务在真实上下文里挂起来了，名字就是 `pdf.io`、`pdf.export` 与 `pdf.layout`', async () => {
+  it('服务在真实上下文里挂起来了，名字就是 `pdf.io` 与 `pdf.export`', async () => {
     const { ctx } = await bootEditTrack();
     expect(asApp(ctx)['pdf.io']).toBeInstanceOf(PdfIoService);
     expect(asApp(ctx)['pdf.export']).toBeInstanceOf(PdfExportService);
-    expect(asApp(ctx)['pdf.layout']).toBeInstanceOf(PdfLayoutService);
   });
 
   it('网关把 `pdf.io.open` 切成服务 `pdf.io` + 方法 `open` 并调得通', async () => {
@@ -83,35 +83,41 @@ describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的�
     expect(AppError.from(failure).code).toBe('PDF_EDIT_SAVE_FAILED');
   });
 
-  it('网关把 `pdf.layout.textItems` 切成服务 `pdf.layout` + 方法 `textItems`（路径与页号两个实参都过界）', async () => {
+  it('网关把 `pdf.io.bytes` 切成服务 `pdf.io` + 方法 `bytes`（真纸面的取数腿，只有一个路径实参）', async () => {
     const { lookup } = await bootEditTrack();
-    const resolution = resolveCall('pdf.layout.textItems', lookup);
-    expect(resolution).toMatchObject({ ok: true, service: 'pdf.layout', method: 'textItems' });
+    const resolution = resolveCall('pdf.io.bytes', lookup);
+    expect(resolution).toMatchObject({ ok: true, service: 'pdf.io', method: 'bytes' });
     if (!resolution.ok) throw new Error('should not reach');
     // 路径不存在时落在打开腿那一个码上（`PDF_EDIT_READ_FAILED`）：读不出文件这件事在界面上的处置与 `pdf.io.open` 相同，
     // 按已验收的口径（界面处置相同就共用一支码）不再另开支新码。
-    const failure = await Promise.resolve(resolution.invoke('/tmp/auto-cc-不存在的那份.pdf', 1)).catch(
-      (error: unknown) => error,
-    );
+    // 字节腿只读盘、不解析，所以它是**同步抛**而不是 reject（`open` 那条仍是 reject，它先 `await` 过装载）；
+    // 网关那条 `try` 两种都接得住，这里就按抛出取——写 `.catch` 的话，抛出在 `Promise.resolve` 包上它之前就已经穿过去了。
+    let failure: unknown;
+    try {
+      resolution.invoke('/tmp/auto-cc-不存在的那份.pdf');
+    } catch (caught) {
+      failure = caught;
+    }
     expect(failure).toBeInstanceOf(AppError);
     expect(AppError.from(failure).code).toBe('PDF_EDIT_READ_FAILED');
   });
 });
 
 describe('白名单只放行登记过的那三条（§8.2 的边界）', () => {
-  it('`pdf.*` 恰有 io.open、export.saveAs 与 layout.textItems，抄错的名字与还没落地的方法都进不来', () => {
+  it('`pdf.*` 恰有 io.open、io.bytes 与 export.saveAs，退役的线框腿与抄错的名字都进不来', () => {
     // 3.5-c₂ 会话腿把 `pdf.edit.*` 判成了渲染层的纯模型（plan §7.14），所以那六行至今不在名单里；
-    // 这一片补上的是 §7.4 那张表里从 3.5-a 顺延下来的 `pdf.layout.textItems`。
+    // `pdf.layout.textItems` 在 2026-10-10 随真纸面形态退役（spec 3.5-13），换进来的是同一条腿上的 `pdf.io.bytes`。
     // 口径照旧：白名单每多一行就多一条没人审的通路，只在实现真落在一口服务上时才登记（表是路线图，不是许可证）。
     expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('pdf.'))).toEqual([
       'pdf.io.open',
+      'pdf.io.bytes',
       'pdf.export.saveAs',
-      'pdf.layout.textItems',
     ]);
     expect(isAllowedCall('pdf.io.open')).toBe(true);
+    expect(isAllowedCall('pdf.io.bytes')).toBe(true);
     expect(isAllowedCall('pdf.export.saveAs')).toBe(true);
-    expect(isAllowedCall('pdf.layout.textItems')).toBe(true);
     expect(isAllowedCall('pdf.edit.addOverlay')).toBe(false);
+    expect(isAllowedCall('pdf.layout.textItems')).toBe(false);
     expect(isAllowedCall('pdf.layout.items')).toBe(false);
     expect(isAllowedCall('pdf.layout')).toBe(false);
     expect(isAllowedCall('pdf.export')).toBe(false);

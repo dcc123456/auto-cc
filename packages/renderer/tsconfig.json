@@ -7,5 +7,5 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "vite-pdfjs-assets.ts"]
 }

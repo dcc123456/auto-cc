@@ -25,7 +25,7 @@ export const pdfIoSchema = z.strictObject({
 
 export type PdfIoConfig = z.output<typeof pdfIoSchema>;
 
-/** `open` 的回执：来源哈希 + 页数 + 每页宽高（界面据此画页面列表与线框，见 plan §7.5）。 */
+/** `open` 的回执：来源哈希 + 页数 + 每页宽高（界面据此定纸栏的缩放与页号读数；真纸面的图像在渲染层画，见 3.5-12）。 */
 export interface PdfOpenReceipt {
   /** 源文件的 sha256（3.5-09 断言「另存之后源文件仍是这一份」的基准）。 */
   readonly sourceHash: string;
@@ -76,6 +76,21 @@ export class PdfIoService extends Service {
       pageCount: loaded.document.sourcePageCount,
       pages: loaded.document.sourcePageMetrics(),
     };
+  }
+
+  /**
+   * 按同一份字节上限把整份 PDF 交给渲染层（spec 3.5-12 的真纸面：位图与文本层都在渲染层算）。
+   *
+   * 为什么这条口是必要的而不是"再多开一条读文件通道"：渲染层在 sandbox 下没有文件系统
+   *（§8.1），而 pdf.js 要把页面画成真实图像就必须拿到字节。字节上限沿用 `open` 那一支 `maxBytes`，
+   * 不在这里另立第二档尺度（§2.5：两处上限迟早漂）。本机实测 1MB 一次往返约 2ms、5MB 约 4ms，
+   * 所以不分块、不做缓存（plan §10.4）。
+   * @param filePath 用户给的**绝对路径**（与 `open` 同一口径，路径不过界的是"谁来读"）
+   * @returns 整份文件的字节；一次调用一份，渲染层装载完交给 pdf.js
+   * @throws `AppError('PDF_EDIT_READ_FAILED')`——路径非法、读不出或超过上限；处置与 `open` 完全相同，故共用一支码
+   */
+  bytes(filePath: string): Uint8Array {
+    return readBoundedFile(filePath, { maxBytes: this.options.maxBytes, code: 'PDF_EDIT_READ_FAILED' });
   }
 }
 
