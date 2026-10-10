@@ -11,6 +11,7 @@ import {
   Pencil,
   RefreshCw,
   SlidersHorizontal,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -18,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
   ExportReceiptView,
+  ImportProvenanceRowView,
   ImportReceiptView,
   PendingImportRowView,
   ResumeDocSummaryView,
@@ -26,6 +28,7 @@ import type {
   SnapshotDiffView,
   SnapshotMetaView,
 } from '@auto-cc/shared';
+import { DEMO_RESUME_DOC_ID } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
 import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
@@ -35,9 +38,9 @@ import { PdfPaperView } from './PdfPaperView';
 import { ResumeEditor } from './ResumeEditor';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
-import { Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
-import { DeskExplainer, DeskSection } from './ui/disclosure';
-import { Drawer, useRevealLabel } from './ui/overlays';
+import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
+import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
+import { Drawer, Modal, useRevealLabel } from './ui/overlays';
 import { SplitHandle, useSplitWidth } from './ui/split';
 import { useBridgeAction } from './useBridgeAction';
 import { usePdfEdit } from './usePdfEdit';
@@ -177,6 +180,16 @@ export function ResumeDesk() {
   const [docId, setDocId] = useState<string>();
   /** 库里的候选（只到摘要一层：id / 姓名 / 最后改动时刻），供「选简历」那一格与 `GeneratePanel` 共用。 */
   const [docs, setDocs] = useState<ResumeDocSummaryView[]>([]);
+  /**
+   * 每份简历的**来路**（spec 4.1-14 / 裁定㉖ 第 3 条）：候选列表那一行小字唯一的数据源。
+   * 与 `docs` 各读各的：`resume.doc.list` 只到摘要一层（id / 姓名 / 最后改动），
+   * "它是哪份文件、什么时候导进来的"在 `resume_imports` 那张表里，只有 `resume.parse.provenance` 说得出。
+   */
+  const [provenance, setProvenance] = useState<ImportProvenanceRowView[]>([]);
+  /** 正在等人二次确认要删掉的那一份（undefined = 确认框没开）。只存 id，界面不复制那份文档。 */
+  const [pendingDelete, setPendingDelete] = useState<string>();
+  /** 上一次删除失败的结构化错误（半删状态必须说得出为什么，且不把行从列表里摘掉，spec 6.4-20 的④）。 */
+  const [deleteError, setDeleteError] = useState<AppErrorPayload>();
   /** 可摆的模板清单（含版式骨架的七条轴）、当前用来出纸的那一套、人设定的那一套（3.2-03）。 */
   const [templates, setTemplates] = useState<ResumeTemplateSummaryView[]>([]);
   const [templateId, setTemplateId] = useState('classic');
@@ -207,18 +220,28 @@ export function ResumeDesk() {
   }, [bridge]);
 
   /**
-   * 重读待确认清单（spec 4.1-04）与库里的简历清单：导入落库与确认都发生在主进程，界面不猜它当下的状态，
-   * 所以每个动作结束后都调一次 `resume.parse.pending` + `resume.doc.list`（§2.5）。
+   * 重读待确认清单（spec 4.1-04）、每份简历的来路（spec 4.1-14）与库里的简历清单：
+   * 导入落库、确认与删除都发生在主进程，界面不猜它当下的状态，
+   * 所以每个动作结束后都调一次 `resume.parse.pending` + `resume.parse.provenance` + `resume.doc.list`（§2.5）。
    */
   const read = useCallback(async () => {
-    const reply = await bridge?.resume['parse.pending']();
-    if (reply?.ok) setPending(reply.value);
+    const [pendingReply, provenanceReply] = await Promise.all([
+      bridge?.resume['parse.pending'](),
+      bridge?.resume['parse.provenance'](),
+    ]);
+    if (pendingReply?.ok) setPending(pendingReply.value);
+    if (provenanceReply?.ok) setProvenance(provenanceReply.value);
     await refreshDocs();
   }, [bridge, refreshDocs]);
 
   /**
-   * 进门先问三句：能摆哪些模板（含骨架轴）、人上次设定用哪一套、以及库里已经有哪些简历。
-   * 只在挂载时问：这三样都是库读数，屏内的动作要么自己写进 state，要么由 `read` 重读。
+   * 进门先问：能摆哪些模板（含骨架轴）、人上次设定用哪一套、以及库里已经有哪些简历**加上它们各自的来路**。
+   * 只在挂载时问：这些都是库读数，屏内的动作要么自己写进 state，要么由 `read` 重读。
+   *
+   * 这里必须走 `read()` 而不是只 `refreshDocs()`：候选列表那一行小字（spec 6.4-18）吃的是
+   * `resume.parse.provenance`，只问文档清单的话首屏每条来路都是空的，于是每个候选都会写成"没有导入记录"——
+   * 那不是"读不到"，是**撒谎**（2026-10-10 活体首读就是在 10244 隔离实例上抓到这一条：
+   * 同一条 37 版之前的老行，进门显示"没有导入记录"，随手导一份之后才显示"由本机导入（当时未记文件名）"）。
    */
   useEffect(() => {
     void (async () => {
@@ -231,9 +254,9 @@ export function ResumeDesk() {
         setTemplateId(pref.value.templateId);
         setDefaultTemplateId(pref.value.templateId);
       }
-      await refreshDocs();
+      await read();
     })();
-  }, [bridge, refreshDocs]);
+  }, [bridge, read]);
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 
   /**
@@ -313,6 +336,64 @@ export function ResumeDesk() {
           value.filePath === null ? t('resume.pickerCanceled') : t('resume.pickerPicked', { path: value.filePath }),
       },
     );
+
+  /**
+   * 删掉一份简历（spec 4.1-14 / 裁定㉖ 第 1 条）：一次跨进程调用，六张表里属于它的那几行在主进程的
+   * **同一条事务**里消失，界面只摆服务带回的行数（§2.5：成功那句里的 N 段素材、M 条索引不是这里数的）。
+   *
+   * 三条形状约束：
+   * ① 只从**二次确认框**里进来（`askDelete` 那一颗键负责开框），这颗键自己不决定删谁——
+   *    确认框关掉之后 `pendingDelete` 已经清空，所以人手一抖按不到第二刀；
+   * ② 删的是当前那份时**不写回** `docId`：`run` 收尾必然走 `read()` → `refreshDocs()`，
+   *    那里已经有"当前那份不在列表里就落到下一份、列表空了就当作没有一份"这一条唯一判据（§2.5），
+   *    纸面随之由那条去抖 effect 清空，于是"挂着已死身份的那张纸"在这一屏不可能出现；
+   * ③ 失败时把主进程的错误码留在界面上，而**不**把行从列表里摘掉（库里本来就没动，读数回来还是那一行）。
+   * @param targetDocId 确认框里那个人读过并点确认的那一份 id
+   */
+  const deleteDoc = (targetDocId: string) =>
+    void run(t('resume.delete'), () => bridge?.kb['profile.removeDoc'](targetDocId), {
+      onError: (error) => setDeleteError(error),
+      describe: (value) =>
+        t('resume.deleted', {
+          entities: value.entities,
+          chunks: value.chunks,
+          snapshots: value.snapshots,
+          imports: value.imports,
+        }),
+    });
+
+  /**
+   * 打开删除的二次确认（spec 6.4-20）：这一刀删的是"这个人找工作用的全部素材"，比删一个模型配置重一个量级，
+   * 所以不跟 `ModelSettingsPanel` 那一键直删的先例，必须让那句"连同素材一起删"先被人读到。
+   * @param targetDocId 要删的那一份
+   */
+  const askDelete = (targetDocId: string) => {
+    setDeleteError(undefined);
+    setPendingDelete(targetDocId);
+  };
+
+  /**
+   * 一份候选的**出处那一行**（裁定㉖ 第 3 条：每个候选一行小字）。
+   *
+   * 三种诚实形状，按库里有没有这一条来路、以及来路记没记住文件名分：
+   * ① 有文件名 → 「来自 王二.pdf · 2026年10月9日 14:05 导入 · 读到 1842 字」；
+   * ② 有来路但第 37 版之前没记文件名 → 照样给出时刻与字数，并明写"当时未记文件名"，
+   *    **不回落成 hash 前缀、不拿姓名冒充**（4.1-14 的判据原文）；
+   * ③ 压根没有来路行 → 只有自测台那颗种子键走这一支（它直接落库、从不写出处），所以写"演示内容"；
+   *    真出现别的无来路文档也不能撒谎，另有一句"没有导入记录"。
+   * @param targetDocId 这一行所属的候选 id
+   * @returns 摆在那一行下面的小字（已翻译，不含任何开发者标识）
+   */
+  const provenanceLine = (targetDocId: string): string => {
+    const line = provenance.find((row) => row.docId === targetDocId);
+    if (line === undefined) {
+      return targetDocId === DEMO_RESUME_DOC_ID ? t('resume.provenanceDemo') : t('resume.provenanceNoImport');
+    }
+    const time = new Date(line.importedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    return line.sourceName === null
+      ? t('resume.provenanceNoName', { time, chars: line.textLength })
+      : t('resume.provenanceFile', { file: line.sourceName, time, chars: line.textLength });
+  };
 
   /**
    * 把当前选中的模板写成人设定的默认模板（3.2-03：此后不给模板 id 的预览与导出都用它）。
@@ -496,6 +577,9 @@ export function ResumeDesk() {
   /** 当前那份的身份读数（姓名读不到就露 id——宁可露 id 也不给一个空白纸）。 */
   const currentDoc = docs.find((doc) => doc.id === docId);
   const docLabel = currentDoc ? (currentDoc.name ?? currentDoc.id) : undefined;
+  /** 确认框里那一份的身份读数：读不到姓名就写"没读出姓名的那一份"，**绝不把 docId 印给用户**（6.4-16 同源）。 */
+  const deleteTarget = docs.find((doc) => doc.id === pendingDelete);
+  const deleteTargetLabel = deleteTarget ? (deleteTarget.name ?? t('resume.pendingUnnamed')) : undefined;
   const templateName = templates.find((template) => template.id === templateId)?.name;
 
   /**
@@ -534,6 +618,29 @@ export function ResumeDesk() {
    */
   const pdfEdit = usePdfEdit({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
 
+  /**
+   * 「选择文件」那颗键（spec 6.4-19）：**在源码里只写一次**，却按段的开合只出现在一处 DOM——
+   * 收起时它在段头下面那条常驻动作条里，展开时它在正文里。
+   * 写成变量而不是两份 JSX，是因为 `data-action="pick-file"` 是 6.4-19 的取证通道地址：
+   * 同一份 DOM 里长出两只，harness 就只能猜用户看见的是哪一只（§2.5「不允许两个都能用」）。
+   * React 元素是不可变的描述，同一个变量在互斥的两条分支里引用不会让 DOM 翻倍。
+   * 琥珀那一档说的是"往本机库里写一份"——不是外发，所以不给朱砂。
+   */
+  const pickFileButton = (
+    <DeskButton
+      action="pick-file"
+      variant="amber"
+      busy={!!busy}
+      disabled={!!busy}
+      disabledReason={busyReason}
+      disabledReasonLabel={reasonLabel(busyReason)}
+      onClick={pickAndImport}
+    >
+      <FolderOpen size={13} />
+      {t('resume.pickFile')}
+    </DeskButton>
+  );
+
   return (
     // 查询容器必须挂在**祖先**上：元素自己的 `container-type` 不作为自己的查询容器（CSS Containment 把
     // 查询对象限定为最近的祖先容器）。这一条是活体量出来的：容器挂在自己身上时首读 `flexDirection`
@@ -549,383 +656,455 @@ export function ResumeDesk() {
     // 77rem 那条算式之所以不再成立，是因为它隐含了"装不下就横向滚"这个前提；
     // 这一片把它换成**装不下就整张缩小**（`ResumePaperStage` 的 `--paper-scale`），
     // 纸的物理宽度 `w-[210mm]` 一字未改，所以"纸不许被裁"这件物理条件仍然成立（3.3-01 同源）。
-    <div className="@container min-w-0">
-      <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[46rem]:flex-row">
-        {/* 左列：三步操作。宽度是**减出来的**（`flex-1`）而不是定死的——右栏那一格现在归人拖，
+    <>
+      <div className="@container min-w-0">
+        <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[46rem]:flex-row">
+          {/* 左列：三步操作。宽度是**减出来的**（`flex-1`）而不是定死的——右栏那一格现在归人拖，
             对面若还是 400px 定宽，纸拖到 62% 时整行就会溢出（940 容器里 400+6+12+583=1001）。
             默认 56% 时这里量回 396px，与 6.4-07 那批读数的 400px 只差把手那 6px 的挤占。 */}
-        <div className="order-2 flex min-w-0 flex-col gap-3 @[46rem]:order-1 @[46rem]:flex-1">
-          {notice && (
-            <Banner tone={noticeTone} markers={{ testid: 'resume-notice' }} className="break-all">
-              {notice}
-            </Banner>
-          )}
+          <div className="order-2 flex min-w-0 flex-col gap-3 @[46rem]:order-1 @[46rem]:flex-1">
+            {notice && (
+              <Banner tone={noticeTone} markers={{ testid: 'resume-notice' }} className="break-all">
+                {notice}
+              </Banner>
+            )}
 
-          {/* ① 挑一份简历（段名 2026-10-10 换成人话，spec 6.4-15）：库里那份 + 从本机导入那一步。
+            {/* ① 挑一份简历（段名 2026-10-10 换成人话，spec 6.4-15）：库里那份 + 从本机导入那一步。
             原来独占一格的「事实核对」拆成两半各归其位——**没读准的地方**是这一步的产出，所以那一句提醒留在这里；
             素材与缺口是"回头要核对的东西"，不是一步，降到下面那一格披露层里（裁定㉕ 第 2 条）。
             `DeskSection` 的 `id` 是持久收起状态键，一个都不改（6.2-06 / 6.4-08 的取证通道地址）。 */}
-          <DeskSection
-            id="resume.doc"
-            title={t('desk.resume.sectionDoc')}
-            summary={docLabel ?? t('desk.resume.sectionDocEmpty')}
-            defaultOpen
-            markers={{ testid: 'resume-section-doc' }}
-          >
-            <div className="flex min-w-0 flex-col gap-2">
-              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="doc">
-                {t('desk.resume.stepDocHint')}
-              </p>
+            <DeskSection
+              id="resume.doc"
+              title={t('desk.resume.sectionDoc')}
+              summary={docLabel ?? t('desk.resume.sectionDocEmpty')}
+              defaultOpen
+              markers={{ testid: 'resume-section-doc' }}
+              headExtra={
+                // 裁定㉖ 第 2 条：收起态**只**把「选择文件」提到段头，别的都不提（提多了这一段就变成一整条工具栏）。
+                // 常驻的那一句是"当前是哪一份"——那句报障要的是"看得见这份是怎么来的、怎么删"，
+                // 所以这里给身份 + 入口，把候选列表与出处留在正文里（一收起就读完的那两件事）。
+                <DeskActionRow className="w-full">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400">
+                    {docLabel === undefined
+                      ? t('desk.resume.sectionDocEmpty')
+                      : t('desk.resume.sectionDocCurrent', { doc: docLabel })}
+                  </span>
+                  {pickFileButton}
+                </DeskActionRow>
+              }
+            >
+              <div className="flex min-w-0 flex-col gap-2">
+                <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="doc">
+                  {t('desk.resume.stepDocHint')}
+                </p>
 
-              <DeskSelect
-                action="resume-doc"
-                data-testid="resume-doc"
-                label={t('resume.docLabel')}
-                value={docId ?? ''}
-                onValueChange={(value) => setDocId(value === '' ? undefined : value)}
-                disabled={docs.length === 0}
-                disabledReason={docs.length === 0 ? 'NO_DOC' : undefined}
-                disabledReasonLabel={docs.length === 0 ? reasonLabel('NO_DOC') : undefined}
-              >
-                {docs.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {doc.name ?? doc.id}
-                  </option>
-                ))}
-              </DeskSelect>
-
-              {/* 主入口就是这颗键：选一份本机文件直接导入（裁定：绝对路径框降到"高级"里，不再是进门第一格）。
-                琥珀那一档说的是"往本机库里写一份"——不是外发，所以不给朱砂。 */}
-              <DeskButton
-                action="pick-file"
-                variant="amber"
-                busy={!!busy}
-                disabled={!!busy}
-                disabledReason={busyReason}
-                disabledReasonLabel={reasonLabel(busyReason)}
-                onClick={pickAndImport}
-              >
-                <FolderOpen size={13} />
-                {t('resume.pickFile')}
-              </DeskButton>
-
-              <DeskExplainer id="resume.import-advanced" label={t('desk.resume.advanced')}>
-                <div className="flex flex-col gap-2">
-                  <p className="text-slate-400">{t('resume.importHint')}</p>
-                  <DeskField
-                    action="resume-import-path"
-                    data-testid="resume-import-path"
-                    label={t('resume.importPath')}
-                    value={importPath}
-                    onValueChange={setImportPath}
-                  />
-                  <DeskButton
-                    action="import"
-                    variant="amber"
-                    compact
-                    busy={!!busy}
-                    disabled={importReason !== undefined}
-                    disabledReason={importReason}
-                    disabledReasonLabel={reasonLabel(importReason)}
-                    onClick={() => importResume()}
+                {/* 候选列表（spec 6.4-18，**定向替换** 6.2-06 / 6.4-15 那一支 `DeskSelect` 的行形态）：
+                  出处要"每个候选都看得见"，而下拉与列表是同一件事的两个入口（§2.5 不允许两个都能用），
+                  所以下拉在这一格退场——`data-testid="resume-doc"` 与 `data-action="resume-doc"` 两条取证通道
+                  跟着换形态、保留在承载它们的那只容器上（历史读数不重写，§4.5），行内选文档那颗键另起
+                  `resume-doc-pick`，于是这一格仍然只有一处"可选文档的入口"。
+                  生成腿那一格的「定制哪一份简历」下拉**不动**（它选的是目标，不是管文档）。
+                  当前那一份用 `BLOCK_SELECTED_CLASS` 表状态而不是涂语气色：这一格同时可能有"在读 / 在改"，
+                  两块色斑叠在一行就读不出了（6.2-20 那条纪律，`src/ui/**` 之外不许写 `bg-*-wash`）。 */}
+                <p className="text-[11px] text-slate-400">{t('resume.docLabel')}</p>
+                {docs.length === 0 ? (
+                  <p className="text-[11px] text-slate-500" data-testid="resume-doc-none">
+                    {t('desk.resume.sectionDocEmpty')}
+                  </p>
+                ) : (
+                  <ul
+                    data-testid="resume-doc"
+                    data-action="resume-doc"
+                    data-current={docId ?? ''}
+                    className="flex min-w-0 flex-col gap-1"
                   >
-                    <Upload size={12} />
-                    {t('resume.import')}
-                  </DeskButton>
-                </div>
-              </DeskExplainer>
-
-              {importError && (
-                <Banner tone="seal" markers={{ testid: 'resume-import-error' }} className="break-all">
-                  {t('resume.importError', { code: importError.code, message: importError.message })}
-                </Banner>
-              )}
-
-              {lastImport && (
-                <div className="flex flex-wrap items-center gap-1" data-testid="resume-import-sections">
-                  {lastImport.sections.map((section) => (
-                    <span
-                      key={section.kind}
-                      data-testid="resume-import-section"
-                      className="rounded border border-line px-1 text-[11px] text-slate-400"
-                    >
-                      {t(`resume.kind.${section.kind}`)} · {section.entries}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* 裁定㉕ 第 3 条：「待确认清单」降级成**一句只读提醒**——不加确认写口（那要新迁移 37 +
-                `resume['parse.ack']` + 白名单行，另立一片），也不删显示（它是"疑似扫描件：只读到 N 字"
-                唯一能被看见的信号，4.1-05）。点进去仍是那五类原因，逐字来自 `parse.pending`。 */}
-              {pending.length > 0 ? (
-                <DeskExplainer
-                  id="resume.pending-issues"
-                  label={t('resume.pendingCount', { count: pending.length })}
-                  markers={{ testid: 'resume-pending-list' }}
-                >
-                  <div className="flex min-w-0 flex-col gap-2">
-                    <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
-                      <ListChecks size={14} />
-                      {t('resume.pending')}
-                    </h3>
-                    <ul className="space-y-2">
-                      {pending.map((row) => (
+                    {docs.map((doc) => {
+                      const isCurrent = doc.id === docId;
+                      return (
                         <li
-                          key={row.sourceHash}
-                          data-testid="resume-pending-row"
-                          data-status={row.status}
-                          className="rounded border border-line px-2 py-1.5"
+                          key={doc.id}
+                          data-testid="resume-doc-row"
+                          data-doc-id={doc.id}
+                          data-current={isCurrent ? 'true' : 'false'}
+                          className={`flex items-start gap-1 rounded-lg border px-1.5 py-1 ${
+                            isCurrent ? BLOCK_SELECTED_CLASS : 'border-line'
+                          }`}
                         >
-                          {/* 这一行从前印的是 `{{docId}} · {{textLength}} 字`——开发者标识符摆到了用户面前
-                            （spec 6.4-16 顺手修掉的那处违规）：换成姓名 + 处数 + 时刻。 */}
-                          <p className="text-[11px] text-slate-400">
-                            {t('resume.pendingRow', {
-                              // 疑似扫描件**不入库**（4.1-05），所以这一行常常查不到姓名——那是它唯一的可见处。
-                              // 查不到就写"没读出姓名的那一份"，**绝不回落成 id**：回落等于把刚修掉的那串又印回去。
-                              name: docs.find((doc) => doc.id === row.docId)?.name ?? t('resume.pendingUnnamed'),
-                              issueCount: row.issues.length,
-                              time: new Date(row.updatedAt).toLocaleTimeString(),
-                            })}{' '}
-                            · {t(row.status === 'scanned' ? 'resume.statusScanned' : 'resume.statusImported')} ·{' '}
-                            {t(FORMAT_LABEL_KEY[row.format])}
-                          </p>
-                          <ul className="mt-1 space-y-0.5 pl-2">
-                            {row.issues.map((issue, index) => (
-                              <li
-                                key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
-                                data-testid="resume-pending-issue"
-                                className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
-                              >
-                                <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
-                                <span>{issue.sectionKind ?? '-'}</span>
-                                <span className="break-all">{issue.excerpt}</span>
-                              </li>
-                            ))}
-                          </ul>
+                          {/* 姓名读不到时写"没读出姓名的那一份"，与待确认那一行同一条口径（6.4-16：
+                            用户可见的串里不许出现 id）；出处那一句永远单独一行，人不用点开任何东西就能看到它。 */}
+                          <DeskButton
+                            action="resume-doc-pick"
+                            variant="ghost"
+                            compact
+                            className="min-w-0 flex-1 justify-start py-0.5 text-left"
+                            markers={{ picked: isCurrent ? 'true' : 'false' }}
+                            onClick={() => setDocId(doc.id)}
+                          >
+                            <span className="flex min-w-0 flex-col items-start gap-0.5">
+                              <span className="flex w-full min-w-0 items-center gap-1.5">
+                                <span className="truncate text-xs text-slate-100">
+                                  {doc.name ?? t('resume.pendingUnnamed')}
+                                </span>
+                                {isCurrent ? <Tag tone="celadon">{t('resume.docInUse')}</Tag> : null}
+                              </span>
+                              <span className="w-full truncate text-[11px] text-slate-500">
+                                {provenanceLine(doc.id)}
+                              </span>
+                            </span>
+                          </DeskButton>
+                          {/* 每一行都长出这颗键：那句「如何删除都不可见」要的不是一个隐藏手势，而是一个入口。 */}
+                          <DeskButton
+                            action="resume-delete"
+                            variant="ghost"
+                            compact
+                            busy={busy === t('resume.delete')}
+                            disabled={!!busy}
+                            disabledReason={busyReason}
+                            disabledReasonLabel={reasonLabel(busyReason)}
+                            markers={{ docId: doc.id }}
+                            onClick={() => askDelete(doc.id)}
+                          >
+                            <Trash2 size={12} />
+                            {t('resume.delete')}
+                          </DeskButton>
                         </li>
-                      ))}
-                    </ul>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {/* 主入口就是这颗键：选一份本机文件直接导入（裁定：绝对路径框降到"高级"里，不再是进门第一格）。
+                它只在**展开态**出现在这里——收起态那一颗住在段头下面的常驻动作条里（见上面的 `headExtra`）。 */}
+                {pickFileButton}
+
+                <DeskExplainer id="resume.import-advanced" label={t('desk.resume.advanced')}>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-slate-400">{t('resume.importHint')}</p>
+                    <DeskField
+                      action="resume-import-path"
+                      data-testid="resume-import-path"
+                      label={t('resume.importPath')}
+                      value={importPath}
+                      onValueChange={setImportPath}
+                    />
+                    <DeskButton
+                      action="import"
+                      variant="amber"
+                      compact
+                      busy={!!busy}
+                      disabled={importReason !== undefined}
+                      disabledReason={importReason}
+                      disabledReasonLabel={reasonLabel(importReason)}
+                      onClick={() => importResume()}
+                    >
+                      <Upload size={12} />
+                      {t('resume.import')}
+                    </DeskButton>
                   </div>
                 </DeskExplainer>
-              ) : (
-                docId !== undefined && (
-                  <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
-                    {t('resume.pendingEmpty')}
-                  </p>
-                )
-              )}
 
-              {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
+                {importError && (
+                  <Banner tone="seal" markers={{ testid: 'resume-import-error' }} className="break-all">
+                    {t('resume.importError', { code: importError.code, message: importError.message })}
+                  </Banner>
+                )}
+
+                {/* 删不动的那一句必须说得出**为什么**（主进程的错误码原样带上来），而且这一刻列表里那一行还在——
+                库里没动，`read()` 回来的读数当然还在，这不是界面缓存（spec 6.4-20 的第 ④ 条腿）。 */}
+                {deleteError && (
+                  <Banner tone="seal" markers={{ testid: 'resume-delete-error' }} className="break-all">
+                    {t('resume.deleteError', { code: deleteError.code, message: deleteError.message })}
+                  </Banner>
+                )}
+
+                {lastImport && (
+                  <div className="flex flex-wrap items-center gap-1" data-testid="resume-import-sections">
+                    {lastImport.sections.map((section) => (
+                      <span
+                        key={section.kind}
+                        data-testid="resume-import-section"
+                        className="rounded border border-line px-1 text-[11px] text-slate-400"
+                      >
+                        {t(`resume.kind.${section.kind}`)} · {section.entries}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 裁定㉕ 第 3 条：「待确认清单」降级成**一句只读提醒**——不加确认写口（那要新迁移 37 +
+                `resume['parse.ack']` + 白名单行，另立一片），也不删显示（它是"疑似扫描件：只读到 N 字"
+                唯一能被看见的信号，4.1-05）。点进去仍是那五类原因，逐字来自 `parse.pending`。 */}
+                {pending.length > 0 ? (
+                  <DeskExplainer
+                    id="resume.pending-issues"
+                    label={t('resume.pendingCount', { count: pending.length })}
+                    markers={{ testid: 'resume-pending-list' }}
+                  >
+                    <div className="flex min-w-0 flex-col gap-2">
+                      <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                        <ListChecks size={14} />
+                        {t('resume.pending')}
+                      </h3>
+                      <ul className="space-y-2">
+                        {pending.map((row) => (
+                          <li
+                            key={row.sourceHash}
+                            data-testid="resume-pending-row"
+                            data-status={row.status}
+                            className="rounded border border-line px-2 py-1.5"
+                          >
+                            {/* 这一行从前印的是 `{{docId}} · {{textLength}} 字`——开发者标识符摆到了用户面前
+                            （spec 6.4-16 顺手修掉的那处违规）：换成姓名 + 处数 + 时刻。 */}
+                            <p className="text-[11px] text-slate-400">
+                              {t('resume.pendingRow', {
+                                // 疑似扫描件**不入库**（4.1-05），所以这一行常常查不到姓名——那是它唯一的可见处。
+                                // 查不到就写"没读出姓名的那一份"，**绝不回落成 id**：回落等于把刚修掉的那串又印回去。
+                                name: docs.find((doc) => doc.id === row.docId)?.name ?? t('resume.pendingUnnamed'),
+                                issueCount: row.issues.length,
+                                time: new Date(row.updatedAt).toLocaleTimeString(),
+                              })}{' '}
+                              ·{' '}
+                              {row.status === 'scanned'
+                                ? t('resume.statusScanned', { chars: row.textLength })
+                                : t('resume.statusImported')}{' '}
+                              · {t(FORMAT_LABEL_KEY[row.format])}
+                            </p>
+                            <ul className="mt-1 space-y-0.5 pl-2">
+                              {row.issues.map((issue, index) => (
+                                <li
+                                  key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
+                                  data-testid="resume-pending-issue"
+                                  className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
+                                >
+                                  <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
+                                  <span>{issue.sectionKind ?? '-'}</span>
+                                  <span className="break-all">{issue.excerpt}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </DeskExplainer>
+                ) : (
+                  docId !== undefined && (
+                    <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
+                      {t('resume.pendingEmpty')}
+                    </p>
+                  )
+                )}
+
+                {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
                 spec 6.4-15 的 C 半边要求：`id` 与 `data-testid` 两个通道名一字不改地跟着走）。
                 条件挂载是刻意的：收起态下正文卸载，`KbPanel` 的订阅与 `read()` 就不跑——
                 这正是"不活跃时别养第二份工作副本"的口径（`usePdfEdit` 同形，spec 3.5-12）。 */}
-              <DeskExplainer
-                id="resume.facts"
-                label={t('desk.resume.sectionFacts')}
-                markers={{ testid: 'resume-section-facts' }}
-              >
-                <div className="flex min-w-0 flex-col gap-3">
-                  <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="facts">
-                    {t('desk.resume.stepFactsHint')}
-                  </p>
-                  {/* 两块既有面板只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）；
+                <DeskExplainer
+                  id="resume.facts"
+                  label={t('desk.resume.sectionFacts')}
+                  markers={{ testid: 'resume-section-facts' }}
+                >
+                  <div className="flex min-w-0 flex-col gap-3">
+                    <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="facts">
+                      {t('desk.resume.stepFactsHint')}
+                    </p>
+                    {/* 两块既有面板只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）；
                     `docId` 由 desk 单向推进来，人仍可在这格里改（spec 6.4-17）。 */}
-                  <KbPanel docId={docId ?? ''} docLabel={docLabel} />
-                  <GapPanel />
-                </div>
-              </DeskExplainer>
-            </div>
-          </DeskSection>
-
-          {/* ② 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
-          <DeskSection
-            id="resume.generate"
-            title={t('desk.resume.sectionGenerate')}
-            summary={
-              docLabel ? t('desk.resume.sectionGenerateFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
-            }
-            defaultOpen
-            // 岗位行双击跳过来时（09 稿形态⑥ / spec 6.4-05）强制打开这一格：收起态下正文是卸载的，
-            // 人不该被送到一格看不见 JD 输入框的地方。
-            openSignal={trail && trail.targetView === 'resume' ? trail.requestId : undefined}
-            markers={{ testid: 'resume-section-generate' }}
-          >
-            <div className="flex min-w-0 flex-col gap-2">
-              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="generate">
-                {t('desk.resume.stepGenerateHint')}
-              </p>
-              <GeneratePanel
-                docs={docs}
-                docId={docId ?? ''}
-                onDocIdChange={setDocId}
-                refreshDocs={refreshDocs}
-                onAccepted={bumpPaper}
-              />
-            </div>
-          </DeskSection>
-
-          {/* ③ 出纸：模板架（裁定② 的骨架缩略图）+ 这张纸的三把出口键 + 快照对照。 */}
-          <DeskSection
-            id="resume.output"
-            title={t('desk.resume.sectionOutput')}
-            summary={
-              templateName
-                ? t('desk.resume.sectionOutputWith', { template: templateName, locale })
-                : t('desk.resume.sectionOutputNone')
-            }
-            defaultOpen
-            markers={{ testid: 'resume-section-output' }}
-          >
-            <div className="flex min-w-0 flex-col gap-3">
-              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="output">
-                {t('desk.resume.stepOutputHint')}
-              </p>
-
-              <TemplateShelf
-                templates={templates}
-                selectedId={templateId}
-                defaultId={defaultTemplateId}
-                filter={shelfFilter}
-                onFilterChange={setShelfFilter}
-                onSelect={selectTemplate}
-                onSetDefault={rememberTemplate}
-                busy={!!busy}
-                disabledReason={templateReason}
-                disabledReasonLabel={reasonLabel(templateReason)}
-              />
-
-              <label className="flex items-center gap-1 text-[11px] text-slate-400">
-                {t('resume.locale')}
-                <DeskSelect
-                  action="resume-locale"
-                  data-testid="resume-locale"
-                  value={locale}
-                  onValueChange={(value) => setLocale(value as ResumeLocaleView)}
-                >
-                  <option value="zh-CN">zh-CN</option>
-                  <option value="en">en</option>
-                </DeskSelect>
-              </label>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <DeskButton
-                  action="preview"
-                  variant="line"
-                  compact
-                  busy={!!busy}
-                  disabled={noDocReason !== undefined}
-                  disabledReason={noDocReason}
-                  disabledReasonLabel={reasonLabel(noDocReason)}
-                  onClick={bumpPaper}
-                >
-                  <Eye size={12} />
-                  {t('resume.preview')}
-                </DeskButton>
-                {/* 写本机userData 的这一颗走琥珀；预览是只读渲染，不给外发那一档的朱砂。 */}
-                <DeskButton
-                  action="export"
-                  variant="amber"
-                  compact
-                  busy={!!busy}
-                  disabled={noDocReason !== undefined}
-                  disabledReason={noDocReason}
-                  disabledReasonLabel={reasonLabel(noDocReason)}
-                  onClick={() => docId !== undefined && exportPdf(docId)}
-                >
-                  <FileDown size={12} />
-                  {t('resume.export')}
-                </DeskButton>
-                <DeskButton
-                  action="open-editor"
-                  variant="line"
-                  compact
-                  busy={!!busy}
-                  disabled={editorReason !== undefined}
-                  disabledReason={editorReason}
-                  disabledReasonLabel={reasonLabel(editorReason)}
-                  onClick={() => requestPaperMode('layout')}
-                >
-                  <SlidersHorizontal size={12} />
-                  {t('resume.editor.enter')}
-                </DeskButton>
-                <DeskButton
-                  action="open-pdf-edit"
-                  variant="line"
-                  compact
-                  busy={!!busy}
-                  disabled={!!busy}
-                  disabledReason={busyReason}
-                  disabledReasonLabel={reasonLabel(busyReason)}
-                  onClick={() => requestPaperMode('pdf')}
-                >
-                  <Pencil size={12} />
-                  {t('pdfEdit.enter')}
-                </DeskButton>
-                <DeskButton
-                  action="snapshots"
-                  variant="line"
-                  compact
-                  busy={!!busy}
-                  disabled={noDocReason !== undefined}
-                  disabledReason={noDocReason}
-                  disabledReasonLabel={reasonLabel(noDocReason)}
-                  onClick={() => {
-                    setSnapshotsOpen(true);
-                    if (docId !== undefined) loadSnapshots(docId);
-                  }}
-                >
-                  <History size={12} />
-                  {t('resume.snapshots')}
-                </DeskButton>
-                <DeskButton
-                  action="diff"
-                  variant="line"
-                  compact
-                  busy={!!busy}
-                  disabled={diffReason !== undefined}
-                  disabledReason={diffReason}
-                  disabledReasonLabel={reasonLabel(diffReason)}
-                  onClick={() => {
-                    setSnapshotsOpen(true);
-                    compareSnapshots();
-                  }}
-                >
-                  <GitCompareArrows size={12} />
-                  {t('resume.diff')}
-                </DeskButton>
+                    <KbPanel docId={docId ?? ''} docLabel={docLabel} />
+                    <GapPanel />
+                  </div>
+                </DeskExplainer>
               </div>
-            </div>
-          </DeskSection>
+            </DeskSection>
 
-          {/* 排版编辑器：只在「排版」这一档长出**控件**（区块顺序、字号、行距、页边距、语言），
+            {/* ② 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
+            <DeskSection
+              id="resume.generate"
+              title={t('desk.resume.sectionGenerate')}
+              summary={
+                docLabel ? t('desk.resume.sectionGenerateFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
+              }
+              defaultOpen
+              // 岗位行双击跳过来时（09 稿形态⑥ / spec 6.4-05）强制打开这一格：收起态下正文是卸载的，
+              // 人不该被送到一格看不见 JD 输入框的地方。
+              openSignal={trail && trail.targetView === 'resume' ? trail.requestId : undefined}
+              markers={{ testid: 'resume-section-generate' }}
+            >
+              <div className="flex min-w-0 flex-col gap-2">
+                <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="generate">
+                  {t('desk.resume.stepGenerateHint')}
+                </p>
+                <GeneratePanel
+                  docs={docs}
+                  docId={docId ?? ''}
+                  onDocIdChange={setDocId}
+                  refreshDocs={refreshDocs}
+                  onAccepted={bumpPaper}
+                />
+              </div>
+            </DeskSection>
+
+            {/* ③ 出纸：模板架（裁定② 的骨架缩略图）+ 这张纸的三把出口键 + 快照对照。 */}
+            <DeskSection
+              id="resume.output"
+              title={t('desk.resume.sectionOutput')}
+              summary={
+                templateName
+                  ? t('desk.resume.sectionOutputWith', { template: templateName, locale })
+                  : t('desk.resume.sectionOutputNone')
+              }
+              defaultOpen
+              markers={{ testid: 'resume-section-output' }}
+            >
+              <div className="flex min-w-0 flex-col gap-3">
+                <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="output">
+                  {t('desk.resume.stepOutputHint')}
+                </p>
+
+                <TemplateShelf
+                  templates={templates}
+                  selectedId={templateId}
+                  defaultId={defaultTemplateId}
+                  filter={shelfFilter}
+                  onFilterChange={setShelfFilter}
+                  onSelect={selectTemplate}
+                  onSetDefault={rememberTemplate}
+                  busy={!!busy}
+                  disabledReason={templateReason}
+                  disabledReasonLabel={reasonLabel(templateReason)}
+                />
+
+                <label className="flex items-center gap-1 text-[11px] text-slate-400">
+                  {t('resume.locale')}
+                  <DeskSelect
+                    action="resume-locale"
+                    data-testid="resume-locale"
+                    value={locale}
+                    onValueChange={(value) => setLocale(value as ResumeLocaleView)}
+                  >
+                    <option value="zh-CN">zh-CN</option>
+                    <option value="en">en</option>
+                  </DeskSelect>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <DeskButton
+                    action="preview"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={noDocReason !== undefined}
+                    disabledReason={noDocReason}
+                    disabledReasonLabel={reasonLabel(noDocReason)}
+                    onClick={bumpPaper}
+                  >
+                    <Eye size={12} />
+                    {t('resume.preview')}
+                  </DeskButton>
+                  {/* 写本机userData 的这一颗走琥珀；预览是只读渲染，不给外发那一档的朱砂。 */}
+                  <DeskButton
+                    action="export"
+                    variant="amber"
+                    compact
+                    busy={!!busy}
+                    disabled={noDocReason !== undefined}
+                    disabledReason={noDocReason}
+                    disabledReasonLabel={reasonLabel(noDocReason)}
+                    onClick={() => docId !== undefined && exportPdf(docId)}
+                  >
+                    <FileDown size={12} />
+                    {t('resume.export')}
+                  </DeskButton>
+                  <DeskButton
+                    action="open-editor"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={editorReason !== undefined}
+                    disabledReason={editorReason}
+                    disabledReasonLabel={reasonLabel(editorReason)}
+                    onClick={() => requestPaperMode('layout')}
+                  >
+                    <SlidersHorizontal size={12} />
+                    {t('resume.editor.enter')}
+                  </DeskButton>
+                  <DeskButton
+                    action="open-pdf-edit"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={!!busy}
+                    disabledReason={busyReason}
+                    disabledReasonLabel={reasonLabel(busyReason)}
+                    onClick={() => requestPaperMode('pdf')}
+                  >
+                    <Pencil size={12} />
+                    {t('pdfEdit.enter')}
+                  </DeskButton>
+                  <DeskButton
+                    action="snapshots"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={noDocReason !== undefined}
+                    disabledReason={noDocReason}
+                    disabledReasonLabel={reasonLabel(noDocReason)}
+                    onClick={() => {
+                      setSnapshotsOpen(true);
+                      if (docId !== undefined) loadSnapshots(docId);
+                    }}
+                  >
+                    <History size={12} />
+                    {t('resume.snapshots')}
+                  </DeskButton>
+                  <DeskButton
+                    action="diff"
+                    variant="line"
+                    compact
+                    busy={!!busy}
+                    disabled={diffReason !== undefined}
+                    disabledReason={diffReason}
+                    disabledReasonLabel={reasonLabel(diffReason)}
+                    onClick={() => {
+                      setSnapshotsOpen(true);
+                      compareSnapshots();
+                    }}
+                  >
+                    <GitCompareArrows size={12} />
+                    {t('resume.diff')}
+                  </DeskButton>
+                </div>
+              </div>
+            </DeskSection>
+
+            {/* 排版编辑器：只在「排版」这一档长出**控件**（区块顺序、字号、行距、页边距、语言），
             画面不跟着搬进来——它仍画在右栏那一格里（spec 6.4-14 的④：同一屏不许有两份草稿预览）。
             这是 2026-10-10 的一次形状更正：原先编辑器整块塞在纸面槽里（控件 + 它自己那张 iframe），
             于是"改了滑杆要在那一格才看得见结果"，而它与右边那张落库版预览同时挂在屏上。
             条件挂载而不是 `hidden`：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
-          {paperMode === 'layout' && docId !== undefined && (
-            <ResumeEditor docId={docId} onClose={() => requestPaperMode('preview')} onPreview={acceptDraft} />
-          )}
+            {paperMode === 'layout' && docId !== undefined && (
+              <ResumeEditor docId={docId} onClose={() => requestPaperMode('preview')} onPreview={acceptDraft} />
+            )}
 
-          {/* PDF 覆盖这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
+            {/* PDF 覆盖这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
               与排版编辑器同一条形状：只有当前那一档在 DOM 里。 */}
-          {paperMode === 'pdf' && <PdfEditPanel model={pdfEdit} />}
+            {paperMode === 'pdf' && <PdfEditPanel model={pdfEdit} />}
 
-          {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
+            {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
             spec 3.3-10 / 3.3-11 的取证通道因此不断；变的只是它们住在哪一格。 */}
-          <DeskButton
-            action="desk-fixtures"
-            variant="ghost"
-            compact
-            onClick={() => setFixturesOpen(true)}
-            className="self-start"
-          >
-            <FlaskConical size={12} />
-            {t('desk.resume.fixtures')}
-          </DeskButton>
-        </div>
+            <DeskButton
+              action="desk-fixtures"
+              variant="ghost"
+              compact
+              onClick={() => setFixturesOpen(true)}
+              className="self-start"
+            >
+              <FlaskConical size={12} />
+              {t('desk.resume.fixtures')}
+            </DeskButton>
+          </div>
 
-        {/* 右栏：一根把手 + 一张常驻的纸。三种看法（预览 / 排版 / PDF 覆盖）都画在这一格里，
+          {/* 右栏：一根把手 + 一张常驻的纸。三种看法（预览 / 排版 / PDF 覆盖）都画在这一格里，
           所以"编排显示在右侧边栏"与"实时看到变动"是同一件事的两个说法（用户 2026-10-10 的原话）。
           窄档整栏换到最上面（`order-1`）：纵向退让时把纸摆在动作之前，主视觉不再被 330 行控件埋住（病灶③）；
           把手在这一档不画（堆叠时没有"左右"可拖），宽度那一档仍照常持久化，够到 46rem 就回到人拖的位置上。
@@ -938,215 +1117,272 @@ export function ResumeDesk() {
 
           `self-start` 是 sticky 生效的前提：flex 项默认被 `align-items: stretch` 拉成整行高（左列实测 2673px），
           拉满之后就没有可粘的余量——本轮活体拍到"滚到排版控件时右栏整格空白"正是这一条。 */}
-        <div
-          ref={paperSplit.panelRef}
-          className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
-        >
-          <SplitHandle
-            split={paperSplit}
-            label={t('desk.resume.paperHandle')}
-            action="resume-paper-handle"
-            testid="resume-paper-handle"
-            className="hidden @[46rem]:block"
-          />
-          <div className="min-w-0 flex-1">
-            <ResumePaperStage
-              mode={paperMode}
-              onModeChange={requestPaperMode}
-              paperHtml={paperHtml}
-              paperStatus={paperStatus}
-              paperUpdatedAt={paperUpdatedAt}
-              pdfView={<PdfPaperView model={pdfEdit} />}
-              docLabel={docLabel}
-              templateName={templateName}
-              locale={locale}
-              receipt={receipt}
-              onReveal={revealReceipt}
-              busy={!!busy}
+          <div
+            ref={paperSplit.panelRef}
+            className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
+          >
+            <SplitHandle
+              split={paperSplit}
+              label={t('desk.resume.paperHandle')}
+              action="resume-paper-handle"
+              testid="resume-paper-handle"
+              className="hidden @[46rem]:block"
             />
-          </div>
-        </div>
-
-        <Drawer
-          action="desk-fixtures"
-          open={fixturesOpen}
-          title={t('desk.resume.fixtures')}
-          subtitle={t('desk.resume.fixturesHint')}
-          onClose={() => setFixturesOpen(false)}
-        >
-          <div className="flex flex-col gap-2">
-            <p className="text-[11px] leading-relaxed text-slate-400">{t('desk.resume.fixturesBody')}</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <DeskButton
-                action="seed"
-                variant="amber"
-                compact
+            <div className="min-w-0 flex-1">
+              <ResumePaperStage
+                mode={paperMode}
+                onModeChange={requestPaperMode}
+                paperHtml={paperHtml}
+                paperStatus={paperStatus}
+                paperUpdatedAt={paperUpdatedAt}
+                pdfView={<PdfPaperView model={pdfEdit} />}
+                docLabel={docLabel}
+                templateName={templateName}
+                locale={locale}
+                receipt={receipt}
+                onReveal={revealReceipt}
                 busy={!!busy}
-                disabled={!!busy}
-                disabledReason={busyReason}
-                disabledReasonLabel={reasonLabel(busyReason)}
-                onClick={() => loadDemo('base')}
-              >
-                <RefreshCw size={12} />
-                {t('resume.seed')}
-              </DeskButton>
-              <DeskButton
-                action="seed-edited"
-                variant="amber"
-                compact
-                busy={!!busy}
-                disabled={!!busy}
-                disabledReason={busyReason}
-                disabledReasonLabel={reasonLabel(busyReason)}
-                onClick={() => loadDemo('edited')}
-              >
-                <FileText size={12} />
-                {t('resume.seedEdited')}
-              </DeskButton>
-              <DeskButton
-                action="fail"
-                variant="ghost"
-                compact
-                busy={!!busy}
-                disabled={!!busy}
-                disabledReason={busyReason}
-                disabledReasonLabel={reasonLabel(busyReason)}
-                onClick={injectFailure}
-              >
-                <Ban size={12} />
-                {t('resume.fail')}
-              </DeskButton>
+              />
             </div>
           </div>
-        </Drawer>
 
-        <Drawer
-          action="snapshots"
-          open={snapshotsOpen}
-          title={t('resume.snapshots')}
-          subtitle={snapshots.length > 0 ? t('resume.snapshotCount', { count: snapshots.length }) : undefined}
-          onClose={() => setSnapshotsOpen(false)}
-        >
-          {snapshots.length > 0 && (
-            <div className="flex flex-wrap gap-3" data-testid="snapshot-list">
-              <label className="flex items-center gap-1 text-[11px] text-slate-400">
-                {t('resume.diffFrom')}
-                <DeskSelect
-                  action="snapshot-diff-from"
-                  data-testid="snapshot-diff-from"
-                  value={fromId}
-                  onValueChange={(value) => {
-                    setFromId(value);
-                    setDiff(undefined);
-                  }}
-                  className="max-w-[260px]"
+          <Drawer
+            action="desk-fixtures"
+            open={fixturesOpen}
+            title={t('desk.resume.fixtures')}
+            subtitle={t('desk.resume.fixturesHint')}
+            onClose={() => setFixturesOpen(false)}
+          >
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] leading-relaxed text-slate-400">{t('desk.resume.fixturesBody')}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <DeskButton
+                  action="seed"
+                  variant="amber"
+                  compact
+                  busy={!!busy}
+                  disabled={!!busy}
+                  disabledReason={busyReason}
+                  disabledReasonLabel={reasonLabel(busyReason)}
+                  onClick={() => loadDemo('base')}
                 >
-                  {snapshots.map((item) => (
-                    <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
-                      {snapshotLabel(item)}
-                    </option>
-                  ))}
-                </DeskSelect>
-              </label>
-              <label className="flex items-center gap-1 text-[11px] text-slate-400">
-                {t('resume.diffTo')}
-                <DeskSelect
-                  action="snapshot-diff-to"
-                  data-testid="snapshot-diff-to"
-                  value={toId}
-                  onValueChange={(value) => {
-                    setToId(value);
-                    setDiff(undefined);
-                  }}
-                  className="max-w-[260px]"
+                  <RefreshCw size={12} />
+                  {t('resume.seed')}
+                </DeskButton>
+                <DeskButton
+                  action="seed-edited"
+                  variant="amber"
+                  compact
+                  busy={!!busy}
+                  disabled={!!busy}
+                  disabledReason={busyReason}
+                  disabledReasonLabel={reasonLabel(busyReason)}
+                  onClick={() => loadDemo('edited')}
                 >
-                  {snapshots.map((item) => (
-                    <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
-                      {snapshotLabel(item)}
-                    </option>
-                  ))}
-                </DeskSelect>
-              </label>
-              {/* 换完版本对就在栏内重比（09 稿形态④ 4-A）。不在 onValueChange 里即时重比：
+                  <FileText size={12} />
+                  {t('resume.seedEdited')}
+                </DeskButton>
+                <DeskButton
+                  action="fail"
+                  variant="ghost"
+                  compact
+                  busy={!!busy}
+                  disabled={!!busy}
+                  disabledReason={busyReason}
+                  disabledReasonLabel={reasonLabel(busyReason)}
+                  onClick={injectFailure}
+                >
+                  <Ban size={12} />
+                  {t('resume.fail')}
+                </DeskButton>
+              </div>
+            </div>
+          </Drawer>
+
+          <Drawer
+            action="snapshots"
+            open={snapshotsOpen}
+            title={t('resume.snapshots')}
+            subtitle={snapshots.length > 0 ? t('resume.snapshotCount', { count: snapshots.length }) : undefined}
+            onClose={() => setSnapshotsOpen(false)}
+          >
+            {snapshots.length > 0 && (
+              <div className="flex flex-wrap gap-3" data-testid="snapshot-list">
+                <label className="flex items-center gap-1 text-[11px] text-slate-400">
+                  {t('resume.diffFrom')}
+                  <DeskSelect
+                    action="snapshot-diff-from"
+                    data-testid="snapshot-diff-from"
+                    value={fromId}
+                    onValueChange={(value) => {
+                      setFromId(value);
+                      setDiff(undefined);
+                    }}
+                    className="max-w-[260px]"
+                  >
+                    {snapshots.map((item) => (
+                      <option key={`from-${item.snapshotId}`} value={item.snapshotId}>
+                        {snapshotLabel(item)}
+                      </option>
+                    ))}
+                  </DeskSelect>
+                </label>
+                <label className="flex items-center gap-1 text-[11px] text-slate-400">
+                  {t('resume.diffTo')}
+                  <DeskSelect
+                    action="snapshot-diff-to"
+                    data-testid="snapshot-diff-to"
+                    value={toId}
+                    onValueChange={(value) => {
+                      setToId(value);
+                      setDiff(undefined);
+                    }}
+                    className="max-w-[260px]"
+                  >
+                    {snapshots.map((item) => (
+                      <option key={`to-${item.snapshotId}`} value={item.snapshotId}>
+                        {snapshotLabel(item)}
+                      </option>
+                    ))}
+                  </DeskSelect>
+                </label>
+                {/* 换完版本对就在栏内重比（09 稿形态④ 4-A）。不在 onValueChange 里即时重比：
                 连改两只选择器时，前一条还在途的差异会贴到新版本对上，界面就成了说谎。 */}
-              <DeskButton
-                action="snapshot-compare"
-                variant="line"
-                compact
-                busy={!!busy}
-                disabled={diffReason !== undefined}
-                disabledReason={diffReason}
-                disabledReasonLabel={reasonLabel(diffReason)}
-                onClick={compareSnapshots}
-              >
-                <GitCompareArrows size={12} />
-                {t('resume.diff')}
-              </DeskButton>
-            </div>
-          )}
+                <DeskButton
+                  action="snapshot-compare"
+                  variant="line"
+                  compact
+                  busy={!!busy}
+                  disabled={diffReason !== undefined}
+                  disabledReason={diffReason}
+                  disabledReasonLabel={reasonLabel(diffReason)}
+                  onClick={compareSnapshots}
+                >
+                  <GitCompareArrows size={12} />
+                  {t('resume.diff')}
+                </DeskButton>
+              </div>
+            )}
 
-          {diff && (
-            <div className="mt-3 border-t border-line" data-testid="snapshot-diff">
-              {diff.isEmpty ? (
-                <p className="py-2.5 text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
-                  {t('resume.diffEmpty')}
-                </p>
-              ) : (
-                <ul>
-                  {diff.sections.map((section) => (
-                    <li
-                      key={section.sectionId}
-                      data-testid="diff-section"
-                      className="border-b border-line py-2.5 last:border-b-0"
-                    >
-                      <p
-                        className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-300"
-                        data-testid="diff-section-heading"
+            {diff && (
+              <div className="mt-3 border-t border-line" data-testid="snapshot-diff">
+                {diff.isEmpty ? (
+                  <p className="py-2.5 text-[11px] text-slate-400" data-testid="snapshot-diff-empty">
+                    {t('resume.diffEmpty')}
+                  </p>
+                ) : (
+                  <ul>
+                    {diff.sections.map((section) => (
+                      <li
+                        key={section.sectionId}
+                        data-testid="diff-section"
+                        className="border-b border-line py-2.5 last:border-b-0"
                       >
-                        <Tag tone={CHANGE_TONE[section.change]}>{t(CHANGE_LABEL_KEY[section.change])}</Tag>
-                        {t(`resume.kind.${section.kind}`)}
-                      </p>
-                      <ul className="mt-1 space-y-1 pl-3">
-                        {section.entries.map((entry) => (
-                          <li key={entry.entryId} data-testid="diff-entry">
-                            <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                              <Tag tone={CHANGE_TONE[entry.change]}>{t(CHANGE_LABEL_KEY[entry.change])}</Tag>
-                              {entry.entryId}
-                            </p>
-                            <ul className="mt-0.5 space-y-0.5 pl-3">
-                              {entry.fields.map((field) => (
-                                <li
-                                  key={field.key}
-                                  data-testid="diff-field"
-                                  className="flex flex-wrap items-baseline gap-1 text-[11px]"
-                                >
-                                  <span className="text-slate-500">{field.key}</span>
-                                  <span className="break-all text-slate-400 line-through">
-                                    {field.before ?? t('resume.valueAbsent')}
-                                  </span>
-                                  <span className="text-slate-600">→</span>
-                                  <span className="break-all text-jade-ink">
-                                    {field.after ?? t('resume.valueAbsent')}
-                                  </span>
-                                  {field.locked && (
-                                    <Tag tone="amber" data-testid="diff-field-locked">
-                                      {t('resume.fieldLocked')}
-                                    </Tag>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </li>
-                        ))}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </Drawer>
-      </section>
-    </div>
+                        <p
+                          className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-300"
+                          data-testid="diff-section-heading"
+                        >
+                          <Tag tone={CHANGE_TONE[section.change]}>{t(CHANGE_LABEL_KEY[section.change])}</Tag>
+                          {t(`resume.kind.${section.kind}`)}
+                        </p>
+                        <ul className="mt-1 space-y-1 pl-3">
+                          {section.entries.map((entry) => (
+                            <li key={entry.entryId} data-testid="diff-entry">
+                              <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                                <Tag tone={CHANGE_TONE[entry.change]}>{t(CHANGE_LABEL_KEY[entry.change])}</Tag>
+                                {entry.entryId}
+                              </p>
+                              <ul className="mt-0.5 space-y-0.5 pl-3">
+                                {entry.fields.map((field) => (
+                                  <li
+                                    key={field.key}
+                                    data-testid="diff-field"
+                                    className="flex flex-wrap items-baseline gap-1 text-[11px]"
+                                  >
+                                    <span className="text-slate-500">{field.key}</span>
+                                    <span className="break-all text-slate-400 line-through">
+                                      {field.before ?? t('resume.valueAbsent')}
+                                    </span>
+                                    <span className="text-slate-600">→</span>
+                                    <span className="break-all text-jade-ink">
+                                      {field.after ?? t('resume.valueAbsent')}
+                                    </span>
+                                    {field.locked && (
+                                      <Tag tone="amber" data-testid="diff-field-locked">
+                                        {t('resume.fieldLocked')}
+                                      </Tag>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </Drawer>
+        </section>
+      </div>
+      {/* 删除的二次确认（spec 6.4-20）：这一刀删的是"这个人找工作用的全部素材"，
+          与 `ModelSettingsPanel` 那一键直删的配置条目不是一个量级，所以必须读完整风险才点得下去——
+          `dismissOnScrim: false` 一条 prop 同时关掉点遮罩 / Esc / 右上角 ✕ 三条退路（09 稿形态⑤）。
+          渲染在 `@container` 那一格的**外面**，两条都是硬理由：
+          ① `DeskSection` 收起时正文是卸载的，确认框不能跟着一起消失；
+          ② `container-type: inline-size` 隐含 `contain: layout`，于是那一格会成为 `position: fixed` 后代的包含块——
+             遮罩就只盖住简历区而不是整扇窗口，09 稿那条"同一时刻全 app 只有一只遮罩"的几何前提会当场不成立。 */}
+      <Modal
+        action="resume-delete"
+        open={deleteTargetLabel !== undefined}
+        title={t('resume.deleteTitle')}
+        onClose={() => setPendingDelete(undefined)}
+        width="480"
+        tone="seal"
+        dismissOnScrim={false}
+        testId="resume-delete-modal"
+        markers={{ docId: pendingDelete ?? '' }}
+        footer={
+          <>
+            <DeskButton
+              action="resume-delete-cancel"
+              variant="line"
+              compact
+              onClick={() => setPendingDelete(undefined)}
+            >
+              {t('resume.deleteCancel')}
+            </DeskButton>
+            <DeskButton
+              action="resume-delete-confirm"
+              variant="seal"
+              compact
+              busy={busy === t('resume.delete')}
+              disabled={!!busy}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
+              onClick={() => {
+                const target = pendingDelete;
+                setPendingDelete(undefined);
+                if (target !== undefined) deleteDoc(target);
+              }}
+            >
+              {t('resume.deleteConfirm')}
+            </DeskButton>
+          </>
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-2">
+          <p>{t('resume.deleteBody', { doc: deleteTargetLabel ?? '' })}</p>
+          {/* 把"删掉哪些"与"留下哪些"分列写清：这一刀连素材一起删是裁定㉖ 第 1 条，
+              而生成历史与额度台账留下是同一条裁定里另一半的表态——人不该靠猜知道边界在哪。 */}
+          <ul className="list-disc pl-4 text-slate-300">
+            <li>{t('resume.deleteRemoves')}</li>
+            <li>{t('resume.deleteKept')}</li>
+          </ul>
+        </div>
+      </Modal>
+    </>
   );
 }

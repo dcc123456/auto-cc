@@ -266,6 +266,10 @@ describe('4.1-14 出处（来路看得见）', () => {
     // 目录不进库（§8.5 的默认脱敏：路径说的是"放在我哪块盘上"，对简历读数没有增益）。
     expect(line.sourceName).not.toContain(dir);
     expect(parse.pending()[0]?.sourceName).toBe('张三-后端简历.md');
+    // 界面那句「读到 N 字」的唯一来源：来路行自己带字数，而且是**同一次导入的同一个数**
+    // （`resume_imports.text_length` 一格，两条读数不许各数一遍，§2.5）。
+    expect(line.textLength).toBeGreaterThan(0);
+    expect(line.textLength).toBe(parse.pending()[0]?.textLength);
   });
 
   it('来路覆盖**干净**导入：issues 清空后 pending() 不再出现，provenance() 仍然说得出它从哪来', async () => {

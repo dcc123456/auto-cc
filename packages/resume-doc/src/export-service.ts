@@ -10,7 +10,12 @@
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
-import { PREVIEW_FONT_BASE, type ResumePrintPort, type ResumeTemplateSummaryView } from '@auto-cc/shared';
+import {
+  DEMO_RESUME_DOC_ID,
+  PREVIEW_FONT_BASE,
+  type ResumePrintPort,
+  type ResumeTemplateSummaryView,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -23,9 +28,6 @@ import type { TemplateLocale } from './template.js';
 
 /** 导出产物落盘的子目录名（在 `userDataDir` 之下，与库、会话分区同根）。 */
 const EXPORTS_SUBDIR = 'exports';
-
-/** 演示种子文档 id（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 落地后由用户文档取代）。 */
-const DEMO_DOC_ID = 'resume-demo';
 
 /**
  * 演示种子的两个版本：`base` 是首次载入的样子，`edited` 在它之上改两处自由文本并追加一个项目区块。
@@ -148,7 +150,7 @@ export class ResumeExportService extends Service {
 
   seedDemo = (variant: ResumeSeedVariant = 'base'): { docId: string; hash: string } => {
     const saved = this.docStore.save(this.demoDocument(variant));
-    return { docId: DEMO_DOC_ID, hash: saved.hash };
+    return { docId: DEMO_RESUME_DOC_ID, hash: saved.hash };
   };
 
   /**
@@ -163,7 +165,7 @@ export class ResumeExportService extends Service {
    */
   private demoDocument(variant: ResumeSeedVariant): ResumeDocument {
     const base: ResumeDocument = {
-      ...createEmptyDocument(DEMO_DOC_ID, Date.now()),
+      ...createEmptyDocument(DEMO_RESUME_DOC_ID, Date.now()),
       profile: { name: '张三', contact: { email: 'zhangsan@example.com', phone: '13800000000', location: '上海' } },
       sections: [
         {

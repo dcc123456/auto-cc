@@ -1782,3 +1782,12 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
 `generate-service.test.ts` / `bench.ts` / `main/evidence-link.test.ts` / `main/gap-quota-link.test.ts` /
 `main/generate-link.test.ts`，判据与顺序读数新落在 `main/resume-remove-link.test.ts`。
 **下一片再加硬注入时必须同样全仓搜一遍 `plugin(KbProfileService`**，别指望单测会替你把顺序错误暴露出来。
+
+**4.1-14 的 V 半边收口（2026-10-10，第六十一片）**：活体删两份（一份当前在用的导入件、一份非当前且带素材的老行），
+逐表前后计数与画面四张落在 `docs/acceptance/06-ui-ink-desk/6.4-20-delete-*`。两条要留档的结论：
+① 裁定㉖「留生成历史」是真的落地了——删李静后 `resume_generations` 16→16，而它自己那 10 行仍在，
+`kb_entities` 15→6 / `kb_chunks` 17→7 / `resume_snapshots` 23→17 / `resume_imports` 3→2；
+② 本行原判据里"生成历史对已删那份显示成人读的一句话"指的是一个**不存在的界面**
+（`resume_generations` 从不上桥，界面上从来没有那一格），已按 §4.5 就地更正为可判形态，写进 spec 那一格里。
+"删除中失败"那一腿（6.4-20 ④）本机拿不到触发面（`DELETE` 天然幂等 → 全零回执），
+那一行因此标 `[!]` 而不是 `[x]`，替代证据是本片那条回滚单测。

@@ -117,6 +117,15 @@ export interface DeskSectionProps {
   openSignal?: number;
   /** 挂在段容器上的附加 `data-*`（harness 常按 testid 找那一格）。 */
   markers?: Record<string, string>;
+  /**
+   * 只在**收起态**出现在段头之后的那一行（裁定㉖ 第 2 条「把导入提到段头」的落点）。
+   *
+   * 为什么是段头的**兄弟行**而不是塞进段头里：段头本身就是一颗 `<button>`，而嵌套交互元素会被浏览器
+   * 把内层那颗的点击判给外层——harness 与人再也按不到内层自己的 `data-action`（上面那条实测注释）。
+   * 为什么只在收起态渲染：展开态正文里本来就有同一颗键，两处同时存在就是 §2.5 禁止的"两个入口都能办同一件事"。
+   * 缺席时这一行整个不渲染，所以其余没给这一格的段 DOM 一字不变。
+   */
+  headExtra?: ReactNode;
   /** 追加 class（只放外边与宽度档）。 */
   className?: string;
   children: ReactNode;
@@ -135,6 +144,7 @@ export function DeskSection({
   defaultOpen = false,
   openSignal,
   markers,
+  headExtra,
   className = '',
   children,
 }: DeskSectionProps) {
@@ -162,6 +172,14 @@ export function DeskSection({
           {summary ? <span className="mt-0.5 block truncate text-[11px] text-slate-500">{summary}</span> : null}
         </span>
       </button>
+      {/* 常驻动作条：段头的**兄弟行**，只在收起态出现（`headExtra` 缺席时这一行整个不渲染）。
+          收起态下正文是卸载的，于是"这一格最主要的那颗键"跟着一起消失——人必须点开段头才找得到做事的入口，
+          这正是 2026-10-10 那句报障（「导入简历功能无效」「如何删除都不可见」）里最重的一条根因。 */}
+      {!open && headExtra ? (
+        <div data-head-extra={id} className="flex min-w-0 flex-wrap items-center gap-2 border-t border-line px-4 py-2">
+          {headExtra}
+        </div>
+      ) : null}
       {/* 正文是这一段里**唯一可滚**的一格：段落在纵向 flex 列（对话屏）里是 flex 子项，
           而 `overflow-hidden` 让它的自动最小尺寸塌成 0，于是"给多少长多少"而不是把输入区顶出画面
           （活体读数：对话列各带合计 733 而面板只有 652，展开的档位段把输入区整个顶到窗口之外）。

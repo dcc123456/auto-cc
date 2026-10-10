@@ -130,8 +130,8 @@ export interface PendingImportView {
 /**
  * 一份导入的**来路**读数（spec 4.1-14 / 裁定㉖ 的「候选列表里每个一行小字」的数据源）。
  *
- * 与 `PendingImportView` 刻意不同形状：那一条是"待确认"的清单行，带 issues 与正文长度；
- * 这一条只回答"它从哪来、什么时候来的、当时是什么格式"，所以它必须覆盖**全部**导入行
+ * 与 `PendingImportView` 刻意不同形状：那一条是"待确认"的清单行，带 issues；
+ * 这一条只回答"它从哪来、什么时候来的、当时是什么格式、读进来多少字"，所以它必须覆盖**全部**导入行
  * （一份解析得干干净净的简历同样有来路）。
  */
 export interface ImportProvenanceView {
@@ -142,6 +142,11 @@ export interface ImportProvenanceView {
   readonly status: ImportStatus;
   /** 那次导入落库的时刻（毫秒）——是「导入于何时」，不是「简历最后改动于何时」。 */
   readonly importedAt: number;
+  /**
+   * 那次导入读到的字数（裁定㉖ 第 3 条那句「读到 N 字」的唯一来源）。
+   * 界面不许拿正文自己数（§2.5），也不许拿这一格去回答"简历有多长"——它是**导入当时**的读数。
+   */
+  readonly textLength: number;
 }
 
 interface ResumeImportRow {
@@ -185,7 +190,7 @@ function toPendingView(row: ResumeImportRow): PendingImportView {
  * @returns 不含正文与 issues 的出处视图
  */
 function toProvenanceView(
-  row: Pick<ResumeImportRow, 'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name'>,
+  row: Pick<ResumeImportRow, 'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name' | 'text_length'>,
 ): ImportProvenanceView {
   return {
     docId: row.doc_id,
@@ -193,6 +198,7 @@ function toProvenanceView(
     format: row.format as ResumeSourceFormat,
     status: row.status as ImportStatus,
     importedAt: Number(row.updated_at),
+    textLength: Number(row.text_length),
   };
 }
 
@@ -353,13 +359,13 @@ export class ResumeParseService extends Service {
   provenance(): readonly ImportProvenanceView[] {
     const rows = this.store.db
       .prepare(
-        `SELECT doc_id, format, status, updated_at, source_name
+        `SELECT doc_id, format, status, updated_at, source_name, text_length
                   FROM resume_imports
                  ORDER BY updated_at DESC`,
       )
       .all() as unknown as readonly Pick<
       ResumeImportRow,
-      'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name'
+      'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name' | 'text_length'
     >[];
     return rows.map(toProvenanceView);
   }

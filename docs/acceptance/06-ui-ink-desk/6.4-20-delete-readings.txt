@@ -1,0 +1,46 @@
+6.4-20 活体读数（2026-10-10，隔离实例 CDP 10244 / --url 5173，userData tmp/61-userdata）
+窗口 1200×772、未最大化、document.visibilityState = visible
+——因此下列删除/确认动作是**真实原生鼠标事件**落的页，不是 element.click() 的逻辑层读数。
+（库计数用只读 node:sqlite 探针 tmp/61/db.cjs 现问，不走界面回显。）
+
+腿①：确认遮罩画得出来、且盖住整窗
+  dialog  : 480 × 195 @ (360, 289)      —— width="480" 真的生效（原件到货配几何读数）
+  scrim   : 1200 × 772 @ (0, 0) == 视口  —— 自证遮罩必须渲染在 @container 之外：
+            container-type: inline-size 隐含 contain: layout，段内祖先会变成
+            position: fixed 的包含块，写进段里就盖不住整窗。
+  ✕ 关闭角标 : 无（dismissOnScrim:false → neverClose，Esc 亦不关）
+  确认/取消两颗键 : 均 enabled（无 data-disabled-reason）
+  确认前候选行数 : 3
+
+腿②：删当前在用的那份（王五，导入件、无快照无素材）
+  回执文案：已删掉这一份：0 段素材 · 0 条索引 · 0 个版本 · 1 条来路
+  候选行数 3 → 2；docId 回落到 resume-demo（列表首项）
+  纸面 data-status = idle，段头摘要「张三 · 现代双列强调 · zh-CN」
+  槽内 iframe+canvas 计数 = 1（没有第二份预览，6.4-08 的不变量没被拖红）
+  库计数（前 → 后）：docs 3→2、imports 4→3、snapshots 23→23、kb_entities 15→15、
+                    kb_chunks 17→17、resume_generations 16→16
+  perDoc（王五，前 → 后）：doc 1→0、snapshots 0→0、imports 1→0、entities 0→0、chunks 0→0
+
+腿③：删非当前、且有素材的那份（李静，第 37 版之前的老导入行）
+  回执文案：已删掉这一份：9 段素材 · 10 条索引 · 6 个版本 · 1 条来路
+  提醒行「3 处没读准」→「2 处没读准」（同一次 read() 里重读，界面不猜）
+  候选行数 2 → 1
+  库计数（前 → 后）：docs 2→1、snapshots 23→17（-6）、imports 3→2、
+                    kb_entities 15→6（-9）、kb_chunks 17→7（-10）、
+                    kb_vectors 0→0（本机该库未建向量）、resume_generations 16→16
+  perDoc（李静，前 → 后）：doc 1→0、snapshots 6→0、imports 1→0、entities 9→0、chunks 10→0、
+                          generations **10→10（留着）**
+  → 裁定㉖「连素材一起真删、但留生成历史与额度账」在这一条腿上是活体证据，不是注释里的承诺。
+
+腿④：删除失败要报得出原因码、且不许把行弄丢 —— [!] 未取到活体触发
+  原因：packages/resume-kb 的 profile.removeDoc 对不存在的 docId 回的是**全零回执**
+        （DELETE 语句天然幂等），界面因此拿不到错误码；本机没有可复现的失败注入面
+        （库文件可写、无约束冲突路径）。
+  已落地的替代证据：片 60-c 的回滚单测（六张表任一抛错 → 整事务回滚、行不消失），
+  以及渲染层 useBridgeAction 的形态——失败只 setDeleteError 并照常跑 read()，
+  所以「回执失败 + 行被抹掉」这一对不可能同时出现（列表刷新是唯一事实源）。
+  解除条件：接上真实失败注入（如把库目录挂成只读）后补一张带 data-testid="resume-delete-error"
+  的遮罩外 Banner 画面。
+
+画面：6.4-20-delete-confirm.png（确认遮罩 + 整窗 scrim + 两颗键）
+      6.4-20-list-after-delete.png（删完的列表，行数与提醒行同步）

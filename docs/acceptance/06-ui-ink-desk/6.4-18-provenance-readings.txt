@@ -1,0 +1,30 @@
+6.4-18 活体读数（2026-10-10，隔离实例 CDP 10244 / --url 5173，userData tmp/61-userdata）
+窗口 1200×772，未最大化，document.visibilityState = visible。
+
+一、候选列表每行一行小字（三种来路各读一条，逐字回读）
+  1) 导入件（当前在用）
+     "王五 · 前端工程师" + 「在用」标记
+     来路行：来自 王五-前端简历.md · 2026年10月10日 21:09 导入 · 读到 190 字
+  2) 内置演示件
+     "张三"
+     来路行：演示内容，不是你的简历
+  3) 第 37 版迁移之前的老导入行（source_name 为 NULL）
+     来路行：由本机导入（当时未记文件名）· 2026年10月9日 20:17 · 读到 210 字
+  4) 扫描件分支（文本层读不出时的诚实回落，同一条行的另一态）
+     提醒行：疑似扫描件，只读到 N 字
+
+二、用户可见串里不出现开发者标识
+  探针：取 [data-testid="resume-doc"] 所属 <section> 的 innerText（265 字），
+  在其中检索 ["resume-", "textLength", "docId", "hash", "sourceHash"]
+  → forbiddenHits: []（零命中）
+  机器可读的标识只活在 DOM 属性上：li[data-doc-id="resume-2660206afbdc"]，
+  界面文字里从不出现（docId 走 markers 属性，不走文案）。
+
+三、旧的下拉控件已退役、选择通道唯一
+  resumeDocChannelCount: 1        —— 候选选择只剩这一处列表
+  legacyDeskSelect: false         —— 段内不再长出 DeskSelect
+  data-testid="resume-doc" 挂在列表（ul）上，行内两颗键：
+    [data-action="resume-doc-pick"]（整行选中）
+    [data-action="resume-delete"]（删除，markers 带 data-docid，注意 HTML 属性名小写）
+
+画面：6.4-18-provenance-rows.png（两个候选各带自己的出处行：一份导入、一份演示内容）

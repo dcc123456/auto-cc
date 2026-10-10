@@ -1156,6 +1156,15 @@ export interface ResumeTemplateSummaryView {
 }
 
 /**
+ * 「自测台」那颗种子键落的工作副本 id（`resume.export.seedDemo` 唯一的使用方）。
+ *
+ * 它同时是界面认出"这一份是演示内容、不是你的简历"的凭据：候选列表的出处那一行按 `resume.parse.provenance`
+ * 的来路说话，而种子从不写来路（没有文件被选中过），所以**没有来路行**与**是演示内容**今天是同一件事的两种说法。
+ * 常量放在这一层是因为它有两处消费者（L2 的 `resume-doc` 与 L4 的渲染层），而 §2.2 不许同一个字面量各写一遍。
+ */
+export const DEMO_RESUME_DOC_ID = 'resume-demo';
+
+/**
  * 一份简历的摘要（镜像 `resume-doc` 的 `ResumeDocSummary`）：够界面问出「定制哪一份」，不含正文。
  * `name` 为 null 时界面回退到 id 显示——宁可露出 id，也不给一个空白选项。
  */
@@ -1260,7 +1269,8 @@ export interface PendingImportRowView {
 
 /**
  * 一份导入的来路（镜像 resume-kb 的 `ImportProvenanceView`，spec 4.1-14 / 裁定㉖）。
- * 不含 issues 与正文长度：这一条回答的是「它从哪来」，不是「它有什么没读准」。
+ * 不含 issues：这一条回答的是「它从哪来」，不是「它有什么没读准」。
+ * 带的字数是**那次导入当时**的读数，不是正文现在的长度——别拿它回答"这份简历有多长"。
  */
 export interface ImportProvenanceRowView {
   docId: string;
@@ -1270,6 +1280,8 @@ export interface ImportProvenanceRowView {
   status: ImportStatusView;
   /** 那次导入落库的时刻（毫秒）：是「导入于何时」，与简历摘要里的「最后改动」不是一回事。 */
   importedAt: number;
+  /** 那次导入读到的字数：界面那句「读到 N 字」只从这里取，不拿正文自己数（§2.5）。 */
+  textLength: number;
 }
 
 /** 一次导出的回执（镜像 resume-doc 的 `ExportReceipt`）。 */

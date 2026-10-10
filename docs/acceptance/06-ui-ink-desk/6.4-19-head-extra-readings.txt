@@ -1,0 +1,24 @@
+6.4-19 活体读数（2026-10-10，隔离实例 CDP 10244 / --url 5173）
+量几何前注入 *,*::before,*::after{transition:none!important;animation:none!important}
+（自证：注入前 document.getAnimations().length 非 0），收尾摘除（hadFreeze: true → 已删除）。
+
+一、折叠态：动作条在段头下方长出，且真的画得出来
+  barMounted        : true
+  barRect           : x=205 y=201 w=522 h=47
+  barText           : 当前：王五 · 前端工程师   选择文件
+  pickFileCount     : 1        —— 全 DOM 只有一颗 [data-action="pick-file"]，通道唯一
+  pickRect          : x=600 y=210 w=111 h=30   —— 非零几何（原件到货的真实几何读数）
+  hitIsPickOrChild  : true     —— document.elementFromPoint(把手中心) 命中键本身或其子节点
+  collapsedBodyRows : 0        —— 段体真未挂载，列表不在折叠态里重复出现
+  otherSectionBars  : ["resume.doc"]  —— 负对照：其余三段的折叠态都不长这条动作条
+
+二、展开态：动作条收回，键改在段体内出现（同一颗键，不并存两份）
+  barMounted : false
+  pickRect   : x=221 y=444 w=490 h=30
+  rows       : 3（候选列表在展开态里出现）
+
+三、为什么键不能嵌在段头按钮里
+  DeskSection 的段头本身是一颗 <button>，交互元件嵌进按钮属于非法 HTML；
+  headExtra 因此渲染成段头**之外**的兄弟行（ui/disclosure.tsx），且只在 !open 时长出。
+
+画面：6.4-19-collapsed-bar.png（折叠态段头动作条 + 当前简历摘要 + 「选择文件」）
