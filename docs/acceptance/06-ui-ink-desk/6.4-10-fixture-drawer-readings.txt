@@ -1,0 +1,43 @@
+6.4-10 三颗开发夹具退出产品列、改由「自测台」抽屉承载
+=====================================================================
+取证时间：2026-10-10。同一窗口（1200×772 真实宽，单栏档）、渲染层 app 页（CDP 10222 + `--url 5173`）。
+画面：6.4-10-fixture-drawer.png（1200×772，「自测台」抽屉展开态：三颗夹具键在浮层里齐挂，
+  左列产品控件仍按 940px 正常排布）。
+探针：tmp/g7/desk-flow.mjs（段四：开合抽屉 + 数三颗键）、tmp/g7/seed-leg2.mjs（按一次夹具看回执换字）。
+节拍：每一跳都是「点 → 轮询谓词 → 现读」；验"处理器跑不跑"用 `node.click()`（§9 的 6.2 第二条），
+本轮窗口是激活态，页面侧状态行确实跟着变了。
+
+一、C 半边：夹具键名在 grep 读数里不出现在抽屉之外（命令逐字）
+---------------------------------------------------------------------
+$ grep -rn 'action="seed"\|action="seed-edited"\|action="fail"' packages/renderer/src/
+packages/renderer/src/ResumeDesk.tsx:790:                action="seed"
+packages/renderer/src/ResumeDesk.tsx:803:                action="seed-edited"
+packages/renderer/src/ResumeDesk.tsx:816:                action="fail"
+全仓（渲染层射程内）只有三处命中，而这三行都在 `<Drawer action="desk-fixtures">`（:779 起）的体里。
+· `data-action` 的**值**一字未改：`seed` / `seed-edited` / `fail`——spec 3.3-10 / 3.3-11 的取证通道不断。
+· 改造前它们住在 `ResumePanel.tsx` 的产品列底部（那 825 行本次整体退场），读数对照见 6.4-07 第一节。
+
+二、V 半边：抽屉收起时三颗根本不在 DOM 里，展开后齐三颗且都在 dialog 内
+---------------------------------------------------------------------
+收起态          可点 `[data-action="desk-fixtures"]` 的键：`[]`（0 颗——不是"看不见"，是**没挂载**）
+按「自测台」    123ms 后抽屉打开，标题 = 「开发夹具」
+展开态          seed        { inDialog: true,  visible: true }
+                seed-edited { inDialog: true,  visible: true }
+                fail        { inDialog: true,  visible: true }
+                抽屉宽 420px（`dialogWidth`），遮罩同宽（`scrimWidth`）
+按关闭          122ms 后回到 `[]`
+· 抽屉是浮层，不改产品列几何：抽屉展开那一刻**左列仍量到 940px**（`deskStillWide`，与 6.4-07 窄档同一读数），
+  即"三颗搬进抽屉"没有把产品列挤窄，也没有第二张遮罩叠在产品列上。
+· 抽屉里额外一行说明（`desk.resume.fixturesBody`，双语齐）写清这三颗只服务于验收、日常不需要——
+  这是裁定④要的"退出产品列"的界面表达，不是把键藏起来让人找不到。
+
+三、回执不变：按一次夹具仍然回**既有那句** `resume.seedReceipt`
+---------------------------------------------------------------------
+先按 `fail`（把界面推到错误态，好让下一跳的"变了"有对照）：
+  「注入失败导出 失败：简历文档不存在：resume-fail-injected」    （151ms 落定）
+再按 `seed`：
+  「已载入演示文档 resume-demo」                                  （152ms 落定）
+这句正是语言包里那一支没动过的键（`packages/renderer/src/locales/zh-CN.json:622`
+「"seedReceipt": "已载入演示文档 {{docId}}"」）——抽屉换了位置，回执的文字与占位符形状**都没换**。
+同一跳后 `resume.doc.list` 现读回 `["resume-demo","resume-438cbe25a4de"]`，说明种子真落了库，
+不只是界面自己改了行字。

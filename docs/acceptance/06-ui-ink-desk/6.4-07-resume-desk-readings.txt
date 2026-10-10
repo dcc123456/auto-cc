@@ -1,0 +1,79 @@
+6.4-07 简历屏骨架（左右分栏 + 常驻纸面 + 窄档纵向退让）收口读数
+=====================================================================
+取证时间：2026-10-10（简历屏换装片第五～六片）
+取证方式：CDP 10222 打开发实例的 app 页（`--url 5173`）。宽档由
+  `Emulation.setDeviceMetricsOverride` 临时放大视口，且放大→量几何→拍图→复位全在
+  **同一条 WebSocket** 里做完（AGENTS.md §9 的 5.4-b ⑥：该覆盖只在那条会话存活期有效）。
+  量几何与拍图前注入动效冻结那一支 `<style>`，收尾摘掉（§9 的 6.2 第二条）。
+探针：tmp/g7/desk-shot.mjs（四张画面 + 同帧几何）、tmp/g7/probe-heights.js（段高）。
+
+一、C 半边（机检读数，命令逐字）
+---------------------------------------------------------------------
+$ grep -c 'DeskSection' packages/renderer/src/ResumeDesk.tsx
+10                      # 四颗 <DeskSection> + import + 类型引用
+$ grep -n '<DeskSection' packages/renderer/src/ResumeDesk.tsx
+433 / 523 / 587 / 609   # 选简历 / 事实核对 / 定制生成 / 出纸，四段各一颗
+$ grep -n 'resume:' packages/renderer/src/App.tsx
+318:  resume: <ResumeDesk />,        # 旧的四块平铺（ResumePanel/KbPanel/GapPanel/GeneratePanel）退场
+$ grep -rn 'action="seed"\|action="seed-edited"\|action="fail"' packages/renderer/src --include='*.tsx'
+ResumeDesk.tsx:790 / :803 / :816     # 三颗夹具只活在抽屉那一段里（同一读数见 6.4-10）
+
+二、V 半边：两档几何（同一张纸面，两种容器宽）
+---------------------------------------------------------------------
+                                   窄档（真实窗口）      宽档（视口覆写 1600×1000）
+window.innerWidth                       1200                    1600
+查询容器（`@container` 那一层）宽        940                     1340
+containerType                        inline-size              inline-size
+section 的 flexDirection                 column                   row
+左列宽                                   940                      400
+纸面槽宽                                 940                      928
+纸面外层 position                        static                   sticky（吸顶）
+纸面 top / 左列 top                    51 / 685（纸在上）       51 / 51（并排同高起点）
+[data-stage-mode]                        preview                preview
+槽内 iframe+canvas 计数                    1                        1
+整屏 iframe+canvas 计数                    1                        1
+预览 iframe 宽                            794                      794
+纸面装得下（794+24 ≤ 槽宽）                true                     true
+空态占位是否挂着                           false                    false
+段数 / 展开段                    4 / doc,generate,output     4 / doc,generate,output
+模板架卡片数 / 夹具键                     50 / 1                   50 / 1
+播报                                  「预览已刷新」            「预览已刷新」
+
+三、这一条腿被活体推翻的两处假设（写进 plan §3.26 的补片）
+---------------------------------------------------------------------
+① **`@container` 挂在元素自己身上，它自己的 `@[…]` 变体永远不成立。**
+   首版把 `@container` 与 `@[56rem]:flex-row` 写在同一颗 `<section>` 上：类名确实编译进了产物
+   （现读 `document.styleSheets` 里有 `@container (width >= 56rem)` 这一条 CSSContainerRule，
+   同时挂着 `.\@\[56rem\]\:flex-row` 与 `.\@min-\[56rem\]\:flex-row` 两组选择器——顺带否掉了
+   "`@[…]` 这种写法在 Tailwind v4.3 里不生成规则"这个猜测），但 `getComputedStyle(section).flexDirection`
+   仍回 `column`，而**左栏（真·后代）已经按 400px 摆好**：CSS Containment 把查询容器限定为最近的祖先，
+   元素自己的 `container-type` 不作为自己的查询容器。修法是外面套一层 `<div className="@container">`。
+   口径：容器查询的断点类与 `@container` 标记**不能写在同一颗元素上**。
+   另一条同帧教训：`harness eval` 里 `node.click()` 之后**同一帧读不到换档结果**（React 还没 flush），
+   本屏所有"点一下再看"的判据都改成"点 → 轮询到条件成立 → 读"，见 tmp/g7/desk-flow.mjs。
+
+② **分栏断点不能沿用 56rem：那是抽屉/导航/键的窄档，纸面不认这个数。**
+   56rem（896px）处分栏时，940 的容器给纸面只剩 528px，而 A4 预览是 `w-[210mm]`=794px——
+   活体首读就是一张被横向裁掉三分之二的纸（`previewFitsSlot:false`）。纸面要求的算术是硬的：
+   左栏 400 + 栏间距 12 + 纸面内边距 24 + 794 = **1230** → 断点取 **77rem（1232px）**。
+   低于这一档退回单栏：940 的容器里纸按整宽摆，794 完整可见、一行不折（`previewFitsSlot:true`），
+   并且 `order-1` 把纸放在所有控件之前（纸面 top 51 < 左列 top 685）。
+   这不与 spec 6.4-06 的"三处同格"冲突：那三处（抽屉/导航/键）仍走 56rem，简历屏多出来的一格
+   是**纸面自己提出的物理条件**，两处共用的是"纸面装得下"这一件事，不是两个各说各话的断点。
+
+③ 顺带一条病灶（同一轮量出来的）：50 套模板摊开把整段架子撑成主凶——窄档实测 `shelfH` 1957 占整屏
+   3414 的 57%，宽档（左列只有 400px，卡片换行更少）整列直接到 **6032px**；纸面吸顶之后人要滚六千像素
+   才摸得到「出纸」那一段的键——这正是本片区要治的"主视觉被控件埋住"。
+   修法：架子自己限高滚（`max-h-[min(52vh,440px)] overflow-y-auto`，量得 clientHeight 401 / scrollHeight 1676），
+   限高挂在架体而不是 `DeskSection` 的体上（段是通用原件，不该为一只架子长高度约束，§2.2）。
+   改后：宽档整屏 6032 → **1849**（`6407-wide-*.read.txt` 的 `deskHeight`），
+   窄档 3414 → **2139**（`tmp/g7/heights2.txt`：`shelfH` 1957 → 682、`shelfGridH` 401）。
+
+四、画面（四张，同一屏两档 × 两主题；md5 互异，已按 §9 的 5.10-18 去重核对）
+---------------------------------------------------------------------
+6.4-07-resume-desk-narrow-dark.png   1200×772  墨案  单栏：纸在上（A4 完整）+ 四段在下
+6.4-07-resume-desk-narrow-light.png  1200×772  毡案  同上
+6.4-07-resume-desk-wide-dark.png     1600×1000 墨案  左右分栏：左列 400 + 右侧吸顶纸面 928
+6.4-07-resume-desk-wide-light.png    1600×1000 毡案  同上
+段头读数在收起态仍可见：`事实核对` 收起时段头仍是「事实核对 / 1 条待确认」，
+`出纸` 段头是「现代双列强调 · zh-CN」，`选简历` 段头是「张三」——四段的段头都读得出当前那一份是谁。

@@ -1,0 +1,54 @@
+6.4-11 换装只动形状与归属：四道门禁 + 改动面复核
+=====================================================================
+取证时间：2026-10-10（收口那一轮，命令与退出码逐条实录；一律 `> 日志 2>&1; echo EXIT=$?`，
+不接 `tail`——§9 的 5.4-c：管道接 `tail` 之后退出码属于 `tail`，本机假绿过一次）。
+
+一、四道门禁
+---------------------------------------------------------------------
+$ pnpm format:check   > tmp/g7/final-format.log 2>&1   FORMAT_EXIT=0   # "All matched files use Prettier code style!"
+$ pnpm lint           > tmp/g7/final-lint.log   2>&1   LINT_EXIT=0
+$ pnpm typecheck      > tmp/g7/final-tc.log     2>&1   TC_EXIT=0      # 26 个包 Done
+$ pnpm test           > tmp/g7/final-test.log   2>&1   TEST_EXIT=0
+`pnpm test` 逐包核对（23 个有测试的包，`Test Files` 全为 passed、`failed` 模式零命中）：
+  agent 223 · browser 306 · core 52 · config 30 · devtools 3 · entitlement 18 · ipc 14 · kernel 23
+  llm 66 · logger 13 · main 79 · outbound 197 · pdf-edit 102 · platform-boss 177 · plugins 5
+  resume-doc 151 · resume-kb 398 · scheduler 21 · sessions 28 · shell 45 · store 21 · testing 32 · workflow 214
+  合计 **2218 条通过 / 0 条失败**。
+`pnpm lint` 里链末的渲染层规范机检（第 9/10/11/13/14 节正是这一格的判据）：
+  ✔ 2 个语言包、67 个源文件、派生文案 50 条逐包齐备
+  ✔ src/ui/** 之外裸原生控件 0 只、语气洗底（`bg-*-wash`）0 处、≥12px 灰阶档 0 处、
+    hover 挂到不可点那一格 0 处、按不动却不带原因码那一格 0 处
+· 语言包齐备这条是自动的：`check-renderer-conventions.ts` 要求新增 key 在 zh-CN 与 en 里同时存在，
+  本轮两侧各 +56 行（见下面的 diff 读数），缺一边 lint 即红。
+
+二、改动面：全部落在渲染层，且是"换形状 + 换归属"
+---------------------------------------------------------------------
+$ git diff --stat HEAD -- packages
+packages/renderer/src/App.tsx            |  14 +-     # PANELS.resume 从四块平铺换成 <ResumeDesk />
+packages/renderer/src/GeneratePanel.tsx  |  59 +-     # 收进段里：共用 docList/read 那一份事实
+packages/renderer/src/ResumePanel.tsx    | 825 ------- # 退场（旧的"平铺到底"骨架，无逻辑残留）
+packages/renderer/src/locales/en.json    |  56 +-
+packages/renderer/src/locales/zh-CN.json |  56 +-
+packages/renderer/src/ui/disclosure.tsx  |  22 +-     # DeskSection 加 openSignal（跳进那一格必须连带打开）
+packages/renderer/src/ui/overlays.tsx    |  14 +-     # useRevealLabel 从 Toast 里提到原件层共用
+新增三个未跟踪文件（同一格事，一起入）：
+  packages/renderer/src/ResumeDesk.tsx        # 骨架：左右分栏 + 四段 + 自测台抽屉
+  packages/renderer/src/ResumePaperStage.tsx  # 纸面槽：预览 / 排版 / PDF 覆盖条件挂载
+  packages/renderer/src/TemplateShelf.tsx     # 模板架：版式骨架小图 + 轴筛选
+$ git diff --stat HEAD -- packages/shared packages/resume-doc packages/preload packages/ipc packages/main
+（零行）  # 主进程、IPC 网关、preload 桥、领域包**在本轮一字未改**
+
+三、"没有新增 IPC 条目"这一条怎么复核的
+---------------------------------------------------------------------
+本轮唯一碰过桥的那一笔是**上一笔已入库**的 7b071e2（模板摘要带七条轴），它对
+`packages/shared/src/bridge.ts` 的 diff 里：
+$ git diff 7b071e2~1 7b071e2 -- packages/shared/src/bridge.ts | grep -E "^[-+].*'(resume|kb|shell)\.[a-z]"
+（零行）  # 白名单数组没有 +/- 任何一条 call name——只**扩**了返回类型
+`resume.export.templates` 的返回从 `{id,name}` 扩成 `{id,name,layout}`；`export-service.ts` 的
+24 行改动全部落在 `templates()` 的投影上（`preview`/`toPdf`/`setPreference` 的调用链一行未动），
+轴取自注册表里渲染时真正吃的那份 `spec`，界面不另抄一份（§2.5）。
+新增三文件里出现的桥名，逐个对过白名单，全是既有的一支：
+  resume['export.seedDemo' / 'export.templates' / 'export.preference' / 'export.setPreference'
+          / 'export.preview' / 'export.toPdf']、resume['doc.list']、resume['parse.fromFile']、
+  resume['parse.pending']、resume['generate.run']、resume['generate.accept']
+—— 没有第二份 `docId` 事实，也没有新的 service 名。

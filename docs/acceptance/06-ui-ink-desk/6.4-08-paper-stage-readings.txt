@@ -1,0 +1,48 @@
+6.4-08 纸面槽：三档换装（预览 / 排版 / PDF 覆盖）同槽只挂一份 + 导出回执常驻
+=============================================================================
+取证时间：2026-10-10。同一窗口（1200×772 真实宽，单栏档）、同一份文档 `resume-demo`（张三）。
+探针：tmp/g7/stage-leg.mjs（三档换装 + 每档一张画面）、tmp/g7/desk-flow.mjs（导出腿）。
+节拍：每一档都是「点 → 轮询 `[data-stage-mode]` 落到目标态 → 现读」，不在同一帧里读
+（`node.click()` 之后同帧读到的是换档前的旧值，本轮实测 121ms 才 flush 完）。
+
+一、① 同槽同时刻只挂一份画布（改造前三张可并存）
+---------------------------------------------------------------------
+档位            [data-stage-mode]   槽内 iframe+canvas   整屏 iframe+canvas   页签选中态
+预览（基准）        preview                  1                    1          preview=true / layout=false / pdf=false
+排版                layout                   1                    1          preview=false / layout=true / pdf=false
+PDF 编辑             pdf                     0                    0          preview=false / layout=false / pdf=true
+退回预览            preview                  1                    1          preview=true / layout=false / pdf=false
+
+· 排版档那一张里 `resume-editor-*` 系列 testid 挂着（`editorMounted:true`），而预览的
+  `[data-testid="resume-preview"]` **同时为 false**——条件挂载不是 `hidden` 叠放的正面读数。
+· PDF 档读到 0 张画布是**如实**：`PdfEditPanel` 在没有选定 PDF 时先摆自己的选件态，画布还没长出来；
+  判据写的是"该槽内 ≤1"，不是"每档都恰好 1"。
+· 页签三颗宽 42/42/67px，选中态跟着档位走，没有"点了没回应"的静默档。
+
+二、② 从预览进 PDF 覆盖再退出回到预览（往返闭合）
+---------------------------------------------------------------------
+`paper-stage-preview` → `paper-stage-layout`（121ms 落位）→ `paper-stage-pdf`（121ms）→
+`paper-stage-preview`（156ms）；四段末态见上表，回到预览后 `resume-preview` 重新挂上、
+`data-stage-mode` 与页签 `data-selected` 对得上。没有留下第二张画布。
+
+补一条门禁读数（不是缺陷）：上一段「预览」还在飞的时候按排版键，得到的是
+`data-disabled-reason="ACTION_BUSY"` 且**什么都不发生**（`click` 返回 `blocked:ACTION_BUSY`）——
+这是 spec 6.2-06「按不动必带原因码」在纸面页签上生效，探针改成先等它松开再按。
+
+三、③ 导出之后纸面内容与右下回执同时变（同一张画面里）
+---------------------------------------------------------------------
+按 `[data-action="export"]` 之前：
+  receiptMetrics = ""      receiptPath = ""      notice = "预览已刷新"      槽内画布 = 1
+之后（364ms 内长出回执）：
+  receiptMetrics = "1 页 · 30610 字节"
+  receiptPath    = "…/tmp/v6-userdata/exports/resume-demo-modern.pdf"
+  notice         = "导出成功：1 页 · 30610 字节"
+  槽内画布 = 1（仍是那一张预览，没有多挂画布）
+「在访达中显示」那颗键的文案与左下角 toast 同源（`useRevealLabel()`，§2.2 抽到原件层，
+不再在两处各拼一遍句子）。
+
+四、画面
+---------------------------------------------------------------------
+6.4-08-stage-preview.png   预览档：A4 完整、右上身份行「张三 · 现代双列强调 · zh-CN」
+6.4-08-stage-editor.png    排版档：同一格里换成排版编辑器（区块顺序 + 六条度量滑杆）
+6.4-08-stage-pdf.png       PDF 覆盖档：同一格换成 PDF 面板的选件态（画布 0 张，见上）
