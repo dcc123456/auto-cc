@@ -12,16 +12,20 @@
  * 判定口径不同、失败语义也不同，抽成一份只会让两边都长出开关参数（AGENTS.md §2.7 的按事判断）。
  * 但「绝对路径 + 字节上限 + 读出字节」这一小段是同一条逻辑，3.5-a 的编辑轨是它的第二回使用，
  * 所以它已经上收到 `@auto-cc/core/file-read`（§2.2），本层只决定用哪个错误码。
+ *
+ * 出处（spec 4.1-14 / 裁定㉖）也归这一层记：`resume_imports` 是「哪份文件变成过这份简历」的唯一事实源，
+ * 所以人选中的文件名在这里落库、`provenance()` 在这里读，而不是让渲染层自己拼一份"看起来像来路"的东西。
  */
 import { AppError, agentTool, asApp, registerAgentTools, Service, toolResult, type Context } from '@auto-cc/core';
 import { readBoundedFile } from '@auto-cc/core/file-read';
 import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { z } from 'zod';
+import { basename } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ParseIssue } from './sections.js';
 import { type ResumeSourceFormat, parseResumeSource, sourceHashOf } from './source.js';
 
-/** 迁移号段：账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 / resume_docs 7 / resume_snapshots 8 / delivery_records 9，本表取 10。 */
+/** 迁移号段：账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 / consent 6 / resume_docs 7 / resume_snapshots 8 / delivery_records 9，本表取 10（建表）+ 37（补出处列）。 */
 export const RESUME_IMPORT_MIGRATION_VERSION = 10;
 
 /** 导入结果的两个确定态（4.1-05 的「疑似扫描件」不是异常，是一条正常结论）。 */
@@ -47,6 +51,32 @@ const resumeImportMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS resume_imports');
+  },
+};
+
+/**
+ * 迁移号段：**37**。号段台账（AGENTS.md §9 的 5.3-a）：36 是 `resume_preferences`、35 是投递记录的
+ * `conversation_target`、33 是会话消息的同名列、30 预留给草稿表但未启用，**34 在本工作树读不到但不当空号用**。
+ *
+ * 这一支只补一列 `source_name`：这张表从前只存来源哈希，于是「这份简历是怎么来的」在界面上永远答不出
+ * （spec 4.1-14 / 裁定㉖ 的来路那一问）。**不能把 `ADD COLUMN` 塞进上面那条第 10 版的 `up`**——
+ * `runMigrations` 认的是台账里记没记过这一版，第 10 版在老库（含本机开发实例）上早已记过账，改了也不会重跑。
+ */
+export const RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION = 37;
+
+/**
+ * 给 `resume_imports` 加出处列。
+ * 可空是刻意的：**导入时人选中的那个文件名**只有从这一版起才拿得到，老行留 NULL 是事实而不是缺陷
+ * （界面据此显示「没记下文件名」，绝不拿哈希或姓名冒充，见 `provenance()` 的注释）。
+ */
+const resumeImportSourceNameMigration = {
+  version: RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE resume_imports ADD COLUMN source_name TEXT');
+  },
+  down: (db: DatabaseSync) => {
+    // SQLite 3.35+ 支持 DROP COLUMN（本机 sqlite 3.53.4）；回退就是把出处读数打回全 NULL。
+    db.exec('ALTER TABLE resume_imports DROP COLUMN source_name');
   },
 };
 
@@ -93,6 +123,25 @@ export interface PendingImportView {
   readonly textLength: number;
   readonly updatedAt: number;
   readonly issues: readonly ParseIssue[];
+  /** 导入时人选中的文件名；第 37 版之前的老行为 null（当时没记），界面如实显示而不是猜。 */
+  readonly sourceName: string | null;
+}
+
+/**
+ * 一份导入的**来路**读数（spec 4.1-14 / 裁定㉖ 的「候选列表里每个一行小字」的数据源）。
+ *
+ * 与 `PendingImportView` 刻意不同形状：那一条是"待确认"的清单行，带 issues 与正文长度；
+ * 这一条只回答"它从哪来、什么时候来的、当时是什么格式"，所以它必须覆盖**全部**导入行
+ * （一份解析得干干净净的简历同样有来路）。
+ */
+export interface ImportProvenanceView {
+  readonly docId: string;
+  /** 导入时人选中的文件名；老行为 null。 */
+  readonly sourceName: string | null;
+  readonly format: ResumeSourceFormat;
+  readonly status: ImportStatus;
+  /** 那次导入落库的时刻（毫秒）——是「导入于何时」，不是「简历最后改动于何时」。 */
+  readonly importedAt: number;
 }
 
 interface ResumeImportRow {
@@ -104,6 +153,7 @@ interface ResumeImportRow {
   readonly doc_json: string;
   readonly issues_json: string;
   readonly updated_at: number | bigint;
+  readonly source_name: string | null;
 }
 
 /** 由来源哈希直接推出文档 id：同一份文件重复导入必然落到同一个 id，不产生第二套实体。 */
@@ -125,6 +175,24 @@ function toPendingView(row: ResumeImportRow): PendingImportView {
     textLength: Number(row.text_length),
     updatedAt: Number(row.updated_at),
     issues: JSON.parse(row.issues_json) as ParseIssue[],
+    sourceName: row.source_name,
+  };
+}
+
+/**
+ * 把 `resume_imports` 的一行转成来路读数。
+ * @param row 库里的原始行
+ * @returns 不含正文与 issues 的出处视图
+ */
+function toProvenanceView(
+  row: Pick<ResumeImportRow, 'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name'>,
+): ImportProvenanceView {
+  return {
+    docId: row.doc_id,
+    sourceName: row.source_name,
+    format: row.format as ResumeSourceFormat,
+    status: row.status as ImportStatus,
+    importedAt: Number(row.updated_at),
   };
 }
 
@@ -164,8 +232,10 @@ export class ResumeParseService extends Service {
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    if (!migrations.some((item) => item.version === RESUME_IMPORT_MIGRATION_VERSION)) {
-      migrations.push(resumeImportMigration);
+    for (const migration of [resumeImportMigration, resumeImportSourceNameMigration]) {
+      if (!migrations.some((item) => item.version === migration.version)) {
+        migrations.push(migration);
+      }
     }
     this.store.upgrade();
   }
@@ -201,7 +271,8 @@ export class ResumeParseService extends Service {
       }),
     ]);
     this.ctx.logger.info(
-      `[resume-parse] resume_imports 表就绪，迁移号段 ${String(RESUME_IMPORT_MIGRATION_VERSION)}，单次上限 ${String(this.options.maxBytes)} 字节` +
+      `[resume-parse] resume_imports 表就绪，迁移号段 ${String(RESUME_IMPORT_MIGRATION_VERSION)} + ` +
+        `${String(RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION)}，单次上限 ${String(this.options.maxBytes)} 字节` +
         ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
@@ -218,6 +289,9 @@ export class ResumeParseService extends Service {
     // 顺序是硬约束：pdf.js 会移交（detach）传入的 ArrayBuffer，抽取之后再算哈希就是空壳。
     const sourceHash = sourceHashOf(bytes);
     const docId = docIdOf(sourceHash);
+    // 只记**文件名**，不记整条路径（§8.5 的默认脱敏：目录结构是"这份文件放在我哪块盘上"，
+    // 对简历库的读数没有增益，却会在备份导出与界面里跟人一辈子）。
+    const sourceName = basename(filePath);
     const parsed = await parseResumeSource(bytes, docId, nowMs);
 
     if (parsed.status === 'failed') {
@@ -230,6 +304,7 @@ export class ResumeParseService extends Service {
       return this.persist({
         docId,
         sourceHash,
+        sourceName,
         format: parsed.format,
         status: 'scanned',
         textLength: parsed.textLength,
@@ -241,6 +316,7 @@ export class ResumeParseService extends Service {
     return this.persist({
       docId,
       sourceHash,
+      sourceName,
       format: parsed.format,
       status: 'imported',
       textLength: parsed.textLength,
@@ -257,13 +333,35 @@ export class ResumeParseService extends Service {
   pending(): readonly PendingImportView[] {
     const rows = this.store.db
       .prepare(
-        `SELECT doc_id, source_hash, format, status, text_length, issues_json, updated_at
+        `SELECT doc_id, source_hash, format, status, text_length, issues_json, updated_at, source_name
                   FROM resume_imports
                  WHERE issues_json <> '[]'
                  ORDER BY updated_at DESC`,
       )
       .all() as unknown as readonly ResumeImportRow[];
     return rows.map(toPendingView);
+  }
+
+  /**
+   * 列出所有导入过的**来路**（spec 4.1-14 / 裁定㉖：候选列表里每份简历要说清自己从哪来）。
+   *
+   * 为什么不复用 `pending()`：那一条按 4.1-04 只回"还带着未处理条目"的行，而"这份简历是哪份文件导入的"
+   * 对一份解析得干干净净的简历同样成立——把它当出处读数，干净导入的那一行就永远没有来路。
+   * 两条回答的是两个问题（待确认 vs 来路），各写一遍是对的；同一问题写两遍才是 §2.5 要拦的那种合并。
+   * @returns 按导入时刻倒序的来路；每个 `docId` 至多一条（`doc_id` 由主键 `source_hash` 截出来，1:1）
+   */
+  provenance(): readonly ImportProvenanceView[] {
+    const rows = this.store.db
+      .prepare(
+        `SELECT doc_id, format, status, updated_at, source_name
+                  FROM resume_imports
+                 ORDER BY updated_at DESC`,
+      )
+      .all() as unknown as readonly Pick<
+      ResumeImportRow,
+      'doc_id' | 'format' | 'status' | 'updated_at' | 'source_name'
+    >[];
+    return rows.map(toProvenanceView);
   }
 
   /**
@@ -278,12 +376,26 @@ export class ResumeParseService extends Service {
   importOf(sourceHash: string): PendingImportView | null {
     const row = this.store.db
       .prepare(
-        `SELECT doc_id, source_hash, format, status, text_length, issues_json, updated_at
+        `SELECT doc_id, source_hash, format, status, text_length, issues_json, updated_at, source_name
                   FROM resume_imports
                  WHERE source_hash = ? LIMIT 1`,
       )
       .get(sourceHash) as unknown as ResumeImportRow | undefined;
     return row === undefined ? null : toPendingView(row);
+  }
+
+  /**
+   * 删掉某文档的导入出处行（spec 4.1-14 的删除腿里属于本表的那一段）。
+   *
+   * **不在这里碰 `resume_docs` / 快照 / 素材**：那几张表各有各的持有者，跨表编排只有一个入口
+   * （`kb.profile.removeDoc` 在同一条事务里逐表调用，见 plan 04 §4.7）。本方法只保证一件事——
+   * 出处这张表不会留下一条指向已删文档的行。
+   * @param docId 文档 id
+   * @returns 被删掉的行数（0 是合法结果：手动新建的工作副本从来没导过文件）
+   */
+  removeForDoc(docId: string): number {
+    const result = this.store.db.prepare('DELETE FROM resume_imports WHERE doc_id = ?').run(docId);
+    return Number(result.changes);
   }
 
   /**
@@ -296,6 +408,8 @@ export class ResumeParseService extends Service {
   private persist(input: {
     docId: string;
     sourceHash: string;
+    /** 导入时人选中的文件名（只到文件名，不含目录，§8.5）。 */
+    sourceName: string;
     format: ResumeSourceFormat;
     status: ImportStatus;
     textLength: number;
@@ -309,11 +423,11 @@ export class ResumeParseService extends Service {
     const docJson = JSON.stringify(input.document ?? null);
     const issuesJson = JSON.stringify(input.issues);
     db.prepare(
-      `INSERT INTO resume_imports (doc_id, source_hash, format, status, text_length, doc_json, issues_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO resume_imports (doc_id, source_hash, format, status, text_length, doc_json, issues_json, created_at, updated_at, source_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (source_hash) DO UPDATE SET format = excluded.format, status = excluded.status,
          text_length = excluded.text_length, doc_json = excluded.doc_json,
-         issues_json = excluded.issues_json, updated_at = excluded.updated_at`,
+         issues_json = excluded.issues_json, updated_at = excluded.updated_at, source_name = excluded.source_name`,
     ).run(
       input.docId,
       input.sourceHash,
@@ -324,6 +438,7 @@ export class ResumeParseService extends Service {
       issuesJson,
       input.nowMs,
       input.nowMs,
+      input.sourceName,
     );
     // 工作副本只在「还没有」时建：重复导入按 4.1-07 的语义只刷新出处与时间，绝不能把用户已经改过的
     // 简历冲掉——那份改动属于 `resume_docs`，本表只是出处。

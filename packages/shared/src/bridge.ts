@@ -380,6 +380,9 @@ export const RENDERER_ALLOWLIST = [
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
   'resume.parse.fromFile',
   'resume.parse.pending',
+  // 4.1-14 / 裁定㉖ 的来路腿：候选列表要说清"这份简历是哪份文件导入的"。只读，且 `pending()` 回答不了
+  // 这件事——那一条按 4.1-04 只回带未处理条目的行，干净导入的简历同样有来路。
+  'resume.parse.provenance',
   // 4.2-d 的知识库管理面（spec 4.2-05 / 06）：读库、反查证据、手工实体的增删改、按简历工作副本重新同步，
   // 以及 4.2-08 的备份导出 / 导入。渲染层没有 SQL 通道，也没有读文件的通道——备份路径同样是绝对路径口径。
   // `remove` 对派生实体必然以 `KB_ENTITY_DERIVED` 失败（4.2-04），界面据 `sourceDocId` 分两套处置而不是挂个必失败的按钮。
@@ -1246,6 +1249,22 @@ export interface PendingImportRowView {
   textLength: number;
   updatedAt: number;
   issues: ParseIssueView[];
+  /** 导入时人选中的文件名（spec 4.1-14）；第 37 版之前导入的老行是 null。 */
+  sourceName: string | null;
+}
+
+/**
+ * 一份导入的来路（镜像 resume-kb 的 `ImportProvenanceView`，spec 4.1-14 / 裁定㉖）。
+ * 不含 issues 与正文长度：这一条回答的是「它从哪来」，不是「它有什么没读准」。
+ */
+export interface ImportProvenanceRowView {
+  docId: string;
+  /** 导入时人选中的文件名；老行是 null，界面如实显示「没记下文件名」，不许拿哈希或姓名冒充。 */
+  sourceName: string | null;
+  format: ResumeSourceFormatView;
+  status: ImportStatusView;
+  /** 那次导入落库的时刻（毫秒）：是「导入于何时」，与简历摘要里的「最后改动」不是一回事。 */
+  importedAt: number;
 }
 
 /** 一次导出的回执（镜像 resume-doc 的 `ExportReceipt`）。 */
@@ -2561,6 +2580,11 @@ export interface BridgeSignatures {
    * issues 已清空的历史记录不出现。
    */
   'resume.parse.pending': { args: []; returns: PendingImportRowView[] };
+  /**
+   * 列出所有导入过的来路（spec 4.1-14）：每个 `docId` 至多一条，含导入时选中的文件名与导入时刻。
+   * 与 `resume.parse.pending` 是两条不同的问题（来路 vs 待确认），所以各自覆盖各自的行集，不合并。
+   */
+  'resume.parse.provenance': { args: []; returns: ImportProvenanceRowView[] };
   /**
    * 列出知识库实体（spec 4.2-05）：可按种类与来源文档过滤，按更新时间倒序。
    * 界面拿到的是整棵树的平铺读数，父子关系靠 `parentId` 在渲染层组织——关系是库里的真相，不另存一份。

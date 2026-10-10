@@ -30,6 +30,7 @@ export {
   ResumeParseService,
   resumeParseRequestSchema,
   resumeParseSchema,
+  type ImportProvenanceView,
   type ImportReceipt,
   type ImportStatus,
   type PendingImportView,

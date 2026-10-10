@@ -18,7 +18,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { RESUME_IMPORT_MIGRATION_VERSION, ResumeParseService, type ImportReceipt } from './parse-service.js';
+import {
+  RESUME_IMPORT_MIGRATION_VERSION,
+  RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION,
+  ResumeParseService,
+  type ImportReceipt,
+} from './parse-service.js';
 import { FakeAgentToolsService } from './test-doubles.js';
 
 const NOW_MS = 1_700_000_000_000;
@@ -232,6 +237,76 @@ describe('4.1-04 待确认清单', () => {
     await parse.fromFile(writeFile(dir, 'old.md', RESUME_MD), NOW_MS);
     await parse.fromFile(writeFile(dir, 'new.md', `${RESUME_MD}\n- Go\n`), LATER_MS);
     expect(parse.pending().map((item) => item.updatedAt)).toEqual([LATER_MS, NOW_MS]);
+  });
+});
+
+describe('4.1-14 出处（来路看得见）', () => {
+  it('迁移 37 给本表补上 source_name 列并记进台账；取号往后走、不回填', async () => {
+    const { db } = await boot();
+    const columns = db.prepare('PRAGMA table_info(resume_imports)').all() as unknown as readonly { name: string }[];
+    expect(columns.map((column) => column.name)).toContain('source_name');
+    // 取号纪律（AGENTS.md §9 的 5.3-a）：36 是当前最高已用号（`resume_preferences`），34 在本工作树读不到
+    // 但按纪律不当成可占的号——所以新号必须**大于 36**，不是回填。
+    expect(RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION).toBe(37);
+    expect(RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION).toBeGreaterThan(36);
+    const ledger = db.prepare('SELECT version FROM schema_migrations').all() as unknown as readonly {
+      version: number | bigint;
+    }[];
+    expect(ledger.map((row) => Number(row.version))).toContain(RESUME_IMPORT_SOURCE_NAME_MIGRATION_VERSION);
+  });
+
+  it('导入时记下人选中的**文件名**（不含目录），provenance() 与 pending() 两条读数都带它', async () => {
+    const dir = tempDir();
+    const { parse } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, '张三-后端简历.md', RESUME_MD), NOW_MS);
+    const [line] = parse.provenance();
+    if (line === undefined) return expect(parse.provenance()).toHaveLength(1);
+    expect(line).toMatchObject({ docId: receipt.docId, format: 'markdown', status: 'imported', importedAt: NOW_MS });
+    expect(line.sourceName).toBe('张三-后端简历.md');
+    // 目录不进库（§8.5 的默认脱敏：路径说的是"放在我哪块盘上"，对简历读数没有增益）。
+    expect(line.sourceName).not.toContain(dir);
+    expect(parse.pending()[0]?.sourceName).toBe('张三-后端简历.md');
+  });
+
+  it('来路覆盖**干净**导入：issues 清空后 pending() 不再出现，provenance() 仍然说得出它从哪来', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    await parse.fromFile(writeFile(dir, 'clean.md', RESUME_MD), NOW_MS);
+    db.prepare(`UPDATE resume_imports SET issues_json = '[]'`).run();
+    expect(parse.pending()).toEqual([]);
+    expect(parse.provenance().map((item) => item.sourceName)).toEqual(['clean.md']);
+  });
+
+  it('第 37 版之前的老行就是 null：读路径不拿哈希、也不拿姓名冒充文件名', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, 'legacy.md', RESUME_MD), NOW_MS);
+    db.prepare('UPDATE resume_imports SET source_name = NULL').run();
+    const [line] = parse.provenance();
+    expect(line?.sourceName).toBeNull();
+    expect(line?.docId).toBe(receipt.docId);
+    expect(parse.pending()[0]?.sourceName).toBeNull();
+  });
+
+  it('同一份内容换名重导：出处刷新成这次的名字，行数与 docId 都不变（4.1-07 的幂等不被出处破坏）', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    const first = await parse.fromFile(writeFile(dir, '旧名.md', RESUME_MD), NOW_MS);
+    const second = await parse.fromFile(writeFile(dir, '新名.md', RESUME_MD), LATER_MS);
+    expect(second.docId).toBe(first.docId);
+    expect(rowCount(db)).toBe(1);
+    expect(parse.provenance()).toHaveLength(1);
+    expect(parse.provenance()[0]?.sourceName).toBe('新名.md');
+  });
+
+  it('removeForDoc 删掉本表的出处行并回报行数；从没导过的工作副本返回 0 而不是抛错', async () => {
+    const dir = tempDir();
+    const { parse, db } = await boot(dir);
+    const receipt = await parse.fromFile(writeFile(dir, 'gone.md', RESUME_MD), NOW_MS);
+    expect(parse.removeForDoc(receipt.docId)).toBe(1);
+    expect(rowCount(db)).toBe(0);
+    expect(parse.provenance()).toEqual([]);
+    expect(parse.removeForDoc(receipt.docId)).toBe(0);
   });
 });
 
