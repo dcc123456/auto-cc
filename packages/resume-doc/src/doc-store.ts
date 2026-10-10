@@ -227,6 +227,18 @@ export class ResumeDocService extends Service {
   };
 
   /**
+   * 删掉一份简历的工作副本行（spec 4.1-14 的删除腿里属于本表的那一段）。
+   *
+   * **只管这张表**：跨六张表的原子删除只有一个入口（`kb.profile.removeDoc`，plan 04 §4.7 的事实②——
+   * 包依赖单向 kb→doc，本服务够不到 `kb_*` 那三张表），所以快照、出处、素材都由编排方在事务里逐个删。
+   * @param id 文档 id
+   * @returns 真的删掉了一行返回 true；本来就没有返回 false——调用点的语义是「让它不存在」，不是「删掉一行」
+   */
+  remove = (id: string): boolean => {
+    return Number(this.db.prepare('DELETE FROM resume_docs WHERE id = ?').run(id).changes) > 0;
+  };
+
+  /**
    * 列出库里所有**有正文**的文档 id（升序）。
    *
    * 只回 id 不回正文：全量重建派生索引（4.3-a 的 `kb_chunks` 补建）要遍历一遍库，

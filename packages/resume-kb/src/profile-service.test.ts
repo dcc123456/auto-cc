@@ -23,7 +23,7 @@ import {
 } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { resumePrint, ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -210,13 +210,16 @@ interface EmbedFixture {
 }
 
 /**
- * 挂起 config + log + store + resume.doc + kb.profile（外加 `resume.parse`，端到端那条用例要用）。
+ * 挂起 config + log + store + resume.doc + resume.snapshot + resume.parse + kb.profile。
+ *
+ * 后三只排在 `kb.profile` **之前**（AGENTS.md §9 的 5.1-c：清单顺序就是挂载顺序）——4.1-14 的删除腿让
+ * `kb.profile` 硬注入了它们，挂晚了本服务直接 PENDING，整包用例以「服务取不到」收场。
  * @param dir 复用哪个目录
  * @param evidence 反查阈值（4.2-03）；默认与 `cordis.yml` 一致，用于验证「阈值来自配置」那两条用例
  * @param search 检索参数（4.3-03），默认与 `cordis.yml` 一致；传部分键即只覆盖那几项
  * @param embed 向量服务替身（4.3-07 / 08）；不传就不挂 `llm.embed`，向量腿整条缺席——
  *              那正是「摘掉插件」的真实装配形态，也是 `unavailable` 分支的入口
- * @returns 实体服务、文档存储服务、导入服务与裸连接
+ * @returns 实体服务、文档存储、快照存储、导入服务与裸连接
  */
 async function boot(
   dir = tempDir(),
@@ -233,6 +236,8 @@ async function boot(
   // 替身只在显式要求时挂：不挂就是真实装配里「注掉 llm-embed 那一行」的形态（4.3-08 的 `unavailable` 分支）。
   const embedStub = embed === undefined ? undefined : (await ctx.plugin(FakeEmbedService, embed), ctx.get('llm.embed'));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
+  fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   fibers.push(
     await ctx.plugin(KbProfileService, {
       evidenceTopK: evidence.topK,
@@ -241,7 +246,6 @@ async function boot(
       ...search,
     }),
   );
-  fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   const app = asApp(ctx);
   return {
     ctx,
@@ -249,6 +253,7 @@ async function boot(
     embed: embedStub as FakeEmbedService | undefined,
     kb: app['kb.profile'],
     doc: app['resume.doc'],
+    snapshot: app['resume.snapshot'],
     parse: app['resume.parse'],
     store: app.store,
     db: app.store.db,
@@ -910,6 +915,168 @@ describe('删除与归属级联（4.2-04）', () => {
     expect(kb.list({ kind: 'experience' })).toEqual([]);
     expect(kb.get(manual.entityId)?.parentId).toBeNull();
     expect(orphanParentCount(db)).toBe(0);
+  });
+});
+
+describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起真删」）', () => {
+  /**
+   * 一份简历在六张表里的落点读数（`kb_chunks_fts` / `kb_vectors` 是派生索引，改由孤儿计数判）。
+   * @param db 裸连接
+   * @param docId 哪一份简历
+   * @returns 逐表行数；界面那句成功文案里的每个数字都对应这里的一格
+   */
+  function docFootprint(db: DatabaseSync, docId: string) {
+    const count = (sql: string): number => Number((db.prepare(sql).get(docId) as { total: number | bigint }).total);
+    return {
+      document: count('SELECT COUNT(*) AS total FROM resume_docs WHERE id = ?'),
+      snapshots: count('SELECT COUNT(*) AS total FROM resume_snapshots WHERE doc_id = ?'),
+      imports: count('SELECT COUNT(*) AS total FROM resume_imports WHERE doc_id = ?'),
+      entities: count('SELECT COUNT(*) AS total FROM kb_entities WHERE source_doc_id = ?'),
+      chunks: count('SELECT COUNT(*) AS total FROM kb_chunks WHERE source_doc_id = ?'),
+    };
+  }
+
+  /**
+   * 灌两份**真导入**的简历并把索引长齐：文件落盘 → `resume.parse` 建档 → `kb.profile` 派生实体与切片，
+   * 再给第一份补两条快照、补一次向量，并在它的派生经历下挂一条手工实体。
+   *
+   * 走 `fromFile` 而不是手搓 `doc.save`：`resume_imports.doc_id` 是由源文件哈希现算的
+   * （`resume-<哈希前 12 位>`），只有从文件导入才能得到「出处行与被删的那份 id 对得上」的前置。
+   * @param dir 本次用的临时目录（每个用例独立一份库）
+   * @returns 装配句柄、两份简历的 id、那条手工实体的 id，以及本次写入的向量条数
+   */
+  async function importedPairWithIndex(dir: string) {
+    const booted = await boot(dir, undefined, undefined, {
+      available: true,
+      // 替身模型名与真端点同形：删除腿不认识具体模型，只认「切片没了向量行也必须没」。
+      model: 'fixture-remove-model',
+      table: { 订单: [10, 1], 重构: [0, 10], 发布流水线: [10, 0], 技能: [1, 10] },
+    });
+    const fileA = join(dir, '甲-简历.md');
+    const fileB = join(dir, '乙-简历.md');
+    writeFileSync(fileA, RESUME_MD_WITH_SECTIONS, 'utf8');
+    writeFileSync(fileB, RESUME_MD, 'utf8');
+    const receiptA = await booted.parse.fromFile(fileA, NOW_MS);
+    const receiptB = await booted.parse.fromFile(fileB, LATER_MS);
+    if (receiptA.status !== 'imported' || receiptB.status !== 'imported') {
+      throw new Error(`语料应该都能导入：${receiptA.status} / ${receiptB.status}`);
+    }
+    booted.kb.sync(receiptA.docId, NOW_MS);
+    booted.kb.sync(receiptB.docId, LATER_MS);
+    const loadedA = booted.doc.load(receiptA.docId);
+    if (loadedA.status !== 'found') throw new Error(`导入后工作副本读不回：${loadedA.status}`);
+    booted.snapshot.record(loadedA.document, 'classic', resumePrint.fontSet, NOW_MS);
+    booted.snapshot.record(loadedA.document, 'dense', resumePrint.fontSet, LATER_MS);
+    const vectors = await booted.kb.syncVectors(NOW_MS);
+    const parent = booted.kb.list({ kind: 'experience' }).find((entity) => entity.sourceDocId === receiptA.docId);
+    if (parent === undefined) throw new Error('语料 A 应该派生出经历实体');
+    const manual = booted.kb.create(
+      { kind: 'achievement', payload: { text: '手工补的一条成果，记在甲的经历下' }, parentId: parent.entityId },
+      NOW_MS,
+    );
+    return { ...booted, docIdA: receiptA.docId, docIdB: receiptB.docId, manualId: manual.entityId, vectors };
+  }
+
+  it('一次删除把六张表清干净：回执逐表计数与库里的行数逐条相等，删完那份在库里一行不剩', async () => {
+    const dir = tempDir();
+    const { kb, db, docIdA, vectors } = await importedPairWithIndex(dir);
+    const before = docFootprint(db, docIdA);
+    expect(before).toMatchObject({ document: 1, snapshots: 2, imports: 1 });
+    expect(before.entities).toBeGreaterThan(0);
+    // 区块级切片（个人简介 / 教育 / 校园）走的是另一条派生腿，所以切片一定比实体多。
+    expect(before.chunks).toBeGreaterThan(before.entities);
+    expect(vectors.written).toBeGreaterThan(0);
+
+    expect(kb.removeDoc(docIdA, LATER_MS)).toEqual({ docId: docIdA, ...before, detached: 1 });
+    expect(docFootprint(db, docIdA)).toEqual({ document: 0, snapshots: 0, imports: 0, entities: 0, chunks: 0 });
+  });
+
+  it('另一份简历一字不动，手工实体不被连带删掉、只被解除归属（裁定㉖ 的第 2 条归属边界）', async () => {
+    const dir = tempDir();
+    const { kb, doc, db, docIdA, docIdB, manualId } = await importedPairWithIndex(dir);
+    const beforeA = docFootprint(db, docIdA);
+    const beforeB = docFootprint(db, docIdB);
+    const beforeManual = kb.get(manualId);
+    expect(beforeManual?.parentId).not.toBeNull();
+    const totalEntities = entityCount(db);
+
+    kb.removeDoc(docIdA, LATER_MS);
+
+    expect(docFootprint(db, docIdB)).toEqual(beforeB);
+    expect(doc.exists(docIdB)).toBe(true);
+    expect(kb.get(manualId)).toMatchObject({ sourceDocId: null, parentId: null });
+    // 全库少的正是甲那一格：手工实体（`source_doc_id IS NULL`）不在删除集合里。
+    expect(entityCount(db)).toBe(totalEntities - beforeA.entities);
+    // 归属收敛走的是 4.2-04 那条老腿：全库不留悬空引用。
+    expect(orphanParentCount(db)).toBe(0);
+  });
+
+  it('倒排与向量不留孤儿行：两条派生索引随切片一起清，剩下的一行都对得上主表', async () => {
+    const dir = tempDir();
+    const { kb, db, docIdA } = await importedPairWithIndex(dir);
+    expect(ftsCount(db)).toBe(chunkCount(db));
+    expect(vectorCount(db)).toBeGreaterThan(0);
+
+    kb.removeDoc(docIdA, LATER_MS);
+
+    expect(ftsCount(db)).toBe(chunkCount(db));
+    expect(orphanFtsCount(db)).toBe(0);
+    expect(orphanVectorCount(db)).toBe(0);
+    expect(vectorCount(db)).toBeGreaterThan(0);
+    // 「发布流水线」两份语料都写了（甲在个人简介、乙在成果），所以这一句同时判两件事：
+    // 删掉的那份再也搜不到，剩下那份照样搜得到（索引没被连坐清空）。
+    const hits = await kb.search('发布流水线');
+    expect(hits.hits.length).toBeGreaterThan(0);
+    expect(hits.hits.filter((hit) => hit.sourceDocId === docIdA)).toEqual([]);
+  });
+
+  it('工作副本本来就不存在：逐表计数为 0 且不抛（删除的语义是「让它不存在」，不是「删掉一行」）', async () => {
+    const dir = tempDir();
+    const { kb, db } = await importedPairWithIndex(dir);
+    const totalEntities = entityCount(db);
+    const totalChunks = chunkCount(db);
+
+    expect(kb.removeDoc('resume-never-imported', LATER_MS)).toEqual({
+      docId: 'resume-never-imported',
+      document: 0,
+      snapshots: 0,
+      imports: 0,
+      entities: 0,
+      chunks: 0,
+      detached: 0,
+    });
+    expect(entityCount(db)).toBe(totalEntities);
+    expect(chunkCount(db)).toBe(totalChunks);
+  });
+
+  it('中途失败整笔回滚：切片与实体删完才炸时，六张表一行不少', async () => {
+    const dir = tempDir();
+    const seeded = await importedPairWithIndex(dir);
+    const { kb, db, docIdA, manualId } = seeded;
+    const before = docFootprint(db, docIdA);
+    const boom = new Error('快照腿炸了');
+    // 替身打的是**事务内部**的中断点（真实故障是约束冲突 / 磁盘写不进），而不是拆表：
+    // 这条用例判的就是「删到一半抛错会不会留下半删」，所以六张表必须都还在才能逐表比。
+    seeded.snapshot.removeAllForDoc = () => {
+      throw boom;
+    };
+
+    expect(() => kb.removeDoc(docIdA, LATER_MS)).toThrow(boom);
+    expect(docFootprint(db, docIdA)).toEqual(before);
+    expect(kb.get(manualId)?.parentId).not.toBeNull();
+  });
+
+  it('删除推一条 entities-changed：动作 remove、带上 docId 与「素材 + 解除归属」的计数', async () => {
+    const dir = tempDir();
+    const { kb, ctx, docIdA } = await importedPairWithIndex(dir);
+    const events: KbEntitiesChangedEvent[] = [];
+    ctx.on('kb/entities-changed', (event) => events.push(event));
+
+    const receipt = kb.removeDoc(docIdA, LATER_MS);
+    expect(events.map((event) => event.action)).toEqual(['remove']);
+    expect(events[0]).toMatchObject({ action: 'remove', docId: docIdA, changed: receipt.entities + receipt.detached });
+    // 载荷仍然只有动作与计数：界面重读 `list()` 拿现状，事件里不塞副本（§2.5）。
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['action', 'at', 'changed', 'docId']);
   });
 });
 

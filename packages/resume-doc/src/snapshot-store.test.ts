@@ -308,3 +308,26 @@ describe('3.7-03 任意两份快照可 diff（条目级 + 字段级）', () => {
     expect(String(toCorrupt?.message)).toContain('JSON 解析失败');
   });
 });
+
+describe('按文档整体清除快照（spec 4.1-14 的删除腿里属于本表的那一段）', () => {
+  it('一次带走那份的全部快照并返回条数，另一份的一字不动', async () => {
+    const { snapshots, db } = await boot();
+    snapshots.record(sampleDoc({ id: 'a' }), 'classic', 'f', 1);
+    snapshots.record(sampleDoc({ id: 'a' }), 'dense', 'f', 2);
+    snapshots.record(sampleDoc({ id: 'a' }), 'modern', 'f', 3);
+    const kept = snapshots.record(sampleDoc({ id: 'b' }), 'classic', 'f', 4).snapshotId;
+
+    expect(snapshots.removeAllForDoc('a')).toBe(3);
+    expect(snapshots.list('a')).toEqual([]);
+    expect(snapshots.meta(kept)?.snapshotId).toBe(kept);
+    const row = db.prepare('SELECT COUNT(*) AS total FROM resume_snapshots').get() as { total: number | bigint };
+    expect(Number(row.total)).toBe(1);
+  });
+
+  it('没有那份的快照时返回 0 而不是抛（编排方按逐表计数说话，不需要一种失败）', async () => {
+    const { snapshots } = await boot();
+    snapshots.record(sampleDoc({ id: 'a' }), 'classic', 'f', 1);
+    expect(snapshots.removeAllForDoc('库里从来没有的那份')).toBe(0);
+    expect(snapshots.list('a')).toHaveLength(1);
+  });
+});

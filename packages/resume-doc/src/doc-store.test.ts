@@ -164,3 +164,28 @@ describe('文档清单（生成轨的选文档口）', () => {
     expect(docs.list()).toEqual([{ id: 'no-name', name: null, updatedAt: 1234 }]);
   });
 });
+
+describe('删除工作副本（spec 4.1-14 的删除腿里属于本表的那一段）', () => {
+  it('真删返回 true，再删同一份返回 false 而不是抛（删除的语义是「让它不存在」）', async () => {
+    const { docs } = await boot();
+    docs.save(sampleDoc({ id: 'gone' }));
+    docs.save(sampleDoc({ id: 'kept' }));
+
+    expect(docs.remove('gone')).toBe(true);
+    expect(docs.exists('gone')).toBe(false);
+    expect(docs.load('gone')).toEqual({ status: 'missing' });
+    expect(docs.remove('gone')).toBe(false);
+    // 本服务只管自己这张表：另一份一字不动，跨表的原子删除只有一个入口（`kb.profile.removeDoc`）。
+    expect(docs.exists('kept')).toBe(true);
+  });
+
+  it('删掉的是一份的行，库里其它文档与清单读数跟着收敛', async () => {
+    const { docs, db } = await boot();
+    docs.save(sampleDoc({ id: 'a', updatedAt: 1000 }));
+    docs.save(sampleDoc({ id: 'b', updatedAt: 2000 }));
+    expect(docs.remove('a')).toBe(true);
+    expect(docs.list().map((item) => item.id)).toEqual(['b']);
+    const row = db.prepare('SELECT COUNT(*) AS total FROM resume_docs').get() as { total: number | bigint };
+    expect(Number(row.total)).toBe(1);
+  });
+});

@@ -56,6 +56,7 @@ export {
   type KbImportResult,
   type KbProfileConfig,
   type KbRemoveResult,
+  type KbRemoveDocResult,
   type KbSyncResult,
   type KbVectorSyncResult,
 } from './profile-service.js';

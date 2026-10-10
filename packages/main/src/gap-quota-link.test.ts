@@ -28,8 +28,15 @@ import { AgentToolsService } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { EntitlementGateService, UsageLedgerService, type GateConfig } from '@auto-cc/plugin-entitlement';
 import { LogService } from '@auto-cc/plugin-logger';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
-import { KbGapService, KbProfileService, kbGapSchema, kbProfileSchema } from '@auto-cc/plugin-resume-kb';
+import { ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
+import {
+  KbGapService,
+  KbProfileService,
+  kbGapSchema,
+  kbProfileSchema,
+  ResumeParseService,
+  resumeParseSchema,
+} from '@auto-cc/plugin-resume-kb';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,6 +89,9 @@ async function bootWithGate(gate: GateConfig) {
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   fibers.push(await ctx.plugin(EntitlementGateService, gate));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）。
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
+  fibers.push(await ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
   // 配置一律取 schema 默认值（与 `cordis.yml` 同源）：这里判的是接线，不在测试里另抄一份阈值。
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   // 注册表先于 `kb.gap` 上岗：`registerAgentTools` 是软取，晚挂载就登记出 0 个工具。

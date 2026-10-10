@@ -284,6 +284,17 @@ export class ResumeSnapshotService extends Service {
     };
   };
 
+  /**
+   * 删掉某文档的**全部**快照历史（spec 4.1-14：版本历史是这份文档的，删简历就该把它一起带走）。
+   *
+   * 与 `prune` 的区别是刻意的：那条按 `maxSnapshots` 留下最新的几份，这一条一份都不留——
+   * 「保留上限」管的是同一份简历反复导出把表撑大，不管「这份简历已经不存在」这种情形。
+   * @param docId 文档 id
+   * @returns 被删掉的快照行数（0 是合法结果：从没导出过的简历没有历史）
+   */
+  removeAllForDoc = (docId: string): number =>
+    Number(this.db.prepare('DELETE FROM resume_snapshots WHERE doc_id = ?').run(docId).changes);
+
   [Service.init](): void {
     this.ensureSchema();
     this.ctx.logger.info(

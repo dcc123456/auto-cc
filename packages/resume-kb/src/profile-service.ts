@@ -294,6 +294,28 @@ export interface KbRemoveResult {
   readonly detached: number;
 }
 
+/**
+ * 一次「删掉整份简历」的读数（spec 4.1-14 / 裁定㉖ 第 1 条）。
+ *
+ * 逐表计数是**给界面用的**：那句「已删掉这份简历，连同 N 段素材、M 条索引」的数字必须由删的人给，
+ * 让渲染层自己数一遍就是第二套事实（§2.5）。
+ */
+export interface KbRemoveDocResult {
+  readonly docId: string;
+  /** `resume_docs` 那一行（0 也是合法结果：只导进过扫描件时本来就没有工作副本）。 */
+  readonly document: number;
+  /** 随这份文档走的版本历史条数。 */
+  readonly snapshots: number;
+  /** `resume_imports` 的出处行数（0 是合法值：手动新建的简历从没导过文件）。 */
+  readonly imports: number;
+  /** 这份文档派生出的素材条数；手工建的实体不在此列（它们不属于任何一份简历）。 */
+  readonly entities: number;
+  /** 随素材一起清掉的索引切片数（倒排行与向量行走同一条路径，计数以主表为准，4.3-11）。 */
+  readonly chunks: number;
+  /** 因为父被删而解除归属的行数——收的是「另一份简历 / 手工实体挂在这批素材上」的悬空引用。 */
+  readonly detached: number;
+}
+
 /** 一次备份导出的读数。 */
 export interface KbExportResult {
   readonly filePath: string;
@@ -379,7 +401,10 @@ function viewOf(row: KbEntityRow): KbEntityView {
 export class KbProfileService extends Service {
   static provide = 'kb.profile';
   static Config = kbProfileSchema;
-  static inject = ['store', 'resume.doc'];
+  // 删除腿（spec 4.1-14）要一次点全六张表，而包依赖是单向 kb→doc（plan 04 §4.7 的事实②）：
+  // 只有这一侧能同时够到 `kb_*` 与简历那三张表，所以跨表编排住在 `kb.profile`，不在 `resume.doc`。
+  // 挂载顺序已核对过 `cordis.yml`（`resume-doc` / `resume-snapshot` / `resume-parse` 全排在 `kb-profile` 之前）。
+  static inject = ['store', 'resume.doc', 'resume.snapshot', 'resume.parse'];
 
   /** `withTransaction` 的嵌套深度：>0 表示已经在事务里，内层不再开新事务（SQLite 不允许嵌套 BEGIN）。 */
   private txDepth = 0;
@@ -397,6 +422,16 @@ export class KbProfileService extends Service {
 
   private get docStore() {
     return asApp(this.ctx)['resume.doc'];
+  }
+
+  /** 快照存储：删除腿要把版本历史跟着文档一起带走（那张表由 `resume.snapshot` own，本包不写它的裸 SQL）。 */
+  private get snapshotStore() {
+    return asApp(this.ctx)['resume.snapshot'];
+  }
+
+  /** 导入出处：`resume_imports` 由 `resume.parse` own，留着它就会有一条指向已删简历的「没读准的地方」。 */
+  private get parseService() {
+    return asApp(this.ctx)['resume.parse'];
   }
 
   /**
@@ -823,6 +858,48 @@ export class KbProfileService extends Service {
     this.ctx.logger.info(`[kb-profile] 删除手工实体 ${entityId}（连带解除归属 ${String(detached)} 条）`);
     this.announce('remove', null, removed + detached);
     return { entityId, removed, detached };
+  }
+
+  /**
+   * 删掉一份简历**连同它派生出的素材与索引**（spec 4.1-14 / 裁定㉖ 第 1 条「连素材一起真删」）。
+   *
+   * 六张表删在同一条事务里，因为 `PRAGMA foreign_keys` 全仓没有打开（AGENTS.md §9 的 5.3-a），
+   * DDL 里的 `ON DELETE CASCADE` 是装饰性的；而拆成两次桥接调用会留下「文档没了但素材还在」的半删，
+   * 那正是界面上最难解释的一种脏。切片一律走 `deleteChunksWhere`（倒排行与向量行同一条路径，4.3-11），
+   * 归属收敛复用 `detachOrphanParents`（4.2-04 的「不留悬空引用」）。
+   *
+   * 三样东西**刻意留着**：手工实体（`source_doc_id IS NULL`，不属于任何一份简历）、
+   * `resume_generations` 与额度台账（那是"花过钱"的审计事实）。删除不抛「查无此文档」：
+   * 调用点的语义是「让它不存在」，工作副本本来就不在时逐表计数为 0，界面据读数说一句人话即可。
+   * @param docId 简历文档 id（`resume_docs` 的主键）
+   * @param nowMs 时间戳（毫秒），只用于刷新被解除归属那些行的 `updated_at`
+   * @returns 逐表被删行数（界面那句成功文案的数字全部由这里给，渲染层不自己数）
+   */
+  removeDoc(docId: string, nowMs = Date.now()): KbRemoveDocResult {
+    const outcome = this.withTransaction(() => {
+      // 先删切片再删实体：`deleteChunksWhere` 的倒排与向量删除都靠回读 `kb_chunks`，而实体级切片的
+      // `source_doc_id` 就是实体自己的来源（`entityChunkOf`），所以这一条谓词同时覆盖实体级与区块级，
+      // 不必像 `prune` 那样再经 `kb_entities` 子查询一次。
+      const chunks = this.deleteChunksWhere('source_doc_id = ?', [docId]);
+      const entities = Number(
+        this.store.db.prepare('DELETE FROM kb_entities WHERE source_doc_id = ?').run(docId).changes,
+      );
+      return {
+        chunks,
+        entities,
+        detached: this.detachOrphanParents(nowMs),
+        snapshots: this.snapshotStore.removeAllForDoc(docId),
+        imports: this.parseService.removeForDoc(docId),
+        document: this.docStore.remove(docId) ? 1 : 0,
+      };
+    });
+    this.ctx.logger.info(
+      `[kb-profile] 删除简历 ${docId}：工作副本 ${String(outcome.document)} 行 / 快照 ${String(outcome.snapshots)} 份 / ` +
+        `出处 ${String(outcome.imports)} 行 / 派生素材 ${String(outcome.entities)} 条 / 切片 ${String(outcome.chunks)} 条 / ` +
+        `解除归属 ${String(outcome.detached)} 条（生成记录与额度台账按裁定㉖ 保留）`,
+    );
+    this.announce('remove', docId, outcome.entities + outcome.detached);
+    return { docId, ...outcome };
   }
 
   /**

@@ -25,7 +25,7 @@
 import { AppError, Context, NO_CONFIG, asApp, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -35,6 +35,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { KbGapService, kbGapSchema, type KbGapConfig, type GapReportView } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
 import { KbProfileService, kbProfileSchema } from './profile-service.js';
+import { ResumeParseService } from './parse-service.js';
 import { parseResumeText } from './sections.js';
 import { REQUIREMENT_LEXICON_VERSION } from './requirements.js';
 import { REQUIREMENT_PROMPT_VERSION } from './prompts.js';
@@ -293,7 +294,8 @@ const AS_OF_MS = new Date(2026, 9, 15, 12).getTime();
 const LIBRARY_DOC_ID = 'resume-gap-report';
 
 /**
- * 建一份「拆解 + 真库」的装配：config + log + store + resume.doc + kb.profile + kb.gap。
+ * 建一份「拆解 + 真库」的装配：config + log + store + resume.doc + resume.snapshot + resume.parse +
+ * kb.profile + kb.gap（后两只的顺序见上面的挂载注释）。
  *
  * 库里那几行不是手写的，而是**从简历文本经 4.1 的区块解析与 4.2 的实体派生**得到的——
  * 本条用例要判的正是「拆出来的要求能不能比回真实派生结果」，自己造一批实体等于没接库（AGENTS.md §2.1）。
@@ -308,6 +310,9 @@ async function bootGapWithLibrary(gapConfig: Partial<KbGapConfig> = {}) {
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
+  fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   // 配置项一律取 schema 的默认值（与 `cordis.yml` 同源），不在测试里另抄一份阈值。
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   // 注册表先于本服务上岗：`registerAgentTools` 是软取，晚挂载就只能登记出 0 个工具（4.4-05 的双入口）。

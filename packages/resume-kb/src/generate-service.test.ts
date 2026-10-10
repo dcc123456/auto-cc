@@ -24,7 +24,13 @@
 import { AppError, Context, NO_CONFIG, asApp, numbersOf, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { documentSchema, ResumeDocService, validateDocument, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
+import {
+  documentSchema,
+  ResumeDocService,
+  ResumeSnapshotService,
+  validateDocument,
+  type ResumeDocument,
+} from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,6 +50,7 @@ import {
   type KbGenerateConfig,
 } from './generate-service.js';
 import { preservesAllEntries } from './generate-reorder.js';
+import { ResumeParseService } from './parse-service.js';
 import { GENERATE_PROMPT_VERSION } from './prompts.js';
 import { KbGapService, kbGapSchema } from './gap-service.js';
 import { waitForLogLine } from './log-file.js';
@@ -143,7 +150,11 @@ interface ChatSetup {
 const NEVER_ASKED_REPLY = '{"entries":[]}';
 
 /**
- * 建一份「真库 + 生成轨」的装配：config + log + store + resume.doc + kb.profile + agent.tools + kb.gap + resume.generate。
+ * 建一份「真库 + 生成轨」的装配：config + log + store + resume.doc + resume.snapshot + resume.parse +
+ * kb.profile + agent.tools + kb.gap + resume.generate。
+ *
+ * `resume.snapshot` 与 `resume.parse` 排在 `kb.profile` 之前是硬性顺序（AGENTS.md §9 的 5.1-c）：
+ * 4.1-14 的删除腿让 `kb.profile` 硬注入了它们，挂晚了本服务 PENDING。
  *
  * 库里那几行不是手写的，而是**从简历文本经 4.1 区块解析、4.2 实体派生**得到的：本文件要判的
  * 正是"生成的顺序与证据回指得到库里真实的那几行"，自己造一批实体等于没接库（AGENTS.md §2.1）。
@@ -159,6 +170,9 @@ async function bootGenerate(generateConfig: Partial<KbGenerateConfig> = {}, chat
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
+  fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   // 注册表先于本服务上岗：`registerAgentTools` 是软取，晚挂载就只能登记出 0 个工具（双入口的判据）。
   fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));

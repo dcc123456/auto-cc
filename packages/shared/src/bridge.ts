@@ -396,6 +396,11 @@ export const RENDERER_ALLOWLIST = [
   'kb.profile.sync',
   'kb.profile.exportBackup',
   'kb.profile.importBackup',
+  // 4.1-14 / 裁定㉖ 的删除腿：删一份简历**连同它派生的素材与索引**，六张表删在同一条事务里。
+  // 它落在 `kb.profile.*` 而不是语义上更顺的 `resume.doc.remove`，是因为桥接 id 的前两段就是服务名，
+  // 而唯一能同时够到 `kb_*` 与简历那三张表的服务只有这一只（包依赖单向 kb→doc，plan 04 §4.7 的事实②）。
+  // 与上面 `kb.profile.remove` 不是一条：那条只删手工实体、对派生行必然以 `KB_ENTITY_DERIVED` 失败。
+  'kb.profile.removeDoc',
   // 4.4-d 的缺口报告双入口（spec 4.4-05）：报告是「JD × 库」的现算投影，只读本地库，
   // 三态、分数、五种模型腿结局全在主进程算完（同 `kb.profile.search` 的口径）。
   // 证据正文单独一条只读口：报告里每条证据只有 id，把正文并进报告就等于让一次比对把半本库
@@ -1798,6 +1803,20 @@ export interface KbRemoveRowResult {
   readonly detached: number;
 }
 
+/**
+ * 一次「删掉整份简历」的回执（镜像 `KbRemoveDocResult`，spec 4.1-14 / 裁定㉖ 第 1 条）。
+ * 界面那句「已删掉这份简历，连同 N 段素材、M 条索引」的数字全部来自这里，渲染层不自己数（§2.5）。
+ */
+export interface RemoveDocReceiptView {
+  readonly docId: string;
+  readonly document: number;
+  readonly snapshots: number;
+  readonly imports: number;
+  readonly entities: number;
+  readonly chunks: number;
+  readonly detached: number;
+}
+
 /** 一次备份导出的回执（镜像 `KbExportResult`）。 */
 export interface KbExportRowResult {
   readonly filePath: string;
@@ -2634,6 +2653,14 @@ export interface BridgeSignatures {
   'kb.profile.exportBackup': { args: [filePath: string]; returns: KbExportRowResult };
   /** 从本地 JSON 备份导入（spec 4.2-08）：单事务，中途失败整批回滚；默认策略 `skip` 不动用户已有数据。 */
   'kb.profile.importBackup': { args: [filePath: string, mode?: KbImportModeView]; returns: KbImportRowResult };
+  /**
+   * 删掉一份简历**连同它派生的素材与索引**（spec 4.1-14 / 裁定㉖）：六张表删在同一条事务里。
+   *
+   * 入参只有 `docId`——删除范围由主进程按库里的归属关系算，界面拿不到也不该拿到"还有哪些行"。
+   * 与 `kb.profile.remove` 是两件事：那条删一条手工实体、对派生行必然失败；这一条正是按归属整批删派生行。
+   * `resume_generations` 与额度台账**不在删除范围内**（那是"花过钱"的审计事实），手工实体也不动。
+   */
+  'kb.profile.removeDoc': { args: [docId: string]; returns: RemoveDocReceiptView };
   /**
    * 缺口报告（spec 4.4-03 / 04 / 05 / 06）：一段 JD 正文与本地库现算一次三态比对。
    *

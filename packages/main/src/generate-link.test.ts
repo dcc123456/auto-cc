@@ -40,7 +40,7 @@ import { asApp, AppError, Context, type Fiber } from '@auto-cc/core';
 import { AgentToolsService } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import {
   KbGapService,
   KbProfileService,
@@ -49,6 +49,8 @@ import {
   kbProfileSchema,
   parseResumeText,
   ResumeGenerateService,
+  resumeParseSchema,
+  ResumeParseService,
   type GenerationView,
 } from '@auto-cc/plugin-resume-kb';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -103,6 +105,10 @@ async function bootAssembly() {
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），而清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）：
+  // 挂晚了本服务 PENDING，下面那句 `app['kb.profile']` 直接取不到。
+  fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
+  fibers.push(await ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   fibers.push(await ctx.plugin(AgentToolsService, {}));
   fibers.push(await ctx.plugin(KbGapService, kbGapSchema.parse({})));

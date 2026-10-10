@@ -23,7 +23,7 @@
 import { asApp, Context } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { ResumeDocService } from '@auto-cc/plugin-resume-doc';
+import { ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import { storeSchema, StoreService } from '@auto-cc/plugin-store';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -33,6 +33,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { KB_ENTITY_KINDS, type KbEntityKind } from './entities.js';
+import { resumeParseSchema, ResumeParseService } from './parse-service.js';
 import { kbProfileSchema, KbProfileService } from './profile-service.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -222,6 +223,9 @@ async function runBench(budget: z.output<typeof benchConfigSchema>): Promise<Ben
   await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir: benchDir, redact: false });
   await ctx.plugin(StoreService, storeConfig);
   await ctx.plugin(ResumeDocService, {});
+  // 这两只为 `kb.profile` 的删除腿（4.1-14 的硬注入）而在场，基准本身不读它们；顺序必须在 kb-profile 之前。
+  await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 });
+  await ctx.plugin(ResumeParseService, resumeParseSchema.parse({}));
   await ctx.plugin(KbProfileService, profileConfig);
   const kb = asApp(ctx)['kb.profile'];
   const db = asApp(ctx).store.db;

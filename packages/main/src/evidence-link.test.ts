@@ -139,8 +139,9 @@ async function bootEvidenceAssembly(options: { withConversations?: boolean } = {
   }
   await mount(ctx.plugin(ResumeDocService, {}));
   await mount(ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
-  await mount(ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
+  // `resume.parse` 也排在 `kb.profile` 之前：4.1-14 的删除腿让它硬注入了这两只，挂晚了就 PENDING（§9 的 5.1-c）。
   await mount(ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
+  await mount(ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   await mount(ctx.plugin(KbGapService, kbGapSchema.parse({})));
   await mount(ctx.plugin(ResumeGenerateService, kbGenerateSchema.parse({})));
   await mount(ctx.plugin(ChatSessionService, chatConfigSchema.parse({})));
