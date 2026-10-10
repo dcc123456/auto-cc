@@ -1,0 +1,152 @@
+6.4-15 / 16 / 17 · 三步说人话 + 待确认降级 + 素材不用手敲 id——活体读数
+=====================================================================
+
+取证对象：用户自己的 dev 实例（CDP 10222 / `--url 5173`），窗口 1200×772、简历屏容器实测 940、
+主题墨案（浅色）。前半批读数在 `visibilityState:"hidden"` 下取（量几何前注入动效冻结、收尾摘掉，
+§9 的 6.2 ①），最后两腿（6.4-17 的那一发同步）窗口已在场可见，所以点的是**真实鼠标**。
+探针：`tmp/59/probe-{a,c,e,f,g,h,sync,sync-receipt}.js`（一律 `harness eval --url 5173 --expr-file`）。
+
+----------------------------------------------------------------------
+① 6.4-15（C+V）：主流程只剩三步，段名说的是"这一步要我做什么"
+----------------------------------------------------------------------
+
+probe-a（`[data-action="nav-resume"]` 先激活，再读四段段头 + 四句平铺）：
+
+SECTION-HEADS {"resume.doc":"挑一份简历 · 张三","resume.facts":"改之前先看一眼",
+               "resume.generate":"按岗位改写 · 为 张三 定制","resume.output":"挑版式并导出 · 现代双列强调 · zh-CN"}
+STEP-HINTS    [{"doc":"从本机导入，再选要改的那份"},{"facts":"没读准的地方，和能拿来改写的素材"},
+               {"generate":"贴上岗位要求，逐条决定要不要采纳"},{"output":"选一套版式，预览后存成 PDF"}]
+BANNED-HITS   []
+
+→ 四句平铺各 11～18 汉字（plan §3.24 的 ≤24 上限），四段段头都读得出"要做什么"，而
+  `bannedHits:[]` 是对**工作台可见文字**跑一遍七个禁词（事实核对 / 知识库实体 / 岗位缺口 / 待确认清单 /
+  定制生成 / docId / textLength）+ 两个 id 形状（`resume-`、「确认后」）的读数：主流程里一个都不剩。
+  「改之前先看一眼」这一段的**标题**留着，是因为它现在说的是动作而不是数据结构；
+  旧名「事实核对」连同 `desk.resume.sectionFactsClean/Pending` 两支摘要键一起删掉了（见第⑤段）。
+
+----------------------------------------------------------------------
+② 6.4-15 的披露层半边：收起来就是**不挂载**，不是藏起来
+----------------------------------------------------------------------
+
+probe-e（整段收起时）/ probe-g（点开后）：
+
+COLLAPSED {"explainersCollapsed":{"facts":"false","importAdvanced":"false"},
+           "kbMountedWhileCollapsed":false,"gapMountedWhileCollapsed":false}
+EXPANDED  {"before":{"open":"false","kbMounted":0,"gapMounted":0,"toggleText":"改之前先看一眼"},
+           "after":{"open":"true","kbMounted":1,"gapMounted":1},
+           "headings":[{"text":"能拿来改写的素材","size":"14px"},{"text":"还差什么","size":"14px"}],
+           "bannedWords":[]}
+
+→ `DeskExplainer` 收起时正文整块不渲染（`kbMounted:0 → 1`），所以"降到披露层"是真的把主流程变短，
+  而不是把同样的东西换个地方堆着。展开后两格的 h2 是「能拿来改写的素材」「还差什么」，
+  这一格内仍然零禁词。素材/缺口/版本对照/页序/绝对路径导入全部只在这一层出现。
+
+----------------------------------------------------------------------
+③ 6.4-16（V）：待确认清单已经是"一句提醒"，且界面上不再印开发者标识
+----------------------------------------------------------------------
+
+probe-f（提醒那一行收起态的标签 + 展开后的三行）：
+
+REMINDER {"collapsedLabel":"3 处没读准，导出前自己看一眼","openAfter":"true"}
+ROWS     [{"status":"scanned","text":"没读出姓名的那一份 · 1 处 · 17:34:16 · 疑似扫描件 · 纯文本正文过短-75 / 100"},
+          {"status":"scanned","text":"没读出姓名的那一份 · 1 处 · 17:27:57 · 疑似扫描件 · 纯文本正文过短-69 / 100"},
+          {"status":"imported","text":"李静 · 2 处 · 20:17:13 · 已入库 · Markdown已脱敏，需确认-l***@example.com已脱敏，需确认-138****2222"}]
+TYPE     {"reminderFontPx":"11px","rowColor":"rgb(79, 90, 100)"}
+BANNED   {"hits":[],"docIdShapeInVisibleText":[]}
+NOTICE   "疑似扫描件：只读到 75 字，不引入 OCR，请人工补录"
+
+→ 三行全是**简历姓名 + 处数 + 时间 + 五类原因**，没有一行印 `resume-1a2b` 或 `textLength`
+  （`docIdShapeInVisibleText:[]` 是对整段可见文字现读 `resume-` 的结果）。前两行是本轮新导入的
+  薄正文夹具（`tmp/59/王二-薄简历{,2}.txt`，71 / 86 字，都低于 `MIN_TEXT_CHAR_COUNT = 100`）。
+  灰阶档按 §6.1-09：11px 才许用 `slate-500/600`，读数 `rgb(79,90,100)` 对得上。
+  两条边界照旧诚实：**没有**"确认后才能生成"这类话（生成腿确实不读它），也**没有**新增确认口；
+  而"疑似扫描件只读到 N 字"这条信号仍然看得见（4.1-05 的欠账没有因为降级而丢掉）。
+
+补一条本轮才浮出来的形状事实：**扫描件导入不写文档行**（`status:'scanned'` 只回回执），
+所以那一行在 `resume.doc.list` 里查不到名字。第一版因此渲染成「 · 1 处 · …」的空姓名——
+看着像渲染 bug。修法是 `resume.pendingUnnamed`（「没读出姓名的那一份」）兜底，
+**不退回印 docId**（那正是本条判据要消灭的东西）。
+
+----------------------------------------------------------------------
+④ 6.4-17（V）：desk 选中的那份一进来就同步得动，人手不敲 id
+----------------------------------------------------------------------
+
+probe-g（面板一挂上就现读，未碰任何输入框）：
+
+FIELD  {"value":"resume-demo","label":"素材来自：张三"}
+SYNC   {"count":1,"disabledReason":null,"ariaDisabled":null,"hitTest":"self"}
+
+$ pnpm harness click --url 5173 --selector '[data-kb-action="sync"]'
+已点击 <button>（原生鼠标事件）
+
+probe-sync-receipt（那一发之后隔 2s 现读）：
+
+RECEIPT {"kbErrors":[],"emptyShown":false,
+         "panelTextHead":["能拿来改写的素材","","实体树来自…","","素材来自：张三","从简历同步",
+                          "证据链","检索知识库","导出备份","导入备份","冲突时跳过","冲突时覆盖",
+                          "技能","TypeScript"]}
+
+→ 三条对上判据：① 输入框**一挂上就是 desk 当前那份**（`value:"resume-demo"`，人读到的那一行是
+  「素材来自：张三」），② 同步那颗的 `data-disabled-reason` 是 `null`——`DOC_ID_EMPTY` 不再挡在门口，
+  ③ 真实鼠标点下去之后回执是**树长出来了**（空态行「还没有素材：点一次「从简历同步」…」消失，
+  `emptyShown:false`，节点里能读到「技能 / TypeScript」），而不是一个错误码。
+  字段本身仍可编辑（想指别的那份时改一格就行），但主流程不再要求任何人知道 id 长什么样。
+
+----------------------------------------------------------------------
+⑤ 6.4-15 的 C 半边：`DeskSection id` 与全部取证通道一字未改
+----------------------------------------------------------------------
+
+$ grep -n 'id="resume\.' packages/renderer/src/ResumeDesk.tsx
+569:            id="resume.doc"      612:              <DeskExplainer id="resume.import-advanced"
+663:                  id="resume.pending-issues"   724:                id="resume.facts"
+743:            id="resume.generate"  770:            id="resume.output"
+
+$ grep -o 'data-testid="resume-[a-z-]*"' packages/renderer/src/ResumeDesk.tsx | sort
+resume-doc / resume-import-path / resume-import-section / resume-import-sections /
+resume-locale / resume-panel / resume-pending-empty / resume-pending-issue / resume-pending-row
+
+→ 四段 `DeskSection id` 是**持久收起状态的键**（`localStorage['auto-cc.desk.disclosure']`），一律没动；
+  改动只是把 `resume.facts` 从 section 换成 explainer（新键 `resume.facts` 落在同一份偏好里，
+  收起态不丢）。全部 `data-action` / `data-testid` 值原样保留，`6.2-06-*`、`6.4-08-*` 那批取证通道不断。
+  语言包侧删掉两支随旧摘要消失的键（`sectionFactsClean` / `sectionFactsPending`），
+  新增 `resume.pendingUnnamed`，并把 `resume.importDup` 的 `{{docId}}` 换成 `{{file}}`
+  （回执从此印"人刚选中的那个文件名"，而不是 `resume-1a2b`）。
+
+----------------------------------------------------------------------
+⑥ 本轮撞到的四条工具/环境陷阱（都不是产品缺陷，但会伪装成缺陷）
+----------------------------------------------------------------------
+
+· **i18n 机检会被对象字面量里的注释行吃掉**：`t('resume.importDone', { /* 注释 */ name, … })` 这种写法
+  `pnpm lint` 报「未传占位符 {{name}}」而实参明明传了——`check-renderer-conventions.ts` 按逗号切键，
+  注释行把第一个键吞掉。修法是把注释提到 `describe:` 那一行**之上**（本轮 EXIT=1 → 0）。
+· **并行会话改主进程源码会重启 Electron**：同一份库里 pending 行数在两次探针之间从 2 掉到 0
+  （`parse.pending` 是内存态）。这不是"提醒消失了"，是进程被换掉；重导一份夹具即可恢复。
+· **Grep 工具会返回已删除文件的命中**：片 58 退役的 `layout-service.ts` / `pdf.layout.textItems`
+  仍被报出来，用 `ls` + `bash grep` 复核才确认工作树上真的没有。退役类判据一律以 shell 现读为准。
+· **`harness shot --reveal` 对 desk 内滚动的元素会报"已滚到边界仍不在视口内"**：
+  简历屏容器 940×3225，目标在文档滚动条之外。改用页面里 `scrollIntoView({block:'start'})` +
+  不带 `--reveal` 重拍（§9 的 5.4-b ⑭ 同一形态），两张新画面都这么来的。
+
+----------------------------------------------------------------------
+⑦ 已知没做的事（写清楚，不留模糊）
+----------------------------------------------------------------------
+
+· 自测台抽屉里的 `resume.seedReceipt` 仍会印 `{{docId}}`——那是 QA 面（给夹具回执用的），
+  不在主流程三步里，本条判据的范围是工作台可见文字；留着，另片再收。
+· `GeneratePanel` 体内那句「按 JD 定制这份简历」没改：它本身是人话，且不属于七个被点名的段名。
+· 素材输入框里显示的仍是原始 id（`resume-demo`），上面一行是「素材来自：张三」。
+  这一格**可编辑**是刻意的（要指别的那份时不必绕路），所以没有把值换成姓名。
+
+----------------------------------------------------------------------
+画面（同批四张，md5 互异）
+----------------------------------------------------------------------
+docs/acceptance/06-ui-ink-desk/6.4-15-three-steps-light.png      6f49dbe208147d5b3c33c4d8fd10d214  三步主流程 + 右栏那张纸
+docs/acceptance/06-ui-ink-desk/6.4-15-disclosure-material.png    2d1544272f64538dd20c2b870253b07d  披露层展开：素材格（含未同步时的空态）
+docs/acceptance/06-ui-ink-desk/6.4-16-pending-reminder-light.png c13c1cbd995c229b7af765dc93b13b5e  提醒展开后的三行（姓名 + 处数 + 原因）
+docs/acceptance/06-ui-ink-desk/6.4-17-kb-docid-auto.png          aee497445cd28a54d7fe20aa3f0cfddb  真实鼠标同步之后：树已长出节点
+
+6.4-17 的"改前"那一半**不补拍**（产品里已经没有那个状态，摆拍就是伪证）。用的是它落地当天已在库的
+真实画面：`docs/acceptance/06-ui-ink-desk/6.2-06-kb-desk-dark.png`——里面段名仍是「知识库实体」，
+输入框是**空的**、占位符写着「简历文档 id（如 resume-xxxx）」，下面一行「库里还没有实体：
+先在上方填简历文档 id 做一次同步。」，正是本条要消灭的那次"让用户去翻 id"。两张对看即改前 / 改后。
+

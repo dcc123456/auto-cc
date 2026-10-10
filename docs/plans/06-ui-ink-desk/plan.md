@@ -1229,6 +1229,103 @@ zh 19 / en 18 条改写，判据是"这句话有没有一个开发者标识符�
 
 ---
 
+### 3.28 段名说人话、主流程收成三步：名字说的是数据结构，不是"这一步要我做什么"（第五十九片起，6.4-15…17）
+
+用户 2026-10-10 的报障里有半句专冲名字来：「**选简历、事实核对、知识库实体 我都不知道它们的作用是什么。要让这些术语都让用户易懂，并且简历生成的流程要简单。**」
+同一天他选的处置是**改文案 + 收成三步**（裁定㉕ 第 2 条），并且当场定了边界：**`data-action` / `data-testid` / `DeskSection` 的 `id` 一字不改**——
+那三样是 6.2-06、6.4-08 那批既有取证通道的地址，改了等于把历史读数全作废。所以这一片动的只有**用户看得见的字**与**东西摆在哪一格**。
+
+#### 3.28.1 一条要先摊开的冲突（§0：不可调和就先提出来，不许自己绕）
+
+`6.4-07` 那条 `[x]` 写的是"左列**四段**（选简历 / 事实核对 / 定制生成 / 出纸）"。三步主流程与"四段"不是同一件事：
+第四段（`resume.facts`）里装的两块面板本来就不是"一步"，它是"回头要核对的东西"。处理办法与 6.4-12 对 77rem 那一次同形：
+**不重写 `[x]` 行**（§4.5），在 6.4-07 行尾追加一条定向作废注记，新事实由 6.4-15 兑现——
+主列从此是三步，`resume.facts` 那一格的内容拆成两半各归其位（见 3.28.3），`id` 与它的持久收起状态**保留不删**（老库里人已经存过的那一档状态不悬空）。
+
+#### 3.28.2 逐键改名表（zh ↔ en 同键同时补，缺一边 `pnpm lint` 即红；键名一律不动，只换值）
+
+| 键                                  | 旧值（zh）                                       | 新值（zh）                                                 | 新值（en）                                     |
+| ----------------------------------- | ------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------- |
+| `shell.desk.resume.sectionDoc`      | 选简历                                           | **挑一份简历**                                             | Start from a resume                            |
+| `shell.desk.resume.sectionFacts`    | 事实核对                                         | **改之前先看一眼**                                         | Read it before you edit                        |
+| `shell.desk.resume.sectionGenerate` | 定制生成                                         | **按岗位改写**                                             | Rewrite for the job                            |
+| `shell.desk.resume.sectionOutput`   | 出纸                                             | **挑版式并导出**                                           | Pick a layout and export                       |
+| `shell.kb.heading`                  | 知识库实体                                       | **能拿来改写的素材**                                       | Material you can rewrite from                  |
+| `shell.gap.heading`                 | 岗位缺口报告                                     | **还差什么**                                               | What is still missing                          |
+| `shell.resume.pending`              | 待确认清单                                       | **没读准的地方**                                           | What was not read well                         |
+| `shell.desk.resume.hint`            | 本机简历与知识库，按岗位补齐缺口                 | **挑一份，按岗位改写，再存成 PDF**                         | Pick one, rewrite it for the job, export a PDF |
+| `shell.kb.docIdPlaceholder`         | 简历文档 id（如 resume-xxxx）                    | **素材来自哪一份简历**                                     | Which resume this material comes from          |
+| `shell.kb.empty`                    | 库里还没有实体：先在上方填简历文档 id 做一次同步 | **还没有素材：点一次「从简历同步」，这份简历就被拆成素材** | No material yet: hit Sync from resume once…    |
+| `shell.kb.reason.DOC_ID_EMPTY`      | 先填简历文档 id，同步才知道从哪一份派生          | **还没选定简历：先在「挑一份简历」里挑一份**               | No resume picked yet…                          |
+| `shell.resume.pendingRow`           | `{{docId}} · {{textLength}} 字 · {{time}}`       | `{{name}} · {{issueCount}} 处 · {{time}}`                  | `{{name}} · {{issueCount}} items · {{time}}`   |
+| `shell.resume.pendingCount`         | `{{count}}` 份导入记录还有未处理条目             | `{{count}} 处没读准，导出前自己看一眼`                     | `{{count}} things were not read well…`         |
+| `shell.resume.importDone`           | 已导入 `{{docId}}`：…                            | 已导入 **`{{name}}`**：…                                   | Imported **{{name}}**…                         |
+
+四段各配一句平铺说明（新增键 `desk.resume.step{Doc,Facts,Generate,Output}Hint`，**≤24 汉字**，§3.24 的行长规则），
+写在段体第一行而不是段头——段头那条 `summary` 已经是**状态读数**（当下是哪一份 / 几条没读准 / 当前版式），
+状态读数的位置不给说明文字占，否则收起态就看不见"现在是什么"了。
+
+#### 3.28.3 归属：主列三步，其余一律降到披露层
+
+- **挑一份简历**：库下拉 + 「导入本机文件」（主入口）+ 已有的 `resume.import-advanced` 披露层（绝对路径导入）
+  \+ **一句只读提醒**（`N 处没读准，导出前自己看一眼`，点开仍是那五类原因）
+  \+ 一格 `DeskExplainer`（标签就用「改之前先看一眼」），里面是**能拿来改写的素材**与**还差什么**两块面板。
+- **按岗位改写**、**挑版式并导出**：内容不动；版本对照（`snapshots` / `diff`）与页序、拖动落位这类"进阶"继续在各自的披露层里。
+- 长说明（`kb.hint` 96 字、`gap.hint` 那一大段、`desk.resume.fixturesBody`）**搬进披露层，一个字都不删**——
+  它们是 4.x / 6.x 既有验收的读法说明，删掉等于把判据的出处抹了。可见位置换成 3.28.2 那句平铺。
+
+#### 3.28.4 `docId` 自动带上：这是 bug 形状，机械修
+
+`KbPanel.tsx:434-437` 要人手敲 `resume-xxxx` 才点得动「从简历同步」，而 desk 早就持有那一份（`ResumeDesk.tsx` 的 `docId` / `docLabel`），
+`DOC_ID_EMPTY`（`:317`）因此挡在一件界面自己知道答案的事情前面。改法照 `GeneratePanel` 的**受控 props 先例**：
+`<KbPanel docId={docId ?? ''} docLabel={docLabel} />`，面板内部那份 `useState('')` 保留为"人可以改这一格"的余地，
+只在 props 变化时把 desk 的值写进去（desk 是唯一持有者，6.4-11 的"没有第二份事实"这条不能弯——所以是**推**，不是各存一份再各自判）。
+输入框里显示的仍是 id（它是那条通道 `data-kb-field="docId"` 的载体），但**标签说的是那份简历的名字**，
+人不需要知道 `resume-1a2b` 是什么才能同步。
+
+#### 3.28.5 三条判据的机检口径（写清楚，免得靠印象）
+
+- **通道未改**：`git diff` 里 `DeskSection` 的四个 `id=`、全部 `data-action=`、`data-testid=` 值零改动（`grep -c` 前后一致），
+  并且 6.2-06 / 6.4-08 那两份既有读数文件里点到的通道名都还在。
+- **开发者标识归零**：判据读的是**界面文本**而不是 DOM 属性——可见串里搜不到 `docId` / `textLength` 两个词，
+  也搜不到 `resume-` 这种 id 形状（提醒那一行显示的是姓名）。
+- **不许长出假门禁**：界面上搜"确认后才能生成"这类承诺为 0。生成腿不读待确认这条事实一字未改（`parse.pending` 仍是无参只读，
+  全仓仍无确认写口，也不新增迁移 37——那要另立一片）。
+
+**落地补片（第五十九片收口时读到的，七条）**
+
+1. **「改之前先看一眼」从 `DeskSection` 换成 `DeskExplainer`，代价与收益都要写清**。收益是一条实测：
+   收起时 `KbPanel` / `GapPanel` **整块不挂载**（现读 `kbMounted:0 → 1`、`gapMounted:0 → 1`），
+   所以"降到披露层"是真的把主流程变短，而不是换个地方把同样的东西堆着；
+   代价是段头那条常驻读数（旧摘要「N 处待确认 / 已全部核对」）没有了——那两支键
+   （`sectionFactsClean` / `sectionFactsPending`）随旧段头一起删，改由「挑一份简历」段里那句提醒承担。
+   `id="resume.facts"` 一字未改，所以人存过的收起状态仍落在同一份 `localStorage['auto-cc.desk.disclosure']` 里。
+2. **扫描件导入不写文档行**（`status:'scanned'` 只回回执，`resume.doc.list` 里查不到它），
+   于是提醒那一行第一次渲染成「 · 1 处 · …」的空姓名——看着像渲染 bug，实际是数据形状。
+   处置是 `resume.pendingUnnamed`（「没读出姓名的那一份」）兜底，**不退回归 `docId`**，
+   因为"不印开发者标识"正是 6.4-16 要做掉的那件事。这条也是 4.1-05 那句"疑似扫描件唯一能被看见的信号"的正面证据。
+3. **顺手清掉两处往界面上印 id**：`resume.importDup` 的 `{{docId}}` 换成 `{{file}}`（回执说"是哪一份文件"，
+   而不是 `resume-1a2b`），描述函数里取 `baseNameOf(target)`；素材那一格的**标签**改成人话
+   （「素材来自：张三」），但**值仍是原始 id 且仍可编辑**——这是刻意的：要指别的那份时不必绕路，
+   而 desk 仍是 `docId` 的唯一持有者（6.4-11 的"没有第二份事实"没被破坏）。
+4. **i18n 机检会被对象字面量里的注释行吃掉**（本轮 `pnpm lint` EXIT=1 才暴露）：
+   `t('resume.importDone', { /* 为什么印文件名 */ name, … })` 报的是「未传占位符 {{name}}」而实参明明传了——
+   `check-renderer-conventions.ts` 按逗号切键，注释那一行把第一个键吞掉。修法是把注释提到 `describe:` 那一行**之上**。
+   写判据的人要知道这条：机检报"缺占位符"时先看注释位置，不要先怀疑翻译文件。
+5. **6.4-17 的"改前"画面不补拍**。产品里已经没有"要求手敲 id"那个状态，摆拍就是伪证；
+   用的是它落地前已在库的真实画面 `6.2-06-kb-desk-dark.png`（段名「知识库实体」+ 空输入框 +
+   占位符「简历文档 id（如 resume-xxxx）」+「先在上方填简历文档 id 做一次同步」）。
+   改后那一发是**真实鼠标**（窗口本轮在场可见，`harness click` 回"已点击 <button>（原生鼠标事件）"），
+   回执是树长出节点、空态行消失，而不是一个错误码。
+6. **两条环境陷阱会伪装成产品缺陷**（都记进读数文件第⑥段）：① 并行会话改主进程源码会重启 Electron，
+   `parse.pending` 是内存态，两次探针之间行数从 2 掉到 0；② Grep 工具会返回**已删除文件**的命中
+   （片 58 退役的 `layout-service.ts` 仍在结果里），退役类判据一律以 `ls` + shell `grep` 现读为准。
+   另有一条工具口径：`harness shot --reveal` 对 940×3225 的 desk 容器会报"已滚到边界仍不在视口内"，
+   改成页面里 `scrollIntoView({block:'start'})` + 不带 `--reveal` 重拍（§9 的 5.4-b ⑭ 同一形态）。
+7. **一处已知没做，不静默**：自测台抽屉里的 `resume.seedReceipt` 仍会印 `{{docId}}`。
+   那是 QA 面（给夹具回执用的），不在主流程三步里，本片的禁词读射程是工作台可见文字；
+   要收它得连带整张自测台的读数口径，另立一片，不在这里夹带（§1.4）。
+
 ## 4. 分片与落点
 
 | 片号 | 内容                                                                              | 文件                                                                  |

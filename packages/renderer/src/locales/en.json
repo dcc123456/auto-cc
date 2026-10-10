@@ -64,15 +64,13 @@
       },
       "resume": {
         "title": "Resume",
-        "hint": "Local resume and knowledge base, filled against each job",
-        "sectionDoc": "Pick a resume",
+        "hint": "Pick one, rewrite it for the job, then export a PDF",
+        "sectionDoc": "Start from a resume",
         "sectionDocEmpty": "No resume in the library yet",
-        "sectionFacts": "Check the facts",
-        "sectionFactsClean": "Nothing waiting for review",
-        "sectionFactsPending": "{{count}} items waiting for review",
-        "sectionGenerate": "Tailored generation",
+        "sectionFacts": "Read it before you edit",
+        "sectionGenerate": "Rewrite it for the job",
         "sectionGenerateFor": "Tailoring {{doc}}",
-        "sectionOutput": "Output",
+        "sectionOutput": "Pick a layout and export",
         "sectionOutputWith": "{{template}} · {{locale}}",
         "sectionOutputNone": "No layout on the shelf yet",
         "advanced": "Advanced: type an absolute path",
@@ -81,7 +79,11 @@
         "paperFitBody": "The paper's physical width is untouched — it is still A4 210mm; only the display scale changes, so line breaks, content and the exported file are unaffected. Drag this column wider (or focus the handle and use the arrow keys) to bring it back to 1:1.",
         "fixtures": "Dev fixtures",
         "fixturesHint": "Evidence entry points, not three product steps",
-        "fixturesBody": "These three keys only serve the acceptance rows of spec 3.3-10 / 3.3-11: seed a fictional resume as an end-to-end baseline, drop a second revision onto the same document so the version diff has something to compare, and inject one export failure against a missing document to capture the error state. Everyday work with a real resume needs none of them — pick one above, or press “Import from this machine”."
+        "fixturesBody": "These three keys only serve the acceptance rows of spec 3.3-10 / 3.3-11: seed a fictional resume as an end-to-end baseline, drop a second revision onto the same document so the version diff has something to compare, and inject one export failure against a missing document to capture the error state. Everyday work with a real resume needs none of them — pick one above, or press “Import from this machine”.",
+        "stepDocHint": "Import from this machine, then pick the one to edit",
+        "stepFactsHint": "What was not read well, and the material to rewrite from",
+        "stepGenerateHint": "Paste the job ask, then accept it change by change",
+        "stepOutputHint": "Pick a layout, preview it, save as PDF"
       },
       "workflow": {
         "title": "Flows",
@@ -190,7 +192,7 @@
       "navigatePlaceholder": "URL on a registered platform origin, e.g. http://127.0.0.1:10233/boss"
     },
     "locator": {
-      "reasonBusy": "The last locate or click has not come back yet \u2014 wait for it before pressing again",
+      "reasonBusy": "The last locate or click has not come back yet — wait for it before pressing again",
       "heading": "Locator lab (failure states & self-heal trace)",
       "refresh": "Reload locator status",
       "thresholds": "minScore {{minScore}} · minMargin {{minMargin}} · candidateLimit {{candidateLimit}}",
@@ -422,7 +424,7 @@
     },
     "assembly": {
       "reason": {
-        "ACTION_BUSY": "The last plugin action has not come back yet \u2014 wait for it before pressing again"
+        "ACTION_BUSY": "The last plugin action has not come back yet — wait for it before pressing again"
       },
       "heading": "Plugin assembly (cordis.yml)",
       "refresh": "Re-read assembly state",
@@ -597,14 +599,14 @@
       "templateSet": "Default template is now {{template}}; exports and generation will use it",
       "importPath": "Absolute file path",
       "importHint": "Press Choose file to pick one in the system dialog, or type an absolute path; the main process detects the format by magic bytes (PDF / DOCX / Markdown / plain text)",
-      "importDone": "Imported {{docId}}: {{format}} · {{textLength}} chars · {{count}} items to confirm",
-      "importDup": "Same file already in store ({{docId}}): row count unchanged, only the timestamp moved",
+      "importDone": "Imported {{name}}: {{format}} · {{textLength}} characters read · {{count}} items not read well",
+      "importDup": "Same file already in store ({{file}}): row count unchanged, only the timestamp moved",
       "importScanned": "Likely a scan: only {{textLength}} chars extracted — no OCR is bundled, please re-enter manually",
       "importError": "Import failed ({{code}}): {{message}}",
-      "pending": "Pending review",
-      "pendingCount": "{{count}} import records still have unresolved items",
-      "pendingEmpty": "Nothing pending",
-      "pendingRow": "{{docId}} · {{textLength}} chars · {{time}}",
+      "pending": "What was not read well",
+      "pendingCount": "{{count}} items were not read well — take a look before exporting",
+      "pendingEmpty": "This one read clean",
+      "pendingRow": "{{name}} · {{issueCount}} items · {{time}}",
       "statusImported": "imported",
       "statusScanned": "likely scan",
       "formatPdf": "PDF",
@@ -682,7 +684,8 @@
           "NOTHING_TO_REDO": "No edit left to redo",
           "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save"
         }
-      }
+      },
+      "pendingUnnamed": "The one with no name read"
     },
     "shelf": {
       "heading": "Template shelf",
@@ -1366,9 +1369,9 @@
       "unloading": "unloading"
     },
     "kb": {
-      "heading": "Knowledge base entities",
+      "heading": "Material you can rewrite from",
       "hint": "Entities are derived from the resume working copy (labeled derived) or created by hand (editable, deletable). Editing, deleting, syncing and importing refresh this tree immediately via main-process events, without restart or manual reload.",
-      "docIdPlaceholder": "resume doc id (e.g. resume-xxxx)",
+      "docIdPlaceholder": "Which resume this material comes from",
       "claimPlaceholder": "Enter a claim to look up supporting entities",
       "backupPathPlaceholder": "Absolute path of the backup file",
       "sync": "Sync from resume",
@@ -1383,7 +1386,7 @@
       "searchNoTokens": "This query yields no searchable term",
       "searchNoTokensHint": "This query yields no searchable term (punctuation or whitespace only). Try one or two real words, e.g. \"high concurrency\" or \"orders\".",
       "searchNoHitsCount": "Nothing in the library relates to this query",
-      "searchNoHitsHint": "Nothing in the library relates to this query. You can: fill in the resume doc id above and run \"Sync from resume\" to build the library; try a shorter or more general keyword (Chinese is indexed in two-character groups, single characters rely on substring matching); or add this experience via \"New manual entity\" below.",
+      "searchNoHitsHint": "Nothing in the library matches. You can: hit \"Sync from resume\" once to turn this resume into material; try a shorter, more general keyword (search cuts terms in pairs, single characters fall back to substring matching); or add this experience by hand below.",
       "create": "New manual entity",
       "created": "Created {{entityId}}",
       "save": "Save",
@@ -1399,7 +1402,7 @@
       "importDone": "Import done: created {{created}} / overwritten {{overwritten}} / skipped {{skipped}} / detached {{danglingParents}}",
       "modeSkip": "Skip on conflict",
       "modeOverwrite": "Overwrite on conflict",
-      "empty": "No entities yet: fill a resume doc id above and sync once.",
+      "empty": "No material yet: hit \"Sync from resume\" once and this resume becomes material",
       "derivedFrom": "Derived from resume {{docId}} (edit the working copy, then sync)",
       "manualEntity": "Created manually (never pruned by sync)",
       "payloadHint": "One key=value per line; blank lines and lines without = are ignored",
@@ -1428,15 +1431,17 @@
       "vectorStatusFailed": "Embedding this query failed, so the ranking fell back to lexical only.",
       "reason": {
         "ACTION_BUSY": "The previous action hasn’t returned yet",
-        "DOC_ID_EMPTY": "Enter a resume doc id so sync knows which document to derive from",
+        "DOC_ID_EMPTY": "No resume picked yet: choose one under \"Start from a resume\"",
         "CLAIM_EMPTY": "Write a claim first so the evidence lookup has a sentence to match",
         "ENTITY_KIND_LOCKED": "This record is already in the library: its kind cannot be switched here, create a new one.",
         "SEARCH_EMPTY": "Type a keyword or a sentence first so search has a query",
         "BACKUP_PATH_EMPTY": "Enter the absolute path of a backup file so export knows where to write and import where to read"
-      }
+      },
+      "docIdLabel": "Which resume to sync from",
+      "docIdFrom": "Material from: {{name}}"
     },
     "gap": {
-      "heading": "Job gap report",
+      "heading": "What is still missing",
       "hint": "Compares a pasted JD against your local knowledge base right now. The three columns are states — matched, partially matched, missing — and rows inside a column keep the extraction order; the panel never re-sorts. Counts, scores and states all come from the main process. When the model leg is unavailable the report falls back to the lexical baseline and is simply shorter. The three text thresholds were calibrated on 42 locally annotated samples (2026-10-02); the years ratio and the highlight cap are product decisions, and every value still lives in the kb-gap section of cordis.yml. The lexical ruler only sees literal overlap, so a differently worded but equivalent claim can read as missing.",
       "jdPlaceholder": "Paste the JD body (the full description — a job title alone yields no requirements)",
       "analyze": "Compare gaps",
@@ -1459,7 +1464,7 @@
       "originChunk": "resume section",
       "evidenceLine": "{{origin}} {{id}} · score {{score}} (click for the text)",
       "evidenceGone": "This evidence is no longer in the library: the report is a stale reading, run the comparison again.",
-      "libraryMissing": "There is no knowledge base to compare against yet: import your résumé in the Library entities panel below and sync it, then come back. This is not “you do not qualify” — nothing was compared.",
+      "libraryMissing": "No material to compare yet: sync a resume under \"Material you can rewrite from\" first, then come back to this JD. This is not a verdict on you — nothing was compared.",
       "noEntities": "0 entities in the library — every missing row here only says your résumé has not been entered yet, not that you are unqualified.",
       "noRequirements": "This JD ({{chars}} characters) yielded no comparable requirements: the text is probably too short or is only a job title. Try a fuller description.",
       "columnEmpty": "None",
@@ -1681,7 +1686,7 @@
     },
     "update": {
       "reason": {
-        "ACTION_BUSY": "The last update has not come back yet \u2014 wait for it before pressing again",
+        "ACTION_BUSY": "The last update has not come back yet — wait for it before pressing again",
         "BRIDGE_MISSING": "No bridge in this window, the update channel cannot reach the main process"
       },
       "heading": "Updates",

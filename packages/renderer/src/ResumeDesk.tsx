@@ -95,6 +95,16 @@ const FORMAT_LABEL_KEY = {
   text: 'resume.formatText',
 } as const;
 
+/**
+ * 取一条本机路径的**末段名字**（两个分隔符都吃：mac 的 `/` 与 Windows 的 `\`）。
+ * @param filePath 人选中的那条绝对路径（只在函数里过一遍，不把全串摆上界面）
+ * @returns 文件名那一段，用在导入回执里说"是哪一份"；末尾就是分隔符这类极端形状回空串
+ */
+function baseNameOf(filePath: string): string {
+  const segments = filePath.split(/[/\\]/);
+  return segments[segments.length - 1] ?? '';
+}
+
 /** 变更类型 → 文案键（`added`/`removed`/`modified` 三种在界面上的说法不同，颜色也不同）。 */
 const CHANGE_LABEL_KEY = {
   added: 'resume.changeAdded',
@@ -260,17 +270,19 @@ export function ResumeDesk() {
         setPaperHtml(undefined);
       },
       onError: setImportError,
+      // 回执里印的是**人刚选中的那个文件名**，不是 `resume-1a2b`：这一句要说得出"是哪一份"，
+      // 而此刻 `docs` 还没刷回来（spec 6.4-16 顺手修掉的那类违规就是往界面上印开发者标识）。
       describe: (value) =>
         value.status === 'scanned'
           ? t('resume.importScanned', { textLength: value.textLength })
           : value.isNew
             ? t('resume.importDone', {
-                docId: value.docId,
+                name: baseNameOf(target),
                 format: t(FORMAT_LABEL_KEY[value.format]),
                 textLength: value.textLength,
                 count: value.issues.length,
               })
-            : t('resume.importDup', { docId: value.docId }),
+            : t('resume.importDup', { file: baseNameOf(target) }),
     });
   };
 
@@ -549,7 +561,10 @@ export function ResumeDesk() {
             </Banner>
           )}
 
-          {/* ① 选简历：库里那份 + 从本机导入那一步。段头收起时也留着"当下是哪一份"，否则状态跟着一起消失。 */}
+          {/* ① 挑一份简历（段名 2026-10-10 换成人话，spec 6.4-15）：库里那份 + 从本机导入那一步。
+            原来独占一格的「事实核对」拆成两半各归其位——**没读准的地方**是这一步的产出，所以那一句提醒留在这里；
+            素材与缺口是"回头要核对的东西"，不是一步，降到下面那一格披露层里（裁定㉕ 第 2 条）。
+            `DeskSection` 的 `id` 是持久收起状态键，一个都不改（6.2-06 / 6.4-08 的取证通道地址）。 */}
           <DeskSection
             id="resume.doc"
             title={t('desk.resume.sectionDoc')}
@@ -557,7 +572,11 @@ export function ResumeDesk() {
             defaultOpen
             markers={{ testid: 'resume-section-doc' }}
           >
-            <div className="flex flex-col gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="doc">
+                {t('desk.resume.stepDocHint')}
+              </p>
+
               <DeskSelect
                 action="resume-doc"
                 data-testid="resume-doc"
@@ -635,75 +654,91 @@ export function ResumeDesk() {
                   ))}
                 </div>
               )}
-            </div>
-          </DeskSection>
 
-          {/* ② 事实核对：待确认清单 + 知识库 + 缺口。默认收起——这一格最厚（两块既有面板），
-            而它属于"回头要核对"而不是"进门就要做"，收起来才让出主视觉。 */}
-          <DeskSection
-            id="resume.facts"
-            title={t('desk.resume.sectionFacts')}
-            summary={
-              pending.length === 0
-                ? t('desk.resume.sectionFactsClean')
-                : t('desk.resume.sectionFactsPending', { count: pending.length })
-            }
-            markers={{ testid: 'resume-section-facts' }}
-          >
-            <div className="flex min-w-0 flex-col gap-3">
-              {pending.length === 0 ? (
-                <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
-                  {t('resume.pendingEmpty')}
-                </p>
+              {/* 裁定㉕ 第 3 条：「待确认清单」降级成**一句只读提醒**——不加确认写口（那要新迁移 37 +
+                `resume['parse.ack']` + 白名单行，另立一片），也不删显示（它是"疑似扫描件：只读到 N 字"
+                唯一能被看见的信号，4.1-05）。点进去仍是那五类原因，逐字来自 `parse.pending`。 */}
+              {pending.length > 0 ? (
+                <DeskExplainer
+                  id="resume.pending-issues"
+                  label={t('resume.pendingCount', { count: pending.length })}
+                  markers={{ testid: 'resume-pending-list' }}
+                >
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                      <ListChecks size={14} />
+                      {t('resume.pending')}
+                    </h3>
+                    <ul className="space-y-2">
+                      {pending.map((row) => (
+                        <li
+                          key={row.sourceHash}
+                          data-testid="resume-pending-row"
+                          data-status={row.status}
+                          className="rounded border border-line px-2 py-1.5"
+                        >
+                          {/* 这一行从前印的是 `{{docId}} · {{textLength}} 字`——开发者标识符摆到了用户面前
+                            （spec 6.4-16 顺手修掉的那处违规）：换成姓名 + 处数 + 时刻。 */}
+                          <p className="text-[11px] text-slate-400">
+                            {t('resume.pendingRow', {
+                              // 疑似扫描件**不入库**（4.1-05），所以这一行常常查不到姓名——那是它唯一的可见处。
+                              // 查不到就写"没读出姓名的那一份"，**绝不回落成 id**：回落等于把刚修掉的那串又印回去。
+                              name: docs.find((doc) => doc.id === row.docId)?.name ?? t('resume.pendingUnnamed'),
+                              issueCount: row.issues.length,
+                              time: new Date(row.updatedAt).toLocaleTimeString(),
+                            })}{' '}
+                            · {t(row.status === 'scanned' ? 'resume.statusScanned' : 'resume.statusImported')} ·{' '}
+                            {t(FORMAT_LABEL_KEY[row.format])}
+                          </p>
+                          <ul className="mt-1 space-y-0.5 pl-2">
+                            {row.issues.map((issue, index) => (
+                              <li
+                                key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
+                                data-testid="resume-pending-issue"
+                                className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
+                              >
+                                <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
+                                <span>{issue.sectionKind ?? '-'}</span>
+                                <span className="break-all">{issue.excerpt}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </DeskExplainer>
               ) : (
-                <div className="rounded-md border border-line bg-ink-950/60 p-3" data-testid="resume-pending-list">
-                  <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
-                    <ListChecks size={14} />
-                    {t('resume.pending')} · {t('resume.pendingCount', { count: pending.length })}
-                  </h3>
-                  <ul className="mt-2 space-y-2">
-                    {pending.map((row) => (
-                      <li
-                        key={row.sourceHash}
-                        data-testid="resume-pending-row"
-                        data-status={row.status}
-                        className="rounded border border-line px-2 py-1.5"
-                      >
-                        <p className="text-[11px] text-slate-400">
-                          {t('resume.pendingRow', {
-                            docId: row.docId,
-                            textLength: row.textLength,
-                            time: new Date(row.updatedAt).toLocaleTimeString(),
-                          })}{' '}
-                          · {t(row.status === 'scanned' ? 'resume.statusScanned' : 'resume.statusImported')} ·{' '}
-                          {t(FORMAT_LABEL_KEY[row.format])}
-                        </p>
-                        <ul className="mt-1 space-y-0.5 pl-2">
-                          {row.issues.map((issue, index) => (
-                            <li
-                              key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
-                              data-testid="resume-pending-issue"
-                              className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
-                            >
-                              <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
-                              <span>{issue.sectionKind ?? '-'}</span>
-                              <span className="break-all">{issue.excerpt}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                docId !== undefined && (
+                  <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
+                    {t('resume.pendingEmpty')}
+                  </p>
+                )
               )}
 
-              {/* 两块既有面板原样挂进来：只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）。 */}
-              <KbPanel />
-              <GapPanel />
+              {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
+                spec 6.4-15 的 C 半边要求：`id` 与 `data-testid` 两个通道名一字不改地跟着走）。
+                条件挂载是刻意的：收起态下正文卸载，`KbPanel` 的订阅与 `read()` 就不跑——
+                这正是"不活跃时别养第二份工作副本"的口径（`usePdfEdit` 同形，spec 3.5-12）。 */}
+              <DeskExplainer
+                id="resume.facts"
+                label={t('desk.resume.sectionFacts')}
+                markers={{ testid: 'resume-section-facts' }}
+              >
+                <div className="flex min-w-0 flex-col gap-3">
+                  <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="facts">
+                    {t('desk.resume.stepFactsHint')}
+                  </p>
+                  {/* 两块既有面板只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）；
+                    `docId` 由 desk 单向推进来，人仍可在这格里改（spec 6.4-17）。 */}
+                  <KbPanel docId={docId ?? ''} docLabel={docLabel} />
+                  <GapPanel />
+                </div>
+              </DeskExplainer>
             </div>
           </DeskSection>
 
-          {/* ③ 定制生成：按这一屏当前那份文档定制（`docId` 由 desk 持有，面板改吃 props，见风险①）。 */}
+          {/* ② 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
           <DeskSection
             id="resume.generate"
             title={t('desk.resume.sectionGenerate')}
@@ -716,16 +751,21 @@ export function ResumeDesk() {
             openSignal={trail && trail.targetView === 'resume' ? trail.requestId : undefined}
             markers={{ testid: 'resume-section-generate' }}
           >
-            <GeneratePanel
-              docs={docs}
-              docId={docId ?? ''}
-              onDocIdChange={setDocId}
-              refreshDocs={refreshDocs}
-              onAccepted={bumpPaper}
-            />
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="generate">
+                {t('desk.resume.stepGenerateHint')}
+              </p>
+              <GeneratePanel
+                docs={docs}
+                docId={docId ?? ''}
+                onDocIdChange={setDocId}
+                refreshDocs={refreshDocs}
+                onAccepted={bumpPaper}
+              />
+            </div>
           </DeskSection>
 
-          {/* ④ 出纸：模板架（裁定② 的骨架缩略图）+ 这张纸的三把出口键 + 快照对照。 */}
+          {/* ③ 出纸：模板架（裁定② 的骨架缩略图）+ 这张纸的三把出口键 + 快照对照。 */}
           <DeskSection
             id="resume.output"
             title={t('desk.resume.sectionOutput')}
@@ -738,6 +778,10 @@ export function ResumeDesk() {
             markers={{ testid: 'resume-section-output' }}
           >
             <div className="flex min-w-0 flex-col gap-3">
+              <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="output">
+                {t('desk.resume.stepOutputHint')}
+              </p>
+
               <TemplateShelf
                 templates={templates}
                 selectedId={templateId}

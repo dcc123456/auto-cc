@@ -98,6 +98,17 @@ function primaryTextOf(entity: KbEntityRowView): string {
 }
 
 /**
+ * 素材面板的 props（spec 6.4-17，第五十九片）。
+ * @param docId desk 当前选中的那份简历的 id（空串 = 还没选）；由 desk 单向**推**进来，
+ *   面板内部那份 state 只是"人还可以改这一格"的余地，不是第二份事实（6.4-11）
+ * @param docLabel 那份简历显示出来的名字，只进标签；输入框里装的仍是 id（`data-kb-field="docId"` 是 4.x 的取证通道）
+ */
+export interface KbPanelProps {
+  readonly docId: string;
+  readonly docLabel?: string | undefined;
+}
+
+/**
  * 知识库管理面板（spec 4.2-05 / 06 的界面化身，裁定三）：实体树 + 展开证据链 + 编辑即时生效。
  *
  * 三件事在界面上是刻意的，读代码的人不该重新推断：
@@ -108,7 +119,7 @@ function primaryTextOf(entity: KbEntityRowView): string {
  * 3. **证据链由主进程的确定性反查给出**：展开一条卡片等于拿它的正文去 `evidenceFor`，
  *    分数、理由码、命中词全部来自 `evidence.ts`，界面不重算一遍（§2.5）。
  */
-export function KbPanel() {
+export function KbPanel({ docId: docIdFromDesk, docLabel }: KbPanelProps) {
   const { t } = useTranslation();
   const [entities, setEntities] = useState<KbEntityRowView[]>([]);
   const [expandedId, setExpandedId] = useState<string>();
@@ -129,6 +140,15 @@ export function KbPanel() {
    */
   const [pendingFactCheckIds, setPendingFactCheckIds] = useState<ReadonlySet<string>>(new Set());
   const bridge = window.autoCC;
+
+  /**
+   * desk 选中的那一份**推**进这一格（spec 6.4-17）：换文档就跟着换，`DOC_ID_EMPTY` 从此不挡同步。
+   * 只在 desk 的值变那一刻写，不在每次渲染都写——否则人刚在这格里敲的半串会被吃掉，
+   * 而这一格留着手改的余地是有意的（`data-kb-field="docId"` 载的是 id，那是 4.x 的取证通道）。
+   */
+  useEffect(() => {
+    setDocId(docIdFromDesk);
+  }, [docIdFromDesk]);
 
   /**
    * 重读整棵实体树（4.2-05 的数据源）：界面不缓存"上次的内容"，主进程才是真相。
@@ -432,6 +452,7 @@ export function KbPanel() {
         <DeskField
           action="kb-doc-id"
           data-kb-field="docId"
+          label={docLabel ? t('kb.docIdFrom', { name: docLabel }) : t('kb.docIdLabel')}
           value={docId}
           onValueChange={setDocId}
           placeholder={t('kb.docIdPlaceholder')}
