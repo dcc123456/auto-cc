@@ -117,6 +117,57 @@ describe('3.5-02 的绘制半边：applyOverlays 只追加，页号越界当场�
   });
 });
 
+describe('3.5-14 的绘制半边：垫底矩形取量到的纸色，量不到才按墨色，纯白一个字都不许出现', () => {
+  /** 三条实测形状（本机 `pdf-lib` 1.17.1 的 `rg` 写法是**全精度小数**，写断言前用 `tmp/35-14-color-probe.mjs` 现读过一遍）。 */
+  const SAMPLED_FILL = '0.9411764705882353 0.8235294117647058 0.7058823529411765 rg'; // #f0d2b4
+  const FALLBACK_FILL = '0.06666666666666667 0.06666666666666667 0.06666666666666667 rg'; // #111111
+  const FALLBACK_INK = '0.9725490196078431 0.9803921568627451 0.9882352941176471 rg'; // #f8fafc
+  const SAMPLED_INK = '0.058823529411764705 0.09019607843137255 0.16470588235294117 rg'; // #0f172a
+
+  /**
+   * 造一份只画一区覆盖区后的内容流文本。
+   * @param plan 这一区的几何与颜色（页号固定 1，夹具就是单页）
+   */
+  async function contentOf(plan: { backdropHex?: string; text?: string }): Promise<string> {
+    const loaded = await PdfEditDocument.load(minimalPdf(['Jane Doe']));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    await loaded.document.applyOverlays([
+      {
+        id: 'box-1',
+        pageNumber: 1,
+        xPt: 10,
+        yBottomPt: 20,
+        widthPt: 100,
+        heightPt: 30,
+        sizePt: 11,
+        ...plan,
+        ...(plan.text === undefined ? {} : { textBaselinePt: 25 }),
+      },
+    ]);
+    return pdfContentText(await loaded.document.save());
+  }
+
+  it('量到了底色：矩形填那一个色号，新字取默认墨色，产物里没有 `1 1 1 rg`', async () => {
+    const content = await contentOf({ backdropHex: '#f0d2b4', text: 'OK' });
+    expect(content).toContain(SAMPLED_FILL);
+    expect(content).toContain(SAMPLED_INK);
+    expect(content).not.toContain('1 1 1 rg');
+  });
+
+  it('没量到底色：如实按墨黑垫底并把新字反白（宁可难看也不猜白），仍然没有 `1 1 1 rg`', async () => {
+    const content = await contentOf({ text: 'OK' });
+    expect(content).toContain(FALLBACK_FILL);
+    expect(content).toContain(FALLBACK_INK);
+    expect(content).not.toContain('1 1 1 rg');
+  });
+
+  it('只铺底不写字：这一条腿只有那一个颜色操作符，不该长出反白墨色', async () => {
+    const content = await contentOf({});
+    expect(content).toContain(FALLBACK_FILL);
+    expect(content).not.toContain(FALLBACK_INK);
+  });
+});
+
 describe('3.5-07 的引擎半边：按页序拷出新的页树', () => {
   it('页序就是 `1…n` 时直通返回自身，不重拷一遍文档', async () => {
     const loaded = await PdfEditDocument.load(minimalMultiPagePdf(3));

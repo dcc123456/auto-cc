@@ -97,7 +97,7 @@ function hexOf(text: string): string {
   return Buffer.from(text, 'latin1').toString('hex').toUpperCase();
 }
 
-describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流', () => {
+describe('3.5-02 的叠加半边：垫底矩形 + 拉丁文字都进了内容流（颜色口径见 3.5-14）', () => {
   it('产物里同时有旧文字与新文字，且新矩形是填充（re f）而不是描边', async () => {
     const dir = tempDir();
     const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
@@ -108,7 +108,10 @@ describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流
     // 原内容流没被改写：旧文字仍以字面串在原位（实测口径见 plan §7.2 第一轮，这就是 §7.6 的「只追加」）。
     expect(content).toContain('(Jane Doe) Tj');
     expect(content).toContain(`<${hexOf('REDACTED')}> Tj`);
-    expect(content).toMatch(/1 1 1 rg/); // 白底
+    // 3.5-14：这一区没带量到的底色（界面还没走到那一步），于是**如实按墨黑垫底**，
+    // 而过去那一版是猜白——产物里今天再出现 `1 1 1 rg` 就说明有人在绘制侧写回了纯白。
+    expect(content).toMatch(/0\.06666666666666667 0\.06666666666666667 0\.06666666666666667 rg/);
+    expect(content).not.toMatch(/1 1 1 rg/);
     expect(content).toMatch(/h\s+f/); // 闭合路径 + 填充
     expect(content).not.toMatch(/h\s+[SB]/); // 出现 S 或 B 就是描边没被 `borderWidth: 0` 关掉
     // 3.5-03 的精确度：落点与尺寸就是比例换算出来的那四个数（0.25×595=148.75、0.5×595=297.5、
@@ -117,6 +120,20 @@ describe('3.5-02 的叠加半边：白底矩形 + 拉丁文字都进了内容流
     expect(content).toContain('0 105.25 l');
     expect(content).toContain('297.5 0 l');
     expect(content).toContain('1 0 0 1 148.75 573.375 Tm');
+  });
+
+  it('界面量到了纸色：那一个色号一路走到产物内容流，屏幕上看到什么产物里就是什么', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const outPath = join(dir, 'out.pdf');
+    await (await boot()).saveAs(sourcePath, [{ ...box, backdropHex: '#F0D2B4' }], keepPages(1), outPath);
+
+    const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
+    // 小写归一在 `planOverlays` 那一步做完，这里判的是"量到的那个数真的落到了纸上"；
+    // 而新字的墨色是另一笔 `rg`（#0f172a），两者都在，说明两条腿读的是同一份判据。
+    expect(content).toContain('0.9411764705882353 0.8235294117647058 0.7058823529411765 rg');
+    expect(content).toContain('0.058823529411764705 0.09019607843137255 0.16470588235294117 rg');
+    expect(content).not.toContain('1 1 1 rg');
   });
 
   it('产物是一份能被重新装载的合法 PDF，页数与源一致', async () => {

@@ -10,6 +10,7 @@
  * - PDF 的页面坐标是原点**左下**、y 向上，`pdf-lib` 的 `drawRectangle` 的 `y` 是矩形**底边**。
  *   换算式：`yBottomPt = (1 - yRatio - heightRatio) * pageHeightPt`。
  */
+import { normalizeHexColor } from './overlay-colors.js';
 import type { PdfPageMetric } from './pdf-document.js';
 
 /** 覆盖区的矩形，比例坐标（0..1），原点左上、y 向下。 */
@@ -20,7 +21,7 @@ export interface PdfOverlayRect {
   readonly heightRatio: number;
 }
 
-/** 一条覆盖区：白底矩形 + 可选的叠加文字（省略 `text` 就只涂白底）。 */
+/** 一条覆盖区：底色矩形 + 可选的叠加文字（省略 `text` 就只铺底）。 */
 export interface PdfOverlayInput {
   /** 界面给的稳定标识，错误信息里用它指认是哪一区 */
   readonly id: string;
@@ -31,6 +32,11 @@ export interface PdfOverlayInput {
   readonly text?: string;
   /** 字号（pt），省略取服务配置的 `defaultTextSizePt` */
   readonly sizePt?: number;
+  /**
+   * 这一块要垫的底色（`#rrggbb`，spec 3.5-14）：渲染层从**已渲染的位图**上量出行盒外那一圈的纸色带给这里。
+   * 省略或形状不对即"没量到"，两条腿一起按墨色垫底（见 `overlay-colors.ts` 的那句不许猜白）。
+   */
+  readonly backdropHex?: string;
 }
 
 /** 换算完成的覆盖区：矩形在 PDF 坐标里（原点左下，`y` 是底边），文字基线一并算好。 */
@@ -41,12 +47,14 @@ export interface PlannedOverlay {
   readonly yBottomPt: number;
   readonly widthPt: number;
   readonly heightPt: number;
-  /** 叠加文字（拉丁，见 `isLatinOnly`）；省略即只涂白底。 */
+  /** 叠加文字（拉丁，见 `isLatinOnly`）；省略即只铺底色。 */
   readonly text?: string;
   /** 字号（pt）：配置默认值或本区自带值，换算后总是确定的。 */
   readonly sizePt: number;
   /** 文字基线的 `y`（pt，PDF 坐标）：只在有 `text` 时给出，绘制侧不再自己算符号。 */
   readonly textBaselinePt?: number;
+  /** 量到的纸底颜色（已过 `normalizeHexColor`）；没量到时这个键根本不出现。 */
+  readonly backdropHex?: string;
 }
 
 /**
@@ -173,11 +181,13 @@ export function planOverlays(
       );
     }
     const pageRect = toPageRect(rect, metric);
+    const backdropHex = normalizeHexColor(input.backdropHex);
     plans.push({
       id: input.id,
       pageNumber: input.pageNumber,
       ...pageRect,
       sizePt,
+      ...(backdropHex === undefined ? {} : { backdropHex }),
       ...(input.text === undefined
         ? {}
         : { text: input.text, textBaselinePt: baselinePt(pageRect.yBottomPt, pageRect.heightPt, sizePt) }),

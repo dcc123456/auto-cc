@@ -351,12 +351,16 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
     const session = sessionRef.current;
     if (!session) return;
     overlaySeqRef.current += 1;
+    // 底色在**交进会话这一刻**量（spec 3.5-14）：量到的那个颜色进 draft，画布与产物都从 draft 读，
+    // 于是"屏幕上这块是什么色"与"另存出来这块是什么色"是同一个数，不是两处各猜一次。
+    const backdropHex = paperPage?.sampleBackdrop(rect);
     const ok = session.addOverlay({
       id: `ov-${overlaySeqRef.current}`,
       pageNumber: pageRef.current,
       rect,
       ...(text === '' ? {} : { text }),
       ...(sizePt === undefined ? {} : { sizePt }),
+      ...(backdropHex === undefined ? {} : { backdropHex }),
     });
     syncFromSession();
     if (!ok) setNotice(t('pdfEdit.overlayRejected'), 'seal');

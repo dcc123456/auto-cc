@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./edit-session": "./src/edit-session.ts"
+    "./edit-session": "./src/edit-session.ts",
+    "./overlay-colors": "./src/overlay-colors.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

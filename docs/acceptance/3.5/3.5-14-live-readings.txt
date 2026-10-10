@@ -1,0 +1,69 @@
+spec 3.5-14（族一 · 片 1）活体读数 —— 覆盖区垫页面自己的底色、提交态不描边
+采集时间：2026-10-10 21:07 前后（本机 macOS arm64，`pnpm dev` 在跑，CDP 10222，`--url 5173`）
+被改对象：`packages/renderer/src/PdfPaperView.tsx`（画布侧绘制）、`packages/renderer/src/pdf-page-view.ts`（`sampleBackdrop`）、
+`packages/renderer/src/usePdfEdit.ts`（提交时把颜色写进草稿）、`packages/pdf-edit/src/{overlay-colors,overlay-writer,pdf-document}.ts`（写侧同一函数）
+
+一、夹具（刻意做成**非白底**，否则这一片的差值读不出来）
+  文件：tmp/35-14-beige.pdf（1255 B，1 页）
+  页面底色 #f4ead6（米白）、一条 #e2f0e6 背景色带、5 行 Helvetica #1f2937
+  源指纹（界面读数）：7174c2233ccb69bfdc9af11ec597ed9ddce30f72be5cff95303ec4e86f3b2ad1 · 共 1 页
+  说明：夹具与探针脚本全在被忽略的 tmp/ 下，不进仓库（AGENTS.md §7.5）。
+
+二、采样与绘制（改后主证）
+  操作：在「第 1 行 Jane Doe Platform Architect」上点一次 → 就地改输入框预填原文 → 提交（`pdf-edit-commit-inline`）
+  画布位图读数（同一块行盒内部 vs 行盒外那一圈）：
+    insideMedian  [244, 234, 214]
+    ringMedian    [244, 234, 214]
+    delta         [0, 0, 0]
+    perimeterSamples 558 · perimeterAmberPixels 0
+  界面读数（`pdf-edit-backdrop-reading`）：data-overlays=1 data-sampled=1 data-unsampled=0
+    文案：本页覆盖 1 区 · 底色取自这一页 1 处
+  覆盖区列表（`PdfEditPanel`）：源第 1 页 · 起点 8.4%,5.8% · 尺寸 35.6%×1.5% · Jane Doe Platform Architect
+  结论：这一块的底色与它周围那一圈纸**逐通道相同**（差值 0），提交态四周**没有琥珀像素**（558 个周长采样里 0 个）。
+
+三、提交态不描边的负腿（拖拽中仍然要有反馈）
+  拖框进行中读 `pdf-edit-rubber-box` 的计算样式：
+    { "present": true, "dashed": "dashed", "color": "rgb(42, 84, 79)" }
+  松手后：rubberStillAfterCommit = false
+  结论：虚线只活在拖拽那一段；已提交的覆盖区在画布上没有任何描边。
+
+四、改动前对照（**计算对照，不是回滚重跑**）
+  在同一张活体画布上，按旧算法的那一句（`fillStyle = '#ffffff'` 铺满行盒）补画一块，再量同一位置：
+    oldWhiteFillMedian [255, 255, 255]
+    sameAreaPaperMedian [244, 234, 214]
+    deltaOld [11, 21, 41]
+  对照图：3.5-14-old-white-control.png
+  诚实口径：这一张是「旧算法会画成什么样」的**同一画布上的对照块**，不是把主干回滚到 744d4bb 之前重跑一遍；
+  旧实现的白是代码里写死的 `#ffffff`（`PdfPaperView.tsx` 旧 :137 与 `pdf-document.ts` 旧 `rgb(1,1,1)`），
+  所以对照块与旧产物在"填色"这一件事上同值，但**旧版还带一圈常驻琥珀虚线**，这张对照图里没有那一圈。
+  取证结束后已让组件自己重画复位（见第六节），对照块不在最终画面上。
+
+五、措辞核对（plan §7.6 反伪装：那半句一字未改）
+  `pdf-edit-cover-hint` 活体文本：
+    覆盖是垫一层这一页自己的底色再加新字：原文字仍在文件里，只是被盖住了
+  「原文字仍在文件里，只是被盖住了」保持原样；改的是前半句的机制描述（原来写的是"垫一层白"）。
+  没有出现「删除 / 涂黑 / 不可恢复 / 与原文完全一致」这类说法。
+
+六、探针留下的痕迹已复位
+  注入过的 `#probe-no-motion`（读几何前关掉动效用）已删除：hadInjected=true → 节点不存在。
+  第四节的白色对照块：改包裹节点宽度触发组件自己的 ResizeObserver 重画，再复位宽度：
+    whitePatchMedianBefore [255,255,255] → medianAfterSelfRepaint [244,234,214]（= ringMedian，delta [0,0,0]）
+    复位后 `wrap.getAttribute('style')` = null（探针没在 DOM 上留下宽度）
+  最终画面：3.5-14-self-repaint-restored.png（与主证 3.5-14-sampled-backdrop.png 同状态，md5 互异，因界面时间戳不同）
+  三张图 md5 各出现 1 次（`md5 -q | sort | uniq -c`）：
+    16bedd53170b215f2927e4a858d61d1a / 396aef1f30e9881218edb608a0384458 / a1ce69953dc702834b9d9ac71a680b23
+
+七、本轮**没有**收掉的两条（如实登记）
+  ① 「人眼看不出是覆盖」这一半是 V 判据里要人在场的那一条：本机窗口未在前台，
+     上面量到的是**像素与 DOM 的客观差值**，不是"看起来像不像"。等用户在场看一眼才算 [x]，现在整条 3.5-14 记 [!]。
+  ② 拖框提交那条腿（进阶：先写字、再框位置）在本轮活体里暴露一个**先前就存在**的缺陷，两次独立跑到同一读数：
+     `PdfPaperView.tsx` 的 `onPointerDown` 里，`up` 闭包读到的 `model.rubber` 是 pointerdown 那次渲染的快照，
+     于是 `dragged` 恒为 false、拖框那条 `commitOverlay` 分支从不执行。
+     拖框区间（位图像素）x0=111 y0=131 x1=444 y1=173：
+       insideSecondOverlay [226, 240, 230]  ← 夹具那条未改动的色带 #e2f0e6，说明这里根本没落新覆盖区
+       ringOfSecond        [244, 234, 214]
+       deltaSecond         [-18, 6, 16]
+       reading             overlays=1 sampled=1 unsampled=0（跑完仍是 1 区）
+     探针是页面内 `dispatchEvent` 派发的合成指针事件——它足以跑到监听器与闭包（逻辑层的真相），
+     但**不等于**"真实鼠标拖得动"；后者仍属要人在场的那一条。
+     不属于本片范围（本片只改填色与描边），已登记到 plan 03 §11 的欠项，留给 3.5-15 那一片一并处理。

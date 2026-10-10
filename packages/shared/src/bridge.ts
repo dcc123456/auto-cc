@@ -1341,7 +1341,7 @@ export interface PdfOverlayRectView {
 }
 
 /**
- * 一条覆盖区（镜像 `PdfOverlayInput`，spec 3.5-02）：白底矩形 + 可选的叠加文字。
+ * 一条覆盖区（镜像 `PdfOverlayInput`，spec 3.5-02）：垫底矩形 + 可选的叠加文字。
  * 文字过界前不校验，越界与非法都在主进程侧拒（`details.code`），因为字号、面积这些尺度是服务配置。
  */
 export interface PdfOverlayInputView {
@@ -1354,6 +1354,11 @@ export interface PdfOverlayInputView {
   text?: string;
   /** 字号（pt），省略取服务配置的 `defaultTextSizePt` */
   sizePt?: number;
+  /**
+   * 这一块要垫的底色（`#rrggbb`，spec 3.5-14）：渲染层从**已渲染的位图**上量出行盒外那一圈的纸色带过来。
+   * 省略即"没量到"，主进程与画布一起按墨色垫底（判据只在 `overlay-colors` 那一处，两条腿不会分叉）。
+   */
+  backdropHex?: string;
 }
 
 /**

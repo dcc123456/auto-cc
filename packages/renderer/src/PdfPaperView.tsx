@@ -4,18 +4,22 @@
  * 这一格存在的理由就是那句报障：「希望 pdf 编辑可以直接在导入的 pdf 上进行编辑，而不是显示一堆框框」。
  * 改造前的画布是一张**纯白底**（`fillStyle='#ffffff'` 之后只描文本项矩形），人看到的框里根本没有字，
  * 位置与眼睛对不上任何东西；现在位图来自 pdf.js 的真实渲染，行盒只在悬停时才描边、点下去就是那一行。
+ * 3.5-14 补上另一半：提交上去的覆盖区**用这一页自己的底色**（从位图上量的，不是猜的白），
+ * 并且提交态**不再描任何边**——那一圈常驻的琥珀虚线就是"这里有一块补丁"的自供状。
  *
  * 三条不变量：
  * ① 槽里任何时刻只有一张画布（spec 6.4-08）——控件在左列，画面只在这里；
  * ② 装不下就整张缩小（spec 6.4-12）——画布挂 `w-full`，位图按量出的 CSS 宽度铺，永不横向裁；
- * ③ 覆盖永远说「盖住」，不说「删掉原文」（§7.6 反伪装）：那两句提示原样留着。
+ * ③ 覆盖永远说「盖住」，不说「删掉原文」（§7.6 反伪装）：那两句里「原文字仍在文件里」这一句一字未动，
+ *    3.5-14 只把机制那半句的「白底」换成「这一页自己的底色」——机制真的变了，措辞跟着变才算诚实；
+ *    底色量不到时再多说一句（按墨色垫底、新字反白），不许静默猜白。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, X } from 'lucide-react';
+import { colorsOfOverlay } from '@auto-cc/plugin-pdf-edit/overlay-colors';
 import { DeskButton, InlineEditField } from './ui/controls';
-import { useDeskThemeValue } from './theme';
 import type { PdfEditModel } from './usePdfEdit';
 import type { PdfPaperRect, PdfTextLine } from './pdf-page-view';
 
@@ -91,7 +95,6 @@ function putRectVars(node: HTMLElement, prefix: string, rect?: PdfPaperRect): vo
  */
 export function PdfPaperView({ model }: { model: PdfEditModel }) {
   const { t } = useTranslation();
-  const deskTheme = useDeskThemeValue();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** 上一次真画时量到的 CSS 宽度（px）；0 = 还没画过。 */
@@ -106,9 +109,9 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
   const [paintMs, setPaintMs] = useState(-1);
 
   /**
-   * 画这一页：先要位图（pdf.js），再把已提交的覆盖区叠上去（白底 + 虚线 + 新字）。
+   * 画这一页：先要位图（pdf.js），再把已提交的覆盖区叠上去（**这一页自己的底色** + 新字，不描边）。
    * 覆盖区画进同一块画布是「所见即所得」的最低要求——另存产物里那一块就是这个样子（spec 3.5-02）；
-   * 唯独纸面图像与新字墨色**跟着产物走、不跟主题走**，虚线框才取主题令牌。
+   * 所以纸面图像、垫底颜色与新字墨色**一律跟着产物走**（`colorsOfOverlay`），不跟主题走。
    */
   const paintNow = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -124,25 +127,23 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
     setPaintMs(started);
     const painter = canvas.getContext('2d');
     if (!painter) return;
-    const tone = getComputedStyle(canvas);
-    const draftTone = tone.getPropertyValue('--color-amber');
     const pxPerPt = canvas.width / page.widthPt;
     painter.setTransform(1, 0, 0, 1, 0, 0);
     for (const overlay of model.draft.overlays) {
       if (overlay.pageNumber !== page.pageNumber) continue;
+      // 两条腿共用 `colorsOfOverlay` 这一句判据：画布上这块的颜色就是产物里那块的颜色（spec 3.5-02 的所见即所得）。
+      const colors = colorsOfOverlay(overlay);
       const x = overlay.rect.xRatio * canvas.width;
       const y = overlay.rect.yRatio * canvas.height;
       const boxWidth = overlay.rect.widthRatio * canvas.width;
       const boxHeight = overlay.rect.heightRatio * canvas.height;
-      painter.fillStyle = '#ffffff';
-      painter.fillRect(x, y, boxWidth, boxHeight);
-      painter.strokeStyle = draftTone;
-      painter.lineWidth = 1;
-      painter.setLineDash([4, 3]);
-      painter.strokeRect(x, y, boxWidth, boxHeight);
-      painter.setLineDash([]);
+      // 向外溢 1px：行盒边缘那一圈是抗锯齿的半透明墨，只铺整盒会留一条看得见的花边（还是"看到底部文字"）。
+      painter.fillStyle = colors.fillHex;
+      painter.fillRect(x - 1, y - 1, boxWidth + 2, boxHeight + 2);
+      // 提交态**不描边**（spec 3.5-14）：那一圈琥珀虚线是"这里有一块补丁"的自供状，
+      // 而拖拽中的那一只已经有 DOM 里的青瓷虚线框在说（`pdf-edit-rubber-box`），不重复挂。
       if (overlay.text && model.limits) {
-        painter.fillStyle = '#0f172a';
+        painter.fillStyle = colors.inkHex;
         painter.font = `${(overlay.sizePt ?? model.limits.defaultTextSizePt) * pxPerPt}px sans-serif`;
         painter.textBaseline = 'bottom';
         painter.fillText(overlay.text, x + 2, y + boxHeight - 2);
@@ -164,13 +165,14 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
     return paintChainRef.current;
   }, [paintNow]);
 
-  // 换页 / 换覆盖区 / 翻主题都重画这一张（`repaint` 的引用随这三样换）。
+  // 换页 / 换覆盖区都重画这一张（`repaint` 的引用随这两样换）。
   // 宽度变化不走这里：拖把手时每帧都在改宽度，它由下面那条观察器按阈值挑一次重画。
-  // `deskTheme` 必须在依赖里——本视图挂在 `App.tsx` 的模块常量 PANELS 下，翻主题时子树拿到的是同一个
-  // 元素引用、并不重渲染，唯有把这个读数取进来才会让画布跟着翻（活体实测过不取就是旧色）。
+  // 翻主题不再惊动画布（3.5-14 把它从依赖里摘掉）：纸上只剩两种颜色——那一页自己的位图，
+  // 和覆盖区从位图上量到的那块纸色，两者都跟着产物走、不跟主题走；
+  // 原先为那一圈琥珀虚线才取的 `deskTheme` 读数随虚线一起退役（§2.4：被替换的旧实现要删干净）。
   useEffect(() => {
     void repaint();
-  }, [repaint, deskTheme]);
+  }, [repaint]);
 
   // 槽宽变化（拖把手、缩窗口、展开内核视图）由观察器推：够一笔就重画清晰的那一张。
   useEffect(() => {
@@ -198,7 +200,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
     putRectVars(node, 'pdf-hover', hovered?.rect);
     putRectVars(node, 'pdf-rubber', model.rubber);
     putRectVars(node, 'pdf-edit', model.editing?.line.rect);
-  }, [hovered, model.editing, model.rubber, deskTheme]);
+  }, [hovered, model.editing, model.rubber]);
 
   /**
    * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶腿）。
@@ -252,6 +254,13 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
 
   /** 这一页有没有读得出的文字（扫描型的判据：为空就走那句诚实回落，绝不画假的可点行列表）。 */
   const lineCount = model.paperPage?.lines.length ?? 0;
+  /**
+   * 这一页上已提交的覆盖区，底色是不是**量到的**（spec 3.5-14 的那句读数）。
+   * 判据不在此处再写一遍：取的就是 `colorsOfOverlay` 那句，界面上说的与两条腿上画的是同一件事。
+   */
+  const pageOverlays = model.draft.overlays.filter((overlay) => overlay.pageNumber === model.paperPage?.pageNumber);
+  const sampledCount = pageOverlays.filter((overlay) => colorsOfOverlay(overlay).sampled).length;
+  const unsampledCount = pageOverlays.length - sampledCount;
   const busyReason = model.busy !== undefined ? 'ACTION_BUSY' : undefined;
 
   return (
@@ -336,8 +345,26 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
         )}
       </div>
 
-      {/* 两句诚实读数：反伪装那条一个字不能改（3.5-04 已放弃字节级替换，覆盖永远不许说成涂黑），
-          扫描型那一页没字就直说没字，仍然可以拖框。 */}
+      {/* 底色读数（spec 3.5-14）：这几块补丁到底是量出来的纸色，还是量不到而回落的墨色——界面上要说得出条数。 */}
+      {pageOverlays.length > 0 && (
+        <p
+          className="font-mono text-[11px] text-slate-500"
+          data-testid="pdf-edit-backdrop-reading"
+          data-overlays={pageOverlays.length}
+          data-sampled={sampledCount}
+          data-unsampled={unsampledCount}
+        >
+          {t('pdfEdit.backdropReading', { count: pageOverlays.length, sampled: sampledCount })}
+        </p>
+      )}
+      {unsampledCount > 0 && (
+        <p className="text-[11px] text-amber" data-testid="pdf-edit-backdrop-fallback">
+          {t('pdfEdit.backdropFallback', { count: unsampledCount })}
+        </p>
+      )}
+
+      {/* 两句诚实读数：反伪装那条的「原文字仍在文件里，只是被盖住了」一字不能改（3.5-04 已放弃字节级替换，
+          覆盖永远不许说成涂黑），扫描型那一页没字就直说没字，仍然可以拖框。 */}
       <p className="text-[11px] text-amber" data-testid="pdf-edit-cover-hint">
         {t('pdfEdit.coverHint')}
       </p>

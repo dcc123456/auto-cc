@@ -112,6 +112,29 @@ describe('3.5-02 / 3.5-03 的边界校验：非法输入一条也不放过，且
   });
 });
 
+describe('3.5-14 的颜色半边：底色归一后带进计划，形状不对就整个键不出现', () => {
+  it('大写十六进制被归成小写：绘制侧与画布读同一份判据，差别只能有一处', () => {
+    const planned = planOverlays([overlay({ backdropHex: '#F0D2B4' })], [a4], limits);
+    if (!planned.ok) throw new Error(planned.detail);
+    expect(planned.overlays[0]?.backdropHex).toBe('#f0d2b4');
+  });
+
+  it('形状不对的颜色（`red` / 带 alpha / 三位缩写）：这一区仍然合法，但颜色键不出现', () => {
+    // 不出现而不是"拒绝整条"：人框好的位置不该因为界面量色失败而被整个丢掉。
+    for (const backdropHex of ['red', '#fff', '#f0d2b4ff', '#12345']) {
+      const planned = planOverlays([overlay({ backdropHex })], [a4], limits);
+      if (!planned.ok) throw new Error(`${backdropHex} 应当放行，实际是 ${planned.detail}`);
+      expect(backdropHex in (planned.overlays[0] ?? {})).toBe(false);
+    }
+  });
+
+  it('没写颜色的覆盖区同样合法：回落是绘制侧那一句判据的事，不在这里再写一遍（§2.5）', () => {
+    const planned = planOverlays([overlay()], [a4], limits);
+    if (!planned.ok) throw new Error(planned.detail);
+    expect('backdropHex' in (planned.overlays[0] ?? {})).toBe(false);
+  });
+});
+
 describe('isLatinOnly：按整条文字选字体的判据（全拉丁走标准字体，掺非拉丁整条走随包字体）', () => {
   it('拉丁、数字、标点、Latin-1 补充都放过', () => {
     for (const text of ['Jane Doe', '2024.03 - present', 'Fudan Univ. (CS) ©±£', '']) {

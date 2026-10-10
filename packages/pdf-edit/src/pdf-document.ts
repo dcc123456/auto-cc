@@ -12,6 +12,7 @@
 import { sha256Hex } from '@auto-cc/core/file-read';
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
+import { colorsOfOverlay } from './overlay-colors.js';
 import { isLatinOnly, type PlannedOverlay } from './overlay-writer.js';
 import { isIdentityOrder } from './page-ops.js';
 
@@ -146,8 +147,9 @@ export class PdfEditDocument {
    * 把换算好的覆盖区追加到各自那一页上（spec 3.5-02 的「叠加」半边 + 3.5-06 的中文半边）。
    *
    * 只有这一处碰 `pdf-lib` 的绘制 API，因为它决定三件必须写死的事：
-   * ① 白底矩形必须 `borderWidth: 0`——实测（本机 `pdf-lib` 1.17.1 的 `PDFPageOptions.d.ts`）
+   * ① 垫底矩形必须 `borderWidth: 0`——实测（本机 `pdf-lib` 1.17.1 的 `PDFPageOptions.d.ts`）
    *    `drawRectangle` 的默认描边宽是 1 pt，留着它就成了一圈黑框，而覆盖区的作用是垫一块干净的底；
+   *    颜色不写死纯白：那是「能明显看到底部文字」的头一个来源（spec 3.5-14），一律走 `colorsOfOverlay` 的判据；
    * ② 字体按**整条文字**选，不按字符拆：全拉丁走 `StandardFonts.Helvetica`（零内嵌成本，plan §7.2 结论③），
    *    掺一个非拉丁字符就整条走随包的 `Noto Sans SC`——混排（「2024 年经验」）拆成两只字体分段画会让基线与
    *    间距各算一遍，而这只字体本来就带拉丁字形；
@@ -182,18 +184,27 @@ export class PdfEditDocument {
           throw new Error(
             `覆盖区 ${plan.id} 落到产物第 ${String(position + 1)} 页，本档只有 ${String(pages.length)} 页`,
           );
+        // 底色取渲染层量到的那块纸色，量不到才按墨色垫底（spec 3.5-14）。判据与画布那一条腿共用
+        // `colorsOfOverlay`，所以屏幕上看到什么，产物里就是什么。
+        const colors = colorsOfOverlay(plan);
         page.drawRectangle({
           x: plan.xPt,
           y: plan.yBottomPt,
           width: plan.widthPt,
           height: plan.heightPt,
-          color: rgb(1, 1, 1),
+          color: rgb(...colors.fillRgb01),
           borderWidth: 0,
         });
         if (plan.text !== undefined && plan.textBaselinePt !== undefined) {
           const font = isLatinOnly(plan.text) ? latinFont : cjkFont;
           if (font !== undefined) {
-            page.drawText(plan.text, { x: plan.xPt, y: plan.textBaselinePt, size: plan.sizePt, font });
+            page.drawText(plan.text, {
+              x: plan.xPt,
+              y: plan.textBaselinePt,
+              size: plan.sizePt,
+              font,
+              color: rgb(...colors.inkRgb01),
+            });
           }
         }
       }

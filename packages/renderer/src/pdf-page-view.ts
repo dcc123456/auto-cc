@@ -15,6 +15,7 @@
  */
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
+import { backdropOfBand } from '@auto-cc/plugin-pdf-edit/overlay-colors';
 import { PDFJS_ASSET_DIRS, PDFJS_PATH_PREFIX, PDFJS_WORKER_FILE } from './pdfjs-asset-tree';
 
 /**
@@ -63,6 +64,14 @@ export interface PdfPaperPage {
    * @returns 渲染耗时（ms，整数）；未画时回 -1，调用方据此显示「还没画」而不是「画了个 0ms」
    */
   paint(canvas: HTMLCanvasElement, cssWidthPx: number): Promise<number>;
+  /**
+   * 量出**这一块矩形周围的纸是什么颜色**（spec 3.5-14）：从这一页当下画在画布上的那张位图里，
+   * 取矩形外扩一圈的像素，按逐通道中位数定色。
+   * @param rect 比例矩形（就是将要盖住的那一区）
+   * @returns `#rrggbb`；画布还没画过、读不回像素（视图未激活 / `getImageData` 被拒）或取样不足时
+   *          回 undefined，由 `colorsOfOverlay` 那一句如实回落墨色，**绝不猜白**
+   */
+  sampleBackdrop(rect: PdfPaperRect): string | undefined;
 }
 
 /** 一次装载后的文档句柄。 */
@@ -197,6 +206,43 @@ interface PdfTextItemSlice {
 }
 
 /**
+ * 量底色时，行盒向外扩多宽（**物理像素**，不是 CSS px：位图是按 devicePixelRatio 铺的）。
+ * 3px 这一档是量出来的经验值——再窄就扫到这一行自己的抗锯齿边缘（那已经不是纸了），再宽就走进相邻那一行。
+ */
+const BACKDROP_GUTTER_PX = 3;
+/** 环带上每隔几个像素取一个：一条 400px 宽的行盒外圈有几千个像素，中位数不需要那么多。 */
+const BACKDROP_SAMPLE_STEP_PX = 2;
+/** 少于这么多个取样就当"没量到"（回 undefined 走那句诚实回落，不猜一个数）。 */
+const BACKDROP_MIN_SAMPLES = 24;
+
+/**
+ * 把比例矩形换成**这一页当下那张位图**上的环带几何（像素坐标，原点左上）。
+ * @param canvas 已经画好这一页的画布（宽高是物理像素）
+ * @param rect 将要盖住的那一区（比例）
+ * @returns 带子的位置与尺寸，以及"盒"在带内坐标（取色时把内沿跳过）
+ */
+function backdropBandOf(canvas: HTMLCanvasElement, rect: PdfPaperRect) {
+  const boxLeft = Math.round(rect.xRatio * canvas.width);
+  const boxTop = Math.round(rect.yRatio * canvas.height);
+  const boxRight = Math.round((rect.xRatio + rect.widthRatio) * canvas.width);
+  const boxBottom = Math.round((rect.yRatio + rect.heightRatio) * canvas.height);
+  const x0 = Math.max(0, Math.min(canvas.width - 1, boxLeft - BACKDROP_GUTTER_PX));
+  const y0 = Math.max(0, Math.min(canvas.height - 1, boxTop - BACKDROP_GUTTER_PX));
+  const x1 = Math.max(x0 + 1, Math.min(canvas.width, boxRight + BACKDROP_GUTTER_PX));
+  const y1 = Math.max(y0 + 1, Math.min(canvas.height, boxBottom + BACKDROP_GUTTER_PX));
+  return {
+    x0,
+    y0,
+    width: x1 - x0,
+    height: y1 - y0,
+    innerX: boxLeft - x0,
+    innerY: boxTop - y0,
+    innerWidth: boxRight - boxLeft,
+    innerHeight: boxBottom - boxTop,
+  };
+}
+
+/**
  * 装载一份 PDF 的字节，得到真纸面的文档句柄。
  * @param bytes 整份文件的字节（`pdf.io.bytes` 的返回值）。注意 pdf.js 会把这块缓冲区**转移**给 worker，
  *              调用方此后不能再拿它做二次解析——要重取只能再走一次 `pdf.io.bytes`。
@@ -235,6 +281,8 @@ export async function loadPdfPaper(bytes: Uint8Array): Promise<PdfPaper> {
       const slices: PdfTextItemSlice[] = content.items
         .filter((item) => 'str' in item)
         .map((item) => ({ str: item.str, transform: item.transform, width: item.width, height: item.height }));
+      /** 这一页当下画在哪块画布上（`paint` 写、`sampleBackdrop` 读）；还没画过即 null。 */
+      let paintedCanvas: HTMLCanvasElement | null = null;
       const built: PdfPaperPage = {
         pageNumber,
         widthPt: base.width,
@@ -251,7 +299,34 @@ export async function loadPdfPaper(bytes: Uint8Array): Promise<PdfPaper> {
           canvas.height = Math.max(1, Math.round(viewport.height));
           const started = performance.now();
           await proxy.render({ canvas, canvasContext: painter, viewport }).promise;
+          // 记住"这一页当下画在哪块画布上"：底色就是从那张位图上量的（见 `sampleBackdrop`）。
+          paintedCanvas = canvas;
           return Math.round(performance.now() - started);
+        },
+        sampleBackdrop(rect) {
+          const canvas = paintedCanvas;
+          const painter = canvas?.getContext('2d');
+          const band = canvas ? backdropBandOf(canvas, rect) : undefined;
+          if (!canvas || !painter || !band) return undefined;
+          let pixels: ImageData;
+          try {
+            pixels = painter.getImageData(band.x0, band.y0, band.width, band.height);
+          } catch {
+            // 读不回像素（画布被隔离 / 尺寸为 0）：交回"没量到"，让两条腿一起走那句诚实回落。
+            return undefined;
+          }
+          return backdropOfBand({
+            // `ImageData` 的三个成员是原型上的 getter，展开运算拷不到，所以逐键给（活体踩过一次空带的）。
+            data: pixels.data,
+            width: pixels.width,
+            height: pixels.height,
+            innerX: band.innerX,
+            innerY: band.innerY,
+            innerWidth: band.innerWidth,
+            innerHeight: band.innerHeight,
+            stepPx: BACKDROP_SAMPLE_STEP_PX,
+            minSamples: BACKDROP_MIN_SAMPLES,
+          });
         },
       };
       cache.set(pageNumber, built);

@@ -183,8 +183,12 @@ function runtimeSpecifiers(text: string): string[] {
 }
 
 describe('窄出口的纯度：渲染层取 `./edit-session` 不该把 PDF 引擎与 Node 能力一起拖进 bundle', () => {
-  /** 闭包内三个模块的运行期说明符写法（`edit-session.ts` 自己 + 它真的算进来的两只纯模块）。 */
-  const closureFiles = ['edit-session.ts', 'page-ops.ts', 'overlay-writer.ts'];
+  /**
+   * 闭包内的运行期模块：`edit-session.ts` 自己 + 它真的算进来的那些纯模块。
+   * 3.5-14 起多了一支 `overlay-colors.ts`（`overlay-writer.ts` 要它归一颜色）——它同样一条 Node 依赖都不许有，
+   * 所以列进来而不是加进白名单：列进来才会被这一句扫一遍它自己的 import。
+   */
+  const closureFiles = ['edit-session.ts', 'page-ops.ts', 'overlay-writer.ts', 'overlay-colors.ts'];
   /**
    * 允许的运行期依赖：只有那条纯历史栈的窄子路径，加闭包内部的相对模块。
    * 写成正向白名单而不是禁止清单——新增一条越界依赖（`pdf-lib`、`node:fs`、带 `readBoundedFile` 的服务文件）
