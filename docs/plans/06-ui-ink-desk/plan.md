@@ -1326,6 +1326,87 @@ zh 19 / en 18 条改写，判据是"这句话有没有一个开发者标识符�
    那是 QA 面（给夹具回执用的），不在主流程三步里，本片的禁词读射程是工作台可见文字；
    要收它得连带整张自测台的读数口径，另立一片，不在这里夹带（§1.4）。
 
+### 3.29 主入口在收起态也得点得到：段头常驻、候选带出处、删除有落点（第六十/六十一片，6.4-18…20；能力腿在 04 的 §4.7 / 4.1-13…14）
+
+**用户报障（2026-10-10，逐字）**：「简历应该支持导入 现在导入简历功能无效 点击导入简历应该弹出窗让用户选择文件
+而不是必须要用户输入绝对路径 / 现在的选择一份简历 这个简历怎么生成的 如何删除 都不可见」
+
+**两条根因都是从他那台活体（CDP 10222 / 5173）读出来的，不是印象**：
+
+1. **「选择文件」每次都失败，原生面板从未弹过**。页面里挂着一条回执原文：
+   `失败：文件选择器参数不合法：扩展名不合法：*`。判定层（`packages/shell/src/file-picker.ts:33`）
+   只认 `[A-Za-z0-9_-]{1,10}`，而渲染层（`ResumeDesk.tsx:303`）按 Electron 的写法传"所有文件"那一组
+   `extensions: ['*']`——**界面上明写着卖给用户的那一组，被网关在弹框之前就拒了**。
+   这条已在 `66dc5a5` 单独修掉（只放行"整组仅一颗星"，`['*','pdf']` 仍拒）。
+   **为什么四道门禁全绿没拦住**：`file-picker.test.ts` 那份"合法参数"夹具只有**一组**筛选器，
+   从来不是真实调用点的形状。从此加一条纪律：**判定类单测的夹具必须从调用点抄，不自己编**。
+2. **整条主流程被三段收起状态吞掉了**。现读
+   `localStorage['auto-cc.desk.disclosure']` = `{resume.doc:false, resume.generate:false, resume.output:false}`，
+   而 `DeskSection` 的正文在收起态是**真的卸载**（`disclosure.tsx:169`）。于是屏幕上只剩三行段头 + 一张纸，
+   「选择文件」与「当前简历」下拉根本不在 DOM 里——"导入无效""怎么生成的、如何删除都不可见"
+   这两句报障里，这一条占的分量比第一根因更大。本轮取证后已把那三档改回展开，但**产品口径必须改**，
+   因为一次误点就会让整屏空掉，而且它跨重启仍然算数。
+
+**裁定㉖ 三条**（2026-10-10 问答定的，逐字对应三个问题）：
+
+1. **删除 = 连素材一起真删**：`resume_docs` 那一行 + 它的 `resume_snapshots` + 从它拆出的
+   `kb_entities` / `kb_chunks` / `kb_vectors`（含 FTS 倒排行）+ 它的 `resume_imports` 出处行全部消失；
+   **`resume_generations` 与额度台账留着**——那是"花过钱"的审计事实，不随文档消失。
+   它与 4.2-04「不留悬空引用」不矛盾：那条讲的是**派生关系**的完整性（父没了要把子解绑），
+   这条讲的是**审计行**，其 `doc_id` 保留原值就是"当时是哪一份"的历史凭证；界面对已删文档的生成历史
+   显示成人读的一句话，不许崩、不许空白（写进 4.1-14 的反向验证）。
+2. **三段仍可整体收起，但把导入提到段头**：不改 `DeskSection` 的折叠语义、不动
+   `resume.doc-toggle` / `generate-toggle` / `output-toggle` 三颗取证通道，而是在段头之下加一条
+   **只在收起态渲染的常驻动作条**（原件新槽位 `headExtra`）。
+3. **来路显示在候选列表里，每个候选一行小字**：`来自 王二.pdf · 2026-10-09 14:05 导入 · 读到 1842 字`；
+   自测台种子那份写「演示内容，不是你的简历」；扫描件写「疑似扫描件，只读到 N 字」。
+
+**四条形状约束（读出来的，决定实现只能长成这样）**：
+
+1. **`DeskSection` 的段头本身就是一颗 `<button>`，里面不许嵌交互元素**（`disclosure.tsx:150-151` 的实测结论：
+   嵌进 `<button>` 的元素其点击会被判给外层，harness 再也按不到内层自己的 `data-action`）。
+   所以"提到段头"落地成**段头之后的兄弟行**，不是段头里的按钮。它只在 `!open` 时渲染，
+   展开态一行都不多出——避免"同一件事两个入口"（§2.5）。
+2. **包依赖是单向 kb→doc**（`resume-kb` 的三个服务都 `inject` 了 `resume.doc`，反向会成环并被 eslint boundaries 拦）。
+   因此跨 `resume_docs` / `resume_snapshots` / `kb_*` / `resume_imports` 的**原子删除编排方只能站在 `kb-profile`**，
+   桥接行随之落在 `kb.profile.*` 而不是 `resume.doc.*`。`cordis.yml` 现读 `resume-parse` 在 427、`kb-profile` 在 438，
+   后者排前面那两只之后，注入拿得到（§9 的 5.1-c：清单顺序就是挂载顺序）。
+3. **`PRAGMA foreign_keys` 全仓没有任何一处打开**（AGENTS.md §9 已登记），DDL 里的 `ON DELETE CASCADE` 是装饰性的，
+   删父行必须显式删子表。编排方走 `KbProfileService` 既有的 `withTransaction()`（它带嵌套深度计数，
+   五条写路径统一走它，SQLite 不允许嵌套 `BEGIN`），倒排行一律走既有的 `deleteChunksWhere()` 而不是自己写
+   `DELETE FROM kb_chunks`（`profile-service.ts:1419` 的原话：倒排行必须跟主表行同一条路径清理）。
+4. **`resume_imports` 没有文件名列**（只有 `source_hash` / `format` / `status` / `text_length` / `issues_json`），
+   而裁定 3 要的那句"来自 王二.pdf"说的是**人选中那个文件的名字**。因此取**迁移 37** 加一列 `source_name`
+   （取号前按 AGENTS.md §9 的口径两条通道核过：`MIGRATION_VERSION = 37` 与字面 `version: 37` 全仓零命中，
+   台账最高 36 = `resume_preferences`；34 仍按"本工作树读但不当它是空号"处理）。
+   旧行 `source_name` 为 NULL → 界面写「由本机导入（当时未记文件名）」，**不回落成 hash、不编一个名字**。
+
+**一处 §2.5 冲突与它的了断**：候选出处要"每个候选一行"，那就得有一列候选行；而当前那份的入口是一支
+`DeskSelect`（`data-testid="resume-doc"`，6.2-06 / 6.4-15 的取证通道）。**下拉与列表是同一件事的两个入口**，
+§2.5 不允许两个都能用——所以这一格**换成候选行列表**（一行 = 姓名 + 出处小字 + 该行的删除键），
+`DeskSelect` 从这一格退场（`resume.docLabel` 与 `data-testid="resume-doc"` 两个通道名跟着换形态并保留在同一容器上）。
+历史读数不重写（§4.5）：6.4-18 显式声明"定向替换 6.2-06/6.4-15 里那一支下拉的行形态"，
+并在读数里给出改前/改后各一张画面。生成腿那一格的「定制哪一份简历」下拉**不动**（它是选目标，不是管文档）。
+
+**删除的二次确认**：界面先例是 `ModelSettingsPanel.tsx:459` 的提供商删除——**一键直删、无确认**，
+所以这一族**没有**现成的破坏性确认形状可用，必须用 `ui/overlays.tsx:322` 的 `Modal` 原件自己搭一只
+（6.2-25 那条教训在此适用：原件到货必须配一张真实几何读数，类型通过不等于画面对）。
+这一刀删的是"这个人找工作用的全部素材"，比删一个提供商配置重一个量级，所以不跟那个先例。
+
+**落点文件**
+
+- 能力腿（片 60，见 04 的 §4.7）：`packages/resume-kb/src/{parse-service,profile-service}.ts`、
+  `packages/resume-doc/src/{doc-store,snapshot-store}.ts`、`packages/shared/src/bridge.ts`
+  （`RENDERER_ALLOWLIST` 加一行 + `BridgeCalls` 一行 + `PendingImportRowView` 加 `sourceName`）、
+  新增 `packages/main/src/doc-delete-link.test.ts`、两份 `locales/*.json` 不动。
+- 界面腿（片 61）：`packages/renderer/src/ui/disclosure.tsx`（`headExtra` 槽位）、
+  `packages/renderer/src/ResumeDesk.tsx`（候选行列表 + 出处小字 + 删除键 + 收起态常驻动作条）、
+  `packages/renderer/src/locales/{zh-CN,en}.json`（同键同时补，缺一边 lint 即红）。
+
+**验收行**：能力面 4.1-13 / 4.1-14（在 04 的 spec），界面面 6.4-18 / 19 / 20（本片）。
+真实鼠标那一腿（点「选择文件」看到系统面板真的弹出来）仍然**必须用户在场**——
+本轮窗口 `visibilityState` 已从 `hidden` 转成 `visible`，读数与画面按 §9 的 6.5-05 补窗口径取。
+
 ## 4. 分片与落点
 
 | 片号 | 内容                                                                              | 文件                                                                  |
