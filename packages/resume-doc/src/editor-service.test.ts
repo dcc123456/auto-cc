@@ -3,19 +3,17 @@
  *
  * 打**真的 config + store + `node:sqlite`**（系统临时目录，不进仓库，§7.5）：这一片要判的就是
  * "打开→改→不保存则库里不动→保存才动"，用内存替身自存自取证明不了这件事（同 `doc-store.test.ts` 的口径）。
- * 打印端口是一只**只给 `fontBaseUrl()`** 的假服务：编辑器只要这一个读数，
- * 另一条 `render()` 一旦被打到就抛错——那说明有人把"印一份"塞进了"排一版"（两件事分属两环，见 plan §8.3）。
- * 不复用 `export-service.test.ts` 里那只可拨动的假端口：那只的意义在于换字节、抛内核错、并发各写各的，
- * 这里的编辑器根本不碰渲染，把两者并成一份只会得到一份谁都用不顺手的替身（§2.7 判的是同一件事，不是同名函数）。
+ * 这里**不再挂假打印端口**：编辑器只投影 HTML、从不产 PDF 字节，所以它连 `resume.print` 都不引
+ * （spec 6.6-04 之后预览的字体 base 是渲染层相对路径，不再是端口读数）。原先那只"`render` 被调到即失败"的假服务
+ * 就这一条存在理由，结构上没有那条通道之后，替身留着只是死代码（§2.4）。
  */
-import { AppError, asApp, Context, Service, type Fiber } from '@auto-cc/core';
+import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import type { ResumePrintPort, ResumePrintRequest } from '@auto-cc/shared';
+import { PREVIEW_FONT_BASE } from '@auto-cc/shared';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { z } from 'zod';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ResumeDocService } from './doc-store.js';
 import { EDITOR_METRIC_BOUNDS } from './editor-ops.js';
@@ -23,27 +21,8 @@ import { ResumeEditorService } from './editor-service.js';
 import { createEmptyDocument, makeField, type ResumeDocument } from './model.js';
 import { resumePrint } from './print.js';
 
-const FONT_BASE = 'file:///fake/fonts';
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
-
-/** 只在字体 base 上给读数的假打印端口（`render` 被调到即失败）。 */
-class FontOnlyPrintService extends Service implements ResumePrintPort {
-  static provide = 'resume.print';
-  static Config = z.strictObject({});
-
-  constructor(ctx: Context, _options: z.infer<typeof FontOnlyPrintService.Config>) {
-    super(ctx, 'resume.print');
-  }
-
-  fontBaseUrl(): string {
-    return FONT_BASE;
-  }
-
-  render(_request: ResumePrintRequest): Promise<Uint8Array> {
-    throw new Error('排版编辑器不该调打印端口的 render（预览只要 HTML，印一份是 export 轨的事）');
-  }
-}
 
 function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-resume-editor-'));
@@ -51,13 +30,12 @@ function tempDir(): string {
   return dir;
 }
 
-/** 挂起 config + store + resume.doc + 假 resume.print + resume.editor，并把一份 fixture 落进库。 */
+/** 挂起 config + store + resume.doc + resume.editor，并把一份 fixture 落进库。 */
 async function boot(document = fixture()) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(StoreService, { dir: tempDir(), file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  fibers.push(await ctx.plugin(FontOnlyPrintService, {}));
   // 3.6-08 的两只阈值随配置走（带 `.default()` 的键在直接调用点必须显式给出，§9 的 1.3 那条）。
   fibers.push(await ctx.plugin(ResumeEditorService, { maxPreviewResponseMs: 1200, largeDocumentSectionCount: 5 }));
   const app = asApp(ctx);
@@ -234,7 +212,7 @@ describe('3.6-04 模板与语言：视图旋钮，不是数据', () => {
     expect(after.isDirty).toBe(false);
   });
 
-  it('预览是同一份 builder 的产物：字体 base 来自端口，未保存的 draft 也能被排出来', async () => {
+  it('预览是同一份 builder 的产物：字体 base 是渲染层相对路径，未保存的 draft 也能被排出来', async () => {
     const { editor, docs } = await boot();
     editor.open('r');
     const draft = editor.metric('r', 'baseFontPt', 12).layout;
@@ -246,8 +224,11 @@ describe('3.6-04 模板与语言：视图旋钮，不是数据', () => {
     expect(draft.baseFontPt).toBe(12);
     // 同一份 builder + 同一个 base 的直接展开：与 `export-service.test.ts` 钉住的 `resume.export.preview`
     // 的产出条件完全相同，于是"编辑器里看到的"与"导出出来的"在结构上不可能分叉（spec 3.3-01 续用到 3.6）。
-    expect(html).toBe(resumePrint.buildHtml({ ...fixture(), layout: draft }, 'classic', 'zh-CN', FONT_BASE));
-    expect(html).toContain(FONT_BASE);
+    expect(html).toBe(resumePrint.buildHtml({ ...fixture(), layout: draft }, 'classic', 'zh-CN', PREVIEW_FONT_BASE));
+    // 预览这一支的字体 base 必须是**相对**路径：绝对 `file://` 在 http 页的纸面帧里取不到（spec 6.6-04 实测的
+    // 那条 `NetworkError`），而端口给的正是那一种，所以这一条同时钉住"编辑器不再引打印端口"。
+    expect(html).toContain(`src:url('${PREVIEW_FONT_BASE}/`);
+    expect(html).not.toContain('file://');
   });
 });
 

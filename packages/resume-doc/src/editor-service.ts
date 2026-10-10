@@ -11,10 +11,11 @@
  * ③ 落库全在 `resume.doc`，本文件的 `save` 只是把当前 draft 交出去（AGENTS.md §2.5：一件事一个入口）。
  *
  * 预览走 `resumePrint.buildHtml` 这**同一个** builder（spec 3.3-01「预览即导出所见」在编辑器里继续成立），
- * 所以它要注入 `resume.print` 只为拿一次 `fontBaseUrl()`——不 import shell、不认识 Electron。
+ * 字体 base 用 `@auto-cc/shared` 的 `PREVIEW_FONT_BASE`（相对路径，见那一条的注释）——所以本服务**不认得**
+ * `resume.print` 端口：它只投影 HTML，从不产 PDF 字节，那个绝对 `file://` base 与它无关。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import type { ResumePrintPort } from '@auto-cc/shared';
+import { PREVIEW_FONT_BASE } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ResumeDocService } from './doc-store.js';
 import { EDITOR_METRIC_BOUNDS, type EditorOutcome, type MetricBound, type MetricKey } from './editor-ops.js';
@@ -73,7 +74,7 @@ export interface ResumeEditorState {
 export class ResumeEditorService extends Service {
   static provide = 'resume.editor';
   static Config = resumeEditorSchema;
-  static inject = ['resume.doc', 'resume.print'];
+  static inject = ['resume.doc'];
 
   /**
    * docId → 会话。只活在内存里，**重启即失**（plan §8.5 裁定⑨「只拦不存」：draft 不落库，
@@ -98,10 +99,6 @@ export class ResumeEditorService extends Service {
 
   private get docStore(): ResumeDocService {
     return asApp(this.ctx)['resume.doc'];
-  }
-
-  private get printPort(): ResumePrintPort {
-    return asApp(this.ctx)['resume.print'];
   }
 
   /**
@@ -200,20 +197,15 @@ export class ResumeEditorService extends Service {
   };
 
   /**
-   * 当前 draft 的预览 HTML：与 `resume.export.preview` 用**同一份** builder 与同一个 `fontBaseUrl()`，
-   * 区别只在这里喂的是**未保存**的那一份文档（spec 3.6-01「松开即预览更新」的前提）。
+   * 当前 draft 的预览 HTML：与 `resume.export.preview` 用**同一份** builder 与同一个相对字体 base
+   * （`PREVIEW_FONT_BASE`），区别只在这里喂的是**未保存**的那一份文档（spec 3.6-01「松开即预览更新」的前提）。
    * @param docId 文档 id
    * @returns 完整打印 HTML 字符串
    * @throws AppError(`RESUME_EDITOR_NOT_OPEN`)
    */
   preview = (docId: string): string => {
     const session = this.require(docId);
-    return resumePrint.buildHtml(
-      session.document(),
-      session.templateId(),
-      session.locale(),
-      this.printPort.fontBaseUrl(),
-    );
+    return resumePrint.buildHtml(session.document(), session.templateId(), session.locale(), PREVIEW_FONT_BASE);
   };
 
   /**

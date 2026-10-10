@@ -159,6 +159,28 @@ overflow-hidden`、段头 `shrink-0`、正文 `min-h-0 flex-1 overflow-y-auto`�
 
 ---
 
+## 6.6 简历样式层与随包字体（plan `06-ui-ink-desk` 补片 / 全局 plan `tall-beacon-darter` 族四）
+
+**这一族起于 2026-10-10 的一条报障**：「通过内置模版生成的简历太丑了，要有合适的页边距，要支持文字颜色、
+文字背景色、段落样式、字体大小、字体样式」。查源码得到的不是观感而是三条可读缺陷：屏上那张纸根本没有边距
+（`@page` 只管分页媒体）、11 套衬线模板声称的字族随包里根本没有（中文静默掉回系统衬线）、
+以及"颜色/底色/段落样式"在 `Layout` 模型里**没有落脚处**。四条裁定见 plan 补片（顺序先去痕、
+保真判据未改动区像素级一致、样式粒度到"文档主题 + 段落样式"为止、补衬线随包且默认 14/16mm 不改）。
+
+| ID     | 验收标准                                                                                                                                                                                                                                                                                                                           | 方式 | 验证操作                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 状态 |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 6.6-01 | `Layout` 加可选 `design`（`ink / paper / accent / heading / body{fontFamily,sizePt,weight} / paragraphPresets` + 按 `sectionId`/`kind` 的段落档），三处同源（`model.ts` / `schema.ts` 的 `strictObject` / `normalize.ts` 逐字段重建）+ `bridge.ts` 载荷类型。**不占迁移号**（落在既有 `resume_docs.doc_json` 那一个 TEXT blob 里） | C    | 单测两条：① 改样式**不触发事实锁定**（`checkFactLock` 只走 sections/entries/fields）；② 样式会正常弄脏快照（`contentSlice` 含 layout）。schema 的 `strictObject` 少列一个键即红                                                                                                                                                                                                                                                                                                                                                                          | [ ]  |
+| 6.6-02 | 渲染侧只发**语义槽位类** `rz-ink / rz-band / rz-head / rz-body`，hex 只出现在 `buildPrintHtml` 发的文档级 `:root{--rz-*:…}`；`TemplateContext` 带 `design`、`renderWithSpec` 一次算出 `spec ⊕ design` ⇒ 50 行模板零改动。`print-css.ts` 为每个 `rz-*` 加真 `put()` 规则（于是自动进 `PRINT_UTILITY_KEYS`）                         | C    | 既有机检两条继续绿：模板片段禁 `<style>`/`style="`（`template.test.ts:193-199`）、模板用到的 class 必须在 `PRINT_UTILITY_KEYS`（`template-library.test.ts:144-154`）。**新增一条机检**：hex 字面量只许出现在文档级 style 块                                                                                                                                                                                                                                                                                                                              | [ ]  |
+| 6.6-03 | **屏上纸面有真边距**：`buildPrintHtml` 发 `@media screen{body{padding:<margin>}}@media print{body{padding:0}}`，单一来源 `doc.layout.margin`；不新增常量、不动打印选项（`margins:{0,0,0,0}` + `preferCSSPageSize:true` 是已钉事实）                                                                                                | C+V  | C：`print.test.ts` 在 `@page` 那条旁边各补一条钉两条媒体分支，且「预览与导出用同一份 HTML 源」那条仍绿。V：纸面帧自己（`about:srcdoc` target，直连 CDP）读回 `@media screen{body{padding:14mm 16mm}}` 与计算内边距 `52.9134px / 60.4724px` = **14mm / 16mm**，与 `DEFAULT_LAYOUT.margin` 逐位相等；画面一张。读数见 `6.6-03-screen-margin-readings.txt`                                                                                                                                                                                                  | [x]  |
+| 6.6-04 | **衬线随包**：`resources/fonts/` 补 Noto Serif SC 400/700（中文 + 拉丁共四只 woff2，OFL），`EMBEDDED_FONTS` 加四条 ⇒ `FONT_SET_ID` 自动跟着（3.7-01 快照记的就是这份清单）；`LICENSES.md` 记来源与条文同一性。**并修掉一条同源缺陷**：预览面此前根本取不到随包字体（屏与产物两种字族）                                             | C+V  | C：`print.test.ts` 三条——四只衬线档以自己的族名声明、`font-sans`/`font-serif` 各自至少认领一个随包族名、`fontSet` 含两族八档。V：纸面帧里八档 `@font-face` 的 src 全是相对 base、`document.fonts.load` 每档回 1 条、`check(...,'简历')` 为 true；**决定性一条**是同一字族栈只差 `'Noto Serif SC'` 一格时中文位图 raster hash 与有墨像素都变（1378041559/5044 ↔ 1111970614/5117），而 advance 与 DOM 宽度量不出来（两侧都 1em）；导出产物 `strings` 读到 `NotoSerifSCExtraLight-{Regular,Bold}`。包体读数 +3.0MB。见 `6.6-04-embedded-serif-readings.txt` | [x]  |
+| 6.6-05 | 界面上这套样式点得到：新原件 `DeskSwatch`（调色格，**不用** `<input type=color>`）、`ResumeEditor` 六只滑杆下方加"主题"区（`DeskSegmented` 选预设 / `DeskField`+`DeskSelect` 选色名与字族 / `DeskSwatch` 上底色）、段落样式走 `Modal`；桥接加 `resume.editor.design`（结构化 patch、**一个 undo 单元**）；文案走 zh/en 双包        | C+V  | 机检三条：`src/ui/**` 之外不许裸控件（§10）、`hover:` 要交互凭据（§13）、按不动要原因码（§14）；语言包两侧齐 + 占位符实参。V：**新原件到货必须配一张真实几何读数**（6.2-25 那条教训）；undo 一条腿走编辑器历史（改一次主题 = 一步）                                                                                                                                                                                                                                                                                                                      | [ ]  |
+
+**本机证不了的一条（6.6-04 的装机半边，标 `[!]` 不推测）**：装机版渲染层是 `file://` 页 + `font-src 'self'`，
+`sandbox=""` 的 srcdoc 帧在 `file:` scheme 下能否取到那条相对字体路径（Chromium 对 `file:` 的 CORS 判定与
+`http` 不同），需要真打包一次装机才能量。本轮只证到 dev。
+
+---
+
 ## 6.1 / 6.2 / 6.3 落地记录（2026-10-06，令牌层 + 原件层 + 外壳归位）
 
 **本片实际只干三件事：把颜色收成一套可翻面的令牌、把控件行为收进一个原件目录、把 16 只面板按用户语言归位。**
@@ -1948,3 +1970,58 @@ bg-ink-950 px-2 py-1 text-[11px]` 与原件内部 `fieldClass` 同源，所以 c
 10. **工具面一条新实测**：`pnpm harness reload` **不是子命令**（exit 1，`harness` 的用法表里没有它），
     改完渲染层代码要让页面吃上新代码，直接跑 `eval`/`shot` 即可（Vite HMR 已推过去），
     或按 §9 那条走"改配置 → 重开会话"的顺序；不要照某些落地记录里的说法去调 `reload`。
+
+## 6.6 第一片落地记录（2026-10-10，屏上边距与衬线随包到货，顺带挖出预览取不到字体的真因）
+
+**这一片只做 6.6-03 / 6.6-04 两格**（族四另三格 6.6-01/02/05 是"颜色/底色/段落样式"的模型与界面，
+要先有 `layout.design` 才谈得上，按 plan 的顺序排在后头）。落到的是一条报障的两半：
+屏上那张纸没有边距、衬线模板的中文根本没有随包字体。
+
+1. **屏上边距的修法只有一条合法形状**：`@page{margin}` 在屏幕上恒为 0（它只管分页媒体），而 reset 里
+   `body{margin:0}` 是既成事实，所以补的是 `@media screen{body{padding:<同一份 margin>}}` +
+   `@media print{body{padding:0}}` 两条**同源**分支，来源仍是 `doc.layout.margin` 那一个对象。
+   没有新增常量、没有动打印选项（`margins:{0,0,0,0}` + `preferCSSPageSize:true` 是 `print.test.ts:40,60-66`
+   钉着的"防双份边距"事实），也没有把默认 14/16mm 改掉（裁定第 4 条：改它要重钉 3.3-03 且顶开
+   `editor-ops.ts:31-40` 的"缺省落在中值"不变量）。
+2. **衬线这一族的"缺"是声明与随包两份事实不一致**：`print-css.ts` 的 `font-serif` 栈里写着
+   `'Noto Serif SC'`，而 `EMBEDDED_FONTS` 只有 Noto **Sans** SC ⇒ 拉丁走 Georgia/Times 正常、
+   中文静默掉回系统衬线，界面读起来像"这套模板没做完整"。补的是随包四档（中文 400/700 + 拉丁 400/700），
+   **不改那两条 utility 栈**：Georgia/Times 在拉丁侧是有意选择，把系统名一并清掉反而会把拉丁换族。
+   于是 `print.test.ts` 那条跨检查的判据写成"这一条 utility 至少认领一个随包族名"，而不是"栈里每个名字都随包"。
+3. **`FONT_SET_ID` 跟着自动变**（3.7-01 快照记的就是这份清单）：形状换成"族名集合 + 文件清单"，
+   两族八档 ⇒ 快照据此认得出是哪一份字体产的产物；`fontSet.split(',')` 长度 8 有单测钉住。
+4. **一条被活体推翻的假设（本片真正的收获）**：原判断"预览取不到字体是因为 src 写了绝对 `file://`"只对一半。
+   换成相对 base（`PREVIEW_FONT_BASE = 'fonts'`，进 `@auto-cc/shared` 与打印面那份绝对 base 分列两条事实）之后
+   仍然 `NetworkError`。真因是**纸面帧是 `sandbox=""` 的 srcdoc ⇒ 它没有来源**，那条相对字体的请求于是是
+   跨源取（`Origin: null`）并按 CORS 校验，而渲染层的静态资源中间件不发 `Access-Control-Allow-Origin`。
+   补这一行之后同一探针从 `ERR:NetworkError` 变成 `load → 1 条 / check → true`。
+   这两棵树（pdf.js 的 worker/cmaps/standard_fonts/wasm 与随包字体）都是随包的公开静态文件，`*` 不外泄任何东西；
+   **没有**去动 `sandbox=""`：那正是 §8.1 要的"纸面里不许有脚本"，放宽成 `allow-same-origin` 是把纸面接回渲染层来源。
+5. **一条复用而非新铺**：字体腿并进既有的 pdf.js 静态资源插件（`vite-pdfjs-assets.ts` → `vite-static-assets.ts`，
+   一棵树=一个 `AssetTree`，中间件与 `closeBundle` 只有一份），而不是再写第二个中间件（§2.2/2.3）。
+   顺带把编辑器不再需要的 `resume.print` 依赖拆掉（预览改吃相对 base 之后它只问 `resume.doc`）：
+   删的是真死掉的依赖注入与两只测试替身，不是"先留着"（§2.4），装配对账 `editor-link.test.ts` 同步收窄。
+6. **宽度量不出字形，只有位图量得出**：`张三` 那只 h1 在"带随包衬线"与"去掉那一格"两条栈下 DOM 宽度
+   都是 52.5px（Noto CJK 与 macOS 的中文回退都按 1em 走），所以 6.6-04 的 V 判据必须画进 canvas 比像素
+   （raster hash 与有墨像素双双变化），不能像 6.5 那一族那样按宽度/颜色读数判。拉丁侧才可以用宽度
+   （Serif 346.00 / Sans 327.64 / 不存在的族 326.84）。
+7. **许可证只记一行、不新增全文**：`resources/fonts/OFL.txt` 与 `@fontsource/noto-serif-sc@5.3.0` 包内
+   LICENSE 逐字节相同（md5 `4538a5afdd18ccebd224405ffe3dee4b`），于是 `LICENSES.md` 只在生成段**之外**
+   记一行来源与条文同一性；本轮没有手改生成段，`check-licenses.ts --write` 因此不需要跑
+   （没有新增依赖：字体是随包资源，不是 package 依赖）。包体读数按实测写 **+3.0MB**，计划里估的 +2.3MB 偏低。
+8. **门禁与末态**：`pnpm typecheck` `TYPECHECK_EXIT=0`、`pnpm lint` `LINT_EXIT=0`、
+   `pnpm format:check`（对我改过的 16 个文件跑 prettier `--check`）`FMT_EXIT=0`、
+   全仓 `pnpm test` `TEST_EXIT=0`，逐包核对：`packages/resume-doc` 160 条 / `packages/main` 85 条 /
+   `packages/resume-kb` 410 条全绿（含本片新增的六条打印面判据）。
+   **中途一次全仓红不是本片造成的**：那一轮脏区里 `packages/resume-kb/**` 正被另一个窗口改
+   （`profile-service.ts` 的 `static inject` 已加 `resume.snapshot`/`resume.parse`，其测试 boot 还没跟上），
+   表现为 `app['kb.profile'] === undefined` → `TypeError: Cannot read properties of undefined (reading 'sync')`，
+   连带 `packages/main` 的两份装配对账红；按 §9 的共享工作树口径不修人家的红、不 `git add` 人家的文件，
+   等那一格自己跟上之后重跑即绿（上面那份读数就是重跑之后的）。
+   另记一条噪音：`pnpm -r test` 在 `packages/sessions` / `packages/browser` 会打一句
+   `Cannot find module '<pkg>/install.js'`（electron 自带 postinstall 的解析问题），**那两个包的测试仍全绿**，
+   不是本片引入、也不是失败原因。
+   零写入：真实抓取一轮未跑；只调了产品自己的 `resume.export.toPdf`（产物落 `tmp/v6-userdata/exports/`，不进仓库）。
+   末态开发实例：毡案、zh-CN、视图 `resume`，纸面停在 `modern`（取证中途把模板点成 `legal-navy` 读衬线，
+   读完点回原档；`selectTemplate` 只写组件状态，没碰"设为默认"那颗键，所以库里偏好一字未动）。
+   探针注入的那支 `transition/animation:none` 样式已摘（`removed=true`）。

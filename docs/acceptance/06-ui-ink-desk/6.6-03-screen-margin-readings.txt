@@ -1,0 +1,30 @@
+spec 6.6-03｜屏上纸面补真边距 —— 活体读数（2026-10-10，本机 macOS arm64 / Electron 44.4.5 / dev 实例 CDP 10222）
+
+判据：屏幕上的这张纸（`ResumePaperStage.tsx:212` 那只 `<iframe sandbox="" srcDoc>`）里，正文左边缘到纸边的
+距离必须等于 `doc.layout.margin`，而导出产物的 `@page` 边距一字不改（否则变成双份边距）。
+原缺陷：`@page{margin:…}` 只对**分页媒体**生效，屏幕上是 0，而 `print-html.ts` 的 reset 写了 `body{margin:0}`
+⇒ 屏上正文贴到纸边、导出的 PDF 却有 14/16mm，人看到的两张纸不一样。
+
+读数取自纸面帧自己（`about:srcdoc` target，直连 CDP `Runtime.evaluate`；探针 `tmp/66h-probe.js`，不入库）：
+
+  帧内样式表里真的两条媒体分支（`document.styleSheets` 逐条读回）：
+    @media screen { body { padding: 14mm 16mm; } }
+    @media print  { body { padding: 0px; } }
+
+  计算后的实际内边距（`getComputedStyle(document.body)`）：
+    padding-top    = 52.9134px  → 14.00 mm   （96dpi 换算：52.9134 / (96/25.4)）
+    padding-left   = 60.4724px  → 16.00 mm
+    padding-right  = 60.4724px  → 16.00 mm
+    padding-bottom = 52.9134px  → 14.00 mm
+  与 `DEFAULT_LAYOUT.margin`（上下 14mm、左右 16mm）逐位相等。
+
+  画面：`6.6-03-screen-margin-serif-paper.png`（纸面上正文与纸边之间看得见留白）。
+
+打印侧没有被这条改动碰到的证据（同一轮全仓 `pnpm test` `TEST_EXIT=0`，`packages/resume-doc` 160 条）：
+  - `print.test.ts` 「@page 与打印选项同源」那条仍绿：`toPrintRequest` 给的仍是
+    `margins:{0,0,0,0}` + `preferCSSPageSize:true`，`@page{size:A4;margin:14mm 16mm}` 由 HTML 自己带。
+  - `export-service.test.ts` 「预览与导出用同一份 HTML 源」仍绿，且现在只允许一处不同：
+    字体 src 的 base（预览=相对、打印=端口给的绝对 `file://`）。
+
+装机版没有单独量：这一条是 HTML 自带的样式分支，不涉任何取源，媒体查询的判定与文档 scheme 无关；
+需要打包才能证的只有字体那一半（见 `6.6-04-embedded-serif-readings.txt` 末尾的 `[!]`）。

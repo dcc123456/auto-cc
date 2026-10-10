@@ -8,7 +8,7 @@
  *
  * 编辑语义本体（界内界外、历史、dirty、撤销）在 `packages/resume-doc/src/editor-*.test.ts` 判，
  * 这里只钉四件只在真装配里才成立的事：
- * 1. **登记齐**：注册表与清单都有 `resume-editor`，且它排在 `resume-doc` 与 `resume-print` 之后。
+ * 1. **登记齐**：注册表与清单都有 `resume-editor`，且它排在 `resume-doc` 之后。
  * 2. **切得对**：白名单里每一条 `resume.editor.*` 都切成服务 `resume.editor` + **同名方法**，
  *    并且那个方法在挂起来的实例上真的存在（名单与实现各写各的、点到才发现没有，是这一类缺陷的形状）。
  * 3. **原因跨进程不丢**（3.6-02 的判据原文）：界外值经网关这一路抛出的仍是那条码，
@@ -16,12 +16,11 @@
  * 4. **正文仍不过界**（§8.1 第 1 条）：经网关拿到的投影 `structuredClone` 得过去（IPC 载荷是结构化克隆），
  *    而克隆串里一句简历原文都没有；界面手里也没有 `resume.doc.*` 那两条读写口。
  *
- * 语料是手搓的虚构中文文档（§7.2 不碰真实平台、§7.5 不落任何文件进仓库）。打印端口是一只**只给
- * `fontBaseUrl()`** 的替身：真身 `ResumePrintService` 在 `@auto-cc/shell`（它才认识 Electron），
- * 在本机 vitest 的纯 Node 运行时挂不起来——与 `three-gate-link.test.ts` 用 `FakeSessionsService`
- * 顶掉 `sessions` 是同一个手法。
+ * 语料是手搓的虚构中文文档（§7.2 不碰真实平台、§7.5 不落任何文件进仓库）。这里**不再挂打印端口替身**：
+ * 预览的字体 base 自 spec 6.6-04 起是渲染层的相对路径（`PREVIEW_FONT_BASE`），编辑器连 `resume.print`
+ * 都不引了——"排一版"与"印一版"分属两环这条边界从此由依赖表保证，不再靠一只抛错的替身看守。
  */
-import { AppError, asApp, Context, Service, type Fiber } from '@auto-cc/core';
+import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
 import { AgentToolsService } from '@auto-cc/plugin-agent';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { resolveCall } from '@auto-cc/plugin-ipc';
@@ -34,38 +33,17 @@ import {
   type ResumeDocument,
 } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
-import type { ResumePrintPort, ResumePrintRequest } from '@auto-cc/shared';
-import { RENDERER_ALLOWLIST, isAllowedCall } from '@auto-cc/shared';
+import { PREVIEW_FONT_BASE, RENDERER_ALLOWLIST, isAllowedCall } from '@auto-cc/shared';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
 import { afterAll, describe, expect, it } from 'vitest';
 
 /** 这份装配用的工作副本 id（正文全虚构，只有它需要过界的是 id 本身）。 */
 const DOC_ID = 'resume-editor-link';
-const FONT_BASE = 'file:///fake/fonts';
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
-
-/** 只给字体 base 的打印端口替身：`render` 被调到即失败（排一版与印一版分属两环，plan §8.3）。 */
-class FakePrintService extends Service implements ResumePrintPort {
-  static provide = 'resume.print';
-  static Config = z.strictObject({});
-
-  constructor(ctx: Context, _options: z.infer<typeof FakePrintService.Config>) {
-    super(ctx, 'resume.print');
-  }
-
-  fontBaseUrl(): string {
-    return FONT_BASE;
-  }
-
-  render(_request: ResumePrintRequest): Promise<Uint8Array> {
-    throw new Error('编辑器不该调打印端口的 render');
-  }
-}
 
 /**
  * 撑起「config + store + resume.doc + resume.editor + agent.tools」的真装配。
@@ -82,7 +60,6 @@ async function bootAssembly() {
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(AgentToolsService, {}));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  fibers.push(await ctx.plugin(FakePrintService, {}));
   // 3.6-08 的两只阈值随配置走（带 `.default()` 的键在直接调用点必须显式给出，§9 的 1.3 那条）。
   fibers.push(await ctx.plugin(ResumeEditorService, { maxPreviewResponseMs: 1200, largeDocumentSectionCount: 5 }));
   const app = asApp(ctx);
@@ -172,7 +149,7 @@ afterAll(async () => {
 });
 
 describe('装配对账（plan §8.3 的两处登记）', () => {
-  it('注册表与 cordis.yml 都有 resume-editor，且它排在 resume-doc 与 resume-print 之后', () => {
+  it('注册表与 cordis.yml 都有 resume-editor，且它排在 resume-doc 之后', () => {
     // 只写注册表不进清单，启动时这一道口根本不存在；只进清单不写注册表，插件树显示 failed。
     const here = fileURLToPath(new URL('.', import.meta.url));
     const registrySource = readFileSync(join(here, 'registry.ts'), 'utf8');
@@ -180,9 +157,9 @@ describe('装配对账（plan §8.3 的两处登记）', () => {
     const cordisYml = readFileSync(join(here, '../../../cordis.yml'), 'utf8');
     const indexOf = (id: string): number => cordisYml.indexOf(`\n  - id: ${id}\n`);
     expect(indexOf('resume-editor')).toBeGreaterThan(-1);
-    // 它 inject 了这两只，而早挂的问不到晚注册的（§9 的 5.1-c）——顺序写反在包内用例里看不出来。
+    // 它 inject 了 `resume.doc`，而早挂的问不到晚注册的（§9 的 5.1-c）——顺序写反在包内用例里看不出来。
+    // `resume.print` 从这一条里退场了：预览的字体 base 换成渲染层相对路径后，编辑器不再引那只端口（spec 6.6-04）。
     expect(indexOf('resume-editor')).toBeGreaterThan(indexOf('resume-doc'));
-    expect(indexOf('resume-editor')).toBeGreaterThan(indexOf('resume-print'));
   });
 
   it('真上下文里挂起来的名字就是 `resume.editor`，且没往 agent 工具面登记任何一只手', async () => {
@@ -299,8 +276,11 @@ describe('可达面边界：九条只给界面，正文仍然不过界（§8.1 /
     expect(serialized).not.toContain('星桥-e2');
     expect(serialized).not.toContain('经历');
     // 界面要看内容只有一条路：打印 HTML，与导出同一份源（spec 3.3-01 的口径续用到编辑器）。
+    // 过界的那一份必须带**相对**字体 base（spec 6.6-04）：装机/开发两种运行态里纸面帧都只取同源字体，
+    // 端口那一支绝对 `file://` 一旦漏进这条口，屏上就静默掉回系统字体——只有导出的 PDF 是对的。
     const preview = resolveCall('resume.editor.preview', lookup);
     if (!preview.ok) throw new Error('分派失败');
-    expect(String(preview.invoke(DOC_ID))).toContain(FONT_BASE);
+    expect(String(preview.invoke(DOC_ID))).toContain(`url('${PREVIEW_FONT_BASE}/noto-`);
+    expect(String(preview.invoke(DOC_ID))).not.toContain('file://');
   });
 });

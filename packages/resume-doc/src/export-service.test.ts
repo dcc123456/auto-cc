@@ -9,7 +9,7 @@
 import { asApp, Context, Service, type Fiber } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { StoreService } from '@auto-cc/plugin-store';
-import type { ResumePrintPort, ResumePrintRequest } from '@auto-cc/shared';
+import { PREVIEW_FONT_BASE, type ResumePrintPort, type ResumePrintRequest } from '@auto-cc/shared';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -133,9 +133,14 @@ describe('3.3-09 导出成功回执 + 落盘 + 页数回写', () => {
     docs.save(sampleDoc());
     const previewHtml = exporter.preview('resume-1', 'classic');
     await exporter.toPdf('resume-1', 'classic');
-    expect(print.lastRequest?.html).toBe(previewHtml);
-    // 预览经过端口拼字体 base，证明它走的是注入的端口而非本地硬编码。
-    expect(previewHtml).toContain('file:///fake/fonts');
+    // 两份只允许在**字体 src 的 base** 上不同（其余字节必须逐位相同）：预览面是渲染层的 srcdoc 帧，
+    // 那里取不到绝对 `file://`（spec 6.6-04 实测的 `NetworkError`），打印面是临时 `file://` 文档，
+    // 只有绝对同源 URL 才读得到本地字体。base 之外的任何差异都意味着两条轨道又长了第二份版面。
+    const withoutFontBase = (html: string): string => html.replace(/url\('[^']*?(?=\/noto-)/g, "url('<base>");
+    expect(withoutFontBase(print.lastRequest?.html ?? '')).toBe(withoutFontBase(previewHtml));
+    // 各自的 base 形状也钉住：预览=相对（走渲染层根），打印=端口给的绝对 `file://`（不是本地硬编码）。
+    expect(previewHtml).toContain(`url('${PREVIEW_FONT_BASE}/noto-`);
+    expect(print.lastRequest?.html).toContain("url('file:///fake/fonts/noto-");
   });
 });
 

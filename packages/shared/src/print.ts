@@ -4,8 +4,28 @@
  * 为什么放 `@auto-cc/shared`：L1 与 L2 都只依赖它、互不 import（L1 禁止反向依赖 L2，见 AGENTS.md §4.1）。
  * 打印执行要碰 `WebContents`（Electron），而 `resume-doc` 刻意不含 electron 依赖——于是把「唯一需要内核环境」
  * 的两件事（渲染字节、字体目录 base）抽成这个端口，由 shell 实现、resume-doc 经 cordis 依赖注入消费。
- * 这里是**纯类型**，没有任何运行时代码，也不 import electron（`render` 返回 `Uint8Array` 而非 Electron 的 `Buffer` 别名）。
+ * 这里除下面那一个**目录名常量**外没有任何运行时代码，也不 import electron（`render` 返回 `Uint8Array` 而非 Electron 的 `Buffer` 别名）。
  */
+
+/**
+ * 预览 HTML 里字体 `src` 的**相对** base（不带斜杠）：渲染层根目录下的字体子目录名。
+ *
+ * 为什么预览不能沿用端口的 `fontBaseUrl()`（绝对 `file://`）：纸面是渲染层里的 `about:srcdoc` 帧，
+ * 而开发态的渲染层跑在 `http://127.0.0.1:5173/`——从 http 页面里取 `file://` 资源会被 Chromium 直接挡掉
+ * （实测 `document.fonts.load('40px "Noto Sans SC"')` 回 `NetworkError`），于是**屏上预览一路用系统回退字体，
+ * 只有导出的 PDF 才是内嵌字体**，3.3-01「预览即导出所见」在字形这一维不成立（spec 6.6-04 的那半条报障）。
+ * 相对路径把这一支换到渲染层自己的根上：dev 由 vite 中间件从仓库 `resources/fonts` 直接送出，
+ * 装机版由 `vite build` 搬进渲染层产物根的 `fonts/`（同一套做法的先例是 `pdfjs/` 那棵树，
+ * 见 `packages/renderer/vite-static-assets.ts`）。
+ * **一条实测补上的必要条件**（原判断"换成相对就两边都对"不完整）：纸面帧是 `sandbox=""` 的 srcdoc，
+ * 它**没有来源**，于是那条相对字体的请求是跨源取（`Origin: null`）并按 CORS 校验——
+ * 中间件不发 `Access-Control-Allow-Origin` 时相对路径照样 `NetworkError`（两处必须一起成立，见上面那个文件）。
+ * 装机那一半（`file://` 根 + `font-src 'self'`）本轮未取读数，见 spec 6.6-04 底下那条 `[!]`。
+ *
+ * **这一支目录名与渲染层构建侧写死的字面量必须一致**（构建侧引不到这里：vite 配置文件只内联相对 import，
+ * 而 `@auto-cc/shared` 的包入口在 node 下解析不了 `./print.js`），改动时两处一起改。
+ */
+export const PREVIEW_FONT_BASE = 'fonts';
 
 /**
  * `printToPDF` 的调用选项（本地结构类型，刻意不 import electron：本契约两端都不认识 Electron 类型）。

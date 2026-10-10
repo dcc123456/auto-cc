@@ -1407,6 +1407,78 @@ zh 19 / en 18 条改写，判据是"这句话有没有一个开发者标识符�
 真实鼠标那一腿（点「选择文件」看到系统面板真的弹出来）仍然**必须用户在场**——
 本轮窗口 `visibilityState` 已从 `hidden` 转成 `visible`，读数与画面按 §9 的 6.5-05 补窗口径取。
 
+### 3.25 补片（2026-10-10，裁定「先去痕 + 样式层另起一族」落地第一格：屏上边距与衬线随包）
+
+**这条补片不取代上面任何一节**（§4.5：号段与原判据原文一律保留），它登记的是新起的一族
+`6.6-01 … 6.6-05`（06 号段原最高 `6.5-07`，`6.6` 全仓 0 命中）与它的第一格到货。
+起因是 2026-10-10 的一条报障（「内置模板生成的简历太丑，要有合适的页边距，要支持文字颜色、文字背景色、
+段落样式、字体大小、字体样式」）。源码里查实的不是观感，是三条可读缺陷：
+
+1. **屏上那张纸根本没有边距**：`@page{margin}` 只对分页媒体生效，屏幕上是 0，而 `print-html.ts` 的 reset
+   写了 `body{margin:0}` ⇒ 屏上正文贴到纸边、导出的 PDF 却有 14/16mm。**人骂的是这两张纸不一样**。
+   修法只有一条合法形状：补 `@media screen{body{padding:<同一份 margin>}}` + `@media print{body{padding:0}}`，
+   来源仍是 `doc.layout.margin` 那一个对象；打印选项 `margins:{0,0,0,0}` + `preferCSSPageSize:true`
+   是 `print.test.ts:40,60-66` 钉着的"防双份边距"事实，一字不动。
+2. **11 套 `serif:true` 模板声称的字族随包里根本没有**：`print-css.ts` 的 `font-serif` 栈写着 `'Noto Serif SC'`，
+   `EMBEDDED_FONTS` 只有 Noto **Sans** SC ⇒ 拉丁走 Georgia/Times 正常、中文静默掉回系统衬线。
+   补的是随包四档（中文 400/700 + 拉丁 400/700，OFL，来源 `@fontsource/noto-serif-sc@5.3.0`，
+   条文与既有 `resources/fonts/OFL.txt` 逐字节相同故不新增全文），**不改那两条 utility 栈**：
+   Georgia/Times 在拉丁侧是有意选择。于是跨检查的判据是"这一条 utility 至少认领一个随包族名"，
+   不是"栈里每个名字都随包"（后者会把有意选择判成缺陷）。
+3. **屏上预览从来取不到随包字体**（本轮实测新发现，比前两条更根上）：纸面帧是
+   `ResumePaperStage.tsx:212` 那只 `<iframe sandbox="" srcDoc>`，而预览 HTML 的 `@font-face` src 吃的是
+   `resume.print` 端口给的**绝对 `file://`** ⇒ srcdoc 帧在 `http://127.0.0.1:5173` 这一侧取本地绝对路径
+   一律 `NetworkError`。**屏与产物两种字族**就是这么来的。
+
+**四条裁定（2026-10-10 人表态，全局 plan `tall-beacon-darter`）**：① 顺序先去痕（族一 `3.5-14…16`）
+再谈保真重建；② 保真判据 = 未改动区像素级一致 + 界面措辞如实（「按原样式重建，可逐处修改」，
+**不许**写「与原文完全一致」）；③ 样式粒度到"文档主题 + 段落样式"为止，**不做逐字段级**；
+④ 补衬线随包 + 修屏上边距，默认 14/16mm **不改**（改它要重钉 `print.test.ts:40` 与 3.3-03，
+且顶开 `editor-ops.ts:31-40` 的"缺省落在中值"不变量）。
+
+**两条被活体推翻的假设（写下来，别让下一个人再撞）**
+
+- 「预览取不到字体只是因为 src 写了绝对 `file://`」只对一半。换成相对 base
+  （`PREVIEW_FONT_BASE = 'fonts'`，进 `@auto-cc/shared`，与打印面那份绝对 base 分列两条事实、各自注明对方）
+  之后**仍然** `NetworkError`。真因是 `sandbox=""` 的 srcdoc **没有来源**，那条相对字体的请求于是是跨源取
+  （`Origin: null`）并按 CORS 校验，而渲染层的静态资源中间件不发 `Access-Control-Allow-Origin`。
+  补这一行后同一探针从 `ERR:NetworkError` 变成 `load → 1 条 / check → true`。
+  **没有**去动 `sandbox=""`：那正是 §8.1 要的"纸面里不许有脚本"，把它放宽成 `allow-same-origin`
+  等于把纸面接回渲染层来源——那是用安全底线换一个样式读数。
+- 「DOM 宽度能证明用的是谁家的字」不能。`张三` 在"带随包衬线"与"去掉那一格"两条栈下 DOM 宽度都是 52.5px
+  （Noto CJK 与 macOS 的中文回退都按 1em 走），advance 也同值。字形这一层只能画进 canvas 比像素
+  （raster hash 1378041559/5044 ↔ 1111970614/5117）。拉丁侧才可以用宽度（346.00 / 327.64 / 326.84）。
+  **口径教训**：6.5 那一族靠计算色与宽度读数判够了的画法，换到"字族"这一族就不够——判据要跟着被测的那一层重定。
+
+**一条被机检形状逼出来的写法**：`eslint.config.js:50-52` 那条禁 `style` 属性的 selector 只匹配
+`JSXAttribute`，而打印 HTML 不是 JSX——它是 L2 `resume-doc` 里主进程拼的字符串。所以文档级 `<style>` 块合法，
+`rz-*` 那一族（6.6-02）的 hex 才**只许**经 `buildPrintHtml` 落 `:root{--rz-*:…}`，
+模板片段仍禁 `<style>` / `style="`（`template.test.ts:193-199` 不变），并另加一条机检钉"hex 只出现在文档级块"。
+
+**复用而非新铺**：字体腿并进既有的 pdf.js 静态资源插件（`vite-pdfjs-assets.ts` → `vite-static-assets.ts`，
+一棵树 = 一个 `AssetTree`，中间件与 `closeBundle` 只有一份）。顺带把编辑器不再需要的 `resume.print`
+依赖拆掉（预览改吃相对 base 之后它只问 `resume.doc`）：删的是真死掉的注入与两只测试替身（§2.4），
+装配对账 `editor-link.test.ts` 同步收窄成只钉 `resume-doc` 那一行。
+
+**包体读数**：衬线四档 +3,101,944 B ≈ **+3.0MB**（全局 plan 里估的 +2.3MB 偏低，按实测改），
+`resources/fonts/` 整目录 5,340 KB。
+
+**仍欠（不装作做完）**
+
+- `[!]` **装机版那一半没量**：渲染层是 `file://` 页 + `font-src 'self'`，`sandbox=""` 帧里的相对字体
+  在 `file:` scheme 下能不能取到（Chromium 对 `file:` 的 CORS 判定与 `http` 不同）必须真打包一次装机才能证。
+  本轮只证到 dev。这一条同时挡着 6.6-04 的完全收口，所以那一行的 `[x]` 判的是 dev 腿 + 产物字节腿，
+  装机腿在 spec 表下面单独挂着。
+- `[ ]` 6.6-01 / 02（`layout.design` 与 `rz-*` 槽位）、6.6-05（`DeskSwatch` + `resume.editor.design` 桥接）。
+- 一条过程读数（不写成品质的，只写口径）：本轮中途全仓 `pnpm test` 红过一次，**与本片无关**——
+  脏区里 `packages/resume-kb/**` 正被另一个窗口改（`profile-service.ts` 的 `static inject` 已加
+  `resume.snapshot`/`resume.parse`，其测试 boot 还没跟上），表现为 `app['kb.profile'] === undefined` →
+  `TypeError: … reading 'sync'`，连带 `packages/main` 两份装配对账红。按 §9 的共享工作树口径
+  不修人家的红、不 `git add` 人家的文件；那一格跟上之后重跑，全仓 `TEST_EXIT=0`
+  （`resume-doc` 160 / `main` 85 / `resume-kb` 410）。
+  另记一条噪音：`pnpm -r test` 在 `packages/sessions` / `packages/browser` 打
+  `Cannot find module '<pkg>/install.js'`（electron 自带 postinstall 的解析问题），那两个包测试仍全绿。
+
 ## 4. 分片与落点
 
 | 片号 | 内容                                                                              | 文件                                                                  |

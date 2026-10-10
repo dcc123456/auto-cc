@@ -1,0 +1,74 @@
+spec 6.6-04｜衬线模板的中文随包 + 屏上预览终于取到随包字体 —— 活体读数（2026-10-10，本机 macOS arm64 / Electron 44.4.5 / dev 实例 CDP 10222）
+
+两条报障形状（都在 `docs/plans/06-ui-ink-desk/plan.md` 的补片里）：
+① 11 套 `serif:true` 模板的 `font-serif` 声称 `'Noto Serif SC'`，而 `EMBEDDED_FONTS` 只随包 Noto **Sans** SC
+   ⇒ 中文静默掉回系统衬线、拉丁正常，看起来像"这套模板没做完整"。
+② 屏上预览那只 srcdoc 帧里，`@font-face` 的 src 取不到任何一份随包字体 ⇒ 屏上永远是系统字，
+   只有导出的 PDF 才是内嵌字（屏与产物两张纸的字族不同）。
+
+────────────────────────────────────────────────────────────────────────────
+读数 A｜八档 @font-face 都在纸面帧里，且 src 是**相对**预览 base（探针 `tmp/66d-probe.js`，不入库）
+
+  Noto Sans SC  400 (整族)      <- fonts/noto-sans-sc-chinese-simplified-400-normal.woff2
+  Noto Sans SC  700 (整族)      <- fonts/noto-sans-sc-chinese-simplified-700-normal.woff2
+  Noto Sans SC  400 U+0-FF      <- fonts/noto-sans-sc-latin-400-normal.woff2
+  Noto Sans SC  700 U+0-FF      <- fonts/noto-sans-sc-latin-700-normal.woff2
+  Noto Serif SC 400 (整族)      <- fonts/noto-serif-sc-chinese-simplified-400-normal.woff2
+  Noto Serif SC 700 (整族)      <- fonts/noto-serif-sc-chinese-simplified-700-normal.woff2
+  Noto Serif SC 400 U+0-FF      <- fonts/noto-serif-sc-latin-400-normal.woff2
+  Noto Serif SC 700 U+0-FF      <- fonts/noto-serif-sc-latin-700-normal.woff2
+
+读数 B｜八档真的**装载成功**（`document.fonts.load` 的返回条数 + `FontFace.status`）
+
+  load("400 40px 'Noto Serif SC'", 中文串)  → 1 条
+  load("700 40px 'Noto Serif SC'", 中文串)  → 1 条
+  load("400 40px 'Noto Serif SC'", 拉丁串)  → 2 条（整族档 + U+0-FF 档）
+  load("400 40px 'Noto Sans SC'",  中文串)  → 1 条
+  document.fonts.check("400 14px 'Noto Serif SC'", '简历') → true
+  [...document.fonts].map(f => f.status)    → 7 条 loaded（第 8 条 Serif 700 当时未被任何文字要，unloaded）
+
+读数 C｜决定性一条：随包衬线**真的在画中文**（探针 `tmp/66h-probe.js`，不入库）
+  同一个 40px 字族栈只差 `'Noto Serif SC'` 一格，把同一串中文「张三后端工程师简历」画进 canvas 比像素：
+
+    带随包族：  raster hash 1378041559 / 有墨像素 5044 / advance 360
+    去掉随包族：raster hash 1111970614 / 有墨像素 5117 / advance 360
+
+  ⇒ 位图不同：那一格族名确实在管中文的字形，不是掉回系统衬线。
+  一条如实的读数口径：**advance 与 DOM 宽度量不出这件事**（`张三` 那只 h1 在两条栈下都是 52.5px，
+  因为 Noto CJK 与 macOS 的中文回退都按 1em 走）——所以这一条只能比像素，不能比宽度。
+  拉丁侧可宽度判据：`Engineer 0123 Ilw` 在 40px 下 Serif 346.00 / Sans 327.64 / 不存在的族 326.84。
+
+读数 D｜导出产物里嵌的是衬线子集（`resume.export.toPdf('resume-demo','legal-navy','zh-CN')`）
+
+  回执：{ pages: 1, bytes: 57398, path: tmp/v6-userdata/exports/resume-demo-legal-navy.pdf }
+  产物里的字体程序名（`strings <pdf> | grep Noto`）：
+    NotoSerifSCExtraLight-Regular ×3
+    NotoSerifSCExtraLight-Bold    ×3
+  同一份文档换无衬线模板（modern）作对照：
+    NotoSansSCThin-Regular ×6 / NotoSansSCThin-Bold ×6，bytes 30610
+  ⇒ 打印面确实把随包衬线打了进去（Chromium 的 subset 命名带 ExtraLight 字样，装的是我们给的 400/700 两档）。
+  产物只落 `tmp/v6-userdata/exports/`（§7.5：不进仓库）。
+
+读数 E｜包体成本（照 spec 3.4-08 的写法记一条实际数）
+
+  新增四只 woff2：中文 400 = 1,507,260 B、中文 700 = 1,557,548 B、拉丁 400 = 18,540 B、拉丁 700 = 18,596 B
+  ⇒ 衬线这一族 +3,101,944 B ≈ **+3.0 MB**（计划里估的 +2.3MB 偏低，按实测写）。
+  `resources/fonts/` 整目录 5,340 KB（八档 5,123,160 B + `OFL.txt`）。
+  许可证：`OFL.txt` 与 `@fontsource/noto-serif-sc@5.3.0` 包内 LICENSE 逐字节相同
+  （md5 4538a5afdd18ccebd224405ffe3dee4b），故不新增许可证全文，只在 `LICENSES.md` 记一行来源与条文同一性。
+
+画面：`6.6-04-paper-sans-contrast.png`（无衬线模板，与 `6.6-03-screen-margin-serif-paper.png` 的衬线纸面对照；
+两张 md5 互异：46b79409d6ee5377a0273d607cc193b2 / 553c3d4ba5f0422651c965d1a53227b1）。
+
+────────────────────────────────────────────────────────────────────────────
+本轮被活体推翻的一条假设（写进 plan 补片）
+
+原判断「预览取不到字体只是因为 src 写了绝对 `file://`」只对了一半。换成相对 base 之后仍然
+`NetworkError`，真因是纸面帧是 `sandbox=""` 的 srcdoc ⇒ **它没有来源**，于是那条相对字体的请求是
+跨源取（`Origin: null`）并按 CORS 校验，而渲染层的静态资源中间件不发 `Access-Control-Allow-Origin`。
+补上这一行后同一探针从 `ERR:NetworkError` 变成 `load → 1 条 / check → true`（读数 B）。
+这两棵树（pdf.js 资源与随包字体）都是随包的公开静态文件，`*` 不外泄任何东西。
+
+本机证不了的一条（如实 `[!]`，不推测）：装机版渲染层是 `file://` 页 + `font-src 'self'`，
+`sandbox=""` 帧里的相对字体在 `file:` scheme 下能不能取到（Chromium 对 `file:` 的 CORS 判定与 `http` 不同），
+必须真打包一次装机才能量——本轮没有做装机验证，只证到 dev。

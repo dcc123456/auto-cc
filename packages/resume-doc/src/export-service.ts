@@ -10,7 +10,7 @@
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
-import type { ResumePrintPort, ResumeTemplateSummaryView } from '@auto-cc/shared';
+import { PREVIEW_FONT_BASE, type ResumePrintPort, type ResumeTemplateSummaryView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -250,6 +250,10 @@ export class ResumeExportService extends Service {
 
   /**
    * 渲染预览 HTML——与 {@link toPdf} 用的是**同一份**打印 HTML 源（3.3-01「预览即导出所见」）。
+   *
+   * 只有字体 base 的形状不同，而且这一支**必须是相对路径**：这份 HTML 落到渲染层的 `about:srcdoc` 纸面帧里，
+   * 开发态那一面是 http 页，取 `file://` 字体会被 Chromium 挡掉（屏上永远掉回系统字体，见 spec 6.6-04）；
+   * `toPdf` 那一面由执行器经临时 `file://` 文档装载，只有绝对同源 URL 才读得到本地字体，所以它仍走 `fontBaseUrl()`。
    * @param docId 文档 id
    * @param templateId 模板 id（未知由模板层抛可读错）
    * @param locale 语言，默认 `zh-CN`
@@ -257,7 +261,7 @@ export class ResumeExportService extends Service {
    */
   preview = (docId: string, templateId?: string, locale: TemplateLocale = 'zh-CN'): string => {
     const doc = this.requireDoc(docId);
-    return resumePrint.buildHtml(doc, this.resolveTemplateId(templateId), locale, this.printPort.fontBaseUrl());
+    return resumePrint.buildHtml(doc, this.resolveTemplateId(templateId), locale, PREVIEW_FONT_BASE);
   };
 
   /**

@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LAYOUT, makeField, RESUME_SCHEMA_VERSION, resumePrint, type ResumeDocument } from './index.js';
+import { PRINT_STYLESHEET } from './internal/print-css.js';
 
 const FONT_BASE = 'file:///app/resources/fonts';
 
@@ -66,10 +67,25 @@ describe('3.3-03 打印选项与版式全部取自模型，不散落魔法数', 
       margins: { top: 0, bottom: 0, left: 0, right: 0 },
     });
   });
+
+  it('6.6-03 屏幕上的那一份自己吃下同一份边距，打印那一支显式归零（屏上贴纸边而产物有边是两条纸）', () => {
+    const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
+    expect(html).toContain('@media screen{body{padding:14mm 16mm 14mm 16mm;}}');
+    expect(html).toContain('@media print{body{padding:0;}}');
+  });
+
+  it('6.6-03 屏上边距与 @page 同源：改模型 margin 两处一起变，不出现第二个数', () => {
+    const custom = doc({
+      layout: { ...DEFAULT_LAYOUT, margin: { topMm: 20, rightMm: 8, bottomMm: 20, leftMm: 8 } },
+    });
+    const { html } = resumePrint.toRequest(custom, 'classic', 'zh-CN', FONT_BASE);
+    expect(html).toContain('@page{size:A4;margin:20mm 8mm 20mm 8mm;}');
+    expect(html).toContain('@media screen{body{padding:20mm 8mm 20mm 8mm;}}');
+  });
 });
 
 describe('3.3-05 随包内嵌字体在打印 HTML 里被声明', () => {
-  it('四只 woff2（中文 400/700 + 拉丁 400/700）都以 base URL 拼接进 @font-face', () => {
+  it('正体那四只 woff2（中文 400/700 + 拉丁 400/700）都以 base URL 拼接进 @font-face', () => {
     const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
     for (const file of [
       'noto-sans-sc-chinese-simplified-400-normal.woff2',
@@ -86,6 +102,42 @@ describe('3.3-05 随包内嵌字体在打印 HTML 里被声明', () => {
 
   it('未知模板 id 直接抛可读错，不在打印层吞掉', () => {
     expect(() => resumePrint.buildHtml(doc(), 'ghost', 'zh-CN', FONT_BASE)).toThrow(/未知模板/);
+  });
+
+  it('6.6-04 衬线档以自己的族名声明：11 套 serif 模板的中文不再静默掉回系统衬线', () => {
+    const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
+    for (const file of [
+      'noto-serif-sc-chinese-simplified-400-normal.woff2',
+      'noto-serif-sc-chinese-simplified-700-normal.woff2',
+      'noto-serif-sc-latin-400-normal.woff2',
+      'noto-serif-sc-latin-700-normal.woff2',
+    ]) {
+      expect(html).toContain(`${FONT_BASE}/${file}`);
+    }
+    // 中文主体档不带 unicode-range、拉丁档带：两族各自的四档都是这个形状。
+    for (const face of [
+      "@font-face{font-family:'Noto Serif SC';font-weight:700;font-style:normal;src:",
+      "@font-face{font-family:'Noto Serif SC';font-weight:400;font-style:normal;unicode-range:U+0000-00FF;src:",
+    ]) {
+      expect(html).toContain(face);
+    }
+  });
+
+  it('6.6-04 样式表里 font-sans / font-serif 各自认领一个随包族名（拼错一个就静默掉回系统字体）', () => {
+    const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
+    const declared = new Set([...html.matchAll(/@font-face\{font-family:'([^']+)'/g)].map((face) => face[1]));
+    expect([...declared]).toEqual(['Noto Sans SC', 'Noto Serif SC']);
+    // 系统字体（Georgia / Times New Roman）留在字族栈里是**有意的**：拉丁走它们，中文只认随包那一族。
+    // 所以判据不是"栈里每个名字都随包"，而是"这一条 utility 里有一个名字随包"——否则衬线模板的中文就没人认领了，
+    // 而那正是这条报障里「这套模板看起来没做完整」的来源（spec 6.6-04）。
+    expect(PRINT_STYLESHEET).toMatch(/font-sans\{font-family:[^}]*Noto Sans SC[^}]*\}/);
+    expect(PRINT_STYLESHEET).toMatch(/font-serif\{font-family:[^}]*Noto Serif SC[^}]*\}/);
+  });
+
+  it('字体集标识含两族八档，快照据此认得出是哪一份字体产的产物', () => {
+    expect(resumePrint.fontSet).toContain('Noto Sans SC');
+    expect(resumePrint.fontSet).toContain('Noto Serif SC');
+    expect(resumePrint.fontSet.split(',')).toHaveLength(8);
   });
 
   it('同一 doc+模板+语言两次装配逐字节一致（不读时钟/随机）', () => {

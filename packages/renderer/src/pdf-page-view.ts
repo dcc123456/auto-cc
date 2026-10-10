@@ -11,7 +11,7 @@
  * ① worker 必须是**同源的真文件**——装机页是 `file://` 且 `script-src 'self'`（`scripts/build.ts` 的
  *    `RENDERER_CSP`），vite 的 `?worker&inline` 产出的 `blob:` worker 会被 CSP 挡掉，回退成主线程 fake worker；
  * ② worker 里的 `import()` 与 cmaps / 标准字体 / wasm 的 `fetch` 也全部按 `document.baseURI` 相对解析，
- *    所以这四类资源必须由 `vite-pdfjs-assets.ts` 原样搬进渲染层根目录下的 `pdfjs/` 树（两种运行态同一条路径）。
+ *    所以这四类资源必须由 `vite-static-assets.ts` 原样搬进渲染层根目录下的 `pdfjs/` 树（两种运行态同一条路径）。
  */
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
