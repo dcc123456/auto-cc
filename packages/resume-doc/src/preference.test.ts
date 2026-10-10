@@ -18,6 +18,7 @@ import { RESUME_PREFERENCE_MIGRATION_VERSION, ResumeDocService } from './doc-sto
 import { ResumeExportService } from './export-service.js';
 import { DEFAULT_LAYOUT, makeField, RESUME_SCHEMA_VERSION, type ResumeDocument } from './model.js';
 import { ResumeSnapshotService } from './snapshot-store.js';
+import { resumeTemplate } from './template.js';
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
@@ -127,6 +128,23 @@ describe('界面偏好（默认模板）', () => {
     const list = exports.templates();
     expect(list.length).toBeGreaterThanOrEqual(50);
     expect(list.every((item) => item.id !== '' && item.name !== '')).toBe(true);
+  });
+
+  it('模板摘要把七条版式轴一字不差地带出去，且一条不多（spec 6.4-09 的 U 半边）', async () => {
+    const { exports } = await boot();
+    // 这七条是界面画"版式骨架"唯一需要的东西：小图必须来自渲染真正吃的那份轴，不能另抄一份（§2.5）。
+    const shelfAxes = ['columns', 'accent', 'header', 'heading', 'entry', 'density', 'serif'] as const;
+    for (const item of exports.templates()) {
+      const registered = resumeTemplate.get(item.id);
+      expect(registered, `注册表里没有 ${item.id}`).not.toBeNull();
+      for (const axis of shelfAxes) {
+        // 逐条对表：投影写错一根（比如把 heading 误成 header）或某套缺轴都在这里红，而不是到界面上才看出来。
+        expect(item.layout[axis], `${item.id} 的 ${axis}`).toBe(registered?.spec[axis]);
+      }
+      // 其余六条轴（nameSize 的 `'[28px]'` 档名、contactSep、entryDivider、plainGrid…）不许搭这趟车：
+      // 它们是 Tailwind class 片段，递进渲染层只会诱导出动态拼 class——那种名字编译不进产物。
+      expect(Object.keys(item.layout).sort()).toEqual([...shelfAxes].sort());
+    }
   });
 
   it('不给 templateId 的预览按人设定的模板渲，换一套就换一份 HTML（spec 3.2-02 的版面差异在导出链上成立）', async () => {

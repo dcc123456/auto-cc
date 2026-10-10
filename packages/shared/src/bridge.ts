@@ -1091,10 +1091,59 @@ export type DevtoolsStatusView = {
   targets: DevtoolsTargetView[];
 };
 
-/** 一套模板在界面上的摘要（镜像 `resume.export.templates` 的返回：只过 id 与展示名）。 */
+/**
+ * 一套模板的**版式骨架**读数（镜像 `resume-doc` 的 `TemplateSpec` 里那七条画得出几何的轴，
+ * 声明现场在 `packages/resume-doc/src/internal/template-kit.ts`）。
+ *
+ * 为什么在 `shared` 另写一份字面量联合而不是 import 领域类型：包边界禁止 L1 依赖 L2（§4.1），
+ * 而两侧的一致由**接缝处的返回类型标注**保证——`resume.export` 的 `templates()` 一旦产出这份视图类型，
+ * 领域里新增一个轴值而这里没跟上就会 typecheck 失败（与 `toPrintRequest(): ResumePrintRequest` 同一口径）。
+ *
+ * 为什么**只**过这七条：界面拿它们画的是示意骨架，不是成品（spec 6.4-09）。剩下的轴
+ * （`nameSize` 的 `'[28px]'` 档名、`contactSep`、`entryDivider`、`plainGrid`）是 Tailwind class 片段或
+ * 渲染细节，递到渲染层只会诱导出动态拼 class 的写法——那种名字 Tailwind v4 扫不到、编译不进产物，
+ * 界面会静默失去样式（AGENTS.md §9 的实测教训）。
+ */
+export interface ResumeTemplateLayoutView {
+  /** 栏数：1 = 通栏，2 = 主栏 + 侧栏 */
+  columns: 1 | 2;
+  /** 强调色族（骨架小图按它涂一条色带） */
+  accent:
+    | 'neutral'
+    | 'slate'
+    | 'stone'
+    | 'zinc'
+    | 'gray'
+    | 'sky'
+    | 'teal'
+    | 'emerald'
+    | 'amber'
+    | 'rose'
+    | 'violet'
+    | 'indigo'
+    | 'red'
+    | 'blue'
+    | 'green';
+  /** 抬头摆法 */
+  header: 'center' | 'left' | 'right' | 'split' | 'banner' | 'boxed' | 'stacked' | 'ruleUnder';
+  /** 区块标题画法 */
+  heading: 'rule' | 'doubleRule' | 'bar' | 'block' | 'wide' | 'numbered' | 'leftBorder' | 'pill' | 'underlineShort';
+  /** 条目行结构：两端同行还是上下叠放 */
+  entry: 'split' | 'stack';
+  /** 密度档 */
+  density: 'compact' | 'normal' | 'roomy';
+  /** 姓名与联系方式是否用衬线族 */
+  serif: boolean;
+}
+
+/**
+ * 一套模板在界面上的摘要（镜像 `resume.export.templates` 的返回）：
+ * id 与展示名之外还带**版式骨架的七条轴**（spec 6.4-09），模板架据此画小图，界面不自己抄一份轴表（§2.5）。
+ */
 export interface ResumeTemplateSummaryView {
   id: string;
   name: string;
+  layout: ResumeTemplateLayoutView;
 }
 
 /**

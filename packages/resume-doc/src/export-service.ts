@@ -10,7 +10,7 @@
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { ConfigService } from '@auto-cc/plugin-config';
-import type { ResumePrintPort } from '@auto-cc/shared';
+import type { ResumePrintPort, ResumeTemplateSummaryView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -94,11 +94,27 @@ export class ResumeExportService extends Service {
    * @returns 种子文档的 id 与落库后的内容 hash
    */
   /**
-   * 列出可给界面摆的模板（id + 展示名）：模板选择器唯一的数据源，界面不自己抄一份清单（§2.5）。
+   * 列出可给界面摆的模板（id + 展示名 + 版式骨架的七条轴）：模板架唯一的数据源，
+   * 界面不自己抄一份清单、也不自己猜一份轴表（§2.5 / spec 6.4-09）。
+   *
+   * 轴取自注册表里那一份 `spec`——它就是 `renderWithSpec` 渲染时真正吃的对象，
+   * 所以小图与产物之间不存在"改了轴、忘了小图"的窗口。
    * @returns 按注册次序的模板摘要
    */
-  templates = (): { id: string; name: string }[] =>
-    resumeTemplate.list().map((template) => ({ id: template.id, name: template.name }));
+  templates = (): ResumeTemplateSummaryView[] =>
+    resumeTemplate.list().map((template) => ({
+      id: template.id,
+      name: template.name,
+      layout: {
+        columns: template.spec.columns,
+        accent: template.spec.accent,
+        header: template.spec.header,
+        heading: template.spec.heading,
+        entry: template.spec.entry,
+        density: template.spec.density,
+        serif: template.spec.serif,
+      },
+    }));
 
   /**
    * 读人设定的默认模板 id（spec 3.2-03 的「用户可设置用哪套生成」那半边的存储出口）。

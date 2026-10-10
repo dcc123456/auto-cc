@@ -67,10 +67,12 @@ export {
 export {
   resumeTemplate,
   TemplateBindingError,
+  type ResumeTemplate,
   type Template,
   type TemplateContext,
   type TemplateLocale,
   type TemplateOrigin,
+  type TemplateSpec,
 } from './template.js';
 export { resumePrint, type PdfInspection, type ResumePrintOptions, type ResumePrintRequest } from './print.js';
 export {

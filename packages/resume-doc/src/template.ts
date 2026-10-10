@@ -9,21 +9,23 @@
  * 版面度量落地与打印分页在 3.3，不在模板里。
  */
 import type { ResumeDocument } from './model.js';
-import type { Template, TemplateContext, TemplateLocale } from './internal/bind.js';
+import type { TemplateContext, TemplateLocale } from './internal/bind.js';
+import type { ResumeTemplate } from './internal/template-kit.js';
 import { BUILTIN_TEMPLATES } from './internal/templates.js';
 
 export type { Template, TemplateContext, TemplateLocale, TemplateOrigin } from './internal/bind.js';
+export type { ResumeTemplate, TemplateSpec } from './internal/template-kit.js';
 export { TemplateBindingError } from './internal/bind.js';
 
 /** 运行期注册表；新增内置模板只改这张表的数据，不改下面的方法。 */
-const registry = new Map<string, Template>();
+const registry = new Map<string, ResumeTemplate>();
 for (const template of BUILTIN_TEMPLATES) registry.set(template.id, template);
 
 /**
  * 列出全部可用模板（SPI 之一）。
- * @returns 模板数组（含 id / name / origin / render）
+ * @returns 模板数组（含 id / name / origin / spec / render）
  */
-export function list(): Template[] {
+export function list(): ResumeTemplate[] {
   return [...registry.values()];
 }
 
@@ -32,16 +34,18 @@ export function list(): Template[] {
  * @param id 模板 id
  * @returns 命中的模板；不存在返回 null（调用方据此提示，不抛裸异常）
  */
-export function get(id: string): Template | null {
+export function get(id: string): ResumeTemplate | null {
   return registry.get(id) ?? null;
 }
 
 /**
  * 注册一套模板（运行期扩展位，佐证 3.2-03「新增不改核心」）。
- * @param template 合法 Template 对象
+ *
+ * 契约要求带 `spec`：一套模板若不在注册现场交代自己的版面取值，界面就只能靠猜画骨架（spec 6.4-09）。
+ * @param template 合法 ResumeTemplate 对象（契约 + 轴取值）
  * @throws 同 id 已存在时抛错，避免静默覆盖
  */
-export function register(template: Template): void {
+export function register(template: ResumeTemplate): void {
   if (registry.has(template.id)) {
     throw new Error(`模板 id 重复：${template.id}`);
   }

@@ -16,6 +16,7 @@ import {
   fieldLabel,
   sectionLabel,
   toEntryView,
+  type Template,
   type TemplateContext,
   type TemplateLocale,
 } from './bind.js';
@@ -73,6 +74,19 @@ export interface TemplateSpec {
   entryDivider: boolean;
   /** 技能/简介那类无标题区块的正文是否走两栏网格 */
   plainGrid: boolean;
+}
+
+/**
+ * 注册表里实际存的形状：`Template` 契约 + 这一套自己的轴取值。
+ *
+ * 为什么要把 `spec` 挂上契约（而不是让预设表自己留着）：界面要按版式骨架画缩略图（spec 6.4-09），
+ * 而骨架的**唯一**依据就是渲染时真正生效的那份轴——它只存在于这里。摘要层再抄一份轴表就是
+ * 第二份事实（§2.5），改一条轴时界面上的小图会先于产物骗人。
+ * `bind.ts` 的 `Template` 保持最小（只讲"怎么渲"），因为运行期扩展位不该被迫懂版面词汇。
+ */
+export interface ResumeTemplate extends Template {
+  /** 这套模板的版面取值：`renderWithSpec` 吃的就是它，界面画骨架读的也是它。 */
+  readonly spec: TemplateSpec;
 }
 
 /** 侧栏收纳的区块种类（双栏模板把这三类摆到窄栏；其余进主栏）。 */

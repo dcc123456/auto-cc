@@ -13,12 +13,13 @@
  * 模板里不出现字符串截断 / 日期或数字推断 / 事实新造（3.2-05），不写 `<style>` 或 `style="`（3.2-07）。
  */
 import type { ResumeDocument } from '../model.js';
-import type { Template, TemplateContext } from './bind.js';
+import type { TemplateContext } from './bind.js';
 import {
   renderWithSpec,
   type AccentHue,
   type HeaderVariant,
   type HeadingVariant,
+  type ResumeTemplate,
   type TemplateSpec,
 } from './template-kit.js';
 
@@ -40,18 +41,19 @@ const DEFAULTS: TemplateSpec = {
 };
 
 /**
- * 造一套模板（把一行预设数据装成 `Template` 契约）。
+ * 造一套模板（把一行预设数据装成注册表契约：契约 + 这一套真正生效的轴）。
  * @param id 模板 id（kebab-case，进产物文件名与快照行，一经发布不复用不改写）
- * @param name 界面展示名（中文，供模板选择器摆）
+ * @param name 界面展示名（中文，供模板架摆）
  * @param overrides 该套模板偏离缺省的版面取值
- * @returns 合法 Template 对象
+ * @returns 合法 ResumeTemplate 对象
  */
-function preset(id: string, name: string, overrides: Partial<TemplateSpec>): Template {
+function preset(id: string, name: string, overrides: Partial<TemplateSpec>): ResumeTemplate {
   const spec: TemplateSpec = { ...DEFAULTS, ...overrides };
   return {
     id,
     name,
     origin: 'clean-room-rewrite',
+    spec,
     render(doc: ResumeDocument, ctx: TemplateContext): string {
       return renderWithSpec(doc, ctx, spec, id);
     },
@@ -66,7 +68,7 @@ const row = (
   header: HeaderVariant,
   heading: HeadingVariant,
   extra: Partial<TemplateSpec> = {},
-): Template => preset(id, name, { accent, header, heading, ...extra });
+): ResumeTemplate => preset(id, name, { accent, header, heading, ...extra });
 
 /**
  * 50 套内置模板。
@@ -76,7 +78,7 @@ const row = (
  * 其余 47 套按「求职者一眼能分辨」的版面类型铺开：单栏通投、双栏侧条、色块抬头、细线学术、
  * 大字创意、徽章技能、编号区块等，每套至少在两条轴上与相邻行不同。
  */
-export const BUILTIN_TEMPLATES: Template[] = [
+export const BUILTIN_TEMPLATES: ResumeTemplate[] = [
   // —— 3.2 原三套（id 冻结）——
   row('classic', '经典单栏', 'neutral', 'center', 'rule', { serif: true, nameSize: '2xl', entry: 'split' }),
   row('modern', '现代双列强调', 'sky', 'ruleUnder', 'leftBorder', { columns: 2, entry: 'split' }),

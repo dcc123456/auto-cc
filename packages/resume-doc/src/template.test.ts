@@ -12,8 +12,8 @@ import {
   resumeTemplate,
   TemplateBindingError,
   type ResumeDocument,
+  type ResumeTemplate,
   type Section,
-  type Template,
 } from './index.js';
 import { bindField, escapeHtml, fieldLabel, sectionLabel } from './internal/bind.js';
 
@@ -93,10 +93,26 @@ describe('3.2-03 SPI：list / get / render，新增模板不改核心', () => {
   });
 
   it('运行期 register 一套新模板后 list 立即含它、render 可用——list/get/render 源码未改', () => {
-    const smoke: Template = {
+    const smoke: ResumeTemplate = {
       id: 'smoke-新增',
       name: '冒烟',
       origin: 'clean-room-rewrite',
+      // 契约要求现场交代版面取值：注册表里那一份 `spec` 同时是渲染实参与界面骨架小图的唯一依据（spec 6.4-09）。
+      spec: {
+        columns: 2,
+        accent: 'teal',
+        header: 'boxed',
+        heading: 'pill',
+        entry: 'split',
+        density: 'compact',
+        serif: true,
+        nameSize: '4xl',
+        nameWeight: 'black',
+        nameCaps: true,
+        contactSep: ' | ',
+        entryDivider: true,
+        plainGrid: true,
+      },
       render: (d: ResumeDocument, ctx) => `<i data-locale="${ctx.locale}">${d.profile.name}</i>`,
     };
     resumeTemplate.register(smoke);
