@@ -18,7 +18,13 @@ import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import { PREVIEW_FONT_BASE } from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ResumeDocService } from './doc-store.js';
-import { EDITOR_METRIC_BOUNDS, type EditorOutcome, type MetricBound, type MetricKey } from './editor-ops.js';
+import {
+  EDITOR_METRIC_BOUNDS,
+  type DesignPatch,
+  type EditorOutcome,
+  type MetricBound,
+  type MetricKey,
+} from './editor-ops.js';
 import { createResumeEditorSession, type ResumeEditorSession } from './editor-session.js';
 import type { Layout, ResumeDocument, SectionKind } from './model.js';
 import { resumePrint } from './print.js';
@@ -169,6 +175,18 @@ export class ResumeEditorService extends Service {
    */
   metric = (docId: string, key: MetricKey, value: number): ResumeEditorState =>
     this.afterEdit(docId, this.require(docId).setMetric(key, value));
+
+  /**
+   * 改一次样式（spec 6.6-05）：文档主题三色、正文三轴、某一类区块的六条段落轴。
+   * **一次调用 = 一个撤销单元**（弹窗里"整格保存"是一次调用，不是六次），形状与界的判定全在
+   * `editor-ops.ts` 那一份，本文件只把拒绝项翻成 `AppError`（与 `metric` 同一条通道）。
+   * @param docId 文档 id
+   * @param patch 结构化补丁（同一格给 `null` 就是取消它，回到模板默认档）
+   * @returns 新的会话投影（`layout.design` 就是补丁之后的形状）
+   * @throws AppError(`RESUME_EDITOR_NOT_OPEN` / `RESUME_EDITOR_EDIT_REJECTED`)
+   */
+  design = (docId: string, patch: DesignPatch): ResumeEditorState =>
+    this.afterEdit(docId, this.require(docId).setDesign(patch));
 
   /**
    * 换预览模板或语言（3.6-04）。它**不碰文档**，所以不产生撤销单元。

@@ -2,7 +2,14 @@
  * 编辑器纯操作的用例（spec 3.6-01 的落点数学半边 + 3.6-02 的 U 半边，plan §8.4 的 3.6-a 那一格）。
  */
 import { describe, expect, it } from 'vitest';
-import { EDITOR_METRIC_BOUNDS, planEntryMove, planMetric, planSectionMove, type MetricKey } from './editor-ops.js';
+import {
+  EDITOR_METRIC_BOUNDS,
+  planDesign,
+  planEntryMove,
+  planMetric,
+  planSectionMove,
+  type MetricKey,
+} from './editor-ops.js';
 import { DEFAULT_LAYOUT, makeField, type Layout, type Section } from './model.js';
 
 /** 造一个区块（三个区块的用例里只有 id 与标题不同）。 */
@@ -116,5 +123,129 @@ describe('3.6-01 条目落点数学（作用域限在所属区块内）', () => 
     expect(planEntryMove(sections, 'zz', 'e1', 0)).toMatchObject({ ok: false, code: 'unknown-section' });
     // 单条目区块里唯一的落点就是原地，越界的那一侧仍然是 index-out-of-range。
     expect(planEntryMove(sections, 'edu', 'e4', 1)).toMatchObject({ ok: false, code: 'index-out-of-range' });
+  });
+});
+
+describe('6.6-05 样式补丁的判定半边（颜色形状、档位、数值界与"取消那一格"）', () => {
+  /** 一份带主题的版面：主题两色 + 正文两轴 + experience 的两条段落轴，用来验证补丁是"改而不是换"。 */
+  const styled = (): Layout => {
+    const first = planDesign(DEFAULT_LAYOUT, {
+      inkHex: '#0b5c50',
+      accentHex: '#a31621',
+      body: { fontFamily: 'serif', sizePt: 11 },
+      paragraph: { kind: 'experience', align: 'justify', inkHex: '#101820' },
+    });
+    if (!first.ok) throw new Error('前置补丁应当放行');
+    return first.value;
+  };
+
+  it('合法补丁只动 design，度量与纸张一字不改', () => {
+    const result = planDesign(DEFAULT_LAYOUT, {
+      paperHex: '#f7f5f2',
+      body: { weight: 'medium' },
+      paragraph: { kind: 'skills', sizePt: 9 },
+    });
+    if (!result.ok) throw new Error('应当放行');
+    expect(result.value.design).toMatchObject({
+      paperHex: '#f7f5f2',
+      body: { weight: 'medium' },
+      paragraphs: { skills: { sizePt: 9 } },
+    });
+    expect(result.value.baseFontPt).toBe(DEFAULT_LAYOUT.baseFontPt);
+    expect(result.value.margin).toEqual(DEFAULT_LAYOUT.margin);
+    expect(result.value.pageSize).toBe(DEFAULT_LAYOUT.pageSize);
+    expect(result.value.columns).toBe(DEFAULT_LAYOUT.columns);
+  });
+
+  it('补丁是"改"：已有的每一格都沿用，只覆盖给到的那几格', () => {
+    const result = planDesign(styled(), { inkHex: '#aa0000' });
+    if (!result.ok) throw new Error('应当放行');
+    expect(result.value.design).toMatchObject({
+      inkHex: '#aa0000',
+      accentHex: '#a31621',
+      body: { fontFamily: 'serif', sizePt: 11 },
+      paragraphs: { experience: { align: 'justify', inkHex: '#101820' } },
+    });
+  });
+
+  it('空补丁不落空壳：`design` 这一格要么不存在、要么原样', () => {
+    const bare = planDesign(DEFAULT_LAYOUT, {});
+    if (!bare.ok) throw new Error('应当放行');
+    // `'design' in layout` 必须是 false：留一个 `{}` 会让"从没设过主题"与"设过又清空"在产物里分不开。
+    expect('design' in bare.value).toBe(false);
+    const kept = planDesign(styled(), {});
+    if (!kept.ok) throw new Error('应当放行');
+    expect(kept.value.design).toEqual(styled().design);
+  });
+
+  it('取消到只剩一格时只留那一格，取消到一无所有时整格消失', () => {
+    const cleared = planDesign(styled(), {
+      inkHex: null,
+      paperHex: null,
+      accentHex: null,
+      body: null,
+      paragraph: {
+        kind: 'experience',
+        sizePt: null,
+        weight: null,
+        align: null,
+        lineHeight: null,
+        inkHex: null,
+        backdropHex: null,
+      },
+    });
+    if (!cleared.ok) throw new Error('应当放行');
+    expect('design' in cleared.value).toBe(false);
+
+    // 只留 accentHex 那一格：`body` 整组取消、`paragraph` 那一类整格消失，都不该留下 `{}` 空壳。
+    const oneLeft = planDesign(styled(), {
+      inkHex: null,
+      paperHex: null,
+      body: null,
+      paragraph: { kind: 'experience', align: null, inkHex: null },
+    });
+    if (!oneLeft.ok) throw new Error('应当放行');
+    expect(oneLeft.value.design).toEqual({ accentHex: '#a31621' });
+  });
+
+  it('坏颜色、坏档位、坏种类与界外数值各给一条确定的拒绝码，都不抛异常', () => {
+    for (const bad of ['#12345', 'red', '#GGHHII', '#0f172a ', '']) {
+      const rejected = planDesign(DEFAULT_LAYOUT, { inkHex: bad });
+      expect(rejected.ok, `颜色 ${JSON.stringify(bad)} 不该放行`).toBe(false);
+      if (rejected.ok) continue;
+      expect(rejected.code).toBe('bad-color');
+      // 轴名要在理由里：界面得把话说到哪一格，而不是笼统报"颜色不对"。
+      expect(rejected.detail).toContain('inkHex');
+    }
+    expect(planDesign(DEFAULT_LAYOUT, { body: { weight: 'heavy' as never } })).toMatchObject({
+      ok: false,
+      code: 'bad-token',
+    });
+    expect(
+      planDesign(DEFAULT_LAYOUT, { paragraph: { kind: 'awards' as never, align: 'middle' as never } }),
+    ).toMatchObject({ ok: false, code: 'unknown-kind' });
+    expect(planDesign(DEFAULT_LAYOUT, { paragraph: { kind: 'skills', align: 'middle' as never } })).toMatchObject({
+      ok: false,
+      code: 'bad-token',
+    });
+    // 段落字号沿用度量那一档界（6…24），行距沿用 1…3——同一张界表，不另立第二个数（§2.5）。
+    expect(planDesign(DEFAULT_LAYOUT, { body: { sizePt: 30 } })).toMatchObject({ ok: false, code: 'out-of-bounds' });
+    expect(planDesign(DEFAULT_LAYOUT, { paragraph: { kind: 'skills', lineHeight: 4 } })).toMatchObject({
+      ok: false,
+      code: 'out-of-bounds',
+    });
+    expect(planDesign(DEFAULT_LAYOUT, { paragraph: { kind: 'skills', sizePt: Number.NaN } })).toMatchObject({
+      ok: false,
+      code: 'not-a-number',
+    });
+  });
+
+  it('一类区块的六条轴全被取消时那一格整格消失，别的种类原样带着', () => {
+    const two = planDesign(styled(), { paragraph: { kind: 'project', backdropHex: '#f7f5f2' } });
+    if (!two.ok) throw new Error('应当放行');
+    expect(Object.keys(two.value.design?.paragraphs ?? {})).toEqual(['experience', 'project']);
+    const dropped = planDesign(two.value, { paragraph: { kind: 'project', backdropHex: null } });
+    if (!dropped.ok) throw new Error('应当放行');
+    expect(Object.keys(dropped.value.design?.paragraphs ?? {})).toEqual(['experience']);
   });
 });

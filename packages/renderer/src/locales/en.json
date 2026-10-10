@@ -680,6 +680,52 @@
           "mm": "mm",
           "ratio": "×"
         },
+        "theme": "Text & colour",
+        "themeHint": "This family only changes styling — colours, sizes, fonts, paragraphs. Not one word of the content moves. Every slot you leave alone keeps following the template.",
+        "design": "Change styling",
+        "designDone": "{{axis}} set",
+        "axes": {
+          "preset": "Preset",
+          "inkHex": "Body colour",
+          "paperHex": "Paper colour",
+          "accentHex": "Accent colour",
+          "bodyFontFamily": "Body font",
+          "bodyWeight": "Body weight",
+          "bodySizePt": "Body size",
+          "paragraphSizePt": "Section size",
+          "paragraphLineHeight": "Section line height",
+          "paragraphWeight": "Section weight",
+          "paragraphAlign": "Section alignment",
+          "paragraphInkHex": "Section colour",
+          "paragraphBackdropHex": "Section highlight"
+        },
+        "preset": {
+          "default": "Back to default",
+          "ink": "Ink",
+          "jade": "Jade",
+          "seal": "Seal"
+        },
+        "family": {
+          "sans": "Sans serif",
+          "serif": "Serif"
+        },
+        "weight": {
+          "normal": "Regular",
+          "medium": "Medium",
+          "semibold": "Semibold",
+          "bold": "Bold"
+        },
+        "align": {
+          "left": "Left",
+          "center": "Center",
+          "right": "Right",
+          "justify": "Justify"
+        },
+        "followTemplate": "As template",
+        "swatchName": "Swatch {{hex}}",
+        "bodySizeHint": "While this slot follows the template, the body size is whatever the Body size metric above says.",
+        "paragraph": "Paragraph styles",
+        "paragraphHint": "Pick a section kind first, then set its size, line height, weight, alignment and the two colours (per section kind, not per entry).",
         "use": "Switch template or language",
         "useDone": "Preview switched to {{template}}",
         "undo": "Undo",
@@ -697,7 +743,8 @@
           "ACTION_BUSY": "The previous action hasn't come back yet",
           "NOTHING_TO_UNDO": "No edit left to undo",
           "NOTHING_TO_REDO": "No edit left to redo",
-          "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save"
+          "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save",
+          "ALREADY_FOLLOWING": "This slot already follows the template, so there is nothing to clear"
         }
       },
       "pendingUnnamed": "The one with no name read"

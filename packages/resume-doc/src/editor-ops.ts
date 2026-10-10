@@ -1,19 +1,36 @@
 /**
- * 排版编辑器的三个纯操作（spec 3.6-01 / 3.6-02 的判定半边，plan §8.3 的 `editor-ops.ts`）。
+ * 排版编辑器的纯操作（spec 3.6-01 / 3.6-02 与 6.6-05 的判定半边，plan §8.3 的 `editor-ops.ts`）。
  *
  * 为什么单拎一个文件而不是写进 `schema.ts` 或 `doc-store.ts`：这一层只回答「这样改合不合法、
  * 合法之后新状态长什么样」，既不落库也不读配置，形状照已经验收的 `packages/pdf-edit/src/page-ops.ts`
  * （拒绝腿在前、合法才产新值、**不抛异常**）。服务层与编辑会话（`editor-session.ts`）共用这一份判据，
  * 于是"界面放行而保存被拒"这种分叉从一开始就不存在（AGENTS.md §2.5）。
  *
- * 两条边界口径（plan §8.1 第 2、3 条）：
+ * 三条边界口径（plan §8.1 第 2、3 条 + 6.6 补片）：
  * - **度量上下界只加在这一层，不加进 `layoutSchema`**：`schema.ts` 那份是「一份文档合不合法」，
  *   已验收的 3.1/3.2 判据都挂在它上面；这里的界是「编辑器的滑杆允许推到哪儿」，是给**人的输入**设的界，
  *   把两者混进一处等于用新判据去追改旧判据（§2.4 的反面：老文档不该因为今天立了滑杆范围而变非法）。
+ * - **样式补丁是个例外，它要查"形状"**：预览吃的是**未保存的 draft**，而 `validateDocument` 只在保存那一刻跑，
+ *   所以颜色的 `#rrggbb` 与档位枚举必须在这里就挡住，否则一个自由字符串会先一步进产物文档的 `<style>` 块。
+ *   查的是 Schema 同一件事，因此模式也引用同一只（`HEX_COLOR_PATTERN`）、枚举引用 `model.ts` 那三份清单，
+ *   不在此处再抄一遍字符串。
  * - **模板不属于这里**：模板是渲染期的纯函数注册表（`template.ts`），文档模型里没有 templateId，
  *   所以「切模板」在这套代码里根本不是一次编辑，也就没有"切完丢数据"这件事可修。
  */
-import type { Layout, PageMargin, Section } from './model.js';
+import type {
+  DocumentDesign,
+  FontFamilyToken,
+  FontWeightToken,
+  Layout,
+  PageMargin,
+  ParagraphStyle,
+  Section,
+  SectionKind,
+  TextAlignToken,
+} from './model.js';
+import { FONT_FAMILY_TOKENS, FONT_WEIGHT_TOKENS, TEXT_ALIGN_TOKENS } from './model.js';
+import { PARAGRAPH_KIND_ORDER } from './normalize.js';
+import { HEX_COLOR_PATTERN } from './schema.js';
 
 /** 度量键：`Layout` 里那四个可由人推的数（边距拆成四条边，界面各一条滑杆）。 */
 export type MetricKey = 'baseFontPt' | 'lineHeight' | keyof PageMargin;
@@ -41,7 +58,15 @@ export const EDITOR_METRIC_BOUNDS: Readonly<Record<MetricKey, MetricBound>> = {
 
 /** 被拒的原因（各自对应界面一句话，所以不合并成一个 code）。 */
 export type EditorRejectionCode =
-  'unknown-metric' | 'not-a-number' | 'out-of-bounds' | 'unknown-section' | 'unknown-entry' | 'index-out-of-range';
+  | 'unknown-metric'
+  | 'not-a-number'
+  | 'out-of-bounds'
+  | 'unknown-section'
+  | 'unknown-entry'
+  | 'index-out-of-range'
+  | 'bad-color'
+  | 'bad-token'
+  | 'unknown-kind';
 
 /** 一次操作的判定：通过给新值，否则给机器码与技术原因，**不抛异常**。 */
 export type EditorOutcome<T> =
@@ -82,6 +107,220 @@ export function planMetric(layout: Layout, key: MetricKey, value: number): Edito
   return { ok: true, value: { ...layout, [key]: value } };
 }
 
+/**
+ * 一次样式动作里的一条可空轴：给值是设，给 `null` 是**清掉**（这一条轴回到模板默认档），不给是不改。
+ * 三种表态必须分得开——界面上"取消选中"与"这格我还没碰"是两件不同的事，
+ * 而它们在产物里的差别是"少挂一只 `rz-*` 类"与"什么都没发生"。
+ */
+type Nullable<T> = T | null;
+
+/** 正文字体三条轴的补丁形状。 */
+export interface BodyStylePatch {
+  fontFamily?: Nullable<FontFamilyToken>;
+  sizePt?: Nullable<number>;
+  weight?: Nullable<FontWeightToken>;
+}
+
+/** 一类区块的段落样式补丁（六条轴与 `ParagraphStyle` 一一对应）。 */
+export interface ParagraphStylePatch {
+  kind: SectionKind;
+  sizePt?: Nullable<number>;
+  weight?: Nullable<FontWeightToken>;
+  align?: Nullable<TextAlignToken>;
+  lineHeight?: Nullable<number>;
+  inkHex?: Nullable<string>;
+  backdropHex?: Nullable<string>;
+}
+
+/**
+ * 一次样式动作的载荷（spec 6.6-05：界面一次调用 = 一个撤销单元，所以段落弹窗"整格保存"是一次调用）。
+ * 五个入口各自可以带多条轴，`body: null` 与 `paragraph` 里的多格一次提交都合法。
+ */
+export interface DesignPatch {
+  inkHex?: Nullable<string>;
+  paperHex?: Nullable<string>;
+  accentHex?: Nullable<string>;
+  body?: Nullable<BodyStylePatch>;
+  paragraph?: ParagraphStylePatch;
+}
+
+/**
+ * 一条颜色轴的落点。
+ * @param patch 这一格的补丁（`undefined` 不改 / `null` 清掉 / 字符串要过 `#rrggbb`）
+ * @param current 现值
+ * @param axis 轴名（写进拒绝理由，界面能把话说到哪一格）
+ * @returns 通过给下一格的值（`undefined` = 这一格没有值），形状不合法给 `bad-color`
+ */
+function planColor(
+  patch: Nullable<string> | undefined,
+  current: string | undefined,
+  axis: string,
+): EditorOutcome<string | undefined> {
+  if (patch === undefined) return { ok: true, value: current };
+  if (patch === null) return { ok: true, value: undefined };
+  if (!HEX_COLOR_PATTERN.test(patch)) return reject('bad-color', `${axis}=${patch} 不是 #rrggbb 六位十六进制`);
+  return { ok: true, value: patch };
+}
+
+/**
+ * 一条枚举轴的落点。
+ * @param patch 这一格的补丁（`undefined` 不改 / `null` 清掉 / 其余必须在清单里）
+ * @param current 现值
+ * @param axis 轴名
+ * @param tokens 合法取值清单（`model.ts` 那三份，界面与闸门同源）
+ * @returns 通过给下一格的值，不在清单里给 `bad-token`（界面上不该出现自造档名）
+ */
+function planToken<T extends string>(
+  patch: Nullable<T> | undefined,
+  current: T | undefined,
+  axis: string,
+  tokens: readonly T[],
+): EditorOutcome<T | undefined> {
+  if (patch === undefined) return { ok: true, value: current };
+  if (patch === null) return { ok: true, value: undefined };
+  if (!tokens.includes(patch)) {
+    return reject('bad-token', `${axis}=${patch} 不是 ${tokens.join('/')} 当中的一个`);
+  }
+  return { ok: true, value: patch };
+}
+
+/**
+ * 一条数值轴的落点：非有限数与界外都拒，界由调用方给（字号/行距沿用度量那同一张界表）。
+ * @param patch 这一格的补丁（`undefined` 不改 / `null` 清掉）
+ * @param current 现值
+ * @param axis 轴名
+ * @param bound 界（`EDITOR_METRIC_BOUNDS` 里的那一档）
+ * @returns 通过给下一格的值，非数给 `not-a-number`，界外给 `out-of-bounds`
+ */
+function planNumber(
+  patch: Nullable<number> | undefined,
+  current: number | undefined,
+  axis: string,
+  bound: MetricBound,
+): EditorOutcome<number | undefined> {
+  if (patch === undefined) return { ok: true, value: current };
+  if (patch === null) return { ok: true, value: undefined };
+  if (!Number.isFinite(patch)) return reject('not-a-number', `${axis}=${String(patch)} 不是有限数字`);
+  if (patch < bound.min || patch > bound.max) {
+    return reject('out-of-bounds', `${axis}=${String(patch)} 不在 ${String(bound.min)}…${String(bound.max)} 之内`);
+  }
+  return { ok: true, value: patch };
+}
+
+/**
+ * 给一个对象挑出"真的有值"的那几格（样式层的全部纪律都在这一小步上：
+ * 空壳不许留下 `design: {}`，否则 `'design' in layout` 会变 true，而产物与落地前逐字节相同这一条
+ * 判据就再也对不上）。
+ * @param entries 候选格（键 → 值或 undefined）
+ * @returns 只含有值那些格的新对象；全空则是空对象
+ */
+function compact<T extends object>(entries: { [K in keyof T]: T[K] | undefined }): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entries)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
+
+/**
+ * 应用一次样式补丁（spec 6.6-05 的判定半边）。
+ * @param layout 当前版面（不被修改）
+ * @param patch 要改的那几格（见 `DesignPatch`；同一格给 `null` 就是取消它）
+ * @returns 通过给一份**新** `Layout`：补丁全空或全被取消时连 `design` 键都不留（与"从未设过主题"同一形状）；
+ *          颜色形状非法给 `bad-color`，档位不在清单里给 `bad-token`，数值界外给 `out-of-bounds` / `not-a-number`，
+ *          段落种类不认识给 `unknown-kind`
+ */
+export function planDesign(layout: Layout, patch: DesignPatch): EditorOutcome<Layout> {
+  const current = layout.design;
+  const ink = planColor(patch.inkHex, current?.inkHex, 'inkHex');
+  if (!ink.ok) return ink;
+  const paper = planColor(patch.paperHex, current?.paperHex, 'paperHex');
+  if (!paper.ok) return paper;
+  const accent = planColor(patch.accentHex, current?.accentHex, 'accentHex');
+  if (!accent.ok) return accent;
+
+  // 正文三条轴：`body: null` 是整格取消，给了某几格则其余格沿用现值。
+  let body: DocumentDesign['body'];
+  if (patch.body !== null) {
+    const family = planToken(patch.body?.fontFamily, current?.body?.fontFamily, 'body.fontFamily', FONT_FAMILY_TOKENS);
+    if (!family.ok) return family;
+    const size = planNumber(patch.body?.sizePt, current?.body?.sizePt, 'body.sizePt', EDITOR_METRIC_BOUNDS.baseFontPt);
+    if (!size.ok) return size;
+    const weight = planToken(patch.body?.weight, current?.body?.weight, 'body.weight', FONT_WEIGHT_TOKENS);
+    if (!weight.ok) return weight;
+    body = compact<{ fontFamily?: FontFamilyToken; sizePt?: number; weight?: FontWeightToken }>({
+      fontFamily: family.value,
+      sizePt: size.value,
+      weight: weight.value,
+    });
+  }
+
+  let paragraphs: Partial<Record<SectionKind, ParagraphStyle>> = current?.paragraphs ?? {};
+  const paragraph = patch.paragraph;
+  if (paragraph) {
+    if (!PARAGRAPH_KIND_ORDER.includes(paragraph.kind)) {
+      return reject('unknown-kind', `没有 ${paragraph.kind} 这一类区块（可改的是 ${PARAGRAPH_KIND_ORDER.join('/')}）`);
+    }
+    const kind = paragraph.kind;
+    const style = current?.paragraphs?.[kind];
+    const size = planNumber(paragraph.sizePt, style?.sizePt, `${kind}.sizePt`, EDITOR_METRIC_BOUNDS.baseFontPt);
+    if (!size.ok) return size;
+    const weight = planToken(paragraph.weight, style?.weight, `${kind}.weight`, FONT_WEIGHT_TOKENS);
+    if (!weight.ok) return weight;
+    const align = planToken(paragraph.align, style?.align, `${kind}.align`, TEXT_ALIGN_TOKENS);
+    if (!align.ok) return align;
+    const lineHeight = planNumber(
+      paragraph.lineHeight,
+      style?.lineHeight,
+      `${kind}.lineHeight`,
+      EDITOR_METRIC_BOUNDS.lineHeight,
+    );
+    if (!lineHeight.ok) return lineHeight;
+    const kindInk = planColor(paragraph.inkHex, style?.inkHex, `${kind}.inkHex`);
+    if (!kindInk.ok) return kindInk;
+    const backdrop = planColor(paragraph.backdropHex, style?.backdropHex, `${kind}.backdropHex`);
+    if (!backdrop.ok) return backdrop;
+    const nextStyle = compact<ParagraphStyle>({
+      sizePt: size.value,
+      weight: weight.value,
+      align: align.value,
+      lineHeight: lineHeight.value,
+      inkHex: kindInk.value,
+      backdropHex: backdrop.value,
+    });
+    // 六条轴全被取消时这一类整格消失，而不是留下一只 `{}`（否则 `'experience' in paragraphs` 会说谎）。
+    paragraphs =
+      Object.keys(nextStyle).length === 0 ? withoutKind(paragraphs, kind) : { ...paragraphs, [kind]: nextStyle };
+  }
+
+  const design = compact<DocumentDesign>({
+    inkHex: ink.value,
+    paperHex: paper.value,
+    accentHex: accent.value,
+    body: body && Object.keys(body).length > 0 ? body : undefined,
+    paragraphs: Object.keys(paragraphs).length > 0 ? paragraphs : undefined,
+  });
+  // 全空时要把这一格**删掉**而不是设成 `undefined`：展开一个 `design: undefined` 会把键留下，
+  // 于是 `'design' in layout` 说真话而产物里根本没有样式块——"从没设过主题"与"设过又清空"必须同形。
+  if (Object.keys(design).length === 0) {
+    const stripped: Layout = { ...layout };
+    delete stripped.design;
+    return { ok: true, value: stripped };
+  }
+  return { ok: true, value: { ...layout, design } };
+}
+
+/**
+ * 从段落样式表里去掉一类区块那一格。
+ * @param paragraphs 当前表（不被修改）
+ * @param kind 要删的那一类
+ * @returns 新表（不含那一格）
+ */
+function withoutKind(paragraphs: Partial<Record<SectionKind, ParagraphStyle>>, kind: SectionKind) {
+  const next: Partial<Record<SectionKind, ParagraphStyle>> = { ...paragraphs };
+  delete next[kind];
+  return next;
+}
 /**
  * 「把第 fromIndex 个搬到第 toIndex 位」的唯一一份落点数学（区块与条目共用）。
  *

@@ -1,0 +1,102 @@
+spec 6.6-05 · 样式控件（主题 + 段落）与 resume.editor.design 的活体读数
+时间：2026-10-11 · 宿主：`pnpm dev` 的 10222 实例，vite 5173，窗口 1200×772（`document.visibilityState = visible`）
+取证方式：`pnpm harness click/eval --url 5173`（真实鼠标事件落页，页面自己回读的 `aria-pressed` / 回执横幅为凭，不看命令返回值）
+文档：`resume-366c43b91025`（左列常驻编辑器，右列那张纸由纸面槽持有）
+
+## 1. 新原件 DeskSwatch 的真实几何（AGENTS.md §6.2-25 那条：原件到货必须配一张几何读数）
+
+`[data-testid="resume-editor-design-inkHex"]`（role=group）：390 × 30 px，格数 16 = 1 格「随模板」+ 15 格色卡，每格 20 × 20 px。
+
+逐格计算样式（前四格，原样抄回）：
+
+- `resume-editor-design-inkHex-clear` → `--desk-swatch` 空、`background-color: rgba(0, 0, 0, 0)`（斜条纹走 background-image），`aria-pressed="true"`
+- `…-101820` → `--desk-swatch: #101820`、`background-color: rgb(16, 24, 32)`
+- `…-1b2228` → `--desk-swatch: #1b2228`、`background-color: rgb(27, 34, 40)`
+- `…-334155` → `--desk-swatch: #334155`、`background-color: rgb(51, 65, 81)`
+
+这一条同时钉住两件事：JSX 上没有 `style` 属性（机检第 5 节），而 hex 是运行期经
+`node.style.setProperty('--desk-swatch', hex)` 供进 `bg-[var(--desk-swatch)]` 的 —— 画出来的色与 `data-hex` 逐格对得上。
+
+## 2. 一次点击走完整条通道（界面 → 桥 → planDesign → draft → 打印 HTML）
+
+点 `[data-action="resume-editor-design-inkHex-a31621"]`（正文颜色那一格）之后：
+
+- 页面回执横幅：`正文颜色已经设好`
+- `aria-pressed` 从 clear 格移到 `…-a31621` 格（clear 格回 `false`）
+- 未保存标记：`data-dirty="true"`，`保存` 那颗从 `NOTHING_TO_SAVE` 变可点
+- `window.autoCC.resume['editor.preview']` 回来的产物里多出：`:root{--rz-ink:#a31621;}`（产物长 35 086 → 35 120 字节）
+
+界面没有一处本地判断颜色的形状：色卡只摆得出 `#rrggbb`，所以 `bad-color` 那一条腿在界面上走不到（判界只在主进程一次，AGENTS.md §2.5）。
+
+## 3. 一次调用 = 一个撤销单元（裁定第 3 条的形状）
+
+点预设「青玉」一只键（`resume-editor-design-preset-jade`）之后，产物里一次出现四格：
+
+```
+:root{--rz-ink:#1b2228;--rz-accent:#0b5c50;--rz-body-weight:400;--rz-paper:#ffffff;}
+```
+
+再点一次「撤销」（`data-action="undo"`）：产物回到只有 `:root{--rz-ink:#a31621;}`，
+回执 `已撤销一步` —— 四格作为一个单元整步退掉，不是四步。
+预设格的选中态同时落回（`presetPressed` 变空，因为手上剩的是手拼组合，不匹配任何一套）。
+
+## 4. 段落样式那一族（按区块种类，不到逐条）
+
+选「摘要」这一类后点两格（底色 `#f7f5f2`、对齐 居中），产物：
+
+```
+:root{--rz-p-summary-align:center;--rz-p-summary-band:#f7f5f2;}
+```
+
+段落块 `[data-testid="resume-editor-paragraph"]` 几何 462 × 305 px，控件齐 48 只 `data-action`
+（六类区块 6 只 + 两条数值滑杆与其「随模板」2×2 只 + 字重 5 只 + 对齐 5 只 + 两格色卡 2×16 只）。
+
+## 5. 全部退回去 = 与库里那份同形
+
+连点四次撤销后：`与库里的一致`（`data-dirty="false"`）、`撤销` 带 `NOTHING_TO_UNDO`、
+`保存` 带 `NOTHING_TO_SAVE`、正文颜色回到 clear 格选中；
+产物 `:root{--rz-*}` 那一块**整个不在**（`rootBlock = null`，长 35 086 字节）——
+这一条同时验到「取消干净要把 `design` 键删掉」那一步：没有样式块时产物与没设过主题同形。
+
+**本轮没有点过「保存」**，库里那份 `resume-366c43b91025` 一字未动。
+
+## 6. 按不动的那些格都带着原因码（§14）
+
+- 「随模板」（正文字号那一格，未设过）→ `data-disabled-reason="ALREADY_FOLLOWING"`，
+  `title="这一格本来就跟着模板，没什么可取消的"`
+- 读数行显示的档位：`10.5 pt`（正文字号与段落字号都跟着上面那条度量走，因为这两格都没设过）
+
+## 7. 换到有内容的文档上再走一遍（纸面看得见变化，且撤销回得干净）
+
+上面 1–6 是在种子文档 `resume-366c43b91025` 上取的，那一份正文几乎是空的，纸面看不出差别。
+所以同一族操作在有内容的 `resume-demo`（张三 · 现代双列强调 · zh-CN）上重走一遍：
+
+- 真实鼠标点 `resume-editor-design-preset-jade` → 产物 `:root{--rz-ink:#1b2228;--rz-accent:#0b5c50;--rz-body-weight:400;--rz-paper:#ffffff;}`
+- 选「概述」这一类（`resume-editor-paragraph-kind-summary`，走 `node.click()`，只证处理器跑过）后
+  真实鼠标点 `resume-editor-paragraph-backdropHex-f7f5f2` → 产物多出一格 `--rz-p-summary-band:#f7f5f2;`
+- 真实鼠标点 `resume-editor-design-preset-ink` → 产物四格整步换成 `--rz-ink:#101820;--rz-accent:#a31621;--rz-body-weight:400;--rz-paper:#f7f5f2;`，
+  同时 `<article class="…">` 从 `font-sans` 换回 `font-serif` —— 这一条是"字体样式那一格真的落到产物"的正面读数：
+  青玉预设写的是 `fontFamily:'sans'`（把这套模板自带的衬线轴顶掉），墨黑写的是 `'serif'`（与模板同值）
+- 撤销三次（每次一步）：第三步之后产物里 `:root{…}` 那一块**整个不在**（`root: null`，36 535 → 36 225 字节），
+  `<article class="font-serif text-neutral-900 ">` 回到模板自己那份（无 `rz-design` 钩子），
+  `撤销` 带 `NOTHING_TO_UNDO`、`保存` 带 `NOTHING_TO_SAVE`、预设格 `default:true / ink:false / jade:false / seal:false`
+- **这一节同样一次都没有点「保存」**，库里 `resume-demo` 一字未动
+
+## 画面
+
+- `6.6-05-theme-controls.png` —— 主题块（预设四格 + 三行色卡 + 字族/字重 + 字号滑杆），2400 × 1544
+- `6.6-05-paragraph-controls.png` —— 段落块（六类区块 + 两条数值 + 字重/对齐 + 两行色卡），2400 × 1544
+- `6.6-05-paper-jade-theme.png` —— 整屏：左列样式控件、右列那张纸已按「青玉」重出，2400 × 1544
+- `6.6-05-paper-demo-before.png` —— `resume-demo` 未设主题时的纸面（右列那张纸 + 左列主题块），2400 × 1544
+- `6.6-05-paper-demo-jade.png` —— 同一份文档设了「青玉 + 概述底色」之后的纸面，2400 × 1544
+- `6.6-05-paper-demo-ink-serif.png` —— 换到「墨黑」：纸面转暖白、正文转衬线，且左列「纸面颜色」那一行的
+  `#f7f5f2` 格与「正文字体 · 衬线」格同时亮起选中档
+
+六张 md5 互异（`0efacfb4…` / `ceb3872a…` / `8439bbed…` / `3dba69ea…` / `b611518f…` / `ff15e550…`，
+`md5 -q | sort | uniq -c` 每行都是 1）。
+量几何前注入的 `transition/animation:none` 已在收尾摘掉（`stillThere: false`）。
+
+## 本机证不了的
+
+- 「纸面看起来好不好看」是人眼的判断，不是这些读数能替的：这一条要用户在场看一眼才算通过。
+- Windows / Linux 的字体回退（衬线那一族随包后是否仍掉系统衬线）与打印出件，本机 macOS arm64 无法验。

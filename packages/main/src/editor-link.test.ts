@@ -3,7 +3,7 @@
  *
  * 为什么住在 `packages/main`（与 `graph-link.test.ts` / `pdf-link.test.ts` 同一个理由）：这里要同时读到
  * 注册表、`cordis.yml`、渲染层白名单与网关的 `resolveCall`——四样东西分属四个包，只有装配层认识它们全部。
- * 判据也正是装配层的判据：`resume.editor` 的九条口在包内单测里全绿，但**清单少一行、或它排在
+ * 判据也正是装配层的判据：`resume.editor` 的十条口在包内单测里全绿，但**清单少一行、或它排在
  * `resume-doc` 前面**（§9 的 5.1-c：清单顺序就是挂载顺序），真 app 里界面照样一道都调不到。
  *
  * 编辑语义本体（界内界外、历史、dirty、撤销）在 `packages/resume-doc/src/editor-*.test.ts` 判，
@@ -111,7 +111,7 @@ function fixtureDoc(): ResumeDocument {
 /**
  * 经网关调一次，把抛出的错误翻成三段读数（不抛则当场报错，避免"没失败"被读成"失败但不判"）。
  *
- * 走 try/catch 而不是 `Promise.resolve(invoke(…)).catch(…)`：编辑器那九条方法是**同步**的（会话在内存里），
+ * 走 try/catch 而不是 `Promise.resolve(invoke(…)).catch(…)`：编辑器那十条方法是**同步**的（会话在内存里），
  * 实参求值那一刻就抛了，挂在返回值上的 `.catch` 根本没机会接住——这条在 3.5 的另存腿（异步）不会显出来。
  * @param resolution 网关的切分结果（调用方已确认它是 `ok: true` 那一支）
  * @param args 白名单签名里那串实参
@@ -179,11 +179,11 @@ describe('装配对账（plan §8.3 的两处登记）', () => {
   });
 });
 
-describe('白名单九条都切成服务方法并经网关真的落到位（spec 3.6-05/06/07 的接线半边）', () => {
+describe('白名单十条都切成服务方法并经网关真的落到位（spec 3.6-05/06/07 的接线半边）', () => {
   it('每条 `resume.editor.*` 都对应挂起来的实例上的同名函数', async () => {
     const { lookup, editor } = await bootAssembly();
     const rows = RENDERER_ALLOWLIST.filter((id) => id.startsWith('resume.editor.'));
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
     const methods = editor as unknown as Record<string, unknown>;
     for (const row of rows) {
       const resolution = resolveCall(row, lookup);
@@ -225,6 +225,47 @@ describe('拒绝的原因跨进程不丢（spec 3.6-02 的判据原文）', () =
     expect(rejected.message).toContain(String(EDITOR_METRIC_BOUNDS.baseFontPt.max));
   });
 
+  it('样式补丁的形状判据也在网关这一侧生效：坏颜色给的仍是 `bad-color` 且说得出哪一格（6.6-05）', async () => {
+    const { lookup } = await bootAssembly();
+    const open = resolveCall('resume.editor.open', lookup);
+    if (!open.ok) throw new Error('分派失败');
+    open.invoke(DOC_ID);
+    const design = resolveCall('resume.editor.design', lookup);
+    if (!design.ok) throw new Error('分派失败');
+    const rejected = rejectViaGateway(design, [DOC_ID, { inkHex: '#0z' }]);
+    expect(rejected.code).toBe('RESUME_EDITOR_EDIT_REJECTED');
+    expect(rejected.reason).toBe('bad-color');
+    // 轴名要在 message 里：界面据此指到那一格，而不是笼统报"颜色不对"（同上面 metric 那条的口径）。
+    expect(rejected.message).toContain('inkHex');
+  });
+
+  it('一次样式调用只长一条撤销单元，且退回去之后 `design` 整格消失（6.6-05 的一个撤销单元）', async () => {
+    const { lookup } = await bootAssembly();
+    const open = resolveCall('resume.editor.open', lookup);
+    if (!open.ok) throw new Error('分派失败');
+    open.invoke(DOC_ID);
+    const design = resolveCall('resume.editor.design', lookup);
+    const undo = resolveCall('resume.editor.undo', lookup);
+    if (!design.ok || !undo.ok) throw new Error('分派失败');
+    // 一次调用带四条轴（主题两色 + 正文两轴）：界面上这是一格"保存"，历史上也只能是一步。
+    const after = design.invoke(DOC_ID, {
+      inkHex: '#0b5c50',
+      accentHex: '#a31621',
+      body: { fontFamily: 'serif', weight: 'medium' },
+      paragraph: { kind: 'experience', align: 'justify' },
+    }) as ReturnType<ResumeEditorService['open']>;
+    expect(after.layout.design).toMatchObject({
+      inkHex: '#0b5c50',
+      body: { fontFamily: 'serif', weight: 'medium' },
+      paragraphs: { experience: { align: 'justify' } },
+    });
+    expect(after.canUndo).toBe(true);
+    const back = undo.invoke(DOC_ID) as ReturnType<ResumeEditorService['open']>;
+    expect(back.canUndo).toBe(false);
+    // 退回去要退得干净：`design` 整格不存在，而不是留着空壳（空壳会让"未改过"与"改回原样"在产物里分不开）。
+    expect('design' in back.layout).toBe(false);
+  });
+
   it('没有会话与库里没有这份文档，是两条不同的话术（界面的处置不同）', async () => {
     const { lookup } = await bootAssembly();
     const metric = resolveCall('resume.editor.metric', lookup);
@@ -239,14 +280,16 @@ describe('拒绝的原因跨进程不丢（spec 3.6-02 的判据原文）', () =
   });
 });
 
-describe('可达面边界：九条只给界面，正文仍然不过界（§8.1 / §8.2 / 3.6-09）', () => {
-  it('抄错的名字、带点的方法名、未登记的第第十口都进不来', () => {
-    // 比 plan §8.3 那八条多登记了 `.use`（模板与语言必须由主进程的读数驱动，否则界面存第二份事实，§2.7）。
+describe('可达面边界：十条只给界面，正文仍然不过界（§8.1 / §8.2 / 3.6-09）', () => {
+  it('抄错的名字、带点的方法名、未登记的第十又一口都进不来', () => {
+    // 比 plan §8.3 那八条多登记了 `.use`（模板与语言必须由主进程的读数驱动，否则界面存第二份事实，§2.7），
+    // 与 6.6-05 的 `.design`（样式档名与颜色要过界，但判界与判形状都只在 `editor-ops.ts` 那一份）。
     expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('resume.editor.'))).toEqual([
       'resume.editor.open',
       'resume.editor.view',
       'resume.editor.move',
       'resume.editor.metric',
+      'resume.editor.design',
       'resume.editor.use',
       'resume.editor.preview',
       'resume.editor.undo',

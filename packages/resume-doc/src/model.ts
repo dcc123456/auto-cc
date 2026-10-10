@@ -20,14 +20,27 @@ export interface PageMargin {
   leftMm: number;
 }
 
-/** 字重档（取值必须是 `print-css.ts` 里已登记的 `font-*` 那一族，不引入自造档名）。 */
-export type FontWeightToken = 'normal' | 'medium' | 'semibold' | 'bold';
+/**
+ * 字重档的取值清单（必须与 `print-css.ts` 里已登记的 `font-*` 那一族一一对应，不引入自造档名）。
+ * 这一份清单是**运行时**唯一的那一份：Schema 用它建枚举、编辑器的输入闸门用它挡非法值、
+ * 界面用它列档（同一件事不许有第二份字符串，AGENTS.md §2.5）。
+ */
+export const FONT_WEIGHT_TOKENS = ['normal', 'medium', 'semibold', 'bold'] as const;
 
-/** 对齐档（与 CSS `text-align` 同口径；`justify` 是中文简历常见诉求）。 */
-export type TextAlignToken = 'left' | 'center' | 'right' | 'justify';
+/** 字重档。 */
+export type FontWeightToken = (typeof FONT_WEIGHT_TOKENS)[number];
 
-/** 字体族档：只有随包的那两族可选（`print-html.ts` 的 `EMBEDDED_FONTS`），不给自由字符串。 */
-export type FontFamilyToken = 'sans' | 'serif';
+/** 对齐档清单（与 CSS `text-align` 同口径；`justify` 是中文简历常见诉求）。 */
+export const TEXT_ALIGN_TOKENS = ['left', 'center', 'right', 'justify'] as const;
+
+/** 对齐档。 */
+export type TextAlignToken = (typeof TEXT_ALIGN_TOKENS)[number];
+
+/** 字体族档清单：只有随包的那两族可选（`print-html.ts` 的 `EMBEDDED_FONTS`），不给自由字符串。 */
+export const FONT_FAMILY_TOKENS = ['sans', 'serif'] as const;
+
+/** 字体族档。 */
+export type FontFamilyToken = (typeof FONT_FAMILY_TOKENS)[number];
 
 /**
  * 一段落（按区块种类）的样式覆盖。

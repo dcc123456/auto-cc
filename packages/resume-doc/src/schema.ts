@@ -10,25 +10,38 @@
  * `checkFactLock` 是跨两份文档的判定，Schema 表达不了，单列在此（3.1-03）。
  */
 import { z as zod } from 'zod';
-import { factKeyOf, type Entry, type FactKey, type ResumeDocument, type Section } from './model.js';
+import {
+  FONT_FAMILY_TOKENS,
+  FONT_WEIGHT_TOKENS,
+  TEXT_ALIGN_TOKENS,
+  factKeyOf,
+  type Entry,
+  type FactKey,
+  type ResumeDocument,
+  type Section,
+} from './model.js';
 
 const factKeySchema = zod.enum(['company', 'role', 'period', 'achievement']);
 
 /** 区块种类（样式层按它寻址段落，所以与 `sectionSchema` 共用一份枚举，§2.5 一个判据一个出处）。 */
 const sectionKindSchema = zod.enum(['summary', 'experience', 'education', 'skills', 'project', 'campus']);
 
-/** 字重档枚举：与 `print-css.ts` 里已登记的 `font-*` 那一族一一对应。 */
-const fontWeightSchema = zod.enum(['normal', 'medium', 'semibold', 'bold']);
+/** 字重档枚举：清单在 `model.ts`（编辑器的输入闸门与界面都用它，不各抄一份）。 */
+const fontWeightSchema = zod.enum(FONT_WEIGHT_TOKENS);
 
 /** 对齐档枚举（与 CSS `text-align` 同口径）。 */
-const textAlignSchema = zod.enum(['left', 'center', 'right', 'justify']);
+const textAlignSchema = zod.enum(TEXT_ALIGN_TOKENS);
 
 /**
  * 一条十六进制颜色（`#rrggbb`）。
  * 只认这一种形状是刻意的：样式层的值要一路写进**产物文档**的 `<style>` 块里，
  * 放开成自由字符串就等于把注入面交给用户输入（§8 的系统边界口径）。
+ * 模式单列在这里，编辑器的闸门（`editor-ops.ts` 的 `planDesign`）引用同一只——
+ * 判"能不能进文档"与判"能不能进 draft"必须是同一件事，否则会出现"界面放行、保存被拒"的分叉。
  */
-const hexColorSchema = zod.string().regex(/^#[0-9a-fA-F]{6}$/, '需要 #rrggbb 形式的十六进制颜色');
+export const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+const hexColorSchema = zod.string().regex(HEX_COLOR_PATTERN, '需要 #rrggbb 形式的十六进制颜色');
 
 const fieldSchema = zod.strictObject({
   key: zod.string().min(1),
@@ -66,7 +79,7 @@ const designSchema = zod.strictObject({
   accentHex: hexColorSchema.optional(),
   body: zod
     .strictObject({
-      fontFamily: zod.enum(['sans', 'serif']).optional(),
+      fontFamily: zod.enum(FONT_FAMILY_TOKENS).optional(),
       sizePt: zod.number().positive().optional(),
       weight: fontWeightSchema.optional(),
     })

@@ -592,6 +592,52 @@
           "mm": "mm",
           "ratio": "倍"
         },
+        "theme": "文字与颜色",
+        "themeHint": "这一族只改样式：色、字号、字体、段落，正文一个字都不动。没挑的每一格继续跟着模板走。",
+        "design": "改样式",
+        "designDone": "{{axis}}已经设好",
+        "axes": {
+          "preset": "整套预设",
+          "inkHex": "正文颜色",
+          "paperHex": "纸面颜色",
+          "accentHex": "强调颜色",
+          "bodyFontFamily": "正文字体",
+          "bodyWeight": "正文字重",
+          "bodySizePt": "正文字号",
+          "paragraphSizePt": "这一段字号",
+          "paragraphLineHeight": "这一段行距",
+          "paragraphWeight": "这一段字重",
+          "paragraphAlign": "这一段对齐",
+          "paragraphInkHex": "这一段颜色",
+          "paragraphBackdropHex": "这一段底色"
+        },
+        "preset": {
+          "default": "回到默认",
+          "ink": "墨黑",
+          "jade": "青玉",
+          "seal": "朱砂"
+        },
+        "family": {
+          "sans": "无衬线",
+          "serif": "衬线"
+        },
+        "weight": {
+          "normal": "常规",
+          "medium": "中等",
+          "semibold": "半粗",
+          "bold": "加粗"
+        },
+        "align": {
+          "left": "靠左",
+          "center": "居中",
+          "right": "靠右",
+          "justify": "两端对齐"
+        },
+        "followTemplate": "随模板",
+        "swatchName": "色值 {{hex}}",
+        "bodySizeHint": "这一格没设时，正文字号就是上面那条「正文字号」的度量值。",
+        "paragraph": "段落样式",
+        "paragraphHint": "先挑一类区块，再调它这一类的字号、行距、字重、对齐与两色（按区块种类，不到逐条那一层）。",
         "use": "切换模板或语言",
         "useDone": "预览已切到 {{template}}",
         "undo": "撤销",
@@ -609,7 +655,8 @@
           "ACTION_BUSY": "上一条动作还没回来",
           "NOTHING_TO_UNDO": "没有可撤销的编辑了",
           "NOTHING_TO_REDO": "没有可重做的编辑了",
-          "NOTHING_TO_SAVE": "草稿与库里的一致，没有要保存的改动"
+          "NOTHING_TO_SAVE": "草稿与库里的一致，没有要保存的改动",
+          "ALREADY_FOLLOWING": "这一格本来就跟着模板，没什么可取消的"
         }
       },
       "locale": "语言",

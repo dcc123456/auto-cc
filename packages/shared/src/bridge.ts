@@ -345,7 +345,7 @@ export const RENDERER_ALLOWLIST = [
   // 而界面此前没有任何一条能列出文档的通道，于是自动生成在多份库里直接判死）。
   // 过的只有 id / 姓名 / 时刻三样摘要：正文的唯一读取通道仍是带 Schema 复验的 `load()`，它不在允许清单里。
   'resume.doc.list',
-  // 3.6 排版编辑器的会话面（plan §8.3）：九行全是**人**在编辑器面板里的动作（打开、拖、推滑杆、换模板、
+  // 3.6 排版编辑器的会话面（plan §8.3）：十行全是**人**在编辑器面板里的动作（打开、拖、推滑杆、改样式、换模板、
   // 撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
   // 与 §3 第 1 条的事实锁定同一条线（口径照 5.10-e 那四条写口与 `pdf.*` 那两行）。
   // 过界的只有 docId、结构 id 与度量数：正文不过界（见上面 `resume.export.preview` 那行的注释），
@@ -354,6 +354,10 @@ export const RENDERER_ALLOWLIST = [
   'resume.editor.view',
   'resume.editor.move',
   'resume.editor.metric',
+  // 6.6-05 的样式补丁腿：过的仍然是**枚举档名与 `#rrggbb` 字符串**，一个字的正文都不过。
+  // 形状校验（颜色、档位、数值界）只在主进程的 `editor-ops.ts` 做一次，界面照 `view().metricBounds`
+  // 那同一条口径摆滑杆，所以这里不存在"界面放行而保存被拒"的分叉（AGENTS.md §2.5）。
+  'resume.editor.design',
   'resume.editor.use',
   'resume.editor.preview',
   'resume.editor.undo',
@@ -1437,7 +1441,7 @@ export interface EditorMetricBoundView {
   readonly max: number;
 }
 
-/** 版面度量（镜像 `Layout`）：**只有数**，简历的一个字都不在这里。 */
+/** 版面度量（镜像 `Layout`）：**只有数与样式档名**，简历的一个字都不在这里。 */
 export interface ResumeEditorLayoutView {
   readonly pageSize: 'A4';
   readonly margin: {
@@ -1449,6 +1453,78 @@ export interface ResumeEditorLayoutView {
   readonly baseFontPt: number;
   readonly lineHeight: number;
   readonly columns: number;
+  /** 样式层（spec 6.6-01 的过界半边）：缺省 = 这份文档从没设过主题，产物随模板。 */
+  readonly design?: ResumeEditorDesignView;
+}
+
+/** 字重档（镜像 `FontWeightToken` = resume-doc `model.ts` 的那份清单；界面下拉摆的就是这一串）。 */
+export type EditorFontWeightView = 'normal' | 'medium' | 'semibold' | 'bold';
+
+/** 对齐档（镜像 `TextAlignToken`，与 CSS `text-align` 同口径）。 */
+export type EditorTextAlignView = 'left' | 'center' | 'right' | 'justify';
+
+/** 字族档（镜像 `FontFamilyToken`；只有随包的那两族，自由字符串在这一层进不来）。 */
+export type EditorFontFamilyView = 'sans' | 'serif';
+
+/** 一类区块的段落样式（镜像 `ParagraphStyle`；缺一格 = 那一轴随模板）。 */
+export interface ResumeEditorParagraphStyleView {
+  readonly sizePt?: number;
+  readonly weight?: EditorFontWeightView;
+  readonly align?: EditorTextAlignView;
+  readonly lineHeight?: number;
+  readonly inkHex?: string;
+  readonly backdropHex?: string;
+}
+
+/** 文档主题 + 段落样式档（镜像 `DocumentDesign`，键是**区块种类**而不是 sectionId——裁定第 3 条的粒度）。 */
+export interface ResumeEditorDesignView {
+  readonly inkHex?: string;
+  readonly paperHex?: string;
+  readonly accentHex?: string;
+  readonly body?: {
+    readonly fontFamily?: EditorFontFamilyView;
+    readonly sizePt?: number;
+    readonly weight?: EditorFontWeightView;
+  };
+  readonly paragraphs?: Partial<Record<ResumeSectionKindView, ResumeEditorParagraphStyleView>>;
+}
+
+/**
+ * 一条样式轴的补丁三态（镜像 `editor-ops.ts` 里的 `Nullable<T>`）：
+ * 给值是设，给 `null` 是**取消那一格**（回到模板默认档），不给是"这格我没碰"。
+ * 三者必须在过界时区分得开——界面上"取消选中"与"没动过"是两件不同的事。
+ */
+export type EditorStyleAxisPatch<T> = T | null;
+
+/** 正文三条轴的补丁（镜像 `BodyStylePatch`）。 */
+export interface ResumeEditorBodyPatchView {
+  fontFamily?: EditorStyleAxisPatch<EditorFontFamilyView>;
+  sizePt?: EditorStyleAxisPatch<number>;
+  weight?: EditorStyleAxisPatch<EditorFontWeightView>;
+}
+
+/** 一类区块的段落样式补丁（镜像 `ParagraphStylePatch`；`kind` 必填，六条轴任选几条）。 */
+export interface ResumeEditorParagraphPatchView {
+  kind: ResumeSectionKindView;
+  sizePt?: EditorStyleAxisPatch<number>;
+  weight?: EditorStyleAxisPatch<EditorFontWeightView>;
+  align?: EditorStyleAxisPatch<EditorTextAlignView>;
+  lineHeight?: EditorStyleAxisPatch<number>;
+  inkHex?: EditorStyleAxisPatch<string>;
+  backdropHex?: EditorStyleAxisPatch<string>;
+}
+
+/**
+ * 一次样式动作的载荷（镜像 `DesignPatch`）。一次调用 = **一个撤销单元**（spec 6.6-05），
+ * 所以段落弹窗的"整格保存"是一次调用而不是六次。
+ */
+export interface ResumeEditorDesignPatchView {
+  inkHex?: EditorStyleAxisPatch<string>;
+  paperHex?: EditorStyleAxisPatch<string>;
+  accentHex?: EditorStyleAxisPatch<string>;
+  /** 给 `null` 是整组正文档取消。 */
+  body?: EditorStyleAxisPatch<ResumeEditorBodyPatchView>;
+  paragraph?: ResumeEditorParagraphPatchView;
 }
 
 /** 编辑器里的一个区块（标签由界面按 kind 取 i18n，同 3.2-06 的口径；`entryIds` 是条目级拖拽的把手数据）。 */
@@ -2555,6 +2631,15 @@ export interface BridgeSignatures {
    * 界外与非有限数都被拒——**message 跨进程不丢**，界面上那句提示由主进程的原因拼。
    */
   'resume.editor.metric': { args: [docId: string, key: EditorMetricKeyView, value: number]; returns: ResumeEditorView };
+  /**
+   * 改一次样式（6.6-05）：文档主题三色、正文三轴、某一类区块的六条段落轴，一次调用一个撤销单元。
+   * 颜色形状、档位枚举与数值界都由主进程 `editor-ops.ts` 那一份判据挡下，被拒时上浮
+   * `RESUME_EDITOR_EDIT_REJECTED`，子原因（`bad-color` / `bad-token` / `unknown-kind` / `out-of-bounds`）在 `details.reason`。
+   */
+  'resume.editor.design': {
+    args: [docId: string, patch: ResumeEditorDesignPatchView];
+    returns: ResumeEditorView;
+  };
   /**
    * 换预览模板或语言（3.6-04）。它不碰文档、不产生撤销单元，所以"切模板丢数据"在这套形状里无从发生。
    * 两个参数都不给就是只刷新读数；未知模板 id 以 `RESUME_EDITOR_TEMPLATE_UNKNOWN` 失败。

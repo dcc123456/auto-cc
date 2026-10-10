@@ -1,9 +1,19 @@
-import { GripVertical, Redo2, Save, Timer, Undo2, X } from 'lucide-react';
+import { GripVertical, Palette, Redo2, Save, Timer, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { EditorMetricKeyView, ResumeEditorView, ResumeLocaleView } from '@auto-cc/shared';
+import type {
+  EditorFontFamilyView,
+  EditorFontWeightView,
+  EditorMetricKeyView,
+  EditorTextAlignView,
+  ResumeEditorDesignPatchView,
+  ResumeEditorDesignView,
+  ResumeEditorView,
+  ResumeLocaleView,
+  ResumeSectionKindView,
+} from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { Banner, DeskButton, DeskRange, DeskSelect, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSelect, DeskSwatch, deskReason } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -26,6 +36,146 @@ const METRIC_ROWS: { key: EditorMetricKeyView; unit: 'pt' | 'mm' | 'ratio'; step
 interface DragState {
   fromIndex: number;
   overIndex: number;
+}
+
+/**
+ * 色卡格里摆的那些色（spec 6.6-05）。
+ * 摆的是**档**而不是自由输入：主进程那道 `#rrggbb` 判据（`editor-ops.ts` 的 `bad-color`）
+ * 因此永远不需要在人面前报错——人挑不出一个不合法的颜色，也就没有"界面放行而保存被拒"的分叉（§2.5）。
+ * 前三档是稿上的中性墨色与两档纸色，其余按墨案那套低饱和色相排。
+ */
+const SWATCH_HEXES = [
+  '#101820',
+  '#1b2228',
+  '#334155',
+  '#64748b',
+  '#f7f5f2',
+  '#ffffff',
+  '#a31621',
+  '#b93b26',
+  '#7c2d12',
+  '#0b5c50',
+  '#134e4a',
+  '#1e3a8a',
+  '#312e81',
+  '#a16207',
+  '#3f3f46',
+] as const;
+
+/** 「随模板」这一档的哨兵值：`DeskSegmented` 的值必须是字符串，而 null 在补丁里另有"取消那一格"的语义。 */
+const INHERIT = 'inherit';
+
+/**
+ * 主题预设（一次点击 = 一次调用 = 一个撤销单元，spec 6.6-05 的那一条）。
+ * `default` 那一档把主题四格全部取消（`paragraph` 不动：段落样式是另一族表态）。
+ */
+const THEME_PRESETS: { id: string; patch: ResumeEditorDesignPatchView }[] = [
+  { id: 'default', patch: { inkHex: null, paperHex: null, accentHex: null, body: null } },
+  {
+    id: 'ink',
+    patch: {
+      inkHex: '#101820',
+      paperHex: '#f7f5f2',
+      accentHex: '#a31621',
+      body: { fontFamily: 'serif', weight: 'normal' },
+    },
+  },
+  {
+    id: 'jade',
+    patch: {
+      inkHex: '#1b2228',
+      paperHex: '#ffffff',
+      accentHex: '#0b5c50',
+      body: { fontFamily: 'sans', weight: 'normal' },
+    },
+  },
+  {
+    id: 'seal',
+    patch: {
+      inkHex: '#334155',
+      paperHex: '#f7f5f2',
+      accentHex: '#b93b26',
+      body: { fontFamily: 'serif', weight: 'medium' },
+    },
+  },
+];
+
+/** 段落样式的六种区块种类（与 `resume.kind.*` 同一份枚举，界面不另列一套）。 */
+const PARAGRAPH_KINDS: readonly ResumeSectionKindView[] = [
+  'summary',
+  'experience',
+  'education',
+  'skills',
+  'project',
+  'campus',
+];
+
+/** 主题里的三格颜色轴（顺序即画面顺序）。 */
+const THEME_COLOR_AXES: readonly ('inkHex' | 'paperHex' | 'accentHex')[] = ['inkHex', 'paperHex', 'accentHex'];
+
+/** 段落样式里的两格颜色轴（字色与底色）。 */
+const PARAGRAPH_COLOR_AXES: readonly ('inkHex' | 'backdropHex')[] = ['inkHex', 'backdropHex'];
+
+/** 字族的两个档（清单来自 `model.ts` 的 `FONT_FAMILY_TOKENS`，过界那侧按同一串验收）。 */
+const FONT_FAMILY_TOKENS: readonly EditorFontFamilyView[] = ['sans', 'serif'];
+
+/** 字重的四个档。 */
+const FONT_WEIGHT_TOKENS: readonly EditorFontWeightView[] = ['normal', 'medium', 'semibold', 'bold'];
+
+/** 对齐的四个档。 */
+const TEXT_ALIGN_TOKENS: readonly EditorTextAlignView[] = ['left', 'center', 'right', 'justify'];
+
+/**
+ * 拼一格的**主题**颜色补丁（写成三个分支而不是 `{ [axis]: value }`：计算属性会让键退化成
+ * `string`，那份补丁就到不了 `ResumeEditorDesignPatchView` 的形状了）。
+ * @param axis 哪一格
+ * @param value 新色，或 `null` 取消那一格
+ * @returns 只含那一格的补丁
+ */
+function themePatch(axis: 'inkHex' | 'paperHex' | 'accentHex', value: string | null): ResumeEditorDesignPatchView {
+  if (axis === 'inkHex') return { inkHex: value };
+  if (axis === 'paperHex') return { paperHex: value };
+  return { accentHex: value };
+}
+
+/**
+ * 拼一格的**段落**样式补丁。
+ * @param kind 当前选中的区块种类（补丁里必填，主进程按它定位那一格）
+ * @param axis 段落六条轴之一
+ * @param value 新值，或 `null` 取消那一格
+ * @returns 只带 `kind` 与那一条轴的补丁
+ */
+function paragraphPatch(
+  kind: ResumeSectionKindView,
+  axis: 'sizePt' | 'weight' | 'align' | 'lineHeight' | 'inkHex' | 'backdropHex',
+  value: string | number | null,
+): ResumeEditorDesignPatchView {
+  return { paragraph: { kind, [axis]: value } };
+}
+
+/**
+ * 判"当前主题是不是这一套预设"（预设格的选中态用，不是判据——判界只在主进程做一次）。
+ * @param design 投影里带回来的主题（`undefined` = 从没设过）
+ * @param patch 那一套预设的补丁
+ * @returns 预设里给出的每一格都对得上才算选中；全 null 那一套要求 `design` 整格不存在
+ */
+function matchesPreset(design: ResumeEditorDesignView | undefined, patch: ResumeEditorDesignPatchView): boolean {
+  if (patch.inkHex === null && patch.paperHex === null && patch.accentHex === null && patch.body === null) {
+    return design === undefined;
+  }
+  // 正文档在这一支只认"预设给了具体档位"那一种：`null`（整组取消）只出现在上面那一套 default 里。
+  const presetBody = typeof patch.body === 'object' ? patch.body : undefined;
+  if (!design || (patch.body !== undefined && !presetBody)) return false;
+  const bodySame =
+    !presetBody ||
+    ((design.body?.fontFamily ?? INHERIT) === (presetBody.fontFamily ?? INHERIT) &&
+      (design.body?.weight ?? INHERIT) === (presetBody.weight ?? INHERIT));
+  return (
+    design.inkHex === patch.inkHex &&
+    design.paperHex === patch.paperHex &&
+    design.accentHex === patch.accentHex &&
+    bodySame
+  );
 }
 
 /**
@@ -65,6 +215,8 @@ export function ResumeEditor({
   const [rejected, setRejected] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
   const [drag, setDrag] = useState<DragState>();
+  /** 段落样式当前调的那一类区块（默认最常改的那一类；它只是界面状态，不进撤销栈）。 */
+  const [paragraphKind, setParagraphKind] = useState<ResumeSectionKindView>('experience');
   /** 拖拽落点要读实时值：`pointerup` 的闭包里读 state 会拿到起手那一刻的旧落点。 */
   const dragRef = useRef<DragState | undefined>(undefined);
   /** 进行中的拖拽监听的摘除口，供卸载时兜底。 */
@@ -199,6 +351,25 @@ export function ResumeEditor({
     });
 
   /**
+   * 改一格样式（spec 6.6-05）。一次调用 = **一个撤销单元**，所以点一次预设发的是整套补丁而不是四次单格。
+   *
+   * 界面不判颜色形状、不判档位清单、不判数值界（AGENTS.md §2.5）：那三件事只在主进程的
+   * `planDesign` 做一次，拒了就把那句原因原样摆出来。色卡因此只摆得出 `#rrggbb`，
+   * 人挑不出一个不合法的颜色，也就不存在"界面放行、保存被拒"的分叉。
+   * @param axis 哪一格（回执与拒绝话术里要说清是哪一格）
+   * @param patch 补丁（`null` = 取消那一格，回到模板默认档）
+   */
+  const applyDesign = (axis: string, patch: ResumeEditorDesignPatchView) =>
+    void run(t('resume.editor.design'), () => bridge?.resume['editor.design'](docId, patch), {
+      apply: (next) => {
+        setView(next);
+        setRejected(undefined);
+      },
+      describe: () => t('resume.editor.designDone', { axis: t(`resume.editor.axes.${axis}`) }),
+      onError: (error) => setRejected(error.message),
+    });
+
+  /**
    * 换预览模板或语言（3.6-04）：它不碰文档，所以画面上只换排版而数据一字不变。
    * @param templateId 目标模板 id，不给表示不改
    * @param locale 目标预览语言，不给表示不改
@@ -261,11 +432,79 @@ export function ResumeEditor({
   const isLargeDocument = rowCount > view.timing.largeDocumentSectionCount;
   /** 在途那一档优先级最高：这时任何键的理由都是"上一趟还没回来"，而不是它自己的业务条件。 */
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
-  const { dead, reason: afterBusy } = deskReason(t, 'resume.editor', busyReason);
+  const { dead, label: reasonLabel, reason: afterBusy } = deskReason(t, 'resume.editor', busyReason);
   /** 各键的禁用理由：在途优先，其次才是它自己的业务条件（顺序即优先级，与第十二片同一条写法）。 */
   const undoReason = afterBusy(!view.canUndo, 'NOTHING_TO_UNDO');
   const redoReason = afterBusy(!view.canRedo, 'NOTHING_TO_REDO');
   const saveReason = afterBusy(!view.isDirty, 'NOTHING_TO_SAVE');
+
+  /**
+   * 样式层（spec 6.6-05）在这里只读投影：`design` 缺省 = 这份文档从没设过主题，产物随模板。
+   * 段落那一格按**区块种类**定位（裁定第 3 条的粒度：文档主题 + 段落样式，不做逐字段级）。
+   */
+  const design = view.layout.design;
+  const paragraphStyle = design?.paragraphs?.[paragraphKind];
+  /** 预设格的选中态：只对得上那一套才涂选中；人自己拼出来的组合不是任何一套，于是空格都不涂。 */
+  const activePresetId = THEME_PRESETS.find((preset) => matchesPreset(design, preset.patch))?.id;
+
+  /**
+   * 一行数值样式轴（字号 / 行距）：滑杆 + 读数 + 一颗「随模板」。
+   *
+   * 三条轴共用这一份画法（§2.2）：界表**沿用度量那一张**（`view.metricBounds`），
+   * 滑杆两端同样各多摆一份容差，越界一律由主进程拒 —— 样式轴不另立第二份界（§2.5）。
+   * 「随模板」这一格没设过时按不动，理由码 `ALREADY_FOLLOWING`：它不是坏了，是没什么可取消的。
+   * @param axis 轴名（i18n 与 `data-testid` 的后缀）
+   * @param row 这一行的界、当前读数与两条出口
+   */
+  const numericRow = (
+    axis: string,
+    row: {
+      boundKey: 'baseFontPt' | 'lineHeight';
+      step: number;
+      unit: 'pt' | 'ratio';
+      /** 这一格设过没有（`undefined` = 随模板，滑杆摆在它继承来的那一档上）。 */
+      current: number | undefined;
+      /** 随模板时滑杆显示的那一档：正文档跟 `layout.baseFontPt`，段落档跟它自己的父档。 */
+      fallback: number;
+      onChange: (value: number) => void;
+      onClear: () => void;
+    },
+  ) => {
+    const bound = view.metricBounds[row.boundKey];
+    const reach = (bound.max - bound.min) * OUT_OF_BOUNDS_REACH;
+    const shown = row.current ?? row.fallback;
+    return (
+      <div key={axis} className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <span data-testid={`resume-editor-design-label-${axis}`} className="w-28 shrink-0">
+          {t(`resume.editor.axes.${axis}`)}
+        </span>
+        <DeskRange
+          action={`resume-editor-design-${axis}`}
+          data-testid={`resume-editor-design-${axis}`}
+          min={Number((bound.min - reach).toFixed(2))}
+          max={Number((bound.max + reach).toFixed(2))}
+          step={row.step}
+          value={shown}
+          {...dead(busyReason)}
+          onValueChange={(value) => row.onChange(Number(value))}
+          className="w-40"
+        />
+        <span data-testid={`resume-editor-design-value-${axis}`} className="w-16 text-slate-300">
+          {shown} {t(`resume.editor.unit.${row.unit}`)}
+        </span>
+        <DeskButton
+          action={`resume-editor-design-${axis}-follow`}
+          variant="ghost"
+          compact
+          busy={!!busy}
+          {...dead(afterBusy(row.current === undefined, 'ALREADY_FOLLOWING'))}
+          onClick={row.onClear}
+        >
+          {t('resume.editor.followTemplate')}
+        </DeskButton>
+      </div>
+    );
+  };
 
   return (
     <section data-testid="resume-editor" className="rounded-xl border border-line bg-ink-900/60 p-4">
@@ -450,6 +689,192 @@ export function ResumeEditor({
                 })}
               </span>
             </label>
+          );
+        })}
+      </div>
+
+      <h4 className="mt-4 flex items-center gap-1 text-[11px] font-semibold text-slate-300">
+        <Palette size={12} />
+        {t('resume.editor.theme')}
+      </h4>
+      <p className="text-[11px] text-slate-500">{t('resume.editor.themeHint')}</p>
+      <div className="mt-2 space-y-2" data-testid="resume-editor-design">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 shrink-0 text-[11px] text-slate-400">{t('resume.editor.axes.preset')}</span>
+          <DeskSegmented
+            action="resume-editor-design-preset"
+            markers={{ testid: 'resume-editor-design-preset' }}
+            value={activePresetId}
+            options={THEME_PRESETS.map((preset) => ({
+              value: preset.id,
+              label: t(`resume.editor.preset.${preset.id}`),
+            }))}
+            onSelect={(id) => {
+              const preset = THEME_PRESETS.find((candidate) => candidate.id === id);
+              if (preset) applyDesign('preset', preset.patch);
+            }}
+            busy={!!busy}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
+          />
+        </div>
+
+        {THEME_COLOR_AXES.map((axis) => (
+          <div key={axis} className="flex flex-wrap items-center gap-2">
+            <span className="w-28 shrink-0 text-[11px] text-slate-400">{t(`resume.editor.axes.${axis}`)}</span>
+            <DeskSwatch
+              action={`resume-editor-design-${axis}`}
+              markers={{ testid: `resume-editor-design-${axis}` }}
+              hexes={SWATCH_HEXES}
+              value={design?.[axis]}
+              clearLabel={t('resume.editor.followTemplate')}
+              nameOf={(hex) => t('resume.editor.swatchName', { hex })}
+              onSelect={(hex) => applyDesign(axis, themePatch(axis, hex))}
+              onClear={() => applyDesign(axis, themePatch(axis, null))}
+              busy={!!busy}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
+            />
+          </div>
+        ))}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 shrink-0 text-[11px] text-slate-400">{t('resume.editor.axes.bodyFontFamily')}</span>
+          <DeskSegmented
+            action="resume-editor-design-family"
+            markers={{ testid: 'resume-editor-design-family' }}
+            value={design?.body?.fontFamily ?? INHERIT}
+            options={[
+              { value: INHERIT, label: t('resume.editor.followTemplate') },
+              ...FONT_FAMILY_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.family.${token}`) })),
+            ]}
+            onSelect={(value) =>
+              applyDesign('bodyFontFamily', { body: { fontFamily: value === INHERIT ? null : value } })
+            }
+            busy={!!busy}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 shrink-0 text-[11px] text-slate-400">{t('resume.editor.axes.bodyWeight')}</span>
+          <DeskSegmented
+            action="resume-editor-design-weight"
+            markers={{ testid: 'resume-editor-design-weight' }}
+            value={design?.body?.weight ?? INHERIT}
+            options={[
+              { value: INHERIT, label: t('resume.editor.followTemplate') },
+              ...FONT_WEIGHT_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.weight.${token}`) })),
+            ]}
+            onSelect={(value) => applyDesign('bodyWeight', { body: { weight: value === INHERIT ? null : value } })}
+            busy={!!busy}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
+          />
+        </div>
+
+        {numericRow('bodySizePt', {
+          boundKey: 'baseFontPt',
+          step: 0.5,
+          unit: 'pt',
+          current: design?.body?.sizePt,
+          fallback: view.layout.baseFontPt,
+          onChange: (value) => applyDesign('bodySizePt', { body: { sizePt: value } }),
+          onClear: () => applyDesign('bodySizePt', { body: { sizePt: null } }),
+        })}
+
+        <p className="text-[11px] text-slate-500">{t('resume.editor.bodySizeHint')}</p>
+      </div>
+
+      <h4 className="mt-4 text-[11px] font-semibold text-slate-300">{t('resume.editor.paragraph')}</h4>
+      <p className="text-[11px] text-slate-500">{t('resume.editor.paragraphHint')}</p>
+      <div className="mt-2 space-y-2" data-testid="resume-editor-paragraph">
+        <DeskSegmented
+          action="resume-editor-paragraph-kind"
+          markers={{ testid: 'resume-editor-paragraph-kind' }}
+          value={paragraphKind}
+          options={PARAGRAPH_KINDS.map((kind) => ({ value: kind, label: t(`resume.kind.${kind}`) }))}
+          onSelect={setParagraphKind}
+          busy={!!busy}
+          disabledReason={busyReason}
+          disabledReasonLabel={reasonLabel(busyReason)}
+        />
+
+        {numericRow('paragraphSizePt', {
+          boundKey: 'baseFontPt',
+          step: 0.5,
+          unit: 'pt',
+          current: paragraphStyle?.sizePt,
+          fallback: design?.body?.sizePt ?? view.layout.baseFontPt,
+          onChange: (value) => applyDesign('paragraphSizePt', paragraphPatch(paragraphKind, 'sizePt', value)),
+          onClear: () => applyDesign('paragraphSizePt', paragraphPatch(paragraphKind, 'sizePt', null)),
+        })}
+
+        {numericRow('paragraphLineHeight', {
+          boundKey: 'lineHeight',
+          step: 0.05,
+          unit: 'ratio',
+          current: paragraphStyle?.lineHeight,
+          fallback: view.layout.lineHeight,
+          onChange: (value) => applyDesign('paragraphLineHeight', paragraphPatch(paragraphKind, 'lineHeight', value)),
+          onClear: () => applyDesign('paragraphLineHeight', paragraphPatch(paragraphKind, 'lineHeight', null)),
+        })}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 shrink-0 text-[11px] text-slate-400">{t('resume.editor.axes.paragraphWeight')}</span>
+          <DeskSegmented
+            action="resume-editor-paragraph-weight"
+            markers={{ testid: 'resume-editor-paragraph-weight' }}
+            value={paragraphStyle?.weight ?? INHERIT}
+            options={[
+              { value: INHERIT, label: t('resume.editor.followTemplate') },
+              ...FONT_WEIGHT_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.weight.${token}`) })),
+            ]}
+            onSelect={(value) => applyDesign('paragraphWeight', paragraphPatch(paragraphKind, 'weight', value))}
+            busy={!!busy}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-28 shrink-0 text-[11px] text-slate-400">{t('resume.editor.axes.paragraphAlign')}</span>
+          <DeskSegmented
+            action="resume-editor-paragraph-align"
+            markers={{ testid: 'resume-editor-paragraph-align' }}
+            value={paragraphStyle?.align ?? INHERIT}
+            options={[
+              { value: INHERIT, label: t('resume.editor.followTemplate') },
+              ...TEXT_ALIGN_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.align.${token}`) })),
+            ]}
+            onSelect={(value) => applyDesign('paragraphAlign', paragraphPatch(paragraphKind, 'align', value))}
+            busy={!!busy}
+            disabledReason={busyReason}
+            disabledReasonLabel={reasonLabel(busyReason)}
+          />
+        </div>
+
+        {PARAGRAPH_COLOR_AXES.map((axis) => {
+          /** 轴名在补丁里是 `inkHex`/`backdropHex`，在文案与 testid 里要带 `paragraph` 前缀（免得和主题那三格撞名）。 */
+          const label = axis === 'inkHex' ? 'paragraphInkHex' : 'paragraphBackdropHex';
+          return (
+            <div key={axis} className="flex flex-wrap items-center gap-2">
+              <span className="w-28 shrink-0 text-[11px] text-slate-400">{t(`resume.editor.axes.${label}`)}</span>
+              <DeskSwatch
+                action={`resume-editor-paragraph-${axis}`}
+                markers={{ testid: `resume-editor-paragraph-${axis}` }}
+                hexes={SWATCH_HEXES}
+                value={paragraphStyle?.[axis]}
+                clearLabel={t('resume.editor.followTemplate')}
+                nameOf={(hex) => t('resume.editor.swatchName', { hex })}
+                onSelect={(hex) => applyDesign(label, paragraphPatch(paragraphKind, axis, hex))}
+                onClear={() => applyDesign(label, paragraphPatch(paragraphKind, axis, null))}
+                busy={!!busy}
+                disabledReason={busyReason}
+                disabledReasonLabel={reasonLabel(busyReason)}
+              />
+            </div>
           );
         })}
       </div>

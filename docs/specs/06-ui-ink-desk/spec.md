@@ -173,7 +173,7 @@ overflow-hidden`、段头 `shrink-0`、正文 `min-h-0 flex-1 overflow-y-auto`�
 | 6.6-02 | 渲染侧只发**语义槽位类** `rz-ink / rz-band / rz-head / rz-body`，hex 只出现在 `buildPrintHtml` 发的文档级 `:root{--rz-*:…}`；`TemplateContext` 带 `design`、`renderWithSpec` 一次算出 `spec ⊕ design` ⇒ 50 行模板零改动。`print-css.ts` 为每个 `rz-*` 加真 `put()` 规则（于是自动进 `PRINT_UTILITY_KEYS`）                         | C    | 既有机检两条继续绿：模板片段禁 `<style>`/`style="`（`template.test.ts:193-199`）、模板用到的 class 必须在 `PRINT_UTILITY_KEYS`（`template-library.test.ts:144-154`）。**新增一条机检**：hex 字面量只许出现在文档级 style 块                                                                                                                                                                                                                                                                                                                              | [x]  |
 | 6.6-03 | **屏上纸面有真边距**：`buildPrintHtml` 发 `@media screen{body{padding:<margin>}}@media print{body{padding:0}}`，单一来源 `doc.layout.margin`；不新增常量、不动打印选项（`margins:{0,0,0,0}` + `preferCSSPageSize:true` 是已钉事实）                                                                                                | C+V  | C：`print.test.ts` 在 `@page` 那条旁边各补一条钉两条媒体分支，且「预览与导出用同一份 HTML 源」那条仍绿。V：纸面帧自己（`about:srcdoc` target，直连 CDP）读回 `@media screen{body{padding:14mm 16mm}}` 与计算内边距 `52.9134px / 60.4724px` = **14mm / 16mm**，与 `DEFAULT_LAYOUT.margin` 逐位相等；画面一张。读数见 `6.6-03-screen-margin-readings.txt`                                                                                                                                                                                                  | [x]  |
 | 6.6-04 | **衬线随包**：`resources/fonts/` 补 Noto Serif SC 400/700（中文 + 拉丁共四只 woff2，OFL），`EMBEDDED_FONTS` 加四条 ⇒ `FONT_SET_ID` 自动跟着（3.7-01 快照记的就是这份清单）；`LICENSES.md` 记来源与条文同一性。**并修掉一条同源缺陷**：预览面此前根本取不到随包字体（屏与产物两种字族）                                             | C+V  | C：`print.test.ts` 三条——四只衬线档以自己的族名声明、`font-sans`/`font-serif` 各自至少认领一个随包族名、`fontSet` 含两族八档。V：纸面帧里八档 `@font-face` 的 src 全是相对 base、`document.fonts.load` 每档回 1 条、`check(...,'简历')` 为 true；**决定性一条**是同一字族栈只差 `'Noto Serif SC'` 一格时中文位图 raster hash 与有墨像素都变（1378041559/5044 ↔ 1111970614/5117），而 advance 与 DOM 宽度量不出来（两侧都 1em）；导出产物 `strings` 读到 `NotoSerifSCExtraLight-{Regular,Bold}`。包体读数 +3.0MB。见 `6.6-04-embedded-serif-readings.txt` | [x]  |
-| 6.6-05 | 界面上这套样式点得到：新原件 `DeskSwatch`（调色格，**不用** `<input type=color>`）、`ResumeEditor` 六只滑杆下方加"主题"区（`DeskSegmented` 选预设 / `DeskField`+`DeskSelect` 选色名与字族 / `DeskSwatch` 上底色）、段落样式走 `Modal`；桥接加 `resume.editor.design`（结构化 patch、**一个 undo 单元**）；文案走 zh/en 双包        | C+V  | 机检三条：`src/ui/**` 之外不许裸控件（§10）、`hover:` 要交互凭据（§13）、按不动要原因码（§14）；语言包两侧齐 + 占位符实参。V：**新原件到货必须配一张真实几何读数**（6.2-25 那条教训）；undo 一条腿走编辑器历史（改一次主题 = 一步）                                                                                                                                                                                                                                                                                                                      | [ ]  |
+| 6.6-05 | 界面上这套样式点得到：新原件 `DeskSwatch`（调色格，**不用** `<input type=color>`）、`ResumeEditor` 六只滑杆下方加"主题"区（`DeskSegmented` 选预设 / `DeskField`+`DeskSelect` 选色名与字族 / `DeskSwatch` 上底色）、段落样式走 `Modal`；桥接加 `resume.editor.design`（结构化 patch、**一个 undo 单元**）；文案走 zh/en 双包        | C+V  | 机检三条：`src/ui/**` 之外不许裸控件（§10）、`hover:` 要交互凭据（§13）、按不动要原因码（§14）；语言包两侧齐 + 占位符实参。V：**新原件到货必须配一张真实几何读数**（6.2-25 那条教训）；undo 一条腿走编辑器历史（改一次主题 = 一步）                                                                                                                                                                                                                                                                                                                      | [x]  |
 
 **本机证不了的一条（6.6-04 的装机半边，标 `[!]` 不推测）**：装机版渲染层是 `file://` 页 + `font-src 'self'`，
 `sandbox=""` 的 srcdoc 帧在 `file:` scheme 下能否取到那条相对字体路径（Chromium 对 `file:` 的 CORS 判定与
@@ -203,6 +203,26 @@ overflow-hidden`、段头 `shrink-0`、正文 `min-h-0 flex-1 overflow-y-auto`�
   **一条过程读数**：第一轮 `pnpm test` 曾以 `packages/pdf-edit` 一条红中止——`3.5-15 的绘制半边 > 量到 monospace`
   的 `baseFontsOf` 回 `[]`；该包单独跑两次、单文件跑三次全绿，第二轮全量亦绿。判为**负载相关的夹具脆弱**
   而非本轮改动的后果（本轮射程只有 `packages/resume-doc/**`，pdf-edit 不依赖它），登记为欠项，不写成已修。
+
+**6.6-05 的补片（2026-10-11，判据原文一字未改，这里记两处落点与一条状态翻转）**
+
+- **6.6-01 的 `[!]` 就地翻成 `[x]`**：当年欠的那一格是"`bridge.ts` 的 `ResumeEditorLayoutView` 不带 `design`"，
+  理由是"在控件与通道到货之前挂它是零读者字段"。这一片控件与 `resume.editor.design` 通道都到了，
+  字段有了读者（活体读数见 `6.6-05-style-controls-readings.txt` 第 7 节：预设换档会换掉产物里
+  `<article class="font-sans …">` ↔ `font-serif`，撤销回到底时 `:root{--rz-*}` 整块消失），
+  所以那一行的 `[!]` 是**等这一片**而不是被推翻。原判据那句"欠的是 bridge.ts 那一格"照原文留着不重写。
+- **段落样式不走 `Modal`，改成内联在编辑器里**（原句"段落样式走 `overlays.tsx:322` 的 `Modal`"到这一格为止不再适用）。
+  理由是 `Modal` 自己的教义就是"可逆动作不进遮罩"——改一类区块的字号/对齐是一步撤销就回来的事，
+  把它塞进遮罩反而多一次"打开—找控件—关闭"的往返，也让用户在遮罩里看不见右列那张纸的重出。
+  内联之后仍然满足这一格真正要证的三件事：控件只出自 `src/ui/**`、按不动带原因码、一次调用一个撤销单元。
+- **`DeskSwatch` 落在 `packages/renderer/src/ui/controls.tsx` 里，不另起文件**。
+  原件层今天就是这一个模块（`DeskButton`/`DeskRange`/`DeskSegmented`/`DeskSelect`/`Banner`/`deskReason` 都住这里），
+  新开一支只会让"控件只出自原件层"这条规矩多一处射程；`check-renderer-conventions.ts` 第 10 节按目录判定，与文件名无关。
+- 门禁实跑（2026-10-11，退出码不接管道）：`pnpm typecheck` = 0、`pnpm lint` = 0、`pnpm format:check` = 0、
+  `pnpm test` = 0。活体一侧：真实鼠标点击走完整条通道（`harness click --url 5173`，页面自己的
+  `aria-pressed` 与回执横幅为凭），新原件 `DeskSwatch` 配了真实几何与逐格计算色读数。
+  **仍然欠的一条不是读数能替的**：用户最初那句"模板太丑了"判的是好不好看，这一格只证到"点得到、改得动、退得回"。
+  审美那一半要用户在场看一眼才算通过（见读数文件末尾"本机证不了的"）。
 
 ---
 

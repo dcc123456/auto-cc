@@ -1,7 +1,7 @@
 /**
  * 排版编辑会话（plan §8.3 的 `editor-session.ts`，接住 spec 3.6-03 的「撤销/重做与状态面板反映当前步骤」）。
  *
- * 装的是那份**正在编辑的简历文档**：三个动作（区块重排、条目重排、改度量）都只在真的改了它的时候
+ * 装的是那份**正在编辑的简历文档**：四个动作（区块重排、条目重排、改度量、改样式）都只在真的改了它的时候
  * 长出一条撤销单元。历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`——全仓唯一那一份
  * past/present/future（画布 5.10-19 与轻编辑 3.5-08 是两个已验收消费者），这里开第三份栈就是违反
  * 3.5-08 那句"不引入第二套历史栈"（AGENTS.md §2.2）。
@@ -18,7 +18,15 @@ import { createSnapshotStack, DEFAULT_SNAPSHOT_HISTORY } from '@auto-cc/core/sna
 import type { ResumeDocument } from './model.js';
 import { contentHash } from './normalize.js';
 import type { TemplateLocale } from './template.js';
-import { planEntryMove, planMetric, planSectionMove, type EditorOutcome, type MetricKey } from './editor-ops.js';
+import {
+  planEntryMove,
+  planMetric,
+  planDesign,
+  planSectionMove,
+  type DesignPatch,
+  type EditorOutcome,
+  type MetricKey,
+} from './editor-ops.js';
 
 /** 建会话时需要的读数。 */
 export interface ResumeEditorSessionOptions {
@@ -76,6 +84,12 @@ export interface ResumeEditorSession {
    * @returns 同 `moveSection`；界外给 `out-of-bounds`，非有限数给 `not-a-number`
    */
   setMetric(key: MetricKey, value: number): EditorOutcome<ResumeDocument>;
+  /**
+   * 改主题/段落样式（spec 6.6-05）。一次调用是一个撤销单元：弹窗里"整格保存"就是这一条。
+   * @param patch 结构化补丁（见 `editor-ops.ts` 的 `DesignPatch`；给 `null` 是清掉那一格）
+   * @returns 同 `moveSection`；形状非法给 `editor-ops` 的拒绝项（原样转发，不在这里判第二遍）
+   */
+  setDesign(patch: DesignPatch): EditorOutcome<ResumeDocument>;
   /** 回退一步；栈空返回 false 且文档不变。 */
   undo(): boolean;
   /** 重做一步；没有可重做的返回 false。 */
@@ -156,6 +170,13 @@ export function createResumeEditorSession(
     setMetric(key, value) {
       const current = stack.present();
       const planned = planMetric(current.layout, key, value);
+      if (!planned.ok) return planned;
+      return apply({ ...current, layout: planned.value });
+    },
+    setDesign(patch) {
+      const current = stack.present();
+      const planned = planDesign(current.layout, patch);
+      // 判据只有一份：颜色/档位/界外都由 `planDesign` 挡，会话不写第二条 if（AGENTS.md §2.5）。
       if (!planned.ok) return planned;
       return apply({ ...current, layout: planned.value });
     },

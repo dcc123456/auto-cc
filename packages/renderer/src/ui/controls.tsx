@@ -1423,3 +1423,122 @@ export function DeskViewTrail({
     </div>
   );
 }
+
+export interface DeskSwatchProps {
+  /** 每只色卡的 `data-action` 前缀：单格拿到 `<action>-<hex>`（`#` 换成 `-`，选择器里不带引号取不到）。 */
+  action: string;
+  /** 调色格里的十六进制色（`#rrggbb`）；顺序即从左到右。 */
+  hexes: readonly string[];
+  /** 当前选中的色；`undefined` 表示这一格随模板（一格都不涂选中档）。 */
+  value: string | undefined;
+  /** 选中回调（收人话签名：十六进制串，不是事件）。 */
+  onSelect: (hex: string) => void;
+  /** 给「取消这一格」留的退路（不给就不画那一格）；界面上它是"选错了要退回去"的唯一出口。 */
+  onClear?: () => void;
+  /** 「随模板」那一格的文案（调用方翻译，§5.5）。 */
+  clearLabel?: string;
+  /** 每只色卡的无障碍名（调用方按 hex 插值翻好；色卡上没有字，读屏只能从这里拿名字）。 */
+  nameOf: (hex: string) => string;
+  /** 在途：整组按不动，且**不**派发 `onSelect`。 */
+  busy?: boolean;
+  /** 按不动的原因码（与 `DeskButton` 同一口径）。 */
+  disabledReason?: string;
+  /** 原因码对人说的话。 */
+  disabledReasonLabel?: string;
+  /** 整组的外边/排布档。 */
+  className?: string;
+  /** 挂在组容器上的附加 `data-*`（验收要读"当前选到哪一格"时用这一格）。 */
+  markers?: Record<string, string>;
+}
+
+/**
+ * 色卡格本身的画法。**必须写成完整字面量**（Tailwind 只扫源码里出现的字符串），
+ * 而色本身走 `--desk-swatch` 那一只变量：hex 是运行期递进来的，拼进 class 永远不会被编译出来，
+ * 于是画面上由 `setProperty` 供色（同 `PdfPaperView` 的动态几何口径，§5.2 那条已登记写法）。
+ * @param isSelected 是否是当前选中格
+ * @param busy 整组是否在途（按不动时不许长出 hover，spec 6.2-25）
+ * @returns 该格的 class 串
+ */
+const swatchCellClass = (isSelected: boolean, busy: boolean): string =>
+  `size-5 shrink-0 rounded-chip border bg-[var(--desk-swatch)] ` +
+  // 选中靠**双层描边**而不是色：色卡本身可以是任何色，加一圈青瓷才在深墨与浅纸上都看得见，
+  // 而这一圈不携带任何语义色（选中 ≠ 风险），与 `DeskSegmented` 同一套画法。
+  `${isSelected ? 'border-celadon ring-1 ring-ink-950 ' : 'border-line-strong '}` +
+  (busy ? 'opacity-40' : 'hover:border-slate-300');
+
+/**
+ * 色卡（spec 6.6-05 的取色原件）。
+ *
+ * 它存在的理由是一条合规红线：渲染层**不许**用 `<input type="color">`（`check-renderer-conventions.ts`
+ * 第 10 节：`src/ui/**` 之外不许出现裸控件，而系统取色器在 `sandbox: true` 下弹不回来，
+ * 用它等于画一只点了没东西的键）。所以这里摆的是一组**给定的色**——人挑的是档，不是自由字符串，
+ * 而主进程那一侧的判据（`#rrggbb`）因此永远不需要给人写错误文案。
+ * 颜色本身走 CSS 变量而不是 class：hex 是运行期值，Tailwind 扫不到拼出来的 utility。
+ * @param props 见 `DeskSwatchProps`
+ * @returns 一排色卡，最前可选「随模板」那一格
+ */
+export function DeskSwatch({
+  action,
+  hexes,
+  value,
+  onSelect,
+  onClear,
+  clearLabel,
+  nameOf,
+  busy = false,
+  disabledReason,
+  disabledReasonLabel,
+  className = '',
+  markers,
+}: DeskSwatchProps) {
+  const groupAttrs = Object.fromEntries(
+    Object.entries(markers ?? {}).map(([name, attr]) => [`data-${name}`, attr]),
+  ) as Record<string, string>;
+  const dead = deskFieldDead(busy, disabledReason, disabledReasonLabel);
+  return (
+    <span
+      role="group"
+      {...groupAttrs}
+      className={`flex flex-wrap items-center gap-1 rounded-control border border-line-strong bg-ink-950 p-1 ${className}`}
+    >
+      {onClear && clearLabel ? (
+        <button
+          type="button"
+          data-action={`${action}-clear`}
+          data-on={value === undefined ? 'true' : 'false'}
+          aria-pressed={value === undefined}
+          aria-label={clearLabel}
+          {...(dead.isDead
+            ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
+            : { onClick: onClear })}
+          {...(disabledReasonLabel ? { title: disabledReasonLabel } : {})}
+          className={
+            value === undefined
+              ? 'size-5 shrink-0 rounded-chip border border-celadon bg-[repeating-linear-gradient(135deg,transparent,transparent_3px,var(--color-line-strong)_3px,var(--color-line-strong)_4px)] ring-1 ring-ink-950'
+              : 'size-5 shrink-0 rounded-chip border border-line-strong bg-[repeating-linear-gradient(135deg,transparent,transparent_3px,var(--color-line-strong)_3px,var(--color-line-strong)_4px)] hover:border-slate-300'
+          }
+        />
+      ) : null}
+      {hexes.map((hex) => (
+        <button
+          key={hex}
+          type="button"
+          data-action={`${action}-${hex.replace('#', '')}`}
+          data-hex={hex}
+          data-on={hex === value ? 'true' : 'false'}
+          aria-pressed={hex === value}
+          aria-label={nameOf(hex)}
+          {...(dead.isDead
+            ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
+            : { onClick: () => onSelect(hex) })}
+          {...(disabledReasonLabel ? { title: disabledReasonLabel } : {})}
+          // 一只节点上的一个变量：色由运行期给，class 里只留 `bg-[var(--desk-swatch)]` 那一条字面量。
+          ref={(node) => {
+            node?.style.setProperty('--desk-swatch', hex);
+          }}
+          className={swatchCellClass(hex === value, dead.isDead)}
+        />
+      ))}
+    </span>
+  );
+}
