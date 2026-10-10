@@ -73,6 +73,95 @@ export function minimalMultiPagePdf(pageCount: number): Uint8Array {
 }
 
 /**
+ * 一条内容流算子的记录（`styledResumePdf` 的构造表用它说"这一格本来该被抽成什么"）。
+ */
+export interface StyledPdfExpectation {
+  /** 期望抽到的文本（逐字）。 */
+  readonly text: string;
+  /** 资源名（`/F1` 之类），抽取侧要能读回字族提示。 */
+  readonly fontName: string;
+  /** 字号（pt）。 */
+  readonly sizePt: number;
+  /** 基线左下角（pt，PDF 坐标：原点在左下）。 */
+  readonly xPt: number;
+  readonly yPt: number;
+  /** 墨色 `[r,g,b]`，0..1；`null` 表示这一格没写颜色算子（沿默认黑）。 */
+  readonly rgb: readonly [number, number, number] | null;
+  /** 旋转角（度）；非 0 的那些是"已知丢失项"，不进恢复率的分母。 */
+  readonly rotationDeg: number;
+}
+
+/**
+ * `styledResumePdf()` 的内容清单：七格文字（三种字族、三种字号、两格有色、一格旋转）
+ * + 一条色带 + 一条分隔线。写在这里而不是散在字符串里，是为了让判据能拿**同一份表**当期望值。
+ */
+export const STYLED_PDF_RUNS: readonly StyledPdfExpectation[] = [
+  { text: 'Jane Doe', fontName: 'F2', sizePt: 18, xPt: 50, yPt: 800, rgb: null, rotationDeg: 0 },
+  { text: 'Work Experience', fontName: 'F1', sizePt: 12, xPt: 50, yPt: 770, rgb: null, rotationDeg: 0 },
+  { text: 'Led platform migration', fontName: 'F3', sizePt: 12, xPt: 50, yPt: 750, rgb: null, rotationDeg: 0 },
+  {
+    text: 'Senior Engineer',
+    fontName: 'F3',
+    sizePt: 12,
+    xPt: 50,
+    yPt: 730,
+    rgb: [0.639, 0.086, 0.086],
+    rotationDeg: 0,
+  },
+  { text: 'Shanghai China', fontName: 'F1', sizePt: 12, xPt: 50, yPt: 710, rgb: [0.043, 0.361, 0.314], rotationDeg: 0 },
+  { text: 'Total 999 hires', fontName: 'F1', sizePt: 11, xPt: 50, yPt: 640, rgb: null, rotationDeg: 0 },
+  { text: 'ROTATED WATERMARK', fontName: 'F1', sizePt: 12, xPt: 300, yPt: 400, rgb: null, rotationDeg: 45 },
+] as const;
+
+/** 色带（填充矩形）：`styledResumePdf` 画它一条，抽取侧的矩形恢复率分母就是它。 */
+export const STYLED_PDF_BAND = { xPt: 50, yPt: 690, widthPt: 495, heightPt: 34, rgb: [0.969, 0.961, 0.949] } as const;
+
+/** 分隔线（描边直线）：与色带同属"非文字元素"，但画法完全不同（`m`/`l`/`S` 而不是 `re`/`f`）。 */
+export const STYLED_PDF_RULE = { x1Pt: 50, yPt: 680, x2Pt: 545, rgb: [0.502, 0.502, 0.502] } as const;
+
+/**
+ * 生成一份**带样式**的单页 PDF（spec 3.8-01 的输入：抽取完整性要有可核对的期望值）。
+ *
+ * 与 `minimalPdf` 同一个口径：手写对象与交叉引用表，**不用 pdf-lib 造再让 pdf-lib 读**，
+ * 也不用 pdf-lib 造再让 pdf.js 读（那等于拿被测引擎的另一半自证）。
+ * 三条字族都是标准 14 型（Helvetica / Times-Roman / Helvetica-Bold），因此不需要内嵌字体，
+ * 任何解析器都能读到 `/BaseFont`，字族提示这一条腿才是真的在测抽取而不是测字体装载。
+ * @returns 单页 A4 的 PDF 字节（内容清单见 `STYLED_PDF_RUNS` / `STYLED_PDF_BAND` / `STYLED_PDF_RULE`）
+ */
+export function styledResumePdf(): Uint8Array {
+  const ops: string[] = [
+    // 色带：先画，后面的文字才盖在它上面（与真实简历模板的"区块底色"同一顺序）。
+    'q 0.969 0.961 0.949 rg 50 690 495 34 re f Q',
+    // 分隔线：描边一条 0.8pt 的灰线。
+    `q 0.502 0.502 0.502 RG 0.8 w ${String(STYLED_PDF_RULE.x1Pt)} 680 m ${String(STYLED_PDF_RULE.x2Pt)} 680 l S Q`,
+  ];
+  for (const run of STYLED_PDF_RUNS) {
+    const color = run.rgb ? `${run.rgb.map((channel) => channel.toFixed(3)).join(' ')} rg ` : '';
+    // 旋转那一格走文本矩阵（Tm 的 a/b/c/d 四条就是旋转 + 缩放），与真实文档里的斜切同一画法。
+    const rad = (run.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(rad).toFixed(3);
+    const sin = Math.sin(rad).toFixed(3);
+    // 有色的那一格包在一对 `q…Q` 里：真实生成器都这么写，而 PDF 的颜色状态本来会一路延续到下一次赋值——
+    // 不包的话，后面没写颜色的格子会"继承"到前一格的红，抽出来看着对、其实测不到状态进出这条腿。
+    const open = run.rgb ? 'q ' : '';
+    const close = run.rgb ? ' Q' : '';
+    ops.push(
+      `${open}BT ${color}/${run.fontName} ${String(run.sizePt)} Tf ${cos} ${sin} ${(-Math.sin(rad)).toFixed(3)} ${cos} ${String(run.xPt)} ${String(run.yPt)} Tm (${run.text.replace(/[()\\]/g, '')}) Tj ET${close}`,
+    );
+  }
+  const body = ops.join('\n');
+  return wrapPdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> >> /Contents 7 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+    `<< /Length ${String(Buffer.byteLength(body))} >>\nstream\n${body}\nendstream`,
+  ]);
+}
+
+/**
  * 生成一份「结构合法但带加密字典」的最小 PDF（spec 3.4-03 / plan §7.10 的加密确定态腿）。
  *
  * 造法与上面两条同一个口径：手写 trailer 里的 `/Encrypt` 引用 + 一个 `/Filter /Standard` 字典，
