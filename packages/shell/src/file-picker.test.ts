@@ -19,6 +19,26 @@ describe('打开面板的参数判定', () => {
     if (decision.isAccepted) expect(decision.options.filters[0]?.extensions).toEqual(['pdf']);
   });
 
+  // 这一条照的是 `ResumeDesk.pickAndImport` 的真实形状（两组筛选器，第二组是界面上明写的「所有文件」）。
+  // 上一条夹具只有一组，所以"星号被拒 → 原生面板从不弹出来"这个断裂在四道门禁里全绿躲过了整整一轮。
+  it('渲染层真实发的两组形状（含「所有文件」那一组）被接纳', () => {
+    const decision = decideOpenPicker(
+      {
+        title: '选择要导入的简历文件',
+        filters: [
+          { name: '简历文件', extensions: ['pdf', 'docx', 'md', 'txt'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      },
+      3,
+    );
+    expect(decision.isAccepted).toBe(true);
+    if (decision.isAccepted) {
+      expect(decision.options.filters).toHaveLength(2);
+      expect(decision.options.filters[1]?.extensions).toEqual(['*']);
+    }
+  });
+
   it.each([
     ['不是对象', null],
     ['标题为空', { ...validRequest(), title: '  ' }],
@@ -39,6 +59,10 @@ describe('打开面板的参数判定', () => {
     ['扩展名带路径分隔符', { ...validRequest(), filters: [{ name: '简历文件', extensions: ['../etc/passwd'] }] }],
     ['扩展名带点', { ...validRequest(), filters: [{ name: '简历文件', extensions: ['.pdf'] }] }],
     ['扩展名不是字符串', { ...validRequest(), filters: [{ name: '简历文件', extensions: [1] }] }],
+    [
+      '星号与别的扩展名混写（自相矛盾的一组）',
+      { ...validRequest(), filters: [{ name: '简历文件', extensions: ['*', 'pdf'] }] },
+    ],
   ])('%s 被拒并带回原因', (_label: string, raw: unknown) => {
     const decision = decideOpenPicker(raw, 3);
     expect(decision.isAccepted).toBe(false);

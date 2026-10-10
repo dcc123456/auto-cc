@@ -91,8 +91,12 @@ function readRequest(
     if (!Array.isArray(group.extensions) || group.extensions.length === 0 || group.extensions.length > 12) {
       return { reason: `筛选器「${name}」的扩展名数量不合法` };
     }
+    // 「所有文件」那一组必须放过去：Electron 的写法是 `extensions: ['*']`，而简历导入界面就明写着这一组。
+    // 收紧到只认"整组只有这一颗星"——`['*','pdf']` 那种自相矛盾的形状仍然按非法处理（星号进不了下面的正则）。
+    // 不放行的后果是这一口每次都在这行报错、原生面板根本不弹（简历轨的导入主入口整条断掉）。
+    const isAllFilesGroup = group.extensions.length === 1 && group.extensions[0] === '*';
     for (const extension of group.extensions) {
-      if (typeof extension !== 'string' || !EXTENSION_PATTERN.test(extension)) {
+      if (typeof extension !== 'string' || (!isAllFilesGroup && !EXTENSION_PATTERN.test(extension))) {
         return { reason: `扩展名不合法：${String(extension)}` };
       }
     }
