@@ -14,6 +14,22 @@ import { factKeyOf, type Entry, type FactKey, type ResumeDocument, type Section 
 
 const factKeySchema = zod.enum(['company', 'role', 'period', 'achievement']);
 
+/** 区块种类（样式层按它寻址段落，所以与 `sectionSchema` 共用一份枚举，§2.5 一个判据一个出处）。 */
+const sectionKindSchema = zod.enum(['summary', 'experience', 'education', 'skills', 'project', 'campus']);
+
+/** 字重档枚举：与 `print-css.ts` 里已登记的 `font-*` 那一族一一对应。 */
+const fontWeightSchema = zod.enum(['normal', 'medium', 'semibold', 'bold']);
+
+/** 对齐档枚举（与 CSS `text-align` 同口径）。 */
+const textAlignSchema = zod.enum(['left', 'center', 'right', 'justify']);
+
+/**
+ * 一条十六进制颜色（`#rrggbb`）。
+ * 只认这一种形状是刻意的：样式层的值要一路写进**产物文档**的 `<style>` 块里，
+ * 放开成自由字符串就等于把注入面交给用户输入（§8 的系统边界口径）。
+ */
+const hexColorSchema = zod.string().regex(/^#[0-9a-fA-F]{6}$/, '需要 #rrggbb 形式的十六进制颜色');
+
 const fieldSchema = zod.strictObject({
   key: zod.string().min(1),
   value: zod.string(),
@@ -28,9 +44,34 @@ const entrySchema = zod.strictObject({
 
 const sectionSchema = zod.strictObject({
   id: zod.string().min(1),
-  kind: zod.enum(['summary', 'experience', 'education', 'skills', 'project', 'campus']),
+  kind: sectionKindSchema,
   title: zod.string(),
   entries: zod.array(entrySchema),
+});
+
+/** 一段落（按区块种类）的样式覆盖：每条轴都可缺省。 */
+const paragraphStyleSchema = zod.strictObject({
+  sizePt: zod.number().positive().optional(),
+  weight: fontWeightSchema.optional(),
+  align: textAlignSchema.optional(),
+  lineHeight: zod.number().positive().optional(),
+  inkHex: hexColorSchema.optional(),
+  backdropHex: hexColorSchema.optional(),
+});
+
+/** 文档主题（spec 6.6-01）：整块可缺省，缺省 = 完全随模板。 */
+const designSchema = zod.strictObject({
+  inkHex: hexColorSchema.optional(),
+  paperHex: hexColorSchema.optional(),
+  accentHex: hexColorSchema.optional(),
+  body: zod
+    .strictObject({
+      fontFamily: zod.enum(['sans', 'serif']).optional(),
+      sizePt: zod.number().positive().optional(),
+      weight: fontWeightSchema.optional(),
+    })
+    .optional(),
+  paragraphs: zod.partialRecord(sectionKindSchema, paragraphStyleSchema).optional(),
 });
 
 const layoutSchema = zod.strictObject({
@@ -44,6 +85,7 @@ const layoutSchema = zod.strictObject({
   baseFontPt: zod.number().positive(),
   lineHeight: zod.number().positive(),
   columns: zod.number().int().min(1).max(2),
+  design: designSchema.optional(),
 });
 
 const profileSchema = zod.strictObject({

@@ -1536,6 +1536,80 @@ zh 19 / en 18 条改写，判据是"这句话有没有一个开发者标识符�
   另记一条噪音：`pnpm -r test` 在 `packages/sessions` / `packages/browser` 打
   `Cannot find module '<pkg>/install.js'`（electron 自带 postinstall 的解析问题），那两个包测试仍全绿。
 
+### 3.25 补片二（2026-10-11，样式层到货：`layout.design` 进模型、`rz-*` 槽位进产物 —— 6.6-01 / 6.6-02）
+
+**这条补片不取代上面任何一节，也不取代补片一**（§4.5：号段与原判据原文一律保留）。
+它登记的是报障里那五个词在代码里的落点，以及原判据中三处被源码形状推翻的假设。
+
+**落点对照**（`layout.design`，全部可选，粒度到"文档主题 + 段落样式"为止 = 裁定第 3 条）：
+
+| 报障里的词              | 模型里的轴                          | 产物里的落点                                                                                   |
+| ----------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 文字颜色                | `inkHex`（文档级）+ 段落级 `inkHex` | `rz-design` 挂 `<article>`、`rz-ink` 挂正文那几格，读同一只 `--rz-ink`                         |
+| 文字背景色              | 段落级 `backdropHex`                | `rz-<kind>-band` → `background-color:var(--rz-p-<kind>-band)`                                  |
+| 字体大小                | `body.sizePt` + 段落级 `sizePt`     | `rz-body-size` / `rz-<kind>-size`（pt 直写，不走 `--rz-*` 之外的第二套字号）                   |
+| 字体样式（字族）        | `body.fontFamily`                   | 复用已有的 `font-serif` / `font-sans` 两只 utility，**不新铺** `rz-family`                     |
+| 字体样式（字重）        | `body.weight` + 段落级 `weight`     | `rz-body-weight` / `rz-<kind>-weight`（`medium`/`semibold` 换成数）                            |
+| 段落样式（对齐 / 行距） | 段落级 `align` / `lineHeight`       | `rz-<kind>-align` / `rz-<kind>-lh`                                                             |
+| 纸底与强调色            | `paperHex` / `accentHex`            | 纸底没有类槽，落在文档级 `body{background-color:var(--rz-paper)}`；强调色 `rz-head` 挂区块标题 |
+
+**三处被源码推翻的原判据（原句保留，这里只记实际形状）**
+
+1. 「`TemplateContext` 带 `design`」没走这一支。`renderWithSpec` 的 `doc` 形参本来就握着 `doc.layout.design`，
+   再经 context 传一份等于把同一事实登记两个入口（§2.5），而且 50 支模板的委托签名会跟着一起变。
+   `TemplateContext` 一行未动，design 从 `doc` 读；`spec ⊕ design` 的合并仍然只在那一支函数里算一次。
+2. 「按 `sectionId`/`kind` 的段落档」只落 `kind` 那一半。`sectionId` 是用户与流水线会改的东西
+   （`resume.editor.move` 重排、KB 同步重建区块），样式挂在它上面就会在区块删掉后留下孤儿样式档；
+   而模板侧根本没有 id 维度——`SIDE_KINDS` 分栏、`normalize.ts` 的规范序都按 `kind`。
+   裁定第 3 条说的"段落样式"粒度正好等于 `kind`，所以段落寻址面是 **6 类 × 6 轴**，不是"每个区块一格"。
+3. 「`rz-ink / rz-band / rz-head / rz-body`」四只类表达不了这张 36 格的表。实际形状：段落级
+   `rz-<kind>-{size,weight,align,lh,ink,band}`（36 只）+ 文档级 5 只（`rz-design`、`rz-ink`、`rz-head`、
+   `rz-body-size`、`rz-body-weight`）。原句的 `rz-band` 变成每一类自己的 `-band`，`rz-body` 拆成
+   `-size` / `-weight`（字族那一格复用既有的 `font-serif`/`font-sans`，与 6.6-04 那两条随包栈同源，
+   不再登记第三份字族真相）。`paragraphPresets` 那一格没落进模型：预设是**界面层**的产物（6.6-05 的
+   `DeskSegmented`），库里只存摊平后的轴值——存"预设名"就是第二份真相，用户手改一格之后那个名字会说谎。
+
+**为什么是一张表而不是三处字符串**：一个轴的值要一路走到三个地方才算生效——① 模板片段上挂的 class、
+② 打印样式表里那条读变量的规则、③ 产物 `:root` 里那只变量。三处各写一遍，改一条轴就有三份真相，
+而错的那一份恰好看不出来（class 挂上了、变量没发出去 ⇒ 静默回到模板默认值）。
+所以 `internal/design-slots.ts` 同时持有这三样，`print-css.ts` 逐条 `put()`、`template-kit.ts` 只认
+`rowClassesFor` / `headingClassFor` / `articleHookFor` 三支函数、`print-html.ts` 按 `designVarEntries` 发块。
+
+**一条贯穿全表的规矩：类只在对应变量真的存在时才挂。** CSS 里 `color:var(--rz-ink)` 而该变量未定义时
+是"计算值非法"→ 该属性按 `unset` 处理（对 `color` 等于继承来一个浏览器默认黑），既不报错也不回落模板档，
+于是"没设这一条轴"变成"悄悄变黑"。宁可少挂一只类。反向的判据也在测试里：片段里挂上的每一只 `rz-*`
+都反查得到 `:root` 里的那只变量，无主题时片段里一个 `rz-` 都没有（于是产物与样式层落地前逐字节相同）。
+
+**两条顺序合起来才是"用户赢"**：槽位类与模板自带的 `text-neutral-700` 同特异度（0,1,0），同特异度按出现次序决胜。
+所以① `print-css.ts` 里 `rz-*` 那一族必须排在全部 utility 之后，② `:root{…}` 块必须排在 `PRINT_STYLESHEET` 之后。
+各钉一条（`design.test.ts` 读 `html.indexOf('.text-neutral-700{') < html.indexOf('.rz-ink{') < html.indexOf(':root{')`）。
+
+**`pill` 那一支标题豁免**：它画的是色块上的反白字（`bg-*-600 text-white`），把字色换成用户选的强调色
+就成了同色块上的同色字——不是"样式没生效"，是生效得看不见。豁免写在模板层（`spec.heading` 在那儿），
+`headingClassFor(design, reversedFill)` 的第二参就是为它留的。
+
+**不占迁移号**：`design` 落在既有 `resume_docs.doc_json` 那一个 TEXT blob 里（AGENTS §9「加表才占号」）。
+两条配套判据按 plan 原样钉住：改样式**不**触发事实锁定（`checkFactLock` 只看 sections/entries/fields），
+改样式会正常弄脏快照（`contentSlice` 含 layout）。
+
+**一条机检写法的失手（值得记）**：「hex 字面量只许出现在文档级 style 块」不能写成"全文 grep `#rrggbb`"——
+`PRINT_STYLESHEET` 里的 Tailwind 色板本身就是 hex。判据必须按**用户给的那几只值**逐个查、
+且只在剔掉 `:root` 块之后查。夹具因此换掉一格：`skills.backdropHex` 原本写 `#0f766e`（正好是色板里的 teal-600），
+第一次跑就报"漏到了文档级之外"——那是判据错，不是实现漏。换成 `#0b5c50` 之后同一条断言才是它本来说的那件事。
+
+**仍欠（不装作做完）**
+
+- `[!]` 6.6-01 的 `bridge.ts` 载荷那一格随 6.6-05 一起落：`ResumeEditorLayoutView` 今天不带 `design`，
+  在界面（6.6-05 的 `DeskSwatch` + `resume.editor.design`）之前挂上它就是一只零读者字段——
+  6.2-25 那条教训（"零消费者的原件等于没写过的原件"）在这里同样成立，所以整行标 `[!]` 而不是 `[x]`。
+- `[!]` 一条**负载相关的夹具脆弱**（本轮撞到、没修）：全量 `pnpm test` 第一轮里 `packages/pdf-edit` 的
+  「3.5-15 的绘制半边 > 量到 monospace」回 `baseFontsOf = []` 而中止整条递归链；该包单独跑两次、
+  单文件跑三次全绿，第二轮全量亦绿。本轮射程只有 `packages/resume-doc/**`（pdf-edit 不依赖它），
+  所以按 §7.4 的口径如实登记而不是"顺手改人家的夹具"。下一步要做的是把那两条 `toContain('Courier')`
+  改成对同一份产物的**结构**判据（或让夹具自己声明它依赖的对象流形状），而不是加重试。
+- `[ ]` 这一族唯一没被样式层覆盖的轴是**正文字族之外的逐字段级样式**（同一个区块里公司名与成就行分开上色）：
+  裁定第 3 条明确不做，spec 也不为它立行。"改完真看起来不一样"是 6.6-05 的 V 判据，本行两格的方式列都是 C。
+
 ## 4. 分片与落点
 
 | 片号 | 内容                                                                              | 文件                                                                  |

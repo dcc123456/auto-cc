@@ -10,7 +10,8 @@
  */
 import { resumeTemplate, type TemplateLocale } from '../template.js';
 import { PRINT_STYLESHEET } from './print-css.js';
-import type { ResumeDocument } from '../model.js';
+import { designVarEntries, PAPER_VAR_NAME } from './design-slots.js';
+import type { DocumentDesign, ResumeDocument } from '../model.js';
 import type { ResumePrintRequest } from '@auto-cc/shared';
 
 /** 随包内嵌的简历正文字体族名（打印 HTML 与 CSS `font-family` 必须一致）。 */
@@ -77,6 +78,31 @@ export const FONT_SET_ID = `${[...new Set(EMBEDDED_FONTS.map((f) => f.family))].
 ).join(',')}`;
 
 /**
+ * 样式层在**产物文档级**落下的那一小块 `<style>`（spec 6.6-02 的后半边，也是全份产物里唯一允许出现
+ * 用户所选颜色的位置）。
+ *
+ * 为什么必须走这一支而不是让模板自己写颜色：`resumeTemplate.render` 的片段受 3.2-07 约束
+ * （不得出现 `style="` 与 `<style>`，`template.test.ts` 逐条机检），而 50 套模板只有一条装配路径；
+ * 于是「用户选了什么颜色」这件事在 CSS 层被拆成两半——模板挂的是**恒定存在**的槽位类（`design-slots.ts`），
+ * 值由这里发到 `:root` 的变量上。改一次颜色不需要重编译任何样式表，产物里变的只有这一小块。
+ *
+ * 顺序裁定的另一半：这一支排在 `PRINT_STYLESHEET` **之后**。槽位类与模板自带的 `text-neutral-700`
+ * 同特异度（0,1,0），CSS 在同特异度时按出现次序决胜，所以只有排在这后面的槽位规则才赢得过模板默认档。
+ * @param design 文档主题（可缺省）
+ * @returns 一小段 CSS；无主题或一条轴都没设时返回空串，于是产物与样式层落地前**逐字节相同**
+ */
+function designStyleBlock(design: DocumentDesign | undefined): string {
+  const vars = designVarEntries(design);
+  const entries = Object.entries(vars);
+  if (entries.length === 0) return '';
+  const rootRule = `:root{${entries.map(([name, value]) => `${name}:${value};`).join('')}}`;
+  // 纸底色没有对应的 class 槽：它落在 `body` 上——屏幕上那张纸的整个 padding 区（6.6-03 那条 `@media screen`
+  // 的边距）与打印出去的整页底必须是同一个色，而这两者都只有 `body` 能盖住。
+  const paperRule = vars[PAPER_VAR_NAME] === undefined ? '' : `body{background-color:var(${PAPER_VAR_NAME});}`;
+  return `${rootRule}${paperRule}`;
+}
+
+/**
  * 把简历文档渲染成「可独立打印的完整 HTML 文档」。
  * 纸张/页边距/字号/行距全部取自 `doc.layout`（3.3-03「配置集中于模型、不散落魔法数」），
  * 并声明随包内嵌字体（3.3-05）；正文来自 `resumeTemplate.render`（沿用 3.2 的模板与 i18n）。
@@ -97,7 +123,7 @@ export function buildPrintHtml(
   fontBaseUrl: string,
 ): string {
   const body = resumeTemplate.render(doc, templateId, locale);
-  const { margin, baseFontPt, lineHeight, pageSize } = doc.layout;
+  const { margin, baseFontPt, lineHeight, pageSize, design } = doc.layout;
   const faces = EMBEDDED_FONTS.map(
     (f) =>
       `@font-face{font-family:'${f.family}';font-weight:${f.weight};font-style:normal;` +
@@ -120,7 +146,10 @@ export function buildPrintHtml(
   const screenMarginRule = `@media screen{body{padding:${marginSpec};}}@media print{body{padding:0;}}`;
   // 工具类样式表排在最后：模板按 3.2-07 用 utility class 表达版面，而这份文档不经过渲染层那条编译链，
   // class 只有在产物里带上对应规则才算数（缺它时三套模板导出像素相同，见 print-css.ts 文件头）。
-  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${breakRule}${baseRule}${screenMarginRule}${resetRule}${PRINT_STYLESHEET}</style></head><body>${body}</body></html>`;
+  // 样式层再往后一档：`:root` 的那些变量与 `body` 的纸底色必须与 `rz-*` 槽位同块同源（见 `designStyleBlock`），
+  // 无主题时它是空串，所以下面这一条拼接不改变"没设样式层的文档"的一个字节。
+  const designRule = designStyleBlock(design);
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><style>${faces}${pageRule}${breakRule}${baseRule}${screenMarginRule}${resetRule}${PRINT_STYLESHEET}${designRule}</style></head><body>${body}</body></html>`;
 }
 
 /**

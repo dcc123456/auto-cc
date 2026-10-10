@@ -9,8 +9,9 @@
  *
  * 分层口径：这不是渲染层的第二套样式系统（§5.1 的 Tailwind only 管的是 `packages/renderer`），
  * 它是**产物文档**自带的样式表；app 界面与简历 PDF 是两份文档，各自需要一份能独立解析的 CSS。
- * 取名与取值一律照 Tailwind v4 官方 utility，不在这份表之外新增自造 class。
+ * 取名与取值一律照 Tailwind v4 官方 utility；自造 class 只有文末 `rz-*` 那一族槽位，且它不带值、只读变量。
  */
+import { DESIGN_SLOT_RULES } from './design-slots.js';
 
 /** 色相档位（照 Tailwind 官方调色板取常用几档，够用即止，不为凑全而堆）。 */
 const PALETTE: Record<string, Record<number, string>> = {
@@ -445,6 +446,18 @@ put('list-disc', 'list-style-type:disc');
 put('break-inside-avoid', 'break-inside:avoid');
 put('break-after-avoid', 'break-after:avoid');
 put('break-before-avoid', 'break-before:avoid');
+
+/**
+ * 样式层的槽位规则（spec 6.6-02）——文件头那句「不自造 class」在此有一处**受控例外**：
+ * `rz-*` 不是版面 utility，而是「文档主题里那一条轴」的名字，它的**值**永远来自 `:root` 上的变量
+ * （由 `print-html.ts` 按 `designVarEntries` 发出），所以这一族规则是常量，用户改颜色改的是变量。
+ * 位置刻意排在全部 utility 之后：与 `text-[13px] text-neutral-700` 这类同特异度（0,1,0）的 class 竞时，
+ * 后出现者胜，于是"用户在界面上选的段落样式"盖过"模板写死的默认档"，而不是反过来。
+ * 类名与声明的唯一出处是 `design-slots.ts` 那张表（三处消费者共用，§2.5）。
+ */
+for (const slot of DESIGN_SLOT_RULES) {
+  put(slot.className, slot.declaration);
+}
 
 /**
  * 模板可用的 utility class 集合（`template.test.ts` 用它做覆盖机检：

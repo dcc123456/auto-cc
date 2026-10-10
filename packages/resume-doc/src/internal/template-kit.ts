@@ -9,8 +9,13 @@
  * 数据边界（3.2-05）：本层只决定**怎么摆**，不读任何字段之外的信息——
  * 取值一律经 `toEntryView`（唯一的"读数据"实现，缺核心槽位照旧抛 `TemplateBindingError`），
  * 不截断、不补日期、不新造事实。双栏只是把区块按 kind 分到两栏里，条目内容与文档次序一字不改。
+ *
+ * 样式层（spec 6.6-02）：`doc.layout.design` 里的用户选择**不改动这里任何一条轴的取值**，
+ * 只是往承着文字的那一格上多挂几个 `rz-*` 槽位类（类名/变量名/声明三样同出于 `design-slots.ts` 一张表）。
+ * 因此未设主题时这一层的产物与设主题前**逐字节相同**——50 套模板的一行委托也照旧零改动。
  */
-import type { ResumeDocument, Section } from '../model.js';
+import type { DocumentDesign, ResumeDocument, Section } from '../model.js';
+import { articleHookFor, headingClassFor, rowClassesFor } from './design-slots.js';
 import {
   escapeHtml,
   fieldLabel,
@@ -144,7 +149,7 @@ function renderHeader(spec: TemplateSpec, doc: ResumeDocument, ctx: TemplateCont
 
   switch (spec.header) {
     case 'center':
-      return `<header class="mb-4 text-center"><h1 class="${nameClass} text-neutral-900">${name}</h1><p class="text-xs ${inkText}">${line}</p></header>`;
+      return `<header class="mb-4 text-center"><h1 class="${nameClass}">${name}</h1><p class="text-xs ${inkText}">${line}</p></header>`;
     case 'right':
       return `<header class="mb-4 text-right"><h1 class="${nameClass}">${name}</h1><p class="text-xs ${inkText}">${line}</p></header>`;
     case 'split':
@@ -154,7 +159,7 @@ function renderHeader(spec: TemplateSpec, doc: ResumeDocument, ctx: TemplateCont
     case 'boxed':
       return `<header class="mb-4 border-2 border-${spec.accent}-700 px-4 py-3 text-center"><h1 class="${nameClass} text-${spec.accent}-900">${name}</h1><p class="text-xs text-neutral-600">${line}</p></header>`;
     case 'stacked':
-      return `<header class="mb-4"><h1 class="${nameClass} text-neutral-900">${name}</h1>${contactRows(doc, `text-xs ${inkText} leading-relaxed`)}</header>`;
+      return `<header class="mb-4"><h1 class="${nameClass}">${name}</h1>${contactRows(doc, `text-xs ${inkText} leading-relaxed`)}</header>`;
     case 'ruleUnder':
       return `<header class="mb-4 border-b-4 border-${spec.accent}-600 pb-2"><h1 class="${nameClass}">${name}</h1><p class="text-xs text-neutral-600">${line}</p></header>`;
     case 'left':
@@ -164,35 +169,64 @@ function renderHeader(spec: TemplateSpec, doc: ResumeDocument, ctx: TemplateCont
 }
 
 /**
- * 渲染一个区块标题（六种画法都在这一支函数里，预设表只挑画法编号）。
+ * 渲染一个区块标题（九种画法都在这一支函数里，预设表只挑画法编号）。
  * @param spec 版面取值
  * @param heading 已本地化的区块标题文案
  * @param ordinal 该区块在文档里的序位（`numbered` 画法用）
+ * @param design 文档主题（6.6-02：只有 `accentHex` 设了才多挂一只钩子）
  * @returns HTML 串
  */
-function renderHeading(spec: TemplateSpec, heading: string, ordinal: number): string {
+function renderHeading(
+  spec: TemplateSpec,
+  heading: string,
+  ordinal: number,
+  design: DocumentDesign | undefined,
+): string {
   const label = escapeHtml(heading);
   const accentText = `text-${spec.accent}-700`;
+  // 强调色的钩子在这一处统一加，不在九支分支里各写一遍：`put()` 出的 `.rz-head` 排在全部 utility 之后，
+  // 与各分支自带的 `text-*-700` / `text-neutral-500` 同特异度，后出现者胜，于是一支覆盖八种画法。
+  // `pill` 由 `headingClassFor` 豁免（色块上的反白字，换成强调色就等于隐形）。
+  const ink = headingClassFor(design, spec.heading === 'pill');
+  const wrap = (classes: string, inner = label, tail = ''): string =>
+    `<h2 class="${classes}${ink}">${inner}</h2>${tail}`;
   switch (spec.heading) {
     case 'doubleRule':
-      return `<h2 class="mb-1 border-b-2 border-t-2 border-${spec.accent}-600 py-1 text-xs font-bold uppercase tracking-widest ${accentText}">${label}</h2>`;
+      return wrap(
+        `mb-1 border-b-2 border-t-2 border-${spec.accent}-600 py-1 text-xs font-bold uppercase tracking-widest ${accentText}`,
+      );
     case 'bar':
-      return `<h2 class="mb-1.5 bg-${spec.accent}-100 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-${spec.accent}-800">${label}</h2>`;
+      return wrap(
+        `mb-1.5 bg-${spec.accent}-100 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-${spec.accent}-800`,
+      );
     case 'block':
-      return `<h2 class="mb-1.5 inline-block border-b-2 border-${spec.accent}-600 text-sm font-extrabold uppercase tracking-wide">${label}</h2>`;
+      return wrap(
+        `mb-1.5 inline-block border-b-2 border-${spec.accent}-600 text-sm font-extrabold uppercase tracking-wide`,
+      );
     case 'wide':
-      return `<h2 class="mb-1 text-[11px] font-semibold uppercase tracking-widest text-neutral-500">${label}</h2>`;
+      return wrap('mb-1 text-[11px] font-semibold uppercase tracking-widest text-neutral-500');
     case 'numbered':
-      return `<h2 class="mb-1.5 text-sm font-bold ${accentText}"><span class="mr-1 text-neutral-400">${String(ordinal).padStart(2, '0')}</span>${label}</h2>`;
+      return wrap(
+        `mb-1.5 text-sm font-bold ${accentText}`,
+        `<span class="mr-1 text-neutral-400">${String(ordinal).padStart(2, '0')}</span>${label}`,
+      );
     case 'leftBorder':
-      return `<h2 class="mb-1.5 border-l-4 border-${spec.accent}-500 pl-2 text-sm font-bold uppercase tracking-wide">${label}</h2>`;
+      return wrap(`mb-1.5 border-l-4 border-${spec.accent}-500 pl-2 text-sm font-bold uppercase tracking-wide`);
     case 'pill':
-      return `<h2 class="mb-1.5 inline-block rounded-full bg-${spec.accent}-600 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">${label}</h2>`;
+      return wrap(
+        `mb-1.5 inline-block rounded-full bg-${spec.accent}-600 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white`,
+      );
     case 'underlineShort':
-      return `<h2 class="mb-1.5 text-sm font-bold tracking-wide">${label}</h2><div class="mb-1 h-0.5 w-10 bg-${spec.accent}-600"></div>`;
+      return wrap(
+        'mb-1.5 text-sm font-bold tracking-wide',
+        label,
+        `<div class="mb-1 h-0.5 w-10 bg-${spec.accent}-600"></div>`,
+      );
     case 'rule':
     default:
-      return `<h2 class="mb-1 border-b border-${spec.accent}-300 pb-1 text-sm font-bold uppercase tracking-wide ${accentText}">${label}</h2>`;
+      return wrap(
+        `mb-1 border-b border-${spec.accent}-300 pb-1 text-sm font-bold uppercase tracking-wide ${accentText}`,
+      );
   }
 }
 
@@ -204,6 +238,7 @@ function renderHeading(spec: TemplateSpec, heading: string, ordinal: number): st
  * @param ctx 渲染上下文
  * @param templateId 模板 id（绑定错误文案用）
  * @param densityClasses 当前密度档的留白 class
+ * @param design 文档主题（6.6-02；缺省时一个 `rz-*` 类都不挂）
  * @returns HTML 串；区块无条目时整块不渲染（不留空标题）
  */
 function renderSection(
@@ -213,15 +248,16 @@ function renderSection(
   ctx: TemplateContext,
   templateId: string,
   densityClasses: { section: string; entry: string; body: string },
+  design: DocumentDesign | undefined,
 ): string {
   if (section.entries.length === 0) return '';
-  const heading = renderHeading(spec, sectionLabel(section.kind, ctx.locale), ordinal);
+  const heading = renderHeading(spec, sectionLabel(section.kind, ctx.locale), ordinal, design);
   const isPlain = section.kind === 'summary' || section.kind === 'skills';
   const entries = section.entries
     .map((entry) =>
       isPlain
-        ? renderPlainEntry(spec, section, entry, ctx, templateId)
-        : renderEntry(spec, section, entry, ctx, templateId),
+        ? renderPlainEntry(spec, section, entry, ctx, templateId, design)
+        : renderEntry(spec, section, entry, ctx, templateId, design),
     )
     .join('');
   const inner = isPlain && spec.plainGrid ? `<div class="grid grid-cols-2 gap-x-4">${entries}</div>` : entries;
@@ -235,6 +271,7 @@ function renderSection(
  * @param entry 条目
  * @param ctx 渲染上下文
  * @param templateId 模板 id
+ * @param design 文档主题（6.6-02）
  * @returns HTML 串
  */
 function renderEntry(
@@ -243,9 +280,13 @@ function renderEntry(
   entry: ResumeDocument['sections'][number]['entries'][number],
   ctx: TemplateContext,
   templateId: string,
+  design: DocumentDesign | undefined,
 ): string {
   const view = toEntryView(templateId, section, entry, ctx.locale);
   const classes = DENSITY_CLASSES[spec.density];
+  // 样式层的类挂在这里，不挂 `<section>`：栏上那一格自己带 `text-[13px]` 之类的 utility，
+  // 继承进来的字号会被它顶掉，只有落在承字的那一格里、与它同特异度且**排在它之后**才赢得过默认档。
+  const slots = rowClassesFor(design, section.kind);
   const headingClass =
     spec.columns === 2 && SIDE_KINDS.includes(section.kind) ? 'text-[12px] font-bold' : 'text-[13px] font-bold';
   const meta = view.meta
@@ -254,15 +295,15 @@ function renderEntry(
   const lines = view.lines
     .map(
       (line) =>
-        `<div class="${classes.body} text-neutral-700${line.label === '' ? '' : ' flex gap-1'}">` +
-        (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500">${line.label}:</span>`) +
+        `<div class="${classes.body} text-neutral-700${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
+        (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
         `<span class="min-w-0">${line.value}</span></div>`,
     )
     .join('');
   const head =
     spec.entry === 'split'
-      ? `<div class="flex items-baseline justify-between gap-2"><div class="${headingClass}">${view.heading}</div><div class="flex shrink-0 gap-2">${meta}</div></div>`
-      : `<div class="${headingClass}">${view.heading}</div><div class="flex gap-2">${meta}</div>`;
+      ? `<div class="flex items-baseline justify-between gap-2"><div class="${headingClass}${slots}">${view.heading}</div><div class="flex shrink-0 gap-2">${meta}</div></div>`
+      : `<div class="${headingClass}${slots}">${view.heading}</div><div class="flex gap-2">${meta}</div>`;
   const divider = spec.entryDivider ? ' border-b border-neutral-200 pb-1.5' : '';
   return `<div class="resume-entry${divider} ${classes.entry}">${head}${lines}</div>`;
 }
@@ -274,6 +315,7 @@ function renderEntry(
  * @param entry 条目
  * @param ctx 渲染上下文
  * @param templateId 模板 id
+ * @param design 文档主题（6.6-02）
  * @returns HTML 串
  */
 function renderPlainEntry(
@@ -282,16 +324,18 @@ function renderPlainEntry(
   entry: ResumeDocument['sections'][number]['entries'][number],
   ctx: TemplateContext,
   templateId: string,
+  design: DocumentDesign | undefined,
 ): string {
   const view = toEntryView(templateId, section, entry, ctx.locale);
   const classes = DENSITY_CLASSES[spec.density];
+  const slots = rowClassesFor(design, section.kind);
   const isSkill = section.kind === 'skills';
   const chip = isSkill && spec.heading === 'pill';
   const body = view.lines
     .map(
       (line) =>
-        `<div class="${chip ? `mr-1 mb-1 inline-block rounded-full bg-${spec.accent}-100 px-2 py-0.5 text-[11px] text-${spec.accent}-800` : `${classes.body} text-neutral-700`}${line.label === '' ? '' : ' flex gap-1'}">` +
-        (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500">${line.label}:</span>`) +
+        `<div class="${chip ? `mr-1 mb-1 inline-block rounded-full bg-${spec.accent}-100 px-2 py-0.5 text-[11px] text-${spec.accent}-800` : `${classes.body} text-neutral-700`}${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
+        (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
         `<span>${line.value}</span></div>`,
     )
     .join('');
@@ -313,26 +357,35 @@ export function renderWithSpec(
   templateId: string,
 ): string {
   const classes = DENSITY_CLASSES[spec.density];
+  const design = doc.layout.design;
   const header = renderHeader(spec, doc, ctx);
   const sections = doc.sections;
   let body: string;
 
   if (spec.columns === 1) {
-    body = sections.map((section, index) => renderSection(spec, section, index + 1, ctx, templateId, classes)).join('');
+    body = sections
+      .map((section, index) => renderSection(spec, section, index + 1, ctx, templateId, classes, design))
+      .join('');
   } else {
     const side = sections.filter((section) => SIDE_KINDS.includes(section.kind));
     const main = sections.filter((section) => !SIDE_KINDS.includes(section.kind));
     // 栏内序位沿用区块在文档里的原序（双栏只是摆位变化，不重排数据，3.2-05）。
     const ordinalOf = (section: Section): number => sections.indexOf(section) + 1;
     const mainHtml = main
-      .map((section) => renderSection(spec, section, ordinalOf(section), ctx, templateId, classes))
+      .map((section) => renderSection(spec, section, ordinalOf(section), ctx, templateId, classes, design))
       .join('');
     const sideHtml = side
-      .map((section) => renderSection(spec, section, ordinalOf(section), ctx, templateId, classes))
+      .map((section) => renderSection(spec, section, ordinalOf(section), ctx, templateId, classes, design))
       .join('');
     body = `<div class="grid grid-cols-3 gap-x-6"><div class="col-span-2">${mainHtml}</div><div class="text-[12px]">${sideHtml}</div></div>`;
   }
 
   const frame = spec.header === 'boxed' ? 'border border-neutral-300 p-5' : '';
-  return `<article class="${spec.serif ? 'font-serif' : 'font-sans'} text-neutral-900 ${frame}">${header}${body}</article>`;
+  // 正文字族：`design.body.fontFamily` 设了就换掉这套模板的 `serif` 轴取值（6.6-01 的"字体样式"就这一格），
+  // 未设时逐字回落到 `spec.serif`，于是无主题的产物与样式层落地前**字节相同**。
+  const family = design?.body?.fontFamily ?? (spec.serif ? 'serif' : 'sans');
+  // `rz-design` 是文档级墨色在**抬头**那一格的落点（顶掉 `article` 自带的 `text-neutral-900`，姓名那几格靠继承跟上）；
+  // 正文那一格另有 `rz-ink`，因为继承赢不过元素自己写的 utility。挂不挂由 `articleHookFor` 与 `rz-ink` 同源判定。
+  const hook = articleHookFor(design);
+  return `<article class="font-${family} text-neutral-900${hook} ${frame}">${header}${body}</article>`;
 }

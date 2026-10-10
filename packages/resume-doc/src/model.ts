@@ -20,6 +20,59 @@ export interface PageMargin {
   leftMm: number;
 }
 
+/** 字重档（取值必须是 `print-css.ts` 里已登记的 `font-*` 那一族，不引入自造档名）。 */
+export type FontWeightToken = 'normal' | 'medium' | 'semibold' | 'bold';
+
+/** 对齐档（与 CSS `text-align` 同口径；`justify` 是中文简历常见诉求）。 */
+export type TextAlignToken = 'left' | 'center' | 'right' | 'justify';
+
+/** 字体族档：只有随包的那两族可选（`print-html.ts` 的 `EMBEDDED_FONTS`），不给自由字符串。 */
+export type FontFamilyToken = 'sans' | 'serif';
+
+/**
+ * 一段落（按区块种类）的样式覆盖。
+ * **每一格都可缺省**，缺省 = 这一条轴仍由模板自己的预设决定（spec 6.6-01 的裁定：粒度到段落为止，
+ * 不做逐字段级）。渲染时逐条轴单独判定，不会因为"只设了对齐"就把那一类的字号/字色一起接管过去。
+ */
+export interface ParagraphStyle {
+  /** 字号（pt）；省略 = 沿用该档自己的字号。 */
+  sizePt?: number;
+  /** 字重。 */
+  weight?: FontWeightToken;
+  /** 对齐。 */
+  align?: TextAlignToken;
+  /** 行距倍数。 */
+  lineHeight?: number;
+  /** 文字颜色，`#rrggbb`。 */
+  inkHex?: string;
+  /** 文字背景色，`#rrggbb`（整段铺满，不是描边）。 */
+  backdropHex?: string;
+}
+
+/**
+ * 文档主题（spec 6.6-01）：用户能改的那一层，与模板自己的 `TemplateSpec` 叠加后生效。
+ * 整块可缺省——缺省即"这份文档完全随模板"，产物与加这一层之前逐字节相同（有一条单测钉住）。
+ */
+export interface DocumentDesign {
+  /** 正文墨色（`#rrggbb`）；省略 = 随模板。 */
+  inkHex?: string;
+  /** 纸面底色（`#rrggbb`）；省略 = 随模板（白）。 */
+  paperHex?: string;
+  /** 强调色（`#rrggbb`）：区块标题与那类"模板用 `text-<hue>-700` 点睛"的地方统一换成它。 */
+  accentHex?: string;
+  /** 正文字体族 / 字号 / 字重（三条轴各可单独缺省）。 */
+  body?: {
+    fontFamily?: FontFamilyToken;
+    sizePt?: number;
+    weight?: FontWeightToken;
+  };
+  /**
+   * 段落样式：键是**区块种类**（不是 sectionId——裁定第 3 条把粒度停在段落为止，
+   * 而种类是唯一能跨模板稳定寻址的键，界面也按它列六行）。
+   */
+  paragraphs?: Partial<Record<SectionKind, ParagraphStyle>>;
+}
+
 /**
  * 版面度量（plan §3.1「含度量」）。
  * 这些默认值来自 `DEFAULT_LAYOUT`，是「空文档 → 合法 A4 单页」这一判据（3.1-07）的来源之一：
@@ -34,6 +87,11 @@ export interface Layout {
   lineHeight: number;
   /** 分栏数——1 或 2；模型只存意图，实际栏宽由渲染轨算。 */
   columns: number;
+  /**
+   * 样式层（spec 6.6-01）：**可选**，落在既有的 `resume_docs.doc_json` 那一个 TEXT blob 里，
+   * 因此不占迁移号（AGENTS §9「加表才占号」）。
+   */
+  design?: DocumentDesign;
 }
 
 /** 事实锁定的字段类别（plan §3.1）：这四类不得由生成轨新造，只能来自知识库或被标为待确认。 */
