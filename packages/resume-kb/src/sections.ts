@@ -24,6 +24,7 @@ import {
   createEmptyDocument,
   educationFields,
   makeField,
+  normalizeRichLine,
   periodText,
   splitHeader,
   stripLineMarkup,
@@ -265,7 +266,11 @@ export function splitEntryBlocks(kind: SectionKind, lines: readonly string[]): s
   };
 
   for (const rawLine of lines) {
-    const content = stripLineMarkup(rawLine);
+    // 条目边界判据吃**原始行**（4.1-15）。装进块的内容分三种走法（4.1-18，plan §4.10 记录的偏离点）：
+    // ① 技能区块一条即一个实体、界面上渲染成小标签，标记留进去就会印成字面的「- TypeScript」，仍按老口径剥装饰；
+    // ② 每块首行是抬头行，交给 `splitHeader` 拆公司 / 职位 / 时间，同样不许标记混进字段值；
+    // ③ 其余正文行才做归一：项目符号换成封闭标记 `- ` / `  - `，交给打印面按 3.9 那条渲染成列表。
+    const content = kind === 'skills' || block.length === 0 ? stripLineMarkup(rawLine) : normalizeRichLine(rawLine);
     if (content === '') {
       flush();
       continue;

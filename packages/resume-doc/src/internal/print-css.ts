@@ -426,6 +426,11 @@ put('text-justify', 'text-align:justify');
 put('align-top', 'vertical-align:top');
 put('align-middle', 'vertical-align:middle');
 
+// 列表的两档标记（spec 3.9-02）：`list-disc` 本表已有（见下方装饰族），二级那一档是块级文法新增的一档。
+// `print-html.ts` 最小归零里的 `ul,ol{list-style:none}` 抹掉的是**浏览器默认**，不是我们的：
+// 本表排在它之后、且类名特异度高于元素名，所以这两条一定盖得过它（次序由 template-library.test.ts 钉住）。
+put('list-circle', 'list-style-type:circle');
+
 // —— 文本装饰与变换 ——
 put('uppercase', 'text-transform:uppercase');
 put('lowercase', 'text-transform:lowercase');

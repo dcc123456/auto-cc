@@ -305,6 +305,77 @@ describe('4.5-08 text 里的量化数字守恒', () => {
   });
 });
 
+describe('4.5-15 排版标记不进事实面（裁定㉘ 第 1 条：加重来自模型标注）', () => {
+  /** 基线那一段成果原文，四条用例都在它之上加标记或改数。 */
+  const BASE_ACHIEVEMENT = `主导订单服务重构，P99 延迟下降 40%，复用率 40%。${PII_EMAIL}`;
+
+  it('拆成两级列表 + 关键词加重的改写：数值与具名两条判据都不报（标记只是"怎么摆"）', () => {
+    const base = makeBaselineDocument();
+    const proposed = withField(
+      base,
+      'experience',
+      'e1',
+      'achievement',
+      `- 主导 **订单服务** 重构\n- P99 延迟下降 40%，复用率 40%。\n  - ${PII_EMAIL}`,
+    );
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.numberFindings).toHaveLength(0);
+    expect(report.entityFindings).toHaveLength(0);
+    expect(report.ok).toBe(true);
+  });
+
+  it('带标记时凭空多一个数照样拦（剥标记不等于放宽事实面）', () => {
+    const base = makeBaselineDocument();
+    const proposed = withField(
+      base,
+      'experience',
+      'e1',
+      'achievement',
+      `- 主导 **订单服务** 重构，P99 延迟下降 40%，复用率 35%。\n  - ${PII_EMAIL}`,
+    );
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.numberFindings).toHaveLength(1);
+    expect(report.numberFindings[0]?.missing).toEqual(['40']);
+    expect(report.numberFindings[0]?.added).toEqual(['35']);
+    expect(report.ok).toBe(false);
+  });
+
+  it('反向证据：模型真写了有序列表，那个编号就是一个凭空数字，被 4.5-08 整条拦下', () => {
+    // 提示词第 7 条禁有序列表不是习惯性劝告——这一例就是它的代价，spec 4.5-15 的反向判据。
+    const base = makeBaselineDocument();
+    const proposed = withField(base, 'experience', 'e1', 'achievement', `1. ${BASE_ACHIEVEMENT}`);
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.numberFindings[0]?.added).toEqual(['1']);
+  });
+
+  it('加粗把机构名切断时，靠"先剥标记"才回查得到（不剥就漏检一个虚构公司）', () => {
+    const base = makeBaselineDocument();
+    const boldedSplit = `主导**蓝海云计算**公司的订单服务重构，P99 延迟下降 40%，复用率 40%。${PII_EMAIL}`;
+    // 先自证这条漏检是真的：`ORG_CANDIDATE_RUN` 的字符集不含 `*`，带标记直接喂进回查取不到候选
+    const names = collectKnownNames(base);
+    expect(findUnknownEntityCandidates(boldedSplit, names, JD_TEXT)).toHaveLength(0);
+    // 走校验器（它先过 stripRichMarkers）就报得出来
+    const proposed = withField(base, 'experience', 'e1', 'achievement', boldedSplit);
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.entityFindings.map((finding) => finding.candidate)).toEqual(['主导蓝海云计算公司']);
+    expect(report.ok).toBe(false);
+  });
+
+  it('已知名加粗不误报：星桥科技仍是基线里的名字', () => {
+    const base = makeBaselineDocument();
+    const proposed = withField(
+      base,
+      'experience',
+      'e1',
+      'achievement',
+      `主导**星桥科技**公司的订单服务重构，P99 延迟下降 40%，复用率 40%。${PII_EMAIL}`,
+    );
+    const report = verifyGeneration({ original: base, proposed, jdText: JD_TEXT });
+    expect(report.entityFindings).toHaveLength(0);
+    expect(report.numberFindings).toHaveLength(0);
+  });
+});
+
 describe('4.5-14 校验读数不带原文', () => {
   it('三条哨兵在任何一条读数里都取不到（植入式证明）', () => {
     const base = makeBaselineDocument();

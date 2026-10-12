@@ -10,6 +10,7 @@
  */
 import { makeField, type Field, type SectionKind } from './model.js';
 import { extractPeriod, type ParsedPeriod } from './period.js';
+import { BULLET_MARK, keepPairedEmphasis, NESTED_INDENT } from './internal/richtext.js';
 
 /** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
 const LEADING_MARKUP =
@@ -25,7 +26,7 @@ const PUNCTUATION_ONLY = /^[-–—~～至到.,，;、|｜·•\s]+$/u;
 const DEGREE_TERM = /学士|硕士|博士|本科|大专|MBA|PhD|BSc|MSc/i;
 
 /**
- * 去掉一行开头的 Markdown 标记与加粗符号，得到纯文字。
+ * 去掉一行开头的 Markdown 标记与加粗符号，得到纯文字（**装饰一律删掉**那一支）。
  *
  * 与 `splitHeader` 一起住在这一层的理由：导入时"摘装饰 → 拆抬头"是**一条**规则的两步（`sections.ts`
  * 先剥装饰再喂 `splitHeader`），手动拆分（63-b）要对拆出来那一行说同一句话，
@@ -34,10 +35,49 @@ const DEGREE_TERM = /学士|硕士|博士|本科|大专|MBA|PhD|BSc|MSc/i;
  * @returns 去掉装饰后的行文本（可能为空串）
  */
 export function stripLineMarkup(line: string): string {
-  return line
-    .replace(LEADING_MARKUP, '')
-    .replace(/\*\*|__|`/g, '')
-    .trim();
+  return stripDecorations(line, false);
+}
+
+/**
+ * 摘掉行首装饰与强调符号的公共骨架，`**` 的去留由调用方决定。
+ * @param line 原始行
+ * @param keepEmphasis true = 成对的 `**…**` 留给渲染层（正文那一支）；false = 连成对的一起删（抬头与标题判定）
+ * @returns 处理后的行文本
+ */
+function stripDecorations(line: string, keepEmphasis: boolean): string {
+  const withoutLeading = line.replace(LEADING_MARKUP, '');
+  const withoutMarkers = keepEmphasis ? keepPairedEmphasis(withoutLeading) : withoutLeading.replace(/\*\*|__|`/g, '');
+  return withoutMarkers.trim();
+}
+
+/** 行首**项目符号**那一族：只有真正的符号才算列表项——`1.` / `（二）` 这类序号在本语法里刻意不当列表
+ * （它与 4.5-08 的数字守恒判据同族冲突，记账见 spec 4.5-15 的反向验证段），`**` 也不在这里被认成符号。
+ *
+ * 两个分支的空格要求不同，是实测形状逼出来的：pdf.js 的 `str` 会把同一行的两列直接拼起来（中间没有空格项时
+ * 就是「•订单服务重构」），所以版面圆点那一族**不许**强制空格；而 ASCII 的 `-` / `+` / `*` 必须带空格——
+ * 换行切断的日期片段（`-2024.06`）与区间（`~` 那族已在别处归零）不带空格，把它们当列表项会凭空造出一条条目。 */
+const LEADING_BULLET = /^\s*(?:[•·‣◦▪●○]\s*|(?:[-+]|\*(?!\*))\s+)/u;
+
+/**
+ * 把一条**正文行**归一到封闭文法（spec 4.1-18；文法的定义只在 `internal/richtext.ts` 那一处）。
+ *
+ * 与 `stripLineMarkup` 的分工必须说清：那一支的语义是「删掉装饰」，用于抬头装配与标题判定；
+ * 这一支的语义是「识别并归一保留」——项目符号换成 `- `/`  - `，成对的 `**…**` 留给渲染层、
+ * 落单的删掉（spec 4.1-18 原文的那半句），其余行的**行首装饰**处理与过去逐字相同。
+ * 之所以只此一步：真实 PDF 文本层里本来就有 682 个符号字符（plan 03 §14 的 S1 读数），
+ * 过去被删得一个不剩，纸面上就只剩自动换行。层级不靠猜符号，吃的是 `source.ts` 按左 x 写进来的缩进档。
+ * @param line 原始行（可含行首缩进与项目符号）
+ * @returns 带封闭标记的行；非符号行返回「只保留成对加重」的纯文本
+ */
+export function normalizeRichLine(line: string): string {
+  const withoutIndent = line.replace(/^ +/u, '');
+  if (!LEADING_BULLET.test(withoutIndent)) return stripDecorations(line, true);
+  const deep = line.length - withoutIndent.length >= NESTED_INDENT.length;
+  const matched = LEADING_BULLET.exec(withoutIndent)?.[0] ?? '';
+  const rest = keepPairedEmphasis(withoutIndent.slice(matched.length).trim());
+  // 一行只有符号没有内容（扫描件里偶见的装饰残块）：不产出空列表项，交回原判定。
+  if (rest === '') return stripDecorations(line, true);
+  return `${deep ? NESTED_INDENT : ''}${BULLET_MARK}${rest}`;
 }
 
 /**

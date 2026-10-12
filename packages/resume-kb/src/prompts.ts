@@ -29,8 +29,52 @@ export const REQUIREMENT_PROMPT_VERSION = 'jdreq-v1';
  * 每一段**整段回显**一遍。真实简历上一份四区块的文档（三条改写目标 1297 / 2963 / 381 字）因此
  * 要生成约 4 600 字：512 token 被截断成非法 JSON，抬到 4096 token 一次要等 6～9 分钟（本机活体读数）。
  * 现在只回真正改过的那几条，回复量由"整份清单"变成"改动的那几段"。
+ *
+ * v3（2026-10-12，spec 4.9-05）加的是**书写指引那一段**：app 内置一份可看可改不能删的简历书写技能，
+ * 每一趟生成在拼消息时现问它的生效正文并接在规则之后。指引只动"怎么写"，规则 3 / 4 与事实校验的
+ * 优先级写在壳子里（`buildSkillGuideAppendix`），所以人改正文改不掉红线（4.9-06 有反向单测）。
+ *
+ * v4（2026-10-12，spec 4.5-15 / 裁定㉘ 第 1 条）加的是**排版标记那两条**（规则 7 / 8）：关键字加重
+ * 的唯一来源就是模型标注，导入侧不猜字体（S3 实测：真实 PDF 的字体名被子集重命名为 `g_d0_f1…f5`，
+ * 11 种字形读数里加粗命中 0 次），编辑器里也不给手动加粗开关。所以这一段文案是"界面上的粗体从哪来"
+ * 的唯一答案——没有它，模型永远不知道可以标，块级正文就只剩导入轨那一半。
+ * 有序列表**显式禁止**：`1.` 里的 `1` 会被数值守恒（4.5-08）当成凭空多出的数，那条改写必被整条丢弃；
+ * 与其让模型白写一段，不如在提示词里就说清只认 `- ` 与两格缩进的 `  - ` 两级（plan §4.10 反向验证）。
+ *
+ * 版本号取 v4 而不是 v3 的原因是共享工作树撞号：上面那一支 v3 已由 4.9 那一片落在 `prompts.ts` 里，
+ * 按 plan §4.10 的登记规则「谁先落地谁占，后进的一方占下一号」。
  */
-export const GENERATE_PROMPT_VERSION = 'resume-generate-v2';
+export const GENERATE_PROMPT_VERSION = 'resume-generate-v4';
+
+/**
+ * 注入的书写指引在提示词里的长度上限（字符）。
+ *
+ * 内置那份正文实测 1 152 字（`renderBuiltinSkillBody()` 的产物），取 4000 是给"人往里粘了自己那份模板"
+ * 留出三倍空间，同时给整趟请求一个可算的上界——回复上限 `modelMaxTokens` 管的是**产出**，
+ * 不管输入这一侧被撑多长；没有上界时一次粘贴就能把这条通道的耗时推到超时壁上（§9 的 2026-10-12 那条①同族）。
+ */
+export const SKILL_GUIDE_CHAR_LIMIT = 4000;
+
+/**
+ * 把生效的书写技能正文拼成提示词里的那一段（spec 4.9-05 / 4.9-06）。
+ *
+ * 壳子写在这里而不是 `skill-service.ts`，是因为这段字最终是给模型看的消息内容（4.6-09 的落点唯一性）。
+ * 首句是这条判据的全部要点：**指引只改写法，不改能写什么**——人把正文改成"多补几个数字"
+ * 也不会拆掉规则 3 / 4 与事实校验，那一句写在壳子里而不只在技能正文的"底线"那一节里
+ * （正文是可被改的那一份，壳子不是）。
+ * @param guide 生效正文（有人的覆盖就是覆盖那一份，否则内置那一份）
+ * @returns 可直接接在 system 后面的一段；空正文回空串（技能服务未装配时提示词仍是合法的一份）
+ */
+export function buildSkillGuideAppendix(guide: string): string {
+  const trimmed = guide.trim();
+  if (trimmed === '') return '';
+  const capped = trimmed.length > SKILL_GUIDE_CHAR_LIMIT ? trimmed.slice(0, SKILL_GUIDE_CHAR_LIMIT) : trimmed;
+  return (
+    '\n\n书写指引（来自 app 内的简历书写技能，用户可以自己改这一份）。' +
+    '它只规定**怎么写**：不得据此新增事实、区块、联系方式或数字，与上面规则 3 / 4 冲突时一律以规则为准。\n' +
+    capped
+  );
+}
 
 /** 发给模型的消息序列形状（与 `ChatGateway` 的请求侧一致，这里只拼字符串、不碰传输）。 */
 export type PromptMessages = Array<{ role: 'system' | 'user'; content: string }>;
@@ -85,6 +129,7 @@ export function buildRetryAppendix(violationLines: readonly string[]): string {
  * @param requirementLines 已拆出的要求短句（与缺口报告共用同一份读数，不让模型再拆一遍）
  * @param targets 待改写的散文位置（`generationTargetFields` 的产物，已按重排后的相关性顺序）
  * @param retryAppendix 第二轮才有的约束补强
+ * @param skillGuide 生效的书写技能正文（spec 4.9-05；空串 = 技能通道没装配，提示词退回 v2 的那一份形状）
  * @returns 可直接交给 `ChatGateway.complete` 的消息序列
  */
 export function buildGenerateMessages(
@@ -92,6 +137,7 @@ export function buildGenerateMessages(
   requirementLines: readonly string[],
   targets: readonly GenerationField[],
   retryAppendix = '',
+  skillGuide = '',
 ): PromptMessages {
   const system =
     '你在帮中国求职者把已有简历改写得更贴合一个具体岗位。你只能改写我给出的句子，不能新增、不能编造。\n' +
@@ -102,7 +148,13 @@ export function buildGenerateMessages(
     '3. 数字与百分比一个都不许增减、不许改写成「大幅 / 显著」这类模糊词，也不许反过来凭空补一个数。\n' +
     '4. 公司名、学校名、专业名、职位名、时间范围一律照抄我给过的写法，不许出现任何新的机构名或人名。\n' +
     '5. 只在确实能更贴合岗位要求时改写；**无话可改的条目不要回**（回了也只会整条丢弃），只回你真正动过的那几条。\n' +
-    '6. 只改写清单里的位置，清单外的 sectionId / entryId / fieldKey 会被整条丢弃。' +
+    '6. 只改写清单里的位置，清单外的 sectionId / entryId / fieldKey 会被整条丢弃。\n' +
+    '7. 排版：一段长经历可以在同一句 text 里换行写成条目——行首用「- 」起一项，子项用「两个空格 + - 」**只嵌一层**（最多两级）。' +
+    '只在原文本来就是并列的几件事时才拆，拆完每一项的事实与原文一致。**禁止有序列表**（「1. 」「(2)」这类），' +
+    '编号会被事实校验当成凭空新增的数字而整条丢弃。\n' +
+    '8. 加重：确实值得让招聘者一眼看到的**量化成果或核心技术名**，用「**…**」包住（例如「**P99 延迟下降 40%**」），' +
+    '一整条最多两到三处，不许整段加粗，也不许为了加重而改动里面的字。' +
+    buildSkillGuideAppendix(skillGuide) +
     retryAppendix;
   const listed = targets.map((target) => ({
     sectionId: target.sectionId,

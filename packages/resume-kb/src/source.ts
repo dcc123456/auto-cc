@@ -13,7 +13,7 @@
  * - **不引入 OCR**：图片型 PDF 抽出来就是近零字符，一律由 `MIN_TEXT_CHAR_COUNT` 判成疑似扫描件（4.1-05）。
  */
 import { sha256Hex } from '@auto-cc/core/file-read';
-import { type ResumeDocument } from '@auto-cc/plugin-resume-doc';
+import { NESTED_INDENT, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
 import { type ParseIssue, parseResumeText } from './sections.js';
 
 /** 导入源格式。`markdown` 与 `text` 只影响界面回显，解析规则完全一致。 */
@@ -65,10 +65,19 @@ const PDF_TEXT_OPTIONS = {
   verbosity: 0,
 } as const;
 
-/** pdf.js 文本项的结构切片——只声明实测用到的两处，不依赖它的类型入口（版本间漂移大）。 */
-interface PdfTextChunk {
+/**
+ * pdf.js 文本项的结构切片——只声明实测用到的三处，不依赖它的类型入口（版本间漂移大）。
+ *
+ * 与下面的 `joinTextItems` 一起导出：这两样是缩进归档那一判据的**测试缝**（同 `sections.ts` 的
+ * `splitEntryBlocks` 口径）。真实夹具 PDF 造不出"同一页不同左 x"的版面，硬造就要往 `@auto-cc/testing`
+ * 再加第二套生成器（§2.7 禁第二套同类基础设施），而判据本身是纯函数，直接喂项数组就能逐档断言。
+ */
+export interface PdfTextChunk {
   readonly str?: unknown;
   readonly hasEOL?: unknown;
+  /** 六元仿射矩阵，`[4]` 是该文本项的绘制起点 x（单位 pt）——spike S2 的读数就取自这里。
+   *  成员类型写 `unknown` 而不是 `number`：这一格是外部库的形状切片，元素是不是数要在用的时候判（§6.2）。 */
+  readonly transform?: readonly unknown[];
 }
 
 /** 实测到的 pdf.js 文档对象切片（只有抽文本用到的三个成员）。 */
@@ -192,23 +201,66 @@ async function extractDocxText(bytes: Uint8Array): Promise<SourceTextResult> {
 }
 
 /**
- * 把 pdf.js 的文本项拼回带换行的正文。
- * 断行依据是 `hasEOL`（实测同一行的两列之间由 pdf.js 插入空格项，因此直接累加 `str` 即可保持「公司 时间」同行）。
- * @param items 单页文本项
- * @returns 该页正文
+ * 一档缩进对应的水平距离（pt）。
+ * 取值来自真实简历那一份的左 x 直方图读数 **90 / 101.6 / 111 / 154**（plan `03-resume-pdf` §14 的 S2）：
+ * 相邻两档差约 10pt，正是一个中文字符在该文件字号（10.45pt）下的宽度——所以这不是魔法倍数，是量出来的。
  */
-function joinTextItems(items: readonly PdfTextChunk[]): string {
-  const lines: string[] = [];
+const INDENT_UNIT_PT = 10;
+
+/**
+ * 取一个文本项的绘制起点 x。
+ * @param item pdf.js 的文本项（形状切片，可能缺字段）
+ * @returns 左 x（pt）；该 item 没带 `transform` 或值不是有限数时返回 `null`（扫描件与异形 PDF 走这一支）
+ */
+function leftXOf(item: PdfTextChunk): number | null {
+  const transform = item.transform;
+  if (transform === undefined) return null;
+  const rawX = transform[4];
+  return typeof rawX === 'number' && Number.isFinite(rawX) ? rawX : null;
+}
+
+/**
+ * 把一行的左 x 折成语法里的缩进档。
+ * 只认两档（裁定㉘ 第 2 条把层级封顶在二级）：基线与第一档差都算"贴着正文走"，由符号本身决定它是不是一条列表项；
+ * 第二档及更深才写缩进——符号在前、缩进在后，`normalizeRichLine` 才读得出层级。
+ * @param leftX 该行的最小左 x（pt）
+ * @param baseline 该页的最小左 x（pt）
+ * @returns 行首缩进串（空串或一档 `NESTED_INDENT`）
+ */
+function indentFor(leftX: number | null, baseline: number | null): string {
+  if (leftX === null || baseline === null) return '';
+  return Math.round((leftX - baseline) / INDENT_UNIT_PT) >= 2 ? NESTED_INDENT : '';
+}
+
+/**
+ * 把 pdf.js 的文本项拼回带换行的正文，并**把版面缩进带出来**（spec 4.1-18）。
+ * 断行依据是 `hasEOL`（实测同一行的两列之间由 pdf.js 插入空格项，因此直接累加 `str` 即可保持「公司 时间」同行）。
+ * 两趟处理：先按行收字与左 x（一行的左 x 取该行**最小**的那个 item x，符号项通常比文字更靠左），
+ * 再以该页最小左 x 为基线折缩进档——不在第一趟里做，是因为基线要看到整页才知道。
+ * @param items 单页文本项
+ * @returns 该页正文（行首可能带一档缩进空格）
+ */
+export function joinTextItems(items: readonly PdfTextChunk[]): string {
+  const collected: { text: string; leftX: number | null }[] = [];
   let currentLine = '';
+  let lineLeftX: number | null = null;
+  const flushLine = (): void => {
+    if (currentLine !== '') collected.push({ text: currentLine, leftX: lineLeftX });
+    currentLine = '';
+    lineLeftX = null;
+  };
   for (const item of items) {
-    if (typeof item.str === 'string' && item.str !== '') currentLine += item.str;
-    if (item.hasEOL === true) {
-      if (currentLine !== '') lines.push(currentLine);
-      currentLine = '';
+    if (typeof item.str === 'string' && item.str !== '') {
+      currentLine += item.str;
+      const x = leftXOf(item);
+      if (x !== null && (lineLeftX === null || x < lineLeftX)) lineLeftX = x;
     }
+    if (item.hasEOL === true) flushLine();
   }
-  if (currentLine !== '') lines.push(currentLine);
-  return lines.join('\n');
+  flushLine();
+  const xs = collected.map((line) => line.leftX).filter((x): x is number => x !== null);
+  const baseline = xs.length === 0 ? null : Math.min(...xs);
+  return collected.map((line) => `${indentFor(line.leftX, baseline)}${line.text}`).join('\n');
 }
 
 /**

@@ -160,3 +160,81 @@ describe('内置模板库（3.2-02 / 3.2-03）', () => {
     expect(html).toContain('.bg-amber-800{');
   });
 });
+
+/**
+ * 造一份**带行标记**的文档（spec 3.9-02 的被测语料）：简介与项目正文各写一段
+ * 「多行 + 两级列表 + 成对 `**`」，这正是裁定㉘ 之后导入轨与生成轨会交付的形状。
+ * @returns 在 fullDocument 之上只改两处正文的文档
+ */
+function richDocument(): ResumeDocument {
+  const doc = structuredClone(fullDocument());
+  const summaryBody = doc.sections.find((section) => section.id === 'summary')?.entries[0]?.fields[0];
+  if (summaryBody !== undefined) {
+    summaryBody.value = '五年后端工程师。\n主攻方向：\n- **订单服务**重构\n  - 日均 2 亿单';
+  }
+  const project = doc.sections.find((section) => section.id === 'project')?.entries[0];
+  project?.fields.push(makeField('project', 'achievement', '- 维护 **3** 个仓库\n- 响应 Issue 平均 2 小时'));
+  return doc;
+}
+
+describe('块级正文的渲染接缝（spec 3.9-02）', () => {
+  it('只有正文格走块级：列表与行内加重真的进了产物，标题/时间格没有被撑成块', () => {
+    const html = resumeTemplate.get('classic')?.render(richDocument(), { locale: 'zh-CN' }) ?? '';
+    expect(html).toContain('<ul class="list-disc pl-4 mt-1">');
+    expect(html).toContain('<ul class="list-circle pl-4">');
+    expect(html).toContain('<strong class="font-bold">订单服务</strong>');
+    // 反向：副行（时间/地点那一族）里永远不许长出列表项——块级只走正文那一格。
+    for (const meta of html.match(/<span class="text-\[11px\][^>]*>[^<]*</g) ?? []) {
+      expect(meta).not.toContain('<li');
+    }
+    // 简介：两行散文 = 两只 `<p>`（另两行是列表项，不进散文计数）。
+    expect(html.match(/<p>/g)).toHaveLength(2);
+  });
+
+  it('同一份含列表正文经两套模板各渲一次：产物字节互异而列表结构同数（3.2-02 那次缺陷的形状护栏）', () => {
+    const doc = richDocument();
+    const classic = resumeTemplate.get('classic')?.render(doc, { locale: 'zh-CN' }) ?? '';
+    const modern = resumeTemplate.get('modern')?.render(doc, { locale: 'zh-CN' }) ?? '';
+    expect(classic).not.toBe(modern);
+    for (const html of [classic, modern]) {
+      // 简介两只（一级 + 嵌套那一只二级）+ 项目两只 = 四条 `<li>`。
+      expect(html.match(/<li>/g)).toHaveLength(4);
+      expect(html.match(/<strong class="font-bold">/g)).toHaveLength(2);
+    }
+  });
+
+  it('块级产物里的每一个 class 都在打印样式表里有规则（class 空转即失败，同 3.2-07 那一条）', () => {
+    const doc = richDocument();
+    const missing: string[] = [];
+    for (const template of resumeTemplate.list()) {
+      for (const token of classTokens(template.render(doc, { locale: 'zh-CN' }))) {
+        if (NON_UTILITY_CLASSES.has(token)) continue;
+        if (!PRINT_UTILITY_KEYS.has(token)) missing.push(`${template.id} → ${token}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('打印面把项目符号带回来：list-disc 的 utility 排在 ul,ol{list-style:none} 归零之后', () => {
+    const html = buildPrintHtml(richDocument(), 'modern', 'zh-CN', 'file:///fonts');
+    expect(html).toContain('.list-disc{list-style-type:disc;}');
+    expect(html).toContain('.list-circle{list-style-type:circle;}');
+    expect(html.indexOf('ul,ol{list-style:none;}')).toBeLessThan(html.indexOf('.list-disc{'));
+  });
+
+  it('负对照：单行无标记正文的产物与接线前逐字节相同（3.9-01 的边界）', () => {
+    const html = resumeTemplate.get('classic')?.render(fullDocument(), { locale: 'zh-CN' }) ?? '';
+    expect(html).toContain('<span class="min-w-0">订单服务重构，P99 下降 40%。</span>');
+    expect(html).not.toContain('<ul');
+    expect(html).not.toContain('<p>');
+  });
+
+  it('技能徽章那一族保持行内：块级不许把一只徽章撑成整段（3.9-02 的"不破栏、不越格"）', () => {
+    const doc = structuredClone(fullDocument());
+    const skillsBody = doc.sections.find((section) => section.id === 'skills')?.entries[0]?.fields[0];
+    if (skillsBody !== undefined) skillsBody.value = 'TypeScript\nElectron\nNode';
+    const chipHtml = resumeTemplate.get('designer-portfolio')?.render(doc, { locale: 'zh-CN' }) ?? '';
+    expect(chipHtml).not.toContain('<p>');
+    expect(chipHtml).toContain('rounded-full');
+  });
+});

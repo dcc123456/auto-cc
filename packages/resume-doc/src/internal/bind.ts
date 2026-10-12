@@ -177,8 +177,13 @@ export function bindOptional(entry: Entry, fieldKey: string): string | null {
   return value === undefined || value === '' ? null : value;
 }
 
-/** 一条「标签:值」展示行。 */
+/**
+ * 一条「标签:值」展示行。
+ * `key` 是**字段键**（不是本地化标签）：渲染轨要认出哪一格是那一类区块的正文（`bodyKeyOf`）才能只把
+ * 它交给块级渲染（spec 3.9-02），而标签已经过了 i18n，按标签反推等于把语种当成排版条件。
+ */
 export interface EntryLine {
+  key: string;
   label: string;
   value: string;
 }
@@ -212,7 +217,7 @@ export function toEntryView(templateId: string, section: Section, entry: Entry, 
 
   const pushOptionalLine = (key: string): void => {
     const value = bindOptional(entry, key);
-    if (value !== null) lines.push({ label: fieldLabel(key, locale), value: escapeHtml(value) });
+    if (value !== null) lines.push({ key, label: fieldLabel(key, locale), value: escapeHtml(value) });
   };
 
   let heading: string;
@@ -237,6 +242,7 @@ export function toEntryView(templateId: string, section: Section, entry: Entry, 
     for (const field of entry.fields) {
       if (field.value === '') continue;
       lines.push({
+        key: field.key,
         label: field.key === 'text' ? '' : fieldLabel(field.key, locale),
         value: escapeHtml(field.value),
       });

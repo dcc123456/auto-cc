@@ -8,8 +8,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import { minimalPdf } from '@auto-cc/testing';
+import { NESTED_INDENT } from '@auto-cc/plugin-resume-doc';
 
-import { detectFormat, parseResumeSource, sourceHashOf, extractSourceText } from './source.js';
+import {
+  detectFormat,
+  joinTextItems,
+  parseResumeSource,
+  type PdfTextChunk,
+  sourceHashOf,
+  extractSourceText,
+} from './source.js';
 
 /** 更新时间戳固定值，保证文档 `updatedAt` 可断言。 */
 const NOW_MS = 1_700_000_000_000;
@@ -222,10 +230,51 @@ describe('4.1-06 损坏输入不抛异常', () => {
     expect(result.code).toBe(expectedCode);
   });
 
-  it('脱敏在 PDF 通道上也生效：邮箱不以原文出现在文档里', async () => {
+  it('正文脱敏在 PDF 通道上也生效：邮箱不以原文出现在区块里', async () => {
     const result = await parseResumeSource(minimalPdf(PDF_RESUME_LINES), 'doc-redact', NOW_MS);
     if (result.status !== 'ok') throw new Error('预期解析成功');
-    expect(JSON.stringify(result.document)).not.toContain('jane.doe@example.com');
+    // 2026-10-12 裁定：`profile.contact` 存原文（投递用的简历必须有真号码），脱敏范围收窄到正文/清单/实体/出网四处。
+    expect(JSON.stringify(result.document.sections)).not.toContain('jane.doe@example.com');
+    expect(result.document.profile.contact.email).toBe('jane.doe@example.com');
     expect(result.issues.some((issue) => issue.code === 'sensitive-redacted')).toBe(true);
+  });
+});
+
+describe('4.1-18 左 x 折成缩进档（导入轨的分层来源，裁定㉘ 第 2 条）', () => {
+  /** 造一个 pdf.js 形状的文本项：x 缺省即"这一项没带 transform"（扫描件与异形 PDF 的真实形状）。 */
+  const chunk = (str: string, x: number | null, hasEol = true): PdfTextChunk => ({
+    str,
+    hasEOL: hasEol,
+    ...(x === null ? {} : { transform: [1, 0, 0, 1, x, 0] }),
+  });
+
+  it('真实简历那四档左 x（90 / 101.6 / 111 / 154）：一档不缩，二档与更深各只写一档缩进', () => {
+    const text = joinTextItems([
+      chunk('主导订单服务重构', 90),
+      chunk('负责结算与对账', 101.6),
+      chunk('- 日均 2 亿单', 111),
+      chunk('- 库存扣减幂等', 154),
+    ]);
+    expect(text.split('\n')).toEqual([
+      '主导订单服务重构',
+      '负责结算与对账',
+      `${NESTED_INDENT}- 日均 2 亿单`,
+      `${NESTED_INDENT}- 库存扣减幂等`,
+    ]);
+  });
+
+  it('一行的左 x 取该行最小值：符号项比文字更靠左时，基线由符号定，正文行不被误判成缩进', () => {
+    // 同一行的两个项之间没有 hasEOL（实测 pdf.js 只在真有断行时插它，两列之间是插空格项而不是靠 here 补），
+    // 所以 `str` 逐字拼接：符号与文字之间**不会**被这里补出空格，归一成 `- ` 标记是 `normalizeRichLine` 的事。
+    const text = joinTextItems([chunk('•', 88, false), chunk('订单服务重构', 90), chunk('日均 2 亿单', 88)]);
+    expect(text.split('\n')).toEqual(['•订单服务重构', '日均 2 亿单']);
+  });
+
+  it('整页没有 transform（图片型 PDF 的另一半形状）→ 文本逐字保留且一行缩进都不加', () => {
+    expect(joinTextItems([chunk('Jane Doe', null), chunk('Five years', null)])).toBe('Jane Doe\nFive years');
+  });
+
+  it('空项与只有空格的行不产出行（旧口径不变：`str` 为空即跳过）', () => {
+    expect(joinTextItems([chunk('', 90, false), chunk('   ', 90), chunk('第二段', 90)])).toBe('   \n第二段');
   });
 });

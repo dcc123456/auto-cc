@@ -45,7 +45,15 @@ export { contentHash, normalizeDocument } from './normalize.js';
 // 63-a（plan 03 §13）：时间归一化与抬头装配从 `resume-kb` 搬进模型层——它们产出的就是下面 `model.ts` 的字段键，
 // 而手动拆分条目（63-b）要在编辑器里按同一条规则重装抬头，依赖方向 kb→doc 决定了复用只能建在这个归属上。
 export { extractPeriod, parsePeriod, type ParsedPeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
-export { companyRoleFields, educationFields, periodText, splitHeader, stripLineMarkup } from './header.js';
+export {
+  companyRoleFields,
+  educationFields,
+  normalizeRichLine,
+  periodText,
+  splitHeader,
+  stripLineMarkup,
+} from './header.js';
+export { BULLET_MARK, NESTED_INDENT, renderRichValue, stripRichMarkers, type RichValue } from './internal/richtext.js';
 export { diff, type ChangeType, type DocDiff, type EntryChange, type FieldChange, type SectionChange } from './diff.js';
 export { importExternal, type ImportResult, type ImportWarning } from './import.js';
 // 3.6-a 排版编辑器的模型通道：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。

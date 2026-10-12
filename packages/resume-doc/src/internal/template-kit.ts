@@ -14,17 +14,19 @@
  * 只是往承着文字的那一格上多挂几个 `rz-*` 槽位类（类名/变量名/声明三样同出于 `design-slots.ts` 一张表）。
  * 因此未设主题时这一层的产物与设主题前**逐字节相同**——50 套模板的一行委托也照旧零改动。
  */
-import type { DocumentDesign, ResumeDocument, Section } from '../model.js';
+import { bodyKeyOf, type DocumentDesign, type ResumeDocument, type Section } from '../model.js';
 import { articleHookFor, headingClassFor, rowClassesFor } from './design-slots.js';
 import {
   escapeHtml,
   fieldLabel,
   sectionLabel,
   toEntryView,
+  type EntryLine,
   type Template,
   type TemplateContext,
   type TemplateLocale,
 } from './bind.js';
+import { renderRichValue, type RichValue } from './richtext.js';
 
 /** 强调色族（取值必须是 `print-css.ts` 里已登记的 Tailwind 色相，不引入自定义色名）。 */
 export type AccentHue =
@@ -265,6 +267,19 @@ function renderSection(
 }
 
 /**
+ * 取一格的渲染内容：**只有该类区块的正文格**（`bodyKeyOf`）走块级文法，其余格原样行内
+ * （spec 3.9-02 的那道界线——日期、地点、学历这些一格一句话的东西不许长成列表）。
+ * @param line 展示行（`toEntryView` 递出的已转义格）
+ * @param bodyKey 该类区块的正文键
+ * @param forceInline 该格只许行内吗（技能徽章那一族：一只徽章就是一行，块级会把徽章撑成整段）
+ * @returns 渲染决定：`block` 决定调用方用 `<div>` 还是 `<span>` 承它
+ */
+function richForLine(line: EntryLine, bodyKey: string, forceInline: boolean): RichValue {
+  if (forceInline || line.key !== bodyKey) return { block: false, html: line.value };
+  return renderRichValue(line.value);
+}
+
+/**
  * 渲染一条有标题结构的条目（经历 / 项目 / 校园 / 教育）。
  * @param spec 版面取值
  * @param section 所属区块
@@ -293,12 +308,16 @@ function renderEntry(
     .map((value) => `<span class="text-[11px] font-medium text-${spec.accent}-700">${value}</span>`)
     .join('');
   const lines = view.lines
-    .map(
-      (line) =>
+    .map((line) => {
+      const rich = richForLine(line, bodyKeyOf(section.kind), false);
+      return (
         `<div class="${classes.body} text-neutral-700${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
         (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
-        `<span class="min-w-0">${line.value}</span></div>`,
-    )
+        // 块级时外层从 `<span>` 换成 `<div>`：`<p>` / `<ul>` 是块级元素，塞在行内容器里浏览器会把它们折回一行。
+        (rich.block ? `<div class="min-w-0">${rich.html}</div>` : `<span class="min-w-0">${rich.html}</span>`) +
+        '</div>'
+      );
+    })
     .join('');
   const head =
     spec.entry === 'split'
@@ -332,12 +351,15 @@ function renderPlainEntry(
   const isSkill = section.kind === 'skills';
   const chip = isSkill && spec.heading === 'pill';
   const body = view.lines
-    .map(
-      (line) =>
+    .map((line) => {
+      const rich = richForLine(line, bodyKeyOf(section.kind), chip);
+      return (
         `<div class="${chip ? `mr-1 mb-1 inline-block rounded-full bg-${spec.accent}-100 px-2 py-0.5 text-[11px] text-${spec.accent}-800` : `${classes.body} text-neutral-700`}${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
         (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
-        `<span>${line.value}</span></div>`,
-    )
+        (rich.block ? `<div>${rich.html}</div>` : `<span>${rich.html}</span>`) +
+        '</div>'
+      );
+    })
     .join('');
   return `<div class="resume-entry ${classes.entry}">${body}</div>`;
 }

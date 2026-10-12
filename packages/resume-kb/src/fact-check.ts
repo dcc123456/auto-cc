@@ -18,9 +18,10 @@ import { diffNumberMultiset, redactText } from '@auto-cc/core';
 import {
   checkFactLock,
   GENERATION_EDITABLE_KEYS,
-  type FactViolation,
   type ResumeDocument,
   type SectionKind,
+  stripRichMarkers,
+  type FactViolation,
 } from '@auto-cc/plugin-resume-doc';
 
 /**
@@ -257,7 +258,13 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
     // 基线里根本没有这一段（候选新增了条目/字段）：由结构面把关（模型通道没有新增通道），这里不重复判。
     if (originalText === undefined) continue;
     if (originalText === field.text) continue;
-    const { missing, added } = diffNumberMultiset(originalText, field.text);
+    // 两条判据都比**去掉排版标记以后**的正文（spec 4.5-15）：标记说的是"怎么摆"，不是"写了什么事实"。
+    // 数值这一侧本来就安全（`NUMBER_RUN` 两个分支都从数字或中文数词起手，`- ` 与 `**` 抽不出一个数），
+    // 真正会被标记影响的是具名回查——`ORG_CANDIDATE_RUN` 的字符集不含 `*`，「主导了 **星辰科技** 公司」
+    // 里的候选会被星号切断而漏检。两边一起剥，剥法只有 `stripRichMarkers` 一份（§2.5，此处不再写正则）。
+    const strippedOriginal = stripRichMarkers(originalText);
+    const strippedProposed = stripRichMarkers(field.text);
+    const { missing, added } = diffNumberMultiset(strippedOriginal, strippedProposed);
     if (missing.length > 0 || added.length > 0) {
       numberFindings.push({
         sectionId: field.sectionId,
@@ -267,7 +274,7 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
         added,
       });
     }
-    for (const candidate of findUnknownEntityCandidates(field.text, knownNames, input.jdText)) {
+    for (const candidate of findUnknownEntityCandidates(strippedProposed, knownNames, input.jdText)) {
       entityFindings.push({ sectionId: field.sectionId, entryId: field.entryId, fieldKey: field.fieldKey, candidate });
     }
   }

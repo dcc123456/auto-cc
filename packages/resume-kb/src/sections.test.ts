@@ -81,7 +81,9 @@ describe('4.1-02 文本简历解析为文档模型', () => {
     expect(fieldOf(parsed, 'experience', 1, 'company')).toBe('未名开源社区');
     expect(fieldOf(parsed, 'experience', 1, 'period')).toBe('2019 - 2022');
     expect(fieldOf(parsed, 'experience', 0, 'achievement')).toBe(
-      '主导订单服务重构，P99 延迟下降 40%。\n搭建内核自动化打印管线。',
+      // 4.1-18（裁定㉘ 第 2 条）：语料里那两行的项目符号不再被删掉，而是换成封闭文法里的 `- `，
+      // 打印面据此渲染成列表（`resume-doc` 的 3.9）。抬头行与技能行不走这一条，见 `splitEntryBlocks` 的三种走法。
+      '- 主导订单服务重构，P99 延迟下降 40%。\n- 搭建内核自动化打印管线。',
     );
   });
 
@@ -288,7 +290,9 @@ describe('4.1-15 区块内的条目边界不再只认空行', () => {
       '**这一段是加粗的正文说明，用来验证超长行不会被弱信号误升成条目标题，它写得足够长以超过五十个字符的阈值上限。**';
     const blocks = splitEntryBlocks('experience', ['星桥科技 后端工程师', boldHeader, boldParagraph]);
     expect(blocks.map((block) => block.length)).toEqual([1, 2]);
-    expect(blocks[1]?.[1]).toBe(stripBoldForTest(boldParagraph));
+    // 正文行里**成对**的 `**` 从这里开始是留给渲染层的（spec 4.1-18 那半句 + 裁定㉘ 第 1 条的「成对才算格式」）：
+    // 纸面上这一段真的加粗，而落单的那对仍被删掉——两种结局见 `richtext.test.ts` 的同名用例。
+    expect(blocks[1]?.[1]).toBe(boldParagraph);
   });
 
   it('S3 Markdown 三级标题成条；区块词那一级的 `##` 仍归区块', () => {
@@ -420,8 +424,3 @@ describe('4.1-15 / 4.1-16 端到端：零空行的真实简历形状', () => {
     expect(parsed.document.sections.find((section) => section.kind === 'experience')?.entries).toHaveLength(2);
   });
 });
-
-/** 测试侧的加粗剥离（与实现里的 `stripMarkup` 同一形状，只为把断言写成人读的字面）。 */
-function stripBoldForTest(line: string): string {
-  return line.replace(/^\*\*|\*\*$/g, '').trim();
-}

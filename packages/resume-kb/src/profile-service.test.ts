@@ -1593,7 +1593,9 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     // 同一个中文查询两侧都命中。两条切片的内容是同一句话，**只断句子不断段头**，
     // 否则断言会莫名挂在「区块切片多带了公司名与时间」这种与检索无关的差异上。
     const contest = await kb.search('算法竞赛');
-    expect(contest.hits.map((hit) => hit.text)).toContain('组织过三十人规模的校内算法竞赛，负责赛题与判题机。');
+    // 4.1-18：语料里那行的项目符号自今日起**留在正文值里**（打印面按它渲染列表），所以命中串带 `- ` 前缀。
+    // 检索面本轮不做剥标记（plan §4.10 记为后续项）——命中的是同一句话，判据没有变松。
+    expect(contest.hits.map((hit) => hit.text)).toContain('- 组织过三十人规模的校内算法竞赛，负责赛题与判题机。');
     expect(new Set(contest.hits.map((hit) => hit.chunkKind))).toEqual(new Set(['entity', 'section']));
 
     // 手工建的技能实体同样进得了检索：切片与实体的 1:1 对能力词查询成立

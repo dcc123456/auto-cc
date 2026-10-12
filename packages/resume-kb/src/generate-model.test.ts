@@ -85,12 +85,24 @@ describe('4.5-01 提示词的形状', () => {
     expect(appendix).toContain('number-conservation');
     const withRetry = buildGenerateMessages('JD 正文', [], targets, appendix);
     expect(withRetry[0]?.content).toContain('上一轮的改写未通过事实校验');
-    // 第一轮没有补强：system 结尾就是规则第 6 条
+    // 第一轮没有补强：system 结尾就是规则第 8 条
     expect(buildGenerateMessages('JD 正文', [], targets)[0]?.content).not.toContain('上一轮');
   });
 
+  it('排版标记那两条约束在 system 里（spec 4.5-15：加重与分层都由生成轨提供）', () => {
+    const system = buildGenerateMessages('JD 正文', [], targets)[0]?.content ?? '';
+    // 第 7 条：行首 `- `、子项两格缩进、只两级、禁有序列表
+    expect(system).toContain('行首用「- 」起一项');
+    expect(system).toContain('最多两级');
+    expect(system).toContain('**禁止有序列表**');
+    // 第 8 条：`**…**` 包住量化成果或核心技术名，且不许整段加粗
+    expect(system).toContain('用「**…**」包住');
+    expect(system).toContain('不许整段加粗');
+  });
+
   it('提示词版本常量随片固定，改文案必须改它（4.5-10 复盘要靠这一列分辨）', () => {
-    expect(GENERATE_PROMPT_VERSION).toBe('resume-generate-v2');
+    // v4 = 本片的排版标记两条（规则 7 / 8）。v3 那一号由 4.9-05 的书写指引占走，见 prompts.ts 的版本注释
+    expect(GENERATE_PROMPT_VERSION).toBe('resume-generate-v4');
   });
 });
 
