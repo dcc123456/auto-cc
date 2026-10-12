@@ -3,7 +3,7 @@
  *
  * 19 家预设照搬 `browser-copilot/src/lib/providers.ts:71-271`（用户本人的项目，不存在 §8.7 的许可问题），
  * `id` / `baseUrl` / `defaultModel` / `docsUrl` 与端点变体逐条对得上——7.2-01 就是按这张对照表验收的。
- * 与来源不同的三处形状决定写在 `LlmProviderView` 的注释里（不声明腿、不带显示名、不带厂商说明）。
+ * 与来源不同的三处形状决定写在 `LlmProviderView` 的注释里（不声明通道、不带显示名、不带厂商说明）。
  *
  * 一条来自来源实现的教训随迁：那边的模型清单只当输入候选、不入库（`llm.ts:545-547` 注释），
  * 本项目按 2026-10-07 的裁定④改成"勾选入库"，所以这份目录只负责"怎么把地址填上"，
@@ -179,7 +179,7 @@ export function endpointOf(preset: LlmProviderView, baseUrl: string): string | u
 /**
  * 这个地址是目录里哪家的（spec 7.2-12 的显示半边）。
  *
- * 用在"这条腿没绑实例、走的是 yml/env 兜底地址"那一种读数上：界面要能说出"这看着像 DeepSeek"，
+ * 用在"这条通道没绑实例、走的是 yml/env 兜底地址"那一种读数上：界面要能说出"这看着像 DeepSeek"，
  * 而不是让人对着一条裸地址自己认亲。逐条比（含端点变体，同 `endpointOf` 的口径），认不出回 `custom`——
  * 反查只是显示，不构成任何写入：写的那一次表态在池那一行里。
  * @param baseUrl 归一后的地址（`normalizeBaseUrl` 的输出；空串表示根本没配）

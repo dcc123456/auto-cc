@@ -89,7 +89,7 @@ async function bootWithGate(gate: GateConfig) {
   fibers.push(await ctx.plugin(UsageLedgerService, {}));
   fibers.push(await ctx.plugin(EntitlementGateService, gate));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）。
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除通道），清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）。
   fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
   fibers.push(await ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
   // 配置一律取 schema 默认值（与 `cordis.yml` 同源）：这里判的是接线，不在测试里另抄一份阈值。
@@ -144,7 +144,7 @@ describe('4.4-09 缺口报告不误扣额度（真闸门 + 真账本）', () => 
     // 报告出来了：空库下每类要求都判缺失，但行数与三态计数齐全（"没扣额度"不等于"没干活"）。
     expect(view.rows.length).toBeGreaterThan(0);
     expect(view.counts.missing).toBe(view.rows.length);
-    // 装配里根本没有 `llm.chat`，所以模型腿报 unavailable 且不问任何人要额度。
+    // 装配里根本没有 `llm.chat`，所以模型通道报 unavailable 且不问任何人要额度。
     expect(view.modelStatus).toBe('unavailable');
     expect(ledgerRows(db)).toBe(rowsBefore);
   });

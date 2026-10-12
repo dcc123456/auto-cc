@@ -35,9 +35,9 @@ import { GAP_HIGHLIGHT_ANNOTATIONS, GAP_TEXT_ANNOTATIONS, type GapTextAnnotation
 import { kbGapSchema } from './gap-service.js';
 import type { GapState } from './requirements-compare.js';
 
-/** 三态腿的扫描结果（下面每条用例都在它上面挑读数，避免同一份标定跑五遍）。 */
+/** 三态通道的扫描结果（下面每条用例都在它上面挑读数，避免同一份标定跑五遍）。 */
 const TEXT_SWEEP = sweepTextThresholds();
-/** 亮点腿的扫描结果。 */
+/** 亮点通道的扫描结果。 */
 const HIGHLIGHT_SWEEP = sweepHighlightThreshold();
 /** schema 的出厂默认（`kbGapSchema.parse({})` 就是把所有 `.default()` 补齐）。 */
 const SHIPPED = kbGapSchema.parse({});
@@ -94,7 +94,7 @@ function textAnnotation(id: string): GapTextAnnotation {
 }
 
 /**
- * 独立复算一遍三态腿的候选（0.05 粗网格，只用于验证选值判据本身，不与工具共用实现）。
+ * 独立复算一遍三态通道的候选（0.05 粗网格，只用于验证选值判据本身，不与工具共用实现）。
  * @returns 每个满足 `partial ≤ hit` 的候选的评估读数
  */
 function coarseTextCandidates(): TextEvaluation[] {
@@ -114,7 +114,7 @@ function coarseTextCandidates(): TextEvaluation[] {
 }
 
 describe('标定值与出厂值对齐（plan §4.4-e 的落地口径）', () => {
-  it('三态腿扫出的 partial / hit 就是 schema 默认，且 cordis.yml 的 kb-gap 段写的是同一组数', () => {
+  it('三态通道扫出的 partial / hit 就是 schema 默认，且 cordis.yml 的 kb-gap 段写的是同一组数', () => {
     expect(TEXT_SWEEP.chosen.thresholds.partialMinScore).toBe(SHIPPED.evidencePartialMinScore);
     expect(TEXT_SWEEP.chosen.thresholds.hitMinScore).toBe(SHIPPED.evidenceHitMinScore);
     expect(HIGHLIGHT_SWEEP.chosen.threshold.highlightMinScore).toBe(SHIPPED.highlightMinScore);
@@ -137,7 +137,7 @@ describe('标定值与出厂值对齐（plan §4.4-e 的落地口径）', () => 
 });
 
 describe('翻脸清单逐条钉死（"一条不剩的标定等于没标"）', () => {
-  it('三态腿在选定值下只剩 T24 一条错分，亮点腿只剩 H12', () => {
+  it('三态通道在选定值下只剩 T24 一条错分，亮点通道只剩 H12', () => {
     expect(TEXT_SWEEP.chosen.misfits.map((flip) => flip.id)).toEqual(['T24']);
     expect(HIGHLIGHT_SWEEP.chosen.misfits.map((flip) => flip.id)).toEqual(['H12']);
   });
@@ -226,7 +226,7 @@ describe('选值判据本身（三段各拦一种翻车方式）', () => {
     expect(chosenProfile[2]).toBeGreaterThan(hugProfile[2] ?? Number.NEGATIVE_INFINITY);
   });
 
-  it('改数确有依据：亮点腿从 0.12 换到标定值后错分严格变少，三态腿不变差', () => {
+  it('改数确有依据：亮点通道从 0.12 换到标定值后错分严格变少，三态通道不变差', () => {
     const previous: HighlightThreshold = { highlightMinScore: 0.12 };
     expect(evaluateHighlight(GAP_HIGHLIGHT_ANNOTATIONS, previous).misfits.length).toBeGreaterThan(
       HIGHLIGHT_SWEEP.chosen.misfits.length,
@@ -282,9 +282,9 @@ describe('语料规模守门（防止用删样本的方式"提高"标定质量�
   it('可分带宽的两侧都来自真实读数，不是把某一类抽空后得到的假干净', () => {
     expect(TEXT_SWEEP.band).not.toBeNull();
     expect(HIGHLIGHT_SWEEP.band).not.toBeNull();
-    // 三态腿：缺失侧最高 < 命中侧最低 → 两个类之间存在可放分界线的空带
+    // 三态通道：缺失侧最高 < 命中侧最低 → 两个类之间存在可放分界线的空带
     expect(TEXT_SWEEP.band?.lower).toBeLessThan(TEXT_SWEEP.band?.upper ?? Number.POSITIVE_INFINITY);
-    // 亮点腿：band.lower（不相关最高 0.1429）> band.upper（相关最低 0.1111）→ 类带真重叠，
+    // 亮点通道：band.lower（不相关最高 0.1429）> band.upper（相关最低 0.1111）→ 类带真重叠，
     // 这正是 H12 一定翻脸的原因，标定不假装它能分开
     expect((HIGHLIGHT_SWEEP.band?.lower ?? 0) > (HIGHLIGHT_SWEEP.band?.upper ?? 1)).toBe(true);
     expect(HIGHLIGHT_SWEEP.chosen.misfits).toHaveLength(1);

@@ -104,7 +104,7 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
   const [outPath, setOutPath] = useState('');
   const [saveError, setSaveError] = useState<AppErrorPayload>();
   const [saved, setSaved] = useState<PdfSaveAsReceiptView>();
-  /** 正在拖的那只橡皮筋（进阶腿：先在左列写好字、再到纸上框位置）。 */
+  /** 正在拖的那只橡皮筋（进阶那一条：先在左列写好字、再到纸上框位置）。 */
   const [rubber, setRubber] = useState<PdfPaperRect>();
   /** 就地改的目标行（点中一行才长出来；提交或 Esc 就收掉）。 */
   const [editing, setEditing] = useState<PdfInlineEdit>();
@@ -132,7 +132,7 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
    */
   const paperSeqRef = useRef(0);
 
-  /** 建 / 必要时重建编辑会话：要同时有打开回执（页面度量）与尺度才建得起来，所以两条腿各调一次。 */
+  /** 建 / 必要时重建编辑会话：要同时有打开回执（页面度量）与尺度才建得起来，所以两条通道各调一次。 */
   const ensureSession = () => {
     const metrics = receiptRef.current?.pages;
     const currentLimits = limitsRef.current;
@@ -155,7 +155,7 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
     setCanRedo(session.canRedo());
   }
 
-  /** 真纸面不挂在全屏 `busy` 上：它是一条后台供料腿，走自己的状态读数（与纸面实时那条 effect 同一取向）。 */
+  /** 真纸面不挂在全屏 `busy` 上：它是一条后台供料那一条，走自己的状态读数（与纸面实时那条 effect 同一取向）。 */
   const loadPaper = useCallback(
     async (target: string) => {
       const seq = paperSeqRef.current + 1;
@@ -341,12 +341,12 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
   };
 
   /**
-   * 把一个矩形连同要写的字交进会话（就地改与进阶拖动落位共用这一条腿）。
+   * 把一个矩形连同要写的字交进会话（就地改与进阶拖动落位共用这一条通道）。
    * 合法性一律由会话判——会话用的就是另存那一份 `planOverlays`，界面这里不写第二条规则（§2.5）。
    * @param rect 比例矩形
    * @param text 要盖上去的新字；空串表示只涂底（那时 `text` 这个键根本不出现）
    * @param line 就地改时的那一行原文（spec 3.5-15：字号、字族、基线三样都照它）；
-   *             拖框那一腿没有"一行"可依，省略即用缺省字号 + em 盒居中
+   *             拖框那一条没有"一行"可依，省略即用缺省字号 + em 盒居中
    */
   const commitRect = (rect: PdfPaperRect, text: string, line?: PdfTextLine) => {
     const session = sessionRef.current;
@@ -393,7 +393,7 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
   const cancelEdit = () => setEditing(undefined);
 
   /**
-   * 进阶腿：拖完一只橡皮筋后交进会话，文字取左列那行输入框（旧流程原样保留，只是降到进阶）。
+   * 进阶那一条：拖完一只橡皮筋后交进会话，文字取左列那行输入框（旧流程原样保留，只是降到进阶）。
    * 这一条**没有行可依**，所以字号走缺省、基线走 em 盒居中（`planOverlays` 里那一句回落）。
    * @param rect 拖出来的比例矩形
    */

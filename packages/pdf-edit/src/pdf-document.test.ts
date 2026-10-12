@@ -3,7 +3,7 @@
  * 外加 plan §7.10 要求三种「打不开」都有确定态，以及 3.5-09 的「装载与另存都不碰源字节」半边）。
  *
  * 夹具来自 `@auto-cc/testing` 的手写 PDF 生成器：**不用 pdf-lib 造再让 pdf-lib 读**，
- * 否则「装载」这条腿等于自证（spec 3.4-03 要的是引擎对外部输入负责）。
+ * 否则「装载」这条通道等于自证（spec 3.4-03 要的是引擎对外部输入负责）。
  */
 import { describe, expect, it } from 'vitest';
 import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
@@ -11,7 +11,7 @@ import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } 
 import { latinStandardFontOf, PdfEditDocument } from './pdf-document.js';
 import type { PlannedOverlay } from './overlay-writer.js';
 
-describe('3.4-03 装载腿：把最小 PDF 读成一份可编辑文档', () => {
+describe('3.4-03 装载通道：把最小 PDF 读成一份可编辑文档', () => {
   it('单页：页数与 A4 宽高（pt）都读得出来，来源哈希是 sha256', async () => {
     const loaded = await PdfEditDocument.load(minimalPdf(['Jane Doe', 'Work Experience']));
     if (loaded.status !== 'loaded') throw new Error(`应当装载成功，实际是 ${loaded.reason}`);
@@ -30,7 +30,7 @@ describe('3.4-03 装载腿：把最小 PDF 读成一份可编辑文档', () => {
   });
 });
 
-describe('3.4-03 生成腿：save 出去的字节要能被重新装载', () => {
+describe('3.4-03 生成通道：save 出去的字节要能被重新装载', () => {
   it('往返一次：页数与宽高不变，产物以 %PDF- 开头', async () => {
     const loaded = await PdfEditDocument.load(minimalMultiPagePdf(2));
     if (loaded.status !== 'loaded') throw new Error(`应当装载成功，实际是 ${loaded.reason}`);
@@ -180,7 +180,7 @@ describe('3.5-14 的绘制半边：垫底矩形取量到的纸色，量不到才
     expect(content).not.toContain('1 1 1 rg');
   });
 
-  it('只铺底不写字：这一条腿只有那一个颜色操作符，不该长出反白墨色', async () => {
+  it('只铺底不写字：这一条通道只有那一个颜色操作符，不该长出反白墨色', async () => {
     const content = await contentOf({});
     expect(content).toContain(FALLBACK_FILL);
     expect(content).not.toContain(FALLBACK_INK);
@@ -227,7 +227,7 @@ describe('3.5-15 的绘制半边：量到的字族决定嵌哪只标准字体', 
     expect(textFontKeysOf(text).filter((key) => key.startsWith('Times-Roman')).length).toBe(1);
   });
 
-  it('量到 monospace：嵌 Courier；没量到（拖框那一腿）按无衬线走且绝不长出衬线名', async () => {
+  it('量到 monospace：嵌 Courier；没量到（拖框那一条）按无衬线走且绝不长出衬线名', async () => {
     const mono = await productTextOf({ text: 'AAA', fontFamilyHint: 'monospace' });
     expect(baseFontsOf(mono)).toContain('Courier');
     expect(textFontKeysOf(mono).filter((key) => key.startsWith('Courier')).length).toBe(1);

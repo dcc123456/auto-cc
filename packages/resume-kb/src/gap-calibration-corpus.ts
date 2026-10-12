@@ -3,7 +3,7 @@
  *
  * 这份数据标的是**尺子**，不是功能：每条只记「要求文本 × 库内文本 → 人判三态」，
  * 由 `gap-calibration.ts` 直接喂 `coverageOf`，**不经过 `report()`**。理由写在 plan §4.4-e：
- * 走完整链路的话，一次翻脸分不清是拆解腿抓错了要求还是这把 token 尺子量错了，标定就白做。
+ * 走完整链路的话，一次翻脸分不清是拆解通道抓错了要求还是这把 token 尺子量错了，标定就白做。
  *
  * 四条诚实约束（都是判据，不是风格）：
  *
@@ -28,7 +28,7 @@ import type { GapState } from './requirements-compare.js';
 export interface GapTextAnnotation {
   /** 稳定号，报告与回归锁都按它对账（改内容不改号） */
   readonly id: string;
-  /** 拆解腿的 `label`（比对真正吃的字段，别名归一后的代表词） */
+  /** 拆解通道的 `label`（比对真正吃的字段，别名归一后的代表词） */
   readonly claim: string;
   /** 库内实体的可比文本（真库里是 `evidenceTextOf(payload)` 的产物） */
   readonly target: string;
@@ -56,7 +56,7 @@ export interface GapHighlightAnnotation {
   readonly isBoundary: boolean;
 }
 
-/** 亮点腿用的那份 JD 正文（虚构岗位；`缓存`/`接口`/`文档` 这些词是真 JD 一定会写的）。 */
+/** 亮点通道用的那份 JD 正文（虚构岗位；`缓存`/`接口`/`文档` 这些词是真 JD 一定会写的）。 */
 const JD_BACKEND =
   '后端工程师（交易方向）：负责交易链路的稳定性与容量规划，要求 Java、Spring Boot，' +
   '熟悉 MySQL、Redis 缓存、限流与降级，5 年以上经验，具备良好的文档写作习惯。';

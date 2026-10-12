@@ -42,7 +42,7 @@ export {
 export { contentHash, normalizeDocument } from './normalize.js';
 export { diff, type ChangeType, type DocDiff, type EntryChange, type FieldChange, type SectionChange } from './diff.js';
 export { importExternal, type ImportResult, type ImportWarning } from './import.js';
-// 3.6-a 排版编辑器的模型腿：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。
+// 3.6-a 排版编辑器的模型通道：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。
 export {
   EDITOR_METRIC_BOUNDS,
   planEntryMove,
@@ -58,7 +58,7 @@ export {
   type ResumeEditorSession,
   type ResumeEditorSessionOptions,
 } from './editor-session.js';
-// 3.6-b 契约腿：`resume.editor` 服务（会话持有者 + 投影）。导出口径照 `doc-store` / `snapshot-store`
+// 3.6-b 契约轨：`resume.editor` 服务（会话持有者 + 投影）。导出口径照 `doc-store` / `snapshot-store`
 // 那两行：类 + 配置类型 + 读数类型；空配置的 schema 常量留在文件内部（`static Config` 自己用）。
 export { ResumeEditorService, type ResumeEditorConfig, type ResumeEditorState } from './editor-service.js';
 export {

@@ -1,5 +1,5 @@
 /**
- * 简历源文件 → 纯文本 → 文档模型（spec 4.1-01 的 PDF / DOCX 两条依赖腿，以及 4.1-06 的失败路径）。
+ * 简历源文件 → 纯文本 → 文档模型（spec 4.1-01 的 PDF / DOCX 两条依赖通道，以及 4.1-06 的失败路径）。
  *
  * 职责边界：本文件只做「字节 → 文本」，字段抽取仍然全部交给 `sections.ts`；
  * `parseResumeSource` 是这一层唯一的对外入口，服务层与界面只认它，不允许各调各的抽取函数（AGENTS.md §2.5）。
@@ -50,7 +50,7 @@ export type ResumeSourceResult =
     }
   | {
       readonly status: 'too-short';
-      /** 过短腿仍然带判定出的格式：扫描件是「读得出是 PDF 但没文本层」，界面要按格式给补录指引。 */
+      /** 过短通道仍然带判定出的格式：扫描件是「读得出是 PDF 但没文本层」，界面要按格式给补录指引。 */
       readonly format: ResumeSourceFormat;
       readonly issues: readonly ParseIssue[];
       readonly textLength: number;

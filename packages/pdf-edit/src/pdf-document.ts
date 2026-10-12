@@ -1,9 +1,9 @@
 /**
- * 既有 PDF 的装载与另存（spec 3.4-03：`pdf-lib` 装载并生成合法 PDF；plan §7.3 的 `pdf-edit` 引擎腿）。
+ * 既有 PDF 的装载与另存（spec 3.4-03：`pdf-lib` 装载并生成合法 PDF；plan §7.3 的 `pdf-edit` 引擎通道）。
  *
  * 契约与生成轨**相反**，所以它是独立的一只包：`resume-doc` 的真相源是文档模型、PDF 是它的投影；
  * 这里的真相源是**用户手里那份文件**，没有模型可依赖（plan §7.3 的第一条理由）。
- * 降级裁定（2026-10-05）之后这是编辑轨唯一一条引擎腿：纯 JS、随 `app.asar` 内嵌、零 WASM、零原生编译，
+ * 降级裁定（2026-10-05）之后这是编辑轨唯一一条引擎通道：纯 JS、随 `app.asar` 内嵌、零 WASM、零原生编译，
  * 因此 `scripts/check-dependency-floor.ts` 的搬运层与 `scripts/check-licenses.ts` 都按现成的口判它（plan §7.7）。
  *
  * 反伪装约束（plan §7.6）：本层只**追加**内容，不改写原内容流——实测覆盖上去的白底矩形之下，
@@ -59,10 +59,10 @@ export class PdfEditDocument {
    */
   static async load(bytes: Uint8Array): Promise<PdfLoadOutcome> {
     if (bytes.length === 0) return { status: 'failed', reason: 'empty', detail: 'file is empty' };
-    // 哈希在进入三方库之前算：与 4.1 的导入腿同一条顺序约束，字节被消费之后再摘要就是空壳。
+    // 哈希在进入三方库之前算：与 4.1 的导入通道同一条顺序约束，字节被消费之后再摘要就是空壳。
     const sourceHash = sha256Hex(bytes);
     try {
-      // 交给三方库前先复制一份（同 `source.ts` 的抽取腿）：解析失败或内部缓冲移交都不该动到调用方手里的原件。
+      // 交给三方库前先复制一份（同 `source.ts` 的抽取通道）：解析失败或内部缓冲移交都不该动到调用方手里的原件。
       // `ignoreEncryption: true` 只为了让下面那一句读得到 `isEncrypted`，而不是「解析都失败在同一个异常里」——
       // 加密与损坏在界面上的处置不同（一条要用户去解密，一条是文件本身坏了），所以先分开判。
       const pdf = await PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
@@ -192,7 +192,7 @@ export class PdfEditDocument {
           throw new Error(
             `覆盖区 ${plan.id} 落到产物第 ${String(position + 1)} 页，本档只有 ${String(pages.length)} 页`,
           );
-        // 底色取渲染层量到的那块纸色，量不到才按墨色垫底（spec 3.5-14）。判据与画布那一条腿共用
+        // 底色取渲染层量到的那块纸色，量不到才按墨色垫底（spec 3.5-14）。判据与画布那一条通道共用
         // `colorsOfOverlay`，所以屏幕上看到什么，产物里就是什么。
         const colors = colorsOfOverlay(plan);
         page.drawRectangle({

@@ -28,7 +28,7 @@ const CHAT_ENV = 'AUTO_CC_LLM_API_KEY';
 const EMBED_ENV = 'AUTO_CC_SILICONFLOW_API_KEY';
 const BASE_URL = 'https://model.test.invalid/v1';
 
-/** 一次保存要覆盖到的格子；`baseUrl: null` 用来造"这一腿还没配"的形态。 */
+/** 一次保存要覆盖到的格子；`baseUrl: null` 用来造"这一条还没配"的形态。 */
 interface BootOptions {
   /** 放进环境变量的兜底 key */
   envKey?: string;
@@ -40,7 +40,7 @@ interface BootOptions {
   chatProviderId?: string | null;
 }
 
-/** 一条腿的读数（按腿取，避免各处写下标）。 */
+/** 一条通道的读数（按通道取，避免各处写下标）。 */
 const legOf = (view: LlmSettingsView, leg: 'chat' | 'embed') => view.legs.find((item) => item.leg === leg)!;
 
 /**
@@ -161,7 +161,7 @@ describe('服务商目录（spec 7.2-01：参考实现的全部 19 家）', () =
     expect(PROVIDER_PRESETS.at(-1)).toMatchObject({ id: 'custom', baseUrl: '', defaultModel: '' });
   });
 
-  it('目录不再声明腿，也不再出现同一个地址的第二条条目（§2.5 / plan §7.2 裁定②）', () => {
+  it('目录不再声明通道，也不再出现同一个地址的第二条条目（§2.5 / plan §7.2 裁定②）', () => {
     const seen = new Set<string>();
     for (const item of PROVIDER_PRESETS) {
       if (item.baseUrl === '') continue;
@@ -220,7 +220,7 @@ describe('地址归一与端点归属（spec 7.2-03）', () => {
   });
 
   it('按地址反查提供商：每家与每个变体都认得出自己，认不出和空地址都回 custom', () => {
-    // 这一条是"逐家自证"：兜底态那条腿显示的是反查结果，目录里任何一家认不出自己都会让它显示成「自定义」。
+    // 这一条是"逐家自证"：兜底态那条通道显示的是反查结果，目录里任何一家认不出自己都会让它显示成「自定义」。
     for (const preset of PROVIDER_PRESETS) {
       if (preset.baseUrl !== '') {
         expect(presetIdOfBaseUrl(preset.baseUrl), `${preset.id} 的反查落到了别家`).toBe(preset.id);
@@ -258,7 +258,7 @@ describe('read()：密钥来源与可用性读数（spec 7.1-07）', () => {
     expect(llm.status().keySource).toBe('secret');
   });
 
-  it('向量腿未配置时缺三项，且 keyEnv 报的是它自己那一个', async () => {
+  it('向量通道未配置时缺三项，且 keyEnv 报的是它自己那一个', async () => {
     const { settings } = await boot({ envKey: 'sk-env-9900' });
     const embed = legOf(settings.read(), 'embed');
     expect(embed.missing).toEqual(['baseUrl', 'model', 'apiKey']);
@@ -266,7 +266,7 @@ describe('read()：密钥来源与可用性读数（spec 7.1-07）', () => {
   });
 });
 
-describe('read()：一条腿的来源读数（spec 7.2-12 的显示半边，7.2-d）', () => {
+describe('read()：一条通道的来源读数（spec 7.2-12 的显示半边，7.2-d）', () => {
   it('绑定态：origin=pool、boundProviderId 是那行实例，提供商名直取那一行记的预设', async () => {
     const first = await boot();
     const saved = first.settings.saveProvider({
@@ -312,7 +312,7 @@ describe('read()：一条腿的来源读数（spec 7.2-12 的显示半边，7.2-
   });
 });
 
-describe('clearKey()：只清这条腿兜底那一把（spec 7.1-09 的删除半边）', () => {
+describe('clearKey()：只清这条通道兜底那一把（spec 7.1-09 的删除半边）', () => {
   it('密钥清掉后端点与模型名留着，读数里没有一个明文字节', async () => {
     const { settings, config } = await boot();
     config.setSecret('llm.chat', 'sk-x-abcd');
@@ -365,7 +365,7 @@ describe('check()：连通性测试复用模型出口（spec 7.1-10）', () => {
     }
   });
 
-  it('向量腿本轮明确回 CHECK_NOT_SUPPORTED，而不是假称可用', async () => {
+  it('向量通道本轮明确回 CHECK_NOT_SUPPORTED，而不是假称可用', async () => {
     const { settings } = await boot({ envKey: 'sk-env-9900' });
     expect(await settings.check('embed')).toMatchObject({ ok: false, reason: 'CHECK_NOT_SUPPORTED' });
   });
@@ -576,7 +576,7 @@ describe('提供商实例池（spec 7.2-02 / 06 / 08 / 10 的存储半边）', (
 });
 
 describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 12）', () => {
-  /** 池实例的端点前缀：与 `BASE_URL` 刻意不同名，"腿读到的是池那个地址"才量得出来。 */
+  /** 池实例的端点前缀：与 `BASE_URL` 刻意不同名，"通道读到的是池那个地址"才量得出来。 */
   const POOL_URL = 'https://gw.test.invalid/v1';
   const POOL_KEY = 'sk-pool-7777';
 
@@ -662,12 +662,12 @@ describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 
     }
   });
 
-  it('绑定角色：持久层与热改都只写两格、不复制 baseUrl，腿读回的是池那个地址', async () => {
+  it('绑定角色：持久层与热改都只写两格、不复制 baseUrl，通道读回的是池那个地址', async () => {
     const { settings, config, applied } = await boot();
     const saved = seededProvider(settings);
     const view = await settings.bindRole({ leg: 'chat', providerId: saved.id, model: 'a-model' });
 
-    // 端点不落持久层：用户改了那家的地址，这条腿下一次就该跟着变（§2.5 不存第二份事实）。
+    // 端点不落持久层：用户改了那家的地址，这条通道下一次就该跟着变（§2.5 不存第二份事实）。
     expect(config.persisted('llm')).toEqual({ providerId: saved.id, model: 'a-model' });
     expect(applied).toEqual([{ id: 'llm', patch: { providerId: saved.id, model: 'a-model' } }]);
     expect(legOf(view, 'chat')).toMatchObject({
@@ -676,11 +676,11 @@ describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 
       available: true,
       key: { present: true, source: 'secret', tail: '7777' },
     });
-    // 另一腿不受这次绑定影响（一次绑定只动一格，风险表里"重建两次"那一条的读法）。
+    // 另一条不受这次绑定影响（一次绑定只动一格，风险表里"重建两次"那一条的读法）。
     expect(legOf(view, 'embed').missing).toEqual(['baseUrl', 'model', 'apiKey']);
   });
 
-  it('绑定只认已入库的那条模型，三条负腿各报自己的码且一次落盘都没有', async () => {
+  it('绑定只认已入库的那条模型，三条反向证据各报自己的码且一次落盘都没有', async () => {
     const { settings, config, applied } = await boot();
     const saved = seededProvider(settings);
 
@@ -737,19 +737,19 @@ describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 
       origin: 'none',
     });
 
-    // 向量腿共用同一条解析（`resolveLeg` 抽在这里的理由）：绑定 embed 后它读的也是池那个地址。
+    // 向量通道共用同一条解析（`resolveLeg` 抽在这里的理由）：绑定 embed 后它读的也是池那个地址。
     await first.settings.bindRole({ leg: 'embed', providerId: saved.id, model: 'b-model' });
     expect(legOf(first.settings.read(), 'embed')).toMatchObject({ baseUrl: POOL_URL, model: 'b-model' });
   });
 
-  it('删掉正被绑定的实例：那条腿回落到兜底、热改一次 null，并报出缺的那一格', async () => {
+  it('删掉正被绑定的实例：那条通道回落到兜底、热改一次 null，并报出缺的那一格', async () => {
     const { settings, config, applied } = await boot();
     const saved = seededProvider(settings);
     await settings.bindRole({ leg: 'chat', providerId: saved.id, model: 'a-model' });
     expect(applied).toHaveLength(1);
 
     await settings.deleteProvider(saved.id);
-    // 悬空绑定必须当场撤掉：留着的话这条腿每次请求都要先解析一次才发现"这一行没有了"。
+    // 悬空绑定必须当场撤掉：留着的话这条通道每次请求都要先解析一次才发现"这一行没有了"。
     expect(applied.at(-1)).toEqual({ id: 'llm', patch: { providerId: null, model: null } });
     // 绑定是一条原子表态（实例 + 模型名一起写的），所以撤它也是两条一起撤——
     // 留着那个模型名，界面就会拿着一个候选清单里已经不存在的值。
@@ -776,7 +776,7 @@ describe('模型清单获取与角色绑定（spec 7.2-04 / 05 / 07 / 09 / 11 / 
       expect(applied).toHaveLength(0);
       expect(config.persisted('llm')).toEqual({});
 
-      // 负腿：点名了池里没有的实例，报"这一家没有"而不是发一次注定失败的请求。
+      // 反向证据：点名了池里没有的实例，报"这一家没有"而不是发一次注定失败的请求。
       const requestsBefore = fixture.requests.length;
       expect(await settings.checkProvider('不在池里的 id', 'm')).toMatchObject({
         ok: false,

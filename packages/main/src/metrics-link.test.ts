@@ -13,7 +13,7 @@
  * 1. **五级从真库数得出**：岗位、打招呼、回话岗位、投递各写进行内与行外的数据，
  *    数出来的只有行内那些——半开区间在替身上测的是形状，在这里测的是真列名与真时刻。
  * 2. **额度块读的是真闸门**：上限来自它的配置侧、今日已用来自真账本，两处在同一份装配里对齐。
- * 3. **摘掉一条能力腿只影响那一级**：本服务没有 `inject`，所以装配面板单个摘包时
+ * 3. **摘掉一条能力通道只影响那一级**：本服务没有 `inject`，所以装配面板单个摘包时
  *    给的是那句「此刻没有挂载」，而不是整只服务降为 PENDING 或一片 0。
  *
  * `funnel.query` 进渲染层白名单、界面把这张读数画出来是 5.8-b 的事（V 类，见切片表），
@@ -44,7 +44,7 @@ const DAY_MS = 86_400_000;
 /** 看板窗口：往前两天、往后一天，基准时刻落在里面。 */
 const WINDOW: FunnelRange = { fromMs: AS_OF_MS - 2 * DAY_MS, toMs: AS_OF_MS + DAY_MS };
 
-/** 窗口外的时刻（三日之前，`fromMs` 之下）：每条腿各写一条，用来证明区间真的在挡行。 */
+/** 窗口外的时刻（三日之前，`fromMs` 之下）：每条通道各写一条，用来证明区间真的在挡行。 */
 const BEFORE_WINDOW = AS_OF_MS - 3 * DAY_MS;
 
 const assemblies: FunnelAssembly[] = [];
@@ -53,8 +53,8 @@ const assemblies: FunnelAssembly[] = [];
  * 装配一份真库并把行内与行外的数据写进去。
  *
  * 写一律走各服务的**公开写入口**，不手搓 SQL：手搓会把「服务真认得这一行」判成假。
- * @param options.without 摘掉哪些服务的装配（服务名数组），用来演「那条能力腿没装」的现场
- * @returns 上下文、应用句柄、聚合口句柄（本装配写进去的各条腿的期望数见下面各用例的字面量）
+ * @param options.without 摘掉哪些服务的装配（服务名数组），用来演「那条能力通道没装」的现场
+ * @returns 上下文、应用句柄、聚合口句柄（本装配写进去的各条通道的期望数见下面各用例的字面量）
  */
 async function bootMetricsAssembly(options: { without?: string[] } = {}) {
   const without = new Set(options.without ?? []);
@@ -196,7 +196,7 @@ describe('5.8-01 五级从真库数得出', () => {
   });
 });
 
-describe('5.8-02 装配面：摘腿与挂载', () => {
+describe('5.8-02 装配面：摘掉通道与挂载', () => {
   it('摘掉会话库只让「回过话」那一级给原因，其余三级照旧是真数', async () => {
     const { funnel } = await bootMetricsAssembly({ without: ['conversation.store'] });
     const view = funnel.query(WINDOW, { nowMs: AS_OF_MS });

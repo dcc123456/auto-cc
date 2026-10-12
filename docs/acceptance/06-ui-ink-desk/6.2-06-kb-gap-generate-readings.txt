@@ -94,7 +94,7 @@
 --------------------------------------------------------------------
 | 条目 | 代码位 | 没取到的原因 |
 |---|---|---|
-| `generate accept` 的 amber 与四种禁用理由（NO_PREVIEW / OUTCOME_REJECTED / NOTHING_SELECTED / ACTION_BUSY） | 已写 | 取它要先真跑一次定向生成（会调模型腿），本片不做未经用户在场的生成动作 |
+| `generate accept` 的 amber 与四种禁用理由（NO_PREVIEW / OUTCOME_REJECTED / NOTHING_SELECTED / ACTION_BUSY） | 已写 | 取它要先真跑一次定向生成（会调模型通道），本片不做未经用户在场的生成动作 |
 | `gap` 三栏色带（jade/amber/seal 的 wash）与 `generate` 三种结局色带（jade/celadon/amber 的 wash） | 已写 | 要出读数必须真跑一次缺口分析/生成，同上；截图里能看到的是面板容器与按钮，不是栏 |
 | `ACTION_BUSY`（三块面板共 8 处） | 已写 | fixture 侧动作在 <25ms 内返回，取不到"在途"那一帧；按 §7.2 不去打真实平台凑这一帧 |
 | 证据链展开块的分隔线 | 已写 | 见第 5 节：当轮 0 条命中，块未渲染 |

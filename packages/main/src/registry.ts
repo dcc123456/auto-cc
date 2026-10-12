@@ -160,7 +160,7 @@ export const REGISTRY: Registry = {
   // 界面点「导出 PDF」给出结构化错误——「导出」与「导出即留档」因此是可分别摘除的两件事，而不是悄悄少记一份历史。
   'resume-snapshot': ResumeSnapshotService,
   // 简历导入（spec 4.1-06 / 07 / 09 / 10）：`resume_imports` 表的唯一落点，迁移号段 10，也是 PDF / DOCX /
-  // Markdown 三条输入腿在桌面端的唯一入口（pdf.js 与 mammoth 是外置依赖，见 plan §1.2 与 1.7-15）。
+  // Markdown 三条输入通道在桌面端的唯一入口（pdf.js 与 mammoth 是外置依赖，见 plan §1.2 与 1.7-15）。
   // 摘掉它，界面的「导入简历」得到「服务未挂载」的结构化失败，而导出轨照旧——「读进来」与「排出去」分属两条。
   'resume-parse': ResumeParseService,
   // 知识库实体（spec 4.2-01 / 02）：`kb_entities` 表的唯一落点，迁移号段 11。四类实体从 `resume_docs`
@@ -168,7 +168,7 @@ export const REGISTRY: Registry = {
   // 摘掉它，4.2-d 的实体面板与 4.3 的检索都失去数据源；本切片（4.2-a）它还没有界面调用方，这是刻意留下的
   // 可见缺口——表先在真实 app 里建好，界面与 agent 工具在 4.2-d 接，两侧都不许对着内存假数据验收。
   'kb-profile': KbProfileService,
-  // JD 能力要求拆解（spec 4.4-01）：4.4-a 只有词面腿，所以它**不建表、不依赖 store**，
+  // JD 能力要求拆解（spec 4.4-01）：4.4-a 只有词面通道，所以它**不建表、不依赖 store**，
   // 拆解是纯派生、用时现算（plan §4.4 口径 3：可重建的投影不落库，`jobs.requirements_json` 仍是 2.3 抓取的原样真相）。
   // 与 `kb-profile` 一样，本切片它没有界面调用方——缺口报告在 4.4-d 接，届时两侧共用这一个入口（§5.9）。
   'kb-gap': KbGapService,
@@ -177,16 +177,16 @@ export const REGISTRY: Registry = {
   // 而知识库、缺口报告、导出轨照旧——「算出改了什么」与「按改动出 PDF」分属两条。
   // 它不 `inject` `kb.gap`（用的时候现问），所以摘掉上面那行它不会连带 PENDING，只会在调用时报库未装配。
   'kb-generate': ResumeGenerateService,
-  // 轻编辑的打开腿（spec 3.4-03 / plan §7.4）：`pdf.io` 只做「绝对路径 → 页数与每页宽高」。
+  // 轻编辑的打开通道（spec 3.4-03 / plan §7.4）：`pdf.io` 只做「绝对路径 → 页数与每页宽高」。
   // 它**不建表、不占迁移号段**——编辑会话只活在一次操作里，产物是一份新文件，没有跨重启还在的状态要存。
   // 摘掉 `cordis.yml` 里这一行，`pdf.io.open` 得到「服务未挂载」的结构化失败，而导入轨与导出轨照旧：
   // 「在用户那份 PDF 上改」与「按文档模型排出去」分属两条。本切片（3.5-a）它还没有界面调用方，
-  // 这是刻意留下的可见缺口——引擎腿先在真实装配里装好，界面与另存腿在 3.5-b 接（同 4.2-a 的口径）。
+  // 这是刻意留下的可见缺口——引擎通道先在真实装配里装好，界面与另存通道在 3.5-b 接（同 4.2-a 的口径）。
   'pdf-io': PdfIoService,
-  // 轻编辑的另存腿（spec 3.5-02 / 3.5-09 / plan §7.4）：`pdf.export` 只做「源路径 + 覆盖区 + 产物路径 → 新文件」。
+  // 轻编辑的另存通道（spec 3.5-02 / 3.5-09 / plan §7.4）：`pdf.export` 只做「源路径 + 覆盖区 + 产物路径 → 新文件」。
   // 与 `pdf-io` 一样不建表、不占迁移号段、不 inject；它**只写产物、从不写源文件**，
   // 于是摘掉 `pdf-io` 只是打不开，摘掉本行是「改完了存不出去」——两件事分开占行（§4.1 一个包只做一件事的装配版）。
-  // 本切片（3.5-b 前半）它同样还没有界面调用方：界面在 3.5-b 后半与 3.5-c 接，中文叠加腿按裁定⑧ 随字体资产再落。
+  // 本切片（3.5-b 前半）它同样还没有界面调用方：界面在 3.5-b 后半与 3.5-c 接，中文叠加轨按裁定⑧ 随字体资产再落。
   'pdf-export': PdfExportService,
   // 定时任务登记处（spec 5.7-05 / 06 / 09 / 10）：`schedule_jobs` + `schedule_triggers` 两张表的唯一落点，
   // 迁移号段 25，也是全仓唯一持有调度 `setInterval` 的地方（`scripts/check-scheduler-no-external-cron.ts` 钉住）。
@@ -223,7 +223,7 @@ export const REGISTRY: Registry = {
   'agent-run': EvidenceRefService,
   // 漏斗与额度的只读聚合口（spec 5.8-01 / 02 / 03 / 04）：看板的唯一数据源，id 与 provide 名同为 `funnel`
   // （点换横线那条对齐规则），于是白名单里的 `funnel.query` 可机械对上「服务 funnel 的方法 query」。
-  // 它没有 `inject`：归属服务一律现问，摘掉任何一条能力腿都只会让那一级带上「没挂载」那句原话，
+  // 它没有 `inject`：归属服务一律现问，摘掉任何一条能力通道都只会让那一级带上「没挂载」那句原话，
   // 而注掉本行让看板整块读不到数——「有几级数」与「有一个地方把它们拼起来」分属两条。
   funnel: FunnelQueryService,
   shell: ShellService,

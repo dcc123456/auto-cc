@@ -36,18 +36,18 @@ export interface PdfOverlayInput {
   readonly sizePt?: number;
   /**
    * 这一块要垫的底色（`#rrggbb`，spec 3.5-14）：渲染层从**已渲染的位图**上量出行盒外那一圈的纸色带给这里。
-   * 省略或形状不对即"没量到"，两条腿一起按墨色垫底（见 `overlay-colors.ts` 的那句不许猜白）。
+   * 省略或形状不对即"没量到"，两条通道一起按墨色垫底（见 `overlay-colors.ts` 的那句不许猜白）。
    */
   readonly backdropHex?: string;
   /**
    * 这一行的字族（spec 3.5-15，三种通用字族之一）：渲染层从 pdf.js 的页级字体样式表量出来带过来。
-   * 省略或值不在那三种里即"没量到"，两条腿一起按无衬线画（导出侧就是 Helvetica）。
+   * 省略或值不在那三种里即"没量到"，两条通道一起按无衬线画（导出侧就是 Helvetica）。
    */
   readonly fontFamilyHint?: FontFamilyHint;
   /**
    * 基线在页面上的视觉位置（比例，0..1，原点左上，spec 3.5-15）：新字要落在被盖住那一行的**同一条基线**上，
    * 而不是矩形里竖向居中——居中就是"字浮在半空"的那只来源。
-   * 省略、非有限数、或落在本区矩形之外都当"没量到"，回落到 em 盒竖向居中（拖框那一腿本来就没有行可依）。
+   * 省略、非有限数、或落在本区矩形之外都当"没量到"，回落到 em 盒竖向居中（拖框那一条本来就没有行可依）。
    */
   readonly baselineRatio?: number;
 }

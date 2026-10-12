@@ -437,7 +437,7 @@ export async function loadPdfPaper(bytes: Uint8Array): Promise<PdfPaper> {
           try {
             pixels = painter.getImageData(band.x0, band.y0, band.width, band.height);
           } catch {
-            // 读不回像素（画布被隔离 / 尺寸为 0）：交回"没量到"，让两条腿一起走那句诚实回落。
+            // 读不回像素（画布被隔离 / 尺寸为 0）：交回"没量到"，让两条通道一起走那句诚实回落。
             return undefined;
           }
           return backdropOfBand({

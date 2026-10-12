@@ -14,7 +14,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts && tsx scripts/check-dependency-floor.ts && tsx scripts/check-prompts.ts && tsx scripts/check-agent-model-authority.ts && tsx scripts/check-tool-contract.ts && tsx scripts/check-scheduler-no-external-cron.ts && tsx scripts/check-dashboard-readonly.ts && tsx scripts/check-licenses.ts",
+    "lint": "eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts && tsx scripts/check-dependency-floor.ts && tsx scripts/check-prompts.ts && tsx scripts/check-agent-model-authority.ts && tsx scripts/check-tool-contract.ts && tsx scripts/check-scheduler-no-external-cron.ts && tsx scripts/check-dashboard-readonly.ts && tsx scripts/check-licenses.ts && tsx scripts/check-lexicon.ts",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -29,6 +29,7 @@
     "postinstall": "node packages/main/node_modules/electron/install.js",
     "prepare": "git config core.hooksPath .githooks",
     "fixture": "tsx scripts/fixture-server.ts",
+    "e2e:resume-jd": "tsx scripts/e2e-resume-jd.ts",
     "smoke:dist": "tsx scripts/smoke-dist.ts"
   },
   "devDependencies": {

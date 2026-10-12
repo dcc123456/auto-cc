@@ -843,7 +843,7 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 等到这次 run 停下（`done` / `failed` / `paused`）——`workflow.run` 的等待腿（spec 5.10-18）。
+   * 等到这次 run 停下（`done` / `failed` / `paused`）——`workflow.run` 的等待通道（spec 5.10-18）。
    * @param runId 由 `start()` 当场返回的 run id，不接受外部输入
    * @param signal 取消信号；让出的方式是**停在可恢复点**（`abort()`），与用户在界面按暂停同一条路，
    *        于是"取消一次工具调用"不会变成"这一件事从没发生过"，续跑与幂等闸门照旧成立

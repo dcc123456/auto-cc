@@ -5,14 +5,14 @@
 ----------------------------------------
 - 没有用共享的那台 dev 实例（CDP 10222，userData `tmp/v6-userdata`）：它的 vite dev server 与另一个正在
   改 6.x 的窗口共用，`scripts/dev.ts` 里 `electron.on('exit') → process.exit(0)`，杀掉主进程会把人家整条
-  dev 会话一起带走。所以另起一份**只属于本腿**的实例：
+  dev 会话一起带走。所以另起一份**只属于本条**的实例：
     ELECTRON_RENDERER_URL=http://127.0.0.1:5173 \
       packages/main/node_modules/.bin/electron packages/main/dist/main.cjs \
       --remote-debugging-port=10299 --disable-features=CalculateNativeWinOcclusion \
       --user-data-dir="$PWD/tmp/killleg-userdata"
   （`tmp/killleg-userdata` 是 `tmp/v6-userdata` 的 rsync 副本，副本里删掉 SingletonLock/Socket/Cookie 才起得来；
    不能直接跑第二份 `pnpm dev`——`packages/renderer/vite.config.ts` 是 `strictPort: true`，5173 被占就起不来。）
-- 靶计划是 `park-killleg3-muwbdxsu`（名字「kill 续跑腿 3」，3 只 `demo.flaky`，2 条线性边，指纹 ea6f783a）。
+- 靶计划是 `park-killleg3-muwbdxsu`（名字「kill 续跑那一条 3」，3 只 `demo.flaky`，2 条线性边，指纹 ea6f783a）。
   它由 `tmp/park/seed-plan3.mts` 经仓库自己的 `insertPlan` + `savePlanGraph` 写进**副本**库：这台机器的库里
   一条自定义计划都没有，而渲染层没有「新建计划」入口（创建只能从对话沉淀，M6-02），所以先把声明面铺好再走界面。
 - 为了让 kill 落在一格「正在跑」的节点上，先用诊断页装配面板把 `workflow` 的配置改成
@@ -49,7 +49,7 @@
     workflow_nodes：flaky-1 仍 done/attempts 1，flaky-2 仍 running/attempts 1/finished_at null
 - 渲染层读数（此刻 runner 的当前计划还是配置里那条 `boss-basic`）：
     [data-testid=wf-lab-plan] 「当前计划 3 个节点：jd.capture → jd.list → demo.flaky」
-    runner.resumable() → run c4aa5abe（boss-basic 那条 failed 的旧 run）——**不是**本腿那条
+    runner.resumable() → run c4aa5abe（boss-basic 那条 failed 的旧 run）——**不是**本条那条
     runner.state() → null
   也就是说：换了进程，界面认不出「库里那一次中断」属于谁，除非先把当前计划换成它。
 
@@ -99,7 +99,7 @@
 - 截图 `5.10-13-killleg-resumed-rows.png`（md5 ac91db272a8acff……）与 `5.10-13-killleg-lab-after-resume.png`
   （md5 0a2114f9fc64f5e2……）。三张 md5 互不相同（§9 的 5.10-18 硬步骤：同批截图先跑一次 md5 去重）。
 
-这条腿证明了什么、没证明什么
+这条通道证明了什么、没证明什么
 ----------------------------
 - 证明了 spec 5.10-13 字面那条「kill 一条自定义计划的 run → 重启 app → 下拉里选中那条 → 点续跑 → 从中断那一格继续」
   在真实界面上走得通，且 2.4-05（中断判据、不假装在跑）与 2.4-06（不重放、幂等键不动）在 DAG + 自定义计划下仍成立。
@@ -107,7 +107,7 @@
   续跑停在人面前**（`needs-human` → 「拒绝自动重放」），由人按那一格的「重试」才继续。
   这与 5.10-13 原文里「外发幂等仍成立」是同一件事的两面，之前只由 U 用例覆盖。
 - 没有证明的：这条图里 `effect` 是 read / local-write，**没有一只 `effect: outbound` 的节点**，
-  所以真实外发（打招呼 / 投递）的幂等仍由 2.4-06 与 2.5 / 2.6 的既有验收背着，本腿没有重跑（与 5.10-k 那句一致）。
+  所以真实外发（打招呼 / 投递）的幂等仍由 2.4-06 与 2.5 / 2.6 的既有验收背着，本条没有重跑（与 5.10-k 那句一致）。
 - 一条如实交代：`resumeRun` 那一下没有让 run 直接跑完，是「续跑 → 停在接管点 → 人按重试」三步。
   spec 原文的「点续跑」之后还要人再表态一次，这是 §8.3「失败后禁止盲重放」的预期行为，不是缺陷。
 
@@ -116,4 +116,4 @@
     pnpm harness <eval|click|shot> --port 10299 --url 5173 ...
     node tmp/park/killer.mjs tmp/killleg-userdata/store.db killleg-userdata
     node tmp/park/dump-run.cjs tmp/killleg-userdata/store.db 07ed0144-6991-4aee-a880-4b85be737254
-  脚本都是本腿的一次性产物，写在被忽略的 `tmp/park/` 里，不入库（AGENTS.md §7.5）。
+  脚本都是本条的一次性产物，写在被忽略的 `tmp/park/` 里，不入库（AGENTS.md §7.5）。

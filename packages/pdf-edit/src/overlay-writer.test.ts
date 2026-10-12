@@ -71,7 +71,7 @@ describe('3.5-03 的坐标半边：比例（视觉，原点左上）↔ pt（PDF
 });
 
 describe('3.5-02 / 3.5-03 的边界校验：非法输入一条也不放过，且第一条说了就算', () => {
-  /** 七条拒绝腿：每条给一个越界的字段，断言机器码而不是断言"抛了个错"。 */
+  /** 七条拒绝通道：每条给一个越界的字段，断言机器码而不是断言"抛了个错"。 */
   const cases: readonly { name: string; inputs: readonly PdfOverlayInput[]; code: string }[] = [
     { name: '条数超上限', inputs: [overlay(), overlay(), overlay(), overlay()], code: 'too-many' },
     { name: '页号不存在', inputs: [overlay({ pageNumber: 2 })], code: 'out-of-page' },
@@ -173,7 +173,7 @@ describe('3.5-15 的几何半边：量来的基线与字族进计划，量不到
     }
   });
 
-  it('既没量到基线也没量到字族（拖框那一腿的覆盖区）：区仍然合法，两条回落各自生效', () => {
+  it('既没量到基线也没量到字族（拖框那一条的覆盖区）：区仍然合法，两条回落各自生效', () => {
     const planned = planOverlays([overlay({ text: '拖出来的框' })], [a4], limits);
     if (!planned.ok) throw new Error(planned.detail);
     expect(planned.overlays[0]?.textBaselinePt).toBeCloseTo(647.05, 10);

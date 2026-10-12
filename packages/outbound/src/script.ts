@@ -34,7 +34,7 @@ import { buildScriptMessages, renderScriptTemplate, SCRIPT_PROMPT_VERSION } from
  *
  * `refId` 是**必填**的——spec 4.6-02 要求产物显式回指证据，而一个没有 id 的 `fact` 串
  * 事后无法核对"这句话到底来自库里哪一行"（2.5-09 的来源可追溯在证据这一层的落点）。
- * 值取 `kb.profile.search` 命中的 `chunkId`（entity 腿就是实体行 id），由调用方传入：
+ * 值取 `kb.profile.search` 命中的 `chunkId`（entity 通道就是实体行 id），由调用方传入：
  * 话术服务不查库，这是 plan §4.6 裁定二（`outbound` 反向依赖 `resume-kb` 是 §4.1 禁止的横向引用）。
  */
 export const scriptEvidenceSchema = z.strictObject({
@@ -216,7 +216,7 @@ export class OutboundScriptService extends Service {
   /**
    * 找出文案命中的第一条禁发表述（两组黑名单一次判完）。
    *
-   * 只留这一个判据入口：模型腿（`askModel`，命中就可见回落）与发送腿（`assertSendable`，命中就硬拦）
+   * 只留这一个判据入口：模型通道（`askModel`，命中就可见回落）与发送通道（`assertSendable`，命中就硬拦）
    * 处置不同，但**"什么算禁发"必须一字不差**——两处各写一遍就会各判各的（§2.5）。
    * @param text 待判文案
    * @returns 命中组别与组内序号（从 1 起，界面与账本按它说话）；没命中为 null
@@ -390,7 +390,7 @@ export class OutboundScriptService extends Service {
   };
 
   [Service.init](): void {
-    // 5.1-c 的话术腿：工具面只转发 `generate`，校验、黑名单、回落决策一条都不在登记处重写（§2.5）。
+    // 5.1-c 的话术通道：工具面只转发 `generate`，校验、黑名单、回落决策一条都不在登记处重写（§2.5）。
     // 入参直接复用 `scriptRequestSchema`——界面、工作流节点（`greet.ts` 里的 `outbound.script.generate`）、
     // agent 工具三面读的是同一个入参形状，这是 4.6-11「接口定型」要求的那种一致。
     // `effect: 'local-write'`：本条不落库、也不把内容送到招聘平台（那是 `outbound.greet.perform`），
@@ -402,7 +402,7 @@ export class OutboundScriptService extends Service {
         id: 'outbound.script.generate',
         titleKey: 'agent.tool.labels.scriptGenerate',
         description:
-          '按一个岗位生成一句可发送的话术文案：三类共用这一只入口（开场白 greeting / 追问 follow-up / 拒绝应对 rejection），后两类必须带上对方最后那条消息否则直接失败。产出前过两道硬判据——凭据与夸大诱导两组禁发内容、没有证据支撑的数字，命中就不产出；模型腿不可用或产出不合格时回落本地模板并把原因随结果返回。证据条目的 refId 会原样回指成 evidenceRefs，空数组表示这句话术没有任何库内依据。只产文案，不发送、不落库、不占外发额度',
+          '按一个岗位生成一句可发送的话术文案：三类共用这一只入口（开场白 greeting / 追问 follow-up / 拒绝应对 rejection），后两类必须带上对方最后那条消息否则直接失败。产出前过两道硬判据——凭据与夸大诱导两组禁发内容、没有证据支撑的数字，命中就不产出；模型通道不可用或产出不合格时回落本地模板并把原因随结果返回。证据条目的 refId 会原样回指成 evidenceRefs，空数组表示这句话术没有任何库内依据。只产文案，不发送、不落库、不占外发额度',
         input: scriptRequestSchema,
         effect: 'local-write',
         requiresConfirmation: true,

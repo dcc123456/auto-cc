@@ -46,7 +46,7 @@ const REQUIREMENT_KIND_LABEL_KEY: Record<GapRequirementKindView, string> = {
   experience_years: 'gap.kindYears',
 };
 
-/** 模型腿结局 → 行的色调（五态五句文案，但"是好消息还是坏消息"只有三档）。 */
+/** 模型通道结局 → 行的色调（五态五句文案，但"是好消息还是坏消息"只有三档）。 */
 const MODEL_TONE: Record<GapModelStatusView, string> = {
   merged: 'text-slate-400',
   rejected: 'text-amber',
@@ -168,7 +168,7 @@ export function GapPanel() {
           evidenceId: paramOf(suggestion, 'evidenceId'),
         });
       case 'years_gap':
-        // `noPeriod` 是比对腿挂的标记位：库里一条带起止的经历都没有时，报「只有 0 年」会把
+        // `noPeriod` 是比对通道挂的标记位：库里一条带起止的经历都没有时，报「只有 0 年」会把
         // 「还没录简历」说成「年限不够」——两件事的下一步完全不同，所以各占一句独立文案。
         return suggestion.params['noPeriod'] === undefined
           ? t('gap.suggestion.yearsGap', {
@@ -191,7 +191,7 @@ export function GapPanel() {
   };
 
   /**
-   * 模型腿的五种结局 → 五句文案（spec 4.4-02 的 V 半边）。
+   * 模型通道的五种结局 → 五句文案（spec 4.4-02 的 V 半边）。
    *
    * 这里刻意不合成一句"这次没用上模型"：`rejected`（模型答了但一条都没收下）与 `disabled`
    * （配置关着）对用户的下一步完全不同，四种未并进来的原因也必须分别读得出来。

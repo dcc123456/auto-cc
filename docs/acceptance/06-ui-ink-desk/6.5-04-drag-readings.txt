@@ -7,7 +7,7 @@ fixture 10233），视口 1200×772，`document.visibilityState` 全程 `visible
 
 取证方法：全部鼠标事件走**同一条 CDP WebSocket** 的 `Input.dispatchMouseEvent`，
 中间 `mouseMoved` 一律带 `buttons: 1`（不带就等于告诉浏览器左键已松开，拖拽会话当场结束）。
-脚本：`tmp/v6b/drag-probe.mjs`（六条腿）+ `tmp/v6b/drag-shot.mjs`（双主题截图）。
+脚本：`tmp/v6b/drag-probe.mjs`（六条通道）+ `tmp/v6b/drag-shot.mjs`（双主题截图）。
 读数原始输出：`tmp/v6b/rp50.out` / `tmp/v6b/rp51.out`。
 
 滚动作前提：画布 holder 在页面文档的 y=1290 处、视口只有 772 高，端点全在视口外
@@ -15,7 +15,7 @@ fixture 10233），视口 1200×772，`document.visibilityState` 全程 `visible
 此后调色板格子（y≈321）与画布上半部（y≈590 起）同时可见——**这是取证的步骤，不是页面缺陷**。
 
 
-一、正腿：拖 `resume.customize` 落到画布内（10 稿⑤⑧ 三态一次跑完）
+一、正向证据：拖 `resume.customize` 落到画布内（10 稿⑤⑧ 三态一次跑完）
 -------------------------------------------------------------------
 起点：调色板 `[data-action="palette-add"][data-kind="resume.customize"]`，中心 (383.5, 333.3)。
 落点：画布内 (522.3, 700.2)。
@@ -36,10 +36,10 @@ fixture 10233），视口 1200×772，`document.visibilityState` 全程 `visible
 「拖完撤销一次，格子数回到拖之前」（plan §3.7 明写不能破的那条复核口）：
 点 `[data-action="canvas-undo"]` 之后 `canvas-node` 回到 3、`canvas-draft-count` 回到「图上 0 格」。
 位置只活在视图层 `dragOffsets`，命令栈收到的是 `draftNodeSpec` 的七个字段（没有 `position`），
-因此这一腿验的是"拖入这一格本身可撤销"，与 5.10-03 的点击建格走同一栈。
+因此这一条验的是"拖入这一格本身可撤销"，与 5.10-03 的点击建格走同一栈。
 
 
-二、Esc 取消腿（08 稿「中途 Esc 取消」）
+二、Esc 取消通道（08 稿「中途 Esc 取消」）
 ---------------------------------------
 拖 `jd.capture`：越过阈值且光标进画布后读数为 `data-palette-drag="jd.capture"`、
 `canvas-drop-frame` 1 只、原槽位 `dashed rgb(192,57,31)` + `opacity 0.4`、`canvas-node` 3、「图上 0 格」。
@@ -55,13 +55,13 @@ fixture 10233），视口 1200×772，`document.visibilityState` 全程 `visible
 在画布外松手之后：`data-palette-drag=""`、`canvas-node` 仍 3、「图上 0 格」——没有凭空多一格。
 
 
-四、回归腿：点击仍然直接加一格（5.10-03 的旧通路没被拖拽抢掉）
+四、回归那一条：点击仍然直接加一格（5.10-03 的旧通路没被拖拽抢掉）
 -------------------------------------------------------------
 对 `[data-kind="greeting.send"]` 走一次「不动的按下-松开」（与 `harness click` 同形：
 mouseMoved / mousePressed / mouseReleased 同点）：`canvas-node` 3 → 4、`canvas-draft-count`
 「图上 0 格」→「图上 1 格」，且全程 `data-palette-drag` 保持空串（未越阈值不算拖）。
 这条是 08 稿「点一格 = 加一格」与本片共存的直接证据：`click` 只在按下与松开同处一元素时派发，
-所以拖拽与点击两条腿共用一只 `DeskButton` 而不互相抢。
+所以拖拽与点击两条通道共用一只 `DeskButton` 而不互相抢。
 
 
 五、双主题（Q5：深浅双主题一起做）
@@ -91,7 +91,7 @@ mouseMoved / mousePressed / mouseReleased 同点）：`canvas-node` 3 → 4、`c
 未取到（照实记，不推测）：
 ① **运行中整体禁用时拖不动**——`isReadOnly` 分支在 `onMouseDown` 第一行 `return`，
    只有静态读数（`OperatorPalette.tsx` 的 `if (isReadOnly) return;` + `dead('READ_ONLY')`），
-   活体那一腿要一条真在跑的 run，与 6.5-05 的 `READ_ONLY` 同一受阻原因；
+   活体那一条要一条真在跑的 run，与 6.5-05 的 `READ_ONLY` 同一受阻原因；
 ② **10 稿⑧ 的"自动接上被穿过的那条边（插队）"没做**，plan §3.7 已写否决理由
    （那要改命令栈的建格语义，不是样式换装）；
 ③ **↑↓ 键在画布上选格**不属于本片（08 稿那条挂在 JD 列表上，见 6.4-04 的仍欠清单）。

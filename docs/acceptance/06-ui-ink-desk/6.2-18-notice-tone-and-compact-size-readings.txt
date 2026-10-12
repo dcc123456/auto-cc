@@ -1,7 +1,7 @@
 6.2-18 提示条语气随判定走 + Banner 紧凑尺寸档——活体与探针读数
 取证时间：2026-10-08（macOS Apple Silicon，开发实例 userData = tmp/v6-userdata）
 命令口径：CDP 10222 / 应用页 --url 5173；渲染层由 Vite HMR 带上新代码（无重启）
-        腿脚本 tmp/38-legA.js / tmp/38-legB.js / tmp/38-light2.js，探针 tmp/38-probe.js
+        通道脚本 tmp/38-legA.js / tmp/38-legB.js / tmp/38-light2.js，探针 tmp/38-probe.js
 
 ────────────────────────────────────────
 一、裁定（用户 2026-10-08 两条 AskUserQuestion 表态，逐字）
@@ -65,9 +65,9 @@
 元素级逐处点名留给下一片，见那份读数的第七节。
 
 ────────────────────────────────────────
-五、真消费者活体三条腿（墨案 + 毡案，全部零写入）
+五、真消费者活体三组探针（墨案 + 毡案，全部零写入）
 ────────────────────────────────────────
-腿一 · 失败句 → seal（整条档）：信任屏 `[data-action="snapshot"]` → `browser.page.snapshot`，
+通道一 · 失败句 → seal（整条档）：信任屏 `[data-action="snapshot"]` → `browser.page.snapshot`，
 内核视图未挂载时回 `NO_KERNEL_SESSION`；`[data-testid="session-notice"]`。
 墨案（6.2-18-tone-seal-full-dark.png）：
   class `flex items-start gap-2 border leading-relaxed rounded-control px-3 py-2 text-xs
@@ -78,26 +78,26 @@
   文本「已读取页面快照 失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面」
 毡案（6.2-18-tone-seal-full-light.png）：同一条 class 一字不差，color rgb(192,57,31) /
   bg rgba(192,57,31,0.1) / border oklab(0.542214 … / 0.5) / radius 7px / font 12px。
-对照第三十六、三十七片：同一条腿当时拿到的是 celadon 皮 + 失败话——这正是 6.2-18 要修的那件事，
+对照第三十六、三十七片：同一条通道当时拿到的是 celadon 皮 + 失败话——这正是 6.2-18 要修的那件事，
 现在按裁定换成了 seal，形状档（7px / 8·12px / 12px / 13px 图标）与 celadon 完全同一只原件。
 
-腿二 · 成功句 → celadon（整条档）：岗位屏 `[data-action="list"]` → `jd.store.list`（纯本地读，
+通道二 · 成功句 → celadon（整条档）：岗位屏 `[data-action="list"]` → `jd.store.list`（纯本地读，
 `describe()` 走的是成功回执那一支），`[data-testid="jd-notice"]`。
 墨案（6.2-18-tone-celadon-full-dark.png）：border-celadon/40 bg-celadon-wash text-celadon，
   color rgb(127,182,173) / bg rgba(127,182,173,0.12) / radius 7px / pad 8px/12px / font 12px / 图标 13px，
   图标形状 = circle + M12 16v-4 + M12 8h.01（lucide `Info`），文本「画出最近 0 行 · 库内共 0 条」
 毡案（6.2-18-tone-celadon-full-light.png）：color rgb(63,128,120) / bg rgba(63,128,120,0.12) /
   border oklab(0.554606 … / 0.4)，其余同墨案。
-⇒ 同一屏两条腿拿到的是**两个语气、一只形状**：tone 跟着 `reply.ok` 走，几何不再跟着面板走。
+⇒ 同一屏两条通道拿到的是**两个语气、一只形状**：tone 跟着 `reply.ok` 走，几何不再跟着面板走。
 
-腿三 · 紧凑档 + 失败句 → seal（size="compact"）：流程屏定时区填 61 字任务名（过客户端闸门
+通道三 · 紧凑档 + 失败句 → seal（size="compact"）：流程屏定时区填 61 字任务名（过客户端闸门
 `NAME_EMPTY`，不过 `createJobSchema.max(60)`），点 `[data-action="schedule-create"]` →
 `[data-testid="schedule-notice"]`。零写入的依据：packages/scheduler/src/registry.ts:172-189 里
 `safeParse` 在 `requireKnownPlan` 与 `INSERT` 之前抛出，所以这一条只留话、不落行。
 墨案（6.2-18-size-compact-seal-dark.png）：
   class `… border leading-relaxed rounded-md px-2 py-1 text-[10px] border-seal/50 bg-seal-wash text-seal mt-2 break-all`
   color rgb(226,84,58)  radius 6px  pad 4px/8px  font 10px  图标 11px（TriangleAlert）  align flex-start
-毡案读数（同一条腿，切换主题后现取）：color rgb(192,57,31) / bg rgba(192,57,31,0.1) /
+毡案读数（同一条通道，切换主题后现取）：color rgb(192,57,31) / bg rgba(192,57,31,0.1) /
   radius 6px / pad 4px/8px / font 10px；
 成图 6.2-18-size-compact-seal-light.png。
 
@@ -140,7 +140,7 @@
 （日志 tmp/38-format.log、tmp/38-typecheck.log、tmp/38-lint.log、tmp/38-formatcheck.log、
  tmp/38-test.log；test 按 §9 的写法先看退出码再剥 ANSI 数 failed：`EXIT=0`、清洗后 "failed" 计数 0）
 终态：探针节点已从 DOM 移除（`[data-probe]` 计数 0）、主题回到墨案、任务名输入框已清空、
-`window.autoCC` 一次写调用都没走过（三条腿分别是纯读、纯读、被 schema 拒掉的建任务）。
+`window.autoCC` 一次写调用都没走过（三组探针分别是纯读、纯读、被 schema 拒掉的建任务）。
 残留：流程屏那条 seal 紧凑提示行仍挂在组件 state 里（组件内状态，重启即清，库里没有它）。
 
 ────────────────────────────────────────

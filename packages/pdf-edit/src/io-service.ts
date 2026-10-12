@@ -3,7 +3,7 @@
  * 用户键入的绝对路径 → 受字节上限约束的读取 → 装载 → 页数与每页宽高。
  *
  * 为什么渲染层只能给路径而不是文件本身：sandbox + contextIsolation 下渲染层没有读文件的通道，
- * 也没有 `showOpenDialog`（§8.1/§8.2，与 4.1 的导入腿同一口径，见 plan §7.1 的最后一条选型）。
+ * 也没有 `showOpenDialog`（§8.1/§8.2，与 4.1 的导入通道同一口径，见 plan §7.1 的最后一条选型）。
  *
  * 本服务**不建表、不占迁移号段**（plan §7.1 的存储行）：编辑会话只活在一次操作里，产物是新文件，
  * 没有「跨重启还在」的状态要存——所以摘掉 `cordis.yml` 里这一行只是打不开文件，不会留下半截记录。
@@ -49,7 +49,7 @@ export class PdfIoService extends Service {
 
   [Service.init](): void {
     this.ctx.logger.info(
-      `[pdf-edit] pdf.io 就绪，单次打开上限 ${String(this.options.maxBytes)} 字节（3.5-a 只有装载腿，叠加与另存在 3.5-b）`,
+      `[pdf-edit] pdf.io 就绪，单次打开上限 ${String(this.options.maxBytes)} 字节（3.5-a 只有装载通道，叠加与另存在 3.5-b）`,
     );
   }
 

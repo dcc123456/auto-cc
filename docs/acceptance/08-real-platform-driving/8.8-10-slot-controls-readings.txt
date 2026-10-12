@@ -1,4 +1,4 @@
-8.8-10 网页窗口控件换装 + 收起/全屏/拖拽三条腿（2026-10-09，窗口 visibilityState=visible，CDP 10222，全部 --url 5173）
+8.8-10 网页窗口控件换装 + 收起/全屏/拖拽三条判据（2026-10-09，窗口 visibilityState=visible，CDP 10222，全部 --url 5173）
 
 同一环境说明见 `6.2-33-35-copy-and-bubbles-readings.txt` 抬头（真指针、窗口在前台、量几何前注入无动效）。
 内容区 1200×742：左轨 184、主区从 184 起、把手 6、右栏从 744 起（38% 档）。
@@ -19,7 +19,7 @@
   handle = { role: "slider", valuemin: "38", valuemax: "72", valuenow: "38", cursor: "col-resize" }
 
 ────────────────────────────────────────────────────────────────────────
-【2】8.8-08 欠的那半条指针腿：真拖确实落页
+【2】8.8-08 欠的那半条指针通道：真拖确实落页
 
 `harness drag --from-selector [data-action="kernel-resize-handle"] --to-selector [data-action="nav-jobs"]`
 （把手中心 741,396 → 91.5,109，负位移 = 变宽）：
@@ -67,7 +67,7 @@
               → div → section → section(main) rect=[184,51,146,691]
   main.right = 330，而这颗按钮 right=389 → 主区内容**溢出到自己的盒子之外**，画到了同一行更晚的兄弟身上
 
-事件计数腿（window 上的捕获监听）：`{down:1, move:13, up:1, targets:["null"]}` ——
+事件计数通道（window 上的捕获监听）：`{down:1, move:13, up:1, targets:["null"]}` ——
 pointerdown 有发但 `target` 上没有 `data-action`，即压根没落在把手上，所以 `startResize` 没挂过监听。
 把手是 aside 的**前一个**兄弟，DOM 顺序在 main 之后 → 溢出内容画在它上面并赢下命中测试；
 aside 在更后面，所以溢出内容画不进右栏（那一截由原生视图盖住，人看不见）。

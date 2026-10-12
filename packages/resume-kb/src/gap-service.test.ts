@@ -1,19 +1,19 @@
 /**
- * `kb.gap` 的装配用例（spec 4.4-01 的入参边界 / 4.4-02 的模型腿五态与可见回落 /
+ * `kb.gap` 的装配用例（spec 4.4-01 的入参边界 / 4.4-02 的模型通道五态与可见回落 /
  * 4.4-03 / 04 的三态比对与反向比对 / 4.4-06 的计数与建议可见 / 4.4-07 的全链确定性 /
  * 4.4-08 的离线口径 / 4.3-12 的脱敏延续）。
  *
  * 拆解与合并的规则本身在 `requirements.test.ts` 与 `requirements-model.test.ts` 里逐条断过了，
  * 三态怎么定、两道闸怎么设则在 `requirements-compare.test.ts` 的纯函数层断言；
- * 这里只判服务这一层的事：入参校验、每类上限走配置、**模型腿的五种结局各能观测到、
+ * 这里只判服务这一层的事：入参校验、每类上限走配置、**模型通道的五种结局各能观测到、
  * 且除 merged 之外的四种结局交回来的序列就是词面基线**、比对确实接的是 `kb.profile`、日志只有计数没有正文。
  * 语料是**写在文件里的本地样例**（§7.2 不许碰真实招聘平台），公司名与手机号都是虚构。
  *
  * 4.4-c 那组用例挂**真的 `node:sqlite` + 真派生结果**（简历文本经 4.1 区块解析、4.2 实体派生入库）：
  * 「拆出来的要求能不能比回库里那些行」只在真实装配路径上才成立，手写一批实体当库等于没接库（§2.1）。
- * 全链 hash（4.4-07）也在这一组里复跑——拆解腿那半边的 hash 稳定在 4.4-a 已归档。
+ * 全链 hash（4.4-07）也在这一组里复跑——拆解通道那半边的 hash 稳定在 4.4-a 已归档。
  *
- * 模型腿用的是测试替身（`test-doubles.ts` 里的 `FakeChatService`，4.5-b 是它的第二个消费者，
+ * 模型通道用的是测试替身（`test-doubles.ts` 里的 `FakeChatService`，4.5-b 是它的第二个消费者，
  * 所以从本文件抽了出去）而不是真端点：本机没有对话模型的 key，
  * 而 4.4-02 要判的是「五态可区分 + 回落不断流」，那需要一个**可控**的回复。
  * 替身只在用例显式要求时才挂进装配——不挂就是真实装配里注掉 `llm` 那一行的形态（spec 4.4-02 的
@@ -48,7 +48,7 @@ const SAMPLE_JD = [
   '要求本科及以上学历，3 年以上相关工作经验，抗压能力强。',
 ].join('\n');
 
-/** 词表抓不到、只能靠模型腿补的一句（引文必须逐字来自 `SAMPLE_JD` 才会被采信）。 */
+/** 词表抓不到、只能靠模型通道补的一句（引文必须逐字来自 `SAMPLE_JD` 才会被采信）。 */
 const LONG_TAIL_QUOTE = '负责订单与推荐链路的后端服务';
 
 /** 一条会被采信的模型回复（契约见 `requirements-model.ts`）。 */
@@ -77,7 +77,7 @@ afterAll(async () => {
   }
 });
 
-/** 一次装配里模型腿的形态。 */
+/** 一次装配里模型通道的形态。 */
 interface ChatSetup {
   /** 不给就是「装配里没有 llm.chat」——摘掉 `llm` 包那一行的形态 */
   reply?: string;
@@ -89,7 +89,7 @@ interface ChatSetup {
 /**
  * 建一份只挂知识库拆解这一条链的装配。
  * @param config `kb.gap` 的覆盖项（不传就用 `DEFAULT_CONFIG`）——每类上限那条用例要靠它
- * @param chat 模型腿的形态；不传则连替身都不挂，本服务只能报 `unavailable`
+ * @param chat 模型通道的形态；不传则连替身都不挂，本服务只能报 `unavailable`
  * @returns 服务实例、日志文件路径、替身实例（没挂时 null）与临时目录（目录进 `tempDirs` 由 afterAll 清）
  */
 async function bootGap(config: Partial<KbGapConfig> = {}, chat?: ChatSetup) {
@@ -115,7 +115,7 @@ async function bootGap(config: Partial<KbGapConfig> = {}, chat?: ChatSetup) {
 }
 
 describe('kb.gap 的拆解入口（spec 4.4-01 / 4.4-06）', () => {
-  it('四类齐全，计数与词表版本随结果返回，且每条都是词面腿产的', async () => {
+  it('四类齐全，计数与词表版本随结果返回，且每条都是词面通道产的', async () => {
     const { gap } = await bootGap();
     const view = await gap.extract(SAMPLE_JD);
     const kinds = new Set(view.items.map((item) => item.kind));
@@ -161,7 +161,7 @@ describe('kb.gap 的拆解入口（spec 4.4-01 / 4.4-06）', () => {
   });
 });
 
-describe('kb.gap 的模型腿五态（spec 4.4-02）', () => {
+describe('kb.gap 的模型通道五态（spec 4.4-02）', () => {
   it('merged：词面基线一条不少，模型补的长尾带上 via=model 与可对回原文的位置', async () => {
     const { gap, fake } = await bootGap({}, {});
     const view = await gap.extract(SAMPLE_JD);
@@ -216,7 +216,7 @@ describe('kb.gap 的模型腿五态（spec 4.4-02）', () => {
     expect(view.items.every((item) => item.via === 'lexicon')).toBe(true);
   });
 
-  it('rejected：模型报的与词面腿完全重复时也不虚增条数', async () => {
+  it('rejected：模型报的与词面通道完全重复时也不虚增条数', async () => {
     const { gap } = await bootGap({}, { reply: '{"items":[{"kind":"hard_skill","label":"Java","quote":"Java"}]}' });
     const view = await gap.extract(SAMPLE_JD);
     expect(view.modelStatus).toBe('rejected');
@@ -240,12 +240,12 @@ describe('kb.gap 的模型腿五态（spec 4.4-02）', () => {
 });
 
 describe('kb.gap 的日志脱敏（延续 spec 4.3-12 的口径）', () => {
-  it('日志里只有四类计数与腿状态，查不到 JD 正文、手机号与模型原文', async () => {
+  it('日志里只有四类计数与通道状态，查不到 JD 正文、手机号与模型原文', async () => {
     const { gap, logFile } = await bootGap({}, {});
     await gap.extract(SAMPLE_JD);
     const logText = await waitForLogLine(logFile, '[kb-gap] 拆解');
     expect(logText).toMatch(
-      /\[kb-gap\] 拆解 \d+ 字 → 词面 \d+ 条（硬技能 \d+ \/ 软技能 \d+ \/ 学历 \d+ \/ 年限 \d+，丢弃 \d+） · 模型腿 merged 并入 \d+ 条/,
+      /\[kb-gap\] 拆解 \d+ 字 → 词面 \d+ 条（硬技能 \d+ \/ 软技能 \d+ \/ 学历 \d+ \/ 年限 \d+，丢弃 \d+） · 模型通道 merged 并入 \d+ 条/,
     );
     for (const sentinel of [LONG_TAIL_QUOTE, '13800002222', '星桥科技', '抗压能力', '订单链路']) {
       expect(logText).not.toContain(sentinel);
@@ -255,7 +255,7 @@ describe('kb.gap 的日志脱敏（延续 spec 4.3-12 的口径）', () => {
   it('回落那一路走 warn，让「没用上模型」在日志里也是显眼的', async () => {
     const { gap, logFile } = await bootGap({}, { available: false });
     await gap.extract(SAMPLE_JD);
-    const logText = await waitForLogLine(logFile, '模型腿 unavailable');
+    const logText = await waitForLogLine(logFile, '模型通道 unavailable');
     expect(logText).toContain('WARN');
   });
 });
@@ -264,7 +264,7 @@ describe('kb.gap 的日志脱敏（延续 spec 4.3-12 的口径）', () => {
  * 撑起缺口报告的库语料（虚构）。
  *
  * 两段经历**首尾相接**（2021.07-2024.06 与 2024.07 至今）是有意的：它让「相邻区间连成一段」这条
- * 判据在真派生结果上被走到，而不是只在纯函数用例里成立。「教育经历」那段决定学历腿有没有据
+ * 判据在真派生结果上被走到，而不是只在纯函数用例里成立。「教育经历」那段决定学历通道有没有据
  * （4.2 裁定二：学历不产实体行，档位只能从区块切片读）。
  */
 const LIBRARY_MD = [
@@ -310,7 +310,7 @@ async function bootGapWithLibrary(gapConfig: Partial<KbGapConfig> = {}) {
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除通道），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
   fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   // 配置项一律取 schema 的默认值（与 `cordis.yml` 同源），不在测试里另抄一份阈值。
@@ -366,7 +366,7 @@ describe('kb.gap.report 的三态比对与反向比对（spec 4.4-03 / 4.4-04 / 
     expect(checked).toBeGreaterThan(0);
   });
 
-  it('年限腿在真库上走算术：首尾相接的两段合并成一段，换算成年后判命中', async () => {
+  it('年限通道在真库上走算术：首尾相接的两段合并成一段，换算成年后判命中', async () => {
     const { gap } = await bootGapWithLibrary();
     const view = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
     // 2021.07 → 2026.10 连成一段 = 64 个月 = 5 整年 ≥ JD 要的 3 年
@@ -377,7 +377,7 @@ describe('kb.gap.report 的三态比对与反向比对（spec 4.4-03 / 4.4-04 / 
     expect(view.asOfMonth).toBe('2026-10');
   });
 
-  it('学历腿从区块切片取档位，证据 id 落在切片而不是实体上（4.2 裁定二）', async () => {
+  it('学历通道从区块切片取档位，证据 id 落在切片而不是实体上（4.2 裁定二）', async () => {
     const { gap } = await bootGapWithLibrary();
     const view = await gap.report(SAMPLE_JD, {}, AS_OF_MS);
     const eduRow = view.rows.find((row) => row.item.kind === 'education');

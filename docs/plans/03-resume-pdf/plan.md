@@ -60,15 +60,15 @@
   落 `resources/fonts/**`，许可证全文随附 `resources/fonts/OFL.txt` 并记入 `LICENSES.md`。打印 HTML 经 `@font-face` 声明该字体，Chromium 打印时按用到的字形**自动子集内嵌**，产物字形三端一致（服务于 3.3-05/06/07）——**无需另引 fontkit 之类的子集化依赖**。
 - **本机实跑已通过（spike：隐藏窗口 `loadURL(file://)` → `document.fonts.ready` → `printToPDF({preferCSSPageSize:true, printBackground:true, margins:0})`）**，对产物做字节级读数（不引第三方 PDF 解析，避开 3.4 的 AGPL/pdf-lib 依赖）：
 
-  | 用例             | 结果                                                                                     | 对应机制腿                                                        |
+  | 用例             | 结果                                                                                     | 对应机制通道                                                      |
   | ---------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
   | 单页简历         | `%PDF-1.4` / 1 页 / 24,916 B / `FontFile`=真 / `ToUnicode`=真 / 命中原名 `NotoSansSC`=真 | 3.3-02 无 Puppeteer、3.3-05 字体随包内嵌、3.3-07 文字可搜索非位图 |
   | 26 段长文        | `%PDF-1.4` / 2 页 / 27,049 B（页数随内容增长、未腰斩丢字）                               | 3.3-03 A4+mm 边距经 `@page` 生效、3.3-09 页数可从产物回读         |
   | 两份不同文档并发 | 各自 hash 不同（`81f636…` vs `e02ac8…`），互不串内容                                     | 3.3-12 并发导出安全                                               |
 
-  产物体积在「单份简历 PDF」合理阈值内（3.3-06 体积腿达标；字形数精确子集比对待实现期用真实字体度量核）。
+  产物体积在「单份简历 PDF」合理阈值内（3.3-06 体积判据达标；字形数精确子集比对待实现期用真实字体度量核）。
 
-- **仍待 CDP harness + 你在场取证的纯 V 腿**：3.3-01（预览 DOM 与导出位图逐页比对）、3.3-04（连续 5 次导出无窗口闪现截图）、3.3-08（跨页条目不被腰斩的截图）、3.3-10（给定 JD 内容→PDF→截图）、3.3-11（注入失败的错误态界面截图）——这些是「看得见」的判据，须由真实渲染层 + harness 出图（§7.1），机制已在 spike 里跑通但截图腿不提前判过。
+- **仍待 CDP harness + 你在场取证的纯 V 那一条**：3.3-01（预览 DOM 与导出位图逐页比对）、3.3-04（连续 5 次导出无窗口闪现截图）、3.3-08（跨页条目不被腰斩的截图）、3.3-10（给定 JD 内容→PDF→截图）、3.3-11（注入失败的错误态界面截图）——这些是「看得见」的判据，须由真实渲染层 + harness 出图（§7.1），机制已在 spike 里跑通但截图判据不提前判过。
 
 > spike 代码在 `.research-repos/print-spike/`（工作区外，§6.4 不入主干），结论进本节。落码阶段据此把「渲染 HTML + 打印选项 + 字体源 + 产物结构读数」放在 resume-doc（纯、可单测），把唯一碰 `WebContents` 的打印执行器放 shell（经注入）。
 
@@ -314,7 +314,7 @@ packages/pdf-edit/          @auto-cc/plugin-pdf-edit   # L2，只做一件事：
 
 - **为什么新建包而不是塞进 `resume-doc`**：两者的契约不同——`resume-doc` 是「文档模型 JSON → PDF」（真相源是模型，PDF 是投影），
   `pdf-edit` 是「外部 PDF 字节 → 新 PDF 字节」（真相源是那份文件，没有模型）。合在一只包里会让 `resume-doc` 的依赖面多出
-  `pdf-lib` + `fontkit`，而它的导出腿一行都用不到（§4.1 一个包只做一件事）。原 §2 的包图里 `pdf-edit` 这个名字**已经预留**，
+  `pdf-lib` + `fontkit`，而它的导出通道一行都用不到（§4.1 一个包只做一件事）。原 §2 的包图里 `pdf-edit` 这个名字**已经预留**，
   本节只是把它的职责从"三引擎 + WASM 装载"重写成"覆盖式轻编辑"，包名不变以免 §4.5 的 ID 语义漂移。
 - **依赖方向**：`pdf-edit` 只依赖 `@auto-cc/core`（快照栈、`AppError`）、`@auto-cc/shared`（视图类型与 hash）、`@auto-cc/plugin-store`（不需要，见 §7.1 存储行）、
   `@auto-cc/plugin-config`（取 `paths().userDataDir`）；**禁止 import `resume-doc`**，也禁止被 `resume-doc` import（两者只在 `packages/main` 的装配层并列）。
@@ -371,12 +371,12 @@ i18n（§5.5/5.6）：新增命名空间 `pdfEdit.*`，两份语言包同批补�
 
 ### 7.8 子计划分解与顺序
 
-| 片                                                                                       | 内容                                                                                                                                                                                            | 判据                                                                     | 依赖         |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------ |
-| **3.5-a** 引擎腿（**已落地 2026-10-05**，见 §7.11）                                      | 引入 `pdf-lib`、建 `packages/pdf-edit`、`pdf.io.open`（fontkit 与 `pdf.layout.textItems` 顺延到 3.5-b，理由在 §7.11）                                                                           | `3.4-03` 已 `[x]`；`3.5-01` 的 C 半边随顺延仍 `[ ]`                      | 1.3 / 1.7    |
-| **3.5-b** 覆盖腿（**前半已落地 2026-10-05**，见 §7.12）                                  | 覆盖区模型 + `overlay-writer`（白底矩形 + 中文字体子集）+ `pdf.export.saveAs` + 失败不落半成品——前半=不要字体的那半边（裁定⑧），中文/fontkit 半边另裁                                           | `3.5-02` / `09` 已 `[x]`；`3.5-03` 只剩截图目视；`3.5-06` 随中文字体顺延 | 3.5-a        |
-| **3.5-c** 整页与历史腿（**c₁ 页序腿 + c₂ 会话腿均已落地 2026-10-05**，见 §7.13 / §7.14） | `page-ops`（增删/重排，**已落**）+ `createSnapshotStack<T>` 抽取（**已落** `4db0fb0`）+ `edit-session`（覆盖区增删改与撤销重做，**已落**）+ `pdf.edit.*` 的白名单行与页序控件（随渲染层那一片） | `3.5-08` 已 `[x]`；`3.5-07` 只剩截图腿；5.10-19 的原有用例复跑未变绿→红  | 3.5-b / 5.10 |
-| **3.6** 排版编辑器                                                                       | 生成轨的文档模型编辑器（区块拖拽、度量调节、模板切换、i18n、拦截未保存离开）——**与轻编辑无关**，判据与状态不动；**实现面见 §8**（2026-10-05 立：边界三条 + 拖拽通道选型 + 三片切法）            | `3.6-01…09` 九条                                                         | 3.3          |
+| 片                                                                                       | 内容                                                                                                                                                                                            | 判据                                                                      | 依赖         |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------ |
+| **3.5-a** 引擎轨（**已落地 2026-10-05**，见 §7.11）                                      | 引入 `pdf-lib`、建 `packages/pdf-edit`、`pdf.io.open`（fontkit 与 `pdf.layout.textItems` 顺延到 3.5-b，理由在 §7.11）                                                                           | `3.4-03` 已 `[x]`；`3.5-01` 的 C 半边随顺延仍 `[ ]`                       | 1.3 / 1.7    |
+| **3.5-b** 覆盖轨（**前半已落地 2026-10-05**，见 §7.12）                                  | 覆盖区模型 + `overlay-writer`（白底矩形 + 中文字体子集）+ `pdf.export.saveAs` + 失败不落半成品——前半=不要字体的那半边（裁定⑧），中文/fontkit 半边另裁                                           | `3.5-02` / `09` 已 `[x]`；`3.5-03` 只剩截图目视；`3.5-06` 随中文字体顺延  | 3.5-a        |
+| **3.5-c** 整页与历史轨（**c₁ 页序轨 + c₂ 会话轨均已落地 2026-10-05**，见 §7.13 / §7.14） | `page-ops`（增删/重排，**已落**）+ `createSnapshotStack<T>` 抽取（**已落** `4db0fb0`）+ `edit-session`（覆盖区增删改与撤销重做，**已落**）+ `pdf.edit.*` 的白名单行与页序控件（随渲染层那一片） | `3.5-08` 已 `[x]`；`3.5-07` 只剩截图判据；5.10-19 的原有用例复跑未变绿→红 | 3.5-b / 5.10 |
+| **3.6** 排版编辑器                                                                       | 生成轨的文档模型编辑器（区块拖拽、度量调节、模板切换、i18n、拦截未保存离开）——**与轻编辑无关**，判据与状态不动；**实现面见 §8**（2026-10-05 立：边界三条 + 拖拽通道选型 + 三片切法）            | `3.6-01…09` 九条                                                          | 3.3          |
 
 顺序裁定：a → b → c 是依赖链，**3.6 排在其后或并行都可**（它只依赖 3.3），但一次只推进一个窗口（§0）。
 3.5-c 那一片动到 5.10 已验收的画布栈，属于跨计划的重构，落码前要在 `docs/plans/05-chat-agent/plan.md` 里留一条对应记号，别让两个计划各自以为栈是自己的。
@@ -386,7 +386,7 @@ i18n（§5.5/5.6）：新增命名空间 `pdfEdit.*`，两份语言包同批补�
 1. **3.5-01 的"渲染显示"读法**：我按上表选了"文本项线框"（零新依赖、CSP 不动）。
    如果你要的是**位图级真实渲染**，就得裁一条"允许渲染层引入 pdfjs worker 并为此调整 CSP"，代价是把 3.4-06 降级白捡的那条收益吐回去。
 2. **`3.4-08` 包体增量的同轮 win 读数**：降级后只剩 `pdf-lib` 一支纯 JS，量级远小于三引擎方案，但判据要的"与 P1 基线同轮对比"仍缺 Windows 宿主——本机现在给不出。
-3. **V 腿要在场**：3.5-01 / 03 / 07 的截图按 §7.1 要在真实窗口里取，取证据期间会改 dev 的 `userData`，按惯例要你在场再跑。
+3. **V 那一条要在场**：3.5-01 / 03 / 07 的截图按 §7.1 要在真实窗口里取，取证据期间会改 dev 的 `userData`，按惯例要你在场再跑。
 
 ### 7.10 明确不做（本节新增，与 §6 并列）
 
@@ -409,7 +409,7 @@ i18n（§5.5/5.6）：新增命名空间 `pdfEdit.*`，两份语言包同批补�
 1. `@pdf-lib/fontkit` → **3.5-b**。3.5-a 只装载与量页，没有要嵌入字体的一笔，此刻引入就是一条没人评的空依赖（§2.6）。
    所以 §7.7 那句"记账要补 `pdf-lib` / fontkit 的行"这轮只落了 `pdf-lib` 那一支：`LICENSES.md` 生成节多四行
    （`pdf-lib@1.17.1` / `@pdf-lib/standard-fonts@1.0.0` / `@pdf-lib/upng@1.0.1` / `tslib@1.14.1`）。
-2. `pdf.layout.textItems` → **3.5-b 的线框腿**。理由是实测出来的：它需要**第二条 PDF 解析链**
+2. `pdf.layout.textItems` → **3.5-b 的线框通道**。理由是实测出来的：它需要**第二条 PDF 解析链**
    （`pdfjs-dist` 的 textItems 与 `pdf-lib` 是两套解析器，两份对同一页的理解得并进同一个坐标空间），
    而 3.4-03 的判据里没有这件东西；两条链一起进来反而让"装上了"有两个真相源。
    于是 `3.5-01` 的 C 半边**没有**跟着 3.4-03 一起收，那一行仍 `[ ]`。
@@ -442,8 +442,8 @@ MIT 归属照样随包分发，因为 `LICENSES.md` 已经在 extraResources 里
 `packages/resume-kb/src/source.test.ts` 那份重复的最小 PDF 生成器也在这轮抽掉了——它就是 §2.2 说的第二次出现。
 
 **这轮的闸门读数**：`pnpm typecheck` EXIT=0、`pnpm lint` EXIT=0（许可证记账节按裁定③ 用 `--write` 重生成，
-在这台 macOS 上不再逐台漂）、`pnpm test` EXIT=0（`pdf-edit` 16 例、`main` 69 例含新接线腿、`resume-kb` 398 例夹具抽取后不降级）、
-`pnpm app:build` EXIT=0。P3 的实现面因此从 17 条变 **16 条**（剩 3.5 的六条轻编辑判据 + 3.6 的九条 + 3.4-03 之外的 BLOCKED 腿）。
+在这台 macOS 上不再逐台漂）、`pnpm test` EXIT=0（`pdf-edit` 16 例、`main` 69 例含新接线用例、`resume-kb` 398 例夹具抽取后不降级）、
+`pnpm app:build` EXIT=0。P3 的实现面因此从 17 条变 **16 条**（剩 3.5 的六条轻编辑判据 + 3.6 的九条 + 3.4-03 之外的 BLOCKED 那几条）。
 
 ### 7.12 3.5-b 前半落地记录（2026-10-05，裁定⑧："先做不要字体的半边"）
 
@@ -454,18 +454,18 @@ MIT 归属照样随包分发，因为 `LICENSES.md` 已经在 extraResources 里
 `package.json` 与锁文件的 `pdf-edit` 依赖仍是 `pdf-lib` 一支（fontkit 没进），中文在边界上被 `text-not-supported` 拒掉而不是画豆腐块。
 
 **实际落点**（四份新文件 + 六处接线）：`packages/pdf-edit/src/overlay-writer.ts`（覆盖区的比例模型与校验、
-两种坐标的换算、七条拒绝腿）、`export-service.ts`（服务 `pdf.export` + 方法 `saveAs`）、同目录两份测试；
+两种坐标的换算、七条拒绝通道）、`export-service.ts`（服务 `pdf.export` + 方法 `saveAs`）、同目录两份测试；
 `packages/testing/src/pdf-inspect.ts`（`pdfContentText`，理由在下面 §"内容流断言"）；
 接线是 `packages/core/src/errors.ts` 的错误码、`packages/shared/src/bridge.ts` 的三条 view + 白名单行 + `BridgeSignatures` 行、
 `packages/main/src/registry.ts` 与 `cordis.yml` 的 `pdf-export` 行（排在 `pdf-io` 之后，它不 inject 任何名字，所以 §9 的 5.1-c 顺序坑在这条上仍然不存在）、
-`packages/main/src/pdf-link.test.ts` 重写为两腿装配对账。
+`packages/main/src/pdf-link.test.ts` 重写为两条装配对账。
 
 **一处与 §7.4 那张表的签名偏离**（表是路线图，落码按当轮实际需要）：原写 `saveAs(filePath, draft)`，
 实落 `saveAs(filePath, overlays, outPath)`。两处偏离各有原因：
 ① `draft` 是"编辑会话"那一层的对象，而会话模型与快照栈（`pdf.edit.*` 的增删改查 + `createSnapshotStack<T>`）
 按计划落在 **3.5-c**——现在传 `draft` 就得先造一个只被 `saveAs` 用过一次的假类型，等 3.5-c 再改签名，
 反而把同一层逻辑写两遍（§2.3 反过来用：不新建还没有第二个消费者的抽象层）；所以这一轮实参就是覆盖区数组本身。
-② `outPath` 由调用方给，而不是服务自己拼：本轮**没有保存对话框**（那是渲染层那一半，随 3.5-03 的截图腿一起落），
+② `outPath` 由调用方给，而不是服务自己拼：本轮**没有保存对话框**（那是渲染层那一半，随 3.5-03 的截图判据一起落），
 也没有 `dependsOn: [config]` 去取 `paths().userDataDir`（§7.11 顺延第 3 条仍然有效）。
 代价是"另存到哪"这个决定暂归界面，收益是服务不藏任何路径拼接规则——顺带一条边界：`outPath` 必须绝对路径，
 且 `resolve(outPath) === resolve(filePath)` 直接拒（`out-is-source`），因为覆盖式编辑最容易犯的错就是拿产物盖掉源文件。
@@ -499,7 +499,7 @@ MIT 归属照样随包分发，因为 `LICENSES.md` 已经在 extraResources 里
 
 **"失败不落半成品"是结构而不是承诺**：绝对性检查 → 同路径检查 → 读字节 → 装载 → 比例换算与校验，
 全在**第一次碰磁盘之前**；唯一可见的写是 `${outPath}.part` 写完 `rename`，`rename` 之前的异常路径带 `rm({ force: true })`。
-测试因此不判"提示语对不对"，判**目录清单**：七条失败腿各自断言 `readdirSync(dir)` 等于 `['resume.pdf']`，
+测试因此不判"提示语对不对"，判**目录清单**：七条失败那一条各自断言 `readdirSync(dir)` 等于 `['resume.pdf']`，
 `out-is-source` 那条也一样——这样"少写了半截文件"这类缺陷不可能靠改断言蒙过去。
 白底矩形那半边另有一条反向断言：`not.toMatch(/h\s+[SB]/)`（`S`/`B` 是描边类绘制，出现即说明边框又回来了）。
 
@@ -510,20 +510,20 @@ MIT 归属照样随包分发，因为 `LICENSES.md` 已经在 extraResources 里
 
 **这轮的闸门读数**：`pnpm format` 后 `typecheck` / `lint` / `format:check` 各 EXIT=0；
 `pnpm test` EXIT=0（`pdf-edit` 从 16 例变 **46 例**：overlay-writer 15 + export-service 13 + pdf-document 9 + io-service 9；
-`main` 70 例含重写的接线腿；`resume-kb` 398 例不降级；`platform-boss` 139 例不动）；
+`main` 70 例含重写的接线用例；`resume-kb` 398 例不降级；`platform-boss` 139 例不动）；
 `pnpm app:build` EXIT=0，`build/app/main.cjs` 3,999,124 字节内含 `pdf-lib` 631 处、`build/app/node_modules` 里 0 份
 （§7.11 那条"打进主 bundle、不进外置名单"的决定这轮没被推翻）。
 P3 的实现面因此从 16 条变 **14 条**（`3.5-02` / `3.5-09` 转 `[x]`；`3.5-03` 的 U 半边过、截图目视仍 `[ ]`）。
 
 **顺延清单**（这轮明确没做，别在下一轮被当成"顺手补齐"）：
-① 中文叠加腿＝`@pdf-lib/fontkit` + 字体子集 + §7.11 顺延第 1 条欠的记账行 + `3.5-06` 的"随包资产目录读数"，等裁定；
+① 中文叠加轨＝`@pdf-lib/fontkit` + 字体子集 + §7.11 顺延第 1 条欠的记账行 + `3.5-06` 的"随包资产目录读数"，等裁定；
 ② `pdf.edit.*` 的会话面（草稿 CRUD、覆盖区的增删改）与 `page-ops`、`createSnapshotStack<T>` 抽取一起进 **3.5-c**，
 动 5.10-19 前要在 `docs/plans/05-chat-agent/plan.md` 留记号（§7.8 末段那条纪律仍然有效）；
 ③ `3.5-03` 的截图目视与 §7.9 第 3 条同源，要你在场；
 ④ 白名单这轮只多了 `pdf.export.saveAs` 一行——`pdf.edit.addOverlay` / `pdf.layout.textItems` 都还在名单外，
 `pdf-link.test.ts` 用一条"精确等于两项"的断言把它们钉在门外（§7.4 的表是路线图，不是许可证）。
 
-### 7.13 3.5-c₁ 页序腿落地记录（2026-10-05，`3.5-07` 的 U 半边过了、V 半边仍缺）
+### 7.13 3.5-c₁ 页序轨落地记录（2026-10-05，`3.5-07` 的 U 半边过了、V 半边仍缺）
 
 **这一片是 §7.8 里 3.5-c 的前半**，按 §7.12 顺延清单② 拆开的：c₁＝页序（`page-ops` 校验 + `PdfEditDocument.arrange`），
 c₂＝`pdf.edit.*` 的会话面（覆盖区增删改、`setPageOrder`、`undo`/`redo`，直接吃 commit `4db0fb0` 抽好的 `createSnapshotStack<T>`）。
@@ -555,7 +555,7 @@ c₂＝`pdf.edit.*` 的会话面（覆盖区增删改、`setPageOrder`、`undo`/
 **签名对 §7.4 又偏一格**：`saveAs(filePath, overlays, pageOrder, outPath)`（四实参）。§7.4 写的是 `saveAs(filePath, draft)`，
 而页序本属于 `draft`；它现在单列成一个入参，原因与 §7.12 那条① 同源——会话模型（`pdf.edit.*` + 快照栈）在 c₂ 才落，
 本轮先把它当外部输入接进来。代价是渲染层此刻要自己把页序数组递过来（`bridge.ts` 的 `pdf.export.saveAs` 行已同步成四参数），
-收益是 c₂ 落的时候只换"谁生产这只数组"，不动另存腿。
+收益是 c₂ 落的时候只换"谁生产这只数组"，不动另存通道。
 
 **新增的是一条尺度，不是一条行为**：`pdfExportSchema` 多一个 `maxPages`（默认 64、上界 500，`cordis.yml` 的 `pdf-export` 块随之五行）。
 页序数组来自渲染层，不设界等于允许它用一只长数组把主进程的内存顶满；它和 `maxOverlays` 同族，都只回答"多到多少就拒"。
@@ -569,16 +569,16 @@ c₂＝`pdf.edit.*` 的会话面（覆盖区增删改、`setPageOrder`、`undo`/
 
 **这轮的闸门读数**：`pnpm format` 后 `typecheck` / `lint` / `format:check` 各 EXIT=0；
 `pnpm test` EXIT=0——`pdf-edit` 从 46 例变 **62 例**（新增 `page-ops.test.ts` 6 例、`pdf-document.test.ts` +3、
-`export-service.test.ts` +3 且失败腿从 7 条变 11 条）；`main` 70 例（接线那条改成四实参：`saveAs` 的入参表变了，
+`export-service.test.ts` +3 且失败那一条从 7 条变 11 条）；`main` 70 例（接线那条改成四实参：`saveAs` 的入参表变了，
 网关测试要跟着给全，否则 `outPath` 落成 `undefined`、`isAbsolute` 抛的是 `TypeError` 而不是本轨的码——这次就是这么红了一下）；
 `core` 52 例、`workflow` 209 例**未降级**（c₁ 没碰快照栈，`4db0fb0` 抽取的原有用例仍然是回归门）；
 `pnpm app:build` EXIT=0，`build/app/main.cjs` 4,003,592 字节内含 `pdf-lib` 632 处、`build/app/node_modules` 里 0 份。
 
 **状态位**：`3.5-07` 仍 `[ ]`——U 半边（操作后断言）已过，V 半边（截图）要真实页面上的页序控件，而控件在 c₂ 之后才有落点，
 且取证据要你在场（§7.9 第 3 条）。所以 P3 的实现面**仍是 14 条**，这轮一个勾都没打。
-**顺延**：① c₂ 的会话面与 `3.5-08`；② `3.5-07` 的截图腿；③ 渲染层的页序控件与 `pdf.edit.*` 白名单行（§7.12 顺延④ 那条"精确等于两项"的断言仍未松动）。
+**顺延**：① c₂ 的会话面与 `3.5-08`；② `3.5-07` 的截图判据；③ 渲染层的页序控件与 `pdf.edit.*` 白名单行（§7.12 顺延④ 那条"精确等于两项"的断言仍未松动）。
 
-### 7.14 3.5-c₂ 会话腿落地记录（2026-10-05，`3.5-08` 转 `[x]`）
+### 7.14 3.5-c₂ 会话轨落地记录（2026-10-05，`3.5-08` 转 `[x]`）
 
 **落点**：`packages/pdf-edit/src/edit-session.ts`（`createPdfEditSession`）+ 同目录测试（9 例）。接线只两处：
 包的门面 `index.ts` 多一组导出，`packages/core/package.json` 的 `exports` 多一条 `"./snapshot-stack"`。
@@ -609,7 +609,7 @@ c₂＝`pdf.edit.*` 的会话面（覆盖区增删改、`setPageOrder`、`undo`/
 id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上限、空编辑（挪回原处 / 删不存在的 id / 指回同一份页序）、
 非法页序（空数组与越界页号）。其中一条是**结构性的**而不是UX的：会话里判覆盖区合不合法用的就是另存那一份 `planOverlays`
 （连同同一份尺度），所以不会出现「界面放行、另存被拒」与「界面拦住、另存偏能过」这两种分叉（§2.5）。
-`removeOverlay` 是唯一不过 `planOverlays` 的腿——少一条只会更合法，不会更非法。
+`removeOverlay` 是唯一不过 `planOverlays` 的通道——少一条只会更合法，不会更非法。
 
 **判据怎么过的**：`3.5-08` 的验证操作是「连续 5 步 undo/redo 状态一致」，用例就走五步（加区、加区、挪区、改页序、删区），
 把每一层的读数记进 `trail` 数组，再逐层 undo 比一次、逐层 redo 比一次——只比「退到底那一份」会放过一份跳步的实现
@@ -620,16 +620,16 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 全量 `pnpm test` EXIT=0（core 52 / pdf-edit 71 / workflow 209 / main 70，`main` 那 70 例未降级）；
 `pnpm typecheck`、`pnpm lint`、`pnpm format:check` 均 EXIT=0；`pnpm app:build` EXIT=0，
 产物 `build/app/main.cjs` 4,003,604 字节内含 `pdf-lib` 引用 632 处、外置资源目录 0 份（兑现 §1.4 零首启动下载）。
-`3.5-08` 转 `[x]`，所以 **P3 的实现面从 14 条变 13 条**（剩 `3.5-01` 的 C 半边线框腿、`3.5-03` 与 `3.5-07` 两条截图腿、
-`3.5-06` 的中文字体腿 + 3.6 的九条），全局未做 16 → **15 条**。
+`3.5-08` 转 `[x]`，所以 **P3 的实现面从 14 条变 13 条**（剩 `3.5-01` 的 C 半边（线框）、`3.5-03` 与 `3.5-07` 两条截图判据、
+`3.5-06` 的中文字体判据 + 3.6 的九条），全局未做 16 → **15 条**。
 
 **顺延**（别在下一轮被当成"顺手补齐"）：① 界面上的撤销/重做两颗按钮、页序控件与 `pdf.edit.*` 的白名单行，
 连同 `@auto-cc/plugin-pdf-edit` 给渲染层用的窄出口 `"./edit-session"` 一起，等面板落地那一片（§7.5 的第三块视图）；
-② `3.5-07` 与 `3.5-03` 的截图腿要真实窗口与你在场（§7.9 第 3 条）；③ 中文腿随字体资产那条裁定（`3.5-06`）不动。
+② `3.5-07` 与 `3.5-03` 的截图判据要真实窗口与你在场（§7.9 第 3 条）；③ 中文叠加轨随字体资产那条裁定（`3.5-06`）不动。
 
 ---
 
-### 7.15 3.5-d 线框腿落地记录（2026-10-06，`pdf.layout.textItems`：`3.5-01` 的非可视半边有了，状态位照旧不动）
+### 7.15 3.5-d 线框轨落地记录（2026-10-06，`pdf.layout.textItems`：`3.5-01` 的非可视半边有了，状态位照旧不动）
 
 **落点**：`packages/pdf-edit/src/text-layout.ts`（纯换算，16 例）+ `packages/pdf-edit/src/layout-service.ts`（`pdf.layout` 服务，12 例），包内 71 → **99 例**。
 接线四处：`packages/shared/src/bridge.ts` 的白名单第三行 + `RequestMap` 一条 + 两只视图类型（`PdfTextBoxView` / `PdfTextItemsView`）、
@@ -639,7 +639,7 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 
 **为什么这一片现在能做、不等裁定**：§7.9 第 1 条欠的是"**位图级**真实渲染要不要为 pdfjs worker 动 CSP"那一条表态，
 而它给的默认读法（文本项线框）本身就写在 §7.3 的包图（`src/text-layout.ts`）与 §7.4 的表（`pdf.layout` 那一行）里，没有欠东西。
-这条腿落的正是**默认读法的非可视半边**；`3.5-01` 那行的 V（样例 PDF 截图含高亮）仍归 §7.9 第 3 条那个在场时段，所以状态位是 `[ ]` 原地不动。
+这条通道落的正是**默认读法的非可视半边**；`3.5-01` 那行的 V（样例 PDF 截图含高亮）仍归 §7.9 第 3 条那个在场时段，所以状态位是 `[ ]` 原地不动。
 
 **与 §7.4 那张表的一处偏离（只收窄读数，不动签名）**：表里原本写「带 `transform/width/height/str` 的文本项（脱敏：只回坐标与命中框，整页原文不进渲染层）」。
 落码时按后半句的字面把 `str` 摘了，三条理由：① 判据要的是"看得见有哪些块"，线框自己就够了；
@@ -647,7 +647,7 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 ③ 搬原文过界就是 §8.5 那条默认脱敏的反面，而 §2.6 不许为假想的将来留通道。
 `textItemRect` 只用 `str` 判"这一项有没有可画的东西"，判完就丢。钉住这件事的用例是把读数 `JSON.stringify` 之后搜 `Jane` / `Doe` / `138` 全搜不到、而 `xRatio` 在（口径照 3.6-b 那条 `structuredClone` 断言）。
 
-**页面宽高只问 pdf-lib 一份**（§2.5 的"一个入口"）：`pdf.io.open` 报的、另存腿 `toPageRect` 换算用的、线框换算用的必须是同一个数，
+**页面宽高只问 pdf-lib 一份**（§2.5 的"一个入口"）：`pdf.io.open` 报的、另存通道 `toPageRect` 换算用的、线框换算用的必须是同一个数，
 否则会出现"框看得见但盖上去偏了"。pdf.js 在这里只干"取文本项"这一件事，**不用它的 viewport 当尺寸**。
 **由此继承一条限制**（写在这里以免被当成新缺陷）：换算按 MediaBox、假定原点 (0,0)、旋转不参与——与 `overlay-writer.ts` 完全同一条口径，
 所以 CropBox≠MediaBox、MediaBox 原点非零、页面带旋转这三类文档上线框与覆盖区**要么一起对、要么一起偏**；要修就两条一起修（另裁一片，不在这里单改一侧）。
@@ -667,12 +667,12 @@ id 重复、中文（`planOverlays` 的 `text-not-supported`）、条数超上�
 **状态机读数**：一个 `[x]` 都没新增、一个 `[!]` 都没动（P3 未做仍 **4 条**、全局 `[ ]` 仍 **6 条**，`447 / 32 / 6`）——
 新增的是 `3.5-01` 的 C/U 半边证据，那行的验收方式写的是 V。
 
-**顺延（别在下一轮被当成"顺手补齐"）**：① `3.5-01` 的线框截图与 `3.5-03` / `3.5-07` 的截图腿一起等 §7.9 第 3 条那个在场时段；
+**顺延（别在下一轮被当成"顺手补齐"）**：① `3.5-01` 的线框截图与 `3.5-03` / `3.5-07` 的截图判据一起等 §7.9 第 3 条那个在场时段；
 ② §7.5 那块「在既有 PDF 上改」的第三视图——它现在**两头都齐了**（`pdf.io.open` 报页数、`pdf.layout.textItems` 报线框、
 `createPdfEditSession` 在渲染层拿 draft、`pdf.export.saveAs` 落盘），下一片就是把它拼起来，连 `@auto-cc/plugin-pdf-edit` 的窄出口
-`"./edit-session"`（§7.14 顺延①）一并给；③ `3.5-06` 的中文腿随字体资产那条裁定不动。
+`"./edit-session"`（§7.14 顺延①）一并给；③ `3.5-06` 的中文叠加轨随字体资产那条裁定不动。
 
-### 7.16 3.5-e 面板腿落地记录（2026-10-06，§7.5 的第三视图进主干；状态位照旧不动）
+### 7.16 3.5-e 面板轨落地记录（2026-10-06，§7.5 的第三视图进主干；状态位照旧不动）
 
 **落点**：`packages/renderer/src/PdfEditPanel.tsx`（新组件）+ `ResumePanel.tsx` 的入口按钮与挂载两处 +
 两份语言包的 `pdfEdit.*` 命名空间（42 键 × 2）。接线两处：`packages/pdf-edit/package.json` 的窄出口
@@ -703,7 +703,7 @@ canvas 的宽高取 `width`/`height` **属性**（不是样式），页面比例
 只要打开过文件就一直挂在界面上。文案里不出现涂黑/删除原文那类字样，删区的按钮写的是"撤掉这一区"。
 
 **`moveOverlay` 这一片故意没接**：会话六个动作里只有它没有界面调用点——§7.5 列的图标是加框/删框/上移下移/撤销重做/导出，
-"拖拽改位置"不在其中。按 §2.4 不为接而接；这条腿等 `3.5-03` 那条截图腿的真人在场验收里长出来再说。
+"拖拽改位置"不在其中。按 §2.4 不为接而接；这条通道等 `3.5-03` 那条截图判据的真人在场验收里长出来再说。
 
 **纯度从此有机检**：`edit-session.test.ts` 最后一节扫 `edit-session.ts` / `page-ops.ts` / `overlay-writer.ts` 三个文件的
 **运行期** import（`import type` 擦除后不算），走正向白名单：只许 `@auto-cc/core/snapshot-stack` 加闭包内相对模块。
@@ -720,11 +720,11 @@ canvas 的宽高取 `width`/`height` **属性**（不是样式），页面比例
 **状态机读数**：一个 `[x]` 都没新增、一个 `[!]` 都没动（P3 未做仍 **4 条**、全局 `[ ]` 仍 **6 条**，`447 / 32 / 6`）。
 `3.5-01` / `3.5-03` / `3.5-07` 三行的界面落点至此全部就位，欠的只有"真实窗口 + 你在场"那一段（§7.9 第 3 条）。
 
-**顺延（别在下一轮被当成"顺手补齐"）**：① 三条截图腿要你在场，一次跑完；② `moveOverlay` 的界面调用点；
+**顺延（别在下一轮被当成"顺手补齐"）**：① 三条截图判据要你在场，一次跑完；② `moveOverlay` 的界面调用点；
 ③ 拖框精度与"画布上点不动"这类只有活体才暴露的坑（§9 的 5.10-a ⑩ 一族）——第一次在场跑就要按 ⑩ 那条写法核，
-不要相信 `pointerdown` 的返回值；④ `3.5-06` 的中文腿随字体资产那条裁定不动。
+不要相信 `pointerdown` 的返回值；④ `3.5-06` 的中文叠加轨随字体资产那条裁定不动。
 
-### 7.17 3.5-f 中文叠加腿（裁定⑮ 第二问"现在做中文叠加"，2026-10-06；`3.5-06` 的 C 判据在同日"断言轮"钉住后转 `[x]`）
+### 7.17 3.5-f 中文叠加轨（裁定⑮ 第二问"现在做中文叠加"，2026-10-06；`3.5-06` 的 C 判据在同日"断言轮"钉住后转 `[x]`）
 
 **落点**：`@pdf-lib/fontkit@1.1.1` 进 `packages/pdf-edit` 的依赖（MIT，唯一传递依赖 `pako@1.0.11`，纯 JS 无安装脚本）；
 `pdf-document.ts` 长出私有 `embedCjkFont()`——先 `registerFontkit(fontkit)` 再 `embedFont(bytes, { subset: true })`，
@@ -735,7 +735,7 @@ canvas 的宽高取 `width`/`height` **属性**（不是样式），页面比例
 
 **字体目录的读数从 L1 借，不在 L2 猜第二份路径**（§2.2/§2.5）：随包字体那份资产与生成轨**共用同一个文件**
 （`resources/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2`，SIL OFL 1.1，早已在册），
-目录由 `resume.print` 端口的 `fontBaseUrl()` 给——这正是 `resume-doc` 导出腿已经在用的形状。
+目录由 `resume.print` 端口的 `fontBaseUrl()` 给——这正是 `resume-doc` 导出通道已经在用的形状。
 但**取的方式不同**：那边写进 `static inject`（那是它的必需依赖），这边按名字**现问**（`maybeService`），
 因为纯拉丁与只涂白底的另存根本用不到字体——把它声明成必需依赖会让每一次热改配置都重建这只服务（§9 的 2.5 那条），
 也会逼着所有另存用例先装一只打印服务。问不到就 `font-unavailable` 失败，**绝不退化成豆腐块**。
@@ -773,7 +773,7 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 **同一条线索的后续（同日已核掉，落点与读数见 §7.18）**：`extraResources` 里确实没有 fonts 条目，
 所以缺的不是"读数"而是**装机产物里根本没有那批字体**。补法一行、两条轨一起补，不为编辑轨单开通道。
 
-**顺延**：界面上的中文目视随 `3.5-03` 那三条截图腿一起在场跑；装机版里真跑一次导出取字形读数是同一批事项。
+**顺延**：界面上的中文目视随 `3.5-03` 那三条截图判据一起在场跑；装机版里真跑一次导出取字形读数是同一批事项。
 
 ### 7.18 随包字体进装机产物（§7.17 那条待查线索的核对与修法，2026-10-06）
 
@@ -799,7 +799,7 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 `dist/linux-unpacked`（x64，10-05 那次的旧产物）**没有** fonts——它是**改动之前**建的，不是缺陷；重跑会补上，本轮不拿旧目录充当读数。
 
 **边界（本轮不声称的部分）**：只核到**产物目录**这一层。装机版里真点一次导出、取内嵌字形读数属于 §7.4 的 V 类，
-要你在场，与 `3.5-01` / `3.5-03` / `3.5-07` 三条截图腿排同一批。
+要你在场，与 `3.5-01` / `3.5-03` / `3.5-07` 三条截图判据排同一批。
 
 ---
 
@@ -843,7 +843,7 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 
 - **不新建包**：编辑器属于生成轨的文档域，扩 `packages/resume-doc`（§2.3 扩展现有模块）。新增两个纯文件：
   `src/editor-ops.ts`（`moveSection` / `moveEntry` / `setMetric` 三个纯操作：输入 draft 输出 draft + issue 列表，
-  形状照 `packages/pdf-edit/src/page-ops.ts` 的"拒绝腿在前、合法才产 draft"）与 `src/editor-session.ts`
+  形状照 `packages/pdf-edit/src/page-ops.ts` 的"拒绝通道在前、合法才产 draft"）与 `src/editor-session.ts`
   （`createResumeEditorSession()`：draft + `createSnapshotStack` + dirty 位 + 当前 templateId/locale，
   与 `packages/pdf-edit/src/edit-session.ts` 同构——同一逻辑的第二次出现，按 §2.2 抽的是**栈**而不是再写一份栈）。
 - **service 名 `resume.editor`**（`src/editor-service.ts`，注入 `resume.doc` 与 `resume.print`）：
@@ -864,9 +864,9 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 
 | 片               | 内容                                                                                                                                                                              | 收哪几条                                                                                                                        | 离线可收                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| **3.6-a** 模型腿 | `editor-ops` + `editor-session` + `layoutSchema` 的上下界，纯函数单测（fixture 文档现造，不碰用户磁盘）                                                                           | 3.6-01 的落点数学、3.6-02 的 U、3.6-03 的 U、3.6-04 的"数据一字不变"断言                                                        | 能                                                   |
-| **3.6-b** 契约腿 | `resume.editor` service + registry / `cordis.yml` 顺序 + 白名单与签名 + `ResumeEditorView` 投影 + `packages/main/src/editor-link.test.ts`（照 `pdf-link.test.ts` 的接线判据形态） | 3.6-02 的界外拒绝跨进程不丢 message、3.6-05 / 06 / 07 的 C 半边（现成机检复跑）                                                 | 能                                                   |
-| **3.6-c** 界面腿 | 编辑器组件（把手拖拽、滑杆、撤销/重做两颗按钮、模板下拉、未保存离开拦截）+ i18n 双语                                                                                              | 3.6-01 的 V、3.6-02 的提示截图、3.6-03 的 V、3.6-04 的 V、3.6-05 的双语截图、3.6-06/07 的目视、3.6-08 的计时与截图、3.6-09 的 V | **不能**（要真实窗口与你在场，§7.9 第 3 条同一口径） |
+| **3.6-a** 模型轨 | `editor-ops` + `editor-session` + `layoutSchema` 的上下界，纯函数单测（fixture 文档现造，不碰用户磁盘）                                                                           | 3.6-01 的落点数学、3.6-02 的 U、3.6-03 的 U、3.6-04 的"数据一字不变"断言                                                        | 能                                                   |
+| **3.6-b** 契约轨 | `resume.editor` service + registry / `cordis.yml` 顺序 + 白名单与签名 + `ResumeEditorView` 投影 + `packages/main/src/editor-link.test.ts`（照 `pdf-link.test.ts` 的接线判据形态） | 3.6-02 的界外拒绝跨进程不丢 message、3.6-05 / 06 / 07 的 C 半边（现成机检复跑）                                                 | 能                                                   |
+| **3.6-c** 界面轨 | 编辑器组件（把手拖拽、滑杆、撤销/重做两颗按钮、模板下拉、未保存离开拦截）+ i18n 双语                                                                                              | 3.6-01 的 V、3.6-02 的提示截图、3.6-03 的 V、3.6-04 的 V、3.6-05 的双语截图、3.6-06/07 的目视、3.6-08 的计时与截图、3.6-09 的 V | **不能**（要真实窗口与你在场，§7.9 第 3 条同一口径） |
 
 3.6-08 的阈值按判据原文"阈值来自配置"落在 `resume.editor` 自己的 `static Config`（`maxPreviewResponseMs`、
 `largeDocumentSectionCount`），不新开一套配置读取（§2）。3.6 落地还带一笔连带：spec 3.7 注记把
@@ -882,11 +882,11 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
    **不占首页位**（5.9 只规定 chat 是第一入口、工作流是第二视图），`ResumePanel.tsx` 里不再塞编辑器逻辑。
 3. **拦到哪一层** → **裁定⑪：只拦组件卸载**（切视图 / 收起面板）。app 关闭那一条要 `packages/shell` 的窗口 close
    事件加一次跨进程问答，判据原文只写"关闭编辑器"，按字面不做。
-4. **V 腿时段** → **2026-10-06 已跑（你在场）**：3.6-01/02/03/04/05/08/09 的活体按 §7.1 走 `pnpm harness`
+4. **V 那一条时段** → **2026-10-06 已跑（你在场）**：3.6-01/02/03/04/05/08/09 的活体按 §7.1 走 `pnpm harness`
    （CDP 10222、`--url 5173`、同批 `md5 -q` 去重），dev 换了一份 `userData`（`tmp/v6-userdata`）没动你正在用的 app。
    结果：八条 `[x]`、`3.6-08` 记 `[!]`（>5 区块的前提在现有界面上到不了）。逐条读数与三条活体坑见 §8.9。
 
-### 8.6 3.6-a 模型腿落地记录（2026-10-05，九条判据一条都不打勾：U 半边过了、V 半边全缺）
+### 8.6 3.6-a 模型轨落地记录（2026-10-05，九条判据一条都不打勾：U 半边过了、V 半边全缺）
 
 **落点**：`packages/resume-doc/src/editor-ops.ts`（`planMetric` / `planSectionMove` / `planEntryMove` + `EDITOR_METRIC_BOUNDS`）
 与 `editor-session.ts`（`createResumeEditorSession`），各带同目录测试（9 + 9 例，包内 106 → **124 例**）。
@@ -911,7 +911,7 @@ pdf.js 6 只收 `Uint8Array`，把 `readFileSync` 的 `Buffer` 直接递进去�
 **空编辑不进栈的判据是 `contentHash` 相等**，不是逐动作写三份比较逻辑：`normalize.ts` 那份 canonical 已经定义了
 "两份文档内容上是不是同一份"（`updatedAt` 不参与）。顺带来一个白捡的正确读数——`isDirty()` 就是"与打开时 hash 不同"，
 于是**撤销回原样自动不再 dirty**，3.6-09 的拦截提示不会在用户手动退回去之后还拦他一次。
-拒绝腿（界外、NaN、未知 id、越界下标）都不动栈也不抛异常，界面读的是 `code`；会话这一层只回答"进没进一步"。
+拒绝通道（界外、NaN、未知 id、越界下标）都不动栈也不抛异常，界面读的是 `code`；会话这一层只回答"进没进一步"。
 
 **模板与语言放在历史栈之外**（两个普通局部变量，不在快照里）。这是 §8.1 第 2 条"模板不进模型"的直接兑现，
 也是把 3.6-04 从"要小心的判据"变成"结构上不可能失败的判据"：一次切换不改文档一个字节，
@@ -932,10 +932,10 @@ DOM 与状态都要按 id 寻，不要按下标缓存位置。
 **状态位**：3.6 九条**全部保持 `[ ]`**。U 半边（3.6-01 的数学、3.6-02 的界内界外、3.6-03 的五步一致性、
 3.6-04 的数据不变）已过，但四条判据的原文方式都带 V，spec §7 的验收标准不允许用单测替代可视项。
 所以 P3 的实现面**仍是 14 条**，这轮一个勾都没打。
-**顺延**：① 3.6-b 契约腿（`resume.editor` service + 白名单/签名 + `ResumeEditorView` 投影 + `editor-link.test.ts`，离线可收）；
-② 3.6-c 界面腿（要你在场）；③ §8.4 那笔连带——`seedDemo variant='edited'` 的退场，留给 3.6-c 收口，不夹带。
+**顺延**：① 3.6-b 契约轨（`resume.editor` service + 白名单/签名 + `ResumeEditorView` 投影 + `editor-link.test.ts`，离线可收）；
+② 3.6-c 界面轨（要你在场）；③ §8.4 那笔连带——`seedDemo variant='edited'` 的退场，留给 3.6-c 收口，不夹带。
 
-### 8.7 3.6-b 契约腿落地记录（2026-10-05，九条状态位仍然一条都不动）
+### 8.7 3.6-b 契约轨落地记录（2026-10-05，九条状态位仍然一条都不动）
 
 **落点**（§8.3 那四条登记一次做完，没有新包）：`packages/core/src/errors.ts` 加四条码、
 `packages/resume-doc/src/editor-service.ts`（**新文件**：`ResumeEditorService`，provide 名 `resume.editor`，注入 `resume.doc` 与 `resume.print`）
@@ -987,7 +987,7 @@ TS2551（"Did you mean 'resume.doc'?"）——沿用 `graph-link.test.ts` 已有
 再按句柄类型收口，**不去改 cordis 的声明**（那是框架的表，本片没有理由动它）。
 ② 编辑器九条方法都是**同步**的（会话在内存里），所以 `Promise.resolve(invoke(…)).catch(…)` 接不住抛错——实参求值那一刻就抛了，
 `.catch` 挂在返回值上，于是错误穿透到测试体外（表现是两条用例红而错误信息就是那条业务 `AppError` 原话）。
-`pdf-link.test.ts` 那两条走的是异步另存腿，所以这个写法在那儿是对的；这里改成 `try/catch`。
+`pdf-link.test.ts` 那两条走的是异步另存通道，所以这个写法在那儿是对的；这里改成 `try/catch`。
 
 **这轮的闸门读数**：`pnpm typecheck` EXIT=0（第一次是 EXIT=2，就是上面那条 TS2551）、`pnpm lint` EXIT=0、
 `pnpm format` + `format:check` EXIT=0、`pnpm test` EXIT=0——23 个包全绿、无 failed 无 skipped，
@@ -995,10 +995,10 @@ TS2551（"Did you mean 'resume.doc'?"）——沿用 `graph-link.test.ts` 已有
 
 **状态位**：3.6 九条**仍全部 `[ ]`**。这轮收的是 §8.4 那行写的"3.6-02 的界外拒绝跨进程不丢 message、3.6-05 / 06 / 07 的 C 半边"，
 但九条的验收方式每一条都带 V 或界面读数，spec §7 不允许用单测替代可视项；按 master plan 的口径（P3 未做 **13 条** / 全局 **15 条**）
-这轮一条都没翻。**剩余实现面只有 3.6-c 界面腿**（`ResumeEditor.tsx` + `ResumePanel` 一个按钮进入，裁定⑩；未保存拦截只拦组件卸载，裁定⑪；
+这轮一条都没翻。**剩余实现面只有 3.6-c 界面轨**（`ResumeEditor.tsx` + `ResumePanel` 一个按钮进入，裁定⑩；未保存拦截只拦组件卸载，裁定⑪；
 3.6-08 的计时阈值配置随这片落；连带 `seedDemo variant='edited'` 的退场）——它要真实窗口与你在场（§7.1 / §7.9 第 3 条同一口径）。
 
-### 8.8 3.6-c 界面腿落码（2026-10-06，代码进主干、九条状态位仍然一条都不动）
+### 8.8 3.6-c 界面轨落码（2026-10-06，代码进主干、九条状态位仍然一条都不动）
 
 **这片写的是什么**：`packages/renderer/src/ResumeEditor.tsx`（新建）+ `ResumePanel.tsx` 的一颗进入按钮（裁定⑩：另起组件、
 不占首页位、面板里不再塞编辑逻辑）+ 两份语言包各 **44 键**（`shell.resume.editor.*`，键集对齐由 lint 链里的渲染层规范检查机检）。
@@ -1028,10 +1028,10 @@ TS2551（"Did you mean 'resume.doc'?"）——沿用 `graph-link.test.ts` 已有
 
 **状态位**：九条**仍全部 `[ ]`**，一条都不翻（P3 未做仍 13 条 / 全局仍 15 条）。这片只是把界面写出来并通过静态门，
 判据要的截图与目视一条都还没取——那需要真实窗口（CDP 10222、`--url 5173`、dev 换 `userData`、同批 `md5 -q` 去重），
-也就是 §8.5 第 4 条"V 腿时段"仍未定。**下一步就是在场跑这一轮**：载入种子 → 进编辑器 → 拖一把看预览变了 →
+也就是 §8.5 第 4 条"V 那一条时段"仍未定。**下一步就是在场跑这一轮**：载入种子 → 进编辑器 → 拖一把看预览变了 →
 滑到界外看那句拒绝 → 连撤销重做 → 切模板与语言 → 有改动时点关闭看拦截块。
 
-### 8.9 3.6 的 V 腿已在活体窗口跑完（2026-10-06，你在场）：八条 `[x]`、`3.6-08` 记 `[!]`
+### 8.9 3.6 的 V 那一条已在活体窗口跑完（2026-10-06，你在场）：八条 `[x]`、`3.6-08` 记 `[!]`
 
 **怎么跑的**：`AUTO_CC_USER_DATA_DIR="$PWD/tmp/v6-userdata" pnpm dev`（换一份 dev 专用 userData，不动你正在用的 app）→
 CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内容 → 进排版编辑器 → 逐条动作 + `shot --reveal <小元素>` →
@@ -1054,7 +1054,7 @@ CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内
 但拿 3 区块的读数冒充大文档读数就是虚报。补法两条（>5 区块的种子 / 编辑器接受任意 docId）都是新增面，不夹带进 3.6。
 
 **3.6 收口后 P3 还剩什么**：`3.6-08` 的那条前提、`3.5-01` 的线框 vs 位图裁定、`3.5-06` 的中文字体半边（裁定⑧ 余下）、
-`3.4-08` 的 Windows 同轮读数（本机给不出）、`3.5-03`/`3.5-07` 两条截图腿，以及 `seedDemo variant='edited'` 的退场——
+`3.4-08` 的 Windows 同轮读数（本机给不出）、`3.5-03`/`3.5-07` 两条截图判据，以及 `seedDemo variant='edited'` 的退场——
 现在九条 V 已取到证据，这笔退场的条件成立了，但它会连带 3.7-03 已入库证据的数据源，属独立一片，不在本轮夹带。
 
 **2026-10-09 更正这一段的最后两格**：① 上面那句"编辑器入口按裁定⑩ 只挂在种子文档"已过期——整测那轮给编辑器补了
@@ -1075,9 +1075,9 @@ CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内
 | 按钮全是禁用态 | 预览、导出、轻编辑三处的前置判据都取 `seedDemo` 那张开发种子收据                           | 闸门换成**当前文档** `docId`，并补 `resume.doc.list` 与面板选档下拉      |
 | 无法打开 PDF   | 导出成功但产物路径没有任何去处                                                             | 导出回执带路径 + toast 的`在访达中显示`→ `shell.revealInFolder`          |
 | 不能编辑 PDF   | 编辑器入口只认种子文档，且没有"对任意 PDF 打开"的口                                        | 打开任意 PDF → 线框 → 拖拽造覆盖 → 另存到新路径（源文件不动）            |
-| 生成不可确认   | 两处叠着：面板没有"定制哪一份"这一栏；模型腿被超时壁掐死（详见下）                         | 补 `generate-doc` 下拉；超时与回复上限按实测延迟重定                     |
+| 生成不可确认   | 两处叠着：面板没有"定制哪一份"这一栏；模型通道被超时壁掐死（详见下）                       | 补 `generate-doc` 下拉；超时与回复上限按实测延迟重定                     |
 
-**生成腿的两次测量**（对话腿 `ark-code-latest`，同一份简历 + 同一份 JD，直接打 bridge 的同一入口）：
+**生成通道的两次测量**（对话通道 `ark-code-latest`，同一份简历 + 同一份 JD，直接打 bridge 的同一入口）：
 连通探测最小一次 3.7～7.5s；`timeoutMs` 60s 与 120s 两档的结局都是 `reorder_only`（改写 0 处），
 `modelMaxTokens` 2000 在 120s 顶下一次都不回；**512 用 118.5s 回 3 处改写并过事实校验**，256 用 111.5s 回 2 处。
 也就是**耗时随回复上限一起涨**，超时缺省必须按真端点定。落地为 `llm.timeoutMs` 缺省 180000ms（上限 600s）、
@@ -1140,7 +1140,7 @@ CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内
 
 1. **先交 port、再把 `workerSrc` 换成不存在的地址**：渲染照样成功，且整页 console 里**一句 `Setting up fake worker` 都没有**——
    假工作线程必须 `import(workerSrc)`，这条路走不通还出图，说明用的确实是 port 上那只 worker。
-2. **主线程忙等 300ms 的同时渲 JPX 页**：墙钟 361ms（自有导出那份 315ms）。假线程那一腿同一份 JPX 的解码是 687ms，
+2. **主线程忙等 300ms 的同时渲 JPX 页**：墙钟 361ms（自有导出那份 315ms）。假线程那一条同一份 JPX 的解码是 687ms，
    若真线程不存在，墙钟应≈ 300+687≈990ms。→ 解码确实发生在另一条线程上。
 
 ### 10.3 S2：`'wasm-unsafe-eval'` 要不要加 —— **不加**
@@ -1148,16 +1148,16 @@ CDP 10222、每个动词都带 `--url 5173` → 诊断视图 → 载入演示内
 | 读数                                                            | 结果                                                                                                                                                  |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 主线程 `WebAssembly.compile/instantiate`（`script-src 'self'`） | `CompileError: … violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script`                   |
-| 同一份 CSP + port 路线下 pdf.js 的 openjpeg 腿                  | 请求了 `pdfjs-dist/wasm/openjpeg.wasm`、**没有 CompileError**、JPX 页 ~60ms → worker 那一格里 wasm 可用                                               |
+| 同一份 CSP + port 路线下 pdf.js 的 openjpeg 通道                | 请求了 `pdfjs-dist/wasm/openjpeg.wasm`、**没有 CompileError**、JPX 页 ~60ms → worker 那一格里 wasm 可用                                               |
 | 同一份 CSP + 假线程（pdf.js 自己退回主线程）                    | `Warning: #instantiateWasm: CompileError…` → 落 `openjpeg_nowasm_fallback.js`，JPX 页 **687ms/页**；连渲两次 687/686 → **不是冷启一次性，是常态价**   |
 | `script-src 'self' 'wasm-unsafe-eval'` 那一页                   | 主线程 `s2_wasm_instantiate` 报的已是 `TypeError: Imports argument must be present…`（CSP 那关过了，卡在链接参数）→ 证明这一项确实能放开主线程的 wasm |
 | cmaps / 标准字体 / wasm 三类资源在 file:// 下                   | `fetch` 与 `XHR` **都拿得到**：`UniGB-UCS2-H.bcmap` 43366、`FoxitSerif.pfb` 19469、`qcms_bg.wasm` 96589，全 200                                       |
-| `jbig2_nowasm_fallback.js` 能不能被 `import()`                  | 能（`exportKeys:'default'`）→ 就算某条腿彻底没有 wasm，也还有 JS 退路                                                                                 |
+| `jbig2_nowasm_fallback.js` 能不能被 `import()`                  | 能（`exportKeys:'default'`）→ 就算某条通道彻底没有 wasm，也还有 JS 退路                                                                               |
 
 结论：**走 worker 路线就一行 CSP都不用动**（`'wasm-unsafe-eval'` 只在"必须留在主线程"的世界里才需要，而 10.2 已证不必）。
 作废一条：我另写了一支"直接在 worker 里 fetch wasm 再 compile"的探针（`worker-wasm.mjs`），它报 `TypeError: Failed to fetch`，
 原因是相对路径写错（`wasm/…` 相对 worker 自己所在的 spike 根，指向了不存在的目录），**这一条作废、不作 S2 的凭据**；
-S2 的凭据是 pdf.js 自己那一腿（`openjpeg.wasm` 取到且无 CompileError）。
+S2 的凭据是 pdf.js 自己那一条（`openjpeg.wasm` 取到且无 CompileError）。
 "掩膜（SMask）"这一问没单独测：手上有 SMask 的样例做不出来，而 pdf.js 的 SMask 走的是与 DCT 同一条图像解码 + canvas 路、不经 wasm，
 所以不构成额外授权需求——**这条是结构推断，落码时要用一张带 SMask 的真图复核再算数**（§6.2）。
 
@@ -1192,16 +1192,16 @@ S2 的凭据是 pdf.js 自己那一腿（`openjpeg.wasm` 取到且无 CompileErr
 
 隐藏 `BrowserWindow` + 内建 PDFium + `webContents.capturePage()` 实测可用：`show:false` 的窗口里就拍得出真帧
 （PNG 103,672 字节、`size 2000×1544`、`inkedRatio 0.353`、`navigator.pdfViewerEnabled:true`、`pluginCount:5`）。
-一条使用注意：带 `#page=1&zoom=1.5&navpanes=0` 时 `did-finish-load` **不发**（这一腿读到 `settled:'timeout'`），
+一条使用注意：带 `#page=1&zoom=1.5&navpanes=0` 时 `did-finish-load` **不发**（这一条读到 `settled:'timeout'`），
 回退路线要换别的路标（`did-frame-finish-load` 或轮询 `capturePage` 的字节变化），不能照搬 `loadFile` 的等待姿势。
-**S1/S2 两条都过 → 这条回退门不启用**；它存在的全部意义是"万一 pdf.js 那条 port 路在装机版炸了"，界面腿与写出腿的形状不受它影响。
+**S1/S2 两条都过 → 这条回退门不启用**；它存在的全部意义是"万一 pdf.js 那条 port 路在装机版炸了"，界面半边与写出通道的形状不受它影响。
 
 ### 10.7 反向验证（§6.5：裁定⑮ 作废之后没有造成能力缺口）
 
-- **"覆盖不涂黑"的语义**原样：写出腿仍是 `createPdfEditSession.addOverlay`（`edit-session.ts:121`）+ `pdf.export.saveAs`，
+- **"覆盖不涂黑"的语义**原样：写出通道仍是 `createPdfEditSession.addOverlay`（`edit-session.ts:121`）+ `pdf.export.saveAs`，
   `PdfEditPanel.tsx:130,623-626` 那两条反伪装提示一字不改；位图路线换的只是**看得见什么**，不是**改掉什么**。
 - **3.5-09 源文件只读**不受影响：渲染层拿到的是字节副本，写出口仍然只有 `saveAs`。
-- **3.5-f 中文叠加与随包字体**（§7.17 / §7.18）在**写出腿**，与本轮**读入渲染腿**无关；
+- **3.5-f 中文叠加与随包字体**（§7.17 / §7.18）在**写出通道**，与本轮**读入渲染通道**无关；
   且 spike 里我们的产物 `modern-long.pdf` 被 pdf.js 正常读出 132 条文本项与中文串，两侧对得上。
 - **CJK 抽文本资源**（cmaps / 标准字体）本来就随包（`scripts/vendor-runtime-deps.ts` 的 `PRUNED_PACKAGE_DIRS` 只裁 `web/` 与 `types/`），
   本轮实测它们在 file:// 下 fetch 得到 → 裁定⑮ 作废后资源面没有新缺口。
@@ -1231,10 +1231,10 @@ worker 与三类资源在**打包产物里的可达路径**还没走过真实 st
 `image_decoders/` 与 `iccs/`（grep `pdf.worker.min.mjs` 里没有指向这两处的路径串，wasm 类文件名全部按 `wasmUrl` 拼）。
 
 **更正②（asar 这一层之前没问过）**：渲染层整页住在 `app.asar` 里，上面那棵树也在 asar 里面，
-所以"同源 file:// worker"这条腿必须在 **asar 内**再证一次，普通目录的读数不算数。
+所以"同源 file:// worker"这条通道必须在 **asar 内**再证一次，普通目录的读数不算数。
 补跑的 spike 在 `.research-repos/p58-asar-probe/`（§6.4，不进仓库），读数 `asar-pdf-out.json`：
 把 `index.html` + `pdfjs/{build,cmaps,standard_fonts,wasm}` + 三份夹具按产品布局装进一份 `app.asar`，
-窗口参数取 `packages/shell/src/index.ts:355-367`、CSP 取 `scripts/build.ts:24-35` 原文，页面里做完整一条腿：
+窗口参数取 `packages/shell/src/index.ts:355-367`、CSP 取 `scripts/build.ts:24-35` 原文，页面里做完整一条通道：
 
 | 夹具                | 装载 | 画页     | 文本项 | 中文样本                            | 这一条在问什么                                                                     |
 | ------------------- | ---- | -------- | ------ | ----------------------------------- | ---------------------------------------------------------------------------------- |
@@ -1256,12 +1256,12 @@ asar 内的 worker，不是假工作线程）、`hasCleanup:true`（销毁口按
 
 **形状最终落成了三块**（与 §10.5 那条"一次装载同时供位图与文本层"一致，没有第二份画纸）：
 
-| 落点                             | 只负责的事                                                                                                                                       |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `usePdfEdit.ts`                  | 这一轨**唯一**的事实：路径、打开回执、draft、页号、覆盖区清单、橡皮筋、就地改的草稿、`paperState`/`paperPage`。desk 持有它，两边只转述（§2.5）   |
-| `PdfEditPanel.tsx`（左列）       | 控件与清单。画布的活一个字都不碰——旧形状里"控件与画布同在一个组件"是这次拆分的直接原因                                                           |
-| `PdfPaperView.tsx`（右栏那一格） | 真纸面：位图 + 行盒命中 + 三只框（悬停 / 橡皮筋 / 就地改）的几何                                                                                 |
-| `pdf-page-view.ts`               | pdf.js 的那一条腿：`loadPdfPaper(bytes)` → 逐页 `{ paint(canvas, cssWidth), viewport, lines }`，**一只文档一只 worker**、销毁走 `task.destroy()` |
+| 落点                             | 只负责的事                                                                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usePdfEdit.ts`                  | 这一轨**唯一**的事实：路径、打开回执、draft、页号、覆盖区清单、橡皮筋、就地改的草稿、`paperState`/`paperPage`。desk 持有它，两边只转述（§2.5）     |
+| `PdfEditPanel.tsx`（左列）       | 控件与清单。画布的活一个字都不碰——旧形状里"控件与画布同在一个组件"是这次拆分的直接原因                                                             |
+| `PdfPaperView.tsx`（右栏那一格） | 真纸面：位图 + 行盒命中 + 三只框（悬停 / 橡皮筋 / 就地改）的几何                                                                                   |
+| `pdf-page-view.ts`               | pdf.js 的那一条通道：`loadPdfPaper(bytes)` → 逐页 `{ paint(canvas, cssWidth), viewport, lines }`，**一只文档一只 worker**、销毁走 `task.destroy()` |
 
 三条落码期定下来的口径，写在这里免得下次重新推：
 
@@ -1273,7 +1273,7 @@ asar 内的 worker，不是假工作线程）、`hasCleanup:true`（销毁口按
 - **`pdf.io.bytes` 是同步的**。`require-await` 那条机检把它从 `async` 逼回同步读盘，而网关那条 `try` 两种都接得住
   （`packages/ipc/src/gateway.ts:57-77` 里 `await target.invoke(...)` 在 `try` 内，同步抛与 reject 走同一支码）。
   连带三处测试写法要换：`.catch(...)` 在**同步抛**面前根本接不到（抛出发生在 `Promise.resolve` 包上它之前），
-  一律改成 `try { … } catch (caught) { failure = caught; }`。这条坑对 `open` 不存在——那条腿先 `await` 过装载，本来就是 reject。
+  一律改成 `try { … } catch (caught) { failure = caught; }`。这条坑对 `open` 不存在——那条通道先 `await` 过装载，本来就是 reject。
 
 **活体抓到并修掉的缺陷（四道门禁全绿时它躲过了所有单测）**：状态读数说 `ready`，纸上却整张透明、旁边写着「画了 -1 毫秒」，
 页面里捕获到 `rejection: Cannot use the same canvas during multiple render() operations. Use different canvas or ensure
@@ -1297,7 +1297,7 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
    `Input.dispatchMouseEvent` 的 move/press/release 三发全部落页：悬停框、就地改输入框、`pdf-edit-commit-inline`、
    `pdf-edit-undo`、`pdf-edit-save-as` 五处都是**真按下**取到的回执。这条从此不再需要标 `[!]`。
 
-**打包态这一腿的两条读数**（§10.8 那条未决项的兑现进度）：`pnpm --filter @auto-cc/renderer build` 之后
+**打包态这一条的两条读数**（§10.8 那条未决项的兑现进度）：`pnpm --filter @auto-cc/renderer build` 之后
 `packages/renderer/dist/pdfjs/` 长出 `build/pdf.worker.min.mjs`（1.2M）+ `cmaps/`（1.6M）+ `standard_fonts/`（816K）+ `wasm/`（1.5M，
 含 `jbig2.wasm` / `openjpeg.wasm` 及各自 fallback），即 `vite-pdfjs-assets.ts` 的 `closeBundle` 搬运在构建态成立，
 且主线程用的 `pdf.mjs` 由 vite 打进 `assets/index-*.js`、不需要另拷一份。
@@ -1342,7 +1342,7 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
 | 一行一次 `getImageData`，`stepPx` 采样，**不做全页扫描** | 纸面重绘是四路触发的（§10.10），全页扫描会把拖把手那一路拖成帧帧重扫                                                            |
 | 采样不足即回 `undefined`，由界面走那句诚实回落           | 宁可难看（墨底反白），也不许悄悄拿纯白去猜一张不是白底的纸                                                                      |
 
-### 11.2 两条腿共用一个函数：WYSIWYG 是构造出来的，不是约定出来的
+### 11.2 两条通道共用一个函数：WYSIWYG 是构造出来的，不是约定出来的
 
 `colorsOfOverlay(plan)` 是**唯一**的配色出口：画布侧（`PdfPaperView.paintNow`）与写侧（`pdf-document.applyOverlays` 的
 `drawRectangle` / `drawText`）调的是同一句，于是"屏幕上那块补丁"与"另存产物里那块补丁"不可能各算一遍——这是 §2.5
@@ -1358,7 +1358,7 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
 3. 新落笔进的是**新建的 Flate 流**，直接在字节里找子串会得到假阴性 ⇒ 读侧统一走 `@auto-cc/testing` 的 `pdfContentText`。
 
 连带一条测试面的旧断言必须换掉：`export-service.test.ts` 里原先钉着的 `toMatch(/1 1 1 rg/)`（"覆盖区是白的"）
-在 3.5-14 之后是**错的判据**，已改成墨色回落的浮点字面量 + 一条 `not.toMatch(/1 1 1 rg/)`，并补一条"量到了就用纸色"的正腿。
+在 3.5-14 之后是**错的判据**，已改成墨色回落的浮点字面量 + 一条 `not.toMatch(/1 1 1 rg/)`，并补一条"量到了就用纸色"的正向证据。
 
 ### 11.4 活体读数与那张对照图
 
@@ -1372,7 +1372,7 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
 
 ### 11.5 一条**先前就存在**的缺陷（本片不修，登记给 3.5-15）
 
-拖框那条进阶腿（先写字、再框位置）在活体里从不落覆盖区：`PdfPaperView.tsx` 的 `onPointerDown` 里，
+拖框那条进阶那一条（先写字、再框位置）在活体里从不落覆盖区：`PdfPaperView.tsx` 的 `onPointerDown` 里，
 `up` 闭包读到的 `model.rubber` 是 **pointerdown 那一次渲染**的快照，于是 `dragged` 恒为 false，
 `commitOverlay` 分支永远走不到。两次独立跑到同一读数（覆盖区仍 1 区；框内量到的是夹具那条未改动的色带 `[226,240,230]`）。
 
@@ -1396,7 +1396,7 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
   **（2026-10-10 片 2 补记，原三条不重写）**上面第二条仍然开着（`pdfjs-dist` 的归宿在族三）；第一条的观感半边
   现在同时欠 3.5-14 与 3.5-15 两行，等你在场；第三条的片 2 已落地（见 §11.7），族一只剩片 3。
 
-### 11.7 片 2（3.5-15）：三个数从 pdf.js 现场量，两腿同源
+### 11.7 片 2（3.5-15）：三个数从 pdf.js 现场量，两条同源
 
 **口径来源**：几何与升降部**照抄 pdf.js 6.3.289 自己 TextLayer 的算法**，不按博客转述（§6.2 那条本项目已栽过两次）：
 
@@ -1422,12 +1422,12 @@ paintChainRef.current = paintChainRef.current.then(paintNow, paintNow);
 
 **一处设计裁定（不新增拒绝码）**：`fontFamilyHint` / `baselineRatio` 与 `backdropHex` 用同一手法——
 **形状不合就当"没量到"**，走回落，而不是长出一个新的 `OVERLAY_*` 拒收码（§2.6 不为不会发生的输入加校验；
-且"量不到"是常态：拖框那一腿根本没有行可依）。基线只有落在 `rect` 的纵向区间内才认（`[yRatio, yRatio+heightRatio]`），
+且"量不到"是常态：拖框那一条根本没有行可依）。基线只有落在 `rect` 的纵向区间内才认（`[yRatio, yRatio+heightRatio]`），
 越界、NaN、负数一律回落"行盒内按字号居中"。
 
-**两腿同源**：`packages/pdf-edit/src/text-metrics.ts`（新，纯函数、零依赖）持有度量口径，
+**两条同源**：`packages/pdf-edit/src/text-metrics.ts`（新，纯函数、零依赖）持有度量口径，
 渲染层 `pdf-page-view.ts` 与写侧 `overlay-writer.ts` / `pdf-document.ts` 都从它拿；
-canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那一腿的 `Tf` 字号 / `Tm` 基线
+canvas 那一条的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那一条的 `Tf` 字号 / `Tm` 基线
 用的是**同一条 `PlannedOverlay`**——WYSIWYG 还是构造出来的，不是约定出来的（§11.2 同一条）。
 
 **活体主证**（`docs/acceptance/3.5/3.5-15-live-readings.txt`）：三族 × 三字号 × 每行带降部的夹具上，
@@ -1452,7 +1452,7 @@ canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那
 2. **三个数走 CSS 变量，不走 JSX `style`**（`eslint.config.js:50-52` 那条机检红线）。
    `--pdf-edit-size` / `--pdf-edit-font` / `--pdf-edit-ink` 与三只框的几何变量并排写在**同一个 holder 节点**上，
    输入框靠继承吃到（活体读数：holder 的 `style` 属性原文里三件俱在，输入格上 `getPropertyValue` 读回空串而 computed 值对得上）。
-   墨色不是新算的一套：它取的就是那条腿画字用的那个色，所以"框里的字"与"盖上去之后的字"颜色同源。
+   墨色不是新算的一套：它取的就是那条通道画字用的那个色，所以"框里的字"与"盖上去之后的字"颜色同源。
 3. **原件只多一只 prop，不另起一只组件**。`InlineEditField` 加 `bare`（透明底、无边框、`text-inherit`、
    琥珀只在 `:focus`），简历屏那一路仍要白底输入框——两种画法共用一只原件，比在面板层复刻一套输入框便宜（§2.3、§2.5）。
 4. **基态无边框靠特异度，不靠 class 顺序**。Tailwind v4 里 `border-transparent` 与 `border-amber` 是同一个
@@ -1472,7 +1472,7 @@ canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那
 **临时挂回**旧 class 复现的（computed 当场读到 `oklab(… / 0.95)`，拍完立刻摘掉），两张裁剪几何逐位相同、md5 互异。
 
 **三条欠项（与 spec 行尾一致，不留模糊）**：
-① 中文那一腿字族仍随包 Noto Sans SC（继承 3.5-15 欠项①）；
+① 中文那一条字族仍随包 Noto Sans SC（继承 3.5-15 欠项①）；
 ② 输入框里的字由 DOM 排版决定基线，与被盖原文的 PDF 基线**不做逐像素对齐**——本片只保证字号/字族/墨色同源，
 位置仍以提交后画布上那一条为准（要做逐像素对齐就得放弃原生 `<input>`，代价大于收益）；
 ③ 「敲字时琥珀边框长出来」与「人眼看不出这是一只贴上去的盒子」两条等用户在场（hidden 窗口里 `:focus` 根本不匹配）。
@@ -1519,7 +1519,7 @@ canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那
 
 还有一条不是 pdf.js 的形状而是 PDF 的：**颜色状态会一路延续到下一次赋值**。夹具第一版把 `rg` 写在
 `BT` 前面而不包 `q…Q`，于是后面三格"没写颜色"的文字继承到了前一格的红——抽出来数值上"对"，
-其实整条状态进出的腿没测到。现在有色那两格各自包在一对 `q…Q` 里，并且留了一条**如实的负腿**：
+其实整条状态进出没测到。现在有色那两格各自包在一对 `q…Q` 里，并且留了一条**如实的反向证据**：
 没写颜色算子的格回 `null` 而不是猜黑。
 
 ### 12.3 三道阈值的真跑数字（`packages/pdf-edit/src/page-extract.test.ts` 6 条，2026-10-11）
@@ -1556,7 +1556,7 @@ canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那
 （esbuild 打仓库源码进 spike，不是抄一份），输入是 §12.3 的样式夹具。全量读数与三张图在
 `docs/acceptance/03-resume-pdf/3.8-02-fidelity-readings.txt`，下面只登记**改变了后续判断的部分**。
 
-**两条腿的分工**：A 版按 §12 原设计做（每格一个绝对定位 `<span>`，行盒高取 pdf.js 的 ascent/descent，字族只取模型现有的
+**两条通道的分工**：A 版按 §12 原设计做（每格一个绝对定位 `<span>`，行盒高取 pdf.js 的 ascent/descent，字族只取模型现有的
 `fontFamilyHint`）；B 版是对 A 的一处**已查实缺陷**的补偿（整页一个 `<svg viewBox="0 0 595 842">`，`<text y>` 直接落基线，
 并按夹具声明补回字重）。分成两版不是为了凑过门，是为了把读数拆成**"模型缺一格"与"物理补不齐"两类**——
 判据若只有一版，这两类会混在一个数字里，裁定就没法写。
@@ -1570,7 +1570,7 @@ canvas 那一腿的 `font` / `textBaseline='alphabetic'` / 基线 y 与产物那
 
 **失手的类别是字形，不是几何。** diff 图上页面底色与 495×34pt 的色带逐像素一致（整块纯蓝），
 0.8pt 细线整条红，每一行文字的轮廓呈重影状全红；而起点 Δx 全部 −0.007pt、B 版 Δy 全部 −0.068~−0.076pt。
-也就是**这条路线的几何腿已经量到 0.01~0.08pt 的量级并且成立了，字形腿按定义不成立**——它正是批准计划里预先登记的
+也就是**这条路线的几何通道已经量到 0.01~0.08pt 的量级并且成立了，字形通道按定义不成立**——它正是批准计划里预先登记的
 "完全一致补不齐的五条"第 ①（源 PDF 常嵌子集字体，新字打不进原字形）与第 ②（`Tc`/`Tw` 字距与两端对齐的 advance width
 Chromium 不复现）的合成结果。衬线那一行 14.5% 的宽度差由**本机字体解析**决定：换成与源 BaseFont 同名的一族优先，读数一字未动。
 
@@ -1602,5 +1602,5 @@ Chromium 不复现）的合成结果。衬线那一行 14.5% 的宽度差由**�
 
 **本机证不了的（照 §9 标 `[!]`，不做推测）**：四个数只在 macOS arm64 + 本机字体集下成立，
 Windows/Linux 上 `Helvetica`/`Times` 会落到别的字面，advance 误差只会不同、不会更准（不影响裁定——门已经在最好的一侧过线外）；
-本轮量的是 pdf.js 栅格这一条腿，装机版的真纸打印不在本机可验范围；
+本轮量的是 pdf.js 栅格这一条通道，装机版的真纸打印不在本机可验范围；
 「人眼看不出是覆盖」那一条仍按裁定要用户在场看一眼才算 `[x]`，这份读数不替代它。

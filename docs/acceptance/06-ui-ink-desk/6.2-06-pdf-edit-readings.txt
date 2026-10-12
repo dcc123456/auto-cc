@@ -25,7 +25,7 @@ draft 只活在内存，收尾已按 `pdf-edit-close` 弃掉（复测 `panelPres
 | `pdf-edit-remove-overlay-<id>` | `ghost` | — | — | `pointer` |
 | `pdf-edit-save-as` | `amber` | `OUT_PATH_EMPTY`（尺度没读到时先 `LIMITS_PENDING`） | 给一句 | `not-allowed` |
 
-归属口径（plan §5）：**这一屏零朱砂、零翡翠**——它没有外发腿，「另存为」是本机写盘，落 `amber`；
+归属口径（plan §5）：**这一屏零朱砂、零翡翠**——它没有外发通道，「另存为」是本机写盘，落 `amber`；
 页序/复制是草稿重排，落 `solid`；只读翻页落 `line`；撤销、关掉、去掉一页落 `ghost`。
 换装前这些键的禁用态是 `rose-900/rose-950` 一排红边——把"可撤销的草稿编辑"画成了"办砸了"，本片修掉的就是这处串色。
 
@@ -55,7 +55,7 @@ draft 只活在内存，收尾已按 `pdf-edit-close` 弃掉（复测 `panelPres
 App 自己的 state，App 重渲染时子树拿到的是**同一个元素引用**，React 直接跳过整棵子树。
 实测：把 `currentTheme()` 放进画布 effect 的依赖数组后翻面，画布像素逐位不变
 （`darkAmber 342 / lightAmber 0` 在浅色下依旧），也就是**画布停在旧材质上**。
-因此在 `theme.ts` 落一条唯一的订阅腿（`themeListeners` + `useDeskThemeValue()`，`applyTheme` 负责报），
+因此在 `theme.ts` 落一条唯一的订阅通道（`themeListeners` + `useDeskThemeValue()`，`applyTheme` 负责报），
 `useDeskTheme` 改为建在它上面（不再自己存第二份 state，也不再有那条重复的 `applyTheme` effect）。
 `WorkflowCanvas` 的 `colorMode` 同一族（它也在 `PANELS` 底下），一并换成订阅读数。
 
@@ -110,8 +110,8 @@ pdf-edit-remove-page-0 w=49 h=24 …
 ------------------------
 
 - `WorkflowCanvas` 的 `colorMode` 订阅：机制与本片画布同一条、且本片已取到活体证据，但**流程屏这一轮没有
-  任何计划可摆**，`.react-flow` 根本不在 DOM（`flowPresent: false`），所以那一腿算 `[!]` 未取到，不算通过。
+  任何计划可摆**，`.react-flow` 根本不在 DOM（`flowPresent: false`），所以那一条算 `[!]` 未取到，不算通过。
 - 「另存为」的真实落盘与失败半成品：本片纯换画法，不动 `pdf.export.saveAs`（3.5-02/09 的验收在 3.x 那批）。
-- 拖出覆盖区的**真鼠标**腿：本轮那一区是脚本派发 PointerEvent 落进 draft 的（取的是画法，不是输入通道）；
+- 拖出覆盖区的**真鼠标**那一条：本轮那一区是脚本派发 PointerEvent 落进 draft 的（取的是画法，不是输入通道）；
   真实拖拽要窗口在前台，见 §9 的 5.4-b ⑩。
 - Windows / linux：本机是 macOS arm64，不适用。

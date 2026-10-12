@@ -2,7 +2,7 @@
 
 ## 判据
 `spec.md 3.2-09`：模板对超长条目有确定策略（分页续排，**不截断内容**）；证据形态=构造 3 页长文档断言内容完整 + 页数增长。
-状态位原先写的是「C 腿待 3.3」——U 半边（HTML 里带 `break-inside:avoid` 等护栏）早已在
+状态位原先写的是「C 那一条待 3.3」——U 半边（HTML 里带 `break-inside:avoid` 等护栏）早已在
 `packages/resume-doc/src/print.test.ts` 里做成了永久机检，缺的正是本窗补上的 C 半边：真实内核下的页数与内容完整性读数。
 
 ## 方法（与 3.2-02 同一套 spike，见 `3.2-02-templates-pages.txt`）

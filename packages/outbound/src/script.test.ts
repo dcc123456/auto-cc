@@ -4,7 +4,7 @@
  * 三条主线：模型可用时用模型的、不可用时**可见地**回落模板、任何一路产出的文本都要过黑名单。
  * 4.6-b 起加两条：三类话术走同一个入口（分型只换文案与入参校验）、超长先按句末截断再决定回落。
  * 4.6-c 起再加三条：产物显式回指引用的证据（`evidenceRefs`）、模型编出来的数被判不合格、
- * 夸大与诱导承诺和凭据分两组但走同一条判据（发送腿硬拦、模型腿可见回落）。
+ * 夸大与诱导承诺和凭据分两组但走同一条判据（发送通道硬拦、模型通道可见回落）。
  * 4.6-e 起再加一段：与 P2 的接口定型契约，用一只只会读字段的假消费方证明"不二次加工"（4.6-11）。
  * 网络一律用 `globalThis.fetch` 存根（模型端点与 fixture 都不真连，AGENTS.md §7.2），
  * 并且每次都断言请求次数——"回落"只有在确定没发网络时才是可测的（plan §12.6.1）。
@@ -380,7 +380,7 @@ describe('outbound.script 的长度与语气约束（spec 4.6-04）', () => {
   });
 
   it('禁发内容在被截掉的那半段里：整条判不可信，不靠截断蒙过去（4.6-04 × 2.5-10）', async () => {
-    // 岗位名与公司名取短形态，是为了让模板本身能落进 60 字上限——回落那一腿必须还能过校验，
+    // 岗位名与公司名取短形态，是为了让模板本身能落进 60 字上限——回落那一条必须还能过校验，
     // 否则这条用例测到的是"模板超长"而不是"凭据出现在被截掉的段落里"。
     const shortJd = { jdId: 'job-1002', title: '前端', company: '示例', keywords: [] };
     const filler =
@@ -534,7 +534,7 @@ describe('outbound.script 的夸大与诱导承诺拦截（spec 4.6-05）', () =
     }
   });
 
-  it('发送腿对四类夸大/诱导说法逐条硬拦，并带上组别与规则序号（4.6-05 的可核对清单）', async () => {
+  it('发送通道对四类夸大/诱导说法逐条硬拦，并带上组别与规则序号（4.6-05 的可核对清单）', async () => {
     const fixture = stubFetch({ status: 200, body: {} });
     try {
       const script = await ready({});
@@ -639,9 +639,9 @@ describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
   const REQUIRED_DRAFT_KEYS = ['evidenceRefs', 'jdId', 'kind', 'origin', 'scriptVersion', 'text'];
 
   /**
-   * 该条候选**应当**有的键集合：模型腿六个，模板腿多一个 `fallbackReason`。
+   * 该条候选**应当**有的键集合：模型通道六个，模板通道多一个 `fallbackReason`。
    * @param draft 话术视图
-   * @returns 升序键名清单（可选键只在它出现的那条腿上出现，所以集合随 `origin` 而定，这是契约的一部分）
+   * @returns 升序键名清单（可选键只在它出现的那条通道上出现，所以集合随 `origin` 而定，这是契约的一部分）
    */
   const pinnedDraftKeys = (draft: ScriptDraftView): string[] =>
     draft.origin === 'model' ? REQUIRED_DRAFT_KEYS : [...REQUIRED_DRAFT_KEYS, 'fallbackReason'].sort();
@@ -678,7 +678,7 @@ describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
       // 二次加工的两种常见形态：改标点/空白、按 origin 分支重排。这里要求逐字符相等。
       expect(consumed.text).toBe(draft.text);
       expect(consumed.source).toBe('v1:greeting:job-1001');
-      // 消费方抄出来的那份正文仍然过得了发送腿的判据——它不需要"先修一修再发"。
+      // 消费方抄出来的那份正文仍然过得了发送通道的判据——它不需要"先修一修再发"。
       expect(script.assertSendable(consumed.text, draft.origin)).toBeUndefined();
     } finally {
       fixture.restore();
@@ -708,7 +708,7 @@ describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
     }
   });
 
-  it('回落那条也不逼消费方加工：fallbackReason 是读数，来源链与模型腿同形（4.6-06 × 4.6-11）', async () => {
+  it('回落那条也不逼消费方加工：fallbackReason 是读数，来源链与模型通道同形（4.6-06 × 4.6-11）', async () => {
     const fixture = stubFetch({ status: 503, body: {} });
     try {
       const script = await ready({ baseUrl: 'https://model.test.invalid/v1', model: 'test-model' });
@@ -724,8 +724,8 @@ describe('outbound.script 与 P2 的接口定型（spec 4.6-11）', () => {
 });
 
 /**
- * 5.1-c 的话术腿：`outbound.script` 要能被对话挑中（spec 5.1-07 的「生成话术」），
- * 且挑中之后走的仍是 2.5 / 4.6 那一条生成链。三段判据与 `resume-kb` 的建档腿同形：
+ * 5.1-c 的话术通道：`outbound.script` 要能被对话挑中（spec 5.1-07 的「生成话术」），
+ * 且挑中之后走的仍是 2.5 / 4.6 那一条生成链。三段判据与 `resume-kb` 的建档通道同形：
  * 登记形状、两入口产物逐字相等、入参是边界。
  */
 describe('outbound.script 的 agent 工具面（spec 5.1-07 的生成话术）', () => {
@@ -752,7 +752,7 @@ describe('outbound.script 的 agent 工具面（spec 5.1-07 的生成话术）',
   it('跑工具与直接调 service 的产物逐字相等：两入口共用同一条生成链（§5.9）', async () => {
     const { script, tools } = await bootScript({ baseUrl: null, model: null });
     const tool = scriptTool(tools);
-    // 模型端点未配置 → 两条腿都走可见回落，产物只由配置与入参决定，因此逐字比较是确定的。
+    // 模型端点未配置 → 两条通道都走可见回落，产物只由配置与入参决定，因此逐字比较是确定的。
     const viaTool = (await tool.run(tool.input.parse(JD))).value as ScriptDraftView;
     const viaService = await script.generate(JD);
     expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));

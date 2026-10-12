@@ -21,7 +21,7 @@
       "summary",
       "value"
     ],
-    "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量腿 unavailable）",
+    "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量通道 unavailable）",
     "evidenceRefs": [
       "chunk:kbs-f36b7699466d5b4b",
       "chunk:kb-15bcbd47c3f28866"
@@ -72,7 +72,7 @@
         "summary",
         "value"
       ],
-      "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量腿 unavailable）",
+      "summary": "检索「订单」：切出 1 个 token → 2 条命中（ok · 向量通道 unavailable）",
       "evidenceRefCount": 2,
       "evidenceRefSample": [
         "chunk:kbs-f36b7699466d5b4b",
@@ -87,7 +87,7 @@
         "summary",
         "value"
       ],
-      "summary": "检索「。。。」：切出 0 个 token → 0 条命中（no_query_tokens · 向量腿 not_attempted）",
+      "summary": "检索「。。。」：切出 0 个 token → 0 条命中（no_query_tokens · 向量通道 not_attempted）",
       "evidenceRefCount": 0,
       "evidenceRefSample": [],
       "valueType": "object"

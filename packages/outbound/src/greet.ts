@@ -109,7 +109,7 @@ const greetRequestSchema = z
 /**
  * 拼账本 `source` 列那条可追溯链（spec 2.5-09 + 4.6-02）。
  *
- * 两条腿共用一个拼装函数：格式长两遍就是两条复盘口径。`manualPrefix` 为真时链首是 `manual`，
+ * 两条通道共用一个拼装函数：格式长两遍就是两条复盘口径。`manualPrefix` 为真时链首是 `manual`，
  * 表示"这条正文是调用方给定的、本服务没有再生成"，其后仍是生成它的那份话术的来源。
  * @param manualPrefix 内容是否来自调用方的现成文案
  * @param scriptVersion 提示词与模板的版本号（注册表常量）

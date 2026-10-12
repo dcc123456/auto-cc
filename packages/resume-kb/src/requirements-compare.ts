@@ -70,7 +70,7 @@ export interface GapSuggestion {
 
 /** 一条 JD 要求的比对结果。 */
 export interface GapRequirementView {
-  /** 拆解腿的原条目，界面靠它的 `start/end` 做原文高亮（spec 4.4-01 的位置判据）。 */
+  /** 拆解通道的原条目，界面靠它的 `start/end` 做原文高亮（spec 4.4-01 的位置判据）。 */
   readonly item: RequirementItem;
   readonly state: GapState;
   /** 证据链：`matched` / `partial` 非空，`missing` 恒为空数组（"没有据"不能靠塞弱据来圆场）。 */
@@ -109,7 +109,7 @@ export interface GapEducationChunk {
 
 /** 一次比对的输入。 */
 export interface GapCompareInput {
-  /** JD 正文（与拆解腿同一份字符串——已经 `trim()` 过的那份，反向比对要在它上面算相关性）。 */
+  /** JD 正文（与拆解通道同一份字符串——已经 `trim()` 过的那份，反向比对要在它上面算相关性）。 */
   readonly jdText: string;
   readonly items: readonly RequirementItem[];
   readonly entities: readonly GapLibraryEntity[];
@@ -135,7 +135,7 @@ export interface GapCompareOptions {
 
 /** 一次比对的读数。 */
 export interface GapCompareResult {
-  /** 与 `items` 同序（拆解腿已按「类别 → 原文位置」排成稳定序列，比对不重排，界面分栏才不用二次排序）。 */
+  /** 与 `items` 同序（拆解通道已按「类别 → 原文位置」排成稳定序列，比对不重排，界面分栏才不用二次排序）。 */
   readonly rows: readonly GapRequirementView[];
   readonly highlights: readonly GapHighlightView[];
   /** 因 `maxHighlights` 被截掉的候选条数（计数可见，同 4.4-06 的"负面结论要给依据"）。 */
@@ -233,7 +233,7 @@ function libraryEducationOf(chunks: readonly GapEducationChunk[]): {
 
 /**
  * 给一条技能类（或档位表外的学历 label）要求找证据并按强度定三态。
- * @param item 拆解腿的要求条目
+ * @param item 拆解通道的要求条目
  * @param entities 库内实体投影
  * @param options 阈值与 topK
  * @returns 一条比对结果行
@@ -288,7 +288,7 @@ function textSuggestion(state: GapState, item: RequirementItem, top: readonly Ga
 
 /**
  * 年限要求的算术比对：库内经验总时长（合并后）够不够 JD 要的年数。
- * @param item 年限要求（`years` 为拆解腿从原文取出的数字）
+ * @param item 年限要求（`years` 为拆解通道从原文取出的数字）
  * @param entities 库内实体投影（只有 `experience` 参与）
  * @param options 阈值与 `nowMonth`
  * @returns 一条比对结果行；库里一条可解析时间段都没有时判缺失并给"补时间"的建议
@@ -305,7 +305,7 @@ function compareByYears(
   const required = item.years ?? 0;
   const haveYears = Math.floor(totalMonths / 12);
   // 取 floor 而不是四舍五入：3 年 5 个月对「4 年以上」就是不满足，宁可少算不可多算。
-  // 「0 年」不是真实 JD 会写的要求，但拆解腿的数字来自原文，这里不为它造一个特殊态：按已满足处理。
+  // 「0 年」不是真实 JD 会写的要求，但拆解通道的数字来自原文，这里不为它造一个特殊态：按已满足处理。
   const state: GapState =
     required === 0 || haveYears >= required
       ? 'matched'
@@ -351,7 +351,7 @@ function compareByYears(
  * 学历要求的档位比对。
  * @param item 学历要求（label 是本仓库的 5 档之一时才有档位）
  * @param chunks 学历区块切片
- * @returns 一条比对结果行；`label` 在档位表外（模型腿给的「中专」之类）时返回 `null`，调用方退回文本反查
+ * @returns 一条比对结果行；`label` 在档位表外（模型通道给的「中专」之类）时返回 `null`，调用方退回文本反查
  */
 function compareByEducation(item: RequirementItem, chunks: readonly GapEducationChunk[]): GapRequirementView | null {
   const required = educationRankOf(item.label);

@@ -1,5 +1,5 @@
 /**
- * `pdf.export` 服务（plan §7.4 的另存腿；spec 3.5-02 / 3.5-09，并接住从 3.4-04/05/07 转移来的确定态）。
+ * `pdf.export` 服务（plan §7.4 的另存通道；spec 3.5-02 / 3.5-09，并接住从 3.4-04/05/07 转移来的确定态）。
  *
  * 一句话：**源文件只读，产物是新文件**。整条链上唯一一次写盘发生在最后那一下 `rename`，
  * 且写的是 `<outPath>.part` 再改名（plan §7.10）——于是「抛错的时候磁盘上没有半成品」是结构上的必然，
@@ -29,7 +29,7 @@ import { planPageOrder, type PageOrderRejection } from './page-ops.js';
 /**
  * 随包中文字体的文件名（与生成轨打印用的是**同一份资产**，plan §7.1 的字体资产行）。
  * 目录由 L1 的 `resume.print.fontBaseUrl()` 给（开发态仓库 `resources/fonts`、打包态 `process.resourcesPath/fonts`），
- * 本层不猜第二份路径——同一件事在 `resume-doc` 的导出腿已经是这个形状（§2.2）。
+ * 本层不猜第二份路径——同一件事在 `resume-doc` 的导出通道已经是这个形状（§2.2）。
  */
 const CJK_FONT_FILE = 'noto-sans-sc-chinese-simplified-400-normal.woff2';
 
@@ -58,7 +58,7 @@ export interface PdfSaveAsReceipt {
 }
 
 /**
- * 另存腿的失败子原因（进 `AppError.details.code`）。
+ * 另存通道的失败子原因（进 `AppError.details.code`）。
  * 覆盖区校验那几种复用 `OverlayRejection['code']` 的字面量，不另起一套说法。
  */
 type SaveFailureCode =

@@ -19,9 +19,9 @@ auto-cc · 7.2-d 读数与取证（spec 7.2-02 ~ 12 的 C+U 半边 · 渲染层�
 
 `packages/llm`：4 个文件 66 条全绿，其中 `settings.test.ts` 35 条。**条数与 HEAD 相同（35 → 35），换了的是组成**：
 删掉 `apply()` 那一节的 6 条，换上本片新写的 6 条——`read()` 的来源读数 4 条（`origin` = pool / config（端点变体）/
-config（手改地址→custom）/ none，加 `boundProviderId`）、`clearKey()` 1 条（只清这条腿兜底那一把，且读数里
+config（手改地址→custom）/ none，加 `boundProviderId`）、`clearKey()` 1 条（只清这条通道兜底那一把，且读数里
 不带明文）、`presetIdOfBaseUrl` 按地址反查 1 条（逐家 + 逐变体 + 认不出与空地址回 custom）。
-一条 `it` 都没被"顺手删掉"来凑数：两边各 6 条是同一件事的正反面（旧的单腿写口 ↔ 新的来源读法）。
+一条 `it` 都没被"顺手删掉"来凑数：两边各 6 条是同一件事的正反面（旧的单独一条写口 ↔ 新的来源读法）。
 
 改完 spec / plan 的文案位之后，四道门禁**整链重跑一次**（`tmp/72d/{typecheck,lint,format,test2}.log`）：
 TYPECHECK_EXIT=0 / LINT_EXIT=0 / FORMAT_EXIT=0 / TEST_EXIT=0，分包通过数与上表逐包一字不差（合计仍是 2182 条），
@@ -43,7 +43,7 @@ TYPECHECK_EXIT=0 / LINT_EXIT=0 / FORMAT_EXIT=0 / TEST_EXIT=0，分包通过数�
    §9 的 1.3 类型坑），不在本包再写第二份（§2.2）。
 3. `ModelSettingsPanel.tsx` 三处 TS18048/TS2345：`setForm((current) => …)` 的 `current` 是
    `ProviderForm | undefined`，展开后各键变可选；`bindingDraft` 同理。改成更新函数里先 `if (!current) return current`
-   与把草稿初值定为 `{}`（"没动过的腿"本就是缺键而不是 undefined 对象），不做非空断言。
+   与把草稿初值定为 `{}`（"没动过的通道"本就是缺键而不是 undefined 对象），不做非空断言。
 
 另外三条红**不是本片的**，登记下来是为了让下一次不要有人去"修"它们（共享工作树里有并行会话在同棵树提交，
 AGENTS.md §9 的 5.3-a 收口那条）：`packages/preload/src/PreloadApp.tsx` 一度引用 `'settings.apply'` 与一只
@@ -57,7 +57,7 @@ lint 里与本片直接相关的三条读数：
   逐包齐备；src/ui/** 之外裸原生控件 0 只 … 按不动却不带原因码那一格 0 处 …）`。三段里所有按钮/下拉/输入/勾选
   都出自 `src/ui/**` 原件，且每一格按不动都带 `data-disabled-reason`（§6.2-06）。
 - `check-llm-single-entry.ts`：**绿**。`模型端点只在 packages/llm`，`llm.settings` 一个字节都不发；
-  本片的"测这家 / 测这条腿 / 获取模型"三条全部经 `llm.chat` 的出口（`listModels` / `complete` / 显式目标探测）。
+  本片的"测这家 / 测这条通道 / 获取模型"三条全部经 `llm.chat` 的出口（`listModels` / `complete` / 显式目标探测）。
 - `check-compliance-redlines.ts`：**绿**。测试面地址仍是 `*.test.invalid` 与 `127.0.0.1` fixture，
   渲染层没有出网点（§7.2 / §8.1）。
 - i18n 半边：语言包键对齐与占位符实参齐不齐由同一条 lint 链守住（§5.5/5.6 已落地），绿。
@@ -125,8 +125,8 @@ plan §7.2-d 原案写的是"添加 `Modal`"。实现前读了 `packages/rendere
     第二段  settings-model-models（带 data-selected-provider-id）；空态 -no-provider；
             候选 -candidates（每格 DeskCheck action="settings-model-tick" + data-model-name）；
             已入库 -stored（每行 data-model-name + origin 徽标）；-already-stored
-    第三段  每腿 <li data-model-leg="chat|embed">；来源读数 settings-model-leg-origin；
-            密钥来源 -key-source-<leg>、缺项 -missing-<leg>；绑定/探测/清除四颗 action 都带腿名
+    第三段  每一条 <li data-model-leg="chat|embed">；来源读数 settings-model-leg-origin；
+            密钥来源 -key-source-<leg>、缺项 -missing-<leg>；绑定/探测/清除四颗 action 都带通道名
     播报    -hot-apply-note、-check-result、-notice、-storage-encrypted；明文/解不开两条走 Banner
             （reason=STORAGE_PLAINTEXT / SECRET_UNREADABLE）
 

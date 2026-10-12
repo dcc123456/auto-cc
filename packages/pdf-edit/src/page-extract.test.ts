@@ -3,7 +3,7 @@
  *
  * 输入是 `@auto-cc/testing` 手写的带样式 PDF（`styledResumePdf`），期望值与夹具共用同一份清单
  * （`STYLED_PDF_RUNS` / `STYLED_PDF_BAND` / `STYLED_PDF_RULE`）——不在测试里另抄一份数字，
- * 否则夹具一改就同时改断言，那条腿等于没测（AGENTS.md §2.5）。
+ * 否则夹具一改就同时改断言，那条通道等于没测（AGENTS.md §2.5）。
  *
  * 三条阈值是 plan `03-resume-pdf` §11 写死的：run ≥98%、色 ≥95%、矩形 ≥90%；
  * 旋转文字**单列成已知丢失项**，不进任何一条分母。
@@ -60,7 +60,7 @@ describe('3.8-01 抽取完整性：三道阈值（plan 03 §11）', () => {
     });
     expect(matched.length / COLOURED_RUNS.length).toBeGreaterThanOrEqual(0.95);
 
-    // 一条如实的负腿：没写颜色算子的那些格**回 null 而不是猜黑**。
+    // 一条如实的反向证据：没写颜色算子的那些格**回 null 而不是猜黑**。
     const uncoloured = UPRIGHT_RUNS.find((run) => run.rgb === null);
     expect(runOf(runs, uncoloured?.text ?? '').colorRgb).toBeNull();
   });

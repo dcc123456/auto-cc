@@ -9,7 +9,7 @@
  *    多一个数是凭空放大——两个方向都要拦（4.5-08）。抽取与比对实现在 `@auto-cc/core` 的 `numbers.ts`：
  *    话术侧的无据断言拦截（4.6-02）要的是同一份口径，而两个包同级，谁都不该 import 谁（AGENTS.md §4.1）。
  * 3. **具名候选回查**：散文里出现的组织名形态候选，必须能在基线词表或 JD 原文里找到（4.5-07 的补刀，
- *    强保证在结构面：模型腿没有新增条目的通道，见 plan §4.5 判据六）。
+ *    强保证在结构面：模型通道没有新增条目的通道，见 plan §4.5 判据六）。
  *
  * 本文件不认识 cordis，也不打开任何 SQLite 连接：校验规则要能离线、逐条断言
  * （与 `sections.ts` / `evidence.ts` / `requirements-compare.ts` 同一规矩，装配与入库留在服务层）。
@@ -35,9 +35,9 @@ import { checkFactLock, type FactViolation, type ResumeDocument, type SectionKin
 export const GENERATION_EDITABLE_KEYS = ['text', 'achievement', 'description'] as const;
 
 /**
- * 生成腿可以**提议改写**的区块种类（比校验面小一圈）。
+ * 生成通道可以**提议改写**的区块种类（比校验面小一圈）。
  *
- * `skills` 刻意不在内：技能行不是"描述性文字"，而让它进生成腿等于开一条最贵的虚构通道——
+ * `skills` 刻意不在内：技能行不是"描述性文字"，而让它进生成通道等于开一条最贵的虚构通道——
  * 模型往技能行里加一个库里没有的「Rust」，具名回查（只认机构后缀形态）与数值守恒都拦不住。
  * 技能在 4.2 里本来就是一条一个 id 的独立实体，要改该走知识库的实体编辑，用户当面确认。
  * 联系资料（`profile`）不是区块字段，天然不在面上。
@@ -206,9 +206,9 @@ export interface GenerationField {
  * 两个调用方共用：本文件的数值 / 具名两条判据（`verifyGeneration`），以及 `resume.generate` 拼提示词与
  * 采纳改写时的目标面。**必须是同一个函数**——校验遍历的面比递给模型的面小，就等于留了一个
  * "模型可以改、校验器不看"的口子（4.5-07 的强保证会在那一刻变成假话）。
- * @param document 待遍历的文档（基线或候选各调一次，遍历口径必须一致，否则两条腿比的不是同一段文字）
+ * @param document 待遍历的文档（基线或候选各调一次，遍历口径必须一致，否则两条通道比的不是同一段文字）
  * @param editableKeys 可改写键白名单，省略时用 `GENERATION_EDITABLE_KEYS`
- * @param sectionKinds 只收这些区块种类；省略时**收全部区块**（校验面要比提议面广：技能行不许生成腿改，
+ * @param sectionKinds 只收这些区块种类；省略时**收全部区块**（校验面要比提议面广：技能行不许生成通道改，
  *        但万一被改了仍要按数值与具名两条判据检一遍，不许出现"改了没人看"的位置）
  * @returns 位置与文本的列表，顺序为区块 → 条目 → 字段（进提示词的编号因此稳定）
  */
@@ -231,7 +231,7 @@ export function generationEditableFields(
 }
 
 /**
- * 生成腿这一趟**被允许提议改写**的位置（`generationEditableFields` 的子集，理由见
+ * 生成通道这一趟**被允许提议改写**的位置（`generationEditableFields` 的子集，理由见
  * `GENERATION_TARGET_SECTION_KINDS` 与 `GENERATION_EDITABLE_KEYS` 两处注释）。
  *
  * 服务层拿它做两件事：拼提示词里的"待改写清单"，以及**只采纳落在这份清单里的模型回答**——
@@ -265,7 +265,7 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
   for (const field of generationEditableFields(input.proposed, editableKeys)) {
     const location = `${field.sectionId}#${field.entryId}#${field.fieldKey}`;
     const originalText = baselineByKey.get(location);
-    // 基线里根本没有这一段（候选新增了条目/字段）：由结构面把关（模型腿没有新增通道），这里不重复判。
+    // 基线里根本没有这一段（候选新增了条目/字段）：由结构面把关（模型通道没有新增通道），这里不重复判。
     if (originalText === undefined) continue;
     if (originalText === field.text) continue;
     const { missing, added } = diffNumberMultiset(originalText, field.text);

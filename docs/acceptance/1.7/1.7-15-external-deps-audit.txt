@@ -30,4 +30,4 @@ ASAR_ROOT=dist/win-unpacked/resources/app.asar 用 packages/main 的 electron.ex
 -- staging 位置（与装机同解析路径）的 PDF 抽取实测 --
 把 tmp 探针 bundle 成 build/app/probe-41c.cjs（同样的 external 四项）后用 node 运行：
 {"status":"ok","format":"pdf","sections":["summary","experience","education"],"email":"j***@example.com"}
-=> 依赖腿在 staging/装机布局下可用（此前内联形态报 Cannot find module 'pdf.worker.mjs'）。
+=> 依赖通道在 staging/装机布局下可用（此前内联形态报 Cannot find module 'pdf.worker.mjs'）。

@@ -1,6 +1,6 @@
 /**
  * `resume.parse` service（spec 4.1-06 / 4.1-07 / 4.1-09 / 4.1-10）：把「一份简历文件」变成
- * 已入库的 P3.1 文档 + 待确认清单，是 4.1 三条输入腿在桌面端的唯一落点。
+ * 已入库的 P3.1 文档 + 待确认清单，是 4.1 三条输入通道在桌面端的唯一落点。
  *
  * 分工刻意窄：判定与抽取全在 `source.ts` / `sections.ts`（纯函数，离线可断言），这一层只做
  * 只有服务才该做的四件事——按上限读用户给的路径、在把字节交给 pdf.js **之前**算来源哈希
@@ -89,7 +89,7 @@ export const resumeParseSchema = z.strictObject({
 export type ResumeParseConfig = z.output<typeof resumeParseSchema>;
 
 /**
- * `resume.parse.fromFile` 的工具入参（spec 5.1-07 的建档腿）。
+ * `resume.parse.fromFile` 的工具入参（spec 5.1-07 的建档通道）。
  *
  * 只有 `filePath` 一个键，且刻意收成非空串就停：绝对路径、存在性、字节上限、格式识别全都由
  * `fromFile()` 自己判（它已经为此抛 `RESUME_IMPORT_FAILED`）。在这里再写一遍 `refine` 等于同一
@@ -248,7 +248,7 @@ export class ResumeParseService extends Service {
 
   [Service.init](): void {
     this.ensureSchema();
-    // 5.1-c 的建档腿：登记只转发 `fromFile`，判定与入库都在那一条路上（§5.9 双入口共用一条业务链，
+    // 5.1-c 的建档通道：登记只转发 `fromFile`，判定与入库都在那一条路上（§5.9 双入口共用一条业务链，
     // 工具面不构成第二条导入通道）。注册表是软取（agent 可单独摘掉），没装时这里返回 0 并如实进日志。
     const tools = registerAgentTools(this.ctx, [
       agentTool({
@@ -391,7 +391,7 @@ export class ResumeParseService extends Service {
   }
 
   /**
-   * 删掉某文档的导入出处行（spec 4.1-14 的删除腿里属于本表的那一段）。
+   * 删掉某文档的导入出处行（spec 4.1-14 的删除通道里属于本表的那一段）。
    *
    * **不在这里碰 `resume_docs` / 快照 / 素材**：那几张表各有各的持有者，跨表编排只有一个入口
    * （`kb.profile.removeDoc` 在同一条事务里逐表调用，见 plan 04 §4.7）。本方法只保证一件事——

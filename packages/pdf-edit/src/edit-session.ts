@@ -163,7 +163,7 @@ export function createPdfEditSession(initial: PdfEditDraft, options: PdfEditSess
     removeOverlay(id) {
       const current = stack.present();
       const overlays = current.overlays.filter((candidate) => candidate.id !== id);
-      // 少一条只会更合法，不会更非法，所以这一腿不必再过一遍 `planOverlays`。
+      // 少一条只会更合法，不会更非法，所以这一条不必再过一遍 `planOverlays`。
       if (overlays.length === current.overlays.length) return false;
       stack.commit({ overlays, pageOrder: current.pageOrder });
       return true;

@@ -58,7 +58,7 @@ export function jobSeed(jobId: string, capturedAt: number) {
  * 只装配、不写数据：写由各判定文件经各服务的**公开写入口**进行（手搓 SQL 会把
  * 「服务真认得这一行」判成假），所以本函数返回的 `app` 就是它们写数的口。
  * @param options.without 摘掉哪些服务的装配（服务名集合，数组或 `Set` 都收：判定时要按名字查，
- *                        调用方手里已经有一份 `Set` 就不必再摊平成数组），用来演「那条能力腿没装」的现场
+ *                        调用方手里已经有一份 `Set` 就不必再摊平成数组），用来演「那条能力通道没装」的现场
  * @param options.prefix 临时目录前缀（分开命名便于在测试输出里认出是哪条判定）
  * @returns 装配句柄；调用方负责在收尾时 `await dispose()`
  */
@@ -70,9 +70,9 @@ export async function bootFunnelAssembly(
   const ctx = new Context();
   const fibers: Fiber[] = [];
   /**
-   * 挂一个插件并把 fiber 记进收尾清单（未点名的腿直接跳过）。
+   * 挂一个插件并把 fiber 记进收尾清单（未点名的通道直接跳过）。
    * 传**函数**而不是 fiber：`ctx.plugin(...)` 在实参位置就会真的挂载，
-   * 摘腿分支于是变成「只不入清单」，否则测试会拿到一只仍然在装的会话库。
+   * 摘掉通道分支于是变成「只不入清单」，否则测试会拿到一只仍然在装的会话库。
    * @param name 服务名（与 `without` 里写的同一个字符串）
    * @param open 挂载动作（延迟到确认没被摘掉才执行）
    */

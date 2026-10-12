@@ -14,7 +14,7 @@
   "notice": "save：成功",
   "nameFieldValue": "fixture-ping-model-3"
  },
- "主进程视图里的chat腿": {
+ "主进程视图里的chat通道": {
   "leg": "chat",
   "pluginId": "llm",
   "providerId": "custom",
@@ -28,7 +28,7 @@
 }
 
 # 为什么这一份算热改的凭据：最后一行是 fixture 原样回显「这次请求里发来的 model」，
-# 拿到的是 -3 而不是进程启动时的 -2 —— 说明 llm.chat 这条腿已经被 kernel.applyConfig 重建过，
+# 拿到的是 -3 而不是进程启动时的 -2 —— 说明 llm.chat 这条通道已经被 kernel.applyConfig 重建过，
 # 新值真的进了下一次请求，而不只是写进了文件。
 # 顺带一句播报（界面上明写，见 7.1-11 的 hotApplyNote 读数）：配置改动会重建下游插件，
 # 已打开的浏览器会话视图会被关掉（AGENTS.md §9 的 2.5 实测），所以分区里那句话不是客套，是提醒。

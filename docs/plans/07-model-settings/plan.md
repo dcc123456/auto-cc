@@ -4,7 +4,7 @@
 > 立项缘由：2026-10-06 用户直接点名「模型 api key 的配置模块需要补上」，并追加两条口径：
 > **① 模型要由用户自己配置；② 必须支持所有 OpenAI 协议的模型提供商（DeepSeek / 火山引擎 / OpenAI 等）**。
 > 计划树里原先没有一条子计划负责这件事（见 §2 缺口清单），因此单开 P7 并在
-> `docs/00-master-plan.md` §4 登记。本计划**只补配置面**，不接 agent 真模型腿（那是 5.x 的射程）。
+> `docs/00-master-plan.md` §4 登记。本计划**只补配置面**，不接 agent 真模型通道（那是 5.x 的射程）。
 
 ---
 
@@ -54,7 +54,7 @@
   ③ 新建 SQLite 迁移存 key；④ 继续只走环境变量。
 - **否决 ④**：这正是缺口本身——命令行赋值只对那个进程有效，装机用户不会 export，验收记录里
   `AUTO_CC_LLM_API_KEY` 长期未设置（`docs/acceptance/4.4/4.4-02-model-leg-fallback.txt:56,140`），
-  模型腿因此一直走模板回落。
+  模型通道因此一直走模板回落。
 - **否决 ③**：key 进 WAL 数据库意味着日志、备份、失败证据三处都要重新脱敏；且加表必须另起迁移号段
   （§9 实测 5.3-a），30 已预留给 3.6，为一个文件级别的事实占一支迁移不值。
 - **否决「只用 ②」**：AGENTS.md §8.6 的措辞是「系统安全存储**或**本地配置文件」，两条都合法，但 macOS/Windows
@@ -168,7 +168,7 @@
 
 **用户原话的三件事，按顺序就是界面的三段**：① 先添加模型提供商（可多个）；② 添加成功后**自动获取**该提供商的模型列表，
 并把自己需要的**勾进入库**；③ 之后从这份已入库的清单里分别绑定 **chat 模型**与 **embedding 模型**。
-7.1 只做到了"两条腿各填一份扁平配置 + 一家一个预设模型名"，做不到 ①② —— 它的数据形状装不下"任意多提供商 × 任意多模型"。
+7.1 只做到了"两条通道各填一份扁平配置 + 一家一个预设模型名"，做不到 ①② —— 它的数据形状装不下"任意多提供商 × 任意多模型"。
 
 ### 7.1 参考实现的一手证据（browser-copilot，本机现读，路径 + 行号）
 
@@ -229,7 +229,7 @@ CREATE TABLE llm_models (
 ### 7.4 服务形状：扩展现有入口，不新开平行模块（§2.3 / §2.5）
 
 硬约束（现读）：`scripts/check-llm-single-entry.ts:25-27` 写明 **`llm.settings` 一个字节都不发，import `http.js` 即红**。
-所以"拉模型列表"不许新长第三条 HTTP 腿，只能经 `llm.chat` 那唯一客户端：
+所以"拉模型列表"不许新长第三条 HTTP 通道，只能经 `llm.chat` 那唯一客户端：
 
 - `llm.chat` 内部把请求收成"显式目标"一种形状：现有绑定态（读自己的配置格）与新的探测态
   （`listModels(target)` / `complete(target)`，`target = { baseUrl, secretPath, timeoutMs }`）共用同一个客户端与同一条
@@ -238,7 +238,7 @@ CREATE TABLE llm_models (
   `saveProvider(...)`、`deleteProvider(id)`、`addModels(id, names[])`、`removeModel(id, name)`、
   `fetchModels(id)`（→ 转调 `llm.chat.listModels`）、`bindRole({ leg, providerId, model })`、`checkProvider(id)`（→ 转调 `llm.chat.complete`）。
 - **旧的 `apply()` 删除**，不是一个新入口 + 一个旧入口并存（§2.5）：界面的保存只剩 `saveProvider` / `addModels` / `bindRole` 三个动作；
-  yml/env 那条兜底从此只是配置层本身，不再是 `llm.settings` 的方法。7.1-d 那块面板的"保存这一腿"按钮随之换成角色绑定。
+  yml/env 那条兜底从此只是配置层本身，不再是 `llm.settings` 的方法。7.1-d 那块面板的"保存这一条"按钮随之换成角色绑定。
 - **解析顺序**（chat 与 embed 各算一遍）：
   `providerId` 有绑定 → 向池问 `{baseUrl}` + 密钥路径 `llm.provider:<id>`；
   否则 → 配置格自己的 `baseUrl` + `keyEnv` 环境变量（7.1-07 那条链原样不动）；
@@ -265,7 +265,7 @@ CREATE TABLE llm_models (
   无 key 验证"某家到底提不提供 `/embeddings`"，写进目录就是拿文档转述当事实（§6.2）。界面按用户绑定走，
   绑错了就在连通测试里以可读失败回出来——那是**真读数**，不是猜测。
 - 不做提供商级自定义请求头（参考实现有 `headers`，OpenRouter 归因头是它那边的用法）、不做模型元数据
-  （价格/上下文长度）、不做 vision/接管角色（本项目没有这条腿）。
+  （价格/上下文长度）、不做 vision/接管角色（本项目没有这条通道）。
 - 不做多 key 轮询与配额分摊；一个提供商一把 key。
 
 ### 7.7 片序（一次一片，每片自带验收）
@@ -310,7 +310,7 @@ CREATE TABLE llm_models (
 > **7.2-c 收口补记（2026-10-08，spec 7.2-07 / 12 / 13 已 `[x]`，读数见 `7.2-04-05-07-12-client-readings.txt`）**：
 >
 > **一条改判**：这一行里的"删除旧 `apply()`"**挪到 7.2-d**（表格下一行已接手）。原因是现读而不是偏好——
-> `packages/renderer/src/ModelSettingsPanel.tsx` 的「保存这一腿」走的是 `llm.settings.apply`，而进程契约（`shared/src/bridge.ts`）
+> `packages/renderer/src/ModelSettingsPanel.tsx` 的「保存这一条」走的是 `llm.settings.apply`，而进程契约（`shared/src/bridge.ts`）
 > 与界面三段都在 7.2-d 才换；在 7.2-c 删掉它，主干就会留下一段"点了没反应"的界面回归，
 > 而那条回归既不属于本片要验的东西，也不会在本片里被活体取到。spec 7.2-15（反向验证"只剩一个入口"）因此仍 `[ ]`。
 >
@@ -389,4 +389,4 @@ CREATE TABLE llm_models (
 | 换 embedding 模型后旧向量与新查询不同源                                              | 4.3-d 已按 `model` 过滤（`kb_vectors.model`），本片只多一个"角色可以改绑"的入口，不改那条失效判据      |
 | 删提供商留下孤儿（密钥、清单、仍在引用它的角色绑定）                                 | 删除是一条事务：`llm_models` 连带清（外键 CASCADE）+ `clearKey` + 角色绑定回落到"未绑定"并播报缺哪一格 |
 | `llm` 在 `cordis.yml` 里排 `store` 之后才拿得到连接（§9 实测 5.1-c：顺序即挂载顺序） | 现读 `cordis.yml:21` 的 store 已在 `:35` 的 llm 之前；本片不动顺序，若动则同片补一条顺序机检           |
-| 一次绑定改两格 → 下游插件重建两次（§9 实测 2.5）                                     | `bindRole` 一次 `applyConfig` 只写受影响的那条腿，界面把两腿合并成一次保存动作，保存后只播报一句       |
+| 一次绑定改两格 → 下游插件重建两次（§9 实测 2.5）                                     | `bindRole` 一次 `applyConfig` 只写受影响的那条通道，界面把两条合并成一次保存动作，保存后只播报一句     |

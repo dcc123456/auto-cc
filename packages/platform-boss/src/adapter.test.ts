@@ -50,7 +50,7 @@ import {
 const pack = loadBossKnowledgePack({ pack: 'fixture' });
 /**
  * 上线知识包（真 BOSS 的声明）：会话列表那一双定位只在真包里登记（仿站页没有那一屏，它靠
- * `chat.targetParam` 直接拼地址），所以「按行选中目标」那一组用例与投递的会话那一腿都取它，
+ * `chat.targetParam` 直接拼地址），所以「按行选中目标」那一组用例与投递的会话那一条都取它，
  * 而两只手始终是 `createFakePage` / `createFakeAct`——读一份 JSON 声明不是访问真实平台（AGENTS.md §7.2）。
  */
 const realPack = loadBossKnowledgePack({ pack: 'real' });
@@ -570,7 +570,7 @@ describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话�
 
 describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07）', () => {
   /**
-   * 一份「投递段来自仿站、会话列表那一双定位来自上线包」的组合知识包（8.5-D 的会话那一腿用它）。
+   * 一份「投递段来自仿站、会话列表那一双定位来自上线包」的组合知识包（8.5-D 的会话那一条用它）。
    *
    * 为什么要拼：真包的投递段还没到货（8.5-C 缺的就是那一次在场读数），而这一组要演的是
    * **按行选中的那一发在页面上怎么走**（先选中 → 再注文件 → 再点确认），不是真站点长什么样。
@@ -648,7 +648,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(act.uploaded).toHaveLength(1);
   });
 
-  it('缺判据时页面那句话写着「已下架」也不抛 DELIVER_TARGET_OFFLINE：没有凭据就不猜（裁定㉒ 的负腿）', async () => {
+  it('缺判据时页面那句话写着「已下架」也不抛 DELIVER_TARGET_OFFLINE：没有凭据就不猜（裁定㉒ 的反向证据）', async () => {
     // 这一条钉的是"缺 offlinePattern 时代码自己编一句判据"这条路：文案是站点知识，
     // 拿仿站那句「岗位已下架」去真页面上撞，撞中了就是拿假凭据拦下一次真投递。
     const noOffline: KnowledgePack = { ...pack, deliver: { ...pack.deliver!, offlinePattern: undefined } };
@@ -760,7 +760,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
   });
 
   it('仿站包没声明按行选中那一双定位 → 会话坐标那一路以 KNOWLEDGE_PACK_INVALID 停在门口', async () => {
-    // 与打招呼的同一条负腿（上方「两种坐标都没给」那组）：仿站页靠 `targetParam` 直接拼地址，
+    // 与打招呼的同一条反向证据（上方「两种坐标都没给」那组）：仿站页靠 `targetParam` 直接拼地址，
     // 它没有会话列表那一屏。拿会话坐标去敲它，如果静默退化成"打开岗位地址栏"或"读当前选中的那条"，
     // 递出去的就不再是人点的那一格（裁定⑲）。
     const { adapter, page, act } = withScript(

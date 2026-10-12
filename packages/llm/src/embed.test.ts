@@ -67,7 +67,7 @@ describe('llm.embed 的可用性判定（spec 4.3-08：降级必须是可测的�
       endpoint: ENDPOINT,
       dimensions: null,
       keySource: 'env',
-      // spec 7.2-12 的第二条读数：没有绑定，端点来自这条腿自己的配置格。
+      // spec 7.2-12 的第二条读数：没有绑定，端点来自这条通道自己的配置格。
       origin: 'config',
       providerId: null,
     });

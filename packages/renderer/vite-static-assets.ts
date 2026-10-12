@@ -1,5 +1,5 @@
 /**
- * `packages/renderer/vite.config.ts` 的静态资源腿：把「必须与 `index.html` 同在一棵相对路径树下」的两类
+ * `packages/renderer/vite.config.ts` 的静态资源通道：把「必须与 `index.html` 同在一棵相对路径树下」的两类
  * 随包资源接进渲染层的 URL 空间——pdf.js 的 worker 与四类运行期资源（spec 3.5-12，plan §10.8 的那条未决项）、
  * 简历随包内嵌字体（spec 6.6-04）。
  *
@@ -10,9 +10,9 @@
  * ——`document.baseURI` 在 dev 是 `http://127.0.0.1:5173/`、在装机版是 `file://…/renderer/index.html`，
  * 两边都指向「渲染层根目录」，于是同一条相对路径在两种运行态里各自落到正确的位置（§2.5 一份事实）。
  *
- * 字体腿用的是**同一条性质**：预览 HTML 里的 `@font-face` src 是相对路径（`PREVIEW_FONT_BASE`，
+ * 字体通道用的是**同一条性质**：预览 HTML 里的 `@font-face` src 是相对路径（`PREVIEW_FONT_BASE`，
  * 见 `packages/shared/src/print.ts` 那条注释里记的 `NetworkError` 实测），而 `resources/fonts/**` 既不在
- * 渲染层包里、也不会被 vite 自己看见——不接这一条腿，屏上纸面永远掉回系统字体，只有导出的 PDF 才是内嵌字体。
+ * 渲染层包里、也不会被 vite 自己看见——不接这一条通道，屏上纸面永远掉回系统字体，只有导出的 PDF 才是内嵌字体。
  */
 import { cpSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -123,7 +123,7 @@ function serveAssetTree(tree: AssetTree): Plugin {
 }
 
 /**
- * pdf.js 资源腿（worker + cmaps/standard_fonts/wasm）。
+ * pdf.js 资源通道（worker + cmaps/standard_fonts/wasm）。
  * @returns vite 插件
  */
 export function pdfjsAssets(): Plugin {
@@ -131,7 +131,7 @@ export function pdfjsAssets(): Plugin {
 }
 
 /**
- * 简历随包内嵌字体腿（`resources/fonts/*.woff2` → 渲染层根下的 `fonts/`）。
+ * 简历随包内嵌字体通道（`resources/fonts/*.woff2` → 渲染层根下的 `fonts/`）。
  * @returns vite 插件
  */
 export function resumeFonts(): Plugin {

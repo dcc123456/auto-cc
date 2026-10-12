@@ -2,7 +2,7 @@
  * `@auto-cc/plugin-resume-kb` 对外出口（AGENTS.md §4.2：`src/index.ts` 是唯一门面）。
  *
  * P4 的第一块地基：**简历文本 → P3.1 文档模型**的纯解析层（spec 4.1-02 / 4.1-03 / 4.1-04 / 4.1-05 / 4.1-09），
- * 以及它的两条依赖腿：**字节 → 文本**（spec 4.1-01，`pdfjs-dist` Apache-2.0 + `mammoth` BSD-2-Clause，
+ * 以及它的两条依赖通道：**字节 → 文本**（spec 4.1-01，`pdfjs-dist` Apache-2.0 + `mammoth` BSD-2-Clause，
  * 许可与实测口径见 `docs/plans/04-resume-kb/plan.md` §1.1）。
  * `source.ts` / `sections.ts` / `period.ts` **不认识 cordis、也不打开自己的 SQLite 连接**——解析规则要能离线、
  * 逐字段断言；`parse-service.ts` 是本包唯一接触装配与入库（4.1-06 / 4.1-07 / 4.1-09 / 4.1-10）的文件，
@@ -62,7 +62,7 @@ export {
 } from './profile-service.js';
 // 4.4-a 的拆解入口（spec 4.4-01）：`kb.gap` 与它的配置形状要进 `packages/main` 的注册表与 `cordis.yml`，
 // 所以服务与 schema 对外；`extractRequirementsLexically` 不外露——绕过服务自己拆就是开第二条拆解通道（§2.5）。
-// 4.4-b 的模型腿同理（`requirements-model.ts` 的三个函数只在包内被服务调用），
+// 4.4-b 的模型通道同理（`requirements-model.ts` 的三个函数只在包内被服务调用），
 // 但 `GapModelStatus` 跟着视图对外：界面与 agent 要按五种结局分别播报（spec 4.4-02 的 V 类）。
 // 4.4-c 的 `GapReportView` 是 `kb.gap.report()` 的返回体，界面（4.4-d）与 agent 工具面读的是同一个对象，
 // 所以它嵌套的三态行 / 亮点 / 建议形状必须一起对外；`compareRequirements` 本身不外露——
@@ -87,7 +87,7 @@ export {
   type GapSuggestionKey,
 } from './requirements-compare.js';
 // 4.5-b 的生成轨入口（spec 4.5-01 / 10 / 12）。同 4.4 的规矩：对外只给**服务与读数形状**，
-// 三条确定性判据（`fact-check.ts`）与模型腿的读写函数（`generate-model.ts`）不外露——
+// 三条确定性判据（`fact-check.ts`）与模型通道的读写函数（`generate-model.ts`）不外露——
 // 绕过 `resume.generate` 自己校验或自己拼提示词就是开第二条生成通道（§2.5），
 // 而那条通道上的产物不会落 `resume_generations` 那一行记录（4.5-10 的复盘面会缺一半）。
 // `GENERATION_OUTCOMES` 与迁移号段跟着对外：界面要按三种结局分支，`packages/main` 的注册表要写号段。

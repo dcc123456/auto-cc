@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { isIdentityOrder, planPageOrder } from './page-ops.js';
 
-/** 源档三页、产物上限十页，测试里只改这两个数就够覆盖三条拒绝腿。 */
+/** 源档三页、产物上限十页，测试里只改这两个数就够覆盖三条拒绝通道。 */
 const limits = { sourcePageCount: 3, maxPages: 10 };
 
 describe('planPageOrder：一只数组同时表达增页/删页/重排', () => {

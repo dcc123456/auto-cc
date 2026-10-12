@@ -2,7 +2,7 @@
  * `reveal-target.ts` 的判定用例（spec 6.2-12）。
  *
  * 这一口的实参来自渲染层，形状没有任何保证，所以用例全部围着"边界"与"目标在不在"两条打；
- * `showItemInFolder` 本身不在这里验（它需要 Electron 运行期，且活体那一腿在界面上跑）。
+ * `showItemInFolder` 本身不在这里验（它需要 Electron 运行期，且活体那一条在界面上跑）。
  */
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -202,7 +202,7 @@ const SEARCH_DEFAULTS = {
   vectorMinCosine: 0.35,
 };
 
-/** 装配 `llm.embed` 替身时的形状（不传即整条向量腿缺席，与真实装配里「摘掉 llm-embed」同构）。 */
+/** 装配 `llm.embed` 替身时的形状（不传即整条向量通道缺席，与真实装配里「摘掉 llm-embed」同构）。 */
 interface EmbedFixture {
   available: boolean;
   model: string | null;
@@ -212,12 +212,12 @@ interface EmbedFixture {
 /**
  * 挂起 config + log + store + resume.doc + resume.snapshot + resume.parse + kb.profile。
  *
- * 后三只排在 `kb.profile` **之前**（AGENTS.md §9 的 5.1-c：清单顺序就是挂载顺序）——4.1-14 的删除腿让
+ * 后三只排在 `kb.profile` **之前**（AGENTS.md §9 的 5.1-c：清单顺序就是挂载顺序）——4.1-14 的删除通道让
  * `kb.profile` 硬注入了它们，挂晚了本服务直接 PENDING，整包用例以「服务取不到」收场。
  * @param dir 复用哪个目录
  * @param evidence 反查阈值（4.2-03）；默认与 `cordis.yml` 一致，用于验证「阈值来自配置」那两条用例
  * @param search 检索参数（4.3-03），默认与 `cordis.yml` 一致；传部分键即只覆盖那几项
- * @param embed 向量服务替身（4.3-07 / 08）；不传就不挂 `llm.embed`，向量腿整条缺席——
+ * @param embed 向量服务替身（4.3-07 / 08）；不传就不挂 `llm.embed`，向量通道整条缺席——
  *              那正是「摘掉插件」的真实装配形态，也是 `unavailable` 分支的入口
  * @returns 实体服务、文档存储、快照存储、导入服务与裸连接
  */
@@ -662,7 +662,7 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
  * @param docId 存进 `resume_docs` 时用的文档 id
  * @param evidence 反查阈值；省略时用装配默认值
  * @param search 检索参数；省略时用装配默认值
- * @param embed 向量服务替身；省略即整条向量腿缺席（4.3-08 的 `unavailable` 分支）
+ * @param embed 向量服务替身；省略即整条向量通道缺席（4.3-08 的 `unavailable` 分支）
  * @returns 装配好的服务与裸连接
  */
 async function syncedKb(
@@ -948,7 +948,7 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
   async function importedPairWithIndex(dir: string) {
     const booted = await boot(dir, undefined, undefined, {
       available: true,
-      // 替身模型名与真端点同形：删除腿不认识具体模型，只认「切片没了向量行也必须没」。
+      // 替身模型名与真端点同形：删除通道不认识具体模型，只认「切片没了向量行也必须没」。
       model: 'fixture-remove-model',
       table: { 订单: [10, 1], 重构: [0, 10], 发布流水线: [10, 0], 技能: [1, 10] },
     });
@@ -983,7 +983,7 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     const before = docFootprint(db, docIdA);
     expect(before).toMatchObject({ document: 1, snapshots: 2, imports: 1 });
     expect(before.entities).toBeGreaterThan(0);
-    // 区块级切片（个人简介 / 教育 / 校园）走的是另一条派生腿，所以切片一定比实体多。
+    // 区块级切片（个人简介 / 教育 / 校园）走的是另一条派生通道，所以切片一定比实体多。
     expect(before.chunks).toBeGreaterThan(before.entities);
     expect(vectors.written).toBeGreaterThan(0);
 
@@ -1007,7 +1007,7 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     expect(kb.get(manualId)).toMatchObject({ sourceDocId: null, parentId: null });
     // 全库少的正是甲那一格：手工实体（`source_doc_id IS NULL`）不在删除集合里。
     expect(entityCount(db)).toBe(totalEntities - beforeA.entities);
-    // 归属收敛走的是 4.2-04 那条老腿：全库不留悬空引用。
+    // 归属收敛走的是 4.2-04 那条老通道：全库不留悬空引用。
     expect(orphanParentCount(db)).toBe(0);
   });
 
@@ -1054,7 +1054,7 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     const seeded = await importedPairWithIndex(dir);
     const { kb, db, docIdA, manualId } = seeded;
     const before = docFootprint(db, docIdA);
-    const boom = new Error('快照腿炸了');
+    const boom = new Error('快照通道炸了');
     // 替身打的是**事务内部**的中断点（真实故障是约束冲突 / 磁盘写不进），而不是拆表：
     // 这条用例判的就是「删到一半抛错会不会留下半删」，所以六张表必须都还在才能逐表比。
     seeded.snapshot.removeAllForDoc = () => {
@@ -1632,7 +1632,7 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     expect(await kb.search('')).toMatchObject({ status: 'no_query_tokens', vectorStatus: 'not_attempted' });
   });
 
-  it('参数来自配置：topK、minScore、两腿权重各自改动都会改变结果（4.3-03 的无魔法数判据）', async () => {
+  it('参数来自配置：topK、minScore、两条权重各自改动都会改变结果（4.3-03 的无魔法数判据）', async () => {
     const { kb: baselineKb } = await searchableKb();
     const baseline = await baselineKb.search('订单');
     expect(baseline.hits.length).toBeGreaterThan(1);
@@ -1646,8 +1646,8 @@ describe('本地检索：倒排召回 + 子串召回 + 合并排序（spec 4.3-0
     const strict = await strictKb.search('订单');
     expect(strict.hits.length).toBeLessThan(baseline.hits.length);
 
-    // 只留覆盖腿与只留 BM25 腿是两种取向，头部次序应当能被其中一条腿翻掉；
-    // 若两腿权重根本不进算式，这三条断言会给出完全相同的结果。
+    // 只留覆盖通道与只留 BM25 通道是两种取向，头部次序应当能被其中一条通道翻掉；
+    // 若两条权重根本不进算式，这三条断言会给出完全相同的结果。
     const { kb: bm25Kb } = await searchableKb({ bm25Weight: 1, lexicalWeight: 0 });
     const { kb: lexKb } = await searchableKb({ bm25Weight: 0, lexicalWeight: 1 });
     const bm25Only = await bm25Kb.search('订单服务重构');
@@ -1758,7 +1758,7 @@ describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
    * 词面与语义**故意给出不同名次**的一张表。
    *
    * 「发布流水线」只在个人简介那段出现，「重构」只在工作经历那条出现，而查询「订单」两边都含：
-   * 于是词面腿把「主导订单服务重构」排在前，语义腿把简介那条排在最前（余弦 0.995 vs 0.0995）。
+   * 于是词面通道把「主导订单服务重构」排在前，语义通道把简介那条排在最前（余弦 0.995 vs 0.0995）。
    * 片段按声明顺序匹配，所以特异片段必须写在通用片段前面，否则两边都落到 `[10,1]` 上、名次就不分了。
    */
   const SEMANTIC_TABLE: Record<string, number[]> = {
@@ -1918,7 +1918,7 @@ describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
     expect(vectorCount(db)).toBeLessThan(before.length);
   });
 
-  it('检索四态之 `failed`：查询侧编码失败就退回纯词面，命中与没有向量腿时逐字段相等', async () => {
+  it('检索四态之 `failed`：查询侧编码失败就退回纯词面，命中与没有向量通道时逐字段相等', async () => {
     const dir = tempDir();
     const seeded = await embedKb(dir, 'resume-rrf-failed', SEMANTIC_TABLE);
     await seeded.kb.syncVectors(NOW_MS);
@@ -1946,7 +1946,7 @@ describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
     expect(fused.hits[0]?.text).toContain('发布流水线');
     expect(fused.hits[0]?.reasons).toContain('vector');
     expect(fused.hits[0]?.vectorScore).toBeGreaterThan(0.9);
-    // 词面腿的第一名（那条「主导订单服务重构」）在融合后掉到了后面——这就是「融合优于纯 BM25」的机制证据
+    // 词面通道的第一名（那条「主导订单服务重构」）在融合后掉到了后面——这就是「融合优于纯 BM25」的机制证据
     const lexicalFirst = lexical.hits[0];
     if (lexicalFirst === undefined) throw new Error('词面基线没有命中');
     expect(lexicalFirst.text).not.toContain('发布流水线');
@@ -1960,7 +1960,7 @@ describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
     }
   });
 
-  it('只被语义捞到的切片也能进结果：查询「比赛」与库内「竞赛」没有任何共用 token，词面腿 0 命中', async () => {
+  it('只被语义捞到的切片也能进结果：查询「比赛」与库内「竞赛」没有任何共用 token，词面通道 0 命中', async () => {
     const dir = tempDir();
     const seeded = await embedKb(dir, 'resume-rrf-semantic', { 竞赛: [1, 0], 比赛: [1, 0] });
     await seeded.kb.syncVectors(NOW_MS);
@@ -1973,7 +1973,7 @@ describe('向量补建与 RRF 融合（4.3-d / spec 4.3-07 / 08）', () => {
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits.every((hit) => hit.text.includes('竞赛'))).toBe(true);
     expect(result.hits.every((hit) => hit.reasons.includes('vector'))).toBe(true);
-    // 词面分为 0 也照样进结果：`minScore` 是词面腿的门槛，不许拿来挡语义命中（plan §4.3-d 的落地更正）
+    // 词面分为 0 也照样进结果：`minScore` 是词面通道的门槛，不许拿来挡语义命中（plan §4.3-d 的落地更正）
     expect(result.hits.every((hit) => hit.score === 0)).toBe(true);
   });
 
@@ -2129,7 +2129,7 @@ describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec
 
     // —— 正向半边：检索计数行确实存在，用例不是靠「日志压根没写」通过的 ——
     expect(logText).toMatch(
-      /\[kb-profile\] 检索 \d+ 个 token \/ \d+ 条候选 → \d+ 条命中（\w+ · 向量腿 \w+ \/ 语义名单 \d+ 条）/,
+      /\[kb-profile\] 检索 \d+ 个 token \/ \d+ 条候选 → \d+ 条命中（\w+ · 向量通道 \w+ \/ 语义名单 \d+ 条）/,
     );
     expect(logText).toContain('同步 resume-log：派生');
 
@@ -2137,7 +2137,7 @@ describe('日志脱敏：检索与派生日志不落正文与 PII（4.3-e / spec
     expect(leaks).toEqual([]);
   });
 
-  it('向量腿失败与退库路径也不带切片正文（warn 分支同样只记计数与原因）', async () => {
+  it('向量通道失败与退库路径也不带切片正文（warn 分支同样只记计数与原因）', async () => {
     const dir = tempDir();
     const booted = await syncedKb(dir, RESUME_MD, 'resume-log-vector', undefined, undefined, {
       available: true,

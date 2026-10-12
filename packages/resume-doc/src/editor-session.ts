@@ -157,7 +157,7 @@ export function createResumeEditorSession(
     moveSection(sectionId, toIndex) {
       const current = stack.present();
       const moved = planSectionMove(current.sections, sectionId, toIndex);
-      // 拒绝腿原样转发：判据只有一份（`editor-ops`），会话不造第二种失败形状。
+      // 拒绝通道原样转发：判据只有一份（`editor-ops`），会话不造第二种失败形状。
       if (!moved.ok) return moved;
       return apply({ ...current, sections: moved.value });
     },

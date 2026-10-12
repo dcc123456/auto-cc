@@ -703,7 +703,7 @@ export function ResumeDesk() {
                   所以下拉在这一格退场——`data-testid="resume-doc"` 与 `data-action="resume-doc"` 两条取证通道
                   跟着换形态、保留在承载它们的那只容器上（历史读数不重写，§4.5），行内选文档那颗键另起
                   `resume-doc-pick`，于是这一格仍然只有一处"可选文档的入口"。
-                  生成腿那一格的「定制哪一份简历」下拉**不动**（它选的是目标，不是管文档）。
+                  生成通道那一格的「定制哪一份简历」下拉**不动**（它选的是目标，不是管文档）。
                   当前那一份用 `BLOCK_SELECTED_CLASS` 表状态而不是涂语气色：这一格同时可能有"在读 / 在改"，
                   两块色斑叠在一行就读不出了（6.2-20 那条纪律，`src/ui/**` 之外不许写 `bg-*-wash`）。 */}
                 <p className="text-[11px] text-slate-400">{t('resume.docLabel')}</p>
@@ -810,7 +810,7 @@ export function ResumeDesk() {
                 )}
 
                 {/* 删不动的那一句必须说得出**为什么**（主进程的错误码原样带上来），而且这一刻列表里那一行还在——
-                库里没动，`read()` 回来的读数当然还在，这不是界面缓存（spec 6.4-20 的第 ④ 条腿）。 */}
+                库里没动，`read()` 回来的读数当然还在，这不是界面缓存（spec 6.4-20 的第 ④ 条）。 */}
                 {deleteError && (
                   <Banner tone="seal" markers={{ testid: 'resume-delete-error' }} className="break-all">
                     {t('resume.deleteError', { code: deleteError.code, message: deleteError.message })}

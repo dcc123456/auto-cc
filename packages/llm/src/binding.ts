@@ -1,8 +1,8 @@
 /**
- * 一条模型腿的**解析顺序**（spec 7.2-12，plan §7.4）：角色绑定 > 配置格自己的端点（yml/env 兜底）> 未配置。
+ * 一条模型通道的**解析顺序**（spec 7.2-12，plan §7.4）：角色绑定 > 配置格自己的端点（yml/env 兜底）> 未配置。
  *
  * 抽成一支纯函数的理由与 `key.ts` 同一条：chat 与 embed 对"这次到底打哪儿、用哪把 key"的判法完全同构，
- * 差别只有配置格的名字（AGENTS.md §2.2）。留在两个服务里各写一遍，就会长出"绑定了但只有聊天腿听绑定"这种缺陷。
+ * 差别只有配置格的名字（AGENTS.md §2.2）。留在两个服务里各写一遍，就会长出"绑定了但只有聊天通道听绑定"这种缺陷。
  *
  * 这里**不存第二份事实**（§2.7）：池里那一行的 `baseUrl` 是当场问 `store` 拿的，所以用户改了某个实例的地址，
  * 下一次请求立刻跟着变，不需要任何一次"重新绑定"。`store` 是软取的——它没挂载时按"绑定读不到"回落，
@@ -12,15 +12,15 @@ import { maybeService, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
 import { providerRowOf, providerSecretPath } from './provider-pool.js';
 
-/** 哪条模型腿：chat 是话术与规划，embed 是知识库的向量增强。 */
+/** 哪条模型通道：chat 是话术与规划，embed 是知识库的向量增强。 */
 export type LegName = 'chat' | 'embed';
 
-/** 腿 → 密钥库里"没有绑定时"的那一格路径（与 `llm.settings` 的 7.1 读法同词）。 */
+/** 通道 → 密钥库里"没有绑定时"的那一格路径（与 `llm.settings` 的 7.1 读法同词）。 */
 const LEG_SECRET: Record<LegName, string> = { chat: 'llm.chat', embed: 'llm.embed' };
 
-/** 一条腿在自己配置格里的读法（`llm` / `llm-embed` 那两格的子集）。 */
+/** 一条通道在自己配置格里的读法（`llm` / `llm-embed` 那两格的子集）。 */
 export interface LegConfig {
-  /** 角色绑定指向的池实例 id；`null` = 没绑定，走这条腿自己的端点。 */
+  /** 角色绑定指向的池实例 id；`null` = 没绑定，走这条通道自己的端点。 */
   providerId: string | null;
   /** 配置格（yml / 持久层 / env 合并后）自己的端点前缀。 */
   baseUrl: string | null;
@@ -31,26 +31,26 @@ export interface LegConfig {
 }
 
 /**
- * 解析结果：这一腿实际用的端点、以及该问密钥库哪一格。
- * `model` 可能是 null —— "缺模型名"永远是这条腿自己的缺项，不由池替它决定。
+ * 解析结果：这一条实际用的端点、以及该问密钥库哪一格。
+ * `model` 可能是 null —— "缺模型名"永远是这条通道自己的缺项，不由池替它决定。
  */
 export interface ResolvedLeg {
   baseUrl: string | null;
   model: string | null;
-  /** 读 key 时问的路径：绑定态是 `llm.provider:<实例 id>`，兜底态是腿自己的服务名。 */
+  /** 读 key 时问的路径：绑定态是 `llm.provider:<实例 id>`，兜底态是通道自己的服务名。 */
   secretPath: string;
   keyEnv: string;
-  /** 端点是谁给的：池实例 / 配置格自己 / 两边都没有。界面上"这一腿在用哪家"就读这一个值。 */
+  /** 端点是谁给的：池实例 / 配置格自己 / 两边都没有。界面上"这一条在用哪家"就读这一个值。 */
   origin: 'pool' | 'config' | 'none';
   /** 生效的绑定（读不到那一行时为 null，即回落）。 */
   providerId: string | null;
 }
 
 /**
- * 按「绑定 > 兜底 > 未配置」解析一条腿。
+ * 按「绑定 > 兜底 > 未配置」解析一条通道。
  * @param ctx 当前服务的上下文（用于按名字软取 `store`）
- * @param leg 哪条腿，决定兜底密钥路径
- * @param config 该腿配置格里的四个值
+ * @param leg 哪条通道，决定兜底密钥路径
+ * @param config 该条配置格里的四个值
  * @returns 解析结果；不抛——"没绑定且没兜底"是合法形态，由调用方的 `status()` 列进 `missing`
  */
 export function resolveLeg(ctx: Context, leg: LegName, config: LegConfig): ResolvedLeg {

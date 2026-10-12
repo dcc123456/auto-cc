@@ -33,7 +33,7 @@
 ────────────────────────────────────────
 三、真消费者活体（墨案 + 毡案）
 ────────────────────────────────────────
-腿：信任屏「读取页面快照」（`[data-action="snapshot"]` → `browser.page.snapshot`，纯读、零写入）。
+通道：信任屏「读取页面快照」（`[data-action="snapshot"]` → `browser.page.snapshot`，纯读、零写入）。
 内核视图未挂载时它回 `NO_KERNEL_SESSION`，`useBridgeAction` 把失败原因写进 `notice`，
 于是 `[data-testid="session-notice"]` 长出来——这一条正是被收进原件的那 12 处之一。
 

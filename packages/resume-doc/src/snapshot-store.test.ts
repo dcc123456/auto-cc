@@ -309,7 +309,7 @@ describe('3.7-03 任意两份快照可 diff（条目级 + 字段级）', () => {
   });
 });
 
-describe('按文档整体清除快照（spec 4.1-14 的删除腿里属于本表的那一段）', () => {
+describe('按文档整体清除快照（spec 4.1-14 的删除通道里属于本表的那一段）', () => {
   it('一次带走那份的全部快照并返回条数，另一份的一字不动', async () => {
     const { snapshots, db } = await boot();
     snapshots.record(sampleDoc({ id: 'a' }), 'classic', 'f', 1);

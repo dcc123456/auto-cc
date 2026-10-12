@@ -10,7 +10,7 @@
     pnpm --filter @auto-cc/plugin-llm test    EXIT=0   Test Files 4 passed (4) / Tests 50 passed (50)
 
 `pnpm lint` 链内的 `check-llm-single-entry.ts` 仍绿（扫描 440 个文件，`llm.chat` / `llm.embed` 各自声明者唯一，
-`llm.settings` 未碰 `http.js`）——本片只动目录数据与 `apply()` 的入库前置归一，没有新开第三条 HTTP 腿（spec 7.2-13 的前半边）。
+`llm.settings` 未碰 `http.js`）——本片只动目录数据与 `apply()` 的入库前置归一，没有新开第三条 HTTP 通道（spec 7.2-13 的前半边）。
 
 ## 2. 7.2-01：19 家逐条比对（一手来源 = `browser-copilot/src/lib/providers.ts:71-271`，本机现读）
 
@@ -39,7 +39,7 @@
 入库的是归一值：`apply()` 在 `config.setPersisted` 与 `kernel.applyConfig` 之前先 `normalizeBaseUrl`，
 单测「误粘整条动作路径时入库的是归一后的前缀」断言持久层与回显读数都是前缀（留着动作路径会被 `joinEndpoint` 再拼一次，成双段路径）。
 
-端点归属：`endpointOf` 认地址不认腿——预设自身地址命中时回 `endpoints[0].id ?? preset.id`
+端点归属：`endpointOf` 认地址不认通道——预设自身地址命中时回 `endpoints[0].id ?? preset.id`
 （方舟回 `ark-standard`、DeepSeek 回 `deepseek`，界面上不许多出一格"标准"），
 变体命中回该变体的 id，认不出回 undefined（读数改口 `custom`）。
 单测对全目录每一条变体断言"这一家认得出自己的变体"，并断言认不出的地址与认不出的 id 都不冒充。
@@ -58,7 +58,7 @@
 
 7.2-02（实例池 CRUD）与 7.2-08（迁移 31/32）属于 7.2-b；7.2-04/05/06/07 属于 7.2-c；
 7.2-11/12 的绑定与解析顺序、删旧 `apply()` 属于 7.2-c/d；V 类（7.2-04/05/06/09/11/14/15）一律 `[ ]`，
-本片没有任何活体界面改动（`ModelSettingsPanel` 只跟着目录去掉了按腿过滤那一行）。
+本片没有任何活体界面改动（`ModelSettingsPanel` 只跟着目录去掉了按通道过滤那一行）。
 
 `docsUrl` 这一格本片只是**带过边界、界面还没用**：spec 7.2-01 要求它与来源实现逐条对得上，消费点是 7.2-d 添加提供商
 弹窗里那句"去哪拿 key"。写在这里是为了它将来出现在界面上时，能被认回本片而不是"临时补的字段"。

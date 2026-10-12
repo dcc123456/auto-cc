@@ -181,7 +181,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
     painter.setTransform(1, 0, 0, 1, 0, 0);
     for (const overlay of model.draft.overlays) {
       if (overlay.pageNumber !== page.pageNumber) continue;
-      // 两条腿共用 `colorsOfOverlay` 这一句判据：画布上这块的颜色就是产物里那块的颜色（spec 3.5-02 的所见即所得）。
+      // 两条通道共用 `colorsOfOverlay` 这一句判据：画布上这块的颜色就是产物里那块的颜色（spec 3.5-02 的所见即所得）。
       const colors = colorsOfOverlay(overlay);
       const x = overlay.rect.xRatio * canvas.width;
       const y = overlay.rect.yRatio * canvas.height;
@@ -199,7 +199,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
         painter.fillStyle = colors.inkHex;
         painter.font = `${String(sizePt * pxPerPt)}px ${overlay.fontFamilyHint ?? 'sans-serif'}`;
         painter.textBaseline = 'alphabetic';
-        // 量到了基线就照那条线画；量不到（拖框那一腿没有行可依）才按 em 盒竖向居中。
+        // 量到了基线就照那条线画；量不到（拖框那一条没有行可依）才按 em 盒竖向居中。
         const baselineY =
           overlay.baselineRatio === undefined
             ? y + boxHeight - (boxHeight - sizePt * pxPerPt) / 2
@@ -280,7 +280,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
   }, [hovered, model.editing?.line, model.rubber, writeEditTypeVars]);
 
   /**
-   * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶腿）。
+   * 纸上的手势：一次按下既可能是「点一行来改」，也可能是「拖一只覆盖区」（进阶那一条）。
    * 分辨只看**起收点的位移**（`DRAG_MIN_MANHATTAN`）：够不上就当作点，那点上有行盒便进就地改；够上了按拖出来的矩形交进会话。
    * 监听在 `pointerdown` 当场挂上，不挂在后续渲染的 effect 里（3.6 活体那条教训：
    * harness 把 down/move/up 在几毫秒里派发完，effect 等渲染提交时 `pointerup` 早就过去了）。
@@ -307,7 +307,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
       dragStartRef.current = undefined;
       if (!current || !point) return;
       // 判"拖过没拖过"只看**这两点自己的位移**，不读 `model.rubber`：那个值是 pointerdown 那一次渲染的快照，
-      // 在同一趟手势里永远是 `undefined`（活体实测：拖框那条腿从不落覆盖区，见 plan §11.5）。
+      // 在同一趟手势里永远是 `undefined`（活体实测：拖框那条通道从不落覆盖区，见 plan §11.5）。
       // 橡皮筋的显示仍然走 state，只是它不再是这条分支的判据（§2.5：一个判据一个出处）。
       const dragged = hasDragged(current, point);
       model.setRubber(undefined);
@@ -336,7 +336,7 @@ export function PdfPaperView({ model }: { model: PdfEditModel }) {
   const lineCount = model.paperPage?.lines.length ?? 0;
   /**
    * 这一页上已提交的覆盖区，底色是不是**量到的**（spec 3.5-14 的那句读数）。
-   * 判据不在此处再写一遍：取的就是 `colorsOfOverlay` 那句，界面上说的与两条腿上画的是同一件事。
+   * 判据不在此处再写一遍：取的就是 `colorsOfOverlay` 那句，界面上说的与两条通道上画的是同一件事。
    */
   const pageOverlays = model.draft.overlays.filter((overlay) => overlay.pageNumber === model.paperPage?.pageNumber);
   const sampledCount = pageOverlays.filter((overlay) => colorsOfOverlay(overlay).sampled).length;

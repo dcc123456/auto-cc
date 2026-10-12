@@ -165,7 +165,7 @@ describe('文档清单（生成轨的选文档口）', () => {
   });
 });
 
-describe('删除工作副本（spec 4.1-14 的删除腿里属于本表的那一段）', () => {
+describe('删除工作副本（spec 4.1-14 的删除通道里属于本表的那一段）', () => {
   it('真删返回 true，再删同一份返回 false 而不是抛（删除的语义是「让它不存在」）', async () => {
     const { docs } = await boot();
     docs.save(sampleDoc({ id: 'gone' }));

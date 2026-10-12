@@ -3,7 +3,7 @@
  *
  * 这里验的是「读文档 → 装配请求 → 交端口渲染 → 落盘 + 回写页数」这条编排链本身：
  * 打印能力由一个**假 `resume.print` 端口**提供（可控返回字节 / 抛错），于是能在无 Electron 的进程里
- * 把「渲染失败」「产物不是 PDF」「文档缺失/损坏」这些失败腿逐条打分——真实 `printToPDF` 走 3.3 的 V 类腿与 spike。
+ * 把「渲染失败」「产物不是 PDF」「文档缺失/损坏」这些失败那一条逐条打分——真实 `printToPDF` 走 3.3 的 V 类那一条与 spike。
  * 落盘一律打**系统临时目录**（经 config 的 userDataDir 覆盖注入，不进仓库，AGENTS.md §7.5）。
  */
 import { asApp, Context, Service, type Fiber } from '@auto-cc/core';
@@ -144,7 +144,7 @@ describe('3.3-09 导出成功回执 + 落盘 + 页数回写', () => {
   });
 });
 
-describe('3.3-11 失败腿全部收敛成 RESUME_EXPORT_FAILED', () => {
+describe('3.3-11 失败那一条全部收敛成 RESUME_EXPORT_FAILED', () => {
   it('产物不是合法 PDF → 结构化失败', async () => {
     const { docs, exporter, print } = await boot();
     docs.save(sampleDoc());

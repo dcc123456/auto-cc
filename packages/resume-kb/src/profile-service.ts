@@ -6,12 +6,12 @@
  * `kb_chunks_fts`（FTS5 虚表 + `norm_text` 列）、迁移 14 的 `kb_vectors`（向量派生索引）建出来、
  * 从 `resume_docs` 的**当前工作副本**派生实体、按稳定 id 幂等 upsert 并清掉已不存在的派生行、给出界面与后续检索（4.3）
  * 要用的读接口、把一句陈述映射回支撑它的实体（4.2-03，判定在 `evidence.ts`）、本地备份文件的读写
- * （4.2-08，格式在 `backup.ts`）、4.2-05 / 06 需要的两条装配腿（写入后发 `kb/entities-changed` 事件、
+ * （4.2-08，格式在 `backup.ts`）、4.2-05 / 06 需要的两条装配通道（写入后发 `kb/entities-changed` 事件、
  * 把读口 `list` 登记成 agent 工具——裁定三，界面与 agent 走同一个 service，不许各长一套），
  * 4.3-a 的切片收敛：**每一条实体写删都在同一事务里带上它的切片**（4.3-11 的「无孤儿索引行」），
  * 4.3-b 的检索取数：倒排召回 ∪ 子串召回 → 把语料统计与 df 交给 `search.ts` 打分（判定全在纯函数里），
  * 以及 4.3-d 的向量增强：按当前 embedding 模型补向量（`syncVectors`）与在检索里做一次 RRF 融合
- * （`fuseByRrf`）——向量服务没配就整条腿跳过，**一个 BLOB 都不写**（4.3-08）。
+ * （`fuseByRrf`）——向量服务没配就整条通道跳过，**一个 BLOB 都不写**（4.3-08）。
  * 「文本 → 实体」的判定全在 `entities.ts`，「文本 → 切片」的判定全在 `chunks.ts`，
  * 「切片 → 分数」的判定全在 `search.ts`，「向量 → 名次」的度量全在 `vectors.ts`
  * （四者都是纯函数，离线逐条断言），本文件不重复任何规则。
@@ -194,9 +194,9 @@ export const kbProfileSchema = z.strictObject({
   bm25K1: z.number().min(0).max(3).default(1.2),
   /** BM25 长度归一参数（默认 0.75，同上）。 */
   bm25B: z.number().min(0).max(1).default(0.75),
-  /** 合并分里 BM25 腿的权重。 */
+  /** 合并分里 BM25 通道的权重。 */
   bm25Weight: z.number().min(0).max(1).default(0.6),
-  /** 合并分里词面覆盖腿的权重（两腿权重之和建议 ≤1，超过 1 时分数会被截断的风险见 `search.ts` 的 `normalizeBm25`）。 */
+  /** 合并分里词面覆盖通道的权重（两条权重之和建议 ≤1，超过 1 时分数会被截断的风险见 `search.ts` 的 `normalizeBm25`）。 */
   lexicalWeight: z.number().min(0).max(1).default(0.4),
   /**
    * 子串兜底通道（`instr` on `norm_text`）召回的切片在合并分里的折扣系数。
@@ -214,10 +214,10 @@ export const kbProfileSchema = z.strictObject({
    */
   rrfK: z.number().int().min(1).max(1000).default(60),
   /**
-   * 向量腿的余弦门限（低于它就不进融合）。
+   * 向量通道的余弦门限（低于它就不进融合）。
    *
    * 与 `searchMinScore` 分开的理由是量纲不同：那边是 0～1 的合并分，这边是 -1～1 的余弦，
-   * 共用一个数就会变成「调检索松紧顺手把向量腿也调了」。默认值给的是 bge-m3 上偏保守的常见区间，
+   * 共用一个数就会变成「调检索松紧顺手把向量通道也调了」。默认值给的是 bge-m3 上偏保守的常见区间，
    * 与 `rrfK` 同理，真实取值等 4.3-e 的评测集标定（届时的动作是改 `cordis.yml`，不改代码）。
    */
   vectorMinCosine: z.number().min(0).max(1).default(0.35),
@@ -401,7 +401,7 @@ function viewOf(row: KbEntityRow): KbEntityView {
 export class KbProfileService extends Service {
   static provide = 'kb.profile';
   static Config = kbProfileSchema;
-  // 删除腿（spec 4.1-14）要一次点全六张表，而包依赖是单向 kb→doc（plan 04 §4.7 的事实②）：
+  // 删除通道（spec 4.1-14）要一次点全六张表，而包依赖是单向 kb→doc（plan 04 §4.7 的事实②）：
   // 只有这一侧能同时够到 `kb_*` 与简历那三张表，所以跨表编排住在 `kb.profile`，不在 `resume.doc`。
   // 挂载顺序已核对过 `cordis.yml`（`resume-doc` / `resume-snapshot` / `resume-parse` 全排在 `kb-profile` 之前）。
   static inject = ['store', 'resume.doc', 'resume.snapshot', 'resume.parse'];
@@ -424,7 +424,7 @@ export class KbProfileService extends Service {
     return asApp(this.ctx)['resume.doc'];
   }
 
-  /** 快照存储：删除腿要把版本历史跟着文档一起带走（那张表由 `resume.snapshot` own，本包不写它的裸 SQL）。 */
+  /** 快照存储：删除通道要把版本历史跟着文档一起带走（那张表由 `resume.snapshot` own，本包不写它的裸 SQL）。 */
   private get snapshotStore() {
     return asApp(this.ctx)['resume.snapshot'];
   }
@@ -498,7 +498,7 @@ export class KbProfileService extends Service {
         id: 'kb.profile.search',
         titleKey: 'agent.tool.labels.kbSearch',
         description:
-          '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；默认纯本地不联网，只有已配置并补建过向量时才额外做一次查询编码（结果里的 vectorStatus 说明本次用了哪条腿）',
+          '在本地知识库里按关键词检索经历 / 项目 / 技能 / 成果与简历区块切片，返回按 BM25 与词面覆盖合并打分的排序结果，每条命中带出处、分数与命中词；默认纯本地不联网，只有已配置并补建过向量时才额外做一次查询编码（结果里的 vectorStatus 说明本次用了哪条通道）',
         input: z.strictObject({ query: z.string() }),
         effect: 'read',
         requiresConfirmation: false,
@@ -507,7 +507,7 @@ export class KbProfileService extends Service {
           return toolResult(result, {
             summary:
               `检索「${query}」：切出 ${String(result.queryTokens.length)} 个 token → ${String(result.hits.length)} 条命中` +
-              `（${result.status} · 向量腿 ${result.vectorStatus}）`,
+              `（${result.status} · 向量通道 ${result.vectorStatus}）`,
             evidenceRefs: result.hits.map((hit) => `chunk:${hit.chunkId}`),
           });
         },
@@ -529,7 +529,7 @@ export class KbProfileService extends Service {
           const sync = await this.syncVectors();
           return toolResult(sync, {
             summary:
-              `向量腿 ${sync.status}：待补 ${String(sync.pending)} 条 · 本次写入 ${String(sync.written)} 条` +
+              `向量通道 ${sync.status}：待补 ${String(sync.pending)} 条 · 本次写入 ${String(sync.written)} 条` +
               ` · 清理 ${String(sync.removed)} 条 · 模型 ${sync.model ?? '未配置'} · 维度 ${String(sync.dim ?? '（无）')}`,
             evidenceRefs: sync.model === null ? [] : [`vectors:${sync.model}`],
           });
@@ -537,12 +537,12 @@ export class KbProfileService extends Service {
       }),
     ]);
     this.ctx.logger.info(
-      `[kb-profile] kb_entities / kb_chunks / kb_chunks_fts / kb_vectors 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)} / ${String(KB_SEARCH_MIGRATION_VERSION)} / ${String(KB_VECTOR_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}，检索阈值 topK=${String(this.options.searchTopK)} minScore=${String(this.options.searchMinScore)} k1=${String(this.options.bm25K1)} b=${String(this.options.bm25B)}，向量腿 rrfK=${String(this.options.rrfK)} minCosine=${String(this.options.vectorMinCosine)}${this.vectorGatewayHint()} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
+      `[kb-profile] kb_entities / kb_chunks / kb_chunks_fts / kb_vectors 就绪，迁移号段 ${String(KB_PROFILE_MIGRATION_VERSION)} / ${String(KB_CHUNKS_MIGRATION_VERSION)} / ${String(KB_SEARCH_MIGRATION_VERSION)} / ${String(KB_VECTOR_MIGRATION_VERSION)}，实体种类 ${KB_ENTITY_KINDS.join('/')}，反查阈值 topK=${String(this.options.evidenceTopK)} minScore=${String(this.options.evidenceMinScore)}，检索阈值 topK=${String(this.options.searchTopK)} minScore=${String(this.options.searchMinScore)} k1=${String(this.options.bm25K1)} b=${String(this.options.bm25B)}，向量通道 rrfK=${String(this.options.rrfK)} minCosine=${String(this.options.vectorMinCosine)}${this.vectorGatewayHint()} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 
   /**
-   * 装配日志尾部的向量腿状态（spec 4.3-08 的可读性：现场要能一眼看出这次检索到底有没有语义腿）。
+   * 装配日志尾部的向量通道状态（spec 4.3-08 的可读性：现场要能一眼看出这次检索到底有没有语义通道）。
    * @returns 一句 ` · 向量增强 …` 后缀；未挂载 / 未配置时把缺的项一并写出来
    */
   private vectorGatewayHint(): string {
@@ -694,7 +694,7 @@ export class KbProfileService extends Service {
    * 个人内容不塞进建议对象，也不随报告整份过 IPC）。所以界面要展开原文时，必须有且只有这一条
    * id→文本的读口——再加一个"按 id 批量取正文"就是第二条通道（§2.5）。
    *
-   * id 的前缀决定查哪张表：学历腿给的是 `kbs-` 开头的区块切片 id（4.2 裁定二：学历不产实体行），
+   * id 的前缀决定查哪张表：学历通道给的是 `kbs-` 开头的区块切片 id（4.2 裁定二：学历不产实体行），
    * 其余是实体 id。这里**先实体后切片**地试两张表而不是按前缀分流：前缀是实现细节，
    * 真按前缀判就会让"报告给的 id 一定能读回"这条不变量依赖命名规则（同 4.2 的 `get` 不做前缀校验）。
    * @param id 证据 id（`GapEvidence.id`，界面从报告里拿到后原样递回来）
@@ -1242,8 +1242,8 @@ export class KbProfileService extends Service {
    * ③ 语料统计（`N` 与 `avgdl`，一条 SQL，实测与 JS 侧 token 数完全一致，spike6 §S4）；
    * ④ 逐个查询 token 的 `df`（同一句 prepared 语句复用，2000 条语料下 8 个 token 约 0ms，spike6 §S5）。
    * 两路召回的并集连同 ③④ 交给 `rankChunks` 合并打分与排序（判定全在纯函数里，可离线断言）。
-   * ⑤ 向量腿（4.3-d）：只在 `llm.embed` 已配置**且**库里已有当前模型的向量时才编一次查询，
-   *   把余弦名单与词面名单交给 `fuseByRrf` 按名次融合。这条腿缺席时结果内容与次序都不变，
+   * ⑤ 向量通道（4.3-d）：只在 `llm.embed` 已配置**且**库里已有当前模型的向量时才编一次查询，
+   *   把余弦名单与词面名单交给 `fuseByRrf` 按名次融合。这条通道缺席时结果内容与次序都不变，
    *   缺席的原因写进 `vectorStatus`——降级必须看得见（4.3-08）。
    * @param query 用户查询原文（可以带标点、全角字符、引号）
    * @returns 命中读数；`status` 为 `no_query_tokens` 时**没有进过 SQL、也没有出网**（`MATCH ''` 会抛语法错误，
@@ -1268,7 +1268,7 @@ export class KbProfileService extends Service {
     candidates.push(...recalled.map(chunkViewOf));
 
     // 子串通道给的是「原文确实含这几个字」，与倒排的「预分词里有这个 token」是两种证据，
-    // 所以它的 id 单独记一份交给打分侧——那一腿 0 分的命中要靠它才有理由进结果（`substringFloorScore`）。
+    // 所以它的 id 单独记一份交给打分侧——那一条 0 分的命中要靠它才有理由进结果（`substringFloorScore`）。
     const substringChunkIds = new Set<string>();
     const normalizedQuery = normalizeText(query);
     if (normalizedQuery !== '') {
@@ -1304,7 +1304,7 @@ export class KbProfileService extends Service {
     const lexical = rankChunks(query, candidates, context, params);
     const vector = await this.vectorRanking(query, params);
     const views = new Map<string, KbSearchCandidate>(candidates.map((candidate) => [candidate.chunkId, candidate]));
-    // 向量腿可以给出一条**词面一点都没召回**的切片（查询「性能优化」对上「P99 延迟下降 40%」就是这种：
+    // 向量通道可以给出一条**词面一点都没召回**的切片（查询「性能优化」对上「P99 延迟下降 40%」就是这种：
     // 没有共同 token、`norm_text` 里也不含查询串）。这正是它存在的理由，所以要把这些 id join 回主表补进
     // 候选视图——不补的话语义名单会被词面召回集裁掉，RRF 退化成「只给已有结果换换序」，增强就成了装饰。
     const missingIds = vector.scores.map((score) => score.chunkId).filter((chunkId) => !views.has(chunkId));
@@ -1321,13 +1321,13 @@ export class KbProfileService extends Service {
     const hits = vector.status === 'ok' ? fuseByRrf(query, lexical.hits, vector.scores, views, params) : lexical.hits;
     const result: KbSearchResult = { ...lexical, hits, vectorStatus: vector.status };
     this.ctx.logger.info(
-      `[kb-profile] 检索 ${String(queryTokens.length)} 个 token / ${String(candidates.length)} 条候选 → ${String(result.hits.length)} 条命中（${result.status} · 向量腿 ${result.vectorStatus} / 语义名单 ${String(vector.scores.length)} 条）`,
+      `[kb-profile] 检索 ${String(queryTokens.length)} 个 token / ${String(candidates.length)} 条候选 → ${String(result.hits.length)} 条命中（${result.status} · 向量通道 ${result.vectorStatus} / 语义名单 ${String(vector.scores.length)} 条）`,
     );
     return result;
   }
 
   /**
-   * 向量腿取数：把一句查询编成向量，并在**当前模型**下按余弦排名（spec 4.3-07）。
+   * 向量通道取数：把一句查询编成向量，并在**当前模型**下按余弦排名（spec 4.3-07）。
    *
    * 三道本地判定把出网次数压到最少：服务没挂载 / 没配置 → `unavailable`；库里没有该模型的行 →
    * `no_vectors`（为了一句查询去编整库是浪费，补建只在 `syncVectors()` 里发生）。两种都一次网络都不发。

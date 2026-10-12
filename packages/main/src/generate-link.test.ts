@@ -32,7 +32,7 @@
  * 服务，而生成照样跑完——与 4.4-e1 判据三同一手法。真接付费网关那天要动的 spec 是 4.6-08，不是这里。
  *
  * 语料是文件里的虚构中文简历（§7.2 不碰真实招聘平台），手机号是假哨兵；
- * 没有装 `llm.chat`，所以模型腿报 `unavailable`、产物走 4.5-09 的仅重排保守版——
+ * 没有装 `llm.chat`，所以模型通道报 `unavailable`、产物走 4.5-09 的仅重排保守版——
  * 这条用例判的恰恰是"没有模型时装配面不断流"，改写内容与重试的判定在包内的
  * `generate-service.test.ts` 用替身断过。
  */
@@ -61,7 +61,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 
-/** 虚构简历：两段经历 + 技能行，够 4.4 的词面腿命中，也够 4.5 的重排真的挪位置。 */
+/** 虚构简历：两段经历 + 技能行，够 4.4 的词面通道命中，也够 4.5 的重排真的挪位置。 */
 const CORPUS_MD = [
   '李四',
   '电话：13900007777',
@@ -78,7 +78,7 @@ const CORPUS_MD = [
   '- Kubernetes、Helm',
 ].join('\n');
 
-/** 虚构 JD：词面腿命中 Kubernetes 与学历，不需要模型也能出相关性读数。 */
+/** 虚构 JD：词面通道命中 Kubernetes 与学历，不需要模型也能出相关性读数。 */
 const JD_TEXT =
   '后端工程师（虚构：南汇云图）：负责结算链路的 Java 服务，熟悉 Kubernetes 与 Helm，本科及以上学历，3 年以上经验。';
 
@@ -90,7 +90,7 @@ const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
 
 /**
- * 撑起「真 store + 简历文档 + 知识库 + 缺口腿 + 生成腿 + 真工具注册表」的装配。
+ * 撑起「真 store + 简历文档 + 知识库 + 缺口通道 + 生成通道 + 真工具注册表」的装配。
  *
  * 挂载顺序照 `cordis.yml`：`agent` 在能力包之前（工具登记是软取，晚挂载就登记出 0 个工具），
  * `kb-generate` 排在 `kb-gap` 之后。配置一律取 schema 出厂值（与清单同源）：
@@ -105,7 +105,7 @@ async function bootAssembly() {
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），而清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）：
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除通道），而清单顺序就是挂载顺序（AGENTS.md §9 的 5.1-c）：
   // 挂晚了本服务 PENDING，下面那句 `app['kb.profile']` 直接取不到。
   fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
   fibers.push(await ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));

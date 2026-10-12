@@ -120,7 +120,7 @@ redo         | ghost | dead true | why NOTHING_TO_REDO    | title 没有可重�
 save-editor  | amber | dead true | why NOTHING_TO_SAVE    | title 草稿与库里的一致…    | w 76  h 24
 ```
 
-与第十三片收口时那份逐位一致（`aria-disabled` / `data-disabled-reason` / `title` 三条腿都在，
+与第十三片收口时那份逐位一致（`aria-disabled` / `data-disabled-reason` / `title` 三样都在，
 宽度 109/76/76/76、高一律 24），即抽层没有改变任何一条可见行为。
 门禁：typecheck / lint / format:check / test 四道 0。
 `PdfEditPanel` 那一侧没有重开活体（它调的是同一个工厂、传参形状与本地别名逐字相同，且 `dead` 的

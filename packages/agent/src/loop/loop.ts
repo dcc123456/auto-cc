@@ -774,7 +774,7 @@ export class AgentLoopService extends Service {
     // 崩过一次的对账排在建表之后、就绪日志之前：那一刻库里那行「正在跑」已经不会再有人来写终态了（D3）。
     const interrupted = this.reconcileInterruptedRuns();
     this.ctx.logger.info(
-      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型腿 确定性桩` +
+      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型通道 确定性桩` +
         (interrupted > 0 ? ` · 本次启动把 ${String(interrupted)} 条 run 判为中断（上次进程停过，不是有人叫的停）` : ''),
     );
   }

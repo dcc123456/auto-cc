@@ -59,7 +59,7 @@ describe('3.6-03 撤销/重做与当前步骤', () => {
     expect(session.moveSection('exp', 0)).toEqual({ ok: true, value: session.document() });
     expect(session.moveEntry('exp', 'e1', 0).ok).toBe(true);
     expect(session.setMetric('baseFontPt', 10.5).ok).toBe(true);
-    // 界外、非有限数、未知 id：判定是"拒绝"，子原因原样上浮（3.6-b 的契约腿靠它拼提示）。
+    // 界外、非有限数、未知 id：判定是"拒绝"，子原因原样上浮（3.6-b 的契约通道靠它拼提示）。
     expect(session.setMetric('baseFontPt', 99)).toMatchObject({ ok: false, code: 'out-of-bounds' });
     expect(session.setMetric('baseFontPt', Number.NaN)).toMatchObject({ ok: false, code: 'not-a-number' });
     expect(session.moveSection('zz', 1)).toMatchObject({ ok: false, code: 'unknown-section' });

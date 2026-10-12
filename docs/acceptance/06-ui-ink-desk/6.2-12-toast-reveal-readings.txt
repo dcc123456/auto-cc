@@ -40,7 +40,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 │   画面里是折成两行而不是省略号 —— 不用 `truncate`：seal 那一格装的是失败原因，"必须人读过"不许被截掉）
 │ 第二格键文案：`在访达中显示`（`desk.reveal` + `desk.revealTarget.macos`，平台名走插值，§5.7；
 │   语言名由 `navigator.userAgent` 现推，不额外开一条 `shell.getStatus()` 状态通道，§2.5）
-│ 真点成功那一腿（`afterRevealClick`）：`result="done"` · `busySpin=false` · `toastStillThere=true` ·
+│ 真点成功那一条（`afterRevealClick`）：`result="done"` · `busySpin=false` · `toastStillThere=true` ·
 │   `titleOnButton=null` · `activeBeforeClick="BODY"` —— **toast 不抢焦点**（09 稿第 517 行那句），
 │   点完键之后焦点仍在 body，没有被 reveal 按钮夺走。
 │ ⚠ 诚实边界：`showItemInFolder` 是否真的开出一扇访达窗口是**操作系统侧**的事实，
@@ -65,9 +65,9 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
       `title` 里还写着上一只那个已消失的路径 —— 界面在替一件没发生过的事说话。
 修法：`useBridgeAction` 把 `clearResult` 一并返回（此前只在内部用），`Toast` 在 `[toast]` 变化时
       `setRevealError(undefined) + clearResult()`。仍是那一份五态实现，没有在 toast 里另长一套（§2.5）。
-命令：`tmp/35-inherit2.js`（一条脚本里连跑三腿：导出 → 删文件 → 点 reveal → 再导出）→ `tmp/35-inherit2.log`
+命令：`tmp/35-inherit2.js`（一条脚本里连跑三条：导出 → 删文件 → 点 reveal → 再导出）→ `tmp/35-inherit2.log`
 │ `toast1_success`：`tone="jade"` · `result=null` · `title=null`
-│ `toast1_afterReveal`：`result="failed"` · `title="产物已不在磁盘上：…"`（④ 那条现象在本腿复现）
+│ `toast1_afterReveal`：`result="failed"` · `title="产物已不在磁盘上：…"`（④ 那条现象在本条复现）
 │ `toast2_fresh`：**`result=null` · `title=null` · `tone="jade"`** —— 继承没有了
 │ 反证（改之前）：`toast2_fresh` 那两格读到的是 `failed` 与上一只的路径，同一份探针脚本，只换实现。
 
@@ -80,7 +80,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 │   末态复读 `probePresent=false` · `toastPresent=false` · `theme="dark"` · `lang="zh-CN"` · `nav-workflow` 为 `aria-current="page"`。
 │ 成图入库前对同批跑 `md5 -q | sort | uniq -c`：三张各 1，无重复。
 │ 毡案那一张是**失败态**的毡案（`6.2-12-toast-reveal-failed-light.png`）：洗色在两套主题下都要成立，
-│   而成功态的毡案在视觉上与墨案只差底色，⑤ 的三腿读数是主题无关的。
+│   而成功态的毡案在视觉上与墨案只差底色，⑤ 的三条读数是主题无关的。
 
 ─────────────────────────────────────────────────────────────────────────────
 ⑦ 落点边界：为什么知识库备份的那只 toast 不带 revealPath

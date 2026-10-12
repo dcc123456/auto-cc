@@ -47,7 +47,7 @@ index=2 row="boss未登录持久分区…"       → auth 仍 state=ok
 状态条**没有**因此翻朱砂报「刚失效」。这一格的判据是快照之间的变化（上一份里 active、这一份里不再 active），
 不是「读回 expired」——见 `deskStatus.ts` 的 `reportDeskPlatforms`。
 
-== 7) 正腿：真掉一次线，那一格翻朱砂并点名；重新登录之后自己撤回去 ==
+== 7) 正向证据：真掉一次线，那一格翻朱砂并点名；重新登录之后自己撤回去 ==
 （顺序刻意反过来：先证明恢复的门是开的，再动登录态。全程只碰本地 fixture 站点，§7.2。）
 before    auth state=ok   text="登录态已登录 1 / 共 3"      dotBg rgb(47,143,102)
 doorOpen  点 `[data-action="open"]`（fixture-alt）→ 地址栏写 `http://127.0.0.1:10233/login?next=/alt`

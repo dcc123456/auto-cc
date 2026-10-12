@@ -4,7 +4,7 @@ import { resolveNavigableUrl } from './navigate-policy.js';
 /**
  * 已登记平台及其声明的可导航源（P8 8.1-05 的新口径：名单来自知识包的 `origins`，不再是 startUrl 的源）。
  *
- * `fixture` 挂本地回环与另一个 https 源，是为了能分别演「回环免签字」与「真源要签字」两条腿。
+ * `fixture` 挂本地回环与另一个 https 源，是为了能分别演「回环免签字」与「真源要签字」两条通道。
  */
 const PLATFORMS = [
   { id: 'fixture', origins: ['http://127.0.0.1:10233', 'https://fixture.example.com'] },

@@ -7,7 +7,7 @@
 -------------------------------------------------------------------
 窗口：pnpm dev（AUTO_CC_USER_DATA_DIR=tmp/dev-userdata，CDP 10222）
 视图：诊断（[data-view="diagnostics"]）→ 面板 [data-testid="generate-panel"]
-模型腿：llm.baseUrl 指向本地 fixture 靶（scripts/fixture-server.ts /v1/chat/completions），
+模型通道：llm.baseUrl 指向本地 fixture 靶（scripts/fixture-server.ts /v1/chat/completions），
         模式 = rewrite。真实外部模型服务一次都没打（判据四：花钱需单独授权）；
         全程不碰真实招聘平台（§7.2）。
 

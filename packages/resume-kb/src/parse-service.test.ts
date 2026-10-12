@@ -81,7 +81,7 @@ function writeFile(dir: string, name: string, content: string | Uint8Array): str
 /**
  * 挂起 config + log + store + resume.doc + resume.parse。
  * @param dir 复用哪个目录（演「换个进程重挂同一份库」时传同一个）
- * @param maxBytes 单次导入字节上限，用于测「超大文件」这条失败腿
+ * @param maxBytes 单次导入字节上限，用于测「超大文件」这条失败那一条
  * @param withAgentTools 是否在本服务之前挂上 agent 工具注册表替身（默认不挂：5.1-c 之外的用例判的是
  *        入库与脱敏，不该被注册表分走注意力；要挂必须早于本服务，`registerAgentTools` 是软取）
  * @returns 解析服务、文档存储服务、日志出口、裸连接，以及（挂了替身时）注册表替身，未挂时为 null
@@ -192,7 +192,7 @@ describe('4.1-07 幂等导入', () => {
     expect(rowCount(db)).toBe(2);
   });
 
-  it('哈希在抽取之前算：PDF 腿把 ArrayBuffer 移交给 pdf.js 之后，幂等键仍然是同一份字节的哈希', async () => {
+  it('哈希在抽取之前算：PDF 通道把 ArrayBuffer 移交给 pdf.js 之后，幂等键仍然是同一份字节的哈希', async () => {
     const dir = tempDir();
     const { parse } = await boot(dir);
     const filePath = writeFile(dir, 'resume.md', RESUME_MD);
@@ -337,8 +337,8 @@ describe('4.1-05 疑似扫描件', () => {
   });
 });
 
-describe('4.1-06 失败腿收敛成结构化错误', () => {
-  /** 四条失败腿：相对路径、不存在、是目录、超过字节上限。 */
+describe('4.1-06 失败那一条收敛成结构化错误', () => {
+  /** 四条失败那一条：相对路径、不存在、是目录、超过字节上限。 */
   const cases: { readonly name: string; readonly prepare: (dir: string) => string; readonly maxBytes?: number }[] = [
     { name: '相对路径', prepare: () => 'relative/resume.md' },
     { name: '文件不存在', prepare: (dir) => join(dir, 'missing.md') },
@@ -497,7 +497,7 @@ describe('导入即建可编辑工作副本（plan §1.4 裁定一）', () => {
 });
 
 /**
- * 5.1-c 的建档腿：`resume.parse` 要能被对话挑中，且挑中之后走的仍是 4.1 那一条导入链——
+ * 5.1-c 的建档通道：`resume.parse` 要能被对话挑中，且挑中之后走的仍是 4.1 那一条导入链——
  * 判据与 4.5-b 的 `resume.generate.run` 同形（登记形状 / 两入口产物相等 / 入参是边界）。
  */
 describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
@@ -535,7 +535,7 @@ describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
     const serviceDir = tempDir();
     const { tools, db: toolDb, doc: toolDoc } = await boot(toolDir, 5_242_880, true);
     const { parse, db: serviceDb } = await boot(serviceDir);
-    // 两份沙箱、同一份正文：`sourceHash` 由内容决定，所以两条腿必须落到同一个 docId。
+    // 两份沙箱、同一份正文：`sourceHash` 由内容决定，所以两条通道必须落到同一个 docId。
     // 逐字比较而不是比字段，是因为 `ImportReceipt` 里没有时间戳（入库时间只进库列），相等就是整条链相等。
     const viaTool = (
       await parseTool(tools).run({
@@ -546,7 +546,7 @@ describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
     expect(JSON.stringify(viaTool)).toBe(JSON.stringify(viaService));
     expect(rowCount(toolDb)).toBe(1);
     expect(rowCount(serviceDb)).toBe(1);
-    // 工具那条腿同样把可编辑工作副本建起来了（只写 `resume_imports` 的话，3.x 的编辑与导出读不到它）。
+    // 工具那条通道同样把可编辑工作副本建起来了（只写 `resume_imports` 的话，3.x 的编辑与导出读不到它）。
     expect(toolDoc.load(viaTool.docId).status).toBe('found');
   });
 

@@ -349,7 +349,7 @@ spec 5.1-01 写的六个名字里有四个与实现同义不同名——`params`
   `@auto-cc/plugin-browser`（`plugin-*` 是 1.5 定的口径）。规则会"存在但永不命中"，
   即 5.1-09 反向验证存在的理由。名单按 5.1-08 点到的四族展开，
   **有意不列** `plugin-workflow`（对话与工作流共用同一个 `workflow.runner`，§5.9）与
-  `plugin-llm` / `plugin-entitlement`（agent 的对话腿与档位判定要问它们）。
+  `plugin-llm` / `plugin-entitlement`（agent 的对话通道与档位判定要问它们）。
 - 表里没写、本片也**没做**的一条：`effect` ↔ `requiresConfirmation` 的一致性检查。
   它与 5.1-a 推掉三态是同一条理由——判定者（档位开关）在 5.3 才存在，先写检查就是给假想的未来做抽象（§2.6）。
 
@@ -951,7 +951,7 @@ plan §5.5 明写"待决审批随检查点保存"）；不做"档位变更后重
   当前档位 = `chat.session.current().session.autonomy`；最近失败原因 = `agent.loop.read(runId).stopReason`
   加 `usage.ledger.summary().recentDenials`；已投目标 id = `outbound.deliveries.listFor(jobId)` 加账本行的
   `targetId`；被否决做法 = `agent_step.status='refused'` 加 `agent_pause_requests.resolution`。
-- **F6 出站腿只有一处**：`llm.chat` 的 `complete(request)`（`packages/llm`，`keyEnv` 默认
+- **F6 出站通道只有一处**：`llm.chat` 的 `complete(request)`（`packages/llm`，`keyEnv` 默认
   `AUTO_CC_LLM_API_KEY`，未配置即 `LLM_UNAVAILABLE` 且不发请求），测试走 `stubFetch`。agent 侧模型仍是硬接的
   `StubLoopModel`（`estimateTokens` = 长度 / 2），真模型未接。
 - **F7 位置早在 §3 留好了**：`agent.transcript`（L4，"会话与消息持久化、流式增量、压缩与关键事实保留、脱敏"）
@@ -1159,7 +1159,7 @@ tick 只做一件事：对每条启用的任务算 `next_run_at <= now` 就触�
 ### 7.5.5 5.7-c 的两条决策（2026-10-03 现场读码后补，实现按此执行）
 
 **决策七：择机投递做成"纯函数规则 + 投递服务的一个配置块"，不新建服务。**
-F7 说清了现状：四个输入里频控与额度已经在投递那条腿上（`throttle.nextGapMs()` + `ledger.latestActionTs` + `gate.enforce`），
+F7 说清了现状：四个输入里频控与额度已经在投递那条通道上（`throttle.nextGapMs()` + `ledger.latestActionTs` + `gate.enforce`），
 回复状态只在 `jd.store` 的列表读数里算出来过、投递侧从不读，时间窗全仓没有。所以本片是**新建一条可读规则并接到投递前置**。
 落点选 `packages/outbound/src/deliver-timing.ts`（纯函数）而不是新包/新服务，按 §2.3"扩展现有模块"：
 它管的就是"这一刻该不该递"，而"该不该递"这件事已经住在投递服务里了。
@@ -1207,7 +1207,7 @@ F6 的形状：`maxAttempts = 1 + (spec.retryTimes ?? this.config.retryTimes)`�
    判据因此取**区间下界**：只有连下界都还没过才是**必然还要等**。用下界可能放过一次仍需在节点里干等的起跑
    （那是 `outbound.greet` / `outbound.deliver` 自己的 `sleep`，2.5-04 早已验收），
    用上界则会把本可以起跑的任务跳掉——**宁可少跳，不可误跳**。减法继续只写在 `gapRemainingMs()` 一处
-   （§2.2：本片顺手把 `greet.ts` 里手写的那第二遍算术并进来，两条腿共用同一个函数）。
+   （§2.2：本片顺手把 `greet.ts` 里手写的那第二遍算术并进来，两条通道共用同一个函数）。
 3. **动作名单仍是 `SCHEDULE_OUTBOUND_ACTIONS` 那两条**（greet / deliver）。`search` 不进名单有具体理由：
    它的节奏是页面动作那一档（`nextScrollGapMs`，秒级），而 `checkGap` 只认外发两条、**陌生动作名以
    `INVALID_ARGUMENT` 结构化失败**——照 `entitlement.gate.requireLimit` 的口径。
@@ -1426,9 +1426,9 @@ F14 说现状只有一套闸门实现，`source` / `remote_ref` 是空列。看�
    后者在模块顶层读 `app.isPackaged`，纯 Node 测试宿主里必崩（本仓此前没有任何测试 import 过 `registry.ts`）。
    所以"清单 + 注册表两处都在"这一条改成读两份源文本（`registry.ts` 里那一行 + `cordis.yml` 里那个 `- id: funnel`），
    与 `deliver.test.ts` 直接读装配文件的先例同法；真装配那一半由本文件自己按类挂载来证。
-5. **测试装具的"摘腿"必须是惰性的**：`mount(name, ctx.plugin(X, cfg))` 的实参在函数调用前就真挂载了，
-   摘腿分支只是不把 fiber 记进清单。第一版因此读到 `count: 0` 而不是 `null`（断言当场失败、把假绿抓了出来），
-   正确形状是 `mount(name, () => ctx.plugin(X, cfg))`。5.8-b 之后若还有用例要摘腿，照这一条写。
+5. **测试装具的"摘掉通道"必须是惰性的**：`mount(name, ctx.plugin(X, cfg))` 的实参在函数调用前就真挂载了，
+   摘掉通道分支只是不把 fiber 记进清单。第一版因此读到 `count: 0` 而不是 `null`（断言当场失败、把假绿抓了出来），
+   正确形状是 `mount(name, () => ctx.plugin(X, cfg))`。5.8-b 之后若还有用例要摘掉通道，照这一条写。
 6. **本片结束时 5.8 全表仍是 `[ ]`**：判据主体（截图、白名单、面板）在 5.8-b / 5.8-c，
    服务半边与 C 半边的证据已在 spec 的 5.8-a 落地记录里逐条对应到条目 ID，不在表里提前打勾。
 
@@ -1463,7 +1463,7 @@ F14 说现状只有一套闸门实现，`source` / `remote_ref` 是空列。看�
 3. **万级用例复用 link 用例的装配**：`packages/main/src/metrics-assembly.ts` 是本仓第一份
    "测试专用装配模块"（临时库 + 七只服务 + 真闸门 + 聚合口），后续再有看板类判定应从这里起步，
    不要再抄第三份装配代码。它的 `without` 参数是 `Iterable<string>`（数组或 `Set` 都收），
-   摘腿的用法与 5.8-a 记录的坑一致：`mount(name, () => ctx.plugin(...))` 必须延迟挂载。
+   摘掉通道的用法与 5.8-a 记录的坑一致：`mount(name, () => ctx.plugin(...))` 必须延迟挂载。
 
 ## 7.7 5.9 发布与升级通道的落点与切片（2026-10-04 现场读码后定，逐片独立跑门禁、独立提交）
 
@@ -1964,8 +1964,8 @@ mac/linux 按 §9 一律 `[!]`，不许用"渲染层代码是同一份"充当"�
 `docs/plans/06-ui-ink-desk/plan.md`。只取 `git ls-files` 的已提交面单跑 eslint 与 prettier 双双 = 0，
 所以**主干代码是干净的，红的是在制品**。本窗没有去格式化、移动或提交别人的草稿（那是另一条轨的在制品，
 动了就会撞上同一支文件）。留给下一窗裁的两问：① 06 那批草稿由它自己补齐格式，还是把 `docs/design/ui-drafts/**`
-写进 ignore 清单（草稿是给人看的 HTML，未必该按 prettier 的口径排版）；② `5.10-13` 唯一还开着的离线免做的腿
-——「kill 自定义计划的 run → 重启 → 下拉选中 → 点续跑」——需要真窗口可杀可重启，等在场时跑（同 `#37/#38` 的裁定⑰反腿）。
+写进 ignore 清单（草稿是给人看的 HTML，未必该按 prettier 的口径排版）；② `5.10-13` 唯一还开着的离线免做的那一条
+——「kill 自定义计划的 run → 重启 → 下拉选中 → 点续跑」——需要真窗口可杀可重启，等在场时跑（同 `#37/#38` 的裁定⑰反向证据）。
 其余开着的行按既有登记都需要用户表态，本窗未代答，也未新开实现面。
 
 ##### 7.8.3-quater 5.10-h 的登记半边已落，h 片还差两件（2026-10-04）
@@ -2404,7 +2404,7 @@ join 排在两支之后"，不写"同时 running"）、`5.10-13`（DAG 下重验
    于是被 kill 的自定义计划 run 在重启后终于有界面入口。护栏照旧：select 之后 fingerprint 仍与那条 run 不符，
    `resumeRun` 依旧拒绝，2.4-05 的测试不许改。
 
-验收腿（那一片要一并补的）：U——`plan.select` 切完 `storedPlan()` 得到自定义计划且 `workflow_runs` 零新增行；
+验收通道（那一片要一并补的）：U——`plan.select` 切完 `storedPlan()` 得到自定义计划且 `workflow_runs` 零新增行；
 C——白名单与 `RequestMap` 对齐（`pnpm lint` 链内的工具契约检）；V——活体里 kill 一条**自定义计划**的 run →
 重启 app → 在下拉里选中那条计划 → 点续跑 → 从中断那格继续（这条正是 `5.10-13` 现在 `[!]` 的那半边，
 补齐后 5.10-13 才转 `[x]`，缺口 5.10-j 同时收口）。
@@ -2454,7 +2454,7 @@ run 的镜像（idle 那一份的槽位仍属于上一条计划，直到 `start(
 默认那一格（空值）**不**调主进程：它的语义是"这一次 `start` 不传 id"，不是"把当前计划换回配置值"，
 服务侧根本没有"换回去"的入口（改配置会重建下游，AGENTS.md §9 的 2.5 实测条）。
 续跑那颗按钮没有再自己调一次 select：`resumeRun()` 读的服务侧当前计划正是上一次 select 落下的那一份，
-"select → resumeRun"这条序列是**两次点击**（下拉选中 → 点续跑），与裁定七验收腿的活体操作步骤一字不差；
+"select → resumeRun"这条序列是**两次点击**（下拉选中 → 点续跑），与裁定七验收通道的活体操作步骤一字不差；
 把 select 塞进按钮里会让那颗按钮同时改两处状态，而界面里那两处（下拉 state 与服务侧当前计划）会分开失败。
 
 **一条被替换掉的旧实现**：`runner.test.ts` 里那个"为绕开这一步而先 `start(planId)` 跑完再清零调用序列"的
@@ -2512,5 +2512,5 @@ run 停在中途时拒绝切换（`WORKFLOW_INVALID_STATE`，消息"先处理完
 `docs/acceptance/1.2/1.2-11-electron-binary-recheck-mac.txt`——翻位依据是本行判据本身，与平台换边无关），
 `1.2-08`（原生托盘区不可 CDP 驱动，要人眼）、`3.3-04`（窗口闪烁判据）、`3.5-*` 与 `3.4-*` 其余行（降级裁定与线框/字体半边待裁）、
 `4.1-08` / `4.3-03` / `4.5-06`（等用户裁）、`4.3-07` / `4.4-02` / `4.6-08`（等真实 LLM 与在场）、`5.7-11` / `P5-01` / `M6-02`（真实账号 + 在场）、
-`3.6-08`（>5 区块的大文档在现有种子与入口形状下到不了，见 `docs/plans/03-resume-pdf/plan.md` §8.9）、`5.10-13`（续跑入口缺口，等 5.10-j 的活体腿）。
+`3.6-08`（>5 区块的大文档在现有种子与入口形状下到不了，见 `docs/plans/03-resume-pdf/plan.md` §8.9）、`5.10-13`（续跑入口缺口，等 5.10-j 的活体证据）。
 `1.7-09` / `1.7-10` 已经是 `[x]`，不受影响。

@@ -2,7 +2,7 @@
 # baseUrl 填的是本机 fixture（http://127.0.0.1:10246/v1，私有端口，未打任何真实模型端点，§7.2）。
 # checkOk 那句「fixture-ping-model 在 26ms 内回了话」里的模型名是请求里发出去的那一份，
 # 由 fixture 原样回显 —— 证明真有一次请求往返，而不是界面自己拼的话。
-# afterClear 之后 checkStillBlocked=true：清掉 key 之后这条腿回到 LEG_INCOMPLETE，再点同一只键读数不变（禁用是真的 inert）。
+# afterClear 之后 checkStillBlocked=true：清掉 key 之后这条通道回到 LEG_INCOMPLETE，再点同一只键读数不变（禁用是真的 inert）。
 
 {
  "连通测试": {
@@ -15,7 +15,7 @@
   },
   "checkStillBlocked": true
  },
- "两条腿与目录过滤": {
+ "两条通道与目录过滤": {
   "before": {
    "leg": "chat",
    "providerValue": "custom",

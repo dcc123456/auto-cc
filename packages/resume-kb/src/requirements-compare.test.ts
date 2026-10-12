@@ -53,7 +53,7 @@ function options(overrides: Partial<GapCompareOptions> = {}): GapCompareOptions 
 }
 
 /**
- * 造一条拆解腿产出的要求条目。
+ * 造一条拆解通道产出的要求条目。
  * @param kind 四类之一
  * @param label 代表词（比对真正吃的字段）
  * @param years 年限数字，仅 `experience_years` 有意义；其余传 `null`
@@ -179,7 +179,7 @@ describe('三态比对：每类要求各用各的尺子（spec 4.4-03）', () =>
   });
 });
 
-describe('年限腿的区间合并与「今天」夹取（spec 4.4-03 / 4.4-07）', () => {
+describe('年限通道的区间合并与「今天」夹取（spec 4.4-03 / 4.4-07）', () => {
   it('重叠区间只算一次：两段共 60 个月，合并后 53 个月', () => {
     const result = compareRequirements(
       {
@@ -264,7 +264,7 @@ describe('年限腿的区间合并与「今天」夹取（spec 4.4-03 / 4.4-07�
   });
 });
 
-describe('学历腿的档位比较与退回文本（spec 4.4-03）', () => {
+describe('学历通道的档位比较与退回文本（spec 4.4-03）', () => {
   /**
    * 组一份只有学历要求的最小输入。
    * @param requiredLabel JD 里的学历 label
@@ -308,7 +308,7 @@ describe('学历腿的档位比较与退回文本（spec 4.4-03）', () => {
     expect(result.rows[0]?.suggestion?.key).toBe('education_missing');
   });
 
-  it('档位表外的 label（模型腿给的「中专」）退回文本反查，不猜一档', () => {
+  it('档位表外的 label（模型通道给的「中专」）退回文本反查，不猜一档', () => {
     const result = educationCase('中专', [{ chunkId: 'chunk-edu', text: '江海大学 本科' }]);
     const row = result.rows[0];
     expect(row?.evidence[0]?.origin).toBe('entity');

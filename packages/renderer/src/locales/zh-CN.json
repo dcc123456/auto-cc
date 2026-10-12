@@ -1508,7 +1508,7 @@
     },
     "gap": {
       "heading": "还差什么",
-      "hint": "把一段 JD 正文与本地知识库现算一次比对：三栏是「命中 / 部分命中 / 缺失」三种状态，栏内顺序等于要求在原文件里出现的顺序，界面不再二次排序。计数、分数、状态全部由主进程给出，这里只负责摆出来。模型腿不可用时自动退回词面拆解，报告只是短一些。三条文本阈值已按本地 42 条人判标注初标定（2026-10-02），年限比例与亮点条数是产品口径，这些值仍可在 cordis.yml 的 kb-gap 段调整。词面这把尺子只认字面重合，语义等价的另一种说法可能被判成缺失。",
+      "hint": "把一段 JD 正文与本地知识库现算一次比对：三栏是「命中 / 部分命中 / 缺失」三种状态，栏内顺序等于要求在原文件里出现的顺序，界面不再二次排序。计数、分数、状态全部由主进程给出，这里只负责摆出来。模型问不通时自动退回词面拆解，报告只是短一些。三条文本阈值已按本地 42 条人判标注初标定（2026-10-02），年限比例与亮点条数是产品口径，这些值仍可在 cordis.yml 的 kb-gap 段调整。词面这把尺子只认字面重合，语义等价的另一种说法可能被判成缺失。",
       "jdPlaceholder": "贴上 JD 正文（岗位描述全文，只贴标题拆不出要求）",
       "analyze": "比对缺口",
       "evidence": "证据",
@@ -1539,11 +1539,11 @@
       "promptNone": "未问过模型",
       "highlights": "库内具备、这份 JD 没提、且与该岗位相关的亮点",
       "highlightsDropped": "另有 {{count}} 条未展开",
-      "modelMerged": "模型腿并入 {{added}} 条长尾要求（{{model}}）",
-      "modelRejected": "模型答的 {{dropped}} 条一条都没采信（引文对不上原文或与词面腿重复）：{{reason}}",
-      "modelFailed": "模型腿没跑成，已退回词面基线：{{reason}}",
+      "modelMerged": "模型比对补进 {{added}} 条长尾要求（{{model}}）",
+      "modelRejected": "模型答的 {{dropped}} 条一条都没采信（引文对不上原文，或与词面比对重复）：{{reason}}",
+      "modelFailed": "模型比对没跑成，已退回词面基线：{{reason}}",
       "modelUnavailable": "没用上模型，本报告只有词面拆解：{{reason}}",
-      "modelDisabled": "模型腿已在配置里关掉，本报告只有词面拆解",
+      "modelDisabled": "模型比对已在设置里关掉，本报告只有词面拆解",
       "suggestion": {
         "addEvidence": "建议：为「{{label}}」补一条可验证的陈述（写清场景与结果），库里现在没有任何一条与它重合。",
         "strengthenEvidence": "建议：把「{{label}}」改写成像库里这条依据那样可验证的说法（{{evidenceId}}）——现在有据，但强度不够。",
@@ -1568,11 +1568,11 @@
       "outcomeRewritten": "产出了 {{count}} 处改写：逐条看过之后勾选，接受才会写进工作副本",
       "outcomeReorderOnly": "本次没有采纳任何改写，只按相关性调换了 {{moves}} 处位置（保守版，功能不降级为不可用）",
       "outcomeRejected": "事实校验没过（{{count}} 条违规），本次拒绝产出：没有文档可以接受",
-      "modelMerged": "模型腿改写过 {{model}}，{{dropped}} 条未采信（id 或位置对不上清单）",
+      "modelMerged": "改写过 {{model}}，{{dropped}} 条未采信（id 或位置对不上清单）",
       "modelRejected": "模型答的 {{dropped}} 条一条都没采信：{{reason}}",
-      "modelFailed": "模型腿没跑成，已退回仅重排的保守版：{{reason}}",
+      "modelFailed": "模型改写没跑成，已退回仅重排的保守版：{{reason}}",
       "modelUnavailable": "没用上模型，本次只重排、不改写：{{reason}}",
-      "modelDisabled": "模型腿已在配置里关掉，本次只重排、不改写",
+      "modelDisabled": "模型改写已在设置里关掉，本次只重排、不改写",
       "receipt": "目标简历 {{docId}} · 提示词 {{prompt}} · 校验前重试 {{retried}}",
       "promptNone": "未问过模型",
       "retriedYes": "重试过一次",
@@ -1776,7 +1776,7 @@
     "settings": {
       "model": {
         "heading": "模型",
-        "note": "这一格管三件事：把几家提供商同时收进来（火山引擎、OpenAI、DeepSeek 各占一行），从每家拉回模型清单勾进本机，再给对话与向量两条腿各挑一条。端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
+        "note": "这一格管三件事：把几家提供商同时收进来（火山引擎、OpenAI、DeepSeek 各占一行），从每家拉回模型清单勾进本机，再给对话与向量各自挑一条。端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
         "leg": {
           "chat": "对话（话术生成）",
           "embed": "向量（知识库检索）"
@@ -1856,7 +1856,7 @@
         "modelsFetched": "{{label}} 回来了 {{count}} 条模型名。",
         "fetchFailed": "没拉回来（{{reason}}）：{{message}}",
         "modelsStored": "{{count}} 条已入库到 {{label}}。",
-        "bindingHeading": "两条腿各用哪一条",
+        "bindingHeading": "对话与向量各用哪一条",
         "bindingEmpty": "还没有可挑的模型：先在上一段勾进至少一条。",
         "bindingSave": "保存绑定",
         "legOrigin": {
@@ -1877,7 +1877,7 @@
         },
         "check": "测试连接",
         "clearKey": "清除密钥",
-        "noteHotApply": "保存绑定会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+        "noteHotApply": "保存绑定会立刻重建这一路（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
         "missingHeading": "还缺：",
         "field": {
           "baseUrl": "端点",
@@ -1893,18 +1893,18 @@
           "ACTION_BUSY": "上一次动作还没返回：等它跑完再按下一颗",
           "BRIDGE_MISSING": "这个窗口里没有桥接，模型设置够不到主进程",
           "LEG_INCOMPLETE": "端点、模型名与密钥还没配齐，测试连接必然失败，先补齐这三格",
-          "CHECK_NOT_SUPPORTED": "向量腿的连通性测试尚未实现，这一按不会发任何请求",
-          "NO_KEY_STORED": "这一条腿在本机没存过密钥，没有可清除的东西",
+          "CHECK_NOT_SUPPORTED": "向量这一路还没做连通性测试，这一按不会发任何请求",
+          "NO_KEY_STORED": "这一路在本机没存过密钥，没有可清除的东西",
           "FORM_ALREADY_OPEN": "上面已经摊着一张表单：先保存或取消那一张，同时只改一家",
           "NO_MODEL_STORED": "这一家一条模型都还没入库，点名不出要测哪条，先去下一段勾几条",
           "FORM_INCOMPLETE": "显示名与端点地址还缺着，这一格保存了也没法用",
           "NOT_FETCHED": "还没点「获取模型」，此刻没有可勾的候选",
           "NOTHING_TICKED": "一条都没勾中，添加动作没有可入库的东西",
           "MANUAL_EMPTY": "模型名那一格是空的，先敲一条名字",
-          "MODEL_BOUND": "这条模型正被某条腿指着，先给那条腿换一条再移出清单",
+          "MODEL_BOUND": "这条模型正被对话或向量用着，先给它换成另一条再移出清单",
           "NO_STORED_MODEL": "两家都还没有已入库的模型，候选是空的，没什么可挑",
           "BIND_INCOMPLETE": "这一格还没挑出「哪家的哪条模型」，保存绑定必然失败",
-          "BIND_UNCHANGED": "下拉里的就是这条腿现在指着的那一条，没有要改的东西"
+          "BIND_UNCHANGED": "下拉里选的就是现在正在用的那一条，没有要改的东西"
         }
       }
     }

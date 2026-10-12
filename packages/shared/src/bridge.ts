@@ -341,7 +341,7 @@ export const RENDERER_ALLOWLIST = [
   'resume.export.setPreference',
   'resume.export.preview',
   'resume.export.toPdf',
-  // 「要定制哪一份」这一栏的候选（4.5-b 的 `resume.generate.run` 缺的那条腿：库里多于一份时它要求 `docId`，
+  // 「要定制哪一份」这一栏的候选（4.5-b 的 `resume.generate.run` 缺的那条通道：库里多于一份时它要求 `docId`，
   // 而界面此前没有任何一条能列出文档的通道，于是自动生成在多份库里直接判死）。
   // 过的只有 id / 姓名 / 时刻三样摘要：正文的唯一读取通道仍是带 Schema 复验的 `load()`，它不在允许清单里。
   'resume.doc.list',
@@ -354,7 +354,7 @@ export const RENDERER_ALLOWLIST = [
   'resume.editor.view',
   'resume.editor.move',
   'resume.editor.metric',
-  // 6.6-05 的样式补丁腿：过的仍然是**枚举档名与 `#rrggbb` 字符串**，一个字的正文都不过。
+  // 6.6-05 的样式补丁通道：过的仍然是**枚举档名与 `#rrggbb` 字符串**，一个字的正文都不过。
   // 形状校验（颜色、档位、数值界）只在主进程的 `editor-ops.ts` 做一次，界面照 `view().metricBounds`
   // 那同一条口径摆滑杆，所以这里不存在"界面放行而保存被拒"的分叉（AGENTS.md §2.5）。
   'resume.editor.design',
@@ -367,16 +367,16 @@ export const RENDERER_ALLOWLIST = [
   // 界面拿到的是「哪个快照、模板与时刻」与「条目级 / 字段级差异」两种读数。
   'resume.snapshot.list',
   'resume.snapshot.diff',
-  // 3.5 编辑轨的打开腿（spec 3.4-03 / plan §7.4）：入参是**绝对路径**（渲染层没有读文件的通道，
-  // 与上面 4.1 的导入腿同一口径），回执只有页数与每页宽高——整页原文不过进程边界。
+  // 3.5 编辑轨的打开通道（spec 3.4-03 / plan §7.4）：入参是**绝对路径**（渲染层没有读文件的通道，
+  // 与上面 4.1 的导入通道同一口径），回执只有页数与每页宽高——整页原文不过进程边界。
   // `pdf.*` 一律**不登记为 agent 工具**（plan §7.4 末行）：编辑的是用户手里的文件，判据里没有「让模型改 PDF」这一条。
   'pdf.io.open',
-  // 3.5 编辑轨的字节腿（spec 3.5-12，2026-10-10 的真纸面形态）：绝对路径 → 整份文件的字节。
+  // 3.5 编辑轨的字节通道（spec 3.5-12，2026-10-10 的真纸面形态）：绝对路径 → 整份文件的字节。
   // 这是"渲染层自己把页面画成真实图像"唯一可能的取数形状——sandbox 下的渲染层读不了文件（§8.1），
   // 而 pdf.js 画位图与取文本层都必须拿到字节。上限沿用 `pdf.io` 那一份 `maxBytes`，不另立第二档（§2.5）；
   // 本机实测一次往返 1MB≈2ms、5MB≈4ms，所以不分块、不做缓存（plan §10.4）。
   'pdf.io.bytes',
-  // 3.5 编辑轨的另存腿（spec 3.5-02 / 3.5-09，plan §7.4）：源路径 + 覆盖区 + 产物路径 → 新文件。
+  // 3.5 编辑轨的另存通道（spec 3.5-02 / 3.5-09，plan §7.4）：源路径 + 覆盖区 + 产物路径 → 新文件。
   // 边界上过的只有**比例坐标**与回执三个字段——整页原文不过界（同上面 `pdf.io.open` 的取向）。
   'pdf.export.saveAs',
   // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
@@ -384,7 +384,7 @@ export const RENDERER_ALLOWLIST = [
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
   'resume.parse.fromFile',
   'resume.parse.pending',
-  // 4.1-14 / 裁定㉖ 的来路腿：候选列表要说清"这份简历是哪份文件导入的"。只读，且 `pending()` 回答不了
+  // 4.1-14 / 裁定㉖ 的来路通道：候选列表要说清"这份简历是哪份文件导入的"。只读，且 `pending()` 回答不了
   // 这件事——那一条按 4.1-04 只回带未处理条目的行，干净导入的简历同样有来路。
   'resume.parse.provenance',
   // 4.2-d 的知识库管理面（spec 4.2-05 / 06）：读库、反查证据、手工实体的增删改、按简历工作副本重新同步，
@@ -400,13 +400,13 @@ export const RENDERER_ALLOWLIST = [
   'kb.profile.sync',
   'kb.profile.exportBackup',
   'kb.profile.importBackup',
-  // 4.1-14 / 裁定㉖ 的删除腿：删一份简历**连同它派生的素材与索引**，六张表删在同一条事务里。
+  // 4.1-14 / 裁定㉖ 的删除通道：删一份简历**连同它派生的素材与索引**，六张表删在同一条事务里。
   // 它落在 `kb.profile.*` 而不是语义上更顺的 `resume.doc.remove`，是因为桥接 id 的前两段就是服务名，
   // 而唯一能同时够到 `kb_*` 与简历那三张表的服务只有这一只（包依赖单向 kb→doc，plan 04 §4.7 的事实②）。
   // 与上面 `kb.profile.remove` 不是一条：那条只删手工实体、对派生行必然以 `KB_ENTITY_DERIVED` 失败。
   'kb.profile.removeDoc',
   // 4.4-d 的缺口报告双入口（spec 4.4-05）：报告是「JD × 库」的现算投影，只读本地库，
-  // 三态、分数、五种模型腿结局全在主进程算完（同 `kb.profile.search` 的口径）。
+  // 三态、分数、五种模型通道结局全在主进程算完（同 `kb.profile.search` 的口径）。
   // 证据正文单独一条只读口：报告里每条证据只有 id，把正文并进报告就等于让一次比对把半本库
   // 推过进程边界——而界面上一次只会展开一条。
   'kb.gap.report',
@@ -425,7 +425,7 @@ export const RENDERER_ALLOWLIST = [
   // 真正发出去仍然只有 `greet.perform` / `deliver.perform` 那两条（AGENTS.md §7.3 的红线没有被这条口绕过）。
   'outbound.script.generate',
   // 5.7-b 的定时任务面（spec 5.7-05 / 06 / 09）：两条只读（任务列表、触发史）+ 三条写（建、启停、删）
-  // + 一条"现在跑一次"。`triggerNow` 与到点触发走的是同一条腿（同一个 `launch`），所以它同样先问额度、
+  // + 一条"现在跑一次"。`triggerNow` 与到点触发走的是同一条通道（同一个 `launch`），所以它同样先问额度、
   // 同样落一条触发记录——手工跑不等于额外出发（§7.3）。
   // 刻意**不登记** `tick` / `accountForMissedRuns`：那是调度器自己的心跳与追账。界面若能手动画一次"到点"
   // 或"补跑"，5.7-09 的"关闭期间不补跑"就变成渲染层可以发明的第二种结局，而这条判据要的恰恰是它不可选。
@@ -452,7 +452,7 @@ export const RENDERER_ALLOWLIST = [
   'update.download',
   'update.install',
   // P7 · 模型设置面（spec 7.1-07 ~ 10 的五条 + 7.2-02 ~ 11 的九条）：每条口的形状写在下面
-  // `BridgeSignatures` 的同名条目上。`llm.settings.apply` 是 7.1 那只「单腿编辑器」的写口，
+  // `BridgeSignatures` 的同名条目上。`llm.settings.apply` 是 7.1 那只「单独一条编辑器」的写口，
   // 7.2-d 起端点与 key 归提供商实例池、模型名归角色绑定，它就没有调用方了，随本片删净（spec 7.2-15）。
   'llm.settings.catalog',
   'llm.settings.read',
@@ -1360,12 +1360,12 @@ export interface PdfOverlayInputView {
   sizePt?: number;
   /**
    * 这一块要垫的底色（`#rrggbb`，spec 3.5-14）：渲染层从**已渲染的位图**上量出行盒外那一圈的纸色带过来。
-   * 省略即"没量到"，主进程与画布一起按墨色垫底（判据只在 `overlay-colors` 那一处，两条腿不会分叉）。
+   * 省略即"没量到"，主进程与画布一起按墨色垫底（判据只在 `overlay-colors` 那一处，两条通道不会分叉）。
    */
   backdropHex?: string;
   /**
    * 替换字要用的字族档（`serif` / `sans-serif` / `monospace`，spec 3.5-15）：取自**被盖住的那一行**的字体名，
-   * 于是新字与被它遮住的那一行同族。省略即没量到（覆盖区不是从某一行拖来的），两条腿一起走无衬线。
+   * 于是新字与被它遮住的那一行同族。省略即没量到（覆盖区不是从某一行拖来的），两条通道一起走无衬线。
    */
   fontFamilyHint?: 'serif' | 'sans-serif' | 'monospace';
   /**
@@ -1594,7 +1594,7 @@ export interface KbEvidenceRowView {
  * 一条检索命中（镜像 `KbSearchHit`，4.3-10 的结果行数据源）。
  *
  * `reasons` 与 `coverageReason` 是判定码不是文案：界面按码取 i18n（§5.5），
- * 而「BM25 腿 / 词面覆盖腿 / 子串通道」这套说法属于主进程的实现细节，不该在渲染层再拼一遍（§2.5）。
+ * 而「BM25 通道 / 词面覆盖通道 / 子串通道」这套说法属于主进程的实现细节，不该在渲染层再拼一遍（§2.5）。
  */
 export interface KbSearchRowHit {
   readonly chunkId: string;
@@ -1608,7 +1608,7 @@ export interface KbSearchRowHit {
   readonly bm25Score: number;
   readonly lexicalScore: number;
   /**
-   * 向量腿的余弦读数（4 位小数）；本次没用向量腿、或这条没进向量名单时为 `null`。
+   * 向量通道的余弦读数（4 位小数）；本次没用向量通道、或这条没进向量名单时为 `null`。
    *
    * 与 `score` 分开放而不是合成一个数：词面分是 0～1 的证据强度，余弦是 0～1 的几何夹角，
    * 量纲不同源，界面要能分别说「词面有多强」和「语义有多近」（spec 4.3-07）。
@@ -1626,7 +1626,7 @@ export interface KbSearchRowResult {
   readonly hits: readonly KbSearchRowHit[];
   readonly queryTokens: readonly string[];
   /**
-   * 本次检索的向量腿状态（镜像 `KbVectorStatus`，spec 4.3-08 的播报依据）。
+   * 本次检索的向量通道状态（镜像 `KbVectorStatus`，spec 4.3-08 的播报依据）。
    *
    * 降级必须看得见：`unavailable` / `no_vectors` / `failed` 三种情况下界面给出的都是「只有词面命中」，
    * 没有这一项用户读不出原因，只能靠猜（4.3-08 的判据半边就在这一列上）。
@@ -1639,7 +1639,7 @@ export interface KbSearchRowResult {
  *
  * 这一组全是 `@auto-cc/plugin-resume-kb` 里同名类型的**镜像**：`shared` 在 L1，不许依赖 L2 能力包
  * （AGENTS.md §4.1），与上面 `KbEntityRowView` 之于 `KbEntityView` 同一做法。
- * 镜像的取舍口径是"界面上要出现的东西才过来"：三态、建议 key、五种模型腿结局、证据 id 与分数都要，
+ * 镜像的取舍口径是"界面上要出现的东西才过来"：三态、建议 key、五种模型通道结局、证据 id 与分数都要，
  * 而 `RequirementItem.label` 这类词表内部字段虽然是判据的一部分，界面要用它做「要求是什么」的标题，所以照带。
  */
 
@@ -1652,7 +1652,7 @@ export type GapStateView = 'matched' | 'partial' | 'missing';
 /** 证据 id 的来源（镜像 `GapEvidenceOrigin`）：库内实体，还是学历区块的切片。 */
 export type GapEvidenceOriginView = 'entity' | 'section_chunk';
 
-/** 模型腿的五种结局（镜像 `GapModelStatus`，spec 4.4-02 的 V 半边：五态五句文案，不许合成一句"没用上模型"）。 */
+/** 模型通道的五种结局（镜像 `GapModelStatus`，spec 4.4-02 的 V 半边：五态五句文案，不许合成一句"没用上模型"）。 */
 export type GapModelStatusView = 'merged' | 'rejected' | 'failed' | 'unavailable' | 'disabled';
 
 /** 补救建议的 i18n key（镜像 `GapSuggestionKey`）：文案本体在语言包，主进程只给 key 与参数（§5.5 / §5.7）。 */
@@ -1669,7 +1669,7 @@ export interface GapRequirementRowItem {
   readonly end: number;
   /** 年限类要求的年数；其余三类为 `null`（0 是合法读数，不能拿来表示"没有"） */
   readonly years: number | null;
-  /** 这条来自哪条腿：词面还是模型（4.4-02 的 V 类：界面上"模型补的"要能被看出来） */
+  /** 这条来自哪条通道：词面还是模型（4.4-02 的 V 类：界面上"模型补的"要能被看出来） */
   readonly via: 'lexicon' | 'model';
 }
 
@@ -2015,7 +2015,7 @@ export type LlmLegName = 'chat' | 'embed';
  * 服务商目录里的一条预设（spec 7.2-01）。
  *
  * 三条形状约束，都是与参考实现（`browser-copilot/src/lib/providers.ts`）不同的地方，理由见 plan §7.1/§7.2：
- * - **不声明腿**：哪家能不能配 embedding 本机无法无 key 验证，写进目录就是拿文档转述当事实（AGENTS.md §6.2）；
+ * - **不声明通道**：哪家能不能配 embedding 本机无法无 key 验证，写进目录就是拿文档转述当事实（AGENTS.md §6.2）；
  *   用户绑谁就用谁，能不能通由那一次连通测试给真读数。
  * - **不带显示名**：界面上的名字出自语言包（§5.5），数据里再存一份会漂（§2.5）。
  * - **不带厂商说明**：那类英文说明进界面同样破 §5.5，取 key 的指引由语言包按 `id` 出。
@@ -2032,7 +2032,7 @@ export type LlmProviderView = {
   endpoints?: Array<{ id: string; baseUrl: string }>;
 };
 
-/** 一条腿的密钥读数（掩码，不含明文）。 */
+/** 一条通道的密钥读数（掩码，不含明文）。 */
 export type LlmKeyReadingView = {
   present: boolean;
   /** 明文末 4 位；未存时为空串。 */
@@ -2043,13 +2043,13 @@ export type LlmKeyReadingView = {
   keyEnv: string;
 };
 
-/** 一条模型腿的完整读数。 */
+/** 一条模型通道的完整读数。 */
 export type LlmLegView = {
   leg: LlmLegName;
   /** 装配里的插件 id（`llm` / `llm-embed`）。 */
   pluginId: string;
   /**
-   * 这一腿**看起来像哪家**（目录里的预设 id，只作显示）。
+   * 这一条**看起来像哪家**（目录里的预设 id，只作显示）。
    *
    * 三种来源，按可信度排：绑定态取那行实例的 `presetId`（确切事实）；兜底态由生效地址在目录里
    * 反查（含端点变体），认不出就是 `custom`；未配置也是 `custom`。它**不是**用户的那次表态——
@@ -2058,7 +2058,7 @@ export type LlmLegView = {
   providerId: string;
   /** 生效的池实例 id（spec 7.2-12 的"绑定态"）；没绑定或那一行读不到时为 null。 */
   boundProviderId: string | null;
-  /** 端点是谁给的：池实例 / 这条腿自己的配置格（yml、env 兜底） / 两边都没有。 */
+  /** 端点是谁给的：池实例 / 这条通道自己的配置格（yml、env 兜底） / 两边都没有。 */
   origin: LlmLegOrigin;
   baseUrl: string | null;
   model: string | null;
@@ -2068,7 +2068,7 @@ export type LlmLegView = {
   missing: Array<'baseUrl' | 'model' | 'apiKey'>;
 };
 
-/** 一条腿的端点来源（与 `packages/llm/src/binding.ts` 的 `ResolvedLeg.origin` 同枚举，跨边界复用一名）。 */
+/** 一条通道的端点来源（与 `packages/llm/src/binding.ts` 的 `ResolvedLeg.origin` 同枚举，跨边界复用一名）。 */
 export type LlmLegOrigin = 'pool' | 'config' | 'none';
 
 /** 一条模型清单的来源：自动获取勾进来的 / 人手敲的（spec 7.2-06）。 */
@@ -2136,7 +2136,7 @@ export type LlmProviderAddModelsInput = {
   origin?: LlmModelOrigin;
 };
 
-/** 一次角色绑定的入参（spec 7.2-11）：把一条腿指到池里某个实例、以及它已入库的某条模型。 */
+/** 一次角色绑定的入参（spec 7.2-11）：把一条通道指到池里某个实例、以及它已入库的某条模型。 */
 export type LlmRoleBindInput = {
   leg: LlmLegName;
   /** 池实例 id（`llm_providers.id`），不是目录里的预设 id。 */
@@ -2144,7 +2144,7 @@ export type LlmRoleBindInput = {
   model: string;
 };
 
-/** 整个设置面的读数：两条腿 + 密钥存储的事实陈述（是否加密、是否解不开、文件在哪）。 */
+/** 整个设置面的读数：两条通道 + 密钥存储的事实陈述（是否加密、是否解不开、文件在哪）。 */
 export type LlmSettingsView = {
   legs: LlmLegView[];
   storage: { encrypted: boolean; unreadable: boolean; file: string | null };
@@ -2305,17 +2305,17 @@ export interface BridgeSignatures {
    * 5.3 定的「不可自提升」就出现了一个它能自行改写的运行时——而且这十三条口的返回里没有一处明文 key。
    */
   'llm.settings.catalog': { args: []; returns: LlmProviderView[] };
-  /** 两条腿的端点 / 模型名 / 掩码密钥读数，加密钥存储的事实（未加密、解不开都要播出来）。 */
+  /** 两条通道的端点 / 模型名 / 掩码密钥读数，加密钥存储的事实（未加密、解不开都要播出来）。 */
   'llm.settings.read': { args: []; returns: LlmSettingsView };
-  /** 这条腿的连通性测试：经 `llm.chat` 发一次最小请求，失败也回结构化原因。 */
+  /** 这条通道的连通性测试：经 `llm.chat` 发一次最小请求，失败也回结构化原因。 */
   'llm.settings.check': { args: [leg?: LlmLegName]; returns: LlmCheckView };
-  /** 删掉某条腿**兜底那把**已存的密钥（`llm.chat` / `llm.embed` 那两格），端点与模型名不动。 */
+  /** 删掉某条通道**兜底那把**已存的密钥（`llm.chat` / `llm.embed` 那两格），端点与模型名不动。 */
   'llm.settings.clearKey': { args: [leg: LlmLegName]; returns: LlmSettingsView };
   /** 池里全部提供商实例（spec 7.2-02）：每行带掩码末 4 位与已入库条数。 */
   'llm.settings.listProviders': { args: []; returns: LlmProviderInstanceView[] };
   /** 添加或修改一个实例（spec 7.2-03 / 10）：地址归一后进表，明文 key 只进密钥库那一格。 */
   'llm.settings.saveProvider': { args: [input: LlmProviderSaveInput]; returns: LlmProviderInstanceView };
-  /** 删一个实例（spec 7.2-09）：连带删它的清单、清它的凭证、把引用它的腿回落成未绑定。 */
+  /** 删一个实例（spec 7.2-09）：连带删它的清单、清它的凭证、把引用它的通道回落成未绑定。 */
   'llm.settings.deleteProvider': { args: [providerId: string]; returns: LlmProviderInstanceView[] };
   /** 某家已入库的模型清单（角色绑定那两只下拉的候选源）。 */
   'llm.settings.listModels': { args: [providerId: string]; returns: LlmModelView[] };
@@ -2323,9 +2323,9 @@ export interface BridgeSignatures {
   'llm.settings.fetchModels': { args: [providerId: string]; returns: LlmFetchModelsView };
   /** 勾中的那几条入库（spec 7.2-06）：已在清单里的原样跳过，一家都没有勾就回空。 */
   'llm.settings.addModels': { args: [input: LlmProviderAddModelsInput]; returns: LlmModelView[] };
-  /** 从清单里去掉一条（spec 7.2-06 的反向）；正被某条腿绑着的那条由界面先挡住。 */
+  /** 从清单里去掉一条（spec 7.2-06 的反向）；正被某条通道绑着的那条由界面先挡住。 */
   'llm.settings.removeModel': { args: [providerId: string, model: string]; returns: LlmModelView[] };
-  /** 把一条腿指到某个实例的某条已入库模型（spec 7.2-11 / 12）：只写实例 id 与模型名两格，不复制地址。 */
+  /** 把一条通道指到某个实例的某条已入库模型（spec 7.2-11 / 12）：只写实例 id 与模型名两格，不复制地址。 */
   'llm.settings.bindRole': { args: [input: LlmRoleBindInput]; returns: LlmSettingsView };
   /** 点名测某一家连通性（spec 7.2-04）：打的是那个实例自己的地址与 key，不碰全局绑定。 */
   'llm.settings.checkProvider': { args: [providerId: string, model: string]; returns: LlmCheckView };
@@ -2795,7 +2795,7 @@ export interface BridgeSignatures {
    * 与 `kb.gap.report` 一样**没有 `nowMs`**：记录行的时间戳由主进程取，调用方不许决定"这次生成算哪一天"。
    * `docId` 省略时只在库里恰好一份简历的情况下自动选，多份则以 `INVALID_ARGUMENT` 上浮（"要定制哪一份"是人来答的）。
    * 三种结构化失败各有界面口径：`INVALID_ARGUMENT`（JD 过短 / 多份简历未指明）、`KB_SOURCE_MISSING`（还没导入简历）、
-   * `KB_LIBRARY_MISSING`（缺口腿未装配，只能报"功能不可用"）。
+   * `KB_LIBRARY_MISSING`（缺口通道未装配，只能报"功能不可用"）。
    * 返回体**不含文档本体**（见上面那组镜像的头注释）：产物是否存在的判据是 `receipt.outcome`，
    * `rejected` 时界面只给违规明细与"需人工确认"，不给一份看起来像成功过的空壳（判据三）。
    */
@@ -2841,7 +2841,7 @@ export interface BridgeSignatures {
   'schedule.registry.removeJob': { args: [jobId: string]; returns: void };
   /**
    * 立刻跑一次（把"到点"这件事交给人按一次，用于验证 5.7-06 的失败不影响下次）。
-   * 与到点触发同一条腿：先问额度、被拒即落 `skipped` 并带回闸门原话，一次 `start` 都不发。
+   * 与到点触发同一条通道：先问额度、被拒即落 `skipped` 并带回闸门原话，一次 `start` 都不发。
    */
   'schedule.registry.triggerNow': { args: [jobId: string]; returns: ScheduleTriggerView };
 }

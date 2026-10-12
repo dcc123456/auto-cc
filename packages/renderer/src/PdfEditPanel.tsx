@@ -290,7 +290,7 @@ export function PdfEditPanel({ model }: { model: PdfEditModel }) {
             <p className="text-[11px] text-slate-500">{t('pdfEdit.outPathHint')}</p>
           </div>
 
-          {/* 两条被降级的腿（plan 片 58 步骤 3）：旧流程「先在输入框里写好字、再到空白画布上拖橡皮筋」
+          {/* 两条被降级的通道（plan 片 58 步骤 3）：旧流程「先在输入框里写好字、再到空白画布上拖橡皮筋」
               与页序调整。键名与 `data-action` 值原样保留，取证通道不断；变的只是它们住在披露层里。 */}
           <DeskExplainer id="pdfEdit.advanced" label={t('pdfEdit.advanced')}>
             <div className="flex flex-col gap-3">

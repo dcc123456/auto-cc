@@ -1,5 +1,5 @@
 /**
- * 模型腿纯函数的用例（spec 4.4-02 的采信判据 / 4.4-07 的合并稳定性 / 4.4-08 的离线口径）。
+ * 模型通道纯函数的用例（spec 4.4-02 的采信判据 / 4.4-07 的合并稳定性 / 4.4-08 的离线口径）。
  *
  * 这里**不起装配、不碰 cordis、不发请求**：`readModelRequirements` 接的是「模型回复的一段文本」，
  * 所以用例直接把文本写在文件里，等价于把真实回复录下来回放（同 `requirements.test.ts` 的做法）。
@@ -10,7 +10,7 @@ import { mergeModelWithLexical, readModelRequirements } from './requirements-mod
 import { buildRequirementMessages, REQUIREMENT_PROMPT_VERSION } from './prompts.js';
 import { extractRequirementsLexically, type RequirementItem } from './requirements.js';
 
-/** 固定样例 JD（虚构）：第二句里的「数据治理」「成本优化」不在词表里，正是模型腿要补的长尾。 */
+/** 固定样例 JD（虚构）：第二句里的「数据治理」「成本优化」不在词表里，正是模型通道要补的长尾。 */
 const JD = [
   '数据平台工程师（星桥科技）',
   '负责订单与推荐链路的数据治理，具备成本优化意识，技术栈以 Java、Kafka 为主。',
@@ -18,7 +18,7 @@ const JD = [
 ].join('\n');
 
 /**
- * 造一条模型腿的条目（只给合并用例需要的字段，其余走默认）。
+ * 造一条模型通道的条目（只给合并用例需要的字段，其余走默认）。
  * @param overrides 需要改写的字段
  * @returns 一条 `via: model` 的要求
  */
@@ -61,7 +61,7 @@ describe('模型输出的读取（spec 4.4-02 的事实锁定判据）', () => {
     const item = read.accepted[0];
     expect(item?.via).toBe('model');
     expect(item?.quote).toBe('负责订单与推荐链路的数据治理');
-    // 下标必须能切回同一句原文——这是 4.4-01「带原文引用位置」在模型腿上的同一判据。
+    // 下标必须能切回同一句原文——这是 4.4-01「带原文引用位置」在模型通道上的同一判据。
     expect(JD.slice(item?.start ?? -1, item?.end ?? -1)).toBe(item?.quote);
   });
 
@@ -129,11 +129,11 @@ describe('模型输出的读取（spec 4.4-02 的事实锁定判据）', () => {
   });
 });
 
-describe('两条腿的合并（spec 4.4-02 / 4.4-07）', () => {
-  /** 词面腿的基线（同一份 JD、每类上限放宽到不会触顶）。 */
+describe('两条通道的合并（spec 4.4-02 / 4.4-07）', () => {
+  /** 词面通道的基线（同一份 JD、每类上限放宽到不会触顶）。 */
   const lexical = extractRequirementsLexically(JD, 12).items;
 
-  it('词面腿是底座：合并后每条原始条目都在，且模型条目排在同类别后', () => {
+  it('词面通道是底座：合并后每条原始条目都在，且模型条目排在同类别后', () => {
     const merged = mergeModelWithLexical(lexical, [modelItem()], 12);
     expect(merged.added).toBe(1);
     expect(merged.droppedDuplicate).toBe(0);
@@ -167,12 +167,12 @@ describe('两条腿的合并（spec 4.4-02 / 4.4-07）', () => {
     expect(merged.items.filter((item) => item.via === 'model')).toEqual([]);
   });
 
-  it('该类别已被词面腿占满上限时，模型条目计入触顶丢弃', () => {
+  it('该类别已被词面通道占满上限时，模型条目计入触顶丢弃', () => {
     const hardOnly = lexical.filter((item) => item.kind === 'hard_skill');
     const merged = mergeModelWithLexical(hardOnly, [modelItem()], 1);
     expect(merged.added).toBe(0);
     expect(merged.droppedByLimit).toBe(1);
-    // 底座原样保留：触顶只挡"再加一条"，不会把词面腿已有的条目挤掉。
+    // 底座原样保留：触顶只挡"再加一条"，不会把词面通道已有的条目挤掉。
     expect(merged.items).toEqual(hardOnly);
   });
 

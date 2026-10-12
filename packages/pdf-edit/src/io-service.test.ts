@@ -1,5 +1,5 @@
 /**
- * `pdf.io` 服务单元测试（spec 3.4-03 的打开腿 + 3.5-12 的字节腿 + plan §7.4 的第一条口 + §7.10 的确定态）。
+ * `pdf.io` 服务单元测试（spec 3.4-03 的打开通道 + 3.5-12 的字节通道 + plan §7.4 的第一条口 + §7.10 的确定态）。
  *
  * 判据面只有三件事：**读得到度量**、**搬得出字节**与**读不到时给一个码**。文件一律写在系统临时目录里
  * （AGENTS.md §7.5：测试产物不进仓库），路径是绝对路径——渲染层给的就是绝对路径，
@@ -40,7 +40,7 @@ function writeFile(dir: string, name: string, bytes: Uint8Array): string {
 
 /**
  * 挂起一份 `pdf.io`。
- * @param maxBytes 单次打开的字节上限（用于演「误选大文件」这条失败腿）
+ * @param maxBytes 单次打开的字节上限（用于演「误选大文件」这条失败那一条）
  * @returns 服务实例
  */
 async function boot(maxBytes = 5_242_880): Promise<PdfIoService> {
@@ -49,7 +49,7 @@ async function boot(maxBytes = 5_242_880): Promise<PdfIoService> {
   return asApp(ctx)['pdf.io'];
 }
 
-describe('3.4-03 打开腿：pdf.io.open 只回度量读数', () => {
+describe('3.4-03 打开通道：pdf.io.open 只回度量读数', () => {
   it('三页文件：页数、逐页宽高、来源哈希都回来', async () => {
     const dir = tempDir();
     const bytes = minimalMultiPagePdf(3);
@@ -82,7 +82,7 @@ describe('3.4-03 打开腿：pdf.io.open 只回度量读数', () => {
 });
 
 describe('plan §7.10 的确定态：读不出一律 PDF_EDIT_READ_FAILED', () => {
-  /** 六条失败腿：前四条是「读不到字节」，后两条是「字节读到了但这份 PDF 用不了」。 */
+  /** 六条失败那一条：前四条是「读不到字节」，后两条是「字节读到了但这份 PDF 用不了」。 */
   const cases: readonly { name: string; maxBytes?: number; prepare: (dir: string) => string; code?: string }[] = [
     { name: '相对路径', prepare: () => 'relative/resume.pdf' },
     { name: '文件不存在', prepare: (dir) => join(dir, 'missing.pdf') },
@@ -116,7 +116,7 @@ describe('plan §7.10 的确定态：读不出一律 PDF_EDIT_READ_FAILED', () =
   }
 });
 
-describe('3.5-12 字节腿：pdf.io.bytes 把整份文件交给渲染层', () => {
+describe('3.5-12 字节通道：pdf.io.bytes 把整份文件交给渲染层', () => {
   it('回的是逐字相同的字节，且与 `open` 共用同一份上限（不另立第二档尺度）', async () => {
     const dir = tempDir();
     const bytes = minimalMultiPagePdf(3);
@@ -129,7 +129,7 @@ describe('3.5-12 字节腿：pdf.io.bytes 把整份文件交给渲染层', () =>
     expect(value.byteLength).toBe(bytes.byteLength);
   });
 
-  it('字节腿只读不解析：结构损坏的文件照样把字节交出去，判"是不是 PDF"是渲染层 pdf.js 的事', async () => {
+  it('字节通道只读不解析：结构损坏的文件照样把字节交出去，判"是不是 PDF"是渲染层 pdf.js 的事', async () => {
     const dir = tempDir();
     const broken = new Uint8Array(Buffer.from('%PDF-1.4\n这不是合法的 PDF 结构\n'));
     const filePath = writeFile(dir, 'broken.pdf', broken);
@@ -141,7 +141,7 @@ describe('3.5-12 字节腿：pdf.io.bytes 把整份文件交给渲染层', () =>
     expect(sha256Hex(value)).toBe(sha256Hex(broken));
   });
 
-  it('读不到字节那四条腿与 `open` 同码同话术：界面上的处置完全相同，就不另开支新码', async () => {
+  it('读不到字节那四条通道与 `open` 同码同话术：界面上的处置完全相同，就不另开支新码', async () => {
     const cases: readonly { name: string; maxBytes?: number; prepare: (dir: string) => string }[] = [
       { name: '相对路径', prepare: () => 'relative/resume.pdf' },
       { name: '文件不存在', prepare: (dir) => join(dir, 'missing.pdf') },
@@ -151,7 +151,7 @@ describe('3.5-12 字节腿：pdf.io.bytes 把整份文件交给渲染层', () =>
     for (const item of cases) {
       const dir = tempDir();
       const io = await boot(item.maxBytes ?? 5_242_880);
-      // 同步腿就同步抛（网关那一侧的 try 同样接得住），所以这里不用 `.catch` 而是就地捕获。
+      // 同步通道就同步抛（网关那一侧的 try 同样接得住），所以这里不用 `.catch` 而是就地捕获。
       let failure: unknown;
       try {
         io.bytes(item.prepare(dir));

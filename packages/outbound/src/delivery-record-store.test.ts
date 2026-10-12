@@ -212,7 +212,7 @@ describe('3.7-02 记录的写入与读取', () => {
   it('老库（已记 9 / 27、没有会话坐标那一列）重挂后列补得上，旧行读回 null 而不是空串', async () => {
     // 这一条守的是 §9 实测 5.3-a 那一类缺陷：`runMigrations` 认的是 `schema_migrations` 台账，
     // 把 `ALTER TABLE` 补进已经记过账的号段 9 里，老用户机上永远执行不到那一支，
-    // 列因此静默缺失、第一次按会话投递就以 `no such column` 失败。每个用例都从空库起，单测照不出这条腿。
+    // 列因此静默缺失、第一次按会话投递就以 `no such column` 失败。每个用例都从空库起，单测照不出这条通道。
     const dir = tempDir();
     const first = await boot(dir);
     first.records.record(record({ ledgerId: 31, snapshotId: 'snap-old' }));

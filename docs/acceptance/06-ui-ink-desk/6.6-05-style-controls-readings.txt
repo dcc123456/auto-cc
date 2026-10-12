@@ -26,7 +26,7 @@ spec 6.6-05 · 样式控件（主题 + 段落）与 resume.editor.design 的活�
 - 未保存标记：`data-dirty="true"`，`保存` 那颗从 `NOTHING_TO_SAVE` 变可点
 - `window.autoCC.resume['editor.preview']` 回来的产物里多出：`:root{--rz-ink:#a31621;}`（产物长 35 086 → 35 120 字节）
 
-界面没有一处本地判断颜色的形状：色卡只摆得出 `#rrggbb`，所以 `bad-color` 那一条腿在界面上走不到（判界只在主进程一次，AGENTS.md §2.5）。
+界面没有一处本地判断颜色的形状：色卡只摆得出 `#rrggbb`，所以 `bad-color` 那一条通道在界面上走不到（判界只在主进程一次，AGENTS.md §2.5）。
 
 ## 3. 一次调用 = 一个撤销单元（裁定第 3 条的形状）
 

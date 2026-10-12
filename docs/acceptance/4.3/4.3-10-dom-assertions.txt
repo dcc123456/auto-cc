@@ -36,7 +36,7 @@
     agent 侧的空态同样是返回值：{判题机} => `status:'ok', hits:0`；{。。。} => `status:'no_query_tokens', hits:0, queryTokens:[]`
     => 注册表的 `TOOL_INPUT_INVALID` 没有把两种态吃成一个错误（入参只校验「是字符串」，不设 `min(1)`），
        agent 与界面看到的是同一套码，不存在第二条数据通道
-    => 单字腿在活体里也成立：{订} => `status:'ok', hits:2`，其中含 `substring` 理由
+    => 单字通道在活体里也成立：{订} => `status:'ok', hits:2`，其中含 `substring` 理由
 
 [5] 确定性复跑：同一查询连打两次，整段 JSON 相等（`twice=true`，分数 [0.6829, 0.6034]）
     ——4.3-10 的「不返回随机结果」不只是"看着一样"：排序键是分数，分数由库内统计量（N / df / avgdl）决定，无随机项。

@@ -11,7 +11,7 @@
 "每一跳都走公开入口"：生成走 resume.generate.run、接受走 resume.generate.accept、
 导出走 resume.export.toPdf —— 三个都在 shared/bridge.ts 的白名单里（204 / 208 与 export 段）。
 
-模型腿打的是本地 fixture（scripts/fixture-server.ts，127.0.0.1:10233/v1），
+模型通道打的是本地 fixture（scripts/fixture-server.ts，127.0.0.1:10233/v1），
 零真实平台流量、零真实模型花费（§7.2 + 判据四）。
 
 ────────────────────────────────────────────────────────────────────

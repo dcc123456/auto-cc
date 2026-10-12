@@ -7,7 +7,7 @@
  * 且**在小库上永远测不出来**——所以必须灌到万级再测，且必须看查询计划。
  *
  * 三条独立证据，各钉一件事：
- * 1. **一万行真的进库了**：四张表按 `COUNT(*)` 逐张数，四腿之和等于灌入总数；
+ * 1. **一万行真的进库了**：四张表按 `COUNT(*)` 逐张数，四条之和等于灌入总数；
  *    少了这一条，"计时很快"就只是"表是空的"。
  * 2. **聚合口的读数与灌数时的逐行点数一致**：期望值由灌数循环自己累加（与 SQL 无关的第二条路），
  *    所以这里对平的是"区间口径 + 时刻列 + 去重键"三件事，而不只是"没报错"。
@@ -31,10 +31,10 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bootFunnelAssembly, jobSeed, type FunnelAssembly } from './metrics-assembly.js';
 
-/** 灌入总数（判据原文的"万级"取 10 000 行，四腿相加正好落在这一位数上）。 */
+/** 灌入总数（判据原文的"万级"取 10 000 行，四条相加正好落在这一位数上）。 */
 const SCALE_TOTAL_ROWS = 10_000;
 
-/** 四腿各灌多少行：岗位库最重（真实使用里抓一轮就是几百条），投递最轻。 */
+/** 四条各灌多少行：岗位库最重（真实使用里抓一轮就是几百条），投递最轻。 */
 const LEG_ROWS = { jobs: 4000, ledger: 3000, conversation: 2000, delivery: 1000 };
 
 const DAY_MS = 86_400_000;

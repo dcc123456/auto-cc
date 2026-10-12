@@ -1,5 +1,5 @@
 /**
- * `kb.gap` service（spec 4.4-01 的入口位 / 4.4-02 的模型腿与可见回落 / 4.4-03 的三态比对 /
+ * `kb.gap` service（spec 4.4-01 的入口位 / 4.4-02 的模型通道与可见回落 / 4.4-03 的三态比对 /
  * 4.4-04 的反向比对 / 4.4-06 的建议随结论 / 4.4-07 的稳定读数 / 4.4-10 的来源标注）。
  *
  * 4.4 这条链在本包里做到「拆解 + 比对」为止：输入一段 JD 正文，产出带原文位置的四类要求，
@@ -7,10 +7,10 @@
  * agent 工具面在本文件 `[Service.init]` 里登记（4.4-05 的双入口），界面呈现与证据链跳转
  * （4.4-05 / 4.4-02 的 V 半边）在渲染层的 `GapPanel`，本文件不写任何 UI（§4.1 的依赖方向）。
  *
- * 两条腿的分工是本服务的形状（plan §4.4-b 证据 [3] 对 4.4-a 草案的更正）：
- * **词面腿是基线，每次都跑；模型腿是增强，只在基线上补**。于是模型缺席时报告只是短一些，
+ * 两条通道的分工是本服务的形状（plan §4.4-b 证据 [3] 对 4.4-a 草案的更正）：
+ * **词面通道是基线，每次都跑；模型通道是增强，只在基线上补**。于是模型缺席时报告只是短一些，
  * 而拆解这件事本身不会失败——这正是 4.4-02 要的「功能不中断 + 回落可被看见」。
- * 比对腿（4.4-c）反过来是**硬依赖**：报告要比的是"我这本库里有没有"，库里没有可比对象时
+ * 比对通道（4.4-c）反过来是**硬依赖**：报告要比的是"我这本库里有没有"，库里没有可比对象时
  * 给一份全缺失的报告等于把装配问题说成能力问题，所以那条路直接结构化失败（`KB_LIBRARY_MISSING`）。
  *
  * 五条装配层的立身之本：
@@ -26,7 +26,7 @@
  *    「页面原样的要求标签」——那是 2.3 抓取的真相源，把派生结果写回同一列就是造第二个真相（4.2-11）。
  *    可重建的投影不落库，用时现算。
  * 5. **日志只记计数与状态**（延续 4.3-12 的脱敏口径）：JD 正文与简历正文一样是个人的，
- *    本服务落的两行只有字数、条数、丢弃数、模型腿状态与模型名、比对三态计数与截止日期，
+ *    本服务落的两行只有字数、条数、丢弃数、模型通道状态与模型名、比对三态计数与截止日期，
  *    **不含 JD 正文，也不含模型原文或库内正文**。
  */
 import {
@@ -60,16 +60,16 @@ import { mergeModelWithLexical, readModelRequirements } from './requirements-mod
 import { buildRequirementMessages, REQUIREMENT_PROMPT_VERSION } from './prompts.js';
 
 /**
- * 模型腿的五种结局（spec 4.4-02 的「不可用要能被看见」就落在这个字段上）。
+ * 模型通道的五种结局（spec 4.4-02 的「不可用要能被看见」就落在这个字段上）。
  *
- * 与 4.3-d 向量腿的 `unavailable / failed / merged` 同一套语言，区别在 4.4 多了 `disabled`
- * （本条腿可以整体关掉，向量腿不行——关了就退回纯词面检索，用户不会察觉是配置还是故障），
+ * 与 4.3-d 向量通道的 `unavailable / failed / merged` 同一套语言，区别在 4.4 多了 `disabled`
+ * （本条可以整体关掉，向量通道不行——关了就退回纯词面检索，用户不会察觉是配置还是故障），
  * 以及 `rejected`（模型答得上来但一条都没收下：引文对不上原文或不合契约）。
  * 五态都必须能在日志与界面上区分开，否则「回落」就又变成静默失败。
  */
 export const GAP_MODEL_STATUSES = ['merged', 'rejected', 'failed', 'unavailable', 'disabled'] as const;
 
-/** 模型腿结局的字面量类型。 */
+/** 模型通道结局的字面量类型。 */
 export type GapModelStatus = (typeof GAP_MODEL_STATUSES)[number];
 
 /**
@@ -88,19 +88,19 @@ export const kbGapSchema = z
      */
     minJdChars: z.number().int().min(1).max(2000).default(20),
     /**
-     * 是否允许问模型腿。关掉后本服务退回纯词面拆解（4.4-02 的「没有模型也能用」在运行期也要成立，
+     * 是否允许问模型通道。关掉后本服务退回纯词面拆解（4.4-02 的「没有模型也能用」在运行期也要成立，
      * 而不是只靠摘插件——离线演示、省额度、以及 4.4-e 的额度闸门都直接把这个开关递给用户）。
      */
     allowModelLeg: z.boolean().default(true),
-    /** 模型腿单次回复的长度上限（token）。四类型别 + 每类上限的清单远小于对话全文，1200 足够且防跑飞。 */
+    /** 模型通道单次回复的长度上限（token）。四类型别 + 每类上限的清单远小于对话全文，1200 足够且防跑飞。 */
     modelMaxTokens: z.number().int().min(128).max(4096).default(1200),
     /**
-     * 模型腿的采样温度。与话术生成的 0.7 相反，这里取 0：拆解是**读数**不是创作，
+     * 模型通道的采样温度。与话术生成的 0.7 相反，这里取 0：拆解是**读数**不是创作，
      * 同一个 JD 两次拆出不同的清单会让 4.4-07 的稳定性验收无从谈起。
      */
     modelTemperature: z.number().min(0).max(2).default(0),
 
-    // ---- 以下六项属比对腿（spec 4.4-03 / 04 / 06，plan §4.4-c 判据一 / 二）----
+    // ---- 以下六项属比对通道（spec 4.4-03 / 04 / 06，plan §4.4-c 判据一 / 二）----
     // 其中三条（`evidenceHitMinScore` / `evidencePartialMinScore` / `highlightMinScore`）是**测量型**：
     // 它们是这把 token 尺子的刻度，4.4-e 已按人判标注集标定（语料 `gap-calibration-corpus.ts`、
     // 选值 `gap-calibration.ts`、回归锁 `gap-calibration.test.ts`、读数
@@ -158,30 +158,30 @@ export type { RequirementItem, RequirementKind } from './requirements.js';
 
 /** 一次拆解的读数（界面与后续比对拿它当输入）。 */
 export interface GapExtractView {
-  /** 四类要求条目，已按「四类表次序 → 原文起始位置」排成稳定序列（spec 4.4-07）；词面腿与模型腿已合并 */
+  /** 四类要求条目，已按「四类表次序 → 原文起始位置」排成稳定序列（spec 4.4-07）；词面通道与模型通道已合并 */
   items: RequirementItem[];
   /** 参与拆解的正文字符数——日志与界面播报用计数，不落 JD 正文（4.3-12 同口径） */
   inputChars: number;
-  /** 被每类上限丢弃的条数——只统计**词面腿**那一路，模型腿的触顶数在 `modelDropped` 里 */
+  /** 被每类上限丢弃的条数——只统计**词面通道**那一路，模型通道的触顶数在 `modelDropped` 里 */
   droppedByLimit: number;
   /** 词表版本，随结果一起进复盘记录（同 2.5-09 的 `scriptVersion`） */
   lexiconVersion: string;
-  /** 模型腿这次是哪五种结局之一（spec 4.4-02 的界面播报判据） */
+  /** 模型通道这次是哪五种结局之一（spec 4.4-02 的界面播报判据） */
   modelStatus: GapModelStatus;
   /** `modelStatus` 非 merged 时必填：为什么没用上模型，界面按它播报；merged 时为 null */
   modelReason: string | null;
   /** 实际完成本次拆解的模型名（来自 `llm.chat`，不是配置里的猜测）；没问过模型时 null */
   model: string | null;
-  /** 模型腿实际并入的条数（merged 时 > 0；rejected 时为 0） */
+  /** 模型通道实际并入的条数（merged 时 > 0；rejected 时为 0） */
   modelAdded: number;
-  /** 模型腿被丢弃的条数合计：契约不合格 + 引文定位不到 + 与词面腿重复 + 触顶（4.4-06 的"负面结论要给依据"） */
+  /** 模型通道被丢弃的条数合计：契约不合格 + 引文定位不到 + 与词面通道重复 + 触顶（4.4-06 的"负面结论要给依据"） */
   modelDropped: number;
   /** 提示词版本，随结果进复盘；没问过模型时 null */
   promptVersion: string | null;
 }
 
 /**
- * 一次缺口报告的读数 = 拆解视图（含模型腿五态）+ 比对结果。
+ * 一次缺口报告的读数 = 拆解视图（含模型通道五态）+ 比对结果。
  *
  * 界面上的"这次没用上模型"与"这三条JD要求你库里没据"要同时被看见，所以两层视图叠成一个返回体，
  * 而不是让渲染层自己拼两个调用（§5.9 双入口共用同一 service）。
@@ -215,7 +215,7 @@ function countOfKind(items: readonly RequirementItem[], kind: RequirementKind): 
   return items.filter((item) => item.kind === kind).length;
 }
 
-/** 一次模型腿尝试的内部结果（`askModel` 的返回，直接摊进视图）。 */
+/** 一次模型通道尝试的内部结果（`askModel` 的返回，直接摊进视图）。 */
 interface ModelAttempt {
   status: GapModelStatus;
   reason: string | null;
@@ -228,9 +228,9 @@ interface ModelAttempt {
 /**
  * 这次是否真的把提示词发出去了（视图里的 `promptVersion` 与日志尾部的版本段共用这条判据）。
  *
- * 对外可见是因为 4.5 的生成腿共用同一套五态与同一条"没问过就不许报版本"的判断（§2.2）：
+ * 对外可见是因为 4.5 的生成通道共用同一套五态与同一条"没问过就不许报版本"的判断（§2.2）：
  * 生成记录表里的 `prompt_version` 也必须在这个函数说"没发过"时为 null，两处各写一遍迟早会分叉。
- * @param status 模型腿结局
+ * @param status 模型通道结局
  * @returns 走到"问"这一步（含问了但失败 / 被拒）时为 true
  */
 export function wasAsked(status: GapModelStatus): boolean {
@@ -266,7 +266,7 @@ export class KbGapService extends Service {
         id: 'kb.gap.report',
         titleKey: 'agent.tool.labels.kbGapReport',
         description:
-          '把一段 JD 正文与本地简历知识库比对，返回三态缺口报告（命中 / 部分命中 / 缺失）、每条未命中要求的改写建议、库内具备而 JD 未提的相关亮点，以及经验月数与学历档位两个换算读数；模型腿不可用时自动退回词面拆解并在 modelStatus 里给出原因，全程只读本地库、不出网',
+          '把一段 JD 正文与本地简历知识库比对，返回三态缺口报告（命中 / 部分命中 / 缺失）、每条未命中要求的改写建议、库内具备而 JD 未提的相关亮点，以及经验月数与学历档位两个换算读数；模型通道不可用时自动退回词面拆解并在 modelStatus 里给出原因，全程只读本地库、不出网',
         input: z.strictObject({
           jdText: z.string(),
           kind: z.enum(KB_ENTITY_KINDS).optional(),
@@ -301,7 +301,7 @@ export class KbGapService extends Service {
       `[kb-gap] 缺口比对就绪：阈值 topK=${String(this.options.evidenceTopK)}` +
         ` hit=${String(this.options.evidenceHitMinScore)} partial=${String(this.options.evidencePartialMinScore)}` +
         ` yearsRatio=${String(this.options.yearsPartialRatio)} highlight=${String(this.options.highlightMinScore)}` +
-        ` maxHighlights=${String(this.options.maxHighlights)} · 模型腿 ${
+        ` maxHighlights=${String(this.options.maxHighlights)} · 模型通道 ${
           this.options.allowModelLeg ? '开' : '关（纯词面）'
         } · 知识库 ${hasLibrary ? '已装配' : '未装配（调用时报 KB_LIBRARY_MISSING）'}` +
         ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
@@ -309,15 +309,15 @@ export class KbGapService extends Service {
   }
 
   /**
-   * 把一段 JD 正文拆成四类能力要求：先跑词面腿拿基线，再问模型腿做增强，最后合并成稳定序列。
+   * 把一段 JD 正文拆成四类能力要求：先跑词面通道拿基线，再问模型通道做增强，最后合并成稳定序列。
    *
-   * 模型腿的任何失败都不会让本方法失败（4.4-02 的「功能不中断」）：拿不到网关、没配 key、
-   * 超时、返回的不是 JSON、引文对不上原文——一律退回词面腿的结果并把原因放进视图。
+   * 模型通道的任何失败都不会让本方法失败（4.4-02 的「功能不中断」）：拿不到网关、没配 key、
+   * 超时、返回的不是 JSON、引文对不上原文——一律退回词面通道的结果并把原因放进视图。
    * 唯一的例外是 `llm.chat` 抛 `INVALID_ARGUMENT`：那是我们拼错了请求而不是模型不可用，
    * 回落只会把 bug 藏起来（`outbound.script` 的同一判据）。
    * @param jdText JD 正文（来自界面文本框或 `jobs.description`，单位：JS 字符串）
-   * @returns 合并后的稳定序列 + 两条腿各自的版本、计数与模型腿结局
-   * @throws AppError(`INVALID_ARGUMENT`) 正文去空白后短于 `minJdChars`，或模型腿请求本身不合法
+   * @returns 合并后的稳定序列 + 两条通道各自的版本、计数与模型通道结局
+   * @throws AppError(`INVALID_ARGUMENT`) 正文去空白后短于 `minJdChars`，或模型通道请求本身不合法
    */
   async extract(jdText: string): Promise<GapExtractView> {
     const trimmed = jdText.trim();
@@ -345,10 +345,10 @@ export class KbGapService extends Service {
   }
 
   /**
-   * 问一次模型腿，把五种结局收敛成一个 `ModelAttempt`，不在这里决定界面怎么播。
+   * 问一次模型通道，把五种结局收敛成一个 `ModelAttempt`，不在这里决定界面怎么播。
    * @param jdText 去空白后的 JD 正文（与提示词里那份同一个字符串，引文才定位得回去）
-   * @param lexicalItems 词面腿的产出，作为合并的底座
-   * @returns 合并后的序列与各计数；词面腿基线在任何分支下都完整保留在 `items` 里
+   * @param lexicalItems 词面通道的产出，作为合并的底座
+   * @returns 合并后的序列与各计数；词面通道基线在任何分支下都完整保留在 `items` 里
    */
   private askModel = async (jdText: string, lexicalItems: readonly RequirementItem[]): Promise<ModelAttempt> => {
     // 除 merged 之外的四种结局，交回来的序列都是词面基线原样——这条不变量就是 4.4-02 的「功能不中断」。
@@ -361,7 +361,7 @@ export class KbGapService extends Service {
       items: [...lexicalItems],
     });
     if (!this.options.allowModelLeg) {
-      return fallback('disabled', null, '配置里关掉了模型腿（allowModelLeg=false）');
+      return fallback('disabled', null, '配置里关掉了模型通道（allowModelLeg=false）');
     }
     const gateway = chatGatewayOf(this.ctx);
     if (!gateway) {
@@ -401,7 +401,7 @@ export class KbGapService extends Service {
     const dropped = merged.droppedDuplicate + merged.droppedByLimit + read.droppedUnlocatable + read.droppedInvalid;
     if (merged.added === 0) {
       return {
-        ...fallback('rejected', modelName, `模型产出的 ${String(read.accepted.length)} 条与词面腿完全重复`),
+        ...fallback('rejected', modelName, `模型产出的 ${String(read.accepted.length)} 条与词面通道完全重复`),
         dropped,
       };
     }
@@ -422,7 +422,7 @@ export class KbGapService extends Service {
    * 拆解**复用** `extract()`，本方法不重开一条拆解通道（§2.5）；判据全在 `requirements-compare.ts` 的纯函数里，
    * 这里只做投影（库内实体 / 学历区块）与播报。
    *
-   * 与模型腿不同，**库是必需输入而不是增强**：`kb.profile` 不在装配里时抛 `KB_LIBRARY_MISSING`，
+   * 与模型通道不同，**库是必需输入而不是增强**：`kb.profile` 不在装配里时抛 `KB_LIBRARY_MISSING`，
    * 而不是给一份"全是缺失"的报告——那是最容易骗到自己的一种假读数（plan §4.4-c 接线形状）。
    * @param jdText JD 正文（与 `extract()` 同一份入参口径）
    * @param filter 比对范围：`sourceDocId` 限定"针对哪份简历"，不传则全库（含手工实体）
@@ -496,8 +496,8 @@ export class KbGapService extends Service {
   /**
    * 写一行拆解日志（只记计数与状态，§8.5 / 4.3-12 的脱敏口径）。
    * @param inputChars 参与拆解的正文字符数
-   * @param lexical 词面腿的产出
-   * @param attempt 模型腿的结局
+   * @param lexical 词面通道的产出
+   * @param attempt 模型通道的结局
    * @returns 无
    */
   private logExtract(inputChars: number, lexical: LexicalExtractResult, attempt: ModelAttempt): void {
@@ -508,8 +508,8 @@ export class KbGapService extends Service {
       ` / 年限 ${String(countOfKind(lexical.items, 'experience_years'))}`;
     const leg =
       attempt.status === 'merged'
-        ? `模型腿 merged 并入 ${String(attempt.added)} 条`
-        : `模型腿 ${attempt.status}（${attempt.reason ?? ''}）`;
+        ? `模型通道 merged 并入 ${String(attempt.added)} 条`
+        : `模型通道 ${attempt.status}（${attempt.reason ?? ''}）`;
     // 没问过的两种结局（disabled / unavailable）不把提示词版本写进日志——那会读成"发过这份提示词"。
     const asked = wasAsked(attempt.status);
     const line =

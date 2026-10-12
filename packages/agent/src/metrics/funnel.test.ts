@@ -316,7 +316,7 @@ describe('五级读数的形状与归属（spec 5.8-01）', () => {
   it('每一级要么有数要么有原因，两者必有其一且只有一', async () => {
     const full = await bootMetrics();
     const views = [full.funnel.query(RANGE, { nowMs: NOW_MS })];
-    // 逐只摘掉归属服务再各查一遍：这条性质在「有腿被摘」的装配上更要紧。
+    // 逐只摘掉归属服务再各查一遍：这条性质在「有通道被摘」的装配上更要紧。
     for (const name of ['jd.store', 'usage.ledger', 'conversation.store', 'outbound.deliveries']) {
       const { funnel } = await bootMetrics([name]);
       views.push(funnel.query(RANGE, { nowMs: NOW_MS }));
@@ -463,7 +463,7 @@ describe('入参校验与只读性（spec 5.8-04 / 5.8-02 的服务半边）', (
     expect(source).not.toMatch(/SELECT|INSERT|UPDATE|DELETE|prepare\(|\bmigrations\b|upgrade\(/i);
     expect(source).not.toContain('node:sqlite');
     expect(source).not.toMatch(/plugin-(store|outbound|platform|entitlement|resume|kb|browser)/);
-    // 没有 `inject`：摘掉任何一条能力腿都不会把本服务一起带进 PENDING（决策十六的装配取向）。
+    // 没有 `inject`：摘掉任何一条能力通道都不会把本服务一起带进 PENDING（决策十六的装配取向）。
     expect((FunnelQueryService as unknown as { inject?: unknown }).inject).toBeUndefined();
     // 台架里根本没有 store 插件，五级读数照样出得来——它不碰库不是承诺而是事实。
     const { funnel } = await bootMetrics();

@@ -883,7 +883,7 @@ describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () 
   it('老库（只有号段 2、没有审计表）重新挂载后能建出审计表并写进行', async () => {
     // 这一条是实跑探针抓出来的缺陷回归位：审计表最初挂在号段 2 的 `up` 里，而 `runMigrations` 认的是
     // `schema_migrations` 台账——已记「2 已应用」的库根本不会重跑那支迁移，老用户机上第一次切档位
-    // 就以 `no such table` 失败。每个用例都从空库起，所以单测全绿照不出这条腿（详见 plan §5.3-a 的更正）。
+    // 就以 `no such table` 失败。每个用例都从空库起，所以单测全绿照不出这条通道（详见 plan §5.3-a 的更正）。
     const { ctx, chatFiber } = await boot();
     const store = asApp(ctx).store;
     store.db.exec('DROP TABLE chat_autonomy_audit');

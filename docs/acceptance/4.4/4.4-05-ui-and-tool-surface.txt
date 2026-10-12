@@ -4,7 +4,7 @@
 条目原文：缺口报告界面可读（分栏 + 证据链跳转），文案 i18n（V 类，判据"截图两栏 + 点击跳转"）。
 
 结论：`[x]`。界面是 `packages/renderer/src/GapPanel.tsx`（新文件，挂在 `App.tsx` 诊断区 `KbPanel` 之后），
-它**只做呈现**：三态、计数、分数、建议、模型腿结局全部来自 `kb.gap.report` 的返回体，
+它**只做呈现**：三态、计数、分数、建议、模型通道结局全部来自 `kb.gap.report` 的返回体，
 本文件不重排、不重新判定（plan §4.4-d 判据二）。同时 `kb.gap.report` 进了 agent 工具面，
 两入口读的是同一个 `report()`（判据六）。
 
@@ -91,7 +91,7 @@ $ npx vitest run --reporter=verbose src/gap-service.test.ts src/profile-service.
   bodies:  kb-ba545af11d6c16b5 → "Java"
            kbs-f9eccc4cf5cb30c6 → "本科\n软件工程\n2017-09 - 2021-06\n江海大学"   # 出现两次：本科行与硕士行共用同一条区块依据
 
-第二条正是学历腿的形状：`硕士`（部分命中 0.67）与 `本科`（命中）指向**同一条** `section_chunk` 证据，
+第二条正是学历通道的形状：`硕士`（部分命中 0.67）与 `本科`（命中）指向**同一条** `section_chunk` 证据，
 界面上不复制正文，两处各自展开同一 id——"凭什么叫部分命中"在页面上是可查的，不需要再问模型。
 
 
@@ -101,15 +101,15 @@ $ npx vitest run --reporter=verbose src/gap-service.test.ts src/profile-service.
    缺失行每条带建议，年限行带"分数只作展示"那句。
 2. `4.4-05-zh-evidence-entity-and-section-chunk.png` — 两类 origin 同时展开（`Java` 与学历区块正文），
    证明实体与切片都跳得动。
-3. `4.4-05-en-three-columns.png` — 同一份报告切到 English：标题、栏头、建议句、模型腿播报、摘要行全部翻成英文。
-4. `4.4-05-zh-model-leg-disabled.png` — 腿状态 `disabled` 的播报：「模型腿已在配置里关掉，本报告只有词面拆解」。
+3. `4.4-05-en-three-columns.png` — 同一份报告切到 English：标题、栏头、建议句、模型通道播报、摘要行全部翻成英文。
+4. `4.4-05-zh-model-leg-disabled.png` — 通道状态 `disabled` 的播报：「模型通道已在配置里关掉，本报告只有词面拆解」。
 5. `4.4-05-zh-library-missing.png` — 库缺席空态（`plugins.stop('kb-profile')` 后点比对）：
    「还没有可比对的知识库：先在下方「知识库实体」面板导入简历并同步，再回来比这份 JD。
    这不是「你不合格」，是根本没比过。」+ 失败播报「比对缺口 失败：知识库服务 kb.profile 未装配：缺口报告没有可比的对象」。
    这张同时证明两件事：`kb-gap` 在没有 `dependsOn` 时**照样上岗并可见地失败**，
    以及旧的报告在 `kb/entities-changed` 后被清掉（页面上没有残留的三栏）。
 
-判据四要求"五种模型腿状态 → 五个 i18n 键"，现场看到的是 `unavailable`（缺 key）与 `disabled`（配置关腿）两种；
+判据四要求"五种模型通道状态 → 五个 i18n 键"，现场看到的是 `unavailable`（缺 key）与 `disabled`（配置关掉通道）两种；
 `merged` / `rejected` / `failed` 三种要真实可用的模型网关才排得出，见第【4】节。
 
 
@@ -123,8 +123,8 @@ $ pnpm harness eval --url 5173 --expr-file tmp/tool-surface.js
            jd.capture.run, kb.gap.report, kb.profile.list, kb.profile.search, kb.profile.syncVectors
   gapToolDescriptor: {id: "kb.gap.report", effect: "read", requiresConfirmation: false, description: "把一段 JD 正文与本地简历知识库比对…"}
 
-  viaTool.summary   : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 腿unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
-  directReadings    : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 腿unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
+  viaTool.summary   : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 通道unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
+  directReadings    : 4/1/10 · 月68 · 档2 · 2026-10 · 实体10 · 通道unavailable(模型未配置，缺 baseUrl / model / apiKey) · 提示词null · 词表lex-v1
   identicalFullJson : true                      # 整份返回体逐字节相等，不是"看起来一样"
 
   strictObjectRejectsNowMs : "TOOL_INPUT_INVALID"   # 入参 {jdText, nowMs:1} 被 z.strictObject 拒收
@@ -146,12 +146,12 @@ $ pnpm harness eval --url 5173 --expr-file tmp/tool-surface.js
 对话卡片标题走 `ChatPanel.TOOL_LABEL_KEY` + `agent.tool.labels.kbGapReport`（zh/en 双份），
 `gap.suggestion.*` 与 `gap.model*` 全部键在两份语言包里齐全——`pnpm lint` 的渲染层规范机检
 （`✔ 渲染层规范检查通过（2 个语言包，24 个源文件）`）就是查这个的：只解析字面 `t('key', {…})` 调用，
-所以界面里写了 5 条字面建议调用与 5 条字面腿播报，而不是动态拼 key。
+所以界面里写了 5 条字面建议调用与 5 条字面通道播报，而不是动态拼 key。
 
 
 【5】本片没覆盖什么（如实记录）
 ------------------------------------------------------------------------------
-- `merged` / `rejected` / `failed` 三种腿状态的**界面播报**没有现场图：本机 `llm` 未配 baseUrl/model/apiKey，
+- `merged` / `rejected` / `failed` 三种通道状态的**界面播报**没有现场图：本机 `llm` 未配 baseUrl/model/apiKey，
   而 4.4-02 的 U 半边已用契约用例钉住这五态的产出。缺的是"接上真 key 后在页面上看一眼"，
   与 4.4-02 的收口绑在同一个动作里（见 `4.4-02-model-leg-fallback.txt` 第【4】节）。
 - 反向比对亮点区在本语料下 0 条，所以 `data-gap-highlight` 与"另有 N 条未展开"（`data-gap-highlight-dropped`）

@@ -2,8 +2,8 @@
  * 千级切片检索基准（spec 4.3-09 的验收工具，plan §4.3-e 实现形状 1）。
  *
  * 它测的是**用户实际等的那个函数**：`kb.profile.search()` 的全链路——分词、FTS5 召回、子串兜底、
- * 应用层 BM25 重算、词面覆盖、排序、视图组装、向量腿短路。4.3-a 那份 spike 读数只覆盖其中**裸 FTS5
- * 一条腿**（2000 行双写 11.1ms、单次查询 0.30～0.61ms），拿它当 4.3-09 的证据等于把没测的那几条腿
+ * 应用层 BM25 重算、词面覆盖、排序、视图组装、向量通道短路。4.3-a 那份 spike 读数只覆盖其中**裸 FTS5
+ * 一条通道**（2000 行双写 11.1ms、单次查询 0.30～0.61ms），拿它当 4.3-09 的证据等于把没测的那几条
  * 当成免费的（plan §4.3-e 候选表第 1 行的否决理由）。
  *
  * 跑法：`pnpm bench:kb`（根脚本，等价于 `pnpm --filter @auto-cc/plugin-resume-kb bench`）。
@@ -65,7 +65,7 @@ const METRICS = [
   '上线周期压缩到 6 小时',
   '用例覆盖率提到 90%',
 ];
-/** 只在部分行尾追加，用来把切片长度拉开——整库平均长度一致会让 BM25 的长度归一那条腿测不出东西。 */
+/** 只在部分行尾追加，用来把切片长度拉开——整库平均长度一致会让 BM25 的长度归一那条通道测不出东西。 */
 const TAILS = [
   '沉淀了 Java 与 Go 两栈的排查手册',
   '并推动链路追踪与告警口径统一',
@@ -138,7 +138,7 @@ function corpusText(index: number): string {
 }
 
 /**
- * 本次基准要跑的查询（真实中文关键词，含三个故意冷门的，用来把"库里没有"那条腿也跑到）。
+ * 本次基准要跑的查询（真实中文关键词，含三个故意冷门的，用来把"库里没有"那条通道也跑到）。
  * @returns 查询数组；采样时按序号循环，条数与配置的 `queries` 不必整除
  */
 function querySet(): string[] {
@@ -223,7 +223,7 @@ async function runBench(budget: z.output<typeof benchConfigSchema>): Promise<Ben
   await ctx.plugin(LogService, { level: 'info', buffer: 500, file: 'auto-cc.log', dir: benchDir, redact: false });
   await ctx.plugin(StoreService, storeConfig);
   await ctx.plugin(ResumeDocService, {});
-  // 这两只为 `kb.profile` 的删除腿（4.1-14 的硬注入）而在场，基准本身不读它们；顺序必须在 kb-profile 之前。
+  // 这两只为 `kb.profile` 的删除通道（4.1-14 的硬注入）而在场，基准本身不读它们；顺序必须在 kb-profile 之前。
   await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 });
   await ctx.plugin(ResumeParseService, resumeParseSchema.parse({}));
   await ctx.plugin(KbProfileService, profileConfig);
@@ -317,7 +317,7 @@ async function runBench(budget: z.output<typeof benchConfigSchema>): Promise<Ben
     )}`,
   );
   console.log(
-    `向量腿：${[...vectorStatuses]
+    `向量通道：${[...vectorStatuses]
       .map(([status, count]) => `${status}×${String(count)}`)
       .join('  ')}（没有 key 就必须全是降级态）`,
   );
@@ -346,7 +346,9 @@ async function main(): Promise<void> {
     `RESULT 4.3-09 p95=${ms(report.p95Ms)}ms budget=${String(report.budgetMs)}ms verdict=${passed ? 'PASS' : 'FAIL'}`,
   );
   if (!passed) {
-    console.error('P95 超出配置预算：这就是 4.3-09 的验收失败。不要调预算，要去看是哪条腿慢（plan §4.3-e 的边界条）。');
+    console.error(
+      'P95 超出配置预算：这就是 4.3-09 的验收失败。不要调预算，要去看是哪条通道慢（plan §4.3-e 的边界条）。',
+    );
     process.exitCode = 1;
   }
 }

@@ -48,19 +48,19 @@ import type { GapState } from './requirements-compare.js';
 import { tokenize } from './tokenize.js';
 
 /**
- * 扫描网格的步长。0.01 而不是 0.02：亮点腿的读数本来就挤在 0.1～0.2 之间（实体短、JD 长，
+ * 扫描网格的步长。0.01 而不是 0.02：亮点通道的读数本来就挤在 0.1～0.2 之间（实体短、JD 长，
  * 覆盖率是 max(实体侧, JD 侧) 里较小的那一侧决定的），2 分位的格子连"不相关最高 0.1"与
  * "相关最低 0.1111"之间的带都放不下，会把一条本来可分的带扫成不可分。
  */
 export const CALIBRATION_GRID_STEP = 0.01;
 
-/** 文本比对腿的两个阈值（与 `GapCompareOptions` 里的同名两项一一对应）。 */
+/** 文本比对通道的两个阈值（与 `GapCompareOptions` 里的同名两项一一对应）。 */
 export interface TextThresholds {
   readonly partialMinScore: number;
   readonly hitMinScore: number;
 }
 
-/** 二态判定用的单个阈值（亮点腿）。 */
+/** 二态判定用的单个阈值（亮点通道）。 */
 export interface HighlightThreshold {
   readonly highlightMinScore: number;
 }
@@ -70,7 +70,7 @@ export interface CalibrationFlip {
   readonly id: string;
   /** `coverageOf` 的读数；零重合为 `null`（盲区） */
   readonly score: number | null;
-  /** 人判（三态腿是状态，亮点腿是布尔） */
+  /** 人判（三态通道是状态，亮点通道是布尔） */
   readonly human: GapState | boolean;
   /** 该选择下尺子判出来的 */
   readonly judged: GapState | boolean;
@@ -81,7 +81,7 @@ export interface CalibrationFlip {
   readonly isBoundary: boolean;
 }
 
-/** 三态腿在给定阈值下的完整读数。 */
+/** 三态通道在给定阈值下的完整读数。 */
 export interface TextEvaluation {
   readonly thresholds: TextThresholds;
   /** 与人判不一致、且**阈值动得了**的条目（真正要靠选值解决的） */
@@ -94,7 +94,7 @@ export interface TextEvaluation {
   readonly margin: number | null;
 }
 
-/** 亮点腿在给定阈值下的完整读数。 */
+/** 亮点通道在给定阈值下的完整读数。 */
 export interface HighlightEvaluation {
   readonly threshold: HighlightThreshold;
   readonly misfits: readonly CalibrationFlip[];
@@ -209,7 +209,7 @@ export function highlightSlack(score: number, isRelated: boolean, threshold: Hig
 }
 
 /**
- * 造一条翻脸读数（两条腿共用）。
+ * 造一条翻脸读数（两条通道共用）。
  * @param annotation 原标注（词面或亮点）
  * @param score 尺子读数
  * @param judged 该选择下尺子判出的
@@ -235,7 +235,7 @@ function flipOf(
 }
 
 /**
- * 把一组松弛量折成选值用的剖面（升序 + 取首位作最紧值）。两条腿共用同一份换算（§2.2）。
+ * 把一组松弛量折成选值用的剖面（升序 + 取首位作最紧值）。两条通道共用同一份换算（§2.2）。
  * @param slacks 全部**有读数**标注的松弛量（盲区不参与，见文件头第 2 条）
  * @returns `slackProfile` 为空数组时 `margin` 为 `null`
  */
@@ -416,7 +416,7 @@ function pickBestIndex(keys: readonly CandidateKeys[]): { index: number; tied: n
 }
 
 /**
- * 扫三态腿的两条分界线（`partial ≤ hit` 是 schema 的有序约束，违反它等于造一把
+ * 扫三态通道的两条分界线（`partial ≤ hit` 是 schema 的有序约束，违反它等于造一把
  * 任何命中都先被判成缺失的尺子，所以直接不生成这类候选）。
  * @param annotations 人判标注（默认为仓库里那份）
  * @param step 网格步长
@@ -449,7 +449,7 @@ export function sweepTextThresholds(
 }
 
 /**
- * 扫亮点腿的相关性下限。
+ * 扫亮点通道的相关性下限。
  * @param annotations 人判标注（默认为仓库里那份）
  * @param step 网格步长
  * @returns 选中阈值的评估读数、扫描规模与可分带宽
@@ -474,7 +474,7 @@ export function sweepHighlightThreshold(
 }
 
 /**
- * 三态腿的可分带宽：缺失类有读数样本的最高分 ↔ 命中类有读数样本的最低分。
+ * 三态通道的可分带宽：缺失类有读数样本的最高分 ↔ 命中类有读数样本的最低分。
  * @param scored 预读好的标注读数
  * @returns 两个端点；任一所需类别没有有读数样本时为 `null`
  */
@@ -523,10 +523,10 @@ export function formatReport(
   const lines: string[] = [];
   lines.push(`标注集：词面 ${String(annotations.length)} 条 / 亮点 ${String(highlightAnnotations.length)} 条`);
   lines.push(
-    `网格步长 ${String(CALIBRATION_GRID_STEP)}：三态腿评估 ${String(textSweep.gridPoints)} 组，亮点腿评估 ${String(highlightSweep.gridPoints)} 个点`,
+    `网格步长 ${String(CALIBRATION_GRID_STEP)}：三态通道评估 ${String(textSweep.gridPoints)} 组，亮点通道评估 ${String(highlightSweep.gridPoints)} 个点`,
   );
   lines.push('');
-  lines.push('—— 词面腿逐条读数（尺子 = coverageOf(claim, target)，与 compareByText 同一调用）——');
+  lines.push('—— 词面通道逐条读数（尺子 = coverageOf(claim, target)，与 compareByText 同一调用）——');
   for (const annotation of annotations) {
     const score = textScoreOf(annotation);
     const slack =
@@ -537,7 +537,7 @@ export function formatReport(
     );
   }
   lines.push('');
-  lines.push('—— 亮点腿逐条读数（尺子 = coverageOf(entity, jdText)，与 findHighlights 第二道闸同一调用）——');
+  lines.push('—— 亮点通道逐条读数（尺子 = coverageOf(entity, jdText)，与 findHighlights 第二道闸同一调用）——');
   for (const annotation of highlightAnnotations) {
     const score = highlightScoreOf(annotation);
     const slack =
@@ -552,30 +552,30 @@ export function formatReport(
   lines.push('');
   lines.push('—— 选型 ——');
   lines.push(
-    `三态腿 选中 partial=${String(textSweep.chosen.thresholds.partialMinScore)} ` +
+    `三态通道 选中 partial=${String(textSweep.chosen.thresholds.partialMinScore)} ` +
       `hit=${String(textSweep.chosen.thresholds.hitMinScore)}｜错分 ${String(textSweep.chosen.misfits.length)} 条` +
       `｜最紧余量 ${String(textSweep.chosen.margin)}｜出厂 ` +
       `partial=${String(shipped.partialMinScore)} hit=${String(shipped.hitMinScore)}`,
   );
   lines.push(
-    `亮点腿 选中 highlight=${String(highlightSweep.chosen.threshold.highlightMinScore)}｜` +
+    `亮点通道 选中 highlight=${String(highlightSweep.chosen.threshold.highlightMinScore)}｜` +
       `错分 ${String(highlightSweep.chosen.misfits.length)} 条｜` +
       `最紧余量 ${String(highlightSweep.chosen.margin)}｜出厂 ${String(shipped.highlightMinScore)}`,
   );
   lines.push(
-    `可分带宽：三态腿 [缺失最高 ${String(textSweep.band?.lower ?? 'n/a')}, 命中最低 ${String(textSweep.band?.upper ?? 'n/a')}]` +
-      `；亮点腿 [不相关最高 ${String(highlightSweep.band?.lower ?? 'n/a')}, 相关最低 ${String(highlightSweep.band?.upper ?? 'n/a')}]`,
+    `可分带宽：三态通道 [缺失最高 ${String(textSweep.band?.lower ?? 'n/a')}, 命中最低 ${String(textSweep.band?.upper ?? 'n/a')}]` +
+      `；亮点通道 [不相关最高 ${String(highlightSweep.band?.lower ?? 'n/a')}, 相关最低 ${String(highlightSweep.band?.upper ?? 'n/a')}]`,
   );
   lines.push(
-    `并列候选：三态腿 ${String(textSweep.tiedCandidates)} 组 / 亮点腿 ${String(highlightSweep.tiedCandidates)} 个点` +
+    `并列候选：三态通道 ${String(textSweep.tiedCandidates)} 组 / 亮点通道 ${String(highlightSweep.tiedCandidates)} 个点` +
       '（并列取网格上更靠前者；判据是错分最少 → 最紧余量最大 → 剖面逐位比，见 `pickBestIndex`）',
   );
   const shippedText = evaluateText(annotations, shipped);
   const shippedHighlight = evaluateHighlight(highlightAnnotations, shipped);
   lines.push(
-    `出厂值在标注集上的错分：三态腿 ${String(shippedText.misfits.length)} 条` +
+    `出厂值在标注集上的错分：三态通道 ${String(shippedText.misfits.length)} 条` +
       `（${shippedText.misfits.map((one) => one.id).join(' / ') || '无'}）/ ` +
-      `亮点腿 ${String(shippedHighlight.misfits.length)} 条` +
+      `亮点通道 ${String(shippedHighlight.misfits.length)} 条` +
       `（${shippedHighlight.misfits.map((one) => one.id).join(' / ') || '无'}）`,
   );
   lines.push('');

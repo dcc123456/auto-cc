@@ -23,7 +23,7 @@ import {
 import { useBridgeAction } from './useBridgeAction';
 import { useViewTrail } from './viewTrail';
 
-/** 模型腿结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
+/** 模型通道结局 → 行的色调（与缺口面板同一分档：只有"是好消息还是坏消息"是三档，文案是五句）。 */
 const MODEL_TONE: Record<GapModelStatusView, string> = {
   merged: 'text-slate-400',
   rejected: 'text-amber',
@@ -152,7 +152,7 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   };
 
   /**
-   * 模型腿的五种结局 → 五句文案（spec 4.5-09 的播报半边：保守版要说清"为什么没有改写"）。
+   * 模型通道的五种结局 → 五句文案（spec 4.5-09 的播报半边：保守版要说清"为什么没有改写"）。
    * @param value 一次生成的读数
    * @returns 一行播报
    */

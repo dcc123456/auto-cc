@@ -30,7 +30,7 @@
   role=assistant   liW=480  textX=34   textW=379  borderRadius=12px  bg=oklab(0.173835 … / 0.6)（ink-900/60）
 
 判据：user 的 textX(360) + textW(86) = 446 ≈ 480 − 34（右侧留白与左侧对称），而 assistant 的 textX=34 贴在左缘；
-两者宽度都停在 `max-w-[85%]`（408）之内，长文本不会横穿整行。图标腿同向：`flex-row-reverse` 让头像走到右侧。
+两者宽度都停在 `max-w-[85%]`（408）之内，长文本不会横穿整行。图标通道同向：`flex-row-reverse` 让头像走到右侧。
 既有 `data-message-role` / `data-part-kind` 通道一字未改（5.6-01、5.2-13 那批历史读数仍读得到同一格）。
 
 画面：`6.2-34-35-chat-desk.png`（助手气泡靠左、用户气泡靠右）。
@@ -45,7 +45,7 @@
 
 三档对比收在披露层，触发文案「这三档到底差在哪」（`[data-explainer="agent.autonomy-compare"]` 已挂载），
 段容器 `data-open=true`。文案不是猜的：三条 one-liner 逐条对过 `packages/agent/src/loop/policy.test.ts` 的真值表
-（建议档所有外发/写入腿都是 `TIER_SUGGEST_READ_ONLY`；半自动只放行 `read` 且不要求确认；
+（建议档所有外发/写入通道都是 `TIER_SUGGEST_READ_ONLY`；半自动只放行 `read` 且不要求确认；
 全自动放行除"要求确认的手"以外的一切，而免确认白名单只在 `auto` 档起作用）。
 
 普查（两份语言包，改写条数 zh 19 / en 18）：

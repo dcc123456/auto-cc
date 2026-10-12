@@ -270,7 +270,7 @@ describe('到点触发与触发记录（spec 5.7-06）', () => {
     expect(schedule.triggers(job.id)[0]?.result).toBe('started');
   });
 
-  it('手工「跑一次」走同一条腿：也记账、也推进', async () => {
+  it('手工「跑一次」走同一条通道：也记账、也推进', async () => {
     const { schedule, runner } = await boot();
     const job = everyMinute(schedule);
     const record = schedule.triggerNow(job.id, job.nextRunAt! + 5000);
@@ -365,7 +365,7 @@ describe('频控预检（spec 5.7-08 的频控半边）', () => {
     expect(throttle!.asks).toBe(0);
   });
 
-  it('手工「跑一次」也被频控挡住：它不是后门，走的是同一条腿', async () => {
+  it('手工「跑一次」也被频控挡住：它不是后门，走的是同一条通道', async () => {
     const { schedule, runner, throttle } = await boot();
     const job = everyMinute(schedule);
     throttle!.refusals.greet = '离上一次打招呼还差 12 秒，按频控此刻不动手';

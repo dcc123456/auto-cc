@@ -235,7 +235,7 @@ export class ResumeExportService extends Service {
   }
 
   /**
-   * 载入一份合法文档；缺失或库里存坏了都以 `RESUME_EXPORT_FAILED` 结构化失败上浮（3.3-11 的「文档非法」腿）。
+   * 载入一份合法文档；缺失或库里存坏了都以 `RESUME_EXPORT_FAILED` 结构化失败上浮（3.3-11 的「文档非法」通道）。
    * @param docId 文档 id
    * @returns 合法文档
    */

@@ -41,7 +41,7 @@
      按过之后：`data-node-issue-count="1"`（本格）而全图那一头 `[data-testid="canvas-validate-issues"]` 1 条
        ⇒ 抽屉里报的是**本格**那几条，不是全图清单
      「查看」`[data-action="drawer-issues"]`：`aria-expanded` false→true，`drawer-issue-list` 0→1，
-       条目文案「外发节点缺少动作对象，无法判定幂等与额度：greeting-send-draft」；再点一次 → 列表回 0（收起腿）
+       条目文案「外发节点缺少动作对象，无法判定幂等与额度：greeting-send-draft」；再点一次 → 列表回 0（收起那一条）
    撤销掉选中那一格 → 抽屉自己收掉（44-e：第一次 undo 后 drawer=0，节点 8→7），不留下指着幽灵格的浮层。
 
 ----------------------------------------------------------------------------------------------------

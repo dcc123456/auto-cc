@@ -1,29 +1,29 @@
-4.3-08 向量腿降级看得见（离线半边）+ 融合不改动既有读数（CDP 10222，Electron 主窗口 target 127.0.0.1:5173）
+4.3-08 向量通道降级看得见（离线半边）+ 融合不改动既有读数（CDP 10222，Electron 主窗口 target 127.0.0.1:5173）
 数据来源：诊断视图 → KbPanel docId=resume-demo →「从简历同步」→ 检索框「订单」
 运行时：本机 Electron 44.4.5 主窗口，真实主进程 + 真实 node:sqlite，非单测替身
 userData：tmp/43c-userdata（与用户装机版隔离；这份库里已带着 4.3-c 时期的 11/12/13 号迁移与 7 条实体）
 **未配置任何 embedding 端点**（`llm-embed` 的 baseUrl / model / apiKey 三项都空），所以本文件记的是
-「向量腿缺席」这一态；「向量腿在场」的增益判定是 4.3-07，需要真 key + 评测集，另计。
+「向量通道缺席」这一态；「向量通道在场」的增益判定是 4.3-07，需要真 key + 评测集，另计。
 
-[1] 未配置时界面单独一行说明向量腿缺席（`data-kb-search="vector-status"`）
+[1] 未配置时界面单独一行说明向量通道缺席（`data-kb-search="vector-status"`）
     中文：「没有可用的向量服务，本次只按词面排序。」      → 4.3-08-vector-status-zh.png
     English：「No embedding service is available, so this ranking is lexical only.」
                                                        → 4.3-08-vector-status-en.png
     同一屏的既有读数一字未动：提示行「按这些词检索：订单」，命中 2 条
       实体切片 · 成果 · 主导订单服务重构，P99 延迟下降 40%。 · 词频相关 / 词面覆盖 · 0.68 · 订单
       实体切片 · 经历 · 主导订单服务重构，P99 延迟下降 40%。\n星桥科技\n2021 - 2024\n后端工程师 · 词频相关 / 词面覆盖 · 0.60 · 订单
-    => 降级不是「少一行」这种看不出来的差别：界面显式说清本次排序里没有语义腿，用户不会以为自己搜到的就是全部
+    => 降级不是「少一行」这种看不出来的差别：界面显式说清本次排序里没有语义通道，用户不会以为自己搜到的就是全部
 
 [2] 真实进程内 IPC 读数与界面同源（`kb['profile.search']('订单')`）
     { status: 'ok', vectorStatus: 'unavailable', hits: 2, queryTokens: ['订单'] }
     首条命中：score 0.6829 / bm25Score 0.4716 / lexicalScore 1 / **vectorScore null** / reasons ['bm25','lexical']
-    => 分数与 4.3-c 归档（4.3-10-dom-assertions.txt [5]）逐位相同：融合腿缺席时 0.6829 / 0.6034 一位都没漂，
+    => 分数与 4.3-c 归档（4.3-10-dom-assertions.txt [5]）逐位相同：融合通道缺席时 0.6829 / 0.6034 一位都没漂，
        「可选增强」真的是可选——接不上就等价于本片不存在，不是把老结果悄悄改坏
 
 [3] 短路与「不请求」在日志里可核对（`log.tail` 共 78 条，逐条扫）
     启动：info | llm-embed-service | 「向量出口未就绪：缺 baseUrl / model / apiKey（检索将只做词面与倒排，向量增强不可用）」
     就绪：info | kb-profile-service | 「[kb-profile] kb_entities / kb_chunks / kb_chunks_fts / kb_vectors 就绪，迁移号段 11 / …」
-    每次检索：info | kb-profile-service | 「[kb-profile] 检索 1 个 token / 4 条候选 → 2 条命中（ok · 向量腿 unavailable / 语义名单 0 条）」
+    每次检索：info | kb-profile-service | 「[kb-profile] 检索 1 个 token / 4 条候选 → 2 条命中（ok · 向量通道 unavailable / 语义名单 0 条）」
     全量扫描：含简历正文「主导订单服务重构」的日志条数 = 0；含 embeddings / siliconflow / apiKey 字样的条数 = 0
     => 降级态进了日志且带当次原因（4.3-08），同时查询词与简历正文都不落（4.3-12 的口径在新增日志行上继续成立）
 
@@ -46,7 +46,7 @@ userData：tmp/43c-userdata（与用户装机版隔离；这份库里已带着 4
 [6] `not_attempted` 那一态整行不出现（不是换成另一句提示）
     检索「。」（切不出词）→ `[data-kb-search="vector-status"]` 节点数 0，命中 0 条，
     只留 `data-kb-search="no_tokens"`：「This query yields no searchable term (punctuation / whitespace only)…」
-    => 查询连词都切不出来时，向量腿根本没被考虑过（在 SQL 与网络之前就短路），界面也就不为它编一句话
+    => 查询连词都切不出来时，向量通道根本没被考虑过（在 SQL 与网络之前就短路），界面也就不为它编一句话
 
 [7] i18n parity 由类型面强制，不是靠人记
     `KbSearchRowResult.vectorStatus` 五态里界面覆盖四态（`not_attempted` 用 `Exclude<…>` 显式排除），

@@ -18,7 +18,7 @@
  *    而不是抛异常或一片空白——5.7-02 判的正是「每一步都能回溯」，不是「每条都能读到正文」。
  *
  * 语料是文件里的虚构中文简历（§7.2 不碰真实招聘平台），手机号是假哨兵；没装 `llm.chat`，
- * 生成腿走 4.5-09 的仅重排保守版；模型腿是 5.2 那台桩（输入即脚本），所以全程零出网、零真实平台调用。
+ * 生成通道走 4.5-09 的仅重排保守版；模型通道是 5.2 那台桩（输入即脚本），所以全程零出网、零真实平台调用。
  * 循环真跑一步（`read` 级假手，`auto` 档下不必批准），步记录里的 `evidence_refs_json` 就是被点的那些引用——
  * 归属判据因此是**对着真落库的那一步**判的，不是对着手搓视图。
  */
@@ -59,7 +59,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-/** 虚构简历正文：够 4.1 的解析出区块，也够 4.4 的词面腿命中。 */
+/** 虚构简历正文：够 4.1 的解析出区块，也够 4.4 的词面通道命中。 */
 const CORPUS_MD = [
   '王五',
   '电话：13900008888',
@@ -139,7 +139,7 @@ async function bootEvidenceAssembly(options: { withConversations?: boolean } = {
   }
   await mount(ctx.plugin(ResumeDocService, {}));
   await mount(ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
-  // `resume.parse` 也排在 `kb.profile` 之前：4.1-14 的删除腿让它硬注入了这两只，挂晚了就 PENDING（§9 的 5.1-c）。
+  // `resume.parse` 也排在 `kb.profile` 之前：4.1-14 的删除通道让它硬注入了这两只，挂晚了就 PENDING（§9 的 5.1-c）。
   await mount(ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
   await mount(ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   await mount(ctx.plugin(KbGapService, kbGapSchema.parse({})));

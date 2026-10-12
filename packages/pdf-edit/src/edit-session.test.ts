@@ -1,10 +1,10 @@
 /**
  * 编辑会话（3.5-c₂）的单测：判据是 spec 3.5-08 的「连续 5 步 undo/redo 状态一致」，
- * 外加四条"空编辑不许长出撤销单元"的语义腿——那类缺陷的表现为按一次撤销却什么都没退，
+ * 外加四条"空编辑不许长出撤销单元"的语义通道——那类缺陷的表现为按一次撤销却什么都没退，
  * 用户会以为自己按错了键，而栈里其实多了一条一模一样的快照。
  *
  * 三条口径与已验收的 3.5-b / 3.5-c₁ 一致：
- * - 覆盖区合法性**只有一个判据**（`planOverlays`，与另存同一个），所以这里演"会话拦住中文"那一腿
+ * - 覆盖区合法性**只有一个判据**（`planOverlays`，与另存同一个），所以这里演"会话拦住中文"那一条
  *   用的就是服务侧同一份尺度，而不是在会话里另写规则；
  * - 页序同理走 `planPageOrder`；
  * - 夹具用二进制精确的比例（0.25 / 0.5 / 0.125），免得断言在测浮点而不是测语义。
@@ -20,7 +20,7 @@ import type { PdfOverlayInput, PdfOverlayRect } from './overlay-writer.js';
 /** 三页 A4 的量得（`pdf.io.open` 的回执形状，会话只吃这个读数，不重新装载文件）。 */
 const pageMetrics: readonly PdfPageMetric[] = [1, 2, 3].map((number) => ({ number, widthPt: 595, heightPt: 842 }));
 
-/** 会话尺度：`maxOverlays` 挑成 3，好演"加到第 4 区就被同一份判据拦住"那一腿。 */
+/** 会话尺度：`maxOverlays` 挑成 3，好演"加到第 4 区就被同一份判据拦住"那一条。 */
 const limits = { maxOverlays: 3, defaultTextSizePt: 11, minAreaRatio: 0.0001, maxPages: 10 };
 
 /** 挪到新位置用的那份矩形（面积 0.03 远大于 `minAreaRatio`，边界也在页内）。 */

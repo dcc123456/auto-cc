@@ -11,11 +11,11 @@
  * 实测同一份数据下自建 BM25 与内置 `bm25()` 给出**同一条排序**（spike6 §S7：`订单` → e6 > e2 > e1 两边一致），
  * 换 k1/b 只改分值不改头部次序，说明这条替换不牺牲召回质量。内置 `bm25()` 仍然被用作**召回排序**（省一次全表扫）。
  *
- * 两条腿合并成一条排序（不是两条各出一批结果）：
- * - `bm25` 腿：词频 + 稀有度 + 长度归一，负责「这条内容里这个词有多重」。
- * - `lexical` 腿：4.2-03 已有的覆盖率尺子（`coverageOf`），负责「查询词被这条内容覆盖了多少」。
+ * 两条通道合并成一条排序（不是两条各出一批结果）：
+ * - `bm25` 通道：词频 + 稀有度 + 长度归一，负责「这条内容里这个词有多重」。
+ * - `lexical` 通道：4.2-03 已有的覆盖率尺子（`coverageOf`），负责「查询词被这条内容覆盖了多少」。
  *   复用而不是重写：反查与检索如果在「什么算沾边」上各有一套，界面与检索就会给出互相矛盾的答案（§2.2 / §2.5）。
- * 两腿各自归一到 0～1 后按配置权重相加，所以阈值 `minScore` 的含义是**绝对**的，不随语料规模漂移——
+ * 两条各自归一到 0～1 后按配置权重相加，所以阈值 `minScore` 的含义是**绝对**的，不随语料规模漂移——
  * 这正是内置 `bm25()` 做不到的（它是负值且量级随语料变，spike 轮次二 D 实测）。
  */
 import type { SectionKind } from '@auto-cc/plugin-resume-doc';
@@ -24,11 +24,11 @@ import { type KbChunkKind, type KbChunkView } from './chunks.js';
 import { normalizeText, tokenSequence } from './tokenize.js';
 import type { KbVectorScore } from './vectors.js';
 
-/** 命中理由：这条结果是被哪条通道 / 哪一腿分数撑起来的，界面按码取 i18n 文案。 */
+/** 命中理由：这条结果是被哪条通道 / 哪一条分数撑起来的，界面按码取 i18n 文案。 */
 export type KbSearchReason = 'bm25' | 'lexical' | 'substring' | 'vector';
 
 /**
- * 向量腿的当次状态（spec 4.3-07 / 08 的界面播报依据）。
+ * 向量通道的当次状态（spec 4.3-07 / 08 的界面播报依据）。
  *
  * 它是**结果的一个值**而不是异常：4.3-08 要求「embedding 不可用时自动降级纯 BM25」，
  * 而降级必须让用户看得见，否则界面给出的是「只有三条词面命中」这种读不出原因的形态。
@@ -42,7 +42,7 @@ export type KbVectorStatus =
   | 'no_vectors'
   /** 本次编码或取数失败（超时、对端报错、维度对不上）—— 已降级，本次只给词面结果 */
   | 'failed'
-  /** 查询切不出 token，整条检索在进 SQL 之前短路，向量腿**也没跑**（既不是没配也不是失败）；界面在那种空态下不读这一项 */
+  /** 查询切不出 token，整条检索在进 SQL 之前短路，向量通道**也没跑**（既不是没配也不是失败）；界面在那种空态下不读这一项 */
   | 'not_attempted';
 
 /** 检索的可调项（全部来自 `kb.profile` 的配置，4.3-03 的判据就是「代码内无魔法数」）。 */
@@ -55,28 +55,28 @@ export interface KbSearchParams {
   readonly k1: number;
   /** BM25 的长度归一参数（0 = 不管长度，1 = 完全按长度惩罚）。 */
   readonly b: number;
-  /** BM25 腿在合并分里的权重（两腿权重之和决定上限，见 `mergeScore`）。 */
+  /** BM25 通道在合并分里的权重（两条权重之和决定上限，见 `mergeScore`）。 */
   readonly bm25Weight: number;
-  /** 词面覆盖腿的权重。 */
+  /** 词面覆盖通道的权重。 */
   readonly lexicalWeight: number;
   /**
    * 子串通道独有命中（与查询**没有任何 token 级重合**，只在 `norm_text` 里含这段字）的地板分。
    *
    * 必须有这一项：单字与词尾字查询在预分词索引里切不出可命中的 token（实测 spike 轮次五：
-   * `订*` 前缀漏「提前预**订**」），两腿分数都是 0，不打一个地板分的话子串通道就永远进不了结果。
+   * `订*` 前缀漏「提前预**订**」），两条分数都是 0，不打一个地板分的话子串通道就永远进不了结果。
    */
   readonly substringFloorScore: number;
   /**
    * RRF 融合的阻尼常数（贡献 = `1 / (rrfK + 名次)`，名次从 1 起）。
    *
    * 60 是信息检索里的惯用值（plan §4.3-d）：它决定「第一名比第二名值多少」，
-   * 调大就各腿趋于平均、调小就头部名次独大。4.3-e 的评测集标定动的就是这一处而不是代码。
+   * 调大就每一条趋于平均、调小就头部名次独大。4.3-e 的评测集标定动的就是这一处而不是代码。
    */
   readonly rrfK: number;
   /**
-   * 向量腿的余弦下限（低于它不进向量名单）。
+   * 向量通道的余弦下限（低于它不进向量名单）。
    *
-   * 与 `minScore` 是**两条腿各自的门槛**，不能共用：合并分是 0～1 的词面证据强度，
+   * 与 `minScore` 是**两条通道各自的门槛**，不能共用：合并分是 0～1 的词面证据强度，
    * 余弦是几何夹角，同一个数在两边含义完全不同。默认值待标定（4.3-e），现在的作用是
    * 「明显不相干的切片不要靠语义挤进结果」。
    */
@@ -109,17 +109,17 @@ export interface KbSearchHit {
    * 把它换成量级完全不同的 RRF 值会让「minScore=0.2」失去意义（plan §4.3-d 第 4 点）。
    */
   readonly score: number;
-  /** BM25 腿归一分（单独留着：4.3-d 做 RRF 融合与 4.3-e 的评测集要比这一列）。 */
+  /** BM25 通道归一分（单独留着：4.3-d 做 RRF 融合与 4.3-e 的评测集要比这一列）。 */
   readonly bm25Score: number;
-  /** 词面覆盖腿的分。 */
+  /** 词面覆盖通道的分。 */
   readonly lexicalScore: number;
   /**
-   * 向量腿的余弦（4 位小数）；本次没用向量腿、或该切片没进向量名单时为 null。
+   * 向量通道的余弦（4 位小数）；本次没用向量通道、或该切片没进向量名单时为 null。
    *
-   * 与 `score` 一样是**证据读数**而不是排序键：两条腿的量纲不同，合成一个数就是伪造精度。
+   * 与 `score` 一样是**证据读数**而不是排序键：两条通道的量纲不同，合成一个数就是伪造精度。
    */
   readonly vectorScore: number | null;
-  /** 覆盖腿的判定形态，界面用它区分「整段就是这句话」与「只是有重合」。 */
+  /** 覆盖通道的判定形态，界面用它区分「整段就是这句话」与「只是有重合」。 */
   readonly coverageReason: EvidenceReason | null;
   readonly reasons: readonly KbSearchReason[];
   /** 命中的 token（升序）；子串通道独有命中时给的是查询串本身。 */
@@ -130,7 +130,7 @@ export interface KbSearchHit {
 export type KbSearchStatus = 'ok' | 'no_query_tokens';
 
 /**
- * 词面腿的排序读数（`rankChunks` 的返回）。
+ * 词面通道的排序读数（`rankChunks` 的返回）。
  *
  * 单独一个类型是因为它**不该知道自己没做的事**：`rankChunks` 是纯词面打分，
  * 向量状态由检索编排（`profile-service.ts`）决定，硬塞进这里就得凭空造一个值。
@@ -143,7 +143,7 @@ export interface KbSearchResult {
   readonly hits: readonly KbSearchHit[];
   /** 查询侧切出的 token（去重、升序），界面解释「按哪些词搜的」要用它。 */
   readonly queryTokens: readonly string[];
-  /** 本次检索的向量腿状态（4.3-08 的播报依据：降级必须看得见）。 */
+  /** 本次检索的向量通道状态（4.3-08 的播报依据：降级必须看得见）。 */
   readonly vectorStatus: KbVectorStatus;
 }
 
@@ -255,7 +255,7 @@ export function normalizeBm25(rawScore: number, queryTokenCount: number, params:
 }
 
 /**
- * 两腿合并成一条排序。
+ * 两条合并成一条排序。
  * @param query 用户查询原文
  * @param candidates 候选切片（倒排召回 ∪ 子串召回；重复 id 由这里收敛成一条）
  * @param context df 与语料统计
@@ -291,7 +291,7 @@ export function rankChunks(
     if (matched.length === 0 && !isSubstringHit) continue;
 
     const merged = params.bm25Weight * bm25 + params.lexicalWeight * lexical;
-    // 没有任何 token 级重合、只被 `norm_text` 子串召回的行，两腿都是 0 分：打配置给的地板分，
+    // 没有任何 token 级重合、只被 `norm_text` 子串召回的行，两条都是 0 分：打配置给的地板分，
     // 否则单字查询会「召回到却进不了结果」；地板分同时保证它排在有词面证据的命中之后。
     const isTokenless = matched.length === 0;
     const score = Math.round((isTokenless ? Math.max(merged, params.substringFloorScore) : merged) * 10_000) / 10_000;
@@ -301,7 +301,7 @@ export function rankChunks(
     if (bm25 > 0) reasons.push('bm25');
     if (lexical > 0) reasons.push('lexical');
     if (isTokenless) reasons.push('substring');
-    // 三个条件都不成立只可能是「有 token 重合但两腿都被权重压成 0」——此时它是靠子串通道进的候选集，
+    // 三个条件都不成立只可能是「有 token 重合但两条都被权重压成 0」——此时它是靠子串通道进的候选集，
     // 理由必须说清来源，界面才不会显示一条解释不了的命中（4.3-01 的「理由非空」判据）。
     if (reasons.length === 0) reasons.push(isSubstringHit ? 'substring' : 'lexical');
 
@@ -314,7 +314,7 @@ export function rankChunks(
       score,
       bm25Score: Math.round(bm25 * 10_000) / 10_000,
       lexicalScore: lexical,
-      // 词面腿自己不可能有向量分；融合时命中过向量名单的才由 `fuseByRrf` 填上（4.3-08：不编不存在的数据）。
+      // 词面通道自己不可能有向量分；融合时命中过向量名单的才由 `fuseByRrf` 填上（4.3-08：不编不存在的数据）。
       vectorScore: null,
       coverageReason: covered?.reason ?? null,
       reasons,
@@ -328,22 +328,22 @@ export function rankChunks(
 }
 
 /**
- * Reciprocal Rank Fusion —— 把词面腿与向量腿的**名次**合成一条次序（spec 4.3-07）。
+ * Reciprocal Rank Fusion —— 把词面通道与向量通道的**名次**合成一条次序（spec 4.3-07）。
  *
  * 为什么是 RRF 而不是「两个分数加权相加」（plan §4.3-d 第 4 点）：合并分是 0～1 的词面证据强度，
  * 余弦是 0～1 的几何相似度，两者**量纲不同源**——同一个 0.6 在两边的含义完全不一样，
  * 直接相加等于伪造精度，而且换一批语料、换一家的向量模型，这个和的最优点就会漂。
- * RRF 只用名次（`1 / (k + rank)`），对两条腿各自的分布不做任何假设，所以：
+ * RRF 只用名次（`1 / (k + rank)`），对两条通道各自的分布不做任何假设，所以：
  * - 两边都靠前的必然靠前；
- * - 只有一边命中的靠那条腿的名次说话（这就是「语义命中补词面盲区」的来路）；
+ * - 只有一边命中的靠那条通道的名次说话（这就是「语义命中补词面盲区」的来路）；
  * - `k` 决定头部名次的边际价值，来自配置而不是代码（4.3-03）。
  *
- * 融合**只改次序、不改读数**：`score` / `bm25Score` / `lexicalScore` 保持词面腿算出来的原值，
- * 向量腿只往 `vectorScore` 里填余弦。界面与评测集因此仍能分别问「词面有多强」和「语义有多近」。
+ * 融合**只改次序、不改读数**：`score` / `bm25Score` / `lexicalScore` 保持词面通道算出来的原值，
+ * 向量通道只往 `vectorScore` 里填余弦。界面与评测集因此仍能分别问「词面有多强」和「语义有多近」。
  * @param query 用户查询原文（只用于给「只被向量捞到」的命中填一个能看的命中词，见函数末尾那条注释）
- * @param lexical `rankChunks` 的词面腿命中（数组次序就是它的名次，已按 `topK` 截断）
- * @param vectors 向量腿命中（按余弦倒序、已过滤掉低于 `vectorMinCosine` 的；数组次序就是它的名次）
- * @param views 只在向量名单里出现、词面腿没给的那些切片的正文投影（服务侧 join 主表取回）
+ * @param lexical `rankChunks` 的词面通道命中（数组次序就是它的名次，已按 `topK` 截断）
+ * @param vectors 向量通道命中（按余弦倒序、已过滤掉低于 `vectorMinCosine` 的；数组次序就是它的名次）
+ * @param views 只在向量名单里出现、词面通道没给的那些切片的正文投影（服务侧 join 主表取回）
  * @param params 只用 `rrfK` 与 `topK`
  * @returns 融合后的命中：按 RRF 总分倒序、同分按 `chunkId` 升序，最多 `topK` 条；
  *          两边都命中的那条会同时带 `vectorScore` 与 `vector` 理由，只被向量捞到的那条词面分全为 0
@@ -369,7 +369,7 @@ export function fuseByRrf(
     fused.set(entry.chunkId, (fused.get(entry.chunkId) ?? 0) + 1 / (params.rrfK + rank + 1));
     const known = byId.get(entry.chunkId);
     if (known) {
-      // 词面腿已经有这条：补上余弦读数与理由，其余字段一律不动（见上「只改次序、不改读数」）。
+      // 词面通道已经有这条：补上余弦读数与理由，其余字段一律不动（见上「只改次序、不改读数」）。
       byId.set(entry.chunkId, { ...known, vectorScore: entry.cosine, reasons: [...known.reasons, 'vector'] });
       return;
     }

@@ -14,7 +14,7 @@
  "leg": "chat", "encrypted": "false",
  "keySource": "这一把还没有：既没在界面里存过，环境变量也没设。",
  "missing": "还缺：端点模型名API key",
- "hotApplyNote": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+ "hotApplyNote": "保存会立刻重建这条通道（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
  "storageBanner": "未加密存储：本机没有可用的系统密钥库，密钥文件以 0600 权限明文落在 userData 下。",
  "controls": [
   { "action": "settings-model-leg",          "tag": "select", "value": "chat",  "disabledReason": null,            "ariaDisabled": null },
@@ -40,7 +40,7 @@
  "leg": "chat", "encrypted": "true",
  "keySource": "现在这一把来自界面（密钥库，末 4 位 9001）",
  "missing": null,
- "hotApplyNote": "保存会立刻重建这条腿（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
+ "hotApplyNote": "保存会立刻重建这条通道（无需重启），顺带把已打开的浏览器会话视图关掉——要用的话回去重开一次。",
  "storageBanner": null,
  "controls": [
   { "action": "settings-model-leg",          "tag": "select", "value": "chat",   "disabledReason": null, "ariaDisabled": null },
@@ -55,5 +55,5 @@
 }
 ```
 
-# 八只控件全在、每只都带 data-action；三格输入 + 两颗动作键 + 一只清除键 + 两条下拉（模型腿 / 服务商）。
+# 八只控件全在、每只都带 data-action；三格输入 + 两颗动作键 + 一只清除键 + 两条下拉（模型通道 / 服务商）。
 # 截图：7.1-11-model-settings-{light,dark}.png（同一分区、两套主题，深浅各一张，md5 互异）。

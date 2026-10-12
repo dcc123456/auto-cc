@@ -14,7 +14,7 @@
 typecheck 第一次是红的（TYPECHECK_EXIT=2），报在**包外**：`packages/outbound` 的两处 `LlmConfig` 字面量
 （`greet.test.ts:65`、`script.test.ts:33`）缺 `providerId`。原因不是写错，而是 §9 实测 1.3 那条的另一副面孔——
 schema 里带 `.default()` 的键在 **output 类型**里是必填，所以给 `llmSchema` 加 `providerId` 会直接波及所有
-"手工递一份配置"的调用点。两处各补 `providerId: null`（= 未绑定态，读这条腿自己的 `baseUrl`），
+"手工递一份配置"的调用点。两处各补 `providerId: null`（= 未绑定态，读这条通道自己的 `baseUrl`），
 不改 schema、也不把该键做成 optional（那会让兜底链在类型层失去"必须表态过一次"的约束）。
 
 lint 里与本片直接相关的三条：
@@ -75,8 +75,8 @@ lint 里与本片直接相关的三条：
   `keySource:'env'`（7.1-07 那条链原样不动，spec 7.2-15 的反向验证半边）。
 - ③ 未配置：两边都没有 → `missing:['baseUrl','model','apiKey']`、`endpoint:null`、`origin:'none'`，
   且 `complete()` 在 fetch 之前就抛 `LLM_UNAVAILABLE`（不发请求）。
-- 向量腿同一条函数：绑定 embed 后 `read().legs[embed]` 读的也是池那个地址 —— 这条是"抽出来"的全部理由，
-  否则会长出"只有聊天腿听绑定"。
+- 向量通道同一条函数：绑定 embed 后 `read().legs[embed]` 读的也是池那个地址 —— 这条是"抽出来"的全部理由，
+  否则会长出"只有聊天通道听绑定"。
 
 一条取证口径（写进 plan §7.7 第 1、2 条）：本用例的内核是**替身**，热改只写生效值、不会重建 `llm.chat`，
 所以"绑定态的客户端读数"必须由第二次装载取；`settings.read()` 现问 `kernel.effectiveConfig`，两条通道别混成一条断言。
@@ -88,18 +88,18 @@ lint 里与本片直接相关的三条：
 - `bindRole({ leg:'chat', providerId, model })`：
   - 持久层 `config.persisted('llm')` **恰好等于** `{ providerId:<实例 id>, model:'a-model' }` —— 没有 `baseUrl` 这一项
     （§2.5：端点当场向池问，复制一份就永远会漂）。
-  - 热改补丁 `applied` **一条**：`{ id:'llm', patch:{ providerId, model } }`。一次绑定只动受影响的那条腿，
+  - 热改补丁 `applied` **一条**：`{ id:'llm', patch:{ providerId, model } }`。一次绑定只动受影响的那条通道，
     风险表里"重建两次"那一条按这个形状兑现。
-  - 读回的腿：`baseUrl` 是池地址、`key.tail` 是 `7777`、`available:true`；另一条腿 `embed` 的 `missing` 仍是三项（没被牵连）。
-  - 三条负腿：模型没入库 → `INVALID_ARGUMENT` + `details.reason:'MODEL_NOT_ADDED'`（候选只出自 `llm_models`，
-    界面不长手敲口子）；实例不在池里 → `LLM_PROVIDER_NOT_FOUND`；腿名不合法 → `INVALID_ARGUMENT` + `issues:['leg']`。
+  - 读回的通道：`baseUrl` 是池地址、`key.tail` 是 `7777`、`available:true`；另一条通道 `embed` 的 `missing` 仍是三项（没被牵连）。
+  - 三条反向证据：模型没入库 → `INVALID_ARGUMENT` + `details.reason:'MODEL_NOT_ADDED'`（候选只出自 `llm_models`，
+    界面不长手敲口子）；实例不在池里 → `LLM_PROVIDER_NOT_FOUND`；通道名不合法 → `INVALID_ARGUMENT` + `issues:['leg']`。
     三条之后 `persisted('llm')` 仍是 `{}`、`applied` 长度 0（校验早于任何写）。
 - `deleteProvider` 撤悬空绑定：删掉正被 chat 绑着的那条之后 ——
   - `applied.at(-1)` 是 `{ id:'llm', patch:{ providerId:null, model:null } }`（当场撤，不留"每次请求先解析一次才发现这一行没了"）；
   - `persisted('llm')` 变 `{ providerId:null, model:null }` —— **两条键一起撤**，因为绑定是一次原子表态：
-    只撤 `providerId` 会让这条腿挂着一个已经不存在的模型名，而 7.2-d 的候选出自 `llm_models`，那一格里再也没有它
+    只撤 `providerId` 会让这条通道挂着一个已经不存在的模型名，而 7.2-d 的候选出自 `llm_models`，那一格里再也没有它
     （第一版实现就是这么写的，实测读数把这条改了过来 —— spec 7.2-09 那句"回落到未绑定"判的是整个绑定，不是半个）；
-  - 腿回落：`baseUrl` 回到配置格那一个（`model.test.invalid`），`model` 为 null，`missing` 是 `['model','apiKey']`
+  - 通道回落：`baseUrl` 回到配置格那一个（`model.test.invalid`），`model` 为 null，`missing` 是 `['model','apiKey']`
     （key 随实例一起清了）。缺哪一格由 `read()` 照报，界面不用自己拼。
   - 一条随之而来的口径记在这里：持久层写 `null` 会**盖过** `cordis.yml` 里那一格（`mergeDeep` 后层赢，null 是值不是"删除"）。
     所以"删掉一家之后 yml 的模型名不会自己回来"是当前语义 —— yml 本身没动，重新绑定或界面保存一次就覆盖掉这个 null。
@@ -116,7 +116,7 @@ GET 与 POST 共用同一具骨架（`requestJson` + 两支薄封装），而不
 
 # 七、本片没做的事（留给 7.2-d / 7.2-e，防止被当成已完成）
 
-- **旧的 `apply()` 仍在**（改判：删除挪到 7.2-d）。原因是现读而非偏好——`ModelSettingsPanel.tsx` 的「保存这一腿」
+- **旧的 `apply()` 仍在**（改判：删除挪到 7.2-d）。原因是现读而非偏好——`ModelSettingsPanel.tsx` 的「保存这一条」
   走的就是 `llm.settings.apply`，而进程契约（`shared/src/bridge.ts`）与渲染层三段都在 7.2-d 才换；
   在本片删掉它主干会留下一段"点了没反应"的界面回归。因此 **spec 7.2-15 仍 `[ ]`**。
 - 所有 U+V 条目的 **V 半边**（活体点「获取模型」看候选数、勾两条重读、改绑后 `status().model` 立刻为新、

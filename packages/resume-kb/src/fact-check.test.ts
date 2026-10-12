@@ -7,7 +7,7 @@
  *
  * 可改写面按 2026-10-02 用户裁定的 A 口径（plan §4.5 取证三 已同步更正）：
  * 散文键 `text / achievement / description` 可改写，受数值与具名两条判据约束；
- * 结构事实键整句原样引用。技能行不进生成腿的提议面，但仍在校验面内（下面单有一例锁住这个关系）。
+ * 结构事实键整句原样引用。技能行不进生成通道的提议面，但仍在校验面内（下面单有一例锁住这个关系）。
  *
  * 数值抽取本身的口径测试不在这里：那份实现搬到 `@auto-cc/core` 的 `numbers.ts`（两个同级包共用），
  * 用例跟着搬去 `packages/core/src/numbers.test.ts`；本文件只测"校验读得出篡改"这一层。
@@ -244,7 +244,7 @@ describe('4.5-03 / 04 字段原样引用', () => {
     expect(report.fieldViolations[0]?.factKey).toBe('role');
   });
 
-  it('技能行不许生成腿改，但万一被改了仍按数值守恒检（校验面 ⊇ 提议面）', () => {
+  it('技能行不许生成通道改，但万一被改了仍按数值守恒检（校验面 ⊇ 提议面）', () => {
     const base: ResumeDocument = {
       ...makeBaselineDocument(),
       sections: [

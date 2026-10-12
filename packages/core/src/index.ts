@@ -286,9 +286,9 @@ export function embedGatewayOf(ctx: Context): EmbedGateway | undefined {
  * 取对话模型网关（spec 4.4-02 的可选增强），实现方是 `llm.chat`。
  *
  * 与 `embedGatewayOf` 同一条理由做成**软取**：4.4-02 要的是「模型不可用时词面拆解照常出结果、
- * 功能不中断」，而 `static inject = ['llm.chat']` 会把这条腿变成硬依赖——摘掉 `llm-chat` 就连带
+ * 功能不中断」，而 `static inject = ['llm.chat']` 会把这条通道变成硬依赖——摘掉 `llm-chat` 就连带
  * 让 `kb-gap` 降成 PENDING，那是与本条目相反的验收。`outbound.script` 之所以敢用硬依赖，是因为
- * 它没有「没有模型也照样成立」的形态（模板回落到最后仍要产出话术），而本服务在词面腿就有独立产出。
+ * 它没有「没有模型也照样成立」的形态（模板回落到最后仍要产出话术），而本服务在词面通道就有独立产出。
  * @param ctx 调用方的上下文
  * @returns 询问面；`llm.chat` 没装时为 undefined，此时调用方退回纯词面拆解并如实报 `disabled` / `unavailable`
  */

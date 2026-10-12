@@ -28,8 +28,8 @@ import { readModelKey, type KeyProbe } from './key.js';
  */
 export const llmEmbedSchema = z.strictObject({
   /**
-   * 角色绑定指向的**池实例 id**（spec 7.2-11 的向量腿）。`null` = 没绑定，走下面这个 `baseUrl`。
-   * 与 `llm.chat` 同一个解析顺序（`resolveLeg`），所以"绑了哪家"与"这条腿自己配的端点"不会两套判法。
+   * 角色绑定指向的**池实例 id**（spec 7.2-11 的向量通道）。`null` = 没绑定，走下面这个 `baseUrl`。
+   * 与 `llm.chat` 同一个解析顺序（`resolveLeg`），所以"绑了哪家"与"这条通道自己配的端点"不会两套判法。
    */
   providerId: z.string().min(1).nullable().default(null),
   /**
@@ -69,7 +69,7 @@ export interface LlmEmbedStatus {
   dimensions: number | null;
   /** 当前这把 key 从哪来（spec 7.1-07）：密钥库（界面上存的）> 环境变量（`keyEnv`）> 没有。 */
   keySource: 'secret' | 'env' | 'none';
-  /** 这一腿的端点是谁给的（spec 7.2-12）：池实例 / 自己的配置格 / 两边都没有。 */
+  /** 这一条的端点是谁给的（spec 7.2-12）：池实例 / 自己的配置格 / 两边都没有。 */
   origin: ResolvedLeg['origin'];
   /** 生效的绑定实例 id；没绑定或绑定已回落时为 null。 */
   providerId: string | null;
@@ -132,14 +132,14 @@ export class LlmEmbedService extends Service {
   }
 
   /**
-   * 解析这一腿打哪儿（spec 7.2-12 的顺序：绑定 > 自己的配置格 > 未配置）。
+   * 解析这一条打哪儿（spec 7.2-12 的顺序：绑定 > 自己的配置格 > 未配置）。
    * @returns 端点前缀、模型名、该问密钥库哪一格
    */
   private resolve = (): ResolvedLeg => resolveLeg(this.ctx, 'embed', this.options);
 
   /**
    * 读取 API key：先问密钥库（界面上填的那把或绑定实例的那把），`keyEnv` 的环境变量只作兜底（spec 7.1-07）。
-   * @param resolved 这一腿解析出来的目标，决定问密钥库哪一格
+   * @param resolved 这一条解析出来的目标，决定问密钥库哪一格
    * @returns 明文与出处；两处都没有时 `value` 是空串
    * @throws 不抛异常
    */

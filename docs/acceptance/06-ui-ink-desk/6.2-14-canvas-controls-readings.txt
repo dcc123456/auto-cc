@@ -1,4 +1,4 @@
-6.2-14 第三十三片：画布 chrome 收进令牌层（裁定 2 的最后一腿）+ chrome 文案补 i18n
+6.2-14 第三十三片：画布 chrome 收进令牌层（裁定 2 的最后一通道）+ chrome 文案补 i18n
 生成时间：2026-10-07（本机 macOS / Apple Silicon，CDP 10222，渲染层 target `--url 5173`，视口 1200×772）
 被检改动：packages/renderer/src/WorkflowCanvas.tsx、packages/renderer/src/locales/{zh-CN,en}.json
 裁定依据：用户 2026-10-06 表态「保留 `<Controls>`，只用 Tailwind 覆盖它的样式」（plan §3.8 裁定 2）
@@ -56,7 +56,7 @@
 全部高于 ≥12px 正文的 4.5:1 门槛（这一档本来就不是正文，取它是为了以后有人换底时有基线可退）。
 
 ────────────────────────────────────────────
-三、行为腿（覆盖样式之后按钮还得是能用的那三只）
+三、行为通道（覆盖样式之后按钮还得是能用的那三只）
 ────────────────────────────────────────────
 视口缩放矩阵的 `a` 分量（`.react-flow__viewport` 的 computed transform）：
   基线 1.374 → 点 `zoomin` 1.6488 → 点 `zoomout` 1.374 → 点 `fitview` 1.374（本来就已 fit）

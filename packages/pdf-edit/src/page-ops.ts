@@ -22,7 +22,7 @@ export type PageOrderRejection =
 export type PagePlanOutcome = { readonly ok: true; readonly order: readonly number[] } | PageOrderRejection;
 
 /**
- * 拒绝项的构造口（收成一个，避免三条腿各写一份 `{ ok: false, ... }` 而漏掉某一条）。
+ * 拒绝项的构造口（收成一个，避免三处各写一份 `{ ok: false, ... }` 而漏掉某一条）。
  * @param code 机器码
  * @param detail 技术原因（中文提示由服务层决定）
  * @returns 带 `ok: false` 的拒绝项

@@ -1,7 +1,7 @@
 /**
  * 用户给出的绝对路径 → 受字节上限约束的字节（AGENTS.md §2.2：这条逻辑在简历导入之后第二次被用到）。
  *
- * 为什么住在 `core` 而不是各自包内：读取者分属两个 L2 域包（`resume-kb` 的导入腿、`pdf-edit` 的编辑腿），
+ * 为什么住在 `core` 而不是各自包内：读取者分属两个 L2 域包（`resume-kb` 的导入通道、`pdf-edit` 的编辑通道），
  * 让它们互相 import 就是同级横向引用（§4.1）；而错误码 `AppErrorCode` 与 `AppError` 本来就在这一层。
  * **只经子路径出口**（`@auto-cc/core/file-read`），不进 `src/index.ts` 门面——它带 `node:fs`，
  * 并进门面就会把 Node 能力拖进渲染层 bundle（同 `shared/src/bridge.ts` 记过的那次 `node:path` 事故）。

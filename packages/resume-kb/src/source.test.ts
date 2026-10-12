@@ -1,8 +1,8 @@
 /**
- * `source.ts` 单元测试（spec 4.1-01 的 PDF / DOCX / Markdown 三条输入腿、4.1-05 的扫描件判定、4.1-06 的失败路径）。
+ * `source.ts` 单元测试（spec 4.1-01 的 PDF / DOCX / Markdown 三条输入通道、4.1-05 的扫描件判定、4.1-06 的失败路径）。
  *
- * 夹具在测试内生成，不放二进制样本：最小 PDF 只能用 Type1/Helvetica（不含中日韩字形），所以 **PDF 腿用英文简历**；
- * DOCX 是 XML 文本，可以带中文，所以 **DOCX 腿复用 4.1-a 的中文语料**，证明两条依赖腿落到同一套模型。
+ * 夹具在测试内生成，不放二进制样本：最小 PDF 只能用 Type1/Helvetica（不含中日韩字形），所以 **PDF 通道用英文简历**；
+ * DOCX 是 XML 文本，可以带中文，所以 **DOCX 通道复用 4.1-a 的中文语料**，证明两条依赖通道落到同一套模型。
  * 最小 PDF 的生成器住在 `@auto-cc/testing`（编辑轨 3.4-03 的装载用例是它第二次被用到，AGENTS.md §2.2 要求抽公共层）。
  * 所有内容均为虚构，不含真实个人信息（spec 数据纪律）。
  */
@@ -14,7 +14,7 @@ import { detectFormat, parseResumeSource, sourceHashOf, extractSourceText } from
 /** 更新时间戳固定值，保证文档 `updatedAt` 可断言。 */
 const NOW_MS = 1_700_000_000_000;
 
-/** PDF 腿的英文简历正文（逐行，**不带空行**——真实 PDF 抽出来就是这样：标题行紧接着条目行）。 */
+/** PDF 通道的英文简历正文（逐行，**不带空行**——真实 PDF 抽出来就是这样：标题行紧接着条目行）。 */
 const PDF_RESUME_LINES = [
   'Jane Doe',
   'jane.doe@example.com',
@@ -27,7 +27,7 @@ const PDF_RESUME_LINES = [
   'Fudan University | 2011.09 - 2015.06',
 ];
 
-/** DOCX 腿的中文简历段落（与 4.1-a 的 `sections.test.ts` 语料同形，断言口径因此可复用）。 */
+/** DOCX 通道的中文简历段落（与 4.1-a 的 `sections.test.ts` 语料同形，断言口径因此可复用）。 */
 const DOCX_RESUME_PARAGRAPHS = [
   '张三',
   '电话：13800001111 邮箱：zhangsan@example.com',
@@ -157,7 +157,7 @@ describe('4.1-01 格式判定', () => {
   });
 });
 
-describe('4.1-01 三条输入腿都产出结构化经历实体', () => {
+describe('4.1-01 三条输入通道都产出结构化经历实体', () => {
   it('PDF 英文简历', async () => {
     const result = await parseResumeSource(minimalPdf(PDF_RESUME_LINES), 'doc-pdf', NOW_MS);
     expect(result.status).toBe('ok');
@@ -170,7 +170,7 @@ describe('4.1-01 三条输入腿都产出结构化经历实体', () => {
     expect(fieldOf(result.document, 'education', 0, 'school')).toMatch(/Fudan/);
   });
 
-  it('DOCX 中文简历与文本腿同形', async () => {
+  it('DOCX 中文简历与文本条同形', async () => {
     const result = await parseResumeSource(minimalDocx(DOCX_RESUME_PARAGRAPHS), 'doc-docx', NOW_MS);
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
@@ -182,7 +182,7 @@ describe('4.1-01 三条输入腿都产出结构化经历实体', () => {
     expect(fieldOf(result.document, 'education', 0, 'school')).toBe('东海大学');
   });
 
-  it('Markdown 文本与 DOCX 腿同源同形（同一段中文语料走两种输入）', async () => {
+  it('Markdown 文本与 DOCX 通道同源同形（同一段中文语料走两种输入）', async () => {
     const bytes = new Uint8Array(Buffer.from(DOCX_RESUME_PARAGRAPHS.join('\n\n'), 'utf8'));
     const result = await parseResumeSource(bytes, 'doc-md', NOW_MS);
     expect(result.status).toBe('ok');
@@ -222,7 +222,7 @@ describe('4.1-06 损坏输入不抛异常', () => {
     expect(result.code).toBe(expectedCode);
   });
 
-  it('脱敏在 PDF 腿上也生效：邮箱不以原文出现在文档里', async () => {
+  it('脱敏在 PDF 通道上也生效：邮箱不以原文出现在文档里', async () => {
     const result = await parseResumeSource(minimalPdf(PDF_RESUME_LINES), 'doc-redact', NOW_MS);
     if (result.status !== 'ok') throw new Error('预期解析成功');
     expect(JSON.stringify(result.document)).not.toContain('jane.doe@example.com');

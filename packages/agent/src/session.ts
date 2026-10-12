@@ -139,7 +139,7 @@ const chatMigration = {
  * 为什么不能挂在号段 2 的 `up` 里（我最初的判断，已被实测推翻并更正在这里）：`runMigrations` 认的是
  * `schema_migrations` 台账，不是 DDL 幂等——开发实例的库里早就记着「2 已应用」，把建表语句塞进
  * 号段 2 永远不会重跑，老用户机上第一次切档位就会以 `no such table` 失败。单测每个用例都从空库起，
- * 因此全绿也照不出这条腿（回看证据见 plan §5.3-a 的更正）。
+ * 因此全绿也照不出这条通道（回看证据见 plan §5.3-a 的更正）。
  */
 export const CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION = 17;
 

@@ -46,7 +46,7 @@ function bandOf(
 }
 
 describe('normalizeHexColor：跨进程递来的颜色只认 `#rrggbb`', () => {
-  it('大写入参归一成小写，画布与 pdf-lib 两条腿拿到的是同一个字面量', () => {
+  it('大写入参归一成小写，画布与 pdf-lib 两条通道拿到的是同一个字面量', () => {
     expect(normalizeHexColor('#ABCDEF')).toBe('#abcdef');
   });
 

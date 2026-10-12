@@ -3,14 +3,14 @@
  *
  * 它是"用户自己配模型"这件事的唯一入口，做四件事：给出 OpenAI 兼容服务商目录、
  * 管**提供商实例池**（添加/改/删，每张提供商各自的 key 与已入库的模型清单）、
- * 读回两条模型腿当下用什么（按「绑定 > 兜底 > 未配置」现算），以及用一次最小请求验证连通性。
+ * 读回两条模型通道当下用什么（按「绑定 > 兜底 > 未配置」现算），以及用一次最小请求验证连通性。
  *
  * 三条刻意的取舍：
  * 1. **不自建 HTTP**：`check()` / `checkProvider()` / `fetchModels()` 都走 `llm.chat` 那唯一出口，
  *    所以 `scripts/check-llm-single-entry.ts` 那道机检仍然成立——配置模块不是第二个 LLM 客户端（AGENTS.md §2.7）。
  * 2. **服务商目录只是数据**：预设的作用是把格子填上，`baseUrl`/模型名一律可改写，
  *    自定义端点与预设走完全同一条代码路径（spec 7.1-09）。
- * 3. **密钥不进配置层**：只经 `config` 的密钥库那几格（`secret.ts`：腿的兜底一格、每个提供商实例一格），
+ * 3. **密钥不进配置层**：只经 `config` 的密钥库那几格（`secret.ts`：通道的兜底一格、每个提供商实例一格），
  *    所以它既不在 `trace()` 里，也不在 `settings.json` 里，更不会回传给渲染层（spec 7.1-06 / 7.2-10）。
  */
 import { AppError, asApp, Service, maybeService, type Context } from '@auto-cc/core';
@@ -48,11 +48,11 @@ import {
 } from './provider-pool.js';
 import type { LlmChatService } from './index.js';
 
-/** 两条模型腿：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
+/** 两条模型通道：chat 是话术与规划，embed 是知识库的向量增强（各家网关通常不同，故各自配）。 */
 export const llmLegSchema = z.enum(['chat', 'embed']);
 
 /**
- * 角色绑定的入参（spec 7.2-11）：把一条腿指到池里某个实例、以及它已入库的某条模型。
+ * 角色绑定的入参（spec 7.2-11）：把一条通道指到池里某个实例、以及它已入库的某条模型。
  *
  * 这里的 `providerId` 是**实例 id**（`llm_providers.id`），写进 `llm` / `llm-embed` 那格；
  * 目录里的预设 id 只出现在读数里（`LlmLegView.providerId`，由地址反查），不再是一格配置。
@@ -66,13 +66,13 @@ export const bindRoleSchema = z.strictObject({
 /** 一次角色绑定的入参形状（`origin` 之类没有缺省键，所以 input 与 output 同形）。 */
 export type BindRoleInput = z.output<typeof bindRoleSchema>;
 
-/** 腿 → 装配里的插件 id。 */
+/** 通道 → 装配里的插件 id。 */
 const LEG_PLUGIN: Record<LlmLegName, string> = { chat: 'llm', embed: 'llm-embed' };
 
-/** 腿 → 密钥库里的路径（与服务名一致）：这只在**兜底态**用得上，绑定态问的是 `llm.provider:<实例 id>`。 */
+/** 通道 → 密钥库里的路径（与服务名一致）：这只在**兜底态**用得上，绑定态问的是 `llm.provider:<实例 id>`。 */
 const LEG_SECRET: Record<LlmLegName, string> = { chat: 'llm.chat', embed: 'llm.embed' };
 
-/** 腿 → 兜底环境变量名（与各自 schema 的 `keyEnv` 默认值同词，界面当参数显示）。 */
+/** 通道 → 兜底环境变量名（与各自 schema 的 `keyEnv` 默认值同词，界面当参数显示）。 */
 const LEG_KEY_ENV: Record<LlmLegName, string> = {
   chat: 'AUTO_CC_LLM_API_KEY',
   embed: 'AUTO_CC_SILICONFLOW_API_KEY',
@@ -111,12 +111,12 @@ export class LlmSettingsService extends Service {
 
   /**
    * 服务商目录（纯数据，不发请求）。
-   * @returns 全部 19 条预设；两条腿都能选其中任何一条（不再有 `legs` 过滤）
+   * @returns 全部 19 条预设；两条通道都能选其中任何一条（不再有 `legs` 过滤）
    */
   catalog = (): LlmProviderView[] => PROVIDER_PRESETS;
 
   /**
-   * 当前配置读数：两条腿的端点/模型名/密钥状态，加密钥存储的事实。
+   * 当前配置读数：两条通道的端点/模型名/密钥状态，加密钥存储的事实。
    *
    * 全部现问（不在本服务里存第二份事实，AGENTS.md §9 实测 2.5 那条），所以界面每次刷新都是真的当下值。
    * @returns 掩码读数；密钥库未装载时按"没存"处置而不抛
@@ -128,10 +128,10 @@ export class LlmSettingsService extends Service {
   };
 
   /**
-   * 取某条腿的**生效配置**（五层合并后的值，含界面上一次保存的持久层）。
+   * 取某条通道的**生效配置**（五层合并后的值，含界面上一次保存的持久层）。
    *
    * 只问内核，不在本地存第二份事实（AGENTS.md §9 实测 2.5 那条）。先查快照是为了避开
-   * `kernel.effectiveConfig` 对未列出插件抛错——清单里注掉某条腿是合法装配，此时按"没配"处置。
+   * `kernel.effectiveConfig` 对未列出插件抛错——清单里注掉某条通道是合法装配，此时按"没配"处置。
    * @param pluginId 装配里的插件 id
    * @returns 合并后的值；内核未装或该格不在清单里时为空表
    */
@@ -142,9 +142,9 @@ export class LlmSettingsService extends Service {
   }
 
   /**
-   * 读一条腿（spec 7.2-12 的读数半边）：先按「绑定 > 兜底 > 未配置」解析，再照实报这一腿当下用什么。
-   * @param leg 哪条模型腿
-   * @returns 该腿的读数，含"这把 key 现在从哪来"——绑定时问的是那家实例自己的密钥格
+   * 读一条通道（spec 7.2-12 的读数半边）：先按「绑定 > 兜底 > 未配置」解析，再照实报这一条当下用什么。
+   * @param leg 哪条模型通道
+   * @returns 该条的读数，含"这把 key 现在从哪来"——绑定时问的是那家实例自己的密钥格
    */
   private readLeg = (leg: LlmLegName): LlmLegView => {
     const pluginId = LEG_PLUGIN[leg];
@@ -163,7 +163,7 @@ export class LlmSettingsService extends Service {
     const model = resolved.model;
     const storedKey = config?.getSecret(resolved.secretPath) ?? '';
     const envKey = (process.env[keyEnv] ?? '').trim();
-    // 「这一腿看起来像哪家」出自解析结果而不是任何本地记忆：绑定态直读那一行的 `preset_id`（确切事实），
+    // 「这一条看起来像哪家」出自解析结果而不是任何本地记忆：绑定态直读那一行的 `preset_id`（确切事实），
     // 兜底态拿生效地址去目录里反查（端点变体也算），地址认不出就是「自定义」——
     // 界面指着的必须是真在用的那一家（spec 7.1-09 同一条纪律，只是现在不再需要有人先把选择存下来）。
     const db = maybeService<StoreService>(this.ctx, 'store')?.db;
@@ -240,8 +240,8 @@ export class LlmSettingsService extends Service {
    * 删一个提供商实例：清单连带删、密钥库那一把一起清、引用它的角色绑定回落到未绑定（spec 7.2-09 的三条）。
    *
    * 三条都必须在这里做，缺一条就留下孤儿：行删了而 `llm_models` 留着是孤儿清单，密钥留着是孤儿凭证，
-   * 绑定还指着它则是**悬空绑定**——那条腿每次请求都要先解析一次才发现"这一行没有了"，界面上看着像端点坏了。
-   * 回落之后那条腿按 7.2-12 的顺序重解析（有 yml/env 兜底就用兜底），缺项由 `read()` 照报
+   * 绑定还指着它则是**悬空绑定**——那条通道每次请求都要先解析一次才发现"这一行没有了"，界面上看着像端点坏了。
+   * 回落之后那条通道按 7.2-12 的顺序重解析（有 yml/env 兜底就用兜底），缺项由 `read()` 照报
    * （`missing` 里会重新长出 `model` / `apiKey`），所以界面不用自己拼这句话。
    * @param id 实例 id
    * @returns 删完之后剩下的实例（界面不用再补一刀）
@@ -257,7 +257,7 @@ export class LlmSettingsService extends Service {
       const pluginId = LEG_PLUGIN[leg];
       if (this.effectiveOf(pluginId).providerId !== id) continue;
       // 绑定是一次原子表态（实例 + 模型名两条键一起写），撤它就得两条一起撤：只撤 `providerId`
-      // 会让这条腿挂着一个已经不存在的模型名，而界面的候选出自 `llm_models`，那一格里再也没有它。
+      // 会让这条通道挂着一个已经不存在的模型名，而界面的候选出自 `llm_models`，那一格里再也没有它。
       const unset = { providerId: null, model: null };
       maybeService<ConfigService>(this.ctx, 'config')?.setPersisted(pluginId, unset, ['providerId', 'model']);
       if (kernel) await kernel.applyConfig(pluginId, unset);
@@ -380,13 +380,13 @@ export class LlmSettingsService extends Service {
   };
 
   /**
-   * 角色绑定：把一条腿指到池里某个实例的某条**已入库**模型（spec 7.2-11）。
+   * 角色绑定：把一条通道指到池里某个实例的某条**已入库**模型（spec 7.2-11）。
    *
    * 候选只出自 `llm_models`，所以"能选到的就一定已经在清单里"——这条硬约束是为了不让界面长出一个
    * 可以手敲任意模型名的口子（那会让 7.2-12 的解析顺序变成猜）。
    * 落盘走 `config` 的持久层 + `kernel.applyConfig` 热改，所以保存后**不用重启**就生效（spec 7.1-08 同一条链）。
-   * @param input 哪条腿、哪个实例、哪条模型
-   * @returns 绑定后的读数（两条腿都重算，界面不用再补一刀）
+   * @param input 哪条通道、哪个实例、哪条模型
+   * @returns 绑定后的读数（两条通道都重算，界面不用再补一刀）
    * @throws 入参不合法 `INVALID_ARGUMENT`；实例不在池里 `LLM_PROVIDER_NOT_FOUND`；模型没入库 `INVALID_ARGUMENT`（`details.reason = 'MODEL_NOT_ADDED'`）
    */
   bindRole = async (input: BindRoleInput): Promise<LlmSettingsView> => {
@@ -418,7 +418,7 @@ export class LlmSettingsService extends Service {
     }
     const pluginId = LEG_PLUGIN[leg];
     // 只写 `providerId` 与 `model` 两个键，**不复制 baseUrl**：端点当场向池问（`resolveLeg`），
-    // 否则用户改了那家的地址，这条腿还会拿着旧地址打（AGENTS.md §2.5）。
+    // 否则用户改了那家的地址，这条通道还会拿着旧地址打（AGENTS.md §2.5）。
     config.setPersisted(pluginId, { providerId, model }, ['providerId', 'model']);
     const kernel = maybeService<KernelReader>(this.ctx, 'kernel');
     if (kernel) await kernel.applyConfig(pluginId, { providerId, model });
@@ -445,8 +445,8 @@ export class LlmSettingsService extends Service {
   };
 
   /**
-   * 清除某条腿已存的密钥（界面上的"删除密钥"）。
-   * @param leg 哪条模型腿
+   * 清除某条通道已存的密钥（界面上的"删除密钥"）。
+   * @param leg 哪条模型通道
    * @returns 清除后的读数
    */
   clearKey = (leg: LlmLegName): LlmSettingsView => {
@@ -459,7 +459,7 @@ export class LlmSettingsService extends Service {
    *
    * 复用 `llm.chat` 的出口而不是自己 `fetch`：这样"测试通过"与"业务真的能用"是同一件事，
    * 也让超时、非 2xx、空回复这些失败形态与生产路径完全一致。
-   * @param leg 目前只支持 `chat`（向量腿要的是 embeddings 端点，判据不同且暂无消费者）
+   * @param leg 目前只支持 `chat`（向量通道要的是 embeddings 端点，判据不同且暂无消费者）
    * @returns 结构化结果；失败不抛，界面按 `reason` 说话
    */
   check = async (leg: LlmLegName = 'chat'): Promise<LlmCheckView> => {
@@ -468,7 +468,7 @@ export class LlmSettingsService extends Service {
         ok: false,
         model: null,
         reason: 'CHECK_NOT_SUPPORTED',
-        message: '向量腿的连通性测试本轮未接入',
+        message: '向量通道的连通性测试本轮未接入',
         elapsedMs: 0,
       };
     }

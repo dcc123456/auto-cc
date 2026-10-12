@@ -59,7 +59,7 @@ theme 经 `[data-action=shell-theme-toggle]` 切到 light 后：
 那是首启动态取证点击 acknowledge 的自然结果，与用户本来的"已确认"状态等价。
 
 ---------------------------------------------------------------------
-⑤ 负腿与还原
+⑤ 反向证据与还原
 ---------------------------------------------------------------------
 - `data-reopened` 仍挂在 dialog 节点上（`markers` 旋钮），5.9-06 与 6.2-06 的旧断言口径不变；
   `scripts/smoke-dist.ts` 用的 `[data-testid="privacy-notice"]` 与 `[data-action="privacy-acknowledge"]`

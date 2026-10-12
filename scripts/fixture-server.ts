@@ -42,12 +42,12 @@
  *   `off` 让 `/boss` 照常出列表页，`captcha` 出 200 的「安全验证」页（正文判据的靶子），
  *   `blocked` 出 403 的「访问受限」页（状态码判据的靶子）。开关在 fixture 进程里，所以能在
  *   工作流正跑着的时候切，把「运行中突然被拦 → 立即暂停」这条时序演出来（spec 2.7-01）；
- * - `/api/generate-mode` 是**改写腿档位开关**（POST `{mode:'rewrite'|'fabricate'}`，GET 只读，
+ * - `/api/generate-mode` 是**改写通道档位开关**（POST `{mode:'rewrite'|'fabricate'}`，GET 只读，
  *   DELETE 归回 `rewrite`），对端是 `/v1/chat/completions` —— 一个只回 OpenAI 信封的本地靶端点：
  *   它把请求里那份「待改写清单」原样回填位置三 id，`rewrite` 档在正文后追加一句不含数字与机构名的
  *   哨兵（确定性事实校验三条判据都会放行，界面能拍到真改写行），`fabricate` 档凭空补一个 `91%`
  *   （数值守恒必然不过，两轮都过不了 → 拒绝产出）。4.5 的 V 类条目要的就是「界面上看得见改写行 /
- *   看得见被拒」，而真打外部模型服务要花钱、也需用户单独授权，所以这一条腿在本地打靶（spec 4.5-02 /
+ *   看得见被拒」，而真打外部模型服务要花钱、也需用户单独授权，所以这一条通道在本地打靶（spec 4.5-02 /
  *   05 / 11，与 §7.2「测试不打真实平台」同一条口径）；
  * - `/pii` 是**脱敏靶页**（spec 2.7-07）：裸写的手机号 / 邮箱 / 身份证 + 一组刻意留下的对照数字
  *   （薪资区间、编号、年份）+ 一个把号码拆成三个文本节点的块，遮罩到底盖住了什么、盖不住什么，
@@ -172,14 +172,14 @@ const RISK_BLOCKED_HTML =
   '<p data-testid="risk-body">您的请求过于频繁，请稍后再试。</p></body></html>';
 
 /**
- * 改写腿的应答档位（spec 4.5-02 / 05 / 11 的 V 半边用）。
+ * 改写通道的应答档位（spec 4.5-02 / 05 / 11 的 V 半边用）。
  *
  * 为什么要有这个靶子：这三条的判据都是"界面上看得见改写行"，而**没有模型就没有改写行**
  * （4.5-09 的保守版只有重排）。真打外部模型服务要花钱、也需用户单独授权（同 4.4-02 一直标 `[!]`
  * 的理由），所以这里在本地做一个只回 OpenAI 信封的靶端点：
  * - `rewrite` 逐条原样回填位置三 id，正文只在原文后追加一句**不含数字、不含机构名**的哨兵，
  *   于是确定性事实校验（数值守恒 + 具名回查 + 事实锁）三条全过，产物是 `rewritten`；
- *   截图里"改后"与"改前"必须肉眼可分，否则证明不了这一行真从模型腿来。
+ *   截图里"改后"与"改前"必须肉眼可分，否则证明不了这一行真从模型通道来。
  * - `fabricate` 把正文换成一句凭空多了 `91%` 的说法，**必然**命中数值守恒，两轮都不过 →
  *   `rejected`、没有产物、界面列出违规行（4.5-05 要的正是"注入必失败用例"）。
  * 档位由验收脚本现调，不在启动时定死：同一份简历要能反复拍这两种结局。
@@ -212,8 +212,8 @@ const GENERATE_FABRICATED_TEXT = '把存量问题的解决率提升到 91%。';
 /**
  * 从一次 chat 请求体里读出那份待改写清单。
  *
- * 认标记串而不是认模型名或某条消息的顺序：清单只可能由改写腿的提示词拼出来，
- * 而 4.4 的拆解腿、2.5 的话术腿用的是完全不同的提示词，它们打到这里应当被判"不是改写腿"
+ * 认标记串而不是认模型名或某条消息的顺序：清单只可能由改写通道的提示词拼出来，
+ * 而 4.4 的拆解通道、2.5 的话术通道用的是完全不同的提示词，它们打到这里应当被判"不是改写通道"
  * 并回 400，而不是拿到一份看似成功、实则答非所问的回复。
  * @param body 请求体（OpenAI 信封：`{model, messages:[{role, content}]}`）
  * @returns 清单条目；请求里没有那份清单（或读不出合法 JSON）时 null
@@ -761,7 +761,7 @@ const newtabTargetPageHtml = `<!doctype html>
  * 读完请求体再回调；默认上限 64 KB，避免样例端点被当成缓冲区滥用。
  * @param request 入站请求
  * @param response 出站响应（超限时就地回 413，所以调用方拿到 null 时不要再写头）
- * @param maxBytes 体积上限（字节）；改写腿的请求体带整份待改写清单，只有它需要放宽
+ * @param maxBytes 体积上限（字节）；改写通道的请求体带整份待改写清单，只有它需要放宽
  * @returns 解析后的对象；体不是合法 JSON 时 `undefined`，超限并已就地回了 413 时 `null`
  */
 function readJson(
@@ -1249,7 +1249,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
-  // 改写腿档位开关（spec 4.5-02 / 05 / 11 的 V 半边）：只认 rewrite / fabricate 两个值，
+  // 改写通道档位开关（spec 4.5-02 / 05 / 11 的 V 半边）：只认 rewrite / fabricate 两个值，
   // 别的按 400 拒绝——靶子没立起来必须是一次看得见的失败，否则截图里那份"改写版"说明不了任何事。
   if (url.pathname === '/api/generate-mode' && request.method === 'POST') {
     const body = await readJson(request, response);
@@ -1261,7 +1261,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       return;
     }
     generateMode = next;
-    console.log(`[fixture] 改写腿档位切换为 ${next}`);
+    console.log(`[fixture] 改写通道档位切换为 ${next}`);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ ok: true, mode: generateMode }));
     return;
@@ -1271,7 +1271,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   // 后面每一轮都会立刻被拒，第二次的「改写版」截图就拍不到了。
   if (url.pathname === '/api/generate-mode' && request.method === 'DELETE') {
     generateMode = 'rewrite';
-    console.log('[fixture] 改写腿档位归零（rewrite）');
+    console.log('[fixture] 改写通道档位归零（rewrite）');
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ ok: true, mode: generateMode }));
     return;
@@ -1319,8 +1319,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   // OpenAI 信封的本地靶端点（`llm.baseUrl` 指到 `http://127.0.0.1:<port>/v1` 时打的就是这里）。
-  // 只应答改写腿，别的提示词一律 400 并说清原因：话术腿、拆解腿的答案这里给不出，
-  // 假装给得出就会把「模型腿跑通了」的假证据留在截图里。
+  // 只应答改写通道，别的提示词一律 400 并说清原因：话术通道、拆解通道的答案这里给不出，
+  // 假装给得出就会把「模型通道跑通了」的假证据留在截图里。
   if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
     // 提示词带的是整份待改写清单，64KB 那道上限是给页面表单定的，这里按 512KB 走。
     const body = await readJson(request, response, 512 * 1024);
@@ -1333,7 +1333,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         const auth = request.headers.authorization ?? '';
         if (!auth.startsWith('Bearer ') || auth.slice(7).trim() === '') {
           response.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-          response.end(JSON.stringify({ error: { message: 'fixture 的 ping 腿要求 Authorization: Bearer <key>' } }));
+          response.end(JSON.stringify({ error: { message: 'fixture 的 ping 通道要求 Authorization: Bearer <key>' } }));
           return;
         }
         const pingModel = body['model'];
@@ -1354,7 +1354,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
       response.end(
         JSON.stringify({
-          error: { message: 'fixture 的 chat 端点只应答简历改写腿与连通 ping：请求里既读不出清单也不是 ping' },
+          error: { message: 'fixture 的 chat 端点只应答简历改写通道与连通 ping：请求里既读不出清单也不是 ping' },
         }),
       );
       return;
@@ -1369,7 +1369,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     // 但只回显字符串：`String(非字符串)` 会印出 `[object Object]`，那是条会误导人的读数。
     const requestedModel = body['model'];
     // 日志只落条数与档位，正文一个字都不打（AGENTS.md §8.5：简历内容默认脱敏）。
-    console.log(`[fixture] 改写腿应答 ${String(entries.length)} 条，档位 ${generateMode}`);
+    console.log(`[fixture] 改写通道应答 ${String(entries.length)} 条，档位 ${generateMode}`);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(
       JSON.stringify({

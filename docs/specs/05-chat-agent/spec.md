@@ -134,7 +134,7 @@
   不算架构越界。**第一版名单整条空转**——写的是 `@auto-cc/browser`，而仓库真实包名是
   `@auto-cc/plugin-browser`（`plugin-*` 是 1.5 定的口径）。"规则存在"与"规则命中"是两件事，这条坑留字。
   有意不列 `plugin-workflow`（§5.9 要求对话与工作流共用同一个 `workflow.runner`）、
-  `plugin-llm` 与 `plugin-entitlement`（agent 的对话腿要发模型、档位判定要问闸门）。
+  `plugin-llm` 与 `plugin-entitlement`（agent 的对话通道要发模型、档位判定要问闸门）。
 - **5.1-09 反向验证按判据原文打整条 `pnpm lint`**：新建 `packages/agent/src/probe-5109.ts`，三条越界 import
   各测一种名单形态（精确名 `@auto-cc/plugin-resume-kb`、通配 `@auto-cc/plugin-platform-boss`、
   深路径 `@auto-cc/plugin-browser/src/index.js`）→ `pnpm lint` **exit 1**、`✖ 3 problems (3 errors)`，
@@ -160,7 +160,7 @@
 
 ### 5.1-c 落地记录（建档与生成话术登记成工具，装配顺序从此有机检，2026-10-02）
 
-- **这一片把 5.1-06 / 5.1-07 的清单补齐，并且只补两条腿**：`resume.parse.fromFile`（建档）与
+- **这一片把 5.1-06 / 5.1-07 的清单补齐，并且只补两条通道**：`resume.parse.fromFile`（建档）与
   `outbound.script.generate`（生成话术）各以 `agentTool({…})` 登记进 `agent.tools`，**复用两只服务已有的方法口**
   （`fromFile(filePath)` / `generate(params)`），零新 service、零新 IPC 口、零新依赖——两包各自 `registerAgentTools`
   的写法与另外八包同构，入参 schema 直接复用既有导出的 `resumeParseRequestSchema` / `scriptRequestSchema`
@@ -378,7 +378,7 @@
   `loop.ts` 里 `this.policy.decide(` 恰一处、实参块只读那三位，出现 `intent/observation/summary/draft/steps/model`
   任一即红；`policy.ts` 不 `import './model.js'`。**行为用例防「这次没听话」，机检防「以后长出一条能听话的口」**，
   后者才是这条判据真正要的东西。
-- **录像机为什么装在 `StubLoopModel.prototype` 上**：`agent.loop` 的模型腿是它自己 new 出来的（5.2 只有桩一种实现），
+- **录像机为什么装在 `StubLoopModel.prototype` 上**：`agent.loop` 的模型通道是它自己 new 出来的（5.2 只有桩一种实现），
   要拿到循环**真发出去**的请求就得在这条方法上包一层；给服务开一条「测试专用注入模型」的构造口子等于在生产
   surface 上开后门（与 5.2-a 刻意不留「往桩里塞队列」的口子是同一条判断）。替换只在用例内发生、`finally` 里还原；
   起草那条只按参数改措辞、不记清单——记了没人读的那一份是死代码（§2.4），提交前删净。
@@ -1492,7 +1492,7 @@ inactive context`（`loop.ts:384`）；那是 cordis 的重建语义，不是本
   在 insert 前 `redactText`，`writeStep` 的 `observation` 同理（页面读数里那串 HR 手机号进的就是这一列）。
   ③ 同一文件的 `read()` —— 界面唯一去处（IPC 白名单上 `agent.loop.read` 与 `agent/run-progress` 推的是同一份形状），
   把 `plan[].input` 逐次 `redactValue`。④ `packages/llm/src/index.ts` 的请求体 `messages[].content` —— 出站前最后一道，
-  一处覆盖所有走模型的文本（F6：`llm.chat.complete()` 是当前唯一那条 chat 腿）。**全部经 `@auto-cc/core` 复导出的
+  一处覆盖所有走模型的文本（F6：`llm.chat.complete()` 是当前唯一那条 chat 通道）。**全部经 `@auto-cc/core` 复导出的
   `redactText` / `redactValue`**，agent 与 llm 包里没有任何第二套 PII 正则（§2.5 / §2.7），掩码形状与 logger、
   工作流证据（2.7-d）、KB 入库（4.1-09）三处历史消费者逐字一致：手机留前 3 后 4、证件留后 4、邮箱留首字符与域名。
 - **本片最重要的一处不是"遮"，是"不遮哪里"**：`agent_run.plan_json` 存的是**执行件**而不是对话记录——
@@ -1643,7 +1643,7 @@ inactive context`（`loop.ts:384`）；那是 cordis 的重建语义，不是本
   拒之后；已删栏只在 `trashed()` 非空时渲染，每一行一只「恢复」按钮，标题用 `对话 {{code}}` 兜住 null；
   删除之后提示那一句直接指向下面那一栏（`deleted`），而不是一个会消失的撤销 toast。
   原 `ChatPanel` 头部那只「新建」按钮搬进这条带并删掉——同一个动作只留一个入口（§2.5），
-  `startSession()` 这条腿一行没动（1.11-08 的语义本来就对）。图标 6 只全 lucide
+  `startSession()` 这条通道一行没动（1.11-08 的语义本来就对）。图标 6 只全 lucide
   （`Check / Pencil / Plus / RotateCcw / Trash2 / X`），样式全 Tailwind，文案全走 i18n 且 zh-CN / en 齐（`pnpm lint` 的
   缺翻译与占位符实参两条都过）。
 - **U 半边 8 条用例**（`agent.test.ts` 的 describe「会话三操作：标题、软删与恢复途径（spec 5.6-07）」）：
@@ -1857,7 +1857,7 @@ covered_count / tokens_before / tokens_after / created_at`）+ 一条 `(session_
 ### 5.7-a 落地记录（2026-10-03，服务半边：`packages/scheduler` + 号段 25）
 
 **为什么这一片只做服务侧**：`plan §7.5.1` 读码结论是全仓零调度机制（F1/F2），界面与 IPC 口要在有登记处之后才有东西可列，
-所以 a 片落"任务表 + 触发记录 + 触发腿 + 静态检查"，b 片再接界面（5.7-05 的 V、5.7-09 的截图标记都在 b）。
+所以 a 片落"任务表 + 触发记录 + 触发通道 + 静态检查"，b 片再接界面（5.7-05 的 V、5.7-09 的截图标记都在 b）。
 本片完成后本包**尚未进 app 装配清单**（`packages/main/src/registry.ts` 与 `cordis.yml` 各一行在 5.7-b 同批加），
 所以 5.7-05 / 5.7-09 保持 `[ ]` 而不是 `[x]`——真 app 里现在还看不到任何定时任务，这是刻意的可见缺口，不是遗漏。
 
@@ -1908,7 +1908,7 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 "没配闸门就什么都别跑"。同理 `inject` 只有 `['store']`：§9 的 2.5 实测教训（热改配置重建下游）决定了跨包能力用的时候现问。
 
 **新增用例 16 条**（`packages/scheduler/src/scheduler.test.ts`）：cron 本地时区与永不成立式 2 条；建任务校验 3 条
-（含越形拒 `goal`）；触发记录 3 条（到点 started、失败 failed 且不影响下次、手工跑一次走同一条腿）；闸门 3 条
+（含越形拒 `goal`）；触发记录 3 条（到点 started、失败 failed 且不影响下次、手工跑一次走同一条通道）；闸门 3 条
 （额度尽 skipped、名单恰为 greet/deliver、闸门缺席照跑）；不补跑 2 条（tick 层与真重启层）；启停 2 条
 （停用不触发且停用期间不记"错过"、删除任务保留触发历史）；号段 1 条。
 
@@ -1932,7 +1932,7 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 `.triggers` / `.createJob` / `.setEnabled` / `.removeJob` / `.triggerNow`）；③ 界面 `ScheduleSection` 挂在工作流视图的计划库下面。
 
 **`tick` 与 `accountForMissedRuns` 没有开成白名单口，是设计而不是遗漏**：渲染层若能喊"到点"或"补跑"，
-5.7-09 那条约定就有了第二种结局。界面能做的只有建 / 启停 / 删 / 跑一次，而"跑一次"复用的正是 tick 那条 `launch` 腿
+5.7-09 那条约定就有了第二种结局。界面能做的只有建 / 启停 / 删 / 跑一次，而"跑一次"复用的正是 tick 那条 `launch` 通道
 （§7.3：手工触发不是额外的外发路径）。计划下拉复用既有的 `workflow.runner.plans`，不为调度另开一条读计划的口（§2.1）。
 
 **三个视图类型提到契约包 `@auto-cc/shared`（`ScheduleJobView` / `ScheduleTriggerView` / `ScheduleTriggerResult`），
@@ -1955,7 +1955,7 @@ unrecognized key 报法），落库零行、起跑零次。仓库里也不存在
 落了一条 `started` 记录与一条 run（`8aa142a9-b2db-41e6-9a66-67a59bb872cf`）。该 run 第一个节点即以
 「内核视图尚未挂载任何平台，先打开一个会话再操作页面」失败（`workflow_runs.last_error` 原文），
 **没有打开任何会话、没有出网、没有任何外发**——§7.2 的"自动化不得访问真实招聘平台"没有被违反，判据是这条 run 的失败原因；
-它同时反向证明了调度起跑与界面/手工起跑是同一条腿，失败原因原样上浮而不是被调度器翻译（§5.7-a 的口径）。
+它同时反向证明了调度起跑与界面/手工起跑是同一条通道，失败原因原样上浮而不是被调度器翻译（§5.7-a 的口径）。
 
 **界面不自己算 cron**：表达式那一格只做填写，能不能成立、下一个点是什么时候全由主进程求值后回读，
 所以"这条表达式永远不会跑"那句拒因能原样留在提示行里当证据（`0 0 31 2 *` 在建任务那一刻即 `INVALID_ARGUMENT`）。
@@ -2240,7 +2240,7 @@ resume-0185fba4a2cc-classic.pdf / 43871 字节 / sha256 c272d0a4378a… / delive
 **这片存在的唯一理由**：5.7-a 的收口里写着 08 保持 `[ ]` 的两条缺什么——「① 频控那半边没做——`throttle.nextGapMs()`
 仍在节点侧，调度层没有预检，这需要与真工作流一起验才不流于假数据；② 判据原文要求"切『每天 N 次』实现"，
 本片的断言用的是 `FakeGateService`（只读端口的形状），真闸门 `mode:'daily'` 的端到端要等 5.7-d 的全链路复跑」。
-d 片把全链路跑完了，但那两条仍没被那次的读数覆盖（d 片的投递走的是界面/审批那一腿，额度是 `unlimited`），
+d 片把全链路跑完了，但那两条仍没被那次的读数覆盖（d 片的投递走的是界面/审批那一条，额度是 `unlimited`），
 所以 e 片拆成 e-1 专门还这两笔账，e-2 才是逐项收口。
 
 **决策九（`plan §7.5.6`）：预检挂在既有的节奏服务上，不新建服务、不新建状态**。
@@ -2287,7 +2287,7 @@ deliver 同样被预检）、只读性质（无账本行、无被拒流水）、
 "次日"用 `Date#setDate(+1)` 而不是 `+86400000`， DST 机器上才不会差一小时。
 
 **反向验证（防"永远为真"的断言）**：把 `registry.ts` 的 `if (throttle)` 临时改成 `if (false && throttle)` 后重跑，
-3 条频控用例转红（判序那条仍绿，因为额度先命中——正好证明两条腿各自独立），改回后 8 条全绿。
+3 条频控用例转红（判序那条仍绿，因为额度先命中——正好证明两条通道各自独立），改回后 8 条全绿。
 这是本片唯一一次改主干代码之外的"验"，改动没有留在仓库里。
 
 **四道门禁**（实跑退出码，命令写在括号里）：`pnpm typecheck` → `TYPECHECK_EXIT=0`（22 个包全部 `Done`）；
@@ -2619,7 +2619,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 不是替身上的形状。`structuredClone(view)` 与 `view` 逐字段相等（IPC 载荷那条前置）。
 
 **5.8-02 的只读性用三条独立证据**，而不是"看起来没写"：① 聚合口在**完全不装 store 插件**的上下文里照样答得出
-（它没有 `static inject`，摘任何一条能力腿都不会把它一起带进 PENDING，用例逐条摘四条腿各演一次）；
+（它没有 `static inject`，摘任何一条能力通道都不会把它一起带进 PENDING，用例逐条摘四条通道各演一次）；
 ② 源码扫描如上；③ 非法区间断言之后所有 recorder 仍为空、真装配里 `jd.store.countCaptured` 的读数不变。
 
 **5.8-04 的服务半边**：`requireRange` 是唯一校验处（系统边界：那两个数从渲染层经 IPC 进来）。
@@ -2638,7 +2638,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 （与 `deliver.test.ts` 直接读装配文件的先例同法）。
 
 **一条测试装具的实测教训**（写下来免得下次再踩）：`mount(name, ctx.plugin(X, cfg))` 里
-`ctx.plugin(...)` 是**实参**，在函数调用之前就真的挂载了，所以"摘腿"分支只是不把 fiber 记进收尾清单，
+`ctx.plugin(...)` 是**实参**，在函数调用之前就真的挂载了，所以"摘掉通道"分支只是不把 fiber 记进收尾清单，
 服务仍然在上下文里。第一版 `metrics-link.test.ts` 的摘会话库那条用例因此读到了 `count: 0` 而不是 `null`——
 断言当场失败，把这只假绿抓了出来。正确形状是 `mount(name, () => ctx.plugin(...))`，在 `without` 判定之后才求值。
 
@@ -2736,7 +2736,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 | 门禁       | 命令                | 实际输出（节选）                                                                                                                                                                                          |
 | ---------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 类型       | `pnpm typecheck`    | 两轮均 22 个包全部 `tsc --noEmit` → `Done`，含 `packages/main`、`packages/shared`、`packages/renderer`，零报错；上移那轮改完 import 后复跑仍全绿                                                          |
-| 机检与规约 | `pnpm lint`         | 两轮 exit 0：eslint 0 命中 + 渲染层规范（2 个语言包 / 43 个源文件）+ 站点知识包 + LLM 入口唯一 + 合规护栏 + 离线依赖门槛 + 提示词落点 + agent 三条通道全过                                                |
+| 机检与规约 | `pnpm lint`         | 两轮 exit 0：eslint 0 命中 + 渲染层规范（2 个语言包 / 43 个源文件）+ 站点知识包 + LLM 入口唯一 + 合规护栏 + 离线依赖门槛 + 提示词落点 + agent 三条机检全过                                                |
 | 格式       | `pnpm format:check` | 第一轮**红**：`[warn] packages/main/src/metrics-link.test.ts` → `prettier --write` 该文件后复跑 `All matched files use Prettier code style!`；上移后第二轮 exit 0（口径文案再改过一次，故终局仍复跑一次） |
 | 测试       | `pnpm test`         | 两轮 exit 0，22 个包 `Test Files` 全绿、**1753 / 1753** 条通过、零失败（日志里唯一含 "failed" 的那行是某条通过用例的标题原文，不是失败计数）；`packages/main` 8 文件 56 条（`metrics-link.test.ts` 8 条） |
 
@@ -2781,7 +2781,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 5.8-06 → `scripts/check-dependency-floor.ts` 的新禁令组（本来就在 `pnpm lint` 链里）。
 
 **装配先上移**（§2.2，同一逻辑出现第二次）：5.8-b 的 `metrics-link.test.ts` 已经有一份
-「临时库 + 七只服务 + 真闸门 + 真聚合口」的装配代码，万级用例要的是同一条腿的装配、只多灌一万行。
+「临时库 + 七只服务 + 真闸门 + 真聚合口」的装配代码，万级用例要的是同一条通道的装配、只多灌一万行。
 这一片把装配抽成 `packages/main/src/metrics-assembly.ts` 的 `bootFunnelAssembly({ without, prefix })`
 （含 `jobSeed` 这个岗位种子构造口），两份判定都只做自己的事：link 那份保留"只经公开写入口写数"的
 八条断言原文不动，scale 那份只管灌行与计时。**没新增 service、没新增包、没开第二套存储**，
@@ -2795,7 +2795,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 都由测试自己按时间戳独立算出再对比——顺带把**含头不含尾**钉在真实数据上：偏移量 7 的那一天
 正好落在 `fromMs` 上，半开区间把它算进来，直觉按"7 天前不含"写出的谓词会少 150 条左右，两类数不同过；
 ③ 额度三量在万级账本下仍答得出（`mode='daily'`、`usedToday > 0`、`remaining >= 0`），
-聚合口没有因为行数而把闸门那条腿拖成不可用；
+聚合口没有因为行数而把闸门那条通道拖成不可用；
 ④ 计时用 `FunnelView.tookMs`（主进程自测，不含 IPC 与绘制），**近 7 天五次采样全部 1ms（中位 1ms）、
 整段 31 天全部 2ms（最差 2ms）**，预算线定在 200ms。这条预算不是拍的：它取"最差实测的一百倍"，
 既能挡住"退化成全表扫"这种量级跃迁（本仓的对照量级是毫秒→百毫秒），又不会因机器负载抖动误报；
@@ -2853,7 +2853,7 @@ CDP 10222 打渲染层（`--url 5173`）。本轮**没有改任何配置**（§9
 | 门禁       | 命令                | 实际输出（节选）                                                                                                                                                                                                            |
 | ---------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 类型       | `pnpm typecheck`    | 22 个包全部 `tsc --noEmit` → `Done`，exit 0。中途红过一次：`metrics-link.test.ts(61,47) TS2740 Set<string> 不能赋给 string[]` → 把 `bootFunnelAssembly` 的 `without` 放宽为 `Iterable<string>`（数组与 Set 都收），复跑全绿 |
-| 机检与规约 | `pnpm lint`         | exit 0：eslint 0 命中 + 渲染层规范（2 个语言包 / 43 个源文件）+ 站点知识包 + LLM 入口唯一 + 合规护栏 + 离线依赖门槛（含新的图表库禁令）+ 提示词落点 + agent 三条通道 + 调度器 + **看板只读性**（本片刻意加进链尾）          |
+| 机检与规约 | `pnpm lint`         | exit 0：eslint 0 命中 + 渲染层规范（2 个语言包 / 43 个源文件）+ 站点知识包 + LLM 入口唯一 + 合规护栏 + 离线依赖门槛（含新的图表库禁令）+ 提示词落点 + agent 三条机检 + 调度器 + **看板只读性**（本片刻意加进链尾）          |
 | 格式       | `pnpm format:check` | `All matched files use Prettier code style!`，exit 0（`docs/acceptance/` 在 `.prettierignore` 里，验收证据按归档原样排版这一既有约定不变）                                                                                  |
 | 测试       | `pnpm test`         | exit 0，22 个包 **113 个测试文件 / 1758 条全过**（较 5.8-b 的 1753 条多 5 条 = `metrics-scale.test.ts`）；`packages/main` 9 文件 61 条（`metrics-link` 8 + `metrics-scale` 5）                                              |
 
@@ -3267,7 +3267,7 @@ a 片已经拍到过"三个节点两条边"的画面，但它证的是 5.10-01�
 
 > **M6-01 打勾的边界，写清楚免得被读成"比实际更多"**：证的判据是**同一条 run 在对话主界面里跑完六只手、
 > 中途按住可交还、交还后可续跑、投递真落地**（`docs/acceptance/5.7/5.7-01-4*.png` 六张 + fixture 回执对账，
-> 详见 5.7-d 落地记录）。其中「自然语言→计划」这一腿是**桩模型**证的：`/run` 那句话本身就是脚本，
+> 详见 5.7-d 落地记录）。其中「自然语言→计划」这一条是**桩模型**证的：`/run` 那句话本身就是脚本，
 > 逐字点名的六只手一一步一张计划卡，所以它证的是**循环与闸门的正确性**，不是真实大模型的规划质量——
 > 后者要单独授权打外部模型服务，与 5.7-11（真实账号端到端）同批做，届时再复判这一条。
 > **M6b-01 打勾的边界**：两条路径都是**真实现**而不是假端口——「每天 N 次」用的是 `EntitlementGateService`
@@ -3416,7 +3416,7 @@ agent 工具（§8.4）；未登记名（`workflow.graph.deleteGraph`、带点�
   `effect:'outbound'` + `requiresConfirmation:true`，入参 `z.strictObject({ planId })`。
   定级取最保守那一侧的理由写在代码注释里（通用运行器的副作用取决于图里有什么，而声明期必须定级 F33）；
   节点级的三闸门与会话失效/风控停在可恢复点，全都仍在 runner 里逐个判，工具一层不碰。
-- **等待腿**：私有 `waitForSettled(runId, signal)` 订阅 `workflow/progress`，只在 `done|failed|paused`
+- **等待通道**：私有 `waitForSettled(runId, signal)` 订阅 `workflow/progress`，只在 `done|failed|paused`
   收口；取消映射到 `this.abort()`——即「停在可恢复点」而不是「这次调用没发生过」，与界面按暂停同一条路。
   入口先读一次 `current()`，为零节点那种「起完就已经跑完」的 run 留一条不悬挂的出口。
 - **文案**：`agent.tool.labels.workflowRun` 两份语言包齐（zh-CN「运行这条工作流计划」/ en "Run this workflow plan"），

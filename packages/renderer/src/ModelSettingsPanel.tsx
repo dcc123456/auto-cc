@@ -100,13 +100,13 @@ export function ModelSettingsPanel() {
   const [candidates, setCandidates] = useState<string[]>();
   const [ticked, setTicked] = useState<string[]>([]);
   const [manualModel, setManualModel] = useState('');
-  /** 两条腿各自的下拉草稿（没动过的腿就是空对象里缺的那一键，值直接取主进程回的那份绑定）。 */
+  /** 两条通道各自的下拉草稿（没动过的通道就是空对象里缺的那一键，值直接取主进程回的那份绑定）。 */
   const [bindingDraft, setBindingDraft] = useState<Partial<Record<LlmLegName, string>>>({});
   const [form, setForm] = useState<ProviderForm>();
   const [probe, setProbe] = useState<ProbeReading>();
 
   /**
-   * 重读整份事实：两条腿 + 目录 + 池 + 每家的清单。
+   * 重读整份事实：两条通道 + 目录 + 池 + 每家的清单。
    *
    * 每家的清单逐家现问而不在主进程攒一份：条数就是家数（个位数，全是本地 SQL），而"攒一份"等于在池
    * 之外再造一个真相（§2.5）——用户删掉一家之后那份缓存还得有人去擦。
@@ -146,7 +146,7 @@ export function ModelSettingsPanel() {
   const stored = storedOf(selected?.id);
   const legViewOf = (leg: LlmLegName): LlmLegView | undefined => view?.legs.find((item) => item.leg === leg);
 
-  /** 两条腿正绑着的 `<实例>::<模型>` 组合，用来挡住"删掉一条正在用的模型"。 */
+  /** 两条通道正绑着的 `<实例>::<模型>` 组合，用来挡住"删掉一条正在用的模型"。 */
   const boundCandidates = new Set(
     (view?.legs ?? [])
       .filter((item) => item.boundProviderId !== null && item.model !== null)
@@ -154,7 +154,7 @@ export function ModelSettingsPanel() {
   );
 
   /**
-   * 全部家 × 各家已入库的模型 = 两条腿的候选（spec 7.2-11 的"从我已经添加的模型里选"）。
+   * 全部家 × 各家已入库的模型 = 两条通道的候选（spec 7.2-11 的"从我已经添加的模型里选"）。
    *
    * 标签写成「显示名 · 模型名」：`DeskSelect` 的选项是 children，原件层没有 `<optgroup>` 的先例
    * （plan §7.5 的待核项已实测确认），而扁平值 `<实例>::<模型>` 才能把"两家都有同名模型"挑开。
@@ -310,7 +310,7 @@ export function ModelSettingsPanel() {
   };
 
   /**
-   * 从清单里摘掉一条（正被某条腿绑着的那条在按钮上先挡住，见 `boundCandidates`）。
+   * 从清单里摘掉一条（正被某条通道绑着的那条在按钮上先挡住，见 `boundCandidates`）。
    * @param row 池里的一行
    * @param model 要摘掉的模型名
    */
@@ -321,8 +321,8 @@ export function ModelSettingsPanel() {
   };
 
   /**
-   * 把一条腿指到某个实例的某条已入库模型（spec 7.2-11）：只写实例 id 与模型名两格，端点由池当场给。
-   * @param leg 哪条腿
+   * 把一条通道指到某个实例的某条已入库模型（spec 7.2-11）：只写实例 id 与模型名两格，端点由池当场给。
+   * @param leg 哪条通道
    */
   const bindLeg = (leg: LlmLegName): void => {
     const target = decodeCandidate(bindingDraft[leg] ?? '');
@@ -336,14 +336,14 @@ export function ModelSettingsPanel() {
   };
 
   /**
-   * 一条腿的下拉当前值：人敲过的草稿优先，否则由主进程那份绑定拼回来。
-   * @param legView 这条腿的读数
+   * 一条通道的下拉当前值：人敲过的草稿优先，否则由主进程那份绑定拼回来。
+   * @param legView 这条通道的读数
    */
   const boundValueOf = (legView?: LlmLegView): string =>
     legView?.boundProviderId && legView.model ? encodeCandidate(legView.boundProviderId, legView.model) : '';
 
   /**
-   * 「测这家」点名哪条模型名：有腿正绑着它就用那条，否则用清单里排首的那条。
+   * 「测这家」点名哪条模型名：有通道正绑着它就用那条，否则用清单里排首的那条。
    * @param row 要探测的实例
    * @returns 模型名；这家一条都还没入库时回 null（按钮此时按不动）
    */
@@ -675,7 +675,7 @@ export function ModelSettingsPanel() {
         </div>
       )}
 
-      {/* —— 第三段：两条腿各自从已入库的模型里挑一条（spec 7.2-11 / 12）—— */}
+      {/* —— 第三段：两条通道各自从已入库的模型里挑一条（spec 7.2-11 / 12）—— */}
       <h3 className="mt-4 text-xs font-semibold text-slate-300">{t('settings.model.bindingHeading')}</h3>
       <ul className="-mx-4 mt-2">
         {(['chat', 'embed'] as const).map((leg) => {
@@ -840,7 +840,7 @@ function presetOptions(current: string, catalog?: LlmProviderView[]): string[] {
 
 /**
  * 密钥来源那一行：把「现在这把从哪来」说出来，而不是只显示一把掩码。
- * @param legView 这条腿的读数；还没到位时是 undefined
+ * @param legView 这条通道的读数；还没到位时是 undefined
  * @param translate 翻译函数
  * @returns 一句已翻译的话
  */

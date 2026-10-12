@@ -282,7 +282,7 @@ export class ScheduleRegistryService extends Service {
   /**
    * 手工立刻触发一条任务（界面的"跑一次"、也是 spec 5.7-06 的验证方式）。
    *
-   * 走的是与 tick **完全相同**的一条腿：额度预检查、起跑、落账、推进计划点都在，
+   * 走的是与 tick **完全相同**的一条通道：额度预检查、起跑、落账、推进计划点都在，
    * 所以手工这条路不会成为一个绕过闸门的后门；它只是把"计划点"当成此刻。
    * @param jobId 任务 id
    * @param nowMs 时间基准（毫秒）

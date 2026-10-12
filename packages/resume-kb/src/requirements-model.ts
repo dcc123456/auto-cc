@@ -1,15 +1,15 @@
 /**
- * JD 文本 → 能力要求列表的**模型腿**（spec 4.4-02 的模型分支与可见回落）。
+ * JD 文本 → 能力要求列表的**模型通道**（spec 4.4-02 的模型分支与可见回落）。
  *
- * 与词面腿（`requirements.ts`）的分工是「基线 + 增强」，不是「两条并列的实现」：
- * 词面腿每次都跑、永远先出结果，模型腿只在它上面**补**词面抓不到的长尾表达。
+ * 与词面通道（`requirements.ts`）的分工是「基线 + 增强」，不是「两条并列的实现」：
+ * 词面通道每次都跑、永远先出结果，模型通道只在它上面**补**词面抓不到的长尾表达。
  * 这样模型不可用时报告只是短一些，流程一个都不会断（4.4-02 的「功能不中断」）。
  *
  * 三条判据立在纯函数这一层，服务层（`gap-service.ts`）只做装配与播报：
  * 1. **只认能对回原文的条目**（AGENTS.md §8.4 事实锁定在 4.4 上的对应物）：模型必须逐字给出 JD 里的
  *    引文，位置由本文件用 `indexOf` 自己算——模型报的下标一概不收（它对 UTF-16 下标没有可靠概念）。
  *    引文在原文里找不到就丢弃并计入 `droppedUnlocatable`，绝不为了让报告好看而保留一条无据的要求；
- * 2. **确定性**：模型返回的次序先按「四类表次序 → 起始下标」归一，再与词面腿合并，
+ * 2. **确定性**：模型返回的次序先按「四类表次序 → 起始下标」归一，再与词面通道合并，
  *    所以同一个词面结果 + 同一份模型输出永远得到同一个合并序列（4.4-07 的稳定性判据接得上）；
  * 3. **纯函数**：这里不发请求、不碰 cordis、不开连接（4.4-08）。提示词字面量自 4.6-a 起在本包的
  *    注册表 `./prompts.ts` 里（spec 4.6-09 的落点唯一性由 `scripts/check-prompts.ts` 机检），
@@ -44,8 +44,8 @@ const claimSchema = z.strictObject({
 type ModelClaim = z.infer<typeof claimSchema>;
 
 /**
- * 归一化 label 用于「模型说的和词面腿说的是同一条要求」的判定。
- * @param label 任一条腿给出的代表词
+ * 归一化 label 用于「模型说的和词面通道说的是同一条要求」的判定。
+ * @param label 任一条通道给出的代表词
  * @returns 去首尾空白、去内部空白、转小写后的形态（大小写与空格差异不算两条要求）
  */
 function normalizeLabel(label: string): string {
@@ -69,7 +69,7 @@ function yearsFromQuote(quote: string): number | null {
  * 剥掉模型常用的 Markdown 代码围栏与前后空白。
  *
  * 单列成函数并**对外可见**是因为「模型把 JSON 包在 ```json 里」是实测常见形态（`outbound.script` 那边是纯文本所以没这问题），
- * 判据只该有一处：本文件与 4.5 的生成腿（`generate-model.ts`）读的都是同一份模型回复，
+ * 判据只该有一处：本文件与 4.5 的生成通道（`generate-model.ts`）读的都是同一份模型回复，
  * 第二份围栏剥离实现就是第二套判据（AGENTS.md §2.2/§2.5）。
  * @param text 模型回复正文
  * @returns 去掉围栏与首尾空白后的文本
@@ -97,7 +97,7 @@ function locateQuote(jdText: string, quote: string): number {
 
 /** 一次模型输出的读取结果。 */
 export interface ModelRequirementsRead {
-  /** 通过契约校验**且**在原文里定位到的条目，未与词面腿合并（`via` 已标成 model） */
+  /** 通过契约校验**且**在原文里定位到的条目，未与词面通道合并（`via` 已标成 model） */
   accepted: RequirementItem[];
   /** 整份输出不可用时的原因（供界面播报）；可用时为 null */
   reason: string | null;
@@ -172,26 +172,26 @@ function appendLocated(accepted: RequirementItem[], claim: ModelClaim, jdText: s
   return true;
 }
 
-/** 模型腿与词面腿合并后的读数。 */
+/** 模型通道与词面通道合并后的读数。 */
 export interface ModelMergeResult {
   /** 合并并按「四类次序 → 起始下标」排好的稳定序列 */
   items: RequirementItem[];
-  /** 模型腿实际并入的条数 */
+  /** 模型通道实际并入的条数 */
   added: number;
-  /** 与词面腿指同一条要求（同类别同代表词，或原文区间重叠）而未并入的条数 */
+  /** 与词面通道指同一条要求（同类别同代表词，或原文区间重叠）而未并入的条数 */
   droppedDuplicate: number;
   /** 因该类别已达每类上限而未并入的条数 */
   droppedByLimit: number;
 }
 
 /**
- * 把模型腿的条目并进词面腿的基线。
+ * 把模型通道的条目并进词面通道的基线。
  *
- * 词面腿永远是底座：它已经跑过、已经带位置，模型只在它没覆盖到的地方补。
- * 两条腿指同一处原文时保留词面那条——它的 label 来自受控词表，比模型的自由写法更可比（4.4-c 要做比对）。
- * @param lexical 词面腿的产出（已按每类上限截断）
+ * 词面通道永远是底座：它已经跑过、已经带位置，模型只在它没覆盖到的地方补。
+ * 两条通道指同一处原文时保留词面那条——它的 label 来自受控词表，比模型的自由写法更可比（4.4-c 要做比对）。
+ * @param lexical 词面通道的产出（已按每类上限截断）
  * @param model `readModelRequirements` 收录的条目
- * @param limitPerKind 每类上限（与词面腿同一个配置值）
+ * @param limitPerKind 每类上限（与词面通道同一个配置值）
  * @returns 合并序列 + 三个计数（并入 / 判重丢弃 / 触顶丢弃）
  */
 export function mergeModelWithLexical(

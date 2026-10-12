@@ -60,10 +60,10 @@ ANIMATIONS_AFTER_UNFREEZE 0
 
 → `direction:"row"`：1200 窗口（容器 940）这一档**真的分栏了**——这正是 6.4-07 那 77rem 档在这台机器上
   永远不发生的那件事。纸栏在左列右侧按横坐标判：`paperColX 618 ≥ leftRightEdge 606`（差 12 就是 `gap-3`）。
-  纸面不被裁的两条正腿：`paperScale 0.5919 ∈ (0,1]` 且 `neverClipped:true`（`frameRect.right ≤ slot.right`）。
+  纸面不被裁的两条正向证据：`paperScale 0.5919 ∈ (0,1]` 且 `neverClipped:true`（`frameRect.right ≤ slot.right`）。
   `w-[210mm]` 一字未改：`frameNaturalWidth 794`，折完是 `frameRenderedWidth 470 ≤ slotWidth 494`。
 
-  **一条被活体推翻的判据（写在这里，spec 行内同步更正）**：原先第三条腿写的是"槽内
+  **一条被活体推翻的判据（写在这里，spec 行内同步更正）**：原先第三条判据写的是"槽内
   `scrollWidth ≤ clientWidth`"。实测三档的 `slotScrollWidth` 恒为 **818**（=794+2×12 的**变换前**布局溢出），
   而 `slotClientWidth` 是 494/718/682——Tailwind v4 的 `scale-(…)` 写的是独立 CSS `scale` 属性
   （`getComputedStyle(frame).scale === "0.59194"` 而 `transform` 为 `none`），`scrollWidth` 量的不是它的视觉结果。
@@ -88,7 +88,7 @@ ANIMATIONS_AFTER_UNFREEZE 0
   宽度档不变而倍率随槽连续变化，就是"改的是显示倍率、不是纸的物理宽度"。
 
 ----------------------------------------------------------------------
-④ 负腿：退到 46rem 以下（840×772，容器 708 < 736）
+④ 反向证据：退到 46rem 以下（840×772，容器 708 < 736）
 ----------------------------------------------------------------------
 
 $ node tmp/57b/desk57.mjs tmp/57b/r-840.png 840 772

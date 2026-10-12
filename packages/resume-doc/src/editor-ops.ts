@@ -3,7 +3,7 @@
  *
  * 为什么单拎一个文件而不是写进 `schema.ts` 或 `doc-store.ts`：这一层只回答「这样改合不合法、
  * 合法之后新状态长什么样」，既不落库也不读配置，形状照已经验收的 `packages/pdf-edit/src/page-ops.ts`
- * （拒绝腿在前、合法才产新值、**不抛异常**）。服务层与编辑会话（`editor-session.ts`）共用这一份判据，
+ * （拒绝通道在前、合法才产新值、**不抛异常**）。服务层与编辑会话（`editor-session.ts`）共用这一份判据，
  * 于是"界面放行而保存被拒"这种分叉从一开始就不存在（AGENTS.md §2.5）。
  *
  * 三条边界口径（plan §8.1 第 2、3 条 + 6.6 补片）：
@@ -74,7 +74,7 @@ export type EditorOutcome<T> =
   | { readonly ok: false; readonly code: EditorRejectionCode; readonly detail: string };
 
 /**
- * 构造拒绝项（收成一个口，避免六条腿各写一份而漏掉某个字段）。
+ * 构造拒绝项（收成一个口，避免六条通道各写一份而漏掉某个字段）。
  * @param code 机器码（界面按它选文案）
  * @param detail 技术原因（含具体数值，排查时用得上）
  * @returns 带 `ok: false` 的拒绝项

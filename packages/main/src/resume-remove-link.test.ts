@@ -2,7 +2,7 @@
  * 「删掉一份简历连同它的素材」的**装配与 IPC 面**对账（spec 4.1-14 的接线半边，plan 04 §4.7 的 60-c）。
  *
  * 为什么住在 `packages/main`（与 `editor-link.ts` / `generate-link.test.ts` 同一个理由）：
- * 这条腿横跨四个包——白名单与 `BridgeCalls` 在 `shared`、`removeDoc` 的编排在 `resume-kb`、被它硬注入的
+ * 这条通道横跨四个包——白名单与 `BridgeCalls` 在 `shared`、`removeDoc` 的编排在 `resume-kb`、被它硬注入的
  * `resume.snapshot` / `resume.parse` 分属两个包、`cordis.yml` 在仓库根。包内用例只判删除语义本体，
  * 判不了「界面按下去到底调不调得到」这一类只在真装配里才成立的缺陷。
  *
@@ -13,7 +13,7 @@
  *    同时**没有**给渲染层开 `resume.doc.remove` 那类单表口——六个表各自删一半是界面最难解释的脏。
  * 3. **经网关删得动**：`resolveCall(...).invoke(docId)` 的回执逐表计数与库里少掉的行逐条相等。
  * 4. **审计保留**（裁定㉖）：`resume_generations` 那一行**不跟着删**——花过 token 是既成事实，
- *    台账与生成记录由别的包 own，删除腿碰不到它们。
+ *    台账与生成记录由别的包 own，删除通道碰不到它们。
  *
  * 语料是写在临时目录里的虚构中文简历（§7.2 不碰真实平台，§7.5 产物不落进仓库）。
  */
@@ -59,7 +59,7 @@ const RESUME_MD = [
   '- 分布式一致性、性能剖析、容量规划、链路追踪、成本治理',
 ].join('\n');
 
-/** 生成腿要的 JD 正文（虚构）。 */
+/** 生成通道要的 JD 正文（虚构）。 */
 const JD_TEXT = '后端工程师（虚构：南汇云图）：负责交易链路的 Java 与 Go 服务，熟悉 Kafka；要求 5 年以上经验。';
 
 const AS_OF_MS = new Date(2026, 9, 15, 12).getTime();
@@ -67,7 +67,7 @@ const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
 
 /**
- * 撑起「config + log + store + 简历三件套 + 知识库 + 缺口腿 + 生成腿 + 真工具注册表」的装配。
+ * 撑起「config + log + store + 简历三件套 + 知识库 + 缺口通道 + 生成通道 + 真工具注册表」的装配。
  *
  * 挂载顺序照 `cordis.yml`：`agent` 在能力包之前（工具登记是软取），`resume-snapshot` / `resume-parse`
  * 在 `kb-profile` 之前（它硬注入这两只，挂晚了整只服务 PENDING）。
@@ -157,7 +157,7 @@ afterAll(async () => {
 });
 
 describe('清单顺序与白名单形状（4.1-14 的接线半边）', () => {
-  it('`resume-snapshot` 与 `resume-parse` 排在 `kb-profile` 之前，删腿要的注入才拿得到', () => {
+  it('`resume-snapshot` 与 `resume-parse` 排在 `kb-profile` 之前，删通道要的注入才拿得到', () => {
     const here = fileURLToPath(new URL('.', import.meta.url));
     const cordisYml = readFileSync(join(here, '../../../cordis.yml'), 'utf8');
     const indexOf = (id: string): number => cordisYml.indexOf(`\n  - id: ${id}\n`);

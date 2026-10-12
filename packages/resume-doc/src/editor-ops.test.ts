@@ -54,7 +54,7 @@ describe('3.6-02 度量界内界外', () => {
       code: 'not-a-number',
     });
     // `columns` 是真实存在的版面键，但**不在**编辑器给人推的那四条里（它只有 1/2 两档，模型级 schema 管着）：
-    // 运行时它就是个字符串，会话外面递进来的键都必须过 `unknown-metric` 这一腿。
+    // 运行时它就是个字符串，会话外面递进来的键都必须过 `unknown-metric` 这一条。
     expect(planMetric(DEFAULT_LAYOUT, 'columns' as unknown as MetricKey, 1)).toMatchObject({
       ok: false,
       code: 'unknown-metric',

@@ -83,7 +83,7 @@ TEST_EXIT=0
 - `docs/acceptance/4.4/4.4-06-suggestion-structure.txt`（结构断言与日志）
 
 同目录的 `requirements.test.ts`（11 例）与 `requirements-model.test.ts`（13 例）原样复跑通过，
-其中"18/18 位置可反查"那条 4.4-01 判据仍然成立——比对的输入形状没有改动拆解腿。
+其中"18/18 位置可反查"那条 4.4-01 判据仍然成立——比对的输入形状没有改动拆解通道。
 
 
 【5】pnpm bench:kb → BENCH_EXIT=0（4.3-09 的检索基准复跑，本片没碰检索但共用同一份配置段）
@@ -99,13 +99,13 @@ TEST_EXIT=0
 采样：预热 22 × 11 轮（不计入），再取 240 个样本
 延迟：P50=3.25ms  P95=7.64ms  P99=8.71ms  max=9.90ms  mean=3.66ms
 命中分布：0 命中 86 次 / 平均 6.42 条 / 上限 topK=10
-向量腿：unavailable×240（没有 key 就必须全是降级态）
+向量通道：unavailable×240（没有 key 就必须全是降级态）
 出网：globalThis.fetch 存根被调用 0 次（判据：0）
 RESULT 4.3-09 p95=7.64ms budget=150ms verdict=PASS
 BENCH_EXIT=0
 
 跑这一条的理由不是"检索也要验收"，而是它同时是 **§7.2 的零出网证据**与库内三表一致性的复证：
-比对腿复用 `coverageOf` 与 `listChunks()`，没有新增 SQL、没有新增表（迁移号段仍停在 14，15 空着——
+比对通道复用 `coverageOf` 与 `listChunks()`，没有新增 SQL、没有新增表（迁移号段仍停在 14，15 空着——
 plan §4.4 口径 3：报告是可重算的投影，落库就造出第二个真相）。上一片记的是 p95=8.10ms，
 这次 7.64ms，同一量级。`tmp\kb-bench` 是 gitignored 的基准库，不入库（§7.5）。
 
@@ -121,7 +121,7 @@ plan §4.4 口径 3：报告是可重算的投影，落库就造出第二个真�
   不是加 `!` 断言——`!` 只是把同一件事骗过编译器，运行时该崩还崩（eslint 也把多余断言判红）。
 
 **第二轮 · lint 1 条**：`requirements-compare.ts` 的 `compareByEducation(item, chunks, options)`
-里 `options` 未使用（学历腿不需要阈值，档位比较是离散量）→ 删参数、删它的 JSDoc 行、
+里 `options` 未使用（学历通道不需要阈值，档位比较是离散量）→ 删参数、删它的 JSDoc 行、
 改调用点实参（§2.4：发现无用代码及时删除，不留"以后可能用得上"的形参）。
 
 **第三轮 · test 1 例**：「起点在未来的区间直接不计」那条例用最初写成要求 12 年、

@@ -10,7 +10,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 ─────────────────────────────────────────────────────────────────────────────
 ① BEFORE（改之前同一条探针的实测，两轮）
 ─────────────────────────────────────────────────────────────────────────────
-第二十五片那条负腿在这一片被复现成"缺陷本体"，另加两条当场暴露的：
+第二十五片那条反向证据在这一片被复现成"缺陷本体"，另加两条当场暴露的：
 │ 落点：`landing.active = button:privacy-open` —— 焦点根本没进弹窗（`PrivacyNotice` 那一只没有 `autoFocus`）
 │ Tab：正向 8 步全部 `inDialog=true` 是**改完之后**的读数；改之前焦点停在弹窗外，第一次 Tab 就走进背景
 │ 命中测试：背景点的 hit = `fixed inset-0 z-50 flex items-center justify-center p-6`（居中容器，**不是** `.bg-scrim`）
@@ -20,7 +20,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 │           旧证据 `6.2-05-privacy-modal-readings.txt` 第④节那格「点遮罩：关」是按 `scrim.click()` 记的，
 │           方法本身没错（它测的是"这只元素挂没挂 onClick"），但它测不到命中测试这一层——更正记在这里，旧文件不改。
 │ 焦点归还：`afterClose.active = body`（`returnedToTrigger: false`）——还焦点这件事压根没有实现
-│ StrictMode 那一腿：`autoFocus` 加上之后仍然 `landing.active = button:privacy-open`。原因是 React 19 dev 的
+│ StrictMode 那一条：`autoFocus` 加上之后仍然 `landing.active = button:privacy-open`。原因是 React 19 dev 的
 │   假卸载会跑一遍 effect cleanup，那一趟把焦点拽回背景（正好抵消 `commitMount` 的 `autoFocus`），
 │   并且把记下的触发者清空 ⇒ 真关的时候谁也没还。修法见下面第⑤节。
 
@@ -67,7 +67,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 ─────────────────────────────────────────────────────────────────────────────
 │ 判据给的是「`inert`（**或等价的焦点陷阱**）」。选后者的理由是第一线的结构事实：
 │   `inert` 必须挂在**背景容器**上，而浮层按 §3.8 的裁定就渲染在面板里（不提到 `App.tsx`、不引 Portal），
-│   因为"同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（第二十五片负腿）。
+│   因为"同一时刻 ≤1 只遮罩"正是靠 `display:none` 的祖先把 `fixed` 后代一起藏掉来保证的（第二十五片反向证据）。
 │   要 `inert` 就得把浮层提到顶层，那是拿一条已验收的保证去换另一条写法，不值。
 │ 三条通道各自有主：鼠标 = 遮罩（`fixed inset-0`，命中测试实测）；键盘 = 本片的环；滚轮 = 弹窗那层的滚动锁。
 │ 环的实现要点：
@@ -78,7 +78,7 @@ CDP 10222 → 渲染层 target `--url 5173`，视口 1200×772 / dpr 2（成图 
 │   · 焦点掉回文档（环内那格被卸载）时 `current=-1`，从端点重新起步而不是放任走出。
 │   · 触发者在**渲染阶段**记进 ref、键在 `open` 的跳变上；归还只在 `activeElement === body` 那一刻做
 │     ——这一条同时躲开 StrictMode 的假卸载（那时焦点还稳稳在弹窗里）与人已经自己走开（那时不该拽回来）。
-│ 落点腿（纪律表第 2 行前半句）由调用方的 `autoFocus` 承担：`ConsentModal` 早就有（deny），
+│ 落点通道（纪律表第 2 行前半句）由调用方的 `autoFocus` 承担：`ConsentModal` 早就有（deny），
 │   `PrivacyNotice` 本片补 `autoFocus={isReopened}`——**首启动那一次不给**：那一屏唯一的动作就是写下表态，
 │   把焦点自动交给它等于允许一次误按 Enter 替用户点头（⑤ 的入场判据不许破）。
 │ 顺带更正一处旧引用：`ConsentModal` 的注释与第二十五片记录把焦点这条写成"纪律表第 5 行"，

@@ -21,7 +21,7 @@ const CORDIS = {
  * `resume.*` / `kb.*`→ plugin-resume-doc + plugin-resume-kb。
  * **故意不列** `@auto-cc/plugin-workflow`：plan 与 §5.9 要求对话与工作流共用同一个 `workflow.runner`，
  * 把它禁掉会逼出第二套编排；`plugin-llm` / `plugin-entitlement` 同理不在禁令里，
- * agent 的对话腿要发模型、档位判定要问闸门。
+ * agent 的对话通道要发模型、档位判定要问闸门。
  */
 const AGENT_CAPABILITY = {
   group: [

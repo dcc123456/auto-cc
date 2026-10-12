@@ -2,8 +2,8 @@ spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一�
 采集时间：2026-10-10 21:40–22:16（本机 macOS arm64，`pnpm dev` 在跑，CDP 10222，`--url 5173`）
 被改对象：`packages/renderer/src/pdf-page-view.ts`（把字族/字号/基线从 pdf.js 读进行数据）、
 `packages/renderer/src/usePdfEdit.ts`（提交时把三个数写进覆盖区）、
-`packages/renderer/src/PdfPaperView.tsx`（画布那一腿按三个数画字）、
-`packages/pdf-edit/src/text-metrics.ts`（新：字体度量口径，两腿共用）、
+`packages/renderer/src/PdfPaperView.tsx`（画布那一条按三个数画字）、
+`packages/pdf-edit/src/text-metrics.ts`（新：字体度量口径，两条共用）、
 `packages/pdf-edit/src/overlay-writer.ts`（计划层沿用或回落）、`packages/pdf-edit/src/pdf-document.ts`（出件按字族嵌标准字体）、
 `packages/shared/src/bridge.ts`（`PdfOverlayInput` 的同形镜像，两个可选键）
 
@@ -27,7 +27,7 @@ spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一�
   mono 那一行的墨末在 0.15759、行盒下沿在 0.15724，**墨比盒多出 0.00035 比例 ≈ 0.4 个位图像素**，
   那是抗锯齿的那一圈，不是漏字脚；sans 那一行严格包住。
 
-三、点那一腿沿用的是被盖行的三个数（主证二：`tmp/35-15-commit.js` → `tmp/35-15-save.js` 出的产物）
+三、点那一条沿用的是被盖行的三个数（主证二：`tmp/35-15-commit.js` → `tmp/35-15-save.js` 出的产物）
   操作：在 serif 那一行的**降部**（比例 y=0.1172，即上一节量到的墨末 0.11748 之内）点一下
     → 就地改输入框预填 `Typography debugging legacy stacks`（读数 `prefilled` 逐字相同，说明点中的是 serif 那一行而不是别的）
     → 改成 `Gilded typography, page 7` → 提交（`pdf-edit-commit-inline`）
@@ -45,7 +45,7 @@ spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一�
     ② 上面那两行字号相同、字族相同，但**字面宽度**不会逐字节相同（Times 的 advance width 由渲染器给），
        这正是 plan §11 第五节"补不齐的五条"里的第 ② 条。
 
-四、拖框那一腿现在落得下了（plan §11.5 登记的那条**先前就存在**的缺陷，本片一并修掉）
+四、拖框那一条现在落得下了（plan §11.5 登记的那条**先前就存在**的缺陷，本片一并修掉）
   同一探针里接着做：pointerdown 于比例 (0.20,0.55) → pointermove 至 (0.50,0.60) → pointerup。
     拖拽中 `pdf-edit-rubber-box` 存在：rubberShown=true
     松手前覆盖区列表 1 条 → 松手后 2 条：新增 `源第 1 页 · 起点 20.0%,55.0% · 尺寸 30.0%×5.0% · 只铺这一页的底色`
@@ -56,10 +56,10 @@ spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一�
   诚实口径：探针是页面内 `dispatchEvent` 派发的合成指针事件——它证明的是**逻辑层的分支跑得通**，
   不等于"真实鼠标拖得动"；后者仍属要人在场的那一条（见第八节）。
 
-五、画布那一腿（同一份三个数，两腿同源）
+五、画布那一条（同一份三个数，两条同源）
   `PdfPaperView.tsx` 的绘制取 `overlay.fontFamilyHint ?? 'sans-serif'` 组 `font`、`textBaseline='alphabetic'`、
   y 取 `baselineRatio × canvas.height`；量不到基线才回落到"行盒内按字号居中"。
-  上面第三节的截图（`3.5-15-styled-replacement.png`）就是这条腿画出来的：serif 那一行被换成的新字是衬线体，
+  上面第三节的截图（`3.5-15-styled-replacement.png`）就是这条通道画出来的：serif 那一行被换成的新字是衬线体，
   与左右两行（sans / mono）的字族差异在图上直接可读。
   对照图：`3.5-15-original-page.png` = 同一张活体、把两个覆盖区撤掉之后的原页面（同一裁剪框 745×1052 px @2x）。
   两张图 md5 各出现 1 次（`md5 -q | sort | uniq -c`）：
@@ -83,7 +83,7 @@ spec 3.5-15（族一 · 片 2）活体读数 —— 替换字按被盖住那一�
 八、本片**没有**收掉的三条（如实登记）
   ① 「人眼看不出是覆盖」这一半仍是要用户在场的 V 判据：上面量到的是**基线/字族/行盒的客观数**，
      不是"看起来像不像"。等用户在场看一眼才算 [x]，整条 3.5-15 记 [!]。
-  ② **中文那一腿不认字族**：`pdf-document.ts` 的 CJK 一律用随包的 Noto Sans SC，量到的 `fontFamilyHint`
+  ② **中文那一条不认字族**：`pdf-document.ts` 的 CJK 一律用随包的 Noto Sans SC，量到的 `fontFamilyHint`
      只作用于纯拉丁 run（`isLatinOnly`）。原因是随包只有 Noto **Sans** SC，没有中文字族可换。
      这是有意的欠项，不是漏写：界面上如果哪天要"中文也跟原字族"，得先补一整套中文衬线/等宽随包。
   ③ **颜色真值还没拿到**：pdf.js 6.3 的 `TextStyle` 没有 `color` 成员（`types/src/display/api.d.ts` 只有

@@ -36,7 +36,7 @@
 --------------------------------------------------------------------------------
 起点：库里那条计划带三格（`jd-capture` / `jd-list` / `flaky`），`canvas-draft-count` =「图上 0 格」。
 
-| 腿 | 主题 | 格子 | `data-node-selected` | 计算 `outline` |
+| 通道 | 主题 | 格子 | `data-node-selected` | 计算 `outline` |
 | --- | --- | --- | --- | --- |
 | empty | 毡案 | 3 格全在 | 全部 `false` | `none 3px rgb(107,118,129) offset:0px` |
 | first | 毡案 | `jd-capture-draft-1` | `true` | `solid 2px oklab(0.554606 -0.0677615 -0.00587878 / 0.7) offset:2px` |
@@ -57,12 +57,12 @@
 `box-shadow` 也仍是那一份 `shadow-sm`。也就是描边只加了一圈，没有把
 `STEP_STATUS_STYLE` 的任何一项顶掉（画布格子与步骤行同色这条 1.10-03 的约束不破）。
 
-五、撤销那一腿（不误标）
+五、撤销那一条（不误标）
 --------------------------------------------------------------------------------
 `canvas-undo` 撤掉选中的 `draft-2` 之后：`图上 1 格`，剩下 `draft-1` 的
 `data-node-selected` 是 `false`、outline 回到 `none`，参数卡整块不出现
 （`formCount: 0`、`detailNodeId: null`）。也就是**撤销不会把旁边那一格冒充成选中的**——
-这一腿是顺手量的，因为 `selectedNodeId` 是视图层状态、撤销不清它，
+这一条是顺手量的，因为 `selectedNodeId` 是视图层状态、撤销不清它，
 判据落在「找不到那一格时界面不画任何东西」上，与 6.5-05 的「单选才有检查器」同一条读法。
 
 六、没取到的（如实）
@@ -79,5 +79,5 @@
 探针跑完：`图上 0 格`、`formCount: 0`、主题回到起始那一面（`localStorage['auto-cc.theme'] = 'light'`）。
 截图两张（视口 1200×772 @dpr2 → 2400×1544，拍前 `scrollIntoView` 把画布滚进画面）：
 - `6.5-06-selected-light.png`（毡案，右边那一格带青瓷外圈）`md5 0e306a68646623873bf929969836d130`
-- `6.5-06-selected-dark.png`（墨案，同一腿）`md5 8e35c8180064ab3352583d0beb8ce061`
+- `6.5-06-selected-dark.png`（墨案，同一条）`md5 8e35c8180064ab3352583d0beb8ce061`
 两支互异，且与 `docs/acceptance/` 全目录逐张 `md5 -q | sort | uniq -c` 无重复（§9 的 5.10-18 / 3.6-c ⑭）。

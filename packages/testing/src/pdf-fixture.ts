@@ -5,7 +5,7 @@
  *
  * 产物的构造口径：Helvetica Type1 字体 + 未压缩内容流，一行一个 `Tj`，页面 `MediaBox` 是 A4（595×842 pt）。
  * 手写交叉引用表而不是用库生成，是为了让夹具**独立于被测的 PDF 库**——用 `pdf-lib` 造再让 `pdf-lib` 读，
- * 等于什么都没测（spec 3.4-03 要的是"装载"一条腿能对外部输入负责）。
+ * 等于什么都没测（spec 3.4-03 要的是"装载"一条通道能对外部输入负责）。
  */
 
 /**
@@ -31,7 +31,7 @@ function wrapPdf(objects: readonly string[], trailerEntries = ''): Uint8Array {
 /**
  * 生成最小合法 PDF：Helvetica Type1 + 未压缩内容流，一行一个 `Tj`。
  * 括号与反斜杠会被剥掉（PDF 字符串转义不值得在测试里复刻）。
- * @param lines 逐行文本（拉丁字形；CJK 请走真实字体内嵌那条腿，见 plan §7.2）
+ * @param lines 逐行文本（拉丁字形；CJK 请走真实字体内嵌那条通道，见 plan §7.2）
  * @returns 单页 A4 的 PDF 字节
  */
 export function minimalPdf(lines: readonly string[]): Uint8Array {
@@ -48,7 +48,7 @@ export function minimalPdf(lines: readonly string[]): Uint8Array {
 }
 
 /**
- * 生成 N 页的最小合法 PDF（页数腿要用：3.5-07 的页面增删、3.6-08 的多页交互都得有"不止一页"的输入）。
+ * 生成 N 页的最小合法 PDF（页数通道要用：3.5-07 的页面增删、3.6-08 的多页交互都得有"不止一页"的输入）。
  * @param pageCount 页数（小于 1 时按 1 页造，避免造出结构上不合法的文档）
  * @returns 每页都是 A4 的 PDF 字节
  */
@@ -125,7 +125,7 @@ export const STYLED_PDF_RULE = { x1Pt: 50, yPt: 680, x2Pt: 545, rgb: [0.502, 0.5
  * 与 `minimalPdf` 同一个口径：手写对象与交叉引用表，**不用 pdf-lib 造再让 pdf-lib 读**，
  * 也不用 pdf-lib 造再让 pdf.js 读（那等于拿被测引擎的另一半自证）。
  * 三条字族都是标准 14 型（Helvetica / Times-Roman / Helvetica-Bold），因此不需要内嵌字体，
- * 任何解析器都能读到 `/BaseFont`，字族提示这一条腿才是真的在测抽取而不是测字体装载。
+ * 任何解析器都能读到 `/BaseFont`，字族提示这一条通道才是真的在测抽取而不是测字体装载。
  * @returns 单页 A4 的 PDF 字节（内容清单见 `STYLED_PDF_RUNS` / `STYLED_PDF_BAND` / `STYLED_PDF_RULE`）
  */
 export function styledResumePdf(): Uint8Array {
@@ -142,7 +142,7 @@ export function styledResumePdf(): Uint8Array {
     const cos = Math.cos(rad).toFixed(3);
     const sin = Math.sin(rad).toFixed(3);
     // 有色的那一格包在一对 `q…Q` 里：真实生成器都这么写，而 PDF 的颜色状态本来会一路延续到下一次赋值——
-    // 不包的话，后面没写颜色的格子会"继承"到前一格的红，抽出来看着对、其实测不到状态进出这条腿。
+    // 不包的话，后面没写颜色的格子会"继承"到前一格的红，抽出来看着对、其实测不到状态进出这条通道。
     const open = run.rgb ? 'q ' : '';
     const close = run.rgb ? ' Q' : '';
     ops.push(
@@ -162,7 +162,7 @@ export function styledResumePdf(): Uint8Array {
 }
 
 /**
- * 生成一份「结构合法但带加密字典」的最小 PDF（spec 3.4-03 / plan §7.10 的加密确定态腿）。
+ * 生成一份「结构合法但带加密字典」的最小 PDF（spec 3.4-03 / plan §7.10 的加密确定态通道）。
  *
  * 造法与上面两条同一个口径：手写 trailer 里的 `/Encrypt` 引用 + 一个 `/Filter /Standard` 字典，
  * **不做真加密**（不需要能解出内容，只需要让解析器认它是加密文档）。实测（本机 `pdf-lib` 1.17.1）：

@@ -1,5 +1,5 @@
 /**
- * 检索打分的纯函数用例（spec 4.3-01 / 4.3-02 / 4.3-03 的判定半边，4.3-d 加上融合腿）。
+ * 检索打分的纯函数用例（spec 4.3-01 / 4.3-02 / 4.3-03 的判定半边，4.3-d 加上融合通道）。
  *
  * 这一份文件**不开数据库**：`search.ts` 里全是「两个 token 集合 → 一个分数」的算式，
  * 只有离线断言才能把每个系数的作用单独钉住（在装配用例里改一个参数会同时动召回、df、语料统计三样，
@@ -110,7 +110,7 @@ describe('查询侧切分与 FTS5 表达式（4.3-02 的转义半边）', () => 
   });
 });
 
-describe('BM25 腿（4.3-03：k1 / b 参与算式）', () => {
+describe('BM25 通道（4.3-03：k1 / b 参与算式）', () => {
   const target = candidate('c1', '主导订单服务重构，提升订单吞吐');
   const others = [candidate('c2', '负责库存服务'), candidate('c3', '组织校内算法竞赛')];
   const all = [target, ...others];
@@ -181,7 +181,7 @@ describe('BM25 腿（4.3-03：k1 / b 参与算式）', () => {
   });
 });
 
-describe('两腿合并成一条排序（4.3-01 / 4.3-02）', () => {
+describe('两条合并成一条排序（4.3-01 / 4.3-02）', () => {
   const orderHit = candidate('e-order', '主导订单服务重构，P99 延迟下降 40%');
   const stockHit = candidate('e-stock', '负责库存服务与订单中心的接口设计');
   const unrelated = candidate('e-campus', '组织校内算法竞赛，负责赛题与判题机');
@@ -239,9 +239,9 @@ describe('两腿合并成一条排序（4.3-01 / 4.3-02）', () => {
     expect(strict.hits.every((hit) => hit.score >= 1)).toBe(true);
   });
 
-  it('两腿权重此消彼长：BM25 腿偏向「多个查询词都在里面」，覆盖腿偏向「整条就是查询的子集」', () => {
+  it('两条权重此消彼长：BM25 通道偏向「多个查询词都在里面」，覆盖通道偏向「整条就是查询的子集」', () => {
     // a-long 含 `订单` 与 `库存` 两个查询词但很长；b-short 只含 `订单` 却整条被查询覆盖。
-    // 这两条腿的取向本来就不同，谁在前后正好由权重决定——所以这是「权重真的进了算式」的判据。
+    // 这两条通道的取向本来就不同，谁在前后正好由权重决定——所以这是「权重真的进了算式」的判据。
     const query = '订单库存';
     const long = candidate('a-long', '负责订单中心与库存服务的接口设计');
     const short = candidate('b-short', '订单');
@@ -251,14 +251,14 @@ describe('两腿合并成一条排序（4.3-01 / 4.3-02）', () => {
     const lexicalOnly = rankChunks(query, corpus, ctxLocal, { ...PARAMS, bm25Weight: 0, lexicalWeight: 1 });
     expect(bm25Only.hits[0]?.chunkId).toBe('a-long');
     expect(lexicalOnly.hits[0]?.chunkId).toBe('b-short');
-    // 一条腿权重为 0 时它的分就不再参与：把 BM25 腿整个关掉，合并分就等于覆盖腿的分本身
+    // 一条通道权重为 0 时它的分就不再参与：把 BM25 通道整个关掉，合并分就等于覆盖通道的分本身
     const lexicalTop = lexicalOnly.hits[0];
-    if (lexicalTop === undefined) throw new Error('覆盖腿应当有命中');
+    if (lexicalTop === undefined) throw new Error('覆盖通道应当有命中');
     expect(lexicalTop.score).toBeCloseTo(lexicalTop.lexicalScore, 10);
   });
 
   it('子串通道独有命中（无 token 重合）拿地板分，且理由标 substring', () => {
-    // 「订」这个单字在预分词里切不出来，两腿都是 0 分，只有 instr 通道召回它
+    // 「订」这个单字在预分词里切不出来，两条都是 0 分，只有 instr 通道召回它
     const singleCharTarget = candidate('e-single', '提前预订机票');
     const result = rankChunks('订', [singleCharTarget], contextOf([singleCharTarget], { 订: 0 }, ['e-single']), PARAMS);
     expect(result.hits).toHaveLength(1);
@@ -293,7 +293,7 @@ describe('两腿合并成一条排序（4.3-01 / 4.3-02）', () => {
  * 失败时看不出是词面打分坏了还是融合坏了。装配（真库 + 真取数）在 `profile-service.test.ts` 判。
  */
 describe('RRF 融合只改名次、不改读数（4.3-07）', () => {
-  /** 造一条词面腿命中：只有 `chunkId` 与三项读数参与融合的算式，其余是把命中认出来的标签。 */
+  /** 造一条词面通道命中：只有 `chunkId` 与三项读数参与融合的算式，其余是把命中认出来的标签。 */
   function lexicalHit(chunkId: string, score: number, reasons: readonly KbSearchReason[] = ['bm25']): KbSearchHit {
     return {
       chunkId,
@@ -311,7 +311,7 @@ describe('RRF 融合只改名次、不改读数（4.3-07）', () => {
     };
   }
 
-  /** 造一条向量腿命中（`rankByCosine` 的读数形状）。 */
+  /** 造一条向量通道命中（`rankByCosine` 的读数形状）。 */
   function vectorHit(chunkId: string, cosine: number) {
     return { chunkId, cosine };
   }
@@ -402,12 +402,12 @@ describe('RRF 融合只改名次、不改读数（4.3-07）', () => {
   });
 
   it('融合总分同分时按 chunkId 升序，且 topK 截断发生在融合之后', () => {
-    // 两条都只在自己的那条腿里排第一：`1/(k+1)` 完全相同，于是次序只能由 chunkId 决定。
+    // 两条都只在自己的那条通道里排第一：`1/(k+1)` 完全相同，于是次序只能由 chunkId 决定。
     const lexical = [lexicalHit('z-lexical', 0.9)];
     const vectors = [vectorHit('a-vector', 0.9)];
     const views = new Map<string, KbSearchCandidate>([['a-vector', candidate('a-vector', '组织校内算法竞赛')]]);
     expect(fuseByRrf('订单', lexical, vectors, views, { rrfK: PARAMS.rrfK, topK: 10 })).toHaveLength(2);
-    // 截断留下的是融合后的头部而不是先来那条腿的头名：`topK: 1` 时活下来的是 id 更小的 `a-vector`。
+    // 截断留下的是融合后的头部而不是先来那条通道的头名：`topK: 1` 时活下来的是 id 更小的 `a-vector`。
     expect(
       fuseByRrf('订单', lexical, vectors, views, { rrfK: PARAMS.rrfK, topK: 1 }).map((hit) => hit.chunkId),
     ).toEqual(['a-vector']);

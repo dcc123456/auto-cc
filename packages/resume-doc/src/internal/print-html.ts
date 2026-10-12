@@ -108,7 +108,7 @@ function designStyleBlock(design: DocumentDesign | undefined): string {
  * 并声明随包内嵌字体（3.3-05）；正文来自 `resumeTemplate.render`（沿用 3.2 的模板与 i18n）。
  * @param doc 简历文档
  * @param templateId 模板 id（未知则交由 `resumeTemplate.render` 抛出可读错误）
- * @param locale 渲染语言，决定 `@font-face` 命中的字形族与正文标签本地化（3.3 en 导出腿的服务对象）
+ * @param locale 渲染语言，决定 `@font-face` 命中的字形族与正文标签本地化（3.3 en 导出通道的服务对象）
  * @param fontBaseUrl 字体目录 base（不带结尾斜杠），本层不猜路径。两支消费者给的是**两种形状**，各有所据：
  *   打印面必须给绝对 `file://`（执行器把 HTML 落到临时目录再经 `file://` 装载，只有同源文档才允许读本地字体，
  *   `data:`/相对路径在那一面都无源可溯）；预览面必须给相对路径（`@auto-cc/shared` 的 `PREVIEW_FONT_BASE`）——

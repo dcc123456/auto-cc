@@ -623,7 +623,7 @@ for (const group of CAPABILITY_CHECKLIST) {
   for (const [capability, id] of group.items) {
     if (!idsSeen.has(id)) {
       failures.push(
-        `${group.group} 的「${capability}」没有以工具形式登记（注册表里读不到 id「${id}」）：5.9 的双入口少了一条腿`,
+        `${group.group} 的「${capability}」没有以工具形式登记（注册表里读不到 id「${id}」）：5.9 的双入口少了一条通道`,
       );
     }
   }

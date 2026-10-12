@@ -1,4 +1,4 @@
-4.4-02 验收证据 · JD 拆解的模型腿与可见回落（2026-10-02，切片 4.4-b）
+4.4-02 验收证据 · JD 拆解的模型通道与可见回落（2026-10-02，切片 4.4-b）
 ==============================================================================
 
 条目原文：拆解失败或 LLM 不可用时回落关键词抽取，功能不中断（U+V）。
@@ -19,23 +19,23 @@ $ npx vitest run --reporter=verbose src/requirements-model.test.ts src/gap-servi
  ✓ 模型输出的读取 > 经验年限的数字从定位到的原文里取，不采信模型自己填的数
  ✓ 模型输出的读取 > 整份产出不是 JSON、缺 items 数组、或空回复：给出可直接播报的原因而不是抛
  ✓ 模型输出的读取 > 模型重复认领同一处原文时，第二条按区间重叠丢弃
- ✓ 两条腿的合并 > 词面腿是底座：合并后每条原始条目都在，且模型条目排在同类别后
- ✓ 两条腿的合并 > 同一处原文或同一要求（忽略大小写与空格）不双计，词面那条留下
- ✓ 两条腿的合并 > 该类别已被词面腿占满上限时，模型条目计入触顶丢弃
- ✓ 两条腿的合并 > 同一份词面 + 同一份模型输出，无论模型给的次序如何，合并序列完全一致（4.4-07）
- ✓ kb.gap 的拆解入口 > 四类齐全，计数与词表版本随结果返回，且每条都是词面腿产的
+ ✓ 两条通道的合并 > 词面通道是底座：合并后每条原始条目都在，且模型条目排在同类别后
+ ✓ 两条通道的合并 > 同一处原文或同一要求（忽略大小写与空格）不双计，词面那条留下
+ ✓ 两条通道的合并 > 该类别已被词面通道占满上限时，模型条目计入触顶丢弃
+ ✓ 两条通道的合并 > 同一份词面 + 同一份模型输出，无论模型给的次序如何，合并序列完全一致（4.4-07）
+ ✓ kb.gap 的拆解入口 > 四类齐全，计数与词表版本随结果返回，且每条都是词面通道产的
  ✓ kb.gap 的拆解入口 > 先去空白再判长度：输入两端留白不影响 inputChars 与产出
  ✓ kb.gap 的拆解入口 > 过短的 JD 结构化失败，而不是给一份空报告（spec 4.4-01 的入参校验）
  ✓ kb.gap 的拆解入口 > 每类上限来自配置：调小之后只留稳定序列头部，丢弃条数如实报出
- ✓ kb.gap 的模型腿五态 > merged：词面基线一条不少，模型补的长尾带上 via=model 与可对回原文的位置
- ✓ kb.gap 的模型腿五态 > 装配里没有 llm.chat：报 unavailable，产出就是词面基线（功能不中断）
- ✓ kb.gap 的模型腿五态 > unavailable：配齐了替身但模型没配 key，一次请求都不发
- ✓ kb.gap 的模型腿五态 > failed：请求抛错就回落，原因里带上那句可直接播报的话
- ✓ kb.gap 的模型腿五态 > rejected：模型答得上来但一条都采不了信——引文对不上原文
- ✓ kb.gap 的模型腿五态 > rejected：模型报的与词面腿完全重复时也不虚增条数
- ✓ kb.gap 的模型腿五态 > disabled：allowModelLeg=false 时不碰模型，哪怕替身是可用状态
- ✓ kb.gap 的模型腿五态 > 温度取 0：拆解是读数不是创作（4.4-07 的稳定判据）
- ✓ kb.gap 的日志脱敏 > 日志里只有四类计数与腿状态，查不到 JD 正文、手机号与模型原文
+ ✓ kb.gap 的模型通道五态 > merged：词面基线一条不少，模型补的长尾带上 via=model 与可对回原文的位置
+ ✓ kb.gap 的模型通道五态 > 装配里没有 llm.chat：报 unavailable，产出就是词面基线（功能不中断）
+ ✓ kb.gap 的模型通道五态 > unavailable：配齐了替身但模型没配 key，一次请求都不发
+ ✓ kb.gap 的模型通道五态 > failed：请求抛错就回落，原因里带上那句可直接播报的话
+ ✓ kb.gap 的模型通道五态 > rejected：模型答得上来但一条都采不了信——引文对不上原文
+ ✓ kb.gap 的模型通道五态 > rejected：模型报的与词面通道完全重复时也不虚增条数
+ ✓ kb.gap 的模型通道五态 > disabled：allowModelLeg=false 时不碰模型，哪怕替身是可用状态
+ ✓ kb.gap 的模型通道五态 > 温度取 0：拆解是读数不是创作（4.4-07 的稳定判据）
+ ✓ kb.gap 的日志脱敏 > 日志里只有四类计数与通道状态，查不到 JD 正文、手机号与模型原文
  ✓ kb.gap 的日志脱敏 > 回落那一路走 warn，让「没用上模型」在日志里也是显眼的
 
  Test Files  2 passed (2)
@@ -60,36 +60,36 @@ $ npx tsx tmp/demo-44b.ts      # 一次性演示脚本，跑完即删（§6.4 / 
 modelStatus=unavailable · model=null · 并入 0 条 · 丢弃 0 条 · 提示词 null
 reason=模型未配置，缺 baseUrl / model
 条数=6（词面 6 + 模型 0） · 模型条目可对回原文=true · items 指纹 d668f55a7d54d3f7
-  日志：WARN [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型腿 unavailable（模型未配置，缺 baseUrl / model） · 丢弃 0 条 · 词表 lex-v1
+  日志：WARN [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型通道 unavailable（模型未配置，缺 baseUrl / model） · 丢弃 0 条 · 词表 lex-v1
 
 ### ② merged（真 llm.chat 打到本地 fixture 端点）
 modelStatus=merged · model=fixture-jd-model · 并入 1 条 · 丢弃 2 条 · 提示词 jdreq-v1
 reason=null
 条数=7（词面 6 + 模型 1） · 模型条目可对回原文=true · items 指纹 752f3c49a71c6721
   · [hard_skill] 订单链路 ← 「负责订单与推荐链路的后端服务」 @ 12-26
-  日志：INFO [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型腿 merged 并入 1 条 · 丢弃 2 条 · 词表 lex-v1 / 提示词 jdreq-v1
+  日志：INFO [kb-gap] 拆解 95 字 → 词面 6 条（硬技能 3 / 软技能 1 / 学历 1 / 年限 1，丢弃 0） · 模型通道 merged 并入 1 条 · 丢弃 2 条 · 词表 lex-v1 / 提示词 jdreq-v1
   连跑两次序列一致=true（4.4-07） · 请求体 max_tokens=1200 temperature=0
 
 fixture 这一次回给三条声明，去向逐条可查：
   {"hard_skill","订单链路","负责订单与推荐链路的后端服务"} → 并入（词面抓不到这句的长尾表达）
   {"soft_skill","英语流利","听说读写流利"}                → 丢弃（JD 原文里没有这七个字，§8.4 不接受无据条目）
-  {"hard_skill","Java","Java"}                            → 丢弃（词面腿已经认出 Java，同 label 不双计）
+  {"hard_skill","Java","Java"}                            → 丢弃（词面通道已经认出 Java，同 label 不双计）
 于是 `modelAdded=1 / modelDropped=2`，且合并序列的条数 = 词面 6 + 1，**词面基线一条没少**。
 
 ### ③ rejected（模型答得上来，但整份不是 JSON）
 modelStatus=rejected · reason=模型产出不是合法 JSON · 并入 0 条 · 提示词 jdreq-v1
 条数=6 · items 指纹 d668f55a7d54d3f7（与 ①④⑤ 同一串，即"回落后的产出就是词面基线"）
-  日志：WARN [kb-gap] ... · 模型腿 rejected（模型产出不是合法 JSON） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
+  日志：WARN [kb-gap] ... · 模型通道 rejected（模型产出不是合法 JSON） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
 
 ### ④ failed（端点指向已关闭的端口）
 modelStatus=failed · reason=问模型失败：模型请求发不出去：fetch failed · 提示词 jdreq-v1
 条数=6 · items 指纹 d668f55a7d54d3f7
-  日志：WARN [kb-gap] ... · 模型腿 failed（问模型失败：模型请求发不出去：fetch failed） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
+  日志：WARN [kb-gap] ... · 模型通道 failed（问模型失败：模型请求发不出去：fetch failed） · 丢弃 0 条 · 词表 lex-v1 / 提示词 jdreq-v1
 
 ### ⑤ disabled（allowModelLeg=false，模型这次是可用的）
-modelStatus=disabled · reason=配置里关掉了模型腿（allowModelLeg=false） · 提示词 null
+modelStatus=disabled · reason=配置里关掉了模型通道（allowModelLeg=false） · 提示词 null
 条数=6 · items 指纹 d668f55a7d54d3f7 · fixture 端点一次请求都没收到（服务没走到 complete）
-  日志：WARN [kb-gap] ... · 模型腿 disabled（配置里关掉了模型腿（allowModelLeg=false）） · 丢弃 0 条 · 词表 lex-v1
+  日志：WARN [kb-gap] ... · 模型通道 disabled（配置里关掉了模型通道（allowModelLeg=false）） · 丢弃 0 条 · 词表 lex-v1
 
 
 【3】4.4-02 的两句判据分别怎么落
@@ -126,7 +126,7 @@ modelStatus=disabled · reason=配置里关掉了模型腿（allowModelLeg=false
 $ npx tsx scripts/check-llm-single-entry.ts
   ✔ LLM 入口唯一性检查通过（扫描 276 个文件，llm.chat / llm.embed 各自声明者唯一，模型端点只在 packages/llm）
 
-用例里的模型腿一律打**替身**（`FakeChatService`，`provide = 'llm.chat'`，只在用例显式要求时才挂进装配）；
+用例里的模型通道一律打**替身**（`FakeChatService`，`provide = 'llm.chat'`，只在用例显式要求时才挂进装配）；
 不挂替身那条用例就是"真实装配里注掉 llm 那一行"的形态，`modelStatus` 报 unavailable 且产出照常。
 
 

@@ -47,7 +47,7 @@
 
 # 三条来源各对上一次：baseUrl/模型名/providerId 来自 settings.json 的 persisted 层（见 7.1-01 那份 dump），
 # key 来自 secrets.bin（密文；界面只露末 4 位，input 的 value 长度恒为 0 = 不回填明文），
-# 最后一行是 fixture 原样回显本次请求带出去的 model —— 证明这一发真经过了主进程那条腿。
+# 最后一行是 fixture 原样回显本次请求带出去的 model —— 证明这一发真经过了主进程那条通道。
 # 单测那半边（装载 → 写入 → 重新 new Context() 装载第二次，trace() 的 persisted 层含该值）：
 # packages/config/src/settings.test.ts 的「重新装载后持久层与密钥都还在（spec 7.1-05 的重启半边）」。
 # 截图：7.1-05-restart-{before,after}.png（同一分区、两个进程，md5 互异）。

@@ -36,7 +36,7 @@
 | `dismiss-run` | ghost | 同上，`compact` 高 24px |
 - 毡案下 `confirm-run` 的朱是 `rgb(192,57,31)`（与深色同一令牌的另一档）
 - `stop-run`（amber）与 `resume-run`（amber）：**只有代码位**。前者要 run 在 `running`、后者要 `paused + TAKEOVER_HELD`，
-  取到就得真跑一轮循环（§7.2 禁止外发腿，且接管需要用户在场的真实页面）
+  取到就得真跑一轮循环（§7.2 禁止外发通道，且接管需要用户在场的真实页面）
 
 ## 2. 免确认白名单带（`AgentPolicyPanel`，10 只候选 / 已免确认 0 项）
 

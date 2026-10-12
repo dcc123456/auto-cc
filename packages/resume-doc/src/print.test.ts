@@ -178,7 +178,7 @@ describe('自由正文条目不印出键名（summary/skills 的 text 字段无�
   });
 });
 
-describe('模板正文与语言贯穿到打印文档（服务 3.2 顺延的 en 导出腿）', () => {
+describe('模板正文与语言贯穿到打印文档（服务 3.2 顺延的 en 导出通道）', () => {
   it('zh-CN 下 html lang 为 zh-CN，正文出现中文区块标签与数据', () => {
     const { html } = resumePrint.toRequest(doc(), 'classic', 'zh-CN', FONT_BASE);
     expect(html).toContain('<html lang="zh-CN">');

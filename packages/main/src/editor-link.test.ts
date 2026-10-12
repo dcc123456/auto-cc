@@ -112,7 +112,7 @@ function fixtureDoc(): ResumeDocument {
  * 经网关调一次，把抛出的错误翻成三段读数（不抛则当场报错，避免"没失败"被读成"失败但不判"）。
  *
  * 走 try/catch 而不是 `Promise.resolve(invoke(…)).catch(…)`：编辑器那十条方法是**同步**的（会话在内存里），
- * 实参求值那一刻就抛了，挂在返回值上的 `.catch` 根本没机会接住——这条在 3.5 的另存腿（异步）不会显出来。
+ * 实参求值那一刻就抛了，挂在返回值上的 `.catch` 根本没机会接住——这条在 3.5 的另存通道（异步）不会显出来。
  * @param resolution 网关的切分结果（调用方已确认它是 `ok: true` 那一支）
  * @param args 白名单签名里那串实参
  * @returns 错误负载的三段读数：码、人读原话、`details.reason` 里的子原因

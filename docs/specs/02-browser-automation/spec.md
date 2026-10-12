@@ -173,8 +173,8 @@
   「已完成」改口为「页面未回执」）。**探针答不上来仍按 `done`**——这条判据不外扩成假阴性，
   否则 iframe 链路与显式降级到 DOM 通道的用例会整片被打成超时（取舍写在 `act-service.ts` 的注释里）。
   `type` / `upload` 的回读骨架不动，它们本来就有页面侧回读。
-- **裁定⑰的活体两腿至此齐了（2026-10-06 第二次补窗）**：正腿（`visible` → `done` 且页面计数 0→1）在
-  `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第七节；**反腿（派发没落地时不许报 `done`）**在
+- **裁定⑰的活体两条证据至此齐了（2026-10-06 第二次补窗）**：正向证据（`visible` → `done` 且页面计数 0→1）在
+  `docs/acceptance/2.1/2.1-12-macos-runtime-readings.txt` 第七节；**反向证据（派发没落地时不许报 `done`）**在
   `docs/acceptance/2.2/2.2-12-hidden-window-timeout.txt`——app 窗口不在前台（两份文档 `visibilityState` 都是
   `hidden`）时对同一颗 `data-testid="greet-button"` 连派两次，服务两律回
   **`status:'timeout'` / `channel:'cdp'` / `trusted:true` / `waitedMs:6355`、`6551`**，而页面侧三条互不采信的独立证据

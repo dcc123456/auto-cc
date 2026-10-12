@@ -1,5 +1,5 @@
 /**
- * `pdf.export` 另存腿的端到端单测（spec 3.5-02 的「不改写原内容流」+ 3.5-09 的「源文件 hash 前后一致」
+ * `pdf.export` 另存通道的端到端单测（spec 3.5-02 的「不改写原内容流」+ 3.5-09 的「源文件 hash 前后一致」
  * + 从 3.4-04/05/07 转移来的确定态：失败即报错、**磁盘上没有半成品**）。
  *
  * 产物断言走的是**内容流原文**而不是渲染像素：这片没有位图渲染（plan §7.1 的读侧选型），
@@ -47,7 +47,7 @@ function putFile(dir: string, name: string, bytes: Uint8Array): string {
   return filePath;
 }
 
-/** 另存腿的五条尺度：测试里显式写全（`.default()` 出现在输出类型里，调用点必须给，见 AGENTS.md §9）。 */
+/** 另存通道的五条尺度：测试里显式写全（`.default()` 出现在输出类型里，调用点必须给，见 AGENTS.md §9）。 */
 const config: PdfExportConfig = {
   maxBytes: 5_242_880,
   maxOverlays: 3,
@@ -67,7 +67,7 @@ function keepPages(pageCount: number): number[] {
 
 /**
  * 挂起一份 `pdf.export`。
- * @param overrides 想改的尺度（演「条数超上限」那条腿时改 `maxOverlays`）
+ * @param overrides 想改的尺度（演「条数超上限」那条通道时改 `maxOverlays`）
  * @returns 服务实例
  */
 async function boot(overrides: Partial<PdfExportConfig> = {}): Promise<PdfExportService> {
@@ -130,7 +130,7 @@ describe('3.5-02 的叠加半边：垫底矩形 + 拉丁文字都进了内容流
 
     const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
     // 小写归一在 `planOverlays` 那一步做完，这里判的是"量到的那个数真的落到了纸上"；
-    // 而新字的墨色是另一笔 `rg`（#0f172a），两者都在，说明两条腿读的是同一份判据。
+    // 而新字的墨色是另一笔 `rg`（#0f172a），两者都在，说明两条通道读的是同一份判据。
     expect(content).toContain('0.9411764705882353 0.8235294117647058 0.7058823529411765 rg');
     expect(content).toContain('0.058823529411764705 0.09019607843137255 0.16470588235294117 rg');
     expect(content).not.toContain('1 1 1 rg');
@@ -258,7 +258,7 @@ describe('3.5-07 的另存半边：页数与顺序符合操作，覆盖区跟着
 });
 
 describe('plan §7.10 的确定态：失败一律 PDF_EDIT_SAVE_FAILED，且沙箱里不留半成品', () => {
-  /** 十一条失败腿：四条"覆盖区非法"、四条"页序非法"、一条"源文件读不出"、两条"产物写不了"。 */
+  /** 十一条失败那一条：四条"覆盖区非法"、四条"页序非法"、一条"源文件读不出"、两条"产物写不了"。 */
   const cases: readonly {
     name: string;
     source?: Uint8Array;
@@ -352,7 +352,7 @@ afterAll(async () => {
 /**
  * 随包字体目录的替身（3.5-06 的中文半边要它）。
  *
- * 另存腿按名字**现问** `resume.print` 的 `fontBaseUrl()`（`export-service.ts` 的 `cjkFontBytes`），
+ * 另存通道按名字**现问** `resume.print` 的 `fontBaseUrl()`（`export-service.ts` 的 `cjkFontBytes`），
  * 所以这里只装一只提供那一个读数的假服务，指向仓库里真正随包的那份 woff2——
  * 判据要的是「中文真的嵌得进去、抽得出来」，用假字节就把它测成了空气。
  */

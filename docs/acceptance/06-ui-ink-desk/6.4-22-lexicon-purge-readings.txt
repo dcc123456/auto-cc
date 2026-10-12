@@ -1,0 +1,114 @@
+6.4-22 「这条〔禁〕/ 那条〔禁〕」全仓清零 + 禁令入册 + 机检防再长 —— 读数
+================================================================================
+子计划：docs/plans/06-ui-ink-desk/plan.md §3.32（第六十四片）
+spec  ：docs/specs/06-ui-ink-desk/spec.md 6.4-C（6.4-22 … 6.4-22e）
+时间  ：2026-10-12
+被禁的字在本文件里一律记作〔禁〕（码位 U+817F）；逐字只出现在 AGENTS.md §4.6
+        （禁令的点名现场，机检豁免）与 scripts/check-lexicon.ts（判据本体的码位注释）。
+        本片自己写的 plan / spec / 证据三份文档**不含**那个字——禁令对自己生效。
+
+--------------------------------------------------------------------------------
+A. 起手普查（对当时的 HEAD，未提交前）
+--------------------------------------------------------------------------------
+扫描面            829 个跟踪文本文件（17 种扩展名：ts tsx js mjs cjs json md txt
+                  css html yml yaml xml sh bat ps1 py）
+命中              1631 处 / 216 个文件
+命令            python3 逐文件 git show HEAD:<path> 计数（脚本见 C 段最后一条）
+
+收口时对最新 HEAD 复核：1665 处 / 222 个文件 / 扫描面 837。
+多出的 34 处 / 6 个文件全部是并行窗口在这期间**新提交**的内容：
+  cordis.yml 21、packages/resume-kb/src/generate-service.ts 17（新增部分）、
+  packages/llm/src/index.ts 10、packages/resume-kb/src/{prompts,generate-model,sections,…}
+→ 这就是"人工清一遍不够、必须有机检"的正面读数：词会在没人看的地方重新长出来。
+
+--------------------------------------------------------------------------------
+B. 三轮 pass（按语义分档，不是一把梭）
+--------------------------------------------------------------------------------
+第一轮：按词面全局清零（tmp/leg-passage1，被禁词 → 通道），命中即改。
+第二轮：锚定整句改 8 文件 80 行（tmp/leg-passage2.cjs）
+        —— 修第一轮把"真渠道语义"与"验收条目"混成一个词的问题。分档表：
+          并列实现 / 真渠道   → 通道（保留原词）
+          验收条目            → 判据 / 那一条
+          取证方案            → 探针
+          计划切片名          → X 轨（3.6-c 界面轨、编辑轨、截图轨…）
+          界面那一半          → 界面半边
+          反向验证            → 反向证据 / 负对照
+        一条刻意的"不改"：`docs/plans/02-browser-automation/plan.md` 里的
+        「截图通道」保持原样——那一份说的确实是截图这条真渠道，不是验收条目。
+第三轮：锚定改 8 文件 11 行（tmp/leg-passage3.cjs）
+        「agent 三条通道 → agent 三条机检」「本轮取三条通道：→ 三组探针：」
+        「6.2-01 的第三条通道 → 第三条判据」「三条通道都在 → 三样都在」
+        「避免三条通道各写一份 → 避免三处各写一份」（packages/pdf-edit/src/page-ops.ts:25）
+语言包：两份**手改**而不是脚本改（脚本会连着键名一起动）——zh-CN 15 串 / en 17 串。
+
+--------------------------------------------------------------------------------
+C. 反向验证（判据本体 scripts/check-lexicon.ts，pnpm lint 链末位）
+--------------------------------------------------------------------------------
+探针一律写在被忽略的 tmp/lexicon-probe/ 里，通过判据本体的 argv 口送进去
+（`tsx scripts/check-lexicon.ts <目标>`，指定实参时"脏区延后"与"豁免"都不启用）。
+不动仓内真文件做实验的理由：真文件一变脏就被延后机制接住，实验永远只拿到 EXIT=0。
+
+① 注入副本（含 1 处被禁字）：EXIT=1，报错 =
+     - tmp/lexicon-probe/has-banned.md 出现被禁的字 1 处（tmp/lexicon-probe/has-banned.md:1）：
+       用户裁定 2026-10-12 禁用这一说法，改写成「那一条 / 判据 / 通道 / 轨」等具体所指（判据 1）
+② 同一副本去掉被禁字：EXIT=0
+③ 语言包注入一条含 leg 的值（全仓扫描）：EXIT=1，报错 =
+     - packages/renderer/src/locales/en.json:1777 的页面文案含 leg 一词
+       （"zzLegProbe": "the chat leg of the model",）：界面要说的是"哪一条"，
+        英文写 role / route / binding 这类具体所指（判据 2）
+④ 语言包还原核对：md5 逐字节相同
+⑤ 全仓扫描（还原后负对照）：EXIT=0
+⑥ 空扫描面探针：EXIT=1，报「扫描面异常」（判据 3，防判据跑在空集合上假绿）
+
+全仓收尾行（2026-10-12 收口读数，逐字）：
+✔ 术语禁令保持（扫描 837 个跟踪文本文件、2 份语言包的值：被禁的字在已进主干的内容里 0 处；
+  脏区延后 11 份（cordis.yml（2 处，脏区中）、docs/plans/08-real-platform-driving/plan.md（5 处）、
+  packages/core/src/events.ts（2 处）、packages/llm/src/index.ts（5 处）、
+  packages/resume-kb/src/generate-model.test.ts（2 处）、generate-model.ts（4 处）、
+  generate-service.test.ts（2 处）、generate-service.ts（10 处）、prompts.ts（5 处）、
+  sections.ts（3 处）、test-doubles.ts（1 处））—— 落地即判，本窗不替它们清；
+  豁免 2 处（AGENTS.md——§4.6 的禁令要写出被禁的字；scripts/check-lexicon.ts——判据本体）
+  内共 10 处，逐处都是禁令本体；二进制与素材文件不在扫描面内）
+
+--------------------------------------------------------------------------------
+D. 活体半边（V：6.4-22d）
+--------------------------------------------------------------------------------
+窗口：本机 dev 实例（CDP 10222，harness --url 5173），visibilityState=hidden。
+信任栏是这一族文案最密的一屏（会话 / 内核页面 / 指标看板 / 额度 / 模型五段）。
+探针 tmp/6422-check-view.cjs，读数（逐字）：
+  wasVisible            true（[data-view="trust"] 高 > 0）
+  railFound             true（[data-action="nav-trust"] 在位）
+  bannedInWholeDocument 0     ← document.body.innerText 全份
+  legRows               [{leg:"chat",  banned:0, text:"对话（话术生成）未配置…"},
+                         {leg:"embed", banned:0, text:"向量（知识库检索）未配置…"}]
+  sectionCount          1（[data-testid="model-settings"]）
+画面：6.4-22-trust-view.png（1 张，与全目录 md5 互异；本批只有这一张，无同批重复风险）
+收尾自证（tmp/6422-unfreeze.cjs）：
+  {"freezeRemoved":true,"injectedStylesLeft":0,"animationsNow":0,"theme":"light"}
+→ 量几何/拍图前注入的去动画 <style> 已摘掉，用户的 dev 实例没有被动效回归。
+
+取证过程中的一条环境读数（不是产品缺陷）：`harness shot --reveal <css>` 在一串
+链式命令里挂住 3.5 分钟不出帧（背景任务 b8kzmxf6r 已终止）；改成不带 --reveal 的
+单发 `harness shot --url 5173 --out …` 立刻出帧。口径：--reveal 与链式命令的组合
+在本机不可靠，单发是可行写法。
+
+--------------------------------------------------------------------------------
+E. 边界（写进判据本体与 plan §3.32，不靠自觉）
+--------------------------------------------------------------------------------
+1. 扫描面之外：5 张 PNG + 2 个 woff2 素材（二进制读不出词）。
+2. 不改名的三类同名物：`data-model-leg`（harness 取证锚点）、`allowModelLeg` / `LEG_*`
+   （代码标识符）、语言包键名 `"leg"`。改名会把 AGENTS.md §9 那批"按锚点找元素"的
+   实测全部作废，而且与"页面文案"无关。
+3. 脏区延后 ≠ 放过：11 份在飞文件（并行窗口正在写）只记账不判红，**落地即判**——
+   它们一进 HEAD，这条判据立刻对同一份内容变硬。其中 cordis.yml（+2）与
+   packages/llm/src/index.ts（+5）是**在本窗清完之后被并行窗口重新写进的**，
+   按"防再长"记账，不追改（追改会把别人的在飞改动卷进本次提交）。
+4. 本次提交因此排除 5 份文件：docs/plans/08-real-platform-driving/plan.md、
+   packages/resume-kb/src/generate-service.test.ts、packages/llm/src/llm.test.ts、
+   packages/resume-kb/src/sections.test.ts、packages/llm/src/http.ts。
+   前四份逐条核过：plan 08 的 diff 是并行窗口的 ㉓㉔ 两条裁定行（2 增 0 删），
+   另三份是纯新增（0 删）的超时覆盖用例——没有一行是本片的替换。
+   第五份 http.ts 是"本片清掉的一行注释 + 人家的 describeNetworkCause 整支新函数"
+   混在同一份里，整份不提交（人家的新代码当前有 1 条 eslint 红，不能由本次提交带进主干）。
+5. 与术语无关的一条旧文案缺陷另片改：模型面板那两句「先在上一段勾进至少一条」
+   指的是同一屏的上半段，读起来像"上一条记录"（zh-CN.json 三处）。

@@ -73,9 +73,9 @@ describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的�
     const resolution = resolveCall('pdf.export.saveAs', lookup);
     expect(resolution).toMatchObject({ ok: true, service: 'pdf.export', method: 'saveAs' });
     if (!resolution.ok) throw new Error('should not reach');
-    // 源文件读不出即结构化失败，且用的另存腿那一个码（`PDF_EDIT_READ_FAILED` 是打开腿的话术，两者不混）。
+    // 源文件读不出即结构化失败，且用的另存通道那一个码（`PDF_EDIT_READ_FAILED` 是打开通道的话术，两者不混）。
     // 四个实参按 `saveAs(filePath, overlays, pageOrder, outPath)` 给全：页序给空数组就够，因为这一条只测
-    // "失败落到了编辑轨的码上"，而源文件不存在那一条腿在读文件时就先撞上了。
+    // "失败落到了编辑轨的码上"，而源文件不存在那一条通道在读文件时就先撞上了。
     const failure = await Promise.resolve(
       resolution.invoke('/tmp/auto-cc-不存在的那份.pdf', [], [], '/tmp/auto-cc-产物.pdf'),
     ).catch((error: unknown) => error);
@@ -83,14 +83,14 @@ describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的�
     expect(AppError.from(failure).code).toBe('PDF_EDIT_SAVE_FAILED');
   });
 
-  it('网关把 `pdf.io.bytes` 切成服务 `pdf.io` + 方法 `bytes`（真纸面的取数腿，只有一个路径实参）', async () => {
+  it('网关把 `pdf.io.bytes` 切成服务 `pdf.io` + 方法 `bytes`（真纸面的取数那一条，只有一个路径实参）', async () => {
     const { lookup } = await bootEditTrack();
     const resolution = resolveCall('pdf.io.bytes', lookup);
     expect(resolution).toMatchObject({ ok: true, service: 'pdf.io', method: 'bytes' });
     if (!resolution.ok) throw new Error('should not reach');
-    // 路径不存在时落在打开腿那一个码上（`PDF_EDIT_READ_FAILED`）：读不出文件这件事在界面上的处置与 `pdf.io.open` 相同，
+    // 路径不存在时落在打开通道那一个码上（`PDF_EDIT_READ_FAILED`）：读不出文件这件事在界面上的处置与 `pdf.io.open` 相同，
     // 按已验收的口径（界面处置相同就共用一支码）不再另开支新码。
-    // 字节腿只读盘、不解析，所以它是**同步抛**而不是 reject（`open` 那条仍是 reject，它先 `await` 过装载）；
+    // 字节通道只读盘、不解析，所以它是**同步抛**而不是 reject（`open` 那条仍是 reject，它先 `await` 过装载）；
     // 网关那条 `try` 两种都接得住，这里就按抛出取——写 `.catch` 的话，抛出在 `Promise.resolve` 包上它之前就已经穿过去了。
     let failure: unknown;
     try {
@@ -104,9 +104,9 @@ describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的�
 });
 
 describe('白名单只放行登记过的那三条（§8.2 的边界）', () => {
-  it('`pdf.*` 恰有 io.open、io.bytes 与 export.saveAs，退役的线框腿与抄错的名字都进不来', () => {
-    // 3.5-c₂ 会话腿把 `pdf.edit.*` 判成了渲染层的纯模型（plan §7.14），所以那六行至今不在名单里；
-    // `pdf.layout.textItems` 在 2026-10-10 随真纸面形态退役（spec 3.5-13），换进来的是同一条腿上的 `pdf.io.bytes`。
+  it('`pdf.*` 恰有 io.open、io.bytes 与 export.saveAs，退役的线框通道与抄错的名字都进不来', () => {
+    // 3.5-c₂ 会话轨把 `pdf.edit.*` 判成了渲染层的纯模型（plan §7.14），所以那六行至今不在名单里；
+    // `pdf.layout.textItems` 在 2026-10-10 随真纸面形态退役（spec 3.5-13），换进来的是同一条通道上的 `pdf.io.bytes`。
     // 口径照旧：白名单每多一行就多一条没人审的通路，只在实现真落在一口服务上时才登记（表是路线图，不是许可证）。
     expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('pdf.'))).toEqual([
       'pdf.io.open',
