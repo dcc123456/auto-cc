@@ -424,6 +424,14 @@ export const RENDERER_ALLOWLIST = [
   // 它刻意**不**登记为 agent 工具——让模型自己接受自己生成的内容，等于把 4.5-11 的"人逐项过目"取消掉，
   // 而事实锁定的最后一道闸就是那道过目（§8.4）。界面侧调用点在 `GeneratePanel`。
   'resume.generate.accept',
+  // 4.9 的内置书写技能四张口（spec 4.9-01 ～ 4.9-04 / 4.9-09）：读、改、还原、对一份文档核对必备信息。
+  // 这里**刻意没有第四种动作**——`kb.skill.remove` 这种调用名根本不存在：内置正文不在库里，
+  // `reset` 删的只是覆盖行，于是"技能不能被删除"是白名单的形状而不是界面上少画一颗键（4.9-04 的机检判据）。
+  // `checkDocument` 只回判定与档位、不回正文，界面要的是"哪一项缺"（§8.5 的少跨边界同一口径）。
+  'kb.skill.read',
+  'kb.skill.save',
+  'kb.skill.reset',
+  'kb.skill.checkDocument',
   // 4.6-d 的话术候选面板（spec 4.6-07）：以前界面只能经 `outbound.greet.perform` **间接**触发话术生成
   // （生成入参藏在 greet 的 `script` 字段里），拿不到候选、也看不见「模板」标识与回落原因。
   // 这里开的是一条**只生成、不外发**的口：它不现问渠道、不过闸门、不产生任何离开 app 的字节，
@@ -1870,6 +1878,51 @@ export interface GenerationRunRowView {
   readonly reorderBases: readonly GenerationReorderRowView[];
   readonly checks: GenerationChecksRowView;
   readonly receipt: GenerationReceiptRowView;
+  /**
+   * 必备信息在**改写前**那份工作副本上的逐项读数（spec 4.9-09）。
+   * 与 `requiredAfter` 一起摆才说得出"这一趟有没有让它更齐"——只给一份就是让界面自己猜另一份。
+   */
+  readonly requiredBefore: readonly RequiredInfoRowView[];
+  /** 改写后（仅重排的保守版本也算）的读数；被拒没有产物时为 null，界面这一格显示"本次没有产物"。 */
+  readonly requiredAfter: readonly RequiredInfoRowView[] | null;
+}
+
+/** 必备信息逐项判定的三种结局（镜像 `REQUIRED_INFO_STATUSES`，spec 4.9-09）。 */
+export type RequiredInfoStatusView = 'present' | 'weak' | 'missing';
+
+/** 必备信息的两档：`core` 缺了就是不合格，`recommended` 只提示（镜像 `REQUIRED_INFO_SEVERITIES`）。 */
+export type RequiredInfoSeverityView = 'core' | 'recommended';
+
+/**
+ * 必备信息清单的一行（spec 4.9-09 / 4.9-10）。
+ *
+ * 给的是 `labelKey` 而不是中文标签：页面文案一律走 i18n（AGENTS.md §5.5），
+ * 主进程只报"是哪一项、判定如何"，字怎么说是渲染层语言包的事。
+ */
+export interface RequiredInfoRowView {
+  readonly id: string;
+  readonly labelKey: string;
+  readonly severity: RequiredInfoSeverityView;
+  readonly status: RequiredInfoStatusView;
+}
+
+/** 生效技能的来源两态（镜像 `KB_SKILL_SOURCES`，spec 4.9-01 / 4.9-02）。 */
+export type KbSkillSourceView = 'builtin' | 'custom';
+
+/**
+ * `kb.skill.read` 的读数（spec 4.9-01 ～ 4.9-03）。
+ * `builtinContent` 一起过界是有意的：界面要说"你改过 / 已是内置"，就得拿得出对照的那一份，
+ * 而第二份对照只能来自同一个来源（§2.7 不在渲染层再存一份内置正文）。
+ */
+export interface KbSkillReadRowView {
+  readonly skillId: string;
+  readonly version: string;
+  readonly source: KbSkillSourceView;
+  readonly content: string;
+  readonly builtinContent: string;
+  readonly chars: number;
+  readonly updatedAt: number | null;
+  readonly maxChars: number;
 }
 
 /**
@@ -2844,6 +2897,29 @@ export interface BridgeSignatures {
     args: [receiptId: string, decision: GenerationDecisionRowInput];
     returns: GenerationAcceptRowResult;
   };
+  /**
+   * 读生效的书写技能（spec 4.9-01 / 4.9-03 的界面入口）。
+   * 无入参：内置只有一份，生效值是「人的覆盖 ?? 内置」这一件事由主进程合成，界面不自己拼（§2.7）。
+   */
+  'kb.skill.read': { args: []; returns: KbSkillReadRowView };
+  /**
+   * 存下人改过的那一份正文（spec 4.9-02）。
+   * 整份覆盖而不是增量：编辑面是"改完保存"，两种形状混着存会让还原后的样子说不清。
+   * `INVALID_ARGUMENT` 两种：空正文（要回到出厂写法应该点还原）、超过配置上限。
+   */
+  'kb.skill.save': { args: [content: string]; returns: KbSkillReadRowView };
+  /**
+   * 一键还原（spec 4.9-03）：删的是库里的**覆盖行**，内置正文不在库里所以删不掉——
+   * 这一张口存在的全部意义就是"没有删除技能这件事"。
+   */
+  'kb.skill.reset': { args: []; returns: KbSkillReadRowView };
+  /**
+   * 对一份工作副本逐项核对必备信息（spec 4.9-09 / 4.9-07）。
+   * `docId` 必填：与 `resume.generate.run` 不同，这一格问的是"我屏幕上这份齐不齐"，
+   * 让主进程去猜库里那一份是哪一份会给出错的答案（多份时猜错就是判错）。
+   * `KB_SOURCE_MISSING`：副本不存在或已损坏（先导入简历）。
+   */
+  'kb.skill.checkDocument': { args: [docId: string]; returns: RequiredInfoRowView[] };
   /**
    * 定时任务列表（spec 5.7-05）：按"下一次什么时候跑"排序的只读读数，停用任务的 `nextRunAt` 为 null。
    * 界面每次现读、不缓存第二份（§9 的 2.5 实测：热改配置会重建下游，本地存一份就静默变空）。

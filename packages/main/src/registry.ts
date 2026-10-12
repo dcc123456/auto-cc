@@ -52,7 +52,7 @@ import {
   ResumeExportService,
   ResumeSnapshotService,
 } from '@auto-cc/plugin-resume-doc';
-import { KbGapService, KbProfileService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import { KbGapService, KbProfileService, KbSkillService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
 import { ScheduleRegistryService } from '@auto-cc/plugin-scheduler';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -176,6 +176,12 @@ export const REGISTRY: Registry = {
   // 摘掉这一行，4.5-c 的预览面板与 agent 的 `resume.generate.run` 同时得到结构化失败，
   // 而知识库、缺口报告、导出轨照旧——「算出改了什么」与「按改动出 PDF」分属两条。
   // 它不 `inject` `kb.gap`（用的时候现问），所以摘掉上面那行它不会连带 PENDING，只会在调用时报库未装配。
+  // 内置简历书写技能（spec 4.9-01 ～ 4.9-04 / 4.9-09）：`resume_skill_override` 的唯一落点，迁移号段 38。
+  // 它管的是**一份可以看、可以改、不能删、可以一键还原的指引**：库里只存人的覆盖，内置正文随代码发货，
+  // 所以没有任何一次调用能删掉它——`kb.skill.*` 在桥接白名单里只有 read / save / reset / checkDocument 四张口。
+  // 摘掉 `cordis.yml` 里这一行：界面那一格报"服务未挂载"，生成轨仍能跑（它现问技能，缺席时提示词少一段指引），
+  // 而 `resume_generations` 与导出轨照旧——「怎么写」与「改哪几处」分属两条。
+  'kb-skill': KbSkillService,
   'kb-generate': ResumeGenerateService,
   // 轻编辑的打开通道（spec 3.4-03 / plan §7.4）：`pdf.io` 只做「绝对路径 → 页数与每页宽高」。
   // 它**不建表、不占迁移号段**——编辑会话只活在一次操作里，产物是一份新文件，没有跨重启还在的状态要存。

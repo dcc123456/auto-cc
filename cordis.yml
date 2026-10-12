@@ -497,6 +497,21 @@ plugins:
       highlightMinScore: 0.11
       maxHighlights: 6
 
+  # 简历书写技能（spec 4.9-01 ～ 4.9-09，plan §4.9 裁定 A2）：内置正文随代码发货，库里只存**用户改过的那一份**。
+  # 于是"不可删除"是结构性的而不是校验出来的：全仓没有一处删除入口（`kb.skill.*` 只有读 / 存 / 还原 / 判定四句，
+  # 见 `packages/shared/src/bridge.ts` 的允许清单），还原 = 删掉覆盖行让内置正文重新生效，builtin 永远在。
+  # 它 `inject` `store`（迁移号段 **38**，新表 `resume_skill_override`）与 `resume.doc`（只读工作副本做必备信息判定），
+  # 不 inject 也不 dependsOn `kb.generate`——是生成轨用的时候按名字现问（§9 实测 2.5：不在本地存第二份事实）。
+  # 顺序排在 `kb-generate` 之前：装配期没有硬性依赖，但生成轨 init 那行日志要报"书写指引已接入/未接入"，
+  # 先挂技能才报得准（§9 实测 5.1-c 同一条口径）。
+  # `maxContentChars` 20000：技能正文的**上限闸门**，同时也是递给提示词那一段的截断预算的参照物
+  # （真正进提示词的额度是 `prompts.ts` 的 `SKILL_GUIDE_CHAR_LIMIT` 4000，那里管的是 token 成本，这里管的是用户的表述空间）。
+  # 摘掉本行：`kb.skill.*` 四句全部报"服务未挂载"，而生成轨照跑——`skillRead` 问不到即指引为空，
+  # 等价于内置正文没接入，产物仍过事实校验（4.9-05 的反向面）。
+  - id: kb-skill
+    config:
+      maxContentChars: 20000
+
   # 定向内容生成（spec 4.5-01 / 05 / 09 / 10 / 12）。它 `inject` 的是 `store` 与 `resume.doc`——
   # 读工作副本、往 `resume_generations`（新号段 **15**）落一行记录，这两件事之外它不碰任何持久化。
   # 与 `kb-gap` 同一条纪律：**不 `inject` `kb.gap`、也不 `dependsOn` `llm`**，相关性读数与模型出口都是

@@ -141,3 +141,28 @@ export {
   type SourceFailureCode,
   type SourceTextResult,
 } from './source.js';
+// 4.9 的内置书写技能（spec 4.9-01 ～ 4.9-09）：对外给**服务、配置形状、生效来源与读数形状**，
+// 以及 `REQUIRED_INFO` / `checkRequiredInfo` 这一对——界面清单与内置正文必须由同一张表派生（裁定 A5），
+// 所以表本身要能被 `packages/main` 的注册表与测试读到；`factsOfDocument` 不外露（投影只服务判定，§2.4）。
+export {
+  BUILTIN_RESUME_SKILL_BODY,
+  REQUIRED_INFO,
+  REQUIRED_INFO_SEVERITIES,
+  REQUIRED_INFO_STATUSES,
+  RESUME_SKILL_ID,
+  RESUME_SKILL_VERSION,
+  checkRequiredInfo,
+  type RequiredInfoItem,
+  type RequiredInfoRow,
+  type RequiredInfoSeverity,
+  type RequiredInfoStatus,
+} from './skill.js';
+export {
+  KB_SKILL_SOURCES,
+  RESUME_SKILL_MIGRATION_VERSION,
+  KbSkillService,
+  kbSkillSchema,
+  type KbSkillConfig,
+  type KbSkillReadView,
+  type KbSkillSource,
+} from './skill-service.js';
