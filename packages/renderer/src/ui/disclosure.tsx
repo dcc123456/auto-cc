@@ -1,7 +1,11 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { BLOCK_SURFACE_CLASS } from './controls';
+import { BLOCK_SURFACE_CLASS, DISCLOSURE_CLASS } from './controls';
+
+/** 段头那一整行的画法：整行可点、只提亮底色，悬停档不内联在 JSX 上。 */
+const SECTION_HEAD_CLASS =
+  'flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-3 text-left transition-colors duration-150 hover:bg-ink-850';
 
 /**
  * 收纳三件原件（`DeskSection` / `DeskExplainer` / `DeskActionRow`）。
@@ -158,13 +162,14 @@ export function DeskSection({
       className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-ink-900/60 ${className}`}
     >
       {/* 段头本身就是一颗按钮，且**不嵌**别的交互元素：嵌在 `<button>` 里等于嵌套交互元素，
-          浏览器会把内层那颗的点击判给外层，harness 就再也按不到那颗自己的 `data-action`。 */}
+          浏览器会把内层那颗的点击判给外层，harness 就再也按不到那颗自己的 `data-action`。
+          画法只出自 `SECTION_HEAD_CLASS` 一处（2026-10-11 按钮统一裁定：原件层也不许在 JSX 上内联悬停档）。 */}
       <button
         type="button"
         data-action={`${id}-toggle`}
         aria-expanded={open}
         onClick={toggle}
-        className="flex shrink-0 items-center gap-2 px-4 py-3 text-left transition-colors duration-150 hover:bg-ink-850"
+        className={SECTION_HEAD_CLASS}
       >
         <Chevron size={13} className="shrink-0 text-slate-500" aria-hidden="true" />
         <span className="min-w-0 flex-1">
@@ -226,7 +231,7 @@ export function DeskExplainer({ id, label, markers, className = '', children }: 
         data-action={`${id}-toggle`}
         aria-expanded={open}
         onClick={() => setOpen((previous) => !previous)}
-        className="inline-flex items-center gap-1 text-left text-[11px] text-slate-400 transition-colors duration-150 hover:text-celadon"
+        className={DISCLOSURE_CLASS}
       >
         <Chevron size={11} className="shrink-0" aria-hidden="true" />
         {label}

@@ -249,15 +249,11 @@ export function Drawer({ action, open, title, subtitle, headExtra, onClose, widt
             </h3>
             {subtitle ? <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p> : null}
           </div>
-          <button
-            type="button"
-            data-action={`${action}-close`}
-            aria-label={title}
-            onClick={onClose}
-            className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
-          >
+          {/* 关掉那颗也是按钮，因此走 `DeskButton` 的同一套画法（2026-10-11 的按钮统一裁定：
+              原件层自己也不许再手写第二套描边/悬停）。`data-action` 值不变，harness 锚点照旧。 */}
+          <DeskButton action={`${action}-close`} variant="line" compact aria-label={title} onClick={onClose}>
             <X size={14} />
-          </button>
+          </DeskButton>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
       </aside>
@@ -367,15 +363,15 @@ export function Modal({
             {/* 关掉那颗只在"可安全取消"的弹窗上出现：`dismissOnScrim` 一只 prop 同时管三条退路
                 （点遮罩 / 按 Esc / 按右上角的 ✕），必须表态的那几只因此一条退路都不留（09 稿⑤-1/⑤-5）。 */}
             {dismissOnScrim ? (
-              <button
-                type="button"
-                data-action={`${action}-close`}
+              <DeskButton
+                action={`${action}-close`}
+                variant="line"
+                compact
                 aria-label={closeLabel ?? (typeof title === 'string' ? title : undefined)}
                 onClick={onClose}
-                className="rounded-chip border border-line p-1 text-slate-400 hover:bg-ink-800 hover:text-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70"
               >
                 <X size={14} />
-              </button>
+              </DeskButton>
             ) : null}
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-xs leading-relaxed text-slate-200">

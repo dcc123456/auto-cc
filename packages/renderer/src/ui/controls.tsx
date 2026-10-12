@@ -23,8 +23,27 @@ export type DeskVariant = 'line' | 'solid' | 'ghost' | 'seal' | 'jade' | 'amber'
 /** 控件的结果态读数：`done` 两秒自行回落，`failed` 不回落，必须人再动一次（07 稿五态规则）。 */
 export type DeskResult = 'done' | 'failed';
 
-/** 五态里「进行中宽度锁死」的实现方式：转针槽位常驻，空闲时只是透明（07 稿③）。 */
-const SPINNER_SLOT = 'inline-flex w-3.5 shrink-0 items-center justify-center';
+/** 结果态的底色 wash：jade 走 2 秒回落动画，seal 常亮直到人再动一次。 */
+const RESULT_WASH: Record<DeskResult, string> = {
+  done: 'bg-jade-wash animate-wash',
+  failed: 'bg-seal-wash',
+};
+
+/** 结果态的图标：成功盖一个 jade 的对勾，失败盖一枚朱砂印章（失败要显眼到必须处理）。 */
+const RESULT_ICON: Record<DeskResult, ReactNode> = {
+  done: <BadgeCheck size={11} className="text-jade-ink" aria-hidden="true" />,
+  failed: <Stamp size={11} className="text-seal-ink" aria-hidden="true" />,
+};
+
+/**
+ * 状态角标（转针 / 对勾 / 印章）的画法：**压在按钮右上角的边上，不参与排版**。
+ * 2026-10-11 之前这一格是"文案前常驻一个 `w-3.5` + `gap-1.5` 的槽位"，于是渲染层那 174 处 `<DeskButton`
+ * 里凡是传了 `doneLabel` 的键，空闲时文案前面都空出一大片（活体读数：那颗「测这家」宽 71px、左边 20px 是空的）。
+ * 绝对定位之后五态宽度**完全不变**（07 稿③④ 的"宽度锁死不跳版"由"预留一格"改成"零成本"，比原来更严格），
+ * 而空闲态一个像素都不占。`overflow` 不能裁切（根节点本来就不裁，见 `DeskButton` 里那条注释），角标才露得出去。
+ */
+const STATE_BADGE =
+  'pointer-events-none absolute -right-1.5 -top-1.5 grid size-[18px] place-items-center rounded-full border border-line bg-ink-850';
 
 /**
  * 各 variant 的静态 class。**必须写成完整字面量**——Tailwind 只扫源码里出现的字符串，
@@ -88,18 +107,6 @@ const buttonClass = (variant: DeskVariant, disabled: boolean, compact: boolean):
   return `${base}${tone}`;
 };
 
-/** 结果态的底色 wash：jade 走 2 秒回落动画，seal 常亮直到人再动一次。 */
-const RESULT_WASH: Record<DeskResult, string> = {
-  done: 'bg-jade-wash animate-wash',
-  failed: 'bg-seal-wash',
-};
-
-/** 结果态的图标：成功盖一个 jade 的对勾，失败盖一枚朱砂印章（失败要显眼到必须处理）。 */
-const RESULT_ICON: Record<DeskResult, ReactNode> = {
-  done: <BadgeCheck size={14} className="text-jade-ink" aria-hidden="true" />,
-  failed: <Stamp size={14} className="text-seal-ink" aria-hidden="true" />,
-};
-
 export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-disabled'> {
   /** harness 的点击凭据（AGENTS.md §9 第④条：每只可点控件都要有 `data-action`），必填。 */
   action: string;
@@ -158,19 +165,16 @@ export function DeskButton({
   ...rest
 }: DeskButtonProps) {
   const busy = busyProp === true;
-  // **只有真会进入进行中/结果态的按钮才预留那一格转针位**。原先它无条件渲染（`w-3.5` + `gap-1.5`
-  // = 20px），于是渲染层那 174 处 `<DeskButton` 里根本没有状态可进入的多数字键，文案前面都空出一大片。
-  // 判据取"调用方有没有把状态摊给这颗键"：`busy` 传了（哪怕是 false）、有结果态、或给了完成态文案，
-  // 三者之一成立才留位——这一格的预留是为了 07 稿④「进行中宽度锁死不跳版」，
-  // 一颗永远不会变忙、也永远不会盖章的键没有要锁死的第二条状态。
-  const holdsStateSlot = busyProp !== undefined || result !== undefined || doneLabel !== undefined;
   const isDead = disabled === true || busy;
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
   ) as Record<string, string>;
+  // 状态角标只在**状态真的在显示**时渲染（进行中、或已有结果态）。它压在外框右上角的边上，
+  // 不占排版，所以空闲态不留任何空白，五态之间宽度也一个字节的差都没有。
+  const showsBadge = busy || (result !== undefined && !busy);
   // 根节点**不带** `overflow-hidden`：flex 子项的自动最小尺寸在 overflow 非 visible 时会塌成 0，
   // 于是窄列里的按钮会被压成"只剩内边距的空壳"（活体读数：页序行那颗页码键宽 30px、文字整条裁掉）。
-  // 结果态 wash 因此自己带一份圆角，不靠父级裁切。
+  // 结果态 wash 与右上角标因此各自带一份圆角/边距，不靠父级裁切——而角标能露出框外也正是靠这一条。
   return (
     <button
       type="button"
@@ -184,7 +188,7 @@ export function DeskButton({
       // 人只会看到"按不动"而看不到为什么按不动（07 稿④）。改走 aria-disabled + 这里挡下 onClick。
       {...(isDead ? {} : { onClick })}
       {...(isDead && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-      className={`relative rounded-control ${buttonClass(variant, isDead, compact)} ${className}`}
+      className={`relative ${buttonClass(variant, isDead, compact)} ${className}`}
       {...rest}
     >
       {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标。
@@ -192,31 +196,42 @@ export function DeskButton({
       {result && !busy ? (
         <span className={`pointer-events-none absolute inset-0 rounded-control ${RESULT_WASH[result]}`} />
       ) : null}
-      {/* 转针与结果角标共用这一格预留位（`w-3.5`）：07 稿④ 的「宽度锁死不跳版」管的正是进行中与结果
-          这两态。活体差值原先是 109 → 127px（角标挤在文案后面长出 18px），挪进已有的状态位后五态同宽。
-          预留与否由 `holdsStateSlot` 判（见上面那条注释）：没有状态可锁的键不占这一格。 */}
-      {holdsStateSlot ? (
-        <span className={SPINNER_SLOT}>
-          {busy ? <LoaderCircle size={14} className="animate-needle" aria-hidden="true" /> : null}
-          {result && !busy ? RESULT_ICON[result] : null}
-        </span>
-      ) : null}
-      <span className="relative flex items-center gap-1">
+      <span
+        className={doneLabel ? 'relative grid items-center' : 'relative flex items-center gap-1'}
+        {...(doneLabel ? { 'data-result-text': result === 'done' && !busy ? 'done' : 'idle' } : {})}
+      >
         {doneLabel ? (
           // 完成态换文案（07 稿⑤）与「宽度锁死不跳版」（④）是同一条规矩的两半，所以两句话叠在同一个
           // 网格里同时参与排版：不可见那一句照样占宽，按钮的宽度因此是两态里的较长者，按下去不会自己变宽也不会变窄。
-          <span className="grid items-center" data-result-text={result === 'done' && !busy ? 'done' : 'idle'}>
-            <span className={`row-start-1 col-start-1 ${result === 'done' && !busy ? 'invisible' : ''}`}>
+          // 锚点 `data-result-text` 是 spec 6.2-01 认的读数口，判据读 DOM 的可见性而不是读 `result` 返回值。
+          // **每一格自己是一行 flex**：Tailwind 的 preflight 把 `svg` 画成 `display:block`，
+          // 于是"图标 + 文案"直接塞进网格里会拆成上下两行（活体读数：那颗「测这家」因此高 36px 而不是 21px，
+          // 图标孤零零压在文案上面）。走 `children` 那一支不受影响，因为它的外层本来就是 flex 行。
+          <>
+            <span
+              className={`row-start-1 col-start-1 flex items-center gap-1 ${result === 'done' && !busy ? 'invisible' : ''}`}
+            >
               {children}
             </span>
-            <span className={`row-start-1 col-start-1 ${result === 'done' && !busy ? '' : 'invisible'}`}>
+            <span
+              className={`row-start-1 col-start-1 flex items-center gap-1 ${result === 'done' && !busy ? '' : 'invisible'}`}
+            >
               {doneLabel}
             </span>
-          </span>
+          </>
         ) : (
           children
         )}
       </span>
+      {showsBadge ? (
+        <span className={STATE_BADGE} aria-hidden="true">
+          {busy ? (
+            <LoaderCircle size={11} className="animate-needle text-slate-200" />
+          ) : result ? (
+            RESULT_ICON[result]
+          ) : null}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -968,6 +983,14 @@ export interface DeskDisclosureProps extends ButtonHTMLAttributes<HTMLButtonElem
 }
 
 /**
+ * 文字档披露键的**唯一**画法（行内那一族：无框无底、只提亮文字）。
+ * 抽出来是因为 `DeskDisclosure` 与 `DeskExplainer` 的段头原先各写一份同样的三行字面量（§2.2 的第二
+ * occurrence），而这两处都必须在按钮的 class 上带 `whitespace-nowrap`——图标与文案不同行是 2026-10-11 的报障。
+ */
+export const DISCLOSURE_CLASS =
+  'inline-flex items-center gap-1 whitespace-nowrap text-left text-[11px] text-slate-400 transition-colors duration-150 hover:text-celadon';
+
+/**
  * 行内披露（"看证据 / 看出处"那一类）：只有下划线档的文案，无框无底——它展开的是紧挨其下的一小段正文，
  * 不是一次动作，所以既不能涂 `DeskButton` 的六档（那会造出"按钮长得像文字链"的第四种画法），
  * 也不许留在面板里各写一遍 class（`GeneratePanel` 与 `GapPanel` 原先抄的是同一条字面量，§2.2 的第二 occurrence）。
@@ -984,7 +1007,7 @@ export function DeskDisclosure({ action, open, className = '', ...rest }: DeskDi
       data-action={action}
       data-open={open ? 'true' : 'false'}
       aria-expanded={open}
-      className={`text-left text-[11px] text-slate-400 hover:text-celadon ${className}`}
+      className={`${DISCLOSURE_CLASS} ${className}`}
       {...rest}
     />
   );
@@ -1038,10 +1061,18 @@ export interface DeskSegmentedProps<T extends string = string> {
  * @returns 该格的 class 串；按不动态里不含任何 `hover:`
  */
 const segmentCellClass = (isSelected: boolean, isRisk: boolean, busy: boolean): string => {
-  if (isSelected) {
-    return isRisk ? 'bg-seal-wash text-seal-ink ring-1 ring-inset ring-seal/35' : 'bg-ink-750 text-slate-100';
-  }
-  return busy ? 'text-slate-500' : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300';
+  const tone = isSelected
+    ? isRisk
+      ? 'bg-seal-wash text-seal-ink ring-1 ring-inset ring-seal/35'
+      : 'bg-ink-750 text-slate-100'
+    : busy
+      ? 'text-slate-500'
+      : 'text-slate-500 hover:bg-ink-800 hover:text-slate-300';
+  // 行内排版与档位色同一张画法（图标/文案不同行，见 `DISCLOSURE_CLASS` 那条注释）；
+  // 而按不动的透明度单独一条字面量，与上面那族的 `hover:` 永不同串（第 13 节①）。
+  return `inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${
+    busy ? 'opacity-40' : ''
+  } ${tone}`;
 };
 
 /**
@@ -1093,11 +1124,9 @@ export function DeskSegmented<T extends string>({
               ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
               : { onClick: () => onSelect(option.value) })}
             {...(busy && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-            // 档位画法交给 `segmentCellClass`：按不动态（上面那层透明度）与 hover 分属两条字面量，
+            // 档位画法整份交给 `segmentCellClass`（含行内排版）：按不动态与 hover 分属两条字面量，
             // 未选中档永远只提亮文字，不预支任何语气。
-            className={`rounded-md px-2.5 py-1 text-[11px] transition-colors duration-150 ${
-              busy ? 'opacity-40' : ''
-            } ${segmentCellClass(isSelected, option.isRisk === true, busy)}`}
+            className={segmentCellClass(isSelected, option.isRisk === true, busy)}
           >
             {option.label}
           </button>
@@ -1144,6 +1173,24 @@ export interface DeskTabProps extends Omit<ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 /**
+ * 导航页签的静态画法：与 `buttonClass` 同一族规矩——**档位色（含悬停）只出自这个函数**，
+ * JSX 上不许再内联一份 `hover:`（2026-10-11 的按钮统一裁定：一个功能只留一种画法）。
+ * 行内排版（`flex items-center whitespace-nowrap`）也在这里：图标与文案不同行是 2026-10-11 的报障，
+ * 而它归画法而不是归 JSX 站点，否则下一只页签还会各抄一份、各抄错一次。
+ * @param tier 主档 / 低一档（低一档给诊断那一类"开发者才看"的入口）
+ * @param selected 此刻是不是选中的那一格
+ * @returns 一行 class（含行内排版、字号、内边距、选中底色与悬停提亮）
+ */
+const tabCellClass = (tier: 'primary' | 'muted', selected: boolean): string =>
+  tier === 'muted'
+    ? `flex items-center whitespace-nowrap gap-2 px-2.5 py-1.5 text-[11px] ${
+        selected ? 'bg-ink-800 text-slate-300' : 'text-slate-500 hover:bg-ink-850 hover:text-slate-400'
+      }`
+    : `flex items-center whitespace-nowrap gap-2.5 px-2.5 py-2 text-xs font-medium ${
+        selected ? 'bg-ink-800 text-slate-50' : 'text-slate-400 hover:bg-ink-850 hover:text-slate-100'
+      }`;
+
+/**
  * 导航页签（01 稿左栏那一格）：非六档按钮语义，所以不进 `DeskButton`。
  * 选中态按稿上是「贴在轨道左缘的一道 3×17 短线」而不是整块高亮——一眼知道我在哪，又不抢内容；
  * 短线颜色走 **celadon 不走 seal**（plan §5 的归属表：seal 只给外发/不可逆/风险，
@@ -1168,15 +1215,7 @@ export function DeskTab({
       data-view={view}
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
-      className={`relative flex items-center rounded-control before:absolute before:-left-2 before:top-1/2 before:h-[17px] before:w-[3px] before:-translate-y-1/2 before:rounded-r-[2px] before:content-[''] ${marker} max-[1120px]:justify-center max-[1120px]:gap-0 ${
-        isMuted
-          ? `gap-2 px-2.5 py-1.5 text-[11px] ${
-              selected ? 'bg-ink-800 text-slate-300' : 'text-slate-500 hover:bg-ink-850 hover:text-slate-400'
-            }`
-          : `gap-2.5 px-2.5 py-2 text-xs font-medium ${
-              selected ? 'bg-ink-800 text-slate-50' : 'text-slate-400 hover:bg-ink-850 hover:text-slate-100'
-            }`
-      } ${className}`}
+      className={`relative rounded-control before:absolute before:-left-2 before:top-1/2 before:h-[17px] before:w-[3px] before:-translate-y-1/2 before:rounded-r-[2px] before:content-[''] ${marker} ${tabCellClass(tier, selected)} max-[1120px]:justify-center max-[1120px]:gap-0 ${className}`}
       {...rest}
     >
       <Icon size={isMuted ? 12 : 15} className="shrink-0" />
@@ -1467,6 +1506,20 @@ const swatchCellClass = (isSelected: boolean, busy: boolean): string =>
   (busy ? 'opacity-40' : 'hover:border-slate-300');
 
 /**
+ * 「随模板」那一格（清空态）的画法：与 `swatchCellClass` 同尺寸同描边，只是底材换成 135° 斜纹——
+ * 这套色板里斜纹读作"这一格不给色，由模板决定"，所以它必须是实心色块的反面而不是另一档色。
+ * hover 走与色卡同一条纪律（按不动时长不出 hover，spec 6.2-25），两态画法照样分属两条字面量。
+ * @param isSelected 当前是否就是"随模板"态
+ * @param busy 整组是否在途
+ * @returns 该格的 class 串
+ */
+const swatchClearClass = (isSelected: boolean, busy: boolean): string =>
+  `size-5 shrink-0 rounded-chip border ` +
+  'bg-[repeating-linear-gradient(135deg,transparent,transparent_3px,var(--color-line-strong)_3px,var(--color-line-strong)_4px)] ' +
+  `${isSelected ? 'border-celadon ring-1 ring-ink-950' : 'border-line-strong'} ` +
+  (busy ? 'opacity-40' : 'hover:border-slate-300');
+
+/**
  * 色卡（spec 6.6-05 的取色原件）。
  *
  * 它存在的理由是一条合规红线：渲染层**不许**用 `<input type="color">`（`check-renderer-conventions.ts`
@@ -1512,11 +1565,7 @@ export function DeskSwatch({
             ? { 'aria-disabled': true, ...(disabledReason ? { 'data-disabled-reason': disabledReason } : {}) }
             : { onClick: onClear })}
           {...(disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-          className={
-            value === undefined
-              ? 'size-5 shrink-0 rounded-chip border border-celadon bg-[repeating-linear-gradient(135deg,transparent,transparent_3px,var(--color-line-strong)_3px,var(--color-line-strong)_4px)] ring-1 ring-ink-950'
-              : 'size-5 shrink-0 rounded-chip border border-line-strong bg-[repeating-linear-gradient(135deg,transparent,transparent_3px,var(--color-line-strong)_3px,var(--color-line-strong)_4px)] hover:border-slate-300'
-          }
+          className={swatchClearClass(value === undefined, dead.isDead)}
         />
       ) : null}
       {hexes.map((hex) => (

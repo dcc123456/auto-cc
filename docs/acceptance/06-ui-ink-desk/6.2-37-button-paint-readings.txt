@@ -1,0 +1,160 @@
+6.2-37 取证：按钮只有一张画法——图标与文案同行、文案前不留空白、状态改长右上角
+==============================================================================
+
+用户 2026-10-12 的三条要求（原文）：
+- 「按钮需要统一封装成一个组件 禁止按钮内样式前面出现一片空白，图标和文案禁止换行 这个项目中统一使用一个按钮组件」
+追问后定的一条裁定（原文）：状态格「角标移到右上角压边，槽位删掉」——
+转针 / 对勾 / 印章**不再占掉文案前面那一格**，改长在按钮右上角压边处，布局代价为零。
+
+宿主：`pnpm dev`（`AUTO_CC_USER_DATA_DIR=tmp/dev-userdata`，CDP 10222），探针一律 `--url 5173`。
+时间：2026-10-12 11:0x–11:2x UTC+8，取读数前注入 `*,*::before,*::after{transition:none!important;animation:none!important}`
+（窗口 `visibilityState=hidden` 时 CSS 时间轴不推进，§9 的 6.2 第二十三/二十四片①），
+**收尾已把这支 `<style>` 摘掉**（`tmp/6237-unfreeze.mjs` 回读 `removed=true`）。
+
+一、几何普查：信任屏上 35 只可见按钮（脚本 `tmp/6237-probe.mjs`，聚合 `tmp/6237-parse.mjs`）
+--------------------------------------------------------------------------------------------
+
+判据两条，都是"读 DOM 的几何"而不是"读 class 字符串"：
+
+1. **图标与文案不许换行** = 一只按钮里所有可见墨迹（文案节点用 `Range.getBoundingClientRect()` 现量，
+   图标用 `svg` 的矩形）必须落在同一条横带上：`max(top) < min(bottom)`。
+2. **文案前面不许有空白** = `headGap = min(墨迹左缘) - 按钮左缘 - 1px 描边` 必须 **等于左内边距**，
+   多出一分都算（旧缺陷就是多出 14px 槽位 + 6px gap = 20px）。
+
+读数（`selectedView=trust`，`count=35`，注入冻结后 `anim=0`）：
+
+| 项 | 读数 |
+| --- | --- |
+| 分行（`sameLine=false`）的键 | **0 只** |
+| `headGap − (左内边距 + 1px 描边)` | **min = −1，max = 0**（负 1 是亚像素取整，不是空白） |
+| 高度档 | **19 / 24.1 / 30 / 30.1 / 32** 五档 |
+| 带 `doneLabel` 那一族（`open` / `probe` / `logout` / `close-view` / `snapshot` / `navigate` / `settings-model-*`）| **24.1px**（改版前同一族 **35–38px**：preflight 把 `svg` 画成 `display:block`，图标孤零零压在文案上面，多出一整行） |
+| 状态角标已渲染（静止态） | **0 只**（角标只在 busy / 结果态长出，静止态不占位） |
+
+逐档样本（`w / h / padLeft / headGap`）：
+
+```
+h=30   pad=12px headGap=13 → 4 只   shell-theme-toggle(115) / shell-language-switch(84.1) / privacy-open(103) / refresh(140)
+h=32   pad=10px headGap=10 → 5 只   nav-chat / nav-jobs / nav-resume / nav-workflow / nav-trust（各 167）
+h=30.1 pad=10px headGap=10 → 1 只   nav-diagnostics(167)
+h=24.1 pad=8px  headGap=9  → 24 只  open(78) / probe(89) / logout(80.6) / close-view(100) / snapshot(102) / navigate(56) / send(115.6) / audit-refresh(55) / settings-model-*(80)
+h=19   pad=8px  headGap=9  → 1 只   kernel-slot-show(31，只有图标没有文案)
+```
+
+`headGap` 与左内边距逐位对得上：`12px + 1px 描边 = 13`、`10px + 描边 = 10~11`（导航格左缘还带一根
+`before` 短线的负边距，量到的是文字起始位）、`8px + 1px = 9`。**没有一只多留那 20px**。
+
+带 `doneLabel` 的那一族 `inkCount=3` 而 `headGap` 仍是 9，是因为两句话叠进同一个 grid 单元格后
+**不可见那句照样占宽**（6.2-01 的宽度锁死），而它们的左缘都是同一格里的图标：
+`close-view` 两句分别在 `@230`（已关闭视图）与 `@246`（关闭内核视图），图标 `@230`，取最小者 230。
+
+二、五态锁宽 + 角标几何（脚本 `tmp/6237-badge3.mjs`，MutationObserver 抓角标进/出 DOM 那一拍）
+------------------------------------------------------------------------------------------------
+
+取数对象是 `close-view`：信任屏上唯一一条**纯本机、可逆、且带 `doneLabel`** 的动作
+（它关的是内嵌内核视图，不发消息、不碰平台）。总共 5 拍：
+
+| 拍 | `w` | `h` | `data-result` | `data-disabled-reason` | 角标 | 可见墨迹 |
+| --- | --- | --- | --- | --- | --- | --- |
+| rest（点之前） | 100 | 24.1 | null | null | 无 | `关闭内核视图@246`、`icon@230` |
+| mutation 1（在途） | 100 | 24.1 | null | `ACTION_BUSY` | 无 | 同上 |
+| mutation 2（回结果） | 100 | 24.1 | `done` | null | `offTop -5 / offRight -5 / 18×18` | `已关闭视图@230`、`icon@230`、`icon@311.5` |
+| mutation 3（回落） | 100 | 24.1 | null | null | 无 | `关闭内核视图@246`、`icon@230` |
+| tail（3s 后） | 100 | 24.1 | null | null | 无 | 同上 |
+
+四条要一起看的：
+1. **换文案前后宽度逐位相同**（rest 100 → done 100）——这正是 6.2-01 卡了很久的第①支 V 读数；
+   行高五拍都是 24.1，所以"换字不会挤行"同帧兑现。
+2. **角标长在右上角压边处**：`-top-1.5 / -right-1.5` → 相对按钮矩形 `offTop = -5`、`offRight = -5`，
+   尺寸 18×18。**它不占文案前面那一格**（`headGap` 五拍恒为 8，即 `px-2` + 描边），
+   也不改宽度（第一版的缺陷就是角标排在文案后，按钮从 109px 撑到 127px）。
+3. **锚点 `data-result-text` 换到了包裹 `<span>` 上**，值在 `idle`↔`done` 之间翻；
+   判据读 DOM 可见性（表里"可见墨迹"就是 `visibility!=='hidden'` 那两支），不读 `result` 返回值。
+4. **回落时刻**：在途那一拍拿到的是 `data-disabled-reason="ACTION_BUSY"`（组件自己的门禁，
+   不是原生 `disabled`，§9 的 6.2 第二十三/二十四片②），结果态约 2s 后回到 rest 形状。
+
+三、失败态（印章）持久占位（脚本 `tmp/6237-fail.mjs` / `tmp/6237-failcheck.mjs`）
+-----------------------------------------------------------------------------------
+
+`snapshot`（读取页面快照）在开发实例上以 `NO_KERNEL_SESSION` 失败，结果态**不回落**，
+于是可以慢慢量"印章那一格长在哪"：
+
+```
+{"action":"snapshot","w":102,"h":24.1,"result":"failed","badge":{"offTop":-5,"offRight":-5,"w":18,"h":18},
+ "headGap":9,"sameLine":true,"visibleInk":["读取页面快照@1052","(svg)@1034","(svg)@1131.5"]}
+```
+
+与成功态**同一格、同一几何**（只是图标从 `badge-check` 换 `stamp`、语气从 jade 换 seal），
+宽度 102 与失败前后一致。画面：`6.2-37-badge-failed-dark.png`（md5 `faa1a4c5eaa8fcc45741ca2d46140331`）。
+整屏画面 `6.2-37-trust-desk-buttons-dark.png`（md5 `e01ec9afccd58b83b0a2741b9f67e1d4`）——两张 md5 互异，
+同批去重 `md5 -q | sort | uniq -c` 无重复。
+
+四、机检第 15 节「按钮只有一张画法」（`scripts/check-renderer-conventions.ts`）
+---------------------------------------------------------------------------------
+
+三条判据，射程 = `packages/renderer/src/ui/**\/*.tsx`（原件层自己也在射程内，不留豁免）：
+
+| 判据 | 机制 |
+| --- | --- |
+| ① `src/ui/**` 之外的裸 `<button>` | 第 10 节已有，本节不重复 |
+| ② `src/ui/**` 里手写 `<button>` 的画法必须走**具名档位** | `className` 必须匹配 `\w+Class` 或 `[A-Z][A-Z0-9_]*_CLASS`；不带 `className` 单独报一句 |
+| ③ 悬停画法不许写在 JSX 站点 | 同第 13 节，但本节把射程拉进原件层 |
+| ④ **不许有只给尺寸不给内容的空 `<span />`** | `<span className="…(w|h|size)-…" />` 直接判死——这就是"文案前那一段空白"的机制本身 |
+
+两条注入探针（各自 `npx tsx scripts/check-renderer-conventions.ts`，退出码不经管道）：
+
+```
+P1 一只内联画法的按钮 + 一支 w-3.5 空槽位   → EXIT=1，报 :3 画法写在 JSX 里、:3 内联 hover、:4 空 span
+P2 一只完全不带 className 的 <button>        → EXIT=1，报 :3 不带 className
+负对照（删掉探针）                            → EXIT=0，收尾日志含「src/ui/** 内画法未走具名档位的按钮 0 只、占位空 span 0 只」
+```
+
+一条实现层的坑（写进脚本注释）：判据取 `className={…}` 表达式时必须**配平花括号**。
+原先用非贪婪 `className=(\{[\s\S]*?\})`，在 `${…}` 处就截断了，
+把 `controls.tsx:1104 / :1204` 两格正常档位引用误报成"没走具名档位"。
+
+五、本片改掉的东西（机制层，不是逐颗打补丁）
+----------------------------------------------
+
+| 位置 | 改法 |
+| --- | --- |
+| `ui/controls.tsx` `DeskButton` | 删掉 `SPINNER_SLOT`；状态图标改挂 `STATE_BADGE`（`absolute -right-1.5 -top-1.5`，`pointer-events-none` + `aria-hidden`）；根节点补 `relative` |
+| `ui/controls.tsx` `doneLabel` 两态 | 每格自己是一行 `flex items-center gap-1`（preflight 的 `svg{display:block}` 会把"图标 + 文案"拆成两行）|
+| `ui/controls.tsx` 三族控件 | `DISCLOSURE_CLASS` / `segmentCellClass` / `tabCellClass` / `swatchClearClass` 各自把形状收进具名档位，并统一带 `whitespace-nowrap`（`shrink-0` **刻意不加**进 `buttonClass` 基座——它会和调用方的 `min-w-0 flex-1` 打架）|
+| `ui/overlays.tsx` :252 :370 | 抽屉与弹窗的关闭键原来是手写 `<button>`，收进 `DeskButton variant="line" compact` |
+| `ui/disclosure.tsx` :162 :224 | 段头键走 `SECTION_HEAD_CLASS`，说明触发键走 `DISCLOSURE_CLASS` |
+
+保留的锚点一条没动：`data-action` / `data-result` / `data-result-text`（挪到包裹 span，值域不变）/
+`data-disabled-reason` / `data-open` / `aria-expanded`。
+
+六、如实记的边界与副作用
+-------------------------
+
+- **像素级"人眼看不出这是同一只按钮组件"没有兑现**：本次全部读数走几何与计算值，
+  窗口 `visibilityState=hidden`，真鼠标事件不落页（§9 的 2.1-12）。**这一条留给用户在场**。
+- 角标在 `overflow-hidden` 的行容器里会不会被裁：本片没量。信任屏的行容器没有 `overflow-hidden`，
+  但 6.2-26 那条"光晕不被裁"的欠项同属这一族，仍在 6.2-26 名下。
+- 取数时在用户 dev 实例上做的动作：acknowledge 隐私提示、切到信任屏、点 `close-view` 两次、
+  点 `snapshot` 一次（失败态因此持久）。**全是本机动作，无外发、无真实平台导航、无写库**；
+  `close-view` 关掉的视图是渲染层的内嵌槽位，用户随时可再展开。`snapshot` 那次失败没有留副作用
+  （它要写的快照需要视图在场，一条都没落）。
+- 冻动效的 `<style>` 已摘（`removed=true`），用户实例的动效恢复正常。
+
+七、四道门禁（退出码一律重定向到文件再读，不用管道接 `tail`/`head`，§9 的 5.4-c）
+-------------------------------------------------------------------------------------
+
+```
+npx pnpm -s typecheck      > tmp/6237-typecheck.log 2>&1   TYPECHECK_EXIT=0
+npx pnpm -s lint           > tmp/6237-lint.log 2>&1        LINT_EXIT=1        ← 红点整支在射程外
+npx prettier --check <本片四个源文件>       FMT_EXIT=0
+npx prettier --check .     > tmp/6237-fmt-repo.log 2>&1    FMT_REPO_EXIT=1    ← 同上
+pnpm test                  > tmp/6237-test2.log 2>&1       TEST_EXIT=0（末包 87 passed）
+```
+
+`LINT_EXIT=1` 的两条 error 全在 `scripts/e2e-resume-jd.ts:639`（`MODEL_TIMEOUT_MS` 相关的
+`no-unsafe-call` / `no-unsafe-member-access`），是**另一窗口正在写的文件**，按共享工作树的口径不替它改。
+`prettier --check .` 另报三支同样在射程外：`packages/resume-kb/src/sections.ts`、`sections.test.ts`、
+`scripts/e2e-resume-jd.ts`。本片的四个源文件 + 两份文档 + 这份读数单独跑 prettier 是 `0`
+（文档先 `--write` 这两个文件，不做 repo-wide format）。
+链内其余十道（`check-renderer-conventions` 等）随 `pnpm lint` 跑到第 2 道之前被 eslint 挡住，
+故本节把渲染层规范检查**单独跑过**：P1 / P2 注入探针 EXIT=1、负对照 EXIT=0（第四节）。

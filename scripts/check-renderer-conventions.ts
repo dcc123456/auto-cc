@@ -665,6 +665,95 @@ for (const file of tsxFiles) {
   });
 }
 
+/**
+ * 15. 按钮只有一张画法（2026-10-12 裁定「本项目统一使用一个按钮组件」，spec 6.2-37）。
+ *     这一节拦的是**结构**，不是像素：2026-10-11 那轮报障的两条症状（图标与文案换行、文案前一段空白）
+ *     根因同一条——原件里长出了第二套画法（`doneLabel` 那一支把文案塞进不带 `flex items-center` 的 grid 格；
+ *     状态位预留了一只 20px 的空 `<span />`）。所以判据按机制写三条，每条都能被一条注入探针复现：
+ *     ① 射程 `src/ui/**` 的每一只 `<button>`：它的 `className` 表达式必须引用一张**具名档位**
+ *        （`…Class` 函数或 `…_CLASS` 常量）。 JSX 里内联一整串 class 就等于在旁边又画了一只按钮。
+ *     ② 射程 `src/ui/**` 内不许出现"只给尺寸、不给内容"的自闭合 `<span />`（`w-` / `h-` / `size-`）。
+ *        要拉开距离请用布局（`gap-*`、`justify-between`），不要用一只空元素占位——占位就是那段空白本身。
+ *     ③ JSX 站点的 class 字面量里不许出现 `hover:`：悬停画法归档位函数，且必须与按不动态**分属两条字面量**
+ *        （与第 13 节①同一条纪律，只是这一条的射程反过来——只管原件层内部）。
+ *     活体几何读数（一行高、leading 空白 0）由 spec 6.2-37 的 V 项兑现，不在这里；机检保证的是
+ *     "下一次改按钮仍然只改一处"。
+ */
+const BUTTON_TAG = /<button(?:[\s/>]|$)/;
+const NAMED_PAINT = /\b\w+Class\b|\b[A-Z][A-Z0-9_]*_CLASS\b/;
+/** 只给尺寸不给内容的空 span（占位）：行级粗筛，因为开始标签常在 className 之后就只剩 `/>`。 */
+const SPACER_SPAN = /<span\s+className="[^"]*\b(?:w|h|size)-[0-9[][^\s"]*"[^>]*\/>/;
+
+/**
+ * 取一只 `<button>` 开始标签里 `className=` 那一段的**完整**表达式（按大括号配平，不是非贪婪截断）。
+ * 必须配平：模板串里的 `${…}` 会先闭合一次，用非贪婪正则在 `segmentCellClass(…)` 之前就被截断，
+ * 于是"引用了具名档位"的按钮会被误报成"画法写在 JSX 里"（探针实测过这一条）。
+ * @param tag 开始标签原文（`<button` 到 `>` / `/>`）
+ * @returns `className=` 与其表达式；没有该属性时返回 null
+ */
+function classNameExpr(tag: string): string | null {
+  const at = tag.indexOf('className=');
+  if (at < 0) return null;
+  let cursor = at + 'className='.length;
+  const opener = tag[cursor];
+  if (opener === '"') {
+    const close = tag.indexOf('"', cursor + 1);
+    return close < 0 ? null : tag.slice(at, close + 1);
+  }
+  if (opener !== '{') return null;
+  let depth = 0;
+  for (; cursor < tag.length; cursor += 1) {
+    if (tag[cursor] === '{') depth += 1;
+    else if (tag[cursor] === '}') {
+      depth -= 1;
+      if (depth === 0) return tag.slice(at, cursor + 1);
+    }
+  }
+  return null;
+}
+for (const file of await files(uiDir, (name) => name.endsWith('.tsx'))) {
+  const lines = commentBlanked(await readFile(file, 'utf8'));
+  lines.forEach((line, index) => {
+    if (SPACER_SPAN.test(line)) {
+      failures.push(
+        `${path.relative(repoRoot, file)}:${String(index + 1)} 有一只只给尺寸不给内容的空 <span />：` +
+          '按钮里的距离归布局（`gap-*`／`justify-between`），预留空槽位就是"文案前那一段空白"的机制本身（spec 6.2-37）',
+      );
+    }
+  });
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!BUTTON_TAG.test(lines[index] ?? '')) continue;
+    // 把开始标签读到 `>` / `/>` 那一行为止：className 常常在标签里换行，单行判据会漏掉整段档位引用。
+    let end = index;
+    while (end < lines.length && !/(?:\/?>)\s*$/.test(lines[end] ?? '')) end += 1;
+    const tag = lines.slice(index, Math.min(end + 1, lines.length)).join('\n');
+    const classExpr = classNameExpr(tag);
+    if (!classExpr) {
+      failures.push(
+        `${path.relative(repoRoot, file)}:${String(index + 1)} 有一只 <button> 不带 className：` +
+          '按钮画法只许出自具名档位（spec 6.2-37）',
+      );
+      index = end;
+      continue;
+    }
+    if (!NAMED_PAINT.test(classExpr)) {
+      failures.push(
+        `${path.relative(repoRoot, file)}:${String(index + 1)} 有一只 <button> 的画法写在 JSX 里：` +
+          '`className` 必须引用具名档位（`…Class` 或 `…_CLASS`），内联一整串 class 等于长出第二只按钮（spec 6.2-37）',
+      );
+    }
+    for (const cls of stringLiterals(classExpr)) {
+      if (HOVER_PATTERN.test(cls)) {
+        failures.push(
+          `${path.relative(repoRoot, file)}:${String(index + 1)} 有一只 <button> 在 JSX 站点里内联了悬停画法：` +
+            'hover 归档位函数持有，且与按不动态分属两条字面量（spec 6.2-37 / 6.2-25）',
+        );
+      }
+    }
+    index = end;
+  }
+}
+
 if (failures.length) {
   console.error('✖ 渲染层规范检查未通过：');
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -673,6 +762,6 @@ if (failures.length) {
 console.log(
   `✔ 渲染层规范检查通过（${String(localeNames.length)} 个语言包，${String(tsxFiles.length)} 个源文件，派生文案 ${String(derivedKeys.size)} 条逐包齐备；` +
     'src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处、' +
-    '按不动却不带原因码那一格 0 处，' +
+    '按不动却不带原因码那一格 0 处、src/ui/** 内画法未走具名档位的按钮 0 只、占位空 span 0 只，' +
     '四档语气文字档 × 两案 × 五级承载面 × 两种同色底、实底档 × 两案 × 钉死字色全部 ≥4.5:1）',
 );
