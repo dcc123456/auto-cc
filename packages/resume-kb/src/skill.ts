@@ -118,7 +118,8 @@ export function factsOfDocument(doc: ResumeDocument): RequiredInfoFacts {
       0,
     ),
     educationEntries: sectionOf(sections, 'education')?.entries.length ?? 0,
-    educationWithSchool: sectionOf(sections, 'education')?.entries.filter((entry) => hasKey(entry, 'school')).length ?? 0,
+    educationWithSchool:
+      sectionOf(sections, 'education')?.entries.filter((entry) => hasKey(entry, 'school')).length ?? 0,
     skillEntries: sectionOf(sections, 'skills')?.entries.length ?? 0,
     skillChars: entryTextLengthOf(sectionOf(sections, 'skills')),
     projectEntries: sectionOf(sections, 'project')?.entries.length ?? 0,
@@ -376,7 +377,10 @@ function hasKey(entry: Section['entries'][number], key: string): boolean {
 
 /** 一条条目的全部字段值拼成的文本（用于字数与关键词判定）。 */
 function entryText(entry: Section['entries'][number]): string {
-  return entry.fields.map((field) => field.value.trim()).filter((value) => value !== '').join(' ');
+  return entry.fields
+    .map((field) => field.value.trim())
+    .filter((value) => value !== '')
+    .join(' ');
 }
 
 /** 一个区块内所有条目的文本。 */
@@ -392,6 +396,8 @@ function entryTextLengthOf(section: Section | undefined): number {
 
 /** 一条经历/项目条目的正文（`achievement` 优先，退回 `description` 与整条）。 */
 function entryBody(entry: Section['entries'][number]): string {
-  const body = entry.fields.find((field) => (field.key === 'achievement' || field.key === 'description') && field.value.trim() !== '');
+  const body = entry.fields.find(
+    (field) => (field.key === 'achievement' || field.key === 'description') && field.value.trim() !== '',
+  );
   return body ? body.value.trim() : entryText(entry);
 }

@@ -52,7 +52,13 @@ import {
   ResumeExportService,
   ResumeSnapshotService,
 } from '@auto-cc/plugin-resume-doc';
-import { KbGapService, KbProfileService, KbSkillService, ResumeGenerateService, ResumeParseService } from '@auto-cc/plugin-resume-kb';
+import {
+  KbGapService,
+  KbProfileService,
+  KbSkillService,
+  ResumeGenerateService,
+  ResumeParseService,
+} from '@auto-cc/plugin-resume-kb';
 import { ScheduleRegistryService } from '@auto-cc/plugin-scheduler';
 import { SessionsService } from '@auto-cc/plugin-sessions';
 import { StoreService } from '@auto-cc/plugin-store';

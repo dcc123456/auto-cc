@@ -27,7 +27,10 @@ function makeDoc(sections: Section[], profile?: ResumeDocument['profile']): Resu
 }
 
 /** 一条经历条目：公司 / 职位 / 时间 / 成果四件套。 */
-function experienceEntry(index: number, overrides: { period?: string; achievement?: string } = {}): Section['entries'][number] {
+function experienceEntry(
+  index: number,
+  overrides: { period?: string; achievement?: string } = {},
+): Section['entries'][number] {
   return {
     id: `experience-${String(index)}`,
     fields: [
@@ -48,7 +51,10 @@ function completeDoc(): ResumeDocument {
         kind: 'summary',
         title: '个人简介',
         entries: [
-          { id: 'summary-1', fields: [makeField('summary', 'text', '求职意向：高级前端工程师，五年可视化与打印管线经验。')] },
+          {
+            id: 'summary-1',
+            fields: [makeField('summary', 'text', '求职意向：高级前端工程师，五年可视化与打印管线经验。')],
+          },
         ],
       },
       {
@@ -76,7 +82,9 @@ function completeDoc(): ResumeDocument {
         id: 'skills',
         kind: 'skills',
         title: '专业技能',
-        entries: [{ id: 'skills-1', fields: [makeField('skills', 'text', 'TypeScript / React / Electron / Vite 构建')] }],
+        entries: [
+          { id: 'skills-1', fields: [makeField('skills', 'text', 'TypeScript / React / Electron / Vite 构建')] },
+        ],
       },
       {
         id: 'project',
@@ -122,7 +130,9 @@ describe('4.9-09 一张表派生两份呈现', () => {
       const mark = item.severity === 'core' ? '（必备）' : '（建议）';
       expect(BUILTIN_RESUME_SKILL_BODY).toContain(`${item.labelZh}${mark}`);
     }
-    expect(BUILTIN_RESUME_SKILL_BODY.indexOf('## 三、底线')).toBeGreaterThan(BUILTIN_RESUME_SKILL_BODY.indexOf('## 一、必备信息'));
+    expect(BUILTIN_RESUME_SKILL_BODY.indexOf('## 三、底线')).toBeGreaterThan(
+      BUILTIN_RESUME_SKILL_BODY.indexOf('## 一、必备信息'),
+    );
   });
 
   it('渲染是纯函数：同输入两次逐字节相同，版本号只出现在抬头一处', () => {
@@ -135,7 +145,20 @@ describe('4.9-09 一张表派生两份呈现', () => {
 describe('4.9-07 / 4.9-08 逐项判定：齐就是齐，缺就分档', () => {
   it('齐备的文档里四项联系方式与四段内容全部 present', () => {
     const rows = checkRequiredInfo(completeDoc());
-    for (const id of ['name', 'phone', 'email', 'location', 'objective', 'experience', 'period', 'education', 'skills', 'project', 'quantified', 'length']) {
+    for (const id of [
+      'name',
+      'phone',
+      'email',
+      'location',
+      'objective',
+      'experience',
+      'period',
+      'education',
+      'skills',
+      'project',
+      'quantified',
+      'length',
+    ]) {
       expect(statusOf(completeDoc(), id)).toBe('present');
     }
     expect(rows).toHaveLength(REQUIRED_INFO.length);
