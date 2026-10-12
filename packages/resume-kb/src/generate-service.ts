@@ -46,11 +46,16 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { validateDocument, type Entry, type ResumeDocument, type Section } from '@auto-cc/plugin-resume-doc';
+import {
+  validateDocument,
+  GENERATION_EDITABLE_KEYS,
+  type Entry,
+  type ResumeDocument,
+  type Section,
+} from '@auto-cc/plugin-resume-doc';
 import { deriveEntities, type KbEntityDraft } from './entities.js';
 import {
   describeViolations,
-  GENERATION_EDITABLE_KEYS,
   generationTargetFields,
   verifyGeneration,
   type GenerationCheckReport,

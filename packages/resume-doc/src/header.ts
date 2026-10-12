@@ -11,6 +11,10 @@
 import { makeField, type Field, type SectionKind } from './model.js';
 import { extractPeriod, type ParsedPeriod } from './period.js';
 
+/** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
+const LEADING_MARKUP =
+  /^\s*(?:#{1,6}\s*|(?:[-+•·]|\*(?!\*))\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
+
 /** 条目内字段分隔：中英文竖线 / 间隔号 / 逗号分号 / 任意空白（英文公司名带空格会被切开，切多了就标待确认）。 */
 const SEGMENT_SPLIT = /[|｜·•,，;；]|\s+/u;
 
@@ -19,6 +23,22 @@ const PUNCTUATION_ONLY = /^[-–—~～至到.,，;、|｜·•\s]+$/u;
 
 /** 学位词表：教育区块里能识别出学位的那一段。 */
 const DEGREE_TERM = /学士|硕士|博士|本科|大专|MBA|PhD|BSc|MSc/i;
+
+/**
+ * 去掉一行开头的 Markdown 标记与加粗符号，得到纯文字。
+ *
+ * 与 `splitHeader` 一起住在这一层的理由：导入时"摘装饰 → 拆抬头"是**一条**规则的两步（`sections.ts`
+ * 先剥装饰再喂 `splitHeader`），手动拆分（63-b）要对拆出来那一行说同一句话，
+ * 只搬后半截会让编辑器把 `（二）` 当成公司名。
+ * @param line 原始行
+ * @returns 去掉装饰后的行文本（可能为空串）
+ */
+export function stripLineMarkup(line: string): string {
+  return line
+    .replace(LEADING_MARKUP, '')
+    .replace(/\*\*|__|`/g, '')
+    .trim();
+}
 
 /**
  * 把归一化的时间转成写回简历 `period` 字段的标准文本。

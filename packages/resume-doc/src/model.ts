@@ -250,3 +250,24 @@ export function makeField(kind: SectionKind, key: string, value: string): Field 
   const fact = factKeyOf(kind, key);
   return { key, value, locked: fact !== null, factKey: fact };
 }
+
+/**
+ * 条目正文键的名单（**散文键集合**，不是"非事实键"集合）。
+ *
+ * 为什么住在模型层而不是生成轨：这三键里实际存在的那一个就是**一条记录的正文**，
+ * 两个消费者问的是同一件事——生成轨问"哪几键可以被改写"（spec 4.5-03），
+ * 编辑器问"拆与合动的是哪一格"（plan 03 §13 的 63-b）。名单只许有一份（AGENTS.md §2.1）。
+ *
+ * 4.5-03 的原文是「`facts.locked` 字段（公司 / 职位 / 时间 / 数字 / 学历 / 证书号）只能原样引用」——
+ * 那份清单里没有「成果」。这不是疏漏：`achievement` 装的就是"主导订单服务重构，P99 延迟下降 40%"
+ * 这类**描述性散文**，而简历里真正会被 JD 改写的正文只有它（`sections.ts` 把经历 / 项目 / 校园的
+ * 正文键定为 `achievement`，教育正文键是 `description`，`text` 是简介与技能行）。
+ * 若把它整句锁死，本条链在真实解析出的简历上**无处可改**，4.5-01 的"输出定制内容"会退化成只重排顺序，
+ * 而 4.5-08 的"不许把「提升 20%」写成「大幅提升」"更是永远不会触发——那条规则要防的正是"这句可以被改写"。
+ *
+ * 所以这里按 spec 的两轨读法收：散文键可改写，但改写受**另外两条判据**约束——
+ * 数值守恒（4.5-08）与具名候选回查（4.5-07）；结构事实键（`company / role / period / school / degree /
+ * major`）一律不进白名单。已知残余风险：散文里"主导"改成"参与"这类**不含数与名**的弱化，三条判据都抓不到，
+ * 它由 4.5-11 的逐项人工接受 / 回退兜底——这也是 spec 把接受动作放在界面而不是让机器自动入库的原因。
+ */
+export const GENERATION_EDITABLE_KEYS = ['text', 'achievement', 'description'] as const;

@@ -25,6 +25,7 @@ import {
   makeField,
   periodText,
   splitHeader,
+  stripLineMarkup,
   type Field,
   type ResumeDocument,
   type Section,
@@ -118,10 +119,6 @@ const HEADING_TERMS: ReadonlyArray<readonly [SectionKind, readonly string[]]> = 
 /** 标题行长度上限：超过它就认定是正文（正文里也常出现「工作经历梳理」这类词组）。 */
 const MAX_HEADING_LENGTH = 16;
 
-/** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
-const LEADING_MARKUP =
-  /^\s*(?:#{1,6}\s*|(?:[-+•·]|\*(?!\*))\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
-
 /**
  * 弱信号（整行加粗 / Markdown 标题 / 短行带时间段）能容忍的标题行长度上限（按码点计）。
  * 取 50 是因为真实简历的 13 条条目标题去装饰后最长 49 字；超过它的一律当正文（一句被加粗的正文比标题长）。
@@ -185,7 +182,7 @@ function hasHeaderPeriod(content: string): boolean {
 /**
  * 四个结构化区块（经历 / 项目 / 教育 / 校园）里，一行是否新开一个条目（spec 4.1-15）。
  *
- * 必须吃**原始行**：`stripMarkup` 会把 `**`、`（一）`、`###` 这三处信号先吃掉，判据就没东西可读了。
+ * 必须吃**原始行**：`stripLineMarkup` 会把 `**`、`（一）`、`###` 这三处信号先吃掉，判据就没东西可读了。
  * @param rawLine 未去装饰的原始行
  * @param content 该行去装饰后的文本（空串直接判否）
  * @returns 命中 S1 汉字序号 / S2 整行加粗 / S3 Markdown 标题 / S4 短行带时间段 任一条时为真
@@ -267,7 +264,7 @@ export function splitEntryBlocks(kind: SectionKind, lines: readonly string[]): s
   };
 
   for (const rawLine of lines) {
-    const content = stripMarkup(rawLine);
+    const content = stripLineMarkup(rawLine);
     if (content === '') {
       flush();
       continue;
@@ -297,25 +294,13 @@ export function splitEntryBlocks(kind: SectionKind, lines: readonly string[]): s
 }
 
 /**
- * 去掉一行开头的 Markdown 标记与加粗符号，得到纯文字。
- * @param line 原始行
- * @returns 去掉装饰后的行文本（可能为空串）
- */
-function stripMarkup(line: string): string {
-  return line
-    .replace(LEADING_MARKUP, '')
-    .replace(/\*\*|__|`/g, '')
-    .trim();
-}
-
-/**
  * 判断一行是否是区块标题并给出归类。
  * 要求「去装饰后足够短 + 等于或以词典词开头」，避免把正文当成标题。
  * @param line 原始行
  * @returns 命中的区块种类与该行去装饰后的字面；不是标题时返回 `null`
  */
 function classifyHeading(line: string): { kind: SectionKind; title: string } | null {
-  const text = stripMarkup(line).replace(/[:：]\s*$/, '');
+  const text = stripLineMarkup(line).replace(/[:：]\s*$/, '');
   if (text === '' || [...text].length > MAX_HEADING_LENGTH) return null;
   const lower = text.toLowerCase();
   for (const [kind, terms] of HEADING_TERMS) {
@@ -519,7 +504,7 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
     }
     if (current === null) {
       // 抬头区：只要非空的纯文字，姓名与联系方式各按自己的规则从这里挑（4.1-04 / 4.1-09）。
-      const content = stripMarkup(line);
+      const content = stripLineMarkup(line);
       if (content !== '') headerLines.push(content);
       continue;
     }
