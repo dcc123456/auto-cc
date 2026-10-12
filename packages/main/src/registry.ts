@@ -152,7 +152,7 @@ export const REGISTRY: Registry = {
   'resume-export': ResumeExportService,
   // 排版编辑器（spec 3.6 / plan §8.3）：编辑会话的持有者。它在 `cordis.yml` 里必须排在 `resume-doc` 之后
   // （§9 的 5.1-c：清单顺序就是挂载顺序，早挂的问不到晚注册的），且**不登记为 agent 工具**——改版面是人对"投出去的那份"的表态。
-  // 摘掉这一行，界面九条 `resume.editor.*` 全部得到「服务未挂载」的结构化失败，而预览/导出照旧：
+  // 摘掉这一行，界面十二行 `resume.editor.*` 全部得到「服务未挂载」的结构化失败，而预览/导出照旧：
   // 「排一版」与「印一版」分属两件事（草稿不落库，见 plan §8.5 裁定⑨）。
   'resume-editor': ResumeEditorService,
   // 导出快照（spec 3.7-01）：`resume_snapshots` 表的唯一落点，迁移号段 8。每次 `resume.export` 成功后记一行不可变快照，

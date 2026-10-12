@@ -1,8 +1,8 @@
 /**
  * 排版编辑会话（plan §8.3 的 `editor-session.ts`，接住 spec 3.6-03 的「撤销/重做与状态面板反映当前步骤」）。
  *
- * 装的是那份**正在编辑的简历文档**：四个动作（区块重排、条目重排、改度量、改样式）都只在真的改了它的时候
- * 长出一条撤销单元。历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`——全仓唯一那一份
+ * 装的是那份**正在编辑的简历文档**：六个动作（区块重排、条目重排、拆条目、并条目、改度量、改样式）
+ * 都只在真的改了它的时候长出一条撤销单元。历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`——全仓唯一那一份
  * past/present/future（画布 5.10-19 与轻编辑 3.5-08 是两个已验收消费者），这里开第三份栈就是违反
  * 3.5-08 那句"不引入第二套历史栈"（AGENTS.md §2.2）。
  *
@@ -19,7 +19,9 @@ import type { ResumeDocument } from './model.js';
 import { contentHash } from './normalize.js';
 import type { TemplateLocale } from './template.js';
 import {
+  planEntryMerge,
   planEntryMove,
+  planEntrySplit,
   planMetric,
   planDesign,
   planSectionMove,
@@ -77,6 +79,21 @@ export interface ResumeEditorSession {
    * @returns 同 `moveSection`
    */
   moveEntry(sectionId: string, entryId: string, toIndex: number): EditorOutcome<ResumeDocument>;
+  /**
+   * 把一条条目从正文第 bodyLineIndex 行之后拆成两条（spec 3.6-10）。
+   * @param sectionId 条目所属区块 id
+   * @param entryId 要拆的条目 id
+   * @param bodyLineIndex 留在前一条里的行数（从 1 起算；正文不过界，界面只递这个整数）
+   * @returns 同 `moveSection`；没有正文字段给 `no-body`，行号不在范围内给 `index-out-of-range`
+   */
+  splitEntry(sectionId: string, entryId: string, bodyLineIndex: number): EditorOutcome<ResumeDocument>;
+  /**
+   * 把一条条目并回同区块的上一条（spec 3.6-10）。
+   * @param sectionId 条目所属区块 id
+   * @param entryId 要并走的条目 id
+   * @returns 同 `moveSection`；它是区块第一条时给 `nothing-to-merge`
+   */
+  mergeEntry(sectionId: string, entryId: string): EditorOutcome<ResumeDocument>;
   /**
    * 改一条度量（spec 3.6-02）。
    * @param key 度量键（`baseFontPt` / `lineHeight` / 边距四条之一）
@@ -166,6 +183,18 @@ export function createResumeEditorSession(
       const moved = planEntryMove(current.sections, sectionId, entryId, toIndex);
       if (!moved.ok) return moved;
       return apply({ ...current, sections: moved.value });
+    },
+    splitEntry(sectionId, entryId, bodyLineIndex) {
+      const current = stack.present();
+      const split = planEntrySplit(current.sections, sectionId, entryId, bodyLineIndex);
+      if (!split.ok) return split;
+      return apply({ ...current, sections: split.value });
+    },
+    mergeEntry(sectionId, entryId) {
+      const current = stack.present();
+      const merged = planEntryMerge(current.sections, sectionId, entryId);
+      if (!merged.ok) return merged;
+      return apply({ ...current, sections: merged.value });
     },
     setMetric(key, value) {
       const current = stack.present();

@@ -19,6 +19,7 @@
  */
 import { PII_VALUE_PATTERNS, redactText } from '@auto-cc/core';
 import {
+  bodyKeyOf,
   companyRoleFields,
   createEmptyDocument,
   educationFields,
@@ -345,7 +346,7 @@ function buildSection(kind: SectionKind, title: string, blocks: readonly string[
     };
 
     if (kind === 'summary' || kind === 'skills') {
-      return { id: entryId, fields: [makeField(kind, 'text', block.join('\n'))] };
+      return { id: entryId, fields: [makeField(kind, bodyKeyOf(kind), block.join('\n'))] };
     }
 
     const isEducation = kind === 'education';
@@ -384,8 +385,8 @@ function buildSection(kind: SectionKind, title: string, blocks: readonly string[
 
     const body = bodyLines.join('\n');
     if (body !== '') {
-      // 教育区块正文暂存 `description`：当前模板不渲染它，但知识库要留着这条证据，不丢内容。
-      fields.push(makeField(kind, isEducation ? 'description' : 'achievement', body));
+      // 教育区块正文暂存 `description`（`bodyKeyOf` 给的就是这一档）：当前模板不渲染它，但知识库要留着这条证据，不丢内容。
+      fields.push(makeField(kind, bodyKeyOf(kind), body));
     } else if (!isEducation) {
       missing('achievement');
     }

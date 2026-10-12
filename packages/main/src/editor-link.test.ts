@@ -3,7 +3,7 @@
  *
  * 为什么住在 `packages/main`（与 `graph-link.test.ts` / `pdf-link.test.ts` 同一个理由）：这里要同时读到
  * 注册表、`cordis.yml`、渲染层白名单与网关的 `resolveCall`——四样东西分属四个包，只有装配层认识它们全部。
- * 判据也正是装配层的判据：`resume.editor` 的十条口在包内单测里全绿，但**清单少一行、或它排在
+ * 判据也正是装配层的判据：`resume.editor` 的十二行口在包内单测里全绿，但**清单少一行、或它排在
  * `resume-doc` 前面**（§9 的 5.1-c：清单顺序就是挂载顺序），真 app 里界面照样一道都调不到。
  *
  * 编辑语义本体（界内界外、历史、dirty、撤销）在 `packages/resume-doc/src/editor-*.test.ts` 判，
@@ -95,6 +95,8 @@ function fixtureDoc(): ResumeDocument {
           fields: [
             makeField('experience', 'company', `星桥-${entryId}`),
             makeField('experience', 'role', `岗位-${entryId}`),
+            // 两条正文行：3.6-10 的拆点经网关只能递**整数**，这一条要有两行才拨得动那颗步进器。
+            makeField('experience', 'achievement', `成果-${entryId}-首行\n成果-${entryId}-次行`),
           ],
         })),
       },
@@ -111,7 +113,7 @@ function fixtureDoc(): ResumeDocument {
 /**
  * 经网关调一次，把抛出的错误翻成三段读数（不抛则当场报错，避免"没失败"被读成"失败但不判"）。
  *
- * 走 try/catch 而不是 `Promise.resolve(invoke(…)).catch(…)`：编辑器那十条方法是**同步**的（会话在内存里），
+ * 走 try/catch 而不是 `Promise.resolve(invoke(…)).catch(…)`：编辑器那十二行方法是**同步**的（会话在内存里），
  * 实参求值那一刻就抛了，挂在返回值上的 `.catch` 根本没机会接住——这条在 3.5 的另存通道（异步）不会显出来。
  * @param resolution 网关的切分结果（调用方已确认它是 `ok: true` 那一支）
  * @param args 白名单签名里那串实参
@@ -179,11 +181,11 @@ describe('装配对账（plan §8.3 的两处登记）', () => {
   });
 });
 
-describe('白名单十条都切成服务方法并经网关真的落到位（spec 3.6-05/06/07 的接线半边）', () => {
+describe('白名单十二行都切成服务方法并经网关真的落到位（spec 3.6-05/06/07 的接线半边 + 3.6-10 两只新口）', () => {
   it('每条 `resume.editor.*` 都对应挂起来的实例上的同名函数', async () => {
     const { lookup, editor } = await bootAssembly();
     const rows = RENDERER_ALLOWLIST.filter((id) => id.startsWith('resume.editor.'));
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(12);
     const methods = editor as unknown as Record<string, unknown>;
     for (const row of rows) {
       const resolution = resolveCall(row, lookup);
@@ -206,6 +208,26 @@ describe('白名单十条都切成服务方法并经网关真的落到位（spec
     expect(viaGateway.docId).toBe(DOC_ID);
     expect(viaGateway.templateId).toBe('modern');
     expect(viaGateway.sections.map((section) => section.id)).toEqual(['exp', 'skills']);
+  });
+
+  it('拆与合经网关真的落到位，被拒时子原因照样跨进程（3.6-10 的 C 半边）', async () => {
+    const { lookup } = await bootAssembly();
+    const open = resolveCall('resume.editor.open', lookup);
+    if (!open.ok) throw new Error('分派失败');
+    open.invoke(DOC_ID);
+    const split = resolveCall('resume.editor.split', lookup);
+    const merge = resolveCall('resume.editor.merge', lookup);
+    if (!split.ok || !merge.ok) throw new Error('分派失败');
+    // 递过去的实参只有 docId / 区块 id / 条目 id / 一个整数——界面手里没有正文，也就递不出正文。
+    const after = split.invoke(DOC_ID, 'exp', 'e1', 1) as ReturnType<ResumeEditorService['open']>;
+    expect(after.sections[0]?.entries.map((entry) => entry.id)).toEqual(['e1', 'experience-1', 'e2']);
+    expect(after.isDirty).toBe(true);
+    const back = merge.invoke(DOC_ID, 'exp', 'experience-1') as ReturnType<ResumeEditorService['open']>;
+    expect(back.sections[0]?.entries.map((entry) => entry.id)).toEqual(['e1', 'e2']);
+    // 区块第一条没有上一条可并：这条原因界面要拿去把那颗按不动，所以它必须跨得过来。
+    const rejected = rejectViaGateway(merge, [DOC_ID, 'exp', 'e1']);
+    expect(rejected.code).toBe('RESUME_EDITOR_EDIT_REJECTED');
+    expect(rejected.reason).toBe('nothing-to-merge');
   });
 });
 
@@ -280,14 +302,17 @@ describe('拒绝的原因跨进程不丢（spec 3.6-02 的判据原文）', () =
   });
 });
 
-describe('可达面边界：十条只给界面，正文仍然不过界（§8.1 / §8.2 / 3.6-09）', () => {
-  it('抄错的名字、带点的方法名、未登记的第十又一口都进不来', () => {
-    // 比 plan §8.3 那八条多登记了 `.use`（模板与语言必须由主进程的读数驱动，否则界面存第二份事实，§2.7），
-    // 与 6.6-05 的 `.design`（样式档名与颜色要过界，但判界与判形状都只在 `editor-ops.ts` 那一份）。
+describe('可达面边界：十二行只给界面，正文仍然不过界（§8.1 / §8.2 / 3.6-09 / 3.6-10）', () => {
+  it('抄错的名字、带点的方法名、未登记的第十三又一口都进不来', () => {
+    // 比 plan §8.3 那八条多登记了 `.use`（模板与语言必须由主进程的读数驱动，否则界面存第二份事实，§2.7）、
+    // 6.6-05 的 `.design`（样式档名与颜色要过界，但判界与判形状都只在 `editor-ops.ts` 那一份），
+    // 与 3.6-10 的 `.split` / `.merge`（拆点只能是**行号整数**，正文不过界这条因此仍然成立——新增就这两行，别多给）。
     expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('resume.editor.'))).toEqual([
       'resume.editor.open',
       'resume.editor.view',
       'resume.editor.move',
+      'resume.editor.split',
+      'resume.editor.merge',
       'resume.editor.metric',
       'resume.editor.design',
       'resume.editor.use',
@@ -297,6 +322,11 @@ describe('可达面边界：十条只给界面，正文仍然不过界（§8.1 /
       'resume.editor.save',
     ]);
     expect(isAllowedCall('resume.editor.use')).toBe(true);
+    expect(isAllowedCall('resume.editor.split')).toBe(true);
+    expect(isAllowedCall('resume.editor.merge')).toBe(true);
+    // 拆与合只有这一种递法：任何"把正文文本递过来"的变体都没登记（§8.1 第 1 条的可执行形式）。
+    expect(isAllowedCall('resume.editor.splitAt')).toBe(false);
+    expect(isAllowedCall('resume.editor.split.text')).toBe(false);
     expect(isAllowedCall('resume.editor.dropSession')).toBe(false);
     expect(isAllowedCall('resume.editor.save.all')).toBe(false);
     expect(isAllowedCall('resume.editor')).toBe(false);
@@ -313,10 +343,18 @@ describe('可达面边界：十条只给界面，正文仍然不过界（§8.1 /
     const view = open.invoke(DOC_ID) as ReturnType<ResumeEditorService['open']>;
     // 结构化克隆是 IPC 载荷的真实通路：带函数或不可克隆成员的形状在单测里能过、到边界才丢。
     const cloned = structuredClone(view);
-    expect(cloned.sections.map((section) => section.entryIds).flat()).toEqual(['e1', 'e2', 'e3']);
+    expect(cloned.sections.map((section) => section.entries.map((entry) => entry.id)).flat()).toEqual([
+      'e1',
+      'e2',
+      'e3',
+    ]);
+    // 3.6-10 为投影新增的那一格是**数字**（正文行数），不是正文：步进器拨到哪儿由它定，行内容一步都不过界。
+    expect(cloned.sections[0]?.entries.map((entry) => entry.bodyLineCount)).toEqual([2, 2]);
+    expect(cloned.sections[1]?.entries[0]?.bodyLineCount).toBe(1);
     const serialized = JSON.stringify(cloned);
     expect(serialized).not.toContain('岗位-e1');
     expect(serialized).not.toContain('星桥-e2');
+    expect(serialized).not.toContain('成果-e1-首行');
     expect(serialized).not.toContain('经历');
     // 界面要看内容只有一条路：打印 HTML，与导出同一份源（spec 3.3-01 的口径续用到编辑器）。
     // 过界的那一份必须带**相对**字体 base（spec 6.6-04）：装机/开发两种运行态里纸面帧都只取同源字体，

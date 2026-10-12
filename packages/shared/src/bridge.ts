@@ -345,14 +345,19 @@ export const RENDERER_ALLOWLIST = [
   // 而界面此前没有任何一条能列出文档的通道，于是自动生成在多份库里直接判死）。
   // 过的只有 id / 姓名 / 时刻三样摘要：正文的唯一读取通道仍是带 Schema 复验的 `load()`，它不在允许清单里。
   'resume.doc.list',
-  // 3.6 排版编辑器的会话面（plan §8.3）：十行全是**人**在编辑器面板里的动作（打开、拖、推滑杆、改样式、换模板、
-  // 撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
+  // 3.6 排版编辑器的会话面（plan §8.3）：这些行全是**人**在编辑器面板里的动作（打开、拖、拆条目、并条目、
+  // 推滑杆、改样式、换模板、撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
   // 与 §3 第 1 条的事实锁定同一条线（口径照 5.10-e 那四条写口与 `pdf.*` 那两行）。
-  // 过界的只有 docId、结构 id 与度量数：正文不过界（见上面 `resume.export.preview` 那行的注释），
+  // 过界的只有 docId、结构 id、度量数与**正文行号**：正文不过界（见上面 `resume.export.preview` 那行的注释），
   // 界面要看内容走 `.preview` 那份打印 HTML，与导出同一份源。
   'resume.editor.open',
   'resume.editor.view',
   'resume.editor.move',
+  // 裁定㉗ 第 1 条后半句「也要支持手动拆分和合并」：拆点只能是**行号**（从 1 起算的整数），
+  // 因为正文不许过界，界面递不出"在哪一段之后断开"这句话。可拨的上界来自 `view().sections[].entries[].bodyLineCount`，
+  // 与主进程 `planEntrySplit` 的 `index-out-of-range` 用同一个 `entryBodyLineCount`（§2.5：判据一份）。
+  'resume.editor.split',
+  'resume.editor.merge',
   'resume.editor.metric',
   // 6.6-05 的样式补丁通道：过的仍然是**枚举档名与 `#rrggbb` 字符串**，一个字的正文都不过。
   // 形状校验（颜色、档位、数值界）只在主进程的 `editor-ops.ts` 做一次，界面照 `view().metricBounds`
@@ -1527,11 +1532,17 @@ export interface ResumeEditorDesignPatchView {
   paragraph?: ResumeEditorParagraphPatchView;
 }
 
-/** 编辑器里的一个区块（标签由界面按 kind 取 i18n，同 3.2-06 的口径；`entryIds` 是条目级拖拽的把手数据）。 */
+/** 编辑器里的一条条目：id 与**正文行数**（拆点坐标）。行数不是正文，正文不过界。 */
+export interface ResumeEditorEntryView {
+  readonly id: string;
+  readonly bodyLineCount: number;
+}
+
+/** 编辑器里的一个区块（标签由界面按 kind 取 i18n，同 3.2-06 的口径；`entries` 是条目级拖拽与拆/合的把手数据）。 */
 export interface ResumeEditorSectionView {
   readonly id: string;
   readonly kind: ResumeSectionKindView;
-  readonly entryIds: string[];
+  readonly entries: ResumeEditorEntryView[];
 }
 
 /**
@@ -2624,6 +2635,23 @@ export interface BridgeSignatures {
    */
   'resume.editor.move': {
     args: [docId: string, sectionId: string, toIndex: number, entryId?: string];
+    returns: ResumeEditorView;
+  };
+  /**
+   * 拆一条（spec 3.6-10 / 裁定㉗ 第 1 条后半句）：把该条正文从第 `bodyLineIndex` 行之后断成两条。
+   * @入参 `bodyLineIndex` 是留在**前一条**里的行数，从 1 起算，必须小于 `bodyLineCount`（步进器因此不许拨到行数本身）。
+   * 被拒时上浮 `RESUME_EDITOR_EDIT_REJECTED`，子原因 `no-body` / `index-out-of-range` 在 `details.reason`。
+   */
+  'resume.editor.split': {
+    args: [docId: string, sectionId: string, entryId: string, bodyLineIndex: number];
+    returns: ResumeEditorView;
+  };
+  /**
+   * 并一条（spec 3.6-10）：把该条并回**同区块的上一条**，被并走那条除正文以外的每一格按原样成行进前一条正文。
+   * 它是区块第一条时以 `nothing-to-merge` 拒绝（界面按 `entries` 里的下标预先就知道，用原因码说清楚）。
+   */
+  'resume.editor.merge': {
+    args: [docId: string, sectionId: string, entryId: string];
     returns: ResumeEditorView;
   };
   /**

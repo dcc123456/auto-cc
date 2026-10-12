@@ -643,7 +643,7 @@ export function ResumeEditor({
                 {index + 1} · {t(`resume.kind.${section.kind}`)}
               </p>
               <p className="text-[11px] text-slate-600">
-                {t('resume.editor.entryCount', { count: section.entryIds.length })}
+                {t('resume.editor.entryCount', { count: section.entries.length })}
               </p>
             </div>
           </li>

@@ -9,6 +9,7 @@ export {
   createEmptyDocument,
   DEFAULT_LAYOUT,
   factKeyOf,
+  bodyKeyOf,
   GENERATION_EDITABLE_KEYS,
   makeField,
   RESUME_SCHEMA_VERSION,

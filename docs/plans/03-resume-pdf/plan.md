@@ -1619,8 +1619,8 @@ Windows/Linux 上 `Helvetica`/`Times` 会落到别的字面，advance 误差只�
 
 ### 三条读出来的形状约束（它们决定实现只能长成这样）
 
-1. **正文不过界，所以拆点只能是行号。** `bridge.ts:353-365` 那十行白名单的注释写的就是这条（人是唯一调用者、文档文本不跨进程）。
-   因此界面**不能**让人敲"从哪句话拆开"，只能递一个整数。现在的 `ResumeEditorSectionState` 只带 `entryIds: string[]`（`editor-service.ts:54`），
+1. **正文不过界，所以拆点只能是行号。** `bridge.ts` 那一片 `resume.editor.*` 白名单的注释写的就是这条（人是唯一调用者、文档文本不跨进程）。
+   因此界面**不能**让人敲"从哪句话拆开"，只能递一个整数。当时的 `ResumeEditorSectionState` 只带 `entryIds: string[]`（`editor-service.ts:54`），
    界面无从知道能拨到第几行——所以视图那一格要新增**每条的正文行数**。加的是数字，不是文本，过界的东西仍然只有一种坐标。
    人的操作面因此是：**左边常驻纸面数第几行，右边把行号拨到那儿**（真纸面是裁定㉕ 第 1 条已经付过费的东西，这里直接复用，不新开文本预览）。
 2. **拆出来的那一半必须带抬头，否则它是个更糟的形状。** 光把正文一刀两段，第二条会变成"没有公司的经历"，纸面上比不拆还难看。
@@ -1648,3 +1648,42 @@ Windows/Linux 上 `Helvetica`/`Times` 会落到别的字面，advance 误差只�
 **拆/合的正文对象**是条目里 `achievement` / `description` / `text` 之中实际存在的那一个键（与生成轨 `GENERATION_EDITABLE_KEYS` 同一份名单，
 `generate-service.ts` 里已有的那个常量，不新开第二份），所以教育条目的正文是 `description`、技能条目的正文是 `text`、经历/项目是 `achievement`。
 拆时那半截的行**相接拼接**（不再插空行，保持 PDF 原样），合时两组正文之间补一个 `\n`。
+
+### 63-b 落地记录（2026-10-12；U+C 两面已绿，V 仍等 63-c，所以 3.6-10 状态位不动）
+
+落了什么（逐字对着上表那一行做，没有多做一格）：
+
+- `editor-ops.ts` 新增 `planEntrySplit` / `planEntryMerge` 与只读用的 `entryBodyLineCount`，同一套 `EditorOutcome<T>`、不抛异常；
+  拒绝码复用 `unknown-section` / `unknown-entry` / `index-out-of-range`，新增 `no-body` 与 `nothing-to-merge` 两个。
+  新条目 id 走 `nextEntryId`：取本区块 `<kind>-<n>` 里最大 n 加一，**不重排既有 id**（用例钉住拆完是
+  `['e1','experience-1','e2']`，而不是把后面几条往后挪一位）。
+- `editor-session.ts` 两条方法（`splitEntry` / `mergeEntry`）照 `moveEntry` 的三行写法：拒绝通道原样转发，只有真的改了才 `apply`。
+  文件头那句「四个动作」随之改「六个动作」——历史栈仍只有一份（`@auto-cc/core/snapshot-stack`）。
+- `editor-service.ts` 两只动作 `split` / `merge`，以及**视图形状的一处必要改动**：`ResumeEditorSectionState.entryIds: string[]`
+  换成 `entries: { id, bodyLineCount }[]`。`bodyLineCount` 与 `planEntrySplit` 的行数判据同用 `entryBodyLineCount`（§2.5），
+  用例因此写成"按 `entryBodyLineCount` 拨到最大可拆点必然放行、拨到行数本身必然被拒"——界面放行而主进程拒绝这种分叉从一开始就断掉。
+- `bridge.ts` 白名单**恰新增两行**（`resume.editor.split` / `resume.editor.merge`），`BridgeCalls` 两条签名过的都是
+  `docId / sectionId / entryId / 一个整数`；装配层用例逐字钉住那十二行的顺序与内容，并补两条反向断言
+  （`resume.editor.splitAt`、`resume.editor.split.text` 都进不来）——"想递正文文本"在这套形状里根本没有那条口。
+- 正文键的落点抽成 `model.ts` 的 `bodyKeyOf(kind)`：解析轨 `buildSection` 与编辑器的拆/合都问它，
+  这条事实在仓里出现过两次（§2.2），`resume-kb/src/sections.ts` 里那两处 `isEducation ? 'description' : 'achievement'` 随之删除。
+
+三条判据里两处**按更严的读法实现**，写下来免得日后按字面去"修"：
+
+1. **「不吞字」在经历区块不可能按字面成立**——拆出来的后半截首行**就是要被装成抬头**（§13 第 2 条），它因此不再出现在正文键里。
+   所以用例判的是**行级**：原条目正文的每一行，都能在拆出来的两条的**全部字段值**里逐字找到（`linesOf` 那份并集）。
+   技能与简介没有抬头这一说，那两条按字面成立（两条正文 `join('\n')` 与原正文一字不差）。
+2. **合并带的不是"只有锁定字段"，而是除正文以外每一格按原样成行**。字面写的是"锁定字段"，但教育区块的 `school`/`degree`/`major`
+   并不在 `factKeyOf` 的锁定名单里（只有 `period` 在），按字面读会静默丢掉人写下的学校名——这与 §13 第 3 条那句
+   "吞掉人写下的事实同样严重"直接冲突，所以取更严的那一侧。用例两条分别钉住这一读法：
+   经历条目并走 `company`/`role`/`period` 三行、教育条目在前一条**没有正文**时新建 `description` 那一格（键沿用被并走那条的正文键，不凭空造 `achievement`）。
+
+门禁实际输出（`pnpm x > tmp/63b/x.log 2>&1; echo "EXIT=$?"` 的读法，不用管道接 `tail`）：
+`pnpm typecheck` EXIT=0；`pnpm lint` EXIT=0（含 `check-lexicon` 术语禁令保持）；`pnpm format:check` EXIT=0；
+`pnpm test` EXIT=0，23 个包逐个核对通过数，其中 `resume-doc` **206 → 217 例**（本片 +11：`editor-ops.test.ts` 15 → 23 的八条拆分/合并判据、
+`editor-service.test.ts` 11 → 14 的三条服务侧形状）、
+`main` 88 例、`resume-kb` 411 例全绿。
+
+**没有做的**：界面那颗控件、行号步进器、`NO_BODY_TO_SPLIT` / `NOTHING_TO_MERGE` 两个原因码的上屏与双语，
+都在 63-c（06 §3.33 / spec 6.4-23）。3.6-10 的 V 半边（活体拆一次 + 合一次 + 撤销两颗回得去）因此仍 `[ ]`，
+本节这一格是 U+C 的读数，不是整条判据的通过。

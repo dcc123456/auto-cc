@@ -4,13 +4,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   EDITOR_METRIC_BOUNDS,
+  entryBodyLineCount,
   planDesign,
+  planEntryMerge,
   planEntryMove,
+  planEntrySplit,
   planMetric,
   planSectionMove,
   type MetricKey,
 } from './editor-ops.js';
-import { DEFAULT_LAYOUT, makeField, type Layout, type Section } from './model.js';
+import { DEFAULT_LAYOUT, makeField, type Entry, type Layout, type Section, type SectionKind } from './model.js';
 
 /** 造一个区块（三个区块的用例里只有 id 与标题不同）。 */
 function section(id: string, entryIds: readonly string[] = []): Section {
@@ -247,5 +250,196 @@ describe('6.6-05 样式补丁的判定半边（颜色形状、档位、数值界
     const dropped = planDesign(two.value, { paragraph: { kind: 'project', backdropHex: null } });
     if (!dropped.ok) throw new Error('应当放行');
     expect(Object.keys(dropped.value.design?.paragraphs ?? {})).toEqual(['experience']);
+  });
+});
+
+/** 造一条给定字段的条目：键的顺序就是装配顺序，哪一格被事实锁定由 `makeField` 判（不在此处抄名单）。 */
+function entryOf(kind: SectionKind, entryId: string, fields: ReadonlyArray<readonly [string, string]>): Entry {
+  return { id: entryId, fields: fields.map(([key, value]) => makeField(kind, key, value)) };
+}
+
+/** 造一个区块（拆/合的作用域就是一个区块内部，所以条目一律喂进来而不是按 id 生成）。 */
+function sectionOf(kind: SectionKind, id: string, entries: Entry[]): Section {
+  return { id, kind, title: id, entries };
+}
+
+/** 取一条条目里某个键的值（断言里反复用，缺键就给 `undefined` 而不是抛）。 */
+function valueOf(entry: Entry, key: string): string | undefined {
+  return entry.fields.find((field) => field.key === key)?.value;
+}
+
+/** 一条条目的全部字段值按存值顺序成行——"这行的内容还在不在"就按这一份找。 */
+function linesOf(entry: Entry): string[] {
+  return entry.fields.flatMap((field) => field.value.split('\n'));
+}
+
+/** 三条正文各两行的经历区块（第一、二条同一条正文里混着一条完整的抬头行，就是导入漏拆的那种形状）。 */
+function splitFixture(): Section[] {
+  return [
+    sectionOf('experience', 'exp', [
+      entryOf('experience', 'e1', [
+        ['company', '星桥'],
+        ['role', '前端'],
+        ['achievement', '带教三名实习生\n蓝鲸科技 - 支付中台开发 2021.03 - 2024.06\n把结算对账从三小时压到八分钟'],
+      ]),
+      entryOf('experience', 'e2', [
+        ['company', '只有一行'],
+        ['role', '岗位'],
+        ['achievement', '孤行一条'],
+      ]),
+    ]),
+    sectionOf('skills', 'skills', [entryOf('skills', 's1', [['text', 'TypeScript\nReact\nNode']])]),
+  ];
+}
+
+describe('3.6-10 手动拆分：拆点只能是行号，四种拒绝各给一条确定的码', () => {
+  it('查无区块 / 查无条目 / 没有正文 / 行号越界，四种都不抛异常且 detail 说得出界在哪', () => {
+    const sections = splitFixture();
+    expect(planEntrySplit(sections, 'zz', 'e1', 1)).toMatchObject({ ok: false, code: 'unknown-section' });
+    expect(planEntrySplit(sections, 'exp', 'e9', 1)).toMatchObject({ ok: false, code: 'unknown-entry' });
+    // 没有正文字段的条目（只带了 company/role）：拆它无意义，界面上的原因码 `no-body` 由此而来。
+    const noBody = [sectionOf('experience', 'exp', [entryOf('experience', 'e1', [['company', '星桥']])])];
+    expect(planEntrySplit(noBody, 'exp', 'e1', 1)).toMatchObject({ ok: false, code: 'no-body' });
+    // 三行正文的可拆点是 1…2：0（拆在前一条之前）、3（拆完之后没有第二条）、非整数都不放行。
+    for (const bad of [0, 3, 2.5, Number.NaN]) {
+      const rejected = planEntrySplit(sections, 'exp', 'e1', bad);
+      expect(rejected.ok, `拆点 ${String(bad)} 不该放行`).toBe(false);
+      if (rejected.ok) continue;
+      expect(rejected.code).toBe('index-out-of-range');
+      expect(rejected.detail).toContain('1…2');
+    }
+    // 只有一行正文（e2）压根没有可拆点。
+    expect(planEntrySplit(sections, 'exp', 'e2', 1)).toMatchObject({ ok: false, code: 'index-out-of-range' });
+  });
+
+  it('拆出的后半截按**导入时同一条规则**装抬头：`（二）` 这种装饰不会冒充公司名', () => {
+    const sections = [
+      sectionOf('experience', 'exp', [
+        entryOf('experience', 'e1', [
+          ['company', '星桥'],
+          ['role', '前端'],
+          // 导入漏拆的形状：三条经历挤在一条正文里，第二条的抬头行落在中间。拆点 1 让那一行进后半截。
+          ['achievement', '负责官网首页\n（二）某公司 - 前端开发 2021.03 - 2024.06\n主导组件库迁移'],
+        ]),
+      ]),
+    ];
+    const result = planEntrySplit(sections, 'exp', 'e1', 1);
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const tail = result.value[0]?.entries[1] as Entry;
+    // 抬头三格都认出来了，且汉字序号装饰被摘掉——这一条就是 63-a 把 `stripLineMarkup` 一起搬过来的原因。
+    expect(valueOf(tail, 'company')).toBe('某公司');
+    expect(valueOf(tail, 'role')).toBe('前端开发');
+    expect(valueOf(tail, 'period')).toBe('2021-03 - 2024-06');
+    expect(valueOf(tail, 'achievement')).toBe('主导组件库迁移');
+    expect(tail.fields.some((field) => field.value.includes('（二）'))).toBe(false);
+  });
+
+  it('拆后两条的正文拼起来与原条目逐字相同（不吞字），新条目 id 取本区块最大序号 +1 且不重排既有 id', () => {
+    const sections = splitFixture();
+    const original = sections[0]?.entries[0] as Entry;
+    const before = valueOf(original, 'achievement');
+    const result = planEntrySplit(sections, 'exp', 'e1', 2);
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const [head, tail] = result.value[0]?.entries as [Entry, Entry];
+    // 前半截只剩两行正文，其余字段（company/role）原样带着；引用换了新对象但 id 不动。
+    expect(valueOf(head, 'achievement')).toBe('带教三名实习生\n蓝鲸科技 - 支付中台开发 2021.03 - 2024.06');
+    expect(valueOf(head, 'company')).toBe('星桥');
+    expect(head.id).toBe('e1');
+    // 后半截首行被装成抬头（上一条），所以"逐字相同"要按**行**对齐：原文的每一行都能在两条里找到。
+    expect((before ?? '').split('\n').every((line) => [...linesOf(head), ...linesOf(tail)].includes(line))).toBe(true);
+    // 新 id：本区块现有 `<kind>-<n>` 里没有，故从 1 起；既有的 e1/e2 一字不动。
+    expect(tail.id).toBe('experience-1');
+    expect(result.value[0]?.entries.map((entry) => entry.id)).toEqual(['e1', 'experience-1', 'e2']);
+    // 别的区块原样带着（引用相等），拆是局部动作。
+    expect(result.value[1]).toBe(sections[1]);
+  });
+
+  it('技能与简介没有抬头这一说：拆出来两条都只有正文键', () => {
+    const sections = splitFixture();
+    const result = planEntrySplit(sections, 'skills', 's1', 1);
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const [head, tail] = result.value[1]?.entries as [Entry, Entry];
+    expect(head.fields.map((field) => field.key)).toEqual(['text']);
+    expect(valueOf(head, 'text')).toBe('TypeScript');
+    // 新条目 id 在技能区块里跟着 kind 走，与经历区块那条互不影响。
+    expect(tail.id).toBe('skills-1');
+    expect(valueOf(tail, 'text')).toBe('React\nNode');
+  });
+
+  it('投影里的行数与拆操作的界同源：按 `entryBodyLineCount` 拨到最大可拆点必然放行', () => {
+    const sections = splitFixture();
+    const target = sections[0]?.entries[0] as Entry;
+    const count = entryBodyLineCount(target);
+    expect(count).toBe(3);
+    // 上界是"行数 − 1"（拆完两条都得有内容）：拨到它放行，拨到行数本身被拒。
+    expect(planEntrySplit(sections, 'exp', 'e1', count - 1).ok).toBe(true);
+    expect(planEntrySplit(sections, 'exp', 'e1', count)).toMatchObject({ ok: false, code: 'index-out-of-range' });
+    // 没有正文字段的条目给 0（界面据此把「拆」那颗按不动，而不是让它拆出个空条目）。
+    expect(entryBodyLineCount(entryOf('experience', 'e9', [['company', '星桥']]))).toBe(0);
+  });
+});
+
+describe('3.6-10 手动合并：并回上一条，锁定字段按原样进正文', () => {
+  it('区块第一条没有上一条可并，给 `nothing-to-merge` 且不动任何东西', () => {
+    const sections = splitFixture();
+    const rejected = planEntryMerge(sections, 'exp', 'e1');
+    expect(rejected).toMatchObject({ ok: false, code: 'nothing-to-merge' });
+    if (rejected.ok) throw new Error('区块第一条不该放行合并');
+    expect(rejected.detail).toContain('第一条');
+    expect(planEntryMerge(sections, 'zz', 'e2')).toMatchObject({ ok: false, code: 'unknown-section' });
+    expect(planEntryMerge(sections, 'exp', 'e9')).toMatchObject({ ok: false, code: 'unknown-entry' });
+  });
+
+  it('被并走那条除正文以外的每一格按原样成行：事实锁定的 company/role/period 一个字都不丢', () => {
+    const sections = [
+      sectionOf('experience', 'exp', [
+        entryOf('experience', 'e1', [
+          ['company', '星桥'],
+          ['role', '前端'],
+          ['achievement', '带教三名实习生'],
+        ]),
+        entryOf('experience', 'e2', [
+          ['company', '蓝鲸'],
+          ['role', '支付中台'],
+          ['period', '2021-03 - 2024-06'],
+          ['achievement', '把对账从三小时压到八分钟'],
+        ]),
+        entryOf('experience', 'e3', [
+          ['company', '另一家'],
+          ['role', '岗位'],
+        ]),
+      ]),
+    ];
+    const result = planEntryMerge(sections, 'exp', 'e2');
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const merged = result.value[0]?.entries[0] as Entry;
+    // 顺序：前一条正文 → 被并走那条的其余格（存值顺序）→ 被并走那条的正文。
+    expect(valueOf(merged, 'achievement')).toBe(
+      '带教三名实习生\n蓝鲸\n支付中台\n2021-03 - 2024-06\n把对账从三小时压到八分钟',
+    );
+    // 前一条自己的抬头不受影响，被并走那条消失，第三条 id 与位置一字不动。
+    expect(valueOf(merged, 'company')).toBe('星桥');
+    expect(result.value[0]?.entries.map((entry) => entry.id)).toEqual(['e1', 'e3']);
+    expect(linesOf(sections[0]?.entries[1] as Entry).every((line) => linesOf(merged).includes(line))).toBe(true);
+  });
+
+  it('前一条没有正文字段时，合并给它新建那一格而不是丢下内容（键沿用被并走那条的正文键）', () => {
+    const sections = [
+      sectionOf('education', 'edu', [
+        entryOf('education', 'e1', [['school', '某大学']]),
+        entryOf('education', 'e2', [
+          ['school', '另一大学'],
+          ['description', '计算机科学与技术 学士'],
+        ]),
+      ]),
+    ];
+    const result = planEntryMerge(sections, 'edu', 'e2');
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const merged = result.value[0]?.entries[0] as Entry;
+    // 教育区块的正文键是 `description`（`bodyKeyOf` 给的那一档），不是凭空造一个 `achievement`；
+    // 前一条自己的 school 仍留在它那格（'某大学' 没被搬进正文，也没被丢），正文收到被并走那条的全部内容。
+    expect(valueOf(merged, 'description')).toBe('另一大学\n计算机科学与技术 学士');
+    expect(valueOf(merged, 'school')).toBe('某大学');
+    expect(merged.fields.map((field) => field.key)).toEqual(['school', 'description']);
   });
 });

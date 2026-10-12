@@ -60,9 +60,14 @@ function fixture(): ResumeDocument {
         title: '经历',
         // 经历区块的核心槽位是 company + role（缺了模板会抛可定位错误，见 `bind.ts` 的 `toEntryView`），
         // 预览那一条用例要真的渲染，所以这里给全——内容全部虚构。
+        // 三条都带**两行**正文：3.6-10 的拆点坐标是行数，服务侧要有能拨到 1 的那一条才测得出投影形状。
         entries: ['e1', 'e2', 'e3'].map((id) => ({
           id,
-          fields: [makeField('experience', 'company', `星桥-${id}`), makeField('experience', 'role', `岗位-${id}`)],
+          fields: [
+            makeField('experience', 'company', `星桥-${id}`),
+            makeField('experience', 'role', `岗位-${id}`),
+            makeField('experience', 'achievement', `成果-${id}-首行\n成果-${id}-次行`),
+          ],
         })),
       },
       {
@@ -88,8 +93,16 @@ describe('3.6-b 打开与投影（正文不过界的那条边界要能被断言�
     const view = editor.open('r');
     expect(view.docId).toBe('r');
     expect(view.sections).toEqual([
-      { id: 'exp', kind: 'experience', entryIds: ['e1', 'e2', 'e3'] },
-      { id: 'skills', kind: 'skills', entryIds: ['e4'] },
+      {
+        id: 'exp',
+        kind: 'experience',
+        entries: [
+          { id: 'e1', bodyLineCount: 2 },
+          { id: 'e2', bodyLineCount: 2 },
+          { id: 'e3', bodyLineCount: 2 },
+        ],
+      },
+      { id: 'skills', kind: 'skills', entries: [{ id: 'e4', bodyLineCount: 1 }] },
     ]);
     expect(view.layout).toEqual(createEmptyDocument('r', 0).layout);
     expect(view.templateId).toBe('classic');
@@ -121,6 +134,8 @@ describe('3.6-b 打开与投影（正文不过界的那条边界要能被断言�
     const { editor } = await boot();
     expect(rejection(thrown(() => editor.view('r'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.move('r', 'exp', 1))).code).toBe('RESUME_EDITOR_NOT_OPEN');
+    expect(rejection(thrown(() => editor.split('r', 'exp', 'e1', 1))).code).toBe('RESUME_EDITOR_NOT_OPEN');
+    expect(rejection(thrown(() => editor.merge('r', 'exp', 'e2'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.metric('r', 'baseFontPt', 12))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.undo('r'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.preview('r'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
@@ -157,7 +172,7 @@ describe('3.6-01 / 03 动作后的读数与撤销', () => {
     const { editor } = await boot();
     editor.open('r');
     const moved = editor.move('r', 'exp', 2, 'e1');
-    expect(moved.sections[0]?.entryIds).toEqual(['e2', 'e3', 'e1']);
+    expect(moved.sections[0]?.entries.map((entry) => entry.id)).toEqual(['e2', 'e3', 'e1']);
 
     expect(rejection(thrown(() => editor.move('r', 'skills', 0, 'e1')))).toMatchObject({
       code: 'RESUME_EDITOR_EDIT_REJECTED',
@@ -167,6 +182,53 @@ describe('3.6-01 / 03 动作后的读数与撤销', () => {
       code: 'RESUME_EDITOR_EDIT_REJECTED',
       reason: 'index-out-of-range',
     });
+  });
+});
+
+describe('3.6-10 拆与并：服务侧只多两只动作，历史与 dirty 走同一条通道', () => {
+  it('拆一条：同区块多出一条且紧跟原条目，undo 一步退回去、脏位归零', async () => {
+    const { editor } = await boot();
+    editor.open('r');
+    const after = editor.split('r', 'exp', 'e1', 1);
+    const exp = after.sections.find((section) => section.id === 'exp');
+    // 新 id 取 `<kind>-<n>` 里最大 n 加一（fixture 的三条是 e1/e2/e3，不参与取最大），且不重排既有 id。
+    expect(exp?.entries.map((entry) => entry.id)).toEqual(['e1', 'experience-1', 'e2', 'e3']);
+    expect(exp?.entries[0]?.bodyLineCount).toBe(1);
+    expect(after.isDirty).toBe(true);
+    expect(after.canUndo).toBe(true);
+
+    const undone = editor.undo('r');
+    expect(undone.sections.find((section) => section.id === 'exp')?.entries.length).toBe(3);
+    expect(undone.isDirty).toBe(false);
+  });
+
+  it('并一条：并回上一条，被并走那条除正文以外的每一格按原样成行（一个字都不丢）', async () => {
+    const { editor } = await boot();
+    editor.open('r');
+    const after = editor.merge('r', 'exp', 'e2');
+    const exp = after.sections.find((section) => section.id === 'exp');
+    expect(exp?.entries.map((entry) => entry.id)).toEqual(['e1', 'e3']);
+    // e1 原有两行正文，e2 带进 company / role 两行再加自己的两行 → 六行。行数由投影给出，正文不过界。
+    expect(exp?.entries[0]?.bodyLineCount).toBe(6);
+    // 一步退得回去，而且退完与库里那份一字不差。
+    expect(editor.undo('r').sections.find((section) => section.id === 'exp')?.entries.length).toBe(3);
+  });
+
+  it('只有一行的正文拆不动、区块第一条没有上一条可并，都带得出原因的子码，且投影一字未动', async () => {
+    const { editor } = await boot();
+    editor.open('r');
+    expect(rejection(thrown(() => editor.split('r', 'skills', 'e4', 1)))).toMatchObject({
+      code: 'RESUME_EDITOR_EDIT_REJECTED',
+      reason: 'index-out-of-range',
+    });
+    expect(rejection(thrown(() => editor.merge('r', 'exp', 'e1')))).toMatchObject({
+      code: 'RESUME_EDITOR_EDIT_REJECTED',
+      reason: 'nothing-to-merge',
+    });
+    const unchanged = editor.view('r');
+    expect(unchanged.sections[0]?.entries.length).toBe(3);
+    expect(unchanged.canUndo).toBe(false);
+    expect(unchanged.isDirty).toBe(false);
   });
 });
 

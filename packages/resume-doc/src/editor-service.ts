@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { ResumeDocService } from './doc-store.js';
 import {
   EDITOR_METRIC_BOUNDS,
+  entryBodyLineCount,
   type DesignPatch,
   type EditorOutcome,
   type MetricBound,
@@ -46,12 +47,23 @@ export type ResumeEditorConfig = z.infer<typeof resumeEditorSchema>;
 /** 新建编辑会话时没指定模板的落点（与 `ResumePanel` 现在硬编码的那一个同源，3.6-c 之后由下拉给）。 */
 const DEFAULT_TEMPLATE_ID = 'classic';
 
+/**
+ * 投影里的一条条目：只有 id 与**正文行数**（3.6-10 的拆点坐标）。
+ * 行数不是正文——界面据此摆步进器，能拨到的最大就是「行数 − 1」，而这条界由 `editor-ops` 的
+ * `entryBodyLineCount` 给出，与拆操作里 `index-out-of-range` 的判据同源（§2.5：不许界面放行、主进程拒绝）。
+ */
+export interface ResumeEditorEntryState {
+  id: string;
+  /** 正文行数；这一条没有正文字段时为 0（界面据此把「拆」那颗按不动，原因是 `no-body`）。 */
+  bodyLineCount: number;
+}
+
 /** 投影里的一个区块：只有结构与 id，**不回正文**（区块标签由界面按 kind 走 i18n，同 3.2-06 口径）。 */
 export interface ResumeEditorSectionState {
   id: string;
   kind: SectionKind;
-  /** 条目 id 序列（界面条目级拖拽的把手数据；字段值不在其中）。 */
-  entryIds: string[];
+  /** 条目序列（界面条目级拖拽与拆/合的把手数据；字段值不在其中）。 */
+  entries: ResumeEditorEntryState[];
 }
 
 /**
@@ -164,6 +176,30 @@ export class ResumeEditorService extends Service {
       entryId === undefined ? session.moveSection(sectionId, toIndex) : session.moveEntry(sectionId, entryId, toIndex);
     return this.afterEdit(docId, outcome);
   };
+
+  /**
+   * 拆一条：把正文从第 bodyLineIndex 行之后断成两条（裁定㉗ 第 1 条后半句「也要支持手动拆分」）。
+   * @param docId 文档 id
+   * @param sectionId 条目所在区块 id
+   * @param entryId 要拆的条目 id
+   * @param bodyLineIndex 留在前一条里的行数（从 1 起算；**只能是行号**——正文不过进程边界，界面递不出文本）
+   * @returns 新的会话投影
+   * @throws AppError(`RESUME_EDITOR_NOT_OPEN` / `RESUME_EDITOR_EDIT_REJECTED`)；
+   *         拒绝原因在 `details.reason`（`no-body` / `index-out-of-range` 等，判据见 `editor-ops.ts`）
+   */
+  split = (docId: string, sectionId: string, entryId: string, bodyLineIndex: number): ResumeEditorState =>
+    this.afterEdit(docId, this.require(docId).splitEntry(sectionId, entryId, bodyLineIndex));
+
+  /**
+   * 并一条：把条目并回同区块的上一条（裁定㉗ 第 1 条后半句「也要支持…合并」）。
+   * @param docId 文档 id
+   * @param sectionId 条目所在区块 id
+   * @param entryId 要并走的条目 id（区块第一条会被 `nothing-to-merge` 挡）
+   * @returns 新的会话投影（被并走那条的其余字段按原样进前一条正文，一个字不丢）
+   * @throws AppError(`RESUME_EDITOR_NOT_OPEN` / `RESUME_EDITOR_EDIT_REJECTED`)
+   */
+  merge = (docId: string, sectionId: string, entryId: string): ResumeEditorState =>
+    this.afterEdit(docId, this.require(docId).mergeEntry(sectionId, entryId));
 
   /**
    * 改一条度量（字号 / 行距 / 四条边距）。
@@ -303,7 +339,7 @@ export class ResumeEditorService extends Service {
       sections: doc.sections.map((section) => ({
         id: section.id,
         kind: section.kind,
-        entryIds: section.entries.map((entry) => entry.id),
+        entries: section.entries.map((entry) => ({ id: entry.id, bodyLineCount: entryBodyLineCount(entry) })),
       })),
       layout: doc.layout,
       templateId: session.templateId(),

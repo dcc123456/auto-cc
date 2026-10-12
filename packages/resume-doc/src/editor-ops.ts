@@ -19,6 +19,8 @@
  */
 import type {
   DocumentDesign,
+  Entry,
+  Field,
   FontFamilyToken,
   FontWeightToken,
   Layout,
@@ -28,8 +30,16 @@ import type {
   SectionKind,
   TextAlignToken,
 } from './model.js';
-import { FONT_FAMILY_TOKENS, FONT_WEIGHT_TOKENS, TEXT_ALIGN_TOKENS } from './model.js';
+import {
+  bodyKeyOf,
+  FONT_FAMILY_TOKENS,
+  FONT_WEIGHT_TOKENS,
+  GENERATION_EDITABLE_KEYS,
+  makeField,
+  TEXT_ALIGN_TOKENS,
+} from './model.js';
 import { PARAGRAPH_KIND_ORDER } from './normalize.js';
+import { companyRoleFields, educationFields, periodText, splitHeader, stripLineMarkup } from './header.js';
 import { HEX_COLOR_PATTERN } from './schema.js';
 
 /** 度量键：`Layout` 里那四个可由人推的数（边距拆成四条边，界面各一条滑杆）。 */
@@ -66,7 +76,9 @@ export type EditorRejectionCode =
   | 'index-out-of-range'
   | 'bad-color'
   | 'bad-token'
-  | 'unknown-kind';
+  | 'unknown-kind'
+  | 'no-body'
+  | 'nothing-to-merge';
 
 /** 一次操作的判定：通过给新值，否则给机器码与技术原因，**不抛异常**。 */
 export type EditorOutcome<T> =
@@ -403,6 +415,184 @@ export function planEntryMove(
     ok: true,
     value: sections.map((candidate, position) =>
       position === sectionIndex ? { ...candidate, entries: movedEntries } : candidate,
+    ),
+  };
+}
+
+/**
+ * 取条目里承载正文的那一格——三键名单（`GENERATION_EDITABLE_KEYS`）里实际存在的那一个。
+ * 名单与生成轨同源（`model.ts` 的一处声明），这里不再抄一遍字符串。
+ * @param entry 条目
+ * @returns 正文字段；这一条没有正文时 `undefined`（拆/合据此走 `no-body`）
+ */
+function bodyFieldOf(entry: Entry): Field | undefined {
+  const bodyKeys: readonly string[] = GENERATION_EDITABLE_KEYS;
+  return entry.fields.find((field) => bodyKeys.includes(field.key));
+}
+
+/**
+ * 这一条的正文有几个可拆的断点（行数），给界面那条步进器用（spec 6.4-23）。
+ *
+ * 与 `planEntrySplit` 里 `lines = body.value.split('\n')` 同一条算式：界面按这个数放行、
+ * 主进程按同一个数判界，两边不可能给出不同的行号（§2.5：一份判据）。
+ * @param entry 条目
+ * @returns 正文行数；这一条没有正文字段时为 0（界面据此把拆那一颗锁在 `NO_BODY_TO_SPLIT`）
+ */
+export function entryBodyLineCount(entry: Entry): number {
+  const body = bodyFieldOf(entry);
+  return body === undefined ? 0 : body.value.split('\n').length;
+}
+
+/**
+ * 该区块里下一条条目的 id：`<kind>-<n>` 形态中现有最大的 n 加一，**不重排既有 id**
+ * （与 `planEntryMove` 同口径——diff 靠 id 对齐同一条记录，重排会让 3.1-06 的读数说谎）。
+ * @param section 目标区块
+ * @returns 未被占用的新 id；非 `<kind>-<n>` 形态的既有 id 不参与取最大
+ */
+function nextEntryId(section: Section): string {
+  const highest = section.entries.reduce((max, entry) => {
+    const tail = entry.id.startsWith(`${section.kind}-`) ? entry.id.slice(section.kind.length + 1) : '';
+    return /^\d+$/u.test(tail) ? Math.max(max, Number(tail)) : max;
+  }, 0);
+  const used = new Set(section.entries.map((entry) => entry.id));
+  let index = highest + 1;
+  while (used.has(`${section.kind}-${String(index)}`)) index += 1;
+  return `${section.kind}-${String(index)}`;
+}
+
+/**
+ * 把一截行装配成一条新条目：首行按**导入时同一条规则**装抬头，其余行作正文。
+ *
+ * 「同一条规则」不是形容词——剥装饰与拆抬头都走 `header.ts` 那一处真相（plan 03 §13 第 2 条：
+ * 编辑器里不许有第二份抬头装配），所以 `（二）某公司 - 前端开发 2021.03 - 2024.06` 这一行
+ * 在导入与在这里得到的是同样的三个字段。简介与技能没有抬头这一说（导入时整块就是正文），照旧只给正文键。
+ * @param kind 区块种类（决定 `makeField` 的事实锁定判定与要不要装抬头）
+ * @param id 新条目 id
+ * @param lines 拆出来的那半截行（第一行是它的标题行）
+ * @param bodyKey 正文键，沿用**被拆的那一格**，不按 kind 重新猜
+ * @returns 一条新条目；认不出抬头就少给那几个字段，不编（§8.4 事实锁定同一条口径）
+ */
+function assembleEntry(kind: SectionKind, id: string, lines: readonly string[], bodyKey: string): Entry {
+  if (kind === 'summary' || kind === 'skills') {
+    return { id, fields: [makeField(kind, bodyKey, lines.join('\n'))] };
+  }
+  const [headerLine = '', ...bodyLines] = lines;
+  const { period, titles } = splitHeader(stripLineMarkup(headerLine));
+  const fields: Field[] = kind === 'education' ? educationFields(titles) : companyRoleFields(kind, titles);
+  const normalized = period === null ? null : periodText(period);
+  if (normalized !== null) fields.push(makeField(kind, 'period', normalized));
+  const body = bodyLines.join('\n');
+  if (body !== '') fields.push(makeField(kind, bodyKey, body));
+  return { id, fields };
+}
+
+/**
+ * 把一条条目从正文的第 bodyLineIndex 行之后拆成两条（spec 3.6-10 的拆半边，裁定㉗ 第 1 条后半句）。
+ *
+ * 拆点只给**行号**而不是文本：正文不过进程边界（`bridge.ts` 那十行白名单的口径），界面能递的只有整数。
+ * @param sections 当前区块序列（不被修改）
+ * @param sectionId 条目所在区块 id
+ * @param entryId 要拆的条目 id
+ * @param bodyLineIndex 留在**前一条**里的行数（从 1 起算；1 表示第一行之后断开，必须小于正文总行数）
+ * @returns 通过给新的区块序列（新条目紧跟原条目，原条目只剩前半截正文，其余字段原样）；
+ *          查无区块/条目给 `unknown-section` / `unknown-entry`，这一条没有正文字段给 `no-body`，
+ *          行号非整数或不在 1…行数-1 之内给 `index-out-of-range`
+ */
+export function planEntrySplit(
+  sections: readonly Section[],
+  sectionId: string,
+  entryId: string,
+  bodyLineIndex: number,
+): EditorOutcome<Section[]> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  const section = sections[sectionIndex] as Section;
+  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
+  if (entryIndex < 0) {
+    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
+  }
+  const entry = section.entries[entryIndex] as Entry;
+  const body = bodyFieldOf(entry);
+  if (body === undefined) {
+    return reject('no-body', `条目 ${entryId} 没有正文字段（${GENERATION_EDITABLE_KEYS.join('/')} 都不在这一条里）`);
+  }
+  const lines = body.value.split('\n');
+  if (!Number.isInteger(bodyLineIndex) || bodyLineIndex < 1 || bodyLineIndex >= lines.length) {
+    return reject(
+      'index-out-of-range',
+      `拆点 ${String(bodyLineIndex)} 不在 1…${String(Math.max(lines.length - 1, 0))} 之内（这一条正文共 ${String(lines.length)} 行）`,
+    );
+  }
+  const headValue = lines.slice(0, bodyLineIndex).join('\n');
+  const head: Entry = {
+    ...entry,
+    fields: entry.fields.map((field) => (field === body ? { ...field, value: headValue } : field)),
+  };
+  const tail = assembleEntry(section.kind, nextEntryId(section), lines.slice(bodyLineIndex), body.key);
+  const nextEntries = [...section.entries.slice(0, entryIndex), head, tail, ...section.entries.slice(entryIndex + 1)];
+  return {
+    ok: true,
+    value: sections.map((candidate, position) =>
+      position === sectionIndex ? { ...candidate, entries: nextEntries } : candidate,
+    ),
+  };
+}
+
+/**
+ * 把一条条目并回**同区块的上一条**（spec 3.6-10 的合并半边）。
+ *
+ * 被合掉那条**除正文以外的每一格按原样追加为前一条的正文行**——不是丢弃、也不是覆盖前一条已有的值
+ * （plan 03 §13 第 3 条：事实锁定防的是模型**编造**事实，而编辑动作**吞掉**人写下的事实同样严重。
+ * 重复看得见、再合一次修得掉，丢失看不见、修不掉）。两截正文之间补一个换行。
+ * @param sections 当前区块序列（不被修改）
+ * @param sectionId 条目所在区块 id
+ * @param entryId 要并走的条目 id
+ * @returns 通过给新的区块序列（前一条正文变长，被并走的那条消失，**其余条目 id 一字不动**）；
+ *          查无区块/条目给 `unknown-section` / `unknown-entry`，它是区块第一条给 `nothing-to-merge`
+ */
+export function planEntryMerge(
+  sections: readonly Section[],
+  sectionId: string,
+  entryId: string,
+): EditorOutcome<Section[]> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  const section = sections[sectionIndex] as Section;
+  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
+  if (entryIndex < 0) {
+    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
+  }
+  if (entryIndex === 0) {
+    return reject('nothing-to-merge', `条目 ${entryId} 是区块 ${sectionId} 里的第一条，没有上一条可以并`);
+  }
+  const previous = section.entries[entryIndex - 1] as Entry;
+  const target = section.entries[entryIndex] as Entry;
+  const previousBody = bodyFieldOf(previous);
+  const targetBody = bodyFieldOf(target);
+  // 除正文以外的格子按**存值顺序**逐格成行（`company`/`role`/`period`，教育则是 school/degree/major），
+  // 这就是"按原样追加"：连归一化都不做，因为这一格是人写下的话。
+  const carried = target.fields.filter((field) => field !== targetBody).map((field) => field.value);
+  const mergedValue = [previousBody?.value, ...carried, targetBody?.value]
+    .filter((part): part is string => part !== undefined && part !== '')
+    .join('\n');
+  const merged: Entry =
+    previousBody === undefined
+      ? {
+          ...previous,
+          fields: [
+            ...previous.fields,
+            makeField(section.kind, targetBody?.key ?? bodyKeyOf(section.kind), mergedValue),
+          ],
+        }
+      : {
+          ...previous,
+          fields: previous.fields.map((field) => (field === previousBody ? { ...field, value: mergedValue } : field)),
+        };
+  const nextEntries = [...section.entries.slice(0, entryIndex - 1), merged, ...section.entries.slice(entryIndex + 1)];
+  return {
+    ok: true,
+    value: sections.map((candidate, position) =>
+      position === sectionIndex ? { ...candidate, entries: nextEntries } : candidate,
     ),
   };
 }

@@ -271,3 +271,16 @@ export function makeField(kind: SectionKind, key: string, value: string): Field 
  * 它由 4.5-11 的逐项人工接受 / 回退兜底——这也是 spec 把接受动作放在界面而不是让机器自动入库的原因。
  */
 export const GENERATION_EDITABLE_KEYS = ['text', 'achievement', 'description'] as const;
+
+/**
+ * 某一类区块的正文落在哪个字段键上（装配与编辑共用的同一份落点）。
+ *
+ * 这条事实出现过两次就必须抽成一处（AGENTS.md §2.2）：解析轨装配条目时按它写正文
+ * （`resume-kb/src/sections.ts` 的 `buildSection`），编辑器拆与合时也按它找回正文那一格（3.6-10）。
+ * @param kind 区块种类
+ * @returns 正文键：简介与技能是 `text`，教育是 `description`，经历 / 项目 / 校园是 `achievement`
+ */
+export function bodyKeyOf(kind: SectionKind): string {
+  if (kind === 'summary' || kind === 'skills') return 'text';
+  return kind === 'education' ? 'description' : 'achievement';
+}
