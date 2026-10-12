@@ -1,0 +1,47 @@
+4.9-05 / 4.9-09 的真实链半边读数（2026-10-12 收口，书写指引在端到端那一趟里到底吃没吃）
+================================================================================
+
+判据：spec `docs/specs/04-resume-kb/spec.md` 的 4.9-05（生成时自动调用，值真的递到传输层）与
+4.9-09（必备信息逐项可核对）。单测那一半已在 `packages/resume-kb/src/generate-service.test.ts`
+与 `packages/main/src/generate-link.test.ts` 里兑现；这一份补的是**真实链上那一趟**的读数。
+
+命令（§7.2 全程零出网：简历是本地 PDF，JD 来自 fixture 10233，渲染层是本机构建的 dist）：
+
+    pnpm e2e:resume-jd --userdata-src tmp/dev-userdata    # E2E_EXIT=0，链路结论：段 1/2/3/4/4b 全过
+
+一、这一趟实际带上的书写指引（`scripts/e2e-resume-jd.ts` 新增的那一行读数，逐字）：
+
+    · 生成读数：outcome=rewritten modelStatus=merged model=auto 改写 7 处 重排 20 项 证据 14 条 事实校验 ok=true（违规 0）
+    · 模型通道原因：无
+    · 书写指引：builtin · 1288 字 · 必备信息 改前 8/12 齐（name:present phone:present email:present location:weak
+      objective:weak experience:present period:present education:missing skills:present project:present
+      quantified:present length:weak） → 改后 8/12 齐（同上逐项）
+
+    PASS · 段 4b 模型通道按 JD 给出改写并被写入（不是仅重排的保守回落） —— modelStatus=merged 采纳改写 7 处 · 原因 无
+
+二、台账那一半（同一份 userData 的 SQLite，`resume_generations` 全文只有这一行）：
+
+    {"id":"gen-4b999a08-dbdd-47f9-b192-0f00ca9716a1","doc_id":"resume-366c43b91025","jd_id":"1002",
+     "prompt_version":"resume-generate-v4","model":"auto","model_status":"merged","status":"rewritten","retried":0}
+    resume_skill_override 行数 = 0
+
+三、这几行读数说得出什么、说不出什么
+
+- `书写指引：builtin · 1288 字` + `prompt_version=resume-generate-v4` + `resume_skill_override` 零行：
+  生成通道**自动**取了内置正文（不是"界面里看得到但那一趟没吃"），且来源是内置而非本地覆盖——
+  与活体那一份（`4.9-07-09-10-live-readings.txt` 的"还没存过 / 1288 字"）对上同一字数。
+- `改写 7 处 · 事实校验 ok=true（违规 0）`：指引的作用面是**措辞**，7 处改写全部通过事实锁定并写进产物
+  （段 4 的产物 hash 从 `c8d47f9d98d5` 变成 `35b1e7a3…`）。这就是"自动优化简历"在真实链上的形态。
+- `改前 8/12 → 改后 8/12`（逐项状态一字未动）是**预期结果，不是没优化**：
+  `education:missing` 与 `objective:weak` 这些缺口只能由人来补，模型按 §8.5 不许编造公司/职位/学历，
+  所以一次正确的优化不会把缺的那四项凭空变齐。同一形状在反向证据那一格（4.9-06）也被钉住：
+  把指引写成"补几个数字/加一段联系方式"，事实校验仍整条丢弃。
+- `length:weak / location:weak` 两份读数里同源，判读见 `4.9-07-09-10-live-readings.txt`
+  （城市令牌在这份简历里从第 45 行以后才出现，抬头那一行没有——不是抽取缺陷）。
+
+四、第一条那趟（18:18 起）的如实记账
+
+同一条命令的第一趟在段 4b 的模型调用在飞时以 `E2E_EXIT=13`（`unsettled top-level await`）收场，
+前一行是 `· 会话进程退出 code=0`——那个时刻工作树里另有**一个并行会话的 e2e 实例**在跑
+（`--pdf tmp/64/mini-resume-en.pdf`，两份实例的 userData 目录与 CDP 端口各自独立但同期启动）。
+这是环境事件，不是产品结局：第二趟从头到尾没有并发实例，链路全过，上面所有读数出自第二趟。

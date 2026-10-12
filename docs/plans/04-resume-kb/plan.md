@@ -2011,6 +2011,15 @@ project: entries=1  company(7) role(26) period(12) achievement(2963)
 `skill.test.ts` 三份在 0d16725 那趟提交里带着未换行的长行进了主干，prettier 补齐后单独一个 style 提交）·
 `pnpm test` EXIT=0（23 个包全过，`packages/resume-kb` 20 文件 / `packages/main` 13 文件 91 测试）。
 
+**真实链那一半（4.9-05 / 4.9-09 的活体侧，2026-10-12 18:24 收口）**：`scripts/e2e-resume-jd.ts` 补了一行读数
+（这一趟实际吃的指引来源与字数 + 必备信息在改写前后的逐项 `id:status`，正文不进日志），
+`pnpm e2e:resume-jd` 跑到段 4b 全过——`书写指引：builtin · 1288 字`、`outcome=rewritten modelStatus=merged 改写 7 处`
+`事实校验 ok=true（违规 0）`、`resume.generate.run 用时 270.6s`，同一份 userData 的台账
+`resume_generations` 那一行是 `prompt_version=resume-generate-v4` 且 `resume_skill_override` 零行。
+**改前 8/12 → 改后 8/12 逐项不动是预期结果**：指引的作用面是措辞，缺的那四项只能由人补，
+模型按 §8.5 不许编造学历——这一格读数逐字与判定理由见 `docs/acceptance/04-resume-kb/4.9-05-live-chain-reading.txt`
+（同文件还如实记了第一趟以 `E2E_EXIT=13` 收场的环境原因，它不是产品结局）。
+
 **两条后续项（都不是本片判据缺口）**：① 真实那份的 `objective` / `length` 两格显示 weak，
 要人补意向句与压篇幅，代码侧不发假信号也不代填；② `education:missing` 那一格在真实简历上是**真缺**
 （抬头之后没有教育区块），清单显示 8/12 齐与"必备那几档还差 2 项"就是这一份的成色读数。
