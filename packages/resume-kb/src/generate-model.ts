@@ -1,5 +1,5 @@
 /**
- * 简历定制内容的**模型腿**纯函数面（spec 4.5-01 / 03 / 05 / 07 的代码半边，plan §4.5 判据四 / 六）。
+ * 简历定制内容的**模型通道**纯函数面（spec 4.5-01 / 03 / 05 / 07 的代码半边，plan §4.5 判据四 / 六）。
  *
  * 这一层不认识 cordis、不开连接、不发请求（同 4.4-b 的 `requirements-model.ts`）：它只做三件事——
  * 把要改写的散文递给模型看、把它的回答读成一份可判的改写清单、把清单装回文档。
@@ -36,7 +36,7 @@ export interface GeneratedRewrite {
   readonly sectionId: string;
   readonly entryId: string;
   readonly fieldKey: string;
-  /** 清单里那一处的原正文（位置对不对的第二道确认，也是校验腿的基线侧）。 */
+  /** 清单里那一处的原正文（位置对不对的第二道确认，也是事实校验的基线侧）。 */
   readonly originalText: string;
   readonly rewrittenText: string;
 }
@@ -78,13 +78,30 @@ function locationKeyOf(location: { sectionId: string; entryId: string; fieldKey:
 }
 
 /**
+ * 这一处改写的长度上限：配置值与"原文的 1.5 倍"里取宽的那个。
+ *
+ * 为什么不能只用配置值（实测 2026-10-12，真实简历 PDF）：那份文档的三个改写目标是
+ * **1297 / 2963 / 381 字**，而 `maxRewriteChars` 缺省 600 的注释写的是"一整段经历成果通常在
+ * 200 字以内"——那是 fixture 的读数。按字面上限判，模型如实改写长段落也**必然**整条丢弃，
+ * 于是模型通道在任何一份真实简历上都是 0 处改写，界面上看起来像"这个功能没做"。
+ * 1.5 倍给的是"贴 JD 补一句上下文"的余量；真正的跑飞（几十倍长度）仍然被这条拦下。
+ * @param originalLength 清单里那一处的原文字数
+ * @param maxRewriteChars 配置值，作为下限兜住短原文（20 字的格子不许长成一个短篇）
+ * @returns 该位置允许的改写字数
+ */
+function lengthLimitFor(originalLength: number, maxRewriteChars: number): number {
+  return Math.max(maxRewriteChars, Math.ceil(originalLength * 1.5));
+}
+
+/**
  * 读一份模型输出：解析 JSON、逐条校验契约、逐条对回待改写清单。
  *
- * 与 4.4 的拆解腿同一个口径：**能对回本地方位的才收**，收不下就计数并给一句可播报的原因，
+ * 与 4.4 的拆解通道同一个口径：**能对回本地方位的才收**，收不下就计数并给一句可播报的原因，
  * 不"就近猜位置"，也不把整份回答因为一条乱写就全丢（那样一条幻觉会打断合法改写）。
  * @param rawText 模型回复正文（可能带代码围栏）
  * @param targets 提示词里给出的那份清单（同一个数组，位置才对得回去）
- * @param maxRewriteChars 单段改写的长度上限（模型跑飞时的一句保险，值来自 `kb.generate` 配置）
+ * @param maxRewriteChars 单段改写的长度下限（模型跑飞时的一句保险，值来自 `kb.generate` 配置；
+ *                        长原文按 `lengthLimitFor` 放宽，见那里的实测读数）
  * @returns 可安装的改写 + 四个丢弃计数；整份不可用时 `reason` 非 null 且 `accepted` 为空
  */
 export function readModelRewrites(
@@ -120,7 +137,7 @@ export function readModelRewrites(
 
   for (const claim of claims) {
     const parsed = rewriteSchema.safeParse(claim);
-    if (!parsed.success || parsed.data.text.length > maxRewriteChars) {
+    if (!parsed.success) {
       droppedInvalid += 1;
       continue;
     }
@@ -129,6 +146,11 @@ export function readModelRewrites(
     // 位置对不上清单 = 模型在指一个我们没给它的位置（多半是它自己拼的 id），整条丢。
     if (target === undefined) {
       droppedUnknown += 1;
+      continue;
+    }
+    // 长度判在位置之后：上限要按**这一处的原文**算（见 `lengthLimitFor` 的实测读数）。
+    if (parsed.data.text.length > lengthLimitFor(target.text.length, maxRewriteChars)) {
+      droppedInvalid += 1;
       continue;
     }
     if (taken.has(key)) {

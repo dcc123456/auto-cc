@@ -57,6 +57,39 @@ export function describeError(status: number, body: string): string {
   return `对端返回 ${String(status)}：${clipped}`;
 }
 
+/**
+ * 把「发不出去」的异常链展开成一句能定位的文案。
+ *
+ * 实测（2026-10-12，真实简历全链路第 15 轮）：`fetch` 的传输层失败在 Node/undici 下是一串
+ * 包了两层的壳——顶层永远是一句 `TypeError: fetch failed`，真正的原因（`ECONNRESET`、
+ * `UND_ERR_SOCKET`、`UND_ERR_HEADERS_TIMEOUT` 这类）藏在 `cause` 里。原实现只取顶层
+ * `cause.message`，于是界面与读数一律写着"模型请求发不出去：fetch failed"，
+ * **分不清是断网、对端掐连接、还是响应头超时**，这一条判据就无法复盘。
+ * @param cause `fetch` 抛出的原始异常（未知形状：可能是 Error、可能是任意值）
+ * @returns `text` 是拼进错误文案的链条（外层消息 + 内层的 code/message，最多三层），
+ *          `codes` 是链上取到的错误码数组（进 `details.codes`，给机检与日志按码聚合）
+ */
+export function describeNetworkCause(cause: unknown): { text: string; codes: string[] } {
+  const messages: string[] = [];
+  const codes: string[] = [];
+  let cursor: unknown = cause;
+  // 三层封顶：再深的链只会把无关的框架内部栈搬进界面，而真实原因总在头两层里。
+  // 链上只取 Error 的 message 与字符串本身（`cause: 'socket closed'` 这种），其余形状就此停下。
+  for (let depth = 0; depth < 3; depth += 1) {
+    const message = cursor instanceof Error ? cursor.message : typeof cursor === 'string' ? cursor : undefined;
+    if (message === undefined) break;
+    const trimmed = message.trim();
+    // 顶层的 `fetch failed` 只有配上内层的码才是一句人话，所以两条都留、由下面去重拼接。
+    if (trimmed !== '' && !messages.includes(trimmed)) messages.push(trimmed);
+    if (!(cursor instanceof Error)) break;
+    const code = (cursor as Error & { code?: unknown }).code;
+    if (typeof code === 'string' && !codes.includes(code)) codes.push(code);
+    cursor = cursor.cause;
+  }
+  const text = messages.join('：');
+  return { text: codes.length === 0 ? text : `${text}（${codes.join(' / ')}）`, codes };
+}
+
 /** 一次 JSON 请求的实参（`method` 省略时是 POST）。 */
 export interface JsonRequest {
   /** 完整地址（由 `joinEndpoint` 拼出），也进错误详情，便于界面指出打的是哪个端点。 */
@@ -104,13 +137,16 @@ export async function requestJson(request: JsonRequest): Promise<unknown> {
     });
   } catch (cause) {
     const isTimeout = cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
+    const network = describeNetworkCause(cause);
     throw new AppError(
       'LLM_REQUEST_FAILED',
       isTimeout
         ? `${request.label}超时（${String(request.timeoutMs)}ms）`
-        : `${request.label}发不出去：${cause instanceof Error ? cause.message : String(cause)}`,
+        : `${request.label}发不出去：${network.text}`,
       request.source,
-      { endpoint: request.endpoint, reason: isTimeout ? 'timeout' : 'network' },
+      isTimeout
+        ? { endpoint: request.endpoint, reason: 'timeout' }
+        : { endpoint: request.endpoint, reason: 'network', codes: network.codes },
     );
   }
   if (!response.ok) {
@@ -132,7 +168,7 @@ export async function requestJson(request: JsonRequest): Promise<unknown> {
 }
 
 /**
- * 发一次 JSON POST（chat completion 与 embeddings 那两条腿）。
+ * 发一次 JSON POST（chat completion 与 embeddings 那两条通道）。
  * @param request 见 `JsonPost`
  * @returns 对端 JSON
  * @throws 同 `requestJson`

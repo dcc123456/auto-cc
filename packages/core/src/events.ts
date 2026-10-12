@@ -695,6 +695,11 @@ export type ChatRequestView = {
   messages: Array<{ role: 'system' | 'user'; content: string }>;
   maxTokens?: number | null;
   temperature?: number | null;
+  /**
+   * 单次请求的超时覆盖（毫秒）：慢的那一趟（整份简历改写散文，实测 369.6s）自己给值，
+   * 快的那些继续用配置里的通道缺省（JD 拆解实测 32.7s），不让一个数同时迁就两头。
+   */
+  timeoutMs?: number | null;
 };
 
 /** 一次对话补全的结果；token 用量只有模型侧才说得清，属 `llm.chat` 内部，不进本询问面。 */
@@ -705,7 +710,7 @@ export type ChatCompletionView = { text: string; model: string };
  *
  * 为什么与 `EmbedGateway` 同套路而不是像 `outbound.script` 那样 `static inject`：
  * 话术生成没有"不装模型也能用"的形态（那里注释写明"装上半个不如不装"），而 JD 拆解**有**——
- * 词面腿（4.4-a）就是它的离线基线。硬注入会让摘掉 `llm` 包连带把 `kb.gap` 降成 PENDING，
+ * 词面通道（4.4-a）就是它的离线基线。硬注入会让摘掉 `llm` 包连带把 `kb.gap` 降成 PENDING，
  * 等于把"增强"做成"必需"（plan §4.4-b 证据 [2]）。
  */
 export interface ChatGateway {

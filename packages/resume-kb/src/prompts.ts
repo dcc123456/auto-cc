@@ -3,8 +3,8 @@
  *
  * 本包内**唯一**允许出现「发给模型的消息字面量」与提示词版本常量的文件，
  * 由 `scripts/check-prompts.ts` 机检（别处出现 `role: 'system'` 的消息对象或 `*_PROMPT_VERSION`
- * 声明即 lint 失败）。4.6-a 之前它们是散在两个模型腿文件里的（`generate-model.ts` 的改写腿、
- * `requirements-model.ts` 的拆解腿），本次**只搬家、不改一个字**——行为零变化由既有的
+ * 声明即 lint 失败）。4.6-a 之前它们是散在两个模型通道文件里的（`generate-model.ts` 的改写那一支、
+ * `requirements-model.ts` 的拆解那一支），本次**只搬家、不改一个字**——行为零变化由既有的
  * 4.4 / 4.5 用例（81 + 8 例）复跑自证，而不是靠"看起来一样"。
  *
  * 为什么要收在一处：这两段约束就是 §8.4 事实锁定红线的**唯一一处自然语言表达**（其余全在数据结构里：
@@ -16,16 +16,21 @@
 import type { GenerationField } from './fact-check.js';
 
 /**
- * JD 拆解腿的提示词版本（同 2.5-09 的 `scriptVersion` 与 4.4-a 的 `lexiconVersion` 口径）：
+ * JD 拆解通道的提示词版本（同 2.5-09 的 `scriptVersion` 与 4.4-a 的 `lexiconVersion` 口径）：
  * 改提示词必须同时改它，否则 4.4-07 复盘时分不清某份报告是哪一版产的。
  */
 export const REQUIREMENT_PROMPT_VERSION = 'jdreq-v1';
 
 /**
- * 生成腿的提示词版本（沿用上面的 `jdreq-v1` 与 2.5-09 的 `scriptVersion` 口径）：
+ * 生成通道的提示词版本（沿用上面的 `jdreq-v1` 与 2.5-09 的 `scriptVersion` 口径）：
  * 改提示词必须同时改它，否则 4.5-10 复盘时分不清某份产物是哪一版产的。
+ *
+ * v2（2026-10-12）改的是规则第 5 条：原先要求"无话可改就把原文逐字返回"，于是模型必须把清单里
+ * 每一段**整段回显**一遍。真实简历上一份四区块的文档（三条改写目标 1297 / 2963 / 381 字）因此
+ * 要生成约 4 600 字：512 token 被截断成非法 JSON，抬到 4096 token 一次要等 6～9 分钟（本机活体读数）。
+ * 现在只回真正改过的那几条，回复量由"整份清单"变成"改动的那几段"。
  */
-export const GENERATE_PROMPT_VERSION = 'resume-generate-v1';
+export const GENERATE_PROMPT_VERSION = 'resume-generate-v2';
 
 /** 发给模型的消息序列形状（与 `ChatGateway` 的请求侧一致，这里只拼字符串、不碰传输）。 */
 export type PromptMessages = Array<{ role: 'system' | 'user'; content: string }>;
@@ -96,7 +101,7 @@ export function buildGenerateMessages(
     '2. 每条必须原样回填我给它的 sectionId / entryId / fieldKey 三个值，text 是这一整段的新写法。\n' +
     '3. 数字与百分比一个都不许增减、不许改写成「大幅 / 显著」这类模糊词，也不许反过来凭空补一个数。\n' +
     '4. 公司名、学校名、专业名、职位名、时间范围一律照抄我给过的写法，不许出现任何新的机构名或人名。\n' +
-    '5. 只在确实能更贴合岗位要求时改写；无话可改就把原文逐字返回。\n' +
+    '5. 只在确实能更贴合岗位要求时改写；**无话可改的条目不要回**（回了也只会整条丢弃），只回你真正动过的那几条。\n' +
     '6. 只改写清单里的位置，清单外的 sectionId / entryId / fieldKey 会被整条丢弃。' +
     retryAppendix;
   const listed = targets.map((target) => ({

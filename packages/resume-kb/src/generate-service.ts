@@ -20,7 +20,7 @@
  * 3. **拒绝也落一行记录**（判据三）：`resume_generations`（号段 15）存的是路径、计数、状态与证据 id，
  *    **不存任何正文**——被拒内容整段留在库里会诱导"绕过闸门自己捞出来用"，
  *    而 4.5-10 要的复盘只需要"哪一版提示词、哪个模型、动了哪些位置、为什么被拒"。
- * 4. **模型腿不可用不等于没产物**（判据四）：退回"仅重排、所有字段照抄"的保守版本，
+ * 4. **模型通道不可用不等于没产物**（判据四）：退回"仅重排、所有字段照抄"的保守版本，
  *    它必然通过校验（什么都没动），但 `modelStatus` / `modelReason` 会一路带到界面上，
  *    降级必须可见——与 4.6-06「模板话术标识『模板』」同一条口径。
  * 5. **不接额度闸门**（判据五）：生成既不在真实平台上留痕迹也不花钱（未配置时纯本地），
@@ -81,9 +81,18 @@ export const RESUME_GENERATION_MIGRATION_VERSION = 15;
 export const MAX_PENDING_PROPOSALS = 8;
 
 /**
+ * 模型通道在"连接断了"这一种结局上最多重发几次（只作用于 `reason=network`，不含超时）。
+ *
+ * 实测（2026-10-12，同一份真实简历 + 同一份 JD、发货默认配置）：第 14 轮 369.6s 落地并写出 1 处改写，
+ * 第 15 轮 356.2s 被 `fetch failed` 掐在半路。这一趟要等六分钟，一次抖动就把整趟生成退成保守回落，
+ * 而重发是这条通道上唯一不需要用户参与的补救；取 1 而不是更多，是因为上限直接乘在等待时间上。
+ */
+export const MODEL_LEG_NETWORK_RETRIES = 1;
+
+/**
  * 一次生成的三种结局。
  *
- * 与模型腿的五态（`GAP_MODEL_STATUSES`）是**两个维度**：五态说"模型那条腿这次怎么样了"，
+ * 与模型通道的五态（`GAP_MODEL_STATUSES`）是**两个维度**：五态说"模型那条通道这次怎么样了"，
  * 三态说"用户拿到了什么"。`reorder_only` 可能来自 `unavailable`（没配模型）也可能来自 `disabled`
  * （配置关掉），把它们混成一列会让 4.5-09 的"降级可见"变成"降级可读成一堆故障"。
  */
@@ -123,27 +132,45 @@ const resumeGenerationsMigration = {
  */
 export const kbGenerateSchema = z.strictObject({
   /**
-   * 是否允许问模型腿。关掉后本服务只做重排、所有字段照抄（4.5-09 的纯本地路径，
+   * 是否允许问模型通道。关掉后本服务只做重排、所有字段照抄（4.5-09 的纯本地路径，
    * 离线演示与"这篇我不想发出去"都直接把这关递给用户）。
    */
   allowModelLeg: z.boolean().default(true),
   /**
    * 单次回复的长度上限（token）。
    *
-   * 原先的 2000 是按"够写完但不许跑飞"估的，实测证明这个估值把这条腿关死了（2026-10-09 本机活体，
-   * 对话腿绑 `ark-code-latest`）：同一份 JD + 同一份工作副本，`maxTokens=2000` 在 120s 的超时顶下
-   * **一次都不回**（结局恒为 `reorder_only`、改写 0 处），降到 512 用 118.5s 回 3 处改写、
-   * 256 用 111.5s 回 2 处——这条端点的耗时随请求的回复上限一起涨，2000 那一档落在没人等得到的时间里。
-   * 512 是能真正拿到改写行的那一档（清单里每段散文 100～600 字，两三段改写就写完），跑飞另有
-   * `maxRewriteChars` 那一格拦着，不靠上限兜底。
+   * 两批实测把这一格从 2000 推到 512 再推回 4096，两批都是**同一条通道的两种语料**：
+   * ① 2026-10-09（本机活体，对话通道绑 `ark-code-latest`，语料是仓库里那种每段 100～600 字的简历）：
+   * `maxTokens=2000` 在 120s 的超时顶下一次都不回（结局恒为 `reorder_only`、改写 0 处），
+   * 512 用 118.5s 回 3 处改写、256 用 111.5s 回 2 处——这条端点的耗时随回复上限一起涨。
+   * ② 2026-10-12（同一端点，语料换成**用户手里那份真实简历 PDF**：正文 5196 字，三个改写目标
+   * 1297 / 2963 / 381 字）：512 那一档在 180s 的通道超时顶下 `modelStatus=failed · 模型请求超时`，
+   * 抬到 4096 后 369.6s 回了 1 处改写并过事实校验。
+   * 也就是说 512 那次的"能拿到改写行"是**短语料**的读数，按它发货就等于让真实简历永远走保守回落。
+   * 4096 是按"改写一整段 2963 字的成果"给的；跑飞另有 `maxRewriteChars` 与长度校验拦着，不靠上限兜底。
    */
-  modelMaxTokens: z.number().int().min(256).max(8192).default(512),
+  modelMaxTokens: z.number().int().min(256).max(8192).default(4096),
+  /**
+   * 这一趟自己的请求超时（毫秒），随请求递给 `llm.chat`（单次覆盖，不动通道缺省）。
+   *
+   * 为什么不直接把 `llm.timeoutMs` 抬到六分钟：同一个端点上各条通道差着一个量级——实测 JD 拆解
+   * （`kb.gap.report`）32.7s，而整份真实简历的改写要 369.6s。抬全局会让对话与工作流那些快通道
+   * 一起变成"失败前静默等七分钟"，那是把一条慢通道的实测延迟摊给所有人。
+   * 420000 = 369.6s 之上留一成多的余量（慢端点抖一次也不至于让这一趟白跑）。
+   */
+  modelTimeoutMs: z.number().int().min(5000).max(600000).default(420000),
   /**
    * 采样温度，取 0。与"文案要有花样"相反，这里要的是**可复盘**：同一份 JD + 同一份工作副本
    * 重跑一次应当得到同一份产物，否则 4.5-10 的记录行无法解释自己（用户想更活可以在配置里调高）。
    */
   modelTemperature: z.number().min(0).max(2).default(0),
-  /** 单段改写的长度上限（字符）。模型跑飞时把整段 JD 抄回来的那类，按契约不合格丢弃而不是收下。 */
+  /**
+   * 单段改写的长度**下限式**上限（字符）：模型跑飞时把整段 JD 抄回来的那类按契约丢弃，而不是收下。
+   *
+   * 它是**地板不是天花板**——原文本身就长时按原文的 1.5 倍放宽（`generate-model.ts` 的
+   * `lengthLimitFor`，2026-10-12 实测：真实简历的一整段成果有 2963 字，按 600 的字面上限判，
+   * 模型如实改写也必然整条丢弃，这条通道在任何一份真实简历上都是 0 处改写）。
+   */
   maxRewriteChars: z.number().int().min(50).max(4000).default(600),
 });
 
@@ -348,7 +375,7 @@ interface PendingProposal {
   readonly view: GenerationView;
 }
 
-/** 一次模型腿尝试的内部结果（`askModel` 的返回）。 */
+/** 一次模型通道尝试的内部结果（`askModel` 的返回）。 */
 interface RewriteAttempt {
   status: GapModelStatus;
   reason: string | null;
@@ -418,13 +445,13 @@ export class ResumeGenerateService extends Service {
         id: 'resume.generate.run',
         titleKey: 'agent.tool.labels.generateRun',
         description:
-          '按一段 JD 定制这份简历的内容：区块与条目顺序由知识库证据强度算出（不进模型），简介 / 经历成果 / 教育描述三类散文段交模型改写，改写后必过三条确定性事实校验（事实字段原样、数值多重集守恒、具名机构回查），不过则带违规明细重试一次、仍不过就拒绝产出；模型腿不可用时退回「仅重排、不改写」的保守版本并在 modelStatus 里给出原因。只产出提议态文档与证据 id，不写工作副本、不接外发额度闸门',
+          '按一段 JD 定制这份简历的内容：区块与条目顺序由知识库证据强度算出（不进模型），简介 / 经历成果 / 教育描述三类散文段交模型改写，改写后必过三条确定性事实校验（事实字段原样、数值多重集守恒、具名机构回查），不过则带违规明细重试一次、仍不过就拒绝产出；模型通道不可用时退回「仅重排、不改写」的保守版本并在 modelStatus 里给出原因。只产出提议态文档与证据 id，不写工作副本、不接外发额度闸门',
         input: z.strictObject({
           jdText: z.string(),
           docId: z.string().min(1).optional(),
           jdId: z.string().min(1).nullable().optional(),
         }),
-        // `local-write`：本工具往生成记录表写一行，且（模型腿已配置时）把待改写散文发给模型。
+        // `local-write`：本工具往生成记录表写一行，且（模型通道已配置时）把待改写散文发给模型。
         // 需要批准是有意的——真正的改写落进简历是界面上逐项接受那一步，但出网与建档这一步不该被静默做掉。
         effect: 'local-write',
         requiresConfirmation: true,
@@ -449,10 +476,11 @@ export class ResumeGenerateService extends Service {
     this.ctx.logger.info(
       `[kb-generate] resume_generations 就绪，迁移号段 ${String(RESUME_GENERATION_MIGRATION_VERSION)}` +
         ` · 可改写键 ${GENERATION_EDITABLE_KEYS.join(' / ')}（其余字段一律原样）` +
-        ` · 模型腿 ${this.options.allowModelLeg ? '开' : '关（仅重排）'}` +
+        ` · 模型通道 ${this.options.allowModelLeg ? '开' : '关（仅重排）'}` +
         ` maxTokens=${String(this.options.modelMaxTokens)} temp=${String(this.options.modelTemperature)}` +
-        ` 单段上限=${String(this.options.maxRewriteChars)} 字` +
-        ` · 缺口腿 ${hasGap ? '已装配' : '未装配（调用时报 KB_LIBRARY_MISSING）'}` +
+        ` 单次超时=${String(this.options.modelTimeoutMs)}ms` +
+        ` 单段上限=${String(this.options.maxRewriteChars)} 字起（原文更长时按原文 1.5 倍放宽）` +
+        ` · 缺口通道 ${hasGap ? '已装配' : '未装配（调用时报 KB_LIBRARY_MISSING）'}` +
         ` · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
@@ -716,9 +744,9 @@ export class ResumeGenerateService extends Service {
   }
 
   /**
-   * 问一次模型腿，把五种结局收敛成一个 `RewriteAttempt`，不在这里决定要不要采纳它的改写。
+   * 问一次模型通道，把五种结局收敛成一个 `RewriteAttempt`，不在这里决定要不要采纳它的改写。
    *
-   * 与 4.4 的拆解腿同一套不变量：除 `merged` 之外的四种结局交回来的 `rewrites` 都是空数组，
+   * 与 4.4 的拆解通道同一套不变量：除 `merged` 之外的四种结局交回来的 `rewrites` 都是空数组，
    * 于是"模型不可用"在调用方只是一句 `if`，功能不断流（4.5-09）。
    * 唯一例外仍是 `llm.chat` 抛 `INVALID_ARGUMENT`：那是我们拼错了请求，必须让它穿透。
    * @param jdText JD 正文（与提示词里那份同一个字符串）
@@ -741,10 +769,10 @@ export class ResumeGenerateService extends Service {
       dropped: 0,
     });
     if (!this.options.allowModelLeg) {
-      return fallback('disabled', null, '配置里关掉了模型腿（allowModelLeg=false），本次只重排不改写');
+      return fallback('disabled', null, '配置里关掉了模型通道（allowModelLeg=false），本次只重排不改写');
     }
     // 清单为空 = 这份工作副本里没有可改写的散文段。这一条不走 `unavailable`：
-    // 五态里没有一个词表示"无事可做"，而 `disabled` 的"本条腿这一轮没启用"是诚实的读法。
+    // 五态里没有一个词表示"无事可做"，而 `disabled` 的"本条这一轮没启用"是诚实的读法。
     if (targets.length === 0) {
       return fallback('disabled', null, '这份简历里没有可改写的散文段（技能行与事实字段不在生成轨的改写面上）');
     }
@@ -758,19 +786,44 @@ export class ResumeGenerateService extends Service {
     }
     let reply: string;
     let modelName: string;
-    try {
-      const completion = await gateway.complete({
-        messages: buildGenerateMessages(jdText, requirementLines, targets, retryAppendix ?? ''),
-        maxTokens: this.options.modelMaxTokens,
-        temperature: this.options.modelTemperature,
-      });
-      reply = completion.text;
-      // 用回复里回报的模型名，不用配置里的：换了模型的产物要能看出来是哪一款写的。
-      modelName = completion.model;
-    } catch (cause) {
-      if (cause instanceof AppError && cause.code === 'INVALID_ARGUMENT') throw cause;
-      const message = cause instanceof Error ? cause.message : String(cause);
-      return fallback('failed', configured.model, `问模型失败：${message}`);
+    let networkRestarts = 0;
+    for (;;) {
+      try {
+        const completion = await gateway.complete({
+          messages: buildGenerateMessages(jdText, requirementLines, targets, retryAppendix ?? ''),
+          maxTokens: this.options.modelMaxTokens,
+          temperature: this.options.modelTemperature,
+          // 这一趟的耗时按真实简历的散文量给（见 `modelTimeoutMs` 的实测读数），不吃通道缺省那 180s。
+          timeoutMs: this.options.modelTimeoutMs,
+        });
+        reply = completion.text;
+        // 用回复里回报的模型名，不用配置里的：换了模型的产物要能看出来是哪一款写的。
+        modelName = completion.model;
+        break;
+      } catch (cause) {
+        if (cause instanceof AppError && cause.code === 'INVALID_ARGUMENT') throw cause;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        // 传输层掉线与"端点回得慢"要分开判：前者是这一发的连接没走完（实测 2026-10-12 第 15 轮：
+        // 同一份请求在第 14 轮 369.6s 落地、第 15 轮 356.2s 以 `fetch failed` 断在半路），重发一次就能落地；
+        // 后者（`reason=timeout`）重发只把等待翻倍、仍然等不到，所以按原样回落，不做第二次沉默等待。
+        const isNetworkDrop =
+          cause instanceof AppError &&
+          cause.code === 'LLM_REQUEST_FAILED' &&
+          (cause.details as { reason?: unknown } | undefined)?.reason === 'network';
+        if (isNetworkDrop && networkRestarts < MODEL_LEG_NETWORK_RETRIES) {
+          networkRestarts += 1;
+          this.ctx.logger.info(
+            `resume.kb.generate：问模型这一发的连接断了（${message}），重发第 ${String(networkRestarts)} 次`,
+          );
+          continue;
+        }
+        return fallback(
+          'failed',
+          configured.model,
+          `问模型失败：${message}` +
+            (networkRestarts === 0 ? '' : `（连接断开已重发 ${String(networkRestarts)} 次仍未落地）`),
+        );
+      }
     }
     const read = readModelRewrites(reply, targets, this.options.maxRewriteChars);
     const dropped = read.droppedInvalid + read.droppedUnknown + read.droppedDuplicate + read.droppedUnchanged;
@@ -885,8 +938,8 @@ export class ResumeGenerateService extends Service {
     const { receipt, checks } = view;
     const leg =
       receipt.modelStatus === 'merged'
-        ? `模型腿 merged 采纳 ${String(receipt.rewritesApplied)} 条（丢弃 ${String(receipt.rewritesDropped)}）`
-        : `模型腿 ${receipt.modelStatus}（${receipt.modelReason ?? ''}）`;
+        ? `模型通道 merged 采纳 ${String(receipt.rewritesApplied)} 条（丢弃 ${String(receipt.rewritesDropped)}）`
+        : `模型通道 ${receipt.modelStatus}（${receipt.modelReason ?? ''}）`;
     const line =
       `[kb-generate] ${receipt.id} · 结果 ${receipt.outcome} · 要求 ${String(requirementCount)} 条 ·` +
       ` 重排 区块 ${String(receipt.movedSections)} / 条目 ${String(receipt.movedEntries)} · ${leg}` +

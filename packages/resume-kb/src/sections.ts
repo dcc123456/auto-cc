@@ -1,8 +1,8 @@
 /**
- * 纯文本 / Markdown 简历的区块识别与结构化（spec 4.1-01 的 Markdown 一条腿、4.1-02、4.1-04、4.1-05、4.1-09）。
+ * 纯文本 / Markdown 简历的区块识别与结构化（spec 4.1-01 的 Markdown 那一条通道、4.1-02、4.1-04、4.1-05、4.1-09）。
  *
  * 为什么先做这一半：PDF 与 DOCX 只负责「字节 → 文本」，真正决定解析质量的是**文本 → 实体**这一半，
- * 而后者零依赖、可离线、能用固定语料逐字段断言。单独成文件的收益是 4.1-01 的另两条依赖腿接进来时
+ * 而后者零依赖、可离线、能用固定语料逐字段断言。单独成文件的收益是 4.1-01 的另两条依赖通道接进来时
  * 只多一个调用方，不必动这里的判定规则。
  *
  * 三条不可动摇的口径：
@@ -75,9 +75,23 @@ export interface RejectedResumeText {
 /** `parseResumeText` 的返回：成功给文档，过短只给判定读数（两条路径都带 issues，界面可复用同一套渲染）。 */
 export type ParseTextResult = ParsedResumeText | RejectedResumeText;
 
-/** 区块标题词典。顺序即优先级——「实习经历」归 experience 而不是 campus；英文词条给拉丁文 PDF/DOCX 腿用（匹配前统一小写）。 */
+/** 区块标题词典。顺序即优先级——「实习经历」归 experience 而不是 campus；英文词条给拉丁文 PDF/DOCX 那两条通道用（匹配前统一小写）。 */
 const HEADING_TERMS: ReadonlyArray<readonly [SectionKind, readonly string[]]> = [
-  ['summary', ['个人简介', '自我介绍', '自我评价', '个人总结', '简介', 'summary', 'profile', 'objective']],
+  [
+    'summary',
+    [
+      '个人简介',
+      '自我介绍',
+      '自我评价',
+      '个人总结',
+      '求职意向',
+      '核心竞争力',
+      '简介',
+      'summary',
+      'profile',
+      'objective',
+    ],
+  ],
   [
     'experience',
     [
@@ -94,15 +108,16 @@ const HEADING_TERMS: ReadonlyArray<readonly [SectionKind, readonly string[]]> = 
   ],
   ['project', ['项目经历', '项目经验', 'selected projects', 'projects', 'project']],
   ['education', ['教育经历', '教育背景', '学习经历', '教育', 'education']],
-  ['skills', ['专业技能', '技能特长', '技能清单', '技能', 'technical skills', 'core skills', 'skills']],
+  ['skills', ['专业技能', '职业技能', '技能特长', '技能清单', '技能', 'technical skills', 'core skills', 'skills']],
   ['campus', ['校园经历', '校园活动', '学生活动', '社团活动', '志愿者', 'campus activities', 'volunteering']],
 ];
 
 /** 标题行长度上限：超过它就认定是正文（正文里也常出现「工作经历梳理」这类词组）。 */
 const MAX_HEADING_LENGTH = 16;
 
-/** 行首装饰：Markdown 的 `#`、项目符号、有序列表号。 */
-const LEADING_MARKUP = /^\s*(?:#{1,6}\s*|[-*+•·]\s*|\d+[.、)]\s*)/;
+/** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
+const LEADING_MARKUP =
+  /^\s*(?:#{1,6}\s*|[-*+•·]\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
 
 /** 条目内字段分隔：中英文竖线 / 间隔号 / 逗号分号 / 任意空白（英文公司名带空格会被切开，切多了就标待确认）。 */
 const SEGMENT_SPLIT = /[|｜·•,，;；]|\s+/u;

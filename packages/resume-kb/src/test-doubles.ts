@@ -59,6 +59,13 @@ const fakeChatSchema = z.strictObject({
    */
   replies: z.array(z.string()).min(1),
   fail: z.boolean(),
+  /**
+   * 前几次 `complete()` 以"连接断了"（`reason=network`）收场，之后恢复正常。
+   *
+   * 与 `fail` 分开两个旋钮是必要的：`fail` 给的是超时形态，而生成的模型通道对两种结局的处置
+   * 不同（掉线重发一次、超时直接回落），用一个布尔就测不出这条区别。
+   */
+  networkFails: z.number().int().min(0).default(0),
 });
 
 /**
@@ -75,6 +82,14 @@ export class FakeChatService extends Service {
 
   /** 每次 `complete()` 收到的消息序列（断言提示词确实带着原文与补强）。 */
   readonly calls: Array<Array<{ role: 'system' | 'user'; content: string }>> = [];
+
+  /**
+   * 每次 `complete()` 收到的**请求整份**（断言传输层的旋钮真的递到了出口那一边）。
+   *
+   * `calls` 只留消息，判不了 `timeoutMs` / `maxTokens`：本轮活体第 15 轮的教训正是
+   * "配置改了但没递到传输层"在界面上与"端点本来就慢"长得一模一样，所以这一格必须有机检读数。
+   */
+  readonly requests: ChatRequestView[] = [];
 
   constructor(
     ctx: Context,
@@ -94,11 +109,20 @@ export class FakeChatService extends Service {
    * 不写成 `async`：存根里没有任何 `await` 表达式，加 `async` 只是白造一层微任务；
    * 契约要的是「返回 Promise」，失败半边用 `Promise.reject` 给的就是同一个被调用方 `catch` 住的错误。
    * 用普通方法而不是箭头属性：唯一的调用点是 `gateway.complete({...})`，`this` 由调用点绑定。
-   * @param request 本次请求（只记下消息序列，不参与回复的选取）
+   * @param request 本次请求（消息序列进 `calls`，整份进 `requests`，都不参与回复的选取）
    * @returns 下一次该给的文本；配置里要求失败时给 rejected
    */
   complete(request: ChatRequestView): Promise<ChatCompletionView> {
     this.calls.push(request.messages);
+    this.requests.push(request);
+    if (this.networkFailuresLeft() > 0) {
+      return Promise.reject(
+        new AppError('LLM_REQUEST_FAILED', '模型请求发不出去：fetch failed（ECONNRESET）', 'llm.chat', {
+          reason: 'network',
+          codes: ['ECONNRESET'],
+        }),
+      );
+    }
     if (this.options.fail) {
       return Promise.reject(
         new AppError('LLM_REQUEST_FAILED', '模型请求超时（测试存根）', 'llm.chat', { reason: 'timeout' }),
@@ -106,5 +130,13 @@ export class FakeChatService extends Service {
     }
     const reply = this.options.replies[Math.min(this.calls.length - 1, this.options.replies.length - 1)] as string;
     return Promise.resolve({ text: reply, model: this.options.model ?? 'fake-model' });
+  }
+
+  /**
+   * 还剩几次"连接断了"该发（判据是已发出的次数，不是成功次数——失败的那几发同样进 `requests`）。
+   * @returns 还有多少次要回连接断开形态的失败；用尽后回 0
+   */
+  private networkFailuresLeft(): number {
+    return this.options.networkFails - this.requests.length + 1;
   }
 }

@@ -106,6 +106,8 @@ async function bootGap(config: Partial<KbGapConfig> = {}, chat?: ChatSetup) {
         model: chat.model === undefined ? 'fake-jd-model' : chat.model,
         replies: [chat.reply ?? GOOD_REPLY],
         fail: chat.fail ?? false,
+        // 缺口这一条不判"连接断了重发"（那是生成通道那一条六分钟的判据），显式给 0 让替身一次都不掉线。
+        networkFails: 0,
       }),
     );
     fake = ctx.get('llm.chat');

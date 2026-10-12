@@ -149,6 +149,55 @@ describe('llm.chat 的请求形态与解析（实测契约，plan §12.6 S3）',
     }
   });
 
+  it('单次覆盖 timeoutMs 换掉的是这一发的等待上限，不是请求体里的一个键', async () => {
+    // 判据是"哪一条先到"：桩在 1400ms 才回，通道缺省 8000ms 等得到、单次覆盖 1000ms 等不到。
+    // 只有把 `parsed.data.timeoutMs` 真的递给传输层，第一次才会以 `reason=timeout` 收场；
+    // 第二次（同一份桩、不给覆盖）必须正常返回，否则这条判据就只是在测桩慢。
+    const slowReply = () => {
+      const recorded = slow.requests[slow.requests.length - 1];
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(json({ choices: [{ message: { content: '改写好了' } }] })), 1400);
+        // 存根必须自己响应 abort：真实 fetch 是被 `AbortSignal.timeout` 掐断的，桩不接就测不出覆盖值。
+        recorded?.init.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          const error = new Error('aborted by test stub');
+          error.name = 'TimeoutError';
+          reject(error);
+        });
+      });
+    };
+    const slow = stubFetch(slowReply);
+    try {
+      const { llm } = await boot();
+      await expect(
+        llm.complete({ messages: [{ role: 'user', content: '改写这三段散文' }], timeoutMs: 1000 }),
+      ).rejects.toMatchObject({ code: 'LLM_REQUEST_FAILED', details: { reason: 'timeout' } });
+      const result = await llm.complete({ messages: [{ role: 'user', content: '改写这三段散文' }] });
+      expect(result.text).toBe('改写好了');
+      expect(slow.requests).toHaveLength(2);
+      // 超时是传输层的等待上限，不進请求体（发出去的还是那五个键）。
+      expect(JSON.parse(bodyText(slow.requests[1]?.init ?? {}))).toMatchObject({ max_tokens: 400, stream: false });
+      expect(JSON.parse(bodyText(slow.requests[1]?.init ?? {}))).not.toHaveProperty('timeout_ms');
+    } finally {
+      slow.restore();
+    }
+  });
+
+  it('超时覆盖越界（0 / 低于 1s / 高于 10min）以 INVALID_ARGUMENT 失败，不打网络', async () => {
+    const fixture = stubFetch(() => Promise.resolve(json({ choices: [{ message: { content: '好' } }] })));
+    try {
+      const { llm } = await boot();
+      for (const timeoutMs of [0, 999, 600_001]) {
+        await expect(
+          llm.complete({ messages: [{ role: 'user', content: '慢一点' }], timeoutMs }),
+        ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      }
+      expect(fixture.requests).toHaveLength(0);
+    } finally {
+      fixture.restore();
+    }
+  });
+
   it('空消息数组以 INVALID_ARGUMENT 失败，不打网络', async () => {
     const fixture = stubFetch(() => Promise.resolve(json({})));
     try {
@@ -270,6 +319,24 @@ describe('llm.chat 的失败形态（全部结构化，不许静默）', () => {
         code: 'LLM_REQUEST_FAILED',
         message: expect.stringContaining('fetch failed'),
         details: { reason: 'network' },
+      });
+      expect(fixture.requests).toHaveLength(1);
+    } finally {
+      fixture.restore();
+    }
+  });
+
+  it('发不出去的原因在 cause 链里时（undici 的 ECONNRESET），文案与 details 都要带上码而不止一句 fetch failed', async () => {
+    // 实测形状（2026-10-12 第 15 轮真实全链路）：顶层永远是 `TypeError: fetch failed`，
+    // 真正的码在 `cause` 上。只读顶层的话，"断网 / 对端掐连接 / 头超时"三种结局在界面上是同一句话。
+    const socketError = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    const fixture = stubFetch(() => Promise.reject(new TypeError('fetch failed', { cause: socketError })));
+    try {
+      const { llm } = await boot();
+      await expect(llm.complete({ messages: [{ role: 'user', content: '你好' }] })).rejects.toMatchObject({
+        code: 'LLM_REQUEST_FAILED',
+        message: '模型请求发不出去：fetch failed：socket hang up（ECONNRESET）',
+        details: { reason: 'network', codes: ['ECONNRESET'] },
       });
       expect(fixture.requests).toHaveLength(1);
     } finally {

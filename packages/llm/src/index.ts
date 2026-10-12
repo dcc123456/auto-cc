@@ -36,11 +36,20 @@ export const chatRequestSchema = z.strictObject({
   messages: z.array(chatMessageSchema).min(1),
   maxTokens: z.number().int().min(1).max(8192).nullish(),
   temperature: z.number().min(0).max(2).nullish(),
+  /**
+   * 单次请求的超时覆盖（毫秒）。
+   *
+   * 为什么要这一格而不是把 `llm.timeoutMs` 调到能装下最慢的那一趟：同一个端点上各条通道的耗时差着
+   * 一个量级（实测 2026-10-12，本机 ark 端点）——JD 拆解 32.7s，而按一份 5196 字的真实简历改写
+   * 散文段要 369.6s。抬全局缺省会让对话与工作流那些快通道一起变成"失败前默默等七分钟"。
+   * 与 `maxTokens` 同一个口径：**这一趟自己按实测延迟给值**，配置里的 `timeoutMs` 仍是其余调用方的缺省。
+   */
+  timeoutMs: z.number().int().min(1000).max(600000).nullish(),
 });
 
 export const llmSchema = z.strictObject({
   /**
-   * 角色绑定指向的**池实例 id**（spec 7.2-11）。`null` = 没绑定，这条腿用自己下面那个 `baseUrl`。
+   * 角色绑定指向的**池实例 id**（spec 7.2-11）。`null` = 没绑定，这条通道用自己下面那个 `baseUrl`。
    *
    * 有绑定时端点与密钥路径都当场向池问（`resolveLeg`），这里**不复制**一份 `baseUrl`：
    * 用户改了那个实例的地址，下一次请求就该立刻跟着变（AGENTS.md §2.5 的"不存第二份事实"）。
@@ -61,9 +70,9 @@ export const llmSchema = z.strictObject({
   /**
    * 单次请求的超时（毫秒）。取 `AbortSignal.timeout`，到点以 `LLM_REQUEST_FAILED` 失败而不是吊死。
    *
-   * 默认 180s。这个数是被活体读数逼出来的，不是估的（2026-10-09，本机对话腿绑 `ark-code-latest`）：
+   * 默认 180s。这个数是被活体读数逼出来的，不是估的（2026-10-09，本机对话通道绑 `ark-code-latest`）：
    * ① 最小探测（`llm.settings.check('chat')`）3.7～7.5s——原先的 8s 连探测都贴着顶；
-   * ② 简历生成腿一次真实产出要 111～119s（回复上限 512 时 118.5s 回 3 处改写），
+   * ② 简历生成通道一次真实产出要 111～119s（回复上限 512 时 118.5s 回 3 处改写），
    *   而 60s 与 120s 两档都把它掐成了 `reorder_only`（改写 0 处），也就是用户看到的"简历根本生成不出来"。
    * 上限放到 600s：慢端点、长清单、走两轮重试的场合要有人能等得到的档位，缺省则不该假定机房内网。
    * 代价说清楚：真·不可用时失败要等满这一格才报出来，所以界面那侧的忙态与"退回保守版"是必需项而非可选项。
@@ -105,8 +114,8 @@ export interface LlmStatus {
    */
   keySource: 'secret' | 'env' | 'none';
   /**
-   * 这一腿的端点是谁给的（spec 7.2-12 的那三条读数）：
-   * `pool` = 角色绑定指向的实例，`config` = 这条腿自己的配置格（yml/env 兜底），`none` = 两边都没有。
+   * 这一条的端点是谁给的（spec 7.2-12 的那三条读数）：
+   * `pool` = 角色绑定指向的实例，`config` = 这条通道自己的配置格（yml/env 兜底），`none` = 两边都没有。
    */
   origin: ResolvedLeg['origin'];
   /** 生效的绑定实例 id；没绑定或绑定已回落时为 null。 */
@@ -124,7 +133,7 @@ export interface LlmProbeTarget {
   providerId: string;
   /** 这次探测用哪条模型名（清单探测用不到它，但连通测试必须点名一条） */
   model: string;
-  /** 单次超时覆盖（毫秒）；省略时用这条腿自己的配置值 */
+  /** 单次超时覆盖（毫秒）；省略时用这条通道自己的配置值 */
   timeoutMs?: number;
 }
 
@@ -185,16 +194,18 @@ export class LlmChatService extends Service {
   };
 
   /**
-   * 一次请求的实际超时（毫秒）：探测态可覆盖，否则用这条腿的配置值。
+   * 一次请求的实际超时（毫秒）：单次覆盖最优先，其次探测态，最后这条通道的配置值。
    * @param target 探测态的目标（可省）
+   * @param requestOverride 调用方按自己那条通道的实测延迟给的单次覆盖（可省）
    * @returns 传给 `AbortSignal.timeout` 的毫秒数
    */
-  private timeoutOf = (target?: LlmProbeTarget): number => target?.timeoutMs ?? this.options.timeoutMs;
+  private timeoutOf = (target?: LlmProbeTarget, requestOverride?: number | null): number =>
+    requestOverride ?? target?.timeoutMs ?? this.options.timeoutMs;
 
   /**
    * 读取 API key：**先问密钥库**（`config` 那一格，界面上填的），`keyEnv` 指向的环境变量只作兜底
    * （CI 与验收复跑的口子和 AGENTS.md §8.6 的"本地配置文件"两条都靠它）。
-   * @param resolved 这一腿解析出来的目标，决定问密钥库哪一格（绑定的实例 / 腿自己）
+   * @param resolved 这一条解析出来的目标，决定问密钥库哪一格（绑定的实例 / 通道自己）
    * @returns 明文与出处；两处都没有时 `value` 是空串，交由 `status()` 判为不可用
    * @throws 不抛异常
    */
@@ -230,7 +241,7 @@ export class LlmChatService extends Service {
 
   /**
    * 发一次 chat completion 请求并取回正文。
-   * @param request 消息序列（至少一条），以及可选的 `maxTokens` / `temperature` 单次覆盖
+   * @param request 消息序列（至少一条），以及可选的 `maxTokens` / `temperature` / `timeoutMs` 单次覆盖
    * @param target 探测态的目标（spec 7.2-04「测试连通」走这一条，不改绑定）；省略时按 7.2-12 的顺序解析
    * @returns 回复正文、实际模型名与 token 用量；**空回复视为失败**（不返回空串，见 plan §12.2「失败即抛」）
    * @throws 未配置时 `LLM_UNAVAILABLE`（且**不发请求**）；网络失败 / 超时 / 非 2xx / 空回复时 `LLM_REQUEST_FAILED`
@@ -273,7 +284,7 @@ export class LlmChatService extends Service {
       endpoint: completionsUrl(resolved.baseUrl as string),
       apiKey: this.readKey(resolved).value,
       body,
-      timeoutMs: this.timeoutOf(target),
+      timeoutMs: this.timeoutOf(target, parsed.data.timeoutMs),
       source: 'llm.chat',
       label: '模型请求',
     })) as {
@@ -305,7 +316,7 @@ export class LlmChatService extends Service {
   /**
    * 问一家网关要它的模型清单（spec 7.2-05）：`GET <baseUrl>/models`。
    *
-   * 这是本客户端的**第三个方法而不是第三条腿**：`llm.settings` 一个字节都不发
+   * 这是本客户端的**第三个方法而不是第三条通道**：`llm.settings` 一个字节都不发
    * （`scripts/check-llm-single-entry.ts` 为这一条守白名单），所以清单探测必须经这里出去。
    * 没有 key 也照发——实测有的网关的 `/models` 不鉴权，"这次没成"该由对端说话，而不是在本地预判。
    * @param target 探测态的目标（实例 id + 模型名；清单本身与模型名无关，但连通测试共用同一个形状）

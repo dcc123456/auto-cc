@@ -1,5 +1,5 @@
 /**
- * 生成腿模型面的单元测试（spec 4.5-01 / 03 / 07 的代码半边，plan §4.5 判据四 / 六）。
+ * 生成通道模型面的单元测试（spec 4.5-01 / 03 / 07 的代码半边，plan §4.5 判据四 / 六）。
  *
  * 不起 store、不发请求：这一层判的是「模型那句 JSON 怎么变成一份可安装的改写清单」，
  * 请求装配与重试在 `generate-service.test.ts`。语料是**明显虚构**的中文简历，
@@ -14,7 +14,7 @@ import { buildGenerateMessages, buildRetryAppendix, GENERATE_PROMPT_VERSION } fr
 const NOW_MS = 1_700_000_000_000;
 const MAX_CHARS = 600;
 
-/** 生成腿专用的两份段简历：一条经历 + 一段简介，正文键分别是 achievement 与 text。 */
+/** 生成通道专用的两份段简历：一条经历 + 一段简介，正文键分别是 achievement 与 text。 */
 function makeDoc(): ResumeDocument {
   return {
     ...createEmptyDocument('resume-demo', NOW_MS),
@@ -90,7 +90,7 @@ describe('4.5-01 提示词的形状', () => {
   });
 
   it('提示词版本常量随片固定，改文案必须改它（4.5-10 复盘要靠这一列分辨）', () => {
-    expect(GENERATE_PROMPT_VERSION).toBe('resume-generate-v1');
+    expect(GENERATE_PROMPT_VERSION).toBe('resume-generate-v2');
   });
 });
 
@@ -206,6 +206,43 @@ describe('4.5-07 / 4.5-03 回答的读取：只收清单里的位置', () => {
       MAX_CHARS,
     );
     expect(read.droppedInvalid).toBe(1);
+  });
+
+  it('长原文按原文的 1.5 倍放宽上限（真实简历的一段成果就有 2963 字，配置值判它是 fixture 口径）', () => {
+    const longDoc: ResumeDocument = {
+      ...createEmptyDocument('resume-long', NOW_MS),
+      sections: [
+        {
+          id: 'experience',
+          kind: 'experience',
+          title: '工作经历',
+          entries: [{ id: 'experience-1', fields: [makeField('experience', 'achievement', '主导'.repeat(700))] }],
+        },
+      ],
+    };
+    const longTargets = generationTargetFields(longDoc);
+    // 原文 1400 字 → 这一格的上限是 ceil(1400 × 1.5) = 2100 字
+    const inside = readModelRewrites(
+      JSON.stringify({
+        entries: [
+          { sectionId: 'experience', entryId: 'experience-1', fieldKey: 'achievement', text: '重构'.repeat(750) },
+        ],
+      }),
+      longTargets,
+      MAX_CHARS,
+    );
+    expect(inside.accepted).toHaveLength(1);
+    const outside = readModelRewrites(
+      JSON.stringify({
+        entries: [
+          { sectionId: 'experience', entryId: 'experience-1', fieldKey: 'achievement', text: '飞'.repeat(2101) },
+        ],
+      }),
+      longTargets,
+      MAX_CHARS,
+    );
+    expect(outside.accepted).toHaveLength(0);
+    expect(outside.droppedInvalid).toBe(1);
   });
 
   it('三种不可用的回答各给一句不同的原因', () => {

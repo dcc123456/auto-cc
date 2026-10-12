@@ -208,3 +208,39 @@ describe('4.1-05 疑似扫描件走明确失败路径', () => {
     expect(justEnough.status).toBe('ok');
   });
 });
+
+describe('4.1-02 中文简历惯用的汉字序号标题（真实 PDF 抽出来的那一族形状）', () => {
+  // 装机版实测的失效现场：一份真实导出的 PDF 抽成文本后标题长这样（`一、`、`（二）`），
+  // 老规则只剥 Markdown 与阿拉伯数字，于是整份简历解析出**零个区块**、实体类也就无从生成。
+  const NUMBERED = [
+    '李四',
+    '电话：13700002222',
+    '',
+    '一、基本信息',
+    '姓名：李四 学历：本科',
+    '',
+    '二、求职意向：高级前端工程师',
+    '八年前端经验，期望上海。',
+    '',
+    '四、职业技能',
+    '1. 熟练掌握：JavaScript、TypeScript。',
+    '',
+    '五、工作经历',
+    '（一）云栖网络科技有限公司 - 前端开发 2020.07 - 2023.12',
+    '- 重构结算前端，首屏耗时下降 35%。',
+  ].join('\n');
+  const parsed = parseResumeText(NUMBERED, 'resume-numbered', NOW_MS);
+
+  it('汉字序号前缀被摘掉后按词典归类，四类区块都落进文档', () => {
+    expect(parsed.status).toBe('ok');
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    expect(parsed.document.sections.map((section) => section.kind)).toEqual(['summary', 'skills', 'experience']);
+  });
+
+  it('序号条目行（`（一）公司 - 职位 时间`）认得出公司与时间段', () => {
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const company = fieldOf(parsed, 'experience', 0, 'company');
+    expect(company).toContain('云栖网络');
+    expect(fieldOf(parsed, 'experience', 0, 'period')).toBeTruthy();
+  });
+});

@@ -7,9 +7,9 @@
  * 降级是不是可见、证据 id 是不是能读回、以及日志与库里查得到哨兵吗。
  *
  * 语料与 JD 都是自造的虚构中文简历，**不碰真实招聘平台**（§7.2）。
- * 两条腿共用同一个 `llm.chat`，所以 `kb.gap` 的模型腿在装配里**关掉**（`GAP_CONFIG`）——
- * 不关掉的话替身的调用计数里会混进拆解腿那一次，「一次都不发」「恰好两次」这类判据就不成立了；
- * 关掉之后本用例仍然拿到真实的相关性读数，词面腿就是缺口报告的基线（spec 4.4-02）。
+ * 两条通道共用同一个 `llm.chat`，所以 `kb.gap` 的模型通道在装配里**关掉**（`GAP_CONFIG`）——
+ * 不关掉的话替身的调用计数里会混进拆解通道那一次，「一次都不发」「恰好两次」这类判据就不成立了；
+ * 关掉之后本用例仍然拿到真实的相关性读数，词面通道就是缺口报告的基线（spec 4.4-02）。
  *
  * 4.5-14 的哨兵按判据七**植入**，四条各占一条通道（每条都有正向对照，没植进去时用例自己会红）：
  * 1. 简历抬头的手机号 → 4.1-09 在解析那一刻就掩码，产物里只有掩码形态；
@@ -72,7 +72,7 @@ const PII_JD_PHONE = '13800002222';
 /**
  * 装配用简历（虚构）。
  *
- * 区块顺序是有意的：技能区块排在最后，而样例 JD 的词面腿只命中技能行与学历，
+ * 区块顺序是有意的：技能区块排在最后，而样例 JD 的词面通道只命中技能行与学历，
  * 于是"有证据的区块被提前"在真实派生结果上必然发生（4.5-02 要的是真动过位置，不是断言一个空列表）。
  * 两段经历首尾相接同 4.4-c 的语料口径。正文里的手机号与邮箱写成**原始形态**，
  * 由解析层负责掩码——用例断言的正是"掩码发生在生成轨之前"。
@@ -97,7 +97,7 @@ const CORPUS_MD = [
   '- Kubernetes、Docker、Grafana',
 ].join('\n');
 
-/** 样例 JD（虚构）：词面腿命中技能与学历，正文里带一条招聘方电话当哨兵。 */
+/** 样例 JD（虚构）：词面通道命中技能与学历，正文里带一条招聘方电话当哨兵。 */
 const SAMPLE_JD = [
   '后端工程师（星桥科技）',
   `负责订单与推荐链路的后端服务，技术栈以 Java、Go、Kubernetes 为主，简历投至 ${PII_JD_PHONE}。`,
@@ -113,7 +113,7 @@ const DOC_ID = 'resume-generate';
 /** 生成轨配置的出厂值：不在测试里手抄阈值（同 4.4 的 `DEFAULT_CONFIG` 判断）。 */
 const DEFAULT_GENERATE_CONFIG: KbGenerateConfig = kbGenerateSchema.parse({});
 
-/** 缺口腿的出厂值 + 关掉它的模型腿（理由见文件头）。 */
+/** 缺口通道的出厂值 + 关掉它的模型通道（理由见文件头）。 */
 const GAP_CONFIG = { ...kbGapSchema.parse({}), allowModelLeg: false };
 
 const tempDirs: string[] = [];
@@ -132,7 +132,7 @@ afterAll(async () => {
   }
 });
 
-/** 一次装配里模型腿的形态；不给就是「装配里没有 llm.chat」。 */
+/** 一次装配里模型通道的形态；不给就是「装配里没有 llm.chat」。 */
 interface ChatSetup {
   /**
    * 按次取用的回复（用尽后重复最后一条）。
@@ -144,6 +144,8 @@ interface ChatSetup {
   available?: boolean;
   model?: string | null;
   fail?: boolean;
+  /** 前几次请求以"连接断了"收场（`reason=network`），之后恢复正常——判重发那一条用。 */
+  networkFails?: number;
 }
 
 /** 替身配置里 `replies` 的 `.min(1)` 与"挂上但不指望被问"这对需求的接缝（见 `ChatSetup.replies`）。 */
@@ -154,12 +156,12 @@ const NEVER_ASKED_REPLY = '{"entries":[]}';
  * kb.profile + agent.tools + kb.gap + resume.generate。
  *
  * `resume.snapshot` 与 `resume.parse` 排在 `kb.profile` 之前是硬性顺序（AGENTS.md §9 的 5.1-c）：
- * 4.1-14 的删除腿让 `kb.profile` 硬注入了它们，挂晚了本服务 PENDING。
+ * 4.1-14 的删除通道让 `kb.profile` 硬注入了它们，挂晚了本服务 PENDING。
  *
  * 库里那几行不是手写的，而是**从简历文本经 4.1 区块解析、4.2 实体派生**得到的：本文件要判的
  * 正是"生成的顺序与证据回指得到库里真实的那几行"，自己造一批实体等于没接库（AGENTS.md §2.1）。
  * @param generateConfig `kb.generate` 的覆盖项（`allowModelLeg` 那条用例靠它）
- * @param chat 模型腿的形态；不传则连替身都不挂，生成轨只能报 `unavailable`
+ * @param chat 模型通道的形态；不传则连替身都不挂，生成轨只能报 `unavailable`
  * @returns 生成服务、实体服务、装配与 store 句柄、agent 工具替身、聊天替身、日志文件路径与工作副本基线
  */
 async function bootGenerate(generateConfig: Partial<KbGenerateConfig> = {}, chat?: ChatSetup) {
@@ -170,7 +172,7 @@ async function bootGenerate(generateConfig: Partial<KbGenerateConfig> = {}, chat
   fibers.push(await ctx.plugin(LogService, { level: 'info', buffer: 200, file: 'auto-cc.log', dir, redact: false }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
   fibers.push(await ctx.plugin(ResumeDocService, {}));
-  // `kb.profile` 硬注入了这两只（4.1-14 的删除腿），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
+  // `kb.profile` 硬注入了这两只（4.1-14 的删除通道），清单顺序就是挂载顺序：挂晚了本服务 PENDING（§9 的 5.1-c）。
   fibers.push(await ctx.plugin(ResumeSnapshotService, { maxSnapshots: 20 }));
   fibers.push(await ctx.plugin(ResumeParseService, { maxBytes: 5_242_880 }));
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
@@ -184,6 +186,7 @@ async function bootGenerate(generateConfig: Partial<KbGenerateConfig> = {}, chat
         model: chat.model === undefined ? 'fake-generate-model' : chat.model,
         replies: chat.replies ?? [NEVER_ASKED_REPLY],
         fail: chat.fail ?? false,
+        networkFails: chat.networkFails ?? 0,
       }),
     );
     fake = ctx.get('llm.chat');
@@ -304,7 +307,7 @@ function fieldValuesByLocation(document: ResumeDocument): Map<string, string> {
 }
 
 describe('resume.generate 的产物面与 Schema（spec 4.5-01 / 12）', () => {
-  it('模型腿给出合法改写时产出提议态文档：过 P3 Schema、顶层键与 schema 完全一致、且只改了这一处', async () => {
+  it('模型通道给出合法改写时产出提议态文档：过 P3 Schema、顶层键与 schema 完全一致、且只改了这一处', async () => {
     const boot = await bootGenerate({}, {});
     const target = numberedTarget(generationTargetFields(boot.baseline));
     const rewritten = safeRewriteOf(target);
@@ -387,12 +390,12 @@ describe('resume.generate 的产物面与 Schema（spec 4.5-01 / 12）', () => {
   });
 });
 
-describe('resume.generate 的重排腿（spec 4.5-02）', () => {
+describe('resume.generate 的重排通道（spec 4.5-02）', () => {
   it('顺序由 4.4 的证据强度决定：拿分的对象被提前，依据里带命中的要求与证据 id', async () => {
     const { gen, baseline } = await bootGenerate({}, {});
     const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
     expect(view.reorderBases).toHaveLength(view.receipt.movedSections + view.receipt.movedEntries);
-    // 这份语料 + 这份 JD 必然真动过位置（技能区块基线在最后，而词面腿只命中技能行与学历）。
+    // 这份语料 + 这份 JD 必然真动过位置（技能区块基线在最后，而词面通道只命中技能行与学历）。
     expect(view.receipt.movedSections + view.receipt.movedEntries).toBeGreaterThan(0);
     for (const basis of view.reorderBases) {
       expect(basis.fromIndex).not.toBe(basis.toIndex);
@@ -461,7 +464,7 @@ describe('resume.generate 的证据反查（spec 4.5-06）', () => {
   });
 });
 
-describe('resume.generate 的模型腿与重试（spec 4.5-05 / 09）', () => {
+describe('resume.generate 的模型通道与重试（spec 4.5-05 / 09）', () => {
   it('第一轮动数值、第二轮改回来：恰好两次请求，第二轮的提示词里带着上一轮的违规行而不带原文', async () => {
     const boot = await bootGenerate({}, {});
     const target = numberedTarget(generationTargetFields(boot.baseline));
@@ -540,6 +543,38 @@ describe('resume.generate 的模型腿与重试（spec 4.5-05 / 09）', () => {
     expect(view.checks.ok).toBe(true);
   });
 
+  it('递给模型出口的等待上限是这一趟自己的配置值，不吃通道缺省（改配置没递到传输层时界面读起来只是"端点慢"）', async () => {
+    const { gen, fake } = await bootGenerate({}, { replies: [NEVER_ASKED_REPLY] });
+    await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(fake?.requests).toHaveLength(1);
+    expect(fake?.requests[0]?.timeoutMs).toBe(DEFAULT_GENERATE_CONFIG.modelTimeoutMs);
+    expect(fake?.requests[0]?.maxTokens).toBe(DEFAULT_GENERATE_CONFIG.modelMaxTokens);
+  });
+
+  it('连接断开（reason=network）就重发一次并采纳第二发的回复：六分钟那一趟不该因一次抖动退成保守回落', async () => {
+    const boot = await bootGenerate({}, {});
+    const [target] = generationTargetFields(boot.baseline);
+    if (target === undefined) throw new Error('语料里没有可改写散文段，重发用例失去前提');
+    const { gen, fake } = await bootGenerate(
+      {},
+      { replies: [replyFor(target, safeRewriteOf(target))], networkFails: 1 },
+    );
+    const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(fake?.requests).toHaveLength(2);
+    expect(view.receipt.modelStatus).toBe('merged');
+    expect(view.receipt.modelReason).toBeNull();
+    expect(view.receipt.outcome).toBe('rewritten');
+    expect(view.rewrites.length).toBeGreaterThan(0);
+  });
+
+  it('超时形态一次都不重发：那一格已经是六分半，重发只会把白等翻倍（与上一条合成"两种失败两种处置"）', async () => {
+    const { gen, fake } = await bootGenerate({}, { fail: true });
+    const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(fake?.requests).toHaveLength(1);
+    expect(view.receipt.modelStatus).toBe('failed');
+    expect(view.receipt.modelReason ?? '').not.toContain('重发');
+  });
+
   it('装配里没有 llm.chat：报 unavailable，一次都不发，产物是重排版（4.5-09 的降级可见）', async () => {
     const { gen } = await bootGenerate();
     const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
@@ -599,7 +634,7 @@ describe('resume_generations 落库（spec 4.5-10 / 判据三）', () => {
     expect(indexes.map((index) => index.name)).toContain('idx_resume_generations_doc');
   });
 
-  it('每次生成落一行：归因、腿状态、结局与证据 id 都在，且没有正文字段', async () => {
+  it('每次生成落一行：归因、通道状态、结局与证据 id 都在，且没有正文字段', async () => {
     const { gen, db } = await bootGenerate({ allowModelLeg: false });
     const view = await gen.run(SAMPLE_JD, { docId: DOC_ID, jdId: 'jd-42' }, AS_OF_MS);
     const rows = generationRows(db);
@@ -705,12 +740,12 @@ describe('PII 不因生成流程外流（spec 4.5-14 / 判据七）', () => {
     }
   });
 
-  it('生成日志一行说清结局、腿状态与计数，级别按结局分（被拒与回落走 warn）', async () => {
+  it('生成日志一行说清结局、通道状态与计数，级别按结局分（被拒与回落走 warn）', async () => {
     const { gen, logFile } = await bootGenerate();
     await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
     const line = lastLogLine(await waitForLogLine(logFile, '[kb-generate]'), '[kb-generate]');
     expect(line).toMatch(
-      /\[kb-generate\] gen-[0-9a-f-]+ · 结果 reorder_only · 要求 \d+ 条 · 重排 区块 \d+ \/ 条目 \d+ · 模型腿 unavailable/,
+      /\[kb-generate\] gen-[0-9a-f-]+ · 结果 reorder_only · 要求 \d+ 条 · 重排 区块 \d+ \/ 条目 \d+ · 模型通道 unavailable/,
     );
     expect(line).toContain('WARN');
   });
@@ -894,7 +929,7 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
   });
 
   it('只采纳重排、一条改写都没勾：顺序按产物走，字段值一字未动', async () => {
-    // 不挂模型腿的装配本身就是保守版（4.5-09）：`rewrites` 天然为空，正好用来判"只动顺序"这一支
+    // 不挂模型通道的装配本身就是保守版（4.5-09）：`rewrites` 天然为空，正好用来判"只动顺序"这一支
     const { gen, app } = await bootGenerate();
     const before = app['resume.doc'].load(DOC_ID);
     if (before.status !== 'found') throw new Error(`读回工作副本失败：${before.status}`);
