@@ -1164,6 +1164,62 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
   ⑧ 暂存区——入库图片只有 `docs/acceptance/4.5/4.5-13-m5-chain-*.png`（按 spec 条目 ID 命名），
   PDF 二进制与 `pdftotext` 输出都留在 `tmp/`（§7.5）。
 
+### 4.5-f 补录（真实简历 PDF 跑通全链路与模型通道发货值重定，2026-10-12）
+
+- **要补的账**：4.5-e 那条链的两端都是替身——文档是 fixture、模型是 `scripts/fixture-server.ts`。
+  换成用户手里那份真实简历 PDF（5 196 字、最长正文 2 633 字）之后，同一条链在**发货配置 + 真实端点**上
+  到底能不能给出"被采信的改写"，此前只有推测。入口是 `pnpm e2e:resume-jd`（scripts/e2e-resume-jd.ts），
+  四段判据一次跑完：导入 → 实体 → 搜 JD 填正文 → 按 JD 定制并导出。读数见
+  `docs/acceptance/4.5/4.5-13-real-pdf-jd-chain.txt`。
+- **结论**：全过。`outcome=rewritten · modelStatus=merged · 改写 1 处 / 重排 4 区块 · 证据 9 条 ·
+事实校验 ok（违规 0）`，产物 hash `53e346e57434 → 72c7a18c512a`（同 doc `resume-366c43b91025`，
+  两份导出快照的 `sections` 次序与正文 diff 都在证据第 9 节）。台账行把 4.5-10 四件齐了第一次真实记录
+  （`jd_id=1002 / prompt_version=resume-generate-v2 / model=auto / created_at`），
+  且 `retried=1` 是 4.5-05 的补强重试**第一次在真实语料上真的跑了一次并第二轮过**。
+- **随这条链改的四处实现**（都是"这条链跑不通"逼出来的，不是顺手重构）：
+  ① `packages/llm/src/http.ts` 的 `describeNetworkCause`：undici 把真实原因（`ECONNRESET` 等）藏在
+  `cause` 链里，界面上只剩一句 `fetch failed`，判不出是超时还是断连；现在文案带链、`details.codes` 带码。
+  ② `packages/resume-kb/src/generate-service.ts` 的 `MODEL_LEG_NETWORK_RETRIES = 1`：**只对
+  `details.reason === 'network'` 重发一次**，超时形态一次都不重发（慢通道重发只会把等待翻倍），
+  重发次数进 `modelReason`。
+  ③ 同一函数的 `timeoutMs` 按通道递给 `llm.chat` 的单次覆盖，并由单测机检"值真的递到了传输层"
+  （`test-doubles.ts` 的 FakeChatService 现在整份留请求）——改配置类判据光看 Schema 缺省不算证据。
+  ④ 取证入口默认走 **dist 渲染层 + 自有 Electron 实例**（`--renderer dist`，端口 10277）：
+  同一工作树里另一窗口的渲染层改动会 HMR 重刷页面，把 `window.__e2e` 的在途读数和那发六分钟的模型请求一起带走。
+- **两条新记的读法口径**（都进 AGENTS §9 的简历轨那条 bullet ⑧，避免下一个人重踩）：
+  判"内容有没有进 PDF 产物"**不许用整行 `includes`**（打印面会在长正文里插条目符/分隔符，
+  本轮实测 32 条文档行只有 8 条整行命中，看着像丢了三成内容），要用滑窗并在失配窗上再拆两半核；
+  **双列模板（`modern`，`columns: 2`）的文本层抽取次序是绘制次序不是文档次序**，
+  所以"重排落在打印产物里看得见"这一条只能由单列 `classic` 那份证据（4.5-e）承担，本片的次序证据停在文档模型层。
+- **状态位**：4.5-01 / 05 / 10 / 13 的判据半边此前只由 fixture 那条链撑过，现在各多一条真实简历上的读数，
+  **不改档位**（本来就是 `[x]`，且真实这一半没有推翻任何既有断言）；受阻面也没有新增。
+  4.5-06 仍是本片唯一未收项（4.5-e 的裁定不动）。
+- **发货 pin 随本片一起落地，但落法要说清**：本轮跑通用的是**工作树**那份 `cordis.yml` 的 `kb-generate` pin
+  （`modelMaxTokens: 512 → 4096` + 新增 `modelTimeoutMs: 420000`）。原先证据里那句"HEAD 上仍是 512、
+  这句话不成立"在提交前被核掉了：逐行看 `git diff -- cordis.yml`，那份脏区里**只有**本片的这一块 +
+  另一窗口做的注释性「那个被禁的字 → 通道」改名，没有任何 8.x 的配置键（`approveTimeoutMs` / `candidateLimit` /
+  `injectMinScore` 那些已在 HEAD 上），所以整份文件落地不会代别人的功能提交。
+  Schema 缺省同时到 4096 / 420000，两边同源（AGENTS §9 的 2026-10-09 条③：清单 pin 会盖掉 Schema 缺省，
+  只改一处就是发货即坏）。
+- **一条因术语禁令而产生的落地副作用，必须写在档位之外**：`scripts/check-lexicon.ts` 的延后机制按"文件是否脏"记账，
+  而**提交即判**（文件从脏区消失的下一刻就按 0 处判）。本片的功能 hunk 落在 7 份别人也在改的文件里
+  （`packages/core/src/events.ts`、`packages/llm/src/index.ts`、`generate-model.ts` / `.test.ts`、`prompts.ts`、
+  `sections.ts`、`cordis.yml`），要么整份落地并把被禁的字清到 0，要么让这条链在 HEAD 上缺一半。
+  取前者，且**先逐行确认那批外来 hunk 全是注释措辞、没有行为**（`events.ts` 与 `llm/index.ts` 里那条
+  `timeoutMs` 单次覆盖是本片功能半边，不是外来件）。清完的结果是这 7 份文件在 HEAD 上的该项读数从 10～21 处降到 0。
+  仍然留在脏区的只有 `docs/plans/08-real-platform-driving/plan.md`（另一窗口的裁定㉓/㉔ 正文，5 处），本片不代它清。
+- **§7.4 逐条**：① 四道门禁从定稿到提交前跑了**六轮**（`tmp/g2-*.log` ～ `tmp/g6-*.log`，每轮四道各 EXIT=0，
+  逐轮改了什么、差别在哪写在证据第 11 节，不接管道；最后只剩本节的计数句改字，那一处复跑 `pnpm lint` 与
+  `pnpm format:check` 两道，`tmp/g7-{lint,format}.log` 各 EXIT=0）
+  ——其中第二轮那次"绿灯"是术语禁令的脏区延后换来的，不能作为提交凭据，这一条的错法也原样写进证据第 11 节而不是抹掉；
+  ② V 类这一格**如实记成"读数而非截图"**：过程截图上有真实姓名/手机/邮箱，位图无法脱敏，按 §8.5 不入库，
+  可视证据仍指 fixture 那两份 `4.5-13-m5-chain-*.png`；③ 状态位见上一条，无模糊项；
+  ④ 复用检查：文本层抽取复用包内 `pdfjs-dist`，没有引入第二个 PDF 依赖，取证脚本留在 `tmp/`；
+  ⑤ 死代码：`describeNetworkCause` 只有 `http.ts` 一处消费者、`MODEL_LEG_NETWORK_RETRIES` 只有生成通道一处，
+  无被替换的旧实现残留；⑥ 前端：本片未动渲染层（dist 只是构建产物来源，不是新页面）；
+  ⑦ 提交与推送按 §1，pathspec 形式；⑧ 暂存区只有 `docs/acceptance/4.5/4.5-13-real-pdf-jd-chain.txt`
+  与本文件、`AGENTS.md`、`scripts/e2e-resume-jd.ts` 加那批源文件与测试，无图片、无 PDF 二进制、无 `tmp/` 产物。
+
 ## 4.6 话术生成器
 
 | ID     | 验收标准                                                                              | 方式 | 验证操作                                      | 状态 |
