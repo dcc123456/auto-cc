@@ -13,7 +13,7 @@ import type {
   ResumeSectionKindView,
 } from '@auto-cc/shared';
 import { useBridgeAction } from './useBridgeAction';
-import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSelect, DeskSwatch, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, deskReason } from './ui/controls';
 
 /**
  * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
@@ -195,16 +195,22 @@ function matchesPreset(design: ResumeEditorDesignView | undefined, patch: Resume
  * 人改完滑杆要转到编辑器那一格才看得见结果（正是用户 2026-10-10 报的那件事）。
  *
  * @param docId 要编辑的简历文档 id（由 `ResumeDesk` 持有并传入）
+ * @param templateId 架上当前选中的那套版式（**唯一来源**是 desk，编辑器不再自己长一只模板下拉，§2.5）
+ * @param locale 架上当前选中的预览语言（同上）
  * @param onClose 人按"关闭编辑器"且拦截通过后要走的卸载动作（裁定⑪：拦截只做组件卸载这一层）
  * @param onPreview 每一次 draft 重出之后把 HTML 交给父级（`undefined` = 这一版没渲出来，画空态不画残留）；
  *   它是**单向的供料**，父级不回推，因此槽位里那张纸的身份仍由 desk 判
  */
 export function ResumeEditor({
   docId,
+  templateId,
+  locale,
   onClose,
   onPreview,
 }: {
   docId: string;
+  templateId: string;
+  locale: ResumeLocaleView;
   onClose: () => void;
   onPreview: (html: string | undefined) => void;
 }) {
@@ -388,6 +394,23 @@ export function ResumeEditor({
       },
       describe: () => t('resume.editor.useDone', { template: templateId ?? locale ?? '' }),
     });
+
+  /**
+   * 把会话里的预览模板/语言对齐到**架上那一份**（用户 2026-10-12 报的「编排显示的样式和预览不一致」根因）。
+   *
+   * 这一档的会话是 `editor.open` 时按库里那份模板起的，而预览那一档吃 desk 的 `templateId`/`locale`。
+   * 从前这里另长一只下拉让人在编辑器里再选一次，于是同一种选择有两处、两张纸各说各话：
+   * 架上点「现代双栏」，编排那张纸还是「经典单栏」。现在唯一来源是 desk，差异出现时补一次
+   * `resume.editor.use`——它不碰文档，因此不产生撤销单元（3.6-04 的口径原样沿用）。
+   * `run` 的收尾会重读投影并重出预览，所以画面自己跟上。
+   */
+  useEffect(() => {
+    if (!view) return;
+    if (view.templateId === templateId && view.locale === locale) return;
+    useTemplate(templateId, locale);
+    // `useTemplate` 每次渲染换引用（它闭包着 `run`），放进依赖会在无关动作后重发这一趟；
+    // 判据只有上面那四个值，`run` 在途时这条 effect 本就因 view 不变而不会再发。
+  }, [view, templateId, locale]);
 
   /**
    * 拆一条（spec 3.6-10 / 裁定㉗ 第 1 条后半句）：把这一条的正文从第 `bodyLineIndex` 行之后断成两条。
@@ -597,35 +620,9 @@ export function ResumeEditor({
         >
           {t(view.isDirty ? 'resume.editor.dirty' : 'resume.editor.clean')}
         </span>
-        <label className="flex items-center gap-1 text-slate-400">
-          {t('resume.editor.template')}
-          <DeskSelect
-            action="resume-editor-template"
-            data-testid="resume-editor-template"
-            value={view.templateId}
-            {...dead(busyReason)}
-            onValueChange={(value) => useTemplate(value)}
-          >
-            {view.templates.map((template) => (
-              <option key={template} value={template}>
-                {template}
-              </option>
-            ))}
-          </DeskSelect>
-        </label>
-        <label className="flex items-center gap-1 text-slate-400">
-          {t('resume.editor.previewLocale')}
-          <DeskSelect
-            action="resume-editor-locale"
-            data-testid="resume-editor-locale"
-            value={view.locale}
-            {...dead(busyReason)}
-            onValueChange={(value) => useTemplate(undefined, value as ResumeLocaleView)}
-          >
-            <option value="zh-CN">zh-CN</option>
-            <option value="en">en</option>
-          </DeskSelect>
-        </label>
+        {/* 模板与语言的下拉从前长在这里，于是同一种选择有两处（这里的下拉 + 架上那一排），
+            结果是「架上点了现代双栏、编排这张纸还是经典单栏」。唯一来源现在是 desk 的模板架，
+            这一格只留 dirty 那一条读数（AGENTS.md §2.4：被替换的旧实现要删干净）。 */}
       </div>
 
       {confirmClose && (

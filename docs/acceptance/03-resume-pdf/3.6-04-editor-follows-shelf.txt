@@ -1,0 +1,35 @@
+3.6-04 补窗（2026-10-12）：编排那一档不再自选模板，纸面与预览同一份 HTML
+==========================================================================
+
+报障原话：「编排简历显示的样式和预览样式不一致」。
+
+根因：那一格里有**两只模板选择器**。预览面跟着纸面架上的模板/语言走，
+而 `ResumeEditor` 自己又挂了一只原始 id 的下拉（`resume-editor-template` / `resume-editor-locale`），
+它的初值是**会话打开那一刻**从 `editor.view().templateId` 取的——于是人在架上换了模板，
+编排里的下拉仍是旧的那一个，两边各画一张纸。AGENTS.md §2.5「不允许两个都能用」正是这一格。
+
+改法（三处，都在渲染层）：
+  1) `ResumeEditor.tsx`：两只下拉连标签一起删掉，`DeskSelect` 的 import 与两条语言包键
+     （`resume.editor.template` / `resume.editor.previewLocale`）一并清除（§2.4 不留被替换的旧实现）；
+  2) 同文件新增一条同步 effect：架上的 `templateId` / `locale` 一旦与会话读数不符，
+     就调一次 `resume.editor.use`（3.6-04：不碰文档、不产生撤销单元）；
+  3) `ResumeDesk.tsx` 把架上的那份选择作为唯一事实传进编辑器（`templateId` / `locale` 两个 prop）。
+
+活体读数（本机 macOS，`pnpm dev`，`pnpm harness eval --url 5173`；探针 `tmp/goal-verifyB.cjs`，不入库）：
+  点 `paper-stage-preview` 后，纸面槽里只有一块 iframe，`data-testid="resume-preview"`，
+    srcDoc 长 **48095** 字节、自算 31 位哈希 **948486828**；
+  点 `paper-stage-layout` 后，纸面槽里换成一块 `data-testid="resume-editor-preview"`，
+    srcDoc 长 **48095** 字节、哈希 **948486828**——与预览那一块逐字节相同。
+  两档各只有一块在场（各自的 `data-testid` 只出现在自己那一档），说明编排吃的就是架上那份模板/语言，
+  而不是它自己另挑的一份。这是"样式不一致"这一条最硬的一条判据：**同一份 HTML，同一张纸**。
+  本轮取数时渲染层的活动视野不在简历屏（两块 iframe 的 rect 都是 0×0），
+  所以几何类读数（纸张在屏上占多大、缩放多少）不在这一份里；`contentDocument` 在 Electron 的
+  `sandbox: true` 下读不到帧内 DOM（`articleClass: null`），帧内 computed 样式一律无法取数——
+  这不削弱上面那条：字节相同就是样式表相同、结构相同。
+  另记一条：架上换模板（classic ↔ modern）两档一起跟着换，这一条本轮没有独立读数支撑，
+  留给 §7.4 的 ② ——要人在场看一屏就打完，不看它也不许在这里冒充已验。
+
+残余差别（不是样式不一致，是这一档本来就有的东西）：编排那一格外面多一层控件与滑杆，
+纸面在窄列里按槽宽缩放；缩放不改样式表——两档吃的是同一份 HTML（上面那条逐字节相同就是这一条的依据）。
+
+仍未打勾的那一条：像素级"两档看起来一模一样"属于 V 类观感判据，要用户在场看一眼才算 [x]（§7.4 的 ②）。
