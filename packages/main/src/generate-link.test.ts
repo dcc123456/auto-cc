@@ -31,6 +31,10 @@
  * 判据五（生成不接额度闸门）在这里是**结构性**成立的：这份装配里根本没有 `entitlement.*` / `usage.*`
  * 服务，而生成照样跑完——与 4.4-e1 判据三同一手法。真接付费网关那天要动的 spec 是 4.6-08，不是这里。
  *
+ * 下面第三组（4.9 的书写技能）判的是同一格装配面上的两件事：`@auto-cc/shared` 那份白名单里
+ * `kb.skill.*` 只有四句（4.9-04 的"不可删"就落在这张清单上，本包能 import shared，`resume-kb` 不能），
+ * 以及**摘掉 `kb.skill` 那一行**时生成轨照跑、指引那一格如实报「未装配」（4.9-05 的反向面）。
+ *
  * 语料是文件里的虚构中文简历（§7.2 不碰真实招聘平台），手机号是假哨兵；
  * 没有装 `llm.chat`，所以模型通道报 `unavailable`、产物走 4.5-09 的仅重排保守版——
  * 这条用例判的恰恰是"没有模型时装配面不断流"，改写内容与重试的判定在包内的
@@ -42,19 +46,28 @@ import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import { ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
 import {
+  BUILTIN_RESUME_SKILL_BODY,
   KbGapService,
   KbProfileService,
+  KbSkillService,
   kbGapSchema,
   kbGenerateSchema,
   kbProfileSchema,
+  kbSkillSchema,
   parseResumeText,
+  REQUIRED_INFO,
   ResumeGenerateService,
   resumeParseSchema,
   ResumeParseService,
   type GenerationView,
 } from '@auto-cc/plugin-resume-kb';
 import { StoreService } from '@auto-cc/plugin-store';
-import { isAllowedCall, type GenerationAcceptRowResult, type GenerationRunRowView } from '@auto-cc/shared';
+import {
+  isAllowedCall,
+  RENDERER_ALLOWLIST,
+  type GenerationAcceptRowResult,
+  type GenerationRunRowView,
+} from '@auto-cc/shared';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,9 +108,10 @@ const fibers: Fiber[] = [];
  * 挂载顺序照 `cordis.yml`：`agent` 在能力包之前（工具登记是软取，晚挂载就登记出 0 个工具），
  * `kb-generate` 排在 `kb-gap` 之后。配置一律取 schema 出厂值（与清单同源）：
  * 这里判接线，不在测试里另抄一份阈值。
+ * @param withSkill 是否挂上 4.9 的书写技能服务（默认 `false`：不挂的那一份正是 4.9-05 反向面的活体装配）
  * @returns 应用句柄与这份装配用的临时目录
  */
-async function bootAssembly() {
+async function bootAssembly(withSkill = false) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-generate-link-'));
   sandboxes.push(dir);
   const ctx = new Context();
@@ -111,6 +125,9 @@ async function bootAssembly() {
   fibers.push(await ctx.plugin(ResumeParseService, resumeParseSchema.parse({})));
   fibers.push(await ctx.plugin(KbProfileService, kbProfileSchema.parse({})));
   fibers.push(await ctx.plugin(AgentToolsService, {}));
+  // 4.9 的挂载面半边：默认**不挂**（这一份装配就是"摘掉 `cordis.yml` 那一行"的形状），
+  // 只在 4.9-05 那两条里按清单顺序挂在 `kb-gap` / `kb-generate` 之前。
+  if (withSkill) fibers.push(await ctx.plugin(KbSkillService, kbSkillSchema.parse({})));
   fibers.push(await ctx.plugin(KbGapService, kbGapSchema.parse({})));
   fibers.push(await ctx.plugin(ResumeGenerateService, kbGenerateSchema.parse({})));
   const app = asApp(ctx);
@@ -238,6 +255,10 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
       reorderBases: view.reorderBases,
       checks: view.checks,
       receipt: view.receipt,
+      skillSource: view.skillSource,
+      skillChars: view.skillChars,
+      requiredBefore: view.requiredBefore,
+      requiredAfter: view.requiredAfter,
     };
     const cloned = structuredClone(preview);
     expect(cloned.receipt.outcome).toBe('reorder_only');
@@ -245,6 +266,11 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
     expect(cloned.rewrites).toEqual([]);
     expect(cloned.receipt.modelStatus).toBe('unavailable');
     expect(cloned.receipt.modelReason).not.toBeNull();
+    // 4.9-12：指引来源/字数与必备信息清单确实过了进程边界。这一份装配没挂 `kb.skill`（见上面
+    // `bootAssembly` 的默认值），所以过界的读数是"未装配"那一种诚实形状，而不是被静默丢掉。
+    expect(cloned.skillSource).toBeNull();
+    expect(cloned.skillChars).toBe(0);
+    expect(cloned.requiredBefore).toHaveLength(REQUIRED_INFO.length);
   });
 });
 
@@ -338,5 +364,35 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
         .map((tool) => tool.id)
         .filter((id) => id.startsWith('resume.generate')),
     ).toEqual(['resume.generate.run']);
+  });
+});
+
+describe('4.9-04 / 4.9-05 书写技能面的接线半边（白名单四句 · 技能缺席时生成轨照跑）', () => {
+  it('渲染层能问的四句都在，第五句（删除）在白名单里根本不存在（4.9-04）', () => {
+    // 判"不可删"要靠这张清单，而不是靠一句"删除会被拒绝"：清单里没有第五句，界面就长不出那颗键。
+    expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('kb.skill.')).sort()).toEqual([
+      'kb.skill.checkDocument',
+      'kb.skill.read',
+      'kb.skill.reset',
+      'kb.skill.save',
+    ]);
+  });
+
+  it('这份装配没挂 kb.skill：生成照样跑完，而指引那一格如实报「未装配」（4.9-05 的反向面）', async () => {
+    const { app } = await bootAssembly();
+    const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
+    expect(view.skillSource).toBeNull();
+    expect(view.skillChars).toBe(0);
+    // 必备信息的逐项判定不依赖服务挂载（本体在 `skill.ts`，纯函数）：摘掉技能不能把清单一起摘空。
+    expect(view.requiredBefore.map((row) => row.id)).toEqual(REQUIRED_INFO.map((item) => item.id));
+  });
+
+  it('挂上 kb.skill 后同一趟拿到内置正文的指纹，且界面上不出现第二份正文（4.9-05 / §2.7）', async () => {
+    const { app } = await bootAssembly(true);
+    const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
+    expect(view.skillSource).toBe('builtin');
+    expect(view.skillChars).toBe(BUILTIN_RESUME_SKILL_BODY.length);
+    // 读数里只有来源与字数：正文出网一次就够，不再往界面上抄第二份（§8.5）。
+    expect(JSON.stringify(view)).not.toContain('简历书写指引（内置');
   });
 });

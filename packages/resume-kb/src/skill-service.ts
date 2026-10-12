@@ -215,7 +215,10 @@ export class KbSkillService extends Service {
   checkDocument(docId: string): RequiredInfoRow[] {
     const loaded = asApp(this.ctx)['resume.doc'].load(docId);
     if (loaded.status !== 'found') {
-      throw new AppError('KB_SOURCE_MISSING', `工作副本 ${docId} ${loaded.status === 'missing' ? '不存在' : '已损坏'}：先导入一份简历再核对必备信息`);
+      throw new AppError(
+        'KB_SOURCE_MISSING',
+        `工作副本 ${docId} ${loaded.status === 'missing' ? '不存在' : '已损坏'}：先导入一份简历再核对必备信息`,
+      );
     }
     return this.checkDocumentObject(loaded.document);
   }
@@ -227,5 +230,11 @@ export class KbSkillService extends Service {
    */
   checkDocumentObject(document: ResumeDocument): RequiredInfoRow[] {
     return checkRequiredInfo(document);
+  }
+}
+
+declare module '@auto-cc/core' {
+  interface AppServices {
+    'kb.skill': KbSkillService;
   }
 }

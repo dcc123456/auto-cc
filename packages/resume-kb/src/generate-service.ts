@@ -67,6 +67,10 @@ import { GAP_MODEL_STATUSES, wasAsked, type GapModelStatus, type KbGapService } 
 import { buildGenerateMessages, buildRetryAppendix, GENERATE_PROMPT_VERSION } from './prompts.js';
 import type { GapRequirementView } from './requirements-compare.js';
 import type { RequirementKind } from './requirements.js';
+// 4.9 的书写技能：判定本体（`skill.ts`）与生效正文（经 `kb.skill` 现问，§9 的 2.5：不在本地存第二份事实）。
+// 类型软引，运行期用 `maybeService` 按名字问——摘掉 `cordis.yml` 里那一行时生成轨仍跑，只是提示词少了指引那一段。
+import { checkRequiredInfo, type RequiredInfoRow } from './skill.js';
+import type { KbSkillService, KbSkillSource } from './skill-service.js';
 
 /**
  * 生成记录表的迁移号段：**15**（账本 1 / agent 会话 2 / jobs 3 / workflow run 4 / conversation 5 /
@@ -317,6 +321,19 @@ export interface GenerationView {
   readonly reorderBases: readonly GenerationReorderView[];
   readonly checks: GenerationChecksView;
   readonly receipt: GenerationReceipt;
+  /**
+   * 必备信息在**改写前**那份工作副本上的逐项读数（spec 4.9-09）。
+   * 与 `requiredAfter` 并排才是"这一趟有没有让它更齐"的证据，只给一份是让用户自己猜另一份。
+   */
+  readonly requiredBefore: readonly RequiredInfoRow[];
+  /** 改写后（仅重排的保守版本也算）的读数；被拒没有产物时为 null，界面这一格要说"本次没有产物"。 */
+  readonly requiredAfter: readonly RequiredInfoRow[] | null;
+  /**
+   * 这一趟吃的是哪一份书写指引（4.9-05 / 4.9-02 的取证面）：`builtin` 还是人改过的 `custom`，
+   * 以及生效正文的字数。**只带指纹不带正文**——正文已经在提示词里出网一次，不该再往界面上抄第二份（§8.5）。
+   */
+  readonly skillSource: KbSkillSource | null;
+  readonly skillChars: number;
 }
 
 /**
@@ -518,6 +535,12 @@ export class ResumeGenerateService extends Service {
       throw new AppError('KB_LIBRARY_MISSING', '缺口比对服务 kb.gap 未装配：生成轨拿不到相关性读数');
     }
     const baseline = loaded.document;
+    // 4.9-05：每一趟在拼消息之前**现问**一次生效的书写指引（不在本地存第二份事实，§9 的 2.5 那条热改会重建下游）。
+    // 技能服务缺席（摘掉 `cordis.yml` 那一行）时正文为空、`skillSource` 为 null——提示词退回没有指引的那一份形状，
+    // 而这一格降级必须能在读数里看出来，不能静默长成"指引反正一直没生效"。
+    const skillRead = maybeService<KbSkillService>(this.ctx, 'kb.skill')?.read() ?? null;
+    const skillGuide = skillRead?.content ?? '';
+    const requiredBefore = checkRequiredInfo(baseline);
     // 相关性、要求清单、证据强度全部来自 4.4 那一份报告——本服务不重算任何分数（§2.1）。
     const report = await gap.report(jdText, { sourceDocId: docId }, nowMs);
     const drafts = deriveEntities(baseline);
@@ -531,7 +554,7 @@ export class ResumeGenerateService extends Service {
         : item.label,
     );
 
-    let attempt = await this.askModel(jdText, requirementLines, targets);
+    let attempt = await this.askModel(jdText, requirementLines, targets, null, skillGuide);
     let check: GenerationCheckReport | null = null;
     let product: ResumeDocument | null = null;
     let retried = false;
@@ -549,6 +572,7 @@ export class ResumeGenerateService extends Service {
           requirementLines,
           targets,
           buildRetryAppendix(describeViolations(check)),
+          skillGuide,
         );
         attempt = second;
         if (second.rewrites.length > 0) {
@@ -595,6 +619,10 @@ export class ResumeGenerateService extends Service {
       reorderBases: product === null ? [] : reorderLabelsWith(reorderedDoc, reordered.bases),
       checks: { ok: check?.ok === true, retried, violations, violationCount: violations.length },
       receipt,
+      requiredBefore,
+      requiredAfter: product === null ? null : checkRequiredInfo(product),
+      skillSource: skillRead?.source ?? null,
+      skillChars: skillRead?.chars ?? 0,
     };
     if (product !== null) {
       // 提议态留在主进程：`accept` 认的是 `receiptId`，位置三键与正文都不经界面来回（判据二 / 4.5-11）。
@@ -758,6 +786,7 @@ export class ResumeGenerateService extends Service {
    * @param requirementLines 4.4 已拆出的要求代表词（不让模型再拆一遍，判据一 / §2.5）
    * @param targets 待改写清单；为空时**一次都不问**（没内容可改写还要发一遍简历是纯粹的泄露面）
    * @param retryAppendix 第二轮的约束补强（违规行，已过脱敏）
+   * @param skillGuide 生效的书写技能正文（4.9-05；空串时提示词退回没有指引的那一份形状）
    * @returns 结局 + 可安装的改写 + 丢弃计数
    */
   private askModel = async (
@@ -765,6 +794,7 @@ export class ResumeGenerateService extends Service {
     requirementLines: readonly string[],
     targets: readonly GenerationField[],
     retryAppendix: string | null = null,
+    skillGuide = '',
   ): Promise<RewriteAttempt> => {
     const fallback = (status: GapModelStatus, model: string | null, reason: string): RewriteAttempt => ({
       status,
@@ -795,7 +825,7 @@ export class ResumeGenerateService extends Service {
     for (;;) {
       try {
         const completion = await gateway.complete({
-          messages: buildGenerateMessages(jdText, requirementLines, targets, retryAppendix ?? ''),
+          messages: buildGenerateMessages(jdText, requirementLines, targets, retryAppendix ?? '', skillGuide),
           maxTokens: this.options.modelMaxTokens,
           temperature: this.options.modelTemperature,
           // 这一趟的耗时按真实简历的散文量给（见 `modelTimeoutMs` 的实测读数），不吃通道缺省那 180s。
@@ -949,10 +979,22 @@ export class ResumeGenerateService extends Service {
       `[kb-generate] ${receipt.id} · 结果 ${receipt.outcome} · 要求 ${String(requirementCount)} 条 ·` +
       ` 重排 区块 ${String(receipt.movedSections)} / 条目 ${String(receipt.movedEntries)} · ${leg}` +
       `${checks.retried ? ' · 已重试一次' : ''} · 校验 ${checks.ok ? '通过' : `未过（${String(checks.violationCount)} 条）`}` +
-      `${receipt.promptVersion === null ? '' : ` · 提示词 ${receipt.promptVersion}`}`;
+      `${receipt.promptVersion === null ? '' : ` · 提示词 ${receipt.promptVersion}`}` +
+      // 4.9-05 / 4.9-09 的播报：这一趟吃的是哪一份指引（来源与字数，正文不落日志），以及必备信息前后各齐几项。
+      ` · 书写指引 ${view.skillSource === null ? '未装配' : `${view.skillSource} ${String(view.skillChars)} 字`}` +
+      ` · 必备信息 ${countPresent(view.requiredBefore)} → ${view.requiredAfter === null ? '无产物' : countPresent(view.requiredAfter)}`;
     if (receipt.outcome === 'rewritten') this.ctx.logger.info(line);
     else this.ctx.logger.warn(line);
   }
+}
+
+/**
+ * 数一份必备信息读数里"齐了"几项，格式 `n/总数`（4.9-09 的播报用）。
+ * @param rows 逐项读数
+ * @returns 例如 `9/12 齐`
+ */
+function countPresent(rows: readonly RequiredInfoRow[]): string {
+  return `${String(rows.filter((row) => row.status === 'present').length)}/${String(rows.length)} 齐`;
 }
 
 /**

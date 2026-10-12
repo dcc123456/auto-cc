@@ -67,7 +67,10 @@ describe('4.9-01 / 4.9-03 生效来源与一键还原', () => {
 
   it('迁移 38 落台账且重复挂载不重复推号（同 5.3-a：改老迁移的 up 不会重跑）', async () => {
     const { db } = await boot();
-    const versions = db.prepare('SELECT version FROM schema_migrations').all().map((row) => Number(row.version));
+    const versions = db
+      .prepare('SELECT version FROM schema_migrations')
+      .all()
+      .map((row) => Number(row.version));
     expect(versions).toContain(RESUME_SKILL_MIGRATION_VERSION);
     expect(versions.filter((version) => version === RESUME_SKILL_MIGRATION_VERSION)).toHaveLength(1);
   });

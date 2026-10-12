@@ -1879,6 +1879,14 @@ export interface GenerationRunRowView {
   readonly checks: GenerationChecksRowView;
   readonly receipt: GenerationReceiptRowView;
   /**
+   * 这一趟**实际带上**的书写指引来源（spec 4.9-05 / 4.9-12）。
+   * `null` = 技能面没装配（摘掉 `cordis.yml` 那一行的形状），提示词退回没有指引的那一份形状。
+   * 必须是过界的读数而不是界面自己拼：界面猜不出主进程当下生效的是内置还是人改的那一份（§2.7）。
+   */
+  readonly skillSource: KbSkillSourceView | null;
+  /** 生效指引的字数（与 `skillSource` 同一批读数，用来证明"带上了"而不是"带了个空串"）。 */
+  readonly skillChars: number;
+  /**
    * 必备信息在**改写前**那份工作副本上的逐项读数（spec 4.9-09）。
    * 与 `requiredAfter` 一起摆才说得出"这一趟有没有让它更齐"——只给一份就是让界面自己猜另一份。
    */

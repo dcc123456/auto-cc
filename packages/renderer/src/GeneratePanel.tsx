@@ -9,6 +9,7 @@ import type {
   GenerationRunRowView,
   ResumeDocSummaryView,
 } from '@auto-cc/shared';
+import { countRequired } from './required-info';
 import {
   Banner,
   BLOCK_EDGE_CLASS,
@@ -170,6 +171,21 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
       case 'disabled':
         return t('generate.modelDisabled');
     }
+  };
+
+  /**
+   * 必备信息在改写前后的对照（spec 4.9-09 / 4.9-12 的界面半边）。
+   *
+   * 两份读数必须一起摆：只报"改完还缺几项"会把"这一趟让它更齐了"和"这一趟白跑"混成同一句话。
+   * 判定与逐项结局都在主进程（`skill.ts`），这里只把已经判完的结论数成一个数（§2.5）。
+   * @param value 一次生成的读数
+   * @returns 一行汇总；产物被拒（`requiredAfter` 为 `null`）时说明这一趟没有产物可比
+   */
+  const requiredSummaryText = (value: GenerationRunRowView) => {
+    const [before, total] = countRequired(value.requiredBefore);
+    if (value.requiredAfter === null) return t('generate.requiredNoArtifact', { before, total });
+    const [after] = countRequired(value.requiredAfter);
+    return t('generate.requiredAfter', { before, after, total });
   };
 
   /**
@@ -430,6 +446,23 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
               prompt: preview.receipt.promptVersion ?? t('generate.promptNone'),
               retried: preview.checks.retried ? t('generate.retriedYes') : t('generate.retriedNo'),
             })}
+          </p>
+          {/* 这一趟实际带上书写指引的那一格（spec 4.9-12）：读数来自服务侧，界面不猜当下生效的是哪一份。
+              「未装配」必须单独说得出——它是摘掉 `cordis.yml` 那一行的形状，不是"带了但没字数"。 */}
+          <p
+            data-generate-skill={preview.skillSource ?? 'absent'}
+            className="text-[11px] leading-relaxed text-slate-500"
+          >
+            {preview.skillSource === null
+              ? t('generate.skillAbsent')
+              : t('generate.skillUsed', {
+                  source: t(preview.skillSource === 'builtin' ? 'generate.skillBuiltin' : 'generate.skillCustom'),
+                  chars: preview.skillChars,
+                })}
+          </p>
+          {/* 必备信息改写前后的对照（4.9-09 的界面半边）：只给一份就是让界面自己猜另一份。 */}
+          <p data-generate-required="summary" className="text-[11px] leading-relaxed text-slate-500">
+            {requiredSummaryText(preview)}
           </p>
         </div>
       )}
