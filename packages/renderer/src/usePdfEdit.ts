@@ -489,6 +489,11 @@ export function usePdfEdit({ active, onClose }: { active: boolean; onClose: () =
     notice,
     noticeTone,
     setNotice,
+    /**
+     * 直接按给定路径开一份 PDF（desk 进 PDF 档时把刚生成的那份简历产物交到这里，spec 3.5-12 的供料半边）。
+     * 输入框与选文件面板那两条口保留，走的是同一个函数——打开只有这一条通道（AGENTS.md §2.5）。
+     */
+    openPath: openPdfWith,
     openPdf,
     pickSourceFile,
     pickSavePath,

@@ -37,6 +37,7 @@ import { PdfEditPanel } from './PdfEditPanel';
 import { PdfPaperView } from './PdfPaperView';
 import { ResumeEditor } from './ResumeEditor';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
+import { SkillPanel } from './SkillPanel';
 import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
 import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
@@ -478,11 +479,13 @@ export function ResumeDesk() {
   /**
    * 导出 PDF：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，回执摆到纸右下角（3.3-04 / 05 / 09）。
    * @param targetDocId 已落库的文档 id
+   * @param after 产物落地后还要做的一件事（PDF 编辑那一档用它把刚出的这份产物铺到纸上，见下面那条自动供料）
    */
-  const exportPdf = (targetDocId: string) =>
+  const exportPdf = (targetDocId: string, after?: (value: ExportReceiptView) => void) =>
     void run(t('resume.export'), () => bridge?.resume['export.toPdf'](targetDocId, templateId, locale), {
       apply: (value) => {
         setReceipt(value);
+        after?.(value);
         // 09 稿形态① 1-B：产物是磁盘上的一份 PDF，当前视野里翻不到它，所以除了回执条，
         // 还在左下角补一只 toast 把落点说清楚——稿子里"结果不在视野才配 toast"指的就是这一类。
         pushDeskToast({
@@ -617,6 +620,32 @@ export function ResumeDesk() {
    * 之所以把它挂在 desk 而不是面板里：一拆两格就有两个消费者，state 留在任何一边都会让另一份成第二份事实（§2.5）。
    */
   const pdfEdit = usePdfEdit({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
+
+  /**
+   * 进 PDF 这一档就把**当前这份简历刚生成的产物**铺到纸上（用户 2026-10-12 报的「pdf 编辑页完全空白」根因）。
+   *
+   * 这一档原先只等人键绝对路径或开选文件面板，于是从页签切进来是一张 `idle` 的白纸、
+   * 每一颗编辑键都按不动（回执不在场时清单整块不画）。人手里那份 PDF 那两条入口原样保留，
+   * 但「改我刚生成的那份」不该要求人先知道产物落在 userData/exports 的哪里。
+   * 判门只在这一处：有当前文档、这一档在场、且还没开过任何一份 PDF 才自动供料——
+   * 用的就是架上选中的那套版式与语言，所以纸上的字与预览那一档看见的是同一份（spec 3.3-01 续用）。
+   * 去抖靠 ref 记这一轮已经为哪一份文档+哪套版式发过：切走时 `usePdfEdit` 会回收回执，
+   * 切回来就该按当下那份重新出一份，而不是拿旧产物冒充。
+   */
+  const pdfAutoKeyRef = useRef('');
+  useEffect(() => {
+    if (paperMode !== 'pdf') {
+      pdfAutoKeyRef.current = '';
+      return;
+    }
+    if (docId === undefined || pdfEdit.receipt !== undefined) return;
+    const key = `${docId}|${templateId}|${locale}`;
+    if (pdfAutoKeyRef.current === key) return;
+    pdfAutoKeyRef.current = key;
+    exportPdf(docId, (value) => pdfEdit.openPath(value.path));
+    // `exportPdf` 与 `pdfEdit` 每次渲染都换引用，放进依赖会让这一趟在无关按键后重发；
+    // 这一条的判据全在 ref 与上面那三个 state 里，多跑的趟数由 key 挡住。
+  }, [paperMode, docId, templateId, locale, pdfEdit.receipt]);
 
   /**
    * 「选择文件」那颗键（spec 6.4-19）：**在源码里只写一次**，却按段的开合只出现在一处 DOM——
@@ -941,6 +970,9 @@ export function ResumeDesk() {
                   refreshDocs={refreshDocs}
                   onAccepted={bumpPaper}
                 />
+                {/* 书写技能与必备信息清单（spec 4.9-10 / 4.9-11）挂在「按岗位改写」这一格：
+                这一份指引就是这一趟改写带上的一张纸，人改完下一次就生效，中间没有别的开关。 */}
+                <SkillPanel docId={docId ?? ''} />
               </div>
             </DeskSection>
 
@@ -1083,7 +1115,13 @@ export function ResumeDesk() {
             于是"改了滑杆要在那一格才看得见结果"，而它与右边那张落库版预览同时挂在屏上。
             条件挂载而不是 `hidden`：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
             {paperMode === 'layout' && docId !== undefined && (
-              <ResumeEditor docId={docId} onClose={() => requestPaperMode('preview')} onPreview={acceptDraft} />
+              <ResumeEditor
+                docId={docId}
+                templateId={templateId}
+                locale={locale}
+                onClose={() => requestPaperMode('preview')}
+                onPreview={acceptDraft}
+              />
             )}
 
             {/* PDF 覆盖这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
