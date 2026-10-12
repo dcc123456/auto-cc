@@ -1,0 +1,81 @@
+spec 4.9 的活体读数（CDP 10222 → 5173 那一页，`harness eval --expr-file`；截图走 `tmp/skill-clip.mjs` 的裁剪口）
+时间：2026-10-12 18:00 前后 · 实例：`pnpm dev`（默认 userData）· 视图：简历
+
+为什么只有裁剪图没有整窗图（AGENTS.md §8.5 / §7.5）：常驻纸面装着用户那份真实简历（姓名 / 手机 / 邮箱），
+位图无法脱敏，所以 4.9-10 的四张画面只裁 `[data-testid="skill-panel"]` 与 `[data-skill-required]` 那两块；
+4.9-07 / 4.9-09 的活体那半按 spec 末尾「受阻面预告」写成的退路执行——只给逐字读数，不给截图。
+
+================================================================================
+一、4.9-10 界面：可看 / 可改 / 不可删 / 一键还原（三态逐字读数）
+================================================================================
+
+【态 1 · 内置态】`4.9-10-builtin.png`（368×898 CSS px，scale 2）
+  data-skill-source = builtin
+  data-skill-readout = 「指引版本 resume-skill-v1 · 1288 / 20000 字 · 上次保存 还没存过」
+  data-skill-dirty 不存在（未改）
+  [data-action="skill-save"]  data-disabled-reason = DRAFT_UNCHANGED
+  [data-action="skill-reset"] data-disabled-reason = ALREADY_BUILTIN
+
+【态 2 · 已改态】`4.9-10-edited.png`（368×721 CSS px）
+  改法：`HTMLTextAreaElement` 原生 setter 写进 `[data-skill-field="body"]` + 派发 `input`（§9 的 5.3-b ⑤），
+  追加的那一行是「（这一行是验收探针写的，还原之后必须不见）」
+  草稿态读数：data-skill-dirty = true、save 的 data-disabled-reason 变成 null（两颗键都可点）
+  点「保存指引」之后：
+    提示条（`[data-testid="skill-notice"]`）= 「已存下这一份指引（1311 字）」
+    data-skill-source = custom（标签显示「你改过的那一份」）
+    data-skill-readout = 「指引版本 resume-skill-v1 · 1311 / 20000 字 · 上次保存 2026/10/12 18:00:24」
+    data-skill-dirty = false（存完草稿与生效正文重新对齐）
+    [data-action="skill-reset"] data-disabled-reason = null（还原那颗键亮了）
+    正文里含探针行 = true
+
+【态 3 · 还原后】`4.9-10-restored.png`（368×721 CSS px）
+  点「还原为内置」之后：
+    提示条 = 「已还原为内置那一份，你未保存的改动一起丢掉」
+    data-skill-source = builtin
+    data-skill-readout = 「指引版本 resume-skill-v1 · 1288 / 20000 字 · 上次保存 还没存过」
+    正文含探针行 = false、正文长度 = 1288（与内置逐字节同一份）
+    save 的 data-disabled-reason = DRAFT_UNCHANGED、reset 的 = ALREADY_BUILTIN（回到态 1）
+
+【不可删除是结构性的】面板上 `[data-action]` 枚举 = ["skill-body", "skill-save", "skill-reset"]
+  —— 没有第四颗，也没有任何"删除后隐藏"的口子；界面上这一格显示的是
+  「这份技能没有删除口：能改、能还原，删不掉。」（`[data-skill-no-delete]`）而不是假装的禁用键。
+  同一件事的静态半边在 4.9-04（桥接白名单里 `kb.skill.*` 只有 read / save / reset 三支）。
+
+四张图的 md5（同批去重，§9 的 5.10-18 那条）：
+  9088c5f657b546874e5ab0f1db51ecba  4.9-10-builtin.png
+  ef59e600a34e099b92ef37bad90317e3  4.9-10-edited.png
+  46dc0fa8e75adcf9c774b8fd9103c11a  4.9-10-required-checklist.png
+  de62cf2c54ed7b9afc5a8226fd9d90d4  4.9-10-restored.png
+
+================================================================================
+二、4.9-09 必备信息清单：活体 12 行（真文档，经 `kb.skill.checkDocument`）
+================================================================================
+
+工作副本：`resume-366c43b91025`（`resume.doc.list()` 回 1 份，就是用户那份真实 PDF 导入的）
+12 行逐字（`id:status`，顺序即界面顺序 = `REQUIRED_INFO` 数组顺序）：
+  name:present  phone:present  email:present  location:weak  objective:weak  experience:present
+  period:present  education:missing  skills:present  project:present  quantified:present  length:weak
+汇总行：「8 / 12 项齐」（`[data-skill-required-summary]`），必备缺项：「必备那几档还差 2 项」（education + objective）
+画面：`4.9-10-required-checklist.png`（清单后 5 行：教育背景 必备/缺、技能清单 必备/齐、项目经历 建议/齐、
+量化成果 必备/齐、篇幅 建议/在但不合格）；前 7 行在 `4.9-10-builtin.png` 里。
+
+================================================================================
+三、4.9-07 抬头四项真的进文档模型（活体那半：三项落地 + 一项如实为空）
+================================================================================
+
+活体（同一份真文档，只报形状不报值，§8.5）：
+  profile.name    = 4 字（非空）
+  contact.phone   = 11 位数字（原文落在工作副本里，按裁定「工作副本存原文」）
+  contact.email   = 在（含 @ 与点号）
+  contact.location = null ← 这一项**不是抽取缺陷**，见下面的取证
+
+为什么 null 是对的（一次判定性观察，`tmp/probe-city.ts` 走 app 自己那条 `extractSourceText` 通道）：
+  这份 PDF 抽出来 201 行，抬头前 8 行的长度是 [6, 6, 22, 19, 22, 34, 29, 14]，
+  全文里能对上城市形状的令牌只出现在第 45 / 54 / 66 / 78 / 89 行（「上海」，工作经历里的公司地）
+  与第 154 / 155 行（「重庆」，教育/项目段），**抬头那几行一个都没有**。
+  `pickLocation` 只扫抬头行（`rawHeaderLines`），所以它回 null 是"抽不出即为空、不编造"（4.9-08 同一条），
+  清单因此显示 所在城市 = weak（在，但不合格 → 这一项在文档模型里是空的），并把它算进缺项提示。
+  四项的**正向**断言在单测里按 PDF 抬头形状跑（`sections.test.ts` 的 `4.9-b`：
+  「李测试｜13800002222｜litest@example.com｜上海市」→ name / phone / email / location 四项逐字对上，
+  且不带「市」后缀的「深圳」也认）。所以本行的状态位是 [x]，但城市这一格在真实那份上的结论是"源里没有"，
+  不是"抽丢了"——两种写法在界面上长得一样（都显示 weak），靠这一条读数分开。
