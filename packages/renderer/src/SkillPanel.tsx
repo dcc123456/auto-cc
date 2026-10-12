@@ -243,7 +243,9 @@ export function SkillPanel({ docId }: { docId: string }) {
       </div>
 
       {notice && (
-        <Banner data-skill-notice tone={noticeTone} size="compact">
+        // 走 `markers` 而不是直接挂 `data-*`：`Banner` 不透传未声明的 props，直接挂的那个锚点
+        // 在 DOM 上根本不存在（活体第一轮就查不到这一格），而 harness 的判据全靠锚点。
+        <Banner tone={noticeTone} size="compact" markers={{ testid: 'skill-notice' }}>
           {notice}
         </Banner>
       )}
