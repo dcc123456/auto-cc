@@ -19,14 +19,17 @@
  */
 import { PII_VALUE_PATTERNS, redactText } from '@auto-cc/core';
 import {
+  companyRoleFields,
   createEmptyDocument,
+  educationFields,
   makeField,
+  periodText,
+  splitHeader,
   type Field,
   type ResumeDocument,
   type Section,
   type SectionKind,
 } from '@auto-cc/plugin-resume-doc';
-import { extractPeriod, type ParsedPeriod } from './period.js';
 
 /**
  * 疑似扫描件的正文长度下限（spec 4.1-05）。
@@ -118,15 +121,6 @@ const MAX_HEADING_LENGTH = 16;
 /** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
 const LEADING_MARKUP =
   /^\s*(?:#{1,6}\s*|(?:[-+•·]|\*(?!\*))\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
-
-/** 条目内字段分隔：中英文竖线 / 间隔号 / 逗号分号 / 任意空白（英文公司名带空格会被切开，切多了就标待确认）。 */
-const SEGMENT_SPLIT = /[|｜·•,，;；]|\s+/u;
-
-/** 摘掉时间段后剩下的孤立标点（`-`、`至` 这类），不能让它冒充公司名进入模型。 */
-const PUNCTUATION_ONLY = /^[-–—~～至到.,，;、|｜·•\s]+$/u;
-
-/** 学位词表：教育区块里能识别出学位的那一段。 */
-const DEGREE_TERM = /学士|硕士|博士|本科|大专|MBA|PhD|BSc|MSc/i;
 
 /**
  * 弱信号（整行加粗 / Markdown 标题 / 短行带时间段）能容忍的标题行长度上限（按码点计）。
@@ -347,68 +341,6 @@ function piiPattern(kind: 'phone' | 'email' | 'id'): RegExp {
 /** 截取原文片段供界面定位（最多 40 字）。传入前必须已经过脱敏。 */
 function excerptOf(text: string): string {
   return [...text.trim()].slice(0, 40).join('');
-}
-
-/**
- * 把归一化的时间转成写回简历 `period` 字段的标准文本。
- * @param period `parsePeriod` 的结果
- * @returns `2021-03 - 2023-11` 或 `2021-03 - 至今` 形态；两端都没认出来时返回 `null`（由调用方记待确认）
- */
-export function periodText(period: ParsedPeriod): string | null {
-  if (period.from === null && period.to === null) return null;
-  const end = period.isCurrent ? '至今' : (period.to ?? '');
-  if (period.from === null) return end === '' ? null : `- ${end}`;
-  return end === '' ? period.from : `${period.from} - ${end}`;
-}
-
-/**
- * 把经历类区块的首行拆成「时间段」与「名称段」。
- *
- * 时间先整段摘掉再拆名字，是因为范围写法常跨空格（`2019 - 2022`）——若先按空白切开，
- * 孤立的 `-` 和半个年份就会冒充成公司名。摘完后仍剩下的标点段一并丢弃。
- * @param headerLine 区块内一条经历的首行
- * @returns 认出的时间（含 issues，供上层转待确认）与剩下的名称段；一个端点都没认出时 `period` 为 `null`
- */
-function splitHeader(headerLine: string): { period: ParsedPeriod | null; titles: string[] } {
-  const { period, rest } = extractPeriod(headerLine);
-  const titles = rest
-    .split(SEGMENT_SPLIT)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment !== '' && !PUNCTUATION_ONLY.test(segment));
-  // `unparsable` 说明这行压根没有四位年份形态的东西：当作「没有时间」，不能拿整行当时间。
-  const recognized = period.precision === 'none' && !period.isCurrent ? null : period;
-  return { period: recognized, titles };
-}
-
-/**
- * 由「名称段」装配经历 / 项目 / 校园区块的 company / role 字段。
- * @param kind 区块种类（决定 `makeField` 的事实锁定判定）
- * @param titles 去掉时间段后剩下的段
- * @returns 字段数组；一段都没有时返回空数组，由调用方记 `missing-field`
- */
-function companyRoleFields(kind: SectionKind, titles: readonly string[]): Field[] {
-  const [company, ...rest] = titles;
-  if (company === undefined) return [];
-  const fields = [makeField(kind, 'company', company)];
-  const role = rest.join(' ');
-  if (role !== '') fields.push(makeField(kind, 'role', role));
-  return fields;
-}
-
-/**
- * 装配教育区块的 school / degree / major 字段。
- * @param titles 去掉时间段后剩下的段
- * @returns 字段数组；首段作学校，命中学位词的段作学位，其余拼成专业
- */
-function educationFields(titles: readonly string[]): Field[] {
-  const [school, ...rest] = titles;
-  if (school === undefined) return [];
-  const fields = [makeField('education', 'school', school)];
-  const degree = rest.find((segment) => DEGREE_TERM.test(segment));
-  const majors = rest.filter((segment) => segment !== degree).join(' ');
-  if (degree !== undefined) fields.push(makeField('education', 'degree', degree));
-  if (majors !== '') fields.push(makeField('education', 'major', majors));
-  return fields;
 }
 
 /**

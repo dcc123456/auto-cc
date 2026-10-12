@@ -4,9 +4,14 @@
  * P4 的第一块地基：**简历文本 → P3.1 文档模型**的纯解析层（spec 4.1-02 / 4.1-03 / 4.1-04 / 4.1-05 / 4.1-09），
  * 以及它的两条依赖通道：**字节 → 文本**（spec 4.1-01，`pdfjs-dist` Apache-2.0 + `mammoth` BSD-2-Clause，
  * 许可与实测口径见 `docs/plans/04-resume-kb/plan.md` §1.1）。
- * `source.ts` / `sections.ts` / `period.ts` **不认识 cordis、也不打开自己的 SQLite 连接**——解析规则要能离线、
+ * `source.ts` / `sections.ts` **不认识 cordis、也不打开自己的 SQLite 连接**——解析规则要能离线、
  * 逐字段断言；`parse-service.ts` 是本包唯一接触装配与入库（4.1-06 / 4.1-07 / 4.1-09 / 4.1-10）的文件，
- * 且入库只经 1.3 的共享 `store` 连接，判定的那三个纯函数文件不因装配而变脏。
+ * 且入库只经 1.3 的共享 `store` 连接，那两份纯函数判定文件不因装配而变脏。
+ * 63-a（plan 03 §13）把时间归一化与抬头装配搬去了 `@auto-cc/plugin-resume-doc`
+ * （`period.ts` / `header.ts`，它们产出的是文档模型的字段键，归属在模型层），本包改为从那边 import，
+ * 也因此**不再出口**这两个名字——门面只有一份，避免同一个能力长出两个门（§2.5）。
+ * 时间与抬头装配（`period.ts` / `header.ts`）在 63-a 起归 `@auto-cc/plugin-resume-doc`（模型层持有字段键），
+ * 本包按 import 使用，不再转口一遍——一份能力只有一个门面（AGENTS.md §2.5）。
  * 4.2 带来 `entities.ts`（实体派生）与 `evidence.ts`（反查打分），4.3-a 带来 `chunks.ts`（检索切片派生），
  * 4.3-b 带来 `search.ts`（切片 → 分数的合并排序）——
  * 同一个规矩：切分与派生是纯函数，落库与事务只在 `profile-service.ts`。
@@ -14,11 +19,9 @@
  * 4.5 带来 `generate-reorder.ts`（顺序）/ `generate-model.ts`（改写）/ `fact-check.ts`（三条确定性判据）
  * 与装配层 `generate-service.ts`——判定仍然全在纯函数里，出网、落库与播报只发生在服务里。
  */
-export { extractPeriod, parsePeriod, type ParsedPeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
 export {
   MIN_TEXT_CHAR_COUNT,
   parseResumeText,
-  periodText,
   type ParsedResumeText,
   type ParseIssue,
   type ParseIssueCode,

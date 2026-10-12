@@ -14,7 +14,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { type Entry, type ResumeDocument } from '@auto-cc/plugin-resume-doc';
-import { parsePeriod } from './period.js';
+import { parsePeriod } from '@auto-cc/plugin-resume-doc';
 
 /** 知识库的四类实体（plan §1.4 裁定二），顺序即列表界面的分组顺序。 */
 export const KB_ENTITY_KINDS = ['experience', 'project', 'skill', 'achievement'] as const;
