@@ -130,6 +130,16 @@ export interface DeskSectionProps {
    * 缺席时这一行整个不渲染，所以其余没给这一格的段 DOM 一字不变。
    */
   headExtra?: ReactNode;
+  /**
+   * 常驻在段头**右端**的那一组动作（信任栏改版：`重新读取会话状态` 这类面板级动作）。
+   *
+   * 为什么是段头按钮的**兄弟**而不是塞进段头里：与 `headExtra` 同一条理由——嵌在 `<button>` 里
+   * 等于嵌套交互元素，浏览器会把内层那颗的点击判给外层，那颗键自己的 `data-action` 就再也按不到。
+   * 为什么与 `headExtra` 分两个口子：`headExtra` 只在**收起态**出现（展开态正文里本来就有同一颗键，
+   * 两处同时存在就是 §2.5 禁的"两个入口办同一件事"）；`actions` 两态都在，因为它就是这一格的标题行
+   * 的一部分（读数 + 刷新），收起时正好是人唯一看得见的那颗动作。
+   */
+  actions?: ReactNode;
   /** 追加 class（只放外边与宽度档）。 */
   className?: string;
   children: ReactNode;
@@ -149,6 +159,7 @@ export function DeskSection({
   openSignal,
   markers,
   headExtra,
+  actions,
   className = '',
   children,
 }: DeskSectionProps) {
@@ -163,20 +174,28 @@ export function DeskSection({
     >
       {/* 段头本身就是一颗按钮，且**不嵌**别的交互元素：嵌在 `<button>` 里等于嵌套交互元素，
           浏览器会把内层那颗的点击判给外层，harness 就再也按不到那颗自己的 `data-action`。
-          画法只出自 `SECTION_HEAD_CLASS` 一处（2026-10-11 按钮统一裁定：原件层也不许在 JSX 上内联悬停档）。 */}
-      <button
-        type="button"
-        data-action={`${id}-toggle`}
-        aria-expanded={open}
-        onClick={toggle}
-        className={SECTION_HEAD_CLASS}
-      >
-        <Chevron size={13} className="shrink-0 text-slate-500" aria-hidden="true" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-semibold text-slate-50">{title}</span>
-          {summary ? <span className="mt-0.5 block truncate text-[11px] text-slate-500">{summary}</span> : null}
-        </span>
-      </button>
+          画法只出自 `SECTION_HEAD_CLASS` 一处（2026-10-11 按钮统一裁定：原件层也不许在 JSX 上内联悬停档）。
+          常驻动作（`actions`）是这颗按钮的**兄弟**，靠同一行 flex 排到右端。 */}
+      <div className="flex min-w-0 items-stretch">
+        <button
+          type="button"
+          data-action={`${id}-toggle`}
+          aria-expanded={open}
+          onClick={toggle}
+          className={`${SECTION_HEAD_CLASS} min-w-0 flex-1`}
+        >
+          <Chevron size={13} className="shrink-0 text-slate-500" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-semibold text-slate-50">{title}</span>
+            {summary ? <span className="mt-0.5 block truncate text-[11px] text-slate-500">{summary}</span> : null}
+          </span>
+        </button>
+        {actions ? (
+          <div data-section-actions={id} className="flex shrink-0 items-center gap-1.5 pr-3">
+            {actions}
+          </div>
+        ) : null}
+      </div>
       {/* 常驻动作条：段头的**兄弟行**，只在收起态出现（`headExtra` 缺席时这一行整个不渲染）。
           收起态下正文是卸载的，于是"这一格最主要的那颗键"跟着一起消失——人必须点开段头才找得到做事的入口，
           这正是 2026-10-10 那句报障（「导入简历功能无效」「如何删除都不可见」）里最重的一条根因。 */}

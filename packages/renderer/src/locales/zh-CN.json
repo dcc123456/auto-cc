@@ -188,6 +188,8 @@
       "snapshotReading": "标题「{{title}}」· 装载 {{readyState}} · 元素 {{elements}} 个 · 正文 {{textLength}} 字（取回 {{bodyLength}}）· 标题节点 {{headings}} 条",
       "snapshotUrl": "页面地址 {{url}} · 分区 {{partition}}",
       "snapshotHeadings": "页面标题：{{items}}",
+      "snapshotSummary": "最近一次快照：{{title}}",
+      "detailToggle": "分区、落盘位置与 cookie 名",
       "navigate": "导航",
       "actionNavigate": "导航到该地址",
       "navigatePlaceholder": "已登记平台同源地址，如 http://127.0.0.1:10233/boss"
@@ -1804,6 +1806,7 @@
         "providersHeading": "已添加的提供商",
         "addProvider": "添加提供商",
         "providersEmpty": "一家都还没添加。点上面「添加提供商」收进第一家。",
+        "providerSummary": "已添加 {{count}} 家",
         "customEndpoint": "自定义端点",
         "labelField": "显示名",
         "labelPlaceholder": "在这台机器上叫什么",

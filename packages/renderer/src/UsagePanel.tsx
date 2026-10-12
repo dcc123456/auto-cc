@@ -1,4 +1,4 @@
-import { Gauge, RefreshCw, Send } from 'lucide-react';
+import { RefreshCw, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,7 +10,8 @@ import {
   type UsageSummaryView,
 } from '@auto-cc/shared';
 import { AuditSection } from './AuditSection';
-import { Banner, DeskButton } from './ui/controls';
+import { Banner, DeskButton, HAIRLINE_ROW_CLASS } from './ui/controls';
+import { DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskQuota } from './deskStatus';
 
@@ -91,45 +92,49 @@ export function UsagePanel() {
     );
 
   return (
-    <section data-testid="usage-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Gauge size={16} />
-          {t('usage.heading')}
-        </h2>
+    <DeskSection
+      id="trust.usage"
+      defaultOpen
+      markers={{ testid: 'usage-panel' }}
+      title={t('usage.heading')}
+      summary={
+        <span>
+          <span data-stat="usage-total">{t('usage.total', { count: summary?.total ?? 0 })}</span>
+          {' · '}
+          <span data-stat="usage-today">{t('usage.today', { count: summary?.today ?? 0 })}</span>
+        </span>
+      }
+      actions={
         <DeskButton action="refresh" variant="line" compact busy={!!busy} onClick={() => void read()}>
           <RefreshCw size={12} />
           {t('usage.refresh')}
         </DeskButton>
-      </div>
-
+      }
+    >
       {notice && (
-        <Banner tone={noticeTone} markers={{ testid: 'usage-notice' }} className="mt-2">
+        <Banner tone={noticeTone} size="compact" markers={{ testid: 'usage-notice' }}>
           {notice}
         </Banner>
       )}
 
-      <ul className="mt-3 flex flex-col gap-2">
+      {/* 三条闸门判定各一行：额度按动作独立，所以「抓 40 轮不打招呼」与「打招呼用尽而投递照旧」
+          必须同时看得见。行与行只留一根发丝线，不再各自套一只小卡（旧版卡中卡，三层描边）。 */}
+      <ul className="mt-1 flex flex-col" data-testid="usage-gate">
         {QUOTA_ACTIONS.map((action) => {
           const decision = decisions?.[action];
           const canSend = isSampleAction(action);
           return (
-            <li
-              key={action}
-              data-gate-action={action}
-              className="flex items-center justify-between gap-2 rounded-lg border border-line bg-ink-950/60 px-3 py-2"
-            >
+            <li key={action} data-gate-action={action} className={HAIRLINE_ROW_CLASS}>
+              <span className="font-mono text-xs text-slate-200">{action}</span>
               <span
-                className={`break-all text-[11px] ${
+                className={`min-w-0 break-all text-[11px] ${
                   decision && !decision.allowed
                     ? 'text-seal'
                     : decision?.remaining === null
                       ? 'text-jade'
-                      : 'text-slate-300'
+                      : 'text-slate-400'
                 }`}
               >
-                <span className="font-mono text-xs text-slate-200">{action}</span>
-                {' · '}
                 {!decision
                   ? t('usage.gateUnknown')
                   : !decision.allowed
@@ -148,13 +153,14 @@ export function UsagePanel() {
                   disabled={!!busy}
                   disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
                   disabledReasonLabel={busy !== undefined ? t('usage.reasonBusy') : undefined}
+                  className="ml-auto"
                   onClick={() => send(action)}
                 >
                   <Send size={12} />
                   {t('usage.send')}
                 </DeskButton>
               ) : (
-                <span className="text-[11px] text-slate-500" data-gate-note={action}>
+                <span className="ml-auto text-[11px] text-slate-500" data-gate-note={action}>
                   {t('usage.consumedByCapture')}
                 </span>
               )}
@@ -162,11 +168,6 @@ export function UsagePanel() {
           );
         })}
       </ul>
-
-      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-        <span data-stat="usage-total">{t('usage.total', { count: summary?.total ?? 0 })}</span>
-        <span data-stat="usage-today">{t('usage.today', { count: summary?.today ?? 0 })}</span>
-      </p>
 
       {(summary?.byDay.length ?? 0) > 0 ? (
         <ul className="mt-2 flex flex-col gap-1" data-testid="usage-days">
@@ -198,6 +199,6 @@ export function UsagePanel() {
       )}
 
       <AuditSection />
-    </section>
+    </DeskSection>
   );
 }

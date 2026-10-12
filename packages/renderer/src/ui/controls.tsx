@@ -568,6 +568,17 @@ export const BLOCK_SURFACE_CLASS = 'bg-ink-850';
 export const BLOCK_SELECTED_CLASS = 'border-slate-300/70 bg-ink-800';
 
 /**
+ * 面板内「一行一条读数」的画法：左右出血到卡片描边、行间只留一根发丝线、首行不画线。
+ *
+ * 抽到原件层是因为同一个形状在一次改版里出现了四次（会话行、闸门行、漏斗行、额度行）——
+ * 面板各自手搓 class 的话，第二次改版就会量出四种行高（§2.2、6.2-14 同一条判据）。
+ * `gap-y-1` 是窄视图整颗换行时行内元素之间的缝；`-mx-4` 与 `px-4` 必须成对写，
+ * 单独去掉一边就会把发丝线断在卡片内边距上。
+ */
+export const HAIRLINE_ROW_CLASS =
+  '-mx-4 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line/70 px-4 py-2 first:border-t-0';
+
+/**
  * 字段档的尺寸档。**只有 `DeskTextarea` 用得上第二档**（用户 2026-10-06 裁定：对话输入区
  * 「原件加一个尺寸档」而不是并入元信息档）——composer 是全渲染层唯一让人连续打字的格子，
  * 11px 的元信息档读着像表格、敲着像填错地方，所以它单独占一档而不改别人。

@@ -1,0 +1,146 @@
+6.4-21 信任栏四块面板「版式与密度整体重做」活体读数（2026-10-12）
+================================================================================================
+
+裁定（用户 2026-10-12，AskUserQuestion 二选一里选的那一支）：
+  「版式与密度整体重做，信息架构不动」
+  —— 数据源、bridge 调用、每一格读什么，一律不改；只改这些读数**怎么摆**。
+
+取数环境：本机 macOS arm64，`pnpm dev`（AUTO_CC_USER_DATA_DIR=tmp/dev-userdata，CDP 10222），
+渲染层 attach 用 `harness eval/shot --url 5173`。窗口未在前台（hidden），因此：
+  · 几何与画面类判据可以取（`Page.captureScreenshot` 在 hidden 下照样出帧）；
+  · 指针落页类判据不取（CDP 输入不落页），本片的交互全部走 `element.click()` = 逻辑层真相；
+  · hidden 时 CSS 时间轴不推进，所以每次量之前注入 `*,*::before,*::after{transition:none;animation:none}`，
+    量完摘掉。收尾读数（第 六 节）自证这一支 `<style>` 已经不在页面里、`getAnimations()` 回到 0。
+
+
+一、卡中卡的层数：13 → 0（同一屏、同一份数据）
+------------------------------------------------------------------------------------------------
+旧版（HEAD 那一版）这一屏上有 13 张「卡里再套一张卡」：
+  · 会话行 3 张（`SessionPanel.tsx:222` 的 `rounded-lg border border-line bg-ink-950/60 px-3 py-2`）
+  · 闸门行 3 张（`UsagePanel.tsx:120` 同一串）
+  · 漏斗行 5 张（`MetricsPanel.tsx:299` 同一串）
+  · 角色绑定块 2 张（`ModelSettingsPanel.tsx:671` 的 `rounded-chip border border-line p-2`）
+外层面板自己还有一只 `rounded-xl border border-line bg-ink-900/60 p-4`，于是同一屏最多三层描边叠在一起。
+
+新版探针（`nestedCards`：同一 `data-testid` 列表里 class 含 `rounded-lg`/`rounded-chip` 的 `li`）：
+  trust.sessions  nestedCards=0   rows(发丝线行)=3
+  trust.page      nestedCards=0   rows=0
+  trust.metrics   nestedCards=0   rows=8   （5 级漏斗 + 3 行额度）
+  trust.usage     nestedCards=0   rows=3
+  trust.models    nestedCards=0   rows=2   （两段角色绑定）
+行与行之间只剩一根 `border-t border-line/70` 的发丝线，且**首行不画线**（`first:border-t-0`），
+线左右出血到卡片描边（`-mx-4 … px-4`）。这一串从此只有一处定义：
+`packages/renderer/src/ui/controls.tsx` 的 `HAIRLINE_ROW_CLASS`（四个面板共用，§2.2）。
+
+
+二、五段展开态几何（视口 1690×942，主区宽 980）
+------------------------------------------------------------------------------------------------
+段头一律是 `DeskSection` 那一颗按钮：高 60.1（标题 12px + 读数 11px 两行），标题与读数同行不折断。
+段头右端的动作组是段头的**兄弟**（`[data-section-actions]`，5 段各挂 1…2 只），不是嵌在按钮里：
+嵌套交互元素会把点击判给外层（`disclosure.tsx` 那条实测），所以 `close-view` 这类键的 `data-action` 仍然点得到。
+
+  段              段宽×高      段头宽    段头动作（宽×高，是否同一行）
+  trust.sessions  940×247.0   698×60.1  close-view 100×24.1 同行 · refresh 122×24.1 同行
+  trust.page      940×115.3   826×60.1  snapshot 100×24.1 同行
+  trust.metrics   940×571.8   826×60.1  refresh 100×24.1 同行
+  trust.usage     940×427.8   826×60.1  refresh 100×24.1 同行
+  trust.models    940×569.9   826×60.1  settings-model-add-provider 91×24.1 同行
+
+三条从此可核的口径：
+  ① 五段段头高度**完全相同**（60.1），五段段头动作高度**完全相同**（24.1）——旧版是 h2 一行 +
+     面板各自一颗不同尺寸的键（30 / 24 两档混着），这一屏读起来像五块不同的界面。
+  ② 动作全部 24.1 高 = `compact` 档，且 `sameLine=true`（图标与文案顶边对不齐的那种折断为 0）；
+  ③ 行高 34.1 / 35.1 / 41.1 / 57.3 四档，全部来自内容本身（57.3 那一档是「约面」级带原话说明，
+     发丝线行内换行），不是各面板自己写的 padding 档。
+
+
+三、五段收起态：整屏一屏装得下，读数与动作都不跟着收起
+------------------------------------------------------------------------------------------------
+逐段点段头收起后（`data-open=false` × 5）：
+
+  段              高     段头读数（收起态仍可见）                          段头动作数
+  trust.sessions  62.1  内核视图地址 data:text/html;charset=utf-8,…        2
+  trust.page      62.1  内核视图还没挂载任何站点，读不到页面                1
+  trust.metrics   62.1  2026-10-06 ~ 2026-10-13（含头不含尾）              1
+  trust.usage     62.1  账本累计 0 次 · 今日 0 次                          1
+  trust.models    62.1  已添加 0 家                                        0（动作常驻段头右端，见 actions 槽）
+
+5 × 62.1 + 段间距 = 约 350 高，落在 690 高的主区里**不需要滚动**（画面：
+`6.4-21-trust-collapsed-dark.png`）。这就是这一片的取舍：展开时正文卸载（`disclosure.tsx` 那条），
+但「这一格此刻怎么样」和「做事的那颗键」都留在段头，收起不等于把面板关掉。
+
+`trust.models` 的「添加提供商」从段内那一行（`h3 + 按钮` 的两列行）**移进段头右端**：
+一屏只有一个入口（§2.5），且收起态也点得到。移过去之后 6.2-06 那条门禁照样成立——
+点开内联表单时段头那颗键回 `data-disabled-reason="FORM_ALREADY_OPEN"`（第四节读数）。
+
+
+四、锚点：一个都没拆，条件锚点当场再挂一次
+------------------------------------------------------------------------------------------------
+展开态普查（`[data-testid]` 计数，同一份活体页面）：
+  常驻且当场在位：session-panel / session-list / kernel-page / navigate-url / metrics-panel /
+    metrics-preset / metrics-range / metrics-levels / metrics-took / metrics-mode / usage-panel /
+    usage-gate / model-settings / settings-model-providers / settings-model-provider-summary（新增）
+  按数据条件出现，本轮为 0（与改版前同一条件，不是被版式弄丢的）：
+    session-expired（要 `session/expired` 推送）· page-snapshot / data-page-url（要先读到页面）·
+    metrics-await（额度读数缺席才画）· usage-days / usage-recent（账本为空不画）·
+    data-provider-id（这台实例一家提供商都还没添加）
+  条件锚点当场再挂一次（点段头那颗「添加提供商」）：
+    settings-model-form=1 · settings-model-providers=1 · settings-model-leg-origin=2 ·
+    settings-model-no-provider=1 · 表单块高 244（内联、青瓷描边那一档保留：它是「正在编辑」的信号）
+  读数属性逐条对过：data-funnel-level=5 · data-funnel-count=5 · data-gate-action=3 ·
+    data-quota-action=3 · data-session-id=4 · data-section-actions=5 · data-explainer=9
+  `data-testid="metrics-range"` 从筛选那一行**搬进段头读数**：元素、testid、文案（含「（含头不含尾）」）
+  一字未改，harness 按 `[data-testid=metrics-range]` 取文本仍然取到同一串。
+
+
+五、机检与门禁
+------------------------------------------------------------------------------------------------
+  `npx tsx scripts/check-renderer-conventions.ts`  → EXIT=0（第 10/11/12/13/14/15 节全过：
+    `src/ui/**` 之外裸原生控件 0、≥12px 灰阶档 0、hover 挂到不可点 0、按不动不带原因码 0、
+    具名档位外的按钮 0、占位空 span 0）
+  `npx eslint packages/renderer/src --max-warnings 0` → EXIT=0
+  `npx tsc -p packages/renderer --noEmit`             → EXIT=0
+  `npx prettier --write` 只作用在本片改过的文件上（共享工作树，不做全仓 format）
+  `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 四条见 spec 收尾行。
+
+五之补、`scripts/check-dashboard-readonly.ts` 跟着改版换形（spec 5.8-02 组件半边）
+------------------------------------------------------------------------------------------------
+  改版后 `MetricsPanel.tsx` 多了 `./ui/disclosure` 一条进口。这条机检的判据 1 是**进口白名单**，
+  原样会把改版判成"看板开了第二条能力通道"（本片的报错读数：`packages/renderer/src/MetricsPanel.tsx
+  引了 ./ui/disclosure：看板的进口只允许 react / react-i18next / lucide-react / @auto-cc/shared /
+  ./ui/controls（判据 1）`，EXIT=1）。按 2026-10-07 放开 `./ui/controls` 那条先例的写法办：
+  ① 判据 1 清单加 `./ui/disclosure` 这一条相对路径；② **判据 5 同时把它本体钉住**——`UI_PRIMITIVES`
+  由一支变两支（`controls.tsx` + `disclosure.tsx`），原件里出现桥接口 / 网络出口 / 清单外进口即失败，
+  原件之间引 `./controls` 单独放行（共用画法是同一条口子内部的事，不是第三条通道）。
+
+  反向验证两条（脚本：追加一行探针 → 跑检 → `finally` 还原）：
+    · 往 `disclosure.tsx` 末尾追加 `const zzBridgeProbe = window.autoCC;`
+      → **EXIT=1**，报行逐字指准注入点：
+        `- packages/renderer/src/ui/disclosure.tsx 里出现了桥接口：判据 1 放开的是一条只画界面的通道（判据 5）`
+    · 删掉探针 → **EXIT=0**，且还原后的文件与探针前**逐字节相同**（`same=true`），
+      成功行现在念两只原件本体：
+        `✔ 看板保持只读（… 6 条 import 全在清单里 …；原件本体 packages/renderer/src/ui/controls.tsx、
+          packages/renderer/src/ui/disclosure.tsx 无桥接口与网络口）`
+
+  判据 4 的按钮计数没被这次改版抬高：看板仍恰好一只 `[data-action=refresh]`，`onClick={() => void read()}`。
+  段头那颗折叠键画在 `disclosure.tsx` 里、不在被检文件（`TARGETS` 只有 MetricsPanel），
+  这是既有口径"计数按被检文件而不是按整棵 DOM"，不是漏判——判据 5 已经单独钉住那只原件。
+
+
+六、边界（诚实的那一半）
+------------------------------------------------------------------------------------------------
+  · 取数完页面已复位：五段全部回到 `data-open=true`、`auto-cc.desk.disclosure` 五项都是 true、
+    内联表单已取消（`settings-model-form` 计数 0）、探针注入的那支 `<style>` 已摘
+    （`killStyleLeft=false`）、主题回到墨案（`data-theme=dark`）、`document.getAnimations()=0`。
+  · 「人眼看是不是顺眼」这一条不在机检里，也不在探针里：本轮交的是画面
+    （`6.4-21-trust-{sessions,metrics,usage,models-flat,models-form}-dark.png` 与
+      `6.4-21-trust-collapsed-dark.png`、`6.4-21-trust-open-light.png`，七张 md5 互异），
+    改得好不好看要用户在场点头才算 `[x]`，本轮按 `[!]` 记。
+  · 真实指针能不能点动段头右端那组新位置的键（尤其 `close-view` 与「添加提供商」）本轮只证到**逻辑层**
+    （`element.click()` 处理器照跑、门禁原因码照回）；窗口 hidden 时 CDP 输入不落页（AGENTS.md 2.1-12），
+    指针那一半留给用户在场。
+  · 深浅两案各拍了一屏，但**只拍了墨案（深色）的四个局部**；浅色那一案只有一张整屏。
+    色档、描边色、语气 wash 一律没动（本片只动几何与层级），所以对比度沿用 6.1-09 / 6.2-50 那两条
+    令牌层机检的结论，没有在本片重量。
+  · 会话行的「分区 / 落盘位置 / cookie 名」三串取证明细挪进了一只 `DeskExplainer`
+    （`data-explainer="trust.sessions.detail"`，不落盘、刷新即回落收起）——明细还在，只是不再摊在行里。

@@ -11,11 +11,14 @@
  * 这里补的是界面半边。
  *
  * 四条判据，各拦一种绕法：
- * 1. **进口只有四个包 + 一条 UI 原件相对路径**（`react` / `react-i18next` / `lucide-react` /
- *    `@auto-cc/shared` / `./ui/controls`）：引不到能力包就引不到第二条能力通道，这一条最硬，所以先判它。
+ * 1. **进口只有四个包 + 两条 UI 原件相对路径**（`react` / `react-i18next` / `lucide-react` /
+ *    `@auto-cc/shared` / `./ui/controls` / `./ui/disclosure`）：引不到能力包就引不到第二条能力通道，这一条最硬，所以先判它。
  *    2026-10-07 用户裁定放开 `./ui/controls` 这一条（06-ui-ink-desk 第三十片的活体读数证明看板那几处
  *    手写的 class 与原件同源、换件不动画面），但**放开的只是这一条相对路径**，不是"引 UI 层没关系"：
  *    原件自己有没有偷偷开口子，由判据 5 直接检它本体。
+ *    2026-10-12（6.4-21）同一条口径再放开 `./ui/disclosure`：看板那一段收进 `DeskSection` 段头，
+ *    而段头画法是 `disclosure.tsx` 持有的（`SECTION_HEAD_CLASS`）——放开的还是"只画界面"的那一类通道，
+ *    所以这一条与 `./ui/controls` 一起进判据 5 的本体检数。
  * 2. **桥接口只有一句 `funnel.query`**：`window.autoCC` 上是白名单生成的命名空间，
  *    看板只能碰 `funnel` 那一只，而且只调 `query`；出现别的命名空间或第二次调用点即失败。
  * 3. **没有任何网络与进程出口**：`fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` /
@@ -25,9 +28,10 @@
  *    `onClick` 只允许 `void read()`。区间下拉与两个日期输入是筛选器不是动作按钮，所以按"按钮开标签"计数、
  *    不按"可交互元素"计数；换进原件之后 `<button` 这个字面量会消失，所以计数必须同时认得两种写法，
  *    否则判据会在"什么都没多出来"的那一次提交上假红。
- * 5. **被放开的进口自己也要被钉住**：`packages/renderer/src/ui/controls.tsx` 本体不许出现
- *    桥接口、网络出口或能力包进口——判据 1 放开的是一条"只画界面"的通道，
- *    如果哪天原件里长出了 `window.autoCC`，这条口子就不再是样式口了。
+ * 5. **被放开的进口自己也要被钉住**：`packages/renderer/src/ui/controls.tsx` 与
+ *    `packages/renderer/src/ui/disclosure.tsx` 本体不许出现桥接口、网络出口或能力包进口——判据 1 放开的是一条
+ *    "只画界面"的通道，如果哪天原件里长出了 `window.autoCC`，这条口子就不再是样式口了。
+ *    原件之间可以互相引（`disclosure.tsx` 引 `./controls` 拿共用画法），引到清单外的相对路径即失败。
  *
  * 命令：`pnpm lint` 里倒数第二条，或单独 `tsx scripts/check-dashboard-readonly.ts`。
  * 注释行不参与判定（与调度器那条同一口径）：本项目的注释会写"不发一个动作"这类话。
@@ -46,17 +50,30 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  */
 const TARGETS = process.argv[2] === undefined ? ['packages/renderer/src/MetricsPanel.tsx'] : [process.argv[2]];
 
-/** 允许的进口（模块说明符 → 为什么允许）。`./ui/controls` 是判据 5 单独钉住的样式口。 */
+/** 允许的进口（模块说明符 → 为什么允许）。两条 `./ui/*` 是判据 5 单独钉住的样式口。 */
 const ALLOWED_MODULES: readonly string[] = [
   'react',
   'react-i18next',
   'lucide-react',
   '@auto-cc/shared',
   './ui/controls',
+  './ui/disclosure',
 ];
 
-/** 判据 5：被放开的这条进口本体（它一旦长出桥接口或网络口，判据 1 的放开就变成了开能力口）。 */
-const UI_PRIMITIVES = 'packages/renderer/src/ui/controls.tsx';
+/** 判据 5：被放开的这两条进口本体必须只是"画界面"的。 */
+const UI_PRIMITIVES: readonly string[] = [
+  'packages/renderer/src/ui/controls.tsx',
+  'packages/renderer/src/ui/disclosure.tsx',
+];
+
+/** 判据 5 里原件本体允许的进口：react / 图标 / 类型包，加上原件之间共用画法的相对路径。 */
+const ALLOWED_PRIMITIVE_IMPORTS: readonly string[] = [
+  'react',
+  'i18next',
+  'lucide-react',
+  '@auto-cc/shared',
+  './controls',
+];
 
 /** 桥接口上唯一允许的服务命名空间与方法（`window.autoCC.funnel.query`）。 */
 const ALLOWED_BRIDGE_PATH = 'funnel.query';
@@ -178,20 +195,20 @@ for (const relPath of TARGETS) {
   }
 }
 
-// —— 判据 5：被放开的这条进口本体必须只是"画界面"的 ——
-{
-  const filePath = path.join(repoRoot, UI_PRIMITIVES);
+// —— 判据 5：被放开的这两条进口本体必须只是"画界面"的 ——
+for (const relPath of UI_PRIMITIVES) {
+  const filePath = path.join(repoRoot, relPath);
   const lines = readFileSync(filePath, 'utf8').split(/\r?\n/);
   const code = lines.map((line) => (isCommentLine(line.trimStart()) ? '' : line)).join('\n');
   for (const ban of OUTBOUND_BANS) {
-    if (ban.pattern.test(code)) problems.push(`${UI_PRIMITIVES} 命中 ${ban.pattern}：${ban.reason}（判据 5）`);
+    if (ban.pattern.test(code)) problems.push(`${relPath} 命中 ${ban.pattern}：${ban.reason}（判据 5）`);
   }
   if (/\bwindow\.autoCC\b/.test(code) || /\bbridge\s*\??\./.test(code)) {
-    problems.push(`${UI_PRIMITIVES} 里出现了桥接口：判据 1 放开的是一条只画界面的通道（判据 5）`);
+    problems.push(`${relPath} 里出现了桥接口：判据 1 放开的是一条只画界面的通道（判据 5）`);
   }
   for (const specifier of importSpecifiersOf(code)) {
-    if (!['react', 'i18next', 'lucide-react', '@auto-cc/shared'].includes(specifier)) {
-      problems.push(`${UI_PRIMITIVES} 引了 ${specifier}：原件只许引 react / 图标 / 类型包（判据 5）`);
+    if (!ALLOWED_PRIMITIVE_IMPORTS.includes(specifier)) {
+      problems.push(`${relPath} 引了 ${specifier}：原件只许引 react / 图标 / 类型包 / 原件之间的画法（判据 5）`);
     }
   }
 }
@@ -216,5 +233,5 @@ if (problems.length) {
 console.log(
   `✔ 看板保持只读（${TARGETS.join('、')}：${String(importStatementCount)} 条 import 全在清单里（含放开给原件的那一条）、` +
     `桥接口只有 ${ALLOWED_BRIDGE_PATH} 一处、0 处网络/动态装载出口、恰好 1 只按钮且它的 onClick 只是重读；` +
-    `原件本体 ${UI_PRIMITIVES} 无桥接口与网络口）`,
+    `原件本体 ${UI_PRIMITIVES.join('、')} 无桥接口与网络口）`,
 );

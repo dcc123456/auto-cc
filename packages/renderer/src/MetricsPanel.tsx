@@ -1,4 +1,4 @@
-import { BarChart3, CalendarClock, RefreshCw } from 'lucide-react';
+import { CalendarClock, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,7 +9,8 @@ import {
   type FunnelRange,
   type FunnelView,
 } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskField, DeskSelect } from './ui/controls';
+import { Banner, DeskButton, DeskField, DeskSelect, HAIRLINE_ROW_CLASS } from './ui/controls';
+import { DeskSection } from './ui/disclosure';
 
 /** 区间档位：两个预设 + 自定义（spec 5.8-04）。localStorage 里存的就是这个判别式。 */
 type RangePreset = 'last7' | 'last30' | 'custom';
@@ -216,18 +217,26 @@ export function MetricsPanel() {
   const quota = view?.quota;
 
   return (
-    <section data-testid="metrics-panel" className="rounded-xl border border-line bg-ink-900/60 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <BarChart3 size={16} />
-          {t('metrics.heading')}
-        </h2>
+    <DeskSection
+      id="trust.metrics"
+      defaultOpen
+      markers={{ testid: 'metrics-panel' }}
+      title={t('metrics.heading')}
+      summary={
+        view ? (
+          <span data-testid="metrics-range">
+            {t('metrics.rangeShown', { from: dayKey(view.range.fromMs), to: dayKey(view.range.toMs) })}
+          </span>
+        ) : undefined
+      }
+      actions={
         <DeskButton action="refresh" variant="line" compact onClick={() => void read()}>
           <RefreshCw size={12} />
           {t('metrics.refresh')}
         </DeskButton>
-      </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('metrics.hint')}</p>
+      }
+    >
+      <p className="text-[11px] leading-relaxed text-slate-500">{t('metrics.hint')}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
         <label className="flex items-center gap-1" htmlFor="metrics-preset">
@@ -271,15 +280,10 @@ export function MetricsPanel() {
             </label>
           </>
         )}
-        {view && (
-          <span data-testid="metrics-range" className="text-slate-500">
-            {t('metrics.rangeShown', { from: dayKey(view.range.fromMs), to: dayKey(view.range.toMs) })}
-          </span>
-        )}
       </div>
 
       {notice && (
-        <Banner tone="amber" markers={{ testid: 'metrics-notice' }} className="mt-2">
+        <Banner tone="amber" size="compact" markers={{ testid: 'metrics-notice' }} className="mt-2">
           {notice}
         </Banner>
       )}
@@ -290,91 +294,89 @@ export function MetricsPanel() {
         </p>
       )}
 
-      <ul className="mt-3 flex flex-col gap-2" data-testid="metrics-levels">
+      {/* 一级一行，行内左标签、中比例条、右读数：旧版每级是一张卡（`rounded-lg border` 里再套
+          两行），五级就是五张卡，卡里套卡让整块看板比外层那一圈描边还重。 */}
+      <ul className="mt-3 flex flex-col" data-testid="metrics-levels">
         {levels.map((level) => (
           <li
             key={level.level}
             data-funnel-level={level.level}
             data-funnel-count={level.count ?? 'null'}
-            className="rounded-lg border border-line bg-ink-950/60 px-3 py-2"
+            className={HAIRLINE_ROW_CLASS}
           >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[11px] text-slate-300">{t(LEVEL_KEYS[level.level])}</span>
-              <span className="font-mono text-xs text-slate-200">
-                {level.count === null ? t('metrics.noNumber') : t('metrics.count', { count: level.count })}
-              </span>
-            </div>
-            <div className="mt-1 h-2 rounded-full bg-slate-800">
-              <div
-                className={`h-2 rounded-full ${
+            <span className="w-14 shrink-0 text-[11px] text-slate-300">{t(LEVEL_KEYS[level.level])}</span>
+            <span className="h-1.5 min-w-0 flex-1 rounded-full bg-slate-800">
+              <span
+                className={`block h-1.5 rounded-full ${
                   level.count === null
                     ? 'w-0 bg-slate-700'
                     : `${BAR_STEPS[barStepOf(level.count, maxCount)]} bg-celadon`
                 }`}
               />
-            </div>
+            </span>
+            <span className="font-mono text-xs text-slate-200">
+              {level.count === null ? t('metrics.noNumber') : t('metrics.count', { count: level.count })}
+            </span>
             {level.unavailableReason && (
-              <p data-funnel-reason={level.level} className="mt-1 text-[11px] text-amber">
+              <span data-funnel-reason={level.level} className="w-full text-[11px] text-amber">
                 {t('metrics.noSource', { reason: level.unavailableReason })}
-              </p>
+              </span>
             )}
           </li>
         ))}
       </ul>
 
-      <div className="mt-4">
-        <h3 className="text-xs font-semibold text-slate-300">{t('metrics.quotaHeading')}</h3>
-        {!quota ? (
-          <p data-testid="metrics-await" className="mt-1 text-[11px] text-slate-500">
-            {t('metrics.awaitRead')}
-          </p>
-        ) : (
-          <>
-            {quota.mode === null ? (
-              <p data-testid="metrics-gate-missing" className="mt-1 text-[11px] text-amber">
-                {t('metrics.gateMissing')}
-              </p>
-            ) : (
-              <p data-testid="metrics-mode" data-quota-mode={quota.mode} className="mt-1 text-[11px] text-slate-400">
-                {quota.mode === 'daily' ? t('metrics.modeDaily') : t('metrics.modeUnlimited')}
-              </p>
-            )}
-            <ul className="mt-2 flex flex-col gap-1">
-              {quota.actions.map((row) => (
-                <li
-                  key={row.action}
-                  data-quota-action={row.action}
-                  data-quota-used={row.usedToday ?? 'null'}
-                  data-quota-limit={row.dailyLimit ?? 'null'}
-                  data-quota-remaining={row.remaining ?? 'null'}
-                  className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400"
-                >
-                  <span className="font-mono text-xs text-slate-200">{row.action}</span>
-                  <span>
-                    {row.usedToday === null
-                      ? t('metrics.sourceMissing')
-                      : t('metrics.usedToday', { count: row.usedToday })}
-                  </span>
-                  <span>
-                    {row.dailyLimit === null
-                      ? t('metrics.limitMissing')
-                      : quota.mode === 'unlimited'
-                        ? t('metrics.limitUnlimited')
-                        : t('metrics.limit', { count: row.dailyLimit })}
-                  </span>
-                  <span>
-                    {row.remaining === null
-                      ? quota.mode === null
-                        ? t('metrics.remainingNoGate')
-                        : t('metrics.remainingUnlimited')
-                      : t('metrics.remaining', { count: row.remaining })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
+      <h3 className="mt-4 text-xs font-semibold text-slate-300">{t('metrics.quotaHeading')}</h3>
+      {!quota ? (
+        <p data-testid="metrics-await" className="mt-1 text-[11px] text-slate-500">
+          {t('metrics.awaitRead')}
+        </p>
+      ) : (
+        <>
+          {quota.mode === null ? (
+            <p data-testid="metrics-gate-missing" className="mt-1 text-[11px] text-amber">
+              {t('metrics.gateMissing')}
+            </p>
+          ) : (
+            <p data-testid="metrics-mode" data-quota-mode={quota.mode} className="mt-1 text-[11px] text-slate-400">
+              {quota.mode === 'daily' ? t('metrics.modeDaily') : t('metrics.modeUnlimited')}
+            </p>
+          )}
+          <ul className="mt-1 flex flex-col">
+            {quota.actions.map((row) => (
+              <li
+                key={row.action}
+                data-quota-action={row.action}
+                data-quota-used={row.usedToday ?? 'null'}
+                data-quota-limit={row.dailyLimit ?? 'null'}
+                data-quota-remaining={row.remaining ?? 'null'}
+                className={`${HAIRLINE_ROW_CLASS} text-[11px] text-slate-400`}
+              >
+                <span className="font-mono text-xs text-slate-200">{row.action}</span>
+                <span>
+                  {row.usedToday === null
+                    ? t('metrics.sourceMissing')
+                    : t('metrics.usedToday', { count: row.usedToday })}
+                </span>
+                <span>
+                  {row.dailyLimit === null
+                    ? t('metrics.limitMissing')
+                    : quota.mode === 'unlimited'
+                      ? t('metrics.limitUnlimited')
+                      : t('metrics.limit', { count: row.dailyLimit })}
+                </span>
+                <span className="ml-auto">
+                  {row.remaining === null
+                    ? quota.mode === null
+                      ? t('metrics.remainingNoGate')
+                      : t('metrics.remainingUnlimited')
+                    : t('metrics.remaining', { count: row.remaining })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {view && (
         <p data-testid="metrics-took" className="mt-3 text-[11px] text-slate-500">
@@ -383,6 +385,6 @@ export function MetricsPanel() {
           {t('metrics.readOnly')}
         </p>
       )}
-    </section>
+    </DeskSection>
   );
 }

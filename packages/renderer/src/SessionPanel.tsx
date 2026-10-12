@@ -1,4 +1,4 @@
-import { Compass, KeyRound, LogOut, Radar, RefreshCw, ScanText, ShieldAlert } from 'lucide-react';
+import { Compass, KeyRound, LogOut, Radar, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -15,9 +15,11 @@ import {
   BLOCK_SURFACE_CLASS,
   DeskButton,
   DeskField,
+  HAIRLINE_ROW_CLASS,
   Tag,
   type BannerTone,
 } from './ui/controls';
+import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
 import { formatClock } from './format';
@@ -161,30 +163,54 @@ export function SessionPanel() {
         : undefined;
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-            <KeyRound size={16} />
-            {t('session.heading')}
-          </h2>
-          <DeskButton action="refresh" variant="line" onClick={() => void read()}>
-            <RefreshCw size={14} />
-            {t('session.refresh')}
-          </DeskButton>
-        </div>
-
-        {/* 内核视图地址是 percent-encoded 的长串，没有断行点：不 break-all 就会把整页撑出横向滚动条。 */}
-        <p className="mt-2 break-all text-[11px] text-slate-500" data-stat="kernel-view">
-          {t('session.viewUrl', { url: shell?.kernelViewUrl || t('session.viewIdle') })}
-          {' · '}
-          {t('session.viewPartition', { partition: shell?.kernelViewPartition || t('session.viewIdle') })}
-          {' · '}
-          {t('session.active', { id: snapshot?.activePlatform ?? t('session.none') })}
-        </p>
-
+    <>
+      <DeskSection
+        id="trust.sessions"
+        defaultOpen
+        markers={{ testid: 'session-panel' }}
+        title={t('session.heading')}
+        summary={
+          <span data-stat="kernel-view">
+            {t('session.viewUrl', { url: shell?.kernelViewUrl || t('session.viewIdle') })}
+            {' · '}
+            {t('session.viewPartition', { partition: shell?.kernelViewPartition || t('session.viewIdle') })}
+            {' · '}
+            {t('session.active', { id: snapshot?.activePlatform ?? t('session.none') })}
+          </span>
+        }
+        actions={
+          <>
+            <DeskButton
+              action="close-view"
+              variant="ghost"
+              compact
+              disabled={!!busy}
+              disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+              disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+              result={resultOf(actionLabel.close())}
+              doneLabel={t('desk.done.closedView')}
+              onClick={closeView}
+            >
+              <LogOut size={12} />
+              {t('session.close')}
+            </DeskButton>
+            <DeskButton
+              action="refresh"
+              variant="line"
+              compact
+              disabled={!!busy}
+              disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+              disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+              onClick={() => void read()}
+            >
+              <RefreshCw size={12} />
+              {t('session.refresh')}
+            </DeskButton>
+          </>
+        }
+      >
         {viewError && (
-          <Banner tone="seal" markers={{ stat: 'view-error' }} className="mt-2 break-all">
+          <Banner tone="seal" size="compact" markers={{ stat: 'view-error' }} className="break-all">
             {t('session.viewError', { code: viewError.code, description: viewError.description, url: viewError.url })}
           </Banner>
         )}
@@ -195,7 +221,7 @@ export function SessionPanel() {
               <li
                 key={`${event.platform}-${String(index)}`}
                 data-expired-platform={event.platform}
-                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
+                className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-[11px] ${BLOCK_EDGE_CLASS.amber} ${BLOCK_SURFACE_CLASS} text-amber`}
               >
                 <ShieldAlert size={12} />
                 {t('session.expiredBanner', {
@@ -209,116 +235,101 @@ export function SessionPanel() {
         )}
 
         {notice && (
-          <Banner tone={noticeTone} markers={{ testid: 'session-notice' }} className="mt-2">
+          <Banner tone={noticeTone} size="compact" markers={{ testid: 'session-notice' }} className="mt-2">
             {notice}
           </Banner>
         )}
 
-        <ul className="mt-3 flex flex-col gap-2">
+        {/* 一个平台一行：名字与状态在左、动作组贴右，元信息跟在名字后面。
+            旧版把落盘路径与 cookie 名摊在行里（一条 percent-encoded 长串 + 十几个 cookie 名），
+            三行灰字比平台名还显眼——那是取证明细，不是决策信息，挪到下面那一格按需展开。 */}
+        <ul className="mt-2 flex flex-col" data-testid="session-list">
           {(snapshot?.platforms ?? []).map((platform) => (
-            <li
-              key={platform.id}
-              data-session-id={platform.id}
-              className="rounded-lg border border-line bg-ink-950/60 px-3 py-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-slate-200">{platform.id}</span>
-                  <Tag tone={AUTH_TONE[platform.auth]}>{t(`session.auth.${platform.auth}`)}</Tag>
-                  <span className="text-[11px] text-slate-500">
-                    {platform.isPersistent ? t('session.persistent') : t('session.inMemory')}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <DeskButton
-                    action="open"
-                    variant="solid"
-                    compact
-                    disabled={!!busy}
-                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                    result={resultOf(actionLabel.open(platform.id))}
-                    doneLabel={t('desk.done.opened')}
-                    onClick={() => open(platform.id)}
-                  >
-                    <KeyRound size={12} />
-                    {t('session.open')}
-                  </DeskButton>
-                  <DeskButton
-                    action="probe"
-                    variant="line"
-                    compact
-                    disabled={!!busy}
-                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                    result={resultOf(actionLabel.probe(platform.id))}
-                    doneLabel={t('desk.done.probed')}
-                    onClick={() => probe(platform.id)}
-                  >
-                    <Radar size={12} />
-                    {t('session.probe')}
-                  </DeskButton>
-                  {/* 退出登录清的是本机那份会话，动完就回不去——朱砂那一档正是"风险/不可逆"。 */}
-                  <DeskButton
-                    action="logout"
-                    variant="seal"
-                    compact
-                    disabled={!!busy}
-                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                    result={resultOf(actionLabel.logout(platform.id))}
-                    doneLabel={t('desk.done.loggedOut')}
-                    onClick={() => logout(platform.id)}
-                  >
-                    <LogOut size={12} />
-                    {t('session.logout')}
-                  </DeskButton>
-                </div>
-              </div>
-              <p className="mt-1 break-all text-[11px] text-slate-500">
-                {t('session.partition', { name: platform.partition })}
-                {' · '}
-                {t('session.storagePath', { path: platform.storagePath ?? t('session.none') })}
-              </p>
-              <p className="mt-1 break-all text-[11px] text-slate-500">
-                {t('session.cookieNames', { names: platform.cookieNames.join(', ') || t('session.none') })}
+            <li key={platform.id} data-session-id={platform.id} className={HAIRLINE_ROW_CLASS}>
+              <span className="font-mono text-xs text-slate-200">{platform.id}</span>
+              <Tag tone={AUTH_TONE[platform.auth]}>{t(`session.auth.${platform.auth}`)}</Tag>
+              <span className="text-[11px] text-slate-500">
+                {platform.isPersistent ? t('session.persistent') : t('session.inMemory')}
                 {' · '}
                 {/* `unknown` 没有期限可报：写成「无期限」会把"证据不够"谎报成"永远有效"（spec 8.2-01）。 */}
                 {platform.auth === 'unknown'
                   ? t('session.unknownHint')
-                  : t('session.expiresAt', {
-                      time: formatClock(platform.expiresAt, t('session.noExpiry')),
-                    })}
-              </p>
+                  : t('session.expiresAt', { time: formatClock(platform.expiresAt, t('session.noExpiry')) })}
+              </span>
+              <span className="ml-auto flex items-center gap-1.5">
+                <DeskButton
+                  action="open"
+                  variant="solid"
+                  compact
+                  disabled={!!busy}
+                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                  result={resultOf(actionLabel.open(platform.id))}
+                  doneLabel={t('desk.done.opened')}
+                  onClick={() => open(platform.id)}
+                >
+                  <KeyRound size={12} />
+                  {t('session.open')}
+                </DeskButton>
+                <DeskButton
+                  action="probe"
+                  variant="line"
+                  compact
+                  disabled={!!busy}
+                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                  result={resultOf(actionLabel.probe(platform.id))}
+                  doneLabel={t('desk.done.probed')}
+                  onClick={() => probe(platform.id)}
+                >
+                  <Radar size={12} />
+                  {t('session.probe')}
+                </DeskButton>
+                {/* 退出登录清的是本机那份会话，动完就回不去——朱砂那一档正是"风险/不可逆"。 */}
+                <DeskButton
+                  action="logout"
+                  variant="seal"
+                  compact
+                  disabled={!!busy}
+                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                  result={resultOf(actionLabel.logout(platform.id))}
+                  doneLabel={t('desk.done.loggedOut')}
+                  onClick={() => logout(platform.id)}
+                >
+                  <LogOut size={12} />
+                  {t('session.logout')}
+                </DeskButton>
+              </span>
             </li>
           ))}
           {(snapshot?.platforms.length ?? 0) === 0 && <li className="text-xs text-slate-400">{t('session.empty')}</li>}
         </ul>
 
-        <div className="mt-3 flex items-center gap-2">
-          <DeskButton
-            action="close-view"
-            variant="ghost"
-            compact
-            disabled={!!busy}
-            disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-            disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-            result={resultOf(actionLabel.close())}
-            doneLabel={t('desk.done.closedView')}
-            onClick={closeView}
-          >
-            <LogOut size={12} />
-            {t('session.close')}
-          </DeskButton>
-        </div>
-      </section>
+        {(snapshot?.platforms.length ?? 0) > 0 && (
+          <DeskExplainer className="mt-2" id="trust.sessions.detail" label={t('session.detailToggle')}>
+            <ul className="flex flex-col gap-1">
+              {(snapshot?.platforms ?? []).map((platform) => (
+                <li key={platform.id} className="break-all font-mono text-[11px] text-slate-400">
+                  {platform.id}：{t('session.partition', { name: platform.partition })}
+                  {' · '}
+                  {t('session.storagePath', { path: platform.storagePath ?? t('session.none') })}
+                  {' · '}
+                  {t('session.cookieNames', { names: platform.cookieNames.join(', ') || t('session.none') })}
+                </li>
+              ))}
+            </ul>
+          </DeskExplainer>
+        )}
+      </DeskSection>
 
-      <section className="rounded-xl border border-line bg-ink-900/60 p-4" data-testid="kernel-page">
-        <div className="flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-            <ScanText size={16} />
-            {t('session.pageHeading')}
-          </h2>
+      <DeskSection
+        id="trust.page"
+        defaultOpen
+        markers={{ testid: 'kernel-page' }}
+        title={t('session.pageHeading')}
+        summary={page ? t('session.snapshotSummary', { title: page.title }) : t('session.snapshotIdle')}
+        actions={
           <DeskButton
             action="snapshot"
             variant="line"
@@ -330,12 +341,12 @@ export function SessionPanel() {
             doneLabel={t('desk.done.snapshotted')}
             onClick={readPage}
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={12} />
             {t('session.snapshot')}
           </DeskButton>
-        </div>
-
-        <div className="mt-3 flex items-center gap-2">
+        }
+      >
+        <div className="flex items-center gap-2">
           <DeskField
             action="navigate-url"
             data-testid="navigate-url"
@@ -361,7 +372,7 @@ export function SessionPanel() {
         </div>
 
         {page ? (
-          <div className="mt-3 flex flex-col gap-1">
+          <div className="mt-2 flex flex-col gap-1">
             <p className="text-[11px] text-slate-300" data-testid="page-snapshot">
               {t('session.snapshotReading', {
                 title: page.title,
@@ -391,10 +402,8 @@ export function SessionPanel() {
               {page.bodyText}
             </pre>
           </div>
-        ) : (
-          <p className="mt-3 text-[11px] text-slate-500">{t('session.snapshotIdle')}</p>
-        )}
-      </section>
-    </div>
+        ) : null}
+      </DeskSection>
+    </>
   );
 }

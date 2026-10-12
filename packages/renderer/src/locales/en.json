@@ -188,6 +188,8 @@
       "snapshotReading": "Title \"{{title}}\" · loading {{readyState}} · {{elements}} elements · {{textLength}} characters (kept {{bodyLength}}) · {{headings}} headings",
       "snapshotUrl": "Page URL {{url}} · partition {{partition}}",
       "snapshotHeadings": "Headings: {{items}}",
+      "snapshotSummary": "Last snapshot: {{title}}",
+      "detailToggle": "Partition, storage path and cookie names",
       "navigate": "Navigate",
       "actionNavigate": "navigate to that URL",
       "navigatePlaceholder": "URL on a registered platform origin, e.g. http://127.0.0.1:10233/boss"
@@ -1804,6 +1806,7 @@
         "providersHeading": "Added providers",
         "addProvider": "Add provider",
         "providersEmpty": "Nothing added yet. Press \"Add provider\" above to bring in the first one.",
+        "providerSummary": "{{count}} added",
         "customEndpoint": "Custom endpoint",
         "labelField": "Display name",
         "labelPlaceholder": "What to call it on this machine",

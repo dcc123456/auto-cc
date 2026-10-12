@@ -11,7 +11,17 @@ import type {
   LlmProviderView,
   LlmSettingsView,
 } from '@auto-cc/shared';
-import { Banner, DeskButton, DeskCheck, DeskField, DeskSelect, Tag, deskReason } from './ui/controls';
+import {
+  Banner,
+  DeskButton,
+  DeskCheck,
+  DeskField,
+  DeskSelect,
+  HAIRLINE_ROW_CLASS,
+  Tag,
+  deskReason,
+} from './ui/controls';
+import { DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -347,18 +357,21 @@ export function ModelSettingsPanel() {
     (catalog ?? []).find((item) => item.id === presetId)?.endpoints ?? [];
 
   return (
-    <section
-      className="rounded-xl border border-line bg-ink-900/60 p-4"
-      data-testid="model-settings"
-      data-model-encrypted={view?.storage.encrypted ?? 'unknown'}
-      data-provider-count={providerRows.length}
-    >
-      <h2 className="text-sm font-semibold text-slate-200">{t('settings.model.heading')}</h2>
-      <p className="mt-1 text-xs text-slate-400">{t('settings.model.note')}</p>
-
-      {/* —— 第一段：提供商实例池（spec 7.2-02 / 03 / 09）—— */}
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold text-slate-300">{t('settings.model.providersHeading')}</h3>
+    <DeskSection
+      id="trust.models"
+      defaultOpen
+      markers={{
+        testid: 'model-settings',
+        'model-encrypted': String(view?.storage.encrypted ?? 'unknown'),
+        'provider-count': String(providerRows.length),
+      }}
+      title={t('settings.model.heading')}
+      summary={
+        <span data-testid="settings-model-provider-summary">
+          {t('settings.model.providerSummary', { count: providerRows.length })}
+        </span>
+      }
+      actions={
         <DeskButton
           action="settings-model-add-provider"
           variant="amber"
@@ -369,8 +382,13 @@ export function ModelSettingsPanel() {
           <Plus size={14} />
           {t('settings.model.addProvider')}
         </DeskButton>
-      </div>
-      <ul className="mt-2 space-y-1" data-testid="settings-model-providers">
+      }
+    >
+      <p className="text-xs text-slate-400">{t('settings.model.note')}</p>
+
+      {/* —— 第一段：提供商实例池（spec 7.2-02 / 03 / 09）—— */}
+      <h3 className="mt-3 text-xs font-semibold text-slate-300">{t('settings.model.providersHeading')}</h3>
+      <ul className="mt-1 flex flex-col" data-testid="settings-model-providers">
         {providerRows.length === 0 && (
           <li className="text-xs text-slate-400" data-testid="settings-model-providers-empty">
             {t('settings.model.providersEmpty')}
@@ -384,9 +402,7 @@ export function ModelSettingsPanel() {
               key={row.id}
               data-provider-id={row.id}
               data-provider-selected={isFocused ? 'true' : 'false'}
-              className={`flex flex-wrap items-center gap-2 rounded-chip border px-2 py-1.5 text-xs ${
-                isFocused ? 'border-celadon/60 bg-ink-900' : 'border-line'
-              }`}
+              className={`${HAIRLINE_ROW_CLASS} text-xs ${isFocused ? 'bg-ink-800' : ''}`}
             >
               <DeskButton
                 action="settings-model-pick-provider"
@@ -661,15 +677,15 @@ export function ModelSettingsPanel() {
 
       {/* —— 第三段：两条腿各自从已入库的模型里挑一条（spec 7.2-11 / 12）—— */}
       <h3 className="mt-4 text-xs font-semibold text-slate-300">{t('settings.model.bindingHeading')}</h3>
-      <ul className="mt-2 space-y-3">
+      <ul className="-mx-4 mt-2">
         {(['chat', 'embed'] as const).map((leg) => {
           const legView = legViewOf(leg);
           const boundLabel = providerRows.find((row) => row.id === legView?.boundProviderId)?.label ?? '';
           const value = bindingDraft[leg] ?? boundValueOf(legView);
           const unchanged = value === boundValueOf(legView);
           return (
-            <li key={leg} data-model-leg={leg} className="rounded-chip border border-line p-2">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <li key={leg} data-model-leg={leg} className="border-t border-line/70 px-4 py-3 first:border-t-0">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
                 <span className="text-xs font-semibold text-slate-200">{t(`settings.model.leg.${leg}`)}</span>
                 <span className="text-[11px] text-slate-400" data-testid="settings-model-leg-origin">
                   {t(`settings.model.legOrigin.${legView?.origin ?? 'none'}`, { label: boundLabel })}
@@ -807,7 +823,7 @@ export function ModelSettingsPanel() {
           {t('settings.model.storageEncrypted')}
         </p>
       )}
-    </section>
+    </DeskSection>
   );
 }
 
