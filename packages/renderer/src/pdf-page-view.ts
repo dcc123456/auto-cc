@@ -147,6 +147,22 @@ interface LineAccumulator {
 }
 
 /**
+ * 摘掉一个文本项里的**控制码位**（C0、DEL、C1 三段）。
+ *
+ * 活体实测（2026-10-12，本 app 自己生成的那份简历 PDF）：pdf.js 对没有 `ToUnicode` 映射的字形回的是
+ * `U+0000`，于是**每一行行首都多出一个看不见、又写不出去的字符**，就地改提交时被
+ * `hasBundledGlyphCoverage` 判成「这一区被拒了（…文字不受支持）」——人既看不见它，也没法删掉它。
+ * 界面上不许有"点了、改了、按下去却说不动"这种事，所以在抽取的出口就摘掉（那一片像素仍然盖得住，
+ * 字也照原样写回去，只是新字里不再夹着一个谁都画不出的码位）。
+ * 白名单那一关本身留着：人**自己敲进去**的 emoji 照样挡，那是有形状的错，不是抽取的渣（§2.6 只在边界判）。
+ * @param str pdf.js 的一个文本项原文
+ * @returns 只留可打印码位的那一段；可能为空串，由调用方按"这一项没有字"丢掉
+ */
+function withoutControlCodepoints(str: string): string {
+  return str.replace(/[\u0000-\u001f\u007f-\u009f]/gu, '');
+}
+
+/**
  * 把 pdf.js 的文本项按基线聚成行。
  * 为什么要聚：pdf.js 给的是**片段**（同一行的中文常被拆成几段，跨字体还会再多几段），
  * 人眼的一行才是人要点的东西；聚完之后「点这一行」与「盖这一行」才是同一件事。
@@ -173,7 +189,8 @@ function linesOfItems(
     str: string;
   }[] = [];
   for (const item of items) {
-    if (item.str.trim() === '') continue;
+    const str = withoutControlCodepoints(item.str);
+    if (str.trim() === '') continue;
     const left = numberAt(item.transform, 4);
     const baseline = numberAt(item.transform, 5);
     const width = numberAt(item.width);
@@ -196,7 +213,9 @@ function linesOfItems(
       bottom: baseline - size * (1 - ratio),
       size,
       hint: fontFamilyHintOf(typeof style?.fontFamily === 'string' ? style.fontFamily : undefined),
-      str: item.str,
+      // 进组的必须是洗过的那一份：原文里的控制字符会一路带进「就地改」的输入框，
+      // 提交时又被 `planOverlays` 的白名单判成「文字不受支持」（spec 3.5-12 的活体读数）。
+      str,
     });
   }
   // 先按基线再按左右排：同一行的判定用「基线差 ≤1.5pt」，比按 y 分桶更贴排字实际（同字号的两行至少差一行距）。
