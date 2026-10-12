@@ -2141,3 +2141,24 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
   要么把 `timeoutMs` 同时递给传输层（`dispatcher`，代价是多一个运行时依赖，需按 §6.3 先回答"现有依赖能否覆盖"），
   要么走 `stream: true`（首字节立刻到，长产出不再撞 headers 超时）。在此之前，4.5-15 的判据只由提示词规则与
   事实校验用例承担，**不写成活体已过**。
+
+③ 的两格在 2026-10-12 18:19～18:34 各补了一趟，**两条都兑现了**，代价是把语料换成一份逐字虚构的英文简历，而不是把判据放宽：
+
+- **第二格（模型标的 `**` 真正落到纸面）：过**。第 19 轮（`pnpm e2e:resume-jd --pdf tmp/64/mini-resume-en.pdf`，
+  `tmp/64/e2e-mini2.log`）在 1086 字的虚构语料上读到 `resume.generate.run 用时 233.1s` →
+  `outcome=rewritten modelStatus=merged 改写 3 处 重排 2 项 事实校验 ok=true（违规 0）` → `PASS · 段 4b`，
+  产物 1 页 80449 字节（hash `61226bed→52a8ed22`）。**因果那一半单独钉**：源文件 `<body>` 是六段 `<p>`、
+  没有一处 `**` 也没有一行以 `- ` 起手，而落库的 `doc_json` 里 `project/1/achievement` 长成三条一级 `- ` + 一条「两个空格 + `- `」的二级、
+  四处 `**…**`——标记出自模型（规则 7 / 8），不是导入带进来的。纸面按新口径量：左 x 档位 45 / 63 / **81 / 93**
+  （一级 / 二级差 12，与夹具 75/87 同档距），五处被标注短语**逐条独立成 item 且字面从正文 `g_d0_f5` 换成 `g_d0_f8`**。
+  真实简历那一趟仍被上面那条 `UND_ERR_HEADERS_TIMEOUT` 挡着，所以这一格写的是"链路会写、界面与产物会画"，
+  **不写成"5196 字那份也验过了"**。
+- **第一格（界面里那一只 `ul` 的 `listStyleType`）：过，且比原判据多一条形状事实**。`npx tsx tmp/64/ui-preview-probe.ts`
+  自起一台 dist 实例（端口 10278 + 专属 userData 副本，不碰共享的 10222），切简历视图、点
+  `[data-doc-id="resume-8e0617fbed92"] [data-action="resume-doc-pick"]` 之后：`ul=2 / li=4 / 嵌套 ul=1 / strong=5`，
+  第一只 `ul` 计算值 **`listStyleType: disc`**、嵌套那只 `circle`、`strong` 字重 700、`li` 左边界 109/109/109/**125**。
+  原判据里"app chrome 那一圈是 `none`"这一问也顺带判了：**预览宿主是 `<iframe sandbox="" srcdoc>`**
+  （`ResumePaperStage.tsx:208-215`），沙箱 srcdoc 是独立源，父文档 `contentDocument` 读不进去（探针里 `directAccess="blocked"`），
+  所以 app 的那一圈 `ul{list-style:none}` 根本进不了这张纸——计算值来自**同一页面里注入的一份同内容非沙箱副本**，量完即摘。
+  画面证据入库：`docs/acceptance/04-resume-kb/4.1-18-ui-preview-list-and-bold.png`（一级实心点三条 + 二级空心圈一条 +
+  四处粗体；语料虚构，故可入库；同批九张 png 逐张 md5 互异）。逐字读数与两份 JSON 记在同一份证据文件末尾那一节。

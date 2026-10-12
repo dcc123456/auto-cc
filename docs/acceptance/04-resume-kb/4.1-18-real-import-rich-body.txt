@@ -101,3 +101,69 @@ FAIL · 段 4b 模型通道按 JD 给出改写并被写入（不是仅重排的�
 于是发货值越大越像是"配置没生效"。这一条记在 plan 04 §4.10 的后续项 ③ 里，修它属于 07 号那层的传输侧，
 不在裁定㉘ 第 3 条划定的本轮范围内；在它修好之前，"真实模型会不会按 `resume-generate-v4` 的规则 7 / 8 标 `**`"
 只能由提示词原文与 `fact-check.test.ts` 的 4.5-15 用例承担，**不写成活体已过**。
+
+
+—— 第 19 轮真实模型活体 + 界面级四只计数（2026-10-12 18:19～18:34，`tmp/64/e2e-mini2.log` 与 `tmp/64/ui-preview-probe.log`）——
+
+上面两条后续项（① 界面里那张纸、② 模型标注真正落到纸面）这一趟都取到了正读数，代价是把**语料换成一份逐字虚构的
+英文简历**（`tmp/64/mini-resume-en.html` → 同名 PDF，姓名 Alex Lin / 电话 +86 138 0000 0000 / 邮箱 alex.lin@example.com /
+公司 Starbridge Tech，全仓无一处真实个人信息），而不是把判据放宽。真实简历那一趟仍受传输层 headers 超时阻挡（见上一节），
+两条结论因此各归各的：本轮证明的是"链路会写出标记、界面与产物会画出来"，真实简历那 5196 字要等 07 号那层修好才能重跑。
+
+**段 4b 逐字读数（`pnpm e2e:resume-jd --pdf tmp/64/mini-resume-en.pdf`，dist 渲染层 + 专属 userData）**：
+
+```
+· 导入回执：status=imported docId=resume-8e0617fbed92 format=pdf isNew=true 文本=1086 字
+· 解析区块：summary:1 / skills:1 / experience:1 / project:1 · 待确认 3 条
+· 生效配置：llm.timeoutMs=180000 · kb-generate.modelMaxTokens=4096 · modelTimeoutMs=420000 · maxRewriteChars=600 · modelTemperature=0
+· resume.generate.run 用时 233.1s
+· 生成读数：outcome=rewritten modelStatus=merged model=auto 改写 3 处 重排 2 项 证据 2 条 事实校验 ok=true（违规 0）
+· 接受读数：写入改写 3 处 重排=true 移动区块 2 条目 0
+· 定制后产物：…/resume-8e0617fbed92-classic.pdf 1 页 80449 字节 hash=52a8ed227591 快照=f83ef80b-b17a-4fbd-9e5b-de06ee0849d6
+PASS · 段 4 按 JD 定制并导出新 PDF —— outcome=rewritten 写入=3 改写 / 2 区块 · 产物 hash 61226bed→52a8ed22
+PASS · 段 4b 模型通道按 JD 给出改写并被写入（不是仅重排的保守回落） —— modelStatus=merged 采纳改写 3 处 · 原因 无
+链路结论：段 1 导入 / 段 2 实体 / 段 3 搜 JD / 段 4 定制导出 / 段 4b 模型通道改写 全过。
+```
+
+**标记是模型写的，不是导入侧带进来的**（这一条是后续项 ② 的因果半边，只看产物分不开）。源文件 `<body>` 里是六段
+`<p>`，**没有一处 `**`、没有一行以 `- ` 开头**；而落库后的 `resume_docs`（`select doc_json from resume_docs where id='resume-8e0617fbed92'`）
+里，`project/1/achievement` 变成了三条 `- ` 一级项 + 一条 `  - ` 二级项、带四处 `**…**`，`experience/1/achievement`
+是行内段里长出两处 `**…**`。逐字（节选）：
+
+```
+- Built a local-first workbench … into a **visual pipeline**.
+- Adopted by more than **1200 teams**; **P99 latency dropped from 9.8s to 3.4s**, recall hit rate rose 18 points, …
+- Internal efficiency platform · Front-end owner · 2022.01-2022.12
+  - Merged six manual reports into one pipeline with incremental crawling; …
+```
+
+**产物纸面（按上一节换过的新口径量，不看 `•`）**：`node tmp/64/pdf-items-dump.mjs tmp/e2e-resume/e2e-2026-10-12T10-19-02-resume.pdf`
+→ 1 页 / 36 条非空 item，`markerTally={}`（与夹具同形，不是缺陷）。左 x 档位：段落与区块标题 45、行内成果 63、
+**一级条目 81、二级条目 93**（差 12，与夹具 75/87 同一档距）。被标注的短语**逐条独立成 item 且换了字面**：
+`evaluation console` / `first paint from 4.2s to 1.6s` / `visual pipeline` / `1200 teams` / `P99 latency dropped from 9.8s to 3.4s`
+全在 `g_d0_f8`，而它们左右的常规文字在 `g_d0_f5`（正文）。五处加粗、两档分层，纸面与库里逐字对得上。
+
+**界面里那张纸（后续项 ① 的四只计数）**：`npx tsx tmp/64/ui-preview-probe.ts` 自己起一台 dist 实例
+（`--remote-debugging-port=10278` + 专属 userData 副本，不碰共享的 10222），切到简历视图、点
+`[data-doc-id="resume-8e0617fbed92"] [data-action="resume-doc-pick"]` 之后逐字读数：
+
+```
+{"view":"resume","hostExists":true,"hostHeight":532,"srcdocBytes":38096,
+ "hostCounts":{"ul":2,"disc":1,"circle":1,"li":4,"strong":5},"directAccess":"blocked",
+ "inner":{"ul":2,"li":4,"nestedUl":1,"strong":5,
+  "firstUl":{"cls":"list-disc pl-4 mt-1","listStyleType":"disc","marginLeft":"0px","paddingLeft":"16px","fontWeight":"400"},
+  "nestedUlStyle":{"listStyleType":"circle","marginLeft":"0px","paddingLeft":"16px","fontWeight":"400"},
+  "strongStyle":{"text":"evaluation console","fontWeight":"700"},
+  "liLefts":[{"left":109,"text":"Built a local-firs"},{"left":109,"text":"Adopted by more th"},
+             {"left":109,"text":"Internal efficienc"},{"left":125,"text":"Merged six manual "}]}}
+```
+
+三条要点：① **`ul=2 / li=4 / 嵌套 ul=1 / strong=5`，第一只 `ul` 的 `listStyleType` 算出来是 `disc`、嵌套那只是 `circle`**，
+`strong` 的计算字重 700 —— 裁定㉘ 要的"列表 + 分层 + 关键字加重"在界面这一半是正读数，不是靠 `@media print` 才成立；
+② `li` 的左边界 109 / 109 / 109 / **125**，二级那一条确实向内缩了一档（16px，即 `pl-4` 生效）；
+③ **`directAccess="blocked"` 是形状事实，不是缺陷**：预览宿主是 `<iframe sandbox="" srcdoc=…>`（`ResumePaperStage.tsx:208-215`），
+沙箱 srcdoc 是独立源，父文档读不到它的 `contentDocument`——所以那五项计算值来自**在同一页面里注入的一份同内容非沙箱副本**
+（`srcdoc` 逐字取自宿主属性，量完即摘）。这条口径写下来，是为了下一次别把它当成"界面读不到"。
+
+画面证据：`docs/acceptance/04-resume-kb/4.1-18-ui-preview-list-and-bold.png`（真实 app 截图里那张纸的局部，
+一级实心点三条 + 二级空心圈一条 + 四处粗体，语料是上面那份虚构简历，因此可以入库；同批九张 png 逐张 md5 互异）。
