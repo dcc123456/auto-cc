@@ -496,6 +496,23 @@ spike 代码按 AGENTS.md §6.4 留在工作区外 `.research-repos/3-8-02-fidel
 
 ---
 
+## 3.10 整屏直接编辑（2026-10-12 起；裁定㉙；plan `03-resume-pdf` §15）
+
+| ID | 验收标准 | 方式 | 验证操作 | 状态 |
+| --- | --- | --- | --- | --- |
+| 3.10-01 | 整屏编辑页那颗纸面帧是 `sandbox="allow-same-origin"`（**不带** `allow-scripts`）：父页读得到 `contentDocument`、挂在帧文档上的 click 监听收得到事件，而帧内**不执行任何脚本**（内联 `onerror` 不改 DOM）。简历屏那三档的帧形状一字不动（仍是 `sandbox=""`），放开只发生在编辑页这一颗 | U+V | 三条本机实测已在 plan §15 的表里（探针 `tmp/wysi-spike.cjs`）；落地后活体复验：编辑页里现量 `frame.getAttribute('sandbox')`、`contentDocument !== null`、点一段后父页监听计数 +1、`img[onerror]` 的 `dataset` 仍为空。反向验证（§6.5）：被否决的"帧内脚本 + postMessage"没有造成能力缺口——装机版 CSP `script-src 'self'` 会挡内联脚本，而命中/矩形两样父页现量已够用 | [ ] |
+| 3.10-02 | 打印面的区块锚点：`<section>` 挂 `data-rz-section="<区块 id>"` 与 `data-rz-kind`，条目格挂 `data-rz-entry="<条目 id>"`。锚点是**惰性属性**：不参与排版（`template.test.ts` 那条"模板不写 `<style>` / 不写 `style=`"的断言逐字不动仍绿），也不改文本层——同一份文档加锚点前后 `resume.export.toPdf` 两次的文本层逐字相同 | U+C | 单测：两套模板各渲一次，`[data-rz-section]` 计数 = 文档区块数、`[data-rz-entry]` 计数 = 条目数，且两份产物 md5 互异（3.9-02 同一条判据形状）；C 半边：`pnpm lint` 的模板 class 集合机检仍绿。PDF 文本层对比读数（本机，脱敏夹具）：锚点前后同一文档各导一次，逐页 `items[].str` 序列完全相同、页数相同 | [ ] |
+| 3.10-03 | 纸面上**点中一段**就长出样式条：命中按 `closest('[data-rz-section]')` 上溯，条上读数说清改的是哪一类区块；再点别处或 Esc 收掉。命中换算必须走帧自己的矩形（`--paper-scale` 之下 CSS 坐标与帧内坐标差一个倍率，界面不存第二份倍率事实） | V | 活体（`harness eval --url 5173`，指针事件在帧内元素上派发）：`[data-testid="resume-edit-bar"]` 出现、其 `data-kind` 等于被点那段的 `data-rz-kind`；点另一段后读数跟着换；Esc 后节点不在 DOM 里。截图（含个人信息者只留 `tmp/`，判据写"逐字读数 + 帧内矩形"） | [ ] |
+| 3.10-04 | 样式条能改这一类的**字号 / 行距 / 对齐 / 字重 / 字族 / 字色**，以及整份文档的**基准字号 / 行距 / 四边距**；每一次改动 = 一个撤销单元（撤销一步纸面回到上一版）；越界值与非 `#rrggbb` 一律由主进程拒、界面把原话摆出来并把控件弹回已提交值（界表沿用 `view.metricBounds`，不另立第二份） | U+V | 单测：`planDesign` / `planMetric` 的既有用例不动（判据只在主进程一处，§2.5）；活体：拨一次字号 → 纸面 `--rz-p-*` 变量跟着变 + `canUndo` 由按不动变可按 → 撤一步 → 变量回到原值。拒绝路径：把字号拨到界表外（`OUT_OF_BOUNDS_REACH` 那一档）→ 条上出现主进程那句原因、滑杆弹回 | [ ] |
+| 3.10-05 | **在纸上拖区块改序**：按住一段拖到另一段的位置，松手发**一次** `resume.editor.move`，纸面顺序与左列清单同时跟上；落点没变时一个字节都不发（不进撤销栈）。条目级排序沿用同一颗口（`editor.move` 的 `entryId`） | V | 活体：拖第 2 段到第 4 段位 → `view.sections` 序变、纸面 `[data-rz-section]` 的 y 序跟着变、撤销一步回到原序；负对照：原地按下再松手 → 序不变且 `canUndo` 不翻。落点算法与左列 `indexOfPointer` 同一份实现（抽进 hook，§2.2） | [ ] |
+| 3.10-06 | 整屏页的纸**明显比右栏那一格大**：同一份文档下，编辑页帧的布局宽度 ≥ 简历屏 layout 档帧宽，且装不下时仍整张缩小、不横向滚（6.4-12 的口径原样沿用，倍率只写在铺纸那一个节点上） | V | 活体两档各量一次 `getBoundingClientRect()` 与 `--paper-scale` 读数并列出（编辑页 vs 简历屏 layout 档），要求宽度比 ≥1.6 且两处的 `offsetWidth` 相同（同一张 A4 纸，只是放大镜倍率不同——3.3-01「预览即导出所见」不许被这一页破坏） | [ ] |
+| 3.10-07 | 会话状态**只有一处**：`useResumeEditor` 是 `resume.editor.*` 九个动作与投影/预览的唯一持有者，左列编排面板与整屏页都消费它；`ResumeEditor.tsx` 里不再自己 `useState<ResumeEditorView>`。3.6 那十条已 `[x]` 判据的取证通道（`data-action` / `data-testid` / 话术键）一字不改 | C | `grep` 读数：`resume['editor.` 的调用点在渲染层只出现在 `useResumeEditor.ts` 一处（只读预览口 `editor.preview` 亦在同处）；`ResumeEditor.tsx` 的 `useState<ResumeEditorView>` 命中数为 0。活体回归：左列那一份的拖拽行、度量滑杆、主题四格、段落六格、拆/并、撤销重做保存逐项按得动（3.6-01/02/03/05/09/10 复点一遍） | [ ] |
+| 3.10-08 | 新页的每一格都守渲染层规矩：文案全走 i18n（`resume.edit.*`，`zh-CN` 与 `en` 同时补齐）、控件只出自 `src/ui/**` 原件、图标只用 lucide、按不动的格子一律带原因码 | C | `pnpm lint` 全链（含 `check-renderer-conventions.ts` 第 10/13/14 节与语言包对齐）+ `pnpm format:check` 对本片文件 0 命中 | [ ] |
+| 3.10-09 | 反向验证（§6.5）：不在渲染层用 React 重画一张纸这条否决没有造成能力缺口——编辑页画的就是 `resume.editor.preview` 那一份 HTML，与导出产物同源于唯一那颗 builder | C | 活体哈希读数：编辑页帧的 `srcdoc` 长度与 31 位哈希 = 简历屏 layout 档同一份（同一文档同一模板语言下逐字节相同）；`grep` 断言渲染层没有第二处 section/entry 排版实现（`ResumeEditPage.tsx` 不 import 模板内部件） | [ ] |
+| 3.10-10 | 这一片**不做**纸上打字改正文（裁定㉙ 第 1 条"两批都做，排版先行"的后半句另立 3.11）：界面上不出现"看着能改其实不改"的假控件，正文格在编辑页只读；正文不过进程边界那面墙一字不推 | C | `grep` 读数：全仓没有 `editor.text` 这类新口、`bridge.ts` 白名单本片零改动；活体：在纸上双击/长按正文不出现可打字的光标或输入框，条上也没有"改文字"那一格 | [ ] |
+
+---
+
 ## 里程碑对账（P3 结束时）
 
 | 里程碑 | 判据                                                         | 本 spec 覆盖                                                                            |

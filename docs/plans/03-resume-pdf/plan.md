@@ -1817,3 +1817,75 @@ spike 在 `.research-repos/p64-rich-text/`（§6.4，不进主干），对象是
 数字守恒同族冲突，见 4.5-15 反向验证段）、界面里的升 / 降级与手动加粗开关（裁定㉘ 第 3 条把界面控件明确排除在本轮之外，
 另起一片）。检索面（`profile-service` 的命中文本）本轮**不剥标记**——命中的仍是同一句话，判据没变松，
 但列表项文本现在带 `- ` 前缀，要不要在展示层剥掉是下一次界面片的决定，记账在 04 §4.10 的偏离点。
+
+## 15. 整屏直接编辑（2026-10-12 起；裁定㉙；spec 3.10）
+
+### 用户诉求（逐字，2026-10-12）
+
+> 简历编辑功能很难用   我希望简历编辑可以项目pdf 编辑器那样直接编辑  修改字号 行距 排序 等等功能  可以单独做一个简历编辑页面实现这个功能
+
+### 裁定㉙（两条，AskUserQuestion 逐字）
+
+1. **正文写口 = 「两批都做，排版先行」**：这一片只做**排版类**的纸面直改（字号 / 行距 / 边距 / 段落样式 / 区块与条目排序），
+   全部走既有白名单口（`resume.editor.metric` / `.design` / `.move`），**不动** 2026-10-08 裁定① 那面墙（正文不过进程边界）。
+   「纸上打字改正文」是下一片（3.11），本片只把它的设计写进本节的「下一片」段，不顺手做。
+2. **页面形态 = 独立整页**：用户原话「是一个单独的编辑页 这样显示才清楚 现在的预览页显示的区域太小了 或者让现在的预览页能全屏也可以」。
+   取**整屏编辑页**：从简历屏一颗键进去，进去之后盖住工作区（纸按可用高度铺满，不再挤在右栏那一格里），顶部一条工具栏，Esc 或「返回简历」出来。
+   这一条同时满足他给的两个候选（单独一页 / 预览能全屏），不需要在左轨新增顶层视图——顶层视图的名字由 `viewTrail.ts` own，
+   且 `docId` 住在 `ResumeDesk` 里，为多一个入口把文档选择状态抬到 `App` 是第二份事实（§2.5）。
+
+### 选型与证据（§6.1/§6.2：文档转述不算，本机 spike 为准）
+
+纸面是 `<iframe sandbox srcDoc>`，之前所有取证里 `contentDocument` 都读不到（3.6-04 那份读数就是 `articleClass: null`）。
+整屏直改的前提是"点得中纸上的某一段"，所以先量三种 sandbox 形状各能不能读 DOM、能不能挂监听、帧内脚本会不会跑
+（探针 `tmp/wysi-spike.cjs`，本机 `pnpm dev` + `harness eval --url 5173`，2026-10-12 12:12）：
+
+| `sandbox` | `contentDocument` 可读 | 数得出 `[data-rz-section]` | 父页挂的 click 监听收得到 | 帧内内联 `onerror` 跑了吗 |
+| --- | --- | --- | --- | --- |
+| `allow-same-origin` | **是** | 是（2 段，首段 id `s1`） | **是** | **否** |
+| `""`（现状） | 否 | 0 | 取不到文档 | 否 |
+| `allow-same-origin allow-scripts` | 是 | 是 | 是 | **是**（不要这一档） |
+
+结论与选定的形状：**`sandbox="allow-same-origin"`（不带 `allow-scripts`）+ 父页一侧现量矩形做命中**。
+被否决的三条：
+
+- **帧内挂脚本、往父页 `postMessage`**：装机版渲染层 CSP 是 `script-src 'self'`（`scripts/build.ts` 的 `RENDERER_CSP`），
+  srcdoc 帧继承父页 CSP，内联 `<script>` 会被挡；要放开就得往渲染层根目录再搬一支外部脚本资产（`vite-static-assets.ts` 那一族），
+  多一条资产链、也多一处"帧里能跑代码"的面。上表第三行实测：帧内脚本确实会跑 —— 那正是要避免的。
+- **在渲染层用 React 重画一张纸**（自己排 section/entry）：那是**第二套**简历渲染器，直接撞 §2.5 与 3.3-01「预览即导出所见」——
+  两套排版引擎迟早分叉，而分叉的代价是"屏上好看、导出来不是那张"。
+- **pdf.js 那套文本层命中**：那是位图上的行盒（`pdf-page-view.ts`），纸面这边是活的 DOM，矩形现量即可，不需要再解析一遍。
+
+保留的一条风险，写在这里而不是藏起来：`allow-same-origin` 让帧与父页同源，父页能读它的 DOM；帧里的内容是我们自己
+从 `doc_json` 生成的 HTML（格值一律走 `toEntryView` 的转义），且**没有** `allow-scripts`，所以帧内不执行任何脚本 ——
+上表第一行实测 `scriptRan: false` 就是这一条的反向验证判据（3.10-01 收它）。
+
+### 形状（新增/改动清单）
+
+| 文件 | 做什么 | 为什么在这一处 |
+| --- | --- | --- |
+| `packages/renderer/src/useResumeEditor.ts` | 把 `ResumeEditor` 的会话状态与九个动作（`open/view/preview/metric/design/use/split/merge/move/undo/redo/save` + 拒绝话术 + 预览重出）**抽成一只 hook** | 整屏页与左列编排面板要的是同一份会话；抄一份就是第二套状态机（§2.2/§2.5） |
+| `packages/renderer/src/ResumeEditor.tsx` | 改为消费 hook，删掉内联那一份；其余（拖拽行、度量滑杆、主题与段落格）不动 | 3.6 那十条已 `[x]` 的判据取证通道（`data-action` / `data-testid`）一字不改 |
+| `packages/renderer/src/ResumePaperFrame.tsx` | 把"一张纸怎么铺进槽里"（`fitPaper` 量倍率 + `ResizeObserver` + 那颗 iframe）抽成原件，`--paper-scale` 仍只写在这一个节点上 | 槽位与整屏页共用同一颗纸的铺法；倍率是放大镜这条口径只留一份 |
+| `packages/renderer/src/ResumePaperStage.tsx` | 改用 `ResumePaperFrame`；三档页签、身份读数、回执条不动 | 同上 |
+| `packages/renderer/src/ResumeEditPage.tsx` | **新页**：整屏、顶部工具栏（返回 / 文档 / 模板读数 / 撤销 / 重做 / 保存）、纸按可用高度铺满、点中一段长出**贴在那一段上方**的样式条（字号 / 行距 / 对齐 / 字重 / 字族 / 字色 + 区块上下移），拖区块改序 | 用户要的"直接编辑"落在纸本身上，而不是左列那张控制清单 |
+| `packages/renderer/src/ResumeDesk.tsx` | 挂整屏页 + 一颗进整屏的键 + Esc 出口；`docId` / `templateId` / `locale` 仍由 desk own | 文档身份的唯一持有者不变 |
+| `packages/resume-doc/src/internal/template-kit.ts` | `<section>` 挂 `data-rz-section="<区块 id>" data-rz-kind="<种类>"`，条目格挂 `data-rz-entry="<条目 id>"` | 命中要靠这几个锚点；它们是**惰性属性**，不参与排版，导出产物只是多几个属性 |
+| `packages/renderer/src/locales/{zh-CN,en}.json` | 新增 `resume.edit.*` 一整组文案（两档同时补齐，缺翻译即 lint 红） | §5.5/§5.6 |
+
+### 交互口径（与 PDF 编辑器同一族，但按 DOM 现状改形）
+
+- 命中 = 帧内 `document.elementFromPoint` 沿 `closest('[data-rz-section]')` 上溯（与 `PdfPaperView` 的"点中一行"同一形态，
+  只是那边是行盒、这边是区块锚点）；倍率换算不能省：`--paper-scale` 之下 CSS 坐标与帧内坐标差一个倍率，
+  一律**现量帧自己的 rect** 再换算，不存第二份倍率事实。
+- 选中态画在帧里（父页往帧内 `<head>` 注一支 `<style>`，只写 `[data-rz-section].rz-picked{outline…}` 这一条），
+  样式条本体在父页、按那段矩形换算到父页坐标摆在那一段上方 —— 与 `usePdfEdit` 的 `putRectVars` 同一口径。
+- 排序 = 在纸上按住一段拖（落点用相邻段矩形中心判定，与左列那一份 `indexOfPointer` 同一算法，抽进 hook 复用），
+  松手发**一次** `resume.editor.move`；落点没变一个字节都不发（3.6-03 的"空编辑不进栈"）。
+- 门禁与拒绝：数值界、颜色形状、种类清单都只在主进程判一次（`planDesign` / `planMetric`），界面把拒绝原话摆出来并把控件弹回已提交值。
+
+### 下一片（3.11，等正文写口的裁定落地后再做）
+
+纸上打字改正文：需要一条**带文字**的新口（暂名 `resume.editor.text(docId, sectionId, entryId, fieldKey, value)`），
+随之要定三件事 —— 落在 `doc_json` 还是回写 `kb_entities`、与事实锁定（`locked` / `factKey`）怎么打架、
+「已读准」标记与快照台账要不要跟着走。这一片不做，也不做出"看着能改其实不改"的假控件（6.2 那条假按钮的教训）。
