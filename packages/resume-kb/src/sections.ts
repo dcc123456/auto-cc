@@ -117,7 +117,7 @@ const MAX_HEADING_LENGTH = 16;
 
 /** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
 const LEADING_MARKUP =
-  /^\s*(?:#{1,6}\s*|[-*+•·]\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
+  /^\s*(?:#{1,6}\s*|(?:[-+•·]|\*(?!\*))\s*|\d+[.、)]\s*|[（(【]?\s*[一二三四五六七八九十百]+\s*[）)】]?[、.．:：]?\s*|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲]\s*[、.．:：]?\s*)/u;
 
 /** 条目内字段分隔：中英文竖线 / 间隔号 / 逗号分号 / 任意空白（英文公司名带空格会被切开，切多了就标待确认）。 */
 const SEGMENT_SPLIT = /[|｜·•,，;；]|\s+/u;
@@ -127,6 +127,180 @@ const PUNCTUATION_ONLY = /^[-–—~～至到.,，;、|｜·•\s]+$/u;
 
 /** 学位词表：教育区块里能识别出学位的那一段。 */
 const DEGREE_TERM = /学士|硕士|博士|本科|大专|MBA|PhD|BSc|MSc/i;
+
+/**
+ * 弱信号（整行加粗 / Markdown 标题 / 短行带时间段）能容忍的标题行长度上限（按码点计）。
+ * 取 50 是因为真实简历的 13 条条目标题去装饰后最长 49 字；超过它的一律当正文（一句被加粗的正文比标题长）。
+ * 汉字序号那一支**不受这一条限制**（见 `CJK_ORDINAL_HEAD` 的注释）。
+ */
+const MAX_ENTRY_HEADER_CHARS = 50;
+
+/**
+ * 汉字序号行首：`（一）`、`一、`、`第三章` 这三种写法。
+ * 刻意**不含**阿拉伯数字支与项目符号支——真实简历条目**内部**的分点用的正是 `1. 工作职责` 与 `- 业绩`，
+ * 把它们当边界会把一段经历切成四条假经历。序号是作者亲手编的结构，所以这一支不设长度上限
+ * （实测最长的一条 56 字：`（八）MarkDown 移动端编辑器 App - …`）。
+ */
+const CJK_ORDINAL_HEAD =
+  /^\s*(?:[（(【]\s*[一二三四五六七八九十百]+\s*[）)】]|[一二三四五六七八九十百]+\s*[、.．]|第\s*[一二三四五六七八九十\d]+\s*[章节部分讲])/u;
+
+/** 整行被加粗符号包住。中间不许再出现加粗符号——`**甲** 与 **乙**` 是一句正文，不是一条标题。 */
+const BOLD_WHOLE_LINE = /^\s*(?:\*\*|__)[^*_]+(?:\*\*|__)\s*$/u;
+
+/** Markdown 标题（任意层级）；区块词那一级早在 `classifyHeading` 就被认领了，走到这里的都是条目标题。 */
+const MARKDOWN_HEADLINE = /^\s*#{1,6}\s+\S/u;
+
+/**
+ * 阿拉伯数字序号或项目符号开头的行：技能区块认它成条，其余四个区块永远当正文。
+ * `*` 那一支带负向环视——整行加粗的 `**…**` 是 S2 的输入，不能被当成项目符号吃掉。
+ */
+const LIST_MARKUP_HEAD = /^\s*(?:(?:[-+•·]|\*(?!\*))\s*|\d+[.、)]\s*)/u;
+
+/** 句末结尾标点：技能那一格用它判「这一条说完了」，说完之后的物理行起新条目。 */
+const SENTENCE_FINAL = /[。！？；!?;]$/u;
+
+/** 结尾是冒号的行（`4. 主要功能：`）说的是「下面要开始」，本身不能当一条技能。 */
+const TRAILING_COLON = /[：:]$/u;
+
+/** 技能分组小标题的长度上限（`编程语言`、`开发工具与技术` 这种只有名字的一行）。 */
+const MAX_SKILL_GROUP_TITLE_CHARS = 12;
+
+/**
+ * 走条目边界四信号的区块种类。
+ * `summary` 刻意不在其中——它是散文，切多条没有裁定依据（4.1-16 明写不动）；`skills` 走自己的逻辑行规则。
+ */
+const ENTRY_SPLIT_KINDS: readonly SectionKind[] = ['experience', 'project', 'education', 'campus'];
+
+/** 按码点计长度（中英文混排的简历里 `string.length` 会把代理对算成两个）。 */
+function charCount(text: string): number {
+  return [...text].length;
+}
+
+/**
+ * S4：一行「短标题 + 成端点的时间段」——`某公司 前端开发 2021.03 - 2024.06`。
+ * 必须两端都认出来（或写明「至今」）才算，单个年份不算：正文里的 `2020 年做过 X` 会假切。
+ * @param content 去装饰后的行文本
+ * @returns 认得出标题形状的时间段、且摘掉时间后还剩名称段时为真
+ */
+function hasHeaderPeriod(content: string): boolean {
+  const { period, titles } = splitHeader(content);
+  if (period === null || titles.length === 0) return false;
+  return period.from !== null && (period.to !== null || period.isCurrent);
+}
+
+/**
+ * 四个结构化区块（经历 / 项目 / 教育 / 校园）里，一行是否新开一个条目（spec 4.1-15）。
+ *
+ * 必须吃**原始行**：`stripMarkup` 会把 `**`、`（一）`、`###` 这三处信号先吃掉，判据就没东西可读了。
+ * @param rawLine 未去装饰的原始行
+ * @param content 该行去装饰后的文本（空串直接判否）
+ * @returns 命中 S1 汉字序号 / S2 整行加粗 / S3 Markdown 标题 / S4 短行带时间段 任一条时为真
+ */
+function isEntryHeader(rawLine: string, content: string): boolean {
+  if (content === '') return false;
+  if (CJK_ORDINAL_HEAD.test(rawLine)) return true;
+  if (charCount(content) > MAX_ENTRY_HEADER_CHARS) return false;
+  if (LIST_MARKUP_HEAD.test(rawLine)) return false;
+  return BOLD_WHOLE_LINE.test(rawLine) || MARKDOWN_HEADLINE.test(rawLine) || hasHeaderPeriod(content);
+}
+
+/**
+ * 技能区块里一行是否起一条新技能（spec 4.1-16：裁定㉗「一行一条技能」读作**一条逻辑行**）。
+ * @param rawLine 未去装饰的原始行
+ * @param content 该行去装饰后的文本
+ * @returns 命中四信号或列表序号 / 项目符号任一条时为真
+ */
+function startsSkillEntry(rawLine: string, content: string): boolean {
+  if (content === '') return false;
+  return (
+    CJK_ORDINAL_HEAD.test(rawLine) ||
+    BOLD_WHOLE_LINE.test(rawLine) ||
+    MARKDOWN_HEADLINE.test(rawLine) ||
+    LIST_MARKUP_HEAD.test(rawLine) ||
+    hasHeaderPeriod(content)
+  );
+}
+
+/**
+ * 一行是否是技能区块里的「分组小标题」（`编程语言`、`开发工具与技术`）。
+ * 它自己成一条，且**紧跟其后的那一行必然另起一条**——否则 `（一）编程语言` 会和下面那整段散文粘在一起。
+ * @param content 去装饰后的行文本
+ * @returns 短、无句末标点、且不以冒号收尾时为真
+ */
+function isSkillGroupTitle(content: string): boolean {
+  return (
+    content !== '' &&
+    charCount(content) <= MAX_SKILL_GROUP_TITLE_CHARS &&
+    !SENTENCE_FINAL.test(content) &&
+    !TRAILING_COLON.test(content)
+  );
+}
+
+/**
+ * 把 PDF 排版切出来的折行碎片并回上一行。
+ * 两侧都是 ASCII 字母或数字时补一个空格（被切开的英文单词），中文相接不补——补了会长出源文件里没有的空格。
+ * @param previous 上一条物理行的文本
+ * @param current 当前碎片行的文本
+ * @returns 拼接后的一行
+ */
+function joinFragment(previous: string, current: string): string {
+  const isWordChar = (character: string): boolean => /[A-Za-z0-9]/.test(character);
+  const gap = isWordChar(previous.at(-1) ?? '') && isWordChar(current.charAt(0)) ? ' ' : '';
+  return `${previous}${gap}${current}`;
+}
+
+/**
+ * 把一个区块内的一段连续物理行切成条目块（spec 4.1-15 / 4.1-16 的落点）。
+ *
+ * 空行仍然是边界（旧行为一字不改），**新增**的是：四个结构化区块里命中条目边界信号的行、
+ * 以及技能区块里的一条逻辑行。块内首行永不做边界判定——它天然就是这一条的标题行，
+ * 这样 4.1-04 / 4.1-07 那两条读 `missing-field` 的判据形状不会变。
+ * @param kind 区块种类，决定用哪一套边界规则（`summary` 只认空行）
+ * @param lines 该区块这一段内的原始物理行（含空行，未去装饰）
+ * @returns 条目块数组，每块的首行是该条的标题行
+ */
+export function splitEntryBlocks(kind: SectionKind, lines: readonly string[]): string[][] {
+  const blocks: string[][] = [];
+  let block: string[] = [];
+  /** 技能区块专用：上一条物理行是不是分组小标题（它后面那行必须另起一条）。 */
+  let previousIsGroupTitle = false;
+
+  /** 收掉当前条：空条丢弃。 */
+  const flush = (): void => {
+    if (block.length > 0) blocks.push(block);
+    block = [];
+    previousIsGroupTitle = false;
+  };
+
+  for (const rawLine of lines) {
+    const content = stripMarkup(rawLine);
+    if (content === '') {
+      flush();
+      continue;
+    }
+    if (block.length === 0) {
+      block.push(content);
+      previousIsGroupTitle = kind === 'skills' && isSkillGroupTitle(content);
+      continue;
+    }
+    if (kind === 'skills') {
+      const previous = block[block.length - 1] as string;
+      const isContinuation =
+        !startsSkillEntry(rawLine, content) && !previousIsGroupTitle && !SENTENCE_FINAL.test(previous);
+      if (isContinuation) block[block.length - 1] = joinFragment(previous, content);
+      else {
+        flush();
+        block.push(content);
+      }
+      previousIsGroupTitle = isSkillGroupTitle(content);
+      continue;
+    }
+    if (ENTRY_SPLIT_KINDS.includes(kind) && isEntryHeader(rawLine, content)) flush();
+    block.push(content);
+  }
+  flush();
+  return blocks;
+}
 
 /**
  * 去掉一行开头的 Markdown 标记与加粗符号，得到纯文字。
@@ -241,7 +415,7 @@ function educationFields(titles: readonly string[]): Field[] {
  * 把一个区块内的条目块转成 `Section`。
  * @param kind 区块种类，决定字段键（与 `resume-doc` 模板的槽位一致）
  * @param title 区块标题，保留简历原文（本地化标签由渲染轨按 kind 走 i18n）
- * @param blocks 按空行切出的条目块，每块首行是标题行
+ * @param blocks `splitEntryBlocks` 切出的条目块，每块首行是标题行
  * @param issues 待确认标记的收集数组（就地追加）
  * @returns 可直接放进 `ResumeDocument.sections` 的区块
  */
@@ -356,7 +530,8 @@ function maskedContact(rawText: string, kind: 'email' | 'phone'): string | null 
  * 把一份纯文本 / Markdown 简历解析成 P3.1 文档模型。
  *
  * 流程：整篇先过 `redactText`（4.1-09 的落点，之后全程只接触掩码文本）→ 按词典行切区块 →
- * 区块内按空行切条目 → 首行拆「公司 · 职位 + 时间段」→ 其余行作成果 / 职责正文。
+ * 区块内由 `splitEntryBlocks` 切条目（空行 + 4.1-15 的四信号；技能按 4.1-16 的一条逻辑行）→
+ * 首行拆「公司 · 职位 + 时间段」→ 其余行作成果 / 职责正文。
  * 同一区块种类多次出现（分栏简历常见）合并进同一个 `Section`，以守住「区块 id 按 kind 唯一」的 diff 前提。
  * @param text PDF / DOCX / Markdown 抽出的原始文本（允许 CRLF、Markdown 标记、全角数字）
  * @param docId 文档 id，交给 `createEmptyDocument` 作存储寻址
@@ -386,38 +561,39 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
   const safe = redactText(raw);
 
   const headerLines: string[] = [];
-  const buckets = new Map<SectionKind, { title: string; blocks: string[][] }>();
-  let current: { title: string; blocks: string[][] } | null = null;
-  let block: string[] = [];
+  const buckets = new Map<SectionKind, { kind: SectionKind; title: string; blocks: string[][] }>();
+  let current: { kind: SectionKind; title: string; blocks: string[][] } | null = null;
+  /** 当前区块这一段连续的物理行（含空行、未去装饰）——条目边界由 `splitEntryBlocks` 在这一段上判。 */
+  let run: string[] = [];
 
-  /** 收掉当前条目块：空块直接丢弃，未开区块时（抬头区）不做收集。 */
-  const flushBlock = (): void => {
-    if (current !== null && block.length > 0) current.blocks.push(block);
-    block = [];
+  /** 收掉当前这一段：交给该区块种类的条目边界规则切成条目块；未开区块时（抬头区）不做收集。 */
+  const flushRun = (): void => {
+    if (current !== null && run.length > 0) current.blocks.push(...splitEntryBlocks(current.kind, run));
+    run = [];
   };
 
   for (const line of safe.split('\n')) {
     const heading = classifyHeading(line);
     if (heading !== null) {
-      flushBlock();
+      flushRun();
       const existing = buckets.get(heading.kind);
       if (existing === undefined) {
-        current = { title: heading.title, blocks: [] };
+        current = { kind: heading.kind, title: heading.title, blocks: [] };
         buckets.set(heading.kind, current);
       } else {
         current = existing;
       }
       continue;
     }
-    const content = stripMarkup(line);
-    if (content === '') {
-      flushBlock();
+    if (current === null) {
+      // 抬头区：只要非空的纯文字，姓名与联系方式各按自己的规则从这里挑（4.1-04 / 4.1-09）。
+      const content = stripMarkup(line);
+      if (content !== '') headerLines.push(content);
       continue;
     }
-    if (current === null) headerLines.push(content);
-    else block.push(content);
+    run.push(line);
   }
-  flushBlock();
+  flushRun();
 
   const document = createEmptyDocument(docId, nowMs);
   document.profile.contact = {
