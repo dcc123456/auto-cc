@@ -55,3 +55,27 @@
 「盖上去的那行字与原文肉眼分不出」这类观感判据（3.5-15 的字族/基线增益）仍然只有用户在场能打勾；
 本轮取证覆盖到「按得动、进得了会话、写得出文件、回读得到」这一层，不覆盖观感层。
 截图含册内个人信息，按 §8.5 只留在 tmp/，不入库。
+
+五、补录（同一判据的第二轮，先修了"洗了但没换"那一处）
+------------------------------------------------------
+第一轮把 `withoutControlCodepoints` 只用在判空那一句，进组的仍是 `item.str` 原文
+（`grep -n "str: " packages/renderer/src/pdf-page-view.ts` 读出来的），所以修法没落地。
+补成 `str` 本体（提交 cb3dad4）， reload 后同一串判据重跑一遍，全部为真：
+
+1) 进 PDF 档自动出纸：点「纸面 = PDF」后 1.5 秒内画布宽 494、状态行
+   「第 1 页真纸 · 可点行 38 条 · 画了 4 毫秒」、页读数「第 1 / 5 页 · 可点行 38 条」
+   （源指纹 ad93c94b232a…，即货架上那份生成的简历）
+2) 点第 1 页那一行 → `hasControl: false`，预填文本头「丰富的项目经验：参与多个不同行业项目…」
+3) 改一字提交 → 覆盖区 1 行「源第 1 页 · 起点 9.5%,15.6% · 尺寸 58.7%×1.1% · <改后整行>」；
+   底色读数「本页覆盖 1 区 · 底色取自这一页 1 处」；撤销位由按不动变可按；提示行无「这一区被拒了」
+4) 另存 → 「已另存到 …/tmp/goal-edited.pdf（5 页 · 产物指纹 747cac5302de）」，与源指纹 ad93c94b232a 互异
+5) 回读产物 → 源回执指纹正是 747cac5302deee2c…，第 1 / 5 页 38 条可点行，
+   点改过那一行预填已含「（本机自测加注）」（`clickedLineHasMark: true`），覆盖区清单 0 行
+6) 收尾读数：`document.getElementById('unfreezy')` 为 null（注入的去动画 `<style>` 已摘），
+   页面上只剩应用自己的两支样式表
+
+门禁（第二轮，改动只在渲染层那一个文件）：
+  pnpm --filter @auto-cc/renderer typecheck → EXIT=0
+  eslint packages/renderer/src/pdf-page-view.ts → EXIT=0
+  prettier --check 同一文件 → EXIT=0
+  pnpm test → EXIT=0（逐包读数见 tmp/my-test.log，含 resume-kb 446、outbound 197、platform-boss 177、main 91 全过）
