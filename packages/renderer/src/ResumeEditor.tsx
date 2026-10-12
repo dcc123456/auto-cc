@@ -1,4 +1,4 @@
-import { GripVertical, Palette, Redo2, Save, Timer, Undo2, X } from 'lucide-react';
+import { GripVertical, Merge, Minus, Palette, Plus, Redo2, Save, Split, Timer, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -215,6 +215,12 @@ export function ResumeEditor({
   const [rejected, setRejected] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
   const [drag, setDrag] = useState<DragState>();
+  /**
+   * 每一条目当前拨到的**拆点行号**（键是 `区块id/条目id`）。
+   * 它是纯界面状态：不进撤销栈（拆点还没落地时没有编辑可言），也不与投影里的条目表并成一份数组——
+   * 条目的真相只有 `view.sections[].entries` 一份（§2.2）。
+   */
+  const [splitLines, setSplitLines] = useState<Record<string, number>>({});
   /** 段落样式当前调的那一类区块（默认最常改的那一类；它只是界面状态，不进撤销栈）。 */
   const [paragraphKind, setParagraphKind] = useState<ResumeSectionKindView>('experience');
   /** 拖拽落点要读实时值：`pointerup` 的闭包里读 state 会拿到起手那一刻的旧落点。 */
@@ -382,6 +388,58 @@ export function ResumeEditor({
       },
       describe: () => t('resume.editor.useDone', { template: templateId ?? locale ?? '' }),
     });
+
+  /**
+   * 拆一条（spec 3.6-10 / 裁定㉗ 第 1 条后半句）：把这一条的正文从第 `bodyLineIndex` 行之后断成两条。
+   *
+   * 过界的只有那**一个整数**：正文不许过界，所以界面递不出"在哪一句之后断开"这句话（plan 06 §3.33 的形状约束①），
+   * 人是对着常驻纸面数行把步进器拨到位的。可拨的上界就是投影里那条 `bodyLineCount`，与主进程
+   * `planEntrySplit` 的 `index-out-of-range` 同用一支 `entryBodyLineCount`（§2.5：判据一份，不存在"界面放行、保存被拒"）。
+   * @param sectionId 区块 id
+   * @param entryId 条目 id
+   * @param bodyLineIndex 留在前一条里的行数（从 1 起算）
+   */
+  const splitEntry = (sectionId: string, entryId: string, bodyLineIndex: number) =>
+    void run(t('resume.editor.split'), () => bridge?.resume['editor.split'](docId, sectionId, entryId, bodyLineIndex), {
+      apply: (next) => {
+        setView(next);
+        setRejected(undefined);
+      },
+      describe: () => t('resume.editor.splitDone', { line: bodyLineIndex }),
+      onError: (error) => setRejected(error.message),
+    });
+
+  /**
+   * 并一条（spec 3.6-10）：方向写死为"并回同区块的上一条"，界面不给人挑"并到哪一条"——
+   * 那要往过界递第二个条目 id，而人的意图从来只有"这两条本来是一条"。
+   * @param sectionId 区块 id
+   * @param entryId 要并走的条目 id
+   */
+  const mergeEntry = (sectionId: string, entryId: string) =>
+    void run(t('resume.editor.merge'), () => bridge?.resume['editor.merge'](docId, sectionId, entryId), {
+      apply: (next) => {
+        setView(next);
+        setRejected(undefined);
+      },
+      describe: () => t('resume.editor.mergeDone'),
+      onError: (error) => setRejected(error.message),
+    });
+
+  /**
+   * 把某一条目的拆点拨一格：只动界面状态，不发跨进程调用。
+   *
+   * 这里的上下界不是**第二份判定**：它就是投影里那一格的 `bodyLineCount`（上界 = 行数 - 1，
+   * 因为"留下 0 行"或"全部留下"都拆不出第二条），主进程拿同一个数去拒越界（§2.5）。
+   * @param key 条目键（`区块id/条目id`，同一条 id 不会跨区块串味）
+   * @param delta 拨的方向（-1 / +1）
+   * @param maxLine 可拨的上界
+   */
+  const stepSplitLine = (key: string, delta: number, maxLine: number) => {
+    setSplitLines((current) => {
+      const next = Math.min(Math.max((current[key] ?? 1) + delta, 1), maxLine);
+      return next === current[key] ? current : { ...current, [key]: next };
+    });
+  };
 
   /**
    * 回退 / 重做一步（3.6-03）。
@@ -640,11 +698,96 @@ export function ResumeEditor({
               }
             >
               <p className="text-[11px] text-slate-300">
-                {index + 1} · {t(`resume.kind.${section.kind}`)}
-              </p>
-              <p className="text-[11px] text-slate-600">
+                {index + 1} · {t(`resume.kind.${section.kind}`)} ·{' '}
                 {t('resume.editor.entryCount', { count: section.entries.length })}
               </p>
+              {/* 旧切法那一句要说人话（4.1-17 的界面半边 / 裁定㉗ 第 3 条「不回填」）：库里的老文档还是导入那一刻的形状，
+                  这里既不谎称会自动重切，也不摆内部 id。 */}
+              {section.entries.length === 1 && (
+                <p className="mt-0.5 text-[11px] text-slate-500" data-testid="resume-editor-legacy-cut">
+                  {t('resume.editor.legacyCutHint')}
+                </p>
+              )}
+              <ul className="mt-1 space-y-1" data-testid="resume-editor-entry-list">
+                {section.entries.map((entry, entryIndex) => {
+                  const maxLine = Math.max(entry.bodyLineCount - 1, 1);
+                  const stepped = splitLines[`${section.id}/${entry.id}`] ?? 1;
+                  const line = Math.min(Math.max(stepped, 1), maxLine);
+                  const canSplit = entry.bodyLineCount >= 2;
+                  return (
+                    <li
+                      key={entry.id}
+                      data-testid="resume-editor-entry"
+                      data-entry-id={entry.id}
+                      data-body-line-count={entry.bodyLineCount}
+                      className="flex flex-wrap items-center gap-1.5"
+                    >
+                      <span className="text-[11px] text-slate-400">{entryIndex + 1}</span>
+                      <span className="text-[11px] text-slate-600">
+                        {t('resume.editor.bodyLines', { count: entry.bodyLineCount })}
+                      </span>
+                      {/* 行号步进器（spec 6.4-23 的形状约束①：正文不过界，界面只递得出行号）。
+                          正文不足两行时这一格整只不画——拨头没有可拨的档，画出来只会多两只"按不动但说不出新理由"的键。 */}
+                      {canSplit && (
+                        <span className="flex items-center gap-1" data-testid="resume-editor-split-stepper">
+                          <DeskButton
+                            action="split-line-minus"
+                            variant="ghost"
+                            compact
+                            busy={!!busy}
+                            aria-label={t('resume.editor.splitLineMinus')}
+                            {...dead(afterBusy(line <= 1, 'AT_FIRST_LINE'))}
+                            onClick={() => stepSplitLine(`${section.id}/${entry.id}`, -1, maxLine)}
+                          >
+                            <Minus size={11} />
+                          </DeskButton>
+                          <span
+                            className="text-[11px] text-slate-300"
+                            data-testid="resume-editor-split-line"
+                            data-line={line}
+                            data-max={maxLine}
+                          >
+                            {t('resume.editor.splitLine', { line, max: maxLine })}
+                          </span>
+                          <DeskButton
+                            action="split-line-plus"
+                            variant="ghost"
+                            compact
+                            busy={!!busy}
+                            aria-label={t('resume.editor.splitLinePlus')}
+                            {...dead(afterBusy(line >= maxLine, 'AT_LAST_LINE'))}
+                            onClick={() => stepSplitLine(`${section.id}/${entry.id}`, 1, maxLine)}
+                          >
+                            <Plus size={11} />
+                          </DeskButton>
+                        </span>
+                      )}
+                      <DeskButton
+                        action="split-entry"
+                        variant="line"
+                        compact
+                        busy={!!busy}
+                        {...dead(afterBusy(!canSplit, 'NO_BODY_TO_SPLIT'))}
+                        onClick={() => splitEntry(section.id, entry.id, line)}
+                      >
+                        <Split size={11} />
+                        {t('resume.editor.split')}
+                      </DeskButton>
+                      <DeskButton
+                        action="merge-entry"
+                        variant="line"
+                        compact
+                        busy={!!busy}
+                        {...dead(afterBusy(entryIndex === 0, 'NOTHING_TO_MERGE'))}
+                        onClick={() => mergeEntry(section.id, entry.id)}
+                      >
+                        <Merge size={11} />
+                        {t('resume.editor.merge')}
+                      </DeskButton>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           </li>
         ))}

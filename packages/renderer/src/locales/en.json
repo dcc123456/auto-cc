@@ -660,8 +660,17 @@
         "discardAndLeave": "Discard and close",
         "keepEditing": "Keep editing",
         "sections": "Section order",
-        "sectionsHint": "Drag the handle up or down; the preview refreshes as soon as you drop it.",
+        "sectionsHint": "Drag the handle up or down; the preview refreshes as soon as you drop it. To split an entry: count the lines on the sheet at the right, set that row's stepper to the line, then press “Split”.",
         "entryCount": "{{count}} entries",
+        "bodyLines": "{{count}} body lines",
+        "legacyCutHint": "This entry was cut by the rules in force at import time. For several entries, import again, or use “Split” on any row below.",
+        "splitLine": "break after line {{line}} / {{max}}",
+        "splitLineMinus": "One line earlier",
+        "splitLinePlus": "One line later",
+        "split": "Split",
+        "splitDone": "Broken after line {{line}}; this entry is now two",
+        "merge": "Merge up",
+        "mergeDone": "Merged into the previous entry of this section",
         "moveSection": "Drag section",
         "moved": "Section moved from position {{from}} to {{to}}",
         "metrics": "Layout metrics",
@@ -746,7 +755,11 @@
           "NOTHING_TO_UNDO": "No edit left to undo",
           "NOTHING_TO_REDO": "No edit left to redo",
           "NOTHING_TO_SAVE": "The draft matches the stored document; nothing to save",
-          "ALREADY_FOLLOWING": "This slot already follows the template, so there is nothing to clear"
+          "ALREADY_FOLLOWING": "This slot already follows the template, so there is nothing to clear",
+          "NO_BODY_TO_SPLIT": "This entry has a single body line, there is nothing to break apart",
+          "NOTHING_TO_MERGE": "It is the first entry of this section, there is no previous entry to merge into",
+          "AT_FIRST_LINE": "Already at the first line; moving earlier would leave no body in the previous entry",
+          "AT_LAST_LINE": "Already at the last breakable line; going further means moving the whole entry — use “Merge up” instead"
         }
       },
       "pendingUnnamed": "The one with no name read"

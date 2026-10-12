@@ -1,0 +1,130 @@
+spec 6.4-23（裁定㉗ 第 1 条后半句「但是也要支持手动拆分和合并」）· 界面那一半的活体逐字读数
+日期：2026-10-12　执行：片 63-c
+画面：6.4-23-split-two-entries.png（拆成两条后）、6.4-23-one-line-tail-no-body.png（拆出单行尾巴后）
+　　　两张只截 [data-testid="resume-editor-section-list"] 这一块（CDP Page.captureScreenshot 带 clip，scale 2）——
+　　　整窗截图会把常驻纸面（真实简历，含姓名/手机/邮箱）一起拍进来，位图无法脱敏，按 §8.5 / §7.5 不入库。
+　　　md5 互异（同批去重读数）：
+　　　　e62f0e4264a6d1550fdbbb355684f86a  6.4-23-split-two-entries.png
+　　　　ff2a8571feff2b66762f3d2f147c22e3  6.4-23-one-line-tail-no-body.png
+
+现场：与另一套 dev 会话共享的实例（CDP 10222 / vite 5173）。document.visibilityState = "visible"。
+　　　点击一律走 eval 里的 node.click()（§9 裁定⑱ 补窗：只证处理器跑没跑），
+　　　「人拿鼠标点得动」这一半留给用户在场，本文件不声称它。
+　　　全程没有按过「保存」，收尾把编辑器关掉；库里那份文档的 updatedAt 仍是导入那一刻（见最后一条读数）。
+
+────────────────────────────────────────────────────────────────────────
+0. 基线（打开编辑器后，四区块各 1 条，纸面已是最新）
+
+{
+ "visibility": "visible",
+ "editorMounted": true,
+ "dirty": "与库里的一致",
+ "paper": { "status": "idle", "text": "已是最新 · 15:53:11" },
+ "rows": [
+  { "entryId": "summary-1",    "bodyLineCount": "10",  "stepper": true, "line": "1", "max": "9",   "splitDead": null, "mergeDead": "NOTHING_TO_MERGE" },
+  { "entryId": "skills-1",     "bodyLineCount": "23",  "stepper": true, "line": "1", "max": "22",  "splitDead": null, "mergeDead": "NOTHING_TO_MERGE" },
+  { "entryId": "experience-1", "bodyLineCount": "50",  "stepper": true, "line": "1", "max": "49",  "splitDead": null, "mergeDead": "NOTHING_TO_MERGE" },
+  { "entryId": "project-1",    "bodyLineCount": "104", "stepper": true, "line": "1", "max": "103", "splitDead": null, "mergeDead": "NOTHING_TO_MERGE" }
+ ]
+}
+
+→ 判据③ 的一半（NOTHING_TO_MERGE）在这一刻就已经逐字挂在四颗「并回上一条」上；
+　 上界 9 / 22 / 49 / 103 = 正文行数 - 1，与主进程 entryBodyLineCount 判界用的是同一份数（§2.5 判据一份）。
+
+────────────────────────────────────────────────────────────────────────
+1. 步进器：拨一档 + 两个边界都按不动且说得出原因
+
+{
+  "before": "1", "afterOnePlus": "2",
+  "afterEightMinus": "1", "floorMinusDead": "AT_FIRST_LINE", "plusAfterFloorDead": null
+}
+{
+  "start": "1",
+  "atCeiling": { "line": "22", "max": "22", "plusDead": "AT_LAST_LINE" },
+  "afterTwentyMinus": { "line": "2", "minusDead": null },
+  "readyToSplitAt": "2"
+}
+
+→ 连点 30 次「+」停在 22（不是 23，也不越界），「+」自己长出 AT_LAST_LINE；连点 20 次「-」落到 2、
+　 再点落 1 并长出 AT_FIRST_LINE。左端「-」在 1 处按不动、右端「+」在 22 处按不动，与主进程
+　 index-out-of-range 的判界同一条，所以"界面放行、保存被拒"的分叉结构上不可能。
+※ 读数里那一条 "atLine4": { "line": "1", "max": "22" } 是探针自己的缺陷：它在两次 click 之前抓了 DOM 节点引用，
+　 React 换掉该节点后读到的是脱离文档的旧值。改成一律现查（step-b）后同一判据读到 22 / AT_LAST_LINE，
+　 不是产品缺陷，写在这里免得后人按它去找 bug。
+
+────────────────────────────────────────────────────────────────────────
+2. 判据①：拆一次 → 条数 +1，且常驻纸面当场自己重出
+
+拆前 skills 区块：[{ "id": "skills-1", "lines": 23 }]，纸面「已是最新 · 15:53:11」
+点 [data-entry-id="skills-1"] [data-action="split-entry"]（此时步进器停在第 2 行）
+
+{
+  "splitReflectedInDom": true,
+  "after": [ { "id": "skills-1", "lines": 2 }, { "id": "skills-2", "lines": 21 } ],
+  "afterPaper": { "status": "idle", "text": "已是最新 · 15:59:10", "dirty": "false" },
+  "dirty": "有未保存的改动",
+  "legacyHintStillThere": 3
+}
+
+→ 条数 1 → 2，2 + 21 = 23 一字不差；纸角时间戳从 15:53:11 走到 15:59:10，人没有按过任何「预览」键
+　 （paperRevision 那条去抖 350ms 的实时通道）。
+→ "sawRendering": false 是采样窗口没蹲到在途那一瞬（去抖 350ms + 渲染比 50ms 轮询快），不是"纸面没动"；
+　 纸面动了的正证是时间戳与条数同向变化，以及下面第 4 条撤销后时间戳再走一次。
+→ 旧切法那一句从 4 个区块掉到 3 个：技能现在有两条，那句"按导入时的规则切的"就该消失，逐字对得上。
+
+────────────────────────────────────────────────────────────────────────
+3. 判据③另一半 + 合的方向：拆出单行尾巴，再并回上一条
+
+对 skills-2（21 行）在第 1 行再拆一次：
+
+{
+  "afterSecondSplit": [
+    { "id": "skills-1", "lines": 2,  "stepper": true,  "splitDead": null,              "mergeDead": "NOTHING_TO_MERGE", "mergeTip": "它是这个区块里的第一条，前面没有可以并回去的条目" },
+    { "id": "skills-2", "lines": 1,  "stepper": false, "splitDead": "NO_BODY_TO_SPLIT","mergeDead": null,               "splitTip": "这一条的正文只有一行，中间没有可断的地方" },
+    { "id": "skills-3", "lines": 20, "stepper": true,  "splitDead": null,              "mergeDead": null }
+  ]
+}
+
+→ 单行那一条：步进器整块不渲染（一行没有可拨的档），「拆分」按不动，原因码逐字 NO_BODY_TO_SPLIT，
+　 人话文案「这一条的正文只有一行，中间没有可断的地方」同时挂在 title 上。
+→ 门禁形状：splitAriaDisabled "true" 而 splitNativeDisabled false —— 是 DeskButton 的 aria-disabled +
+　 data-disabled-reason，不是原生 disabled（§9 6.2 那条读法）。
+
+点 skills-2 的「并回上一条」：
+
+{ "afterMerge": [ { "id": "skills-1", "lines": 3 }, { "id": "skills-3", "lines": 20 } ] }
+
+→ 2 + 1 = 3：合的方向确实是写死的「并回同区块上一条」，不是"跟下一条合"，也不是重新切。
+
+────────────────────────────────────────────────────────────────────────
+4. 判据②：撤销回得去，而且一路回到打开时那一份
+
+{
+  "rowsAfterUndoMerge": [ "skills-1=2", "skills-2=1", "skills-3=20" ],
+  "rowsAtEnd": [ "skills-1=23" ],
+  "dirty": "与库里的一致",
+  "undoDead": "NOTHING_TO_UNDO", "redoLive": null,
+  "paper": { "status": "idle", "text": "已是最新 · 16:01:11" },
+  "legacyHints": 4
+}
+
+→ 三颗撤销（合 → 拆 → 拆）逐格回退，最后 skills-1 又是 23 行、旧切法那一句回到 4 个区块；
+　 dirty 从「有未保存的改动」回到「与库里的一致」——这一格是内容 hash 判据的正面读数（撤销回原样就不再 dirty）。
+→ 撤销也走纸面：时间戳再走一次到 16:01:11。
+→ redo 两颗在撤干净后仍然点得动（redoLive 无原因码），再 redo 两次回到三条目，画面 6.4-23-one-line-tail-no-body.png 就是这一态。
+
+────────────────────────────────────────────────────────────────────────
+5. 收尾：不保存关掉，用户现场一字未动
+
+{
+  "restored": true, "rowsAtEnd": [],
+  "dirtyBeforeClose": "与库里的一致",
+  "closedWithoutConfirmModal": true,
+  "editorStillMounted": false,
+  "paper": "已是最新 · 16:01:44"
+}
+{ "ok": true, "count": 1, "keys": ["id","name","updatedAt"], "shape": { "name": "个人简历", "updatedAt": "2026-10-12T04:52:02.941Z" } }
+
+→ 关掉时没有长出"你有未保存的改动"那张确认卡（因为已经撤干净了），确认口的另一条判据不在这一片兑现。
+→ 库里仍只有那一份「个人简历」，updatedAt 停在 2026-10-12T04:52:02.941Z（= 本机 12:52 导入那一刻）：
+　 这一整轮取证没有写过一次盘。

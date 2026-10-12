@@ -373,6 +373,17 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   （度量行与紧挨其下的计时行各截一张，两张字节完全相同），要独立画面就在页面里 `scrollIntoView({ block: 'start' })`
   后不带 `--reveal` 重拍。第②条与 §9 的 5.10-18 是同一条硬步骤：收截图前对整批跑 `md5 -q | sort | uniq -c`。
 
+- **实测（6.4-23 片 63-c 补窗）`harness shot` 没有裁剪口，而"证据区不含个人数据"这一类判据必须裁**：
+  `packages/testing/src/cdp.ts` 的 `screenshot` 只发 `format: 'png'`（`cli.ts` 只认 `--reveal`），
+  于是**整窗截图会把常驻纸面（用户真实简历，含姓名/手机/邮箱）一起拍进来**，而位图无法脱敏、按 §8.5 不许入库
+  （§9 的 4.5 那条先例只给了"改写成逐字读数"这一条退路）。配方：直连 CDP，`Runtime.evaluate` 量目标元素的
+  `getBoundingClientRect()` → `Page.captureScreenshot` 带 `clip: {x,y,width,height,scale:2}` +
+  `captureBeyondViewport: true`，只截证据那一块（本轮脚本 `tmp/63c/shot-clip.mjs`，选择器传参）。
+  同一轮另两条探针口径：① **别在 `click()` 之前抓 DOM 节点引用**——React 换掉节点后旧引用读到的是脱离文档的
+  值（本轮一条读数因此假报"步进器没动"），一律现查选择器；② 瞬时状态（如 `paperStatus==='rendering'`）
+  按 50ms 轮询蹲不到，**判"界面有没有跟着动"要读同向的两个持久读数**（本轮是纸角时间戳 + 条数），
+  别把"没蹲到那一帧"写成产品缺陷。
+
 - **实测（8.3-01 补窗）harness 再补两条**：⑮ `eval` 取脚本的入参名是 **`--expr-file`**，写成 `--file` **不报错**——
   未知参数被吃掉后落回 `expression('1')`（`packages/testing/src/cli.ts:172`），于是每条探针都稳定回一个 `1`，
   看上去像"页面返回了 1"。本轮有三份读数因此作废。探针返回值不合逻辑时第一步是核对参数名，不是怀疑页面。
