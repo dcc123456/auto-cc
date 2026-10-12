@@ -62,3 +62,42 @@
 落在这条上的两条后续项（都归界面片，裁定㉘ 第 3 条）：① 人在场时切到简历屏，读 `[data-testid="resume-preview"]`
 里 `ul / li / ul ul / strong` 四只计数与第一只 `ul` 的 `listStyleType`（期望 `disc`，不是 `none`）；
 ② 模型标注真正落到纸面（`<strong>` 出现在真实简历上）也还欠一趟活体，一次 6～9 分钟，见上面第 4 点。
+
+—— 2026-10-12 18:04 更正：上面第 4 点与"产物文本层没有 `•`"这两句的解释范围 ——
+
+对真实产物的 PDF 抽文本层读到 `markerTally={"·":11,"-":1}`（没有一个 `•`），当时不能区分"标记是矢量画出来的"
+与"根本没画"。这一条已经用一份**逐字脱敏的夹具**判死（证据：`docs/acceptance/03-resume-pdf/3.9-02-print-marker-and-bold.txt`
+与同目录 `3.9-02-print-list-and-bold-paint.png`）：`renderRichValue` 的产出塞进真实产品 HTML 的 `<style>` 原文、
+经 Chromium 打印出的那一页**肉眼看得见一级实心点、二级空心圈与三处粗体**，而同一份 PDF 的文本层 `markerTally={}`。
+所以：
+
+1. **「产物文本层没有 `•`」不是缺陷读数**，CSS 列表标记本来就不进 PDF 文本层；分层在文本层仍按左 x 档位判（夹具 63 / 75 / 87 三档）。
+2. 上面第 4 点里"`<strong>=0`"这一格仍然成立（导入侧不猜字体，裁定㉘ 第 1 条），但**判加粗落到产物没有**换了形状：
+   看被标注短语是否独立成 item 且 `fontName` 与相邻常规文字不同（夹具读数：`g_d0_f12` / `g_d0_f21` 对正文 `g_d0_f1`）。
+3. 后续项 ① 里"纸面画没画列表"那一半已由夹具兑现，剩下的一半是**界面里那张纸**（`@media screen` 通道，夹具也已画出实心点与空心圈），
+   它只需要人在场时切一次简历屏读四只计数，不再是判据缺口。
+
+
+—— 第 18 轮真实模型活体（2026-10-12 18:10，`pnpm e2e:resume-jd`，真实 PDF + 真实 JD，`tmp/64/e2e-v4.log`）——
+
+上面后续项 ② 那一格（模型标的 `**` 真正落到真实简历的纸面）这一趟**没取到**，逐字读数：
+
+```
+· 生效配置：llm.timeoutMs=180000 · kb-generate.modelMaxTokens=4096 · modelTimeoutMs=420000 · maxRewriteChars=600 · modelTemperature=0
+· resume.generate.run 用时 635.6s
+· 生成读数：outcome=reorder_only modelStatus=failed model=ark-code-latest 改写 0 处 重排 20 项 证据 16 条 事实校验 ok=true（违规 0）
+· 模型通道原因：问模型失败：模型请求发不出去：fetch failed：Headers Timeout Error（UND_ERR_HEADERS_TIMEOUT）（连接断开已重发 1 次仍未落地）
+FAIL · 段 4b 模型通道按 JD 给出改写并被写入（不是仅重排的保守回落） —— modelStatus=failed 采纳改写 0 处
+```
+
+同一趟里其余各段仍是通过：导入 `status=imported 文本=5196 字`、四区块 `summary:1 / skills:13 / experience:5 / project:8`、
+实体 70 条（4 种、21 条挂父子）、JD 正文 178 字、缺口报告 `matched=5 partial=2 missing=1`（43.7s）、
+重排通道写出 `4 区块 条目 16` 并把产物从 5 页 163288 字节（hash `c8d47f9d98d5`）换成 4 页 162298 字节（hash `0ff6f86a43ba`）。
+
+**为什么这一格不算本片缺陷、也不算过**：死点在传输层。两趟各约 318s 被 `UND_ERR_HEADERS_TIMEOUT` 掐掉，
+而我们那 420s 的单次超时是交给 `AbortSignal.timeout` 的（`packages/llm/src/http.ts`）——真按 420s 到点，
+文案会是「模型请求超时（420000ms）」且 `reason=timeout`，不是现在这句 `fetch failed`。
+也就是说 `modelTimeoutMs=420000` 确实递到了 `http.ts`，却没有递进 undici 的 `headersTimeout`（默认 5 分钟那一档），
+于是发货值越大越像是"配置没生效"。这一条记在 plan 04 §4.10 的后续项 ③ 里，修它属于 07 号那层的传输侧，
+不在裁定㉘ 第 3 条划定的本轮范围内；在它修好之前，"真实模型会不会按 `resume-generate-v4` 的规则 7 / 8 标 `**`"
+只能由提示词原文与 `fact-check.test.ts` 的 4.5-15 用例承担，**不写成活体已过**。

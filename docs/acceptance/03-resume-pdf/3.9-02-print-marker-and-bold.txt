@@ -1,0 +1,67 @@
+3.9-02 打印面上的圆点与加粗到底画不画得出来（2026-10-12 18:04，无个人信息夹具）
+================================================================================
+
+判据（`docs/specs/03-resume-pdf/spec.md` 3.9-02）：块级文法（一级实心点、二级空心圈、成对 `**` 变粗）
+必须在**打印产物**上看得见，而不只是在 `renderRichValue` 的返回值里。
+
+—— 为什么这一格不能沿用 4.1-18 那份"真实简历产物"的读数 ——
+
+`docs/acceptance/04-resume-kb/4.1-18-real-import-rich-body.txt` 里对真实产物 PDF 抽文本层，
+`markerTally` 读到 `{"·":11,"-":1}`（那 11 个 `·` 是模板自己的元信息分隔符），**一个 `•` 都没有**。
+当时留下的问题是三种解释分不开：① Chromium 把 CSS 的 `disc` 标记画成了文字、② 画成了矢量图形而文本层抽不到、
+③ 根本没画。这三条里只有 ③ 是缺陷，而文本层读数对 ①②③ 不敏感——所以它不能作为 3.9-02 的判据。
+真实简历的位图上有姓名 / 手机 / 邮箱，按 §8.5 与 §7.5 **不入库**，所以这一格只能由一份逐字脱敏的夹具兑现。
+
+—— 夹具怎么造的（不手写 HTML，避免"测的是我自己写的字符串"）——
+
+`tsx tmp/64/marker-fixture.ts`：正文喂给**渲染轨唯一的那只入口** `renderRichValue`
+（`packages/resume-doc/src/internal/richtext.ts`），产出的块级 HTML 原样塞进**真实产品 HTML 的 `<style>` 原文**
+（从 `tmp/64/real-modern.html` 用正则取出的那一整块，含 `resetRule` 的 `ul,ol{list-style:none}` 与
+`PRINT_STYLESHEET` 的 `list-disc` / `list-circle` / `font-bold`），拼成一份独立可打开的 HTML。
+夹具正文全部是编造文字，不含任何真人信息。逐字产出的块级 HTML：
+
+```
+<p>主导检索链路的成本优化，<strong class="font-bold">P99 延迟下降 40%</strong>，同时保持召回不变。</p>
+<ul class="list-disc pl-4 mt-1"><li>订单服务重构，<strong class="font-bold">成本降 30%</strong></li>
+<li>检索增强生成链路<ul class="list-circle pl-4"><li>向量召回与重排分离</li>
+<li>缓存命中提升到 <strong class="font-bold">92%</strong></li></ul></li>
+<li>组件库沉淀</li></ul>
+```
+
+（上面为了可读性折了行；实际是一整串，`<ul class="list-circle pl-4">` 确实嵌在上一条一级 `<li>` **内部**——
+这正是 `renderListRun` 注释里说的那个坑：挂到 `</li>` 之后会被浏览器折回同级，分层在纸面上消失。）
+
+—— 两条通道的产物读数 ——
+
+打印通道：`Google Chrome --headless=new --no-pdf-header-footer --print-to-pdf=marker-fixture.pdf`（走 `@media print`，
+与应用侧 `printToPDF` 同一支媒体查询）；屏幕通道：`--headless=new --screenshot=marker-fixture.png --window-size=820,520`
+（走 `@media screen`，即界面里那张纸）。两份都**画出了标记**：
+
+1. 一级三项前是**实心圆点**，二级两项前是**空心圈**，且二级比一级再往里缩一档；
+2. 三处成对 `**` 的内容（`P99 延迟下降 40%` / `成本降 30%` / `92%`）在两份产物里都是**粗体**，
+   与同一句里的常规字重肉眼可分；
+3. 屏幕那一档正文左侧带页边距（`@media screen` 的 `body{padding}`），打印那一档由 `@page` 给——
+   两条通道一致地画出了标记，说明 `list-disc` / `list-circle` 排在 `ul,ol{list-style:none}` **之后**这一件事成立。
+
+画面入库：`docs/acceptance/03-resume-pdf/3.9-02-print-list-and-bold-paint.png`（打印通道那一页，`sips -s format png` 自 `marker-fixture.pdf` 转来；夹具无个人信息，故可入库）。
+
+—— 文本层那一侧同时得到一条新口径（写进判据写法，别再用整行 `includes`）——
+
+对夹具 PDF 跑 `node tmp/64/pdf-face-probe.mjs`（包内 `pdfjs-dist` 抽文本层）：
+
+- `pages=1 / items=18`，**`markerTally={}`** —— 一份"肉眼看得见实心点与空心圈"的产物，文本层里一个 `•` `◦` 都没有。
+  这直接排除了上面解释 ①，并给出结论：**CSS 列表标记不进 PDF 文本层**（Chromium 画成矢量，不是字形）。
+  从此「产物文本层没有 `•`」这句话**不能再读成"没画圆点"**，4.1-18 那条读数按这一条更正解释。
+- `leftXHistogram`：`x=63`（段落）/ `x=75`（一级条目，6 项）/ `x=87`（二级条目，4 项）—— 三档左 x 与两档列表一一对上。
+  所以**分层在文本层是可测的**，测的是缩进档位而不是标记字符；真实简历那份产物读到的 68 / 79 两档与此同形。
+- 逐字体分组：`g_d0_f12`（`P99 延迟下降 40%`）、`g_d0_f21`（`成本降 30%`）与段落正文的 `g_d0_f1` 是**不同的字体资源**，
+  且被加粗的那几个字在文本层里**单独成 item**。这给出「加粗有没有落到产物」的可测形状：
+  看被标注的短语是否与相邻常规文字分属不同 `fontName`，而不是看有没有星号字符。
+
+—— 由此改定的 3.9-02 / 4.1-18 取证口径 ——
+
+| 要判的事 | 不能用什么 | 用什么 |
+| --- | --- | --- |
+| 圆点画没画 | 产物文本层搜 `•` | 位图（真实简历那份不入库 → 无个人信息夹具） |
+| 分层有没有生效 | 标记字符 | 文本层左 x 档位直方图 |
+| 加粗有没有生效 | 星号字符 | 同一句里被标注短语是否独立成 item 且 `fontName` 不同 |
