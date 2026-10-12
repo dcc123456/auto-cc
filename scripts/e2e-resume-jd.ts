@@ -284,11 +284,22 @@ interface GapReport {
   modelReason: string | null;
 }
 
+/** 必备信息的一行读数（镜像 `RequiredInfoRowView`，只取判定用得到的两支）。 */
+interface RequiredRow {
+  id: string;
+  status: string;
+}
+
 /** 生成读数（镜像 `GenerationRunRowView`）。 */
 interface GenerationRun {
   rewrites: unknown[];
   evidence: unknown[];
   reorderBases: unknown[];
+  /** 这一趟**实际带上**的书写指引来源（spec 4.9-05 / 4.9-12）：null 表示装配里没挂 `kb.skill`。 */
+  skillSource: string | null;
+  skillChars: number;
+  requiredBefore: RequiredRow[];
+  requiredAfter: RequiredRow[] | null;
   checks: { ok: boolean; retried: boolean; violations: string[]; violationCount: number };
   receipt: {
     id: string;
@@ -748,6 +759,17 @@ async function main(): Promise<void> {
       `事实校验 ok=${String(generated.checks.ok)}（违规 ${String(generated.checks.violationCount)}）`,
   );
   say(`· 模型通道原因：${String(generated.receipt.modelReason ?? '无')}`);
+  // 4.9-05 / 4.9-09 的真实链半边：这一趟带没带书写指引、必备信息在改写前后各是什么成色（只报 id:status，正文是个人信息不进日志）。
+  const requiredTally = (rows: RequiredRow[]): string =>
+    `${String(rows.filter((row) => row.status === 'present').length)}/${String(rows.length)} 齐（${rows
+      .map((row) => `${row.id}:${row.status}`)
+      .join(' ')}）`;
+  say(
+    `· 书写指引：${generated.skillSource === null ? '未装配' : `${generated.skillSource} · ${String(generated.skillChars)} 字`} · ` +
+      `必备信息 改前 ${requiredTally(generated.requiredBefore)} → 改后 ${
+        generated.requiredAfter === null ? '本次没有产物' : requiredTally(generated.requiredAfter)
+      }`,
+  );
   const indexes = generated.rewrites.map((_, index) => index);
   const accepted = await callBridge<GenerationAccept>(bridge, 'resume.generate.accept', [
     generated.receipt.id,
