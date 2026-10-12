@@ -6,7 +6,7 @@
  * 最后这一类是重点：认不出必须留 `null` 并报 issue，绝不返回一个看起来合法的时间（spec 4.1-04）。
  */
 import { describe, expect, it } from 'vitest';
-import { parsePeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
+import { extractPeriod, parsePeriod, type PeriodIssue, type PeriodPrecision } from './period.js';
 
 interface PeriodCase {
   readonly label: string;
@@ -146,6 +146,15 @@ const CASES: readonly PeriodCase[] = [
     issues: ['stray-digits'],
   },
   {
+    label: '到日的写法归一后仍只到月',
+    input: '2022.03 - 2023.06.30',
+    from: '2022-03',
+    to: '2023-06',
+    isCurrent: false,
+    precision: 'month',
+    issues: [],
+  },
+  {
     label: '纯中文相对时间一概不猜',
     input: '最近三年',
     from: null,
@@ -185,5 +194,11 @@ describe('4.1-03 时间归一化', () => {
   it('描述性文字里的数字不会被当成时间端点', () => {
     // 「P99 延迟下降 40%」这种职责行在标题拆分时会被扫到，必须保持 unparsable 才不会被误认成时间段。
     expect(parsePeriod('主导订单服务重构，P99 延迟下降 40%').precision).toBe('none');
+  });
+
+  it('到日的写法摘干净后不给职位留残串', () => {
+    // 真实简历的 `…- 前端开发 2022.03 - 2023.06.30`：日留在残渣里就会长成「前端开发 .30」这种职位。
+    const { rest } = extractPeriod('上海定卓科技有限公司 - 前端开发 2022.03 - 2023.06.30');
+    expect(rest).toBe('上海定卓科技有限公司 - 前端开发 ');
   });
 });
