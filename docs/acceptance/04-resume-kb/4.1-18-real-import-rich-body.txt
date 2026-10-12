@@ -45,3 +45,20 @@
 `normalizeRichLine` 对 ASCII 符号要求"符号后必须有空格"，因此被换行切断的日期片段（`-2024.06`）
 不会被造出一条凭空条目；版面圆点（`•` `·`）不带空格也认（pdf.js 的 `str` 是逐字拼接，实测样本
 `•订单服务重构` 归一成 `- 订单服务重构`）。
+
+—— 界面级复读（2026-10-12 17:54，共享 dev 实例 10222，只读 eval，未动别人的会话）——
+
+想补一张"人在界面上看得见列表"的正证据，取不到，逐字读数如下（`harness eval --url 5173`）：
+
+1. 顶层文档：`ul=26 / li=167 / strong=0 / p=128`，而第一只 `li` 的 `listStyleType=none`、`paddingLeft=6px`
+   —— 这一组是 **app 自己的界面 chrome**（Tailwind preflight 把列表样式抹掉了），不是简历纸面，不能拿来当本片的证据。
+2. 打印面那一格 `[data-testid="resume-preview"]`：`mounted=true`、`data-stage-mode=preview`，
+   但 `innerHTML.length=0`、`p=0`、`emptyShown=false`、`canvasCount=0`；纸角文案读到「个人简历 · 经典单栏 · zh-CN」、
+   `paper-live` 状态 `idle`。
+3. 同一次读到的决定性一格：`stage.getBoundingClientRect().height=0` —— 简历视图此刻在别人的实例里不在前台
+   （祖先 section 被 `hidden`，与 06 §6.2-25 那条反向证据同形），所以预览宿主根本没被喂过内容。
+
+结论与记账：界面级"看得见列表"这一格本轮**未取**，不是缺陷被略过，而是取它必须切别人正在用的实例的视图（不做）。
+落在这条上的两条后续项（都归界面片，裁定㉘ 第 3 条）：① 人在场时切到简历屏，读 `[data-testid="resume-preview"]`
+里 `ul / li / ul ul / strong` 四只计数与第一只 `ul` 的 `listStyleType`（期望 `disc`，不是 `none`）；
+② 模型标注真正落到纸面（`<strong>` 出现在真实简历上）也还欠一趟活体，一次 6～9 分钟，见上面第 4 点。
