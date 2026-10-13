@@ -1,8 +1,8 @@
 /**
  * 排版编辑会话（plan §8.3 的 `editor-session.ts`，接住 spec 3.6-03 的「撤销/重做与状态面板反映当前步骤」）。
  *
- * 装的是那份**正在编辑的简历文档**：六个动作（区块重排、条目重排、拆条目、并条目、改度量、改样式）
- * 都只在真的改了它的时候长出一条撤销单元。历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`——全仓唯一那一份
+ * 装的是那份**正在编辑的简历文档**：七个动作（区块重排、条目重排、拆条目、并条目、改度量、改样式、
+ * 打字改一格正文）都只在真的改了它的时候长出一条撤销单元。历史机制一律走 `@auto-cc/core` 的 `createSnapshotStack`——全仓唯一那一份
  * past/present/future（画布 5.10-19 与轻编辑 3.5-08 是两个已验收消费者），这里开第三份栈就是违反
  * 3.5-08 那句"不引入第二套历史栈"（AGENTS.md §2.2）。
  *
@@ -22,6 +22,7 @@ import {
   planEntryMerge,
   planEntryMove,
   planEntrySplit,
+  planFieldText,
   planMetric,
   planDesign,
   planSectionMove,
@@ -107,6 +108,15 @@ export interface ResumeEditorSession {
    * @returns 同 `moveSection`；形状非法给 `editor-ops` 的拒绝项（原样转发，不在这里判第二遍）
    */
   setDesign(patch: DesignPatch): EditorOutcome<ResumeDocument>;
+  /**
+   * 打字改**一格**正文（spec 3.11-02 / 裁定㉚）。
+   * @param sectionId 区块 id（纸上的 `data-rz-section`）
+   * @param entryId 条目 id（纸上的 `data-rz-entry`）
+   * @param fieldKey 字段键（纸上的 `data-rz-field`）
+   * @param value 人敲进去的新值，原样存（`locked` / `factKey` 由 `planFieldText` 那一份判据保住）
+   * @returns 同 `moveSection`：内容与当前逐字相同（空编辑）不进栈，键不在这一条里给 `unknown-field`
+   */
+  setFieldText(sectionId: string, entryId: string, fieldKey: string, value: string): EditorOutcome<ResumeDocument>;
   /** 回退一步；栈空返回 false 且文档不变。 */
   undo(): boolean;
   /** 重做一步；没有可重做的返回 false。 */
@@ -208,6 +218,13 @@ export function createResumeEditorSession(
       // 判据只有一份：颜色/档位/界外都由 `planDesign` 挡，会话不写第二条 if（AGENTS.md §2.5）。
       if (!planned.ok) return planned;
       return apply({ ...current, layout: planned.value });
+    },
+    setFieldText(sectionId, entryId, fieldKey, value) {
+      const current = stack.present();
+      const planned = planFieldText(current.sections, sectionId, entryId, fieldKey, value);
+      if (!planned.ok) return planned;
+      // 「空编辑不进栈」这一条不为打字另写判断：`apply` 里那一句 `contentHash` 比对就是全仓唯一的那一份。
+      return apply({ ...current, sections: planned.value });
     },
     undo() {
       return stack.undo();

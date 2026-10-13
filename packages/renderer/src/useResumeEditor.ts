@@ -215,7 +215,7 @@ export interface ResumeEditorSessionProps {
  * 两份 `view` 会各自漂（一处撤销了另一处还画着旧值），而撤销栈在主进程只有一条（§2.2/§2.5）。
  * 动作一律经 `useBridgeAction` 的 `run`：收尾必重读投影 + 重出预览，界面不猜主进程当下是什么。
  * @param props 见 `ResumeEditorSessionProps`
- * @returns 投影 `view`、九个动作、在途态与那句回执
+ * @returns 投影 `view`、十个动作、在途态与那句回执
  */
 export function useResumeEditor({ docId, templateId, locale, onPreview }: ResumeEditorSessionProps) {
   const { t } = useTranslation();
@@ -368,6 +368,26 @@ export function useResumeEditor({ docId, templateId, locale, onPreview }: Resume
     });
 
   /**
+   * 改一格正文（spec 3.11-02 / 裁定㉚「只写简历工作副本」）：一次只递**一格**的新值，
+   * 收尾与度量、样式走同一条 `run`（重读投影 + 重出预览），所以打完字屏上那张纸立刻跟着变，
+   * 界面不需要、也没有第二条路自己拼 HTML。
+   * 被拒时（查无此键 / 传进来的不是字符串）主进程那句原话进 `rejected`，界面上就摆在打字框旁边。
+   * @param sectionId 区块 id
+   * @param entryId 条目 id
+   * @param fieldKey 字段键（纸上那一格 `data-rz-field` 的读数，一格一键）
+   * @param value 这一格的新原文（`\n` 分行，块级文法由主进程那一份 `renderRichValue` 消化）
+   */
+  const setFieldText = (sectionId: string, entryId: string, fieldKey: string, value: string) =>
+    void run(t('resume.editor.text'), () => bridge?.resume['editor.text'](docId, sectionId, entryId, fieldKey, value), {
+      apply: (next) => {
+        setView(next);
+        setRejected(undefined);
+      },
+      describe: () => t('resume.editor.textDone'),
+      onError: (error) => setRejected(error.message),
+    });
+
+  /**
    * 回退 / 重做一步（3.6-03）。
    * @param direction 方向：撤销或重做
    */
@@ -406,6 +426,7 @@ export function useResumeEditor({ docId, templateId, locale, onPreview }: Resume
     moveSection,
     splitEntry,
     mergeEntry,
+    setFieldText,
     stepHistory,
     save,
   };

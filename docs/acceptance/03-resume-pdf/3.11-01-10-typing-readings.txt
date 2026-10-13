@@ -1,0 +1,238 @@
+3.11-01…10 纸上打字改正文：单测、门禁与活体读数对账（2026-10-13，无个人信息夹具）
+================================================================================
+
+会话：`tmp/310/boot.mjs` 起的**独立实例**（自有 `--user-data-dir=tmp/310/userdata`、自有 CDP 端口 10255，
+渲染层由共享 vite 5173 提供），按 §9 的 5.10-13 并存配方，不动别人正在跑的 10222 实例。
+文档：点「样例与夹具 → 造一份演示简历」种出的夹具（`resume-demo`，姓名/公司/联系方式都是编造的占位），
+所有截图类判据都写成**逐字读数**而不入库（§8.5：真实简历位图无法脱敏）。
+
+指针事件与赋值一律在**父页 `eval`** 里做（帧是 `allow-same-origin`，`contentDocument` 读得到）；
+本片**没有用** CDP 派发真实鼠标——与别人的 dev 会话并存时那会挂住不返回（§9 的 8.3-01 与简历轨那条④）。
+探针脚本与原始输出都在被忽略的 `tmp/311/`：`p-a-open.js`/`p-a2-anchors.js`（锚点清单）、
+`p-b-type-blur.js`+`p-b.out`（双击→打字→失焦整链）、`p-c-esc-yield.js`+`p-c.out`（Esc 与拖拽互不打架）、
+`p-e-chain.js`+`p-e.out`（失焦只发一次 / 撤销一步回到打字前）、`p-f-third.js`+`p-f.out`（第三轮 + 全角冒号）、
+`p-d-save.js`+`p-d.out`（保存）、`db-read.mjs`+`db-before.log`/`db-middle.log`/`db-after.log`/`db-after3.log`（`resume_docs` 台账）、
+`db-kb.mjs`+`db-kb-before.log`/`db-kb-after.log`（`kb_*` 整表摘要）。
+
+--------------------------------------------------------------------------------
+四道门禁（§7.4 的①，退出码一律重定向后单独 echo，不用管道读——§9 的 5.4-c）
+--------------------------------------------------------------------------------
+
+- `pnpm typecheck > tmp/311/typecheck.log 2>&1` → **TYPECHECK_EXIT=0**
+- `pnpm lint > tmp/311/lint.log 2>&1` → **LINT_EXIT=1**，`✖ 4 problems` **全部**是
+  `packages/renderer/dummy-non-existing-folder/pdfjs/**` 的 `Parsing error: … was not found by the project service`
+  （另一窗口的未跟踪产物，`git status` 里是 `?? packages/renderer/dummy-non-existing-folder/`，本片不替它清，见 §9 的共享工作树口径）。
+  因此 `&&` 链在它后面断掉，**12 项 checker 逐个现跑**（§9 的 5.4-c 同条教训：链断 = 后面根本没跑）：
+  `check-renderer-conventions` / `check-knowledge-pack` / `check-llm-single-entry` / `check-compliance-redlines` /
+  `check-dependency-floor` / `check-prompts` / `check-agent-model-authority` / `check-tool-contract` /
+  `check-scheduler-no-external-cron` / `check-dashboard-readonly` / `check-licenses` / `check-lexicon` → **各自 EXIT=0**
+  （逐条日志 `tmp/311/checker-*.log`）。
+- 本片文件单独 eslint（10 个路径：`ResumeEditPage.tsx`、`useResumeEditor.ts`、`ui/controls.tsx`、
+  `resume-doc/{diff,editor-ops,editor-session,editor-service}.test.ts`、`main/src/editor-link.test.ts`、`shared/src/bridge.ts`）
+  → **SCOPED_LINT_EXIT=0**（`tmp/311/lint-scoped.log` 空文件 = 零命中）。
+- `pnpm format:check` → 本片文件 `prettier --write` 后**零命中**；全仓仍剩那 3 个 `dummy-non-existing-folder` 的
+  `.js`（同一未跟踪产物，不是本片文件）。
+- `pnpm test > tmp/311/test-full.log 2>&1` → **TEST_EXIT=0**，全仓逐包绿；本片射程内两份读数：
+  `packages/resume-doc test: Test Files 18 passed (18) / Tests 268 passed (268)`；
+  `packages/main test: Test Files 13 passed (13) / Tests 93 passed (93)`，其中 `✓ src/editor-link.test.ts (13 tests)`。
+
+--------------------------------------------------------------------------------
+3.11-01 纯判据 `planFieldText`：只换 `value`，四种拒绝各一条确定的码（U）
+--------------------------------------------------------------------------------
+
+单测半边：`packages/resume-doc/src/editor-ops.test.ts` 的 describe「3.11-01 打字改一格：只换 value，四种拒绝各给一条确定的码」
+（6 条用例，随 268 条一起绿）。断的是：
+
+- 正向：新值进那一格（含 `\n` 原样留着），同区块未被点的那一条与别的区块**引用相等**（打字是局部动作，不重建任何人），
+  原序列不被就地改。
+- `locked` 那一格（公司名）改值后仍 `locked: true` 且 `factKey` 保留——这就是裁定㉛「允许改，但标待确认」的实现含义。
+- 空串与 5000 字超长串都放行：这一格能装什么由 `fieldSchema.value` 那一份判据管，编辑器不自造界（§2.6）。
+- 四条拒绝各回一个码且不抛异常：`unknown-section` / `unknown-entry` / `unknown-field` / `not-a-text`。
+  `unknown-field` 那条明确不许"当作新建"——界面递出的键只可能来自纸上的锚点，对不上就是定位错了。
+
+--------------------------------------------------------------------------------
+3.11-02 打字一次 = 一个撤销单元；空编辑不进栈（U，另有活体半边见 3.11-06）
+--------------------------------------------------------------------------------
+
+单测半边：`editor-session.test.ts` 的 describe「3.11-02 打字改正文：一次调用一条撤销单元，改成同一个字不进栈」——
+`setFieldText` 改一格 → `canUndo` 真、`isDirty` 真、`undo()` 一步回到原值；同一格再"改"成同一个值 → 栈深度不变、
+`dirty` 不翻。判据沿用会话里那一份 `contentHash`，没有为打字另写相等比较。
+子原因上浮一条（「查无此键 / 查无区块都不进栈」）同时是 3.11-03 契约通道的依赖。
+
+活体半边（见 3.11-06 的 `p-e.out`）：失焦之后**撤销一步**就逐字回到打字前、`dirty` 从 `true` 回到 `false`、
+`redo` 随即可用——栈里恰好进了一条，没有第二条。
+
+--------------------------------------------------------------------------------
+3.11-03 桥接口上白名单 + 投影不新增任何字段值（C）
+--------------------------------------------------------------------------------
+
+`grep` 读数（`tmp/311/` 外的现仓 grep，命令逐字）：
+
+- `grep -rn "resume\.editor\.text" packages/shared/src/bridge.ts` → 白名单数组一条（`bridge.ts:373`
+  `'resume.editor.text',`）+ 声明一条（`bridge.ts:2751` `'resume.editor.text': { args: [docId, sectionId, entryId, fieldKey, value]; returns: ResumeEditorView }`），
+  形状与实参表**五个位置实参**一致；其余三处是注释（`:352`/`:359`/`:1454`）。
+- 跨进程那条在 `packages/main/src/editor-link.test.ts` 的 describe「3.11-02 / 03 打字经网关：一次一格进草稿，保存才进库，
+  被拒时子原因照样跨进程」+「可达面边界：十三行只给界面，正文只从一颗口进来」（13 tests 全绿）。
+  被白名单挡在门外那一格由既有 1.2-04 类断言覆盖，未在本片重复。
+- 活体反向读数（`p-b.out` 的 `viewShape`）：改完一格之后
+  `{ ok: true, docId: "resume-demo", carriesTypedText: false, sectionKeys: ["id","kind","entries"] }`
+  → 投影里**没有任何文字键**，敲进去的字在整份 `JSON.stringify(view.value)` 里搜不到（`carriesTypedText:false`）。
+  纸上要看的文字仍只出自 `resume.editor.preview` 那份打印 HTML。
+
+--------------------------------------------------------------------------------
+3.11-04 打印面每一格带打字锚点，且锚点是惰性属性（U）
+--------------------------------------------------------------------------------
+
+单测半边：`packages/resume-doc/src/template.test.ts` 的 describe「3.11-04 纸上每一格都带得回写入坐标与原文（打字锚点是惰性的）」
+（30 tests 的文件，随 268 绿）。断的是：三套模板各渲一次，`[data-rz-field]` 计数 = 该文档被渲染出的行数、
+值集合等于该条目里被渲染的字段键；`stripAnchors()`（正则已含 `field` 与 `raw`）前后两份产物的**文本层逐字相同**；
+三套模板之间产物 md5 互异（防空判）。锚点本体在 `internal/template-kit.ts` 的 `fieldAnchors`（一格的
+`data-rz-field="<字段键>"` + `data-rz-raw=<原文 JSON>`），注释里显式登记"惰性属性、不参与排版"。
+
+活体半边（`p-a-open.out` / `p-a2.out`，两份读数一字不差）：帧内 `[data-rz-field]` 命中 **6 格**，逐格
+`{ field, entry, section, raw, text }`：
+
+1. `{ field:"text", entry:"s1", section:"summary", raw:"\"五年后端工程师，专注高并发服务与可观测性。\"" }`
+2. `{ field:"company", entry:"e1", section:"exp", raw:"\"星桥科技\"" }`
+3. `{ field:"role", entry:"e1", section:"exp", raw:"\"后端工程师\"" }`
+4. `{ field:"period", entry:"e1", section:"exp", raw:"\"2021 - 2024\"" }`
+5. `{ field:"achievement", entry:"e1", section:"exp", raw:"\"主导订单服务重构，P99 延迟下降 40%。\"" }`
+6. `{ field:"text", entry:"k1", section:"skills", raw:"\"TypeScript / Node.js / PostgreSQL / Electron\"" }`
+
+每格的 `data-rz-entry` / `data-rz-section` 同时把**写入坐标**（区块 id + 条目 id + 字段键）带在节点上，
+父页双击时三步 `closest()` 就凑齐 `resume.editor.text` 的五个实参——界面手里没有第二份文档模型（3.11-10）。
+同一趟读到 `page: { editPage: true, frame: true, dirty: "false", hintTail: "，按住段落拖动可以换顺序。想改字就双击纸上那一格，敲完点别处就写进草稿，按 Esc 就不改。" }`。
+
+--------------------------------------------------------------------------------
+3.11-05 改掉事实锁定那一格：diff 里那枚 `locked` 照样读得出（U）
+--------------------------------------------------------------------------------
+
+单测半边：`packages/resume-doc/src/diff.test.ts` 的 describe「3.11-05 打字改掉事实锁定那一格：那枚 locked 照样读得出」
+（6 tests 的文件，绿）。断的是：
+
+- 改一条 `locked` 字段（公司名）→ `diff(改前, 改后)` 里那一条 `change: 'modified'`、`before`/`after` 两个值都在、
+  **`locked: true`**（界面上的「待确认」标由这一枚读出，spec 3.1-03 的口径不因编辑而失效）。
+- 对照组改一条非锁定字段（正文）→ `change: 'modified'` 且 `locked: false`。
+
+活体侧证（`db-after3.log`）：打字改掉的那一格保存到库之后仍是
+`{ "achievement": "第三轮：只进工作副本", "locked": true, "factKey": "achievement" }`——
+`planFieldText` 只换 `value`，`locked` / `factKey` 一个字都没被清掉。
+
+--------------------------------------------------------------------------------
+3.11-06 双击纸上那一格就能打字：失焦发且仅发一次，Esc 一次不发（V）
+--------------------------------------------------------------------------------
+
+**实现形状与本行原文有一处更正**（打字框不是挂在纸上的 `contenteditable`，而是父页一侧那只透明覆盖框），
+理由与判据等价性写在 `docs/plans/03-resume-pdf/plan.md` §16 的「更正」小节，行 ID 与三条行为语义（双击即打字 /
+失焦发且仅发一次 / Esc 一次不发）不变。
+
+活体读数（`p-b.out`，逐字）：
+
+- 打字框**钉在纸上那一格的值节点**上，且量的是"藏字之前"的样式（`expect` 与 `opened.vars` 两份互相印证）：
+  `{ left: 117, top: 355, width: 223, sizePx: "12.25", font: "Georgia, \"Times New Roman\", \"Noto Serif SC\", serif", ink: "rgb(64, 64, 64)", rawBefore: "\"主导订单服务重构，P99 延迟下降 40%。\"", labelVisible: "成果:" }`
+  → 覆盖框左边 117 而不是整格左边 84、宽 223 而不是整格宽 670，**「成果:」这段标签仍然露在外面**（`labelVisible`）。
+  `opened.vars` = `{ left:"117px", top:"355px", width:"223px", size:"12.25px", font:"Georgia, … serif", ink:"rgb(64, 64, 64)" }`
+  与上面的期望逐位一致；`taRect.left/top` = `117/355`。
+- 框里是 `taTag: "TEXTAREA"`、`taRows: 1`、`taValue: "主导订单服务重构，P99 延迟下降 40%。"`（**原文带回来**，
+  靠的是 `data-rz-raw` 而不是 DOM 文本——打印面那套块级文法不能从 `textContent` 反推，见 plan §16）。
+  敲进第二行之后 `typed = { taValue: "手改的成果第一行\n第二行也进来了", rowsNow: 2 }` → 行数随内容长。
+- 字与原字同族同色（`taFont`）：`{ size:"12.25px", family:"Georgia, \"Times New Roman\", \"Noto Serif ", color:"rgb(64, 64, 64)", bg:"rgba(0, 0, 0, 0)" }`
+  → 透明底、没有白盒子。原字那一格 `valueNodeClass: "min-w-0 rz-edit-typing"`、`valueNodeColor: "rgba(0, 0, 0, 0)"`
+  → 挂上 `.rz-edit-typing` 后原字变透明，**不重影**（`.rz-edit-typing` 那条规则只写颜色，不写排版）。
+- `cellContenteditable: null` → 纸上的节点**没有**被挂 `contenteditable`（这一枚读数是上面那条更正的正面证据）。
+- `barHiddenWhileTyping: true` → 打字期间那只段落样式条不画，两套控件不叠。
+- 失焦之后（`afterBlur`）：`{ overlayGone: true, dirty: "true", notice: "这一格已经写进草稿", rejected: null,
+  rawInPaper: "\"手改的成果第一行\\n第二行也进来了\"", textInPaper: "成果:手改的成果第一行第二行也进来了" }`
+  → 纸**重出**为新值（帧内现查，不拿旧引用——§9 的 6.4-23 补窗①），`\n` 在文档里原样留着、在纸上分成了两行。
+- **仅发一次**（`p-e.out`）：打字前 `{ raw: "\"手改的成果第一行\\n第二行也进来了\"", dirty: "false" }` →
+  失焦后 `{ raw: "\"第二轮打字进草稿\\n第三行也在\"", dirty: "true", notice: "这一格已经写进草稿" }` →
+  **点一次撤销**回到 `{ raw: "\"手改的成果第一行\\n第二行也进来了\"", dirty: "false", equalsBefore: true, redoEnabled: null }`
+  → 栈里只有一条（`redoEnabled` 读的是 `aria-disabled`，`null` = 重做那颗可点）；再点重做得回新值。
+- **Esc 一次都不发**（`p-c.out`）：另一格（`period`，`taValue: "2021 - 2024"`）进打字态后按 Esc →
+  `afterEsc = { overlayGone: true, pageStillOpen: true, dirty: "true", dirtyUnchanged: true, undoUnchanged: true,
+  notice: "这一格已经写进草稿", rawRestored: "\"2021 - 2024\"", rawEqualsBefore: true, orderUnchanged: true }`
+  → `dirty` 与撤销栈深度两条持久读数都不动、纸上回到敲之前的字（`rawEqualsBefore: true`）。
+  这里 `dirty: "true"` 是**上一条真编辑**留下的状态，`dirtyUnchanged: true` 断的是"按 Esc 前后同值"。
+- 真实输入法那条口径（§9 的 5.4-b）：第三轮（`p-f.out`）敲的是含**全角冒号**的中文
+  `afterBlur.raw = "\"第三轮：只进工作副本\""`，写口没有把它当非法输入拒掉（`rejected` 一路为 `null`）。
+
+--------------------------------------------------------------------------------
+3.11-07 打字态与拖拽换序互不打架（V）
+--------------------------------------------------------------------------------
+
+活体读数（`p-c.out`，帧内 `pointerdown` 用 `PointerEvent` 在文档里派发）：
+
+- 打字态里指针落在同一行：`duringTypingPointerdown = { defaultPrevented: false, overlayStillThere: true }`
+  → 不 `preventDefault`、不接管成拖拽，打字框原样还在。
+- 未进打字态（Esc 收掉之后）同一格派发：`afterTypingPointerdown = { defaultPrevented: true, barAppeared: true }`
+  → 3.10-05 那条拖拽路径逐字不变（照样接管、照样长段落条）。
+- 同一条链上的持久读数 `orderUnchanged: true`（`view.sections` 的序没被这一下改动），且**没有**产生 `resume.editor.move`
+  ——`dirty` 与撤销栈深度两条都停在原值（`dirtyUnchanged` / `undoUnchanged`）。
+
+--------------------------------------------------------------------------------
+3.11-08 打字只写工作副本，知识库一侧一字不动（C）
+--------------------------------------------------------------------------------
+
+台账读数（`node tmp/311/db-read.mjs`，只读打开独立实例那份 `tmp/310/userdata/store.db`），三趟一起看：
+
+| 时刻                        | `resume_docs.content_hash`（`resume-demo`） | `achievement` 那一格                     | `kb_entities` 行数 |
+| --------------------------- | ------------------------------------------- | ---------------------------------------- | ------------------ |
+| 打字前（`db-before.log`）   | `f2de9ab2bad8b21f40c0de70186b75f33d37a082b9bd881073b81fcc47a7d0fb` | `手改的成果第一行\n第二行也进来了`       | 0                  |
+| 打字已进草稿、**未保存**（`db-middle.log`，此刻界面 `dirty="true"`） | `f2de9ab2bad8b21f…`（**同一枚，未变**）     | `手改的成果第一行\n第二行也进来了`（旧值） | 0                  |
+| 保存之后（`db-after.log`）  | `ab6e0c8ac62f8a2ed03acc5777eeda598cb5209eb29da921e35ddea5cb0a64b7` | `第二轮打字进草稿\n第三行也在`             | 0                  |
+| 第三轮保存后（`db-after3.log`） | `3fe8b5607b5a1cfc98854eda09777f4460eac4bd0c7299abea94c2e1f707c7e3` | `第三轮：只进工作副本`                   | 0                  |
+
+保存那两行的界面读数（`p-d.out` / `p-f.out`）：`before { dirty:"true", ariaDisabled:null, disabledReason:null }` →
+`after { dirty:"false", notice:"已保存到库里，dirty 归零", rejected:null }`。
+中间那一行是裁定㉚ 的正面证据：**草稿态的打字不落库**，`resume.editor.save` 才是唯一的落库口。
+
+知识库一侧整表摘要对比（`db-kb.mjs`：`kb_*` 九张表逐表行数 + 全行 JSON 的 sha256 前 16 位），
+第三轮打字+保存前后各跑一次，`diff` 前后两份日志 → **KB_IDENTICAL=YES**（逐字相同）：
+`kb_chunks 0/4f53cda18c2baa0c`、`kb_chunks_fts 0/4f53cda18c2baa0c`、`kb_chunks_fts_config 1/6c188207c1643c51`、
+`kb_chunks_fts_content 0/4f53cda18c2baa0c`、`kb_chunks_fts_data 2/4842c74cc0c0a799`、
+`kb_chunks_fts_docsize 0/4f53cda18c2baa0c`、`kb_chunks_fts_idx 0/4f53cda18c2baa0c`、
+`kb_entities 0/4f53cda18c2baa0c`、`kb_vectors 0/4f53cda18c2baa0c`。
+
+**这一格要如实标出读数强度**：这台独立实例从没喂过知识库素材，所以九张表里七张本来就是空表
+（摘要 `4f53cda18c2baa0c` = 空数组的 sha256），"前后相同"在这一档是 0→0 的同值读数，不是"有内容而不动"。
+"打字不动库"这一条的**非空**证据在单测半边：`editor-service.test.ts` 的 describe
+「3.11-02 / 03 打字改正文：走的是同一份草稿账，库里那份要等保存」直接断 `doc_json` 在 `setText` 之后仍是原值、
+`save()` 之后才换新值（17 tests 绿）。要拿"库里有素材而一字不动"那一档活体读数，需要先在实例里喂一份真实素材，
+按 §8.4/§8.5 那两条（事实锁定 + 个人数据不入库）留给用户在场时补，本片不猜。
+
+--------------------------------------------------------------------------------
+3.11-09 新格守渲染层规矩（C）
+--------------------------------------------------------------------------------
+
+- 文案全走 i18n，两份语言包同步补齐（新增键：`resume.editor.text`、`resume.editor.textDone`、
+  `resume.edit.typeCommit`、`resume.edit.typeCancel`、`resume.edit.typeLabel`，zh-CN 与 en 各一份）。
+  `check-renderer-conventions.ts` 的全链读数（逐字）：
+  `✔ 渲染层规范检查通过（2 个语言包，77 个源文件，派生文案 50 条逐包齐备；src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、
+  ≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处、按不动却不带原因码那一格 0 处、src/ui/** 内画法未走具名档位的按钮 0 只、
+  占位空 span 0 只，…全部 ≥4.5:1）` → 第 10 节（控件只出自原件）、第 13 节（不可点不长 hover）、
+  第 14 节（按不动必带原因码）与语言包对齐四道都是 0 命中。
+  打字框那只控件走的是原件 `DeskTextarea`（新增 `bare` 一档，注释里点名 spec 3.11-06），
+  确认/取消两颗走 `DeskButton`，没有裸 `<textarea>`/`<button>`。
+- 纸面不引入第二套排版：打字框只读纸上算出来的六个 CSS 变量（左/上/宽/字号/字族/字色），
+  打印 HTML 一字不改（3.11-04 的 `stripAnchors` 逐字节相同那条）。
+- `pnpm format:check` 对本片文件 0 命中（见上面四道门禁那一节）。
+- 术语禁令（§4.6）：`check-lexicon.ts` 读数 `✔ 术语禁令保持（扫描 862 个跟踪文本文件、2 份语言包的值：被禁的字在已进主干的内容里 0 处；
+  脏区延后 1 份（docs/plans/08-real-platform-driving/plan.md（5 处，脏区中））—— 落地即判，本窗不替它们清；豁免 2 处…内共 4 处，逐处都是禁令本体…）`
+  → 延后那份是**另一窗口正在写的文件**，不是本片的。
+
+--------------------------------------------------------------------------------
+3.11-10 反向验证：被否决的"渲染层自己拼 doc 再存"没有造成能力缺口（C）
+--------------------------------------------------------------------------------
+
+`grep` 读数（命令逐字：`grep -rn "resume\['editor\." packages/renderer/src` 与
+`grep -rn "resume\.doc\.save\|resume\['doc\.save'\]\|doc\.set" packages/renderer/src`）：
+
+- `resume['editor.` 的调用点**只在一份文件里**：`packages/renderer/src/useResumeEditor.ts`，12 行
+  （`:236 preview` / `:243 view` / `:255 open` / `:267 metric` / `:285 design` / `:300 use` / `:329 move` /
+  `:346 split` / `:361 merge` / `:381 text` / `:397 undo|redo` / `:411 save`）。
+  整屏编辑页与架上的面板共用这一份会话，界面手里没有第二份文档模型（3.10-07 的读数形状复跑，仍是这一处）。
+- 渲染层**没有**任何直写口：第二条 grep 在 `packages/renderer/src` 里唯一命中是 `useResumeEditor.ts:406` 的**注释**
+  （"因此不可能绕过它去调 `resume.doc.save`"），零调用点。
+- 一条打字对应一次动作、无第二条通道：`setFieldText` 是全仓唯一的正文写口（桥侧只有 `resume.editor.text` 一颗，
+  见 3.11-03 的白名单读数），界面侧 `commitTyping` 是它唯一的调用方（失焦与「改好了」两颗都汇进这一只手，
+  先收框再发，因此不可能发两次——`p-e.out` 的"撤销一步就回到打字前"是同一件事的持久读数）。

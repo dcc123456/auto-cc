@@ -178,27 +178,45 @@ export function bindOptional(entry: Entry, fieldKey: string): string | null {
 }
 
 /**
- * 一条「标签:值」展示行。
+ * 一条「标签:值」展示格。
  * `key` 是**字段键**（不是本地化标签）：渲染轨要认出哪一格是那一类区块的正文（`bodyKeyOf`）才能只把
  * 它交给块级渲染（spec 3.9-02），而标签已经过了 i18n，按标签反推等于把语种当成排版条件。
+ * `value` 是已转义的可打印文本，`raw` 是这一格的**原始值**——3.11 的打字锚点要它：纸面上的正文格是
+ * `renderRichValue` 消化过的块级 HTML，`- ` 与 `**` 在 DOM 里已经是 `<li>` 与 `<strong>`，反推不回来。
  */
 export interface EntryLine {
   key: string;
   label: string;
   value: string;
+  raw: string;
 }
 
 /**
- * 条目视图：模板共用的「读好了的数据」中间形——把一份条目规整成标题行 + 副行 + 标签值行。
+ * 条目视图：模板共用的「读好了的数据」中间形——把一份条目规整成标题格 + 副行格 + 标签值格。
  * 三套模板拿同一个 EntryView，各自只决定用什么 Tailwind class 包起来（3.2-05：模板只排版不加工数据）。
+ *
+ * 标题为什么不是一只拼好的字符串（3.11 改的这条形状）：`公司 · 职位` 在纸面上是**一格一键**的打字坐标，
+ * 连成一个节点后就没人知道用户点的是公司还是职位，递回主进程等于猜。于是这里递出有序的两格，
+ * ` · ` 那一个分隔符由模板层在格与格之间连——可见文本与过去逐字相同，只是节点换了。
  */
 export interface EntryView {
-  /** 主标题（如「公司 · 职位」）；由核心槽位绑定，缺失会抛错。 */
-  heading: string;
-  /** 副行（如时间），已转义。 */
-  meta: string[];
-  /** 标签值行（成果 / 描述 / 学历等可选信息），已转义。 */
+  /** 主标题的构成格（经历/项目/校园是 公司 + 职位，教育是学校；简介/技能为空）。 */
+  title: EntryLine[];
+  /** 副行格（如时间）。 */
+  meta: EntryLine[];
+  /** 标签值格（成果 / 描述 / 学历等可选信息）。 */
   lines: EntryLine[];
+}
+
+/**
+ * 把一格装成展示格：`value` 转义、`raw` 留着（两个消费者各要一样，见 `EntryLine`）。
+ * @param key 字段键
+ * @param label 已本地化的标签（不带冒号；不配标签的格传空串）
+ * @param raw 文档里的原始值（未转义）
+ * @returns 展示格
+ */
+function toLine(key: string, label: string, raw: string): EntryLine {
+  return { key, label, value: escapeHtml(raw), raw };
 }
 
 /**
@@ -209,44 +227,41 @@ export interface EntryView {
  * @param section 所属区块
  * @param entry 条目
  * @param locale 语言
- * @returns 转义后的 EntryView
+ * @returns 规整好的 EntryView（`value` 已转义，`raw` 未转义）
  */
 export function toEntryView(templateId: string, section: Section, entry: Entry, locale: TemplateLocale): EntryView {
-  const meta: string[] = [];
+  const title: EntryLine[] = [];
+  const meta: EntryLine[] = [];
   const lines: EntryLine[] = [];
 
-  const pushOptionalLine = (key: string): void => {
+  /** 必选槽：缺失照旧抛 `TemplateBindingError`（错误文案要的是"哪个区块的哪一格"）。 */
+  const pushRequired = (target: EntryLine[], key: string): void => {
+    target.push(toLine(key, '', bindField(templateId, section, entry, key, locale)));
+  };
+  /** 可选槽：这一格没有值就整个不出现（3.1-04 的容错）。 */
+  const pushOptional = (target: EntryLine[], key: string, label: string): void => {
     const value = bindOptional(entry, key);
-    if (value !== null) lines.push({ key, label: fieldLabel(key, locale), value: escapeHtml(value) });
+    if (value !== null) target.push(toLine(key, label, value));
   };
 
-  let heading: string;
   if (section.kind === 'experience' || section.kind === 'project' || section.kind === 'campus') {
-    const company = escapeHtml(bindField(templateId, section, entry, 'company', locale));
-    const role = escapeHtml(bindField(templateId, section, entry, 'role', locale));
-    heading = `${company} · ${role}`;
-    const period = bindOptional(entry, 'period');
-    if (period !== null) meta.push(escapeHtml(period));
-    pushOptionalLine('achievement');
-    pushOptionalLine('description');
+    pushRequired(title, 'company');
+    pushRequired(title, 'role');
+    pushOptional(meta, 'period', '');
+    pushOptional(lines, 'achievement', fieldLabel('achievement', locale));
+    pushOptional(lines, 'description', fieldLabel('description', locale));
   } else if (section.kind === 'education') {
-    heading = escapeHtml(bindField(templateId, section, entry, 'school', locale));
-    const period = bindOptional(entry, 'period');
-    if (period !== null) meta.push(escapeHtml(period));
-    pushOptionalLine('degree');
-    pushOptionalLine('major');
+    pushRequired(title, 'school');
+    pushOptional(meta, 'period', '');
+    pushOptional(lines, 'degree', fieldLabel('degree', locale));
+    pushOptional(lines, 'major', fieldLabel('major', locale));
   } else {
     // summary / skills：无必选槽，逐字段平铺。自由正文键 `text` 不配标签（否则会把键名 "text" 印进 PDF），
     // 其余仍走 fieldLabel——未登记键名照旧露出，与 `fieldLabel` 的「绝不渲染空白」口径一致。
-    heading = '';
     for (const field of entry.fields) {
       if (field.value === '') continue;
-      lines.push({
-        key: field.key,
-        label: field.key === 'text' ? '' : fieldLabel(field.key, locale),
-        value: escapeHtml(field.value),
-      });
+      lines.push(toLine(field.key, field.key === 'text' ? '' : fieldLabel(field.key, locale), field.value));
     }
   }
-  return { heading, meta, lines };
+  return { title, meta, lines };
 }

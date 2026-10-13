@@ -263,8 +263,8 @@ function renderSection(
     )
     .join('');
   const inner = isPlain && spec.plainGrid ? `<div class="grid grid-cols-2 gap-x-4">${entries}</div>` : entries;
-  // 两个 `data-rz-*` 锚点是**惰性属性**（spec 3.10-02）：不参与排版，只给整屏编辑页在父页一侧现量矩形用
-  // （纸面帧是 `sandbox="allow-same-origin"`，帧内不跑脚本，命中只能靠这些锚点上溯）。
+  // `data-rz-*` 锚点全是**惰性属性**（spec 3.10-02 / 3.11-04）：不参与排版，只给整屏编辑页在父页一侧现量矩形、
+  // 找回写入坐标用（纸面帧是 `sandbox="allow-same-origin"`，帧内不跑脚本，命中只能靠这些锚点上溯）。
   return (
     `<section data-rz-section="${escapeHtml(section.id)}" data-rz-kind="${section.kind}" ` +
     `class="${densityClasses.section}">${heading}${inner}</section>`
@@ -283,6 +283,23 @@ function richForLine(line: EntryLine, bodyKey: string, forceInline: boolean): Ri
   if (forceInline || line.key !== bodyKey) return { block: false, html: line.value };
   return renderRichValue(line.value);
 }
+
+/**
+ * 一格的打字锚点（spec 3.11-04 / 裁定㉚「只写简历工作副本」）。
+ *
+ * `data-rz-field` 给**字段键**（一次打字只改一格，键就是写入坐标）。`data-rz-raw` 给**这一格的原始值**，
+ * 这一条不是多余：纸面上的正文格是 `renderRichValue` 消化过的块级 HTML，`- ` 与 `**` 在 DOM 里已经是
+ * `<li>` 与 `<strong>`，从 `textContent` 反推不回来——把用户的多行成果敲扁成一行是丢内容，不是省事。
+ * 两个属性都与 `data-rz-section` 同一条口径：**惰性**（不参与排版，`stripAnchors` 后逐字节相同）。
+ * @param line 展示格（`toEntryView` 递出的一格，`raw` 就是文档里那一格的原文）
+ * @returns 两个属性串（带前导空格，直接接在开始标签之后）
+ */
+function fieldAnchors(line: EntryLine): string {
+  return ` data-rz-field="${escapeHtml(line.key)}" data-rz-raw="${escapeHtml(JSON.stringify(line.raw))}"`;
+}
+
+/** 主标题两格之间的那个分隔符（连在格与格**外面**：它不属于任何一格，因此也不该被算进任何一格的打字范围）。 */
+const TITLE_SEPARATOR = ' · ';
 
 /**
  * 渲染一条有标题结构的条目（经历 / 项目 / 校园 / 教育）。
@@ -309,14 +326,19 @@ function renderEntry(
   const slots = rowClassesFor(design, section.kind);
   const headingClass =
     spec.columns === 2 && SIDE_KINDS.includes(section.kind) ? 'text-[12px] font-bold' : 'text-[13px] font-bold';
+  // 标题与副行都是 `<span>`（行内、不带任何类）：可见文本与换成打字锚点之前逐字相同，只是每格有了自己的节点。
+  const title = view.title.map((item) => `<span${fieldAnchors(item)}>${item.value}</span>`).join(TITLE_SEPARATOR);
   const meta = view.meta
-    .map((value) => `<span class="text-[11px] font-medium text-${spec.accent}-700">${value}</span>`)
+    .map(
+      (item) =>
+        `<span${fieldAnchors(item)} class="text-[11px] font-medium text-${spec.accent}-700">${item.value}</span>`,
+    )
     .join('');
   const lines = view.lines
     .map((line) => {
       const rich = richForLine(line, bodyKeyOf(section.kind), false);
       return (
-        `<div class="${classes.body} text-neutral-700${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
+        `<div${fieldAnchors(line)} class="${classes.body} text-neutral-700${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
         (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
         // 块级时外层从 `<span>` 换成 `<div>`：`<p>` / `<ul>` 是块级元素，塞在行内容器里浏览器会把它们折回一行。
         (rich.block ? `<div class="min-w-0">${rich.html}</div>` : `<span class="min-w-0">${rich.html}</span>`) +
@@ -326,8 +348,8 @@ function renderEntry(
     .join('');
   const head =
     spec.entry === 'split'
-      ? `<div class="flex items-baseline justify-between gap-2"><div class="${headingClass}${slots}">${view.heading}</div><div class="flex shrink-0 gap-2">${meta}</div></div>`
-      : `<div class="${headingClass}${slots}">${view.heading}</div><div class="flex gap-2">${meta}</div>`;
+      ? `<div class="flex items-baseline justify-between gap-2"><div class="${headingClass}${slots}">${title}</div><div class="flex shrink-0 gap-2">${meta}</div></div>`
+      : `<div class="${headingClass}${slots}">${title}</div><div class="flex gap-2">${meta}</div>`;
   const divider = spec.entryDivider ? ' border-b border-neutral-200 pb-1.5' : '';
   return `<div data-rz-entry="${escapeHtml(entry.id)}" class="resume-entry${divider} ${classes.entry}">${head}${lines}</div>`;
 }
@@ -359,7 +381,7 @@ function renderPlainEntry(
     .map((line) => {
       const rich = richForLine(line, bodyKeyOf(section.kind), chip);
       return (
-        `<div class="${chip ? `mr-1 mb-1 inline-block rounded-full bg-${spec.accent}-100 px-2 py-0.5 text-[11px] text-${spec.accent}-800` : `${classes.body} text-neutral-700`}${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
+        `<div${fieldAnchors(line)} class="${chip ? `mr-1 mb-1 inline-block rounded-full bg-${spec.accent}-100 px-2 py-0.5 text-[11px] text-${spec.accent}-800` : `${classes.body} text-neutral-700`}${slots}${line.label === '' ? '' : ' flex gap-1'}">` +
         (line.label === '' ? '' : `<span class="shrink-0 text-neutral-500${slots}">${line.label}:</span>`) +
         (rich.block ? `<div>${rich.html}</div>` : `<span>${rich.html}</span>`) +
         '</div>'

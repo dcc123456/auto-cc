@@ -1,5 +1,5 @@
 /**
- * 编辑器纯操作的用例（spec 3.6-01 的落点数学半边 + 3.6-02 的 U 半边，plan §8.4 的 3.6-a 那一格）。
+ * 编辑器纯操作的用例（spec 3.6-01 的落点数学半边 + 3.6-02 的 U 半边 + 3.11-01 的打字判据，plan §8.4 / §16）。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -9,6 +9,7 @@ import {
   planEntryMerge,
   planEntryMove,
   planEntrySplit,
+  planFieldText,
   planMetric,
   planSectionMove,
   type MetricKey,
@@ -441,5 +442,58 @@ describe('3.6-10 手动合并：并回上一条，锁定字段按原样进正文
     expect(valueOf(merged, 'description')).toBe('另一大学\n计算机科学与技术 学士');
     expect(valueOf(merged, 'school')).toBe('某大学');
     expect(merged.fields.map((field) => field.key)).toEqual(['school', 'description']);
+  });
+});
+
+describe('3.11-01 打字改一格：只换 value，四种拒绝各给一条确定的码', () => {
+  it('改成果那一格：值换了、其余字段一字不动，别的区块引用相等，原序列不被就地改', () => {
+    const sections = splitFixture();
+    const before = sections[0]?.entries[0] as Entry;
+    const result = planFieldText(sections, 'exp', 'e1', 'achievement', '改成的一行\n又加一行');
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const patched = result.value[0]?.entries[0] as Entry;
+    expect(valueOf(patched, 'achievement')).toBe('改成的一行\n又加一行');
+    // 换行原样留着：打字框里的回车就是文档里的 `\n`，拆/并（3.6-10）与块级渲染（3.9-01）都读同一条算式。
+    expect(valueOf(patched, 'role')).toBe('前端');
+    // 同区块里没被点的那一条、以及别的区块都必须是**同一个引用**——打字是局部动作，不许重建任何人。
+    expect(result.value[0]?.entries[1]).toBe(sections[0]?.entries[1]);
+    expect(result.value[1]).toBe(sections[1]);
+    expect(valueOf(before, 'achievement')).toContain('带教三名实习生');
+  });
+
+  it('事实锁定那一格（公司名）照样允许人打字改，但 `locked` / `factKey` 必须留着——「待确认」靠它们（裁定㉛）', () => {
+    const sections = splitFixture();
+    const field = (sections[0]?.entries[0] as Entry).fields.find((item) => item.key === 'company')!;
+    const result = planFieldText(sections, 'exp', 'e1', 'company', '新的公司名');
+    if (!result.ok) throw new Error(`应当放行，实际 ${result.code}`);
+    const patched = (result.value[0]?.entries[0] as Entry).fields.find((item) => item.key === 'company');
+    expect(patched).toMatchObject({ value: '新的公司名', locked: true, factKey: field.factKey });
+  });
+
+  it('空串与超长串都放行：这一格能装什么由 `fieldSchema.value` 那一份判据管，编辑器不自造界（§2.5）', () => {
+    const sections = splitFixture();
+    expect(planFieldText(sections, 'exp', 'e2', 'achievement', '').ok).toBe(true);
+    expect(planFieldText(sections, 'exp', 'e2', 'achievement', '经'.repeat(5000)).ok).toBe(true);
+  });
+
+  it('查无区块 / 查无条目 / 查无此键 / 值不是字符串，四种都不抛异常', () => {
+    const sections = splitFixture();
+    expect(planFieldText(sections, 'zz', 'e1', 'achievement', 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-section',
+    });
+    expect(planFieldText(sections, 'exp', 'e9', 'achievement', 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-entry',
+    });
+    // 这一条没有 `description` 键：不许"当作新建"——界面递出的键只可能来自纸上的锚点，对不上就是定位错了。
+    expect(planFieldText(sections, 'exp', 'e1', 'description', 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-field',
+    });
+    expect(planFieldText(sections, 'exp', 'e1', 'achievement', 3 as unknown as string)).toMatchObject({
+      ok: false,
+      code: 'not-a-text',
+    });
   });
 });

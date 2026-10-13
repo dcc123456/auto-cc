@@ -789,6 +789,8 @@
         "redo": "Redo",
         "undone": "Undid one step",
         "redone": "Redid one step",
+        "text": "Body text",
+        "textDone": "That cell is now in the draft",
         "save": "Save",
         "saved": "Saved to the store; no pending changes",
         "rejected": "Edit rejected: {{message}}",
@@ -812,15 +814,18 @@
       },
       "edit": {
         "enter": "Full-screen editing",
-        "heading": "Full-screen layout editor",
+        "heading": "Full-screen editor",
         "back": "Leave editor",
-        "hint": "Click a section on the paper and the style bar lands right above it: size, line height, alignment, weight and colour all live there, and dragging a section moves it. This screen restyles the resume — the body text itself is not edited here.",
+        "hint": "Click a section on the paper and the style bar lands right above it: size, line height, alignment, weight and colour all live there, and dragging a section moves it. To change the words themselves, double-click that line — clicking away writes it into the draft, Esc leaves it alone.",
         "globals": "Whole document",
         "selected": "Editing: {{kind}}",
         "byKind": "Styles apply per section kind, so every block of this kind changes together",
         "moveUp": "Move up",
         "moveDown": "Move down",
-        "close": "Hide the style bar"
+        "close": "Hide the style bar",
+        "typeCommit": "Done",
+        "typeCancel": "Cancel",
+        "typeLabel": "Edit this line of body text"
       },
       "pendingUnnamed": "The one with no name read"
     },

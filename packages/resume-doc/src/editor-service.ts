@@ -225,6 +225,25 @@ export class ResumeEditorService extends Service {
     this.afterEdit(docId, this.require(docId).setDesign(patch));
 
   /**
+   * 打字改**一格**正文（spec 3.11 / 裁定㉚「只写工作副本」、㉛「允许改事实格但标待确认」）。
+   *
+   * 这是全仓唯一一颗让**文字**从渲染层进到主进程的简历写口：判据（键在不在这一条里、值是不是字符串）
+   * 在 `planFieldText` 那一份，本文件只把拒绝项翻成 `AppError`（与 `split` / `merge` / `design` 同一条通道）。
+   * 落点是会话里那份 draft——`save` 之后进 `doc_json`，**不回写 `kb_entities`**：派生实体由工作副本
+   * `kb.profile.sync` 单向生成（spec 4.2-01），两边都写就是同一句话有两个人说（§2.5）。
+   * @param docId 文档 id
+   * @param sectionId 区块 id（纸上的 `data-rz-section`）
+   * @param entryId 条目 id（纸上的 `data-rz-entry`）
+   * @param fieldKey 字段键（纸上的 `data-rz-field`）
+   * @param value 人敲进去的新值（原样存，不归一化、不裁长度）
+   * @returns 新的会话投影
+   * @throws AppError(`RESUME_EDITOR_NOT_OPEN` / `RESUME_EDITOR_EDIT_REJECTED`)；
+   *         拒绝原因在 `details.reason`（`unknown-field` / `not-a-text` 等，判据见 `editor-ops.ts`）
+   */
+  text = (docId: string, sectionId: string, entryId: string, fieldKey: string, value: string): ResumeEditorState =>
+    this.afterEdit(docId, this.require(docId).setFieldText(sectionId, entryId, fieldKey, value));
+
+  /**
    * 换预览模板或语言（3.6-04）。它**不碰文档**，所以不产生撤销单元。
    * @param docId 文档 id
    * @param templateId 目标模板 id，不给表示不改

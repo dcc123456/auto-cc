@@ -1,8 +1,9 @@
 /**
- * 文档 diff 用例（spec 3.1-06 增 / 删 / 改三例，条目级 + 字段级）。
+ * 文档 diff 用例（spec 3.1-06 增 / 删 / 改三例，条目级 + 字段级；3.11-05 打字之后的「待确认」读数）。
  */
 import { describe, expect, it } from 'vitest';
 import { diff } from './diff.js';
+import { planFieldText } from './editor-ops.js';
 import { DEFAULT_LAYOUT, makeField, RESUME_SCHEMA_VERSION, type ResumeDocument, type Section } from './model.js';
 
 function build(sections: Section[]): ResumeDocument {
@@ -81,5 +82,32 @@ describe('3.1-06 diff 三例', () => {
       ]),
     ]);
     expect(diff(a, b).isEmpty).toBe(true);
+  });
+});
+
+describe('3.11-05 打字改掉事实锁定那一格：那枚 locked 照样读得出', () => {
+  it('锁定格（company）与非锁定格（description）各打一次字：前者 modified + locked:true，后者 locked:false', () => {
+    const before = build([
+      expSection([
+        {
+          id: 'e1',
+          fields: [makeField('experience', 'company', '旧公司'), makeField('experience', 'description', '旧的补充')],
+        },
+      ]),
+    ]);
+    const typedCompany = planFieldText(before.sections, 'exp', 'e1', 'company', '手改的公司名');
+    if (!typedCompany.ok) throw new Error(`打字应当放行，实际 ${typedCompany.code}`);
+    const typedBoth = planFieldText(typedCompany.value, 'exp', 'e1', 'description', '手改的补充');
+    if (!typedBoth.ok) throw new Error(`非锁定那一格同样应当放行，实际 ${typedBoth.code}`);
+    const fields = diff(before, build(typedBoth.value)).sections[0]?.entries[0]?.fields ?? [];
+    // 界面上那枚「待确认」正是从这一条读出来的（spec 3.1-03 的口径不因打字而失效，㉛ 的实现含义）。
+    expect(fields.find((field) => field.key === 'company')).toMatchObject({
+      change: 'modified',
+      before: '旧公司',
+      after: '手改的公司名',
+      locked: true,
+    });
+    // 对照组：没被锁的那一格改了只是"改了"，不长出待确认标——否则这一屏上每一格都会被判成可疑。
+    expect(fields.find((field) => field.key === 'description')).toMatchObject({ change: 'modified', locked: false });
   });
 });

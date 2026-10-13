@@ -73,6 +73,8 @@ export type EditorRejectionCode =
   | 'out-of-bounds'
   | 'unknown-section'
   | 'unknown-entry'
+  | 'unknown-field'
+  | 'not-a-text'
   | 'index-out-of-range'
   | 'bad-color'
   | 'bad-token'
@@ -383,6 +385,47 @@ export function planSectionMove(
 }
 
 /**
+ * 一次按 id 定位的读数（区块 + 条目两条下标与两侧对象）。
+ * `planEntryMove` / `planEntrySplit` / `planEntryMerge` / `planFieldText` 四条动作开头都在做同一件事，
+ * 判据只许有一份（AGENTS.md §2.2：同一逻辑出现第二次就抽）。
+ */
+interface EntryLocation {
+  readonly sectionIndex: number;
+  readonly entryIndex: number;
+  readonly section: Section;
+  readonly entry: Entry;
+}
+
+/**
+ * 定位「某个区块里的某条条目」。
+ * @param sections 当前区块序列（不被修改）
+ * @param sectionId 区块 id
+ * @param entryId 条目 id
+ * @returns 找到给两条下标与两侧对象；查无原样给 `unknown-section` / `unknown-entry` 那条拒绝项（调用方直接 return）
+ */
+function locateEntry(sections: readonly Section[], sectionId: string, entryId: string): EditorOutcome<EntryLocation> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  const section = sections[sectionIndex] as Section;
+  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
+  if (entryIndex < 0) {
+    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
+  }
+  return { ok: true, value: { sectionIndex, entryIndex, section, entry: section.entries[entryIndex] as Entry } };
+}
+
+/**
+ * 换掉序列里某一个区块的条目，其余区块**原对象引用**返回。
+ * @param sections 当前区块序列
+ * @param sectionIndex 要换那一个区块的下标
+ * @param entries 该区块的新条目序列
+ * @returns 新的区块序列（只换那一个区块）
+ */
+function withEntries(sections: readonly Section[], sectionIndex: number, entries: Entry[]): Section[] {
+  return sections.map((section, position) => (position === sectionIndex ? { ...section, entries } : section));
+}
+
+/**
  * 把区块里的某条条目搬到第 toIndex 位（条目级重排；只在**所属区块内**有效）。
  *
  * 为什么不许跨区块搬条目：条目是某个 kind 的一条记录（一段经历、一项技能），把它挪进别的区块
@@ -400,23 +443,14 @@ export function planEntryMove(
   entryId: string,
   toIndex: number,
 ): EditorOutcome<Section[]> {
-  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
-  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
-  const section = sections[sectionIndex] as Section;
-  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
-  if (entryIndex < 0) {
-    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
-  }
+  const located = locateEntry(sections, sectionId, entryId);
+  if (!located.ok) return located;
+  const { sectionIndex, entryIndex, section } = located.value;
   const movedEntries = reorderAt(section.entries, entryIndex, toIndex);
   if (movedEntries === null) {
     return reject('index-out-of-range', `落点 ${String(toIndex)} 不在 0…${String(section.entries.length - 1)} 之内`);
   }
-  return {
-    ok: true,
-    value: sections.map((candidate, position) =>
-      position === sectionIndex ? { ...candidate, entries: movedEntries } : candidate,
-    ),
-  };
+  return { ok: true, value: withEntries(sections, sectionIndex, movedEntries) };
 }
 
 /**
@@ -489,7 +523,8 @@ function assembleEntry(kind: SectionKind, id: string, lines: readonly string[], 
 /**
  * 把一条条目从正文的第 bodyLineIndex 行之后拆成两条（spec 3.6-10 的拆半边，裁定㉗ 第 1 条后半句）。
  *
- * 拆点只给**行号**而不是文本：正文不过进程边界（`bridge.ts` 那十行白名单的口径），界面能递的只有整数。
+ * 拆点只给**行号**而不是文本：拆这一动作本身不需要动任何一个字，界面在拆这一格上递的就只有整数
+ * （要动文字走下面的 `planFieldText`，那是 3.11 的口径，与 `bridge.ts` 里那句"正文只从这一颗口进来"同源）。
  * @param sections 当前区块序列（不被修改）
  * @param sectionId 条目所在区块 id
  * @param entryId 要拆的条目 id
@@ -504,14 +539,9 @@ export function planEntrySplit(
   entryId: string,
   bodyLineIndex: number,
 ): EditorOutcome<Section[]> {
-  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
-  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
-  const section = sections[sectionIndex] as Section;
-  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
-  if (entryIndex < 0) {
-    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
-  }
-  const entry = section.entries[entryIndex] as Entry;
+  const located = locateEntry(sections, sectionId, entryId);
+  if (!located.ok) return located;
+  const { sectionIndex, entryIndex, section, entry } = located.value;
   const body = bodyFieldOf(entry);
   if (body === undefined) {
     return reject('no-body', `条目 ${entryId} 没有正文字段（${GENERATION_EDITABLE_KEYS.join('/')} 都不在这一条里）`);
@@ -530,12 +560,7 @@ export function planEntrySplit(
   };
   const tail = assembleEntry(section.kind, nextEntryId(section), lines.slice(bodyLineIndex), body.key);
   const nextEntries = [...section.entries.slice(0, entryIndex), head, tail, ...section.entries.slice(entryIndex + 1)];
-  return {
-    ok: true,
-    value: sections.map((candidate, position) =>
-      position === sectionIndex ? { ...candidate, entries: nextEntries } : candidate,
-    ),
-  };
+  return { ok: true, value: withEntries(sections, sectionIndex, nextEntries) };
 }
 
 /**
@@ -555,18 +580,13 @@ export function planEntryMerge(
   sectionId: string,
   entryId: string,
 ): EditorOutcome<Section[]> {
-  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
-  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
-  const section = sections[sectionIndex] as Section;
-  const entryIndex = section.entries.findIndex((entry) => entry.id === entryId);
-  if (entryIndex < 0) {
-    return reject('unknown-entry', `区块 ${sectionId} 里没有 id 为 ${entryId} 的条目`);
-  }
+  const located = locateEntry(sections, sectionId, entryId);
+  if (!located.ok) return located;
+  const { sectionIndex, entryIndex, section, entry: target } = located.value;
   if (entryIndex === 0) {
     return reject('nothing-to-merge', `条目 ${entryId} 是区块 ${sectionId} 里的第一条，没有上一条可以并`);
   }
   const previous = section.entries[entryIndex - 1] as Entry;
-  const target = section.entries[entryIndex] as Entry;
   const previousBody = bodyFieldOf(previous);
   const targetBody = bodyFieldOf(target);
   // 除正文以外的格子按**存值顺序**逐格成行（`company`/`role`/`period`，教育则是 school/degree/major），
@@ -589,10 +609,51 @@ export function planEntryMerge(
           fields: previous.fields.map((field) => (field === previousBody ? { ...field, value: mergedValue } : field)),
         };
   const nextEntries = [...section.entries.slice(0, entryIndex - 1), merged, ...section.entries.slice(entryIndex + 1)];
-  return {
-    ok: true,
-    value: sections.map((candidate, position) =>
-      position === sectionIndex ? { ...candidate, entries: nextEntries } : candidate,
-    ),
+  return { ok: true, value: withEntries(sections, sectionIndex, nextEntries) };
+}
+
+/**
+ * 打字改**一格**正文（spec 3.11-01 / 裁定㉚、㉛）。
+ *
+ * 三条刻意的设计：
+ * - **只换 `value`**，`key` / `locked` / `factKey` 连着其余字段逐字不动（用 `{ ...field, value }` 而不是
+ *   重建一格）。这是 ㉛ 的全部实现含义：`diff.ts` 的 `FieldChange.locked` 读的就是字段上那一枚标，
+ *   打字时若顺手把它清掉，3.1-03 那道「改事实要标待确认」的判据就静默失效。
+ * - **落点是这份文档**（会话里的 draft，保存后进 `doc_json`），不回写 `kb_entities`：派生实体本来就是由
+ *   工作副本 `sync` 出来的（spec 4.2-01），两边都写就是同一句话有两个人说（㉚）。
+ * - **不设长度上限**：这一格能装什么由 `schema.ts` 的 `fieldSchema.value` 那一条唯一判据管着，
+ *   编辑器自造一个界就会出现"导入进库的文档在编辑页改不动"的分叉（§2.5）。
+ * @param sections 当前区块序列（不被修改）
+ * @param sectionId 区块 id（纸上的 `data-rz-section`）
+ * @param entryId 条目 id（纸上的 `data-rz-entry`）
+ * @param fieldKey 字段键（纸上的 `data-rz-field`）；这一条里没有这个键就是定位错了，不许"当作新建"
+ * @param value 人敲进去的新值（原样存，不做归一化——这一格是人写下的话）
+ * @returns 通过给新的区块序列（只有那一格变）；查无区块/条目给 `unknown-section` / `unknown-entry`，
+ *          键不在该条目里给 `unknown-field`，值不是字符串给 `not-a-text`（桥那头是渲染层，属于系统边界）
+ */
+export function planFieldText(
+  sections: readonly Section[],
+  sectionId: string,
+  entryId: string,
+  fieldKey: string,
+  value: string,
+): EditorOutcome<Section[]> {
+  if (typeof value !== 'string') {
+    return reject('not-a-text', `正文必须是字符串，收到的是 ${typeof value}`);
+  }
+  const located = locateEntry(sections, sectionId, entryId);
+  if (!located.ok) return located;
+  const { sectionIndex, entryIndex, entry } = located.value;
+  const field = entry.fields.find((candidate) => candidate.key === fieldKey);
+  if (field === undefined) {
+    return reject('unknown-field', `条目 ${entryId} 里没有键为 ${fieldKey} 的字段`);
+  }
+  const patched: Entry = {
+    ...entry,
+    fields: entry.fields.map((candidate) => (candidate === field ? { ...candidate, value } : candidate)),
   };
+  const nextEntries = located.value.section.entries.map((candidate, position) =>
+    position === entryIndex ? patched : candidate,
+  );
+  return { ok: true, value: withEntries(sections, sectionIndex, nextEntries) };
 }

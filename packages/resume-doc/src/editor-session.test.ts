@@ -43,6 +43,20 @@ function entryIds(session: ResumeEditorSession, sectionId: string): readonly (st
   );
 }
 
+/** 取某一格的值（打字那条反复要读"这一格现在写的是什么"，缺键就给 `undefined`）。 */
+function valueOf(
+  session: ResumeEditorSession,
+  sectionId: string,
+  entryId: string,
+  fieldKey: string,
+): string | undefined {
+  return session
+    .document()
+    .sections.find((item) => item.id === sectionId)
+    ?.entries.find((entry) => entry.id === entryId)
+    ?.fields.find((field) => field.key === fieldKey)?.value;
+}
+
 describe('3.6-03 撤销/重做与当前步骤', () => {
   it('刚打开既不 dirty、也没有可退的；一次真编辑同时翻动两个读数', () => {
     const session = open();
@@ -170,5 +184,53 @@ describe('3.6-04 模板与语言切换不碰数据', () => {
     expect(session.undo()).toBe(true);
     expect(session.undo()).toBe(false);
     expect(session.document().layout.baseFontPt).toBe(11);
+  });
+});
+
+describe('3.11-02 打字改正文：一次调用一条撤销单元，改成同一个字不进栈', () => {
+  it('敲进 e1 那一格：值换了、dirty 与 canUndo 同翻，退一步就回到敲之前', () => {
+    const session = open();
+    expect(session.setFieldText('exp', 'e1', 'role', '新的岗位名').ok).toBe(true);
+    expect(valueOf(session, 'exp', 'e1', 'role')).toBe('新的岗位名');
+    expect(session.isDirty()).toBe(true);
+    expect(session.canUndo()).toBe(true);
+
+    expect(session.undo()).toBe(true);
+    expect(valueOf(session, 'exp', 'e1', 'role')).toBe('e1');
+    expect(session.isDirty()).toBe(false);
+  });
+
+  it('打成同一个字：判定是"通过"但不长撤销单元——这一条不为打字另写判断，用的就是 `apply` 里那一份 `contentHash`', () => {
+    const session = open();
+    expect(session.setFieldText('exp', 'e1', 'role', 'e1')).toEqual({ ok: true, value: session.document() });
+    expect(session.canUndo()).toBe(false);
+    expect(session.isDirty()).toBe(false);
+  });
+
+  it('查无此键 / 查无区块都不进栈，子原因原样上浮（3.11-03 的契约通道靠它拼提示）', () => {
+    const session = open();
+    expect(session.setFieldText('exp', 'e1', 'description', 'x')).toMatchObject({ ok: false, code: 'unknown-field' });
+    expect(session.setFieldText('zz', 'e1', 'role', 'x')).toMatchObject({ ok: false, code: 'unknown-section' });
+    expect(session.canUndo()).toBe(false);
+    expect(session.isDirty()).toBe(false);
+    expect(session.document()).toEqual(fixture());
+  });
+
+  it('打字与拖拽、度量共用同一只栈：三步交错，退两步仍是那两步（3.10-07「会话只有一份」在这格续用）', () => {
+    const session = open();
+    session.setFieldText('exp', 'e1', 'role', '甲');
+    session.setMetric('baseFontPt', 12);
+    session.setFieldText('skills', 'e4', 'name', '乙');
+
+    expect(session.undo()).toBe(true);
+    expect(valueOf(session, 'skills', 'e4', 'name')).toBe('e4');
+    expect(session.document().layout.baseFontPt).toBe(12);
+
+    expect(session.undo()).toBe(true);
+    expect(session.document().layout.baseFontPt).toBe(10.5);
+
+    expect(session.undo()).toBe(true);
+    expect(valueOf(session, 'exp', 'e1', 'role')).toBe('e1');
+    expect(session.canUndo()).toBe(false);
   });
 });

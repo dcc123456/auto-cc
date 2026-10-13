@@ -348,13 +348,16 @@ export const RENDERER_ALLOWLIST = [
   // 3.6 排版编辑器的会话面（plan §8.3）：这些行全是**人**在编辑器面板里的动作（打开、拖、拆条目、并条目、
   // 推滑杆、改样式、换模板、撤销/重做、预览、另存），一律**不登记为 agent 工具**——它改的是"以后投出去的那份简历长什么样"，
   // 与 §3 第 1 条的事实锁定同一条线（口径照 5.10-e 那四条写口与 `pdf.*` 那两行）。
-  // 过界的只有 docId、结构 id、度量数与**正文行号**：正文不过界（见上面 `resume.export.preview` 那行的注释），
-  // 界面要看内容走 `.preview` 那份打印 HTML，与导出同一份源。
+  // 从 3.11（裁定㉚）起这一条口径要**分两头说清**，不是笼统一句"正文不过界"：
+  // ① 除了下面 `resume.editor.text` 那一颗，其余各行过的仍只有 docId、结构 id、度量数与**正文行号**；
+  // ② 界面看内容走的仍是 `.preview` 那份打印 HTML（与导出同一份源），投影 `ResumeEditorView` **不新增**任何字段值——
+  // 也就是说打字这条路是**写**，不是给界面多开一条读的口。
   'resume.editor.open',
   'resume.editor.view',
   'resume.editor.move',
-  // 裁定㉗ 第 1 条后半句「也要支持手动拆分和合并」：拆点只能是**行号**（从 1 起算的整数），
-  // 因为正文不许过界，界面递不出"在哪一段之后断开"这句话。可拨的上界来自 `view().sections[].entries[].bodyLineCount`，
+  // 裁定㉗ 第 1 条后半句「也要支持手动拆分和合并」：拆点只能是**行号**（从 1 起算的整数）——
+  // 这不是"正文递不出去"，而是拆这一动作本身一个字都不必改（要改字走下面 `resume.editor.text` 那一颗）。
+  // 可拨的上界来自 `view().sections[].entries[].bodyLineCount`，
   // 与主进程 `planEntrySplit` 的 `index-out-of-range` 用同一个 `entryBodyLineCount`（§2.5：判据一份）。
   'resume.editor.split',
   'resume.editor.merge',
@@ -363,6 +366,11 @@ export const RENDERER_ALLOWLIST = [
   // 形状校验（颜色、档位、数值界）只在主进程的 `editor-ops.ts` 做一次，界面照 `view().metricBounds`
   // 那同一条口径摆滑杆，所以这里不存在"界面放行而保存被拒"的分叉（AGENTS.md §2.5）。
   'resume.editor.design',
+  // 3.11（裁定㉚「只写简历工作副本」/ ㉛「允许改事实格，但标待确认」）的正文写口：
+  // **全仓唯一一颗**让文字从渲染层进主进程的简历通道，一次只改**一格**（docId + 区块 id + 条目 id + 字段键 + 新值）。
+  // 落点是 `resume_documents.doc_json`，**不回写** `kb_entities`——要让知识库里的实体跟着走，人按那个「同步」。
+  // 它同样**不登记为 agent 工具**（§3 第 1 条：往简历里写字的是人，不是模型）。
+  'resume.editor.text',
   'resume.editor.use',
   'resume.editor.preview',
   'resume.editor.undo',
@@ -1441,9 +1449,10 @@ export interface SnapshotDiffView {
  * 排版编辑器过进程边界的读数（spec 3.6，plan §8.3）。
  *
  * 与上面那组同样是主进程侧同名类型的**镜像**，而且这里刻意只镜像"界面要摆出来的东西"：
- * 3.3 立下的口径（见白名单里那段注释）——文档正文不过界，界面只认 docId——在编辑器里照样成立。
- * 于是界面拿到的是**结构**（区块 id / kind / 条目 id 序列）与**度量**（数），拿不到一句简历原文；
+ * 界面拿到的是**结构**（区块 id / kind / 条目 id 序列）与**度量**（数），这一份投影里**没有一句简历原文**；
  * 它要看内容靠的是 `resume.editor.preview` 那份打印 HTML，与导出所见同一份源（spec 3.3-01 的口径续用）。
+ * 3.11（裁定㉚）之后这条要说得更准一点：**打字开的是写口，不是读口**——`resume.editor.text` 一次只递一格新值进去，
+ * 投影这一侧因此一字未增（spec 3.11-03 的反向判据就量这件事）。
  */
 /** 可调度量的键（镜像 `MetricKey`；`columns` 不在其中——它只有 1..2 两档，由模型 schema 管着，不给人一根两档滑杆）。 */
 export type EditorMetricKeyView = 'baseFontPt' | 'lineHeight' | 'topMm' | 'rightMm' | 'bottomMm' | 'leftMm';
@@ -2730,6 +2739,20 @@ export interface BridgeSignatures {
     returns: ResumeEditorView;
   };
   /**
+   * 改一格正文（3.11 / 裁定㉚「只写简历工作副本」+ ㉛「允许改事实格，但标待确认」）：
+   * 一次调用只动**一个字段键**的那一格，落点是会话里的 draft（保存才进 `resume_documents.doc_json`），
+   * **不回写** `kb_entities`——要让知识库里的实体跟着走，人按那个「同步」。
+   * `fieldKey` 必须是这一条上存在的字段键（界面递得出哪些键？打印 HTML 里带 `data-rz-field` 的那几格，
+   * **一格一键**：标题行原本在 DOM 里是「公司 · 角色」混在一格里，现已拆成两个 span，日期那一格同样带上键——
+   * 裁定㉛ 说的正是这几格，不给锚点就改不到），查无此键以 `unknown-field` 拒绝；
+   * 非字符串以 `not-a-text` 拒绝。**长度不设闸门**：`fieldSchema.value` 是全仓唯一那一份"这一格能装什么"的判据（§2.5）。
+   * 改到 `locked` 那格时主进程只换 `value`，`locked` / `factKey` 原样留着，于是 3.1-03 的「待确认」自然跟着出现。
+   */
+  'resume.editor.text': {
+    args: [docId: string, sectionId: string, entryId: string, fieldKey: string, value: string];
+    returns: ResumeEditorView;
+  };
+  /**
    * 换预览模板或语言（3.6-04）。它不碰文档、不产生撤销单元，所以"切模板丢数据"在这套形状里无从发生。
    * 两个参数都不给就是只刷新读数；未知模板 id 以 `RESUME_EDITOR_TEMPLATE_UNKNOWN` 失败。
    */
@@ -2748,7 +2771,8 @@ export interface BridgeSignatures {
   'resume.editor.redo': { args: [docId: string]; returns: ResumeEditorView };
   /**
    * 保存（3.6-09 的另一半）：把当前 draft 交给 `resume.doc` 那唯一的写入入口，成功后 dirty 归零、
-   * 撤销历史照旧保留。界面**不**直接调 `resume.doc.save`——正文不过界，它手里也没有正文。
+   * 撤销历史照旧保留。界面**不**直接调 `resume.doc.save`——不是因为手里没有正文（3.11 起打字口就有），
+   * 而是因为保存必须走会话那一份校验与草稿账（dirty、撤销栈、号段），绕过它就等于绕开那一份判据。
    */
   'resume.editor.save': { args: [docId: string]; returns: ResumeEditorView };
   /**

@@ -808,6 +808,12 @@ export interface DeskTextareaProps
   onValueChange: (value: string) => void;
   /** 尺寸档，默认 `meta`；对话输入区用 `composer`（见 `FIELD_SIZE`）。 */
   size?: DeskFieldSize;
+  /**
+   * 卸掉自己的底色、描边与字号档（spec 3.11-06，与 `InlineEditField` 的 `bare` 同一档）：
+   * 压在别人的画面上打字时，那一圈深色盒子会把画面自己的颜色盖掉。字档一律 `inherit`，
+   * 由调用方挂在包裹节点上（动态几何与量来的读数走一个节点上的 CSS 变量，§5.2 那条已登记口径）。
+   */
+  bare?: boolean;
 }
 
 /**
@@ -819,6 +825,7 @@ export interface DeskTextareaProps
  * @param value 当前文本
  * @param onValueChange 取值回调
  * @param size 尺寸档（`meta` 元信息 / `composer` 对话输入区）
+ * @param bare 画在真实画面上的那一档：不铺底、平时不描边，focus 才长出琥珀描边（`size` 在这一档不参与）
  * @param rest 原生 textarea 属性透传（`rows`/`spellCheck`/`data-*`……；`disabled` 改成按不动档）
  * @returns 文本域；带 `label` 时套一层 `<label>`
  */
@@ -830,6 +837,7 @@ export function DeskTextarea({
   value,
   onValueChange,
   size = 'meta',
+  bare,
   disabled,
   disabledReason,
   disabledReasonLabel,
@@ -843,7 +851,9 @@ export function DeskTextarea({
       onChange={(event) => {
         if (!dead.isDead) onValueChange(event.target.value);
       }}
-      className={`${fieldClass(isInvalid === true, size)} ${dead.deadClass}resize-none leading-relaxed ${className}`}
+      // `bare` 是**换掉**整串而不是往 `fieldClass` 后面再拼一条：同族两条并排时谁赢取决于
+      // Tailwind 生成的顺序，写在 class 属性里的先后不作数（上面 `fieldClass` 那条已登记实测）。
+      className={`${bare === true ? `${EDIT_INPUT_BARE} leading-[1.2]` : `${fieldClass(isInvalid === true, size)} leading-relaxed`} ${dead.deadClass}resize-none ${className}`}
       {...dead.attrs}
       {...rest}
     />

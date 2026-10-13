@@ -61,6 +61,25 @@ function doc(overrides: Partial<ResumeDocument> = {}): ResumeDocument {
   };
 }
 
+/**
+ * 锚点整串删掉 = "没有锚点的那一份"，用来量锚点到底多带了什么（3.10-02 的三枚 + 3.11-04 的打字两枚）。
+ * 提到 describe 外面是因为 3.2-09 那条"没重复渲染"也要用它：`data-rz-raw` 里本来就带着同一份原文，
+ * 不剥锚点就会把"纸面上出现一次"数成两次。
+ */
+const stripAnchors = (html: string) => html.replace(/ data-rz-(?:section|kind|entry|field|raw)="[^"]*"/g, '');
+
+/** 只留文本节点：打印面的文本层就是由这些字组成的，锚点多一个字这里就会露出来。 */
+const textOnly = (html: string) => html.replace(/<[^>]*>/g, '');
+
+/** HTML 属性值反实体（`escapeHtml` 的逆，只在这份用例里成对出现，不进生产码）。 */
+const decodeAttr = (value: string) =>
+  value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
 describe('3.2-01 模板是纯函数 render(doc)=>HTML', () => {
   it('同一 doc + 同一模板 + 同一语言 → 两次输出字节一致（无副作用 / 不读时钟不读随机）', () => {
     const a = resumeTemplate.render(doc(), 'classic', 'zh-CN');
@@ -210,10 +229,6 @@ describe('3.2-07 生成轨 HTML 只用 Tailwind utility，不写自定义 CSS', 
 });
 
 describe('3.10-02 打印面的区块/条目锚点是惰性属性（整屏编辑靠它命中）', () => {
-  /** 三枚锚点整串删掉 = "没有锚点的那一份"，用来量锚点到底多带了什么。 */
-  const stripAnchors = (html: string) => html.replace(/ data-rz-(?:section|kind|entry)="[^"]*"/g, '');
-  /** 只留文本节点：打印面的文本层就是由这些字组成的，锚点多一个字这里就会露出来。 */
-  const textOnly = (html: string) => html.replace(/<[^>]*>/g, '');
   /** 产物指纹：md5 只用来比"两套模板不是同一张纸"，不是安全用途。 */
   const digest = (html: string) => createHash('md5').update(html, 'utf8').digest('hex');
 
@@ -248,6 +263,61 @@ describe('3.10-02 打印面的区块/条目锚点是惰性属性（整屏编辑�
   });
 });
 
+describe('3.11-04 纸上每一格都带得回写入坐标与原文（打字锚点是惰性的）', () => {
+  /** 一格锚点对的两种形状：属性成对出现，值取自文档里的那一格。 */
+  const PAIR = / data-rz-field="([^"]*)" data-rz-raw="([^"]*)"/g;
+
+  it('标题、时间、正文三种格都有锚点，且 `data-rz-raw` 反解回来就是文档里那一格的原文', () => {
+    const d = doc();
+    const html = resumeTemplate.render(d, 'classic');
+    const values = new Map(
+      d.sections.flatMap((section) => section.entries.flatMap((entry) => entry.fields.map((f) => [f.key, f.value]))),
+    );
+    // 经历条 = 公司 + 职位 + 时间 + 成果，教育条 = 学校 + 专业（简介/技能那一族在另一个用例里）。
+    const pairs = [...html.matchAll(PAIR)];
+    expect(pairs.map((match) => decodeAttr(match[1] as string))).toEqual([
+      'company',
+      'role',
+      'period',
+      'achievement',
+      'school',
+      'major',
+    ]);
+    for (const match of pairs) {
+      const key = decodeAttr(match[1] as string);
+      // `data-rz-raw` 存的是 `JSON.stringify(原文)`：换行与引号因此能原样回来，多行正文不会被敲扁。
+      expect(JSON.parse(decodeAttr(match[2] as string))).toBe(values.get(key));
+    }
+  });
+
+  it('多行带标记的正文：纸面上已经是 `<li>`，锚点里仍是带 `- ` 与 `**` 的原文（这就是 `data-rz-raw` 存在的理由）', () => {
+    const d = doc();
+    const exp = d.sections.find((section) => section.kind === 'experience')!;
+    exp.entries[0]!.fields.find((field) => field.key === 'achievement')!.value = '- **P99 下降 40%**\n- 主导迁移';
+    const html = resumeTemplate.render(d, 'classic');
+    expect(html).toContain('<ul class="list-disc');
+    expect(html).toContain('<strong class="font-bold">');
+    // 块级 HTML 里既没有 `- ` 也没有 `**`，所以只可能从这一枚属性里拿回来。
+    expect(html).toContain(`data-rz-raw="${escapeHtml(JSON.stringify('- **P99 下降 40%**\n- 主导迁移'))}"`);
+  });
+
+  it('锚点成对挂上：`data-rz-field` 与 `data-rz-raw` 同数，且都是惰性属性（文本层一字不多）', () => {
+    for (const id of ['classic', 'modern', 'minimal']) {
+      const html = resumeTemplate.render(doc(), id);
+      const fields = (html.match(/ data-rz-field="/g) ?? []).length;
+      expect(fields, `${id} 的打字锚点没挂上，判据空转`).toBeGreaterThan(0);
+      expect((html.match(/ data-rz-raw="/g) ?? []).length).toBe(fields);
+      expect(textOnly(stripAnchors(html))).toBe(textOnly(html));
+    }
+  });
+
+  it('剥掉锚点后的两套模板产物仍互异（锚点没把版式差别抹平）', () => {
+    expect(stripAnchors(resumeTemplate.render(doc(), 'classic'))).not.toBe(
+      stripAnchors(resumeTemplate.render(doc(), 'modern')),
+    );
+  });
+});
+
 describe('3.2-09 超长条目不截断（U 那一条：内容完整；页数增长属 V 交 3.3）', () => {
   it('5000 字成果原样出现在产物里，且所有条目都渲染出来了', () => {
     const long = '经'.repeat(5000);
@@ -261,7 +331,8 @@ describe('3.2-09 超长条目不截断（U 那一条：内容完整；页数增�
     const html = resumeTemplate.render(d, 'classic');
     expect(html).toContain(escapeHtml(long)); // 未截断
     expect(html).toContain('第二家公司'); // 未丢条目
-    expect(html.match(/星桥科技/g)?.length).toBe(1); // 未重复
+    // 数"有没有重复渲染"必须剥掉锚点再数：`data-rz-raw`（3.11-04）里本来就带着同一份原文，那是打字用的，不是第二遍渲染。
+    expect(stripAnchors(html).match(/星桥科技/g)?.length).toBe(1); // 未重复
   });
 });
 

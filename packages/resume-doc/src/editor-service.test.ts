@@ -1,5 +1,6 @@
 /**
- * `resume.editor` 的用例（spec 3.6-02 的跨进程半边 + 3.6-01 / 03 / 04 / 09 的服务侧形状，plan §8.4 的 3.6-b）。
+ * `resume.editor` 的用例（spec 3.6-02 的跨进程半边 + 3.6-01 / 03 / 04 / 09 的服务侧形状，plan §8.4 的 3.6-b；
+ * 再加 3.11-02 / 03：打字那一条走的是同一份草稿账，服务侧要能断言"预览跟着变而库里不动"）。
  *
  * 打**真的 config + store + `node:sqlite`**（系统临时目录，不进仓库，§7.5）：这一片要判的就是
  * "打开→改→不保存则库里不动→保存才动"，用内存替身自存自取证明不了这件事（同 `doc-store.test.ts` 的口径）。
@@ -137,6 +138,7 @@ describe('3.6-b 打开与投影（正文不过界的那条边界要能被断言�
     expect(rejection(thrown(() => editor.split('r', 'exp', 'e1', 1))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.merge('r', 'exp', 'e2'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.metric('r', 'baseFontPt', 12))).code).toBe('RESUME_EDITOR_NOT_OPEN');
+    expect(rejection(thrown(() => editor.text('r', 'exp', 'e1', 'company', 'x'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.undo('r'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
     expect(rejection(thrown(() => editor.preview('r'))).code).toBe('RESUME_EDITOR_NOT_OPEN');
   });
@@ -320,6 +322,63 @@ describe('3.6-09 保存是唯一的落点，未保存的东西不落', () => {
     expect(loaded.document.sections.map((section) => section.id)).toEqual(['skills', 'exp']);
     // 存完再退一步：退的是编辑历史，不是把库里的内容改回去（保存是单向的一次落点）。
     expect(editor.undo('r').isDirty).toBe(true);
+  });
+});
+
+describe('3.11-02 / 03 打字改正文：走的是同一份草稿账，库里那份要等保存', () => {
+  it('改一格：预览跟着变、dirty 翻、投影里读不到这句新话，而库里仍是原文', async () => {
+    const { editor, docs } = await boot();
+    editor.open('r');
+    const after = editor.text('r', 'exp', 'e1', 'achievement', '只有一句的新正文');
+    expect(after.isDirty).toBe(true);
+    expect(after.canUndo).toBe(true);
+    // 这一格在投影里仍然只以**行数**出现（两行变一行）：§8.1 第 1 条边界从 3.11 起要这样表述——
+    // 界面递得出正文（往主进程的方向），但投影这一侧一字未增，读正文仍只有 `preview` 那份打印 HTML。
+    expect(after.sections.find((section) => section.id === 'exp')?.entries[0]?.bodyLineCount).toBe(1);
+    expect(JSON.stringify(after)).not.toContain('只有一句的新正文');
+    expect(editor.preview('r')).toContain('只有一句的新正文');
+    // 未保存的打字与未保存的度量同一条规则：库里动不了一个字。
+    const loaded = docs.load('r');
+    if (loaded.status !== 'found') throw new Error(`库里应读得出文档，实际 ${loaded.status}`);
+    expect(loaded.document.sections[0]?.entries[0]?.fields.find((field) => field.key === 'achievement')?.value).toBe(
+      '成果-e1-首行\n成果-e1-次行',
+    );
+  });
+
+  it('改到事实锁定那一格：放行，且保存进库后那枚 `locked` 还在（裁定㉛ 的跨进程半边）', async () => {
+    const { editor, docs } = await boot();
+    editor.open('r');
+    editor.text('r', 'exp', 'e1', 'company', '手改的公司名');
+    editor.save('r');
+    const loaded = docs.load('r');
+    if (loaded.status !== 'found') throw new Error(`保存后读回应为 found，实际 ${loaded.status}`);
+    const company = loaded.document.sections[0]?.entries[0]?.fields.find((field) => field.key === 'company');
+    expect(company?.value).toBe('手改的公司名');
+    // 这一条是㉛ 的全部实现含义：标不丢，`diff.ts` 就还读得出「待确认」；打字时顺手清标会让 3.1-03 静默失效。
+    expect(company?.locked).toBe(true);
+    expect(company?.factKey).not.toBeNull();
+  });
+
+  it('查无此键 / 查无此条目 / 传进来的不是字符串：三种都是结构化拒绝，草稿一字未动', async () => {
+    const { editor } = await boot();
+    editor.open('r');
+    expect(rejection(thrown(() => editor.text('r', 'exp', 'e1', '不存在的键', 'x')))).toMatchObject({
+      code: 'RESUME_EDITOR_EDIT_REJECTED',
+      reason: 'unknown-field',
+    });
+    expect(rejection(thrown(() => editor.text('r', 'exp', 'e9', 'company', 'x')))).toMatchObject({
+      code: 'RESUME_EDITOR_EDIT_REJECTED',
+      reason: 'unknown-entry',
+    });
+    // 非字符串只有从 IPC 那一侧才可能进来（Schema 之前先要有人能传），子原因仍必须说得出为什么。
+    expect(rejection(thrown(() => editor.text('r', 'exp', 'e1', 'company', 42 as unknown as string)))).toMatchObject({
+      code: 'RESUME_EDITOR_EDIT_REJECTED',
+      reason: 'not-a-text',
+    });
+    const unchanged = editor.view('r');
+    expect(unchanged.canUndo).toBe(false);
+    expect(unchanged.isDirty).toBe(false);
+    expect(unchanged.sections.find((section) => section.id === 'exp')?.entries[0]?.bodyLineCount).toBe(2);
   });
 });
 
