@@ -263,7 +263,12 @@ function renderSection(
     )
     .join('');
   const inner = isPlain && spec.plainGrid ? `<div class="grid grid-cols-2 gap-x-4">${entries}</div>` : entries;
-  return `<section class="${densityClasses.section}">${heading}${inner}</section>`;
+  // 两个 `data-rz-*` 锚点是**惰性属性**（spec 3.10-02）：不参与排版，只给整屏编辑页在父页一侧现量矩形用
+  // （纸面帧是 `sandbox="allow-same-origin"`，帧内不跑脚本，命中只能靠这些锚点上溯）。
+  return (
+    `<section data-rz-section="${escapeHtml(section.id)}" data-rz-kind="${section.kind}" ` +
+    `class="${densityClasses.section}">${heading}${inner}</section>`
+  );
 }
 
 /**
@@ -324,7 +329,7 @@ function renderEntry(
       ? `<div class="flex items-baseline justify-between gap-2"><div class="${headingClass}${slots}">${view.heading}</div><div class="flex shrink-0 gap-2">${meta}</div></div>`
       : `<div class="${headingClass}${slots}">${view.heading}</div><div class="flex gap-2">${meta}</div>`;
   const divider = spec.entryDivider ? ' border-b border-neutral-200 pb-1.5' : '';
-  return `<div class="resume-entry${divider} ${classes.entry}">${head}${lines}</div>`;
+  return `<div data-rz-entry="${escapeHtml(entry.id)}" class="resume-entry${divider} ${classes.entry}">${head}${lines}</div>`;
 }
 
 /**
@@ -361,7 +366,7 @@ function renderPlainEntry(
       );
     })
     .join('');
-  return `<div class="resume-entry ${classes.entry}">${body}</div>`;
+  return `<div data-rz-entry="${escapeHtml(entry.id)}" class="resume-entry ${classes.entry}">${body}</div>`;
 }
 
 /**

@@ -4,6 +4,7 @@
  * 3.2 的 U/C 那一条全部可在**无 UI、无打印**下断言——模板是纯函数，输出就是 HTML 字符串。
  * 唯一必须跑真打印的是 3.2-02/06/08 的「导出后逐页截图」（V），它们依赖 3.3 的 printToPDF 管线，显式顺延。
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -205,6 +206,45 @@ describe('3.2-07 生成轨 HTML 只用 Tailwind utility，不写自定义 CSS', 
       const src = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
       expect(src, `${file} 不该引样式文件`).not.toMatch(/\.css['"]/);
     }
+  });
+});
+
+describe('3.10-02 打印面的区块/条目锚点是惰性属性（整屏编辑靠它命中）', () => {
+  /** 三枚锚点整串删掉 = "没有锚点的那一份"，用来量锚点到底多带了什么。 */
+  const stripAnchors = (html: string) => html.replace(/ data-rz-(?:section|kind|entry)="[^"]*"/g, '');
+  /** 只留文本节点：打印面的文本层就是由这些字组成的，锚点多一个字这里就会露出来。 */
+  const textOnly = (html: string) => html.replace(/<[^>]*>/g, '');
+  /** 产物指纹：md5 只用来比"两套模板不是同一张纸"，不是安全用途。 */
+  const digest = (html: string) => createHash('md5').update(html, 'utf8').digest('hex');
+
+  for (const id of ['classic', 'modern', 'minimal']) {
+    it(`${id}：锚点计数 = 区块数与条目数，值逐个对得上，且锚点不带样式`, () => {
+      const d = doc();
+      const html = resumeTemplate.render(d, id);
+      const entryCount = d.sections.reduce((sum, section) => sum + section.entries.length, 0);
+      expect((html.match(/ data-rz-section="/g) ?? []).length).toBe(d.sections.length);
+      expect((html.match(/ data-rz-kind="/g) ?? []).length).toBe(d.sections.length);
+      expect((html.match(/ data-rz-entry="/g) ?? []).length).toBe(entryCount);
+      for (const section of d.sections) {
+        expect(html).toContain(`data-rz-section="${section.id}" data-rz-kind="${section.kind}"`);
+        for (const entry of section.entries) expect(html).toContain(`data-rz-entry="${entry.id}"`);
+      }
+      expect(html).not.toContain('<style');
+      expect(html).not.toContain('style="');
+    });
+  }
+
+  it('加锚点前后：一字文本都不多（printToPDF 的文本层因此逐字不变）', () => {
+    for (const id of ['classic', 'modern', 'minimal']) {
+      const html = resumeTemplate.render(doc(), id);
+      const stripped = stripAnchors(html);
+      expect(stripped, `${id} 的锚点没挂上，判据空转`).not.toBe(html);
+      expect(textOnly(stripped)).toBe(textOnly(html));
+    }
+  });
+
+  it('两套模板各渲一次：产物 md5 互异（锚点没有把版式差别抹平）', () => {
+    expect(digest(resumeTemplate.render(doc(), 'modern'))).not.toBe(digest(resumeTemplate.render(doc(), 'classic')));
   });
 });
 

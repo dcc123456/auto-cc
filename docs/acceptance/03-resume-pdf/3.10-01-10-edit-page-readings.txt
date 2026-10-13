@@ -1,0 +1,386 @@
+3.10-01…10 整屏简历编辑页：活体读数与判据对账（2026-10-13，无个人信息夹具）
+================================================================================
+
+会话：`tmp/310/boot.mjs` 起的**独立实例**（自有 `--user-data-dir=tmp/310/userdata`、自有 CDP 端口 10255，
+`ELECTRON_RENDERER_URL` 指向共享 vite 5173），按 §9 的 5.10-13 并存配方，不动别人正在跑的 10222 实例。
+文档：点「样例与夹具 → 造一份演示简历」种出的夹具（姓名/联系方式都是编造的占位），
+所有截图类判据都写成**逐字读数**而不入库（§8.5：真实简历位图无法脱敏）。
+
+指针事件一律在**帧内 realm** 构造（`frame.contentWindow.PointerEvent`），
+父页 `eval` 里的 `node.click()` 只用于逻辑层判据（§9 的 2.1-12 / 6.2 读数口径），
+真实鼠标命中（CDP 派发）本片**没有用**：与别人的 dev 会话并存时 CDP 鼠标会挂住不返回（§9 的 8.3-01 与简历轨那条④）。
+
+--------------------------------------------------------------------------------
+3.10-01 纸面帧的沙箱形状（U+V）
+--------------------------------------------------------------------------------
+
+判据：编辑页那颗帧是 `sandbox="allow-same-origin"`（**不带** `allow-scripts`）；父页读得到 `contentDocument`；
+挂在帧文档上的监听收得到事件；帧内不执行任何脚本。简历屏那三档的帧形状一字不动（仍是 `sandbox=""`）。
+
+逐字读数（`tmp/310/p-c-drag.js`）：
+
+- `frame.getAttribute('sandbox')` = `allow-same-origin`（编辑页那颗）。
+- `frame.contentDocument !== null` = true（父页现量段矩形靠这一条）。
+- 对照帧（父页临时挂上一颗同形状的 `sandbox="allow-same-origin"` iframe，srcdoc 里**同时**放
+  `<img src=x onerror="document.title='PWNED'">` 与 `<script>document.title="PWNED2";document.body.dataset.ran="1"`）：
+  `controlFrame = { title: "clean", datasetRan: null, parentCanRead: true }`
+  → 内联事件处理与 `<script>` **都没跑**，而父页照样读得到文档。这一条就是"只放开同源读、不放开执行"。
+- 桌台三档（预览 / 排版 / PDF）那颗帧的 `sandbox` 属性仍是空串，本片零改动
+  （`ResumePaperStage.tsx:152` 的 `sandbox=""`，编辑页那一档在 `ResumeEditPage.tsx` 自己给 `allow-same-origin`）。
+
+反向验证（§6.5，被否决的"帧内脚本 + postMessage"没有造成能力缺口）：命中（`closest('[data-rz-section]')`）
+与矩形（`getBoundingClientRect()`）两样都在父页侧现量到真实值（见 3.10-03/05 的读数），装机版 CSP
+`script-src 'self'` 会挡内联脚本这条约束因此不需要绕过。
+
+--------------------------------------------------------------------------------
+3.10-02 打印面的锚点是惰性属性（U+C）
+--------------------------------------------------------------------------------
+
+单测半边（`pnpm --filter @auto-cc/plugin-resume-doc test` → **252 passed（18 files）**，EXIT=0）：
+`packages/resume-doc/src/template.test.ts` 新增 describe「3.10-02 打印面的区块/条目锚点是惰性属性」五条用例：
+
+1. 三套模板各渲一次：`' data-rz-section="'` 计数 = 文档区块数、`' data-rz-kind="'` 计数 = 种类数、
+   `' data-rz-entry="'` 计数 = 条目数。
+2. 每个区块 id 都以 `data-rz-section="<id>" data-rz-kind="<kind>"` 的形状逐字出现在产物里。
+3. `stripAnchors()`（把三类锚点属性整条删掉）之后 `textOnly()` 与加锚点前**逐字相同** → 锚点不贡献任何文本节点。
+4. 产物里仍无 `<style`、无 `style="`（spec 3.2-07 那条断言逐字不动仍绿，见 `design.test.ts` 一节）。
+5. `classic` 与 `modern` 两份产物 md5 互异（3.9-02 同一条判据形状，防"两套模板渲成同一张纸"）。
+
+同一片顺带改掉的一条被测断言（`design.test.ts`「无主题时片段里一个 rz- 类都没有」）：
+锚点是 `data-rz-*` 属性而不是 class，原断言按整段 HTML 找 `rz-` 会误判，现已收窄成**只看 `class="…"` 属性**，
+并补一条防空转的守卫（`classAttrs.length > 0`，否则那条判据会在"片段里根本没有 class"时假绿）。
+
+C 半边：`pnpm lint` 里那条"模板 class 集合必须都在 `PRINT_UTILITY_KEYS`"的机检仍绿（本片没新增 utility 类）。
+
+**PDF 文本层那一半：`[!]` BLOCKED（本机这一片没做，写清楚做到哪一步）**
+
+判据原文要求"锚点前后同一文档各导一次 `resume.export.toPdf`，逐页 `items[].str` 序列完全相同、页数相同"。
+"锚点前"那份产物需要**回退代码**才能导出（锚点已进唯一那颗 builder，界面上没有开关），
+而在共享工作树里为了取一份对照产物去动 `packages/resume-doc` 是会伤到别人在写的改动，所以没有回退。
+已兑现的等价读数只有单测第 3 条（属性删除前后文本节点逐字相同），它证的是 HTML 层而不是 PDF 层。
+补这一格需要的配方已记在下方"待办"一节，取号后单独跑。
+
+--------------------------------------------------------------------------------
+3.10-03 纸面上点中一段就长出样式条（V）
+--------------------------------------------------------------------------------
+
+逐字读数（`tmp/310/p-c-drag.js`，夹具文档三个区块 summary / experience / skills）：
+
+- 按下第一段（帧内矩形 `summary@top+height` 的 `top+8` 处）后：
+  `onPress = { barExists: true, kind: "summary", sectionId: "<帧里那段自己的 data-rz-section>", selectedOutline: true,
+  axes: ["resume-edit-paragraphSizePt", "resume-edit-paragraphLineHeight", "resume-edit-paragraph-align",
+         "resume-edit-paragraph-weight", "resume-edit-paragraph-ink"],
+  moveUpReason: "AT_FIRST_SECTION" }`
+  → 条上的种类读数与被点那段的 `data-rz-kind` 同一条；第一段按"上移"确实按不动，且说得出为什么（§6.2-06）。
+- 换点到第三段：`reselect = { kind: "skills" }` → 读数跟着换，界面不存第二份区块表。
+- 条上那颗 ✕：`afterBarClose = { barExists: false }`。
+- Esc 那一半（判据原文"再点别处或 Esc 收掉"）：**落地时是缺陷**——原先 Esc 直接等于"退出这一屏"，
+  现在补成两层（选中还挂着先收条，什么都没选才退出）。活体复验读数（`tmp/310/p-g-family-esc.js`）：
+
+  ```
+  esc.barBefore        = { barInDom: true, pageInDom: true }        // 点中第一段之后条长出来了
+  esc.afterFirst       = { barInDom: false, pageStillOpen: true, confirmShown: false }
+  esc.afterSecond      = { pageInDom: false, confirmShown: false }
+  ```
+
+  → 第一次 Esc 只把样式条从 DOM 里摘掉、整屏页还在、也没冒出未保存拦截；
+  第二次 Esc 才退出这一屏，`confirmShown: false` 是因为这一刻 `dirty` 已经是 `false`
+  （前面撤销撤干净了），裁定⑪ 的"只拦未保存"这条判据因此同时得到一条负对照。
+- 命中换算只经帧自己的矩形：样式条落点写成 CSS 变量 `--rz-bar-x/--rz-bar-y`，
+  倍率现场算（`frame.getBoundingClientRect().width / frame.offsetWidth`），界面不存第二份倍率事实。
+
+像素级"人眼看不出描边压住字"这一条按 §7.4 留给用户在场，本片不写 `[x]`。
+
+--------------------------------------------------------------------------------
+3.10-04 样式条改字号 / 行距 / 对齐 / 字重 / 字族 / 字色 + 整份度量，每改一次是一个撤销单元（U+V）
+--------------------------------------------------------------------------------
+
+界表沿用 `view.metricBounds` 那一张（`OUT_OF_BOUNDS_REACH` 只在界面上把可拖范围放大，
+判定仍只发生在主进程 `planDesign`/`planMetric` 一处——§2.5）。滑杆的 `min`/`max` 属性因此是"合法界 ± 界宽×0.25"，
+探针从属性把合法界换算回来：`baseFontPt` 属性 1.5…28.5 → 合法 6…24；`lineHeight` 属性 0.5…3.5 → 合法 1…3；
+`topMm` 合法 5…40。
+
+段级五格（`tmp/310/p-d-axes.js` + `p-d2-numeric.js`，选中段种类 `summary`）：
+
+| 格 | 改动 | 纸面读数（帧内 `getComputedStyle(documentElement)`） | 撤销 |
+| --- | --- | --- | --- |
+| 字号 | 拨到 `23.5`（合法上界 24 之内） | `--rz-p-summary-size = 23.5pt`，且 `[class~="rz-summary-size"]` 计数 0→1 | 见下 |
+| 行距 | 拨到 `2.95` | `--rz-p-summary-lh = 2.95` | 见下 |
+| 对齐 | 点「居中」 | `--rz-p-summary-align = center`，该格 `data-on` false→true | — |
+| 字重 | 点「半粗」 | `--rz-p-summary-weight = 600` | — |
+| 字色 | 点第一格色卡 `#101820` | `--rz-p-summary-ink = #101820` | — |
+
+撤销单元逐条对账（这是判据里"每一次改动 = 一个撤销单元"那一句）：
+
+- 改动前 `undo = NOTHING_TO_UNDO`、`dirty = false`；拨完字号那一下 `undo = null`（可按）、`dirty = true`、
+  `rejected = null`。
+- 连撤两步的读数：`step1 { size: "23.5pt", lh: null }`（**只把行距撤掉**，字号还在）→
+  `step2 { size: null, lh: null, dirty: false }` → 撤到 `NOTHING_TO_UNDO`。
+  两步各自只回一条轴 = 两条轴各是一个撤销单元，不是一笔总账。
+- 离散三格（对齐 / 字重 / 字色）各改一次后连撤三步：`undoWalk.steps = 3`，撤完 `dirtyAtEnd = false`、
+  `undoReasonAtEnd = NOTHING_TO_UNDO`。
+
+整份文档那六格（右栏）：
+
+- 基准字号拨到 `23.5 pt`：帧内 `html` 计算字距从 `14px` 变 `31.3333px`、`line-height` 从 `21px` 变 `47px`
+  （23.5pt 与 2.0 倍的算术自证：14px→31.33px 就是 10.5pt→23.5pt）。
+- 上边距拨到 `39.25 mm`：第一段离纸顶从 `57px` 走到 `153px`（左边距没动，`60→60`，说明只改了这一边）。
+
+拒绝路径（判据原文"把字号拨到界表外 → 条上出现主进程那句原因、滑杆弹回"）：
+
+- 段级字号拨到属性上界 `27.5`：`rejected = 这次改动被拒：out-of-bounds：summary.sizePt=27.5 不在 6…24 之内`，
+  `readout` 仍是 `10.5 pt`（已提交值），`--rz-p-summary-size` 仍是空、`dirty` 仍是 `false`
+  → **越界值没有进文档，也没有生成撤销单元**。
+- 再拨到 `28.5`：同一句话换数字（`sizePt=28.5`），`attrValue` 弹回 `10.5`。
+- 上边距拨到 `48.75`：`out-of-bounds：topMm=48.75 不在 5…40 之内`，读数弹回 `39.25 mm`、`attrValue` 弹回 `39.25`。
+- 整份字号拨到 `3.5`：`out-of-bounds：baseFontPt=3.5 不在 6…24 之内`。
+- 颜色这一格结构上拒不掉：色卡只摆 `SWATCH_HEXES` 那几档（§6.6-05 同一口径），人挑不出一个不合法的 `#rrggbb`。
+
+字族这一格（判据原文里有、整屏页到货时**缺的那一格**）：补齐在右栏「整份文档」里，
+走的是同一条已白名单的 `resume.editor.design`（补丁形状 `{ body: { fontFamily } }`，与左列那颗
+`resume-editor-design-family` 同一条通道），文案沿用既有键 `resume.editor.axes.bodyFontFamily`
+与 `resume.editor.family.*`，**不新增语言包键**。活体读数（`tmp/310/p-i-family-sans.js`）：
+
+```
+before      { cls: "font-serif", family: 'Georgia, "Times New Roman", "Noto Serif SC", …', srcdoc: "bd735bdd/36463" }
+afterSans   { cls: "font-sans",  family: '"Noto Sans SC", system-ui, -apple-system, "Seg…', srcdoc: "80ec6253/36462",
+              on: "true", dirty: "true", undoClickable: true }
+afterUndo   { cls: "font-serif", family: 'Georgia, "Times New Roman", "Noto Serif SC", …', srcdoc: "bd735bdd/36463",
+              dirty: "false", undoReason: "NOTHING_TO_UNDO" }
+```
+
+- 纸上的落点是 `<article class="font-serif|font-sans">`（`template-kit.ts:413` 那条 `design.body.fontFamily ?? spec.serif`），
+  帧内 `getComputedStyle` 两家族名逐字不同 → 不是"状态改了而画没动"。
+- 撤一步之后 `srcdoc` 的哈希与长度都**逐字节弹回**起手那一份（`bd735bdd/36463`）→ 这一格同样是一个撤销单元。
+- 中途一条读数口径的坑要记：夹具那套模板本来就是 `serif`，所以**点 serif 是一条都不变**（我第一趟就点了它，
+  拿到 `family` 未变，看着像缺陷）。判"这一格画没画"必须往**与模板当前档相反**的那一档点。
+- 另一条探针自身的坑（同一条读数口径）：`undoReason()` 写成 `getAttribute(...) ?? 'NO_BUTTON'` 会把
+  **"没有原因码 = 可按"** 误报成"按钮不存在"。现在一律读 `hasAttribute('data-disabled-reason') === false`
+  （`afterSans.undoClickable: true` 就是这么来的），与 §9 的 6.2 那条"`aria-disabled` 不是原生 `disabled`"同源。
+
+--------------------------------------------------------------------------------
+3.10-05 在纸上拖区块改序（V）
+--------------------------------------------------------------------------------
+
+逐字读数（`tmp/310/p-c-drag.js`）：
+
+- 起手顺序 `beforeDrag.anchors = [summary, experience, skills]`（帧内 `[data-rz-section]` 的文档序）。
+- 按住第一段拖到最后一段下缘：拖动途中 `duringDrag.dropMarks = ["skills"]`（落点标记挂在目标那一段上）。
+- 松手后 `afterDrag.anchors = [experience, skills, summary]`、`dirty = true`、`undo = null`。
+- 撤一步：`afterUndo.anchors = [summary, experience, skills]`（回到原序）、`undo = NOTHING_TO_UNDO`
+  → 一次拖拽 = 恰好一个撤销单元。
+- **负对照**（判据原文"落点没变时一个字节都不发"）：在第二段原地按下再原地抬起（位移 < `DRAG_THRESHOLD_PX`）→
+  `negativeControl = { moveCallsAdded: 0, barKind: "experience", dirty: "false" }`
+  序不变、不进撤销栈，而样式条照长（点选与拖拽共用一次按下，按位移分岔）。
+- 跨进程调用次数这一条**不能**用 `window.autoCC` 包一层来数：preload 用 `contextBridge.exposeInMainWorld`
+  冻过命名空间，渲染层替换方法不生效（`moveCalls` 恒为 0 而真实调用照样发出去）。
+  所以"只发一次"这一句由**两条持久读数**承担：撤销栈一次回退就回到原序（上面那条）+ 负对照里 `dirty` 不翻。
+
+条目级排序这一片**没有**在纸上做（`editor.move` 的 `entryId` 通道在 hook 里已备好，纸面只给区块级），
+判据原文只要求"沿用同一颗口"，左列那条拆/并/移动仍在 3.6 的界面上（复点未跑，见末尾"待办"第 2 格）。
+
+同一轮修掉的两条实现缺陷（都由"写探针才暴露"，记进 plan §15）：
+
+1. 拖拽的 `onMove`/`onUp` 原先闭包捕获了 pointerdown 那一次事件，位移恒为 0 → 拖过也算点选，换序静默失效；
+   现在各自读**自己**那一次事件的 `clientY`。
+2. 纸每装一帧就换掉整个帧内 `Document`（`srcdoc` 重写），而监听与注入样式只挂过一次 →
+   补 `paperNonce` 进所有碰帧内文档的 effect 依赖，命中监听与描边每帧重挂。
+
+**收口时补的第三条（§2.2 / 判据原文那句"同一份实现"）**：纸面那一份落点算法原先是抄在 `ResumeEditPage.tsx`
+里的第二段循环，与左列 `ResumeEditor.tsx` 的 `indexOfPointer` 各写各的。现已抽成
+`useResumeEditor.ts` 导出的 `dropIndexOfPointer(clientY, rectAt, rowCount)`，两处各自只供给行的来源
+（React 的 `rowRefs` / 帧内 `querySelectorAll` 的节点）。抽完在隔离实例上**复跑同一支探针**（`tmp/310/p-c-drag.js`，
+CDP 10255，窗口仍 `hidden`），逐字读数与上面这一组逐位相同：
+
+- `beforeDrag.anchors = [summary, exp, skills]` → `duringDrag.dropMarks = ["skills"]` →
+  `afterDrag.anchors = [exp, skills, summary]`、`dirty = "true"`、`undoReason = null`；
+- `afterUndo.anchors = [summary, exp, skills]`、`undoReason = "NOTHING_TO_UNDO"`（一次拖拽 = 一个撤销单元）；
+- 负对照 `negativeControl = { moveCallsAdded: 0, barKind: "experience", dirty: "false" }`；
+- 同一轮顺带复到的几何读数 `paper = { rectWidth: 794, offsetWidth: 794, scale: 1, slotWidth: 940,
+  pageWidth: 1200, scrollsHorizontally: false }`（3.10-06 那条不横向滚的判据在 1200 宽的窗口上仍成立）。
+- 探针末尾把去动画那支 `<style>` 摘干净：`document.getElementById('rz-kill-anim') === null` 实测 `true`。
+
+--------------------------------------------------------------------------------
+3.10-06 整屏页的纸明显比右栏那一格大（V）
+--------------------------------------------------------------------------------
+
+同一份文档、同一模板与语言下两档各量一次（`tmp/310/p-e-geom.js`）：
+
+| 档位 | 帧 `getBoundingClientRect().width` | 帧 `offsetWidth` | 倍率（rect/offsetWidth） | 槽位宽 |
+| --- | --- | --- | --- | --- |
+| 简历屏 layout 档（`resume-editor-preview`） | 470 | 794 | 0.592 | 494 |
+| 整屏编辑页（`resume-edit-paper`） | 794 | 794 | 1.000 | 940 |
+
+- 宽度比 = `794 / 470` = **1.689** ≥ 1.6。
+- 两处 `offsetWidth` 相同（794）：同一张 A4 纸，差别只在放大倍率——3.3-01「预览即导出所见」没被这一页破坏。
+- 整屏页窗口宽 1200，槽位 940 装下 794 的纸不横向滚（`slot.scrollWidth > slot.clientWidth` = false）。
+- 倍率只写在铺纸那一个节点上（`--paper-scale`，`ResumePaperFrame` 那一处），这一片没有第二份事实。
+
+--------------------------------------------------------------------------------
+3.10-07 会话状态只有一处（C）
+--------------------------------------------------------------------------------
+
+grep 读数：
+
+- 渲染层里 `resume['editor.<动作>']` 的**调用点**全部落在 `packages/renderer/src/useResumeEditor.ts`
+  一处（`editor.preview` / `view` / `open` / `metric` / `design` / `use` / `move` / `split` / `merge` /
+  `undo` / `redo` / `save`）。其余命中都是 `t('resume.editor.*')` 的语言包键，不是调用。
+- `grep -c "useState<ResumeEditorView>" packages/renderer/src/ResumeEditor.tsx` = **0**。
+- `ResumeEditPage.tsx` 的 import 清单只有 lucide / react / react-i18next / `@auto-cc/shared` 的类型 /
+  `ResumePaperFrame` / `ui/controls` / `useResumeEditor` —— 没有深入 `@auto-cc/plugin-resume-doc` 的 `internal/`
+  （§4.2 那条机检也在拦）。
+- 互斥：整屏页开着时桌台工作台被换掉而不是盖上去（`ResumeDesk.tsx:698` 那条注释记的就是这个理由），
+  所以同一时刻只有一只 `useResumeEditor` 在持有撤销栈。
+
+活体回归半边**没跑**（脚本 `tmp/310/p-f2-left.js` 已写好、未执行；写法见本节末"探针口径"第 3 条），
+因此这一格整条记 `[!]`：grep 那三条是真的，"左列那几项仍逐项按得动"这句目前没有任何读数支撑。
+
+--------------------------------------------------------------------------------
+3.10-08 渲染层规矩（C）
+--------------------------------------------------------------------------------
+
+- `npx eslint` 一次带上本片全部代码文件（`ResumeEditPage.tsx`、`ResumePaperFrame.tsx`、`ResumePaperStage.tsx`、
+  `ResumeEditor.tsx`、`ResumeDesk.tsx`、`useResumeEditor.ts`、`packages/resume-doc/src/internal/template-kit.ts`、
+  `packages/resume-doc/src/template.test.ts`、`packages/resume-doc/src/design.test.ts`）→ **EXIT=0，0 errors**。
+  两条 warning 是这次点名方式带出来的，不是本片缺陷：两份语言包 `.json` 不在 eslint 的配置面里
+  （`File ignored because no matching configuration was supplied`），语言包对齐由下面那条机检负责。
+- `npx prettier --check` 对本片 14 份文件（含三份文档与两份语言包）：All matched files use Prettier code style，
+  **EXIT=0**（`format:check` 全仓另有并行会话的脏区，不属于本片，不去动它）。
+- `npx tsx scripts/check-renderer-conventions.ts` **EXIT=0**，末行读数含本片那三格：
+  `src/ui/**` 之外裸原生控件 0 只、hover 挂到不可点那一格 0 处、按不动却不带原因码那一格 0 处
+  （全仓 2 个语言包 / 77 个源文件 / 派生文案 50 条逐包齐备）。
+- `npx tsx scripts/check-lexicon.ts` **EXIT=0**：脏区延后那 1 份是并行会话正在写的
+  `docs/plans/08-real-platform-driving/plan.md`（5 处，不是本片的文件），本片新写的两份文档与代码零命中。
+- i18n：新增的键都在 `shell.resume.edit.*`（`back/byKind/close/enter/globals/heading/hint/moveDown/moveUp/selected`）
+  与 `shell.resume.editor.reason.*`（新增 `AT_FIRST_SECTION` / `AT_LAST_SECTION`），`zh-CN` 与 `en` 同时补齐
+  （上面的对齐机检已核）。字族那一格**没有新键**，复用左列已有的 `resume.editor.axes.bodyFontFamily`、
+  `resume.editor.followTemplate`、`resume.editor.family.*`。控件只出自 `src/ui/**`（DeskButton / DeskRange /
+  DeskSegmented / DeskSwatch / Banner），图标只出 lucide（ChevronUp / ChevronDown / X / Palette / Undo2 / Redo2 / Save /
+  SlidersHorizontal），按不动的每一格都带原因码（`AT_FIRST_SECTION` / `AT_LAST_SECTION` / `ACTION_BUSY` /
+  `NOTHING_TO_UNDO` / `NOTHING_TO_REDO` / `NOTHING_TO_SAVE` / `ALREADY_FOLLOWING`）。
+- `pnpm --filter @auto-cc/renderer typecheck` **EXIT=0**；
+  `pnpm --filter @auto-cc/plugin-resume-doc typecheck` **EXIT=0**；
+  `pnpm --filter @auto-cc/plugin-resume-doc test` **EXIT=0，252 passed（18 test files）**。
+
+--------------------------------------------------------------------------------
+3.10-09 反向验证：没有在渲染层重画一张纸（C）
+--------------------------------------------------------------------------------
+
+同一份文档、同一模板与语言下，两档帧的 `srcdoc` 属性（不是渲染后的 DOM，逐字节）：
+
+- 简历屏 layout 档：长度 `36463`，31 位 FNV-1a 哈希 `bd735bdd`，`' data-rz-section="'` 计数 3。
+- 整屏编辑页：长度 `36463`，哈希 `bd735bdd`，锚点计数 3。
+- `compare.sameSrcdoc = true`、`sameNaturalWidth = true`（都是 794）。
+
+→ 编辑页画的就是 `resume.editor.preview` 那一份 HTML，与导出产物同源于唯一那颗 builder；
+渲染层没有第二处 section/entry 排版实现（`ResumeEditPage.tsx` 不 import 模板内部件，见 3.10-07 的 import 清单）。
+
+--------------------------------------------------------------------------------
+3.10-10 这一片不做纸上打字改正文（C）
+--------------------------------------------------------------------------------
+
+grep 读数：
+
+- 全仓 `editor.text` 命中数 **0**（`packages/shared/src/bridge.ts`、`packages/preload/src/index.ts`、
+  `packages/renderer/src/**` 三条一起扫）。
+- `bridge.ts` 的白名单本片零改动（`git status` 里 `packages/shared/src/bridge.ts` 不在改动清单）。
+- `ResumeEditPage.tsx` / `ResumePaperFrame.tsx` / `ResumePaperStage.tsx` 里 `contenteditable` 命中数 **0**。
+
+活体半边（`p-e-geom.js` 的 `dblClick` 那一节，指针按下抬起 + 帧内 `dblclick`，`detail: 2`）：
+
+- `contentEditableCount = 0`、`inputsInPaper = 0`（纸上一个输入口都不长）；
+- 条上非滑杆的输入格 = `[]`，条上 `input` 只有两只 `range`（`barSizeAxes = ["range","range"]`）；
+- 帧内选区字符数 `paperSelection = 0`（没有长出可打字的光标）。
+
+→ 界面上没有"看着能改其实不改"的假控件；正文那一格留给另立的一片 3.11（要一条带正文的新桥接口）。
+
+--------------------------------------------------------------------------------
+这一批探针用到的三条口径（写下来防止下一片重踩）
+--------------------------------------------------------------------------------
+
+1. 桌台（左列）那一档帧是 `sandbox=""` 的只读帧：父页读它的 `contentDocument` 拿到的是 **null**，
+   探针 `tmp/310/p-f-left.js` 就在 `paperDoc().documentElement` 上抛
+   `TypeError: Cannot read properties of null`。左帧的读数只能取 `getAttribute('srcdoc')`
+   这条口（长度 + 31 位 FNV-1a 哈希 + 正则数 `data-rz-kind` 的出现次序），
+   要按 DOM 活体点它里面的控件得先把 sandbox 放开——那是产品决定，不是探针能绕的。
+   整屏编辑页那一档是 `sandbox="allow-same-origin"`（无 `allow-scripts`），父页**能**读 `contentDocument`，
+   所以纸面上的锚点/选区类读数都在这一档取。
+2. 验"字族真的换了"必须点**与当前相反**那一格：fixture 的模板本身是 `serif`，点 `serif` 纸面纹丝不动，
+   看起来像控件坏了。`tmp/310/p-i-family-sans.js` 点 `sans` 才拿到换轴的读数。
+3. 判"这一格按得动"用 `hasAttribute('data-disabled-reason') === false`。
+   写成 `getAttribute('data-disabled-reason') ?? 'NO_BUTTON'` 会把"能按（没有原因码）"
+   和"按钮根本不在"读成同一个值——本轮第一次就因此把可点的撤销误报成缺按钮。
+4. **门禁的过滤器名字必须按 `package.json` 的 `name` 写**：`@auto-cc/resume-doc` **匹配不到任何工程**，
+   pnpm 只打一句 `No projects matched the filters` 然后 **EXIT=0**——本文件先前两处读数就是这么假绿的。
+   真名是 `@auto-cc/plugin-resume-doc`（`packages/resume-doc/package.json`），本轮按真名重跑过，252 passed 是重跑后的读数。
+5. `window.autoCC` 是 `contextBridge.exposeInMainWorld` 冻上的，**渲染层里换不掉桥方法**：
+   想在探针里数"这一趟到底发了几次 `resume.editor.*`"，只能在持久读数上做
+   （撤销栈深度、`dirty` 翻转次数），不能靠包一层计数代理——计数器一直是 0，真实调用照发。
+6. **去动画那支 `<style id="rz-kill-anim">` 会因探针中途抛错而留在活体上**：收尾时必须现查一次
+   `document.getElementById('rz-kill-anim') === null`，不能只看脚本末尾那行 `remove()`。
+   本轮收口实测 `had: true`（p-g 之后一直没摘），摘掉后 `nowNull: true`。
+   这只窗口是本片自己的隔离实例（CDP 10255 + `tmp/310/userdata`），不是用户的 dev 实例（10222 全程未动）。
+
+--------------------------------------------------------------------------------
+待办（本片没做的三格，写清缺什么）
+--------------------------------------------------------------------------------
+
+1. 3.10-02 的 PDF 文本层半边：需要"锚点前"那份对照产物。可行配方（不碰别人改动）——
+   在独立实例里 `resume['export.toPdf'](docId)` 取到 `receipt.path`（落 `tmp/310/userdata/exports/`），
+   用包内 `pdfjs-dist` 抽逐页 `items[].str`，与 `resume['export.preview'](docId)` 那份 HTML 的文本节点序列对账，
+   并断言文本层里 `rz-` / `data-rz` 出现次数为 0。判据原文那句"加锚点前后各导一次"仍要代码回退才成字面，
+   所以这一格记 `[!]` 而不是 `[x]`。
+2. 3.10-07 的活体回归半边：脚本 `tmp/310/p-f2-left.js` 已按上面的口径 1 写好（左帧走 `srcdoc`，
+   右帧走 `contentDocument`），**尚未执行**——每趟跨进程十几秒、二十多趟会超出前台上限，
+   要放后台跑。这一格目前只有 grep 那三条，因此整条 `[!]`。
+3. 像素级观感（描边压字、字号档看着合不合理）与真实鼠标命中：§7.1 的 V 类里必须用户在场的那部分。
+
+--------------------------------------------------------------------------------
+§7.4 收尾自检（本片逐条回答，命令与退出码逐字贴）
+--------------------------------------------------------------------------------
+
+① 四道门禁（日志都在被忽略的 `tmp/310/gates/`）：
+
+- `pnpm --filter @auto-cc/renderer typecheck` → **EXIT=0**（`tsc --noEmit` 无输出）
+- `pnpm --filter @auto-cc/plugin-resume-doc typecheck` → **EXIT=0**
+- `pnpm test`（全仓）→ **EXIT=0**；本片那一档 `packages/resume-doc test: Test Files 18 passed (18) /
+  Tests 252 passed (252)`，其余各包同轮全绿（`browser 306`、`outbound 197`、`resume-kb 446`、
+  `platform-boss 177`、`main 91`…），日志里 `FAIL` 命中数 **0**。
+- `npx eslint <本片 9 份代码文件>` → **EXIT=0**（0 errors；两份 `.json` 语言包不在 eslint 配置面上，
+  各报一句 `File ignored…` warning，属点名方式带来的，见 3.10-08）
+- `npx prettier --check <本片 14 份文件>` → **EXIT=0**
+- `npx tsx scripts/check-renderer-conventions.ts` / `npx tsx scripts/check-lexicon.ts` → **各自 EXIT=0**
+- **全仓 `pnpm lint` EXIT=1、`pnpm format:check` EXIT=1，这两处红不属于本片**：四条 eslint error 与三条
+  prettier warn 全部落在同一只**未跟踪目录** `packages/renderer/dummy-non-existing-folder/pdfjs/**`
+  （并行会话为 pdf.js worker 路径做的实验产物，`git status` 里是 `??`）。除它以外全仓零命中，
+  所以本片没有去动那个目录，也没有去"顺手修红"。
+
+② V 类条目逐条对上的证据：01/03/04/05/06/09/10 的活体读数在本文件各节里（探针 `tmp/310/p-*.js`，
+   隔离实例 CDP 10255 + `tmp/310/userdata`，全程未碰共享的 10222 那只）。
+   **没有截图入库**：纸面是用户真实简历（姓名/手机/邮箱），位图无法脱敏，按 §8.5 只留 `tmp/`，
+   这一格一律写成逐字读数（与 §9 的 2026-10-12 那条⑧ 同一条口径）。
+
+③ spec 状态位：`[x]` = 01/03/04/05/06/08/09/10；`[!]` = 02（PDF 文本层那半句要"锚点前"对照产物）、
+   07（活体复点未跑）；没有留 `[ ]`。
+
+④ 复用检查：`resume.editor.*` 十二支动作与投影只在 `useResumeEditor.ts` 一处；
+   落点下标本轮**补抽**成 `dropIndexOfPointer`（原先纸面抄了第二份，见 3.10-05 那节）；
+   铺纸（`fitPaper` + `ResizeObserver` + 那颗 iframe）走 `ResumePaperFrame` 一只原件；
+   字族那一格复用左列已有通道与语言包键，未新增口。
+
+⑤ 死代码检查：新导出的 `dropIndexOfPointer` / `OUT_OF_BOUNDS_REACH` / `METRIC_ROWS` /
+   `FONT_FAMILY_TOKENS` / `INHERIT` / `paragraphPatch` / `ResumePaperFrame` 逐个查过消费者
+   （`ResumeEditor.tsx` 与 `ResumeEditPage.tsx` 两处都在用）；`ResumeEditor.tsx` 里被替换掉的那份
+   内联会话状态与落点循环已删除，没有留注释掉的旧实现。
+
+⑥ 前端三项：Tailwind only（无 `.css`、无 `style={}` 做布局）、图标只出 lucide、
+   文案全走 i18n 且 `zh-CN`/`en` 齐；控件只出自 `src/ui/**`；按不动的每一格带原因码
+   （见 3.10-08 的机检读数）。
+
+⑦ 提交与推送：按显式 pathspec 提交本片 14 份文件（9 份代码 + 2 份语言包 + 3 份文档；
+   并行会话的脏区一律不进），提交后
+   `git show --stat --name-only HEAD` 逐行数过，再 `git push origin main` 并用
+   `git rev-parse refs/remotes/origin/main` 复核远端 ref。
+
+⑧ 暂存面：`tmp/` 全目录被忽略；入库的只有 `docs/acceptance/03-resume-pdf/3.10-*.txt` 这一份逐字读数，
+   **零图片**（原因见②），因此同批 `md5` 去重那一步没有对象可跑。

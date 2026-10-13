@@ -805,8 +805,22 @@
           "NO_BODY_TO_SPLIT": "This entry has a single body line, there is nothing to break apart",
           "NOTHING_TO_MERGE": "It is the first entry of this section, there is no previous entry to merge into",
           "AT_FIRST_LINE": "Already at the first line; moving earlier would leave no body in the previous entry",
-          "AT_LAST_LINE": "Already at the last breakable line; going further means moving the whole entry — use “Merge up” instead"
+          "AT_LAST_LINE": "Already at the last breakable line; going further means moving the whole entry — use “Merge up” instead",
+          "AT_FIRST_SECTION": "It is already the top section, there is nothing above it",
+          "AT_LAST_SECTION": "It is already the bottom section, there is nothing below it"
         }
+      },
+      "edit": {
+        "enter": "Full-screen editing",
+        "heading": "Full-screen layout editor",
+        "back": "Leave editor",
+        "hint": "Click a section on the paper and the style bar lands right above it: size, line height, alignment, weight and colour all live there, and dragging a section moves it. This screen restyles the resume — the body text itself is not edited here.",
+        "globals": "Whole document",
+        "selected": "Editing: {{kind}}",
+        "byKind": "Styles apply per section kind, so every block of this kind changes together",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "close": "Hide the style bar"
       },
       "pendingUnnamed": "The one with no name read"
     },

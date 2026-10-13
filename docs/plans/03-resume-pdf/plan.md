@@ -1822,7 +1822,7 @@ spike 在 `.research-repos/p64-rich-text/`（§6.4，不进主干），对象是
 
 ### 用户诉求（逐字，2026-10-12）
 
-> 简历编辑功能很难用   我希望简历编辑可以项目pdf 编辑器那样直接编辑  修改字号 行距 排序 等等功能  可以单独做一个简历编辑页面实现这个功能
+> 简历编辑功能很难用 我希望简历编辑可以项目pdf 编辑器那样直接编辑 修改字号 行距 排序 等等功能 可以单独做一个简历编辑页面实现这个功能
 
 ### 裁定㉙（两条，AskUserQuestion 逐字）
 
@@ -1840,11 +1840,11 @@ spike 在 `.research-repos/p64-rich-text/`（§6.4，不进主干），对象是
 整屏直改的前提是"点得中纸上的某一段"，所以先量三种 sandbox 形状各能不能读 DOM、能不能挂监听、帧内脚本会不会跑
 （探针 `tmp/wysi-spike.cjs`，本机 `pnpm dev` + `harness eval --url 5173`，2026-10-12 12:12）：
 
-| `sandbox` | `contentDocument` 可读 | 数得出 `[data-rz-section]` | 父页挂的 click 监听收得到 | 帧内内联 `onerror` 跑了吗 |
-| --- | --- | --- | --- | --- |
-| `allow-same-origin` | **是** | 是（2 段，首段 id `s1`） | **是** | **否** |
-| `""`（现状） | 否 | 0 | 取不到文档 | 否 |
-| `allow-same-origin allow-scripts` | 是 | 是 | 是 | **是**（不要这一档） |
+| `sandbox`                         | `contentDocument` 可读 | 数得出 `[data-rz-section]` | 父页挂的 click 监听收得到 | 帧内内联 `onerror` 跑了吗 |
+| --------------------------------- | ---------------------- | -------------------------- | ------------------------- | ------------------------- |
+| `allow-same-origin`               | **是**                 | 是（2 段，首段 id `s1`）   | **是**                    | **否**                    |
+| `""`（现状）                      | 否                     | 0                          | 取不到文档                | 否                        |
+| `allow-same-origin allow-scripts` | 是                     | 是                         | 是                        | **是**（不要这一档）      |
 
 结论与选定的形状：**`sandbox="allow-same-origin"`（不带 `allow-scripts`）+ 父页一侧现量矩形做命中**。
 被否决的三条：
@@ -1862,16 +1862,16 @@ spike 在 `.research-repos/p64-rich-text/`（§6.4，不进主干），对象是
 
 ### 形状（新增/改动清单）
 
-| 文件 | 做什么 | 为什么在这一处 |
-| --- | --- | --- |
-| `packages/renderer/src/useResumeEditor.ts` | 把 `ResumeEditor` 的会话状态与九个动作（`open/view/preview/metric/design/use/split/merge/move/undo/redo/save` + 拒绝话术 + 预览重出）**抽成一只 hook** | 整屏页与左列编排面板要的是同一份会话；抄一份就是第二套状态机（§2.2/§2.5） |
-| `packages/renderer/src/ResumeEditor.tsx` | 改为消费 hook，删掉内联那一份；其余（拖拽行、度量滑杆、主题与段落格）不动 | 3.6 那十条已 `[x]` 的判据取证通道（`data-action` / `data-testid`）一字不改 |
-| `packages/renderer/src/ResumePaperFrame.tsx` | 把"一张纸怎么铺进槽里"（`fitPaper` 量倍率 + `ResizeObserver` + 那颗 iframe）抽成原件，`--paper-scale` 仍只写在这一个节点上 | 槽位与整屏页共用同一颗纸的铺法；倍率是放大镜这条口径只留一份 |
-| `packages/renderer/src/ResumePaperStage.tsx` | 改用 `ResumePaperFrame`；三档页签、身份读数、回执条不动 | 同上 |
-| `packages/renderer/src/ResumeEditPage.tsx` | **新页**：整屏、顶部工具栏（返回 / 文档 / 模板读数 / 撤销 / 重做 / 保存）、纸按可用高度铺满、点中一段长出**贴在那一段上方**的样式条（字号 / 行距 / 对齐 / 字重 / 字族 / 字色 + 区块上下移），拖区块改序 | 用户要的"直接编辑"落在纸本身上，而不是左列那张控制清单 |
-| `packages/renderer/src/ResumeDesk.tsx` | 挂整屏页 + 一颗进整屏的键 + Esc 出口；`docId` / `templateId` / `locale` 仍由 desk own | 文档身份的唯一持有者不变 |
-| `packages/resume-doc/src/internal/template-kit.ts` | `<section>` 挂 `data-rz-section="<区块 id>" data-rz-kind="<种类>"`，条目格挂 `data-rz-entry="<条目 id>"` | 命中要靠这几个锚点；它们是**惰性属性**，不参与排版，导出产物只是多几个属性 |
-| `packages/renderer/src/locales/{zh-CN,en}.json` | 新增 `resume.edit.*` 一整组文案（两档同时补齐，缺翻译即 lint 红） | §5.5/§5.6 |
+| 文件                                               | 做什么                                                                                                                                                                                                  | 为什么在这一处                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `packages/renderer/src/useResumeEditor.ts`         | 把 `ResumeEditor` 的会话状态与九个动作（`open/view/preview/metric/design/use/split/merge/move/undo/redo/save` + 拒绝话术 + 预览重出）**抽成一只 hook**                                                  | 整屏页与左列编排面板要的是同一份会话；抄一份就是第二套状态机（§2.2/§2.5）  |
+| `packages/renderer/src/ResumeEditor.tsx`           | 改为消费 hook，删掉内联那一份；其余（拖拽行、度量滑杆、主题与段落格）不动                                                                                                                               | 3.6 那十条已 `[x]` 的判据取证通道（`data-action` / `data-testid`）一字不改 |
+| `packages/renderer/src/ResumePaperFrame.tsx`       | 把"一张纸怎么铺进槽里"（`fitPaper` 量倍率 + `ResizeObserver` + 那颗 iframe）抽成原件，`--paper-scale` 仍只写在这一个节点上                                                                              | 槽位与整屏页共用同一颗纸的铺法；倍率是放大镜这条口径只留一份               |
+| `packages/renderer/src/ResumePaperStage.tsx`       | 改用 `ResumePaperFrame`；三档页签、身份读数、回执条不动                                                                                                                                                 | 同上                                                                       |
+| `packages/renderer/src/ResumeEditPage.tsx`         | **新页**：整屏、顶部工具栏（返回 / 文档 / 模板读数 / 撤销 / 重做 / 保存）、纸按可用高度铺满、点中一段长出**贴在那一段上方**的样式条（字号 / 行距 / 对齐 / 字重 / 字族 / 字色 + 区块上下移），拖区块改序 | 用户要的"直接编辑"落在纸本身上，而不是左列那张控制清单                     |
+| `packages/renderer/src/ResumeDesk.tsx`             | 挂整屏页 + 一颗进整屏的键 + Esc 出口；`docId` / `templateId` / `locale` 仍由 desk own                                                                                                                   | 文档身份的唯一持有者不变                                                   |
+| `packages/resume-doc/src/internal/template-kit.ts` | `<section>` 挂 `data-rz-section="<区块 id>" data-rz-kind="<种类>"`，条目格挂 `data-rz-entry="<条目 id>"`                                                                                                | 命中要靠这几个锚点；它们是**惰性属性**，不参与排版，导出产物只是多几个属性 |
+| `packages/renderer/src/locales/{zh-CN,en}.json`    | 新增 `resume.edit.*` 一整组文案（两档同时补齐，缺翻译即 lint 红）                                                                                                                                       | §5.5/§5.6                                                                  |
 
 ### 交互口径（与 PDF 编辑器同一族，但按 DOM 现状改形）
 
@@ -1883,6 +1883,34 @@ spike 在 `.research-repos/p64-rich-text/`（§6.4，不进主干），对象是
 - 排序 = 在纸上按住一段拖（落点用相邻段矩形中心判定，与左列那一份 `indexOfPointer` 同一算法，抽进 hook 复用），
   松手发**一次** `resume.editor.move`；落点没变一个字节都不发（3.6-03 的"空编辑不进栈"）。
 - 门禁与拒绝：数值界、颜色形状、种类清单都只在主进程判一次（`planDesign` / `planMetric`），界面把拒绝原话摆出来并把控件弹回已提交值。
+
+### 3.10 落地记录（2026-10-13；十条状态的逐字读数在 `docs/acceptance/03-resume-pdf/3.10-01-10-edit-page-readings.txt`，此处只记下一窗口用得着的五件事）
+
+**状态位**：`01/03/04/05/06/08/09/10` 为 `[x]`，`02/07` 为 `[!]`，各欠哪半句写在证据文件末尾的"待办"三格。
+像素级观感与真实鼠标命中按 §7.1 留给用户在场，没有拿单测顶替。
+
+1. **落码与取证期间修掉的四条缺陷，全部是活体才暴露的**（当时本片文件的 typecheck / eslint / prettier /
+   `resume-doc` 单测都是绿的）：
+   - 拖拽用父页的 `PointerEvent` 构造不行，必须用**帧自己的 realm** 造事件（同一坐标在两边是两个事件类）；
+   - 预览重出会把 iframe 换掉，挂在旧节点上的命中监听因此静默失效——加 `paperNonce` 随 `srcdoc` 重新绑定；
+   - 整屏页少一只**字族**控件（判据 3.10-04 列了六格，落码只落了五格）；补的是右栏那一格
+     `design.body.fontFamily`，复用左列已有的通道与语言包键，没新增口；
+   - Esc 原本直接等于"退出这一屏"，把 3.10-03 那句"Esc 收掉"顶掉了——改成两层：选中还挂着先收样式条，
+     什么都没选才走退出（退出仍先过未保存拦截）；
+   - 落点下标在纸面那一份是**抄的第二段循环**（左列 `ResumeEditor.tsx` 已有一份 `indexOfPointer`），
+     撞 §2.2 与 3.10-05 判据原文那句"同一份实现（抽进 hook）"——收口时补抽成
+     `useResumeEditor.ts` 导出的 `dropIndexOfPointer(clientY, rectAt, rowCount)`，两处只供给"第几行的矩形"
+     这个来源（React 的 `rowRefs` / 帧内 `querySelectorAll`），坐标换算仍各自留在调用侧（帧内不带缩放）。
+     抽完在同一支探针 `tmp/310/p-c-drag.js` 上复跑，逐字读数与抽之前逐位相同（见证据文件 3.10-05 那节）。
+2. **探针口径三条**（详见证据文件，别再重踩）：桌台那三档帧是 `sandbox=""`，父页读 `contentDocument` 拿到
+   **null**，左列只能走 `getAttribute('srcdoc')` 那条口；验字族必须点**与当前相反**那一格；
+   `window.autoCC` 被 `contextBridge` 冻上，**包不了计数代理**，"这一趟发了几次"只能靠持久读数（撤销栈深度、`dirty` 翻转）。
+3. **门禁那一条要按 `package.json` 的 `name` 写过滤器**：`pnpm --filter @auto-cc/resume-doc test` 匹配不到任何工程，
+   pnpm 只打一句 `No projects matched the filters` 便 **EXIT=0**（真名 `@auto-cc/plugin-resume-doc`）。
+   本轮两处单测读数先按假名记过，已按真名重跑并更正。
+4. **界表的算法**：滑杆的 `min`/`max` 属性是**放宽过**的合法界 ± `OUT_OF_BOUNDS_REACH`×跨度（`useResumeEditor.ts:21`，
+   系数 0.25 ⇒ 属性跨度 ÷1.5 才是真界）。按属性端点拨值仍然会被主进程拒，第一次就在这上面浪费了一整趟探针。
+5. **3.11 的前置没变**：纸上打字仍要一条带正文的新桥接口（下面那节三件事），本片零改动 `bridge.ts` 白名单。
 
 ### 下一片（3.11，等正文写口的裁定落地后再做）
 

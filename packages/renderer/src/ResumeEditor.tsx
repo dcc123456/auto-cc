@@ -1,181 +1,31 @@
 import { GripVertical, Merge, Minus, Palette, Plus, Redo2, Save, Split, Timer, Undo2, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type {
-  EditorFontFamilyView,
-  EditorFontWeightView,
-  EditorMetricKeyView,
-  EditorTextAlignView,
-  ResumeEditorDesignPatchView,
-  ResumeEditorDesignView,
-  ResumeEditorView,
-  ResumeLocaleView,
-  ResumeSectionKindView,
-} from '@auto-cc/shared';
-import { useBridgeAction } from './useBridgeAction';
+import type { ResumeLocaleView, ResumeSectionKindView } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, deskReason } from './ui/controls';
-
-/**
- * 度量滑杆在界表两端各多摆出的**容差比例**（3.6-02 的判据原文是"滑杆到界外 → 提示截图"：
- * 滑杆若恰好停在界内，界外那条拒绝路径在界面上永远到不了。判界仍然只在主进程做一次（§2.5），
- * 这里长的只是可拖范围，越界的值一律由 `resume.editor.metric` 拒掉并回一句话术）。
- */
-const OUT_OF_BOUNDS_REACH = 0.25;
-
-/** 度量键的显示顺序与单位（单位只是标签，不参与判定）。 */
-const METRIC_ROWS: { key: EditorMetricKeyView; unit: 'pt' | 'mm' | 'ratio'; step: number }[] = [
-  { key: 'baseFontPt', unit: 'pt', step: 0.5 },
-  { key: 'lineHeight', unit: 'ratio', step: 0.05 },
-  { key: 'topMm', unit: 'mm', step: 0.5 },
-  { key: 'rightMm', unit: 'mm', step: 0.5 },
-  { key: 'bottomMm', unit: 'mm', step: 0.5 },
-  { key: 'leftMm', unit: 'mm', step: 0.5 },
-];
+import {
+  FONT_FAMILY_TOKENS,
+  FONT_WEIGHT_TOKENS,
+  INHERIT,
+  METRIC_ROWS,
+  OUT_OF_BOUNDS_REACH,
+  PARAGRAPH_COLOR_AXES,
+  PARAGRAPH_KINDS,
+  SWATCH_HEXES,
+  TEXT_ALIGN_TOKENS,
+  THEME_COLOR_AXES,
+  THEME_PRESETS,
+  dropIndexOfPointer,
+  matchesPreset,
+  paragraphPatch,
+  themePatch,
+  useResumeEditor,
+} from './useResumeEditor';
 
 /** 一次拖拽的进行态：`fromIndex` 是起手的区块位置，`overIndex` 是此刻指针算出的落点（结果序列下标）。 */
 interface DragState {
   fromIndex: number;
   overIndex: number;
-}
-
-/**
- * 色卡格里摆的那些色（spec 6.6-05）。
- * 摆的是**档**而不是自由输入：主进程那道 `#rrggbb` 判据（`editor-ops.ts` 的 `bad-color`）
- * 因此永远不需要在人面前报错——人挑不出一个不合法的颜色，也就没有"界面放行而保存被拒"的分叉（§2.5）。
- * 前三档是稿上的中性墨色与两档纸色，其余按墨案那套低饱和色相排。
- */
-const SWATCH_HEXES = [
-  '#101820',
-  '#1b2228',
-  '#334155',
-  '#64748b',
-  '#f7f5f2',
-  '#ffffff',
-  '#a31621',
-  '#b93b26',
-  '#7c2d12',
-  '#0b5c50',
-  '#134e4a',
-  '#1e3a8a',
-  '#312e81',
-  '#a16207',
-  '#3f3f46',
-] as const;
-
-/** 「随模板」这一档的哨兵值：`DeskSegmented` 的值必须是字符串，而 null 在补丁里另有"取消那一格"的语义。 */
-const INHERIT = 'inherit';
-
-/**
- * 主题预设（一次点击 = 一次调用 = 一个撤销单元，spec 6.6-05 的那一条）。
- * `default` 那一档把主题四格全部取消（`paragraph` 不动：段落样式是另一族表态）。
- */
-const THEME_PRESETS: { id: string; patch: ResumeEditorDesignPatchView }[] = [
-  { id: 'default', patch: { inkHex: null, paperHex: null, accentHex: null, body: null } },
-  {
-    id: 'ink',
-    patch: {
-      inkHex: '#101820',
-      paperHex: '#f7f5f2',
-      accentHex: '#a31621',
-      body: { fontFamily: 'serif', weight: 'normal' },
-    },
-  },
-  {
-    id: 'jade',
-    patch: {
-      inkHex: '#1b2228',
-      paperHex: '#ffffff',
-      accentHex: '#0b5c50',
-      body: { fontFamily: 'sans', weight: 'normal' },
-    },
-  },
-  {
-    id: 'seal',
-    patch: {
-      inkHex: '#334155',
-      paperHex: '#f7f5f2',
-      accentHex: '#b93b26',
-      body: { fontFamily: 'serif', weight: 'medium' },
-    },
-  },
-];
-
-/** 段落样式的六种区块种类（与 `resume.kind.*` 同一份枚举，界面不另列一套）。 */
-const PARAGRAPH_KINDS: readonly ResumeSectionKindView[] = [
-  'summary',
-  'experience',
-  'education',
-  'skills',
-  'project',
-  'campus',
-];
-
-/** 主题里的三格颜色轴（顺序即画面顺序）。 */
-const THEME_COLOR_AXES: readonly ('inkHex' | 'paperHex' | 'accentHex')[] = ['inkHex', 'paperHex', 'accentHex'];
-
-/** 段落样式里的两格颜色轴（字色与底色）。 */
-const PARAGRAPH_COLOR_AXES: readonly ('inkHex' | 'backdropHex')[] = ['inkHex', 'backdropHex'];
-
-/** 字族的两个档（清单来自 `model.ts` 的 `FONT_FAMILY_TOKENS`，过界那侧按同一串验收）。 */
-const FONT_FAMILY_TOKENS: readonly EditorFontFamilyView[] = ['sans', 'serif'];
-
-/** 字重的四个档。 */
-const FONT_WEIGHT_TOKENS: readonly EditorFontWeightView[] = ['normal', 'medium', 'semibold', 'bold'];
-
-/** 对齐的四个档。 */
-const TEXT_ALIGN_TOKENS: readonly EditorTextAlignView[] = ['left', 'center', 'right', 'justify'];
-
-/**
- * 拼一格的**主题**颜色补丁（写成三个分支而不是 `{ [axis]: value }`：计算属性会让键退化成
- * `string`，那份补丁就到不了 `ResumeEditorDesignPatchView` 的形状了）。
- * @param axis 哪一格
- * @param value 新色，或 `null` 取消那一格
- * @returns 只含那一格的补丁
- */
-function themePatch(axis: 'inkHex' | 'paperHex' | 'accentHex', value: string | null): ResumeEditorDesignPatchView {
-  if (axis === 'inkHex') return { inkHex: value };
-  if (axis === 'paperHex') return { paperHex: value };
-  return { accentHex: value };
-}
-
-/**
- * 拼一格的**段落**样式补丁。
- * @param kind 当前选中的区块种类（补丁里必填，主进程按它定位那一格）
- * @param axis 段落六条轴之一
- * @param value 新值，或 `null` 取消那一格
- * @returns 只带 `kind` 与那一条轴的补丁
- */
-function paragraphPatch(
-  kind: ResumeSectionKindView,
-  axis: 'sizePt' | 'weight' | 'align' | 'lineHeight' | 'inkHex' | 'backdropHex',
-  value: string | number | null,
-): ResumeEditorDesignPatchView {
-  return { paragraph: { kind, [axis]: value } };
-}
-
-/**
- * 判"当前主题是不是这一套预设"（预设格的选中态用，不是判据——判界只在主进程做一次）。
- * @param design 投影里带回来的主题（`undefined` = 从没设过）
- * @param patch 那一套预设的补丁
- * @returns 预设里给出的每一格都对得上才算选中；全 null 那一套要求 `design` 整格不存在
- */
-function matchesPreset(design: ResumeEditorDesignView | undefined, patch: ResumeEditorDesignPatchView): boolean {
-  if (patch.inkHex === null && patch.paperHex === null && patch.accentHex === null && patch.body === null) {
-    return design === undefined;
-  }
-  // 正文档在这一支只认"预设给了具体档位"那一种：`null`（整组取消）只出现在上面那一套 default 里。
-  const presetBody = typeof patch.body === 'object' ? patch.body : undefined;
-  if (!design || (patch.body !== undefined && !presetBody)) return false;
-  const bodySame =
-    !presetBody ||
-    ((design.body?.fontFamily ?? INHERIT) === (presetBody.fontFamily ?? INHERIT) &&
-      (design.body?.weight ?? INHERIT) === (presetBody.weight ?? INHERIT));
-  return (
-    design.inkHex === patch.inkHex &&
-    design.paperHex === patch.paperHex &&
-    design.accentHex === patch.accentHex &&
-    bodySame
-  );
 }
 
 /**
@@ -215,10 +65,25 @@ export function ResumeEditor({
   onPreview: (html: string | undefined) => void;
 }) {
   const { t } = useTranslation();
-  const bridge = window.autoCC;
-  const [view, setView] = useState<ResumeEditorView>();
-  const [previewMs, setPreviewMs] = useState<number>();
-  const [rejected, setRejected] = useState<string>();
+  /**
+   * 会话本体在 `useResumeEditor`（spec 3.10-07）：这一档的控件与整屏编辑页吃的是**同一份**投影、
+   * 同一条撤销栈、同一张 draft 的纸。这里只留界面自己的四样（确认关闭、拖拽进行态、拆点行号、段落种类）。
+   */
+  const {
+    view,
+    rejected,
+    previewMs,
+    busy,
+    notice,
+    noticeTone,
+    setMetric,
+    applyDesign,
+    moveSection,
+    splitEntry,
+    mergeEntry,
+    stepHistory,
+    save,
+  } = useResumeEditor({ docId, templateId, locale, onPreview });
   const [confirmClose, setConfirmClose] = useState(false);
   const [drag, setDrag] = useState<DragState>();
   /**
@@ -237,52 +102,12 @@ export function ResumeEditor({
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
 
   /**
-   * 拉一次当前 draft 的预览 HTML 并计时（3.6-08 的读数来源就是这一趟跨进程往返）。
-   * 它不走 `run`：`run` 结束会调 `read`，而 `read` 里就要调它——绕成递归的话每次动作会翻倍发调用。
-   * 拿到之后**不在本组件里画**：交一份给 `onPreview`，由右栏那张纸去画（spec 6.4-14 的④）。
-   */
-  const refreshPreview = useCallback(async () => {
-    if (!bridge) return;
-    const started = performance.now();
-    const reply = await bridge.resume['editor.preview'](docId);
-    setPreviewMs(Math.round(performance.now() - started));
-    onPreview(reply?.ok ? reply.value : undefined);
-  }, [bridge, docId, onPreview]);
-
-  /** 每个动作结束后一律重读投影 + 重取预览：界面不猜主进程当下的状态（AGENTS.md §2.5）。 */
-  const read = useCallback(async () => {
-    const reply = await bridge?.resume['editor.view'](docId);
-    if (reply?.ok) setView(reply.value);
-    await refreshPreview();
-  }, [bridge, docId, refreshPreview]);
-
-  const { busy, notice, noticeTone, run } = useBridgeAction(read);
-
-  /**
-   * 挂起时开一次会话（`open` 会放弃上一份未保存的 draft，正是裁定⑨"只拦不存"的另一半）。
-   */
-  useEffect(() => {
-    void run(t('resume.editor.open'), () => bridge?.resume['editor.open'](docId), {
-      apply: setView,
-      describe: (value) => t('resume.editor.opened', { docId: value.docId }),
-    });
-    // 只在挂载时开一次：`run` 与 `t` 的引用每次渲染都变，把它们放进依赖会反复重开会话并丢掉草稿。
-  }, [docId]);
-
-  /**
-   * 把指针的纵坐标换算成落点下标：数一下"中心线在指针上方"的行数。
-   * `moveSection` 的 `toIndex` 是**结果序列**（抽掉再插入）里的位置，所以这里不加 1。
+   * 把指针的纵坐标换算成落点下标——与纸面帧那一份共用 `dropIndexOfPointer`（spec 3.10-05 / §2.2）。
    * @param clientY 指针视口纵坐标（px）
    * @param rowCount 当前区块行数
    */
-  const indexOfPointer = (clientY: number, rowCount: number) => {
-    let index = 0;
-    for (let row = 0; row < rowCount; row += 1) {
-      const rect = rowRefs.current.get(row)?.getBoundingClientRect();
-      if (rect && rect.top + rect.height / 2 < clientY) index += 1;
-    }
-    return Math.min(Math.max(index, 0), rowCount - 1);
-  };
+  const indexOfPointer = (clientY: number, rowCount: number) =>
+    dropIndexOfPointer(clientY, (index) => rowRefs.current.get(index)?.getBoundingClientRect(), rowCount);
 
   /**
    * 拖拽的监听在 `pointerdown` **当场**挂上，不挂在后续渲染的 effect 里。
@@ -318,18 +143,7 @@ export function ResumeEditor({
       if (!current || current.overIndex === current.fromIndex) return;
       const section = sections[current.fromIndex];
       if (!section) return;
-      void run(
-        t('resume.editor.moveSection'),
-        () => bridge?.resume['editor.move'](docId, section.id, current.overIndex),
-        {
-          apply: (value) => {
-            setView(value);
-            setRejected(undefined);
-          },
-          describe: () => t('resume.editor.moved', { from: current.fromIndex + 1, to: current.overIndex + 1 }),
-          onError: (error) => setRejected(error.message),
-        },
-      );
+      moveSection(section.id, current.overIndex);
     };
     const initial = { fromIndex: index, overIndex: index };
     dragRef.current = initial;
@@ -348,107 +162,6 @@ export function ResumeEditor({
   );
 
   /**
-   * 改一条度量：界外与非有限值都由主进程拒，界面把那句原因原样摆出来并把滑杆弹回已提交的值。
-   * @param key 度量键
-   * @param value 新值（单位随键，界表见 `view.metricBounds`）
-   */
-  const setMetric = (key: EditorMetricKeyView, value: number) =>
-    void run(t('resume.editor.metric'), () => bridge?.resume['editor.metric'](docId, key, value), {
-      apply: (next) => {
-        setView(next);
-        setRejected(undefined);
-      },
-      describe: () => t('resume.editor.metricDone', { key: t(`resume.editor.units.${key}`), value }),
-      onError: (error) => setRejected(error.message),
-    });
-
-  /**
-   * 改一格样式（spec 6.6-05）。一次调用 = **一个撤销单元**，所以点一次预设发的是整套补丁而不是四次单格。
-   *
-   * 界面不判颜色形状、不判档位清单、不判数值界（AGENTS.md §2.5）：那三件事只在主进程的
-   * `planDesign` 做一次，拒了就把那句原因原样摆出来。色卡因此只摆得出 `#rrggbb`，
-   * 人挑不出一个不合法的颜色，也就不存在"界面放行、保存被拒"的分叉。
-   * @param axis 哪一格（回执与拒绝话术里要说清是哪一格）
-   * @param patch 补丁（`null` = 取消那一格，回到模板默认档）
-   */
-  const applyDesign = (axis: string, patch: ResumeEditorDesignPatchView) =>
-    void run(t('resume.editor.design'), () => bridge?.resume['editor.design'](docId, patch), {
-      apply: (next) => {
-        setView(next);
-        setRejected(undefined);
-      },
-      describe: () => t('resume.editor.designDone', { axis: t(`resume.editor.axes.${axis}`) }),
-      onError: (error) => setRejected(error.message),
-    });
-
-  /**
-   * 换预览模板或语言（3.6-04）：它不碰文档，所以画面上只换排版而数据一字不变。
-   * @param templateId 目标模板 id，不给表示不改
-   * @param locale 目标预览语言，不给表示不改
-   */
-  const useTemplate = (templateId?: string, locale?: ResumeLocaleView) =>
-    void run(t('resume.editor.use'), () => bridge?.resume['editor.use'](docId, templateId, locale), {
-      apply: (next) => {
-        setView(next);
-        setRejected(undefined);
-      },
-      describe: () => t('resume.editor.useDone', { template: templateId ?? locale ?? '' }),
-    });
-
-  /**
-   * 把会话里的预览模板/语言对齐到**架上那一份**（用户 2026-10-12 报的「编排显示的样式和预览不一致」根因）。
-   *
-   * 这一档的会话是 `editor.open` 时按库里那份模板起的，而预览那一档吃 desk 的 `templateId`/`locale`。
-   * 从前这里另长一只下拉让人在编辑器里再选一次，于是同一种选择有两处、两张纸各说各话：
-   * 架上点「现代双栏」，编排那张纸还是「经典单栏」。现在唯一来源是 desk，差异出现时补一次
-   * `resume.editor.use`——它不碰文档，因此不产生撤销单元（3.6-04 的口径原样沿用）。
-   * `run` 的收尾会重读投影并重出预览，所以画面自己跟上。
-   */
-  useEffect(() => {
-    if (!view) return;
-    if (view.templateId === templateId && view.locale === locale) return;
-    useTemplate(templateId, locale);
-    // `useTemplate` 每次渲染换引用（它闭包着 `run`），放进依赖会在无关动作后重发这一趟；
-    // 判据只有上面那四个值，`run` 在途时这条 effect 本就因 view 不变而不会再发。
-  }, [view, templateId, locale]);
-
-  /**
-   * 拆一条（spec 3.6-10 / 裁定㉗ 第 1 条后半句）：把这一条的正文从第 `bodyLineIndex` 行之后断成两条。
-   *
-   * 过界的只有那**一个整数**：正文不许过界，所以界面递不出"在哪一句之后断开"这句话（plan 06 §3.33 的形状约束①），
-   * 人是对着常驻纸面数行把步进器拨到位的。可拨的上界就是投影里那条 `bodyLineCount`，与主进程
-   * `planEntrySplit` 的 `index-out-of-range` 同用一支 `entryBodyLineCount`（§2.5：判据一份，不存在"界面放行、保存被拒"）。
-   * @param sectionId 区块 id
-   * @param entryId 条目 id
-   * @param bodyLineIndex 留在前一条里的行数（从 1 起算）
-   */
-  const splitEntry = (sectionId: string, entryId: string, bodyLineIndex: number) =>
-    void run(t('resume.editor.split'), () => bridge?.resume['editor.split'](docId, sectionId, entryId, bodyLineIndex), {
-      apply: (next) => {
-        setView(next);
-        setRejected(undefined);
-      },
-      describe: () => t('resume.editor.splitDone', { line: bodyLineIndex }),
-      onError: (error) => setRejected(error.message),
-    });
-
-  /**
-   * 并一条（spec 3.6-10）：方向写死为"并回同区块的上一条"，界面不给人挑"并到哪一条"——
-   * 那要往过界递第二个条目 id，而人的意图从来只有"这两条本来是一条"。
-   * @param sectionId 区块 id
-   * @param entryId 要并走的条目 id
-   */
-  const mergeEntry = (sectionId: string, entryId: string) =>
-    void run(t('resume.editor.merge'), () => bridge?.resume['editor.merge'](docId, sectionId, entryId), {
-      apply: (next) => {
-        setView(next);
-        setRejected(undefined);
-      },
-      describe: () => t('resume.editor.mergeDone'),
-      onError: (error) => setRejected(error.message),
-    });
-
-  /**
    * 把某一条目的拆点拨一格：只动界面状态，不发跨进程调用。
    *
    * 这里的上下界不是**第二份判定**：它就是投影里那一格的 `bodyLineCount`（上界 = 行数 - 1，
@@ -463,30 +176,6 @@ export function ResumeEditor({
       return next === current[key] ? current : { ...current, [key]: next };
     });
   };
-
-  /**
-   * 回退 / 重做一步（3.6-03）。
-   * @param direction 方向：撤销或重做
-   */
-  const stepHistory = (direction: 'undo' | 'redo') =>
-    void run(
-      t(direction === 'undo' ? 'resume.editor.undo' : 'resume.editor.redo'),
-      () => (direction === 'undo' ? bridge?.resume['editor.undo'](docId) : bridge?.resume['editor.redo'](docId)),
-      {
-        apply: setView,
-        describe: () => t(direction === 'undo' ? 'resume.editor.undone' : 'resume.editor.redone'),
-      },
-    );
-
-  /**
-   * 保存到库（3.6-09 的另一半）：唯一的写入口是 `resume.editor.save`，界面手里没有正文，
-   * 因此不可能绕过它去调 `resume.doc.save`。
-   */
-  const save = () =>
-    void run(t('resume.editor.save'), () => bridge?.resume['editor.save'](docId), {
-      apply: setView,
-      describe: () => t('resume.editor.saved'),
-    });
 
   /**
    * "关闭编辑器"的判定（裁定⑪：只拦组件卸载这一层，app 关闭不在 3.6-09 的判据原文里）。
@@ -640,7 +329,7 @@ export function ResumeEditor({
                 onClick={() => {
                   // 先等保存那一趟跨进程往返真落地，再卸载：反过来会留下一份"看起来存了其实没存"的草稿
                   // （裁定⑨ 之后界面没有第二次恢复入口，所以这一步的顺序不能马虎）。
-                  void bridge?.resume['editor.save'](docId).then(() => onClose());
+                  void save().then(() => onClose());
                 }}
               >
                 {t('resume.editor.saveAndLeave')}
@@ -1042,7 +731,16 @@ export function ResumeEditor({
           <Redo2 size={12} />
           {t('resume.editor.redo')}
         </DeskButton>
-        <DeskButton action="save-editor" variant="amber" compact busy={!!busy} {...dead(saveReason)} onClick={save}>
+        <DeskButton
+          action="save-editor"
+          variant="amber"
+          compact
+          busy={!!busy}
+          {...dead(saveReason)}
+          onClick={() => {
+            void save();
+          }}
+        >
           <Save size={12} />
           {t('resume.editor.save')}
         </DeskButton>

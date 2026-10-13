@@ -202,7 +202,12 @@ describe('6.6-01 样式不碰事实：只改主题的生成结果不算篡改', 
 describe('6.6-02 模板片段：只挂设了的那几条轴的槽位类', () => {
   it('无主题时片段里一个 rz- 类都没有', () => {
     for (const template of resumeTemplate.list()) {
-      expect(resumeTemplate.render(doc(), template.id, 'zh-CN')).not.toContain('rz-');
+      const html = resumeTemplate.render(doc(), template.id, 'zh-CN');
+      // 判据只吃 `class="…"`：`data-rz-section/kind/entry` 那三枚是 3.10 整屏编辑的**命中锚点**
+      // （不带任何样式，无主题时片段照样不该长出槽位类），按整串 `rz-` 判会把锚点当成主题泄漏。
+      const classAttrs = html.match(/class="[^"]*"/g) ?? [];
+      expect(classAttrs.length, `${template.id} 片段里没有 class 属性，判据空转`).toBeGreaterThan(0);
+      for (const classAttr of classAttrs) expect(classAttr, `${template.id} 无主题却挂了槽位类`).not.toContain('rz-');
     }
   });
 

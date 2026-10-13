@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { ExportReceiptView, ResumeLocaleView } from '@auto-cc/shared';
+import { ResumePaperFrame } from './ResumePaperFrame';
 import { DeskButton, DeskSegmented } from './ui/controls';
 import { DeskExplainer } from './ui/disclosure';
 import { useRevealLabel } from './ui/overlays';
@@ -15,9 +15,6 @@ import { useRevealLabel } from './ui/overlays';
  * - `pdf` 编辑轨的 PDF 覆盖层（改的是用户手里那份真实文件）
  */
 export type ResumePaperMode = 'preview' | 'layout' | 'pdf';
-
-/** 纸面槽左右内边距的**总**宽度（px）：与下面槽位 class 里的 `p-3`（12×2）是同一个数。 */
-const PAPER_SLOT_PADDING_PX = 24;
 
 /**
  * 这一张纸此刻的供料状态（`ResumeDesk` 是唯一判别人，槽位只转述）。
@@ -91,27 +88,6 @@ export function ResumePaperStage({
   const { t } = useTranslation();
   // 「在访达中显示」那一句与左下角 toast 的 reveal 键同源（同一句话在两处各拼一遍就是第二份事实，§2.2）。
   const revealLabel = useRevealLabel();
-  /** 纸的那一格：宽度跟着右栏走，倍率写在自己身上。 */
-  const slotRef = useRef<HTMLDivElement | null>(null);
-  /** 唯一那张纸（iframe）。`offsetWidth` 是它的**布局**宽度，不受 transform 影响，正好拿来当分母。 */
-  const frameRef = useRef<HTMLIFrameElement | null>(null);
-
-  /**
-   * 量一次槽宽并把显示倍率写成 CSS 变量。
-   * 分母取 iframe 自己量出的布局宽度而不是写死的 794：`210mm` 换到多少 px 由浏览器与 DPI 口径决定，
-   * 写死等于在界面里存第二份纸宽事实（§2.5）。
-   * 分子要扣掉槽位自己的左右内边距（`PAPER_SLOT_PADDING_PX`）——扣了这一格，纸的右缘才会落在槽内，
-   * 而 `overflow-hidden` 只是保险，不是"裁纸"的那一道（spec 6.4-12 的③）。
-   */
-  const fitPaper = useCallback(() => {
-    const slot = slotRef.current;
-    const frame = frameRef.current;
-    if (!slot || !frame) return;
-    const naturalWidth = frame.offsetWidth;
-    const availWidth = slot.clientWidth - PAPER_SLOT_PADDING_PX;
-    if (naturalWidth < 1 || availWidth < 1) return;
-    slot.style.setProperty('--paper-scale', String(Math.min(1, availWidth / naturalWidth)));
-  }, []);
 
   /** 三档页签的文案（值即 `data-action` 后缀：`paper-stage-preview` 这种，harness 按它切档）。 */
   const stageOptions = [
@@ -119,25 +95,6 @@ export function ResumePaperStage({
     { value: 'layout' as const, label: t('resume.paper.modeLayout') },
     { value: 'pdf' as const, label: t('resume.paper.modePdf') },
   ];
-
-  /** 纸此刻在不在槽里（PDF 档换的是画布，不参与缩放）。 */
-  const paperMounted = mode !== 'pdf';
-
-  // 内容换了要重量一次：新挂上的 iframe 首帧还没有布局宽度。
-  useLayoutEffect(() => {
-    fitPaper();
-  }, [fitPaper, paperHtml, paperMounted]);
-
-  // 槽位宽度由 ResizeObserver 推：拖右栏把手、缩窗口、展开内核视图都会让这一格重新布局。
-  // `mode` 必须在依赖里（与 `KernelViewSlot` 那条同一个理由）：PDF 档不画这一格，
-  // 回到预览时节点是新的，effect 不重跑就没有观察器，纸会停在最后一次量到的倍率上。
-  useEffect(() => {
-    const slot = slotRef.current;
-    if (!slot) return;
-    const observer = new ResizeObserver(() => fitPaper());
-    observer.observe(slot);
-    return () => observer.disconnect();
-  }, [fitPaper, mode]);
 
   return (
     <section
@@ -186,35 +143,18 @@ export function ResumePaperStage({
       {mode === 'pdf' ? (
         <div className="min-w-0">{pdfView}</div>
       ) : (
-        <div
-          ref={slotRef}
-          data-testid="resume-paper-slot"
-          className="h-[min(72vh,900px)] min-h-[460px] min-w-0 overflow-hidden p-3"
-        >
-          {paperHtml === undefined ? (
-            <div
-              data-testid={mode === 'layout' ? 'resume-editor-preview-empty' : 'resume-preview-empty'}
-              className="flex h-full w-full items-center justify-center rounded-control border border-dashed border-line bg-ink-850 px-6 text-center text-[11px] leading-relaxed text-slate-500"
-            >
-              {t(mode === 'layout' ? 'resume.editor.previewEmpty' : 'resume.previewEmpty')}
-            </div>
-          ) : (
-            // `w-[210mm]` 是字面量：预览按 A4 的真实纸宽摆，装不下时整张缩小（`--paper-scale`），
-            // 而不是压窄纸面、也不是横向滚——压窄了折行就与导出产物不是同一张纸（3.3-01），
-            // 滚则等于把人刚要看的那张纸切掉一块（6.4-12 的③）。
-            // 倍率是**视觉**缩放，布局盒仍是 794px，所以父级的 `overflow-hidden` 必须有：
-            // 它在的是"倍率还没量到的首帧"那一格，而不是裁纸的口子。
-            // 高度按倍率反算（`calc(100% / k)`）：缩放之后正好铺满槽位的内容盒，上下各留 `p-3`。
-            <iframe
-              ref={frameRef}
-              data-testid={mode === 'layout' ? 'resume-editor-preview' : 'resume-preview'}
-              title={t(mode === 'layout' ? 'resume.editor.heading' : 'resume.paper.aria')}
-              sandbox=""
-              srcDoc={paperHtml}
-              className="h-[calc(100%/(var(--paper-scale)))] w-[210mm] shrink-0 origin-top-left scale-(--paper-scale) rounded-control border border-line bg-white shadow-sheet"
-            />
-          )}
-        </div>
+        <ResumePaperFrame
+          html={paperHtml}
+          frameTestId={mode === 'layout' ? 'resume-editor-preview' : 'resume-preview'}
+          frameTitle={t(mode === 'layout' ? 'resume.editor.heading' : 'resume.paper.aria')}
+          // 这一档是**只读**的那一张：帧里不跑脚本、父页也不读它（sandbox 空串）。
+          // 整屏编辑页那一档才放开 `allow-same-origin`，为的是在父页一侧现量段矩形（spec 3.10-01）。
+          sandbox=""
+          emptyTestId={mode === 'layout' ? 'resume-editor-preview-empty' : 'resume-preview-empty'}
+          emptyLabel={t(mode === 'layout' ? 'resume.editor.previewEmpty' : 'resume.previewEmpty')}
+          slotTestId="resume-paper-slot"
+          slotClassName="h-[min(72vh,900px)] min-h-[460px] min-w-0 overflow-hidden p-3"
+        />
       )}
 
       {/* 「装不下就缩小」这件事必须有一句人话，否则人会觉得字突然变小是界面出了毛病。 */}
