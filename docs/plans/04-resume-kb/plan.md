@@ -2376,5 +2376,11 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
   按并存口径不替它改、不给它开豁免；本片射程内单跑：`npx eslint --max-warnings 0 <8 份源文件与测试>` **EXIT=0**、
   `npx prettier --check <本片 10 份改动 + 本文件与 spec>` **EXIT=0**、`npx tsx scripts/check-renderer-conventions.ts` **EXIT=0**、
   `npx tsx scripts/check-lexicon.ts` **EXIT=0**。
+- **一条顺带的活体读数（不算 V 判据，只证升级路径）**：本机开发实例的库
+  （`~/Library/Application Support/auto-cc/store.db`）现读 `schema_migrations` 最高 **40**、
+  `pragma_table_info('resume_docs')` = `id, schema_version, content_hash, doc_json, updated_at, parent_doc_id, jd_id, jd_label`
+  ——一支 `ALTER ADD COLUMN` 在一份**已经跑过 7 / 36 / 39** 的老库上真落到了列，且没有回填旧号。
+  同一次读数里 `resume_docs` 是**零行**，所以 4.11-16 / 31 / 32 那两张画面在这台机上还没有现成数据可拍：
+  先要有母版（导入或自测台那颗种子键），再走一趟生成 + 接受才会长出变体行。
 - **还欠的只有 V 半边（4.11-31 / 32 与 4.11-16）**：真实窗口里那两张画面（母版行 + 两支不同 JD 的变体行各带标题与时刻）、
   切换后各自导出的两份 PDF 产物 hash 互异，必须 `pnpm dev` + harness 打 `--url 5173` 现读，等用户在场。
