@@ -251,12 +251,12 @@ export class ResumeDocService extends Service {
    * 四步必须绑在一起发生。分开写就会出现第二种结局：两个调用点各自造一支同 JD 的变体，
    * 界面上长出两行、删一删不干净，而"只改 JD 就能生成不同简历"这句话就没有落地对象了。
    * 已有变体时**整份覆盖正文、血缘列一字不动**——再按同一段 JD 生成一次是更新那一份，不是长出新的一份。
-   * @param input.parentDocId 母版 id（必须已存在；派生不许凭空造一支没有来路的变体）
+   * @param input.parentDocId 母版 id（必须已存在**且它自己不是变体**：血缘只许一层）
    * @param input.jdId 生成它的那段 JD 的 id；null 表示无归因（界面显示「未标明 JD」，不拿哈希冒充）
    * @param input.document 要装进变体的文档；它的 `id` 在这里被换成变体 id，其余字段原样落库
    * @param input.nowMs 变体行的 `updatedAt`（毫秒），由调用方给，避免同一份改动在两处各取一次时钟
    * @returns 变体行的 id、落库后的内容 hash、以及这一趟是否新建了行
-   * @throws AppError(`INVALID_ARGUMENT`) 母版不存在，或文档未通过 `save` 那侧的权威校验
+   * @throws AppError(`INVALID_ARGUMENT`) 母版不存在 / 母版本身是变体（第二层血缘），或文档未通过 `save` 那侧的权威校验
    */
   deriveVariant = (input: {
     parentDocId: string;
@@ -264,8 +264,19 @@ export class ResumeDocService extends Service {
     document: ResumeDocument;
     nowMs: number;
   }): DeriveVariantResult => {
-    if (!this.exists(input.parentDocId)) {
+    const parent = this.db
+      .prepare('SELECT parent_doc_id AS parentDocId FROM resume_docs WHERE id = ?')
+      .get(input.parentDocId) as { parentDocId: string | null } | undefined;
+    if (parent === undefined) {
       throw new AppError('INVALID_ARGUMENT', `母版 ${input.parentDocId} 不存在，派不出变体：先导入或新建一份简历`);
+    }
+    // 血缘只许一层。变体再生变体在形状上毫无限制，在读数上是灾难：界面排不出"这一份是谁的定制结果"，
+    // 而删掉最上面那一支时，下面那支的来路就指向一个不存在的行（这张表的 DDL 没有外键子句，级联不会被声明出来）。
+    if (parent.parentDocId !== null) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `${input.parentDocId} 本身是变体（母版 ${String(parent.parentDocId)}）：变体不再往下派生`,
+      );
     }
     const existingId = this.findVariantId(input.parentDocId, input.jdId);
     const docId = existingId ?? newDocId();
@@ -273,8 +284,7 @@ export class ResumeDocService extends Service {
     // 已派生过：只覆盖正文（`save` 的 UPSERT 不碰血缘列），界面读到的还是那一行、那一段 JD。
     if (existingId !== null) return { docId, hash: this.save(doc).hash, created: false };
     // 新建那一趟要把正文与血缘一起落：`save` 只认正文（它服务五条既有调用点，不认识血缘），
-    // 血缘只在这一个口里写，所以两条语句必须同成同败——全仓没有一处设 `PRAGMA foreign_keys`（§9 的 5.3-a），
-    // 这两列也没有外键可依赖，崩溃在中间会留下一行"正文是变体、血缘是 NULL"的假母版。
+    // 血缘只在这一个口里写，所以两条语句必须同成同败：崩溃在中间会留下一行"正文是变体、血缘是 NULL"的假母版。
     this.db.exec('BEGIN');
     try {
       const saved = this.save(doc);

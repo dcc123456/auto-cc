@@ -937,6 +937,37 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
   }
 
   /**
+   * 还剩几行变体指向一个已经不存在的母版（spec 4.11-18 的删除半边判的就是这个）。
+   *
+   * 为什么必须现查而不是相信级联：`resume_docs` 的 DDL 里根本没有外键子句（见 `foreignKeyFootprint` 那一格读数），
+   * "删父行带走子行"这件事在 SQLite 里从来没有被声明过，所以它只可能由那条显式循环兑现。
+   * @param db 裸连接
+   * @returns 悬空血缘的行数
+   */
+  function orphanVariantCount(db: DatabaseSync): number {
+    const sql =
+      'SELECT COUNT(*) AS total FROM resume_docs WHERE parent_doc_id IS NOT NULL' +
+      ' AND parent_doc_id NOT IN (SELECT id FROM resume_docs)';
+    return Number((db.prepare(sql).get() as { total: number | bigint }).total);
+  }
+
+  /**
+   * 「级联是装饰性的」这一条事实的读数本体（spec 4.11-18 要求它有测试，而不是只有注释）。
+   * @param db 裸连接
+   * @returns 建表语句里有没有外键子句，以及本机连接上 `PRAGMA foreign_keys` 的实际值
+   */
+  function foreignKeyFootprint(db: DatabaseSync): { ddlDeclaresFk: boolean; pragmaForeignKeys: number } {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'resume_docs'").get() as
+      { sql?: string } | undefined;
+    return {
+      ddlDeclaresFk: /REFERENCES|FOREIGN KEY/.test(String(row?.sql ?? '')),
+      pragmaForeignKeys: Number(
+        (db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number | bigint }).foreign_keys,
+      ),
+    };
+  }
+
+  /**
    * 灌两份**真导入**的简历并把索引长齐：文件落盘 → `resume.parse` 建档 → `kb.profile` 派生实体与切片，
    * 再给第一份补两条快照、补一次向量，并在它的派生经历下挂一条手工实体。
    *
@@ -1009,6 +1040,75 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     expect(entityCount(db)).toBe(totalEntities - beforeA.entities);
     // 归属收敛走的是 4.2-04 那条老通道：全库不留悬空引用。
     expect(orphanParentCount(db)).toBe(0);
+  });
+
+  it('删母版连同它的每一支变体：`document` 那一格是行数而非份数（spec 4.11-18 / 裁定㉜）', async () => {
+    const dir = tempDir();
+    const { kb, doc, db, docIdA, docIdB } = await importedPairWithIndex(dir);
+    const loaded = doc.load(docIdA);
+    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    const backend = doc.deriveVariant({
+      parentDocId: docIdA,
+      jdId: 'jd-backend',
+      document: loaded.document,
+      nowMs: LATER_MS,
+    });
+    const platform = doc.deriveVariant({
+      parentDocId: docIdA,
+      jdId: 'jd-platform',
+      document: loaded.document,
+      nowMs: LATER_MS,
+    });
+    const before = docFootprint(db, docIdA);
+    // 变体不占素材（4.11-17）：两支各只有一行正文，删母版要带的行数因此只多 `document` 那一格。
+    expect(docFootprint(db, backend.docId)).toMatchObject({ document: 1, entities: 0, chunks: 0 });
+    expect(docFootprint(db, platform.docId)).toMatchObject({ document: 1, entities: 0, chunks: 0 });
+
+    expect(kb.removeDoc(docIdA, LATER_MS)).toEqual({ docId: docIdA, ...before, document: 3, detached: 1 });
+    expect(doc.exists(docIdA)).toBe(false);
+    expect(doc.exists(backend.docId)).toBe(false);
+    expect(doc.exists(platform.docId)).toBe(false);
+    expect(doc.exists(docIdB)).toBe(true);
+    // 不留"来路指向一个不存在的行"的孤儿：这一格靠的是那条显式循环，不是 DDL——外键子句压根没声明过。
+    expect(orphanVariantCount(db)).toBe(0);
+    // spec 4.11-18 要的那条"`foreign_keys` 未开"事实，实测**不在开关上**：本机连接默认回 1，
+    // 真正没有级联的原因是 `resume_docs` 的建表语句里一个外键子句都没有（全仓 `FOREIGN KEY` 零命中）。
+    expect(foreignKeyFootprint(db)).toEqual({ ddlDeclaresFk: false, pragmaForeignKeys: 1 });
+  });
+
+  it('删一支变体只带走那一行：母版与另一支照旧、素材层一字不少（spec 4.11-18 的反向）', async () => {
+    const dir = tempDir();
+    const { kb, doc, db, docIdA } = await importedPairWithIndex(dir);
+    const loaded = doc.load(docIdA);
+    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    const backend = doc.deriveVariant({
+      parentDocId: docIdA,
+      jdId: 'jd-backend',
+      document: loaded.document,
+      nowMs: LATER_MS,
+    });
+    const platform = doc.deriveVariant({
+      parentDocId: docIdA,
+      jdId: 'jd-platform',
+      document: loaded.document,
+      nowMs: LATER_MS,
+    });
+    const beforeMaster = docFootprint(db, docIdA);
+
+    expect(kb.removeDoc(backend.docId, LATER_MS)).toEqual({
+      docId: backend.docId,
+      document: 1,
+      snapshots: 0,
+      imports: 0,
+      entities: 0,
+      chunks: 0,
+      detached: 0,
+    });
+    expect(doc.exists(backend.docId)).toBe(false);
+    expect(doc.exists(platform.docId)).toBe(true);
+    // 「删掉那份定制结果」不该动原件：母版的正文、快照、出处、素材、切片逐表还是原来的数。
+    expect(docFootprint(db, docIdA)).toEqual(beforeMaster);
+    expect(orphanVariantCount(db)).toBe(0);
   });
 
   it('倒排与向量不留孤儿行：两条派生索引随切片一起清，剩下的一行都对得上主表', async () => {

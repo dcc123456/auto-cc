@@ -10,10 +10,11 @@
  * - 相关性读数：`kb.gap.report()`，本服务**不重开一条拆解或比对通道**（§2.5）。
  *
  * 五条装配层的立身之本：
- * 1. **`run()` 不写工作副本**。产物是"提议态"，唯一的 `save()` 发生在 `accept()` 里、
- *    也就是用户逐项接受之后（4.5-11）。于是生成这条路对 `resume.doc` 只有 `load()`，
+ * 1. **`run()` 一次盘都不落**。产物是"提议态"，唯一的写发生在 `accept()` 里、也就是用户逐项接受之后
+ *    （4.5-11），而接受写的是**这一趟对应的那一支变体**——母版一字不动（裁定㉜ / 4.11-15，落库走
+ *    `resume.doc.deriveVariant` 那个唯一的建行口）。于是生成这条路对 `resume.doc` 只有 `load()`，
  *    这是 4.5-05 那句"拒绝产出"能被断言的前提：没有产物可捞，也没有半份改动留在副本里。
- *    接受侧同样不放松：写之前比基线、写之前复验，两道都过才动那份文档（见 `accept()`）。
+ *    接受侧同样不放松：写之前比**两道**基线（母版 + 那一支变体，4.11-18）、写之前复验，都过才动文档。
  * 2. **产物与证据并排返回，不嵌进文档**（判据二）：`documentSchema` 是 `strictObject`，
  *    多一个私有键就同时破掉 4.5-01 与 4.5-12。所以返回体是
  *    `{ document, rewrites, evidence, reorderBases, checks, receipt }`，证据留在旁边那一份里。
@@ -48,6 +49,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import {
   validateDocument,
+  contentHash,
   GENERATION_EDITABLE_KEYS,
   type Entry,
   type ResumeDocument,
@@ -388,8 +390,14 @@ interface GenerationRecordRow {
  * `resume_generations` 里加正文列，那是判据三明确不要的东西（被拒内容不留整段），不落库是规则而非疏漏。
  */
 interface PendingProposal {
-  /** 生成那一刻的工作副本（接受前要比对，用户中途改过简历就不能再按旧产物写）。 */
+  /** 生成那一刻**被改写的那一份**（这一对 (母版, JD) 已有变体时就是变体，否则是母版）：接受前要比对。 */
   readonly baseline: ResumeDocument;
+  /** 这一趟的来路：母版行 id。事实层（`kb_entities` / `kb_chunks`）归母版，变体不重导（spec 4.11-17）。 */
+  readonly parentDocId: string;
+  /** 生成那一刻母版的 `content_hash`：母版被并行改过就拦（spec 4.11-18），而接受不写它一个字。 */
+  readonly parentHash: string;
+  /** 生成那一刻已存在的变体行 id；这对 (母版, JD) 从没采纳过时为 null（第一次接受才建那一行）。 */
+  readonly variantDocId: string | null;
   /** 重排后的区块序列（与 `view.reorderBases` 同源）。 */
   readonly sections: readonly Section[];
   /** 拼提示词时用的那份 JD 正文（`accept` 里复验具名回查要用，界面无从提供）。 */
@@ -522,12 +530,18 @@ export class ResumeGenerateService extends Service {
     filter: { docId?: string; jdId?: string | null } = {},
     nowMs = Date.now(),
   ): Promise<GenerationView> {
-    const docId = this.resolveDocId(filter.docId);
-    const loaded = this.docStore.load(docId);
+    const parentDocId = this.resolveDocId(filter.docId);
+    // 裁定㉜：这一趟要写的是「(母版, 这段 JD)」那一支变体。已有变体就以**它**为基础再生成——用户在那一支上的
+    // 手工改动与上一次采纳的结果都留在原地，"只换 JD 就换一份简历"靠的是每支变体有自己的那一份正文；
+    // 还没有变体时以母版为基础，第一次接受才建那一行（`run()` 依旧一次盘都不落，判据一不变）。
+    const variantDocId = this.docStore.findVariantId(parentDocId, filter.jdId ?? null);
+    const targetId = variantDocId ?? parentDocId;
+    const loaded = this.docStore.load(targetId);
     if (loaded.status !== 'found') {
       throw new AppError(
         'KB_SOURCE_MISSING',
-        `工作副本 ${docId} ${loaded.status === 'missing' ? '不存在' : '已损坏'}：先在知识库里导入一份简历再定制内容`,
+        `${targetId === parentDocId ? '工作副本' : '变体'} ${targetId} ` +
+          `${loaded.status === 'missing' ? '不存在' : '已损坏'}：先在知识库里导入一份简历再定制内容`,
       );
     }
     const gap = maybeService<KbGapService>(this.ctx, 'kb.gap');
@@ -535,6 +549,19 @@ export class ResumeGenerateService extends Service {
       throw new AppError('KB_LIBRARY_MISSING', '缺口比对服务 kb.gap 未装配：生成轨拿不到相关性读数');
     }
     const baseline = loaded.document;
+    // 母版那一刻的 hash：没有变体时两者就是同一行，不必多读一次；有变体时另取，
+    // 因为接受侧要**两道基线各自拦**（spec 4.11-18——母版动了是证据层换了版本，变体动了是两份改动会叠）。
+    let parentHash = contentHash(baseline);
+    if (targetId !== parentDocId) {
+      const parent = this.docStore.load(parentDocId);
+      if (parent.status !== 'found') {
+        throw new AppError(
+          'KB_SOURCE_MISSING',
+          `母版 ${parentDocId} ${parent.status === 'missing' ? '不存在' : '已损坏'}：变体 ${targetId} 没有了来路`,
+        );
+      }
+      parentHash = contentHash(parent.document);
+    }
     // 4.9-05：每一趟在拼消息之前**现问**一次生效的书写指引（不在本地存第二份事实，§9 的 2.5 那条热改会重建下游）。
     // 技能服务缺席（摘掉 `cordis.yml` 那一行）时正文为空、`skillSource` 为 null——提示词退回没有指引的那一份形状，
     // 而这一格降级必须能在读数里看出来，不能静默长成"指引反正一直没生效"。
@@ -542,7 +569,8 @@ export class ResumeGenerateService extends Service {
     const skillGuide = skillRead?.content ?? '';
     const requiredBefore = checkRequiredInfo(baseline);
     // 相关性、要求清单、证据强度全部来自 4.4 那一份报告——本服务不重算任何分数（§2.1）。
-    const report = await gap.report(jdText, { sourceDocId: docId }, nowMs);
+    // 取数一律按**母版**（spec 4.11-17）：实体与分块只有一份，变体不重导，否则同一个人在库里长两份事实。
+    const report = await gap.report(jdText, { sourceDocId: parentDocId }, nowMs);
     const drafts = deriveEntities(baseline);
     const reordered = reorderDocument(baseline, report.rows, drafts);
     const reorderedDoc: ResumeDocument = { ...baseline, sections: [...reordered.sections] };
@@ -596,8 +624,10 @@ export class ResumeGenerateService extends Service {
         : 'rejected';
 
     const violations = check === null ? [] : describeViolations(check);
+    // 记录行的 `doc_id` 仍是**母版**：复盘问的是"这份简历生成过哪几版"（那张索引就是 `(doc_id, created_at)`），
+    // 而按 JD 分成的那几支变体在库里靠血缘两列认，不在这里编第二个事实（spec 4.11-25 的台账两行靠 `jd_id` 归因）。
     const receipt = this.record({
-      docId,
+      docId: parentDocId,
       jdId: filter.jdId ?? null,
       createdAt: nowMs,
       attempt,
@@ -628,6 +658,9 @@ export class ResumeGenerateService extends Service {
       // 提议态留在主进程：`accept` 认的是 `receiptId`，位置三键与正文都不经界面来回（判据二 / 4.5-11）。
       this.remember(receipt.id, {
         baseline,
+        parentDocId,
+        parentHash,
+        variantDocId,
         sections: reordered.sections,
         jdText,
         view,
@@ -638,18 +671,21 @@ export class ResumeGenerateService extends Service {
   }
 
   /**
-   * 按用户在界面上的逐项表态，把选中的改写与（可选的）重排写进工作副本（spec 4.5-11）。
+   * 按用户在界面上的逐项表态，把选中的改写与（可选的）重排写进**这一趟对应的那一支变体**
+   * （spec 4.5-11 的"接受后才写入"+ 裁定㉜ 的"母版不被生成覆盖"，判据 4.11-15）。
    *
    * 三条不放行的判定，都在"写"之前：
    * 1. **提议态还在**（本服务重启过 / 超出保留窗口 → 让界面重新生成，不猜用户当时看到什么）；
-   * 2. **工作副本逐字未变**（生成之后用户自己改过简历 → 两份改动叠在一起是谁都没法解释的产物）；
+   * 2. **两道基线逐字未变**（母版与这一趟那一支变体各自核一遍，spec 4.11-18：生成之后简历被改过，
+   *    两份改动叠在一起是谁都没法解释的产物）；
    * 3. **子集再过一次同一套校验**（每条改写各自守恒数值，所以子集必然通过；这里跑它不是为了防模型，
    *    是为了防"界面回传的下标拼出来一份我们没验过的组合"——写用户简历是全片唯一不可逆的动作）。
    * 一条都没勾且重排也没采纳时**一次盘都不落**（见函数体里那条早退），返回的是零改写的读数。
    * @param receiptId 一次生成的凭证 id（`receipt.id`，同时是 `resume_generations` 那一行的主键）
    * @param decision 逐项表态：接受哪几条改写（下标）、要不要采纳重排
    * @param nowMs 写入时刻（毫秒），只用于比对与读数，不进 `save`
-   * @returns 写进去的改写条数、是否采纳重排、以及工作副本写入后的 `updatedAt`
+   * @returns 写进去的改写条数、是否采纳重排、以及**那一支变体**写入后的 `updatedAt`
+   *          （`docId` 是变体行 id，不是母版——母版在这一趟里一个字都不动，spec 4.11-15）
    * @throws AppError(`KB_GENERATION_PROPOSAL_MISSING` / `INVALID_ARGUMENT` / `KB_SOURCE_MISSING` /
    *         `KB_GENERATION_STALE_BASELINE` / `KB_GENERATION_CHECK_FAILED`)
    */
@@ -664,7 +700,7 @@ export class ResumeGenerateService extends Service {
     if (proposal.view.document === null) {
       throw new AppError('INVALID_ARGUMENT', `${receiptId} 那次生成被拒绝产出，没有可接受的改写`);
     }
-    const docId = proposal.view.receipt.docId;
+    const { parentDocId, variantDocId } = proposal;
     // 表态的是**界面看见的那一行**（`view.rewrites`），不是模型回答里的那一条：两者的顺序不同
     // （行按文档结构排，回答按模型给的顺序排），拿回答侧的下标就等于让用户签他没看见的东西。
     const rows = proposal.view.rewrites;
@@ -687,28 +723,57 @@ export class ResumeGenerateService extends Service {
         originalText: row.originalText,
         rewrittenText: row.rewrittenText,
       }));
-    const loaded = this.docStore.load(docId);
-    if (loaded.status !== 'found') {
-      throw new AppError('KB_SOURCE_MISSING', `工作副本 ${docId} ${loaded.status === 'missing' ? '不存在' : '已损坏'}`);
+    // 两道基线各自拦（spec 4.11-18 / 裁定㉜），因为这一趟动的是两支文档而不是一支：
+    // ① **母版**动了 → 这一趟的证据与事实层已经换了版本，即使要写的字一个都不落在它上面也不能照写；
+    // ② **那一支变体**动了（人在整屏编辑页改过，或这一对 (母版, JD) 认的行换了）→ 两份改动叠在一起
+    //    是谁都没法解释的产物。第一次生成时还没有变体那一行，②就并进①（此时基线就是母版）。
+    const parent = this.docStore.load(parentDocId);
+    if (parent.status !== 'found') {
+      throw new AppError(
+        'KB_SOURCE_MISSING',
+        `母版 ${parentDocId} ${parent.status === 'missing' ? '不存在' : '已损坏'}`,
+      );
     }
-    if (JSON.stringify(loaded.document) !== JSON.stringify(proposal.baseline)) {
+    if (contentHash(parent.document) !== proposal.parentHash) {
       throw new AppError(
         'KB_GENERATION_STALE_BASELINE',
-        `工作副本 ${docId} 在生成之后被改过：先重新生成，再逐项接受，不要把两份改动叠在一起`,
+        `母版 ${parentDocId} 在生成之后被改过：先重新生成，再逐项接受，不要把两份改动叠在一起`,
       );
+    }
+    if (this.docStore.findVariantId(parentDocId, proposal.view.receipt.jdId) !== variantDocId) {
+      throw new AppError(
+        'KB_GENERATION_STALE_BASELINE',
+        `这段 JD（${proposal.view.receipt.jdId ?? '无归因'}）对应的那一行在主进程里换了对象：请重新生成一次再接受`,
+      );
+    }
+    if (variantDocId !== null) {
+      const variant = this.docStore.load(variantDocId);
+      if (variant.status !== 'found') {
+        throw new AppError(
+          'KB_SOURCE_MISSING',
+          `变体 ${variantDocId} ${variant.status === 'missing' ? '不存在' : '已损坏'}：请重新生成一次`,
+        );
+      }
+      if (contentHash(variant.document) !== contentHash(proposal.baseline)) {
+        throw new AppError(
+          'KB_GENERATION_STALE_BASELINE',
+          `变体 ${variantDocId} 在生成之后被改过：先重新生成，再逐项接受，不要把两份改动叠在一起`,
+        );
+      }
     }
     if (selected.length === 0 && !decision.applyReorder) {
       // 一条没勾、重排也没采纳：这声"接受"没有要写的内容，就一次盘都不落。
       // 写下去会顶掉 `updated_at`，用户明明什么都没采纳，简历却显示"刚刚被改过"——
       // 那是界面读数在撒谎。提议态也留着不删（这次表态还没用完）。
+      // 报给界面的那一行是**这一趟对应的那一支**（还没建变体行时就是母版），不是凭空造一行。
       return {
-        docId,
+        docId: variantDocId ?? parentDocId,
         receiptId,
         appliedRewrites: 0,
         reorderApplied: false,
         movedSections: 0,
         movedEntries: 0,
-        updatedAt: loaded.document.updatedAt,
+        updatedAt: proposal.baseline.updatedAt,
       };
     }
     const sections = decision.applyReorder ? proposal.sections : proposal.baseline.sections;
@@ -719,17 +784,24 @@ export class ResumeGenerateService extends Service {
       // 所以这句错文可以安全地进日志与界面。
       throw new AppError(
         'KB_GENERATION_CHECK_FAILED',
-        `接受后的文档未过事实校验（${describeViolations(verified).join('；')}）：本次不写入工作副本`,
+        `接受后的文档未过事实校验（${describeViolations(verified).join('；')}）：本次不写入变体`,
       );
     }
-    // 时刻由这次表态决定，而不是沿用基线：`resume.doc.save()` 存的是文档自带的 `updatedAt`，
+    // 时刻由这次表态决定，而不是沿用基线：`resume.doc` 存的是文档自带的 `updatedAt`，
     // 不重新打点。内容换了、时刻还停在导入那一刻，3.7 的快照与界面上的"哪一版"就都读不出先后。
-    this.docStore.save(validated({ ...proposed, updatedAt: nowMs }));
-    // 一次接受用掉一份提议态：同一个 receiptId 再接受一次，读到的就是刚才那份副本（必然撞上面
-    // 那条 stale），删掉它让它落在"重新生成"这句更清楚的话上。
+    // 写的是**这一趟对应的那一支变体**（`resume.doc.deriveVariant` 是全仓唯一的建行口，spec 4.11-14 / 15）：
+    // 母版一字不动，于是"只换 JD"得到的是新增/更新一支，而不是把上一份定制结果覆盖掉。
+    const derived = this.docStore.deriveVariant({
+      parentDocId,
+      jdId: proposal.view.receipt.jdId,
+      document: validated({ ...proposed, updatedAt: nowMs }),
+      nowMs,
+    });
+    // 一次接受用掉一份提议态：同一个 receiptId 再接受一次，读到的就是刚才那一份变体（必然撞上面
+    // 那两条 stale），删掉它让它落在"重新生成"这句更清楚的话上。
     this.proposals.delete(receiptId);
     return {
-      docId,
+      docId: derived.docId,
       receiptId,
       appliedRewrites: selected.length,
       reorderApplied: decision.applyReorder,
@@ -755,25 +827,30 @@ export class ResumeGenerateService extends Service {
   }
 
   /**
-   * 选出生成针对哪份工作副本。
+   * 选出生成针对哪份**母版**。
    *
    * 对话入口不该逼模型先查一次 docId（它没有那个工具面），但也不许"随便挑一份"——
    * 库里多份简历时替用户挑一份是产品决定，不是解码器决定，所以这里宁可报一句可播读的歧义。
+   * 候选只数母版（裁定㉜）：变体是"某段 JD 的定制结果"，不是用户手里另一份简历。按全表行数判歧义的话，
+   * 接受过一次之后就永远得到"库里有 2 份简历，需指明 docId"，而界面上明明只有一份——那是把派生物数成了候选。
    * @param docId 显式指定的文档 id（界面总是给；agent 通常不给）
    * @returns 确定可用的文档 id
-   * @throws AppError(`KB_SOURCE_MISSING`) 库里一份都没有；
-   *         AppError(`INVALID_ARGUMENT`) 有多份但没说用哪份
+   * @throws AppError(`KB_SOURCE_MISSING`) 库里一份母版都没有；
+   *         AppError(`INVALID_ARGUMENT`) 有多份母版但没说用哪份
    */
   private resolveDocId(docId: string | undefined): string {
     if (docId !== undefined) return docId;
-    const ids = this.docStore.listIds();
-    if (ids.length === 0) {
+    const masterIds = this.docStore
+      .list()
+      .filter((item) => item.parentDocId === null)
+      .map((item) => item.id);
+    if (masterIds.length === 0) {
       throw new AppError('KB_SOURCE_MISSING', '工作副本里还没有任何简历文档：先在知识库里导入一份简历');
     }
-    if (ids.length > 1) {
-      throw new AppError('INVALID_ARGUMENT', `库里有 ${String(ids.length)} 份简历，需指明 docId 再定制内容`);
+    if (masterIds.length > 1) {
+      throw new AppError('INVALID_ARGUMENT', `库里有 ${String(masterIds.length)} 份简历，需指明 docId 再定制内容`);
     }
-    return ids[0] as string;
+    return masterIds[0] as string;
   }
 
   /**

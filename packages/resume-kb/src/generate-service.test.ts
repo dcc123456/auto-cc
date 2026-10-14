@@ -1,10 +1,12 @@
 /**
- * `resume.generate` 的装配用例（spec 4.5-01 / 02 / 05 / 06 / 09 / 10 / 12 / 14 的服务半边）。
+ * `resume.generate` 的装配用例（spec 4.5-01 / 02 / 05 / 06 / 09 / 10 / 12 / 14 的服务半边，
+ * 与 4.11-15 ~ 18 的「母版 + 每 JD 变体」半边）。
  *
  * 三条规则本身已经在纯函数层断过了：顺序在 `generate-reorder.test.ts`、回答形状在
  * `generate-model.test.ts`、判据在 `fact-check.test.ts`。本文件只判**装配层**的事：
  * 产物是不是合法文档、拒绝时是不是真的没有产物、被拒那一轮是不是仍落一行记录、
- * 降级是不是可见、证据 id 是不是能读回、以及日志与库里查得到哨兵吗。
+ * 降级是不是可见、证据 id 是不是能读回、日志与库里查得到哨兵吗，以及一声"接受"究竟写进哪一行
+ * （裁定㉜：写的是这一趟那段 JD 对应的变体，导入那一份母版一字不动）。
  *
  * 语料与 JD 都是自造的虚构中文简历，**不碰真实招聘平台**（§7.2）。
  * 两条通道共用同一个 `llm.chat`，所以 `kb.gap` 的模型通道在装配里**关掉**（`GAP_CONFIG`）——
@@ -25,10 +27,12 @@ import { AppError, Context, NO_CONFIG, asApp, numbersOf, type Fiber } from '@aut
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
+  contentHash,
   documentSchema,
   ResumeDocService,
   ResumeSnapshotService,
   validateDocument,
+  type ResumeDocSummary,
   type ResumeDocument,
 } from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
@@ -103,6 +107,13 @@ const SAMPLE_JD = [
   '后端工程师（星桥科技）',
   `负责订单与推荐链路的后端服务，技术栈以 Java、Go、Kubernetes 为主，简历投至 ${PII_JD_PHONE}。`,
   '要求本科及以上学历，3 年以上相关工作经验，抗压能力强。',
+].join('\n');
+
+/** 第二段 JD（虚构，spec 4.11-16）：换 JD 再生成一次是这条流程的主用法，所以语料必须真的不同而不是只换个 id。 */
+const SECOND_JD = [
+  '平台工程师（沧海数据）',
+  '负责稳定性与容量规划，技术栈以 Go、Kubernetes、Grafana 为主。',
+  '本科及以上学历，3 年以上经验。',
 ].join('\n');
 
 /** 判定基准时刻（2026 年 10 月，与 4.4-c 同一口径；两次运行要比 hash 就必须钉死时钟）。 */
@@ -290,6 +301,64 @@ function dbCopy(db: DatabaseSync): { updatedAt: number; body: string } {
     { updated_at?: number | bigint; body?: string } | undefined;
   if (row === undefined) throw new Error(`工作副本 ${DOC_ID} 没落进 resume_docs：装配或建表出了问题`);
   return { updatedAt: Number(row.updated_at ?? -1), body: String(row.body ?? '') };
+}
+
+/**
+ * 数一份母版现在挂在库里的变体行（spec 4.11-16 的「并存」就是数这一格）。
+ * @param summaries `resume.doc.list()` 的返回值
+ * @param parentDocId 母版 id
+ * @returns 该母版的变体摘要，按 id 升序（`list()` 的次序不作判据，断言前自己排一次）
+ */
+function variantsOf(summaries: readonly ResumeDocSummary[], parentDocId: string): ResumeDocSummary[] {
+  return summaries
+    .filter((item) => item.parentDocId === parentDocId)
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+/**
+ * 读一张素材表的「总行数 + 出现过的来源」（spec 4.11-17：接受只动 `resume_docs`，事实层一分不动）。
+ * @param db store 的连接句柄
+ * @param table 表名——写成字面量联合而不是自由字符串，这条拼接的取值只有这两张表
+ * @returns 行数与去重后的 `source_doc_id`（升序；null 记成 `'null'`，手工实体那一格也在内）
+ */
+function materialFootprint(db: DatabaseSync, table: 'kb_entities' | 'kb_chunks'): { total: number; sources: string[] } {
+  const total = Number(
+    (db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get() as { total: number | bigint }).total,
+  );
+  const rows = db.prepare(`SELECT DISTINCT source_doc_id AS source FROM ${table}`).all() as Array<{
+    source: string | null;
+  }>;
+  return {
+    total,
+    sources: rows.map((row) => String(row.source)).sort(),
+  };
+}
+
+/**
+ * 在文档里造一处**真实正文**改动，用来表达"生成之后这一份被人改过了"（spec 4.11-18）。
+ *
+ * 为什么不是单顶 `updatedAt`：接受侧的基线判据用 `contentHash`，它按内容切片算、与 `resume.editor`
+ * 那句"空编辑不进栈"共用同一份 canonical（`normalize.ts`）——只动时刻是空编辑，拦下来反而是错的。
+ * @param document 刚从库里读回的文档
+ * @param note 追加到第一个未锁事实的字段末尾的那句
+ * @returns 新文档：除那一格与 `updatedAt` 外逐字原样
+ * @throws 语料里没有可编辑字段时直接失败——那是测试自己写错，宁可红也不空跑（判据七）
+ */
+function editedCopy(document: ResumeDocument, note: string): ResumeDocument {
+  let hasAppended = false;
+  const sections = document.sections.map((section) => ({
+    ...section,
+    entries: section.entries.map((entry) => ({
+      ...entry,
+      fields: entry.fields.map((field) => {
+        if (hasAppended || field.locked) return field;
+        hasAppended = true;
+        return { ...field, value: `${field.value}${note}` };
+      }),
+    })),
+  }));
+  if (!hasAppended) throw new Error('语料里没有未锁事实的字段，造不出"生成之后被改过"的基线');
+  return { ...document, updatedAt: document.updatedAt + 1, sections };
 }
 
 /**
@@ -848,17 +917,18 @@ async function bootRewrittenAt(picked: readonly GenerationField[]) {
   return { gen, app, view };
 }
 
-describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写工作副本）', () => {
-  it('接受全部改写并采纳重排：工作副本变成产物那一份，读回来仍过 P3 Schema', async () => {
+describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写变体）', () => {
+  it('接受全部改写并采纳重排：写进新建的那一支变体，母版按字节一字未动（spec 4.11-15）', async () => {
     const boot = await bootGenerate({}, {});
     const target = numberedTarget(generationTargetFields(boot.baseline));
     const { gen, app, view } = await bootRewrittenAt([target]);
     expect(view.receipt.outcome).toBe('rewritten');
     const product = view.document;
     if (product === null) throw new Error('rewritten 的产物不该是 null');
+    const masterBefore = dbCopy(app.store.db);
     const result = gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 1);
     expect(result).toEqual({
-      docId: DOC_ID,
+      docId: expect.any(String),
       receiptId: view.receipt.id,
       appliedRewrites: 1,
       reorderApplied: true,
@@ -866,13 +936,20 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
       movedEntries: view.receipt.movedEntries,
       updatedAt: AS_OF_MS + 1,
     });
-    const loaded = app['resume.doc'].load(DOC_ID);
-    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    // 接受写的是**派生出来的那一行**，不是导入的那一份（裁定㉜）：id 由 `deriveVariant` 现给，不复用母版。
+    expect(result.docId).not.toBe(DOC_ID);
+    const loaded = app['resume.doc'].load(result.docId);
+    if (loaded.status !== 'found') throw new Error(`读回变体失败：${loaded.status}`);
     expect(validateDocument(loaded.document).ok).toBe(true);
     expect(JSON.stringify(loaded.document.sections)).toBe(JSON.stringify(product.sections));
+    expect(variantsOf(app['resume.doc'].list(), DOC_ID)).toMatchObject([
+      { id: result.docId, parentDocId: DOC_ID, jdId: null },
+    ]);
+    // 本片正面主判据：母版那两列（`doc_json` + `updated_at`）逐字节没动——界面按导入那份显示的还是用户的原文。
+    expect(dbCopy(app.store.db)).toEqual(masterBefore);
   });
 
-  it('只勾其中一条：另一处逐字留在原样，接受不是整份覆盖', async () => {
+  it('只勾其中一条：另一处逐字留在变体里，接受不是整份覆盖', async () => {
     const boot = await bootGenerate({}, {});
     const targets = generationTargetFields(boot.baseline);
     const picked = [targets[0] as GenerationField, targets[1] as GenerationField];
@@ -880,14 +957,13 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
     expect(view.rewrites).toHaveLength(2);
     const accepted = view.rewrites[0] as GenerationRewriteView;
     const refused = view.rewrites[1] as GenerationRewriteView;
-    expect(
-      gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: false }, AS_OF_MS + 1).appliedRewrites,
-    ).toBe(1);
-    const loaded = app['resume.doc'].load(DOC_ID);
-    if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
+    const result = gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: false }, AS_OF_MS + 1);
+    expect(result.appliedRewrites).toBe(1);
+    const loaded = app['resume.doc'].load(result.docId);
+    if (loaded.status !== 'found') throw new Error(`读回变体失败：${loaded.status}`);
     const values = fieldValuesByLocation(loaded.document);
     expect(values.get(`${accepted.sectionId}#${accepted.entryId}#${accepted.fieldKey}`)).toBe(accepted.rewrittenText);
-    // 没勾的那条：工作副本里仍是原文，而不是产物里那句新写法（部分接受必须真的部分）
+    // 没勾的那条：变体里仍是原文，而不是产物里那句新写法（部分接受必须真的部分）
     expect(values.get(`${refused.sectionId}#${refused.entryId}#${refused.fieldKey}`)).toBe(refused.originalText);
   });
 
@@ -929,8 +1005,8 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
     const { gen, app, view } = await bootRewrittenAt([target]);
     const loaded = app['resume.doc'].load(DOC_ID);
     if (loaded.status !== 'found') throw new Error(`读回工作副本失败：${loaded.status}`);
-    // 只动时刻就足够构成"生成之后副本变了"——判定看的是逐字比较，不是挑某几个字段
-    const edited = { ...loaded.document, updatedAt: AS_OF_MS + 5 };
+    // 改动必须是**内容**级别的：基线判据按 `contentHash` 比，只顶 `updatedAt` 是空编辑，不该拦（见 `editedCopy`）
+    const edited = editedCopy(loaded.document, '（用户自己补的一句）');
     app['resume.doc'].save(edited);
     let caught: unknown;
     try {
@@ -939,9 +1015,12 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
       caught = error;
     }
     expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
+    expect((caught as AppError).message).toContain('母版');
     const after = app['resume.doc'].load(DOC_ID);
     expect(after.status).toBe('found');
     expect(JSON.stringify((after as { document: ResumeDocument }).document)).toBe(JSON.stringify(edited));
+    // 拦在写之前：连一行变体都不该长出来（半截接受是最难解释的脏）
+    expect(app['resume.doc'].findVariantId(DOC_ID, null)).toBeNull();
   });
 
   it('一条都没勾也没采纳重排：这声接受一次盘都不落，提议态也留着', async () => {
@@ -950,32 +1029,44 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
     const { gen, app, view } = await bootRewrittenAt([target]);
     const before = dbCopy(app.store.db);
     const result = gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: false }, AS_OF_MS + 3);
-    expect(result).toMatchObject({ appliedRewrites: 0, reorderApplied: false, updatedAt: before.updatedAt });
+    expect(result).toMatchObject({
+      docId: DOC_ID,
+      appliedRewrites: 0,
+      reorderApplied: false,
+      updatedAt: before.updatedAt,
+    });
     expect(dbCopy(app.store.db)).toEqual(before);
+    // "一次盘都不落"也包括不落变体行：还没写过的这一趟不该在库里留下空壳
+    expect(app['resume.doc'].findVariantId(DOC_ID, null)).toBeNull();
     // 什么都没写就不该把这单子判成"已用掉"：同一张单子随后仍能正常接受
     expect(
       gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 4).appliedRewrites,
     ).toBe(1);
   });
 
-  it('只采纳重排、一条改写都没勾：顺序按产物走，字段值一字未动', async () => {
+  it('只采纳重排、一条改写都没勾：顺序按产物落进变体，母版与字段值一字未动', async () => {
     // 不挂模型通道的装配本身就是保守版（4.5-09）：`rewrites` 天然为空，正好用来判"只动顺序"这一支
     const { gen, app } = await bootGenerate();
     const before = app['resume.doc'].load(DOC_ID);
     if (before.status !== 'found') throw new Error(`读回工作副本失败：${before.status}`);
+    const masterBefore = dbCopy(app.store.db);
     const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
     expect(view.receipt.outcome).toBe('reorder_only');
     expect(view.rewrites).toEqual([]);
     const result = gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 1);
     expect(result.reorderApplied).toBe(true);
     expect(result.movedSections + result.movedEntries).toBeGreaterThan(0);
-    const after = app['resume.doc'].load(DOC_ID);
-    if (after.status !== 'found') throw new Error(`读回工作副本失败：${after.status}`);
+    expect(result.docId).not.toBe(DOC_ID);
+    const after = app['resume.doc'].load(result.docId);
+    if (after.status !== 'found') throw new Error(`读回变体失败：${after.status}`);
     expect(JSON.stringify(after.document.sections)).toBe(JSON.stringify(view.document?.sections));
     // 每条改写各自守恒数值，重排又不动内容，所以两侧的位置集合与取值必须逐字相同
     expect(fieldValuesByLocation(after.document)).toEqual(fieldValuesByLocation(before.document));
     expect(view.document?.updatedAt).toBe(before.document.updatedAt);
     expect(after.document.updatedAt).toBe(AS_OF_MS + 1);
+    // 重排落在变体上，母版就还是导入时的那一份顺序——"改 JD 换一支"不改动用户的原件
+    expect(dbCopy(app.store.db)).toEqual(masterBefore);
+    expect(JSON.stringify(app['resume.doc'].load(DOC_ID))).toBe(JSON.stringify(before));
   });
 
   it('被拒的那次没有提议态可接受：界面只能给"需人工确认"，捞不出一份产物', async () => {
@@ -1004,6 +1095,7 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
 
   it('提议态只留最近 `MAX_PENDING_PROPOSALS` 份：最早那份接受时报"重新生成一次"', async () => {
     const { gen, app } = await bootGenerate();
+    const masterBefore = dbCopy(app.store.db);
     const ids: string[] = [];
     // 循环里只生成不接受：工作副本一直停在同一份基线上，越界与过期两条判定都不会抢在前面，
     // 这里判的就只剩"保留窗口"这一件事（接受掉任何一份都会把它自己从窗口里删掉）。
@@ -1019,10 +1111,134 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
     }
     expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
     // 最新那份还在窗口里：被挤掉的只有最早的那一份，不是"来第二次就把第一次弄丢"
-    expect(
-      gen.accept(ids[MAX_PENDING_PROPOSALS] as string, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS).docId,
-    ).toBe(DOC_ID);
+    const last = gen.accept(
+      ids[MAX_PENDING_PROPOSALS] as string,
+      { acceptedIndexes: [], applyReorder: true },
+      AS_OF_MS,
+    );
+    expect(last.receiptId).toBe(ids[MAX_PENDING_PROPOSALS]);
+    expect(last.docId).not.toBe(DOC_ID);
     expect(app['resume.doc'].load(DOC_ID).status).toBe('found');
+    // 窗口这条判据不因血缘而变松：被挤掉的那些提议既没写过母版，也没写过变体
+    expect(dbCopy(app.store.db)).toEqual(masterBefore);
+  });
+});
+
+describe('母版与每 JD 变体：并存、素材层不动、基线换到变体侧（spec 4.11-16 / 17 / 18 · 裁定㉜）', () => {
+  it('换一段 JD 再生成一次：库里并存两支变体，各自读回自己那句改写（spec 4.11-16）', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const position = `${target.sectionId}#${target.entryId}#${target.fieldKey}`;
+    const textForBackend = `${target.text}，方向与后端岗位要求一致。`;
+    const textForPlatform = `${target.text}，方向与平台岗位要求一致。`;
+    // 两趟各要一句**不同**的合法改写：否则"并存"就只剩两行 id 相同、正文也相同，判不出谁覆盖谁。
+    const { gen, app } = await bootGenerate(
+      {},
+      {
+        replies: [
+          multiReplyFor([{ ...target, text: textForBackend }]),
+          multiReplyFor([{ ...target, text: textForPlatform }]),
+        ],
+      },
+    );
+    const masterBefore = dbCopy(app.store.db);
+    const backend = await gen.run(SAMPLE_JD, { docId: DOC_ID, jdId: 'jd-backend' }, AS_OF_MS);
+    const backendId = gen.accept(backend.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 1).docId;
+    const platform = await gen.run(SECOND_JD, { docId: DOC_ID, jdId: 'jd-platform' }, AS_OF_MS + 2);
+    const platformId = gen.accept(
+      platform.receipt.id,
+      { acceptedIndexes: [0], applyReorder: true },
+      AS_OF_MS + 3,
+    ).docId;
+    expect(backendId).not.toBe(platformId);
+    expect(
+      variantsOf(app['resume.doc'].list(), DOC_ID)
+        .map((item) => item.jdId)
+        .sort(),
+    ).toEqual(['jd-backend', 'jd-platform']);
+    const backendDoc = app['resume.doc'].load(backendId);
+    const platformDoc = app['resume.doc'].load(platformId);
+    if (backendDoc.status !== 'found' || platformDoc.status !== 'found') {
+      throw new Error(`两支变体读不回来：${backendDoc.status} / ${platformDoc.status}`);
+    }
+    // 「两段 JD 的结果并存且各自可导出」的字面半边：同一格上两句话各在自己的行里，谁也没盖掉谁。
+    expect(fieldValuesByLocation(backendDoc.document).get(position)).toBe(textForBackend);
+    expect(fieldValuesByLocation(platformDoc.document).get(position)).toBe(textForPlatform);
+    expect(dbCopy(app.store.db)).toEqual(masterBefore);
+  });
+
+  it('接受不动素材层：实体与切片的行数和来源集合都停在生成前的样子（spec 4.11-17）', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { gen, app, view } = await bootRewrittenAt([target]);
+    const entitiesBefore = materialFootprint(app.store.db, 'kb_entities');
+    const chunksBefore = materialFootprint(app.store.db, 'kb_chunks');
+    // 正向对照：装配确实派生过素材，否则"没变"只是因为压根没有。
+    expect(entitiesBefore.total).toBeGreaterThan(0);
+    expect(entitiesBefore.sources).toEqual([DOC_ID]);
+    const variantId = gen.accept(view.receipt.id, { acceptedIndexes: [0], applyReorder: true }, AS_OF_MS + 1).docId;
+    // 变体不另建一份实体与切片：检索与事实校验继续认母版那一条来源（`kb_entities` 里搜不到这个新 id）。
+    expect(variantId).not.toBe(DOC_ID);
+    expect(materialFootprint(app.store.db, 'kb_entities')).toEqual(entitiesBefore);
+    expect(materialFootprint(app.store.db, 'kb_chunks')).toEqual(chunksBefore);
+  });
+
+  it('生成之后人改过那一支变体：接受被拦下，改动停在人写的那一份上（spec 4.11-18）', async () => {
+    // 只走重排那支（不挂模型通道）：这条用例判的是"基线换到变体侧"，与模型无关，挂上反而多一个变量。
+    const { gen, app } = await bootGenerate();
+    const first = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    const variantId = gen.accept(first.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 1).docId;
+    const second = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS + 2);
+    const masterBefore = dbCopy(app.store.db);
+    // 人在整屏编辑页改的就是那一支变体（3.10 的整屏编辑按 docId 现读，变体是一个正常的可编辑文档）。
+    const variantNow = app['resume.doc'].load(variantId);
+    if (variantNow.status !== 'found') throw new Error(`读回变体失败：${variantNow.status}`);
+    const edited = editedCopy(variantNow.document, '（用户在变体上补的一句）');
+    app['resume.doc'].save(edited);
+    let caught: unknown;
+    try {
+      gen.accept(second.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 4);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
+    expect((caught as AppError).message).toContain('变体');
+    const after = app['resume.doc'].load(variantId);
+    expect(JSON.stringify((after as { document: ResumeDocument }).document)).toBe(JSON.stringify(edited));
+    expect(variantsOf(app['resume.doc'].list(), DOC_ID)).toHaveLength(1);
+    expect(dbCopy(app.store.db)).toEqual(masterBefore);
+  });
+
+  it('生成之后母版被并行改过：即便要写的字一个都不落在母版上，这一声接受仍被拦（spec 4.11-18）', async () => {
+    const { gen, app } = await bootGenerate();
+    const first = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    const variantId = gen.accept(first.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 1).docId;
+    const second = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS + 2);
+    const variantBefore = app['resume.doc'].load(variantId);
+    if (variantBefore.status !== 'found') throw new Error(`读回变体失败：${variantBefore.status}`);
+    const variantHashBefore = contentHash(variantBefore.document);
+    const masterNow = app['resume.doc'].load(DOC_ID);
+    if (masterNow.status !== 'found') throw new Error(`读回母版失败：${masterNow.status}`);
+    // 改的是母版：这一趟要写的字确实一个都不落在它上面，但证据、缺口与事实层已经换了版本，不能照写。
+    const editedMaster = editedCopy(masterNow.document, '（母版被并发改的一句）');
+    app['resume.doc'].save(editedMaster);
+    let caught: unknown;
+    try {
+      gen.accept(second.receipt.id, { acceptedIndexes: [], applyReorder: true }, AS_OF_MS + 4);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
+    expect((caught as AppError).message).toContain('母版');
+    // 拦在写之前：变体那一行还是生成时读到的样子，也没有长出第二行。
+    const variantAfter = app['resume.doc'].load(variantId);
+    if (variantAfter.status !== 'found') throw new Error(`读回变体失败：${variantAfter.status}`);
+    expect(contentHash(variantAfter.document)).toBe(variantHashBefore);
+    expect(variantsOf(app['resume.doc'].list(), DOC_ID)).toHaveLength(1);
+    // 母版停在用户改过的那一份上：接受被拦下之后，没有任何一条通道会把它盖回生成前的样子。
+    const masterAfter = app['resume.doc'].load(DOC_ID);
+    if (masterAfter.status !== 'found') throw new Error(`读回母版失败：${masterAfter.status}`);
+    expect(JSON.stringify(masterAfter.document)).toBe(JSON.stringify(editedMaster));
   });
 });
 

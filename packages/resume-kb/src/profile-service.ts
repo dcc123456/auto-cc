@@ -863,10 +863,15 @@ export class KbProfileService extends Service {
   /**
    * 删掉一份简历**连同它派生出的素材与索引**（spec 4.1-14 / 裁定㉖ 第 1 条「连素材一起真删」）。
    *
-   * 六张表删在同一条事务里，因为 `PRAGMA foreign_keys` 全仓没有打开（AGENTS.md §9 的 5.3-a），
-   * DDL 里的 `ON DELETE CASCADE` 是装饰性的；而拆成两次桥接调用会留下「文档没了但素材还在」的半删，
+   * 六张表删在同一条事务里，因为这六张表的 DDL 里**没有外键子句**（全仓只有 `llm_providers` 带一处
+   * `REFERENCES`），级联从来没有被声明过——删父行必须显式删子行（AGENTS.md §9 的 5.3-a 的结论；
+   * 原因不在 `PRAGMA foreign_keys` 那一格，本机连接的实测读数写在 `profile-service.test.ts` 的 `foreignKeyFootprint`）；
+   * 而拆成两次桥接调用会留下「文档没了但素材还在」的半删，
    * 那正是界面上最难解释的一种脏。切片一律走 `deleteChunksWhere`（倒排行与向量行同一条路径，4.3-11），
    * 归属收敛复用 `detachOrphanParents`（4.2-04 的「不留悬空引用」）。
+   *
+   * 删的是**母版连同它的每一支变体**（spec 4.11-18 / 裁定㉜）：`resume_docs.document` 那个计数因此是行数而非份数，
+   * 而删一支变体只带走那一行与它的快照，母版一字不动。
    *
    * 三样东西**刻意留着**：手工实体（`source_doc_id IS NULL`，不属于任何一份简历）、
    * `resume_generations` 与额度台账（那是"花过钱"的审计事实）。删除不抛「查无此文档」：
@@ -876,6 +881,13 @@ export class KbProfileService extends Service {
    * @returns 逐表被删行数（界面那句成功文案的数字全部由这里给，渲染层不自己数）
    */
   removeDoc(docId: string, nowMs = Date.now()): KbRemoveDocResult {
+    // 母版删掉之后，它派生的每一支变体就没了来路（`resume_docs` 的 DDL 没有外键子句，级联不会被声明出来），
+    // 所以逐支走**同一条**删除通道：各自的快照 + 各自的行。事实层不必管——变体从来不建实体与切片（spec 4.11-17），
+    // 而候选直接取自 `list()` 的血缘两列，不在本地存第二份"谁是谁的变体"（§2.7）。
+    const variantIds = this.docStore
+      .list()
+      .filter((item) => item.parentDocId === docId)
+      .map((item) => item.id);
     const outcome = this.withTransaction(() => {
       // 先删切片再删实体：`deleteChunksWhere` 的倒排与向量删除都靠回读 `kb_chunks`，而实体级切片的
       // `source_doc_id` 就是实体自己的来源（`entityChunkOf`），所以这一条谓词同时覆盖实体级与区块级，
@@ -884,17 +896,24 @@ export class KbProfileService extends Service {
       const entities = Number(
         this.store.db.prepare('DELETE FROM kb_entities WHERE source_doc_id = ?').run(docId).changes,
       );
+      let snapshots = this.snapshotStore.removeAllForDoc(docId);
+      let document = this.docStore.remove(docId) ? 1 : 0;
+      for (const variantId of variantIds) {
+        snapshots += this.snapshotStore.removeAllForDoc(variantId);
+        document += this.docStore.remove(variantId) ? 1 : 0;
+      }
       return {
         chunks,
         entities,
         detached: this.detachOrphanParents(nowMs),
-        snapshots: this.snapshotStore.removeAllForDoc(docId),
+        snapshots,
         imports: this.parseService.removeForDoc(docId),
-        document: this.docStore.remove(docId) ? 1 : 0,
+        document,
       };
     });
     this.ctx.logger.info(
-      `[kb-profile] 删除简历 ${docId}：工作副本 ${String(outcome.document)} 行 / 快照 ${String(outcome.snapshots)} 份 / ` +
+      `[kb-profile] 删除简历 ${docId}：工作副本 ${String(outcome.document)} 行（含变体 ${String(variantIds.length)} 支）/ ` +
+        `快照 ${String(outcome.snapshots)} 份 / ` +
         `出处 ${String(outcome.imports)} 行 / 派生素材 ${String(outcome.entities)} 条 / 切片 ${String(outcome.chunks)} 条 / ` +
         `解除归属 ${String(outcome.detached)} 条（生成记录与额度台账按裁定㉖ 保留）`,
     );

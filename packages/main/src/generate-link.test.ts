@@ -21,12 +21,14 @@
  *    带函数或带不可克隆成员的形状在单测里能通过、到进程边界才会丢。
  *
  * 下面第二组（4.5-c 的接受面）再加三条，判的都是"唯一写口"这一侧：
- * 5. **`accept()` 在真 store 里写回的是它自己复验过的那一份**，且写后的 `updated_at` 等于表态时刻；
- *    返回体能赋给 `GenerationAcceptRowResult` 并克隆得过去。
+ * 5. **`accept()` 在真 store 里写回的是它自己复验过的那一份**，写后的 `updated_at` 等于表态时刻，
+ *    而那一行是**这一趟那段 JD 对应的变体**、母版按字节不动（spec 4.11-15）；返回体能赋给
+ *    `GenerationAcceptRowResult` 并克隆得过去。
  * 6. **基线过期在真库里拦得住**：用户经 `resume.doc.save()` 自己改过简历后，旧产物接受必须以
- *    `KB_GENERATION_STALE_BASELINE` 拒绝，且库里留的仍然是用户那一版。
+ *    `KB_GENERATION_STALE_BASELINE` 拒绝，且库里留的仍然是用户那一版、连一行变体都不长。
  * 7. **写口的可达面只有界面**：`resume.generate.accept` 在渲染层白名单里，
  *    而 `agent.tools` 的声明里没有它（对话不替用户签字），`resume.doc.save` 也不在白名单里（正文不过界）。
+ *    白名单里 `resume.doc.*` 那一条都不带写口——`deriveVariant` 同样不过界（spec 4.11-14）。
  *
  * 判据五（生成不接额度闸门）在这里是**结构性**成立的：这份装配里根本没有 `entitlement.*` / `usage.*`
  * 服务，而生成照样跑完——与 4.4-e1 判据三同一手法。真接付费网关那天要动的 spec 是 4.6-08，不是这里。
@@ -144,12 +146,13 @@ async function bootAssembly(withSkill = false) {
 /**
  * 读工作副本落在库里的那一字节（用于"逐字未变"的比对，判据三）。
  * @param db 真 sqlite 连接
- * @returns `resume_docs` 里那份文档的 `updated_at` 与正文串；查无返回 null
+ * @param docId 哪一行；缺省是导入的那一份母版（变体行要显式给 id，spec 4.11-15）
+ * @returns 那一行的 `updated_at` 与正文串；查无返回 null
  */
-function workingCopy(db: DatabaseSync): { updatedAt: number; body: string } {
-  const row = db.prepare('SELECT updated_at, doc_json AS body FROM resume_docs WHERE id = ?').get(DOC_ID) as
+function workingCopy(db: DatabaseSync, docId = DOC_ID): { updatedAt: number; body: string } {
+  const row = db.prepare('SELECT updated_at, doc_json AS body FROM resume_docs WHERE id = ?').get(docId) as
     { updated_at?: number | bigint; body?: string } | undefined;
-  if (row === undefined) throw new Error(`工作副本 ${DOC_ID} 没落进 resume_docs：装配或建表出了问题`);
+  if (row === undefined) throw new Error(`工作副本 ${docId} 没落进 resume_docs：装配或建表出了问题`);
   return { updatedAt: Number(row.updated_at ?? -1), body: String(row.body ?? '') };
 }
 
@@ -164,14 +167,15 @@ function generationRowCount(db: DatabaseSync): number {
 }
 
 /**
- * 按字节读出库里那份工作副本并解析（接受面判"落盘的到底是哪一份"，判据三的反面）。
+ * 按字节读出库里那一行并解析（接受面判"落盘的到底是哪一份"，判据三的反面）。
  * @param db 真 sqlite 连接
+ * @param docId 哪一行；缺省是导入的那一份母版（变体行要显式给 id，spec 4.11-15）
  * @returns `save()` 规范化之后落库的那份文档对象
  */
-function storedDoc(db: DatabaseSync): Record<string, unknown> {
-  const row = db.prepare('SELECT doc_json AS body FROM resume_docs WHERE id = ?').get(DOC_ID) as
+function storedDoc(db: DatabaseSync, docId = DOC_ID): Record<string, unknown> {
+  const row = db.prepare('SELECT doc_json AS body FROM resume_docs WHERE id = ?').get(docId) as
     { body?: string } | undefined;
-  if (row?.body === undefined) throw new Error(`工作副本 ${DOC_ID} 没落进 resume_docs：装配或建表出了问题`);
+  if (row?.body === undefined) throw new Error(`工作副本 ${docId} 没落进 resume_docs：装配或建表出了问题`);
   return JSON.parse(row.body) as Record<string, unknown>;
 }
 
@@ -274,8 +278,8 @@ describe('4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副�
   });
 });
 
-describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.5-11 的接线半边）', () => {
-  it('只采纳重排也在真库里写回：落盘的就是产物那一份，`updated_at` 等于表态时刻（判据三的反面）', async () => {
+describe('4.5-c 接受面的真装配（唯一写变体的一口，spec 4.5-11 / 4.11-15 的接线半边）', () => {
+  it('只采纳重排也在真库里写回：落盘的是变体那一行，母版按字节留在导入那一版（判据三的反面）', async () => {
     const { app, db } = await bootAssembly();
     const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
     const product = view.document;
@@ -290,7 +294,7 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
       acceptAt,
     );
     expect(result).toEqual({
-      docId: DOC_ID,
+      docId: expect.any(String),
       receiptId: view.receipt.id,
       appliedRewrites: 0,
       reorderApplied: true,
@@ -298,12 +302,16 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
       movedEntries: view.receipt.movedEntries,
       updatedAt: acceptAt,
     });
-    expect(workingCopy(db).updatedAt).toBe(acceptAt);
-    expect(workingCopy(db).body).not.toBe(before.body);
+    // 真装配上接受写的也是**派生出来的那一行**（裁定㉜）：id 由 `deriveVariant` 现给，不复用母版。
+    expect(result.docId).not.toBe(DOC_ID);
+    expect(workingCopy(db, result.docId).updatedAt).toBe(acceptAt);
+    expect(workingCopy(db, result.docId).body).not.toBe(before.body);
     // 落盘内容与主进程那份产物同源：顺序真的换了，而一条改写都没勾，正文字字未动。
-    expect(storedDoc(db).sections).toEqual(product.sections);
+    expect(storedDoc(db, result.docId).sections).toEqual(product.sections);
     // 接受口不许成为唯一能把简历存坏的通道——写进去的那一份读回来仍是合法文档（3.1-08 的安全往返）。
-    expect(app['resume.doc'].load(DOC_ID).status).toBe('found');
+    expect(app['resume.doc'].load(result.docId).status).toBe('found');
+    // 母版那两列逐字节没动（spec 4.11-15 的正面主判据）：界面按导入那一份显示的还是用户自己的字。
+    expect(workingCopy(db)).toEqual(before);
     // 编译期保险丝 + 结构化克隆：界面按下的那个按钮拿到的形状与 `shared` 镜像同步（4.5-11 的数据面）。
     const row: GenerationAcceptRowResult = result;
     expect(structuredClone(row).receiptId).toBe(view.receipt.id);
@@ -319,6 +327,8 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
       AS_OF_MS + 1000,
     );
     expect(empty).toMatchObject({ appliedRewrites: 0, reorderApplied: false, movedSections: 0, movedEntries: 0 });
+    // 还没派生过任何一行时，报给界面的就是母版那一行——"什么都没写"不许凭空造一个 id（spec 4.11-15）。
+    expect(empty.docId).toBe(DOC_ID);
     // 播报的是库里那一版当下的时刻，不是这次点按钮的时刻：什么都没改，界面就不该显示"刚刚被改过"。
     expect(empty.updatedAt).toBe(before.updatedAt);
     expect(workingCopy(db)).toEqual(before);
@@ -334,9 +344,14 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
     const view = await app['resume.generate'].run(JD_TEXT, { docId: DOC_ID }, AS_OF_MS);
     const loaded = app['resume.doc'].load(DOC_ID);
     if (loaded.status !== 'found') throw new Error(`读不回工作副本：${loaded.status}`);
-    // 用户侧每一次保存都会带新的 `updatedAt`（3.1 的界面保存路径），所以只动这一位就足以代表"生成后改过"。
+    // 改动必须是**内容**级的：基线判据按 `contentHash` 比（与 `resume.editor` 那句"空编辑不进栈"共用同一份
+    // canonical，`normalize.ts`），只顶 `updatedAt` 是一次空编辑，拦下来反而是错的（spec 4.11-18）。
     const userEditedAt = AS_OF_MS + 30_000;
-    app['resume.doc'].save({ ...loaded.document, updatedAt: userEditedAt });
+    app['resume.doc'].save({
+      ...loaded.document,
+      updatedAt: userEditedAt,
+      layout: { ...loaded.document.layout, baseFontPt: loaded.document.layout.baseFontPt + 0.5 },
+    });
     const userCopy = workingCopy(db);
     let caught: unknown;
     try {
@@ -348,6 +363,11 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
     expect((caught as AppError).code).toBe('KB_GENERATION_STALE_BASELINE');
     // 挡下来必须是不写：两份改动叠在一起是谁都没法解释的产物，用户那一版得逐字留在库里。
     expect(workingCopy(db)).toEqual(userCopy);
+    // 连一行变体都不许长出来（拦在写之前，不是写完再回滚）。
+    const variantRows = app.store.db
+      .prepare('SELECT COUNT(*) AS total FROM resume_docs WHERE parent_doc_id = ?')
+      .get(DOC_ID) as { total: number | bigint };
+    expect(Number(variantRows.total)).toBe(0);
   });
 
   it('写口只对界面开放：白名单放行 accept，agent 只拿到 run，文档正文从不过界（4.5-11 / 判据二）', async () => {
@@ -364,6 +384,10 @@ describe('4.5-c 接受面的真装配（唯一写工作副本的一口，spec 4.
         .map((tool) => tool.id)
         .filter((id) => id.startsWith('resume.generate')),
     ).toEqual(['resume.generate.run']);
+    // 派生口不过界（spec 4.11-14）：界面在 `resume.doc.*` 上连一条写口都没有，变体只能由主进程那条接受通道长出来；
+    // 而"哪一行属于哪一份母版"由只读的 `resume.doc.list` 那两列血缘承担，不为变体新开第二条界内查询（§2.3）。
+    expect(isAllowedCall('resume.doc.deriveVariant')).toBe(false);
+    expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('resume.doc.'))).toEqual(['resume.doc.list']);
   });
 });
 

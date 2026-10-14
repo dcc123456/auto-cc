@@ -336,6 +336,19 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
     ).toBe(0);
   });
 
+  it('变体不再往下派生：血缘只许一层，否则界面排不出「这一份是谁的定制结果」', async () => {
+    const { docs, db } = await boot();
+    docs.save(sampleDoc());
+    const variant = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 });
+    expect(() =>
+      docs.deriveVariant({ parentDocId: variant.docId, jdId: 'jd-b', document: sampleDoc(), nowMs: 6000 }),
+    ).toThrowError(/本身是变体/);
+    expect(docs.findVariantId(variant.docId, 'jd-b')).toBeNull();
+    expect(
+      Number((db.prepare('SELECT COUNT(*) AS total FROM resume_docs').get() as { total: number | bigint }).total),
+    ).toBe(2);
+  });
+
   it('文档不合校验时整趟回滚：不留一行"正文是变体、血缘是 NULL"的假母版', async () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc());
