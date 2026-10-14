@@ -7,9 +7,12 @@
  * 于是「库里那行是不是还能当合法文档用」成了一个被读路径主动确认的事实，而不是写入时的信任。
  *
  * 表只放文档本体；版本快照（3.7）与投递引用另立表，本服务不认识它们，保持「只管这一张表的读写」。
+ * 母版与每 JD 变体（裁定㉜ / spec 4.11）同存这张表：变体就是一份完整文档，差别只在 `parent_doc_id` /
+ * `jd_id` 两列血缘，因此没有第二张正文表、也没有第二条正文读取通道（§2.7）。
  */
 import { AppError, asApp, Service, type Context } from '@auto-cc/core';
 import type { StoreService } from '@auto-cc/plugin-store';
+import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { ResumeDocument } from './model.js';
@@ -37,6 +40,32 @@ const resumeDocMigration = {
   },
   down: (db: DatabaseSync) => {
     db.exec('DROP TABLE IF EXISTS resume_docs');
+  },
+};
+
+/**
+ * 迁移号段：**39**。号段台账（AGENTS.md §9 的 5.3-a）：36 是 `resume_preferences`、
+ * 37 是 `resume_imports.source_name`、38 是 `resume_skill_override`、35 是投递记录的 `conversation_target`、
+ * 33 是会话消息的同名列、30 预留给草稿表但未启用，**34 在本工作树读不到但不当空号用**。
+ *
+ * 这一支只给 `resume_docs` 加两列血缘（spec 4.11-13 / 裁定㉜「母版 + 每 JD 一份变体」）。
+ * 为什么加列而不另立一张表：变体装的就是**一份完整文档**，正文、hash、复验走的都是同一套通道，
+ * 另立一张表等于造第二条正文出口（§2.7）；于是母版与变体在存储上的全部差别就是这两列。
+ * 两列都可空且缺省 NULL——母版本来就没有来路，老库升级后库里每一份简历都仍是母版。
+ */
+export const RESUME_DOC_VARIANT_MIGRATION_VERSION = 39;
+
+/** 给 `resume_docs` 加变体血缘列（`down` 反着序，先摘子再摘父列，与建列无关于可读性）。 */
+const resumeDocVariantMigration = {
+  version: RESUME_DOC_VARIANT_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE resume_docs ADD COLUMN parent_doc_id TEXT');
+    db.exec('ALTER TABLE resume_docs ADD COLUMN jd_id TEXT');
+  },
+  down: (db: DatabaseSync) => {
+    // SQLite 3.35+ 支持 DROP COLUMN（本机 sqlite 3.53.4）；回退就是把血缘读数打回全 NULL。
+    db.exec('ALTER TABLE resume_docs DROP COLUMN jd_id');
+    db.exec('ALTER TABLE resume_docs DROP COLUMN parent_doc_id');
   },
 };
 
@@ -98,6 +127,35 @@ export interface ResumeDocSummary {
   name: string | null;
   /** 最后改动时刻（毫秒），列表按它倒序排。 */
   updatedAt: number;
+  /** 母版 id；这一行本身是母版时为 null（界面据此把列表分成「母版 / 变体」两组，裁定㉜）。 */
+  parentDocId: string | null;
+  /** 生成这一支变体时那段 JD 的 id；无归因的变体与母版一样是 null。 */
+  jdId: string | null;
+}
+
+/**
+ * `deriveVariant` 的读数：落成哪一行、内容 hash、以及这一趟是不是新建了行。
+ *
+ * `created` 不是给界面看的装饰，是给**调用方**分辨两种结局的：新建那一趟变体逐字等于母版
+ * （什么都没改），覆盖那一趟则可能把上一次采纳的结果换掉——界面上"这一份 JD 的简历更新了"
+ * 与"新建了这一份 JD 的简历"是两句话（spec 4.11-16）。
+ */
+export interface DeriveVariantResult {
+  docId: string;
+  hash: string;
+  created: boolean;
+}
+
+/**
+ * 变体行的 id（`resume-` + 12 位十六进制，与 `resume.parse` 那侧的导入 id 同形）。
+ *
+ * 取随机而不是取 `hash(母版 + JD)`：行属于哪一对由血缘两列说了算（`findVariantId` 那条查询），
+ * id 里再编一次同一件事就成了第二个事实来源——两边哪天不一致（改列名、改算法）就查不到已有那一行，
+ * 于是每次派生长出新行。前缀沿用 `resume-` 是因为界面的 `data-doc-id` 与老库读数都按这个形状认。
+ * @returns 新变体行的 id
+ */
+function newDocId(): string {
+  return `resume-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 }
 
 /**
@@ -120,7 +178,7 @@ export class ResumeDocService extends Service {
     return this.store.db;
   }
 
-  /** 幂等地把本表迁移推进共享迁移列表并升级到最新。 */
+  /** 幂等地把本表的两支迁移（正文表 7 + 偏好键值表 36）与变体血缘列 39 推进共享迁移列表并升级到最新。 */
   private ensureSchema(): void {
     const { migrations } = this.store;
     if (!migrations.some((item) => item.version === RESUME_DOC_MIGRATION_VERSION)) {
@@ -129,6 +187,9 @@ export class ResumeDocService extends Service {
     if (!migrations.some((item) => item.version === RESUME_PREFERENCE_MIGRATION_VERSION)) {
       migrations.push(resumePreferenceMigration);
     }
+    if (!migrations.some((item) => item.version === RESUME_DOC_VARIANT_MIGRATION_VERSION)) {
+      migrations.push(resumeDocVariantMigration);
+    }
     this.store.upgrade();
   }
 
@@ -136,6 +197,8 @@ export class ResumeDocService extends Service {
    * 保存（新增或覆盖）一份简历文档。
    *
    * 写入前先跑权威校验：非法文档根本不该进库，直接以结构化错误挡下（而不是写坏行再指望读回发现）。
+   * UPSERT 只写正文那四列，**血缘两列（`parent_doc_id` / `jd_id`）一字不碰**：变体被整屏编辑页改一次
+   * 之后仍然挂在那支母版、那一段 JD 下面（spec 4.11-19），而新建行的血缘只有 `deriveVariant` 一个口（4.11-14）。
    * @param doc 待保存的文档
    * @returns 落库后的内容 hash
    * @throws AppError(`INVALID_ARGUMENT`) 文档未通过权威校验
@@ -162,6 +225,68 @@ export class ResumeDocService extends Service {
       )
       .run(normalized.id, normalized.schemaVersion, hash, JSON.stringify(normalized), normalized.updatedAt);
     return { hash };
+  };
+
+  /**
+   * 查一支变体的行 id：同一母版 + 同一段 JD 只认一行（spec 4.11-14 的幂等半边）。
+   *
+   * `jd_id IS ?` 而不是 `=` 是刻意的：无归因的那一支（`jdId` 为 null）用 `=` 比永远为假，
+   * 于是每次派生都长出一行新变体，界面按 JD 排开后全是同一份简历的副本。
+   * @param parentDocId 母版 id
+   * @param jdId 生成它的那段 JD 的 id，null 也照样参与比较
+   * @returns 已存在的变体行 id；这对 (母版, JD) 从没派生过时 null
+   */
+  findVariantId = (parentDocId: string, jdId: string | null): string | null => {
+    const row = this.db
+      .prepare('SELECT id FROM resume_docs WHERE parent_doc_id = ? AND jd_id IS ? ORDER BY id LIMIT 1')
+      .get(parentDocId, jdId) as { id: string } | undefined;
+    return row?.id ?? null;
+  };
+
+  /**
+   * 把一份文档落成「(母版, JD) 那一支变体」——全仓**唯一**的新行入口（spec 4.11-14 / 裁定㉜）。
+   *
+   * 为什么必须有这一个口，而不是让调用方自己换一个 id 去 `save`：变体的身份由血缘决定
+   * （同一支母版 + 同一段 JD 永远落在同一行上），所以"查已有 / mint 新 id / 写血缘 / 覆盖正文"
+   * 四步必须绑在一起发生。分开写就会出现第二种结局：两个调用点各自造一支同 JD 的变体，
+   * 界面上长出两行、删一删不干净，而"只改 JD 就能生成不同简历"这句话就没有落地对象了。
+   * 已有变体时**整份覆盖正文、血缘列一字不动**——再按同一段 JD 生成一次是更新那一份，不是长出新的一份。
+   * @param input.parentDocId 母版 id（必须已存在；派生不许凭空造一支没有来路的变体）
+   * @param input.jdId 生成它的那段 JD 的 id；null 表示无归因（界面显示「未标明 JD」，不拿哈希冒充）
+   * @param input.document 要装进变体的文档；它的 `id` 在这里被换成变体 id，其余字段原样落库
+   * @param input.nowMs 变体行的 `updatedAt`（毫秒），由调用方给，避免同一份改动在两处各取一次时钟
+   * @returns 变体行的 id、落库后的内容 hash、以及这一趟是否新建了行
+   * @throws AppError(`INVALID_ARGUMENT`) 母版不存在，或文档未通过 `save` 那侧的权威校验
+   */
+  deriveVariant = (input: {
+    parentDocId: string;
+    jdId: string | null;
+    document: ResumeDocument;
+    nowMs: number;
+  }): DeriveVariantResult => {
+    if (!this.exists(input.parentDocId)) {
+      throw new AppError('INVALID_ARGUMENT', `母版 ${input.parentDocId} 不存在，派不出变体：先导入或新建一份简历`);
+    }
+    const existingId = this.findVariantId(input.parentDocId, input.jdId);
+    const docId = existingId ?? newDocId();
+    const doc: ResumeDocument = { ...input.document, id: docId, updatedAt: input.nowMs };
+    // 已派生过：只覆盖正文（`save` 的 UPSERT 不碰血缘列），界面读到的还是那一行、那一段 JD。
+    if (existingId !== null) return { docId, hash: this.save(doc).hash, created: false };
+    // 新建那一趟要把正文与血缘一起落：`save` 只认正文（它服务五条既有调用点，不认识血缘），
+    // 血缘只在这一个口里写，所以两条语句必须同成同败——全仓没有一处设 `PRAGMA foreign_keys`（§9 的 5.3-a），
+    // 这两列也没有外键可依赖，崩溃在中间会留下一行"正文是变体、血缘是 NULL"的假母版。
+    this.db.exec('BEGIN');
+    try {
+      const saved = this.save(doc);
+      this.db
+        .prepare('UPDATE resume_docs SET parent_doc_id = ?, jd_id = ? WHERE id = ?')
+        .run(input.parentDocId, input.jdId, docId);
+      this.db.exec('COMMIT');
+      return { docId, hash: saved.hash, created: true };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   };
 
   /**
@@ -255,26 +380,45 @@ export class ResumeDocService extends Service {
   };
 
   /**
-   * 列出库里每一份有正文的简历的**摘要**（id / 姓名 / 最后改动时刻），按最近改动排前面。
+   * 列出库里每一份有正文的简历的**摘要**（id / 姓名 / 最后改动时刻 / 血缘），按最近改动排前面。
    *
    * 为什么只回摘要不回正文：界面要的是「定制哪一份」这一栏的候选，而不是原文——原文的唯一读取通道
    * 仍是带 Schema 复验的 `load()`（plan §1.4 裁定一），这里开第二条正文出口就等于绕过它。
    * 姓名用 `json_extract` 在 SQL 里取，因此不必把每份 `doc_json` 反序列化一遍。
+   * 血缘两列一并回（spec 4.11-16 的分组半边）：界面要把同一支母版生出的若干变体排到它下面，
+   * 而"这行是谁生的"只有这两列说了算，让界面自己按 id 前缀猜就等于没有这条事实。
    * @returns 摘要列表；空库返回空数组，不抛错
    */
   list = (): ResumeDocSummary[] => {
     const rows = this.db
       .prepare(
-        `SELECT id, updated_at AS updatedAt, json_extract(doc_json, '$.profile.name') AS name
+        `SELECT id, updated_at AS updatedAt, json_extract(doc_json, '$.profile.name') AS name,
+                parent_doc_id AS parentDocId, jd_id AS jdId
          FROM resume_docs WHERE doc_json IS NOT NULL ORDER BY updated_at DESC, id`,
       )
-      .all() as unknown as readonly { id: string; updatedAt: number | bigint; name: string | null }[];
-    return rows.map((row) => ({ id: row.id, name: row.name, updatedAt: Number(row.updatedAt) }));
+      .all() as unknown as readonly {
+      id: string;
+      updatedAt: number | bigint;
+      name: string | null;
+      parentDocId: string | null;
+      jdId: string | null;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      updatedAt: Number(row.updatedAt),
+      parentDocId: row.parentDocId,
+      jdId: row.jdId,
+    }));
   };
 
   [Service.init](): void {
     this.ensureSchema();
-    this.ctx.logger.info('[resume-doc] resume_docs 表就绪，迁移号段 ' + String(RESUME_DOC_MIGRATION_VERSION));
+    this.ctx.logger.info(
+      `[resume-doc] resume_docs 表就绪，迁移号段 ${String(RESUME_DOC_MIGRATION_VERSION)} + ` +
+        String(RESUME_DOC_VARIANT_MIGRATION_VERSION) +
+        `（变体血缘两列），偏好表 ${String(RESUME_PREFERENCE_MIGRATION_VERSION)}`,
+    );
   }
 }
 
