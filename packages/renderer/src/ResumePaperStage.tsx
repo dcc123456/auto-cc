@@ -1,20 +1,21 @@
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
-import type { ExportReceiptView, ResumeLocaleView } from '@auto-cc/shared';
+import type { ResumeLocaleView } from '@auto-cc/shared';
 import { ResumePaperFrame } from './ResumePaperFrame';
-import { DeskButton, DeskSegmented } from './ui/controls';
+import { DeskSegmented } from './ui/controls';
 import { DeskExplainer } from './ui/disclosure';
-import { useRevealLabel } from './ui/overlays';
 
 /**
- * 纸面槽的三档画面。
+ * 纸面槽的两档画面（裁定㊳后的形状）。
  *
- * 这三档不是三个页面，而是**同一张纸的三种看法**：
+ * 这两档不是两个页面，而是**同一张纸的两种看法**：
  * - `preview` 生成轨的产物（`resume.export.preview` 那份打印 HTML）
- * - `layout` 排版编辑器正在改的那份 draft（同一个 builder，只是还没落库）
- * - `pdf` 编辑轨的 PDF 覆盖层（改的是用户手里那份真实文件）
+ * - `pdf` 本机那份真实 PDF 文件的查看画面（只读：挑文件、翻页，没有任何写口）
+ *
+ * 曾经的第三档 `layout`（编辑器 draft 挂进同一格）随裁定㊲整条搬进整页编辑那一屏——
+ * 同一屏不许有两份草稿预览（spec 6.4-14 的④），而类型留着死分支就是第二份事实（§2.4），故收窄。
  */
-export type ResumePaperMode = 'preview' | 'layout' | 'pdf';
+export type ResumePaperMode = 'preview' | 'pdf';
 
 /**
  * 这一张纸此刻的供料状态（`ResumeDesk` 是唯一判别人，槽位只转述）。
@@ -27,13 +28,12 @@ export interface ResumePaperStageProps {
   /** 槽位此刻是哪一档。 */
   mode: ResumePaperMode;
   /**
-   * 换档。**父级是唯一判门的人**：这一档需不需要当前简历、按不动该说什么，都由 desk 决定，
+   * 换档。**父级是唯一判门的人**：按不动该说什么由 desk 决定，
    * 槽位自己不判（§2.5——判据在两处长出来就会漂）。
    */
   onModeChange: (mode: ResumePaperMode) => void;
   /**
-   * 纸上的内容：**槽里唯一一张画面**由父级供给——`preview` 档给落库版、`layout` 档给 draft 版，
-   * 两者都画在**同一颗 iframe** 上（`ResumeEditor` 不再自己养第二张预览，spec 6.4-14 的④）。
+   * 纸上的内容：**槽里唯一一张画面**由父级供给——`preview` 档给落库版（这一格不再有 draft 分支）。
    * undefined = 这一份还没渲过（画空态，不画上一份的残留）。
    */
   paperHtml?: string;
@@ -41,7 +41,7 @@ export interface ResumePaperStageProps {
   paperStatus: PaperStatus;
   /** 最近一次纸面落定的时刻（毫秒时间戳）；undefined = 这一张还没落过。 */
   paperUpdatedAt?: number;
-  /** PDF 档的画面：那一档改的是真实文件，画布有自己的缩放，父级**只在这一档**把它传进来（spec 6.4-08）。 */
+  /** PDF 档的画面：那一档吃真实文件，画布有自己的缩放，父级**只在这一档**把它传进来（spec 6.4-08）。 */
   pdfView?: ReactNode;
   /** 纸上方那条窄栏的身份读数：这一张是谁的简历（姓名或 id）。 */
   docLabel?: string;
@@ -49,24 +49,24 @@ export interface ResumePaperStageProps {
   templateName?: string;
   /** 纸面语言（`resume-locale` 那颗选择器的当前值，只作读数摆出来，不在这里改）。 */
   locale: ResumeLocaleView;
-  /** 上一次导出的回执；undefined 表示这次会话还没导过。 */
-  receipt?: ExportReceiptView;
-  /** 「在访达中显示」那一段动作（同样是父级的 `run`，槽位不自己开一条桥接通道）。 */
-  onReveal: () => void;
   /** 上一条动作在途：整组页签按不动的原因码走这一档。 */
   busy?: boolean;
 }
 
 /**
- * 简历屏的纸面槽：一条页签 + 一张常驻的纸 + 纸右下角那条导出回执。
+ * 简历屏的纸面槽：一条页签 + 一张常驻的纸。
  *
- * 形状依据是 2026-10-10 的两条裁定：① 三种看法共用一格、切换是条件挂载而不是 `hidden` 叠放
+ * 形状依据是 2026-10-10 的两条裁定加 2026-10 下旬的裁定㊲/㊳：
+ * ① 几种看法共用一格、切换是条件挂载而不是 `hidden` 叠放
  * （隐藏态宽高为 0 会让同名选择器命中看不见的那一份，AGENTS.md §9 的 5.4-b ⑦）；
  * ② 纸住在**右栏**里，装不下时**整张缩放**而不是横向滚（spec 6.4-12）。
  *
  * "装不下"的判据在 2026-10-14 由 6.4-24 加了第二条：这一格按**宽与一页的高取小**，
  * 所以 A4 一页完整可见、不必在纸里滚（代价是窗口矮时左右留白）。缩放的手术只住在 `ResumePaperFrame` 里，
  * 这一格不重述口径（§2.2），只供画面内容与取证通道名。
+ *
+ * 导出回执条从前常驻在纸下方——写端搬进整页编辑右轨（裁定㊲）后，回执跟着住在结果旁边，
+ * 这一格不再持有第二条"产物落地"的读数（§2.5）。
  * @param props 见 `ResumePaperStageProps`
  * @returns 一栏纸面；被切走的那一档不在 DOM 里
  */
@@ -80,18 +80,13 @@ export function ResumePaperStage({
   docLabel,
   templateName,
   locale,
-  receipt,
-  onReveal,
   busy = false,
 }: ResumePaperStageProps) {
   const { t } = useTranslation();
-  // 「在访达中显示」那一句与左下角 toast 的 reveal 键同源（同一句话在两处各拼一遍就是第二份事实，§2.2）。
-  const revealLabel = useRevealLabel();
 
-  /** 三档页签的文案（值即 `data-action` 后缀：`paper-stage-preview` 这种，harness 按它切档）。 */
+  /** 两档页签的文案（值即 `data-action` 后缀：`paper-stage-preview` 这种，harness 按它切档）。 */
   const stageOptions = [
     { value: 'preview' as const, label: t('resume.paper.modePreview') },
-    { value: 'layout' as const, label: t('resume.paper.modeLayout') },
     { value: 'pdf' as const, label: t('resume.paper.modePdf') },
   ];
 
@@ -138,19 +133,19 @@ export function ResumePaperStage({
       </p>
 
       {/* 纸面本体：只有当前那一档在 DOM 里，且**槽里任何时刻只有一张画布**（spec 6.4-08）。
-          从此不会再有"预览 iframe + 编辑器 + PDF 画布"三张同屏，导出后画面自己变。 */}
+          从此不会再有"预览 iframe + PDF 画布"两张同屏，导出后画面自己变。 */}
       {mode === 'pdf' ? (
         <div className="min-w-0">{pdfView}</div>
       ) : (
         <ResumePaperFrame
           html={paperHtml}
-          frameTestId={mode === 'layout' ? 'resume-editor-preview' : 'resume-preview'}
-          frameTitle={t(mode === 'layout' ? 'resume.editor.heading' : 'resume.paper.aria')}
+          frameTestId="resume-preview"
+          frameTitle={t('resume.paper.aria')}
           // 这一档是**只读**的那一张：帧里不跑脚本、父页也不读它（sandbox 空串）。
           // 整屏编辑页那一档才放开 `allow-same-origin`，为的是在父页一侧现量段矩形（spec 3.10-01）。
           sandbox=""
-          emptyTestId={mode === 'layout' ? 'resume-editor-preview-empty' : 'resume-preview-empty'}
-          emptyLabel={t(mode === 'layout' ? 'resume.editor.previewEmpty' : 'resume.previewEmpty')}
+          emptyTestId="resume-preview-empty"
+          emptyLabel={t('resume.previewEmpty')}
           slotTestId="resume-paper-slot"
           fit="page"
           slotClassName="min-w-0 overflow-hidden p-3"
@@ -161,26 +156,6 @@ export function ResumePaperStage({
       <DeskExplainer id="resume.paper.fit" label={t('desk.resume.paperFit')}>
         {t('desk.resume.paperFitBody')}
       </DeskExplainer>
-
-      {/* 回执条常驻在纸下方（裁定②：导出后画面要当场给反馈）。路径那一格留着既有
-          `resume-receipt-path` 通道名，harness 的旧读数不断。没导过时整条不画，而不是摆一个 0 页。 */}
-      {receipt && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-line pt-2">
-          <p
-            className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-500"
-            data-testid="resume-receipt-path"
-            title={receipt.path}
-          >
-            {receipt.path}
-          </p>
-          <p className="shrink-0 font-mono text-[11px] text-slate-400" data-testid="resume-receipt-metrics">
-            {t('resume.paper.receipt', { pages: receipt.pages, bytes: receipt.bytes })}
-          </p>
-          <DeskButton action="resume-reveal-pdf" variant="line" compact onClick={onReveal}>
-            {revealLabel}
-          </DeskButton>
-        </div>
-      )}
     </section>
   );
 }

@@ -1,7 +1,7 @@
 import {
   Ban,
+  BookOpen,
   Eye,
-  FileDown,
   FileText,
   FlaskConical,
   FolderOpen,
@@ -9,9 +9,7 @@ import {
   History,
   ListChecks,
   Maximize2,
-  Pencil,
   RefreshCw,
-  SlidersHorizontal,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -19,7 +17,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
-  ExportReceiptView,
   ImportProvenanceRowView,
   ImportReceiptView,
   PendingImportRowView,
@@ -35,19 +32,17 @@ import { formatClock } from './format';
 import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
-import { PdfEditPanel } from './PdfEditPanel';
 import { PdfPaperView } from './PdfPaperView';
+import { PdfViewPanel } from './PdfViewPanel';
 import { ResumeEditPage } from './ResumeEditPage';
-import { ResumeEditor } from './ResumeEditor';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { SkillPanel } from './SkillPanel';
-import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
 import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
-import { Drawer, Modal, useRevealLabel } from './ui/overlays';
+import { Drawer, Modal } from './ui/overlays';
 import { SplitHandle, useSplitWidth } from './ui/split';
 import { useBridgeAction } from './useBridgeAction';
-import { usePdfEdit } from './usePdfEdit';
+import { usePdfView } from './usePdfView';
 import { useViewTrail } from './viewTrail';
 
 /** 故意不存在的文档 id：供「注入失败导出」那颗键触发主进程返回 `AppErrorPayload`（spec 3.3-11 的验证入口）。 */
@@ -133,26 +128,27 @@ const CHANGE_TONE: Record<keyof typeof CHANGE_LABEL_KEY, 'jade' | 'seal' | undef
  * 简历屏的「一页纸工作台」（spec 6.4-07…11 / plan §3.26，第五十六片起）。
  *
  * **形状依据是 2026-10-09 的四条裁定**（用户在 AskUserQuestion 里选的，不是我推的）：
- * ① 左右分栏——左列操作、右列一张纸常驻；② 模板走版式骨架缩略图网格；
- * ③ 预览 / 排版 / PDF 覆盖三种画面共用同一纸面槽位、由键位进入；④ 三颗开发夹具退出产品列、进「自测台」抽屉。
+ * ① 左右分栏——左列操作、右列一张纸常驻；② 模板走版式骨架缩略图网格（裁定㊲后住进整页编辑的右轨）；
+ * ③ 预览 / PDF 查看两种画面共用同一纸面槽位、由键位进入（裁定㊳：原「排版」档与 PDF 的编辑能力都收进整页编辑）；
+ * ④ 三颗开发夹具退出产品列、进「自测台」抽屉。
  *
  * 改造前的样子（病灶逐条在 plan §3.26 的表里）：`PANELS.resume` 平铺四块全宽面板、65 只键一列排到底，
  * `seed` / `seed-edited` / `fail` 与「导入 / 预览 / 导出」挤在同一行，预览 iframe 之前压着 330 行控件，
  * 而 50 套模板是一只看不见差别的 `<select>`。
  *
- * 状态归属：这一层是 `docId` / 模板 / 纸面档 / 导出回执的**唯一持有者**（风险① 的对策），
- * 挂进来的 `GeneratePanel` 改吃 props；读数一律来自 `window.autoCC` 的既有白名单调用，界面不自己算（§2.5）。
+ * 状态归属：这一层是 `docId` / 模板 / 纸面档的**唯一持有者**（风险① 的对策），
+ * 挂进来的 `GeneratePanel` 改吃 props；导出回执随写端一起搬进整页编辑的右轨（裁定㊲）。
+ * 读数一律来自 `window.autoCC` 的既有白名单调用，界面不自己算（§2.5）。
  */
 export function ResumeDesk() {
   const { t } = useTranslation();
-  // 纸右下角那颗「在访达中显示」与 toast 上的同名动作共用一句文案（`ui/overlays` 那一处推导）。
-  const revealLabel = useRevealLabel();
   const bridge = window.autoCC;
   const [locale, setLocale] = useState<ResumeLocaleView>('zh-CN');
   /**
    * 右栏那张纸上此刻的内容——**desk 是唯一持有者**（§2.5）。
-   * 来源两路且互斥：`preview` 档是 `resume.export.preview` 的落库版，`layout` 档是编辑器递上来的 draft。
+   * 只有一路来源：`preview` 档的 `resume.export.preview` 落库版；`pdf` 档画的是本机 PDF 文件本身，不吃这份 HTML。
    * `undefined` = 这一档此刻没有可画的那一张（槽位画空态，不画上一档的残留）。
+   * 整页编辑那一屏的草稿画面归编辑页自己（它换掉整个工作台，不与这一格共用槽位，裁定㊲）。
    */
   const [paperHtml, setPaperHtml] = useState<string>();
   /** 纸角读数条（`paper-live`）的唯一依据：在途还是已最新。 */
@@ -167,7 +163,6 @@ export function ResumeDesk() {
   const [paperRevision, setPaperRevision] = useState(0);
   /** 在途那一趟的序列号：只有最新一次的响应能落进纸上，过期的直接丢（1200ms 预算下不丢会闪现旧纸）。 */
   const paperSeqRef = useRef(0);
-  const [receipt, setReceipt] = useState<ExportReceiptView>();
   const [snapshots, setSnapshots] = useState<SnapshotMetaView[]>([]);
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
@@ -194,16 +189,18 @@ export function ResumeDesk() {
   const [pendingDelete, setPendingDelete] = useState<string>();
   /** 上一次删除失败的结构化错误（半删状态必须说得出为什么，且不把行从列表里摘掉，spec 6.4-20 的④）。 */
   const [deleteError, setDeleteError] = useState<AppErrorPayload>();
-  /** 可摆的模板清单（含版式骨架的七条轴）、当前用来出纸的那一套、人设定的那一套（3.2-03）。 */
+  /**
+   * 可摆的模板清单（含版式骨架的七条轴）、当前用来出纸的那一套、人设定的那一套（3.2-03）。
+   * 裁定㊲之后 desk 只**读**这一格（「当前样式：<名>」那一行 + 把 props 递给整页编辑），
+   * 换样式与记默认的写端都搬进了编辑页的右轨——desk 里不再长出模板写入路径（§2.5）。
+   */
   const [templates, setTemplates] = useState<ResumeTemplateSummaryView[]>([]);
   const [templateId, setTemplateId] = useState('classic');
   const [defaultTemplateId, setDefaultTemplateId] = useState('classic');
-  /** 模板架的筛选（父级持有：收起再展开、切走再切回都不该把人筛掉的东西偷偷放回来）。 */
-  const [shelfFilter, setShelfFilter] = useState<ResumeShelfFilter>({});
   const [lastImport, setLastImport] = useState<ImportReceiptView>();
   const [importError, setImportError] = useState<AppErrorPayload>();
   const [pending, setPending] = useState<PendingImportRowView[]>([]);
-  /** 纸面槽此刻是哪一档（预览 / 排版 / PDF 覆盖，裁定③）。 */
+  /** 纸面槽此刻是哪一档（预览 / PDF 查看；裁定㊳后没有第三档，类型收窄）。 */
   const [paperMode, setPaperMode] = useState<ResumePaperMode>('preview');
   /**
    * 整页直接编辑那一屏在不在场（spec 3.10 / 裁定㉙ 第 2 条）。
@@ -270,17 +267,13 @@ export function ResumeDesk() {
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 
   /**
-   * 换纸面档。**判门只在这一处**：排版那一档吃当前文档，没有文档就不换档、把原因说给人听，
-   * 而不是把人送进一张空编辑器（页签点下去必须有回应，静默拒绝是说谎）。
+   * 换纸面档。**判门只在这一处**：裁定㊳之后只剩「预览」与「PDF 查看」两档，
+   * 两档都不吃当前文档之外的门槛（PDF 档打开后仍可空手挑文件），于是这里只留"重复点同一个页签就什么都不做"。
    * 换档同时**清空画面**：上一档的 HTML 留在槽里就会以另一档的身份挂在纸上（`preview` 档的落库版
-   * 挂在「排版」页签下面，是 §2.5 禁止的那两份事实）；清空之后由那一条去抖 effect 或编辑器重新供料。
+   * 挂在「PDF 查看」页签下面，是 §2.5 禁止的那两份事实）；清空之后由那一条去抖 effect 重新供料。
    * @param next 目标档位
    */
   const requestPaperMode = (next: ResumePaperMode) => {
-    if (next === 'layout' && docId === undefined) {
-      setNotice(t('resume.reason.NO_CURRENT_DOC'), 'amber');
-      return;
-    }
     if (next === paperMode) return;
     setPaperHtml(undefined);
     setPaperStatus('idle');
@@ -406,16 +399,6 @@ export function ResumeDesk() {
   };
 
   /**
-   * 把当前选中的模板写成人设定的默认模板（3.2-03：此后不给模板 id 的预览与导出都用它）。
-   * 写入走 `resume.export.setPreference`，未知 id 由主进程拒绝，界面不自己判模板存在性（§2.5）。
-   */
-  const rememberTemplate = () =>
-    void run(t('resume.setTemplate'), () => bridge?.resume['export.setPreference'](templateId), {
-      apply: () => setDefaultTemplateId(templateId),
-      describe: (value) => t('resume.templateSet', { template: value.templateId }),
-    });
-
-  /**
    * 落一份演示文档（`base` / `edited`，spec 3.3-10 / 3.7-03 的取证入口），成功后立刻渲一次预览。
    * @param variant 种子的版本——`edited` 在同一 docId 上落第二版内容，好让 diff 有得比
    */
@@ -426,7 +409,6 @@ export function ResumeDesk() {
       {
         apply: (value) => {
           setDocId(value.docId);
-          setReceipt(undefined);
         },
         describe: (value) => t('resume.seedReceipt', { docId: value.docId }),
       },
@@ -437,10 +419,9 @@ export function ResumeDesk() {
    * 就尾随去抖 350ms 发一次 `resume.export.preview`，与导出同一份打印 HTML 源（3.3-01「预览即导出所见」）。
    *
    * 三条形状约束，都是这一条要成立才让"预览"那颗键降级成手动补同步的凭据：
-   * ① **只在 `preview` 档跑**——`layout` 档的纸由编辑器递 draft 上来，这里再发一次就把没保存的那份盖掉了
-   *    （两份事实），`pdf` 档画的是真实文件的覆盖层，更不该被生成轨的 HTML 顶掉；
+   * ① **只在 `preview` 档跑**——`pdf` 档画的是本机真实 PDF 文件，更不该被生成轨的 HTML 顶掉；
    * ② **不走 `run`**——`run` 收尾会调 `read`（重读待确认与库清单）并把 `busy` 挂上全屏，
-   *    于是每滑一次滑杆就禁掉整屏的键；先例是 `ResumeEditor.refreshPreview` 那条注释（§2.5）；
+   *    于是每滑一次滑杆就禁掉整屏的键；先例是编辑器会话那条不挂全屏 busy 的渲染注释（§2.5）；
    * ③ **序列号丢过期响应**——一次渲染在途时后面的改动会重新起一趟，回来的旧结果必须整条丢弃
    *    （`maxPreviewResponseMs` 那档预算下不丢就等于闪现旧纸，连改五次之后纸上看到的是第三次）；
    * ④ **去抖是尾随的**——每一次依赖变化都把上一趟还没起走的定时器 `clearTimeout` 掉，
@@ -474,52 +455,18 @@ export function ResumeDesk() {
     }, PAPER_DEBOUNCE_MS);
     // 依赖只列这六个语义输入：`t` 与 `setNotice` 故意不进来——换 app 界面语言不该重出这张纸
     // （纸上用哪种语言由 `resume-locale` 那一格自己管），而它们是每次渲染都可能换引用的壳，
-    // 进依赖会让这条 effect 在无关事件上也重发一趟跨进程渲染（先例：`ResumeEditor` 挂载那条只吃 `docId`）。
+    // 进依赖会让这条 effect 在无关事件上也重发一趟跨进程渲染（先例：编辑器会话挂载那条只吃 `docId`）。
     return () => window.clearTimeout(timer);
   }, [paperMode, docId, templateId, locale, paperRevision, bridge]);
 
   /**
-   * 换一套版式：选中它。画面不用在这里显式重渲——`templateId` 是上面那条 effect 的依赖，
-   * 换档自己会走那趟去抖（原先这里是"点一下模板调一次预览"，那正是"预览键是唯一入口"的形状）。
-   * @param id 目标模板 id（来自 `resume.export.templates`，界面不自造）
-   */
-  const selectTemplate = (id: string) => setTemplateId(id);
-
-  /**
-   * 导出 PDF：主进程离屏视图 printToPDF → 落 userData/exports → 回写页数，回执摆到纸右下角（3.3-04 / 05 / 09）。
-   * @param targetDocId 已落库的文档 id
-   * @param after 产物落地后还要做的一件事（PDF 编辑那一档用它把刚出的这份产物铺到纸上，见下面那条自动供料）
-   */
-  const exportPdf = (targetDocId: string, after?: (value: ExportReceiptView) => void) =>
-    void run(t('resume.export'), () => bridge?.resume['export.toPdf'](targetDocId, templateId, locale), {
-      apply: (value) => {
-        setReceipt(value);
-        after?.(value);
-        // 09 稿形态① 1-B：产物是磁盘上的一份 PDF，当前视野里翻不到它，所以除了回执条，
-        // 还在左下角补一只 toast 把落点说清楚——稿子里"结果不在视野才配 toast"指的就是这一类。
-        pushDeskToast({
-          action: 'resume-export-toast',
-          tone: 'jade',
-          message: t('resume.exportToast', { path: value.path }),
-          // 稿上 1-B 的第二段动作（spec 6.2-12）：PDF 是主进程写进 userData/exports 的产物，落在 reveal 口的边界内。
-          revealPath: value.path,
-        });
-      },
-      describe: (value) => t('resume.exportReceipt', { pages: value.pages, bytes: value.bytes }),
-    });
-
-  /**
-   * 把上一次导出的产物在系统文件管理器里选中（`shell.revealInFolder`，spec 6.2-12 的第二段动作）。
-   * 路径是主进程自己写出来的那份，正好落在 reveal 口的边界内。
-   */
-  const revealReceipt = () =>
-    void run(revealLabel, () => bridge?.shell.revealInFolder(receipt?.path ?? ''), {
-      describe: () => undefined,
-    });
-
-  /**
    * 注入一次导出失败（对不存在的文档调 `toPdf`），让主进程的 `AppErrorPayload` 经同一个 `run` 外壳
    * 显示成可读中文——spec 3.3-11「注入失败 → 截图错误态，主进程不崩」的界面入口（自测台里的第三颗）。
+   *
+   * 裁定㊲把出纸的**正常**写端全部搬进了整页编辑（spec 3.13-01 的 C 半边），这一颗是唯一的例外并有意保留：
+   * 它是"错误态能不能被看见"这条判据（3.3-11）的取证入口，目标硬接在 `FAILURE_DOC_ID` 上——
+   * 它检验的不是"导出一份真简历"，而是"主进程返回 `AppErrorPayload` 时界面与主进程都不崩"。
+   * 把它删了，3.3-11 就失去界面入口；把它改指当前文档，它就不再失败、 criterion 当场失效。
    */
   const injectFailure = () =>
     void run(t('resume.fail'), () => bridge?.resume['export.toPdf'](FAILURE_DOC_ID, templateId, locale), {
@@ -582,8 +529,6 @@ export function ResumeDesk() {
 
   const importReason = importPath.trim() === '' ? 'IMPORT_PATH_EMPTY' : busyReason;
   const noDocReason = docId === undefined ? 'NO_CURRENT_DOC' : busyReason;
-  const editorReason = noDocReason;
-  const templateReason = templates.length === 0 ? 'TEMPLATE_LIST_PENDING' : busyReason;
   const diffReason = fromId === '' || toId === '' ? 'SNAPSHOT_MISSING' : fromId === toId ? 'SNAPSHOT_SAME' : busyReason;
 
   /** 当前那份的身份读数（姓名读不到就露 id——宁可露 id 也不给一个空白纸）。 */
@@ -656,16 +601,6 @@ export function ResumeDesk() {
   };
 
   /**
-   * 编辑器递上来的 draft：直接成为纸上这一刻的内容（`layout` 档里槽位自己不发起跨进程渲染）。
-   * @param html draft 的打印 HTML；undefined = 这一版没渲出来，画空态而不是留着上一版冒充 draft
-   */
-  const acceptDraft = useCallback((html: string | undefined) => {
-    setPaperHtml(html);
-    if (html !== undefined) setPaperUpdatedAt(Date.now());
-    setPaperStatus('idle');
-  }, []);
-
-  /**
    * 右栏的宽度（拖拽、键盘、双击、持久化全在 `ui/split.tsx` 那一处实现，spec 6.4-13）。
    * 与内核视图那一支共用原件而不是复刻一份，就是为了这里不必再写第二套越界夹取（§2.2/§2.5）。
    */
@@ -679,36 +614,16 @@ export function ResumeDesk() {
   });
 
   /**
-   * PDF 覆盖这一轨的唯一模型（spec 3.5-12）：控件长在左列、真纸画在右栏那一格，两边吃同一份 state。
+   * PDF 查看这一轨的唯一模型（spec 3.5-12 / 裁定㊳）：控件长在左列、真纸画在右栏那一格，两边吃同一份 state。
    * 之所以把它挂在 desk 而不是面板里：一拆两格就有两个消费者，state 留在任何一边都会让另一份成第二份事实（§2.5）。
-   */
-  const pdfEdit = usePdfEdit({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
-
-  /**
-   * 进 PDF 这一档就把**当前这份简历刚生成的产物**铺到纸上（用户 2026-10-12 报的「pdf 编辑页完全空白」根因）。
+   * 裁定㊳之后这一轨只剩"看"：`pdf.io.open` 拿页数文件名、`pdf.io.bytes` 拿真纸，
+   * 覆盖层/页序/另存那三条写端已整条摘除（编辑与出纸归整页编辑那一屏）。
    *
-   * 这一档原先只等人键绝对路径或开选文件面板，于是从页签切进来是一张 `idle` 的白纸、
-   * 每一颗编辑键都按不动（回执不在场时清单整块不画）。人手里那份 PDF 那两条入口原样保留，
-   * 但「改我刚生成的那份」不该要求人先知道产物落在 userData/exports 的哪里。
-   * 判门只在这一处：有当前文档、这一档在场、且还没开过任何一份 PDF 才自动供料——
-   * 用的就是架上选中的那套版式与语言，所以纸上的字与预览那一档看见的是同一份（spec 3.3-01 续用）。
-   * 去抖靠 ref 记这一轮已经为哪一份文档+哪套版式发过：切走时 `usePdfEdit` 会回收回执，
-   * 切回来就该按当下那份重新出一份，而不是拿旧产物冒充。
+   * 曾经这里还有一条"进 PDF 档就自动导一份刚出的产物铺上纸"的 effect（用户 2026-10-12 报空白根因的补丁）：
+   * 它的前提是"这一档吃当前文档"，而那个前提随导出写端一起搬走了——现在这一档从挑一份本机 PDF 开始，
+   * 空的就画空态并教人选文件，不再拿一次隐式导出冒充"用户想看的那一份"。
    */
-  const pdfAutoKeyRef = useRef('');
-  useEffect(() => {
-    if (paperMode !== 'pdf') {
-      pdfAutoKeyRef.current = '';
-      return;
-    }
-    if (docId === undefined || pdfEdit.receipt !== undefined) return;
-    const key = `${docId}|${templateId}|${locale}`;
-    if (pdfAutoKeyRef.current === key) return;
-    pdfAutoKeyRef.current = key;
-    exportPdf(docId, (value) => pdfEdit.openPath(value.path));
-    // `exportPdf` 与 `pdfEdit` 每次渲染都换引用，放进依赖会让这一趟在无关按键后重发；
-    // 这一条的判据全在 ref 与上面那三个 state 里，多跑的趟数由 key 挡住。
-  }, [paperMode, docId, templateId, locale, pdfEdit.receipt]);
+  const pdfView = usePdfView({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
 
   /**
    * 「选择文件」那颗键（spec 6.4-19）：**在源码里只写一次**，却按段的开合只出现在一处 DOM——
@@ -761,6 +676,10 @@ export function ResumeDesk() {
           locale={locale}
           docLabel={docLabel}
           templateName={templateName}
+          templates={templates}
+          defaultTemplateId={defaultTemplateId}
+          onTemplateChange={setTemplateId}
+          onDefaultTemplateChange={setDefaultTemplateId}
           onClose={() => setEditPageOpen(false)}
         />
       ) : (
@@ -1011,7 +930,7 @@ export function ResumeDesk() {
                   {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
                 spec 6.4-15 的 C 半边要求：`id` 与 `data-testid` 两个通道名一字不改地跟着走）。
                 条件挂载是刻意的：收起态下正文卸载，`KbPanel` 的订阅与 `read()` 就不跑——
-                这正是"不活跃时别养第二份工作副本"的口径（`usePdfEdit` 同形，spec 3.5-12）。 */}
+                这正是"不活跃时别养第二份工作副本"的口径（`usePdfView` 同形，spec 3.5-12）。 */}
                   <DeskExplainer
                     id="resume.facts"
                     label={t('desk.resume.sectionFacts')}
@@ -1060,7 +979,7 @@ export function ResumeDesk() {
                 </div>
               </DeskSection>
 
-              {/* ③ 出纸：模板架（裁定② 的骨架缩略图）+ 这张纸的三把出口键 + 快照对照。 */}
+              {/* ③ 出纸：当前样式读数 + 这张纸的出口键 + 快照对照（裁定㊲后模板架与导出写端都住进整页编辑）。 */}
               <DeskSection
                 id="resume.output"
                 title={t('desk.resume.sectionOutput')}
@@ -1077,18 +996,16 @@ export function ResumeDesk() {
                     {t('desk.resume.stepOutputHint')}
                   </p>
 
-                  <TemplateShelf
-                    templates={templates}
-                    selectedId={templateId}
-                    defaultId={defaultTemplateId}
-                    filter={shelfFilter}
-                    onFilterChange={setShelfFilter}
-                    onSelect={selectTemplate}
-                    onSetDefault={rememberTemplate}
-                    busy={!!busy}
-                    disabledReason={templateReason}
-                    disabledReasonLabel={reasonLabel(templateReason)}
-                  />
+                  {/* 裁定㊲：模板架整块搬进整页编辑的右轨，这一格只剩**读数**——
+                      「此刻出纸用的是哪一套样式」+「要换样式去哪里」。
+                      写端（选中 / 记默认）在这里不再存在，同一屏不许有两条改样式的通道（§2.5）。 */}
+                  <p className="text-[11px] text-slate-400" data-testid="resume-template-reading">
+                    {templateName
+                      ? t('desk.resume.styleCurrent', { name: templateName })
+                      : t('desk.resume.styleCurrent', { name: templateId })}
+                    {' · '}
+                    {t('desk.resume.styleHint')}
+                  </p>
 
                   <label className="flex items-center gap-1 text-[11px] text-slate-400">
                     {t('resume.locale')}
@@ -1117,48 +1034,25 @@ export function ResumeDesk() {
                       <Eye size={12} />
                       {t('resume.preview')}
                     </DeskButton>
-                    {/* 写本机userData 的这一颗走琥珀；预览是只读渲染，不给外发那一档的朱砂。 */}
-                    <DeskButton
-                      action="export"
-                      variant="amber"
-                      compact
-                      busy={!!busy}
-                      disabled={noDocReason !== undefined}
-                      disabledReason={noDocReason}
-                      disabledReasonLabel={reasonLabel(noDocReason)}
-                      onClick={() => docId !== undefined && exportPdf(docId)}
-                    >
-                      <FileDown size={12} />
-                      {t('resume.export')}
-                    </DeskButton>
-                    <DeskButton
-                      action="open-editor"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={editorReason !== undefined}
-                      disabledReason={editorReason}
-                      disabledReasonLabel={reasonLabel(editorReason)}
-                      onClick={() => requestPaperMode('layout')}
-                    >
-                      <SlidersHorizontal size={12} />
-                      {t('resume.editor.enter')}
-                    </DeskButton>
-                    {/* 整页编辑（spec 3.10-06）：判门与那颗"排版控件"完全同一条（要有当前文档），
-                      因为两档编辑的是同一份 draft、同一条撤销栈——差别只在纸多大、能不能点着段改。 */}
+                    {/* 裁定㊲：出纸与换样式/记默认的写端整条搬进整页编辑的右轨，
+                        且必须先落库再出纸（spec 3.13-05）——desk 这一侧不再持有"导一份还没存的纸"这条路。
+                        预览是只读渲染，仍是这一格的键。 */}
+                    {/* 整页编辑（spec 3.10-06）：判门是"要有当前文档"——编辑的是那一份的草稿，
+                        没有文档就送进空会话（6.4-07 那句"页签点下去必须有回应"的同一条判门）。 */}
                     <DeskButton
                       action="open-edit-page"
                       variant="line"
                       compact
                       busy={!!busy}
-                      disabled={editorReason !== undefined}
-                      disabledReason={editorReason}
-                      disabledReasonLabel={reasonLabel(editorReason)}
+                      disabled={noDocReason !== undefined}
+                      disabledReason={noDocReason}
+                      disabledReasonLabel={reasonLabel(noDocReason)}
                       onClick={() => setEditPageOpen(true)}
                     >
                       <Maximize2 size={12} />
                       {t('resume.edit.enter')}
                     </DeskButton>
+                    {/* 裁定㊳：这一档只剩"看"——眼睛而不是铅笔，进的是本机 PDF 文件的查看轨。 */}
                     <DeskButton
                       action="open-pdf-edit"
                       variant="line"
@@ -1169,7 +1063,7 @@ export function ResumeDesk() {
                       disabledReasonLabel={reasonLabel(busyReason)}
                       onClick={() => requestPaperMode('pdf')}
                     >
-                      <Pencil size={12} />
+                      <BookOpen size={12} />
                       {t('pdfEdit.enter')}
                     </DeskButton>
                     <DeskButton
@@ -1208,24 +1102,14 @@ export function ResumeDesk() {
                 </div>
               </DeskSection>
 
-              {/* 排版编辑器：只在「排版」这一档长出**控件**（区块顺序、字号、行距、页边距、语言），
-            画面不跟着搬进来——它仍画在右栏那一格里（spec 6.4-14 的④：同一屏不许有两份草稿预览）。
-            这是 2026-10-10 的一次形状更正：原先编辑器整块塞在纸面槽里（控件 + 它自己那张 iframe），
-            于是"改了滑杆要在那一格才看得见结果"，而它与右边那张落库版预览同时挂在屏上。
-            条件挂载而不是 `hidden`：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
-              {paperMode === 'layout' && docId !== undefined && (
-                <ResumeEditor
-                  docId={docId}
-                  templateId={templateId}
-                  locale={locale}
-                  onClose={() => requestPaperMode('preview')}
-                  onPreview={acceptDraft}
-                />
-              )}
+              {/* 裁定㊲：排版编辑器（区块顺序、字号、行距、页边距那几条控件）整块搬进整页编辑，
+                  desk 里不再挂那只排版编辑器——同一屏不许有两份草稿会话（§2.5），
+                  而"改了滑杆要在那一格才看得见结果"的旧病灶也正是这一改的理由。 */}
 
-              {/* PDF 覆盖这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
-              与排版编辑器同一条形状：只有当前那一档在 DOM 里。 */}
-              {paperMode === 'pdf' && <PdfEditPanel model={pdfEdit} />}
+              {/* PDF 查看这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
+                  纯查看：只有挑文件、开路径、翻页，没有任何写口。
+                  条件挂载是刻意的：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
+              {paperMode === 'pdf' && <PdfViewPanel model={pdfView} />}
 
               {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
             spec 3.3-10 / 3.3-11 的取证通道因此不断；变的只是它们住在哪一格。 */}
@@ -1241,7 +1125,7 @@ export function ResumeDesk() {
               </DeskButton>
             </div>
 
-            {/* 右栏：一根把手 + 一张常驻的纸。三种看法（预览 / 排版 / PDF 覆盖）都画在这一格里，
+            {/* 右栏：一根把手 + 一张常驻的纸。两种看法（预览 / PDF 查看）都画在这一格里，
           所以"编排显示在右侧边栏"与"实时看到变动"是同一件事的两个说法（用户 2026-10-10 的原话）。
           窄档整栏换到最上面（`order-1`）：纵向退让时把纸摆在动作之前，主视觉不再被 330 行控件埋住（病灶③）；
           把手在这一档不画（堆叠时没有"左右"可拖），宽度那一档仍照常持久化，够到 46rem 就回到人拖的位置上。
@@ -1272,12 +1156,10 @@ export function ResumeDesk() {
                   paperHtml={paperHtml}
                   paperStatus={paperStatus}
                   paperUpdatedAt={paperUpdatedAt}
-                  pdfView={<PdfPaperView model={pdfEdit} />}
+                  pdfView={<PdfPaperView model={pdfView} />}
                   docLabel={docLabel}
                   templateName={templateName}
                   locale={locale}
-                  receipt={receipt}
-                  onReveal={revealReceipt}
                   busy={!!busy}
                 />
               </div>

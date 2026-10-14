@@ -1,7 +1,7 @@
-import { GripVertical, Merge, Minus, Palette, Plus, Redo2, Save, Split, Timer, Undo2, X } from 'lucide-react';
+import { GripVertical, Merge, Minus, Palette, Plus, Redo2, Save, Split, Timer, Undo2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ResumeLocaleView, ResumeSectionKindView } from '@auto-cc/shared';
+import type { ResumeSectionKindView } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, deskReason } from './ui/controls';
 import {
   FONT_FAMILY_TOKENS,
@@ -19,7 +19,7 @@ import {
   matchesPreset,
   paragraphPatch,
   themePatch,
-  useResumeEditor,
+  type useResumeEditor,
 } from './useResumeEditor';
 
 /** 一次拖拽的进行态：`fromIndex` 是起手的区块位置，`overIndex` 是此刻指针算出的落点（结果序列下标）。 */
@@ -29,46 +29,26 @@ interface DragState {
 }
 
 /**
- * 排版编辑器（spec 3.6 的界面化身，plan §8.3/§8.4 的 3.6-c）。
+ * 排版编辑器的**纯表现层**（spec 3.13 裁定㊲：整页编辑是唯一编辑处，本片起本组件只画不改状态）。
  *
- * 形状照 5.10 画布那条已经走通的通道：**动作过桥、投影回来**。简历正文一句都不到这边，
- * 界面手里的只有区块 id/kind、度量数、界表、dirty/可撤销位，以及一份打印 HTML 预览
- * （预览与导出同一个 builder，spec 3.3-01 的口径在编辑器里继续成立）。
+ * 形状照 5.10 画布那条已经走通的通道：**动作过桥、投影回来**——但那趟往返如今全在宿主传进来的
+ * `session`（`useResumeEditor` 的返回值）里，本组件不自己调 hook（§2.2：会话只有一份，长在整页编辑那里）。
+ * 简历正文一句都不到这边，界面手里的只有区块 id/kind、度量数、界表、dirty/可撤销位。
  * 因此这里**不判任何界**：滑杆拖到界外时改的是主进程的拒绝话术，不是本地的一次 `if`（§2.5）。
  *
  * 拖拽用 pointer 把手而不是原生 HTML5 DnD 或 @dnd-kit，选型与否决理由见 plan §8.2：
  * 本仓唯一被活体证明能驱动的拖拽通道是 CDP 派发的可信鼠标事件，而它走的就是 pointer 这一路。
  *
- * **画面不住在这里**（2026-10-10 起，spec 6.4-14 的④）：这一版编辑器只长在左列，出纸的那张 iframe
- * 由纸面槽持有，本组件通过 `onPreview` 把 draft 的打印 HTML 交上去。理由是一条说谎的形状：
- * 编辑器自己养一张预览时，同一屏上同时存在"库里那份的预览"与"draft 的预览"两张纸，
- * 人改完滑杆要转到编辑器那一格才看得见结果（正是用户 2026-10-10 报的那件事）。
+ * **画面不住在这里**（2026-10-10 起，spec 6.4-14 的④）：出纸的那张 iframe 由整页编辑的纸面持有，
+ * draft 的打印 HTML 经 `session` 背后的 `onPreview` 直接交给宿主，本组件不经手。
  *
- * @param docId 要编辑的简历文档 id（由 `ResumeDesk` 持有并传入）
- * @param templateId 架上当前选中的那套版式（**唯一来源**是 desk，编辑器不再自己长一只模板下拉，§2.5）
- * @param locale 架上当前选中的预览语言（同上）
- * @param onClose 人按"关闭编辑器"且拦截通过后要走的卸载动作（裁定⑪：拦截只做组件卸载这一层）
- * @param onPreview 每一次 draft 重出之后把 HTML 交给父级（`undefined` = 这一版没渲出来，画空态不画残留）；
- *   它是**单向的供料**，父级不回推，因此槽位里那张纸的身份仍由 desk 判
+ * **关闭那一途也不在这里**（裁定㊲ / plan §3.35 的形状规则）：整页编辑自己已有「确认关闭」与三层 Esc，
+ * 组件再摆一套就是第二条可用的关闭路（§2.4/§2.5），所以内置的关闭键与确认块整体删除。
+ *
+ * @param session 宿主（`ResumeEditPage`）持有的那一份编辑会话——投影、动作、在途态与回执都从它来
  */
-export function ResumeEditor({
-  docId,
-  templateId,
-  locale,
-  onClose,
-  onPreview,
-}: {
-  docId: string;
-  templateId: string;
-  locale: ResumeLocaleView;
-  onClose: () => void;
-  onPreview: (html: string | undefined) => void;
-}) {
+export function ResumeEditor({ session }: { session: ReturnType<typeof useResumeEditor> }) {
   const { t } = useTranslation();
-  /**
-   * 会话本体在 `useResumeEditor`（spec 3.10-07）：这一档的控件与整屏编辑页吃的是**同一份**投影、
-   * 同一条撤销栈、同一张 draft 的纸。这里只留界面自己的四样（确认关闭、拖拽进行态、拆点行号、段落种类）。
-   */
   const {
     view,
     rejected,
@@ -83,8 +63,7 @@ export function ResumeEditor({
     mergeEntry,
     stepHistory,
     save,
-  } = useResumeEditor({ docId, templateId, locale, onPreview });
-  const [confirmClose, setConfirmClose] = useState(false);
+  } = session;
   const [drag, setDrag] = useState<DragState>();
   /**
    * 每一条目当前拨到的**拆点行号**（键是 `区块id/条目id`）。
@@ -175,15 +154,6 @@ export function ResumeEditor({
       const next = Math.min(Math.max((current[key] ?? 1) + delta, 1), maxLine);
       return next === current[key] ? current : { ...current, [key]: next };
     });
-  };
-
-  /**
-   * "关闭编辑器"的判定（裁定⑪：只拦组件卸载这一层，app 关闭不在 3.6-09 的判据原文里）。
-   * 干净就直接卸载；有未保存改动先摆确认块，人再选一次。
-   */
-  const requestClose = () => {
-    if (view?.isDirty) setConfirmClose(true);
-    else onClose();
   };
 
   if (!view) {
@@ -278,24 +248,11 @@ export function ResumeEditor({
 
   return (
     <section data-testid="resume-editor" className="rounded-xl border border-line bg-ink-900/60 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <GripVertical size={16} />
-          {t('resume.editor.heading')}
-          <span className="break-all text-[11px] font-normal text-slate-500">{view.docId}</span>
-        </h3>
-        <DeskButton
-          action="close-editor"
-          variant="ghost"
-          compact
-          busy={!!busy}
-          {...dead(busyReason)}
-          onClick={requestClose}
-        >
-          <X size={12} />
-          {t('resume.editor.close')}
-        </DeskButton>
-      </div>
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+        <GripVertical size={16} />
+        {t('resume.editor.heading')}
+        <span className="break-all text-[11px] font-normal text-slate-500">{view.docId}</span>
+      </h3>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
         <span
@@ -313,37 +270,6 @@ export function ResumeEditor({
             结果是「架上点了现代双栏、编排这张纸还是经典单栏」。唯一来源现在是 desk 的模板架，
             这一格只留 dirty 那一条读数（AGENTS.md §2.4：被替换的旧实现要删干净）。 */}
       </div>
-
-      {confirmClose && (
-        <Banner tone="amber" markers={{ testid: 'resume-editor-close-confirm' }} className="mt-2">
-          <div className="w-full">
-            <p className="text-xs font-semibold">{t('resume.editor.closeConfirmTitle')}</p>
-            <p className="mt-1 text-xs opacity-80">{t('resume.editor.closeConfirmHint')}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <DeskButton
-                action="close-save"
-                variant="amber"
-                compact
-                busy={!!busy}
-                {...dead(busyReason)}
-                onClick={() => {
-                  // 先等保存那一趟跨进程往返真落地，再卸载：反过来会留下一份"看起来存了其实没存"的草稿
-                  // （裁定⑨ 之后界面没有第二次恢复入口，所以这一步的顺序不能马虎）。
-                  void save().then(() => onClose());
-                }}
-              >
-                {t('resume.editor.saveAndLeave')}
-              </DeskButton>
-              <DeskButton action="close-discard" variant="seal" compact onClick={() => onClose()}>
-                {t('resume.editor.discardAndLeave')}
-              </DeskButton>
-              <DeskButton action="close-stay" variant="ghost" compact onClick={() => setConfirmClose(false)}>
-                {t('resume.editor.keepEditing')}
-              </DeskButton>
-            </div>
-          </div>
-        </Banner>
-      )}
 
       <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('resume.editor.sections')}</h4>
       <p className="text-[11px] text-slate-500">{t('resume.editor.sectionsHint')}</p>

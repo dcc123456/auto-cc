@@ -406,12 +406,20 @@ export function useResumeEditor({ docId, templateId, locale, onPreview }: Resume
    * 因此不可能绕过它去调 `resume.doc.save`。
    * 返回那条 Promise 而不是 `void`：「先等这一趟真落地再卸载」是裁定⑨ 之后唯一不留悬空草稿的顺序
    * （`ResumeEditor` 与整屏页的「保存并离开」都靠它，各自都不必再直接摸桥接）。
+   * 决议算的是**成功与否**（`true` = 这一趟真落了库）：整页编辑的导出走「先落库再出纸」（3.13-05），
+   * 而 `useBridgeAction.run` 本身把回执吞在界面上（它只 setNotice），所以下面在 `apply` 里立一只哨。
+   * 干净文档调它也无妨——主进程那次 save 只是重写一遍同一份正文，不会失败（编辑服务幂等）。
    */
-  const save = () =>
-    run(t('resume.editor.save'), () => bridge?.resume['editor.save'](docId), {
-      apply: setView,
+  const save = () => {
+    let saved = false;
+    return run(t('resume.editor.save'), () => bridge?.resume['editor.save'](docId), {
+      apply: (next) => {
+        setView(next);
+        saved = true;
+      },
       describe: () => t('resume.editor.saved'),
-    });
+    }).then(() => saved);
+  };
 
   return {
     view,

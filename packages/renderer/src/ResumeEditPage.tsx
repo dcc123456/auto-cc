@@ -1,10 +1,31 @@
-import { ChevronDown, ChevronUp, Palette, Redo2, Save, SlidersHorizontal, Undo2, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  FileDown,
+  Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Redo2,
+  Save,
+  SlidersHorizontal,
+  Undo2,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ResumeLocaleView, ResumeSectionKindView } from '@auto-cc/shared';
+import type {
+  ExportReceiptView,
+  ResumeLocaleView,
+  ResumeSectionKindView,
+  ResumeTemplateSummaryView,
+} from '@auto-cc/shared';
 import { editableToRaw } from '@auto-cc/plugin-resume-doc/richtext';
+import { ResumeEditor } from './ResumeEditor';
 import { ResumePaperFrame } from './ResumePaperFrame';
+import { TemplateShelf, type ResumeShelfFilter } from './TemplateShelf';
 import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, deskReason } from './ui/controls';
+import { useRevealLabel } from './ui/overlays';
+import { useBridgeAction } from './useBridgeAction';
 import {
   FONT_FAMILY_TOKENS,
   FONT_WEIGHT_TOKENS,
@@ -85,27 +106,42 @@ function paperScaleOf(frame: HTMLIFrameElement): { scale: number; originLeft: nu
 }
 
 /**
- * 整页直接编辑（spec 3.10 / 3.12，裁定㉙ 与 裁定㉠）。
+ * 整页直接编辑 = 唯一的工作台（spec 3.10 / 3.12 / **3.13 裁定㊲**，plan §3.35 的"一张纸 + 两条轨"）。
  *
  * **这一屏对着纸改两件事**：排版（点一段 → 那一段的字号 / 行距 / 对齐 / 字重 / 字色 + 上移下移，
- * 文档级的基准字号 / 行距 / 四边距在右边那一窄栏）与正文（**纸上那一格就是输入口**：
+ * 文档级的基准字号 / 行距 / 四边距在右轨）与正文（**纸上那一格就是输入口**：
  * 点一下落光标、直接敲、离开那一格就进工作副本，界面上没有第三只框、也没有确认键，spec 3.12 / 裁定㉠）。
  * 敲进去的字只进简历工作副本，知识库要靠原来那颗「同步」；改了也不直接进库，还要按「保存」（裁定㉚）。
  * 这一屏上不画任何"点了没反应"的假控件（§2.6）。
  *
- * 四条形状约束：
+ * 裁定㊲ 之后这一屏**新增长着两条轨**（06 plan §3.35）：
+ * - **左轨管"内容"**（区块清单 / 条目拆并，就是那份纯表现层的 `ResumeEditor`），可收起——
+ *   收起走**条件挂载**：收起态下那一份展开的控件根本不在 DOM 里，不是 `hidden` 叠放（§9 的 5.4-b ⑦，
+ *   零宽高的同名选择器会命中看不见的那一份）；
+ * - **右轨管"呈现与出货"**（样式网格 + 整份文档的度量 + 默认样式 + 导出键），常开。
+ *   导出、脏态读数、导出回执在右轨底部**三点一线**（6.4-25 的③：不许让人去别的界面找回执）。
+ *
+ * 四条形状约束（裁定㊲ 后修订）：
  * ① **画面仍出自同一个 builder**——纸上是 `resume.editor.preview` 返回的那份 draft HTML，
  *    与导出产物同一份源（3.3-01 在这屏继续成立），这里没有第二套简历渲染器（§2.5）；
  * ② **命中与编辑态都在父页一侧做**——帧是 `sandbox="allow-same-origin"`（**不放开** `allow-scripts`），
  *    帧内不跑脚本，父页读它的 DOM、给那一格挂 `contenteditable`、把监听挂在帧文档上（plan §17 的实测表）；
  * ③ **格式只由主进程那一份文法解释**——离开那一格时把纸上的形状摘成语法树交给 `editableToRaw`，
  *    渲染层不认识 `- ` 与 `**`（3.12-03）；
- * ④ **会话只有一份**——所有动作走 `useResumeEditor`，与左列编排面板同一条撤销栈（spec 3.10-07）。
- * @param docId 要编辑的那份文档（由 desk 持有）
- * @param templateId 架上选中的版式（同上，唯一来源）
+ * ④ **会话只有一份，且只长在这一屏**——左轨的表现层控件全部吃这一屏传入的 `session`（同一条撤销栈，
+ *    spec 3.10-07 / 3.13 裁定㊲：desk 上不再挂编辑器，也没有第二份会话可漂）。
+ * @param docId 要编辑的那份文档（**归属仍由 desk 持有**——纸面预览 `resume.export.preview` 吃同一份身份，
+ *   且两屏互斥挂载；这一屏只消费，不自造第二份 docId state）
+ * @param templateId 架上选中的版式（归属同上；**这一屏绝不自己长一份模板 state**，§2.5。
+ *   写端在本屏：样式网格点一套 → `onTemplateChange` 回写 desk 那一份，`useResumeEditor` 的对齐效应
+ *   随即补一次 `editor.use` 换预览，下一次导出也带这一套——切样式只剩这一条路（3.13-04））
  * @param locale 架上选中的预览语言
  * @param docLabel 身份读数（姓名读不到就露 id）
  * @param templateName 版式展示名
+ * @param templates 可摆的模板清单（desk 那一趟 `resume.export.templates` **只读**的落点，整份递进来）
+ * @param defaultTemplateId 人设定的默认那套 id
+ * @param onTemplateChange 把架上选中的版式改成这一套（回写 desk 的唯一 setter）
+ * @param onDefaultTemplateChange 默认那套已写进库时的回写（`export.setPreference` 成功后才调）
  * @param onClose 退出这一屏（dirty 时先走屏内的确认）
  */
 export function ResumeEditPage({
@@ -114,6 +150,10 @@ export function ResumeEditPage({
   locale,
   docLabel,
   templateName,
+  templates,
+  defaultTemplateId,
+  onTemplateChange,
+  onDefaultTemplateChange,
   onClose,
 }: {
   docId: string;
@@ -121,9 +161,14 @@ export function ResumeEditPage({
   locale: ResumeLocaleView;
   docLabel?: string;
   templateName?: string;
+  templates: readonly ResumeTemplateSummaryView[];
+  defaultTemplateId: string;
+  onTemplateChange: (id: string) => void;
+  onDefaultTemplateChange: (id: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const bridge = window.autoCC;
   const [paperHtml, setPaperHtml] = useState<string>();
   /** 每一帧装好后收回来的那一个 iframe（命中测试与选中描边都挂在它的文档上）。 */
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -153,7 +198,21 @@ export function ResumeEditPage({
    * 那一刻投影里还是旧值，只看它就会把刚敲的字连着会话一起丢掉（spec 3.12-05）。
    */
   const hasTypedRef = useRef(false);
+  /**
+   * 左轨（内容）在不在场。**条件挂载**的唯一开关：收起态下展开那份整体从 DOM 里消失，
+   * 只留一条 24px 的把手（06 plan §3.35 决定 1；`hidden` 叠放会撞 §9 的 5.4-b ⑦ 同名选择器陷阱）。
+   */
+  const [contentRailOpen, setContentRailOpen] = useState(true);
+  /** 样式网格的筛选（纯界面状态：这一屏自己收放、翻页不该把人筛掉的东西偷偷放回来）。 */
+  const [shelfFilter, setShelfFilter] = useState<ResumeShelfFilter>({});
+  /** 这一次进屏导出的回执（右轨底部那条，3.13-05 的"回执与动作同视野"）。 */
+  const [exportReceipt, setExportReceipt] = useState<ExportReceiptView>();
 
+  /**
+   * 这一屏是**唯一的会话持有者**（裁定㊲）：左轨的 `ResumeEditor` 吃这里递下去的 `session`，
+   * 屏自己的样式条与右轨度量栏也吃同一份投影、同一条撤销栈（spec 3.10-07）。
+   */
+  const session = useResumeEditor({ docId, templateId, locale, onPreview: setPaperHtml });
   const {
     view,
     rejected,
@@ -166,7 +225,16 @@ export function ResumeEditPage({
     setFieldText,
     stepHistory,
     save,
-  } = useResumeEditor({ docId, templateId, locale, onPreview: setPaperHtml });
+  } = session;
+
+  /**
+   * 「出货」那一手的独立外壳（默认样式 + 导出 PDF 这两个**写端**，裁定㊲ 第 2/3 条把它们从 desk 搬了进来）。
+   * 走既有的 `useBridgeAction` 通道——回执那句"这一次顺带落了库"就落在它的 `notice` 上，
+   * 不新造提示机制（§2.2）；它的读数就是这份 paper 状态本身，动作收尾无需再发一次桥调用（`usePdfView` 同形）。
+   */
+  const shipRead = useCallback(() => Promise.resolve(), []);
+  const { busy: shipBusy, notice: shipNotice, noticeTone: shipNoticeTone, run: runShip } = useBridgeAction(shipRead);
+  const revealLabel = useRevealLabel();
 
   /** 当前那一段（从投影里查：撤回到没有它的状态时样式条自己消失，不拿着旧种类继续发）。 */
   const selected = view?.sections.find((section) => section.id === selectedId);
@@ -182,6 +250,47 @@ export function ResumeEditPage({
     selectedIndex < 0 || selectedIndex >= (view?.sections.length ?? 0) - 1,
     'AT_LAST_SECTION',
   );
+  /** 出货那一手的在途判门：会话或写端任一在途，导出/设默认都轮不到人再按（原因码与全屏共用那一句）。 */
+  const shipBusyReason = busy !== undefined || shipBusy !== undefined ? 'ACTION_BUSY' : undefined;
+  /** 样式网格的按不动：清单还没读回来时整架按不动（6.2-06 的码与话成对，这话住在 `resume.reason.*`）。 */
+  const shelfPendingReason = templates.length === 0 ? 'TEMPLATE_LIST_PENDING' : undefined;
+
+  /**
+   * 导出 PDF：**先落库再出纸**（3.13-05 / plan §19.4 第 1 条，裁定㊲ 的第 2 条写端）。
+   *
+   * 两个反例都不许出现：脏时把导出键禁用（"改了反而不能导"是反的——这里**只看有没有在途**，
+   * 不看 dirty），或跳过落库直接导旧稿（产物与纸上所见不一致，破 3.3-01）。
+   * 干净文档调 `save` 也无妨：主进程那趟是幂等的重写，不产失败（3.13-05 的 V：不改字直接导出，
+   * 保存态不许变成"保存失败"）。保存那一趟**真落了库**才发导出——`save()` 的成功位就是为这一条留的。
+   * 回执走 `runShip` 的既有提示通道，落在右轨里与导出键、脏态读数同一视野（6.4-25 的③）。
+   */
+  const exportPdf = () => {
+    void (async () => {
+      const saved = await save();
+      if (!saved) return;
+      await runShip(t('resume.export'), () => bridge?.resume['export.toPdf'](docId, templateId, locale), {
+        apply: (value) => setExportReceipt(value),
+        describe: (value) => t('resume.edit.template.exportDone', { pages: value.pages, bytes: value.bytes }),
+      });
+    })();
+  };
+
+  /**
+   * 把人设定的默认样式写进库（`resume.export.setPreference`，从 desk 搬进来的第二个写端，3.13-04）。
+   * 未知 id 由主进程拒绝，界面不自己判模板存在性（§2.5）；成功后回写 desk 那一份 `defaultTemplateId`——
+   * 归属不变，这里只是那只唯一的手。
+   */
+  const rememberTemplate = () =>
+    void runShip(t('resume.setTemplate'), () => bridge?.resume['export.setPreference'](templateId), {
+      apply: () => onDefaultTemplateChange(templateId),
+      describe: () => t('resume.edit.template.defaultDone', { name: templateName ?? templateId }),
+    });
+
+  /** 把刚导出的那份产物在系统文件管理器里选中（`shell.revealInFolder`，6.2-12 的第二段动作，锚点随回执搬进来）。 */
+  const revealReceipt = () =>
+    void runShip(revealLabel, () => bridge?.shell.revealInFolder(exportReceipt?.path ?? ''), {
+      describe: () => undefined,
+    });
 
   /**
    * 动作与状态的**当下引用**：拖拽与编辑都跨好几拍，抬起/离开那一刻要读最新的 `moveSection` / `setFieldText`，
@@ -552,17 +661,8 @@ export function ResumeEditPage({
         >
           {docLabel ? t('resume.paper.who', { doc: docLabel, template: templateName ?? '-', locale }) : null}
         </p>
-        <span
-          data-testid="resume-edit-dirty"
-          data-dirty={String(view.isDirty)}
-          className={
-            view.isDirty
-              ? 'rounded-chip border border-amber/45 px-1 text-[11px] text-amber'
-              : 'rounded-chip border border-line px-1 text-[11px] text-slate-400'
-          }
-        >
-          {t(view.isDirty ? 'resume.editor.dirty' : 'resume.editor.clean')}
-        </span>
+        {/* 脏态读数（`resume-edit-dirty`）搬进了右轨底部：3.13-05 的导出键与回执要求"动作、态、回执
+            三点一线"（6.4-25 的③），头部那一格离导出键太远。锚点名一字不改，只换宿主的位置。 */}
         <DeskButton
           action="resume-edit-undo"
           variant="ghost"
@@ -650,8 +750,43 @@ export function ResumeEditPage({
       </p>
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-3">
-        {/* 纸：整屏的宽度都给它（左列那 400px 与把手那 6px 都不在这屏存在），所以同一份界表算出来的
-            倍率在这一屏是 1（A4 原尺寸），而右栏那一档最多到 0.7 上下——这就是用户报的"区域太小"的差值。
+        {/* 左轨管"内容"（区块清单 / 条目拆并 = 那份纯表现层的 `ResumeEditor`，吃这一屏的 session）。
+            可收起，且收起走**条件挂载**：收起态下这一整格不在 DOM 里（不是 `display:none`——零宽高的同名
+            选择器会命中看不见的那一份，§9 的 5.4-b ⑦ / 6.4-25 的 C），只剩下面那一条 24px 的把手。 */}
+        {contentRailOpen ? (
+          <aside data-testid="resume-edit-rail-content" className="flex w-80 shrink-0 flex-col gap-2 overflow-auto">
+            <div className="flex justify-end">
+              <DeskButton
+                action="resume-edit-rail-collapse"
+                variant="ghost"
+                compact
+                aria-label={t('resume.edit.rail.collapse')}
+                markers={{ testid: 'resume-edit-rail-collapse' }}
+                onClick={() => setContentRailOpen(false)}
+              >
+                <PanelLeftClose size={12} />
+              </DeskButton>
+            </div>
+            <ResumeEditor session={session} />
+          </aside>
+        ) : (
+          // 收起态常驻的那一条把手（24px 宽，06 plan §3.35 决定 1）：点开它内容轨才回来。
+          <div className="flex w-6 shrink-0 flex-col">
+            <DeskButton
+              action="resume-edit-rail-expand"
+              variant="ghost"
+              compact
+              aria-label={t('resume.edit.rail.expand')}
+              markers={{ testid: 'resume-edit-rail-expand' }}
+              className="w-6"
+              onClick={() => setContentRailOpen(true)}
+            >
+              <PanelLeftOpen size={12} />
+            </DeskButton>
+          </div>
+        )}
+
+        {/* 纸：整屏的正中央、唯一的主角（06 plan §3.35）。左右两条轨各占各的宽，剩下的都给它；
             这一屏**只按宽判**（`fit="width"`，spec 6.4-24 的两档）：人是趴在纸上打字的，按一页的高缩就把纸压成卡片了。 */}
         <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
           <ResumePaperFrame
@@ -668,58 +803,146 @@ export function ResumeEditPage({
           />
         </div>
 
-        {/* 文档级的度量：这一窄栏只管"整份文档"的那六格，段级的在纸上那一条样式里。 */}
-        <aside className="flex w-56 shrink-0 flex-col gap-2 overflow-auto rounded-sheet border border-line bg-ink-900/60 p-3">
+        {/* 右轨管"呈现与出货"（常开，06 plan §3.35）：样式网格 → 整份文档的度量 → 出货段（脏态、导出键、回执）。
+            浮出的样式条管的是"这一段这一类"，这一轨管"整份简历长什么样、什么时候出纸"——两件事，不再被"样式"一个词捆着。 */}
+        <aside
+          data-testid="resume-edit-rail-output"
+          className="flex w-72 shrink-0 flex-col gap-3 overflow-auto rounded-sheet border border-line bg-ink-900/60 p-3"
+        >
           <h3 className="flex items-center gap-1 text-[11px] font-semibold text-slate-300">
-            <SlidersHorizontal size={12} />
-            {t('resume.edit.globals')}
+            <Palette size={12} />
+            {t('resume.edit.template.railTitle')}
           </h3>
-          {METRIC_ROWS.map((row) => {
-            const bound = view.metricBounds[row.key];
-            const reach = (bound.max - bound.min) * OUT_OF_BOUNDS_REACH;
-            const current =
-              row.key === 'baseFontPt'
-                ? view.layout.baseFontPt
-                : row.key === 'lineHeight'
-                  ? view.layout.lineHeight
-                  : view.layout.margin[row.key];
-            return (
-              <div key={row.key} className="flex flex-col gap-1 text-[11px] text-slate-400">
-                <span data-testid={`resume-edit-metric-label-${row.key}`}>{t(`resume.editor.units.${row.key}`)}</span>
-                <DeskRange
-                  action={`resume-edit-metric-${row.key}`}
-                  data-testid={`resume-edit-metric-${row.key}`}
-                  min={Number((bound.min - reach).toFixed(2))}
-                  max={Number((bound.max + reach).toFixed(2))}
-                  step={row.step}
-                  value={current}
-                  {...dead(busyReason)}
-                  onValueChange={(value) => setMetric(row.key, Number(value))}
-                />
-                <span data-testid={`resume-edit-metric-value-${row.key}`} className="text-slate-300">
-                  {current} {t(`resume.editor.unit.${row.unit}`)}
-                </span>
-              </div>
-            );
-          })}
-          {/* 字族是整份文档那一格（`design.body.fontFamily`），与纸面上那五格不同层，所以摆在右栏。 */}
-          <div className="flex flex-col gap-1 text-[11px] text-slate-400">
-            <span data-testid="resume-edit-family-label">{t('resume.editor.axes.bodyFontFamily')}</span>
-            <DeskSegmented
-              action="resume-edit-body-family"
-              markers={{ testid: 'resume-edit-body-family' }}
-              value={view.layout.design?.body?.fontFamily ?? INHERIT}
-              options={[
-                { value: INHERIT, label: t('resume.editor.followTemplate') },
-                ...FONT_FAMILY_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.family.${token}`) })),
-              ]}
-              onSelect={(value) =>
-                applyDesign('bodyFontFamily', { body: { fontFamily: value === INHERIT ? null : value } })
+
+          {/* 样式网格（从 desk 搬进来，3.13-04）：点一套 = `onTemplateChange` 回写 desk 那一份 templateId，
+              `useResumeEditor` 的对齐效应随即补一次 `editor.use` 换预览；"设为默认"落 `export.setPreference`。
+              整条路只有这一处入口，desk 上只剩读数（3.13-07）。 */}
+          <TemplateShelf
+            templates={templates}
+            selectedId={templateId}
+            defaultId={defaultTemplateId}
+            filter={shelfFilter}
+            onFilterChange={setShelfFilter}
+            onSelect={onTemplateChange}
+            onSetDefault={rememberTemplate}
+            busy={!!busy || !!shipBusy}
+            disabledReason={shelfPendingReason}
+            disabledReasonLabel={
+              shelfPendingReason === undefined ? undefined : t(`resume.reason.${shelfPendingReason}`)
+            }
+          />
+
+          {/* 文档级的度量：这一段只管"整份文档"的那六格 + 字族，段级的在纸上那一条样式里。 */}
+          <div className="flex flex-col gap-2 border-t border-line pt-2">
+            <h3 className="flex items-center gap-1 text-[11px] font-semibold text-slate-300">
+              <SlidersHorizontal size={12} />
+              {t('resume.edit.globals')}
+            </h3>
+            {METRIC_ROWS.map((row) => {
+              const bound = view.metricBounds[row.key];
+              const reach = (bound.max - bound.min) * OUT_OF_BOUNDS_REACH;
+              const current =
+                row.key === 'baseFontPt'
+                  ? view.layout.baseFontPt
+                  : row.key === 'lineHeight'
+                    ? view.layout.lineHeight
+                    : view.layout.margin[row.key];
+              return (
+                <div key={row.key} className="flex flex-col gap-1 text-[11px] text-slate-400">
+                  <span data-testid={`resume-edit-metric-label-${row.key}`}>{t(`resume.editor.units.${row.key}`)}</span>
+                  <DeskRange
+                    action={`resume-edit-metric-${row.key}`}
+                    data-testid={`resume-edit-metric-${row.key}`}
+                    min={Number((bound.min - reach).toFixed(2))}
+                    max={Number((bound.max + reach).toFixed(2))}
+                    step={row.step}
+                    value={current}
+                    {...dead(busyReason)}
+                    onValueChange={(value) => setMetric(row.key, Number(value))}
+                  />
+                  <span data-testid={`resume-edit-metric-value-${row.key}`} className="text-slate-300">
+                    {current} {t(`resume.editor.unit.${row.unit}`)}
+                  </span>
+                </div>
+              );
+            })}
+            {/* 字族是整份文档那一格（`design.body.fontFamily`），与纸面上那五格不同层，所以摆在右轨。 */}
+            <div className="flex flex-col gap-1 text-[11px] text-slate-400">
+              <span data-testid="resume-edit-family-label">{t('resume.editor.axes.bodyFontFamily')}</span>
+              <DeskSegmented
+                action="resume-edit-body-family"
+                markers={{ testid: 'resume-edit-body-family' }}
+                value={view.layout.design?.body?.fontFamily ?? INHERIT}
+                options={[
+                  { value: INHERIT, label: t('resume.editor.followTemplate') },
+                  ...FONT_FAMILY_TOKENS.map((token) => ({ value: token, label: t(`resume.editor.family.${token}`) })),
+                ]}
+                onSelect={(value) =>
+                  applyDesign('bodyFontFamily', { body: { fontFamily: value === INHERIT ? null : value } })
+                }
+                busy={!!busy}
+                disabledReason={busyReason}
+                disabledReasonLabel={reasonLabel(busyReason)}
+              />
+            </div>
+          </div>
+
+          {/* 出货段：导出键、脏态读数、回执**三点一线**（3.13-05 / 6.4-25 的③，纵向排好，不让人去别的界面找回执）。
+              导出这颗走"先落库再出纸"，脏的时候**不 disable**（3.13-05 的反例之一），只在有动作在途时按不动。 */}
+          <div className="flex flex-col gap-2 border-t border-line pt-2">
+            <span
+              data-testid="resume-edit-dirty"
+              data-dirty={String(view.isDirty)}
+              className={
+                view.isDirty
+                  ? 'self-start rounded-chip border border-amber/45 px-1 text-[11px] text-amber'
+                  : 'self-start rounded-chip border border-line px-1 text-[11px] text-slate-400'
               }
-              busy={!!busy}
-              disabledReason={busyReason}
-              disabledReasonLabel={reasonLabel(busyReason)}
-            />
+            >
+              {t(view.isDirty ? 'resume.editor.dirty' : 'resume.editor.clean')}
+            </span>
+            <DeskButton
+              action="export"
+              variant="amber"
+              compact
+              busy={!!busy || !!shipBusy}
+              {...dead(shipBusyReason)}
+              className="self-start"
+              onClick={exportPdf}
+            >
+              <FileDown size={12} />
+              {t('resume.export')}
+            </DeskButton>
+            {shipNotice && (
+              <Banner tone={shipNoticeTone} markers={{ testid: 'resume-edit-export-notice' }} className="break-all">
+                {shipNotice}
+              </Banner>
+            )}
+            {/* 导出回执条：锚点名（`resume-receipt-path` / `resume-receipt-metrics` / `resume-reveal-pdf`）
+                一字不改地从 desk 的纸面槽搬进这一轨（3.13-06"只换宿主"）。没导过时整条不画，而不是摆一个 0 页。 */}
+            {exportReceipt && (
+              <div className="flex min-w-0 flex-col gap-1" data-testid="resume-edit-receipt">
+                <p
+                  className="break-all font-mono text-[11px] text-slate-500"
+                  data-testid="resume-receipt-path"
+                  title={exportReceipt.path}
+                >
+                  {exportReceipt.path}
+                </p>
+                <p className="font-mono text-[11px] text-slate-400" data-testid="resume-receipt-metrics">
+                  {t('resume.paper.receipt', { pages: exportReceipt.pages, bytes: exportReceipt.bytes })}
+                </p>
+                <DeskButton
+                  action="resume-reveal-pdf"
+                  variant="line"
+                  compact
+                  className="self-start"
+                  onClick={revealReceipt}
+                >
+                  {revealLabel}
+                </DeskButton>
+              </div>
+            )}
           </div>
         </aside>
       </div>
