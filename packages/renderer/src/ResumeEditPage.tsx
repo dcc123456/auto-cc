@@ -651,7 +651,8 @@ export function ResumeEditPage({
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-3">
         {/* 纸：整屏的宽度都给它（左列那 400px 与把手那 6px 都不在这屏存在），所以同一份界表算出来的
-            倍率在这一屏是 1（A4 原尺寸），而右栏那一档最多到 0.7 上下——这就是用户报的"区域太小"的差值。 */}
+            倍率在这一屏是 1（A4 原尺寸），而右栏那一档最多到 0.7 上下——这就是用户报的"区域太小"的差值。
+            这一屏**只按宽判**（`fit="width"`，spec 6.4-24 的两档）：人是趴在纸上打字的，按一页的高缩就把纸压成卡片了。 */}
         <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
           <ResumePaperFrame
             html={paperHtml}
@@ -661,7 +662,8 @@ export function ResumeEditPage({
             emptyTestId="resume-edit-paper-empty"
             emptyLabel={t('resume.editor.previewEmpty')}
             slotTestId="resume-edit-slot"
-            slotClassName="min-h-full min-w-0 overflow-hidden p-3"
+            fit="width"
+            slotClassName="min-w-0 overflow-hidden p-3"
             onFrameLoad={onPaperLoad}
           />
         </div>

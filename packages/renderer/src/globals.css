@@ -248,9 +248,14 @@
 
   /* 纸面的显示倍率（无单位）。装不下 A4 时**整张缩小**而不是横向滚（spec 6.4-12 的③），
      所以 `w-[210mm]` 这个物理宽度一字不改，只改这一支倍率；它必须由 `--paper-scale: 1` 起步，
-     否则 iframe 那两条引用它的 utility（`scale-(--paper-scale)` 与 `calc(100%/(var(--paper-scale)))`）
-     在首帧量到之前解析不出值，纸会既不等比也不铺满。真值写在 `ResumePaperStage` 的槽位节点上。 */
+     否则 iframe 那两条引用它的 utility（`scale-(--paper-scale)` 与 `h-(--paper-height)`）
+     在首帧量到之前解析不出值，纸会既不等比也不铺满。真值写在纸面槽那个节点上（`ResumePaperFrame`）。 */
   --paper-scale: 1;
+
+  /* 纸面 iframe 的**布局**高度（spec 6.4-24 的③：由 `fitPaper` 量出来写成 px，不再用 `100% ÷ 倍率` 那一支百分比——
+     百分比要求槽先显式给高，而"槽该多高"本来就是倍率之后那一截纸的视觉高度，只有现算才量得出来。
+     这一支只是首帧的占位：`useLayoutEffect` 在画之前就会把它换成量出来的值，所以它不必等于任何一种纸。 */
+  --paper-height: 60vh;
 
   color-scheme: dark;
 }

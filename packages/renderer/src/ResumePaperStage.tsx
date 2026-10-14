@@ -64,10 +64,9 @@ export interface ResumePaperStageProps {
  * （隐藏态宽高为 0 会让同名选择器命中看不见的那一份，AGENTS.md §9 的 5.4-b ⑦）；
  * ② 纸住在**右栏**里，装不下时**整张缩放**而不是横向滚（spec 6.4-12）。
  *
- * 缩放只动显示倍率：iframe 仍是 `w-[210mm]`，A4 的物理宽度与折行一字未改，导出产物与这一格无关
- * （3.3-01「预览即导出所见」继续成立——倍率是放大镜，不是第二张纸）。倍率由 `--paper-scale` 给，
- * **只写在这一个节点上**（与 `--kernel-slot-width` 同一口径，plan §3.24 记的那条 §5.2 偏离）：
- * 拖右栏宽度时 `pointermove` 每帧都在改布局，这里若把它写进 React state，整屏每帧重渲一次。
+ * "装不下"的判据在 2026-10-14 由 6.4-24 加了第二条：这一格按**宽与一页的高取小**，
+ * 所以 A4 一页完整可见、不必在纸里滚（代价是窗口矮时左右留白）。缩放的手术只住在 `ResumePaperFrame` 里，
+ * 这一格不重述口径（§2.2），只供画面内容与取证通道名。
  * @param props 见 `ResumePaperStageProps`
  * @returns 一栏纸面；被切走的那一档不在 DOM 里
  */
@@ -153,7 +152,8 @@ export function ResumePaperStage({
           emptyTestId={mode === 'layout' ? 'resume-editor-preview-empty' : 'resume-preview-empty'}
           emptyLabel={t(mode === 'layout' ? 'resume.editor.previewEmpty' : 'resume.previewEmpty')}
           slotTestId="resume-paper-slot"
-          slotClassName="h-[min(72vh,900px)] min-h-[460px] min-w-0 overflow-hidden p-3"
+          fit="page"
+          slotClassName="min-w-0 overflow-hidden p-3"
         />
       )}
 
