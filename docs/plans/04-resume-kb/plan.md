@@ -2329,3 +2329,52 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
   3 份 prettier warn，与被 片 3-A 记下的同一处同源），本片不替它改、不给它开豁免。
   在我这 7 份文件 + 3 份文档的射程内各跑一遍取证：`npx eslint <那 7 份>` **EXIT=0**、
   `npx prettier --check <9 份>` **EXIT=0**、`tsx scripts/check-lexicon.ts` **EXIT=0**（§4.6）。
+
+### 4.11 片 3-C 的开工判断（2026-10-14，还没写代码，先把"为什么现在能碰渲染层"落在纸上）
+
+- 4.11-15 / 16 留的正是 **V 半边**：变体要能在界面上被看见、按 JD 切换、各自导出，这一格只能在渲染层兑现。
+- **上一片不能碰渲染层的理由已经消失**：那批脏区（`ResumeEditPage.tsx` / `resume-paper-edit.ts` /
+  `locales/*.json`）随并行会话的 `9c0426c` 落地，我这四份目标文件现在工作树干净（`git status --short` 实测：
+  剩余脏区只有 `packages/resume-kb/src/sections.ts` + 它的两支测试、`parse-service.test.ts`、
+  `docs/plans/08-real-platform-driving/plan.md` 与那只未跟踪的 `packages/renderer/dummy-non-existing-folder/`）。
+  **仍在的只有一条**：`sections.ts` 还脏着，所以片 1（`pickJobIntent`）照 §4.11 开头那条换序继续往后排，不提前。
+
+### 4.11 片 3-C 的落地（2026-10-14：粘贴 JD 的内容归因 + 界面按母版分组切换）
+
+**裁定㊱（弹窗选项标签逐字：`哈希归因 + 存首行标题（推荐）`）**：手输/粘贴的 JD 没有 `jobs.id`，
+就按**正文内容**归因（同一段文本重复生成仍落同一支变体，改一个字得到另一支），并新增 `resume_docs.jd_label`
+（迁移 **40**）存 JD 首个非空行前 40 字作**显示标题**；从岗位屏跳过来仍用真实 `jobs.id`；
+标题只作显示，**不进身份与事实判据**。
+
+- **落点三处，一处一个职责**（不出现"两处各判一次归因"）：
+  ① `packages/resume-kb/src/generate-service.ts` 的 `attributeJd()`——`run()` 唯一的归因点，
+  id 取 `jd-` + `sha256(trim(jdText))` 前 8 位十六进制，标题取首个非空行、超 40 字以 `…` 收尾；
+  ② `packages/resume-doc/src/doc-store.ts` 的迁移 40 + `deriveVariant` 入参 `jdLabel` + `list()` 回读该列；
+  ③ 渲染层只**转述**这三列，不自己算（`ResumeDocSummaryView` 加了 `parentDocId` / `jdId` / `jdLabel`，
+  桥接白名单一字未动，gateway 原样序列化服务返回值）。
+- **`deriveVariant` 的两条路径合并成一条事务**（正文 UPSERT + 血缘三列 UPDATE），
+  已有变体那一支重写的是**同一对血缘值**，所以不构成第二个事实来源；标题跟着新一趟刷新是刻意的——
+  人看到的永远是"这一支最近是为哪段 JD 生成的"。
+- **界面半边**（`ResumeDesk.tsx`）：`docGroups` 一条 memo 把候选排成「母版在上、它的定制版紧跟在下」，
+  母版已删而定制版还在的那些行排在末尾（它们仍在库里，也必须还能被删掉）；变体行下面那行小字从"出处"换成
+  「为「{{jd}}」定制 · {{time}} 生成」，时刻复用 `format.ts` 的 `formatClock`；点一行 = `setDocId`，
+  于是整屏编辑、预览、导出全都跟着走，**没有第二条通道**。
+- **`GeneratePanel` 两处随之换形状**：「定制哪一份」的候选只列母版（变体不能再往下派生，列进去等于长出一按就报错的选项），
+  而它的 `value` 是 `generateDocId`（当前停在变体上时回到它的母版）；`onAccepted` 从"无参通知"换成**递回被写的那一行 id**，
+  desk 拿它 `setDocId` + 重画纸面——接受之后人看见的是那张改好的纸，而不是一行「已接受」。
+  语言包随之改了 5 支（`generate.hint` / `stale` / `outcomeRewritten` / `accepted` / `acceptedRebind`）
+  说的是"写进这一支定制版、母版一字不动"，并新增 3 支变体行文案；zh-CN / en 齐（§5.5/5.6）。
+- **取号核对（§9 的 5.3-a 两条通道）**：`grep -rn "RESUME_DOC_JD_LABEL_MIGRATION_VERSION" packages/` 与
+  `grep -rn "version: 40" packages/` 在动手前都零命中，39 已被片 3-A 用掉，故取 **40**。
+  **为什么单独起号而不是回填 39**：`runMigrations` 认的是台账"这一版记过账没有"，把 `ALTER` 塞进已应用的 39 里，
+  在老库上根本执行不到，运行期才以 `no such column` 失败——测试里那条"7 / 36 / 39 都记过账的老库升级后多出 `jd_label` 列"
+  显式点名了这一格：谁把 `jd_label` 回填进 39，它就会以 `no such column` 红掉。
+- **门禁逐字读数（片 3-C 收口这轮）**：`pnpm typecheck` **EXIT=0**；`pnpm test` **EXIT=0**（23 个包逐包核对，
+  `resume-doc` 288 / `resume-kb` 453 / `main` 93 全过）；`pnpm lint` **EXIT=1**、`pnpm format:check` **EXIT=1**——
+  两条红点同源且**都不在本片射程内**：并行会话那只未跟踪的 `packages/renderer/dummy-non-existing-folder/**`
+  贡献 4 条 eslint `was not found by the project service` + 3 条 prettier warn（`✖ 4 problems (4 errors, 0 warnings)` 逐字可见全是那三个 `*_fallback` 文件）。
+  按并存口径不替它改、不给它开豁免；本片射程内单跑：`npx eslint --max-warnings 0 <8 份源文件与测试>` **EXIT=0**、
+  `npx prettier --check <本片 10 份改动 + 本文件与 spec>` **EXIT=0**、`npx tsx scripts/check-renderer-conventions.ts` **EXIT=0**、
+  `npx tsx scripts/check-lexicon.ts` **EXIT=0**。
+- **还欠的只有 V 半边（4.11-31 / 32 与 4.11-16）**：真实窗口里那两张画面（母版行 + 两支不同 JD 的变体行各带标题与时刻）、
+  切换后各自导出的两份 PDF 产物 hash 互异，必须 `pnpm dev` + harness 打 `--url 5173` 现读，等用户在场。
