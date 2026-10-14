@@ -2235,3 +2235,44 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
 **明确不做**：不引入向量 / embedding 召回（`kb_vectors`、`search.ts` 现成而不用于此处，按 §6.5 留一条反向验证判据）；
 不做有序列表；不做"系统自动裁到 N 段"；不做另存为或第二套复制口；不新增模板；不动 `store` 连接层的 PRAGMA；
 不碰真实招聘平台（§7.2，JD 一律来自本地 fixture 或人手粘贴的文本）。
+
+### 4.11 开工顺序的变更（2026-10-14，AskUserQuestion 逐字取得：「先做片 3」）
+
+上表的 1 → 2 → 3 → 4 → 5 是**依赖顺序**，实际发货顺序改成 **3 → 1 → 2 → 4 → 5**。
+理由不是"片 3 更重要"，而是"片 3 的射程与并行会话的脏区不相交"：片 1 的 `pickJobIntent` 落在
+`packages/resume-kb/src/sections.ts` 的抬头 / profile 区，而那一格当时正被另一窗改着（`git status` 实测 128 行脏区），
+按 §9 的 5.10-13 那条与 §1.4，我不能把它的半成品吞进我的 pathspec 提交。片 3 只碰 `doc-store.ts` /
+`generate-service.ts` / 桥接与变体面板，于是先走它。
+**这不是把片 1 判成后做**——它的判据一条没减，只是排到 `sections.ts` 干净之后。
+
+### 4.11 落地记录
+
+**片 3-A（2026-10-14，`a7c1cec`，判据 4.11-13 已过 / 4.11-14 过一半）**
+
+- `packages/resume-doc/src/doc-store.ts` 加 `RESUME_DOC_VARIANT_MIGRATION_VERSION = 39`，`up` 是两条
+  `ALTER TABLE resume_docs ADD COLUMN parent_doc_id / jd_id`，`down` 反序 DROP。号段 39 的取号理由与
+  台账（35 / 36 / 37 / 38 已用，**34 在本工作树读不到但不当空号**）写在该常量的注释里，与 §9 的 5.3-a 同一条：
+  加列塞进已应用的第 7 版 `up` 里在老库上根本执行不到。
+- **偏离一（判据 4.11-14 的原文措辞）**：spec 那行写的是 `resume.doc.derive(docId, jdId)`，实现是
+  `ResumeDocService.deriveVariant({ parentDocId, jdId, document, nowMs })`，且**不在桥接白名单上**——
+  理由是"渲染层不该能凭空造一行简历"：派生是**接受那一刻的副作用**，接受本身已经有 `resume.generate.accept`
+  这一句在白名单上把关。判据的后半边（"文档级复制只有这一句，出现第二句即红"）仍然要落，
+  它落的是**静态检查**，随片 3-B 一起进 `packages/main/src/generate-link.test.ts`（同 4.9-04 的形状）。
+  判据含义未变：**新行只有一个入口**，所以这一格在静态检查到货前记 `[ ]`。
+- `deriveVariant` 把四步绑在一起：`findVariantId` 查已有 → 没有才 mint `resume-<12hex>` → 写血缘 → 覆盖正文。
+  为什么必须绑：变体的身份由血缘两列说了算（同一对 (母版, JD) 永远落在同一行），拆成两个调用点就会长出
+  两支同 JD 的变体，界面按 JD 排开后删一删不干净——那正是"只换 JD 就能生成不同简历"这句话的落地对象。
+  id 取随机而不取 `hash(母版+JD)`：后者等于把同一件事编进第二个事实来源。
+- 新建那一趟用 `BEGIN / COMMIT / ROLLBACK` 包住两条语句（全仓无人设 `PRAGMA foreign_keys`，这两列也没有外键可依赖，
+  崩在中间会留下一行"正文是变体、血缘是 NULL"的假母版）；`save()` 的 UPSERT 只写正文四列，
+  所以变体被整屏编辑页改一次之后血缘一字不丢（4.11-19 的存储半边已经在这条上验过）。
+- 读数（`pnpm vitest run packages/resume-doc packages/resume-kb`，逐字）：
+  **`Test Files 1 failed | 37 passed (38) / Tests 1 failed | 730 passed (731)`**，其中
+  `doc-store.test.ts` **22 passed**（含新增的九条：迁移台账含 39、老库（只记过 7 与 36）升级后两列存在且旧行读得回、
+  派生新建 / 同对幂等覆盖 / 两段 JD 并存 / `jd_id IS ?` 那一支、母版不存在即拒、不合校验整趟回滚、
+  save 覆盖后血缘仍在）。
+  **唯一那一支红不在我的射程**：`model.test.ts` 的「3.1-10 模型不含任何渲染细节」扫到 `richtext.ts` 里的 `</`，
+  而 `richtext.ts` 是并行会话**未提交**的 `src/internal/richtext.ts → src/richtext.ts` 移动（HEAD 那份里有 6 处 `</`，
+  在被扫目录之外所以过去是绿的）。按 §1.4 与记忆里的并行会话口径：**不替它改、不给它开豁免、不重跑一遍冒充绿**，
+  原样记在这里。`pnpm lint` 的 4 条红同理全部来自 `packages/renderer/dummy-non-existing-folder/**`（未跟踪目录），
+  `pnpm typecheck` **EXIT=0**。

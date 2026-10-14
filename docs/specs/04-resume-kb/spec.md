@@ -1632,13 +1632,19 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 
 | ID      | 验收标准                                                                                                                  | 方式 | 验证操作                                                                    | 状态 |
 | ------- | ------------------------------------------------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------- | ---- |
-| 4.11-13 | 迁移 **39** 给 `resume_docs` 加 `parent_doc_id` / `jd_id` 两列（母版两列皆 NULL）；不改任何已应用的号段                   | C    | `SELECT version FROM schema_migrations` 读数 + 老库升级后两列存在           | [ ]  |
+| 4.11-13 | 迁移 **39** 给 `resume_docs` 加 `parent_doc_id` / `jd_id` 两列（母版两列皆 NULL）；不改任何已应用的号段                   | C    | `SELECT version FROM schema_migrations` 读数 + 老库升级后两列存在           | [x]  |
 | 4.11-14 | `resume.doc.derive(docId, jdId)` 是**唯一**复制口：桥接白名单里文档级复制只有这一句，出现第二句即红                       | C    | 静态检查 `resume.doc.` 命中集合（同 4.9-04 的形状）                         | [ ]  |
 | 4.11-15 | `resume.generate.accept` 只写这一趟对应的变体，**母版 `content_hash` 一字不动**（本片正面主判据）                         | U+V  | accept 前后各读一次母版 hash 逐字相等；变体 hash 变                         | [ ]  |
 | 4.11-16 | 两个 JD 并存：JD-A、JD-B 各一份变体，两份 PDF 产物 hash 互异，界面可按 JD 切换并各自导出                                  | V    | 真实窗口两张画面 + 逐字读数（变体行显示 JD 标题与生成时间）                 | [ ]  |
 | 4.11-17 | 事实层归母版：生成与采纳**不新增** `kb_entities` / `kb_chunks` 行（计数逐字不变），变体不重导实体                         | U    | 前后计数比对；`sourceDocId` 仍指母版                                        | [ ]  |
 | 4.11-18 | `KB_GENERATION_STALE_BASELINE` 的判据换成"该变体的基线移动"；母版被并行改实时仍拦；删变体不动母版、删母版显式同事务删变体 | U    | 三条用例：变体陈旧、母版并发改、删除各自；`foreign_keys` 未开这一事实有测试 | [ ]  |
 | 4.11-19 | 整屏编辑页对变体同样可编辑（仍走 `resume.editor.*` 按 `docId` 现读，不新增第二套编辑器与第二份正文）                      | V    | 真实窗口改变体里一格 → 母版同一格逐字不变                                   | [ ]  |
+
+**偏离登记（片 3-A，2026-10-14）**：4.11-14 原文写的 `resume.doc.derive(docId, jdId)` 落成为主进程侧服务方法
+`ResumeDocService.deriveVariant({ parentDocId, jdId, document, nowMs })`，且**刻意不上桥**——渲染层不许凭空造一行简历，
+派生是"接受"那一刻的副作用，而接受已经有 `resume.generate.accept` 那一句在白名单上把关。
+判据含义一字未动（**新行只有一个入口**），它的静态检查半边随片 3-B 进 `packages/main/src/generate-link.test.ts`，
+逐字理由与读数见 plan §4.11 落地记录。
 
 ### 片 4 逐条「原文 / 改写 / 人主动隐」（㉝）
 
