@@ -3,8 +3,15 @@
  * 每一例只钉一件事：文法认什么、不认什么，以及「无标记时不许改变产物字节」这一条负对照。
  */
 import { describe, expect, it } from 'vitest';
-import { BULLET_MARK, NESTED_INDENT, renderRichValue, stripRichMarkers } from './richtext.js';
-import { normalizeRichLine, stripLineMarkup } from '../header.js';
+import {
+  BULLET_MARK,
+  NESTED_INDENT,
+  editableToRaw,
+  renderRichValue,
+  stripRichMarkers,
+  type EditableNode,
+} from './richtext.js';
+import { normalizeRichLine, stripLineMarkup } from './header.js';
 
 describe('renderRichValue：段落', () => {
   it('空串原样返回，不抛异常', () => {
@@ -148,5 +155,81 @@ describe('normalizeRichLine：导入侧把符号归一成标记（spec 4.1-18）
   it('只有符号、没有内容的一行不产出空列表项', () => {
     expect(normalizeRichLine('- ')).toBe('');
     expect(normalizeRichLine('•')).toBe('');
+  });
+});
+
+/**
+ * 反向文法（spec 3.12-01 / 02，片 65-A）。
+ * 树是**手写的正向产物形状**：本仓没有 DOM，而渲染层摘下来的树与此同形（`tag` 小写、文本节点 `#text`），
+ * 所以这一批用例钉的是「纸上的那一格被改成什么形状 → 交回文档的是哪一串」这一件事。
+ */
+const el = (tag: string, ...children: EditableNode[]): EditableNode => ({ tag, text: '', children });
+const txt = (text: string): EditableNode => ({ tag: '#text', text, children: [] });
+
+describe('editableToRaw：与 renderRichValue 互逆（spec 3.12-01）', () => {
+  it('单行原样回，不带任何标记', () => {
+    expect(editableToRaw([txt('主导订单服务重构')])).toBe('主导订单服务重构');
+  });
+
+  it('多个 `<p>` 回多行，`\n` 在行与行之间', () => {
+    const tree = [el('p', txt('上')), el('p', txt('下'))];
+    expect(editableToRaw(tree)).toBe('上\n下');
+    // 正向的同一档：这棵树就是 `renderRichValue('上\n下')` 该产出的那两个 `<p>`
+    expect(renderRichValue('上\n下').html).toBe('<p>上</p><p>下</p>');
+  });
+
+  it('一级与两级列表各自回 `- ` 与两空格 + `- `', () => {
+    const flat = [el('ul', el('li', txt('甲')), el('li', txt('乙')))];
+    expect(editableToRaw(flat)).toBe(`${BULLET_MARK}甲\n${BULLET_MARK}乙`);
+    const nested = [el('ul', el('li', txt('甲'), el('ul', el('li', txt('乙')))))];
+    expect(editableToRaw(nested)).toBe(`${BULLET_MARK}甲\n${NESTED_INDENT}${BULLET_MARK}乙`);
+  });
+
+  it('行内加重回成对 `**`，`<b>` 与 `<strong>` 是同一档（spec 3.12-02）', () => {
+    const fromGrammar = [txt('P99 '), el('strong', txt('下降 40%')), txt(' 稳定')];
+    const fromExecCommand = [txt('P99 '), el('b', txt('下降 40%')), txt(' 稳定')];
+    expect(editableToRaw(fromGrammar)).toBe('P99 **下降 40%** 稳定');
+    expect(editableToRaw(fromExecCommand)).toBe(editableToRaw(fromGrammar));
+    // 反向永远产成对：落单星号一种也不会出现（3.12-07 的「再按一次取消」靠这一条成立）
+    expect(editableToRaw(fromGrammar).split('**').length % 2).toBe(1);
+  });
+
+  it('第三层列表折回第二档，与正向的两级封顶同一条（spec 3.12-02）', () => {
+    const levelThree = el('ul', el('li', txt('丙')));
+    const levelTwo = el('ul', el('li', txt('乙'), levelThree));
+    const deep = [el('ul', el('li', txt('甲'), levelTwo))];
+    expect(editableToRaw(deep)).toBe(
+      `${BULLET_MARK}甲\n${NESTED_INDENT}${BULLET_MARK}乙\n${NESTED_INDENT}${BULLET_MARK}丙`,
+    );
+  });
+
+  it('`<br>` 与块级兄弟一样换行；空的块不产行（与 `toRichLines` 丢空行同口径）', () => {
+    expect(editableToRaw([txt('甲'), el('br'), txt('乙')])).toBe('甲\n乙');
+    expect(editableToRaw([el('p'), el('p', txt('甲'))])).toBe(editableToRaw([el('p', txt('甲'))]));
+  });
+
+  it('浏览器包装出来的 `<span>` / `<font>` 不改动行的切分，只把里面的字与加重留下', () => {
+    expect(editableToRaw([el('p', el('span', txt('甲 '), el('b', txt('乙')))), el('p', txt('丙'))])).toBe(
+      '甲 **乙**\n丙',
+    );
+  });
+
+  it('反向的产物再喂正向，形状不变（一条经历的四行成果来回各一次）', () => {
+    const raw = [
+      '负责交易链路的稳定性。',
+      `${BULLET_MARK}**P99 延迟下降 40%**`,
+      `${BULLET_MARK}日均 2 亿单`,
+      `${NESTED_INDENT}${BULLET_MARK}库存扣减幂等`,
+    ].join('\n');
+    const tree = [
+      el('p', txt('负责交易链路的稳定性。')),
+      el(
+        'ul',
+        el('li', el('strong', txt('P99 延迟下降 40%'))),
+        el('li', txt('日均 2 亿单'), el('ul', el('li', txt('库存扣减幂等')))),
+      ),
+    ];
+    expect(editableToRaw(tree)).toBe(raw);
+    expect(stripRichMarkers(editableToRaw(tree))).toBe(stripRichMarkers(raw));
   });
 });

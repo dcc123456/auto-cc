@@ -10,7 +10,7 @@
  */
 import { makeField, type Field, type SectionKind } from './model.js';
 import { extractPeriod, type ParsedPeriod } from './period.js';
-import { BULLET_MARK, keepPairedEmphasis, NESTED_INDENT } from './internal/richtext.js';
+import { BULLET_MARK, keepPairedEmphasis, NESTED_INDENT } from './richtext.js';
 
 /** 行首装饰：Markdown 的 `#`、项目符号、有序列表号，以及中文简历惯用的汉字序号（`一、`、`（二）`、`第三章`）。 */
 const LEADING_MARKUP =
@@ -59,7 +59,7 @@ function stripDecorations(line: string, keepEmphasis: boolean): string {
 const LEADING_BULLET = /^\s*(?:[•·‣◦▪●○]\s*|(?:[-+]|\*(?!\*))\s+)/u;
 
 /**
- * 把一条**正文行**归一到封闭文法（spec 4.1-18；文法的定义只在 `internal/richtext.ts` 那一处）。
+ * 把一条**正文行**归一到封闭文法（spec 4.1-18；文法的定义只在 `src/richtext.ts` 那一处）。
  *
  * 与 `stripLineMarkup` 的分工必须说清：那一支的语义是「删掉装饰」，用于抬头装配与标题判定；
  * 这一支的语义是「识别并归一保留」——项目符号换成 `- `/`  - `，成对的 `**…**` 留给渲染层、

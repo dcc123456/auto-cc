@@ -816,16 +816,13 @@
         "enter": "Full-screen editing",
         "heading": "Full-screen editor",
         "back": "Leave editor",
-        "hint": "Click a section on the paper and the style bar lands right above it: size, line height, alignment, weight and colour all live there, and dragging a section moves it. To change the words themselves, double-click that line — clicking away writes it into the draft, Esc leaves it alone.",
+        "hint": "Edit the words right on the paper: click a block and the caret lands there, type, and leaving that block (click elsewhere or move to another) writes it into the working copy. Esc abandons that block, and Cmd/Ctrl+B bolds the selection. Click a section's margin to raise the style bar: size, line height, alignment, weight and colour all live there, and dragging a margin moves the section.",
         "globals": "Whole document",
         "selected": "Editing: {{kind}}",
         "byKind": "Styles apply per section kind, so every block of this kind changes together",
         "moveUp": "Move up",
         "moveDown": "Move down",
-        "close": "Hide the style bar",
-        "typeCommit": "Done",
-        "typeCancel": "Cancel",
-        "typeLabel": "Edit this line of body text"
+        "close": "Hide the style bar"
       },
       "pendingUnnamed": "The one with no name read"
     },

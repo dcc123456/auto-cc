@@ -427,6 +427,9 @@ importers:
       '@auto-cc/plugin-pdf-edit':
         specifier: workspace:*
         version: link:../pdf-edit
+      '@auto-cc/plugin-resume-doc':
+        specifier: workspace:*
+        version: link:../resume-doc
       '@auto-cc/shared':
         specifier: workspace:*
         version: link:../shared

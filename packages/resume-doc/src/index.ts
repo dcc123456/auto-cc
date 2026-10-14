@@ -53,7 +53,15 @@ export {
   splitHeader,
   stripLineMarkup,
 } from './header.js';
-export { BULLET_MARK, NESTED_INDENT, renderRichValue, stripRichMarkers, type RichValue } from './internal/richtext.js';
+export {
+  BULLET_MARK,
+  NESTED_INDENT,
+  editableToRaw,
+  renderRichValue,
+  stripRichMarkers,
+  type EditableNode,
+  type RichValue,
+} from './richtext.js';
 export { diff, type ChangeType, type DocDiff, type EntryChange, type FieldChange, type SectionChange } from './diff.js';
 export { importExternal, type ImportResult, type ImportWarning } from './import.js';
 // 3.6-a 排版编辑器的模型通道：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。

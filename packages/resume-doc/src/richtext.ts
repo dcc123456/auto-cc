@@ -189,3 +189,115 @@ export function stripRichMarkers(text: string): string {
     .map((line) => line.content.replace(/\*\*/g, ''))
     .join('\n');
 }
+
+/** 编辑面上摘下来的一节（**语法树的形状**，不含任何 DOM 类型，因此渲染层能在跨 realm 的帧文档上现摘）。 */
+export interface EditableNode {
+  /** 小写标签名；文本节点写作 `#text`（与 DOM 的 `nodeName` 同一字面）。 */
+  tag: string;
+  /** 仅 `#text` 用：那一段的字（**未转义**——DOM 里读到的是浏览器已经解过实体的字面）。 */
+  text: string;
+  /** 元素节点的子节点；`#text` 恒为空数组。 */
+  children: EditableNode[];
+}
+
+/** 块级标签：各自起一行（与正向 `toRichLines` 的"一行"同一档），浏览器回车产出的 `<div>` 也在这一档里。 */
+const BLOCK_TAGS = new Set(['address', 'blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'pre']);
+
+/** 加重的那两种写法：正向文法产 `<strong>`，而 `execCommand('bold')`（`styleWithCSS` 关着）产 `<b>`——两者回同一档。 */
+const EMPHASIS_TAGS = new Set(['b', 'strong']);
+
+/**
+ * 列表项的行首标记按层级给：一级 `- `，二级及**更深**都是两空格 + `- `。
+ * 这一句就是与正向同一条封顶（`toRichLines` 把三档缩进折成二级），所以反向永远产不出第三档。
+ * @param depth 该 `<li>` 外面套了几层 `ul` / `ol`
+ * @returns 那一行的前缀
+ */
+function bulletFor(depth: number): string {
+  return depth >= 2 ? `${NESTED_INDENT}${BULLET_MARK}` : BULLET_MARK;
+}
+
+/**
+ * 把一棵子树压成**行内**文本（`<span>` 之类不改变块结构的标签、以及嵌在里面的加重都走这里）。
+ * @param nodes 子节点
+ * @returns 行内串（成对 `**` 保留，`<br>` 按一个空格收口，因为行内不产生新行）
+ */
+function inlineTextOf(nodes: EditableNode[]): string {
+  let inline = '';
+  for (const node of nodes) {
+    if (node.tag === '#text') inline += node.text;
+    else if (node.tag === 'br') inline += ' ';
+    else if (EMPHASIS_TAGS.has(node.tag)) {
+      const inner = inlineTextOf(node.children).trim();
+      if (inner !== '') inline += `**${inner}**`;
+    } else inline += inlineTextOf(node.children);
+  }
+  return inline;
+}
+
+/**
+ * 装配一批节点的**行**（正向 `renderBlocks` 的镜像）。`prefix` 是这一批所在列表项的前缀，`depth` 是列表层级。
+ * @param nodes 同一层的节点
+ * @param prefix 当前行的前缀（列表项才有；段落恒为空串）
+ * @param depth 当前外面套了几层列表
+ * @param lines 产出缓冲（顺序即原文顺序）
+ */
+function collectEditableLines(nodes: EditableNode[], prefix: string, depth: number, lines: string[]): void {
+  let inline = '';
+  // 攒到的行内串落一行：首尾空白去掉（正向 `toRichLines` 也这么做），空行不进缓冲（空块不产行）。
+  const flush = (): void => {
+    const body = inline.trim();
+    inline = '';
+    if (body !== '') lines.push(`${prefix}${body}`);
+  };
+  for (const node of nodes) {
+    if (node.tag === '#text') {
+      inline += node.text;
+      continue;
+    }
+    if (node.tag === 'br') {
+      flush();
+      continue;
+    }
+    if (EMPHASIS_TAGS.has(node.tag)) {
+      const inner = inlineTextOf(node.children).trim();
+      if (inner !== '') inline += `**${inner}**`;
+      continue;
+    }
+    if (node.tag === 'li') {
+      flush();
+      // `<li>` 自己的行按**它所在那一层**给前缀；它嵌的 `ul` 在下面那次递归里再升一层。
+      collectEditableLines(node.children, bulletFor(depth), depth, lines);
+      continue;
+    }
+    if (node.tag === 'ol' || node.tag === 'ul') {
+      flush();
+      collectEditableLines(node.children, prefix, depth + 1, lines);
+      continue;
+    }
+    if (BLOCK_TAGS.has(node.tag)) {
+      flush();
+      collectEditableLines(node.children, prefix, depth, lines);
+      continue;
+    }
+    // 其余一律当行内继续攒：粘贴或浏览器包装出来的 `<span>` / `<font>` / `<a>` 都不该改动行的切分。
+    inline += inlineTextOf(node.children);
+  }
+  flush();
+}
+
+/**
+ * 反向文法：纸上一格的语法树 → 文档里那一格的**原文**（spec 3.12-01 / 02；与 `renderRichValue` 同文件同文法）。
+ *
+ * **为什么存在**：编辑页把纸上那一格直接交给浏览器改（`contenteditable`，plan §18 的路线甲），
+ * 交回主进程的必须还是那串带 `- ` / 两空格缩进 / 成对 `**` 的原文——否则写字要另立一套格式、
+ * 而格式的解释权就散到渲染层去了（§2.5：正向与反向都只许住在这一个文件里）。
+ * 吃的是**未转义**的字面：DOM 里的文本节点已经是浏览器解过实体的那一串，与文档存的那份同一形状，
+ * 所以这一支不需要 `escapeHtml` 的逆函数，也不会把正文里的字面 `<b>` 误当标签吃掉。
+ * @param nodes 那一格的子节点（渲染层机械摘取，只给小写标签名与文本，不含格式判断）
+ * @returns 原文：行与行以 `\n` 相接，行内加重是成对 `**`，列表项带行首标记（封顶两档）
+ */
+export function editableToRaw(nodes: EditableNode[]): string {
+  const lines: string[] = [];
+  collectEditableLines(nodes, '', 0, lines);
+  return lines.join('\n');
+}

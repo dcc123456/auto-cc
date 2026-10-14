@@ -26,7 +26,7 @@ import {
   type TemplateContext,
   type TemplateLocale,
 } from './bind.js';
-import { renderRichValue, type RichValue } from './richtext.js';
+import { renderRichValue, type RichValue } from '../richtext.js';
 
 /** 强调色族（取值必须是 `print-css.ts` 里已登记的 Tailwind 色相，不引入自定义色名）。 */
 export type AccentHue =

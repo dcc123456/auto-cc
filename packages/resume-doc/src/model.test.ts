@@ -110,12 +110,22 @@ describe('factKeyOf 四类事实判定', () => {
 });
 
 describe('3.1-10 模型不含任何 HTML / 渲染细节', () => {
-  it('本包全部源码里不出现标签字符串 / innerHTML / style 属性拼接', () => {
+  /**
+   * 全仓唯一持有打印面文法的那一格（行标记 ↔ 块级 HTML，正向与反向同一个文件，spec 3.12-01）。
+   * 它是**渲染面**而不是模型面，所以 3.1-10 判的那句「模型不含 HTML」对它不适用；
+   * 它住在 `src/` 顶层而不是 `src/internal/`，只因为渲染层要经公开子路径 `./richtext` 取反向那半
+   * （深入 `internal` 被 eslint 拦死，§4.2），先例是 `plugin-pdf-edit` 的三只公开模块。
+   */
+  const GRAMMAR_MODULE = 'richtext.ts';
+
+  it('模型层源码里不出现标签字符串 / innerHTML / style 属性拼接', () => {
     // 从模块自身位置解析 src 目录，不依赖 vitest 的工作目录（此前用 '.' 扫到的是包根，没有 .ts，断言空转）。
     const srcDir = fileURLToPath(new URL('.', import.meta.url));
     const files = readdirSync(srcDir).filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'));
     // 至少要真的扫到源码文件，否则「没命中」只是因为「没读到」。
     expect(files.length).toBeGreaterThan(0);
+    // 豁免只能是**指名的一格**，而且必须真的在那儿：漏这一句，改名或搬走都会让上面那条变成空转。
+    expect(files).toContain(GRAMMAR_MODULE);
     // 只针对真实 HTML/DOM 痕迹：闭合标签、已知标签名、DOM API、带引号的 class/style。
     // 用闭合标签与标签名白名单而非泛泛的 `<x>`，否则会把 TS 泛型 `Map<string, Entry>` 误判成标签。
     const patterns = [
@@ -126,7 +136,7 @@ describe('3.1-10 模型不含任何 HTML / 渲染细节', () => {
       /\bclass\s*=\s*["']/,
       /\bstyle\s*=\s*["']/,
     ];
-    for (const file of files) {
+    for (const file of files.filter((name) => name !== GRAMMAR_MODULE)) {
       const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
       for (const pattern of patterns) {
         expect(pattern.test(source), `${file} 命中了渲染细节模式 ${String(pattern)}`).toBe(false);

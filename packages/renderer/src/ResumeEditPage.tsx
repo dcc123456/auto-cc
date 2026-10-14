@@ -1,9 +1,10 @@
-import { Check, ChevronDown, ChevronUp, Palette, Redo2, Save, SlidersHorizontal, Undo2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Palette, Redo2, Save, SlidersHorizontal, Undo2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ResumeLocaleView, ResumeSectionKindView } from '@auto-cc/shared';
+import { editableToRaw } from '@auto-cc/plugin-resume-doc/richtext';
 import { ResumePaperFrame } from './ResumePaperFrame';
-import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, DeskTextarea, deskReason } from './ui/controls';
+import { Banner, DeskButton, DeskRange, DeskSegmented, DeskSwatch, deskReason } from './ui/controls';
 import {
   FONT_FAMILY_TOKENS,
   FONT_WEIGHT_TOKENS,
@@ -16,6 +17,7 @@ import {
   paragraphPatch,
   useResumeEditor,
 } from './useResumeEditor';
+import { armPaperBlocks, editableNodesOf, paperBlockOf, type PaperBlock } from './resume-paper-edit';
 
 /** 样式条的名义宽度（clamp 落点时用来自证右缘不越窗）。 */
 const STYLE_BAR_WIDTH_PX = 560;
@@ -25,48 +27,49 @@ const STYLE_BAR_GAP_PX = 10;
 const STYLE_BAR_TOP_FLOOR_PX = 96;
 
 /**
- * 注进纸面帧里的那一小段样式（选中的那一格 + 拖拽落点那一格 + 正在打字的那一格）。
+ * 注进纸面帧里的那一小段样式（编辑中的那一格 + 选中那一段 + 拖拽落点那一格）。
  *
  * 为什么在帧内注一条规则而不是在父页盖一层描边：纸是被 `scale` 缩放过的，父页那一层要跟着每帧重算矩形，
  * 而段落在**帧内**的矩形天然就是排版后的真实位置。这一条只描边、不改排版（`outline` 不占布局盒），
  * 所以它进不了导出产物——导出走的是主进程那份 HTML，与界面里这一个运行期节点无关（spec 3.10-02 的读数）。
- * 3.11 补的两条同理：`cursor:text` 只是把"这一格能敲字"这件事画在指针上；`color:transparent` 那一格是
- * 被盖住的原字——打字框是透明的、坐在纸上，原字不藏就会和敲进去的重影（spec 3.11-06）。
+ * 3.12 换的形状：`caret-color` 那一档是给纸上那一格落光标用的（编辑态就在纸上，不再有盖在上面的框），
+ * 而 `outline:none` 是**关掉浏览器自己那一圈** `:focus-visible` 的黑粗线——它在纸上像一块补丁，
+ * 描边改由 `.rz-edit-focus` 画（spec 3.12-04）。
  */
 const PAPER_EDIT_STYLE = [
   '[data-rz-section]{cursor:pointer}',
   '[data-rz-field]{cursor:text}',
+  '[contenteditable="true"]{outline:none;caret-color:#a31621}',
+  '[contenteditable="true"].rz-edit-focus{outline:1px solid #0b5c50;outline-offset:2px}',
   '[data-rz-section].rz-edit-selected{outline:2px solid #a31621;outline-offset:3px}',
   '[data-rz-section].rz-edit-drop{outline:2px dashed #0b5c50;outline-offset:-2px}',
-  '.rz-edit-typing{color:transparent}',
 ].join('');
 
 /** 指针按下到抬起之间，算"拖过"的位移门槛（px）：低于它按**点选**处理，不发任何跨进程调用。 */
 const DRAG_THRESHOLD_PX = 4;
 
-/**
- * 正在打字的那一格：**写入坐标**（与 `resume.editor.text` 的前四个实参同一形状）+ 原文 + 草稿。
- *
- * `raw` 必须跟着存一份：判"这一趟到底改没改"要拿草稿与**文档里那一格**比，而不是与纸面上渲染出来的
- * 那段 HTML 比（正文格已被 `renderRichValue` 消化成列表与粗体，两种写法看着不同、其实是同一句）。
- */
-interface TypingCell {
-  sectionId: string;
-  entryId: string;
-  fieldKey: string;
-  raw: string;
-  draft: string;
-}
+/** 一格的写入坐标换成一个可比的字符串（同格之内的焦点移动不算"离开那一格"）。 */
+const blockKeyOf = (target: PaperBlock): string => `${target.sectionId}/${target.entryId}/${target.fieldKey}`;
 
-/** 一格的视口矩形与它自己的字档（px 都是父页坐标，已经乘过纸的缩放倍率）。 */
-interface PaperCellGeometry {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  sizePx: number;
-  fontFamily: string;
-  ink: string;
+/** 正在编辑的那一格的凭据：写入坐标 + 原文 + 承字节点 + 进编辑态之前的 HTML。
+ *
+ * **不存草稿**：纸上的 DOM 就是草稿本身（父页驱动 `contenteditable`，spec 3.12-04），
+ * 界面手里再存一份文本就是第二份事实，还会与纸上不同步（§2.5）。
+ * `snapshot` 只为 Esc 那一条存在：取消要把那一格**逐字放回**进编辑态之前的形状（3.12-09）。
+ */
+interface HeldBlock extends PaperBlock {
+  /** 坐标换成一个可比的字符串：同格之内的焦点移动不算"离开那一格"。 */
+  key: string;
+  snapshot: string;
+  /** 人已按 Esc 收回这一格：焦点离开时只清状态，一个字节都不发。 */
+  isCanceled: boolean;
+  /**
+   * 人在这一格里**真的动过字**吗（帧内派过一次 `input`）。
+   * 只比摘回来的原文与文档里那一格是不够的：文档存的写法可能不是文法的**规范形**
+   * （多余空行、三级缩进、落单的 `**`），那样"点进去看一眼再点出来"就会被判成改动，
+   * 于是界面替人把那一格悄悄重排成另一种写法（spec 3.12-05：没动过就一个字都不发）。
+   */
+  hasEdited: boolean;
 }
 
 /**
@@ -82,68 +85,22 @@ function paperScaleOf(frame: HTMLIFrameElement): { scale: number; originLeft: nu
 }
 
 /**
- * 按写入坐标在帧内找回那一格。
- * 逐节比对属性而不是把 id 拼进 CSS 选择器：那些 id 是主进程生成的串，拼进字符串就是把两种事实并成一条（§2.6）。
- * @param paperDoc 纸面帧的文档
- * @param target 写入坐标（区块 / 条目 / 字段键）
- * @returns 那一格；纸重出之后坐标对不到任何节点时回 `null`
- */
-function findPaperCell(
-  paperDoc: Document,
-  target: Pick<TypingCell, 'sectionId' | 'entryId' | 'fieldKey'>,
-): Element | null {
-  return (
-    Array.from(paperDoc.querySelectorAll('[data-rz-field]')).find(
-      (node) =>
-        node.getAttribute('data-rz-field') === target.fieldKey &&
-        node.closest('[data-rz-entry]')?.getAttribute('data-rz-entry') === target.entryId &&
-        node.closest('[data-rz-section]')?.getAttribute('data-rz-section') === target.sectionId,
-    ) ?? null
-  );
-}
-
-/**
- * 量纸上那一格在**父页视口**里的矩形，连同它在打印面上被画出来的字档（spec 3.11-06）。
- *
- * 为什么连着量字档：打字那一格是透明地盖在纸上的（原件的 `bare` 档）。字号、字族、墨色若由界面自己挑，
- * 就成了第二份事实——纸把那格画成 11px 衬线深灰，框里却是 12px 无衬线浅白，看上去就是贴了一只补丁
- * （3.5-16 量到的正是这一类观感缺陷）。帧是同源、不开脚本的，父页可以直接问它的 computed style，
- * 拿到的就是打印面当下真实的那三档。
- * @param frame 纸面帧节点
- * @param node 帧内那一格
- * @returns 视口矩形 + 字档；量不到（帧没宽度、节点已脱离文档）时回 `undefined`，调用方这一格就不画
- */
-function measurePaperCell(frame: HTMLIFrameElement, node: Element): PaperCellGeometry | undefined {
-  const measured = paperScaleOf(frame);
-  const style = measured === undefined ? undefined : node.ownerDocument?.defaultView?.getComputedStyle(node);
-  if (!measured || !style) return undefined;
-  const { scale, originLeft, originTop } = measured;
-  const hit = node.getBoundingClientRect();
-  return {
-    left: originLeft + hit.left * scale,
-    top: originTop + hit.top * scale,
-    width: hit.width * scale,
-    height: hit.height * scale,
-    sizePx: Number.parseFloat(style.fontSize) * scale,
-    fontFamily: style.fontFamily,
-    ink: style.color,
-  };
-}
-
-/**
- * 整页直接编辑（spec 3.10 / 裁定㉙）。
+ * 整页直接编辑（spec 3.10 / 3.12，裁定㉙ 与 裁定㉠）。
  *
  * **这一屏对着纸改两件事**：排版（点一段 → 那一段的字号 / 行距 / 对齐 / 字重 / 字色 + 上移下移，
- * 文档级的基准字号 / 行距 / 四边距在右边那一窄栏）与正文（**双击**纸上那一格就地敲字，spec 3.11 / 裁定㉚）。
- * 敲进去的字只进简历工作副本，知识库要靠原来那颗「同步」；改了也不直接进库，还要按「保存」。
+ * 文档级的基准字号 / 行距 / 四边距在右边那一窄栏）与正文（**纸上那一格就是输入口**：
+ * 点一下落光标、直接敲、离开那一格就进工作副本，界面上没有第三只框、也没有确认键，spec 3.12 / 裁定㉠）。
+ * 敲进去的字只进简历工作副本，知识库要靠原来那颗「同步」；改了也不直接进库，还要按「保存」（裁定㉚）。
  * 这一屏上不画任何"点了没反应"的假控件（§2.6）。
  *
- * 三条形状约束：
+ * 四条形状约束：
  * ① **画面仍出自同一个 builder**——纸上是 `resume.editor.preview` 返回的那份 draft HTML，
  *    与导出产物同一份源（3.3-01 在这屏继续成立），这里没有第二套简历渲染器（§2.5）；
- * ② **命中在父页一侧做**——帧是 `sandbox="allow-same-origin"`（不放开 `allow-scripts`），
- *    帧内不跑脚本，父页读它的 DOM 量矩形、给它挂监听（plan §15 的实测表就是按这一条选的路线）；
- * ③ **会话只有一份**——所有动作走 `useResumeEditor`，与左列编排面板同一条撤销栈（spec 3.10-07）。
+ * ② **命中与编辑态都在父页一侧做**——帧是 `sandbox="allow-same-origin"`（**不放开** `allow-scripts`），
+ *    帧内不跑脚本，父页读它的 DOM、给那一格挂 `contenteditable`、把监听挂在帧文档上（plan §17 的实测表）；
+ * ③ **格式只由主进程那一份文法解释**——离开那一格时把纸上的形状摘成语法树交给 `editableToRaw`，
+ *    渲染层不认识 `- ` 与 `**`（3.12-03）；
+ * ④ **会话只有一份**——所有动作走 `useResumeEditor`，与左列编排面板同一条撤销栈（spec 3.10-07）。
  * @param docId 要编辑的那份文档（由 desk 持有）
  * @param templateId 架上选中的版式（同上，唯一来源）
  * @param locale 架上选中的预览语言
@@ -178,18 +135,24 @@ export function ResumeEditPage({
   /** 选中那一段的 id（种类从投影里现查，不在这里存第二份区块表，§2.2）。 */
   const [selectedId, setSelectedId] = useState<string>();
   /**
-   * 正在打字的那一格（`undefined` = 没在敲）。
-   * 只存**写入坐标 + 原文 + 草稿**，不存 HTML：纸上那一格的 HTML 是主进程那一份文法渲出来的，
-   * 界面重拼一份就是第二套渲染器（§2.5），而写回只需要原文。
+   * 正在编辑的那一格的**坐标读数**（`undefined` = 没有在敲）。
+   * 它是这一屏唯一的一份"编辑态"事实：样式条据此收起（描边不能盖在人正在敲的那一行上），
+   * 而**内容**不在这里存——纸上的 DOM 就是当下那一份（`heldRef` 只留节点与快照，§2.5）。
    */
-  const [typing, setTyping] = useState<TypingCell>();
+  const [editingKey, setEditingKey] = useState<string>();
+  /** 当下那一格的凭据（跨拍要现问：监听只挂一次，见 `liveRef`）。 */
+  const heldRef = useRef<HeldBlock | undefined>(undefined);
   /** 样式条的落点（视口坐标，px）：写成 CSS 变量而不是 `style={}`（§5.1，与 `--paper-scale` 同一口径）。 */
   const barRef = useRef<HTMLDivElement | null>(null);
-  /** 打字框的落点（同一口径：几何只写在 `--rz-type-*` 这几只变量上）。 */
-  const typeRef = useRef<HTMLDivElement | null>(null);
   /** 纸所在的那一格是这一屏的滚动容器：滚动要把样式条跟着挪或收起。 */
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  /**
+   * 这一次进屏有没有**真的发出过**一次打字（判据见 `flushHeld`：与原文相同就不发，所以发出必改动）。
+   * 「退出这一屏」那一条确认不能只看 `view.isDirty`——交回打字与抬起手指点中退出键只隔一个往返，
+   * 那一刻投影里还是旧值，只看它就会把刚敲的字连着会话一起丢掉（spec 3.12-05）。
+   */
+  const hasTypedRef = useRef(false);
 
   const {
     view,
@@ -221,28 +184,41 @@ export function ResumeEditPage({
   );
 
   /**
-   * 动作与状态的**当下引用**：拖拽过程跨好几拍，抬起那一刻要读最新的 `moveSection` 与 setter，
-   * 而监听挂的是帧内文档（重挂一次就把整趟拖拽打断），所以经这一只 ref 现问而不是把监听重挂一遍。
+   * 动作与状态的**当下引用**：拖拽与编辑都跨好几拍，抬起/离开那一刻要读最新的 `moveSection` / `setFieldText`，
+   * 而监听挂的是帧内文档（重挂一次就把整趟拖拽与正在敲的那格打断），所以经这一只 ref 现问而不是把监听重挂一遍。
    */
-  const liveRef = useRef({ moveSection, setSelectedId, setTyping, typing });
+  const liveRef = useRef({ moveSection, setSelectedId, setFieldText });
   useEffect(() => {
-    liveRef.current = { moveSection, setSelectedId, setTyping, typing };
+    liveRef.current = { moveSection, setSelectedId, setFieldText };
   });
 
   /**
-   * 交回这一格的草稿（spec 3.11-06「失焦发且仅发一次」）。
+   * 交回正在编辑的那一格（spec 3.12-05「离开那一格发且仅发一次」）。
    *
-   * **先收框再发**：点「改好了」那颗时焦点还在文本域上，浏览器会先派一次 blur，于是同一次表态可能进这条两次；
-   * 先把 `typing` 置空，第二次进来手里已经没格子了，自然一个字节都不发。
-   * 与原文逐字相同（空编辑）不发：主进程那条 `contentHash` 判据仍在会话里，但这里连一趟跨进程往返都不必花。
-   * @param cell 敲完的那一格（`undefined` = 已经没有在敲的格子，直接当重复提交收掉）
+   * **先收状态再发**：从一格跳到另一格时，`focusout` 与 `focusin` 是连着派的，
+   * 手里若还留着旧格子，同一次移动可能交回两次。
+   * 摘树走 `editableToRaw`（主进程那一份文法的反向，3.12-01），界面不认识 `- ` 与 `**`（§2.5）。
+   * **两道闸各自的含义不同**：按过 Esc（那一支已把 HTML 放回快照）不发；这一格没派过 `input` 也不发
+   * ——后一道是**必需**的，因为文档里存的值可能不是文法的规范形（多余空行、三级缩进、落单的 `**`），
+   * 只比内容就会把"点进去看一眼"变成"界面替人把那一格悄悄重排"（plan §18 落地补充第 2 条）。
+   * "改了又改回去"那一种留给主进程的 `contentHash` 判（3.11-02），界面不写第二份相等判据（§2.5）。
    */
-  const commitTyping = (cell: TypingCell | undefined) => {
-    if (cell === undefined) return;
-    setTyping(undefined);
-    if (cell.draft === cell.raw) return;
-    setFieldText(cell.sectionId, cell.entryId, cell.fieldKey, cell.draft);
-  };
+  const flushHeld = useCallback(() => {
+    const held = heldRef.current;
+    if (!held) return;
+    heldRef.current = undefined;
+    setEditingKey(undefined);
+    held.node.classList.remove('rz-edit-focus');
+    if (held.isCanceled || !held.hasEdited) return;
+    hasTypedRef.current = true;
+    liveRef.current.setFieldText(
+      held.sectionId,
+      held.entryId,
+      held.fieldKey,
+      editableToRaw(editableNodesOf(held.node)),
+    );
+    // 依赖只有这一份：只读 ref 与稳定 setter，所以监听 effect 不会因为父页重渲而重挂（§2.5 一份事实一条路径）。
+  }, []);
 
   /** 帧每装好一次：记下节点并把装载次数加一，让下面两条 effect 在**新文档**上重挂一遍监听。 */
   const onPaperLoad = useCallback((node: HTMLIFrameElement) => {
@@ -284,71 +260,48 @@ export function ResumeEditPage({
     );
   }, [frame, paperNonce, selectedId]);
 
-  /**
-   * 把打字框盖在纸上那一格上，并把**打印面自己画出来的那三档字**（字号 / 字族 / 墨色）写成 CSS 变量。
-   *
-   * 量的是那一格里**承字的那个节点**，不是整格：带标签的那一格（「成果: …」）在 DOM 里是
-   * 标签 `<span>` + 值 `<span>` 两只，框若按整格的左缘去钉，敲起来的字会盖住标签，看起来像在改标签那两个字。
-   * 值的节点恒为最后一个元素子节点（标签在前；标题那一格是纯 `<span>`，没有元素子节点就取它自己）。
-   * 同一趟里把 `.rz-edit-typing` 落到那个节点上——原字不藏就会和敲进去的重影（spec 3.11-06）。
-   *
-   * 量不到格子就不画（纸重出之后坐标对不到节点，例如上一步撤销把这一条删了）：宁可不画也不猜坐标（§2.6）。
-   */
-  const placeTyping = useCallback(() => {
-    const box = typeRef.current;
-    const paper = frame;
-    const paperDoc = paper?.contentDocument;
-    for (const node of Array.from(paperDoc?.querySelectorAll('.rz-edit-typing') ?? [])) {
-      node.classList.remove('rz-edit-typing');
-    }
-    if (!box || !paper || !typing || !paperDoc) return;
-    const cell = findPaperCell(paperDoc, typing);
-    const node = cell?.lastElementChild ?? cell;
-    if (!node) return;
-    // **先量再藏**：那三档字要读的是打印面原本的那一档，class 一挂上去读回来就是 `transparent` 了。
-    const geometry = measurePaperCell(paper, node);
-    if (!geometry) return;
-    node.classList.add('rz-edit-typing');
-    box.style.setProperty('--rz-type-left', `${Math.round(geometry.left)}px`);
-    box.style.setProperty('--rz-type-top', `${Math.round(geometry.top)}px`);
-    box.style.setProperty('--rz-type-width', `${Math.round(geometry.width)}px`);
-    box.style.setProperty('--rz-type-size', `${geometry.sizePx.toFixed(2)}px`);
-    box.style.setProperty('--rz-type-font', geometry.fontFamily);
-    box.style.setProperty('--rz-type-ink', geometry.ink);
-  }, [frame, paperNonce, typing]);
-
-  // 选中变了、纸换了、窗口动了、格子滚了——样式条与打字框都要跟着重钉一次。
-  // 用 `useLayoutEffect`：钉格子的量法要读帧内矩形，画之前先钉好才不会闪一帧错位。
+  // 选中变了、纸换了、窗口动了、格子滚了——样式条要跟着重钉一次。
+  // 打字态不需要这一趟：纸上的那一格就是输入口，光标落点由帧内文档自己管（裁定㉠）。
+  // 用 `useLayoutEffect`：钉条的量法要读帧内矩形，画之前先钉好才不会闪一帧错位。
   useLayoutEffect(() => {
     placeBar();
-    placeTyping();
     const slot = scrollRef.current;
-    const onScroll = () => {
-      placeBar();
-      placeTyping();
-    };
+    const onScroll = () => placeBar();
     slot?.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
     return () => {
       slot?.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, [placeBar, placeTyping]);
+  }, [placeBar]);
 
   /**
-   * 纸面帧装载好之后：注一条选中样式、把命中测试挂在**帧内文档**上。
+   * 纸面帧装载好之后：注一条选中样式、把**每一格**武装成输入口、把监听挂在**帧内文档**上。
    *
    * 监听挂在 `pointerdown` 当场（与左列拖拽同一条活体教训：`harness drag` 的 up 在 effect 跑之前就过去了）。
-   * 一次按下只做两件事之一：位移超过门槛就是**换顺序**（抬起时发一次 `resume.editor.move`，落点没变就一个字节都不发），
-   * 没超过就是**选中**（长出样式条）。整个拖拽过程只改帧内那个节点的 class，不触发父页重渲。
-   * 双击是第三件事：**进打字态**（spec 3.11-06），于是同一次按下先选中、随后那一下双击长出文本域。
+   *
+   * 三件事各归一处，互不打断：
+   * ① 按在**格子之内**（带 `data-rz-field`）——只把选中落到那一段，**不** `preventDefault`、**不**起拖拽，
+   *    剩下的交给浏览器：光标落点、选中词、双击选句、IME 候选窗都是原生行为（spec 3.12-05 / 3.12-10）；
+   * ② 按在格子之外（段落的空白处、标题、日期那些没有写入坐标的地方）——这才是**换顺序**的手势：
+   *    位移过门槛抬起时发一次 `resume.editor.move`，没拖过就只**选中**（长出样式条，3.10-05 不变）；
+   * ③ 焦点进出一格由 `focusin`/`focusout` 管：进格记下凭据与快照，出格把形状摘成原文交回**一次**
+   *    `resume.editor.text`（3.12-05 的"发且仅发一次"）。
+   *
+   * 每帧都要重新武装：`srcdoc` 换内容会换掉整个帧内 Document，上一帧挂的 `contenteditable` 随之消失。
    */
   useEffect(() => {
     const paperDoc = frame?.contentDocument;
     if (!paperDoc) return;
+    // 这一份是**新** Document：`focusout` 在文档被换掉时**不会**派，上一帧那一格的凭据若还留在手里，
+    // 下一次点进同一个 `fieldKey` 就会被下面那句"同一格不算离开"的早退挡掉——
+    // 于是新格没快照、交回时摘的还是那棵已脱离文档的旧树（字就这么静默丢了）。
+    heldRef.current = undefined;
+    setEditingKey(undefined);
     const style = paperDoc.createElement('style');
     style.textContent = PAPER_EDIT_STYLE;
     paperDoc.head.appendChild(style);
+    armPaperBlocks(paperDoc);
     const sectionNodes = () => Array.from(paperDoc.querySelectorAll('[data-rz-section]'));
     const clearMarks = () => {
       for (const node of sectionNodes()) node.classList.remove('rz-edit-drop');
@@ -362,9 +315,9 @@ export function ResumeEditPage({
       const sectionId = node?.getAttribute('data-rz-section');
       const kind = node?.getAttribute('data-rz-kind') as ResumeSectionKindView | null;
       if (!node || !sectionId || !kind || pointer.button !== 0) return;
-      // 正在敲字时这一按**不接管**：不 preventDefault（那是把焦点抢走的动作，会把失焦那次提交挡掉），
-      // 也不起拖拽——一趟还没交回的草稿不该被一次换序吞掉（spec 3.11-07）。
-      if (liveRef.current.typing !== undefined) {
+      // 纸上那一格是输入口：这一按**不接管**（不 preventDefault、不起拖拽），只把选中带过去。
+      // 抢下这一按就等于把焦点从正在敲的那格移走，人只是想放个光标（spec 3.12-10）。
+      if (target.closest('[data-rz-field]')) {
         liveRef.current.setSelectedId(sectionId);
         return;
       }
@@ -403,40 +356,76 @@ export function ResumeEditPage({
       paperDoc.addEventListener('pointermove', onMove);
       paperDoc.addEventListener('pointerup', onUp);
     };
-    /**
-     * 双击纸上那一格 → 进打字态（spec 3.11-06）。
-     *
-     * 只认带 `data-rz-field` 的那几格：它们是打印面上**由 `view.lines` 逐行渲出来**的行，也就是
-     * 写得回去的那些格（3.11-04 的同一份锚点）；标题行与页脚没锚点，双击它们就什么都不长，
-     * 而不是长出一只发了出去必然被拒的框（§2.6）。
-     * 原文从 `data-rz-raw` 读而不是从 `textContent` 抄：正文格被 `renderRichValue` 消化成列表与粗体，
-     * 从画面往回拼就是把那套文法在渲染层重实现一遍（§2.5），而判"改没改"要的正是原文。
-     */
-    const onDoubleClick = (event: Event) => {
-      const mouse = event as MouseEvent;
-      const target = mouse.target as Element | null;
-      if (!target || typeof target.closest !== 'function') return;
-      const cell = target.closest('[data-rz-field]');
-      const fieldKey = cell?.getAttribute('data-rz-field');
-      const entryId = cell?.closest('[data-rz-entry]')?.getAttribute('data-rz-entry');
-      const sectionId = cell?.closest('[data-rz-section]')?.getAttribute('data-rz-section');
-      if (!cell || !fieldKey || !entryId || !sectionId) return;
-      mouse.preventDefault();
-      // 锚点是主进程 `JSON.stringify` 写进去的，读回来仍按那条形状判：`unknown` 落进类型守卫，
-      // 而不是把一个 `any` 直接当字符串用（帧里的 DOM 是外部面，这一格读不出字符串就当没这一格）。
-      const parsed: unknown = JSON.parse(cell.getAttribute('data-rz-raw') ?? '""');
-      if (typeof parsed !== 'string') return;
-      liveRef.current.setSelectedId(sectionId);
-      liveRef.current.setTyping({ sectionId, entryId, fieldKey, raw: parsed, draft: parsed });
+
+    /** 焦点走进一格：记下这一格的写入坐标、原文与进编辑态之前的 HTML（3.12-09 的快照只在 Esc 那一条用）。 */
+    const onFocusIn = (event: Event) => {
+      const block = paperBlockOf((event as FocusEvent).target);
+      if (!block) return;
+      const key = blockKeyOf(block);
+      if (heldRef.current?.key === key) return;
+      // 走进来的这一格之前若还留着一格没交回（程序化移焦点走不了 focusout），先把它交回。
+      flushHeld();
+      heldRef.current = { ...block, key, snapshot: block.node.innerHTML, isCanceled: false, hasEdited: false };
+      block.node.classList.add('rz-edit-focus');
+      setEditingKey(key);
     };
+    /** 帧内派上来的 `input` 只用来举旗：内容不进父页 state，纸上的 DOM 就是当下那一份（§2.5）。 */
+    const onInput = () => {
+      const held = heldRef.current;
+      if (held) held.hasEdited = true;
+    };
+    /** 焦点走出这一格：交回（同格之内的移动不算离开，那一判据在 `flushHeld` 的 key 上）。 */
+    const onFocusOut = (event: Event) => {
+      const held = heldRef.current;
+      if (!held) return;
+      if ((event as FocusEvent).target !== held.node) return;
+      flushHeld();
+    };
+    const onKeyDown = (event: Event) => {
+      const key = event as KeyboardEvent;
+      const held = heldRef.current;
+      if (!held) return;
+      if (key.key === 'Escape') {
+        // Esc 只收这一格：逐字放回进编辑态之前的形状，一个字都不发（3.12-09）。
+        key.preventDefault();
+        held.isCanceled = true;
+        held.node.innerHTML = held.snapshot;
+        held.node.blur();
+        flushHeld();
+        return;
+      }
+      if ((key.metaKey || key.ctrlKey) && key.key.toLowerCase() === 'b') {
+        // ⌘/Ctrl+B 就地加重（裁定㉘① 的更正）：`styleWithCSS=false` 逼出 `<b>` 而不是 `<span style=>`，
+        // 反向文法只认 `<b>`/`<strong>` 这一档，于是落纸的标记一定能落回 `**…**`（3.12-07）。
+        key.preventDefault();
+        paperDoc.execCommand('styleWithCSS', false, 'false');
+        paperDoc.execCommand('bold');
+      }
+    };
+    /** 粘贴一律转成纯文本（3.12-08）：网页带来的 `style=`、`<span>`、`<font>` 都进不了打印面。 */
+    const onPaste = (event: Event) => {
+      const clip = event as ClipboardEvent;
+      clip.preventDefault();
+      const text = clip.clipboardData?.getData('text/plain') ?? '';
+      paperDoc.execCommand('insertText', false, text);
+    };
+
     paperDoc.addEventListener('pointerdown', onPointerDown, true);
-    paperDoc.addEventListener('dblclick', onDoubleClick);
+    paperDoc.addEventListener('focusin', onFocusIn);
+    paperDoc.addEventListener('focusout', onFocusOut);
+    paperDoc.addEventListener('keydown', onKeyDown);
+    paperDoc.addEventListener('paste', onPaste, true);
+    paperDoc.addEventListener('input', onInput);
     return () => {
       paperDoc.removeEventListener('pointerdown', onPointerDown, true);
-      paperDoc.removeEventListener('dblclick', onDoubleClick);
+      paperDoc.removeEventListener('focusin', onFocusIn);
+      paperDoc.removeEventListener('focusout', onFocusOut);
+      paperDoc.removeEventListener('keydown', onKeyDown);
+      paperDoc.removeEventListener('paste', onPaste, true);
+      paperDoc.removeEventListener('input', onInput);
       style.remove();
     };
-  }, [frame, paperNonce]);
+  }, [frame, paperNonce, flushHeld]);
 
   // 选中那一格换了（或纸重出）就把描边类重新落到对应节点上。
   useEffect(() => {
@@ -447,19 +436,30 @@ export function ResumeEditPage({
     }
   }, [frame, paperNonce, selectedId, paperHtml]);
 
-  /** 退出这一屏：与左列同一套判据（裁定⑪ 只拦组件卸载这一层）。 */
+  /**
+   * 退出这一屏：与左列同一套判据（裁定⑪ 只拦组件卸载这一层），但**先算上还没落到投影的那一次打字**。
+   * 交回打字与抬起手指点中退出键只隔一个往返，那一刻 `view.isDirty` 还是旧值；只看它就把刚敲的字连着会话丢了。
+   */
   const requestClose = () => {
-    if (view?.isDirty) setConfirmClose(true);
+    if (view?.isDirty || hasTypedRef.current) setConfirmClose(true);
     else onClose();
   };
 
-  // Esc 有三层（spec 3.10-03 的顺序，加上 3.11-06 的最里层）：
-  // 正在敲字 → 只收打字框，一次调用都不发；选中还挂着 → 先收样式条；什么都没选 → 才是"退出这一屏"。
+  // 那一次打字落到投影之后（干净态回来了，例如撤销到底或保存完成）就把这面旗收回，
+  // 不然它会一直举着，"退出这一屏"从此每次都要问一遍。
+  useEffect(() => {
+    if (view?.isDirty === false) hasTypedRef.current = false;
+  }, [view?.isDirty]);
+
+  // Esc 有三层（spec 3.10-03 的顺序，加上 3.12-09 的最里层）：
+  // 正在敲字 → 只收那一格（**帧内**那条 keydown 干的，这里只保证它不越界去收样式条）；
+  // 选中还挂着 → 先收样式条；什么都没选 → 才是"退出这一屏"。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (typing !== undefined) {
-        setTyping(undefined);
+      // 帧里的按键事件不会冒泡到父页文档，所以这一支只在"焦点在纸外、但那一格还举着"时兜底。
+      if (editingKey !== undefined) {
+        flushHeld();
         return;
       }
       if (selectedId !== undefined) setSelectedId(undefined);
@@ -467,7 +467,7 @@ export function ResumeEditPage({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedId, typing, view?.isDirty]);
+  }, [selectedId, editingKey, flushHeld, view?.isDirty]);
 
   if (!view) {
     return (
@@ -722,67 +722,10 @@ export function ResumeEditPage({
         </aside>
       </div>
 
-      {/* 就地敲字那一格：**双击**纸上带 `data-rz-field` 的那一行才长出来（spec 3.11-06）。
-          它透明地盖在纸上（原件的 `bare` 档）：字号、字族、墨色一律量自打印面自己画出来的那一档，
-          被盖住的原字此刻是透明的——所以看上去是把那一行改写，而不是在简历上贴了一只输入框。
-          几何与字档只写在 `--rz-type-*` 这几只变量上（§5.1：这一屏不用 `style` 做视觉布局）。 */}
-      {typing && (
-        <div
-          ref={typeRef}
-          data-testid="resume-edit-typing"
-          data-field={typing.fieldKey}
-          className="absolute left-(--rz-type-left) top-(--rz-type-top) z-10 flex w-(--rz-type-width) min-w-[160px] items-start gap-1 font-[family-name:var(--rz-type-font)] text-[color:var(--rz-type-ink)] text-[length:var(--rz-type-size)]"
-        >
-          <DeskTextarea
-            bare
-            autoFocus
-            spellCheck={false}
-            action="resume-edit-typing-text"
-            data-testid="resume-edit-typing-text"
-            aria-label={t('resume.edit.typeLabel')}
-            rows={Math.max(1, typing.draft.split('\n').length)}
-            value={typing.draft}
-            onValueChange={(draft) => setTyping((cell) => (cell ? { ...cell, draft } : cell))}
-            onBlur={() => commitTyping(typing)}
-            onKeyDown={(event) => {
-              // Esc 在这一层就收口：窗级那条还要收样式条、甚至退出这一屏，而敲字的人按 Esc 只想"不改了"（3.11-06）。
-              if (event.key !== 'Escape') return;
-              event.stopPropagation();
-              setTyping(undefined);
-            }}
-            className="min-w-0 flex-1"
-          />
-          {/* 两颗键压掉 mousedown 的默认动作：不压的话手还没抬起，焦点已经先跑掉、那一次 blur 替人把字交回了草稿，
-              「不改了」就变成另一条写入口（§2.5 一件事只留一颗口）。 */}
-          <div className="flex flex-col gap-1" onMouseDown={(event) => event.preventDefault()}>
-            <DeskButton
-              action="resume-edit-typing-commit"
-              variant="amber"
-              compact
-              busy={!!busy}
-              {...dead(busyReason)}
-              onClick={() => commitTyping(typing)}
-            >
-              <Check size={11} />
-              {t('resume.edit.typeCommit')}
-            </DeskButton>
-            <DeskButton
-              action="resume-edit-typing-cancel"
-              variant="ghost"
-              compact
-              aria-label={t('resume.edit.typeCancel')}
-              onClick={() => setTyping(undefined)}
-            >
-              <X size={11} />
-            </DeskButton>
-          </div>
-        </div>
-      )}
-
       {/* 样式条：钉在选中那一段的上方（放不下就下方），位置只写在 `--rz-bar-x/y` 这两个变量上。
           它只摆**真能改**的那几格：段落六轴里这里给字号 / 行距 / 对齐 / 字重 / 字色，加上一对换顺序的键。
-          正文不在这里摆格子——纸上双击那一格就是正文的口（裁定㉚），两只框同时摆在纸上会盖住彼此。 */}
-      {selected && !typing && (
+          正文不在这里摆格子——纸上那一格就是正文的口（裁定㉚），而人正在敲的那一格上不能盖描边（3.12-10）。 */}
+      {selected && editingKey === undefined && (
         <div
           ref={barRef}
           data-testid="resume-edit-bar"
