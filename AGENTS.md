@@ -295,6 +295,12 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   顺带一条同片实测：`store` 开连接时**全仓没有一处设 `PRAGMA foreign_keys = ON`**，所以 DDL 里的
   `ON DELETE CASCADE` 是装饰性的，删父行必须显式在同一条事务里删子表（先例：`packages/store/src/migrate.ts:100`、
   `packages/llm/src/provider-pool.ts` 的 `deleteProviderRow`）。
+  **更正这条的前提（实测 2026-10-14，简历轨片 3-B）：原因不是开关没开。** `node:sqlite` 的
+  `new DatabaseSync()` 上 `PRAGMA foreign_keys` 实测回 **1**（默认就开着，无需设置），真正的原因是
+  **那些表的 DDL 里从来没有外键子句**——全仓只有 `packages/llm/src/provider-pool.ts:100` 一处
+  `REFERENCES … ON DELETE CASCADE`，`resume_docs` / `kb_entities` / `kb_chunks` 一个都没有。
+  结论一字不变（删父行必须同事务显式删子表），但**不要去加 `PRAGMA foreign_keys = ON`"修"一个不存在的问题**；
+  读数已固化成断言，见 `packages/resume-kb/src/profile-service.test.ts` 的 `foreignKeyFootprint`。
 - **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe

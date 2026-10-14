@@ -1745,6 +1745,8 @@ prompt 版本随结果返回（`promptVersion`，2.5-09 的 `scriptVersion` 同�
    所以 DDL 里哪怕写了 `ON DELETE CASCADE` 也是装饰性的——**"删父行让库自己 cascade"这条路径不存在**，
    六张表的子行必须逐条显式删。这一条同时否掉了"分两次桥接调用、让渲染层串起来"的省事写法：
    跨两次往返就没有原子性，中途失败会留下"文档没了但素材还在"的半删状态，而那正是界面上最难解释的东西。
+   **（片 3-B 更正这条的前提，结论不动）**：实测 `node:sqlite` 的连接上 `PRAGMA foreign_keys` 回 **1**，
+   装饰性的真正原因是这些表的 DDL 里没有外键子句；写法照旧，理由见上面 片 3-B 落地记录那一条。
 2. **包依赖是单向 kb→doc**：`resume.parse`(427) / `kb.profile`(438) / `resume.generate`(519) 三只都 `inject` 了
    `resume.doc`，反向注入会把包依赖做成环并被 eslint boundaries（§4.1）拦下。
    **因此跨这六张表的原子删除只能由 `kb.profile` 编排**，桥接行 consequently 落在 `kb.profile.*` 而不是
@@ -2204,6 +2206,8 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
 - **只有母版/变体那条链接需要迁移，取 39**（现最高 38 = `skill-service.ts:33`；34 在本工作树仍读不到，按既有口径不当空号占）。
   按 §9 的 5.3-a：给已有表加列必须另起号段，回填老迁移的 `up` 在已应用过的库上根本不执行。
 - 全仓 `PRAGMA foreign_keys` 无人设过，所以 `parent_doc_id` 上的任何 `ON DELETE CASCADE` 都是装饰性的——删母版必须显式同事务删变体行。
+  **（片 3-B 更正：那两列上根本没有外键子句，且 `node:sqlite` 的 `PRAGMA foreign_keys` 实测回 1；
+  "必须显式同事务删"这一条结论不变，成因见本片落地记录最后一条。）**
 - 事实层归母版：`kb_entities` / `kb_chunks` 仍以母版 `doc_id` 记账，**变体不重导实体**（§2.7 禁第二份真相）。
 - 整屏编辑页（3.11 / 裁定㉚ ㉛）写回的也是 `resume_docs` 那一行（`useResumeEditor.ts:381 resume['editor.text'](docId, …)`），
   因此变体天然可编辑，**不需要第二套编辑器**——这是㉜ 选"派生文档"而不是"新投影层"的主要理由。
@@ -2276,3 +2280,52 @@ spike 三问 S1/S2/S3 的逐字读数、封闭文法（`- ` / 两空格 ` -` / �
   在被扫目录之外所以过去是绿的）。按 §1.4 与记忆里的并行会话口径：**不替它改、不给它开豁免、不重跑一遍冒充绿**，
   原样记在这里。`pnpm lint` 的 4 条红同理全部来自 `packages/renderer/dummy-non-existing-folder/**`（未跟踪目录），
   `pnpm typecheck` **EXIT=0**。
+
+**片 3-B（2026-10-14，判据 4.11-14 / 17 / 18 已过，4.11-15 / 16 只剩 V 半边）**
+
+- **accept 的落点从母版换成变体**（裁定㉜ 的正面主判据）：`run()` 先把目标算成
+  `variantDocId = findVariantId(parentDocId, filter.jdId ?? null)`，`targetId = variantDocId ?? parentDocId`，
+  提议态里因此同时留 `parentDocId` / `parentHash` / `baseline`（基线取 target，即"已有变体优先"）；
+  `accept()` 唯一的一次写走 `docStore.deriveVariant(...)`，写完 `proposals.delete(receiptId)`。
+  `run()` 本身仍然一次盘都不落，`MAX_PENDING_PROPOSALS = 8` 的保留窗口也没动——这两条是 4.5 的骨架。
+- **`resolveDocId` 只数母版**（`list().filter(i => i.parentDocId === null)`）：不加这一条，接受成功一次之后
+  "没指定 docId 时取哪一份"就永远报歧义，界面表现为"接一次之后再生成总是失败"。
+- **三道基线判定各说得出名字**：母版 hash 与 `parentHash` 不符 → 文案含「母版」；`findVariantId` 现查回来的 id
+  与提议态那支不符 → 也拦（防止另一窗在同一段 JD 上派生过）；已有变体的 hash 与 `contentHash(proposal.baseline)`
+  不符 → 文案含「变体」。零勾选那条早退**不建行**，回执 `docId` 回 `variantDocId ?? parentDocId`。
+- **判据写法上的一处更正（会影响 4.5 那批旧用例）**：4.5-11 原先用"把 `updatedAt` 动一下"代表用户改过简历。
+  改成按 `contentHash` 比之后这种写法**静默失效**（那个函数按设计排除 `updatedAt`，与整屏编辑页
+  "空编辑不进栈"同源）。三条用例因此改成内容级编辑（`generate-service.test.ts` 的 helper `editedCopy`
+  改第一个未锁字段的字并在一个字段都没改到时直接抛；`generate-link.test.ts` 改 `layout.baseFontPt`）。
+  抛的那一句是反向断言：语料以后变窄时宁可红，不要"其实没编辑"混成"基线没动"的假绿。
+- **4.11-17 的判法**：`materialFootprint(db, table)` 现查 `kb_entities` / `kb_chunks` 的行数**与 `source_doc_id` 集合**，
+  断前后逐字相等且集合仍为 `[母版 id]`（集合这一半是正向对照，防"两边都空"被当成"没新增"）。
+  两段 JD 并存那条同时断言同一格两句不同——那就是用户那句"后续可以只修改 JD 就能生成不同的简历"在库里的形状。
+- **4.11-18 的删除半边**：`removeDoc` 先 `list()` 现查该母版名下的每一支变体，然后在原来那一条事务里
+  逐支 `removeAllForDoc(variantId)` + `docStore.remove(variantId)`，计数并入 `document` 那一格
+  （所以 `document` 从此是**行数而非份数**，`profile-service.ts` 的 JSDoc 已随之改写）；
+  删一支变体只带走那一行与它的快照，母版逐表读数一字不动。读数：回执 `{document: 3, ...}`、
+  `orphanVariantCount` = 0、`foreignKeyFootprint` = `{ddlDeclaresFk: false, pragmaForeignKeys: 1}`。
+- **顺带更正一处写错的实测前提（片 3-A 那条与 `doc-store.ts` 的注释、AGENTS.md §9 的 5.3-a 同源）**：
+  片 3-A 写的是"全仓无人设 `PRAGMA foreign_keys`"，本机实测**这个前提是错的**——`node:sqlite` 的
+  `new DatabaseSync()` 上 `PRAGMA foreign_keys` 回 **1**（默认就开着，无需设置）。真正的原因是
+  `resume_docs` / `kb_entities` / `kb_chunks` 的 DDL **没有外键子句**（全仓只有
+  `packages/llm/src/provider-pool.ts` 一处 `REFERENCES … ON DELETE CASCADE`），级联从来没有被声明过，
+  所以开不开那个开关都不带动作。**结论一字未动**（删父行必须同事务显式删子表），但理由必须写对，
+  否则下一个人会去加 `PRAGMA foreign_keys = ON` 来"修"一个不存在的问题。
+  三处注释/文档已同步，并把读数固化成上面那条断言。
+- **血缘只许一层**（`deriveVariant` 里"母版本身是变体即拒"）：变体再生变体在形状上没有任何限制，
+  在读界面上是灾难（排不出"这一份是谁的定制结果"），而且删最上面那一支会让下面那支的来路指向不存在的行。
+  随这条补了一条 `doc-store.test.ts` 用例（`/本身是变体/` + `findVariantId` 回 null + 行数仍为 2）。
+- 读数（逐字，`pnpm vitest run packages/resume-doc packages/resume-kb packages/main`）：
+  `generate-service.test.ts` **43 passed**、`profile-service.test.ts` **87 passed**、
+  `generate-link.test.ts` **11 passed**（新增的是母版逐字节未动 + 变体行 `updated_at`/正文与产物同源 +
+  白名单集合相等 `['resume.doc.list']`），三包合跑 **`Test Files 51 passed (51) / Tests 831 passed (831)`**。
+- **四道门禁的逐字退出码**（`tmp/g8-*.log`，一律重定向后取 `$?`，不接管道——§9 的 5.4-c）：
+  `pnpm typecheck` **EXIT=0**、`pnpm test` **EXIT=0**（全仓逐包核对：`resume-doc` 286 / `resume-kb` 452 /
+  `main` 93 / `agent` 223 / `browser` 306 / `outbound` 197 / `platform-boss` 177 全绿）；
+  `pnpm lint` **EXIT=1** 与 `pnpm format:check` **EXIT=1** 的红点**全部来自并行会话那只在跟踪外的
+  `packages/renderer/dummy-non-existing-folder/**`**（4 条 eslint `was not found by the project service` +
+  3 份 prettier warn，与被 片 3-A 记下的同一处同源），本片不替它改、不给它开豁免。
+  在我这 7 份文件 + 3 份文档的射程内各跑一遍取证：`npx eslint <那 7 份>` **EXIT=0**、
+  `npx prettier --check <9 份>` **EXIT=0**、`tsx scripts/check-lexicon.ts` **EXIT=0**（§4.6）。

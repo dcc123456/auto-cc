@@ -1226,6 +1226,24 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
   ⑦ 提交与推送按 §1，pathspec 形式；⑧ 暂存区只有 `docs/acceptance/4.5/4.5-13-real-pdf-jd-chain.txt`
   与本文件、`AGENTS.md`、`scripts/e2e-resume-jd.ts` 加那批源文件与测试，无图片、无 PDF 二进制、无 `tmp/` 产物。
 
+### 4.5-g 补录（片 3-B 换边：那句「接受后才写入工作副本」现在写的是变体，2026-10-14）
+
+- **为什么单开一节而不是改 4.5-11 的原文**：按 §4.5，文档 ID 与判据原文一经分配不改写；
+  而裁定㉜（母版 + 每 JD 一份变体）确实把 4.5-11 的**语义位置**换了一格——原文"接受后才写入工作副本"里的
+  那个"工作副本"，从 片 3-B 起**不再是导入的那一份**，而是这一趟 JD 对应的那一支派生行。
+  档位仍为 `[x]`（"接受之前一份都不落、接受那一刻才写"这条判据一字未松），换的只有写到哪一行。
+- **换边之后 accept 的写入形状**：`run()` 仍然一次盘都不落（提议态在内存 `Map`，`MAX_PENDING_PROPOSALS = 8`），
+  `accept()` 仍然是唯一写口——这两条是 4.5 的骨架，没动。动的是它落点的选择：
+  先按 `(parentDocId, jdId)` 现查有没有那一支（`findVariantId`，SQL 里用 `jd_id IS ?` 才能把"这一段没挂 JD"
+  与"挂了另一段"分开），有则覆盖正文（`deriveVariant` 的 UPSERT 不碰血缘列），无则新建一行并同事务写血缘。
+  所以同一份简历对同一段 JD 反复生成只会有一支变体，`resume_generations` 的台账行数继续按趟计。
+- **4.5-11 那三条陈旧用例的连带换边**：基线从"母版"改成"该 JD 的那一支变体（已有则取它，没有才取母版）"，
+  于是"用户在上一次接受之后又手改过变体"这一格才拦得住；同时新增母版侧那一道（母版被并行改实时也拦），
+  两条的 `message` 分别含「变体」「母版」字样，界面上要说得出是哪一份动了。逐字文案与用例位置见上一节的落地记录。
+- **不影响的部分**（避免下一位误以为 4.5 整片重做）：4.5-13 的 M5 判据、4.5-14 的四条出口归因、
+  `resume_generations` 的号段 15 表形状、以及 4.5-f 那批发货值（`modelMaxTokens: 4096` / `modelTimeoutMs: 420000`）
+  全部原样。4.5-06 仍是本 spec 唯一未收的 `[!]`，裁定㉜没有给它新的收口路径。
+
 ## 4.6 话术生成器
 
 | ID     | 验收标准                                                                              | 方式 | 验证操作                                      | 状态 |
@@ -1633,11 +1651,11 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 | ID      | 验收标准                                                                                                                  | 方式 | 验证操作                                                                    | 状态 |
 | ------- | ------------------------------------------------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------- | ---- |
 | 4.11-13 | 迁移 **39** 给 `resume_docs` 加 `parent_doc_id` / `jd_id` 两列（母版两列皆 NULL）；不改任何已应用的号段                   | C    | `SELECT version FROM schema_migrations` 读数 + 老库升级后两列存在           | [x]  |
-| 4.11-14 | `resume.doc.derive(docId, jdId)` 是**唯一**复制口：桥接白名单里文档级复制只有这一句，出现第二句即红                       | C    | 静态检查 `resume.doc.` 命中集合（同 4.9-04 的形状）                         | [ ]  |
+| 4.11-14 | `resume.doc.derive(docId, jdId)` 是**唯一**复制口：桥接白名单里文档级复制只有这一句，出现第二句即红                       | C    | 静态检查 `resume.doc.` 命中集合（同 4.9-04 的形状）                         | [x]  |
 | 4.11-15 | `resume.generate.accept` 只写这一趟对应的变体，**母版 `content_hash` 一字不动**（本片正面主判据）                         | U+V  | accept 前后各读一次母版 hash 逐字相等；变体 hash 变                         | [ ]  |
 | 4.11-16 | 两个 JD 并存：JD-A、JD-B 各一份变体，两份 PDF 产物 hash 互异，界面可按 JD 切换并各自导出                                  | V    | 真实窗口两张画面 + 逐字读数（变体行显示 JD 标题与生成时间）                 | [ ]  |
-| 4.11-17 | 事实层归母版：生成与采纳**不新增** `kb_entities` / `kb_chunks` 行（计数逐字不变），变体不重导实体                         | U    | 前后计数比对；`sourceDocId` 仍指母版                                        | [ ]  |
-| 4.11-18 | `KB_GENERATION_STALE_BASELINE` 的判据换成"该变体的基线移动"；母版被并行改实时仍拦；删变体不动母版、删母版显式同事务删变体 | U    | 三条用例：变体陈旧、母版并发改、删除各自；`foreign_keys` 未开这一事实有测试 | [ ]  |
+| 4.11-17 | 事实层归母版：生成与采纳**不新增** `kb_entities` / `kb_chunks` 行（计数逐字不变），变体不重导实体                         | U    | 前后计数比对；`sourceDocId` 仍指母版                                        | [x]  |
+| 4.11-18 | `KB_GENERATION_STALE_BASELINE` 的判据换成"该变体的基线移动"；母版被并行改实时仍拦；删变体不动母版、删母版显式同事务删变体 | U    | 三条用例：变体陈旧、母版并发改、删除各自；`foreign_keys` 未开这一事实有测试 | [x]  |
 | 4.11-19 | 整屏编辑页对变体同样可编辑（仍走 `resume.editor.*` 按 `docId` 现读，不新增第二套编辑器与第二份正文）                      | V    | 真实窗口改变体里一格 → 母版同一格逐字不变                                   | [ ]  |
 
 **偏离登记（片 3-A，2026-10-14）**：4.11-14 原文写的 `resume.doc.derive(docId, jdId)` 落成为主进程侧服务方法
@@ -1645,6 +1663,50 @@ education_missing`）**在 service 层不拼中文**。这同时兑现 §5.5（�
 派生是"接受"那一刻的副作用，而接受已经有 `resume.generate.accept` 那一句在白名单上把关。
 判据含义一字未动（**新行只有一个入口**），它的静态检查半边随片 3-B 进 `packages/main/src/generate-link.test.ts`，
 逐字理由与读数见 plan §4.11 落地记录。
+
+**落地记录（片 3-B，2026-10-14）**：
+
+- **4.11-14 的静态半边落点**：`packages/main/src/generate-link.test.ts` 里两条一起判——
+  `isAllowedCall('resume.doc.deriveVariant')` 回 **false**（派生不过界，渲染层造不出一行简历），且
+  `RENDERER_ALLOWLIST` 里 `resume.doc.` 前缀的命中集合**按集合相等**断言为 `['resume.doc.list']`
+  （多一句即红，形状同 4.9-04）。偏离本身（`deriveVariant` 为主进程侧服务方法、刻意不上桥）在片 3-A 已登记，档位不变。
+- **4.11-15 / 16 保持 `[ ]`，且不是因为没过**：这两条都是 `U+V` / `V`，**U 半边已经过了**
+  （`generate-service.test.ts` 43 例 + `generate-link.test.ts` 11 例里各有一条正面判据：accept 回执的 `docId` 不等于母版 id、
+  母版行前后 `JSON.stringify` 逐字节相同、两段 JD 各长一支变体且同一格两句不同）。
+  按原文要"两份 PDF 产物 hash 互异、界面可按 JD 切换并各自导出"，那需要 片 3-C 的变体面板与导出口，
+  所以此处留的是 **V 半边**，不是能力缺口。
+- **4.11-17 的判法**：变体接受前后各现查一次 `kb_entities` / `kb_chunks` 的**行数与 `source_doc_id` 集合**
+  （helper `materialFootprint`），断两趟逐字相等且集合仍为 `[母版 id]`——集合等于 `[DOC_ID]` 这一条是正向对照，
+  防止"两边都空"被当成"没新增"。变体侧零实体写入同时是 4.11-28 的反向证据预件。
+- **4.11-18 里那句「`foreign_keys` 未开这一事实有测试」需要就地更正实测前提**（AGENTS.md §9 的 5.3-a 同源，已同步改）：
+  本机实测 `node:sqlite` 的 `new DatabaseSync(...)` 上 `PRAGMA foreign_keys` **回 1**（默认就是开着），
+  而全仓只有 `packages/llm/src/provider-pool.ts` 一处 `REFERENCES … ON DELETE CASCADE`，
+  `resume_docs` / `kb_entities` / `kb_chunks` 的 DDL **根本没有外键子句**。
+  所以"删父行不会带走子行"的成因是**级联从未被声明**，不是开关没打开；结论（删母版必须同事务显式删变体那一支）一字未动。
+  读数固化成断言：`profile-service.test.ts` 的 `foreignKeyFootprint` 现查 `sqlite_master` 里 `resume_docs` 的 DDL
+  与 `PRAGMA foreign_keys` 实值，断言形状为 `{ddlDeclaresFk: false, pragmaForeignKeys: 1}`——
+  将来谁给这张表补了外键，这条会红并逼他重看删除路径，而不是让一个错误的文档前提继续传下去。
+  同一条用例另断 `orphanVariantCount`（`parent_doc_id` 指向不存在的行的变体数）删完为 **0**。
+- **基线判据从"字节"换成"内容"，这条是本轮最需要留字的地方**：4.5-11 原先三条陈旧用例都靠"动一下 `updatedAt`"
+  来代表用户改过简历。片 3-B 把基线比较改走 `contentHash(doc)`（`packages/resume-doc` 里既有实现，
+  它排除 `updatedAt`，与整屏编辑页的"空编辑不进栈"同源，§2.1 复用）之后，那种写法**全部失效**——
+  只改时间戳不再算改动。用例因此改成内容级编辑（helper `editedCopy` 改第一个未锁字段的字、`generate-link` 那条改
+  `layout.baseFontPt`），并且加了一条反向断言：`editedCopy` 若一个字段都没改到就直接抛，
+  防止语料变动后"静默地没有编辑"变成"基线没动的假绿"。
+- **§7.4 自检**：① 四道门禁逐字退出码 `typecheck` **0** / `test` **0**（全仓逐包核对，见 plan §4.11 片 3-B 落地记录）/
+  `lint` **1**、`format:check` **1**——两处红点全部来自并行会话那只未跟踪的
+  `packages/renderer/dummy-non-existing-folder/**`，本片射程内 `npx eslint <7 份源文件与测试>` 与
+  `npx prettier --check <9 份>` 各跑一遍均 **EXIT=0**；④ 复用——变体血缘走 `resume_docs` 加两列（不开第二张正文表、不开第二条读取通道），
+  派生口复用 `save` 的 UPSERT（它不碰血缘列），删除复用 `removeAllForDoc` / `detachOrphanParents`，
+  基线复用 `contentHash`；本片**没有新增 service、没有新增桥接句**。⑤ 死代码——`PendingProposal` 的
+  `baselineDocId` 换成 `parentDocId` / `variantDocId` 两个字段后旧名零消费者，已删。
+  ⑧ 暂存区——本片只有 7 份源文件与测试 + 本文件 + plan + `AGENTS.md`，无图片、无 `tmp/` 产物。
+
+### 片 3-C 待办（随 4.11-16 的 V 半边）
+
+渲染层变体面板：列表按母版分组、变体行显示 JD 标题与生成时间、按 JD 切换、各自导出；
+`packages/shared/src/bridge.ts` 的 `ResumeDocSummaryView` 需镜像 `parentDocId` / `jdId` 两列，
+`generate.acceptedRebind` 那句文案要跟着变体语义改（zh-CN / en 一起补，§5.5/5.6）。
 
 ### 片 4 逐条「原文 / 改写 / 人主动隐」（㉝）
 
