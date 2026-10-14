@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ResumeDocService, RESUME_DOC_MIGRATION_VERSION, RESUME_DOC_VARIANT_MIGRATION_VERSION } from './doc-store.js';
+import {
+  ResumeDocService,
+  RESUME_DOC_JD_LABEL_MIGRATION_VERSION,
+  RESUME_DOC_MIGRATION_VERSION,
+  RESUME_DOC_VARIANT_MIGRATION_VERSION,
+} from './doc-store.js';
 import { contentHash } from './normalize.js';
 import { DEFAULT_LAYOUT, makeField, RESUME_SCHEMA_VERSION, type ResumeDocument } from './model.js';
 
@@ -153,8 +158,8 @@ describe('文档清单（生成轨的选文档口）', () => {
     docs.save(sampleDoc({ id: 'older', profile: { ...sampleDoc().profile, name: '王五' }, updatedAt: 1000 }));
     docs.save(sampleDoc({ id: 'newer', updatedAt: 2000 }));
     expect(docs.list()).toEqual([
-      { id: 'newer', name: '张三', updatedAt: 2000, parentDocId: null, jdId: null },
-      { id: 'older', name: '王五', updatedAt: 1000, parentDocId: null, jdId: null },
+      { id: 'newer', name: '张三', updatedAt: 2000, parentDocId: null, jdId: null, jdLabel: null },
+      { id: 'older', name: '王五', updatedAt: 1000, parentDocId: null, jdId: null, jdLabel: null },
     ]);
   });
 
@@ -162,7 +167,9 @@ describe('文档清单（生成轨的选文档口）', () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc({ id: 'no-name' }));
     db.prepare("UPDATE resume_docs SET doc_json = json_remove(doc_json, '$.profile.name') WHERE id = 'no-name'").run();
-    expect(docs.list()).toEqual([{ id: 'no-name', name: null, updatedAt: 1234, parentDocId: null, jdId: null }]);
+    expect(docs.list()).toEqual([
+      { id: 'no-name', name: null, updatedAt: 1234, parentDocId: null, jdId: null, jdLabel: null },
+    ]);
   });
 });
 
@@ -191,17 +198,18 @@ describe('删除工作副本（spec 4.1-14 的删除通道里属于本表的那�
   });
 });
 
-describe('变体血缘：迁移 39 与老库升级（spec 4.11-13）', () => {
+describe('变体血缘与 JD 标题：迁移 39 + 40 与老库升级（spec 4.11-13 / 裁定㊱）', () => {
   /** 读 `resume_docs` 的列名集合（ALTER 有没有真的执行到位，只看这个而不是看服务起没起来）。 */
   function columnNames(db: DatabaseSync): string[] {
     const rows = db.prepare('PRAGMA table_info(resume_docs)').all() as unknown as readonly { name: string }[];
     return rows.map((row) => row.name);
   }
 
-  it('挂载后台账记到 39，两列都在，且已有母版行的两列是 NULL', async () => {
+  it('挂载后台账记到 39 与 40，三列都在，且已有母版行的这三列是 NULL', async () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc());
     expect(RESUME_DOC_VARIANT_MIGRATION_VERSION).toBe(39);
+    expect(RESUME_DOC_JD_LABEL_MIGRATION_VERSION).toBe(40);
     const ledger = (
       db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as unknown as readonly {
         version: number | bigint;
@@ -209,7 +217,8 @@ describe('变体血缘：迁移 39 与老库升级（spec 4.11-13）', () => {
     ).map((row) => Number(row.version));
     expect(ledger).toContain(RESUME_DOC_MIGRATION_VERSION);
     expect(ledger).toContain(RESUME_DOC_VARIANT_MIGRATION_VERSION);
-    expect(columnNames(db)).toEqual(expect.arrayContaining(['parent_doc_id', 'jd_id']));
+    expect(ledger).toContain(RESUME_DOC_JD_LABEL_MIGRATION_VERSION);
+    expect(columnNames(db)).toEqual(expect.arrayContaining(['parent_doc_id', 'jd_id', 'jd_label']));
     const lineage = db
       .prepare('SELECT parent_doc_id AS p, jd_id AS j FROM resume_docs WHERE id = ?')
       .get('resume-1') as {
@@ -219,9 +228,8 @@ describe('变体血缘：迁移 39 与老库升级（spec 4.11-13）', () => {
     expect(lineage).toEqual({ p: null, j: null });
   });
 
-  it('老库（只应用过 7 与 36）升级后两列存在、旧行读得回来', async () => {
-    // 这一条钉的是 §9 的 5.3-a 那个坑：给已有表加列必须另起号段，塞进已应用的版本的 `up` 里不会重跑。
-    // 于是这里先手造一份"7 与 36 已记过账"的库（连 5 列的老 `resume_docs` 和一行真实正文），再挂服务。
+  it('老库（只应用过 7 与 36，表只有五列）升级后血缘两列与标题列一起补上，旧行读得回来', async () => {
+    // 片 3-A 那条夹具原样留着：它判的是"39 从没跑过的库"能不能一步升到最新形状（两列 + 一列标题）。
     const dir = tempDir();
     const seed = new DatabaseSync(join(dir, 'store.db'));
     seed.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
@@ -236,11 +244,43 @@ describe('变体血缘：迁移 39 与老库升级（spec 4.11-13）', () => {
     seed.close();
 
     const { docs, db } = await boot(dir);
-    expect(columnNames(db)).toEqual(expect.arrayContaining(['parent_doc_id', 'jd_id']));
-    // 旧行没被 ALTER 打坏，血缘两列对老行就是 NULL（"它没有来路"是事实，不是缺数据）。
+    expect(columnNames(db)).toEqual(expect.arrayContaining(['parent_doc_id', 'jd_id', 'jd_label']));
     const loaded = docs.load('legacy-doc');
     expect(loaded.status).toBe('found');
-    expect(docs.list().map((item) => [item.id, item.parentDocId, item.jdId])).toEqual([['legacy-doc', null, null]]);
+    expect(docs.list().map((item) => [item.id, item.parentDocId, item.jdId, item.jdLabel])).toEqual([
+      ['legacy-doc', null, null, null],
+    ]);
+  });
+
+  it('老库（7 / 36 / 39 都记过账，表里已有血缘两列）升级后多出 jd_label 列，旧行照读', async () => {
+    // 这一条钉的是 §9 的 5.3-a 那个坑：给已有表加列必须**另起号段**，塞进已应用的版本的 `up` 里不会重跑。
+    // 所以这里的夹具是"39 已经跑过"的那一份库（血缘两列已经在表上、台账记着 39），
+    // 升级之后只应多出 40 那一列——假如有人把 `jd_label` 回填进 39，这一条就会以 `no such column` 红掉。
+    const dir = tempDir();
+    const seed = new DatabaseSync(join(dir, 'store.db'));
+    seed.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+    seed.exec('INSERT INTO schema_migrations (version, applied_at) VALUES (7, 1), (36, 1), (39, 1)');
+    seed.exec(`CREATE TABLE resume_docs (
+      id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, content_hash TEXT NOT NULL,
+      doc_json TEXT NOT NULL, updated_at INTEGER NOT NULL,
+      parent_doc_id TEXT, jd_id TEXT
+    )`);
+    seed
+      .prepare(
+        'INSERT INTO resume_docs (id, schema_version, content_hash, doc_json, updated_at, parent_doc_id, jd_id)' +
+          ' VALUES (?, ?, ?, ?, ?, NULL, NULL)',
+      )
+      .run('legacy-doc', RESUME_SCHEMA_VERSION, 'legacy-hash', JSON.stringify(sampleDoc({ id: 'legacy-doc' })), 1000);
+    seed.close();
+
+    const { docs, db } = await boot(dir);
+    expect(columnNames(db)).toEqual(expect.arrayContaining(['parent_doc_id', 'jd_id', 'jd_label']));
+    // 旧行没被 ALTER 打坏，三列对老行就是 NULL（"它没有来路、也没记过标题"是事实，不是缺数据）。
+    const loaded = docs.load('legacy-doc');
+    expect(loaded.status).toBe('found');
+    expect(docs.list().map((item) => [item.id, item.parentDocId, item.jdId, item.jdLabel])).toEqual([
+      ['legacy-doc', null, null, null],
+    ]);
   });
 });
 
@@ -264,7 +304,13 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
     docs.save(master);
     const masterHash = hashOf(db, 'resume-1');
 
-    const derived = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: master, nowMs: 5000 });
+    const derived = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: null,
+      document: master,
+      nowMs: 5000,
+    });
     expect(derived.created).toBe(true);
     expect(derived.docId).not.toBe('resume-1');
     expect(derived.docId).toMatch(/^resume-[0-9a-f]{12}$/);
@@ -282,10 +328,17 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
     const { docs, db } = await boot();
     docs.save(sampleDoc());
     const masterHash = hashOf(db, 'resume-1');
-    const first = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 });
+    const first = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: null,
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
     const second = docs.deriveVariant({
       parentDocId: 'resume-1',
       jdId: 'jd-a',
+      jdLabel: null,
       document: sampleDoc({ profile: { ...sampleDoc().profile, name: '李四' } }),
       nowMs: 6000,
     });
@@ -299,25 +352,89 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
     expect(loaded.status === 'found' && loaded.document.profile.name).toBe('李四');
   });
 
-  it('两段 JD 各得一支变体，两行并存且血缘各自对得上（spec 4.11-16 的数据面）', async () => {
+  it('两段 JD 各得一支变体，两行并存且血缘与标题各自对得上（spec 4.11-16 的数据面 / 裁定㊱）', async () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc());
-    const variantA = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 });
-    const variantB = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-b', document: sampleDoc(), nowMs: 6000 });
+    const variantA = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: '后端工程师（上海）',
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
+    const variantB = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-b',
+      jdLabel: '数据平台工程师',
+      document: sampleDoc(),
+      nowMs: 6000,
+    });
     expect(variantA.docId).not.toBe(variantB.docId);
     expect(lineageOf(db, variantB.docId)).toEqual({ parentDocId: 'resume-1', jdId: 'jd-b' });
+    // 标题逐行回读：界面那句"这一支是为哪段 JD 生成的"只有这一列说得出，而它必须是**各自**的而不是同一个。
     expect(docs.list()).toEqual([
-      { id: variantB.docId, name: '张三', updatedAt: 6000, parentDocId: 'resume-1', jdId: 'jd-b' },
-      { id: variantA.docId, name: '张三', updatedAt: 5000, parentDocId: 'resume-1', jdId: 'jd-a' },
-      { id: 'resume-1', name: '张三', updatedAt: 1234, parentDocId: null, jdId: null },
+      {
+        id: variantB.docId,
+        name: '张三',
+        updatedAt: 6000,
+        parentDocId: 'resume-1',
+        jdId: 'jd-b',
+        jdLabel: '数据平台工程师',
+      },
+      {
+        id: variantA.docId,
+        name: '张三',
+        updatedAt: 5000,
+        parentDocId: 'resume-1',
+        jdId: 'jd-a',
+        jdLabel: '后端工程师（上海）',
+      },
+      { id: 'resume-1', name: '张三', updatedAt: 1234, parentDocId: null, jdId: null, jdLabel: null },
     ]);
+  });
+
+  it('同一对 (母版, JD) 重生成时标题跟着刷新，血缘仍是那一对（裁定㊱：标题是读数，不是身份）', async () => {
+    const { docs, db } = await boot();
+    docs.save(sampleDoc());
+    const first = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: '后端工程师',
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
+    const second = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: '资深后端工程师（薪资面议）',
+      document: sampleDoc(),
+      nowMs: 6000,
+    });
+    expect(second.docId).toBe(first.docId);
+    expect(second.created).toBe(false);
+    const row = db
+      .prepare('SELECT parent_doc_id AS p, jd_id AS j, jd_label AS label FROM resume_docs WHERE id = ?')
+      .get(second.docId) as { p: string | null; j: string | null; label: string | null };
+    expect(row).toEqual({ p: 'resume-1', j: 'jd-a', label: '资深后端工程师（薪资面议）' });
   });
 
   it('无归因（jdId=null）也认同一行：SQL 用 IS 而不是 =，否则每派生一次长一行', async () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc());
-    const first = docs.deriveVariant({ parentDocId: 'resume-1', jdId: null, document: sampleDoc(), nowMs: 5000 });
-    const second = docs.deriveVariant({ parentDocId: 'resume-1', jdId: null, document: sampleDoc(), nowMs: 6000 });
+    const first = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: null,
+      jdLabel: null,
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
+    const second = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: null,
+      jdLabel: null,
+      document: sampleDoc(),
+      nowMs: 6000,
+    });
     expect(second.created).toBe(false);
     expect(second.docId).toBe(first.docId);
     expect(lineageOf(db, first.docId)).toEqual({ parentDocId: 'resume-1', jdId: null });
@@ -329,7 +446,13 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
   it('母版不存在时拒绝派生：不凭空造一支没有来路的变体', async () => {
     const { docs, db } = await boot();
     expect(() =>
-      docs.deriveVariant({ parentDocId: 'never-saved', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 }),
+      docs.deriveVariant({
+        parentDocId: 'never-saved',
+        jdId: 'jd-a',
+        jdLabel: null,
+        document: sampleDoc(),
+        nowMs: 5000,
+      }),
     ).toThrowError(/母版 never-saved 不存在/);
     expect(
       Number((db.prepare('SELECT COUNT(*) AS total FROM resume_docs').get() as { total: number | bigint }).total),
@@ -339,9 +462,21 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
   it('变体不再往下派生：血缘只许一层，否则界面排不出「这一份是谁的定制结果」', async () => {
     const { docs, db } = await boot();
     docs.save(sampleDoc());
-    const variant = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 });
+    const variant = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: null,
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
     expect(() =>
-      docs.deriveVariant({ parentDocId: variant.docId, jdId: 'jd-b', document: sampleDoc(), nowMs: 6000 }),
+      docs.deriveVariant({
+        parentDocId: variant.docId,
+        jdId: 'jd-b',
+        jdLabel: null,
+        document: sampleDoc(),
+        nowMs: 6000,
+      }),
     ).toThrowError(/本身是变体/);
     expect(docs.findVariantId(variant.docId, 'jd-b')).toBeNull();
     expect(
@@ -356,6 +491,7 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
       docs.deriveVariant({
         parentDocId: 'resume-1',
         jdId: 'jd-a',
+        jdLabel: null,
         document: sampleDoc({ metrics: { pages: 0 } }),
         nowMs: 5000,
       }),
@@ -372,7 +508,13 @@ describe('resume.doc.deriveVariant：唯一的文档复制口（spec 4.11-14 / �
     const masterJson = (
       db.prepare('SELECT doc_json AS json FROM resume_docs WHERE id = ?').get('resume-1') as { json: string }
     ).json;
-    const derived = docs.deriveVariant({ parentDocId: 'resume-1', jdId: 'jd-a', document: sampleDoc(), nowMs: 5000 });
+    const derived = docs.deriveVariant({
+      parentDocId: 'resume-1',
+      jdId: 'jd-a',
+      jdLabel: null,
+      document: sampleDoc(),
+      nowMs: 5000,
+    });
     const loaded = docs.load(derived.docId);
     expect(loaded.status).toBe('found');
     if (loaded.status !== 'found') return;

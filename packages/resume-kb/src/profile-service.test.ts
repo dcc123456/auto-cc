@@ -1050,12 +1050,14 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     const backend = doc.deriveVariant({
       parentDocId: docIdA,
       jdId: 'jd-backend',
+      jdLabel: null,
       document: loaded.document,
       nowMs: LATER_MS,
     });
     const platform = doc.deriveVariant({
       parentDocId: docIdA,
       jdId: 'jd-platform',
+      jdLabel: null,
       document: loaded.document,
       nowMs: LATER_MS,
     });
@@ -1084,12 +1086,14 @@ describe('删除一份简历连同素材（4.1-14 / 裁定㉖「连素材一起�
     const backend = doc.deriveVariant({
       parentDocId: docIdA,
       jdId: 'jd-backend',
+      jdLabel: null,
       document: loaded.document,
       nowMs: LATER_MS,
     });
     const platform = doc.deriveVariant({
       parentDocId: docIdA,
       jdId: 'jd-platform',
+      jdLabel: null,
       document: loaded.document,
       nowMs: LATER_MS,
     });

@@ -70,6 +70,30 @@ const resumeDocVariantMigration = {
 };
 
 /**
+ * 迁移号段：**40**。给 `resume_docs` 再加一列 `jd_label`——变体行上那段 JD 的**显示标题**
+ * （裁定㊱：手输 / 粘贴的 JD 没有岗位清单里的真实 id，界面那句「为哪段 JD 定制」必须有出处，
+ * 而全文不落库是 §8.5 的口径，只留首行那一小截作标签）。
+ *
+ * 为什么单独起号而不是回填 39：AGENTS.md §9 的 5.3-a——`runMigrations` 认的是台账里"这一版记过账没有"，
+ * 往已应用的 39 里塞一条 `ALTER`，在升级过一次的老库（含本机开发实例）上根本执行不到，
+ * 运行期才以 `no such column` 失败。
+ * 为什么这一列不进身份判据：变体属于哪一段 JD 只由 `jd_id` 说了算（`findVariantId` 那条查询），
+ * 标签只是给人看的读数，重生成一次就跟着刷新一次；把它编进身份等于造第二个事实来源（§2.7）。
+ */
+export const RESUME_DOC_JD_LABEL_MIGRATION_VERSION = 40;
+
+/** 给 `resume_docs` 加变体的 JD 显示标题列。 */
+const resumeDocJdLabelMigration = {
+  version: RESUME_DOC_JD_LABEL_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE resume_docs ADD COLUMN jd_label TEXT');
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('ALTER TABLE resume_docs DROP COLUMN jd_label');
+  },
+};
+
+/**
  * 迁移号段：**36**。
  * 号段台账（AGENTS.md §9 的 5.3-a 那条）：29 之前是各包自有号段，31/32 是提供商池，
  * 33 是 `conversation_target`，35 是投递记录的 `conversation_target`，30 预留给草稿表但未启用；
@@ -131,6 +155,8 @@ export interface ResumeDocSummary {
   parentDocId: string | null;
   /** 生成这一支变体时那段 JD 的 id；无归因的变体与母版一样是 null。 */
   jdId: string | null;
+  /** 变体行上那段 JD 的显示标题（首行那一小截，裁定㊱）；母版与没记标题的老变体是 null。 */
+  jdLabel: string | null;
 }
 
 /**
@@ -178,7 +204,7 @@ export class ResumeDocService extends Service {
     return this.store.db;
   }
 
-  /** 幂等地把本表的两支迁移（正文表 7 + 偏好键值表 36）与变体血缘列 39 推进共享迁移列表并升级到最新。 */
+  /** 幂等地把本表的三支迁移（正文表 7 + 偏好键值表 36 + 变体血缘 39 + JD 标题 40）推进共享迁移列表并升级到最新。 */
   private ensureSchema(): void {
     const { migrations } = this.store;
     if (!migrations.some((item) => item.version === RESUME_DOC_MIGRATION_VERSION)) {
@@ -189,6 +215,9 @@ export class ResumeDocService extends Service {
     }
     if (!migrations.some((item) => item.version === RESUME_DOC_VARIANT_MIGRATION_VERSION)) {
       migrations.push(resumeDocVariantMigration);
+    }
+    if (!migrations.some((item) => item.version === RESUME_DOC_JD_LABEL_MIGRATION_VERSION)) {
+      migrations.push(resumeDocJdLabelMigration);
     }
     this.store.upgrade();
   }
@@ -250,9 +279,11 @@ export class ResumeDocService extends Service {
    * （同一支母版 + 同一段 JD 永远落在同一行上），所以"查已有 / mint 新 id / 写血缘 / 覆盖正文"
    * 四步必须绑在一起发生。分开写就会出现第二种结局：两个调用点各自造一支同 JD 的变体，
    * 界面上长出两行、删一删不干净，而"只改 JD 就能生成不同简历"这句话就没有落地对象了。
-   * 已有变体时**整份覆盖正文、血缘列一字不动**——再按同一段 JD 生成一次是更新那一份，不是长出新的一份。
+   * 已有变体时**整份覆盖正文、血缘两列照原样再写一遍**（同一条 UPDATE 里写的是同一对值，等于没改），
+   * 只有 `jd_label` 跟着这一趟刷新——再按同一段 JD 生成一次是更新那一份，不是长出新的一份。
    * @param input.parentDocId 母版 id（必须已存在**且它自己不是变体**：血缘只许一层）
    * @param input.jdId 生成它的那段 JD 的 id；null 表示无归因（界面显示「未标明 JD」，不拿哈希冒充）
+   * @param input.jdLabel 那段 JD 的显示标题（首行那一小截，裁定㊱）；只给人看，不参与身份判据
    * @param input.document 要装进变体的文档；它的 `id` 在这里被换成变体 id，其余字段原样落库
    * @param input.nowMs 变体行的 `updatedAt`（毫秒），由调用方给，避免同一份改动在两处各取一次时钟
    * @returns 变体行的 id、落库后的内容 hash、以及这一趟是否新建了行
@@ -261,6 +292,7 @@ export class ResumeDocService extends Service {
   deriveVariant = (input: {
     parentDocId: string;
     jdId: string | null;
+    jdLabel: string | null;
     document: ResumeDocument;
     nowMs: number;
   }): DeriveVariantResult => {
@@ -281,18 +313,18 @@ export class ResumeDocService extends Service {
     const existingId = this.findVariantId(input.parentDocId, input.jdId);
     const docId = existingId ?? newDocId();
     const doc: ResumeDocument = { ...input.document, id: docId, updatedAt: input.nowMs };
-    // 已派生过：只覆盖正文（`save` 的 UPSERT 不碰血缘列），界面读到的还是那一行、那一段 JD。
-    if (existingId !== null) return { docId, hash: this.save(doc).hash, created: false };
-    // 新建那一趟要把正文与血缘一起落：`save` 只认正文（它服务五条既有调用点，不认识血缘），
-    // 血缘只在这一个口里写，所以两条语句必须同成同败：崩溃在中间会留下一行"正文是变体、血缘是 NULL"的假母版。
+    // 正文与血缘/标题三样必须同成同败：`save` 只认正文（它服务五条既有调用点，不认识血缘），
+    // 新建那一趟若崩在中间会留下一行"正文是变体、血缘是 NULL"的假母版；
+    // 覆盖那一趟则会把标题留在上一段 JD 的那一行上。同一条 UPDATE 对已有行写回的是**同一对血缘值**
+    // （它们正是 `findVariantId` 用来命中这一行的条件），所以重写一遍不是第二个事实来源。
     this.db.exec('BEGIN');
     try {
       const saved = this.save(doc);
       this.db
-        .prepare('UPDATE resume_docs SET parent_doc_id = ?, jd_id = ? WHERE id = ?')
-        .run(input.parentDocId, input.jdId, docId);
+        .prepare('UPDATE resume_docs SET parent_doc_id = ?, jd_id = ?, jd_label = ? WHERE id = ?')
+        .run(input.parentDocId, input.jdId, input.jdLabel, docId);
       this.db.exec('COMMIT');
-      return { docId, hash: saved.hash, created: true };
+      return { docId, hash: saved.hash, created: existingId === null };
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
@@ -403,7 +435,7 @@ export class ResumeDocService extends Service {
     const rows = this.db
       .prepare(
         `SELECT id, updated_at AS updatedAt, json_extract(doc_json, '$.profile.name') AS name,
-                parent_doc_id AS parentDocId, jd_id AS jdId
+                parent_doc_id AS parentDocId, jd_id AS jdId, jd_label AS jdLabel
          FROM resume_docs WHERE doc_json IS NOT NULL ORDER BY updated_at DESC, id`,
       )
       .all() as unknown as readonly {
@@ -412,6 +444,7 @@ export class ResumeDocService extends Service {
       name: string | null;
       parentDocId: string | null;
       jdId: string | null;
+      jdLabel: string | null;
     }[];
     return rows.map((row) => ({
       id: row.id,
@@ -419,6 +452,7 @@ export class ResumeDocService extends Service {
       updatedAt: Number(row.updatedAt),
       parentDocId: row.parentDocId,
       jdId: row.jdId,
+      jdLabel: row.jdLabel,
     }));
   };
 
@@ -427,7 +461,8 @@ export class ResumeDocService extends Service {
     this.ctx.logger.info(
       `[resume-doc] resume_docs 表就绪，迁移号段 ${String(RESUME_DOC_MIGRATION_VERSION)} + ` +
         String(RESUME_DOC_VARIANT_MIGRATION_VERSION) +
-        `（变体血缘两列），偏好表 ${String(RESUME_PREFERENCE_MIGRATION_VERSION)}`,
+        ` + ${String(RESUME_DOC_JD_LABEL_MIGRATION_VERSION)}（变体血缘两列 + JD 显示标题一列），` +
+        `偏好表 ${String(RESUME_PREFERENCE_MIGRATION_VERSION)}`,
     );
   }
 }

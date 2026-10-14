@@ -15,7 +15,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
@@ -31,6 +31,7 @@ import type {
 } from '@auto-cc/shared';
 import { DEMO_RESUME_DOC_ID } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
+import { formatClock } from './format';
 import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
@@ -594,11 +595,65 @@ export function ResumeDesk() {
   const templateName = templates.find((template) => template.id === templateId)?.name;
 
   /**
+   * 候选列表那一份**排好归属**的行序，外加「能被定制的那几份」。
+   *
+   * 为什么界面自己排而不是照 `resume.doc.list` 的序直接map：那一列的序是"最后改动在前"，是全局读数；
+   * 这一格要人一眼看清**归属**（裁定㉜：导入那份是母版，按 JD 定制出来的是它的派生物）。
+   * 母版按原时刻序在上，各自的定制版紧跟其下、内部也按时刻序，所以只是把已有的 `parentDocId` 读出来分组，
+   * 不引入第二份事实。母版已删而定制版还在的那些行排在末尾——它们仍在库里，也必须还能被删掉。
+   */
+  const docGroups = useMemo(() => {
+    const masters = docs.filter((doc) => doc.parentDocId === null);
+    const rows: ResumeDocSummaryView[] = [];
+    for (const master of masters) {
+      rows.push(master);
+      rows.push(...docs.filter((doc) => doc.parentDocId === master.id));
+    }
+    const masterIds = new Set(masters.map((master) => master.id));
+    rows.push(...docs.filter((doc) => doc.parentDocId !== null && !masterIds.has(doc.parentDocId)));
+    return { rows, masters };
+  }, [docs]);
+
+  /**
+   * 一支定制版下面那行小字：说清它是**为哪段 JD** 生成的、生成于何时（spec 4.11-16 的界面半边 / 裁定㊱）。
+   * @param variant 库里的变体行（`parentDocId` 不为 null 的那一类）
+   * @returns 已翻译的一行小字；标题读不到时明写"没记下标题"，绝不回落成 id 或姓名（6.4-16 同源）。
+   *          时刻那格的格式化复用 `format.ts` 的 `formatClock`——它的"无时刻"替身在这里用不上，
+   *          因为变体行的 `updatedAt` 总是存在（落库那一刻由调用方给）
+   */
+  const variantLine = (variant: ResumeDocSummaryView): string =>
+    t('resume.docVariantLine', {
+      jd: variant.jdLabel ?? t('resume.docVariantNoLabel'),
+      time: formatClock(variant.updatedAt, ''),
+    });
+
+  /**
+   * 「定制哪一份」那一栏的值：当前停在某支定制版上时回到它的母版。
+   *
+   * 为什么不是直接把 `docId` 递下去：变体不能再往下派生（血缘只许一层，主进程会挡），
+   * 而人刚接受过一次改写、当前文档已经是那一支变体——这时下拉里若给的是变体 id，
+   * 既对不上任何一个选项（候选只有母版），下一次「生成」也会撞在母版校验上。
+   */
+  const generateDocId = currentDoc?.parentDocId ?? docId ?? '';
+
+  /**
    * "这张纸该重画了"：左列那些**不在上面六个依赖里**的改动（采纳一条改写、手动再同步一次）只写这一个意图，
    * 由上面那条 effect 去抖成一趟渲染。原先这里是"每处改动各自调一次 `renderPreview`"，
    * 于是同一屏有六条出纸的路径，而人不按预览就看不见结果（spec 6.4-14 要治的正是这一条）。
    */
   const bumpPaper = () => setPaperRevision((previous) => previous + 1);
+
+  /**
+   * 接受过一次改写之后，把"当前那一份"切到刚被写过的定制版并重画那张纸。
+   *
+   * 为什么切换而不是留在母版：改写从来不落到母版上（裁定㉜），留在母版的那张纸上人看不到任何结果，
+   * 「已接受」就只是一行字。切过去以后整屏编辑、预览、导出都按这个 docId 现读，不需要第二条通道。
+   * @param writtenDocId 接受写入的那一行 id（`GeneratePanel` 从主进程的接受读数原样递上来）
+   */
+  const adoptVariant = (writtenDocId: string) => {
+    setDocId(writtenDocId);
+    bumpPaper();
+  };
 
   /**
    * 编辑器递上来的 draft：直接成为纸上这一刻的内容（`layout` 档里槽位自己不发起跨进程渲染）。
@@ -770,17 +825,20 @@ export function ResumeDesk() {
                       data-current={docId ?? ''}
                       className="flex min-w-0 flex-col gap-1"
                     >
-                      {docs.map((doc) => {
+                      {docGroups.rows.map((doc) => {
                         const isCurrent = doc.id === docId;
+                        const isVariant = doc.parentDocId !== null;
                         return (
                           <li
                             key={doc.id}
                             data-testid="resume-doc-row"
                             data-doc-id={doc.id}
+                            data-parent-doc-id={doc.parentDocId ?? ''}
+                            data-jd-label={doc.jdLabel ?? ''}
                             data-current={isCurrent ? 'true' : 'false'}
                             className={`flex items-start gap-1 rounded-lg border px-1.5 py-1 ${
                               isCurrent ? BLOCK_SELECTED_CLASS : 'border-line'
-                            }`}
+                            }${isVariant ? ' ml-3' : ''}`}
                           >
                             {/* 姓名读不到时写"没读出姓名的那一份"，与待确认那一行同一条口径（6.4-16：
                             用户可见的串里不许出现 id）；出处那一句永远单独一行，人不用点开任何东西就能看到它。 */}
@@ -797,10 +855,13 @@ export function ResumeDesk() {
                                   <span className="truncate text-xs text-slate-100">
                                     {doc.name ?? t('resume.pendingUnnamed')}
                                   </span>
+                                  {isVariant ? <Tag>{t('resume.docVariantTag')}</Tag> : null}
                                   {isCurrent ? <Tag tone="celadon">{t('resume.docInUse')}</Tag> : null}
                                 </span>
+                                {/* 出处那一行与定制版那一行是两种来路：母版说"从哪个文件读来的"，
+                                    定制版说"为哪段 JD 生成的、什么时候生成的"（裁定㉜ / ㊱）。 */}
                                 <span className="w-full truncate text-[11px] text-slate-500">
-                                  {provenanceLine(doc.id)}
+                                  {isVariant ? variantLine(doc) : provenanceLine(doc.id)}
                                 </span>
                               </span>
                             </DeskButton>
@@ -987,11 +1048,11 @@ export function ResumeDesk() {
                     {t('desk.resume.stepGenerateHint')}
                   </p>
                   <GeneratePanel
-                    docs={docs}
-                    docId={docId ?? ''}
+                    docs={docGroups.masters}
+                    docId={generateDocId}
                     onDocIdChange={setDocId}
                     refreshDocs={refreshDocs}
-                    onAccepted={bumpPaper}
+                    onAccepted={adoptVariant}
                   />
                   {/* 书写技能与必备信息清单（spec 4.9-10 / 4.9-11）挂在「按岗位改写」这一格：
                 这一份指引就是这一趟改写带上的一张纸，人改完下一次就生效，中间没有别的开关。 */}

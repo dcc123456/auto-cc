@@ -942,9 +942,14 @@ describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写�
     if (loaded.status !== 'found') throw new Error(`读回变体失败：${loaded.status}`);
     expect(validateDocument(loaded.document).ok).toBe(true);
     expect(JSON.stringify(loaded.document.sections)).toBe(JSON.stringify(product.sections));
-    expect(variantsOf(app['resume.doc'].list(), DOC_ID)).toMatchObject([
-      { id: result.docId, parentDocId: DOC_ID, jdId: null },
-    ]);
+    // 手贴的这一段没有 `jobs.id`，归因走内容哈希（裁定㊱）；标题取 JD 首个非空行，只作显示。
+    const variants = variantsOf(app['resume.doc'].list(), DOC_ID);
+    expect(variants).toHaveLength(1);
+    if (variants[0] === undefined) throw new Error('变体行没长出来');
+    expect(variants[0].id).toBe(result.docId);
+    expect(variants[0].parentDocId).toBe(DOC_ID);
+    expect(variants[0].jdId).toMatch(/^jd-[0-9a-f]{8}$/);
+    expect(variants[0].jdLabel).toBe('后端工程师（星桥科技）');
     // 本片正面主判据：母版那两列（`doc_json` + `updated_at`）逐字节没动——界面按导入那份显示的还是用户的原文。
     expect(dbCopy(app.store.db)).toEqual(masterBefore);
   });
@@ -1165,6 +1170,33 @@ describe('母版与每 JD 变体：并存、素材层不动、基线换到变体
     expect(fieldValuesByLocation(backendDoc.document).get(position)).toBe(textForBackend);
     expect(fieldValuesByLocation(platformDoc.document).get(position)).toBe(textForPlatform);
     expect(dbCopy(app.store.db)).toEqual(masterBefore);
+  });
+
+  it('手贴的 JD 没有 jobs.id：按正文内容归因，逐字重复粘贴仍落同一支、改一句话得到另一支（裁定㊱ / spec 4.11-29）', async () => {
+    // 只走重排那支（不挂模型通道）：这条用例判的是"粘贴通道上归因认什么"，与模型产出无关。
+    const { gen, app } = await bootGenerate();
+    // 每一趟都不给 jdId（用户在生成面板里直接粘一段文字，这是主用法）：归因必须由主进程自己算出来，
+    // 而不是留成 null——留 null 的话每粘一段都往同一行覆盖，「两段 JD 并存」在粘贴通道上就落不了地。
+    const pasteAndAccept = async (jdText: string, nowMs: number): Promise<string> => {
+      const view = await gen.run(jdText, { docId: DOC_ID }, nowMs);
+      return gen.accept(view.receipt.id, { acceptedIndexes: [], applyReorder: true }, nowMs + 1).docId;
+    };
+    const firstId = await pasteAndAccept(SAMPLE_JD, AS_OF_MS);
+    const secondId = await pasteAndAccept(SECOND_JD, AS_OF_MS + 2);
+    expect(secondId).not.toBe(firstId);
+    // 标题各归各的：界面那句「这一支是为哪段 JD 生成的」只有这一列说得出，而它必须不是同一个值。
+    expect(variantsOf(app['resume.doc'].list(), DOC_ID).map((item) => item.jdLabel)).toEqual(
+      expect.arrayContaining(['后端工程师（星桥科技）', '平台工程师（沧海数据）']),
+    );
+    // 逐字再粘一遍（首尾多空白不算改内容）：同一支变体被覆盖，库里仍是两支。
+    expect(await pasteAndAccept(`\n  ${SAMPLE_JD}  \n`, AS_OF_MS + 4)).toBe(firstId);
+    expect(variantsOf(app['resume.doc'].list(), DOC_ID)).toHaveLength(2);
+    // 改一句话就得到另一支：归因认内容，不认时间戳与随机数。
+    const editedId = await pasteAndAccept(SAMPLE_JD.replace('抗压能力强。', '有强烈的责任心。'), AS_OF_MS + 6);
+    expect(editedId).not.toBe(firstId);
+    const variants = variantsOf(app['resume.doc'].list(), DOC_ID);
+    expect(variants).toHaveLength(3);
+    expect(variants.every((item) => /^jd-[0-9a-f]{8}$/.test(String(item.jdId)))).toBe(true);
   });
 
   it('接受不动素材层：实体与切片的行数和来源集合都停在生成前的样子（spec 4.11-17）', async () => {

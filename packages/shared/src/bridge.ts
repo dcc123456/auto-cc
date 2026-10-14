@@ -1190,14 +1190,24 @@ export interface ResumeTemplateSummaryView {
 export const DEMO_RESUME_DOC_ID = 'resume-demo';
 
 /**
- * 一份简历的摘要（镜像 `resume-doc` 的 `ResumeDocSummary`）：够界面问出「定制哪一份」，不含正文。
+ * 一份简历的摘要（镜像 `resume-doc` 的 `ResumeDocSummary`）：够界面问出"定制哪一份"，不含正文。
  * `name` 为 null 时界面回退到 id 显示——宁可露出 id，也不给一个空白选项。
+ *
+ * 血缘那两列（`parentDocId` / `jdId`）与 `jdLabel` 一起过界（裁定㉜ / ㊱），因为界面要做的
+ * 是"把变体排到它母版下面、并说清这一支是为哪段 JD 生成的"——这两件事只有存储侧那三列说了算。
+ * 它们都是**读数**：界面不能凭它们造行（建行只有主进程侧那一个口），也不能拿去比内容（内容比对用 hash）。
  */
 export interface ResumeDocSummaryView {
   id: string;
   name: string | null;
   /** 最后改动时刻（毫秒）。 */
   updatedAt: number;
+  /** 母版 id；这一行本身是母版时为 null。 */
+  parentDocId: string | null;
+  /** 生成这一支变体时那段 JD 的归因 id（岗位清单的真实 id，或手输 JD 的内容哈希）；母版为 null。 */
+  jdId: string | null;
+  /** 那段 JD 的显示标题（首行那一小截）；没记过标题的行是 null，界面回退到「未标明 JD」。 */
+  jdLabel: string | null;
 }
 
 /** 一组文件筛选器（显示名由渲染层翻好，扩展名不含点）。 */

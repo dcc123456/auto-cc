@@ -44,7 +44,7 @@ import {
   toolResult,
   type Context,
 } from '@auto-cc/core';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import {
@@ -398,6 +398,8 @@ interface PendingProposal {
   readonly parentHash: string;
   /** 生成那一刻已存在的变体行 id；这对 (母版, JD) 从没采纳过时为 null（第一次接受才建那一行）。 */
   readonly variantDocId: string | null;
+  /** 这段 JD 的显示标题（`attributeJd` 算出的那一小截，裁定㊱）；写进变体行供界面认"这是哪段 JD 的结果"。 */
+  readonly jdLabel: string | null;
   /** 重排后的区块序列（与 `view.reorderBases` 同源）。 */
   readonly sections: readonly Section[];
   /** 拼提示词时用的那份 JD 正文（`accept` 里复验具名回查要用，界面无从提供）。 */
@@ -518,7 +520,8 @@ export class ResumeGenerateService extends Service {
   /**
    * 把一份工作副本按一段 JD 定制成提议态文档（spec 4.5-01 / 02 / 05 / 06 / 09 的总入口）。
    * @param jdText JD 正文（与缺口报告同一份入参口径，过短由 `kb.gap.report()` 拒绝）
-   * @param filter `docId` 省略时只在"库里恰好一份简历"时才自动选；`jdId` 只进记录行做归因
+   * @param filter `docId` 省略时只在"库里恰好一份简历"时才自动选；`jdId` 是这段 JD 的**外部**归因 id
+   *               （从岗位屏跳过来时是 `jobs.id`），省略时按 JD 正文内容现算一个稳定 id（裁定㊱，见 `attributeJd`）
    * @param nowMs 报告读数的时间基准（毫秒），原样递给 `report()`——年限的"今天"只能由服务取，
    *              不让模型自己填（同 4.4 的 `nowMs` 判断）
    * @returns 产物 + 证据 + 重排依据 + 校验读数 + 凭证；被拒时 `document` 为 null
@@ -531,10 +534,14 @@ export class ResumeGenerateService extends Service {
     nowMs = Date.now(),
   ): Promise<GenerationView> {
     const parentDocId = this.resolveDocId(filter.docId);
+    // 裁定㊱：这一趟的 JD 先归因成 (id, 标题) 一对读数，后面三处（变体行、台账、凭证）都用这一份，
+    // 不在任何一处再算第二遍（§2.7）。手输/粘贴的 JD 没有 `jobs.id`，按正文内容取稳定哈希——
+    // 于是"只改 JD 就生成另一份简历"在粘贴那条路上也成立：同一段文本重复生成仍落同一支变体。
+    const attribution = attributeJd(jdText, filter.jdId ?? null);
     // 裁定㉜：这一趟要写的是「(母版, 这段 JD)」那一支变体。已有变体就以**它**为基础再生成——用户在那一支上的
     // 手工改动与上一次采纳的结果都留在原地，"只换 JD 就换一份简历"靠的是每支变体有自己的那一份正文；
     // 还没有变体时以母版为基础，第一次接受才建那一行（`run()` 依旧一次盘都不落，判据一不变）。
-    const variantDocId = this.docStore.findVariantId(parentDocId, filter.jdId ?? null);
+    const variantDocId = this.docStore.findVariantId(parentDocId, attribution.jdId);
     const targetId = variantDocId ?? parentDocId;
     const loaded = this.docStore.load(targetId);
     if (loaded.status !== 'found') {
@@ -628,7 +635,7 @@ export class ResumeGenerateService extends Service {
     // 而按 JD 分成的那几支变体在库里靠血缘两列认，不在这里编第二个事实（spec 4.11-25 的台账两行靠 `jd_id` 归因）。
     const receipt = this.record({
       docId: parentDocId,
-      jdId: filter.jdId ?? null,
+      jdId: attribution.jdId,
       createdAt: nowMs,
       attempt,
       outcome,
@@ -661,6 +668,7 @@ export class ResumeGenerateService extends Service {
         parentDocId,
         parentHash,
         variantDocId,
+        jdLabel: attribution.jdLabel,
         sections: reordered.sections,
         jdText,
         view,
@@ -794,6 +802,7 @@ export class ResumeGenerateService extends Service {
     const derived = this.docStore.deriveVariant({
       parentDocId,
       jdId: proposal.view.receipt.jdId,
+      jdLabel: proposal.jdLabel,
       document: validated({ ...proposed, updatedAt: nowMs }),
       nowMs,
     });
@@ -1063,6 +1072,38 @@ export class ResumeGenerateService extends Service {
     if (receipt.outcome === 'rewritten') this.ctx.logger.info(line);
     else this.ctx.logger.warn(line);
   }
+}
+
+/** 变体行上那段 JD 的显示标题长度上限（字符数）；超出部分以省略号收尾。 */
+const JD_LABEL_MAX_CHARS = 40;
+
+/**
+ * 一段 JD 的归因读数：稳定 id + 界面显示标题（裁定㊱）。
+ *
+ * 为什么要在主进程算而不是让界面传：界面只有一段自由文本，"这两段 JD 是不是同一段"必须有一个说得出的判据，
+ * 而把它留在渲染层就是同一件事在两处各判一次（§2.7）。取**内容哈希**而不是时间戳或随机数：
+ * 用户改一个字的粘贴会得到另一支变体（那确实是另一段 JD），逐字重复粘贴仍回到同一支（"只改 JD 就能生成
+ * 不同简历"这句话的可重复半边）。哈希只取前 8 位十六进制——这一格里 `resume-` 那类随机 id 要的是唯一性，
+ * 而这里要的是**可重复**，短前缀撞车的后果只是两支 JD 共用一支变体，且都在界面上看得见标题。
+ * @param jdText JD 正文（原样，不做小写化——大小写差别的文本按不同 JD 处理）
+ * @param explicitId 界面从岗位屏带过来的真实 `jobs.id`；给了就以它为准（外部事实优先于本地哈希）
+ * @returns `jdId` 用于变体身份与台账归因；`jdLabel` 是首个非空行的前 40 字，全空白时为 null
+ */
+function attributeJd(jdText: string, explicitId: string | null): { jdId: string; jdLabel: string | null } {
+  const trimmed = jdText.trim();
+  const jdId =
+    explicitId !== null && explicitId.length > 0
+      ? explicitId
+      : `jd-${createHash('sha256').update(trimmed).digest('hex').slice(0, 8)}`;
+  const firstLine = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (firstLine === undefined) return { jdId, jdLabel: null };
+  return {
+    jdId,
+    jdLabel: firstLine.length > JD_LABEL_MAX_CHARS ? `${firstLine.slice(0, JD_LABEL_MAX_CHARS)}…` : firstLine,
+  };
 }
 
 /**

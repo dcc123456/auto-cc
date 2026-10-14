@@ -48,9 +48,13 @@ const OUTCOME_TONE: Record<GenerationRunRowView['receipt']['outcome'], BannerTon
  * 现在候选清单与当前文档的**唯一持有者是 desk**，本面板只转述递进来的读数、把人的改动回报上去。
  */
 export interface GeneratePanelProps {
-  /** 库里的候选摘要（id / 姓名 / 时刻），由父级从 `resume['doc.list']` 取来整份递入。 */
+  /**
+   * 能被定制的那几份候选摘要（id / 姓名 / 时刻），由父级从 `resume['doc.list']` 取来整份递入。
+   * 只有**母版**在这一栏（裁定㉜）：变体是"某段 JD 的定制结果"，往它身上再派生一层会被主进程挡下
+   * （血缘只许一层），把变体列进候选等于长出一按就报错的选项。
+   */
   docs: readonly ResumeDocSummaryView[];
-  /** 这一屏正在定制的那一份；空串 = 库里还没有简历（「生成」因此按不动，原因码要说清）。 */
+  /** 这一屏正在定制的那一份（母版）；空串 = 库里还没有简历（「生成」因此按不动，原因码要说清）。 */
   docId: string;
   /** 人在这一栏换文档时回报（落不落"当前"由父级判，本面板不存第二份）。 */
   onDocIdChange: (docId: string) => void;
@@ -61,10 +65,11 @@ export interface GeneratePanelProps {
    */
   refreshDocs: () => Promise<void>;
   /**
-   * 一次接受写完工作副本之后的通知（plan §3.26 的反馈闭环）：
-   * 父级拿它把纸面重渲一次，人当场看见改写落在那张纸上，而不是只读一行成功提示。
+   * 一次接受写完变体之后的通知（plan §3.26 的反馈闭环）：递给父级**这次被写的那一行 id**，
+   * 父级拿它把当前文档切过去并重渲纸面，人当场看见改写落在那张纸上，而不是只读一行成功提示。
+   * @param writtenDocId 接受写入的那一行：新建或覆盖的那一支变体（裁定㉜ 之后它永远不是母版）
    */
-  onAccepted: () => void;
+  onAccepted: (writtenDocId: string) => void;
 }
 
 /**
@@ -206,7 +211,8 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   };
 
   /**
-   * 把用户勾中的那些改写与（可选的）重排写进工作副本——本面板唯一一个会改文件的动作。
+   * 把用户勾中的那些改写与（可选的）重排写进**这一支变体**——本面板唯一一个会改文件的动作。
+   * 母版那一份一个字都不动（裁定㉜）：写完切到变体，人看见的就是定制结果。
    */
   const accept = () => {
     if (!preview) return;
@@ -220,9 +226,9 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
           // 提议态在一次接受之后就不在主进程里了（`accept()` 会把它删掉），留着界面只会诱导第二次失败。
           setPreview(undefined);
           setChecked([]);
-          // 写盘成功就请父级重渲纸面（plan §3.26 的反馈闭环）：改动的结果要出现在那张纸上，
-          // 而不是只剩一行「已接受」的小字——人核对的是纸，不是提示条。
-          onAccepted();
+          // 写盘成功就把当前文档切到刚写的那一支并重渲纸面（plan §3.26 的反馈闭环）：改动的结果要出现在
+          // 那张纸上，而不是只剩一行「已接受」的小字——人核对的是纸，不是提示条。
+          onAccepted(value.docId);
         },
         onError: (error) => {
           // 三个码各对应一句不同的话，处置也不同：重生成 / 先看用户自己改的那版 / 这条组合没过校验。
