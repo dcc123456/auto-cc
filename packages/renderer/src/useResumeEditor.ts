@@ -114,7 +114,7 @@ export const THEME_PRESETS: { id: string; patch: ResumeEditorDesignPatchView }[]
   },
 ];
 
-/** 段落样式的六种区块种类（与 `resume.kind.*` 同一份枚举，界面不另列一套）。 */
+/** 段落样式的区块种类（与 `resume.kind.*` 同一份枚举，界面不另列一套；custom 一样可调段落样式）。 */
 export const PARAGRAPH_KINDS: readonly ResumeSectionKindView[] = [
   'summary',
   'experience',
@@ -122,6 +122,7 @@ export const PARAGRAPH_KINDS: readonly ResumeSectionKindView[] = [
   'skills',
   'project',
   'campus',
+  'custom',
 ];
 
 /** 主题里的三格颜色轴（顺序即画面顺序）。 */
