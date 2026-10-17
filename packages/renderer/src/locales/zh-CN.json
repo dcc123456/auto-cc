@@ -77,8 +77,6 @@
         "step3": "贴 JD 生成",
         "step4": "编辑 / 导出 PDF",
         "stepsEmptyReason": "先在第 1 步导入一份简历",
-        "stepsFromStart": "从这步开始",
-        "stepsFromGenerate": "再次使用直接从这步开始",
         "sectionGenerate": "按岗位改写",
         "sectionGenerateFor": "为 {{doc}} 定制",
         "sectionOutput": "看这份纸",

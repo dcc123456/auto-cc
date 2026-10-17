@@ -77,8 +77,6 @@
         "step3": "Paste a JD",
         "step4": "Edit / export PDF",
         "stepsEmptyReason": "Import a résumé in step 1 first",
-        "stepsFromStart": "Start here",
-        "stepsFromGenerate": "Next time, start from here",
         "sectionGenerate": "Rewrite it for the job",
         "sectionGenerateFor": "Tailoring {{doc}}",
         "sectionOutput": "Look at this paper",
