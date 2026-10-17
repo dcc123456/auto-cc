@@ -24,13 +24,7 @@ import type { PdfViewModel } from './usePdfView';
  * @param model `usePdfView` 的那一份唯一状态与动作
  * @param onOpenEditor 「在编辑器中打开」：切到 WPS 形态纸面编辑器（2026-10-14 反转裁定后的新整页编辑）
  */
-export function PdfViewPanel({
-  model,
-  onOpenEditor,
-}: {
-  model: PdfViewModel;
-  onOpenEditor: () => void;
-}) {
+export function PdfViewPanel({ model, onOpenEditor }: { model: PdfViewModel; onOpenEditor: () => void }) {
   const { t } = useTranslation();
   const { receipt, page, busy, notice, noticeTone, openError } = model;
 

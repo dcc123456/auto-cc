@@ -186,7 +186,15 @@ export function PdfEditorPageCanvas({ model, pageIndex }: { model: PdfEditorMode
     const surface = sheetRef.current;
     if (!surface) return;
     const start = ratioPointOf(event, surface);
-    const session: DragSession = { mode, startX: start.xRatio, startY: start.yRatio, origin, last: origin, onLive, onCommit };
+    const session: DragSession = {
+      mode,
+      startX: start.xRatio,
+      startY: start.yRatio,
+      origin,
+      last: origin,
+      onLive,
+      onCommit,
+    };
     dragRef.current = session;
 
     const onMove = (moveEvent: PointerEvent) => {
@@ -282,11 +290,7 @@ export function PdfEditorPageCanvas({ model, pageIndex }: { model: PdfEditorMode
   const lineZonesActive = model.tool === 'pointer' && !model.inline;
 
   return (
-    <div
-      data-editor-page-index={pageIndex}
-      data-page-id={entry.id}
-      className="mx-auto w-(--re-page-w) shrink-0"
-    >
+    <div data-editor-page-index={pageIndex} data-page-id={entry.id} className="mx-auto w-(--re-page-w) shrink-0">
       <div
         ref={sheetRef}
         className="relative aspect-(--re-ar) overflow-hidden rounded-sm bg-white shadow-sheet ring-1 ring-black/10"
@@ -358,16 +362,16 @@ export function PdfEditorPageCanvas({ model, pageIndex }: { model: PdfEditorMode
                   } [font-family:var(--re-ff)] bg-(--re-bg) text-(--re-ink) text-[length:var(--re-fs)] ${
                     model.tool === 'pointer' ? 'cursor-move' : 'cursor-default'
                   }`}
-                    ref={(node) => {
-                      if (!node) return;
-                      const familyCss = fontFamilyCssOf(object.fontFamilyHint);
-                      node.style.setProperty('--re-fs', `${fontPxOf(object.sizePt ?? 11, model.pageWidthPx, widthPt)}px`);
-                      node.style.setProperty('--re-ink', object.colorHex ?? '#1f2937');
-                      node.style.setProperty('--re-bg', object.backdropHex ?? 'transparent');
-                      node.style.setProperty('--re-ff', familyCss);
-                      // 基线回拉按本机字体真实升部（行盒是照 PDF 内嵌字体升部量的，0.8 硬编码对 Helvetica 偏 1px+）。
-                      node.style.setProperty('--re-asc', `-${cssAscentRatioOf(familyCss).toFixed(4)}em`);
-                    }}
+                  ref={(node) => {
+                    if (!node) return;
+                    const familyCss = fontFamilyCssOf(object.fontFamilyHint);
+                    node.style.setProperty('--re-fs', `${fontPxOf(object.sizePt ?? 11, model.pageWidthPx, widthPt)}px`);
+                    node.style.setProperty('--re-ink', object.colorHex ?? '#1f2937');
+                    node.style.setProperty('--re-bg', object.backdropHex ?? 'transparent');
+                    node.style.setProperty('--re-ff', familyCss);
+                    // 基线回拉按本机字体真实升部（行盒是照 PDF 内嵌字体升部量的，0.8 硬编码对 Helvetica 偏 1px+）。
+                    node.style.setProperty('--re-asc', `-${cssAscentRatioOf(familyCss).toFixed(4)}em`);
+                  }}
                 >
                   {object.baselineYRatio !== undefined ? (
                     <span
@@ -403,10 +407,7 @@ export function PdfEditorPageCanvas({ model, pageIndex }: { model: PdfEditorMode
 
           {/* 文本框工具的橡皮筋。 */}
           {rubber && (
-            <RatioBox
-              rect={rubber}
-              className="pointer-events-none z-30 border border-blue-600 bg-blue-500/10"
-            />
+            <RatioBox rect={rubber} className="pointer-events-none z-30 border border-blue-600 bg-blue-500/10" />
           )}
 
           {/* 就地输入框（行盒改字 / 新建文本框同一只）。 */}

@@ -83,7 +83,9 @@ function isSamePage(left: PdfEditorPageInput, right: PdfEditorPageInput): boolea
 }
 
 function isSamePages(left: readonly PdfEditorPageInput[], right: readonly PdfEditorPageInput[]): boolean {
-  return left.length === right.length && left.every((page, index) => isSamePage(page, right[index] as PdfEditorPageInput));
+  return (
+    left.length === right.length && left.every((page, index) => isSamePage(page, right[index] as PdfEditorPageInput))
+  );
 }
 
 /** 两个对象是否逐字段相同（嵌套 rect 也要比）。 */

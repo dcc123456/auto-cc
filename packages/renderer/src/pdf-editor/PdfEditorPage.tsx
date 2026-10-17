@@ -130,11 +130,7 @@ function PdfEditorShell({ model }: { model: ReturnType<typeof usePdfEditor> }) {
       <div className="flex min-h-0 flex-1">
         {model.thumbsOpen && <PageThumbRail model={model} onJump={jumpToPage} />}
 
-        <main
-          ref={scrollRef}
-          data-testid="pdf-editor-scroll"
-          className="min-w-0 flex-1 overflow-auto bg-slate-200/90"
-        >
+        <main ref={scrollRef} data-testid="pdf-editor-scroll" className="min-w-0 flex-1 overflow-auto bg-slate-200/90">
           <div className="flex flex-col items-center gap-10 px-3 py-8">
             {model.pages.map((entry, index) => (
               <PdfEditorPageCanvas key={entry.id} model={model} pageIndex={index} />

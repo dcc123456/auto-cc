@@ -376,11 +376,9 @@ describe('WPS 编辑器 assembleEditor：五类对象的绘制（拉丁侧，不
     for (const input of inputs.filter((item) => item.kind === 'image')) {
       images.set(input.id, { format: 'png', bytes: ONE_PIXEL_PNG });
     }
-    const saved = await loaded.document.assembleEditor(
-      plannedPagesOf(pages),
-      plannedObjectsOf(pages, inputs),
-      images,
-    ).then((document) => document.save());
+    const saved = await loaded.document
+      .assembleEditor(plannedPagesOf(pages), plannedObjectsOf(pages, inputs), images)
+      .then((document) => document.save());
     return pdfContentText(saved);
   }
 
@@ -425,7 +423,12 @@ describe('WPS 编辑器 assembleEditor：五类对象的绘制（拉丁侧，不
 
   it('高亮是半透明矩形（ExtGState + /ca 0.35），形状是描边矩形，图片嵌得进去不抛', async () => {
     const content = await contentWith(
-      { id: 'h1', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.2, heightRatio: 0.03 } },
+      {
+        id: 'h1',
+        pageId: 'p1',
+        kind: 'highlight',
+        rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.2, heightRatio: 0.03 },
+      },
       {
         id: 's1',
         pageId: 'p1',
@@ -433,7 +436,13 @@ describe('WPS 编辑器 assembleEditor：五类对象的绘制（拉丁侧，不
         rect: { xRatio: 0.1, yRatio: 0.4, widthRatio: 0.2, heightRatio: 0.05 },
         colorHex: '#dc2626',
       },
-      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.5, widthRatio: 0.1, heightRatio: 0.1 }, imagePath: 'a.png' },
+      {
+        id: 'i1',
+        pageId: 'p1',
+        kind: 'image',
+        rect: { xRatio: 0.1, yRatio: 0.5, widthRatio: 0.1, heightRatio: 0.1 },
+        imagePath: 'a.png',
+      },
     );
     // 半透明：pdf-lib 给 opacity 生成 ExtGState，内容流里出现 /GSn 与 /ca。
     expect(content).toMatch(/\/ca 0\.35/);

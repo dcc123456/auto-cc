@@ -15,13 +15,7 @@ import type { PdfEditorModel } from './usePdfEditor';
 /** 缩略图 CSS 宽（px）；高度由页面宽高比自然撑开。 */
 const THUMB_WIDTH_PX = 120;
 
-export function PageThumbRail({
-  model,
-  onJump,
-}: {
-  model: PdfEditorModel;
-  onJump: (pageIndex: number) => void;
-}) {
+export function PageThumbRail({ model, onJump }: { model: PdfEditorModel; onJump: (pageIndex: number) => void }) {
   const { t } = useTranslation();
   return (
     <aside

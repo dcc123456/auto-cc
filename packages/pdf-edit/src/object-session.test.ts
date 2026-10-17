@@ -5,11 +5,7 @@
  * 界面放行的东西 saveEditor 必须也放行；② 空编辑不产生撤销单元，删页不能留下孤儿对象。
  */
 import { describe, expect, it } from 'vitest';
-import {
-  createPdfEditorSession,
-  type PdfEditorDraft,
-  type PdfEditorSession,
-} from './object-session.js';
+import { createPdfEditorSession, type PdfEditorDraft, type PdfEditorSession } from './object-session.js';
 import type { PdfEditorObjectInput, PdfEditorPageInput } from './object-model.js';
 
 const limits = {

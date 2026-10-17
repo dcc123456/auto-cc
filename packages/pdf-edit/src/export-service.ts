@@ -16,10 +16,7 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 import { AppError, maybeService, Service, type Context } from '@auto-cc/core';
 import { readBoundedFile, sha256Hex } from '@auto-cc/core/file-read';
 import { z } from 'zod';
-import {
-  type EditorImageAsset,
-  PdfEditDocument,
-} from './pdf-document.js';
+import { type EditorImageAsset, PdfEditDocument } from './pdf-document.js';
 import {
   DEFAULT_BLANK_HEIGHT_PT,
   DEFAULT_BLANK_WIDTH_PT,
@@ -31,12 +28,7 @@ import {
   type PdfEditorObjectInput,
   type PdfEditorPageInput,
 } from './object-model.js';
-import {
-  isLatinOnly,
-  planOverlays,
-  type OverlayRejection,
-  type PdfOverlayInput,
-} from './overlay-writer.js';
+import { isLatinOnly, planOverlays, type OverlayRejection, type PdfOverlayInput } from './overlay-writer.js';
 import { planPageOrder, type PageOrderRejection } from './page-ops.js';
 
 /**
@@ -131,7 +123,13 @@ export class PdfExportService extends Service {
     // `pdf-edit` 不依赖 `@auto-cc/shared`（plan §7.3 的依赖行），而 L1 那个端口结构上满足它就够了。
     const printPort = maybeService<{ fontBaseUrl(): string }>(this.ctx, 'resume.print');
     if (printPort === undefined)
-      throw this.failure('font-unavailable', `这份中文叠加画不出来：随包字体目录问不到（${CJK_FONT_FILE}）`, outPath, undefined, origin);
+      throw this.failure(
+        'font-unavailable',
+        `这份中文叠加画不出来：随包字体目录问不到（${CJK_FONT_FILE}）`,
+        outPath,
+        undefined,
+        origin,
+      );
     const fontDir = fileURLToPath(printPort.fontBaseUrl());
     try {
       // 1.1 MB 的随包资产，不走 `readBoundedFile`：那套上限是给**用户手里的文件**设的，随包字体是我们自己的东西。
@@ -260,7 +258,13 @@ export class PdfExportService extends Service {
     if (!isAbsolute(outPath))
       throw this.failure('out-path-not-absolute', `产物路径必须是绝对路径：${outPath}`, outPath, undefined, origin);
     if (resolve(outPath) === resolve(filePath)) {
-      throw this.failure('out-is-source', `产物路径与源文件相同，编辑器不允许就地覆盖：${filePath}`, outPath, undefined, origin);
+      throw this.failure(
+        'out-is-source',
+        `产物路径与源文件相同，编辑器不允许就地覆盖：${filePath}`,
+        outPath,
+        undefined,
+        origin,
+      );
     }
 
     const bytes = readBoundedFile(filePath, { maxBytes: this.options.maxBytes, code: 'PDF_EDIT_SAVE_FAILED' });
@@ -282,7 +286,13 @@ export class PdfExportService extends Service {
       defaultBlankHeightPt: DEFAULT_BLANK_HEIGHT_PT,
     });
     if (!plannedPages.ok) {
-      throw this.failure(plannedPages.code, `这份页计划没法用：${plannedPages.detail}`, outPath, plannedPages.detail, origin);
+      throw this.failure(
+        plannedPages.code,
+        `这份页计划没法用：${plannedPages.detail}`,
+        outPath,
+        plannedPages.detail,
+        origin,
+      );
     }
     const plannedObjects = planEditorObjects(objects, plannedPages.pages, {
       maxObjects: this.options.maxObjects,
@@ -290,7 +300,13 @@ export class PdfExportService extends Service {
       minAreaRatio: this.options.minAreaRatio,
     });
     if (!plannedObjects.ok) {
-      throw this.failure(plannedObjects.code, `这些对象画不上去：${plannedObjects.detail}`, outPath, plannedObjects.detail, origin);
+      throw this.failure(
+        plannedObjects.code,
+        `这些对象画不上去：${plannedObjects.detail}`,
+        outPath,
+        plannedObjects.detail,
+        origin,
+      );
     }
 
     // 图片按路径去重读（同一图被多个对象引用时只读一次），格式靠魔数判定而不是扩展名。
@@ -299,13 +315,22 @@ export class PdfExportService extends Service {
     for (const object of plannedObjects.objects.filter((item) => item.kind === 'image')) {
       const imagePath = object.imagePath;
       if (imagePath === undefined) {
-        throw this.failure('image-unreadable', `图片对象 ${object.id} 没有图片路径`, outPath, 'missing imagePath', origin);
+        throw this.failure(
+          'image-unreadable',
+          `图片对象 ${object.id} 没有图片路径`,
+          outPath,
+          'missing imagePath',
+          origin,
+        );
       }
       let asset = imageCache.get(imagePath);
       if (asset === undefined) {
         let imageBytes: Uint8Array;
         try {
-          imageBytes = readBoundedFile(imagePath, { maxBytes: this.options.maxImageBytes, code: 'PDF_EDIT_SAVE_FAILED' });
+          imageBytes = readBoundedFile(imagePath, {
+            maxBytes: this.options.maxImageBytes,
+            code: 'PDF_EDIT_SAVE_FAILED',
+          });
         } catch (error) {
           throw this.failure(
             'image-unreadable',
@@ -317,7 +342,13 @@ export class PdfExportService extends Service {
         }
         const format = sniffImageMagic(imageBytes);
         if (format === undefined) {
-          throw this.failure('image-format', `只支持 PNG 与 JPEG 图片，这份不是：${imagePath}`, outPath, 'bad magic bytes', origin);
+          throw this.failure(
+            'image-format',
+            `只支持 PNG 与 JPEG 图片，这份不是：${imagePath}`,
+            outPath,
+            'bad magic bytes',
+            origin,
+          );
         }
         asset = { format, bytes: imageBytes };
         imageCache.set(imagePath, asset);

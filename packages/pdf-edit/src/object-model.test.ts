@@ -29,7 +29,9 @@ function sourcePage(id: string, sourcePageNumber: number, rotation?: 0 | 90 | 18
 }
 
 /** 一个矩形对象的最小构造。 */
-function object(partial: Partial<PdfEditorObjectInput> & Pick<PdfEditorObjectInput, 'id' | 'kind' | 'pageId'>): PdfEditorObjectInput {
+function object(
+  partial: Partial<PdfEditorObjectInput> & Pick<PdfEditorObjectInput, 'id' | 'kind' | 'pageId'>,
+): PdfEditorObjectInput {
   return {
     rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.2, heightRatio: 0.05 },
     ...partial,
@@ -62,7 +64,10 @@ describe('planEditorPages：源页副本 / 空白页 / 旋转的校验与规整'
       ok: false,
       code: 'duplicate-page-id',
     });
-    expect(planEditorPages([sourcePage('a', 4)], 3, pageLimits)).toMatchObject({ ok: false, code: 'page-out-of-range' });
+    expect(planEditorPages([sourcePage('a', 4)], 3, pageLimits)).toMatchObject({
+      ok: false,
+      code: 'page-out-of-range',
+    });
     expect(planEditorPages([sourcePage('a', 1, 45 as 90)], 3, pageLimits)).toMatchObject({
       ok: false,
       code: 'bad-rotation',
@@ -124,7 +129,12 @@ describe('planEditorObjects：五类对象的边界校验', () => {
       [
         object({ id: 't', pageId: 'p1', kind: 'text', text: 'x' }),
         object({ id: 'n', pageId: 'p1', kind: 'note', text: '一条便签' }),
-        object({ id: 'h', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0, yRatio: 0, widthRatio: 0.3, heightRatio: 0.02 } }),
+        object({
+          id: 'h',
+          pageId: 'p1',
+          kind: 'highlight',
+          rect: { xRatio: 0, yRatio: 0, widthRatio: 0.3, heightRatio: 0.02 },
+        }),
       ],
       plannedPages.pages,
       objectLimits,
@@ -137,7 +147,11 @@ describe('planEditorObjects：五类对象的边界校验', () => {
   });
 
   it('image：必须带图片路径；shape：描边宽越界拒；非 hex 颜色静默丢弃（不当失败）', () => {
-    const rejected = planEditorObjects([object({ id: 'i', pageId: 'p1', kind: 'image' })], plannedPages.pages, objectLimits);
+    const rejected = planEditorObjects(
+      [object({ id: 'i', pageId: 'p1', kind: 'image' })],
+      plannedPages.pages,
+      objectLimits,
+    );
     expect(rejected).toMatchObject({ ok: false, code: 'image-path-required' });
     const badWidth = planEditorObjects(
       [object({ id: 's', pageId: 'p1', kind: 'shape', borderWidthPt: 99 })],
@@ -159,11 +173,21 @@ describe('planEditorObjects：五类对象的边界校验', () => {
       { code: 'object-page-unknown', input: object({ id: 'a', pageId: 'nope', kind: 'highlight' }) },
       {
         code: 'object-out-of-bounds',
-        input: object({ id: 'b', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0.9, yRatio: 0, widthRatio: 0.2, heightRatio: 0.1 } }),
+        input: object({
+          id: 'b',
+          pageId: 'p1',
+          kind: 'highlight',
+          rect: { xRatio: 0.9, yRatio: 0, widthRatio: 0.2, heightRatio: 0.1 },
+        }),
       },
       {
         code: 'object-too-small',
-        input: object({ id: 'c', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0, yRatio: 0, widthRatio: 0.001, heightRatio: 0.001 } }),
+        input: object({
+          id: 'c',
+          pageId: 'p1',
+          kind: 'highlight',
+          rect: { xRatio: 0, yRatio: 0, widthRatio: 0.001, heightRatio: 0.001 },
+        }),
       },
       { code: 'text-required', input: object({ id: 'd', pageId: 'p1', kind: 'text', text: '' }) },
       { code: 'text-not-supported', input: object({ id: 'e', pageId: 'p1', kind: 'text', text: '你好😀' }) },
@@ -195,9 +219,17 @@ describe('planEditorObjects：五类对象的边界校验', () => {
       planEditorObjects([object({ id: 'u', pageId: 'p1', kind: 'stamp' as 'note' })], plannedPages.pages, objectLimits),
     ).toMatchObject({ ok: false, code: 'unknown-kind' });
     const many = Array.from({ length: 101 }, (_, index) =>
-      object({ id: `o${String(index)}`, pageId: 'p1', kind: 'highlight', rect: { xRatio: 0, yRatio: 0, widthRatio: 0.01, heightRatio: 0.01 } }),
+      object({
+        id: `o${String(index)}`,
+        pageId: 'p1',
+        kind: 'highlight',
+        rect: { xRatio: 0, yRatio: 0, widthRatio: 0.01, heightRatio: 0.01 },
+      }),
     );
-    expect(planEditorObjects(many, plannedPages.pages, objectLimits)).toMatchObject({ ok: false, code: 'too-many-objects' });
+    expect(planEditorObjects(many, plannedPages.pages, objectLimits)).toMatchObject({
+      ok: false,
+      code: 'too-many-objects',
+    });
   });
 });
 
@@ -216,10 +248,34 @@ describe('旋转几何：四档显示旋转下视觉矩形/点的落位', () => 
 
   it('整页矩形四档旋转都盖满整页（绘制原点随角走，宽高 90/270 互换）', () => {
     const full = { xRatio: 0, yRatio: 0, widthRatio: 1, heightRatio: 1 };
-    expect(placeVisualRect(full, portrait)).toMatchObject({ xPt: 0, yPt: 0, widthPt: 595, heightPt: 842, drawRotationDegrees: 0 });
-    expect(placeVisualRect(full, r90)).toMatchObject({ xPt: 595, yPt: 0, widthPt: 842, heightPt: 595, drawRotationDegrees: 90 });
-    expect(placeVisualRect(full, r180)).toMatchObject({ xPt: 595, yPt: 0, widthPt: 595, heightPt: 842, drawRotationDegrees: 180 });
-    expect(placeVisualRect(full, r270)).toMatchObject({ xPt: 0, yPt: 842, widthPt: 842, heightPt: 595, drawRotationDegrees: 270 });
+    expect(placeVisualRect(full, portrait)).toMatchObject({
+      xPt: 0,
+      yPt: 0,
+      widthPt: 595,
+      heightPt: 842,
+      drawRotationDegrees: 0,
+    });
+    expect(placeVisualRect(full, r90)).toMatchObject({
+      xPt: 595,
+      yPt: 0,
+      widthPt: 842,
+      heightPt: 595,
+      drawRotationDegrees: 90,
+    });
+    expect(placeVisualRect(full, r180)).toMatchObject({
+      xPt: 595,
+      yPt: 0,
+      widthPt: 595,
+      heightPt: 842,
+      drawRotationDegrees: 180,
+    });
+    expect(placeVisualRect(full, r270)).toMatchObject({
+      xPt: 0,
+      yPt: 842,
+      widthPt: 842,
+      heightPt: 595,
+      drawRotationDegrees: 270,
+    });
   });
 
   it('视觉四角在 90 档映射到原生四个角（阅读器转正后归位）', () => {

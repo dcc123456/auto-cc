@@ -308,7 +308,8 @@ export class PdfEditDocument {
 
     // ② 字体：拉丁按 字族×粗斜 各嵌一只标准字体；任何非拉丁文字出现就嵌随包 Noto Sans SC（粗斜不兑现）。
     const needsCjk = objects.some(
-      (object) => (object.kind === 'text' || object.kind === 'note') && object.text !== undefined && !isLatinOnly(object.text),
+      (object) =>
+        (object.kind === 'text' || object.kind === 'note') && object.text !== undefined && !isLatinOnly(object.text),
     );
     const latinFonts = new Map<string, PDFFont>();
     const cjkFont = needsCjk ? await this.embedCjkFontOn(target, cjkFontBytes) : undefined;
@@ -370,9 +371,7 @@ export class PdfEditDocument {
           width: placement.widthPt,
           height: placement.heightPt,
           rotate: degrees(-placement.drawRotationDegrees),
-          ...(object.fillHex === undefined
-            ? {}
-            : { color: rgb(...hexRgb01(object.fillHex)) }),
+          ...(object.fillHex === undefined ? {} : { color: rgb(...hexRgb01(object.fillHex)) }),
           borderColor: rgb(...hexRgb01(object.colorHex ?? SHAPE_BORDER_HEX)),
           borderWidth: object.borderWidthPt ?? 1.5,
         });
@@ -427,8 +426,7 @@ export class PdfEditDocument {
 
     // 基线：量到的页面比例优先；没量到按 em 盒竖向居中（与旧 overlay 的 baselinePt 同一式）。
     const baselineYRatio =
-      object.baselineYRatio ??
-      object.rect.yRatio + object.rect.heightRatio / 2 + sizePt / (2 * display.heightPt);
+      object.baselineYRatio ?? object.rect.yRatio + object.rect.heightRatio / 2 + sizePt / (2 * display.heightPt);
     const anchor = placeVisualPointRatio(object.rect.xRatio, baselineYRatio, geometry);
     page.drawText(text, {
       x: anchor.xPt,
@@ -494,8 +492,7 @@ export class PdfEditDocument {
     const lines = wrapTextToLines(object.text, font, sizePt, availableWidth, maxLines);
     for (let index = 0; index < lines.length; index += 1) {
       // 显示面 y 向下：第 i 行基线距盒顶 pad + 0.8 个字高，每行再往下走一行高。
-      const yRatio =
-        object.rect.yRatio + (padPt + sizePt * 0.8 + index * lineHeightPt) / display.heightPt;
+      const yRatio = object.rect.yRatio + (padPt + sizePt * 0.8 + index * lineHeightPt) / display.heightPt;
       const xRatio = object.rect.xRatio + padPt / display.widthPt;
       const anchor = placeVisualPointRatio(xRatio, yRatio, geometry);
       page.drawText(lines[index] as string, {

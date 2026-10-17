@@ -199,7 +199,9 @@ export function usePdfEditor(filePath: string, onClose: () => void) {
 
     function fail(error: AppErrorPayload | undefined) {
       setLoadState('failed');
-      setLoadError(error ? t('pdfEditor.loadFailedWith', { code: error.code, message: error.message }) : t('action.noBridge'));
+      setLoadError(
+        error ? t('pdfEditor.loadFailedWith', { code: error.code, message: error.message }) : t('action.noBridge'),
+      );
     }
 
     void boot();
@@ -399,7 +401,19 @@ export function usePdfEditor(filePath: string, onClose: () => void) {
         // 行盒改字且文字与原文一致：这一层盖写没有意义，删掉（样式也还原）。
         if (existing) removeObject(current.objectId);
       } else if (existing) {
-        updateObject({ ...existing, rect: current.rect, text: value, sizePt: current.fontSizePt, fontFamilyHint: current.fontFamilyHint, colorHex: current.colorHex, bold: current.bold, italic: current.italic, underline: current.underline, baselineYRatio: current.baselineYRatio, ...(current.backdropHex !== undefined ? { backdropHex: current.backdropHex } : { backdropHex: undefined }) });
+        updateObject({
+          ...existing,
+          rect: current.rect,
+          text: value,
+          sizePt: current.fontSizePt,
+          fontFamilyHint: current.fontFamilyHint,
+          colorHex: current.colorHex,
+          bold: current.bold,
+          italic: current.italic,
+          underline: current.underline,
+          baselineYRatio: current.baselineYRatio,
+          ...(current.backdropHex !== undefined ? { backdropHex: current.backdropHex } : { backdropHex: undefined }),
+        });
       } else {
         addObject({
           id: current.objectId,

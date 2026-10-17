@@ -140,9 +140,7 @@ export function EditorRibbon({ model }: { model: PdfEditorModel }) {
               <Type size={16} />
               {t('pdfEditor.toolText')}
             </DeskButton>
-            <p className="ml-2 max-w-[360px] text-[11px] leading-relaxed text-slate-500">
-              {t('pdfEditor.insertHint')}
-            </p>
+            <p className="ml-2 max-w-[360px] text-[11px] leading-relaxed text-slate-500">{t('pdfEditor.insertHint')}</p>
           </>
         )}
 

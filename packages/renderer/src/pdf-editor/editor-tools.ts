@@ -111,11 +111,7 @@ export function resizeRect(
  * @param dxRatio 横向位移（比例）
  * @param dyRatio 纵向位移（比例）
  */
-export function moveRect(
-  current: PdfObjectRatioRect,
-  dxRatio: number,
-  dyRatio: number,
-): PdfObjectRatioRect {
+export function moveRect(current: PdfObjectRatioRect, dxRatio: number, dyRatio: number): PdfObjectRatioRect {
   return clampRect({
     ...current,
     xRatio: current.xRatio + dxRatio,

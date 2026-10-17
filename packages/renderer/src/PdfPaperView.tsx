@@ -31,13 +31,7 @@ const REPAINT_WIDTH_DELTA = 0.06;
  * @param model 这一轨的唯一模型（`usePdfView`，desk 持有）
  * @param onOpenEditor 进 WPS 形态整页编辑器（纸就绪后入口直接挂在纸面上方）
  */
-export function PdfPaperView({
-  model,
-  onOpenEditor,
-}: {
-  model: PdfViewModel;
-  onOpenEditor: () => void;
-}) {
+export function PdfPaperView({ model, onOpenEditor }: { model: PdfViewModel; onOpenEditor: () => void }) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** 上一次真画时量到的 CSS 宽度（px）；0 = 还没画过。 */
@@ -156,9 +150,7 @@ export function PdfPaperView({
           >
             {t('pdfEdit.landingManual')}
           </DeskButton>
-          {model.paperState === 'loading' && (
-            <p className="text-[11px] text-slate-500">{t('pdfEdit.paperLoading')}</p>
-          )}
+          {model.paperState === 'loading' && <p className="text-[11px] text-slate-500">{t('pdfEdit.paperLoading')}</p>}
           {(model.openError || model.paperState === 'failed') && (
             <Banner tone="seal" markers={{ testid: 'pdf-edit-landing-error' }}>
               {t('pdfEdit.landingFailed', {

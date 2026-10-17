@@ -165,7 +165,8 @@ export type EditorPageRejection =
   | { readonly ok: false; readonly code: 'bad-blank-size'; readonly detail: string }
   | { readonly ok: false; readonly code: 'bad-rotation'; readonly detail: string };
 
-export type EditorPagePlanOutcome = { readonly ok: true; readonly pages: readonly PlannedEditorPage[] } | EditorPageRejection;
+export type EditorPagePlanOutcome =
+  { readonly ok: true; readonly pages: readonly PlannedEditorPage[] } | EditorPageRejection;
 
 /** 对象校验的拒绝原因。 */
 export type EditorObjectRejection =
@@ -184,8 +185,7 @@ export type EditorObjectRejection =
   | { readonly ok: false; readonly code: 'image-path-required'; readonly detail: string };
 
 export type EditorObjectPlanOutcome =
-  | { readonly ok: true; readonly objects: readonly PlannedEditorObject[] }
-  | EditorObjectRejection;
+  { readonly ok: true; readonly objects: readonly PlannedEditorObject[] } | EditorObjectRejection;
 
 /** 便签默认字号 pt（便签是贴纸不是正文，固定比正文小一档）。 */
 export const NOTE_TEXT_SIZE_PT = 9;
@@ -198,7 +198,10 @@ const MAX_BLANK_SIDE_PT = 4000;
 export const DEFAULT_BLANK_WIDTH_PT = 595.28;
 export const DEFAULT_BLANK_HEIGHT_PT = 841.89;
 
-function reject<T extends string>(code: T, detail: string): { readonly ok: false; readonly code: T; readonly detail: string } {
+function reject<T extends string>(
+  code: T,
+  detail: string,
+): { readonly ok: false; readonly code: T; readonly detail: string } {
   return { ok: false, code, detail };
 }
 
@@ -240,7 +243,12 @@ export function planEditorPages(
     }
     if (entry.kind === 'source') {
       const pageNumber = entry.sourcePageNumber;
-      if (typeof pageNumber !== 'number' || !Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > sourcePageCount) {
+      if (
+        typeof pageNumber !== 'number' ||
+        !Number.isInteger(pageNumber) ||
+        pageNumber < 1 ||
+        pageNumber > sourcePageCount
+      ) {
         return reject(
           'page-out-of-range',
           `页条目 ${entry.id} 指向源档第 ${String(pageNumber)} 页，源档只有 ${String(sourcePageCount)} 页`,
@@ -430,7 +438,10 @@ function withTextFields(
 
 function checkText(id: string, text: string): EditorObjectRejection | undefined {
   if (text.length > MAX_TEXT_LENGTH) {
-    return reject('text-too-long', `对象 ${id} 的文字长 ${String(text.length)} 字，超过单条上限 ${String(MAX_TEXT_LENGTH)}`);
+    return reject(
+      'text-too-long',
+      `对象 ${id} 的文字长 ${String(text.length)} 字，超过单条上限 ${String(MAX_TEXT_LENGTH)}`,
+    );
   }
   if (!hasBundledGlyphCoverage(text)) {
     return reject(
@@ -489,7 +500,11 @@ export function displayedSize(geometry: PageGeometry): { readonly widthPt: numbe
  * @param cx 显示面 y 向上的 x（pt）
  * @param cy 显示面 y 向上的 y（pt）
  */
-export function visualPointToNative(cx: number, cy: number, geometry: PageGeometry): { readonly xPt: number; readonly yPt: number } {
+export function visualPointToNative(
+  cx: number,
+  cy: number,
+  geometry: PageGeometry,
+): { readonly xPt: number; readonly yPt: number } {
   const { widthPt: W, heightPt: H, rotation: R } = geometry;
   switch (R) {
     case 0:

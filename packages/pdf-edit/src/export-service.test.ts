@@ -482,11 +482,28 @@ describe('pdf.export.saveEditor：页计划 + 五类对象的另存端到端', (
         baselineYRatio: 0.14,
       },
       // 高亮（半透明）。
-      { id: 'h1', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.3, heightRatio: 0.03 } },
+      {
+        id: 'h1',
+        pageId: 'p1',
+        kind: 'highlight',
+        rect: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.3, heightRatio: 0.03 },
+      },
       // 图片（字节按路径在主进程重读，不随对象过界）。
-      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
+      {
+        id: 'i1',
+        pageId: 'p1',
+        kind: 'image',
+        rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 },
+        imagePath,
+      },
       // 空白页上的中文便签。
-      { id: 'n1', pageId: 'b1', kind: 'note', rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.5, heightRatio: 0.1 }, text: '这是一页空白纸的便签' },
+      {
+        id: 'n1',
+        pageId: 'b1',
+        kind: 'note',
+        rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.5, heightRatio: 0.1 },
+        text: '这是一页空白纸的便签',
+      },
     ];
 
     const receipt = await (await bootWithFont()).saveEditor(sourcePath, pages, objects, outPath);
@@ -526,7 +543,12 @@ describe('pdf.export.saveEditor：页计划 + 五类对象的另存端到端', (
     const outPath = join(dir, 'out.pdf');
     const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
     const objects: readonly PdfEditorObjectInput[] = [
-      { id: 'h1', pageId: 'ghost', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.2, heightRatio: 0.03 } },
+      {
+        id: 'h1',
+        pageId: 'ghost',
+        kind: 'highlight',
+        rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.2, heightRatio: 0.03 },
+      },
     ];
     const error = (await (
       await boot()
@@ -544,7 +566,13 @@ describe('pdf.export.saveEditor：页计划 + 五类对象的另存端到端', (
     const outPath = join(dir, 'out.pdf');
     const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
     const objects: readonly PdfEditorObjectInput[] = [
-      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath: fakeImage },
+      {
+        id: 'i1',
+        pageId: 'p1',
+        kind: 'image',
+        rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 },
+        imagePath: fakeImage,
+      },
     ];
     const error = (await (
       await boot()
@@ -562,8 +590,20 @@ describe('pdf.export.saveEditor：页计划 + 五类对象的另存端到端', (
     const outPath = join(dir, 'out.pdf');
     const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
     const objects: readonly PdfEditorObjectInput[] = [
-      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
-      { id: 'i2', pageId: 'p1', kind: 'image', rect: { xRatio: 0.3, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
+      {
+        id: 'i1',
+        pageId: 'p1',
+        kind: 'image',
+        rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 },
+        imagePath,
+      },
+      {
+        id: 'i2',
+        pageId: 'p1',
+        kind: 'image',
+        rect: { xRatio: 0.3, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 },
+        imagePath,
+      },
     ];
     const receipt = await (await boot()).saveEditor(sourcePath, pages, objects, outPath);
     expect(receipt.pageCount).toBe(1);
