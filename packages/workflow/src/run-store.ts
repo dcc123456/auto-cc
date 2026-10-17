@@ -134,6 +134,46 @@ export const workflowNodeOutputMigration = {
   },
 };
 
+/**
+ * 节点相位的迁移号段：**41**（40 是简历事实那支，39/38 属 4.11 的 JD 变体轨，37 是 `resume_imports.source_name`）。
+ * 号段登记口径见 AGENTS.md §9 的 5.3-a：并行会话随时可能取用下一个号，所以取号往后走而不往回占。
+ *
+ * 为什么另起一支而不是加到 `workflow_nodes` 上（plan §7.9 裁定二）：改老迁移的 `up` 不会在老库里重跑，
+ * 而那批库正是「上一轮跑了一半」的现场。
+ *
+ * 为什么非落库不可（plan §7.9 F38）：`side_effect` 那一列现读只有「派发过」与「成功」两态，
+ * 中间那一相——**已经派出去但没观察到落地**——没有任何地方记录。于是续跑只能一刀切：
+ * 「派发过且没成功」一律拒绝盲重放（`claimNode` 的 `needs-human`）。有了相位才能把两种情形分开：
+ * 只有 `nodeStarted` = 可能已经动过手，绝不盲重放；`nodeStarted` + `sideEffectObserved` = 落地已被观察到。
+ */
+export const WORKFLOW_CHECKPOINT_MIGRATION_VERSION = 41;
+
+/** 一个节点的相位名（与 browser-copilot `lib/workflow/checkpoints.ts` 同名同义）。 */
+export type WorkflowNodePhase = 'nodeStarted' | 'sideEffectObserved' | 'nodeCommitted';
+
+/**
+ * 节点相位表的迁移（号段 41）。
+ *
+ * 主键是 `(run_id, node_index, phase)`：**一个相位对同一个节点只留最后一次**的时间，
+ * 重试沿用同一行时用 upsert 改 `at` 而不是追加——相位记的是「这件事到哪一相了」，
+ * 不是「派发过几次」，后者已经在 `workflow_nodes.attempts` 里。
+ */
+export const workflowCheckpointMigration = {
+  version: WORKFLOW_CHECKPOINT_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS workflow_node_checkpoints (
+      run_id TEXT NOT NULL,
+      node_index INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (run_id, node_index, phase)
+    )`);
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP TABLE IF EXISTS workflow_node_checkpoints');
+  },
+};
+
 /** `workflow_runs` 一行的原始读数（列名与视图字段不同，转换收在 `toRunRow` 一侧）。 */
 type RunRow = {
   run_id: string;
@@ -277,6 +317,11 @@ export class WorkflowRunStoreService extends Service {
     if (!migrations.some((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)) {
       migrations.push(workflowNodeOutputMigration);
     }
+    // 号段 41 是节点相位表（5.11-a，plan §7.9 裁定二）。新建表而不是加列，
+    // 因为相位是「一对多」——同一节点先后落三个相位，一列存不下。
+    if (!migrations.some((item) => item.version === WORKFLOW_CHECKPOINT_MIGRATION_VERSION)) {
+      migrations.push(workflowCheckpointMigration);
+    }
     this.store.upgrade();
   }
 
@@ -322,13 +367,24 @@ export class WorkflowRunStoreService extends Service {
         );
       }
       // 失败留的行沿用到底：`attempts` 自增、上一轮的耗时/错误/证据清空（重试是一次新的尝试，但仍是同一个节点）。
-      this.db
-        .prepare(
-          `UPDATE workflow_nodes SET status = 'running', attempts = attempts + 1,
-            finished_at = NULL, duration_ms = NULL, error = NULL
-           WHERE run_id = ? AND node_index = ?`,
-        )
-        .run(runId, index);
+      // 节点行与相位行同成同败（spec 5.11-01）：崩在两句之间会留下「节点行说派发过、
+      // 相位表说没派发过」的自相矛盾现场，而续跑时这两处给出的判决正好相反。
+      this.db.exec('BEGIN');
+      try {
+        this.db
+          .prepare(
+            `UPDATE workflow_nodes SET status = 'running', attempts = attempts + 1,
+              finished_at = NULL, duration_ms = NULL, error = NULL
+             WHERE run_id = ? AND node_index = ?`,
+          )
+          .run(runId, index);
+        // 重试是一次**新的**尝试，所以相位重新回到「可能已经动过手」：同相位覆盖时间戳而不是追加。
+        if (spec.effect !== 'read') this.markPhase(runId, index, 'nodeStarted', at);
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
       return 'granted';
     }
     const key = idempotencyKey(runId, spec);
@@ -350,25 +406,65 @@ export class WorkflowRunStoreService extends Service {
     if (!run) {
       throw new AppError('INVALID_ARGUMENT', `续跑前必须先有 run 行：${runId}`, 'workflow.store', { runId });
     }
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workflow_nodes
+            (run_id, node_index, node_id, kind, effect, status, attempts, started_at,
+             finished_at, duration_ms, idempotency_key, side_effect, evidence_ref, error)
+           VALUES (?, ?, ?, ?, ?, 'running', 1, ?, NULL, NULL, ?, ?, NULL, NULL)`,
+        )
+        .run(
+          runId,
+          index,
+          spec.id,
+          spec.kind,
+          spec.effect,
+          at,
+          key,
+          // 只有真的会动外面世界的节点才占副作用位：read 节点的 `started` 毫无意义，还会挡住重试。
+          spec.effect === 'read' ? null : 'started',
+        );
+      // 相位与副作用位同一个判据：只读节点永远不动外面世界，记「可能派发过」只会让续跑误判。
+      if (spec.effect !== 'read') this.markPhase(runId, index, 'nodeStarted', at);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return 'granted';
+  };
+
+  /**
+   * 记一个节点到达了某个相位（同相位覆盖时间戳，见 5.11-01 的主键形状）。
+   * @param runId 本次 run
+   * @param index 节点下标
+   * @param phase 相位名
+   * @param at 到达时刻（毫秒）
+   * @returns 无
+   */
+  private markPhase = (runId: string, index: number, phase: WorkflowNodePhase, at: number): void => {
     this.db
       .prepare(
-        `INSERT INTO workflow_nodes
-          (run_id, node_index, node_id, kind, effect, status, attempts, started_at,
-           finished_at, duration_ms, idempotency_key, side_effect, evidence_ref, error)
-         VALUES (?, ?, ?, ?, ?, 'running', 1, ?, NULL, NULL, ?, ?, NULL, NULL)`,
+        `INSERT INTO workflow_node_checkpoints (run_id, node_index, phase, at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (run_id, node_index, phase) DO UPDATE SET at = excluded.at`,
       )
-      .run(
-        runId,
-        index,
-        spec.id,
-        spec.kind,
-        spec.effect,
-        at,
-        key,
-        // 只有真的会动外面世界的节点才占副作用位：read 节点的 `started` 毫无意义，还会挡住重试。
-        spec.effect === 'read' ? null : 'started',
-      );
-    return 'granted';
+      .run(runId, index, phase, at);
+  };
+
+  /**
+   * 读一个节点已经落下的相位。
+   * @param runId 本次 run
+   * @param index 节点下标
+   * @returns 相位名数组（按到达先后排序）；该节点还没 claim 过则是空数组
+   */
+  readPhases = (runId: string, index: number): WorkflowNodePhase[] => {
+    const rows = this.db
+      .prepare('SELECT phase FROM workflow_node_checkpoints WHERE run_id = ? AND node_index = ? ORDER BY at, phase')
+      .all(runId, index) as { phase?: string }[];
+    return rows.map((row) => row.phase as WorkflowNodePhase);
   };
 
   /**

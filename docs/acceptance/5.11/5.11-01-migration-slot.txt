@@ -1,0 +1,51 @@
+5.11-01 号段占用与两种声明形状（2026-10-18 现场读码）
+
+判据原文：迁移号 41 的两条声明形状都 grep 过（常量声明 + 字面声明）且与 39/40/§9 已用号段不撞；
+空库与「已跑过老迁移的老库」两种情形都建出表。
+
+一、两种声明形状各 grep 一次（AGENTS.md §9 的 5.3-a：并行会话随时可能取用下一个号，两条通道都得看）
+
+  $ grep -rn "MIGRATION_VERSION = 41" packages/ --include='*.ts'
+  packages/workflow/src/run-store.ts:149:export const WORKFLOW_CHECKPOINT_MIGRATION_VERSION = 41;
+
+  $ grep -rn "version: 41" packages/ --include='*.ts'
+  （零命中）
+
+读数：只有我这一条常量声明，没有任何别处用字面形状写 41；反向也不存在「有人已经写了 41 的表」。
+
+二、已用号段（只取 38 以上的，因为 41 紧跟在它们后面）
+
+  $ grep -rn "MIGRATION_VERSION = 3[89];\|MIGRATION_VERSION = 40;" packages/ --include='*.ts'
+  packages/resume-kb/src/skill-service.ts:33:export const RESUME_SKILL_MIGRATION_VERSION = 38;
+  packages/resume-doc/src/doc-store.ts:56:export const RESUME_DOC_VARIANT_MIGRATION_VERSION = 39;
+  packages/resume-doc/src/doc-store.ts:83:export const RESUME_DOC_JD_LABEL_MIGRATION_VERSION = 40;
+
+读数：38 是简历技能表、39/40 是 4.11 的 JD 变体与标签两支，41 紧接其后且无人占用。
+所以本片取 41 而不是回填 34（34 在本工作树读不到，但按同一条口径不得当成可占的空号）。
+
+三、空库与老库两种情形（单测，不是手工读数）
+
+用例「号段 41 与 §9 已登记的那几支不撞，空库与老库两种情形都建出表」两段各做一遍：
+第一段 boot() 到空目录 → sqlite_master 里有 workflow_node_checkpoints；
+第二段先 store.rollback(40)（把 41 这一支退掉，台账最高落在 40、相位表被 down 删掉，
+于是库里就是「已跑过老迁移的老库」的真实形状），关掉这一套 fiber 后在同一目录重挂 →
+store.version 是 41、表又建了出来，并在老库上真的 claim 出一个 nodeStarted。
+
+  $ pnpm vitest run packages/workflow/src/run-store.test.ts
+  EXIT=0
+  Test Files  1 passed (1)
+  Tests  23 passed (23)
+
+四、同事务（判据的 U 半边：抛错时两张表都没变）
+
+用例「claimNode 与副作用位同事务：崩在两句之间时两处都不变」把相位表 DROP 掉再 claim，
+node:sqlite 在写相位那一句上报 no such table，然后断言：
+新节点那一支 workflow_nodes 里三格都还是 pending（节点行没有留下）；
+重试那一支 status/attempts/error 三个读数与失败那一轮逐字相同（attempts 的自增被退回去了）。
+只断言「相位表没写进去」是不够的——那正是不做事务时的样子。
+
+五、本片不动 runner 行为
+
+5.11-a 只加存储与读回口（readPhases），enterNode 的三态判决与 claimNode 的返回值一字未改，
+所以 spec 5.11-02 要求「run-store.test.ts:279 那条崩溃窗口用例逐字不变地绿」仍然成立：
+那一条在 23 条全绿的名单里，改动前后都是 PASS（改前基线见该用例本次未修改的 diff）。

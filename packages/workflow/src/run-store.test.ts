@@ -15,6 +15,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { BOSS_BASIC_PLAN, buildPlan } from './plan.js';
 import { WORKFLOW_GRAPH_MIGRATION_VERSION, WORKFLOW_PLAN_MIGRATION_VERSION } from './plan-store.js';
 import {
+  WORKFLOW_CHECKPOINT_MIGRATION_VERSION,
   WORKFLOW_MIGRATION_VERSION,
   WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
   WorkflowRunStoreService,
@@ -38,12 +39,22 @@ function tempDir(): string {
  */
 async function boot(dir = tempDir()) {
   const ctx = new Context();
-  fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
-  fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  const configFiber = await ctx.plugin(ConfigService, { appName: 'auto-cc' });
+  const storeFiber = await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' });
   const runFiber = await ctx.plugin(WorkflowRunStoreService, {});
-  fibers.push(runFiber);
+  fibers.push(configFiber, storeFiber, runFiber);
   const app = asApp(ctx);
-  return { ctx, runFiber, store: app.store, runs: app['workflow.store'], db: app.store.db };
+  return {
+    ctx,
+    runFiber,
+    store: app.store,
+    runs: app['workflow.store'],
+    db: app.store.db,
+    /** 关掉这一套的全部 fiber：同一目录重挂第二遍之前必须先关，连接不释放就锁住那个库文件。 */
+    close: async () => {
+      for (const fiber of [runFiber, storeFiber, configFiber]) await fiber.dispose();
+    },
+  };
 }
 
 /** 一次节点结束读数（除状态外全部给足，视图里看不到「有耗时没结束时间」这种半截行）。 */
@@ -84,9 +95,10 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
       }[]
     ).map((row) => row.name);
     // `workflow_plans` 是 5.4-01 加的那张表，与 run 两张表同一个服务、另一个号段。
-    expect(tables).toEqual(['workflow_nodes', 'workflow_plans', 'workflow_runs']);
-    // 5.10-f 起最高号段是 29（节点行的出口句柄列），画布那四列的 28 与计划本体的 20 排在它下面。
-    expect(store.version).toBe(WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION);
+    // `workflow_node_checkpoints` 是 5.11-a 加的相位表。
+    expect(tables).toEqual(['workflow_node_checkpoints', 'workflow_nodes', 'workflow_plans', 'workflow_runs']);
+    // 5.11-a 起最高号段是 41（节点相位表）；本服务自己的号段仍以 29 为顶。
+    expect(store.version).toBe(WORKFLOW_CHECKPOINT_MIGRATION_VERSION);
     // 号段是全局的（1=usage_ledger、2=chat、3=jobs、…、19=usage_denials），撞号只在运行期炸，所以钉在断言里。
     expect(WORKFLOW_MIGRATION_VERSION).toBe(4);
     expect(WORKFLOW_PLAN_MIGRATION_VERSION).toBe(20);
@@ -118,13 +130,15 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_CHECKPOINT_MIGRATION_VERSION)).toHaveLength(1);
     await runFiber.dispose();
     fibers.push(await ctx.plugin(WorkflowRunStoreService, {}));
     expect(store.migrations.filter((item) => item.version === WORKFLOW_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_PLAN_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_GRAPH_MIGRATION_VERSION)).toHaveLength(1);
     expect(store.migrations.filter((item) => item.version === WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION)).toHaveLength(1);
-    expect(store.version).toBe(WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION);
+    expect(store.migrations.filter((item) => item.version === WORKFLOW_CHECKPOINT_MIGRATION_VERSION)).toHaveLength(1);
+    expect(store.version).toBe(WORKFLOW_CHECKPOINT_MIGRATION_VERSION);
     // 必须拿**新**实例读写：旧句柄的 ctx 已经 inactive，用它调用会在 cordis 层就失败（实测过一次），
     // 而「重启后照样能用」要证的正是新实例，不是旧壳子。
     const again = asApp(ctx)['workflow.store'];
@@ -138,8 +152,10 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     expect(runs.state('r-rollback')).not.toBeNull();
 
     const back = store.rollback(WORKFLOW_MIGRATION_VERSION - 1);
-    // 倒序回滚：29（节点出口句柄）→ 28（画布那四列）→ 20（计划表）→ 4（run 两张表），各支的 down 只管自己那一份。
+    // 倒序回滚：41（节点相位表）→ 29（节点出口句柄）→ 28（画布那四列）→ 20（计划表）→ 4（run 两张表），
+    // 各支的 down 只管自己那一份。
     expect(back.reverted).toEqual([
+      WORKFLOW_CHECKPOINT_MIGRATION_VERSION,
       WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
       WORKFLOW_GRAPH_MIGRATION_VERSION,
       WORKFLOW_PLAN_MIGRATION_VERSION,
@@ -158,6 +174,7 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
       WORKFLOW_PLAN_MIGRATION_VERSION,
       WORKFLOW_GRAPH_MIGRATION_VERSION,
       WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION,
+      WORKFLOW_CHECKPOINT_MIGRATION_VERSION,
     ]);
     expect(runs.state('r-rollback')).toBeNull();
     // 升级回来的不只是 run 表：计划表也必须建得回来，否则老库回滚再升级会得出「能跑、存不了」。
@@ -182,6 +199,98 @@ describe('建表与迁移（spec 2.4-01，复用 2.3-05 的 down 路径判据）
     // 第二次尝试没给句柄 → 列必须是 NULL，留着上一轮的 'yes' 会把「换了出口」读成「没变」。
     runs.recordNode('r-output', 0, outcome({ status: 'failed', error: 'boom' }));
     expect(runs.state('r-output')?.nodes[0]?.outputHandle).toBeNull();
+  });
+});
+
+describe('节点相位（spec 5.11-01，号段 41）', () => {
+  it('号段 41 与 §9 已登记的那几支不撞，空库与老库两种情形都建出表', async () => {
+    const dir = tempDir();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    const first = await boot(dir);
+    // 39/38 属 4.11 的 JD 变体轨、40 属简历事实那支（AGENTS.md §9 的 5.3-a 清单）。
+    // 判据要求的「两种声明形状都 grep 过」是仓面读数，记在
+    // docs/acceptance/5.11/5.11-01-migration-slot.txt；这里是常量本身的钉死。
+    expect(WORKFLOW_CHECKPOINT_MIGRATION_VERSION).toBe(41);
+    expect(
+      first.db.prepare("select name from sqlite_master where type='table' and name='workflow_node_checkpoints'").get(),
+    ).toMatchObject({ name: 'workflow_node_checkpoints' });
+
+    // 老库形状：把 41 退掉，库里就只剩「已跑过老迁移」的现场（台账最高 40、相位表没了）。
+    expect(first.store.rollback(WORKFLOW_CHECKPOINT_MIGRATION_VERSION - 1).reverted).toEqual([
+      WORKFLOW_CHECKPOINT_MIGRATION_VERSION,
+    ]);
+    expect(
+      first.db.prepare("select name from sqlite_master where type='table' and name='workflow_node_checkpoints'").get(),
+    ).toBeUndefined();
+    await first.close();
+
+    // 再挂一次：这一支必须真的执行，而不是因为「看着像跑过了」被跳过。
+    const second = await boot(dir);
+    expect(second.store.version).toBe(WORKFLOW_CHECKPOINT_MIGRATION_VERSION);
+    expect(
+      second.db.prepare("select name from sqlite_master where type='table' and name='workflow_node_checkpoints'").get(),
+    ).toMatchObject({ name: 'workflow_node_checkpoints' });
+    second.runs.openRun('r-oldlib', plan, 1_000);
+    expect(second.runs.claimNode('r-oldlib', 2, plan.nodes[2]!, 1_000)).toBe('granted');
+    expect(second.runs.readPhases('r-oldlib', 2)).toEqual(['nodeStarted']);
+  });
+
+  it('claimNode 与副作用位同事务：崩在两句之间时两处都不变', async () => {
+    const { runs, db } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    runs.openRun('r-tx', plan, 1_000);
+
+    // 新节点那一支：节点行先 INSERT、相位行后写。把相位表抽掉就是「崩在两句之间」的真实形状
+    // （迁移没跑成 / 库是从别处拷来的半份），node:sqlite 直接在写相位那一句上报错。
+    db.exec('DROP TABLE workflow_node_checkpoints');
+    expect(() => runs.claimNode('r-tx', 2, plan.nodes[2]!, 1_000)).toThrowError(/no such table/);
+    // 两张表都要是「没变」：只断言相位表空着不够——那正是不做事务时的样子。
+    expect(runs.state('r-tx')?.nodes.map((node) => node.status)).toEqual(['pending', 'pending', 'pending']);
+    expect(
+      db
+        .prepare("select count(*) as total from sqlite_master where type='table' and name='workflow_node_checkpoints'")
+        .get(),
+    ).toMatchObject({ total: 0 });
+
+    // 重试那一支：UPDATE 已自增过 attempts，回滚后必须连自增一起退回去。
+    db.exec(
+      `CREATE TABLE workflow_node_checkpoints (
+         run_id TEXT NOT NULL, node_index INTEGER NOT NULL, phase TEXT NOT NULL, at INTEGER NOT NULL,
+         PRIMARY KEY (run_id, node_index, phase))`,
+    );
+    runs.claimNode('r-tx', 2, plan.nodes[2]!, 1_000);
+    runs.recordNode('r-tx', 2, outcome({ status: 'failed', error: '第 1 次失败', sideEffect: null }));
+    db.exec('DROP TABLE workflow_node_checkpoints');
+    expect(() => runs.claimNode('r-tx', 2, plan.nodes[2]!, 2_000)).toThrowError(/no such table/);
+    expect(runs.state('r-tx')?.nodes[2]).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      error: '第 1 次失败',
+    });
+  });
+
+  it('只有会动外面世界的节点记相位，只读节点记了只会让续跑误判', async () => {
+    const { runs, db } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    runs.openRun('r-phase', plan, 1_000);
+    runs.claimNode('r-phase', 0, plan.nodes[0]!, 1_000);
+    runs.claimNode('r-phase', 1, plan.nodes[1]!, 1_000);
+    runs.claimNode('r-phase', 2, plan.nodes[2]!, 1_000);
+
+    // 同一个判据落在两张表上：只读节点不占副作用位，也不占相位。
+    expect(runs.state('r-phase')?.nodes.map((node) => node.sideEffect)).toEqual([null, null, 'started']);
+    expect(runs.readPhases('r-phase', 0)).toEqual([]);
+    expect(runs.readPhases('r-phase', 1)).toEqual([]);
+    expect(runs.readPhases('r-phase', 2)).toEqual(['nodeStarted']);
+    expect(db.prepare('select count(*) as total from workflow_node_checkpoints').get()).toMatchObject({ total: 1 });
+
+    // 重试是新的尝试：同相位覆盖时间戳而不是追加，否则「派发过几次」会被误读成相位前进。
+    runs.recordNode('r-phase', 2, outcome({ status: 'failed', error: 'boom' }));
+    expect(runs.claimNode('r-phase', 2, plan.nodes[2]!, 9_000)).toBe('granted');
+    expect(runs.readPhases('r-phase', 2)).toEqual(['nodeStarted']);
+    expect(db.prepare('select at from workflow_node_checkpoints where node_index = 2').get()).toMatchObject({
+      at: 9_000,
+    });
   });
 });
 
