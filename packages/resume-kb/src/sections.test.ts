@@ -116,22 +116,81 @@ describe('4.1-02 文本简历解析为文档模型', () => {
   });
 });
 
-describe('4.1-09 敏感原文默认脱敏', () => {
-  it('联系方式与正文里的个人信息都只以掩码形态存在', () => {
+describe('4.1-09 敏感原文默认脱敏（范围按 2026-10-12 裁定收窄到四处）', () => {
+  it('正文与待确认清单里只以掩码存在，而工作副本的联系方式是原文', () => {
     const parsed = parseResumeText(FIXTURE, 'resume-import', NOW_MS);
     if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
     expect(parsed.document.profile.name).toBe('张三');
-    expect(parsed.document.profile.contact.phone).toBe('138****1111');
-    expect(parsed.document.profile.contact.email).toBe('z***@example.com');
+    // 裁定（2026-10-12）：拿去投递的简历必须有真号码，所以 `profile.contact` 存原文；
+    // 掩码仍然覆盖正文区块、待确认清单、实体表与出网载荷这四处（4.9-12 逐处断言）。
+    expect(parsed.document.profile.contact.phone).toBe('13800001111');
+    expect(parsed.document.profile.contact.email).toBe('zhangsan@example.com');
 
-    const serialized = JSON.stringify(parsed.document);
-    expect(serialized).not.toContain('13800001111');
-    expect(serialized).not.toContain('zhangsan@example.com');
+    const body = JSON.stringify(parsed.document.sections);
+    expect(body).not.toContain('13800001111');
+    expect(body).not.toContain('zhangsan@example.com');
     expect(parsed.issues.filter((issue) => issue.code === 'sensitive-redacted').map((issue) => issue.fieldKey)).toEqual(
       ['email', 'phone'],
     );
   });
 
+  it('联系方式缺项时写 null，不造一个占位值（4.9-08）', () => {
+    const noContact = FIXTURE.replace('电话：13800001111\n', '').replace('邮箱：zhangsan@example.com\n', '');
+    const parsed = parseResumeText(noContact, 'resume-import', NOW_MS);
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    expect(parsed.document.profile.contact.phone).toBeNull();
+    expect(parsed.document.profile.contact.email).toBeNull();
+  });
+});
+
+describe('4.9-b 抬头抽取：姓名与城市必须从同一行的联系方式里摘出来', () => {
+  /** 真实 PDF 的抬头形状（用户手里那份就是这一族）：姓名｜电话｜邮箱｜城市挤在一条物理行里。 */
+  const ONE_LINE_HEADER = [
+    '李测试｜13800002222｜litest@example.com｜上海市',
+    '',
+    '## 个人简介',
+    '五年前端工程师，专注可视化与打印管线。',
+    '期望薪资 15000-25000。',
+    '',
+    '## 工作经历',
+    '星桥科技｜前端工程师 2021.03-2024.06',
+    '- 主导订单服务重构，P99 延迟下降 40%。',
+    '- 搭建内核自动化打印管线。',
+    '',
+    '## 教育经历',
+    '东海大学 计算机科学与技术 学士 2015.09-2019.06',
+  ].join('\n');
+
+  it('抬头一行写完时，姓名不再被手机号的数字连累，城市落进 contact.location', () => {
+    const parsed = parseResumeText(ONE_LINE_HEADER, 'resume-header', NOW_MS);
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    expect(parsed.document.profile.name).toBe('李测试');
+    expect(parsed.document.profile.contact.location).toBe('上海市');
+    expect(parsed.document.profile.contact.phone).toBe('13800002222');
+  });
+
+  it('城市不带「市」后缀时也认（白名单内的高频写法），认不出就是 null', () => {
+    const bare = ONE_LINE_HEADER.replace('上海市', '深圳');
+    const parsed = parseResumeText(bare, 'resume-header', NOW_MS);
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    expect(parsed.document.profile.contact.location).toBe('深圳');
+    expect(parsed.document.profile.name).toBe('李测试');
+
+    const none = parseResumeText(ONE_LINE_HEADER.replace('｜上海市', ''), 'resume-header', NOW_MS);
+    if (none.status !== 'ok') return expect(none.status).toBe('ok');
+    expect(none.document.profile.contact.location).toBeNull();
+  });
+
+  it('姓名与城市同一行时，摘掉城市之后剩下的才是姓名（城市不许当人名）', () => {
+    const noContact = ONE_LINE_HEADER.replace('｜13800002222｜litest@example.com', '');
+    const parsed = parseResumeText(noContact, 'resume-header', NOW_MS);
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    expect(parsed.document.profile.name).toBe('李测试');
+    expect(parsed.document.profile.contact.location).toBe('上海市');
+  });
+});
+
+describe('4.1-09 其余掩码判据（收窄范围后仍然生效）', () => {
   it('脱敏不吃掉薪资区间与量化成果里的数字（值形态判据带环视）', () => {
     const parsed = parseResumeText(FIXTURE, 'resume-import', NOW_MS);
     if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
@@ -241,10 +300,20 @@ describe('4.1-02 中文简历惯用的汉字序号标题（真实 PDF 抽出来�
   ].join('\n');
   const parsed = parseResumeText(NUMBERED, 'resume-numbered', NOW_MS);
 
-  it('汉字序号前缀被摘掉后按词典归类，四类区块都落进文档', () => {
+  it('汉字序号前缀被摘掉后按词典归类；词典外的「基本信息」按 custom 保真、内容不丢', () => {
     expect(parsed.status).toBe('ok');
     if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
-    expect(parsed.document.sections.map((section) => section.kind)).toEqual(['summary', 'skills', 'experience']);
+    // 「一、基本信息」不在六类词典里：新口径下它是独立 custom 要素（原文标题保留），
+    // 其下「姓名：李四 学历：本科」整行进正文，而不是像旧口径那样在抬头区被静默丢弃。
+    expect(parsed.document.sections.map((section) => section.kind)).toEqual([
+      'custom',
+      'summary',
+      'skills',
+      'experience',
+    ]);
+    const basic = parsed.document.sections[0]!;
+    expect(basic.title).toBe('基本信息');
+    expect(basic.entries[0]!.fields[0]!.value).toContain('姓名：李四 学历：本科');
   });
 
   it('序号条目行（`（一）公司 - 职位 时间`）认得出公司与时间段', () => {
@@ -252,6 +321,120 @@ describe('4.1-02 中文简历惯用的汉字序号标题（真实 PDF 抽出来�
     const company = fieldOf(parsed, 'experience', 0, 'company');
     expect(company).toContain('云栖网络');
     expect(fieldOf(parsed, 'experience', 0, 'period')).toBeTruthy();
+  });
+});
+
+/**
+ * custom 通用自定义要素：六类词典之外的标题一律收住，信息不丢、不吞邻区。
+ */
+describe('custom 陌生要素保真（证书 / 荣誉 / 语言等词典外标题）', () => {
+  const CUSTOM_FIXTURE = [
+    '张三',
+    '电话：13800001111',
+    'github.com/zhangsan 期望城市：上海',
+    '',
+    '## 个人简介',
+    '五年后端工程师，专注高并发服务。',
+    '',
+    '## 证书',
+    'CET-6（586）',
+    '',
+    'PMP 项目管理认证',
+    '',
+    '## 工作经历',
+    '星桥科技｜后端工程师 2021.03-2024.06',
+    '- 主导订单服务重构。',
+    '',
+    '## 荣誉奖项',
+    '2023 年集团优秀员工',
+    '',
+    '## 语言能力',
+    '英语：可作为工作语言',
+  ].join('\n');
+  const parsed = parseResumeText(CUSTOM_FIXTURE, 'resume-custom', NOW_MS);
+
+  it('三个陌生标题各成一块 custom，原文标题保留，且不吞相邻的固定区块', () => {
+    expect(parsed.status).toBe('ok');
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const kinds = parsed.document.sections.map((section) => section.kind);
+    expect(kinds).toEqual(['custom', 'summary', 'custom', 'experience', 'custom', 'custom']);
+    const titles = parsed.document.sections.filter((section) => section.kind === 'custom').map((s) => s.title);
+    expect(titles).toEqual(['其他信息', '证书', '荣誉奖项', '语言能力']);
+  });
+
+  it('custom 区块可多块并存：id 按文档序为 custom-1..4，条目 id 挂区块 id 前缀不撞号', () => {
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const customs = parsed.document.sections.filter((section) => section.kind === 'custom');
+    expect(customs.map((section) => section.id)).toEqual(['custom-1', 'custom-2', 'custom-3', 'custom-4']);
+    expect(customs[1]!.entries.map((entry) => entry.id)).toEqual(['custom-2-1', 'custom-2-2']);
+  });
+
+  it('陌生区块的正文逐行进 text 字段，不被上一区块吞掉', () => {
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const cert = parsed.document.sections.find((section) => section.title === '证书')!;
+    expect(cert.entries.map((entry) => entry.fields[0]!.value)).toEqual(['CET-6（586）', 'PMP 项目管理认证']);
+    const language = parsed.document.sections.find((section) => section.title === '语言能力')!;
+    expect(language.entries[0]!.fields[0]!.value).toBe('英语：可作为工作语言');
+  });
+
+  it('抬头区残留（github / 期望城市）进 custom-1「其他信息」，姓名与电话不重复进正文', () => {
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const other = parsed.document.sections[0]!;
+    expect(other.kind).toBe('custom');
+    const joined = other.entries.map((entry) => entry.fields[0]!.value).join('\n');
+    // 抬头分词把 `/` 当分隔符（既有口径），github 路径会被空格分开——逐段断言即可。
+    expect(joined).toContain('github.com');
+    expect(joined).toContain('zhangsan');
+    expect(joined).toContain('上海');
+    expect(joined).not.toContain('13800001111');
+    expect(joined).not.toContain('张三');
+  });
+
+  it('重复解析的 custom 区块 / 条目 id 完全一致（位置号稳定，供 diff 对齐）', () => {
+    const again = parseResumeText(CUSTOM_FIXTURE, 'resume-custom-2', NOW_MS);
+    if (parsed.status !== 'ok' || again.status !== 'ok') return expect(again.status).toBe('ok');
+    const idsOf = (r: typeof again) =>
+      r.document.sections.flatMap((section) => [section.id, ...section.entries.map((entry) => entry.id)]);
+    expect(idsOf(again)).toEqual(idsOf(parsed));
+  });
+
+  it('护栏：带时间段的经历抬头行不被误切成 custom 标题', () => {
+    const text = [
+      '张三',
+      '电话：13800001111',
+      '',
+      '## 工作经历',
+      '星桥科技｜后端工程师 2021.03-2024.06',
+      '主导订单服务重构，P99 延迟下降 40%，并负责新人培养与线上值守的完整闭环，相关指标连续四个季度达标。',
+      '海图信息｜高级工程师 2018.03-2020.06',
+      '搭建发布流水线与回滚预案，把平均发布耗时从四十分钟压到八分钟，事故恢复时间缩短一个数量级。',
+    ].join('\n');
+    const r = parseResumeText(text, 'resume-period-guard', NOW_MS);
+    if (r.status !== 'ok') return expect(r.status).toBe('ok');
+    expect(r.document.sections.map((section) => section.kind)).toEqual(['experience']);
+  });
+
+  it('护栏：句末标点收尾的句子、键值行、列表项不被认成 custom 标题', () => {
+    const text = [
+      '张三',
+      '电话：13800001111',
+      '',
+      '## 个人简介',
+      '五年后端工程师，做过交易、支付与风控三条核心链路，习惯用数据而不是感觉来判断优化是否成立。',
+      '',
+      '## 证书',
+      '证书编号：CERT-2023-0001，请按需核验。',
+      '- PMP 项目管理认证。',
+      '这是一句完整的叙述句，以句号收尾，长度也在标题字数上限以内，但它不该成为标题，只能留在证书正文里。',
+    ].join('\n');
+    const r = parseResumeText(text, 'resume-custom-guard', NOW_MS);
+    if (r.status !== 'ok') return expect(r.status).toBe('ok');
+    expect(r.document.sections.map((section) => section.kind)).toEqual(['summary', 'custom']);
+    const section = r.document.sections[1]!;
+    expect(section.title).toBe('证书');
+    // 三行全部留在唯一的证书区块里（切成几条由条目边界规则决定，但没有任何一块变成新区块）。
+    expect(section.entries.map((entry) => entry.fields[0]!.value).join('\n')).toContain('证书编号：CERT-2023-0001');
+    expect(section.entries.map((entry) => entry.fields[0]!.value).join('\n')).toContain('这是一句完整的叙述句');
   });
 });
 

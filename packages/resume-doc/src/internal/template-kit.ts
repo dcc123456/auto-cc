@@ -17,9 +17,9 @@
 import { bodyKeyOf, type DocumentDesign, type ResumeDocument, type Section } from '../model.js';
 import { articleHookFor, headingClassFor, rowClassesFor } from './design-slots.js';
 import {
+  displaySectionTitle,
   escapeHtml,
   fieldLabel,
-  sectionLabel,
   toEntryView,
   type EntryLine,
   type Template,
@@ -253,8 +253,9 @@ function renderSection(
   design: DocumentDesign | undefined,
 ): string {
   if (section.entries.length === 0) return '';
-  const heading = renderHeading(spec, sectionLabel(section.kind, ctx.locale), ordinal, design);
-  const isPlain = section.kind === 'summary' || section.kind === 'skills';
+  // custom 区块的标题是简历原文（证书 / 荣誉奖项…），固定六类才走 i18n 标签——判据在 bind 层只有一份。
+  const heading = renderHeading(spec, displaySectionTitle(section, ctx.locale), ordinal, design);
+  const isPlain = section.kind === 'summary' || section.kind === 'skills' || section.kind === 'custom';
   const entries = section.entries
     .map((entry) =>
       isPlain

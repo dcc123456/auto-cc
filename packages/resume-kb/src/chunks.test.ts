@@ -158,3 +158,36 @@ describe('deriveSectionChunks：区块级切片（裁定二不建实体行的那
     );
   });
 });
+
+describe('deriveSectionChunks：custom 陌生要素同样进检索（按 JD 生成不能漏掉证书 / 荣誉）', () => {
+  const customA: Section = {
+    id: 'custom-1',
+    kind: 'custom',
+    title: '证书',
+    entries: [
+      makeEntry('custom', 'custom-1-1', { text: 'CET-6（586）' }),
+      makeEntry('custom', 'custom-1-2', { text: 'PMP 项目管理认证' }),
+    ],
+  };
+  const customB: Section = {
+    id: 'custom-2',
+    kind: 'custom',
+    title: '语言能力',
+    entries: [makeEntry('custom', 'custom-2-1', { text: '英语：可作为工作语言' })],
+  };
+  const document = makeDocument([customA, customB]);
+
+  it('每条 custom 条目一条 section 切片，两块并存不撞 id', () => {
+    const chunks = deriveSectionChunks(document);
+    expect(chunks.map((chunk) => chunk.sectionKind)).toEqual(['custom', 'custom', 'custom']);
+    expect(chunks.map((chunk) => chunk.chunkId)).toEqual([...new Set(chunks.map((chunk) => chunk.chunkId))]);
+  });
+
+  it('切片正文含原文标题下的条目内容，JD 里出现「证书 / PMP」时能检索到这块素材', () => {
+    const chunks = deriveSectionChunks(document);
+    const pmp = chunks.find((chunk) => chunk.text.includes('PMP 项目管理认证'))!;
+    expect(pmp).toBeDefined();
+    expect(pmp.tokens).toContain('项目');
+    expect(chunks.find((chunk) => chunk.text.includes('CET-6'))?.tokens).toContain('cet');
+  });
+});

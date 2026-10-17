@@ -390,16 +390,28 @@ describe('4.1-06 失败那一条收敛成结构化错误', () => {
   });
 });
 
-describe('4.1-09 入库与日志脱敏', () => {
-  it('手机号 / 邮箱 / 身份证不以原文进入库的任何文本列', async () => {
+describe('4.1-09 入库与日志脱敏（范围按 2026-10-12 裁定收窄：工作副本的联系方式存原文）', () => {
+  /** 数一段文本里出现了多少次原文号码：只允许出现在 `profile.contact` 那一处。 */
+  const hitsOf = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
+
+  it('手机号 / 邮箱只在 doc_json 的抬头一处是原文，身份证全库无原文', async () => {
     const dir = tempDir();
     const { parse, db } = await boot(dir);
     await parse.fromFile(writeFile(dir, 'resume.md', RESUME_MD), NOW_MS);
     const stored = allStoredText(db);
-    expect(stored).not.toContain('13800001111');
-    expect(stored).not.toContain('zhangsan@example.com');
+    expect(hitsOf(stored, '13800001111')).toBe(1);
+    expect(hitsOf(stored, 'zhangsan@example.com')).toBe(1);
+    expect(stored).toContain('"phone":"13800001111"');
     expect(stored).not.toContain('110101199003071234');
     expect(stored).toContain('***');
+    // 待确认清单那一列仍然只有掩码：原文不许跟着 issue 走一遍。
+    const issuesOnly = db
+      .prepare('SELECT issues_json FROM resume_imports')
+      .all()
+      .map((row) => String(row.issues_json))
+      .join('\n');
+    expect(hitsOf(issuesOnly, '13800001111')).toBe(0);
+    expect(hitsOf(issuesOnly, 'zhangsan@example.com')).toBe(0);
   });
 
   it('日志里只落 docId + 哈希前缀 + 计数：把脱敏出口关掉也扫不出原文（4.1-09 的强判据）', async () => {

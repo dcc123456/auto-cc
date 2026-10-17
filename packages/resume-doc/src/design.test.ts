@@ -178,8 +178,8 @@ describe('6.6-01 归一化：主题参与内容 hash，空壳一律不出现', (
   });
 
   it('规范序两张表同源：段落 kinds 与轴 key 的清单互不重复登记', () => {
-    // 六个种类 × 六条轴是样式层的全部寻址面；normalize 拥有清单，design-slots 只按清单铺槽位。
-    expect(PARAGRAPH_KIND_ORDER).toHaveLength(6);
+    // 七个种类（含 custom 自定义要素）× 六条轴是样式层的全部寻址面；normalize 拥有清单，design-slots 只按清单铺槽位。
+    expect(PARAGRAPH_KIND_ORDER).toHaveLength(7);
     expect(PARAGRAPH_STYLE_KEYS).toHaveLength(6);
     const slotClasses = DESIGN_SLOT_RULES.map((slot) => slot.className);
     expect(new Set(slotClasses).size).toBe(slotClasses.length);

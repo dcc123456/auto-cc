@@ -36,7 +36,11 @@ export interface Template {
   render: (doc: ResumeDocument, ctx: TemplateContext) => string;
 }
 
-/** 区块标题标签（按 kind 取，模板不写死中文——3.2-06）。 */
+/**
+ * 区块标题标签（按 kind 取，模板不写死中文——3.2-06）。
+ * custom 的标签只是「文档没带 title 时」的兜底；正常情况下 custom 区块展示的是简历原文标题
+ * （见 `displaySectionTitle`），不会走到这里。
+ */
 const SECTION_LABELS: Record<TemplateLocale, Record<SectionKind, string>> = {
   'zh-CN': {
     summary: '个人简介',
@@ -45,6 +49,7 @@ const SECTION_LABELS: Record<TemplateLocale, Record<SectionKind, string>> = {
     skills: '专业技能',
     project: '项目经历',
     campus: '校园经历',
+    custom: '其他信息',
   },
   en: {
     summary: 'Summary',
@@ -53,6 +58,7 @@ const SECTION_LABELS: Record<TemplateLocale, Record<SectionKind, string>> = {
     skills: 'Skills',
     project: 'Projects',
     campus: 'Campus',
+    custom: 'Other',
   },
 };
 
@@ -96,6 +102,21 @@ const FIELD_LABELS: Record<TemplateLocale, Record<string, string>> = {
  */
 export function sectionLabel(kind: SectionKind, locale: TemplateLocale): string {
   return SECTION_LABELS[locale][kind] ?? SECTION_LABELS[locale].summary;
+}
+
+/**
+ * 区块在纸面上真正展示的标题：custom 用文档里的原文标题（缺失时才回退 i18n 兜底），
+ * 固定六类走 i18n 标签。模板与编辑器共用这一个判据，避免「PDF 是原文、界面是标签」两份口径。
+ * @param section 待展示区块
+ * @param locale 目标语言
+ * @returns 已本地化 / 已取原文的纯文本标题（调用方插入 HTML 前仍需转义）
+ */
+export function displaySectionTitle(section: Section, locale: TemplateLocale): string {
+  if (section.kind === 'custom') {
+    const title = section.title.trim();
+    return title !== '' ? title : sectionLabel('custom', locale);
+  }
+  return sectionLabel(section.kind, locale);
 }
 
 /**
@@ -256,7 +277,7 @@ export function toEntryView(templateId: string, section: Section, entry: Entry, 
     pushOptional(lines, 'degree', fieldLabel('degree', locale));
     pushOptional(lines, 'major', fieldLabel('major', locale));
   } else {
-    // summary / skills：无必选槽，逐字段平铺。自由正文键 `text` 不配标签（否则会把键名 "text" 印进 PDF），
+    // summary / skills / custom：无必选槽，逐字段平铺。自由正文键 `text` 不配标签（否则会把键名 "text" 印进 PDF），
     // 其余仍走 fieldLabel——未登记键名照旧露出，与 `fieldLabel` 的「绝不渲染空白」口径一致。
     for (const field of entry.fields) {
       if (field.value === '') continue;

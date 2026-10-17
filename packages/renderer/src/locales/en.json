@@ -690,7 +690,8 @@
         "education": "Education",
         "skills": "Skills",
         "project": "Projects",
-        "campus": "Campus activities"
+        "campus": "Campus activities",
+        "custom": "Other"
       },
       "editor": {
         "heading": "Layout editor",

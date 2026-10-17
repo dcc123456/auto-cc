@@ -230,10 +230,12 @@ describe('4.1-06 损坏输入不抛异常', () => {
     expect(result.code).toBe(expectedCode);
   });
 
-  it('脱敏在 PDF 通道上也生效：邮箱不以原文出现在文档里', async () => {
+  it('正文脱敏在 PDF 通道上也生效：邮箱不以原文出现在区块里', async () => {
     const result = await parseResumeSource(minimalPdf(PDF_RESUME_LINES), 'doc-redact', NOW_MS);
     if (result.status !== 'ok') throw new Error('预期解析成功');
-    expect(JSON.stringify(result.document)).not.toContain('jane.doe@example.com');
+    // 2026-10-12 裁定：`profile.contact` 存原文（投递用的简历必须有真号码），脱敏范围收窄到正文/清单/实体/出网四处。
+    expect(JSON.stringify(result.document.sections)).not.toContain('jane.doe@example.com');
+    expect(result.document.profile.contact.email).toBe('jane.doe@example.com');
     expect(result.issues.some((issue) => issue.code === 'sensitive-redacted')).toBe(true);
   });
 });

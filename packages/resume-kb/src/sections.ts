@@ -300,12 +300,45 @@ export function splitEntryBlocks(kind: SectionKind, lines: readonly string[]): s
 }
 
 /**
+ * 一行认不出词典词的短标题，是否按**通用自定义要素** custom 收住。
+ *
+ * 这是「简历里系统预设要素之外的内容也不许丢」的兜底：证书 / 荣誉奖项 / 语言能力 / 兴趣爱好 /
+ * 专利 / 出版物等陌生标题都走这一道。判据从严，宁可漏切（内容仍留在上一区块正文里，不丢）
+ * 也不误切（误切不丢内容，但会在要素核对里制造一个假区块）：
+ * - 句末标点收尾（。！？；…）的是正文句子，不切；
+ * - 列表序号 / 项目符号开头（`- `、`1.`）的是条目，不切；
+ * - 带完整时间段抬头形状（`公司 职位 2021.03 - 2024.06`）的是经历条目标题，不切；
+ * - 强信号四只：Markdown 标题、整行加粗、冒号收尾；汉字序号那只只在抬头区 / summary / custom
+ *   之后认——它在四类结构化区块与技能区块里是**条目边界**信号（见 `isEntryHeader` 的 S1），
+ *   在那些区块里认成新要素会把一段经历拦腰截断。
+ * @param rawLine 未去装饰的原始行（Markdown / 加粗信号吃原始行）
+ * @param text 该行去装饰、去尾冒号后的文本（已保证非空且 ≤16 字）
+ * @param currentKind 当前所在区块种类；尚在抬头区为 `null`
+ * @returns 收为 custom 区块标题时为真
+ */
+function isCustomHeading(rawLine: string, text: string, currentKind: SectionKind | null): boolean {
+  if (SENTENCE_FINAL.test(text)) return false;
+  if (LIST_MARKUP_HEAD.test(rawLine)) return false;
+  if (hasHeaderPeriod(text)) return false;
+  // 内部还含冒号的是「键：值」正文行（`英语等级：CET-6`、`证书编号：xxx`），不是要素标题——
+  // 走到这里时尾部的冒号已经被 `classifyHeading` 摘掉，文本里再出现冒号就只能是内联的。
+  if (/[:：]/u.test(text)) return false;
+  if (MARKDOWN_HEADLINE.test(rawLine) || BOLD_WHOLE_LINE.test(rawLine) || /[:：]\s*$/u.test(rawLine.trimEnd())) {
+    return true;
+  }
+  const ordinalAllowed = currentKind === null || currentKind === 'summary' || currentKind === 'custom';
+  return ordinalAllowed && CJK_ORDINAL_HEAD.test(rawLine);
+}
+
+/**
  * 判断一行是否是区块标题并给出归类。
- * 要求「去装饰后足够短 + 等于或以词典词开头」，避免把正文当成标题。
+ * 要求「去装饰后足够短 + 等于或以词典词开头」，避免把正文当成标题；
+ * 词典认不出但带强标题信号的短行收进 `custom`（陌生要素不丢信息，见 `isCustomHeading`）。
  * @param line 原始行
+ * @param currentKind 当前所在区块种类（抬头区为 `null`），汉字序号兜底要用它区分区块标题与条目头
  * @returns 命中的区块种类与该行去装饰后的字面；不是标题时返回 `null`
  */
-function classifyHeading(line: string): { kind: SectionKind; title: string } | null {
+function classifyHeading(line: string, currentKind: SectionKind | null): { kind: SectionKind; title: string } | null {
   const text = stripLineMarkup(line).replace(/[:：]\s*$/, '');
   if (text === '' || [...text].length > MAX_HEADING_LENGTH) return null;
   const lower = text.toLowerCase();
@@ -315,7 +348,7 @@ function classifyHeading(line: string): { kind: SectionKind; title: string } | n
       if (lower === needle || lower.startsWith(needle)) return { kind, title: text };
     }
   }
-  return null;
+  return isCustomHeading(line, text, currentKind) ? { kind: 'custom', title: text } : null;
 }
 
 /**
@@ -336,21 +369,30 @@ function excerptOf(text: string): string {
 
 /**
  * 把一个区块内的条目块转成 `Section`。
+ * @param id 区块 id：固定六类即 kind 字符串；custom 为 `custom-1/2/…`（同文档可多块并存）
  * @param kind 区块种类，决定字段键（与 `resume-doc` 模板的槽位一致）
- * @param title 区块标题，保留简历原文（本地化标签由渲染轨按 kind 走 i18n）
+ * @param title 区块标题，保留简历原文（custom 的展示名就是它；固定六类由渲染轨按 kind 走 i18n）
  * @param blocks `splitEntryBlocks` 切出的条目块，每块首行是标题行
  * @param issues 待确认标记的收集数组（就地追加）
  * @returns 可直接放进 `ResumeDocument.sections` 的区块
  */
-function buildSection(kind: SectionKind, title: string, blocks: readonly string[][], issues: ParseIssue[]): Section {
+function buildSection(
+  id: string,
+  kind: SectionKind,
+  title: string,
+  blocks: readonly string[][],
+  issues: ParseIssue[],
+): Section {
   const entries = blocks.map((block, blockIndex) => {
-    const entryId = `${kind}-${String(blockIndex + 1)}`;
+    // custom 的区块 id 是 `custom-N`，条目再用 `custom-N` 前缀会与区块 id 撞号，故条目 id 挂区块 id 前缀
+    // （`custom-1-1`）；固定六类维持 `<kind>-<n>` 老形状，diff / 快照读数一字不变。
+    const entryId = `${kind === 'custom' ? id : kind}-${String(blockIndex + 1)}`;
     const [headerLine = '', ...bodyLines] = block;
     const missing = (fieldKey: string | null): void => {
       issues.push({ code: 'missing-field', sectionKind: kind, entryId, fieldKey, excerpt: excerptOf(headerLine) });
     };
 
-    if (kind === 'summary' || kind === 'skills') {
+    if (kind === 'summary' || kind === 'skills' || kind === 'custom') {
       return { id: entryId, fields: [makeField(kind, bodyKeyOf(kind), block.join('\n'))] };
     }
 
@@ -398,7 +440,7 @@ function buildSection(kind: SectionKind, title: string, blocks: readonly string[
     return { id: entryId, fields };
   });
 
-  return { id: kind, kind, title, entries };
+  return { id, kind, title, entries };
 }
 
 /**
@@ -430,29 +472,169 @@ function sensitiveIssues(rawText: string): ParseIssue[] {
 
 /**
  * 从抬头行挑姓名。
- * 规则刻意保守：只看第一条抬头行，含数字或 `@`（手机号、邮箱）就判定「没认出姓名」，
- * 因为抬头里排第二第三的常是城市与微信，猜出来会把地点当人名。
- * @param headerLines 第一个区块标题之前的抬头行（已去装饰、已脱敏）
- * @returns 姓名字面；认不出时返回 `null`
+ * 规则：只看第一条抬头行。**先摘掉行内的联系方式与城市**——真实简历的抬头常是「姓名｜电话｜城市」挤在
+ * 同一行，手机号带进来的数字会把姓名判定连累成「含数字即不是名字」（2026-10-12 用用户手里那份 PDF 撞上的一次）；
+ * 摘完之后仍含数字或 `@` 就照样判「没认出姓名」。
+ * @param headerLines 第一个区块标题之前的抬头行（**原文**，只用于就地判定，不外传）
+ * @returns 姓名字面；认不出时返回 `null`（绝不拿城市或岗位当人名，与 4.1-04 的「不猜填」同一条口径）
  */
 function pickName(headerLines: readonly string[]): string | null {
-  const [firstLine] = headerLines;
-  if (firstLine === undefined || firstLine === '') return null;
-  if (/[0-9@]/.test(firstLine)) return null;
-  const length = [...firstLine].length;
-  return length >= 2 && length <= 12 ? firstLine : null;
+  const [firstLine = ''] = headerLines;
+  const withoutContact = firstLine
+    .replace(piiPattern('phone'), ' ')
+    .replace(piiPattern('email'), ' ')
+    .replace(/https?:\/\/\S+/gi, ' ');
+  const city = pickLocation([withoutContact]);
+  const namePart = withoutContact
+    .split(HEADER_TOKEN_SPLIT)
+    .filter((token) => token !== '' && token !== city && !HEADER_LABEL_TOKENS.includes(token))
+    .join(' ')
+    .trim();
+  if (namePart === '' || /[0-9@]/.test(namePart)) return null;
+  const length = [...namePart].length;
+  return length >= 2 && length <= 12 ? namePart : null;
 }
 
-/** 用原文里的命中位置 + 核心掩码函数，给出「已脱敏的联系方式」；原文不落到模型里。 */
-function maskedContact(rawText: string, kind: 'email' | 'phone'): string | null {
+/** 抬头行里的分隔符（中英文标点都算，含全角竖线 `｜`——真实 PDF 的抬头就是用它的这一族）：
+ *  姓名与城市、联系方式在同一行时靠它们分开。 */
+const HEADER_TOKEN_SPLIT = /[\s|｜/·、,，;；::()（）[\]{}【】]+/;
+
+/** 抬头里跟在联系方式后面的纯标签词：它们永远不是姓名。 */
+const HEADER_LABEL_TOKENS: readonly string[] = [
+  '电话',
+  '手机',
+  '手机号',
+  '联系电话',
+  '邮箱',
+  '邮件',
+  '电子邮箱',
+  '邮箱地址',
+  '微信',
+  '微信号',
+  '地址',
+  '住址',
+  '籍贯',
+  '现居',
+  // 身份证号在入库前已掩码（4.1-09），抬头里只剩标签词；它与上面同族——既不能当姓名，
+  // 也不能在「其他信息」残块里留下一条光秃秃的「身份证」噪声。
+  '身份证',
+  '身份证号',
+];
+
+/** 不带「市」后缀也常出现在抬头里的城市写法（白名单，整词匹配）。 */
+const CITY_TOKENS: readonly string[] = [
+  '北京',
+  '上海',
+  '天津',
+  '重庆',
+  '广州',
+  '深圳',
+  '杭州',
+  '南京',
+  '成都',
+  '武汉',
+  '西安',
+  '苏州',
+  '长沙',
+  '郑州',
+  '青岛',
+  '厦门',
+];
+
+/**
+ * 抬头里的城市令牌。
+ * 中文简历抬头的城市绝大多数带「市」后缀；不带后缀的只有 `CITY_TOKENS` 这一小组高频写法，
+ * 所以按白名单整词认，认不出返回 `null` 交人工补——不建全城字典（§2.6 不为假想需求做抽象）。
+ * @param texts 待扫的抬头行（原文）
+ * @returns 第一个命中城市的字面令牌；没有则 `null`
+ */
+function pickLocation(texts: readonly string[]): string | null {
+  for (const text of texts) {
+    for (const token of text.split(HEADER_TOKEN_SPLIT)) {
+      const value = token.trim();
+      if (/^[\u4e00-\u9fa5]{2,3}市$/.test(value) || CITY_TOKENS.includes(value)) return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * 从原文里取第一条联系方式，**按字面**写进工作副本（用户裁定 2026-10-12：拿去投递的简历必须有真号码）。
+ * 4.1-09 的脱敏范围随之从「整份解析产物」收窄为四处：正文区块、待确认清单、实体表、出网载荷——
+ * 那四处仍然落掩码，联系方式只在本机的工作副本里以原文存在（§8.5 的默认脱敏没取消，只是换边界）。
+ * @param rawText 未脱敏的原始文本（只用于匹配）
+ * @param kind 联系方式种类
+ * @returns 命中的字面值；原文里没有该项时返回 `null`，不造一个假的出来
+ */
+function firstContact(rawText: string, kind: 'email' | 'phone'): string | null {
   const matched = [...rawText.matchAll(piiPattern(kind))][0];
-  return matched === undefined ? null : redactText(matched[0]);
+  return matched === undefined ? null : matched[0].trim();
+}
+
+/**
+ * 抬头区残留行兜底区块的标题：第一个区块标题之前、未被姓名 / 联系方式 / 城市认领的行
+ * （如「求职意向：后端工程师」、「github.com/xxx」）收进这一块 custom，逐行成条，不丢信息。
+ */
+const CUSTOM_HEADER_RESIDUAL_TITLE = '其他信息';
+
+/**
+ * 从抬头区里挑出**没被 profile 认领**的残行（custom 兜底，保证首个区块标题之前的内容也不丢）。
+ *
+ * 联系方式 / 链接 / 城市 / 姓名整词 / 纯标签词（「电话」「邮箱」）一律摘除——它们已经在
+ * `document.profile` 里有位置，再进正文就是重复。每行 surviving 文本成一条，空行丢弃。
+ * @param rawHeaderLines 抬头区原文行（已去 Markdown 装饰、未脱敏——本机工作副本允许原文联系方式）
+ * @param name `pickName` 的结果，用于整词摘除
+ * @param city `pickLocation` 的结果，用于整词摘除
+ * @returns 残行文本数组（一行一条 custom 条目）；无残留时为空数组
+ */
+function residualHeaderLines(rawHeaderLines: readonly string[], name: string | null, city: string | null): string[] {
+  const nameTokens = new Set(
+    name === null
+      ? []
+      : name
+          .split(HEADER_TOKEN_SPLIT)
+          .map((token) => token.trim())
+          .filter((token) => token !== ''),
+  );
+  const residual: string[] = [];
+  for (const line of rawHeaderLines) {
+    const cleaned = line
+      .replace(/https?:\/\/\S+/giu, ' ')
+      .replace(piiPattern('id'), ' ')
+      .replace(piiPattern('phone'), ' ')
+      .replace(piiPattern('email'), ' ');
+    const tokens = cleaned
+      .split(HEADER_TOKEN_SPLIT)
+      // HEADER_TOKEN_SPLIT 的字符类漏了全角「：」（既有瑕疵，不动它以免波及姓名判定），
+      // 在摘除标签词前把每个词首尾的冒号先剥掉，「电话：」才会正确落成可被滤除的标签词。
+      .map((token) =>
+        token
+          .trim()
+          .replace(/^[:：]+|[:：]+$/gu, '')
+          .trim(),
+      )
+      .filter(
+        (token) => token !== '' && !nameTokens.has(token) && token !== city && !HEADER_LABEL_TOKENS.includes(token),
+      );
+    const text = tokens.join(' ').trim();
+    // 单字残片（标点 / 装饰）不收；真实信息至少两个字符。
+    if ([...text].length >= 2) residual.push(text);
+  }
+  return residual;
+}
+
+/** 解析中途的一个区块桶：固定六类的 `id` 即 kind；custom 装配时再按文档序编号。 */
+interface HeadingBucket {
+  id: string | null;
+  kind: SectionKind;
+  title: string;
+  blocks: string[][];
 }
 
 /**
  * 把一份纯文本 / Markdown 简历解析成 P3.1 文档模型。
  *
- * 流程：整篇先过 `redactText`（4.1-09 的落点，之后全程只接触掩码文本）→ 按词典行切区块 →
+ * 流程：整篇先过 `redactText`（4.1-09 的落点，之后区块正文与待确认清单只接触掩码文本）→ 按词典行切区块 →
  * 区块内由 `splitEntryBlocks` 切条目（空行 + 4.1-15 的四信号；技能按 4.1-16 的一条逻辑行）→
  * 首行拆「公司 · 职位 + 时间段」→ 其余行作成果 / 职责正文。
  * 同一区块种类多次出现（分栏简历常见）合并进同一个 `Section`，以守住「区块 id 按 kind 唯一」的 diff 前提。
@@ -481,11 +663,24 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
   }
 
   const issues: ParseIssue[] = sensitiveIssues(raw);
-  const safe = redactText(raw);
+  /**
+   * 逐行掩码（不是整篇一次）：`PII_VALUE_PATTERNS` 的三条判据都不吃换行，两种写法结果相同，
+   * 但逐行能让"原文行"和"掩码行"按序号一一对齐——姓名与城市必须看原文那一行（下面 4.9-b 的抬头区）。
+   */
+  const rawLines = raw.split('\n');
+  const safeLines = rawLines.map((line) => redactText(line));
 
   const headerLines: string[] = [];
-  const buckets = new Map<SectionKind, { kind: SectionKind; title: string; blocks: string[][] }>();
-  let current: { kind: SectionKind; title: string; blocks: string[][] } | null = null;
+  /** 抬头区的原文行（与 `headerLines` 同序）：掩码后的手机号自带数字，会把姓名判定连累成「含数字即不是名字」。 */
+  const rawHeaderLines: string[] = [];
+  /**
+   * 区块桶按插入序排列：固定六类以 kind 为键（同类多次出现仍合并，守住 diff 的「区块 id 按 kind 唯一」前提）；
+   * custom 每次出现都是新桶（`custom#n` 临时键），装配时按文档序编成 `custom-1/2/…`，允许同名多块并存。
+   */
+  const buckets = new Map<string, HeadingBucket>();
+  let current: HeadingBucket | null = null;
+  /** custom 桶的自增临时键（与装配时的 custom-N 编号无关，只求 Map 键不撞）。 */
+  let customBucketCount = 0;
   /** 当前区块这一段连续的物理行（含空行、未去装饰）——条目边界由 `splitEntryBlocks` 在这一段上判。 */
   let run: string[] = [];
 
@@ -495,23 +690,32 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
     run = [];
   };
 
-  for (const line of safe.split('\n')) {
-    const heading = classifyHeading(line);
+  for (const [lineIndex, line] of safeLines.entries()) {
+    const heading = classifyHeading(line, current?.kind ?? null);
     if (heading !== null) {
       flushRun();
-      const existing = buckets.get(heading.kind);
-      if (existing === undefined) {
-        current = { kind: heading.kind, title: heading.title, blocks: [] };
-        buckets.set(heading.kind, current);
+      if (heading.kind === 'custom') {
+        current = { id: null, kind: 'custom', title: heading.title, blocks: [] };
+        customBucketCount += 1;
+        buckets.set(`custom#${String(customBucketCount)}`, current);
       } else {
-        current = existing;
+        const existing = buckets.get(heading.kind);
+        if (existing === undefined) {
+          current = { id: heading.kind, kind: heading.kind, title: heading.title, blocks: [] };
+          buckets.set(heading.kind, current);
+        } else {
+          current = existing;
+        }
       }
       continue;
     }
     if (current === null) {
       // 抬头区：只要非空的纯文字，姓名与联系方式各按自己的规则从这里挑（4.1-04 / 4.1-09）。
       const content = stripLineMarkup(line);
-      if (content !== '') headerLines.push(content);
+      if (content !== '') {
+        headerLines.push(content);
+        rawHeaderLines.push(stripLineMarkup(rawLines[lineIndex] ?? ''));
+      }
       continue;
     }
     run.push(line);
@@ -520,12 +724,12 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
 
   const document = createEmptyDocument(docId, nowMs);
   document.profile.contact = {
-    email: maskedContact(raw, 'email'),
-    phone: maskedContact(raw, 'phone'),
-    location: null,
+    email: firstContact(raw, 'email'),
+    phone: firstContact(raw, 'phone'),
+    location: pickLocation(rawHeaderLines),
   };
 
-  const name = pickName(headerLines);
+  const name = pickName(rawHeaderLines);
   if (name === null) {
     issues.push({
       code: 'missing-field',
@@ -537,21 +741,48 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
   }
   document.profile.name = name ?? '';
 
-  if (buckets.size === 0) {
+  // 抬头区残留（求职意向行等）先占 custom-1 并排在最前；其后扫描到的 custom 桶按文档序继续编号。
+  // 只在简历**至少扫出一个区块**时启用兜底——整篇连一个标题都没有的长散文本仍走 unknown-section
+  // 失败路径（4.1-04），不能把整段散文包装成「其他信息」伪装成解析成功。
+  let customOrdinal = 0;
+  const residuals = residualHeaderLines(rawHeaderLines, name, document.profile.contact.location);
+  if (buckets.size > 0 && residuals.length > 0) {
+    customOrdinal += 1;
+    document.sections.push(
+      buildSection(
+        `custom-${String(customOrdinal)}`,
+        'custom',
+        CUSTOM_HEADER_RESIDUAL_TITLE,
+        residuals.map((line) => [line]),
+        issues,
+      ),
+    );
+  }
+
+  for (const bucket of buckets.values()) {
+    const id = bucket.kind === 'custom' ? `custom-${String(++customOrdinal)}` : (bucket.id ?? bucket.kind);
+    const section = buildSection(id, bucket.kind, bucket.title, bucket.blocks, issues);
+    if (section.entries.length === 0 && section.kind !== 'custom') {
+      issues.push({
+        code: 'missing-field',
+        sectionKind: section.kind,
+        entryId: null,
+        fieldKey: null,
+        excerpt: bucket.title,
+      });
+    }
+    document.sections.push(section);
+  }
+
+  // 一个区块都没落出来（连 custom 兜底都没有）才报「未识别」：这时整篇文本无法结构化成简历。
+  if (document.sections.length === 0) {
     issues.push({
       code: 'unknown-section',
       sectionKind: null,
       entryId: null,
       fieldKey: null,
-      excerpt: excerptOf(headerLines[0] ?? safe),
+      excerpt: excerptOf(headerLines[0] ?? safeLines.join('\n')),
     });
-  }
-  for (const [kind, bucket] of buckets) {
-    const section = buildSection(kind, bucket.title, bucket.blocks, issues);
-    if (section.entries.length === 0) {
-      issues.push({ code: 'missing-field', sectionKind: kind, entryId: null, fieldKey: null, excerpt: bucket.title });
-    }
-    document.sections.push(section);
   }
 
   return { status: 'ok', document, issues, textLength };

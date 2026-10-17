@@ -18,6 +18,7 @@ export const PARAGRAPH_KIND_ORDER: readonly SectionKind[] = [
   'skills',
   'project',
   'campus',
+  'custom',
 ];
 
 /** 一条段落样式里全部可设的轴（模型层的字段名；顺序即规范序）。 */

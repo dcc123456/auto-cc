@@ -138,6 +138,52 @@ describe('3.1-03 事实锁定：篡改已锁字段被拦，改非锁字段放行
   });
 });
 
+describe('custom 通用自定义要素（陌生简历要素不丢信息）', () => {
+  it('custom 区块合法：原文标题 + 多块并存（id 各不同）+ text 正文', () => {
+    const raw = {
+      ...createEmptyDocument('r', 0),
+      sections: [
+        {
+          id: 'custom-1',
+          kind: 'custom',
+          title: '证书',
+          entries: [{ id: 'custom-1-1', fields: [makeField('custom', 'text', 'CET-6（586）')] }],
+        },
+        {
+          id: 'custom-2',
+          kind: 'custom',
+          title: '兴趣爱好',
+          entries: [{ id: 'custom-2-1', fields: [makeField('custom', 'text', '长跑、摄影')] }],
+        },
+      ],
+    };
+    const result = validateDocument(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.issues.map((i) => i.message).join('; '));
+    expect(result.document.sections.map((s) => s.title)).toEqual(['证书', '兴趣爱好']);
+  });
+
+  it('custom 的 text 字段不是事实锁字段（用户自己的素材，允许在母版上编辑）', () => {
+    const raw = {
+      ...createEmptyDocument('r', 0),
+      sections: [
+        {
+          id: 'custom-1',
+          kind: 'custom',
+          title: '荣誉奖项',
+          entries: [{ id: 'custom-1-1', fields: [makeField('custom', 'text', '国家奖学金')] }],
+        },
+      ],
+    };
+    const result = validateDocument(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const field = result.document.sections[0]!.entries[0]!.fields[0]!;
+    expect(field.locked).toBe(false);
+    expect(field.factKey).toBeNull();
+  });
+});
+
 describe('4.5-03 生成轨口径：只有白名单里的键可改写，其余原样引用', () => {
   /** 一份同时含「锁定事实 + 可改写正文 + 模型未标锁的事实字段」的基线，用来证明两道判据各管一段。 */
   const baseline: ResumeDocument = {

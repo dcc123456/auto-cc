@@ -32,7 +32,15 @@ export interface ImportResult {
   warnings: ImportWarning[];
 }
 
-const SECTION_KINDS = new Set<SectionKind>(['summary', 'experience', 'education', 'skills', 'project', 'campus']);
+const SECTION_KINDS = new Set<SectionKind>([
+  'summary',
+  'experience',
+  'education',
+  'skills',
+  'project',
+  'campus',
+  'custom',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

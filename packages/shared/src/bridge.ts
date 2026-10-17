@@ -1417,7 +1417,7 @@ export interface PdfSaveAsReceiptView {
 }
 
 /** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
-export type ResumeSectionKindView = 'summary' | 'experience' | 'education' | 'skills' | 'project' | 'campus';
+export type ResumeSectionKindView = 'summary' | 'experience' | 'education' | 'skills' | 'project' | 'campus' | 'custom';
 
 /** 变更类型（镜像 resume-doc 的 `ChangeType`）。 */
 export type SnapshotChangeTypeView = 'added' | 'removed' | 'modified';

@@ -830,7 +830,8 @@
         "education": "教育背景",
         "skills": "技能",
         "project": "项目经历",
-        "campus": "校园经历"
+        "campus": "校园经历",
+        "custom": "其他信息"
       },
       "pendingUnnamed": "没读出姓名的那一份"
     },

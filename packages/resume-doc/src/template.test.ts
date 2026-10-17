@@ -354,6 +354,34 @@ describe('安全：数据值 HTML 转义（注入面在打印视图，必须封�
   });
 });
 
+describe('custom 通用自定义要素：陌生标题按原文渲染，内容不丢', () => {
+  const customSection: Section = {
+    id: 'custom-1',
+    kind: 'custom',
+    title: '证书',
+    entries: [
+      { id: 'custom-1-1', fields: [makeField('custom', 'text', 'CET-6（586）')] },
+      { id: 'custom-1-2', fields: [makeField('custom', 'text', 'PMP 项目管理认证')] },
+    ],
+  };
+
+  it('三套模板都把原文标题「证书」与条目正文排出来', () => {
+    const d = doc({ sections: [customSection] });
+    for (const id of ['classic', 'modern', 'minimal']) {
+      const html = resumeTemplate.render(d, id, 'zh-CN');
+      expect(textOnly(html)).toContain('证书');
+      expect(html).toContain('CET-6');
+      expect(html).toContain('PMP 项目管理认证');
+    }
+  });
+
+  it('custom 标题是用户原文，不走 i18n 固定标签', () => {
+    const d = doc({ sections: [{ ...customSection, title: '语言能力' }] });
+    const html = resumeTemplate.render(d, 'classic', 'en');
+    expect(textOnly(html)).toContain('语言能力');
+  });
+});
+
 describe('3.2-10 抽取来源记录：全部 clean-room 重写，未搬 ai-resume 代码', () => {
   it('每套模板 origin 标记为重写，且许可门禁未被本包触发', () => {
     for (const t of resumeTemplate.list()) {

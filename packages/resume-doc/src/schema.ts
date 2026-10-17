@@ -24,7 +24,7 @@ import {
 const factKeySchema = zod.enum(['company', 'role', 'period', 'achievement']);
 
 /** 区块种类（样式层按它寻址段落，所以与 `sectionSchema` 共用一份枚举，§2.5 一个判据一个出处）。 */
-const sectionKindSchema = zod.enum(['summary', 'experience', 'education', 'skills', 'project', 'campus']);
+const sectionKindSchema = zod.enum(['summary', 'experience', 'education', 'skills', 'project', 'campus', 'custom']);
 
 /** 字重档枚举：清单在 `model.ts`（编辑器的输入闸门与界面都用它，不各抄一份）。 */
 const fontWeightSchema = zod.enum(FONT_WEIGHT_TOKENS);

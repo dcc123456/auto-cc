@@ -10,6 +10,8 @@
  * - `section`：`summary / education / campus` 这三类**裁定二明确不建实体行**的区块，
  *   按区块内的 entry 一条一切片。`entities.ts` 头部注释把这三类的检索归属许给了 4.3-11，
  *   补不上它们就等于「简历里这三段永远检索不到」，那是能力缺口而不是简化。
+ *   `custom`（证书 / 荣誉 / 兴趣等陌生要素）同走这一支：它们也不建实体行，但同样要能被
+ *   JD 检索与区块排序引用到，否则「按 JD 生成」会把这些素材静默漏掉。
  *
  * `tokens` 是**写入侧预分词**的结果（plan §4.3 预分词小节的口径 2）：内置 SQLite 没有 bigram tokenizer，
  * `trigram` 对两字查询恒不命中，所以把正文切成双字 token 再以空格连接入库，查询侧同一把尺子切，
@@ -26,8 +28,11 @@ export const KB_CHUNK_KINDS = ['entity', 'section'] as const;
 /** 切片来源种类。 */
 export type KbChunkKind = (typeof KB_CHUNK_KINDS)[number];
 
-/** 不建实体行、只能按区块级切片索引的三类区块（与 `entities.ts` 的裁定二互补）。 */
-export const KB_SECTION_CHUNK_KINDS: readonly SectionKind[] = ['summary', 'education', 'campus'];
+/**
+ * 不建实体行、只能按区块级切片索引的区块种类（与 `entities.ts` 的裁定二互补）。
+ * custom 在此：陌生要素不建专属实体表，但每条 custom 条目都是可检索 / 可被 JD 排序引用的切片。
+ */
+export const KB_SECTION_CHUNK_KINDS: readonly SectionKind[] = ['summary', 'education', 'campus', 'custom'];
 
 /** 派生出的一条切片（尚未落库的形态）。 */
 export interface KbChunkDraft {
@@ -97,8 +102,8 @@ function sectionChunkId(sourceDocId: string, sectionKind: SectionKind, entryId: 
 /**
  * 由一份简历文档派生区块级切片（spec 4.3-11 里「按实体自然分层」之外的另一半）。
  * @param document 已通过 P3.1 校验的简历文档
- * @returns 只含 `summary / education / campus` 三类区块内 entry 的切片，顺序为文档里的区块顺序与条目顺序；
- *          这三类区块不存在时返回空数组，不报错（缺失区块本来就要能正常渲染，见 3.1-04）
+ * @returns 只含 `summary / education / campus / custom` 区块内 entry 的切片，顺序为文档里的区块顺序与条目顺序；
+ *          这些区块不存在时返回空数组，不报错（缺失区块本来就要能正常渲染，见 3.1-04）
  */
 export function deriveSectionChunks(document: ResumeDocument): readonly KbChunkDraft[] {
   const drafts: KbChunkDraft[] = [];

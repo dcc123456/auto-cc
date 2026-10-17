@@ -133,15 +133,25 @@ export interface Entry {
 /**
  * 区块种类。缺失某类区块必须能正常渲染（3.1-04），所以文档里只放「实际存在」的区块，
  * 而不是给每种都留一个空占位；`sections` 的顺序即用户意图顺序，normalize / diff 都不重排。
+ *
+ * `custom` 是**通用自定义要素**：解析时遇到六类固定要素之外的标题（证书 / 荣誉奖项 / 语言能力 /
+ * 兴趣爱好 / 专利等）一律收进 custom 区块，原文标题存在 `Section.title`，保证简历信息不丢。
+ * 与固定六类不同，custom 允许同文档多块并存（id 为 `custom-1/2/…`），标题即用户原文。
  */
-export type SectionKind = 'summary' | 'experience' | 'education' | 'skills' | 'project' | 'campus';
+export type SectionKind = 'summary' | 'experience' | 'education' | 'skills' | 'project' | 'campus' | 'custom';
 
 /** 区块：一组同类条目及其标题。 */
 export interface Section {
-  /** 区块稳定 id（按 kind 唯一，供 diff 对齐）。 */
+  /**
+   * 区块稳定 id（供 diff 对齐）。固定六类按 kind 唯一（id 即 kind）；
+   * custom 可多块并存，id 为 `custom-1/2/…`（位置号，稳定性 caveat 同 entry id）。
+   */
   id: string;
   kind: SectionKind;
-  /** 区块标题（纯文本；本地化标签由渲染轨按 kind 走 i18n，不进模型，见 3.2-06）。 */
+  /**
+   * 区块标题（纯文本）。固定六类的展示名由渲染轨按 kind 走 i18n；
+   * custom 区块以本字段为准（简历原文标题），是它真正的展示名。
+   */
   title: string;
   entries: Entry[];
 }
@@ -281,6 +291,6 @@ export const GENERATION_EDITABLE_KEYS = ['text', 'achievement', 'description'] a
  * @returns 正文键：简介与技能是 `text`，教育是 `description`，经历 / 项目 / 校园是 `achievement`
  */
 export function bodyKeyOf(kind: SectionKind): string {
-  if (kind === 'summary' || kind === 'skills') return 'text';
+  if (kind === 'summary' || kind === 'skills' || kind === 'custom') return 'text';
   return kind === 'education' ? 'description' : 'achievement';
 }
