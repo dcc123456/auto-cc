@@ -16,7 +16,7 @@
 1. 用户用自己的 BOSS 账号在 app 内扫码登录后，**真实搜索**能搜到 JD 并 ≥10 条入 `jobs` 表（兑现 M3 / 重开 `2.3-10`）；
 2. **真实打招呼**发得出、页面状态行回读到「已送达」字样、且每笔在 `usage_ledger` 有账（兑现 M4 / 重开 `2.5-11`）；
 3. **真实投递**简历经人确认后送达并落 `delivery_records`；
-4. agent 的模型腿接上已就位的 `@auto-cc/llm`，对话主界面不再回确定性模板。
+4. agent 的模型通道接上已就位的 `@auto-cc/llm`，对话主界面不再回确定性模板。
 
 **边界（明确不做，AGENTS.md §8.3 + master plan §8 原样）**：
 
@@ -113,7 +113,7 @@ spec 8.2-03 已按实测收窄，不是让步。
 | 8.3 | 真实搜索 + 抓取 ≥10 条入 `jobs`（字段完整率如实播报）                                                                                                                                                                    | 要               | V-人工               |
 | 8.4 | 真实打招呼：外发通道遇 `unverified` 定位即 `LOCATOR_UNVERIFIED` 失败；1 条真实送达且账本有行                                                                                                                             | 要               | V-人工               |
 | 8.5 | 真实投递：`input[type=file]`（预期 `requireActionable:false`）+ 人确认 + 落 `delivery_records`                                                                                                                           | 要               | V-人工               |
-| 8.6 | `loop/model-gateway.ts` 接 `llm.chat`，`agent-loop` 配置键 `model:'stub'\|'gateway'`（默认 `stub`）；聊天模板腿接同一网关；LLM 输出按不可信输入过 `knownToolIds` 与工具 `strictObject`                                   | 不要             | U+V+V-人工（连通性） |
+| 8.6 | `loop/model-gateway.ts` 接 `llm.chat`，`agent-loop` 配置键 `model:'stub'\|'gateway'`（默认 `stub`）；聊天模板那一路接同一网关；LLM 输出按不可信输入过 `knownToolIds` 与工具 `strictObject`                                   | 不要             | U+V+V-人工（连通性） |
 | 8.7 | `entitlement.mode` 由 `unlimited` 收 `daily`；`demo.*` 改名 `fixture.*`；`outbound` 样例端点默认 null；`resume.customize` 变实或按 §2.4 删除                                                                             | 不要             | U+C                  |
 | 8.8 | 内嵌视图几何换边（2026-10-08 用户点名"网页显示不全 / 要自适应、滚动、全屏"）：渲染层 `ResizeObserver` 量槽位 → `shell.setKernelViewBounds` → `slot-bounds.ts` 纯函数钳制；工具行（收窄/加宽/展开）摆在视图盖不住的那一行 | 要（真站点读数） | U+V+V-人工           |
 | 8.9 | 猎聘第二家：验证 8.1 的抽象是否真的通用（新平台包 + 在场取证，另立切片）                                                                                                                                                 |
@@ -132,7 +132,7 @@ spec 8.2-03 已按实测收窄，不是让步。
 - **候选三是引入 Portal/浮层组件库来摆工具行**。否决——工具行只要落在上报矩形**之外**就天然可点（原生视图造成的是命中测试遮挡，
   不是 z 序竞争），为这一条加依赖不值当（§2.6 不为假想需求做抽象）。
 - 落点选择：钳制与兜底写成 `packages/shell/src/slot-bounds.ts` 的**纯函数**（不 import electron），
-  于是负腿（非有限、非正、无交集）在单测里就能判，不必在活体上制造非法几何；滚动一律交还给页面自己
+  于是负向判据（非有限、非正、无交集）在单测里就能判，不必在活体上制造非法几何；滚动一律交还给页面自己
   （视图尺寸 = 站点视口尺寸，`ResizeObserver` 只负责让这条等式在改窗口/换档/展开时重新成立）。
 - 几何偏好只落渲染层 localStorage（`auto-cc.kernel-slot-width`），**不新建迁移**：`plugins.saveConfig` 那条路重启即失，
   而为一只宽度档开表不值当（与 `MetricsPanel` 的区间档同一条裁定）。展开态不落盘是刻意的——
@@ -341,7 +341,7 @@ spec 8.2-03 已按实测收窄，不是让步。
     而遮罩承诺的"此刻只有这一张卡片可点"在重叠区根本不成立——站点页面在那里照常接得住鼠标，Tab 也能走进被盖住的格子。
     ⇒ 这片的处置是**绕开而不是修**：签字前用 `sessions.close()` 卸载视图，签完再重开（本轮就是这么走过 8.3-01 的）。
     真修要的是"把遮罩画到原生视图之上"的能力，属于渲染层那一片（6.2 的遮罩互斥族），不在 P8 里顺手改；
-    同一条负腿与 **6.2-13** 记的是同一类缺口（遮罩盖不住 ≠ 背后不可达），到那一片一起裁。
+    同一条负向判据与 **6.2-13** 记的是同一类缺口（遮罩盖不住 ≠ 背后不可达），到那一片一起裁。
 12. **抽取的截断信号在适配器那一层就被丢掉了，所以 8.3-03 的"界面报被截断"现在根本无从报起**
     （8.3-01 现场证实的缺陷，2026-10-08；读数 `8.3-01-real-search.txt` 第三节）：
     `cordis.yml:198` 的 `browser.page.extractRowLimit: 12` 在 15 张卡片在场时把单轮抽取截到 12 条，
@@ -420,7 +420,7 @@ spec 8.2-03 已按实测收窄，不是让步。
       `approve-<approvalId>`），而 `agent-pause-notice` 那句「批准这一步 失败：确认单 be6c7…」
       直接证明用户在对话屏点过、只是落在到期之后。所以第一发空转的根因是**表态窗口太短 + 我给的位置是错的**。
     - 仍然成立的两条：① 同一时刻 DOM 里有**两只 `data-action="approve-<同一个 id>"`**，
-      岗位屏那一只在用户停在对话屏时量出宽度 0（祖先 `display:none`，6.2-25 的负腿同一形态），
+      岗位屏那一只在用户停在对话屏时量出宽度 0（祖先 `display:none`，6.2-25 的负向判据同一形态），
       所以按 `data-action` 程序化找卡会打错（§9 实测 5.4-b 的⑦ 同一条：同名选择器命中隐藏那一份）；
       ② 有尺寸的那一只也可能被吸顶 header 压住中心点（本轮 `y 34` 命中 `header`，
       `scrollIntoView({block:'center'})` 后 `y 405`、`isSelf:true` 才点得到）⇒ 缺 `scroll-margin-top`。
