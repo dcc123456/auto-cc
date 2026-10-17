@@ -30,6 +30,7 @@ import { DEMO_RESUME_DOC_ID } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
 import { formatClock } from './format';
 import { GapPanel } from './GapPanel';
+import { ChunkReviewSection } from './ChunkReviewSection';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
 import { PdfPaperView } from './PdfPaperView';
@@ -96,6 +97,18 @@ const FORMAT_LABEL_KEY = {
   markdown: 'resume.formatMarkdown',
   text: 'resume.formatText',
 } as const;
+
+/**
+ * 简历屏顶部分步引导的四步（resume chunk flow 片 4）：顺序就是两条用户流程——
+ * 首次：①导入 → ②核对要素 → ③贴 JD 生成 → ④编辑导出；后续：直接 ③→④，①②保持可回查。
+ * `sectionId` 既是 DeskSection 的持久开合键，也是点击跳转的目标；一颗事实不抄第二份（§2.5）。
+ */
+const RESUME_STEPS = [
+  { sectionId: 'resume.doc', labelKey: 'desk.resume.step1' },
+  { sectionId: 'resume.review', labelKey: 'desk.resume.step2' },
+  { sectionId: 'resume.generate', labelKey: 'desk.resume.step3' },
+  { sectionId: 'resume.output', labelKey: 'desk.resume.step4' },
+] as const;
 
 /**
  * 取一条本机路径的**末段名字**（两个分隔符都吃：mac 的 `/` 与 Windows 的 `\`）。
@@ -212,6 +225,44 @@ export function ResumeDesk() {
   const trail = useViewTrail();
 
   /**
+   * 分步引导的「跳进」信号（resume chunk flow 片 4）：每格 DeskSection 各认一个自增数，
+   * 变了就强制展开该格——与 view trail 那一跳同机制（`useSectionOpen` 的 openSignal），不另造开关。
+   * 键是段 id（`resume.doc` / `resume.review` / `resume.generate` / `resume.output`）；
+   * 值是递增计数而不是时间戳：trail 跳来的 requestId 与点步骤条是两路来源，只有各自加一才能
+   * 让两路都产生触发沿（取 max 会让小计数的 trail 被时间戳永久压住）。
+   */
+  const [stepSignals, setStepSignals] = useState<Record<string, number>>({});
+
+  /**
+   * 跳到某一步：把目标段强制展开（信号加一），下一帧再滚到它的段头。
+   *
+   * 两帧的延迟是刻意的：信号写入 → DeskSection 的 effect 把收起态正文挂回 DOM（正文收起时是真卸载），
+   * 同一帧里查询找不到节点。用双 rAF 等「信号落 state」与「正文挂载」两次提交走完。
+   * @param sectionId 目标段 id
+   */
+  const jumpToSection = useCallback((sectionId: string): void => {
+    setStepSignals((previous) => ({ ...previous, [sectionId]: (previous[sectionId] ?? 0) + 1 }));
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(`[data-testid="resume-section-${sectionId.slice('resume.'.length)}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }, []);
+
+  // 岗位行双击跳进简历屏（09 稿形态⑥）：那一跳也折成「③ 生成段」的一个信号沿，
+  // 与步骤条共用同一支 openSignal，不给 DeskSection 喂第二个开关。
+  const trailRequestId = trail?.targetView === 'resume' ? trail.requestId : undefined;
+  useEffect(() => {
+    if (trailRequestId === undefined) return;
+    setStepSignals((previous) => ({
+      ...previous,
+      'resume.generate': (previous['resume.generate'] ?? 0) + 1,
+    }));
+  }, [trailRequestId]);
+
+  /**
    * 重读库里的简历清单，并把「当前那一份」接上。
    *
    * 这一口是三处共用的（挂进来的 `GeneratePanel` 也吃它，§2.2 不留第二份实现）：清单里还有当前这一份
@@ -261,9 +312,29 @@ export function ResumeDesk() {
         setTemplateId(pref.value.templateId);
         setDefaultTemplateId(pref.value.templateId);
       }
-      await read();
     })();
+    // 文档清单 / 待确认 / 来路不跟模板偏好串行：模板枚举在冷 userData 上可能慢，
+    // 简历清单不该被它堵在空态（活体 e2e 抓到切到简历视图十秒仍「库里还没有简历」）。
+    void read();
   }, [bridge, read]);
+
+  /**
+   * 工作台切换是 `hidden` 显隐、不是卸载（App 1.10-01）：ResumeDesk 随应用启动就挂载，
+   * 若简历是在别的视图（或桥通道）落库的，切回本视图时挂载 effect 不会再跑，清单就停在旧读数。
+   * 于是每「重新可见」都重读一次——读数只以主进程当下状态为准（§2.5），不靠屏内事件凑刷新。
+   */
+  useEffect(() => {
+    const host = document.querySelector<HTMLElement>('[data-view-scroll="resume"]');
+    if (!host || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void read();
+      },
+      { threshold: 0 },
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [read]);
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
 
   /**
@@ -294,6 +365,8 @@ export function ResumeDesk() {
         setDocId(value.docId);
         // 清掉上一份的纸：新文档还没出过纸，留着的是一张挂着新身份的旧画面。
         setPaperHtml(undefined);
+        // 首次使用流程：导入成功后自动展开并滚到「② 核对要素」（scanned 还停在待确认、尚未入库，不跳）。
+        if (value.status === 'imported') jumpToSection('resume.review');
       },
       onError: setImportError,
       // 回执里印的是**人刚选中的那个文件名**，不是 `resume-1a2b`：这一句要说得出"是哪一份"，
@@ -695,6 +768,46 @@ export function ResumeDesk() {
                 </Banner>
               )}
 
+              {/* 分步引导条（片 4）：四步顺序固定，点击强制展开并滚到对应段。
+            空库时②③④按不动并给出原因（先导入），①挂「从这步开始」；库里有素材后③挂「再次使用从这步开始」——
+            生成段本身 defaultOpen，所以后续使用进门就能直接贴 JD，不必先碰①②。 */}
+              <nav
+                data-testid="resume-steps"
+                aria-label={t('desk.resume.stepsHeading')}
+                className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-line bg-ink-900/60 px-2 py-1.5"
+              >
+                <span className="text-[11px] text-slate-500">{t('desk.resume.stepsHeading')}</span>
+                {RESUME_STEPS.map((step, index) => {
+                  const isFirst = index === 0;
+                  const isGenerateStep = step.sectionId === 'resume.generate';
+                  const libraryEmpty = docs.length === 0;
+                  const blocked = !isFirst && libraryEmpty;
+                  const isEntryHint = (isFirst && libraryEmpty) || (isGenerateStep && !libraryEmpty);
+                  return (
+                    <span key={step.sectionId} className="flex items-center gap-1">
+                      <DeskButton
+                        action={`resume-step-${step.sectionId.slice('resume.'.length)}`}
+                        variant="ghost"
+                        compact
+                        disabled={blocked}
+                        disabledReason="resume-empty-library"
+                        disabledReasonLabel={t('desk.resume.stepsEmptyReason')}
+                        markers={{ step: String(index + 1) }}
+                        onClick={() => jumpToSection(step.sectionId)}
+                      >
+                        <span className="text-[11px] text-slate-500">{String(index + 1)}</span>
+                        {t(step.labelKey)}
+                      </DeskButton>
+                      {isEntryHint && (
+                        <Tag tone="celadon" data-testid="resume-step-entry">
+                          {libraryEmpty ? t('desk.resume.stepsFromStart') : t('desk.resume.stepsFromGenerate')}
+                        </Tag>
+                      )}
+                    </span>
+                  );
+                })}
+              </nav>
+
               {/* ① 挑一份简历（段名 2026-10-10 换成人话，spec 6.4-15）：库里那份 + 从本机导入那一步。
             原来独占一格的「事实核对」拆成两半各归其位——**没读准的地方**是这一步的产出，所以那一句提醒留在这里；
             素材与缺口是"回头要核对的东西"，不是一步，降到下面那一格披露层里（裁定㉕ 第 2 条）。
@@ -704,6 +817,7 @@ export function ResumeDesk() {
                 title={t('desk.resume.sectionDoc')}
                 summary={docLabel ?? t('desk.resume.sectionDocEmpty')}
                 defaultOpen
+                openSignal={stepSignals['resume.doc']}
                 markers={{ testid: 'resume-section-doc' }}
                 headExtra={
                   // 裁定㉖ 第 2 条：收起态**只**把「选择文件」提到段头，别的都不提（提多了这一段就变成一整条工具栏）。
@@ -851,13 +965,16 @@ export function ResumeDesk() {
 
                   {lastImport && (
                     <div className="flex flex-wrap items-center gap-1" data-testid="resume-import-sections">
-                      {lastImport.sections.map((section) => (
+                      {lastImport.sections.map((section, index) => (
                         <span
-                          key={section.kind}
+                          key={`${section.kind}-${index}`}
                           data-testid="resume-import-section"
                           className="rounded border border-line px-1 text-[11px] text-slate-400"
                         >
-                          {t(`resume.kind.${section.kind}`)} · {section.entries}
+                          {section.kind === 'custom' && section.title.trim() !== ''
+                            ? section.title
+                            : t(`resume.kind.${section.kind}`)}{' '}
+                          · {section.entries}
                         </span>
                       ))}
                     </div>
@@ -949,7 +1066,27 @@ export function ResumeDesk() {
                 </div>
               </DeskSection>
 
-              {/* ② 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
+              {/* ② 核对要素：导入拆块的逐块查看与修改（resume chunk flow 片 3）。
+            只对母版开放：选中变体时组件内部只给一句「去选母版」，写调用在主进程还有同一判据兜底。
+            条件挂载与上面的 facts 披露层同口径——收起态不养读口与事件订阅。 */}
+              <DeskSection
+                id="resume.review"
+                title={t('desk.resume.sectionReview')}
+                summary={
+                  docLabel ? t('desk.resume.sectionReviewFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
+                }
+                openSignal={stepSignals['resume.review']}
+                markers={{ testid: 'resume-section-review' }}
+              >
+                <div className="flex min-w-0 flex-col gap-2">
+                  <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="review">
+                    {t('desk.resume.stepReviewHint')}
+                  </p>
+                  <ChunkReviewSection docId={docId} isVariant={currentDoc?.parentDocId != null} />
+                </div>
+              </DeskSection>
+
+              {/* ③ 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
               <DeskSection
                 id="resume.generate"
                 title={t('desk.resume.sectionGenerate')}
@@ -957,9 +1094,8 @@ export function ResumeDesk() {
                   docLabel ? t('desk.resume.sectionGenerateFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
                 }
                 defaultOpen
-                // 岗位行双击跳过来时（09 稿形态⑥ / spec 6.4-05）强制打开这一格：收起态下正文是卸载的，
-                // 人不该被送到一格看不见 JD 输入框的地方。
-                openSignal={trail && trail.targetView === 'resume' ? trail.requestId : undefined}
+                // 岗位行双击跳过来（trail effect 折成信号沿）与步骤条点③，共用这一支 openSignal。
+                openSignal={stepSignals['resume.generate']}
                 markers={{ testid: 'resume-section-generate' }}
               >
                 <div className="flex min-w-0 flex-col gap-2">
@@ -989,6 +1125,7 @@ export function ResumeDesk() {
                     : t('desk.resume.sectionOutputNone')
                 }
                 defaultOpen
+                openSignal={stepSignals['resume.output']}
                 markers={{ testid: 'resume-section-output' }}
               >
                 <div className="flex min-w-0 flex-col gap-3">
@@ -1303,6 +1440,7 @@ export function ResumeDesk() {
                           >
                             <Tag tone={CHANGE_TONE[section.change]}>{t(CHANGE_LABEL_KEY[section.change])}</Tag>
                             {t(`resume.kind.${section.kind}`)}
+                            {section.kind === 'custom' ? ` · ${section.sectionId}` : ''}
                           </p>
                           <ul className="mt-1 space-y-1 pl-3">
                             {section.entries.map((entry) => (

@@ -64,12 +64,21 @@ export {
 } from './richtext.js';
 export { diff, type ChangeType, type DocDiff, type EntryChange, type FieldChange, type SectionChange } from './diff.js';
 export { importExternal, type ImportResult, type ImportWarning } from './import.js';
-// 3.6-a 排版编辑器的模型通道：三条纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。
+// 3.6-a 排版编辑器的模型通道：纯操作（唯一的判据入口）与一只编辑会话（历史走 core 那唯一一份栈）。
 export {
+  CUSTOM_TITLE_MAX_CHARS,
   EDITOR_METRIC_BOUNDS,
+  planCustomSectionCreate,
+  planCustomSectionRename,
+  planEntryCreate,
+  planEntryMerge,
   planEntryMove,
+  planEntryRemove,
+  planEntrySplit,
+  planFieldText,
   planMetric,
   planSectionMove,
+  planSectionRemove,
   type EditorOutcome,
   type EditorRejectionCode,
   type MetricBound,

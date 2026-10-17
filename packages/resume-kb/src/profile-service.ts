@@ -33,7 +33,16 @@ import {
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
-import type { ResumeDocument } from '@auto-cc/plugin-resume-doc';
+import {
+  planCustomSectionCreate,
+  planCustomSectionRename,
+  planEntryCreate,
+  planEntryRemove,
+  planFieldText,
+  planSectionRemove,
+  type ResumeDocument,
+  type Section,
+} from '@auto-cc/plugin-resume-doc';
 import {
   KB_ENTITY_KINDS,
   type KbEntityDraft,
@@ -256,6 +265,63 @@ export interface KbSyncResult {
   readonly created: number;
   readonly updated: number;
   readonly removed: number;
+}
+
+/**
+ * 要素核对（chunk review）对**母版**的一批结构编辑操作（`revise` 的服务侧形状）。
+ *
+ * 与桥接层 `KbReviseOpView` 同构、在 main 侧 link 逐条照抄转换：本包不依赖 shared，
+ * 服务自己的入参形状由自己声明（同 `KbCreateInput` 与 `KbCreateRowInput` 的两层关系）。
+ */
+export type KbReviseOp =
+  | {
+      readonly op: 'entry.text';
+      readonly sectionId: string;
+      readonly entryId: string;
+      readonly fieldKey: string;
+      readonly value: string;
+    }
+  | { readonly op: 'entry.create'; readonly sectionId: string }
+  | { readonly op: 'entry.remove'; readonly sectionId: string; readonly entryId: string }
+  | { readonly op: 'section.create'; readonly title: string }
+  | { readonly op: 'section.remove'; readonly sectionId: string }
+  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string };
+
+/**
+ * 一次要素核对的读数：`applied` 为套用的操作条数，后三列是随之那次重建同步的计数（同 `KbSyncResult`）。
+ */
+export interface KbReviseResult {
+  readonly docId: string;
+  readonly applied: number;
+  readonly created: number;
+  readonly updated: number;
+  readonly removed: number;
+}
+
+/** 要素核对读到的一个字段（只到键与值：chunk 核对不需要 locked/factKey 那两格编辑器元数据）。 */
+export interface KbReviewFieldView {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** 要素核对读到的一条 entry（用户心智里的一块「chunk」）。 */
+export interface KbReviewEntryView {
+  readonly id: string;
+  readonly fields: readonly KbReviewFieldView[];
+}
+
+/** 要素核对读到的一个要素区块：固定六类 kind 即身份，custom 的身份是原文标题 `title`。 */
+export interface KbReviewSectionView {
+  readonly id: string;
+  readonly kind: Section['kind'];
+  readonly title: string;
+  readonly entries: readonly KbReviewEntryView[];
+}
+
+/** `review(docId)` 的读数：母版当前的要素结构（chunk 核对页的唯一数据源）。 */
+export interface KbReviewView {
+  readonly docId: string;
+  readonly sections: readonly KbReviewSectionView[];
 }
 
 /**
@@ -650,6 +716,133 @@ export class KbProfileService extends Service {
     );
     this.announce('sync', docId, outcome.created + outcome.updated + outcome.removed);
     return { docId, created: outcome.created, updated: outcome.updated, removed: outcome.removed };
+  }
+
+  /**
+   * 要素核对（chunk review）：在**母版**上顺序套用一批结构编辑，随后同流程重建派生素材与切片。
+   *
+   * 为什么改的是母版而不是 chunk：chunk 是母版的派生物（sync 整体重建），在 chunk 行上直接改就是开
+   * 第二份事实，下一次导入 / 同步必然把它冲掉。这里所有判据都复用 resume-doc 的 editor-ops 纯函数，
+   * 本方法只负责顺序套用、整批语义、过 `docStore.save` 的权威校验、再跑一遍 `sync()`。
+   *
+   * 整批语义：ops 在一份工作副本上顺序 reduce，任一条返回拒绝就以 `INVALID_ARGUMENT` 上浮、
+   * **半条都不落库**（拒绝后直接抛，save 还没发生）；全部通过后才保存并重建。
+   * @param docId 母版文档 id；传变体 id 一律拒绝（变体走整页编辑器，素材源头只能是母版）
+   * @param ops 结构编辑批次（改字 / 增删条目 / 增删改名 custom 要素）
+   * @param nowMs 母版 `updatedAt` 与重建同步的时间戳，由调用方注入以便断言
+   * @returns 套用条数 + 随之那次重建的计数
+   * @throws `AppError('KB_SOURCE_MISSING')` 工作副本不存在或损坏
+   * @throws `AppError('INVALID_ARGUMENT')` 目标是变体 / 空批次 / 任一条操作被 editor-ops 拒绝
+   */
+  revise(docId: string, ops: readonly KbReviseOp[], nowMs = Date.now()): KbReviseResult {
+    const summary = this.docStore.list().find((item) => item.id === docId);
+    if (summary === undefined) {
+      throw new AppError('KB_SOURCE_MISSING', `简历 ${docId} 还没有可编辑的工作副本，请先导入或新建一份`, undefined, {
+        docId,
+      });
+    }
+    if (summary.parentDocId !== null) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：要素核对只改母版，请打开母版`,
+        undefined,
+        { docId, parentDocId: summary.parentDocId },
+      );
+    }
+    if (ops.length === 0) {
+      throw new AppError('INVALID_ARGUMENT', '要素核对没有收到任何修改操作');
+    }
+
+    const loaded = this.docStore.load(docId);
+    if (loaded.status !== 'found') {
+      throw new AppError(
+        'KB_SOURCE_MISSING',
+        loaded.status === 'missing'
+          ? `简历 ${docId} 还没有可编辑的工作副本，请先导入或新建一份`
+          : `简历 ${docId} 的工作副本读不回合法文档：${loaded.reason}`,
+        undefined,
+        { docId, status: loaded.status },
+      );
+    }
+
+    // 在内存工作副本上顺序 reduce：拒绝即抛、不触碰库里的行（save 在循环之后）。
+    let sections: readonly Section[] = loaded.document.sections;
+    let applied = 0;
+    for (const op of ops) {
+      const outcome = applyReviseOp(sections, op);
+      if (!outcome.ok) {
+        throw new AppError(
+          'INVALID_ARGUMENT',
+          `第 ${String(applied + 1)} 条要素核对操作被拒：${outcome.detail}`,
+          undefined,
+          { docId, index: applied, reason: outcome.detail, code: outcome.code, op: op.op },
+        );
+      }
+      sections = outcome.value;
+      applied += 1;
+    }
+
+    // save 内部做权威 schema 校验，非法文档会在这里以 `INVALID_ARGUMENT` 抛出（doc-store 的既有承诺）：
+    // editor-ops 的结构性保证之外再兜一层。
+    this.docStore.save({ ...loaded.document, sections: [...sections], updatedAt: nowMs });
+
+    // 母版已改，派生素材必须立刻跟上：同一方法内重建，界面在一次桥调用后看到的就是自洽状态。
+    const synced = this.sync(docId, nowMs);
+    this.ctx.logger.info(`[kb-profile] 要素核对 ${docId}：套用 ${String(applied)} 条修改并完成重建同步`);
+    return { docId, applied, created: synced.created, updated: synced.updated, removed: synced.removed };
+  }
+
+  /**
+   * 读一份**母版**当前的要素结构（chunk 核对页的唯一数据源）。
+   *
+   * 为什么不复用 `resume.editor.view`：那条读口有一条刻意的 §8.1 边界——投影**不带一句正文**
+   * （editor-service 的用例把「JSON 里不含简历原文」钉死了），整页编辑器经打印 HTML 的锚点改字。
+   * chunk 核对要逐块逐条目摆正文与 custom 原文标题，走那条口拿不到内容；而 `kb.profile` 本就承载
+   * chunk 正文过界（`evidenceBody` 等），核对读口住在这里不破坏任何既有边界。
+   * 与 `revise` 同源同一条母版判据：变体不是素材源头，传变体 id 一律结构化拒绝。
+   * @param docId 母版文档 id
+   * @returns 区块 / 条目 / 字段三层的只读结构
+   * @throws `AppError('KB_SOURCE_MISSING')` 工作副本不存在或损坏
+   * @throws `AppError('INVALID_ARGUMENT')` 目标是变体
+   */
+  review(docId: string): KbReviewView {
+    const summary = this.docStore.list().find((item) => item.id === docId);
+    if (summary === undefined) {
+      throw new AppError('KB_SOURCE_MISSING', `简历 ${docId} 还没有可编辑的工作副本，请先导入或新建一份`, undefined, {
+        docId,
+      });
+    }
+    if (summary.parentDocId !== null) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：要素核对只对母版打开`,
+        undefined,
+        { docId, parentDocId: summary.parentDocId },
+      );
+    }
+    const loaded = this.docStore.load(docId);
+    if (loaded.status !== 'found') {
+      throw new AppError(
+        'KB_SOURCE_MISSING',
+        loaded.status === 'missing'
+          ? `简历 ${docId} 还没有可编辑的工作副本，请先导入或新建一份`
+          : `简历 ${docId} 的工作副本读不回合法文档：${loaded.reason}`,
+        undefined,
+        { docId, status: loaded.status },
+      );
+    }
+    return {
+      docId,
+      sections: loaded.document.sections.map((section) => ({
+        id: section.id,
+        kind: section.kind,
+        title: section.title,
+        entries: section.entries.map((entry) => ({
+          id: entry.id,
+          fields: entry.fields.map((field) => ({ key: field.key, value: field.value })),
+        })),
+      })),
+    };
   }
 
   /**
@@ -1540,6 +1733,32 @@ export class KbProfileService extends Service {
         )
         .run(nowMs).changes,
     );
+  }
+}
+
+/**
+ * 把一条要素核对操作分发给 resume-doc 的 editor-ops 纯函数。
+ *
+ * 判据（区块是否存在、固定要素不可删、custom 标题空/超长、字段键是否合法）全在 editor-ops 里，
+ * 这里只做判别标签到计划函数的一一映射，不重复任何规则（AGENTS.md §2.5）。
+ * @param sections 当前工作副本的区块序列
+ * @param op 单条核对操作
+ * @returns editor-ops 的计划结局（接受给新区块序列，拒绝给人读的原因）
+ */
+function applyReviseOp(sections: readonly Section[], op: KbReviseOp): ReturnType<typeof planEntryCreate> {
+  switch (op.op) {
+    case 'entry.text':
+      return planFieldText(sections, op.sectionId, op.entryId, op.fieldKey, op.value);
+    case 'entry.create':
+      return planEntryCreate(sections, op.sectionId);
+    case 'entry.remove':
+      return planEntryRemove(sections, op.sectionId, op.entryId);
+    case 'section.create':
+      return planCustomSectionCreate(sections, op.title);
+    case 'section.remove':
+      return planSectionRemove(sections, op.sectionId);
+    case 'section.rename':
+      return planCustomSectionRename(sections, op.sectionId, op.title);
   }
 }
 

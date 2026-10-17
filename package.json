@@ -30,6 +30,7 @@
     "prepare": "git config core.hooksPath .githooks",
     "fixture": "tsx scripts/fixture-server.ts",
     "e2e:resume-jd": "tsx scripts/e2e-resume-jd.ts",
+    "e2e:resume-chunks": "tsx scripts/e2e-resume-chunks.ts",
     "smoke:dist": "tsx scripts/smoke-dist.ts"
   },
   "devDependencies": {

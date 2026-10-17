@@ -411,6 +411,9 @@ export const RENDERER_ALLOWLIST = [
   'kb.profile.update',
   'kb.profile.remove',
   'kb.profile.sync',
+  // 要素核对（chunk review）：读母版要素结构，以及在母版上改字 / 增删条目 / 增删改名 custom 要素。
+  'kb.profile.review',
+  'kb.profile.revise',
   'kb.profile.exportBackup',
   'kb.profile.importBackup',
   // 4.1-14 / 裁定㉖ 的删除通道：删一份简历**连同它派生的素材与索引**，六张表删在同一条事务里。
@@ -1990,6 +1993,66 @@ export interface KbSyncRowResult {
   readonly removed: number;
 }
 
+/**
+ * 要素核对（chunk review）对**母版**的一次结构编辑操作（`kb.profile.revise` 的单条载荷）。
+ *
+ * 全部六类都只是「改母版 doc_json」的形状声明：chunk 是母版的派生物，改 chunk 必须回写母版、
+ * 再由服务侧同流程 `sync()` 重建实体与索引，不存在第二份事实。判据半边在 resume-doc 的 editor-ops，
+ * 这里只过进程边界，逐条按判别标签分发。
+ */
+export type KbReviseOpView =
+  | {
+      readonly op: 'entry.text';
+      readonly sectionId: string;
+      readonly entryId: string;
+      readonly fieldKey: string;
+      readonly value: string;
+    }
+  | { readonly op: 'entry.create'; readonly sectionId: string }
+  | { readonly op: 'entry.remove'; readonly sectionId: string; readonly entryId: string }
+  | { readonly op: 'section.create'; readonly title: string }
+  | { readonly op: 'section.remove'; readonly sectionId: string }
+  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string };
+
+/**
+ * `kb.profile.revise` 的回执：结构编辑已落母版并完成一次重建同步。
+ * `applied` = 实际套用的操作条数（应等于请求条数，任一被拒则整批上浮、不做半套）；
+ * 其余三列是随后那次 `sync()` 的重建读数，与 `KbSyncRowResult` 同口径。
+ */
+export interface KbReviseRowResult {
+  readonly docId: string;
+  readonly applied: number;
+  readonly created: number;
+  readonly updated: number;
+  readonly removed: number;
+}
+
+/** 要素核对读到的一个字段（镜像 `KbReviewFieldView`）。 */
+export interface KbReviewFieldRowView {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** 要素核对读到的一条 entry（镜像 `KbReviewEntryView`）。 */
+export interface KbReviewEntryRowView {
+  readonly id: string;
+  readonly fields: readonly KbReviewFieldRowView[];
+}
+
+/** 要素核对读到的一个要素区块（镜像 `KbReviewSectionView`）。 */
+export interface KbReviewSectionRowView {
+  readonly id: string;
+  readonly kind: ResumeSectionKindView;
+  readonly title: string;
+  readonly entries: readonly KbReviewEntryRowView[];
+}
+
+/** `kb.profile.review` 的读数（镜像 `KbReviewView`）：母版当前的要素结构。 */
+export interface KbReviewRowView {
+  readonly docId: string;
+  readonly sections: readonly KbReviewSectionRowView[];
+}
+
 /** 一次删除的读数（镜像 `KbRemoveResult`：删了几条 + 解除归属几条）。 */
 export interface KbRemoveRowResult {
   readonly entityId: string;
@@ -2884,6 +2947,22 @@ export interface BridgeSignatures {
    * 「在简历里删掉再同步」都走这一口，工作副本不存在时以 `KB_SOURCE_MISSING` 失败。
    */
   'kb.profile.sync': { args: [docId: string]; returns: KbSyncRowResult };
+  /**
+   * 要素核对（chunk review）：对**母版**顺序套用一批结构编辑，过 schema 校验后保存，
+   * 并在同一方法内执行一次 `sync()` 重建实体与切片。
+   *
+   * 只认母版：`parent_doc_id` 非空的变体一律结构化失败上浮（变体的修改走整页编辑器，不允许在这里改着改着
+   * 把"按 JD 生成的变体"当成素材源头）。任一条操作被拒则整批不生效（不做半套），拒绝原因随结构化错误上浮。
+   * 没有 `nowMs`——与 sync / generate 同口径，时间戳由主进程取。
+   */
+  'kb.profile.revise': { args: [docId: string, ops: readonly KbReviseOpView[]]; returns: KbReviseRowResult };
+  /**
+   * 要素核对（chunk review）的读口：读一份**母版**当前的要素结构（区块 / 条目 / 字段三层，custom 带原文标题）。
+   *
+   * 不复用 `resume.editor.view`：那条读口有刻意的「投影不带一句正文」边界（整页编辑经打印 HTML 锚点改字），
+   * 核对页要逐块摆正文，只能由本就承载 chunk 正文的 `kb.profile` 给。变体 id 以 `INVALID_ARGUMENT` 上浮。
+   */
+  'kb.profile.review': { args: [docId: string]; returns: KbReviewRowView };
   /** 导出全库为本地 JSON 备份（spec 4.2-08）：路径由用户给，父目录必须已存在。 */
   'kb.profile.exportBackup': { args: [filePath: string]; returns: KbExportRowResult };
   /** 从本地 JSON 备份导入（spec 4.2-08）：单事务，中途失败整批回滚；默认策略 `skip` 不动用户已有数据。 */

@@ -60,6 +60,12 @@ export {
   type KbProfileConfig,
   type KbRemoveResult,
   type KbRemoveDocResult,
+  type KbReviseOp,
+  type KbReviseResult,
+  type KbReviewEntryView,
+  type KbReviewFieldView,
+  type KbReviewSectionView,
+  type KbReviewView,
   type KbSyncResult,
   type KbVectorSyncResult,
 } from './profile-service.js';

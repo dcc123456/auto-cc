@@ -80,7 +80,10 @@ export type EditorRejectionCode =
   | 'bad-token'
   | 'unknown-kind'
   | 'no-body'
-  | 'nothing-to-merge';
+  | 'nothing-to-merge'
+  | 'section-not-removable'
+  | 'empty-title'
+  | 'title-too-long';
 
 /** 一次操作的判定：通过给新值，否则给机器码与技术原因，**不抛异常**。 */
 export type EditorOutcome<T> =
@@ -484,14 +487,17 @@ export function entryBodyLineCount(entry: Entry): number {
  * @returns 未被占用的新 id；非 `<kind>-<n>` 形态的既有 id 不参与取最大
  */
 function nextEntryId(section: Section): string {
+  // custom 区块本身的 id 是 `custom-N`，其条目 id 按 `custom-N-i` 走（解析器同一规则，见 resume-kb/sections.ts），
+  // 否则新条目会拿到 `custom-1` 这种与区块 id 撞号的 id；固定六类维持 `<kind>-<n>` 老形状。
+  const prefix = section.kind === 'custom' ? `${section.id}-` : `${section.kind}-`;
   const highest = section.entries.reduce((max, entry) => {
-    const tail = entry.id.startsWith(`${section.kind}-`) ? entry.id.slice(section.kind.length + 1) : '';
+    const tail = entry.id.startsWith(prefix) ? entry.id.slice(prefix.length) : '';
     return /^\d+$/u.test(tail) ? Math.max(max, Number(tail)) : max;
   }, 0);
   const used = new Set(section.entries.map((entry) => entry.id));
   let index = highest + 1;
-  while (used.has(`${section.kind}-${String(index)}`)) index += 1;
-  return `${section.kind}-${String(index)}`;
+  while (used.has(`${prefix}${String(index)}`)) index += 1;
+  return `${prefix}${String(index)}`;
 }
 
 /**
@@ -507,7 +513,8 @@ function nextEntryId(section: Section): string {
  * @returns 一条新条目；认不出抬头就少给那几个字段，不编（§8.4 事实锁定同一条口径）
  */
 function assembleEntry(kind: SectionKind, id: string, lines: readonly string[], bodyKey: string): Entry {
-  if (kind === 'summary' || kind === 'skills') {
+  // custom 与 summary / skills 同形：整块就是正文，没有抬头四信号，不许走公司 / 职位装配那一支。
+  if (kind === 'summary' || kind === 'skills' || kind === 'custom') {
     return { id, fields: [makeField(kind, bodyKey, lines.join('\n'))] };
   }
   const [headerLine = '', ...bodyLines] = lines;
@@ -656,4 +663,157 @@ export function planFieldText(
     position === entryIndex ? patched : candidate,
   );
   return { ok: true, value: withEntries(sections, sectionIndex, nextEntries) };
+}
+
+/* -------------------------------------------------------------------------------------------------- */
+/* 要素核对（chunk review）的结构操作：在母版上增删条目、增删与重命名 custom 区块。                     */
+/* 与上面九条排版操作同一份拒绝通道：纯函数、不改入参、合法才产新值、不抛异常。                        */
+/* -------------------------------------------------------------------------------------------------- */
+
+/** custom 区块标题长度上限（按码点）：标题是短标签，不是一句话；与解析侧 MAX_HEADING_LENGTH 对齐。 */
+export const CUSTOM_TITLE_MAX_CHARS = 16;
+
+/** 固定六类（id 即 kind）不允许整块删除——删了 kind 枚举就少一类要素；custom 可删。 */
+const FIXED_SECTION_IDS: ReadonlySet<string> = new Set([
+  'summary',
+  'experience',
+  'education',
+  'skills',
+  'project',
+  'campus',
+]);
+
+/**
+ * 新建条目时按区块种类给出该种类的槽位字段（空值起步，值由用户在核对页逐格填）。
+ * @param kind 区块种类
+ * @returns 与解析器同形的字段集合：plain 三类只有 `text`；经历 / 项目 / 校园是 company+role+正文；
+ *          教育是 school+major+description。**不造 period**（认不出的时间段走待确认，不凭空给）。
+ */
+function emptyEntryFields(kind: SectionKind): Field[] {
+  if (kind === 'summary' || kind === 'skills' || kind === 'custom') {
+    return [makeField(kind, bodyKeyOf(kind), '')];
+  }
+  if (kind === 'education') {
+    return [makeField(kind, 'school', ''), makeField(kind, 'major', ''), makeField(kind, 'description', '')];
+  }
+  return [makeField(kind, 'company', ''), makeField(kind, 'role', ''), makeField(kind, bodyKeyOf(kind), '')];
+}
+
+/**
+ * 下一个 custom 区块 id：取现有 `custom-N` 里最大的 N + 1（非该形态的 id 不参与计数）。
+ * 位置号 caveat 与条目 id 相同——它是同一文档内的稳定槽位，不是跨编辑的不可变标识。
+ * @param sections 当前区块序列
+ * @returns 未被占用的 `custom-N`
+ */
+function nextCustomSectionId(sections: readonly Section[]): string {
+  let highest = 0;
+  for (const section of sections) {
+    const match = /^custom-(\d+)$/u.exec(section.id);
+    if (match !== null) highest = Math.max(highest, Number(match[1]));
+  }
+  return `custom-${String(highest + 1)}`;
+}
+
+/**
+ * 校验 custom 区块标题（非空、不超长）。
+ * @param title 待存标题（会先 trim）
+ * @returns 通过给 trim 后的标题；空白给 `empty-title`，超长给 `title-too-long`
+ */
+function validateCustomTitle(title: string): EditorOutcome<string> {
+  const trimmed = title.trim();
+  if (trimmed === '') return reject('empty-title', '自定义要素标题不能是空白');
+  if ([...trimmed].length > CUSTOM_TITLE_MAX_CHARS) {
+    return reject('title-too-long', `标题 ${trimmed} 超过 ${String(CUSTOM_TITLE_MAX_CHARS)} 字`);
+  }
+  return { ok: true, value: trimmed };
+}
+
+/**
+ * 在指定区块末尾追加一条空条目（要素核对页「加一条」）。
+ * @param sections 当前区块序列
+ * @param sectionId 目标区块 id
+ * @returns 通过给新区块序列；查无区块给 `unknown-section`
+ */
+export function planEntryCreate(sections: readonly Section[], sectionId: string): EditorOutcome<Section[]> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  const section = sections[sectionIndex] as Section;
+  const entry: Entry = { id: nextEntryId(section), fields: emptyEntryFields(section.kind) };
+  return { ok: true, value: withEntries(sections, sectionIndex, [...section.entries, entry]) };
+}
+
+/**
+ * 删除指定区块里的一条条目（要素核对页「删除这一条」）。
+ * @param sections 当前区块序列
+ * @param sectionId 区块 id
+ * @param entryId 条目 id
+ * @returns 通过给新区块序列（区块允许删到空——空区块渲染时自然跳过，仍可再加条目）；
+ *          定位失败给 `unknown-section` / `unknown-entry`
+ */
+export function planEntryRemove(
+  sections: readonly Section[],
+  sectionId: string,
+  entryId: string,
+): EditorOutcome<Section[]> {
+  const located = locateEntry(sections, sectionId, entryId);
+  if (!located.ok) return located;
+  const { sectionIndex, section } = located.value;
+  const nextEntries = section.entries.filter((entry) => entry.id !== entryId);
+  return { ok: true, value: withEntries(sections, sectionIndex, nextEntries) };
+}
+
+/**
+ * 新建一块 custom 自定义要素区块（要素核对页「增加要素」）。
+ * @param sections 当前区块序列
+ * @param title 简历原文风格的标题（trim 后非空、≤16 字）
+ * @returns 通过给「末尾追加空 custom 区块」的新序列（条目由后续 `planEntryCreate` 加）
+ */
+export function planCustomSectionCreate(sections: readonly Section[], title: string): EditorOutcome<Section[]> {
+  const checked = validateCustomTitle(title);
+  if (!checked.ok) return checked;
+  const section: Section = { id: nextCustomSectionId(sections), kind: 'custom', title: checked.value, entries: [] };
+  return { ok: true, value: [...sections, section] };
+}
+
+/**
+ * 删除整块区块：**只允许 custom**。固定六类是要素枚举本身，删 kind 枚举不属于「核对素材」的语义。
+ * @param sections 当前区块序列
+ * @param sectionId 要删的区块 id
+ * @returns 通过给删掉该区块的新序列；查无区块 `unknown-section`，固定六类给 `section-not-removable`
+ */
+export function planSectionRemove(sections: readonly Section[], sectionId: string): EditorOutcome<Section[]> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  if (FIXED_SECTION_IDS.has(sectionId)) {
+    return reject('section-not-removable', `固定要素区块 ${sectionId} 不允许整块删除（可删除其中条目）`);
+  }
+  return { ok: true, value: sections.filter((_, position) => position !== sectionIndex) };
+}
+
+/**
+ * 重命名 custom 区块标题（要素核对页改要素名）。
+ * @param sections 当前区块序列
+ * @param sectionId 区块 id（必须是 custom 区块）
+ * @param title 新标题（trim 后非空、≤16 字）
+ * @returns 通过给改了标题的新序列；查无区块 `unknown-section`，固定六类给 `section-not-removable`，
+ *          标题空白 / 超长给 `empty-title` / `title-too-long`
+ */
+export function planCustomSectionRename(
+  sections: readonly Section[],
+  sectionId: string,
+  title: string,
+): EditorOutcome<Section[]> {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return reject('unknown-section', `文档里没有 id 为 ${sectionId} 的区块`);
+  if (FIXED_SECTION_IDS.has(sectionId)) {
+    return reject('section-not-removable', `固定要素区块 ${sectionId} 的标题不能改名（走 i18n 标签）`);
+  }
+  const checked = validateCustomTitle(title);
+  if (!checked.ok) return checked;
+  return {
+    ok: true,
+    value: sections.map((section, position) =>
+      position === sectionIndex ? { ...section, title: checked.value } : section,
+    ),
+  };
 }

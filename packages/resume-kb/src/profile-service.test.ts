@@ -653,6 +653,166 @@ describe('端到端：导入 → 工作副本 → 实体（裁定一 + 4.2-01）
 });
 
 /**
+ * 带陌生要素「证书」的语料（要素核对 revise 用例用）：证书在六类词典之外，解析时收进 custom-1。
+ * 两条证书之间空行（custom 沿用空行切块）；整体凑过 100 字正文下限。
+ */
+const RESUME_MD_CUSTOM = [
+  '张三',
+  '电话：13800001111',
+  '',
+  '## 工作经历',
+  '星桥科技｜后端工程师 2021.03-2024.06',
+  '- 主导订单服务重构，P99 延迟下降 40%，并负责线上容量规划与值班体系。',
+  '',
+  '## 技能',
+  '- TypeScript、Node.js、Go、Kubernetes、PostgreSQL、Redis',
+  '',
+  '## 证书',
+  '- CET-6 大学英语六级',
+  '',
+  '- PMP 项目管理专业人士认证',
+].join('\n');
+
+/** 断言一次同步调用抛 AppError 且 code 命中（revise 是同步方法，不能用 promise 的 rejects）。 */
+function expectSyncAppError(code: AppErrorCode, fn: () => unknown): void {
+  try {
+    fn();
+    throw new Error('应该抛错却没有抛错');
+  } catch (error) {
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe(code);
+  }
+}
+
+describe('要素核对 revise：改母版 → 重建 chunk（chunk review）', () => {
+  it('改名 / 改字 / 加 custom 要素一批落库，工作副本与区块切片同时更新', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-revise-ok');
+    const { kb, doc, db } = booted;
+
+    const before = doc.load('resume-revise-ok');
+    if (before.status !== 'found') throw new Error(`前置文档读不回：${before.status}`);
+    const cert = before.document.sections.find((item) => item.kind === 'custom');
+    expect(cert?.title).toBe('证书');
+
+    const receipt = kb.revise(
+      'resume-revise-ok',
+      [
+        { op: 'section.rename', sectionId: 'custom-1', title: '资格证书' },
+        {
+          op: 'entry.text',
+          sectionId: 'custom-1',
+          entryId: 'custom-1-1',
+          fieldKey: 'text',
+          value: '- CET-6（580 分）',
+        },
+        { op: 'section.create', title: '语言能力' },
+      ],
+      LATER_MS,
+    );
+    expect(receipt.applied).toBe(3);
+
+    // 母版工作副本读到的就是新形状（revise 改的是母版，不是 chunk 行）。
+    const after = doc.load('resume-revise-ok');
+    if (after.status !== 'found') throw new Error('修订后文档读不回');
+    const renamed = after.document.sections.find((item) => item.id === 'custom-1');
+    expect(renamed?.title).toBe('资格证书');
+    expect(renamed?.entries[0]?.fields[0]?.value).toContain('580 分');
+    const added = after.document.sections.find((item) => item.kind === 'custom' && item.title === '语言能力');
+    expect(added?.id).toBe('custom-2');
+
+    // 区块切片随同一趟 sync 重建：custom 条目的新正文进索引，旧文本不再留下（切片逐条、空区块不产切片，
+    // 所以标题与空的「语言能力」在文档层断言，这里只断言条目正文的收敛）。
+    const chunkText = db
+      .prepare('SELECT text FROM kb_chunks WHERE source_doc_id = ? AND chunk_kind = ?')
+      .all('resume-revise-ok', 'section')
+      .map((row) => String((row as { text: string }).text))
+      .join('\n');
+    expect(chunkText).toContain('580 分');
+    expect(chunkText).not.toContain('大学英语六级');
+
+    // 核对读口读到的就是修订后的母版结构（custom 带原文标题）。
+    const review = kb.review('resume-revise-ok');
+    const reviewedCert = review.sections.find((item) => item.id === 'custom-1');
+    expect(reviewedCert).toMatchObject({ kind: 'custom', title: '资格证书' });
+    expect(reviewedCert?.entries[0]?.fields[0]).toEqual({ key: 'text', value: '- CET-6（580 分）' });
+    expect(review.sections.some((item) => item.kind === 'custom' && item.title === '语言能力')).toBe(true);
+  });
+
+  it('review 读口拒绝变体、拒绝不存在的文档，只对母版打开', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-review-guard');
+    const { kb, doc } = booted;
+    const master = doc.load('resume-review-guard');
+    if (master.status !== 'found') throw new Error('母版读不回');
+    const variantId = doc.deriveVariant({
+      parentDocId: 'resume-review-guard',
+      jdId: 'jd-review-1',
+      jdLabel: '虚构 JD',
+      document: master.document,
+      nowMs: LATER_MS,
+    }).docId;
+    expectSyncAppError('INVALID_ARGUMENT', () => kb.review(variantId));
+    expectSyncAppError('KB_SOURCE_MISSING', () => kb.review('resume-从不存在'));
+  });
+
+  it('整批语义：中间一条被拒则整批不落库，母版保持原样', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-revise-batch');
+    const { kb, doc } = booted;
+
+    expectSyncAppError('INVALID_ARGUMENT', () =>
+      kb.revise(
+        'resume-revise-batch',
+        [
+          { op: 'entry.create', sectionId: 'custom-1' },
+          // 固定要素不允许整块删（editor-ops 的 section-not-removable）。
+          { op: 'section.remove', sectionId: 'skills' },
+        ],
+        LATER_MS,
+      ),
+    );
+
+    const unchanged = doc.load('resume-revise-batch');
+    if (unchanged.status !== 'found') throw new Error('文档读不回');
+    const cert = unchanged.document.sections.find((item) => item.id === 'custom-1');
+    expect(cert?.entries).toHaveLength(2);
+  });
+
+  it('变体不是素材源头：对变体 id 调 revise 结构化拒绝，母版不动', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-revise-master');
+    const { kb, doc } = booted;
+    const master = doc.load('resume-revise-master');
+    if (master.status !== 'found') throw new Error('母版读不回');
+    const variantId = doc.deriveVariant({
+      parentDocId: 'resume-revise-master',
+      jdId: 'jd-revise-1',
+      jdLabel: '虚构 JD',
+      document: master.document,
+      nowMs: LATER_MS,
+    }).docId;
+
+    expectSyncAppError('INVALID_ARGUMENT', () =>
+      kb.revise(variantId, [{ op: 'section.create', title: '不该出现的要素' }], LATER_MS),
+    );
+
+    const still = doc.load('resume-revise-master');
+    if (still.status !== 'found') throw new Error('母版读不回');
+    expect(still.document.sections.some((item) => item.title === '不该出现的要素')).toBe(false);
+  });
+
+  it('空批次与不存在的文档分别结构化拒绝', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-revise-guard');
+    expectSyncAppError('INVALID_ARGUMENT', () => booted.kb.revise('resume-revise-guard', [], LATER_MS));
+    expectSyncAppError('KB_SOURCE_MISSING', () =>
+      booted.kb.revise('resume-从不存在', [{ op: 'section.create', title: 'X' }], LATER_MS),
+    );
+  });
+});
+
+/**
  * 挂一份新库，把给定语料解析成工作副本并同步出实体。
  *
  * 反查（4.2-03）与切片（4.3-a）两组接线用例都要「一份同步好的库」这个前置，

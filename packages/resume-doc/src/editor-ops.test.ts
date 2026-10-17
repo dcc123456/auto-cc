@@ -5,13 +5,18 @@ import { describe, expect, it } from 'vitest';
 import {
   EDITOR_METRIC_BOUNDS,
   entryBodyLineCount,
+  planCustomSectionCreate,
+  planCustomSectionRename,
   planDesign,
+  planEntryCreate,
   planEntryMerge,
   planEntryMove,
+  planEntryRemove,
   planEntrySplit,
   planFieldText,
   planMetric,
   planSectionMove,
+  planSectionRemove,
   type MetricKey,
 } from './editor-ops.js';
 import { DEFAULT_LAYOUT, makeField, type Entry, type Layout, type Section, type SectionKind } from './model.js';
@@ -495,5 +500,91 @@ describe('3.11-01 打字改一格：只换 value，四种拒绝各给一条确�
       ok: false,
       code: 'not-a-text',
     });
+  });
+});
+
+/** 造一个指定 kind 的区块（要素核对结构操作用）。 */
+function kindSection(kind: SectionKind, id: string = kind, entryIds: readonly string[] = []): Section {
+  return {
+    id,
+    kind,
+    title: id,
+    entries: entryIds.map((entryId) => ({ id: entryId, fields: [makeField(kind, 'text', entryId)] })),
+  };
+}
+
+describe('要素核对：planEntryCreate / planEntryRemove', () => {
+  it('custom 区块末尾加条目：id 挂区块 id 前缀（custom-1-2），字段是单个空 text', () => {
+    const sections = [kindSection('custom', 'custom-1', ['custom-1-1'])];
+    const result = planEntryCreate(sections, 'custom-1');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.value[0]!.entries[1]!;
+    expect(created.id).toBe('custom-1-2');
+    expect(created.fields).toEqual([makeField('custom', 'text', '')]);
+    expect(sections[0]!.entries).toHaveLength(1); // 入参不被修改
+  });
+
+  it('经历区块加条目：给 company/role/achievement 三个空槽，不造 period', () => {
+    const result = planEntryCreate([kindSection('experience')], 'experience');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    expect(result.value[0]!.entries[0]!.fields.map((field) => field.key)).toEqual(['company', 'role', 'achievement']);
+  });
+
+  it('删条目：指定条目消失、其余保留；删到零条也合法（空区块渲染跳过）', () => {
+    const sections = [kindSection('custom', 'custom-1', ['custom-1-1', 'custom-1-2'])];
+    const removed = planEntryRemove(sections, 'custom-1', 'custom-1-1');
+    if (!removed.ok) return expect(removed.ok).toBe(true);
+    expect(removed.value[0]!.entries.map((entry) => entry.id)).toEqual(['custom-1-2']);
+    const again = planEntryRemove(removed.value, 'custom-1', 'custom-1-2');
+    if (!again.ok) return expect(again.ok).toBe(true);
+    expect(again.value[0]!.entries).toEqual([]);
+  });
+
+  it('查无区块 / 查无条目各给确定拒绝码', () => {
+    expect(planEntryCreate([], 'nope')).toMatchObject({ ok: false, code: 'unknown-section' });
+    expect(planEntryRemove([kindSection('custom', 'custom-1', ['custom-1-1'])], 'custom-1', 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-entry',
+    });
+  });
+});
+
+describe('要素核对：custom 区块的增 / 删 / 改名', () => {
+  it('新建 custom：id 接现有最大编号，标题 trim，初始无条目', () => {
+    const sections = [
+      kindSection('summary'),
+      kindSection('custom', 'custom-1', ['custom-1-1']),
+      kindSection('custom', 'custom-3'),
+    ];
+    const result = planCustomSectionCreate(sections, '  证书 ');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    expect(result.value[3]).toMatchObject({ id: 'custom-4', kind: 'custom', title: '证书', entries: [] });
+  });
+
+  it('空白标题拒绝（empty-title），超过 16 字拒绝（title-too-long）', () => {
+    expect(planCustomSectionCreate([], '   ')).toMatchObject({ ok: false, code: 'empty-title' });
+    expect(planCustomSectionCreate([], '证'.repeat(17))).toMatchObject({ ok: false, code: 'title-too-long' });
+  });
+
+  it('只有 custom 区块可整块删除：固定六类给 section-not-removable，查无给 unknown-section', () => {
+    const sections = [kindSection('experience', 'experience'), kindSection('custom', 'custom-1')];
+    expect(planSectionRemove(sections, 'experience')).toMatchObject({ ok: false, code: 'section-not-removable' });
+    expect(planSectionRemove(sections, 'nope')).toMatchObject({ ok: false, code: 'unknown-section' });
+    const removed = planSectionRemove(sections, 'custom-1');
+    if (!removed.ok) return expect(removed.ok).toBe(true);
+    expect(removed.value.map((section) => section.id)).toEqual(['experience']);
+  });
+
+  it('改名：custom 可改（trim 生效），固定六类拒绝，空白 / 超长拒绝', () => {
+    const sections = [kindSection('experience', 'experience'), kindSection('custom', 'custom-1')];
+    const renamed = planCustomSectionRename(sections, 'custom-1', ' 荣誉奖项 ');
+    if (!renamed.ok) return expect(renamed.ok).toBe(true);
+    expect(renamed.value[1]!.title).toBe('荣誉奖项');
+    expect(planCustomSectionRename(sections, 'experience', 'x')).toMatchObject({
+      ok: false,
+      code: 'section-not-removable',
+    });
+    expect(planCustomSectionRename(sections, 'custom-1', '')).toMatchObject({ ok: false, code: 'empty-title' });
   });
 });
