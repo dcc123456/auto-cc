@@ -321,6 +321,27 @@ export type WorkflowProgressEvent = {
 };
 
 /**
+ * 一条判据：断言「某件事已经成立」，而不是「下一步该做什么」。
+ *
+ * 三个种类分两类读法（spec 5.11-03，字段与 browser-copilot 同名同义但取值口径按本仓能力定）：
+ * - `effectObserved`：本 run 里这一格已经记下 `sideEffectObserved`，即**外发落地被观察到**。
+ *   它是机器写下的证据，不经任何模型措辞。
+ * - `nodeCommitted`：同一份计划里 `nodeId` 那一格已经落定（`done` 或 `skipped`）。
+ * - `urlContains`：地址栏含某段文本。**本仓没有地址栏读数通道**，所以这一类永远观测不到；
+ *   留着它是因为模型确实会写这一行（browser-copilot 的 F41 现场：模型给「发布页上的那个按钮」
+ *   写 `urlContains /publish/`），而守卫要拒的正是写得出、却证明不了落地的那一行。
+ *   写不出的一行是**无从守卫**的一行。
+ */
+export type WorkflowCondition = {
+  /** 判据种类。 */
+  kind: 'effectObserved' | 'nodeCommitted' | 'urlContains';
+  /** `urlContains` 要匹配的子串；其余种类省略。 */
+  value?: string;
+  /** `nodeCommitted` 指名的格子 id；其余种类省略。 */
+  nodeId?: string;
+};
+
+/**
  * 一个节点的**声明**（spec 2.4-01）——计划里写死的东西，不是跑到一半的读数。
  *
  * `kind` 是 `string` 而不是联合类型，理由与 `LocatorRelocatedEvent.strategy` 同一条：
@@ -356,6 +377,25 @@ export type WorkflowNodeSpec = {
    * 所以它是声明面而不是执行身份的一部分；执行语义由 `nodes + edges` 一起定（5.10-06）。
    */
   outputs?: readonly string[];
+  /**
+   * 成功判据（spec 5.11-03）：本节点做完之后，哪些条件必须成立才算这一格真的成了。
+   *
+   * 与 `terminalStateConditions` **分列两个字段**，不许合成一个：前者问「做完了吗」，
+   * 后者问「不做也成立吗」。合成一个的后果是每一条判据都得按最弱的读法解释，
+   * 于是「已经做完了」与「本来就成立」永远分不开。
+   *
+   * 声明的行必须能证明落地效果（`provesLandedEffect`），否则装配期就拒——一条证不了落地的
+   * 成功判据不是宽松，是谎报。
+   */
+  successConditions?: readonly WorkflowCondition[];
+  /**
+   * 终态判据（spec 5.11-03）：这些条件**在派执行器之前**先问一遍，全成立就不重放这一格
+   * （`enterNode` 的 `satisfied` 判决）。
+   *
+   * 它服务的是不可逆动作：投递已经落地而进程死在记账之前，续跑时那一格既不能盲重放
+   * （可能发两遍）也不该永远停在接管点上。省略即维持现状（`needs-human`），所以既有计划零变化。
+   */
+  terminalStateConditions?: readonly WorkflowCondition[];
 };
 
 /** 线性节点序列里那条唯一的出口名（`default`），也是边的默认出口。 */

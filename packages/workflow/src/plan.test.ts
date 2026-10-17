@@ -14,6 +14,7 @@ import {
   planById,
   WORKFLOW_PLANS,
   workflowPlanSchema,
+  type PlanInput,
 } from './plan.js';
 
 describe('计划声明的解析与补全（spec 2.4-01）', () => {
@@ -150,5 +151,73 @@ describe('全链路计划 boss-e2e（spec 2.8-07 / M6）', () => {
     });
     // 简历路径同理不钉进仓库：取 `outbound.deliver` 配置的 `resumeFile`。
     expect(plan.nodes.every((node) => !('file' in node.params))).toBe(true);
+  });
+});
+
+describe('成功判据与终态判据（spec 5.11-03，分列两个字段）', () => {
+  /** 一条带判据的最小计划：两格，判据挂在第二格上。 */
+  function planWith(overrides: Record<string, unknown>): PlanInput {
+    return {
+      id: 'plan-conditions',
+      nodes: [
+        { id: 'first', kind: 'jd.capture', effect: 'read' },
+        { id: 'second', kind: 'demo.flaky', effect: 'local-write', target: 'demo://second', ...overrides },
+      ],
+    };
+  }
+
+  it('两个字段分列、互不合并，省略时都不补默认值', () => {
+    const bare = buildPlan(planWith({}));
+    // 省略即「没有判据」，而补一个空数组会把 5.11 的两列都变成必填、老计划文本也全要重写。
+    expect('successConditions' in (bare.nodes[1] ?? {})).toBe(false);
+    expect('terminalStateConditions' in (bare.nodes[1] ?? {})).toBe(false);
+
+    const declared = buildPlan(
+      planWith({
+        successConditions: [{ kind: 'effectObserved' }],
+        terminalStateConditions: [{ kind: 'nodeCommitted', nodeId: 'first' }],
+      }),
+    );
+    expect(declared.nodes[1]?.successConditions).toEqual([{ kind: 'effectObserved' }]);
+    expect(declared.nodes[1]?.terminalStateConditions).toEqual([{ kind: 'nodeCommitted', nodeId: 'first' }]);
+    // 两列的内容互不串位：终态判据里那条不得漏进成功判据，反之亦然。
+    expect(declared.nodes[1]?.successConditions).not.toContainEqual({ kind: 'nodeCommitted', nodeId: 'first' });
+  });
+
+  it('成功判据里出现证明不了落地效果的那一行，整条计划在装配期就被拒', () => {
+    // F41 的原话现场：模型给「发布页上的那个按钮」写 urlContains /publish/。
+    expect(() =>
+      buildPlan(planWith({ successConditions: [{ kind: 'urlContains', value: '/publish/' }] })),
+    ).toThrowError(/证明不了落地效果/);
+    // 终态那一列不这么拒：它本来就要问「不做是不是也成立」，由守卫在**合成**时逐行判。
+    expect(() =>
+      buildPlan(planWith({ terminalStateConditions: [{ kind: 'urlContains', value: '/publish/' }] })),
+    ).not.toThrow();
+  });
+
+  it('终态判据指名计划里没有的格子、或指名自己，都拒', () => {
+    expect(() =>
+      buildPlan(planWith({ terminalStateConditions: [{ kind: 'nodeCommitted', nodeId: 'nope' }] })),
+    ).toThrowError(/计划里没有的格子/);
+    // 指名自己：这一格没落定时读自己恒为假，是一条永远不成立的死判据。
+    expect(() =>
+      buildPlan(planWith({ terminalStateConditions: [{ kind: 'nodeCommitted', nodeId: 'second' }] })),
+    ).toThrowError(/指名了自己/);
+  });
+
+  it('判据进指纹，但只有声明了才进——2.4 时代的老计划指纹逐字节不变', () => {
+    const baseline = buildPlan(BOSS_BASIC_PLAN).fingerprint;
+    // 三条内置计划一条判据都没声明，它们的指纹必须与本次改动之前完全一致（canonical.ts 的条件写入）。
+    expect(baseline).toMatch(/^[0-9a-f]{8}$/);
+    expect(buildPlan(BOSS_DELIVER_PLAN).fingerprint).toMatch(/^[0-9a-f]{8}$/);
+
+    // 声明了判据就换了执行身份：跳过与否确实由它决定，指纹必须跟着变（2.4-05 的续跑判据）。
+    const withTerminal = buildPlan(planWith({ terminalStateConditions: [{ kind: 'effectObserved' }] }));
+    const withSuccess = buildPlan(planWith({ successConditions: [{ kind: 'effectObserved' }] }));
+    const plain = buildPlan(planWith({}));
+    expect(withTerminal.fingerprint).not.toBe(plain.fingerprint);
+    expect(withSuccess.fingerprint).not.toBe(plain.fingerprint);
+    // 两列换指纹的值互不相同——它们是不同的执行语义，不是同一件事的两个名字。
+    expect(withTerminal.fingerprint).not.toBe(withSuccess.fingerprint);
   });
 });

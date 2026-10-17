@@ -1583,3 +1583,150 @@ describe('workflow.run 工具：agent 与面板跑的是同一个 runner（spec 
     expect(calls).toEqual(['jd-capture#1', 'jd-list#1', 'jd-list#2', 'flaky#1']);
   });
 });
+
+describe('终态跳过：第四种判决（spec 5.11-03 / 04 的 runner 半边）', () => {
+  /** 终态判据用例那两条计划 id：一条带判据，一条不带（"没说要跳过"与"跳过成立"必须分开）。 */
+  const PLAN_WITH_CONDITIONS = 'plan-terminal-conditions';
+  const PLAN_WITHOUT_CONDITIONS = 'plan-no-conditions';
+
+  /**
+   * 存一条两格线性计划：第一格已落定，第二格是可能动过手的不可逆那一步。
+   * @param runs `workflow.store` 句柄
+   * @param planId 计划 id
+   * @param conditions 第二格的终态判据；`null` 表示**不声明**这一列
+   */
+  function seedPlan(runs: WorkflowRunStoreService, planId: string, conditions: unknown[] | null): void {
+    runs.savePlan({
+      id: planId,
+      name: '终态判据用例',
+      plan: buildPlan({
+        id: planId,
+        nodes: [
+          { id: 'landed', kind: 'jd.capture', effect: 'read' },
+          {
+            id: 'aftermath',
+            kind: 'demo.flaky',
+            effect: 'local-write',
+            target: 'demo://aftermath',
+            ...(conditions === null ? {} : { terminalStateConditions: conditions }),
+          },
+        ],
+      }),
+      sourceRunId: null,
+      at: 1_700_000_000_000,
+    });
+  }
+
+  /**
+   * 跑到第二格挂住再「杀掉进程」：第一格已落定，第二格外发起过却没观察到完成（2.4-05/06 的现场）。
+   * @param planId 用哪条计划
+   * @returns 临时目录、第一次的调用序列、被留下的 run id、计划 id（重启后要先认它才续得上）
+   */
+  async function killAtSecondNode(planId: string) {
+    const dir = tempDir();
+    const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
+    seedPlan(
+      first.runs,
+      planId,
+      planId === PLAN_WITH_CONDITIONS ? [{ kind: 'nodeCommitted', nodeId: 'landed' }] : null,
+    );
+    first.runner.start(planId);
+    await waitFor(() => first.calls.includes('aftermath#1'));
+    const runId = first.runner.current().runId;
+    // 「进程死亡」= 倒序卸载全部 fiber，库里最后一行 `running` 就此成为孤儿。
+    await shutDown();
+    return { dir, first, runId, planId };
+  }
+
+  it('终态判据成立时不重放：执行器一次都不调，这一格照常结算，run 走到头', async () => {
+    const { dir, first, runId, planId } = await killAtSecondNode(PLAN_WITH_CONDITIONS);
+    expect(first.calls).toEqual(['landed#1', 'aftermath#1']);
+
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'done');
+
+    // 判据成立的那一次续跑里第二格一次都没跑：这一格是被判据结掉的，不是被执行器做完的。
+    expect(second.calls).toEqual([]);
+    const stored = second.runs.state(runId);
+    expect(stored?.nodes.map((node) => node.status)).toEqual(['done', 'done']);
+    // 尝试次数接的是上一轮那一次，不因「没跑」而重置——账是连着的（2.4-03 的读数）。
+    expect(stored?.nodes[1]).toMatchObject({ status: 'done', attempts: 1 });
+    // 相位走的是结算那条路：结局落定即 `nodeCommitted`，续跑读数与普通成功同形。
+    expect(second.runs.readPhases(runId, 1)).toContain('nodeCommitted');
+  });
+
+  it('推给界面的那句话要能看出这一格没跑过（spec 5.11-03 的可读性半边）', async () => {
+    const { dir, runId, planId } = await killAtSecondNode(PLAN_WITH_CONDITIONS);
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'done');
+    const messages = second.events.filter((event) => event.stepId === 'aftermath').map((event) => event.message);
+    expect(messages.some((message) => message?.includes('终态已成立'))).toBe(true);
+    // 「完成」那一句只许出现在执行器真跑过的那一次续跑里。
+    expect(messages.some((message) => message === 'aftermath 完成')).toBe(false);
+  });
+
+  it('没声明终态判据的节点判决逐字不变：仍停在接管点上等人工（2.4-06 的基线）', async () => {
+    const { dir, first, runId, planId } = await killAtSecondNode(PLAN_WITHOUT_CONDITIONS);
+    expect(first.calls).toEqual(['landed#1', 'aftermath#1']);
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'paused');
+    expect(second.runner.current().requiresHuman).toMatchObject({
+      subject: 'demo.flaky',
+      reason: 'unobserved-side-effect',
+      stepId: 'aftermath',
+    });
+    // 接管点不改库里那一行（与 2.4-06 同形）：留下的仍是「动过手、没看到完成」那一位。
+    expect(second.runs.state(runId)?.nodes[1]).toMatchObject({ status: 'running', attempts: 1, sideEffect: 'started' });
+  });
+
+  it('F41 的反例端到端：模型写的 urlContains 那一行不触发跳过，仍转接管', async () => {
+    const dir = tempDir();
+    const planId = 'plan-terminal-url-row';
+    const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
+    // 模型给「发布页上的那个按钮」写下的那一行：地址栏带 `/publish/` 与这一步跑没跑过无关。
+    seedPlan(first.runs, planId, [{ kind: 'urlContains', value: '/publish/' }]);
+    first.runner.start(planId);
+    await waitFor(() => first.calls.includes('aftermath#1'));
+    const runId = first.runner.current().runId;
+    await shutDown();
+
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'paused');
+    // 反例必须失败：守卫拒了这一行，跳过没有发生，run 仍停在接管点上等人。
+    expect(second.runner.current().requiresHuman).toMatchObject({ reason: 'unobserved-side-effect' });
+    expect(second.runs.state(runId)?.nodes[1]).toMatchObject({ status: 'running', attempts: 1, sideEffect: 'started' });
+  });
+
+  it('落地已被观察到时同样不重放（sideEffectObserved 那一相就是为它准备的）', async () => {
+    const dir = tempDir();
+    const planId = 'plan-terminal-effect-observed';
+    const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
+    seedPlan(first.runs, planId, [{ kind: 'effectObserved' }]);
+    first.runner.start(planId);
+    await waitFor(() => first.calls.includes('aftermath#1'));
+    const runId = first.runner.current().runId;
+    await shutDown();
+
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    // 「外发落地被观察到、随后步骤失败」这个形状由 `recordNode` 落下（5.11-b 的相位写入点）。
+    // runner 今天还没有产出它的那条路径，所以照 2.4-05 的先例手写真实形状的库行，而不是等一个还不存在的调用点。
+    second.db.prepare("UPDATE workflow_nodes SET side_effect = 'done' WHERE run_id = ? AND node_index = 1").run(runId);
+    second.db
+      .prepare('INSERT INTO workflow_node_checkpoints (run_id, node_index, phase, at) VALUES (?, 1, ?, ?)')
+      .run(runId, 'sideEffectObserved', 1_700_000_000_500);
+
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'done');
+    expect(second.calls).toEqual([]);
+    expect(second.runs.state(runId)?.nodes[1]).toMatchObject({ status: 'done' });
+  });
+});

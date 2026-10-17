@@ -53,6 +53,7 @@ import { BOSS_BASIC_PLAN, buildPlan, planById, WORKFLOW_PLANS, workflowPlanSchem
 import { assertPlanName, newPlanId } from './plan-store.js';
 import type { WorkflowRunStoreService } from './run-store.js';
 import { retryBudgetFor } from './retry-policy.js';
+import { terminalStateHolds } from './terminal-state.js';
 
 // 登记处与落库服务从包出口露出去：装配清单要为它们各占一个 id（main/registry.ts）。
 // 执行器的**契约**（`WorkflowNodeExecutor` 等）在 `@auto-cc/core`，能力包从那里取，不 import 本包。
@@ -1019,6 +1020,28 @@ export class WorkflowRunnerService extends Service {
         this.apply({ type: 'step-skipped', stepId: spec.id, at: Date.now() }, null, `${spec.id} 已完成，跳过`);
         continue;
       }
+      if (claim === 'satisfied') {
+        // 终态已成立：执行器一次都不许调，但图与游标必须照常前进，否则这一格会把整条 run 卡死。
+        // 走 `succeedNode` 而不是就地拼一遍落库+推图：推图校验、节点行、相位、run 行、事件推送
+        // 是同一套顺序（AGENTS.md §2.2），抄一遍就迟早漂成两条真相。
+        const stored = this.store.state(run.runId)?.nodes[index];
+        // 迁移表只允许「正在运行的那一步」结束（machine.ts 的 `step-finished`），而续跑读回的镜像里
+        // 这一格是 pending——它上一次死在半路。于是先把这一步认成 running，时间戳用库里那一次尝试的
+        // 真实起点：耗时栏读出来仍是「从上一次动手指到现在」，而不是被编出来的 0ms。
+        const startedAt = stored?.startedAt ?? Date.now();
+        this.apply({ type: 'step-started', stepId: spec.id, at: startedAt }, null, null);
+        this.succeedNode(
+          run.runId,
+          index,
+          spec,
+          stored?.attempts ?? 1,
+          startedAt,
+          undefined,
+          graph,
+          `${spec.id} 终态已成立，未重放`,
+        );
+        continue;
+      }
       if (claim === 'needs-human') {
         this.stop(
           { subject: spec.kind, reason: 'unobserved-side-effect', stepId: spec.id, at: Date.now() },
@@ -1052,9 +1075,13 @@ export class WorkflowRunnerService extends Service {
    * @param runId 本次 run
    * @param index 节点下标
    * @param spec 节点声明
-   * @returns `granted` / `already-done` / `needs-human`
+   * @returns `granted` / `already-done` / `satisfied` / `needs-human`
    */
-  private enterNode(runId: string, index: number, spec: WorkflowNodeSpec): 'granted' | 'already-done' | 'needs-human' {
+  private enterNode(
+    runId: string,
+    index: number,
+    spec: WorkflowNodeSpec,
+  ): 'granted' | 'already-done' | 'satisfied' | 'needs-human' {
     const key = this.positionKey(runId, index);
     if (this.confirmedPositions.delete(key)) {
       // 一次确认只放行一次：闸门仍然要写这笔重放（并留下日志），否则「拒绝盲重放」就成了空话。
@@ -1077,8 +1104,35 @@ export class WorkflowRunnerService extends Service {
       return 'granted';
     }
     const claim = this.store.claimNode(runId, index, spec, Date.now());
-    if (claim === 'granted') this.claimedPositions.add(key);
-    return claim;
+    if (claim === 'already-done') return 'already-done';
+    if (claim === 'granted') {
+      this.claimedPositions.add(key);
+      return 'granted';
+    }
+    // `needs-human` 之前先问终态：不可逆动作落地了却死在记账之前时，这一格既不能盲重放，
+    // 也不该永远停在接管点上（spec 5.11-03）。没声明终态判据的节点问出 false，判决与改前逐字相同。
+    return this.terminalStateReached(runId, index, spec) ? 'satisfied' : claim;
+  }
+
+  /**
+   * 这个位置的**终态**是不是已经成立——成立就不该再派一次执行器。
+   *
+   * 快照只来自 run store（相位 + 节点行），守卫与合成都在 `terminal-state.ts` 那个纯函数里；
+   * 这里只负责把库里读数收成它要的形状，不在本地缓存第二份事实（AGENTS.md §9 的 2.5）。
+   * @param runId 本次 run
+   * @param index 节点下标
+   * @param spec 节点声明
+   * @returns true 表示终态已成立
+   */
+  private terminalStateReached(runId: string, index: number, spec: WorkflowNodeSpec): boolean {
+    if (!spec.terminalStateConditions) return false;
+    const stored = this.store.state(runId);
+    return terminalStateHolds(spec.terminalStateConditions, {
+      effectObserved: this.store.readPhases(runId, index).includes('sideEffectObserved'),
+      committedNodeIds: (stored?.nodes ?? [])
+        .filter((node) => node.status === 'done' || node.status === 'skipped')
+        .map((node) => node.nodeId),
+    });
   }
 
   /**
@@ -1172,6 +1226,8 @@ export class WorkflowRunnerService extends Service {
    * @param startedAt 本节点首次开始的时间戳（毫秒）
    * @param output 执行器宣告走过的出口句柄；省略即 `default`（裁定 3）
    * @param graph 本次 run 的执行图
+   * @param finishMessage 推给界面的那句话；省略即「完成」。终态跳过走的是同一个出口，
+   *   区别只在这一句——界面必须看得出这一格是**没跑**而是通过终态判据结掉的（spec 5.11-03）
    */
   private succeedNode(
     runId: string,
@@ -1181,6 +1237,7 @@ export class WorkflowRunnerService extends Service {
     startedAt: number,
     output: string | undefined,
     graph: WorkflowGraphView,
+    finishMessage?: string,
   ): void {
     const at = Date.now();
     // 先推图再落库：`advanceGraph` 会校验「这个出口真是该节点声明过的」，声明里没有就结构化失败，
@@ -1211,7 +1268,7 @@ export class WorkflowRunnerService extends Service {
       finishedAt: next.finished ? at : null,
       lastError: null,
     });
-    this.apply({ type: 'step-finished', stepId: spec.id, at }, 'finished', `${spec.id} 完成`);
+    this.apply({ type: 'step-finished', stepId: spec.id, at }, 'finished', finishMessage ?? `${spec.id} 完成`);
   }
 
   /**

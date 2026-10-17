@@ -65,7 +65,19 @@ const EXECUTION_NODE_FIELDS = [
 ] as const satisfies readonly (keyof WorkflowNodeSpec)[];
 
 /**
- * 把节点数组收成"执行身份"读数：只取上面那张清单里的键，顺序固定。
+ * 5.11-03 的两个判据字段：**声明了才进执行身份**。
+ *
+ * 为什么不给它们上那张固定清单：加了固定键，`canonicalJson` 会把 `undefined` 写成 `null`，
+ * 于是**每一条 2.4 时代的老计划指纹都会变**，历史 run 的续跑判据（2.4-05 / 5.10-07）全部作废。
+ * 而判据确实改变「这一步会不会被跳过」，所以声明了必须进哈希——两头的诉求正好由条件写入满足。
+ */
+const CONDITION_FIELDS = [
+  'successConditions',
+  'terminalStateConditions',
+] as const satisfies readonly (keyof WorkflowNodeSpec)[];
+
+/**
+ * 把节点数组收成"执行身份"读数：只取上面两张清单里的键，顺序固定。
  * @param nodes 补全默认值之后的节点数组
  * @returns 用于哈希的数组，每个元素是键固定的对象
  */
@@ -73,6 +85,9 @@ function executionIdentity(nodes: readonly WorkflowNodeSpec[]): Record<string, u
   return nodes.map((node) => {
     const identity: Record<string, unknown> = {};
     for (const field of EXECUTION_NODE_FIELDS) identity[field] = node[field];
+    for (const field of CONDITION_FIELDS) {
+      if (node[field] !== undefined) identity[field] = node[field];
+    }
     return identity;
   });
 }

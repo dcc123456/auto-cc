@@ -8,9 +8,23 @@
 import { AppError, TOOL_EFFECTS, type WorkflowNodeSpec, type WorkflowPlanView } from '@auto-cc/core';
 import { z } from 'zod';
 import { graphFingerprint } from './canonical.js';
+import { provesLandedEffect } from './terminal-state.js';
 
 /** 节点参数值：计划要能整体 JSON 序列化进库，所以不接受嵌套对象（嵌套就得再设计一层模板引擎）。 */
 const nodeParamSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+/**
+ * 一条判据的声明形状（spec 5.11-03）。
+ *
+ * 三个字段各自只对一种 kind 有意义，所以用 `superRefine` 而不是三个互斥 schema：
+ * 一条判据只有三键，拆成三个联合分支换来的只是更长的报错文本。
+ * 「值对不对 kind」由 `buildPlan` 统一拒（那里才知道计划里有哪些格子）。
+ */
+const workflowConditionSchema = z.strictObject({
+  kind: z.enum(['effectObserved', 'nodeCommitted', 'urlContains']),
+  value: z.string().optional(),
+  nodeId: z.string().min(1).optional(),
+});
 
 /**
  * 单个节点的声明形状。
@@ -42,6 +56,13 @@ export const workflowNodeSpecSchema = z.strictObject({
    * 也就是 2.4 那三条线性计划的写法；**线性计划不需要逐个补写**。
    */
   outputs: z.array(z.string().min(1)).min(1).optional(),
+  /**
+   * 成功判据（5.11-03）：与终态判据分列两个字段，不许合成一个。
+   * 每一行都必须能证明落地效果，形状对但证明不了的那一类在 `buildPlan` 里被拒。
+   */
+  successConditions: z.array(workflowConditionSchema).min(1).optional(),
+  /** 终态判据（5.11-03）：派执行器之前先问一遍，全成立就不重放这一格。 */
+  terminalStateConditions: z.array(workflowConditionSchema).min(1).optional(),
 });
 
 /** 一条计划的声明形状（`fingerprint` 由 `buildPlan` 现算，不接受外部传入）。 */
@@ -89,9 +110,11 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
     if (seen.has(node.id)) throw new TypeError(`工作流计划有重名节点 ${node.id}`);
     seen.add(node.id);
   }
+  assertConditionsUsable(parsed.data.nodes, seen);
   // `params` 的默认值必须在这里补全：落库和界面读到的都应当是补全后的形状，而不是「有时有 key 有时没有」。
   // `outputs` 反过来**不补默认值**：省略就是"只有 default 出口"的读法，由投影方（`graph.ts`）按同一口径解释，
   // 这样 2.4 时代留下的计划文本一个字节都不变，历史 run 的续跑判据也不会被 5.10-b 动到。
+  // 两个判据字段同理不补默认值：省略就是「没有判据」的读法，而补一个空数组会让 5.11 的两列都变成必填。
   const nodes: WorkflowNodeSpec[] = parsed.data.nodes.map((node) => ({
     id: node.id,
     kind: node.kind,
@@ -101,8 +124,47 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
     retryTimes: node.retryTimes,
     requiresHuman: node.requiresHuman,
     ...(node.outputs === undefined ? {} : { outputs: node.outputs }),
+    ...(node.successConditions === undefined ? {} : { successConditions: node.successConditions }),
+    ...(node.terminalStateConditions === undefined ? {} : { terminalStateConditions: node.terminalStateConditions }),
   }));
   return { id: parsed.data.id, nodes, fingerprint: planFingerprint(nodes) };
+}
+
+/**
+ * 逐条核判据声明（spec 5.11-03 / 5.11-04）。
+ *
+ * 三件事在这里拒，因为只有这一处同时看得见「整份计划」与「节点的 kind」：
+ * ① 成功判据里出现**证明不了落地效果**的那一行（模型写的 `urlContains /publish/` 是现场原话）——
+ *    留着它等于宣布「这一格的成功可以被一行证明不了的读数认证」；
+ * ② `nodeCommitted` 指名一个计划里没有的格子——那种判据永远观测不到，等于把跳过写成哑条件；
+ * ③ `nodeCommitted` 指名自己——自己没落定时读自己恒为 false，是一条永远不成立的死判据。
+ * @param nodes 已过 schema 的节点声明
+ * @param knownNodeIds 计划内的节点 id 集合
+ * @returns 无；不合即抛 `TypeError`（与本文件其它形状错误同一种失败面）
+ */
+function assertConditionsUsable(
+  nodes: readonly z.output<typeof workflowNodeSpecSchema>[],
+  knownNodeIds: ReadonlySet<string>,
+): void {
+  for (const node of nodes) {
+    for (const condition of node.successConditions ?? []) {
+      if (!provesLandedEffect(condition)) {
+        throw new TypeError(
+          `节点 ${node.id} 的成功判据里有一行证明不了落地效果（${condition.kind}）：地址栏只说明 run 在哪，不说明它做了什么`,
+        );
+      }
+    }
+    for (const condition of node.terminalStateConditions ?? []) {
+      if (condition.kind !== 'nodeCommitted') continue;
+      const named = condition.nodeId ?? '';
+      if (!knownNodeIds.has(named)) {
+        throw new TypeError(`节点 ${node.id} 的终态判据指名了计划里没有的格子 ${named}`);
+      }
+      if (named === node.id) {
+        throw new TypeError(`节点 ${node.id} 的终态判据指名了自己，这一格没落定时读自己恒为假`);
+      }
+    }
+  }
 }
 
 /**
