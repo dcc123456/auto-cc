@@ -2514,3 +2514,102 @@ run 停在中途时拒绝切换（`WORKFLOW_INVALID_STATE`，消息"先处理完
 `4.1-08` / `4.3-03` / `4.5-06`（等用户裁）、`4.3-07` / `4.4-02` / `4.6-08`（等真实 LLM 与在场）、`5.7-11` / `P5-01` / `M6-02`（真实账号 + 在场）、
 `3.6-08`（>5 区块的大文档在现有种子与入口形状下到不了，见 `docs/plans/03-resume-pdf/plan.md` §8.9）、`5.10-13`（续跑入口缺口，等 5.10-j 的活体证据）。
 `1.7-09` / `1.7-10` 已经是 `[x]`，不受影响。
+
+---
+
+## 7.9 5.11 工作流引擎对齐 browser-copilot（2026-10-18 实读两仓后定，一次一片，逐片独立跑门禁、独立提交）
+
+### 7.9.0 这一节的由来与它**不做**什么
+
+用户裁定（2026-10-18）：「这个项目的工作流参考 `/Users/dcc/deepseek-harness-workspece/browser-copilot`
+这个项目中的工作流进行修改，**保持针对浏览器的功能一致**」。
+
+后半句是硬约束，先说清它约束掉什么：`packages/browser` 的**能力面与 IPC 契约一个字都不许动**——
+`packages/shared/src/bridge.ts` 里那批 `browser.*` 口、`packages/browser/src/locator-spec.ts` 的打分与
+fail-closed 语义、`packages/entitlement` 的额度闸门、`navigate-policy.ts` 的地址白名单，
+全部原样保留。本节只动 `packages/workflow` 的**引擎内部**与 `WorkflowNodeSpec` 的契约形状。
+
+理由（现场读码结论，见 F35–F41）：**浏览器层 auto-cc 比 browser-copilot 强，强得不在一处**——
+auto-cc 有打分定位 + 指纹自愈 + 三档分数（`minScore`/`readMinScore`/`injectMinScore`），
+browser-copilot 的 `OpResult` 是「spec 串 + 命中序号」的朴素模型；auto-cc 有五道互相独立的门
+（effect 级、自治档位、额度闸门、接管硬拦、风险信号），browser-copilot 只有三类确认卡。
+所以「对齐」的收益**全部在引擎的可靠性架构里**，不在浏览器能力里。把 browser-copilot 的浏览器层
+搬过来是净损失——那正是后半句要防的事。
+
+### 7.9.1 现场读码（F35–F41，均为 2026-10-18 实读）
+
+| #   | 读数（file:line 为证）                                                                                                                                                                                                                                                                                       | 后果                                                                                                                                                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F35 | browser-copilot 的引擎**零 chrome / 零 storage 导入**：宿主能力全是注入的函数表（`src/background/workflow-engine/engine.ts`），`server/src/run-service.ts` 直接从另一个目录树 import **同一个文件**并配自己的执行器表（`server/src/executors.ts:2142+`，79 个键，与扩展侧 `executors.ts:3404` 近乎一一对应） | 它「两个宿主一套能力」的前提在 auto-cc **不成立**（本仓只有一个驱动器，渲染层走 bridge）。所以「纯引擎 + 双执行器表」这一条**否决**，理由见 7.9.2 候选二                                                                                                             |
+| F36 | `packages/workflow/src/plan.ts:13` `nodeParamSchema = z.union([z.string(), z.number(), z.boolean()])`，`:33` `params: z.record(z.string(), nodeParamSchema)` —— **节点参数只有标量**。`plan.test.ts:82` 明确拒嵌套对象                                                                                       | 工作流节点**装不下一个定位器/等待谓词/滚动计划**。这是 auto-cc 与 browser-copilot 最大的能力差：那边 27 个 `ActionName` 就是节点参数词汇表（`src/lib/ops.ts:1-9`）                                                                                                   |
+| F37 | `packages/workflow/src/index.ts:1057` `enterNode` 返回三态 `'granted' / 'already-done' / 'needs-human'`；`:1017-1021` 的 `already-done` 分支**一次都不许调执行器**（位置性去重，靠 `run-store.ts` 那一行的状态，**不问页面任何东西**）                                                                       | 已有「不重复执行」的一半，缺的是 browser-copilot 的另一半：**「后置条件已成立所以这一节点不必再动手」**。两件事同名不同义，必须分开命名                                                                                                                              |
+| F38 | `run-store.ts:318` `if ((existing.side_effect === 'started' \|\| existing.side_effect === 'done') && !force) return 'needs-human'` —— 「已经动手、没观察到完成」的窗口里，引擎**拒绝重放**（`run-store.test.ts:279-280` 覆盖）                                                                               | 这是**拒绝重放**，不是**因已完成而跳过**。browser-copilot 靠 checkpoint 相位把这两者区分开：全仓 grep `workflow_checkpoint` / `nodeStarted` / `sideEffectObserved` / `nodeCommitted` **零命中**，所以 auto-cc 现在只能一刀切地拒绝                                   |
+| F39 | `retry-policy.ts` 全文 37 行零导入；`retryBudgetFor` 只有两档，按 `effect === 'outbound'` 分：外发恒 1 次，非外发 `1 + min(声明 ?? 配置, READ_RETRY_CEILING=2)`                                                                                                                                              | 「可靠性档位」这个概念在 auto-cc 只有 **2 档**，且其中一档是安全闸门不是可靠性策略。browser-copilot 的 `reliability.ts:19-27` 是**按来源解析**的 `compat` / `generated-strict`，逐工作流生效而全局不变                                                               |
+| F40 | `NodeEvidence`（`workflow_nodes.evidence_ref`，`writeEvidence`/`writeScreenshot` 单一脱敏点 `redactValue`，`evidenceDomChars` 800 / `evidenceTextChars` 300 / `evidenceShotBytes` 2MB）**挂在节点结局上**（失败与终态），不挂在决策上                                                                        | `decideLocate` 的 `reason`（「最优候选 N 分低于最低可用分 M」「与次优候选只差 N 分」）与 `LocateResultView.snapshot`（失败时非空）**止于 IPC 边界**，没有任何东西把它们存下来。browser-copilot 的判据原话（`engine.ts:277-295`）：**「没有报错」不等于「目标达成」** |
+| F41 | browser-copilot 的 `provesLandedEffect`（`repair-verification.ts`）有一条硬边界：URL 在地址栏上与「这一步有没有跑过」无关，模型会给「发布页上的那个按钮」写 `urlContains /publish/`，读成「已生效」就会把这一步的动作删掉却报告它已覆盖                                                                      | 任何「终态跳过」实现都必须带同款谓词守卫，否则会把「跳过」变成「静默漏做」。`terminalStateConditions` 与 `successConditions` 在那边是两个字段（`reliability.ts:60-71`），不许合并                                                                                    |
+
+### 7.9.2 选型与证据（AGENTS.md §6.1）
+
+**候选一（采纳）· 只移植可靠性架构，不动浏览器能力面**
+移植 F37/F38/F40/F41 指出的三处：checkpoint 相位、终态跳过、决策级证据。
+一手来源：browser-copilot `workflow-engine/engine.ts:966-1000`（终态跳过）、
+`lib/workflow/checkpoints.ts`（三相位）、`lib/workflow/reliability.ts:60-71`（两组条件分列）、
+`lib/workflow/repair-verification.ts`（`provesLandedEffect`）。
+本机实测：F35–F41 六条读数已在本仓逐条 grep 复核（`plan.ts:13/33`、`index.ts:1017-1057`、
+`run-store.ts:318`、`retry-policy.ts`、`grep 'workflow_checkpoint'` 零命中）。
+
+**候选二（否决）· 把引擎拆成零导入纯函数 + 双执行器表**
+否决理由：F35 说清那条设计的前提是**两个宿主**（浏览器扩展 + Node 服务端）。auto-cc 只有一个驱动器，
+渲染层经 `bridge.ts` 白名单拿能力（§5.8 的 `contextIsolation`/`sandbox` 底线），
+拆出第二张执行器表等于造一份**只被一份表用**的第二套事实，撞 §2.7「禁止第二套同类基础设施」。
+`machine.ts` / `graph-advance.ts` / `retry-policy.ts` / `canonical.ts` 已经是纯函数，真需要时再拆不迟。
+
+**候选三（否决）· 移植 27 个 `ActionName` 作为节点参数词汇表**
+否决理由：这是候选四的前置，而候选四本身要用户裁（见 7.9.3 裁定一）。若裁定为「不扩浏览器能力面」，
+本节连同 F36 的形状问题一并搁置，只在 spec 留一条反向验证条目（AGENTS.md §6.5）。
+
+**候选四（待裁）· 让工作流节点直接驱动浏览器（新增 `browser.*` 节点族）**
+收益：工作流能像 browser-copilot 那样把「点这个按钮」当节点，而不必经 agent 循环。
+风险：F36 说明这是**从零加概念**（节点参数类型要扩），且会新增一条「工作流可直接外发」的路径，
+必须重验 5.3-d「缺一闸门即不外发」与 2.4 的续跑幂等。详见裁定一。
+
+### 7.9.3 裁定
+
+**裁定一 本节只做候选一（可靠性架构），`browser.*` 节点族不并入本轮**
+`packages/workflow` 的节点参数形状（F36）与浏览器能力面是两件事，混在一起会让「保持浏览器功能一致」
+这半句约束失效——新增节点族就是**扩**浏览器能力面，而用户说的是保持一致。
+候选四留在 spec 的 `[ ]` 里，等用户单独裁；届时它自己是一片子计划，不夹带在本节里。
+
+**裁定二 checkpoint 用号段 41 新建表，不改 `workflow_nodes` 的既有列语义**
+`side_effect` 那一列（`run-store.ts:95`）现读只有 `'started'`（claim 时写）与 `'done'`（成功时写）两态，
+中间那一相「已派发但未观察到落地」**没有任何地方记录**——而那正是 F38 一刀切拒绝重放的原因。
+新表 `workflow_node_checkpoints(run_id, node_index, phase, at)`，三相位与 browser-copilot 同名同义
+（`nodeStarted` / `sideEffectObserved` / `nodeCommitted`）。不改老迁移的 `up`（§9 的 5.3-a 实测条：
+改老迁移不会重跑，老库里根本执行不到）。
+
+**裁定三 「终态跳过」与「位置去重」「拒绝重放」三者命名必须互不相同**
+`enterNode` 扩到四态：`granted` / `already-done`（位置性，F37 原有）/ `satisfied`（终态跳过，新增）/
+`needs-human`（拒绝重放，F38 原有）。`satisfied` **必须**带 F41 那条守卫：
+只有能证明「落地效果已成立」的谓词才准触发，且 `terminalStateConditions` 与 `successConditions`
+在 `WorkflowNodeSpec` 上分列两个字段，不许合成一个。
+
+**裁定四 决策级证据挂在既有 `NodeEvidence` 上，不另起证据体系**
+F40 说清 `writeEvidence` 已是单一脱敏点。`satisfied` 与「定位判据拒绝猜测」各补一种
+`NodeEvidence.kind`，走同一条写入路径与同一处 `redactValue`——§2.2 同一逻辑不许出现第二次。
+
+**裁定五 每一片都必须给出「改前基线」，不许只看改后绿**
+沿用 browser-copilot `specs/reliability-fixtures/scenarios.ts` 的做法：每个场景同时带一条
+**改前为真且必须保持为真**的基线断言。续跑/幂等这一族（2.4-05/06/08、5.10-13）在本节之前已 PASS，
+把它们当基线钉住，本节任何一片红了都能立刻定位是自己改坏的还是本来就这样。
+
+### 7.9.4 切片表（一次一片，片内独立跑四道门禁、独立提交推送）
+
+| 片     | 内容                                                                                                                                                                                                                   | 判据形状                                                                                                         | 前置   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------ |
+| 5.11-a | 号段 41 的 `workflow_node_checkpoints` 表 + 迁移；`claimNode` 在写入 `side_effect='started'` 的同一事务里补一条 `nodeStarted`；纯存储 + 单测，**不改 runner 行为**                                                     | U：迁移在空库与「跑过老迁移的老库」两种情形下都建出表；`nodeStarted` 与 `side_effect` 同事务（抛错即两处都不变） | 裁定二 |
+| 5.11-b | 续跑读 checkpoint 三相位：`nodeStarted` 有而 `nodeCommitted` 无 → 现状「拒绝重放」保持不变（**行为零变化**，只是把判断从「列」挪到「相位」）；`sideEffectObserved` 落库；两个观测到的相位都缺且能证明未派发 → 准许重放 | U+C：F38 那条用例（`run-store.test.ts:279`）在改后**逐字不变地绿**；新增「已观察落地 → 重放时跳过重复动作」用例  | 5.11-a |
+| 5.11-c | `WorkflowNodeSpec` 加 `terminalStateConditions`（与 `successConditions` 分列）；`enterNode` 四态与 `satisfied` 分支；`provesLandedEffect` 同款守卫                                                                     | U+C+V：F41 的反例必须有测试——「URL 在地址栏上」不得构成跳过理由（这条是 C，断言是反例必须失败）                  | 5.11-b |
+| 5.11-d | 决策级证据：`satisfied` 与定位判据拒绝各补一种 `NodeEvidence.kind`，走既有写入路径                                                                                                                                     | U+C：读回路径按 kind 路由；脱敏仍只有一处                                                                        | 5.11-c |
+
+每片四道门禁：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`，加本片的活体读数
+（§7.1，V 类条目附截图或 DOM 断言）。
