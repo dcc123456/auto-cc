@@ -98,6 +98,12 @@ export default tseslint.config(
       // §6.4 的一次性 spike 副本（结论进文档、代码不进主干），不参与主干 lint。
       '.research-repos/**',
       'packages/renderer/**/generated/**',
+      // 外部编辑器/AI 工具落在仓库里的计划原文（不进 git，也不在任何 tsconfig 工程里）。
+      '.trae/**',
+      // 一份误落在渲染层目录下的 pdfjs 资源副本（约 40MB，全仓零引用）。
+      // 留着它会让 eslint 报 4 条 project-service 解析错，而 `&&` 链一断，
+      // check-renderer-conventions 等后面 12 道机检全部不跑。
+      'packages/renderer/dummy-non-existing-folder/**',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked,

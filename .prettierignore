@@ -13,3 +13,10 @@ build/
 
 # 幻彩工坊技能的设计草稿：不是项目源码，重排它只会把设计稿的排版改成 prettier 喜欢的样子。
 .chromatic/
+
+# 外部编辑器/AI 工具落在仓库里的计划原文（不进 git）。
+.trae/
+
+# 一份误落在渲染层目录下的 pdfjs 资源副本（约 40MB，全仓零引用）：
+# 上游产物，重排版只会让归档下来的字节副本与上游对不上。
+packages/renderer/dummy-non-existing-folder/
