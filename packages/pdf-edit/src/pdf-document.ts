@@ -11,9 +11,19 @@
  */
 import { sha256Hex } from '@auto-cc/core/file-read';
 import fontkit from '@pdf-lib/fontkit';
-import { PDFDocument, rgb, StandardFonts, type PDFFont } from 'pdf-lib';
+import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import { colorsOfOverlay } from './overlay-colors.js';
 import { isLatinOnly, type PlannedOverlay } from './overlay-writer.js';
+import {
+  displayedSize,
+  placeVisualPointRatio,
+  placeVisualRect,
+  NOTE_TEXT_SIZE_PT,
+  type PageGeometry,
+  type PdfPageRotation,
+  type PlannedEditorObject,
+  type PlannedEditorPage,
+} from './object-model.js';
 import { isIdentityOrder } from './page-ops.js';
 import type { FontFamilyHint } from './text-metrics.js';
 
@@ -238,6 +248,275 @@ export class PdfEditDocument {
   }
 
   /**
+   * 按 WPS 形态编辑器的 draft（页计划 + 五类纸面对象）装出一份新文档。
+   *
+   * 与旧的 `arrange + applyOverlays` 的差别：
+   * - 页是带 id 的**计划条目**：源页副本（可重复）或空白页，每条可挂显示旋转；对象绑条目 id；
+   * - 对象有 text（改字/文本框）、image、shape、highlight、note 五种，矩形是相对**显示面**的比例坐标；
+   * - 源页可带 /Rotate，我们的绘制按最终显示角**反向旋转**落位（`placeVisualRect`），
+   *   阅读器把页面转正之后，对象正好落在用户拖出来的那个位置。
+   *
+   * 仍然是只**追加**内容：就地改字是盖底 + 同基线重绘，旧文字在文本层还在（反伪装约束见头注）。
+   * @param pages 已由 `planEditorPages` 校验规整的页计划
+   * @param objects 已由 `planEditorObjects` 校验规整的对象
+   * @param imageAssets 图片对象 id → 已读出并嗅探过格式的字节（服务层有界读取，本层不碰文件系统）
+   * @param cjkFontBytes 有非拉丁文字时必给的随包中文字体字节
+   * @returns 装成的新文档（源文件字节一个没动）
+   */
+  async assembleEditor(
+    pages: readonly PlannedEditorPage[],
+    objects: readonly PlannedEditorObject[],
+    imageAssets?: ReadonlyMap<string, EditorImageAsset>,
+    cjkFontBytes?: Uint8Array,
+  ): Promise<PdfEditDocument> {
+    const target = await PDFDocument.create();
+
+    // ① 按计划顺序装页：源页用 copyPages（重复页号=副本，pdf-lib 不拦重复指标），空白页直接 addPage。
+    const sourceIndices = pages
+      .filter((page): page is PlannedEditorPage & { sourcePageNumber: number } => page.kind === 'source')
+      .map((page) => page.sourcePageNumber - 1);
+    const copiedSourcePages = sourceIndices.length > 0 ? await target.copyPages(this.pdf, sourceIndices) : [];
+    let copiedCursor = 0;
+    /** 每条 id → 装好的页 + 最终几何（原生 MediaBox 宽高 + 最终显示旋转）。 */
+    const slots = new Map<string, { page: PDFPage; geometry: PageGeometry }>();
+    const outputMetrics: PdfPageMetric[] = [];
+    const outputSources: number[] = [];
+    for (const entry of pages) {
+      if (entry.kind === 'source') {
+        const page = copiedSourcePages[copiedCursor++];
+        if (page === undefined) throw new Error(`页条目 ${entry.id} 的源页拷贝缺失（copyPages 少给了页）`);
+        // 旋转缺省＝保留源档原有的 /Rotate（显式给 0 才是"转正"）。
+        const existing = reduceRotationToQuarter(page.getRotation().angle);
+        const rotation = entry.rotation ?? existing;
+        if (page.getRotation().angle !== rotation) page.setRotation(degrees(rotation));
+        target.addPage(page);
+        slots.set(entry.id, {
+          page,
+          geometry: { widthPt: page.getWidth(), heightPt: page.getHeight(), rotation },
+        });
+        outputMetrics.push({ number: outputMetrics.length + 1, widthPt: page.getWidth(), heightPt: page.getHeight() });
+        outputSources.push(entry.sourcePageNumber ?? 0);
+      } else {
+        const page = target.addPage([entry.widthPt, entry.heightPt]);
+        const rotation = entry.rotation ?? 0;
+        if (rotation !== 0) page.setRotation(degrees(rotation));
+        slots.set(entry.id, { page, geometry: { widthPt: entry.widthPt, heightPt: entry.heightPt, rotation } });
+        outputMetrics.push({ number: outputMetrics.length + 1, widthPt: entry.widthPt, heightPt: entry.heightPt });
+        outputSources.push(0);
+      }
+    }
+
+    // ② 字体：拉丁按 字族×粗斜 各嵌一只标准字体；任何非拉丁文字出现就嵌随包 Noto Sans SC（粗斜不兑现）。
+    const needsCjk = objects.some(
+      (object) => (object.kind === 'text' || object.kind === 'note') && object.text !== undefined && !isLatinOnly(object.text),
+    );
+    const latinFonts = new Map<string, PDFFont>();
+    const cjkFont = needsCjk ? await this.embedCjkFontOn(target, cjkFontBytes) : undefined;
+    /** 取一个文本对象该用的字体句柄（同键只嵌一次）。 */
+    const fontFor = async (object: PlannedEditorObject): Promise<PDFFont> => {
+      if (object.text !== undefined && !isLatinOnly(object.text)) {
+        if (cjkFont === undefined) throw new Error(`对象 ${object.id} 含非拉丁字符，但没有拿到随包字体字节`);
+        return cjkFont;
+      }
+      const key = `${object.fontFamilyHint ?? 'sans-serif'}/${object.bold ? 'b' : ''}${object.italic ? 'i' : ''}`;
+      const cached = latinFonts.get(key);
+      if (cached !== undefined) return cached;
+      const font = target.embedFont(latinStandardFontOfStyle(object.fontFamilyHint, object.bold, object.italic));
+      // embedFont 对标准字体是同步返回（pdf-lib 1.17.1 类型上写 PromiseLike，实测 await 也安全）。
+      const handle = isThenable(font) ? await font : font;
+      latinFonts.set(key, handle);
+      return handle;
+    };
+
+    // ③ 图片按路径去重嵌入（同一图被多个对象引用时只嵌一份资源）。
+    const embeddedImages = new Map<string, { image: Awaited<ReturnType<PDFDocument['embedPng']>> }>();
+    const imageFor = async (object: PlannedEditorObject) => {
+      const asset = imageAssets?.get(object.id);
+      if (asset === undefined) throw new Error(`图片对象 ${object.id} 没有拿到图片字节`);
+      const cacheKey = `${asset.format}:${asset.bytes.length}`;
+      const cached = embeddedImages.get(object.imagePath ?? cacheKey);
+      if (cached !== undefined) return cached.image;
+      const embedded = asset.format === 'png' ? await target.embedPng(asset.bytes) : await target.embedJpg(asset.bytes);
+      embeddedImages.set(object.imagePath ?? cacheKey, { image: embedded });
+      return embedded;
+    };
+
+    // ④ 逐对象绘制（顺序即对象数组顺序，后画的压先画的）。
+    for (const object of objects) {
+      const slot = slots.get(object.pageId);
+      if (slot === undefined) throw new Error(`对象 ${object.id} 绑的页 ${object.pageId} 不在装成的文档里`);
+      const { page, geometry } = slot;
+      if (object.kind === 'text') {
+        await this.drawEditorText(page, geometry, object, fontFor);
+      } else if (object.kind === 'note') {
+        await this.drawEditorNote(page, geometry, object, fontFor);
+      } else if (object.kind === 'highlight') {
+        const placement = placeVisualRect(object.rect, geometry);
+        page.drawRectangle({
+          x: placement.xPt,
+          y: placement.yPt,
+          width: placement.widthPt,
+          height: placement.heightPt,
+          rotate: degrees(-placement.drawRotationDegrees),
+          color: rgb(...hexRgb01(object.colorHex ?? HIGHLIGHT_HEX)),
+          opacity: HIGHLIGHT_OPACITY,
+          borderWidth: 0,
+        });
+      } else if (object.kind === 'shape') {
+        const placement = placeVisualRect(object.rect, geometry);
+        page.drawRectangle({
+          x: placement.xPt,
+          y: placement.yPt,
+          width: placement.widthPt,
+          height: placement.heightPt,
+          rotate: degrees(-placement.drawRotationDegrees),
+          ...(object.fillHex === undefined
+            ? {}
+            : { color: rgb(...hexRgb01(object.fillHex)) }),
+          borderColor: rgb(...hexRgb01(object.colorHex ?? SHAPE_BORDER_HEX)),
+          borderWidth: object.borderWidthPt ?? 1.5,
+        });
+      } else {
+        const placement = placeVisualRect(object.rect, geometry);
+        const image = await imageFor(object);
+        page.drawImage(image, {
+          x: placement.xPt,
+          y: placement.yPt,
+          width: placement.widthPt,
+          height: placement.heightPt,
+          rotate: degrees(-placement.drawRotationDegrees),
+        });
+      }
+    }
+
+    return new PdfEditDocument(target, outputMetrics, outputSources);
+  }
+
+  /**
+   * 画一个文本对象：有 `backdropHex` 先垫纸色（就地改字），再按基线落字，最后按需画下划线。
+   */
+  private async drawEditorText(
+    page: PDFPage,
+    geometry: PageGeometry,
+    object: PlannedEditorObject,
+    fontFor: (object: PlannedEditorObject) => PDFFont | Promise<PDFFont>,
+  ): Promise<void> {
+    const text = object.text;
+    const sizePt = object.sizePt;
+    if (text === undefined || sizePt === undefined) return;
+    const font = await fontFor(object);
+    const display = displayedSize(geometry);
+
+    // 就地改字的垫底矩形：颜色走 colorsOfOverlay 那同一份判据（量不到纸色就墨底反白，绝不猜白）。
+    let inkHex = object.colorHex ?? DEFAULT_INK_HEX;
+    if (object.backdropHex !== undefined) {
+      const colors = colorsOfOverlay(object);
+      const cover = placeVisualRect(object.rect, geometry);
+      page.drawRectangle({
+        x: cover.xPt,
+        y: cover.yPt,
+        width: cover.widthPt,
+        height: cover.heightPt,
+        rotate: degrees(-cover.drawRotationDegrees),
+        color: rgb(...colors.fillRgb01),
+        borderWidth: 0,
+      });
+      // 没显式给墨色时，垫底用什么回落（纸色 or 墨底），字就跟着那一份判据走反白/深墨。
+      if (object.colorHex === undefined) inkHex = colors.inkHex;
+    }
+
+    // 基线：量到的页面比例优先；没量到按 em 盒竖向居中（与旧 overlay 的 baselinePt 同一式）。
+    const baselineYRatio =
+      object.baselineYRatio ??
+      object.rect.yRatio + object.rect.heightRatio / 2 + sizePt / (2 * display.heightPt);
+    const anchor = placeVisualPointRatio(object.rect.xRatio, baselineYRatio, geometry);
+    page.drawText(text, {
+      x: anchor.xPt,
+      y: anchor.yPt,
+      rotate: degrees(-anchor.drawRotationDegrees),
+      size: sizePt,
+      font,
+      color: rgb(...hexRgb01(inkHex)),
+    });
+    if (object.underline) {
+      const textWidthPt = font.widthOfTextAtSize(text, sizePt);
+      const underlineRect = {
+        xRatio: object.rect.xRatio,
+        yRatio: baselineYRatio + (sizePt * 0.1) / display.heightPt,
+        widthRatio: textWidthPt / display.widthPt,
+        heightRatio: (sizePt * 0.06) / display.heightPt,
+      };
+      const line = placeVisualRect(underlineRect, geometry);
+      page.drawRectangle({
+        x: line.xPt,
+        y: line.yPt,
+        width: line.widthPt,
+        height: line.heightPt,
+        rotate: degrees(-line.drawRotationDegrees),
+        color: rgb(...hexRgb01(inkHex)),
+        borderWidth: 0,
+      });
+    }
+  }
+
+  /**
+   * 画一张便签：黄色贴纸 + 边框 + 自动换行的小字。换行按**字符贪心**（中日韩没有词边界），
+   * 量宽用字体自己的 `widthOfTextAtSize`（随包字体注册过 fontkit，量得准），超出盒子的行数裁掉并加省略号。
+   */
+  private async drawEditorNote(
+    page: PDFPage,
+    geometry: PageGeometry,
+    object: PlannedEditorObject,
+    fontFor: (object: PlannedEditorObject) => PDFFont | Promise<PDFFont>,
+  ): Promise<void> {
+    const sizePt = NOTE_TEXT_SIZE_PT;
+    const font = await fontFor(object);
+    const display = displayedSize(geometry);
+    const bg = placeVisualRect(object.rect, geometry);
+    page.drawRectangle({
+      x: bg.xPt,
+      y: bg.yPt,
+      width: bg.widthPt,
+      height: bg.heightPt,
+      rotate: degrees(-bg.drawRotationDegrees),
+      color: rgb(...hexRgb01(NOTE_FILL_HEX)),
+      borderColor: rgb(...hexRgb01(NOTE_BORDER_HEX)),
+      borderWidth: 1,
+    });
+    if (object.text === undefined || object.text === '') return;
+
+    const padPt = 4;
+    const lineHeightPt = sizePt * 1.3;
+    const boxWidthPt = object.rect.widthRatio * display.widthPt;
+    const boxHeightPt = object.rect.heightRatio * display.heightPt;
+    const availableWidth = boxWidthPt - padPt * 2;
+    const maxLines = Math.max(1, Math.floor((boxHeightPt - padPt * 2) / lineHeightPt));
+    const lines = wrapTextToLines(object.text, font, sizePt, availableWidth, maxLines);
+    for (let index = 0; index < lines.length; index += 1) {
+      // 显示面 y 向下：第 i 行基线距盒顶 pad + 0.8 个字高，每行再往下走一行高。
+      const yRatio =
+        object.rect.yRatio + (padPt + sizePt * 0.8 + index * lineHeightPt) / display.heightPt;
+      const xRatio = object.rect.xRatio + padPt / display.widthPt;
+      const anchor = placeVisualPointRatio(xRatio, yRatio, geometry);
+      page.drawText(lines[index] as string, {
+        x: anchor.xPt,
+        y: anchor.yPt,
+        rotate: degrees(-anchor.drawRotationDegrees),
+        size: sizePt,
+        font,
+        color: rgb(...hexRgb01(object.colorHex ?? NOTE_INK_HEX)),
+      });
+    }
+  }
+
+  /** 在指定目标文档上嵌随包中文字体（assembleEditor 用的是新 target，不是装载那份 this.pdf）。 */
+  private async embedCjkFontOn(target: PDFDocument, bytes?: Uint8Array): Promise<PDFFont> {
+    if (bytes === undefined) throw new Error('这份产物含非拉丁字符，但没有拿到随包字体字节');
+    target.registerFontkit(fontkit);
+    return target.embedFont(bytes, { subset: true });
+  }
+
+  /**
    * 生成新的 PDF 字节（3.4-03 的「生成合法 PDF」半边）。
    *
    * 每次调用都产出一份新副本，源文件从头到尾没被打开过第二回（spec 3.5-09「产物不污染源文件」）。
@@ -246,6 +525,117 @@ export class PdfEditDocument {
   async save(): Promise<Uint8Array> {
     return this.pdf.save();
   }
+}
+
+/** 图片资源：服务层按对象 id 读出、嗅探过格式的字节。 */
+export interface EditorImageAsset {
+  readonly format: 'png' | 'jpeg';
+  readonly bytes: Uint8Array;
+}
+
+/** 新文本对象没给墨色时的默认深墨（与 overlay-colors 的 DEFAULT_INK 同档）。 */
+const DEFAULT_INK_HEX = '#0f172a';
+/** 高亮默认荧光黄（半透明叠在原文上仍读得清字）。 */
+const HIGHLIGHT_HEX = '#ffe066';
+const HIGHLIGHT_OPACITY = 0.35;
+/** 形状默认描边色（WPS 批注矩形那档红）。 */
+const SHAPE_BORDER_HEX = '#dc2626';
+/** 便签贴纸配色。 */
+const NOTE_FILL_HEX = '#fff2a8';
+const NOTE_BORDER_HEX = '#ca8a04';
+const NOTE_INK_HEX = '#1f2937';
+
+/** 归一化后的 `#rrggbb` → 0..1 三元组（入参都来自 planEditorObjects 的 normalizeHexColor 或上面的常量）。 */
+function hexRgb01(hex: string): readonly [number, number, number] {
+  const body = hex.slice(1);
+  return [
+    Number.parseInt(body.slice(0, 2), 16) / 255,
+    Number.parseInt(body.slice(2, 4), 16) / 255,
+    Number.parseInt(body.slice(4, 6), 16) / 255,
+  ];
+}
+
+/** 任意值是不是 PromiseLike（pdf-lib 的 embedFont 重载在类型上两者都可能）。 */
+function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof (value as PromiseLike<T>)?.then === 'function';
+}
+
+/** pdf-lib 读出的旋转角可能带 360/负数，收成 0/90/180/270。 */
+function reduceRotationToQuarter(angle: number): PdfPageRotation {
+  const normalized = ((Math.round(angle) % 360) + 360) % 360;
+  if (normalized === 90 || normalized === 180 || normalized === 270) return normalized;
+  return 0;
+}
+
+/**
+ * 拉丁文字体按 字族×粗斜 取标准字体（每种组合都是 PDF 内置字体，零内嵌成本）。
+ * 中文侧只有一只 Noto Sans SC，粗斜不兑现——界面不许诺"中文加粗"。
+ */
+function latinStandardFontOfStyle(hint: FontFamilyHint | undefined, bold: boolean, italic: boolean): StandardFonts {
+  switch (hint) {
+    case 'serif':
+      if (bold && italic) return StandardFonts.TimesRomanBoldItalic;
+      if (bold) return StandardFonts.TimesRomanBold;
+      if (italic) return StandardFonts.TimesRomanItalic;
+      return StandardFonts.TimesRoman;
+    case 'monospace':
+      if (bold && italic) return StandardFonts.CourierBoldOblique;
+      if (bold) return StandardFonts.CourierBold;
+      if (italic) return StandardFonts.CourierOblique;
+      return StandardFonts.Courier;
+    default:
+      if (bold && italic) return StandardFonts.HelveticaBoldOblique;
+      if (bold) return StandardFonts.HelveticaBold;
+      if (italic) return StandardFonts.HelveticaOblique;
+      return StandardFonts.Helvetica;
+  }
+}
+
+/**
+ * 按可用宽度贪心折行（逐字符，兼顾中日韩无空格与拉丁词）。
+ * @param maxLines 最多返回的行数；超限在最后一行尾部加省略号
+ */
+function wrapTextToLines(
+  text: string,
+  font: PDFFont,
+  sizePt: number,
+  availableWidthPt: number,
+  maxLines: number,
+): string[] {
+  const lines: string[] = [];
+  let current = '';
+  const pushCurrent = () => {
+    lines.push(current);
+    current = '';
+  };
+  for (const character of text) {
+    if (character === '\n') {
+      pushCurrent();
+      if (lines.length >= maxLines) break;
+      continue;
+    }
+    const candidate = current + character;
+    if (font.widthOfTextAtSize(candidate, sizePt) <= availableWidthPt || current === '') {
+      current = candidate;
+    } else {
+      pushCurrent();
+      if (lines.length >= maxLines) break;
+      current = character;
+    }
+  }
+  if (current !== '' && lines.length < maxLines) lines.push(current);
+
+  // 还有字没放进去：最后一行能塞下省略号就补上（塞不下直接替换尾字符）。
+  const consumed = lines.join('').length;
+  if (consumed < text.length && lines.length > 0) {
+    let last = lines[lines.length - 1] as string;
+    const ellipsis = '…';
+    while (last.length > 0 && font.widthOfTextAtSize(last + ellipsis, sizePt) > availableWidthPt) {
+      last = last.slice(0, -1);
+    }
+    lines[lines.length - 1] = last + ellipsis;
+  }
+  return lines;
 }
 
 /**

@@ -14,7 +14,7 @@
  *
  * @param model 这一轨的唯一模型
  */
-import { Eye, FolderOpen, X } from 'lucide-react';
+import { Eye, FolderOpen, PenLine, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Banner, DeskButton, DeskField, deskReason } from './ui/controls';
 import type { PdfViewModel } from './usePdfView';
@@ -22,8 +22,15 @@ import type { PdfViewModel } from './usePdfView';
 /**
  * PDF 查看这一档的左列控件。
  * @param model `usePdfView` 的那一份唯一状态与动作
+ * @param onOpenEditor 「在编辑器中打开」：切到 WPS 形态纸面编辑器（2026-10-14 反转裁定后的新整页编辑）
  */
-export function PdfViewPanel({ model }: { model: PdfViewModel }) {
+export function PdfViewPanel({
+  model,
+  onOpenEditor,
+}: {
+  model: PdfViewModel;
+  onOpenEditor: () => void;
+}) {
   const { t } = useTranslation();
   const { receipt, page, busy, notice, noticeTone, openError } = model;
 
@@ -62,17 +69,10 @@ export function PdfViewPanel({ model }: { model: PdfViewModel }) {
         {t('pdfEdit.pathHint')}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <DeskField
-          action="pdf-edit-path"
-          data-testid="pdf-edit-path"
-          value={model.filePath}
-          onValueChange={model.setFilePath}
-          placeholder={t('pdfEdit.pathPlaceholder')}
-          className="min-w-[200px] flex-1"
-        />
+        {/* 主入口是系统选文件面板（选完即开）；手敲路径只是备选，所以按钮排在输入框前面且用主色。 */}
         <DeskButton
           action="pdf-edit-pick-file"
-          variant="line"
+          variant="jade"
           compact
           busy={!!busy}
           disabled={!!busy}
@@ -83,6 +83,14 @@ export function PdfViewPanel({ model }: { model: PdfViewModel }) {
           <FolderOpen size={12} />
           {t('pdfEdit.pickFile')}
         </DeskButton>
+        <DeskField
+          action="pdf-edit-path"
+          data-testid="pdf-edit-path"
+          value={model.filePath}
+          onValueChange={model.setFilePath}
+          placeholder={t('pdfEdit.pathPlaceholder')}
+          className="min-w-[200px] flex-1"
+        />
         <DeskButton
           action="pdf-edit-open"
           variant="line"
@@ -149,6 +157,24 @@ export function PdfViewPanel({ model }: { model: PdfViewModel }) {
             >
               {t('pdfEdit.next')}
             </DeskButton>
+          </div>
+
+          {/* 2026-10-14 反转裁定的入口：查看档 → WPS 形态纸面编辑器（就地改字/加文本/另存）。 */}
+          <div className="mt-3 border-t border-line-strong pt-3">
+            <DeskButton
+              action="pdf-edit-open-editor"
+              variant="jade"
+              compact
+              busy={!!busy}
+              disabled={busyReason !== undefined}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
+              onClick={onOpenEditor}
+            >
+              <PenLine size={12} />
+              {t('pdfEdit.openInEditor')}
+            </DeskButton>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('pdfEdit.openInEditorHint')}</p>
           </div>
         </>
       )}

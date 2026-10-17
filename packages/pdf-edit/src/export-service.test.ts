@@ -18,10 +18,12 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { sha256Hex } from '@auto-cc/core/file-read';
 import { afterAll, describe, expect, it } from 'vitest';
-import { minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
+import { PDFDict, PDFDocument, PDFName, PDFRef } from 'pdf-lib';
+import { encodePng, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
 
 import { PdfEditDocument } from './pdf-document.js';
 import { PdfExportService, type PdfExportConfig } from './export-service.js';
+import type { PdfEditorObjectInput, PdfEditorPageInput } from './object-model.js';
 import type { PdfOverlayInput } from './overlay-writer.js';
 
 const sandboxes: string[] = [];
@@ -54,6 +56,8 @@ const config: PdfExportConfig = {
   maxPages: 64,
   defaultTextSizePt: 11,
   minAreaRatio: 0.0001,
+  maxObjects: 100,
+  maxImageBytes: 10_485_760,
 };
 
 /**
@@ -448,5 +452,134 @@ describe('3.5-06 的中文半边：CJK 子集内嵌后，文本层逐字符全�
       service.saveAs(sourcePath, [{ ...box, text: '中文哨兵' }], keepPages(1), outPath),
     ).rejects.toMatchObject({ code: 'PDF_EDIT_SAVE_FAILED', details: { code: 'font-unavailable' } });
     expect(readdirSync(dir).filter((name) => name.endsWith('.pdf') || name.endsWith('.part'))).toEqual(['resume.pdf']);
+  });
+});
+
+/**
+ * WPS 形态编辑器 saveEditor 的端到端（2026-10-14 反转裁定）。
+ * 页计划 + 五类对象一路走到落盘；中文走 bootWithFont 的真随包字体，图片写在沙箱里按路径重读。
+ */
+describe('pdf.export.saveEditor：页计划 + 五类对象的另存端到端', () => {
+  it('源页(旋转90) + 空白页：改字/高亮/图片/便签全画上，中文抽得回，产物页旋转为 90', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const imagePath = putFile(dir, 'seal.png', new Uint8Array(encodePng(Buffer.from([0xff, 0x00, 0x00, 0xff]), 2, 2)));
+    const outPath = join(dir, 'editor.pdf');
+
+    const pages: readonly PdfEditorPageInput[] = [
+      { id: 'p1', kind: 'source', sourcePageNumber: 1, rotation: 90 },
+      { id: 'b1', kind: 'blank' },
+    ];
+    const objects: readonly PdfEditorObjectInput[] = [
+      // 就地改字（中文 + 垫底，量到白纸）。
+      {
+        id: 't1',
+        pageId: 'p1',
+        kind: 'text',
+        rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.5, heightRatio: 0.06 },
+        text: '姓名：张三',
+        backdropHex: '#ffffff',
+        baselineYRatio: 0.14,
+      },
+      // 高亮（半透明）。
+      { id: 'h1', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.3, heightRatio: 0.03 } },
+      // 图片（字节按路径在主进程重读，不随对象过界）。
+      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
+      // 空白页上的中文便签。
+      { id: 'n1', pageId: 'b1', kind: 'note', rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.5, heightRatio: 0.1 }, text: '这是一页空白纸的便签' },
+    ];
+
+    const receipt = await (await bootWithFont()).saveEditor(sourcePath, pages, objects, outPath);
+    expect(receipt.pageCount).toBe(2);
+    expect(receipt.sha256).toBe(sha256Hex(new Uint8Array(readFileSync(outPath))));
+
+    // 源文件没被碰过。
+    expect(sha256Hex(readFileSync(sourcePath))).toBe(sha256Hex(minimalPdf(['Jane Doe'])));
+
+    // 产物第一页 /Rotate=90，第二页是默认 A4 竖版。
+    const pdfDoc = await PDFDocument.load(new Uint8Array(readFileSync(outPath)));
+    expect(pdfDoc.getPage(0).getRotation().angle).toBe(90);
+    expect(pdfDoc.getPage(1).getWidth()).toBeCloseTo(595.28, 1);
+
+    // 中文经随包字体子集内嵌：文本层抽得回（可复制可搜索）；旧文字仍在（只追加）。
+    const items = await textItemsOf(outPath);
+    expect(items.some((item) => item.str.includes('姓名：张三'))).toBe(true);
+    expect(items.some((item) => item.str.includes('Jane Doe'))).toBe(true);
+  });
+
+  it('产物路径等于源路径：out-is-source 拒，磁盘上没有产物', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
+    const error = (await (
+      await boot()
+    )
+      .saveEditor(sourcePath, pages, [], sourcePath)
+      .catch((caught: unknown) => caught)) as AppError;
+    expect(error.details).toMatchObject({ code: 'out-is-source' });
+    expect(readdirSync(dir)).toEqual(['resume.pdf']);
+  });
+
+  it('对象绑了页计划里没有的 id：object-page-unknown，失败不落半成品', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const outPath = join(dir, 'out.pdf');
+    const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
+    const objects: readonly PdfEditorObjectInput[] = [
+      { id: 'h1', pageId: 'ghost', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.2, heightRatio: 0.03 } },
+    ];
+    const error = (await (
+      await boot()
+    )
+      .saveEditor(sourcePath, pages, objects, outPath)
+      .catch((caught: unknown) => caught)) as AppError;
+    expect(error.details).toMatchObject({ code: 'object-page-unknown' });
+    expect(readdirSync(dir)).toEqual(['resume.pdf']);
+  });
+
+  it('图片文件头不是 PNG/JPEG（扩展名是 .png 也没用）：image-format 拒', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const fakeImage = putFile(dir, 'seal.png', new Uint8Array(Buffer.from('%PDF-1.4\n假装是图片\n')));
+    const outPath = join(dir, 'out.pdf');
+    const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
+    const objects: readonly PdfEditorObjectInput[] = [
+      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath: fakeImage },
+    ];
+    const error = (await (
+      await boot()
+    )
+      .saveEditor(sourcePath, pages, objects, outPath)
+      .catch((caught: unknown) => caught)) as AppError;
+    expect(error.details).toMatchObject({ code: 'image-format' });
+    expect(readdirSync(dir)).toEqual(['resume.pdf', 'seal.png']);
+  });
+
+  it('同一图片被两个对象引用：主进程按路径只读一次（产物里两个 Do 引用同一个图像 XObject）', async () => {
+    const dir = tempDir();
+    const sourcePath = putFile(dir, 'resume.pdf', minimalPdf(['Jane Doe']));
+    const imagePath = putFile(dir, 'seal.png', new Uint8Array(encodePng(Buffer.from([0x00, 0xff, 0x00, 0xff]), 2, 2)));
+    const outPath = join(dir, 'out.pdf');
+    const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
+    const objects: readonly PdfEditorObjectInput[] = [
+      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
+      { id: 'i2', pageId: 'p1', kind: 'image', rect: { xRatio: 0.3, yRatio: 0.3, widthRatio: 0.1, heightRatio: 0.1 }, imagePath },
+    ];
+    const receipt = await (await boot()).saveEditor(sourcePath, pages, objects, outPath);
+    expect(receipt.pageCount).toBe(1);
+    const content = pdfContentText(new Uint8Array(readFileSync(outPath)));
+    // 两笔绘制（Do）各引一个资源名。
+    expect((content.match(/\/\S+\s+Do/g) ?? []).length).toBe(2);
+
+    // 去重的真正落点：页资源里两个图像名字指向**同一个间接对象号**（主进程按路径只嵌了一份）。
+    // 不能数 `/Subtype /Image`：pdfContentText 解包对象流时同一字典会被资源表与对象表各带出一次。
+    const reloaded = await PDFDocument.load(new Uint8Array(readFileSync(outPath)));
+    const resources = reloaded.getPage(0).node.Resources();
+    if (resources === undefined) throw new Error('产物页应当有资源字典');
+    const xObjects = reloaded.context.lookup(resources.get(PDFName.of('XObject')), PDFDict);
+    const targets = xObjects.entries().map(([, value]) => (value instanceof PDFRef ? value.objectNumber : -1));
+    expect(targets).toHaveLength(2);
+    expect(targets[0]).toBe(targets[1]);
+    expect(targets[0]).toBeGreaterThan(0);
   });
 });

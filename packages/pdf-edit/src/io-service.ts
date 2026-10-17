@@ -12,6 +12,7 @@
 import { AppError, Service, type Context } from '@auto-cc/core';
 import { readBoundedFile } from '@auto-cc/core/file-read';
 import { z } from 'zod';
+import { sniffImageMagic } from './object-model.js';
 import { PdfEditDocument, type PdfPageMetric } from './pdf-document.js';
 
 /** `pdf.io` 的可调项。 */
@@ -21,6 +22,11 @@ export const pdfIoSchema = z.strictObject({
    * 显式写在装配清单里而不是藏在代码默认值里，是为了让「误选了一份大文件」能在装配面板现场改小演示。
    */
   maxBytes: z.number().int().min(1024).max(52_428_800).default(5_242_880),
+  /**
+   * 单张插图的字节上限（WPS 形态编辑器：渲染层拖入图片前要先拿字节画预览）。
+   * 与 `pdf.export` 另存侧的 `maxImageBytes` 同一档默认值——预览读得进、另存也读得进。
+   */
+  maxImageBytes: z.number().int().min(1024).max(31_457_280).default(10_485_760),
 });
 
 export type PdfIoConfig = z.output<typeof pdfIoSchema>;
@@ -31,6 +37,12 @@ export interface PdfOpenReceipt {
   readonly sourceHash: string;
   readonly pageCount: number;
   readonly pages: readonly PdfPageMetric[];
+}
+
+/** `imageBytes` 的回执：嗅探后的格式 + 字节（渲染层用同一份格式判据画预览，另存侧再读一次落盘）。 */
+export interface PdfImageBytesReceipt {
+  readonly format: 'png' | 'jpeg';
+  readonly bytes: Uint8Array;
 }
 
 /**
@@ -91,6 +103,33 @@ export class PdfIoService extends Service {
    */
   bytes(filePath: string): Uint8Array {
     return readBoundedFile(filePath, { maxBytes: this.options.maxBytes, code: 'PDF_EDIT_READ_FAILED' });
+  }
+
+  /**
+   * 按插图字节上限读出一张 PNG/JPEG 图片（WPS 形态编辑器的图片工具：渲染层 sandbox 下读不了文件）。
+   *
+   * 字节只用于**画预览**；另存时主进程按对象里的路径再读一次（`pdf.export.saveEditor`），
+   * 不让大字节数组在一次另存的参数里随对象过第二次界。
+   * @param filePath 用户经文件选择器选定的**绝对路径**
+   * @returns 魔数嗅探到的格式 + 图片字节
+   * @throws `AppError('PDF_EDIT_READ_FAILED')`——路径非法、读不出、超过 `maxImageBytes`；
+   *         文件头不是 PNG/JPEG 时 `details.code` 为 `not-image`
+   */
+  imageBytes(filePath: string): PdfImageBytesReceipt {
+    const bytes = readBoundedFile(filePath, {
+      maxBytes: this.options.maxImageBytes,
+      code: 'PDF_EDIT_READ_FAILED',
+    });
+    const format = sniffImageMagic(bytes);
+    if (format === undefined) {
+      throw new AppError(
+        'PDF_EDIT_READ_FAILED',
+        `只支持 PNG 与 JPEG 图片，这份文件不是：${filePath}`,
+        'pdf.io.imageBytes',
+        { code: 'not-image', filePath },
+      );
+    }
+    return { format, bytes };
   }
 }
 

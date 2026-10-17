@@ -35,6 +35,7 @@ import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
 import { PdfPaperView } from './PdfPaperView';
 import { PdfViewPanel } from './PdfViewPanel';
+import { PdfEditorPage } from './pdf-editor/PdfEditorPage';
 import { ResumeEditPage } from './ResumeEditPage';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { SkillPanel } from './SkillPanel';
@@ -216,11 +217,12 @@ export function ResumeDesk() {
   /** 纸面槽此刻是哪一档（预览 / PDF 查看；裁定㊳后没有第三档，类型收窄）。 */
   const [paperMode, setPaperMode] = useState<ResumePaperMode>('preview');
   /**
-   * 整页直接编辑那一屏在不在场（spec 3.10 / 裁定㉙ 第 2 条）。
-   * 它**换掉**整个工作台而不是盖在上面：会话（`resume.editor.*` 那一条撤销栈）只许有一处持有者，
-   * 而同一屏上两张纸会让 6.4-08 那条"槽里任何时刻只有一张画布"当场不成立。
+   * 全屏整页编辑此刻是哪一屏（spec 3.10 / 裁定㉙ 第 2 条；2026-10-14 反转裁定后扩为三态）：
+   * `model` 旧的内容与模板排版编辑，`pdf` WPS 形态纸面编辑器，`none` 工作台。
+   * 三态**互斥挂载**而不是盖在上面：任何一屏都持有独立会话与画布，
+   * 同一屏上两张纸会让 6.4-08 那条"槽里任何时刻只有一张画布"当场不成立。
    */
-  const [editPageOpen, setEditPageOpen] = useState(false);
+  const [editPageOpen, setEditPageOpen] = useState<'none' | 'model' | 'pdf'>('none');
   /** 09 稿形态⑥ 的那一跳：落点是简历屏时，「定制生成」那一格必须被强制打开（见 `DeskSection.openSignal`）。 */
   const trail = useViewTrail();
 
@@ -742,7 +744,7 @@ export function ResumeDesk() {
           而"槽里任何时刻只有一张画布"（6.4-08）也只能靠卸载保证。
           画在 `@container` 外面：`container-type: inline-size` 隐含 `contain: layout`，
           画在里面时 `fixed` 后代就只能盖住简历区而不是整扇窗（与删除确认框同一条实测）。 */}
-      {editPageOpen && docId !== undefined ? (
+      {editPageOpen === 'model' && docId !== undefined ? (
         <ResumeEditPage
           docId={docId}
           templateId={templateId}
@@ -753,8 +755,10 @@ export function ResumeDesk() {
           defaultTemplateId={defaultTemplateId}
           onTemplateChange={setTemplateId}
           onDefaultTemplateChange={setDefaultTemplateId}
-          onClose={() => setEditPageOpen(false)}
+          onClose={() => setEditPageOpen('none')}
         />
+      ) : editPageOpen === 'pdf' && pdfView.filePath.trim() !== '' ? (
+        <PdfEditorPage filePath={pdfView.filePath.trim()} onClose={() => setEditPageOpen('none')} />
       ) : (
         <div className="@container min-w-0">
           <section data-testid="resume-panel" className="flex min-w-0 flex-col gap-3 @[46rem]:flex-row">
@@ -1184,7 +1188,7 @@ export function ResumeDesk() {
                       disabled={noDocReason !== undefined}
                       disabledReason={noDocReason}
                       disabledReasonLabel={reasonLabel(noDocReason)}
-                      onClick={() => setEditPageOpen(true)}
+                      onClick={() => setEditPageOpen('model')}
                     >
                       <Maximize2 size={12} />
                       {t('resume.edit.enter')}
@@ -1246,7 +1250,7 @@ export function ResumeDesk() {
               {/* PDF 查看这一档的**控件**（同一档的真纸在右栏那一格里，见 `PdfPaperView`）。
                   纯查看：只有挑文件、开路径、翻页，没有任何写口。
                   条件挂载是刻意的：隐藏态宽高为 0，同名选择器会命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
-              {paperMode === 'pdf' && <PdfViewPanel model={pdfView} />}
+              {paperMode === 'pdf' && <PdfViewPanel model={pdfView} onOpenEditor={() => setEditPageOpen('pdf')} />}
 
               {/* 裁定④：三颗开发夹具退出产品列。键名（`seed` / `seed-edited` / `fail`）一字未改，
             spec 3.3-10 / 3.3-11 的取证通道因此不断；变的只是它们住在哪一格。 */}
@@ -1293,7 +1297,7 @@ export function ResumeDesk() {
                   paperHtml={paperHtml}
                   paperStatus={paperStatus}
                   paperUpdatedAt={paperUpdatedAt}
-                  pdfView={<PdfPaperView model={pdfView} />}
+                  pdfView={<PdfPaperView model={pdfView} onOpenEditor={() => setEditPageOpen('pdf')} />}
                   docLabel={docLabel}
                   templateName={templateName}
                   locale={locale}

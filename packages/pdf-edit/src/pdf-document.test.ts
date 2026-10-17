@@ -6,9 +6,16 @@
  * 否则「装载」这条通道等于自证（spec 3.4-03 要的是引擎对外部输入负责）。
  */
 import { describe, expect, it } from 'vitest';
-import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
+import { PDFDocument } from 'pdf-lib';
+import { encodePng, minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf, pdfContentText } from '@auto-cc/testing';
 
-import { latinStandardFontOf, PdfEditDocument } from './pdf-document.js';
+import { latinStandardFontOf, PdfEditDocument, type EditorImageAsset } from './pdf-document.js';
+import {
+  planEditorObjects,
+  planEditorPages,
+  type PdfEditorObjectInput,
+  type PdfEditorPageInput,
+} from './object-model.js';
 import type { PlannedOverlay } from './overlay-writer.js';
 
 describe('3.4-03 装载通道：把最小 PDF 读成一份可编辑文档', () => {
@@ -288,5 +295,167 @@ describe('3.5-07 的引擎半边：按页序拷出新的页树', () => {
         { id: 'box-2', pageNumber: 3, xPt: 0, yBottomPt: 0, widthPt: 10, heightPt: 10, sizePt: 11 },
       ]),
     ).rejects.toThrow(/box-2.*源档第 3 页.*没有来自它的页/);
+  });
+});
+
+/**
+ * WPS 形态编辑器（assembleEditor）这一族的共用夹具：把「比例输入」先过一遍校验规整，
+ * 引擎测试只演引擎该负责的事（拷页/空白页/旋转/绘制），判据重复写在这里就是两份事实。
+ */
+const editorLimits = {
+  pages: { sourcePageCount: 3, maxPages: 10, defaultBlankWidthPt: 595.28, defaultBlankHeightPt: 841.89 },
+  objects: { maxObjects: 100, defaultTextSizePt: 11, minAreaRatio: 0.0001 },
+} as const;
+
+/** 过校验取出规整页计划；夹具写得不对应当场炸，而不是让引擎替它兜。 */
+function plannedPagesOf(inputs: readonly PdfEditorPageInput[]) {
+  const outcome = planEditorPages(inputs, 3, editorLimits.pages);
+  if (!outcome.ok) throw new Error(`夹具页计划不合法：${outcome.detail}`);
+  return outcome.pages;
+}
+
+/** 过校验取出规整对象。 */
+function plannedObjectsOf(pages: readonly PdfEditorPageInput[], inputs: readonly PdfEditorObjectInput[]) {
+  const outcome = planEditorObjects(inputs, plannedPagesOf(pages), editorLimits.objects);
+  if (!outcome.ok) throw new Error(`夹具对象不合法：${outcome.detail}`);
+  return outcome.objects;
+}
+
+/** 1×1 不透明红 PNG（用测试夹具的规范编码器现造，embedPng 真的嵌得进去）。 */
+const ONE_PIXEL_PNG = new Uint8Array(encodePng(Buffer.from([0xff, 0x00, 0x00, 0xff]), 1, 1, 0, true));
+
+describe('WPS 编辑器 assembleEditor：页计划装页（副本/空白页/旋转）', () => {
+  it('源页副本 + 空白页：页数、空白页尺寸、源页内容都按计划落位，产物可重新装载', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(2));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const pages: readonly PdfEditorPageInput[] = [
+      { id: 'dup-a', kind: 'source', sourcePageNumber: 1 },
+      { id: 'blank', kind: 'blank' },
+      { id: 'dup-b', kind: 'source', sourcePageNumber: 1 },
+    ];
+    const assembled = await loaded.document.assembleEditor(plannedPagesOf(pages), []);
+
+    expect(assembled.pageCount).toBe(3);
+    expect(assembled.outputPageSources()).toEqual([1, 0, 1]); // 0 是空白页的来源记号
+    const saved = await assembled.save();
+    const pdfDoc = await PDFDocument.load(saved);
+    expect(pdfDoc.getPageCount()).toBe(3);
+    // 空白页取默认 A4（pdf-lib 存回时 595.28 原样保留）。
+    const blank = pdfDoc.getPage(1);
+    expect(blank.getWidth()).toBeCloseTo(595.28, 1);
+    expect(blank.getHeight()).toBeCloseTo(841.89, 1);
+    // 两张源页副本：pdf-lib 对重复指标共享同一份拷来的内容流对象（字节里原文只出现一次，
+    // 但页树两个页节点都引用它，阅读器两页都看得到），这里只断言原文在、第 2 页原文不在。
+    const content = pdfContentText(saved);
+    expect(content).toContain('(page 1) Tj');
+    expect(content).not.toContain('(page 2) Tj');
+  });
+
+  it('显式旋转写进产物页；省略旋转时源档原本没有 /Rotate 就是 0', async () => {
+    const loaded = await PdfEditDocument.load(minimalMultiPagePdf(1));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const pages: readonly PdfEditorPageInput[] = [
+      { id: 'p1', kind: 'source', sourcePageNumber: 1, rotation: 90 },
+      { id: 'p2', kind: 'source', sourcePageNumber: 1 },
+    ];
+    const saved = await (await loaded.document.assembleEditor(plannedPagesOf(pages), [])).save();
+    const pdfDoc = await PDFDocument.load(saved);
+    expect(pdfDoc.getPage(0).getRotation().angle).toBe(90);
+    expect(pdfDoc.getPage(1).getRotation().angle).toBe(0);
+  });
+});
+
+describe('WPS 编辑器 assembleEditor：五类对象的绘制（拉丁侧，不需要随包字体）', () => {
+  const pages: readonly PdfEditorPageInput[] = [{ id: 'p1', kind: 'source', sourcePageNumber: 1 }];
+
+  /** 装一页带对象的产物，回内容流原文。 */
+  async function contentWith(...inputs: readonly PdfEditorObjectInput[]): Promise<string> {
+    const loaded = await PdfEditDocument.load(minimalPdf(['Jane Doe']));
+    if (loaded.status !== 'loaded') throw new Error('夹具应当装得上');
+    const images = new Map<string, EditorImageAsset>();
+    for (const input of inputs.filter((item) => item.kind === 'image')) {
+      images.set(input.id, { format: 'png', bytes: ONE_PIXEL_PNG });
+    }
+    const saved = await loaded.document.assembleEditor(
+      plannedPagesOf(pages),
+      plannedObjectsOf(pages, inputs),
+      images,
+    ).then((document) => document.save());
+    return pdfContentText(saved);
+  }
+
+  it('就地改字：垫底 + 新字都在，旧文字仍在内容流里（只追加，不许说"已删除"）', async () => {
+    const content = await contentWith({
+      id: 't1',
+      pageId: 'p1',
+      kind: 'text',
+      rect: { xRatio: 0.1, yRatio: 0.1, widthRatio: 0.3, heightRatio: 0.05 },
+      text: 'FIXED',
+      backdropHex: '#ffffff',
+    });
+    expect(content).toContain('(Jane Doe) Tj');
+    // 拉丁走标准字体时文字是十六进制串（与旧覆盖区同一口径）。
+    expect(content).toContain(`<${Buffer.from('FIXED', 'latin1').toString('hex').toUpperCase()}> Tj`);
+  });
+
+  it('文本框（无 backdrop）不画垫底；粗体走 Helvetica-Bold；underline 多一笔矩形', async () => {
+    const noStyle = await contentWith({
+      id: 'a',
+      pageId: 'p1',
+      kind: 'text',
+      rect: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.3, heightRatio: 0.05 },
+      text: 'BOX',
+    });
+    const styled = await contentWith({
+      id: 'a',
+      pageId: 'p1',
+      kind: 'text',
+      rect: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.3, heightRatio: 0.05 },
+      text: 'BOX',
+      bold: true,
+      underline: true,
+    });
+    // 文本框没有垫底：整份内容流里只有源文件与默认墨色，#ffffff 归一后的白一个都不许出现。
+    expect(styled).not.toContain('1 1 1 rg');
+    expect(styled).toContain('Helvetica-Bold');
+    // 下划线比纯文本多一次闭合填充矩形（文本框自己不画垫底，所以基线就是 0 对 1）。
+    expect((noStyle.match(/h\s+f/g) ?? []).length).toBe(0);
+    expect((styled.match(/h\s+f/g) ?? []).length).toBe(1);
+  });
+
+  it('高亮是半透明矩形（ExtGState + /ca 0.35），形状是描边矩形，图片嵌得进去不抛', async () => {
+    const content = await contentWith(
+      { id: 'h1', pageId: 'p1', kind: 'highlight', rect: { xRatio: 0.1, yRatio: 0.3, widthRatio: 0.2, heightRatio: 0.03 } },
+      {
+        id: 's1',
+        pageId: 'p1',
+        kind: 'shape',
+        rect: { xRatio: 0.1, yRatio: 0.4, widthRatio: 0.2, heightRatio: 0.05 },
+        colorHex: '#dc2626',
+      },
+      { id: 'i1', pageId: 'p1', kind: 'image', rect: { xRatio: 0.1, yRatio: 0.5, widthRatio: 0.1, heightRatio: 0.1 }, imagePath: 'a.png' },
+    );
+    // 半透明：pdf-lib 给 opacity 生成 ExtGState，内容流里出现 /GSn 与 /ca。
+    expect(content).toMatch(/\/ca 0\.35/);
+    // 红色描边的三个通道（#dc2626 → 0.862/0.149/0.149）。
+    expect(content).toContain('0.8627450980392157 0.14901960784313725 0.14901960784313725 RG');
+    // 图片：整份字节里有 /Subtype /Image（图像 XObject）。
+    expect(content).toContain('/Subtype');
+    expect(content).toMatch(/\/Image/);
+  });
+
+  it('便签：贴纸色块 + 换行小字，内容超出按行数裁掉并加省略号', async () => {
+    const content = await contentWith({
+      id: 'n1',
+      pageId: 'p1',
+      kind: 'note',
+      // 又窄又矮的贴纸（~119pt 宽、~34pt 高：只能放两行），长文必然被裁。
+      rect: { xRatio: 0.1, yRatio: 0.6, widthRatio: 0.2, heightRatio: 0.04 },
+      // 拉丁文字：这一族不测随包字体（中文换行在 export-service 的端到端里演）。
+      text: 'This is a very long sticky note that should overflow the tiny box and be clipped with an ellipsis at the end',
+    });
+    expect(content).toContain('1 0.9490196078431372 0.6588235294117647 rg'); // 便签填充 #fff2a8
+    // 省略号在 WinAnsi 里是单字节 0x85，随每条 Tj 以十六进制串出现；长文被裁必有一笔带着它收尾。
+    expect(content).toMatch(/<[0-9A-F]*85> Tj/);
   });
 });

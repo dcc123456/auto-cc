@@ -29,3 +29,42 @@ export {
   type PdfOverlayRect,
   type PlannedOverlay,
 } from './overlay-writer.js';
+// WPS 形态编辑器（2026-10-14 反转裁定后的新编辑轨）：页计划 + 五类纸面对象 + 旋转/空白页几何。
+export {
+  DEFAULT_BLANK_HEIGHT_PT,
+  DEFAULT_BLANK_WIDTH_PT,
+  MAX_TEXT_LENGTH,
+  NOTE_TEXT_SIZE_PT,
+  displayedSize,
+  isPageRotation,
+  placeVisualPointRatio,
+  placeVisualRect,
+  planEditorObjects,
+  planEditorPages,
+  sniffImageMagic,
+  visualPointToNative,
+  type EditorObjectLimits,
+  type EditorObjectPlanOutcome,
+  type EditorObjectRejection,
+  type EditorPageLimits,
+  type EditorPagePlanOutcome,
+  type EditorPageRejection,
+  type NativePlacement,
+  type PageGeometry,
+  type PdfEditorObjectInput,
+  type PdfEditorObjectKind,
+  type PdfEditorPageInput,
+  type PdfObjectRatioRect,
+  type PdfPageRotation,
+  type PlannedEditorObject,
+  type PlannedEditorPage,
+} from './object-model.js';
+export {
+  createPdfEditorSession,
+  type PdfEditorDraft,
+  type PdfEditorSession,
+  type PdfEditorSessionLimits,
+  type PdfEditorSessionOptions,
+} from './object-session.js';
+export { type EditorImageAsset } from './pdf-document.js';
+export { type PdfImageBytesReceipt } from './io-service.js';

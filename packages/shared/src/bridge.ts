@@ -389,9 +389,16 @@ export const RENDERER_ALLOWLIST = [
   // 而 pdf.js 画位图与取文本层都必须拿到字节。上限沿用 `pdf.io` 那一份 `maxBytes`，不另立第二档（§2.5）；
   // 本机实测一次往返 1MB≈2ms、5MB≈4ms，所以不分块、不做缓存（plan §10.4）。
   'pdf.io.bytes',
+  // WPS 形态编辑器的图片预览通道（2026-10-14 反转裁定）：绝对路径 → 有界 PNG/JPEG 字节 + 魔数格式。
+  // 与 pdf.io.bytes 同一道有界读取，字节上限是 pdf-io 的 maxImageBytes；字节只用来画预览，
+  // 另存时主进程按对象里的路径再读一次（pdf.export.saveEditor），不随对象过第二次界。
+  'pdf.io.imageBytes',
   // 3.5 编辑轨的另存通道（spec 3.5-02 / 3.5-09，plan §7.4）：源路径 + 覆盖区 + 产物路径 → 新文件。
   // 边界上过的只有**比例坐标**与回执三个字段——整页原文不过界（同上面 `pdf.io.open` 的取向）。
   'pdf.export.saveAs',
+  // WPS 形态编辑器的另存通道（2026-10-14 反转裁定）：源路径 + 页计划（源页副本/空白页/旋转）
+  // + 五类纸面对象 + 产物路径 → 新文件。源文件仍只读、只另存（同 saveAs 的 .part→rename 与失败不留半成品）。
+  'pdf.export.saveEditor',
   // 4.1 简历导入面（spec 4.1-c）：渲染层没有读文件的通道（无 showOpenDialog / File），
   // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
@@ -1417,6 +1424,79 @@ export interface PdfSaveAsReceiptView {
   outPath: string;
   sha256: string;
   pageCount: number;
+}
+
+/**
+ * WPS 形态编辑器（2026-10-14 反转裁定后的新编辑轨）——页计划的一个条目，镜像 `PdfEditorPageInput`。
+ * 对象绑**条目 id**（`PdfEditorObjectView.pageId`）而不是来源页号：复制页 = 渲染层复制一条 + 复制对象改绑 id，
+ * 引擎不替用户决定"另一份副本带不带批注"。
+ */
+export type PdfEditorPageView =
+  | {
+      /** 渲染层给的稳定标识（错误信息用它指认条目） */
+      id: string;
+      kind: 'source';
+      /** 来源页号，1 起；重复出现即"复制这一页" */
+      sourcePageNumber: number;
+      /**
+       * 显示旋转（0/90/180/270，PDF /Rotate 的全部合法值）。
+       * **省略＝保留源档原有旋转**，显式给 0 才是"转正"——两个语义不许混。
+       */
+      rotation?: 0 | 90 | 180 | 270;
+    }
+  | {
+      id: string;
+      kind: 'blank';
+      /** 空白页宽高 pt；省略取默认 A4 竖版（595.28×841.89） */
+      widthPt?: number;
+      heightPt?: number;
+      rotation?: 0 | 90 | 180 | 270;
+    };
+
+/**
+ * 编辑器纸面对象（镜像 `PdfEditorObjectInput`）：矩形一律相对**显示面**（旋转后的那一面）的比例坐标，
+ * 与界面拖框同一方向；旋转换算在主进程侧 `object-model.ts`，判据与单测都在那里。
+ */
+export interface PdfEditorObjectView {
+  id: string;
+  /** 绑页计划条目的 id（不是来源页号） */
+  pageId: string;
+  /** text＝就地改字（有 `backdropHex`）或文本框（没有）；其余四类同名同义 */
+  kind: 'text' | 'image' | 'shape' | 'highlight' | 'note';
+  rect: PdfOverlayRectView;
+  /** text 必填；note 可空 */
+  text?: string;
+  /** text 省略取服务默认字号；note 固定 9pt，不读这个键 */
+  sizePt?: number;
+  /** 文字墨色 / 形状描边色 / 高亮色（`#rrggbb`，不合规的颜色主进程静默丢弃走默认，不作失败） */
+  colorHex?: string;
+  /** 形状填充色，省略即空心 */
+  fillHex?: string;
+  /** text 专用：有它就是就地改字（先垫纸色再画字），没它就是文本框 */
+  backdropHex?: string;
+  fontFamilyHint?: 'serif' | 'sans-serif' | 'monospace';
+  /** 粗/斜只对拉丁标准字体兑现；随包中文字体只有一只 Noto Sans SC，中文侧静默不兑现（界面不许诺） */
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** 文字基线在显示面上的 y 比例（原点左上、y 向下）；就地改字时由行盒量来，省略按矩形居中 */
+  baselineYRatio?: number;
+  /**
+   * image 专用：用户经文件选择器选定的**绝对路径**。字节不随对象过界：
+   * 渲染层预览走 `pdf.io.imageBytes` 读一次，另存时主进程按这个路径有界再读一次（按路径去重）。
+   */
+  imagePath?: string;
+  /** shape 专用：描边宽 pt（0..24），省略取 1.5 */
+  borderWidthPt?: number;
+}
+
+/**
+ * `pdf.io.imageBytes` 的回执（镜像 `PdfImageBytesReceipt`）：格式按**文件头魔数**判定，不靠扩展名。
+ * 字节只用于渲染层画预览；另存时主进程重读，不让大图在一次另存参数里随对象过第二次界。
+ */
+export interface PdfImageBytesReceiptView {
+  format: 'png' | 'jpeg';
+  bytes: Uint8Array;
 }
 
 /** 区块种类（镜像 resume-doc 的 `SectionKind`；界面的区块标签按它走 i18n，见 3.2-06 同一口径）。 */
@@ -2884,6 +2964,28 @@ export interface BridgeSignatures {
    */
   'pdf.export.saveAs': {
     args: [filePath: string, overlays: PdfOverlayInputView[], pageOrder: number[], outPath: string];
+    returns: PdfSaveAsReceiptView;
+  };
+  /**
+   * 读出一张插图（WPS 形态编辑器图片工具的预览半边）：按 `pdf.io` 的 `maxImageBytes` 有界读，
+   * 再按文件头魔数判 PNG/JPEG。失败以 `AppErrorPayload`（`PDF_EDIT_READ_FAILED`）上浮，
+   * `details.code` 为 `too-large` / 读不出 / `not-image`。
+   */
+  'pdf.io.imageBytes': { args: [filePath: string]; returns: PdfImageBytesReceiptView };
+  /**
+   * WPS 形态编辑器另存（2026-10-14 反转裁定后的编辑轨）：页计划 + 五类对象 → 一份新 PDF。
+   * - `pages`：产物逐页条目（源页副本可重复 / 空白页 / 每条约 0/90/180/270 显示旋转）；
+   * - `objects`：text（有 `backdropHex`＝就地改字，没有＝文本框）、image（字节按 `imagePath` 主进程重读）、
+   *   shape、highlight（半透明）、note（贴纸 + 自动折行）；矩形都是相对显示面的比例坐标；
+   * - 就地改字仍是**只追加**（盖底 + 同基线重绘），旧文字在文本层还能复制搜索——界面必须如实这么说。
+   * 失败以 `AppErrorPayload`（`PDF_EDIT_SAVE_FAILED`）上浮，`details.code` 在覆盖区那一组之外新增
+   * `empty-pages` / `bad-page-id` / `duplicate-page-id` / `bad-blank-size` / `bad-rotation` /
+   * `too-many-objects` / `bad-object-id` / `duplicate-object-id` / `unknown-kind` / `object-page-unknown` /
+   * `object-out-of-bounds` / `object-too-small` / `text-required` / `text-too-long` /
+   * `image-path-required` / `image-unreadable` / `image-format`；失败时磁盘上没有 `outPath` 也没有 `.part`。
+   */
+  'pdf.export.saveEditor': {
+    args: [filePath: string, pages: PdfEditorPageView[], objects: PdfEditorObjectView[], outPath: string];
     returns: PdfSaveAsReceiptView;
   };
   /**

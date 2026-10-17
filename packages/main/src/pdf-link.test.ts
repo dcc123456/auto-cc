@@ -4,9 +4,9 @@
  * 为什么放在 `packages/main`：这里要同时读到注册表、`cordis.yml`、渲染层白名单与网关的 `resolveCall`
  * ——四样东西分属四个包，只有装配层认识它们全部（`graph-link.test.ts` 同一口径）。
  * 装载与叠加的语义本体（页数、宽高、字节、内容流）在 `packages/pdf-edit/src/*.test.ts` 判，
- * 这里只钉「界面调得到的那三条路径确实切成服务 `pdf.io` / `pdf.export`，且未登记的名字进不来」。
- * 第三条路径 `pdf.io.bytes` 是 2026-10-10 真纸面形态换来的（spec 3.5-12 / 退役核对 3.5-13）：
- * 位图与文本层改由渲染层的 pdf.js 算，所以名单里少一只服务、多一条口——**总数仍是三**。
+ * 这里只钉「界面调得到的那几条路径确实切成服务 `pdf.io` / `pdf.export`，且未登记的名字进不来」。
+ * 2026-10-14 WPS 形态编辑器反转裁定后再加两口：`pdf.io.imageBytes`（图片预览的有界读取）
+ * 与 `pdf.export.saveEditor`（页计划 + 五类对象另存）——同两只服务，**总数五**。
  */
 import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
 import { PdfExportService, PdfIoService } from '@auto-cc/plugin-pdf-edit';
@@ -22,7 +22,7 @@ const fibers: Fiber[] = [];
  */
 async function bootEditTrack(): Promise<{ ctx: Context; lookup: (name: string) => object | undefined }> {
   const ctx = new Context();
-  fibers.push(await ctx.plugin(PdfIoService, { maxBytes: 5242880 }));
+  fibers.push(await ctx.plugin(PdfIoService, { maxBytes: 5242880, maxImageBytes: 10485760 }));
   fibers.push(
     await ctx.plugin(PdfExportService, {
       maxBytes: 5242880,
@@ -30,6 +30,8 @@ async function bootEditTrack(): Promise<{ ctx: Context; lookup: (name: string) =
       maxPages: 64,
       defaultTextSizePt: 11,
       minAreaRatio: 0.0001,
+      maxObjects: 100,
+      maxImageBytes: 10485760,
     }),
   );
   return {
@@ -48,7 +50,7 @@ afterAll(async () => {
   for (const fiber of fibers) await fiber.dispose();
 });
 
-describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的白名单）', () => {
+describe('编辑轨五口都走真装配（plan §7.3 的挂载 + §7.4 的白名单 + 2026-10-14 反转裁定新增两口）', () => {
   it('服务在真实上下文里挂起来了，名字就是 `pdf.io` 与 `pdf.export`', async () => {
     const { ctx } = await bootEditTrack();
     expect(asApp(ctx)['pdf.io']).toBeInstanceOf(PdfIoService);
@@ -101,21 +103,53 @@ describe('编辑轨三条口都走真装配（plan §7.3 的挂载 + §7.4 的�
     expect(failure).toBeInstanceOf(AppError);
     expect(AppError.from(failure).code).toBe('PDF_EDIT_READ_FAILED');
   });
+
+  it('网关把 `pdf.io.imageBytes` 切成服务 `pdf.io` + 方法 `imageBytes`（图片预览那一口，同步抛）', async () => {
+    const { lookup } = await bootEditTrack();
+    const resolution = resolveCall('pdf.io.imageBytes', lookup);
+    expect(resolution).toMatchObject({ ok: true, service: 'pdf.io', method: 'imageBytes' });
+    if (!resolution.ok) throw new Error('should not reach');
+    let failure: unknown;
+    try {
+      resolution.invoke('/tmp/auto-cc-不存在的那张.png');
+    } catch (caught) {
+      failure = caught;
+    }
+    expect(failure).toBeInstanceOf(AppError);
+    expect(AppError.from(failure).code).toBe('PDF_EDIT_READ_FAILED');
+  });
+
+  it('网关把 `pdf.export.saveEditor` 切成服务 `pdf.export` + 方法 `saveEditor`（页计划 + 对象那一口）', async () => {
+    const { lookup } = await bootEditTrack();
+    const resolution = resolveCall('pdf.export.saveEditor', lookup);
+    expect(resolution).toMatchObject({ ok: true, service: 'pdf.export', method: 'saveEditor' });
+    if (!resolution.ok) throw new Error('should not reach');
+    // 四个实参按 `saveEditor(filePath, pages, objects, outPath)` 给全：源文件不存在在读文件时先撞上另存码。
+    const failure = await Promise.resolve(
+      resolution.invoke('/tmp/auto-cc-不存在的那份.pdf', [], [], '/tmp/auto-cc-产物.pdf'),
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AppError);
+    expect(AppError.from(failure).code).toBe('PDF_EDIT_SAVE_FAILED');
+  });
 });
 
-describe('白名单只放行登记过的那三条（§8.2 的边界）', () => {
-  it('`pdf.*` 恰有 io.open、io.bytes 与 export.saveAs，退役的线框通道与抄错的名字都进不来', () => {
+describe('白名单只放行登记过的那五条（§8.2 的边界）', () => {
+  it('`pdf.*` 恰有 io.open、io.bytes、io.imageBytes、export.saveAs 与 export.saveEditor，退役的线框通道与抄错的名字都进不来', () => {
     // 3.5-c₂ 会话轨把 `pdf.edit.*` 判成了渲染层的纯模型（plan §7.14），所以那六行至今不在名单里；
     // `pdf.layout.textItems` 在 2026-10-10 随真纸面形态退役（spec 3.5-13），换进来的是同一条通道上的 `pdf.io.bytes`。
     // 口径照旧：白名单每多一行就多一条没人审的通路，只在实现真落在一口服务上时才登记（表是路线图，不是许可证）。
     expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('pdf.'))).toEqual([
       'pdf.io.open',
       'pdf.io.bytes',
+      'pdf.io.imageBytes',
       'pdf.export.saveAs',
+      'pdf.export.saveEditor',
     ]);
     expect(isAllowedCall('pdf.io.open')).toBe(true);
     expect(isAllowedCall('pdf.io.bytes')).toBe(true);
+    expect(isAllowedCall('pdf.io.imageBytes')).toBe(true);
     expect(isAllowedCall('pdf.export.saveAs')).toBe(true);
+    expect(isAllowedCall('pdf.export.saveEditor')).toBe(true);
     expect(isAllowedCall('pdf.edit.addOverlay')).toBe(false);
     expect(isAllowedCall('pdf.layout.textItems')).toBe(false);
     expect(isAllowedCall('pdf.layout.items')).toBe(false);
@@ -129,6 +163,6 @@ describe('白名单只放行登记过的那三条（§8.2 的边界）', () => {
   it('`pdf.*` 不进 agent 工具面：改的是用户手里的文件，模型没有这只手（plan §7.4 末行）', () => {
     const pdfIds = RENDERER_ALLOWLIST.filter((id) => id.startsWith('pdf.'));
     expect(pdfIds.every((id) => !id.startsWith('agent.'))).toBe(true);
-    expect(pdfIds).toHaveLength(3);
+    expect(pdfIds).toHaveLength(5);
   });
 });

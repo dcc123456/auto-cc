@@ -6,12 +6,13 @@
  * 相对路径必须被拒（主进程的工作目录不是用户预期的那一个）。
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomFillSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AppError, asApp, Context, type Fiber } from '@auto-cc/core';
 import { sha256Hex } from '@auto-cc/core/file-read';
 import { afterAll, describe, expect, it } from 'vitest';
-import { minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf } from '@auto-cc/testing';
+import { encodePng, minimalEncryptedPdf, minimalMultiPagePdf, minimalPdf } from '@auto-cc/testing';
 
 import { PdfIoService } from './io-service.js';
 
@@ -45,7 +46,7 @@ function writeFile(dir: string, name: string, bytes: Uint8Array): string {
  */
 async function boot(maxBytes = 5_242_880): Promise<PdfIoService> {
   const ctx = new Context();
-  fibers.push(await ctx.plugin(PdfIoService, { maxBytes }));
+  fibers.push(await ctx.plugin(PdfIoService, { maxBytes, maxImageBytes: 10_485_760 }));
   return asApp(ctx)['pdf.io'];
 }
 
@@ -162,6 +163,59 @@ describe('3.5-12 字节通道：pdf.io.bytes 把整份文件交给渲染层', ()
       expect((failure as AppError).code, item.name).toBe('PDF_EDIT_READ_FAILED');
       expect((failure as AppError).message).toMatch(/[\u4e00-\u9fa5]/);
     }
+  });
+});
+
+describe('WPS 编辑器图片预览：pdf.io.imageBytes 有界读 + 魔数判格式', () => {
+  it('PNG 读出字节并判成 png；JPEG 魔数也认得（pdf 字节不是图片，not-image 拒掉）', async () => {
+    const dir = tempDir();
+    const io = await boot();
+    const pngBytes = new Uint8Array(encodePng(Buffer.from([0xff, 0x00, 0x00, 0xff]), 1, 1));
+    const pngPath = writeFile(dir, 'seal.png', pngBytes);
+    const receipt = io.imageBytes(pngPath);
+    expect(receipt.format).toBe('png');
+    expect(sha256Hex(receipt.bytes)).toBe(sha256Hex(pngBytes));
+
+    // 扩展名骗人不算数：PDF 字节改叫 .png 一样按文件头拒。
+    const liarPath = writeFile(dir, 'liar.png', minimalPdf(['Jane Doe']));
+    const failure = ((): unknown => {
+      try {
+        io.imageBytes(liarPath);
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).details).toMatchObject({ code: 'not-image' });
+
+    // 正儿八经的 .jpg 头也认得（只验证魔数分支：两字节 SOS 头足够过嗅探）。
+    const jpegPath = writeFile(dir, 'photo.jpg', new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]));
+    expect(io.imageBytes(jpegPath).format).toBe('jpeg');
+  });
+
+  it('图片上限独立于 PDF 上限：PDF 上限改小不影响图片读取，超图片上限按同码拒', async () => {
+    const dir = tempDir();
+    // 96×96 的随机 RGBA（压缩后仍远大于配置下限允许的最小档 1024B；渐变图压完太小演不了超限）。
+    const noisy = Buffer.alloc(96 * 96 * 4);
+    randomFillSync(noisy);
+    for (let index = 3; index < noisy.length; index += 4) noisy[index] = 0xff;
+    const path = writeFile(dir, 'big.png', new Uint8Array(encodePng(noisy, 96, 96)));
+
+    // boot 的默认 PDF 上限是 5MB，把图片上限压到 1024B（schema 允许的最小档，夹具 PNG 远大于它）。
+    const ctx = new Context();
+    fibers.push(await ctx.plugin(PdfIoService, { maxBytes: 5_242_880, maxImageBytes: 1024 }));
+    const io = asApp(ctx)['pdf.io'];
+    let failure: unknown;
+    try {
+      io.imageBytes(path);
+    } catch (caught) {
+      failure = caught;
+    }
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe('PDF_EDIT_READ_FAILED');
+    // readBoundedFile 不给 details.code（与 bytes 通道同口径），超大这件事在中文消息里直说。
+    expect((failure as AppError).message).toMatch(/超过上限/);
   });
 });
 

@@ -8,6 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./edit-session": "./src/edit-session.ts",
+    "./object-session": "./src/object-session.ts",
+    "./object-model": "./src/object-model.ts",
     "./overlay-colors": "./src/overlay-colors.ts",
     "./text-metrics": "./src/text-metrics.ts"
   },
