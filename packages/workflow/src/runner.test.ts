@@ -265,6 +265,55 @@ afterAll(() => {
   }
 });
 
+/** 终态判据用例那两条计划 id：一条带判据，一条不带（"没说要跳过"与"跳过成立"必须分开）。 */
+const PLAN_WITH_CONDITIONS = 'plan-terminal-conditions';
+const PLAN_WITHOUT_CONDITIONS = 'plan-no-conditions';
+
+/**
+ * 存一条两格线性计划：第一格已落定，第二格是可能动过手的不可逆那一步。
+ * @param runs `workflow.store` 句柄
+ * @param planId 计划 id
+ * @param conditions 第二格的终态判据；`null` 表示**不声明**这一列
+ */
+function seedPlan(runs: WorkflowRunStoreService, planId: string, conditions: unknown[] | null): void {
+  runs.savePlan({
+    id: planId,
+    name: '终态判据用例',
+    plan: buildPlan({
+      id: planId,
+      nodes: [
+        { id: 'landed', kind: 'jd.capture', effect: 'read' },
+        {
+          id: 'aftermath',
+          kind: 'demo.flaky',
+          effect: 'local-write',
+          target: 'demo://aftermath',
+          ...(conditions === null ? {} : { terminalStateConditions: conditions }),
+        },
+      ],
+    }),
+    sourceRunId: null,
+    at: 1_700_000_000_000,
+  });
+}
+
+/**
+ * 跑到第二格挂住再「杀掉进程」：第一格已落定，第二格外发起过却没观察到完成（2.4-05/06 的现场）。
+ * @param planId 用哪条计划
+ * @returns 临时目录、第一次的调用序列、被留下的 run id、计划 id（重启后要先认它才续得上）
+ */
+async function killAtSecondNode(planId: string) {
+  const dir = tempDir();
+  const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
+  seedPlan(first.runs, planId, planId === PLAN_WITH_CONDITIONS ? [{ kind: 'nodeCommitted', nodeId: 'landed' }] : null);
+  first.runner.start(planId);
+  await waitFor(() => first.calls.includes('aftermath#1'));
+  const runId = first.runner.current().runId;
+  // 「进程死亡」= 倒序卸载全部 fiber，库里最后一行 `running` 就此成为孤儿。
+  await shutDown();
+  return { dir, first, runId, planId };
+}
+
 /**
  * 轮询等待条件成立。
  * @param predicate 每 5ms 调一次，返回 true 即结束
@@ -1585,59 +1634,6 @@ describe('workflow.run 工具：agent 与面板跑的是同一个 runner（spec 
 });
 
 describe('终态跳过：第四种判决（spec 5.11-03 / 04 的 runner 半边）', () => {
-  /** 终态判据用例那两条计划 id：一条带判据，一条不带（"没说要跳过"与"跳过成立"必须分开）。 */
-  const PLAN_WITH_CONDITIONS = 'plan-terminal-conditions';
-  const PLAN_WITHOUT_CONDITIONS = 'plan-no-conditions';
-
-  /**
-   * 存一条两格线性计划：第一格已落定，第二格是可能动过手的不可逆那一步。
-   * @param runs `workflow.store` 句柄
-   * @param planId 计划 id
-   * @param conditions 第二格的终态判据；`null` 表示**不声明**这一列
-   */
-  function seedPlan(runs: WorkflowRunStoreService, planId: string, conditions: unknown[] | null): void {
-    runs.savePlan({
-      id: planId,
-      name: '终态判据用例',
-      plan: buildPlan({
-        id: planId,
-        nodes: [
-          { id: 'landed', kind: 'jd.capture', effect: 'read' },
-          {
-            id: 'aftermath',
-            kind: 'demo.flaky',
-            effect: 'local-write',
-            target: 'demo://aftermath',
-            ...(conditions === null ? {} : { terminalStateConditions: conditions }),
-          },
-        ],
-      }),
-      sourceRunId: null,
-      at: 1_700_000_000_000,
-    });
-  }
-
-  /**
-   * 跑到第二格挂住再「杀掉进程」：第一格已落定，第二格外发起过却没观察到完成（2.4-05/06 的现场）。
-   * @param planId 用哪条计划
-   * @returns 临时目录、第一次的调用序列、被留下的 run id、计划 id（重启后要先认它才续得上）
-   */
-  async function killAtSecondNode(planId: string) {
-    const dir = tempDir();
-    const first = await boot({ dir, behavior: { 'demo.flaky': hangUntilAbort() } });
-    seedPlan(
-      first.runs,
-      planId,
-      planId === PLAN_WITH_CONDITIONS ? [{ kind: 'nodeCommitted', nodeId: 'landed' }] : null,
-    );
-    first.runner.start(planId);
-    await waitFor(() => first.calls.includes('aftermath#1'));
-    const runId = first.runner.current().runId;
-    // 「进程死亡」= 倒序卸载全部 fiber，库里最后一行 `running` 就此成为孤儿。
-    await shutDown();
-    return { dir, first, runId, planId };
-  }
-
   it('终态判据成立时不重放：执行器一次都不调，这一格照常结算，run 走到头', async () => {
     const { dir, first, runId, planId } = await killAtSecondNode(PLAN_WITH_CONDITIONS);
     expect(first.calls).toEqual(['landed#1', 'aftermath#1']);
@@ -1728,5 +1724,75 @@ describe('终态跳过：第四种判决（spec 5.11-03 / 04 的 runner 半边�
     await waitFor(() => second.runner.current().status === 'done');
     expect(second.calls).toEqual([]);
     expect(second.runs.state(runId)?.nodes[1]).toMatchObject({ status: 'done' });
+  });
+});
+
+describe('决策级证据（spec 5.11-05：判决也走既有写入路径与同一处脱敏）', () => {
+  it('终态跳过也留下一份判决证据：读回口按 decision 路由，不与失败混成一条', async () => {
+    const { dir, runId, planId } = await killAtSecondNode(PLAN_WITH_CONDITIONS);
+    const second = await boot({ dir });
+    second.runner.selectPlan(planId);
+    second.runner.resumeRun(runId);
+    await waitFor(() => second.runner.current().status === 'done');
+
+    const view = second.runner.readEvidence(runId, 'aftermath');
+    expect(view).toMatchObject({
+      decision: 'terminal-state-satisfied',
+      error: { code: 'TERMINAL_STATE_SATISFIED', message: 'aftermath 终态已成立，未重放' },
+      ref: `evidence/${runId}-aftermath.json`,
+    });
+    // 库里那一格登记的就是这份路径：读回口不是自己拼出来的文件名。
+    expect(second.runs.state(runId)?.nodes[1]?.evidenceRef).toBe(`evidence/${runId}-aftermath.json`);
+    // 判据原文跟着判决一起落盘：事后能自己复核「凭什么说它不用跑」。
+    const file = JSON.parse(readFileSync(join(dir, 'evidence', `${runId}-aftermath.json`), 'utf8')) as {
+      decision: string;
+      error: { details?: { conditions?: unknown } };
+    };
+    expect(file.decision).toBe('terminal-state-satisfied');
+    expect(file.error.details?.conditions).toEqual([{ kind: 'nodeCommitted', nodeId: 'landed' }]);
+  });
+
+  it('定位判据拒绝猜测：reason 落进证据正文，读回口认出这是判决而不是意外（F40）', async () => {
+    const booted = await boot({
+      behavior: {
+        'jd.capture': () => {
+          throw new AppError('LOCATE_FAILED', '定位未过线，动作没有执行：与次优候选只差 3 分', 'browser.act', {
+            status: 'ambiguous',
+          });
+        },
+      },
+    });
+    booted.runner.start();
+    await waitFor(() => booted.runner.current().status === 'failed');
+
+    const view = booted.runner.readEvidence(booted.runner.state()!.runId, 'jd-capture');
+    expect(view.decision).toBe('locate-refused');
+    // 判据点名的那句话此前止于 IPC 边界：它必须在磁盘上找得回来。
+    expect(view.error.code).toBe('LOCATE_FAILED');
+    expect(view.error.message).toContain('与次优候选只差 3 分');
+  });
+
+  it('改前基线仍是原样：普通失败按 outcome 读，而 2.4 时代写下的证据文件没有 decision 那一位', async () => {
+    const booted = await boot({
+      behavior: {
+        'jd.capture': () => {
+          throw new Error('选择器没命中');
+        },
+      },
+    });
+    booted.runner.start();
+    await waitFor(() => booted.runner.current().status === 'failed');
+    const runId = booted.runner.state()!.runId;
+    expect(booted.runner.readEvidence(runId, 'jd-capture')).toMatchObject({
+      decision: 'outcome',
+      error: { code: 'Error', message: '选择器没命中' },
+    });
+
+    // 老版本写下的文件里根本没有这一位：读回按 outcome 处理，不按今天的口径去猜那个位置。
+    const file = join(booted.dir, 'evidence', `${runId}-jd-capture.json`);
+    const legacy = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    delete legacy.decision;
+    writeFileSync(file, JSON.stringify(legacy), 'utf8');
+    expect(booted.runner.readEvidence(runId, 'jd-capture').decision).toBe('outcome');
   });
 });

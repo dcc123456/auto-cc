@@ -1006,7 +1006,18 @@ export type PlanParamReadoutView = {
 };
 
 /**
- * 一次失败节点的证据读数（spec 2.8-04）。
+ * 一条证据记的是哪一次**决策**（spec 5.11-05）。
+ *
+ * 2.4 时代的证据只记结局（`outcome` = 这一格跑完了或判失败了）；browser-copilot 的读数
+ * （`engine.ts:277-295`「没有报错不等于目标达成」）指出另外两种**判决**此前什么都不留：
+ * `terminal-state-satisfied` = 终态已成立、这一格没派执行器就结掉了；
+ * `locate-refused` = 定位判据没过线、引擎拒绝猜一个目标，于是动作一条都没派发。
+ * 三者落在同一份证据文件、同一条写入路径、同一处脱敏上（plan 裁定四）。
+ */
+export type WorkflowEvidenceDecision = 'outcome' | 'terminal-state-satisfied' | 'locate-refused';
+
+/**
+ * 一次节点证据的读数（spec 2.8-04 / 5.11-05）。
  *
  * 它是 `writeEvidence` 落盘那份 JSON 的**读侧投影**，不是第二份事实：字段只从文件里取，
  * 主进程不在这里补任何判断。正文的脱敏发生在**写盘那一次**（唯一权威 `redactValue`），
@@ -1020,6 +1031,12 @@ export type WorkflowEvidenceView = {
   attempt: number;
   /** 判定时间戳（毫秒）。 */
   at: number;
+  /**
+   * 这条证据记的是结局还是判决（`WorkflowEvidenceDecision`）。
+   * 读侧按它路由：2.4 时代写下的证据文件没有这一位，一律按 `outcome` 读——
+   * 证据文件的寿命长于任何一个版本，不能按新口径去猜旧文件里那个同名字段的意思。
+   */
+  decision: WorkflowEvidenceDecision;
   /** 错误码与截断过的一句话（`details` 不进这条：它是执行器原样塞的对象，形状不可信）。 */
   error: { code: string; message: string };
   /** 失败当时的页面读数；抓取时没有内核会话则为 null。 */

@@ -32,6 +32,7 @@ import {
   type WorkflowNodeSpec,
   type WorkflowNodeExecutor,
   type WorkflowNodePhase,
+  type WorkflowEvidenceDecision,
   type WorkflowEvidenceView,
   type WorkflowPlanOptionView,
   type WorkflowPlanView,
@@ -82,11 +83,19 @@ export { READ_RETRY_CEILING, retryBudgetFor, type RetryBudget } from './retry-po
  */
 const workflowRunInputSchema = z.strictObject({ planId: z.string().min(1) });
 
-/** 一个失败节点留下的证据（spec 2.4-04）。 */
+/** 一个节点留下的证据（spec 2.4-04 / 5.11-05）。 */
 type NodeEvidence = {
   runId: string;
   nodeId: string;
+  /** 执行器名（`WorkflowNodeSpec.kind`）。 */
   kind: string;
+  /**
+   * 这条证据记的是结局还是判决（spec 5.11-05）。
+   *
+   * 另起字段而**不复用** `kind`：那个键在证据文件里一直表示执行器名，而证据文件的寿命长于任何一个版本
+   * （用户会把它留着翻），按新口径重解释旧文件里那个同名字段等于篡改历史读数。
+   */
+  decision?: WorkflowEvidenceDecision;
   effect: ToolEffect;
   target: string;
   /** 判失败时是第几次尝试（含首次）。 */
@@ -373,7 +382,10 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 读回一个失败节点的证据（spec 2.8-04）：错误码与正文 + 现场截图，全部取自主进程自己写下的那份文件。
+   * 读回一个节点的证据（spec 2.8-04 / 5.11-05）：错误码与正文 + 现场截图，全部取自主进程自己写下的那份文件。
+   *
+   * 读回口按 `decision` 路由：失败结局、终态跳过、定位拒绝猜测三种都从这里出去，
+   * 消费侧据此说不同的话——同一个 `evidence_ref` 列本来也装得下这三种（plan 裁定四）。
    *
    * 入参来自渲染层，按不可信输入处理（AGENTS.md §2.6）：**不拿这两个字符串拼路径**，
    * 而是先查库——只有 `workflow_nodes` 里确实登记过这条 (runId, nodeId) 且它的 `evidence_ref`
@@ -384,7 +396,7 @@ export class WorkflowRunnerService extends Service {
    * @param runIdRaw 界面给的 run id（来自 `state()` / `resumable()` 的读数，不是用户输入）
    * @param nodeIdRaw 界面给的节点 id
    * @returns 证据读数；库里没有这条 run / 这个节点、或这一位根本没有证据时结构化失败而不是返回半份
-   * @throws `INVALID_ARGUMENT`（id 不属于任何落库节点，或那次节点没有证据文件）
+   * @throws `INVALID_ARGUMENT`（id 不属于任何落库节点，或那个格子既没有失败也没有判决要记）
    */
   readEvidence(runIdRaw: string, nodeIdRaw: string): WorkflowEvidenceView {
     const stored = this.store.state(runIdRaw);
@@ -402,7 +414,7 @@ export class WorkflowRunnerService extends Service {
       throw new AppError(
         'INVALID_ARGUMENT',
         node.evidenceRef === null
-          ? `节点 ${node.nodeId} 没有登记证据文件（这一步不是失败结算的），无证据可读`
+          ? `节点 ${node.nodeId} 没有登记证据文件（这一步不是失败结算的，也没有判决要记），无证据可读`
           : `这个节点登记的证据不是这条路径（库里 ${node.evidenceRef}），拒绝读`,
         'workflow.runner',
         { runId: stored.runId, nodeId: node.nodeId, ref: node.evidenceRef },
@@ -415,6 +427,8 @@ export class WorkflowRunnerService extends Service {
       nodeId: node.nodeId,
       attempt: evidence?.attempt ?? node.attempts,
       at: evidence?.at ?? node.finishedAt ?? stored.startedAt,
+      // 2.4 时代写下的证据文件没有 `decision` 那一位：按 `outcome` 读，而不是按今天的口径去猜。
+      decision: evidence?.decision ?? 'outcome',
       error: {
         code: evidence?.error.code ?? 'UNKNOWN',
         message: evidence?.error.message ?? node.error ?? '这次失败没有留下证据正文',
@@ -1030,6 +1044,20 @@ export class WorkflowRunnerService extends Service {
         // 真实起点：耗时栏读出来仍是「从上一次动手指到现在」，而不是被编出来的 0ms。
         const startedAt = stored?.startedAt ?? Date.now();
         this.apply({ type: 'step-started', stepId: spec.id, at: startedAt }, null, null);
+        // 这一格没派过执行器，于是**没有任何失败**可留证据；不补这份判决证据的话，
+        // 事后只看得见「done」，看不出是终态判据结掉的还是真跑过的（spec 5.11-05，F40）。
+        const evidenceRef = await this.writeEvidence(
+          run.runId,
+          index,
+          spec,
+          stored?.attempts ?? 1,
+          Date.now(),
+          new AppError('TERMINAL_STATE_SATISFIED', `${spec.id} 终态已成立，未重放`, 'workflow.runner', {
+            nodeId: spec.id,
+            conditions: spec.terminalStateConditions ?? [],
+          }),
+          'terminal-state-satisfied',
+        );
         this.succeedNode(
           run.runId,
           index,
@@ -1039,6 +1067,7 @@ export class WorkflowRunnerService extends Service {
           undefined,
           graph,
           `${spec.id} 终态已成立，未重放`,
+          evidenceRef,
         );
         continue;
       }
@@ -1228,6 +1257,7 @@ export class WorkflowRunnerService extends Service {
    * @param graph 本次 run 的执行图
    * @param finishMessage 推给界面的那句话；省略即「完成」。终态跳过走的是同一个出口，
    *   区别只在这一句——界面必须看得出这一格是**没跑**而是通过终态判据结掉的（spec 5.11-03）
+   * @param evidenceRef 这一格留下的判决证据路径；只有终态跳过有（那一格没有失败可记，spec 5.11-05）
    */
   private succeedNode(
     runId: string,
@@ -1238,6 +1268,7 @@ export class WorkflowRunnerService extends Service {
     output: string | undefined,
     graph: WorkflowGraphView,
     finishMessage?: string,
+    evidenceRef?: string | null,
   ): void {
     const at = Date.now();
     // 先推图再落库：`advanceGraph` 会校验「这个出口真是该节点声明过的」，声明里没有就结构化失败，
@@ -1255,7 +1286,7 @@ export class WorkflowRunnerService extends Service {
       finishedAt: at,
       durationMs: at - startedAt,
       error: null,
-      evidenceRef: null,
+      evidenceRef: evidenceRef ?? null,
       // 只有真的会动外面世界的节点才需要把副作用位收成 done（spec 2.4-06 的判据）。
       sideEffect: spec.effect === 'read' ? null : 'done',
       output: output ?? null,
@@ -1290,7 +1321,7 @@ export class WorkflowRunnerService extends Service {
   ): Promise<void> {
     const at = Date.now();
     const message = error instanceof Error ? error.message : String(error);
-    const evidenceRef = await this.writeEvidence(runId, index, spec, attempt, at, error);
+    const evidenceRef = await this.writeEvidence(runId, index, spec, attempt, at, error, this.decisionOf(error));
     this.store.recordNode(runId, index, {
       status: 'failed',
       attempts: attempt,
@@ -1307,6 +1338,21 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
+   * 这次失败是「判决」还是「意外」（spec 5.11-05）。
+   *
+   * 只认一个机器码：`LOCATE_FAILED` 是 `browser.act` 在定位判据没过线时抛的（`act-service.ts`），
+   * 那一族的语义是**引擎拒绝猜一个目标、动作一条都没派发**——与「页面自己坏了」不是一件事，
+   * 而 F40 的读数正是：这条 `reason`（「与次优候选只差 N 分」）此前止于 IPC 边界，什么都不留。
+   * 判据按码走而不去翻 `details.status`：那一位是浏览器包塞进来的对象形状，
+   * 工作流按字段名去读它等于跨层认了一个没人维护的约定（AGENTS.md §2.7），而码是本仓的枚举。
+   * @param error 执行器抛出的那个值
+   * @returns 判决证据的 kind，其余一律 `outcome`（2.4 时代的那一种）
+   */
+  private decisionOf(error: unknown): WorkflowEvidenceDecision {
+    return error instanceof AppError && error.code === 'LOCATE_FAILED' ? 'locate-refused' : 'outcome';
+  }
+
+  /**
    * 第 `attempt` 次失败之后的退避时长。
    * @param attempt 刚刚失败的那一次（从 1 起）
    * @returns 毫秒数：`retryBackoffMs × 2^(attempt-1)`，封顶 `retryBackoffCapMs`（spec 2.4-03，plan §11.4）
@@ -1316,7 +1362,7 @@ export class WorkflowRunnerService extends Service {
   }
 
   /**
-   * 失败证据落盘（spec 2.4-04）。
+   * 证据落盘（spec 2.4-04 / 5.11-05）：失败结局与两种判决都走这一条路径。
    *
    * 写在 run 行旁边（userData 下的 `evidenceDir`）而不是写进库里一个 BLOB：截图是给人翻文件看的，
    * 而库里只留**相对路径**（`workflow_nodes.evidence_ref`），于是「库能被拷走看」这件事没坏。
@@ -1324,12 +1370,14 @@ export class WorkflowRunnerService extends Service {
    * 落盘前整份过一遍 `redactValue`（spec 2.7-07）：证据里除了截断过的正文，还有 `error.details`
    * 这一位——它是执行器原样塞进来的对象（可能含页面 URL、选择器、甚至抓取到的字段值），
    * 逐字段包不如在唯一的写盘点上统一掩码。文本字段另外在 `cap` 里先脱敏后截断，两处共用同一份判据。
+   * 判决证据也走这一处掩码与这个文件名（plan 裁定四）：另起一条写入路径就等于第二套脱敏（AGENTS.md §2.7）。
    * @param runId 本次 run
    * @param index 节点下标（只用于日志）
    * @param spec 节点声明
-   * @param attempt 判失败时的尝试次数
+   * @param attempt 判这一格时的尝试次数
    * @param at 判定时间戳（毫秒）
-   * @param error 最后一次错误
+   * @param error 这次判定要说的事：失败时是错误，判决时是那句判决本身（同一个码位与正文形状）
+   * @param decision 这条证据记的是结局还是判决（`WorkflowEvidenceDecision`）
    * @returns userData 下的**相对路径**（如 `evidence/<runId>-<nodeId>.json`）；磁盘写不下时 null 并记一笔 warn
    */
   private async writeEvidence(
@@ -1339,6 +1387,7 @@ export class WorkflowRunnerService extends Service {
     attempt: number,
     at: number,
     error: unknown,
+    decision: WorkflowEvidenceDecision,
   ): Promise<string | null> {
     const code = error instanceof AppError ? error.code : error instanceof Error ? error.name : 'UNKNOWN';
     const details = error instanceof AppError ? error.details : undefined;
@@ -1349,6 +1398,7 @@ export class WorkflowRunnerService extends Service {
         runId,
         nodeId: spec.id,
         kind: spec.kind,
+        decision,
         effect: spec.effect,
         target: spec.target,
         attempt,

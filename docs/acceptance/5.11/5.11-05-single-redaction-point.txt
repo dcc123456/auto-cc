@@ -1,0 +1,32 @@
+spec 5.11-05 · 判据「断言全仓只有一处脱敏点（`grep -c redactValue` 的写侧计数不因本节增加）」
+采集时间：2026-10-18（5.11-d 落地当天，提交前最后一次读数）
+采集方式：两条独立通道 —— ① 本工作树 grep；② 与上一提交（5.11-c，f3e1086）逐字对比。
+
+── ① 全仓 redactValue 调用点（非测试文件） ──────────────────────────────
+  packages/core/src/redact.ts:111   export function redactValue<T>(value: T, keyHint?: string): T   ← 定义
+  packages/core/src/redact.ts:117   数组分支自调用
+  packages/core/src/redact.ts:122   对象分支自调用
+  packages/core/src/redact.ts:129   export const redact = redactValue                              ← 别名
+  packages/logger/src/index.ts:117  logger 的对象序列化钩子
+  packages/logger/src/index.ts:118  logger 的错误序列化钩子
+  packages/agent/src/session.ts:763 会话导出落盘前整份过一次
+  packages/agent/src/session.ts:924 送进模型前的输入
+  packages/agent/src/loop/loop.ts:712  送进模型前的计划
+  packages/workflow/src/index.ts:1412 证据落盘：`JSON.stringify(redactValue(evidence), null, 2)`
+
+── ② 工作流包的写侧计数（本节前后逐字相同） ─────────────────────────────
+  改前（git show f3e1086:packages/workflow/src/index.ts）：
+    $ git show f3e1086:packages/workflow/src/index.ts | grep -c "redactValue(evidence)"
+    1
+  改后（本工作树）：
+    $ grep -c "redactValue(evidence)" packages/workflow/src/index.ts
+    1
+
+结论：终态跳过与定位拒绝猜测这两种判决证据没有另起写入路径，
+`redactValue(evidence)` 这一句仍是工作流包内唯一的写盘点（`writeEvidence` 的第 1412 行），
+连同 `cap()` 里先脱敏后截断的那一份判据，两种 kind 与 2.4 时代的失败证据完全共用（plan 裁定四）。
+
+补充读数（为什么新增的字段不构成第二处脱敏）：
+  NodeEvidence 新增的 `decision` 是一位枚举字符串（`WorkflowEvidenceDecision`），
+  不含任何来自页面或执行器的自由文本；判据原文（`terminalStateConditions`）与
+  `error.details` 一样落在 `writeEvidence` 内部组装，因此照样整份过一次 redactValue。
