@@ -285,12 +285,96 @@ describe('节点相位（spec 5.11-01，号段 41）', () => {
     expect(db.prepare('select count(*) as total from workflow_node_checkpoints').get()).toMatchObject({ total: 1 });
 
     // 重试是新的尝试：同相位覆盖时间戳而不是追加，否则「派发过几次」会被误读成相位前进。
+    // 走 force=true 那一条（用户在接管点上确认过重试，2.4-05 的路径）：相位要跟着新尝试一起刷新。
+    // 这里不断言「自动重试给什么判决」——那个判决从 5.11-b 起由相位参与，逐个方向由下一组用例证。
     runs.recordNode('r-phase', 2, outcome({ status: 'failed', error: 'boom' }));
-    expect(runs.claimNode('r-phase', 2, plan.nodes[2]!, 9_000)).toBe('granted');
+    expect(runs.claimNode('r-phase', 2, plan.nodes[2]!, 9_000, true)).toBe('granted');
     expect(runs.readPhases('r-phase', 2)).toEqual(['nodeStarted']);
     expect(db.prepare('select at from workflow_node_checkpoints where node_index = 2').get()).toMatchObject({
       at: 9_000,
     });
+  });
+
+  it('落地被观察到时补 sideEffectObserved，结局落定才补 nodeCommitted', async () => {
+    const { runs } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    runs.openRun('r-obs', plan, 1_000);
+    runs.claimNode('r-obs', 2, plan.nodes[2]!, 1_000);
+    // 第一次尝试挂在后置步骤上，但外发确实已经发生——这正是 `sideEffectObserved` 的那一刻。
+    runs.recordNode('r-obs', 2, outcome({ status: 'failed', sideEffect: 'done', error: '后置步骤出错' }));
+    expect(runs.readPhases('r-obs', 2)).toEqual(['nodeStarted', 'sideEffectObserved']);
+    // 结局是 failed 就不算提交：节点还没落定。
+    expect(runs.readPhases('r-obs', 2)).not.toContain('nodeCommitted');
+
+    // 换一次干净的 run 看成功那一侧：三相位齐了。
+    runs.openRun('r-obs-done', plan, 1_000);
+    runs.claimNode('r-obs-done', 2, plan.nodes[2]!, 1_000);
+    runs.recordNode('r-obs-done', 2, outcome({ sideEffect: 'done' }));
+    expect(runs.readPhases('r-obs-done', 2)).toEqual(['nodeStarted', 'sideEffectObserved', 'nodeCommitted']);
+    // 只读节点没有副作用位，但结局落定照样提交——`nodeCommitted` 说的是节点，不是外发。
+    runs.openRun('r-obs-read', plan, 1_000);
+    runs.claimNode('r-obs-read', 0, plan.nodes[0]!, 1_000);
+    runs.recordNode('r-obs-read', 0, outcome());
+    expect(runs.readPhases('r-obs-read', 0)).toEqual(['nodeCommitted']);
+  });
+});
+
+describe('续跑判决读相位（spec 5.11-02，行为零变化）', () => {
+  it('三个来源方向各一条：相位与列都指向动过手 → 拒绝；只有老库的列 → 也拒绝；两处都没有 → 放行', async () => {
+    const { runs, db } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    const flaky = plan.nodes[2]!;
+
+    // 一、新写入的行：相位与列一致，仍然是 needs-human（这一条与改前逐字同判）。
+    runs.openRun('r-new', plan, 1_000);
+    runs.claimNode('r-new', 2, flaky, 1_000);
+    runs.recordNode('r-new', 2, outcome({ status: 'failed', sideEffect: 'done', error: '后置步骤出错' }));
+    expect(runs.readPhases('r-new', 2)).toEqual(['nodeStarted', 'sideEffectObserved']);
+    expect(runs.claimNode('r-new', 2, flaky, 2_000)).toBe('needs-human');
+
+    // 二、号段 41 之前的老库行：相位表里一条都没有，只有 `side_effect='started'`。
+    // 把相位行删掉就是那种库的真实形状——只看相位会把它误判成「能证明未派发」而放行，
+    // 那正是把闸门放松。取并集之后判决与改前完全一致。
+    runs.openRun('r-legacy', plan, 1_000);
+    runs.claimNode('r-legacy', 2, flaky, 1_000);
+    runs.recordNode('r-legacy', 2, outcome({ status: 'failed', error: '崩了', sideEffect: null }));
+    db.prepare("UPDATE workflow_nodes SET side_effect = 'started' WHERE run_id = 'r-legacy' AND node_index = 2").run();
+    db.prepare("DELETE FROM workflow_node_checkpoints WHERE run_id = 'r-legacy' AND node_index = 2").run();
+    expect(runs.readPhases('r-legacy', 2)).toEqual([]);
+    expect(runs.claimNode('r-legacy', 2, flaky, 2_000)).toBe('needs-human');
+
+    // 三、既没有相位、`side_effect` 又是 NULL：这就是「能证明未派发」的形状，照常放行。
+    runs.openRun('r-fresh', plan, 1_000);
+    runs.claimNode('r-fresh', 2, flaky, 1_000);
+    runs.recordNode('r-fresh', 2, outcome({ status: 'failed', error: '只读失败', sideEffect: null }));
+    db.prepare("DELETE FROM workflow_node_checkpoints WHERE run_id = 'r-fresh' AND node_index = 2").run();
+    expect(runs.claimNode('r-fresh', 2, flaky, 2_000)).toBe('granted');
+    // 放行之后这次尝试重新落相位：从此它就是「可能动过手」的了。
+    expect(runs.readPhases('r-fresh', 2)).toEqual(['nodeStarted']);
+  });
+
+  it('人工确认放行的那一次重放照常写闸门日志与新相位（force 分支不被相位挡住）', async () => {
+    const { runs } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    const flaky = plan.nodes[2]!;
+    runs.openRun('r-force', plan, 1_000);
+    runs.claimNode('r-force', 2, flaky, 1_000);
+    runs.recordNode('r-force', 2, outcome({ status: 'failed', sideEffect: 'done', error: '后置步骤出错' }));
+    expect(runs.claimNode('r-force', 2, flaky, 2_000)).toBe('needs-human');
+    // force=true 是用户在接管点上按过重试的路径（2.4-05）：相位不许把它也拦下。
+    expect(runs.claimNode('r-force', 2, flaky, 3_000, true)).toBe('granted');
+    expect(runs.state('r-force')?.nodes[2]).toMatchObject({ status: 'running', attempts: 2 });
+  });
+
+  it('已提交的节点重放仍是 already-done，不因有相位而改判（2.4-05 的基线）', async () => {
+    const { runs } = await boot();
+    const plan = buildPlan(BOSS_BASIC_PLAN);
+    runs.openRun('r-committed', plan, 1_000);
+    runs.claimNode('r-committed', 2, plan.nodes[2]!, 1_000);
+    runs.recordNode('r-committed', 2, outcome({ sideEffect: 'done' }));
+    expect(runs.readPhases('r-committed', 2)).toContain('nodeCommitted');
+    expect(runs.claimNode('r-committed', 2, plan.nodes[2]!, 2_000)).toBe('already-done');
+    expect(runs.state('r-committed')?.nodes[2]).toMatchObject({ status: 'done', attempts: 1 });
   });
 });
 

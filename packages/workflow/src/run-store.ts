@@ -360,7 +360,7 @@ export class WorkflowRunStoreService extends Service {
     const existing = this.nodeRow(runId, index);
     if (existing) {
       if (existing.status === 'done' || existing.status === 'skipped') return 'already-done';
-      if ((existing.side_effect === 'started' || existing.side_effect === 'done') && !force) return 'needs-human';
+      if (this.isDispatchUnobserved(runId, index, existing) && !force) return 'needs-human';
       if (force && existing.side_effect) {
         this.ctx.logger.warn(
           `第 ${String(index)} 个节点的外发未被观察到完成，人工确认后重放（幂等键 ${existing.idempotency_key ?? '（无）'}）`,
@@ -456,44 +456,88 @@ export class WorkflowRunStoreService extends Service {
 
   /**
    * 读一个节点已经落下的相位。
+   *
+   * 按 `rowid`（落库先后）排而不是按 `at`：同一次结算里写的两个相位时间戳逐字相同，
+   * 按时间排就得再加一个字母序的兜底，于是读出来的顺序会是 `nodeCommitted` 在
+   * `sideEffectObserved` 前面——那不是到达顺序，是排序的副作用。
    * @param runId 本次 run
    * @param index 节点下标
    * @returns 相位名数组（按到达先后排序）；该节点还没 claim 过则是空数组
    */
   readPhases = (runId: string, index: number): WorkflowNodePhase[] => {
     const rows = this.db
-      .prepare('SELECT phase FROM workflow_node_checkpoints WHERE run_id = ? AND node_index = ? ORDER BY at, phase')
+      .prepare('SELECT phase FROM workflow_node_checkpoints WHERE run_id = ? AND node_index = ? ORDER BY rowid')
       .all(runId, index) as { phase?: string }[];
     return rows.map((row) => row.phase as WorkflowNodePhase);
   };
 
   /**
+   * 这个位置是不是「可能已经动过手、却没观察到落地」——盲重放可能发两遍，所以要转人工。
+   *
+   * 两个来源取**并集**，不是只看相位：号段 41 之前的行库里根本没有相位，
+   * 只看相位会把那批行从「拒绝盲重放」翻成「准许重放」，那是把闸门放松而不是搬家
+   * （spec 5.11-02 要的正是行为零变化）。反过来，一个既没有相位、`side_effect` 又是 NULL 的行
+   * 才是「能证明未派发」，那种行照常放行——相位本身不是拒绝的理由，「可能动过手」才是。
+   * @param runId 本次 run
+   * @param index 节点下标
+   * @param existing 位置上的节点行（已读出，不再查第二遍）
+   * @returns true 表示拒绝自动重放
+   */
+  private isDispatchUnobserved(runId: string, index: number, existing: NodeRow): boolean {
+    const phases = this.readPhases(runId, index);
+    // 节点已提交结局就不再是这一类：`claimNode` 上游那一句 `status === 'done'` 已经先返回了，
+    // 这里保留这一判是为了让本函数被单独读到时也自洽。
+    if (phases.includes('nodeCommitted')) return false;
+    if (phases.includes('nodeStarted')) return true;
+    return existing.side_effect === 'started' || existing.side_effect === 'done';
+  }
+
+  /**
    * 写回一个节点这次的完整读数。
+   *
+   * 相位与节点行同一个事务（spec 5.11-02）：`side_effect='done'` 与 `sideEffectObserved`、
+   * 终态与 `nodeCommitted` 必须同成同败，否则崩在两句之间会留下「落地已观察、结局没记」的现场，
+   * 而续跑对那两种读数给出的判决不一样。
    * @param runId 本次 run
    * @param index 节点下标
    * @param outcome 结束读数（完整对象，见 `NodeOutcome`）
    * @returns 无；命中 0 行不报错——`claimNode` 已经保证行存在，这里只负责落地
    */
   recordNode = (runId: string, index: number, outcome: NodeOutcome): void => {
-    this.db
-      .prepare(
-        `UPDATE workflow_nodes SET status = ?, attempts = ?, started_at = ?, finished_at = ?, duration_ms = ?,
-           error = ?, evidence_ref = ?, side_effect = ?, output_handle = ?
-         WHERE run_id = ? AND node_index = ?`,
-      )
-      .run(
-        outcome.status,
-        outcome.attempts,
-        outcome.startedAt,
-        outcome.finishedAt,
-        outcome.durationMs,
-        outcome.error,
-        outcome.evidenceRef,
-        outcome.sideEffect,
-        outcome.output ?? null,
-        runId,
-        index,
-      );
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(
+          `UPDATE workflow_nodes SET status = ?, attempts = ?, started_at = ?, finished_at = ?, duration_ms = ?,
+             error = ?, evidence_ref = ?, side_effect = ?, output_handle = ?
+           WHERE run_id = ? AND node_index = ?`,
+        )
+        .run(
+          outcome.status,
+          outcome.attempts,
+          outcome.startedAt,
+          outcome.finishedAt,
+          outcome.durationMs,
+          outcome.error,
+          outcome.evidenceRef,
+          outcome.sideEffect,
+          outcome.output ?? null,
+          runId,
+          index,
+        );
+      // 「落地已被观察到」的判据就是那一列本身：只有写成 `done` 才算观察到了。
+      if (outcome.sideEffect === 'done') {
+        this.markPhase(runId, index, 'sideEffectObserved', outcome.finishedAt ?? Date.now());
+      }
+      // 结局落定才算提交：`running` 与 `failed` 都还在路上（in-process 重试走的就是 `running`）。
+      if (outcome.status === 'done' || outcome.status === 'skipped') {
+        this.markPhase(runId, index, 'nodeCommitted', outcome.finishedAt ?? Date.now());
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   };
 
   /**
