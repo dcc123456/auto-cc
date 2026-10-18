@@ -27,6 +27,37 @@ const workflowConditionSchema = z.strictObject({
 });
 
 /**
+ * 定位候选的**形状**校验（spec 5.12-02）。
+ *
+ * 只管形状，不管语义：策略与该策略所需字段对不对得上、属性名合不合法，那些是
+ * `packages/browser/src/locator-spec.ts` 的 `validateSpec` 在**执行前**做的事。
+ * 装配期这一层存在的意义只有一件——让一份写错的计划在跑之前就被拒，而不是跑到那一格才炸。
+ */
+const locateCandidateSchema = z.strictObject({
+  strategy: z.enum(['testId', 'id', 'name', 'role', 'text', 'css', 'xpath', 'fingerprint']),
+  value: z.string().optional(),
+  attribute: z.string().optional(),
+  role: z.string().optional(),
+  name: z.string().optional(),
+  exact: z.boolean().optional(),
+});
+
+/**
+ * 节点声明里那一格定位（spec 5.12-02）：`LocateSpec` 去掉 `effect` 的投影。
+ *
+ * 这里**没有** `effect` 这一位，而 core 那个 `WorkflowNodeLocate` 类型也没有——
+ * 通道由节点的 `effect` 派生（plan §7.10.1 子决定 b）。用 `strictObject` 是刻意的：
+ * 计划里多写一个 `effect` 就该被拒，否则「节点自称 `read` 而通道按 `outbound` 算」
+ * 这种错配会以"读起来没问题"的样子留在库里。
+ */
+const nodeLocateSchema = z.strictObject({
+  description: z.string(),
+  cardinality: z.enum(['single', 'many']),
+  candidates: z.array(locateCandidateSchema).min(1),
+  requireActionable: z.boolean().optional(),
+});
+
+/**
  * 单个节点的声明形状。
  *
  * 输入侧除 `id`/`kind`/`effect` 外全部可省略，由 schema 补默认值；输出侧再转成
@@ -63,6 +94,11 @@ export const workflowNodeSpecSchema = z.strictObject({
   successConditions: z.array(workflowConditionSchema).min(1).optional(),
   /** 终态判据（5.11-03）：派执行器之前先问一遍，全成立就不重放这一格。 */
   terminalStateConditions: z.array(workflowConditionSchema).min(1).optional(),
+  /**
+   * 这一格要定位的东西（spec 5.12-02）。只在 `browser.*` 那一族上出现，其余 kind 省略。
+   * 省略即「不定位页面元素」，所以既有计划一个字节都不变。
+   */
+  locate: nodeLocateSchema.optional(),
 });
 
 /** 一条计划的声明形状（`fingerprint` 由 `buildPlan` 现算，不接受外部传入）。 */
@@ -115,6 +151,7 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
   // `outputs` 反过来**不补默认值**：省略就是"只有 default 出口"的读法，由投影方（`graph.ts`）按同一口径解释，
   // 这样 2.4 时代留下的计划文本一个字节都不变，历史 run 的续跑判据也不会被 5.10-b 动到。
   // 两个判据字段同理不补默认值：省略就是「没有判据」的读法，而补一个空数组会让 5.11 的两列都变成必填。
+  // `locate` 走同一条路（spec 5.12-03）：省略就是「这一格不定位」，补一个空壳则会让每一格都自称定位过。
   const nodes: WorkflowNodeSpec[] = parsed.data.nodes.map((node) => ({
     id: node.id,
     kind: node.kind,
@@ -126,6 +163,7 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
     ...(node.outputs === undefined ? {} : { outputs: node.outputs }),
     ...(node.successConditions === undefined ? {} : { successConditions: node.successConditions }),
     ...(node.terminalStateConditions === undefined ? {} : { terminalStateConditions: node.terminalStateConditions }),
+    ...(node.locate === undefined ? {} : { locate: node.locate }),
   }));
   return { id: parsed.data.id, nodes, fingerprint: planFingerprint(nodes) };
 }

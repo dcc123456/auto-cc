@@ -1,0 +1,62 @@
+5.12-01 / 5.12-03 读数（2026-10-18，5.12-a 契约下沉与指纹）
+==============================================================
+
+一、5.12-01「定位声明全仓只有一份形状」
+
+搬移前后各查一次：全仓 `LocateSpec` 的形状声明**只有一处**，在 core。
+
+    $ grep -rn "interface LocateSpec|type LocateSpec" packages/*/src/*.ts | grep -v test
+    packages/core/src/events.ts:380:export interface LocateSpec {
+
+`LocateStrategy` 那个八值联合同样只有一处：
+
+    $ grep -rln "'testId' | 'id' | 'name' | 'role'" packages/*/src/*.ts
+    packages/core/src/events.ts
+
+七个既有 import 点**一个都没改**（`git diff --stat` 对这七个路径的输出为空）：
+
+    $ git diff --stat -- \
+        packages/browser/src/act-service.ts \
+        packages/browser/src/locator-spec.ts \
+        packages/browser/src/extract-script.ts \
+        packages/browser/src/platform-contract.ts \
+        packages/browser/src/locate-service.ts \
+        packages/platform-boss/src/adapter.ts \
+        packages/renderer/src/LocatorLabPanel.tsx
+    （无输出）
+
+本片实际改动面（5 个文件）：
+
+    packages/core/src/events.ts        |  82 +++++++++++++++++++++++++++
+    packages/shared/src/bridge.ts      |  73 +++++++++++++------------------
+    packages/workflow/src/canonical.ts |  13 +++--
+    packages/workflow/src/plan.test.ts | 112 ++++++++++++++++++++++++++++++++-----
+    packages/workflow/src/plan.ts      |  38 +++++++++++++
+    5 files changed, 244 insertions(+), 74 deletions(-)
+
+`pnpm typecheck` = 0：七个 import 点在**没有改一行**的前提下继续编译通过，
+这正是「搬运而不是重写」的判据——重写的话这里至少会有一次 diff。
+
+二、5.12-03「老计划指纹逐字节不变」
+
+口径上先说清这次钉的是什么：改前 spec 里那条断言只写了 `toMatch(/^[0-9a-f]{8}$/)`，
+而这个正则对**任何**八位十六进制都成立，钉不住任何东西。所以本片把三个内置计划的实值钉进用例，
+实值由一次临时探针取定——探针按**改动前**的口径（只有七键固定清单、没有条件字段）
+现算一遍，与本实现逐条比对：
+
+    boss-basic   old=28e12a28  new=28e12a28  fn=28e12a28
+    boss-deliver old=c8adb34e  new=c8adb34e  fn=c8adb34e
+    boss-e2e     old=41127d94  new=41127d94  fn=41127d94
+
+三份同值 ⇒ `locate` 与两个判据字段走「声明了才进哈希」这条路，没有动到固定清单。
+探针文件用完即删（`packages/workflow/src/probe-baseline.test.ts` 已不在树上）。
+
+钉进 `plan.test.ts` 的断言：
+
+    expect(baseline).toBe('28e12a28');
+    expect(buildPlan(BOSS_DELIVER_PLAN).fingerprint).toBe('c8adb34e');
+    expect(buildPlan(BOSS_E2E_PLAN).fingerprint).toBe('41127d94');
+
+同一条用例里还钉了「声明了就换值」的四条：换候选换值、只改 `description` 也换值
+（它不参与匹配，但是这一格的自述、读数与证据正文都要用它）、以及**键序不算改动**
+（同一份声明换个键的写法指纹逐位相同——库里读回来的计划要能对上）。

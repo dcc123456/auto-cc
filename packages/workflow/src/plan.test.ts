@@ -154,18 +154,18 @@ describe('全链路计划 boss-e2e（spec 2.8-07 / M6）', () => {
   });
 });
 
-describe('成功判据与终态判据（spec 5.11-03，分列两个字段）', () => {
-  /** 一条带判据的最小计划：两格，判据挂在第二格上。 */
-  function planWith(overrides: Record<string, unknown>): PlanInput {
-    return {
-      id: 'plan-conditions',
-      nodes: [
-        { id: 'first', kind: 'jd.capture', effect: 'read' },
-        { id: 'second', kind: 'demo.flaky', effect: 'local-write', target: 'demo://second', ...overrides },
-      ],
-    };
-  }
+/** 一条带判据的最小计划：两格，判据或定位挂在第二格上（5.11-03 与 5.12-02 共用这一只手）。 */
+function planWith(overrides: Record<string, unknown>): PlanInput {
+  return {
+    id: 'plan-conditions',
+    nodes: [
+      { id: 'first', kind: 'jd.capture', effect: 'read' },
+      { id: 'second', kind: 'demo.flaky', effect: 'local-write', target: 'demo://second', ...overrides },
+    ],
+  };
+}
 
+describe('成功判据与终态判据（spec 5.11-03，分列两个字段）', () => {
   it('两个字段分列、互不合并，省略时都不补默认值', () => {
     const bare = buildPlan(planWith({}));
     // 省略即「没有判据」，而补一个空数组会把 5.11 的两列都变成必填、老计划文本也全要重写。
@@ -208,8 +208,12 @@ describe('成功判据与终态判据（spec 5.11-03，分列两个字段）', (
   it('判据进指纹，但只有声明了才进——2.4 时代的老计划指纹逐字节不变', () => {
     const baseline = buildPlan(BOSS_BASIC_PLAN).fingerprint;
     // 三条内置计划一条判据都没声明，它们的指纹必须与本次改动之前完全一致（canonical.ts 的条件写入）。
-    expect(baseline).toMatch(/^[0-9a-f]{8}$/);
-    expect(buildPlan(BOSS_DELIVER_PLAN).fingerprint).toMatch(/^[0-9a-f]{8}$/);
+    // 这里钉的是**实值**而不是形状：形状正则对任何 8 位十六进制都成立，钉住实值才能在日后有人
+    // 给固定清单加了键时立刻红（5.12-03 的验证操作要求的就是这一条）。三个值取自 5.12-a 之前的
+    // 算法——当时只有七键固定清单，按那一套现算一遍与本实现同值。
+    expect(baseline).toBe('28e12a28');
+    expect(buildPlan(BOSS_DELIVER_PLAN).fingerprint).toBe('c8adb34e');
+    expect(buildPlan(BOSS_E2E_PLAN).fingerprint).toBe('41127d94');
 
     // 声明了判据就换了执行身份：跳过与否确实由它决定，指纹必须跟着变（2.4-05 的续跑判据）。
     const withTerminal = buildPlan(planWith({ terminalStateConditions: [{ kind: 'effectObserved' }] }));
@@ -219,5 +223,87 @@ describe('成功判据与终态判据（spec 5.11-03，分列两个字段）', (
     expect(withSuccess.fingerprint).not.toBe(plain.fingerprint);
     // 两列换指纹的值互不相同——它们是不同的执行语义，不是同一件事的两个名字。
     expect(withTerminal.fingerprint).not.toBe(withSuccess.fingerprint);
+  });
+});
+
+/**
+ * 节点声明里那一格定位（spec 5.12-02 / 03）。
+ *
+ * 重点在三件事，缺一则本节的护栏形同虚设：
+ * ① **结构上写不出两套危险度**——`locate` 那一格没有 `effect` 这一位，多写就拒；
+ * ② **进执行身份**——改候选就是改「点哪儿」，指纹必须跟着变，连说明文字一起算；
+ * ③ **省略即不定位**——既有计划一个字节都不受影响。
+ */
+describe('节点定位声明（spec 5.12-02 / 03）', () => {
+  const CANDIDATES = [{ strategy: 'css' as const, value: '.search-input' }];
+
+  it('声明了就原样带到跨进程视图，省略时字段整个不在', () => {
+    const declared = buildPlan(
+      planWith({ locate: { description: '搜索框', cardinality: 'single', candidates: CANDIDATES } }),
+    );
+    expect(declared.nodes[1]?.locate).toEqual({
+      description: '搜索框',
+      cardinality: 'single',
+      candidates: CANDIDATES,
+    });
+    // 省略不是「空的定位」而是「这一格不定位」：补一个空壳会让每一格都自称定位过。
+    expect(buildPlan(planWith({})).nodes[1]?.locate).toBeUndefined();
+  });
+
+  it('定位那一格写不出通道档位——多一个 effect 就拒（两套危险度词汇的口子）', () => {
+    expect(() =>
+      buildPlan(
+        planWith({
+          locate: { description: '搜索框', cardinality: 'single', candidates: CANDIDATES, effect: 'read' },
+        }),
+      ),
+    ).toThrowError(/工作流计划不合法/);
+  });
+
+  it('候选列表不许为空、策略必须是认得的那八个', () => {
+    expect(() =>
+      buildPlan(planWith({ locate: { description: '搜索框', cardinality: 'single', candidates: [] } })),
+    ).toThrowError(/工作流计划不合法/);
+    expect(() =>
+      buildPlan(
+        planWith({
+          locate: {
+            description: '搜索框',
+            cardinality: 'single',
+            candidates: [{ strategy: 'magic-ai', value: 'x' }],
+          },
+        }),
+      ),
+    ).toThrowError(/工作流计划不合法/);
+  });
+
+  it('定位进指纹：改候选换值，连只改说明文字也换值', () => {
+    const plain = buildPlan(planWith({})).fingerprint;
+    const declared = buildPlan(
+      planWith({ locate: { description: '搜索框', cardinality: 'single', candidates: CANDIDATES } }),
+    ).fingerprint;
+    expect(declared).not.toBe(plain);
+
+    // 换候选 = 换「点哪儿」，续跑判据（2.4-05）必须跟着换，否则会拿旧 run 的进度续一条改了目标的计划。
+    const moved = buildPlan(
+      planWith({
+        locate: { description: '搜索框', cardinality: 'single', candidates: [{ strategy: 'css', value: '.other' }] },
+      }),
+    ).fingerprint;
+    expect(moved).not.toBe(declared);
+
+    // 说明文字不参与匹配，但它是这一格的自述、读数与证据正文里都要用它——改了它就是改了执行身份。
+    const reworded = buildPlan(
+      planWith({ locate: { description: '搜索输入框', cardinality: 'single', candidates: CANDIDATES } }),
+    ).fingerprint;
+    expect(reworded).not.toBe(declared);
+
+    // 键序不算改动：同一份声明换个键的写法，指纹必须逐位相同（库里读回来的计划要能对上）。
+    const reordered = buildPlan(
+      planWith({
+        locate: { candidates: CANDIDATES, cardinality: 'single', description: '搜索框' },
+      }),
+    ).fingerprint;
+    expect(reordered).toBe(declared);
   });
 });

@@ -342,6 +342,77 @@ export type WorkflowCondition = {
 };
 
 /**
+ * 候选策略。顺序不代表优先级——**优先级由 spec 里的声明顺序决定**（spec 2.2-01），
+ * 这里只决定「这类候选满分上限是多少」，即稳定性来源的权重。
+ */
+export type LocateStrategy = 'testId' | 'id' | 'name' | 'role' | 'text' | 'css' | 'xpath' | 'fingerprint';
+
+/** 一条候选：策略 + 该策略所需的那几个字段（多余的字段被忽略，不报错，方便知识包共用一个形状）。 */
+export interface LocateCandidate {
+  strategy: LocateStrategy;
+  /** testId / id / name / css / xpath 的取值 */
+  value?: string;
+  /** testId 用的属性名（如 `data-testid`），必须是合法 HTML 属性名，否则整条候选被判非法 */
+  attribute?: string;
+  /** role 策略：期望的 ARIA 角色（button / link / textbox …） */
+  role?: string;
+  /** role 策略：期望的可读名（accessible name） */
+  name?: string;
+  /** text 策略：是否要求全等（默认 false，即归一化后的包含匹配） */
+  exact?: boolean;
+}
+
+/**
+ * 定位声明适用的通道（`read` = 不改变页面状态，`outbound` = 打招呼 / 投递那一路，
+ * `inject` = 文件注入那一路，P8 裁定㉑）。
+ *
+ * `inject` 为什么单独是一档而不是并进 `read`：这一路**不指点坐标**（隐藏的 `input[type=file]`
+ * 读不到盒模型，坐标无从折算），而注入之后还有两条页面自己的回读兜着——控件报上来的文件名与字节数
+ * 必须与请求一致，否则 `browser.act.upload` 以 `ACT_FAILED` 终止（spec 2.6-04 的②）。
+ * 真实站点恰好只有 class 级候选可用（证据 `8.0-06-deliver-risk-evidence.txt` 第二节：那枚 input
+ * 无 name / 无 id / 无 testid，全页唯一），按 70 分判就是"简历永远投不出去"。
+ * 只有 `deliver.uploadInput` 一条被允许声明这一档，且必须同时带 `requireActionable: false`
+ * ——装载期拦住（`platform-contract.ts` 的通道归属闸门），谁把发送键标成 inject 想去拿低阈值就拒包。
+ */
+export type LocateEffect = 'read' | 'outbound' | 'inject';
+
+/** 一个「要定位的东西」的完整声明，语义描述用于日志与界面，不参与匹配。 */
+export interface LocateSpec {
+  description: string;
+  cardinality: 'single' | 'many';
+  candidates: LocateCandidate[];
+  /**
+   * 是否要求元素**可被指点**（可见、启用、中心点不被遮挡），默认 true。
+   *
+   * 设 false 的场景只有一种：注入类动作（`browser.act.upload`）。站点普遍把
+   * `<input type=file>` 藏成 `display:none`，那三条前置判据对注入毫无意义——
+   * 不关掉就会永远判 `below-score`，而关掉之后仍然要靠声明的策略权重过线，
+   * 所以这条不是「放松定位」，是「按用途取用对应的判据」（见 plan §13.3 第 4 条）。
+   */
+  requireActionable?: boolean;
+  /**
+   * 这条声明用在哪个通道上，决定它适用哪一档最低可用分（P8 裁定⑤ + ㉑）。
+   *
+   * 真实站点没有 `data-testid`，可稳定过 70 分的只有「表单 name」与「role/text + 稳定可读名」两类
+   * （证据 `docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt` 第六节）；
+   * 抓取容器与面板节点只能靠 class，按 70 分一律 `below-score`。分档是把「无副作用的读取」与
+   * 「撤不回来的外发」分开标定，**省略即 `outbound`**：默认落在严的那一档，谁要降档必须在数据里写明。
+   */
+  effect?: LocateEffect;
+}
+
+/**
+ * 节点声明里的定位那一格（spec 5.12-02）：`LocateSpec` 去掉 `effect` 的投影。
+ *
+ * 为什么不是一个新形状而是 `Pick`：`LocateSpec.effect` 与节点自己的 `effect` 是**两套词汇**
+ * （`read｜outbound｜inject` 对 `read｜local-write｜outbound`），同时声明就是两份会漂移的事实
+ * （plan §7.10.1 子决定 b）。节点侧一律由节点的 `effect` 派生通道，派生发生在
+ * `packages/browser` 的执行器里一处纯函数，所以这个类型连 `effect` 这一位都没有——
+ * 结构上就写不出「一个节点自称两条通道」。
+ */
+export type WorkflowNodeLocate = Pick<LocateSpec, 'description' | 'cardinality' | 'candidates' | 'requireActionable'>;
+
+/**
  * 一个节点的**声明**（spec 2.4-01）——计划里写死的东西，不是跑到一半的读数。
  *
  * `kind` 是 `string` 而不是联合类型，理由与 `LocatorRelocatedEvent.strategy` 同一条：
@@ -396,6 +467,17 @@ export type WorkflowNodeSpec = {
    * （可能发两遍）也不该永远停在接管点上。省略即维持现状（`needs-human`），所以既有计划零变化。
    */
   terminalStateConditions?: readonly WorkflowCondition[];
+  /**
+   * 这一格要定位的东西（spec 5.12-02）。
+   *
+   * 只出现在 `browser.*` 那一族节点上：其余 kind（`jd.capture`、`greeting.send` …）不定位页面元素，
+   * 省略即没有。留成**可选**字段而不是塞进 `params`：定位声明是这份数据里最该被校验的一块，
+   * 编成字符串塞进标量表就是拿字符串绕开类型系统（plan §7.10.1 候选一否决理由）。
+   *
+   * 它进执行身份（指纹），因为改掉候选就是改掉「点哪儿」；但走的是「声明了才进哈希」那一路，
+   * 所以既有计划一字节都不受影响（见 `canonical.ts` 的 `DECLARED_FIELDS`）。
+   */
+  locate?: WorkflowNodeLocate;
 };
 
 /** 线性节点序列里那条唯一的出口名（`default`），也是边的默认出口。 */

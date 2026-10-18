@@ -23,6 +23,9 @@ import type {
   JdProgressEvent,
   KbEntitiesChangedEvent,
   KernelViewLoadError,
+  LocateCandidate,
+  LocateSpec,
+  LocateStrategy,
   LocatorRelocatedEvent,
   LogLineView,
   PluginErrorView,
@@ -85,6 +88,10 @@ export type {
   ExemptToolView,
   JdProgressEvent,
   KernelViewLoadError,
+  LocateCandidate,
+  LocateEffect,
+  LocateSpec,
+  LocateStrategy,
   LocatorRelocatedEvent,
   LogLineView,
   PlanParamReadoutView,
@@ -3266,64 +3273,16 @@ export const isAllowedEvent = (name: string): name is RendererEventName =>
  * ------------------------------------------------------------------ */
 
 /**
- * 候选策略。顺序不代表优先级——**优先级由 spec 里的声明顺序决定**（spec 2.2-01），
- * 这里只决定「这类候选满分上限是多少」，即稳定性来源的权重。
- */
-export type LocateStrategy = 'testId' | 'id' | 'name' | 'role' | 'text' | 'css' | 'xpath' | 'fingerprint';
-
-/** 一条候选：策略 + 该策略所需的那几个字段（多余的字段被忽略，不报错，方便知识包共用一个形状）。 */
-export interface LocateCandidate {
-  strategy: LocateStrategy;
-  /** testId / id / name / css / xpath 的取值 */
-  value?: string;
-  /** testId 用的属性名（如 `data-testid`），必须是合法 HTML 属性名，否则整条候选被判非法 */
-  attribute?: string;
-  /** role 策略：期望的 ARIA 角色（button / link / textbox …） */
-  role?: string;
-  /** role 策略：期望的可读名（accessible name） */
-  name?: string;
-  /** text 策略：是否要求全等（默认 false，即归一化后的包含匹配） */
-  exact?: boolean;
-}
-
-/** 一个「要定位的东西」的完整声明，语义描述用于日志与界面，不参与匹配。 */
-export interface LocateSpec {
-  description: string;
-  cardinality: 'single' | 'many';
-  candidates: LocateCandidate[];
-  /**
-   * 是否要求元素**可被指点**（可见、启用、中心点不被遮挡），默认 true。
-   *
-   * 设 false 的场景只有一种：注入类动作（`browser.act.upload`）。站点普遍把
-   * `<input type=file>` 藏成 `display:none`，那三条前置判据对注入毫无意义——
-   * 不关掉就会永远判 `below-score`，而关掉之后仍然要靠声明的策略权重过线，
-   * 所以这条不是「放松定位」，是「按用途取用对应的判据」（见 plan §13.3 第 4 条）。
-   */
-  requireActionable?: boolean;
-  /**
-   * 这条声明用在哪个通道上，决定它适用哪一档最低可用分（P8 裁定⑤ + ㉑）。
-   *
-   * 真实站点没有 `data-testid`，可稳定过 70 分的只有「表单 name」与「role/text + 稳定可读名」两类
-   * （证据 `docs/acceptance/08-real-platform-driving/8.0-03-list-dom-evidence.txt` 第六节）；
-   * 抓取容器与面板节点只能靠 class，按 70 分一律 `below-score`。分档是把「无副作用的读取」与
-   * 「撤不回来的外发」分开标定，**省略即 `outbound`**：默认落在严的那一档，谁要降档必须在数据里写明。
-   */
-  effect?: LocateEffect;
-}
-
-/**
- * 定位声明适用的通道（`read` = 不改变页面状态，`outbound` = 打招呼 / 投递那一路，
- * `inject` = 文件注入那一路，P8 裁定㉑）。
+ * `LocateStrategy` / `LocateCandidate` / `LocateEffect` / `LocateSpec` 这四个定位契约
+ * 从这里搬进了 `@auto-cc/core`（spec 5.12-01），并在本文件顶部的 `export type` 里原样转出。
  *
- * `inject` 为什么单独是一档而不是并进 `read`：这一路**不指点坐标**（隐藏的 `input[type=file]`
- * 读不到盒模型，坐标无从折算），而注入之后还有两条页面自己的回读兜着——控件报上来的文件名与字节数
- * 必须与请求一致，否则 `browser.act.upload` 以 `ACT_FAILED` 终止（spec 2.6-04 的②）。
- * 真实站点恰好只有 class 级候选可用（证据 `8.0-06-deliver-risk-evidence.txt` 第二节：那枚 input
- * 无 name / 无 id / 无 testid，全页唯一），按 70 分判就是"简历永远投不出去"。
- * 只有 `deliver.uploadInput` 一条被允许声明这一档，且必须同时带 `requireActionable: false`
- * ——装载期拦住（`platform-contract.ts` 的通道归属闸门），谁把发送键标成 inject 想去拿低阈值就拒包。
+ * 搬的理由不是「想整理」：工作流节点声明（`WorkflowNodeSpec`）住在 core，而 core 的依赖里
+ * **没有** `@auto-cc/shared`（`packages/core/package.json` 只有 cordis 与 zod），方向是
+ * shared → core，所以 core 引用不了这里的类型。留住一份在 shared 的话，加 `locate` 字段就只剩
+ * 两个选择：在 core 里重抄一份（两份会漂移的形状，§2.5），或者让字段躲开 core（把候选编成字符串
+ * 塞进标量表）。搬运的读数是七个既有 import 点一个都不用改——转出机制本来就在（`WorkflowNodeSpec`
+ * 就是这么过的）。
  */
-export type LocateEffect = 'read' | 'outbound' | 'inject';
 
 /** 元素在所属帧视口里的位置（CSS 像素，与 CDP 输入同一坐标系）。 */
 export interface ElementRect {
