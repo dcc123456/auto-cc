@@ -1,0 +1,98 @@
+spec 5.12-07（V）活体读数（2026-10-18，本机 macOS arm64 / Node 24.18.0 / Electron 44.4.5）
+
+条件：私有开发实例（`AUTO_CC_USER_DATA_DIR=tmp/512c/userdata`，CDP 10222），fixture 站点 10233。
+没有别人的 dev 实例在跑（起手核过 10222 / 5173 / 10233 三个口都空），所以本片全程独占。
+计划是种进去的（`insertPlan` 走生产写入口，指纹由 `buildPlan` 现算）：`plan-512c01` · 3 格 · 指纹 876692c3。
+
+三格声明：导航 → 写 → 点（点那一格是外发型打招呼）。
+`browser.navigate` / `browser.type` / `browser.click`，靶页 http://127.0.0.1:10233/trusted
+（受信任事件实验台：页面自己把 mousedown / click / input 三类事件的 isTrusted、inputType、
+以及事件发生时输入框里的值逐行记进自己的表格——「事件有没有真的发生」由页面说，不看 app 自述）。
+
+起手两处只读内存不落盘的口（AGENTS.md §9 的 5.3-b / 8.4-01）：
+① `plugins.saveConfig('platform-boss', { pack: 'fixture' })` —— 清单里 `pack: real`，
+   而仿站源 `http://127.0.0.1:10233` 只在 `fixture` 包的 origins 里，不换包导航会被许可判定拒；
+② `sessions.open('fixture')` —— 内核视图没开时 `browser.page` 以 `NO_KERNEL_SESSION` 失败。
+
+── 第一趟（闸门在场）──────────────────────────────────────────────────
+
+run b3281201-2af5-4e8e-a601-775e0a8dfdf6  status=done
+
+    0 | open-trust-lab | browser.navigate | done | 1 | 24ms  | 无错
+    1 | type-note      | browser.type    | done | 1 | 112ms | 无错
+    2 | greet          | browser.click   | done | 1 | 460ms | 无错
+
+页面自己的回执（`--url 10233` 读 `[data-testid="trust-table"] tbody tr`，共 5 行 / `window.__autoCcTrustReadings` 长度 5）：
+
+    mousedown / true / null      /
+    click     / true / null      /
+    input     / true / insertText / 自动化验收🎯
+    mousedown / true / null      / 自动化验收🎯
+    click     / true / null      / 自动化验收🎯
+
+三件事一次说清：输入框的值是 `自动化验收🎯`；那一行 `inputType=insertText` 且 `isTrusted=true`
+（说明是浏览器认可的输入事件，不是 `.value` 直塞）；**打招呼按钮的 mousedown 与 click 两行都带上了
+刚写进去的那串字**——「读回」在这一格成立：第三格的动作把第二格写的东西读回来作证。
+`isTrusted=true` 同时说明这一趟走的是 CDP 受通道（`browser.act` 默认通道），不是降级到 DOM 通道。
+
+账本（`usage_ledger` 整表 1 行）：
+
+    {"id":1,"action":"greet","target_id":"trust-button","workflow_run_id":"b3281201-…"}
+
+节点行 `idempotency_key = b3281201-…|greet|trust-button`：配额动作名与目标键都从节点声明派出来，
+空 `target` 退回节点 id 这条兜底在活体上没被触发（本计划填了 `trust-button`），单测里验过。
+
+── 第二趟（闸门摘掉，同一条计划）───────────────────────────────────
+
+`plugins.stop('entitlement')` → 读回 `entitlement:disposed`（这是运行期真卸载，不是改配置：
+`plugins.saveConfig` 只会改内存配置并重建下游，删不掉一个服务——所以那道门只能用这条路摘）。
+
+run 15c7e0cb-d879-4c3f-a932-47f9202b3751  status=failed
+
+    0 | open-trust-lab | done   | 1 | 无错
+    1 | type-note      | done   | 1 | 无错
+    2 | greet          | failed | 1 | 节点 greet 是外发型而闸门没挂载，拒绝动手（没有闸门的外发等于没有外发）
+                                 evidence_ref = …-greet.json
+
+证据文件读回（`runner.readEvidence`）：
+
+    {"runId":"15c7e0cb-…","nodeId":"greet","attempt":1,"at":1792289001280,
+     "decision":"outcome","error":{"code":"SERVICE_NOT_FOUND","message":"节点 greet 是外发型而闸门没挂载…"},
+     "page":{"url":"http://127.0.0.1:10233/trusted","title":"auto-cc 受信事件实验台 · 本地 fixture",…}}
+
+**页面自己的回执（判据②的主凭）**：这一趟跑完之后表格只有 3 行，全是导航 + 写那两格留下的：
+
+    mousedown / true / null      /
+    click     / true / null      /
+    input     / true / insertText / 自动化验收🎯
+
+**打招呼按钮一行都没有**——同一个 run 里前两格都真跑了，第三格的动作连派发都没发生。
+（第一趟那 2 行是导航重新装载页面时被清掉的，不存在「两趟叠在一起数不清」的问题。）
+
+**「投递计数只多一次」**：整表 `usage_ledger` 仍然只有第一趟那 1 行，第二趟 0 行；
+`usage_denials` 整表 0 行——**「闸门未挂载」这一路压根没走到账本**（它在拿闸门那一步就拒了），
+与「额度不足」那一路会写一条 denial 是两件事，这里记清楚免得被读成漏记。
+
+── 截图（判据①，逐张 md5 互异）────────────────────────────────────
+
+    caa818f7…  5.12-07-runA-three-cells-done.png    应用窗：三格各自 done/attempts=1
+    d32bc459…  5.12-07-runB-gate-removed.png       应用窗：第三格 failed + 证据文件名
+    9ac2d2f0…  5.12-07-runA-page-receipt.png       页面：5 行回执
+    c76dc742…  5.12-07-runB-page-no-greet.png      页面：3 行回执、无打招呼行
+
+四张字节互异（`md5 -q | sort | uniq -c` 四行各 1），尺寸 177KB / 194KB 两档，不是空帧。
+**这一轮没有做像素级目视**：本会话不具备读图能力，所以画面上的具体字样不作为读数；
+判据由上面逐字 DOM / 台账 / 证据文件承担，截图只负责「那一瞬间确实有一帧不同的画面」。
+
+── 边界与未覆盖（照实记，不写成已过）────────────────────────────────
+
+1. **成功格不落证据文件**：三格全 done 时 `workflow_nodes.evidence_ref` 三行都是 null，
+   证据文件只在失败/跳过路径写（既有形状，非本片引入）。所以判据里「看得见三格各自的状态与证据」
+   在活体上落成：**三格状态**都在实验台面板的行里（`wf-lab-nodes` 的 data-node-status / data-node-attempts），
+   **证据**由第二趟失败那格兑现（错误码 + 页面快照都在文件里）。第一趟三格都成功这件事本身没有证据文件可看。
+2. **画布没进画面**：`[data-testid="canvas-node"]` 在这一轮读数为 null（画布未挂载），
+   承载状态与 attempts 的是实验台面板那三行。这是界面轨的读法选择，不是缺陷。
+3. **CDP 受通道成立的前提**：这一趟窗口 `document.visibilityState === 'visible'`，指针事件才落页。
+   若窗口被遮挡，AGENTS.md §9 的 2.1-12 补窗那条仍然成立（`act` 照样回成功而页面回执为 0），
+   本片没有在遮挡态下复验这一条——判据③在遮挡态下的读数留给 8.4 那批。
+4. 界面文案零新增：这一片没有新增任何 i18n 键，节点状态与证据沿用 5.11 那批既有呈现。

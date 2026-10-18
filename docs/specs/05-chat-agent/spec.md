@@ -3442,8 +3442,8 @@ core 上动的是两个**工作流自己的契约**：`WorkflowNodeSpec` 的两�
 | 5.12-04 | 三个执行器（`browser.navigate` / `browser.click` / `browser.type`）住在 `packages/browser`，**只组装** `LocateSpec` 并走既有 `browser.act` 通道；判分与阈值仍由 `decideLocate` 独家                                            | U+C   | C：`git diff` 里 `packages/workflow/src/{runner,index,machine}.ts` 与 `decideLocate` 逐字未动；`grep` 确认执行器里没有任何评分算式（只有组装）。U：把替身 `decideLocate` 打成「一律 `not-found`」时，节点如实失败且**不**自行放行；打成 `ambiguous` 时报出 `decideLocate` 的 `reason` 原文。U：四个动作通道的既有签名（`bridge.ts:2477-2483`）零改动                                                                                                       | `[ ]`                                                                        | `[x]` 读数见 5.12-b                                       |
 | 5.12-05 | `effect:'outbound'` 的 browser 节点**必须**经 `entitlement.gate`：`params.quota` 必填且取值 ⊆ `QUOTA_ACTIONS`，经 `gate.perform` 落账；缺配额声明、额度不足、或闸门未挂载，**三样都拒执行**且页面一个字节都没动（5.3-d 重验）  | U     | U：三条反例各一条用例（缺 `quota` / 额度不足 / `entitlement.gate` 未挂载），每条都断言**替身动作通道的调用次数为 0**——「拒执行」不是抛个错就算，必须证明动作没派发出去                                                                                                                                                                                                                                                                                     | `[ ]`                                                                        | `[x]` 读数见 5.12-b                                       |
 | 5.12-06 | `effect:'outbound'` 的 browser 节点**必须**带至少一条能证明落地效果的 `successConditions`；缺判据即拒执行（把 8.4-05「视口外点击照样回成功」从执行器的自觉升级成声明层的硬约束）                                               | U     | U：缺 `successConditions` 的外发型节点在 `buildPlan` 或执行器任一处拒掉，用例写明拒在哪一步。反例必须失败：`successConditions` 只写一条 `urlContains` 时被 `provesLandedEffect` 挡下（与 5.11-04 同一条守卫）。C：`successConditions` 不参与结算读数——结算那一步读的是 `terminalStateConditions`（5.11-01/02），所以本条只约束**声明**：没有能证明落地效果的判据就没有这一格。活体那一半（`act` 回成功而页面没落地）由 5.12-07 以 fixture 页自己的回执兑现 | `[ ]`                                                                        | `[x]` 读数见 5.12-b                                       |
-| 5.12-07 | **活体**：一条三格计划（导航 → 点 → 读回）在本地 fixture 站点上跑通，界面上看得见三格各自的状态与证据；外发型那格在闸门缺位时确实发不出去                                                                                      | **V** | CDP harness 驱动真实窗口（端口 10222）：① `docs/acceptance/5.12/5.12-07-*.png` 逐张 `md5` 互异（§9 的 5.10-18 同款去重）；② 页面自带回执（fixture 页自己的状态行），不以 `browser.act` 的返回值作凭（§9 的 2.1-12 补窗）；③ 外发型那格单跑一次，闸门摘掉前后各跑一次，页面投递计数**必须**只多一次                                                                                                                                                         | `[ ]`                                                                        |
-| 5.12-08 | **反向验证**（§6.5）：本节否决的三条路线没有留下补不齐的能力缺口——① 不把动作词汇补齐到 browser-copilot 的 27 个 `ActionName`；② 不在 core 里重抄一份最小定位声明；③ 不给节点族新增「逐节点批准」字段                           | C     | ①逐条列出本仓缺的几个动作，说明它们各自都能由既有 `browser.act` / `browser.page` 组合达成，无一需要新的 DOM 原语。②`grep` 确认定位声明形状只有一份。③确认外发型节点的批准点已由 `entitlement.gate` 与 5.5 的人接管承担，界面不需要第二处「要不要执行」                                                                                                                                                                                                     | `[ ]`                                                                        |
+| 5.12-07 | **活体**：一条三格计划（导航 → 点 → 读回）在本地 fixture 站点上跑通，界面上看得见三格各自的状态与证据；外发型那格在闸门缺位时确实发不出去                                                                                      | **V** | CDP harness 驱动真实窗口（端口 10222）：① `docs/acceptance/5.12/5.12-07-*.png` 逐张 `md5` 互异（§9 的 5.10-18 同款去重）；② 页面自带回执（fixture 页自己的状态行），不以 `browser.act` 的返回值作凭（§9 的 2.1-12 补窗）；③ 外发型那格单跑一次，闸门摘掉前后各跑一次，页面投递计数**必须**只多一次                                                                                                                                                         | `[ ]`                                                                        | `[x]` 读数见 5.12-c                                       |
+| 5.12-08 | **反向验证**（§6.5）：本节否决的三条路线没有留下补不齐的能力缺口——① 不把动作词汇补齐到 browser-copilot 的 27 个 `ActionName`；② 不在 core 里重抄一份最小定位声明；③ 不给节点族新增「逐节点批准」字段                           | C     | ①逐条列出本仓缺的几个动作，说明它们各自都能由既有 `browser.act` / `browser.page` 组合达成，无一需要新的 DOM 原语。②`grep` 确认定位声明形状只有一份。③确认外发型节点的批准点已由 `entitlement.gate` 与 5.5 的人接管承担，界面不需要第二处「要不要执行」                                                                                                                                                                                                     | `[ ]`                                                                        | `[x]` 读数见 5.12-d                                       |
 
 ### 5.12-a 落地记录（2026-10-18，契约下沉与指纹）
 
@@ -3522,6 +3522,69 @@ core 上动的是两个**工作流自己的契约**：`WorkflowNodeSpec` 的两�
 实测计数：`packages/browser` 322 条（本片新文件 `node-executors.test.ts` 16 条，
 单跑该文件读数 `✓ src/node-executors.test.ts (16 tests)`），`packages/workflow` 248 条
 （`plan.test.ts` 从 18 条增至 20 条：外发型浏览器格子缺判据那条规矩、以及「只管浏览器那一族」的反向一条）。
+
+### 5.12-c 落地记录（2026-10-18，活体三格与闸门）
+
+证据文件：`docs/acceptance/5.12/5.12-07-live-three-cells-and-gate.txt`。
+
+**计划是种进去的，走生产写入口**：私有实例（`tmp/512c/userdata`，CDP 10222）起手核过 10222/5173/10233
+三个口都空，全程独占，没有别人的 dev 实例被波及。计划经 `insertPlan` 落库而不是手写 SQL——
+读路会按指纹复核（`readTrustedPlan`），手拼的指纹过不了那一关。落库读数 `plan-512c01` · 3 格 · 指纹 `876692c3`。
+
+**三格跑通，读回由页面自己说**：靶页选受信任事件实验台（`http://127.0.0.1:10233/trusted`），
+因为它是本仓唯一一个「事件有没有真发生由页面逐行记账」的 fixture（`mousedown`/`click`/`input` 三类事件的
+`isTrusted`、`inputType`、事件发生那一刻输入框里的值）。第一趟 `b3281201` status=done，三格 attempts 各 1，
+页面表格 5 行，其中打招呼按钮的 `mousedown` 与 `click` 两行**都带着上一格刚写进去的那串字**
+——「读回」在这一格是字面成立的：第三格的动作把第二格写的东西读回来作证。
+`isTrusted=true` 与 `inputType=insertText` 同时说明走的是 CDP 受通道而不是降级的 DOM 通道。
+
+**闸门摘掉靠运行期真卸载**：`plugins.stop('entitlement')` 读回 `entitlement:disposed`。
+（`plugins.saveConfig` 只能改内存配置并重建下游，删不掉一个服务——所以这道门只有这一条摘法。）
+第二趟同一条计划 `15c7e0cb` status=failed：前两格照跑，第三格以 `SERVICE_NOT_FOUND` 拒，
+正文是「节点 greet 是外发型而闸门没挂载，拒绝动手（没有闸门的外发等于没有外发）」，
+证据文件 `…-greet.json` 里 `decision:'outcome'` + 错误码 + 页面快照齐全（这是 5.11-05 那条既有通路）。
+**页面回执判据**：第二趟跑完表格只剩 3 行，全是导航与写那两格留下的，打招呼按钮**一行都没有**——
+同一趟里前两格真跑了、第三格的动作连派发都没发生。整表 `usage_ledger` 仍然只有第一趟那 1 行，
+`usage_denials` 整表 0 行（「闸门未挂载」这一路压根没走到账本，与「额度不足」会写 denial 是两件事）。
+于是「闸门摘掉前后各跑一次，页面投递计数只多一次」兑现为：打招呼只落地一次、账本只有一行。
+
+**四张截图逐张 md5 互异**（四行各 1，尺寸两档 177KB/194KB，不是空帧）。**本轮没做像素级目视**——
+本会话不具备读图能力，画面上的具体字样不作为读数，判据由逐字 DOM / 台账 / 证据文件承担。
+
+**四条边界照实记，不写成已过**：① 成功格不落证据文件（三格全 done 时 `evidence_ref` 三行皆 null，
+证据只在失败/跳过路径写，既有形状非本片引入），所以「三格各自的状态与证据」落成「三格状态在面板行里 +
+证据由第二趟失败那格兑现」；② `[data-testid="canvas-node"]` 这一轮为 null（画布未挂载），
+承载状态与 attempts 的是实验台面板那三行；③ CDP 受通道成立的前提是窗口 `visibilityState === 'visible'`，
+遮挡态下 `act` 照样回成功而页面回执为 0（§9 的 2.1-12 补窗），本片没有在遮挡态下复验；
+④ 界面零新增 i18n 键，沿用 5.11 那批呈现。
+
+### 5.12-d 落地记录（2026-10-18，反向验证）
+
+证据文件：`docs/acceptance/5.12/5.12-08-reverse-verification.txt`。
+
+**① 27 个 `ActionName` 的缺口检查分三堆，结论都是「无缺口」**。已在能力面上、只是没开成节点 kind 的五个
+（`select_option` / `upload_files` / `wait_for` 与已开的 `click` / `fill`）是编排层取舍；读侧十来个原语由
+`browser.page.extract` + `browser.locate` + `decideLocate` 承担，业务节点自己带读（`jd.capture` 一族已经在做）。
+**刻意不开的指针/键盘/滚动四件套**（`hover` / `press_key` / `scroll` / `set_checkbox`）：`hover` 与 `scroll`
+本就是 `act.click` 内部的工序（reveal → 命中 → 派发），另两个在本仓没有验收条目需要，
+而「先滚一下再点」这种中间步连成功判据都证明不了（5.12-06 的教训）。
+**刻意不开的注入六件套**（`exec_js` / `exec_workflow_js` / `trigger_event` / `set_attribute` /
+`create_element` / `drop_files`）：共同点是**在页面里执行任意 JS**，而本仓的计划声明可能来自模型起草，
+把页面执行权交给一段计划文本是 §8 红线的倒退——参考项目把它做成「模型写脚本」是另一种信任模型。
+
+**② 定位声明形状只有一份，grep 读数**：`LocateStrategy`（`core/src/events.ts:348`）、
+`LocateCandidate`（:351）、`LocateEffect`（:377）、`LocateSpec`（:380）四个声明各一处，
+`WorkflowNodeLocate`（:413）是 `Pick` 投影而非第二份形状；shared 侧是 import + `export type` 复导出，
+`bridge.ts` 里再无 `interface Locate*`。全仓 107 处提及分布在 18 个文件，逐处都是引用。
+留 shared 那条被否决路线的缺口也已排除（core 引用不了 shared，只能重抄最小形状或把候选编成字符串塞标量表）。
+
+**③ 逐节点批准字段：先纠正一处自己写错的引用再给结论**。本仓现有的三个「人介入了」的点
+都不是「这一格执行前问一次」：闸门是外发的执行前判定（活体读数：闸门摘掉后页面零回执）、
+`browser.takeover.*` 是人把手伸进浏览器、而节点 `requiresHuman` 的真实语义是**这一格失败时停下交人**
+（`index.ts:1217-1223`，reason 写 `manual-takeover`）——初稿把它记成「执行前的批准点」，
+查证后改掉（`packages/workflow` 里 `requiresHuman` 只有这三处用途，没有执行前询问这一种）。
+所以真要「逐格问一次」是一个当前谁都没有的第四种语义；本片不需要它，界面再加一个逐节点复选框
+等于让同一个决定问两次。**结论：无能力缺口。**
 
 ## 里程碑对账（P5 结束时）
 

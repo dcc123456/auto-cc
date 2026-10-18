@@ -1,0 +1,81 @@
+spec 5.12-08 反向验证读数（2026-10-18，本机 macOS arm64）
+
+§6.5 要求：被否决的技术路线要留一条反向验证条目，确认它没有留下补不齐的能力缺口。
+本片否决了三条路线，逐条查缺口。
+
+── ① 不把动作词汇补齐到 browser-copilot 的 27 个 ActionName ──────────────
+
+那 27 个动作（browser-copilot `src/**/ops.ts:128-158` 的 `ActionName`）与本仓现状逐条对照：
+
+已在能力面上、只是没开成节点 kind 的（**不是缺口，是编排层的取舍**）：
+    click          → browser.act.click        → 节点 kind browser.click ✅ 已开
+    fill           → browser.act.type         → 节点 kind browser.type  ✅ 已开
+    select_option  → browser.act.select       → 未开 kind
+    upload_files   → browser.act.upload       → 未开 kind
+    wait_for       → browser.act.waitFor      → 未开 kind
+
+读侧的原语（由既有能力承担，未开成通用读取格）：
+    element_exists / get_attribute / get_text / get_value / count_elements /
+    element_selector_at / page_signature / read_form / snapshot
+                    → browser.page.extract + browser.locate + decideLocate 的可操作性判定
+                      （ag 8.1 的抓取与 2.2 的定位都在这两只手上；业务节点自己带读，
+                        例如 jd.capture 一族已经在做 page.extract）
+
+**刻意不开的指针/键盘/滚动四件套**：hover / press_key / scroll / set_checkbox。
+缺口检查：这一族的目标是让计划**表达意图**（"点这个按钮"），而 hover 与 scroll 是
+`act.click` 内部本来就有的工序（reveal-scroll → 命中 → 派发），press_key / set_checkbox
+在本仓没有验收条目需要；开成 kind 等于让计划能写"先滚一下再点"这种没有判据的中间步，
+而成功判据那一列（5.12-06）本来就证明不了中间步的落地。**结论：无能力缺口。**
+
+**刻意不开的注入六件套**：exec_js / exec_workflow_js / trigger_event / set_attribute /
+create_element / drop_files。缺口检查：这六个的共同点是**在页面里执行任意 JS**。
+本仓的计划声明可能来自模型起草（`/run` 那条路），让一段计划文本拿到页面执行权是 §8 的
+红线倒退——参考项目把它做成"模型写脚本"，那是另一种信任模型（模型即作者），
+而本仓的计划是**数据**，由 `assertConditionsUsable` 逐条查证明力。**结论：无能力缺口
+（要的那些效果都能由 click/type/select/upload 四只手达成；真需要注入的场景走既有
+`page.extract` 的结构化抽取，不开放 eval）。**
+
+② 不在 core 里重抄一份最小定位声明（读数见下一节）
+
+③ 不给节点族新增「逐节点批准」字段
+    本仓现有的三个「人介入了」的点，各有各的语义，**都不是"这一格执行前问一次"**：
+    - entitlement.gate（外发，执行前）：`gate.perform` 判定不过就不调 task（gate.ts:141-143），
+      5.12-c 活体读数：闸门摘掉后打招呼按钮在页面上**一行回执都没有**。
+    - 5.5 人接管：`browser.takeover.begin` / `browser.takeover.end`（bridge.ts:2494/2496）
+      管的是"人把手伸进浏览器"，与"这一格要不要执行"不是同一件事。
+    - 节点 `requiresHuman`：标记这一格是**人工接管点**，语义是**它失败时停下交人**
+      （`packages/workflow/src/index.ts:1217-1223`，reason 写 `manual-takeover`），
+      不是执行前的批准框——所以它与额度判定不重叠，也不能当成"逐节点批准"来用。
+    缺口检查：若真要"这一格执行前逐格问一次"，那是一个**当前谁都没有的第四种语义**；
+    但本片不需要它——外发那处的批准点由额度读数与人的在场承担（活体读数：闸门在场才落地），
+    而"这一格要不要人点头"在既有形状里由计划的编排层决定（哪一格标 `requiresHuman`、哪一格走
+    只读通道），不需要在节点声明上再加一位可写的批准位。界面再加一个逐节点复选框等于让
+    同一个决定问两次。**结论：无能力缺口。**
+
+── ② 定位声明形状只有一份（grep 读数）──────────────────────────────────
+
+    $ grep -rn "interface LocateSpec|type LocateSpec =" packages/
+    packages/core/src/events.ts:380:export interface LocateSpec {
+
+    LocateStrategy  声明：packages/core/src/events.ts:348（唯一）
+    LocateCandidate 声明：packages/core/src/events.ts:351（唯一）
+    LocateEffect    声明：packages/core/src/events.ts:377（唯一）
+    LocateSpec      声明：packages/core/src/events.ts:380（唯一）
+    WorkflowNodeLocate    ：packages/core/src/events.ts:413（是 Pick 投影，不是第二份形状）
+
+    shared 侧是复导出：packages/shared/src/bridge.ts 的 import 段（:26-28）+
+    `export type { … }` 段（:91-94），bridge.ts 里再无 `interface Locate*` 声明。
+
+    全仓 107 处提及分布在 18 个文件里，逐处都是**引用**（`const spec: LocateSpec = {…}`、
+    类型标注、导入），零处第二份声明。
+
+反向验证：把 `locate` 留在 shared（不搬进 core）这条被否决的路线会留下什么？core 引用不了
+shared 的类型（依赖方向是 shared → core），于是只能①在 core 重抄一份最小形状（两份会漂，
+AGENTS.md §2.5），或②把候选编成字符串塞进标量表（指纹与判据都要按字符串解析，"改了候选"这件事
+在库里不可读）。两条都已被 grep 排除：现在这份形状只有 core 那四处声明。
+
+── 门禁（本片只改文档，未动源码，故四道门取 5.12-b 那次的实跑读数）────────
+
+    pnpm typecheck / lint / format:check / test 均 EXIT=0
+    （5.12-c 那一趟活体跑在私有实例上，不改任何源码；esbuild watch 期间不碰主进程射程内的文件，
+      这是 AGENTS.md §9 的 8.3-01 补窗那条硬顺序的守法）
