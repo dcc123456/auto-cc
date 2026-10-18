@@ -2641,7 +2641,105 @@ F40 说清 `writeEvidence` 已是单一脱敏点。`satisfied` 与「定位判�
 外发定级（`ToolEffect`）、`entitlement.gate`、频控三道门一道都不许绕过（5.3-d 的「缺一闸门即不外发」重验）；
 ② **不复制定位判定**：`decideLocate` 那份打分与阈值是唯一权威，节点层只声明候选、不自己算分（§2.7）。
 
-**待办（按 §6 方案先行，取证在前）**：候选形状、参数词汇表（扩 `WorkflowNodeSpec.params` 还是另立一类节点声明）、
-与 browser-copilot `src/lib/workflow` 那批节点原语的逐条对照、否决理由与一手来源、
-以及本机最小 spike（§6.2：文档转述不可信，框架/第三方 API 形态必须以 `.d.ts` 或编译产物为准）。
-取证结论写进本节「选型与证据」小节，spec 侧新立 §5.12 的验收条目，两者成对（§4.5）。
+### 7.10.1 选型与证据（2026-10-18，§6 方案先行，取证在前代码在后）
+
+#### 一、候选形状（三选一）
+
+| 候选           | 形状                                                                            | 结论     |
+| -------------- | ------------------------------------------------------------------------------- | -------- |
+| 一             | 把定位声明塞进 `params`——编成一段 JSON 字符串，或「一条候选一格」逐条摊平成标量 | **否决** |
+| 二             | 另立一类节点声明（平行 schema + 平行指纹 + 平行分派）                           | **否决** |
+| 三（本节选定） | `WorkflowNodeSpec` 上新增**一个可选** `locate` 字段，类型取 `LocateSpec` 的投影 | **选定** |
+
+**否决候选一的理由**：定位声明是这份数据里最该被校验的一块，而 `plan.ts:13-14` 的 `nodeParamSchema`
+只收 `string | number | boolean`，注释已把理由写死——「不接受嵌套对象（嵌套就得再设计一层模板引擎）」。
+一条候选是六个标量字段（`bridge.ts:3275-3287`），N 条候选编成字符串就是**拿字符串绕开类型系统**：
+`buildPlan` 的严格校验（`plan.ts:104-107`）对那一格整条失效，界面与落库读到的是一坨无法定位、
+无法 diff、无法指出行号的文本。5.11-04 刚立的判据守卫靠的正是 schema 去拒；同一个包里再开一处
+「靠约定不靠类型」的口子，是同一类缺陷。「逐候选摊平成标量」也是同一类问题的变体：
+拼装与解析要另写一套，而它本身就成了没有单测覆盖的微型 DSL。
+
+**否决候选二的理由**：`WorkflowNodeSpec` 是唯一的跨进程节点视图，图投影（`graph.ts`）、指纹
+（`canonical.ts`）、runner 起跑前的 `requireExecutable`（`index.ts:1539`）、界面读数全都只认它。
+另立一类等于让「节点」有两个真相；而 `WorkflowExecutorRegistry.resolve(kind)`（`events.ts:540`）
+按字符串名分派，第二类节点要多一套分派、多一处存在性校验、多一份界面读数映射——§2.7 禁的正是这个。
+
+#### 二、三处子决定
+
+**子决定 a · 定位声明的类型住在哪一**。本机读数：`packages/core/package.json:21-24` 的依赖只有
+`cordis` 与 `zod`，而 `packages/shared/package.json:15` 反过来依赖 `@auto-cc/core`——**方向是 shared → core**，
+所以写在 core 里的 `WorkflowNodeSpec` 引用不了 shared 的 `LocateSpec`。
+
+- 否决「在 core 里重抄一份最小定位声明」：`LocateCandidate` 的六个字段会各自漂移，库里有两份都能用的形状，
+  这正是 §2.5 明令合并的那一类。
+- **选定**：把 `LocateStrategy` / `LocateCandidate` / `LocateEffect` / `LocateSpec` 这四个**纯数据契约**
+  从 `packages/shared/src/bridge.ts:3272-3312` 搬进 `packages/core/src/events.ts`，shared 侧改为复导出。
+  这不是新写形状，是把形状移到它该在的一层。既有七个 import 点
+  （`browser/act-service.ts`、`browser/locator-spec.ts`、`browser/extract-script.ts`、
+  `browser/platform-contract.ts`、`browser/locate-service.ts`、`platform-boss/adapter.ts`、
+  `renderer/LocatorLabPanel.tsx`）一个都不用改——shared 本来就在复导出 core 的类型
+  （`bridge.ts:44` 进、`bridge.ts:107` 出，`WorkflowNodeSpec` 就是这么过的），校验器 `assertSpecValid`
+  留在 `browser/locator-spec.ts:124` 不动。
+
+**子决定 b · `locate` 字段的类型不是整个 `LocateSpec`**。`LocateSpec.effect`（`bridge.ts:3311`，
+P8 裁定㉑ 的三档 `read | outbound | inject`）与节点自己那个 `effect`（`events.ts:1281` 的
+`TOOL_EFFECTS = ['read','local-write','outbound']`）**是两套词汇**，同时声明就是两份会漂移的事实。
+**裁定**：`locate` 取 `Pick<LocateSpec, 'description' | 'cardinality' | 'candidates' | 'requireActionable'>`，
+`effect` 一律由节点的 `effect` **派生**（`read` → `read`；`local-write` / `outbound` → `outbound`；
+`inject` 那一档不开放给节点，节点族里没有注入文件那一格）。派生是 `packages/browser` 里的一处纯函数，
+core 不认 `LocateEffect`，于是「这一格点哪儿」只有一份说法。
+
+**子决定 c · 指纹怎么算**。`canonical.ts:57-65` 的 `EXECUTION_NODE_FIELDS` 是写死七键的固定清单，
+`canonical.ts:74-77` 的 `CONDITION_FIELDS` 是「声明了才进执行身份」的条件清单。`locate` 改变
+「这一格点哪儿」，必须进哈希；但给它上固定键会让**每一条 2.4 时代的老计划指纹全变**，
+而 `canonical.ts:38-45` 写明那正是 5.10-06 的全部难度所在。
+**裁定**：把 `locate` 并进条件那一组（`CONDITION_FIELDS` 改名 `DECLARED_FIELDS` 并补文档，
+两处理由不同：判据改变「会不会被跳过」，定位改变「打哪儿」），跟着 `!== undefined` 走。
+
+#### 三、与 browser-copilot 的逐条对照
+
+| 能力                   | browser-copilot 落点                                                                                                                     | 本仓落点                                                                               | 取舍                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 动作词汇               | `src/lib/ops.ts:128-158` 的 27 个 `ActionName`                                                                                           | `bridge.ts:2477-2483` 的四个（click / type / select / waitFor）                        | **取交集**。补齐 27 个等于在 `packages/browser` 复刻一整套 DOM 原语，那才是第二条通路 |
+| 定位声明               | `ops.ts:18-54` 的 `Target` / `TargetSpec`                                                                                                | `bridge.ts:3275-3312` 的 `LocateSpec` / `LocateCandidate`                              | 取本仓已有的那份；打分与阈值 `decideLocate`（`locator-spec.ts:239`）独家              |
+| 打分策略               | `ops.ts:101-108` 的 `ResolvePolicy`（`minScore` / `minMargin` / 歧义四态）                                                               | `decideLocate` 四态 `matched｜below-score｜ambiguous｜not-found`，P8 裁定⑤/㉑ 分档     | 本仓那份更严，不改                                                                    |
+| 风险分级               | `operator-registry.ts:39` `SideEffectLevel` ＋ `reliability.ts:52` `IdempotencyLevel`                                                    | 节点 `effect: ToolEffect` ＋ 5.11 的 `terminalStateConditions`                         | 本仓无 `unsafe` 那一档，用 `effect:'outbound'` ＋ 必填成功判据表达同一件事            |
+| 执行器分派             | `executors.ts:3404` 的 `EXECUTORS` 表                                                                                                    | `WorkflowExecutorRegistry.resolve`（`events.ts:540`）                                  | 一致：按 kind 查表，runner 不做字符串猜测                                             |
+| 引擎怎么拿到浏览器能力 | `engine.ts:118-170` 注入 ＋ `run-workflow.ts:52` 接线                                                                                    | `packages/browser` 自己在 init 里经 `executorRegistryOf`（`core/src/index.ts:98`）登记 | 一致；本仓不需要第二套注入面，也不需要动 `cordis.yml` 的清单顺序                      |
+| 「没报错 ≠ 目标达成」  | `engine.ts:273-278` 交接变量袋给判定器，否则退化成「无错即过」                                                                           | 5.11-04 判决证据 ＋ 5.11-06 反向验证                                                   | 一致（移植，不复写）                                                                  |
+| 落地效果守卫           | `repair-verification.ts:85` `provesLandedEffect`、`:105` `isVacuousPresenceRow`、`:220` 的 `satisfied && observed`                       | 5.11-c 已落为 `packages/workflow/src/terminal-state.ts:32` ＋ `plan.ts:11`             | 一致，零复写                                                                          |
+| 终态跳过               | `engine.ts:976-1002`（只有能证明落地效果的判据才准跳）                                                                                   | 5.11-c 的 `satisfied` 分支                                                             | 一致                                                                                  |
+| 逐节点人工批准         | **没有**：全仓 `requiresApproval` / `approvalRequired` / `humanApproval` 零命中，只有修复置信度门（`repair/confirmation-gate.ts:52-80`） | 本仓走既有三道                                                                         | 本仓不需要新增批准字段——外发型节点的批准点就是闸门＋用户在场                          |
+| 浏览器绑定单路         | `executors.ts:8-9` 明写复用 `lib/ops` ＋ `background/driver`，不自实现 DOM                                                               | 节点执行器复用 `browser.act`，不新开通道                                               | 一致                                                                                  |
+
+#### 四、两条硬约束的本机读数（它们不是原则，是可查的事实）
+
+**① 不新增第二套外发通路**。读数：`packages/browser/src/act-service.ts` 全文 grep
+`gate|entitlement|throttle|risk` **零命中**——`browser.act` 本身**不过闸门**，它是「把指针挪过去」的能力，
+外发由调用方判（`outbound/greet.ts:259` 的 `gate.enforce`、`:275` 的 `gate.perform`）。
+于是口径是：`effect: 'outbound'` 的 browser 节点**必须**声明 `params.quota ∈ QUOTA_ACTIONS`
+（`bridge.ts:628`，就 `search｜greet｜deliver` 三个名字，agent 侧注释明写「任何一处自己抄一遍，
+就会出现界面能发明一个闸门没有的动作名」），并经 `gate.perform` 落账，缺一即拒执行。
+工作流是第一条会让「绕闸变容易」的新通道，5.3-d「缺一闸门即不外发」在这里第一次有了真实攻击面。
+
+**② 不复制定位判定**。执行器只**组装** `LocateSpec`，判分仍在 `decideLocate`
+（`browser.act` 内部，`act-service.ts:308-317`）。执行器不得读 `LocateResultView` 之外的任何打分中间量，
+也不得在 `decision !== 'matched'` 时自行放行。
+
+**③ 把 8.4-05 那次实测从「执行器要小心」升级成「声明层就不许这么写」**。
+`browser.act` 在点击落到视口之外时**照样回成功**（证据 `docs/acceptance/08-real-platform-driving/8.4-05*`），
+所以「act 成功」不能充当节点的成功判据。**裁定**：`effect: 'outbound'` 的 browser 节点
+**必须**带至少一条能证明落地效果的 `successConditions`——`buildPlan` 已调 `assertConditionsUsable`
+（`plan.ts:113`）把关形状对不对、证明不证明得成立，缺了就拒执行。
+
+#### 五、落地切片（按 §6.1，两处 spec 与本节成对，§4.5）
+
+| 片     | 内容                                                                                                           | 判据形态 |
+| ------ | -------------------------------------------------------------------------------------------------------------- | -------- |
+| 5.12-a | 四个定位契约下沉 core ＋ shared 复导出 ＋ `locate` 字段 ＋ `DECLARED_FIELDS` 指纹                              | U/C      |
+| 5.12-b | `packages/browser` 的 `browser.navigate` / `browser.click` / `browser.type` 三个执行器 ＋ 闸门与配额两条硬约束 | U/C      |
+| 5.12-c | 活体验收：一条三格计划（导航 → 点 → 读）在 fixture 站点跑通，外发型那格在闸门缺位时确实发不出去                | **V**    |
+
+> **本节刻意不做的事**：不把动作词汇补齐到 27 个（那是第二条 DOM 通路）；不引入 loop / 条件分支
+> （`graph.ts` 的分支能力是 5.10 的另一个话题，且 `demo.branch` 已在证明它）；不给节点族新增
+> 「逐节点批准」字段（本仓的批准点已由闸门与人接管承担，加字段就是第二个真相）。
