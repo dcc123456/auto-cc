@@ -18,6 +18,7 @@ import {
 import {
   BrowserActService,
   BrowserLocateService,
+  BrowserNodeService,
   BrowserPageService,
   BrowserRiskService,
   BrowserTakeoverService,
@@ -118,6 +119,10 @@ export const REGISTRY: Registry = {
   // `browser-act` 会连同进 PENDING（它的 `inject` 里有它），界面上点定位得到结构化错误。
   'browser-locate': BrowserLocateService,
   'browser-act': BrowserActService,
+  // 工作流节点族（spec 5.12-04）：`browser.navigate` / `browser.click` / `browser.type` 三种格子，
+  // 它们只是 `browser-act` 与本行的编排层，不新开浏览器通路。单独占一个 id 是为了能被单独摘掉——
+  // 摘掉之后计划里的浏览器格子得到「执行器未登记」的结构化失败，而动作层与界面照常可用。
+  'browser-nodes': BrowserNodeService,
   // 风控观测（spec 2.7-01）：它是每个分区 `onResponseStarted` 那个**唯一槽位**的独占者，
   // 所以单独占一个清单 id 是可演示的——摘掉它之后验证码页会被照常翻页，而暂停只能由它触发。
   'browser-risk': BrowserRiskService,

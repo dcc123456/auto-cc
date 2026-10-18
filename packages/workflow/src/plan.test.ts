@@ -306,4 +306,28 @@ describe('节点定位声明（spec 5.12-02 / 03）', () => {
     ).fingerprint;
     expect(reordered).toBe(declared);
   });
+
+  it('外发型浏览器格子没有成功判据就拒（spec 5.12-06，装配期这一半）', () => {
+    const browserNode = {
+      kind: 'browser.click',
+      effect: 'outbound',
+      params: { quota: 'greet' },
+      locate: { description: '打招呼按钮', cardinality: 'single', candidates: CANDIDATES },
+    };
+    expect(() => buildPlan(planWith(browserNode))).toThrowError(/外发型浏览器格子却没有成功判据/);
+    // 补上一条**证明不了落地效果**的判据同样拒：两条是不同的拒法，同一个洞。
+    expect(() =>
+      buildPlan(planWith({ ...browserNode, successConditions: [{ kind: 'urlContains', value: '/chat' }] })),
+    ).toThrowError(/证明不了落地效果/);
+    // 补上一条证明得了的判据即通过。
+    expect(() =>
+      buildPlan(planWith({ ...browserNode, successConditions: [{ kind: 'effectObserved' }] })),
+    ).not.toThrow();
+  });
+
+  it('这条规矩只管浏览器那一族：既有的外发节点一个字节都不受影响', () => {
+    // `greeting.send` 与 `resume.deliver` 那两条既有计划一条判据都没声明，
+    // 把这条规矩泛起来就等于改掉了既有计划的读法。
+    expect(() => buildPlan(BOSS_DELIVER_PLAN)).not.toThrow();
+  });
 });

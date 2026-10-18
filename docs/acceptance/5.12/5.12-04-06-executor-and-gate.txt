@@ -1,0 +1,94 @@
+spec 5.12-04 / 5.12-05 / 5.12-06 读数（2026-10-18，本机 macOS arm64 / Node 24.18.0）
+
+本片交付物：packages/browser/src/node-executors.ts（三个执行器 + 宿主）
+            packages/browser/src/node-executors.test.ts（16 条用例）
+            packages/workflow/src/plan.ts 的外发型浏览器格子判据规矩（第 ④ 条）
+            packages/main/src/registry.ts 的 'browser-nodes' 一行 + cordis.yml 的挂载位置
+
+── 5.12-04 判分不在本族 ────────────────────────────────────────────────────
+
+改动面（git diff --stat，未提交态）：
+
+    packages/workflow/src/{runner,index,machine}.ts   无（git status 里不出现这三个文件）
+    packages/browser/src/locator-spec.ts             无（decideLocate 所在文件）
+    packages/shared/src/bridge.ts:2477-2483          无（四个动作通道签名）
+
+「本族里一个分数都没有」的机检口径是断言而不是注释：定位替身只按声明原样回读，
+用例逐位断言派给它的 LocateSpec：
+
+    expect(act.clicks).toEqual([
+      { description: '打招呼按钮', cardinality: 'single',
+        candidates: [{ strategy: 'testId', attribute: 'data-testid', value: 'greet' }],
+        effect: 'read' },
+    ])
+
+只有 effect 一位是派生的（节点的 effect:'read' → 'read'；outbound → 'outbound'，
+见「定位通道档位由节点的 effect 派生，不许节点自称」一条）。
+
+判不过线的两种结局各一条用例，都断言动作一个都没派发，且报错正文逐字来自判定那一侧：
+
+    not-found   → rejects.toThrowError('定位未过线，动作没有执行：页面上没有这种东西')
+    ambiguous   → rejects.toMatchObject({ code: 'LOCATE_FAILED' })  // reason: 与次优候选只差 3 分
+    act.clicks  → []
+
+── 5.12-05 外发型必过闸门 ─────────────────────────────────────────────────
+
+真闸门的性质（packages/entitlement/src/gate.ts:141-145）：
+perform → enforce → task → record，判定不过时 task 根本不被调用。
+替身照抄这一条（额度到量即抛 QUOTA_EXCEEDED，不 push 记账、不调 task），
+否则用例测的是替身的宽松而不是真闸门的严格。
+
+四条拒执行，每条都同时断言「动作通道调用次数 = 0」：
+
+    缺 quota 声明                  INVALID_ARGUMENT   act.clicks=[]  gate.performed=[]
+    quota='say-hi'（自造动作名）   INVALID_ARGUMENT   act.clicks=[]  gate.performed=[]
+    闸门未挂载                     SERVICE_NOT_FOUND  act.clicks=[]  （连闸门都没走到）
+    额度到量（remaining: 0）       QUOTA_EXCEEDED     act.clicks=[]
+
+放行那一条断言记账实参逐位相等：
+
+    gate.performed = [{ action: 'greet', targetId: 'boss-greet', workflowRunId: 'run-1' }]
+
+target 为空串时退回节点 id —— 只读格子允许 target:''，而账本要能回答
+「这一格花掉的是哪一条额度」，空串回答不了是哪一格。
+
+装配期那一半（packages/workflow/src/plan.ts 的 assertConditionsUsable 第 ④ 条）：
+effect:'outbound' 且 kind 带 'browser.' 前缀却没有 successConditions 即抛 TypeError。
+作用域只有浏览器那一族：BOSS_DELIVER_PLAN 一条判据都没声明，buildPlan 仍逐字通过。
+只读格子带着 params.quota 的误认那一半也在动手之前拒（5.12-02 的另一半）：
+它不过闸门也不落账，读声明的人却会以为它过过闸门。
+
+挂载位置：cordis.yml 里 browser-nodes 排在 workflow-executors 之后并写了 dependsOn。
+依据是一手源码 cordis/lib/index.js:1142 —— ctx.get 对未 ACTIVE 的 fiber 返回 undefined，
+排早了登记会静默落空。登记处缺席时整族选择不出手（executorRegistryOf 拿不到就返回），
+browser.act 与界面照常可用，与 jd.capture 同一口径。
+
+── 5.12-06 成功判据两处不重叠 ───────────────────────────────────────────
+
+装配期查「证明不证明得成立」：packages/workflow/src/plan.ts 用
+provesLandedEffect（packages/workflow/src/terminal-state.ts:32）。
+    无 successConditions            → /外发型浏览器格子却没有成功判据/
+    只有一条 urlContains:'/chat'    → /证明不了落地效果/      （与 5.11-04 同一条守卫）
+    补一条 effectObserved           → 不抛
+执行器侧只查「有没有」：挡住手改库 JSON 绕过装配期的那条路。
+    外发型格子无 successConditions → INVALID_ARGUMENT 且 act.clicks=[]
+
+判据原文在本片照实改写（AGENTS.md §7.4 ③）：原 U 写「act 回成功但页面没落地时
+按未落地结算」，而本仓结算读数走的是 terminalStateConditions（5.11-01/02），
+successConditions 只进指纹与声明校验、不参与结算。故本条只约束声明，
+活体那一半由 5.12-07 以 fixture 页自己的回执兑现。
+
+暂停检查点在动作之前：signal.aborted → WORKFLOW_STEP_FAILED，act.clicks=[]。
+
+── 门禁（四道，退出码取自命令本身，不接管道）────────────────────────────
+
+    pnpm typecheck     EXIT=0
+    pnpm lint          EXIT=0
+    pnpm format:check  EXIT=0
+    pnpm test          EXIT=0
+
+计数（实跑）：packages/browser 322 条（node-executors.test.ts 16 条，
+单跑该文件读数 ✓ src/node-executors.test.ts (16 tests) 22ms）；
+packages/workflow 248 条（plan.test.ts 从 18 条增至 20 条）。
+
+V 类（5.12-07 的活体三格 + 闸门摘掉前后各跑一次）不在本片，属下一片。

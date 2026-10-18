@@ -14,6 +14,16 @@ import { provesLandedEffect } from './terminal-state.js';
 const nodeParamSchema = z.union([z.string(), z.number(), z.boolean()]);
 
 /**
+ * 浏览器节点族的 kind 前缀（spec 5.12-06）。
+ *
+ * 认前缀而不是认某个具体 kind：这一族往后还要长 `browser.select` / `browser.waitFor` 那几格，
+ * 而「外发型必须自带成功判据」是**整族**的性质。判定放在这一层是因为这里是唯一同时看得见
+ * 整份计划与节点 `effect` 的地方，而 `provesLandedEffect` 也在本包里——浏览器包（L2）不许
+ * 反向依赖本包（L3），所以这条检查只能在这侧。
+ */
+const BROWSER_NODE_KIND_PREFIX = 'browser.';
+
+/**
  * 一条判据的声明形状（spec 5.11-03）。
  *
  * 三个字段各自只对一种 kind 有意义，所以用 `superRefine` 而不是三个互斥 schema：
@@ -176,6 +186,11 @@ export function buildPlan(raw: unknown): WorkflowPlanView {
  *    留着它等于宣布「这一格的成功可以被一行证明不了的读数认证」；
  * ② `nodeCommitted` 指名一个计划里没有的格子——那种判据永远观测不到，等于把跳过写成哑条件；
  * ③ `nodeCommitted` 指名自己——自己没落定时读自己恒为 false，是一条永远不成立的死判据。
+ *
+ * ④ 外发型 `browser.*` 格子没有成功判据（spec 5.12-06）。这一条只对这一族成立，不是全家的规矩：
+ * `greeting.send` / `resume.deliver` 那两条既有计划一条判据都没声明，泛起来就等于改既有计划的读法。
+ * 而这一族非要有不可的理由来自 8.4-05 的实测——`browser.act` 在点击落到视口之外时**照样回成功**，
+ * 所以「动作通道回了成功」这一句读数证明不了任何落地效果，这一格只有判据能证明它成了。
  * @param nodes 已过 schema 的节点声明
  * @param knownNodeIds 计划内的节点 id 集合
  * @returns 无；不合即抛 `TypeError`（与本文件其它形状错误同一种失败面）
@@ -185,6 +200,13 @@ function assertConditionsUsable(
   knownNodeIds: ReadonlySet<string>,
 ): void {
   for (const node of nodes) {
+    if (
+      node.effect === 'outbound' &&
+      node.kind.startsWith(BROWSER_NODE_KIND_PREFIX) &&
+      !node.successConditions?.length
+    ) {
+      throw new TypeError(`节点 ${node.id} 是外发型浏览器格子却没有成功判据：动作通道回成功不等于落地（spec 8.4-05）`);
+    }
     for (const condition of node.successConditions ?? []) {
       if (!provesLandedEffect(condition)) {
         throw new TypeError(

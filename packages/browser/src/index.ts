@@ -404,6 +404,13 @@ export {
 } from './extract-script.js';
 export { BrowserLocateService, browserLocateSchema, type BrowserLocateConfig } from './locate-service.js';
 export { BrowserActService, browserActSchema, type BrowserActConfig } from './act-service.js';
+export {
+  BrowserNodeService,
+  BROWSER_NODE_KINDS,
+  BROWSER_CLICK_KIND,
+  BROWSER_NAVIGATE_KIND,
+  BROWSER_TYPE_KIND,
+} from './node-executors.js';
 export { BrowserRiskService, browserRiskSchema, type BrowserRiskConfig } from './risk-service.js';
 export {
   BrowserTakeoverService,
