@@ -5,7 +5,7 @@
  * 名称、参数摘要、状态、耗时、副作用分级，失败时把结构化原因原样显示。
  * 长此以往只留一个卡片组件，卡片上的口径改一次就两边同时生效。
  */
-import { Wrench } from 'lucide-react';
+import { LoaderCircle, Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
 import { BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, EffectChip } from './ui/controls';
@@ -15,13 +15,18 @@ import { EvidenceRefButton } from './EvidenceRefButton';
  * 工具卡片的状态配色：四态全部走墨案的语义令牌，不再用 Tailwind 默认的 emerald/rose/amber 三原色。
  * 默认色阶不在设计系统的口径里（浅色主题下也不会跟着翻面），而且它们把"进行中"画成琥珀色，
  * 与「等人表态」撞色——进行中是青瓷，琥珀只说"这台机器在等你"。
+ *
+ * 2026-10-19 按 browser-copilot 的对话屏重排：外框收到 `px-2.5 py-1.5`（参考的 `.tool` 规格），
+ * 头部一行装下图标、工具名、截断的摘要与状态 chip，中间那一圈空白正是"这行还有多宽"的读数。
+ * 外框（`frame`）与状态 chip（`chip`）**同表声明**：两处分色各写一份迟早漂，而 chip 的边框
+ * 必须与外框说的是同一件事。
  */
-const TOOL_STATE_STYLE: Record<ChatToolPartState, string> = {
-  running: `${BLOCK_EDGE_CLASS.celadon} ${BLOCK_SURFACE_CLASS} text-slate-100`,
-  done: `${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS} text-slate-100`,
-  failed: `${BLOCK_EDGE_CLASS.seal} ${BLOCK_SURFACE_CLASS} text-slate-100`,
+const TOOL_STATE_STYLE: Record<ChatToolPartState, { frame: string; chip: string }> = {
+  running: { frame: `${BLOCK_EDGE_CLASS.celadon} ${BLOCK_SURFACE_CLASS}`, chip: 'border-celadon/50 text-celadon' },
+  done: { frame: `${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS}`, chip: 'border-jade/50 text-jade' },
+  failed: { frame: `${BLOCK_EDGE_CLASS.seal} ${BLOCK_SURFACE_CLASS}`, chip: 'border-seal/50 text-seal' },
   // 跳过用中性偏冷的色：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
-  skipped: `border-line-strong ${BLOCK_SURFACE_CLASS} text-slate-300`,
+  skipped: { frame: 'border-line-strong bg-ink-850', chip: 'border-line-strong text-slate-400' },
 };
 
 /**
@@ -86,6 +91,8 @@ export function ToolCard({
   // 标题键来自注册表声明本身（spec 5.1-02：一份事实一个来源），界面不再留 id→键的映射表；
   // 未登记或读数未回来时只有这一条兜底文案，卡片因此永远不会显示裸 id 当标题。
   const labelKey = meta?.titleKey;
+  const stateStyle = TOOL_STATE_STYLE[part.state];
+  const stateLabel = t(`agent.tool.state.${part.state}`);
   const inputLine = (
     <p className="mt-1 break-all text-slate-400" data-tool-input={JSON.stringify(part.input)}>
       {t('agent.tool.input', { input: JSON.stringify(part.input) })}
@@ -98,14 +105,23 @@ export function ToolCard({
       data-tool-state={part.state}
       data-tool-effect={meta?.effect ?? 'unknown'}
       data-tool-confirm={meta ? String(meta.requiresConfirmation) : 'unknown'}
-      className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${TOOL_STATE_STYLE[part.state]}`}
+      className={`mt-2 rounded-lg border px-2.5 py-1.5 text-[11px] ${stateStyle.frame}`}
     >
-      <div className="flex items-center gap-2">
-        <Wrench size={12} />
-        <span className="font-medium">{t(labelKey ?? 'agent.tool.unregistered')}</span>
-        <span className="font-mono text-slate-500">{part.toolId}</span>
-        <span className="ml-auto" data-tool-status={t(`agent.tool.state.${part.state}`)}>
-          {t(`agent.tool.state.${part.state}`)}
+      {/* 头部一行：进行中那格用转圈而不是扳手——扳手说的是"调过这只工具"，转圈说的是"现在还在调"（spec 2.8-09）。
+          工具名与 id 都给：`titleKey` 是人话，裸 id 才是活体读数要对的那一串字符。 */}
+      <div className="flex min-w-0 items-center gap-1.5">
+        {part.state === 'running' ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin text-celadon" />
+        ) : (
+          <Wrench size={12} className="shrink-0 text-slate-400" />
+        )}
+        <span className="shrink-0 font-mono text-xs">{t(labelKey ?? 'agent.tool.unregistered')}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-slate-400">{part.toolId}</span>
+        <span
+          className={`ml-auto shrink-0 rounded border px-1.5 py-px text-[10px] ${stateStyle.chip}`}
+          data-tool-status={stateLabel}
+        >
+          {stateLabel}
         </span>
       </div>
       {foldInput ? (
@@ -145,7 +161,7 @@ export function ToolCard({
         {meta ? <EffectChip effect={meta.effect}>{t(`agent.tool.effect.${meta.effect}`)}</EffectChip> : null}
         {meta?.requiresConfirmation ? <span data-tool-needs-approval>{t('agent.tool.needsConfirm')}</span> : null}
         {part.errorText ? (
-          <span className="break-all text-rose-300" data-tool-error={part.errorText}>
+          <span className="break-all text-seal" data-tool-error={part.errorText}>
             {part.errorText}
           </span>
         ) : null}
