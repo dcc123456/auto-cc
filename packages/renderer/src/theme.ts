@@ -6,11 +6,12 @@ export type DeskTheme = 'dark' | 'light';
 const THEME_STORAGE_KEY = 'auto-cc.theme';
 
 /**
- * 读本机已存的主题偏好；没表过态就用墨案（设计稿的主案）。
+ * 读本机已存的主题偏好；没表过态就用毡案（浅色缺省，2026-10-19 用户裁定），
+ * 只有表过 `dark` 的人留墨案——已经选过一次的人不被缺省值覆盖。
  * @returns 当前应生效的主题
  */
 export function currentTheme(): DeskTheme {
-  return localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+  return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
 }
 
 /**
