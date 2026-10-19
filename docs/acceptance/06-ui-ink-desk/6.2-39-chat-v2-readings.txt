@@ -1,0 +1,276 @@
+对话屏设计稿 v2 落地（6.2-39）活体读数
+======================================
+
+时间：2026-10-19 16:05–16:20（本机 macOS arm64，毡案为缺省材质）
+实例：用户正在跑的 dev 实例（CDP 10222 / vite 5173），未新起进程、未杀共享实例。
+取证脚本：`tmp/chat-v2/*.js`（探针，不入库）
+画面：`6.2-39-chat-v2-light.png`（md5 2f300a4caf9abd062a292e688d59a73e）
+      `6.2-39-chat-v2-dark.png`（md5 79e0a465e4e23e7c6566a64a6013bf5b）
+      —— 两张互异（§9 的 5.10-18 那条 md5 去重在此跑过）。
+      两张都是**按 `[data-testid="chat-panel"]` 裁切**后截的（配方 `tmp/63c/shot-clip.mjs`：
+      量矩形 → `Page.captureScreenshot` 带 `clip` + `captureBeyondViewport`），
+      不用整窗截图，是为了不把常驻纸面（用户真实简历）一起拍进位图（§8.5 / §7.5）。
+
+命令形态（每条都带 `--url 5173`，取脚本一律 `--expr-file`）：
+  pnpm harness eval --url 5173 --expr-file tmp/chat-v2/readings.js
+  pnpm harness eval --url 5173 --expr-file tmp/chat-v2/readings2.js
+  pnpm harness eval --url 5173 --expr-file tmp/chat-v2/rails.js
+  pnpm harness eval --url 5173 --expr-file tmp/chat-v2/jump.js
+  node tmp/63c/shot-clip.mjs '[data-testid="chat-panel"]' <out.png>
+
+【0】窗口状态与副作用（先说清楚，后面几条读数 depend on it）
+- `visibility: "visible"` —— 本轮窗口在前台，所以 CSS 时间轴在推进，读到的计算值就是终态值
+  （不需要 §9 那条"注入 transition:none"的前置，也没有注入过任何样式，用户的实例动效完好）。
+- 三条副作用，全部已还原：
+  ① 为了量「发送」那颗的**可点态**画法，往 `[data-testid=chat-input]` 写过一句草稿
+     （原生 setter + `input` 事件，§9 的 5.3-b⑤），量完清空；
+     毡案那张画面里能看见这句草稿，它是探针留下的，不是产品文案。
+  ② 点过一次档位胶囊 `[data-action=chat-autonomy-jump]`（把「agent 替你做主到哪一步」那一格打开），
+     量完点回收起态；`data-open` 回到 `false`。
+  ③ 换过一次材质（点标题栏 `shell-theme-toggle`）取墨案读数，取完换回毡案；
+     `data-theme` 回到 `light`。
+- 没有发过任何一条消息、没有调用任何外发工具、没有改过任何配置键。
+
+【1】设计稿 v2 的六条几何判据（毡案 / 墨案各一遍，两案逐位相同处只列一次）
+
+  判据                          稿上        毡案实测                    墨案实测
+  顶部那一条（标题行）           46px        h=46                        h=46
+  标题字号 / 字重                14 / 500    14px / 500 / rgb(27,34,40)  14px / 500 / rgb(232,238,243)
+  正文字号 / 行高                15 / 1.95   15px / 29.25px              15px / 29.25px
+  正文底色 / 描边                无          rgba(0,0,0,0) / 0px         同
+  消息之间那条                   虚线 1px    dashed（末条 0px，其余 7/7 都是 1px dashed）
+  落款                           12px        12px / rgb(79,90,100)       12px / rgb(133,152,168)
+  输入卡圆角 / 底                16px / ink-800   borderRadius 16px / rgb(242,239,230)  16px / rgb(19,28,35)
+  输入框字号 / 行高              14.5 / 1.8  14.5px / 26.1px             同
+  发送圆片                       32×32 / 满圆 / 反色   见【2】
+  档位胶囊                       28px / 满圆  height 28px / borderRadius 1.67772e+07px / 底 transparent
+
+  「通栏」这一条的正证：`assistantProse` 的 `paddingLeft: 0px`、`borderLeftWidth: 0px`、
+  `backgroundColor: rgba(0, 0, 0, 0)`，人那侧同样 `backgroundColor: rgba(0, 0, 0, 0)` ——
+  两侧都不再是气泡（6.4-01 那两档气泡面自本片退场）。
+
+【2】发送那颗圆片：可点态与按不动态分属两条画法（机检第 13 节①）
+
+  可点态（草稿非空）：毡案 bg rgb(27,34,40) = `--color-slate-50`、箭头 rgb(231,227,216) = `--color-ink-900`
+                     墨案 bg rgb(232,238,243) = `--color-slate-50`、箭头 rgb(11,17,22) = `--color-ink-900`
+                     两案都是 32×32、`borderRadius: 1.67772e+07px`（= `rounded-full`）
+  按不动态（空草稿）：bg rgb(224,219,205) = `--color-ink-850`、箭头随文案色 rgb(79,90,100)
+                     —— 这一档是 `DeskButton` 基座自己的禁用画法（`ui/controls.tsx:70`），
+                        本片给的 `SEND_DEAD_CLASS` 只出几何、不出底色与悬停。
+  两案的反色对比：毡案 12.54:1 / 墨案 16.23:1。
+  **这一条是本轮唯一必须靠活体才能定的一件事**：`bg-slate-50` 压在 `solid` 档的 `bg-ink-750` 之上
+  靠的是 Tailwind 按令牌声明顺序出样式（`--color-ink-*` 在 `--color-slate-*` 之前），
+  class 属性里的先后不作数；两案读数各自等于 slate-50，说明这条覆盖在真页面上成立。
+  箭头字色挂在图标自己那一格（`text-ink-900`）：按钮本体那一格读回的是 slate-50，
+  子节点自己的声明赢过继承——挂在按钮上会被基座的 `text-slate-50` 盖回去。
+
+【3】工具行四态的左状态轨（规则层读数：同一张 class 串在页面里现造一格量计算值，量完即删）
+
+  活体上这一场只有一条 `failed`（`jd.capture.run` / `TOOL_INPUT_INVALID`）：
+    毡案 rail rgb(128,38,21)、墨案 rail rgb(226,84,58)，`borderLeftWidth: 1px`，行内 `backgroundColor: rgba(0,0,0,0)`（无框）
+  四态（`TOOL_STATE_CLASS`，`ToolCard.tsx:24-29`）的状态文字色：
+    毡案  running #2a544f 6.61:1 / done #1c543d 6.87:1 / failed #802615 7.42:1 / skipped #4f5a64 5.50:1
+    墨案  running #7fb6ad 8.32:1 / done #4fb78a 7.66:1 / failed #ef7a55 6.86:1 / skipped #8598a8 6.38:1
+  底取该材质的 `--color-ink-900`（毡案 #e7e3d8 / 墨案 #0b1116）：消息流那一列自己 `rgba(0,0,0,0)`，
+  其祖先带 0.6 alpha 的 wash，所以这是按整色算的保守读数；强制层是 `check-renderer-conventions.ts` 第 12 节。
+  四档全部 ≥4.5，且**没有一档靠 wash 底**（语气不上底材，§20 那条裁定同一片延续）。
+
+【4】档位胶囊 = 一只跳转，不是第二只开关（§2.5）
+
+  点 `[data-action=chat-autonomy-jump]` 前：`[data-testid=chat-autonomy-section]` 的 `data-open="false"`
+  点之后（React 提交完再读）：`data-open="true"`，且档位三档的正文进入 DOM
+  胶囊自己的 `data-tier` 跟着快照走（本轮 `suggest`），它不写档位——写档位仍只有 `DeskSegmented` 那一处。
+
+【5】两案的整份计算值（`readings.js` 原样输出）
+
+=== 毡案（data-theme=light）===
+{
+ "visibility": "visible",
+ "theme": "light",
+ "bar": {
+  "w": 938,
+  "h": 75,
+  "x": 205,
+  "y": 72
+ },
+ "barRow": {
+  "w": 938,
+  "h": 46,
+  "x": 205,
+  "y": 72
+ },
+ "dividerLi": {
+  "style": "dashed",
+  "width": "0px",
+  "color": "rgba(38, 44, 48, 0.3)",
+  "paddingTop": "10px"
+ },
+ "barTitle": {
+  "fontSize": "14px",
+  "lineHeight": "20px",
+  "color": "rgb(27, 34, 40)",
+  "fontWeight": "500"
+ },
+ "messages": 8,
+ "assistantProse": {
+  "fontSize": "15px",
+  "lineHeight": "29.25px",
+  "color": "rgb(27, 34, 40)",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderTopWidth": "0px",
+  "borderLeftWidth": "0px",
+  "paddingLeft": "0px"
+ },
+ "userProse": {
+  "fontSize": "15px",
+  "lineHeight": "29.25px",
+  "color": "rgb(27, 34, 40)",
+  "backgroundColor": "rgba(0, 0, 0, 0)"
+ },
+ "stamp": {
+  "fontSize": "12px",
+  "color": "rgb(79, 90, 100)"
+ },
+ "divider": {
+  "borderTopStyle": "solid",
+  "borderTopColor": "rgb(27, 34, 40)"
+ },
+ "toolCard": {
+  "borderLeftWidth": "1px",
+  "borderLeftColor": "rgb(128, 38, 21)",
+  "fontSize": "12.5px",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderTopWidth": "0px"
+ },
+ "composerCard": {
+  "borderRadius": "16px",
+  "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(150, 178, 196, 0.06) 0px 1px 0px 0px inset",
+  "backgroundColor": "rgb(242, 239, 230)",
+  "borderColor": "rgba(38, 44, 48, 0.15)",
+  "borderWidth": "1px",
+  "box": 906
+ },
+ "input": {
+  "fontSize": "14.5px",
+  "lineHeight": "26.1px",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderWidth": "1px",
+  "resize": "none"
+ },
+ "send": {
+  "backgroundColor": "rgb(27, 34, 40)",
+  "borderRadius": "1.67772e+07px",
+  "color": "rgb(27, 34, 40)",
+  "width": "32px",
+  "height": "32px"
+ },
+ "sendArrow": {
+  "color": "rgb(231, 227, 216)",
+  "w": 15
+ },
+ "tierPill": {
+  "height": "28px",
+  "borderRadius": "1.67772e+07px",
+  "backgroundColor": "rgba(0, 0, 0, 0)"
+ },
+ "autonomyOpen": "false",
+ "queuedStrip": null
+}
+
+=== 墨案（data-theme=dark）===
+{
+ "visibility": "visible",
+ "theme": "dark",
+ "bar": {
+  "w": 938,
+  "h": 75,
+  "x": 205,
+  "y": 72
+ },
+ "barRow": {
+  "w": 938,
+  "h": 46,
+  "x": 205,
+  "y": 72
+ },
+ "dividerLi": {
+  "style": "dashed",
+  "width": "0px",
+  "color": "rgba(150, 178, 196, 0.26)",
+  "paddingTop": "10px"
+ },
+ "barTitle": {
+  "fontSize": "14px",
+  "lineHeight": "20px",
+  "color": "rgb(232, 238, 243)",
+  "fontWeight": "500"
+ },
+ "messages": 8,
+ "assistantProse": {
+  "fontSize": "15px",
+  "lineHeight": "29.25px",
+  "color": "rgb(232, 238, 243)",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderTopWidth": "0px",
+  "borderLeftWidth": "0px",
+  "paddingLeft": "0px"
+ },
+ "userProse": {
+  "fontSize": "15px",
+  "lineHeight": "29.25px",
+  "color": "rgb(232, 238, 243)",
+  "backgroundColor": "rgba(0, 0, 0, 0)"
+ },
+ "stamp": {
+  "fontSize": "12px",
+  "color": "rgb(133, 152, 168)"
+ },
+ "divider": {
+  "borderTopStyle": "solid",
+  "borderTopColor": "rgb(232, 238, 243)"
+ },
+ "toolCard": {
+  "borderLeftWidth": "1px",
+  "borderLeftColor": "rgb(226, 84, 58)",
+  "fontSize": "12.5px",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderTopWidth": "0px"
+ },
+ "composerCard": {
+  "borderRadius": "16px",
+  "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(150, 178, 196, 0.06) 0px 1px 0px 0px inset",
+  "backgroundColor": "rgb(19, 28, 35)",
+  "borderColor": "rgba(150, 178, 196, 0.14)",
+  "borderWidth": "1px",
+  "box": 906
+ },
+ "input": {
+  "fontSize": "14.5px",
+  "lineHeight": "26.1px",
+  "backgroundColor": "rgba(0, 0, 0, 0)",
+  "borderWidth": "1px",
+  "resize": "none"
+ },
+ "send": {
+  "backgroundColor": "rgb(232, 238, 243)",
+  "borderRadius": "1.67772e+07px",
+  "color": "rgb(232, 238, 243)",
+  "width": "32px",
+  "height": "32px"
+ },
+ "sendArrow": {
+  "color": "rgb(11, 17, 22)",
+  "w": 15
+ },
+ "tierPill": {
+  "height": "28px",
+  "borderRadius": "1.67772e+07px",
+  "backgroundColor": "rgba(0, 0, 0, 0)"
+ },
+ "autonomyOpen": "true",
+ "queuedStrip": null
+}
+【6】四道门禁
+
+  见提交前的收尾自检：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` 各自 EXIT=0，
+  日志在 `tmp/chat-v2/gate-*.log`。
