@@ -1,0 +1,153 @@
+6.2-38 读数三：消息流几何、气泡两色、工具卡、Markdown 渲染 — 2026-10-19
+================================================================================
+
+取数方式（活体，渲染层 5173 / CDP 10222，`harness eval --url 5173`）：
+一律读 `getComputedStyle` 的**计算色**与 `getBoundingClientRect()`，不靠肉眼看图。
+量色/量几何之前按 §9 的 6.2 那条先注入 `#evidence-freeze` 冻结过渡与动画
+（隐藏窗口里 CSS 时间轴不推进，否则读出来的是入场动画的 from 帧）；
+**收尾已摘掉**，读数 `freezeStillInDom = false`。
+
+--------------------------------------------------------------------------------
+① 缺省材质（切片一）
+--------------------------------------------------------------------------------
+清掉 localStorage['auto-cc.theme'] 后重载
+  stored       = null
+  theme        = "light"           ← `documentElement.dataset.theme`
+  colorScheme  = "light"           ← `getComputedStyle(document.body).colorScheme`
+
+再点一次标题栏开关（`[data-action="shell-theme-toggle"]`）
+  stored "dark" → theme "dark" / colorScheme "dark"，点回再翻回 light
+  双向切换没被这次改动弄坏；**已存过 dark 的人保持深色**（这就是"只改缺省值"的可观测形状）。
+
+--------------------------------------------------------------------------------
+② 消息流几何（6.2-34 的新形状，原行容器读数随几何变更作废）
+--------------------------------------------------------------------------------
+行容器宽 906px。
+
+  user turn       <li class="flex justify-end">
+    └─ <div class="… max-w-[92%] items-end">
+         └─ <p class="BUBBLE_CLASS.user">            实测 543 × 681   （543/906 = 59.9%）
+            background   rgb(242, 239, 230)          ← bg-ink-800
+            border       rgba(38, 44, 48, 0.3)  1px  ← border-line-strong
+            radius       12px
+            fontSize     13px
+            lineHeight   19.5px                      ← 13 × 1.5
+            lineBreak    strict                      ← [line-break:strict] 生效
+            whiteSpace   pre-wrap
+            color        rgb(27, 34, 40)
+            正文对比度    13.98 : 1
+
+  assistant turn  <li class="flex flex-col gap-2 rounded-xl border border-line bg-ink-900/60 px-3 py-2.5">
+                                                    实测 906 × 505（左侧满宽）
+            background   oklab(0.915929 -0.0000230074 0.0153806 / 0.6)
+                         叠在面板底上解析成 rgb(216, 211, 198)
+            border       rgba(38, 44, 48, 0.15) 1px
+            radius       12px
+            正文容器 <div data-part-kind="text">
+            fontSize     13px / lineHeight 19.5px / lineBreak strict
+            background   transparent（面在 li 上，文字容器自己不画）
+            正文对比度    10.76 : 1
+
+  avatarsLeft = 0        头像格已退场（`[data-message-who] svg` 在整屏 0 命中）
+  turnCount   = { user: 4, assistant: 4 }
+
+  **两块面在活体上是两个可分辨的计算色**：毡案 rgb(242,239,230) vs rgb(216,211,198)。
+  这一条正是 6.4-01 欠了半辈子的 V 半边——原先两色只靠头像格承担，量不到。
+
+  锚点一个没少：`data-message-id` / `data-message-role` / `data-message-who` /
+  `data-part-kind` / `data-testid="chat-streaming-message"` 全部在 DOM 上（形状变、锚点不断）。
+
+墨案（切过去同一支探针复测）
+  user 气泡       background rgb(19, 28, 35)      border rgba(150, 178, 196, 0.26)  对比度 14.74
+  assistant turn  解析成 rgb(8, 12, 16)           border rgba(150, 178, 196, 0.14)  对比度 16.77
+  两块面仍可分辨，字号/行高/禁则与毡案同值（几何不随材质变，只换色）。
+
+--------------------------------------------------------------------------------
+③ 工具卡（对话流与 agent 落步共用那一份）
+--------------------------------------------------------------------------------
+活体发 `/tool jd.capture.run` 得到一张 `data-tool-state="failed"` 的卡
+（外发级工具按 2.8-10 经额度闸门，本机没有额度所以落 failed——这正是失败态的真实形状）。
+
+  锚点全在（querySelector 实读，不是看源码）
+    data-tool-id="jd.capture.run"  data-tool-state="failed"
+    data-tool-effect="outbound"    data-tool-confirm="true"
+    [data-tool-status]「失败」     [data-tool-duration]「0 毫秒」     [data-tool-input]「参数 {}」
+  2.8-09 / 5.5-08 / 5.6-04 三份读数靠的就是这些，形状改了它们就断了——所以一个都没动，
+  整张卡也**没有**折进 `<details>`（折进去未展开时 querySelector 直接读不到）。
+
+  毡案
+    卡面      rgb(224, 219, 205)      描边 oklab(0.4066 0.106832 0.0688743 / 0.5)（seal/50）
+              radius 8px              padding 6px 10px（= px-2.5 py-1.5，收到小一号）
+              卡身 11px                卡身对比度 11.63 : 1
+    图标      lucide-wrench + text-slate-400
+    工具名    「搜索并抓取 JD」12px    对比度 11.63 : 1
+    耗时      「0 毫秒」10px          对比度 4.00 : 1   ← 10px < 12px，判 3.0，过
+    入参摘要  「参数 {}」11px          对比度 5.10 : 1
+    失败码    rgb(128, 38, 21)        对比度 6.88 : 1   ← 就是语义令牌 seal，不是 rose
+
+  墨案
+    卡面      rgb(15, 22, 28)         描边 oklab(0.631608 0.153413 0.0978069 / 0.5)
+              卡身对比度 15.59 : 1
+    工具名    对比度 15.59 : 1
+    耗时      对比度 4.46 : 1
+    入参摘要  对比度 6.12 : 1
+    失败码    rgb(226, 84, 58)        对比度 4.83 : 1   ← 同一个 seal 令牌翻面后的值
+
+  失败色并入语义令牌这一条，两案各读到一个数：毡案 rgb(128,38,21)、墨案 rgb(226,84,58)。
+  （全仓还剩一处 `text-rose-300`：`WorkflowCanvas.tsx:825` 的画布问题清单，不在本片射程内，
+    如实记账不假装清零。）
+
+--------------------------------------------------------------------------------
+④ Markdown 渲染（助手那侧走 Markdown，人那侧仍是纯文本）
+--------------------------------------------------------------------------------
+送进去的原文（对话骨架的回复是「已收到：「<原文>」」，所以块级标记必须落在**第二行往后**
+才真的在行首——这是取证前提，不是渲染器的毛病）。
+
+流式走完之后在这张 turn 面上数节点（`querySelectorAll`，不靠肉眼看图）：
+  h1 1 / h2 1 / h3 1 / h4 1        四级标题全中
+  p 10
+  strong 1 / em 1 / del 1           行内强调三支
+  code 2（1 支行内 + 1 支在 pre 里）
+  pre 1，pre > code 1
+     pre class = "mb-1.5 overflow-x-auto rounded-md border border-line bg-ink-950 px-3 py-2
+                  font-mono text-[11.5px] leading-[1.5] last:mb-0"
+  a 1，href = "https://example.com/ok"
+  ul 2（外层 + 嵌套一层）/ ol 1 / blockquote 1
+  table 1：thead 1 / thead tr 1 / th 2 / tbody tr 1 / td 2
+  hr 1
+  img 0 / iframe 0 / script 0
+  [data-part-kind] 注入节点 0        ← 全文件零 dangerouslySetInnerHTML 的活体反证
+
+  列表层级按深度读（不是按 `ul ul` 这种选择器计数，那条会数出重复项）：
+    ul depth 1  「甲项乙项乙一丙项」
+      ul depth 2  「乙一」                 ← `- 乙一` 缩进两格，落在 `- 乙项` 里
+  有序表 ol > li 2 条。
+
+  顶层块序列（逐块读 tag 与首 40 字）
+    p 已收到：「先说一句占位。 → h1 一级标题 → p 正文一段（含 strong/em/del/code/a）
+    → h2 二级标题 → h3 三级标题 → h4 四级标题
+    → ul(甲项 / 乙项含嵌套 / 丙项) → ol(第一 / 第二) → blockquote(引文一行)
+    → div(table 甲乙12) → pre(code const 值) → hr → p 结尾一句。」这是对话骨架的本地确定性回复…
+
+  负对照：同一轮里最后那条**人**的气泡
+    白空格数 = "pre-wrap"，而 strong/em/pre/table/h1/ul/ol 命中数 = 0
+    ← 人那侧保持纯文本，只有助手那侧走 Markdown。
+
+--------------------------------------------------------------------------------
+⑤ 画面证据
+--------------------------------------------------------------------------------
+  6.2-38-chat-light.png      f76c6eeabdbf142642c1725d49d6e7eb
+  6.2-38-chat-dark.png       fb65cf462eac276dd9bfab65a3d0764b
+  6.2-38-chat-queued.png     a9a23073338255862dcb73e2d620def2
+  6.2-38-tool-card-light.png 164c95f528c670d42db43799977c1169
+  6.2-38-tool-card-dark.png  c792ea67fed72f1ff66d22278ba67ee4
+
+  五张 md5 两两不同（§9 的 5.10-18：相同即说明有一张截的不是目标视图）。
+
+--------------------------------------------------------------------------------
+收尾复原
+--------------------------------------------------------------------------------
+  localStorage['auto-cc.theme']          未存 → 缺省读出 light
+  localStorage['auto-cc.composerHeight'] 未存 → 缺省第 2 档 / h-[140px]
+  plugins.saveConfig chat.chunkIntervalMs  1000 → 120
+  #evidence-freeze                       已摘（freezeStillInDom = false）
