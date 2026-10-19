@@ -8,25 +8,24 @@
 import { LoaderCircle, Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
-import { BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, EffectChip } from './ui/controls';
+import { EffectChip } from './ui/controls';
 import { EvidenceRefButton } from './EvidenceRefButton';
 
 /**
- * 工具卡片的状态配色：四态全部走墨案的语义令牌，不再用 Tailwind 默认的 emerald/rose/amber 三原色。
- * 默认色阶不在设计系统的口径里（浅色主题下也不会跟着翻面），而且它们把"进行中"画成琥珀色，
- * 与「等人表态」撞色——进行中是青瓷，琥珀只说"这台机器在等你"。
+ * 工具步的三处分色（左侧状态轨 / 前置图标 / 状态字样）：**一张表按 `ChatToolPartState` 给齐**。
  *
- * 2026-10-19 按 browser-copilot 的对话屏重排：外框收到 `px-2.5 py-1.5`（参考的 `.tool` 规格），
- * 头部一行装下图标、工具名、截断的摘要与状态 chip，中间那一圈空白正是"这行还有多宽"的读数。
- * 外框（`frame`）与状态 chip（`chip`）**同表声明**：两处分色各写一份迟早漂，而 chip 的边框
- * 必须与外框说的是同一件事。
+ * 2026-10-19 设计稿 v2：卡片外框整个退掉，一条 1px 左侧状态轨说"这一步此刻在哪个档"（参考图那一行就是
+ * 方角图标 + 一句灰字，没有卡片）。分色只出自这一张表，轨色与字样必然同步改（原先 `frame` 与 `chip`
+ * 同表声明是同一条纪律的前身）。
+ * 四态全部走本仓语义令牌，不用 Tailwind 默认的 emerald/rose/amber 三原色：默认色阶不在设计系统口径里
+ * （浅色主题下不跟着翻面），而且它们把"进行中"画成琥珀色，与「等人表态」撞色——进行中是青瓷，
+ * 琥珀只说"这台机器在等你"。跳过用中性偏冷：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
  */
-const TOOL_STATE_STYLE: Record<ChatToolPartState, { frame: string; chip: string }> = {
-  running: { frame: `${BLOCK_EDGE_CLASS.celadon} ${BLOCK_SURFACE_CLASS}`, chip: 'border-celadon/50 text-celadon' },
-  done: { frame: `${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS}`, chip: 'border-jade/50 text-jade' },
-  failed: { frame: `${BLOCK_EDGE_CLASS.seal} ${BLOCK_SURFACE_CLASS}`, chip: 'border-seal/50 text-seal' },
-  // 跳过用中性偏冷的色：既不提示"正在跑"，也不把"人做完了"染成失败或系统的功劳（5.5-08）。
-  skipped: { frame: 'border-line-strong bg-ink-850', chip: 'border-line-strong text-slate-400' },
+const TOOL_STATE_CLASS: Record<ChatToolPartState, { rail: string; lead: string; state: string }> = {
+  running: { rail: 'border-celadon', lead: 'text-celadon', state: 'text-celadon' },
+  done: { rail: 'border-jade', lead: 'text-slate-400', state: 'text-jade' },
+  failed: { rail: 'border-seal', lead: 'text-slate-400', state: 'text-seal-ink' },
+  skipped: { rail: 'border-line-strong', lead: 'text-slate-400', state: 'text-slate-400' },
 };
 
 /**
@@ -91,10 +90,13 @@ export function ToolCard({
   // 标题键来自注册表声明本身（spec 5.1-02：一份事实一个来源），界面不再留 id→键的映射表；
   // 未登记或读数未回来时只有这一条兜底文案，卡片因此永远不会显示裸 id 当标题。
   const labelKey = meta?.titleKey;
-  const stateStyle = TOOL_STATE_STYLE[part.state];
+  const stateClass = TOOL_STATE_CLASS[part.state];
   const stateLabel = t(`agent.tool.state.${part.state}`);
   const inputLine = (
-    <p className="mt-1 break-all text-slate-400" data-tool-input={JSON.stringify(part.input)}>
+    <p
+      className="w-full break-all pl-5 font-mono text-[11.5px] leading-[1.6] text-slate-400"
+      data-tool-input={JSON.stringify(part.input)}
+    >
       {t('agent.tool.input', { input: JSON.stringify(part.input) })}
     </p>
   );
@@ -105,28 +107,41 @@ export function ToolCard({
       data-tool-state={part.state}
       data-tool-effect={meta?.effect ?? 'unknown'}
       data-tool-confirm={meta ? String(meta.requiresConfirmation) : 'unknown'}
-      className={`mt-2 rounded-lg border px-2.5 py-1.5 text-[11px] ${stateStyle.frame}`}
+      className={`ml-2.5 flex flex-wrap items-baseline gap-x-2 border-l py-1 pl-[11px] text-[12.5px] leading-[1.6] text-slate-300 ${stateClass.rail}`}
     >
-      {/* 头部一行：进行中那格用转圈而不是扳手——扳手说的是"调过这只工具"，转圈说的是"现在还在调"（spec 2.8-09）。
+      {/* 进行中那一格用转圈而不是扳手——扳手说的是"调过这只工具"，转圈说的是"现在还在调"（spec 2.8-09）。
           工具名与 id 都给：`titleKey` 是人话，裸 id 才是活体读数要对的那一串字符。 */}
-      <div className="flex min-w-0 items-center gap-1.5">
-        {part.state === 'running' ? (
-          <LoaderCircle size={12} className="shrink-0 animate-spin text-celadon" />
-        ) : (
-          <Wrench size={12} className="shrink-0 text-slate-400" />
-        )}
-        <span className="shrink-0 font-mono text-xs">{t(labelKey ?? 'agent.tool.unregistered')}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-slate-400">{part.toolId}</span>
-        <span
-          className={`ml-auto shrink-0 rounded border px-1.5 py-px text-[10px] ${stateStyle.chip}`}
-          data-tool-status={stateLabel}
-        >
-          {stateLabel}
+      <span className={`inline-flex items-center ${stateClass.lead}`} aria-hidden="true">
+        {part.state === 'running' ? <LoaderCircle size={13} className="animate-spin" /> : <Wrench size={13} />}
+      </span>
+      <span className="text-slate-100">{t(labelKey ?? 'agent.tool.unregistered')}</span>
+      <span className="font-mono text-[11.5px] text-slate-400">{part.toolId}</span>
+      <span
+        className={`font-mono text-[11px] font-medium tracking-[0.06em] ${stateClass.state}`}
+        data-tool-status={stateLabel}
+      >
+        {stateLabel}
+      </span>
+      {part.durationMs !== null ? (
+        <span className="font-mono text-[11px] text-slate-400" data-tool-duration={String(part.durationMs)}>
+          {t('agent.tool.duration', { ms: part.durationMs })}
         </span>
-      </div>
+      ) : null}
+      {meta ? <EffectChip effect={meta.effect}>{t(`agent.tool.effect.${meta.effect}`)}</EffectChip> : null}
+      {meta?.requiresConfirmation ? (
+        <span className="text-[11px] text-slate-400" data-tool-needs-approval>
+          {t('agent.tool.needsConfirm')}
+        </span>
+      ) : null}
+      {/* 失败码原样带出（是数据不是文案，不进语言包），中文陈述由观察那一行负责。 */}
+      {part.errorText ? (
+        <span className="break-all font-mono text-[11px] text-seal" data-tool-error={part.errorText}>
+          {part.errorText}
+        </span>
+      ) : null}
       {foldInput ? (
-        <details className="mt-1">
-          <summary className="cursor-pointer select-none text-slate-400" data-tool-input-toggle>
+        <details className="w-full">
+          <summary className="cursor-pointer select-none text-[11.5px] text-slate-400" data-tool-input-toggle>
             {t('agent.tool.inputToggle')}
           </summary>
           {inputLine}
@@ -139,7 +154,7 @@ export function ToolCard({
           跳过那一格与成功同色：它说的是一句已成的事实（人做完了），不是一处需要修的错（5.5-08）。 */}
       {step && step.observation ? (
         <p
-          className={`mt-1 break-words ${step.status === 'failed' || step.status === 'refused' ? 'text-seal' : 'text-slate-300'}`}
+          className={`w-full break-words ${step.status === 'failed' || step.status === 'refused' ? 'text-seal' : 'text-slate-300'}`}
           data-step-observation={step.observation}
         >
           {step.observation}
@@ -148,24 +163,12 @@ export function ToolCard({
       {/* 5.7-02：引用从裸文本变成点得开的读数。run 与步下标从这里带进去（只有循环卡片有 `step`），
           分派前缀的事一概交给主进程那一只手，界面不知道 `ledger:` 归账本、`doc:` 归简历。 */}
       {step && step.evidenceRefs.length > 0 ? (
-        <ul className="mt-1 flex flex-col gap-y-1 font-mono text-[10px] text-slate-500" data-step-evidence>
+        <ul className="mt-1 flex w-full flex-col gap-y-1 font-mono text-[10px] text-slate-500" data-step-evidence>
           {step.evidenceRefs.map((ref) => (
             <EvidenceRefButton key={ref} runId={step.runId} planStepIndex={step.planStepIndex} evidenceRef={ref} />
           ))}
         </ul>
       ) : null}
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
-        {part.durationMs !== null ? (
-          <span data-tool-duration={String(part.durationMs)}>{t('agent.tool.duration', { ms: part.durationMs })}</span>
-        ) : null}
-        {meta ? <EffectChip effect={meta.effect}>{t(`agent.tool.effect.${meta.effect}`)}</EffectChip> : null}
-        {meta?.requiresConfirmation ? <span data-tool-needs-approval>{t('agent.tool.needsConfirm')}</span> : null}
-        {part.errorText ? (
-          <span className="break-all text-seal" data-tool-error={part.errorText}>
-            {part.errorText}
-          </span>
-        ) : null}
-      </div>
     </div>
   );
 }

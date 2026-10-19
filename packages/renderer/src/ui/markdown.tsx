@@ -515,7 +515,7 @@ function parseBlocks(lines: string[]): MdBlock[] {
       const marks = heading[2] ?? '#';
       blocks.push({
         kind: 'heading',
-        // 只画 h1–h4：13px 正文里再往下的层级已经分不出轻重，落回段落比堆六档字号好。
+        // 只画 h1–h4：15px 正文里再往下的层级已经分不出轻重，落回段落比堆六档字号好。
         level: Math.min(marks.length, 4) as 1 | 2 | 3 | 4,
         children: parseInline((heading[3] ?? '').replace(/#+\s*$/, '').trim()),
       });
@@ -556,12 +556,16 @@ export function parseMarkdown(source: string): MdBlock[] {
   return parseBlocks(source.replace(/\r\n?/g, '\n').split('\n'));
 }
 
-/** 标题四档的字号与字重。 */
+/**
+ * 标题四档的字号与字重。
+ * 2026-10-19 设计稿 v2：正文升到 15px 后标题只往下压半档到一档（17/16/15.5/15），
+ * 层级靠**字重 + 一根 hairline 下边线**分，不靠字号阶梯——13px 那一族里六档字号本来就分不出轻重。
+ */
 const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
-  1: 'mt-2 mb-1 text-[16px] font-semibold leading-snug first:mt-0',
-  2: 'mt-2 mb-1 text-[15px] font-semibold leading-snug first:mt-0',
-  3: 'mt-2 mb-1 text-[14px] font-semibold leading-snug first:mt-0',
-  4: 'mt-2 mb-1 text-[13px] font-semibold leading-snug first:mt-0',
+  1: 'mt-[0.5em] first:mt-0 border-b border-line pb-[0.3em] text-[17px] font-semibold leading-snug text-slate-50',
+  2: 'mt-[0.5em] first:mt-0 border-b border-line pb-[0.3em] text-[16px] font-semibold leading-snug text-slate-50',
+  3: 'mt-[0.5em] first:mt-0 border-b border-line pb-[0.3em] text-[15.5px] font-semibold leading-snug text-slate-50',
+  4: 'mt-[0.5em] first:mt-0 border-b border-line pb-[0.3em] text-[15px] font-semibold leading-snug text-slate-50',
 };
 
 /** 表格单元格的三个对齐档。 */
@@ -575,6 +579,16 @@ const ALIGN_CLASS: Record<MdAlign, string> = {
 const STREAMING_FENCE_CLASS =
   'relative pl-2 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:rounded-full before:bg-celadon';
 
+/**
+ * 块与块之间的间距（设计稿 v2 的 `.prose > * + *{margin-top:.95em}`）。
+ * 挂在每一块的下沿而不是下一格的上沿：相邻块级外边距会折叠，写在两侧只会让标题那一档读不准。
+ */
+const BLOCK_GAP = 'mb-[0.95em] last:mb-0';
+
+/** 加重与删除线在 15px 正文里的两档：`strong` 提字重并把颜色提到最亮一档，`del` 只压暗不压小。 */
+const STRONG_CLASS = 'font-semibold text-slate-50';
+const DEL_CLASS = 'text-slate-400';
+
 /** 把行内节点画成 React。key 用下标——每次重渲染都是同一棵树，不存在跨渲染的节点复用需求。 */
 function renderInline(nodes: MdInline[]): ReactNode[] {
   return nodes.map((node, index) => {
@@ -586,16 +600,27 @@ function renderInline(nodes: MdInline[]): ReactNode[] {
         return <br key={key} />;
       case 'code':
         return (
-          <code key={key} className="rounded bg-ink-950 px-1 py-0.5 font-mono text-[11.5px] text-celadon-ink">
+          <code
+            key={key}
+            className="rounded-chip bg-ink-800 px-1.5 py-0.5 font-mono text-[13px] leading-normal text-slate-100"
+          >
             {node.value}
           </code>
         );
       case 'strong':
-        return <strong key={key}>{renderInline(node.children)}</strong>;
+        return (
+          <strong key={key} className={STRONG_CLASS}>
+            {renderInline(node.children)}
+          </strong>
+        );
       case 'em':
         return <em key={key}>{renderInline(node.children)}</em>;
       case 'del':
-        return <del key={key}>{renderInline(node.children)}</del>;
+        return (
+          <del key={key} className={DEL_CLASS}>
+            {renderInline(node.children)}
+          </del>
+        );
       case 'link':
         return (
           <a
@@ -630,19 +655,19 @@ function renderBlocks(blocks: MdBlock[]): ReactNode[] {
       }
       case 'paragraph':
         return (
-          <p key={key} className="mb-1.5 last:mb-0">
+          <p key={key} className={BLOCK_GAP}>
             {renderInline(block.children)}
           </p>
         );
       case 'list':
         return block.ordered ? (
-          <ol key={key} className="mb-1.5 list-decimal space-y-1 pl-5 marker:text-slate-400 last:mb-0">
+          <ol key={key} className={`${BLOCK_GAP} list-decimal space-y-[0.42em] pl-[1.6em] marker:text-slate-400`}>
             {block.items.map((item, itemIndex) => (
               <li key={`${key}-${String(itemIndex)}`}>{renderBlocks(item)}</li>
             ))}
           </ol>
         ) : (
-          <ul key={key} className="mb-1.5 list-disc space-y-1 pl-5 marker:text-slate-400 last:mb-0">
+          <ul key={key} className={`${BLOCK_GAP} list-disc space-y-[0.42em] pl-[1.6em] marker:text-slate-400`}>
             {block.items.map((item, itemIndex) => (
               <li key={`${key}-${String(itemIndex)}`}>{renderBlocks(item)}</li>
             ))}
@@ -650,7 +675,7 @@ function renderBlocks(blocks: MdBlock[]): ReactNode[] {
         );
       case 'quote':
         return (
-          <blockquote key={key} className="mb-1.5 border-l-2 border-line-strong pl-2.5 text-slate-300 last:mb-0">
+          <blockquote key={key} className={`${BLOCK_GAP} border-l-2 border-line-strong pl-[14px] text-slate-300`}>
             {renderBlocks(block.children)}
           </blockquote>
         );
@@ -660,34 +685,34 @@ function renderBlocks(blocks: MdBlock[]): ReactNode[] {
             key={key}
             data-markdown-code={block.lang}
             data-markdown-closed={String(block.closed)}
-            className={`mb-1.5 overflow-x-auto rounded-md border border-line bg-ink-950 px-3 py-2 font-mono text-[11.5px] leading-[1.5] last:mb-0 ${block.closed ? '' : STREAMING_FENCE_CLASS}`}
+            className={`${BLOCK_GAP} overflow-x-auto rounded-control bg-ink-850 px-3.5 py-3 font-mono text-[12.5px] leading-[1.7] text-slate-200 ${block.closed ? '' : STREAMING_FENCE_CLASS}`}
           >
             <code>{block.value}</code>
           </pre>
         );
       case 'table':
         return (
-          <div key={key} className="mb-1.5 overflow-x-auto last:mb-0">
-            <table className="w-full border-collapse text-[12px]">
+          <div key={key} className={BLOCK_GAP}>
+            <table className="w-full border-collapse text-[13px] leading-[1.7]">
               <thead>
                 <tr>
                   {block.header.map((cell, cellIndex) => (
                     <th
                       key={`${key}-h-${String(cellIndex)}`}
-                      className={`border-b border-line-strong px-2 py-1 font-semibold ${ALIGN_CLASS[block.align[cellIndex] ?? 'left']}`}
+                      className={`border-b border-line-strong py-1.5 pr-2.5 font-mono text-[11px] font-medium tracking-[0.1em] text-slate-400 ${ALIGN_CLASS[block.align[cellIndex] ?? 'left']}`}
                     >
                       {renderInline(cell)}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="[&>tr:last-child>td]:border-b-0">
                 {block.rows.map((row, rowIndex) => (
                   <tr key={`${key}-r-${String(rowIndex)}`}>
                     {row.map((cell, cellIndex) => (
                       <td
                         key={`${key}-c-${String(cellIndex)}`}
-                        className={`border-b border-line px-2 py-1 ${ALIGN_CLASS[block.align[cellIndex] ?? 'left']}`}
+                        className={`border-b border-line py-[7px] pr-2.5 text-slate-200 ${ALIGN_CLASS[block.align[cellIndex] ?? 'left']}`}
                       >
                         {renderInline(cell)}
                       </td>
@@ -699,7 +724,7 @@ function renderBlocks(blocks: MdBlock[]): ReactNode[] {
           </div>
         );
       case 'hr':
-        return <hr key={key} className="my-2 border-line" />;
+        return <hr key={key} className="my-[1.4em] border-0 border-t border-dashed border-line-strong" />;
       default:
         return null;
     }
