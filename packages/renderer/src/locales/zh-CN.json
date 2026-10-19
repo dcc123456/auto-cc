@@ -1256,7 +1256,6 @@
       }
     },
     "chat": {
-      "heading": "对话",
       "empty": "还没有消息：说说你想找什么样的岗位",
       "loading": "正在读取主进程的会话…",
       "inputPlaceholder": "想聊什么？回车发送，Shift+Enter 换行",

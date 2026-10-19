@@ -8,12 +8,12 @@
  * （plan 5.2-c 的切法），读数来自 `agent.loop.read` 与 `agent/run-progress`，同样不在这里推导。
  */
 import {
-  Bot,
+  ArrowUp,
+  ChevronDown,
   Gauge,
   GripHorizontal,
   ListOrdered,
   LoaderCircle,
-  Send,
   Square,
   Workflow as WorkflowIcon,
 } from 'lucide-react';
@@ -39,6 +39,7 @@ import { WorkflowRunCard } from './WorkflowRunCard';
 import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
 import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { MarkdownBody } from './ui/markdown';
+import { formatClock } from './format';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -70,21 +71,24 @@ type LiveStream = { sessionId: string; messageId: string; text: string; tool?: C
 const RUN_COMMAND_PREFIX = '/plan';
 
 /**
- * 气泡的几何与排版，按"谁在说"分两侧（历史消息与正在累加的那条共用同一处画法，§2.2）。
+ * 正文的排版，按"谁在说"分两侧（历史消息与正在累加的那条共用同一处画法，§2.2）。
  *
- * 2026-10-19 按 browser-copilot 的对话屏改：那边**没有头像**，人那侧靠右（上限 92%），
- * 助手那侧是左侧满宽的一张 turn 面；正文 13px/1.5 并开中文禁则
- * （`[line-break:strict]` 是 Tailwind 任意属性，§5.1 禁手写 CSS 与内联 style）。
+ * 2026-10-19 按设计稿 v2 换成**通栏无泡**（`.msg .prose`）：整列没有一只气泡，人那侧也只是通栏纯文本，
+ * 靠字色与一段留白分开——参考图里人的话同样不涂底色。字号跟着稿上的 15px/1.95 走（原 13px/1.5 太密），
+ * 并开中文禁则（`[line-break:strict]` 是 Tailwind 任意属性，§5.1 禁手写 CSS 与内联 style）。
  *
- * 底色仍用本仓的 ink 档而不是照抄那边的 `color-mix(accent 22%, panel-2)`：
- * 那一条要么新造一枚令牌（机检第 12 节的双案表）、要么写 `*-wash`（第 9 节禁在面板层），
- * 为一块气泡扩一张令牌表不划算。
+ * 人那侧的 `text-slate-50` 是稿上 `.msg[data-message-role='user'] .prose` 那一档"更实"的字色；
+ * 助手那侧不写色由面板基色继承，Markdown 的标题与列表自己带字色。
+ *
+ * 底色与边框一并退掉：它们原本只是"这是两个人说的话"的画法，而 `data-message-role` 那一行读数
+ * 与消息之间的虚线分隔已经说了同一件事。
  */
-const BUBBLE_CLASS = {
-  user: 'max-w-[92%] whitespace-pre-wrap break-words rounded-xl border border-line-strong bg-ink-800 px-3 py-2 text-[13px] leading-[1.5] [line-break:strict]',
+const PROSE_CLASS = {
+  // 人那侧保持纯文本：等宽换行之外的花活会让人以为那不是自己打的那句话。
+  user: 'whitespace-pre-wrap break-words text-[15px] leading-[1.95] text-slate-50 [line-break:strict]',
   // 助手那侧不写 `whitespace-pre-wrap`：Markdown 的块级元素自带段间距，再叠一层预格式化会把
   // JSX 里那些换行印成可见空格。行内换行由解析器按「软换行并空格、硬换行才 `<br>`」处理。
-  assistant: 'min-w-0 break-words text-[13px] leading-[1.5] [line-break:strict]',
+  assistant: 'min-w-0 break-words text-[15px] leading-[1.95] [line-break:strict]',
 } as const;
 
 /** 一段对话里连着属于同一方的若干条消息，画面上并成一颗 turn（参考实现的 `groupEntries`）。 */
@@ -131,11 +135,12 @@ function groupTurns(messages: ChatMessageView[], live: LiveStream | undefined): 
 }
 
 /**
- * 一个 turn：一颗气泡（人那侧）或一张 turn 面（助手那侧），里面的工具卡与正文同列。
+ * 一个 turn：人那侧一串纯文本，助手那侧一张通栏稿面，里面的工具行与正文同列。
  *
  * 三支读数锚点 `data-message-id` / `data-message-role` / `data-message-who` 逐条原样保留在
- * **每一条消息**的容器上（5.6-01、5.2-13、6.2-34 的历史读数都解它们）：形状从头像格挪到了
- * 消息容器上，锚点一个没少。
+ * **每一条消息**的容器上（5.6-01、5.2-13、6.2-34 的历史读数都解它们）。
+ * 两侧都不再涂底色、不再描边（设计稿 v2 的通栏结构）：区分说话人靠的是字色、左侧那行落款时间，
+ * 以及消息之间的一条虚线，不是气泡。
  * @param turn 这一格要画的一串消息
  * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
  * @returns 消息流里的一格
@@ -143,12 +148,7 @@ function groupTurns(messages: ChatMessageView[], live: LiveStream | undefined): 
 function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, ToolDescriptorView> }) {
   const isUser = turn.role === 'user';
   return (
-    <li
-      data-turn-role={turn.role}
-      className={
-        isUser ? 'flex justify-end' : 'flex flex-col gap-2 rounded-xl border border-line bg-ink-900/60 px-3 py-2.5'
-      }
-    >
+    <li data-turn-role={turn.role} className="flex flex-col gap-2 py-2.5">
       {turn.messages.map((message) => (
         <div
           key={message.id}
@@ -157,20 +157,20 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
           data-message-who={message.role}
           // 1.11-02/03 的活体读数靠这支锚点轮询「还在不在打字」，它跟着的是那条正在流式的消息，不是某一格 turn。
           data-testid={message.isStreaming ? 'chat-streaming-message' : undefined}
-          className={`flex min-w-0 flex-col gap-2 ${isUser ? 'max-w-[92%] items-end' : ''}`}
+          className="flex min-w-0 flex-col gap-2"
         >
           {message.parts.map((part, index) =>
             part.kind === 'text' ? (
-              // 人那侧保持纯文本：气泡只有一格，等宽换行之外的花活会让人以为那不是自己打的那句话。
+              // 人那侧保持纯文本：通栏等宽换行之外的花活会让人以为那不是自己打的那句话。
               // 助手那侧走 Markdown（spec 6.2-36）：模型输出里的标题、列表与代码块是内容的一部分，压成一段就是丢信息。
               isUser ? (
-                <p key={`${message.id}-text-${String(index)}`} className={BUBBLE_CLASS.user} data-part-kind="text">
+                <p key={`${message.id}-text-${String(index)}`} className={PROSE_CLASS.user} data-part-kind="text">
                   {part.text}
                 </p>
               ) : (
                 <div
                   key={`${message.id}-text-${String(index)}`}
-                  className={BUBBLE_CLASS.assistant}
+                  className={PROSE_CLASS.assistant}
                   data-part-kind="text"
                 >
                   <MarkdownBody text={part.text} />
@@ -180,6 +180,17 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
               <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
             ),
           )}
+          {/* 落款那一行只画主进程给得起的那一位：`createdAt` 是落库时间戳，正在累加的那条还没有（合成读数是 0）。
+              设计稿上图标动作那一排（复制 / 有用 / 不对 / 转发 / 钉为事实）与「由 AI 生成」那句**没有发货实现**
+              ——对话的助手回复此刻是本地确定性模板（`packages/agent/src/session.ts`），自称 AI 生成的那句是谎报，
+              所以这一行只有时间；那几格记在 spec 的延后清单里，不拿假按钮凑版面（§2.6）。
+              只挂在助手那侧也是稿上的画法（`.msg[data-message-role=user]` 里没有 `footer`）：人那句的时间
+              由它上面那条虚线和上一条落款推得出来，两行并排各敲一个时间戳读起来像台账。 */}
+          {!isUser && message.createdAt > 0 ? (
+            <p className="text-[12px] leading-none text-slate-400" data-message-stamp={String(message.createdAt)}>
+              {formatClock(message.createdAt, '', 'minute')}
+            </p>
+          ) : null}
         </div>
       ))}
     </li>
@@ -194,6 +205,28 @@ const COMPOSER_DEFAULT_STEP = 1;
 const COMPOSER_HEIGHT_KEY = 'auto-cc.composerHeight';
 /** 每拖 40 像素换一档：档位之间落差很大（72→140→220），按像素逐格算只会一直停在同一档。 */
 const COMPOSER_DRAG_PIXELS_PER_STEP = 40;
+
+/**
+ * 发送那颗圆片（设计稿 v2 的 `.send`：实心圆 + 反色箭头，没有文案）。
+ *
+ * 两态**分属两条字面量**（机检第 13 节①：按不动的那一态不许长出 hover）。
+ * `bg-slate-50 / text-ink-900` 是一对会随主题翻面的档：毡案上是深墨圆片压在浅毡上，
+ * 墨案上是亮片压在深桌上，同一写法两案都成立——这也是它不用朱砂的理由（本仓的色相约定里
+ * `seal` 专指"会离开这台机器"，发一条本地对话不配用它）。
+ * **它盖得住 `solid` 档的 `bg-ink-750`** 靠的是本仓 `bg-*` 按令牌声明顺序出样式（`--color-ink-*`
+ * 在 `--color-slate-*` 之前，产物偏移实测 23122 → 26115），`rounded-full` 同理压在原件的
+ * `rounded-control` 上（16841 → 16894）。
+ * 箭头字色挂在图标**自己那一格**：`text-*` 那一组里 slate 排在 ink 之后，挂在按钮上会被原件的
+ * `text-slate-50` 盖回去，而子节点自己的声明永远赢过继承。
+ * 悬停那一档不写在这里（`hover:bg-slate-100` 挂在那一格自己的 className 上）：第 13 节②要面板层的
+ * hover 与交互凭据落在同一片行窗口里，而这张常量表离 `action="send"` 有整一段 JSX 那么远。
+ */
+const SEND_LIVE_CLASS = 'h-8 w-8 justify-center rounded-full bg-slate-50';
+/** 按不动那一态的圆片：底色、字色都由 `buttonClass` 的禁用分支给（六档同色，spec 6.2-10）。 */
+const SEND_DEAD_CLASS = 'h-8 w-8 justify-center rounded-full';
+
+/** 档位那一颗 pill 的几何（稿 `.pill`：28px 高的圆角胶囊）。它只是**跳闸**，不是第二只开关（见 `autonomyJump`）。 */
+const TIER_PILL_CLASS = 'h-7 max-w-[150px] justify-center rounded-full';
 
 /**
  * 从本机读回上次的高度档位。
@@ -357,6 +390,12 @@ export function ChatPanel() {
    * §5.1 两条都禁；于是拖拽按位移折算档位、class 从上表取字面量（Tailwind 只认源码里出现过的类名）。
    */
   const [composerStep, setComposerStep] = useState(readComposerStep);
+  /**
+   * 输入区那颗档位 pill 的**跳闸**读数（undefined = 这一屏还没跳过）。
+   * 它不是第二只档位开关（§2.5）：按下只把上面那一格 `DeskSection` 强制打开并落盘，
+   * 真正切换档位的入口仍在那一格的 `DeskSegmented` 上——同一件事一个入口。
+   */
+  const [autonomyJump, setAutonomyJump] = useState<number>();
   useEffect(() => {
     localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerStep));
   }, [composerStep]);
@@ -398,27 +437,24 @@ export function ChatPanel() {
 
   return (
     <section data-testid="chat-panel" className="flex h-full flex-col rounded-xl border border-line bg-ink-900/60">
-      <header className="flex items-center gap-2 border-b border-line px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Bot size={16} />
-          {t('chat.heading')}
-        </h2>
-        <div className="ml-auto flex items-center gap-2">
-          {workflowRun ? (
+      {/* 顶栏只有一条（设计稿 v2 的 `.bar`）：原先上面还压着一条 `Bot` 图标 + 「对话」的横条，
+          两条都在说"这是对话"，而参考图那一行说的是"这是哪一条会话"。会话三操作与它合成 46px 的一条，
+          `chat-workflow-mirror` 那一位读数跟着搬进条尾（testid 与文案一字未改，1.10-08 / 5.4-07 的读数照旧）。 */}
+      <ChatSessionBar
+        session={snapshot?.session}
+        read={read}
+        headExtra={
+          workflowRun ? (
             <span
               data-testid="chat-workflow-mirror"
-              className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10px] text-slate-400"
+              className="flex items-center gap-1 rounded-chip border border-line px-2 py-1 text-[10px] text-slate-400"
             >
               <WorkflowIcon size={11} />
               {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
             </span>
-          ) : null}
-        </div>
-      </header>
-
-      {/* 会话三操作（新建/改名/软删 + 已删栏）自成一条带（spec 5.6-07）：
-          它们改的是 `chat_session` 那一行，与下面的档位、白名单、消息流都不是一件事。 */}
-      <ChatSessionBar session={snapshot?.session} read={read} />
+          ) : null
+        }
+      />
 
       {/* 压缩读数是一条独立的窄带（spec 5.6-04）：它说的是「这段对话还有多少没画出来」，
           与消息流、与会话操作带都不是同一件事，画成一条假消息会让人以为模型说过那句话。 */}
@@ -432,6 +468,7 @@ export function ChatPanel() {
         id="agent.autonomy"
         markers={{ testid: 'chat-autonomy-section' }}
         className="mx-4 my-3"
+        openSignal={autonomyJump}
         title={
           <span className="flex items-center gap-1.5">
             <Gauge size={12} />
@@ -494,13 +531,19 @@ export function ChatPanel() {
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
           消息流留 120px 地板：上面几条常驻读数带（会话条、压缩读数、档位、免确认白名单、接管横幅）
           在 737px 高的窗口里没有地板时会被挤成 24px 的一条缝，任务卡整个看不见（5.7-d 实测）。 */}
-      <div ref={scrollRef} data-testid="chat-scroll" className="min-h-[120px] flex-1 overflow-y-auto px-4 py-3">
+      <div
+        ref={scrollRef}
+        data-testid="chat-scroll"
+        className="min-h-[120px] flex-1 overflow-y-auto px-4 pb-[18px] pt-1"
+      >
         {turns.length === 0 && !agentRun.run && !workflowRunView ? (
           <p className="mx-auto py-6 text-center text-xs text-slate-400" data-testid="chat-empty">
             {t('chat.empty')}
           </p>
         ) : (
-          <ul data-testid="chat-messages" className="flex flex-col gap-3">
+          // 消息之间的一条虚线（稿 `.divide`）替掉了原先的气泡与卡片外框：两侧都是通栏文本，
+          // 靠这一条说"这又是一句"，所以 ul 自己不留 gap（缝由每条 `<li>` 的 py 与这条分隔线出）。
+          <ul data-testid="chat-messages" className="flex flex-col divide-y divide-dashed divide-line-strong">
             {turns.map((turn) => (
               <MessageTurn key={turn.key} turn={turn} toolMetas={toolMetas} />
             ))}
@@ -576,94 +619,135 @@ export function ChatPanel() {
         </p>
       ) : null}
 
-      {/* 流式期间发送键照常可按——按下去是排进队列（spec 1.11-16），不再是拒发。
-          拖拽手柄走原件层：裸 `<button>` 在面板里会被机检第 10 条拦下。 */}
-      <footer className="border-t border-line px-4 py-3">
-        <DeskButton
-          action="chat-composer-resize"
-          variant="ghost"
-          className="mb-1 flex h-4 w-full cursor-ns-resize touch-none items-center justify-center"
-          aria-label={t('chat.composerHeight', {
-            index: composerStep + 1,
-            height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
-          })}
-          title={t('chat.composerResize')}
-          markers={{ testid: 'chat-composer-resize' }}
-          onPointerDown={onComposerDragStart}
-          onPointerMove={onComposerDragMove}
-          onPointerUp={onComposerDragEnd}
-        >
-          <GripHorizontal size={12} />
-        </DeskButton>
-        {/* 队列读数（spec 1.11-16）紧贴输入框上沿：它是「这句话还没发出去」的证据，
+      {/* 输入区收成**一张卡**（设计稿 v2 的 `.composer > .card`）：档位那颗跳闸键、两条命令说明、
+          停止与发送全部落在卡内的工具条上，卡外只剩队列那一条读数。
+          拖拽手柄走原件层：裸 `<button>` 在面板里会被机检第 10 条拦下；它现在贴在卡的下沿（拖着下沿加高）。 */}
+      <footer className="px-4 pb-3 pt-1">
+        {/* 队列读数（spec 1.11-16）紧贴卡片上沿：它是「这句话还没发出去」的证据，
             画在消息流里会被当成一条消息，而它那时还不是消息。 */}
         {queued.length > 0 ? (
           <p
             data-testid="chat-queued"
-            className="mb-1.5 flex items-center gap-1.5 text-[11px] text-celadon"
             data-queued-count={queued.length}
+            className="mb-2 flex items-center gap-2 rounded-control border border-celadon/34 bg-ink-800 px-3 py-1.5 text-[12.5px] text-celadon-ink"
           >
-            <ListOrdered size={11} />
+            <ListOrdered size={13} />
             {t('chat.queued', { count: queued.length })}
           </p>
         ) : null}
-        <DeskTextarea
-          action="chat-input"
-          size="composer"
-          data-testid="chat-input"
-          rows={2}
-          value={draft}
-          onValueChange={setDraft}
-          onKeyDown={onKeyDown}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false;
-          }}
-          placeholder={t('chat.inputPlaceholder')}
-          className={`w-full resize-none ${COMPOSER_HEIGHT_CLASS[composerStep] ?? ''}`}
-        />
-        <div className="mt-2 flex items-center gap-2">
+        <div className="rounded-2xl border border-line bg-ink-800 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-celadon/50 focus-within:ring-[3px] focus-within:ring-celadon/15">
+          {/* 文本域走原件的 `bare` 档（不铺自己的底、不描边），字号与字色挂在这一层包裹节点上——
+              这正是 `bare` 那一档的设计（spec 3.11-06：字档一律 inherit，由调用方挂在包裹节点）。
+              `[line-height:1.8]` 是**任意属性**那一族：原件在文本域自己那一格挂了 `leading-[1.2]`，
+              同族两条谁赢取决于样式表顺序（本仓已实测过一次，见 controls.tsx 那条 `fieldClass` 注释），
+              所以这里不与它同名，用 property 级写法压过去（稿 `.card textarea` 要的正是 1.8）。 */}
+          <div className="px-[15px] pt-[13px] text-[14.5px] text-slate-100">
+            <DeskTextarea
+              action="chat-input"
+              bare
+              data-testid="chat-input"
+              rows={2}
+              value={draft}
+              onValueChange={setDraft}
+              onKeyDown={onKeyDown}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
+              placeholder={t('chat.inputPlaceholder')}
+              className={`resize-none placeholder:text-slate-400 [line-height:1.8] ${
+                COMPOSER_HEIGHT_CLASS[composerStep] ?? ''
+              }`}
+            />
+          </div>
+          <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
+            {/* 档位跳闸键：明面只留当下那一档的名字，点开的是上面那一格（那里才是唯一的切换入口）。
+                `chat-autonomy-current` 那支读数仍挂在段的 summary 上，这一颗自己叫 `chat-autonomy-pill`。 */}
+            <DeskButton
+              action="chat-autonomy-jump"
+              variant="ghost"
+              compact
+              className={TIER_PILL_CLASS}
+              markers={{ testid: 'chat-autonomy-pill', tier: snapshot?.session.autonomy ?? 'unknown' }}
+              title={t('agent.autonomy.section')}
+              onClick={() => setAutonomyJump(Date.now())}
+            >
+              <Gauge size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
+              <span className={snapshot?.session.autonomy === 'auto' ? 'text-seal-ink' : undefined}>
+                {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
+              </span>
+              <ChevronDown size={13} className="opacity-70" />
+            </DeskButton>
+            {/* 两条命令说明原先平铺在动作行右侧（40 字 + 42 字），在 369px 的右栏宽度里会把整行撑到
+                换行、把发送键挤成半截。收进披露层：明面只留一行短问句，正文按需展开，
+                两支既有 testid 跟着搬进正文（改名等于拆掉 5.2-03 的验收通道）。 */}
+            <DeskExplainer
+              id="chat.hints"
+              className="shrink-0"
+              label={t('chat.hints.toggle')}
+              markers={{ testid: 'chat-hint' }}
+            >
+              <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
+              {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
+              <p className="mt-1" data-testid="chat-run-hint">
+                {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
+              </p>
+            </DeskExplainer>
+            <DeskButton
+              action="stop"
+              variant="line"
+              compact
+              className="ml-auto"
+              busy={busy !== undefined}
+              disabled={!isStreaming}
+              disabledReason={!isStreaming ? 'NOT_STREAMING' : undefined}
+              disabledReasonLabel={!isStreaming ? t('chat.reason.NOT_STREAMING') : undefined}
+              onClick={() => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']())}
+            >
+              <Square size={12} />
+              {t('chat.stop')}
+            </DeskButton>
+            {/* 流式期间发送键照常可按——按下去是排进队列（spec 1.11-16），不再是拒发。
+                文案收成图标后那句"排队发送"换由无障碍名与 `data-send-mode` 带出：testid 与原因码一律原位不动。 */}
+            <DeskButton
+              action="send"
+              variant="solid"
+              compact
+              busy={busy !== undefined}
+              disabled={isSendDisabled}
+              disabledReason={sendReason}
+              disabledReasonLabel={sendReason ? t(`chat.reason.${sendReason}`) : undefined}
+              className={
+                // 悬停档与这一格的凭据同处一行邻域（机检第 13 节②），所以挂在调用点而不是常量表里。
+                isSendDisabled ? SEND_DEAD_CLASS : `${SEND_LIVE_CLASS} hover:bg-slate-100`
+              }
+              markers={{ 'send-mode': isStreaming ? 'queued' : 'now' }}
+              title={isStreaming ? t('chat.sendQueued') : t('chat.send')}
+              onClick={submit}
+            >
+              <ArrowUp size={15} className={isSendDisabled ? undefined : 'text-ink-900'} />
+              <span className="sr-only">{isStreaming ? t('chat.sendQueued') : t('chat.send')}</span>
+            </DeskButton>
+          </div>
           <DeskButton
-            action="send"
-            variant="solid"
-            busy={busy !== undefined}
-            disabled={isSendDisabled}
-            disabledReason={sendReason}
-            disabledReasonLabel={sendReason ? t(`chat.reason.${sendReason}`) : undefined}
-            onClick={submit}
+            action="chat-composer-resize"
+            variant="ghost"
+            compact
+            className="flex h-4 w-full cursor-ns-resize touch-none justify-center"
+            aria-label={t('chat.composerHeight', {
+              index: composerStep + 1,
+              height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
+            })}
+            title={t('chat.composerResize')}
+            markers={{ testid: 'chat-composer-resize' }}
+            onPointerDown={onComposerDragStart}
+            onPointerMove={onComposerDragMove}
+            onPointerUp={onComposerDragEnd}
           >
-            <Send size={12} />
-            {isStreaming ? t('chat.sendQueued') : t('chat.send')}
+            <GripHorizontal size={12} className="text-slate-400" />
           </DeskButton>
-          <DeskButton
-            action="stop"
-            variant="line"
-            busy={busy !== undefined}
-            disabled={!isStreaming}
-            disabledReason={!isStreaming ? 'NOT_STREAMING' : undefined}
-            disabledReasonLabel={!isStreaming ? t('chat.reason.NOT_STREAMING') : undefined}
-            onClick={() => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']())}
-          >
-            <Square size={12} />
-            {t('chat.stop')}
-          </DeskButton>
-          {/* 两条命令说明原先平铺在动作行右侧（40 字 + 42 字），在 369px 的右栏宽度里会把整行撑到
-              换行、把发送键挤成半截。收进披露层：明面只留一行短问句，正文按需展开，
-              两支既有 testid 跟着搬进正文（改名等于拆掉 5.2-03 的验收通道）。 */}
-          <DeskExplainer
-            id="chat.hints"
-            className="ml-auto shrink-0"
-            label={t('chat.hints.toggle')}
-            markers={{ testid: 'chat-hint' }}
-          >
-            <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
-            {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
-            <p className="mt-1" data-testid="chat-run-hint">
-              {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
-            </p>
-          </DeskExplainer>
         </div>
       </footer>
     </section>

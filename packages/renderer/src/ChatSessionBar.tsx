@@ -6,9 +6,14 @@
  * 标题显示只读快照里那一份（`session` prop 递进来），组件自己不留副本（§2.7 禁第二份事实）。
  * 恢复途径为什么是一栏而不是一句「撤销」提示：撤销一旦只存在于内存里，重启之后那行数据就再没有途径捞回来，
  * 「软删」在用户眼里就等同于硬删——判据要防的正是这个。
+ *
+ * 2026-10-19 对话面板按参考图重排（设计稿 v2 的 `.bar`）：这一条**就是面板唯一的顶栏**——
+ * 原先它上面还有一条 `Bot` 图标 + 「对话」标题的横条，两条都在说"这是对话"，而参考图那一行说的是
+ * "这是哪一条会话"。于是那条退掉，这一条收到 46px：文件夹图标 + 会话名 + 行级动作（改名/删除收成图标键），
+ * 右侧留给「新建会话」与调用方递进来的那一位读数（`headExtra`）。
  */
-import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { FolderOpen, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatSessionView } from '@auto-cc/shared';
 import { DeskButton, InlineEditField } from './ui/controls';
@@ -25,17 +30,28 @@ function shortCode(id: string): string {
 }
 
 /**
- * 会话操作带：标题 + 改名/删除/新建三只按钮 + 已删栏 + 一行提示。
+ * 顶栏那两只行级动作（改名 / 删除）的几何：设计稿 v2 的 `.icon` 是一枚 30px 的 ghost 方块。
+ * 文案收进 `sr-only` 与 `title`（同一做法的先前例证是 PDF 编辑屏的墨色键），图标居中靠 `justify-center`：
+ * 原件的 `compact` 档给的是 `px-2`，不居中时 11px 的图标会贴在左边。
+ */
+const BAR_ICON_CLASS = 'h-[30px] w-[30px] justify-center';
+
+/**
+ * 会话操作带（面板的唯一顶栏）：标题 + 改名/删除/新建 + 已删栏 + 一行提示。
  * @param session 当前会话的读数，来自 ChatPanel 那份快照；快照未回来时为 undefined（按钮先禁用）
  * @param read ChatPanel 的快照读取函数；每个动作跑完都调一次，界面不猜主进程当下的状态
- * @returns 贴在对话面板头部下方的一条窄带，没有软删过会话时已删栏整块不渲染
+ * @param headExtra 条尾右侧的那一位读数（对话面板把 `chat-workflow-mirror` 递进来）：
+ *   它说的是"此刻哪个 runner 在动"，归属顶栏的几何，但事实只有 ChatPanel 那份订阅知道，所以走槽位而不是让本组件去订阅（§2.5）
+ * @returns 面板最上面的一条 46px 窄带，没有软删过会话时已删栏整块不渲染
  */
 export function ChatSessionBar({
   session,
   read,
+  headExtra,
 }: {
   session: ChatSessionView | undefined;
   read: () => Promise<unknown>;
+  headExtra?: ReactNode;
 }) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
@@ -76,8 +92,8 @@ export function ChatSessionBar({
   };
 
   return (
-    <div data-testid="chat-session-bar" className="border-b border-slate-800">
-      <div className="flex items-center gap-2 px-4 py-2">
+    <div data-testid="chat-session-bar">
+      <div className="flex min-h-[46px] items-center gap-1.5 px-4">
         {editing ? (
           <>
             {/* 形态②「就地编辑」（09 稿）：标题原地变输入框，Enter 提交 / Esc 还原由原件负责，本组件不再自己长一套键盘语义 */}
@@ -115,16 +131,22 @@ export function ChatSessionBar({
           </>
         ) : (
           <>
+            {/* 图标 + 会话名是这一条的身份（设计稿 v2 `.bar .title`）：原先那条「对话」标题横条退掉后，
+                顶栏只说"这是哪一条会话"，不再说"这是对话"。 */}
+            <FolderOpen size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
             <span
               data-session-title={session?.title ?? ''}
               data-session-id={session?.id ?? ''}
-              className="min-w-0 max-w-[40%] truncate text-xs font-medium text-slate-200"
+              className="min-w-0 truncate text-sm font-medium text-slate-50"
             >
               {session?.title ?? t('chat.session.untitled', { code })}
             </span>
             <DeskButton
               action="rename-session"
+              variant="ghost"
               compact
+              className={BAR_ICON_CLASS}
+              title={t('chat.session.rename')}
               disabled={session === undefined || isBusy}
               disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
               disabledReasonLabel={session === undefined ? t('chat.session.reasonNoSession') : undefined}
@@ -133,13 +155,15 @@ export function ChatSessionBar({
                 setEditing(true);
               }}
             >
-              <Pencil size={11} />
-              {t('chat.session.rename')}
+              <Pencil size={12} />
+              <span className="sr-only">{t('chat.session.rename')}</span>
             </DeskButton>
             <DeskButton
               action="delete-session"
               variant="ghost"
               compact
+              className={BAR_ICON_CLASS}
+              title={t('chat.session.delete')}
               busy={isBusy}
               disabled={session === undefined}
               disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
@@ -151,20 +175,24 @@ export function ChatSessionBar({
                 })
               }
             >
-              <Trash2 size={11} />
-              {t('chat.session.delete')}
+              <Trash2 size={12} />
+              <span className="sr-only">{t('chat.session.delete')}</span>
             </DeskButton>
-            <DeskButton
-              action="new-session"
-              variant="solid"
-              compact
-              busy={isBusy}
-              className="ml-auto"
-              onClick={() => void call(t('chat.actionNewSession'), () => bridge?.chat['session.startSession']())}
-            >
-              <Plus size={12} />
-              {t('chat.newSession')}
-            </DeskButton>
+            {/* 条尾右侧：调用方那一位读数 + 「新建会话」。新建与改名/删除不是一类动作（它换掉整段上下文），
+                所以留文案、用描边档，而两件行级动作收成图标。 */}
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              {headExtra}
+              <DeskButton
+                action="new-session"
+                variant="line"
+                compact
+                busy={isBusy}
+                onClick={() => void call(t('chat.actionNewSession'), () => bridge?.chat['session.startSession']())}
+              >
+                <Plus size={12} />
+                {t('chat.newSession')}
+              </DeskButton>
+            </div>
           </>
         )}
       </div>
@@ -186,7 +214,7 @@ export function ChatSessionBar({
       </DeskExplainer>
 
       {trash && trash.length > 0 ? (
-        <div data-testid="chat-session-trash" className="border-t border-slate-800 bg-slate-950/40 px-4 py-2">
+        <div data-testid="chat-session-trash" className="border-t border-line bg-ink-850 px-4 py-2">
           <p className="text-[10px] text-slate-500" data-trash-count={String(trash.length)}>
             {t('chat.session.trashHeading', { total: trash.length })}
           </p>
@@ -195,7 +223,7 @@ export function ChatSessionBar({
               <li
                 key={row.id}
                 data-trash-session-id={row.id}
-                className="flex items-center gap-2 rounded-md border border-slate-800 px-2 py-1 text-[11px]"
+                className="flex items-center gap-2 rounded-md border border-line px-2 py-1 text-[11px]"
               >
                 <span className="min-w-0 max-w-[50%] truncate text-slate-400">
                   {row.title ?? t('chat.session.untitled', { code: shortCode(row.id) })}
@@ -222,10 +250,7 @@ export function ChatSessionBar({
       ) : null}
 
       {notice ? (
-        <p
-          className="border-t border-slate-800 px-4 py-1.5 text-[11px] text-slate-300"
-          data-testid="chat-session-notice"
-        >
+        <p className="border-t border-line px-4 py-1.5 text-[11px] text-slate-300" data-testid="chat-session-notice">
           {notice}
         </p>
       ) : null}

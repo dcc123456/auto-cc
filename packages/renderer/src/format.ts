@@ -11,10 +11,27 @@
  * 时间戳 → 本地可读时间。
  * @param ms 毫秒时间戳；null 表示「这个时刻不存在」（如无期限 cookie、只抓到摘要的岗位）
  * @param noneLabel ms 为 null 时替换显示的文案
+ * @param precision `'minute'` 时只到分钟（对话每行落款那一档）；默认到秒
  * @returns 本地化日期时间串，或 noneLabel
  */
-export const formatClock = (ms: number | null, noneLabel: string): string =>
-  ms === null ? noneLabel : new Date(ms).toLocaleString();
+export const formatClock = (
+  ms: number | null,
+  noneLabel: string,
+  precision: 'second' | 'minute' = 'second',
+): string => {
+  if (ms === null) return noneLabel;
+  // 落款只到分钟是设计稿的读数（`tmp/chat-redesign/panel.css` 的 `.stamp`）：同屏八行各带秒位
+  // 会读成日志流水，而"这条大概什么时候发的"要的是分钟。
+  return precision === 'minute'
+    ? new Date(ms).toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : new Date(ms).toLocaleString();
+};
 
 /**
  * 主进程的步下标 → 界面上的「第几步」（1 起）。
