@@ -1260,10 +1260,15 @@
       "empty": "No messages yet: say what kind of role you want",
       "loading": "Reading the session from the main process…",
       "inputPlaceholder": "What do you want to do? Enter sends, Shift+Enter adds a line",
+      "composerResize": "Drag to change the composer height",
+      "composerHeight": "Composer height: step {{index}} ({{height}}px)",
       "send": "Send",
       "stop": "Stop",
       "newSession": "New session",
       "streaming": "Reply is being generated…",
+      "streamingElapsed": "{{seconds}}s elapsed",
+      "sendQueued": "Queue it",
+      "queued": "{{count}} message(s) queued — they send in order once the reply finishes",
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
       "hints": {
@@ -1271,7 +1276,6 @@
       },
       "reason": {
         "BUSY": "The previous action hasn't returned yet",
-        "STREAMING": "A reply is still streaming — press Stop first",
         "INPUT_EMPTY": "Write a message first",
         "NOT_STREAMING": "Nothing is streaming right now"
       },

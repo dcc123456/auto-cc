@@ -83,6 +83,15 @@ const RENDERER_SYNTAX = [
   },
 ];
 
+/**
+ * §5.5 那三条裸文案拦截**单独成一份**，好让测试文件能摘掉它们。
+ *
+ * 摘的是"页面文案"这一支，不是整块渲染层约束：测试里没有页面，中文用例名与夹具串
+ * 都不进界面，按 §3.1 的中文注释口径它们该照常写中文（其余各包的测试文件一直如此）。
+ * Tailwind / lucide / 禁 Node 内置那几条在测试里照样生效——它们管的是写法，与是不是测试无关。
+ */
+const I18N_SYNTAX = RENDERER_SYNTAX.filter((rule) => String(rule.message).includes('§5.5'));
+
 export default tseslint.config(
   {
     ignores: [
@@ -147,6 +156,14 @@ export default tseslint.config(
           paths: [{ name: 'react-dom/server', message: '渲染层不做服务端渲染，只挂载到 #root' }],
         },
       ],
+    },
+  },
+  {
+    // 渲染层测试文件：只摘掉 §5.5 那三条裸文案拦截（见 `I18N_SYNTAX` 的注释）。
+    // 其余渲染层约束——Tailwind、lucide、禁 Node 内置、禁跨包 internal——在测试里原样生效。
+    files: ['packages/renderer/src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', ...RENDERER_SYNTAX.filter((rule) => !I18N_SYNTAX.includes(rule))],
     },
   },
   {
