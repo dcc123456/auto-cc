@@ -1295,11 +1295,26 @@ export type ChatCompactionView = {
 };
 
 /** 界面首屏与重读时拿到的整份快照：当前会话 + 未被折叠的那段消息 + 压缩读数（没折过时为 null）。 */
+/**
+ * 排在队里等着发出去的一条用户消息（spec 1.11-16）。
+ *
+ * 它只在内存里（与正在流式那半条同口径），因此 `text` 一定是原文、还没有脱敏——
+ * 脱敏发生在真正派发那一刻（`chat.session` 的 `dispatch`），入队就脱敏等于让一份还没进对话记录的东西先被改写。
+ * @param text 用户原文（未脱敏、未落库）
+ * @param position 队列里的第几条，从 1 起；界面照它说「已排进队列（第 N 条）」
+ */
+export type ChatQueuedView = {
+  text: string;
+  position: number;
+};
+
 export type ChatSnapshotView = {
   session: ChatSessionView;
   messages: ChatMessageView[];
   /** 最近一段有效压缩的读数；一条都没折过、或摘要行与被折叠的原文对不上（原文被外部删了）时为 null，界面上退回全文 */
   compaction: ChatCompactionView | null;
+  /** 等着发出去的用户消息（spec 1.11-16）；空数组表示没有插话。队列只在内存里，重启即失。 */
+  queued: ChatQueuedView[];
 };
 
 /**

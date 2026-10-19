@@ -464,7 +464,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
   it('发消息得到分片增量，字数一片比一片多（1.11-03）', async () => {
     const { chat, deltas } = await boot({ chunkChars: 8, chunkIntervalMs: 5 });
     const started = chat.send('你好');
-    expect(started.isStreaming).toBe(true);
+    expect(started).toMatchObject({ isStreaming: true });
     await settle(300);
     const pieces = deltas.filter((delta) => !delta.done);
     expect(pieces.length).toBeGreaterThan(2);
@@ -565,12 +565,38 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(chat.stop()).toBeNull();
   });
 
-  it('上一条还在流式时再发：结构化失败而不是把两条回复搅在一起', async () => {
-    const { chat } = await boot({ chunkChars: 2, chunkIntervalMs: 20 });
-    chat.send('第一条');
-    expect(() => chat.send('第二条')).toThrowError(/上一条回复还在生成中/);
+  it('上一条还在流式时再发：排进队而不是结构化失败，上一条收尾后按顺序自动发出（1.11-16）', async () => {
+    const { chat, ctx } = await boot({ chunkChars: 2, chunkIntervalMs: 20 });
+    const first = chat.send('第一条');
+    // 入队那一刻它还不算一条消息：库里只有第一条那句，第二句一个字都还没落。
+    const queued = chat.send('第二条') as { text: string; position: number };
+    expect(queued).toEqual({ text: '第二条', position: 1 });
+    expect(chat.current().queued.map((entry) => entry.text)).toEqual(['第二条']);
+    // 库里只有第一条那句用户消息：助手那条还没落库（在流），第二句还没轮到（只排在内存里）。
+    expect(rowCount(ctx, 'chat_message')).toBe(1);
+
     chat.stop();
-    expect(() => chat.send('第二条')).not.toThrow();
+    await settle(160);
+    // 停止不清队列：第二条照样发出去，且落在第一条之后（库里的顺序 = 打字的顺序）。
+    expect(chat.current().queued).toEqual([]);
+    const sentRows = asApp(ctx)
+      .store.db.prepare("SELECT parts FROM chat_message WHERE role = 'user' ORDER BY created_at ASC, rowid ASC")
+      .all() as unknown as { parts: string }[];
+    expect(sentRows.map((row) => (JSON.parse(row.parts) as { text: string }[])[0]?.text)).toEqual(['第一条', '第二条']);
+    expect(first).toMatchObject({ isStreaming: true });
+  });
+
+  it('队列按先进先出排满五条，第六条结构化失败（1.11-16）', async () => {
+    const { chat } = await boot({ chunkChars: 2, chunkIntervalMs: 20 });
+    chat.send('正在跑的那条');
+    for (let index = 1; index <= 5; index += 1) {
+      expect(chat.send(`排队的第 ${String(index)} 句`)).toEqual({
+        text: `排队的第 ${String(index)} 句`,
+        position: index,
+      });
+    }
+    expect(() => chat.send('第六句')).toThrowError(/队列里已经排着 5 条/);
+    chat.stop();
   });
 
   it('空输入与超长输入被边界校验拦下', async () => {

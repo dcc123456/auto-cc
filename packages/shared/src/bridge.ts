@@ -13,6 +13,7 @@ import type {
   AutonomyLevel,
   ChatDeltaEvent,
   ChatMessageView,
+  ChatQueuedView,
   ChatSessionView,
   ChatSnapshotView,
   DeliverApprovalView,
@@ -76,6 +77,7 @@ export type {
   ChatFactCard,
   ChatMessageView,
   ChatPart,
+  ChatQueuedView,
   ChatSessionView,
   ChatSnapshotView,
   ChatRole,
@@ -2788,8 +2790,14 @@ export interface BridgeSignatures {
   'agent.pause.respond': { args: [requestId: string, answer: AgentPauseAnswer]; returns: AgentPauseView[] };
   /** 当前会话的整份快照（spec 1.11-08）；首次访问就地建会话，永不为 null。 */
   'chat.session.current': { args: []; returns: ChatSnapshotView };
-  /** 发一条用户消息并起一次流式回复，返回刚进入流式态的助手消息（spec 1.11-02 / 03）。 */
-  'chat.session.send': { args: [text: string]; returns: ChatMessageView };
+  /**
+   * 发一条用户消息并起一次流式回复（spec 1.11-02 / 03）。
+   *
+   * 上一条还在吐字时**不拒**，改排进队（spec 1.11-16）：于是返回值有两种——
+   * `ChatMessageView` 是立刻开流了，`ChatQueuedView` 是排上了、界面据此把发送键切成「已排进队列」。
+   * 队列读数同时挂在 `chat.session.current()` 的 `queued` 上，渲染层刷新后不必再问一次。
+   */
+  'chat.session.send': { args: [text: string]; returns: ChatMessageView | ChatQueuedView };
   /** 中止正在流式的回复并把已产出的部分如实落库（spec 1.11-13）。 */
   'chat.session.stop': { args: []; returns: ChatMessageView | null };
   /** 切换自治档位（spec 1.11-07）；P1 只写这一列，不产生行为差异。 */

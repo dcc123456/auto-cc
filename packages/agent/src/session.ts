@@ -29,6 +29,7 @@ import {
   type ChatFactCard,
   type ChatMessageView,
   type ChatPart,
+  type ChatQueuedView,
   type ChatSessionView,
   type ChatSnapshotView,
   type ChatToolPart,
@@ -62,6 +63,15 @@ export const CHAT_MIGRATION_VERSION = 2;
  * 5.2-a 的 `agent.loop.propose` 收的是同一类输入，因此共用这一个常量而不是各写一份 2000（§2.2）。
  */
 export const MAX_USER_INPUT_CHARS = 2000;
+
+/**
+ * 插话队列的长度上限（spec 1.11-16）。
+ *
+ * 队列存在的理由是「上一条还在吐字时人已经打好了下一句」，不是「攒一批一起发」——
+ * 所以五档足够（够人把两条话打完），再多就是另一件事（批量任务，那属于工作流而不是对话）。
+ * 满了抛 `CHAT_QUEUE_FULL` 而不是静默丢最旧的：静默丢等于替人决定哪句话不用说了。
+ */
+export const MAX_QUEUED_INTERJECTS = 5;
 
 /**
  * 会话历史导出的字段契约版号（spec 5.6-09「字段命名稳定」）。
@@ -335,6 +345,15 @@ export class ChatSessionService extends Service {
   /** 正在流式的那一条助手消息；没有则为 undefined（P1 一个会话只允许一条在跑）。 */
   private live: ChatMessageView | undefined;
 
+  /**
+   * 排着等发出去的用户消息（spec 1.11-16），先进先出。
+   *
+   * 只在内存里，与 `this.live` 同一口径：正在流式的那半条回复重启后也保不住，
+   * 队列要是落库就会造出「app 被杀掉时留下一串永远发不出去的排队消息」这种孤儿数据。
+   * `sessionId` 在入队那一刻就记下——出队时人可能已经切到别的会话去了，而这句话属于它被打出来的那一段对话。
+   */
+  private pending: { sessionId: string; text: string; at: number }[] = [];
+
   /** 本次流式的取消句柄；停止/新建会话都会换一个新的，避免复用已 abort 的信号。 */
   private controller: AbortController | undefined;
 
@@ -361,7 +380,12 @@ export class ChatSessionService extends Service {
     const compaction = this.validCompactionRow(session.id);
     const coveredIds = new Set(compaction ? (JSON.parse(compaction.covered_ids) as string[]) : []);
     const messages = this.messagesOf(session.id).filter((message) => !coveredIds.has(message.id));
-    return { session, messages, compaction: compaction ? this.viewOfRow(compaction) : null };
+    return {
+      session,
+      messages,
+      compaction: compaction ? this.viewOfRow(compaction) : null,
+      queued: this.pending.map((entry, index) => ({ text: entry.text, position: index + 1 })),
+    };
   }
 
   /**
@@ -528,12 +552,14 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 发一条用户消息并起一次假回复的流式。
+   * 发一条用户消息。上一条还在吐字时**不拒**，改排进队（spec 1.11-16，2026-10-19 用户裁定）：
+   * 人在流式期间打好的下一句是有话要说的，结构化拒绝等于逼他先把想法抄在别处。
+   * 排队那一刻**不写库、不脱敏**——它还没进对话记录；这两件事都在真正派发那一刻做。
    * @param textRaw 渲染层传来的原文，按系统边界校验（去空、限长）
-   * @returns 刚进入流式态的助手消息（`isStreaming: true`），界面据此摆运行中指示
-   * @throws 空输入 `CHAT_EMPTY_INPUT`；超长 `CHAT_INPUT_TOO_LONG`；上一条还在跑 `CHAT_BUSY`
+   * @returns 立刻开流时是刚进入流式态的助手消息（`isStreaming: true`）；排进队时是那条排队读数
+   * @throws 空输入 `CHAT_EMPTY_INPUT`；超长 `CHAT_INPUT_TOO_LONG`；队列已满 `CHAT_QUEUE_FULL`
    */
-  send(textRaw: string): ChatMessageView {
+  send(textRaw: string): ChatMessageView | ChatQueuedView {
     const text = textRaw.trim();
     if (!text) throw new AppError('CHAT_EMPTY_INPUT', '消息内容为空，不写入会话', 'chat.session', {});
     if (text.length > MAX_USER_INPUT_CHARS) {
@@ -546,13 +572,34 @@ export class ChatSessionService extends Service {
         },
       );
     }
-    if (this.live) {
-      throw new AppError('CHAT_BUSY', '上一条回复还在生成中，先按「停止」再发送', 'chat.session', {
-        messageId: this.live.id,
-      });
-    }
     const sessionId = this.ensureSession();
     const at = Date.now();
+    if (this.live) {
+      if (this.pending.length >= MAX_QUEUED_INTERJECTS) {
+        throw new AppError(
+          'CHAT_QUEUE_FULL',
+          `队列里已经排着 ${String(this.pending.length)} 条，等它们发完再发（上限 ${String(MAX_QUEUED_INTERJECTS)} 条）`,
+          'chat.session',
+          { queued: this.pending.length, limit: MAX_QUEUED_INTERJECTS },
+        );
+      }
+      this.pending.push({ sessionId, text, at });
+      return { text, position: this.pending.length };
+    }
+    return this.dispatch(sessionId, text, at);
+  }
+
+  /**
+   * 把一条用户消息送进对话记录并起一次流式回复。
+   *
+   * `send()` 的直发段与排队出队段**共用这一条**（§2.2）：入队只是把「什么时候调它」往后挪，
+   * 脱敏、落库、建消息、起 `pump` 这四步在这条里一字不差，两边各写一份迟早漂成两种落库顺序。
+   * @param sessionId 这句话属于哪一段对话（入队那一刻就记下，不是出队时现问）
+   * @param text 已去空、未脱敏的用户原文
+   * @param at 这条消息的落库时间戳（排队的那条用入队时刻，于是库里的顺序 = 人打字的顺序）
+   * @returns 刚进入流式态的助手消息
+   */
+  private dispatch(sessionId: string, text: string, at: number): ChatMessageView {
     // 进入对话记录之前先脱敏（spec 5.6-05）：事件、内存镜像、落库三条去路共用这一份值，遮一处不如遮源头。
     const safeText = redactText(text);
     this.insertMessage(sessionId, 'user', [{ kind: 'text', text: safeText }], at);
@@ -572,7 +619,22 @@ export class ChatSessionService extends Service {
   }
 
   /**
+   * 收完尾之后把队里下一条放出去（spec 1.11-16）。
+   *
+   * 必须在 `done` **发出去之后**才起下一轮：界面那条 `done` 处理器会清掉流式镜像并重读快照，
+   * 顺序反过来就变成「刚起的新流被上一条的收尾擦掉」，表现为一句话说完就停在那儿不再往下走。
+   * @returns 起了下一轮则回它的助手消息；队列空则什么都不做
+   */
+  private drainPending(): ChatMessageView | undefined {
+    const next = this.pending.shift();
+    if (!next) return undefined;
+    return this.dispatch(next.sessionId, next.text, next.at);
+  }
+
+  /**
    * 中止正在进行的流式，并把已经吐出的部分**如实**落库（不做「假装说完」）。
+   *
+   * 队里排着的消息**不清**：它们还在 `finalize()` 之后依次发出去（spec 1.11-16）。
    * @returns 落库后的那条消息；没有在流式时返回 null
    */
   stop(): ChatMessageView | null {
@@ -981,6 +1043,9 @@ export class ChatSessionService extends Service {
       this.ctx.logger.warn(`会话压缩失败，本轮保留全部原文：${error instanceof Error ? error.message : String(error)}`);
     }
     this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: true });
+    // 出队放在 `done` 之后（理由见 `drainPending`）。按「停止」也会走到这里，于是队列里已经排好的那几条
+    // 仍然会依次发出去：那是人明确打出来并确认排上的话，替他扔掉比多等几秒贵得多。
+    this.drainPending();
     return { ...message, isStreaming: false };
   }
 

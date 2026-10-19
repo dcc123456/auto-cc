@@ -78,11 +78,12 @@ export type AppErrorCode =
   // 站点知识包（spec 2.2-08）与适配器登记（spec 2.2-07）：前者是数据不合法，后者是装配缺包。
   | 'KNOWLEDGE_PACK_INVALID'
   | 'PLATFORM_NOT_REGISTERED'
-  // 对话骨架（spec 1.11）：入参边界（空 / 超长）、并发（上一条还在流式）、档位枚举、注册表重复登记。
+  // 对话骨架（spec 1.11）：入参边界（空 / 超长）、队列（排满）、档位枚举、注册表重复登记。
+  // 「上一条还在流式」不再是错误——它排进队列（1.11-16），因此原来的 `CHAT_BUSY` 一支已随该裁定撤掉。
   // 界面按码决定是「把原因显示成一行提示」还是「什么都不改」。
   | 'CHAT_EMPTY_INPUT'
   | 'CHAT_INPUT_TOO_LONG'
-  | 'CHAT_BUSY'
+  | 'CHAT_QUEUE_FULL'
   | 'CHAT_AUTONOMY_INVALID'
   // 会话标题（spec 5.6-07）：空与超长都在写库之前拒掉，界面各说一句不同的话——
   // 前者是「还没填」，后者是「填太多」，合并成一句会让改了半截的人以为没保存成功。
