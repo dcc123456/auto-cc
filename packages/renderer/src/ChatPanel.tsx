@@ -7,12 +7,22 @@
  * 5.2-c 起，`/plan` 开头的那一句走 agent 循环：计划卡与逐步卡片流插在**同一段对话流**里
  * （plan 5.2-c 的切法），读数来自 `agent.loop.read` 与 `agent/run-progress`，同样不在这里推导。
  */
-import { Bot, Gauge, LoaderCircle, Send, Square, User, Workflow as WorkflowIcon } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Bot,
+  Gauge,
+  GripHorizontal,
+  ListOrdered,
+  LoaderCircle,
+  Send,
+  Square,
+  Workflow as WorkflowIcon,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AutonomyLevel,
   ChatMessageView,
+  ChatPart,
   ChatSnapshotView,
   ChatToolPart,
   ToolDescriptorView,
@@ -28,6 +38,7 @@ import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
 import { DeskExplainer, DeskSection } from './ui/disclosure';
+import { MarkdownBody } from './ui/markdown';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -59,62 +70,141 @@ type LiveStream = { sessionId: string; messageId: string; text: string; tool?: C
 const RUN_COMMAND_PREFIX = '/plan';
 
 /**
- * 正文胶囊的画法，按"谁在说"分两侧（历史消息与正在累加的那条共用，§2.2 不在两处各写一遍）。
- * 靠右一侧用亮一档的桌面底，靠左一侧压在更深的底上——左右之外还要能一眼分出是谁的话。
+ * 气泡的几何与排版，按"谁在说"分两侧（历史消息与正在累加的那条共用同一处画法，§2.2）。
+ *
+ * 2026-10-19 按 browser-copilot 的对话屏改：那边**没有头像**，人那侧靠右（上限 92%），
+ * 助手那侧是左侧满宽的一张 turn 面；正文 13px/1.5 并开中文禁则
+ * （`[line-break:strict]` 是 Tailwind 任意属性，§5.1 禁手写 CSS 与内联 style）。
+ *
+ * 底色仍用本仓的 ink 档而不是照抄那边的 `color-mix(accent 22%, panel-2)`：
+ * 那一条要么新造一枚令牌（机检第 12 节的双案表）、要么写 `*-wash`（第 9 节禁在面板层），
+ * 为一块气泡扩一张令牌表不划算。
  */
 const BUBBLE_CLASS = {
-  user: 'max-w-[85%] whitespace-pre-wrap break-words rounded-xl border border-line-strong bg-ink-800 px-3 py-2 leading-relaxed text-slate-200',
-  assistant:
-    'max-w-[85%] whitespace-pre-wrap break-words rounded-xl border border-line bg-ink-900/60 px-3 py-2 leading-relaxed text-slate-100',
+  user: 'max-w-[92%] whitespace-pre-wrap break-words rounded-xl border border-line-strong bg-ink-800 px-3 py-2 text-[13px] leading-[1.5] [line-break:strict]',
+  // 助手那侧不写 `whitespace-pre-wrap`：Markdown 的块级元素自带段间距，再叠一层预格式化会把
+  // JSX 里那些换行印成可见空格。行内换行由解析器按「软换行并空格、硬换行才 `<br>`」处理。
+  assistant: 'min-w-0 break-words text-[13px] leading-[1.5] [line-break:strict]',
 } as const;
 
+/** 一段对话里连着属于同一方的若干条消息，画面上并成一颗 turn（参考实现的 `groupEntries`）。 */
+type Turn = { key: string; role: 'user' | 'assistant'; messages: ChatMessageView[] };
+
 /**
- * 一条消息：**你说的话在右、agent 回的在左**（聊天软件里人人都有的那条直觉），各自的正文收进一块
- * 胶囊里，胶囊贴在 belong 的那一侧。`parts[]` 按顺序渲染（文本段 + 工具卡片段），
- * 工具卡片仍然跟正文同一列——它是 agent 那一侧的东西，不因为换了左右就换行。
- * @param message 主进程返回的消息视图
- * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
- * @returns 消息节点
+ * 把消息序列折成 turn：**只有助手那侧并**，人那侧一句就是一颗气泡。
+ *
+ * 依据只有"连着"：一条 user 出现就断开；助手那边不管几条（含正在流式的那条）都进同一张 turn 面。
+ * 人那侧不并的理由是两次发言之间必然隔着一次助手回复，并成一格等于把两句话画成同一句。
+ * @param messages 快照里的消息（流式那条已被滤掉）
+ * @param live 正在累加的那条助手消息；并进末尾那张 turn，末尾不是助手就自己起一张
+ * @returns 画面上一格一个 turn
  */
-function MessageBubble({
-  message,
-  toolMetas,
-}: {
-  message: ChatMessageView;
-  toolMetas: Map<string, ToolDescriptorView>;
-}) {
-  const isUser = message.role === 'user';
+function groupTurns(messages: ChatMessageView[], live: LiveStream | undefined): Turn[] {
+  const turns: Turn[] = [];
+  for (const message of messages) {
+    const tail = turns[turns.length - 1];
+    if (tail && tail.role === 'assistant' && message.role === 'assistant') {
+      tail.messages.push(message);
+      tail.key = `${tail.key}-${message.id}`;
+      continue;
+    }
+    turns.push({ key: message.id, role: message.role, messages: [message] });
+  }
+  if (!live) return turns;
+  const parts: ChatPart[] = live.text === '' ? [] : [{ kind: 'text', text: live.text }];
+  if (live.tool) parts.push(live.tool);
+  const streaming: ChatMessageView = {
+    id: live.messageId,
+    sessionId: live.sessionId,
+    role: 'assistant',
+    createdAt: 0,
+    isStreaming: true,
+    parts,
+  };
+  const tail = turns[turns.length - 1];
+  if (tail?.role === 'assistant') {
+    tail.messages.push(streaming);
+    tail.key = `${tail.key}-${streaming.id}`;
+    return turns;
+  }
+  return [...turns, { key: streaming.id, role: 'assistant', messages: [streaming] }];
+}
+
+/**
+ * 一个 turn：一颗气泡（人那侧）或一张 turn 面（助手那侧），里面的工具卡与正文同列。
+ *
+ * 三支读数锚点 `data-message-id` / `data-message-role` / `data-message-who` 逐条原样保留在
+ * **每一条消息**的容器上（5.6-01、5.2-13、6.2-34 的历史读数都解它们）：形状从头像格挪到了
+ * 消息容器上，锚点一个没少。
+ * @param turn 这一格要画的一串消息
+ * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
+ * @returns 消息流里的一格
+ */
+function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, ToolDescriptorView> }) {
+  const isUser = turn.role === 'user';
   return (
     <li
-      data-message-id={message.id}
-      data-message-role={message.role}
-      className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}
+      data-turn-role={turn.role}
+      className={
+        isUser ? 'flex justify-end' : 'flex flex-col gap-2 rounded-xl border border-line bg-ink-900/60 px-3 py-2.5'
+      }
     >
-      <span
-        data-message-who={isUser ? 'user' : 'assistant'}
-        className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border text-[10px] ${
-          isUser ? 'border-line-strong bg-ink-700 text-slate-100' : 'border-celadon/40 text-celadon'
-        }`}
-      >
-        {isUser ? <User size={12} /> : <Bot size={12} />}
-      </span>
-      <div className={`flex min-w-0 flex-1 flex-col gap-2 text-xs ${isUser ? 'items-end' : 'items-start'}`}>
-        {message.parts.map((part, index) =>
-          part.kind === 'text' ? (
-            <p
-              key={`${message.id}-text-${String(index)}`}
-              className={isUser ? BUBBLE_CLASS.user : BUBBLE_CLASS.assistant}
-              data-part-kind="text"
-            >
-              {part.text}
-            </p>
-          ) : (
-            <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
-          ),
-        )}
-      </div>
+      {turn.messages.map((message) => (
+        <div
+          key={message.id}
+          data-message-id={message.id}
+          data-message-role={message.role}
+          data-message-who={message.role}
+          // 1.11-02/03 的活体读数靠这支锚点轮询「还在不在打字」，它跟着的是那条正在流式的消息，不是某一格 turn。
+          data-testid={message.isStreaming ? 'chat-streaming-message' : undefined}
+          className={`flex min-w-0 flex-col gap-2 ${isUser ? 'max-w-[92%] items-end' : ''}`}
+        >
+          {message.parts.map((part, index) =>
+            part.kind === 'text' ? (
+              // 人那侧保持纯文本：气泡只有一格，等宽换行之外的花活会让人以为那不是自己打的那句话。
+              // 助手那侧走 Markdown（spec 6.2-36）：模型输出里的标题、列表与代码块是内容的一部分，压成一段就是丢信息。
+              isUser ? (
+                <p key={`${message.id}-text-${String(index)}`} className={BUBBLE_CLASS.user} data-part-kind="text">
+                  {part.text}
+                </p>
+              ) : (
+                <div
+                  key={`${message.id}-text-${String(index)}`}
+                  className={BUBBLE_CLASS.assistant}
+                  data-part-kind="text"
+                >
+                  <MarkdownBody text={part.text} />
+                </div>
+              )
+            ) : (
+              <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
+            ),
+          )}
+        </div>
+      ))}
     </li>
   );
+}
+
+/** 输入框高度的档位下标与字面量 class（见 `composerStep` 那条注释：Tailwind 只认源码里的字面量）。 */
+const COMPOSER_HEIGHT_CLASS = ['h-[72px]', 'h-[140px]', 'h-[220px]', 'h-[320px]', 'h-[520px]'] as const;
+/** 与上表逐档对齐的像素数，只为手柄那句读数报得出台面高度（class 里那个数字不给界面读）。 */
+const COMPOSER_HEIGHT_PX = [72, 140, 220, 320, 520] as const;
+const COMPOSER_DEFAULT_STEP = 1;
+const COMPOSER_HEIGHT_KEY = 'auto-cc.composerHeight';
+/** 每拖 40 像素换一档：档位之间落差很大（72→140→220），按像素逐格算只会一直停在同一档。 */
+const COMPOSER_DRAG_PIXELS_PER_STEP = 40;
+
+/**
+ * 从本机读回上次的高度档位。
+ * @returns 落在表内的下标；没存过、存的不是数字或越界时回缺省档（输入框读不出来时不该是一片空白）
+ */
+function readComposerStep(): number {
+  const stored = localStorage.getItem(COMPOSER_HEIGHT_KEY);
+  // 判空必须走在 `Number()` 前面：`Number(null)` 是 0，会把"没存过"静默读成最矮那一档。
+  if (stored === null) return COMPOSER_DEFAULT_STEP;
+  const saved = Number(stored);
+  return Number.isInteger(saved) && saved >= 0 && saved < COMPOSER_HEIGHT_CLASS.length ? saved : COMPOSER_DEFAULT_STEP;
 }
 
 /**
@@ -187,6 +277,10 @@ export function ChatPanel() {
   const toolMetas = useMemo(() => new Map(tools.map((tool) => [tool.id, tool])), [tools]);
   const messages = snapshot?.messages.filter((message) => !message.isStreaming) ?? [];
   const isStreaming = liveStream !== undefined;
+  /** 排着等发出去的那些（spec 1.11-16）；空数组就是没插话。事实由主进程给，界面不自己数。 */
+  const queued = snapshot?.queued ?? [];
+  /** 画面上一格一个 turn（助手那侧连着的那几条并成一格，见 `groupTurns`）。 */
+  const turns = useMemo(() => groupTurns(messages, liveStream), [messages, liveStream]);
   /**
    * 当前这条 run 的局部绑定。
    * 沉淀卡的两个动作要把 runId 交给主进程，而 `agentRun.run` 是属性访问、进了闭包就不再收窄，
@@ -210,12 +304,12 @@ export function ChatPanel() {
   const { busy, notice, run: call } = useBridgeAction(read);
 
   /**
-   * 发送输入框里的话；流式期间不发（主进程会以 `CHAT_BUSY` 结构化拒绝，但按钮先禁用更清楚）。
+   * 发送输入框里的话。流式期间**照发**——主进程把它排进队列（spec 1.11-16），上一条收完自动轮到它。
    * `/plan` 开头那一句走 agent 循环：它不进对话表，只在同一段流里起一张计划卡（spec 5.2-03）。
    */
   const submit = () => {
     const text = draft.trim();
-    if (!text || isStreaming) return;
+    if (!text) return;
     if (text.startsWith(RUN_COMMAND_PREFIX)) {
       // 先清输入框再派发：`propose` 是异步的，而输入区在任务跑起来时不该留着上一条命令（5.2-12）。
       // 前缀后面是空的也照样交给主进程——它用 `AGENT_LOOP_EMPTY_GOAL` 结构化拒绝，
@@ -230,23 +324,77 @@ export function ChatPanel() {
   };
 
   /**
-   * 发送按钮按不动的原因是哪一个：三个判据按"离手最近"排（先说在飞的这条，再说没内容）。
+   * 发送按钮按不动的原因是哪一个：两个判据按"离手最近"排（先说在飞的那一次调用，再说没内容）。
+   * **流式不再是一支原因码**——那条话现在进队列而不是被拒（1.11-16），按下去就是排上的意思。
    * 原因码进 `data-disabled-reason`，同一句话的人话版走语言包（6.2-06：禁用必须说得出为什么）。
    */
-  const sendReason =
-    busy !== undefined ? 'BUSY' : isStreaming ? 'STREAMING' : draft.trim() === '' ? 'INPUT_EMPTY' : undefined;
+  const sendReason = busy !== undefined ? 'BUSY' : draft.trim() === '' ? 'INPUT_EMPTY' : undefined;
   const isSendDisabled = sendReason !== undefined;
+
+  /** 中文输入法候选词上敲的那一下回车属于 IME，不属于"发送"。 */
+  const composingRef = useRef(false);
 
   /**
    * 回车发送、Shift+回车换行（spec 1.11-02）。
+   *
+   * `isComposing` 与 `composingRef` 两个判据都要：前者覆盖多数浏览器，后者兜住
+   * `compositionend` 晚于 `keydown` 到达的那种顺序（中文输入法在部分平台上正是这个次序）。
+   * 不守卫的后果很具体：正在选词时敲回车，半句拼音连着候选框一起被发出去。
    * @param event 键盘事件
    */
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || composingRef.current) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submit();
     }
   };
+
+  /**
+   * 输入框的高度档位（2026-10-19 按参考对话屏：缺省 140px，可拖到 72–520px）。
+   *
+   * 做成**吸附档**而不是连续高度，是因为连续高度只能靠内联 `style` 或运行期写 CSS 变量落到 DOM 上，
+   * §5.1 两条都禁；于是拖拽按位移折算档位、class 从上表取字面量（Tailwind 只认源码里出现过的类名）。
+   */
+  const [composerStep, setComposerStep] = useState(readComposerStep);
+  useEffect(() => {
+    localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerStep));
+  }, [composerStep]);
+  /** 拖拽起点：记下按下时的 y 与当时的档位，移动时按位移折算而不是逐帧累加（累加会漂）。 */
+  const composerDragRef = useRef<{ y: number; step: number } | null>(null);
+
+  const onComposerDragStart = (event: PointerEvent<HTMLButtonElement>): void => {
+    composerDragRef.current = { y: event.clientY, step: composerStep };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onComposerDragMove = (event: PointerEvent<HTMLButtonElement>): void => {
+    const start = composerDragRef.current;
+    if (!start) return;
+    const moved = Math.round((start.y - event.clientY) / COMPOSER_DRAG_PIXELS_PER_STEP);
+    setComposerStep(Math.min(Math.max(start.step + moved, 0), COMPOSER_HEIGHT_CLASS.length - 1));
+  };
+
+  const onComposerDragEnd = (event: PointerEvent<HTMLButtonElement>): void => {
+    composerDragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  /**
+   * 这一轮已经吐了多少秒（running 那一行上的读数）。
+   * 只在流式期间挂定时器，`setInterval` 在这个文件里只服务这一件事——机检第 5/7 条禁的是
+   * 「在定时器里读 workflow 服务」与「画布自读进度」，本地计时不在其中。
+   */
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!isStreaming) return;
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => clearInterval(timer);
+  }, [isStreaming]);
 
   return (
     <section data-testid="chat-panel" className="flex h-full flex-col rounded-xl border border-line bg-ink-900/60">
@@ -347,38 +495,15 @@ export function ChatPanel() {
           消息流留 120px 地板：上面几条常驻读数带（会话条、压缩读数、档位、免确认白名单、接管横幅）
           在 737px 高的窗口里没有地板时会被挤成 24px 的一条缝，任务卡整个看不见（5.7-d 实测）。 */}
       <div ref={scrollRef} data-testid="chat-scroll" className="min-h-[120px] flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && !isStreaming && !agentRun.run && !workflowRunView ? (
-          <p className="text-[11px] text-slate-500" data-testid="chat-empty">
+        {turns.length === 0 && !agentRun.run && !workflowRunView ? (
+          <p className="mx-auto py-6 text-center text-xs text-slate-400" data-testid="chat-empty">
             {t('chat.empty')}
           </p>
         ) : (
           <ul data-testid="chat-messages" className="flex flex-col gap-3">
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} toolMetas={toolMetas} />
+            {turns.map((turn) => (
+              <MessageTurn key={turn.key} turn={turn} toolMetas={toolMetas} />
             ))}
-            {liveStream ? (
-              <li
-                data-testid="chat-streaming-message"
-                data-message-id={liveStream.messageId}
-                data-message-role="assistant"
-                className="flex gap-2.5"
-              >
-                <span
-                  data-message-who="assistant"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-celadon/40 text-[10px] text-celadon"
-                >
-                  <Bot size={12} />
-                </span>
-                <div className="flex min-w-0 flex-1 flex-col items-start gap-2 text-xs">
-                  <p className={BUBBLE_CLASS.assistant} data-part-kind="text">
-                    {liveStream.text}
-                  </p>
-                  {liveStream.tool ? (
-                    <ToolCard part={liveStream.tool} meta={toolMetas.get(liveStream.tool.toolId)} />
-                  ) : null}
-                </div>
-              </li>
-            ) : null}
             {/* 计划卡与逐步卡片流插在同一段对话流末尾（plan 5.2-c：五条 V 共用这段流，不另开一条历史）。 */}
             {agentRun.run ? (
               <AgentRunPanel
@@ -438,6 +563,7 @@ export function ChatPanel() {
         >
           <LoaderCircle size={11} className="animate-spin" />
           {t('chat.streaming')}
+          <span className="ml-auto text-slate-400">{t('chat.streamingElapsed', { seconds: elapsedSeconds })}</span>
         </p>
       ) : null}
 
@@ -450,8 +576,37 @@ export function ChatPanel() {
         </p>
       ) : null}
 
-      {/* 流式期间只禁用发送按钮，输入区一直能用（spec 1.11-13：运行中要能打出「停一下」）。 */}
+      {/* 流式期间发送键照常可按——按下去是排进队列（spec 1.11-16），不再是拒发。
+          拖拽手柄走原件层：裸 `<button>` 在面板里会被机检第 10 条拦下。 */}
       <footer className="border-t border-line px-4 py-3">
+        <DeskButton
+          action="chat-composer-resize"
+          variant="ghost"
+          className="mb-1 flex h-4 w-full cursor-ns-resize touch-none items-center justify-center"
+          aria-label={t('chat.composerHeight', {
+            index: composerStep + 1,
+            height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
+          })}
+          title={t('chat.composerResize')}
+          markers={{ testid: 'chat-composer-resize' }}
+          onPointerDown={onComposerDragStart}
+          onPointerMove={onComposerDragMove}
+          onPointerUp={onComposerDragEnd}
+        >
+          <GripHorizontal size={12} />
+        </DeskButton>
+        {/* 队列读数（spec 1.11-16）紧贴输入框上沿：它是「这句话还没发出去」的证据，
+            画在消息流里会被当成一条消息，而它那时还不是消息。 */}
+        {queued.length > 0 ? (
+          <p
+            data-testid="chat-queued"
+            className="mb-1.5 flex items-center gap-1.5 text-[11px] text-celadon"
+            data-queued-count={queued.length}
+          >
+            <ListOrdered size={11} />
+            {t('chat.queued', { count: queued.length })}
+          </p>
+        ) : null}
         <DeskTextarea
           action="chat-input"
           size="composer"
@@ -460,8 +615,14 @@ export function ChatPanel() {
           value={draft}
           onValueChange={setDraft}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
           placeholder={t('chat.inputPlaceholder')}
-          className="w-full"
+          className={`w-full resize-none ${COMPOSER_HEIGHT_CLASS[composerStep] ?? ''}`}
         />
         <div className="mt-2 flex items-center gap-2">
           <DeskButton
@@ -474,7 +635,7 @@ export function ChatPanel() {
             onClick={submit}
           >
             <Send size={12} />
-            {t('chat.send')}
+            {isStreaming ? t('chat.sendQueued') : t('chat.send')}
           </DeskButton>
           <DeskButton
             action="stop"
