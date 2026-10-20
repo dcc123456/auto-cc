@@ -10,12 +10,15 @@
 import {
   ArrowUp,
   ChevronDown,
+  Copy,
   Gauge,
-  GripHorizontal,
   ListOrdered,
   LoaderCircle,
+  SlidersHorizontal,
+  Sparkles,
   Square,
   Workflow as WorkflowIcon,
+  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -37,9 +40,10 @@ import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
-import { DeskExplainer, DeskSection } from './ui/disclosure';
+import { DeskExplainer, DeskHint } from './ui/disclosure';
 import { MarkdownBody } from './ui/markdown';
 import { formatClock } from './format';
+import { pushDeskToast } from './deskToast';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
@@ -135,6 +139,78 @@ function groupTurns(messages: ChatMessageView[], live: LiveStream | undefined): 
 }
 
 /**
+ * 顶栏与消息行上的图标档键的几何（设计稿 v2 的 `.icon`：一枚 30px 的 ghost 方块）。
+ * 文案一律收进 `sr-only` 与气泡（`tip`），
+ * 图标居中靠 `justify-center`：原件的 `compact` 档给的是 `px-2`，不居中时 13px 的图标会贴在左边。
+ */
+const ICON_CELL_CLASS = 'h-[30px] w-[30px] justify-center';
+
+/**
+ * 消息下面那一行的图标档（稿 `.actions .icon`：28px 见方，比顶栏那一排小一档）。
+ * 稿上 `.actions` 自己高 28、`gap:1px`、离正文 10px，所以这一行的 class 全在这里，不与顶栏共用。
+ */
+const ACTION_CELL_CLASS = 'h-7 w-7 justify-center';
+
+/**
+ * 一条助手回复收完之后，它下面那一行：复制 + 落款（设计稿 v2 的 `.actions`）。
+ *
+ * 稿上这一行有六格（复制 / 有用 / 不对 / 转发 / 钉为事实 / 更多）+ 落款 +「由 AI 生成」那句，
+ * 用户 2026-10-19 裁定**只补有真读数的**：复制走渲染层自己的剪贴板（`navigator.clipboard`，
+ * 与 `overlays.tsx` 里 `navigator.userAgent` 同源的一族浏览器能力，不过界），落款是主进程给的落库时间。
+ * 顶/踩要一条反馈通道（全仓没有表、没有桥调用）、「钉为事实」要沉淀入口按 run 认领、
+ * 「由 AI 生成」在助手回复仍是本地确定性模板时（`packages/agent/src/session.ts`）是谎报，
+ * 所以那几格继续不画（§2.6 不拿假控件凑版面）。
+ * @param message 那条已经落库的助手消息（`createdAt` 为 0 的流式那条不进这一行）
+ * @returns 28px 高的一行；正文为空时整行不渲染
+ */
+function MessageActions({ message }: { message: ChatMessageView }) {
+  const { t } = useTranslation();
+  // 只把正文交给剪贴板：工具行是界面读数，不是模型说过的话，复制出来该是人能直接贴走的那段文字。
+  const text = message.parts
+    .filter((part) => part.kind === 'text')
+    .map((part) => part.text)
+    .join('\n\n');
+  if (!text) return null;
+
+  /** 写剪贴板。回执走左下角那只 toast：结果不在当前视野里（它在剪贴板里），而面板里没有别的地方放这句。 */
+  const copy = (): void => {
+    navigator.clipboard.writeText(text).then(
+      () => pushDeskToast({ action: 'chat-copy-message', tone: 'jade', message: t('chat.copied') }),
+      (error: unknown) =>
+        pushDeskToast({
+          action: 'chat-copy-message',
+          tone: 'seal',
+          message: t('chat.copyFailed', { reason: error instanceof Error ? error.message : String(error) }),
+        }),
+    );
+  };
+
+  return (
+    <div className="mt-[10px] flex h-7 items-center gap-px">
+      <DeskButton
+        action="copy-message"
+        variant="ghost"
+        compact
+        className={ACTION_CELL_CLASS}
+        tip={t('chat.copy')}
+        tipAlign="start"
+        markers={{ testid: 'chat-copy-message', 'message-id': message.id }}
+        onClick={copy}
+      >
+        <Copy size={13} />
+        <span className="sr-only">{t('chat.copy')}</span>
+      </DeskButton>
+      {/* 落款只画主进程给得起的那一位：`createdAt` 是落库时间戳，正在累加的那条还没有（合成读数是 0）。
+          只挂助手那侧也是稿上的画法（`.msg[data-message-role=user]` 里没有 `footer`）：人那句的时间
+          由它上面那条虚线和上一条落款推得出来，两行并排各敲一个时间戳读起来像台账。 */}
+      <span className="ml-1.5 text-[12px] leading-none text-slate-400" data-message-stamp={String(message.createdAt)}>
+        {formatClock(message.createdAt, '', 'minute')}
+      </span>
+    </div>
+  );
+}
+
+/**
  * 一个 turn：人那侧一串纯文本，助手那侧一张通栏稿面，里面的工具行与正文同列。
  *
  * 三支读数锚点 `data-message-id` / `data-message-role` / `data-message-who` 逐条原样保留在
@@ -180,17 +256,7 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
               <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
             ),
           )}
-          {/* 落款那一行只画主进程给得起的那一位：`createdAt` 是落库时间戳，正在累加的那条还没有（合成读数是 0）。
-              设计稿上图标动作那一排（复制 / 有用 / 不对 / 转发 / 钉为事实）与「由 AI 生成」那句**没有发货实现**
-              ——对话的助手回复此刻是本地确定性模板（`packages/agent/src/session.ts`），自称 AI 生成的那句是谎报，
-              所以这一行只有时间；那几格记在 spec 的延后清单里，不拿假按钮凑版面（§2.6）。
-              只挂在助手那侧也是稿上的画法（`.msg[data-message-role=user]` 里没有 `footer`）：人那句的时间
-              由它上面那条虚线和上一条落款推得出来，两行并排各敲一个时间戳读起来像台账。 */}
-          {!isUser && message.createdAt > 0 ? (
-            <p className="text-[12px] leading-none text-slate-400" data-message-stamp={String(message.createdAt)}>
-              {formatClock(message.createdAt, '', 'minute')}
-            </p>
-          ) : null}
+          {!isUser && message.createdAt > 0 ? <MessageActions message={message} /> : null}
         </div>
       ))}
     </li>
@@ -198,13 +264,11 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
 }
 
 /** 输入框高度的档位下标与字面量 class（见 `composerStep` 那条注释：Tailwind 只认源码里的字面量）。 */
-const COMPOSER_HEIGHT_CLASS = ['h-[72px]', 'h-[140px]', 'h-[220px]', 'h-[320px]', 'h-[520px]'] as const;
+const COMPOSER_HEIGHT_CLASS = ['h-[66px]', 'h-[140px]', 'h-[220px]', 'h-[320px]', 'h-[520px]'] as const;
 /** 与上表逐档对齐的像素数，只为手柄那句读数报得出台面高度（class 里那个数字不给界面读）。 */
-const COMPOSER_HEIGHT_PX = [72, 140, 220, 320, 520] as const;
-const COMPOSER_DEFAULT_STEP = 1;
+const COMPOSER_HEIGHT_PX = [66, 140, 220, 320, 520] as const;
+const COMPOSER_DEFAULT_STEP = 0;
 const COMPOSER_HEIGHT_KEY = 'auto-cc.composerHeight';
-/** 每拖 40 像素换一档：档位之间落差很大（72→140→220），按像素逐格算只会一直停在同一档。 */
-const COMPOSER_DRAG_PIXELS_PER_STEP = 40;
 
 /**
  * 发送那颗圆片（设计稿 v2 的 `.send`：实心圆 + 反色箭头，没有文案）。
@@ -225,8 +289,34 @@ const SEND_LIVE_CLASS = 'h-8 w-8 justify-center rounded-full bg-slate-50';
 /** 按不动那一态的圆片：底色、字色都由 `buttonClass` 的禁用分支给（六档同色，spec 6.2-10）。 */
 const SEND_DEAD_CLASS = 'h-8 w-8 justify-center rounded-full';
 
-/** 档位那一颗 pill 的几何（稿 `.pill`：28px 高的圆角胶囊）。它只是**跳闸**，不是第二只开关（见 `autonomyJump`）。 */
+/**
+ * 档位那一颗 pill 的几何（稿 `.pill`：28px 高的圆角胶囊）。它**开合**的是输入卡上方那一格档位面板。
+ *
+ * 字号不挂在这里：原件的 `compact` 档已经挂了 `text-[11px]`，而活体实测**同族两条按样式表顺序决胜**，
+ * 且任意属性那一族排在 utility 前面（本轮读数：`[font-size:12.5px]` 偏移 47881、`text-[11px]` 48164，
+ * 于是计算值仍是 11px）。12.5px 因此挂在**标签那一格**（`data-testid="chat-autonomy-current"`）——
+ * 子节点自己的声明永远赢过继承，与发送键箭头字色挂在图标自己那一格是同一条办法。
+ */
 const TIER_PILL_CLASS = 'h-7 max-w-[150px] justify-center rounded-full';
+
+/**
+ * 卡内工具条上那颗「当前对话模型」的几何（稿 `.pill` 的展示档）。
+ *
+ * 它**不是键**：稿上那颗带着 ⌄ 与切换下拉，而全仓没有"在对话里换模型"的写口（换模型在模型设置屏），
+ * 所以这一格只画读数、不给 hover、不给 ⌄（§6.2-25：不可点的元素绝不长出 hover）。
+ * 底色取 `bg-ink-850` 一档：卡片自己是 `bg-ink-800`，同一块底色会把读数糊进卡面。
+ */
+const MODEL_PILL_CLASS = 'flex h-7 max-w-[190px] items-center gap-1.5 rounded-full bg-ink-850 px-2.5 text-[12.5px]';
+
+/**
+ * 档位面板与免确认白名单面板共用的那一格外框（用户 2026-10-19 裁定：流上方不再有卡片，
+ * 两格都收进**输入卡上方**那一层，由顶栏的两颗图标或卡内那颗胶囊点开）。
+ *
+ * `max-h-[240px] + overflow-y-auto`：这一格长在 flex 列的最下方，正文（三档对比、两份清单）展开时
+ * 不许把输入卡顶出窗口——原先那几条常驻带在 737px 高的窗口里正是这么把消息流挤成一条缝的（5.7-d 实测）。
+ */
+const DESK_PANEL_CLASS =
+  'mb-2 max-h-[240px] min-w-0 overflow-y-auto rounded-2xl border border-line bg-ink-850 px-3 py-2.5';
 
 /**
  * 从本机读回上次的高度档位。
@@ -241,7 +331,7 @@ function readComposerStep(): number {
 }
 
 /**
- * 对话面板：消息流 + 输入区 + 运行中指示三块最小结构（spec 1.11-02），加档位一行与 `ChatSessionBar` 那条会话操作带。
+ * 对话面板：一条 46px 顶栏 + 消息流（含流内那条压缩窄行）+ 一张输入卡（含卡上方那两格按需展开的面板）。
  * @returns 占满可用高度的聊天面板；主进程快照未回来之前消息流显示占位文案
  */
 export function ChatPanel() {
@@ -250,6 +340,16 @@ export function ChatPanel() {
   const [liveStream, setLiveStream] = useState<LiveStream>();
   const [tools, setTools] = useState<ToolDescriptorView[]>([]);
   const [draft, setDraft] = useState('');
+  /**
+   * 此刻开在输入卡上方的是哪一格（undefined = 都没开）。
+   *
+   * 档位与免确认白名单**各开各的**（用户 2026-10-19 裁定：顶栏两只图标、卡内那颗胶囊点开的是浮层）：
+   * 它们原先住在同一格 `DeskSection` 里"一起开合"，那是 5.3-07 的口径；这一轮按稿换成了两个入口两格内容，
+   * 由顶栏的 `Zap` / `SlidersHorizontal` 与那颗胶囊共同持有这一位状态——面板自己不留第二份开合事实（§2.7）。
+   */
+  const [deskPanel, setDeskPanel] = useState<'tier' | 'policy'>();
+  /** 当前对话通道用的模型名（稿 `.pill` 右侧那一颗的读数）；没配齐时为 undefined，画「未配置」那句。 */
+  const [chatModel, setChatModel] = useState<string>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bridge = window.autoCC;
   // 对话与工作流镜像同一个 runner 实例（spec 1.10-08 的后半句判据）。
@@ -282,10 +382,22 @@ export function ChatPanel() {
     if (reply?.ok) setTools(reply.value);
   }, [bridge]);
 
+  /**
+   * 读对话通道当下用的那个模型名（稿上卡内工具条右侧那颗 pill 的读数）。
+   *
+   * 事实只有 `llm.settings.read` 那一份（`LlmLegView.model`，端点/模型名/key 三项没齐时是 null），
+   * 界面不猜也不留第二份（§2.7）。这一格没有"对话里换模型"的写口，所以它只做读数、不做起点。
+   */
+  const readModel = useCallback(async () => {
+    const reply = await bridge?.llm['settings.read']();
+    if (reply?.ok) setChatModel(reply.value.legs.find((leg) => leg.leg === 'chat')?.model ?? undefined);
+  }, [bridge]);
+
   useEffect(() => {
     void read();
     void readTools();
-  }, [read, readTools]);
+    void readModel();
+  }, [read, readTools, readModel]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -312,6 +424,12 @@ export function ChatPanel() {
   const isStreaming = liveStream !== undefined;
   /** 排着等发出去的那些（spec 1.11-16）；空数组就是没插话。事实由主进程给，界面不自己数。 */
   const queued = snapshot?.queued ?? [];
+  /**
+   * 这一段会话的压缩读数（5.6-04）：`undefined` = 这段还没折过。
+   * 同一个引用喂两处——流内那条窄行（`ChatCompactionBanner`）与卡下那条长度读数，
+   * 两边都只是画它，不在界面侧算第二个数（§2.5）。
+   */
+  const compaction = snapshot?.compaction;
   /** 画面上一格一个 turn（助手那侧连着的那几条并成一格，见 `groupTurns`）。 */
   const turns = useMemo(() => groupTurns(messages, liveStream), [messages, liveStream]);
   /**
@@ -384,39 +502,78 @@ export function ChatPanel() {
   };
 
   /**
-   * 输入框的高度档位（2026-10-19 按参考对话屏：缺省 140px，可拖到 72–520px）。
+   * 输入框的高度档位（2026-10-20 按稿 `.card textarea`：缺省 66px，可拖到 66–520px）。
    *
    * 做成**吸附档**而不是连续高度，是因为连续高度只能靠内联 `style` 或运行期写 CSS 变量落到 DOM 上，
    * §5.1 两条都禁；于是拖拽按位移折算档位、class 从上表取字面量（Tailwind 只认源码里出现过的类名）。
    */
   const [composerStep, setComposerStep] = useState(readComposerStep);
-  /**
-   * 输入区那颗档位 pill 的**跳闸**读数（undefined = 这一屏还没跳过）。
-   * 它不是第二只档位开关（§2.5）：按下只把上面那一格 `DeskSection` 强制打开并落盘，
-   * 真正切换档位的入口仍在那一格的 `DeskSegmented` 上——同一件事一个入口。
-   */
-  const [autonomyJump, setAutonomyJump] = useState<number>();
   useEffect(() => {
     localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerStep));
   }, [composerStep]);
+  /**
+   * 开/合输入卡上方那一格。
+   *
+   * 三个入口（顶栏的 `Zap`、顶栏的 `SlidersHorizontal`、卡内那颗档位胶囊）都调这一只，
+   * 于是"这一格开没开"只有一个来源；档位本身**仍然只有一个写口**（面板里的 `DeskSegmented`，§2.5），
+   * 这里开的只是那一格。
+   * @param which 要开的那一格
+   */
+  const toggleDeskPanel = (which: 'tier' | 'policy'): void => {
+    setDeskPanel((previous) => (previous === which ? undefined : which));
+  };
   /** 拖拽起点：记下按下时的 y 与当时的档位，移动时按位移折算而不是逐帧累加（累加会漂）。 */
   const composerDragRef = useRef<{ y: number; step: number } | null>(null);
+  /** 是否正在拖：气泡在这期间改报当前高度，手一松就回到「拖动改高度」那句。 */
+  const [composerDragging, setComposerDragging] = useState(false);
 
+  /**
+   * 手柄贴在卡片的**上沿**：卡片是底边锚定的，加高时只有上沿跟着指针走——手柄若挂在卡底，
+   * 拖动时它自己一动不动、只有远处的顶边在跳，这就是 2026-10-20 那句「拖拽也不对」的观感来源。
+   */
   const onComposerDragStart = (event: PointerEvent<HTMLButtonElement>): void => {
     composerDragRef.current = { y: event.clientY, step: composerStep };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    setComposerDragging(true);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // 合成事件或指针已不在途时捕获会抛；拖动本身不依赖它（move 仍派发在节点上）。
+    }
   };
 
+  /**
+   * 按**高度差就近吸附**：每档之间的落差是 74–200px，按固定 40px 一档折算会让手柄落后指针一大截。
+   * @param event 指针移动事件；`clientY` 与起点相减得到「想加/减多少像素」
+   */
   const onComposerDragMove = (event: PointerEvent<HTMLButtonElement>): void => {
     const start = composerDragRef.current;
     if (!start) return;
-    const moved = Math.round((start.y - event.clientY) / COMPOSER_DRAG_PIXELS_PER_STEP);
-    setComposerStep(Math.min(Math.max(start.step + moved, 0), COMPOSER_HEIGHT_CLASS.length - 1));
+    if (event.buttons === 0) {
+      composerDragRef.current = null;
+      setComposerDragging(false);
+      return;
+    }
+    const startHeight = COMPOSER_HEIGHT_PX[start.step] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP] ?? 66;
+    const wanted = startHeight + (start.y - event.clientY);
+    let nearestStep = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    COMPOSER_HEIGHT_PX.forEach((height, step) => {
+      const distance = Math.abs(height - wanted);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestStep = step;
+      }
+    });
+    setComposerStep(nearestStep);
   };
 
   const onComposerDragEnd = (event: PointerEvent<HTMLButtonElement>): void => {
+    if (!composerDragRef.current) return;
     composerDragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    setComposerDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   /**
@@ -439,7 +596,9 @@ export function ChatPanel() {
     <section data-testid="chat-panel" className="flex h-full flex-col rounded-xl border border-line bg-ink-900/60">
       {/* 顶栏只有一条（设计稿 v2 的 `.bar`）：原先上面还压着一条 `Bot` 图标 + 「对话」的横条，
           两条都在说"这是对话"，而参考图那一行说的是"这是哪一条会话"。会话三操作与它合成 46px 的一条，
-          `chat-workflow-mirror` 那一位读数跟着搬进条尾（testid 与文案一字未改，1.10-08 / 5.4-07 的读数照旧）。 */}
+          `chat-workflow-mirror` 那一位读数跟着搬进条尾（testid 与文案一字未改，1.10-08 / 5.4-07 的读数照旧）。
+          条尾右组现在是**图标档**（稿上那排 `⚡` / `sliders`）：档位与免确认白名单各占一格、各开各的
+          （用户 2026-10-19 裁定：「档位收成卡内那颗胶囊点开的浮层、免确认白名单收进顶栏一只图标」）。 */}
       <ChatSessionBar
         session={snapshot?.session}
         read={read}
@@ -447,78 +606,51 @@ export function ChatPanel() {
           workflowRun ? (
             <span
               data-testid="chat-workflow-mirror"
-              className="flex items-center gap-1 rounded-chip border border-line px-2 py-1 text-[10px] text-slate-400"
+              className="flex items-center gap-1 rounded-chip bg-ink-850 px-2 py-1 text-[10px] text-slate-400"
             >
               <WorkflowIcon size={11} />
               {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
             </span>
           ) : null
         }
+        rightActions={
+          <>
+            <DeskButton
+              action="chat-autonomy-toggle"
+              variant={deskPanel === 'tier' ? 'solid' : 'ghost'}
+              compact
+              className={ICON_CELL_CLASS}
+              tip={t('agent.autonomy.section')}
+              tipPlacement="bottom"
+              tipAlign="end"
+              markers={{ 'desk-panel': deskPanel ?? 'none', tier: snapshot?.session.autonomy ?? 'unknown' }}
+              onClick={() => toggleDeskPanel('tier')}
+            >
+              {/* 全自动=风险档，那颗图标跟着染朱砂；其余两档只是"选中"，不预支任何语气（与 DeskSegmented 同口径）。 */}
+              <Zap size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
+              <span className="sr-only">{t('agent.autonomy.section')}</span>
+            </DeskButton>
+            <DeskButton
+              action="agent-policy-toggle"
+              variant={deskPanel === 'policy' ? 'solid' : 'ghost'}
+              compact
+              className={ICON_CELL_CLASS}
+              tip={t('agent.policy.heading')}
+              tipPlacement="bottom"
+              tipAlign="end"
+              markers={{ 'desk-panel': deskPanel ?? 'none' }}
+              onClick={() => toggleDeskPanel('policy')}
+            >
+              <SlidersHorizontal size={13} />
+              <span className="sr-only">{t('agent.policy.heading')}</span>
+            </DeskButton>
+          </>
+        }
       />
 
-      {/* 压缩读数是一条独立的窄带（spec 5.6-04）：它说的是「这段对话还有多少没画出来」，
-          与消息流、与会话操作带都不是同一件事，画成一条假消息会让人以为模型说过那句话。 */}
-      <ChatCompactionBanner compaction={snapshot?.compaction} />
-
-      {/* 档位与「哪些动作已免确认」是同一件事的两半（spec 5.3-07），所以收成**同一格、一起开合**：
-          只收其中一半会让人读不出「这一档下这一步到底问不问我」，而这条常驻带原先要吃掉 90–116px 的
-          消息流空间。收起态仍把当下档位留在 summary 那一行（`chat-autonomy-current` 这支读数没挪走），
-          人不点开也知道此刻是谁在做主。 */}
-      <DeskSection
-        id="agent.autonomy"
-        markers={{ testid: 'chat-autonomy-section' }}
-        className="mx-4 my-3"
-        openSignal={autonomyJump}
-        title={
-          <span className="flex items-center gap-1.5">
-            <Gauge size={12} />
-            {t('agent.autonomy.section')}
-          </span>
-        }
-        summary={
-          <span data-testid="chat-autonomy-current">
-            {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
-          </span>
-        }
-      >
-        <DeskSegmented
-          action="chat-autonomy"
-          markers={{ testid: 'chat-autonomy-switch' }}
-          value={snapshot?.session.autonomy}
-          busy={busy !== undefined}
-          onSelect={(level) =>
-            void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
-              bridge?.chat['session.setAutonomy'](level),
-            )
-          }
-          options={AUTONOMY_OPTIONS.map((level) => ({
-            value: level,
-            label: t(`agent.autonomy.${level}`),
-            // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
-            isRisk: level === 'auto',
-            markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
-          }))}
-        />
-        {/* 当下这一档"替我做主到哪一步"必须明面上说一句（档位是人选的，选错了界面不替他兜），
-            三档的完整对比进披露层——那是教材，不是此刻的读数。 */}
-        <p data-testid="chat-autonomy-why" className="mt-2 text-[11px] leading-relaxed text-slate-400">
-          {snapshot ? t(`agent.autonomy.why.${snapshot.session.autonomy}`) : t('chat.loading')}
-        </p>
-        <DeskExplainer id="agent.autonomy-compare" className="mt-1.5" label={t('agent.autonomy.compareToggle')}>
-          <span className="flex flex-col gap-1.5">
-            {AUTONOMY_OPTIONS.map((level) => (
-              <span key={level} className="flex gap-1.5">
-                <span className="shrink-0 font-semibold text-slate-200">{t(`agent.autonomy.${level}`)}</span>
-                <span className="min-w-0">{t(`agent.autonomy.compare.${level}`)}</span>
-              </span>
-            ))}
-          </span>
-        </DeskExplainer>
-        <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
-      </DeskSection>
-
-      {/* 接管横幅贴在档位/白名单之下、消息流之上（spec 5.5-01）：它说的是「这块页面此刻在谁手里」，
-          与档位（授权范围）和卡片（某一步的等待）都不是一件事，塞进任何一张卡里都会让人漏看它。 */}
+      {/* 接管横幅压在顶栏之下、消息流之上，并收成**一行**（spec 5.5-01；用户 2026-10-19 裁定）：
+          它说的是「这块页面此刻在谁手里」，与档位（授权范围）和卡片（某一步的等待）都不是一件事，
+          塞进任何一张卡里都会让人漏看它——但它自己不该再占成一条 36px 的带。 */}
       <TakeoverBanner
         state={takeover.state}
         elapsedMs={takeover.elapsedMs}
@@ -529,17 +661,23 @@ export function ChatPanel() {
       />
 
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
-          消息流留 120px 地板：上面几条常驻读数带（会话条、压缩读数、档位、免确认白名单、接管横幅）
-          在 737px 高的窗口里没有地板时会被挤成 24px 的一条缝，任务卡整个看不见（5.7-d 实测）。 */}
+          消息流留 120px 地板：5.7-d 那条实测（737px 高的窗口里没有地板时流会被挤成 24px 的一条缝）
+          说的就是这一层，如今流上方只剩顶栏与那一行接管读数，地板照留。
+          压缩读数现在画成**流内第一条虚线窄行**（用户裁定）：它说的正是"上面那些折掉了"，位置自己就得贴着流。 */}
       <div
         ref={scrollRef}
         data-testid="chat-scroll"
-        className="min-h-[120px] flex-1 overflow-y-auto px-4 pb-[18px] pt-1"
+        className="flex min-h-[120px] flex-1 flex-col overflow-y-auto px-4 pb-[18px] pt-1"
       >
+        <ChatCompactionBanner compaction={compaction} />
         {turns.length === 0 && !agentRun.run && !workflowRunView ? (
-          <p className="mx-auto py-6 text-center text-xs text-slate-400" data-testid="chat-empty">
-            {t('chat.empty')}
-          </p>
+          // 空会话那句提示原先贴在流顶（py-6 之后就是一大片空白），看起来像"内容没加载出来"；
+          // 让它占满流内剩余高度、垂直居中，空屏才读成"等你开口"而不是"上面还有东西"。
+          <div className="flex flex-1 items-center justify-center">
+            <p className="py-6 text-center text-xs text-slate-400" data-testid="chat-empty">
+              {t('chat.empty')}
+            </p>
+          </div>
         ) : (
           // 消息之间的一条虚线（稿 `.divide`）替掉了原先的气泡与卡片外框：两侧都是通栏文本，
           // 靠这一条说"这又是一句"，所以 ul 自己不留 gap（缝由每条 `<li>` 的 py 与这条分隔线出）。
@@ -619,8 +757,9 @@ export function ChatPanel() {
         </p>
       ) : null}
 
-      {/* 输入区收成**一张卡**（设计稿 v2 的 `.composer > .card`）：档位那颗跳闸键、两条命令说明、
-          停止与发送全部落在卡内的工具条上，卡外只剩队列那一条读数。
+      {/* 输入区收成**一张卡**（设计稿 v2 的 `.composer > .card`）：档位那颗胶囊、当前模型读数、
+          停止与发送全部落在卡内的工具条上；卡外只剩队列那一条读数、按需展开的两格面板，
+          以及卡下面那条薄读数带（稿 `.understrip`）。
           拖拽手柄走原件层：裸 `<button>` 在面板里会被机检第 10 条拦下；它现在贴在卡的下沿（拖着下沿加高）。 */}
       <footer className="px-4 pb-3 pt-1">
         {/* 队列读数（spec 1.11-16）紧贴卡片上沿：它是「这句话还没发出去」的证据，
@@ -635,13 +774,112 @@ export function ChatPanel() {
             {t('chat.queued', { count: queued.length })}
           </p>
         ) : null}
+        {/* 档位那一格：2026-10-19 之前它常驻在流上方（一条 90–116px 的带），现在按裁定收进**输入卡上方**，
+            由顶栏那颗 `⚡` 或卡内那颗胶囊点开。`chat-autonomy-section` 与 `data-open` 两支锚点跟着搬过来
+            （属性名一字未改，5.3-07 / 6.2-31 的读数照旧解得到），收起时正文不挂载、容器撑不出高度。 */}
+        <div
+          data-testid="chat-autonomy-section"
+          data-open={deskPanel === 'tier' ? 'true' : 'false'}
+          className={deskPanel === 'tier' ? DESK_PANEL_CLASS : undefined}
+        >
+          {deskPanel === 'tier' ? (
+            <>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-50">
+                <Gauge size={12} />
+                {t('agent.autonomy.section')}
+              </p>
+              <DeskSegmented
+                action="chat-autonomy"
+                markers={{ testid: 'chat-autonomy-switch' }}
+                value={snapshot?.session.autonomy}
+                busy={busy !== undefined}
+                onSelect={(level) =>
+                  void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
+                    bridge?.chat['session.setAutonomy'](level),
+                  )
+                }
+                options={AUTONOMY_OPTIONS.map((level) => ({
+                  value: level,
+                  label: t(`agent.autonomy.${level}`),
+                  // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
+                  isRisk: level === 'auto',
+                  markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
+                }))}
+              />
+              {/* 当下这一档"替我做主到哪一步"必须明面上说一句（档位是人选的，选错了界面不替他兜），
+                  三档的完整对比进披露层——那是教材，不是此刻的读数。 */}
+              <p data-testid="chat-autonomy-why" className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                {snapshot ? t(`agent.autonomy.why.${snapshot.session.autonomy}`) : t('chat.loading')}
+              </p>
+              <DeskExplainer id="agent.autonomy-compare" className="mt-1.5" label={t('agent.autonomy.compareToggle')}>
+                <span className="flex flex-col gap-1.5">
+                  {AUTONOMY_OPTIONS.map((level) => (
+                    <span key={level} className="flex gap-1.5">
+                      <span className="shrink-0 font-semibold text-slate-200">{t(`agent.autonomy.${level}`)}</span>
+                      <span className="min-w-0">{t(`agent.autonomy.compare.${level}`)}</span>
+                    </span>
+                  ))}
+                </span>
+              </DeskExplainer>
+            </>
+          ) : null}
+        </div>
+        {/* 「哪些动作已免确认」现在是顶栏那格 `sliders` 自己开的一格，不再与档位同开同合（用户 2026-10-19 裁定）。
+            5.3-07 那句"两半一起读"由这一格里自己的档位说明承接（`agent.policy.onlyAuto` 会在非全自动档明说
+            「名单此刻不影响执行」），所以拆成两格并没有把"这一档下这一步到底问不问我"读丢。 */}
+        <div
+          data-open={deskPanel === 'policy' ? 'true' : 'false'}
+          className={deskPanel === 'policy' ? DESK_PANEL_CLASS : undefined}
+        >
+          {deskPanel === 'policy' ? <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} /> : null}
+        </div>
         <div className="rounded-2xl border border-line bg-ink-800 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-celadon/50 focus-within:ring-[3px] focus-within:ring-celadon/15">
           {/* 文本域走原件的 `bare` 档（不铺自己的底、不描边），字号与字色挂在这一层包裹节点上——
               这正是 `bare` 那一档的设计（spec 3.11-06：字档一律 inherit，由调用方挂在包裹节点）。
               `[line-height:1.8]` 是**任意属性**那一族：原件在文本域自己那一格挂了 `leading-[1.2]`，
               同族两条谁赢取决于样式表顺序（本仓已实测过一次，见 controls.tsx 那条 `fieldClass` 注释），
               所以这里不与它同名，用 property 级写法压过去（稿 `.card textarea` 要的正是 1.8）。 */}
-          <div className="px-[15px] pt-[13px] text-[14.5px] text-slate-100">
+          <div className="relative px-[15px] pt-[13px] text-[14.5px] text-slate-100">
+            {/* 高度手柄贴在卡的**上沿**、浮在那 13px 上内边距里（见 `onComposerDragStart` 那条注释）：
+              卡片底边锚定，加高时只有上沿跟着指针走——手柄挂在卡底时它自己一动不动、只有远处的顶边在跳，
+              那正是「拖拽也不对」的观感。外边再包一层定位层而不是给原件写 `absolute`：基座里那句
+              `relative` 与 `absolute` 同族、谁赢按样式表顺序算（本仓已为这种字面量打架付过一次账，
+              见 `SEND_LIVE_CLASS` 那条注释），包一层就不用赌；且按钮成为 flex item 后被块化，
+              `inline-flex` 不再制造行盒——流内直挂时实测卡片凭空高出 9px。 */}
+            <div className="absolute inset-x-3 top-0 z-10 flex justify-center">
+              <DeskButton
+                action="chat-composer-resize"
+                variant="ghost"
+                compact
+                className="flex h-3 w-full cursor-ns-resize touch-none justify-center"
+                aria-label={t('chat.composerHeight', {
+                  index: composerStep + 1,
+                  height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
+                })}
+                tip={
+                  composerDragging
+                    ? t('chat.composerHeightChip', {
+                        height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
+                      })
+                    : t('chat.composerResize')
+                }
+                markers={{ testid: 'chat-composer-resize', dragging: String(composerDragging) }}
+                onPointerDown={onComposerDragStart}
+                onPointerMove={onComposerDragMove}
+                onPointerUp={onComposerDragEnd}
+                onPointerCancel={onComposerDragEnd}
+                onLostPointerCapture={() => {
+                  composerDragRef.current = null;
+                  setComposerDragging(false);
+                }}
+              >
+                <span
+                  className={`h-1 w-9 rounded-full transition-colors ${
+                    composerDragging ? 'bg-celadon' : 'bg-slate-500 group-hover/desk-tip:bg-slate-400'
+                  }`}
+                />
+              </DeskButton>
+            </div>
             <DeskTextarea
               action="chat-input"
               bare
@@ -657,57 +895,56 @@ export function ChatPanel() {
                 composingRef.current = false;
               }}
               placeholder={t('chat.inputPlaceholder')}
-              className={`resize-none placeholder:text-slate-400 [line-height:1.8] ${
+              className={`block resize-none placeholder:text-slate-400 [line-height:1.8] ${
                 COMPOSER_HEIGHT_CLASS[composerStep] ?? ''
               }`}
             />
           </div>
           <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
-            {/* 档位跳闸键：明面只留当下那一档的名字，点开的是上面那一格（那里才是唯一的切换入口）。
-                `chat-autonomy-current` 那支读数仍挂在段的 summary 上，这一颗自己叫 `chat-autonomy-pill`。 */}
+            {/* 档位那一颗：明面只留当下那一档的名字，按下开/合上面那一格（那里才是唯一的切换入口）。
+                `chat-autonomy-current` 那支读数从原先段的 summary 搬进这一格的 label 节点（1.11-07 的判据
+                是"文案跟着档位走"，它跟着的始终是那句档位名）；`data-tier` 与 `chat-autonomy-pill` 原位不动。 */}
             <DeskButton
-              action="chat-autonomy-jump"
+              action="chat-autonomy-toggle"
               variant="ghost"
               compact
               className={TIER_PILL_CLASS}
               markers={{ testid: 'chat-autonomy-pill', tier: snapshot?.session.autonomy ?? 'unknown' }}
-              title={t('agent.autonomy.section')}
-              onClick={() => setAutonomyJump(Date.now())}
+              tip={t('agent.autonomy.section')}
+              tipAlign="start"
+              onClick={() => toggleDeskPanel('tier')}
             >
               <Gauge size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
-              <span className={snapshot?.session.autonomy === 'auto' ? 'text-seal-ink' : undefined}>
+              <span
+                data-testid="chat-autonomy-current"
+                className={`text-[12.5px] ${snapshot?.session.autonomy === 'auto' ? 'text-seal-ink' : ''}`}
+              >
                 {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
               </span>
               <ChevronDown size={13} className="opacity-70" />
             </DeskButton>
-            {/* 两条命令说明原先平铺在动作行右侧（40 字 + 42 字），在 369px 的右栏宽度里会把整行撑到
-                换行、把发送键挤成半截。收进披露层：明面只留一行短问句，正文按需展开，
-                两支既有 testid 跟着搬进正文（改名等于拆掉 5.2-03 的验收通道）。 */}
-            <DeskExplainer
-              id="chat.hints"
-              className="shrink-0"
-              label={t('chat.hints.toggle')}
-              markers={{ testid: 'chat-hint' }}
-            >
-              <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
-              {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
-              <p className="mt-1" data-testid="chat-run-hint">
-                {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
-              </p>
-            </DeskExplainer>
+            {/* 当前对话通道用的模型名（稿 `.pill` 右侧那颗）。这一格**不是键**：全仓没有在对话里换模型的写口，
+                所以它没有 ⌄、没有 hover、点下去也不会有任何事（§6.2-25）。名字来自 `llm.settings.read`。 */}
+            <span className={`ml-auto ${MODEL_PILL_CLASS}`} data-testid="chat-model-pill" data-model={chatModel ?? ''}>
+              <Sparkles size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
+              <span className="min-w-0 truncate text-slate-200">{chatModel ?? t('chat.modelNone')}</span>
+            </span>
+            {/* 停止收成图标档（稿上工具条右组只有图标）：那句"停止"由气泡（`tip`）与无障碍名带出，
+                原因码 `NOT_STREAMING` 照旧挂在节点上（6.2-06：按不动必须说得出为什么）。 */}
             <DeskButton
               action="stop"
-              variant="line"
+              variant="ghost"
               compact
-              className="ml-auto"
+              className={ICON_CELL_CLASS}
               busy={busy !== undefined}
               disabled={!isStreaming}
               disabledReason={!isStreaming ? 'NOT_STREAMING' : undefined}
               disabledReasonLabel={!isStreaming ? t('chat.reason.NOT_STREAMING') : undefined}
+              tip={t('chat.stop')}
               onClick={() => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']())}
             >
               <Square size={12} />
-              {t('chat.stop')}
+              <span className="sr-only">{t('chat.stop')}</span>
             </DeskButton>
             {/* 流式期间发送键照常可按——按下去是排进队列（spec 1.11-16），不再是拒发。
                 文案收成图标后那句"排队发送"换由无障碍名与 `data-send-mode` 带出：testid 与原因码一律原位不动。 */}
@@ -724,30 +961,58 @@ export function ChatPanel() {
                 isSendDisabled ? SEND_DEAD_CLASS : `${SEND_LIVE_CLASS} hover:bg-slate-100`
               }
               markers={{ 'send-mode': isStreaming ? 'queued' : 'now' }}
-              title={isStreaming ? t('chat.sendQueued') : t('chat.send')}
+              tip={isStreaming ? t('chat.sendQueued') : t('chat.send')}
+              tipAlign="end"
               onClick={submit}
             >
               <ArrowUp size={15} className={isSendDisabled ? undefined : 'text-ink-900'} />
               <span className="sr-only">{isStreaming ? t('chat.sendQueued') : t('chat.send')}</span>
             </DeskButton>
           </div>
-          <DeskButton
-            action="chat-composer-resize"
-            variant="ghost"
-            compact
-            className="flex h-4 w-full cursor-ns-resize touch-none justify-center"
-            aria-label={t('chat.composerHeight', {
-              index: composerStep + 1,
-              height: COMPOSER_HEIGHT_PX[composerStep] ?? COMPOSER_HEIGHT_PX[COMPOSER_DEFAULT_STEP],
-            })}
-            title={t('chat.composerResize')}
-            markers={{ testid: 'chat-composer-resize' }}
-            onPointerDown={onComposerDragStart}
-            onPointerMove={onComposerDragMove}
-            onPointerUp={onComposerDragEnd}
+        </div>
+        {/* 卡下那条薄读数带（稿 `.understrip`：12px、`slate-400`、不描边）。
+            左格是两组说明——那两条命令的用法（原先平铺在工具条右侧，40 字 + 42 字在 369px 的右栏宽度里
+            把整行撑到换行、发送键挤成半截），以及会话改名/删除的规矩（原先常驻在顶栏下面一行，
+            把 46px 的顶栏撑成 75px；活体读数 2026-10-19）。两支说明都是**教材**，点开成气泡浮在卡面上
+            （2026-10-20 用户口径「提示得用气泡框」）：展开式正文会把卡往上顶、消息流跟着缩，
+            读一句说明换一次版面，而稿上这条带是固定高度的。
+            四支既有 testid 跟着搬进气泡正文，不改名（5.2-03 / 5.6-07 的验收通道照旧解得到）。
+            右格只在**真折过一次**时出现：这一对数字是 `snapshot.compaction` 的现读数，
+            没折过时这里根本不会有长度可言（界面上不摆一个"还没发生的读数"）。 */}
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[12px] text-slate-400">
+          <DeskHint
+            id="chat.hints"
+            className="shrink-0"
+            label={t('chat.hints.toggle')}
+            markers={{ testid: 'chat-hint' }}
           >
-            <GripHorizontal size={12} className="text-slate-400" />
-          </DeskButton>
+            <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
+            {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
+            <p className="mt-1" data-testid="chat-run-hint">
+              {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
+            </p>
+          </DeskHint>
+          <DeskHint
+            id="chat.session.hints"
+            className="shrink-0"
+            label={t('chat.session.hintsToggle')}
+            markers={{ testid: 'chat-session-hints' }}
+          >
+            <p data-testid="chat-session-title-hint">{t('chat.session.titleHint')}</p>
+            <p className="mt-1" data-testid="chat-session-delete-hint">
+              {t('chat.session.deleteHint')}
+            </p>
+          </DeskHint>
+          {compaction ? (
+            <span
+              data-testid="chat-context-tokens"
+              data-tokens-before={String(compaction.tokensBefore)}
+              data-tokens-after={String(compaction.tokensAfter)}
+              className="ml-auto"
+            >
+              {t('chat.compress.tokens', { before: compaction.tokensBefore, after: compaction.tokensAfter })}
+            </span>
+          ) : null}
         </div>
       </footer>
     </section>

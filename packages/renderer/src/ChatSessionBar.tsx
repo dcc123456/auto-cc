@@ -10,14 +10,15 @@
  * 2026-10-19 对话面板按参考图重排（设计稿 v2 的 `.bar`）：这一条**就是面板唯一的顶栏**——
  * 原先它上面还有一条 `Bot` 图标 + 「对话」标题的横条，两条都在说"这是对话"，而参考图那一行说的是
  * "这是哪一条会话"。于是那条退掉，这一条收到 46px：文件夹图标 + 会话名 + 行级动作（改名/删除收成图标键），
- * 右侧留给「新建会话」与调用方递进来的那一位读数（`headExtra`）。
+ * 右侧是调用方递进来的那一组图标档动作（`rightActions`：档位、免确认白名单）与「新建会话」。
+ * 稿上这一条右组本来就只有图标（`⚡` 与 ` sliders`），所以「新建会话」也降成图标档：三格并排读起来是
+ * 一排工具，而不是三条各自说着自己的句子。
  */
 import { FolderOpen, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatSessionView } from '@auto-cc/shared';
 import { DeskButton, InlineEditField } from './ui/controls';
-import { DeskExplainer } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 
 /**
@@ -31,7 +32,7 @@ function shortCode(id: string): string {
 
 /**
  * 顶栏那两只行级动作（改名 / 删除）的几何：设计稿 v2 的 `.icon` 是一枚 30px 的 ghost 方块。
- * 文案收进 `sr-only` 与 `title`（同一做法的先前例证是 PDF 编辑屏的墨色键），图标居中靠 `justify-center`：
+ * 文案收进 `sr-only` 与气泡（`tip`），图标居中靠 `justify-center`：
  * 原件的 `compact` 档给的是 `px-2`，不居中时 11px 的图标会贴在左边。
  */
 const BAR_ICON_CLASS = 'h-[30px] w-[30px] justify-center';
@@ -42,16 +43,20 @@ const BAR_ICON_CLASS = 'h-[30px] w-[30px] justify-center';
  * @param read ChatPanel 的快照读取函数；每个动作跑完都调一次，界面不猜主进程当下的状态
  * @param headExtra 条尾右侧的那一位读数（对话面板把 `chat-workflow-mirror` 递进来）：
  *   它说的是"此刻哪个 runner 在动"，归属顶栏的几何，但事实只有 ChatPanel 那份订阅知道，所以走槽位而不是让本组件去订阅（§2.5）
+ * @param rightActions 条尾右侧的那一组图标档动作（对话面板递进档位与免确认白名单那两颗）：
+ *   与 `headExtra` 同一理由——那一格开合的状态只有 ChatPanel 知道，本组件不另存一份（§2.7）
  * @returns 面板最上面的一条 46px 窄带，没有软删过会话时已删栏整块不渲染
  */
 export function ChatSessionBar({
   session,
   read,
   headExtra,
+  rightActions,
 }: {
   session: ChatSessionView | undefined;
   read: () => Promise<unknown>;
   headExtra?: ReactNode;
+  rightActions?: ReactNode;
 }) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
@@ -146,7 +151,9 @@ export function ChatSessionBar({
               variant="ghost"
               compact
               className={BAR_ICON_CLASS}
-              title={t('chat.session.rename')}
+              tip={t('chat.session.rename')}
+              tipPlacement="bottom"
+              tipAlign="start"
               disabled={session === undefined || isBusy}
               disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
               disabledReasonLabel={session === undefined ? t('chat.session.reasonNoSession') : undefined}
@@ -163,7 +170,9 @@ export function ChatSessionBar({
               variant="ghost"
               compact
               className={BAR_ICON_CLASS}
-              title={t('chat.session.delete')}
+              tip={t('chat.session.delete')}
+              tipPlacement="bottom"
+              tipAlign="start"
               busy={isBusy}
               disabled={session === undefined}
               disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
@@ -178,40 +187,36 @@ export function ChatSessionBar({
               <Trash2 size={12} />
               <span className="sr-only">{t('chat.session.delete')}</span>
             </DeskButton>
-            {/* 条尾右侧：调用方那一位读数 + 「新建会话」。新建与改名/删除不是一类动作（它换掉整段上下文），
-                所以留文案、用描边档，而两件行级动作收成图标。 */}
+            {/* 条尾右侧：调用方递进来的那一组图标档（档位、免确认白名单）+「新建会话」。
+                新建也降成图标档：稿上这一条的右组只有图标（`⚡` 与 `sliders` 那一排），
+                留一句「新建会话」会把一排工具读成三件各自说自己的事；它换掉整段上下文这一点
+                由气泡（`tip`）与无障碍名带出。 */}
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
               {headExtra}
+              {rightActions}
               <DeskButton
                 action="new-session"
-                variant="line"
+                variant="ghost"
                 compact
+                className={BAR_ICON_CLASS}
                 busy={isBusy}
+                tip={t('chat.newSession')}
+                tipPlacement="bottom"
+                tipAlign="end"
                 onClick={() => void call(t('chat.actionNewSession'), () => bridge?.chat['session.startSession']())}
               >
-                <Plus size={12} />
-                {t('chat.newSession')}
+                <Plus size={13} />
+                <span className="sr-only">{t('chat.newSession')}</span>
               </DeskButton>
             </div>
           </>
         )}
       </div>
 
-      {/* 这两句规矩（改名 28 字 / 删除 30 字）原先常驻在会话条下面一行，把「名字 + 三颗键」这一条
-          撑成两行高。收进披露层：明面只留一行短问句，两支既有 testid 跟着搬进正文（不改名，
-          5.6-07 的读数还按同一支取）。 */}
-      <DeskExplainer
-        id="chat.session.hints"
-        className="px-4 pb-2"
-        label={t('chat.session.hintsToggle')}
-        markers={{ testid: 'chat-session-hints' }}
-      >
-        {editing ? (
-          <p data-testid="chat-session-title-hint">{t('chat.session.titleHint')}</p>
-        ) : (
-          <p data-testid="chat-session-delete-hint">{t('chat.session.deleteHint')}</p>
-        )}
-      </DeskExplainer>
+      {/* 那两句规矩（改名 28 字 / 删除 30 字）原先常驻在会话条下面一行，把「名字 + 图标组」这一条
+          撑成两行高（活体读数 75 而稿上是 46）。2026-10-19 按裁定搬进输入卡下面那条读数带，
+          与那两条命令的说明同处一格（见 `ChatPanel` 的 understrip）：顶栏从此只有一条 46px。
+          两支 testid 一起搬走、不改名（5.6-07 的读数照旧解得到）。 */}
 
       {trash && trash.length > 0 ? (
         <div data-testid="chat-session-trash" className="border-t border-line bg-ink-850 px-4 py-2">

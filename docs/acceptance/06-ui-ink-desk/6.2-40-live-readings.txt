@@ -1,0 +1,69 @@
+6.2-40 对话屏结构改到与设计稿 v2 一致 —— 活体读数（2026-10-19）
+================================================================
+
+取证面：本机 macOS arm64，`pnpm dev`（CDP 10222 / vite 5173），`harness eval --url 5173 --expr-file`。
+截图走 `tmp/63c/shot-clip.mjs`（按 `[data-testid="chat-panel"]` 的矩形裁切 + `scale:2`），
+不截整窗：常驻纸面是用户真实简历（含姓名/手机/邮箱），位图无法脱敏，按 AGENTS.md §8.5 不许入库。
+四张 md5 互异（口径见 §9 的 5.10-18）：
+  ab9978ff7a4b3636162fbb044d157245  6.2-40-panel-light.png   毡案 · 两格都收起
+  51d29ef7c50563285f740b0a42260279  6.2-40-panel-dark.png    墨案 · 同一状态
+  a895ba1d5808943d5a81f405c4658102  6.2-40-tier-panel.png    档位那一格展开
+  f05d85251b34dfc77fa7475327dbd848  6.2-40-policy-panel.png  免确认白名单那一格展开
+几何/字色类量测前注入 `*,*::before,*::after{transition:none!important;animation:none!important}`，
+量完在同一支探针里摘掉（`document.getAnimations().length` 本轮读回 0：窗口 hidden 时时间轴不推进，
+注入是防一手，不是这一轮的成因）。窗口 `document.visibilityState === 'hidden'`，
+所以开合两格用的是 `node.click()`（§9 的 2.1-12：这一格只判"处理器有没有跑"，"人点得动"仍待用户在场）。
+
+一、画面结构（裁定「全按稿搬走」：流上方不再有卡片）
+------------------------------------------------
+`[data-testid="chat-panel"]` 940 × 651，直接子节点按 DOM 顺序逐字：
+  1. div  data-testid=chat-session-bar   938 × 46   ← 改前 75（会话说明常驻在第二行）
+  2. div  data-testid=takeover-banner    938 × 33   ← 改前是通栏两行带
+  3. div  data-testid=chat-scroll        938 × 366  padding: 4px 16px 18px（稿 `.stream`）
+  4. footer                                938 × 204
+`data-section` 属性在 1–4 里 0 处：流上方那三张 `DeskSection` 卡片（档位、免确认白名单、压缩读数）整个不在了。
+顶栏那一行：`min-height:46px`，行内 `[data-action]` 六颗，除披露层那颗文字链外全是 30 × 30 的图标档：
+  rename-session 30×30 / delete-session 30×30 / chat-autonomy-toggle 30×30 /
+  agent-policy-toggle 30×30 / new-session 30×30 / chat.session.hints-toggle 136×18（文字链，已搬去卡下）
+流内第一条：`chat-compaction-banner` 906 × 33，`data-covered-count=26 data-tokens-before=2989 data-tokens-after=1034`，
+`border-bottom: 1px dashed`（稿 `.divide` 那一族的语气），它下面才是 `chat-messages`（906 × 3641）。
+`takeover-banner` 读回 `data-takeover-held=false / data-takeover-reason=""`（没被接管那一支，收成一行 33px）。
+
+二、输入区一张卡 + 卡下那条读数带
+---------------------------------
+卡：906 × 161，`border-radius:16px`，毡案底色 `rgb(242,239,230)`（`bg-ink-800` 翻面后的值）。
+文本域：`font-size:14.5px / line-height:26.1px` = 1.8（稿 `.card textarea`），placeholder 走 `slate-400`。
+卡内工具条（左→右）：
+  档位胶囊 chat-autonomy-pill  96 × 28  radius:9999px  标签字档 12.5px  文本「建议模式」  data-tier=suggest
+  模型胶囊 chat-model-pill    127 × 28  radius:9999px  12.5px  data-model=""（这一台没配对话模型，读数是「还没配对话模型」）
+  停止 stop                   30 × 30（图标档，原因码 NOT_STREAMING 照挂）
+  发送 send                   32 × 32  radius:9999px  毡案底色 rgb(224,219,205)（`bg-slate-50` 翻面值）
+卡下读数带 understrip：906 × 20，`font-size:12px`，逐字文本
+  「这两条命令怎么用？改名和删除是怎么回事？上下文 2989 → 1034（同一把尺）」
+  左两颗是披露层触发链（`chat-hint` / `chat-session-hints`），右那一句挂
+  `data-testid="chat-context-tokens" data-tokens-before=2989 data-tokens-after=1034`。
+
+三、消息下面那一行（裁定「只补有真读数的」）
+-------------------------------------------
+`copy-message` 图标档 28 × 28（稿 `.actions .icon`），行高 28、离正文 10px；
+落款 `2026-10-19 13:41`，12px / `rgb(79, 90, 100)`（毡案的 `slate-400`；≥12px 不配 slate-500，机检 §11）。
+发送键此刻 `data-disabled-reason=INPUT_EMPTY`（输入框是空的，按不动要说得出为什么，6.2-06）。
+剪贴板这一格只到"处理器跑没跑"这一层：窗口 hidden 时 CDP 派发鼠标不落页（§9 的 2.1-12），
+`navigator.clipboard.writeText` 的真落剪贴板 + 左下角那只 toast 留给用户在场那一轮（同一片 ④）。
+
+四、两格面板的开合（互斥、收起时正文卸载）
+-----------------------------------------
+按卡内胶囊 → `chat-autonomy-section` 的 `data-open=true`、高 131，`chat-autonomy-switch` 在 DOM 里，
+`chat-autonomy-current`「建议模式」，`chat-autonomy-why`「它只把计划写给你看，一步都不替你跑」，
+`agent-policy-panel` 不在 DOM 里。
+再按顶栏 `agent-policy-toggle` → 同一拍里档位那格 `data-open=false`（高 0、正文卸载）、
+`agent-policy-panel` 挂上，读数「已免确认 0 项」+「当前档位是建议模式，名单暂不影响执行」
+（5.3-07 那句"两半一起读"由这一格自己的档位说明承接，拆格没把读数读丢）。
+两格各自归零后（收尾已复原）：`open=false / policyMounted=false`，材质复原为 light。
+
+五、与稿的两处已知偏差（不是漏做）
+---------------------------------
+① 输入卡默认高 161 而稿上是 66：卡高是人的持久偏好（localStorage `auto-cc.composerHeight`，
+   缺省第 2 档 140 + 工具条），卡下沿那根手柄就是改它的口，不按稿上的矮档覆盖人已存过的偏好。
+② 顶栏右组多一枚「同一个 runner：未开始」文字章（稿上那一格是图标）：它是 5.4-07 的现读数，
+   收成图标就读不出"哪一条 run 在跟这屏共用 runner"。

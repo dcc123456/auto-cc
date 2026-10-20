@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight, CircleHelp } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { BLOCK_SURFACE_CLASS, DISCLOSURE_CLASS } from './controls';
 
@@ -261,6 +261,88 @@ export function DeskExplainer({ id, label, markers, className = '', children }: 
           className={`mt-1.5 rounded-md border border-line ${BLOCK_SURFACE_CLASS} px-3 py-2 text-[11px] leading-relaxed text-slate-300`}
         >
           {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export interface DeskHintProps {
+  /** 稳定的 ASCII 段 id，用于挂 `data-explainer` 与 toggle 的 `data-action`。 */
+  id: string;
+  /** 触发文案（调用方翻译好传入）。 */
+  label: ReactNode;
+  /** 气泡里的正文。 */
+  children: ReactNode;
+  /** 挂在容器上的附加 `data-*`（既有验收通道跟着一起挪进来，不改名）。 */
+  markers?: Record<string, string>;
+  /** 追加 class（只放外边与宽度档）。 */
+  className?: string;
+}
+
+/**
+ * 点开一只**气泡**的短说明（与 `DeskExplainer` 同属教材，但正文不再把页面撑高）。
+ *
+ * 为什么要从展开式改成气泡（2026-10-20 用户口径「提示得用气泡框」）：这一族住在输入卡下面那条
+ * 20px 读数带里，展开时正文把卡往上顶、消息流跟着缩——那是"读一句说明就换一次版面"，
+ * 而稿上 `understrip` 是一条固定高度的薄带。气泡浮在卡面上，读的时候版面一像素不动。
+ * 与 `DeskExplainer` 相同的是：开合不落盘（教材不该跨重启保持展开），正文收起时卸载。
+ * 点气泡外面或按 Escape 关上；Escape 把焦点还给触发键，键盘走开时不至于丢在读不到的浮层里。
+ * @param props 见 `DeskHintProps`
+ * @returns 一行触发链 +（展开时）一只浮在上方的气泡
+ */
+export function DeskHint({ id, label, markers, className = '', children }: DeskHintProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      {...markerAttrsOf(markers)}
+      data-explainer={id}
+      data-open={open ? 'true' : 'false'}
+      className={`relative min-w-0 ${className}`}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        data-action={`${id}-toggle`}
+        aria-expanded={open}
+        onClick={() => setOpen((previous) => !previous)}
+        className={DISCLOSURE_CLASS}
+      >
+        <CircleHelp size={11} className="shrink-0" aria-hidden="true" />
+        {label}
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          className="absolute bottom-full left-0 z-30 mb-2 w-[320px] max-w-[calc(100vw-48px)] rounded-xl border border-line-strong bg-ink-850 px-3.5 py-3 text-[12px] leading-relaxed text-slate-300 shadow-lift"
+        >
+          {children}
+          <span
+            className="absolute -bottom-1 left-4 size-2 rotate-45 border-b border-r border-line-strong bg-ink-850"
+            aria-hidden="true"
+          />
         </div>
       ) : null}
     </div>

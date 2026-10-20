@@ -46,6 +46,41 @@ const STATE_BADGE =
   'pointer-events-none absolute -right-1.5 -top-1.5 grid size-[18px] place-items-center rounded-full border border-line bg-ink-850';
 
 /**
+ * 悬停/聚焦气泡的底子：一只绝对定位的浮层，不参与排版、不接鼠标。
+ *
+ * 为什么要原件自带而不是各面板各写一份（§2.2）：裸 `title` 弹的是系统框——字族、底色、圆角全不归
+ * 本仓的主题管，同一排图标一半是系统黄条一半是墨面，正是 2026-10-20 那句「提示得用气泡框」指的形状。
+ * 显隐走 `group-hover/desk-tip` 与 `group-focus-visible/desk-tip`：键盘走到那一格时同一只气泡也出得来。
+ */
+const TIP_BASE_CLASS =
+  'pointer-events-none absolute z-30 w-max max-w-[240px] whitespace-normal rounded-lg border border-line-strong bg-ink-750 px-2.5 py-1.5 text-left text-[11px] font-normal leading-snug text-slate-100 shadow-lift ' +
+  'invisible opacity-0 transition-opacity duration-150 group-hover/desk-tip:visible group-hover/desk-tip:opacity-100 group-focus-visible/desk-tip:visible group-focus-visible/desk-tip:opacity-100';
+
+/** 气泡尾巴：一只旋转 45° 的小方块，只有朝向触发键那两条边描边（不手写 SVG，§5.3）。 */
+const TIP_TAIL_CLASS = 'absolute size-2 rotate-45 border-line-strong bg-ink-750';
+
+/**
+ * 气泡的落点。
+ * @param placement `top` 画在触发键上方，`bottom` 画在下方（顶栏那一排上方会被面板顶边裁掉）
+ * @param align 横向对齐：`center` 居中，`start` / `end` 贴住触发键左/右沿（右端那一组用 `end`，免得溢出面板）
+ * @returns 气泡盒与尾巴各自的追加 class
+ */
+function tipPlacementClass(
+  placement: 'top' | 'bottom',
+  align: 'center' | 'start' | 'end',
+): { box: string; tail: string } {
+  const box =
+    (placement === 'bottom' ? 'top-full mt-2' : 'bottom-full mb-2') +
+    (align === 'center' ? ' left-1/2 -translate-x-1/2' : align === 'start' ? ' left-0' : ' right-0');
+  const tailX = align === 'center' ? 'left-1/2 -translate-x-1/2' : align === 'start' ? 'left-3' : 'right-3';
+  const tail =
+    placement === 'bottom'
+      ? `${TIP_TAIL_CLASS} -top-1 border-l border-t ${tailX}`
+      : `${TIP_TAIL_CLASS} -bottom-1 border-b border-r ${tailX}`;
+  return { box, tail };
+}
+
+/**
  * 各 variant 的静态 class。**必须写成完整字面量**——Tailwind 只扫源码里出现的字符串，
  * 拼出来的 class 不会生成。悬停一律「提亮一档」，位移只允许出现在按下瞬间；
  * 唯一例外是 `seal`：稿上它是六档里唯一一颗反色键，`.seal:hover` 自带 1px 上浮（`shared.css:439-444`）。
@@ -132,6 +167,17 @@ export interface DeskButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
    */
   doneLabel?: string;
   /**
+   * 悬停/聚焦时出现的气泡文案（例如「复制这段回复」）。
+   *
+   * 给了它就不再挂原生 `title`：两套提示同时出现会叠成一只系统框加一只气泡。
+   * 按不动时气泡改说 `disabledReasonLabel`——「为什么按不动」与「这颗键是做什么的」不该分两处读。
+   */
+  tip?: ReactNode;
+  /** 气泡朝向；顶栏那一条用 `bottom`（上方没有空间）。默认 `top`。 */
+  tipPlacement?: 'top' | 'bottom';
+  /** 气泡横向对齐；面板右端那一组用 `end`。默认居中。 */
+  tipAlign?: 'center' | 'start' | 'end';
+  /**
    * 附加的 `data-*` 标记（例如 armed 状态），供 harness 断言。
    * 组件 props 上没有 data-* 的索引签名，所以调用方不能直接写 `data-armed`——走这里。
    */
@@ -158,6 +204,9 @@ export function DeskButton({
   compact = false,
   doneLabel,
   markers,
+  tip,
+  tipPlacement = 'top',
+  tipAlign = 'center',
   disabled,
   className = '',
   onClick,
@@ -166,6 +215,10 @@ export function DeskButton({
 }: DeskButtonProps) {
   const busy = busyProp === true;
   const isDead = disabled === true || busy;
+  // 按不动时气泡改说原因：「这颗键做什么」在按下之前就该读得到，「为什么按不动」也要在同一处读得到。
+  // 没给 `tip` 的键保持原生 `title` 的老路——气泡是逐格启用的，不拿它替换全应用的提示通道。
+  const tipText = tip ? (isDead && disabledReasonLabel ? disabledReasonLabel : tip) : undefined;
+  const tipGeometry = tipText ? tipPlacementClass(tipPlacement, tipAlign) : undefined;
   const markerAttrs = Object.fromEntries(
     Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
   ) as Record<string, string>;
@@ -187,10 +240,16 @@ export function DeskButton({
       // 不用原生 `disabled`：Chromium 对禁用控件不派发鼠标事件，title 提示也就不会出现，
       // 人只会看到"按不动"而看不到为什么按不动（07 稿④）。改走 aria-disabled + 这里挡下 onClick。
       {...(isDead ? {} : { onClick })}
-      {...(isDead && disabledReasonLabel ? { title: disabledReasonLabel } : {})}
-      className={`relative ${buttonClass(variant, isDead, compact)} ${className}`}
+      {...(isDead && disabledReasonLabel && !tipText ? { title: disabledReasonLabel } : {})}
+      className={`relative ${tipText ? 'group/desk-tip ' : ''}${buttonClass(variant, isDead, compact)} ${className}`}
       {...rest}
     >
+      {tipText && tipGeometry ? (
+        <span aria-hidden="true" className={`${TIP_BASE_CLASS} ${tipGeometry.box}`}>
+          {tipText}
+          <span className={tipGeometry.tail} />
+        </span>
+      ) : null}
       {/* 底色 wash 压在文字后面：结果态不改变按钮尺寸，只加一层颜色与一枚角标。
           圆角自己带一份——根节点不裁切（见上面那条注释），不裁就得自己贴合。 */}
       {result && !busy ? (

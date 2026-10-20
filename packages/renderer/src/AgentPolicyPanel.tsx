@@ -55,11 +55,10 @@ export function AgentPolicyPanel({
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
-  // 这块正文住在 `DeskSection`（档位那一格）里，收起时整个不挂载，所以不再自己限高抢消息流的空间
-  // （原先它是常驻带，`max-h-20` 是 5.7-d 那条「737px 窗口里它长到 191px」的对策；
-  // 现在默认收起，同一条空间预算还给了正文里的两张清单，各留 28 高的滚动区）。
+  // 这一格现在住在输入卡上方那一层面板里（`ChatPanel` 的 `deskPanel === 'policy'`），
+  // 外框、描边与内边距都由那一层给；自己再挂一条 `mt-3 / border-t / pt-3` 就是在同一块底上画出第二张卡的脸。
   return (
-    <div data-testid="agent-policy-panel" className="mt-3 min-w-0 border-t border-line pt-3">
+    <div data-testid="agent-policy-panel" className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1 text-[10px] text-slate-500">
           <ShieldCheck size={11} />
@@ -86,7 +85,7 @@ export function AgentPolicyPanel({
           {t('agent.policy.empty')}
         </p>
       ) : (
-        <ul data-testid="agent-policy-exempt" className="mt-2 max-h-28 space-y-1 overflow-y-auto">
+        <ul data-testid="agent-policy-exempt" className="mt-2 space-y-1">
           {exempt.map((row) => (
             <li
               key={row.toolId}
@@ -141,7 +140,7 @@ export function AgentPolicyPanel({
           {t('agent.policy.noCandidates')}
         </p>
       ) : (
-        <ul data-testid="agent-policy-candidates" className="mt-2 max-h-28 space-y-1 overflow-y-auto">
+        <ul data-testid="agent-policy-candidates" className="mt-2 space-y-1">
           {candidates.map((tool) => (
             <li
               key={tool.id}

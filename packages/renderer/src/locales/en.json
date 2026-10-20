@@ -1261,6 +1261,7 @@
       "inputPlaceholder": "What do you want to do? Enter sends, Shift+Enter adds a line",
       "composerResize": "Drag to change the composer height",
       "composerHeight": "Composer height: step {{index}} ({{height}}px)",
+      "composerHeightChip": "{{height}}px",
       "send": "Send",
       "stop": "Stop",
       "newSession": "New session",
@@ -1268,6 +1269,10 @@
       "streamingElapsed": "{{seconds}}s elapsed",
       "sendQueued": "Queue it",
       "queued": "{{count}} message(s) queued — they send in order once the reply finishes",
+      "copy": "Copy this reply",
+      "copied": "Reply copied to the clipboard",
+      "copyFailed": "Clipboard write failed: {{reason}}",
+      "modelNone": "No chat model configured",
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
       "hints": {
@@ -1314,7 +1319,7 @@
       },
       "compress": {
         "covered": "The earlier {{total}} messages are folded into one summary line — nothing was deleted",
-        "tokens": "Estimated length {{before}} → {{after}} (same ruler both sides)",
+        "tokens": "Context {{before}} → {{after}} (same ruler both sides)",
         "factsHeading": "Key facts right now (each read live, not lifted from old messages)",
         "section": "Key facts kept after compaction",
         "autonomy": "Current level: {{level}}",

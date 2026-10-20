@@ -1261,6 +1261,7 @@
       "inputPlaceholder": "想聊什么？回车发送，Shift+Enter 换行",
       "composerResize": "拖动改输入框高度",
       "composerHeight": "输入框高度：第 {{index}} 档（{{height}} 像素）",
+      "composerHeightChip": "{{height}} 像素",
       "send": "发送",
       "stop": "停止",
       "newSession": "新建会话",
@@ -1268,6 +1269,10 @@
       "streamingElapsed": "已用 {{seconds}} 秒",
       "sendQueued": "排进队列",
       "queued": "已经排着 {{count}} 条，回复结束后按顺序自动发出",
+      "copy": "复制这段回复",
+      "copied": "这段回复已复制到剪贴板",
+      "copyFailed": "剪贴板没写进去：{{reason}}",
+      "modelNone": "还没配对话模型",
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
       "hints": {
@@ -1314,7 +1319,7 @@
       },
       "compress": {
         "covered": "较早的 {{total}} 条消息已折成一行摘要，原文一条都没删",
-        "tokens": "长度估计 {{before}} → {{after}}（前后同一把尺）",
+        "tokens": "上下文 {{before}} → {{after}}（同一把尺）",
         "factsHeading": "此刻的关键事实（每一位都是现在问回来的，不是从旧消息里摘的）",
         "section": "压缩后留下的关键事实",
         "autonomy": "当前档位：{{level}}",
