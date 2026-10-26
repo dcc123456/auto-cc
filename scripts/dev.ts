@@ -19,7 +19,12 @@ const distDir = path.join(repoRoot, 'packages', 'main', 'dist');
 const rendererRoot = path.join(repoRoot, 'packages', 'renderer');
 /** CDP 端口按项目约定用 10222，不使用 Chrome/Electron 默认的 9222。 */
 const cdpPort = process.env.AUTO_CC_CDP_PORT ?? '10222';
-const rendererUrl = process.env.ELECTRON_RENDERER_URL ?? 'http://127.0.0.1:5173';
+/**
+ * 渲染层端口：缺省 5173，可由 AUTO_CC_RENDERER_PORT 让出（同一台机器上另一个项目的 dev
+ * 用 strictPort 占着 5173 时）。vite 侧读同一个变量，两处必须保持一致。
+ */
+const rendererPort = process.env.AUTO_CC_RENDERER_PORT ?? '5173';
+const rendererUrl = process.env.ELECTRON_RENDERER_URL ?? `http://127.0.0.1:${rendererPort}`;
 /**
  * 开发态独立的 userData 目录（绝对路径）。
  *
