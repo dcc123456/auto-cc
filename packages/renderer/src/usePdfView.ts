@@ -10,6 +10,9 @@
  * （那条渲染层调用主进程导出接口的一笔）整条摘除——改字与出纸归整页编辑那一屏，
  * 这一轨只剩 `pdf.io.open` 的量得结果与 `pdf.io.bytes` 送来的整份字节（只交给 pdf.js 解析，不二次加工）。
  * 主进程侧的写口一行未动（那是另一个边界），只是渲染层不再调它——"不再调用"就是终态，不顺手清理。
+ *
+ * 裁定㊴（spec 3.15）在本轨补了唯一的一处**跳出**：`openInCompanion` 把人正看的那一页交给伴生应用
+ * Office-cc。它不改本 app 的任何状态、也不回读结果，所以"这一轨只读"这个边界仍然成立。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -185,6 +188,18 @@ export function usePdfView({ active, onClose }: { active: boolean; onClose: () =
     setPaperState('ready');
   };
 
+  /**
+   * 把人正看的这一页交给伴生应用 Office-cc 做整页编辑（裁定㊴ / spec 3.15-01 的唯一入口）。
+   *
+   * 这一句**不写任何东西、也不回读结果**：主进程只是把一条已经存在的绝对路径交给操作系统，
+   * 改完之后的那份新文件不会自动回到简历里——所以要重新导入才会进简历（气泡里写明，§2.6 不造会同步的假象）。
+   * 路径取 `filePath` 的唯一真源（不是输入框的当前值），页号取人正看的那一页，与纸面所见一致。
+   */
+  const openInCompanion = () =>
+    void run(t('pdfEdit.openInCompanion'), () => bridge?.shell.openInCompanionEditor(filePath.trim(), page), {
+      describe: (value) => t('pdfEdit.companionOpened', { path: value.openedPath }),
+    });
+
   return {
     active,
     onClose,
@@ -202,6 +217,7 @@ export function usePdfView({ active, onClose }: { active: boolean; onClose: () =
     openPdf,
     pickSourceFile,
     showPage,
+    openInCompanion,
   };
 }
 

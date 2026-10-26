@@ -176,6 +176,10 @@ export const RENDERER_ALLOWLIST = [
   'shell.setKernelViewVisible',
   'shell.setKernelViewBounds',
   'shell.revealInFolder',
+  // 把一份已经存在的 PDF 交给本机另一个应用整页编辑（spec 3.15，裁定㊴ 的 A 形状）。
+  // 与 `revealInFolder` 同一类：只交一条路径给操作系统，不改本 app 状态、不落文件、不回读结果，
+  // 所以它不是 3.13 钉住的那种写口；失败四支码各有各的人话，判定住在 `packages/shell/src/companion-editor.ts`。
+  'shell.openInCompanionEditor',
   // 选文件口：渲染层在 sandbox 下读不了文件系统（§8.1），而"让人敲绝对路径"把简历导入与 PDF 打开
   // 挡在了禁用态外面。这两条只回**人自己选中的那条路径**，主进程不代读内容、不返回目录。
   'shell.selectFile',
@@ -2453,6 +2457,13 @@ export interface BridgeSignatures {
    * 因为 Electron 44 的 `showItemInFolder` 返回 `void`，成功与否拿不到库的读数。
    */
   'shell.revealInFolder': { args: [filePath: string]; returns: { revealed: true } };
+  /**
+   * 把人正看的那份 PDF 交给本机另一个应用（Office-cc）整页编辑（spec 3.15 / plan `03-resume-pdf` §21，裁定㊴）。
+   * 实参必须是一条**绝对路径**（`.pdf`）；页号说"停在人此刻看着的那一页"（1 起），
+   * 不是正整数就由主进程整支丢掉。返回值只回交出去的那一条路径——**对方之后怎么保存、保存成什么，本 app 不回读**。
+   * 四类失败各有各的码（`COMPANION_EDITOR_MISSING` / `_REJECTED` / `_TIMEOUT` / `_FAILED`），界面按码说不同的下一步。
+   */
+  'shell.openInCompanionEditor': { args: [filePath: string, page?: number]; returns: { openedPath: string } };
   /** 打开面板选人手里的一份文件（标题与筛选器由渲染层按当前语言给，主进程不写界面文案）。 */
   'shell.selectFile': { args: [request: FilePickerRequestView]; returns: { filePath: string | null } };
   /** 另存为面板：同上，多一个建议文件名（不许带路径分隔符，判定在主进程）。 */

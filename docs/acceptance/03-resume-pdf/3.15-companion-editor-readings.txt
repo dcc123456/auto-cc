@@ -1,0 +1,60 @@
+3.15 原 PDF 的整页编辑交给伴生应用 Office-cc —— 读数
+裁定㊴ / plan `03-resume-pdf` §21 / spec 3.15    取证时间：2026-10-26    机器：macOS（Apple Silicon）
+
+一、伴生 CLI 契约的无副作用实测（选的是"文件不存在"这一条：不建窗口、不碰任何真文件）
+
+$ which officecc
+/Users/dcc/.local/bin/officecc
+
+$ officecc --version
+officecc 0.11.0
+
+$ officecc --json open /tmp/does-not-exist.pdf
+{"status":"error","command":"open","code":2,"error":"file_not_found","message":"file not found: /tmp/does-not-exist.pdf"}
+EXIT=2
+
+这一枚原样进了单测（判据 3.15-03），字段名 `status / command / code / error / message` 与伴生应用
+`packages/cli/src/result.ts` 的 `JsonError` 逐字对上。两处名字以本机读数为准、不按文档猜：
+`ErrorReason` 里是复数 `outside_allowed_roots`（不是 `outside_allowed_root`），
+`open` 用的页号开关是 `--page`（1 起）。EXIT=2 是"参数/前置条件不对"那一档，与 `status:'error'` 同时出现。
+
+二、四道门禁（§7.4 的①，退出码逐条；日志留在 tmp/，不入库）
+
+    pnpm typecheck     EXIT=0
+    pnpm lint          EXIT=0   （含 check-renderer-conventions 第 9/10/13/14 节、语言包键对齐、check-lexicon）
+    pnpm format:check  EXIT=0
+    pnpm test          EXIT=0   （全仓；新增 packages/shell/src/companion-editor.test.ts：21 passed / 21）
+
+三、grep 读数（C 类判据）
+
+3.15-01 唯一入口：`packages/renderer/src` 里 `shell.openInCompanionEditor` 命中 1 处 —— `usePdfView.ts:199`。
+  `ResumeDesk.tsx`、`ResumeEditPage.tsx`、`PdfViewPanel.tsx`、`PdfEditorPage` 那几格里都没有第二只跳出口；
+  `packages/shared/src/bridge.ts` 里的两处是白名单与签名声明（契约本体），不计作调用点。
+
+3.15-02 没有复制控制协议：`packages/shell/src` 里 `net.connect` 零命中；`control.json` 只在
+  `companion-editor.ts:10` 那一句"不复制它的 control.json / socket / token 发现逻辑"里出现 —— 那是来源说明，不是实现。
+  本片只拼一条命令行、只读 stdout 那一枚 JSON。
+
+3.15-04 不经 shell：`companion-editor.ts` 里 `shell: true` / `exec(` / `execSync` 零命中；
+  spawn 的实参由单测钉成 `('officecc', ['--json','open','/tmp/resume.pdf'], { stdio: ['ignore','pipe','ignore'] })`，
+  即 argv 是数组、options 里根本没有 shell 这一项。路径与页号的形状判定在主进程
+  （`planCompanionOpen`：非绝对路径、非 `.pdf`、空串、非字符串一律 `INVALID_ARGUMENT`）。
+
+3.15-07 反向验证：`packages/renderer/src` 里 `pdf.export.saveAs` / `addOverlay` / `movePage` / `removePage`
+  零调用点（`pdf-page-view.ts:7` 那句是文档说明）；裁定㊳ 退场的东西没有被请回来。
+  `git diff --stat pnpm-lock.yaml package.json packages/*/package.json` 输出为空 —— 零新增依赖、没有第二套 PDF 引擎。
+  族三（抽取→保真重建）仍未开工：3.8-02 的 `[!]` 结论一字未动，本片做的是**进程间交接**，不是本 app 里的重建。
+
+四、界面那一句必须说清的事（判据 3.15-06）
+
+  「用 Office-cc 编辑」的气泡原文（zh-CN）：
+  整页级的改动（页面重排、图形、扫描页）交给本机已装的伴生应用 Office-cc，它停在人正看的这一页。
+  它改完的那一份不会自动回到简历里：必须重新导入才会进简历。
+  —— 结果不回读这件事写在气泡里，成功提示同样带"改完记得重新导入，这边不会自动同步"。
+
+五、待用户在场（V 类，按 §7.1 / §9 的 2.1-12 不由无人值守代打）
+
+3.15-05 真跳：desk 的 PDF 档打开一份真 PDF → 点「用 Office-cc 编辑」→ Office-cc 起窗（或在跑的实例里）
+  打开那份文件并停在同一页。这一颗会另起一个 GUI 窗口。
+3.15-03 的 V 半边：把 `companionEditorBin` 指到一条不存在的命令后点这颗 → 界面那句应是 `COMPANION_EDITOR_MISSING`
+  那一句（"本机找不到伴生应用的命令行…"）。

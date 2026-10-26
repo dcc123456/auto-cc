@@ -201,6 +201,14 @@ export type AppErrorCode =
   // 不复用 `INVALID_ARGUMENT`，因为界面处置是这一条独有的——「保留上一份摆位，什么都不改」，
   // 静默铺成 0×0 会让用户以为视图整个消失了，而真正的现象只是那一次上报无效。
   | 'KERNEL_VIEW_BOUNDS_INVALID'
+  // 把一份 PDF 交给伴生应用 Office-cc 整页编辑（spec 3.15，plan `03-resume-pdf` §21，裁定㊴）。
+  // 四支分开，因为四句人话给的下一步各不相同：没装（去装、或把那支命令行配出来）、
+  // 被它自己拒了（最常见是路径不在它允许的根之内）、我们等它等超了、它答得不成 `--json` 那个形状。
+  // 不复用 `INVALID_ARGUMENT`：这一口的失败来自**另一个进程**，界面要说的不是「你传错了」而是「那边是怎么回的」。
+  | 'COMPANION_EDITOR_MISSING'
+  | 'COMPANION_EDITOR_REJECTED'
+  | 'COMPANION_EDITOR_TIMEOUT'
+  | 'COMPANION_EDITOR_FAILED'
   | 'UNKNOWN';
 
 export interface AppErrorPayload {

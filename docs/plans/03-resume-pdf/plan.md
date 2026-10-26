@@ -2226,3 +2226,109 @@ spec 3.13 的机检半边就按这一句写（desk 源码里 grep 不到写口�
 - **片67-C**：desk 的编辑类摘除、原 PDF 档退化为纯查看、`PdfEditPanel` / `usePdfEdit` 的编辑半撤下。
 - **片68（后，另立 §20 / spec 3.14）**：解析模块的查改增删 + 写时同步两层（要新桥接口与跨包事务，
   且正面依赖另一窗口此刻在改的 `packages/resume-kb/src/sections.ts`）。
+
+---
+
+## 21. 原 PDF 的整页编辑交给伴生应用 Office-cc（2026-10-26 起；裁定㊴；spec 3.15）
+
+**编号先说清**：§20 / spec 3.14 已由裁定㊳ 第 4 条预留（片68，`03 §19.3` 末行与 `spec 3.13` 收尾那一句），
+本片取 **§21 / spec 3.15**，不占那个号。
+
+### 21.0 裁定㊴：用户的原话与对话框读数（逐字，2026-10-26）
+
+问（用户）：
+
+> 「pdf 整页编辑功能 使用这个项目来完成 /Users/dcc/deepseek-harness-workspece/REA/genoffice
+> 这个项目在单独git中作为单独的项目维护，这种方案是否可行」
+
+答（AskUserQuestion「PDF 整页编辑接入 genoffice，选哪条形状？」的选定读数，逐字）：
+
+> **A 伴生跳转（推荐）** — auto-cc 只加一个「用 Office-cc 编辑」入口，调 officecc open <文件> --page n。
+> 两仓完全独立、不引入 wasm/IPC，最快能验证体验；代价是双应用切换，且要么要求用户装 Office-cc，要么补一条自动拉取。
+
+同一轮里我摆在桌上的另两条**未被选**，按 §4.5 记下以免将来误读成"已裁过"：B 跨仓抽包内嵌（单应用，3–5 个切片，
+要解决 Electron 43→44、两套构建、43 支 `pdf:*` 通道收窄进白名单）；C 暂不接入。
+
+### 21.1 这一片补的是 §19.5 那一格真实缺口，不是重开族三
+
+`spec 3.8-02` 的像素门量到不达标（`[!]`），结论原文一字不动：**族三不开工，族一是本轮 PDF 编辑轨的终态**。
+本片**不碰那条结论**——我们不抽算子流、不重建 HTML、不做任何保真承诺；"把原 PDF 的位面改准"这件事
+整个交给另一个进程的成熟引擎。所以 3.8 那两道门的读数、`.research-repos/3-8-02-fidelity/` 的 spike、
+以及"族一为终态"这句话在本片之后仍然成立。
+
+补的是 §19.5 登记的缺口：裁定㊳ 第 1 条把编辑对象钉成"解析重建出来的那份文档"，于是
+**扫描件与"就想改原文件两个字"这一条在 app 内没有入口**（3.13-09 因此不许自动通过）。
+§19.5 第 ③ 条写的是"将来要补只能当新能力做，不许把刚退场的覆盖层编辑偷偷拉回来"——这一片就是那一次"新能力"，
+补法是把文件**交出去**，而不是把覆盖层请回来。
+
+### 21.2 外部取证（§6.1：一手来源全部是那个仓库自己的源码，不采信任何转述）
+
+| 候选 / 事实                    | 一手读数（2026-10-26 本机）                                                                                                                                                                                                                                                                   | 结论                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 伴生应用**能不能**整页编辑 PDF | `apps/pdf/src/renderer/` 里有 `text-block.ts` / `text-line.ts` / `edit-ops/`（原位文本编辑）、`ImageEditLayer` / `RedactionLayer` / `FormDesignLayer` / `SignaturesDialog` / `ocr-layer`，写端走 `pdf:save`（`apps/pdf/src/shared/ipc.ts` 的 `PDF_CHANNELS`，43 支）                          | **能**，且比本 app 的覆盖层编辑宽一个量级                       |
+| 有没有稳定的跨进程契约可依赖   | `packages/cli/src/cli.ts:96/182/240/245`：全局 `--json` → stdout 一个 JSON 对象；`packages/cli/src/result.ts:2-8`：EXIT `0/1/2/3/4`；同一文件 `ErrorReason` 是**声明为稳定**的原因清单（"keep the names stable"）                                                                             | **有**，`officecc --json open <file> [--page n]` 就是它的公开口 |
+| 本机实际装了没有               | `which officecc` → `/Users/dcc/.local/bin/officecc`；`officecc --version` → `officecc 0.11.0`；`officecc open --help` 回完整用法（`--page n`，1 起）                                                                                                                                          | 装好了，跳转当场可用                                            |
+| 谁负责"应用没在跑"             | `packages/cli/src/commands/open.ts`：先读 control endpoint（`control.ts:15-45`，`userData/control.json` + pid 存活校验），没有就 `appLaunch` 拉起 app 并等 endpoint 最多 45s                                                                                                                  | 拉起与等待**全在 CLI 一侧**，本 app 不复制这套发现逻辑          |
+| 伴生应用二进制的发现顺序       | `packages/cli/src/resources.ts:101-145`：`OFFICECC_APP_BIN` → 打包体内自举 → dev checkout 的 electron → `/Applications/Office-cc.app` 等已装位置                                                                                                                                              | 我们只管找 CLI 本身，app 找不找得到由它回答                     |
+| 路径会不会被拒                 | `packages/cli/src/fs.ts:41-91`：`OFFICECC_ALLOWED_ROOTS` 未设=不限制；设了就按 realpath 逐根比，越界以 `outside_allowed_roots` 拒绝                                                                                                                                                           | 用户若开过白名单根，我们**照它失败并如实显示**，不越权          |
+| 许可                           | 根 `package.json`：`license: Apache-2.0`、`private: true`、repo `dcc123456/genoffice`；`packages/*` 无 `publishConfig`（不发 npm）                                                                                                                                                            | 许可无风险；也不存在"装个 npm 包"这条路，只能走本机 CLI         |
+| 直接内嵌（B 形状）被否的证据   | `apps/shell/src/main/tab-manager.ts` 源码级 `import '../../../pdf/src/main/pdf-main'`；`pdf-main.ts` 自己注册 43 支 IPC + 自定义 renderer 协议 + 自带 i18n/样式；它是 **Electron 43.7.6 + electron-vite**，本仓是 **44.4.5**（`packages/main/package.json`）；wasm 侧 `@embedpdf/pdfium` 7.2M | **不是 drop-in**，要内嵌必须先抽包，属另一次裁定                |
+
+### 21.3 三条形状决定（写代码之前先定，避免实现替我们改口径）
+
+1. **只依赖它的 CLI 契约，不在本仓复制控制协议。** auto-cc 主进程 `spawn` 一支 `officecc --json open <绝对路径> [--page n]`，
+   把 stdout 那一枚 JSON 翻成界面的一句话。若在 auto-cc 里重写"读 `control.json` + 校验 pid + 连 socket + 带 token"，
+   就是同一逻辑的第二份事实（§2.5），而且对方协议一改我们静默失效。CLI 的 `ErrorReason` 清单是它自己声明的稳定面，
+   所以我们按 `reason` 分支、只把 `message` 当诊断文本，不拿它当界面文案（§5.5 的文案必须走 i18n，
+   而 CLI 回的是英文）。
+2. **入口挂在 desk 的 PDF 那一档，与「在整页编辑里打开」同格**（`PdfPaperView` 纸面上方那一行）。
+   理由不是手感，是 §21.1：扫描件与"改原文件"这一条**根本没有文档**，进不了整页编辑那一屏（它吃 `docId`），
+   挂在编辑屏就等于没挂。
+   这与 3.13-01/02/03 不冲突，且要说得出为什么：那三条钉的是**改本 app 状态的跨进程写口**
+   （`resume.editor.*` / `resume.export.toPdf` / `pdf.export.saveAs`）。这一颗键不改本 app 任何状态、
+   不写任何文件、不回读结果——它和 `shell.revealInFolder` 是同一类"把一条已经存在的路径交给操作系统"。
+   机检反向断言因此写进 3.15-07：desk 里 `pdf.export.*` 仍须零调用。
+3. **结果不回读，界面必须先把这一句说在前面。** 伴生应用保存之后，本 app 不知道文件变了，
+   纸面上那张位图仍是旧的。所以那颗键的气泡里必须写明"改完要重新导入才会进简历"，
+   而不是让人以为这边会自动同步（§2.6：不造看起来会同步的假象）。
+
+### 21.4 落点与依赖（本片新增面很小，逐条对上 §2.3）
+
+- `packages/shell`：新增纯模块 `companion-editor.ts`（候选二进制解析 + argv 构造 + CLI 回执映射）与服务方法
+  `openInCompanionEditor`；`shellSchema` 由空 `strictObject` 加一支 `companionEditorBin`（默认 `officecc`），
+  并按 `packages/store/src/index.ts:37` 的既有写法补 `static envMap`。
+  **为什么不新开一个包**：这是 OS 级动作，`shell` 已经是全 app 唯一碰对话框与访达的格（`revealInFolder`、`selectFile`），
+  新建 `packages/companion-editor` 就是把同一件事分成两个宿主（§2.3 / §2.5）。
+- `packages/core/src/errors.ts`：四支码 `COMPANION_EDITOR_MISSING` / `_REJECTED` / `_TIMEOUT` / `_FAILED`，
+  命名沿用 `DOMAIN_ACTION_REASON`，CLI 的 `reason` 进 `details.code` 作子读数。
+- `packages/shared/src/bridge.ts`：`RENDERER_ALLOWLIST` 加 `shell.openInCompanionEditor` + `BridgeSignatures` 一条。
+- 渲染层：`usePdfView` 加一只手（复用它的 `run` 通道与那份唯一的 `filePath`），`PdfPaperView` 加一颗键，
+  两份语言包补齐 `pdfEdit.*`。
+- **依赖零新增**：不装 `officecc`，不引 wasm，不引 `pdf-lib`；`pnpm-lock.yaml` 不许出现相关新条目。
+
+### 21.5 本片不做（四条，免得把范围写成第二件事）
+
+1. 不做 B 形状（抽包内嵌）——那要另一次裁定，且要先把 Electron 43→44 与两套构建讲清。
+2. 不复活覆盖层编辑、页序、另存（§19.5 第 ③ 条原话仍然生效）。
+3. 不回读伴生应用保存后的新文件，也不做"检测到文件变了就重画"这类自动同步。
+4. 不自动下载 Office-cc。本机没装就报 `COMPANION_EDITOR_MISSING` 并说清怎么设那支路径；
+   "自动拉取伴生应用"是一条独立的分发能力，等有需求再另立一片。
+
+### 21.6 验收切片
+
+> **发货读数（2026-10-26）**：`3.15-01` / `02` / `04` / `06` / `07` 五条 C 判据兑现 `[x]`，
+> `3.15-03` 的 C 半边兑现、V 半边待在场标 `[!]`，`3.15-05` 待用户在场标 `[ ]`。
+> 69-B 与 69-C 同批落：主进程三条（`packages/shell/src/companion-editor.ts` 纯模块 +
+> `ShellService.openInCompanionEditor` + `companionEditorBin` 配置键与 `envMap` 与四个新错误码 +
+> `RENDERER_ALLOWLIST` 与 `BridgeSignatures`）与渲染层那一只 `pdf-edit-open-companion`（图标 lucide `ExternalLink`，
+> 气泡与成功提示都写明"改完要重新导入才会进简历"）。
+> 四道门禁 EXIT 全 0（`pnpm typecheck` / `lint` / `format:check` / `test`，日志留 `tmp/`）；
+> 新增单测 21 条全绿；零新增依赖（`git diff --stat pnpm-lock.yaml package.json packages/*/package.json` 输出为空）。
+> 读数见 `docs/acceptance/03-resume-pdf/3.15-companion-editor-readings.txt`。
+
+- **片69-A（本节，文档先行）**：`03 §21` + `spec 3.15`。
+- **片69-B**：主进程那三条（纯模块 + 服务方法 + 白名单/码），带单测与真实 CLI 的**无副作用**契约读数
+  （`--version` 与对不存在文件的 `--json open`，都不拉 GUI）。
+- **片69-C**：渲染层那一颗键与两句人话。
+- **V 半边待用户在场**：真跳一次会另起一个 GUI 窗口，按 §7.1 与 §9 的 2.1-12 那条，无人值守不代跑，
+  `3.15-05` 起步就标 `[ ]`，不拿单测冒充。

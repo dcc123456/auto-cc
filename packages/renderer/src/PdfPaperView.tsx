@@ -15,9 +15,9 @@
  * 纸打开后编辑入口就挂在纸面正上方，不用回左列翻。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileUp, FolderOpen, PenLine } from 'lucide-react';
+import { ExternalLink, FileUp, FolderOpen, PenLine } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Banner, DeskButton } from './ui/controls';
+import { Banner, DeskButton, deskReason } from './ui/controls';
 import type { PdfViewModel } from './usePdfView';
 
 /**
@@ -33,6 +33,9 @@ const REPAINT_WIDTH_DELTA = 0.06;
  */
 export function PdfPaperView({ model, onOpenEditor }: { model: PdfViewModel; onOpenEditor: () => void }) {
   const { t } = useTranslation();
+  /** 「按不动」三件套（原因码 + 那句成因）由控件原件持有，与左列面板同一份实现（§2.2）。 */
+  const busyCode = model.busy === undefined ? undefined : 'ACTION_BUSY';
+  const { reason: afterBusy, dead } = deskReason(t, 'pdfEdit', busyCode);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** 上一次真画时量到的 CSS 宽度（px）；0 = 还没画过。 */
   const paintedWidthRef = useRef(0);
@@ -173,20 +176,34 @@ export function PdfPaperView({ model, onOpenEditor }: { model: PdfViewModel; onO
         >
           {stateText}
         </p>
-        {/* 看完一眼就想改：编辑入口直接跟纸同格，不用回左列翻那颗按钮。 */}
-        <DeskButton
-          action="pdf-edit-open-editor"
-          variant="jade"
-          compact
-          busy={!!model.busy}
-          disabled={!!model.busy}
-          disabledReason="ACTION_BUSY"
-          disabledReasonLabel={t('pdfEdit.reason.ACTION_BUSY')}
-          onClick={onOpenEditor}
-        >
-          <PenLine size={12} />
-          {t('pdfEdit.openInEditor')}
-        </DeskButton>
+        {/* 看完一眼就想改：两条改道都直接跟纸同格，不用回左列翻。
+            左边那只是 app 内的整页编辑，右边那只把人正看的这一页交给伴生应用 Office-cc（裁定㊴ / spec 3.15）——
+            后者改完不会自动回来，这句话写在气泡里，不让人以为这边会同步。 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <DeskButton
+            action="pdf-edit-open-companion"
+            variant="line"
+            compact
+            busy={busyCode !== undefined}
+            {...dead(afterBusy(model.filePath.trim() === '', 'PATH_EMPTY'))}
+            tip={t('pdfEdit.openInCompanionHint')}
+            onClick={model.openInCompanion}
+          >
+            <ExternalLink size={12} />
+            {t('pdfEdit.openInCompanion')}
+          </DeskButton>
+          <DeskButton
+            action="pdf-edit-open-editor"
+            variant="jade"
+            compact
+            busy={busyCode !== undefined}
+            {...dead(busyCode)}
+            onClick={onOpenEditor}
+          >
+            <PenLine size={12} />
+            {t('pdfEdit.openInEditor')}
+          </DeskButton>
+        </div>
       </div>
 
       {/* 纸本体：位图占满这一格（`w-full` + `h-auto` 保住页面自己的长宽比，装不下就是整张缩小）。

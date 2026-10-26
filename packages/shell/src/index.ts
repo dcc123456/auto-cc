@@ -19,6 +19,12 @@ import {
   type ShellStatus,
 } from '@auto-cc/shared';
 import { z } from 'zod';
+import {
+  COMPANION_EDITOR_DEFAULT_BIN,
+  launchCompanion,
+  planCompanionOpen,
+  resolveCompanionCommand,
+} from './companion-editor.js';
 import { decideOpenPicker, decideSavePicker } from './file-picker.js';
 import { resolveRevealTarget } from './reveal-target.js';
 import { clampSlotRect, fallbackSlotRect } from './slot-bounds.js';
@@ -54,14 +60,28 @@ const kernelViewPlaceholder =
       '<p style="padding:12px">Embedded kernel view placeholder (WebContentsView)</p></body>',
   );
 
-/** 壳层暂无可选项；strict 让 cordis.yml 里给 shell 写错的键在挂载期就报错。 */
-export const shellSchema = z.strictObject({});
+/**
+ * 壳层的可选项。strict 让 `cordis.yml` 里给 shell 写错的键在挂载期就报错。
+ *
+ * `companionEditorBin`（spec 3.15 / plan `03-resume-pdf` §21.4）：伴生应用 Office-cc 那条命令行的名字或绝对路径。
+ * 缺省 `officecc` 就够——本机装了就在 `PATH` 与常用目录里认得到；认不到时界面拿到
+ * `COMPANION_EDITOR_MISSING` 那一句（说要什么），而不是"点了什么都没发生"。
+ */
+export const shellSchema = z.strictObject({
+  companionEditorBin: z.string().default(COMPANION_EDITOR_DEFAULT_BIN),
+});
+
+/** 壳层配置的**输出**形状（带 `.default()` 的键在构造器里一定是齐的，§9 的 1.3 那条实测）。 */
+export type ShellConfig = z.infer<typeof shellSchema>;
 
 /**
  * L1 壳层服务：窗口、托盘、生命周期与内嵌内核视图。
  *
  * 这里是「薄壳」与「业务」的分界：本服务只做窗口/进程级的事，任何抓取、发送、
  * 生成类能力都不允许写进来（那属于 L2/L3 插件）。
+ * 例外只有一类形状：**把一条已经存在的路径交给操作系统**——在访达里选中产物（`revealInFolder`）、
+ * 请系统弹面板（`selectFile`）、把一份 PDF 交给本机另一个应用（`openInCompanionEditor`）。
+ * 它们不改本 app 的状态、不产新文件、不回读结果，所以不是"业务"，是壳层替渲染层做的那次系统调用。
  *
  * 渲染层的入站校验自 1.4 起归 `ipc` 网关，shell 不再注册通道，因此声明 `inject: ['ipc']`：
  * 网关的处理器必须在主窗口创建之前就在位，否则首屏调用会撞上「No handler registered」。
@@ -70,6 +90,8 @@ export class ShellService extends Service {
   static provide = 'shell';
   static Config = shellSchema;
   static inject = ['ipc'];
+  /** env 覆盖名，与 `packages/store/src/index.ts` 的 `AUTOCC_STORE_DIR` 同一命名式。 */
+  static envMap = { companionEditorBin: 'AUTOCC_SHELL_COMPANION_EDITOR_BIN' };
 
   private mainWindow: BrowserWindow | undefined;
   private kernelView: WebContentsView | undefined;
@@ -96,7 +118,10 @@ export class ShellService extends Service {
   private lastError: string | undefined;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
-  constructor(ctx: Context) {
+  constructor(
+    ctx: Context,
+    private readonly config: ShellConfig,
+  ) {
     super(ctx, 'shell');
     void this.launch();
   }
@@ -223,6 +248,39 @@ export class ShellService extends Service {
     if (!target.isAccepted) throw new AppError(target.code, target.reason, 'shell.revealInFolder', {});
     electronShell.showItemInFolder(target.resolvedPath);
     return { revealed: true };
+  };
+
+  /**
+   * 把人正看的那份 PDF 交给本机另一个应用（Office-cc）整页编辑（spec 3.15，plan `03-resume-pdf` §21，裁定㊴ 的 A 形状）。
+   *
+   * 这一颗**不写本 app 的任何状态**：不改文档、不落文件、不回读结果——它做的只是
+   * 「把一条已经存在的路径交给操作系统」，与上面的 `revealInFolder` 同类，
+   * 所以它不构成 3.13-01 / 3.13-03 钉的那种写口（这一句读法是 plan §21.3 第 2 条定的，不是事后补的说法）。
+   * 拉起走伴生应用自己声明为稳定的 CLI 契约（`officecc --json open <绝对路径> [--page n]`），
+   * argv 用数组、**不经 shell**（§8.1）；入参形状、回执映射与超时全在 `companion-editor.ts` 里判，
+   * 这里只把拒绝抛成结构化错误——四道失败各有各的码，为的是界面那四句人话给的下一步不一样。
+   * @param filePath 未受信的渲染层实参：那份 PDF 的绝对路径（必须是绝对路径且以 `.pdf` 结尾，判定在主进程）
+   * @param page 未受信的渲染层实参：人此刻正看的那一页（**1 起**，与 CLI 的 `--page` 同一口径）；
+   *             不是正整数就整支不带——页号只是「帮我翻到那一页」，不值得为它失败一次跳转
+   * @returns `{ openedPath }`：交出去的那一条绝对路径，让界面说得清交的是哪一份；
+   *          失败是 `INVALID_ARGUMENT`（形状不对）、`COMPANION_EDITOR_MISSING`（本机没装）、
+   *          `COMPANION_EDITOR_REJECTED`（它按自己的 reason 拒了）、`COMPANION_EDITOR_TIMEOUT`（等不到）、
+   *          `COMPANION_EDITOR_FAILED`（答得不成 `--json` 那个形状）之一
+   */
+  openInCompanionEditor = async (filePath: unknown, page?: unknown): Promise<{ openedPath: string }> => {
+    const plan = planCompanionOpen(filePath, page);
+    if (!plan.isAccepted) throw new AppError(plan.code, plan.reason, 'shell.openInCompanionEditor');
+    const command = resolveCompanionCommand(this.config.companionEditorBin, process.env);
+    if (command === undefined)
+      throw new AppError(
+        'COMPANION_EDITOR_MISSING',
+        `本机找不到伴生应用的命令行：${this.config.companionEditorBin}`,
+        'shell.openInCompanionEditor',
+        { bin: this.config.companionEditorBin },
+      );
+    const reply = await launchCompanion(command, plan.args);
+    if (!reply.isAccepted) throw new AppError(reply.code, reply.reason, 'shell.openInCompanionEditor', reply.details);
+    return { openedPath: plan.filePath };
   };
 
   /**
