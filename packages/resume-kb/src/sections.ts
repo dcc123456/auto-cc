@@ -19,6 +19,8 @@
  */
 import { PII_VALUE_PATTERNS, redactText } from '@auto-cc/core';
 import {
+  INTENT_FIELD_KEYS,
+  INTENT_SECTION_ID,
   bodyKeyOf,
   companyRoleFields,
   createEmptyDocument,
@@ -81,23 +83,29 @@ export interface RejectedResumeText {
 /** `parseResumeText` 的返回：成功给文档，过短只给判定读数（两条路径都带 issues，界面可复用同一套渲染）。 */
 export type ParseTextResult = ParsedResumeText | RejectedResumeText;
 
+/**
+ * 求职意向标题词典：命中即落进 id 稳定的 `intent` custom 区块（在线简历表单的「求职意向」那一组）。
+ *
+ * 为什么从 `summary` 词典里搬出来：那一类标题下的正文是**四格短答案**（期望岗位 / 城市 / 薪资 / 到岗时间），
+ * 折进简介就等于把可结构化的事实混进一段散文——对话轨要按它精确搜岗位时无处可取。
+ * 区块种类仍是 `custom`（不新增 `SectionKind`，理由见 `editor-ops.ts` 的 `INTENT_FIELD_KEYS` 注释），
+ * 稳定的是 id：解析轨与表单写口（`planIntentField`）按同一个 id 认这一块。
+ */
+const INTENT_HEADING_TERMS: readonly string[] = [
+  '求职意向',
+  '求职目标',
+  '期望职位',
+  '意向岗位',
+  '目标岗位',
+  'job objective',
+  'career objective',
+  'job intent',
+  'objective',
+];
+
 /** 区块标题词典。顺序即优先级——「实习经历」归 experience 而不是 campus；英文词条给拉丁文 PDF/DOCX 那两条通道用（匹配前统一小写）。 */
 const HEADING_TERMS: ReadonlyArray<readonly [SectionKind, readonly string[]]> = [
-  [
-    'summary',
-    [
-      '个人简介',
-      '自我介绍',
-      '自我评价',
-      '个人总结',
-      '求职意向',
-      '核心竞争力',
-      '简介',
-      'summary',
-      'profile',
-      'objective',
-    ],
-  ],
+  ['summary', ['个人简介', '自我介绍', '自我评价', '个人总结', '核心竞争力', '简介', 'summary', 'profile']],
   [
     'experience',
     [
@@ -334,21 +342,28 @@ function isCustomHeading(rawLine: string, text: string, currentKind: SectionKind
  * 判断一行是否是区块标题并给出归类。
  * 要求「去装饰后足够短 + 等于或以词典词开头」，避免把正文当成标题；
  * 词典认不出但带强标题信号的短行收进 `custom`（陌生要素不丢信息，见 `isCustomHeading`）。
+ * 求职意向词典先于通用词典判：它落的也是 custom，但 id 是稳定的 `intent` 而不是位置号 `custom-N`。
  * @param line 原始行
  * @param currentKind 当前所在区块种类（抬头区为 `null`），汉字序号兜底要用它区分区块标题与条目头
- * @returns 命中的区块种类与该行去装饰后的字面；不是标题时返回 `null`
+ * @returns 命中的区块种类、该行去装饰后的字面、以及是否为求职意向那一块；不是标题时返回 `null`
  */
-function classifyHeading(line: string, currentKind: SectionKind | null): { kind: SectionKind; title: string } | null {
+function classifyHeading(
+  line: string,
+  currentKind: SectionKind | null,
+): { kind: SectionKind; title: string; isIntent: boolean } | null {
   const text = stripLineMarkup(line).replace(/[:：]\s*$/, '');
   if (text === '' || [...text].length > MAX_HEADING_LENGTH) return null;
   const lower = text.toLowerCase();
+  if (INTENT_HEADING_TERMS.some((term) => lower === term.toLowerCase() || lower.startsWith(term.toLowerCase()))) {
+    return { kind: 'custom', title: text, isIntent: true };
+  }
   for (const [kind, terms] of HEADING_TERMS) {
     for (const term of terms) {
       const needle = term.toLowerCase();
-      if (lower === needle || lower.startsWith(needle)) return { kind, title: text };
+      if (lower === needle || lower.startsWith(needle)) return { kind, title: text, isIntent: false };
     }
   }
-  return isCustomHeading(line, text, currentKind) ? { kind: 'custom', title: text } : null;
+  return isCustomHeading(line, text, currentKind) ? { kind: 'custom', title: text, isIntent: false } : null;
 }
 
 /**
@@ -393,7 +408,14 @@ function buildSection(
     };
 
     if (kind === 'summary' || kind === 'skills' || kind === 'custom') {
-      return { id: entryId, fields: [makeField(kind, bodyKeyOf(kind), block.join('\n'))] };
+      const fields = [makeField(kind, bodyKeyOf(kind), block.join('\n'))];
+      // 求职意向那一块额外带上四格固定键（空值起步，由表单逐格填）：原文那一段散文留在 `text` 里当参照，
+      // 纸面按 `bind.ts` 的口径跳过空值，所以补格子不会在产物里多出四行空白。只给第一条条目补——
+      // 写口（`planIntentField`）也只认 `entries[0]`，两处一份约定。
+      if (id === INTENT_SECTION_ID && blockIndex === 0) {
+        for (const key of INTENT_FIELD_KEYS) fields.push(makeField(kind, key, ''));
+      }
+      return { id: entryId, fields };
     }
 
     const isEducation = kind === 'education';
@@ -623,12 +645,16 @@ function residualHeaderLines(rawHeaderLines: readonly string[], name: string | n
   return residual;
 }
 
-/** 解析中途的一个区块桶：固定六类的 `id` 即 kind；custom 装配时再按文档序编号。 */
+/**
+ * 解析中途的一个区块桶：固定六类的 `id` 即 kind；custom 装配时再按文档序编号。
+ * `isIntent` 的那一块是 custom 里的例外——它的 id 是稳定的 `intent`，多次出现仍合并进同一桶。
+ */
 interface HeadingBucket {
   id: string | null;
   kind: SectionKind;
   title: string;
   blocks: string[][];
+  isIntent: boolean;
 }
 
 /**
@@ -695,13 +721,20 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
     if (heading !== null) {
       flushRun();
       if (heading.kind === 'custom') {
-        current = { id: null, kind: 'custom', title: heading.title, blocks: [] };
+        // 求职意向按稳定键合并（同一份简历里出现两次「期望职位」不该长出两块）；其余 custom 每次都是新桶。
+        const bucketKey = heading.isIntent ? INTENT_SECTION_ID : `custom#${String(customBucketCount + 1)}`;
+        const existing = heading.isIntent ? buckets.get(bucketKey) : undefined;
+        if (existing !== undefined) {
+          current = existing;
+          continue;
+        }
+        current = { id: null, kind: 'custom', title: heading.title, blocks: [], isIntent: heading.isIntent };
         customBucketCount += 1;
-        buckets.set(`custom#${String(customBucketCount)}`, current);
+        buckets.set(bucketKey, current);
       } else {
         const existing = buckets.get(heading.kind);
         if (existing === undefined) {
-          current = { id: heading.kind, kind: heading.kind, title: heading.title, blocks: [] };
+          current = { id: heading.kind, kind: heading.kind, title: heading.title, blocks: [], isIntent: false };
           buckets.set(heading.kind, current);
         } else {
           current = existing;
@@ -760,7 +793,13 @@ export function parseResumeText(text: string, docId: string, nowMs: number): Par
   }
 
   for (const bucket of buckets.values()) {
-    const id = bucket.kind === 'custom' ? `custom-${String(++customOrdinal)}` : (bucket.id ?? bucket.kind);
+    // 求职意向那一块不占 `custom-N` 号：它的 id 是稳定常量，写口（`planIntentField`）按同一个 id 找它。
+    const id =
+      bucket.kind === 'custom'
+        ? bucket.isIntent
+          ? INTENT_SECTION_ID
+          : `custom-${String(++customOrdinal)}`
+        : (bucket.id ?? bucket.kind);
     const section = buildSection(id, bucket.kind, bucket.title, bucket.blocks, issues);
     if (section.entries.length === 0 && section.kind !== 'custom') {
       issues.push({

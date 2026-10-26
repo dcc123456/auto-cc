@@ -5,6 +5,7 @@
  * 这样脱敏断言才能既验证「掩码生效」又不会因为测试数据泄露而成为风险面。
  */
 import { describe, expect, it } from 'vitest';
+import { INTENT_FIELD_KEYS, INTENT_SECTION_ID } from '@auto-cc/plugin-resume-doc';
 import {
   MIN_TEXT_CHAR_COUNT,
   parseResumeText,
@@ -305,15 +306,28 @@ describe('4.1-02 中文简历惯用的汉字序号标题（真实 PDF 抽出来�
     if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
     // 「一、基本信息」不在六类词典里：新口径下它是独立 custom 要素（原文标题保留），
     // 其下「姓名：李四 学历：本科」整行进正文，而不是像旧口径那样在抬头区被静默丢弃。
+    // 「二、求职意向：…」不再折进简介：它落进 id 稳定的 `intent` custom 区块（在线简历表单的写口按这个 id 找它）。
     expect(parsed.document.sections.map((section) => section.kind)).toEqual([
       'custom',
-      'summary',
+      'custom',
       'skills',
       'experience',
     ]);
     const basic = parsed.document.sections[0]!;
     expect(basic.title).toBe('基本信息');
     expect(basic.entries[0]!.fields[0]!.value).toContain('姓名：李四 学历：本科');
+  });
+
+  it('求职意向那一块带稳定 id 与四格空槽，原文散文留在 `text` 里当参照', () => {
+    if (parsed.status !== 'ok') return expect(parsed.status).toBe('ok');
+    const intent = parsed.document.sections.find((section) => section.id === INTENT_SECTION_ID);
+    expect(intent?.kind).toBe('custom');
+    expect(intent?.title).toBe('求职意向：高级前端工程师');
+    expect(intent?.entries[0]!.id).toBe(`${INTENT_SECTION_ID}-1`);
+    expect(intent?.entries[0]!.fields.map((field) => field.key)).toEqual(['text', ...INTENT_FIELD_KEYS]);
+    expect(intent?.entries[0]!.fields[0]!.value).toContain('八年前端经验');
+    // 四格空值起步：纸面按 `bind.ts` 跳过空值，所以补槽不会让产物多出四行空白。
+    expect(intent?.entries[0]!.fields.slice(1).every((field) => field.value === '')).toBe(true);
   });
 
   it('序号条目行（`（一）公司 - 职位 时间`）认得出公司与时间段', () => {

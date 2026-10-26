@@ -4,6 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   EDITOR_METRIC_BOUNDS,
+  INTENT_FIELD_KEYS,
+  INTENT_SECTION_ID,
+  INTENT_SECTION_TITLE,
+  INTENT_VALUE_MAX_CHARS,
+  PROFILE_VALUE_MAX_CHARS,
   entryBodyLineCount,
   planCustomSectionCreate,
   planCustomSectionRename,
@@ -14,12 +19,24 @@ import {
   planEntryRemove,
   planEntrySplit,
   planFieldText,
+  planIntentField,
   planMetric,
+  planProfileField,
   planSectionMove,
   planSectionRemove,
+  type IntentFieldKey,
   type MetricKey,
+  type ProfileFieldKey,
 } from './editor-ops.js';
-import { DEFAULT_LAYOUT, makeField, type Entry, type Layout, type Section, type SectionKind } from './model.js';
+import {
+  DEFAULT_LAYOUT,
+  makeField,
+  type Entry,
+  type Layout,
+  type Profile,
+  type Section,
+  type SectionKind,
+} from './model.js';
 
 /** 造一个区块（三个区块的用例里只有 id 与标题不同）。 */
 function section(id: string, entryIds: readonly string[] = []): Section {
@@ -586,5 +603,99 @@ describe('要素核对：custom 区块的增 / 删 / 改名', () => {
       code: 'section-not-removable',
     });
     expect(planCustomSectionRename(sections, 'custom-1', '')).toMatchObject({ ok: false, code: 'empty-title' });
+  });
+});
+
+describe('在线简历表单：planProfileField（抬头四格）', () => {
+  const profile: Profile = { name: '张三', contact: { email: null, phone: '13800001111', location: null } };
+
+  it('姓名 trim 后原样存，其余三格逐字不动', () => {
+    const result = planProfileField(profile, 'name', '  李四  ');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    expect(result.value).toEqual({ name: '李四', contact: { email: null, phone: '13800001111', location: null } });
+    expect(profile.name).toBe('张三'); // 入参不被修改
+  });
+
+  it('联系方式留空 = 清空这一格（存 null，与 normalizeDocument 的口径一致）', () => {
+    const result = planProfileField(profile, 'phone', '   ');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    expect(result.value.contact.phone).toBeNull();
+    expect(result.value.name).toBe('张三');
+  });
+
+  it('四条拒绝通道：未知键 / 非字符串 / 空姓名 / 邮箱形状不对 / 超长', () => {
+    expect(planProfileField(profile, 'nickname' as ProfileFieldKey, 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-field',
+    });
+    expect(planProfileField(profile, 'name', 7 as unknown as string)).toMatchObject({
+      ok: false,
+      code: 'not-a-text',
+    });
+    expect(planProfileField(profile, 'name', '  ')).toMatchObject({ ok: false, code: 'empty-value' });
+    expect(planProfileField(profile, 'email', 'lisi#example')).toMatchObject({ ok: false, code: 'bad-email' });
+    expect(planProfileField(profile, 'location', '城'.repeat(PROFILE_VALUE_MAX_CHARS + 1))).toMatchObject({
+      ok: false,
+      code: 'value-too-long',
+    });
+  });
+
+  it('邮箱非空时要像一个邮箱；清空时不做形状校验', () => {
+    const filled = planProfileField(profile, 'email', ' lisi@example.com ');
+    if (!filled.ok) return expect(filled.ok).toBe(true);
+    expect(filled.value.contact.email).toBe('lisi@example.com');
+    expect(planProfileField(profile, 'email', '').ok).toBe(true);
+  });
+});
+
+describe('在线简历表单：planIntentField（求职意向四格）', () => {
+  it('区块缺席时补出稳定 id 的那一块，排在最前，四格键齐、只有被写的那格有值', () => {
+    const sections = [kindSection('summary'), kindSection('custom', 'custom-1')];
+    const result = planIntentField(sections, 'expectRole', ' 高级前端工程师 ');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    expect(result.value.map((item) => item.id)).toEqual([INTENT_SECTION_ID, 'summary', 'custom-1']);
+    const intent = result.value[0]!;
+    expect(intent).toMatchObject({ kind: 'custom', title: INTENT_SECTION_TITLE });
+    expect(intent.entries[0]!.id).toBe(`${INTENT_SECTION_ID}-1`);
+    expect(intent.entries[0]!.fields.map((field) => [field.key, field.value])).toEqual([
+      ['text', ''],
+      ['expectRole', '高级前端工程师'],
+      ['expectCity', ''],
+      ['expectSalary', ''],
+      ['expectStart', ''],
+    ]);
+    expect(sections).toHaveLength(2); // 入参不被修改
+  });
+
+  it('解析轨认出的那一块（只有 text）被补齐四格，原文散文留在 text 里不动', () => {
+    const parsed: Section = {
+      id: INTENT_SECTION_ID,
+      kind: 'custom',
+      title: '求职意向：高级前端工程师',
+      entries: [{ id: `${INTENT_SECTION_ID}-1`, fields: [makeField('custom', 'text', '八年经验，期望上海。')] }],
+    };
+    const result = planIntentField([kindSection('summary'), parsed], 'expectCity', '上海');
+    if (!result.ok) return expect(result.ok).toBe(true);
+    const intent = result.value[1]!;
+    expect(intent.title).toBe('求职意向：高级前端工程师'); // 原文标题不被改写
+    expect(intent.entries).toHaveLength(1); // 补键不补条目
+    expect(intent.entries[0]!.fields.map((field) => field.key)).toEqual(['text', ...INTENT_FIELD_KEYS]);
+    expect(intent.entries[0]!.fields[0]!.value).toBe('八年经验，期望上海。');
+    expect(intent.entries[0]!.fields.find((field) => field.key === 'expectCity')?.value).toBe('上海');
+  });
+
+  it('三条拒绝通道：未知键 / 非字符串 / 超长', () => {
+    expect(planIntentField([], 'expectTitle' as IntentFieldKey, 'x')).toMatchObject({
+      ok: false,
+      code: 'unknown-field',
+    });
+    expect(planIntentField([], 'expectRole', 3 as unknown as string)).toMatchObject({
+      ok: false,
+      code: 'not-a-text',
+    });
+    expect(planIntentField([], 'expectSalary', 'K'.repeat(INTENT_VALUE_MAX_CHARS + 1))).toMatchObject({
+      ok: false,
+      code: 'value-too-long',
+    });
   });
 });

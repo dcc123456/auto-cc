@@ -26,6 +26,7 @@ import type {
   Layout,
   PageMargin,
   ParagraphStyle,
+  Profile,
   Section,
   SectionKind,
   TextAlignToken,
@@ -83,7 +84,10 @@ export type EditorRejectionCode =
   | 'nothing-to-merge'
   | 'section-not-removable'
   | 'empty-title'
-  | 'title-too-long';
+  | 'title-too-long'
+  | 'empty-value'
+  | 'value-too-long'
+  | 'bad-email';
 
 /** 一次操作的判定：通过给新值，否则给机器码与技术原因，**不抛异常**。 */
 export type EditorOutcome<T> =
@@ -815,5 +819,152 @@ export function planCustomSectionRename(
     value: sections.map((section, position) =>
       position === sectionIndex ? { ...section, title: checked.value } : section,
     ),
+  };
+}
+
+/* -------------------------------------------------------------------------------------------------- */
+/* 在线简历表单的两类写口：抬头联系方式（`profile.field`）与求职意向（`intent.field`）。                 */
+/* 与上面同一份拒绝通道：纯函数、不改入参、合法才产新值、不抛异常。                                     */
+/* -------------------------------------------------------------------------------------------------- */
+
+/** 抬头可写的四格：姓名 + 三条联系方式（与 `Profile` 的形状一一对应，没有第五格）。 */
+export const PROFILE_FIELD_KEYS = ['name', 'email', 'phone', 'location'] as const;
+
+/** 抬头的一格键。 */
+export type ProfileFieldKey = (typeof PROFILE_FIELD_KEYS)[number];
+
+/**
+ * 抬头单格的长度上限（按码点）：这四格都印在纸面第一行，超长会把抬头挤成两行甚至溢出页边。
+ * 取 60 是因为最长的一格是邮箱（`firstname.lastname@subdomain.example.com` 这一类已到 45 字），
+ * 姓名 / 电话 / 城市都远短于它——四格共用一个界，界面就不用摆四个数。
+ */
+export const PROFILE_VALUE_MAX_CHARS = 60;
+
+/** 邮箱形状的松判据：只挡明显的错字（缺 `@` 或缺域名里那个点），不做 RFC 全量校验。 */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+
+/** 求职意向区块的稳定 id：不是 `custom-N` 那种位置号，解析轨与界面都按它认这一块。 */
+export const INTENT_SECTION_ID = 'intent';
+
+/** 求职意向区块的标题：原文里没有这一块时由 `planIntentField` 补出来（custom 的展示名就是原文标题）。 */
+export const INTENT_SECTION_TITLE = '求职意向';
+
+/**
+ * 求职意向的四格固定键。
+ * 为什么是 custom 区块 + 键约定而不是新增一类 `SectionKind`：种类枚举被模板绑定层（`internal/bind.ts`）、
+ * 归一化的段落序（`PARAGRAPH_KIND_ORDER`）与打印 utility 类名集合机检（`PRINT_UTILITY_KEYS`）三处消费，
+ * 加一类等于同时改这三处并让 50 套模板少一格样式；而"求职意向"在纸面上的画法与任何一块 custom 完全相同。
+ */
+export const INTENT_FIELD_KEYS = ['expectRole', 'expectCity', 'expectSalary', 'expectStart'] as const;
+
+/** 求职意向的一格键。 */
+export type IntentFieldKey = (typeof INTENT_FIELD_KEYS)[number];
+
+/** 求职意向单格的长度上限（按码点）：这四格装的是短答案（岗位名 / 城市 / 薪资档 / 到岗时间），不是一段话。 */
+export const INTENT_VALUE_MAX_CHARS = 40;
+
+/**
+ * 校验一格短文本值（抬头与求职意向共用：trim、挡非字符串、挡超长）。
+ * @param field 键名（只用于报错文案里说清是哪一格）
+ * @param value 人敲进来的原值（桥那头是渲染层，属于系统边界，形状要挡）
+ * @param maxChars 这一族的长度上限（按码点）
+ * @returns 通过给 trim 后的值；非字符串给 `not-a-text`，超长给 `value-too-long`
+ */
+function validateShortValue(field: string, value: string, maxChars: number): EditorOutcome<string> {
+  if (typeof value !== 'string') {
+    return reject('not-a-text', `${field} 必须是字符串，收到的是 ${typeof value}`);
+  }
+  const trimmed = value.trim();
+  if ([...trimmed].length > maxChars) {
+    return reject('value-too-long', `${field} 的值超过 ${String(maxChars)} 字`);
+  }
+  return { ok: true, value: trimmed };
+}
+
+/**
+ * 改抬头的一格（在线简历表单「基本信息」那一组的写口）。
+ *
+ * 两条刻意的分界：
+ * - **姓名留空即拒**：它是纸面抬头与投递记录的唯一署名，空姓名会让整份产物没有主语；
+ *   三条联系方式留空则是**清空这一格**（模型里存 `null`，纸面自然跳过），与 `normalizeDocument`
+ *   把空串折成 `null` 的既有口径一致，所以"删掉电话"不需要第二套语义。
+ * - **值一律 trim 后原样存**：不做大小写 / 分隔符归一，用户写下的号码与城市字面进产物（4.1-09 的同一条口径）。
+ * @param profile 当前抬头（不被修改）
+ * @param field 要改的那一格
+ * @param value 新值（trim 后 ≤60 字；`email` 非空时还要像一个邮箱）
+ * @returns 通过给一份**新** `Profile`（其余格原样）；未知键 `unknown-field`，非字符串 `not-a-text`，
+ *          超长 `value-too-long`，姓名空白 `empty-value`，邮箱形状不对 `bad-email`
+ */
+export function planProfileField(profile: Profile, field: ProfileFieldKey, value: string): EditorOutcome<Profile> {
+  if (!PROFILE_FIELD_KEYS.includes(field)) {
+    return reject('unknown-field', `抬头里没有 ${String(field)} 这一格（可写的是 ${PROFILE_FIELD_KEYS.join(' / ')}）`);
+  }
+  const checked = validateShortValue(field, value, PROFILE_VALUE_MAX_CHARS);
+  if (!checked.ok) return checked;
+  const trimmed = checked.value;
+  if (field === 'name') {
+    if (trimmed === '') return reject('empty-value', '姓名不能是空白：纸面抬头与投递记录都要靠它署名');
+    return { ok: true, value: { ...profile, name: trimmed } };
+  }
+  if (field === 'email' && trimmed !== '' && !EMAIL_SHAPE.test(trimmed)) {
+    return reject('bad-email', `邮箱 ${trimmed} 不像一个邮箱地址（要 user@example.com 这一形状）`);
+  }
+  return { ok: true, value: { ...profile, contact: { ...profile.contact, [field]: trimmed === '' ? null : trimmed } } };
+}
+
+/**
+ * 改求职意向的一格；这一块不在文档里时**顺手补出来**（旧文档读侧兼容的写侧对偶）。
+ *
+ * 补出来的形状与解析轨认出的那一块完全相同：id `intent`、kind `custom`、标题「求职意向」、
+ * 一条条目里带原文正文键 `text` 与四格固定键——于是"导入时就有的求职意向"与"用户在表单里补的求职意向"
+ * 在纸面与检索侧是同一种东西，不存在第二套形状（§2.5）。位置插在**最前**：求职意向在中文简历里
+ * 紧跟抬头，而 `custom-N` 那种追加式落点会把它排到证书 / 荣誉之后。
+ * @param sections 当前区块序列（不被修改）
+ * @param field 四格之一
+ * @param value 新值（trim 后 ≤40 字；留空 = 这一格待补，纸面跳过它）
+ * @returns 通过给新的区块序列；未知键 `unknown-field`，非字符串 `not-a-text`，超长 `value-too-long`
+ */
+export function planIntentField(
+  sections: readonly Section[],
+  field: IntentFieldKey,
+  value: string,
+): EditorOutcome<Section[]> {
+  if (!INTENT_FIELD_KEYS.includes(field)) {
+    return reject(
+      'unknown-field',
+      `求职意向里没有 ${String(field)} 这一格（可写的是 ${INTENT_FIELD_KEYS.join(' / ')}）`,
+    );
+  }
+  const checked = validateShortValue(field, value, INTENT_VALUE_MAX_CHARS);
+  if (!checked.ok) return checked;
+
+  const sectionIndex = sections.findIndex((section) => section.id === INTENT_SECTION_ID);
+  const section: Section =
+    sectionIndex >= 0
+      ? (sections[sectionIndex] as Section)
+      : { id: INTENT_SECTION_ID, kind: 'custom', title: INTENT_SECTION_TITLE, entries: [] };
+  // 已有条目就补它缺的键（解析轨只造 `text`），没有条目才造一条：条目 id 沿用区块 id 前缀的老形状。
+  const entry: Entry = section.entries[0] ?? {
+    id: `${INTENT_SECTION_ID}-1`,
+    fields: [makeField('custom', bodyKeyOf('custom'), '')],
+  };
+  const withSlots = INTENT_FIELD_KEYS.reduce<Field[]>(
+    (fields, key) =>
+      fields.some((candidate) => candidate.key === key) ? fields : [...fields, makeField('custom', key, '')],
+    [...entry.fields],
+  );
+  const patched: Entry = {
+    ...entry,
+    fields: withSlots.map((candidate) =>
+      candidate.key === field ? { ...candidate, value: checked.value } : candidate,
+    ),
+  };
+  const nextSection: Section = { ...section, entries: [patched, ...section.entries.slice(1)] };
+  return {
+    ok: true,
+    value:
+      sectionIndex >= 0
+        ? sections.map((item, position) => (position === sectionIndex ? nextSection : item))
+        : [nextSection, ...sections],
   };
 }

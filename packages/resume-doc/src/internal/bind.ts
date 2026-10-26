@@ -77,6 +77,10 @@ const FIELD_LABELS: Record<TemplateLocale, Record<string, string>> = {
     degree: '学历',
     major: '专业',
     skill: '技能',
+    expectRole: '期望岗位',
+    expectCity: '期望城市',
+    expectSalary: '期望薪资',
+    expectStart: '到岗时间',
   },
   en: {
     email: 'Email',
@@ -91,6 +95,10 @@ const FIELD_LABELS: Record<TemplateLocale, Record<string, string>> = {
     degree: 'Degree',
     major: 'Major',
     skill: 'Skill',
+    expectRole: 'Target role',
+    expectCity: 'Target city',
+    expectSalary: 'Expected salary',
+    expectStart: 'Availability',
   },
 };
 

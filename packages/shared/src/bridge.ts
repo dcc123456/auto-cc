@@ -2083,11 +2083,11 @@ export interface KbSyncRowResult {
 }
 
 /**
- * 要素核对（chunk review）对**母版**的一次结构编辑操作（`kb.profile.revise` 的单条载荷）。
+ * 在线简历表单对**母版**的一次编辑操作（`kb.profile.revise` 的单条载荷）。
  *
- * 全部六类都只是「改母版 doc_json」的形状声明：chunk 是母版的派生物，改 chunk 必须回写母版、
+ * 全部八类都只是「改母版 doc_json」的形状声明：chunk 是母版的派生物，改 chunk 必须回写母版、
  * 再由服务侧同流程 `sync()` 重建实体与索引，不存在第二份事实。判据半边在 resume-doc 的 editor-ops，
- * 这里只过进程边界，逐条按判别标签分发。
+ * 这里只过进程边界，逐条按判别标签分发。后两类（抬头四格 / 求职意向四格）是在线简历表单补上的写口。
  */
 export type KbReviseOpView =
   | {
@@ -2101,7 +2101,9 @@ export type KbReviseOpView =
   | { readonly op: 'entry.remove'; readonly sectionId: string; readonly entryId: string }
   | { readonly op: 'section.create'; readonly title: string }
   | { readonly op: 'section.remove'; readonly sectionId: string }
-  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string };
+  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string }
+  | { readonly op: 'profile.field'; readonly field: KbProfileFieldRowKey; readonly value: string }
+  | { readonly op: 'intent.field'; readonly field: KbIntentFieldRowKey; readonly value: string };
 
 /**
  * `kb.profile.revise` 的回执：结构编辑已落母版并完成一次重建同步。
@@ -2116,19 +2118,27 @@ export interface KbReviseRowResult {
   readonly removed: number;
 }
 
-/** 要素核对读到的一个字段（镜像 `KbReviewFieldView`）。 */
+/**
+ * 事实锁定的四类字段（镜像 resume-doc 的 `FactKey`）：公司 / 职位 / 起止时间 / 数字成果。
+ * 界面按它画「事实待校验」那一枚琥珀标，不再按键名自己猜一遍（§2.5）。
+ */
+export type ResumeFactKeyView = 'company' | 'role' | 'period' | 'achievement';
+
+/** 在线简历表单读到的一个字段（镜像 `KbReviewFieldView`）。 */
 export interface KbReviewFieldRowView {
   readonly key: string;
   readonly value: string;
+  readonly locked: boolean;
+  readonly factKey: ResumeFactKeyView | null;
 }
 
-/** 要素核对读到的一条 entry（镜像 `KbReviewEntryView`）。 */
+/** 在线简历表单读到的一条 entry（镜像 `KbReviewEntryView`）。 */
 export interface KbReviewEntryRowView {
   readonly id: string;
   readonly fields: readonly KbReviewFieldRowView[];
 }
 
-/** 要素核对读到的一个要素区块（镜像 `KbReviewSectionView`）。 */
+/** 在线简历表单读到的一个要素区块（镜像 `KbReviewSectionView`）。 */
 export interface KbReviewSectionRowView {
   readonly id: string;
   readonly kind: ResumeSectionKindView;
@@ -2136,9 +2146,26 @@ export interface KbReviewSectionRowView {
   readonly entries: readonly KbReviewEntryRowView[];
 }
 
-/** `kb.profile.review` 的读数（镜像 `KbReviewView`）：母版当前的要素结构。 */
+/** 抬头四格的可写键（镜像 resume-doc 的 `ProfileFieldKey`）。 */
+export type KbProfileFieldRowKey = 'name' | 'email' | 'phone' | 'location';
+
+/** 母版抬头（镜像 `Profile`）：姓名 + 三条联系方式，缺项是 `null` 而不是空串。 */
+export interface KbProfileRowView {
+  readonly name: string;
+  readonly contact: {
+    readonly email: string | null;
+    readonly phone: string | null;
+    readonly location: string | null;
+  };
+}
+
+/** 求职意向的四格固定键（镜像 resume-doc 的 `IntentFieldKey`）。 */
+export type KbIntentFieldRowKey = 'expectRole' | 'expectCity' | 'expectSalary' | 'expectStart';
+
+/** `kb.profile.review` 的读数（镜像 `KbReviewView`）：母版当前的抬头与要素结构。 */
 export interface KbReviewRowView {
   readonly docId: string;
+  readonly profile: KbProfileRowView;
   readonly sections: readonly KbReviewSectionRowView[];
 }
 

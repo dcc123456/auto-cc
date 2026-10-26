@@ -39,7 +39,14 @@ import {
   planEntryCreate,
   planEntryRemove,
   planFieldText,
+  planIntentField,
+  planProfileField,
   planSectionRemove,
+  type EditorOutcome,
+  type FactKey,
+  type IntentFieldKey,
+  type Profile,
+  type ProfileFieldKey,
   type ResumeDocument,
   type Section,
 } from '@auto-cc/plugin-resume-doc';
@@ -268,10 +275,12 @@ export interface KbSyncResult {
 }
 
 /**
- * 要素核对（chunk review）对**母版**的一批结构编辑操作（`revise` 的服务侧形状）。
+ * 在线简历表单对**母版**的一批编辑操作（`revise` 的服务侧形状）。
  *
  * 与桥接层 `KbReviseOpView` 同构、在 main 侧 link 逐条照抄转换：本包不依赖 shared，
  * 服务自己的入参形状由自己声明（同 `KbCreateInput` 与 `KbCreateRowInput` 的两层关系）。
+ * 八类分两组：前六类改区块结构（要素核对那一批），后两类是在线简历表单补上的写口——
+ * 抬头联系方式（`profile.field`）与求职意向（`intent.field`，区块缺席时由判据层顺手补出来）。
  */
 export type KbReviseOp =
   | {
@@ -285,10 +294,12 @@ export type KbReviseOp =
   | { readonly op: 'entry.remove'; readonly sectionId: string; readonly entryId: string }
   | { readonly op: 'section.create'; readonly title: string }
   | { readonly op: 'section.remove'; readonly sectionId: string }
-  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string };
+  | { readonly op: 'section.rename'; readonly sectionId: string; readonly title: string }
+  | { readonly op: 'profile.field'; readonly field: ProfileFieldKey; readonly value: string }
+  | { readonly op: 'intent.field'; readonly field: IntentFieldKey; readonly value: string };
 
 /**
- * 一次要素核对的读数：`applied` 为套用的操作条数，后三列是随之那次重建同步的计数（同 `KbSyncResult`）。
+ * 一次表单保存的读数：`applied` 为套用的操作条数，后三列是随之那次重建同步的计数（同 `KbSyncResult`）。
  */
 export interface KbReviseResult {
   readonly docId: string;
@@ -298,19 +309,25 @@ export interface KbReviseResult {
   readonly removed: number;
 }
 
-/** 要素核对读到的一个字段（只到键与值：chunk 核对不需要 locked/factKey 那两格编辑器元数据）。 */
+/**
+ * 在线简历表单读到的一个字段：键与值之外还带那两枚编辑器元数据。
+ * `locked` / `factKey` 是事实锁定（3.1-03）在界面侧的唯一来源——表单要把「公司 / 职位 / 时间 / 成果」
+ * 这四类画成待校验的琥珀格，而它们不该由界面按键名再猜一遍（§2.5：一处事实一个出处）。
+ */
 export interface KbReviewFieldView {
   readonly key: string;
   readonly value: string;
+  readonly locked: boolean;
+  readonly factKey: FactKey | null;
 }
 
-/** 要素核对读到的一条 entry（用户心智里的一块「chunk」）。 */
+/** 在线简历表单读到的一条 entry（一段经历 / 一条技能 / 一块自定义要素）。 */
 export interface KbReviewEntryView {
   readonly id: string;
   readonly fields: readonly KbReviewFieldView[];
 }
 
-/** 要素核对读到的一个要素区块：固定六类 kind 即身份，custom 的身份是原文标题 `title`。 */
+/** 在线简历表单读到的一个要素区块：固定六类 kind 即身份，custom 的身份是原文标题 `title`。 */
 export interface KbReviewSectionView {
   readonly id: string;
   readonly kind: Section['kind'];
@@ -318,9 +335,14 @@ export interface KbReviewSectionView {
   readonly entries: readonly KbReviewEntryView[];
 }
 
-/** `review(docId)` 的读数：母版当前的要素结构（chunk 核对页的唯一数据源）。 */
+/**
+ * `review(docId)` 的读数：母版当前的抬头 + 要素结构（在线简历表单的唯一数据源）。
+ * 抬头一并读出是因为表单的「基本信息」那一组要能改姓名与联系方式——写口 `profile.field`
+ * 与读口必须在同一次桥调用里对得上，否则界面得为四格再去开一条读通道（§2.3）。
+ */
 export interface KbReviewView {
   readonly docId: string;
+  readonly profile: Profile;
   readonly sections: readonly KbReviewSectionView[];
 }
 
@@ -719,7 +741,7 @@ export class KbProfileService extends Service {
   }
 
   /**
-   * 要素核对（chunk review）：在**母版**上顺序套用一批结构编辑，随后同流程重建派生素材与切片。
+   * 在线简历表单：在**母版**上顺序套用一批编辑（结构 / 抬头 / 求职意向），随后同流程重建派生素材与切片。
    *
    * 为什么改的是母版而不是 chunk：chunk 是母版的派生物（sync 整体重建），在 chunk 行上直接改就是开
    * 第二份事实，下一次导入 / 同步必然把它冲掉。这里所有判据都复用 resume-doc 的 editor-ops 纯函数，
@@ -728,7 +750,7 @@ export class KbProfileService extends Service {
    * 整批语义：ops 在一份工作副本上顺序 reduce，任一条返回拒绝就以 `INVALID_ARGUMENT` 上浮、
    * **半条都不落库**（拒绝后直接抛，save 还没发生）；全部通过后才保存并重建。
    * @param docId 母版文档 id；传变体 id 一律拒绝（变体走整页编辑器，素材源头只能是母版）
-   * @param ops 结构编辑批次（改字 / 增删条目 / 增删改名 custom 要素）
+   * @param ops 编辑批次（改字 / 增删条目 / 增删改名 custom 要素 / 抬头四格 / 求职意向四格）
    * @param nowMs 母版 `updatedAt` 与重建同步的时间戳，由调用方注入以便断言
    * @returns 套用条数 + 随之那次重建的计数
    * @throws `AppError('KB_SOURCE_MISSING')` 工作副本不存在或损坏
@@ -744,13 +766,13 @@ export class KbProfileService extends Service {
     if (summary.parentDocId !== null) {
       throw new AppError(
         'INVALID_ARGUMENT',
-        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：要素核对只改母版，请打开母版`,
+        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：简历表单只改母版，请打开母版`,
         undefined,
         { docId, parentDocId: summary.parentDocId },
       );
     }
     if (ops.length === 0) {
-      throw new AppError('INVALID_ARGUMENT', '要素核对没有收到任何修改操作');
+      throw new AppError('INVALID_ARGUMENT', '简历表单没有收到任何修改操作');
     }
 
     const loaded = this.docStore.load(docId);
@@ -766,42 +788,49 @@ export class KbProfileService extends Service {
     }
 
     // 在内存工作副本上顺序 reduce：拒绝即抛、不触碰库里的行（save 在循环之后）。
-    let sections: readonly Section[] = loaded.document.sections;
+    // 载体是「区块序列 + 抬头」两格：`profile.field` 只动后者，其余七类只动前者，
+    // 但整批语义（任一条被拒 → 半条都不落库）对两格是同一句承诺，所以共用一个载体。
+    let target: ReviseTarget = { sections: loaded.document.sections, profile: loaded.document.profile };
     let applied = 0;
     for (const op of ops) {
-      const outcome = applyReviseOp(sections, op);
+      const outcome = applyReviseOp(target, op);
       if (!outcome.ok) {
         throw new AppError(
           'INVALID_ARGUMENT',
-          `第 ${String(applied + 1)} 条要素核对操作被拒：${outcome.detail}`,
+          `第 ${String(applied + 1)} 条简历表单操作被拒：${outcome.detail}`,
           undefined,
           { docId, index: applied, reason: outcome.detail, code: outcome.code, op: op.op },
         );
       }
-      sections = outcome.value;
+      target = outcome.value;
       applied += 1;
     }
 
     // save 内部做权威 schema 校验，非法文档会在这里以 `INVALID_ARGUMENT` 抛出（doc-store 的既有承诺）：
     // editor-ops 的结构性保证之外再兜一层。
-    this.docStore.save({ ...loaded.document, sections: [...sections], updatedAt: nowMs });
+    this.docStore.save({
+      ...loaded.document,
+      profile: target.profile,
+      sections: [...target.sections],
+      updatedAt: nowMs,
+    });
 
     // 母版已改，派生素材必须立刻跟上：同一方法内重建，界面在一次桥调用后看到的就是自洽状态。
     const synced = this.sync(docId, nowMs);
-    this.ctx.logger.info(`[kb-profile] 要素核对 ${docId}：套用 ${String(applied)} 条修改并完成重建同步`);
+    this.ctx.logger.info(`[kb-profile] 简历表单 ${docId}：套用 ${String(applied)} 条修改并完成重建同步`);
     return { docId, applied, created: synced.created, updated: synced.updated, removed: synced.removed };
   }
 
   /**
-   * 读一份**母版**当前的要素结构（chunk 核对页的唯一数据源）。
+   * 读一份**母版**当前的抬头与要素结构（在线简历表单的唯一数据源）。
    *
    * 为什么不复用 `resume.editor.view`：那条读口有一条刻意的 §8.1 边界——投影**不带一句正文**
    * （editor-service 的用例把「JSON 里不含简历原文」钉死了），整页编辑器经打印 HTML 的锚点改字。
-   * chunk 核对要逐块逐条目摆正文与 custom 原文标题，走那条口拿不到内容；而 `kb.profile` 本就承载
+   * 表单要逐块逐条目摆正文与 custom 原文标题，走那条口拿不到内容；而 `kb.profile` 本就承载
    * chunk 正文过界（`evidenceBody` 等），核对读口住在这里不破坏任何既有边界。
    * 与 `revise` 同源同一条母版判据：变体不是素材源头，传变体 id 一律结构化拒绝。
    * @param docId 母版文档 id
-   * @returns 区块 / 条目 / 字段三层的只读结构
+   * @returns 抬头 + 区块 / 条目 / 字段三层的只读结构
    * @throws `AppError('KB_SOURCE_MISSING')` 工作副本不存在或损坏
    * @throws `AppError('INVALID_ARGUMENT')` 目标是变体
    */
@@ -815,7 +844,7 @@ export class KbProfileService extends Service {
     if (summary.parentDocId !== null) {
       throw new AppError(
         'INVALID_ARGUMENT',
-        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：要素核对只对母版打开`,
+        `简历 ${docId} 是按 JD 生成的变体（母版 ${String(summary.parentDocId)}）：简历表单只对母版打开`,
         undefined,
         { docId, parentDocId: summary.parentDocId },
       );
@@ -833,13 +862,19 @@ export class KbProfileService extends Service {
     }
     return {
       docId,
+      profile: loaded.document.profile,
       sections: loaded.document.sections.map((section) => ({
         id: section.id,
         kind: section.kind,
         title: section.title,
         entries: section.entries.map((entry) => ({
           id: entry.id,
-          fields: entry.fields.map((field) => ({ key: field.key, value: field.value })),
+          fields: entry.fields.map((field) => ({
+            key: field.key,
+            value: field.value,
+            locked: field.locked,
+            factKey: field.factKey,
+          })),
         })),
       })),
     };
@@ -1737,15 +1772,51 @@ export class KbProfileService extends Service {
 }
 
 /**
- * 把一条要素核对操作分发给 resume-doc 的 editor-ops 纯函数。
- *
- * 判据（区块是否存在、固定要素不可删、custom 标题空/超长、字段键是否合法）全在 editor-ops 里，
- * 这里只做判别标签到计划函数的一一映射，不重复任何规则（AGENTS.md §2.5）。
- * @param sections 当前工作副本的区块序列
- * @param op 单条核对操作
- * @returns editor-ops 的计划结局（接受给新区块序列，拒绝给人读的原因）
+ * 一批表单操作在内存里推进的载体：区块序列 + 抬头。
+ * 两格都由 `resume-doc` 的纯判据产出新值，本服务只做载体拼装，不复制任何规则（AGENTS.md §2.5）。
  */
-function applyReviseOp(sections: readonly Section[], op: KbReviseOp): ReturnType<typeof planEntryCreate> {
+interface ReviseTarget {
+  readonly sections: readonly Section[];
+  readonly profile: Profile;
+}
+
+/**
+ * 把一条表单操作分发给 resume-doc 的 editor-ops 纯函数。
+ *
+ * 判据（区块是否存在、固定要素不可删、custom 标题空/超长、字段键是否合法、抬头四格的形状）
+ * 全在 editor-ops 里，这里只做判别标签到计划函数的一一映射，不重复任何规则（AGENTS.md §2.5）。
+ * @param target 当前载体（区块序列 + 抬头）
+ * @param op 单条操作
+ * @returns editor-ops 的计划结局（接受给新载体，拒绝给人读的原因）
+ */
+function applyReviseOp(target: ReviseTarget, op: KbReviseOp): EditorOutcome<ReviseTarget> {
+  const { sections, profile } = target;
+  switch (op.op) {
+    case 'profile.field': {
+      const planned = planProfileField(profile, op.field, op.value);
+      return planned.ok ? { ok: true, value: { sections, profile: planned.value } } : planned;
+    }
+    case 'intent.field': {
+      const planned = planIntentField(sections, op.field, op.value);
+      return planned.ok ? { ok: true, value: { sections: planned.value, profile } } : planned;
+    }
+    default: {
+      const planned = applySectionOp(sections, op);
+      return planned.ok ? { ok: true, value: { sections: planned.value, profile } } : planned;
+    }
+  }
+}
+
+/**
+ * 六类区块结构操作到计划函数的映射（`applyReviseOp` 的 default 支）。
+ * @param sections 当前区块序列
+ * @param op 单条区块操作（已排除 `profile.field` / `intent.field`）
+ * @returns editor-ops 的计划结局
+ */
+function applySectionOp(
+  sections: readonly Section[],
+  op: Exclude<KbReviseOp, { op: 'profile.field' } | { op: 'intent.field' }>,
+): EditorOutcome<Section[]> {
   switch (op.op) {
     case 'entry.text':
       return planFieldText(sections, op.sectionId, op.entryId, op.fieldKey, op.value);

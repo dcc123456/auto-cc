@@ -23,7 +23,14 @@ import {
 } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
-import { resumePrint, ResumeDocService, ResumeSnapshotService } from '@auto-cc/plugin-resume-doc';
+import {
+  INTENT_SECTION_ID,
+  INTENT_SECTION_TITLE,
+  INTENT_VALUE_MAX_CHARS,
+  resumePrint,
+  ResumeDocService,
+  ResumeSnapshotService,
+} from '@auto-cc/plugin-resume-doc';
 import { StoreService } from '@auto-cc/plugin-store';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -731,11 +738,16 @@ describe('要素核对 revise：改母版 → 重建 chunk（chunk review）', (
     expect(chunkText).toContain('580 分');
     expect(chunkText).not.toContain('大学英语六级');
 
-    // 核对读口读到的就是修订后的母版结构（custom 带原文标题）。
+    // 核对读口读到的就是修订后的母版结构（custom 带原文标题；字段带 locked/factKey 两枚编辑器元数据）。
     const review = kb.review('resume-revise-ok');
     const reviewedCert = review.sections.find((item) => item.id === 'custom-1');
     expect(reviewedCert).toMatchObject({ kind: 'custom', title: '资格证书' });
-    expect(reviewedCert?.entries[0]?.fields[0]).toEqual({ key: 'text', value: '- CET-6（580 分）' });
+    expect(reviewedCert?.entries[0]?.fields[0]).toEqual({
+      key: 'text',
+      value: '- CET-6（580 分）',
+      locked: false,
+      factKey: null,
+    });
     expect(review.sections.some((item) => item.kind === 'custom' && item.title === '语言能力')).toBe(true);
   });
 
@@ -809,6 +821,125 @@ describe('要素核对 revise：改母版 → 重建 chunk（chunk review）', (
     expectSyncAppError('KB_SOURCE_MISSING', () =>
       booted.kb.revise('resume-从不存在', [{ op: 'section.create', title: 'X' }], LATER_MS),
     );
+  });
+
+  it('抬头四格一批落库：姓名改字、联系方式留空即清空，review 同趟读出', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-profile-field');
+    const { kb, doc } = booted;
+
+    const receipt = kb.revise(
+      'resume-profile-field',
+      [
+        { op: 'profile.field', field: 'name', value: '  李四  ' },
+        { op: 'profile.field', field: 'email', value: 'lisi@example.com' },
+        // 语料里的 13800001111 在这一格被清空：留空 = 这一格不写（模型里存 null），不是"删掉姓名"那种非法。
+        { op: 'profile.field', field: 'phone', value: '' },
+        { op: 'profile.field', field: 'location', value: '上海' },
+      ],
+      LATER_MS,
+    );
+    expect(receipt.applied).toBe(4);
+
+    const after = doc.load('resume-profile-field');
+    if (after.status !== 'found') throw new Error('修订后文档读不回');
+    expect(after.document.profile).toEqual({
+      name: '李四',
+      contact: { email: 'lisi@example.com', phone: null, location: '上海' },
+    });
+    // 表单的读写必须在同一次桥调用里对得上：读口一并把抬头带回来，界面不用再开第二条通道。
+    expect(kb.review('resume-profile-field').profile).toEqual({
+      name: '李四',
+      contact: { email: 'lisi@example.com', phone: null, location: '上海' },
+    });
+  });
+
+  it('抬头非法值整批不落库：空姓名与不像邮箱的值各自结构化拒绝', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-profile-bad');
+    const { kb, doc } = booted;
+
+    // 第一条合法、第二条被拒：整批语义要求第一条也不落库（半条都不落）。
+    expectSyncAppError('INVALID_ARGUMENT', () =>
+      kb.revise(
+        'resume-profile-bad',
+        [
+          { op: 'profile.field', field: 'email', value: 'lisi@example.com' },
+          { op: 'profile.field', field: 'name', value: '   ' },
+        ],
+        LATER_MS,
+      ),
+    );
+    expectSyncAppError('INVALID_ARGUMENT', () =>
+      kb.revise('resume-profile-bad', [{ op: 'profile.field', field: 'email', value: 'lisi#example' }], LATER_MS),
+    );
+
+    const unchanged = doc.load('resume-profile-bad');
+    if (unchanged.status !== 'found') throw new Error('文档读不回');
+    expect(unchanged.document.profile.name).toBe('张三');
+    expect(unchanged.document.profile.contact.email).toBeNull();
+  });
+
+  it('求职意向：区块缺席时由写口补出来，id 与四格键与解析轨同形', async () => {
+    const dir = tempDir();
+    // 这份语料没有「求职意向」标题，所以母版里根本没有 intent 区块——正是旧文档读侧兼容的那一格。
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-intent-field');
+    const { kb, doc } = booted;
+    const before = doc.load('resume-intent-field');
+    if (before.status !== 'found') throw new Error('文档读不回');
+    expect(before.document.sections.some((item) => item.id === INTENT_SECTION_ID)).toBe(false);
+
+    const receipt = kb.revise(
+      'resume-intent-field',
+      [
+        { op: 'intent.field', field: 'expectRole', value: '高级前端工程师' },
+        { op: 'intent.field', field: 'expectCity', value: '上海' },
+        { op: 'intent.field', field: 'expectSalary', value: '30-45K' },
+        { op: 'intent.field', field: 'expectStart', value: '一个月内' },
+      ],
+      LATER_MS,
+    );
+    expect(receipt.applied).toBe(4);
+
+    const after = doc.load('resume-intent-field');
+    if (after.status !== 'found') throw new Error('修订后文档读不回');
+    const intent = after.document.sections.find((item) => item.id === INTENT_SECTION_ID);
+    expect(intent).toMatchObject({ kind: 'custom', title: INTENT_SECTION_TITLE });
+    // 补出来就排在最前：求职意向在中文简历里紧跟抬头，追加式落点会把它排到证书之后。
+    expect(after.document.sections[0]?.id).toBe(INTENT_SECTION_ID);
+    expect(intent?.entries[0]?.id).toBe(`${INTENT_SECTION_ID}-1`);
+    expect(
+      Object.fromEntries((intent?.entries[0]?.fields ?? []).map((field) => [field.key, field.value])),
+    ).toMatchObject({
+      expectRole: '高级前端工程师',
+      expectCity: '上海',
+      expectSalary: '30-45K',
+      expectStart: '一个月内',
+    });
+
+    // 第二次写同一格是改字而不是再造一块：稳定 id 的全部意义就在这里。
+    kb.revise('resume-intent-field', [{ op: 'intent.field', field: 'expectCity', value: '杭州' }], LATER_MS);
+    const again = doc.load('resume-intent-field');
+    if (again.status !== 'found') throw new Error('文档读不回');
+    const intents = again.document.sections.filter((item) => item.id === INTENT_SECTION_ID);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.entries[0]?.fields.find((field) => field.key === 'expectCity')?.value).toBe('杭州');
+  });
+
+  it('求职意向超长值被拒，且不留下半块空区块', async () => {
+    const dir = tempDir();
+    const booted = await syncedKb(dir, RESUME_MD_CUSTOM, 'resume-intent-bad');
+    const { kb, doc } = booted;
+    expectSyncAppError('INVALID_ARGUMENT', () =>
+      kb.revise(
+        'resume-intent-bad',
+        [{ op: 'intent.field', field: 'expectRole', value: '前'.repeat(INTENT_VALUE_MAX_CHARS + 1) }],
+        LATER_MS,
+      ),
+    );
+    const unchanged = doc.load('resume-intent-bad');
+    if (unchanged.status !== 'found') throw new Error('文档读不回');
+    expect(unchanged.document.sections.some((item) => item.id === INTENT_SECTION_ID)).toBe(false);
   });
 });
 

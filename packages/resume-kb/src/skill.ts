@@ -19,7 +19,7 @@
  * 事实锁定红线（AGENTS.md §8.4）不在本文件里"说服"模型：它由 `fact-check.ts` 三条确定性判据持有。
  * 本文件只是在正文末尾把它原样钉一句，并且注入顺序在 `prompts.ts` 里排在规则之后（4.9-06 的反向判据）。
  */
-import type { ResumeDocument, Section } from '@auto-cc/plugin-resume-doc';
+import { INTENT_SECTION_ID, type ResumeDocument, type Section } from '@auto-cc/plugin-resume-doc';
 
 /** 技能正文的版本（改正文必须同步改它，同 4.5-10 复盘靠 `prompt_version` 那一列的口径）。 */
 export const RESUME_SKILL_VERSION = 'resume-skill-v1';
@@ -57,7 +57,7 @@ export interface RequiredInfoFacts {
   locationFilled: boolean;
   /** 简介区块的正文总字数（不含标题）。 */
   summaryChars: number;
-  /** 简介里是否出现"求职意向 / 意向岗位 / 目标岗位"这类意向说法。 */
+  /** 是否写了求职意向：`intent` 区块任一格非空，或简介里出现"求职意向 / 意向岗位 / 目标岗位"这类说法。 */
   objectiveMentioned: boolean;
   /** 经历类区块（experience + project）的条目数。 */
   experienceEntries: number;
@@ -104,9 +104,17 @@ export function factsOfDocument(doc: ResumeDocument): RequiredInfoFacts {
     summaryChars: sections
       .filter((section) => section.kind === 'summary')
       .reduce((total, section) => total + section.entries.reduce((sum, entry) => sum + entryText(entry).length, 0), 0),
-    objectiveMentioned: sections
-      .filter((section) => section.kind === 'summary')
-      .some((section) => /求职意向|意向岗位|目标岗位|期望职位|应聘/u.test(entryTextOfSection(section))),
+    objectiveMentioned:
+      // 求职意向自在线简历表单那一片起落进 id 稳定的 `intent` custom 区块（不再折进简介）：
+      // 那一块里任一格非空即算"写了意向"，老文档仍按简介里的意向说法判，两条通道都在才不漏。
+      sections.some(
+        (section) =>
+          section.id === INTENT_SECTION_ID &&
+          section.entries.some((entry) => entry.fields.some((field) => field.value.trim() !== '')),
+      ) ||
+      sections
+        .filter((section) => section.kind === 'summary')
+        .some((section) => /求职意向|意向岗位|目标岗位|期望职位|应聘/u.test(entryTextOfSection(section))),
     experienceEntries: experience.reduce((total, section) => total + section.entries.length, 0),
     experienceWithPeriod: experience.reduce(
       (total, section) => total + section.entries.filter((entry) => hasKey(entry, 'period')).length,
