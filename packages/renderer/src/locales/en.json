@@ -612,6 +612,7 @@
       "paper": {
         "modePreview": "Preview",
         "modePdf": "PDF view",
+        "collapse": "Collapse preview",
         "aria": "Resume preview",
         "who": "{{doc}} · {{template}} · {{locale}}",
         "receipt": "{{pages}} pages · {{bytes}} bytes",

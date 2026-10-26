@@ -248,6 +248,14 @@ export function ResumeDesk() {
   /** 纸面槽此刻是哪一档（预览 / PDF 查看；裁定㊳后没有第三档，类型收窄）。 */
   const [paperMode, setPaperMode] = useState<ResumePaperMode>('preview');
   /**
+   * 纸面预览面板在不在场（2026-10-26 用户点名：默认收起，人按「预览」才展开）。
+   *
+   * 收起是**条件挂载**而不是 `hidden`：宽高为 0 的隐藏态会让同名选择器命中看不见的那一份（§9 的 5.4-b ⑦），
+   * 也白白养着一条预览供料 effect 与 PDF 读口。收起时左列自然吃满整行——右栏的宽度由拖拽把手持有，
+   * 不属于"这一屏此刻有没有纸"这件事（`useSplitWidth` 的持久化值原样留着）。
+   */
+  const [paperOpen, setPaperOpen] = useState(false);
+  /**
    * 全屏整页编辑此刻是哪一屏（spec 3.10 / 裁定㉙ 第 2 条；2026-10-14 反转裁定后扩为三态）：
    * `model` 旧的内容与模板排版编辑，`pdf` WPS 形态纸面编辑器，`none` 工作台。
    * 三态**互斥挂载**而不是盖在上面：任何一屏都持有独立会话与画布，
@@ -418,9 +426,11 @@ export function ResumeDesk() {
    * 两档都不吃当前文档之外的门槛（PDF 档打开后仍可空手挑文件），于是这里只留"重复点同一个页签就什么都不做"。
    * 换档同时**清空画面**：上一档的 HTML 留在槽里就会以另一档的身份挂在纸上（`preview` 档的落库版
    * 挂在「PDF 查看」页签下面，是 §2.5 禁止的那两份事实）；清空之后由那一条去抖 effect 重新供料。
+   * 换档也**展开面板**：两档都只能从面板里的页签或左列的键进入，收起态下换档等于换一个看不见的档。
    * @param next 目标档位
    */
   const requestPaperMode = (next: ResumePaperMode) => {
+    setPaperOpen(true);
     if (next === paperMode) return;
     setPaperHtml(undefined);
     setPaperStatus('idle');
@@ -569,6 +579,8 @@ export function ResumeDesk() {
    *
    * 三条形状约束，都是这一条要成立才让"预览"那颗键降级成手动补同步的凭据：
    * ① **只在 `preview` 档跑**——`pdf` 档画的是本机真实 PDF 文件，更不该被生成轨的 HTML 顶掉；
+   * ①' **面板收起时不跑**（2026-10-26 用户点名「默认收起」）：没有人在看那张纸，跨进程渲染就只是空转；
+   *    展开时依赖变化会重来一趟，所以收起期间改过的东西不会留在旧画面上（`paperStatus` 随即回到 `rendering`）；
    * ② **不走 `run`**——`run` 收尾会调 `read`（重读待确认与库清单）并把 `busy` 挂上全屏，
    *    于是每滑一次滑杆就禁掉整屏的键；先例是编辑器会话那条不挂全屏 busy 的渲染注释（§2.5）；
    * ③ **序列号丢过期响应**——一次渲染在途时后面的改动会重新起一趟，回来的旧结果必须整条丢弃
@@ -577,6 +589,7 @@ export function ResumeDesk() {
    *    所以连改五只在最后发一趟真渲染（spec 6.4-14 的③数的是桥接调用次数，不是画面次数）。
    */
   useEffect(() => {
+    if (!paperOpen) return;
     if (paperMode !== 'preview') return;
     if (docId === undefined) {
       // 没有当前文档就没有这一张：清掉而不是留着上一份，否则身份读数与画面会各说各话。
@@ -606,7 +619,7 @@ export function ResumeDesk() {
     // （纸上用哪种语言由 `resume-locale` 那一格自己管），而它们是每次渲染都可能换引用的壳，
     // 进依赖会让这条 effect 在无关事件上也重发一趟跨进程渲染（先例：编辑器会话挂载那条只吃 `docId`）。
     return () => window.clearTimeout(timer);
-  }, [paperMode, docId, templateId, locale, paperRevision, bridge]);
+  }, [paperOpen, paperMode, docId, templateId, locale, paperRevision, bridge]);
 
   /**
    * 注入一次导出失败（对不存在的文档调 `toPdf`），让主进程的 `AppErrorPayload` 经同一个 `run` 外壳
@@ -738,6 +751,28 @@ export function ResumeDesk() {
   const bumpPaper = () => setPaperRevision((previous) => previous + 1);
 
   /**
+   * 人按「预览」（2026-10-26 用户点名的入口）：先展开面板，再要一趟新纸。
+   *
+   * 两件事合成一个入口而不是拆成"展开"与"重画"两颗键：面板收起时按预览的期待就是"看见现在的纸"，
+   * 已经展开时按它则是"再要一趟"——两种处境下这同一颗键都说得通，界面上不必多一个同义控件（§2.5）。
+   */
+  const openPaperPreview = () => {
+    setPaperOpen(true);
+    bumpPaper();
+  };
+
+  /**
+   * 收起纸面面板。PDF 档一并退回 `preview`：下回从「预览」进来的那一趟必须是预览档，
+   * 否则面板会以「PDF 查看」的身份重新登场，而人按的是「预览」。
+   */
+  const collapsePaper = () => {
+    setPaperOpen(false);
+    setPaperHtml(undefined);
+    setPaperStatus('idle');
+    setPaperMode('preview');
+  };
+
+  /**
    * 接受过一次改写之后，把"当前那一份"切到刚被写过的定制版并重画那张纸。
    *
    * 为什么切换而不是留在母版：改写从来不落到母版上（裁定㉜），留在母版的那张纸上人看不到任何结果，
@@ -772,7 +807,10 @@ export function ResumeDesk() {
    * 它的前提是"这一档吃当前文档"，而那个前提随导出写端一起搬走了——现在这一档从挑一份本机 PDF 开始，
    * 空的就画空态并教人选文件，不再拿一次隐式导出冒充"用户想看的那一份"。
    */
-  const pdfView = usePdfView({ active: paperMode === 'pdf', onClose: () => requestPaperMode('preview') });
+  const pdfView = usePdfView({
+    active: paperOpen && paperMode === 'pdf',
+    onClose: () => requestPaperMode('preview'),
+  });
 
   /**
    * 「选择文件」那颗键（spec 6.4-19）：**在源码里只写一次**，却按段的开合只出现在一处 DOM——
@@ -1292,14 +1330,14 @@ export function ResumeDesk() {
                           disabled={noDocReason !== undefined}
                           disabledReason={noDocReason}
                           disabledReasonLabel={reasonLabel(noDocReason)}
-                          onClick={bumpPaper}
+                          onClick={openPaperPreview}
                         >
                           <Eye size={12} />
                           {t('resume.preview')}
                         </DeskButton>
                         {/* 裁定㊲：出纸与换样式/记默认的写端整条搬进整页编辑的右轨，
                         且必须先落库再出纸（spec 3.13-05）——desk 这一侧不再持有"导一份还没存的纸"这条路。
-                        预览是只读渲染，仍是这一格的键。 */}
+                        预览是只读渲染，仍是这一格的键；2026-10-26 起它还负责**展开**默认收起的纸面面板。 */}
                         {/* 整页编辑（spec 3.10-06）：判门是"要有当前文档"——编辑的是那一份的草稿，
                         没有文档就送进空会话（6.4-07 那句"页签点下去必须有回应"的同一条判门）。 */}
                         <DeskButton
@@ -1390,8 +1428,10 @@ export function ResumeDesk() {
               </DeskButton>
             </div>
 
-            {/* 右栏：一根把手 + 一张常驻的纸。两种看法（预览 / PDF 查看）都画在这一格里，
+            {/* 右栏：一根把手 + 一张纸。两种看法（预览 / PDF 查看）都画在这一格里，
           所以"编排显示在右侧边栏"与"实时看到变动"是同一件事的两个说法（用户 2026-10-10 的原话）。
+          2026-10-26 起这一栏**默认不在场**（用户点名：预览面板默认收起，按「预览」才展开）：
+          收起走条件挂载，左列因此吃满整行；展开的入口是出纸那一格的「预览」与「PDF 查看」两颗键。
           窄档整栏换到最上面（`order-1`）：纵向退让时把纸摆在动作之前，主视觉不再被 330 行控件埋住（病灶③）；
           把手在这一档不画（堆叠时没有"左右"可拖），宽度那一档仍照常持久化，够到 46rem 就回到人拖的位置上。
 
@@ -1403,32 +1443,35 @@ export function ResumeDesk() {
 
           `self-start` 是 sticky 生效的前提：flex 项默认被 `align-items: stretch` 拉成整行高（左列实测 2673px），
           拉满之后就没有可粘的余量——本轮活体拍到"滚到排版控件时右栏整格空白"正是这一条。 */}
-            <div
-              ref={paperSplit.panelRef}
-              className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
-            >
-              <SplitHandle
-                split={paperSplit}
-                label={t('desk.resume.paperHandle')}
-                action="resume-paper-handle"
-                testid="resume-paper-handle"
-                className="hidden @[46rem]:block"
-              />
-              <div className="min-w-0 flex-1">
-                <ResumePaperStage
-                  mode={paperMode}
-                  onModeChange={requestPaperMode}
-                  paperHtml={paperHtml}
-                  paperStatus={paperStatus}
-                  paperUpdatedAt={paperUpdatedAt}
-                  pdfView={<PdfPaperView model={pdfView} onOpenEditor={() => setEditPageOpen('pdf')} />}
-                  docLabel={docLabel}
-                  templateName={templateName}
-                  locale={locale}
-                  busy={!!busy}
+            {paperOpen && (
+              <div
+                ref={paperSplit.panelRef}
+                className="order-1 flex min-w-0 @[46rem]:sticky @[46rem]:top-0 @[46rem]:order-2 @[46rem]:w-(--resume-paper-width) @[46rem]:shrink-0 @[46rem]:self-start"
+              >
+                <SplitHandle
+                  split={paperSplit}
+                  label={t('desk.resume.paperHandle')}
+                  action="resume-paper-handle"
+                  testid="resume-paper-handle"
+                  className="hidden @[46rem]:block"
                 />
+                <div className="min-w-0 flex-1">
+                  <ResumePaperStage
+                    mode={paperMode}
+                    onModeChange={requestPaperMode}
+                    paperHtml={paperHtml}
+                    paperStatus={paperStatus}
+                    paperUpdatedAt={paperUpdatedAt}
+                    pdfView={<PdfPaperView model={pdfView} onOpenEditor={() => setEditPageOpen('pdf')} />}
+                    docLabel={docLabel}
+                    templateName={templateName}
+                    locale={locale}
+                    busy={!!busy}
+                    onCollapse={collapsePaper}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <Drawer
               action="desk-fixtures"

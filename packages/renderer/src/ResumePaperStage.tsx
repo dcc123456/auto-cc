@@ -1,8 +1,9 @@
+import { PanelRightClose } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 import type { ResumeLocaleView } from '@auto-cc/shared';
 import { ResumePaperFrame } from './ResumePaperFrame';
-import { DeskSegmented } from './ui/controls';
+import { DeskButton, DeskSegmented } from './ui/controls';
 import { DeskExplainer } from './ui/disclosure';
 
 /**
@@ -51,15 +52,22 @@ export interface ResumePaperStageProps {
   locale: ResumeLocaleView;
   /** 上一条动作在途：整组页签按不动的原因码走这一档。 */
   busy?: boolean;
+  /**
+   * 收起这一栏（2026-10-26 用户点名：预览面板默认收起）。
+   * 展开的入口在左列「预览」/「PDF 查看」两颗键；这一颗是人看够了以后回去的那条路。
+   */
+  onCollapse: () => void;
 }
 
 /**
- * 简历屏的纸面槽：一条页签 + 一张常驻的纸。
+ * 简历屏的纸面槽：一条页签 + 一张按需展开的纸。
  *
  * 形状依据是 2026-10-10 的两条裁定加 2026-10 下旬的裁定㊲/㊳：
  * ① 几种看法共用一格、切换是条件挂载而不是 `hidden` 叠放
  * （隐藏态宽高为 0 会让同名选择器命中看不见的那一份，AGENTS.md §9 的 5.4-b ⑦）；
  * ② 纸住在**右栏**里，装不下时**整张缩放**而不是横向滚（spec 6.4-12）。
+ * 2026-10-26 用户点名后，这一栏本身也走条件挂载：desk 只在人按「预览」/「PDF 查看」时才把它挂上，
+ * 收起键由这一格自己的页签行给出。
  *
  * "装不下"的判据在 2026-10-14 由 6.4-24 加了第二条：这一格按**宽与一页的高取小**，
  * 所以 A4 一页完整可见、不必在纸里滚（代价是窗口矮时左右留白）。缩放的手术只住在 `ResumePaperFrame` 里，
@@ -81,6 +89,7 @@ export function ResumePaperStage({
   templateName,
   locale,
   busy = false,
+  onCollapse,
 }: ResumePaperStageProps) {
   const { t } = useTranslation();
 
@@ -115,6 +124,20 @@ export function ResumePaperStage({
         >
           {docLabel ? t('resume.paper.who', { doc: docLabel, template: templateName ?? '-', locale }) : null}
         </p>
+        {/* 收起这一栏的路。与左列「预览」成对：那颗是展开，这颗是收回去——
+            没有它，面板一旦展开就只能在两个页签之间切，收不起来。 */}
+        <DeskButton
+          action="paper-collapse"
+          variant="ghost"
+          compact
+          tip={t('resume.paper.collapse')}
+          tipPlacement="bottom"
+          tipAlign="end"
+          aria-label={t('resume.paper.collapse')}
+          onClick={onCollapse}
+        >
+          <PanelRightClose size={13} />
+        </DeskButton>
       </div>
 
       {/* 实时的那一条读数（spec 6.4-14 的②）：左列一动这张纸就自己重出，人不必去按"预览"，

@@ -1,0 +1,66 @@
+6.4-27 简历预览面板默认收起（2026-10-26 用户点名）
+=====================================================
+
+环境（本机实测）
+----------------
+· 载体：已在跑的 dev 实例（Electron 44.4.5，CDP 10222，渲染层 http://127.0.0.1:5174/），
+  userData=tmp/dev-userdata；未杀、未重启（§9 的 2.5-d：不碰用户正在用的 app）。
+· 窗口状态：document.visibilityState = "hidden"（本次判据全部是 DOM 计数与档位读数，不依赖指针落页；
+  画面不入库——纸上是用户真实简历，按 §8.5 与 §9 的 4.5 先例只写逐字读数）。
+· 探针：`tmp/paper-collapse/probe.ts` 与 `probe2.ts`（按 §6.4 留在工作区外，不进主干）；
+  命令 `pnpm harness eval --url 5174 --expr-file tmp/paper-collapse/probe2.ts`
+  （入参名是 `--expr-file`，§9 的 8.3-01 ⑮ 那条）。
+
+读数一：进屏默认收起 + 点「预览」展开（probe.ts）
+---------------------------------------------------
+{
+  "visibility": "hidden",
+  "afterEnter": { "panel": 1, "paper": 0, "paperFrame": 0, "collapseButton": 0 },
+  "outputTab": { "refTab": "output", "previewButton": 1, "paper": 0 },
+  "previewClick": "clicked",
+  "afterPreview": { "paper": 1, "stageMode": "preview", "paperFrame": 0, "liveStatus": "rendering", "collapseButton": 1 },
+  "collapseClick": "clicked",
+  "afterCollapse": { "paper": 0, "paperFrame": 0, "collapseButton": 0, "previewButton": 1 }
+}
+（`afterPreview.paperFrame = 0` 是去抖 350ms + 跨进程渲染还在途，下一趟落定后见读数二。）
+
+读数二：落定后的纸、收起、PDF 档、再展开（probe2.ts）
+-----------------------------------------------------
+{
+  "visibility": "hidden",
+  "collapsedByDefault": { "paper": 0, "panelWidth": 940 },
+  "afterPreviewSettled": {
+    "paper": 1,
+    "stageMode": "preview",
+    "paperFrame": 1,
+    "emptyState": 0,
+    "liveStatus": "idle",
+    "panelWidth": 940
+  },
+  "collapsedAgain": { "paper": 0 },
+  "pdfOpen": "clicked",
+  "afterPdf": { "paper": 1, "stageMode": "pdf" },
+  "collapsedAfterPdf": { "paper": 0, "stageModeAfter": null },
+  "reopenFromPreviewAfterPdf": { "paper": 1, "stageMode": "preview" }
+}
+
+判据逐条对账（spec 6.4-27 的 V ①～⑤）
+--------------------------------------
+① 进屏 `[data-testid="resume-paper"]` 计数 0；`[data-testid="resume-panel"]` 宽 940 —— PASS（收起态是条件挂载，不是 `hidden`）
+② 点 `data-action="preview"` 后：纸计数 1、`data-stage-mode="preview"`、`resume-preview` 帧 1 只、空态 0、`paper-live` 落 `idle` —— PASS
+③ 点 `data-action="paper-collapse"` 后：纸计数回 0，帧与收起键一并消失 —— PASS
+④ 收起态点 `data-action="open-pdf-edit"`：面板重新挂上且 `data-stage-mode="pdf"` —— PASS
+⑤ 在 PDF 档点收起、再点「预览」：展开的是 `data-stage-mode="preview"` —— PASS
+
+C 半边（可机检的静态事实）
+--------------------------
+· `ResumeDesk.tsx`：`paperOpen` 是右栏唯一开关（`{paperOpen && (…)}`）；预览 effect 头部
+  `if (!paperOpen) return`，依赖含 `paperOpen`；`usePdfView({ active: paperOpen && paperMode === 'pdf' })`。
+· `ResumePaperStage.tsx`：收起键是 `DeskButton`（`data-action="paper-collapse"`）+ `PanelRightClose` + 气泡，
+  文案键 `resume.paper.collapse` 在 zh-CN / en 各一条（`pnpm lint` 的语言包键对齐机检覆盖）。
+· 门禁：`pnpm typecheck` EXIT=0、`pnpm lint` EXIT=0（日志 `tmp/gate-typecheck-preview.log` / `tmp/gate-lint-preview.log`）。
+
+没有动的东西
+------------
+· 整页编辑页（`ResumeEditPage`）里那张纸仍是打字主战场，不参与"预览面板收起"。
+· 6.4-24 的倍率口径、6.4-13 的拖拽宽度持久化、PDF 查看档的读口本身，一行未改。

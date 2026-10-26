@@ -612,6 +612,7 @@
       "paper": {
         "modePreview": "预览",
         "modePdf": "PDF 查看",
+        "collapse": "收起预览",
         "aria": "简历预览",
         "who": "{{doc}} · {{template}} · {{locale}}",
         "receipt": "{{pages}} 页 · {{bytes}} 字节",
