@@ -70,6 +70,13 @@ export interface GeneratePanelProps {
    * @param writtenDocId 接受写入的那一行：新建或覆盖的那一支变体（裁定㉜ 之后它永远不是母版）
    */
   onAccepted: (writtenDocId: string) => void;
+  /**
+   * 把这一趟的提议态**转述给父级**（plan §2.2 的「AI 建议」半边）：在线简历表单要把每条改写贴在
+   * 对应那一格旁边，而生成只此一条通道（不新开第二条 LLM 改写路径），所以提议态的持有者上移一层。
+   * 三处清空（新生成、接受写完、库被改过基线失效）也一并转述，表单不会留着一份已经用掉的建议。
+   * @param preview 一次生成的读数；`undefined` = 此刻没有可用的提议态
+   */
+  onPreview?: (preview: GenerationRunRowView | undefined) => void;
 }
 
 /**
@@ -85,7 +92,7 @@ export interface GeneratePanelProps {
  * @param props 见 `GeneratePanelProps`（候选清单与当前文档都从父级递进来）
  * @returns 一块 JD 输入 + 一次生成的提议态清单 + 接受那一步
  */
-export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccepted }: GeneratePanelProps) {
+export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccepted, onPreview }: GeneratePanelProps) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
   const [jdText, setJdText] = useState('');
@@ -108,6 +115,18 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
     };
   }, [trail]);
   const [preview, setPreview] = useState<GenerationRunRowView>();
+  /**
+   * 提议态的**唯一写口**：本面板自己留着渲染，同时转述给父级（在线简历表单按格贴建议）。
+   * 三处调用点都走它，漏一处就会让表单留着一份已经用掉或已经失效的建议。
+   * @param next 一次生成的读数；`undefined` = 清空
+   */
+  const publishPreview = useCallback(
+    (next: GenerationRunRowView | undefined) => {
+      setPreview(next);
+      onPreview?.(next);
+    },
+    [onPreview],
+  );
   /** 与 `preview.rewrites` 等长同序的勾选态：下标就是接受时回传的那份下标（界面看见哪行勾哪行）。 */
   const [checked, setChecked] = useState<boolean[]>([]);
   const [applyReorder, setApplyReorder] = useState(false);
@@ -138,12 +157,12 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   useEffect(() => {
     if (!bridge) return;
     return bridge.on('kb/entities-changed', () => {
-      setPreview(undefined);
+      publishPreview(undefined);
       setChecked([]);
       setBodies({});
       setNotice(t('generate.stale'));
     });
-  }, [bridge, setNotice, t]);
+  }, [bridge, publishPreview, setNotice, t]);
 
   /** 一次生成的三种结局 → 一句播报（literal `t()` 三种各写一遍，占位符与实参由机检对齐）。 */
   const outcomeText = (value: GenerationRunRowView) => {
@@ -201,7 +220,7 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
     setAccepted(undefined);
     void run(t('generate.run'), () => bridge?.resume['generate.run'](jdText.trim(), { docId }), {
       apply: (value) => {
-        setPreview(value);
+        publishPreview(value);
         setChecked(value.rewrites.map(() => false));
         setApplyReorder(false);
         setBodies({});
@@ -224,7 +243,7 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
         apply: (value) => {
           setAccepted(value);
           // 提议态在一次接受之后就不在主进程里了（`accept()` 会把它删掉），留着界面只会诱导第二次失败。
-          setPreview(undefined);
+          publishPreview(undefined);
           setChecked([]);
           // 写盘成功就把当前文档切到刚写的那一支并重渲纸面（plan §3.26 的反馈闭环）：改动的结果要出现在
           // 那张纸上，而不是只剩一行「已接受」的小字——人核对的是纸，不是提示条。

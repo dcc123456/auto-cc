@@ -1,0 +1,47 @@
+auto-cc 在线简历表单（spec 4.12）活体读数 · 2026-10-26T09:11:22Z
+环境：共享 dev 实例 CDP 10222 / vite 5174，窗口 hidden（截图不取：整屏含真实简历个人信息，按 §8.5 不入库）
+
+=== 一、表单挂载与分组（真实母版 resume-02d95ebb40a9） ===
+data-ref-tab = review（默认落在表单那一页）
+resume-form 矩形 = 551 × 9059
+data-testid=resume-form-entry 计数 = 26
+分组（data-section / 高度 px）：
+  resume.form.section.experience 2394   「工作经历 5 条」
+  resume.form.section.project    3764   「项目经历 8 条」
+  resume.form.section.skills     1731   「技能 12 条」
+  resume.form.section.summary     380   「概述 1 条」
+data-testid=resume-form-group-profile 高度 = 312（基本信息）
+data-testid=resume-form-group-intent  高度 = 312（求职意向，四格常显）
+「保存」= data-disabled-reason `resume-form-no-change`，title 「没有需要保存的改动」
+
+=== 二、裸 icon + 气泡（4.12-02 的提示形态） ===
+data-explainer 命中 = [resume-form-hint-draft, resume-form-hint-fact]（ai 那一只在有建议时才出现）
+点 resume-form-hint-draft-toggle → data-open = true，气泡 role=dialog 存在
+气泡首句逐字：「打字只进草稿，改过的格子挂一枚「未保存」；点最下面那颗「保存」才写进母版。一次保…」
+再点一次 → 收起（data-open 回 false）
+
+=== 三、保存闭环（4.12-11；在一次性种子文档上做，不碰真实母版） ===
+种子：resume.export.seedDemo() → docId `resume-demo`，hash af08f0e4a67f…（见下，用完即删）
+改前：kb.profile.review → name = 「张三」；resume.export.preview 含「张三」
+打字（原生 setter + input 事件）：name 输入框 = 「张三丰」
+  同为这一刻的读数：保存 reason = none（可点）；dirty 标签 1 枚；
+  kb.profile.review 仍 = 「张三」；preview 含「张三丰」= false   ← 打字不落库（草稿口径）
+点「保存」后（2.5s）：
+  kb.profile.review → name = 「张三丰」                     ← 复读逐字一致
+  resume.export.preview 含「张三丰」= true，含「>张三<」= false ← 纸面同源反映
+  保存 reason 回 `resume-form-no-change`；dirty 标签 0 枚；输入框 = 「张三丰」
+  data-testid=resume-form-notice = 「已保存 1 处改动」
+清理：kb.profile.removeDoc('resume-demo') 回执
+  {docId: resume-demo, chunks: 7, entities: 6, detached: 0, snapshots: 0, imports: 0, document: 1}
+  之后 resume.doc.list = [resume-02d95ebb40a9]，表单回到 26 条（状态复原）
+
+=== 三之二、「保存」按不动的另两档（4.12-06；同一份种子文档，只在草稿里改，不保存） ===
+姓名清空 → data-disabled-reason `resume-form-name-needed`，title 「姓名不能为空」
+姓名回填、邮箱改成 `bad-email` → `resume-form-email-bad`，title 「邮箱形状不对，例如 name@example.com」
+（草稿随页面 reload 丢弃，种子文档同趟删除，未写任何一格）
+
+=== 四、AI 建议那一格（4.12-07）本轮受阻，逐字原因 ===
+llm.settings.check('chat') → {ok:false, reason: LLM_REQUEST_FAILED, elapsedMs: 282,
+  message: "对端返回 400：Your account (2101736391) does not have a valid CodingPlan subscription,
+  or your subscription has expired. Please visit https://console.volcengine.com/ark/..."}
+→ 生成通道拿不到产物，`resume-form-ai` 建议块在活体上无从复现；该行标 `[!]`，不写成已过。

@@ -17,6 +17,7 @@ import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState }
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
+  GenerationRunRowView,
   ImportProvenanceRowView,
   ImportReceiptView,
   PendingImportRowView,
@@ -30,13 +31,13 @@ import { DEMO_RESUME_DOC_ID } from '@auto-cc/shared';
 import { pushDeskToast } from './deskToast';
 import { formatClock } from './format';
 import { GapPanel } from './GapPanel';
-import { ChunkReviewSection } from './ChunkReviewSection';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
 import { PdfPaperView } from './PdfPaperView';
 import { PdfViewPanel } from './PdfViewPanel';
 import { PdfEditorPage } from './pdf-editor/PdfEditorPage';
 import { ResumeEditPage } from './ResumeEditPage';
+import { ResumeFormPanel } from './ResumeFormPanel';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { SkillPanel } from './SkillPanel';
 import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, DeskTab, Tag } from './ui/controls';
@@ -101,7 +102,7 @@ const FORMAT_LABEL_KEY = {
 
 /**
  * 简历屏顶部分步引导的四步（resume chunk flow 片 4）：顺序就是两条用户流程——
- * 首次：①导入 → ②核对要素 → ③贴 JD 生成 → ④编辑导出；后续：直接 ③→④，①②保持可回查。
+ * 首次：①导入 → ②填在线简历 → ③贴 JD 生成 → ④编辑导出；后续：直接 ③→④，①②保持可回查。
  * `sectionId` 既是 DeskSection 的持久开合键，也是点击跳转的目标；一颗事实不抄第二份（§2.5）。
  */
 const RESUME_STEPS = [
@@ -117,7 +118,7 @@ type ResumeRefTab = 'review' | 'issues' | 'output';
 /**
  * 回查页签的三格（plan §1.2「一屏两件事」）：左列只留**当前在做什么**（①导入、③按岗位改写），
  * 其余三件都是"回头核对一眼"的东西，各占一页，不再一路平铺到脚——
- * ②素材逐块核对、待确认清单 + 事实素材（原先塞在①的正文里，裁定㉕ 第 3 条已经降过一级）、④出纸。
+ * ②在线简历表单、待确认清单 + 事实素材（原先塞在①的正文里，裁定㉕ 第 3 条已经降过一级）、④出纸。
  * `sectionId` 沿用既有的段 id：既是 DeskSection 的持久开合键，也是 `resume-section-<x>` 那条取证通道，一字不改。
  * 「核对」那一页没有自己的段 id（它装的是两只 DeskExplainer，各自的 id 与 testid 跟着搬、不改名）。
  */
@@ -253,6 +254,13 @@ export function ResumeDesk() {
    * 同一屏上两张纸会让 6.4-08 那条"槽里任何时刻只有一张画布"当场不成立。
    */
   const [editPageOpen, setEditPageOpen] = useState<'none' | 'model' | 'pdf'>('none');
+  /**
+   * 「按岗位改写」那一趟的提议态（plan §2.2 的 AI 建议半边）：**desk 持有，两格共用**。
+   * 生成通道只有一条（`GeneratePanel` 跑 `resume.generate.run`），而建议要贴在**在线简历表单**对应那一格旁边，
+   * 所以读数上移到两格共同的父级；`GeneratePanel` 收起或换页时建议仍在（它不该跟着界面开合消失）。
+   * `undefined` = 此刻没有可用的提议态。
+   */
+  const [generatePreview, setGeneratePreview] = useState<GenerationRunRowView>();
   /** 09 稿形态⑥ 的那一跳：落点是简历屏时，「定制生成」那一格必须被强制打开（见 `DeskSection.openSignal`）。 */
   const trail = useViewTrail();
 
@@ -394,6 +402,16 @@ export function ResumeDesk() {
     return () => observer.disconnect();
   }, [read]);
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
+
+  /**
+   * 库被改过就把提议态丢掉：`GeneratePanel` 收起时它自己那条 `kb/entities-changed` 订阅随之卸载，
+   * 而在线简历表单每保存一次都会触发一次重建——留着旧建议就是让人拿一份基线已失效的改写往格子里填。
+   * 判定仍在主进程（接受侧会以 stale 拒绝），界面这一条只是不留诱导。
+   */
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.on('kb/entities-changed', () => setGeneratePreview(undefined));
+  }, [bridge]);
 
   /**
    * 换纸面档。**判门只在这一处**：裁定㊳之后只剩「预览」与「PDF 查看」两档，
@@ -1046,8 +1064,8 @@ export function ResumeDesk() {
                 </div>
               </DeskSection>
 
-              {/* ② 核对要素（素材逐块）本轮搬进下面「回查」那一排的**素材**页：它不是"当前在做什么"，
-                  而是"回头核对一眼"（plan §1.2）。段 id、testid 与条件挂载口径都跟着走，一字不改。 */}
+              {/* ② 在线简历表单本轮仍住在下面「回查」那一排的**表单**页（plan §1.2 的一屏两件事）：
+                  段 id、testid 与条件挂载口径一字不改，改的只是那一页里挂的组件（`ChunkReviewSection` → `ResumeFormPanel`）。 */}
 
               {/* ③ 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
               <DeskSection
@@ -1071,6 +1089,7 @@ export function ResumeDesk() {
                     onDocIdChange={setDocId}
                     refreshDocs={refreshDocs}
                     onAccepted={adoptVariant}
+                    onPreview={setGeneratePreview}
                   />
                   {/* 书写技能与必备信息清单（spec 4.9-10 / 4.9-11）挂在「按岗位改写」这一格：
                 这一份指引就是这一趟改写带上的一张纸，人改完下一次就生效，中间没有别的开关。 */}
@@ -1107,7 +1126,7 @@ export function ResumeDesk() {
                 </nav>
 
                 {refTab === 'review' && (
-                  /* ② 核对要素：导入拆块的逐块查看与修改（resume chunk flow 片 3）。
+                  /* ② 在线简历表单：导入拆出来的内容以分组表单呈现，人在这里改内容（plan §2.2）。
                   只对母版开放：选中变体时组件内部只给一句「去选母版」，写调用在主进程还有同一判据兜底。
                   openSignal 取两支之和（步骤条那一跳 + 换页那一跳）：两支都是只增不减的计数，
                   所以任一支动一下就产生一个触发沿，比取 max 少一条"小计数被大计数永久压住"的坑。 */
@@ -1124,7 +1143,11 @@ export function ResumeDesk() {
                       <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="review">
                         {t('desk.resume.stepReviewHint')}
                       </p>
-                      <ChunkReviewSection docId={docId} isVariant={currentDoc?.parentDocId != null} />
+                      <ResumeFormPanel
+                        docId={docId}
+                        isVariant={currentDoc?.parentDocId != null}
+                        suggestions={generatePreview?.rewrites}
+                      />
                     </div>
                   </DeskSection>
                 )}
