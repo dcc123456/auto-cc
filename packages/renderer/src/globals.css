@@ -52,8 +52,9 @@
      描边、淡洗仍走色相档；与文案同处一只载体的图标（按钮结果态那一枚）跟着文案走 `-ink`，
      同一只载体上不长出两张脸（§2.5）。墨案只有朱砂需要提亮，青玉与琥珀本来就够亮——
      同值也保留键名，为的是组件侧只有一条写法（`text-*-ink`），不分叉。
-     四档在毡案的同名键已被裁定压深到与色相档同值（见 `[data-theme='light']` 那条注释），
-     所以「文字档」在两案里都是**一只可读的色**，消费侧写法不变。 */
+     毡案（2026-10-26 换装成 Claude 暖调之后）四档的 `-ink` 一律是**同色相压深的一档**，
+     与色相档不同值：色相档要留给亮陶土/亮绿当描边与淡洗，过 AA 这件事只能由 `-ink` 承担
+     （见 `[data-theme='light']` 那条注释）。两案的**消费侧写法因此完全一致**：文案永远 `text-*-ink`。 */
   --color-seal-ink: #ef7a55;
   --color-seal-wash: rgba(226, 84, 58, 0.13);
   /* 朱砂的“再深一档”：给印章键的悬停与按下当实心底（07 稿 `.seal:hover` 的填充意图 +
@@ -289,148 +290,160 @@ body {
 
 /* ══════════════════════════════════════════════════════════════════════
    毡案 / Felt Desk —— 浅色主题（Q5 裁定：深浅双主题一起做）
-   材质从「墨桌面」换成「浅灰毡桌面」：纸面仍是全画面最白的一层，
-   分层靠阴影而不是明度差；朱砂仍是唯一的外发色，只是加深到能在浅底撑住对比度。
+   2026-10-26 换装成 **Claude 暖调**（裁定「视觉基调 = Claude 风格」，且只改这一案，墨案逐字节不动）：
+   材质从「冷灰毡桌面」换成「暖米白桌面 + 陶土强调」——桌面 #f0ede7、面板 #f8f6f2、
+   纸面 #fffcf7 仍是全画面最白的一层，分层靠**一线暖灰描边 + 极轻阴影**而不是明度差
+   （Claude 那份风格文档把重阴影、渐变、蓝紫强调都列在禁用清单里）。
    切主题只换 token，不换任何布局与组件——所以这一块只允许出现变量赋值。
    这里不加 `!important`、不写在 @layer 内：未分层的规则天然压过分层的 `@theme` 输出。
    ══════════════════════════════════════════════════════════════════════ */
 [data-theme='light'] {
-  --color-ink-950: #d8d3c6;
-  --color-ink-900: #e7e3d8;
-  --color-ink-850: #e0dbcd;
-  --color-ink-800: #f2efe6;
-  --color-ink-750: #d4cebd;
-  --color-ink-700: #c9c2ae;
+  /* 承载面的分工沿用墨案那一条阶梯（950 桌面 → 900 面板 → 850 区块 → 800 选中/悬停 →
+     750 中性长条与气泡底 → 700 更深一档的长条），只把整条换成暖米白：
+     越"高"越接近白，桌面比面板深一格，于是卡片靠明度差 + `--color-line` 就能浮起来，
+     不必上重阴影。这一批值同时是第 12 节对比度判据的**五档承载面**，改任何一个都要重跑 `pnpm lint`。 */
+  --color-ink-950: #f0ede7;
+  --color-ink-900: #f8f6f2;
+  --color-ink-850: #f3f1ec;
+  --color-ink-800: #fdfcfa;
+  --color-ink-750: #eae7e0;
+  --color-ink-700: #e0dcd3;
 
   /* 文字阶整体翻成深色：utility 名（text-slate-300 这类）不变，语义随主题翻转。
      这一条阶梯是「越往下越浅」，而浅底上的浅色就是低对比，所以 300~600 不能等比翻转。
      逐屏普查（spec 6.1-06）量出毡案的可用带，并据此定下**档位与字号的对应关系**：
-     · ≥12px（`text-xs` 及以上）走 4.5:1 的正文门槛 → 只能用 slate-400 及更深，
-       slate-400 从 #56626c 加深到 #4f5a64（最深桌面 #d8d3c6 上 4.18 → 4.72），
-       slate-300 同时从 #4a5762 提到 #414c56，让这两档之间还留得住肉眼看得出的差；
-     · ≤11px 的元信息/读数走 3:1 门槛 → slate-500（3.70）、slate-600（3.26）胜任，
+     · ≥12px（`text-xs` 及以上）走 4.5:1 的正文门槛 → 只能用 slate-400 及更深；
+     · ≤11px 的元信息/读数走 3:1 门槛 → slate-500（4.87）、slate-600（3.75）胜任，
        它们不许出现在 12px 的说明文案上（普查里毡案 17 行 12px 失守全是这一处错位）。
-     500 与 600 曾经比 500 还深（顺序反了），现在保持 300 < 400 < 500 < 600 单调。 */
-  --color-slate-50: #1b2228;
-  --color-slate-100: #252d34;
-  --color-slate-200: #333c44;
-  --color-slate-300: #414c56;
-  --color-slate-400: #4f5a64;
-  --color-slate-500: #5f6a74;
-  --color-slate-600: #6b7681;
-  /* 桌面与卡片：950 最深毡 → 这里是"最浅"的方向，靠 line 与 shadow 分层 */
-  --color-slate-700: #b3ab98;
-  --color-slate-800: #d4cebd;
-  --color-slate-900: #e7e3d8;
-  --color-slate-950: #d8d3c6;
+     换装时整条改成**暖中性**（Claude 的 gray-900/600/400 那一族），色相从冷蓝灰挪到暖褐灰，
+     但档位与字号的对应关系、以及 300 < 400 < 500 < 600 的单调一律保住：
+     slate-50 对桌面 14.39、slate-400 6.55、slate-500 4.87（都过 4.5 墙），slate-600 3.75（只配 ≤11px）。
+     Claude 文档里那些 `text-gray-600` 一律翻译成这里的 `text-slate-500/400`，不引入裸 slate utility（第 11 节）。 */
+  --color-slate-50: #1f1d1a;
+  --color-slate-100: #2b2825;
+  --color-slate-200: #3a3733;
+  --color-slate-300: #4a4640;
+  --color-slate-400: #57534b;
+  --color-slate-500: #6b665e;
+  --color-slate-600: #7d7871;
+  /* 桌面与卡片：950 最深毡 → 这里是"最浅"的方向，靠 line 与 shadow 分层；三档与 ink 同值，
+     存量面板里 `bg-slate-900` 与 `bg-ink-900` 因此仍然画出同一张面板。 */
+  --color-slate-700: #e0dcd3;
+  --color-slate-800: #eae7e0;
+  --color-slate-900: #f8f6f2;
+  --color-slate-950: #f0ede7;
 
-  --color-paper: #fdfbf5;
-  --color-paper-2: #f3eee1;
+  --color-paper: #fffcf7;
+  --color-paper-2: #f7f3eb;
 
-  --color-seal: #802615;
-  /* 裁定「毡案语气色在令牌层再压深」落地：毡案四档的**色相档=文字档**（`-ink` 与 token 同值），
-     一次改值让 `Banner`/`Tag`/`EffectChip`/语义按钮四条载体同时过 AA，不必逐点改写消费者。
-     压深的程度不是拍脑袋：四档都按「写在自己淡洗（或语义按钮那一档 14~18% 的同色实底）上、
-     对毡案五级承载面里最差的一只（中性长条 `bg-ink-750` #d4cebd）对比 ≥4.55」反推
-     （spec 6.1-09 色相半边；求解与活体复测读数见 docs/acceptance/06-ui-ink-desk/6.1-09-tone-token-readings.txt）。
-     旧值（seal #c0391f / jade #287957 / amber #8a5f0a / celadon #3f8078）在 ink-750 上的自家 wash 只有
-     3.07 / 2.96 / 3.11 / 2.61，够不到 12px 文案的 4.5。压深后落到的深度与稿上
-     `--seal-deep` 同一级（`shared.css:1206` #96290f ↔ 这里 #802615）。 */
-  --color-seal-ink: #802615;
-  --color-seal-wash: rgba(128, 38, 21, 0.1);
-  /* 稿上毡案那档是 #96290f（`shared.css:1206`），但毡案的色相档已被 6.1-09 裁定压深到 #802615——
-     稿的 deep 在它之上（更浅），按下必须比悬停更深，所以这一档沿同一方向再压，取 6.1-09 读数文件里
-     点名过的 #5a1b0f（对稿上那档白字 13.14:1）。 */
-  --color-seal-deep: #5a1b0f;
-  --color-jade: #1c543d;
-  --color-jade-ink: #1c543d;
-  --color-jade-wash: rgba(28, 84, 61, 0.12);
-  --color-amber: #654507;
-  --color-amber-ink: #654507;
-  --color-amber-wash: rgba(101, 69, 7, 0.13);
-  --color-celadon: #2a544f;
-  --color-celadon-ink: #2a544f;
-  --color-celadon-wash: rgba(42, 84, 79, 0.12);
+  /* 强调色换成 Claude 的陶土 #d97757，但**它只当描边、图标与淡洗用，绝不当文字色**：
+     这一档压暖米白桌面只有 2.67:1，配白字 3.12:1，两头都够不到本项目自己的 4.5 墙（spec 6.1-06）。
+     所以毡案的四档从此**色相档 ≠ 文字档**（墨案的朱砂早就是这个形状：#e2543a vs #ef7a55），
+     `-ink` 是同色相压深的一档，写在自己淡洗与语义按钮那档 14~18% 同色实底上、
+     对五级承载面里最差的一只（中性长条 `bg-ink-750` #eae7e0）都 ≥4.85（第 12 节自动核，读数见下）。
+     这一条**取代**旧注释里「毡案四档的色相档=文字档」那句：那次裁定要的是"一处改值、全族过 AA"，
+     换装之后色相档要留给 Claude 的亮陶土，同一件事只能由 `-ink` 承担，消费侧写法（`text-*-ink`）不变。 */
+  --color-seal: #d97757;
+  --color-seal-ink: #8c4526;
+  --color-seal-wash: rgba(217, 119, 87, 0.12);
+  /* 印章键悬停/按下的实心底：配稿上钉死的白字 5.49:1（第 12 节 `SOLID_FILL_PAIRS` 那一行）。
+     不取色相档 #d97757 当实底——它配白字只有 3.12:1，且**不许为对稿把 `seal-deep` 翻回 `seal`**
+     （裁定：会让 lint 直接红）。它比 `-ink` 亮一档，于是"空闲=淡洗+深陶土字 / 悬停=陶土实底+白字"
+     两态在画面上分得开。 */
+  --color-seal-deep: #a4522f;
+  --color-jade: #2f7a5b;
+  --color-jade-ink: #1a5c43;
+  --color-jade-wash: rgba(47, 122, 91, 0.12);
+  --color-amber: #9a6a1c;
+  --color-amber-ink: #7a4f10;
+  --color-amber-wash: rgba(154, 106, 28, 0.13);
+  --color-celadon: #4a8078;
+  --color-celadon-ink: #356059;
+  --color-celadon-wash: rgba(74, 128, 120, 0.12);
 
-  --color-line: rgba(38, 44, 48, 0.15);
-  --color-line-strong: rgba(38, 44, 48, 0.3);
-  --color-scrim: rgba(38, 44, 48, 0.5);
-  --shadow-lift: 0 8px 20px -12px rgba(38, 44, 48, 0.35);
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
-  --shadow-sheet: 0 24px 60px -24px rgba(38, 44, 48, 0.4);
+  /* 一线暖灰描边（合成读数：`line` 落在面板上 #e2e0dc、`line-strong` #cdcbc7，与 Claude 的
+     gray-200 同级）。阴影按 Claude 的禁用清单整体减淡到 `shadow-sm` 量级：不许重投影、不许内阴影。 */
+  --color-line: rgba(31, 29, 26, 0.1);
+  --color-line-strong: rgba(31, 29, 26, 0.2);
+  --color-scrim: rgba(31, 29, 26, 0.42);
+  --shadow-lift: 0 4px 12px -6px rgba(31, 29, 26, 0.18);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  --shadow-sheet: 0 16px 40px -20px rgba(31, 29, 26, 0.22);
 
   color-scheme: light;
-  /* 浅色把整条色阶**反向**：低号给人当文字（要深），高号当底色（要浅），与 slate 同一处理。 */
-  /* rose-* → 墨案 seal 族 */
-  --color-rose-50: #2b0f0b;
-  --color-rose-100: #4a1a13;
-  --color-rose-200: #6d241a;
-  --color-rose-300: #9f3323;
-  --color-rose-400: #c8432d;
-  --color-rose-500: #e2543a;
-  --color-rose-600: #e97259;
-  --color-rose-700: #ef9a86;
-  --color-rose-800: #f3bcb0;
-  --color-rose-900: #f9ddd7;
-  --color-rose-950: #fdf1ee;
-  /* emerald-* → 墨案 jade 族 */
-  --color-emerald-50: #0c2119;
-  --color-emerald-100: #163a2c;
-  --color-emerald-200: #21543f;
-  --color-emerald-300: #2f7a5b;
-  --color-emerald-400: #3c9a72;
-  --color-emerald-500: #4fb78a;
-  --color-emerald-600: #63c39a;
-  --color-emerald-700: #7fd0ac;
-  --color-emerald-800: #a8e2c8;
-  --color-emerald-900: #d6f2e5;
-  --color-emerald-950: #eefaf4;
-  /* amber-* → 墨案 amber 族 */
-  --color-amber-50: #271a09;
-  --color-amber-100: #473112;
-  --color-amber-200: #6b491a;
-  --color-amber-300: #9a6a22;
-  --color-amber-400: #c1872c;
-  --color-amber-500: #e0a33f;
-  --color-amber-600: #e4b251;
-  --color-amber-700: #eac36d;
-  --color-amber-800: #f2d99f;
-  --color-amber-900: #f9eccf;
-  --color-amber-950: #fdf7ea;
-  /* sky-* → 墨案 celadon 族 */
-  --color-sky-50: #101d1c;
-  --color-sky-100: #1d3230;
-  --color-sky-200: #2d4a46;
-  --color-sky-300: #406761;
-  --color-sky-400: #52837b;
-  --color-sky-500: #67a096;
-  --color-sky-600: #7fb6ad;
-  --color-sky-700: #94c7c0;
-  --color-sky-800: #b2d8d3;
-  --color-sky-900: #d8ecea;
-  --color-sky-950: #eff7f6;
-  /* violet-* → 墨案 celadon 族 */
-  --color-violet-50: #101d1c;
-  --color-violet-100: #1d3230;
-  --color-violet-200: #2d4a46;
-  --color-violet-300: #406761;
-  --color-violet-400: #52837b;
-  --color-violet-500: #67a096;
-  --color-violet-600: #7fb6ad;
-  --color-violet-700: #94c7c0;
-  --color-violet-800: #b2d8d3;
-  --color-violet-900: #d8ecea;
-  --color-violet-950: #eff7f6;
-  /* indigo-* → 墨案 celadon 族 */
-  --color-indigo-50: #101d1c;
-  --color-indigo-100: #1d3230;
-  --color-indigo-200: #2d4a46;
-  --color-indigo-300: #406761;
-  --color-indigo-400: #52837b;
-  --color-indigo-500: #67a096;
-  --color-indigo-600: #7fb6ad;
-  --color-indigo-700: #94c7c0;
-  --color-indigo-800: #b2d8d3;
-  --color-indigo-900: #d8ecea;
-  --color-indigo-950: #eff7f6;
+  /* 浅色把整条色阶**反向**：低号给人当文字（要深），高号当底色（要浅），与 slate 同一处理。
+     六族全部锚在新的四档色相上重生成（500 = 色相档本身，往下按同色相压深、往上朝纸面 #fffcf7 冲淡），
+     于是 `text-rose-500` / `bg-emerald-900` 这类存量 class 一个都不改就跟上新装（plan §3.2 的 B 方案）。 */
+  /* rose-* → 毡案 seal 族（陶土） */
+  --color-rose-50: #341d15;
+  --color-rose-100: #4e2b1f;
+  --color-rose-200: #6d3c2c;
+  --color-rose-300: #8f4f39;
+  --color-rose-400: #b46348;
+  --color-rose-500: #d97757;
+  --color-rose-600: #e1947a;
+  --color-rose-700: #eab29d;
+  --color-rose-800: #f1ccbd;
+  --color-rose-900: #f8e4da;
+  --color-rose-950: #fcf1ea;
+  /* emerald-* → 毡案 jade 族 */
+  --color-emerald-50: #0b1d16;
+  --color-emerald-100: #112c21;
+  --color-emerald-200: #183d2e;
+  --color-emerald-300: #1f513c;
+  --color-emerald-400: #27654c;
+  --color-emerald-500: #2f7a5b;
+  --color-emerald-600: #5d977d;
+  --color-emerald-700: #8bb3a0;
+  --color-emerald-800: #b4cdbf;
+  --color-emerald-900: #dae5db;
+  --color-emerald-950: #eef2eb;
+  /* amber-* → 毡案 amber 族（赭黄） */
+  --color-amber-50: #251907;
+  --color-amber-100: #37260a;
+  --color-amber-200: #4d350e;
+  --color-amber-300: #664612;
+  --color-amber-400: #805817;
+  --color-amber-500: #9a6a1c;
+  --color-amber-600: #b08a4c;
+  --color-amber-700: #c6aa7c;
+  --color-amber-800: #dbc7a8;
+  --color-amber-900: #ede2d0;
+  --color-amber-950: #f7f0e5;
+  /* sky-* → 毡案 celadon 族 */
+  --color-sky-50: #121f1d;
+  --color-sky-100: #1b2e2b;
+  --color-sky-200: #25403c;
+  --color-sky-300: #31544f;
+  --color-sky-400: #3d6a64;
+  --color-sky-500: #4a8078;
+  --color-sky-600: #729b94;
+  --color-sky-700: #9ab7b0;
+  --color-sky-800: #becfc9;
+  --color-sky-900: #dee6e0;
+  --color-sky-950: #f1f2ed;
+  /* violet-* → 毡案 celadon 族 */
+  --color-violet-50: #121f1d;
+  --color-violet-100: #1b2e2b;
+  --color-violet-200: #25403c;
+  --color-violet-300: #31544f;
+  --color-violet-400: #3d6a64;
+  --color-violet-500: #4a8078;
+  --color-violet-600: #729b94;
+  --color-violet-700: #9ab7b0;
+  --color-violet-800: #becfc9;
+  --color-violet-900: #dee6e0;
+  --color-violet-950: #f1f2ed;
+  /* indigo-* → 毡案 celadon 族 */
+  --color-indigo-50: #121f1d;
+  --color-indigo-100: #1b2e2b;
+  --color-indigo-200: #25403c;
+  --color-indigo-300: #31544f;
+  --color-indigo-400: #3d6a64;
+  --color-indigo-500: #4a8078;
+  --color-indigo-600: #729b94;
+  --color-indigo-700: #9ab7b0;
+  --color-indigo-800: #becfc9;
+  --color-indigo-900: #dee6e0;
+  --color-indigo-950: #f1f2ed;
 }
