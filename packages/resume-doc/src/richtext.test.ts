@@ -152,6 +152,17 @@ describe('normalizeRichLine：导入侧把符号归一成标记（spec 4.1-18）
     expect(normalizeRichLine('（二）项目经历')).toBe('项目经历');
   });
 
+  it('汉字序号要带括号对或分隔符才算装饰：裸数字开头的正文行首字不丢', () => {
+    // 旧写法把括号与分隔符三段全设成可选，于是「八年前端经验」的行首「八」被当序号吃掉——
+    // 中文简历的正文行常以数字开头，这一格丢的是内容不是装饰（在线简历表单的求职意向正文里实测到）。
+    expect(stripLineMarkup('八年前端经验，期望上海。')).toBe('八年前端经验，期望上海。');
+    expect(stripLineMarkup('五年后端工程师')).toBe('五年后端工程师');
+    // 真的序号照旧剥掉：括号对那一支与分隔符那一支都要在。
+    expect(stripLineMarkup('（二）项目经历')).toBe('项目经历');
+    expect(stripLineMarkup('二、求职意向')).toBe('求职意向');
+    expect(stripLineMarkup('十. 熟练掌握 JavaScript')).toBe('熟练掌握 JavaScript');
+  });
+
   it('只有符号、没有内容的一行不产出空列表项', () => {
     expect(normalizeRichLine('- ')).toBe('');
     expect(normalizeRichLine('•')).toBe('');
