@@ -13,7 +13,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
@@ -39,7 +39,7 @@ import { PdfEditorPage } from './pdf-editor/PdfEditorPage';
 import { ResumeEditPage } from './ResumeEditPage';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { SkillPanel } from './SkillPanel';
-import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, Tag } from './ui/controls';
+import { BLOCK_SELECTED_CLASS, Banner, DeskButton, DeskField, DeskSelect, DeskTab, Tag } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
 import { Drawer, Modal } from './ui/overlays';
 import { SplitHandle, useSplitWidth } from './ui/split';
@@ -110,6 +110,36 @@ const RESUME_STEPS = [
   { sectionId: 'resume.generate', labelKey: 'desk.resume.step3' },
   { sectionId: 'resume.output', labelKey: 'desk.resume.step4' },
 ] as const;
+
+/** 「回查」那一排的页签名。三格互斥挂载：一次只挂一页，没选中那两页连读口与订阅都不养。 */
+type ResumeRefTab = 'review' | 'issues' | 'output';
+
+/**
+ * 回查页签的三格（plan §1.2「一屏两件事」）：左列只留**当前在做什么**（①导入、③按岗位改写），
+ * 其余三件都是"回头核对一眼"的东西，各占一页，不再一路平铺到脚——
+ * ②素材逐块核对、待确认清单 + 事实素材（原先塞在①的正文里，裁定㉕ 第 3 条已经降过一级）、④出纸。
+ * `sectionId` 沿用既有的段 id：既是 DeskSection 的持久开合键，也是 `resume-section-<x>` 那条取证通道，一字不改。
+ * 「核对」那一页没有自己的段 id（它装的是两只 DeskExplainer，各自的 id 与 testid 跟着搬、不改名）。
+ */
+const RESUME_REF_TABS: readonly {
+  tab: ResumeRefTab;
+  sectionId: string | undefined;
+  labelKey: string;
+  icon: ComponentType<{ size?: number; className?: string }>;
+}[] = [
+  { tab: 'review', sectionId: 'resume.review', labelKey: 'desk.resume.refTabReview', icon: FileText },
+  { tab: 'issues', sectionId: undefined, labelKey: 'desk.resume.refTabIssues', icon: ListChecks },
+  { tab: 'output', sectionId: 'resume.output', labelKey: 'desk.resume.refTabOutput', icon: BookOpen },
+];
+
+/**
+ * 段 id → 回查页签：分步引导点到②或④时先把对应那一页挂上，否则滚动目标根本不在 DOM 里（正文收起即卸载，
+ * 而未选中的页签是整块不挂）。①③住在常驻列，不在这张表里。
+ */
+const REF_TAB_OF_SECTION: Record<string, ResumeRefTab> = {
+  'resume.review': 'review',
+  'resume.output': 'output',
+};
 
 /**
  * 取一条本机路径的**末段名字**（两个分隔符都吃：mac 的 `/` 与 Windows 的 `\`）。
@@ -236,13 +266,39 @@ export function ResumeDesk() {
   const [stepSignals, setStepSignals] = useState<Record<string, number>>({});
 
   /**
-   * 跳到某一步：把目标段强制展开（信号加一），下一帧再滚到它的段头。
+   * 「回查」那一排此刻挂的是哪一页（plan §1.2：一屏只留两件事，其余进页签）。
+   * 缺省停在②素材——库里有素材时那是进门后最常被回头看的一格；空库时它自己会给一句"先导入"。
+   */
+  const [refTab, setRefTab] = useState<ResumeRefTab>('review');
+
+  /**
+   * 页签那一格的「跳进」信号：与 `stepSignals` 同一机制（`useSectionOpen` 的 openSignal），
+   * 换页时加一，让新挂上那一页里**被人收起过**的段重新展开——否则点页签只看到一个收起的段头，
+   * 那一跳等于没发生。值取计数不取时间戳，理由与 `stepSignals` 那条相同。
+   */
+  const [refSignal, setRefSignal] = useState(0);
+
+  /**
+   * 换到回查的某一页（顺带把这一页里被人收起过的段重新展开）。
+   * @param next 目标页签名。再点当前那一页同样涨一次信号：那是"点了必须有回应"的同一条判门（6.4-07），
+   *   而不是空转——人刚收起段头再点页签，期待的是内容回来。
+   */
+  const switchRefTab = useCallback((next: ResumeRefTab): void => {
+    setRefTab(next);
+    setRefSignal((signal) => signal + 1);
+  }, []);
+
+  /**
+   * 跳到某一步：目标住在页签里就先把那一页挂上，再把目标段强制展开（信号加一），下一帧滚到它的段头。
    *
    * 两帧的延迟是刻意的：信号写入 → DeskSection 的 effect 把收起态正文挂回 DOM（正文收起时是真卸载），
    * 同一帧里查询找不到节点。用双 rAF 等「信号落 state」与「正文挂载」两次提交走完。
    * @param sectionId 目标段 id
    */
   const jumpToSection = useCallback((sectionId: string): void => {
+    // 换页那一跳只写 refTab、不涨 refSignal：落点段的展开由下面这一支 stepSignals 负责，不喂第二个开关。
+    const pagedTab = REF_TAB_OF_SECTION[sectionId];
+    if (pagedTab !== undefined) setRefTab(pagedTab);
     setStepSignals((previous) => ({ ...previous, [sectionId]: (previous[sectionId] ?? 0) + 1 }));
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -984,111 +1040,14 @@ export function ResumeDesk() {
                     </div>
                   )}
 
-                  {/* 裁定㉕ 第 3 条：「待确认清单」降级成**一句只读提醒**——不加确认写口（那要新迁移 37 +
-                `resume['parse.ack']` + 白名单行，另立一片），也不删显示（它是"疑似扫描件：只读到 N 字"
-                唯一能被看见的信号，4.1-05）。点进去仍是那五类原因，逐字来自 `parse.pending`。 */}
-                  {pending.length > 0 ? (
-                    <DeskExplainer
-                      id="resume.pending-issues"
-                      label={t('resume.pendingCount', { count: pending.length })}
-                      markers={{ testid: 'resume-pending-list' }}
-                    >
-                      <div className="flex min-w-0 flex-col gap-2">
-                        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
-                          <ListChecks size={14} />
-                          {t('resume.pending')}
-                        </h3>
-                        <ul className="space-y-2">
-                          {pending.map((row) => (
-                            <li
-                              key={row.sourceHash}
-                              data-testid="resume-pending-row"
-                              data-status={row.status}
-                              className="rounded border border-line px-2 py-1.5"
-                            >
-                              {/* 这一行从前印的是 `{{docId}} · {{textLength}} 字`——开发者标识符摆到了用户面前
-                            （spec 6.4-16 顺手修掉的那处违规）：换成姓名 + 处数 + 时刻。 */}
-                              <p className="text-[11px] text-slate-400">
-                                {t('resume.pendingRow', {
-                                  // 疑似扫描件**不入库**（4.1-05），所以这一行常常查不到姓名——那是它唯一的可见处。
-                                  // 查不到就写"没读出姓名的那一份"，**绝不回落成 id**：回落等于把刚修掉的那串又印回去。
-                                  name: docs.find((doc) => doc.id === row.docId)?.name ?? t('resume.pendingUnnamed'),
-                                  issueCount: row.issues.length,
-                                  time: new Date(row.updatedAt).toLocaleTimeString(),
-                                })}{' '}
-                                ·{' '}
-                                {row.status === 'scanned'
-                                  ? t('resume.statusScanned', { chars: row.textLength })
-                                  : t('resume.statusImported')}{' '}
-                                · {t(FORMAT_LABEL_KEY[row.format])}
-                              </p>
-                              <ul className="mt-1 space-y-0.5 pl-2">
-                                {row.issues.map((issue, index) => (
-                                  <li
-                                    key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
-                                    data-testid="resume-pending-issue"
-                                    className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
-                                  >
-                                    <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
-                                    <span>{issue.sectionKind ?? '-'}</span>
-                                    <span className="break-all">{issue.excerpt}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </DeskExplainer>
-                  ) : (
-                    docId !== undefined && (
-                      <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
-                        {t('resume.pendingEmpty')}
-                      </p>
-                    )
-                  )}
-
-                  {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
-                spec 6.4-15 的 C 半边要求：`id` 与 `data-testid` 两个通道名一字不改地跟着走）。
-                条件挂载是刻意的：收起态下正文卸载，`KbPanel` 的订阅与 `read()` 就不跑——
-                这正是"不活跃时别养第二份工作副本"的口径（`usePdfView` 同形，spec 3.5-12）。 */}
-                  <DeskExplainer
-                    id="resume.facts"
-                    label={t('desk.resume.sectionFacts')}
-                    markers={{ testid: 'resume-section-facts' }}
-                  >
-                    <div className="flex min-w-0 flex-col gap-3">
-                      <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="facts">
-                        {t('desk.resume.stepFactsHint')}
-                      </p>
-                      {/* 两块既有面板只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）；
-                    `docId` 由 desk 单向推进来，人仍可在这格里改（spec 6.4-17）。 */}
-                      <KbPanel docId={docId ?? ''} docLabel={docLabel} />
-                      <GapPanel />
-                    </div>
-                  </DeskExplainer>
+                  {/* 「待确认清单」与「改之前先看一眼」那两块原先塞在这一格正文的末尾（裁定㉕ 第 3 条已经降过一级），
+                  本轮再降到下面「回查」那一排的**核对**页里去：它们是"回头核对一眼"的东西，不是导入这一步的产出，
+                  摆在这里会让"当前在做什么"那一列一路平铺到脚（plan §1.2）。两块自己的 id 与 testid 一字不改地跟着搬。 */}
                 </div>
               </DeskSection>
 
-              {/* ② 核对要素：导入拆块的逐块查看与修改（resume chunk flow 片 3）。
-            只对母版开放：选中变体时组件内部只给一句「去选母版」，写调用在主进程还有同一判据兜底。
-            条件挂载与上面的 facts 披露层同口径——收起态不养读口与事件订阅。 */}
-              <DeskSection
-                id="resume.review"
-                title={t('desk.resume.sectionReview')}
-                summary={
-                  docLabel ? t('desk.resume.sectionReviewFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
-                }
-                openSignal={stepSignals['resume.review']}
-                markers={{ testid: 'resume-section-review' }}
-              >
-                <div className="flex min-w-0 flex-col gap-2">
-                  <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="review">
-                    {t('desk.resume.stepReviewHint')}
-                  </p>
-                  <ChunkReviewSection docId={docId} isVariant={currentDoc?.parentDocId != null} />
-                </div>
-              </DeskSection>
+              {/* ② 核对要素（素材逐块）本轮搬进下面「回查」那一排的**素材**页：它不是"当前在做什么"，
+                  而是"回头核对一眼"（plan §1.2）。段 id、testid 与条件挂载口径都跟着走，一字不改。 */}
 
               {/* ③ 按岗位改写：贴 JD、逐条决定采不采纳（段名换成人话，内容一字未动）。 */}
               <DeskSection
@@ -1119,129 +1078,271 @@ export function ResumeDesk() {
                 </div>
               </DeskSection>
 
-              {/* ③ 出纸：当前样式读数 + 这张纸的出口键 + 快照对照（裁定㊲后模板架与导出写端都住进整页编辑）。 */}
-              <DeskSection
-                id="resume.output"
-                title={t('desk.resume.sectionOutput')}
-                summary={
-                  templateName
-                    ? t('desk.resume.sectionOutputWith', { template: templateName, locale })
-                    : t('desk.resume.sectionOutputNone')
-                }
-                defaultOpen
-                openSignal={stepSignals['resume.output']}
-                markers={{ testid: 'resume-section-output' }}
+              {/* 「回查」那一排（plan §1.2「一屏两件事」）：上面两格是**当前在做什么**（①挑一份/导入、③按岗位改写），
+              这里三页是"回头核对一眼"的东西，一次只挂一页。条件挂载而不是 `hidden`：没选中的两页连读口与事件订阅都不养
+              （与下面 PDF 查看那一档同口径），而且隐藏态宽高为 0 会让同名选择器命中看不见的那一份（§9 的 5.4-b ⑦）。 */}
+              <div
+                data-testid="resume-ref-tabs"
+                data-ref-tab={refTab}
+                className="flex min-w-0 flex-col gap-2 rounded-xl border border-line bg-ink-900/60 px-2.5 py-2"
               >
-                <div className="flex min-w-0 flex-col gap-3">
-                  <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="output">
-                    {t('desk.resume.stepOutputHint')}
-                  </p>
+                {/* 页签用 `DeskTab`（原件，§2.5 不另造一套）：那道 3×17 短线本来是贴在左轨边缘上的，
+                横排时它落在每格自己的左缘——`nav` 因此留 8px 左内边距，短线才不出框。 */}
+                <nav
+                  aria-label={t('desk.resume.refTabsHeading')}
+                  className="flex min-w-0 flex-wrap items-center gap-1 pl-2"
+                >
+                  {RESUME_REF_TABS.map((entry) => (
+                    <DeskTab
+                      key={entry.tab}
+                      action={`resume-ref-${entry.tab}`}
+                      view={entry.tab}
+                      selected={refTab === entry.tab}
+                      icon={entry.icon}
+                      onClick={() => switchRefTab(entry.tab)}
+                    >
+                      {t(entry.labelKey)}
+                    </DeskTab>
+                  ))}
+                </nav>
 
-                  {/* 裁定㊲：模板架整块搬进整页编辑的右轨，这一格只剩**读数**——
+                {refTab === 'review' && (
+                  /* ② 核对要素：导入拆块的逐块查看与修改（resume chunk flow 片 3）。
+                  只对母版开放：选中变体时组件内部只给一句「去选母版」，写调用在主进程还有同一判据兜底。
+                  openSignal 取两支之和（步骤条那一跳 + 换页那一跳）：两支都是只增不减的计数，
+                  所以任一支动一下就产生一个触发沿，比取 max 少一条"小计数被大计数永久压住"的坑。 */
+                  <DeskSection
+                    id="resume.review"
+                    title={t('desk.resume.sectionReview')}
+                    summary={
+                      docLabel ? t('desk.resume.sectionReviewFor', { doc: docLabel }) : t('desk.resume.sectionDocEmpty')
+                    }
+                    openSignal={(stepSignals['resume.review'] ?? 0) + refSignal}
+                    markers={{ testid: 'resume-section-review' }}
+                  >
+                    <div className="flex min-w-0 flex-col gap-2">
+                      <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="review">
+                        {t('desk.resume.stepReviewHint')}
+                      </p>
+                      <ChunkReviewSection docId={docId} isVariant={currentDoc?.parentDocId != null} />
+                    </div>
+                  </DeskSection>
+                )}
+
+                {refTab === 'issues' && (
+                  <div className="flex min-w-0 flex-col gap-2">
+                    {/* 裁定㉕ 第 3 条：「待确认清单」是**一句只读提醒**——不加确认写口（那要新迁移 +
+                    `resume['parse.ack']` + 白名单行，另立一片），也不删显示（它是"疑似扫描件：只读到 N 字"
+                    唯一能被看见的信号，4.1-05）。点进去仍是那五类原因，逐字来自 `parse.pending`。 */}
+                    {pending.length > 0 ? (
+                      <DeskExplainer
+                        id="resume.pending-issues"
+                        label={t('resume.pendingCount', { count: pending.length })}
+                        markers={{ testid: 'resume-pending-list' }}
+                      >
+                        <div className="flex min-w-0 flex-col gap-2">
+                          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                            <ListChecks size={14} />
+                            {t('resume.pending')}
+                          </h3>
+                          <ul className="space-y-2">
+                            {pending.map((row) => (
+                              <li
+                                key={row.sourceHash}
+                                data-testid="resume-pending-row"
+                                data-status={row.status}
+                                className="rounded border border-line px-2 py-1.5"
+                              >
+                                {/* 这一行从前印的是 `{{docId}} · {{textLength}} 字`——开发者标识符摆到了用户面前
+                                （spec 6.4-16 顺手修掉的那处违规）：换成姓名 + 处数 + 时刻。 */}
+                                <p className="text-[11px] text-slate-400">
+                                  {t('resume.pendingRow', {
+                                    // 疑似扫描件**不入库**（4.1-05），所以这一行常常查不到姓名——那是它唯一的可见处。
+                                    // 查不到就写"没读出姓名的那一份"，**绝不回落成 id**：回落等于把刚修掉的那串又印回去。
+                                    name: docs.find((doc) => doc.id === row.docId)?.name ?? t('resume.pendingUnnamed'),
+                                    issueCount: row.issues.length,
+                                    time: new Date(row.updatedAt).toLocaleTimeString(),
+                                  })}{' '}
+                                  ·{' '}
+                                  {row.status === 'scanned'
+                                    ? t('resume.statusScanned', { chars: row.textLength })
+                                    : t('resume.statusImported')}{' '}
+                                  · {t(FORMAT_LABEL_KEY[row.format])}
+                                </p>
+                                <ul className="mt-1 space-y-0.5 pl-2">
+                                  {row.issues.map((issue, index) => (
+                                    <li
+                                      key={`${issue.code}-${issue.fieldKey ?? 'doc'}-${String(index)}`}
+                                      data-testid="resume-pending-issue"
+                                      className="flex flex-wrap items-baseline gap-1 text-[11px] text-slate-500"
+                                    >
+                                      <Tag tone="amber">{t(ISSUE_LABEL_KEY[issue.code])}</Tag>
+                                      <span>{issue.sectionKind ?? '-'}</span>
+                                      <span className="break-all">{issue.excerpt}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </DeskExplainer>
+                    ) : (
+                      docId !== undefined && (
+                        <p className="text-[11px] text-slate-500" data-testid="resume-pending-empty">
+                          {t('resume.pendingEmpty')}
+                        </p>
+                      )
+                    )}
+
+                    {/* 「改之前先看一眼」是这一格披露层的名字（原 `resume.facts` 那一整段搬到此处，
+                    spec 6.4-15 的 C 半边要求：`id` 与 `data-testid` 两个通道名一字不改地跟着走）。
+                    条件挂载是刻意的：收起态下正文卸载，`KbPanel` 的订阅与 `read()` 就不跑——
+                    这正是"不活跃时别养第二份工作副本"的口径（`usePdfView` 同形，spec 3.5-12）。 */}
+                    <DeskExplainer
+                      id="resume.facts"
+                      label={t('desk.resume.sectionFacts')}
+                      markers={{ testid: 'resume-section-facts' }}
+                    >
+                      <div className="flex min-w-0 flex-col gap-3">
+                        <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="facts">
+                          {t('desk.resume.stepFactsHint')}
+                        </p>
+                        {/* 两块既有面板只归位、不改逻辑（spec 6.3-03 的那条纪律在这一屏同样成立）；
+                        `docId` 由 desk 单向推进来，人仍可在这格里改（spec 6.4-17）。 */}
+                        <KbPanel docId={docId ?? ''} docLabel={docLabel} />
+                        <GapPanel />
+                      </div>
+                    </DeskExplainer>
+                  </div>
+                )}
+
+                {refTab === 'output' && (
+                  /* ④ 出纸：当前样式读数 + 这张纸的出口键 + 快照对照（裁定㊲后模板架与导出写端都住进整页编辑）。 */
+                  <DeskSection
+                    id="resume.output"
+                    title={t('desk.resume.sectionOutput')}
+                    summary={
+                      templateName
+                        ? t('desk.resume.sectionOutputWith', { template: templateName, locale })
+                        : t('desk.resume.sectionOutputNone')
+                    }
+                    defaultOpen
+                    openSignal={(stepSignals['resume.output'] ?? 0) + refSignal}
+                    markers={{ testid: 'resume-section-output' }}
+                  >
+                    <div className="flex min-w-0 flex-col gap-3">
+                      <p className="text-[11px] leading-relaxed text-slate-400" data-resume-step="output">
+                        {t('desk.resume.stepOutputHint')}
+                      </p>
+
+                      {/* 裁定㊲：模板架整块搬进整页编辑的右轨，这一格只剩**读数**——
                       「此刻出纸用的是哪一套样式」+「要换样式去哪里」。
                       写端（选中 / 记默认）在这里不再存在，同一屏不许有两条改样式的通道（§2.5）。 */}
-                  <p className="text-[11px] text-slate-400" data-testid="resume-template-reading">
-                    {templateName
-                      ? t('desk.resume.styleCurrent', { name: templateName })
-                      : t('desk.resume.styleCurrent', { name: templateId })}
-                    {' · '}
-                    {t('desk.resume.styleHint')}
-                  </p>
+                      <p className="text-[11px] text-slate-400" data-testid="resume-template-reading">
+                        {templateName
+                          ? t('desk.resume.styleCurrent', { name: templateName })
+                          : t('desk.resume.styleCurrent', { name: templateId })}
+                        {' · '}
+                        {t('desk.resume.styleHint')}
+                      </p>
 
-                  <label className="flex items-center gap-1 text-[11px] text-slate-400">
-                    {t('resume.locale')}
-                    <DeskSelect
-                      action="resume-locale"
-                      data-testid="resume-locale"
-                      value={locale}
-                      onValueChange={(value) => setLocale(value as ResumeLocaleView)}
-                    >
-                      <option value="zh-CN">zh-CN</option>
-                      <option value="en">en</option>
-                    </DeskSelect>
-                  </label>
+                      <label className="flex items-center gap-1 text-[11px] text-slate-400">
+                        {t('resume.locale')}
+                        <DeskSelect
+                          action="resume-locale"
+                          data-testid="resume-locale"
+                          value={locale}
+                          onValueChange={(value) => setLocale(value as ResumeLocaleView)}
+                        >
+                          <option value="zh-CN">zh-CN</option>
+                          <option value="en">en</option>
+                        </DeskSelect>
+                      </label>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <DeskButton
-                      action="preview"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={noDocReason !== undefined}
-                      disabledReason={noDocReason}
-                      disabledReasonLabel={reasonLabel(noDocReason)}
-                      onClick={bumpPaper}
-                    >
-                      <Eye size={12} />
-                      {t('resume.preview')}
-                    </DeskButton>
-                    {/* 裁定㊲：出纸与换样式/记默认的写端整条搬进整页编辑的右轨，
+                      <div className="flex flex-wrap items-center gap-2">
+                        <DeskButton
+                          action="preview"
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={noDocReason !== undefined}
+                          disabledReason={noDocReason}
+                          disabledReasonLabel={reasonLabel(noDocReason)}
+                          onClick={bumpPaper}
+                        >
+                          <Eye size={12} />
+                          {t('resume.preview')}
+                        </DeskButton>
+                        {/* 裁定㊲：出纸与换样式/记默认的写端整条搬进整页编辑的右轨，
                         且必须先落库再出纸（spec 3.13-05）——desk 这一侧不再持有"导一份还没存的纸"这条路。
                         预览是只读渲染，仍是这一格的键。 */}
-                    {/* 整页编辑（spec 3.10-06）：判门是"要有当前文档"——编辑的是那一份的草稿，
+                        {/* 整页编辑（spec 3.10-06）：判门是"要有当前文档"——编辑的是那一份的草稿，
                         没有文档就送进空会话（6.4-07 那句"页签点下去必须有回应"的同一条判门）。 */}
-                    <DeskButton
-                      action="open-edit-page"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={noDocReason !== undefined}
-                      disabledReason={noDocReason}
-                      disabledReasonLabel={reasonLabel(noDocReason)}
-                      onClick={() => setEditPageOpen('model')}
-                    >
-                      <Maximize2 size={12} />
-                      {t('resume.edit.enter')}
-                    </DeskButton>
-                    {/* 裁定㊳：这一档只剩"看"——眼睛而不是铅笔，进的是本机 PDF 文件的查看轨。 */}
-                    <DeskButton
-                      action="open-pdf-edit"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={!!busy}
-                      disabledReason={busyReason}
-                      disabledReasonLabel={reasonLabel(busyReason)}
-                      onClick={() => requestPaperMode('pdf')}
-                    >
-                      <BookOpen size={12} />
-                      {t('pdfEdit.enter')}
-                    </DeskButton>
-                    <DeskButton
-                      action="snapshots"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={noDocReason !== undefined}
-                      disabledReason={noDocReason}
-                      disabledReasonLabel={reasonLabel(noDocReason)}
-                      onClick={() => {
-                        setSnapshotsOpen(true);
-                        if (docId !== undefined) loadSnapshots(docId);
-                      }}
-                    >
-                      <History size={12} />
-                      {t('resume.snapshots')}
-                    </DeskButton>
-                    <DeskButton
-                      action="diff"
-                      variant="line"
-                      compact
-                      busy={!!busy}
-                      disabled={diffReason !== undefined}
-                      disabledReason={diffReason}
-                      disabledReasonLabel={reasonLabel(diffReason)}
-                      onClick={() => {
-                        setSnapshotsOpen(true);
-                        compareSnapshots();
-                      }}
-                    >
-                      <GitCompareArrows size={12} />
-                      {t('resume.diff')}
-                    </DeskButton>
-                  </div>
-                </div>
-              </DeskSection>
+                        <DeskButton
+                          action="open-edit-page"
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={noDocReason !== undefined}
+                          disabledReason={noDocReason}
+                          disabledReasonLabel={reasonLabel(noDocReason)}
+                          onClick={() => setEditPageOpen('model')}
+                        >
+                          <Maximize2 size={12} />
+                          {t('resume.edit.enter')}
+                        </DeskButton>
+                        {/* 裁定㊳：这一档只剩"看"——眼睛而不是铅笔，进的是本机 PDF 文件的查看轨。 */}
+                        <DeskButton
+                          action="open-pdf-edit"
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={!!busy}
+                          disabledReason={busyReason}
+                          disabledReasonLabel={reasonLabel(busyReason)}
+                          onClick={() => requestPaperMode('pdf')}
+                        >
+                          <BookOpen size={12} />
+                          {t('pdfEdit.enter')}
+                        </DeskButton>
+                        <DeskButton
+                          action="snapshots"
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={noDocReason !== undefined}
+                          disabledReason={noDocReason}
+                          disabledReasonLabel={reasonLabel(noDocReason)}
+                          onClick={() => {
+                            setSnapshotsOpen(true);
+                            if (docId !== undefined) loadSnapshots(docId);
+                          }}
+                        >
+                          <History size={12} />
+                          {t('resume.snapshots')}
+                        </DeskButton>
+                        <DeskButton
+                          action="diff"
+                          variant="line"
+                          compact
+                          busy={!!busy}
+                          disabled={diffReason !== undefined}
+                          disabledReason={diffReason}
+                          disabledReasonLabel={reasonLabel(diffReason)}
+                          onClick={() => {
+                            setSnapshotsOpen(true);
+                            compareSnapshots();
+                          }}
+                        >
+                          <GitCompareArrows size={12} />
+                          {t('resume.diff')}
+                        </DeskButton>
+                      </div>
+                    </div>
+                  </DeskSection>
+                )}
+              </div>
 
               {/* 裁定㊲：排版编辑器（区块顺序、字号、行距、页边距那几条控件）整块搬进整页编辑，
                   desk 里不再挂那只排版编辑器——同一屏不许有两份草稿会话（§2.5），
