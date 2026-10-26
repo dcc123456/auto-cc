@@ -26,7 +26,7 @@ function formatAddedAt(at: number): string {
  * 白名单面板：已免确认清单（逐条可撤销）+ 可加白清单（逐条可加白）。
  * @param tools 注册表读数（`agent.tools.list` 那一份），用来筛候选与显示副作用级
  * @param autonomy 当前档位；非 `auto` 时在面板上说明「名单暂不影响执行」
- * @returns 一条贴在档位行下方的设置带
+ * @returns 设置抽屉里 `agent.policy` 那一段的正文（段头与外框由 `DeskSection` 给）
  */
 export function AgentPolicyPanel({
   tools,
@@ -55,15 +55,11 @@ export function AgentPolicyPanel({
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
-  // 这一格现在住在输入卡上方那一层面板里（`ChatPanel` 的 `deskPanel === 'policy'`），
-  // 外框、描边与内边距都由那一层给；自己再挂一条 `mt-3 / border-t / pt-3` 就是在同一块底上画出第二张卡的脸。
+  // 这一格住在设置抽屉的 `agent.policy` 那一段里（`ChatPanel`）：段头已经把「免确认白名单」这个名字
+  // 说了一遍，外框、描边与内边距也由 `DeskSection` 给，所以这里不再画第二张标题脸（§2.5：一件事一个来源）。
   return (
     <div data-testid="agent-policy-panel" className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1 text-[10px] text-slate-500">
-          <ShieldCheck size={11} />
-          {t('agent.policy.heading')}
-        </span>
         <span className="text-[10px] text-slate-400" data-exempt-count={String(exempt?.length ?? 0)}>
           {t('agent.policy.exemptCount', { total: exempt?.length ?? 0 })}
         </span>

@@ -270,15 +270,38 @@ export function DeskExplainer({ id, label, markers, className = '', children }: 
 export interface DeskHintProps {
   /** 稳定的 ASCII 段 id，用于挂 `data-explainer` 与 toggle 的 `data-action`。 */
   id: string;
-  /** 触发文案（调用方翻译好传入）。 */
+  /** 触发文案（调用方翻译好传入）。`iconOnly` 档下它转去当读屏名（`sr-only`），画面上只留一枚问号。 */
   label: ReactNode;
   /** 气泡里的正文。 */
   children: ReactNode;
+  /**
+   * 裸 icon 档：触发键只画一枚 13px 的问号，`label` 退成读屏名，气泡**悬停即出**（点一下则钉住）。
+   *
+   * 为什么要这一档（2026-10-26 换装裁定「提示文案用 icon + 气泡」）：顶栏与段头右端那一排
+   * 「这是什么」的说明，原先是「问号 + 一句译文」的文字链，一排下来比它解释的东西还占地方。
+   * 收成一颗图标之后，明面上只剩一枚问号，说明仍在同一只气泡里——**不新增第二套 tooltip 原件**
+   * （§2.5）：`DeskButton` 的 `tip` 是"键自带一句短提示"，这一档是"一段说明挂在一枚图标上"，
+   * 两者正文长度与触发形状都不同，但浮层画法共用同一族 class，不在页面里手写第二只气泡。
+   */
+  iconOnly?: boolean;
+  /** 气泡横向对齐：`start` 贴触发键左沿（默认），`end` 贴右沿（顶栏右端那一组用，免得溢出面板）。 */
+  align?: 'start' | 'end';
   /** 挂在容器上的附加 `data-*`（既有验收通道跟着一起挪进来，不改名）。 */
   markers?: Record<string, string>;
   /** 追加 class（只放外边与宽度档）。 */
   className?: string;
 }
+
+/**
+ * 裸 icon 档触发键的画法（具名常量，第 15 节：`src/ui/**` 内的按钮画法不许内联在 JSX 上）。
+ * 空闲态一颗透明底的问号，悬停才长出一格浅底——它是一枚"这里有说明"的记号，不是一颗动作键，
+ * 所以不给描边、不给位移，只提亮底色与字色（07 稿第 199 行：不可点的元素绝不长出 hover，
+ * 而这一格是可点的，提亮是它的凭据）。
+ */
+const HINT_ICON_TRIGGER_CLASS =
+  'grid size-6 shrink-0 place-items-center rounded-control border border-transparent text-slate-400 ' +
+  'transition-colors duration-150 hover:bg-ink-800 hover:text-slate-100 ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70';
 
 /**
  * 点开一只**气泡**的短说明（与 `DeskExplainer` 同属教材，但正文不再把页面撑高）。
@@ -288,22 +311,38 @@ export interface DeskHintProps {
  * 而稿上 `understrip` 是一条固定高度的薄带。气泡浮在卡面上，读的时候版面一像素不动。
  * 与 `DeskExplainer` 相同的是：开合不落盘（教材不该跨重启保持展开），正文收起时卸载。
  * 点气泡外面或按 Escape 关上；Escape 把焦点还给触发键，键盘走开时不至于丢在读不到的浮层里。
+ * 裸 icon 档（`iconOnly`）多一条悬停通道：指针进来即出气泡、移开即收，点一下则**钉住**
+ * （钉住之后悬停移开不收，再点一次或 Escape 才收）——鼠标路过不该把说明留在屏幕上，
+ * 但人真点开了就说明他正在读，不能因为他把手移开就把读到一半的浮层抽走。
  * @param props 见 `DeskHintProps`
- * @returns 一行触发链 +（展开时）一只浮在上方的气泡
+ * @returns 一行触发链（或一枚问号图标）+（展开时）一只浮在上方的气泡
  */
-export function DeskHint({ id, label, markers, className = '', children }: DeskHintProps) {
+export function DeskHint({
+  id,
+  label,
+  markers,
+  className = '',
+  iconOnly = false,
+  align = 'start',
+  children,
+}: DeskHintProps) {
   const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const closeOnOutside = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setPinned(false);
+      }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setOpen(false);
+      setPinned(false);
       triggerRef.current?.focus();
     };
     document.addEventListener('mousedown', closeOnOutside);
@@ -314,6 +353,13 @@ export function DeskHint({ id, label, markers, className = '', children }: DeskH
     };
   }, [open]);
 
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // 点开即钉住、收到关即清钉：下一次悬停仍然是"路过"，不是"接着上次阅读"。
+    setPinned(next);
+  };
+
   return (
     <div
       ref={rootRef}
@@ -321,26 +367,33 @@ export function DeskHint({ id, label, markers, className = '', children }: DeskH
       data-explainer={id}
       data-open={open ? 'true' : 'false'}
       className={`relative min-w-0 ${className}`}
+      onMouseEnter={iconOnly ? () => setOpen(true) : undefined}
+      onMouseLeave={iconOnly ? () => setOpen((previous) => previous && pinned) : undefined}
     >
       <button
         ref={triggerRef}
         type="button"
         data-action={`${id}-toggle`}
         aria-expanded={open}
-        onClick={() => setOpen((previous) => !previous)}
-        className={DISCLOSURE_CLASS}
+        onClick={toggle}
+        className={iconOnly ? HINT_ICON_TRIGGER_CLASS : DISCLOSURE_CLASS}
       >
-        <CircleHelp size={11} className="shrink-0" aria-hidden="true" />
-        {label}
+        <CircleHelp size={iconOnly ? 13 : 11} className="shrink-0" aria-hidden="true" />
+        {/* 裸 icon 档的读屏名：画面上不占一像素，读屏与 `aria-expanded` 的上下文仍然读得到这句译文。 */}
+        {iconOnly ? <span className="sr-only">{label}</span> : label}
       </button>
       {open ? (
         <div
           role="dialog"
-          className="absolute bottom-full left-0 z-30 mb-2 w-[320px] max-w-[calc(100vw-48px)] rounded-xl border border-line-strong bg-ink-850 px-3.5 py-3 text-[12px] leading-relaxed text-slate-300 shadow-lift"
+          className={`absolute bottom-full z-30 mb-2 w-[320px] max-w-[calc(100vw-48px)] rounded-xl border border-line-strong bg-ink-850 px-3.5 py-3 text-[12px] leading-relaxed text-slate-300 shadow-lift ${
+            align === 'end' ? 'right-0' : 'left-0'
+          }`}
         >
           {children}
           <span
-            className="absolute -bottom-1 left-4 size-2 rotate-45 border-b border-r border-line-strong bg-ink-850"
+            className={`absolute -bottom-1 size-2 rotate-45 border-b border-r border-line-strong bg-ink-850 ${
+              align === 'end' ? 'right-4' : 'left-4'
+            }`}
             aria-hidden="true"
           />
         </div>

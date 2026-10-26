@@ -1273,6 +1273,10 @@
       "copied": "这段回复已复制到剪贴板",
       "copyFailed": "剪贴板没写进去：{{reason}}",
       "modelNone": "还没配对话模型",
+      "settings": {
+        "title": "对话设置",
+        "subtitle": "档位与免确认白名单都在这只抽屉里改"
+      },
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "{{prefix}} 开头的一句话交给 agent 规划：先出可见计划，确认后才动手",
       "hints": {

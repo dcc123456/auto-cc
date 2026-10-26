@@ -1273,6 +1273,10 @@
       "copied": "Reply copied to the clipboard",
       "copyFailed": "Clipboard write failed: {{reason}}",
       "modelNone": "No chat model configured",
+      "settings": {
+        "title": "Chat settings",
+        "subtitle": "Autonomy tier and the no-confirm list both live in this drawer"
+      },
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
       "hints": {
