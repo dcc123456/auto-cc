@@ -176,6 +176,14 @@ export type AppErrorCode =
   // 这条是页面已经交回来了、缺的是「读一遍现在的页面」这道能力（装配或站点问题），run 照旧停在安全点。
   | 'AGENT_LOOP_REREAD_UNAVAILABLE'
   | 'AGENT_LOOP_STATUS_INVALID'
+  // 真计划器（plan 2026-10-26 §3.1）。四个码各对应一句不同的处置，所以不合并：
+  // 未配置=去配对话通道（一次网络都不发）；请求失败=这一次没成（可重试）；
+  // JSON 非法=模型没按约定回（换模型或改提示词）；未知工具=模型编了一只不存在的手（重起草）。
+  // 它们都属于「起草没成」，run 落 `failed` 并把码写进 `stop_reason`，**不静默回落到桩**。
+  | 'AGENT_PLANNER_UNAVAILABLE'
+  | 'AGENT_PLANNER_REQUEST_FAILED'
+  | 'AGENT_PLANNER_INVALID_JSON'
+  | 'AGENT_PLANNER_UNKNOWN_TOOL'
   // 免确认白名单（spec 5.3-06 / 07）：只在开放面上的动作才能加白。单独一个码而不是复用 `TOOL_UNAVAILABLE`
   // 那类判定读数，是因为这条走的是**写入口**——界面上的处置是「名单一行都不动 + 说明这只手不在开放面上」，
   // 而读数类的拒绝是「这一步不执行」，两件事混在一个码里会让人以为已经加白了只是这次没跑。

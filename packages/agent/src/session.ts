@@ -259,14 +259,16 @@ export const chatConfigSchema = z.strictObject({
   /** 两片之间的间隔（毫秒）。上限 1 秒：再慢就演示不到「运行中仍可输入」。 */
   chunkIntervalMs: z.number().int().min(0).max(1000).default(120),
   /**
-   * 新会话的起始档位（spec 5.3-02）。缺省即最保守档 `suggest`——只出计划不动手。
+   * 新会话的起始档位（spec 5.3-02；2026-10-26 起缺省 `auto`，plan §3.2）。
    *
-   * 为什么做成配置而不是留字面量：5.3-02 的验证操作是「删配置 → 断言档位为建议模式」，
-   * 代码里写死 `'suggest'` 就删不动任何东西，「回落」也无从断言。装配文件 `cordis.yml` 里
-   * **故意不给这一行**，缺省值因此是被装配本身证明的。能配成 `auto` 是刻意留的口子：
-   * 那是用户在装配面板上的**显式**表态（5.3-04 要防的是 agent 自己升档，不是人改默认值）。
+   * 本产品的目标形态是「说一句话就自己找工作」（plan §Context），所以新会话从全自动起步；
+   * 老会话库里那一列不动。全自动档不再逐步确认，但四道红线照旧：额度闸门、频控、风控暂停、人工接管
+   * （AGENTS.md §8），另有一次性的「全自动授权」落库（`agent.policy` 号段 42）。
+   * 为什么仍做成配置而不是留字面量：5.3-02 的验证操作是「删配置 → 断言档位为缺省值」，
+   * 代码里写死就删不动任何东西；装配文件 `cordis.yml` 里**故意不给这一行**，
+   * 缺省值因此是被装配本身证明的（`agent.test.ts` 钉着「清单里不许出现」）。
    */
-  defaultAutonomy: z.enum(AUTONOMY_LEVELS).default('suggest'),
+  defaultAutonomy: z.enum(AUTONOMY_LEVELS).default('auto'),
   /**
    * 触发折叠的 token 估计阈值（spec 5.6-02「长会话触发压缩」，plan §7.4 取证 2）。
    *
@@ -872,7 +874,7 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 取最新**未删**会话的 id；一个都没有时就地建一个**默认档位**的（5.3-02：默认值来自配置，缺省即最保守）。
+   * 取最新**未删**会话的 id；一个都没有时就地建一个**默认档位**的（5.3-02：默认值来自配置，2026-10-26 起缺省全自动）。
    * @returns 当前会话 id，永不为空
    */
   private ensureSession(): string {

@@ -8,7 +8,7 @@
  * 本文件只带确定性桩（spec 5.2-01）。真模型不在 5.2 接：出网打外部模型服务要花钱，
  * 且必须用户单独授权（AGENTS.md §8 与本计划 plan §7.2 的「5.2 不做的事」）。
  */
-import type { AgentPlanStepView, AutonomyLevel } from '@auto-cc/core';
+import type { AgentPlanStepView, AutonomyLevel, ToolEffect } from '@auto-cc/core';
 import { findNamedTools } from '../tool-request.js';
 
 /** 一次模型调用的用量（桩按字数粗估，真模型接进来时换成它返回的 usage）。 */
@@ -25,6 +25,15 @@ export type PlanStepDraft = { toolId: string; input: unknown; intent: string };
  */
 export type ModelContext = { refs: string[]; text: string };
 
+/**
+ * 递给真计划器的一条工具简介（`knownToolIds` 之外的说明与副作用级）。
+ *
+ * 桩只用 id；真模型要按用途与风险排顺序，缺了这两列只能靠猜 id 的命名，
+ * 而「猜」在计划这一层就是把一只不存在的动作写得像真的。仍是注册表现的投影，
+ * 循环每次现拼（不在服务里存第二份，§9 的 2.5 实测）。
+ */
+export type PlannerToolBrief = { id: string; description: string; effect: ToolEffect };
+
 /** 起草计划的请求（首次起草与撞墙后的续推共用这一条口）。 */
 export type PlanDraftRequest = {
   /** 用户原文 */
@@ -33,6 +42,8 @@ export type PlanDraftRequest = {
   tier: AutonomyLevel;
   /** 注册表现读的工具 id 清单：桩只从这里取材，绝不凭措辞造一只没登记的手 */
   knownToolIds: readonly string[];
+  /** 工具简介（可省）：只有真计划器消费；缺省时它只列 id，仍不越出注册表 */
+  tools?: readonly PlannerToolBrief[];
   context: ModelContext;
 };
 

@@ -12,9 +12,11 @@
  * （2.4-08 的「mock 适配器跑完整条链」在此复用）。全程不出网、不碰真实招聘平台（§7.2）；
  * 模型通道是 5.2 那台桩（输入即脚本），所以这里没有任何真机调用。
  *
- * 档位是 `auto` 而**没有**把假工具加进免确认名单：带条款的那只声明自己是 `outbound` 级，
+ * 档位是 `semi` 而**没有**把假工具加进免确认名单：带条款的那只声明自己是 `outbound` 级，
  * 所以判定口照旧开一张确认单，由本测试扮人按下「批准」（与 5.3-11 的 `watchPauses` 同一手法）。
  * 沉淀判的不是闸门，但也没有为此把闸门调松——那条 run 是带着真实的批准痕迹跑出来的。
+ * （8.10-01 之后全自动档「一次都不问」，这一格若留在 `auto` 就再也走不到确认单；档位与沉淀判据无关，
+ * 所以显式改成半自动，保住这条真批准链路。）
  *
  * 沉淀出的节点参数取自 `agent_run.plan_json` 里那一步的**草案入参**（plan §5.4-a 如实条 ⑤）：
  * 人在确认卡上补过的值只活在 `observation` 文本里，结构上取不到，所以断言里对的是草案那份。
@@ -162,9 +164,9 @@ async function boot(workflow: WorkflowMount = 'full') {
   const nodeCalls: ExecutorCall[] = [];
   app['agent.tools'].register(makeDemoTool(toolCalls, TOOL_ID, true));
   app['agent.tools'].register(makeDemoTool(toolCalls, READ_ONLY_TOOL_ID, false));
-  // 档位由测试扮演人显式改（`setAutonomy` 是那条唯一写入口并留审计）：默认最保守档下每一步都被拒，
-  // 而本片要沉淀的是一段**真跑通过**的对话。
-  app['chat.session'].setAutonomy('auto');
+  // 档位由测试扮演人显式改（`setAutonomy` 是那条唯一写入口并留审计）：缺省全自动档不逐次确认，
+  // 而本片要沉淀的是一段**带着真实批准痕迹跑通**的对话，所以选半自动让判定口照旧开单。
+  app['chat.session'].setAutonomy('semi');
   // 人那一只手仍然在链路末端：`outbound` 那一步由判定口开确认单，这里经真应答口按下批准，
   // 不去改名单也不绕闸门（5.3 的三闸门在 5.3-11 已经判过，这里只演「人批了这一次」）。
   ctx.on('agent/pause-requested', (event) => {

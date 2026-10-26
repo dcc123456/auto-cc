@@ -9,10 +9,13 @@
  */
 import {
   AppError,
+  agentTool,
   asApp,
   asSqlInt,
   executorRegistryOf,
+  registerAgentTools,
   Service,
+  toolResult,
   type Context,
   type WorkflowNodeExecutor,
 } from '@auto-cc/core';
@@ -195,6 +198,9 @@ function toRowView(row: JobRow): JobRowView {
 
 /** 列表条数的钳制区间：界面不需要一万行，SQL 注入面也不在 `?` 参数上，但上限能防一次误传。 */
 export const LIST_LIMIT = { min: 1, max: 500, fallback: 50 };
+
+/** 对话侧那只只读手最多带回多少条岗位键：证据引用要给得全，但不能把一条消息撑成整张表。 */
+const AGENT_LIST_REF_LIMIT = 20;
 
 /**
  * 「对方回了几条」的那段子查询（spec 2.5-14 的单一来源：只在 `conversation_messages` 上算）。
@@ -482,8 +488,40 @@ export class JdStoreService extends Service {
       registry.register(JD_LIST_KIND, this.executor);
       this.ctx.effect(() => () => registry.unregister(JD_LIST_KIND));
     }
+    // 只读回看（spec 8.10-04）：后续轮次里模型要回答"第 3 个岗位具体要求什么"，靠的是库里的真读数，
+    // 而不是它自己记住的编号。`effect: 'read'` 让它既不被判定口拦下、也不会被当成一条可外发的通路。
+    const tools = registerAgentTools(this.ctx, [
+      agentTool({
+        id: 'jd.store.list',
+        titleKey: 'agent.tool.labels.jdStoreList',
+        description:
+          '只读列出库里最近的 JD（已回复优先、其余按抓取时间倒序），带回岗位键与要点；不改库、不出网。' +
+          '回答“某个岗位要什么”之前先调它，不要凭记忆复述编号',
+        input: z.strictObject({
+          limit: z.number().int().min(LIST_LIMIT.min).max(LIST_LIMIT.max).optional(),
+        }),
+        effect: 'read',
+        requiresConfirmation: false,
+        run: ({ limit }) => {
+          const result = this.list(limit);
+          const listed = result.rows.slice(0, AGENT_LIST_REF_LIMIT);
+          const evidenceRefs = listed.map((row) => `job:${row.platform}/${row.jobId}`);
+          const keys = listed.map((row) => `${row.jobId}「${row.title}」`).join('、');
+          const omitted = result.rows.length - listed.length;
+          // 读库是同步的（node:sqlite），但工具契约要求返回 Promise——与节点执行器同一条理由。
+          return Promise.resolve(
+            toolResult(result, {
+              summary:
+                `库内共 ${String(result.total)} 条岗位，本次列出 ${String(result.rows.length)} 条` +
+                `${keys === '' ? '' : `：${keys}`}${omitted > 0 ? `（另有 ${String(omitted)} 条未列入引用）` : ''}`,
+              evidenceRefs,
+            }),
+          );
+        },
+      }),
+    ]);
     this.ctx.logger.info(
-      `JD 库就绪：表 jobs（schema v${String(JD_MIGRATION_VERSION)}）· 现有 ${String(this.count())} 行 · 节点执行器${registry ? `已登记 ${JD_LIST_KIND}` : '未登记（工作流未挂载）'}`,
+      `JD 库就绪：表 jobs（schema v${String(JD_MIGRATION_VERSION)}）· 现有 ${String(this.count())} 行 · 节点执行器${registry ? `已登记 ${JD_LIST_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
 }

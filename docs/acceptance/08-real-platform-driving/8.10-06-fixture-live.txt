@@ -1,0 +1,80 @@
+auto-cc 片三活体验收（对话页全自动求职）· 2026-10-26T10:30:04.847Z
+fixture=http://127.0.0.1:10233 · CDP=10278 · 主进程产物=packages/main/dist/main.cjs
+userData：反向=tmp/89-live/userdata-reverse · 正路=tmp/89-live/userdata-live
+· fixture：本轮新起 http://127.0.0.1:10233（进程内，日志归本轮）
+· 主进程产物已重打：packages/main/dist/main.cjs / preload.cjs
+· 渲染层构建 exit=0
+[app!] DevTools listening on ws://127.0.0.1:10278/devtools/browser/a5158da1-0452-44eb-8bd8-09b1d1f574c7
+PASS · 启动 · 首屏隐私声明已收起 —— 出现过=true · 判据时仍在=false
+
+## ① 反向验证：模型通道缺席
+PASS · 反向 · 会话档位是发货缺省 auto —— autonomy=auto
+PASS · 反向 · 新库还没有那份一次性授权 —— {"acknowledgedAt":null}
+PASS · 反向 · 未授权时发送键按不动且说得出原因 —— aria-disabled=true · reason=FULL_AUTO_CONSENT_REQUIRED
+PASS · 反向 · 授权卡摆在输入框上方（不弹窗） —— 可见=true
+PASS · 反向 · 点了「我了解，开始全自动」 —— click=true
+PASS · 反向 · 授权已落库 —— acknowledgedAt=1793010608379
+PASS · 反向 · 输入后发送键可用 —— {"found":true,"ariaDisabled":null,"reason":null}
+PASS · 反向 · 发送键已点 —— click=true
+PASS · 反向 · 界面明示计划器通道缺席（不是「什么都没发生」） —— 提示行=起草任务计划 失败：模型通道未配置，缺 baseUrl / model / apiKey：先在「信任」工作台里配齐对话通道
+PASS · 反向 · 库里留了一条 failed 的空计划 run —— {"id":"b11dfb8a-bff3-4f96-b04c-5ca875c77fe8","goal":"帮我找一份前端开发工作","status":"failed","autonomy":"auto","plan_json":"[]","stop_reason":"AGENT_PLANNER_UNAVAILABLE","created_at":1793010608941}
+PASS · 反向 · 计划为空且原因码是 AGENT_PLANNER_UNAVAILABLE —— status=failed · plan_json=[] · stop_reason=AGENT_PLANNER_UNAVAILABLE
+PASS · 反向 · 一步都没往外发（账本 / 收件箱 / 投递三处都是 0） —— ledger=0 · outbox=0 · deliveries=0
+· 反向段耗时 0s
+· 本轮 Electron 已停（SIGTERM 生效）
+[app!] DevTools listening on ws://127.0.0.1:10278/devtools/browser/19a58924-800a-4fd1-9db9-7fc76e4a9ecf
+PASS · 启动 · 首屏隐私声明已收起 —— 出现过=true · 判据时仍在=false
+
+## ② 正路：全自动抓取 → 定制 → 打招呼 → 投递（全程只打仿站）
+· llm 指向仿站端点；platform-boss 切到 fixture 知识包（只写内存，重启即失）
+PASS · 正路 · 在线简历已种好，且导出 PDF 在盘上 —— docId=resume-demo · 60867 字节 · sha256=7a0f401045cb09d8…
+· outbound-deliver.resumeFile → /Users/dcc/deepseek-harness-workspece/auto-cc/tmp/89-live/userdata-live/exports/resume-demo-classic.pdf
+· 平台签字已落库；内核视图挂到 fixture 首屏
+PASS · 正路 · 会话档位是 auto —— autonomy=auto
+PASS · 正路 · 一次性授权由界面按钮落下 —— click=true
+PASS · 正路 · 授权已落库 —— {"acknowledgedAt":1793010610810}
+PASS · 正路 · 授权后发送键可用 —— {"found":true,"ariaDisabled":null,"reason":null}
+PASS · 正路 · 抓取 run 跑完了 —— {"runId":"84544809-3b26-45fc-ad23-f851eb37c0cc","sessionId":"a6c26a64-2b7d-497b-a0e0-0e3628054b8e","goal":"帮我找一份前端开发工作","status":"completed","autonomy":"auto","planStepIndex":1,"plan":[{"planStepIndex":0,"toolId":"jd.capture.run","input":{"criteria":{"keyword":"前端","city":"杭州","limit":3}},"intent":"按在线简历的求职意向（缺省按目标原文）在平台列表页抓取岗位","effect":"outbound","requiresConfirmation":true}],"steps":[{"runId":"84544809-3b26-45fc-ad23-f851eb37c0cc","planStepIndex":0,"toolId":"jd.capture.run","status":"ok","snapshotRefs":[],"observation":"fixture 回声：连通正常","evidenceRefs":["search:boss/前端","job:boss/1003","job:boss/1009"],"durationMs":1871,"code":null}],"stepLimit":12,"tokenBudget":4000,"tokensUsed":7,"stopReason":"COMPLETED","createdAt":1793010611151,"updatedAt":1793010613035}
+PASS · 正路 · 全自动档没有长出「确认并执行」（一次都不问） —— 采样 6 次 · 见到确认键=false · 见到待开跑=false
+PASS · 正路 · 计划里的搜索条件取自在线简历的求职意向（前端 / 杭州） —— plan=[{"planStepIndex":0,"toolId":"jd.capture.run","input":{"criteria":{"keyword":"前端","city":"杭州","limit":3}},"intent":"按在线简历的求职意向（缺省按目标原文）在平台列表页抓取岗位","effect":"outbound","requiresConfirmation":true}]
+PASS · 正路 · 计划里的搜索条数是 3（与 fixture 的 limit 一致） —— limit=3
+PASS · 正路 · 库里的岗位全部落在「杭州」（城市来自简历而不是目标原文的缺省上海） —— total=2 · 1009:杭州 · 西湖区 / 1003:杭州 · 滨江区
+PASS · 正路 · 对话里能找到「查看岗位卡」 —— click=true
+PASS · 正路 · 岗位卡出现在对话里 —— data-job-total=2
+· 第一句用时 2.3s
+PASS · 正路 · 定制/招呼/投递 run 跑完了 —— {"runId":"a0e76e7a-572b-44d1-a119-db6af42446a6","sessionId":"a6c26a64-2b7d-497b-a0e0-0e3628054b8e","goal":"给第 1 个岗位改简历并打招呼并投递","status":"completed","autonomy":"auto","planStepIndex":4,"plan":[{"planStepIndex":0,"toolId":"resume.generate.run","input":{"jdText":"前端工程师（移动端 Web）（南岭信息 · 22-32K · 杭州 · 西湖区 · 1-3 年）\n岗位要求：熟练掌握前端工程化、React 与 TypeScript，具备性能优化与跨团队协作经验。","jdId":"1009"},"intent":"按 job:boss/1009 的 JD 定制简历（只产出提议态）","effect":"local-write","requiresConfirmation":true},{"planStepIndex":1,"toolId":"resume.generate.accept","input":{"receiptId":"latest"},"intent":"采纳这一趟通过事实校验的改写","effect":"local-write","requiresConfirmation":true},{"planStepIndex":2,"toolId":"outbound.greet.perform","input":{"request":{"platform":"boss","jobId":"1009","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？"}},"intent":"给库内第 1 个岗位 job:boss/1009 打招呼（取自库内岗位清单）","effect":"outbound","requiresConfirmation":true},{"planStepIndex":3,"toolId":"outbound.deliver.perform","input":{"request":{"platform":"boss","jobId":"1009"}},"intent":"向 job:boss/1009 投递简历","effect":"outbound","requiresConfirmation":true}],"steps":[{"runId":"a0e76e7a-572b-44d1-a119-db6af42446a6","planStepIndex":0,"toolId":"resume.generate.run","status":"ok","snapshotRefs":[],"observation":"fixture 回声：连通正常","evidenceRefs":["generation:gen-106d8fbb-ad9c-45fa-b144-3f3019b28b9e","doc:resume-demo","entity:kb-5ad3fe29f55dbb0c"],"durationMs":9,"code":null},{"runId":"a0e76e7a-572b-44d1-a119-db6af42446a6","planStepIndex":1,"toolId":"resume.generate.accept","status":"ok","snapshotRefs":["run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:0"],"observation":"fixture 回声：连通正常","evidenceRefs":["generation:gen-106d8fbb-ad9c-45fa-b144-3f3019b28b9e","doc:resume-bca5b384bd36"],"durationMs":1,"code":null},{"runId":"a0e76e7a-572b-44d1-a119-db6af42446a6","planStepIndex":2,"toolId":"outbound.greet.perform","status":"ok","snapshotRefs":["run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:0","run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:1"],"observation":"fixture 回声：连通正常","evidenceRefs":["ledger:2","job:boss/1009"],"durationMs":10386,"code":null},{"runId":"a0e76e7a-572b-44d1-a119-db6af42446a6","planStepIndex":3,"toolId":"outbound.deliver.perform","status":"ok","snapshotRefs":["run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:0","run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:1","run:a0e76e7a-572b-44d1-a119-db6af42446a6/step:2"],"observation":"fixture 回声：连通正常","evidenceRefs":["job:boss/1009","ledger:3"],"durationMs":138,"code":null}],"stepLimit":12,"tokenBudget":4000,"tokensUsed":25,"stopReason":"COMPLETED","createdAt":1793010613750,"updatedAt":1793010624302}
+PASS · 正路 · 这一轮同样没有确认键 —— 采样 28 次
+PASS · 正路 · 计划依次是定制 → 采纳 → 打招呼 → 投递 —— ["resume.generate.run","resume.generate.accept","outbound.greet.perform","outbound.deliver.perform"]
+PASS · 正路 · 账本记得住三步外发/检索（search / greet / deliver） —— ["search","greet","deliver"]
+PASS · 正路 · 仿站真的收到了简历（sha256 与导出的 PDF 逐位相同） —— count=1 · 站点=7a0f401045cb09d8ee0d7f1177eddea8ad70cc5b402af5924e8fbed93441efe9 · 本机=7a0f401045cb09d8ee0d7f1177eddea8ad70cc5b402af5924e8fbed93441efe9
+PASS · 正路 · 投递目标是那个杭州岗位 —— targetId=1009 · 库内=1009
+PASS · 正路 · delivery_records 落了一行并与账本一行相连 —— [{"ledger_id":3,"platform":"boss","job_id":"1009","snapshot_id":null,"ts":1793010624161}]
+PASS · 正路 · 仿站收件箱收到了那条招呼 —— [{"action":"greet","targetId":"1009","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？","frameUrl":"/chat/frame","receivedAt":1793010624150}]
+· 第二句用时 11s
+PASS · 正路 · 第二次打招呼 run 跑完了 —— {"runId":"458debe7-1e68-4324-9369-63cb10a1b35d","sessionId":"a6c26a64-2b7d-497b-a0e0-0e3628054b8e","goal":"给第 2 个岗位打招呼","status":"completed","autonomy":"auto","planStepIndex":1,"plan":[{"planStepIndex":0,"toolId":"outbound.greet.perform","input":{"request":{"platform":"boss","jobId":"1003","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？"}},"intent":"给库内第 2 个岗位 job:boss/1003 打招呼（取自库内岗位清单）","effect":"outbound","requiresConfirmation":true}],"steps":[{"runId":"458debe7-1e68-4324-9369-63cb10a1b35d","planStepIndex":0,"toolId":"outbound.greet.perform","status":"ok","snapshotRefs":[],"observation":"fixture 回声：连通正常","evidenceRefs":["ledger:4","job:boss/1003"],"durationMs":90287,"code":null}],"stepLimit":12,"tokenBudget":4000,"tokensUsed":7,"stopReason":"COMPLETED","createdAt":1793010625023,"updatedAt":1793010715323}
+PASS · 正路 · 第二个招呼打向库里第 2 个岗位（不是重发第一个） —— [{"planStepIndex":0,"toolId":"outbound.greet.perform","input":{"request":{"platform":"boss","jobId":"1003","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？"}},"intent":"给库内第 2 个岗位 job:boss/1003 打招呼（取自库内岗位清单）","effect":"outbound","requiresConfirmation":true}]
+PASS · 正路 · 两次招呼的账本时间差落在流控区间 [45000, 150000]ms —— greet 行=[{"id":2,"action":"greet","target_id":"1009","ts":1793010613773,"source":"manual:1009"},{"id":4,"action":"greet","target_id":"1003","ts":1793010704924,"source":"manual:1003"}] · 差=91151ms
+PASS · 正路 · 仿站收件箱累计两条招呼，分别打向两个岗位 —— ["greet:1009","greet:1003"]
+· 第三句用时 90.6s（含频控等待）
+
+## ③ 收尾对账
+· agent_full_auto_consent：[{"scope":"full-auto","acknowledged_at":1793010610810}]
+· usage_ledger：[{"id":1,"action":"search","target_id":"前端","ts":1793010613029,"source":null},{"id":2,"action":"greet","target_id":"1009","ts":1793010613773,"source":"manual:1009"},{"id":3,"action":"deliver","target_id":"1009","ts":1793010624161,"source":"resume:7a0f401045cb@resume-demo-classic.pdf"},{"id":4,"action":"greet","target_id":"1003","ts":1793010704924,"source":"manual:1003"}]
+· delivery_records：[{"ledger_id":3,"platform":"boss","job_id":"1009","snapshot_id":null,"ts":1793010624161}]
+· /api/outbox：{"count":2,"items":[{"action":"greet","targetId":"1009","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？","frameUrl":"/chat/frame","receivedAt":1793010624150},{"action":"greet","targetId":"1003","text":"您好，我对这个岗位很感兴趣，方便聊聊吗？","frameUrl":"/chat/frame","receivedAt":1793010715311}]}
+· /api/deliveries：[{"id":2,"targetId":"1009","attachmentId":1,"fileName":"resume-demo-classic.pdf","sizeBytes":60867,"sha256":"7a0f401045cb09d8ee0d7f1177eddea8ad70cc5b402af5924e8fbed93441efe9","deliveredAt":1793010624294}]
+· fixture 计划器应答 3 次：
+  [fixture] 计划器应答 1 步：帮我找一份前端开发工作 · 意向=有 · 岗位 0 条
+  [fixture] 计划器应答 4 步：给第 1 个岗位改简历并打招呼并投递 · 意向=有 · 岗位 2 条
+  [fixture] 计划器应答 1 步：给第 2 个岗位打招呼 · 意向=有 · 岗位 2 条
+PASS · 正路 · 仿站看到了三次计划器请求（三句话各一次） —— 3
+PASS · 正路 · 第二、三次计划器都读到了在线简历的求职意向与库内岗位 —— ["[fixture] 计划器应答 4 步：给第 1 个岗位改简历并打招呼并投递 · 意向=有 · 岗位 2 条","[fixture] 计划器应答 1 步：给第 2 个岗位打招呼 · 意向=有 · 岗位 2 条"]
+
+注：这一趟投递的简历是**配置里的那份 PDF**（种好后导出的在线简历），不是这一轮新生成的定制变体——
+    fixture 计划器给出的 `outbound.deliver.perform` 不带 `filePath`，投递走 `outbound-deliver.resumeFile`。
+· 本轮 Electron 已停（SIGTERM 生效）
+
+## 结论
+全自动档：一句话 → 计划直接跑（没有确认卡）→ 岗位卡进对话 → 定制/招呼/投递一路落地；
+三处对账（界面 / 库 / 仿站）一致；第二次招呼按 45–150s 的流控真的等了。
+EXIT=0

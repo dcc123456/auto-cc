@@ -5,11 +5,20 @@
  * 名称、参数摘要、状态、耗时、副作用分级，失败时把结构化原因原样显示。
  * 长此以往只留一个卡片组件，卡片上的口径改一次就两边同时生效。
  */
-import { LoaderCircle, Wrench } from 'lucide-react';
+import { Briefcase, ChevronDown, ChevronRight, LoaderCircle, Wrench } from 'lucide-react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentStepView, ChatToolPart, ChatToolPartState, ToolDescriptorView } from '@auto-cc/shared';
-import { EffectChip } from './ui/controls';
+import type {
+  AgentStepView,
+  ChatToolPart,
+  ChatToolPartState,
+  JobListResultView,
+  ToolDescriptorView,
+} from '@auto-cc/shared';
+import { DeskButton, EffectChip } from './ui/controls';
 import { EvidenceRefButton } from './EvidenceRefButton';
+import { JobResultCards } from './JobResultCards';
+import { useBridgeAction } from './useBridgeAction';
 
 /**
  * 工具步的三处分色（左侧状态轨 / 前置图标 / 状态字样）：**一张表按 `ChatToolPartState` 给齐**。
@@ -65,6 +74,33 @@ export function stepToToolPart(step: AgentStepView, input: unknown): ChatToolPar
   };
 }
 
+/** 展开岗位卡时向库里要多少行：够扫一屏，又不至于把一段对话撑成整张表。 */
+const JOB_CARD_LIMIT = 20;
+
+/** `jd.capture.run` 的结果里最多带多少条岗位证据引用（`jd-capture.ts` 的 `CAPTURED_REF_LIMIT`）。 */
+const JOB_REF_CAP = 12;
+
+/**
+ * 这张卡片能指到几条岗位。
+ *
+ * 两处喂进来的数据不同：对话工具段带得到 `ToolResult.value`（`CaptureRunView.captured`，最准），
+ * 而循环的落步只留了证据引用——那条路上回收的岗位键被工具侧钳到 12 条，所以当它顶到钳位时
+ * 只能给出「至少这么多」（卡片上写 `N+`），不把 12 冒充成 13 条结果。
+ * @param part 工具段
+ * @param step 循环落步（只有循环卡片带）
+ * @returns 条数与「是否顶到钳位」；不是抓取结果或一条都没抓到时为 null（没有可看的岗位就不长按钮）
+ */
+function jobCountOf(part: ChatToolPart, step?: AgentStepView): { count: number; capped: boolean } | null {
+  const value = part.output?.value;
+  if (typeof value === 'object' && value !== null) {
+    const captured = (value as { captured?: unknown }).captured;
+    if (Array.isArray(captured)) return captured.length === 0 ? null : { count: captured.length, capped: false };
+  }
+  if (!step) return null;
+  const count = step.evidenceRefs.filter((ref) => ref.startsWith('job:')).length;
+  return count === 0 ? null : { count, capped: count >= JOB_REF_CAP };
+}
+
 /**
  * 一张工具调用卡片（spec 2.8-09：工具名、关键参数、状态、耗时，外加副作用分级）。
  *
@@ -92,6 +128,28 @@ export function ToolCard({
   const labelKey = meta?.titleKey;
   const stateClass = TOOL_STATE_CLASS[part.state];
   const stateLabel = t(`agent.tool.state.${part.state}`);
+  // 抓取卡的结果展开（spec 8.10-04）：只有「本轮真抓到过岗位」的卡片才长这颗键；
+  // 行数据展开时才向 `jd.store.list` 现读，渲染层不缓存一份「我以为抓到了什么」。
+  const jobCount = part.toolId === 'jd.capture.run' && part.state === 'done' ? jobCountOf(part, step) : null;
+  const [jobsOpen, setJobsOpen] = useState(false);
+  const [jobs, setJobs] = useState<JobListResultView>();
+  /** 这张卡没有「动作跑完重读快照」这回事：展开读的是一次性读数，复用外壳只为忙碌态与失败提示同一套呈现。 */
+  const nothingToReread = useCallback(() => Promise.resolve(), []);
+  const {
+    busy: jobsBusy,
+    notice: jobsNotice,
+    noticeTone: jobsNoticeTone,
+    run: readJobs,
+  } = useBridgeAction(nothingToReread);
+  const toggleJobs = (): void => {
+    const next = !jobsOpen;
+    setJobsOpen(next);
+    if (next && jobs === undefined) {
+      void readJobs(t('agent.tool.jobs.actionRead'), () => window.autoCC?.jd['store.list'](JOB_CARD_LIMIT), {
+        apply: setJobs,
+      });
+    }
+  };
   const inputLine = (
     <p
       className="w-full break-all pl-5 font-mono text-[11.5px] leading-[1.6] text-slate-400"
@@ -168,6 +226,42 @@ export function ToolCard({
             <EvidenceRefButton key={ref} runId={step.runId} planStepIndex={step.planStepIndex} evidenceRef={ref} />
           ))}
         </ul>
+      ) : null}
+      {/* 抓完一批之后的结果得有人能扫（spec 8.10-04）：主进程那三键契约不改，界面自己多一颗展开口，
+          展开时现读库里的真行。`N+` 只出现在循环卡片上——那条路只留得住 12 条岗位引用（`jobCountOf`）。 */}
+      {jobCount !== null ? (
+        <div className="w-full">
+          <DeskButton
+            action="review-job-cards"
+            variant="line"
+            compact
+            busy={jobsBusy !== undefined}
+            markers={{ 'job-count': String(jobCount.count) }}
+            onClick={toggleJobs}
+          >
+            {jobsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            <Briefcase size={11} />
+            {t(jobCount.capped ? 'agent.tool.jobs.openCapped' : 'agent.tool.jobs.open', { count: jobCount.count })}
+          </DeskButton>
+          {jobsOpen ? (
+            <div className="mt-1 w-full">
+              {jobsBusy !== undefined ? (
+                <p className="text-[11px] text-celadon" data-testid="job-result-loading">
+                  {t('agent.tool.jobs.loading')}
+                </p>
+              ) : null}
+              {jobsBusy === undefined && jobs === undefined && jobsNotice ? (
+                <p
+                  className={`break-words text-[11px] ${jobsNoticeTone === 'seal' ? 'text-seal' : 'text-amber'}`}
+                  data-testid="job-result-error"
+                >
+                  {jobsNotice}
+                </p>
+              ) : null}
+              {jobs ? <JobResultCards result={jobs} /> : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

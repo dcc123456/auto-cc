@@ -3,8 +3,8 @@
  *
  * 面板自己不判「这只手要不要确认」：名单来自 `agent.policy.exemptList`，副作用级与批准声明来自
  * `agent.tools.list` 那份注册表读数，两处都是主进程算好的（AGENTS.md §2.5）。
- * 可加白的候选因此只有一个来源——注册表里**自己声明要人批准**的那些；`semi` 档不看名单，
- * 所以这一片在非 `auto` 档只是「看得见的设置」，不是当下的行为差异。
+ * 可加白的候选因此只有一个来源——注册表里**半自动档会问**的那些（非只读，或自己声明要批准）；
+ * `auto` 档已经一次都不问，名单在那里无事可做，所以这一片在非 `semi` 档只是「看得见的设置」。
  */
 import { ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -25,7 +25,7 @@ function formatAddedAt(at: number): string {
 /**
  * 白名单面板：已免确认清单（逐条可撤销）+ 可加白清单（逐条可加白）。
  * @param tools 注册表读数（`agent.tools.list` 那一份），用来筛候选与显示副作用级
- * @param autonomy 当前档位；非 `auto` 时在面板上说明「名单暂不影响执行」
+ * @param autonomy 当前档位；非 `semi` 时在面板上说明「名单此刻不影响执行」
  * @returns 设置抽屉里 `agent.policy` 那一段的正文（段头与外框由 `DeskSection` 给）
  */
 export function AgentPolicyPanel({
@@ -51,7 +51,11 @@ export function AgentPolicyPanel({
 
   const { busy, notice, run: call } = useBridgeAction(read);
   const exemptIds = new Set((exempt ?? []).map((row) => row.toolId));
-  const candidates = tools.filter((tool) => tool.requiresConfirmation && !exemptIds.has(tool.id));
+  // 半自动档会问的那些手才是可加白的候选：非只读一律要点头，只读但自己声明要批准的也要。
+  // 全自动档不读这份名单（它一次都不问），候选列表照旧画出来只是为了让用户回半自动时仍然看得见设置。
+  const candidates = tools.filter(
+    (tool) => (tool.effect !== 'read' || tool.requiresConfirmation) && !exemptIds.has(tool.id),
+  );
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
@@ -63,9 +67,9 @@ export function AgentPolicyPanel({
         <span className="text-[10px] text-slate-400" data-exempt-count={String(exempt?.length ?? 0)}>
           {t('agent.policy.exemptCount', { total: exempt?.length ?? 0 })}
         </span>
-        {autonomy !== undefined && autonomy !== 'auto' ? (
+        {autonomy !== undefined && autonomy !== 'semi' ? (
           <span className="text-[10px] text-amber" data-policy-tier-note>
-            {t('agent.policy.onlyAuto', { level: t(`agent.autonomy.${autonomy}`) })}
+            {t('agent.policy.onlySemi', { level: t(`agent.autonomy.${autonomy}`) })}
           </span>
         ) : null}
       </div>

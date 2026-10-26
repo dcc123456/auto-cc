@@ -28,6 +28,7 @@ import type {
   ChatPart,
   ChatSnapshotView,
   ChatToolPart,
+  FullAutoConsentView,
   ToolDescriptorView,
   WorkflowRunView,
 } from '@auto-cc/shared';
@@ -36,11 +37,12 @@ import { AgentPolicyPanel } from './AgentPolicyPanel';
 import { AgentRunPanel } from './AgentRunPanel';
 import { ChatCompactionBanner } from './ChatCompactionBanner';
 import { ChatSessionBar } from './ChatSessionBar';
+import { FullAutoConsentNotice } from './FullAutoConsentNotice';
 import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
-import { DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
+import { Banner, DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
 import { DeskExplainer, DeskHint, DeskSection } from './ui/disclosure';
 import { MarkdownBody } from './ui/markdown';
 import { Drawer } from './ui/overlays';
@@ -384,6 +386,14 @@ export function ChatPanel() {
   const [settings, setSettings] = useState<{ focus: 'tier' | 'policy'; signal: number }>();
   /** 当前对话通道用的模型名（稿 `.pill` 右侧那一颗的读数）；没配齐时为 undefined，画「未配置」那句。 */
   const [chatModel, setChatModel] = useState<string>();
+  /**
+   * 那份一次性的「全自动授权」（spec 8.10-01）。
+   *
+   * `undefined` 是还没读回来（此时不拦发送：拦了也只是一瞬的假禁用）；`acknowledgedAt: null` 才是
+   * 「还没答应过」——全自动档在这之前一步都不执行，界面上据此摆出那句明示并禁用发送键。
+   * 读数来自主进程（`agent.policy.fullAutoConsent`），界面不存第二份「我答应过」的本地标志。
+   */
+  const [fullAutoConsent, setFullAutoConsent] = useState<FullAutoConsentView>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bridge = window.autoCC;
   // 对话与工作流镜像同一个 runner 实例（spec 1.10-08 的后半句判据）。
@@ -427,11 +437,18 @@ export function ChatPanel() {
     if (reply?.ok) setChatModel(reply.value.legs.find((leg) => leg.leg === 'chat')?.model ?? undefined);
   }, [bridge]);
 
+  /** 读那份一次性全自动授权：与档位一起进来，界面据此决定要不要摆那句明示、能不能直接跑。 */
+  const readConsent = useCallback(async () => {
+    const reply = await bridge?.agent['policy.fullAutoConsent']();
+    if (reply?.ok) setFullAutoConsent(reply.value);
+  }, [bridge]);
+
   useEffect(() => {
     void read();
     void readTools();
     void readModel();
-  }, [read, readTools, readModel]);
+    void readConsent();
+  }, [read, readTools, readModel, readConsent]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -490,17 +507,27 @@ export function ChatPanel() {
 
   /**
    * 发送输入框里的话。流式期间**照发**——主进程把它排进队列（spec 1.11-16），上一条收完自动轮到它。
-   * `/plan` 开头那一句走 agent 循环：它不进对话表，只在同一段流里起一张计划卡（spec 5.2-03）。
+   *
+   * 全自动档下**普通一句话也进 agent 循环**（2026-10-26 片三）：「帮我找一份前端开发工作」不该先得到
+   * 一句模板回复、再让用户换种写法敲 `/plan`。起草成功就立刻确认并开跑——那一次确认用的是用户
+   * 在档位上做过的**一次性授权**，不是逐步问；没有那份授权时发送键本身是禁用的（见 `sendReason`）。
+   * 半自动与建议档仍保持原分工：普通句子走对话，`/plan` 才起计划卡。
    */
   const submit = () => {
     const text = draft.trim();
     if (!text) return;
-    if (text.startsWith(RUN_COMMAND_PREFIX)) {
+    const isAuto = snapshot?.session.autonomy === 'auto';
+    const isPlanCommand = text.startsWith(RUN_COMMAND_PREFIX);
+    const goal = isPlanCommand ? text.slice(RUN_COMMAND_PREFIX.length).trim() : isAuto ? text : undefined;
+    if (goal !== undefined) {
       // 先清输入框再派发：`propose` 是异步的，而输入区在任务跑起来时不该留着上一条命令（5.2-12）。
       // 前缀后面是空的也照样交给主进程——它用 `AGENT_LOOP_EMPTY_GOAL` 结构化拒绝，
       // 那句原话会出现在面板提示行里，界面不必再编一条自己的判定（§2.6）。
       setDraft('');
-      void agentRun.propose(text.slice(RUN_COMMAND_PREFIX.length).trim());
+      void (async () => {
+        const drafted = await agentRun.propose(goal);
+        if (drafted && isAuto) await agentRun.confirm();
+      })();
       return;
     }
     void call(t('chat.actionSend'), () => bridge?.chat['session.send'](text), {
@@ -512,9 +539,29 @@ export function ChatPanel() {
    * 发送按钮按不动的原因是哪一个：两个判据按"离手最近"排（先说在飞的那一次调用，再说没内容）。
    * **流式不再是一支原因码**——那条话现在进队列而不是被拒（1.11-16），按下去就是排上的意思。
    * 原因码进 `data-disabled-reason`，同一句话的人话版走语言包（6.2-06：禁用必须说得出为什么）。
+   *
+   * 全自动档少了那份一次性授权时排在最前：那不是"输入有毛病"，而是整条链路此刻不能开跑
+   * （判定口会以 `FULL_AUTO_CONSENT_REQUIRED` 拒掉每一步），所以要让人先看见那句话与那颗按键。
    */
-  const sendReason = busy !== undefined ? 'BUSY' : draft.trim() === '' ? 'INPUT_EMPTY' : undefined;
+  const needsFullAutoConsent = snapshot?.session.autonomy === 'auto' && fullAutoConsent?.acknowledgedAt === null;
+  const sendReason =
+    busy !== undefined
+      ? 'BUSY'
+      : needsFullAutoConsent
+        ? 'FULL_AUTO_CONSENT_REQUIRED'
+        : draft.trim() === ''
+          ? 'INPUT_EMPTY'
+          : undefined;
   const isSendDisabled = sendReason !== undefined;
+
+  /**
+   * 人在明示卡上按下「我了解，开始全自动」：登记进库（一次性，跨重启有效）后读数立刻更新。
+   * 这是**人**的表态，不走 agent 工具；桥接口同样刻意不登记成工具（`check-agent-model-authority` ⑥ 同族）。
+   */
+  const grantFullAuto = () =>
+    void call(t('agent.fullAuto.actionGrant'), () => bridge?.agent['policy.grantFullAutoConsent'](), {
+      apply: setFullAutoConsent,
+    });
 
   /** 中文输入法候选词上敲的那一下回车属于 IME，不属于"发送"。 */
   const composingRef = useRef(false);
@@ -723,7 +770,7 @@ export function ChatPanel() {
         className="flex min-h-[120px] flex-1 flex-col overflow-y-auto px-4 pb-[18px] pt-1"
       >
         <ChatCompactionBanner compaction={compaction} />
-        {turns.length === 0 && !agentRun.run && !workflowRunView ? (
+        {turns.length === 0 && !agentRun.run && !workflowRunView && agentRun.notice === undefined ? (
           // 空会话那句提示原先贴在流顶（py-6 之后就是一大片空白），看起来像"内容没加载出来"；
           // 让它占满流内剩余高度、垂直居中，空屏才读成"等你开口"而不是"上面还有东西"。
           <div className="flex flex-1 items-center justify-center">
@@ -788,6 +835,14 @@ export function ChatPanel() {
             {workflowRunView ? <WorkflowRunCard run={workflowRunView} live={workflowLive} /> : null}
           </ul>
         )}
+        {/* 起草就失败时库里有 run、界面却拿不到它（`propose` 的 apply 只在成功时跑），提示行因此必须
+            在**没有计划卡**的这一侧也画得出来（spec 8.10-06 的反向验证：计划器不可用要如实说，
+            不能表现成"什么都没发生"）。有卡时这一格让位给面板自己那条同类提示，避免同一句话出现两次。 */}
+        {agentRun.run === undefined && agentRun.notice !== undefined ? (
+          <Banner tone={agentRun.noticeTone} markers={{ testid: 'agent-run-notice' }} className="mt-2">
+            {agentRun.notice}
+          </Banner>
+        ) : null}
       </div>
 
       {isStreaming ? (
@@ -827,6 +882,11 @@ export function ChatPanel() {
             <ListOrdered size={13} />
             {t('chat.queued', { count: queued.length })}
           </p>
+        ) : null}
+        {/* 全自动档还没做过那一次明示：这句话摆在这里而不是弹窗——弹窗的入场条件是"不可逆、必须读完整风险"，
+            而它挡住的只是"还没答应"，抽屉一开就能读到同一句话（见下面档位那一格）。 */}
+        {needsFullAutoConsent && settings === undefined ? (
+          <FullAutoConsentNotice busy={busy !== undefined} onGrant={grantFullAuto} />
         ) : null}
         <div className="rounded-2xl border border-line bg-ink-800 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-celadon/50 focus-within:ring-[3px] focus-within:ring-celadon/15">
           {/* 文本域走原件的 `bare` 档（不铺自己的底、不描边），字号与字色挂在这一层包裹节点上——
@@ -1050,6 +1110,12 @@ export function ChatPanel() {
             <p data-testid="chat-autonomy-why" className="mt-2 text-[11px] leading-relaxed text-slate-400">
               {snapshot ? t(`agent.autonomy.why.${snapshot.session.autonomy}`) : t('chat.loading')}
             </p>
+            {/* 抽屉里也挂同一张明示卡：人可能正是在这一格把档位切到全自动，而输入卡此刻被遮罩盖着。 */}
+            {needsFullAutoConsent ? (
+              <div className="mt-2">
+                <FullAutoConsentNotice busy={busy !== undefined} onGrant={grantFullAuto} />
+              </div>
+            ) : null}
             <DeskExplainer id="agent.autonomy-compare" className="mt-1.5" label={t('agent.autonomy.compareToggle')}>
               <span className="flex flex-col gap-1.5">
                 {AUTONOMY_OPTIONS.map((level) => (
@@ -1062,7 +1128,7 @@ export function ChatPanel() {
             </DeskExplainer>
           </DeskSection>
           {/* 「哪些动作已免确认」与档位同处一只抽屉、各占一格：5.3-07 那句"两半一起读"由这一格自己的
-              档位说明承接（`agent.policy.onlyAuto` 会在非全自动档明说「名单此刻不影响执行」）。 */}
+              档位说明承接（`agent.policy.onlySemi` 会在非半自动档明说「名单此刻不影响执行」）。 */}
           <DeskSection
             id="agent.policy"
             title={t('agent.policy.heading')}

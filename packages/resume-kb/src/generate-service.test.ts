@@ -851,11 +851,12 @@ describe('PII 不因生成流程外流（spec 4.5-14 / 判据七）', () => {
 });
 
 describe('resume.generate 的 agent 工具面（spec 4.5 的双入口）', () => {
-  it('本服务只登记一只 resume.generate.run：建档动作、需要批准、不当外发', async () => {
+  it('登记「跑一趟」与「采纳这一趟」两只：都是建档动作、都需要批准、都不当外发', async () => {
     const { tools } = await bootGenerate();
     // 注册表是共享的（`kb.gap` 也往这里登记 `kb.gap.report`），所以按本服务的前缀筛。
     expect([...tools.declarations.keys()].filter((id) => id.startsWith('resume.generate'))).toEqual([
       'resume.generate.run',
+      'resume.generate.accept',
     ]);
     const tool = tools.declarations.get('resume.generate.run');
     if (tool === undefined) throw new Error('resume.generate.run 未登记进 agent 工具面');
@@ -864,6 +865,13 @@ describe('resume.generate 的 agent 工具面（spec 4.5 的双入口）', () =>
     // 描述里必须写清"不写工作副本、不接额度闸门"：模型据此判断这不是外发动作（判据五）。
     expect(tool.description).toContain('不写工作副本');
     expect(tool.description).toContain('不接外发额度闸门');
+    // 采纳面只吃回执与下标：正文与位置不经模型/界面回传，这一点必须写在模型看得见的地方。
+    const accept = tools.declarations.get('resume.generate.accept');
+    if (accept === undefined) throw new Error('resume.generate.accept 未登记进 agent 工具面');
+    expect(accept.effect).toBe('local-write');
+    expect(accept.requiresConfirmation).toBe(true);
+    expect(accept.description).toContain('只认回执 id');
+    expect(accept.description).toContain('全自动档下由循环直接采纳');
   });
 
   it('跑工具与直接调 service 的产物逐字相等：两入口共用同一条生成链（§5.9）', async () => {
@@ -912,12 +920,82 @@ function multiReplyFor(rewrites: readonly GenerationField[]): string {
  */
 async function bootRewrittenAt(picked: readonly GenerationField[]) {
   const rewrites = picked.map((field) => ({ ...field, text: safeRewriteOf(field) }));
-  const { gen, app } = await bootGenerate({}, { replies: [multiReplyFor(rewrites)] });
+  const { gen, app, tools } = await bootGenerate({}, { replies: [multiReplyFor(rewrites)] });
   const view = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
-  return { gen, app, view };
+  return { gen, app, tools, view };
 }
 
 describe('resume.generate 的接受面（spec 4.5-11：逐项表态之后才写变体）', () => {
+  it('agent 工具省略下标即采纳全部改写（全自动档的采纳路）：重排默认不动，正文由主进程复验', async () => {
+    const boot = await bootGenerate({}, {});
+    const targets = generationTargetFields(boot.baseline);
+    const picked = [targets[0] as GenerationField, targets[1] as GenerationField];
+    const { app, tools, view } = await bootRewrittenAt(picked);
+    expect(view.receipt.outcome).toBe('rewritten');
+    const accept = tools.declarations.get('resume.generate.accept');
+    if (accept === undefined) throw new Error('resume.generate.accept 未登记进 agent 工具面');
+    // 模型看不到正文与下标（判据二），所以省略是常态；它等价于「这一趟产物里的全部改写」。
+    const result = (await accept.run({ receiptId: view.receipt.id })).value as {
+      appliedRewrites: number;
+      reorderApplied: boolean;
+      docId: string;
+      movedSections: number;
+      movedEntries: number;
+    };
+    expect(result).toMatchObject({
+      appliedRewrites: 2,
+      reorderApplied: false,
+      movedSections: 0,
+      movedEntries: 0,
+    });
+    const loaded = app['resume.doc'].load(result.docId);
+    if (loaded.status !== 'found') throw new Error(`读回变体失败：${loaded.status}`);
+    const values = fieldValuesByLocation(loaded.document);
+    for (const rewrite of view.rewrites) {
+      expect(values.get(`${rewrite.sectionId}#${rewrite.entryId}#${rewrite.fieldKey}`)).toBe(rewrite.rewrittenText);
+    }
+  });
+
+  it('回执可以写 latest：计划里拿不到回执 id 时采纳本进程最近一份，用掉之后不再能指它（8.10-04）', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    const { tools, view } = await bootRewrittenAt([target]);
+    expect(view.receipt.outcome).toBe('rewritten');
+    const accept = tools.declarations.get('resume.generate.accept');
+    if (accept === undefined) throw new Error('resume.generate.accept 未登记进 agent 工具面');
+
+    const result = (await accept.run({ receiptId: 'latest' })).value as {
+      appliedRewrites: number;
+      receiptId: string;
+    };
+    // 采纳的是那一份真提议态：回执 id 由工具解析成实际 id，读数不说「latest」。
+    expect(result).toMatchObject({ appliedRewrites: 1, receiptId: view.receipt.id });
+    // 一份提议态只够用一次：再指 latest 就落在「先重新生成」这句更清楚的话上。
+    // 工具体在返回 Promise 之前就抛（`latestProposalId` 同步查表），所以这里用同步断言而不是 `.rejects`。
+    expect(() => accept.run({ receiptId: 'latest' })).toThrow('本进程还没有任何提议态');
+  });
+
+  it('agent 工具对「没有提议态」的回执：拒绝在写之前，一行变体都不长（被拒的那一轮也走这条）', async () => {
+    const boot = await bootGenerate({}, {});
+    const target = numberedTarget(generationTargetFields(boot.baseline));
+    // 两轮都动数值 → 服务拒绝产出，提议态根本不会入表：模型手上只有一张「被拒的回执」。
+    const { gen, app, tools } = await bootGenerate({}, { replies: [replyFor(target, numberLosingRewriteOf(target))] });
+    const rejected = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(rejected.receipt.outcome).toBe('rejected');
+    const accept = tools.declarations.get('resume.generate.accept');
+    if (accept === undefined) throw new Error('resume.generate.accept 未登记进 agent 工具面');
+    const before = dbCopy(app.store.db);
+    let caught: unknown;
+    try {
+      await accept.run({ receiptId: rejected.receipt.id });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as AppError).code).toBe('KB_GENERATION_PROPOSAL_MISSING');
+    expect(dbCopy(app.store.db)).toEqual(before);
+    expect(app['resume.doc'].findVariantId(DOC_ID, null)).toBeNull();
+  });
+
   it('接受全部改写并采纳重排：写进新建的那一支变体，母版按字节一字未动（spec 4.11-15）', async () => {
     const boot = await bootGenerate({}, {});
     const target = numberedTarget(generationTargetFields(boot.baseline));

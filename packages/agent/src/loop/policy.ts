@@ -7,8 +7,11 @@
  * （core 的 `takeoverStateOf`，**硬依赖**：读不到接管态就当没接管，等于把这条护栏做成可以摘掉的东西，5.5-02 会静默失效），
  * 模型的自述在这条口上根本没有入口，于是 5.2-07 要的不是「我们忽略了模型的话」，而是「模型没有一条可以表态的通道」。
  *
- * 5.2 立的是这个口本身；5.3-a 把档位语义钉成真值表；5.3-b 在这里接上**免确认白名单**——
- * 它是本服务自己的读数（表 + 唯一写入口 + 审计），不是请求方带进来的主张，所以判定请求那三位一个字都没改。
+ * 5.2 立的是这个口本身；5.3-a 把档位语义钉成真值表；5.3-b 在这里接上**免确认白名单**。
+ * 2026-10-26 片三改了两处档位语义（用户裁定「全自动，一次都不问」）：
+ * ① `auto` 档不再逐步确认，但必须先有一份落库的**一次性全自动授权**（号段 42，见 `fullAutoConsent`）；
+ * ② 免确认白名单从 `auto` 挪到 `semi`——全自动已经不问，名单在那里无事可做；半自动仍要一个个写操作点头，
+ *    名单是它唯一的免问口。两处都仍是本服务自己的读数，判定请求那三位一个字都没改。
  * 5.5-a 加的第四位同样**不进请求**：`StepPermissionRequest` 一个字段都没多——接管是判定者自己现读的事实，
  * 让请求方（循环）自己声明「现在没人动页面」就是把判据交给了要它管的那一方（与 5.2-07 同一条理由）。
  * 两类暂停（审批、补充信息）的通道在 5.3-c，额度还剩多少也不在这里判——外发工具自己经
@@ -23,6 +26,7 @@ import {
   type Context,
   type ExemptAuditRow,
   type ExemptToolView,
+  type FullAutoConsentView,
   type TakeoverStateSource,
   type TakeoverStateView,
   type ToolDescriptorView,
@@ -37,6 +41,7 @@ import type { AgentToolsService } from '../tools.js';
  *
  * `ALLOWED` 之外全是「这一步不动」，区别只在为什么不动、由谁解除：
  * `PLAN_UNCONFIRMED` 等用户确认计划；`TIER_SUGGEST_READ_ONLY` 等档位被用户显式改；
+ * `FULL_AUTO_CONSENT_REQUIRED` 等用户在全自动档上做那一次明示（不是每次执行前的追问）；
  * `CONFIRMATION_REQUIRED` 等 5.3 的审批口；`TOOL_UNAVAILABLE` 是注册表里没有或已声明 disabled；
  * `TAKEOVER_HELD` 等人把页面交回来（5.5-02）——它由循环落成 `paused` 而不是 `failed`，
  * 因为「有人在打字」不是一个需要重跑的失败，是一段必须等人结束的时间。
@@ -45,6 +50,7 @@ export type PolicyCode =
   | 'ALLOWED'
   | 'PLAN_UNCONFIRMED'
   | 'TIER_SUGGEST_READ_ONLY'
+  | 'FULL_AUTO_CONSENT_REQUIRED'
   | 'CONFIRMATION_REQUIRED'
   | 'TOOL_UNAVAILABLE'
   | 'TAKEOVER_HELD';
@@ -114,6 +120,29 @@ const agentPolicyMigration = {
  * 而渲染层不能 import 本包（L4 依赖方向），所以它们与 `AgentRunView` 同住在 `@auto-cc/core`。
  */
 const EXEMPT_AUDIT_LIMIT = 50;
+
+/**
+ * 迁移号段 **42**（2026-10-26 片三）：一次性「全自动授权」的落库凭据，一支迁移一张表。
+ *
+ * 为什么必须是新号段 + 真表，而不是配置键：装配面板写的是运行期内存层，重启即失（AGENTS.md §9 的 5.3-b 实测），
+ * 而「以后都不再逐步确认」是跨重启仍然算数的人的表态。表里只有一行（scope = `full-auto`），
+ * 时刻取**首次**授权那一次：之后重复授权不刷新它，否则「什么时候第一次答应的」就说不清了。
+ */
+export const AGENT_FULL_AUTO_MIGRATION_VERSION = 42;
+
+/** 这张表只有这一个主体：全自动档的授权（不按平台分，也不按会话分）。 */
+const FULL_AUTO_SCOPE = 'full-auto';
+
+/** 全自动授权的建表迁移。 */
+const agentFullAutoMigration = {
+  version: AGENT_FULL_AUTO_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS agent_full_auto_consent (
+      scope TEXT PRIMARY KEY,
+      acknowledged_at INTEGER NOT NULL
+    )`);
+  },
+};
 
 export class AgentPolicyService extends Service {
   static provide = 'agent.policy';
@@ -208,37 +237,87 @@ export class AgentPolicyService extends Service {
         message: '当前档位「建议模式」只出计划不执行任何动作（要执行请由你把档位显式改掉）',
       };
     }
-    // 一只自己声明要批准的手，`semi` 档下不替用户点头；`auto` 档下它仍默认要点头，
-    // 除非用户在界面上把**这一只**显式加进免确认白名单（spec 5.3-06 / plan §5.3 的 2026-10-03 裁定）。
-    if (descriptor.requiresConfirmation || (request.tier === 'semi' && descriptor.effect !== 'read')) {
-      // 白名单只在 `auto` 生效：`semi` 的档位语义就是"每个写操作都问"，
-      // 让名单在这里也管用等于把三档收成两档（主计划 §1.7 只有这三档，plan §5.3 不做第四档）。
-      if (request.tier === 'auto' && this.isExempt(descriptor.id)) {
+    if (request.tier === 'auto') {
+      // 全自动档的语义是「不再逐步确认」（用户裁定 2026-10-26）：手上的 `requiresConfirmation` 与副作用级
+      // 在这一档都不再是「先问一句」的理由。唯一的前置是**一次**明示，不是每一步都问——
+      // 它落在库里（号段 42），所以重启之后仍然算数；没这份记录时一步都不执行，界面据此先摆那句话。
+      if (this.fullAutoConsent().acknowledgedAt === null) {
         return {
-          canRun: true,
-          code: 'ALLOWED',
-          // 免确认≠免闸门：这一句只免掉"每次都要人点头"，额度与频控在外发工具那一侧照旧（AGENTS.md §7.3）。
-          message: `档位 auto 且 ${descriptor.id} 在你显式加白的免确认名单里，这一步不再询问（额度闸门与频控照旧生效）`,
+          canRun: false,
+          code: 'FULL_AUTO_CONSENT_REQUIRED',
+          message: `工具 ${descriptor.id} 这一步不执行：全自动档要先由你做一次「不再逐次确认」的明示（一次性，之后跨重启有效）`,
         };
       }
       return {
-        canRun: false,
-        code: 'CONFIRMATION_REQUIRED',
-        // 这一句是人唯一会读到的下一步指引，所以它必须只说**当下真有的**那条口：5.3-b 落的是免确认白名单，
-        // 5.3-c 落的是逐条批准的确认单——两句都指得到界面上真有的东西，而不是一个还没接的口子。
-        message: `这一步是「${descriptor.effect}」级动作，要先由你批准（循环会为此开一张确认单，批准与拒绝都在卡片上按；全自动档下也可把这只手加进免确认白名单，之后不再每次问你）`,
+        canRun: true,
+        code: 'ALLOWED',
+        // 免确认≠免闸门：这一档省掉的只是「每一步都问人」，额度、频控、风控暂停与人工接管照旧（AGENTS.md §8）。
+        message: `档位 auto 已一次性授权，${descriptor.effect} 级的 ${descriptor.id} 直接执行（额度闸门、频控、风控暂停与人工接管照旧）`,
+      };
+    }
+    // 半自动档：只读且不要求批准的手自己跑；其余写操作与声明要批准的手都要人点头，
+    // 除非用户在界面上把**这一只**显式加进免确认白名单（spec 5.3-06 / 07）。
+    // 名单因此只在 `semi` 生效：`suggest` 一步都不许动，`auto` 已经不问了，那张名单在那两档都无事可做。
+    if (descriptor.effect === 'read' && !descriptor.requiresConfirmation) {
+      return {
+        canRun: true,
+        code: 'ALLOWED',
+        message: `档位 semi 放行只读动作 ${descriptor.id}`,
+      };
+    }
+    if (this.isExempt(descriptor.id)) {
+      return {
+        canRun: true,
+        code: 'ALLOWED',
+        // 免确认≠免闸门：这一句只免掉"每次都要人点头"，额度与频控在外发工具那一侧照旧（AGENTS.md §7.3）。
+        message: `档位 semi 且 ${descriptor.id} 在你显式加白的免确认名单里，这一步不再询问（额度闸门与频控照旧生效）`,
       };
     }
     return {
-      canRun: true,
-      code: 'ALLOWED',
-      message: `档位 ${request.tier} 允许执行 ${descriptor.effect} 级的 ${descriptor.id}`,
+      canRun: false,
+      code: 'CONFIRMATION_REQUIRED',
+      // 这一句是人唯一会读到的下一步指引，所以它必须只说**当下真有的**那条口：5.3-b 落的是免确认白名单，
+      // 5.3-c 落的是逐条批准的确认单——两句都指得到界面上真有的东西，而不是一个还没接的口子。
+      message: `这一步是「${descriptor.effect}」级动作，要先由你批准（循环会为此开一张确认单，批准与拒绝都在卡片上按；半自动档下也可把这只手加进免确认白名单，之后不再每次问你）`,
     };
+  }
+
+  /**
+   * 读那份一次性的「全自动授权」（号段 42）。
+   * @returns 首次授权时刻（毫秒）；从没授权过为 null——全自动档在这之前一步都不执行
+   */
+  fullAutoConsent(): FullAutoConsentView {
+    const row = this.store.db
+      .prepare('SELECT acknowledged_at FROM agent_full_auto_consent WHERE scope = ?')
+      .get(FULL_AUTO_SCOPE) as { acknowledged_at?: number | bigint } | undefined;
+    return { acknowledgedAt: row?.acknowledged_at === undefined ? null : Number(row.acknowledged_at) };
+  }
+
+  /**
+   * 登记那份一次性的「全自动授权」——这条链上**唯一的写入口**，且只由界面点击触发。
+   *
+   * 与 `setExempt` 同一口径：刻意不登记为 agent 工具。模型若能自己写下「以后都不再问我」，
+   * 5.3-04 防的「agent 自己给自己放宽」就直接变成一次代签，比逐步升档还彻底。
+   * 首次时刻不刷新：重复点击不改变「第一次答应是什么时候」这句事实。
+   * @param nowMs 授权时刻（毫秒）；缺省取当前时刻，测试可注入确定值
+   * @returns 登记后的读数（界面上那句话据它收起）
+   */
+  grantFullAutoConsent(nowMs = Date.now()): FullAutoConsentView {
+    this.store.db
+      .prepare(
+        `INSERT INTO agent_full_auto_consent (scope, acknowledged_at) VALUES (?, ?)
+                ON CONFLICT(scope) DO NOTHING`,
+      )
+      .run(FULL_AUTO_SCOPE, nowMs);
+    const view = this.fullAutoConsent();
+    this.ctx.logger.info(`全自动授权已登记：首次时刻 ${String(view.acknowledgedAt)}`);
+    return view;
   }
 
   /**
    * 列出当前免确认的动作（spec 5.3-07 的「可列出」半边）。
    * @returns 按加白时刻升序；名单为空时是空数组——**缺省即空**是 5.3-06「仍默认需要确认」的前提
+   *   （2026-10-26 起它只在半自动档生效：全自动档一次都不问）
    */
   exemptList(): ExemptToolView[] {
     const rows = this.store.db
@@ -326,22 +405,24 @@ export class AgentPolicyService extends Service {
 
   [Service.init](): void {
     this.ensureSchema();
+    const consent = this.fullAutoConsent();
     this.ctx.logger.info(
       `自治策略判定口就绪（无可调项，配置 ${JSON.stringify(this.config)}；` +
-        `免确认名单 ${String(this.exemptList().length)} 只，只在档位为全自动时生效）`,
+        `全自动授权 ${consent.acknowledgedAt === null ? '未登记（全自动档一步都不执行）' : `已登记于 ${String(consent.acknowledgedAt)}`}；` +
+        `免确认名单 ${String(this.exemptList().length)} 只，只在半自动档生效）`,
     );
   }
 
   /**
-   * 把号段 18 的两张表登记进 `store.migrations` 并建表。
+   * 把 18 / 42 两支迁移登记进 `store.migrations` 并建表。
    *
    * 幂等是硬要求：`plugins.start('agent-policy')` 会重新构造本服务，无条件 push 同一个 version
    * 会让 `runMigrations` 抛「迁移版本重复」（与 `chat.session` 的 `ensureSchema` 同一口径）。
    */
   private ensureSchema(): void {
     const migrations = this.store.migrations;
-    if (!migrations.some((registered) => registered.version === agentPolicyMigration.version)) {
-      migrations.push(agentPolicyMigration);
+    for (const migration of [agentPolicyMigration, agentFullAutoMigration]) {
+      if (!migrations.some((registered) => registered.version === migration.version)) migrations.push(migration);
     }
     this.store.upgrade();
   }

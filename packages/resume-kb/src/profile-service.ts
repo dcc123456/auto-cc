@@ -34,6 +34,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import {
+  INTENT_FIELD_KEYS,
+  INTENT_SECTION_ID,
   planCustomSectionCreate,
   planCustomSectionRename,
   planEntryCreate,
@@ -347,6 +349,20 @@ export interface KbReviewView {
 }
 
 /**
+ * 母版求职意向的四格读数（计划器取「搜什么岗位、搜哪个城市」的来源，plan 2026-10-26 §3.4）。
+ *
+ * 四格固定短答案，空串表示该格没填——计划器据此分辨「意向没填」与「意向填了空值」，
+ * 而不是拿到一个全空对象还得再猜一次。
+ */
+export interface KbIntentView {
+  readonly docId: string;
+  readonly expectRole: string;
+  readonly expectCity: string;
+  readonly expectSalary: string;
+  readonly expectStart: string;
+}
+
+/**
  * 一次向量补建的读数（spec 4.3-07 / 08：界面要能说清「补了几条、为什么一条没补」）。
  *
  * 只有计数与模型名，没有任何切片正文（4.3-12 的口径同样适用于返回值——它会经 IPC 落进渲染层日志）。
@@ -561,7 +577,7 @@ export class KbProfileService extends Service {
         id: 'kb.profile.list',
         titleKey: 'agent.tool.labels.kbList',
         description:
-          '列出本地知识库里的经历 / 项目 / 技能 / 成果实体，可按种类过滤；sourceDocId 传 null 时只取用户手工创建的实体',
+          '列出本地知识库里的经历 / 项目 / 技能 / 成果实体，并按同一份文档给出求职意向四格（期望岗位 / 城市 / 薪资 / 到岗时间），可按种类过滤；sourceDocId 传 null 时只取用户手工创建的实体',
         input: z.strictObject({
           kind: z.enum(KB_ENTITY_KINDS).optional(),
           sourceDocId: z.string().min(1).nullable().optional(),
@@ -569,13 +585,21 @@ export class KbProfileService extends Service {
         effect: 'read',
         requiresConfirmation: false,
         // 实体正文不进摘要（§8.5：库内是简历原文，含姓名与联系方式），引用给逐条实体 id。
+        // 求职意向同样只报格数：它是计划器的取材来源，不该借一句话摘要把内容带进日志。
         run: (filter) => {
           const entities = this.list(filter);
+          const intent = filter.sourceDocId === null ? null : this.intentOf(filter.sourceDocId);
+          const filled = intent === null ? 0 : INTENT_FIELD_KEYS.filter((key) => intent[key] !== '').length;
           return Promise.resolve(
-            toolResult(entities, {
-              summary: `库里有 ${String(entities.length)} 条${filter.kind ?? ''}实体`,
-              evidenceRefs: entities.map((entity) => `entity:${entity.entityId}`),
-            }),
+            toolResult(
+              { entities, intent },
+              {
+                summary:
+                  `库里有 ${String(entities.length)} 条${filter.kind ?? ''}实体` +
+                  (filled === 0 ? '' : ` · 求职意向 ${String(filled)}/${String(INTENT_FIELD_KEYS.length)} 格已填`),
+                evidenceRefs: entities.map((entity) => `entity:${entity.entityId}`),
+              },
+            ),
           );
         },
       }),
@@ -877,6 +901,32 @@ export class KbProfileService extends Service {
           })),
         })),
       })),
+    };
+  }
+
+  /**
+   * 读一份文档的求职意向四格（计划器「搜什么岗位、搜哪个城市」的直接来源）。
+   *
+   * `docId` 省略时取**最近改过的那份母版**：变体不是素材源头，与 `review` / `revise` 同一条判据。
+   * 读不回（没有文档 / 文档坏了）一律回 `null` 而不抛——这一路只给计划器提供关键词，
+   * 缺失时循环会照实说「按实体与任务目标推导」，不该让一次起草因此失败。
+   * @param docId 目标文档 id；省略 = 最近更新的母版
+   * @returns 四格读数（空串表示该格没填）；没有可读文档时为 null
+   */
+  private intentOf(docId?: string | null): KbIntentView | null {
+    const targetDocId = docId ?? this.docStore.list().find((item) => item.parentDocId === null)?.id;
+    if (targetDocId === undefined) return null;
+    const loaded = this.docStore.load(targetDocId);
+    if (loaded.status !== 'found') return null;
+    const fields =
+      loaded.document.sections.find((section) => section.id === INTENT_SECTION_ID)?.entries[0]?.fields ?? [];
+    const valueOf = (key: IntentFieldKey): string => fields.find((field) => field.key === key)?.value.trim() ?? '';
+    return {
+      docId: targetDocId,
+      expectRole: valueOf('expectRole'),
+      expectCity: valueOf('expectCity'),
+      expectSalary: valueOf('expectSalary'),
+      expectStart: valueOf('expectStart'),
     };
   }
 

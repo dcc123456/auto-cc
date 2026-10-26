@@ -48,7 +48,9 @@
  *   哨兵（确定性事实校验三条判据都会放行，界面能拍到真改写行），`fabricate` 档凭空补一个 `91%`
  *   （数值守恒必然不过，两轮都过不了 → 拒绝产出）。4.5 的 V 类条目要的就是「界面上看得见改写行 /
  *   看得见被拒」，而真打外部模型服务要花钱、也需用户单独授权，所以这一条通道在本地打靶（spec 4.5-02 /
- *   05 / 11，与 §7.2「测试不打真实平台」同一条口径）；
+ *   05 / 11，与 §7.2「测试不打真实平台」同一条口径）；**同一个端点也应答计划器**（spec 8.10-02/03/04）：
+ *   system 那句含「计划器」的请求回一份确定性 `{"steps":[...]}`，「第 N 个岗位」按上下文里的
+ *   `job:<平台>/<id>` 顺序取——于是全自动档的整条链（起草 → 执行 → 岗位卡 → 后续轮次）在本地可复现；
  * - `/pii` 是**脱敏靶页**（spec 2.7-07）：裸写的手机号 / 邮箱 / 身份证 + 一组刻意留下的对照数字
  *   （薪资区间、编号、年份）+ 一个把号码拆成三个文本节点的块，遮罩到底盖住了什么、盖不住什么，
  *   由这一页的截图与正文读数说，不由实现自述；
@@ -253,6 +255,122 @@ function readGenerateTargets(body: Record<string, unknown>): GenerateTarget[] | 
     targets.push({ sectionId, entryId, fieldKey, text });
   }
   return targets;
+}
+
+/** 计划器上下文里的一只岗位（行格式由 `jobCatalogLines` 产出）。 */
+type PlannerJob = { id: string; title: string; detail: string };
+
+/**
+ * 读出计划器请求的目标、库内岗位与求职意向（spec 8.10-02/03/04 的 fixture 半边）。
+ *
+ * 判据是 system 那一句 `计划器`：简历改写清单走的是另一条分支，两条在同一端点时必须分得开。
+ * 岗位行连标题与后面那截一起收：`resume.generate.run` 要一段 JD 正文，光有 id 拼不出来。
+ * 意向只取期望岗位与城市两格，用来证明「搜索条件真的来自在线简历」（8.10-03）——fixture 自己
+ * 不编这两格，读不到就回 null 让目标原文决定。
+ * @param body OpenAI 信封请求体
+ * @returns 目标原文、按上下文顺序出现的岗位与意向两格；不是计划器请求时为 null
+ */
+function readPlannerRequest(body: Record<string, unknown>): {
+  goal: string;
+  jobs: PlannerJob[];
+  intent: { role: string; city: string } | null;
+} | null {
+  const messages = body['messages'];
+  if (!Array.isArray(messages)) return null;
+  let isPlanner = false;
+  let userText = '';
+  for (const message of messages) {
+    const entry = message as { role?: unknown; content?: unknown };
+    if (entry.role === 'system' && typeof entry.content === 'string' && entry.content.includes('计划器')) {
+      isPlanner = true;
+    }
+    if (entry.role === 'user' && typeof entry.content === 'string') userText = entry.content;
+  }
+  if (!isPlanner) return null;
+  const goal = /任务目标：([^\n]+)/u.exec(userText)?.[1];
+  if (goal === undefined) return null;
+  const jobs = [...userText.matchAll(/- job:([^/\s]+)\/(\S+?)「([^」]*)」([^\n]*)/gu)].map((match) => ({
+    id: `${match[1] as string}/${match[2] as string}`,
+    title: match[3] ?? '',
+    detail: (match[4] ?? '').trim(),
+  }));
+  const intentLine = /^- 求职意向：(.+)$/mu.exec(userText)?.[1] ?? '';
+  const intentCell = (label: string): string => {
+    const found = new RegExp(`${label}\\s+([^/]+)`, 'u').exec(intentLine);
+    return found?.[1]?.trim() ?? '';
+  };
+  const role = intentCell('期望岗位');
+  const city = intentCell('期望城市');
+  return { goal: goal.trim(), jobs, intent: role === '' && city === '' ? null : { role, city } };
+}
+
+/**
+ * 确定性计划（spec 8.10-02/03/04）：只按目标里的关键词出步，不猜业务。
+ *
+ * 「第 N 个岗位」取上下文里第 N 条岗位键——这正是 8.10-04 要证的「后续轮次指得着真岗位」。
+ * 「改简历」先走 `resume.generate.run` 再 `accept`（`latest` 指刚产出的那一份，8.10-04）。
+ * 抓取的关键词与城市优先取在线简历的求职意向；意向缺席时才按目标原文推导（8.10-03 的活体半边）。
+ * @param goal 目标原文
+ * @param jobs 上下文里的岗位清单（按列表顺序）
+ * @param intent 计划器上下文的求职意向两格；读不到为 null
+ * @returns 计划器要求的步序列（`{ steps }` 由调用方包成 JSON）
+ */
+function fixturePlanFor(
+  goal: string,
+  jobs: PlannerJob[],
+  intent: { role: string; city: string } | null,
+): Array<{ toolId: string; intent: string; input: unknown }> {
+  const ordinal = /第\s*(\d+)\s*个/u.exec(goal);
+  const index = ordinal === null ? 0 : Math.max(0, Number(ordinal[1]) - 1);
+  const target = jobs[index] ?? jobs[0];
+  if (target !== undefined && (goal.includes('改简历') || goal.includes('打招呼') || goal.includes('投递'))) {
+    const [platform = 'boss', jobId = ''] = target.id.split('/');
+    const steps: Array<{ toolId: string; intent: string; input: unknown }> = [];
+    if (goal.includes('改简历')) {
+      const jdText = [
+        `${target.title}${target.detail === '' ? '' : `（${target.detail}）`}`,
+        '岗位要求：熟练掌握前端工程化、React 与 TypeScript，具备性能优化与跨团队协作经验。',
+      ].join('\n');
+      steps.push({
+        toolId: 'resume.generate.run',
+        intent: `按 job:${target.id} 的 JD 定制简历（只产出提议态）`,
+        input: { jdText, jdId: jobId },
+      });
+      steps.push({
+        toolId: 'resume.generate.accept',
+        intent: '采纳这一趟通过事实校验的改写',
+        input: { receiptId: 'latest' },
+      });
+    }
+    if (goal.includes('打招呼') || goal.includes('投递')) {
+      steps.push({
+        toolId: 'outbound.greet.perform',
+        intent: `给库内第 ${String(index + 1)} 个岗位 job:${target.id} 打招呼（取自库内岗位清单）`,
+        input: { request: { platform, jobId, text: '您好，我对这个岗位很感兴趣，方便聊聊吗？' } },
+      });
+    }
+    if (goal.includes('投递')) {
+      steps.push({
+        toolId: 'outbound.deliver.perform',
+        intent: `向 job:${target.id} 投递简历`,
+        input: { request: { platform, jobId } },
+      });
+    }
+    return steps;
+  }
+  return [
+    {
+      toolId: 'jd.capture.run',
+      intent: '按在线简历的求职意向（缺省按目标原文）在平台列表页抓取岗位',
+      input: {
+        criteria: {
+          keyword: intent?.role || (goal.includes('前端') ? '前端' : '开发'),
+          city: intent?.city || '上海',
+          limit: 3,
+        },
+      },
+    },
+  ];
 }
 
 /**
@@ -1325,6 +1443,33 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     // 提示词带的是整份待改写清单，64KB 那道上限是给页面表单定的，这里按 512KB 走。
     const body = await readJson(request, response, 512 * 1024);
     if (body === null) return;
+    const planner = body === undefined ? null : readPlannerRequest(body);
+    if (planner !== null && body !== undefined) {
+      // spec 8.10-02/03/04：计划器请求回一份确定性 JSON 计划（不解释、不带代码块，与真模型同形状）。
+      const steps = fixturePlanFor(planner.goal, planner.jobs, planner.intent);
+      const requestedModel = body['model'];
+      console.log(
+        `[fixture] 计划器应答 ${String(steps.length)} 步：${planner.goal.slice(0, 40)} · ` +
+          `意向=${planner.intent === null ? '无' : '有'} · 岗位 ${String(planner.jobs.length)} 条`,
+      );
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(
+        JSON.stringify({
+          id: 'fixture-plan',
+          object: 'chat.completion',
+          model: typeof requestedModel === 'string' ? requestedModel : 'fixture-plan-model',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: JSON.stringify({ steps }) },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: steps.length },
+        }),
+      );
+      return;
+    }
     const targets = body === undefined ? null : readGenerateTargets(body);
     if (targets === null || targets.length === 0) {
       // P7 · 7.1-10：带 `messages` 而不带改写清单的那一发，就是模型设置面板上「测试连接」发的 ping。

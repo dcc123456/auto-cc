@@ -739,7 +739,7 @@ export function deliverScript(pack: KnowledgePack, statuses: (string | null)[]):
  */
 export class FakeAgentToolsService extends Service implements AgentToolRegistry {
   static provide = 'agent.tools';
-  static Config = z.strictObject({});
+  static Config = fakeRegistrySchema;
 
   /** 收到的声明，`Map` 的迭代序即登记顺序。 */
   readonly declarations = new Map<string, AgentToolDeclaration>();
@@ -747,7 +747,7 @@ export class FakeAgentToolsService extends Service implements AgentToolRegistry 
   /** 被摘回的 id，按摘除顺序（销毁那条用例的读数）。 */
   readonly removed: string[] = [];
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, _options: FakeRegistryConfig) {
     super(ctx, 'agent.tools');
   }
 

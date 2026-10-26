@@ -11,7 +11,9 @@
  * `funnel` 是漏斗五级与额度三量的只读聚合口（5.8-01 / 02 / 03 / 04，同样只读、同样按名字现问）。
  * 跨进程的数据模型（消息、档位、工具元数据与结果联合、run 与步读数）不在这里，在 `@auto-cc/core`——
  * 它们要出现在界面镜像里，而注册表本身（`AgentTool` 带 schema 与 `run`）永远不出主进程。
- * 本包的硬边界由 1.11-14 与 5.1-08/09 守着：不 import 任何平台 / 简历 / 外发能力，5.2 也不接真 LLM。
+ * 本包的硬边界由 1.11-14 与 5.1-08/09 守着：不 import 任何平台 / 简历 / 外发能力；
+ * 真计划器（plan 2026-10-26 §3.1）只经 `llm.chat` 的窄口 `PlannerChatChannel` 取补全，
+ * 不 import LLM 包，也不在 agent 层写业务映射。
  */
 export { AgentToolsService, agentToolsConfigSchema } from './tools.js';
 export type { AgentTool } from './tools.js';
@@ -38,8 +40,11 @@ export type {
   ObservationResult,
   PlanDraftRequest,
   PlanDraftResult,
+  PlannerToolBrief,
   PlanStepDraft,
 } from './loop/model.js';
+export { LlmLoopModel, parsePlanJson } from './loop/llm-model.js';
+export type { LlmPlannerConfig, PlannerChatChannel } from './loop/llm-model.js';
 export { AgentSedimentService, agentSedimentSchema, projectRun } from './loop/sediment.js';
 export type { AgentSedimentConfig, SedimentLookups } from './loop/sediment.js';
 export { agentEvidenceSchema, EvidenceRefService } from './loop/evidence.js';

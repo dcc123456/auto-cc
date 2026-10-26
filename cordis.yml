@@ -296,7 +296,10 @@ plugins:
 
   # 简历投递编排（spec 2.6-01…07）：打招呼的下游，复用同一条闸门/账本/频控，只多「等人确认」这一段。
   # 档位显式写在这里而不是藏在代码默认值里：2.6-01 的验收要在装配面板现场改 `suggest / semi / auto`
-  # 并看着行为变，而默认值必须是 `semi`——默认 `auto` 等于装好 app 就往真实站点上自动递简历。
+  # 并看着行为变。**2026-10-26 用户裁定「全自动，一次都不问」**（00-master-plan §3 片三），所以发货值
+  # 从 `semi` 改成 `auto`：投递不再逐单等人点头。四道门禁一个都不撤——额度闸门（entitlement）、频控、
+  # 风控暂停与人工接管、以及平台首次外发的 `ensureConsent` 法律确认照旧；循环那一层另有一次性
+  # 「不再逐次确认」的明示（`agent_full_auto_consent`，迁移 42），没那次明示连跑都跑不起来。
   # 摘掉这一行：`resume.deliver` 节点得到「执行器未登记」的结构化失败；上一行摘掉则投递照旧、打招呼没了。
   # `resumeFile` 是 P3（简历 PDF 生成）之前的临时默认路径，请求里带 `filePath` 时以请求为准（plan §13.5）。
   # 择机投递（spec 5.7-03）在真实装配里**显式打开**：代码默认关（plan §7.5.5 决策七第 2 条——已验收的 2.6 主线
@@ -306,7 +309,7 @@ plugins:
   - id: outbound-deliver
     dependsOn: [entitlement, outbound-throttle, outbound-delivery-records, platform-registry]
     config:
-      autonomy: semi
+      autonomy: auto
       # 表态窗口从 120000 调到 300000（裁定㉓，2026-10-09）：活体那一发实测「发单 → 人读到 → 点下去」
       # 一次往返就超过两分钟（第一张单 be6c7f03 就是这么空掉的，读数见
       # docs/acceptance/08-real-platform-driving/8.5-01-post-injection-shape.txt 第六节）。
@@ -586,8 +589,10 @@ plugins:
     config:
       chunkChars: 6
       chunkIntervalMs: 120
-      # `defaultAutonomy`（新会话的起始档位，spec 5.3-02）**故意不写在这里**：它的缺省值就是最保守档
-      # `suggest`，装配文件不给这一行，"配置缺失亦回落到最保守"这条判据才是被装配本身证明的。
+      # `defaultAutonomy`（新会话的起始档位，spec 5.3-02）**故意不写在这里**：它的缺省值就是产品目标形态的
+      # `auto`（2026-10-26 片三裁定「对话页默认全自动」），装配文件不给这一行，"配置缺失亦取 schema 缺省"
+      # 这条判据才是被装配本身证明的。全自动档另要一次性的「不再逐次确认」明示（`agent.policy` 号段 42），
+      # 缺省宽的是档位，不是那四道红线。
       # 要改默认档只能在装配面板显式改（5.3-04 防的是 agent 自己升档，不是人改默认值），
       # 而会话中途的档位切换另有审计表 `chat_autonomy_audit` 记录（5.3-05）。
 
@@ -613,7 +618,9 @@ plugins:
 
   # 对话循环（spec 5.2-01 / 05 / 08 / 11）：`agent_run` + `agent_step` 两张表由本服务把迁移
   # push 进 `store.migrations`，号段取 16（账本 1、会话 2、jobs 3、workflow run 4…生成记录 15）。
-  # 模型通道是确定性桩（`loop/model.ts`）：真模型出网要花钱且须用户单独授权，本片不接。
+  # 计划器从 2026-10-26 起复用**已配置的对话通道**（plan §3.1）：`planner: llm` 只经 `llm.chat` 的
+  # `status` / `complete` 两条窄口取补全，失败按 `AGENT_PLANNER_*` 落 `failed`，不静默回落成桩。
+  # 单测与「模型没配也要能看计划卡」的既有判据把这一格留在 `stub`（Schema 缺省）。
   # 两条上限就是 5.2-11 的判据对象，在装配面板里改了就生效（改配置会重建本服务并清空内存作用域，
   # 进度因此一律从库里的 run/步行重建——见 `ensureScope` 的注释）。
   - id: agent-loop
@@ -622,6 +629,15 @@ plugins:
       stepLimit: 12
       tokenBudget: 4000
       contextCharsCap: 1200
+      # 计划器通道：`llm` = 复用对话通道（生产），`stub` = 确定性桩（测试与模型未配置的对照）。
+      planner: llm
+      # 这一趟自己的超时（单次覆盖，不抬 `llm.timeoutMs` 通道缺省）。端点慢就改这一格。
+      plannerTimeoutMs: 120000
+      # 起草前取「在线简历」的那只只读手（plan §3.4 的取材接线）：循环不认识简历，只按这个名字现问注册表。
+      profileToolId: kb.profile.list
+      # 起草前取「库内岗位」的那只只读手（plan §3.3 的后续轮次）：一条计划里看不到中间步的观察，
+      # 「给第 2 个岗位打招呼」因此要先把岗位键摆进上下文。它必须排在 `jd-store` 之后（本行在下）。
+      jobListToolId: jd.store.list
       # 5.5-03 的重读口**接线**（不是业务映射）：循环不认识浏览器，只按这个名字现问注册表，
       # 并且只认声明里 `effect === 'read'` 的那只手。写成一只动手的手会响亮失败
       # （`AGENT_LOOP_REREAD_UNAVAILABLE`），循环不会借着「重读」的名义在页面上按一下。

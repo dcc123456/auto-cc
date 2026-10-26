@@ -20,6 +20,7 @@ import type {
   DeliverAttachmentView,
   EvidenceRefView,
   ExemptToolView,
+  FullAutoConsentView,
   GreetTarget,
   JdProgressEvent,
   KbEntitiesChangedEvent,
@@ -88,6 +89,7 @@ export type {
   DeliverAttachmentView,
   EvidenceRefView,
   ExemptToolView,
+  FullAutoConsentView,
   JdProgressEvent,
   KernelViewLoadError,
   LocateCandidate,
@@ -315,13 +317,19 @@ export const RENDERER_ALLOWLIST = [
   // 刻意**不登记为 agent 工具**，也不按每种前缀各开一只：界面若自己分派「哪条引用归谁管」，
   // 就等于把主进程的路由表抄第二份（§2.5）；而它是只读口，既不是外发也不是表态，闸门与审计都不涉及。
   'agent.run.evidence',
-  // 5.3-b 的免确认白名单（spec 5.3-06 / 07）：`auto` 档下「哪些动作不再每次问我」是**用户**的显式设置，
+  // 5.3-b 的免确认白名单（spec 5.3-06 / 07）：`semi` 档下「哪些动作不再每次问我」是**用户**的显式设置
+  // （2026-10-26 片三起挪到半自动档：全自动档已经一次都不问），
   // 所以这三条口只出现在界面上，和 `agent.loop.confirm`、`chat.session.setAutonomy` 同一口径——
   // 刻意不登记为 agent 工具：模型若能自己加白，5.3-04 防的「agent 自己给自己放宽」就换了个名字重演。
   // 静态那半边由 `scripts/check-agent-model-authority.ts` 的 ⑥ 钉住（全仓只有这三份文件能提这两个方法名）。
   'agent.policy.exemptList',
   'agent.policy.setExempt',
   'agent.policy.clearExempt',
+  // 2026-10-26 片三的一次性「全自动授权」（spec 8.10-01）：`fullAutoConsent` 是读数，`grantFullAutoConsent`
+  // 是**人**按的那一次明示。同样不登记为 agent 工具——模型若能自己写下「以后都不再问我」，
+  // 5.3-04 防的「agent 自己给自己放宽」就变成一次代签。
+  'agent.policy.fullAutoConsent',
+  'agent.policy.grantFullAutoConsent',
   // 5.3-c 的暂停单（spec 5.3-08 / 09）：`pending()` 负责「错过了也还在」，`respond()` 是**人**按的那一格。
   // 与 `agent.loop.confirm`、`agent.policy.setExempt` 同一口径：刻意不登记为 agent 工具——
   // 模型若能自己应答自己的确认单，5.3-04 防的「agent 自己给自己放行」就换了个名字重演。
@@ -447,9 +455,10 @@ export const RENDERER_ALLOWLIST = [
   // P3.1 文档本体不过进程边界——`shared` 在 L1、不许依赖 L2 的 `resume-doc`，在 L1 再镜像一份文档模型
   // 就是造第二个真相源（§2.5），而界面要显示的"改了哪几处、为什么提前"全在下面那几行读数里。
   'resume.generate.run',
-  // 4.5-c 的接受口（spec 4.5-11）：4.5 那条链上**唯一**会写工作副本的一口，入站只有 `receiptId` + 下标。
-  // 它刻意**不**登记为 agent 工具——让模型自己接受自己生成的内容，等于把 4.5-11 的"人逐项过目"取消掉，
-  // 而事实锁定的最后一道闸就是那道过目（§8.4）。界面侧调用点在 `GeneratePanel`。
+  // 4.5-c 的接受口（spec 4.5-11 / 8.10-04）：4.5 那条链上**唯一**会写工作副本的一口，入站只有 `receiptId` + 下标。
+  // 2026-10-26 片三起它**也**登记为 agent 工具：全自动档要能「生成 → 采纳」连着走完，而计划器拿不到回执 id，
+  // 因此工具面额外认 `receiptId: 'latest'`。这不是把 4.5-11 的过目取消掉——`accept()` 的基线复验、事实锁定
+  // 与"一份提议态只用一次"三闸一步不绕过，界面仍可逐项勾选后再按。界面侧调用点在 `GeneratePanel`。
   'resume.generate.accept',
   // 4.9 的内置书写技能四张口（spec 4.9-01 ～ 4.9-04 / 4.9-09）：读、改、还原、对一份文档核对必备信息。
   // 这里**刻意没有第四种动作**——`kb.skill.remove` 这种调用名根本不存在：内置正文不在库里，
@@ -2793,7 +2802,7 @@ export interface BridgeSignatures {
    */
   'agent.policy.exemptList': { args: []; returns: ExemptToolView[] };
   /**
-   * 把一只动作加进免确认名单（spec 5.3-06 / 07，只在 `auto` 档生效，且不豁免额度闸门与频控）。
+   * 把一只动作加进免确认名单（spec 5.3-06 / 07，只在 `semi` 档生效，且不豁免额度闸门与频控）。
    * @param toolId 工具 id；不在开放面上时以 `AGENT_POLICY_EXEMPT_UNKNOWN` 结构化失败
    * @returns 变更后的整份名单，界面一次调用即可刷新
    */
@@ -2803,6 +2812,17 @@ export interface BridgeSignatures {
    * @param toolId 工具 id；不在名单里时读数与调用前一致，不报错也不写审计
    */
   'agent.policy.clearExempt': { args: [toolId: string]; returns: ExemptToolView[] };
+  /**
+   * 读那份一次性的「全自动授权」（spec 8.10-01）。
+   * @returns 首次授权时刻；没授权过为 null，全自动档在这之前一步都不执行
+   */
+  'agent.policy.fullAutoConsent': { args: []; returns: FullAutoConsentView };
+  /**
+   * 登记那份一次性的「全自动授权」：界面上那句「不再逐次确认」被按下之后调这一句。
+   * 它是人的表态，刻意不登记为 agent 工具；重复调用不刷新首次时刻。
+   * @returns 登记后的读数
+   */
+  'agent.policy.grantFullAutoConsent': { args: []; returns: FullAutoConsentView };
   /**
    * 当前在等的暂停单（spec 5.3-08 的读路）：两种卡片都从这一份现读，事件只负责「此刻提醒一下」。
    * 没有在等的单时是空数组——界面因此没有「以为还有卡片」的余地。

@@ -1719,6 +1719,18 @@ export type ExemptAuditRow = {
 };
 
 /**
+ * 一次性的「全自动授权」读数（spec 8.10-01）。
+ *
+ * `acknowledgedAt` 为 null 就是还没授权：全自动档在这之前一步都不执行——这不是每次执行前的追问，
+ * 而是把档位切到全自动那一句明示的落库凭据。它落在 SQLite 而不是配置层，因为配置只写内存、重启即失
+ * （AGENTS.md §9 的 5.3-b 实测），而「以后都不再逐步确认」必须跨重启仍然算数。
+ */
+export type FullAutoConsentView = {
+  /** 首次授权时刻（毫秒）；没授权过为 null */
+  acknowledgedAt: number | null;
+};
+
+/**
  * 一张暂停单分哪两类（spec 5.3-08）。
  *
  * 两类要问人的事根本不是一回事，所以界面是两张卡而不是一张卡两种按钮：

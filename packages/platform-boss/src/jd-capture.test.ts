@@ -105,7 +105,7 @@ async function boot(
   sandboxes.push(dir);
   const ctx = new Context();
   // 注册表排在最前：登记发生在后挂的能力包里，顺序反了就是「界面上有工具、清单是空的」（plan §15.7 落点 2）。
-  if (agentTools) fibers.push(await ctx.plugin(FakeAgentToolsService, NO_CONFIG));
+  if (agentTools) fibers.push(await ctx.plugin(FakeAgentToolsService, {}));
   const events: ProgressEvent[] = [];
   ctx.on('jd/progress', (event: ProgressEvent) => events.push(event));
   const fake = createFakePage(script);
@@ -689,7 +689,11 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', (
 describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10）', () => {
   it('挂载即在注册表里登记一只外发工具，id 与服务口名一致且带「需批准」', async () => {
     const { tools } = await boot(twoScreenScript(['1001']), { targetCount: 1 }, 0, undefined, true);
-    expect(tools?.list()).toEqual([{ id: 'jd.capture.run', effect: 'outbound', requiresConfirmation: true }]);
+    // 同一条链上还挂着 `jd.store` 那只只读回看（8.10-04）：顺序即挂载顺序（jd.store 先于 jd.capture）。
+    expect(tools?.list()).toEqual([
+      { id: 'jd.store.list', effect: 'read', requiresConfirmation: false },
+      { id: 'jd.capture.run', effect: 'outbound', requiresConfirmation: true },
+    ]);
   });
 
   it('从工具路径跑一轮：入库读数与直调一致，且只落一条 search 账', async () => {
@@ -746,6 +750,7 @@ describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10�
     const { tools, captureFiber } = await boot(twoScreenScript(['1001']), { targetCount: 1 }, 0, undefined, true);
     await captureFiber.dispose();
     expect(tools?.removed).toEqual(['jd.capture.run']);
-    expect(tools?.list()).toEqual([]);
+    // 摘回的只有自己那一条：`jd.store` 还在，它那只只读手必须留在清单里。
+    expect(tools?.list().map((tool) => tool.id)).toEqual(['jd.store.list']);
   });
 });

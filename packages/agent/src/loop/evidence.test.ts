@@ -336,11 +336,17 @@ async function bootEvidence(without: readonly string[] = []) {
     tokenBudget: 4000,
     contextCharsCap: 1200,
     rereadToolId: 'demo.refs',
+    profileToolId: 'demo.profile',
+    jobListToolId: 'demo.jobs',
     replanLimit: 2,
+    planner: 'stub',
+    plannerTimeoutMs: 120000,
   });
   await loopFiber;
   const app = asApp(ctx);
   app['agent.tools'].register(makeRefsTool());
+  // 全自动档在 8.10-01 之后要先有那次一次性明示才跑得动；台架替用户落下它。
+  app['agent.policy'].grantFullAutoConsent();
   app['chat.session'].setAutonomy('auto');
 
   const owners = new Map<string, Service>();

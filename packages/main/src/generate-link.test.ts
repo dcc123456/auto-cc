@@ -370,20 +370,28 @@ describe('4.5-c 接受面的真装配（唯一写变体的一口，spec 4.5-11 /
     expect(Number(variantRows.total)).toBe(0);
   });
 
-  it('写口只对界面开放：白名单放行 accept，agent 只拿到 run，文档正文从不过界（4.5-11 / 判据二）', async () => {
+  it('接受口对界面与 agent 同开，但 agent 只能给回执 id，文档正文从不过界（4.5-11 / 判据二 · 8.10-04 改口径）', async () => {
     const { app } = await bootAssembly();
     expect(isAllowedCall('resume.generate.run')).toBe(true);
     expect(isAllowedCall('resume.generate.accept')).toBe(true);
     // 界面没有 `resume.doc.*` 任何一条口，所以"改前正文"只能随改写行一起过界（`bridge.ts` 本节头注释 ③）。
     expect(isAllowedCall('resume.doc.save')).toBe(false);
     expect(isAllowedCall('resume.doc.load')).toBe(false);
-    // 反向验证（§6.5）：接受不是 agent 工具——让模型替用户在简历上签字，等于把 4.5-11 的人工确认绕掉。
+    // 2026-10-26 改口径（spec 8.10-04）：接受**也是** agent 工具——自动档要把「生成 → 采纳」串起来，
+    // 一条计划里又拿不到回执 id，只能给 `latest`。原先「接受不是 agent 工具」的反向证据换成下面这条更强的：
+    // 入参 strict 到只认回执 id 与下标，**正文一个字都递不进去**，基线复验与事实校验仍在主进程里原样跑。
     expect(
       app['agent.tools']
         .list()
         .map((tool) => tool.id)
-        .filter((id) => id.startsWith('resume.generate')),
-    ).toEqual(['resume.generate.run']);
+        .filter((id) => id.startsWith('resume.generate'))
+        .sort(),
+    ).toEqual(['resume.generate.accept', 'resume.generate.run']);
+    const tools = app['agent.tools'];
+    expect(tools.validateInput('resume.generate.accept', { receiptId: 'latest' }).ok).toBe(true);
+    expect(tools.validateInput('resume.generate.accept', { receiptId: 'latest', text: '模型替我写的正文' }).ok).toBe(
+      false,
+    );
     // 派生口不过界（spec 4.11-14）：界面在 `resume.doc.*` 上连一条写口都没有，变体只能由主进程那条接受通道长出来；
     // 而"哪一行属于哪一份母版"由只读的 `resume.doc.list` 那两列血缘承担，不为变体新开第二条界内查询（§2.3）。
     expect(isAllowedCall('resume.doc.deriveVariant')).toBe(false);

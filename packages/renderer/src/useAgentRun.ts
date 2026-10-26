@@ -79,9 +79,10 @@ export function useAgentRun(sessionId?: string) {
   /**
    * 起草一份计划（spec 5.2-03）：这一步在主进程里不执行任何动作，返回的就是计划卡要画的那份读数。
    * @param goal 用户原文（去空由主进程按系统边界校验）
+   * @returns 起草成功为 true（`runIdRef` 已指向新 run）；主进程拒绝时为 false，原因在 `notice` 里
    */
   const propose = useCallback(
-    async (goal: string): Promise<void> => {
+    async (goal: string): Promise<boolean> => {
       runIdRef.current = undefined;
       setStopAccepted(false);
       await action.run(t('agent.run.actionPropose'), () => bridge?.agent['loop.propose'](goal), {
@@ -90,6 +91,7 @@ export function useAgentRun(sessionId?: string) {
           setRun(view);
         },
       });
+      return runIdRef.current !== undefined;
     },
     [action, bridge, t],
   );

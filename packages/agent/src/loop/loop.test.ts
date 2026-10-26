@@ -41,10 +41,22 @@ import {
 } from '../session.js';
 import { FakeTakeoverService } from '../test-doubles.js';
 import { AgentToolsService, type AgentTool } from '../tools.js';
-import { AGENT_RUN_MIGRATION_VERSION, AgentLoopService, type AgentLoopConfig } from './loop.js';
+import {
+  AGENT_RUN_MIGRATION_VERSION,
+  AgentLoopService,
+  jobCatalogLines,
+  profileContextLines,
+  type AgentLoopConfig,
+} from './loop.js';
 import { StubLoopModel, type ObservationRequest, type PlanDraftRequest, type PlanStepDraft } from './model.js';
 import { AGENT_PAUSE_MIGRATION_VERSION, AgentPauseService } from './pause.js';
-import { AgentPolicyService, type PolicyDecision, type StepPermissionRequest } from './policy.js';
+import {
+  AGENT_FULL_AUTO_MIGRATION_VERSION,
+  AGENT_POLICY_MIGRATION_VERSION,
+  AgentPolicyService,
+  type PolicyDecision,
+  type StepPermissionRequest,
+} from './policy.js';
 
 /** 拆卸清单与临时库目录（每个用例一套，跑完即删）。 */
 const opened: { dispose(): Promise<unknown> }[] = [];
@@ -67,7 +79,11 @@ const BASE_CONFIG: AgentLoopConfig = {
   tokenBudget: 4000,
   contextCharsCap: 1200,
   rereadToolId: 'demo.reread',
+  profileToolId: 'demo.profile',
+  jobListToolId: 'demo.jobs',
   replanLimit: 2,
+  planner: 'stub',
+  plannerTimeoutMs: 120000,
 };
 
 /**
@@ -79,16 +95,18 @@ const BASE_CONFIG: AgentLoopConfig = {
 const BASE_PAUSE_TIMEOUT_MS = 1000;
 
 /**
- * 台架里由**会话服务**登记的号段。
+ * 台架里由**别的域**登记的号段：会话服务（1.11 / 5.6-c / 5.6-d）与判定口（5.3-b 的 18、片三的 42）。
  *
  * 判「循环一族有没有往上加号段」时要先把它们剔掉：`bootLoop` 挂的是真 `ChatSessionService`
- * （会话域从 1.11 起就带着自己的账，5.6-c 加了号段 23、5.6-d 加了号段 24），按版本号大小筛会把邻居的登记算到循环头上。
+ * 与真 `AgentPolicyService`，按版本号大小筛会把邻居的登记算到循环头上（42 还正好高于 22）。
  */
-const SESSION_DOMAIN_MIGRATION_VERSIONS = [
+const FOREIGN_DOMAIN_MIGRATION_VERSIONS = [
   CHAT_MIGRATION_VERSION,
   CHAT_AUTONOMY_AUDIT_MIGRATION_VERSION,
   CHAT_SESSION_META_MIGRATION_VERSION,
   CHAT_COMPACTION_MIGRATION_VERSION,
+  AGENT_POLICY_MIGRATION_VERSION,
+  AGENT_FULL_AUTO_MIGRATION_VERSION,
 ];
 
 /** `agent_step` 的原始行读数——断言时直接对表说话，不经视图转换。 */
@@ -106,7 +124,9 @@ type StepRecord = {
 /**
  * 装一套 store + 注册表 + 会话 + 判定口 + 暂停通道 + 循环，并登记一只留下副作用的假工具。
  * @param overrides 循环配置覆盖
- * @param tier 起手档位；默认 `auto`（多数用例要的是「允许动手」），判定拒绝的用例显式传 `suggest`
+ * @param tier 起手档位；默认 `auto`（多数用例要的是「允许动手」；这一档在台架里会先替用户落下那份
+ *   一次性全自动授权，否则判定口会按 8.10-01 停在 `FULL_AUTO_CONSENT_REQUIRED`）。
+ *   要确认单与免确认白名单的用例显式传 `semi`（2026-10-26 起名单只在半自动档生效）。
  * @param pauseTimeoutMs 暂停单的超时（毫秒）；超时类用例传一个短值
  * @param withTakeover 是否供上接管态替身（省略为 true；false 就是「摘掉 browser-takeover 那一行装配」）
  * @returns 上下文、六个服务句柄、副作用清单与重读清单、临时库目录与循环的 fiber（重建服务时用）
@@ -161,6 +181,11 @@ async function bootLoop(
    */
   const rereads: string[] = [];
   app['agent.tools'].register(makeTickTool(calls));
+  // 全自动档在真实装配里要先有那次明示才跑得动（8.10-01）；台架替用户落下它，
+  // 判「没授权时一步都不跑」的那条在 `policy.test.ts`，这里不重复。
+  // 判定口缺席那条用例（`withTakeover: false`）里它根本没挂上，跳过即可。
+  const policyService = app.get('agent.policy');
+  if (tier === 'auto' && policyService !== undefined) policyService.grantFullAutoConsent();
   app['chat.session'].setAutonomy(tier);
   return {
     ctx,
@@ -415,6 +440,34 @@ describe('桩模型的确定性草案（5.2-01）', () => {
 });
 
 /**
+ * 真计划器的失败结局（plan §3.1「没配模型 / 超时 / JSON 非法 → run 记 failed，不静默回落成桩」）。
+ *
+ * 这里只判**环回那一半**：起草抛错时库里留下一条空计划的 `failed` run，而不是当成「没有下一步」。
+ * 收窄与通道的三种码在 `llm-model.test.ts`；两者合起来才是「界面说得出为什么没计划」。
+ */
+describe('真计划器失败不静默回落（plan §3.1）', () => {
+  it('planner=llm 而没有对话通道：起草直接失败，库里落一条 failed 空计划，零步行', async () => {
+    const { loop, store } = await bootLoop({ planner: 'llm' });
+    await expect(loop.propose('帮我找一份前端开发工作')).rejects.toMatchObject({
+      code: 'AGENT_PLANNER_UNAVAILABLE',
+    });
+    const rows = store.db.prepare('SELECT status, stop_reason, plan_json FROM agent_run').all() as unknown as {
+      status: string;
+      stop_reason: string;
+      plan_json: string;
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({ status: 'failed', stop_reason: 'AGENT_PLANNER_UNAVAILABLE', plan_json: '[]' });
+    const steps = store.db.prepare('SELECT COUNT(*) AS n FROM agent_step').get() as { n: number | bigint };
+    expect(Number(steps.n)).toBe(0);
+    // 不发布：界面此刻该读的是错误原话，不是一张空的计划卡。
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM agent_run WHERE status = ?').get('proposed')).toEqual({
+      n: 0,
+    });
+  });
+});
+
+/**
  * 一只「每次都要人批准」的假工具（5.3-08 的 `approval` 那一路以它开局）。
  * @param calls 副作用清单
  * @returns 合规声明：`outbound` 级 + `requiresConfirmation: true`
@@ -469,7 +522,8 @@ describe('每一步都过判定口（5.2-02）', () => {
   });
 
   it('一只自己声明要批准的手：先开一张确认单，人批准之后这一步照原样跑', async () => {
-    const rig = await bootLoop();
+    // 半自动档：全自动档下这只手也不再问（裁定 2026-10-26），确认单那一路只剩半自动还在走。
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
     const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
@@ -491,7 +545,7 @@ describe('每一步都过判定口（5.2-02）', () => {
   });
 
   it('同一只手的确认单上按「拒绝」：步记 refused + PAUSE_DENIED，工具一次都没进', async () => {
-    const rig = await bootLoop();
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     const cards = watchPauses(rig.ctx, rig.pause, DENY);
     const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
@@ -504,7 +558,7 @@ describe('每一步都过判定口（5.2-02）', () => {
   });
 
   it('免确认白名单是这条分支的另一条出口：加白之后不再开单，直接跑', async () => {
-    const rig = await bootLoop();
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     const cards = watchPauses(rig.ctx, rig.pause, APPROVE);
     rig.policy.setExempt('demo.needs-approval');
@@ -541,16 +595,26 @@ describe('每一步都过判定口（5.2-02）', () => {
     expect(finished.status).toBe('completed');
     expect(calls).toEqual(['tick:1', 'tick:2', 'tick:3']);
     // 代码走查的机检半边（5.2-02 是 C 类）：**动手**的口只有一处，且它排在判定之后——没有第二条旁路。
-    // 5.5-c 之后源码里多了第二处 `registry.call`，那是「重读页面」那道保险（spec 5.5-03），
-    // 它不在计划步的执行路径上，也不许动页面。所以这条走查按两类口径分开钉，而不是把「一处」放宽成「无所谓几处」：
-    // 步这一侧仍然一处且排在判定之后，重读那一侧必须被 `effect === 'read'` 关在自己的函数里。
+    // 5.5-c 之后源码里多了第二处 `registry.call`，那是「重读页面」那道保险（spec 5.5-03）；
+    // 片三又多了两处：起草前取在线简历与库内岗位（plan §3.4 / §3.3）。这几处必须按三类口径分开钉，
+    // 而不是把「一处」放宽成「无所谓几处」：步这一侧一处且排在判定之后；重读一处；取材两处（各取一只），
+    // 且都被 `effect === 'read'` + 「不要求批准」关在自己的函数里，谁都不许借这条名路变成写入口。
     const source = readFileSync(fileURLToPath(new URL('./loop.ts', import.meta.url)), 'utf8');
+    const contextStart = source.indexOf('private async resumeContext');
+    const contextEnd = source.indexOf('private async draftOrFail');
+    expect(contextStart).toBeGreaterThan(-1);
+    expect(contextEnd).toBeGreaterThan(contextStart);
+    const contextBody = source.slice(contextStart, contextEnd);
     const rereadStart = source.indexOf('private async rereadPage');
     const rereadEnd = source.indexOf('private async replanStep');
     expect(rereadStart).toBeGreaterThan(-1);
     expect(rereadEnd).toBeGreaterThan(rereadStart);
     const rereadBody = source.slice(rereadStart, rereadEnd);
-    const stepBody = source.replace(rereadBody, '');
+    const stepBody = source.replace(contextBody, '').replace(rereadBody, '');
+    expect(contextBody.match(/this\.registry\.call\(/g)).toHaveLength(2);
+    expect(contextBody.match(/descriptor\.effect !== 'read'/g)).toHaveLength(2);
+    expect(contextBody.match(/descriptor\.requiresConfirmation/g)).toHaveLength(2);
+    expect(contextBody).not.toContain('this.policy.decide(');
     expect(rereadBody.match(/this\.registry\.call\(/g)).toHaveLength(1);
     expect(rereadBody).toContain("descriptor.effect !== 'read'");
     expect(stepBody.match(/this\.registry\.call\(/g)).toHaveLength(1);
@@ -635,13 +699,11 @@ describe('步数与 token 双上限（5.2-11）', () => {
   it('预算先撞 → 在下一步开始之前停下并写明 TOKEN_LIMIT', async () => {
     const goal = goalNaming(3);
     // 预算从「这份草案自己花多少」推出来，不硬写数字：桩模型是导出的公开实现，拿它当预言机不是后门。
-    const draft = await new StubLoopModel().draftPlan({
-      goal,
-      tier: 'auto',
-      knownToolIds: ['demo.tick'],
-      context: { refs: [], text: '' },
-    });
-    const budget = draft.usage.inputTokens + draft.usage.outputTokens + 10;
+    // 片三起起草前还会取一句在线简历的上下文（plan §3.4），模型用量因此与装配状态有关，
+    // 所以预算是拿**同一套台架**探一次出来的，而不是照 `context: { text: '' }` 手算。
+    const probe = await bootLoop();
+    const draftUsage = (await probe.loop.propose(goal)).tokensUsed;
+    const budget = draftUsage + 10;
     const { loop, calls } = await bootLoop({ tokenBudget: budget });
     const proposed = await loop.propose(goal);
     expect(proposed.tokensUsed).toBe(budget - 10);
@@ -1149,7 +1211,8 @@ const GOAL_WITHOUT_INPUT = 'demo.tick 请把第几次补上';
 describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', () => {
   it('没人表态：超时按「未批准」收，步记 PAUSE_TIMEOUT、run 记 failed、工具没进', async () => {
     // 超时取 200 毫秒（配置下限）：这一条判据要的是「等不到就什么都不做」，不是等满两分钟。
-    const rig = await bootLoop({}, 'auto', 200);
+    // 档位传 `semi`：确认单只在半自动档还会长出来（全自动档一次都不问）。
+    const rig = await bootLoop({}, 'semi', 200);
     rig.tools.register(makeApprovalTool(rig.calls));
     const cards = watchPauses(rig.ctx, rig.pause, NOBODY);
     const finished = await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
@@ -1165,7 +1228,7 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
   });
 
   it('卡片还开着时叫停：等待以 cancelled 收，run 落 paused 而不是 failed', async () => {
-    const rig = await bootLoop();
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     const cards = watchPauses(rig.ctx, rig.pause, NOBODY);
     const proposed = await rig.loop.propose(APPROVAL_GOAL);
@@ -1244,7 +1307,7 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
   });
 
   it('暂停单落号段 22 那一行账：跑完一轮带暂停的循环之后，那张已批准的单在库里可对账', async () => {
-    const rig = await bootLoop();
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     watchPauses(rig.ctx, rig.pause, APPROVE);
     await rig.loop.confirm((await rig.loop.propose(APPROVAL_GOAL)).runId);
@@ -1264,11 +1327,10 @@ describe('等人表态的那一步（spec 5.3-08 / 09 / 10 的代码半边）', 
     expect(rows[0]).toMatchObject({ kind: 'approval', plan_step_index: 0, resolution: 'approve' });
     expect(Number(rows[0]?.resolved_at)).toBeGreaterThan(0);
     // 台架里的接管态是不带迁移的替身：接管那段账（号段 21 的 `takeover_events`）属于 `browser.takeover`，
-    // 循环这一侧只写 `stop_reason`：剔掉会话域那四行登记之后，它这一族最大的号段仍是 22
-    // （5.6-c 的 23 是 `chat_session` 的标题与软删、5.6-d 的 24 是 `chat_compaction`，登记方都是 `ChatSessionService`）。
+    // 循环这一侧只写 `stop_reason`：剔掉会话域那四行与判定口那两行（18 / 42）之后，它这一族最大的号段仍是 22。
     const loopFamilyVersions = rig.store.migrations
       .map((migration) => migration.version)
-      .filter((version) => !SESSION_DOMAIN_MIGRATION_VERSIONS.includes(version));
+      .filter((version) => !FOREIGN_DOMAIN_MIGRATION_VERSIONS.includes(version));
     expect(Math.max(...loopFamilyVersions)).toBe(AGENT_PAUSE_MIGRATION_VERSION);
   });
 });
@@ -1346,7 +1408,7 @@ describe('人工接管把循环停在安全点（spec 5.5-01 的恢复半边 / 5
   });
 
   it('接管叫醒挂在确认单上的那一步：那一格记 TAKEOVER_HELD 而不是 PAUSE_CANCELLED，恢复后重走', async () => {
-    const rig = await bootLoop();
+    const rig = await bootLoop({}, 'semi');
     rig.tools.register(makeApprovalTool(rig.calls));
     // 恢复要重读（见上一条用例的注释）：这一条里那只只读手同样是「继续」按下去之后第一件事。
     rig.tools.register(makeRereadTool(rig.rereads));
@@ -1888,5 +1950,62 @@ describe('挂载时回看这段会话的最近一次 run（spec 5.6-01 的运行
     // 老会话那条不被新会话的计划顶掉：这是 5.6-c 会话列表「切回去看到的是那一段历史」的前提。
     expect(loop.latestRun(firstSession)?.runId).toBe(newer.runId);
     expect(loop.read(older.runId).status).toBe('proposed');
+  });
+});
+
+describe('库内岗位进计划器上下文（plan 2026-10-26 §3.3）', () => {
+  it('逐行以 job:<平台>/<id> 打头：后续轮次指得着第 2 个岗位，而不是让模型自己编号', () => {
+    const { total, lines } = jobCatalogLines({
+      total: 2,
+      rows: [
+        {
+          platform: 'boss',
+          jobId: '1001',
+          title: '桌面端前端工程师',
+          company: '星桥科技',
+          salaryText: '25-40K',
+          city: '上海',
+          experience: '3-5 年',
+        },
+        { platform: 'boss', jobId: '1002', title: 'React 前端工程师', company: '云栖数据' },
+      ],
+    });
+    expect(total).toBe(2);
+    expect(lines).toEqual([
+      '- job:boss/1001「桌面端前端工程师」 星桥科技 · 25-40K · 上海 · 3-5 年',
+      '- job:boss/1002「React 前端工程师」 云栖数据',
+    ]);
+  });
+
+  it('不成形的行直接跳过：缺 jobId 或标题的行不猜一个编号', () => {
+    expect(jobCatalogLines({ rows: [{ platform: 'boss', title: '缺编号' }, { jobId: '1003' }, null] })).toEqual({
+      total: 0,
+      lines: [],
+    });
+    expect(jobCatalogLines('不是对象')).toEqual({ total: 0, lines: [] });
+  });
+});
+
+describe('求职意向进计划器上下文（plan 2026-10-26 §3.4）', () => {
+  it('意向排在实体之前：它是「搜什么岗位」的直接来源，实体只是回落', () => {
+    const { entityCount, lines } = profileContextLines({
+      entities: [{ kind: 'skill', payload: { name: 'TypeScript' } }],
+      intent: { docId: 'doc-1', expectRole: '前端开发', expectCity: '上海', expectSalary: '', expectStart: '' },
+    });
+    expect(entityCount).toBe(1);
+    expect(lines).toEqual(['- 求职意向：期望岗位 前端开发 / 期望城市 上海', '- skill: TypeScript']);
+  });
+
+  it('意向没填 / 没有工作副本各说各的话，不让模型把猜的关键词当成取自简历', () => {
+    const empty = profileContextLines({
+      entities: [],
+      intent: { docId: 'doc-1', expectRole: '', expectCity: '', expectSalary: '', expectStart: '' },
+    });
+    expect(empty.lines).toEqual(['- 求职意向：简历里还没填（关键词与城市按技能 / 经历实体与任务目标原文推导）']);
+    const missing = profileContextLines({ entities: [], intent: null });
+    expect(missing.lines).toEqual(['- 求职意向：库里没有可读的简历工作副本（关键词与城市按实体与任务目标原文推导）']);
+    // 旧读数（只有实体数组）不知道意向：不许替它编一句「没填」。
+    expect(profileContextLines([{ kind: 'skill', payload: { name: 'React' } }]).lines).toEqual(['- skill: React']);
+    expect(profileContextLines('不是对象')).toEqual({ entityCount: 0, lines: [] });
   });
 });

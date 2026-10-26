@@ -1715,12 +1715,46 @@ describe('变更事件与 agent 工具面（4.2-06 + 裁定三）', () => {
     if (tool === undefined) throw new Error('kb.profile.list 未登记进 agent 工具面');
     expect(tool.effect).toBe('read');
     expect(tool.requiresConfirmation).toBe(false);
-    // 5.1-11 之后工具面交回统一读数，「两入口打同一个口」判的是 `value` 与 service 返回值相等；
-    // 摘要与引用是工具面那层的包装，service 直接调用时没有它们。
-    expect((await tool.run({ kind: 'experience' })).value).toEqual(kb.list({ kind: 'experience' }));
-    expect((await tool.run({})).value).toEqual(kb.list());
+    // 5.1-11 之后工具面交回统一读数，「两入口打同一个口」判的是 `value.entities` 与 service 返回值相等；
+    // 摘要、引用与求职意向是工具面那层的包装，service 直接调用时没有它们。
+    const experiences = await tool.run({ kind: 'experience' });
+    expect(experiences.value).toMatchObject({ entities: kb.list({ kind: 'experience' }) });
+    expect((await tool.run({})).value).toMatchObject({ entities: kb.list() });
+    // 计划器取求职意向（8.10-03）：不指定文档时看最近那份母版；`sourceDocId: null` 是「只看手工实体」，
+    // 那一趟不该顺带把某份简历的意向塞回来。
+    expect((await tool.run({})).value).toMatchObject({
+      intent: { docId: 'resume-evidence', expectRole: '', expectCity: '', expectSalary: '', expectStart: '' },
+    });
+    expect((await tool.run({ sourceDocId: null })).value).toMatchObject({ intent: null });
     // 入参是边界：种类不在四类内必须由 schema 挡下，而不是打到 service 里再猜。
     expect(tool.input.safeParse({ kind: 'no-such-kind' }).success).toBe(false);
+  });
+
+  it('agent 工具面顺带给出母版求职意向：四格逐字取自工作副本，改一格下一次读就变（8.10-03）', async () => {
+    const booted = await syncedKb(tempDir(), RESUME_MD_CUSTOM, 'resume-intent-tool');
+    const tool = booted.tools.declarations.get('kb.profile.list');
+    if (tool === undefined) throw new Error('kb.profile.list 未登记进 agent 工具面');
+    booted.kb.revise(
+      'resume-intent-tool',
+      [
+        { op: 'intent.field', field: 'expectRole', value: '前端开发' },
+        { op: 'intent.field', field: 'expectCity', value: '上海' },
+      ],
+      LATER_MS,
+    );
+
+    const listed = await tool.run({});
+    expect(listed.value).toMatchObject({
+      intent: {
+        docId: 'resume-intent-tool',
+        expectRole: '前端开发',
+        expectCity: '上海',
+        expectSalary: '',
+        expectStart: '',
+      },
+    });
+    // 摘要只说填了几格，不复述四格内容：它会经 IPC 落进渲染层。
+    expect(listed.summary).toContain('求职意向 2/4 格已填');
   });
 
   it('检索登记的也是同一个入口：跑工具与直接调 service 逐字段相等，且空态是值而不是入参错误（裁定三 / 4.3-10）', async () => {

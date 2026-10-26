@@ -503,6 +503,48 @@ export class ResumeGenerateService extends Service {
           });
         },
       }),
+      agentTool({
+        id: 'resume.generate.accept',
+        titleKey: 'agent.tool.labels.generateAccept',
+        description:
+          '采纳上一趟 resume.generate.run 产出的改写，写进这一对（母版，JD）对应的那一支变体：只认回执 id，' +
+          '正文、位置与基线复验全在主进程里做，不接收界面或模型回传的正文；写之前复验两道基线与事实校验，' +
+          '不过则整次拒绝、一个字都不写。省略 acceptedIndexes 表示采纳该回执里的全部改写（产出已被事实校验整体放过才有的提议态）；' +
+          '未通过的改写不会出现在提议态里，因此不会因本工具写进简历。' +
+          '计划里拿不到回执 id 时把 receiptId 写成 latest：它指本进程最近一份提议态（基线复验照旧，一步闸都不绕过）。' +
+          '全自动档下由循环直接采纳，半自动档要人批准',
+        input: z.strictObject({
+          receiptId: z.string().min(1),
+          // 省略即「这一趟产物里的全部改写」：提议态只会为整体过校验的产出建立，所以这就是自动采纳的语义。
+          acceptedIndexes: z.array(z.number().int().min(0)).optional(),
+          applyReorder: z.boolean().optional(),
+        }),
+        // `local-write`：写的是派生变体（母版一字不动），且写前要过两道基线比对与一次事实校验复验。
+        // 与 `resume.generate.run` 同一口径：本工具不发任何东西出去，但也不该在没人看一眼时静默改简历；
+        // 全自动档把它交给那份一次性明示（8.10-01），半自动档仍逐次批准。
+        effect: 'local-write',
+        requiresConfirmation: true,
+        run: (params) => {
+          // 模型起草时看不到任何回执（观察只活在这一轮，不进下一次起草），所以 `latest` 指本进程最近一份提议态；
+          // 它不是旁路：基线复验与事实校验仍在 `accept()` 里原样跑。
+          const receiptId = params.receiptId === 'latest' ? this.latestProposalId() : params.receiptId;
+          // 下标默认值为「提议态里的全部改写」：模型看不到正文与下标（判据二），要它自己编号等于让它签一份没看见的清单。
+          const pending = this.proposals.get(receiptId);
+          const acceptedIndexes = params.acceptedIndexes ?? pending?.view.rewrites.map((_, index) => index) ?? [];
+          const result = this.accept(receiptId, {
+            acceptedIndexes,
+            applyReorder: params.applyReorder ?? false,
+          });
+          return Promise.resolve(
+            toolResult(result, {
+              summary:
+                `已采纳 ${String(result.appliedRewrites)} 处改写` +
+                `${result.reorderApplied ? '并采纳重排' : ''}（回执 ${result.receiptId}，写入 ${result.docId}）`,
+              evidenceRefs: [`generation:${result.receiptId}`, `doc:${result.docId}`],
+            }),
+          );
+        },
+      }),
     ]);
     const hasGap = maybeService<KbGapService>(this.ctx, 'kb.gap') !== undefined;
     this.ctx.logger.info(
@@ -818,6 +860,26 @@ export class ResumeGenerateService extends Service {
       movedEntries: decision.applyReorder ? proposal.view.receipt.movedEntries : 0,
       updatedAt: nowMs,
     };
+  }
+
+  /**
+   * 本进程最近一份提议态的回执 id（接受工具的 `latest` 关键字）。
+   *
+   * 存在的理由：模型起草时看不到任何回执（工具观察不进下一次起草），若只认字面回执 id，
+   * 「生成 → 采纳」在自动档里永远串不起来。`latest` 只解决「指哪一份」，写入前的两道基线与事实校验
+   * 仍由 `accept()` 原样执行。
+   * @returns 最近入表的那一份回执 id
+   * @throws `AppError('KB_GENERATION_PROPOSAL_MISSING')` 本进程还没有任何提议态
+   */
+  private latestProposalId(): string {
+    const latest = [...this.proposals.keys()].at(-1);
+    if (latest === undefined) {
+      throw new AppError(
+        'KB_GENERATION_PROPOSAL_MISSING',
+        '本进程还没有任何提议态：先跑一趟 resume.generate.run 再采纳',
+      );
+    }
+    return latest;
   }
 
   /**

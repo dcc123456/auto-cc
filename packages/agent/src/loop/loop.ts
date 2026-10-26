@@ -2,8 +2,11 @@
  * `agent.loop`：一次任务的「规划 → 执行 → 观察 → 续推」循环（spec 5.2-01 / 02 / 05 / 08 / 11）。
  *
  * 硬规矩长在结构里，不是长在注释里（编号按落片顺序追加）：
- * 1. **每一步都问 `agent.policy`**（5.2-02）：循环里只有「判闸门 → 调工具」这一条顺序，
- *    没有旁路——`registry.call` 只在 `decide()` 放行之后出现，读这段代码时一眼能对上。
+ * 1. **每一步都问 `agent.policy`**（5.2-02）：执行路径上只有「判闸门 → 调工具」这一条顺序，
+ *    没有旁路——步那一侧的 `registry.call` 只在 `decide()` 放行之后出现，读这段代码时一眼能对上。
+ *    另外两处 `registry.call` 不是「步」：重读页面（第 7 条）与起草时取在线简历（第 10 条），
+ *    两处都只认 `effect === 'read' && !requiresConfirmation` 的手，配错就跳过并如实交底，
+ *    所以它们不会变成一条绕过判定的写入口。
  * 2. **模型没有裁量口**（5.2-07，判定在 5.2-b 演）：`LoopModel` 只有起草与摘要两条口，
  *    步骤的副作用分级是循环现读注册表贴上去的，模型自述一概不进判定。
  * 3. **一次 run 一份作用域**（5.2-08）：游标、token 账、取消句柄都长在 `RunScope` 上并按 runId 存，
@@ -52,6 +55,10 @@
  *    外发的那三道闸门与确认单也因此都不会开——重复打招呼比多问一句「要不要批准」严重得多。
  *    没标定哨兵（`null`）**永远不跳过**，比对只发生在恢复那一条路上且只看**这一次**的新读数；
  *    `skipped` 在终态判定里与 `ok` 同权（第 8 步那种「跑到的每一步都成功」不能因为人代劳了就变假）。
+ * 10. **关键词从在线简历来，读不到就如实交代**（plan 2026-10-26 §3.4）：起草前经装配指定的只读手
+ *    （`profileToolId`，缺省 `kb.profile.list`）取一份有界摘要进 prompt；没挂载、读取失败、库里没有实体
+ *    三种情形都照常起草，但上下文里写明这一路没走成——模型因此不会把按常识猜的关键词写成「取自在线简历」。
+ *    取材只认只读且不要求批准的手（与第 7 条那道保险同一口径），配错名字时跳过而不是照调。
  */
 import {
   AGENT_RUN_STATUSES,
@@ -59,6 +66,7 @@ import {
   PAGE_DRIFT_CODES,
   Service,
   asApp,
+  maybeService,
   redactText,
   redactValue,
   takeoverStateOf,
@@ -80,7 +88,15 @@ import { z } from 'zod';
 import { MAX_USER_INPUT_CHARS } from '../session.js';
 import type { ChatSessionService } from '../session.js';
 import type { AgentToolsService } from '../tools.js';
-import { StubLoopModel, type LoopModel, type ModelContext } from './model.js';
+import { LlmLoopModel, type PlannerChatChannel } from './llm-model.js';
+import {
+  StubLoopModel,
+  type LoopModel,
+  type ModelContext,
+  type PlanDraftRequest,
+  type PlanDraftResult,
+  type PlannerToolBrief,
+} from './model.js';
 import { pauseKindLabel, type AgentPauseService } from './pause.js';
 import type { AgentPolicyService } from './policy.js';
 
@@ -131,6 +147,18 @@ const DONE_CHECK_HAYSTACK_CAP = 4000;
 /** 单条输入文本的边界校验：与 `chat.session` 共用同一个上限常量（§2.2 同一逻辑只留一份）。 */
 const MAX_GOAL_CHARS = MAX_USER_INPUT_CHARS;
 
+/**
+ * 计划器一次回复的 token 上限。
+ *
+ * 一份计划就是十几段短 JSON（12 步 × 每步几十 token），1200 足够；给太大只会让慢端点更慢
+ * （2026-10-12 实测：生成通道的耗时随 `max_tokens` 一起涨）。它**不是**配置键——改它属于改引擎，
+ * 与「这条通道超时多久」不是同一类旋钮。
+ */
+const PLANNER_MAX_TOKENS = 1200;
+
+/** 计划器采样温度：计划要可复现，压到接近贪心（与摘要那句「只回报一句」同一口径）。 */
+const PLANNER_TEMPERATURE = 0.1;
+
 /** 循环配置：两条上限是 5.2-11 的判据对象，上下文长度上限是 5.2-06 的判据对象。 */
 export const agentLoopSchema = z.strictObject({
   /** 单次 run 最多执行多少步（无解任务靠它兜底，默认 12）。 */
@@ -147,8 +175,37 @@ export const agentLoopSchema = z.strictObject({
    * （`cordis.yml` 的 `agent-loop` 配置）可以改的，改了名字循环照问新那只。
    */
   rereadToolId: z.string().min(1).default('browser.page.snapshot'),
+  /**
+   * 起草计划前用来取「在线简历」的那只只读工具（plan 2026-10-26 §3.4）。
+   *
+   * 与 `rereadToolId` 同一分工：这是**接线**，循环不认识简历、也不猜库里长什么样，只按装配给出的一只手
+   * 现问一次；注册表里没有这一只时照常起草，但上下文会写明「这一轮没读到在线简历」。
+   */
+  profileToolId: z.string().min(1).default('kb.profile.list'),
+  /**
+   * 起草计划前用来取「库内岗位」的那只只读工具（plan 2026-10-26 §3.3 的后续轮次）。
+   *
+   * 与 `profileToolId` 同一分工：模型在一条计划里看不到中间步的观察，所以「给第 2 个岗位打招呼」
+   * 这类后续指令要把岗位键先摆进上下文，否则它只能自己编号（5.7-d 编出 `jdId:"1009"` 就是这条路）。
+   * 只认 `effect === 'read'` 且不要求批准的手；没有这一只时照常起草，上下文里如实写明。
+   */
+  jobListToolId: z.string().min(1).default('jd.store.list'),
   /** 一条 run 里最多重规划几次（5.5-04 的自转保险丝；0 就是「页面不符即停，不重规划」）。 */
   replanLimit: z.number().int().min(0).max(5).default(2),
+  /**
+   * 计划器通道（plan 2026-10-26 §3.1）。
+   *
+   * `stub` 是确定性桩（单测与「模型没配也能看计划卡」的既有判据都靠它），`llm` 复用已配置的
+   * 对话通道（`llm.chat`）——不新增 LLM 客户端、不新增配置面板。缺省仍是 `stub`：
+   * 测试装配不写这一格时读数必须可复现，生产由 `cordis.yml` 显式换成 `llm`。
+   */
+  planner: z.enum(['llm', 'stub']).default('stub'),
+  /**
+   * 计划器单次请求的超时（毫秒）。**按这一趟单次覆盖**，不改 `llm.timeoutMs` 通道缺省——
+   * 抬通道缺省会把对话与工作流那些快通道一起变成「失败前静默等很久」（AGENTS.md §9 的 2026-10-12 实测）。
+   * 起草一份 JSON 计划比一次对话短，120s 是保守起点；端点慢就改这一格。
+   */
+  plannerTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
 });
 
 /** 校验后的循环配置。 */
@@ -274,6 +331,85 @@ function toPlainText(reading: string): string {
     .replace(/<[\s\S]*$/, ' ') // 畸形或截断留下的半个开标签：后面没有 `>` 也要一起掉
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * 把 `jd.store.list` 的读数摊成计划器可读的岗位行（plan 2026-10-26 §3.3）。
+ *
+ * 每行以 `job:<平台>/<id>` 打头：后续轮次里「给第 2 个岗位打招呼」因此能指向一只真岗位，
+ * 而不是让模型自己编号（5.7-d 编出 `jdId:"1009"` 就是这条路）。形状按不可信输入收窄。
+ * @param value 工具交回的产出（期望 `{ total, rows }`）
+ * @returns 总数与逐行文本（解析不出岗位的行直接跳过，不猜）
+ */
+export function jobCatalogLines(value: unknown): { total: number; lines: string[] } {
+  const record = isPlainRecord(value) ? value : {};
+  const rows = Array.isArray(record['rows']) ? record['rows'] : [];
+  const lines: string[] = [];
+  for (const row of rows) {
+    if (!isPlainRecord(row)) continue;
+    const jobId = typeof row['jobId'] === 'string' ? row['jobId'] : '';
+    const platform = typeof row['platform'] === 'string' ? row['platform'] : '';
+    const title = typeof row['title'] === 'string' ? row['title'] : '';
+    if (!jobId || !title) continue;
+    const parts = [row['company'], row['salaryText'], row['city'], row['experience']]
+      .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
+      .join(' · ');
+    lines.push(`- job:${platform}/${jobId}「${title}」${parts === '' ? '' : ` ${parts}`}`);
+  }
+  const total = typeof record['total'] === 'number' ? record['total'] : lines.length;
+  return { total, lines };
+}
+
+/** 求职意向四格的 prompt 标签（按固定顺序）：模型读的是中文，`expectRole` 这类键名不直接进正文。 */
+const INTENT_PROMPT_FIELDS: ReadonlyArray<readonly [key: string, label: string]> = [
+  ['expectRole', '期望岗位'],
+  ['expectCity', '期望城市'],
+  ['expectSalary', '期望薪资'],
+  ['expectStart', '到岗时间'],
+];
+
+/**
+ * 把 `kb.profile.list` 的读数摊成计划器可读的简历上下文（plan 2026-10-26 §3.4）。
+ *
+ * 两种形状都认：`{ entities, intent }`（本轮起）与只有实体数组的读数（`profileToolId` 可指向别的只读手）。
+ * 求职意向排在实体前——它是「搜什么岗位」的直接来源，实体只是缺它时的回落；
+ * 意向一格都没填时也写一行，明确告诉模型这一路不能用（不说谎原则）。
+ * @param value 工具交回的产出
+ * @returns entityCount 是实体条数（header 里报的总数）；lines 是逐行摘要（意向在前）
+ */
+export function profileContextLines(value: unknown): { entityCount: number; lines: string[] } {
+  const record = isPlainRecord(value) ? value : {};
+  const entities = Array.isArray(value) ? value : Array.isArray(record['entities']) ? record['entities'] : [];
+  const lines: string[] = [];
+  // 有没有 `intent` 这一格本身就是信息：旧读数（只有实体数组）不知道意向，不该替它编一句「没填」。
+  if (Object.hasOwn(record, 'intent')) {
+    const intent = isPlainRecord(record['intent']) ? record['intent'] : null;
+    const filled =
+      intent === null
+        ? []
+        : INTENT_PROMPT_FIELDS.flatMap(([key, label]) => {
+            const raw = intent[key];
+            return typeof raw === 'string' && raw.trim() !== '' ? [`${label} ${raw.trim()}`] : [];
+          });
+    lines.push(
+      intent === null
+        ? '- 求职意向：库里没有可读的简历工作副本（关键词与城市按实体与任务目标原文推导）'
+        : filled.length === 0
+          ? '- 求职意向：简历里还没填（关键词与城市按技能 / 经历实体与任务目标原文推导）'
+          : `- 求职意向：${filled.join(' / ')}`,
+    );
+  }
+  for (const entry of entities) {
+    if (!isPlainRecord(entry)) continue;
+    const kind = typeof entry.kind === 'string' ? entry.kind : 'entity';
+    const values = isPlainRecord(entry.payload)
+      ? Object.values(entry.payload).filter(
+          (value): value is string => typeof value === 'string' && value.trim() !== '',
+        )
+      : [];
+    if (values.length > 0) lines.push(`- ${kind}: ${values.join(' / ')}`);
+  }
+  return { entityCount: entities.length, lines };
 }
 
 /**
@@ -450,18 +586,28 @@ export class AgentLoopService extends Service {
     private readonly config: AgentLoopConfig,
   ) {
     super(ctx, 'agent.loop');
+    // 通道每次调用**现取**（`maybeService`）：改一次配置会重建下游插件，存一份实例会静默变空
+    // （AGENTS.md §9 的 2.5 实测）。取不到就是「计划器未挂载」这一种明确失败，不回落成桩。
+    this.model =
+      config.planner === 'stub'
+        ? new StubLoopModel()
+        : new LlmLoopModel(() => maybeService<PlannerChatChannel>(this.ctx, 'llm.chat') ?? null, {
+            timeoutMs: config.plannerTimeoutMs,
+            maxTokens: PLANNER_MAX_TOKENS,
+            temperature: PLANNER_TEMPERATURE,
+          });
   }
 
   /** 按 runId 存的作用域表；终态即摘行，跨 run 看不见彼此（5.2-08）。 */
   private readonly scopes = new Map<string, RunScope>();
 
   /**
-   * 模型端口。
+   * 模型端口（plan 2026-10-26 §3.1）。
    *
-   * 5.2 只有确定性桩一种实现（真模型要花钱且须用户单独授权，本片不接），所以直接 new 在这里；
-   * 等接真模型时改的是这一行与 `model.ts` 的实现，循环与判定一行都不动。
+   * `planner: 'stub'` 时是确定性桩（单测与模型未配置的既有判据），`'llm'` 时是真计划器。
+   * 循环与判定一行都不动——真模型只多了一条起草实现，判定权仍只在 `agent.policy`。
    */
-  private readonly model: LoopModel = new StubLoopModel();
+  private readonly model: LoopModel;
 
   private get store(): StoreService {
     return asApp(this.ctx).store;
@@ -498,10 +644,171 @@ export class AgentLoopService extends Service {
   }
 
   /**
+   * 注册表投影成计划器要的工具简介（id + 用途 + 副作用级）。
+   *
+   * 每次现读、不缓存：注册表会随能力包热改重建（§9 的 2.5 实测），缓存一份就会在改配置之后
+   * 把「这只手已经不在面上」的计划递给模型。
+   * @returns 与 `knownToolIds` 同源的简介清单；顺序即登记顺序
+   */
+  private plannerTools(): PlannerToolBrief[] {
+    return this.registry.list().map((descriptor) => ({
+      id: descriptor.id,
+      description: descriptor.description,
+      effect: descriptor.effect,
+    }));
+  }
+
+  /**
+   * 把在线简历收成有界的计划上下文（plan 2026-10-26 §3.4）。
+   *
+   * 取材走装配指定的那只**只读**工具（`profileToolId`，缺省 `kb.profile.list`），不新增第二只读简历的手。
+   * 求职意向四格（期望岗位 / 城市）与实体同一次读出（§3.4：意向是 `jd.capture.run` 的 criteria 来源，
+   * 实体是缺它时的回落）；正文只作为关键词来源进 prompt，长度受 `contextCharsCap` 约束；读不到时**照常起草**，
+   * 但文本里写明这一路没走成——模型因此不会把按常识猜的关键词写成「取自在线简历」。
+   * @returns refs 为实体证据引用，text 是供模型的摘要（读不到时是一句如实的说明）
+   */
+  private async resumeContext(): Promise<ModelContext> {
+    const toolId = this.config.profileToolId;
+    const descriptor = this.registry.list().find((entry) => entry.id === toolId);
+    // 取材不能变成一条绕过判定口的写入口：`profileToolId` 配错（或有人改装配）时宁可不读，
+    // 与 5.5-03 那道重读保险同一口径——只读且不要求批准的手才准在这条路上被调用。
+    if (!descriptor || descriptor.effect !== 'read' || descriptor.requiresConfirmation) {
+      return {
+        refs: [],
+        text: `在线简历：这一轮装配里没有可用的只读手 ${toolId}，关键词与城市只能按任务目标原文推导（intent 里要写明用了这一路）`,
+      };
+    }
+    const reply = await this.registry.call(toolId, {});
+    if (!reply.ok) {
+      return {
+        refs: [],
+        text: `在线简历：读取失败（${reply.code}），关键词与城市只能按任务目标原文推导（intent 里要写明用了这一路）`,
+      };
+    }
+    const { entityCount, lines } = profileContextLines(reply.result.value);
+    if (lines.length === 0) {
+      return {
+        refs: [],
+        text: '在线简历：库里还没有可用实体——关键词与城市只能按任务目标原文推导（intent 里要写明用了这一路）',
+      };
+    }
+    const header = `在线简历（取自 ${toolId}，共 ${String(entityCount)} 条实体）：`;
+    const kept: string[] = [];
+    let used = header.length;
+    for (const line of lines) {
+      // 按实体清单顺序装，装不下就停：上下文有界优先于内容完整，被略掉的条数由 header 的总数说得清。
+      if (used + line.length + 1 > this.config.contextCharsCap) break;
+      kept.push(line);
+      used += line.length + 1;
+    }
+    const body = kept.length === 0 ? '（实体摘要超出上下文上限，未纳入）' : kept.join('\n');
+    return {
+      refs: [...reply.result.evidenceRefs],
+      text: `${header}\n${body}`,
+    };
+  }
+
+  /**
+   * 把库内岗位收成有界上下文（plan 2026-10-26 §3.3）。
+   *
+   * 一行一只岗位、`job:<平台>/<id>` 打头：模型因此能指着第 N 个岗位说「就是这只」，
+   * 而不是自己编号。条数与字数都受 `contextCharsCap` 约束，读不到时只写一句如实说明。
+   * @returns refs 为岗位证据引用，text 是供模型的岗位清单
+   */
+  private async jobContext(): Promise<ModelContext> {
+    const toolId = this.config.jobListToolId;
+    const descriptor = this.registry.list().find((entry) => entry.id === toolId);
+    if (!descriptor || descriptor.effect !== 'read' || descriptor.requiresConfirmation) {
+      return {
+        refs: [],
+        text: `库内岗位：这一轮装配里没有可用的只读手 ${toolId}，岗位键无从取用（不要自己编号）`,
+      };
+    }
+    const reply = await this.registry.call(toolId, {});
+    if (!reply.ok) {
+      return { refs: [], text: `库内岗位：读取失败（${reply.code}），岗位键无从取用（不要自己编号）` };
+    }
+    const { total, lines } = jobCatalogLines(reply.result.value);
+    if (lines.length === 0) {
+      return { refs: [], text: `库内岗位：还没有抓过岗位（取自 ${toolId}），要动手先搜一轮` };
+    }
+    const header = `库内岗位（取自 ${toolId}，共 ${String(total)} 条，按列表顺序）：`;
+    const kept: string[] = [];
+    let used = header.length;
+    for (const line of lines) {
+      if (used + line.length + 1 > this.config.contextCharsCap) break;
+      kept.push(line);
+      used += line.length + 1;
+    }
+    const body = kept.length === 0 ? '（岗位摘要超出上下文上限，未纳入）' : kept.join('\n');
+    return { refs: [...reply.result.evidenceRefs], text: `${header}\n${body}` };
+  }
+
+  /**
+   * 起草前的取材：在线简历 + 库内岗位两段拼成一份上下文。
+   * @returns 合并后的引用与文本（两段各自有界，合起来才是递给模型的全部上下文）
+   */
+  private async plannerContext(): Promise<ModelContext> {
+    const profile = await this.resumeContext();
+    const jobs = await this.jobContext();
+    return {
+      refs: [...profile.refs, ...jobs.refs],
+      text: `${profile.text}\n\n${jobs.text}`,
+    };
+  }
+
+  /**
+   * 起草计划；失败时先落一条 `failed` 的空计划 run，再把原错抛出去（plan §3.1「不静默回落成桩」）。
+   *
+   * 落库而不只抛：动作提示行会被下一次交互冲掉，而「上一次连计划都没起草出来」是应该能在
+   * 回看里读到的账（`agent.loop.latestRun` 因此不会把它当成「没跑过」）。不 `publish`：
+   * 这条 run 没有计划卡可画（0 步），界面此刻该读的是错误原话，不是一张空卡。
+   * @param input 会话 id、目标原文、档位与递给模型的完整请求
+   * @returns 起草结果
+   * @throws `AGENT_PLANNER_*`（通道未挂载 / 未配置 / 请求失败 / JSON 非法 / 未知工具）
+   */
+  private async draftOrFail(input: {
+    sessionId: string;
+    goal: string;
+    tier: AutonomyLevel;
+    request: PlanDraftRequest;
+  }): Promise<PlanDraftResult> {
+    try {
+      return await this.model.draftPlan(input.request);
+    } catch (error) {
+      const code = error instanceof AppError ? error.code : 'AGENT_PLANNER_REQUEST_FAILED';
+      const at = Date.now();
+      const runId = randomUUID();
+      this.store.db
+        .prepare(
+          `INSERT INTO agent_run (id, session_id, goal, status, autonomy, plan_step_index, plan_json,
+           step_limit, token_budget, tokens_used, stop_reason, created_at, updated_at)
+           VALUES (?, ?, ?, 'failed', ?, 0, '[]', ?, ?, 0, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          input.sessionId,
+          redactText(input.goal),
+          input.tier,
+          this.config.stepLimit,
+          this.config.tokenBudget,
+          code,
+          at,
+          at,
+        );
+      this.ctx.logger.warn(
+        `计划起草失败（${code}）：${error instanceof Error ? error.message : String(error)}；已落一条 failed 的空计划 run ${runId}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * 起草一份计划并落一条 `proposed` 的 run（spec 5.2-03 的代码半边）。
    * @param goalRaw 用户原文（按系统边界校验：去空、限长）
    * @returns 尚未执行任何动作的 run 读数，`status` 为 `proposed`
-   * @throws 空输入 `AGENT_LOOP_EMPTY_GOAL`；超长 `AGENT_LOOP_GOAL_TOO_LONG`
+   * @throws 空输入 `AGENT_LOOP_EMPTY_GOAL`；超长 `AGENT_LOOP_GOAL_TOO_LONG`；
+   *   起草失败按 `AGENT_PLANNER_*` 原码抛出（同时落一条 `failed` 的空计划 run，见 `draftOrFail`）
    */
   async propose(goalRaw: string): Promise<AgentRunView> {
     const goal = goalRaw.trim();
@@ -513,12 +820,22 @@ export class AgentLoopService extends Service {
     }
     // `autonomy` 列存**起草时**的档位（计划卡要说「当时按哪档起的草」）；能不能动手按执行当下的档位现判，
     // 所以这一位是记录，不是授权凭据——判定只读 `agent.policy`，见 `execute` 里的 `decide`。
+    const sessionId = this.session.current().session.id;
     const tier = this.session.current().session.autonomy;
-    const draft = await this.model.draftPlan({
+    // 真计划器的取材（plan §3.4）：先把在线简历收成有界上下文，再让模型按它推导关键词与城市。
+    // 读不到也照起草，但上下文里写明走了哪一路——模型因此不会把「按经验猜的关键词」写得像取自简历。
+    const context = await this.plannerContext();
+    const draft = await this.draftOrFail({
+      sessionId,
       goal,
       tier,
-      knownToolIds: this.registry.list().map((descriptor) => descriptor.id),
-      context: { refs: [], text: '' },
+      request: {
+        goal,
+        tier,
+        knownToolIds: this.registry.list().map((descriptor) => descriptor.id),
+        tools: this.plannerTools(),
+        context,
+      },
     });
     const runId = randomUUID();
     const at = Date.now();
@@ -533,7 +850,7 @@ export class AgentLoopService extends Service {
       )
       .run(
         runId,
-        this.session.current().session.id,
+        sessionId,
         // 目标原文里可能被人贴上带手机号的 JD 文本；`read()` 回来的视图与界面显示都取自这一列（spec 5.6-05）。
         redactText(goal),
         tier,
@@ -774,7 +1091,10 @@ export class AgentLoopService extends Service {
     // 崩过一次的对账排在建表之后、就绪日志之前：那一刻库里那行「正在跑」已经不会再有人来写终态了（D3）。
     const interrupted = this.reconcileInterruptedRuns();
     this.ctx.logger.info(
-      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · 模型通道 确定性桩` +
+      `对话循环就绪：步上限 ${String(this.config.stepLimit)} · token 预算 ${String(this.config.tokenBudget)} · 上下文 ${String(this.config.contextCharsCap)} 字 · ` +
+        (this.config.planner === 'llm'
+          ? `模型通道 对话通道（计划器，单次超时 ${String(this.config.plannerTimeoutMs)}ms）`
+          : '模型通道 确定性桩') +
         (interrupted > 0 ? ` · 本次启动把 ${String(interrupted)} 条 run 判为中断（上次进程停过，不是有人叫的停）` : ''),
     );
   }
@@ -907,12 +1227,30 @@ export class AgentLoopService extends Service {
         ? [...(fresh ? [fresh.ref] : []), ...reply.result.evidenceRefs]
         : [...(fresh ? [fresh.ref] : [])];
       const context = this.buildContext(scope);
-      const summary = await this.model.summarizeObservation({ step, reading: clipReading(reading), outcome, context });
-      scope.tokensUsed += summary.usage.inputTokens + summary.usage.outputTokens;
+      // 摘要失败**不改写这一步的结局**：工具已经跑完了，读数是真的，只是那一句回报没生成出来。
+      // 落库的观察因此退回「原始读数 + 码」这种如实形态，既不谎报成功、也不把成功的步骤判成失败
+      // （真模型没有返回时这是一条会经常走到的路，不能让它变成「每步都红」）。
+      let summaryText: string;
+      try {
+        const summary = await this.model.summarizeObservation({
+          step,
+          reading: clipReading(reading),
+          outcome,
+          context,
+        });
+        scope.tokensUsed += summary.usage.inputTokens + summary.usage.outputTokens;
+        summaryText = summary.text;
+      } catch (error) {
+        const code = error instanceof AppError ? error.code : 'AGENT_PLANNER_REQUEST_FAILED';
+        summaryText = `第 ${String(step.planStepIndex + 1)} 步 ${step.toolId} → ${outcome}：${clipReading(reading)}（观察摘要不可用：${code}）`;
+        this.ctx.logger.warn(
+          `run ${scope.runId} 第 ${String(step.planStepIndex + 1)} 步的观察摘要没生成（${code}），已按原始读数落库`,
+        );
+      }
       // 入参经人补过就要在步行里留一句：计划里那份是模型的草案，实际动用的是补过之后的值，
       // 两者不同却只记一个数，5.2-09 的「对话里如实指向证据」就成了半句话。
       const notes = [inputResolution.note, fresh?.note].filter((note): note is string => Boolean(note));
-      const observation = notes.length > 0 ? `${summary.text}｜${notes.join('｜')}` : summary.text;
+      const observation = notes.length > 0 ? `${summaryText}｜${notes.join('｜')}` : summaryText;
       this.writeStep(scope, step, outcome, observation, evidenceRefs, durationMs, reply.ok ? null : reply.code);
       if (!reply.ok && PAGE_DRIFT_CODES.includes(reply.reasonCode ?? '')) {
         // 「这一步落空是因为页面不是计划里那个样子」——这一格既不再按旧入参点一次（那叫硬点），
@@ -1194,24 +1532,36 @@ export class AgentLoopService extends Service {
       return { ok: false, stopReason: 'REREAD_UNAVAILABLE' };
     }
     const base = this.buildContext(scope);
-    const draft = await this.model.draftPlan({
-      goal: this.readForExecution(scope.runId).goal,
-      tier: this.session.current().session.autonomy,
-      knownToolIds: this.registry
-        .list()
-        .map((descriptor) => descriptor.id)
-        .filter((id) => id !== step.toolId),
-      context: {
-        refs: [...base.refs, reread.read.ref],
-        text: [
-          base.text,
-          `页面现状（刚重读 ${reread.read.ref}）：${reread.read.excerpt}`,
-          `落空的是第 ${String(step.planStepIndex + 1)} 步 ${step.toolId}：${clipReading(failure)}`,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      },
-    });
+    let draft: PlanDraftResult;
+    try {
+      draft = await this.model.draftPlan({
+        goal: this.readForExecution(scope.runId).goal,
+        tier: this.session.current().session.autonomy,
+        knownToolIds: this.registry
+          .list()
+          .map((descriptor) => descriptor.id)
+          .filter((id) => id !== step.toolId),
+        tools: this.plannerTools().filter((tool) => tool.id !== step.toolId),
+        context: {
+          refs: [...base.refs, reread.read.ref],
+          text: [
+            base.text,
+            `页面现状（刚重读 ${reread.read.ref}）：${reread.read.excerpt}`,
+            `落空的是第 ${String(step.planStepIndex + 1)} 步 ${step.toolId}：${clipReading(failure)}`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        },
+      });
+    } catch (error) {
+      // 续推失败与「续推给不出别的手」是两种停法，但都停在这条落空的那一步上；
+      // 单独一个 `stop_reason` 让界面能说清是「计划器这次没成」而不是「页面没有别的路」。
+      const code = error instanceof AppError ? error.code : 'AGENT_PLANNER_REQUEST_FAILED';
+      this.ctx.logger.warn(
+        `run ${scope.runId} 第 ${String(step.planStepIndex + 1)} 步落空后的重新规划没起草出来（${code}）：停在安全点`,
+      );
+      return { ok: false, stopReason: 'REPLAN_PLANNER_FAILED' };
+    }
     scope.tokensUsed += draft.usage.inputTokens + draft.usage.outputTokens;
     if (draft.steps.length === 0 || draft.steps[0]?.toolId === step.toolId) {
       // 续推给不出别的手就是「无法定位目标」：明说并停住，而不是把同一只手按第二遍。

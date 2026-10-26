@@ -171,20 +171,27 @@ export function AgentRunPanel({
       <footer className="flex items-center gap-2 border-t border-line px-3 py-2">
         {isProposed ? (
           <>
-            {/* 「确认并执行」是让这一步真的动手的那道口：按下去之后循环就可能外发，
-                所以它是 `seal` 而不是旧写法的 emerald（emerald 在墨案里是"已经办成"的读数色）。 */}
-            <DeskButton
-              action="confirm-run"
-              variant="seal"
-              busy={!!busy}
-              disabled={confirmReason !== undefined}
-              disabledReason={confirmReason}
-              disabledReasonLabel={reasonLabel(confirmReason)}
-              onClick={onConfirm}
-            >
-              <Check size={12} />
-              {t('agent.run.confirm')}
-            </DeskButton>
+            {/* 全自动档没有「确认并执行」这一颗（spec 8.10-01）：那一次表态已经在档位上做过，且落成了
+                一次性授权；它若还长出来，就等于在全自动档又逐步问了一次。半自动/建议档照旧由人按。
+                `data-action=confirm-run` 因此只在非全自动档存在——既有验收按档位复现时读得到。 */}
+            {run.autonomy !== 'auto' ? (
+              <DeskButton
+                action="confirm-run"
+                variant="seal"
+                busy={!!busy}
+                disabled={confirmReason !== undefined}
+                disabledReason={confirmReason}
+                disabledReasonLabel={reasonLabel(confirmReason)}
+                onClick={onConfirm}
+              >
+                <Check size={12} />
+                {t('agent.run.confirm')}
+              </DeskButton>
+            ) : (
+              <span className="text-[10px] text-slate-500" data-run-auto-pending>
+                {t('agent.run.autoNotStarted')}
+              </span>
+            )}
             <DeskButton
               action="cancel-run"
               variant="ghost"
@@ -199,7 +206,7 @@ export function AgentRunPanel({
             </DeskButton>
             {/* 确认前零动作这句话是给**人**看的承诺，也是 5.2-03 的判据本身。 */}
             <span className="ml-auto text-[10px] text-slate-500" data-run-before-confirm>
-              {t('agent.run.beforeConfirm')}
+              {t(run.autonomy === 'auto' ? 'agent.run.autoRunsOnConfirm' : 'agent.run.beforeConfirm')}
             </span>
           </>
         ) : null}

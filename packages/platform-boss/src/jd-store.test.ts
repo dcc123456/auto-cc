@@ -8,6 +8,9 @@
  *
  * 「已回复」是左连 `conversation_messages` 算出来的（spec 2.5-08 / 2.5-14），所以本文件的装配把那张表的
  * DDL 直接执行一遍——测连接不需要整条会话链路，也不需要把迁移台账推到号段 5。
+ *
+ * 末尾多一组「对话侧回看」（spec 8.10-04）：注册表替身只证明登记与 schema 收窄，读到的行仍是真的
+ * `node:sqlite` 那一份——只读这件事由「调用前后 `count()` 不变」当面证。
  */
 import {
   asApp,
@@ -27,7 +30,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { conversationMigration } from './conversation-store.js';
 import { JD_MIGRATION_VERSION, JdStoreService, type JobDraft } from './jd-store.js';
-import { FakeExecutorRegistryService } from './test-doubles.js';
+import { FakeAgentToolsService, FakeExecutorRegistryService } from './test-doubles.js';
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
@@ -47,15 +50,19 @@ function tempDir(): string {
  * 不需要整条会话链路（登记处 + 适配器 + 页面手），也不需要把迁移台账推到号段 5。
  * @param dir 库文件目录（省略则新开一个临时目录）
  * @param withRegistry 是否装登记处替身（spec 2.4-01 的登记口；不装就是「工作流缺席」的形状）
+ * @param withAgentTools 是否装对话侧注册表替身（spec 8.10-04 的登记用例要它，其余用例不需要）
  * @returns 上下文、`store` 与 `jd.store` 服务、裸连接、`jd.store` 的 fiber（重启用例要先停掉它），以及登记处（没装则 undefined）
  */
-async function boot(dir = tempDir(), withRegistry = false) {
+async function boot(dir = tempDir(), withRegistry = false, withAgentTools = false) {
   const ctx = new Context();
   fibers.push(await ctx.plugin(ConfigService, { appName: 'auto-cc' }));
   fibers.push(await ctx.plugin(StoreService, { dir, file: 'store.db', journal: 'delete' }));
+  // 两张替身都必须比 `jd.store` 先装：init 里的 `maybeService` 取的是「此刻挂着的那个」。
   if (withRegistry) {
-    // 必须比 `jd.store` 先装：装配是「按顺序逐个 await 挂载」，init 里的 `maybeService` 才取得到登记处。
     fibers.push(await ctx.plugin(FakeExecutorRegistryService, {}));
+  }
+  if (withAgentTools) {
+    fibers.push(await ctx.plugin(FakeAgentToolsService, {}));
   }
   const jdFiber = await ctx.plugin(JdStoreService, {});
   fibers.push(jdFiber);
@@ -68,6 +75,7 @@ async function boot(dir = tempDir(), withRegistry = false) {
     jd: app['jd.store'],
     db: app.store.db,
     executors: executorRegistryOf(ctx),
+    tools: withAgentTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : undefined,
   };
 }
 
@@ -523,5 +531,53 @@ describe('节点执行器登记（spec 2.4-01 / 2.4-08）', () => {
     await jdFiber.dispose();
     fibers.push(await ctx.plugin(JdStoreService, {}));
     expect(executors?.list()).toEqual(['jd.list']);
+  });
+});
+
+describe('对话侧的只读回看（spec 8.10-04）', () => {
+  it('挂载即登记一只只读、不需批准的工具，id 与服务口同名', async () => {
+    const { tools } = await boot(tempDir(), false, true);
+    // 只读是这一格的要害：它既不该被判定口拦下，也不该长成一条可外发的通路。
+    expect(tools?.list()).toEqual([{ id: 'jd.store.list', effect: 'read', requiresConfirmation: false }]);
+  });
+
+  it('读的是库里那一份真行：证据引用逐条指到岗位键，调用前后行数不变', async () => {
+    const { jd, tools } = await boot(tempDir(), false, true);
+    jd.upsert(draft());
+    jd.upsert(
+      draft({
+        jobId: '1002',
+        title: '前端架构师',
+        capturedAt: 1_700_000_001_000,
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=1002',
+      }),
+    );
+    const reply = await tools?.call('jd.store.list', { limit: 10 });
+    expect(reply).toMatchObject({
+      ok: true,
+      result: {
+        value: { total: 2 },
+        // 行序由服务给（抓取时间倒序）：界面与模型都不再排一遍。
+        evidenceRefs: ['job:boss/1002', 'job:boss/1001'],
+      },
+    });
+    expect(String((reply as { result: { summary: string } }).result.summary)).toContain('库内共 2 条');
+    // 只读：跑一趟之后库里一行不多、一行不少。
+    expect(jd.count()).toBe(2);
+  });
+
+  it('入参由声明自己的 schema 收窄：越界 limit 与多余字段都不进实现', async () => {
+    const { tools } = await boot(tempDir(), false, true);
+    await expect(tools?.call('jd.store.list', { limit: 0 })).resolves.toEqual({ ok: false, reason: 'INPUT_INVALID' });
+    await expect(tools?.call('jd.store.list', { keyword: '前端' })).resolves.toEqual({
+      ok: false,
+      reason: 'INPUT_INVALID',
+    });
+  });
+
+  it('注册表缺席时本服务照常就绪，界面的「搜索并入库」不经过对话侧', async () => {
+    const { jd, tools } = await boot();
+    expect(tools).toBeUndefined();
+    expect(jd.upsert(draft()).created).toBe(true);
   });
 });

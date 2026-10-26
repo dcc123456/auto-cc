@@ -8,11 +8,15 @@
  * 三维各关掉一次，每维断言两件事：**没出手**（假渠道的调用清单为空）与**没占额度**（用量表行数与事前相等）：
  * 1. 档位 `suggest` → `agent.policy` 交回 `TIER_SUGGEST_READ_ONLY`，并且**连确认单都不开**（批了也批不动，
  *    让用户按一只按不动的按钮是骗他点一下）；
- * 2. 档位 `auto` 但未加白 → 开一张 `approval` 单，人按拒绝 → `PAUSE_DENIED`，工具一次都没被调；
- * 3. 档位 `auto` 且已加白 → 不再开单、工具真被调，而 `entitlement.gate` 已到量 → `QUOTA_EXCEEDED`。
+ * 2. 档位 `semi` 但未加白 → 开一张 `approval` 单，人按拒绝 → `PAUSE_DENIED`，工具一次都没被调；
+ * 3. 档位 `semi` 且已加白 → 不再开单、工具真被调，而 `entitlement.gate` 已到量 → `QUOTA_EXCEEDED`。
  *    这一格是「免确认 ≠ 免闸门」（plan §5.3 的 2026-10-03 裁定）唯一能被证成的形状：渠道仍没被调、
  *    用量表仍只有种子那一行，而被拦的这一次进了 `usage_denials`。
  * 4. 第四格是正向对照：三维都放行时确实发出一次并多落一行用量。缺了它，前三条的「没出手」全可以是空话。
+ *
+ * 第二、三、四格用 `semi` 而不是 `auto`（8.10-01 之后全自动档「一次都不问」，免确认名单只在半自动档生效）：
+ * 名单这一维要有一个"会开单"的档位才证得出来，而全自动档的准入由那份一次性授权单独兜（`policy.test.ts`）。
+ * 三道闸门本身与档位无关——换档只是让"批准这一维"仍然可观测。
  *
  * 只有平台层与风险签字是替身（真身 `inject` Electron 外壳，Node 侧挂不起来；先例见
  * `packages/outbound/src/test-doubles.ts`）。循环、判定口、暂停通道、工具注册表、打招呼编排、闸门、账本全是真身。
@@ -308,8 +312,8 @@ describe('5.3-11 三道闸门缺一即不外发（真循环 + 真判定口 + 真
     expect(handles.ledger.summary(50).recentDenials).toEqual([]);
   });
 
-  it('第二维关掉：档位 auto 未加白 → 开一张 approval 单，人按拒绝即 PAUSE_DENIED，工具没被调', async () => {
-    const handles = await boot({ tier: 'auto', exempt: false, seedGreetUsage: false });
+  it('第二维关掉：档位 semi 未加白 → 开一张 approval 单，人按拒绝即 PAUSE_DENIED，工具没被调', async () => {
+    const handles = await boot({ tier: 'semi', exempt: false, seedGreetUsage: false });
     const usageBefore = handles.ledger.summary(50).total;
     const { cards, finished } = await runGreet(handles.ctx, handles, () => ({ decision: 'deny' }), 'job-9002');
 
@@ -322,8 +326,8 @@ describe('5.3-11 三道闸门缺一即不外发（真循环 + 真判定口 + 真
     expect(handles.ledger.summary(50).recentDenials).toEqual([]);
   });
 
-  it('第三维关掉：auto + 已加白 + greet 额度见底 → 不开单、工具真被调，闸门拦下并留一条被拒流水', async () => {
-    const handles = await boot({ tier: 'auto', exempt: true, seedGreetUsage: true });
+  it('第三维关掉：semi + 已加白 + greet 额度见底 → 不开单、工具真被调，闸门拦下并留一条被拒流水', async () => {
+    const handles = await boot({ tier: 'semi', exempt: true, seedGreetUsage: true });
     // 种子那一条就是唯一的用量行：事后行数不变，才说明被拦这次没花钱（spec 1.9 的原话在此复钉一次）。
     const usageBefore = handles.ledger.summary(50).total;
     expect(usageBefore).toBe(1);
@@ -347,8 +351,8 @@ describe('5.3-11 三道闸门缺一即不外发（真循环 + 真判定口 + 真
     expect(denials[0]?.reason).toContain('额度已用完');
   });
 
-  it('正向对照：三道闸门都放行时确实发出一次、多落一行用量，且没有被拒流水', async () => {
-    const handles = await boot({ tier: 'auto', exempt: true, seedGreetUsage: false });
+  it('正向对照：semi + 已加白且额度充足时确实发出一次、多落一行用量，且没有被拒流水', async () => {
+    const handles = await boot({ tier: 'semi', exempt: true, seedGreetUsage: false });
     const usageBefore = handles.ledger.summary(50).total;
     const { cards, finished } = await runGreet(handles.ctx, handles, () => ({ decision: 'approve' }), 'job-9004');
 

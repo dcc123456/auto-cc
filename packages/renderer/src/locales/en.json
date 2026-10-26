@@ -1282,13 +1282,14 @@
         "subtitle": "Autonomy tier and the no-confirm list both live in this drawer"
       },
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
-      "runHint": "Use {{prefix}} to ask the agent: plan first, act only after you confirm",
+      "runHint": "On Full-auto, just say what to do and it drafts and starts; other tiers use {{prefix}} to see the plan first",
       "hints": {
         "toggle": "How do these two commands work?"
       },
       "reason": {
         "BUSY": "The previous action hasn't returned yet",
         "INPUT_EMPTY": "Write a message first",
+        "FULL_AUTO_CONSENT_REQUIRED": "Acknowledge the full-auto notice above first",
         "NOT_STREAMING": "Nothing is streaming right now"
       },
       "workflowMirror": "Same runner: {{status}}",
@@ -1412,15 +1413,22 @@
         "auto": "Full-auto",
         "why": {
           "suggest": "It only writes the plan out for you; it runs nothing",
-          "semi": "It reads pages on its own; anything that writes or sends asks you first",
-          "auto": "Everything runs except the hands that send messages out"
+          "semi": "It reads pages on its own; anything that writes or sends asks you first (unless allowlisted)",
+          "auto": "Nothing asks step by step: resume edits, greetings and deliveries all just run (you acknowledge once)"
         },
         "compareToggle": "What actually differs between the three",
         "compare": {
           "suggest": "On Suggest it does not even read a page: it only writes out what it plans to do. Start here if you want to see the arrangement first.",
-          "semi": "On Semi-auto the read-only hands run by themselves (search jobs, read details); anything that touches local files or sends something out stops for your confirmation.",
-          "auto": "On Full-auto everything runs except the hands that send messages out — those always ask unless you add them to the no-confirmation list below. Quota, throttling and daily caps apply on every tier."
+          "semi": "On Semi-auto the read-only hands run by themselves (search jobs, read details); anything that touches local files or sends something out stops for your confirmation, unless you allowlist that exact action.",
+          "auto": "On Full-auto nothing asks step by step: job search, resume edits, greetings and deliveries all just run. Switching to this tier asks you to acknowledge once, and that acknowledgement survives restarts. Quota, rate limiting, risk pauses and manual takeover apply on every tier."
         }
+      },
+      "fullAuto": {
+        "title": "Full-auto: one acknowledgement, then it runs",
+        "statement": "On Full-auto the agent will search jobs, edit the resume, greet and deliver without asking you each time. Quota, rate limiting, risk pauses and manual takeover still apply; the first greeting or delivery on a platform still requires that platform's risk acknowledgement. This authorisation is recorded once and survives restarts.",
+        "grant": "I understand, start full-auto",
+        "once": "Recorded once, not asked on every run",
+        "actionGrant": "Record full-auto authorisation"
       },
       "policy": {
         "reason": {
@@ -1428,10 +1436,10 @@
         },
         "heading": "Confirmation-free allowlist",
         "exemptCount": "{{total}} exempted",
-        "onlyAuto": "Current tier is {{level}}, so the allowlist does not change execution yet",
-        "hint": "The allowlist only applies in the Full-auto tier: an exempted action stops asking each time, while the entitlement gate, rate limit and daily cap still apply.",
+        "onlySemi": "Current tier is {{level}}, so the allowlist only applies on Semi-auto",
+        "hint": "The allowlist only applies on the Semi-auto tier: an exempted action stops asking each time, while the entitlement gate, rate limit and daily cap still apply. Full-auto does not ask step by step at all.",
         "loading": "Loading the allowlist...",
-        "empty": "The allowlist is empty - every approval-required action still asks you",
+        "empty": "The allowlist is empty - every write on Semi-auto still asks you",
         "addedAt": "Added at {{time}}",
         "revoke": "Revoke",
         "actionRevoke": "Revoke the exemption for {{tool}}",
@@ -1484,6 +1492,7 @@
           "deliverPerform": "Deliver resume",
           "greetPerform": "Send greeting",
           "jdCapture": "Search and capture JDs",
+          "jdStoreList": "Review stored jobs",
           "kbGapReport": "Compare JD against my library",
           "kbList": "List knowledge base entities",
           "kbSearch": "Search knowledge base",
@@ -1493,9 +1502,21 @@
           "pageSnapshot": "Read page snapshot",
           "sessionsOpen": "Open platform session",
           "generateRun": "Tailor the resume content for this JD",
+          "generateAccept": "Accept these resume rewrites",
           "parseFromFile": "Import this resume file into the knowledge base",
           "scriptGenerate": "Draft one chat line for this job",
           "workflowRun": "Run this workflow plan"
+        },
+        "jobs": {
+          "open": "View jobs ({{count}})",
+          "openCapped": "View jobs ({{count}}+)",
+          "actionRead": "Read job library",
+          "loading": "Reading the job library…",
+          "empty": "The job library is still empty",
+          "total": "{{total}} in the library, showing the first {{shown}}",
+          "salaryUnknown": "Salary not captured",
+          "requirement": "Key requirement: {{text}}",
+          "replied": "Recruiter replied ({{count}})"
         },
         "effect": {
           "read": "read-only",
@@ -1534,6 +1555,8 @@
         "effectUnregistered": "Unregistered",
         "beforeConfirm": "Nothing runs before you confirm",
         "confirm": "Confirm and run",
+        "autoNotStarted": "Full-auto: this plan has not started yet (it starts right after drafting)",
+        "autoRunsOnConfirm": "Full-auto does not ask step by step: a drafted plan starts immediately",
         "cancel": "Cancel this plan",
         "stopNow": "Stop",
         "stopAccepted": "Stop accepted: the step running now finishes, then it halts",

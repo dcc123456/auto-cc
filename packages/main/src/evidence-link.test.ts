@@ -192,6 +192,8 @@ async function bootEvidenceAssembly(options: { withConversations?: boolean } = {
     'nonsense:1',
   ];
   app['agent.tools'].register(makeRefsTool());
+  // 全自动档在 8.10-01 之后要先有那次一次性明示才跑得动；台架替用户落下它。
+  app['agent.policy'].grantFullAutoConsent();
   app['chat.session'].setAutonomy('auto');
   const proposed = await app['agent.loop'].propose(`${TOOL_ID} ${JSON.stringify({ refs })}`);
   const finished = await app['agent.loop'].confirm(proposed.runId);
