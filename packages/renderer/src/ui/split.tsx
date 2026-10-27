@@ -103,7 +103,7 @@ export function useSplitWidth<T extends HTMLElement = HTMLElement>(config: Split
   const [ratio, setRatioState] = useState(() => loadStoredRatio(config));
   /** 拖拽进行中的即时宽度：只写 CSS 变量与这一支 ref，不进 React state（每帧一次重渲拖不动）。 */
   const liveRatioRef = useRef(ratio);
-  /** 进行中那对 window 监听的摘除口（先例：`ResumeEditor` 的区块拖拽，同一类"人在拖到一半时切走"）。 */
+  /** 进行中那对 window 监听的摘除口（同一类"人在拖到一半时切走"；先例见纸栏把手那条）。 */
   const detachRef = useRef<(() => void) | undefined>(undefined);
   /** 回调要读当下的数字，但它们全是常量；用 ref 兜住配置可以让四个动作的引用一辈子稳定。 */
   const configRef = useRef(config);

@@ -1,0 +1,77 @@
+裁定㊵ / spec 3.16 的读数（2026-10-27，本机 macOS arm64，无人值守窗口）
+================================================================
+
+用户原话（逐字，2026-10-27）
+    「将整屏编辑也使用office-cc软件打开编辑」
+    补充裁定（逐字）：「它持有的样式不要退回简历屏  直接删除」
+AskUserQuestion 的读数：甲：这颗键直接跳 Office-cc（推荐）
+
+一、四道门禁（每条都把退出码单独取出来读，不接 tail/head——AGENTS §9 的 5.4-c 那条）
+    pnpm typecheck      EXIT=0
+    pnpm lint           EXIT=0   （含 check-renderer-conventions.ts 第 9/10/13/14 节、语言包键对齐、check-lexicon.ts）
+    pnpm format:check   EXIT=0   （先对三份新文件跑过 prettier --write，EXIT=0）
+    pnpm test           EXIT=0
+      packages/renderer test:  Test Files  2 passed (2)
+      packages/renderer test:       Tests  20 passed (20)   ← 新增 src/companion-handoff.test.ts (3 tests) 3ms
+      其余各包全绿（resume-doc 308 / pdf-edit 152 / shell 68 …），逐包通过数见 tmp/70-test.log
+    零新增依赖：git diff --stat pnpm-lock.yaml package.json packages/*/package.json 输出为空
+
+二、3.16-01（U，那颗键两步串成一次）——单测三条逐字
+    describe('handOffDocumentToCompanion：先出 PDF，成功才交出去（裁定㊵）')
+      ✓ 两趟都成：第二跳收到的必须是这一趟回执里的那个路径，回执合并页数与字节
+      ✓ 负对照：导出失败时第二跳一次都不发，错误原样带回（不许拿上一份产物冒充）
+      ✓ 伴生应用那趟失败（本机没装 / 它按自己的 reason 拒了）：错误是它那一句，不是导出的那一句
+    实现位置：packages/renderer/src/companion-handoff.ts（纯模块，两座桥按把手注入，不读 window）
+    调用点：packages/renderer/src/ResumeDesk.tsx:777（openDocInCompanion 里的第二跳把手；那颗键 data-action 仍是 open-edit-page）
+
+三、3.16-02（C，跳出口按输入源分、各只有一个）——Grep 工具读 packages/renderer/src
+    openInCompanionEditor 的命中行：
+      usePdfView.ts:199           ← 人手里那份原 PDF（3.15 那一条，一字未动）
+      ResumeDesk.tsx:777          ← app 刚出出来的产物（本册这一条）
+      companion-handoff.ts:35     ← 本模块自己的注释，不是调用点
+      companion-handoff.test.ts:35 ← 假桥错误载荷里的 path 字段，不是调用点
+    结论：渲染层调用点恰为两处，无第三处；两处交出去的是两份不同的文件（原件 / 产物），不合并且同一源只有一个入口。
+    3.15-01 的语义仍然成立，"只命中一个文件"那条取证口径由本条接后续（plan §22.1 第二条写明）。
+
+四、3.16-03（C，那一屏整块退场不留死码）
+    ls packages/renderer/src | grep -E "ResumeEditPage|ResumeEditor|useResumeEditor|resume-paper-edit|TemplateShelf"
+      → 无输出，EXIT=1（五条都不在）
+    Grep "'model'" 于 packages/renderer/src → 只剩 GapPanel.tsx:230 的 row.item.via === 'model'
+      （那是对比"归因走模型还是走词表"，与整屏编辑那一档无关）；ResumeDesk.tsx 只在注释里说明 'model' 那一态已退场。
+    editPageOpen 的形状：useState<'none' | 'pdf'>（ResumeDesk.tsx:262），渲染分支只剩 PdfEditorPage 那一屏（:885）。
+    defaultTemplateId 那支 state 随写端一起删除；模板偏好的读侧（export.preference）一字未动。
+
+五、3.16-04（C，改简历正文在 app 内没有格）——同一次 Grep 读数
+    resume['editor.            → packages/renderer/src 零命中
+    setPreference              → packages/renderer/src 零命中
+    export.preference          → 恰一处读：ResumeDesk.tsx:380（进门那次 Promise.all）
+    TemplateShelf / ResumeEditor → 零引用（ui/split.tsx:106 那句"先例"注释已改指纸栏把手，不留指向已删文件的注释）
+    随删的语言包键：shell.resume.editor.*（含 reason 那一族）与 shell.resume.edit.* 整块，zh-CN 与 en 两份一起删；
+    另外三条因此没有读者的原因码一起删：resume.reason.TEMPLATE_LIST_PENDING / EDITOR_OPEN / PDF_EDIT_OPEN（两份同步）。
+    改口的两句人话（不再指向已退场那一屏）：
+      desk.resume.styleHint     「出纸按你上次设定的样式；app 内已不切换样式」
+      desk.resume.stepOutputHint「预览这张纸；要改整页就按「整屏编辑」，它会把这一份交给 Office-cc」
+      pdfEdit.pathHint          …这一档只看不改：要改这一份，按「用 Office-cc 编辑」把它交出去。
+    新增三句（两份齐）：desk.resume.editEnter / editEnterHint / handoffDone；
+    handoffDone 的三个动态值全走插值参数（§5.7）：{{path}} {{pages}} {{bytes}}。
+
+六、3.16-06（反向验证，三条真实缺口逐字登记，不许自动通过）
+    ① 样式切换在 app 内**没有入口**：模板清单仍读得到（export.templates）、出纸仍按人上次设定的那套
+       （export.preference 的读侧），但界面上再也没有"挑另一套样式 / 记住默认"那一格——
+       `resume.export.setPreference` 的调用点在渲染层归零。这是裁定㊵ 第 3 条"直接删除"的直接后果。
+    ② 结构化排版编辑**没有替代路径**：区块重排、条目拆分合并、字号/行距/字重/对齐/两色、度量滑杆、
+       纸上打字与 ⌘B 加重全部随那一屏删除。Office-cc 改的是 PDF 位面，改完不回 `doc_json`，
+       所以"把某一类段落整体调小一号"这类动作只能重新导入或改库。
+       —— 这一条与 §19.5 那格缺口同类，处理口径同一条：将来要补只能当新能力做，不许把刚删掉的偷偷请回来。
+    ③ `resume.editor.*` 九条动作在主进程**仍挂载**（plan §22.5 第 1 条），`packages/resume-doc/src/richtext.ts`
+       的 `editableToRaw` 也仍在（同条第 2 条：包内实现与依赖的处置另立一次问用户）；
+       本片的判据只看渲染层不再调它们——先例是 usePdfView.ts 头部那句"不再调用就是终态，不顺手清理"。
+    仍然留着的两处（本册没裁它们）：pdf-editor/**（「在编辑器中打开」那一屏）与 3.15 那只「用 Office-cc 编辑」。
+    「注入失败导出」那颗自测键（ResumeDesk.tsx:631）仍在——它是 spec 3.3-11 的取证入口，与编辑轨无关。
+
+七、3.16-05（V，待用户在场）
+    按「整屏编辑」真跳一次会另起一个 GUI 窗口，按 §7.1 与 §9 的 2.1-12 那条无人值守不代跑，标 [ ]。
+    在场时要取的读数：① 提示行那句 handoffDone 里的文件名/页数/字节；② Office-cc 打开的是不是刚出的那一份
+    （产物落 userData/exports，文件名对得上 docId）；③ 在 Office-cc 里改完保存后，回 app 用「查看原 PDF」重新导入，
+    看新文档是否落地（②的那条反向验证也靠这一趟兑现）。
+    另：主进程与 preload 在 3.15 那一批改过，活体前需要重启一次 pnpm dev。

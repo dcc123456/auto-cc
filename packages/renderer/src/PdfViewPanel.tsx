@@ -5,7 +5,7 @@
  * 画面一律由 `PdfPaperView` 画在纸面槽里，两边吃的是同一份 `usePdfView` 模型（AGENTS.md §2.5）。
  *
  * 2026-10 下旬的裁定㊳把这一格收窄成纯查看：覆盖层清单、页序重排、另存落点那三条写端整块摘除——
- * 改字与出纸归整页编辑那一屏。这里只剩挑文件、开路径、翻页与那几句读数。
+ * 改字与出纸不在这一格（app 内那一屏已随裁定㊵退场，改字交给伴生应用）。这里只剩挑文件、开路径、翻页与那几句读数。
  *
  * 旧的可取证通道里，查看那几条（`pdf-edit-path` / `pdf-edit-pick-file` / `pdf-edit-open` /
  * `pdf-edit-page-prev` / `pdf-edit-page-reading` / `pdf-edit-page-next` 等）

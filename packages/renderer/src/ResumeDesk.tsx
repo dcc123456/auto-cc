@@ -33,10 +33,10 @@ import { formatClock } from './format';
 import { GapPanel } from './GapPanel';
 import { GeneratePanel } from './GeneratePanel';
 import { KbPanel } from './KbPanel';
+import { handOffDocumentToCompanion } from './companion-handoff';
 import { PdfPaperView } from './PdfPaperView';
 import { PdfViewPanel } from './PdfViewPanel';
 import { PdfEditorPage } from './pdf-editor/PdfEditorPage';
-import { ResumeEditPage } from './ResumeEditPage';
 import { ResumeFormPanel } from './ResumeFormPanel';
 import { ResumePaperStage, type PaperStatus, type ResumePaperMode } from './ResumePaperStage';
 import { SkillPanel } from './SkillPanel';
@@ -193,7 +193,7 @@ export function ResumeDesk() {
    * 右栏那张纸上此刻的内容——**desk 是唯一持有者**（§2.5）。
    * 只有一路来源：`preview` 档的 `resume.export.preview` 落库版；`pdf` 档画的是本机 PDF 文件本身，不吃这份 HTML。
    * `undefined` = 这一档此刻没有可画的那一张（槽位画空态，不画上一档的残留）。
-   * 整页编辑那一屏的草稿画面归编辑页自己（它换掉整个工作台，不与这一格共用槽位，裁定㊲）。
+   * 从前还有一句"整页编辑那一屏的草稿画面归编辑页自己"（裁定㊲）——那一屏随裁定㊵退场后，这一格是唯一的画纸处。
    */
   const [paperHtml, setPaperHtml] = useState<string>();
   /** 纸角读数条（`paper-live`）的唯一依据：在途还是已最新。 */
@@ -235,13 +235,12 @@ export function ResumeDesk() {
   /** 上一次删除失败的结构化错误（半删状态必须说得出为什么，且不把行从列表里摘掉，spec 6.4-20 的④）。 */
   const [deleteError, setDeleteError] = useState<AppErrorPayload>();
   /**
-   * 可摆的模板清单（含版式骨架的七条轴）、当前用来出纸的那一套、人设定的那一套（3.2-03）。
-   * 裁定㊲之后 desk 只**读**这一格（「当前样式：<名>」那一行 + 把 props 递给整页编辑），
-   * 换样式与记默认的写端都搬进了编辑页的右轨——desk 里不再长出模板写入路径（§2.5）。
+   * 可摆的模板清单（含版式骨架的七条轴）与当前出纸用的那两套读数（3.2-03）。
+   * 裁定㊵ 之后这一格只剩**读**：`export.preference` 把人上次设定的样式读进来，
+   * 出纸与「整屏编辑」那一步都按它走；换样式与记默认的写端随整屏编辑那一屏一起退场（§22.3）。
    */
   const [templates, setTemplates] = useState<ResumeTemplateSummaryView[]>([]);
   const [templateId, setTemplateId] = useState('classic');
-  const [defaultTemplateId, setDefaultTemplateId] = useState('classic');
   const [lastImport, setLastImport] = useState<ImportReceiptView>();
   const [importError, setImportError] = useState<AppErrorPayload>();
   const [pending, setPending] = useState<PendingImportRowView[]>([]);
@@ -256,12 +255,11 @@ export function ResumeDesk() {
    */
   const [paperOpen, setPaperOpen] = useState(false);
   /**
-   * 全屏整页编辑此刻是哪一屏（spec 3.10 / 裁定㉙ 第 2 条；2026-10-14 反转裁定后扩为三态）：
-   * `model` 旧的内容与模板排版编辑，`pdf` WPS 形态纸面编辑器，`none` 工作台。
-   * 三态**互斥挂载**而不是盖在上面：任何一屏都持有独立会话与画布，
-   * 同一屏上两张纸会让 6.4-08 那条"槽里任何时刻只有一张画布"当场不成立。
+   * 全屏那一档此刻挂着哪一屏（2026-10-14 反转裁定的 `pdf` = WPS 形态纸面编辑器；`none` 工作台）。
+   * 裁定㊵ 之后 `'model'` 那一态整块退场：app 内改简历正文的那一屏删掉了，「整屏编辑」从此跳伴生应用。
+   * 两态**互斥挂载**而不是盖在上面：任何一屏都持有独立画布，同一屏两张纸会让 6.4-08 当场不成立。
    */
-  const [editPageOpen, setEditPageOpen] = useState<'none' | 'model' | 'pdf'>('none');
+  const [editPageOpen, setEditPageOpen] = useState<'none' | 'pdf'>('none');
   /**
    * 「按岗位改写」那一趟的提议态（plan §2.2 的 AI 建议半边）：**desk 持有，两格共用**。
    * 生成通道只有一条（`GeneratePanel` 跑 `resume.generate.run`），而建议要贴在**在线简历表单**对应那一格旁边，
@@ -384,7 +382,6 @@ export function ResumeDesk() {
       if (list?.ok) setTemplates(list.value);
       if (pref?.ok) {
         setTemplateId(pref.value.templateId);
-        setDefaultTemplateId(pref.value.templateId);
       }
     })();
     // 文档清单 / 待确认 / 来路不跟模板偏好串行：模板枚举在冷 userData 上可能慢，
@@ -762,6 +759,35 @@ export function ResumeDesk() {
   };
 
   /**
+   * 人按「整屏编辑」（裁定㊵ / spec 3.16-01）：先把当前文档出成一份 PDF，再把那份产物交给伴生应用 Office-cc。
+   *
+   * app 内不再有改正文的那一格（plan §22.2），所以这一颗键从此是"交出去"，不再是"打开某个屏"。
+   * 两步的顺序由 `handOffDocumentToCompanion` 保证：导出失败时第二跳根本不发——
+   * 否则伴生应用打开的是上一份产物，而界面回一句"已交给 Office-cc"，那是假话。
+   * 样式取 `export.preference` 读来的那一份（desk 这一侧不再持有改样式的写端，§22.3）。
+   */
+  const openDocInCompanion = () =>
+    void run(
+      t('desk.resume.editEnter'),
+      () => {
+        if (bridge === undefined || docId === undefined) return undefined;
+        return handOffDocumentToCompanion(
+          {
+            toPdf: (target, template, docLocale) => bridge.resume['export.toPdf'](target, template, docLocale),
+            open: (filePath) => bridge.shell.openInCompanionEditor(filePath),
+          },
+          docId,
+          templateId,
+          locale,
+        );
+      },
+      {
+        describe: (value) =>
+          t('desk.resume.handoffDone', { path: value.openedPath, pages: value.pages, bytes: value.bytes }),
+      },
+    );
+
+  /**
    * 收起纸面面板。PDF 档一并退回 `preview`：下回从「预览」进来的那一趟必须是预览档，
    * 否则面板会以「PDF 查看」的身份重新登场，而人按的是「预览」。
    */
@@ -801,7 +827,7 @@ export function ResumeDesk() {
    * PDF 查看这一轨的唯一模型（spec 3.5-12 / 裁定㊳）：控件长在左列、真纸画在右栏那一格，两边吃同一份 state。
    * 之所以把它挂在 desk 而不是面板里：一拆两格就有两个消费者，state 留在任何一边都会让另一份成第二份事实（§2.5）。
    * 裁定㊳之后这一轨只剩"看"：`pdf.io.open` 拿页数文件名、`pdf.io.bytes` 拿真纸，
-   * 覆盖层/页序/另存那三条写端已整条摘除（编辑与出纸归整页编辑那一屏）。
+   * 覆盖层/页序/另存那三条写端已整条摘除（app 内改正文那一屏随裁定㊵整块退场，改字交给伴生应用）。
    *
    * 曾经这里还有一条"进 PDF 档就自动导一份刚出的产物铺上纸"的 effect（用户 2026-10-12 报空白根因的补丁）：
    * 它的前提是"这一档吃当前文档"，而那个前提随导出写端一起搬走了——现在这一档从挑一份本机 PDF 开始，
@@ -851,25 +877,12 @@ export function ResumeDesk() {
     // 这一片把它换成**装不下就整张缩小**（`ResumePaperFrame` 的 `--paper-scale`，6.4-24 起再叠一条一页的高），
     // 纸的物理宽度 `w-[210mm]` 一字未改，所以"纸不许被裁"这件物理条件仍然成立（3.3-01 同源）。
     <>
-      {/* 整页编辑那一屏（spec 3.10）：与工作台**互斥挂载**，而不是盖在上面或用 `hidden` 收起来——
-          两个界面同时活着就是两份 `resume.editor.*` 会话（`open` 会互相放弃对方那份未保存的 draft），
-          而"槽里任何时刻只有一张画布"（6.4-08）也只能靠卸载保证。
+      {/* PDF 纸面编辑器那一屏：与工作台**互斥挂载**，而不是盖在上面或用 `hidden` 收起来——
+          两张纸同时活着时"槽里任何时刻只有一张画布"（6.4-08）当场不成立。
           画在 `@container` 外面：`container-type: inline-size` 隐含 `contain: layout`，
-          画在里面时 `fixed` 后代就只能盖住简历区而不是整扇窗（与删除确认框同一条实测）。 */}
-      {editPageOpen === 'model' && docId !== undefined ? (
-        <ResumeEditPage
-          docId={docId}
-          templateId={templateId}
-          locale={locale}
-          docLabel={docLabel}
-          templateName={templateName}
-          templates={templates}
-          defaultTemplateId={defaultTemplateId}
-          onTemplateChange={setTemplateId}
-          onDefaultTemplateChange={setDefaultTemplateId}
-          onClose={() => setEditPageOpen('none')}
-        />
-      ) : editPageOpen === 'pdf' && pdfView.filePath.trim() !== '' ? (
+          画在里面时 `fixed` 后代就只能盖住简历区而不是整扇窗（与删除确认框同一条实测）。
+          裁定㊵ 之后这一屏是全屏那一档唯一的挂载者：app 内改简历正文那一屏已整块退场。 */}
+      {editPageOpen === 'pdf' && pdfView.filePath.trim() !== '' ? (
         <PdfEditorPage filePath={pdfView.filePath.trim()} onClose={() => setEditPageOpen('none')} />
       ) : (
         <div className="@container min-w-0">
@@ -1297,9 +1310,9 @@ export function ResumeDesk() {
                         {t('desk.resume.stepOutputHint')}
                       </p>
 
-                      {/* 裁定㊲：模板架整块搬进整页编辑的右轨，这一格只剩**读数**——
-                      「此刻出纸用的是哪一套样式」+「要换样式去哪里」。
-                      写端（选中 / 记默认）在这里不再存在，同一屏不许有两条改样式的通道（§2.5）。 */}
+                      {/* 裁定㊵：模板架随整屏编辑那一屏一起删除（不搬回这里），这一格只剩**读数**——
+                      「此刻出纸用的是哪一套样式」。样式仍取 `export.preference` 读来的那一份；
+                      app 内不再能改样式，这一格也不长第二条改样式的通道（§2.5 / plan §22.6 登记的缺口）。 */}
                       <p className="text-[11px] text-slate-400" data-testid="resume-template-reading">
                         {templateName
                           ? t('desk.resume.styleCurrent', { name: templateName })
@@ -1338,8 +1351,8 @@ export function ResumeDesk() {
                         {/* 裁定㊲：出纸与换样式/记默认的写端整条搬进整页编辑的右轨，
                         且必须先落库再出纸（spec 3.13-05）——desk 这一侧不再持有"导一份还没存的纸"这条路。
                         预览是只读渲染，仍是这一格的键；2026-10-26 起它还负责**展开**默认收起的纸面面板。 */}
-                        {/* 整页编辑（spec 3.10-06）：判门是"要有当前文档"——编辑的是那一份的草稿，
-                        没有文档就送进空会话（6.4-07 那句"页签点下去必须有回应"的同一条判门）。 */}
+                        {/* 裁定㊵：这一颗键不再打开 app 内的某一屏——改正文这件事整块交给了伴生应用。
+                        判门仍是"要有当前文档"（没有文档就不知道出哪一份的纸）。 */}
                         <DeskButton
                           action="open-edit-page"
                           variant="line"
@@ -1348,10 +1361,11 @@ export function ResumeDesk() {
                           disabled={noDocReason !== undefined}
                           disabledReason={noDocReason}
                           disabledReasonLabel={reasonLabel(noDocReason)}
-                          onClick={() => setEditPageOpen('model')}
+                          tip={t('desk.resume.editEnterHint')}
+                          onClick={openDocInCompanion}
                         >
                           <Maximize2 size={12} />
-                          {t('resume.edit.enter')}
+                          {t('desk.resume.editEnter')}
                         </DeskButton>
                         {/* 裁定㊳：这一档只剩"看"——眼睛而不是铅笔，进的是本机 PDF 文件的查看轨。 */}
                         <DeskButton
