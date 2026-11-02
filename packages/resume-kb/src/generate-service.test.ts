@@ -40,7 +40,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { deriveEntities } from './entities.js';
 import { generationTargetFields, type GenerationField } from './fact-check.js';
 import {
@@ -881,11 +881,18 @@ describe('resume.generate 的 agent 工具面（spec 4.5 的双入口）', () =>
     // `run` 交回的是统一读数 `ToolResult`（spec 5.1-11），产物在 `.value` 里。
     // 这里显式收束成 `GenerationView`：工具面哪天少给一个键，下面那三行属性访问当场发红，
     // 而不是跟着 `JSON.stringify(undefined)` 双方都变成 undefined 而悄悄通过。
-    const viaTool = (await tool.run({ jdText: SAMPLE_JD, docId: DOC_ID })).value as GenerationView;
-    const viaService = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
-    expect(JSON.stringify(viaTool.document)).toBe(JSON.stringify(viaService.document));
-    expect(JSON.stringify(viaTool.evidence)).toBe(JSON.stringify(viaService.evidence));
-    expect(JSON.stringify(viaTool.checks)).toBe(JSON.stringify(viaService.checks));
+    // 时间钉在 `AS_OF_MS`：工具面不接受模型递进来的时间，内部取的是 `Date.now()`；
+    // 不钉住的话"3 年经验"的覆盖率会随运行日期漂移，两条入口的分数永远对不上（时间炸弹）。
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(AS_OF_MS);
+    try {
+      const viaTool = (await tool.run({ jdText: SAMPLE_JD, docId: DOC_ID })).value as GenerationView;
+      const viaService = await gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+      expect(JSON.stringify(viaTool.document)).toBe(JSON.stringify(viaService.document));
+      expect(JSON.stringify(viaTool.evidence)).toBe(JSON.stringify(viaService.evidence));
+      expect(JSON.stringify(viaTool.checks)).toBe(JSON.stringify(viaService.checks));
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('入参是边界：正文必填、docId 非空串、基准时间一律拒收', async () => {
