@@ -284,31 +284,36 @@ export class ShellService extends Service {
   };
 
   /**
-   * 请操作系统弹出「打开文件」面板，把人选中的那一条路径回给渲染层（简历导入与 PDF 打开的唯一入口）。
+   * 请操作系统弹出「打开文件」面板，把人选中的路径回给渲染层（简历导入与 PDF 打开的唯一入口）。
    *
    * 渲染层在 sandbox 下读不了文件系统（§8.1），而"敲绝对路径"这条路在界面上根本走不通——
-   * 路径打不出来，导入与打开就永远是禁用态。这里只回路径本身，不读文件内容、不返回目录、不允许多选。
-   * @param raw 未受信的渲染层实参：标题（已由 i18n 翻好）与筛选器；形状判定在 `file-picker.ts`
-   * @returns `{ filePath }`；人取消时为 null（取消不是失败，界面据此保持原状而不报错）
+   * 路径打不出来，导入与打开就永远是禁用态。这里只回路径本身，不读文件内容、不返回目录。
+   * `multiple` 为真时允许一次选中多份（简历批量导入），仍只开放文件选择、不开放目录选择。
+   * @param raw 未受信的渲染层实参：标题（已由 i18n 翻好）、筛选器与多选开关；形状判定在 `file-picker.ts`
+   * @returns `{ filePath, filePaths }`；人取消时两者为空（取消不是失败，界面据此保持原状而不报错）
    */
-  selectFile = async (raw: unknown): Promise<{ filePath: string | null }> => {
+  selectFile = async (raw: unknown): Promise<{ filePath: string | null; filePaths: string[] }> => {
     const decision = decideOpenPicker(raw, 3);
     if (!decision.isAccepted)
       throw new AppError('INVALID_ARGUMENT', `文件选择器参数不合法：${decision.reason}`, 'shell');
     const win = this.mainWindow;
+    const properties: Array<'openFile' | 'multiSelections'> = decision.options.multiple
+      ? ['openFile', 'multiSelections']
+      : ['openFile'];
     const reply =
       win === undefined
         ? await dialog.showOpenDialog({
-            properties: ['openFile'],
+            properties,
             title: decision.options.title,
             filters: decision.options.filters,
           })
         : await dialog.showOpenDialog(win, {
-            properties: ['openFile'],
+            properties,
             title: decision.options.title,
             filters: decision.options.filters,
           });
-    return { filePath: reply.canceled ? null : (reply.filePaths[0] ?? null) };
+    if (reply.canceled) return { filePath: null, filePaths: [] };
+    return { filePath: reply.filePaths[0] ?? null, filePaths: reply.filePaths };
   };
 
   /**

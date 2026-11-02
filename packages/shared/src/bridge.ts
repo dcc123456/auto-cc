@@ -1253,6 +1253,11 @@ export interface FileFilterView {
 export interface FilePickerRequestView {
   title: string;
   filters: FileFilterView[];
+  /**
+   * 是否允许一次选中多份文件（简历批量导入用）。
+   * 仍只开放 `openFile`，不开放目录选择；渲染层负责再限制一次导入的份数。
+   */
+  multiple?: boolean;
 }
 
 /** 「另存为」面板的参数（镜像 shell 的 `SaveFilePickerRequest`）。 */
@@ -2466,7 +2471,10 @@ export interface BridgeSignatures {
    */
   'shell.openInCompanionEditor': { args: [filePath: string, page?: number]; returns: { openedPath: string } };
   /** 打开面板选人手里的一份文件（标题与筛选器由渲染层按当前语言给，主进程不写界面文案）。 */
-  'shell.selectFile': { args: [request: FilePickerRequestView]; returns: { filePath: string | null } };
+  'shell.selectFile': {
+    args: [request: FilePickerRequestView];
+    returns: { filePath: string | null; filePaths: string[] };
+  };
   /** 另存为面板：同上，多一个建议文件名（不许带路径分隔符，判定在主进程）。 */
   'shell.selectSaveFile': { args: [request: SaveFilePickerRequestView]; returns: { filePath: string | null } };
   'shell.probeMainCrash': { args: []; returns: never };
@@ -2551,7 +2559,7 @@ export interface BridgeSignatures {
   /** 抓取层的当期配置与最近一次运行（面板解释「上次抓到哪」用）。 */
   'jd.capture.status': { args: []; returns: CaptureStatusView };
   /** JD 库只读清单（默认最近 20 条）。 */
-  'jd.store.list': { args: [limit?: number]; returns: JobListResultView };
+  'jd.store.list': { args: [limit?: number, filter?: JobListFilterView]; returns: JobListResultView };
   /** JD 库概况与 schema 版本（spec 2.3-05 的实测读数）。 */
   'jd.store.status': { args: []; returns: JdStoreStatusView };
   /**
@@ -3616,13 +3624,28 @@ export interface JobRowView {
 }
 
 /**
+ * 库内清单的筛选条件（只影响读取，不改库）。
+ * 空字符串与省略都表示不筛；`keyword` 同时匹配标题与公司。
+ */
+export interface JobListFilterView {
+  keyword?: string;
+  city?: string;
+  experience?: string;
+  platform?: string;
+  /** true 只返回有人回过话的行；false 或省略返回全部（不做「只看未回复」的负向筛选）。 */
+  replied?: boolean;
+}
+
+/**
  * `jd.store.list` 的返回值。
  *
- * 行序是「已回复优先，其余按抓取时间倒序」（spec 2.5-08 的『后续步骤优先这些目标』落在这里，
- * 不在界面里再排一遍）。
+ * `total` 是**库内总行数**（不受 limit 与筛选影响）；`matched` 是按当前筛选条件命中的行数
+ * （未筛选时等于 `total`）。行序仍是「已回复优先，其余按抓取时间倒序」
+ * （spec 2.5-08 的『后续步骤优先这些目标』落在这里，不在界面里再排一遍）。
  */
 export interface JobListResultView {
   total: number;
+  matched: number;
   rows: JobRowView[];
 }
 

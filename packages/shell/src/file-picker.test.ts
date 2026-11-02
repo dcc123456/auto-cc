@@ -39,10 +39,23 @@ describe('打开面板的参数判定', () => {
     }
   });
 
+  it('省略多选开关时按单选处理', () => {
+    const decision = decideOpenPicker(validRequest(), 3);
+    expect(decision.isAccepted).toBe(true);
+    if (decision.isAccepted) expect(decision.options.multiple).toBe(false);
+  });
+
+  it('multiple=true 被接纳并原样带回', () => {
+    const decision = decideOpenPicker({ ...validRequest(), multiple: true }, 3);
+    expect(decision.isAccepted).toBe(true);
+    if (decision.isAccepted) expect(decision.options.multiple).toBe(true);
+  });
+
   it.each([
     ['不是对象', null],
     ['标题为空', { ...validRequest(), title: '  ' }],
     ['标题超长', { ...validRequest(), title: 'x'.repeat(61) }],
+    ['多选开关不是布尔值', { ...validRequest(), multiple: 'yes' }],
     ['筛选器为空', { ...validRequest(), filters: [] }],
     [
       '筛选器组数越界',

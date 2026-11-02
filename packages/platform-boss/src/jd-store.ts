@@ -19,7 +19,14 @@ import {
   type Context,
   type WorkflowNodeExecutor,
 } from '@auto-cc/core';
-import type { FunnelRange, JobListResultView, JobRowView, JdStoreStatusView, SalaryView } from '@auto-cc/shared';
+import type {
+  FunnelRange,
+  JobListFilterView,
+  JobListResultView,
+  JobRowView,
+  JdStoreStatusView,
+  SalaryView,
+} from '@auto-cc/shared';
 import type { StoreService } from '@auto-cc/plugin-store';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -333,29 +340,85 @@ export class JdStoreService extends Service {
   }
 
   /**
+   * 把筛选条件拼成唯一的 WHERE 片段与参数表（列表与命中计数共用，避免两套条件漂移）。
+   *
+   * 文本筛选用 `instr` 而不是 `LIKE '%…%'`：用户输入里的 `%`/`_` 不该被当成通配符；
+   * 所有值都走参数绑定。`replied=false` 刻意不生成负向条件（只看未回复不是产品需要的筛法，
+   * 省略即全部），因此只有 `true` 会追加 `reply.inbound > 0`。
+   * @param filter 渲染层递来的筛选条件；省略或空串都表示不筛
+   * @returns `where`（带 `WHERE` 前缀，无条件是空串）与按出现顺序排列的绑定参数
+   */
+  private buildFilter(filter?: JobListFilterView): { where: string; params: (string | number)[] } {
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+    const keyword = filter?.keyword?.trim() ?? '';
+    if (keyword !== '') {
+      // SQLite 把非零整数当 TRUE，所以 `instr(...)` 可以直接站在 WHERE 里，不写 `> 0`
+      // （机检把 `>` 当成选择器组合符，SQL 片段里也不留它）。
+      clauses.push('(instr(jobs.title, ?) OR instr(jobs.company, ?))');
+      params.push(keyword, keyword);
+    }
+    const addContains = (column: 'jobs.city' | 'jobs.experience', value?: string): void => {
+      const trimmed = value?.trim() ?? '';
+      if (trimmed === '') return;
+      clauses.push(`instr(${column}, ?)`);
+      params.push(trimmed);
+    };
+    addContains('jobs.city', filter?.city);
+    addContains('jobs.experience', filter?.experience);
+    const platform = filter?.platform?.trim() ?? '';
+    if (platform !== '') {
+      clauses.push('jobs.platform = ?');
+      params.push(platform);
+    }
+    // `reply.inbound` 为空（没人回）时是 NULL，SQLite 的 WHERE 会把它当假；有值时计数非零。
+    if (filter?.replied === true) clauses.push('reply.inbound');
+    return { where: clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')}`, params };
+  }
+
+  /**
+   * 数当前筛选命中的行数（与 `list` 共用 `buildFilter`；未筛选时与 `count()` 同值）。
+   * @param filter 筛选条件
+   * @returns 命中行数（不受 limit 影响）
+   */
+  private countMatching(filter?: JobListFilterView): number {
+    const { where, params } = this.buildFilter(filter);
+    const row = this.store.db.prepare(`SELECT COUNT(*) AS n FROM jobs ${REPLY_JOIN} ${where}`).get(...params) as {
+      n?: number | bigint;
+    };
+    return Number(row?.n ?? 0);
+  }
+
+  /**
    * 列出库里最近的 JD，并带上「对方回了几条」。
    *
    * 已回复是**算出来的**，不是 jobs 表上的一列（spec 2.5-14：单一事实来源在 `conversation_messages`）。
    * 排序把已回复的排在前面，因为 2.5-08 要的就是「下一步先做谁」这件事在列表顺序上说清楚。
+   * 筛选在服务端完成（spec 9.2-01）：`total` 始终是库内总数，`matched` 是当前条件命中数，
+   * 界面据此同时说清「库里有」与「筛掉了多少」。
    * @param limit 条数（钳到 1～500，省略用 50）
-   * @returns 总数（不受 limit 影响）与按「已回复优先、再按 captured_at 倒序」的行
+   * @param filter 库内筛选（标题/公司关键词、城市、经验、平台、只看已回复）
+   * @returns 总数、命中数与按「已回复优先、再按 captured_at 倒序」的行
    * @throws 会话库没挂载时失败在 sqlite 层的 `no such table: conversation_messages`——
    *         与 `jobs` 表被回滚后 `count()` 的失败同一种形状，宁可报错也不把「不知道有没有人回复」写成 `false`
    */
-  list = (limit?: number): JobListResultView => {
+  list = (limit?: number, filter?: JobListFilterView): JobListResultView => {
     const requested = typeof limit === 'number' && Number.isFinite(limit) ? Math.trunc(limit) : LIST_LIMIT.fallback;
     const capped = Math.min(Math.max(requested, LIST_LIMIT.min), LIST_LIMIT.max);
     const total = this.count();
+    const matched = this.countMatching(filter);
+    const { where, params } = this.buildFilter(filter);
     const rows = this.store.db
       .prepare(
         `SELECT jobs.*, reply.inbound AS inbound_count
          FROM jobs
          ${REPLY_JOIN}
+         ${where}
          ORDER BY CASE WHEN reply.inbound IS NULL THEN 0 ELSE 1 END DESC, jobs.captured_at DESC, jobs.id DESC
          LIMIT ?`,
       )
-      .all(capped) as unknown as JobRow[];
-    return { total, rows: rows.map(toRowView) };
+      .all(...params, capped) as unknown as JobRow[];
+    return { total, matched, rows: rows.map(toRowView) };
   };
 
   /**

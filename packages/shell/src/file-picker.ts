@@ -7,9 +7,9 @@
  * 于是简历轨在界面上根本走不通。这一口把"选文件"交回给操作系统，主进程只把人选中的那条路径回给渲染层。
  *
  * 安全口径与 `reveal-target.ts` 相反方向，因此同样要有判定：reveal 是"渲染层给路径、主进程开目录"，
- * 这里是"主进程问人、把人选中的路径交回去"。参数里能进主进程的只有**筛选器扩展名与标题文案**，
- * 所以扩展名必须逐个验形状（不验就等于把 `..`、`/` 这类值拼进 Electron 的 filters），
- * 且一次只允许选一个文件（`openFile` 而非 `openDirectory`/多选，避免拿到整棵目录树）。
+ * 这里是"主进程问人、把人选中的路径交回去"。参数里能进主进程的只有**筛选器扩展名、标题文案与多选开关**，
+ * 所以扩展名必须逐个验形状（不验就等于把 `..`、`/` 这类值拼进 Electron 的 filters）；
+ * 多选也只放开 `multiSelections`，仍不允许 `openDirectory`——拿到的是用户选中的文件列表，不是整棵目录树。
  */
 
 /** 渲染层递来的选择器参数（合法形状）。 */
@@ -18,6 +18,11 @@ export interface FilePickerRequest {
   title: string;
   /** 筛选器，最多三组；每组一个显示名与若干扩展名（不含点） */
   filters: { name: string; extensions: string[] }[];
+  /**
+   * 是否允许多选（简历批量导入）。仍只允许 `openFile`，不开放目录选择；
+   * 省略按单选处理，渲染层还要再限制一次导入份数。
+   */
+  multiple?: boolean;
 }
 
 /** 另存为的补充参数。 */
@@ -41,10 +46,13 @@ const EXTENSION_PATTERN = /^[A-Za-z0-9_-]{1,10}$/;
 export function decideOpenPicker(
   raw: unknown,
   maxFilters: number,
-): PickerDecision<{ title: string; filters: { name: string; extensions: string[] }[] }> {
+): PickerDecision<{ title: string; filters: { name: string; extensions: string[] }[]; multiple: boolean }> {
   const parsed = readRequest(raw, maxFilters);
   if ('reason' in parsed) return { isAccepted: false, reason: parsed.reason };
-  return { isAccepted: true, options: { title: parsed.title, filters: parsed.filters } };
+  return {
+    isAccepted: true,
+    options: { title: parsed.title, filters: parsed.filters, multiple: parsed.multiple },
+  };
 }
 
 /**
@@ -76,11 +84,14 @@ export function decideSavePicker(
 function readRequest(
   raw: unknown,
   maxFilters: number,
-): { title: string; filters: { name: string; extensions: string[] }[] } | { reason: string } {
+): { title: string; filters: { name: string; extensions: string[] }[]; multiple: boolean } | { reason: string } {
   if (typeof raw !== 'object' || raw === null) return { reason: '选择器参数不是对象' };
   const request = raw as FilePickerRequest;
   const title = typeof request.title === 'string' ? request.title.trim() : '';
   if (title === '' || title.length > 60) return { reason: '标题为空或超过 60 字' };
+  if (request.multiple !== undefined && typeof request.multiple !== 'boolean') {
+    return { reason: '多选开关不是布尔值' };
+  }
   if (!Array.isArray(request.filters) || request.filters.length === 0 || request.filters.length > maxFilters) {
     return { reason: `筛选器需 1–${String(maxFilters)} 组` };
   }
@@ -102,5 +113,5 @@ function readRequest(
     }
     filters.push({ name, extensions: group.extensions.map((extension) => extension.toLowerCase()) });
   }
-  return { title, filters };
+  return { title, filters, multiple: request.multiple === true };
 }

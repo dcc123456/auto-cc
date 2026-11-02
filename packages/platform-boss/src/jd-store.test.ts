@@ -323,6 +323,58 @@ describe('只读接口（spec 2.3-09 的界面读数）', () => {
     expect(jd.list(1).total).toBe(2);
   });
 
+  it('list 支持库内筛选：关键词同时匹配标题与公司，城市/经验按包含，replied 只看有人回过的行', async () => {
+    const { jd, db } = await boot();
+    jd.upsert(
+      draft({
+        jobId: 'a',
+        title: '前端工程师',
+        company: '甲公司',
+        city: '上海',
+        experience: '3-5年',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=a',
+        capturedAt: 3_000,
+      }),
+    );
+    jd.upsert(
+      draft({
+        jobId: 'b',
+        title: '后端工程师',
+        company: '乙公司',
+        city: '北京',
+        experience: '5-10年',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=b',
+        capturedAt: 1_000,
+      }),
+    );
+    jd.upsert(
+      draft({
+        jobId: 'c',
+        title: '前端专家',
+        company: '乙公司',
+        city: '上海',
+        experience: '5-10年',
+        sourceUrl: 'http://127.0.0.1:10233/boss/detail?jobId=c',
+        capturedAt: 2_000,
+      }),
+    );
+    seedMessage(db, 'b', 'recruiter', '你好');
+
+    // 关键词同时打标题与公司：'前端' 命中两条标题，'乙公司' 命中两条公司。
+    expect(jd.list(undefined, { keyword: '前端' }).rows.map((row) => row.jobId)).toEqual(['a', 'c']);
+    expect(jd.list(undefined, { keyword: '乙公司' }).rows.map((row) => row.jobId)).toEqual(['b', 'c']);
+    // 城市/经验按包含匹配，命中数不受 limit 影响。
+    expect(jd.list(undefined, { city: '上海' }).matched).toBe(2);
+    expect(jd.list(undefined, { experience: '5-10' }).matched).toBe(2);
+    // 只看已回复：b 的会话表里有一行招聘者消息，其余两行没有。
+    expect(jd.list(undefined, { replied: true }).rows.map((row) => row.jobId)).toEqual(['b']);
+    // 没有命中时 matched 是 0，total 仍是库内总数。
+    const empty = jd.list(1, { keyword: '不存在的岗位' });
+    expect(empty.matched).toBe(0);
+    expect(empty.total).toBe(3);
+    expect(jd.list(1, { city: '上海' }).matched).toBe(2);
+  });
+
   it('status 给出总数、有详情数与最近一次的来源地址', async () => {
     const { jd } = await boot();
     jd.upsert(draft({ detailCapturedAt: 5 }));
