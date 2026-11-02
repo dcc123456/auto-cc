@@ -11,7 +11,7 @@ import { DeskButton } from './controls';
  * 必须写成完整字面量，Tailwind 扫不到拼出来的 class。
  */
 const DRAWER_WIDTH = { '420': 'w-[420px]', '520': 'w-[520px]' } as const;
-const MODAL_WIDTH = { '480': 'w-[480px]', '560': 'w-[560px]', '640': 'w-[640px]' } as const;
+const MODAL_WIDTH = { '480': 'w-[480px]', '560': 'w-[560px]', '640': 'w-[640px]', '960': 'w-[960px]' } as const;
 
 /** 遮罩：盖住工作台但不盖住状态条——底部读数在浮层期间仍然要看得见。 */
 const SCRIM = 'fixed inset-0 z-40 bg-scrim';

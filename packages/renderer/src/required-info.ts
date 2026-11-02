@@ -1,7 +1,7 @@
 /**
  * 必备信息清单的界面侧公共件（判定本体在主进程 `skill.ts`，这里只负责"怎么把结论画出来"）。
  *
- * 抽出来是因为两个面板都要读同一份清单（`SkillPanel` 逐行、`GeneratePanel` 一行汇总）：
+ * 抽出来是因为两个面板都要读同一份清单（已退场的书写技能面板逐行、`GeneratePanel` 一行汇总）：
  * 语气档与计数各写一份就是同一逻辑的第二次复制（AGENTS.md §2.2）。
  */
 import type { RequiredInfoRowView, RequiredInfoStatusView } from '@auto-cc/shared';

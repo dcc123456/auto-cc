@@ -1,12 +1,12 @@
 import {
-  Activity,
   Boxes,
   Briefcase,
   FileText,
+  History,
   Languages,
   MessageSquare,
   Moon,
-  ScrollText,
+  Settings,
   ShieldCheck,
   Sun,
   Workflow as WorkflowIcon,
@@ -16,11 +16,9 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { useDeskTheme } from './theme';
-import { AssemblyPanel } from './AssemblyPanel';
 import { ChatPanel } from './ChatPanel';
 import { JobLabPanel } from './JobLabPanel';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
-import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
 import { ModelsPanel } from './ModelsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
@@ -28,9 +26,8 @@ import { UpdateSection } from './UpdateSection';
 import { ResumeDesk } from './ResumeDesk';
 import { ScriptPanel } from './ScriptPanel';
 import { SessionPanel } from './SessionPanel';
-import { ShellPanel } from './ShellPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { UsagePanel } from './UsagePanel';
-import { WorkflowLabPanel } from './WorkflowLabPanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
@@ -40,8 +37,8 @@ import { Toast } from './ui/overlays';
 /**
  * 顶层视图的名字由 `viewTrail.ts` own：跨视图推进（09 稿形态⑥）是全 app 唯一一处要同时认识
  * 两个视图的契约，联合类型放在那儿才不会长第二份（§2.5）。
- * AGENTS.md §5.9 定的顺序：对话是第一入口；其后四张工作台按用户语言命名（岗位 / 简历 / 流程 /
- * 信任，评审裁定 Q2）；模型独立成页（7.3）；诊断面板再低一档（spec 1.10-07）。七个视图都常驻挂载，切换只改 display，
+ * AGENTS.md §5.9 定的顺序：对话是第一入口；其后工作台按用户语言命名（岗位 / 简历 / 流程 / 模型 /
+ * 运行记录），设置再低一档（spec 1.10-07）。七个视图都常驻挂载，切换只改 display，
  * 所以来回切不丢滚动位置也不丢状态（spec 1.10-01）——形态⑥ 的「返回时滚动位置不变」靠的正是这一条。
  */
 import { clearViewTrail, useViewTrail, type TopView } from './viewTrail';
@@ -56,15 +53,15 @@ interface DeskEntry {
   primary: boolean;
 }
 
-/** 导航顺序即信息架构：对话第一，四张工作台居中，模型独立成页，诊断沉底。 */
+/** 导航顺序即信息架构：对话第一，四张工作台居中，模型独立成页，运行记录与设置沉底。 */
 const DESK_ENTRIES: DeskEntry[] = [
   { view: 'chat', icon: MessageSquare, primary: true },
   { view: 'jobs', icon: Briefcase, primary: true },
   { view: 'resume', icon: FileText, primary: true },
   { view: 'workflow', icon: WorkflowIcon, primary: true },
   { view: 'models', icon: Boxes, primary: true },
-  { view: 'trust', icon: ScrollText, primary: true },
-  { view: 'diagnostics', icon: Activity, primary: false },
+  { view: 'trust', icon: History, primary: true },
+  { view: 'diagnostics', icon: Settings, primary: false },
 ];
 
 /**
@@ -305,8 +302,8 @@ export function App() {
 /**
  * 每张工作台承载的面板清单：只是把既有面板归位，没有新增、没有改逻辑。
  * 归位依据是设计稿的信息架构（03/04/05/06 屏）：
- * 岗位=搜与选（JD 库、话术候选），简历=内容与生成，流程=运行与编排，模型=提供商与默认模型，
- * 信任=登录态、额度与漏斗，诊断=只有开发者看得懂的自测台（桥接自检、更新通道、定位实验室、装配与插件树）。
+ * 岗位=搜与选（JD 库、话术候选），简历=导入与生成，流程=运行与编排，模型=提供商与默认模型，
+ * 运行记录=登录态、额度与漏斗，设置=版本信息与更新检查（开发者实验台已从产品界面退场）。
  */
 const PANELS: Record<TopView, ReactNode> = {
   chat: <></>,
@@ -330,12 +327,9 @@ const PANELS: Record<TopView, ReactNode> = {
   ),
   diagnostics: (
     <>
-      <ShellPanel />
-      {/* 更新通道（5.9-b）紧挨桥接自检台：两者都是"主进程只在被点时动一下"的读数，放一起才对得上同一套口径 */}
+      <SettingsPanel />
+      {/* 更新通道（5.9-b）是用户真正要用的那一块，留在设置页；其余开发者实验台已退场 */}
       <UpdateSection />
-      <LocatorLabPanel />
-      <WorkflowLabPanel />
-      <AssemblyPanel />
     </>
   ),
 };

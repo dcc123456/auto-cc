@@ -197,7 +197,7 @@ export function ResumeFormPanel({ docId, isVariant, suggestions }: ResumeFormPan
     void read();
     if (!bridge) return;
     return bridge.on('kb/entities-changed', (event) => {
-      // 别的文档的重建信号与这一格无关（同屏 KbPanel 也订阅这一条，各取各的）。
+      // 别的文档的重建信号与这一格无关（同屏其它简历面板也订阅这一条，各取各的）。
       if (event.docId && docId && event.docId !== docId) return;
       void read();
     });
@@ -593,7 +593,7 @@ export function ResumeFormPanel({ docId, isVariant, suggestions }: ResumeFormPan
               : view.profile.name
         }
       >
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {PROFILE_FIELDS.map((field) => {
             const original = profileOriginal(field);
             const value = dirtyProfile[field] ?? original;
@@ -641,7 +641,7 @@ export function ResumeFormPanel({ docId, isVariant, suggestions }: ResumeFormPan
             .join(' · ') || t('resumeForm.groupIntentEmpty')
         }
       >
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {INTENT_FIELDS.map((field) => {
             const original = intentOriginal(field);
             const value = dirtyIntent[field] ?? original;
@@ -664,7 +664,11 @@ export function ResumeFormPanel({ docId, isVariant, suggestions }: ResumeFormPan
               />
             );
           })}
-          {intentNote && intentEntry && renderField(INTENT_SECTION_ID, intentEntry.id, intentNote)}
+          {intentNote && intentEntry && (
+            <div className="min-w-0 sm:col-span-2 xl:col-span-4">
+              {renderField(INTENT_SECTION_ID, intentEntry.id, intentNote)}
+            </div>
+          )}
         </div>
       </DeskSection>
 
@@ -743,32 +747,44 @@ export function ResumeFormPanel({ docId, isVariant, suggestions }: ResumeFormPan
               )}
 
               <ul className="flex min-w-0 flex-col gap-2">
-                {section.entries.map((entry, position) => (
-                  <li
-                    key={entry.id}
-                    data-testid="resume-form-entry"
-                    data-entry-id={entry.id}
-                    className="flex min-w-0 flex-col gap-2 rounded-lg border border-line bg-ink-850 p-2"
-                  >
-                    <DeskActionRow className="justify-between">
-                      <span className="text-[11px] text-slate-500">
-                        {t('resumeForm.entryIndex', { index: position + 1 })}
-                      </span>
-                      <DeskButton
-                        action="resume-form-remove-entry"
-                        variant="seal"
-                        compact
-                        busy={busy === t('resumeForm.entryRemove')}
-                        markers={{ section: section.id, entry: entry.id }}
-                        onClick={() => removeEntry(section.id, entry.id)}
-                      >
-                        <Trash2 size={12} aria-hidden />
-                        {t('resumeForm.entryRemove')}
-                      </DeskButton>
-                    </DeskActionRow>
-                    {orderedFields(entry.fields).map((field) => renderField(section.id, entry.id, field))}
-                  </li>
-                ))}
+                {section.entries.map((entry, position) => {
+                  // 短字段一行多列、长字段单列通栏：短字段是单位/职位/时间这类一眼能读的标签，
+                  // 长字段是成段的话，塞进多列会把每列压成一条细缝（spec 9.3-03）。
+                  const ordered = orderedFields(entry.fields);
+                  const shortFields = ordered.filter((field) => !LONG_FIELD_KEYS.has(field.key));
+                  const longFields = ordered.filter((field) => LONG_FIELD_KEYS.has(field.key));
+                  return (
+                    <li
+                      key={entry.id}
+                      data-testid="resume-form-entry"
+                      data-entry-id={entry.id}
+                      className="flex min-w-0 flex-col gap-2 rounded-lg border border-line bg-ink-850 p-2"
+                    >
+                      <DeskActionRow className="justify-between">
+                        <span className="text-[11px] text-slate-500">
+                          {t('resumeForm.entryIndex', { index: position + 1 })}
+                        </span>
+                        <DeskButton
+                          action="resume-form-remove-entry"
+                          variant="seal"
+                          compact
+                          busy={busy === t('resumeForm.entryRemove')}
+                          markers={{ section: section.id, entry: entry.id }}
+                          onClick={() => removeEntry(section.id, entry.id)}
+                        >
+                          <Trash2 size={12} aria-hidden />
+                          {t('resumeForm.entryRemove')}
+                        </DeskButton>
+                      </DeskActionRow>
+                      {shortFields.length > 0 && (
+                        <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {shortFields.map((field) => renderField(section.id, entry.id, field))}
+                        </div>
+                      )}
+                      {longFields.map((field) => renderField(section.id, entry.id, field))}
+                    </li>
+                  );
+                })}
               </ul>
 
               <DeskActionRow>

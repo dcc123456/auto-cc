@@ -1073,7 +1073,7 @@ export const DISCLOSURE_CLASS =
 /**
  * 行内披露（"看证据 / 看出处"那一类）：只有下划线档的文案，无框无底——它展开的是紧挨其下的一小段正文，
  * 不是一次动作，所以既不能涂 `DeskButton` 的六档（那会造出"按钮长得像文字链"的第四种画法），
- * 也不许留在面板里各写一遍 class（`GeneratePanel` 与 `GapPanel` 原先抄的是同一条字面量，§2.2 的第二 occurrence）。
+ * 也不许留在面板里各写一遍 class（`GeneratePanel` 与已退场的缺口面板原先抄的是同一条字面量，§2.2 的第二 occurrence）。
  * @param action `data-action` 凭据
  * @param open 正文此刻在不在（由调用方判，例如"这一条的正文有没有取回来"）
  * @param className 追加档（一般是行内对齐的微调，不写颜色与字号）
@@ -1573,7 +1573,7 @@ export interface DeskSwatchProps {
 /**
  * 色卡格本身的画法。**必须写成完整字面量**（Tailwind 只扫源码里出现的字符串），
  * 而色本身走 `--desk-swatch` 那一只变量：hex 是运行期递进来的，拼进 class 永远不会被编译出来，
- * 于是画面上由 `setProperty` 供色（同 `PdfPaperView` 的动态几何口径，§5.2 那条已登记写法）。
+ * 于是画面上由 `setProperty` 供色（同纸面预览的动态几何口径，§5.2 那条已登记写法）。
  * @param isSelected 是否是当前选中格
  * @param busy 整组是否在途（按不动时不许长出 hover，spec 6.2-25）
  * @returns 该格的 class 串

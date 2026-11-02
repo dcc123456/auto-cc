@@ -90,7 +90,7 @@ function availableHeightOf(slot: HTMLDivElement): number {
 }
 
 /**
- * 一张纸：A4 宽度的 iframe + 「装不下就整张缩小」的那只手（从 `ResumePaperStage` 抽出，spec 3.10-06）。
+ * 一张纸：A4 宽度的 iframe + 「装不下就整张缩小」的那只手（从纸面槽抽出，spec 3.10-06）。
  *
  * 抽出来的理由是 §2.2：右栏那一格与整屏编辑页要画的是**同一张纸**，缩放口径只许有一份
  * （两份 `fitPaper` 就会有两个"装不下"的判据）。两格的差别只写在 `fit` 这一档入参上：
