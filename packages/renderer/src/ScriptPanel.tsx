@@ -142,7 +142,7 @@ export function ScriptPanel() {
       .map((word) => word.trim())
       .filter((word) => word.length > 0);
     const base: ScriptGenerateRequestView = {
-      jdId: String(target.id),
+      jdId: target.jobId,
       title: target.title,
       company: target.company,
       keywords,

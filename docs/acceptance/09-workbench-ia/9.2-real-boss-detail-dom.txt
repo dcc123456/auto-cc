@@ -1,0 +1,31 @@
+09 真实 BOSS 独立详情页 DOM 复量（2026-11-02，CDP --url zhipin.com/job_detail）
+
+页面形状
+- URL: https://www.zhipin.com/job_detail/<jobId>.html
+- title 正常、readyState=complete；正文文本长度约 2100 字。
+- 详情根容器：div.job-detail（class 命中 1，rect 884×2877，visible）
+- 旧候选 div.job-banner 只是顶部状态条，不含职位描述；它仍在页面上，但不应作为正文抽取根。
+- 职位描述标题：h3「职位描述」，其父节点 div.detail-content-header，再父 div.job-detail-section，再父 div.job-detail。
+- 职位描述正文：div.job-sec-text（h3 的兄弟节点，visible，文本以「【岗位职责】…」开头）。
+- 旧候选 p.desc 在该页不存在（形状 A 的面板才会出现）。
+
+立即沟通入口
+- 文本「立即沟通」的元素：a.btn.btn-startchat（rect x=187,y=151,w=150,h=45，visible/enabled/unobstructed）
+- 外层：div.btn.btn-startchat-wrap（同尺寸）
+- 同一文本在页面里还有一份隐藏副本（rect 0×0，visible=false），定位时必须按可见那一份取。
+- `browser.act.click` 用 CSS 候选 `a.btn.btn-startchat` 时定位分只有 10（class 选择器分低），
+  但传入 `HitAddress{candidateIndex,hitIndex}` 后 CDP 点击成功（status=done / channel=cdp / trusted=true）。
+
+点击「立即沟通」之后的页面形状
+- 页面没有跳转（kernelViewUrl 仍是 job_detail），而是在同页长出一块内联聊天面板：
+  div.startchat-content（rect 700×464）。
+- 面板里有 textarea.input-area（rect 422×74，visible）与 div.send-message（class 含 disable，文本「发送」）。
+- 面板文本出现「已发送 您好，可以和您聊聊吗？」——这是 BOSS 自己点「立即沟通」后发出的默认问候，
+  不是本应用的 `greet.perform` 发出的；应用账本里没有对应的 greet 行。
+- 该内联面板里没有 input[type=file]；「新增附件简历」入口在页面上层的简历/附件菜单里，不在聊天面板内。
+
+结论
+- 独立详情页的 description 必须走 div.job-detail → div.job-sec-text；旧 p.desc / div.job-banner 组合会读空。
+- 真实 BOSS 的打招呼入口是岗位详情页的 a.btn.btn-startchat，点击后进入内联聊天面板；
+  现有适配器直接导航 /web/geek/chat 并等 div#chat-input.chat-input，和这条真实路径不一致。
+- 真实 BOSS 的投递入口不在内联聊天面板里；现有 deliver 知识包没有覆盖从会话/附件菜单到文件上传的整条路径。

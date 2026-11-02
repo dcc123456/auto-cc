@@ -276,6 +276,19 @@ describe('抓取编排（spec 2.3-01 / 2.3-06）', () => {
     expect(fake.scrolls).toBe(0);
   });
 
+  it('一页返回的卡片多于 limit 时，入库也在目标条数处收手，不把整页都写进库', async () => {
+    const onePage: PageScript = {
+      listContainer: pack.locators.jobCard!,
+      list: [extractOf(LIST_URL, [cardRow(0, '5001'), cardRow(1, '5002'), cardRow(2, '5003')])],
+      detail: [],
+    };
+    const { capture, jd } = await boot(onePage, { targetCount: 20 });
+    const run = await capture.run({ keyword: '前端', limit: 2 });
+    expect(run).toMatchObject({ rounds: 1, stored: 2, total: 2, stoppedBy: 'target-count' });
+    expect(run.captured.map((job) => job.jobId)).toEqual(['5001', '5002']);
+    expect(jd.count()).toBe(2);
+  });
+
   it('关键词为空时结构化失败，且不留下半个运行读数', async () => {
     const { capture, jd } = await boot(twoScreenScript(['1001']), { targetCount: 1 });
     await expect(capture.run({ keyword: '  ' })).rejects.toMatchObject({

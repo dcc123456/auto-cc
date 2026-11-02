@@ -262,6 +262,9 @@ export class JdCaptureService extends Service {
         touched.add(result.id);
         // 上一轮已经读到过详情的行不再跑详情页：重复抓取只补列表字段（spec 2.3-04 的实际收益）。
         if (!result.hasDetail) needsDetail.push(summary);
+        // 目标条数要在**这一张卡处理完就收手**：一页可能返回几十张卡，等整页走完再判
+        // 就会把"先抓 5 条"变成"先抓一整页"（9.2 首发实测：limit=5 入库 12 条）。
+        if (collected.size >= target) break;
       }
       this.progress('listing', rounds, containers, touched.size, target, '');
       if (collected.size >= target) {

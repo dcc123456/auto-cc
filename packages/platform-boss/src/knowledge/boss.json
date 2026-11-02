@@ -136,7 +136,7 @@
       ]
     },
     "detailRoot": {
-      "description": "详情正文的根容器。真站点有**两种形状**而仿站只有一种（证据 8.0-04 第一节，本条最重要的结论）：形状 A 是列表页右侧同页面板 div.job-detail-body（外层 div.job-detail-container 自己是滚动容器），形状 B 是真·独立详情页，那里取证到的只有状态行 div.job-banner。两条候选各命中 1，抽取时谁在场用谁",
+      "description": "详情正文的根容器。真站点有**两种形状**而仿站只有一种（证据 8.0-04 第一节）：形状 A 是列表页右侧同页面板 div.job-detail-body（外层 div.job-detail-container 自己是滚动容器）；形状 B 是真·独立详情页，2026-11-02 活体复量为 div.job-detail（它包住职位描述、Boss 信息与相似职位；旧读数里的 div.job-banner 只是顶部状态条，不含正文）。两条候选各命中 1，抽取时谁在场用谁",
       "cardinality": "single",
       "effect": "read",
       "candidates": [
@@ -152,18 +152,18 @@
         },
         {
           "strategy": "css",
-          "value": "div.job-banner",
+          "value": "div.job-detail",
           "evidence": {
-            "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
-            "url": "https://www.zhipin.com/job_detail/<jobId>.html?securityId=<…>",
-            "verifiedAt": 1791417600000,
+            "ref": "docs/acceptance/09-workbench-ia/9.2-real-boss-detail-dom.txt",
+            "url": "https://www.zhipin.com/job_detail/<jobId>.html",
+            "verifiedAt": 1793617200000,
             "hits": 1
           }
         }
       ]
     },
     "detailDescription": {
-      "description": "职位描述正文 p.desc（形状 A 面板实测）。两条硬事实：① textContent 是脏的（里面塞了混淆类的 <style> 与水印 span），必须走 innerText 口径，抽取脚本已经是 innerText 优先（证据 8.0-03 第五节第 2 条）；② 形状 B（独立详情页）的正文节点本次**没有取证**，那里只读到状态行与明文薪资，所以从列表 href 直达时这一条可能读空",
+      "description": "职位描述正文。形状 A 面板实测 p.desc；形状 B（独立详情页）2026-11-02 活体复量为 div.job-sec-text（h3「职位描述」的兄弟节点）。两条候选按顺序尝试，抽到的正文仍走 innerText 口径（textContent 里塞了混淆 style 与水印 span）",
       "cardinality": "single",
       "effect": "read",
       "candidates": [
@@ -174,6 +174,15 @@
             "ref": "docs/acceptance/08-real-platform-driving/8.0-04-detail-dom-evidence.txt",
             "url": "https://www.zhipin.com/web/geek/jobs?query=%E5%89%8D%E7%AB%AF%E5%BC%80%E5%8F%91%E5%B7%A5%E7%A8%8B%E5%B8%88&city=101020100&industry=&position=",
             "verifiedAt": 1791417600000
+          }
+        },
+        {
+          "strategy": "css",
+          "value": "div.job-sec-text",
+          "evidence": {
+            "ref": "docs/acceptance/09-workbench-ia/9.2-real-boss-detail-dom.txt",
+            "url": "https://www.zhipin.com/job_detail/<jobId>.html",
+            "verifiedAt": 1793617200000
           }
         }
       ]

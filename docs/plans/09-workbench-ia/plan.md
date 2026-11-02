@@ -75,3 +75,20 @@ JobListResultView { total, matched, rows }
 - 界面退场不等于服务删除：`pdf.io.*` / `pdf.edit.*` / `resume.editor.*` / `resume.snapshot.*` / `kb.*` 仍被测试、harness 或生成链使用；渲染层 grep 零引用，后端测试全绿。
 - 预览与导出同源：弹窗只消费 `resume.export.preview`；Office-cc 仍先 `toPdf` 再 `openInCompanionEditor`，两步顺序由 `companion-handoff.test.ts` 守住。
 - 筛选不在渲染层作假：服务端返回 `total/matched`，界面两条读数同时上屏。
+
+## 6. 2026-11-02 真实 BOSS 复测补记
+
+用用户已登录的真实 BOSS 账号跑了一轮最小规模流程（搜「前端开发」/上海 → 入库 → 打开岗位页 → 打招呼 → 投递）。
+本轮直接修掉三处：`script.jdId` 误用库内自增 id（改传平台 `jobId`）、`limit` 被一整页卡片吞掉（卡片循环内收手）、
+独立详情页正文选择器失配（根 `div.job-detail`、正文 `div.job-sec-text`）。
+
+仍走不通、已登记在 spec `9.2-05…08` 的：
+
+- 真实打招呼入口是岗位详情页 `a.btn.btn-startchat` → 同页内联 `textarea.input-area` + `div.send-message`，
+  现有适配器走 `/web/geek/chat` 等 `div#chat-input.chat-input`，会 `WAIT_TIMEOUT clickable`；
+- 真实投递的附件上传路径未进知识包，`deliver.perform` 会 `WAIT_TIMEOUT appear`；
+- `entitlement.mode = unlimited`，日上限未执行；
+- 会话首页仍在加载时立刻抓取会撞 `(-3) loading`，需等 ready 或重试。
+
+完整读数、账实差异（手动点「立即沟通」由 BOSS 发出默认问候、应用账本无 greet 行）与优化建议见
+`docs/acceptance/09-workbench-ia/9.2-real-boss-flow-findings.md`。

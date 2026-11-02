@@ -338,7 +338,7 @@ export function JobLabPanel() {
           bridge?.outbound['greet.perform']({
             platform: row.platform,
             jobId: row.jobId,
-            script: { jdId: String(row.id), title: row.title, company: row.company },
+            script: { jdId: row.jobId, title: row.title, company: row.company },
           }),
         {
           apply: (receipt) => {
