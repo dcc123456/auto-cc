@@ -1,0 +1,79 @@
+09 工作台信息架构收敛 · 活体读数（2026-11-02，CDP 10222 / --url 5173）
+
+一、导航显示名（9.1-01）
+命令：pnpm harness eval --url 5173 --expr-file tmp/09/probe-nav.js
+读数：
+[{"action":"nav-chat","view":"chat","text":"对话"},
+ {"action":"nav-jobs","view":"jobs","text":"岗位"},
+ {"action":"nav-resume","view":"resume","text":"简历"},
+ {"action":"nav-workflow","view":"workflow","text":"流程"},
+ {"action":"nav-models","view":"models","text":"模型"},
+ {"action":"nav-trust","view":"trust","text":"运行记录"},
+ {"action":"nav-diagnostics","view":"diagnostics","text":"设置"}]
+结论：显示名已改；data-action 与 data-view 一字未改。
+
+二、设置页（9.1-02）
+命令：pnpm harness eval --url 5173 --expr-file tmp/09/probe-settings.js
+读数：
+{"settingsPanel":true,"version":"应用版本 44.4.5","updateSection":true,
+ "oldLabs":{"shell":false,"locator":false,"workflowLab":false,"assembly":false},
+ "bodyHasOldTitles":{"bridge":false,"locator":false,"assembly":false}}
+截图：docs/acceptance/09-workbench-ia/9.1-01-settings.png
+结论：关于 + 更新在，桥接/定位/工作流/装配四个实验台均不在 DOM。
+
+三、岗位库内筛选（9.2-01）
+种子：三行 fixture 岗位（A 前端/甲公司/上海/3-5 年；B 后端/乙公司/北京/5-10 年并有一条招聘者消息；C 前端/乙公司/上海/5-10 年）。
+命令：pnpm harness eval --url 5173 --expr-file tmp/09/probe-jobs-filter.js
+读数：
+initial    库内 3 条 · 命中 3 条 · 当前显示 3 条；行序 B,A,C（已回复优先）
+keyword    关键词「前端」→ 库内 3 条 · 命中 2 条 · 当前显示 2 条；行 A,C
+cleared    清空 → 库内 3 条 · 命中 3 条 · 当前显示 3 条
+onlyReplied 只看已回复 → 库内 3 条 · 命中 1 条 · 当前显示 1 条；行 B
+截图：docs/acceptance/09-workbench-ia/9.2-01-jobs-filter.png
+服务端单测：packages/platform-boss/src/jd-store.test.ts 新增同名用例，33 例通过（见 9.4-01-gates.txt）。
+
+四、岗位详情动作与简历生成入口（9.2-03）
+命令：pnpm harness eval --url 5173 --expr-file tmp/09/probe-jobs-actions.js
+读数：
+rows ["B","A","C"]；选中 A 后 jd-detail 可见；
+jd-open-page / jd-generate-resume-row 均在；
+来源 URL = http://127.0.0.1:10233/boss/detail?jobId=A
+点「用这份 JD 生成简历」后：
+resume-generate-page=true；generate-panel data-generate-seed="前端工程师"；
+JD 输入框首段 = 负责前端页面开发与性能优化。；nav-resume data-selected=true。
+补充：点击导航「简历」后页面回到简历列表（trail 收起时重置），见 tmp/09/probe-trail-reset.js：
+afterTrail {generatePage:true,list:false} → afterManualNav {generatePage:false,list:true}。
+
+五、岗位「在浏览器打开」（9.2-02）
+前置：platform-boss 运行时 pack 临时切到 fixture（只写内存），fixture 服务 10233 已起。
+命令：pnpm harness eval --url 5173 --expr-file tmp/09/probe-jobs-open.js
+读数：
+notice = 已打开岗位页：http://127.0.0.1:10233/boss/detail?jobId=A
+error = null
+kernelViewUrl = activeKernelViewUrl = http://127.0.0.1:10233/boss/detail?jobId=A
+kernelViewVisible = true
+随后已把 pack 还原为 real（tmp/09/patch-real.js 回 state=active）。
+说明：真实 BOSS 域名的同一路径属用户在场项；本轮只证明组合调用（sessions.open → page.navigate）与 URL 落地。
+
+六、简历列表 / 表单页 / 预览弹窗 / 变体只读（9.3-02 / 03 / 04 / 06）
+命令：tmp/09/probe-resume-back.js、probe-resume-form.js、probe-resume-preview.js、probe-variant.js、probe-narrow.js
+列表：4 张卡（王五、李四、张三、既有真实简历），每张都有编辑表单/预览/按 JD 生成（母版）/交给 Office-cc/删除；
+      旧入口 open-pdf-edit / snapshots / desk-fixtures 均为 false。
+表单页（resume-demo）：resume-form-page=true，docId=resume-demo；profileColumns=2、intentColumns=2、entryGridColumns=[2,2]；
+      字段 10 格、返回/预览/交给 Office-cc/保存四键齐。
+窄窗（620px）：profileColumns=1。
+预览弹窗（resume-demo）：modal=true、frame=true、srcDocLength=38085、slotHeight=565、status=已是最新、关闭后 modal=false。
+截图：9.3-02-resume-form-page.png、9.3-04-resume-preview-modal.png。
+变体（resume-demo-variant，父 resume-demo，jdLabel=前端工程师 · 甲公司）：
+      编辑按钮 aria-disabled=true、data-disabled-reason=RESUME_VARIANT_READ_ONLY；
+      卡片上没有「按 JD 生成」；预览/Office-cc/删除仍在。
+多文件服务路径：tmp/09/resume-alice.txt 与 resume-bob.txt 各调一次 resume.parse.fromFile，
+      两份都 status=imported、isNew=true；刷新列表后 4 张卡（王五/李四/张三/既有真实简历）。
+      **系统文件面板的多选与 UI 聚合回执未在无人值守下点击**（原生 dialog 无法由 CDP 驱动），留 `[!]` 等用户在场。
+
+七、截图去重
+md5 -q docs/acceptance/09-workbench-ia/*.png | sort | uniq -c
+1 921e37ccf687e4193a8f43bc1da8a3bb  9.1-01-settings.png
+1 94d9a86fabc9e0ff6be5720c46f267d4  9.2-01-jobs-filter.png
+1 a970a388c549b733d29cff80448c98db  9.3-02-resume-form-page.png
+1 b5f03e0fe6a2a410d537e5ab60218ea8  9.3-04-resume-preview-modal.png
