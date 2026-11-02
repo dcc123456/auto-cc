@@ -1,0 +1,45 @@
+# 7.3-09 · 多实例与移除的可见性 — 复现与修复读数
+
+- 时间：2026-11-02
+- 背景：用户报「项目不支持添加多实例」「无法移除手动添加的模型」。先在活体上复现，再修可见性。
+
+## 一、先复现：两个操作本身都能成功
+
+### 1. 多实例（保存第二条 + 左栏分组 + 删除）
+
+```json
+{"saveReading":{"disabled":false,"reason":null},"afterSave":{"paneId":"234fecaa-ce25-44ba-b8c6-d54f24a19071","instanceOptions":2,"providerCount":2,"providerLabels":["阿里千问","probe-instance-2"],"railInstances":[{"providerId":"7b0170e3-061a-4815-903d-38eeac8b11c4","text":"阿里千问https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"},{"providerId":"234fecaa-ce25-44ba-b8c6-d54f24a19071","text":"probe-instance-2https://dashscope.aliyuncs.com/compatible-mode/v1"}],"notice":"probe-instance-2 已保存"},"afterDelete":{"providerLabels":["阿里千问"],"notice":"已删除这一家"}}
+```
+
+结论：同一预设的第二条实例能保存、左栏出现两条缩进实例、删除也只删新加的那条。探针实例已删除。
+
+### 2. 手动模型的添加与移除
+
+```json
+{"storedAfterAdd":["ark-code-latest","deepseek-v4.1-flash","deepseek-v4.1-flash-1017","doubao-embedding-vision","probe-manual-tmp","qwen3.7-plus","qwen3.8-flash"],"remove":{"found":true,"disabled":false,"reason":null},"storedAfterRemove":["ark-code-latest","deepseek-v4.1-flash","deepseek-v4.1-flash-1017","doubao-embedding-vision","qwen3.7-plus","qwen3.8-flash"],"notice":"remove-model：成功"}
+```
+
+结论：手动添加的非绑定模型能移除，探针模型已清理。
+
+## 二、真正的问题：状态不可见
+
+原界面上：
+
+- 点「添加实例」后只是换成一张同款表单，没有说明"这是新增、不会覆盖"，默认显示名也与原来相同；两条同名实例在左栏看起来像没加。
+- 正被 chat / embed 绑定的模型，移除按钮只是灰掉；原因 `MODEL_BOUND` 只在 tooltip 里，肉眼看不到"为什么不能删"。用户看到的正是「手动加的模型删不掉」。
+
+## 三、修复后的活体读数
+
+```json
+{"before":{"instanceCount":"已添加 1 条实例","rows":[{"model":"ark-code-latest","inUse":null,"removeReason":null},{"model":"deepseek-v4.1-flash","inUse":null,"removeReason":null},{"model":"deepseek-v4.1-flash-1017","inUse":"对话在用","removeReason":"MODEL_BOUND"},{"model":"doubao-embedding-vision","inUse":"向量在用","removeReason":"MODEL_BOUND"},{"model":"qwen3.7-plus","inUse":null,"removeReason":null},{"model":"qwen3.8-flash","inUse":null,"removeReason":null}],"boundHint":"标「在用」的模型由对话或向量占用；先到「设置默认模型」改绑，才能移出清单。"},"adding":{"paneId":"new-dashscope","hint":"现有 1 条实例；保存这一条会新增一条，不会覆盖。","label":"阿里云 · 百炼 · 实例 2","cancel":true,"instanceCount":"已添加 1 条实例"},"afterCancel":"7b0170e3-061a-4815-903d-38eeac8b11c4"}
+```
+
+- 右栏头部明写「已添加 N 条实例」；新增表单一打开就写「现有 N 条实例；保存这一条会新增一条，不会覆盖」。
+- 第二家起默认名自动带「· 实例 {{index}}」，左栏不再出现两条同名行。
+- 新增表单有「取消」，回到原来的实例。
+- 绑定行直接显示「对话在用」/「向量在用」，移除按钮仍按 `MODEL_BOUND` 禁用；清单下方常驻一条改绑提示。
+- 未绑定的手动模型（`ark-code-latest`）没有「在用」标签，移除按钮可用。
+
+## 四、证据缺口
+
+更新后的截图未能补拍：共享 dev 窗口在 `Page.reload` 之后 `Page.captureScreenshot` 会挂住（本机已复现多次，属 AGENTS §9 已记的隐藏窗口截图问题）。本轮以 DOM 读数取证；旧版界面截图 `7.3-03-provider-pane-{light,dark}.png` 仍保留，布局未变，新增的是文案与标签。待用户在场或换一个可截图的实例时补拍。

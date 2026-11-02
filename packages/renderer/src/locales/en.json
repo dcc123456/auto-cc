@@ -141,7 +141,17 @@
         "saved": "{{label}} saved",
         "delete": "Delete instance",
         "modelSearchPlaceholder": "Search models…",
-        "noModelsFiltered": "No matching model"
+        "noModelsFiltered": "No matching model",
+        "customName": "Custom endpoint",
+        "instanceSuffix": "{{name}} · instance {{index}}",
+        "instanceCount": "{{count}} instance(s) added",
+        "newInstanceHintFirst": "This is the first instance of this provider; it appears in the left rail after saving.",
+        "newInstanceHintMore": "{{count}} instance(s) already exist; saving adds one more without replacing them.",
+        "cancel": "Cancel",
+        "inUseChat": "in use by chat",
+        "inUseEmbed": "in use by embeddings",
+        "inUseBoth": "in use by chat and embeddings",
+        "boundHint": "Models marked \"in use\" are held by chat or embeddings; rebind them under Set default models before removing."
       },
       "defaults": {
         "heading": "Set default models",

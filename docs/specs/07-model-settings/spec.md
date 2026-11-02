@@ -114,7 +114,7 @@
 # 7.3 模型工作台（两栏 + 默认模型）— 验收 Spec
 
 > 实施计划：`docs/plans/07-model-settings/plan.md` §8。用户 2026-11-02 点名，四条边界见 §8.1。
-> **条目统计**：8 条。**总基调**：7.3 验的是「模型设置从信任区的一段变成独立两栏页之后，
+> **条目统计**：9 条。**总基调**：7.3 验的是「模型设置从信任区的一段变成独立两栏页之后，
 > 信息架构、配置能力与默认模型这三件事仍然等价且只有一个人口」。
 > **7.2-e 债务**：7.3 取代 7.2-e 的 V 半边——7.2-14 的两主题截图由 7.3-01/02/03 承担；
 > 7.2-09/10/11/15 的活体半边在 7.3 落地后于新页面补取。7.3 未完成前 7.2 的那 8 行保持 `[ ]`。
@@ -129,12 +129,13 @@
 | 7.3-06 | 窄于 `@2xl` 纵向回落；加载 / 无实例 / 无模型 / 桥接缺失 / 拉取失败五态齐全                                                      | V    | 窄窗截图 + DOM 读数；五态各截一张或合并成一张带 `data-testid` 的读数文件；禁用态全部带原因码。证据：`7.3-06-narrow-light.png`（760×772）+ `7.3-06-narrow-readings.txt`（容器 500px 时 `grid: "500px"`，左右各 500px 纵向堆叠）                                                                                                                                                                                                                                                                                                                                                    | [x]  |
 | 7.3-07 | 控件全部出自 `src/ui/**`；双语键齐；禁用态带原因码；无品牌 logo、无自绘图标、无裸文案                                           | C    | `pnpm lint` 绿（`check-renderer-conventions.ts` 第 2/3/10/11/13/14/15 节）；两份语言包键集与占位符差集 0；左栏绿点为 Tailwind 圆点。读数：`7.3-07-gates-readings.txt`（typecheck / lint / format 全 0；6 张主证据 md5 互异）                                                                                                                                                                                                                                                                                                                                                      | [x]  |
 | 7.3-08 | 旧 `ModelSettingsPanel` 删净（无引用、无死文件）；7.2 的 U 类测试全绿；`pnpm --filter @auto-cc/llm test` 通过                   | C+U  | `grep -rn "ModelSettingsPanel\|trust.models" packages scripts` 零命中（解释性历史注释除外）；llm 测试日志 `EXIT=0`；旧面板同名 `data-testid` 在新页保留。读数：`7.3-08-old-panel-readings.txt`（源码/脚本 0 命中、旧文件不存在、llm 69 条全绿、关键锚点计数）                                                                                                                                                                                                                                                                                                                     | [x]  |
+| 7.3-09 | 多实例与移除的可见性：新增实例明说"不会覆盖"、第二家起默认名可区分、可取消；被绑定模型显示「在用」与改绑提示                    | C+V  | 活体读数 `7.3-09-visibility-readings.txt`：第二条实例保存后 `providerCount=2`、左栏两条缩进、删除只删新条；手动模型增删成功；`已添加 1 条实例` / `现有 1 条实例；保存这一条会新增一条` / 默认名 `阿里云 · 百炼 · 实例 2` / 绑定行 `对话在用`、`向量在用` + `MODEL_BOUND` + 常驻改绑提示。更新后的截图待可截图实例补拍（共享窗口 reload 后 capture 挂住），旧版 `7.3-03` 截图保留                                                                                                                                                                                                  | [x]  |
 
 ## 收尾自检（AGENTS.md §7.4，7.3 收口时逐项回答）
 
 - [!] ① `pnpm typecheck` / `pnpm lint` / `pnpm format:check` 全绿（EXIT=0）；`pnpm test` 475/476，唯一失败在 `packages/resume-kb/src/generate-service.test.ts`（HEAD 已有、工作树里该包无本地差异，与本片无关，详见 `7.3-07-gates-readings.txt`）。因此 ① 不写成 `[x]`，避免"全绿"的假话
 - [x] ② V 类条目逐条对应截图或 DOM 读数，本目录归档，文件名对应条目 ID；同批截图 `md5 -q | sort | uniq -c` 去重后 6 个不同值
-- [x] ③ 上表状态位更新：7 条 `[x]`，7.3-04 一条 `[!]`（活体改绑会重建下游并改动共享 dev 现场，待用户在场或隔离实例补取）
+- [x] ③ 上表状态位更新：8 条 `[x]`，7.3-04 一条 `[!]`（活体改绑会重建下游并改动共享 dev 现场，待用户在场或隔离实例补取）
 - [x] ④ 复用检查：读口只有 `useModelsData` 一份；候选编解码复用 `encodeCandidate` / `decodeCandidate`；提供商目录仍只有 `PROVIDER_PRESETS` 一份
 - [x] ⑤ 死代码检查：旧 `ModelSettingsPanel.tsx` 已删除；`packages/scripts` 源码零引用；旧面板的 `settings.model.*` 孤儿文案已从两份语言包清掉
 - [x] ⑥ Tailwind / lucide / i18n：绿点为 Tailwind 圆点、图标只用 lucide、文案全走语言包；`pnpm lint` 的渲染层机检全 0

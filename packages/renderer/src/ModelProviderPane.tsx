@@ -1,7 +1,7 @@
-import { PlugZap, Plus, Save, Trash2 } from 'lucide-react';
+import { Minus, PlugZap, Plus, Save, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { LlmCheckView, LlmFetchModelsView } from '@auto-cc/shared';
+import type { LlmCheckView, LlmFetchModelsView, LlmLegName } from '@auto-cc/shared';
 import { DeskButton, DeskCheck, DeskField, DeskSelect, Tag, deskReason } from './ui/controls';
 import type { ModelsData } from './useModelsData';
 import { encodeCandidate, providerKey, storedModelsOf } from './useModelsData';
@@ -23,6 +23,8 @@ export interface ModelProviderPaneProps {
   instanceId?: string;
   onSelectInstance: (providerId: string) => void;
   onAddInstance: () => void;
+  /** 放弃新增实例，回到这家已有的第一条（没有就回默认模型） */
+  onCancelNew: () => void;
   onInstanceDeleted: (providerId: string) => void;
 }
 
@@ -40,6 +42,7 @@ export function ModelProviderPane({
   instanceId,
   onSelectInstance,
   onAddInstance,
+  onCancelNew,
   onInstanceDeleted,
 }: ModelProviderPaneProps) {
   const { t } = useTranslation();
@@ -49,9 +52,21 @@ export function ModelProviderPane({
   const instance = instances.find((row) => row.id === instanceId);
   const stored = storedModelsOf(data, instance?.id);
 
+  /**
+   * 新增实例的默认显示名。
+   *
+   * 第二家起自动带「实例 N」后缀：否则两条同名实例在左栏看起来像同一条，人会以为没加进去。
+   * 第一家的默认名保持提供商译文名，`custom` 用「自定义端点」兜底（它没有译文名）。
+   */
+  const providerName = preset && preset.id !== 'custom' ? t(providerKey(preset.id)) : t('models.panel.customName');
+  const newLabel =
+    instances.length > 0
+      ? t('models.panel.instanceSuffix', { name: providerName, index: instances.length + 1 })
+      : providerName;
+
   const [draft, setDraft] = useState<ProviderDraft>(() => ({
     endpointId: instance?.endpointId ?? preset?.endpoints?.[0]?.id ?? '',
-    label: instance?.label ?? (preset && preset.id !== 'custom' ? t(providerKey(preset.id)) : ''),
+    label: instance?.label ?? newLabel,
     baseUrl: instance?.baseUrl ?? preset?.baseUrl ?? '',
     keyDraft: '',
   }));
@@ -64,12 +79,19 @@ export function ModelProviderPane({
   const { dead } = deskReason(t, 'settings.model', data.busy ? 'ACTION_BUSY' : undefined);
   const bridgeDead = dead(bridge ? undefined : 'BRIDGE_MISSING').disabledReason;
 
-  /** 两条通道正绑着的 `<实例>::<模型>` 组合，用来挡住"删掉一条正在用的模型"。 */
-  const boundCandidates = new Set(
+  /** 这条模型正被哪几条通道绑着；空数组表示可以移出。 */
+  const boundLegsOf = (model: string): LlmLegName[] =>
     (data.view?.legs ?? [])
-      .filter((item) => item.boundProviderId !== null && item.model !== null)
-      .map((item) => encodeCandidate(item.boundProviderId as string, item.model as string)),
-  );
+      .filter((item) => item.boundProviderId === instance?.id && item.model === model)
+      .map((item) => item.leg);
+
+  /** 「在用」标签的短文案：一条 / 两条通道分别说清。 */
+  const inUseLabel = (legs: LlmLegName[]): string =>
+    legs.length > 1
+      ? t('models.panel.inUseBoth')
+      : legs.includes('chat')
+        ? t('models.panel.inUseChat')
+        : t('models.panel.inUseEmbed');
 
   /** 端点变体（方舟标准 / Coding Plan 那一类）：地址跟着变体走，所以两格不是两次表态。 */
   const endpointsOf = preset?.endpoints ?? [];
@@ -205,6 +227,11 @@ export function ModelProviderPane({
             {instance ? instance.label : t('models.panel.newTitle', { provider: t(providerKey(presetId)) })}
           </h3>
           <p className="mt-1 break-all text-[11px] text-slate-400">{instance?.baseUrl ?? preset?.baseUrl}</p>
+          {instances.length > 0 && (
+            <p className="mt-0.5 text-[11px] text-slate-400" data-testid="models-instance-count">
+              {t('models.panel.instanceCount', { count: instances.length })}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {instances.length > 0 && (
@@ -238,6 +265,13 @@ export function ModelProviderPane({
         className="mt-3 grid gap-2 rounded-chip border border-line bg-ink-900/60 p-3 sm:grid-cols-2"
         data-testid="settings-model-form"
       >
+        {!instance && (
+          <p className="text-[11px] text-slate-400 sm:col-span-2" data-testid="models-new-instance-hint">
+            {instances.length === 0
+              ? t('models.panel.newInstanceHintFirst')
+              : t('models.panel.newInstanceHintMore', { count: instances.length })}
+          </p>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-slate-400">{t('settings.model.labelField')}</span>
           <DeskField
@@ -323,6 +357,11 @@ export function ModelProviderPane({
             >
               <Trash2 size={14} />
               {t('models.panel.delete')}
+            </DeskButton>
+          )}
+          {!instance && (
+            <DeskButton action="models-form-cancel" variant="line" compact onClick={onCancelNew}>
+              {t('models.panel.cancel')}
             </DeskButton>
           )}
         </div>
@@ -428,6 +467,7 @@ export function ModelProviderPane({
           )}
           {visibleStored.map((item) => {
             const candidate = encodeCandidate(item.providerId, item.model);
+            const boundLegs = boundLegsOf(item.model);
             return (
               <li
                 key={candidate}
@@ -438,6 +478,11 @@ export function ModelProviderPane({
                 <Tag tone={item.origin === 'manual' ? 'amber' : undefined}>
                   {t(`settings.model.origin.${item.origin}`)}
                 </Tag>
+                {boundLegs.length > 0 && (
+                  <Tag tone="amber" data-testid="settings-model-in-use">
+                    {inUseLabel(boundLegs)}
+                  </Tag>
+                )}
                 <DeskButton
                   action="settings-model-remove"
                   variant="seal"
@@ -445,15 +490,22 @@ export function ModelProviderPane({
                   busy={data.busy === 'remove-model'}
                   result={data.resultOf('remove-model')}
                   doneLabel={t('desk.done.modelRemoved')}
-                  {...dead(boundCandidates.has(candidate) ? 'MODEL_BOUND' : bridgeDead)}
+                  {...dead(boundLegs.length > 0 ? 'MODEL_BOUND' : bridgeDead)}
                   onClick={() => removeStoredModel(item.model)}
                 >
+                  <Minus size={14} />
                   {t('settings.model.row.remove')}
                 </DeskButton>
               </li>
             );
           })}
         </ul>
+
+        {visibleStored.some((item) => boundLegsOf(item.model).length > 0) && (
+          <p className="mt-2 text-[11px] text-amber" data-testid="models-bound-hint">
+            {t('models.panel.boundHint')}
+          </p>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <DeskButton

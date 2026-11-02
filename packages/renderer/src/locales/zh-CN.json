@@ -141,7 +141,17 @@
         "saved": "{{label}} 已保存",
         "delete": "删除实例",
         "modelSearchPlaceholder": "搜索模型…",
-        "noModelsFiltered": "没有匹配的模型"
+        "noModelsFiltered": "没有匹配的模型",
+        "customName": "自定义端点",
+        "instanceSuffix": "{{name}} · 实例 {{index}}",
+        "instanceCount": "已添加 {{count}} 条实例",
+        "newInstanceHintFirst": "这是这家提供商的第一条实例；保存后出现在左栏。",
+        "newInstanceHintMore": "现有 {{count}} 条实例；保存这一条会新增一条，不会覆盖。",
+        "cancel": "取消",
+        "inUseChat": "对话在用",
+        "inUseEmbed": "向量在用",
+        "inUseBoth": "对话与向量在用",
+        "boundHint": "标「在用」的模型由对话或向量占用；先到「设置默认模型」改绑，才能移出清单。"
       },
       "defaults": {
         "heading": "设置默认模型",

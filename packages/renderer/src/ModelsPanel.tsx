@@ -193,6 +193,12 @@ export function ModelsPanel() {
                 setSelection({ kind: 'preset', presetId: selectedPreset.id, instanceId })
               }
               onAddInstance={() => setSelection({ kind: 'preset', presetId: selectedPreset.id })}
+              onCancelNew={() => {
+                const first = instancesOf(selectedPreset.id)[0];
+                setSelection(
+                  first ? { kind: 'preset', presetId: selectedPreset.id, instanceId: first.id } : { kind: 'defaults' },
+                );
+              }}
               onInstanceDeleted={(deletedId) => {
                 const rest = instancesOf(selectedPreset.id).filter((row) => row.id !== deletedId);
                 setSelection({
