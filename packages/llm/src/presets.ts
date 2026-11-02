@@ -1,8 +1,9 @@
 /**
  * `llm.presets` —— OpenAI 兼容提供商目录（spec 7.2-01 / 03，plan §7.1 的一手来源）。
  *
- * 19 家预设照搬 `browser-copilot/src/lib/providers.ts:71-271`（用户本人的项目，不存在 §8.7 的许可问题），
+ * 前 19 家预设照搬 `browser-copilot/src/lib/providers.ts:71-271`（用户本人的项目，不存在 §8.7 的许可问题），
  * `id` / `baseUrl` / `defaultModel` / `docsUrl` 与端点变体逐条对得上——7.2-01 就是按这张对照表验收的。
+ * 7.3 按用户点名追加 Anthropic / Gemini / HuggingFace / Cohere / vLLM 五家 OpenAI 兼容端点（plan §8.4）。
  * 与来源不同的三处形状决定写在 `LlmProviderView` 的注释里（不声明通道、不带显示名、不带厂商说明）。
  *
  * 一条来自来源实现的教训随迁：那边的模型清单只当输入候选、不入库（`llm.ts:545-547` 注释），
@@ -140,6 +141,36 @@ export const PROVIDER_PRESETS: LlmProviderView[] = [
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     defaultModel: 'meta/llama-3.1-8b-instruct',
     docsUrl: 'https://integrate.api.nvidia.com/',
+  },
+  {
+    id: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    defaultModel: 'claude-sonnet-4-5',
+    docsUrl: 'https://docs.anthropic.com/en/api/openai-sdk',
+  },
+  {
+    id: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    defaultModel: 'gemini-2.5-flash',
+    docsUrl: 'https://ai.google.dev/gemini-api/docs/openai',
+  },
+  {
+    id: 'huggingface',
+    baseUrl: 'https://router.huggingface.co/v1',
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct',
+    docsUrl: 'https://huggingface.co/docs/inference-providers',
+  },
+  {
+    id: 'cohere',
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    defaultModel: 'command-a-03-2025',
+    docsUrl: 'https://docs.cohere.com/docs/compatibility-api',
+  },
+  {
+    id: 'vllm',
+    baseUrl: 'http://localhost:8000/v1',
+    defaultModel: 'Qwen/Qwen3-8B',
+    docsUrl: 'https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html',
   },
   {
     id: 'custom',

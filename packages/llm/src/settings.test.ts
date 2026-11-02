@@ -134,8 +134,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('服务商目录（spec 7.2-01：参考实现的全部 19 家）', () => {
-  it('收录 19 家预设，`custom` 收口在末尾', () => {
+describe('服务商目录（spec 7.2-01 的 19 家 + spec 7.3-05 追加的 5 家）', () => {
+  it('收录 24 家预设，`custom` 收口在末尾', () => {
     expect(PROVIDER_PRESETS.map((item) => item.id)).toEqual([
       'deepseek',
       'ark',
@@ -155,6 +155,11 @@ describe('服务商目录（spec 7.2-01：参考实现的全部 19 家）', () =
       'mistral',
       'xai',
       'nvidia',
+      'anthropic',
+      'gemini',
+      'huggingface',
+      'cohere',
+      'vllm',
       'custom',
     ]);
     // 自定义项的端点必须为空：任何 OpenAI 兼容地址都走同一条路径，预设只是填格子的建议。

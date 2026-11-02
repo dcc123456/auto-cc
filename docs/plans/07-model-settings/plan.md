@@ -390,3 +390,93 @@ CREATE TABLE llm_models (
 | 删提供商留下孤儿（密钥、清单、仍在引用它的角色绑定）                                 | 删除是一条事务：`llm_models` 连带清（外键 CASCADE）+ `clearKey` + 角色绑定回落到"未绑定"并播报缺哪一格 |
 | `llm` 在 `cordis.yml` 里排 `store` 之后才拿得到连接（§9 实测 5.1-c：顺序即挂载顺序） | 现读 `cordis.yml:21` 的 store 已在 `:35` 的 llm 之前；本片不动顺序，若动则同片补一条顺序机检           |
 | 一次绑定改两格 → 下游插件重建两次（§9 实测 2.5）                                     | `bindRole` 一次 `applyConfig` 只写受影响的那条通道，界面把两条合并成一次保存动作，保存后只播报一句     |
+
+---
+
+## 8. P7 · 7.3 模型工作台（2026-11-02 用户点名）
+
+**立项缘由**：用户给出 Cherry Studio 式截图，要求「在菜单中增加模型菜单；左侧提供商、右侧每家配置；
+绿点表示已添加过配置的提供商；顶部『设置默认模型』点开后右侧设置默认模型」。现读 `ModelSettingsPanel.tsx`
+仍是「信任」工作台里的单列三段，信息架构与截图不一致；同时目录缺截图里的 Anthropic / Gemini / HuggingFace /
+Cohere / vLLM。7.3 只改信息架构、版式与目录，**不动存储层、不动桥接、不新增迁移**。
+
+> **2026-11-02 改判（覆盖 §7.5）**：单列三段被本片两栏页取代；§7.5 的「仍挂信任工作台，不新开视图」
+> 不再成立。7.2 已发货的 C/U 断言与 `data-*` 锚点保留，V 半边并入 7.3 取证。
+
+### 8.1 四条边界（用户 2026-11-02 答问）
+
+1. **默认模型只做两条通道**：对话（chat）+ 向量（embed）。候选只出自 `llm_models`，保存仍走 `bindRole`；
+   不扩 LLM / Rerank / TTS / ASR / VLM / OCR / Decision 角色矩阵（那需要新通道与迁移，另立子计划）。
+2. **目录加到 24 家**：保留现有 19 家，追加 Anthropic / Gemini / HuggingFace / Cohere / vLLM；
+   跳过 Replicate / WorldRouter / SystemOne（无 OpenAI 兼容端点或协议不明）。
+3. **单入口**：新增顶层「模型」视图；信任工作台里的模型分区迁走后删除，不允许两套入口并存。
+4. **左栏视觉**：提供商名称 + 绿点；不引入品牌 logo（§5.3 只允许 lucide）。
+
+### 8.2 版式
+
+- 左栏 17rem：搜索框 → 「设置默认模型」固定入口 → 按目录顺序列 24 家预设。
+- **绿点判据 = 该预设至少有一个实例**（用户原话「已添加过配置」），不是「有 key」：
+  Ollama / LM Studio / vLLM 这类本地提供商本来就可以不填 key。key 有无只在右栏以文字报出。
+- 预设下挂实例：恰好 1 个时点预设即选中；≥2 个时缩进列实例行（`label` + baseUrl）。
+- 右栏两种内容：`defaults` → 默认模型；`preset` → 实例表单 + 模型清单。
+- 窄于 `@2xl` 时纵向回落（左栏在上）；沿用 `JobLabPanel.tsx:491–504` 的容器查询栅格。
+
+### 8.3 右栏
+
+- **实例表单常驻**：显示名、Base URL、端点变体（仅多端点时出现）、API Key（password，永不回填，
+  空值保存 = 保持原 key）。保存仍走 `saveProvider`；不再有单独的「编辑」按钮。
+- **模型清单**：「拉取模型」→ `fetchModels`；候选 `DeskCheck` 勾选 → `addModels({origin:'fetched'})`；
+  手动添加 `origin:'manual'`；已入库逐条 `removeModel`，被 chat/embed 绑定的那条禁用（`MODEL_BOUND`）。
+  拉取失败只播报，绝不清空已入库（7.2-07）。
+- **不做能力筛选条**（截图里的 LLM / Embedding / Rerank 标签）：`llm_models` 没有能力元数据，
+  凭空分类等于造第二份事实。
+- **默认模型页**：两条固定行 `data-model-leg="chat|embed"`；候选 `<实例 id>::<模型>`，标签「提供商 · 模型」；
+  无 key 的实例可绑定但标「未填密钥」（yml/env 兜底口径不变）。
+- **clearKey 收窄**：`clearKey(leg)` 只清 `llm.chat` / `llm.embed` 两格兜底密钥，绑定实例时清不动
+  `llm.provider:<id>`。因此该动作只在 `origin !== 'pool'` 且 `key.source === 'secret'` 时可点，
+  否则给原因码 `LEG_BOUND_KEY`；实例密钥的移除由「删除实例」承担。
+- **零后端改动**：复用 13 条 `llm.settings.*`；不加保存前探测、不加按实例清 key（都扩大桥接面，留待 7.4）。
+
+### 8.4 目录扩项（`packages/llm/src/presets.ts`，`custom` 之前）
+
+| id            | baseUrl                                                   | defaultModel                        | docsUrl                                                                |
+| ------------- | --------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------- |
+| `anthropic`   | `https://api.anthropic.com/v1`                            | `claude-sonnet-4-5`                 | `https://docs.anthropic.com/en/api/openai-sdk`                         |
+| `gemini`      | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash`                  | `https://ai.google.dev/gemini-api/docs/openai`                         |
+| `huggingface` | `https://router.huggingface.co/v1`                        | `meta-llama/Llama-3.3-70B-Instruct` | `https://huggingface.co/docs/inference-providers`                      |
+| `cohere`      | `https://api.cohere.ai/compatibility/v1`                  | `command-a-03-2025`                 | `https://docs.cohere.com/docs/compatibility-api`                       |
+| `vllm`        | `http://localhost:8000/v1`                                | `Qwen/Qwen3-8B`                     | `https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html` |
+
+### 8.5 选型与证据（§6.1）
+
+- **Cohere**：官方兼容文档（`docs.cohere.com/docs/compatibility-api`）确认 `Authorization: Bearer` 可用，
+  支持 `/chat/completions`、`/embeddings`、`/audio/transcriptions`，**未列 `GET /models`**。
+  因此该家只保证手动添加模型名；「拉取模型」失败如实播报。
+- **Anthropic**：官方 OpenAI SDK 兼容文档在本机被地区重定向（`platform.claude.com` → app-unavailable），
+  本轮拿不到一手结论。落地前跑无 key 形状探针：`GET <baseUrl>/models` 的 401 = 端点存在且需鉴权、
+  404 = 无该端点；把 HTTP 码记进 `7.3-05-catalog-spike.txt`。若实测 Bearer 不被接受，则该预设按 BLOCKED
+  记档并暂时摘除，鉴权风格扩展另立 7.4，**不偷偷改传输层**。
+- **Gemini / HuggingFace / vLLM**：地址来自各自官方文档的 OpenAI 兼容章节；同样以无 key 探针复核可达性。
+- 自动化测试只打本地 fixture / 无 key 探针；真实 key 的连通性只在用户在场时手测（§7.2 / §7.8）。
+- 否决方案：① 为五家各写一套鉴权与响应适配——`http.ts` 当前只有 Bearer，超出本片；
+  ② 先把 24 家都写进目录再验证——违反 §6.2「文档转述不可信」，改为逐家探针。
+- **7.2-e 债务**：7.3 取代其 V 半边。7.2-14 的两主题截图由 7.3-01/02/03 承担；7.2-09/10/11/15 的活体半边
+  在 7.3 落地后于新页面补取；7.3 未完成前 7.2 的 8 行保持 `[ ]`。
+
+### 8.6 片序
+
+| 片    | 内容                                                                                     |
+| ----- | ---------------------------------------------------------------------------------------- |
+| 7.3-a | 文档（本节 + spec 7.3 + master plan 行）与 7.2-e 债务改判                                |
+| 7.3-b | 目录 24 家 + 单测 + 两份语言包 provider 名 + 无 key 探针证据                             |
+| 7.3-c | `useModelsData.ts` + `ModelProviderPane` + `ModelDefaultsPane`（旧面板暂留，保证可编译） |
+| 7.3-d | `ModelsPanel` + 顶层导航 + ChatPanel 跳转 + 语言包；删旧面板与信任分区                   |
+| 7.3-e | 窄宽 / 空态 / 原因码收口；活体两主题截图与 DOM 读数；spec 状态位                         |
+
+### 8.7 验证口径
+
+- 四道门禁：`pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test`，结论重定向文件看 `EXIT=`。
+- 活体：`AUTO_CC_USER_DATA_DIR="$PWD/tmp/dev-userdata" pnpm dev`；harness 一律带 `--url 5173`；
+  先点 `privacy-acknowledge` 再做真实鼠标动作；同批截图 `md5 -q | sort | uniq -c` 去重。
+- 手测：新增实例 → 存 key → 拉取 → 勾选 → 移除被绑定项应被挡 → chat/embed 各绑一条 → 重启仍在 →
+  信任页无模型段 → 对话页「模型配置」跳到新视图 → 搜索 / 无命中 / 窄窗 / 桥接缺失。

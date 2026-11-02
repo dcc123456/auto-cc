@@ -1,0 +1,47 @@
+# 7.3-07 · 门禁与前端规则 — 读数
+
+- 时间：2026-11-02
+
+## 四道门禁
+
+```text
+pnpm typecheck      EXIT=0
+pnpm lint           EXIT=0
+pnpm format:check   EXIT=0
+pnpm test           EXIT=1（见下）
+```
+
+渲染层规范检查原句（`pnpm lint` 链内）：
+
+```text
+✔ 渲染层规范检查通过（2 个语言包，92 个源文件，派生文案 50 条逐包齐备；src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处、按不动却不带原因码那一格 0 处、src/ui/** 内画法未走具名档位的按钮 0 只、占位空 span 0 只，四档语气文字档 × 两案 × 五级承载面 × 两种同色底、实底档 × 两案 × 钉死字色全部 ≥4.5:1）
+```
+
+## 截图去重
+
+同批 6 张主证据 `md5 -q` 去重后仍是 6 个不同值：
+
+```text
+1669b3a3062a5761fc0a4a58df47d2e0
+3a444678b257bfde13fa1e91585601a3
+841efc8a3f0e70f57903f041600c9f25
+90cf2e55d10966f75418bd555282ea24
+b186fea1085d208821ae4cf019f8ba11
+d9a6706c0808c1f29cae4f7fb26eb471
+```
+
+## 全量测试的一处失败（与 7.3 无关）
+
+`pnpm test` 475/476 通过，唯一失败：
+
+```text
+FAIL packages/resume-kb/src/generate-service.test.ts
+  > resume.generate 的 agent 工具面（spec 4.5 的双入口）
+  > 跑工具与直接调 service 的产物逐字相等：两入口共用同一条生成链（§5.9）
+Expected score 0.5625 / 0.4375
+Received score 0.5538 / 0.4462
+```
+
+- `git diff --stat -- packages/resume-kb packages/core packages/store` 为空：本片（7.3）没有改过这三个包。
+- 该测试最近一次改动来自 HEAD 提交 `b853d8c`（对话页默认全自动那一笔），在本机稳定复现（单文件跑同样失败）。
+- 因此本条不写成 `[x]` 覆盖全量测试；7.3 自己的射程（渲染层 + `packages/llm` 目录）全绿。

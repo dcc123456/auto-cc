@@ -1233,7 +1233,7 @@ export function NarrowLabel({ children }: { children: ReactNode }) {
 
 /**
  * 页签的尺寸档。`muted` 不是"次要按钮"，而是 6.3-02 那条「诊断视图低一档」的兑现：
- * 图标、字号、字重与选中描线一起降一档，让导航六格里有一格在视觉上退后。
+ * 图标、字号、字重与选中描线一起降一档，让导航七格里有一格在视觉上退后。
  */
 export type DeskTabTier = 'primary' | 'muted';
 

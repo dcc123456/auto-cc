@@ -1,0 +1,25 @@
+# 7.3-04 · 设置默认模型 — 活体读数
+
+- 时间：2026-11-02
+- 环境：同 `7.3-01`；点「设置默认模型」进入默认模型右栏
+
+## 读数（逐字）
+
+```json
+{"pane":true,"legs":["chat","embed"],"chatOptions":6,"embedOptions":6,"sampleOptions":["阿里千问 · ark-code-latest","阿里千问 · deepseek-v4.1-flash","阿里千问 · deepseek-v4.1-flash-1017"],"chatBindReason":"BIND_UNCHANGED","chatClearReason":"LEG_BOUND_KEY","embedCheckReason":"CHECK_NOT_SUPPORTED","origins":["由池里的 阿里千问 供给","由池里的 阿里千问 供给"]}
+```
+
+绑定的实际值与标签：
+
+```json
+{"chat":{"value":"7b0170e3-061a-4815-903d-38eeac8b11c4::deepseek-v4.1-flash-1017","selected":"阿里千问 · deepseek-v4.1-flash-1017","options":6},"embed":{"value":"7b0170e3-061a-4815-903d-38eeac8b11c4::doubao-embedding-vision","selected":"阿里千问 · doubao-embedding-vision","options":6}}
+```
+
+## 结论
+
+- 默认模型只呈现 **对话 / 向量** 两条通道，`data-model-leg` 各一行。
+- 候选只来自已入库清单（每个下拉 6 项），标签是「提供商 · 模型」，值是 `<实例 id>::<模型名>`；未动过的通道显示 `BIND_UNCHANGED`。
+- 当前两条通道都由池里的阿里千问供给（`legOrigin.pool`），说明界面读到的是「真的在用哪一家」。
+- embed 的「测试连接」禁用且原因码 `CHECK_NOT_SUPPORTED`（后端本轮确实不支持）。
+- 「清除密钥」在绑定态禁用且原因码 `LEG_BOUND_KEY`：`clearKey(leg)` 只清 `llm.chat` / `llm.embed` 兜底密钥，清不动 `llm.provider:<id>`；实例密钥由「删除实例」承担。
+- **活体未做一次改绑**：共享 dev 实例里改绑会触发 `applyConfig` 重建下游并关闭浏览器会话视图，属于会改动他人现场的动作。`bindRole` 的热生效与持久层两格由 `packages/llm/src/settings.test.ts`（35 条）覆盖；本条 V 半边只取「当前绑定读回 + 候选来源 + 禁用原因」这三项。

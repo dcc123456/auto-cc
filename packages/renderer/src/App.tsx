@@ -1,5 +1,6 @@
 import {
   Activity,
+  Boxes,
   Briefcase,
   FileText,
   Languages,
@@ -21,7 +22,7 @@ import { JobLabPanel } from './JobLabPanel';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
 import { LocatorLabPanel } from './LocatorLabPanel';
 import { MetricsPanel } from './MetricsPanel';
-import { ModelSettingsPanel } from './ModelSettingsPanel';
+import { ModelsPanel } from './ModelsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
 import { UpdateSection } from './UpdateSection';
 import { ResumeDesk } from './ResumeDesk';
@@ -40,7 +41,7 @@ import { Toast } from './ui/overlays';
  * 顶层视图的名字由 `viewTrail.ts` own：跨视图推进（09 稿形态⑥）是全 app 唯一一处要同时认识
  * 两个视图的契约，联合类型放在那儿才不会长第二份（§2.5）。
  * AGENTS.md §5.9 定的顺序：对话是第一入口；其后四张工作台按用户语言命名（岗位 / 简历 / 流程 /
- * 信任，评审裁定 Q2）；诊断面板再低一档（spec 1.10-07）。六个视图都常驻挂载，切换只改 display，
+ * 信任，评审裁定 Q2）；模型独立成页（7.3）；诊断面板再低一档（spec 1.10-07）。七个视图都常驻挂载，切换只改 display，
  * 所以来回切不丢滚动位置也不丢状态（spec 1.10-01）——形态⑥ 的「返回时滚动位置不变」靠的正是这一条。
  */
 import { clearViewTrail, useViewTrail, type TopView } from './viewTrail';
@@ -55,12 +56,13 @@ interface DeskEntry {
   primary: boolean;
 }
 
-/** 导航顺序即信息架构：对话第一，四张工作台居中，诊断沉底。 */
+/** 导航顺序即信息架构：对话第一，四张工作台居中，模型独立成页，诊断沉底。 */
 const DESK_ENTRIES: DeskEntry[] = [
   { view: 'chat', icon: MessageSquare, primary: true },
   { view: 'jobs', icon: Briefcase, primary: true },
   { view: 'resume', icon: FileText, primary: true },
   { view: 'workflow', icon: WorkflowIcon, primary: true },
+  { view: 'models', icon: Boxes, primary: true },
   { view: 'trust', icon: ScrollText, primary: true },
   { view: 'diagnostics', icon: Activity, primary: false },
 ];
@@ -261,9 +263,9 @@ export function App() {
             >
               <ChatPanel />
             </section>
-            {(['jobs', 'resume', 'workflow', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
+            {(['jobs', 'resume', 'workflow', 'models', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
 
-            {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，六张视图切来切去都只有这一只通道，
+            {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，七张视图切来切去都只有这一只通道，
                 各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
             <Toast />
           </main>
@@ -303,8 +305,8 @@ export function App() {
 /**
  * 每张工作台承载的面板清单：只是把既有面板归位，没有新增、没有改逻辑。
  * 归位依据是设计稿的信息架构（03/04/05/06 屏）：
- * 岗位=搜与选（JD 库、话术候选），简历=内容与生成，流程=运行与编排，信任=登录态、额度与漏斗，
- * 诊断=只有开发者看得懂的自测台（桥接自检、更新通道、定位实验室、装配与插件树）。
+ * 岗位=搜与选（JD 库、话术候选），简历=内容与生成，流程=运行与编排，模型=提供商与默认模型，
+ * 信任=登录态、额度与漏斗，诊断=只有开发者看得懂的自测台（桥接自检、更新通道、定位实验室、装配与插件树）。
  */
 const PANELS: Record<TopView, ReactNode> = {
   chat: <></>,
@@ -317,15 +319,13 @@ const PANELS: Record<TopView, ReactNode> = {
   ),
   resume: <ResumeDesk />,
   workflow: <WorkflowPanel />,
+  models: <ModelsPanel />,
   trust: (
     <>
       <SessionPanel />
       {/* 5.8-b 的指标看板排在用量面板前面：五级漏斗是「转化到哪一级」，下面那块是「今天还剩多少额度」 */}
       <MetricsPanel />
       <UsagePanel />
-      {/* P7 · 7.1-11 的模型设置分区排在最后一格：信任这一栏讲的是"这台机器替谁说话"，
-          而模型 key 就是那份凭证——它必须在人能看到登录态与额度的同一栏里，而不是新开一视。 */}
-      <ModelSettingsPanel />
     </>
   ),
   diagnostics: (

@@ -10,6 +10,7 @@
       "jobs": "Jobs",
       "resume": "Resume",
       "workflow": "Flows",
+      "models": "Models",
       "trust": "Trust",
       "diagnostics": "Diagnostics",
       "aria": "Workspace navigation"
@@ -110,6 +111,10 @@
         "title": "Flows",
         "hint": "One line from search to delivery, pausable and resumable"
       },
+      "models": {
+        "title": "Models",
+        "hint": "Set up providers one by one, then pick which stored model chat and embeddings use"
+      },
       "trust": {
         "title": "Trust",
         "hint": "Sessions, quota, funnel and audit — check before anything leaves this machine"
@@ -117,6 +122,33 @@
       "diagnostics": {
         "title": "Diagnostics",
         "hint": "Self-test benches: bridge, assembly, locator lab. You do not need this daily"
+      }
+    },
+    "models": {
+      "loading": "Reading the provider catalog and instance pool…",
+      "bridgeMissing": "This window has no bridge, so the model workspace cannot reach the main process",
+      "rail": {
+        "searchPlaceholder": "Search providers…",
+        "defaults": "Set default models",
+        "heading": "Available providers",
+        "configured": "Configured",
+        "addInstance": "Add instance",
+        "noMatch": "No matching provider"
+      },
+      "panel": {
+        "newTitle": "New {{provider}} instance",
+        "save": "Save",
+        "saved": "{{label}} saved",
+        "delete": "Delete instance",
+        "modelSearchPlaceholder": "Search models…",
+        "noModelsFiltered": "No matching model"
+      },
+      "defaults": {
+        "heading": "Set default models",
+        "note": "Pick one for chat and one for embeddings; candidates come only from models already stored under configured instances, and take effect immediately after saving.",
+        "noKeyTag": "no key",
+        "empty": "No stored models yet: add a provider in the left rail, then tick the models you need.",
+        "goProviders": "Add a provider"
       }
     },
     "status": {
@@ -1892,13 +1924,10 @@
     },
     "settings": {
       "model": {
-        "heading": "Model",
-        "note": "This section does three things in one place: keep several providers at once (Volcano Engine, OpenAI and DeepSeek each get a row), fetch each one's model list and tick entries into this machine, then pick one model for chat and one for embeddings. Base URL and model name go to the persisted layer under userData, the key goes to the secret store, and the UI only ever shows its last 4 characters.",
         "leg": {
           "chat": "Chat (script generation)",
           "embed": "Embeddings (knowledge-base retrieval)"
         },
-        "providerLabel": "Provider",
         "provider": {
           "deepseek": "DeepSeek",
           "ark": "Volcano Engine · Ark",
@@ -1918,13 +1947,13 @@
           "mistral": "Mistral",
           "xai": "xAI · Grok",
           "nvidia": "NVIDIA NIM",
+          "anthropic": "Anthropic",
+          "gemini": "Gemini",
+          "huggingface": "HuggingFace",
+          "cohere": "Cohere",
+          "vllm": "vLLM",
           "custom": "Custom (any OpenAI-compatible endpoint)"
         },
-        "providersHeading": "Added providers",
-        "addProvider": "Add provider",
-        "providersEmpty": "Nothing added yet. Press \"Add provider\" above to bring in the first one.",
-        "providerSummary": "{{count}} added",
-        "customEndpoint": "Custom endpoint",
         "labelField": "Display name",
         "labelPlaceholder": "What to call it on this machine",
         "endpointLabel": "Endpoint variant",
@@ -1947,19 +1976,10 @@
         "row": {
           "fetchModels": "Fetch models",
           "check": "Test this one",
-          "edit": "Edit",
           "delete": "Delete",
           "remove": "Remove"
         },
-        "form": {
-          "titleAdd": "Add a provider",
-          "titleEdit": "Edit this provider",
-          "save": "Save provider",
-          "cancel": "Cancel"
-        },
         "modelsHeading": "Model list of this provider",
-        "modelsNeedProvider": "Pick a row above first to make it the current one.",
-        "modelsOf": "Currently working on {{label}}.",
         "noCandidates": "This provider returned 0 model names.",
         "alreadyStored": "already in the list",
         "addSelected": "Add selected ({{count}})",
@@ -1973,7 +1993,6 @@
         "modelsFetched": "{{label}} returned {{count}} model names.",
         "fetchFailed": "Fetch failed ({{reason}}): {{message}}",
         "modelsStored": "{{count}} added to the list of {{label}}.",
-        "bindingHeading": "Which model chat and embeddings use",
         "bindingEmpty": "No model to offer yet: tick at least one in the section above.",
         "bindingSave": "Save binding",
         "legOrigin": {
@@ -2021,7 +2040,9 @@
           "MODEL_BOUND": "Chat or embeddings is using this model; switch it to another one before removing it",
           "NO_STORED_MODEL": "No provider has stored models yet, so the candidate list is empty",
           "BIND_INCOMPLETE": "No \"which provider's which model\" has been picked yet, so saving the binding would only fail",
-          "BIND_UNCHANGED": "The dropdown already shows the model in use; there is nothing to change"
+          "BIND_UNCHANGED": "The dropdown already shows the model in use; there is nothing to change",
+          "NO_SAVED_PROVIDER": "This instance is not saved yet: press Save first, then fetch models",
+          "LEG_BOUND_KEY": "This connection is served by a provider instance; handle that key via Delete instance on the provider, since clearing here only affects the fallback config"
         }
       }
     }

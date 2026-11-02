@@ -1015,9 +1015,9 @@ export function ChatPanel() {
                         advanceViewTrail({
                           sourceView: 'chat',
                           sourceTitle: t('nav.chat'),
-                          targetView: 'trust',
-                          targetTitle: t('desk.trust.title'),
-                          targetDetail: t('settings.model.heading'),
+                          targetView: 'models',
+                          targetTitle: t('desk.models.title'),
+                          targetDetail: t('models.defaults.heading'),
                         });
                       }}
                     >

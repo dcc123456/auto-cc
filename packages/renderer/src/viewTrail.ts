@@ -3,7 +3,7 @@
  *
  * 稿子上这条通道的判据是**跳转一定要长面包屑**（同视图内的锚点不需要），所以这里存的不是"当前视图"
  * ——当前视图归 `App.tsx` 的 `view`——而是**这一跳是从哪儿来的、带了什么过去**。视图本身仍然由
- * `App.tsx` 的 `hidden` 类名切换，六个容器都不卸载（1.10-01 既有口径），正好兑现稿上「返回时滚动位置不变」
+ * `App.tsx` 的 `hidden` 类名切换，七个容器都不卸载（1.10-01 既有口径），正好兑现稿上「返回时滚动位置不变」
  * 那一条：返回只是清掉这一跳并切回来源视图，没有重建任何子树。
  *
  * 画法照 `deskToast.ts` / `deskStatus.ts` / `theme.ts`：模块级状态 + 一组订阅者 + 一只 hook，
@@ -11,8 +11,8 @@
  */
 import { useEffect, useState } from 'react';
 
-/** 六个视图的名字。归这里 own 是因为跨视图推进是全 app 唯一一处"要同时认识两个视图"的契约。 */
-export type TopView = 'chat' | 'jobs' | 'resume' | 'workflow' | 'trust' | 'diagnostics';
+/** 七个视图的名字。归这里 own 是因为跨视图推进是全 app 唯一一处"要同时认识两个视图"的契约。 */
+export type TopView = 'chat' | 'jobs' | 'resume' | 'workflow' | 'models' | 'trust' | 'diagnostics';
 
 /** 一次推进的内容。所有文案都是调用方已经翻好的字符串（§5.7：组件不拼句子）。 */
 export interface ViewTrailReading {

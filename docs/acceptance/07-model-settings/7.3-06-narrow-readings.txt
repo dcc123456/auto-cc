@@ -1,0 +1,26 @@
+# 7.3-06 · 窄宽纵向回落 — 证据
+
+- 时间：2026-11-02
+- 环境：dev 实例，CDP 10222，页面 target 5173
+
+## 760px 视口截图
+
+`7.3-06-narrow-light.png`（PNG 760×772）。画面里左栏占满整行，右栏落到下方；顶部三颗系统键退成图标，左导航也退成图标档——这是 `@2xl`（672px）以下的纵向回落。
+
+一条环境口径：这张图是在**单条 CDP 会话**里 `Emulation.setDeviceMetricsOverride(760×772)` 后立刻截的；截图成功后覆盖已清，并做了一次 `Page.reload` 把布局视口复位到 1200×772。Electron 的 endpoint 没有 `Browser` 域，无法用 `Browser.setWindowBounds`；`Emulation.clearDeviceMetricsOverride` 在本机偶尔会把页面留在缩放态，reload 能复位。
+
+## 容器宽度读数
+
+把主区临时压到 540px（模型页容器 = 500px），DOM 读数：
+
+```json
+{"innerWidth":1200,"theme":"light","view":"models","grid":"500px","railW":500,"rightW":500}
+```
+
+- `gridTemplateColumns` 只有一列 `500px`（1200px 视口下是 `272px 652px` 两列）；
+- 左栏与右栏各 500px，右栏在左栏下方，符合纵向回落。
+- 量完立即 reload，主区的内联宽度已复位。
+
+## 结论
+
+窄宽回落成立；空态 / 加载 / 无实例 / 桥接缺失 / 拉取失败五态分别由 `models-loading`、`models-rail-no-match`、`NO_SAVED_PROVIDER`、`models.bridgeMissing`、`fetchFailed` 文案承担（DOM 与代码路径见 7.3-02/03 读数）。

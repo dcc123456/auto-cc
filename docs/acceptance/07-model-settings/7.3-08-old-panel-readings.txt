@@ -1,0 +1,42 @@
+# 7.3-08 · 旧面板退场与 7.2 债务 — 读数
+
+- 时间：2026-11-02
+
+## 旧入口删净
+
+```text
+$ grep -rn "ModelSettingsPanel\|trust\.models" packages scripts --exclude-dir=dist --exclude-dir=node_modules
+0 hits in source/scripts
+
+$ ls packages/renderer/src/ModelSettingsPanel.tsx
+No such file or directory
+```
+
+- `packages/renderer/dist/**` 里仍有旧 bundle，但该目录被 `.gitignore` 的 `dist/` 忽略、`git ls-files packages/renderer/dist` 为空，不属于源码或提交面。
+- 历史文档（`docs/plans/**`、`docs/specs/**`、`docs/acceptance/**`）保留旧文件名作为记录，不改写。
+
+## 旧锚点在新页保留
+
+```text
+packages/renderer/src/ModelsPanel.tsx        5 处 settings-model-*
+packages/renderer/src/ModelProviderPane.tsx 22 处 settings-model-*
+packages/renderer/src/ModelDefaultsPane.tsx  9 处 settings-model-*
+```
+
+关键锚点逐条保留：`settings-model-providers`（左栏列表）、`settings-model-form`、`settings-model-form-*`、`settings-model-candidates`、`settings-model-tick`、`settings-model-add-selected`、`settings-model-stored`、`settings-model-remove`、`settings-model-bind-<leg>`、`settings-model-bind-save-<leg>`、`settings-model-check-<leg>`、`settings-model-clear-key-<leg>`、`settings-model-provider-key`、`settings-model-provider-count`、`settings-model-notice`、`settings-model-storage-encrypted`。
+
+## 7.2 的 U 类测试
+
+```text
+$ pnpm --filter @auto-cc/plugin-llm test
+Test Files  4 passed (4)
+Tests       69 passed (69)
+EXIT=0
+```
+
+`settings.test.ts` 的 35 条覆盖：目录 24 家、池 CRUD、模型清单两种信封 + 三态失败、bindRole 持久层两格与一次 `applyConfig`、`MODEL_NOT_ADDED`、删除实例后的绑定回落。
+
+## 7.2-e 债务
+
+- 7.2-14 的两主题截图由 7.3-01/02/03 承担（浅色 + 深色各三张）。
+- 7.2-09/10/11/15 的活体半边仍需在新页面补取；本轮没有把 7.2 的那 8 行标 `[x]`。

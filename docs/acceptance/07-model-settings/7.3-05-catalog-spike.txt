@@ -1,0 +1,40 @@
+# 7.3-05 · 新提供商目录取证（2026-11-02）
+
+## 方法
+
+- 每条预设的 OpenAI 兼容地址以官方文档为来源（见下表）。
+- 本机以无 key 形状探针 `GET <baseUrl>/models` 判断端点是否存在：401 = 端点存在且需鉴权；404 = 无该端点。
+- 自动化测试不访问真实端点（plan §8.5 / AGENTS.md §7.2）；真实 key 的鉴权与连通性只在用户在场时手测。
+
+## 探针读数（macOS arm64，2026-11-02）
+
+```
+curl -s -o /dev/null -w '%{http_code}' --max-time 8 <url>
+
+https://api.anthropic.com/v1/models                              -> 403
+https://generativelanguage.googleapis.com/v1beta/openai/models   -> 000 (连接超时)
+https://router.huggingface.co/v1/models                          -> 000 (连接超时)
+https://api.cohere.ai/compatibility/v1/models                    -> 403
+http://localhost:8000/v1/models                                  -> 000 (本机未启动 vLLM)
+```
+
+换浏览器 UA 复测：Anthropic / Cohere 仍 403，Gemini / HuggingFace 仍超时。403 来自边缘层，
+无法据此区分「端点不存在」与「本机网络被拦」，**本轮不能把 403/000 写成支持或不支持**（§6.2）。
+
+## 官方文档结论
+
+| id            | baseUrl                                                    | 一手来源                                                                | 文档结论                                                                 |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `anthropic`   | `https://api.anthropic.com/v1`                             | `https://docs.anthropic.com/en/api/openai-sdk`                          | 文档在本机被地区重定向，未能取得一手结论；Bearer 与 `/models` 待用户在场实测 |
+| `gemini`      | `https://generativelanguage.googleapis.com/v1beta/openai`   | `https://ai.google.dev/gemini-api/docs/openai`                          | OpenAI 兼容层地址；本机网络不可达，待用户在场验证                         |
+| `huggingface` | `https://router.huggingface.co/v1`                         | `https://huggingface.co/docs/inference-providers`                       | Inference Providers 的 OpenAI 兼容路由；本机网络不可达                    |
+| `cohere`      | `https://api.cohere.ai/compatibility/v1`                   | `https://docs.cohere.com/docs/compatibility-api`                        | 确认 `Authorization: Bearer`；支持 `/chat/completions`、`/embeddings`、`/audio/transcriptions`，**未列 `GET /models`** |
+| `vllm`        | `http://localhost:8000/v1`                                 | `https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html`  | 本地 OpenAI 兼容服务；需用户自行启动，默认无鉴权                          |
+
+## 结论与回落
+
+1. 五家按官方兼容地址入目录；它们是**数据**，不承诺每家都支持 `/models`。
+2. Cohere 官方未列 `GET /models`：该家以「手动添加模型名」为唯一可靠入口；「拉取模型」失败只播报，不清清单。
+3. Anthropic 的 Bearer 兼容性未取证。若用户在场实测不接受 Bearer，则该预设按 BLOCKED 记录并摘除，
+   鉴权风格扩展另立 7.4；不改 `http.ts` 的 Bearer-only 口径。
+4. Gemini / HuggingFace / vLLM 的端点形状与鉴权同样留待用户在场实测；本轮 403/000 不作为产品结论。

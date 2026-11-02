@@ -1,0 +1,33 @@
+# 7.3-03 · 右栏提供商配置与模型清单 — 活体读数
+
+- 时间：2026-11-02
+- 环境：同 `7.3-01`；点已配置的「阿里云·百炼」与未配置的「DeepSeek」
+
+## 已配置实例（阿里千问）
+
+```json
+{"pane":true,"providerId":"7b0170e3-061a-4815-903d-38eeac8b11c4","form":true,"label":"阿里千问","baseUrl":"https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1","keyValue":"","keyPlaceholder":"已存 ····Fyfs（留空＝不改这一把）","keyStatus":"密钥 ····Fyfs","storedRows":6,"fetchDisabled":false,"fetchReason":null,"saveReason":null,"instanceSwitch":true,"addInstance":true}
+```
+
+- 表单常驻并回填显示名 / baseUrl / 端点变体；**key 输入框的 `value` 是空串**，只有 placeholder 与状态行给末 4 位，明文没有回到渲染层。
+- 已入库 6 条模型；「获取模型」可用；有实例切换下拉与「添加实例」。
+
+## 新实例（DeepSeek，未保存）
+
+```json
+{"label":"DeepSeek","baseUrl":"https://api.deepseek.com/v1","fetchReason":"NO_SAVED_PROVIDER","dotsBefore":1}
+```
+
+- 点未配置的预设，右栏直接摊开新增表单并 prefill 目录地址；此时「获取模型」禁用且 `data-disabled-reason="NO_SAVED_PROVIDER"`，左栏绿点数量不变（未落库不算已添加）。
+
+## 被绑定模型不可移除
+
+```json
+{"stored":[{"model":"ark-code-latest","removeReason":null},{"model":"deepseek-v4.1-flash","removeReason":null},{"model":"deepseek-v4.1-flash-1017","removeReason":"MODEL_BOUND"},{"model":"doubao-embedding-vision","removeReason":"MODEL_BOUND"},{"model":"qwen3.7-plus","removeReason":null},{"model":"qwen3.8-flash","removeReason":null}]}
+```
+
+- chat / embed 正绑着的两条在清单里带 `MODEL_BOUND`，其余四条可移除。
+
+## 截图
+
+- `7.3-03-provider-pane-light.png`、`7.3-03-provider-pane-dark.png`（停在模型清单位置）。

@@ -1,0 +1,18 @@
+# 7.3-01 · 顶层「模型」导航与单入口 — 活体读数
+
+- 时间：2026-11-02
+- 环境：`pnpm dev` 隔离 userData（`tmp/dev-userdata`），CDP 10222，页面 target `http://127.0.0.1:5173/`，视口 1200×772
+- 操作：`eval` 里 `node.click()` 点 `[data-action="nav-models"]`（窗口 hidden 时逻辑点击，跳过命中测试）
+
+## 读数（逐字）
+
+```json
+{"navCount":7,"navViews":["chat","jobs","resume","workflow","models","trust","diagnostics"],"modelsNavText":"模型","modelsVisible":"block","trustModelSection":false,"trustSections":["trust.sessions","trust.page","trust.metrics","trust.usage"]}
+```
+
+## 结论
+
+- 左导航由 6 格变 7 格，顺序为 对话 / 岗位 / 简历 / 流程 / **模型** / 信任 / 诊断；`nav-models` 可点，`desk.models.title` 显示「模型」。
+- `[data-view-scroll="models"]` 的 `display` 为 `block`，页面已切到模型工作台。
+- 信任区只剩 `trust.sessions / trust.page / trust.metrics / trust.usage` 四段；`[data-testid="model-settings"]` 在整棵信任子树里为 `false`，旧模型分区已退场。
+- 截图：`7.3-01-models-nav-light.png`、`7.3-01-models-nav-dark.png`（同批 6 张 `md5` 互异，见 `7.3-07` 的收图去重读数）。

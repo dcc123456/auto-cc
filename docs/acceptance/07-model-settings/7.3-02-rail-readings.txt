@@ -1,0 +1,25 @@
+# 7.3-02 · 左栏提供商清单 — 活体读数
+
+- 时间：2026-11-02
+- 环境：同 `7.3-01`，视口 1200×772，双栏栅格 `272px 652px`
+- 操作：点「设置默认模型」与 `models-rail-provider` 行；搜索框走原生 setter + `input` 事件（React 受控输入）
+
+## 读数（逐字）
+
+```json
+{"providerRows":24,"configuredDots":1,"configuredMarkers":1,"defaultsEntry":true,"defaultsPane":true,"railRect":{"w":272,"h":696},"rightRect":{"w":652,"h":290},"grid":"272px 652px","viewport":{"w":1200,"h":772}}
+```
+
+搜索过滤：
+
+```json
+{"newPane":true,"label":"DeepSeek","baseUrl":"https://api.deepseek.com/v1","fetchReason":"NO_SAVED_PROVIDER","dotsBefore":1,"filteredCount":1,"filteredTexts":["Anthropic"],"afterClear":24}
+```
+
+## 结论
+
+- 左栏按目录顺序渲染 **24 家**预设，`custom` 收口；顶部有搜索框与「设置默认模型」入口。
+- 绿点判据 = 「这家至少有一个实例」：本机只有 1 家已配置（阿里云·百炼），`data-configured="true"` 与绿点各 1 个，二者一致。
+- 搜索 `anthropic` 命中 1 行（显示名 Anthropic），清空后回到 24 行；无命中时有 `models-rail-no-match` 空态。
+- 1920 宽下左栏 272px、右栏 652px；两栏在同一 `@container` 栅格里。
+- 截图：`7.3-02-rail-light.png`、`7.3-02-rail-dark.png`。

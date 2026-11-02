@@ -523,7 +523,7 @@ export function ResumeDesk() {
 
   /**
    * 打开删除的二次确认（spec 6.4-20）：这一刀删的是"这个人找工作用的全部素材"，比删一个模型配置重一个量级，
-   * 所以不跟 `ModelSettingsPanel` 那一键直删的先例，必须让那句"连同素材一起删"先被人读到。
+   * 所以不跟模型工作台里「删除实例」那一键直删的先例，必须让那句"连同素材一起删"先被人读到。
    * @param targetDocId 要删的那一份
    */
   const askDelete = (targetDocId: string) => {
@@ -1671,7 +1671,7 @@ export function ResumeDesk() {
         </div>
       )}
       {/* 删除的二次确认（spec 6.4-20）：这一刀删的是"这个人找工作用的全部素材"，
-          与 `ModelSettingsPanel` 那一键直删的配置条目不是一个量级，所以必须读完整风险才点得下去——
+          与模型工作台里「删除实例」那一键直删的配置条目不是一个量级，所以必须读完整风险才点得下去——
           `dismissOnScrim: false` 一条 prop 同时关掉点遮罩 / Esc / 右上角 ✕ 三条退路（09 稿形态⑤）。
           渲染在 `@container` 那一格的**外面**，两条都是硬理由：
           ① `DeskSection` 收起时正文是卸载的，确认框不能跟着一起消失；

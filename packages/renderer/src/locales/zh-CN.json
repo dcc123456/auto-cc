@@ -10,6 +10,7 @@
       "jobs": "岗位",
       "resume": "简历",
       "workflow": "流程",
+      "models": "模型",
       "trust": "信任",
       "diagnostics": "诊断",
       "aria": "工作台导航"
@@ -110,6 +111,10 @@
         "title": "流程",
         "hint": "一条线跑完搜索到投递，随时可停可续"
       },
+      "models": {
+        "title": "模型",
+        "hint": "一家一家配好提供商，再从已入库的模型里挑对话与向量各用哪条"
+      },
       "trust": {
         "title": "信任",
         "hint": "登录态、额度、漏斗与审计——动作离开这台机器之前先看这里"
@@ -117,6 +122,33 @@
       "diagnostics": {
         "title": "诊断",
         "hint": "自测台：桥接、装配、定位实验室。日常使用不需要进来"
+      }
+    },
+    "models": {
+      "loading": "正在读取模型目录与实例池……",
+      "bridgeMissing": "这个窗口里没有桥接，模型工作台够不到主进程",
+      "rail": {
+        "searchPlaceholder": "搜索提供商…",
+        "defaults": "设置默认模型",
+        "heading": "可选提供商",
+        "configured": "已添加配置",
+        "addInstance": "添加实例",
+        "noMatch": "没有匹配的提供商"
+      },
+      "panel": {
+        "newTitle": "新增 {{provider}} 实例",
+        "save": "保存",
+        "saved": "{{label}} 已保存",
+        "delete": "删除实例",
+        "modelSearchPlaceholder": "搜索模型…",
+        "noModelsFiltered": "没有匹配的模型"
+      },
+      "defaults": {
+        "heading": "设置默认模型",
+        "note": "对话与向量各选一条；候选只来自已添加实例的已入库模型，保存后立刻生效。",
+        "noKeyTag": "未填密钥",
+        "empty": "还没有已入库的模型：先去左栏添加提供商，再把需要的模型勾进清单。",
+        "goProviders": "去添加提供商"
       }
     },
     "status": {
@@ -1892,13 +1924,10 @@
     },
     "settings": {
       "model": {
-        "heading": "模型",
-        "note": "这一格管三件事：把几家提供商同时收进来（火山引擎、OpenAI、DeepSeek 各占一行），从每家拉回模型清单勾进本机，再给对话与向量各自挑一条。端点与模型名写进本机 userData 的持久层，密钥另存进密钥库，界面上只露末 4 位。",
         "leg": {
           "chat": "对话（话术生成）",
           "embed": "向量（知识库检索）"
         },
-        "providerLabel": "服务商",
         "provider": {
           "deepseek": "DeepSeek",
           "ark": "火山引擎 · 方舟",
@@ -1918,13 +1947,13 @@
           "mistral": "Mistral",
           "xai": "xAI · Grok",
           "nvidia": "NVIDIA NIM",
+          "anthropic": "Anthropic",
+          "gemini": "Gemini",
+          "huggingface": "HuggingFace",
+          "cohere": "Cohere",
+          "vllm": "vLLM",
           "custom": "自定义（任何 OpenAI 兼容端点）"
         },
-        "providersHeading": "已添加的提供商",
-        "addProvider": "添加提供商",
-        "providersEmpty": "一家都还没添加。点上面「添加提供商」收进第一家。",
-        "providerSummary": "已添加 {{count}} 家",
-        "customEndpoint": "自定义端点",
         "labelField": "显示名",
         "labelPlaceholder": "在这台机器上叫什么",
         "endpointLabel": "端点变体",
@@ -1947,19 +1976,10 @@
         "row": {
           "fetchModels": "获取模型",
           "check": "测这家",
-          "edit": "编辑",
           "delete": "删除",
           "remove": "移出清单"
         },
-        "form": {
-          "titleAdd": "添加一家提供商",
-          "titleEdit": "改这一家提供商",
-          "save": "保存这一家",
-          "cancel": "取消"
-        },
         "modelsHeading": "这一家的模型清单",
-        "modelsNeedProvider": "先在上一段点中一行，把它设为当前操作对象。",
-        "modelsOf": "现在操作的是 {{label}}。",
         "noCandidates": "这家回来了 0 条模型名。",
         "alreadyStored": "已在清单里",
         "addSelected": "添加所选（{{count}}）",
@@ -1973,7 +1993,6 @@
         "modelsFetched": "{{label}} 回来了 {{count}} 条模型名。",
         "fetchFailed": "没拉回来（{{reason}}）：{{message}}",
         "modelsStored": "{{count}} 条已入库到 {{label}}。",
-        "bindingHeading": "对话与向量各用哪一条",
         "bindingEmpty": "还没有可挑的模型：先在上一段勾进至少一条。",
         "bindingSave": "保存绑定",
         "legOrigin": {
@@ -2021,7 +2040,9 @@
           "MODEL_BOUND": "这条模型正被对话或向量用着，先给它换成另一条再移出清单",
           "NO_STORED_MODEL": "两家都还没有已入库的模型，候选是空的，没什么可挑",
           "BIND_INCOMPLETE": "这一格还没挑出「哪家的哪条模型」，保存绑定必然失败",
-          "BIND_UNCHANGED": "下拉里选的就是现在正在用的那一条，没有要改的东西"
+          "BIND_UNCHANGED": "下拉里选的就是现在正在用的那一条，没有要改的东西",
+          "NO_SAVED_PROVIDER": "这个实例还没保存：先按「保存」，再拉取模型",
+          "LEG_BOUND_KEY": "这一路正由实例供给；实例密钥请到该提供商的「删除实例」里处理，这里的清除只作用于兜底配置"
         }
       }
     }
