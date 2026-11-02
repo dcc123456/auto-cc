@@ -68,7 +68,9 @@ plugins:
   - id: entitlement
     dependsOn: [usage]
     config:
-      mode: unlimited
+      # 2026-11-02 用户裁定：发货默认改为 daily，执行下面的三条日上限。
+      # （此前是 unlimited 的「不收费、不登录、不联网校验」阶段默认；真实外发复测后改为受日上限约束。）
+      mode: daily
       dailyLimits:
         search: 40
         greet: 20

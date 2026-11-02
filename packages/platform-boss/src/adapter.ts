@@ -518,19 +518,30 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     // 那就连「打开会话页」这一步都不做（spec 8.1-04 的「不发起任何动作」含导航）。
     const inputSpec = outboundLocator(knowledge.input);
     const sendSpec = outboundLocator(knowledge.sendButton);
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = (target.jobId ?? '').trim();
     // 会话坐标优先（与编排层的幂等键同一个取舍，裁定⑲）：按行选中是"改页面状态"，
     // 而岗位地址是"换一页"，两者同时给时以人认出的那一条为准。
-    if (target.conversationTarget) {
-      await selectConversation(target.conversationTarget);
+    if (conversationTarget) {
+      await selectConversation(conversationTarget);
     } else {
-      const jobId = (target.jobId ?? '').trim();
       if (!jobId) {
         throw new AppError('INVALID_ARGUMENT', '打招呼必须给出目标岗位或会话对象', 'platform.boss', {
           platform: pack.platform,
         });
       }
-      const url = pageUrlFor(knowledge, jobId);
-      if (url) await page.navigate(url);
+      const startSpec = pack.locators.chatStartButton;
+      if (startSpec) {
+        // 真实 BOSS 的会话不在可直接拼的 `/web/geek/chat` 上：先到岗位详情点「继续沟通」，
+        // 让站点把会话选中，再进入下面的输入/发送。只声明「继续沟通」这一种入口候选，
+        // 新会话的「立即沟通」会打开内联面板并可能先发站点默认问候，那条路未实现前不点。
+        const detailUrl = new URL(`/job_detail/${jobId}`, pack.startUrl).href;
+        await page.navigate(detailUrl);
+        await act.click(startSpec);
+      } else {
+        const url = pageUrlFor(knowledge, jobId);
+        if (url) await page.navigate(url);
+      }
     }
     const typed = await act.type(inputSpec, text);
     if (typed.valueAfter !== text) {
@@ -544,17 +555,29 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
     await act.click(sendSpec);
     const wait = await changed;
+    // 状态行是 many（每条已发消息各挂一行），页面上可能早就有上一发的「[送达]」；
+    // 只看它会把手动/上一发的旧凭据当成这一发成功。真正的凭据是消息列表里出现刚发出的正文。
+    // 消息列表一行都读不到时（仿站脚本/旧页面形状）退回状态行；只要读到了行，就必须在行里找到正文。
+    // 不再自己加轮询间隔：上面的 `textChanges` 已经等过页面这一趟变化，写字面量毫秒数会撞 2.7-04。
+    const messages = await readMessages(jobId, conversationTarget);
+    if (messages.some((message) => message.from === 'self' && message.text === text)) {
+      return { sent: true, reason: '页面消息列表回读到刚发出的正文', ledgerKey: null };
+    }
     const status = await readStatusLine(knowledge.statusLine);
-    if (status.includes(knowledge.sentPattern)) {
-      return { sent: true, reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}`, ledgerKey: null };
+    if (messages.length === 0 && status.includes(knowledge.sentPattern)) {
+      return {
+        sent: true,
+        reason: `消息列表没有可读行，状态行回读到「${knowledge.sentPattern}」：${status}`,
+        ledgerKey: null,
+      };
     }
     const detail = status || '（读不到状态行）';
     return {
       sent: false,
       reason:
         wait.status === 'done'
-          ? `状态行文本变了但不含成功样式：${detail}`
-          : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化：${detail}`,
+          ? `状态行文本变了但不含成功样式，消息列表里也找不到刚发出的正文：${detail}`
+          : `点击后 ${String(wait.waitedMs)}ms 内状态行没有变化，消息列表里也找不到刚发出的正文：${detail}`,
       ledgerKey: null,
     };
   };
@@ -684,23 +707,17 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * @throws 缺会话段 `KNOWLEDGE_PACK_INVALID`；两种坐标都没给 `INVALID_ARGUMENT`；
    *         会话坐标选不出目标 `CONVERSATION_TARGET_NOT_FOUND`（绝不退化成"读当前选中的那条"）
    */
-  const readReplies = async (target: GreetTarget): Promise<ReplyMessage[]> => {
+  /**
+   * 读当前页面上的消息行（不做任何导航/选行）。
+   *
+   * `readReplies` 与「刚发完一条，核对正文有没有真的上屏」共用这一段：后者不能再导航一次，
+   * 否则真实站点的会话选中态可能被重置，核对的就不是刚发的那一条了。
+   * @param jobId 岗位坐标（没有就空串）
+   * @param conversationTarget 会话对象坐标（没有就空串）
+   * @returns 页面当下读到的消息行
+   */
+  const readMessages = async (jobId: string, conversationTarget: string): Promise<ReplyMessage[]> => {
     const knowledge = chatKnowledge();
-    const conversationTarget = target.conversationTarget?.trim() ?? '';
-    const jobId = target.jobId?.trim() ?? '';
-    // 读之前先把页面落到那一条会话上（与 `chat` 同一个前置，spec 8.4-02）：
-    // 真实平台的会话页没有可直接拼的地址，不选中就读等于把上一个人说的话记到这一行名下。
-    if (conversationTarget) {
-      await selectConversation(conversationTarget);
-    } else {
-      if (!jobId) {
-        throw new AppError('INVALID_ARGUMENT', '读会话必须给出目标岗位或会话对象', 'platform.boss', {
-          platform: pack.platform,
-        });
-      }
-      const url = pageUrlFor(knowledge, jobId);
-      if (url) await page.navigate(url);
-    }
     const result = await page.extract({
       container: locatorFor(knowledge.messageItem),
       fields: [
@@ -743,6 +760,26 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       });
     }
     return messages;
+  };
+
+  const readReplies = async (target: GreetTarget): Promise<ReplyMessage[]> => {
+    const knowledge = chatKnowledge();
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = target.jobId?.trim() ?? '';
+    // 读之前先把页面落到那一条会话上（与 `chat` 同一个前置，spec 8.4-02）：
+    // 真实平台的会话页没有可直接拼的地址，不选中就读等于把上一个人说的话记到这一行名下。
+    if (conversationTarget) {
+      await selectConversation(conversationTarget);
+    } else {
+      if (!jobId) {
+        throw new AppError('INVALID_ARGUMENT', '读会话必须给出目标岗位或会话对象', 'platform.boss', {
+          platform: pack.platform,
+        });
+      }
+      const url = pageUrlFor(knowledge, jobId);
+      if (url) await page.navigate(url);
+    }
+    return readMessages(jobId, conversationTarget);
   };
 
   return {

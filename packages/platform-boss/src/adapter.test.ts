@@ -535,7 +535,7 @@ describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话�
 
   it('打招呼也先选行：选中之后才敲字、点发送', async () => {
     const { adapter, page, act } = withScript(
-      chatScript(realPack, '第 3 条[送达]', [messageRow(0)], companyRows()),
+      chatScript(realPack, '第 3 条[送达]', [messageRow(0, { text: '您好 🙂' })], companyRows()),
       {},
       realPack,
     );
