@@ -345,14 +345,15 @@ export const RENDERER_ALLOWLIST = [
   'chat.session.stop',
   'chat.session.setAutonomy',
   'chat.session.startSession',
-  // 5.6-c 的会话三操作（spec 5.6-07）：改名、软删、恢复都是**人**对会话这件事的表态，
+  // 5.6-c 的会话操作（spec 5.6-07）：改名、删除、历史清单与继续对话都是**人**对会话这件事的表态，
   // 与 `chat.session.setAutonomy`、`agent.pause.respond` 同一口径刻意不登记为 agent 工具——
-  // 模型若能自己删会话，「它跑过什么」就可被它自己抹掉，那是 5.3-04 防的另一种形态。
+  // 模型若能自己删会话/切会话，「它跑过什么」就可被它自己抹掉，那是 5.3-04 防的另一种形态。
   'chat.session.rename',
   'chat.session.remove',
-  'chat.session.restore',
-  // 软删过的会话要有份读数，那句「可恢复」才不是随重启消失的谎话（spec 5.6-07 的恢复途径）。
-  'chat.session.trashed',
+  // 会话历史（2026-11-02 用户裁定）：历史抽屉的读数与「选中一条继续」的落点。
+  // 恢复口随已删栏一起退场——删除从此是一条单向的表态。
+  'chat.session.list',
+  'chat.session.select',
   // 3.3 生成轨导出面：预览/导出只认 docId + 模板 + 语言，文档正文不过进程边界（编辑轨 3.5 才引入 resume.doc.* 写入面）。
   // seedDemo 是 3.5 之前给端到端自测喂一份固定内容文档的口（spec 3.3-10）。
   'resume.export.seedDemo',
@@ -2869,24 +2870,23 @@ export interface BridgeSignatures {
    */
   'chat.session.rename': { args: [title: string]; returns: ChatSessionView };
   /**
-   * 软删当前会话（spec 5.6-07）：只把 `deleted_at` 打上位，消息、run、档位审计的行一条都不动，
-   * 因此这一格是可逆的——返回值里带着会话 id，界面把它当成「撤销」的凭据。
-   * @returns 变更后的（已删除）会话读数；一个可删的会话都没有时结构化失败 `CHAT_SESSION_NOT_FOUND`
+   * 软删一条会话（spec 5.6-07）：只把 `deleted_at` 打上位，消息、run、档位审计的行一条都不动。
+   * 删除入口在会话历史抽屉里，对象可以是历史里的任意一条，所以 id 可选——省略就是当前会话。
+   * @param sessionId 目标会话 id，来自 `chat.session.list()`；省略 = 当前会话
+   * @returns 变更后的（已删除）会话读数；查无此单 `CHAT_SESSION_NOT_FOUND`，已删过 `CHAT_SESSION_DELETED`
    */
-  'chat.session.remove': { args: []; returns: ChatSessionView };
+  'chat.session.remove': { args: [sessionId?: string]; returns: ChatSessionView };
   /**
-   * 恢复一个软删的会话（spec 5.6-07 的「恢复途径」）：清掉 `deleted_at`，它又变回「最新的那一个」。
-   * @param sessionId 会话 id，来自 `chat.session.remove()` 的返回（界面上就是那条撤销提示）
-   * @returns 变更后的会话读数；查无此单 `CHAT_SESSION_NOT_FOUND`，本来没删 `CHAT_SESSION_NOT_DELETED`
+   * 未删除的会话清单（会话历史抽屉的唯一读数源），按创建时间倒序。
+   * @returns 每行的标题 / 档位 / 消息条数；一条都没有时为空数组
    */
-  'chat.session.restore': { args: [sessionId: string]; returns: ChatSessionView };
+  'chat.session.list': { args: []; returns: ChatSessionView[] };
   /**
-   * 被软删的会话清单（spec 5.6-07 的恢复途径）：界面拿它把「可恢复」画成一只只按得下去的按钮，
-   * 而不是一个随重启就消失的撤销提示。
-   * 末段与 `ChatSessionService.trashed()` 一字不差：网关是按 `service.method` 现取方法，名字对不上只在运行期炸（5.6-c 活体验收踩到）。
-   * @returns 按删除时间倒序的会话读数；一条都没删过时为空数组（界面整块不渲染）
+   * 把当前会话切到历史里的某一条，继续在它上面发消息（人的表态，不是 agent 的手）。
+   * @param sessionId 目标会话 id，来自 `chat.session.list()`
+   * @returns 目标会话的整份快照；查无此单 `CHAT_SESSION_NOT_FOUND`，已删除 `CHAT_SESSION_DELETED`
    */
-  'chat.session.trashed': { args: []; returns: ChatSessionView[] };
+  'chat.session.select': { args: [sessionId: string]; returns: ChatSnapshotView };
   /**
    * 落一份固定内容演示简历（spec 3.3-10「本机先用固定内容验」，编辑轨 3.5 之前导出链的唯一文档来源）；
    * 返回种子 id 与落库 hash，界面据此再去预览/导出。`variant='edited'` 会在同一 docId 上落一份内容不同的第二版

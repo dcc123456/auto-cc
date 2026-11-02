@@ -359,6 +359,15 @@ export class ChatSessionService extends Service {
   /** 本次流式的取消句柄；停止/新建会话都会换一个新的，避免复用已 abort 的信号。 */
   private controller: AbortController | undefined;
 
+  /**
+   * 人在会话历史里选中的那一条（spec 5.6-07 的继续对话入口）。
+   *
+   * 只活在内存里：它记的是「这一轮界面在看哪条会话」，不是库里的一列事实；重启后回到
+   * 「未删会话里最新的那一条」这条既有口径。指向已删或不存在的会话时，`currentSessionId()`
+   * 会自己清掉它并回落——不另存一份会过期的指针（§2.7）。
+   */
+  private selectedSessionId: string | undefined;
+
   /** store 服务句柄；连接未打开时由 `store.db` 的 getter 抛出「尚未完成挂载」。 */
   private get store(): StoreService {
     return asApp(this.ctx).store;
@@ -715,17 +724,55 @@ export class ChatSessionService extends Service {
    */
   startSession(): ChatSnapshotView {
     this.stop();
+    const id = randomUUID();
     this.store.db
       .prepare('INSERT INTO chat_session (id, autonomy, created_at) VALUES (?, ?, ?)')
-      .run(randomUUID(), this.config.defaultAutonomy, Date.now());
+      .run(id, this.config.defaultAutonomy, Date.now());
+    // 新建之后「当前」必须立刻是这一条：附近若还留着历史里选中的旧会话，`current()` 会把它端回来。
+    this.selectedSessionId = id;
+    return this.current();
+  }
+
+  /**
+   * 未删除的会话清单（会话历史抽屉的唯一读数源），按创建时间倒序。
+   * @returns 每行的 id / 标题 / 档位 / 消息条数；一条都没有时是空数组
+   */
+  list(): ChatSessionView[] {
+    const rows = this.store.db
+      .prepare('SELECT id FROM chat_session WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC')
+      .all() as { id: string }[];
+    return rows.map((row) => this.readSession(row.id));
+  }
+
+  /**
+   * 把「当前会话」切到历史里的某一条，继续在它上面发消息。
+   *
+   * 切走之前先把在飞的那一条回复如实收尾：否则新会话的画面里会继续冒出上一段对话的字。
+   * @param sessionId 目标会话 id，来自 `list()`
+   * @returns 目标会话的整份快照
+   * @throws 查无此单 `CHAT_SESSION_NOT_FOUND`；已删除 `CHAT_SESSION_DELETED`
+   */
+  select(sessionId: string): ChatSnapshotView {
+    const row = this.store.db.prepare('SELECT deleted_at FROM chat_session WHERE id = ?').get(sessionId) as
+      { deleted_at?: number | bigint | null } | undefined;
+    if (!row) {
+      throw new AppError('CHAT_SESSION_NOT_FOUND', `找不到会话 ${sessionId}`, 'chat.session', { sessionId });
+    }
+    if (row.deleted_at !== null && row.deleted_at !== undefined) {
+      throw new AppError('CHAT_SESSION_DELETED', `会话 ${sessionId} 已被删除，不能继续`, 'chat.session', {
+        sessionId,
+      });
+    }
+    this.stop();
+    this.selectedSessionId = sessionId;
     return this.current();
   }
 
   /**
    * 给**当前**会话起一个名字（spec 5.6-07 的「重命名」）。
    *
-   * 只作用于当前会话、不接 sessionId：界面上此刻就只有这一条会话可看（没有切换口），
-   * 而「改哪一条」由界面决定会变成「猜另一条也许可爱的会话」。
+   * 只作用于当前会话、不接 sessionId：历史抽屉里那份清单是只读的，人先在抽屉里选中一条、
+   * 它成为当前会话之后才改得到名字——这样「改的是哪一条」永远由屏上那份快照回答。
    * @param titleRaw 渲染层传来的原文（去空、限长，进库之前脱敏）
    * @returns 更新后的会话读数
    * @throws 空标题 `CHAT_TITLE_EMPTY`；超长 `CHAT_TITLE_TOO_LONG`
@@ -748,54 +795,32 @@ export class ChatSessionService extends Service {
   }
 
   /**
-   * 软删**当前**会话（spec 5.6-07 的「删除」）：只给这一行打个时间戳，消息与 run 的行一条都不动。
+   * 软删一条会话（spec 5.6-07 的「删除」）：只给这一行打个时间戳，消息与 run 的行一条都不动。
    *
-   * 为什么不做硬删：判据要「提示恢复途径」，而那条途径之所以是真的，就是因为数据还在库里。
-   * 为什么删完不需要另立「选中会话」状态：当前会话的定义本来就是「未删会话里最新的那一条」
-   * （`currentSessionId`），打上标记之后 `current()` 自然落到上一条，多存一份指针就是 §2.7 禁的第二份事实。
-   * @returns 被删那一行的读数（带着刚打上的 `deletedAt`），界面拿它的 id 作「撤销」的凭据
-   * @throws 库里没有任何未删会话时 `CHAT_SESSION_NOT_FOUND`（不去删一条本就不存在的东西）
+   * 删除入口从顶栏那颗键搬进会话历史抽屉之后，对象不再恒等于「当前」：历史里删一条不该把
+   * 屏上正在看的另一条也换掉。所以入参可选——省略时删当前会话（保留原口径），给了 id 就删那一条。
+   * 删的正好是当前会话时，`selectedSessionId` 一并让位，`current()` 回落到最新的未删会话。
+   * @param sessionId 目标会话 id，来自 `list()`；省略 = 当前会话
+   * @returns 被删那一行的读数（带着刚打上的 `deletedAt`）
+   * @throws 查无此单 `CHAT_SESSION_NOT_FOUND`；已经删过 `CHAT_SESSION_DELETED`
    */
-  remove(): ChatSessionView {
-    const id = this.currentSessionId();
+  remove(sessionId?: string): ChatSessionView {
+    const id = sessionId ?? this.currentSessionId();
     if (!id) throw new AppError('CHAT_SESSION_NOT_FOUND', '没有可删除的会话', 'chat.session', {});
-    this.store.db.prepare('UPDATE chat_session SET deleted_at = ? WHERE id = ?').run(Date.now(), id);
-    return this.readSession(id);
-  }
-
-  /**
-   * 撤销一次软删（spec 5.6-07 的「恢复途径」：界面上那句提示必须指向一只真按得下去的按钮）。
-   * @param sessionId 要恢复的会话 id，来自 `remove()` 或 `trashed()` 的读数；不取「最近被删的那条」——那会让误点变成第二次删除的续命
-   * @returns 恢复后的会话读数（`deletedAt` 回到 null）
-   * @throws 没有这一行 `CHAT_SESSION_NOT_FOUND`；这一行根本没被删过 `CHAT_SESSION_NOT_DELETED`
-   */
-  restore(sessionId: string): ChatSessionView {
-    const row = this.store.db.prepare('SELECT deleted_at FROM chat_session WHERE id = ?').get(sessionId) as
+    const row = this.store.db.prepare('SELECT deleted_at FROM chat_session WHERE id = ?').get(id) as
       { deleted_at?: number | bigint | null } | undefined;
     if (!row) {
-      throw new AppError('CHAT_SESSION_NOT_FOUND', `找不到会话 ${sessionId}`, 'chat.session', { sessionId });
+      throw new AppError('CHAT_SESSION_NOT_FOUND', `找不到会话 ${id}`, 'chat.session', { sessionId: id });
     }
-    if (row.deleted_at === null || row.deleted_at === undefined) {
-      throw new AppError('CHAT_SESSION_NOT_DELETED', `会话 ${sessionId} 并没有被删除，无需恢复`, 'chat.session', {
-        sessionId,
-      });
+    if (row.deleted_at !== null && row.deleted_at !== undefined) {
+      throw new AppError('CHAT_SESSION_DELETED', `会话 ${id} 已经被删除`, 'chat.session', { sessionId: id });
     }
-    this.store.db.prepare('UPDATE chat_session SET deleted_at = NULL WHERE id = ?').run(sessionId);
-    return this.readSession(sessionId);
-  }
-
-  /**
-   * 列出被软删的会话（spec 5.6-07 的「恢复途径」要有的一份读数）。
-   *
-   * 为什么不能只把刚删的那条的 id 存在前端内存里：那句撤销提示一旦随重启消失，库里那一行就再没有途径捞回来，
-   * 「软删」在用户眼里就等同于硬删——正是判据要防的那件事。这一口只查已删的那些，不是会话切换器（5.6 之外的事）。
-   * @returns 按删除时间倒序的会话读数；一条都没删过时为空数组（界面据此整块不渲染，不占一行）
-   */
-  trashed(): ChatSessionView[] {
-    const rows = this.store.db
-      .prepare('SELECT id FROM chat_session WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC')
-      .all() as { id: string }[];
-    return rows.map((row) => this.readSession(row.id));
+    this.store.db.prepare('UPDATE chat_session SET deleted_at = ? WHERE id = ?').run(Date.now(), id);
+    // 这条会话已经不存在了：还排在队里的那几句不再发出去（否则会往一条已删的会话里落消息）。
+    this.pending = this.pending.filter((entry) => entry.sessionId !== id);
+    if (this.selectedSessionId === id) this.selectedSessionId = undefined;
+    if (this.live?.sessionId === id) this.stop();
+    return this.readSession(id);
   }
 
   /**
@@ -884,18 +909,26 @@ export class ChatSessionService extends Service {
     this.store.db
       .prepare('INSERT INTO chat_session (id, autonomy, created_at) VALUES (?, ?, ?)')
       .run(id, this.config.defaultAutonomy, Date.now());
+    this.selectedSessionId = id;
     return id;
   }
 
   /**
-   * 「当前会话」的唯一判定口径：未删会话里按创建时间最新的那一条。
+   * 「当前会话」的唯一判定口径：人在历史里选中的那一条；没有选中时取未删会话里按创建时间最新的一条。
    *
-   * 为什么按 `created_at DESC, id DESC` 而不是另存一个指针：软删之后这条口径自己就会落到上一条，
-   * 再存一份「选中的会话」就是第二处事实，两处不一致时界面上会出现「删掉的会话还在画消息」（§2.7）。
+   * 选中值只在内存里，且每次现查它还在不在（未删）：人删掉选中的那条之后，这里自己清掉指针并回落，
+   * 不另存一份会过期的「选中会话」（§2.7）。
    * `id DESC` 是并列时间戳时的稳定 tiebreaker（同一毫秒建出两条会话是可能的）。
    * @returns 会话 id；一条未删的都没有时为 undefined——调用方决定是报错（`remove`）还是就地建一条（`ensureSession`）
    */
   private currentSessionId(): string | undefined {
+    if (this.selectedSessionId) {
+      const selected = this.store.db
+        .prepare('SELECT id FROM chat_session WHERE id = ? AND deleted_at IS NULL')
+        .get(this.selectedSessionId) as { id?: string } | undefined;
+      if (selected?.id) return selected.id;
+      this.selectedSessionId = undefined;
+    }
     const row = this.store.db
       .prepare('SELECT id FROM chat_session WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1')
       .get() as { id?: string } | undefined;

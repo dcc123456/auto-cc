@@ -1135,28 +1135,28 @@
       "newSession": "New session",
       "streaming": "Reply is being generated…",
       "streamingElapsed": "{{seconds}}s elapsed",
-      "sendQueued": "Queue it",
       "queued": "{{count}} message(s) queued — they send in order once the reply finishes",
       "copy": "Copy this reply",
       "copied": "Reply copied to the clipboard",
       "copyFailed": "Clipboard write failed: {{reason}}",
       "modelNone": "No chat model configured",
+      "modelMenu": "Chat model",
+      "modelConfig": "Model settings",
+      "modelEmpty": "No models yet: add and tick some in Model settings first",
       "settings": {
         "title": "Chat settings",
-        "subtitle": "Autonomy tier and the no-confirm list both live in this drawer"
+        "subtitle": "The no-confirm list lives in this drawer"
       },
       "toolHint": "Messages starting with /tool invoke a registered tool (default: jd.capture.run)",
       "runHint": "On Full-auto, just say what to do and it drafts and starts; other tiers use {{prefix}} to see the plan first",
       "hints": {
-        "toggle": "How do these two commands work?"
+        "toggle": "How the chat and commands work"
       },
       "reason": {
         "BUSY": "The previous action hasn't returned yet",
         "INPUT_EMPTY": "Write a message first",
-        "FULL_AUTO_CONSENT_REQUIRED": "Acknowledge the full-auto notice above first",
-        "NOT_STREAMING": "Nothing is streaming right now"
+        "FULL_AUTO_CONSENT_REQUIRED": "Acknowledge the full-auto notice above first"
       },
-      "workflowMirror": "Same runner: {{status}}",
       "workflowRun": {
         "heading": "Workflow progress",
         "progress": "Step {{index}} of {{total}}",
@@ -1167,6 +1167,7 @@
       "actionStop": "stop reply",
       "actionNewSession": "start a new session",
       "actionAutonomy": "switch autonomy to {{level}}",
+      "actionModelSwitch": "switch the chat model to {{model}}",
       "session": {
         "untitled": "Chat {{code}}",
         "rename": "Rename",
@@ -1174,17 +1175,20 @@
         "titleHint": "Up to 60 characters; phone numbers and emails are masked before they are stored",
         "saveTitle": "Save name",
         "cancel": "Keep it",
-        "delete": "Delete session",
-        "deleteHint": "Deleting only folds this conversation into the list below: every message stays and can be restored",
-        "hintsToggle": "What renaming and deleting do",
-        "trashHeading": "Deleted sessions ({{total}})",
-        "restore": "Restore",
+        "history": "Session history",
+        "historyTitle": "Session history",
+        "historySubtitle": "Pick one to continue, or delete the ones you no longer need",
+        "historyEmpty": "No sessions to continue yet",
+        "historyContinue": "Continue",
+        "historyCurrent": "Current",
+        "historyCount": "{{count}} message(s)",
+        "historyDelete": "Delete",
+        "historyDeleteConfirm": "Click again to delete",
+        "historyDeleted": "Session {{code}} deleted",
         "actionRename": "rename session {{code}}",
-        "actionDelete": "delete session {{code}}",
-        "actionRestore": "restore session {{code}}",
-        "deleted": "Session {{code}} is folded away; restore it from the Deleted sessions list",
-        "restored": "Session {{code}} is back and is now the current one",
-        "reasonNoSession": "No current session yet: start one before renaming or deleting",
+        "historyActionSelect": "switch to session {{code}}",
+        "historyActionDelete": "delete session {{code}}",
+        "reasonNoSession": "No current session yet: start one before renaming",
         "reasonEmptyTitle": "The name is still empty: type something, then Enter or press Save name",
         "reason": {
           "ACTION_BUSY": "The previous action hasn’t returned yet: the title waits for its receipt before you edit again."

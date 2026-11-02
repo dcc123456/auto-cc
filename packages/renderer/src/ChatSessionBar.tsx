@@ -1,23 +1,22 @@
 /**
- * 会话这一条入口的三个动作（spec 5.6-07）：新建、重命名、软删，外加一栏「已删除的会话」作为恢复途径。
+ * 会话这一条入口的两个动作（spec 5.6-07）：新建、重命名；删除与继续对话搬进右侧的会话历史抽屉。
  *
- * 为什么单独成一个组件（AGENTS.md §5.10）：这三只按钮改的是 `chat_session` 那一行的标题与删除标记，
+ * 为什么单独成一个组件（AGENTS.md §5.10）：这几只按钮改的是 `chat_session` 那一行的标题，
  * 与消息流、档位、免确认白名单都不是同一件事；混进 ChatPanel 的头部就会让「当前会话叫什么」有两个来源。
  * 标题显示只读快照里那一份（`session` prop 递进来），组件自己不留副本（§2.7 禁第二份事实）。
- * 恢复途径为什么是一栏而不是一句「撤销」提示：撤销一旦只存在于内存里，重启之后那行数据就再没有途径捞回来，
- * 「软删」在用户眼里就等同于硬删——判据要防的正是这个。
+ * 2026-11-02 用户裁定把「删除会话」从顶栏拿掉、换成「会话历史」：删除要在看得见全部会话的地方做，
+ * 恢复栏随这条裁定一起退场（删除从此是一条单向的表态），历史抽屉里既能选一条继续，也能删掉任意一条。
  *
  * 2026-10-19 对话面板按参考图重排（设计稿 v2 的 `.bar`）：这一条**就是面板唯一的顶栏**——
  * 原先它上面还有一条 `Bot` 图标 + 「对话」标题的横条，两条都在说"这是对话"，而参考图那一行说的是
- * "这是哪一条会话"。于是那条退掉，这一条收到 46px：文件夹图标 + 会话名 + 行级动作（改名/删除收成图标键），
- * 右侧是调用方递进来的那一组图标档动作（`rightActions`：档位、免确认白名单）与「新建会话」。
- * 稿上这一条右组本来就只有图标（`⚡` 与 ` sliders`），所以「新建会话」也降成图标档：三格并排读起来是
- * 一排工具，而不是三条各自说着自己的句子。
+ * "这是哪一条会话"。于是那条退掉，这一条收到 46px：文件夹图标 + 会话名 + 改名，右侧是调用方递进来的
+ * 那一组图标档动作（`rightActions`：免确认白名单）与「会话历史」「新建会话」。
  */
-import { FolderOpen, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { FolderOpen, Pencil, Plus } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatSessionView } from '@auto-cc/shared';
+import { ChatHistoryDrawer } from './ChatHistoryDrawer';
 import { DeskButton, InlineEditField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
@@ -31,54 +30,35 @@ function shortCode(id: string): string {
 }
 
 /**
- * 顶栏那两只行级动作（改名 / 删除）的几何：设计稿 v2 的 `.icon` 是一枚 30px 的 ghost 方块。
+ * 行级动作（改名）的几何：设计稿 v2 的 `.icon` 是一枚 30px 的 ghost 方块。
  * 文案收进 `sr-only` 与气泡（`tip`），图标居中靠 `justify-center`：
  * 原件的 `compact` 档给的是 `px-2`，不居中时 11px 的图标会贴在左边。
  */
 const BAR_ICON_CLASS = 'h-[30px] w-[30px] justify-center';
 
 /**
- * 会话操作带（面板的唯一顶栏）：标题 + 改名/删除/新建 + 已删栏 + 一行提示。
+ * 会话操作带（面板的唯一顶栏）：标题 + 改名 + 历史/新建 + 一行提示。
  * @param session 当前会话的读数，来自 ChatPanel 那份快照；快照未回来时为 undefined（按钮先禁用）
  * @param read ChatPanel 的快照读取函数；每个动作跑完都调一次，界面不猜主进程当下的状态
- * @param headExtra 条尾右侧的那一位读数（对话面板把 `chat-workflow-mirror` 递进来）：
- *   它说的是"此刻哪个 runner 在动"，归属顶栏的几何，但事实只有 ChatPanel 那份订阅知道，所以走槽位而不是让本组件去订阅（§2.5）
- * @param rightActions 条尾右侧的那一组图标档动作（对话面板递进档位与免确认白名单那两颗）：
- *   与 `headExtra` 同一理由——那一格开合的状态只有 ChatPanel 知道，本组件不另存一份（§2.7）
- * @returns 面板最上面的一条 46px 窄带，没有软删过会话时已删栏整块不渲染
+ * @param rightActions 条尾右侧的那一组图标档动作（对话面板递进免确认白名单那一颗）：
+ *   状态只有 ChatPanel 知道，本组件不另存一份（§2.7）
+ * @returns 面板最上面的一条 46px 窄带
  */
 export function ChatSessionBar({
   session,
   read,
-  headExtra,
   rightActions,
 }: {
   session: ChatSessionView | undefined;
   read: () => Promise<unknown>;
-  headExtra?: ReactNode;
   rightActions?: ReactNode;
 }) {
   const { t } = useTranslation();
   const bridge = window.autoCC;
-  const [trash, setTrash] = useState<ChatSessionView[]>();
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
-  /** 重读已删栏：能不能恢复、要恢复哪一条，都以库里 `deleted_at` 那一列为准。 */
-  const readTrash = useCallback(async () => {
-    const reply = await bridge?.chat['session.trashed']();
-    if (reply?.ok) setTrash(reply.value);
-  }, [bridge]);
-
-  const refresh = useCallback(async () => {
-    await Promise.all([read(), readTrash()]);
-  }, [read, readTrash]);
-
-  useEffect(() => {
-    void readTrash();
-  }, [readTrash]);
-
-  const { busy, notice, run: call } = useBridgeAction(refresh);
+  const { busy, notice, run: call } = useBridgeAction(read);
   const code = session ? shortCode(session.id) : '';
   const isBusy = busy !== undefined;
 
@@ -165,35 +145,11 @@ export function ChatSessionBar({
               <Pencil size={12} />
               <span className="sr-only">{t('chat.session.rename')}</span>
             </DeskButton>
-            <DeskButton
-              action="delete-session"
-              variant="ghost"
-              compact
-              className={BAR_ICON_CLASS}
-              tip={t('chat.session.delete')}
-              tipPlacement="bottom"
-              tipAlign="start"
-              busy={isBusy}
-              disabled={session === undefined}
-              disabledReason={session === undefined ? 'NO_SESSION_SNAPSHOT' : undefined}
-              disabledReasonLabel={session === undefined ? t('chat.session.reasonNoSession') : undefined}
-              onClick={() =>
-                void call(t('chat.session.actionDelete', { code }), () => bridge?.chat['session.remove'](), {
-                  apply: () => setEditing(false),
-                  describe: (view) => t('chat.session.deleted', { code: shortCode(view.id) }),
-                })
-              }
-            >
-              <Trash2 size={12} />
-              <span className="sr-only">{t('chat.session.delete')}</span>
-            </DeskButton>
-            {/* 条尾右侧：调用方递进来的那一组图标档（档位、免确认白名单）+「新建会话」。
-                新建也降成图标档：稿上这一条的右组只有图标（`⚡` 与 `sliders` 那一排），
-                留一句「新建会话」会把一排工具读成三件各自说自己的事；它换掉整段上下文这一点
-                由气泡（`tip`）与无障碍名带出。 */}
+            {/* 条尾右侧：调用方递进来的那一组图标档（免确认白名单）+ 会话历史 + 新建会话。
+                历史换掉了原先那颗删除键：删除要在看得见全部会话的地方做，而不是对屏上这一条盲删。 */}
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              {headExtra}
               {rightActions}
+              <ChatHistoryDrawer sessionId={session?.id} onChanged={read} />
               <DeskButton
                 action="new-session"
                 variant="ghost"
@@ -213,46 +169,9 @@ export function ChatSessionBar({
         )}
       </div>
 
-      {/* 那两句规矩（改名 28 字 / 删除 30 字）原先常驻在会话条下面一行，把「名字 + 图标组」这一条
-          撑成两行高（活体读数 75 而稿上是 46）。2026-10-19 按裁定搬进输入卡下面那条读数带，
-          与那两条命令的说明同处一格（见 `ChatPanel` 的 understrip）：顶栏从此只有一条 46px。
-          两支 testid 一起搬走、不改名（5.6-07 的读数照旧解得到）。 */}
-
-      {trash && trash.length > 0 ? (
-        <div data-testid="chat-session-trash" className="border-t border-line bg-ink-850 px-4 py-2">
-          <p className="text-[10px] text-slate-500" data-trash-count={String(trash.length)}>
-            {t('chat.session.trashHeading', { total: trash.length })}
-          </p>
-          <ul className="mt-1 max-h-24 space-y-1 overflow-y-auto">
-            {trash.map((row) => (
-              <li
-                key={row.id}
-                data-trash-session-id={row.id}
-                className="flex items-center gap-2 rounded-md border border-line px-2 py-1 text-[11px]"
-              >
-                <span className="min-w-0 max-w-[50%] truncate text-slate-400">
-                  {row.title ?? t('chat.session.untitled', { code: shortCode(row.id) })}
-                </span>
-                <DeskButton
-                  action="restore-session"
-                  variant="amber"
-                  compact
-                  busy={isBusy}
-                  className="ml-auto"
-                  onClick={() =>
-                    void call(t('chat.session.actionRestore', { code: shortCode(row.id) }), () =>
-                      bridge?.chat['session.restore'](row.id),
-                    )
-                  }
-                >
-                  <RotateCcw size={10} />
-                  {t('chat.session.restore')}
-                </DeskButton>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      {/* 改名那两句规矩原先常驻在会话条下面一行，把「名字 + 图标组」这一条撑成两行高
+          （活体读数 75 而稿上是 46）。2026-10-19 按裁定搬进输入卡下面那只说明气泡；
+          顶栏从此只有一条 46px。 */}
 
       {notice ? (
         <p className="border-t border-line px-4 py-1.5 text-[11px] text-slate-300" data-testid="chat-session-notice">

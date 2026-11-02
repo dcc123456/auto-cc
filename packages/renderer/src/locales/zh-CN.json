@@ -1135,28 +1135,28 @@
       "newSession": "新建会话",
       "streaming": "回复生成中…",
       "streamingElapsed": "已用 {{seconds}} 秒",
-      "sendQueued": "排进队列",
       "queued": "已经排着 {{count}} 条，回复结束后按顺序自动发出",
       "copy": "复制这段回复",
       "copied": "这段回复已复制到剪贴板",
       "copyFailed": "剪贴板没写进去：{{reason}}",
       "modelNone": "还没配对话模型",
+      "modelMenu": "对话模型",
+      "modelConfig": "模型配置",
+      "modelEmpty": "还没有可选的模型：先去模型配置里添加并勾选",
       "settings": {
         "title": "对话设置",
-        "subtitle": "档位与免确认白名单都在这只抽屉里改"
+        "subtitle": "免确认白名单在这只抽屉里改"
       },
       "toolHint": "/tool 开头的消息会真调注册表里的工具（缺省 jd.capture.run）",
       "runHint": "全自动档下直接说要做的事就会起草并开跑；其他档位用 {{prefix}} 先出可见计划",
       "hints": {
-        "toggle": "这两条命令怎么用？"
+        "toggle": "对话与命令的用法"
       },
       "reason": {
         "BUSY": "上一条动作还没回来",
         "INPUT_EMPTY": "先写一句要说的话",
-        "FULL_AUTO_CONSENT_REQUIRED": "先在上方那句全自动明示上点一次「我了解」",
-        "NOT_STREAMING": "此刻没有正在生成的回复可停"
+        "FULL_AUTO_CONSENT_REQUIRED": "先在上方那句全自动明示上点一次「我了解」"
       },
-      "workflowMirror": "同一个 runner：{{status}}",
       "workflowRun": {
         "heading": "工作流进度",
         "progress": "第 {{index}} / {{total}} 步",
@@ -1167,6 +1167,7 @@
       "actionStop": "停止回复",
       "actionNewSession": "新建会话",
       "actionAutonomy": "切换档位为 {{level}}",
+      "actionModelSwitch": "切换对话模型为 {{model}}",
       "session": {
         "untitled": "对话 {{code}}",
         "rename": "改名",
@@ -1174,17 +1175,20 @@
         "titleHint": "最长 60 字；手机号、邮箱这类内容在进库存之前会被打码",
         "saveTitle": "保存名字",
         "cancel": "先不改",
-        "delete": "删除会话",
-        "deleteHint": "删除只是把这条会话收进下面那一栏，消息一条都没少，随时能恢复",
-        "hintsToggle": "改名和删除是怎么回事？",
-        "trashHeading": "已删除的会话（{{total}} 条）",
-        "restore": "恢复",
+        "history": "会话历史",
+        "historyTitle": "会话历史",
+        "historySubtitle": "选一条继续，或删掉不再需要的会话",
+        "historyEmpty": "还没有可继续的会话",
+        "historyContinue": "继续",
+        "historyCurrent": "当前",
+        "historyCount": "{{count}} 条消息",
+        "historyDelete": "删除",
+        "historyDeleteConfirm": "再点一次删除",
+        "historyDeleted": "会话 {{code}} 已删除",
         "actionRename": "重命名会话 {{code}}",
-        "actionDelete": "删除会话 {{code}}",
-        "actionRestore": "恢复会话 {{code}}",
-        "deleted": "会话 {{code}} 已收起，在「已删除的会话」那一栏里可以恢复",
-        "restored": "会话 {{code}} 已恢复，它就是当前会话",
-        "reasonNoSession": "还没有当前会话：先新建一条，再改名或删除",
+        "historyActionSelect": "切到会话 {{code}}",
+        "historyActionDelete": "删除会话 {{code}}",
+        "reasonNoSession": "还没有当前会话：先新建一条，再改名",
         "reasonEmptyTitle": "名字还是空的：先写几个字，Enter 或按「保存名字」都算",
         "reason": {
           "ACTION_BUSY": "上一条动作还没回来：等它报出结果再改标题。"

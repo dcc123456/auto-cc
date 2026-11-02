@@ -662,7 +662,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
   });
 });
 
-describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', () => {
+describe('会话操作：标题、删除与会话历史（spec 5.6-07）', () => {
   it('默认没有标题；改名落在同一行，去空格由主进程做', async () => {
     const { ctx, chat } = await boot();
     const sessionId = chat.current().session.id;
@@ -725,35 +725,39 @@ describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', ()
     expect(rowsOf(oldId)).toHaveLength(2);
     expect(chat.current().session.id).toBe(oldId);
     expect(chat.current().messages).toHaveLength(2);
-    expect(chat.trashed().map((row) => row.id)).toEqual([removed.id]);
+    // 历史清单只列未删的：删掉的那条不在，剩下的仍是那一条旧会话。
+    expect(chat.list().map((row) => row.id)).toEqual([oldId]);
     // 未删与已删的两行都还在表里：号段 23 写的只是 deleted_at，硬删从没发生。
     expect(rowCount(ctx, 'chat_session')).toBe(2);
     expect(rowCount(ctx, 'chat_message')).toBe(4);
   });
 
-  it('恢复途径是真的：restore 之后那条又成为当前会话，标题与消息都在', async () => {
+  it('会话历史可以选中旧会话继续，也可以删掉历史里不是当前的那一条', async () => {
     const { chat } = await boot();
-    chat.send('要说的事');
+    chat.send('旧会话的消息');
     await settle(120);
-    const titled = chat.rename('改过名字的会话');
-    const removed = chat.remove();
-    expect(removed.id).toBe(titled.id);
-    const restored = chat.restore(removed.id);
-    expect(restored.deletedAt).toBeNull();
-    expect(restored.title).toBe('改过名字的会话');
-    expect(chat.trashed()).toEqual([]);
-    expect(chat.current().session.id).toBe(removed.id);
-    expect(chat.current().messages).toHaveLength(2);
-  });
+    const oldId = chat.current().session.id;
+    chat.startSession();
+    chat.send('新会话的消息');
+    await settle(120);
+    const newId = chat.current().session.id;
 
-  it('查无此单与「根本没删过」都结构化失败，一行都不动', async () => {
-    const { chat } = await boot();
-    const sessionId = chat.current().session.id;
-    expect(codeOf(() => chat.restore('00000000-0000-0000-0000-000000000000'))).toBe('CHAT_SESSION_NOT_FOUND');
-    expect(codeOf(() => chat.restore(sessionId))).toBe('CHAT_SESSION_NOT_DELETED');
-    expect(chat.current().session.id).toBe(sessionId);
-    expect(chat.current().session.deletedAt).toBeNull();
-    expect(chat.trashed()).toEqual([]);
+    // 历史按创建时间倒序：新会话在前。
+    expect(chat.list().map((row) => row.id)).toEqual([newId, oldId]);
+    const resumed = chat.select(oldId);
+    expect(resumed.session.id).toBe(oldId);
+    expect(resumed.messages).toHaveLength(2);
+    // 选中之后「当前」就是它，再发一条也落在它这一段里。
+    chat.send('回到旧会话继续');
+    await settle(120);
+    expect(chat.current().session.id).toBe(oldId);
+
+    // 删掉历史里另一条（新的那条）不动屏上这条。
+    expect(chat.remove(newId).deletedAt).not.toBeNull();
+    expect(chat.current().session.id).toBe(oldId);
+    expect(chat.list().map((row) => row.id)).toEqual([oldId]);
+    expect(codeOf(() => chat.select(newId))).toBe('CHAT_SESSION_DELETED');
+    expect(codeOf(() => chat.select('00000000-0000-0000-0000-000000000000'))).toBe('CHAT_SESSION_NOT_FOUND');
   });
 
   it('一条不剩地全删掉：current() 就地建一条默认档位的，绝不把已删的那条再端出来', async () => {
@@ -765,8 +769,8 @@ describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', ()
     expect(snapshot.session.id).not.toBe(only);
     expect(snapshot.session.autonomy).toBe('suggest');
     expect(snapshot.messages).toEqual([]);
-    // 回收站那一条不能因为「没有未删的了」就被当成当前会话——那是 5.6-07 判据里「软删」二字的反面。
-    expect(chat.trashed().map((row) => row.id)).toEqual([only]);
+    // 已删的那条不能因为「没有未删的了」就被重新端出来；历史清单里只有 current() 新补的那一条。
+    expect(chat.list().map((row) => row.id)).toEqual([snapshot.session.id]);
   });
 
   it('号段 23 只登记一次：停掉重挂不重复 push，标题与删除标记都读得回来', async () => {
@@ -789,10 +793,9 @@ describe('会话三操作：标题、软删与恢复途径（spec 5.6-07）', ()
     const remounted = asApp(ctx)['chat.session'];
     expect(remounted.current().session.id).toBe(titled.id);
     expect(remounted.current().session.title).toBe('重启之前起的名字');
-    expect(remounted.trashed()).toEqual([]);
+    expect(remounted.list().map((row) => row.id)).toEqual([titled.id]);
     expect(remounted.remove().deletedAt).not.toBeNull();
-    expect(remounted.trashed().map((row) => row.id)).toEqual([titled.id]);
-    expect(remounted.restore(titled.id).deletedAt).toBeNull();
+    expect(remounted.list()).toEqual([]);
   });
 });
 

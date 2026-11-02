@@ -9,6 +9,7 @@
  */
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   Copy,
   Gauge,
@@ -17,8 +18,6 @@ import {
   Settings2,
   Sparkles,
   Square,
-  Workflow as WorkflowIcon,
-  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,8 +28,8 @@ import type {
   ChatSnapshotView,
   ChatToolPart,
   FullAutoConsentView,
+  LlmSettingsView,
   ToolDescriptorView,
-  WorkflowRunView,
 } from '@auto-cc/shared';
 import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
@@ -43,9 +42,9 @@ import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { Banner, DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
-import { DeskExplainer, DeskHint, DeskSection } from './ui/disclosure';
+import { DeskHint } from './ui/disclosure';
 import { MarkdownBody } from './ui/markdown';
-import { Drawer } from './ui/overlays';
+import { DeskPopover, Drawer } from './ui/overlays';
 import { formatClock } from './format';
 import { pushDeskToast } from './deskToast';
 import { useAgentPause } from './useAgentPause';
@@ -55,6 +54,7 @@ import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
 import { useWorkflowRun } from './useWorkflowRun';
+import { advanceViewTrail } from './viewTrail';
 
 /**
  * 自治档位的三个入口。
@@ -65,6 +65,14 @@ const AUTONOMY_OPTIONS = ['suggest', 'semi', 'auto'] as const satisfies readonly
 
 /** 界面上正在累加的那条助手回复（主进程快照在流式期间也带这条，两边同时画会重复，所以过滤掉它）。 */
 type LiveStream = { sessionId: string; messageId: string; text: string; tool?: ChatToolPart };
+
+/**
+ * 模型气泡里的一条候选：哪家实例下的哪条已入库模型。
+ *
+ * 只装 `llm.settings.listModels()` 读回来的已入库行——那正是 `bindRole` 肯收的候选集，
+ * 界面因此不会给出一个主进程会拒掉的选项（§2.6 不做假入口）。
+ */
+type ModelChoice = { providerId: string; providerLabel: string; model: string };
 
 /**
  * 交给 agent 循环的那一句的前缀：`/plan` 之后是任务目标原文。
@@ -294,7 +302,8 @@ const SEND_LIVE_CLASS = 'h-8 w-8 justify-center rounded-full bg-slate-50';
 const SEND_DEAD_CLASS = 'h-8 w-8 justify-center rounded-full';
 
 /**
- * 档位那一颗 pill 的几何（稿 `.pill`：28px 高的圆角胶囊）。它**开合**的是右侧那只设置抽屉（落点在档位那一格）。
+ * 档位那颗胶囊的几何（稿 `.pill`：28px 高的圆角胶囊）。按下它弹的是**档位气泡**（2026-11-02 用户裁定：
+ * 模式设置只在输入框底部展示与选择），不再开右侧抽屉。
  *
  * 字号不挂在这里：原件的 `compact` 档已经挂了 `text-[11px]`，而活体实测**同族两条按样式表顺序决胜**，
  * 且任意属性那一族排在 utility 前面（本轮读数：`[font-size:12.5px]` 偏移 47881、`text-[11px]` 48164，
@@ -306,48 +315,11 @@ const TIER_PILL_CLASS = 'h-7 max-w-[150px] justify-center rounded-full';
 /**
  * 卡内工具条上那颗「当前对话模型」的几何（稿 `.pill` 的展示档）。
  *
- * 它**不是键**：稿上那颗带着 ⌄ 与切换下拉，而全仓没有"在对话里换模型"的写口（换模型在模型设置屏），
- * 所以这一格只画读数、不给 hover、不给 ⌄（§6.2-25：不可点的元素绝不长出 hover）。
- * 底色取 `bg-ink-850` 一档：卡片自己是 `bg-ink-800`，同一块底色会把读数糊进卡面。
+ * 2026-11-02 起它**是一颗键**：按下弹出模型气泡，里面能直接切到别家已入库的模型，
+ * 也留一只「模型配置」把入口接到信任栏的模型设置。底色取 `bg-ink-850` 一档：
+ * 卡片自己是 `bg-ink-800`，同一块底色会把读数糊进卡面。
  */
-const MODEL_PILL_CLASS = 'flex h-7 max-w-[190px] items-center gap-1.5 rounded-full bg-ink-850 px-2.5 text-[12.5px]';
-
-/**
- * 顶栏那两枚状态点的几何（档位一枚、runner 一枚）：6px 圆点，色相按全仓那套语义分工。
- *
- * 为什么是点而不是一行文字：这一条 46px 的带已经被会话名与四颗图标占满，再塞「半自动 · 运行中」
- * 就得换行（活体读数 2026-10-19：多一行常驻文案把 46px 的顶栏撑成 75px）。点只说"此刻是哪一档"，
- * 那句话由气泡（`tip`）、无障碍名与设置抽屉里的正文带出——三者读的是同一份事实，界面不另存一份（§2.7）。
- */
-const STATUS_DOT_CLASS = 'size-1.5 shrink-0 rounded-full';
-
-/** 档位那枚点的色相：建议档=在跑但不替我做主（celadon），半自动=要等我表态（amber），全自动=风险档（seal）。 */
-const TIER_DOT_CLASS = {
-  suggest: 'bg-celadon',
-  semi: 'bg-amber',
-  auto: 'bg-seal',
-} as const satisfies Record<AutonomyLevel, string>;
-
-/**
- * runner 那枚点的色相。
- * @param status `workflow.runner` 报来的运行态（事实只有那一份订阅，界面不推导）
- * @returns 该状态对应的底色字面量；用 `WorkflowRunView['status']` 索引而不是自己列一遍联合，
- *   运行态多出一档时这里的 switch 就少一条分支、编译期即红（§2.2）
- */
-function runDotClass(status: WorkflowRunView['status']): string {
-  switch (status) {
-    case 'running':
-      return 'bg-celadon';
-    case 'paused':
-      return 'bg-amber';
-    case 'failed':
-      return 'bg-seal';
-    case 'done':
-      return 'bg-jade';
-    case 'idle':
-      return 'bg-slate-500';
-  }
-}
+const MODEL_PILL_CLASS = 'h-7 max-w-[190px] justify-center rounded-full bg-ink-850 px-2.5 text-[12.5px]';
 
 /**
  * 从本机读回上次的高度档位。
@@ -362,8 +334,8 @@ function readComposerStep(): number {
 }
 
 /**
- * 对话面板：一条 46px 顶栏（含两枚状态点与两颗设置图标）+ 消息流（含流内那条压缩窄行）+ 一张输入卡 +
- * 一只按需展开的设置抽屉（档位与免确认白名单）。
+ * 对话面板：一条 46px 顶栏（会话名 + 改名 + 白名单/历史/新建）+ 消息流（含流内那条压缩窄行）+
+ * 一张输入卡（档位气泡、模型气泡、合并后的发送/停止键）+ 一只按需展开的设置抽屉（只留免确认白名单）。
  * @returns 占满可用高度的聊天面板；主进程快照未回来之前消息流显示占位文案
  */
 export function ChatPanel() {
@@ -373,19 +345,17 @@ export function ChatPanel() {
   const [tools, setTools] = useState<ToolDescriptorView[]>([]);
   const [draft, setDraft] = useState('');
   /**
-   * 右侧那只设置抽屉的开合与落点（2026-10-26 片一：顶栏那排开关收进一颗图标键 + `Drawer`）。
+   * 右侧设置抽屉的开合（2026-10-26 片一收成一颗图标键 + `Drawer`；2026-11-02 用户裁定
+   * 「点开后的页面只保留白名单功能」）。
    *
-   * 为什么从"输入卡上方那一格面板"改成抽屉：那一格长在 flex 列的最下方，正文一展开就把输入卡往上顶、
-   * 消息流跟着缩（5.7-d 那条实测的同一个病），只能靠 `max-h` 硬压；抽屉是**浮层**，读它的时候版面一像素不动。
-   * 三个入口（顶栏档位键、顶栏设置键、卡内那颗档位胶囊）共用这一位状态——"抽屉开没开、落在哪一格"
-   * 只有一个来源（§2.7），档位本身仍然只有一个写口（抽屉里的 `DeskSegmented`，§2.5）。
-   *
-   * `signal` 是自增的跳转凭据（`DeskSection.openSignal` 那一支）：抽屉重开时那一格必须**强制展开**，
-   * 否则人点「档位」进来只看到两个收起的段头，落点看不见就等于没跳到。
+   * 档位从这一格退场：它现在只在输入框底部那颗胶囊的气泡里展示与选择，抽屉里不再有第二个写口。
+   * 抽屉仍然是**浮层**——读它的时候版面一像素不动，不必把输入卡往上顶。
    */
-  const [settings, setSettings] = useState<{ focus: 'tier' | 'policy'; signal: number }>();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   /** 当前对话通道用的模型名（稿 `.pill` 右侧那一颗的读数）；没配齐时为 undefined，画「未配置」那句。 */
   const [chatModel, setChatModel] = useState<string>();
+  /** 模型气泡的候选：各家实例下已入库的模型；打开气泡时现问，不在本地存第二份清单（§2.7）。 */
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>();
   /**
    * 那份一次性的「全自动授权」（spec 8.10-01）。
    *
@@ -395,6 +365,13 @@ export function ChatPanel() {
    */
   const [fullAutoConsent, setFullAutoConsent] = useState<FullAutoConsentView>();
   const scrollRef = useRef<HTMLDivElement>(null);
+  /**
+   * 屏上此刻那条会话的 id（事件过滤用）。
+   *
+   * 历史抽屉可以在流式期间切走会话（`chat.session.select` 会先把旧回复收尾）：旧会话剩余的分片与
+   * `done` 仍会经同一条事件通道推来，不认一下会话 id 就会把上一段的字画到这一段的画面里。
+   */
+  const currentSessionIdRef = useRef<string | undefined>(undefined);
   const bridge = window.autoCC;
   // 对话与工作流镜像同一个 runner 实例（spec 1.10-08 的后半句判据）。
   // 5.4-c 起这条订阅在对话侧有两个用户：表头那只徽标显示状态，流末尾那张卡显示进度（同一份读数，spec 5.4-07）。
@@ -427,14 +404,41 @@ export function ChatPanel() {
   }, [bridge]);
 
   /**
-   * 读对话通道当下用的那个模型名（稿上卡内工具条右侧那颗 pill 的读数）。
+   * 读对话通道当下用的那个模型名（卡内工具条右侧那颗 pill 的读数）。
    *
    * 事实只有 `llm.settings.read` 那一份（`LlmLegView.model`，端点/模型名/key 三项没齐时是 null），
-   * 界面不猜也不留第二份（§2.7）。这一格没有"对话里换模型"的写口，所以它只做读数、不做起点。
+   * 界面不猜也不留第二份（§2.7）。
+   * @param view 主进程刚返回的整份读数；省略时现问一次
    */
+  const applyModelView = useCallback((view: LlmSettingsView) => {
+    setChatModel(view.legs.find((leg) => leg.leg === 'chat')?.model ?? undefined);
+  }, []);
   const readModel = useCallback(async () => {
     const reply = await bridge?.llm['settings.read']();
-    if (reply?.ok) setChatModel(reply.value.legs.find((leg) => leg.leg === 'chat')?.model ?? undefined);
+    if (reply?.ok) applyModelView(reply.value);
+  }, [applyModelView, bridge]);
+
+  /**
+   * 现问模型气泡的候选：池里每家实例 × 它已入库的模型。
+   *
+   * 候选只取 `llm.settings.listModels()`（已入库那些），与 `llm.settings.bindRole` 肯收的集合是同一份；
+   * 问不到时留空数组，气泡里如实说「还没有可选的模型」，不编一条假选项。
+   */
+  const readModelChoices = useCallback(async () => {
+    const providers = await bridge?.llm['settings.listProviders']();
+    if (!providers?.ok) {
+      setModelChoices([]);
+      return;
+    }
+    const lists = await Promise.all(
+      providers.value.map(async (provider) => {
+        const reply = await bridge?.llm['settings.listModels'](provider.id);
+        return reply?.ok
+          ? reply.value.map((row) => ({ providerId: provider.id, providerLabel: provider.label, model: row.model }))
+          : [];
+      }),
+    );
+    setModelChoices(lists.flat());
   }, [bridge]);
 
   /** 读那份一次性全自动授权：与档位一起进来，界面据此决定要不要摆那句明示、能不能直接跑。 */
@@ -451,8 +455,14 @@ export function ChatPanel() {
   }, [read, readTools, readModel, readConsent]);
 
   useEffect(() => {
+    currentSessionIdRef.current = snapshot?.session.id;
+  }, [snapshot?.session.id]);
+
+  useEffect(() => {
     if (!bridge) return;
     return bridge.on('chat/delta', (event) => {
+      // 别的会话（切走之前那条）的片段不进当前画面：事件里带 sessionId 正是为了让读的一侧能认领。
+      if (event.sessionId !== currentSessionIdRef.current) return;
       if (event.done) {
         // 收尾以主进程的重读为准：那条消息已经从内存挪进 `chat_message`，快照里才有完整文本与工具段。
         setLiveStream(undefined);
@@ -592,17 +602,6 @@ export function ChatPanel() {
   useEffect(() => {
     localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerStep));
   }, [composerStep]);
-  /**
-   * 开/合设置抽屉并落在那一格。
-   *
-   * 三个入口（顶栏的档位键、顶栏的设置键、卡内那颗档位胶囊）都调这一只，于是"抽屉开没开"只有一个来源。
-   * 同一格被第二次点仍然要重新展开：`signal` 每次都自增，`DeskSection` 才会再跳一次
-   * （人不认"上次我自己收起来了"，与简历屏那一跳同机制，见 `useSectionOpen`）。
-   * @param focus 落点那一格
-   */
-  const toggleSettings = (focus: 'tier' | 'policy'): void => {
-    setSettings((previous) => (previous?.focus === focus ? undefined : { focus, signal: (previous?.signal ?? 0) + 1 }));
-  };
   /** 拖拽起点：记下按下时的 y 与当时的档位，移动时按位移折算而不是逐帧累加（累加会漂）。 */
   const composerDragRef = useRef<{ y: number; step: number } | null>(null);
   /** 是否正在拖：气泡在这期间改报当前高度，手一松就回到「拖动改高度」那句。 */
@@ -675,76 +674,27 @@ export function ChatPanel() {
 
   return (
     <section data-testid="chat-panel" className="flex h-full flex-col rounded-xl border border-line bg-ink-900/60">
-      {/* 顶栏只有一条（设计稿 v2 的 `.bar`）：原先上面还压着一条 `Bot` 图标 + 「对话」的横条，
-          两条都在说"这是对话"，而参考图那一行说的是"这是哪一条会话"。会话三操作与它合成 46px 的一条。
-          2026-10-26 片一按「信息不平铺」把条尾那排**开关**再收一档：档位与免确认白名单不再各占一颗键、
-          各自在输入卡上方撑开一格，而是共用一只右侧抽屉（`chat-settings`）——顶栏留两颗图标，
-          运行态与档位各留一枚状态点，那一排文字（`同一个 runner：已完成` 那句）退成读屏名。
-          三支既有锚点（`chat-workflow-mirror` / `desk-panel` / `agent-policy-toggle`）名字一字未改，
-          1.10-08 / 5.4-07 / 6.2-40 的读数照旧解得到（`textContent` 里那句话仍在，只是不再占画面）。 */}
+      {/* 顶栏只有一条（设计稿 v2 的 `.bar`）：会话名 + 改名 + 右端的白名单/历史/新建。
+          2026-11-02 用户裁定把前两颗「没什么作用的」图标拿掉——runner 那枚只读徽标与顶栏的档位入口
+          不再占位；档位只在输入卡底部那颗胶囊的气泡里展示与选择，白名单留在设置抽屉里。 */}
       <ChatSessionBar
         session={snapshot?.session}
         read={read}
-        headExtra={
-          workflowRun ? (
-            <span
-              data-testid="chat-workflow-mirror"
-              data-workflow-status={workflowRun.status}
-              className="flex items-center gap-1 rounded-chip bg-ink-850 px-2 py-1 text-slate-400"
-            >
-              <WorkflowIcon size={11} aria-hidden="true" />
-              <span className={`${STATUS_DOT_CLASS} ${runDotClass(workflowRun.status)}`} aria-hidden="true" />
-              <span className="sr-only">
-                {t('chat.workflowMirror', { status: t(`workflow.status.${workflowRun.status}`) })}
-              </span>
-            </span>
-          ) : null
-        }
         rightActions={
-          <>
-            <DeskButton
-              action="chat-autonomy-toggle"
-              variant={settings?.focus === 'tier' ? 'solid' : 'ghost'}
-              compact
-              className={ICON_CELL_CLASS}
-              tip={t('agent.autonomy.section')}
-              tipPlacement="bottom"
-              tipAlign="end"
-              markers={{
-                'desk-panel': settings ? settings.focus : 'none',
-                tier: snapshot?.session.autonomy ?? 'unknown',
-              }}
-              onClick={() => toggleSettings('tier')}
-            >
-              {/* 全自动=风险档，那颗图标跟着染朱砂；其余两档只是"选中"，不预支任何语气（与 DeskSegmented 同口径）。 */}
-              <Zap size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
-              {snapshot ? (
-                <span
-                  className={`${STATUS_DOT_CLASS} ${TIER_DOT_CLASS[snapshot.session.autonomy]}`}
-                  aria-hidden="true"
-                />
-              ) : null}
-              <span className="sr-only">
-                {snapshot
-                  ? `${t('agent.autonomy.section')}：${t(`agent.autonomy.${snapshot.session.autonomy}`)}`
-                  : t('agent.autonomy.section')}
-              </span>
-            </DeskButton>
-            <DeskButton
-              action="agent-policy-toggle"
-              variant={settings?.focus === 'policy' ? 'solid' : 'ghost'}
-              compact
-              className={ICON_CELL_CLASS}
-              tip={t('chat.settings.title')}
-              tipPlacement="bottom"
-              tipAlign="end"
-              markers={{ 'desk-panel': settings ? settings.focus : 'none' }}
-              onClick={() => toggleSettings('policy')}
-            >
-              <Settings2 size={13} />
-              <span className="sr-only">{t('chat.settings.title')}</span>
-            </DeskButton>
-          </>
+          <DeskButton
+            action="agent-policy-toggle"
+            variant={isSettingsOpen ? 'solid' : 'ghost'}
+            compact
+            className={ICON_CELL_CLASS}
+            tip={t('chat.settings.title')}
+            tipPlacement="bottom"
+            tipAlign="end"
+            markers={{ 'desk-panel': isSettingsOpen ? 'policy' : 'none' }}
+            onClick={() => setIsSettingsOpen((previous) => !previous)}
+          >
+            <Settings2 size={13} />
+            <span className="sr-only">{t('chat.settings.title')}</span>
+          </DeskButton>
         }
       />
 
@@ -867,8 +817,9 @@ export function ChatPanel() {
 
       {/* 输入区收成**一张卡**（设计稿 v2 的 `.composer > .card`）：档位那颗胶囊、当前模型读数、
           停止与发送全部落在卡内的工具条上；卡外只剩队列那一条读数与卡下面那条薄读数带（稿 `.understrip`）。
-          2026-10-26 片一再收一档：档位与免确认白名单那两格**搬进右侧抽屉**（见本文件末尾的 `chat-settings`），
-          卡上方从此不按需撑开任何东西——那一格展开时把输入卡往上顶、消息流跟着缩，正是 5.7-d 那条实测的病。
+          2026-10-26 片一再收一档：免确认白名单搬进右侧抽屉（见本文件末尾的 `chat-settings`）；
+          2026-11-02 起档位只在卡内那颗胶囊的气泡里改，不再在卡上方撑开任何格子——那一格展开时
+          把输入卡往上顶、消息流跟着缩，正是 5.7-d 那条实测的病。
           拖拽手柄走原件层：裸 `<button>` 在面板里会被机检第 10 条拦下；它现在贴在卡的下沿（拖着下沿加高）。 */}
       <footer className="px-4 pb-3 pt-1">
         {/* 队列读数（spec 1.11-16）紧贴卡片上沿：它是「这句话还没发出去」的证据，
@@ -885,7 +836,7 @@ export function ChatPanel() {
         ) : null}
         {/* 全自动档还没做过那一次明示：这句话摆在这里而不是弹窗——弹窗的入场条件是"不可逆、必须读完整风险"，
             而它挡住的只是"还没答应"，抽屉一开就能读到同一句话（见下面档位那一格）。 */}
-        {needsFullAutoConsent && settings === undefined ? (
+        {needsFullAutoConsent && !isSettingsOpen ? (
           <FullAutoConsentNotice busy={busy !== undefined} onGrant={grantFullAuto} />
         ) : null}
         <div className="rounded-2xl border border-line bg-ink-800 shadow-card transition-[border-color,box-shadow] duration-150 focus-within:border-celadon/50 focus-within:ring-[3px] focus-within:ring-celadon/15">
@@ -956,100 +907,208 @@ export function ChatPanel() {
             />
           </div>
           <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
-            {/* 两组说明收成**裸 icon + 气泡**（片一：提示文案一律 icon+气泡，不平铺在带里）。
-                它们原先住在卡下那条读数带上，各占 136×18 的一行文字（活体读数 2026-10-19），
-                而这一带的宽度在右栏只有 369px——文字一长就把发送键挤成半截。icon 档把它们压到 24px 见方，
-                读的时候气泡浮在卡面上，版面一像素不动。四支既有 testid 跟着搬进气泡正文，不改名
-                （5.2-03 / 5.6-07 的验收通道照旧解得到）。 */}
+            {/* 说明收成**一枚**裸 icon + 气泡（2026-11-02 用户裁定把左端两枚合成一枚）：
+                原先 tool/run 一组、会话改名/删除一组各占一颗问号；删除入口搬进历史抽屉之后，
+                后一组只剩一句改名规矩，并进同一只气泡即可。三支既有 testid 跟着正文留在里面，不改名。 */}
             <DeskHint id="chat.hints" iconOnly label={t('chat.hints.toggle')} markers={{ testid: 'chat-hint' }}>
               <p data-testid="chat-tool-hint">{t('chat.toolHint')}</p>
               {/* 循环入口写在提示里而不是加第三个输入框：`/plan` 起计划卡，其余句子照常走对话（spec 5.2-03）。 */}
               <p className="mt-1" data-testid="chat-run-hint">
                 {t('chat.runHint', { prefix: RUN_COMMAND_PREFIX })}
               </p>
-            </DeskHint>
-            <DeskHint
-              id="chat.session.hints"
-              iconOnly
-              label={t('chat.session.hintsToggle')}
-              markers={{ testid: 'chat-session-hints' }}
-            >
-              <p data-testid="chat-session-title-hint">{t('chat.session.titleHint')}</p>
-              <p className="mt-1" data-testid="chat-session-delete-hint">
-                {t('chat.session.deleteHint')}
+              <p className="mt-1" data-testid="chat-session-title-hint">
+                {t('chat.session.titleHint')}
               </p>
             </DeskHint>
-            {/* 档位那一颗：明面只留当下那一档的名字，按下把右侧抽屉开到档位那一格（那里才是唯一的切换入口）。
-                `chat-autonomy-current` 那支读数从原先段的 summary 搬进这一格的 label 节点（1.11-07 的判据
-                是"文案跟着档位走"，它跟着的始终是那句档位名）；`data-tier` 与 `chat-autonomy-pill` 原位不动。 */}
-            <DeskButton
-              action="chat-autonomy-toggle"
-              variant="ghost"
-              compact
-              className={TIER_PILL_CLASS}
-              markers={{ testid: 'chat-autonomy-pill', tier: snapshot?.session.autonomy ?? 'unknown' }}
-              tip={t('agent.autonomy.section')}
-              tipAlign="start"
-              onClick={() => toggleSettings('tier')}
+            {/* 档位那一颗：明面只留当下那一档的名字，按下弹出**档位气泡**——那里是唯一的切换入口
+                （2026-11-02 用户裁定：模式设置只在对话框底部展示与选择）。
+                `chat-autonomy-current` 仍跟着那句档位名；`data-tier` 与 `chat-autonomy-pill` 原位不动。 */}
+            <DeskPopover
+              action="chat-autonomy-menu"
+              label={t('agent.autonomy.section')}
+              align="start"
+              trigger={({ open, toggle }) => (
+                <DeskButton
+                  action="chat-autonomy-toggle"
+                  variant="ghost"
+                  compact
+                  className={TIER_PILL_CLASS}
+                  markers={{ testid: 'chat-autonomy-pill', tier: snapshot?.session.autonomy ?? 'unknown' }}
+                  tip={t('agent.autonomy.section')}
+                  tipAlign="start"
+                  aria-expanded={open}
+                  onClick={toggle}
+                >
+                  <Gauge size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
+                  <span
+                    data-testid="chat-autonomy-current"
+                    className={`text-[12.5px] ${snapshot?.session.autonomy === 'auto' ? 'text-seal-ink' : ''}`}
+                  >
+                    {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
+                  </span>
+                  <ChevronDown size={13} className="opacity-70" />
+                </DeskButton>
+              )}
             >
-              <Gauge size={13} className={snapshot?.session.autonomy === 'auto' ? 'text-seal' : undefined} />
-              <span
-                data-testid="chat-autonomy-current"
-                className={`text-[12.5px] ${snapshot?.session.autonomy === 'auto' ? 'text-seal-ink' : ''}`}
-              >
-                {snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : t('chat.loading')}
-              </span>
-              <ChevronDown size={13} className="opacity-70" />
-            </DeskButton>
-            {/* 当前对话通道用的模型名（稿 `.pill` 右侧那颗）。这一格**不是键**：全仓没有在对话里换模型的写口，
-                所以它没有 ⌄、没有 hover、点下去也不会有任何事（§6.2-25）。名字来自 `llm.settings.read`。 */}
-            <span className={`ml-auto ${MODEL_PILL_CLASS}`} data-testid="chat-model-pill" data-model={chatModel ?? ''}>
-              <Sparkles size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
-              <span className="min-w-0 truncate text-slate-200">{chatModel ?? t('chat.modelNone')}</span>
-            </span>
-            {/* 停止收成图标档（稿上工具条右组只有图标）：那句"停止"由气泡（`tip`）与无障碍名带出，
-                原因码 `NOT_STREAMING` 照旧挂在节点上（6.2-06：按不动必须说得出为什么）。 */}
-            <DeskButton
-              action="stop"
-              variant="ghost"
-              compact
-              className={ICON_CELL_CLASS}
-              busy={busy !== undefined}
-              disabled={!isStreaming}
-              disabledReason={!isStreaming ? 'NOT_STREAMING' : undefined}
-              disabledReasonLabel={!isStreaming ? t('chat.reason.NOT_STREAMING') : undefined}
-              tip={t('chat.stop')}
-              onClick={() => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']())}
+              {({ close }) => (
+                <DeskSegmented
+                  action="chat-autonomy"
+                  markers={{ testid: 'chat-autonomy-switch' }}
+                  value={snapshot?.session.autonomy}
+                  busy={busy !== undefined}
+                  onSelect={(level) => {
+                    close();
+                    void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
+                      bridge?.chat['session.setAutonomy'](level),
+                    );
+                  }}
+                  options={AUTONOMY_OPTIONS.map((level) => ({
+                    value: level,
+                    label: t(`agent.autonomy.${level}`),
+                    // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
+                    isRisk: level === 'auto',
+                    markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
+                  }))}
+                />
+              )}
+            </DeskPopover>
+            {/* 模型那一颗（2026-11-02 用户裁定：支持下拉换模型 + 一个模型配置入口，气泡下拉框样式）。
+                候选只取已入库清单，选中即 `llm.settings.bindRole` 写 chat 通道；配置入口走跨视图推进，
+                落到信任栏的模型设置。 */}
+            <DeskPopover
+              action="chat-model-menu"
+              label={t('chat.modelMenu')}
+              align="end"
+              className="ml-auto"
+              trigger={({ open, toggle }) => (
+                <DeskButton
+                  action="chat-model-toggle"
+                  variant="ghost"
+                  compact
+                  className={MODEL_PILL_CLASS}
+                  markers={{ testid: 'chat-model-pill', model: chatModel ?? '' }}
+                  tip={t('chat.modelMenu')}
+                  tipAlign="end"
+                  aria-expanded={open}
+                  onClick={() => {
+                    // 每次展开都现问一遍：人在模型设置里刚加的模型不该等到重启才出现。
+                    if (!open) void readModelChoices();
+                    toggle();
+                  }}
+                >
+                  <Sparkles size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  <span className="min-w-0 truncate text-slate-200">{chatModel ?? t('chat.modelNone')}</span>
+                  <ChevronDown size={13} className="opacity-70" />
+                </DeskButton>
+              )}
             >
-              <Square size={12} />
-              <span className="sr-only">{t('chat.stop')}</span>
-            </DeskButton>
-            {/* 流式期间发送键照常可按——按下去是排进队列（spec 1.11-16），不再是拒发。
-                文案收成图标后那句"排队发送"换由无障碍名与 `data-send-mode` 带出：testid 与原因码一律原位不动。 */}
+              {({ close }) => (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2 px-1 pb-1">
+                    <span className="text-[10.5px] text-slate-500">{t('chat.modelMenu')}</span>
+                    <DeskButton
+                      action="chat-model-config"
+                      variant="ghost"
+                      compact
+                      onClick={() => {
+                        close();
+                        advanceViewTrail({
+                          sourceView: 'chat',
+                          sourceTitle: t('nav.chat'),
+                          targetView: 'trust',
+                          targetTitle: t('desk.trust.title'),
+                          targetDetail: t('settings.model.heading'),
+                        });
+                      }}
+                    >
+                      <Settings2 size={11} />
+                      {t('chat.modelConfig')}
+                    </DeskButton>
+                  </div>
+                  {modelChoices === undefined ? (
+                    <p className="px-1 py-1 text-[11px] text-slate-400">{t('chat.loading')}</p>
+                  ) : modelChoices.length === 0 ? (
+                    <p data-testid="chat-model-empty" className="px-1 py-1 text-[11px] text-slate-400">
+                      {t('chat.modelEmpty')}
+                    </p>
+                  ) : (
+                    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                      {modelChoices.map((choice) => {
+                        const isCurrent = choice.model === chatModel;
+                        return (
+                          <DeskButton
+                            key={`${choice.providerId}:${choice.model}`}
+                            action="chat-model-pick"
+                            variant={isCurrent ? 'solid' : 'ghost'}
+                            compact
+                            className="w-full justify-start"
+                            markers={{
+                              testid: 'chat-model-option',
+                              model: choice.model,
+                              provider: choice.providerId,
+                            }}
+                            onClick={() => {
+                              close();
+                              void call(
+                                t('chat.actionModelSwitch', { model: choice.model }),
+                                () =>
+                                  bridge?.llm['settings.bindRole']({
+                                    leg: 'chat',
+                                    providerId: choice.providerId,
+                                    model: choice.model,
+                                  }),
+                                { apply: applyModelView },
+                              );
+                            }}
+                          >
+                            <span className="min-w-0 truncate">
+                              {choice.providerLabel} · {choice.model}
+                            </span>
+                            {isCurrent ? <Check size={12} className="ml-auto shrink-0 text-jade-ink" /> : null}
+                          </DeskButton>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </DeskPopover>
+            {/* 发送与停止合成**一颗**键（2026-11-02 用户裁定）：没在回复时是发送圆片，
+                正在回复时变成停止图标档。流式期间仍然可以用 Enter 把下一句排进队列（spec 1.11-16）。 */}
             <DeskButton
-              action="send"
-              variant="solid"
+              action={isStreaming ? 'stop' : 'send'}
+              variant={isStreaming ? 'ghost' : 'solid'}
               compact
               busy={busy !== undefined}
-              disabled={isSendDisabled}
-              disabledReason={sendReason}
-              disabledReasonLabel={sendReason ? t(`chat.reason.${sendReason}`) : undefined}
+              disabled={isStreaming ? false : isSendDisabled}
+              disabledReason={isStreaming ? undefined : sendReason}
+              disabledReasonLabel={!isStreaming && sendReason ? t(`chat.reason.${sendReason}`) : undefined}
               className={
                 // 悬停档与这一格的凭据同处一行邻域（机检第 13 节②），所以挂在调用点而不是常量表里。
-                isSendDisabled ? SEND_DEAD_CLASS : `${SEND_LIVE_CLASS} hover:bg-slate-100`
+                isStreaming
+                  ? ICON_CELL_CLASS
+                  : isSendDisabled
+                    ? SEND_DEAD_CLASS
+                    : `${SEND_LIVE_CLASS} hover:bg-slate-100`
               }
-              markers={{ 'send-mode': isStreaming ? 'queued' : 'now' }}
-              tip={isStreaming ? t('chat.sendQueued') : t('chat.send')}
+              markers={{ 'send-mode': isStreaming ? 'stop' : 'now' }}
+              tip={isStreaming ? t('chat.stop') : t('chat.send')}
               tipAlign="end"
-              onClick={submit}
+              onClick={
+                isStreaming ? () => void call(t('chat.actionStop'), () => bridge?.chat['session.stop']()) : submit
+              }
             >
-              <ArrowUp size={15} className={isSendDisabled ? undefined : 'text-ink-900'} />
-              <span className="sr-only">{isStreaming ? t('chat.sendQueued') : t('chat.send')}</span>
+              {isStreaming ? (
+                <Square size={12} />
+              ) : (
+                <ArrowUp size={15} className={isSendDisabled ? undefined : 'text-ink-900'} />
+              )}
+              <span className="sr-only">{isStreaming ? t('chat.stop') : t('chat.send')}</span>
             </DeskButton>
           </div>
         </div>
         {/* 卡下那条薄读数带（稿 `.understrip`：12px、`slate-400`、不描边）现在**只剩一个读数**：
-            两组说明搬进了工具条上那两枚裸 icon（气泡形态，见上），会话改名/删除的规矩也从这里走。
+            说明搬进了工具条上那一枚裸 icon（气泡形态，见上）。
             于是整条带只在**真折过一次**时出现——这一对数字是 `snapshot.compaction` 的现读数，
             没折过时这里根本不会有长度可言（界面上不摆一个"还没发生的读数"，也不留一条空带占高度）。 */}
         {compaction ? (
@@ -1066,77 +1125,21 @@ export function ChatPanel() {
         ) : null}
       </footer>
 
-      {/* 设置抽屉（片一：09 稿形态④「读与对照」）——档位与免确认白名单两格都住在这里。
-          为什么是抽屉而不是弹窗：这两格都是**边看边改**（改完档位还想回头看消息流里那张计划卡），
-          而弹窗的入场条件是"不可逆 / 必须读完整风险"，档位不属其中；抽屉的遮罩让出左栏，鼠标随时能切走。
-          两格都走 `DeskSection`：段头常驻、正文收起时真的卸载，于是抽屉里不会一开就摊满两屏教材。
-          `openSignal` 是那一跳的凭据——点顶栏哪一颗进来，哪一格就强制展开（落点看不见等于没跳到）。
-          三支既有锚点（`chat-autonomy-section` / `chat-autonomy-switch` / `agent-policy-panel`）名字一字未改。 */}
+      {/* 设置抽屉（09 稿形态④「读与对照」）——2026-11-02 用户裁定后**只留免确认白名单**。
+          档位不在这一格里了：它只在输入卡底部那颗胶囊的气泡里展示与选择，抽屉里不再有第二个写口。
+          为什么仍然用抽屉而不是弹窗：名单是**边看边改**的东西，抽屉的遮罩让出左栏，鼠标随时能切走。
+          正文是一张常开的块：抽屉里只有这一件事，再套一层可折叠段头等于让人多点一次才看得见按钮。 */}
       <Drawer
         action="chat-settings"
-        open={settings !== undefined}
+        open={isSettingsOpen}
         title={t('chat.settings.title')}
         subtitle={t('chat.settings.subtitle')}
-        onClose={() => setSettings(undefined)}
+        onClose={() => setIsSettingsOpen(false)}
       >
-        <div className="flex flex-col gap-2.5">
-          <DeskSection
-            id="chat.autonomy"
-            title={t('agent.autonomy.section')}
-            markers={{ testid: 'chat-autonomy-section' }}
-            openSignal={settings?.focus === 'tier' ? settings.signal : undefined}
-            summary={snapshot ? t(`agent.autonomy.${snapshot.session.autonomy}`) : undefined}
-          >
-            <DeskSegmented
-              action="chat-autonomy"
-              markers={{ testid: 'chat-autonomy-switch' }}
-              value={snapshot?.session.autonomy}
-              busy={busy !== undefined}
-              onSelect={(level) =>
-                void call(t('chat.actionAutonomy', { level: t(`agent.autonomy.${level}`) }), () =>
-                  bridge?.chat['session.setAutonomy'](level),
-                )
-              }
-              options={AUTONOMY_OPTIONS.map((level) => ({
-                value: level,
-                label: t(`agent.autonomy.${level}`),
-                // 全自动=风险档，选中那一格涂朱砂；其余两档只是"选中"，不预支任何语气
-                isRisk: level === 'auto',
-                markers: { autonomy: level, 'autonomy-on': String(snapshot?.session.autonomy === level) },
-              }))}
-            />
-            {/* 当下这一档"替我做主到哪一步"必须明面上说一句（档位是人选的，选错了界面不替他兜），
-                三档的完整对比进披露层——那是教材，不是此刻的读数。 */}
-            <p data-testid="chat-autonomy-why" className="mt-2 text-[11px] leading-relaxed text-slate-400">
-              {snapshot ? t(`agent.autonomy.why.${snapshot.session.autonomy}`) : t('chat.loading')}
-            </p>
-            {/* 抽屉里也挂同一张明示卡：人可能正是在这一格把档位切到全自动，而输入卡此刻被遮罩盖着。 */}
-            {needsFullAutoConsent ? (
-              <div className="mt-2">
-                <FullAutoConsentNotice busy={busy !== undefined} onGrant={grantFullAuto} />
-              </div>
-            ) : null}
-            <DeskExplainer id="agent.autonomy-compare" className="mt-1.5" label={t('agent.autonomy.compareToggle')}>
-              <span className="flex flex-col gap-1.5">
-                {AUTONOMY_OPTIONS.map((level) => (
-                  <span key={level} className="flex gap-1.5">
-                    <span className="shrink-0 font-semibold text-slate-200">{t(`agent.autonomy.${level}`)}</span>
-                    <span className="min-w-0">{t(`agent.autonomy.compare.${level}`)}</span>
-                  </span>
-                ))}
-              </span>
-            </DeskExplainer>
-          </DeskSection>
-          {/* 「哪些动作已免确认」与档位同处一只抽屉、各占一格：5.3-07 那句"两半一起读"由这一格自己的
-              档位说明承接（`agent.policy.onlySemi` 会在非半自动档明说「名单此刻不影响执行」）。 */}
-          <DeskSection
-            id="agent.policy"
-            title={t('agent.policy.heading')}
-            openSignal={settings?.focus === 'policy' ? settings.signal : undefined}
-          >
-            <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
-          </DeskSection>
-        </div>
+        <section className="rounded-xl border border-line bg-ink-900/60 px-4 py-3">
+          <h4 className="mb-2 text-xs font-semibold text-slate-50">{t('agent.policy.heading')}</h4>
+          <AgentPolicyPanel tools={tools} autonomy={snapshot?.session.autonomy} />
+        </section>
       </Drawer>
     </section>
   );

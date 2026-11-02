@@ -59,8 +59,8 @@ export function AgentPolicyPanel({
   const busyReason = busy !== undefined ? 'ACTION_BUSY' : undefined;
   const busyLabel = busyReason === undefined ? undefined : t('agent.policy.reason.ACTION_BUSY');
 
-  // 这一格住在设置抽屉的 `agent.policy` 那一段里（`ChatPanel`）：段头已经把「免确认白名单」这个名字
-  // 说了一遍，外框、描边与内边距也由 `DeskSection` 给，所以这里不再画第二张标题脸（§2.5：一件事一个来源）。
+  // 这一格住在设置抽屉里（`ChatPanel`）：抽屉的副标题与块头已经把「免确认白名单」这个名字
+  // 说了一遍，外框、描边与内边距也由外层给，所以这里不再画第二张标题脸（§2.5：一件事一个来源）。
   return (
     <div data-testid="agent-policy-panel" className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">

@@ -92,11 +92,10 @@ export type AppErrorCode =
   // 会话历史导出落盘失败（spec 5.6-09）：目录不可写、磁盘满都收在这一个码上。
   // 单独一个码是因为处置只有一种——重导一次；文件没写成绝不能回一份指向不存在路径的回执。
   | 'CHAT_EXPORT_FAILED'
-  // 会话改名/软删/恢复（spec 5.6-07）。两个码的处置不同所以不合并：
-  // NOT_FOUND 是「这一行没有」（重读列表），NOT_DELETED 是「按下的是恢复而它根本没被删」——
-  // 后者界面上该改的是按钮，不是给一句失败提示。
+  // 会话改名/删除/历史切换（spec 5.6-07）。两个码的处置不同所以不合并：
+  // NOT_FOUND 是「这一行没有」（重读列表），DELETED 是「这条已经被删过」（历史里删掉即可，不必再当失败重试）。
   | 'CHAT_SESSION_NOT_FOUND'
-  | 'CHAT_SESSION_NOT_DELETED'
+  | 'CHAT_SESSION_DELETED'
   | 'TOOL_DUPLICATE'
   // 模型出口（spec 2.5-01 / 2.5-12）：两个码必须分开，因为处置不同——
   // `LLM_UNAVAILABLE` 是「根本没配」，调用方应当回落模板并在界面播报；`LLM_REQUEST_FAILED` 是「配了但这次没成」，

@@ -1,5 +1,5 @@
 import { BadgeCheck, CircleAlert, FolderOpen, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clearDeskToast, useDeskToast } from '../deskToast';
@@ -258,6 +258,77 @@ export function Drawer({ action, open, title, subtitle, headExtra, onClose, widt
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
       </aside>
     </>
+  );
+}
+
+export interface DeskPopoverProps {
+  /** 该气泡的 `data-action` 凭据（面板与触发键都挂在它下面）。 */
+  action: string;
+  /** 气泡的读屏名（调用方翻译好传入）。 */
+  label: string;
+  /** 气泡横向对齐：`start` 贴触发键左沿（默认），`end` 贴右沿。 */
+  align?: 'start' | 'end';
+  /** 触发键那一格的外边档（`ml-auto` 这类）。 */
+  className?: string;
+  /** 触发键：由调用方画成 `DeskButton`，开合状态与切换函数从这里拿。 */
+  trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
+  /** 气泡正文：`close` 给选中某一项之后收起用。 */
+  children: (state: { close: () => void }) => ReactNode;
+}
+
+/**
+ * 气泡下拉（2026-11-02 用户裁定：档位与模型都用气泡下拉框选）。
+ *
+ * 与 `DeskHint` 共用同一族浮层画法（圆角、描边、尾巴、从下往上弹），但它是**可操作的菜单**而不是教材：
+ * 点外面或按 Escape 收起，正文收起时真的卸载。触发键归调用方画（`DeskButton`），
+ * 所以「按不动的那一态不许长出 hover」那类判据仍落在调用点的键上。
+ * 不注册成遮罩层：它不锁滚动、不抢焦点环，与人一边看消息一边改档位这件事是同一档打扰度。
+ * @param props 见 `DeskPopoverProps`
+ * @returns 一只相对定位的触发键 +（展开时）向上弹出的气泡
+ */
+export function DeskPopover({ action, label, align = 'start', className = '', trigger, children }: DeskPopoverProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} data-action={action} className={`relative min-w-0 ${className}`}>
+      {trigger({ open, toggle: () => setOpen((previous) => !previous) })}
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={label}
+          data-testid={`${action}-panel`}
+          className={`absolute bottom-full z-30 mb-2 w-[260px] max-w-[calc(100vw-48px)] rounded-xl border border-line-strong bg-ink-850 p-2 text-[12px] text-slate-300 shadow-lift ${
+            align === 'end' ? 'right-0' : 'left-0'
+          }`}
+        >
+          {children({ close })}
+          <span
+            className={`absolute -bottom-1 size-2 rotate-45 border-b border-r border-line-strong bg-ink-850 ${
+              align === 'end' ? 'right-4' : 'left-4'
+            }`}
+            aria-hidden="true"
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
