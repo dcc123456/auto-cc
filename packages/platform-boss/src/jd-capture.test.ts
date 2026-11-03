@@ -303,6 +303,16 @@ describe('抓取编排（spec 2.3-01 / 2.3-06）', () => {
     const { capture } = await boot(twoScreenScript(['1001']), { platform: 'lagou' });
     await expect(capture.run({ keyword: '前端' })).rejects.toMatchObject({ code: 'PLATFORM_NOT_REGISTERED' });
   });
+
+  it('界面显式指定平台时按该平台跑，与配置默认平台各自独立（spec 2.3-12）', async () => {
+    // 配置默认指向一个没登记的平台：不带参数时一定失败，带 `boss` 时应当照常抓完。
+    const { capture, fake } = await boot(twoScreenScript(['1001']), { platform: 'lagou' });
+    expect(capture.status()).toMatchObject({ platform: 'lagou', platforms: ['boss'] });
+    const run = await capture.run({ keyword: '前端' }, 'boss');
+    expect(run).toMatchObject({ platform: 'boss' });
+    expect(run.stored).toBeGreaterThan(0);
+    expect(fake.navigated.length).toBeGreaterThan(0);
+  });
 });
 
 describe('重复抓取（spec 2.3-04 的实际收益）', () => {
@@ -464,7 +474,13 @@ describe('进度事件（spec 2.3-07）', () => {
     // 用 `toEqual` 而不是 `toMatchObject`：节奏归位到 `outbound.throttle` 之后，这里多出一个
     // 「固定间隔」字段就是假读数（spec 2.7-04），逐字对齐才咬得住。
     // `platform` 是 2.7-06 界面拦截点要的那一项：抓取属于哪个平台只能由持有配置的一方说出。
-    expect(capture.status()).toEqual({ platform: 'boss', targetCount: 3, maxRounds: 4, lastRun: null });
+    expect(capture.status()).toEqual({
+      platform: 'boss',
+      platforms: ['boss'],
+      targetCount: 3,
+      maxRounds: 4,
+      lastRun: null,
+    });
     const run = await capture.run({ keyword: '前端' });
     expect(capture.status().lastRun).toEqual(run);
   });

@@ -2554,8 +2554,13 @@ export interface BridgeSignatures {
   'browser.takeover.end': { args: [input?: TakeoverEndInput]; returns: TakeoverStateView };
   /** 已登记平台清单（spec 2.2-07）：内核侧只读，不返回适配器本身。 */
   'platform.registry.list': { args: []; returns: PlatformRegistryView };
-  /** 2.3-01 / 2.3-09：跑一轮抓取（列表滚动 + 详情读取 + 入库），回传本轮结局。 */
-  'jd.capture.run': { args: [criteria: JobSearchCriteriaView]; returns: CaptureRunView };
+  /**
+   * 2.3-01 / 2.3-09：跑一轮抓取（列表滚动 + 详情读取 + 入库），回传本轮结局。
+   *
+   * 第二个实参只在人多平台时由界面给出（spec 2.3-12）；省略就走服务配置的平台。
+   * 工作流与 agent 工具不传它——它们一直按配置平台跑，口径不变。
+   */
+  'jd.capture.run': { args: [criteria: JobSearchCriteriaView, platform?: string]; returns: CaptureRunView };
   /** 抓取层的当期配置与最近一次运行（面板解释「上次抓到哪」用）。 */
   'jd.capture.status': { args: []; returns: CaptureStatusView };
   /** JD 库只读清单（默认最近 20 条）。 */
@@ -3758,11 +3763,18 @@ export interface CaptureRunView {
 /** `jd.capture.status` 的读数：当期配置 + 最近一次运行（间隔不在此列，节奏归 `outbound.throttle`，spec 2.7-04）。 */
 export interface CaptureStatusView {
   /**
-   * 本服务抓取的那个平台标识（`jd-capture` 配置的 `platform`）。
+   * 本服务默认抓取的那个平台标识（`jd-capture` 配置的 `platform`）。
    * 界面拦截点要问「抓取的这次动作属于哪个平台」（spec 2.7-06 ①），
    * 只能由持有配置的一方交出来——让界面自己猜平台名就是第二套判定。
    */
   platform: string;
+  /**
+   * 已登记且声明了 `search` + `detail` 能力的平台标识（spec 2.3-12）。
+   *
+   * 界面据此决定「直接挂载」还是「先让人挑」：只有一个平台时打开它即可，
+   * 多个平台时平台选择必须上屏——否则点搜索会落到默认平台，而人以为搜的是另一个站点。
+   */
+  platforms: string[];
   targetCount: number;
   maxRounds: number;
   lastRun: CaptureRunView | null;

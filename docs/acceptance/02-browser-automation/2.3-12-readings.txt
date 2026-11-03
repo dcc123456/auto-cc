@@ -1,0 +1,45 @@
+2.3-12 岗位屏搜索自动挂载平台 · 活体读数
+日期：2026-11-03
+环境：macOS arm64；隔离 Electron 实例（--remote-debugging-port=10244、独立 --user-data-dir=tmp/2312/userdata、
+      ELECTRON_RENDERER_URL 指向同一份 vite 5173）；本地 fixture http://127.0.0.1:10233（仅 loopback，未碰真实平台）。
+
+装配（运行时补丁，只作用于隔离实例）
+  plugins.saveConfig('sessions', { platforms: [{ id: 'boss', startUrl: 'http://127.0.0.1:10233/boss' }] })
+  plugins.saveConfig('platform-boss', { pack: 'fixture' })
+
+一、改动前的那条失败（用户现场）
+  jd.capture.run 直接调用，内核视图为空 → NO_KERNEL_SESSION：
+  「内核视图尚未挂载任何平台，先打开一个会话再操作页面」。
+
+二、挂载前读数
+  jd.capture.status() = { platform: 'boss', platforms: ['boss'], targetCount: 20, maxRounds: 8, lastRun: null }
+  sessions.status()   = { activePlatform: null, platforms: ['boss'] }
+  ► 只有一个可抓取平台，界面不渲染平台选择器（data-testid=jd-platform-picker 不存在）。
+
+三、点「搜索并入库」之后
+  第一次关键词「前端agent 工程师」：
+    activePlatform = 'boss'                ← 自动挂载成功，未再报 NO_KERNEL_SESSION
+    lastRun = { platform: 'boss', keyword: '前端agent 工程师', rounds: 1, containers: 0,
+                stored: 0, stoppedBy: 'no-new-content' }
+    说明：fixture 按关键词过滤，这个词在仿站里没有岗位，0 条是站点数据的结果，不是挂载失败。
+  第二次关键词「前端」、本次目标 5：
+    notice = 「入库 5 条 · 跳过 1 条 · 停止原因：抓够目标数」
+    lastRun = { platform: 'boss', keyword: '前端', rounds: 1, containers: 5, stored: 5,
+                captured: 1001/1002/1003/1004/1005, skipped: 1（1005 详情无正文）, stoppedBy: 'target-count' }
+    store.status() = { total: 5, withDetail: 4, schemaVersion: 42 }
+    activePlatform = 'boss'
+  截图：docs/acceptance/02-browser-automation/2.3-12-auto-mount-fixture.png
+        （md5 60d1eef749825c2dcfa6d03c55afd2e2；画面含「入库 5 条 · 跳过 1 条」提示与库内 5 行）
+
+四、多平台那一半的状态
+  当前装配只有 boss 一家平台包（platform.registry 里就一份），多平台选择器无法在活体上取出。
+  该分支由单测钉住：packages/renderer/src/platform-choice.test.ts
+    - platforms.length <= 1 → 不摆选择器、直接挂载
+    - platforms.length > 1  → 摆选择器；人选的优先，旧选择失效落回默认，默认也不在清单时退到第一条
+  待 8.9 猎聘第二家平台包到场后，用同一脚本补一张多平台下拉的活体截图。
+
+五、同一条链上的门禁
+  pnpm typecheck   EXIT=0
+  pnpm lint        EXIT=0
+  pnpm test        EXIT=0（全包通过；platform-boss 184 例、renderer 28 例）
+  pnpm format:check EXIT=0

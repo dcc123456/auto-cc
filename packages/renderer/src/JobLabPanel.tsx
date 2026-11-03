@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   AppErrorPayload,
+  BridgeReply,
   CaptureRunView,
   CaptureStatusView,
   DeliverApprovalView,
@@ -30,6 +31,8 @@ import type {
   SalaryView,
 } from '@auto-cc/shared';
 import { formatClock } from './format';
+import { resolveCapturePlatform, shouldOfferPlatformChoice } from './platform-choice';
+import { platformLabel } from './platform-label';
 import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
 import {
   Banner,
@@ -39,6 +42,7 @@ import {
   DeskButton,
   DeskCheck,
   DeskField,
+  DeskSelect,
   Tag,
 } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
@@ -85,6 +89,11 @@ export function JobLabPanel() {
   const [lastRun, setLastRun] = useState<CaptureRunView>();
   const [progress, setProgress] = useState<JdProgressEvent[]>();
   const [bridgeError, setBridgeError] = useState<AppErrorPayload>();
+  /**
+   * 本次要搜哪个平台（spec 2.3-12）：只在有多个可抓取平台时由人改。
+   * 留空 = 跟 `jd.capture.status` 的默认平台走；平台清单变了而旧选择失效时也会落回默认。
+   */
+  const [platformDraft, setPlatformDraft] = useState('');
   const [keywordDraft, setKeywordDraft] = useState('');
   const [cityDraft, setCityDraft] = useState('');
   const [experienceDraft, setExperienceDraft] = useState('');
@@ -116,6 +125,10 @@ export function JobLabPanel() {
   const listLimitRef = useRef(ROW_DISPLAY_LIMIT);
   const bridge = window.autoCC;
   const { refresh: refreshConsent, ...consent } = useConsent();
+  /** 当前能跑抓取的平台（服务侧按适配器能力给出，界面不自己维护名单）。 */
+  const searchPlatforms = captureStatus?.platforms ?? [];
+  /** 本次实际会挂载并搜索的平台：人选的优先，其次默认平台，最后退到清单第一条。 */
+  const effectivePlatform = resolveCapturePlatform(searchPlatforms, captureStatus?.platform ?? '', platformDraft);
 
   const read = useCallback(async () => {
     const [captureReply, storeReply, listReply, pendingReply] = await Promise.all([
@@ -132,7 +145,11 @@ export function JobLabPanel() {
     // 签字状态跟着这一遍一起刷：界面每重读一次快照就把「这个平台签过没有」再取一遍原文，
     // 「重启 / reload 之后仍然显示已确认、且不再弹卡片」（spec 2.7-06 的「出现一次」）靠这行才有证据。
     const platforms = new Set<string>();
-    if (captureReply?.ok) platforms.add(captureReply.value.platform);
+    // 多平台时每一只都可能被选中（spec 2.3-12），签字读数要一次刷齐，切换时不必再等一次读。
+    if (captureReply?.ok) {
+      platforms.add(captureReply.value.platform);
+      for (const platform of captureReply.value.platforms) platforms.add(platform);
+    }
     if (listReply?.ok) {
       for (const row of listReply.value.rows) platforms.add(row.platform);
     }
@@ -193,22 +210,43 @@ export function JobLabPanel() {
    * 搜索条件取界面上的关键词（必填）与城市 / 经验 / 本次目标条数（均可空）。
    *
    * 动作先过 `consent.ensure`（spec 2.7-06 的界面拦截点 ①）：抓取属于哪个平台只由
-   * `jd.capture.status` 的 `platform` 说出，界面不猜；还没读到配置时交空列表，
+   * `jd.capture.status` 的平台清单说出，界面不猜；还没读到配置时交空列表，
    * 由释放路径上那道硬拦（拦截点 ②）给出结构化错误。
+   *
+   * 开搜之前会**自动挂载目标平台的会话视图**（spec 2.3-12）：只有一个可抓取平台时直接挂它，
+   * 多个时用上面选的那一个。这样人不必先去会话面板手动「打开站点」，也避免
+   * `NO_KERNEL_SESSION` 把一次正常的搜索变成失败。
    */
   const capture = () => {
     const keyword = keywordDraft.trim();
     const limit = Number(limitDraft);
-    return void consent.ensure(captureStatus ? [captureStatus.platform] : [], () => {
+    return void consent.ensure(effectivePlatform === '' ? [] : [effectivePlatform], () => {
       void run(
         t('jd.actionRun', { keyword }),
-        () =>
-          bridge?.jd['capture.run']({
-            keyword,
-            city: cityDraft.trim() || undefined,
-            experience: experienceDraft.trim() || undefined,
-            limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
-          }),
+        () => {
+          if (!bridge) return undefined;
+          return (async (): Promise<BridgeReply<CaptureRunView>> => {
+            // 抓取要一块装着平台的内核视图（spec 2.3-12）：先看当前挂的是不是要搜的平台，
+            // 不是就先 `sessions.open` 挂上去再搜。已挂对时不再重建视图——重建会把用户正在看的页面换掉。
+            if (effectivePlatform !== '') {
+              const status = await bridge.sessions.status();
+              if (!status.ok) return { ok: false, error: status.error };
+              if (status.value.activePlatform !== effectivePlatform) {
+                const opened = await bridge.sessions.open(effectivePlatform);
+                if (!opened.ok) return { ok: false, error: opened.error };
+              }
+            }
+            return bridge.jd['capture.run'](
+              {
+                keyword,
+                city: cityDraft.trim() || undefined,
+                experience: experienceDraft.trim() || undefined,
+                limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
+              },
+              effectivePlatform === '' ? undefined : effectivePlatform,
+            );
+          })();
+        },
         {
           apply: (value) => {
             setBridgeError(undefined);
@@ -410,6 +448,15 @@ export function JobLabPanel() {
    */
   const isActionDisabled = busy !== undefined;
   const isListEnabled = !isActionDisabled;
+  /**
+   * 抓取按钮此刻按不动的第一原因：没有关键词先说关键词，平台包全被摘掉时再说平台。
+   * 没读到状态（`captureStatus` 还没回来）不算「没有平台」——那只是还没读，不是配置缺失。
+   */
+  const captureBlockedReason = !keywordDraft.trim()
+    ? 'KEYWORD_EMPTY'
+    : captureStatus !== undefined && searchPlatforms.length === 0
+      ? 'NO_SEARCH_PLATFORM'
+      : undefined;
   /** 一行的稳定标识：列表 key 与选中态共用这一处来源，不让两处各拼一遍。 */
   const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
@@ -459,13 +506,32 @@ export function JobLabPanel() {
             {t('jd.newestSource', { url: storeStatus.newestSourceUrl })}
           </p>
         )}
-        {captureStatus && <ConsentStatusRow view={consent.views[captureStatus.platform]} />}
+        {captureStatus && <ConsentStatusRow view={consent.views[effectivePlatform]} />}
       </section>
 
       <ConsentOverlay consent={consent} />
 
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.criteriaHeading')}</h3>
+        {/* 多平台才需要人挑（spec 2.3-12）：只有一个可抓取平台时省掉这一格，点搜索就直接挂它。 */}
+        {shouldOfferPlatformChoice(searchPlatforms) && (
+          <div className="mt-2" data-testid="jd-platform-picker">
+            <DeskSelect
+              action="jd-platform"
+              data-testid="jd-platform"
+              label={t('jd.platformLabel')}
+              value={effectivePlatform}
+              onValueChange={setPlatformDraft}
+              className="w-full"
+            >
+              {searchPlatforms.map((platform) => (
+                <option key={platform} value={platform}>
+                  {platformLabel(t, platform)}
+                </option>
+              ))}
+            </DeskSelect>
+          </div>
+        )}
         <div className="mt-2 flex flex-col gap-2">
           <DeskField
             action="jd-keyword"
@@ -509,9 +575,15 @@ export function JobLabPanel() {
               variant="solid"
               compact
               busy={!!busy}
-              disabled={!keywordDraft.trim()}
-              disabledReason={!keywordDraft.trim() ? 'KEYWORD_EMPTY' : undefined}
-              disabledReasonLabel={!keywordDraft.trim() ? t('jd.reasonKeywordEmpty') : undefined}
+              disabled={captureBlockedReason !== undefined}
+              disabledReason={captureBlockedReason}
+              disabledReasonLabel={
+                captureBlockedReason === 'KEYWORD_EMPTY'
+                  ? t('jd.reasonKeywordEmpty')
+                  : captureBlockedReason === 'NO_SEARCH_PLATFORM'
+                    ? t('jd.reasonNoPlatform')
+                    : undefined
+              }
               onClick={capture}
             >
               <Search size={12} />

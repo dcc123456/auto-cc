@@ -2,6 +2,9 @@
   "shell": {
     "title": "auto-cc 桌面工作台",
     "subtitle": "搜岗位 · 生成话术 · 按岗位优化简历 · 由你确认后投递",
+    "platformName": {
+      "boss": "BOSS 直聘"
+    },
     "language": {
       "switchTo": "English"
     },
@@ -198,6 +201,7 @@
     },
     "jd": {
       "reasonKeywordEmpty": "先写关键词，抓取才知道搜什么",
+      "reasonNoPlatform": "没有能抓取的平台：平台包可能被摘掉了，先到装配面板把平台装回来",
       "reasonBusy": "上一条动作还没回来",
       "reasonApprovalBusy": "上一张确认单还在等你表态",
       "heading": "这一轮搜到哪儿了",
@@ -207,6 +211,7 @@
       "storeIdle": "库内读数还没回来",
       "newestSource": "最新一条来源 {{url}}",
       "criteriaHeading": "搜索条件",
+      "platformLabel": "在哪个平台搜",
       "keywordPlaceholder": "关键词，如「前端」",
       "cityPlaceholder": "城市名或城市码，如「上海」或 101020100（可空）",
       "experiencePlaceholder": "经验要求，如「3-5 年」（可空）",
@@ -1512,9 +1517,6 @@
       "targetLabel": "目标岗位（取自 JD 库）",
       "targetEmpty": "JD 库还是空的：先在上面的抓取面板跑一轮，再来生成话术。",
       "targetRow": "{{platform}} 的「{{title}}」· {{company}}",
-      "platform": {
-        "boss": "BOSS 直聘"
-      },
       "kind": {
         "greeting": "开场白",
         "follow-up": "追问",

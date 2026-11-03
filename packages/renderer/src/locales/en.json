@@ -2,6 +2,9 @@
   "shell": {
     "title": "auto-cc desktop workspace",
     "subtitle": "Search jobs · draft messages · tailor the resume per job · deliver once you confirm",
+    "platformName": {
+      "boss": "BOSS Zhipin"
+    },
     "language": {
       "switchTo": "中文"
     },
@@ -198,6 +201,7 @@
     },
     "jd": {
       "reasonKeywordEmpty": "Type a keyword first — capture needs something to search for",
+      "reasonNoPlatform": "No platform can capture: a platform pack may be unmounted — bring it back in the assembly panel",
       "reasonBusy": "The previous action hasn't returned yet",
       "reasonApprovalBusy": "A pending approval is still awaiting your call",
       "heading": "Where this search stands",
@@ -207,6 +211,7 @@
       "storeIdle": "No store reading back yet",
       "newestSource": "Newest source URL {{url}}",
       "criteriaHeading": "Search criteria",
+      "platformLabel": "Platform to search",
       "keywordPlaceholder": "Keyword, e.g. \"frontend\"",
       "cityPlaceholder": "City name or code, e.g. \"Shanghai\" or 101020100 (optional)",
       "experiencePlaceholder": "Experience, e.g. \"3-5 years\" (optional)",
@@ -1512,9 +1517,6 @@
       "targetLabel": "Target role (from the JD store)",
       "targetEmpty": "The JD store is empty: run the capture panel above first, then generate scripts.",
       "targetRow": "\"{{title}}\" at {{company}} on {{platform}}",
-      "platform": {
-        "boss": "BOSS Zhipin"
-      },
       "kind": {
         "greeting": "Opening",
         "follow-up": "Follow-up",

@@ -12,6 +12,7 @@ import type {
   ScriptKindView,
 } from '@auto-cc/shared';
 import { ConsentOverlay } from './ConsentModal';
+import { platformLabel } from './platform-label';
 import { Banner, BLOCK_SELECTED_CLASS, DeskButton, DeskCheck, DeskField, DeskSelect, Tag } from './ui/controls';
 import { DeskActionRow, DeskExplainer } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
@@ -30,11 +31,6 @@ const KIND_ORDER: ScriptKindView[] = ['greeting', 'follow-up', 'rejection'];
 
 /** 必须带对方原话的两类（判据在服务侧，这里只是提前把注定失败的那一次调用挡住）。 */
 const KINDS_NEEDING_QUOTE: ScriptKindView[] = ['follow-up', 'rejection'];
-
-/**
- * 语言包里备了专名的平台码。表外的码原样显示（不给"未知平台"编一个名字，也不新增翻译键）。
- */
-const NAMED_PLATFORMS: string[] = ['boss'];
 
 /** 一次生成点按的完整读数：候选列表 + 那次检索本身的状态（空态要能说清为什么少）。 */
 interface CandidateBundle {
@@ -127,7 +123,7 @@ export function ScriptPanel() {
    * @param code 库内行的平台码
    * @returns 语言包里的专名；表外的码原样返回（不猜、不编）
    */
-  const platformName = (code: string): string => (NAMED_PLATFORMS.includes(code) ? t(`script.platform.${code}`) : code);
+  const platformName = (code: string): string => platformLabel(t, code);
 
   /**
    * 一次点按跑完「取证据 → 逐条生成」，把结局合成一份读数交给 `run` 的忙碌态与播报。

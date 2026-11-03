@@ -54,8 +54,8 @@ export type JdCaptureConfig = z.output<typeof jdCaptureSchema>;
  */
 const JD_CAPTURE_KIND = 'jd.capture';
 
-/** 本服务对 `platform.registry` 的诉求：按名字拿到适配器。 */
-type RegistryGet = Pick<PlatformRegistryService, 'get'>;
+/** 本服务对 `platform.registry` 的诉求：按名字拿到适配器，并列出当前装着的平台（spec 2.3-12）。 */
+type RegistryGet = Pick<PlatformRegistryService, 'get' | 'list'>;
 
 /** 登记处交出来的那个平台适配器（`run` 问一次，带着它进编排，不再重复查表）。 */
 type CaptureAdapter = ReturnType<RegistryGet['get']>;
@@ -201,15 +201,40 @@ export class JdCaptureService extends Service {
    * 两道前置的先后是定过的：**先确认平台真的装着，再问签没签字**。对没登记的平台回
    * 「你还没承担风险」会把一个配置错误说成用户的待办事项（界面会画出一张永远签不成的卡片）。
    * @param criteria 搜索条件（关键词必填；它同时作为账本的 `targetId`，界面按词看得清今天搜了什么）
-   * @param signal 协作让出信号，原样透传给 `runOnce`
+   * @param platform 本次要搜的平台标识（spec 2.3-12）；省略则用配置里的默认平台。
+   *        界面在多平台时会显式给出；工作流与 agent 工具不传，口径仍是一条配置。
    * @returns 本轮结局，同 `runOnce`
    * @throws 目标平台未登记时 `PLATFORM_NOT_REGISTERED`（带当前装着的清单）、
+   *         目标平台没声明抓取能力时 `INVALID_ARGUMENT`、
    *         该平台还没签过风险确认时 `CONSENT_REQUIRED`（spec 2.7-06：判定在闸门之前，一个页面都不碰）、
    *         今日 `search` 额度用尽时 `QUOTA_EXCEEDED`（不静默少抓一轮，界面拿到的是一次可回看的失败）
    */
-  run = async (criteria: JobSearchCriteriaView, signal?: AbortSignal): Promise<CaptureRunView> => {
-    const adapter = this.registry.get(this.config.platform);
-    consentGateOf(this.ctx).ensureConsent(this.config.platform);
+  run = async (criteria: JobSearchCriteriaView, platform?: string): Promise<CaptureRunView> =>
+    this.perform(criteria, platform, undefined);
+
+  /**
+   * 抓取的编排入口（带让出信号）。`run` 与工作流节点共用这一处，额度、签字与适配器解析只写一遍。
+   * @param criteria 搜索条件
+   * @param platform 目标平台；undefined 时取配置默认
+   * @param signal 协作让出信号（spec 2.4-07）
+   * @returns 本轮结局
+   */
+  private perform = async (
+    criteria: JobSearchCriteriaView,
+    platform: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<CaptureRunView> => {
+    const targetPlatform = platform?.trim() || this.config.platform;
+    const adapter = this.registry.get(targetPlatform);
+    if (!adapter.meta.capabilities.includes('search') || !adapter.meta.capabilities.includes('detail')) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        `平台 ${targetPlatform} 没有声明抓取能力（需要 search + detail）`,
+        'jd.capture',
+        { platform: targetPlatform, capabilities: adapter.meta.capabilities },
+      );
+    }
+    consentGateOf(this.ctx).ensureConsent(targetPlatform);
     const gate = asApp(this.ctx)['entitlement.gate'];
     const { value } = await gate.perform('search', { targetId: criteria.keyword }, () =>
       this.runOnce(criteria, signal, adapter),
@@ -319,13 +344,27 @@ export class JdCaptureService extends Service {
   };
 
   /**
+   * 当前能跑抓取的平台清单（spec 2.3-12）。
+   *
+   * 判据用适配器自己声明的能力，而不是维护一份名单：抓取要 `search`（开搜索页、读列表）
+   * 与 `detail`（逐条读详情），缺一个都跑不完一轮；把这条事实复制进界面就是第二套判定（§2.5）。
+   * @returns 平台标识，按登记顺序；一个都没有时是空数组
+   */
+  private searchablePlatforms = (): string[] =>
+    this.registry
+      .list()
+      .platforms.filter((meta) => meta.capabilities.includes('search') && meta.capabilities.includes('detail'))
+      .map((meta) => meta.id);
+
+  /**
    * 当期配置 + 最近一次运行（面板与验收脚本共用的一份读数）。
    *
    * 这里**不再报间隔**：节奏已归 `outbound.throttle` 按区间抽样，写一个定值回界面就是说谎（spec 2.7-04）。
-   * @returns 抓取的平台标识、目标条数、轮数上限，以及最近一次运行；还没跑过时 `lastRun` 为 null
+   * @returns 抓取的默认平台、可抓取的平台清单、目标条数、轮数上限，以及最近一次运行；还没跑过时 `lastRun` 为 null
    */
   status = (): CaptureStatusView => ({
     platform: this.config.platform,
+    platforms: this.searchablePlatforms(),
     targetCount: this.config.targetCount,
     maxRounds: this.config.maxRounds,
     lastRun: this.lastRun,
@@ -349,7 +388,7 @@ export class JdCaptureService extends Service {
     const criteria: JobSearchCriteriaView = { keyword: query };
     if (typeof spec.params.city === 'string') criteria.city = spec.params.city;
     if (typeof spec.params.target === 'number') criteria.limit = spec.params.target;
-    await this.run(criteria, signal);
+    await this.perform(criteria, undefined, signal);
   };
 
   [Service.init](): void {
