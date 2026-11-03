@@ -1,0 +1,106 @@
+# Phase 0 · Office-cc「原 DOCX 换正文」保真度实测（2026-11-03）
+
+> 环境：macOS arm64，Office-cc 0.11.0 CLI，`~/.local/bin/officecc`。
+> 样例：`tmp/10-style-spike/style-template.docx`（由 `create --type docx --from style-template.md` 生成后，用 `docs apply` 加样式/表格/图片/页眉页脚）。
+> 所有样例文件只在 `tmp/`，未入库；截图是 scratch 文档，无个人数据。
+
+## 1. 模板构造
+
+命令：
+- `officecc create --type docx --from style-template.md --out style-template.docx --force --json`
+- `officecc docs apply style-template.docx --ops style-ops.json --json`
+
+模板包含：
+- 页面：A4，页边距 top/bottom 2cm、left/right 1.5cm；页眉「王小明 · 前端工程师」、页脚「第 {PAGE} 页 / 共 {NUMPAGES} 页」。
+- 样式：
+  - `ResumeName`：Georgia 24pt / #8B1E3F / bold / 居中；
+  - `ResumeH2`：Arial 14pt / #1F4E79 / bold；
+  - `ResumeH3`：Arial 11pt / #333333 / bold；
+  - `ResumeBody`：Arial 10.5pt / #222222 / 行距 1.15。
+- 结构：19 blocks，含 1 个图片 block（`resources/icon.png`，72px）与 1 个 4×2 表格 block（技能/熟练度）。
+
+模板渲染：`10.1-00-phase0-template.png`。
+
+## 2. 1:1 换正文（核心）
+
+命令：
+- `cp style-template.docx generated.docx`
+- `officecc docs apply generated.docx --ops replace-ops.json --json`
+- `officecc docs read generated.docx --styles --sections --header-footer --json`
+- `officecc render generated.docx --out shots-generated --json`
+
+`replace_ops` 对 13 个正文 block 各做一次 1:1 `replace_blocks`（姓名、联系方式、简介、两段经历的公司/时间/成果、教育、技能文本），未触碰图片 block（index 1）与表格 block（index 16）。
+
+结果：
+- 19 blocks 不变，文本全部替换；
+- `ResumeName` 1 次、`ResumeH2` 4 次、`ResumeH3` 3 次、`ResumeBody` 9 次——样式用量与模板完全一致；
+- 页面 margins 仍为 top/bottom 1134 twips、left/right 850 twips；
+- 页眉/页脚文本保留；
+- 图片 block 仍是 `protected/image`，表格 block 仍是 4×2；
+- 渲染画面：姓名仍为深红衬线、章节标题仍为蓝色、正文/表格/图片/页眉页脚位置一致。
+
+证据：`10.1-00-phase0-generated.png`。
+结论：**1:1 换正文可以稳定保留原 DOCX 的段落/文字样式、页边距、页眉页脚、图片与表格。**
+
+## 3. 表格内容替换
+
+命令：
+- `officecc docs apply generated-table.docx --ops table-ops.json --json`
+- `officecc render generated-table.docx --out shots-table --json`
+
+对 table block（index 16）做一次 `replace_blocks`，HTML 为新的 4×2 表格；同时 `set_header_footer` 更新页眉为「李雷 · 产品经理」。
+
+结果：
+- 表格仍是 4×2，表头底色、边框、字体与模板一致；
+- 单元格文本替换为 JavaScript/Vue/Node.js；
+- 页眉更新成功。
+
+证据：`10.1-00-phase0-table.png`。
+结论：**表格可以整块替换，表格样式（表头底色/边框）保留；单元格内混排/合并单元格不在本次支持范围。**
+
+## 4. 一个范围换多个块（条目数量变化）
+
+命令：
+- `officecc docs apply generated-one2many.docx --ops one2many-ops.json --json`
+- 把 block 6-8（H3 + 时间 + 成果）一次替换成 `<h3>...</h3><p>...</p><p>...</p>`。
+
+结果：
+- 3 个新 block 都继承了被替换范围**第一个 block** 的格式（H3），于是时间与成果也被渲染成 H3 的粗体/大字号；
+- 不是“每个新块按 HTML 标签分别继承”。
+
+证据：`10.1-00-phase0-one2many.png`。
+结论：**条目数量变化不能靠一次范围替换；需要 `insert_content` + `applyStyle`，或者要求模板预先留好足够的占位条目。**
+补充：`docs read` 对自定义段落样式只给 `--styles` 的 id/用量，不给每个 block 的 styleId（只对内置 heading 给 `type/level`）。因此“自动复制任意自定义样式到新增块”目前缺少读数口；第一版应把生成范围限定为**条目数量与模板一致**（`resume.generate` 本身只改写/重排，不增删条目，正好满足）。
+
+## 5. PDF → DOCX 近似度
+
+命令：
+- `officecc convert style-template.docx --to pdf --out style-template.pdf --json`
+- `officecc convert style-template.pdf --to docx --out style-from-pdf.docx --json`
+- `officecc docs read style-from-pdf.docx --styles --sections --json`
+- `officecc render style-from-pdf.docx --out shots-pdfdocx --json`
+
+结果：
+- 视觉上字体/颜色/页边距/表格/图片大体保留；
+- 但 block 结构被合并：联系方式与「个人简介」在同一 paragraph，摘要与「工作经历」在同一 paragraph，公司名与时间在同一 paragraph；
+- 页眉「王小明 · 前端工程师」变成正文第一段，页脚「第 1 页 / 共 1 页」变成正文最后一段；
+- `styles` 只有 `Hyperlink` 在用，原来四个 `Resume*` 样式没有保留；
+- 18 blocks 与模板 19 blocks 不对应，1:1 换正文无法按原结构映射。
+
+证据：`10.1-00-phase0-pdf-docx.png`。
+结论：**PDF→DOCX 只能算“视觉近似”，不能作为自动换正文的结构模板。** 若要高保真，应引导用户上传 DOCX；PDF 只能做近似档或仅作视觉参考。
+
+## 6. 其它实测
+
+- 图片：`replace_blocks` 不触碰图片 block 时，图片原样保留；不要用一个覆盖图片范围的 `replace_blocks`。
+- 页眉/页脚：`set_header_footer {kind:'header'|'footer', text}` 可更新，`{PAGE}`/`{NUMPAGES}` 仍为字段；`docs read --header-footer` 可回读。
+- 表格：`replace_blocks` 整块替换可保留表头底色/边框；嵌套表/合并单元格不支持（Office-cc 限制）。
+- 超时：`convert docx→pdf` 与 `render` 都通过隐藏 Office-cc 进程完成，本次 1 页样例几秒内完成；长文档需单独给 180s 级超时。
+- `docs read` 不暴露每个 block 的自定义 paragraph styleId；只有内置 heading 的 `type/level` 可见。
+
+## 7. 结论与建议
+
+- **DOCX 主路径可行**：`replace_blocks` 1:1 + 表格块替换 + `set_header_footer` 能保留原样式；当前 `resume.generate` 只改写/重排、不增删条目，正好匹配 1:1 映射。
+- **PDF 路径需收窄**：PDF→DOCX 结构被合并，不能作为自动换正文的模板；建议第一版把 PDF 明确标为“近似/仅视觉参考”，或要求用户上传 DOCX。该选择需要用户确认。
+- **条目数量变化**：第一版限制为与模板条目数一致；若用户在表单里增删条目，给明确原因并建议在 Office-cc 里调整模板，不能静默生成错版。
+- **下一步**：先按 DOCX 主路径实现 `resume.compose`（原文件留存 + Office-cc `docs apply`/`convert` + 新母版/artifacts），PDF 档按用户确认的范围处理。
