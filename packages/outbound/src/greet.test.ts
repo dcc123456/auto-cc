@@ -14,6 +14,7 @@ import {
   type Fiber,
   type GreetChannel,
   type GreetChannelSource,
+  type GreetProgressEvent,
   type GreetTarget,
   type WorkflowNodeSpec,
 } from '@auto-cc/core';
@@ -525,6 +526,36 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     expect(hand.calls).toHaveLength(0);
     const decision = asApp(ctx)['entitlement.gate'].check(GREET_ACTION, { nowMs: T0 });
     expect(decision.remaining).toBe(1);
+  });
+});
+
+describe('打招呼的界面进度（spec 2.5-16）', () => {
+  it('九个阶段按编排顺序逐个推送：频控与落账都带读数，最后一步就是账本行', async () => {
+    const hand = fakeChannel();
+    const { ctx, greet } = await boot({ channel: hand.channel });
+    const events: GreetProgressEvent[] = [];
+    ctx.on('outbound/greet-progress', (event) => events.push(event));
+    const receipt = await greet.perform(request());
+    expect(events.map((event) => event.phase)).toEqual([
+      'consent',
+      'channel',
+      'duplicate',
+      'content',
+      'blacklist',
+      'quota',
+      'throttle',
+      'send',
+      'done',
+    ]);
+    expect(events.map((event) => event.step)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(events.every((event) => event.total === 9 && event.platform === 'boss' && event.target === 'job-1001')).toBe(
+      true,
+    );
+    // 现成文案那一路：内容阶段说「手动」，频控这一趟不用等。
+    expect(events.find((event) => event.phase === 'content')?.mode).toBe('manual');
+    expect(events.find((event) => event.phase === 'throttle')?.waitedMs).toBe(0);
+    // 最后一条与回执对得上：用户看到的「已落账」不是界面自己编的。
+    expect(events.at(-1)).toMatchObject({ phase: 'done', ledgerId: receipt.ledgerId });
   });
 });
 

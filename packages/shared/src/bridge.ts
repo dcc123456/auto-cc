@@ -21,6 +21,8 @@ import type {
   EvidenceRefView,
   ExemptToolView,
   FullAutoConsentView,
+  GenerateProgressEvent,
+  GreetProgressEvent,
   GreetTarget,
   JdProgressEvent,
   KbEntitiesChangedEvent,
@@ -90,6 +92,8 @@ export type {
   EvidenceRefView,
   ExemptToolView,
   FullAutoConsentView,
+  GenerateProgressEvent,
+  GreetProgressEvent,
   JdProgressEvent,
   KernelViewLoadError,
   LocateCandidate,
@@ -3298,6 +3302,10 @@ export const RENDERER_EVENTS = [
   'locator/relocated',
   // 抓取进度（spec 2.3-07）：面板实时显示「第 N 轮 · 已入库 M 条」，不靠轮询。
   'jd/progress',
+  // 打招呼进度（spec 2.5-16）：按钮只转圈时人不知道卡在频控还是页面，九个阶段逐个推。
+  'outbound/greet-progress',
+  // 定向生成进度（spec 4.5-17）：模型改写可能跑数分钟，界面要能说出现在走到哪一步。
+  'resume/generate-progress',
   // 投递单等人表态（spec 2.6-01）：确认卡片由它弹出，`outbound.deliver.pending()` 保证错过也补得回。
   'outbound/approval-requested',
   // 风控信号（spec 2.7-01）：暂停由 `workflow.runner` 在主进程做，界面只负责把「卡在哪、为什么」说出来。
@@ -3331,6 +3339,8 @@ export interface RendererEventSignatures {
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;
   'jd/progress': JdProgressEvent;
+  'outbound/greet-progress': GreetProgressEvent;
+  'resume/generate-progress': GenerateProgressEvent;
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
   'browser/takeover-changed': TakeoverStateView;

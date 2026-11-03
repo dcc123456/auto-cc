@@ -1807,6 +1807,60 @@ export interface LocatorRelocatedEvent {
   at: number;
 }
 
+/**
+ * 打招呼的分步阶段（spec 2.5-16）。
+ *
+ * 顺序与 `outbound.greet.perform` 的编排一致；界面按这个枚举翻译成人话，
+ * 不拿主进程发来的中文当文案（AGENTS.md §5.5）。
+ */
+export type GreetProgressPhase =
+  'consent' | 'channel' | 'duplicate' | 'content' | 'blacklist' | 'quota' | 'throttle' | 'send' | 'done';
+
+/** `outbound/greet-progress` 事件载荷：一次打招呼推进到哪一步（spec 2.5-16）。 */
+export interface GreetProgressEvent {
+  /** 平台标识（事件按平台归属，界面据此过滤掉别的平台的动作） */
+  platform: string;
+  /** 打招呼目标（`greetTargetLabel` 的同一份读数：岗位 id 或联系人坐标） */
+  target: string;
+  /** 当前阶段 */
+  phase: GreetProgressPhase;
+  /** 第几步（1 起） */
+  step: number;
+  /** 本次一共几步（固定的九步） */
+  total: number;
+  /** 内容来源：现成文案 / 现场生成（只在 `content` 阶段有意义） */
+  mode?: 'manual' | 'script';
+  /** 频控已经/需要等待的毫秒数（只在 `throttle` 阶段有意义；0 表示不用等） */
+  waitedMs?: number;
+  /** 落账行号（只在 `done` 阶段有意义） */
+  ledgerId?: number;
+  /** 推送时间戳（毫秒） */
+  at: number;
+}
+
+/** 生成定制简历的分步阶段（spec 4.5-17）。 */
+export type GenerateProgressPhase = 'resolve' | 'gap' | 'reorder' | 'model' | 'verify' | 'record' | 'done';
+
+/** `resume/generate-progress` 事件载荷：一次定向生成推进到哪一步（spec 4.5-17）。 */
+export interface GenerateProgressEvent {
+  /** 这一趟定制的是哪一份母版文档（界面上那一栏选中的文档） */
+  docId: string;
+  /** 当前阶段 */
+  phase: GenerateProgressPhase;
+  /** 第几步（1 起） */
+  step: number;
+  /** 本次一共几步（固定七步） */
+  total: number;
+  /** 是否处于事实校验后的重试那一轮（只在 `model` 阶段为 true 时有意义） */
+  retry?: boolean;
+  /** 重排的段/条目数（只在 `reorder` 之后有意义） */
+  moves?: number;
+  /** 模型采纳的改写条数（只在 `verify` 之后有意义） */
+  rewrites?: number;
+  /** 推送时间戳（毫秒） */
+  at: number;
+}
+
 /** `jd/progress` 事件载荷：抓取面板实时显示「第 N 轮 · 已入库 M 条」（spec 2.3-07）。 */
 export interface JdProgressEvent {
   /** 当前阶段：列表抽取 / 详情读取 / 整轮结束 */
@@ -1968,6 +2022,16 @@ declare module 'cordis' {
      * （spec 2.3-07）。面板不轮询 `jd.capture.status` 来「感觉进度」，进度只由事件推进来。
      */
     'jd/progress'(event: JdProgressEvent): void;
+    /**
+     * 一次打招呼推进到某一步时由 `outbound.greet` 发出（spec 2.5-16）。
+     * 九个阶段按编排顺序逐个推送；频控等待与页面发送这两段最长，界面据此把「正在等什么」说清楚。
+     */
+    'outbound/greet-progress'(event: GreetProgressEvent): void;
+    /**
+     * 一次定向生成推进到某一步时由 `resume.generate` 发出（spec 4.5-17）。
+     * 模型改写可能持续数分钟，界面不再只有一个转圈：最近推进到的阶段与步号都在这条载荷里。
+     */
+    'resume/generate-progress'(event: GenerateProgressEvent): void;
     /**
      * `semi` 档的投递在闸门之后、真正点发送之前挂起等人确认时由 `outbound.deliver` 发出
      * （spec 2.6-01）。载荷就是 `pending()` 能现读出来的那张单子，界面两条路都要能画出同一张卡片：

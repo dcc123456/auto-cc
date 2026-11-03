@@ -1,0 +1,44 @@
+2.5-16 打招呼分步进度 · 活体读数
+日期：2026-11-03
+环境：macOS arm64；隔离 Electron（--remote-debugging-port=10244、独立 --user-data-dir=tmp/2312/userdata2、
+      ELECTRON_RENDERER_URL 指向同一份 vite 5173）；本地 fixture http://127.0.0.1:10233（仅 loopback，未碰真实平台）。
+装配：运行时把 sessions.boss.startUrl 指到 fixture /boss、platform-boss.pack=fixture；先在隔离实例里抓了 5 条岗位。
+
+一、点「打招呼」前
+  [data-action="greet-1001"] 存在且 data-disabled-reason 为空。
+
+二、事件读数（window.autoCC.on('outbound/greet-progress')）
+  1/9:consent
+  2/9:channel
+  3/9:duplicate
+  4/9:content
+  5/9:blacklist
+  6/9:quota
+  7/9:throttle
+  8/9:send
+  9/9:done
+
+三、界面流水（[data-testid=jd-greet-progress-log] 的 9 行，最新在前）
+  9/9  已发出并落账（账本第 2 行）        2026/11/3 14:11:30
+  8/9  在页面上发送并回读送达状态           2026/11/3 14:11:19
+  7/9  频控无需等待                      2026/11/3 14:11:19
+  6/9  检查今日额度                      2026/11/3 14:11:19
+  5/9  检查文案黑名单                     2026/11/3 14:11:19
+  4/9  正在生成开场白（模型可能较慢）        2026/11/3 14:11:19
+  3/9  检查是否已经打过招呼                2026/11/3 14:11:19
+  2/9  查找可用的打招呼渠道                2026/11/3 14:11:19
+  1/9  确认这一平台的自动化风险签字         2026/11/3 14:11:19
+  ► 8/9（send）到 9/9（done）之间隔了 11 秒：这 11 秒里界面显示的就是「在页面上发送并回读送达状态」，
+    不再是只有一个按钮转圈。
+  回执：模板回落 · 页面消息列表回读到刚发出的正文 · 频控等了 0 毫秒。
+  错误：无。
+
+四、截图
+  docs/acceptance/02-browser-automation/2.5-16-greet-progress-fixture.png
+  md5 d28e77cb22fa57286193de6b5d783122
+
+五、同一条链上的门禁
+  pnpm typecheck    EXIT=0
+  pnpm lint         EXIT=0
+  pnpm test         EXIT=0（outbound 198 例；全包见本轮收尾日志）
+  pnpm format:check EXIT=0

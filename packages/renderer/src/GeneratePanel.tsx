@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   GapModelStatusView,
+  GenerateProgressEvent,
   GenerationAcceptRowResult,
   GenerationReorderRowView,
   GenerationRewriteRowView,
@@ -21,6 +22,7 @@ import {
   DeskTextarea,
   type BannerTone,
 } from './ui/controls';
+import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
 import { useBridgeAction } from './useBridgeAction';
 import { useViewTrail } from './viewTrail';
 
@@ -136,6 +138,8 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   const [blocked, setBlocked] = useState<string>();
   /** 证据正文按需现取（同缺口面板）：`null` = 问过但库里已经没有这条了。 */
   const [bodies, setBodies] = useState<Record<string, string | null>>({});
+  /** 最近一次定向生成的阶段流水（spec 4.5-17）：最新在前，只累积当前这份文档的事件。 */
+  const [generateProgress, setGenerateProgress] = useState<GenerateProgressEvent[]>([]);
 
   /**
    * 面板的"重读"只重读**候选清单**，不重读产物：
@@ -163,6 +167,16 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
       setNotice(t('generate.stale'));
     });
   }, [bridge, publishPreview, setNotice, t]);
+
+  // 定向生成的阶段流水（spec 4.5-17）：只收当前这份文档的；换文档时清空，免得把上一份的进度带过来。
+  useEffect(() => {
+    setGenerateProgress([]);
+    if (!bridge) return;
+    return bridge.on('resume/generate-progress', (payload) => {
+      if (payload.docId !== docId) return;
+      setGenerateProgress((current) => [payload, ...current].slice(0, 7));
+    });
+  }, [bridge, docId]);
 
   /** 一次生成的三种结局 → 一句播报（literal `t()` 三种各写一遍，占位符与实参由机检对齐）。 */
   const outcomeText = (value: GenerationRunRowView) => {
@@ -213,11 +227,36 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   };
 
   /**
+   * 生成阶段码 → 一句人话（spec 4.5-17）。
+   * @param event 主进程推来的阶段读数
+   * @returns 已翻译的一句；重试那一轮与完成时的条数都带数字
+   */
+  const generateProgressText = (event: GenerateProgressEvent): string => {
+    switch (event.phase) {
+      case 'resolve':
+        return t('generate.progressPhase.resolve');
+      case 'gap':
+        return t('generate.progressPhase.gap');
+      case 'reorder':
+        return t('generate.progressPhase.reorder');
+      case 'model':
+        return event.retry === true ? t('generate.progressPhase.modelRetry') : t('generate.progressPhase.model');
+      case 'verify':
+        return t('generate.progressPhase.verify', { rewrites: event.rewrites ?? 0 });
+      case 'record':
+        return t('generate.progressPhase.record');
+      case 'done':
+        return t('generate.progressPhase.done', { rewrites: event.rewrites ?? 0, moves: event.moves ?? 0 });
+    }
+  };
+
+  /**
    * 跑一次定向生成（拆解、重排、改写、事实校验全在主进程）。
    */
   const generate = () => {
     setBlocked(undefined);
     setAccepted(undefined);
+    setGenerateProgress([]);
     void run(t('generate.run'), () => bridge?.resume['generate.run'](jdText.trim(), { docId }), {
       apply: (value) => {
         publishPreview(value);
@@ -369,6 +408,16 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
   /** 生成按不动的三种原因：还没选要定制哪一份（空库）、JD 那栏还空着、或上一条动作在途。 */
   const runReason =
     docId === '' ? 'NO_DOC' : jdText.trim() === '' ? 'JD_EMPTY' : busy !== undefined ? 'ACTION_BUSY' : undefined;
+  /** 生成流水已翻成上屏条目；最新一条是当前所在的那一步。 */
+  const generateProgressEntries: DeskProgressEntry[] = generateProgress.map((event, index) => ({
+    key: `${event.phase}-${String(event.step)}-${String(event.at)}${event.retry === true ? '-retry' : ''}`,
+    phase: event.phase,
+    step: event.step,
+    total: event.total,
+    at: event.at,
+    active: index === 0,
+    text: generateProgressText(event),
+  }));
 
   return (
     <div
@@ -435,6 +484,14 @@ export function GeneratePanel({ docs, docId, onDocIdChange, refreshDocs, onAccep
           )}
         </div>
       </div>
+
+      {generateProgressEntries.length > 0 && (
+        <div className="rounded border border-line bg-ink-900/40 p-2" data-testid="generate-progress">
+          <p className="text-[11px] font-semibold text-slate-300">{t('generate.progressHeading')}</p>
+          <DeskProgressLog entries={generateProgressEntries} testId="generate-progress-log" className="mt-1" />
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t('generate.progressHint')}</p>
+        </div>
+      )}
 
       {accepted && (
         // 写盘之后的读数留在界面上：接受用掉了提议态，没有这一行用户就看不见"到底写了几处"。

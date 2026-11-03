@@ -25,6 +25,7 @@ import {
   sleep,
   type WorkflowNodeExecutor,
   type Context,
+  type GreetProgressPhase,
   agentTool,
   registerAgentTools,
   toolResult,
@@ -36,6 +37,14 @@ import { SCRIPT_KINDS, scriptRequestSchema } from './script.js';
 
 /** 额度键与账本动作名（`entitlement.gate` 按它数日上限，spec 2.5-02 / 2.5-04）。 */
 export const GREET_ACTION = 'greet';
+
+/**
+ * 打招呼进度一共几步（spec 2.5-16）。
+ *
+ * 顺序是固定的九步：排查类的步骤（是否重复、黑名单、额度）即使很快也各推一条，
+ * 界面上才看得出"这一趟走完了哪几道闸"，而不是只剩一个转圈。
+ */
+const GREET_PROGRESS_TOTAL = 9;
 
 /** 工作流节点名（spec 2.5-e：`greeting.send`）；与 `jd.capture` 同一命名口径，计划里按它选执行器。 */
 export const GREET_NODE_KIND = 'greeting.send';
@@ -164,6 +173,35 @@ export class OutboundGreetService extends Service {
   }
 
   /**
+   * 推一条打招呼进度（spec 2.5-16）。
+   *
+   * 每进入一个阶段就先推一条，所以界面上最后一条永远是「此刻在做什么」；
+   * 失败时最后一条停在出错的那一步，与错误码一起解释"卡在哪"。
+   * @param platform 平台标识
+   * @param target 打招呼目标（与账本幂等键同一个读数）
+   * @param phase 阶段
+   * @param step 第几步（1 起，与 `GREET_PROGRESS_TOTAL` 配套）
+   * @param extra 该阶段可选的读数（内容来源 / 频控等待 / 账本行号）
+   */
+  private progress = (
+    platform: string,
+    target: string,
+    phase: GreetProgressPhase,
+    step: number,
+    extra: { mode?: 'manual' | 'script'; waitedMs?: number; ledgerId?: number } = {},
+  ): void => {
+    this.ctx.emit('outbound/greet-progress', {
+      platform,
+      target,
+      phase,
+      step,
+      total: GREET_PROGRESS_TOTAL,
+      ...extra,
+      at: Date.now(),
+    });
+  };
+
+  /**
    * 打一次招呼：走完上面那条顺序，成功才落账。
    * @param raw 请求（见 `greetRequestSchema`）；平台、目标、文案/生成入参
    * @param signal 让出信号，工作流节点路径用它响应暂停；界面路径传 undefined
@@ -193,10 +231,12 @@ export class OutboundGreetService extends Service {
 
     // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
     // 界面那条确认卡片只是第一道，工作流节点与 agent 工具这两条入口都从这里出去，漏了就是静默绕过。
+    this.progress(platform, targetKey, 'consent', 1);
     consentGateOf(this.ctx).ensureConsent(platform);
 
     // 渠道放在第一步问（不是发送前才问）：平台名写错时要在**花钱生成话术之前**就失败，
     // 而不是等 LLM 写完一段发不出去的文案。现问现取，所以本服务不持有任何平台状态。
+    this.progress(platform, targetKey, 'channel', 2);
     const sources = greetChannelsOf(this.ctx);
     const channel = sources?.greetChannel(platform) ?? null;
     if (!channel) {
@@ -209,6 +249,7 @@ export class OutboundGreetService extends Service {
     // 重复发送防护 = 幂等键 + 账本按 target 计数（spec 2.5-13）：内存里没有「已发送集合」，
     // 所以重启后依然成立，而判据就是「这条 (action, target, run) 有没有落成过一行」。
     const ledger = asApp(this.ctx)['usage.ledger'];
+    this.progress(platform, targetKey, 'duplicate', 3);
     if (ledger.countFor(GREET_ACTION, targetKey, runId) > 0) {
       throw new AppError(
         'OUTBOUND_ALREADY_SENT',
@@ -226,6 +267,7 @@ export class OutboundGreetService extends Service {
     let finalText: string;
     let origin: GreetReceiptView['origin'];
     let source: string;
+    this.progress(platform, targetKey, 'content', 4, { mode: text ? 'manual' : 'script' });
     if (text) {
       // 界面上改过的文案：正文是现成的，但选中候选那条链不能断（spec 4.6-02）——
       // 调用方把候选的来源随 `provenance` 一起递过来，账本里就能写出「manual + 哪个版本给哪条 JD 生成的」。
@@ -251,9 +293,11 @@ export class OutboundGreetService extends Service {
       source = ledgerSource(false, draft.scriptVersion, draft.kind, draft.jdId, draft.evidenceRefs);
     }
     // 文本离开 app 的边界就在这里（spec 2.5-10）：模型产出、模板回落、用户手改三路都过同一份黑名单。
+    this.progress(platform, targetKey, 'blacklist', 5);
     scriptService.assertSendable(finalText, origin);
 
     const gate = asApp(this.ctx)['entitlement.gate'];
+    this.progress(platform, targetKey, 'quota', 6);
     // 先查额度再等间隔：到量即停的意思就是「别让用户白等一个频控周期」（spec 2.5-04）。
     // 走 `enforce` 而不是自己比对 `check`：被拦下要留一条被拒流水（spec 5.3-12），而留痕只在闸门那一处。
     gate.enforce(GREET_ACTION, { targetId: targetKey, workflowRunId: runId, nowMs });
@@ -263,6 +307,7 @@ export class OutboundGreetService extends Service {
     // 减法收进 `gapRemainingMs`（spec 5.7-e 收口时把这条并进来）：投递本体与择机规则算的是同一段，
     // 这里再手写一遍 `lastSentAt + gap - nowMs` 就是 §2.2 禁的第二处算术。
     const remaining = gapRemainingMs(ledger.latestActionTs(GREET_ACTION), gap, nowMs);
+    this.progress(platform, targetKey, 'throttle', 7, { waitedMs: Math.max(0, remaining) });
     let waitedMs = 0;
     if (remaining > 0) {
       await sleep(remaining, signal);
@@ -272,6 +317,7 @@ export class OutboundGreetService extends Service {
     // 不在这里问一句，被暂停的那一步仍会把消息发出去（spec 2.4-07）。
     assertNotYielded(signal, 'outbound.greet', '打招呼');
 
+    this.progress(platform, targetKey, 'send', 8);
     const { value, ledgerId } = await gate.perform(
       GREET_ACTION,
       { targetId: targetKey, workflowRunId: runId, nowMs: nowMs + waitedMs, source },
@@ -285,6 +331,7 @@ export class OutboundGreetService extends Service {
         return outcome.reason;
       },
     );
+    this.progress(platform, targetKey, 'done', 9, { ledgerId });
     this.ctx.logger.info(
       `打招呼已发出并落账：目标 ${targetKey} · 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)}`,
     );

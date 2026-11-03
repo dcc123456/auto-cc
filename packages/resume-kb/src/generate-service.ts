@@ -43,6 +43,7 @@ import {
   Service,
   toolResult,
   type Context,
+  type GenerateProgressPhase,
 } from '@auto-cc/core';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -99,6 +100,14 @@ export const MAX_PENDING_PROPOSALS = 8;
  * 而重发是这条通道上唯一不需要用户参与的补救；取 1 而不是更多，是因为上限直接乘在等待时间上。
  */
 export const MODEL_LEG_NETWORK_RETRIES = 1;
+
+/**
+ * 一次定向生成一共几步（spec 4.5-17）。
+ *
+ * 模型改写即使重试也仍算同一步（载荷里的 `retry` 说"这是第二轮"），
+ * 这样步号不会因为重试而跳格，界面上的进度条读数才对得上用户的等待。
+ */
+const GENERATE_PROGRESS_TOTAL = 7;
 
 /**
  * 一次生成的三种结局。
@@ -453,6 +462,32 @@ export class ResumeGenerateService extends Service {
     return asApp(this.ctx)['resume.doc'];
   }
 
+  /**
+   * 推一条生成进度（spec 4.5-17）。
+   *
+   * 每进入一个阶段先推一条，最后一条就是"此刻在做什么"；模型改写可能持续几分钟，
+   * 界面靠它把「在等模型」与「模型已回、正在复验」分开。
+   * @param docId 这一趟定制的母版文档 id
+   * @param phase 阶段
+   * @param step 第几步（1 起，与 `GENERATE_PROGRESS_TOTAL` 配套）
+   * @param extra 该阶段可选的读数（重试标记 / 重排条数 / 采纳改写数）
+   */
+  private progress = (
+    docId: string,
+    phase: GenerateProgressPhase,
+    step: number,
+    extra: { retry?: boolean; moves?: number; rewrites?: number } = {},
+  ): void => {
+    this.ctx.emit('resume/generate-progress', {
+      docId,
+      phase,
+      step,
+      total: GENERATE_PROGRESS_TOTAL,
+      ...extra,
+      at: Date.now(),
+    });
+  };
+
   /** 幂等地把迁移 15 推进共享迁移列表并升级到最新。 */
   private ensureSchema(): void {
     const { migrations } = this.store;
@@ -576,6 +611,7 @@ export class ResumeGenerateService extends Service {
     nowMs = Date.now(),
   ): Promise<GenerationView> {
     const parentDocId = this.resolveDocId(filter.docId);
+    this.progress(parentDocId, 'resolve', 1);
     // 裁定㊱：这一趟的 JD 先归因成 (id, 标题) 一对读数，后面三处（变体行、台账、凭证）都用这一份，
     // 不在任何一处再算第二遍（§2.7）。手输/粘贴的 JD 没有 `jobs.id`，按正文内容取稳定哈希——
     // 于是"只改 JD 就生成另一份简历"在粘贴那条路上也成立：同一段文本重复生成仍落同一支变体。
@@ -619,8 +655,10 @@ export class ResumeGenerateService extends Service {
     const requiredBefore = checkRequiredInfo(baseline);
     // 相关性、要求清单、证据强度全部来自 4.4 那一份报告——本服务不重算任何分数（§2.1）。
     // 取数一律按**母版**（spec 4.11-17）：实体与分块只有一份，变体不重导，否则同一个人在库里长两份事实。
+    this.progress(parentDocId, 'gap', 2);
     const report = await gap.report(jdText, { sourceDocId: parentDocId }, nowMs);
     const drafts = deriveEntities(baseline);
+    this.progress(parentDocId, 'reorder', 3);
     const reordered = reorderDocument(baseline, report.rows, drafts);
     const reorderedDoc: ResumeDocument = { ...baseline, sections: [...reordered.sections] };
     const targets = generationTargetFields(reorderedDoc);
@@ -631,12 +669,14 @@ export class ResumeGenerateService extends Service {
         : item.label,
     );
 
+    this.progress(parentDocId, 'model', 4);
     let attempt = await this.askModel(jdText, requirementLines, targets, null, skillGuide);
     let check: GenerationCheckReport | null = null;
     let product: ResumeDocument | null = null;
     let retried = false;
     if (attempt.rewrites.length > 0) {
       const proposed = applyRewrites(reorderedDoc, attempt.rewrites);
+      this.progress(parentDocId, 'verify', 5, { rewrites: attempt.rewrites.length });
       check = verifyGeneration({ original: baseline, proposed, jdText });
       if (check.ok) product = validated(proposed);
       else {
@@ -644,6 +684,7 @@ export class ResumeGenerateService extends Service {
         // 不做多轮退避：每多一轮就多一次出网与多一批正文，而违规都是"动了不该动的东西"，
         // 一轮说清楚之后还不过，就是该让人看，而不是该让机器继续猜。
         retried = true;
+        this.progress(parentDocId, 'model', 4, { retry: true });
         const second = await this.askModel(
           jdText,
           requirementLines,
@@ -654,6 +695,7 @@ export class ResumeGenerateService extends Service {
         attempt = second;
         if (second.rewrites.length > 0) {
           const secondProposed = applyRewrites(reorderedDoc, second.rewrites);
+          this.progress(parentDocId, 'verify', 5, { rewrites: second.rewrites.length, retry: true });
           check = verifyGeneration({ original: baseline, proposed: secondProposed, jdText });
           if (check.ok) product = validated(secondProposed);
         }
@@ -663,6 +705,7 @@ export class ResumeGenerateService extends Service {
       // 保守版（判据四）：仅重排、字段照抄。校验照样跑一遍——"它必然通过"是推断，
       // 断言它通过才是证据（4.5-09 的产物合法性不许靠注释声明）。
       product = validated(reorderedDoc);
+      this.progress(parentDocId, 'verify', 5, { rewrites: 0 });
       check = verifyGeneration({ original: baseline, proposed: product, jdText });
     }
     const outcome: GenerationOutcome =
@@ -675,6 +718,10 @@ export class ResumeGenerateService extends Service {
     const violations = check === null ? [] : describeViolations(check);
     // 记录行的 `doc_id` 仍是**母版**：复盘问的是"这份简历生成过哪几版"（那张索引就是 `(doc_id, created_at)`），
     // 而按 JD 分成的那几支变体在库里靠血缘两列认，不在这里编第二个事实（spec 4.11-25 的台账两行靠 `jd_id` 归因）。
+    this.progress(parentDocId, 'record', 6, {
+      moves: reordered.movedSections + reordered.movedEntries,
+      rewrites: attempt.rewrites.length,
+    });
     const receipt = this.record({
       docId: parentDocId,
       jdId: attribution.jdId,
@@ -717,6 +764,10 @@ export class ResumeGenerateService extends Service {
       });
     }
     this.logRun(view, report.rows.length);
+    this.progress(parentDocId, 'done', 7, {
+      moves: reordered.movedSections + reordered.movedEntries,
+      rewrites: attempt.rewrites.length,
+    });
     return view;
   }
 

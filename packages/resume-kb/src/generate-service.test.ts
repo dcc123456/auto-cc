@@ -23,7 +23,7 @@
  * 已知残余（如实记下，不写成"全拦住了"）：模型若往散文里新增一个**不含数字**的邮箱，三条判据都抓不到，
  * 它会原样进产物，由 4.5-11 的逐项人工接受兜底。
  */
-import { AppError, Context, NO_CONFIG, asApp, numbersOf, type Fiber } from '@auto-cc/core';
+import { AppError, Context, NO_CONFIG, asApp, numbersOf, type Fiber, type GenerateProgressEvent } from '@auto-cc/core';
 import { ConfigService } from '@auto-cc/plugin-config';
 import { LogService } from '@auto-cc/plugin-logger';
 import {
@@ -394,6 +394,25 @@ function fieldValuesByLocation(document: ResumeDocument): Map<string, string> {
 }
 
 describe('resume.generate 的产物面与 Schema（spec 4.5-01 / 12）', () => {
+  it('七个阶段按顺序推送进度：无模型时也走到校验与完成（spec 4.5-17）', async () => {
+    const boot = await bootGenerate();
+    const events: GenerateProgressEvent[] = [];
+    boot.app.on('resume/generate-progress', (event) => events.push(event));
+    await boot.gen.run(SAMPLE_JD, { docId: DOC_ID }, AS_OF_MS);
+    expect(events.map((event) => event.phase)).toEqual([
+      'resolve',
+      'gap',
+      'reorder',
+      'model',
+      'verify',
+      'record',
+      'done',
+    ]);
+    expect(events.map((event) => event.step)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(events.every((event) => event.total === 7 && event.docId === DOC_ID)).toBe(true);
+    expect(events.at(-1)).toMatchObject({ phase: 'done', step: 7 });
+  });
+
   it('模型通道给出合法改写时产出提议态文档：过 P3 Schema、顶层键与 schema 完全一致、且只改了这一处', async () => {
     const boot = await bootGenerate({}, {});
     const target = numberedTarget(generationTargetFields(boot.baseline));

@@ -1,0 +1,36 @@
+4.5-17 定向生成分步进度 · 活体读数
+日期：2026-11-03
+环境：macOS arm64；隔离 Electron（--remote-debugging-port=10244、独立 --user-data-dir=tmp/2312/userdata2）；
+      本轮没有配置模型密钥，生成走「仅重排、不改写」的保守路径（模型未配置，缺 baseUrl / model / apiKey）。
+数据：通过 resume.parse.fromFile 导入一份虚构简历 tmp/2312/resume.md（237 字，3 个区块），docId resume-c768b7f7a196。
+
+一、事件读数（window.autoCC.on('resume/generate-progress')）
+  1/7:resolve
+  2/7:gap
+  3/7:reorder
+  4/7:model
+  5/7:verify
+  6/7:record
+  7/7:done
+
+二、界面流水（[data-testid=generate-progress-log] 的 7 行，最新在前）
+  7/7  完成：0 处改写 · 0 处重排          2026/11/3 14:11:56
+  6/7  记录这一趟的生成结果                2026/11/3 14:11:56
+  5/7  事实校验（模型采纳 0 处改写）         2026/11/3 14:11:56
+  4/7  正在请求模型改写（可能要几分钟）       2026/11/3 14:11:56
+  3/7  按相关性重排区块与条目               2026/11/3 14:11:56
+  2/7  分析 JD 与素材的相关性               2026/11/3 14:11:56
+  1/7  读取简历文档                       2026/11/3 14:11:56
+  结局：outcome=reorder_only；提示行「本次没有采纳任何改写，只按相关性调换了 0 处位置（保守版，功能不降级为不可用）」。
+  ► 本轮无模型，七步在 1 秒内走完；配了模型时 4/7 就是那一步会长达数分钟的「在等模型」，
+    界面会停在它上面（步号与时间戳都在），不再只有一个转圈。
+
+三、截图
+  docs/acceptance/04-resume-kb/4.5-17-generate-progress-fixture.png
+  md5 65bdaa0afcd8312efbca9b8309bc8271
+
+四、同一条链上的门禁
+  pnpm typecheck    EXIT=0
+  pnpm lint         EXIT=0
+  pnpm test         EXIT=0（resume-kb 477 例；全包见本轮收尾日志）
+  pnpm format:check EXIT=0

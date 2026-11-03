@@ -22,6 +22,7 @@ import type {
   CaptureStatusView,
   DeliverApprovalView,
   DeliverReceiptView,
+  GreetProgressEvent,
   GreetReceiptView,
   JdProgressEvent,
   JdStoreStatusView,
@@ -46,6 +47,7 @@ import {
   Tag,
 } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
+import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { advanceViewTrail } from './viewTrail';
@@ -103,6 +105,12 @@ export function JobLabPanel() {
   const [resumePathDraft, setResumePathDraft] = useState('');
   /** 最近一次打招呼的回执（`GreetReceiptView`）：闸门拒了就没有回执，界面上只剩结构化错误（spec 2.5-02）。 */
   const [lastGreet, setLastGreet] = useState<GreetReceiptView>();
+  /** 最近一次打招呼的阶段流水（spec 2.5-16）：最新在前，只在它跑的那一条目标上累积。 */
+  const [greetProgress, setGreetProgress] = useState<GreetProgressEvent[]>([]);
+  /** 当前这次打招呼的目标（`platform:target`），用来过滤掉别的面板/别条岗位的进度事件。 */
+  const greetTargetRef = useRef('');
+  /** 同一目标的可渲染副本：详情区换了行之后，旧目标的流水不该长在新行下面。 */
+  const [greetTargetKey, setGreetTargetKey] = useState('');
   /** 最近一次投递回执：`committed:false` 就是 `suggest` 档的待发送态（spec 2.6-06）。 */
   const [lastDeliver, setLastDeliver] = useState<DeliverReceiptView>();
   /** 此刻在等的投递单（spec 2.6-01）：只由 `outbound.deliver.pending()` 的读数填，界面不自造。 */
@@ -180,9 +188,15 @@ export function JobLabPanel() {
     const offApproval = bridge.on('outbound/approval-requested', () => {
       void read();
     });
+    // 打招呼的阶段流水（spec 2.5-16）：只收当前这一条目标的，别条岗位/别的面板的进度不往这里混。
+    const offGreetProgress = bridge.on('outbound/greet-progress', (payload) => {
+      if (`${payload.platform}:${payload.target}` !== greetTargetRef.current) return;
+      setGreetProgress((current) => [payload, ...current].slice(0, 9));
+    });
     return () => {
       offProgress();
       offApproval();
+      offGreetProgress();
     };
   }, [bridge, read]);
 
@@ -202,6 +216,40 @@ export function JobLabPanel() {
       return t('jd.salarySingle', { value: salary.min ?? salary.max ?? 0, unit, period, months });
     }
     return t('jd.salaryRange', { min: salary.min ?? 0, max: salary.max, unit, period, months });
+  };
+
+  /**
+   * 打招呼阶段码 → 一句人话（spec 2.5-16）。
+   *
+   * 频控与落账两格带数字：前者让人知道还要等多久，后者与回执里的账本行号对得上。
+   * @param event 主进程推来的阶段读数
+   * @returns 已翻译的一句
+   */
+  const greetProgressText = (event: GreetProgressEvent): string => {
+    switch (event.phase) {
+      case 'consent':
+        return t('jd.greetPhase.consent');
+      case 'channel':
+        return t('jd.greetPhase.channel');
+      case 'duplicate':
+        return t('jd.greetPhase.duplicate');
+      case 'content':
+        return event.mode === 'script' ? t('jd.greetPhase.contentScript') : t('jd.greetPhase.contentManual');
+      case 'blacklist':
+        return t('jd.greetPhase.blacklist');
+      case 'quota':
+        return t('jd.greetPhase.quota');
+      case 'throttle':
+        return (event.waitedMs ?? 0) > 0
+          ? t('jd.greetPhase.throttleWait', { seconds: Math.ceil((event.waitedMs ?? 0) / 1000) })
+          : t('jd.greetPhase.throttle');
+      case 'send':
+        return t('jd.greetPhase.send');
+      case 'done':
+        return event.ledgerId === undefined
+          ? t('jd.greetPhase.doneGeneric')
+          : t('jd.greetPhase.done', { ledgerId: event.ledgerId });
+    }
   };
 
   /**
@@ -370,6 +418,10 @@ export function JobLabPanel() {
    */
   const greet = (row: JobRowView) => {
     return void consent.ensure([row.platform], () => {
+      greetTargetRef.current = `${row.platform}:${row.jobId}`;
+      setGreetTargetKey(greetTargetRef.current);
+      setGreetProgress([]);
+      setLastGreet(undefined);
       void run(
         t('jd.actionGreet', { title: row.title }),
         () =>
@@ -461,11 +513,23 @@ export function JobLabPanel() {
   const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
   const selectedRow = jobList?.rows.find((row) => rowKey(row) === selectedRowKey);
+  /** 选中行的打招呼坐标：流水只挂回它自己的那一行，换行后不会伪装成新一行的进度。 */
+  const selectedGreetTarget = selectedRow === undefined ? '' : `${selectedRow.platform}:${selectedRow.jobId}`;
   /**
    * 最新一条进度：`progress` 是**新的在前**（推送时 prepend 并截到 `PROGRESS_LIMIT`），所以 [0] 就是"此刻"。
    * 进度段默认收起之后，这一条还要在段头那一行读数里说话——收起不能把"跑到哪了"一起收走。
    */
   const latestProgress = progress?.[0];
+  /** 打招呼流水已翻成上屏条目；最新一条是当前所在的那一步。 */
+  const greetProgressEntries: DeskProgressEntry[] = greetProgress.map((event, index) => ({
+    key: `${event.phase}-${String(event.step)}-${String(event.at)}`,
+    phase: event.phase,
+    step: event.step,
+    total: event.total,
+    at: event.at,
+    active: index === 0,
+    text: greetProgressText(event),
+  }));
   return (
     <div className="flex flex-col gap-4" data-testid="job-lab">
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
@@ -943,6 +1007,17 @@ export function JobLabPanel() {
                       {t('deliver.rowButton')}
                     </DeskButton>
                   </div>
+                  {/* 打招呼不是"点一下就好"：频控可能要等几十秒、页面发送还要回读状态。
+                      这一块把主进程推来的九步流水摆出来，最新一条就是此刻所在的那一步（spec 2.5-16）。 */}
+                  {greetProgressEntries.length > 0 && greetTargetKey === selectedGreetTarget && (
+                    <div
+                      className="mt-2 rounded-md border border-line bg-ink-900/40 p-2"
+                      data-testid="jd-greet-progress"
+                    >
+                      <p className="text-[11px] font-semibold text-slate-300">{t('jd.greetProgressHeading')}</p>
+                      <DeskProgressLog entries={greetProgressEntries} testId="jd-greet-progress-log" className="mt-1" />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
