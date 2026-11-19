@@ -30,7 +30,12 @@ import {
   registerAgentTools,
   toolResult,
 } from '@auto-cc/core';
-import { greetTargetLabel, type GreetReceiptView, type GreetRequestView } from '@auto-cc/shared';
+import {
+  greetTargetLabel,
+  type GreetReceiptView,
+  type GreetRequestView,
+  type OutboundReconcileView,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import { gapRemainingMs } from './deliver-timing.js';
 import { SCRIPT_KINDS, scriptRequestSchema } from './script.js';
@@ -48,18 +53,6 @@ const GREET_PROGRESS_TOTAL = 9;
 
 /** 工作流节点名（spec 2.5-e：`greeting.send`）；与 `jd.capture` 同一命名口径，计划里按它选执行器。 */
 export const GREET_NODE_KIND = 'greeting.send';
-
-/**
- * 幂等拒因里那句「在哪个范围里已经发过」（投递复用同一句，spec 2.5-13 / 2.6-05）。
- *
- * 范围不是这里选的，是 `usage.ledger.countFor(action, target, runId)` 的 WHERE 决定的：带着工作流 run
- * 时只数这一次（`workflow_run_id = ?`）；没有 run 时数的是**历史上所有非工作流发起的那几次**
- * （`workflow_run_id IS NULL`，spec 2.5-13 有意为之——界面单发没有"这一次"可依据）。
- * 所以文案必须跟着范围走，否则第二次单发会看到「在本次运行里已经打过招呼」这种说不通的话
- * （5.4-b 收口时发现，5.4-c 处理）。
- */
-export const alreadySentScope = (runId: string | null): string =>
-  runId === null ? '在此前那些未挂工作流的发送里' : '在本次运行里';
 
 /** 编排层暂无可选项；strict 让 `cordis.yml` 里写错的键在挂载期就报错。 */
 export const greetSchema = z.strictObject({
@@ -104,6 +97,8 @@ const greetRequestSchema = z
       })
       .optional(),
     workflowRunId: z.string().min(1).nullish(),
+    /** 去重第四维；未绑定简历的纯打招呼统一回落为 `unversioned`。 */
+    resumeVersion: z.string().min(1).optional(),
     nowMs: z.number().int().positive().optional(),
   })
   .superRefine((request, ctx) => {
@@ -224,6 +219,7 @@ export class OutboundGreetService extends Service {
     const { platform, jobId, conversationTarget, text, script, provenance, workflowRunId } = parsed.data;
     const nowMs = parsed.data.nowMs ?? Date.now();
     const runId = workflowRunId ?? null;
+    const resumeVersion = parsed.data.resumeVersion ?? 'unversioned';
     // 幂等键与额度目标用哪一维（P8 裁定⑲ 的唯一语义变更点）：读数收在 `greetTargetLabel`，
     // 界面显示的是同一个目标。岗位类站点上 `conversationTarget` 一路是 undefined（仿站知识包有
     // `targetParam`），于是仍旧等于原来的 `jobId`，行为一字不变。
@@ -246,22 +242,11 @@ export class OutboundGreetService extends Service {
       });
     }
 
-    // 重复发送防护 = 幂等键 + 账本按 target 计数（spec 2.5-13）：内存里没有「已发送集合」，
-    // 所以重启后依然成立，而判据就是「这条 (action, target, run) 有没有落成过一行」。
+    // 重复防护读 43 号持久化尝试：四元组不含 run 维，跨入口/跨运行/跨重启都不能重放。
+    const gate = asApp(this.ctx)['entitlement.gate'];
     const ledger = asApp(this.ctx)['usage.ledger'];
     this.progress(platform, targetKey, 'duplicate', 3);
-    if (ledger.countFor(GREET_ACTION, targetKey, runId) > 0) {
-      throw new AppError(
-        'OUTBOUND_ALREADY_SENT',
-        `目标 ${targetKey} ${alreadySentScope(runId)}已经打过招呼，不再重复发送`,
-        'outbound.greet',
-        {
-          // 键名跟着"这一发作用到的实体"走，不再固定叫 jobId（裁定⑲：会话类外发的目标是联系人）。
-          targetId: targetKey,
-          workflowRunId: runId,
-        },
-      );
-    }
+    gate.assertOutboundFresh(GREET_ACTION, { platform, targetId: targetKey, resumeVersion });
 
     const scriptService = asApp(this.ctx)['outbound.script'];
     let finalText: string;
@@ -296,11 +281,10 @@ export class OutboundGreetService extends Service {
     this.progress(platform, targetKey, 'blacklist', 5);
     scriptService.assertSendable(finalText, origin);
 
-    const gate = asApp(this.ctx)['entitlement.gate'];
     this.progress(platform, targetKey, 'quota', 6);
     // 先查额度再等间隔：到量即停的意思就是「别让用户白等一个频控周期」（spec 2.5-04）。
     // 走 `enforce` 而不是自己比对 `check`：被拦下要留一条被拒流水（spec 5.3-12），而留痕只在闸门那一处。
-    gate.enforce(GREET_ACTION, { targetId: targetKey, workflowRunId: runId, nowMs });
+    gate.enforce(GREET_ACTION, { platform, targetId: targetKey, resumeVersion, workflowRunId: runId, nowMs });
 
     // 频控的钟是账本里最近一条 greet，不是本服务的内存字段：跨重启成立，也不是第二套状态存储（§2.7）。
     const gap = asApp(this.ctx)['outbound.throttle'].nextGapMs();
@@ -318,9 +302,9 @@ export class OutboundGreetService extends Service {
     assertNotYielded(signal, 'outbound.greet', '打招呼');
 
     this.progress(platform, targetKey, 'send', 8);
-    const { value, ledgerId } = await gate.perform(
+    const { value, ledgerId } = await gate.performOutbound(
       GREET_ACTION,
-      { targetId: targetKey, workflowRunId: runId, nowMs: nowMs + waitedMs, source },
+      { platform, targetId: targetKey, resumeVersion, workflowRunId: runId, nowMs: nowMs + waitedMs, source },
       async () => {
         // 两种坐标原样递给适配器：谁在页面上定位会话由站点知识包决定，编排层不做映射（裁定⑲）。
         const outcome = await channel.send({ jobId, conversationTarget }, finalText);
@@ -328,7 +312,7 @@ export class OutboundGreetService extends Service {
         if (!outcome.sent) {
           throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.greet', { targetId: targetKey });
         }
-        return outcome.reason;
+        return { value: outcome.reason, receiptId: outcome.receiptId ?? null };
       },
     );
     this.progress(platform, targetKey, 'done', 9, { ledgerId });
@@ -344,7 +328,59 @@ export class OutboundGreetService extends Service {
       waitedMs,
       source,
       origin,
+      resumeVersion,
     };
+  };
+
+  /**
+   * 对上一次打招呼做只读对账；平台确认已发就只补账，明确未发才允许之后显式重试。
+   * @param raw 与原发送相同的请求，必须带原 `text`；不为恢复重新生成话术
+   * @returns 三态对账结果；未知与冲突均 `canResume:false`
+   * @throws `INVALID_ARGUMENT`（缺原文）、`CONSENT_REQUIRED`、`OUTBOUND_CHANNEL_MISSING`
+   */
+  reconcile = async (raw: unknown): Promise<OutboundReconcileView> => {
+    const parsed = greetRequestSchema.safeParse(raw);
+    if (!parsed.success || !parsed.data.text) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        '打招呼对账必须带原正文 text；不能为恢复重新生成一份内容',
+        'outbound.greet',
+      );
+    }
+    const { platform, jobId, conversationTarget, text, provenance, workflowRunId } = parsed.data;
+    const targetKey = greetTargetLabel({ jobId, conversationTarget });
+    const resumeVersion = parsed.data.resumeVersion ?? 'unversioned';
+    const nowMs = parsed.data.nowMs ?? Date.now();
+    consentGateOf(this.ctx).ensureConsent(platform);
+    const channel = greetChannelsOf(this.ctx)?.greetChannel(platform) ?? null;
+    if (!channel) {
+      throw new AppError(
+        'OUTBOUND_CHANNEL_MISSING',
+        `平台 ${platform} 现在没有可用的打招呼对账渠道`,
+        'outbound.greet',
+        {
+          platform,
+        },
+      );
+    }
+    const inspection = channel.inspect
+      ? await channel.inspect({ jobId, conversationTarget }, text)
+      : { status: 'unknown' as const, reason: '平台没有只读对账能力，不能推断是否已发' };
+    const source = provenance
+      ? ledgerSource(true, provenance.scriptVersion, provenance.kind, provenance.jdId, provenance.evidenceRefs)
+      : `manual:${parsed.data.script?.jdId ?? targetKey}`;
+    return asApp(this.ctx)['entitlement.gate'].reconcile(
+      GREET_ACTION,
+      {
+        platform,
+        targetId: targetKey,
+        resumeVersion,
+        workflowRunId: workflowRunId ?? null,
+        nowMs,
+        source,
+      },
+      inspection,
+    );
   };
 
   /**

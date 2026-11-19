@@ -19,4 +19,8 @@ export type ActionContext = {
    * 所以来源挂在上下文上就能进已有的 `source` 列，不必给闸门加第二个签名、也不必改建表。
    */
   source?: string | null;
+  /** 外发去重键的平台维；`performOutbound` 必填，旧 `perform` 的抓取/样例路径可省。 */
+  platform?: string;
+  /** 外发去重键的简历版本维；打招呼未绑定简历时由编排层填 `unversioned`。 */
+  resumeVersion?: string;
 };

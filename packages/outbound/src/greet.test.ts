@@ -206,6 +206,7 @@ const request = (
     conversationTarget: string;
     text: string;
     workflowRunId: string | null;
+    resumeVersion: string;
   }> = {},
 ) => ({
   platform: 'boss',
@@ -213,6 +214,7 @@ const request = (
   conversationTarget: over.conversationTarget,
   text: over.text ?? '您好，看到贵司在招前端工程师，想进一步沟通。',
   workflowRunId: over.workflowRunId ?? null,
+  ...(over.resumeVersion === undefined ? {} : { resumeVersion: over.resumeVersion }),
   nowMs: T0,
 });
 
@@ -379,37 +381,30 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     expect(timestamps).toEqual([T0, T0 + 25]);
   });
 
-  it('同 run 同目标重发：第二次被拒；换一个 run 或换目标仍可发（2.5-13 的幂等键）', async () => {
+  it('同四元组重发：跨 run 也拒；换目标或简历版本才是新动作（10.2-02）', async () => {
     const hand = fakeChannel();
     const { greet, ledger } = await boot({ channel: hand.channel });
     await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }));
-    await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }))).rejects.toMatchObject({
+    await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-2' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { targetId: 'job-1001', workflowRunId: 'run-1' },
+      details: { targetId: 'job-1001', resumeVersion: 'unversioned' },
     });
     await greet.perform(request({ jobId: 'job-2002', workflowRunId: 'run-1' }));
-    await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-2' }));
+    await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-2', resumeVersion: 'resume-v2' }));
     expect(hand.calls).toHaveLength(3);
     expect(ledger.count()).toBe(3);
   });
 
-  it('幂等拒因里的范围与判据口径一致：带 run 说「本次运行」，单发说「未挂工作流的那些」（5.4-c）', async () => {
+  it('幂等拒因说明完整四元组，不再把去重范围误写成某一个 run（10.2-02）', async () => {
     const hand = fakeChannel();
     const { greet } = await boot({ channel: hand.channel });
     await greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }));
-    await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-1' }))).rejects.toMatchObject({
+    await expect(greet.perform(request({ jobId: 'job-1001', workflowRunId: 'run-2' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      message: '目标 job-1001 在本次运行里已经打过招呼，不再重复发送',
+      message: '同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送',
+      details: { platform: 'boss', targetId: 'job-1001', action: 'greet', resumeVersion: 'unversioned' },
     });
-    // 界面与 agent 的单发没有 run，账本按 `workflow_run_id IS NULL` 数的是历史上所有单发（2.5-13），
-    // 所以文案也必须换成那个范围——否则第二次单发会读到一句对不上号的话。
-    await greet.perform(request({ jobId: 'job-3003' }));
-    await expect(greet.perform(request({ jobId: 'job-3003' }))).rejects.toMatchObject({
-      code: 'OUTBOUND_ALREADY_SENT',
-      message: '目标 job-3003 在此前那些未挂工作流的发送里已经打过招呼，不再重复发送',
-      details: { targetId: 'job-3003', workflowRunId: null },
-    });
-    expect(hand.calls).toHaveLength(2);
+    expect(hand.calls).toHaveLength(1);
   });
 
   it('会话坐标那一维（P8 裁定⑲）：幂等键、额度目标与渠道读数都跟着它走，回执里岗位是 null', async () => {
@@ -423,15 +418,17 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
     expect(hand.calls).toEqual([{ targetId: '示例公司', text: request().text }]);
     expect(ledger.summary().recent[0]).toMatchObject({ action: GREET_ACTION, targetId: '示例公司' });
 
-    // 同一会话在同一 run 里再发一次：拦下来的是它自己，不是任何岗位——幂等键与额度目标用的是同一把键。
+    // 同一会话跨 run 重放也拦：run 只作审计，不放宽四元组去重。
     await expect(
-      greet.perform(request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-1' })),
+      greet.perform(request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-2' })),
     ).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { targetId: '示例公司', workflowRunId: 'run-1' },
+      details: { targetId: '示例公司', resumeVersion: 'unversioned' },
     });
-    // 同一会话换一个 run 仍可发；换成另一家公司也是另一个目标。
-    await greet.perform(request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-2' }));
+    // 同一会话绑定另一版简历才是新动作。
+    await greet.perform(
+      request({ jobId: undefined, conversationTarget: '示例公司', workflowRunId: 'run-2', resumeVersion: 'resume-v2' }),
+    );
     expect(hand.calls).toHaveLength(2);
   });
 
@@ -696,5 +693,23 @@ describe('agent 工具路径上的闸门与账本（spec 2.8-08 / 2.8-10）', ()
     expect(tools?.removed).toEqual(['outbound.greet.perform']);
     // 摘回只针对自己那一条：话术那条仍在（同一注册表，另一只服务的生命周期），断言它没被连带摘走。
     expect(tools?.list().map((entry) => entry.id)).toEqual(['outbound.script.generate']);
+  });
+});
+
+describe('打招呼未知结局的只读对账（10.2-03）', () => {
+  it('页面已发但初次未确认：先拒绝盲发，再按原正文补账，渠道不重放', async () => {
+    const hand = fakeChannel(false);
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    await expect(greet.perform(request())).rejects.toMatchObject({ code: 'OUTBOUND_NOT_DELIVERED' });
+    await expect(greet.perform(request())).rejects.toMatchObject({ code: 'OUTBOUND_RECONCILIATION_REQUIRED' });
+    expect(hand.calls).toHaveLength(1);
+
+    hand.channel.inspect = () =>
+      Promise.resolve({ status: 'confirmed', reason: '完整消息清单含原正文', receiptId: 'message-9' });
+    await expect(greet.reconcile(request())).resolves.toMatchObject({ status: 'recovered', canResume: false });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+    await expect(greet.reconcile(request())).resolves.toMatchObject({ status: 'already-succeeded' });
+    expect(hand.calls).toHaveLength(1);
   });
 });

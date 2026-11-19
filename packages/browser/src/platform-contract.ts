@@ -9,7 +9,7 @@
  * 频控参数**全部是数据**。站点改版改的是数据，适配器代码不动——这也是 2.2-08 能被机检的原因
  * （`scripts/check-knowledge-pack.ts` 扫的就是「适配器源码里不许出现选择器字面量」）。
  */
-import { AppError, type GreetTarget, type ResumeAttachment } from '@auto-cc/core';
+import { AppError, type GreetTarget, type OutboundInspection, type ResumeAttachment } from '@auto-cc/core';
 import type { PlatformMetaView } from '@auto-cc/shared';
 import { z } from 'zod';
 import { validateSpec } from './locator-spec.js';
@@ -219,6 +219,15 @@ export const knowledgePackSchema = z.strictObject({
        * 按整行点会得到 `WAIT_TIMEOUT` 或点错行（同一条实测负结论记在 8.0-05 第四节）。
        */
       conversationRowLabel: z.string().min(1).optional(),
+      /** 新会话的可选内联链；站点会自动发默认问候时必须如实标 true，适配器将在点击前停手。 */
+      newConversation: z
+        .strictObject({
+          startButton: z.string().min(1),
+          input: z.string().min(1),
+          sendButton: z.string().min(1),
+          startSendsDefaultGreeting: z.boolean(),
+        })
+        .optional(),
       /**
        * 消息正文在容器**里面**的定位名。
        *
@@ -266,6 +275,14 @@ export const knowledgePackSchema = z.strictObject({
        * 隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被 fail-closed 打掉（plan §13.6 第 1 条）。
        */
       uploadInput: z.string().min(1),
+      /** 附件菜单入口；有独立菜单时先点开再注入，真站未取证时省略并 fail-closed。 */
+      attachmentMenu: z.string().min(1).optional(),
+      /** 真实链必须先有附件菜单但未取证时置 true；适配器在任何页面动作前 fail-closed，不猜选择器。 */
+      attachmentMenuRequired: z.boolean().optional(),
+      /** 状态行上的页面回执 id 属性；省略表示平台没有可核对的独立回执。 */
+      receiptIdAttribute: z.string().min(1).optional(),
+      /** 成功状态是否必须同时带本版文件 sha256 前 12 位，防止旧回执冒充本版投递。 */
+      receiptIncludesResumeHash: z.boolean().optional(),
       /**
        * 确认投递的按钮定位名。**可以是缺的**（P8 8.5-01 的裁定，2026-10-09）。
        *
@@ -443,6 +460,13 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
     ];
     if (chat.conversationRow) chatLocatorKeys.push(['conversationRow', chat.conversationRow]);
     if (chat.conversationRowLabel) chatLocatorKeys.push(['conversationRowLabel', chat.conversationRowLabel]);
+    if (chat.newConversation) {
+      chatLocatorKeys.push(
+        ['newConversation.startButton', chat.newConversation.startButton],
+        ['newConversation.input', chat.newConversation.input],
+        ['newConversation.sendButton', chat.newConversation.sendButton],
+      );
+    }
     for (const [key, name] of chatLocatorKeys) {
       if (!locatorNames.has(name)) problems.push(`chat.${key}：引用了不存在的定位名「${name}」`);
     }
@@ -466,6 +490,7 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   if (deliver) {
     for (const [key, name] of [
       ['uploadInput', deliver.uploadInput],
+      ['attachmentMenu', deliver.attachmentMenu],
       ['sendButton', deliver.sendButton],
       ['statusLine', deliver.statusLine],
     ] as const) {
@@ -505,7 +530,10 @@ export function parseKnowledgePack(raw: unknown): KnowledgePack {
   // 读错状态行的代价由另一半判据兜着：`sent` 要求回读文本**含**成功样式，不是「读到了东西」。
   const actionNames = [
     ...(chat ? [chat.input, chat.sendButton] : []),
-    ...(deliver ? [deliver.uploadInput, deliver.sendButton] : []),
+    ...(chat?.newConversation
+      ? [chat.newConversation.startButton, chat.newConversation.input, chat.newConversation.sendButton]
+      : []),
+    ...(deliver ? [deliver.uploadInput, deliver.attachmentMenu, deliver.sendButton] : []),
   ].filter((name): name is string => Boolean(name));
   for (const name of actionNames) {
     const spec = parsed.data.locators[name];
@@ -610,6 +638,8 @@ export type OutboundResult = {
   reason: string;
   /** 计量凭证：外发必经 `entitlement.gate`，回执里带回本次扣的额度键 */
   ledgerKey: string | null;
+  /** 页面独立回执 id；与账本 id 分列，读不到时为 null。 */
+  receiptId?: string | null;
 };
 
 /** 会话里读到的一条回复。 */
@@ -710,6 +740,10 @@ export interface PlatformAdapter {
    * @returns 外发结局；目标已下架时抛 `DELIVER_TARGET_OFFLINE` 而不是回 `sent:false`（两者界面处置不同，spec 2.6-07）
    */
   sendResume(target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundResult>;
+  /** 只读核对原正文；不支持时缺席，编排层按 unknown 停手而不是盲发。 */
+  inspectChat?(target: GreetTarget, text: string): Promise<OutboundInspection>;
+  /** 只读核对同版附件；不点菜单、不注文件、不点确认。 */
+  inspectDelivery?(target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundInspection>;
   /**
    * 读取会话里的新回复。
    * @param target 落点坐标；与 `chat` 用**同一只**判据选中会话，否则读到的就是"屏幕上恰好选中的那条"

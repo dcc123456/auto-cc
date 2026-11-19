@@ -1,10 +1,12 @@
-import { RefreshCw, Send } from 'lucide-react';
+import { Power, RefreshCw, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   OUTBOUND_SAMPLE_ACTIONS,
   QUOTA_ACTIONS,
   type GateDecisionView,
+  type OutboundAttemptView,
+  type OutboundControlView,
   type OutboundSampleAction,
   type QuotaAction,
   type UsageSummaryView,
@@ -40,16 +42,22 @@ export function UsagePanel() {
   const { t } = useTranslation();
   const [decisions, setDecisions] = useState<Record<string, GateDecisionView>>();
   const [summary, setSummary] = useState<UsageSummaryView>();
+  const [outboundControl, setOutboundControl] = useState<OutboundControlView>();
+  const [attempts, setAttempts] = useState<OutboundAttemptView[]>([]);
   /** 本面板已发过的条数，只用来给 fixture 生成不重复的 targetId。 */
   const [sent, setSent] = useState(0);
   const bridge = window.autoCC;
 
   const read = useCallback(async () => {
-    const [summaryReply, ...gateReplies] = await Promise.all([
+    const [summaryReply, controlReply, attemptsReply, ...gateReplies] = await Promise.all([
       bridge?.usage['ledger.summary'](RECENT_LIMIT),
+      bridge?.entitlement['gate.outboundStatus'](),
+      bridge?.usage['ledger.recentAttempts'](RECENT_LIMIT),
       ...QUOTA_ACTIONS.map((action) => bridge?.entitlement['gate.check'](action)),
     ]);
     if (summaryReply?.ok) setSummary(summaryReply.value);
+    if (controlReply?.ok) setOutboundControl(controlReply.value);
+    if (attemptsReply?.ok) setAttempts(attemptsReply.value);
     const decisions: Record<string, GateDecisionView> = {};
     for (const [index, action] of QUOTA_ACTIONS.entries()) {
       const reply = gateReplies[index];
@@ -91,6 +99,17 @@ export function UsagePanel() {
       },
     );
 
+  /** 人的一键停用/恢复；只切主进程持久化开关，不在这里伪造外发计数。 */
+  const toggleOutbound = () => {
+    if (!outboundControl) return;
+    const nextStopped = !outboundControl.stopped;
+    void run(
+      t(nextStopped ? 'usage.actionStop' : 'usage.actionResume'),
+      () => bridge?.entitlement['gate.setOutboundStopped'](nextStopped),
+      { describe: (control) => t(control.stopped ? 'usage.stoppedNotice' : 'usage.resumedNotice') },
+    );
+  };
+
   return (
     <DeskSection
       id="trust.usage"
@@ -116,6 +135,36 @@ export function UsagePanel() {
           {notice}
         </Banner>
       )}
+
+      <Banner
+        tone={outboundControl?.stopped ? 'seal' : 'celadon'}
+        size="compact"
+        markers={{ testid: 'outbound-control', stopped: String(outboundControl?.stopped ?? false) }}
+        className="mt-1"
+      >
+        <div className="flex w-full items-center gap-2">
+          <div className="min-w-0 flex-1 text-[11px] text-slate-300">
+            {outboundControl
+              ? t(outboundControl.stopped ? 'usage.outboundStopped' : 'usage.outboundEnabled')
+              : t('usage.outboundUnknown')}
+          </div>
+          <DeskButton
+            action="toggle-outbound"
+            variant={outboundControl?.stopped ? 'line' : 'seal'}
+            compact
+            busy={!!busy}
+            disabled={!!busy || !outboundControl}
+            disabledReason={busy ? 'ACTION_BUSY' : !outboundControl ? 'CONTROL_UNAVAILABLE' : undefined}
+            disabledReasonLabel={
+              busy ? t('usage.reasonBusy') : !outboundControl ? t('usage.outboundUnknown') : undefined
+            }
+            onClick={toggleOutbound}
+          >
+            <Power size={12} />
+            {outboundControl?.stopped ? t('usage.resumeOutbound') : t('usage.stopOutbound')}
+          </DeskButton>
+        </div>
+      </Banner>
 
       {/* 三条闸门判定各一行：额度按动作独立，所以「抓 40 轮不打招呼」与「打招呼用尽而投递照旧」
           必须同时看得见。行与行只留一根发丝线，不再各自套一只小卡（旧版卡中卡，三层描边）。 */}
@@ -150,9 +199,11 @@ export function UsagePanel() {
                   variant="seal"
                   compact
                   busy={!!busy}
-                  disabled={!!busy}
-                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                  disabledReasonLabel={busy !== undefined ? t('usage.reasonBusy') : undefined}
+                  disabled={!!busy || outboundControl?.stopped === true}
+                  disabledReason={busy ? 'ACTION_BUSY' : outboundControl?.stopped ? 'OUTBOUND_DISABLED' : undefined}
+                  disabledReasonLabel={
+                    busy ? t('usage.reasonBusy') : outboundControl?.stopped ? t('usage.outboundStopped') : undefined
+                  }
                   className="ml-auto"
                   onClick={() => send(action)}
                 >
@@ -168,6 +219,33 @@ export function UsagePanel() {
           );
         })}
       </ul>
+
+      {attempts.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1" data-testid="outbound-attempts">
+          {attempts.map((attempt) => {
+            const attemptKey = `${attempt.platform}:${attempt.targetId}:${attempt.action}:${attempt.resumeVersion}`;
+            return (
+              <li
+                key={attemptKey}
+                className="rounded-md border border-line px-2 py-1 text-[11px] text-slate-400"
+                data-attempt-key={attemptKey}
+                data-attempt-status={attempt.status}
+                data-ledger-id={String(attempt.ledgerId ?? '')}
+                data-receipt-id={attempt.receiptId ?? ''}
+              >
+                {t('usage.attemptRow', {
+                  action: attempt.action,
+                  target: attempt.targetId,
+                  version: attempt.resumeVersion,
+                  status: t(`usage.attemptStatus.${attempt.status}`),
+                  ledgerId: attempt.ledgerId ?? t('usage.none'),
+                  receiptId: attempt.receiptId ?? t('usage.none'),
+                })}
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {(summary?.byDay.length ?? 0) > 0 ? (
         <ul className="mt-2 flex flex-col gap-1" data-testid="usage-days">

@@ -10,7 +10,7 @@
  * 编排层（2.5-e 的 `outbound.greet`），适配器只管「把这段文字打进这个会话并按页面回读判定结果」。
  * 把闸门写在这里会让「从界面点一次发送」与「从工作流跑一次发送」走两条不同的计量路（AGENTS.md §7.3）。
  */
-import { AppError, type GreetTarget, type ResumeAttachment } from '@auto-cc/core';
+import { AppError, type GreetTarget, type OutboundInspection, type ResumeAttachment } from '@auto-cc/core';
 import type {
   ExtractFieldReading,
   ExtractRequest,
@@ -393,14 +393,34 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
    * @param statusLineName 状态行的定位名（会话页与上传页各用各的那一行）
    * @returns 状态行正文；一行都没读到是空串（调用方按「没读到成功样式」处理，绝不猜成成功）
    */
-  const readStatusLine = async (statusLineName: string): Promise<string> => {
+  const readStatusDetails = async (
+    statusLineName: string,
+    receiptIdAttribute?: string,
+  ): Promise<{ text: string; receiptId: string | null }> => {
     const result = await page.extract({
       container: locatorFor(statusLineName),
-      fields: [{ name: 'status', candidates: [], scope: 'self' }],
+      fields: [
+        { name: 'status', candidates: [], scope: 'self' },
+        ...(receiptIdAttribute
+          ? [{ name: 'receiptId', candidates: [], scope: 'self' as const, attribute: receiptIdAttribute }]
+          : []),
+      ],
     });
-    const reading = fieldsByName(result.rows[0]?.fields ?? []).get('status');
-    return reading?.matched ? cleanText(reading.text) : '';
+    const fields = fieldsByName(result.rows[0]?.fields ?? []);
+    const status = fields.get('status');
+    return {
+      text: status?.matched ? cleanText(status.text) : '',
+      receiptId: attributeOf(fields, 'receiptId') || null,
+    };
   };
+
+  /**
+   * 只取状态正文；聊天与投递预校验共用这一形状，回执 id 需要时再取完整读数。
+   * @param statusLineName 状态行定位名
+   * @returns 状态正文；读不到为空串
+   */
+  const readStatusLine = async (statusLineName: string): Promise<string> =>
+    (await readStatusDetails(statusLineName)).text;
 
   /**
    * 取「按会话列表行选中目标」那一双定位（行容器 + 页面上用来认目标的那一格）。
@@ -516,8 +536,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     }
     // 两道定位先验票，再看页面：一条没取证的候选就足以让整次外发不该发生，
     // 那就连「打开会话页」这一步都不做（spec 8.1-04 的「不发起任何动作」含导航）。
-    const inputSpec = outboundLocator(knowledge.input);
-    const sendSpec = outboundLocator(knowledge.sendButton);
+    let inputSpec = outboundLocator(knowledge.input);
+    let sendSpec = outboundLocator(knowledge.sendButton);
     const conversationTarget = target.conversationTarget?.trim() ?? '';
     const jobId = (target.jobId ?? '').trim();
     // 会话坐标优先（与编排层的幂等键同一个取舍，裁定⑲）：按行选中是"改页面状态"，
@@ -532,12 +552,31 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       }
       const startSpec = pack.locators.chatStartButton;
       if (startSpec) {
-        // 真实 BOSS 的会话不在可直接拼的 `/web/geek/chat` 上：先到岗位详情点「继续沟通」，
-        // 让站点把会话选中，再进入下面的输入/发送。只声明「继续沟通」这一种入口候选，
-        // 新会话的「立即沟通」会打开内联面板并可能先发站点默认问候，那条路未实现前不点。
+        // 已有会话先走「继续沟通」。只有这个只读入口明确失配时才尝试新会话内联链；
+        // 若站点会自动发默认问候，必须在点「立即沟通」之前停下，否则应用账本永远对不上那一发。
         const detailUrl = new URL(`/job_detail/${jobId}`, pack.startUrl).href;
         await page.navigate(detailUrl);
-        await act.click(startSpec);
+        try {
+          await act.click(startSpec);
+        } catch (error) {
+          const code = error instanceof AppError ? error.code : '';
+          const inline = knowledge.newConversation;
+          if (!inline || (code !== 'WAIT_TIMEOUT' && code !== 'LOCATE_FAILED')) throw error;
+          if (inline.startSendsDefaultGreeting) {
+            throw new AppError(
+              'OUTBOUND_UNTRACKED_SITE_GREETING',
+              '新会话入口会先由站点自动发一条默认问候，应用无法把那一发与自定义正文逐笔对账；未点击入口，也未发送正文',
+              'platform.boss',
+              { platform: pack.platform, jobId },
+            );
+          }
+          const inlineStartSpec = outboundLocator(inline.startButton);
+          const inlineInputSpec = outboundLocator(inline.input);
+          const inlineSendSpec = outboundLocator(inline.sendButton);
+          await act.click(inlineStartSpec);
+          inputSpec = inlineInputSpec;
+          sendSpec = inlineSendSpec;
+        }
       } else {
         const url = pageUrlFor(knowledge, jobId);
         if (url) await page.navigate(url);
@@ -551,17 +590,25 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         ledgerKey: null,
       };
     }
-    // 等待要在点击之前起：`textChanges` 的基线是脚本启动那一刻的文本，点完再等就永远「没有变化」。
+    // 两个等待都要在点击之前起：状态行证明按钮有回应，消息列表给出这发正文的独立 id。
+    // 仿站每 1.2s 轮询消息，若只读点击后的即时 DOM，会误退回无 id 的旧状态行凭据。
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
+    const messageChanged = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.messageItem) });
     await act.click(sendSpec);
-    const wait = await changed;
+    const [wait] = await Promise.all([changed, messageChanged]);
     // 状态行是 many（每条已发消息各挂一行），页面上可能早就有上一发的「[送达]」；
     // 只看它会把手动/上一发的旧凭据当成这一发成功。真正的凭据是消息列表里出现刚发出的正文。
     // 消息列表一行都读不到时（仿站脚本/旧页面形状）退回状态行；只要读到了行，就必须在行里找到正文。
     // 不再自己加轮询间隔：上面的 `textChanges` 已经等过页面这一趟变化，写字面量毫秒数会撞 2.7-04。
     const messages = await readMessages(jobId, conversationTarget);
-    if (messages.some((message) => message.from === 'self' && message.text === text)) {
-      return { sent: true, reason: '页面消息列表回读到刚发出的正文', ledgerKey: null };
+    const sentMessage = messages.find((message) => message.from === 'self' && message.text === text);
+    if (sentMessage) {
+      return {
+        sent: true,
+        reason: '页面消息列表回读到刚发出的正文',
+        ledgerKey: null,
+        receiptId: sentMessage.externalId,
+      };
     }
     const status = await readStatusLine(knowledge.statusLine);
     if (messages.length === 0 && status.includes(knowledge.sentPattern)) {
@@ -623,7 +670,16 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       });
     }
     // 与 `chat` 同一条纪律：要动手的定位先验票，未取证就连上传页都不打开（spec 8.1-04）。
+    if (knowledge.attachmentMenuRequired && !knowledge.attachmentMenu) {
+      throw new AppError(
+        'LOCATOR_UNVERIFIED',
+        '附件菜单链尚未取证，禁止导航、注入文件或猜测发送控件',
+        'platform.boss',
+        { platform: pack.platform, locator: 'deliver.attachmentMenu' },
+      );
+    }
     const uploadSpec = outboundLocator(knowledge.uploadInput);
+    const attachmentMenuSpec = knowledge.attachmentMenu ? outboundLocator(knowledge.attachmentMenu) : null;
     // 确认键没登记 ⇒ 这一发只注入、不点（8.5-01 的裁定）：注完文件之后页面上长出什么从来没有在场读数，
     // 而契约从此允许那一格缺席。`sentPattern` 与它成对（加载期就查死），所以下面只问一只。
     const sendSpec = knowledge.sendButton ? outboundLocator(knowledge.sendButton) : null;
@@ -652,6 +708,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         },
       );
     }
+    if (attachmentMenuSpec) await act.click(attachmentMenuSpec);
     const injected = await act.upload(uploadSpec, attachment.path);
     if (injected.valueAfter !== attachment.fileName) {
       return {
@@ -676,12 +733,21 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     const changed = act.waitFor({ kind: 'textChanges', spec: locatorFor(knowledge.statusLine) });
     await act.click(sendSpec);
     const wait = await changed;
-    const status = await readStatusLine(knowledge.statusLine);
+    const receipt = await readStatusDetails(knowledge.statusLine, knowledge.receiptIdAttribute);
+    const status = receipt.text;
     if (status.includes(knowledge.sentPattern)) {
+      if (knowledge.receiptIncludesResumeHash && !status.includes(attachment.sha256.slice(0, 12))) {
+        return {
+          sent: false,
+          reason: `状态行含成功样式但没有本版文件哈希，旧回执不能冒充这次投递：${status}`,
+          ledgerKey: null,
+        };
+      }
       return {
         sent: true,
         reason: `状态行回读到成功样式「${knowledge.sentPattern}」：${status}${skippedOfflineCheck}`,
         ledgerKey: null,
+        receiptId: receipt.receiptId,
       };
     }
     const reading = status || '（读不到状态行）';
@@ -782,6 +848,64 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     return readMessages(jobId, conversationTarget);
   };
 
+  /**
+   * 只读核对原正文；没有可安全定位的目标页时回 unknown，绝不为了对账点开可能自动问候的新会话。
+   * @param target 原岗位或会话坐标
+   * @param text 原发送正文
+   * @returns 页面含原文 confirmed；完整清单不含 absent；无法安全读取 unknown
+   */
+  const inspectChat = async (target: GreetTarget, text: string): Promise<OutboundInspection> => {
+    const knowledge = chatKnowledge();
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = target.jobId?.trim() ?? '';
+    if (!knowledge.targetParam && !conversationTarget) {
+      return { status: 'unknown', reason: '岗位新会话不能安全只读定位，未点击任何入口' };
+    }
+    if (conversationTarget) await selectConversation(conversationTarget);
+    else {
+      const url = pageUrlFor(knowledge, jobId || null);
+      if (!url) return { status: 'unknown', reason: '知识包没有可只读定位的会话地址' };
+      await page.navigate(url);
+    }
+    const messages = await readMessages(jobId, conversationTarget);
+    const matched = messages.find((message) => message.from === 'self' && message.text === text);
+    return matched
+      ? { status: 'confirmed', reason: '完整消息清单含原正文', receiptId: matched.externalId }
+      : { status: 'absent', reason: '完整消息清单不含原正文' };
+  };
+
+  /**
+   * 只读核对同版附件；平台没有回执 id 与版本哈希判据时一律 unknown，不用旧状态行补账。
+   * @param target 原岗位或会话坐标
+   * @param attachment 原附件（版本按 sha256 前 12 位核对）
+   * @returns 同版回执 confirmed；完整状态不含成功 absent；证据不足 unknown
+   */
+  const inspectDelivery = async (target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundInspection> => {
+    const knowledge = deliverKnowledge();
+    if (!knowledge.receiptIncludesResumeHash || !knowledge.receiptIdAttribute || !knowledge.sentPattern) {
+      return { status: 'unknown', reason: '投递知识包没有独立回执 id 与版本哈希判据' };
+    }
+    const conversationTarget = target.conversationTarget?.trim() ?? '';
+    const jobId = target.jobId?.trim() ?? '';
+    if (!knowledge.targetParam && !conversationTarget) {
+      return { status: 'unknown', reason: '岗位投递页不能安全只读定位，未打开附件菜单' };
+    }
+    if (conversationTarget) await selectConversation(conversationTarget);
+    else {
+      const url = pageUrlFor(knowledge, jobId || null);
+      if (!url) return { status: 'unknown', reason: '知识包没有可只读定位的投递地址' };
+      await page.navigate(url);
+    }
+    const receipt = await readStatusDetails(knowledge.statusLine, knowledge.receiptIdAttribute);
+    if (!receipt.text) return { status: 'unknown', reason: '投递状态行读不到' };
+    if (receipt.text.includes(knowledge.sentPattern ?? '')) {
+      return receipt.text.includes(attachment.sha256.slice(0, 12)) && receipt.receiptId
+        ? { status: 'confirmed', reason: '状态行含同版附件哈希与独立回执', receiptId: receipt.receiptId }
+        : { status: 'unknown', reason: '成功样式不能证明是这一版附件，可能是旧回执' };
+    }
+    return { status: 'absent', reason: '完整投递状态不含成功回执' };
+  };
+
   return {
     meta,
     // 风控页文字判据取自知识包那一段；缺段回 null，观测层据此「只按 HTTP 状态判风控」，不猜文案。
@@ -795,6 +919,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     detail,
     chat,
     sendResume,
+    inspectChat,
+    inspectDelivery,
     readReplies,
   };
 }

@@ -1,0 +1,24 @@
+10.2-01 / 9.2-08 导航竞态活体读数（2026-11-19，隔离实例 10222 / 仿站 10234）
+
+隔离条件：独立 userData（tmp/m2a-live-20261119/userdata）、独立 HOME、临时 fixture 知识包指向 10234；
+未改共享 cordis.yml，未打开真实招聘平台。真实平台请求计数 = 0。
+
+实际遇到的竞态（主进程日志，已脱敏）：
+  [browser-page-service] 检测到导航在途竞态，上一笔装载结局 failed，目标地址只重试一次
+  [browser-page-service] 内核视图已导航：http://127.0.0.1:10234/boss（装载 loaded）
+
+打开会话后立即抓取（同一实例、同一 10234）：
+  sessions.open(fixture) → 立即 jd.capture.run({keyword:'前端', limit:1})
+  读数：rounds=1 · containers=1 · stored=1 · skipped=0 · stoppedBy=target-count · captured=[1001 桌面端前端工程师（Electron）]
+  页面快照：url=…/boss?query=%E5%89%8D%E7%AB%AF · readyState=complete · partition=persist:fixture
+  search 账行：usage_ledger id=8，action=search，target_id=前端，ts=1795071752730（与 finishedAt 同值）
+
+说明：CaptureRunView 的 ledgerRowsBefore/After 为 6/6，是既有口径（search 行在闸门任务成功后才落账，
+见 9.2-real-boss-flow-findings.md §5.6）；同一份库读数里 id=8 那行就是本轮 search 账，不拿 6/6 冒充“没落账”。
+
+证据文件：
+- docs/acceptance/10-job-journey/10.2-01-navigation-live.json（含页面快照与库读数）
+- docs/acceptance/10-job-journey/10.2-01-fixture-setup.json（登记源仅 10234、真实平台请求 0）
+- docs/acceptance/10-job-journey/10.2-01-fixture-ready.png（首屏）
+
+真实 BOSS 首页 → 立即抓取仍须用户在场手验；本条活体证据只证明代码路径与竞态重试，不替代真实平台手验。

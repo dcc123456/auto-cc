@@ -1,0 +1,20 @@
+10.2-03 一键停用、未知结局与只读恢复（U 证据，2026-11-19）
+
+安全判据：
+- outbound_control 持久化停用；停用只影响后续动作，不删除 usage_ledger / delivery_records 历史。
+- 页面闭包开始前与成功落账前各查一次停用位，堵住“停用后才收到成功回执”的竞态。
+- 页面失败/写账分歧统一记 unknown；再次 perform 返回 OUTBOUND_RECONCILIATION_REQUIRED，禁止盲目重发。
+- 对账三态：confirmed 只补账不重发；absent 才允许之后显式重试；unknown/conflict 继续停手。
+- 停用期间允许只读核对但 confirmed 也不得补成功账；恢复后可由人再确认同一回执。
+- 打招呼必须提供原正文；投递必须读得到同字节附件；不重新生成恢复内容。
+
+关键断言：
+- 停用前成功 1 行，停用后 greet/deliver 调用均为 OUTBOUND_DISABLED，闭包新增 0、成功账新增 0，历史 1 行仍在。
+- 页面在停用后回执：OUTBOUND_DISABLED，usage_ledger=0；停用中 reconcile(confirmed)=conflict，仍为 0；恢复后同一回执才补 1。
+- 页面成功/账本未知：第一次 send=1，重放 send 不增；对账后账本与经过各 1，成功动作再次对账不重复发送。
+
+实际命令与结果：
+  pnpm --filter @auto-cc/plugin-entitlement test EXIT=0（recovery + migration + 原 entitlement 共 24 tests）
+  pnpm --filter @auto-cc/plugin-outbound test     EXIT=0（200 tests）
+
+V 证据状态：用量页停用/恢复、尝试状态与 fixture 对账读数须活体截图/DOM 证据；未获配置切换批准前不启动，也不以 U 代替 V。

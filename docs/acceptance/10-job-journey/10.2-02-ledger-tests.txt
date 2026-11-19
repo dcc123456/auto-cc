@@ -1,0 +1,20 @@
+10.2-02 外发回执、账本、投递经过与四元组去重（U 证据，2026-11-19）
+
+实现口径：
+- 新持久化键 = platform + targetId + action + resumeVersion；workflowRunId 只作审计，不能用来绕过去重。
+- 纯打招呼 resumeVersion=unversioned；投递 = snapshotId:sha256 或 sha256:<整串>。
+- entitlement.gate.performOutbound 是原闸门内的编排口；usage_ledger、outbound_attempts 成功位与 delivery_records 在同一 SQLite 事务。
+- 页面回执 id 与账本 id 分列；没有平台回执时保留 null，不拿账本 id 冒充。
+
+负对照与读数：
+- 同四元组跨 run 重放：页面闭包不再执行，账本不新增；换平台或换简历版本才是新动作。
+- 投递模拟页面成功但 delivery_records 写失败：usage_ledger=0、delivery_records=0、attempt=unknown。
+- 只读对账确认同版回执后：账本补 1、经过补 1、ledger_id 对齐；页面 send 仍只有初次 1 次。
+- 停用后 greet/deliver 闭包=0、成功账行=0；页面在停用后迟到回执同样不得新增成功账。
+
+实际命令与结果：
+  pnpm --filter @auto-cc/plugin-entitlement test  EXIT=0（含 recovery.test.ts）
+  pnpm --filter @auto-cc/plugin-outbound typecheck EXIT=0
+  pnpm --filter @auto-cc/plugin-outbound test       EXIT=0（9 files / 200 tests）
+
+V 证据状态：须在独立 userData 的 fixture 实例完成新会话/已有会话各一轮页面回执、账行、delivery_records 与去重读数后归档；未获配置切换批准前不伪造 V。

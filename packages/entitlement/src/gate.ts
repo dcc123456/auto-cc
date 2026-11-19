@@ -14,8 +14,17 @@
  * 当前实现是纯本地的：没有网络校验、没有登录、没有付费分支（`docs/00-master-plan.md` §1.5）。
  * P5 接 SaaS 时替换的是本文件里的判定，调用点一个都不用改。
  */
-import { AppError, asApp, Service, type Context } from '@auto-cc/core';
-import { QUOTA_ACTIONS, type GateDecisionView, type GateQuotaView, type QuotaAction } from '@auto-cc/shared';
+import { AppError, asApp, Service, type Context, type OutboundInspection } from '@auto-cc/core';
+import {
+  QUOTA_ACTIONS,
+  type GateDecisionView,
+  type GateQuotaView,
+  type OutboundAttemptKey,
+  type OutboundAttemptView,
+  type OutboundControlView,
+  type OutboundReconcileView,
+  type QuotaAction,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import type { ActionContext } from './types.js';
 
@@ -72,6 +81,101 @@ export class EntitlementGateService extends Service {
     this.options = options;
   }
 
+  /** 账本句柄：所有停用与去重事实都只读这一处，不另存内存副本。 */
+  private get ledger() {
+    return asApp(this.ctx)['usage.ledger'];
+  }
+
+  /**
+   * 生成并校验完整外发键；缺任何一维都必须停在页面动作之前。
+   * @param action greet/deliver
+   * @param context 编排层提供的平台、目标与简历版本
+   * @returns 可直接落尝试台账的键
+   * @throws `INVALID_ARGUMENT`：键缺维或动作为 search
+   */
+  private keyOf(action: OutboundAttemptKey['action'], context: ActionContext): OutboundAttemptKey {
+    const platform = context.platform?.trim() ?? '';
+    const targetId = context.targetId?.trim() ?? '';
+    const resumeVersion = context.resumeVersion?.trim() ?? '';
+    if (!platform || !targetId || !resumeVersion) {
+      throw new AppError(
+        'INVALID_ARGUMENT',
+        '持久化外发必须给全 platform + targetId + action + resumeVersion，缺一维就不能判定重放',
+        'entitlement.gate',
+        { action, platform, targetId, hasResumeVersion: resumeVersion.length > 0 },
+      );
+    }
+    return { platform, targetId, action, resumeVersion };
+  }
+
+  /**
+   * 已成功或结局未知的键一律不许再次进入页面；该方法只读，不产生额度或被拒流水。
+   * @param key 完整去重键
+   * @throws `OUTBOUND_ALREADY_SENT` / `OUTBOUND_RECONCILIATION_REQUIRED`
+   */
+  private assertFresh(key: OutboundAttemptKey): void {
+    const attempt = this.ledger.attemptFor(key);
+    if (!attempt) return;
+    if (attempt.status === 'succeeded') {
+      throw new AppError(
+        'OUTBOUND_ALREADY_SENT',
+        '同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送',
+        'entitlement.gate',
+        {
+          ...key,
+          ledgerId: attempt.ledgerId,
+          receiptId: attempt.receiptId,
+        },
+      );
+    }
+    if (attempt.status !== 'failed') {
+      throw new AppError(
+        'OUTBOUND_RECONCILIATION_REQUIRED',
+        '上一次外发结局尚未对账，禁止盲目重发；先只读核对页面回执与账本',
+        'entitlement.gate',
+        {
+          ...key,
+          attemptStatus: attempt.status,
+          ledgerId: attempt.ledgerId,
+        },
+      );
+    }
+  }
+
+  /**
+   * 停用状态只读展示；恢复不代表自动续跑，仍须重新经审批、额度、频控与去重。
+   * @returns 持久化控制读数
+   */
+  outboundStatus = (): OutboundControlView => this.ledger.outboundStatus();
+
+  /**
+   * 人的一键停用/恢复入口，刻意不登记成 agent 工具，模型不能自行恢复外发。
+   * @param stopped 是否停用
+   * @param nowMs 表态时刻（毫秒）
+   * @returns 设置后的状态
+   */
+  setOutboundStopped = (stopped: boolean, nowMs = Date.now()): OutboundControlView =>
+    this.ledger.setOutboundStopped(stopped, nowMs);
+
+  /**
+   * 只读外发尝试，供编排层提前避免重复生成内容与界面展示对账读数。
+   * @param action greet/deliver
+   * @param context 完整外发上下文
+   * @returns 已持久化的尝试或 null
+   */
+  outboundAttempt = (action: OutboundAttemptKey['action'], context: ActionContext): OutboundAttemptView | null =>
+    this.ledger.attemptFor(this.keyOf(action, context));
+
+  /**
+   * 编排层在生成内容前先做无副作用的重放检查；真正发送前 `performOutbound` 会再查一次防竞态。
+   * @param action greet/deliver
+   * @param context 完整外发上下文
+   * @throws 同 `performOutbound` 的重复/未知两类错误
+   */
+  assertOutboundFresh = (action: OutboundAttemptKey['action'], context: ActionContext): void => {
+    this.assertFresh(this.keyOf(action, context));
+  };
+
   /**
    * 判定某动作现在能不能做、还剩几条。
    * @param action 额度动作名（`search` / `greet` / `deliver`）；渲染层递来的字符串在网关侧不做形状校验，
@@ -109,6 +213,19 @@ export class EntitlementGateService extends Service {
   });
 
   /**
+   * 一键停用优先于去重与额度：停用期间每一次新调用都明确拒绝，不拿旧成功回执冒充本次放行。
+   * @param action 动作名；search 是只读抓取，不受外发总开关影响
+   * @param context 被拒流水的上下文
+   * @throws `OUTBOUND_DISABLED` 并留一条不计额度的被拒审计
+   */
+  private ensureOutboundEnabled(action: QuotaAction, context: ActionContext): void {
+    if (action === 'search' || !this.ledger.outboundStatus().stopped) return;
+    const reason = `动作 ${action} 未执行：外发已一键停用；恢复后仍需重新审批与对账`;
+    this.ledger.recordDenial({ action, ...context, code: 'OUTBOUND_DISABLED', reason });
+    throw new AppError('OUTBOUND_DISABLED', reason, 'entitlement.gate', { action, stopped: true });
+  }
+
+  /**
    * 问一句「现在能不能做」，不能做就**先把这一次记成被拒流水再抛**。
    *
    * 它是 `usage_denials` 的唯一写入口（spec 5.3-12）：判定、留痕、抛错三件事长在一起，
@@ -119,10 +236,11 @@ export class EntitlementGateService extends Service {
    * @throws 到量时以 `QUOTA_EXCEEDED` 失败（`details` 带动作名与剩余额度），不静默跳过
    */
   enforce = (action: QuotaAction, context: ActionContext = {}): GateDecisionView => {
+    this.ensureOutboundEnabled(action, context);
     const decision = this.check(action, context);
     if (decision.allowed) return decision;
     const reason = decision.reason ?? `动作 ${action} 的额度已用完`;
-    asApp(this.ctx)['usage.ledger'].recordDenial({ action, ...context, code: 'QUOTA_EXCEEDED', reason });
+    this.ledger.recordDenial({ action, ...context, code: 'QUOTA_EXCEEDED', reason });
     throw new AppError('QUOTA_EXCEEDED', reason, 'entitlement.gate', { action, remaining: decision.remaining });
   };
 
@@ -144,6 +262,106 @@ export class EntitlementGateService extends Service {
     const ledgerId = asApp(this.ctx)['usage.ledger'].record({ action, ...context });
     this.ctx.logger.info(`闸门放行并落账：动作 ${action} · 账本行 ${String(ledgerId)}`);
     return { value, ledgerId };
+  };
+
+  /**
+   * 带持久化去重与未知结局保护的外发放行口；页面闭包全应用仍只在主进程内。
+   * @param action greet/deliver
+   * @param context 必须含平台、目标、简历版本；账本沿用原字段
+   * @param task 真正的页面动作；只允许执行一次
+   * @param writeDelivery 成功时与同事务写 `delivery_records` 的可选回调
+   * @returns 页面返回值与一对一账本行
+   * @throws 重放 `OUTBOUND_ALREADY_SENT`；未知 `OUTBOUND_RECONCILIATION_REQUIRED`；其余同 `perform`
+   */
+  performOutbound = async <T>(
+    action: OutboundAttemptKey['action'],
+    context: ActionContext,
+    task: () => Promise<{ value: T; receiptId?: string | null }>,
+    writeDelivery?: (ledgerId: number) => void,
+  ): Promise<Performed<T>> => {
+    const key = this.keyOf(action, context);
+    this.ensureOutboundEnabled(action, context);
+    this.assertFresh(key);
+    this.enforce(action, context);
+    const begun = this.ledger.beginAttempt(key, context.workflowRunId ?? null, context.nowMs);
+    if (begun.kind !== 'send') {
+      // 并发入口在唯一索引前只能有一个赢家；输家按同一份持久化事实停下，不碰页面。
+      this.assertFresh(key);
+      throw new AppError(
+        'OUTBOUND_RECONCILIATION_REQUIRED',
+        '外发发送权状态发生变化，先重新对账',
+        'entitlement.gate',
+        key,
+      );
+    }
+    try {
+      const outcome = await task();
+      // 页面动作在停用前开始、停用后才回执时，仍不得在停用后新增成功账；未知结局留给人工对账。
+      this.ensureOutboundEnabled(action, context);
+      const completed = this.ledger.completeAttempt(
+        key,
+        context,
+        outcome.receiptId ?? null,
+        writeDelivery,
+        context.nowMs,
+      );
+      this.ctx.logger.info(`外发已放行并原子落账：动作 ${action} · 账本行 ${String(completed.ledgerId)}`);
+      return { value: outcome.value, ledgerId: completed.ledgerId };
+    } catch (error) {
+      const reason = error instanceof AppError ? error.code : 'OUTBOUND_UNKNOWN_ERROR';
+      this.ledger.markAttemptUnknown(key, reason, context.nowMs);
+      throw error;
+    }
+  };
+
+  /**
+   * 失败后只读对账：页面确认成功就只补账不重发；明确未发生才允许显式重试；未知/冲突继续停手。
+   * @param action greet/deliver
+   * @param context 与原发送完全相同的四元组、来源和运行上下文
+   * @param inspection 平台适配器只读回执，三态不得用 sent:false 冒充“确定没发”
+   * @param writeDelivery 页面确认成功时补投递经过的回调，仍与账本同事务
+   * @returns 对账结局与是否允许之后显式重试
+   */
+  reconcile = (
+    action: OutboundAttemptKey['action'],
+    context: ActionContext,
+    inspection: OutboundInspection,
+    writeDelivery?: (ledgerId: number) => void,
+  ): OutboundReconcileView => {
+    const key = this.keyOf(action, context);
+    const before = this.ledger.attemptFor(key);
+    if (!before) {
+      return { status: inspection.status === 'confirmed' ? 'conflict' : 'not-found', canResume: false, attempt: null };
+    }
+    if (before.status === 'succeeded') {
+      const differs =
+        inspection.status === 'absent' ||
+        (before.receiptId !== null && inspection.receiptId !== undefined && inspection.receiptId !== before.receiptId);
+      return { status: differs ? 'conflict' : 'already-succeeded', canResume: false, attempt: before };
+    }
+    if (inspection.status === 'unknown') return { status: 'unknown', canResume: false, attempt: before };
+    if (inspection.status === 'absent') {
+      const attempt = this.ledger.markAttemptFailed(key, context.nowMs);
+      return { status: 'not-sent', canResume: !this.ledger.outboundStatus().stopped, attempt };
+    }
+    if (this.ledger.outboundStatus().stopped) {
+      // 停用期间允许只读核对，但不得借对账补一条成功账；恢复后可由人再确认同一回执。
+      return { status: 'conflict', canResume: false, attempt: before };
+    }
+    try {
+      const completed = this.ledger.completeAttempt(
+        key,
+        context,
+        inspection.receiptId ?? null,
+        writeDelivery,
+        context.nowMs,
+      );
+      return { status: 'recovered', canResume: false, attempt: completed.attempt };
+    } catch (error) {
+      const reason = error instanceof AppError ? error.code : 'RECONCILE_WRITE_FAILED';
+      const attempt = this.ledger.markAttemptUnknown(key, reason, context.nowMs);
+      return { status: 'conflict', canResume: false, attempt };
+    }
   };
 
   /**

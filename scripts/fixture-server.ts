@@ -979,6 +979,7 @@ const deliverPageHtml = `<!doctype html>
 
     <div class="card">
       <p>上传控件与真实站点一样藏在按钮背后（<code>display:none</code>）：按默认可点判据它永远定位不到，注入走的是 CDP 而不是坐标。</p>
+      <p><button type="button" data-testid="resume-attachment-menu">打开附件菜单</button></p>
       <p>
         <label class="pick" for="resume-file">选择简历文件</label>
         <span data-testid="deliver-note">（人点这个标签；app 用 <code>browser.act.upload</code> 直接注进控件）</span>
@@ -1005,6 +1006,13 @@ const deliverPageHtml = `<!doctype html>
       document.querySelector('[data-testid="deliver-target"]').textContent = deliverTarget || '（地址里没有 targetId）';
       let changeCount = 0;
       let attachmentId = null;
+      let attachmentSha256 = '';
+      let attachmentMenuArmed = false;
+
+      document.querySelector('[data-testid="resume-attachment-menu"]').addEventListener('click', () => {
+        attachmentMenuArmed = true;
+        document.querySelector('[data-testid="deliver-note"]').textContent = '附件菜单已打开，可以登记这一版简历';
+      });
 
       /**
        * 写一行页面读数。
@@ -1027,6 +1035,7 @@ const deliverPageHtml = `<!doctype html>
               return;
             }
             attachmentId = payload.attachmentId;
+            attachmentSha256 = payload.sha256;
             // 摘要只报前 12 位：与账本 <code>source</code> 里 <code>resume:&lt;sha256 前 12 位&gt;</code> 同一形状，截图里能直接对（spec 2.6-05）。
             serverReadout.textContent =
               '服务端已登记附件 #' + String(payload.attachmentId) + '：' + payload.fileName +
@@ -1047,6 +1056,11 @@ const deliverPageHtml = `<!doctype html>
         fill('[data-testid="upload-file-name"]', file ? file.name : '（空）');
         fill('[data-testid="upload-file-size"]', file ? String(file.size) : '0');
         fill('[data-testid="upload-file-type"]', file ? file.type || '（空）' : '（空）');
+        if (file && !attachmentMenuArmed) {
+          statusLine.textContent = '请先打开附件菜单，再登记这一版简历';
+          attachmentId = null;
+          return;
+        }
         if (file) registerUpload(file);
       });
 
@@ -1063,10 +1077,15 @@ const deliverPageHtml = `<!doctype html>
         })
           .then((response) => response.json())
           .then((payload) => {
-            statusLine.textContent = payload.ok
-              ? '简历已送达：目标 ' + payload.targetId + ' · 附件 #' + String(payload.attachmentId) +
-                '（服务端第 ' + String(payload.received) + ' 次收讫）'
-              : '投递未成功：' + payload.error;
+            if (payload.ok) {
+              statusLine.dataset.receiptId = String(payload.receiptId);
+              statusLine.textContent =
+                '简历已送达：目标 ' + payload.targetId + ' · 回执 #' + String(payload.receiptId) +
+                ' · 附件 ' + payload.fileName + ' · sha256 ' + attachmentSha256.slice(0, 12) +
+                '（服务端第 ' + String(payload.received) + ' 次收讫）';
+            } else {
+              statusLine.textContent = '投递未成功：' + payload.error;
+            }
           })
           .catch((error) => {
             statusLine.textContent = '投递失败：服务端不可达（' + String(error) + '）';
@@ -1264,6 +1283,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         targetId: receipt.targetId,
         receiptId: receipt.id,
         attachmentId: receipt.attachmentId,
+        fileName: receipt.fileName,
+        sha256: receipt.sha256,
         received: deliverReceipts.length,
       }),
     );

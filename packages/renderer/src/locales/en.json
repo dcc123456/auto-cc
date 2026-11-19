@@ -662,7 +662,23 @@
       "actionRow": "{{action}} × {{count}}",
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
       "empty": "Ledger is empty: no action has passed the gate yet",
-      "none": "no target"
+      "none": "no target",
+      "stopOutbound": "Stop outbound",
+      "resumeOutbound": "Resume outbound",
+      "actionStop": "Stop outbound",
+      "actionResume": "Resume outbound",
+      "stoppedNotice": "Stopped: new greetings and deliveries stay at zero; history is preserved",
+      "resumedNotice": "Outbound switch resumed; nothing auto-resumes without fresh approval and reconciliation",
+      "outboundStopped": "Outbound is stopped: new greet / deliver actions and successful ledger rows stay at zero",
+      "outboundEnabled": "Outbound switch is on; every action still needs approval, quota, throttling and dedupe",
+      "outboundUnknown": "Outbound switch state is unavailable; treat outbound as blocked",
+      "attemptRow": "{{action}} → {{target}} · version {{version}} · {{status}} · ledger {{ledgerId}} · receipt {{receiptId}}",
+      "attemptStatus": {
+        "in-flight": "in flight (reconcile)",
+        "succeeded": "succeeded (no replay)",
+        "unknown": "unknown (do not resend)",
+        "failed": "confirmed absent"
+      }
     },
     "resume": {
       "skill": {

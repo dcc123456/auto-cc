@@ -44,15 +44,13 @@ import type {
   DeliverAttachmentView,
   DeliverReceiptView,
   DeliverRequestView,
+  OutboundReconcileView,
 } from '@auto-cc/shared';
 import { greetTargetLabel } from '@auto-cc/shared';
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-// 幂等那句拒因与打招呼共用同一句判据（下面那条注释说的就是同一件事），文案因此从 greet 那一侧取，
-// 不再抄一份——两处各自描述"哪个范围"迟早会漂成两个说法（AGENTS.md §2.2）。
-import { alreadySentScope } from './greet.js';
 // 择机投递的判定本体不在这个文件里（spec 5.7-03）：这里只负责把四项读数问出来，交给纯函数裁决。
 import { deliverTimingSchema, evaluateDeliverTiming, gapRemainingMs } from './deliver-timing.js';
 
@@ -177,6 +175,8 @@ export type StagedDelivery = {
   source: string;
   /** 这一版简历的快照 id（spec 3.7-02）；只给了文件路径、没有导出上下文时为 null */
   snapshotId: string | null;
+  /** 持久化去重的版本键：有快照时同时绑定快照 id 与实际文件 hash，防止引用同 id 的坏字节混过去。 */
+  resumeVersion: string;
 };
 
 /**
@@ -343,13 +343,14 @@ export class OutboundDeliverService extends Service {
   /**
    * 准备好一次投递：现问渠道 → 校验文件 → 算 hash → 查幂等（spec 2.6-06 要的中间态）。
    * @param raw 请求（见 `deliverRequestSchema`）；`filePath` 省略时取配置里的 `resumeFile`
+   * @param forReconciliation true 只准备只读对账，跳过“禁止重发”前置，仍不碰页面
    * @returns 已备好的投递（含附件三要素与 `source`），**尚未发出、尚未进闸门、尚未落账**
    *          ——同步返回：这一段没有一处异步（读文件与算 hash 都是同步 API），所以不假装是 Promise
    * @throws `INVALID_ARGUMENT`（入参不合法、没给路径、文件读不出、不是 pdf、超过大小上限）、
    *         `OUTBOUND_CHANNEL_MISSING`（该平台没有带 sendResume 的适配器）、
    *         `OUTBOUND_ALREADY_SENT`（同 run 同 target 已经递过一次）
    */
-  stage = (raw: unknown): StagedDelivery => {
+  stage = (raw: unknown, forReconciliation = false): StagedDelivery => {
     const parsed = deliverRequestSchema.safeParse(raw);
     if (!parsed.success) {
       throw new AppError(
@@ -378,18 +379,12 @@ export class OutboundDeliverService extends Service {
     }
     const attachment = this.readAttachment(filePath);
 
-    // 幂等判据与打招呼同一条：(action, target, run) 有没有落成过一行（spec 2.5-13 的口径搬到投递）。
-    if (this.ledger.countFor(DELIVER_ACTION, targetKey, runId) > 0) {
-      throw new AppError(
-        'OUTBOUND_ALREADY_SENT',
-        `目标 ${targetKey} ${alreadySentScope(runId)}已经递过简历，不再重复发送`,
-        'outbound.deliver',
-        {
-          // 键名跟着「这一发作用到的实体」走，不再固定叫 jobId（同裁定⑲ 在打招呼那一路的改法）。
-          targetId: targetKey,
-          workflowRunId: runId,
-        },
-      );
+    const resumeVersion = parsed.data.snapshotId
+      ? `${parsed.data.snapshotId}:${attachment.sha256}`
+      : `sha256:${attachment.sha256}`;
+    // 对账要读取旧尝试，只有真正的新外发才在这里拒绝成功重放与未知结局。
+    if (!forReconciliation) {
+      this.gate.assertOutboundFresh(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion });
     }
     return {
       platform,
@@ -403,6 +398,7 @@ export class OutboundDeliverService extends Service {
       // spec 2.6-05：hash 取前 12 位就够对上了——完整的 64 位串在账本里没人读，而 3.7 的 diff 按前缀能join。
       source: `resume:${attachment.sha256.slice(0, 12)}@${attachment.fileName}`,
       snapshotId: parsed.data.snapshotId ?? null,
+      resumeVersion,
     };
   };
 
@@ -475,7 +471,8 @@ export class OutboundDeliverService extends Service {
    *         `OUTBOUND_CHANNEL_MISSING`（stage 之后适配器被摘掉）
    */
   commit = async (staged: StagedDelivery, signal?: AbortSignal): Promise<DeliverReceiptView> => {
-    const { platform, jobId, conversationTarget, workflowRunId, nowMs, source, snapshotId, attachment } = staged;
+    const { platform, jobId, conversationTarget, workflowRunId, nowMs, source, snapshotId, attachment, resumeVersion } =
+      staged;
     // 额度目标与幂等键用同一个读数（`greetTargetLabel`，裁定⑲ 搬到投递）：两处各写一遍取舍，
     // 迟早会漂成"账上记的是岗位、拦重复用的是联系人"。
     const targetKey = greetTargetLabel(staged);
@@ -498,7 +495,7 @@ export class OutboundDeliverService extends Service {
 
     // 到量即在等待之前停（spec 2.6 的同条判据）。留痕由闸门的 `enforce` 负责：
     // 被拒要进 `usage_denials`（spec 5.3-12），编排层自己比对 `check` 就把那条性质漏掉了。
-    this.gate.enforce(DELIVER_ACTION, { targetId: targetKey, workflowRunId, nowMs });
+    this.gate.enforce(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion, workflowRunId, nowMs });
 
     // 频控的钟是账本里最近一条 deliver，与打招呼各数各的间隔（两套动作互不背锅）。
     // 减法抽在 `gapRemainingMs` 里（择机规则也算同一段，§2.2 不许留两份算术）；这里再掷一次间隔是
@@ -527,9 +524,9 @@ export class OutboundDeliverService extends Service {
       });
     }
 
-    const { value, ledgerId } = await this.gate.perform(
+    const { value, ledgerId } = await this.gate.performOutbound(
       DELIVER_ACTION,
-      { targetId: targetKey, workflowRunId, nowMs: nowMs + waitedMs, source },
+      { platform, targetId: targetKey, resumeVersion, workflowRunId, nowMs: nowMs + waitedMs, source },
       async () => {
         // 两种坐标原样递给适配器：谁在页面上定位会话由站点知识包决定，编排层不做映射（裁定⑲ 同一条）。
         // `GreetTarget` 用「省略」表达"这一发没有那个坐标"，本服务与库里用 null 表达，这里只做形状换算。
@@ -541,12 +538,19 @@ export class OutboundDeliverService extends Service {
         if (!outcome.sent) {
           throw new AppError('OUTBOUND_NOT_DELIVERED', outcome.reason, 'outbound.deliver', { targetId: targetKey });
         }
-        return outcome.reason;
+        return { value: outcome.reason, receiptId: outcome.receiptId ?? null };
       },
+      // 账本、去重成功位与投递经过同一事务：任一写入失败都不留半笔账。
+      (committedLedgerId) =>
+        this.deliveryRecords.record({
+          ledgerId: committedLedgerId,
+          platform,
+          jobId,
+          conversationTarget,
+          snapshotId,
+          ts: nowMs + waitedMs,
+        }),
     );
-    // 落账之后立刻记一条经过（spec 3.7-02）：与账本行同一个 `ts` 基准、以 `ledgerId` 为主键一一对齐，
-    // 于是「这份简历投给了哪个 JD、当时是哪一版」在库里问得出，而账本仍然只数额度。
-    this.deliveryRecords.record({ ledgerId, platform, jobId, conversationTarget, snapshotId, ts: nowMs + waitedMs });
     this.ctx.logger.info(
       `简历已投递并落账：目标 ${targetKey} · 文件 ${attachment.fileName}（${String(attachment.sizeBytes)} 字节）· 等待 ${String(waitedMs)}ms · 来源 ${source} · 账本行 ${String(ledgerId)} · 快照 ${snapshotId ?? '（请求未带快照引用）'}`,
     );
@@ -562,6 +566,7 @@ export class OutboundDeliverService extends Service {
       waitedMs,
       source,
       snapshotId,
+      resumeVersion,
       committed: true,
     };
   };
@@ -589,10 +594,49 @@ export class OutboundDeliverService extends Service {
         waitedMs: 0,
         source: staged.source,
         snapshotId: staged.snapshotId,
+        resumeVersion: staged.resumeVersion,
         committed: false,
       };
     }
     return this.commit(staged, signal);
+  };
+
+  /**
+   * 对上一次投递做只读对账；页面确认同版附件已递出就只补账，不重复注入或点击。
+   * @param raw 与原投递相同的请求，附件路径必须仍指向同一字节版本
+   * @returns 三态对账结果；明确未发生且未停用时才允许之后显式重试
+   * @throws 文件校验、风险确认或渠道缺失的结构化错误；绝不自动重发
+   */
+  reconcile = async (raw: unknown): Promise<OutboundReconcileView> => {
+    const staged = this.stage(raw, true);
+    const { platform, jobId, conversationTarget, workflowRunId, nowMs, source, snapshotId, attachment, resumeVersion } =
+      staged;
+    const targetKey = greetTargetLabel(staged);
+    consentGateOf(this.ctx).ensureConsent(platform);
+    const channel = deliverChannelsOf(this.ctx)?.deliverChannel(platform) ?? null;
+    if (!channel) {
+      throw new AppError(
+        'OUTBOUND_CHANNEL_MISSING',
+        `平台 ${platform} 现在没有可用的投递对账渠道`,
+        'outbound.deliver',
+        {
+          platform,
+        },
+      );
+    }
+    const inspection = channel.inspect
+      ? await channel.inspect(
+          { jobId: jobId ?? undefined, conversationTarget: conversationTarget ?? undefined },
+          attachment,
+        )
+      : { status: 'unknown' as const, reason: '平台没有只读对账能力，不能推断是否已投递' };
+    return this.gate.reconcile(
+      DELIVER_ACTION,
+      { platform, targetId: targetKey, resumeVersion, workflowRunId, nowMs, source },
+      inspection,
+      (ledgerId) =>
+        this.deliveryRecords.record({ ledgerId, platform, jobId, conversationTarget, snapshotId, ts: nowMs }),
+    );
   };
 
   /**

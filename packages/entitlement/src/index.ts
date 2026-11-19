@@ -15,6 +15,7 @@ export {
 export {
   DENIAL_MIGRATION_VERSION,
   LEDGER_MIGRATION_VERSION,
+  OUTBOUND_STATE_MIGRATION_VERSION,
   UsageLedgerService,
   ledgerSchema,
   type LedgerConfig,

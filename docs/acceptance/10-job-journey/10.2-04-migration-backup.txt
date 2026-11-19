@@ -1,0 +1,24 @@
+10.2-04 迁移前备份与隔离恢复证据（2026-11-19）
+
+范围：43 号 outbound_control / outbound_attempts 新迁移。源库是系统临时目录中的虚构数据，不读取、不修改任何用户库。
+
+实际命令：
+  pnpm --filter @auto-cc/plugin-entitlement typecheck > tmp/m2a-migration-typecheck.log 2>&1
+  TYPECHECK_EXIT=0
+  pnpm --filter @auto-cc/plugin-entitlement test > tmp/m2a-migration-test.log 2>&1
+  TEST_EXIT=0
+
+备份与恢复步骤（packages/entitlement/src/migration-backup.test.ts）：
+1. 建停在 42 的虚构旧库，含 schema_migrations、usage_ledger、usage_denials、delivery_records。
+2. 对打开的连接实际执行 node:sqlite backup(source, backupPath, { rate: 1 })。
+3. 将备份分别复制到 failed/store.db 与 success/store.db 两份隔离恢复库。
+4. 恢复前逐表计算行数、主键与全行 SHA-256，和源库一致。
+5. failed 副本故意让 43 抛出；失败后版本与所有表摘要仍与恢复前一致，源库哈希不变。
+6. success 副本挂真实 store + usage.ledger 升到 43；旧表逐表行数、主键、全行哈希保持一致。
+7. schema_migrations 由 [1,9,19,27,35,42] 变为 [1,9,19,27,35,42,43]，仅新增控制/尝试表。
+
+原始摘要：
+MIGRATION_BACKUP_OK {"backup":"node:sqlite backup(rate=1)","sourceSha256":"2e6f9b81670f","failedCopyUnchanged":true,"oldTablesPreserved":true,"versions":[1,9,19,27,35,42,43],"tables":{"delivery_records":{"rows":1,"primaryKey":["ledger_id"],"sha256":"c264b50916ac"},"outbound_attempts":{"rows":0,"primaryKey":["id"],"sha256":"4f53cda18c2b"},"outbound_control":{"rows":1,"primaryKey":["id"],"sha256":"baf627c8f9e4"},"schema_migrations":{"rows":7,"primaryKey":["version"],"sha256":"e99044e96a96"},"usage_denials":{"rows":0,"primaryKey":["id"],"sha256":"4f53cda18c2b"},"usage_ledger":{"rows":1,"primaryKey":["id"],"sha256":"34db00cbe584"}}}
+
+测试总览：3 files / 24 tests passed，TYPECHECK_EXIT=0 / TEST_EXIT=0。
+说明：哈希每次临时库数据相同则用于逐表比对；证据不含姓名、手机号、邮箱、真实简历、cookie 或本机用户路径。

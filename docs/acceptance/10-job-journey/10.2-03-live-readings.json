@@ -1,0 +1,286 @@
+{
+  "stoppedUi": {
+    "stopped": "true",
+    "attempts": [
+      {
+        "key": "boss:m2a-deliver-existing-1004:deliver:fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": "4",
+        "receiptId": "4"
+      },
+      {
+        "key": "boss:m2a-deliver-new-1003:deliver:fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": "3",
+        "receiptId": "2"
+      },
+      {
+        "key": "boss:m2a-existing-1002:greet:fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": "2",
+        "receiptId": "3"
+      },
+      {
+        "key": "boss:m2a-new-1001:greet:fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": "1",
+        "receiptId": "2"
+      }
+    ]
+  },
+  "stop": {
+    "greetDenied": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_DISABLED",
+        "message": "动作 greet 未执行：外发已一键停用；恢复后仍需重新审批与对账",
+        "path": "entitlement.gate",
+        "details": {
+          "action": "greet",
+          "stopped": true
+        }
+      }
+    },
+    "deliverDenied": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_DISABLED",
+        "message": "动作 deliver 未执行：外发已一键停用；恢复后仍需重新审批与对账",
+        "path": "entitlement.gate",
+        "details": {
+          "action": "deliver",
+          "stopped": true
+        }
+      }
+    },
+    "ledgerBefore": 4,
+    "ledgerAfter": 4,
+    "fixtureDeliveryCount": 2
+  },
+  "recovery": {
+    "first": {
+      "platform": "boss",
+      "jobId": "m2a-recover-1007",
+      "conversationTarget": null,
+      "reason": "页面消息列表回读到刚发出的正文",
+      "ledgerId": 5,
+      "waitedMs": 0,
+      "source": "manual:m2a-recover-1007",
+      "origin": "manual",
+      "resumeVersion": "fixture-resume-v1"
+    },
+    "threadBefore": 1,
+    "blindReplay": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_RECONCILIATION_REQUIRED",
+        "message": "上一次外发结局尚未对账，禁止盲目重发；先只读核对页面回执与账本",
+        "path": "entitlement.gate",
+        "details": {
+          "platform": "boss",
+          "targetId": "m2a-recover-1007",
+          "action": "greet",
+          "resumeVersion": "fixture-resume-v1",
+          "attemptStatus": "unknown",
+          "ledgerId": null
+        }
+      }
+    },
+    "stoppedReconcile": {
+      "status": "conflict",
+      "canResume": false,
+      "attempt": {
+        "platform": "boss",
+        "targetId": "m2a-recover-1007",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "workflowRunId": null,
+        "status": "unknown",
+        "ledgerId": null,
+        "receiptId": "4",
+        "reason": "M2A_FAULT_INJECTION",
+        "updatedAt": 1795072306843
+      }
+    },
+    "ledgerAfterStoppedReconcile": 4,
+    "recovered": {
+      "status": "recovered",
+      "canResume": false,
+      "attempt": {
+        "platform": "boss",
+        "targetId": "m2a-recover-1007",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "workflowRunId": null,
+        "status": "succeeded",
+        "ledgerId": 6,
+        "receiptId": "4",
+        "reason": null,
+        "updatedAt": 1795072306843
+      }
+    },
+    "finalReplay": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_ALREADY_SENT",
+        "message": "同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送",
+        "path": "entitlement.gate",
+        "details": {
+          "platform": "boss",
+          "targetId": "m2a-recover-1007",
+          "action": "greet",
+          "resumeVersion": "fixture-resume-v1",
+          "ledgerId": 6,
+          "receiptId": "4"
+        }
+      }
+    },
+    "threadAfter": 1
+  },
+  "finalUi": {
+    "stopped": "false",
+    "attempts": [
+      {
+        "key": "boss:m2a-recover-1007:greet:fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": "6",
+        "receiptId": "4"
+      },
+      {
+        "key": "boss:m2a-deliver-existing-1004:deliver:fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": "4",
+        "receiptId": "4"
+      },
+      {
+        "key": "boss:m2a-deliver-new-1003:deliver:fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": "3",
+        "receiptId": "2"
+      },
+      {
+        "key": "boss:m2a-existing-1002:greet:fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": "2",
+        "receiptId": "3"
+      },
+      {
+        "key": "boss:m2a-new-1001:greet:fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": "1",
+        "receiptId": "2"
+      }
+    ]
+  },
+  "database": {
+    "ledger": [
+      {
+        "id": 1,
+        "action": "greet",
+        "targetId": "m2a-new-1001",
+        "workflowRunId": null,
+        "ts": 1795070850691,
+        "source": "manual:m2a-new-1001"
+      },
+      {
+        "id": 2,
+        "action": "greet",
+        "targetId": "m2a-existing-1002",
+        "workflowRunId": null,
+        "ts": 1795071050691,
+        "source": "manual:m2a-existing-1002"
+      },
+      {
+        "id": 3,
+        "action": "deliver",
+        "targetId": "m2a-deliver-new-1003",
+        "workflowRunId": null,
+        "ts": 1795071250691,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf"
+      },
+      {
+        "id": 4,
+        "action": "deliver",
+        "targetId": "m2a-deliver-existing-1004",
+        "workflowRunId": null,
+        "ts": 1795071450691,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf"
+      },
+      {
+        "id": 6,
+        "action": "greet",
+        "targetId": "m2a-recover-1007",
+        "workflowRunId": null,
+        "ts": 1795072306843,
+        "source": "manual:m2a-recover-1007"
+      }
+    ],
+    "attempts": [
+      {
+        "platform": "boss",
+        "targetId": "m2a-new-1001",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": 1,
+        "receiptId": "2"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-existing-1002",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": 2,
+        "receiptId": "3"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-deliver-new-1003",
+        "action": "deliver",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": 3,
+        "receiptId": "2"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-deliver-existing-1004",
+        "action": "deliver",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": 4,
+        "receiptId": "4"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-recover-1007",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": 6,
+        "receiptId": "4"
+      }
+    ],
+    "deliveries": [
+      {
+        "ledgerId": 3,
+        "platform": "boss",
+        "jobId": "m2a-deliver-new-1003",
+        "snapshotId": "fixture-snapshot-v1",
+        "ts": 1795071250691
+      },
+      {
+        "ledgerId": 4,
+        "platform": "boss",
+        "jobId": "m2a-deliver-existing-1004",
+        "snapshotId": "fixture-snapshot-v1",
+        "ts": 1795071450691
+      }
+    ],
+    "control": {
+      "stopped": 0,
+      "updatedAt": 1795071118662
+    }
+  }
+}

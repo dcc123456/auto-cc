@@ -638,6 +638,15 @@ export type GreetOutcome = {
   sent: boolean;
   /** 结局说明：成功时说清是哪一段回读确认的，失败时说清卡在哪一段 */
   reason: string;
+  /** 页面自己的稳定回执 id；读不到就是 null，不用账本 id 冒充。 */
+  receiptId?: string | null;
+};
+
+/** 失败后只读对账的三态：确认发生、确认未发生、证据不足；未知绝不自动重发。 */
+export type OutboundInspection = {
+  status: 'confirmed' | 'absent' | 'unknown';
+  reason: string;
+  receiptId?: string | null;
 };
 
 /**
@@ -671,6 +680,8 @@ export type GreetChannel = {
    * @returns 页面回读出的结局；传输层异常由实现方抛结构化错误，不用 `sent:false` 表达
    */
   send(target: GreetTarget, text: string): Promise<GreetOutcome>;
+  /** 只读核对这一文本是否已在目标会话；不点新会话入口，避免对账本身触发站点默认问候。 */
+  inspect?(target: GreetTarget, text: string): Promise<OutboundInspection>;
 };
 
 /**
@@ -738,6 +749,8 @@ export type ResumeDeliveryChannel = {
    * @returns 页面回读出的结局；「目标已下架」这类结构性失败由实现方抛 `DELIVER_TARGET_OFFLINE`，不用 `sent:false` 表达
    */
   send(target: GreetTarget, attachment: ResumeAttachment): Promise<DeliverOutcome>;
+  /** 只读核对这一版附件是否已递出；不打开附件菜单、不注文件、不点确认。 */
+  inspect?(target: GreetTarget, attachment: ResumeAttachment): Promise<OutboundInspection>;
 };
 
 /**

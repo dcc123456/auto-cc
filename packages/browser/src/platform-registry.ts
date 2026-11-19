@@ -18,6 +18,8 @@ import {
   type Context,
   type GreetChannel,
   type GreetChannelSource,
+  type GreetTarget,
+  type ResumeAttachment,
   type ResumeChannelSource,
   type ResumeDeliveryChannel,
 } from '@auto-cc/core';
@@ -97,8 +99,17 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
       send: async (target, text) => {
         // `ledgerKey` 在这里被有意丢掉：计量凭证由 `entitlement.gate` 落账时生成，适配器不算数。
         const outcome = await adapter.chat(target, text);
-        return { sent: outcome.sent, reason: outcome.reason };
+        return {
+          sent: outcome.sent,
+          reason: outcome.reason,
+          ...(outcome.receiptId === undefined ? {} : { receiptId: outcome.receiptId }),
+        };
       },
+      ...(adapter.inspectChat
+        ? {
+            inspect: async (target: GreetTarget, text: string) => adapter.inspectChat!(target, text),
+          }
+        : {}),
     };
   };
 
@@ -127,8 +138,18 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
         // `ledgerKey` 同样被有意丢掉：计量凭证由 `entitlement.gate` 落账时生成，适配器不算数。
         // 两只坐标原样透传，编排层与这里都不做"会话对象算哪个岗位"的映射（裁定⑲ 的同一形状，plan §7 第 14 条）。
         const outcome = await adapter.sendResume(target, attachment);
-        return { sent: outcome.sent, reason: outcome.reason };
+        return {
+          sent: outcome.sent,
+          reason: outcome.reason,
+          ...(outcome.receiptId === undefined ? {} : { receiptId: outcome.receiptId }),
+        };
       },
+      ...(adapter.inspectDelivery
+        ? {
+            inspect: async (target: GreetTarget, attachment: ResumeAttachment) =>
+              adapter.inspectDelivery!(target, attachment),
+          }
+        : {}),
     };
   };
 

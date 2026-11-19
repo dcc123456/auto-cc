@@ -252,13 +252,18 @@ export const RENDERER_ALLOWLIST = [
   // 1.9 的外发额度闸门：判定、账本回看、以及唯一的外发样例入口。
   // 服务名带点（`域.能力`），所以界面侧拿到的是 `bridge.entitlement['gate.check']()`。
   'entitlement.gate.check',
+  'entitlement.gate.outboundStatus',
+  'entitlement.gate.setOutboundStopped',
   'usage.ledger.summary',
+  'usage.ledger.recentAttempts',
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
   'outbound.greet.perform',
+  'outbound.greet.reconcile',
   // 2.6-c 的投递编排：确认卡片要能把「现在有哪些单子等人表态」读出来，并把表态送回去。
   // 外发口只有 `perform` 一条，且它在主进程一侧必经闸门（AGENTS.md §7.3）。
   'outbound.deliver.perform',
+  'outbound.deliver.reconcile',
   'outbound.deliver.pending',
   'outbound.deliver.resolveApproval',
   // 1.10 的工作流 runner：五个动作口 + 一个只读快照。
@@ -676,6 +681,38 @@ export type OutboundSampleAction = (typeof OUTBOUND_SAMPLE_ACTIONS)[number];
  */
 export type GateDecisionView = { allowed: boolean; remaining: number | null; reason: string | null };
 
+/** 需要持久化去重与恢复的两类外发动作；抓取没有“页面已发、账本未知”这一形态。 */
+export type OutboundAction = 'greet' | 'deliver';
+
+/** 一次外发的稳定去重键：平台、目标、动作与实际简历版本缺一不可。 */
+export type OutboundAttemptKey = {
+  platform: string;
+  targetId: string;
+  action: OutboundAction;
+  /** 打招呼未绑定简历时统一为 `unversioned`；投递使用快照/文件字节哈希。 */
+  resumeVersion: string;
+};
+
+/** 持久化外发尝试：成功、未知与已在仿站确认未发生都可区分，不靠进程内记忆。 */
+export type OutboundAttemptView = OutboundAttemptKey & {
+  workflowRunId: string | null;
+  status: 'in-flight' | 'succeeded' | 'unknown' | 'failed';
+  ledgerId: number | null;
+  receiptId: string | null;
+  reason: string | null;
+  updatedAt: number;
+};
+
+/** 一键停用的持久化读数；历史账本与投递记录不因开关变化而删除。 */
+export type OutboundControlView = { stopped: boolean; updatedAt: number };
+
+/** 只读对账的结局；只有 `not-sent` 允许之后重新发起，未知与冲突都必须继续停手。 */
+export type OutboundReconcileView = {
+  status: 'recovered' | 'already-succeeded' | 'not-sent' | 'unknown' | 'conflict' | 'not-found';
+  canResume: boolean;
+  attempt: OutboundAttemptView | null;
+};
+
 /**
  * 额度的静态那一面（spec 5.8-03）：模式 + 按动作的日上限表。
  *
@@ -900,6 +937,8 @@ export type GreetRequestView = {
   provenance?: ScriptProvenanceView;
   /** 属于哪一次工作流运行；界面单次触发时为空 */
   workflowRunId?: string | null;
+  /** 去重第四维；纯打招呼省略时由主进程统一记为 `unversioned`。 */
+  resumeVersion?: string;
   /** 判定与落账的基准毫秒；省略取当前时间（单测靠它造「刚发过一次」，不必真等一个频控周期） */
   nowMs?: number;
 };
@@ -928,6 +967,8 @@ export type GreetReceiptView = {
   source: string;
   /** 内容来源：模型产出 / 模板回落 / 用户手改 */
   origin: 'model' | 'template' | 'manual';
+  /** 本次去重使用的简历版本；纯打招呼为 `unversioned`。 */
+  resumeVersion: string;
 };
 
 /**
@@ -1047,6 +1088,8 @@ export type DeliverReceiptView = {
    * null 是实话：请求本来就只带了文件路径，没有可还原的当时内容。
    */
   snapshotId: string | null;
+  /** 去重使用的实际版本键：快照 id + 文件 sha256，或纯文件 sha256。 */
+  resumeVersion: string;
   /** 这次有没有真的离开 app */
   committed: boolean;
 };
@@ -2588,8 +2631,13 @@ export interface BridgeSignatures {
    * 入参是 `QuotaAction` 而不是任意字符串：日上限按动作取值之后，任意字符串就等于从渲染层发明免限的动作名。
    */
   'entitlement.gate.check': { args: [action: QuotaAction]; returns: GateDecisionView };
+  /** 外发总开关只读与人工切换；刻意不登记为 agent 工具，恢复外发不能由模型自行决定。 */
+  'entitlement.gate.outboundStatus': { args: []; returns: OutboundControlView };
+  'entitlement.gate.setOutboundStopped': { args: [stopped: boolean]; returns: OutboundControlView };
   /** 账本回看：总数、按天、按动作，外加最近几行（spec 1.9-07 / 1.9-08）。 */
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
+  /** 脱敏外发尝试：四元组、状态、页面回执与账本 id，不含正文和附件路径。 */
+  'usage.ledger.recentAttempts': { args: [limit?: number]; returns: OutboundAttemptView[] };
   /**
    * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。
    *
@@ -2644,6 +2692,8 @@ export interface BridgeSignatures {
    * 全在主进程一侧完成，界面拿到的是回执或被拒的结构化错误，没有绕过闸门的第二条口。
    */
   'outbound.greet.perform': { args: [request: GreetRequestView]; returns: GreetReceiptView };
+  /** 人工只读对账：必须带原正文；页面确认已发只补账，不重放。 */
+  'outbound.greet.reconcile': { args: [request: GreetRequestView]; returns: OutboundReconcileView };
   /**
    * 生成一条话术候选（spec 4.6-01 / 02 / 06 / 07）：只产内容，不发送、不过闸门。
    *
@@ -2657,6 +2707,8 @@ export interface BridgeSignatures {
    * 所以界面的那一次调用是「按下发送键并等用户表态」，不是「立刻发出去」。
    */
   'outbound.deliver.perform': { args: [request: DeliverRequestView]; returns: DeliverReceiptView };
+  /** 人工只读对账：同一附件字节版本已递出才补账，不重复注入或点击。 */
+  'outbound.deliver.reconcile': { args: [request: DeliverRequestView]; returns: OutboundReconcileView };
   /**
    * 此刻有哪些投递单在等人表态（spec 2.6-01 的「待发送态」）：界面刷新/重进视图时靠它**重画**卡片，
    * 而不是只接住那一次 `outbound/approval-requested` 事件。

@@ -1,0 +1,33 @@
+{
+  "pack": "fixture",
+  "packFileIsTmp": true,
+  "registered": {
+    "id": "boss",
+    "displayName": "BOSS 直聘（本地仿站）",
+    "startUrl": "http://127.0.0.1:10234/boss",
+    "origins": [
+      "http://127.0.0.1:10234"
+    ],
+    "capabilities": [
+      "search",
+      "detail",
+      "chat",
+      "sendResume",
+      "readReplies"
+    ]
+  },
+  "openedVia": "sessions.open(fixture)",
+  "page": {
+    "title": "求职仿站 · 职位搜索（本地 fixture）",
+    "url": "http://127.0.0.1:10234/boss",
+    "readyState": "complete",
+    "elementCount": 21,
+    "textLength": 230,
+    "bodyText": "职位搜索\n\n本地仿站（fixture）：DOM 结构刻意模仿招聘列表页，数据全为虚构，与任何真实公司、真实职位无关。 自动化验收一律打这一页，不碰真实平台（AGENTS.md §7.2）。\n\n当前登录状态：未登录 · 会话 cookie：autocc_session\n\n在仿站登录 · 在仿站退出\n\n当前筛选：query=（不限） · city=（不限） · experience=（不限）\n\n状态：（加载中）\n\n滚动加载更多岗位…\n页脚广告位（本地仿站留白）",
+    "headings": [
+      "职位搜索"
+    ],
+    "partition": "persist:fixture"
+  },
+  "realPlatformRequests": 0
+}

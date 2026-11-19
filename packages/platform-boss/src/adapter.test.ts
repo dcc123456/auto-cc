@@ -347,7 +347,8 @@ describe('打招呼：sent 由页面回读说了算（spec 2.5-06）', () => {
     expect(act.clicked[0]!.spec).toEqual(pack.locators.chatSendButton);
     // 等待必须起在点击**之前**：基线取的是脚本启动那一刻的文本，点完再等永远读不到变化。
     expect(act.waitedFor[0]!.spec).toBe(pack.locators.chatStatus);
-    expect(act.waitsAtClick).toEqual([1]);
+    expect(act.waitedFor[1]!.spec).toBe(pack.locators.replyItem);
+    expect(act.waitsAtClick).toEqual([2]);
   });
 
   it('输入框回读与发出文本不一致时不发点击，直接判没发出', async () => {
@@ -568,6 +569,65 @@ describe('按会话坐标选中联系人（spec 8.4-02，P8 裁定⑲ 的会话�
   });
 });
 
+describe('新会话内联链与默认问候防线（9.2-05 / 10.2-01）', () => {
+  const inlinePack: KnowledgePack = {
+    ...realPack,
+    chat: {
+      ...realPack.chat!,
+      newConversation: { ...realPack.chat!.newConversation!, startSendsDefaultGreeting: false },
+    },
+    locators: Object.fromEntries(
+      Object.entries(realPack.locators).map(([name, spec]) => [
+        name,
+        { ...spec, candidates: spec.candidates.map((candidate) => ({ ...candidate, unverified: undefined })) },
+      ]),
+    ),
+  };
+
+  it('已有入口失配后走内联输入/发送，并以页面消息 id 作独立回执', async () => {
+    const text = '您好，这是新会话的自定义正文';
+    const page = createFakePage(
+      chatScript(inlinePack, null, [messageRow(0, { text, direction: 'outbound', externalId: 'message-inline-1' })]),
+    );
+    const act = createFakeAct();
+    const click = act.click.bind(act);
+    act.click = (spec, target) => {
+      if (spec === inlinePack.locators.chatStartButton) {
+        return Promise.reject(new AppError('WAIT_TIMEOUT', '已有会话入口不存在', 'browser.act'));
+      }
+      return click(spec, target);
+    };
+    const adapter = createBossAdapter(inlinePack, page, act);
+    await expect(adapter.chat({ jobId: 'job-new-1' }, text)).resolves.toMatchObject({
+      sent: true,
+      receiptId: 'message-inline-1',
+    });
+    expect(act.clicked.map((call) => call.spec)).toEqual([
+      inlinePack.locators.newChatStartButton,
+      inlinePack.locators.newChatSendButton,
+    ]);
+    expect(act.typed).toEqual([{ spec: inlinePack.locators.newChatInput, text }]);
+  });
+
+  it('真包声明会自动默认问候：不点新入口、不输入正文、不落成功回执', async () => {
+    const page = createFakePage(chatScript(realPack, null));
+    const act = createFakeAct();
+    const click = act.click.bind(act);
+    act.click = (spec, target) => {
+      if (spec === realPack.locators.chatStartButton) {
+        return Promise.reject(new AppError('WAIT_TIMEOUT', '已有会话入口不存在', 'browser.act'));
+      }
+      return click(spec, target);
+    };
+    const adapter = createBossAdapter(realPack, page, act);
+    await expect(adapter.chat({ jobId: 'job-new-2' }, '不应发出')).rejects.toMatchObject({
+      code: 'OUTBOUND_UNTRACKED_SITE_GREETING',
+    });
+    expect(act.typed).toEqual([]);
+    expect(act.clicked).toEqual([]);
+  });
+});
+
 describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07）', () => {
   /**
    * 一份「投递段来自仿站、会话列表那一双定位来自上线包」的组合知识包（8.5-D 的会话那一条用它）。
@@ -587,14 +647,26 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     },
   };
 
+  it('真包附件链未取证：导航、选行、注文件全部为零，不拿旧注入路径冒试（9.2-06）', async () => {
+    const { adapter, page, act } = withScript(deliverScript(realPack, ['等待投递']), {}, realPack);
+    await expect(adapter.sendResume({ conversationTarget: '乙公司' }, RESUME)).rejects.toMatchObject({
+      code: 'LOCATOR_UNVERIFIED',
+      details: { locator: 'deliver.attachmentMenu' },
+    });
+    expect(page.navigated).toEqual([]);
+    expect(act.clicked).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+  });
+
   it('成功那条：导航到投递页 → 注文件 → 点击前先起等待 → 状态行回读到成功样式', async () => {
     // 两次读状态行：第一次是「还在不在招」，第二次是「点完以后变成了什么」。
     const { adapter, page, act } = withScript(deliverScript(pack, ['等待投递', '简历已送达，等待回复']));
     const outcome = await adapter.sendResume({ jobId: '1001' }, RESUME);
     expect(outcome).toEqual({
       sent: true,
-      reason: '状态行回读到成功样式「简历已送达」：简历已送达，等待回复',
+      reason: `状态行回读到成功样式「简历已送达」：简历已送达，等待回复 · sha256 ${'a'.repeat(12)}`,
       ledgerKey: null,
+      receiptId: 'fixture-receipt-1',
     });
     expect(page.navigated).toEqual([deliverUrlOf('1001')]);
     // 外发定位是 `outboundLocator` 筛过候选的那一份拷贝（内容与声明一致，因为仿站包没有未取证候选）：
@@ -602,9 +674,12 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(act.uploaded).toEqual([{ spec: pack.locators.resumeUploadInput, filePath: RESUME.path }]);
     expect(act.uploaded[0]!.spec).toEqual(pack.locators.resumeUploadInput);
     expect(act.waitedFor).toEqual([{ kind: 'textChanges', spec: pack.locators.resumeDeliverStatus }]);
-    expect(act.clicked.map((call) => call.spec)).toEqual([pack.locators.resumeSendButton]);
-    // 时序判据（与打招呼同一条）：等待必须起在点击之前，否则基线就是点击后的文本，永远等不到变化。
-    expect(act.waitsAtClick).toEqual([act.waitsStarted]);
+    expect(act.clicked.map((call) => call.spec)).toEqual([
+      pack.locators.resumeAttachmentMenu,
+      pack.locators.resumeSendButton,
+    ]);
+    // 菜单点击早于注入；状态等待只服务最后的确认点击，必须起在它之前。
+    expect(act.waitsAtClick).toEqual([0, act.waitsStarted]);
   });
 
   it('文件控件回读到的文件名与附件不一致 → sent:false 且不再点确认（防「定位到 A、文件塞进 B」）', async () => {
@@ -614,7 +689,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
       sent: false,
       reason: '文件控件回读到的文件名与附件不一致：页面「other-candidate.pdf」/ 附件「resume-2026.pdf」',
     });
-    expect(act.clicked).toEqual([]);
+    expect(act.clicked.map((call) => call.spec)).toEqual([pack.locators.resumeAttachmentMenu]);
     expect(act.waitsStarted).toBe(0);
   });
 
@@ -663,10 +738,10 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(outcome.reason).toContain('下架文案未登记');
     // 仍然走完四段判据（注文件、起等待、点确认），只是没有下架这一道门。
     expect(act.uploaded).toHaveLength(1);
-    expect(act.clicked).toHaveLength(1);
+    expect(act.clicked).toHaveLength(2);
   });
 
-  it('缺确认投递的按钮与成功样式：注完文件就停手，零点击零等待，结局写明「没有点出去」（spec 8.5-01）', async () => {
+  it('缺确认投递的按钮与成功样式：注完文件就停手，不点确认也不起等待，结局写明「没有点出去」（spec 8.5-01）', async () => {
     // 真 BOSS 的这一段就是缺读数（证据 8.0-06 第五节：那次在场未选文件、未按入口键），而契约允许它缺。
     // 停手的形状必须是**动作序列里根本没有点击**：注入的页面回读（控件自己报上来的文件名）做到 ② 为止，
     // ③④ 两段等确认键有读数才做得成。
@@ -680,7 +755,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     expect(outcome.reason).toContain('没有点出去');
     expect(outcome.reason).toContain('控件自己回读到附件名「resume-2026.pdf」');
     expect(act.uploaded).toHaveLength(1);
-    expect(act.clicked).toEqual([]);
+    expect(act.clicked.map((call) => call.spec)).toEqual([pack.locators.resumeAttachmentMenu]);
     expect(act.waitsStarted).toBe(0);
   });
 
@@ -789,6 +864,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     // 点击顺序就是这一路的因果：先选中那一行，再点确认；中间只注一次文件。
     expect(act.clicked.map((call) => call.spec)).toEqual([
       rowAddressing.locators.chatConversationLabel,
+      rowAddressing.locators.resumeAttachmentMenu,
       rowAddressing.locators.resumeSendButton,
     ]);
     expect(act.clicked[0]!.target).toEqual({ candidateIndex: 0, hitIndex: 1, expectText: '乙公司' });
@@ -800,7 +876,7 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     ]);
     // 两次点击各自的"当时已起了几次等待"：选中那一行时是 1（等列表出现），点确认时是 2
     // （等状态行变化起在它之前）——与岗位那一路 `[waitsStarted]` 是同一条时序判据的两次落点。
-    expect(act.waitsAtClick).toEqual([1, 2]);
+    expect(act.waitsAtClick).toEqual([1, 1, 2]);
     // 页面只开到会话入口那一次：这一路没有岗位坐标，所以既没有 `targetId=`，更没有把联系人名字塞进参数里。
     expect(page.navigated).toHaveLength(1);
     expect(page.navigated[0]).not.toContain('targetId');
@@ -831,6 +907,42 @@ describe('投递：四段判据全由页面回读决定（spec 2.6-04 / 2.6-07�
     });
     const error = asErr(await adapter.sendResume({ jobId: '1001' }, RESUME).catch((reason: unknown) => reason));
     expect(error.code).toBe('LOCATE_FAILED');
+  });
+});
+
+describe('只读对账：原正文与同版附件（10.2-03）', () => {
+  it('原正文已在消息清单：confirmed + 页面消息 id，不输入也不点击', async () => {
+    const text = '原样核对这一段话';
+    const { adapter, act } = withScript(
+      chatScript(pack, null, [messageRow(0, { text, direction: 'outbound', externalId: 'message-reconcile-1' })]),
+    );
+    await expect(adapter.inspectChat!({ jobId: '1001' }, text)).resolves.toEqual({
+      status: 'confirmed',
+      reason: '完整消息清单含原正文',
+      receiptId: 'message-reconcile-1',
+    });
+    expect(act.typed).toEqual([]);
+    expect(act.clicked).toEqual([]);
+  });
+
+  it('同版附件回执：confirmed；打开菜单、注入与确认点击均为零', async () => {
+    const { adapter, act } = withScript(deliverScript(pack, ['简历已送达，等待回复']));
+    await expect(adapter.inspectDelivery!({ jobId: '1001' }, RESUME)).resolves.toEqual({
+      status: 'confirmed',
+      reason: '状态行含同版附件哈希与独立回执',
+      receiptId: 'fixture-receipt-1',
+    });
+    expect(act.clicked).toEqual([]);
+    expect(act.uploaded).toEqual([]);
+  });
+
+  it('真包没有版本化回执：unknown，不拿旧成功状态补账', async () => {
+    const { adapter, act } = withScript(deliverScript(realPack, ['简历已送达']), {}, realPack);
+    await expect(adapter.inspectDelivery!({ conversationTarget: '乙公司' }, RESUME)).resolves.toMatchObject({
+      status: 'unknown',
+    });
+    expect(act.clicked).toEqual([]);
+    expect(act.uploaded).toEqual([]);
   });
 });
 

@@ -21,6 +21,9 @@ import {
   type FunnelRange,
   type LedgerDenialView,
   type LedgerRowView,
+  type OutboundAttemptKey,
+  type OutboundAttemptView,
+  type OutboundControlView,
   type UsageSummaryView,
 } from '@auto-cc/shared';
 import { z } from 'zod';
@@ -37,6 +40,44 @@ export const LEDGER_MIGRATION_VERSION = 1;
  * 依据是 5.3-a 实测过的那条（§9）：已记「1 已应用」的老库永远不会重跑那支迁移。
  */
 export const DENIAL_MIGRATION_VERSION = 19;
+
+/**
+ * 外发停用与尝试台账的迁移号段：**43**（本工作树已核到 42；43 的常量与字面声明均零命中）。
+ * 独立新表而不是改旧迁移：老库只按台账判断是否应用，修改 1 号建表语句不会重跑。
+ */
+export const OUTBOUND_STATE_MIGRATION_VERSION = 43;
+
+/** 外发控制与尝试台账：去重不含工作流 id，跨入口、跨运行、跨重启都不得重放。 */
+const outboundStateMigration = {
+  version: OUTBOUND_STATE_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS outbound_control (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      stopped INTEGER NOT NULL CHECK (stopped IN (0, 1)),
+      updated_at INTEGER NOT NULL
+    )`);
+    db.exec('INSERT OR IGNORE INTO outbound_control (id, stopped, updated_at) VALUES (1, 0, 0)');
+    db.exec(`CREATE TABLE IF NOT EXISTS outbound_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('greet', 'deliver')),
+      resume_version TEXT NOT NULL,
+      workflow_run_id TEXT,
+      status TEXT NOT NULL CHECK (status IN ('in-flight', 'succeeded', 'unknown', 'failed')),
+      ledger_id INTEGER,
+      receipt_id TEXT,
+      reason TEXT,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (platform, target_id, action, resume_version)
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_outbound_attempts_status ON outbound_attempts (status, updated_at)');
+  },
+  down: (db: DatabaseSync) => {
+    db.exec('DROP TABLE IF EXISTS outbound_attempts');
+    db.exec('DROP TABLE IF EXISTS outbound_control');
+  },
+};
 
 /** 账本表不存在时按此建表；`up` 只写 DDL，数据迁移由后续版本负责。 */
 const ledgerMigration = {
@@ -118,6 +159,40 @@ type DenialRow = {
   reason: string;
 };
 
+/** `outbound_attempts` 的裸行；跨层出口统一收成 number 与 camelCase。 */
+type OutboundAttemptRow = {
+  platform: string;
+  target_id: string;
+  action: 'greet' | 'deliver';
+  resume_version: string;
+  workflow_run_id: string | null;
+  status: OutboundAttemptView['status'];
+  ledger_id: number | bigint | null;
+  receipt_id: string | null;
+  reason: string | null;
+  updated_at: number | bigint;
+};
+
+/**
+ * 把尝试台账裸行转成共享视图，避免 bigint 漏出 IPC。
+ * @param row SQLite 裸行
+ * @returns 字段类型稳定的跨进程视图
+ */
+function toAttemptView(row: OutboundAttemptRow): OutboundAttemptView {
+  return {
+    platform: row.platform,
+    targetId: row.target_id,
+    action: row.action,
+    resumeVersion: row.resume_version,
+    workflowRunId: row.workflow_run_id,
+    status: row.status,
+    ledgerId: row.ledger_id === null ? null : Number(row.ledger_id),
+    receiptId: row.receipt_id,
+    reason: row.reason,
+    updatedAt: Number(row.updated_at),
+  };
+}
+
 /**
  * 本地日的 `YYYY-MM-DD` 键与本地日界零点已从本文件**上移**到 `@auto-cc/shared` 的 `time.ts`
  * （spec 5.8-b 的复用收口 AGENTS.md §2.2）：指标看板必须按同一口径自己算区间（决策十七），
@@ -181,7 +256,7 @@ export class UsageLedgerService extends Service {
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    for (const migration of [ledgerMigration, denialMigration]) {
+    for (const migration of [ledgerMigration, denialMigration, outboundStateMigration]) {
       if (!migrations.some((item) => item.version === migration.version)) {
         migrations.push(migration);
       }
@@ -239,6 +314,171 @@ export class UsageLedgerService extends Service {
       .prepare('SELECT * FROM usage_denials ORDER BY ts DESC, id DESC LIMIT ?')
       .all(Math.max(0, limit)) as unknown as DenialRow[];
     return rows.map(toDenialView);
+  };
+
+  /**
+   * 读取一键停用状态；停用只影响后续外发，不改写任何历史账行。
+   * @returns 当前停用位与最后修改时刻；新库默认 `stopped:false / updatedAt:0`
+   */
+  outboundStatus = (): OutboundControlView => {
+    const row = this.store.db.prepare('SELECT stopped, updated_at FROM outbound_control WHERE id = 1').get() as
+      { stopped: number; updated_at: number | bigint } | undefined;
+    return { stopped: row?.stopped === 1, updatedAt: Number(row?.updated_at ?? 0) };
+  };
+
+  /**
+   * 持久化一键停用/恢复；重复设置同一状态不刷新表态时刻。
+   * @param stopped true 停用 greet/deliver，false 允许重新经完整闸门发起
+   * @param nowMs 表态时刻（毫秒），省略取当前时间
+   * @returns 设置后的控制读数
+   */
+  setOutboundStopped = (stopped: boolean, nowMs = Date.now()): OutboundControlView => {
+    this.store.db
+      .prepare('UPDATE outbound_control SET stopped = ?, updated_at = ? WHERE id = 1 AND stopped <> ?')
+      .run(stopped ? 1 : 0, nowMs, stopped ? 1 : 0);
+    this.ctx.logger.info(`外发总开关已${stopped ? '停用' : '恢复'}：历史账本与投递记录保持不变`);
+    return this.outboundStatus();
+  };
+
+  /**
+   * 按完整四元组读取一次外发尝试；不在这里猜平台或简历版本。
+   * @param key 平台 + 目标 + 动作 + 简历版本
+   * @returns 已持久化的尝试；从未发起时为 null
+   */
+  attemptFor = (key: OutboundAttemptKey): OutboundAttemptView | null => {
+    const row = this.store.db
+      .prepare(
+        `SELECT platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at
+         FROM outbound_attempts
+         WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ?`,
+      )
+      .get(key.platform, key.targetId, key.action, key.resumeVersion) as OutboundAttemptRow | undefined;
+    return row ? toAttemptView(row) : null;
+  };
+
+  /**
+   * 占据一次发送权。唯一索引是并发入口的最后防线：同四元组只允许一只闭包进入页面。
+   * @param key 完整去重键
+   * @param workflowRunId 来源运行（只作审计，不放宽去重范围）
+   * @param nowMs 写入时刻（毫秒）
+   * @returns `send` 可执行；`duplicate` 已成功；`reconcile` 必须先只读对账
+   */
+  beginAttempt = (
+    key: OutboundAttemptKey,
+    workflowRunId: string | null,
+    nowMs = Date.now(),
+  ): { kind: 'send' | 'duplicate' | 'reconcile'; attempt: OutboundAttemptView } => {
+    const existing = this.attemptFor(key);
+    if (existing?.status === 'succeeded') return { kind: 'duplicate', attempt: existing };
+    if (existing && existing.status !== 'failed') return { kind: 'reconcile', attempt: existing };
+    if (existing) {
+      this.store.db
+        .prepare(
+          `UPDATE outbound_attempts
+           SET status = 'in-flight', workflow_run_id = ?, ledger_id = NULL, receipt_id = NULL,
+               reason = NULL, updated_at = ?
+           WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ? AND status = 'failed'`,
+        )
+        .run(workflowRunId, nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+    } else {
+      this.store.db
+        .prepare(
+          `INSERT INTO outbound_attempts
+             (platform, target_id, action, resume_version, workflow_run_id, status, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'in-flight', ?)`,
+        )
+        .run(key.platform, key.targetId, key.action, key.resumeVersion, workflowRunId, nowMs);
+    }
+    const attempt = this.attemptFor(key);
+    if (!attempt) throw new Error('外发尝试写入后读不到，停止发送');
+    return { kind: 'send', attempt };
+  };
+
+  /**
+   * 页面动作或落账半途失败：保守记成未知，下一次只能先对账，不能自动重发。
+   * @param key 完整去重键
+   * @param reason 结构化错误码或不敏感摘要；禁止写正文、cookie 与本机路径
+   * @param nowMs 失败时刻（毫秒）
+   * @returns 更新后的尝试；原记录不存在时为 null
+   */
+  markAttemptUnknown = (key: OutboundAttemptKey, reason: string, nowMs = Date.now()): OutboundAttemptView | null => {
+    this.store.db
+      .prepare(
+        `UPDATE outbound_attempts SET status = 'unknown', reason = ?, updated_at = ?
+         WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ? AND status = 'in-flight'`,
+      )
+      .run(reason.slice(0, 120), nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+    return this.attemptFor(key);
+  };
+
+  /**
+   * 只读对账明确证明页面没有这次外发后，允许显式重试；这不是自动失败重放。
+   * @param key 完整去重键
+   * @param nowMs 对账时刻（毫秒）
+   * @returns 更新后的尝试；原记录不存在时为 null
+   */
+  markAttemptFailed = (key: OutboundAttemptKey, nowMs = Date.now()): OutboundAttemptView | null => {
+    this.store.db
+      .prepare(
+        `UPDATE outbound_attempts SET status = 'failed', reason = 'PAGE_CONFIRMED_ABSENT', updated_at = ?
+         WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ? AND status <> 'succeeded'`,
+      )
+      .run(nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+    return this.attemptFor(key);
+  };
+
+  /**
+   * 账本、去重成功位与领域经过在同一 SQLite 事务里落库，任一步失败都整体回滚。
+   * @param key 完整去重键
+   * @param context 账本来源、运行与时刻
+   * @param receiptId 页面独立回执 id；没有则保留 null，不伪造
+   * @param writeDelivery 投递经过写入器；与账本共用同一 store 连接，打招呼省略
+   * @param nowMs 成功时刻（毫秒）
+   * @returns 新账本行 id 与成功尝试
+   */
+  completeAttempt = (
+    key: OutboundAttemptKey,
+    context: ActionContext,
+    receiptId: string | null,
+    writeDelivery?: (ledgerId: number) => void,
+    nowMs = Date.now(),
+  ): { ledgerId: number; attempt: OutboundAttemptView } => {
+    this.store.db.exec('BEGIN');
+    try {
+      const ledgerId = this.record({ ...context, action: key.action, targetId: key.targetId });
+      writeDelivery?.(ledgerId);
+      this.store.db
+        .prepare(
+          `UPDATE outbound_attempts
+           SET status = 'succeeded', ledger_id = ?, receipt_id = ?, reason = NULL, updated_at = ?
+           WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ? AND status IN ('in-flight', 'unknown')`,
+        )
+        .run(ledgerId, receiptId, nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+      const attempt = this.attemptFor(key);
+      if (!attempt || attempt.status !== 'succeeded' || attempt.ledgerId !== ledgerId) {
+        throw new Error('外发成功位没有与账本行一对一落定');
+      }
+      this.store.db.exec('COMMIT');
+      return { ledgerId, attempt };
+    } catch (error) {
+      this.store.db.exec('ROLLBACK');
+      throw error;
+    }
+  };
+
+  /**
+   * 最近外发尝试（脱敏对账用）：只含键、状态与引用 id，不含消息正文或附件路径。
+   * @param limit 最多返回几条；0 表示不取
+   * @returns 按最后更新倒序的尝试清单
+   */
+  recentAttempts = (limit = 20): OutboundAttemptView[] => {
+    const rows = this.store.db
+      .prepare(
+        `SELECT platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at
+         FROM outbound_attempts ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      )
+      .all(Math.max(0, limit)) as OutboundAttemptRow[];
+    return rows.map(toAttemptView);
   };
 
   /**

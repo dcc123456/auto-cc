@@ -98,6 +98,15 @@ export async function evaluateInFrames(
 }
 
 /**
+ * 识别 Electron 在另一笔导航仍进行时抛出的 `ERR_ABORTED (-3) loading`；其他导航错误不得自动重试。
+ * @param error `webContents.loadURL` 的原始拒绝值
+ * @returns 仅精确命中 `(-3) loading` 为 true
+ */
+export function isNavigationLoadingRace(error: unknown): boolean {
+  return (error instanceof Error ? error.message : String(error)).includes('(-3) loading');
+}
+
+/**
  * 等一次导航装载落定。
  *
  * 监听器必须在三条出口（成功 / 失败 / 超时）里都摘掉：`once` 只保证触发过一次，

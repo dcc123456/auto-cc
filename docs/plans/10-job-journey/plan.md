@@ -158,3 +158,39 @@ interface JourneyContext {
 - 若原型影响既有对话布局或验收锚点，先撤入口保留 plan/spec，不修改旧 `data-action` 来迁就新画面。
 - 共享工作树只按 pathspec 提交本片文件；提交后逐行核对 `git show --stat --name-only HEAD`，不得吞入其他部门改动。
 - 当前最大风险是把「样例可走通」误读为「真实闭环已通」。因此 M1 的完成口径只覆盖体验契约，M2～M4 未验项必须持续可见。
+
+## 10. M2-A 实施记录（兵部，2026-11-19）
+
+### 10.1 P9 根因 → 修复映射
+
+| 阻断                | 根因                                                                                                                 | 本片修复与仍然保留的边界                                                                                                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 9.2-05 新会话打招呼 | 旧实现只有「继续沟通」与整页输入框，未覆盖内联面板；直接点「立即沟通」又可能由站点先发一条默认问候，应用无法逐笔对账 | 知识包新增可选 `chat.newConversation`，适配器支持已有入口失配后的内联输入/发送；真 BOSS 标记 `startSendsDefaultGreeting:true`，在点击前以 `OUTBOUND_UNTRACKED_SITE_GREETING` 停手。仿站形状回归通过，真实路径仍需用户在场手验 |
+| 9.2-06 附件投递     | 知识包只有文件 input，没有附件菜单、确认键和版本化成功回执；仅注入文件也可能触发上传，不能视为安全                   | 仿站补齐「附件菜单 → 文件控件 → 确认发送 → receipt id + 本版 sha256」；适配器与只读对账均核版本。真包 `attachmentMenuRequired:true` 且无菜单定位，任何页面动作前以 `LOCATOR_UNVERIFIED` 停手，不猜选择器                      |
+| 9.2-08 导航竞态     | 会话首页仍在装载时立即 `loadURL`，`(-3) loading` 直接上浮                                                            | `browser.page.navigate` 精确识别该错误，先等原导航落定再重试一次；非竞态错误不重试。BOSS 包不另写固定等待                                                                                                                     |
+| 10.2-02 去重与账实  | 旧键只有 action/target/run，未含平台与简历版本；账本和投递经过分两次写                                               | 新增 43 号 `outbound_attempts`，四元组跨入口/运行/重启唯一；`gate.performOutbound` 复用原闸门，账本、成功位与 `delivery_records` 同事务                                                                                       |
+| 10.2-03 停用与恢复  | 无持久化总开关；页面失败后会盲发，停用与回执还存在竞态                                                               | 新增 `outbound_control` 与三态只读对账；未知禁止重发，确认成功只补账不重发，明确未发生才允许显式重试。页面闭包前后各查一次停用位，停用期间对账不得补成功账                                                                    |
+
+### 10.2 改造文件与复用边界
+
+- `packages/entitlement/src/{gate,ledger,types}.ts`：持久化控制/尝试、去重、原子落账与三态对账；43 号迁移单独新增，不改旧迁移。
+- `packages/outbound/src/{greet,deliver}.ts`：仍由原 `entitlement.gate` 放行；投递经过改为同一事务的回调，不新增第二条外发通道。
+- `packages/browser/src/{index,frame-channel,platform-contract,platform-registry}.ts`：导航竞态、可选知识形状与只读渠道投影；不新增浏览器宿主。
+- `packages/platform-boss/src/adapter.ts` + 两份知识包：内联新会话、附件菜单、版本化回执与只读核对；真实未取证控件继续 fail-closed。
+- `packages/shared/src/bridge.ts`、`packages/renderer/src/UsagePanel.tsx`：人工停用/恢复与脱敏尝试读数；对账接口只进 IPC 白名单，不登记为 agent 工具。
+- `scripts/fixture-server.ts`：只绑回环，新增附件链和独立回执，不加入真实平台代码或数据。
+
+### 10.3 验证与证据
+
+- U：`packages/entitlement/src/recovery.test.ts` 覆盖四元组跨 run 重放、停用前后闭包/账行、停用竞态、未知结局与恢复；`migration-backup.test.ts` 实际调用 `node:sqlite backup` 并验证两份隔离副本。
+- U：`packages/outbound` 覆盖真实账本与 `delivery_records` 的原子失败/补账；`packages/platform-boss` 覆盖内联链、附件链、真站 fail-closed 与只读回执；`packages/browser` 覆盖 `(-3) loading` 一次重试及非竞态不重试。
+- V：已获皇上批准，在独立 userData + 独立 HOME + 临时 fixture 知识包（指向 10234 仿站）实例完成，未改共享 `cordis.yml`、未访问真实站点。证据：`10.2-01-navigation-live.txt`、`10.2-02-live-readings.json`、`10.2-03-live-readings.json` 及 5 张互异截图。真实 BOSS 手验未做，相关条目继续 `[!]`。
+- 迁移证据：源库全部为虚构临时数据；比较逐表行数、主键与全行 SHA-256。故意失败的副本恢复前后摘要一致，成功副本的旧表逐项一致，源库哈希始终不变。
+- 真实 BOSS 新会话、真实附件投递继续 `[!]`；仿站结果只证明代码路径与本地页面/账本/回执一致，不替代用户在场手验。
+
+### 10.4 回滚与风险
+
+- 代码回滚可按本片 pathspec 反向外移；43 号 `down` 只删除新增控制/尝试表，不删 `usage_ledger` 或 `delivery_records` 的历史事实。执行回滚前仍须备份，不能在用户原库上边试边改。
+- `resumeVersion` 对纯打招呼统一为 `unversioned`；投递使用 `snapshotId:sha256` 或 `sha256:<整串>`。同目标换版本可另发，同版本跨 run 不得重放。
+- 对账不重新生成话术：打招呼必须提供原正文，投递必须仍读得到同字节附件；平台没有只读能力时只能回 `unknown`。
+- 工作区保留 resume-kb、e2e 等他部改动；提交只取本条列出的实现、测试、P10 文档与证据路径，提交后逐行复核文件清单与远端 ref。

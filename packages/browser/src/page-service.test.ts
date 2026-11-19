@@ -23,6 +23,8 @@ import {
   FakeShellService,
   fakeFrame,
   fakeView,
+  fireViewEvent,
+  viewListenerChannels,
 } from './test-doubles.js';
 
 /**
@@ -191,6 +193,68 @@ describe('导航许可的名单来源（spec 8.1-05）', () => {
       details: { platform: 'boss' },
     });
     expect(sessions.consented.size).toBe(0);
+  });
+});
+
+describe('导航在途竞态（9.2-08 / 10.2-01）', () => {
+  /** 造一块能脚本化 loadURL 与快照的本地视图；不发任何网络请求。 */
+  const viewWithLoad = (loadURL: (url: string) => Promise<void>): WebContents => {
+    const contents = fakeView(fakeFrame('http://127.0.0.1:10233/boss', { value: {} }));
+    contents.loadURL = loadURL;
+    contents.executeJavaScript = () =>
+      Promise.resolve({
+        title: '仿站搜索页',
+        url: 'http://127.0.0.1:10233/boss?query=frontend',
+        readyState: 'complete',
+        elementCount: 3,
+        textLength: 0,
+        bodyText: '',
+        headings: [],
+      });
+    return contents;
+  };
+
+  it('第一次遇 (-3) loading：先等原导航落定，再重试一次并回完整快照', async () => {
+    const calls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      calls.push(url);
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return calls.length === 1
+        ? Promise.reject(new Error("UNKNOWN / (-3) loading 'http://127.0.0.1:10233/boss'"))
+        : Promise.resolve();
+    });
+    const { page, registry } = await boot(contents);
+    registry.platforms.push({
+      id: 'fixture',
+      displayName: '本地仿站',
+      startUrl: 'http://127.0.0.1:10233/boss',
+      origins: ['http://127.0.0.1:10233'],
+      capabilities: ['search'],
+    });
+    await expect(page.navigate('http://127.0.0.1:10233/boss?query=frontend')).resolves.toMatchObject({
+      readyState: 'complete',
+      url: 'http://127.0.0.1:10233/boss?query=frontend',
+    });
+    expect(calls).toHaveLength(2);
+    expect(viewListenerChannels(contents)).toEqual([]);
+  });
+
+  it('非 loading 竞态的导航错误原样上浮，不盲目重试', async () => {
+    const calls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      calls.push(url);
+      return Promise.reject(new Error('ERR_CONNECTION_REFUSED'));
+    });
+    const { page, registry } = await boot(contents);
+    registry.platforms.push({
+      id: 'fixture',
+      displayName: '本地仿站',
+      startUrl: 'http://127.0.0.1:10233/boss',
+      origins: ['http://127.0.0.1:10233'],
+      capabilities: ['search'],
+    });
+    await expect(page.navigate('http://127.0.0.1:10233/boss?query=frontend')).rejects.toThrow('ERR_CONNECTION_REFUSED');
+    expect(calls).toHaveLength(1);
   });
 });
 

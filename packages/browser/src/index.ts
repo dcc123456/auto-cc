@@ -21,6 +21,7 @@ import type { NativeImage, WebContents } from 'electron';
 import { z } from 'zod';
 import {
   evaluateInFrames,
+  isNavigationLoadingRace,
   requireKernelContents,
   settleLoad,
   usableEvaluations,
@@ -121,9 +122,20 @@ export class BrowserPageService extends Service {
       .filter((platform) => this.sessions.hasConsent(platform.id))
       .map((platform) => platform.id);
     const target = resolveNavigableUrl(url, platforms, consented);
-    const settled = settleLoad(contents, this.config.navigateTimeoutMs);
-    await contents.loadURL(target.href);
-    const outcome = await settled;
+    let settled = settleLoad(contents, this.config.navigateTimeoutMs);
+    let outcome: 'loaded' | 'failed' | 'timeout';
+    try {
+      await contents.loadURL(target.href);
+      outcome = await settled;
+    } catch (error) {
+      if (!isNavigationLoadingRace(error)) throw error;
+      // 上一笔导航仍占着视图：先等它落定，再只重试一次目标导航。重试期间收到新的事件属于本次等待。
+      const previousOutcome = await settled;
+      this.ctx.logger.info(`检测到导航在途竞态，上一笔装载结局 ${previousOutcome}，目标地址只重试一次`);
+      settled = settleLoad(contents, this.config.navigateTimeoutMs);
+      await contents.loadURL(target.href);
+      outcome = await settled;
+    }
     this.ctx.logger.info(`内核视图已导航：${target.href}（装载 ${outcome}）`);
     return this.readSnapshot(contents);
   };

@@ -156,6 +156,14 @@
         { "strategy": "css", "value": "[data-message-body]" }
       ]
     },
+    "resumeAttachmentMenu": {
+      "description": "仿站附件菜单按钮：先由应用点开，再允许隐藏文件控件接受注入；用于覆盖 10.2 的完整附件链。",
+      "cardinality": "single",
+      "candidates": [
+        { "strategy": "testId", "attribute": "data-testid", "value": "resume-attachment-menu" },
+        { "strategy": "role", "role": "button", "name": "打开附件菜单", "exact": true }
+      ]
+    },
     "resumeUploadInput": {
       "description": "简历上传控件：本地仿站 /deliver?targetId= 的隐藏 input[type=file]（display:none，人的入口做在 label 上）；站点普遍把它藏在「选择文件」按钮背后，因此 requireActionable 关掉——隐藏的控件读不到盒模型，按默认可点判据会在定位阶段就被打掉（2.6-c 已在该页实测「注入 → change 回读文件名与字节数」）",
       "cardinality": "single",
@@ -228,8 +236,11 @@
     "entryPath": "/deliver",
     "targetParam": "targetId",
     "uploadInput": "resumeUploadInput",
+    "attachmentMenu": "resumeAttachmentMenu",
     "sendButton": "resumeSendButton",
     "statusLine": "resumeDeliverStatus",
+    "receiptIdAttribute": "data-receipt-id",
+    "receiptIncludesResumeHash": true,
     "sentPattern": "简历已送达",
     "offlinePattern": "岗位已下架"
   },

@@ -1,0 +1,277 @@
+{
+  "newGreet": {
+    "receipt": {
+      "platform": "boss",
+      "jobId": "m2a-new-1001",
+      "conversationTarget": null,
+      "reason": "页面消息列表回读到刚发出的正文",
+      "ledgerId": 1,
+      "waitedMs": 0,
+      "source": "manual:m2a-new-1001",
+      "origin": "manual",
+      "resumeVersion": "fixture-resume-v1"
+    },
+    "threadTotal": 1,
+    "pageMessageIds": [
+      2
+    ]
+  },
+  "existingGreet": {
+    "receipt": {
+      "platform": "boss",
+      "jobId": "m2a-existing-1002",
+      "conversationTarget": null,
+      "reason": "页面消息列表回读到刚发出的正文",
+      "ledgerId": 2,
+      "waitedMs": 0,
+      "source": "manual:m2a-existing-1002",
+      "origin": "manual",
+      "resumeVersion": "fixture-resume-v1"
+    },
+    "threadTotal": 2,
+    "pageMessageIds": [
+      1,
+      3
+    ]
+  },
+  "greetReplay": {
+    "error": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_ALREADY_SENT",
+        "message": "同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送",
+        "path": "entitlement.gate",
+        "details": {
+          "platform": "boss",
+          "targetId": "m2a-new-1001",
+          "action": "greet",
+          "resumeVersion": "fixture-resume-v1",
+          "ledgerId": 1,
+          "receiptId": "2"
+        }
+      }
+    },
+    "ledgerBefore": 2,
+    "ledgerAfter": 2
+  },
+  "deliveries": {
+    "receipts": [
+      {
+        "platform": "boss",
+        "jobId": "m2a-deliver-new-1003",
+        "conversationTarget": null,
+        "title": "Synthetic new delivery",
+        "company": "Fixture Co",
+        "attachment": {
+          "fileName": "fixture-resume-v1.pdf",
+          "sizeBytes": 117,
+          "sha256": "c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735"
+        },
+        "reason": "状态行回读到成功样式「简历已送达」：简历已送达：目标 m2a-deliver-new-1003 · 回执 #2 · 附件 fixture-resume-v1.pdf · sha256 c3e0ee8ab659（服务端第 1 次收讫）",
+        "ledgerId": 3,
+        "waitedMs": 0,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf",
+        "snapshotId": "fixture-snapshot-v1",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "committed": true
+      },
+      {
+        "platform": "boss",
+        "jobId": "m2a-deliver-existing-1004",
+        "conversationTarget": null,
+        "title": "Synthetic existing delivery",
+        "company": "Fixture Co",
+        "attachment": {
+          "fileName": "fixture-resume-v1.pdf",
+          "sizeBytes": 117,
+          "sha256": "c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735"
+        },
+        "reason": "状态行回读到成功样式「简历已送达」：简历已送达：目标 m2a-deliver-existing-1004 · 回执 #4 · 附件 fixture-resume-v1.pdf · sha256 c3e0ee8ab659（服务端第 2 次收讫）",
+        "ledgerId": 4,
+        "waitedMs": 0,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf",
+        "snapshotId": "fixture-snapshot-v1",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "committed": true
+      }
+    ],
+    "fixtureCount": 2,
+    "replayError": {
+      "ok": false,
+      "error": {
+        "code": "OUTBOUND_ALREADY_SENT",
+        "message": "同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送",
+        "path": "entitlement.gate",
+        "details": {
+          "platform": "boss",
+          "targetId": "m2a-deliver-new-1003",
+          "action": "deliver",
+          "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+          "ledgerId": 3,
+          "receiptId": "2"
+        }
+      }
+    }
+  },
+  "unconfirmed": {
+    "error": {
+      "ok": false,
+      "error": {
+        "code": "CONSENT_REQUIRED",
+        "message": "平台 boss 还没有一份自动化风险确认记录，先确认承担该风险",
+        "path": "sessions",
+        "details": {
+          "platform": "boss",
+          "scope": "automation:boss"
+        }
+      }
+    },
+    "ledgerBefore": 4,
+    "ledgerAfter": 4,
+    "fixtureCount": 2
+  },
+  "attempts": [
+    {
+      "platform": "boss",
+      "targetId": "m2a-deliver-existing-1004",
+      "action": "deliver",
+      "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+      "workflowRunId": null,
+      "status": "succeeded",
+      "ledgerId": 4,
+      "receiptId": "4",
+      "reason": null,
+      "updatedAt": 1795071450691
+    },
+    {
+      "platform": "boss",
+      "targetId": "m2a-deliver-new-1003",
+      "action": "deliver",
+      "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+      "workflowRunId": null,
+      "status": "succeeded",
+      "ledgerId": 3,
+      "receiptId": "2",
+      "reason": null,
+      "updatedAt": 1795071250691
+    },
+    {
+      "platform": "boss",
+      "targetId": "m2a-existing-1002",
+      "action": "greet",
+      "resumeVersion": "fixture-resume-v1",
+      "workflowRunId": null,
+      "status": "succeeded",
+      "ledgerId": 2,
+      "receiptId": "3",
+      "reason": null,
+      "updatedAt": 1795071050691
+    },
+    {
+      "platform": "boss",
+      "targetId": "m2a-new-1001",
+      "action": "greet",
+      "resumeVersion": "fixture-resume-v1",
+      "workflowRunId": null,
+      "status": "succeeded",
+      "ledgerId": 1,
+      "receiptId": "2",
+      "reason": null,
+      "updatedAt": 1795070850691
+    }
+  ],
+  "database": {
+    "ledger": [
+      {
+        "id": 1,
+        "action": "greet",
+        "targetId": "m2a-new-1001",
+        "workflowRunId": null,
+        "ts": 1795070850691,
+        "source": "manual:m2a-new-1001"
+      },
+      {
+        "id": 2,
+        "action": "greet",
+        "targetId": "m2a-existing-1002",
+        "workflowRunId": null,
+        "ts": 1795071050691,
+        "source": "manual:m2a-existing-1002"
+      },
+      {
+        "id": 3,
+        "action": "deliver",
+        "targetId": "m2a-deliver-new-1003",
+        "workflowRunId": null,
+        "ts": 1795071250691,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf"
+      },
+      {
+        "id": 4,
+        "action": "deliver",
+        "targetId": "m2a-deliver-existing-1004",
+        "workflowRunId": null,
+        "ts": 1795071450691,
+        "source": "resume:c3e0ee8ab659@fixture-resume-v1.pdf"
+      }
+    ],
+    "attempts": [
+      {
+        "platform": "boss",
+        "targetId": "m2a-new-1001",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": 1,
+        "receiptId": "2"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-existing-1002",
+        "action": "greet",
+        "resumeVersion": "fixture-resume-v1",
+        "status": "succeeded",
+        "ledgerId": 2,
+        "receiptId": "3"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-deliver-new-1003",
+        "action": "deliver",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": 3,
+        "receiptId": "2"
+      },
+      {
+        "platform": "boss",
+        "targetId": "m2a-deliver-existing-1004",
+        "action": "deliver",
+        "resumeVersion": "fixture-snapshot-v1:c3e0ee8ab6597108c2772824d8b90ee2188c111b200404f63439cb63da8a3735",
+        "status": "succeeded",
+        "ledgerId": 4,
+        "receiptId": "4"
+      }
+    ],
+    "deliveries": [
+      {
+        "ledgerId": 3,
+        "platform": "boss",
+        "jobId": "m2a-deliver-new-1003",
+        "snapshotId": "fixture-snapshot-v1",
+        "ts": 1795071250691
+      },
+      {
+        "ledgerId": 4,
+        "platform": "boss",
+        "jobId": "m2a-deliver-existing-1004",
+        "snapshotId": "fixture-snapshot-v1",
+        "ts": 1795071450691
+      }
+    ],
+    "control": {
+      "stopped": 0,
+      "updatedAt": 0
+    }
+  }
+}

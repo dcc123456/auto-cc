@@ -662,7 +662,23 @@
       "actionRow": "{{action}} × {{count}}",
       "rowMeta": "#{{id}} {{action}} → {{target}} · {{time}}",
       "empty": "账本为空：还没有任何动作通过闸门",
-      "none": "无对象"
+      "none": "无对象",
+      "stopOutbound": "一键停用外发",
+      "resumeOutbound": "恢复外发",
+      "actionStop": "停用外发",
+      "actionResume": "恢复外发",
+      "stoppedNotice": "已停用：后续打招呼与投递均为 0，历史记录保留",
+      "resumedNotice": "已恢复外发开关；不会自动续跑，仍需重新审批与对账",
+      "outboundStopped": "外发已停用：新增 greet / deliver 与成功账行均为 0",
+      "outboundEnabled": "外发开关已启用；每次动作仍须确认、额度、频控与去重",
+      "outboundUnknown": "外发开关状态读不到，按不可外发处理",
+      "attemptRow": "{{action}} → {{target}} · 版本 {{version}} · {{status}} · 账本 {{ledgerId}} · 回执 {{receiptId}}",
+      "attemptStatus": {
+        "in-flight": "进行中（须对账）",
+        "succeeded": "已成功（禁止重放）",
+        "unknown": "结局未知（禁止重发）",
+        "failed": "已对账未发生"
+      }
     },
     "resume": {
       "skill": {

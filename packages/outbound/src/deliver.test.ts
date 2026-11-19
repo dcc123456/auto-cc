@@ -604,18 +604,17 @@ describe('投递的账本、额度与频控（spec 2.6-02 / 03 / 05）', () => {
     expect(ledger.count()).toBe(0);
   });
 
-  it('同 run 同目标重递：第二次在 stage 就被拒，渠道与额度都不消耗（判据在账本里，不在内存集合里）', async () => {
+  it('同四元组重递：跨 run 也在 stage 拒，换目标或简历版本才是新动作（10.2-02）', async () => {
     const hand = fakeChannel();
     const { dir, deliver, ledger } = await boot({ channel: hand.channel, autonomy: 'auto' });
     const filePath = writeResume(dir);
     await deliver.perform(request({ filePath, workflowRunId: 'run-1' }));
-    await expect(deliver.perform(request({ filePath, workflowRunId: 'run-1' }))).rejects.toMatchObject({
+    await expect(deliver.perform(request({ filePath, workflowRunId: 'run-2' }))).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { targetId: 'job-1001', workflowRunId: 'run-1' },
+      details: { targetId: 'job-1001', resumeVersion: `sha256:${RESUME_SHA}` },
     });
-    // 换一个 run 或换一个目标仍可递（与打招呼同一口径）。
     await deliver.perform(request({ filePath, jobId: 'job-2002', workflowRunId: 'run-1' }));
-    await deliver.perform(request({ filePath, workflowRunId: 'run-2' }));
+    await deliver.perform(request({ filePath, workflowRunId: 'run-2', snapshotId: 'snapshot-v2' }));
     expect(hand.calls).toHaveLength(3);
     expect(ledger.count()).toBe(3);
   });
@@ -642,18 +641,25 @@ describe('投递的账本、额度与频控（spec 2.6-02 / 03 / 05）', () => {
     ]);
     expect(ledger.summary().recent[0]).toMatchObject({ action: DELIVER_ACTION, targetId: '示例科技' });
 
-    // 同一条会话在同一 run 里再递一次：拦下来的是它自己，不是任何岗位。
+    // 同一条会话跨 run 重放也拦；更换快照版本才构成另一发。
     await expect(
-      deliver.perform(request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-1', filePath })),
+      deliver.perform(request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-2', filePath })),
     ).rejects.toMatchObject({
       code: 'OUTBOUND_ALREADY_SENT',
-      details: { targetId: '示例科技', workflowRunId: 'run-1' },
+      details: { targetId: '示例科技', resumeVersion: `sha256:${RESUME_SHA}` },
     });
-    // 同一会话换一个 run 仍可递；「示例科技」这个格子的岗位坐标也不该被顺手拦下。
     await deliver.perform(
-      request({ jobId: undefined, conversationTarget: '示例科技', workflowRunId: 'run-2', filePath }),
+      request({
+        jobId: undefined,
+        conversationTarget: '示例科技',
+        workflowRunId: 'run-2',
+        filePath,
+        snapshotId: 'snap-v2',
+      }),
     );
-    await deliver.perform(request({ jobId: 'job-1001', conversationTarget: '示例科技', filePath }));
+    await deliver.perform(
+      request({ jobId: 'job-1001', conversationTarget: '示例科技', filePath, snapshotId: 'snap-v3' }),
+    );
     expect(hand.calls).toHaveLength(3);
     expect(ledger.count()).toBe(3);
   });
@@ -1157,6 +1163,37 @@ describe('投递记录与账本同生同灭（spec 3.7-02）', () => {
     });
     expect(auto.ledger.count()).toBe(0);
     expect(auto.records.listFor('job-1001')).toEqual([]);
+  });
+
+  it('页面成功但经过写失败：账本整体回滚；只读对账补齐两表且不重复注入', async () => {
+    const hand = fakeChannel();
+    const { dir, deliver, ledger, records } = await boot({ channel: hand.channel, autonomy: 'auto' });
+    const filePath = writeResume(dir);
+    const originalRecord = records.record;
+    records.record = () => {
+      throw new Error('模拟 delivery_records 写失败');
+    };
+    await expect(deliver.perform(request({ filePath, snapshotId: 'snap-atomic' }))).rejects.toThrow(
+      '模拟 delivery_records 写失败',
+    );
+    expect(ledger.count()).toBe(0);
+    records.record = originalRecord;
+    expect(records.listFor('job-1001')).toEqual([]);
+
+    await expect(deliver.perform(request({ filePath, snapshotId: 'snap-atomic' }))).rejects.toMatchObject({
+      code: 'OUTBOUND_RECONCILIATION_REQUIRED',
+    });
+    expect(hand.calls).toHaveLength(1);
+    hand.channel.inspect = () =>
+      Promise.resolve({ status: 'confirmed', reason: '仿站含同版附件回执', receiptId: 'delivery-9' });
+    await expect(deliver.reconcile(request({ filePath, snapshotId: 'snap-atomic' }))).resolves.toMatchObject({
+      status: 'recovered',
+      canResume: false,
+    });
+    expect(hand.calls).toHaveLength(1);
+    expect(ledger.count()).toBe(1);
+    expect(records.listFor('job-1001')).toHaveLength(1);
+    expect(records.listFor('job-1001')[0]).toMatchObject({ ledgerId: 1, snapshotId: 'snap-atomic' });
   });
 
   it('节点路径的 `snapshot` 参数进得来：工作流入口与界面入口记的是同一条经过', async () => {

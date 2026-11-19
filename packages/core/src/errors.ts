@@ -22,6 +22,10 @@ export type AppErrorCode =
   | 'OUTBOUND_CHANNEL_MISSING'
   | 'OUTBOUND_ALREADY_SENT'
   | 'OUTBOUND_NOT_DELIVERED'
+  // 10.2 外发恢复：总开关停用、上一次结局未对账、站点会抢在应用前发一条无法逐笔对齐的默认问候。
+  | 'OUTBOUND_DISABLED'
+  | 'OUTBOUND_RECONCILIATION_REQUIRED'
+  | 'OUTBOUND_UNTRACKED_SITE_GREETING'
   // 择机投递（spec 5.7-03）：无人值守那一路被时机规则判成「此刻不该递」。它与上面三个码都不合并——
   // 那三个是「试了没成」，这一条是「压根没试」：不落账、不进被拒流水、下一次计划点照跑。
   | 'OUTBOUND_DELIVER_DEFERRED'

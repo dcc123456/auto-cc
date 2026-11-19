@@ -265,10 +265,18 @@ export function createFakePage(script: PageScript): FakePage {
     if (!deliver?.statusContainer || !sameLocator(request.container, deliver.statusContainer)) return null;
     kinds.push('deliver-status');
     const statuses = deliver.statuses ?? [];
-    const text = statuses.length === 0 ? null : statuses[Math.min(deliverReads++, statuses.length - 1)]!;
+    const rawText = statuses.length === 0 ? null : statuses[Math.min(deliverReads++, statuses.length - 1)]!;
+    const text = rawText?.includes('简历已送达') ? `${rawText} · sha256 ${'a'.repeat(12)}` : rawText;
     return extractOf(
       navigated.at(-1) ?? LIST_URL,
-      text === null ? [] : [rowOf(0, navigated.at(-1) ?? LIST_URL, [fieldHit('status', text)])],
+      text === null
+        ? []
+        : [
+            rowOf(0, navigated.at(-1) ?? LIST_URL, [
+              fieldHit('status', text),
+              fieldHit('receiptId', '', 'fixture-receipt-1'),
+            ]),
+          ],
     );
   };
   return {
