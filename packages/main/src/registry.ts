@@ -25,6 +25,7 @@ import {
   PlatformRegistryService,
 } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
+import { JourneyService } from '@auto-cc/plugin-journey';
 import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
@@ -130,6 +131,8 @@ export const REGISTRY: Registry = {
   // 摘掉它时 `agent.policy` 与 `agent.loop` 一起不进装配（那两个服务把它列成硬依赖）——刻意不是软降级：
   // 读不到接管态还照动手，等于「接管期间一步都不发」这条护栏在少一行配置之后静默失效。
   'browser-takeover': BrowserTakeoverService,
+  // 求职主链编排（M2-B spec 10.3）：L3 只调 L2 的既有服务，不复制匹配、事实校验与话术生成。
+  journey: JourneyService,
   // 平台登记处（spec 2.2-07）：适配器实例只在这里流通，渲染层只拿得到 `platform.registry.list`。
   'platform-registry': PlatformRegistryService,
   // BOSS 适配器（spec 2.2-06）：它在自己的 init 里把自己登记进上一行，`browser` 一行都不认识它。

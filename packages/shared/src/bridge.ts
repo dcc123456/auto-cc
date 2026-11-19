@@ -256,6 +256,12 @@ export const RENDERER_ALLOWLIST = [
   'entitlement.gate.setOutboundStopped',
   'usage.ledger.summary',
   'usage.ledger.recentAttempts',
+  // M2-B 求职主链：意向、按意向搜岗、定制草稿、面试材料。四只都只由人从界面或已审批的
+  // agent 工具触发；`tailor` / `interview` 写的是本地变体与材料，不发任何东西出去。
+  'journey.intent',
+  'journey.search',
+  'journey.tailor',
+  'journey.interview',
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
   'outbound.greet.perform',
@@ -680,6 +686,89 @@ export type OutboundSampleAction = (typeof OUTBOUND_SAMPLE_ACTIONS)[number];
  * `reason` 只在被拒时非空，它是要**显示给用户看**的一句话，不是调试信息。
  */
 export type GateDecisionView = { allowed: boolean; remaining: number | null; reason: string | null };
+
+/** 求职主链 M2-B 的意向读数：来源是母版 `intent` 四格，不另存一份意向事实。 */
+export type JourneyIntentView = {
+  docId: string;
+  /** 母版版本 = docId + 文档内容哈希前 12 位；链上所有材料都按它对齐。 */
+  resumeVersion: string;
+  expectRole: string;
+  expectCity: string;
+  expectSalary: string;
+  expectStart: string;
+  criteria: { keyword: string; city: string | null };
+  missingFields: string[];
+};
+
+/** 一条 JD 要求的匹配读数；`factIds` 是 `kb.gap` 给出的库内证据 id，可逐条反查。 */
+export type JourneyRequirementView = {
+  requirementId: string;
+  kind: string;
+  label: string;
+  quote: string;
+  state: 'matched' | 'partial' | 'missing';
+  factIds: string[];
+  bestScore: number | null;
+};
+
+/** 一个岗位的可解释匹配结果：理由只来自实际比对，不编造。 */
+export type JourneyJobMatchView = {
+  jobId: string;
+  title: string;
+  company: string;
+  jdVersion: string;
+  matchedCount: number;
+  partialCount: number;
+  missingCount: number;
+  requirements: JourneyRequirementView[];
+};
+
+/** 按意向搜岗的整份读数；`insufficient` 为真表示不足三个岗位，界面不得补样例。 */
+export type JourneySearchView = {
+  intent: JourneyIntentView;
+  platform: string;
+  capturedJobIds: string[];
+  jobs: JourneyJobMatchView[];
+  insufficient: boolean;
+};
+
+/** 定制简历与招呼草稿；违规时整份失败，不产生可发内容。 */
+export type JourneyTailorView = {
+  docId: string;
+  platform: string;
+  jobId: string;
+  jdVersion: string;
+  resumeVersion: string;
+  tailoredResumeVersion: string | null;
+  appliedRewrites: number;
+  checks: { ok: boolean; violationCount: number };
+  greeting: {
+    text: string;
+    origin: 'model' | 'template';
+    scriptVersion: string;
+    evidenceRefs: string[];
+  } | null;
+};
+
+/** 面试材料的一条问答；两个来源数组都非空才成立。 */
+export type JourneyInterviewItemView = {
+  question: string;
+  answer: string;
+  resumeFactIds: string[];
+  requirementIds: string[];
+};
+
+/** 面试准备整份读数；租户材料只来自所选 JD 与母版事实。 */
+export type JourneyInterviewView = {
+  docId: string;
+  platform: string;
+  jobId: string;
+  jdVersion: string;
+  resumeVersion: string;
+  selfIntro: string;
+  qa: JourneyInterviewItemView[];
+  checklist: string[];
+};
 
 /** 需要持久化去重与恢复的两类外发动作；抓取没有“页面已发、账本未知”这一形态。 */
 export type OutboundAction = 'greet' | 'deliver';
@@ -2638,6 +2727,24 @@ export interface BridgeSignatures {
   'usage.ledger.summary': { args: [recentLimit?: number]; returns: UsageSummaryView };
   /** 脱敏外发尝试：四元组、状态、页面回执与账本 id，不含正文和附件路径。 */
   'usage.ledger.recentAttempts': { args: [limit?: number]; returns: OutboundAttemptView[] };
+  /**
+   * M2-B 的四只口（spec 10.3-01…03）：意向、搜岗、定制、面试材料。
+   * `tailor` / `interview` 需要 `docId + jobId`，版本由主进程派生并原样回传；
+   * 三只都与 agent 工具、工作流节点共用同一组服务方法（§5.9）。
+   */
+  'journey.intent': { args: [docId: string]; returns: JourneyIntentView };
+  'journey.search': {
+    args: [input: { docId: string; platform?: string; limit?: number }];
+    returns: JourneySearchView;
+  };
+  'journey.tailor': {
+    args: [input: { docId: string; jobId: string; platform?: string }];
+    returns: JourneyTailorView;
+  };
+  'journey.interview': {
+    args: [input: { docId: string; jobId: string; platform?: string }];
+    returns: JourneyInterviewView;
+  };
   /**
    * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。
    *

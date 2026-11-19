@@ -695,6 +695,14 @@ plugins:
   # 真正的三闸门在节点侧（5.3-d）——见 plan §7.5.3 决策四。
   # 注掉这一行：界面的「定时任务」一节给出「服务未挂载」的结构化失败，对话与工作流照旧——
   # 「现在跑一次」与「以后每次都在这时刻跑」分属两条。
+  # 求职主链编排（M2-B spec 10.3）：意向 → 按意向搜岗 → 可解释匹配 → 定制与招呼草稿 → 面试材料。
+  # 它是 L3 编排层，只把 L2 的既有服务串起来：匹配理由来自 `kb.gap`、事实校验来自 `kb-generate`、
+  # 招呼草稿来自 `outbound-script`、模型出口只有 `llm`。不新增第二套生成器 / 模型客户端 / 搜索模块。
+  # 必须排在 `agent` 与下面这些能力包之后：它在 init 里登记三只 agent 工具与三个工作流节点，
+  # 清单顺序即挂载顺序，排早了登记会落空（AGENTS.md §9 的 5.1-c）。
+  - id: journey
+    dependsOn: [agent, resume-doc, kb-profile, kb-gap, kb-generate, jd-capture, jd-store, outbound-script, llm]
+
   - id: schedule
     dependsOn: [store, workflow]
     config:

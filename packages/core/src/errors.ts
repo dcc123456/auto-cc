@@ -158,6 +158,11 @@ export type AppErrorCode =
   | 'KB_GENERATION_PROPOSAL_MISSING'
   | 'KB_GENERATION_STALE_BASELINE'
   | 'KB_GENERATION_CHECK_FAILED'
+  // 求职主链 M2-B（spec 10.3）：可解释匹配不足三个岗位、事实违规阻断生成、面试材料来源或数字不成立。
+  // 三者处置不同：补抓岗位、改简历/换 JD、重跑材料；所以不合并成一个码。
+  | 'JOURNEY_MATCH_INSUFFICIENT'
+  | 'JOURNEY_FACT_BLOCKED'
+  | 'JOURNEY_MATERIAL_INVALID'
   // 对话循环（spec 5.2-01 / 05）。这五个码分两组：
   // 入参组（goal 空 / 超长）与界面组处置相同——把原因显示成一行提示、不改任何状态；
   // 状态组（run 查无 / 状态不对就不许确认）必须分开，因为界面给的话不同——

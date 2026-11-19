@@ -194,3 +194,35 @@ interface JourneyContext {
 - `resumeVersion` 对纯打招呼统一为 `unversioned`；投递使用 `snapshotId:sha256` 或 `sha256:<整串>`。同目标换版本可另发，同版本跨 run 不得重放。
 - 对账不重新生成话术：打招呼必须提供原正文，投递必须仍读得到同字节附件；平台没有只读能力时只能回 `unknown`。
 - 工作区保留 resume-kb、e2e 等他部改动；提交只取本条列出的实现、测试、P10 文档与证据路径，提交后逐行复核文件清单与远端 ref。
+
+## 11. M2-B 实施记录（兵部，2026-11-19）
+
+### 11.1 新增 L3 包的理由与边界
+
+新增 `packages/journey`（`@auto-cc/plugin-journey`，服务名 `journey`）。理由：10.3 这一条链必须同时调
+`kb.profile` / `kb.gap` / `resume.generate` / `resume.doc`（简历域 L2）与 `jd.capture` / `jd.store`
+（平台域 L2）、`outbound.script`（外发域 L2）与 `llm.chat`（L1）。放进任何一个 L2 包都会新开同级横向依赖
+（AGENTS.md §4.1）；放进 `agent` 则把求职主链变成对话循环私产。边界：本包**只编排不生产判据**——
+匹配理由来自 `kb.gap` 的三态证据，事实校验来自 `resume.generate`，招呼草稿来自 `outbound.script`，
+模型出口只有 `llm.chat`；不新增生成器、不新增模型客户端、不新增搜岗适配器、不建表。
+
+### 11.2 改造文件
+
+- 新增 `packages/journey/src/{journey-service,match,prompts,index}.ts` 与 `journey-service.test.ts`。
+- 扩展既有接口：`kb.profile` 增加公开 `intent()`（与工具面同一判据，只提升可见性）；`resume-kb` 导出 `KbIntentView`。
+- 接线：`shared/bridge.ts` 四只白名单口与视图类型；`packages/main/src/registry.ts` 与 `package.json` 登记；
+  `cordis.yml` 在 `agent` 与各能力包之后挂 `journey`；工具标签双语进两份语言包。
+
+### 11.3 版本与来源契约
+
+- `resumeVersion = doc:<docId>:<contentHash 前 12 位>`；`jdVersion = sha256(JD 正文) 前 12 位`。
+- `requirementId = <jdVersion>:R<序号>`，由比对行顺序稳定派生；`factIds` 原样抄自 `kb.gap` 的证据 id。
+- 面试材料每条问答必须给至少一个 `resumeFactIds` 与一个 `requirementIds` 且都在本次清单内；
+  回答里的数字必须能在简历事实或这份 JD 里找到同值，否则 `JOURNEY_MATERIAL_INVALID`。
+
+### 11.4 状态与未完成项
+
+- U/C：`packages/journey` 10 例；全仓 `typecheck` / `lint` / `format:check` / `test` 均 `EXIT=0`（见验收记录）。
+- V：尚未采集。原因：需要新增求职主链接口区（渲染层）与隔离仿站窗口；窗口要临时切换 `platform-boss=fixture`
+  并给 `llm` 配本地 fixture 端点（模型答案由 fixture 按事实 id 回填），属于运行期配置变更，须先请示。
+- 真实 BOSS 仍不参与 M2-B；9.2-05/06 维持 `[!]`，不以仿站替代。

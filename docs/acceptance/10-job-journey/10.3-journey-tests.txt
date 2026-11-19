@@ -1,0 +1,39 @@
+10.3 意向匹配与事实锁定生成（M2-B）U/C 证据（2026-11-19）
+
+实现：新增 L3 `packages/journey`（服务 `journey`），只编排既有服务：
+- 意向：`kb.profile.intent()`（与 kb.profile.list 工具同判据）
+- 搜岗：`jd.capture.run` + `jd.store.list`
+- 匹配理由：`kb.gap.report` 的三态行与证据 id
+- 定制：`resume.generate.run` + `accept`（事实校验在既有生成轨）
+- 招呼草稿：`outbound.script.generate`
+- 面试材料：`llm.chat` + 本包提示词注册表 + 来源/数字校验
+
+版本契约：
+- resumeVersion = doc:<docId>:<contentHash 前 12 位>
+- jdVersion = sha256(JD 正文) 前 12 位
+- requirementId = <jdVersion>:R<序号>（与 kb.gap 行序一致）
+
+U 用例（packages/journey/src/journey-service.test.ts，10 例全过）：
+1) 意向缺期望岗位不替人决定搜什么
+2) JD 版本随正文变化、要求 id 稳定
+3) 三个岗位每条理由可回指 requirementId/factIds
+4) 不足三个可解释岗位 → JOURNEY_MATCH_INSUFFICIENT，不补样例
+5) 定制成功：母版/变体/JD 版本一致，草稿带证据引用
+6) 事实篡改负对照 → JOURNEY_FACT_BLOCKED，不产生招呼
+7) 面试材料 8 问答 + 3 准备，每条带来源
+8) 断模型 → LLM_UNAVAILABLE 原样上浮
+9) 冲突数字 → JOURNEY_MATERIAL_INVALID
+10) 非 JSON → JOURNEY_MATERIAL_INVALID
+
+命令与实读：
+  pnpm --filter @auto-cc/plugin-journey typecheck   EXIT=0
+  pnpm --filter @auto-cc/plugin-journey test        EXIT=0（10 tests）
+  pnpm typecheck                                    EXIT=0
+  pnpm lint（npm_config_store_dir=~/Library/pnpm/store） EXIT=0
+  pnpm format:check                                 EXIT=0
+  pnpm test                                         EXIT=0（journey 10、resume-kb 479、main 100，零 failed）
+
+V 未完成项：
+- 需要新增求职主链接口区（渲染层）与隔离仿站窗口；窗口要临时切换 platform-boss=fixture 并给 llm 配
+  本地 fixture 端点（模型按事实 id 回填答案）。均属运行期配置变更，按边界先请示，未擅自启动。
+- 真实 BOSS 仍不参与 M2-B；9.2-05/06 维持 [!]。

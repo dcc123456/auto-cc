@@ -931,6 +931,16 @@ export class KbProfileService extends Service {
   }
 
   /**
+   * 公开的求职意向读取口（M2-B 10.3-01 的唯一取材点）。
+   *
+   * 与 `kb.profile.list` 工具里那一格是**同一个** `intentOf`：服务调用与工具调用读到的四格必须逐字一致，
+   * 所以这里只做可见性提升，不复制判据（AGENTS.md §2.5）。返回 null 的语义也一样：没有可读文档，不抛。
+   * @param docId 目标文档 id；省略 = 最近更新的母版
+   * @returns 四格读数；没有可读文档时为 null
+   */
+  intent = (docId?: string | null): KbIntentView | null => this.intentOf(docId ?? null);
+
+  /**
    * 列出实体，可按种类与来源文档过滤。
    * @param filter `kind` 限定种类；`sourceDocId` 限定来源（传 `null` 只取手工建的）；都不传取全库
    * @returns 按更新时间倒序的实体读数
