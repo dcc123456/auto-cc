@@ -1,0 +1,55 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-prepare.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-prepare.js
+
+{
+  "afterDemoConfirmation": "0",
+  "activeStep": "prepare",
+  "resumeVersion": "fixture.resume.v1",
+  "jdVersion": "fixture.jd.frontend.v1",
+  "tailoredVersion": "fixture.resume.v1+fixture.jd.frontend.v1",
+  "selfIntroduction": "虚构样例材料自我介绍我有三年前端开发样例经历，主要负责组件拆分、跨端交付、性能优化与核心流程回归。针对当前样例 JD，我会先说明与要求直接对应的事实，再展示测量记录和测试证据；没有来源的经历不会写入自述。experienceperformancetestingfixture.jd.frontend.v1",
+  "questionCount": 8,
+  "questionSources": [
+    [
+      "experience",
+      "JD-A.R1"
+    ],
+    [
+      "performance",
+      "JD-A.R2"
+    ],
+    [
+      "testing",
+      "JD-A.R3"
+    ],
+    [
+      "experience",
+      "JD-A.R1"
+    ],
+    [
+      "performance",
+      "JD-A.R2"
+    ],
+    [
+      "testing",
+      "JD-A.R3"
+    ],
+    [
+      "experience",
+      "JD-A.R1"
+    ],
+    [
+      "performance",
+      "JD-A.R2"
+    ]
+  ],
+  "checklistCount": 3,
+  "operationCount": "8",
+  "chatMounted": true,
+  "navCount": 7
+}

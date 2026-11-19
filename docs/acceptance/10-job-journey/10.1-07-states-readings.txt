@@ -1,0 +1,66 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-states.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-states.js
+
+[
+  {
+    "requested": "empty",
+    "actual": "empty",
+    "reason": null,
+    "blockedReason": null,
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "loading",
+    "actual": "loading",
+    "reason": null,
+    "blockedReason": null,
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "failed",
+    "actual": "failed",
+    "reason": "SAMPLE_READ_FAILED",
+    "blockedReason": null,
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "risk",
+    "actual": "risk",
+    "reason": "RISK_CONTROL_PAUSED",
+    "blockedReason": "RISK_CONTROL_PAUSED",
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "paused",
+    "actual": "paused",
+    "reason": "RUN_PAUSED",
+    "blockedReason": "RUN_PAUSED",
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "recovered",
+    "actual": "recovered",
+    "reason": null,
+    "blockedReason": null,
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "normal",
+    "actual": "normal",
+    "reason": null,
+    "blockedReason": null,
+    "outboundAttempts": "0"
+  },
+  {
+    "requested": "risk",
+    "actual": "risk",
+    "reason": "RISK_CONTROL_PAUSED",
+    "blockedReason": "RISK_CONTROL_PAUSED",
+    "outboundAttempts": "0"
+  }
+]

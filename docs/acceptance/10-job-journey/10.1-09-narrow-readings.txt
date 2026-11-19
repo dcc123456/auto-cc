@@ -1,0 +1,11 @@
+{
+  "viewportWidth": 620,
+  "documentClientWidth": 620,
+  "documentScrollWidth": 620,
+  "rootClientWidth": 486,
+  "rootScrollWidth": 486,
+  "rootOverflows": false,
+  "stepColumns": "220px 220px",
+  "questionCount": 8,
+  "outboundAttempts": "0"
+}

@@ -1,0 +1,15 @@
+P10 / 10.1-05 静态负对照（2026-11-19）
+
+范围：
+- packages/renderer/src/CareerJourneyPrototype.tsx
+- packages/renderer/src/career-journey-prototype.ts
+- packages/renderer/src/career-journey-prototype.test.ts
+
+使用 grep 工具逐项搜索：
+1. window\.autoCC|outbound\.greet|outbound\.deliver|greet\.perform|deliver\.perform|jd\.capture|fetch\(|https?://
+   结果：No matches found。
+2. 1[3-9][0-9]{9}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|/Users/|C:\\
+   结果：No matches found。
+
+结论：原型没有外发桥接、抓取调用、网络地址、真实手机号/邮箱或本机绝对路径。
+活体三阶段外发读数另见 10.1-05-delivery-readings.txt 与 10.1-06-prepare-readings.txt。

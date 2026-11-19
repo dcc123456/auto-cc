@@ -1,0 +1,34 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-links.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-links.js
+
+{
+  "readings": [
+    {
+      "target": "jobs",
+      "visible": true,
+      "trail": "来自对话求职主链原型›岗位前端工程师（样例 A）返回对话",
+      "chatVisibleAfterBack": true
+    },
+    {
+      "target": "resume",
+      "visible": true,
+      "trail": "来自对话求职主链原型›简历前端工程师（样例 A）返回对话",
+      "chatVisibleAfterBack": true
+    },
+    {
+      "target": "trust",
+      "visible": true,
+      "trail": "来自对话求职主链原型›运行记录前端工程师（样例 A）返回对话",
+      "chatVisibleAfterBack": true
+    }
+  ],
+  "contextPreserved": "fixture.resume.v1+fixture.jd.frontend.v1",
+  "questionCountAfterReturn": 8,
+  "chatScrollTop": 0,
+  "chatMounted": true
+}

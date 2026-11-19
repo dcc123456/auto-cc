@@ -1,0 +1,16 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-open.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-open.js
+
+{
+  "rootVisible": true,
+  "activeStep": "resume",
+  "emptyVisible": true,
+  "navCount": 7,
+  "outboundAttempts": "0",
+  "chatMounted": true
+}

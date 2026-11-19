@@ -2,6 +2,197 @@
   "shell": {
     "title": "auto-cc desktop workspace",
     "subtitle": "Search jobs · draft messages · tailor the resume per job · deliver once you confirm",
+    "journey": {
+      "prototype": {
+        "entry": "Job journey",
+        "title": "Job journey prototype",
+        "sampleBadge": "Local sample · no outbound",
+        "sampleOnly": "Fictional sample",
+        "fixtureJob": "Local sample job",
+        "subtitle": "Walk six steps with one resume and JD. This checks interaction and context only; no recruitment platform is contacted.",
+        "reset": "Reset sample",
+        "close": "Back to chat",
+        "disclaimer": "Jobs, resume facts, interview drafts, operation entries, and preparation materials in this prototype are fictional samples, not a formal ledger or real results. Production capabilities require separate acceptance in later milestones."
+      },
+      "context": {
+        "resume": "Master resume version",
+        "jd": "Current JD version",
+        "tailored": "Tailored resume version",
+        "empty": "Not generated"
+      },
+      "states": {
+        "label": "State preview",
+        "normal": "Normal",
+        "empty": "Empty",
+        "loading": "Loading",
+        "failed": "Failed",
+        "risk": "Risk control",
+        "paused": "Paused",
+        "recovered": "Recovered",
+        "normalHint": "Current step is available",
+        "emptyHint": "No resume is loaded. This is empty-state guidance, not a claim that there are zero real jobs.",
+        "loadingHint": "Reading the sample context. Existing versions remain visible and no success receipt appears before completion.",
+        "failedHint": "Sample read failed. Re-read the context before retrying; never present an older artifact as this run's result.",
+        "riskHint": "Risk control pauses the journey. No CAPTCHA solving or bypass. Outbound stays off until human takeover and reconciliation.",
+        "pausedHint": "The journey is paused. Versions and operation entries remain; re-read the page and ledger before resuming.",
+        "recoveredHint": "Reconciled and resumed. Only unfinished actions resume; successful actions are never replayed blindly.",
+        "continueOutbound": "Continue outbound",
+        "loadingAction": "Reading",
+        "recoverAction": "Reconcile and resume",
+        "reason": {
+          "RISK_CONTROL_PAUSED": "Risk-control pause: human takeover and reconciliation are required before outbound",
+          "RUN_PAUSED": "The journey is paused: resume explicitly before continuing",
+          "ACTION_IN_PROGRESS": "The read is still running; do not submit it again"
+        }
+      },
+      "steps": {
+        "aria": "Six job journey steps",
+        "resume": "Resume",
+        "search": "Search",
+        "tailor": "Tailor",
+        "delivery": "Confirm",
+        "interview": "Interview",
+        "prepare": "Prepare"
+      },
+      "resume": {
+        "title": "01 · Derive intent from resume facts",
+        "hint": "Establish the master resume and usable facts before intent guides search. Your real files are not imported.",
+        "empty": "There is no journey context yet. Load a fictional sample resume to begin.",
+        "load": "Load sample resume",
+        "intentTitle": "Job intent derived from the sample facts below"
+      },
+      "search": {
+        "title": "02 · Search by intent and explain matches",
+        "hint": "Only three fictional JDs appear here, each with match reasons and stable requirement IDs.",
+        "run": "Search sample jobs by intent",
+        "select": "Choose this job"
+      },
+      "tailor": {
+        "title": "03 · Answer the same JD with fact-locked materials",
+        "hint": "The sample variant and greeting cite only listed facts. Changing jobs invalidates old artifacts immediately.",
+        "empty": "Go back and choose a sample JD first.",
+        "generate": "Generate fact-locked sample",
+        "factLocked": "All sources listed",
+        "violations": "{{count}} sample fact violations",
+        "resumeTitle": "Tailored resume summary (sample)",
+        "draftOnly": "Draft · not sent",
+        "greetingTitle": "Greeting (sample)"
+      },
+      "delivery": {
+        "enter": "Review outbound",
+        "title": "04 · Confirm target and resume version first",
+        "hint": "This slice demonstrates the confirmation card only. It never calls greeting or delivery services; real outbound remains zero before and after confirmation.",
+        "empty": "Generate a sample resume and greeting bound to the current JD first.",
+        "confirmationDemo": "Approval demo · no outbound",
+        "outboundCount": "{{count}} real outbound actions",
+        "target": "Target job",
+        "resumeVersion": "Resume version",
+        "request": "Request confirmation (no outbound)",
+        "pending": "Check the target, JD, and resume version. Nothing is sent before your answer; confirmation below only records a prototype action.",
+        "confirmDemo": "Confirm (demo only, no outbound)",
+        "cancel": "Cancel confirmation",
+        "confirmedDemo": "Demo confirmation recorded. No outbound service was called; real outbound remains zero."
+      },
+      "interview": {
+        "enter": "Draft a sample interview",
+        "title": "05 · Draft an interview record",
+        "hint": "A production interview source is not implemented. This only checks how job context reaches the interview step.",
+        "empty": "Complete the demo-only confirmation step to inspect the interview information architecture.",
+        "draftExplanation": "The draft binds only to the current sample job. It contains no real time, contact, or production status.",
+        "draftTag": "Sample draft · not in the formal ledger",
+        "createDraft": "Create sample interview draft"
+      },
+      "prepare": {
+        "generate": "Generate sample interview preparation",
+        "title": "06 · Interview introduction and preparation",
+        "hint": "Every material keeps resume-fact and current-JD requirement IDs for traceability.",
+        "empty": "Create a sample interview draft for the current job first.",
+        "sampleMaterial": "Fictional sample material",
+        "selfIntroduction": "Self-introduction",
+        "questions": "Question list · 8 items",
+        "checklist": "Preparation checklist"
+      },
+      "links": {
+        "jobs": "Open Jobs workspace",
+        "resume": "Open Resume workspace",
+        "trust": "Open existing Records"
+      },
+      "log": {
+        "title": "Prototype operation log",
+        "hint": "Not a formal ledger · local sample actions only",
+        "empty": "No sample action has run yet."
+      },
+      "events": {
+        "resume-loaded": "Loaded fixture.resume.v1; no real file was read",
+        "jobs-listed": "Listed three fictional JDs; no real platform was searched",
+        "job-selected": "Selected {{jobId}}; previous downstream artifacts invalidated",
+        "materials-generated": "Generated a sample variant and greeting for the current JD",
+        "confirmation-requested": "Requested demo confirmation; zero outbound actions",
+        "confirmation-cancelled": "Cancelled demo confirmation; zero outbound actions",
+        "confirmation-demonstrated": "Recorded demo confirmation; no outbound service was called",
+        "interview-drafted": "Created a sample interview draft outside the formal ledger",
+        "preparation-generated": "Generated traceable sample interview preparation"
+      },
+      "fixture": {
+        "intent": "Intent: frontend engineering, focusing on components, performance, and quality; any city (sample criteria).",
+        "facts": {
+          "experience": "Sample fact: three years of frontend development covering component decomposition and cross-device delivery.",
+          "performance": "Sample fact: improved initial rendering through resource splitting and rendering changes, with before/after measurements retained.",
+          "testing": "Sample fact: added unit and page regression tests for core flows and documented reproduction steps for failures."
+        },
+        "jobs": {
+          "frontend": {
+            "title": "Frontend Engineer (sample A)",
+            "company": "Fictional Company A",
+            "summary": "Build component-based pages, improve performance, and regress core flows.",
+            "match1": "Component decomposition matches JD-A.R1",
+            "match2": "Performance measurements match JD-A.R2",
+            "greeting": "Hello. In this sample experience I handled component decomposition and performance work and retained measurements. Those facts align with this role, and I would like to discuss it further.",
+            "tailored": "Lead with component delivery, then performance and regression evidence. Companies, dates, and numbers stay within the sample facts."
+          },
+          "platform": {
+            "title": "Web Platform Engineer (sample B)",
+            "company": "Fictional Company B",
+            "summary": "Build reusable web capabilities with a focus on performance, reliability, and developer efficiency.",
+            "match1": "Cross-device delivery matches JD-B.R1",
+            "match2": "Tests and reproduction records match JD-B.R3",
+            "greeting": "Hello. This sample experience covers cross-device delivery, performance measurement, and core-flow regression, aligning with this platform role. I would like to discuss it further.",
+            "tailored": "Highlight reusable components and cross-device delivery, supported by performance and quality evidence. No experience beyond the sample is added."
+          },
+          "quality": {
+            "title": "Frontend Quality Engineer (sample C)",
+            "company": "Fictional Company C",
+            "summary": "Own frontend quality practices, performance governance, and automated regression.",
+            "match1": "Core-flow testing matches JD-C.R1",
+            "match2": "Performance work and measurement match JD-C.R2",
+            "greeting": "Hello. In this sample experience I added tests and regression for core flows and measured performance. Those facts fit this quality role, and I would like to discuss it further.",
+            "tailored": "Lead with testing and failure reproduction, retain measured performance evidence, and do not invent coverage or project numbers."
+          }
+        },
+        "preparation": {
+          "selfIntroduction": "I have three years of sample frontend experience covering component decomposition, cross-device delivery, performance, and core-flow regression. For the current sample JD, I would first explain facts that directly match its requirements, then show measurement and test evidence. Experience without a source is not included.",
+          "q1": "1. How does your component experience match this role?",
+          "a1": "Explain the component responsibilities and delivery scope in the sample facts, then check them against the current JD's first requirement without inventing teams or projects.",
+          "q2": "2. How can you prove the performance work was effective?",
+          "a2": "Show the sample method and before/after measurements, including their measurement basis. If production material lacks a source, state that it cannot be proven.",
+          "q3": "3. How do you protect core-flow quality?",
+          "a3": "Answer with the sample unit tests, page regression, and failure reproduction steps, mapped to the current JD's third requirement.",
+          "q4": "4. How would you approach an unfamiliar business domain?",
+          "a4": "Review existing components and delivery boundaries, then validate understanding with a small change. Do not claim equivalent domain experience.",
+          "q5": "5. How do you trade performance work against delivery pressure?",
+          "a5": "Use measurements to find the largest impact, then split verifiable improvements. Never promise gains without supporting data.",
+          "q6": "6. What if a test failure cannot be reproduced?",
+          "a6": "Keep the failure steps and environment, reduce variables, and regress again. If it remains irreproducible, mark it unresolved rather than calling one pass a fix.",
+          "q7": "7. Why are you a fit for this JD?",
+          "a7": "Cite current JD requirements and the three sample facts one by one, covering matches and open questions without presenting a match as an offer guarantee.",
+          "q8": "8. What would your first month look like?",
+          "a8": "Learn the component and performance measurement conventions, then add one small regressable flow and verify changes with existing evidence instead of promising fictional results.",
+          "checklist1": "Check the current JD version and its three requirements; prepare the corresponding fact sources.",
+          "checklist2": "Rehearse the component, performance, and testing sample facts; do not expand into content without a production source.",
+          "checklist3": "Prepare questions about project boundaries, failure handling, and missing information; record responsibilities that need clarification."
+        }
+      }
+    },
     "platformName": {
       "boss": "BOSS Zhipin"
     },

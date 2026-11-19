@@ -1,0 +1,54 @@
+P10 / 10.1-10 四门禁、构建与收尾自检（2026-11-19）
+
+一、实际命令与退出码
+
+本机 pnpm 会把默认存储误算到仓库 `.pnpm-store`，并使许可扫描找不到既有 v10 索引。
+为避免把存储字节扫进 Prettier，最终命令仅为当前进程指定存储位置；没有改项目配置。
+- typecheck：pnpm --config.store-dir="$PWD/tmp/p10/store" run typecheck
+- lint：npm_config_store_dir=/Users/dcc/Library/pnpm/store/v10 pnpm lint
+- format:check：pnpm --config.store-dir="$PWD/tmp/p10/store" run format:check
+- test：pnpm --config.store-dir="$PWD/tmp/p10/store" run test
+- renderer build：pnpm --config.store-dir="$PWD/tmp/p10/store" --filter @auto-cc/renderer build
+
+结果：TYPE_EXIT=0 / LINT_EXIT=0 / FORMAT_EXIT=0 / TEST_EXIT=0 / BUILD_EXIT=0。
+原始输出：
+- 10.1-10-typecheck.txt
+- 10.1-10-lint.txt
+- 10.1-10-format.txt
+- 10.1-10-test.txt
+- 10.1-10-renderer-build.txt
+
+renderer 局部复测：4 个测试文件、32 例全过，其中 career-journey-prototype.test.ts 4 例。
+renderer 生产构建：2032 modules，built in 1.61s；仅有既有 chunk >500kB 与上游注释提示。
+
+测试环境注记：全仓 test 的 stdout 中，Electron 44 在 Vitest 的纯 Node 场景多次尝试补下载，
+打印 packages/{sessions,browser,main}/install.js MODULE_NOT_FOUND；对应套件仍全部 passed，根命令 EXIT=0。
+本片未改安装链，不把这段输出当作安装成功或失败证据；三端安装冒烟仍由 10.5-02（M4-B）验收。
+
+二、V 类证据索引
+
+- 10.1-02：open-readings + empty.png；空载、七项导航、chat 挂载、外发 0。
+- 10.1-03：search-readings + search.png；3 个样例岗位及匹配理由。
+- 10.1-04：tailor-readings + tailor.png；同版定制材料、事实来源与 0 越界。
+- 10.1-05：delivery-readings + unconfirmed.png + static-checks；确认前/请求后外发均 0。
+- 10.1-06：interview-readings + prepare-readings + prepare.png；约面草稿、8 问答、3 项清单、演示确认后外发 0。
+- 10.1-07：states-readings + risk.png；七态与阻断原因码。
+- 10.1-08：links-readings；三个工作台与返回对话，变体和 8 问答保留。
+- 10.1-09：en-readings + en.png + narrow-readings + narrow.png；双语与 620px 无横向溢出。
+同批正式截图 md5 去重：8 张图片哈希均不同（含后续英文与窄窗图；每一张都指定 5173 或同一会话 CDP 视口）。
+
+三、收尾自检
+
+① 四门禁：全 0，原始输出已归档；renderer build 另为 0。
+② V 类：逐条对应上面的截图/DOM 文件；没有以单测替代可视验收。
+③ spec：10.1 十条均按实际证据标 [x]；10.2-01 真实平台继续 [!]，其余后续项保持 [ ]。
+④ 复用：复用 DeskButton/DeskSelect/Banner/Tag、lucide、i18next、viewTrail 与现有对话容器；
+   核对 Modal 规范后主动改用内联工作区，未新增浮层；未新增生产 service、runner、数据库或 LLM 客户端。
+⑤ 死代码：新增导出均被 UI 或测试消费；无注释掉的旧实现、无平行生成器、无未使用 React 组件。
+⑥ 前端三规：样式仅 Tailwind，图标仅 lucide-react，所有页面与样例文案均有 zh-CN/en；
+   renderer conventions 通过（2 语言包 / 83 源文件 / 裸原生控件 0 / 语气洗底 0）。
+⑦ 提交：仅允许 pathspec 提交 P10 文件；最终提交 SHA、git show 文件清单与远端 ref 由回奏复核，本文件不预写 SHA。
+⑧ 暂存产物：探针、userData、日志与过程截图均在 tmp/；入库图片仅 docs/acceptance/10-job-journey/<条目ID>-*.png。
+
+外发与隐私结论：原型源码无 window.autoCC、外发/抓取方法、网络 URL；确认前、请求确认后、
+演示确认后 data-outbound-attempts 均为 0。所有岗位、简历事实、约面与面试材料均标虚构样例，未访问真实招聘平台。

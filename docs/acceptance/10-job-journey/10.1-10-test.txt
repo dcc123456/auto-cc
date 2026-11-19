@@ -1,0 +1,644 @@
+
+> auto-cc@0.1.0 test /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm -r --if-present test
+
+Scope: 26 of 27 workspace projects
+packages/core test$ vitest run
+packages/testing test$ vitest run
+packages/core test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/core
+packages/testing test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+packages/testing test:  ✓ src/evidence.test.ts (9 tests) 9ms
+packages/testing test:  ✓ src/cdp.test.ts (12 tests) 2ms
+packages/core test:  ✓ src/numbers.test.ts (6 tests) 2ms
+packages/testing test:  ✓ src/png.test.ts (7 tests) 3ms
+packages/core test:  ✓ src/snapshot-stack.test.ts (7 tests) 6ms
+packages/testing test:  ✓ src/diff.test.ts (4 tests) 4ms
+packages/core test:  ✓ src/redact.test.ts (12 tests) 5ms
+packages/testing test:  Test Files  4 passed (4)
+packages/testing test:       Tests  32 passed (32)
+packages/testing test:    Start at  12:53:17
+packages/testing test:    Duration  452ms (transform 118ms, setup 0ms, collect 236ms, tests 18ms, environment 0ms, prepare 318ms)
+packages/core test:  ✓ src/paths.test.ts (8 tests) 1ms
+packages/core test:  ✓ src/pending-channel.test.ts (14 tests) 57ms
+packages/testing test: Done
+packages/core test:  ✓ src/agent-tools.test.ts (5 tests) 8ms
+packages/core test:  Test Files  6 passed (6)
+packages/core test:       Tests  52 passed (52)
+packages/core test:    Start at  12:53:17
+packages/core test:    Duration  593ms (transform 212ms, setup 0ms, collect 564ms, tests 79ms, environment 0ms, prepare 393ms)
+packages/core test: Done
+packages/config test$ vitest run
+packages/pdf-edit test$ vitest run
+packages/pdf-edit test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/pdf-edit
+packages/config test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/config
+packages/config test:  ✓ src/merge.test.ts (6 tests) 4ms
+packages/config test:  ✓ src/validate.test.ts (5 tests) 3ms
+packages/pdf-edit test:  ✓ src/overlay-colors.test.ts (9 tests) 5ms
+packages/pdf-edit test:  ✓ src/text-metrics.test.ts (11 tests) 2ms
+packages/pdf-edit test:  ✓ src/object-model.test.ts (15 tests) 5ms
+packages/pdf-edit test:  ✓ src/overlay-writer.test.ts (23 tests) 3ms
+packages/pdf-edit test:  ✓ src/page-ops.test.ts (6 tests) 5ms
+packages/pdf-edit test:  ✓ src/object-session.test.ts (5 tests) 3ms
+packages/pdf-edit test:  ✓ src/edit-session.test.ts (10 tests) 6ms
+packages/config test:  ✓ src/config.test.ts (6 tests) 22ms
+packages/config test:  ✓ src/settings.test.ts (13 tests) 28ms
+packages/config test:  Test Files  4 passed (4)
+packages/config test:       Tests  30 passed (30)
+packages/config test:    Start at  12:53:18
+packages/config test:    Duration  714ms (transform 234ms, setup 0ms, collect 781ms, tests 58ms, environment 0ms, prepare 358ms)
+packages/pdf-edit test:  ✓ src/pdf-document.test.ts (25 tests) 62ms
+packages/config test: Done
+packages/pdf-edit test:  ✓ src/io-service.test.ts (14 tests) 36ms
+packages/pdf-edit test:  ✓ src/page-extract.test.ts (6 tests) 331ms
+packages/pdf-edit test:    ✓ 3.8-01 抽取完整性：三道阈值（plan 03 §11） > run 恢复率 ≥ 98%：横排的每一格都从算子流里抽回来了  318ms
+packages/pdf-edit test:  ✓ src/export-service.test.ts (28 tests) 470ms
+packages/pdf-edit test:  Test Files  11 passed (11)
+packages/pdf-edit test:       Tests  152 passed (152)
+packages/pdf-edit test:    Start at  12:53:18
+packages/pdf-edit test:    Duration  1.35s (transform 702ms, setup 0ms, collect 2.20s, tests 928ms, environment 1ms, prepare 1.22s)
+packages/pdf-edit test: Done
+packages/devtools test$ vitest run
+packages/ipc test$ vitest run
+packages/kernel test$ vitest run
+packages/logger test$ vitest run
+packages/kernel test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/kernel
+packages/ipc test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/ipc
+packages/devtools test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/devtools
+packages/logger test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/logger
+packages/ipc test:  ✓ src/resolve.test.ts (6 tests) 3ms
+packages/logger test:  ✓ src/ring.test.ts (4 tests) 2ms
+packages/devtools test:  ✓ src/cdp-port.test.ts (3 tests) 2ms
+packages/devtools test:  Test Files  1 passed (1)
+packages/devtools test:       Tests  3 passed (3)
+packages/devtools test:    Start at  12:53:19
+packages/devtools test:    Duration  781ms (transform 35ms, setup 0ms, collect 38ms, tests 2ms, environment 0ms, prepare 50ms)
+packages/kernel test:  ✓ src/manifest.test.ts (5 tests) 8ms
+packages/devtools test: Done
+packages/shell test$ vitest run
+packages/ipc test:  ✓ src/gateway.test.ts (8 tests) 11ms
+packages/ipc test:  Test Files  2 passed (2)
+packages/ipc test:       Tests  14 passed (14)
+packages/ipc test:    Start at  12:53:19
+packages/ipc test:    Duration  916ms (transform 173ms, setup 0ms, collect 372ms, tests 14ms, environment 0ms, prepare 126ms)
+packages/kernel test:  ✓ src/kernel.test.ts (9 tests) 29ms
+packages/ipc test: Done
+packages/store test$ vitest run
+packages/logger test:  ✓ src/logger.test.ts (9 tests) 132ms
+packages/logger test:  Test Files  2 passed (2)
+packages/logger test:       Tests  13 passed (13)
+packages/logger test:    Start at  12:53:19
+packages/logger test:    Duration  1.04s (transform 155ms, setup 0ms, collect 272ms, tests 134ms, environment 0ms, prepare 104ms)
+packages/shell test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/shell
+packages/kernel test:  ✓ src/lifecycle.test.ts (9 tests) 220ms
+packages/kernel test:  Test Files  3 passed (3)
+packages/kernel test:       Tests  23 passed (23)
+packages/kernel test:    Start at  12:53:19
+packages/kernel test:    Duration  1.17s (transform 321ms, setup 0ms, collect 736ms, tests 257ms, environment 0ms, prepare 392ms)
+packages/logger test: Done
+packages/kernel test: Done
+packages/store test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/store
+packages/shell test:  ✓ src/view-takeover.test.ts (8 tests) 2ms
+packages/shell test:  ✓ src/file-picker.test.ts (19 tests) 3ms
+packages/shell test:  ✓ src/slot-bounds.test.ts (7 tests) 5ms
+packages/shell test:  ✓ src/reveal-target.test.ts (4 tests) 4ms
+packages/shell test:  ✓ src/companion-editor.test.ts (21 tests) 41ms
+packages/store test:  ✓ src/migrate.test.ts (12 tests) 6ms
+packages/shell test:  ✓ src/update.test.ts (12 tests) 4ms
+packages/shell test:  Test Files  6 passed (6)
+packages/shell test:       Tests  71 passed (71)
+packages/shell test:    Start at  12:53:20
+packages/shell test:    Duration  570ms (transform 314ms, setup 0ms, collect 674ms, tests 59ms, environment 0ms, prepare 323ms)
+packages/shell test: Done
+packages/store test:  ✓ src/store.test.ts (9 tests) 29ms
+packages/store test:  Test Files  2 passed (2)
+packages/store test:       Tests  21 passed (21)
+packages/store test:    Start at  12:53:21
+packages/store test:    Duration  435ms (transform 131ms, setup 0ms, collect 209ms, tests 36ms, environment 0ms, prepare 131ms)
+packages/store test: Done
+packages/entitlement test$ vitest run
+packages/plugins test$ vitest run
+packages/agent test$ vitest run
+packages/llm test$ vitest run
+packages/plugins test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/plugins
+packages/llm test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/llm
+packages/agent test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/agent
+packages/entitlement test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/entitlement
+packages/llm test:  ✓ src/quota-boundary.test.ts (2 tests) 8ms
+packages/agent test:  ✓ src/loop/sediment.test.ts (15 tests) 4ms
+packages/agent test:  ✓ src/tool-surface.test.ts (5 tests) 12ms
+packages/agent test:  ✓ src/loop/llm-model.test.ts (9 tests) 5ms
+packages/agent test:  ✓ src/metrics/funnel.test.ts (13 tests) 87ms
+packages/llm test:  ✓ src/embed.test.ts (16 tests) 68ms
+packages/entitlement test:  ✓ src/entitlement.test.ts (18 tests) 148ms
+packages/entitlement test:  Test Files  1 passed (1)
+packages/entitlement test:       Tests  18 passed (18)
+packages/entitlement test:    Start at  12:53:21
+packages/entitlement test:    Duration  1.34s (transform 287ms, setup 0ms, collect 466ms, tests 148ms, environment 0ms, prepare 190ms)
+packages/agent test:  ✓ src/loop/policy.test.ts (21 tests) 268ms
+packages/llm test:  ✓ src/settings.test.ts (35 tests) 265ms
+packages/entitlement test: Done
+packages/resume-doc test$ vitest run
+packages/resume-doc test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/resume-doc
+packages/resume-doc test:  ✓ src/normalize.test.ts (4 tests) 8ms
+packages/resume-doc test:  ✓ src/model.test.ts (7 tests) 13ms
+packages/resume-doc test:  ✓ src/editor-session.test.ts (14 tests) 7ms
+packages/resume-doc test:  ✓ src/editor-ops.test.ts (42 tests) 10ms
+packages/resume-doc test:  ✓ src/template-library.test.ts (12 tests) 20ms
+packages/resume-doc test:  ✓ src/schema.test.ts (16 tests) 8ms
+packages/resume-doc test:  ✓ src/design.test.ts (19 tests) 34ms
+packages/agent test:  ✓ src/loop/pause.test.ts (20 tests) 1125ms
+packages/agent test:    ✓ 5.5-05 重启后那张没定局的单带着老单号回来 > 重推的这一等吃本实例的超时：到点把账落成 timed-out、卡片收掉，全程没有放行  309ms
+packages/resume-doc test:  ✓ src/richtext.test.ts (33 tests) 4ms
+packages/resume-doc test:  ✓ src/diff.test.ts (6 tests) 17ms
+packages/resume-doc test:  ✓ src/preference.test.ts (6 tests) 112ms
+packages/resume-doc test:  ✓ src/snapshot-store.test.ts (16 tests) 193ms
+packages/plugins test:  ✓ src/plugins.test.ts (5 tests) 1342ms
+packages/plugins test:    ✓ 插件管理策略层 > 反复启停不泄漏：第二轮起指标一动不动（spec 1.5-08）  1312ms
+packages/plugins test:  Test Files  1 passed (1)
+packages/plugins test:       Tests  5 passed (5)
+packages/plugins test:    Start at  12:53:21
+packages/plugins test:    Duration  2.40s (transform 167ms, setup 0ms, collect 315ms, tests 1.34s, environment 0ms, prepare 157ms)
+packages/resume-doc test:  ✓ src/export-service.test.ts (13 tests) 276ms
+packages/resume-doc test:  ✓ src/import.test.ts (6 tests) 5ms
+packages/resume-doc test:  ✓ src/editor-service.test.ts (17 tests) 291ms
+packages/resume-doc test:  ✓ src/print.test.ts (19 tests) 4ms
+packages/resume-doc test:  ✓ src/template.test.ts (32 tests) 7ms
+packages/resume-doc test:  ✓ src/doc-store.test.ts (25 tests) 350ms
+packages/resume-doc test:  ✓ src/period.test.ts (21 tests) 7ms
+packages/plugins test: Done
+packages/scheduler test$ vitest run
+packages/resume-doc test:  Test Files  18 passed (18)
+packages/resume-doc test:       Tests  308 passed (308)
+packages/resume-doc test:    Start at  12:53:23
+packages/resume-doc test:    Duration  999ms (transform 941ms, setup 0ms, collect 3.93s, tests 1.36s, environment 2ms, prepare 1.22s)
+packages/resume-doc test: Done
+packages/sessions test$ vitest run
+packages/scheduler test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/scheduler
+packages/sessions test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/sessions
+packages/agent test:  ✓ src/loop/loop.test.ts (74 tests) 2060ms
+packages/sessions test:  ✓ src/probe.test.ts (21 tests) 9ms
+packages/sessions test: node:internal/modules/cjs/loader:1520
+packages/sessions test:   throw err;
+packages/sessions test:   ^
+packages/sessions test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/sessions/install.js'
+packages/sessions test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/sessions test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/sessions test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/sessions test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/sessions test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/sessions test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/sessions test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/sessions test:     at node:internal/main/run_main_module:33:47 {
+packages/sessions test:   code: 'MODULE_NOT_FOUND',
+packages/sessions test:   requireStack: []
+packages/sessions test: }
+packages/sessions test: Node.js v24.19.0
+packages/sessions test: stdout | src/consent-store.test.ts > 签字表的迁移（spec 2.7-06） > 号段是 6，且不与前五张表撞号
+packages/sessions test: Downloading Electron binary...
+packages/sessions test:  ✓ src/consent-store.test.ts (7 tests) 53ms
+packages/sessions test:  Test Files  2 passed (2)
+packages/sessions test:       Tests  28 passed (28)
+packages/sessions test:    Start at  12:53:24
+packages/sessions test:    Duration  414ms (transform 140ms, setup 0ms, collect 258ms, tests 62ms, environment 0ms, prepare 99ms)
+packages/scheduler test:  ✓ src/scheduler.test.ts (21 tests) 123ms
+packages/scheduler test:  Test Files  1 passed (1)
+packages/scheduler test:       Tests  21 passed (21)
+packages/scheduler test:    Start at  12:53:24
+packages/scheduler test:    Duration  650ms (transform 225ms, setup 0ms, collect 311ms, tests 123ms, environment 0ms, prepare 34ms)
+packages/sessions test: Done
+packages/workflow test$ vitest run
+packages/scheduler test: Done
+packages/llm test:  ✓ src/llm.test.ts (16 tests) 2465ms
+packages/llm test:    ✓ llm.chat 的请求形态与解析（实测契约，plan §12.6 S3） > 单次覆盖 timeoutMs 换掉的是这一发的等待上限，不是请求体里的一个键  2408ms
+packages/llm test:  Test Files  4 passed (4)
+packages/llm test:       Tests  69 passed (69)
+packages/llm test:    Start at  12:53:21
+packages/llm test:    Duration  3.60s (transform 445ms, setup 0ms, collect 1.52s, tests 2.81s, environment 0ms, prepare 890ms)
+packages/llm test: Done
+packages/workflow test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/workflow
+packages/workflow test:  ✓ src/graph-edit.test.ts (18 tests) 3ms
+packages/workflow test:  ✓ src/machine.test.ts (35 tests) 4ms
+packages/workflow test:  ✓ src/executors.test.ts (3 tests) 7ms
+packages/workflow test:  ✓ src/graph.test.ts (10 tests) 8ms
+packages/workflow test:  ✓ src/graph-advance.test.ts (13 tests) 4ms
+packages/workflow test:  ✓ src/plan.test.ts (20 tests) 10ms
+packages/workflow test:  ✓ src/operators.test.ts (14 tests) 8ms
+packages/workflow test:  ✓ src/terminal-state.test.ts (9 tests) 2ms
+packages/workflow test:  ✓ src/retry-policy.test.ts (8 tests) 2ms
+packages/workflow test:  ✓ src/graph-service.test.ts (9 tests) 102ms
+packages/workflow test:  ✓ src/plan-store.test.ts (19 tests) 120ms
+packages/workflow test:  ✓ src/run-store.test.ts (27 tests) 255ms
+packages/agent test:  ✓ src/agent.test.ts (61 tests) 4440ms
+packages/agent test:    ✓ chat.session 会话与流式（1.11-02 / 03 / 08 / 13） > 发消息得到分片增量，字数一片比一片多（1.11-03）  309ms
+packages/agent test:    ✓ chat.session 会话与流式（1.11-02 / 03 / 08 / 13） > 落库的只有已完成的消息：流式中读快照能看见内存里那一条  1780ms
+packages/agent test:    ✓ 会话操作：标题、删除与会话历史（spec 5.6-07） > 会话历史可以选中旧会话继续，也可以删掉历史里不是当前的那一条  374ms
+packages/workflow test:  ✓ src/runner.test.ts (63 tests) 3280ms
+packages/workflow test:    ✓ 卸载让出（1.10-04 / 2.4-07 / 2.4-09） > 卸载把退避定时器一起带走：句柄数不高于基线，且不等到退避睡满才返回（2.4-09 的「无悬挂句柄」）  1298ms
+packages/workflow test:  Test Files  13 passed (13)
+packages/workflow test:       Tests  248 passed (248)
+packages/workflow test:    Start at  12:53:25
+packages/workflow test:    Duration  3.82s (transform 619ms, setup 0ms, collect 2.52s, tests 3.81s, environment 1ms, prepare 693ms)
+packages/workflow test: Done
+packages/agent test:  ✓ src/loop/evidence.test.ts (23 tests) 23718ms
+packages/agent test:    ✓ 逐前缀的确定结局（5.7-02 的判据核心） > 每一条引用要么给正文、要么给原因，绝不两者都给或都不给，也不抛  1061ms
+packages/agent test:    ✓ 逐前缀的确定结局（5.7-02 的判据核心） > 不认识的引用不编读数，只说「路由表里没有这一类」  1029ms
+packages/agent test:    ✓ 逐前缀的确定结局（5.7-02 的判据核心） > 只有前缀没有 id 的引用算「没有可定点读的东西」，不去问任何归属服务  1023ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 账本行给动作与对象，并把行上的时刻原样带出  1027ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 岗位引用两种形状都能读到，正文含薪资、要求条数与回复状态  1024ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 简历工作副本只给结构读数，并明说全文在简历页——不在这里搬第二份全文  1027ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 导入记录带出待确认条目，条数超过展示上限时只说「另 N 条」  1023ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 生成回执读的是库里那一行，含模型、依据条目数与未通过项  1029ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 实体与切片两种前缀共用 `evidenceBody`，正文原样带出、出处缺失也如实说  1031ms
+packages/agent test:    ✓ 读到正文的那几支给的是归属读数 > 简历快照给元数据而不是第二份全文  1033ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 会话引用说明登录态是现读的，不假装有一条正文  1035ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 搜索引用说明它是入口而不是记录 id，并把人指向逐条引用  1032ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 页面与帧引用说明 DOM 没随引用落盘，并说明截图归工作流那份  1028ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 带时刻的 snapshot 引用按时刻解释，并把那个时刻原样交回界面格式化  1026ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 归属服务没挂载时说「没挂载」，与「库里没有这一行」是两句不同的话  1033ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 服务在、库里那一行不在：每类前缀说的都是「查不到这一条」而不是「没挂载」  1035ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 工作副本读回校验失败时把校验那句原话带出来，不折成一句「读不到」  1028ms
+packages/agent test:    ✓ 读不到正文的那几支，各有各的一句原因 > 归属服务自己抛出来时收成一句读数，异常不穿到进程边界外  1035ms
+packages/agent test:    ✓ 归属没验过就不读别人的记录 > run 查不到时不给任何归属读数  1026ms
+packages/agent test:    ✓ 归属没验过就不读别人的记录 > 步下标不是整数或越界时算「不属于这一步」  1029ms
+packages/agent test:    ✓ 归属没验过就不读别人的记录 > 那一步没登记过的引用被挡下，不去查归属服务  1035ms
+packages/agent test:    ✓ 归属没验过就不读别人的记录 > 空引用直接被拒，不去问 run 也不去问任何服务  1033ms
+packages/agent test:    ✓ 这只口不建表、不改任何东西 > 挂上它之后号段里仍然只有循环那一份（它自己不占迁移号段）  1035ms
+packages/agent test:  Test Files  9 passed (9)
+packages/agent test:       Tests  241 passed (241)
+packages/agent test:    Start at  12:53:21
+packages/agent test:    Duration  24.94s (transform 805ms, setup 0ms, collect 3.11s, tests 31.72s, environment 1ms, prepare 1.20s)
+packages/agent test: Done
+packages/browser test$ vitest run
+packages/renderer test$ vitest run
+packages/resume-kb test$ vitest run
+packages/outbound test$ vitest run
+packages/outbound test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/outbound
+packages/browser test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/browser
+packages/resume-kb test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/resume-kb
+packages/renderer test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/renderer
+packages/renderer test:  ✓ src/platform-choice.test.ts (8 tests) 1ms
+packages/renderer test:  ✓ src/career-journey-prototype.test.ts (4 tests) 8ms
+packages/renderer test:  ✓ src/ui/markdown.test.ts (17 tests) 8ms
+packages/renderer test:  ✓ src/companion-handoff.test.ts (3 tests) 4ms
+packages/renderer test:  Test Files  4 passed (4)
+packages/renderer test:       Tests  32 passed (32)
+packages/renderer test:    Start at  12:53:47
+packages/renderer test:    Duration  932ms (transform 198ms, setup 0ms, collect 392ms, tests 22ms, environment 0ms, prepare 689ms)
+packages/outbound test:  ✓ src/deliver-timing.test.ts (21 tests) 32ms
+packages/resume-kb test:  ✓ src/requirements.test.ts (11 tests) 8ms
+packages/outbound test:  ✓ src/claims.test.ts (8 tests) 2ms
+packages/outbound test:  ✓ src/prompts.test.ts (9 tests) 5ms
+packages/renderer test: Done
+packages/browser test:  ✓ src/platform-contract.test.ts (48 tests) 16ms
+packages/browser test:  ✓ src/mask-script.test.ts (8 tests) 40ms
+packages/outbound test:  ✓ src/throttle.test.ts (14 tests) 84ms
+packages/browser test:  ✓ src/locate-service.test.ts (29 tests) 47ms
+packages/browser test:  ✓ src/act-service-validation.test.ts (3 tests) 7ms
+packages/outbound test:  ✓ src/outbound.test.ts (7 tests) 138ms
+packages/outbound test:  ✓ src/delivery-record-store.test.ts (15 tests) 242ms
+packages/browser test:  ✓ src/node-executors.test.ts (16 tests) 39ms
+packages/browser test:  ✓ src/locator-script.test.ts (44 tests) 282ms
+packages/browser test:  ✓ src/platform-registry.test.ts (9 tests) 29ms
+packages/browser test:  ✓ src/act-service.test.ts (36 tests) 205ms
+packages/outbound test:  ✓ src/script.test.ts (40 tests) 442ms
+packages/browser test:  ✓ src/page-script.test.ts (8 tests) 5ms
+packages/browser test:  ✓ src/page-service.test.ts (14 tests) 67ms
+packages/browser test: node:internal/modules/cjs/loader:1520
+packages/browser test:   throw err;
+packages/browser test:   ^
+packages/browser test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/browser/install.js'
+packages/browser test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/browser test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/browser test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/browser test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/browser test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/browser test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/browser test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/browser test:     at node:internal/main/run_main_module:33:47 {
+packages/browser test:   code: 'MODULE_NOT_FOUND',
+packages/browser test:   requireStack: []
+packages/browser test: }
+packages/browser test: Node.js v24.19.0
+packages/browser test: stdout | src/takeover-service.test.ts > 接管态单源（spec 5.5-02） > 挂载即「未接管」：三个字段同生同灭，界面不可能读到没接管却带一个原因
+packages/browser test: Downloading Electron binary...
+packages/browser test:  ✓ src/extract-script.test.ts (11 tests) 8ms
+packages/browser test:  ✓ src/frame-channel.test.ts (14 tests) 6ms
+packages/browser test:  ✓ src/input-channel.test.ts (22 tests) 10ms
+packages/browser test:  ✓ src/locator-spec.test.ts (19 tests) 7ms
+packages/browser test:  ✓ src/navigate-policy.test.ts (10 tests) 2ms
+packages/outbound test:  ✓ src/greet.test.ts (29 tests) 699ms
+packages/browser test:  ✓ src/takeover-service.test.ts (17 tests) 354ms
+packages/resume-kb test:  ✓ src/fact-check.test.ts (25 tests) 8ms
+packages/resume-kb test:  ✓ src/sections.test.ts (42 tests) 8ms
+packages/resume-kb test:  ✓ src/generate-reorder.test.ts (11 tests) 10ms
+packages/resume-kb test:  ✓ src/requirements-compare.test.ts (26 tests) 7ms
+packages/browser test:  ✓ src/risk-service.test.ts (14 tests) 688ms
+packages/browser test:    ✓ 风控信号观测（spec 2.7-01） > 等不到装载事件不判「没风控」：超时之后仍然读一次正文  653ms
+packages/resume-kb test:  ✓ src/gap-calibration.test.ts (13 tests) 102ms
+packages/browser test:  Test Files  17 passed (17)
+packages/browser test:       Tests  322 passed (322)
+packages/browser test:    Start at  12:53:47
+packages/browser test:    Duration  2.61s (transform 1.95s, setup 0ms, collect 10.94s, tests 1.81s, environment 1ms, prepare 3.55s)
+packages/browser test: Done
+packages/resume-kb test:  ✓ src/skill-service.test.ts (8 tests) 126ms
+packages/resume-kb test:  ✓ src/search.test.ts (29 tests) 5ms
+packages/resume-kb test:  ✓ src/requirements-model.test.ts (13 tests) 9ms
+packages/resume-kb test:  ✓ src/generate-model.test.ts (17 tests) 7ms
+packages/outbound test:  ✓ src/deliver.test.ts (55 tests) 1258ms
+packages/resume-kb test:  ✓ src/entities.test.ts (9 tests) 7ms
+packages/outbound test:  Test Files  9 passed (9)
+packages/outbound test:       Tests  198 passed (198)
+packages/outbound test:    Start at  12:53:47
+packages/outbound test:    Duration  2.94s (transform 1.39s, setup 0ms, collect 5.72s, tests 2.90s, environment 1ms, prepare 2.61s)
+packages/resume-kb test:  ✓ src/evidence.test.ts (13 tests) 5ms
+packages/resume-kb test:  ✓ src/vectors.test.ts (13 tests) 3ms
+packages/resume-kb test:  ✓ src/skill.test.ts (10 tests) 4ms
+packages/outbound test: Done
+packages/resume-kb test:  ✓ src/source.test.ts (16 tests) 627ms
+packages/resume-kb test:    ✓ 4.1-01 格式判定 > 抽取不会破坏调用方手里的字节（pdf.js 会移交 ArrayBuffer，实测过）  377ms
+packages/resume-kb test:  ✓ src/chunks.test.ts (17 tests) 5ms
+packages/resume-kb test:  ✓ src/parse-service.test.ts (34 tests) 1010ms
+packages/resume-kb test:  ✓ src/gap-service.test.ts (27 tests) 990ms
+packages/resume-kb test:  ✓ src/generate-service.test.ts (48 tests) 1771ms
+packages/resume-kb test:  ✓ src/profile-service.test.ts (97 tests) 2135ms
+packages/resume-kb test:  Test Files  20 passed (20)
+packages/resume-kb test:       Tests  479 passed (479)
+packages/resume-kb test:    Start at  12:53:47
+packages/resume-kb test:    Duration  4.93s (transform 3.89s, setup 0ms, collect 19.58s, tests 6.85s, environment 2ms, prepare 3.71s)
+packages/resume-kb test: Done
+packages/platform-boss test$ vitest run
+packages/platform-boss test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/platform-boss
+packages/platform-boss test:  ✓ src/normalize.test.ts (14 tests) 4ms
+packages/platform-boss test:  ✓ src/index.test.ts (15 tests) 12ms
+packages/platform-boss test:  ✓ src/adapter.test.ts (67 tests) 14ms
+packages/platform-boss test:  ✓ src/conversation-store.test.ts (19 tests) 197ms
+packages/platform-boss test:  ✓ src/jd-store.test.ts (33 tests) 244ms
+packages/platform-boss test:  ✓ src/jd-capture.test.ts (36 tests) 408ms
+packages/platform-boss test:  Test Files  6 passed (6)
+packages/platform-boss test:       Tests  184 passed (184)
+packages/platform-boss test:    Start at  12:53:52
+packages/platform-boss test:    Duration  866ms (transform 408ms, setup 0ms, collect 1.32s, tests 879ms, environment 0ms, prepare 325ms)
+packages/platform-boss test: Done
+packages/main test$ vitest run
+packages/main test:  RUN  v3.2.7 /Users/dcc/deepseek-harness-workspece/auto-cc/packages/main
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/schedule-gate-link.test.ts > 5.7-08 额度见底：到点即跳过并留下那一行账（真闸门 mode:daily + 真账本） > 打招呼今日 1 次已用尽 → 不起 run、拒因是闸门原话，而"记账"落在触发记录而不是用量表
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/editor-link.test.ts > 装配对账（plan §8.3 的两处登记） > 真上下文里挂起来的名字就是 `resume.editor`，且没往 agent 工具面登记任何一只手
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/metrics-link.test.ts > 5.8-01 五级从真库数得出 > 四只手在真服务上都在，且区间口径数得出行内条数
+packages/main test: Downloading Electron binary...
+packages/main test: stdout | src/metrics-scale.test.ts
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/three-gate-link.test.ts > 5.3-11 三道闸门缺一即不外发（真循环 + 真判定口 + 真暂停通道 + 真闸门账本） > 第一维关掉：档位 suggest → 判定口拒掉且连确认单都不开，零副作用
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/sediment-link.test.ts > 5.4-01 / 09 一次跑通的对话存成一条计划（真投影 + 真落库） > 预览说能沉淀 → 保存真写出 `workflow_plans` 一行，并带回来时的 runId
+packages/main test: Downloading Electron binary...
+packages/main test:  ✓ src/editor-link.test.ts (13 tests) 139ms
+packages/main test:  ✓ src/metrics-link.test.ts (8 tests) 160ms
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/generate-link.test.ts > 4.5-b 生成轨的真装配（号段 15 / 双入口 / 不写工作副本 / 镜像不漂移） > 号段 15 与 7 / 11～14 一起装得起来，一次生成落一行可复盘的记录（4.5-10）
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/evidence-link.test.ts > 5.7-02 七只归属服务的读口在真装配里都点得着 > 方法名与返回形状都在（结构接口与真服务不漂移）
+packages/main test: Downloading Electron binary...
+packages/main test: stdout | src/resume-remove-link.test.ts > 经网关删得动，且回执的每个数都来自库 > `kb.profile.removeDoc` 切成服务与方法，方法在挂起来的实例上真是函数
+packages/main test: Downloading Electron binary...
+packages/main test: stdout | src/revise-link.test.ts > 经网关核对要素 > 切成服务 `kb.profile` + 方法 `revise` / `review`，挂起来的实例上真是函数
+packages/main test: Downloading Electron binary...
+packages/main test: stdout | src/gap-quota-link.test.ts > 4.4-09 缺口报告不误扣额度（真闸门 + 真账本） > 三条日额度都只剩一次且 search 已用尽：报告照样产出，账本一行都不多
+packages/main test: Downloading Electron binary...
+packages/main test:  ✓ src/schedule-gate-link.test.ts (8 tests) 431ms
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/delivery-snapshot-link.test.ts > 3.7-02 投递记录 ↔ 快照的关联查询 > 一次投递一行经过 JOIN 一行快照，答得出「递给了哪个 JD」与「当时是哪一版内容」
+packages/main test: Downloading Electron binary...
+packages/main test: node:internal/modules/cjs/loader:1520
+packages/main test:   throw err;
+packages/main test:   ^
+packages/main test: Error: Cannot find module '/Users/dcc/deepseek-harness-workspece/auto-cc/packages/main/install.js'
+packages/main test:     at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)
+packages/main test:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+packages/main test:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+packages/main test:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1122:12)
+packages/main test:     at Module._load (node:internal/modules/cjs/loader:1294:5)
+packages/main test:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+packages/main test:     at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+packages/main test:     at node:internal/main/run_main_module:33:47 {
+packages/main test:   code: 'MODULE_NOT_FOUND',
+packages/main test:   requireStack: []
+packages/main test: }
+packages/main test: Node.js v24.19.0
+packages/main test: stdout | src/graph-link.test.ts > 网关切得动这两条路径（spec 5.10-10 的界面半边） > `workflow.graph.load` 切成服务 `workflow.graph` + 方法 `load` 并调得通
+packages/main test: Downloading Electron binary...
+packages/main test:  ✓ src/graph-link.test.ts (4 tests) 46ms
+packages/main test:  ✓ src/delivery-snapshot-link.test.ts (3 tests) 71ms
+packages/main test:  ✓ src/three-gate-link.test.ts (4 tests) 454ms
+packages/main test:  ✓ src/sediment-link.test.ts (12 tests) 478ms
+packages/main test: stdout | src/metrics-scale.test.ts > 5.8-05 万级记录下的计时与不做无界全表扫描 > `FunnelView.tookMs` 在万级库上有记录且落在预算内（中位数与最大值各一条）
+packages/main test: 5.8-05 万级计时实测（10000 行）：近 7 天 tookMs=1/1/1/1/1（中位 1）· 整段 31 天 tookMs=1/1/2/1/1（最差 2）
+packages/main test: stdout | src/metrics-scale.test.ts > 5.8-05 万级记录下的计时与不做无界全表扫描 > 四条计数 SQL 的查询计划都走时间索引，没有一条是全表扫（SCAN）
+packages/main test: 5.8-05 查询计划：
+packages/main test:   jd.store.countCaptured: SEARCH jobs USING COVERING INDEX jobs_captured_at (captured_at>? AND captured_at<?)
+packages/main test:   usage.ledger.countAction: SEARCH usage_ledger USING COVERING INDEX usage_ledger_action_ts (action=? AND ts>? AND ts<?)
+packages/main test:   conversation.store.repliedJobCount: USE TEMP B-TREE FOR count(DISTINCT) / SEARCH conversation_messages USING INDEX conversation_read_at (read_at>? AND read_at<?)
+packages/main test:   outbound.deliveries.count: SEARCH delivery_records USING COVERING INDEX idx_delivery_records_ts (ts>? AND ts<?)
+packages/main test:  ✓ src/metrics-scale.test.ts (5 tests) 604ms
+packages/main test:  ✓ src/gap-quota-link.test.ts (4 tests) 464ms
+packages/main test:  ✓ src/revise-link.test.ts (5 tests) 464ms
+packages/main test:  ✓ src/resume-remove-link.test.ts (6 tests) 483ms
+packages/main test:  ✓ src/evidence-link.test.ts (9 tests) 517ms
+packages/main test:  ✓ src/pdf-link.test.ts (8 tests) 12ms
+packages/main test:  ✓ src/generate-link.test.ts (11 tests) 657ms
+packages/main test:  Test Files  14 passed (14)
+packages/main test:       Tests  100 passed (100)
+packages/main test:    Start at  12:53:53
+packages/main test:    Duration  1.47s (transform 1.13s, setup 0ms, collect 6.05s, tests 4.98s, environment 1ms, prepare 784ms)
+packages/main test: Done

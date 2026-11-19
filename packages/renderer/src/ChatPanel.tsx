@@ -15,6 +15,7 @@ import {
   Gauge,
   ListOrdered,
   LoaderCircle,
+  Route,
   Settings2,
   Sparkles,
   Square,
@@ -33,6 +34,7 @@ import type {
 } from '@auto-cc/shared';
 import { AgentPauseCards } from './AgentPauseCards';
 import { AgentPolicyPanel } from './AgentPolicyPanel';
+import { CareerJourneyPrototype } from './CareerJourneyPrototype';
 import { AgentRunPanel } from './AgentRunPanel';
 import { ChatCompactionBanner } from './ChatCompactionBanner';
 import { ChatSessionBar } from './ChatSessionBar';
@@ -352,6 +354,8 @@ export function ChatPanel() {
    * 抽屉仍然是**浮层**——读它的时候版面一像素不动，不必把输入卡往上顶。
    */
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  /** P10 的本地主链原型与消息流都只改 display：返回后草稿、消息和滚动位置不丢。 */
+  const [isJourneyOpen, setIsJourneyOpen] = useState(false);
   /** 当前对话通道用的模型名（稿 `.pill` 右侧那一颗的读数）；没配齐时为 undefined，画「未配置」那句。 */
   const [chatModel, setChatModel] = useState<string>();
   /** 模型气泡的候选：各家实例下已入库的模型；打开气泡时现问，不在本地存第二份清单（§2.7）。 */
@@ -681,20 +685,35 @@ export function ChatPanel() {
         session={snapshot?.session}
         read={read}
         rightActions={
-          <DeskButton
-            action="agent-policy-toggle"
-            variant={isSettingsOpen ? 'solid' : 'ghost'}
-            compact
-            className={ICON_CELL_CLASS}
-            tip={t('chat.settings.title')}
-            tipPlacement="bottom"
-            tipAlign="end"
-            markers={{ 'desk-panel': isSettingsOpen ? 'policy' : 'none' }}
-            onClick={() => setIsSettingsOpen((previous) => !previous)}
-          >
-            <Settings2 size={13} />
-            <span className="sr-only">{t('chat.settings.title')}</span>
-          </DeskButton>
+          <>
+            <DeskButton
+              action="journey-toggle"
+              variant={isJourneyOpen ? 'solid' : 'ghost'}
+              compact
+              className={ICON_CELL_CLASS}
+              tip={t('journey.prototype.entry')}
+              tipPlacement="bottom"
+              markers={{ open: String(isJourneyOpen) }}
+              onClick={() => setIsJourneyOpen((previous) => !previous)}
+            >
+              <Route size={13} />
+              <span className="sr-only">{t('journey.prototype.entry')}</span>
+            </DeskButton>
+            <DeskButton
+              action="agent-policy-toggle"
+              variant={isSettingsOpen ? 'solid' : 'ghost'}
+              compact
+              className={ICON_CELL_CLASS}
+              tip={t('chat.settings.title')}
+              tipPlacement="bottom"
+              tipAlign="end"
+              markers={{ 'desk-panel': isSettingsOpen ? 'policy' : 'none' }}
+              onClick={() => setIsSettingsOpen((previous) => !previous)}
+            >
+              <Settings2 size={13} />
+              <span className="sr-only">{t('chat.settings.title')}</span>
+            </DeskButton>
+          </>
         }
       />
 
@@ -710,6 +729,8 @@ export function ChatPanel() {
         onRelease={() => void takeover.release()}
       />
 
+      <CareerJourneyPrototype visible={isJourneyOpen} onClose={() => setIsJourneyOpen(false)} />
+
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
           消息流留 120px 地板：5.7-d 那条实测（737px 高的窗口里没有地板时流会被挤成 24px 的一条缝）
           说的就是这一层，如今流上方只剩顶栏与那一行接管读数，地板照留。
@@ -717,7 +738,7 @@ export function ChatPanel() {
       <div
         ref={scrollRef}
         data-testid="chat-scroll"
-        className="flex min-h-[120px] flex-1 flex-col overflow-y-auto px-4 pb-[18px] pt-1"
+        className={`${isJourneyOpen ? 'hidden' : 'flex'} min-h-[120px] flex-1 flex-col overflow-y-auto px-4 pb-[18px] pt-1`}
       >
         <ChatCompactionBanner compaction={compaction} />
         {turns.length === 0 && !agentRun.run && !workflowRunView && agentRun.notice === undefined ? (

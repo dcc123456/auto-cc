@@ -1,0 +1,15 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-interview.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-interview.js
+
+{
+  "draft": "样例草稿 · 未写正式账本fixture.interview.fixture.job.frontend.v1",
+  "resumeVersion": "fixture.resume.v1",
+  "jdVersion": "fixture.jd.frontend.v1",
+  "tailoredVersion": "fixture.resume.v1+fixture.jd.frontend.v1",
+  "outboundAttempts": "0"
+}

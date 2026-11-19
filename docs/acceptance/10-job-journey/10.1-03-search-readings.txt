@@ -1,0 +1,30 @@
+
+> auto-cc@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm --filter @auto-cc/testing harness eval --url 5173 --expr-file tmp/p10/v-search.js
+
+
+> @auto-cc/testing@0.1.0 harness /Users/dcc/deepseek-harness-workspece/auto-cc/packages/testing
+> tsx src/cli.ts eval --url 5173 --expr-file tmp/p10/v-search.js
+
+{
+  "resumeVersion": "fixture.resume.v1",
+  "jobCount": 3,
+  "jobs": [
+    {
+      "id": "fixture.job.frontend",
+      "jdVersion": "fixture.jd.frontend.v1",
+      "text": "本地样例岗位前端工程师（样例 A）虚构公司甲fixture.jd.frontend.v1负责组件化页面、性能优化与核心流程回归。组件拆分经历对应 JD-A.R1性能测量记录对应 JD-A.R2JD-A.R1JD-A.R2JD-A.R3选这个岗位"
+    },
+    {
+      "id": "fixture.job.platform",
+      "jdVersion": "fixture.jd.platform.v1",
+      "text": "本地样例岗位Web 平台工程师（样例 B）虚构公司乙fixture.jd.platform.v1建设可复用 Web 能力，关注性能、稳定性与开发效率。跨端交付经历对应 JD-B.R1测试与复现记录对应 JD-B.R3JD-B.R1JD-B.R2JD-B.R3选这个岗位"
+    },
+    {
+      "id": "fixture.job.quality",
+      "jdVersion": "fixture.jd.quality.v1",
+      "text": "本地样例岗位前端质量工程师（样例 C）虚构公司丙fixture.jd.quality.v1负责前端质量体系、性能治理与自动化回归。核心流程测试对应 JD-C.R1性能优化与测量对应 JD-C.R2JD-C.R1JD-C.R2JD-C.R3选这个岗位"
+    }
+  ],
+  "outboundAttempts": "0"
+}
