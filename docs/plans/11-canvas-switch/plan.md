@@ -14,7 +14,7 @@
 3. **`setZoomFactor` 走 bridge 白名单**并过四门禁；非法值结构化失败，不静默。
 4. **回滚是双路**：① localStorage `auto-cc.kernel-view-mode = 'sidebar'` 走旧 8.8 分支——旧代码整段保留在该分支
    （门下省二选一中选「保留」）；② 必要时 revert 本片实现提交，回到右栏态。
-5. **2.1-10 由本片认领**：宽（≥1400px）窄（1000px）两档判据；V 证据**必须真实修改操作系统窗口尺寸**。
+5. **2.1-10 由本片认领**：宽（≥1409px）窄（1000px）两档判据；V 证据**必须真实修改操作系统窗口尺寸**。
 6. **四屏判据**：切回四屏（视图隐藏）时 `innerWidth ≈ 左轨 + 主区`，误差 ≤1px（56/184 两档各一次）。
 7. 中书省修订与门下省准奏的退役/改写表见 §2，逐条给替代判据；本文件不删任何历史条目。
 
@@ -31,8 +31,15 @@
   主进程 `KERNEL_VIEW_WIDTH_RATIO = 0.38` 兜底；`check-renderer-conventions.ts` 第 4 节钉三条同源字面量。
 - **机检事实**：`WebContents.setZoomFactor(factor: number): void` 在 Electron 44.4.5
   `electron.d.ts:18724` 有声明（一手读数，非文档转述）；运行期形状由实现片活体核验（§6.2）。
-- **活体基线输入**：工部正在 10222 取当前几何读数（窗口宽 / 槽位 bounds / 空白错位现象），
-  回奏后归档为本片验收记录的现状输入；M1 文档不阻塞在该读数上，实现片的判据以本 spec 为准。
+- **活体基线（工部 10222 已回奏，2026-11-19，真实 BOSS 屏）**：窗口内容区 1200×772 DIP、DPR=2 正确落到页面、
+  `visualViewport.scale=1`；右栏槽位 bounds `x=745, y=88, w=455, h=654`，BOSS 页 `innerWidth=455` 而
+  `scrollWidth=1224` → **横向裁掉 769px（63%）**；槽位摆位本身无歪斜、无空白错位（`slotFits=true`），
+  错的是**槽位语义**——455px 装不下 1224px 定宽桌面布局。resize 重排通道（`win.on('resize')→layoutKernelView`
+  - `ResizeObserver` 重报，8.8-03/09 那条）实测已存在且工作正常，11 片不新建第二条通道。
+    **反向数字（坐实「必须主画布」）**：保持右栏语义要 BOSS 不裁切需 `zoom≈0.37`，字形不可用；
+    换主画布后本窗（内容区 1200、左轨 184）视图约 1016 → zoom≈0.83，≥1409 窗 → zoom=1 原生排布。
+    两条如实边界：① 该屏 BOSS **未登录**，页面被引到登录页（`_security_check`）——几何读数有效，
+    「桌面布局完整」判据须登录态窗口、与 11-05 同批在场取；② 工部读数与探针在 `tmp/dev-observe/`，未入库。
 
 ## 2. 承接表：退役 / 改写 / 替代判据（逐条）
 
@@ -96,8 +103,12 @@
 - 新桥方法 `shell.setKernelViewZoomFactor`（args `[zoom: number]`，returns `ShellStatus`，与 `setKernelViewBounds` 同族）：
   校验有限、`0 < z ≤ 1`，否则 `KERNEL_VIEW_ZOOM_INVALID` 保留上一份；白名单登记，绕过 gate 的直调有测试使其失败（§7.3 同款形状）。
 - zoom 与 bounds 在同一条 observer 回调里算完一起报，不各开通道；换平台/换视图时现读适配值。
-- 判据形状（宽窄两档，视图宽记 `w`）：`zoom = min(1, w/1224)`；页面 CSS 布局视口 ≈ `w / zoom`，
-  窄档下该值必须 ≥1224 且 BOSS `scrollWidth ≤ clientWidth`、页面可自主滚动（`scrollHeight > clientHeight`，非 app 代滚）。
+- 判据形状（两档数字与 spec 11-04/11-05 逐字一致，视图宽记 `w`）：**窄档**窗口 1000（< 1120 换档点 → 左轨 56）
+  → `w = 1000−56 = 944` → `zoom = 944/1224 ≈ 0.771`，页面 CSS 布局视口 ≈ `w / zoom` ≥ 1224 且 BOSS
+  `scrollWidth ≤ clientWidth`、页面可自主滚动（`scrollHeight > clientHeight`，非 app 代滚）；
+  **宽档**窗口 ≥ 1409（左轨 184，`1409−184 = 1225 ≥ 1224`）→ `zoom = min(1, 1225/1224) = 1.0` 原生排布。
+  本窗 1200（左轨 184）→ `w≈1016` → zoom≈0.83，为过渡读数。
+  **V 类布局判据须在登录态 BOSS 窗口取值，且与 11-05 同批在场**；`_security_check` 登录页读数只能证几何，不得冒充布局完整。
 - **命中负对照（必须如实登记的风险）**：zoom≠1 改变 CSS px ↔ 设备 px 映射，CDP 输入与接管点的坐标口径要重新量。
   实现片须在皇上在场时验证「缩放后真实鼠标仍能点中站点控件」并把读数归档；不通过则本片降级为
   「canvas 无缩放 + 在场用宽窗」，并把该缺口如实写回 spec，不得静默。

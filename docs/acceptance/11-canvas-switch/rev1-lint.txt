@@ -1,0 +1,22 @@
+
+> auto-cc@0.1.0 lint /Users/dcc/deepseek-harness-workspece/auto-cc
+> eslint . && tsx scripts/check-renderer-conventions.ts && tsx scripts/check-knowledge-pack.ts && tsx scripts/check-llm-single-entry.ts && tsx scripts/check-compliance-redlines.ts && tsx scripts/check-dependency-floor.ts && tsx scripts/check-prompts.ts && tsx scripts/check-agent-model-authority.ts && tsx scripts/check-tool-contract.ts && tsx scripts/check-scheduler-no-external-cron.ts && tsx scripts/check-dashboard-readonly.ts && tsx scripts/check-licenses.ts && tsx scripts/check-lexicon.ts
+
+✔ 渲染层规范检查通过（2 个语言包，84 个源文件，派生文案 50 条逐包齐备；src/ui/** 之外裸原生控件 0 只、语气洗底 0 处、≥12px 灰阶档 0 处、hover 挂到不可点那一格 0 处、按不动却不带原因码那一格 0 处、src/ui/** 内画法未走具名档位的按钮 0 只、占位空 span 0 只，四档语气文字档 × 两案 × 五级承载面 × 两种同色底、实底档 × 两案 × 钉死字色全部 ≥4.5:1）
+✔ 站点知识包检查通过（扫描 1 个平台包，选择器只在知识包目录里）
+✔ LLM 入口唯一性检查通过（扫描 512 个文件，llm.chat / llm.embed 各自声明者唯一且未碰传输骨架，模型端点只在 packages/llm）
+✔ 合规护栏机检通过（扫描 476 个源码文件：无 UA/指纹/打码/自定义分区痕迹，browser/outbound/platform-boss/workflow/agent 的节奏数值全部来自配置，测试与脚本面的 2 条真实域名豁免之外没有出网地址，packages/agent/src/session.ts 与 packages/llm/src/index.ts 的两道脱敏边界都在调用 core 那一份 redact）
+✔ 离线依赖门槛机检通过（28 份 package.json + 锁文件 577 个包名 + 40 个装机依赖共 1790 个文件：无外来向量库/向量服务/docker 客户端、无非内置 SQLite 绑定、无图表与图形引擎、装机闭包内无原生二进制与安装期编译脚本）
+  · 锁文件里有 14 个原生编译链包名（@napi-rs/canvas、@napi-rs/lzma、node-gyp 的家族与平台变体）：均为传递依赖、非本项目声明，且搬运层已确认它们不在 40 个装机依赖里 —— 会不会落到用户机上以搬运层为准。
+  · 锁文件里有 15 个图表类包名（@types/d3-color、@types/d3-drag、@types/d3-interpolate、@types/d3-selection、@types/d3-transition、@types/d3-zoom、d3-color、d3-dispatch、d3-drag、d3-ease、d3-interpolate、d3-selection、d3-timer、d3-transition、d3-zoom）：逐条核对过父边，全部只由 @xyflow/react / @xyflow/system 带进来，按 spec 5.10-01 的画布例外放行 —— 任何 workspace 直接声明它们、或它们进了装机运行期闭包，都仍旧判失败。
+✔ 提示词落点检查通过（扫描 451 个源码文件，注册表 4 份：packages/agent/src/prompts.ts、packages/journey/src/prompts.ts、packages/outbound/src/prompts.ts、packages/resume-kb/src/prompts.ts）
+✔ agent 模型表态通道检查通过（LoopModel 两条口 / StepPermissionRequest 三位 / decide 实参不含模型产出 / policy 不 import model / 升档只有人这一条口 / 加白与撤白只有人这一条口 / 应答暂停单只有人这一条口 / 恢复被接管按住的 run 只有人这一条口 / 会话改名、删除与历史切换只有人这一条口）
+✔ agent 工具契约检查通过（22 只工具 × 2 份语言包：titleKey 形状合规、逐条有非空翻译、与 id 一一对应，labels 一节无孤儿键；能力清单 12 件逐条对得上登记；22 只工具入参顶层全是 z.strictObject 且清单内无 disabled 位；22 只工具的 run 都过 toolResult 构造口；22 个登记方都排在注册表 agent 之后；3 条沉淀条款对得上 11 个已登记 kind、其中 3 条的 target 与 params 路径全在各自 input schema 里点得到、kind 无重复认领）
+调度器保持进程内：扫描 5 个文件，0 处外部计划任务写入，恰好 1 处 setInterval（spec 5.7-10）
+✔ 看板保持只读（packages/renderer/src/MetricsPanel.tsx：6 条 import 全在清单里（含放开给原件的那一条）、桥接口只有 funnel.query 一处、0 处网络/动态装载出口、恰好 1 只按钮且它的 onClick 只是重读；原件本体 packages/renderer/src/ui/controls.tsx、packages/renderer/src/ui/disclosure.tsx 无桥接口与网络口）
+  · 本机扫到 1 条平台专属可选包（@napi-rs/canvas-darwin-arm64@1.0.9），按登记的口径由父包行代表、不进记账表；copyleft / 非商用 / 搬运层三道闸门仍按全量核对
+  · 产物侧已核对：win-arm64-unpacked（LICENSE.electron.txt + LICENSES.chromium.html 齐）、linux-unpacked（LICENSE.electron.txt + LICENSES.chromium.html 齐）、linux-arm64-unpacked（LICENSE.electron.txt + LICENSES.chromium.html 齐）、mac-arm64（LICENSE.electron.txt + LICENSES.chromium.html 齐）
+✔ 许可证记账检查通过（生产依赖 88 个包条目 / 记账表 87 行（其余 1 行是平台专属可选包，由父包代表）/ 11 种许可；搬运层 40 个包全部在册，其中 2 个上游无许可全文、已登记处置；copyleft 命中 1 条且都有处置）
+(node:15776) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ 术语禁令保持（扫描 970 个跟踪文本文件、2 份语言包的值：被禁的字在已进主干的内容里 0 处；脏区延后 0 份；豁免 2 处（AGENTS.md——§4.6 的禁令要写出被禁的字，并在§4.5 登记取代关系，否则规则读不出禁的是什么；scripts/check-lexicon.ts——判据本体（码位注释））内共 4 处，逐处都是禁令本体；二进制与素材文件不在扫描面内，见 plan §3.32 登记的边界）

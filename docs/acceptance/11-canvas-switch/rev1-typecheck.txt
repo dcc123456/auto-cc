@@ -1,0 +1,59 @@
+
+> auto-cc@0.1.0 typecheck /Users/dcc/deepseek-harness-workspece/auto-cc
+> pnpm -r --if-present typecheck
+
+Scope: 27 of 28 workspace projects
+packages/core typecheck$ tsc --noEmit
+packages/testing typecheck$ tsc --noEmit
+packages/testing typecheck: Done
+packages/core typecheck: Done
+packages/config typecheck$ tsc --noEmit
+packages/pdf-edit typecheck$ tsc --noEmit
+packages/shared typecheck$ tsc --noEmit
+packages/shared typecheck: Done
+packages/config typecheck: Done
+packages/pdf-edit typecheck: Done
+packages/ipc typecheck$ tsc --noEmit
+packages/devtools typecheck$ tsc --noEmit
+packages/logger typecheck$ tsc --noEmit
+packages/kernel typecheck$ tsc --noEmit
+packages/logger typecheck: Done
+packages/preload typecheck$ tsc --noEmit
+packages/kernel typecheck: Done
+packages/shell typecheck$ tsc --noEmit
+packages/devtools typecheck: Done
+packages/store typecheck$ tsc --noEmit
+packages/ipc typecheck: Done
+packages/preload typecheck: Done
+packages/store typecheck: Done
+packages/shell typecheck: Done
+packages/agent typecheck$ tsc --noEmit
+packages/plugins typecheck$ tsc --noEmit
+packages/llm typecheck$ tsc --noEmit
+packages/entitlement typecheck$ tsc --noEmit
+packages/plugins typecheck: Done
+packages/resume-doc typecheck$ tsc --noEmit
+packages/entitlement typecheck: Done
+packages/scheduler typecheck$ tsc --noEmit
+packages/llm typecheck: Done
+packages/sessions typecheck$ tsc --noEmit
+packages/agent typecheck: Done
+packages/workflow typecheck$ tsc --noEmit
+packages/scheduler typecheck: Done
+packages/sessions typecheck: Done
+packages/resume-doc typecheck: Done
+packages/workflow typecheck: Done
+packages/browser typecheck$ tsc --noEmit
+packages/renderer typecheck$ tsc --noEmit
+packages/resume-kb typecheck$ tsc --noEmit
+packages/outbound typecheck$ tsc --noEmit
+packages/outbound typecheck: Done
+packages/browser typecheck: Done
+packages/resume-kb typecheck: Done
+packages/renderer typecheck: Done
+packages/platform-boss typecheck$ tsc --noEmit
+packages/platform-boss typecheck: Done
+packages/journey typecheck$ tsc --noEmit
+packages/journey typecheck: Done
+packages/main typecheck$ tsc --noEmit
+packages/main typecheck: Done

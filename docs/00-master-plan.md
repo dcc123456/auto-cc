@@ -433,7 +433,7 @@ V 半边并入 7.3；7.3 已发货，7.3-04 的活体改绑待用户在场或隔
 8.8 换边只解决「谁说了算」，不解决「窗口本来不够宽」。本片把内核视图切换为主画布（占满 header/footer 间内容区），
 并按**视图宽**矢量缩放 `zoom = min(1, 视图宽/1224)`；`setZoomFactor` 进 bridge 白名单过四门禁。
 2.1-10 由本片认领，判据**必须真实修改操作系统窗口尺寸**（`Emulation.setDeviceMetricsOverride` 不算证据），
-宽（≥1400）窄（1000）两档在场收口。回滚双路：localStorage `auto-cc.kernel-view-mode='sidebar'` 走真实保留的旧
+宽（≥1409 → zoom=1）窄（1000 → 视图宽 944 → zoom≈0.771）两档在场收口（登录态 BOSS 窗口，与 11-04 同批）。回滚双路：localStorage `auto-cc.kernel-view-mode='sidebar'` 走真实保留的旧
 8.8 分支，或 revert 本片实现提交。承接条目 `8.8-01…10 / 6.4-06 / 6.4-13（内核侧） / 6.1-07 / 1.2-12 / 1.2-17`
 与 `check-renderer-conventions.ts` 第 4 节，逐条替代判据见 spec；历史 ID 与判据原文不改写。
 条目号 `11-01…11-10` 独立号段，不占用已分配的 10.4/10.5（户部 M3/M4）。
