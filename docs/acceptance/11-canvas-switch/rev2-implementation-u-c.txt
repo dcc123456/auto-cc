@@ -1,0 +1,32 @@
+11 片 M2 实现 U/C 读数（2026-11-19，兵部）
+
+改造清单：
+- packages/shared/src/bridge.ts：ShellStatus 增 kernelViewZoomFactor；PlatformMetaView 增 minLayoutWidth；
+  白名单与声明增 shell.setKernelViewZoomFactor；删除 KERNEL_VIEW_WIDTH_RATIO。
+- packages/core/src/errors.ts：新增 KERNEL_VIEW_ZOOM_INVALID。
+- packages/shell/src/slot-bounds.ts：删除 fallbackSlotRect；新增 clampZoomFactor（有限且 0<z≤1）。
+- packages/shell/src/index.ts：去掉 38% 兜底（slotRect 为空即不铺位）；新增 setKernelViewZoomFactor；
+  内核视图与接管子视图同步应用缩放。
+- packages/browser/src/platform-contract.ts：知识包可选 minLayoutWidth。
+- packages/platform-boss/src/knowledge/boss.json：minLayoutWidth=1224（BOSS 唯一定宽事实）。
+- packages/renderer/src/useKernelViewMode.ts：localStorage auto-cc.kernel-view-mode，默认 canvas。
+- packages/renderer/src/KernelCanvasSlot.tsx：主画布容器自量矩形，同帧上报 bounds + zoom；
+  zoom = min(1, 视图宽/minLayoutWidth)，未适配时 zoom=1 并标 data-zoom-source=unadapted。
+- packages/renderer/src/App.tsx：canvas 态不渲染右栏/竖条；顶栏新增 kernel-canvas-toggle（显示/隐藏视图）；
+  sidebar 态整段保留 KernelViewSlot（三档宽度、把手、竖条、两键）。
+- scripts/check-renderer-conventions.ts：第 4 节整节退役（宽度同源机检），保留编号注记。
+
+命令实读：
+  pnpm typecheck      EXIT=0
+  pnpm lint           EXIT=0（npm_config_store_dir=~/Library/pnpm/store）
+  pnpm format:check   EXIT=0
+  pnpm test           EXIT=0（shell 72 / browser 324 / platform-boss 190 / renderer 32 / main 100，零 failed）
+
+U 覆盖：
+- clampSlotRect 原判据（非法/越界/零尺寸）保留并通过；
+- clampZoomFactor：1 与 0.771 通过；0、负数、NaN、Infinity、1.5 全部拒收。
+
+V 未做（如实）：
+- 11-03 的主画布两档几何、11-04 登录态宽窄两档、11-05 真实窗口 resize、11-06 四屏读数、
+  11-07 sidebar 回滚活体、11-09 反向通道与命中负对照：均需皇上在场或经批准的隔离窗口，
+  本轮未获授权，不以 U 代替。

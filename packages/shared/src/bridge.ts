@@ -179,6 +179,7 @@ export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
   'shell.setKernelViewBounds',
+  'shell.setKernelViewZoomFactor',
   'shell.revealInFolder',
   // 把一份已经存在的 PDF 交给本机另一个应用整页编辑（spec 3.15，裁定㊴ 的 A 形状）。
   // 与 `revealInFolder` 同一类：只交一条路径给操作系统，不改本 app 状态、不落文件、不回读结果，
@@ -570,8 +571,10 @@ export type ShellStatus = {
   windowVisible: boolean;
   /** 内核视图当下在不在界面上：默认 false（裁定⑱），只有装着真实站点时才是 true。 */
   kernelViewVisible: boolean;
-  /** 内核视图当下的几何（DIP，客户区坐标）：由渲染层实测槽位报来，未报时为兜底比例位。 */
+  /** 内核视图当下的几何（DIP，客户区坐标）：由渲染层实测容器报来；首帧未上报时保持 0×0 不铺位。 */
   kernelViewBounds: KernelViewRect;
+  /** 内核视图当前缩放（11-04）：1 表示原生排布；渲染层按视图宽算好后经 `setKernelViewZoomFactor` 报来。 */
+  kernelViewZoomFactor: number;
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
   kernelViewPartition: string;
   /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
@@ -1182,13 +1185,6 @@ export type DeliverReceiptView = {
   /** 这次有没有真的离开 app */
   committed: boolean;
 };
-
-/**
- * 内嵌内核视图的**兜底**宽度比例：渲染层还没把实测槽位报上来时（首帧、或槽位被隐藏），
- * 主进程按这个比例摆位。真实几何由 `shell.setKernelViewBounds` 报来的那份说了算（spec 8.8-01）——
- * 固定比例铺不出真实站点的桌面布局，1200 宽的窗口只有 456px，BOSS 这类站点必然显示不全。
- */
-export const KERNEL_VIEW_WIDTH_RATIO = 0.38;
 
 /**
  * 渲染层实测出来的内核视图槽位矩形（DIP，原点是客户区左上角）。
@@ -2593,6 +2589,11 @@ export interface BridgeSignatures {
    */
   'shell.setKernelViewBounds': { args: [rect: KernelViewRect]; returns: ShellStatus };
   /**
+   * 设置内核视图缩放（11-04）：`zoom = min(1, 视图宽/平台 minLayoutWidth)`。
+   * 入参必须是有限且 `0 < zoom ≤ 1` 的数；否则 `KERNEL_VIEW_ZOOM_INVALID` 且保留上一份。
+   */
+  'shell.setKernelViewZoomFactor': { args: [zoom: number]; returns: ShellStatus };
+  /**
    * 在系统文件管理器里选中某个产物（09 稿 1-B 那句「在访达 / 资源管理器中显示」的去处，spec 6.2-12）。
    * 实参必须是**主进程自己写出来的**产物绝对路径：边界只在 `app.getPath('userData')` 之内，
    * 越界与目标不存在都以结构化失败上浮（`REVEAL_OUTSIDE_USER_DATA` / `REVEAL_TARGET_MISSING`），
@@ -3678,6 +3679,13 @@ export interface PlatformMetaView {
    * 而把许可放宽到「同源以内」的口径不变——不在名单里的一律拒。
    */
   origins: string[];
+  /**
+   * 这个站点桌面布局的最小 CSS 宽度（M2/11-04 的缩放分母）。
+   *
+   * 单一事实来源是平台适配器（知识包声明），渲染层据此算 `zoom = min(1, 视图宽 / minLayoutWidth)`；
+   * 未声明时为 undefined，渲染层按 zoom=1 并如实提示未适配，绝不猜一个数。
+   */
+  minLayoutWidth?: number;
 }
 
 /** `platform.registry` 的只读清单。 */

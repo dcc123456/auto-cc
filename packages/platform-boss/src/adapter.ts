@@ -149,6 +149,8 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     origins: [...pack.origins],
     // 拷一份：登记表面向渲染层，不能让界面读数跟着知识包对象的后续修改漂移。
     capabilities: [...pack.capabilities],
+    // 11-04 的缩放分母：知识包没声明就省略，渲染层据此如实标「未适配」而不是猜一个数。
+    ...(pack.minLayoutWidth === undefined ? {} : { minLayoutWidth: pack.minLayoutWidth }),
   };
 
   /**

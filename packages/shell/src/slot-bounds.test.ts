@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampSlotRect, fallbackSlotRect } from './slot-bounds.js';
+import { clampSlotRect, clampZoomFactor } from './slot-bounds.js';
 
 /**
  * 组一条槽位读数。
@@ -56,8 +56,21 @@ describe('内核视图槽位收口（spec 8.8-01）', () => {
   it('完全落在客户区外（夹完没有面积）时拒收', () => {
     expect(clampSlotRect(rect({ x: 2000, y: 100 }), { width: 1200, height: 800 })).toBeNull();
   });
+});
 
-  it('兜底摆位按右侧一条取宽，铺满全高（渲染层没报过槽位时用它）', () => {
-    expect(fallbackSlotRect({ width: 1000, height: 800 }, 0.38)).toEqual({ x: 620, y: 0, width: 380, height: 800 });
+/**
+ * 缩放值收口（11-04）。`setZoomFactor` 收 NaN / 负数不会报错而是把页面缩成看不见的尺寸，
+ * 所以这两档必须在主进程门口就拒掉。
+ */
+describe('内核视图缩放收口（11-04）', () => {
+  it('(0,1] 的有限数原样通过', () => {
+    expect(clampZoomFactor(1)).toBe(1);
+    expect(clampZoomFactor(0.771)).toBe(0.771);
+  });
+
+  it('0、负数、NaN、Infinity 与大于 1 一律拒收', () => {
+    for (const value of [0, -0.5, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      expect(clampZoomFactor(value)).toBeNull();
+    }
   });
 });

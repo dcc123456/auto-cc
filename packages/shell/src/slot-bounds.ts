@@ -34,12 +34,16 @@ export function clampSlotRect(rect: KernelViewRect, content: ContentSize): Kerne
 }
 
 /**
- * 渲染层还没报过槽位时的兜底摆位：右侧一条、按 `KERNEL_VIEW_WIDTH_RATIO` 取宽、铺满全高。
- * @param content 客户区尺寸
- * @param ratio 兜底宽度比例（与渲染层 `--kernel-view-width` 同源，由 `check-renderer-conventions.ts` 机检）
- * @returns 槽位矩形
+ * 把渲染层报来的缩放值收成一次可用的比例（11-04）。
+ *
+ * `WebContents.setZoomFactor` 收到 NaN 或负数不会报错，而是把页面缩成不可见的尺寸，
+ * 所以校验必须在主进程这一侧做完：有限、`0 < zoom ≤ 1`。`>1` 同样拒——
+ * 本片只允许「装不下时等比缩小」，放大是另一个能力（且会让 1224 的布局事实失去意义）。
+ * @param zoom 渲染层算好的比例（不可信输入）
+ * @returns 收窄后的比例；非法时 null（调用方抛 `KERNEL_VIEW_ZOOM_INVALID` 并保留上一份）
  */
-export function fallbackSlotRect(content: ContentSize, ratio: number): KernelViewRect {
-  const width = Math.round(content.width * ratio);
-  return { x: content.width - width, y: 0, width, height: content.height };
+export function clampZoomFactor(zoom: number): number | null {
+  if (!Number.isFinite(zoom)) return null;
+  if (zoom <= 0 || zoom > 1) return null;
+  return zoom;
 }

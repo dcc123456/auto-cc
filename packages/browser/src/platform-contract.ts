@@ -158,6 +158,11 @@ export const knowledgePackSchema = z.strictObject({
    */
   origins: z.array(originSchema).min(1),
   capabilities: z.array(z.enum(['search', 'detail', 'chat', 'sendResume', 'readReplies'])).min(1),
+  /**
+   * 站点桌面布局的最小 CSS 宽度（11-04 的缩放分母，如真 BOSS 1224）。
+   * 省略 = 未适配：渲染层按 zoom=1 并如实提示，绝不猜一个数。
+   */
+  minLayoutWidth: z.number().int().min(320).max(4096).optional(),
 
   /** 语义名 → 定位声明。适配器只按语义名取用，源码里不出现任何选择器。 */
   locators: z.record(z.string().min(1), locateSpecSchema),

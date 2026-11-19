@@ -6,6 +6,8 @@ import {
   Languages,
   MessageSquare,
   Moon,
+  PanelRight,
+  PanelRightClose,
   Settings,
   ShieldCheck,
   Sun,
@@ -19,7 +21,9 @@ import { useDeskTheme } from './theme';
 import { ChatPanel } from './ChatPanel';
 import { JobLabPanel } from './JobLabPanel';
 import { JourneyPanel } from './JourneyPanel';
+import { KernelCanvasSlot } from './KernelCanvasSlot';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
+import { readKernelViewMode } from './useKernelViewMode';
 import { MetricsPanel } from './MetricsPanel';
 import { ModelsPanel } from './ModelsPanel';
 import { PrivacyNotice, usePrivacyNotice } from './PrivacyNotice';
@@ -143,6 +147,8 @@ export function App() {
   const tierValue = desk.tier ? t(`agent.autonomy.${desk.tier}`) : t('status.none');
   // 档位的点色按「谁替谁做主」：全自动=外发不再逐步问人（朱砂），半自动=每一步等表态（琥珀），建议=只出主意（灰）。
   const tierState: DeskSlotState = desk.tier === 'auto' ? 'warn' : desk.tier === 'semi' ? 'ask' : 'none';
+  // 11 片：布局模式启动时读一次（切换靠 reload 整体生效，不许两态同屏各握一份几何事实）。
+  const kernelMode = readKernelViewMode();
   // 右栏那一槽位默认不占位（裁定⑱）：只有主进程的内核视图装着真实站点时它才存在，收起时那一条宽度还给主区。
   const kernelViewVisible = useKernelViewVisible();
   // 8.8-02 的展开态与宽度档：主区让不让位由这里判，可见性是它的前置条件——
@@ -214,6 +220,19 @@ export function App() {
             <Languages size={13} />
             <NarrowLabel>{t('language.switchTo')}</NarrowLabel>
           </DeskButton>
+          {/* 11-06：主画布态只有这一颗键——语义是「显示/隐藏站点视图」，宽度档键在这个模式里不存在。
+              sidebar 回滚态的这一颗由 `KernelViewSlot` 工具行上的两键承担（旧代码整段保留）。 */}
+          {kernelMode === 'canvas' ? (
+            <DeskButton
+              action="kernel-canvas-toggle"
+              variant="line"
+              title={t(kernelViewVisible ? 'kernel.hide' : 'kernel.show')}
+              onClick={() => void window.autoCC?.shell.setKernelViewVisible(!kernelViewVisible)}
+            >
+              {kernelViewVisible ? <PanelRightClose size={13} /> : <PanelRight size={13} />}
+              <NarrowLabel>{t(kernelViewVisible ? 'kernel.hide' : 'kernel.show')}</NarrowLabel>
+            </DeskButton>
+          ) : null}
           {/* 5.9-06 的重入口：首屏那一层收起后必须还能一眼找回，否则"读过就再也看不见"是合规上的空洞 */}
           <DeskButton action="privacy-open" variant="line" title={t('privacy.entry')} onClick={privacy.open}>
             <ShieldCheck size={13} />
@@ -269,14 +288,17 @@ export function App() {
           </main>
         )}
 
-        {/* 槽位的几何由这一栏自己量、并报给主进程（`KernelViewSlot` / spec 8.8-01）：原生视图只铺报来的那一块，
-            于是既盖不住顶部标题栏与底部状态条，也铺得出真实站点的桌面宽度。
-            宽度没拖过时仍是 `--kernel-view-width`（`--kernel-slot-width` 的默认值就是它），
-            与主进程的兜底比例同源（1.2-12 的机检照旧）；拖过之后在 38…72 之间连续覆盖这一支变量，
-            覆盖只落在这一个节点上，画面里没有第二份宽度事实。
-            视图收掉时这一栏不再空着（裁定⑱ 的"默认不展示"仍然成立），但它换成右缘一条 36px 的竖条：
-            「网页窗口」这件事从此在界面上一直有个看得见的把手，不必绕到诊断面板里去开（spec 8.8-10）。 */}
-        <KernelViewSlot layout={kernelLayout} viewVisible={kernelViewVisible} />
+        {/* 11-03：主画布态的容器由这一块自己量（绝对铺满内容区），原生视图只铺报来的那一块。
+            控制行（顶栏那颗显示/隐藏键）落在上报矩形之外——盖在下面的渲染层节点点不动。
+            首帧没上报前主进程不铺位，不造 38% 假矩形（1.2-12 的新语义）。
+            sidebar 回滚态仍由 `KernelViewSlot` 量右栏槽位（旧三档宽度、把手、竖条整段保留，11-07）。 */}
+        {kernelMode === 'canvas' ? (
+          kernelViewVisible ? (
+            <KernelCanvasSlot />
+          ) : null
+        ) : (
+          <KernelViewSlot layout={kernelLayout} viewVisible={kernelViewVisible} />
+        )}
       </div>
 
       {/* 底部状态条常驻：浮层开着时也看得见，所以层级压在遮罩之上（09 稿浮层纪律）。

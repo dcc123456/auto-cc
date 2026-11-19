@@ -11,13 +11,7 @@ import {
   type WebContents,
 } from 'electron';
 import { AppError, Service, type Context } from '@auto-cc/core';
-import {
-  APP_PARTITION,
-  KERNEL_VIEW_WIDTH_RATIO,
-  type KernelViewLoadError,
-  type KernelViewRect,
-  type ShellStatus,
-} from '@auto-cc/shared';
+import { APP_PARTITION, type KernelViewLoadError, type KernelViewRect, type ShellStatus } from '@auto-cc/shared';
 import { z } from 'zod';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
@@ -27,7 +21,7 @@ import {
 } from './companion-editor.js';
 import { decideOpenPicker, decideSavePicker } from './file-picker.js';
 import { resolveRevealTarget } from './reveal-target.js';
-import { clampSlotRect, fallbackSlotRect } from './slot-bounds.js';
+import { clampSlotRect, clampZoomFactor } from './slot-bounds.js';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
 import { armManualOnly, assertManualOnly, UpdateChannel, UpdateService, updateSchema } from './update.js';
 import type {
@@ -110,10 +104,12 @@ export class ShellService extends Service {
   private kernelViewPartition = '';
   private kernelViewError: KernelViewLoadError | null = null;
   /**
-   * 渲染层报来的槽位矩形（spec 8.8-01）；null = 还没报过，摆位回落到 `KERNEL_VIEW_WIDTH_RATIO` 兜底那份。
+   * 渲染层报来的容器矩形（11-03）；null = 还没报过，**不铺位**（视图保持 0×0，不造 38% 假矩形）。
    * 只存这一份而不另立"视图应在哪儿"的第二套事实：真正的布局永远在渲染层，这里只是它的一次转述。
    */
   private slotRect: KernelViewRect | null = null;
+  /** 内核视图当前缩放（11-04）；默认 1 = 原生排布。 */
+  private zoomFactor = 1;
   private quitting = false;
   private lastError: string | undefined;
 
@@ -139,6 +135,7 @@ export class ShellService extends Service {
       windowVisible: win?.isVisible() ?? false,
       kernelViewVisible: this.kernelViewVisible,
       kernelViewBounds: bounds,
+      kernelViewZoomFactor: this.zoomFactor,
       // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
       // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
       kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
@@ -231,6 +228,34 @@ export class ShellService extends Service {
     }
     this.slotRect = clamped;
     this.layoutKernelView();
+    return this.getStatus();
+  };
+
+  /**
+   * 设置内核视图缩放（11-04）：`zoom = min(1, 视图宽 / 平台 minLayoutWidth)`。
+   *
+   * 与 `setKernelViewBounds` 同一族：几何与比例由渲染层在同一条 observer 回调里算完一起报，
+   * 主进程只负责校验与落库。非法值（非有限、≤0、>1）一律结构化失败并**保留上一份**，
+   * 不让一个 NaN 把页面缩成看不见的尺寸。
+   * @param zoom 渲染层算好的比例（不可信输入）
+   * @returns 应用后的状态快照
+   * @throws 非法值时 `KERNEL_VIEW_ZOOM_INVALID`
+   */
+  setKernelViewZoomFactor = (zoom: number): ShellStatus => {
+    const clamped = clampZoomFactor(zoom);
+    if (clamped === null) {
+      throw new AppError(
+        'KERNEL_VIEW_ZOOM_INVALID',
+        `缩放值不合法：${String(zoom)}（必须是 (0,1] 的有限数）`,
+        'shell',
+        {
+          zoom,
+          previous: this.zoomFactor,
+        },
+      );
+    }
+    this.zoomFactor = clamped;
+    this.applyZoomFactor();
     return this.getStatus();
   };
 
@@ -501,8 +526,9 @@ export class ShellService extends Service {
     // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。
     // 规则写在视图的拥有者这里，而不是让每个挂载方各补一句 `setKernelViewVisible(true)`（§2.5）。
     this.applyKernelViewVisible(this.kernelViewPartition !== '');
-    // 新建的 view 默认尺寸是 0x0：不显式摆位就永远看不见，只有 resize 才会救回来。
+    // 新建的 view 默认尺寸是 0x0：渲染层报来首份矩形之前不铺位（11-03），报来之后由 observer 推。
     this.layoutKernelView();
+    this.applyZoomFactor();
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
     this.observeLoadFailure(view.webContents);
     view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
@@ -571,6 +597,7 @@ export class ShellService extends Service {
     win.contentView.addChildView(view);
     view.setVisible(this.kernelViewVisible);
     this.layoutKernelView();
+    this.applyZoomFactor();
     this.observeLoadFailure(view.webContents);
     // 接管页自己再开新标签也走同一条口：不装 handler 的话那一路就没人管，等于允许逃逸。
     view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
@@ -616,6 +643,20 @@ export class ShellService extends Service {
   }
 
   /**
+   * 把当前缩放应用到内核视图与全部接管子视图（11-04）。
+   *
+   * 接管子视图与父视图同分区同槽位，缩放不一起改就会出现「父页 0.77、子页 1.0」两种字形；
+   * 子视图创建时也会补一次（见 `attachTakeoverView`）。
+   */
+  private applyZoomFactor = () => {
+    const contents = this.kernelView?.webContents;
+    if (contents && !contents.isDestroyed()) contents.setZoomFactor(this.zoomFactor);
+    for (const view of this.takeoverViews) {
+      if (!view.webContents.isDestroyed()) view.webContents.setZoomFactor(this.zoomFactor);
+    }
+  };
+
+  /**
    * 给内核视图摆位：渲染层报过槽位就按那块铺（并夹进当前客户区），没报过才退回固定比例兜底；
    * 接管子视图铺同一块槽位。
    *
@@ -627,9 +668,11 @@ export class ShellService extends Service {
     if (!win || !this.kernelView) return;
     const { width, height } = win.getContentBounds();
     const content = { width, height };
-    const slot =
-      (this.slotRect ? clampSlotRect(this.slotRect, content) : null) ??
-      fallbackSlotRect(content, KERNEL_VIEW_WIDTH_RATIO);
+    // 11-03：首帧没收到渲染层上报就**不铺位**（新视图默认 0×0），不再按 38% 编一块假矩形。
+    // 渲染层一报来，`clampSlotRect` 就把旧矩形夹进当前客户区；resize 之后它会再报新读数。
+    if (!this.slotRect) return;
+    const slot = clampSlotRect(this.slotRect, content);
+    if (!slot) return;
     this.kernelView.setBounds(slot);
     // 接管的子视图是「同一个槽位里的新标签」：不跟着摆位的话，resize 后它就停在旧尺寸上露馅。
     this.takeoverViews.forEach((view) => view.setBounds(slot));

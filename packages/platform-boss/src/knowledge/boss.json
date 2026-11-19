@@ -5,6 +5,7 @@
   "packStatus": "shipped",
   "origins": ["https://www.zhipin.com"],
   "capabilities": ["search", "detail", "chat", "sendResume", "readReplies"],
+  "minLayoutWidth": 1224,
   "locators": {
     "jobCard": {
       "description": "搜索结果页的一张岗位卡片。真站点全页没有 data-testid / id / name 可用（证据 8.0-03 第六节），容器只能靠类名，因此这一条走读取档的低阈值（effect:'read'，P8 裁定⑤）。卡片链是 div.job-list-container > ul.rec-job-list > div.card-area > div.job-card-wrap > li.job-card-box，两条候选各命中 15 枚",
