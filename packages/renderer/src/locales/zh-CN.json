@@ -2027,6 +2027,40 @@
           "LEG_BOUND_KEY": "这一路正由实例供给；实例密钥请到该提供商的「删除实例」里处理，这里的清除只作用于兜底配置"
         }
       }
+    },
+    "journeyMain": {
+      "heading": "求职主链：意向匹配与材料",
+      "summary": "母版 {{docs}} 份",
+      "hint": "从母版求职意向自动搜岗，逐岗列出可回指的匹配理由；定制复用既有生成与事实校验，面试材料逐条带来源。",
+      "docLabel": "母版简历",
+      "noDocs": "知识库里还没有简历",
+      "masterOption": "{{name}}（母版）",
+      "variantOption": "{{name}}（变体）",
+      "actionIntent": "读取求职意向",
+      "actionSearch": "按意向搜岗",
+      "actionTailor": "生成定制与招呼",
+      "actionInterview": "生成面试材料",
+      "reasonNoDoc": "还没有选择母版简历",
+      "reasonBusy": "上一条动作还没回来",
+      "reasonNoIntent": "先读取求职意向",
+      "intentLine": "期望岗位 {{role}} · 城市 {{city}} · 母版 {{version}}",
+      "missingFields": "未填：{{fields}}",
+      "none": "未填",
+      "jobRow": "{{title}} · {{company}}",
+      "matchCounts": "命中 {{matched}} / 部分 {{partial}} / 缺 {{missing}}",
+      "select": "选这一岗",
+      "selected": "已选中",
+      "requirementRow": "{{label}} · {{state}} · 事实 {{facts}} 条",
+      "state": {
+        "matched": "命中",
+        "partial": "部分",
+        "missing": "缺"
+      },
+      "tailorLine": "母版 {{mastered}} · 变体 {{variant}}",
+      "greetingLine": "招呼：{{text}} · 来源 {{refs}}",
+      "introLine": "自我介绍：{{text}}",
+      "qaRow": "第 {{index}} 问：{{question}}",
+      "checklistLine": "准备：{{items}}"
     }
   }
 }

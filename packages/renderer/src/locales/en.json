@@ -2027,6 +2027,40 @@
           "LEG_BOUND_KEY": "This connection is served by a provider instance; handle that key via Delete instance on the provider, since clearing here only affects the fallback config"
         }
       }
+    },
+    "journeyMain": {
+      "heading": "Job journey: intent match and materials",
+      "summary": "{{docs}} master resume(s)",
+      "hint": "Search jobs from the master intent with traceable reasons; tailoring reuses existing generation and fact check; every interview item carries its sources.",
+      "docLabel": "Master resume",
+      "noDocs": "No resume in the knowledge base yet",
+      "masterOption": "{{name}} (master)",
+      "variantOption": "{{name}} (variant)",
+      "actionIntent": "Read job intent",
+      "actionSearch": "Search by intent",
+      "actionTailor": "Draft tailoring and greeting",
+      "actionInterview": "Prepare interview material",
+      "reasonNoDoc": "No master resume selected yet",
+      "reasonBusy": "The previous action has not returned yet",
+      "reasonNoIntent": "Read the job intent first",
+      "intentLine": "Target role {{role}} · city {{city}} · master {{version}}",
+      "missingFields": "Missing: {{fields}}",
+      "none": "not set",
+      "jobRow": "{{title}} · {{company}}",
+      "matchCounts": "matched {{matched}} / partial {{partial}} / missing {{missing}}",
+      "select": "Pick this job",
+      "selected": "Selected",
+      "requirementRow": "{{label}} · {{state}} · {{facts}} facts",
+      "state": {
+        "matched": "matched",
+        "partial": "partial",
+        "missing": "missing"
+      },
+      "tailorLine": "Master {{mastered}} · variant {{variant}}",
+      "greetingLine": "Greeting: {{text}} · sources {{refs}}",
+      "introLine": "Self-intro: {{text}}",
+      "qaRow": "Q{{index}}: {{question}}",
+      "checklistLine": "Prepare: {{items}}"
     }
   }
 }

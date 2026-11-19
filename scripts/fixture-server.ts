@@ -1457,6 +1457,58 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  /**
+   * 从面试材料提示词里读出事实与要求清单（M2-B 10.3-03 的本地靶子）。
+   *
+   * 只认 `prompts.ts` 里那两个标记串：读不到就判「不是面试通道」并回 400，
+   * 不给一条看似成功、实则答非所问的回复（与改写通道同一条纪律）。
+   * @param body OpenAI 信封请求体
+   * @returns 事实 id/正文与要求 id；不是面试请求时为 null
+   */
+  function readInterviewRequest(body: Record<string, unknown>): {
+    facts: { id: string; text: string }[];
+    requirements: { id: string }[];
+  } | null {
+    const messages = body['messages'];
+    if (!Array.isArray(messages)) return null;
+    let systemText = '';
+    let userText = '';
+    for (const message of messages) {
+      const entry = message as { role?: unknown; content?: unknown };
+      if (typeof entry.content !== 'string') continue;
+      if (entry.role === 'system') systemText = entry.content;
+      if (entry.role === 'user') userText = entry.content;
+    }
+    if (!systemText.includes('面试教练')) return null;
+    const factMarker = '简历事实（JSON，id 必须原样引用）：\n';
+    const reqMarker = '岗位要求（JSON，id 必须原样引用）：\n';
+    const factAt = userText.indexOf(factMarker);
+    const reqAt = userText.indexOf(reqMarker);
+    if (factAt < 0 || reqAt < 0 || reqAt < factAt) return null;
+    const factsBlock = userText.slice(factAt + factMarker.length, reqAt).trim();
+    const afterReq = userText.slice(reqAt + reqMarker.length);
+    const reqBlock = afterReq.slice(0, afterReq.indexOf('\n\n请输出 JSON')).trim();
+    let facts: unknown;
+    let requirements: unknown;
+    try {
+      facts = JSON.parse(factsBlock);
+      requirements = JSON.parse(reqBlock);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(facts) || !Array.isArray(requirements)) return null;
+    const factsOut = facts.flatMap((item) => {
+      const entry = item as { id?: unknown; text?: unknown };
+      return typeof entry.id === 'string' && typeof entry.text === 'string' ? [{ id: entry.id, text: entry.text }] : [];
+    });
+    const reqOut = requirements.flatMap((item) => {
+      const entry = item as { id?: unknown };
+      return typeof entry.id === 'string' ? [{ id: entry.id }] : [];
+    });
+    if (factsOut.length === 0 || reqOut.length === 0) return null;
+    return { facts: factsOut, requirements: reqOut };
+  }
+
   // OpenAI 信封的本地靶端点（`llm.baseUrl` 指到 `http://127.0.0.1:<port>/v1` 时打的就是这里）。
   // 只应答改写通道，别的提示词一律 400 并说清原因：话术通道、拆解通道的答案这里给不出，
   // 假装给得出就会把「模型通道跑通了」的假证据留在截图里。
@@ -1489,6 +1541,37 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
           usage: { prompt_tokens: 1, completion_tokens: steps.length },
         }),
       );
+      return;
+    }
+    const interview = body === undefined ? null : readInterviewRequest(body);
+    if (interview !== null && body !== undefined) {
+      // 模型只引用给定 id、回答里不写数字：本片的正向证据要能过来源与数字两道校验。
+      const factId = interview.facts[0]!.id;
+      const requirementId = interview.requirements[0]!.id;
+      const factText = interview.facts[0]!.text;
+      const qa = Array.from({ length: 8 }, (_, index) => ({
+        question: `请结合项目谈谈你在核心技能上的实践（第 ${String(index + 1)} 题）？`,
+        answer: `我在项目中长期负责相关模块，围绕「${factText}」做过实际开发与协作。`,
+        resumeFactIds: [factId],
+        requirementIds: [requirementId],
+      }));
+      const content = JSON.stringify({
+        selfIntro: `我有围绕「${factText}」的项目经验，希望和贵司进一步沟通。`,
+        qa,
+        checklist: ['准备项目背景介绍', '复习岗位要求的核心技能', '确认面试时间与形式'],
+      });
+      const requestedModel = body['model'];
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(
+        JSON.stringify({
+          id: 'fixture-interview',
+          object: 'chat.completion',
+          model: typeof requestedModel === 'string' ? requestedModel : 'fixture-interview-model',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: qa.length },
+        }),
+      );
+      console.log(`[fixture] 面试材料应答 ${String(qa.length)} 条：事实 ${factId} · 要求 ${requirementId}`);
       return;
     }
     const targets = body === undefined ? null : readGenerateTargets(body);

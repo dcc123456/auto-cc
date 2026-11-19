@@ -18,6 +18,7 @@ import { switchLanguage, type SupportedLanguage } from './i18n';
 import { useDeskTheme } from './theme';
 import { ChatPanel } from './ChatPanel';
 import { JobLabPanel } from './JobLabPanel';
+import { JourneyPanel } from './JourneyPanel';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
 import { MetricsPanel } from './MetricsPanel';
 import { ModelsPanel } from './ModelsPanel';
@@ -310,6 +311,9 @@ const PANELS: Record<TopView, ReactNode> = {
   jobs: (
     <>
       <JobLabPanel />
+      {/* M2-B 求职主链：意向 → 按意向搜岗 → 可解释匹配 → 定制/招呼 → 面试材料。放在岗位工作台内，
+          不新增顶级菜单；每颗按钮直接打 journey.* 白名单口，与 agent 工具、工作流节点共用同一服务。 */}
+      <JourneyPanel />
       {/* 4.6-d 的话术候选面板紧跟 JD 库：候选 → 选中 → 打招呼是同一条链的三段，隔开放就要跨面板对目标 */}
       <ScriptPanel />
     </>
