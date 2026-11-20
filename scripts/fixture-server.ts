@@ -51,6 +51,9 @@
  *   05 / 11，与 §7.2「测试不打真实平台」同一条口径）；**同一个端点也应答计划器**（spec 8.10-02/03/04）：
  *   system 那句含「计划器」的请求回一份确定性 `{"steps":[...]}`，「第 N 个岗位」按上下文里的
  *   `job:<平台>/<id>` 顺序取——于是全自动档的整条链（起草 → 执行 → 岗位卡 → 后续轮次）在本地可复现；
+ * - `/api/deliver-delay` 是**投递延迟开关**（POST `{delayMs}`，GET 只读，DELETE 归 0，仅本机测试靶站）：
+ *   在 `/api/deliver` 收讫前先睡这么久，用来稳定制造「外发已发出、回执未返回」的在飞窗口，
+ *   供 10.6-05 的一键停用竞态取证；只影响本地仿站，不碰真实平台。
  * - `/pii` 是**脱敏靶页**（spec 2.7-07）：裸写的手机号 / 邮箱 / 身份证 + 一组刻意留下的对照数字
  *   （薪资区间、编号、年份）+ 一个把号码拆成三个文本节点的块，遮罩到底盖住了什么、盖不住什么，
  *   由这一页的截图与正文读数说，不由实现自述；
@@ -160,6 +163,8 @@ let failCounterHits = 0;
 type RiskMode = 'off' | 'captcha' | 'blocked';
 
 let riskMode: RiskMode = 'off';
+/** 投递延迟（毫秒，仅测试靶站用；0 = 不延迟）。 */
+let deliverDelayMs = 0;
 
 /** 一张最朴素的人机验证页：标题与正文都带「安全验证」，正好落进知识包 `risk.riskPattern` 的判据里。 */
 const RISK_CAPTCHA_HTML =
@@ -1222,6 +1227,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       response.end(JSON.stringify({ ok: false, error: '空附件' }));
       return;
     }
+    if (deliverDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, deliverDelayMs));
     deliverSeq += 1;
     const attachment: DeliverAttachment = {
       id: deliverSeq,
@@ -1387,6 +1393,34 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     console.log('[fixture] 风控靶页归零（off）');
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ ok: true, mode: riskMode }));
+    return;
+  }
+
+  // 投递延迟开关（10.6-05 在飞竞态取证用）：只影响本地仿站的 /api/deliver 收讫时序。
+  if (url.pathname === '/api/deliver-delay' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    const next = Number(body['delayMs']);
+    if (!Number.isInteger(next) || next < 0 || next > 60_000) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'delayMs 只接受 0–60000 的整数' }));
+      return;
+    }
+    deliverDelayMs = next;
+    console.log(`[fixture] 投递延迟切换为 ${String(next)}ms`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: deliverDelayMs }));
+    return;
+  }
+  if (url.pathname === '/api/deliver-delay' && request.method === 'DELETE') {
+    deliverDelayMs = 0;
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: 0 }));
+    return;
+  }
+  if (url.pathname === '/api/deliver-delay') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ delayMs: deliverDelayMs }));
     return;
   }
 

@@ -1,21 +1,68 @@
-10.6-05 一键停用 ≤1 秒 活体读数（可见窗口）
-采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10300、渲染层 dist）+ 本地仿站；真实平台零访问。
+10.6-05 一键停用 ≤1 秒 与在飞竞态 活体读数（可见窗口）
+采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10304、渲染层 dist）+ 本地仿站；真实平台零访问。
 
-开跑即按停用（entitlement.gate.setOutboundStopped(true)）：
+一、开跑即停用（无在飞）：
+  停用位生效 9ms；执行器转 stopped；账本 1→1→1（等待 1.5s 仍不增）。
+
+二、在飞竞态（仿站 /api/deliver-delay=3000ms 制造「请求已发出、回执未回」窗口）：
 {
-  "grantStatus": "active",
-  "stopFlag": {
-    "stopped": true,
-    "updatedAt": 1795172698918
+  "stopFlagBefore": {
+    "stopped": false,
+    "updatedAt": 0
   },
-  "stopFlagMs": 9,
-  "finalStatus": "stopped",
-  "completedBeforeStop": 0,
-  "inFlightUnknown": 0,
-  "ledgerBeforeStop": 1,
-  "ledgerAtStop": 1,
-  "ledgerAfterWait": 1
+  "stopFlagAfter": {
+    "stopped": true,
+    "updatedAt": 1795179081642
+  },
+  "inFlight": {
+    "platform": "boss",
+    "targetId": "1001",
+    "action": "deliver",
+    "resumeVersion": "doc:resume-6c61fe86df58:5b1605ba249a",
+    "workflowRunId": "unattended-1795179070989",
+    "status": "in-flight",
+    "ledgerId": null,
+    "receiptId": null,
+    "reason": null,
+    "updatedAt": 1795179081595
+  },
+  "afterStatus": "done",
+  "completed": 0,
+  "failed": [
+    "OUTBOUND_NOT_DELIVERED"
+  ],
+  "elapsedMs": 307,
+  "deliverAttempt": {
+    "platform": "boss",
+    "targetId": "1001",
+    "action": "deliver",
+    "resumeVersion": "doc:resume-6c61fe86df58:5b1605ba249a",
+    "workflowRunId": "unattended-1795179070989",
+    "status": "unknown",
+    "ledgerId": null,
+    "receiptId": null,
+    "reason": "OUTBOUND_NOT_DELIVERED",
+    "updatedAt": 1795179081595
+  },
+  "ledgerBefore": 1,
+  "ledgerAfterStop": 2,
+  "ledgerAfterWait": 2,
+  "deliveriesBefore": 1,
+  "deliveriesAfterStop": 1
 }
 
-结论：停用位 9ms 内生效；执行器转 stopped，停用后账本 1→1→1（等待 1.5s 仍不增）。
-缺口（本片仍记 [!]）：停用发生在首笔发送之前，没有造出「在飞一笔」的未知结局场景；U 例覆盖停用判定与未知结局对账，活体竞态留待可稳定制造在飞窗口时补。
+  断言：
+  - 停用位 true（点击后 47ms 内读到）；执行器收尾后该笔尝试 status=unknown、ledgerId=null；
+  - 停用后账本 1→2→2（只有先前那笔招呼，本笔无成功账）；
+  - 仿站页面投递数 1→1（在飞这一笔未在停用前落成新投递）。
+
+三、恢复后先对账、不重发：
+{
+  "status": "not-sent",
+  "canResume": true,
+  "deliveriesAfterReconcile": 1
+}
+  - 未知结局期间再发一次 → {"ok":false,"code":"OUTBOUND_RECONCILIATION_REQUIRED","deliveriesAfterRetry":1}（被闸门按「先对账」拒下，页面未动）；
+  - 只读对账完成，未自动重发；证据到此为止（不对已确认未发生的笔做隐式重试）。
+
+结论：通过。在飞一笔按未知结局处理、无成功账、不重发；停用不删历史、不补账。
