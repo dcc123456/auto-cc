@@ -1,0 +1,17 @@
+10.8-05 逐条一致与抽样 证据（C）
+采集：2026-11-20 · 真装配（真 SQLite：usage_ledger / outbound_attempts / delivery_records / interview_records）；不访问网络。
+
+用例 1：两成功 + 一失败的 3 笔，逐笔对四源
+  - job-1 greet 成功：attempt succeeded / ledgerId 有 / receiptId=receipt-greet-1
+  - job-2 deliver 成功：attempt succeeded / ledgerId 有 / delivery_records 有该行（snapshot=snap-1）
+  - job-3 greet 失败：attempt unknown / ledgerId=null / 账本零行（失败不补成功账）
+  - 同区间漏斗五级与逐条数：search=0=0、greet=1=1、reply=0=0、deliver=1=1、interview=1=1，差异 0
+  - 抽样笔数=3，含 1 笔失败
+
+用例 2：构造「账本多一行、没有对应尝试」的分歧
+  - usage.ledger.record 手动补一行 → 对账器抛出「对账差异：账本行 … 找不到对应尝试」
+  - 差异 ≠0 → 阻断发布（10.9-05 复用它作为发布门禁）
+
+命令与实读：
+  npx vitest run packages/main/src/journey-reconcile.test.ts
+  Test Files  1 passed (1) / Tests  2 passed (2) · EXIT=0

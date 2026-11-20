@@ -555,3 +555,8 @@ interface JourneyContext {
   `funnel.query` 的 interview=1（一次读数：search=3 / greet=0 / reply=0 / deliver=0 / interview=1）；趋势今日
   search=3、interview=1，界面逐岗状态与趋势行可读。greet/reply/deliver 段与跨两天趋势需要前台窗口/真实发一笔，本轮未造，
   按 `[!]` 记录；10.8-05 的逐条抽样脚本未落地，同样 `[!]`。
+
+**10.8-05 抽样对账落地（2026-11-20）**：`packages/main/src/journey-reconcile.test.ts` 用真装配（真 SQLite）造
+2 成功 + 1 失败样本：成功笔逐笔对账本行、尝试（四元组/状态/ledgerId/receiptId）、deliver 再加投递记录；失败笔断言
+无账本行。同区间漏斗五级与逐条数逐级相等（差异 0）；再手动补一条「没有对应尝试的账本行」，断言对账器抛「对账差异」
+即阻断发布（10.9-05 复用同一判据）。证据：`docs/acceptance/10-job-journey/10.8-05-reconcile-sample.txt`。
