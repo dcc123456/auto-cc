@@ -1,0 +1,61 @@
+11 片 B 案「常驻分栏」M2 实现与活体读数（2026-11-20，兵部）
+
+一、改造清单
+- packages/renderer/src/useKernelViewMode.ts：新增分栏常量 CANVAS_RIGHT_MIN=30 / MAX=70 / DEFAULT=65 /
+  STEP=2、落盘键 auto-cc.kernel-canvas-right-width、变量 --kernel-canvas-right-width；
+  新增纯函数 canvasZoom（min(1, 右栏宽/minLayoutWidth)，全精度不取整）与 canvasColumnWidths。
+- packages/renderer/src/KernelCanvasSlot.tsx：canvas 分支改为分栏右栏（不再是 absolute inset-0）：
+  右栏容器自量矩形、同帧上报 bounds + zoom；把手复用 ui/split.tsx（负外边距 -ml-1.5 叠在左栏右缘，
+  两栏之和 = 主区宽，不占用 480 判据）；顶栏两颗键（kernel-canvas-toggle / kernel-canvas-expand）
+  由 KernelCanvasControls 承担，落在上报矩形之外。
+- packages/renderer/src/App.tsx：canvas 态新增 kernel-canvas-stage（主区行），左栏四屏与右栏站点为
+  同一 stage 的两个子节点；全屏态左栏让位（节点不销毁）；sidebar 回滚态结构一字不动。
+- packages/renderer/src/useKernelViewMode.test.ts（新增）：zoom 三档 614/796/891/1225、全精度回算
+  ≥1224、未适配恒 1、非法输入；两栏宽 330/429/480 与 30%/70% 端点、窗口非法输入。
+- packages/renderer/src/locales/{zh-CN,en}.json：补 shell.kernel.canvasResizeHandle（双语对齐）。
+
+二、门禁实读（2026-11-20）
+  pnpm typecheck      EXIT=0
+  pnpm lint           EXIT=0（含 conventions 第 4 节退役、术语禁令）
+  pnpm format:check   EXIT=0
+  pnpm test           EXIT=0（renderer 41 = 原 32 + 新增 9；其余包零 failed）
+
+三、活体自证（本机 dev 实例，CDP 10222；window innerWidth=1200 innerHeight=772；macOS arm64）
+真实鼠标事件（CDP Input.dispatchMouseEvent，非 node.click 兜底）逐态成功，读数如下：
+
+1) 分栏态（真点「展开网页窗口」后）
+   shell.getStatus: visible=true bounds={x:541,y:51,w:659,h:691} zoom=1
+   右栏 panel {x:539.6,y:51,w:660.4,h:690.7}；slot {x:540.6,w:659.4}；左栏 main w=355.6
+   右栏 / 主区 = 660.4 / 1016 = 65.0%（stage x=184 w=1016，与左轨 184 分界一致）
+   关闭键 rect {x:1008,y:10,w:67,h:30}；全屏键 {x:935,y:10,w:67,h:30}
+   → 两键与上报矩形均无交集（keyInsideBounds=false / expandInsideBounds=false）
+   → elementFromPoint(键中心) 命中 kernel-canvas-toggle / kernel-canvas-expand
+   截图 11-03-rev3-split.png
+
+2) 全屏态（真点「全屏」后）
+   bounds={x:185,y:51,w:1015,h:691} ≈ stage {x:184,w:1016}（±1px，header 下沿到 footer 上沿、左轨以右）
+   左栏 main=null（四屏让位不销毁）；「退出全屏」键仍在顶栏 {x:911,y:10,w:91,h:30}，与矩形无交集
+   截图 11-03-rev3-fullscreen.png
+
+3) 退出全屏（真点「退出全屏」后）
+   bounds 回到 {x:541,y:51,w:659,h:691}，与 1) 逐位相同（往返 0px 偏差）
+
+4) 关闭视图（真点「收起」后）
+   visible=false；右栏 panel/slot 均不存在；左栏 main 取回整条宽度 w=1016
+   顶栏「展开网页窗口」键 {x:960,y:10,w:115,h:30} 仍在矩形外、elementFromPoint 命中自身
+   截图 11-03-rev3-hidden.png（三张 md5 互异：059a0f3f… / b64eb5e8… / 48d6f7a7…）
+
+四、根因与修复对应（太子四条）
+1) 旧实现 KernelCanvasSlot 用 `absolute inset-0`，而其父链无定位祖先 → 逃到视口，rect 0,0→整窗
+   （工部活体 0,0→1200,772），关闭键整颗被原生视图盖住。修复：改为 stage 内 flex 子节点，矩形严格等于
+   右栏（分栏态）或主区（全屏态），活体 bounds 已不含 0,0 整窗。
+2) 关闭键在顶栏（上报矩形之上），活体 elementFromPoint 命中键本身；真点四次全部生效。
+3) 全屏态退路：常驻「退出全屏」键在矩形外，活体真点往返成功。
+4) 窄窗 1000px 下顶栏键走 NarrowLabel（图标保留）——真实 resize 读数待在场（11-05）。
+
+五、仍未验（保持 [!]，不以 U/活体几何冒充）
+- 11-04 登录态宽窄两档：此刻实例无平台会话（partition 为空，minLayoutWidth 未适配 → zoom=1/unadapted），
+  登录态 BOSS 的 614→0.502、796→0.650、891→0.728 读数与命中负对照需皇上在场。
+- 11-05 真实 OS 窗口 resize 两档；11-03 把手拖到 30%/70% 端点的同帧 bounds+zoom 读数；
+  11-06 窄窗 1000 / ≥1555 与 480 判据；11-07 两路回滚活体；11-09 三通道与命中负对照。
+- 真实 BOSS 的 9.2-05/06 与本片无关，维持 [!]。

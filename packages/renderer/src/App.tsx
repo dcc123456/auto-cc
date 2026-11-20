@@ -6,8 +6,6 @@ import {
   Languages,
   MessageSquare,
   Moon,
-  PanelRight,
-  PanelRightClose,
   Settings,
   ShieldCheck,
   Sun,
@@ -21,7 +19,7 @@ import { useDeskTheme } from './theme';
 import { ChatPanel } from './ChatPanel';
 import { JobLabPanel } from './JobLabPanel';
 import { JourneyPanel } from './JourneyPanel';
-import { KernelCanvasSlot } from './KernelCanvasSlot';
+import { KernelCanvasControls, KernelCanvasSlot } from './KernelCanvasSlot';
 import { KernelViewSlot, useKernelSlotLayout } from './KernelViewSlot';
 import { readKernelViewMode } from './useKernelViewMode';
 import { MetricsPanel } from './MetricsPanel';
@@ -192,6 +190,29 @@ export function App() {
     </section>
   );
 
+  /**
+   * 主区那棵四屏树：对话是第一入口（它自己不套工作台标题头），其余六屏按现有导航切换。
+   *
+   * 它被两种布局共用：常驻分栏态下是左栏（全屏态让位、`hidden` 不销毁，1.10-01），
+   * sidebar 回滚态下仍是原来那一整块 `flex-1` 主区。抽成常量只为让两条分支共用同一份节点树，
+   * 不新增长第二套视图（§2.5）。
+   */
+  const deskMain = (
+    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <section
+        data-view-scroll="chat"
+        className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
+      >
+        <ChatPanel />
+      </section>
+      {(['jobs', 'resume', 'workflow', 'models', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
+
+      {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，七张视图切来切去都只有这一只通道，
+          各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
+      <Toast />
+    </main>
+  );
+
   return (
     <div className="flex h-full flex-col bg-ink-950 text-slate-50">
       <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-2.5">
@@ -220,19 +241,10 @@ export function App() {
             <Languages size={13} />
             <NarrowLabel>{t('language.switchTo')}</NarrowLabel>
           </DeskButton>
-          {/* 11-06：主画布态只有这一颗键——语义是「显示/隐藏站点视图」，宽度档键在这个模式里不存在。
-              sidebar 回滚态的这一颗由 `KernelViewSlot` 工具行上的两键承担（旧代码整段保留）。 */}
-          {kernelMode === 'canvas' ? (
-            <DeskButton
-              action="kernel-canvas-toggle"
-              variant="line"
-              title={t(kernelViewVisible ? 'kernel.hide' : 'kernel.show')}
-              onClick={() => void window.autoCC?.shell.setKernelViewVisible(!kernelViewVisible)}
-            >
-              {kernelViewVisible ? <PanelRightClose size={13} /> : <PanelRight size={13} />}
-              <NarrowLabel>{t(kernelViewVisible ? 'kernel.hide' : 'kernel.show')}</NarrowLabel>
-            </DeskButton>
-          ) : null}
+          {/* 11-06：分栏态的两颗键（显示/隐藏、全屏往返）都在顶栏——顶栏在上报矩形之上，
+              原生视图永远盖不到它们（旧实现的假矩形铺满整窗时，这颗键整颗被吃掉，皇上点不到）。
+              sidebar 回滚态仍由 `KernelViewSlot` 工具行上的两键承担（旧代码整段保留）。 */}
+          {kernelMode === 'canvas' ? <KernelCanvasControls layout={kernelLayout} visible={kernelViewVisible} /> : null}
           {/* 5.9-06 的重入口：首屏那一层收起后必须还能一眼找回，否则"读过就再也看不见"是合规上的空洞 */}
           <DeskButton action="privacy-open" variant="line" title={t('privacy.entry')} onClick={privacy.open}>
             <ShieldCheck size={13} />
@@ -267,37 +279,22 @@ export function App() {
           ))}
         </nav>
 
-        {/* 裁定⑱：内核视图没装着站点时这一栏整个**不存在**，`flex-1` 的主区拿回那一条宽度。
-            展开态（8.8-02）把主区整个让出去：主区是同一棵 flex 里的兄弟，留着它就量不进右栏该占的矩形；
-            收起时它原样回来，不销毁、各视图的滚动位置也不丢。
-            `kernelExpanded` 必须同时看可见性——站点被收回时只认偏好，主区就藏在一栏不存在的位置后面。 */}
-        {kernelExpanded ? null : (
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            {/* 对话是第一入口：它自己不套工作台标题头，输入区直接贴着桌面（§5.9）。 */}
-            <section
-              data-view-scroll="chat"
-              className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
-            >
-              <ChatPanel />
-            </section>
-            {(['jobs', 'resume', 'workflow', 'models', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
-
-            {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，七张视图切来切去都只有这一只通道，
-                各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
-            <Toast />
-          </main>
-        )}
-
-        {/* 11-03：主画布态的容器由这一块自己量（绝对铺满内容区），原生视图只铺报来的那一块。
-            控制行（顶栏那颗显示/隐藏键）落在上报矩形之外——盖在下面的渲染层节点点不动。
-            首帧没上报前主进程不铺位，不造 38% 假矩形（1.2-12 的新语义）。
-            sidebar 回滚态仍由 `KernelViewSlot` 量右栏槽位（旧三档宽度、把手、竖条整段保留，11-07）。 */}
+        {/* 11-03 常驻分栏（canvas）：主区先分成左栏四屏 + 右栏站点，二者的父容器就是「主区」——
+            右栏按它的 65% 算宽，上报矩形因此严格落在内容区之内（左轨以右、header 下沿到 footer 上沿）；
+            旧的 `absolute inset-0` 会逃到最近定位祖先（没有就是视口）铺成整扇窗口，那种假矩形不再出现。
+            全屏态左栏让位（节点不销毁），右栏 flex-1 盖满主区；控制键都在顶栏，落在上报矩形之外。
+            裁定⑱ 仍成立：站点被收起时右栏整个不存在，左栏拿回整条宽度。
+            回滚态（sidebar）结构一字不动：`KernelViewSlot` 仍直接挂在外层行里量右栏槽位（11-07）。 */}
         {kernelMode === 'canvas' ? (
-          kernelViewVisible ? (
-            <KernelCanvasSlot />
-          ) : null
+          <div data-testid="kernel-canvas-stage" className="flex min-h-0 min-w-0 flex-1">
+            {kernelExpanded ? null : deskMain}
+            {kernelViewVisible ? <KernelCanvasSlot layout={kernelLayout} /> : null}
+          </div>
         ) : (
-          <KernelViewSlot layout={kernelLayout} viewVisible={kernelViewVisible} />
+          <>
+            {kernelExpanded ? null : deskMain}
+            <KernelViewSlot layout={kernelLayout} viewVisible={kernelViewVisible} />
+          </>
         )}
       </div>
 

@@ -337,7 +337,8 @@
       "collapse": "退出全屏",
       "hide": "收起",
       "show": "展开网页窗口",
-      "resizeHandle": "拖动改宽度；双击回到最窄"
+      "resizeHandle": "拖动改宽度；双击回到最窄",
+      "canvasResizeHandle": "拖动改分栏宽度；双击回到 65%"
     },
     "session": {
       "heading": "内置内核会话（分区与登录态）",
