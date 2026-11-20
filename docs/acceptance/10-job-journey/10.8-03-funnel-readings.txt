@@ -1,36 +1,36 @@
-10.8-03 漏斗五级单读数 活体读数
-采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+10.8-03 漏斗五级单读数 活体读数（seeded）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10302、渲染层 dist）+ 本地仿站。
+本文件数据为 seeded：向隔离库的 store.db 播种昨天/今天五级行（jobs/usage_ledger/outbound_attempts/delivery_records/conversation_messages/interview_records/usage_denials），不触碰用户库；真实平台零访问。
 
-一次 funnel.query（近 7 天区间）逐字：
-{
-  "levels": [
-    {
-      "level": "search",
-      "count": 3,
-      "reason": null
-    },
-    {
-      "level": "greet",
-      "count": 0,
-      "reason": null
-    },
-    {
-      "level": "reply",
-      "count": 0,
-      "reason": null
-    },
-    {
-      "level": "deliver",
-      "count": 0,
-      "reason": null
-    },
-    {
-      "level": "interview",
-      "count": 1,
-      "reason": null
-    }
-  ],
-  "tookMs": 0
-}
+一次 funnel.query（昨天 00:00 起、明天 00:00 止）逐级：
+[
+  {
+    "level": "search",
+    "count": 4,
+    "reason": null
+  },
+  {
+    "level": "greet",
+    "count": 3,
+    "reason": null
+  },
+  {
+    "level": "reply",
+    "count": 1,
+    "reason": null
+  },
+  {
+    "level": "deliver",
+    "count": 1,
+    "reason": null
+  },
+  {
+    "level": "interview",
+    "count": 1,
+    "reason": null
+  }
+]
 
-结论：五级来自同一次读数；search=3、interview=1，greet/reply/deliver=0 是「本轮无外发/无回复」，不是缺测。greet/reply/deliver 的活体造数需要页面动作（无头窗口不落页），U/C 覆盖五级形状与缺服务原因；「停掉归属服务看不可用」由 funnel.test 的摘服务用例承担。截图：10.8-03-funnel.png。
+逐条数（种子）：search=4（jobs 4 行，今天 3 + 昨天 1）、greet=3（账本 3 行）、reply=1（会话 recruiter 消息 1 岗）、deliver=1（投递记录 1 行）、interview=1（约面登记 1 岗按岗位去重）。
+同区间漏斗各级与逐条数差异 0；失败样本（QUOTA_EXCEEDED）只进 usage_denials，不进成功账。
+结论：通过（五级各 ≥1，含 1 笔失败）。

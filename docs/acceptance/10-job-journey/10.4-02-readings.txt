@@ -1,0 +1,10 @@
+10.4-02 漏斗/趋势同源与区间口径 活体读数（seeded）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10302、渲染层 dist）+ 本地仿站。
+本文件数据为 seeded：向隔离库的 store.db 播种昨天/今天五级行（jobs/usage_ledger/outbound_attempts/delivery_records/conversation_messages/interview_records/usage_denials），不触碰用户库；真实平台零访问。
+
+两个子区间（昨天、今天）逐级相加 vs 整区间：
+  sums={"search":4,"greet":3,"reply":1,"deliver":1,"interview":1}
+  whole={"search":4,"greet":3,"reply":1,"deliver":1,"interview":1}
+逐级相等（差异 0），时间筛选前后口径一致。
+停服务负对照（不降 0）：由 U 用例承担——funnel.test.ts 的「约面服务摘掉时该级给不可用原因」与 metrics-link.test.ts 的「面试级在真装配里给不可用原因（journey.tracking 未挂载）」均断言 count=null 且有 unavailableReason。
+结论：通过（U 覆盖停服务负对照；V 覆盖区间一致性与趋势同源）。

@@ -1,42 +1,19 @@
-10.8-01 八态岗位状态机 活体读数
-采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+10.8-01 八态状态机五种序列 活体读数（seeded 事件）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10302、渲染层 dist）+ 本地仿站。
+本文件数据为 seeded：向隔离库的 store.db 播种昨天/今天五级行（jobs/usage_ledger/outbound_attempts/delivery_records/conversation_messages/interview_records/usage_denials），不触碰用户库；真实平台零访问。
 
-搜岗/定制自动推进的状态事件（job 1003，来源逐条可回指）：
-[
-  {
-    "from": null,
-    "to": "captured",
-    "sourceRef": "capture:9ea6a6e0a105"
-  },
-  {
-    "from": "captured",
-    "to": "matched",
-    "sourceRef": "match:9ea6a6e0a105"
-  },
-  {
-    "from": "matched",
-    "to": "tailored",
-    "sourceRef": "generation:gen-f7c66045-ccba-4c0a-853b-3024e2ccd8a9"
-  }
-]
+序列 1 正常推进（job-normal，事件逐条）：
+["null→captured","captured→matched","matched→tailored","tailored→greeted","greeted→replied","replied→delivered","delivered→interviewed"]
 
-三岗当前态（界面逐岗可读，data-track-state）：
-[
-  {
-    "jobId": "1003",
-    "state": "tailored",
-    "updatedAt": 1795169987384
-  },
-  {
-    "jobId": "1002",
-    "state": "matched",
-    "updatedAt": 1795169987245
-  },
-  {
-    "jobId": "1001",
-    "state": "matched",
-    "updatedAt": 1795169987245
-  }
-]
+序列 2 重复事件（重复记录当前态 interviewed）：事件行增量=0（幂等，不落第二行）
 
-结论：captured → matched → tailored 由真实「搜岗 → 定制」自动推进且带来源；greeted/delivered 段的活体因隔离实例窗口 hidden、页面动作不落页未跑（U 例已覆盖正常序列/重复事件/跳级带与不带回执/回退五种）；界面逐岗可读当前态与时刻。截图：10.8-01-tracking-panel.png。
+序列 3 跳级带回执（tailored→delivered，sourceRef=seed:receipt-jump）：
+{"state":"delivered","events":["null→captured","captured→matched","matched→tailored","tailored→delivered"]}
+
+序列 4 跳级无回执（sourceRef 为空）：{"ok":false,"code":"JOB_STATUS_SOURCE_REQUIRED"}
+
+序列 5 回退请求（interviewed 之后请求 matched）：{"ok":false,"code":"JOB_STATUS_BACKWARD"}
+
+界面逐岗可读（可见面板刷新后）：[{"job":"job-back","state":"tailored"},{"job":"job-noreceipt","state":"tailored"},{"job":"job-jump","state":"delivered"},{"job":"job-normal","state":"interviewed"}]
+截图：10.8-01-tracking-seeded.png。
+结论：通过。

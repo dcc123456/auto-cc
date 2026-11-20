@@ -1,148 +1,19 @@
-10.8-04 按日趋势 活体读数
-采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+10.8-04 按日趋势 活体读数（seeded 跨两天）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10302、渲染层 dist）+ 本地仿站。
+本文件数据为 seeded：向隔离库的 store.db 播种昨天/今天五级行（jobs/usage_ledger/outbound_attempts/delivery_records/conversation_messages/interview_records/usage_denials），不触碰用户库；真实平台零访问。
 
-funnel.trend（同一区间、本地自然日）：
+funnel.trend（同一区间）逐日：
 [
-  {
-    "day": "2026-11-14",
-    "levels": [
-      {
-        "level": "search",
-        "count": 0
-      },
-      {
-        "level": "greet",
-        "count": 0
-      },
-      {
-        "level": "reply",
-        "count": 0
-      },
-      {
-        "level": "deliver",
-        "count": 0
-      },
-      {
-        "level": "interview",
-        "count": 0
-      }
-    ],
-    "sends": 0
-  },
-  {
-    "day": "2026-11-15",
-    "levels": [
-      {
-        "level": "search",
-        "count": 0
-      },
-      {
-        "level": "greet",
-        "count": 0
-      },
-      {
-        "level": "reply",
-        "count": 0
-      },
-      {
-        "level": "deliver",
-        "count": 0
-      },
-      {
-        "level": "interview",
-        "count": 0
-      }
-    ],
-    "sends": 0
-  },
-  {
-    "day": "2026-11-16",
-    "levels": [
-      {
-        "level": "search",
-        "count": 0
-      },
-      {
-        "level": "greet",
-        "count": 0
-      },
-      {
-        "level": "reply",
-        "count": 0
-      },
-      {
-        "level": "deliver",
-        "count": 0
-      },
-      {
-        "level": "interview",
-        "count": 0
-      }
-    ],
-    "sends": 0
-  },
-  {
-    "day": "2026-11-17",
-    "levels": [
-      {
-        "level": "search",
-        "count": 0
-      },
-      {
-        "level": "greet",
-        "count": 0
-      },
-      {
-        "level": "reply",
-        "count": 0
-      },
-      {
-        "level": "deliver",
-        "count": 0
-      },
-      {
-        "level": "interview",
-        "count": 0
-      }
-    ],
-    "sends": 0
-  },
-  {
-    "day": "2026-11-18",
-    "levels": [
-      {
-        "level": "search",
-        "count": 0
-      },
-      {
-        "level": "greet",
-        "count": 0
-      },
-      {
-        "level": "reply",
-        "count": 0
-      },
-      {
-        "level": "deliver",
-        "count": 0
-      },
-      {
-        "level": "interview",
-        "count": 0
-      }
-    ],
-    "sends": 0
-  },
   {
     "day": "2026-11-19",
     "levels": [
       {
         "level": "search",
-        "count": 0
+        "count": 1
       },
       {
         "level": "greet",
-        "count": 0
+        "count": 1
       },
       {
         "level": "reply",
@@ -157,7 +28,8 @@ funnel.trend（同一区间、本地自然日）：
         "count": 0
       }
     ],
-    "sends": 0
+    "sends": 1,
+    "failures": []
   },
   {
     "day": "2026-11-20",
@@ -168,25 +40,31 @@ funnel.trend（同一区间、本地自然日）：
       },
       {
         "level": "greet",
-        "count": 0
+        "count": 2
       },
       {
         "level": "reply",
-        "count": 0
+        "count": 1
       },
       {
         "level": "deliver",
-        "count": 0
+        "count": 1
       },
       {
         "level": "interview",
         "count": 1
       }
     ],
-    "sends": 0
+    "sends": 3,
+    "failures": [
+      {
+        "code": "QUOTA_EXCEEDED",
+        "count": 1
+      }
+    ]
   }
 ]
 
-界面趋势行（可见面板刷新后）：[{"day":"2026-11-20","interview":"1"}]
-
-结论：趋势与漏斗同源同区间，按本地日切；今日 search=3、interview=1，界面读数一致。跨两天的活体数据未造（本轮只有当天数据），这一条按缺口记 [!]，U 例已覆盖逐日与单片漏斗相等。
+与逐日漏斗对比：昨天 search=1/greet=1，今天 search=3/greet=2/reply=1/deliver=1/interview=1；两天逐级相加 = 整区间漏斗（见 10.4-02 读数）。
+外发成功数：昨天 1、今天 3；失败 Top3：今天 QUOTA_EXCEEDED×1（seeded 失败样本）。
+结论：通过。趋势与漏斗同源同区间、按本地自然日切，界面趋势行读得到。

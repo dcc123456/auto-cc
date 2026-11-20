@@ -560,3 +560,21 @@ interface JourneyContext {
 2 成功 + 1 失败样本：成功笔逐笔对账本行、尝试（四元组/状态/ledgerId/receiptId）、deliver 再加投递记录；失败笔断言
 无账本行。同区间漏斗五级与逐条数逐级相等（差异 0）；再手动补一条「没有对应尝试的账本行」，断言对账器抛「对账差异」
 即阻断发布（10.9-05 复用同一判据）。证据：`docs/acceptance/10-job-journey/10.8-05-reconcile-sample.txt`。
+
+**第 7 片补充：seeded 离线取证（2026-11-20，回应「不需前台却记 [!]」的打回）**
+
+- **做法**：先起一次隔离实例建库、关掉；用 `node:sqlite` 往该 userData 的 `store.db` 播种昨天/今天数据——jobs 4 行
+  （今天 3、昨天 1）、`usage_ledger` greet 3 + deliver 1（今天两 greet、一 deliver；昨天一 greet）、对应
+  `outbound_attempts`（含 1 笔 unknown 失败样本、ledger 为 NULL）、`delivery_records` 1 行、`conversation_messages`
+  1 条 recruiter 消息、`interview_records` 1 条、`usage_denials` 1 条（QUOTA_EXCEEDED）；再起实例读服务与界面。
+  证据里统一注明 **seeded**，不冒充真实外发。
+- **10.8-01 五种序列**：正常推进 captured→…→interviewed；重复事件行增量 0；跳级 tailored→delivered 带回执成功；
+  跳级无回执 `JOB_STATUS_SOURCE_REQUIRED`；回退请求 `JOB_STATUS_BACKWARD`。界面逐岗可读状态。
+- **10.8-03**：一次 `funnel.query` 得 search=4 / greet=3 / reply=1 / deliver=1 / interview=1，逐条数逐级相等；失败样本只进
+  `usage_denials`，不补成功账。
+- **10.8-04**：`funnel.trend` 昨天 search=1/greet=1、今天 3/2/1/1/1，两天逐级相加=整区间；外发成功数 1/3，
+  失败 Top3 今天 QUOTA_EXCEEDED×1。
+- **10.4-02**：两子区间逐级相加与整区间逐级相等（差异 0）；停服务负对照由 U 例承担（`funnel.test` 摘约面服务、
+  `metrics-link.test` 真装配未挂追踪 → count=null + unavailableReason）。
+- **仍记 `[!]`**：`10.4-01` 的「真实发一笔后账本/去重三方对账」与 greet/reply/deliver 的真实外发活体，要页面动作，
+  留到用户在场片。
