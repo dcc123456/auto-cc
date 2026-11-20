@@ -1,0 +1,6 @@
+10.6-08 去重与同岗上限 活体读数（可见窗口）
+采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10300、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+四元组重放（同一 platform+target+action+resumeVersion 再发一次）：{"ok":false,"code":"OUTBOUND_ALREADY_SENT"}
+
+结论：重放被 OUTBOUND_ALREADY_SENT 拒绝、页面动作 0、账本未增；同岗 24 小时上限由 U 例（换版本也不叠加）覆盖。

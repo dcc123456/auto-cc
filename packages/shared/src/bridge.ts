@@ -272,7 +272,7 @@ export const RENDERER_ALLOWLIST = [
   'outbound.authorization.revoke',
   // 第 5 片：无人值守执行器。三只口都只由人按（开跑 / 读进度 / 停止）；真正的外发仍走 greet/deliver。
   'journey.unattended.start',
-  'journey.unattended.status',
+  'journey.unattended.view',
   'journey.unattended.stop',
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
@@ -2929,7 +2929,7 @@ export interface BridgeSignatures {
   'outbound.authorization.revoke': { args: []; returns: UnattendedAuthorizationView | null };
   /** 无人值守执行器（第 5 片）：在有效授权单内按序推进岗位；停止不绕开闸门。 */
   'journey.unattended.start': { args: [input: UnattendedStartInput]; returns: UnattendedRunView };
-  'journey.unattended.status': { args: []; returns: UnattendedRunView };
+  'journey.unattended.view': { args: []; returns: UnattendedRunView };
   'journey.unattended.stop': { args: []; returns: UnattendedRunView };
   /**
    * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。

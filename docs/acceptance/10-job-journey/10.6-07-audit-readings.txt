@@ -1,0 +1,72 @@
+10.6-07 外发双落账可审计 活体读数（可见窗口）
+采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10300、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+批量成功笔的尝试/账行/回执对齐：everyLedgerAttemptHasReceipt=true
+最近尝试（节选）：[
+  {
+    "targetId": "1003",
+    "action": "deliver",
+    "status": "succeeded",
+    "resumeVersion": "doc:resume-755f09232ebe:e0796f9ca796",
+    "ledgerId": 6,
+    "receiptId": "36"
+  },
+  {
+    "targetId": "1003",
+    "action": "greet",
+    "status": "succeeded",
+    "resumeVersion": "doc:resume-755f09232ebe:e0796f9ca796",
+    "ledgerId": 5,
+    "receiptId": "7"
+  },
+  {
+    "targetId": "1002",
+    "action": "greet",
+    "status": "succeeded",
+    "resumeVersion": "doc:resume-36859dad293b:314c0992041d",
+    "ledgerId": 4,
+    "receiptId": "6"
+  },
+  {
+    "targetId": "1001",
+    "action": "deliver",
+    "status": "succeeded",
+    "resumeVersion": "doc:resume-38a586f450ea:b2a11631dc33",
+    "ledgerId": 3,
+    "receiptId": "34"
+  }
+]
+对应账本行（节选）：[
+  {
+    "id": 6,
+    "action": "deliver",
+    "targetId": "1003",
+    "ts": 1795172749734
+  },
+  {
+    "id": 5,
+    "action": "greet",
+    "targetId": "1003",
+    "ts": 1795172734226
+  },
+  {
+    "id": 4,
+    "action": "greet",
+    "targetId": "1002",
+    "ts": 1795172717448
+  },
+  {
+    "id": 3,
+    "action": "deliver",
+    "targetId": "1001",
+    "ts": 1795172715969
+  },
+  {
+    "id": 2,
+    "action": "greet",
+    "targetId": "1001",
+    "ts": 1795172700438
+  }
+]
+
+结论：每笔成功外发都有账本行 + 页面回执 id；投递笔另有 delivery_records 行（U 例 `journey-reconcile.test` 对 deliver 逐笔断言）。

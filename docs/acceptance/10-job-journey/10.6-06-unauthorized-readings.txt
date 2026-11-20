@@ -1,0 +1,38 @@
+10.6-06 越权外发为 0：五类负对照 活体读数（可见窗口）
+采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10300、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+逐类从真实外发入口 outbound.greet.perform（unattended）发起：
+[
+  {
+    "label": "①岗位不在集合",
+    "code": "OUTBOUND_TARGET_NOT_AUTHORIZED",
+    "ledgerBefore": 6,
+    "ledgerAfter": 6
+  },
+  {
+    "label": "③版本不匹配",
+    "code": "OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED",
+    "ledgerBefore": 6,
+    "ledgerAfter": 6
+  },
+  {
+    "label": "②超日限额",
+    "code": "AUTHORIZATION_QUOTA_EXHAUSTED",
+    "ledgerBefore": 7,
+    "ledgerAfter": 7
+  },
+  {
+    "label": "④窗口外",
+    "code": "AUTHORIZATION_WINDOW_CLOSED",
+    "ledgerBefore": 7,
+    "ledgerAfter": 7
+  },
+  {
+    "label": "⑤撤权后",
+    "code": "UNATTENDED_NOT_AUTHORIZED",
+    "ledgerBefore": 7,
+    "ledgerAfter": 7
+  }
+]
+
+结论：五类（岗位不在集合 / 超日限额 / 版本不是授权母版变体 / 窗口外 / 撤权后）全部被拒，页面动作 0、账本零增行。

@@ -61,7 +61,7 @@ export function OutboundAuthorizationCard({
   }, [bridge]);
 
   const reloadRun = useCallback(async () => {
-    const reply = await bridge?.journey['unattended.status']();
+    const reply = await bridge?.journey['unattended.view']();
     if (reply?.ok) setRunView(reply.value);
   }, [bridge]);
 

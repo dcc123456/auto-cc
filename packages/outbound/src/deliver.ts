@@ -492,9 +492,10 @@ export class OutboundDeliverService extends Service {
     // 更不该在 `semi` 档被拉起一张确认卡片——那张卡片问的是「要不要递」，不是「要不要承担风险」。
     consentGateOf(this.ctx).ensureConsent(platform);
 
-    // 择机投递（spec 5.7-03）：无人值守那一路先问一句「此刻该不该递」，不合适就到此为止——
-    // 此刻页面动作次数为零、账本零行、被拒流水零行，下一次计划点照跑（5.7-06 的读数）。
-    const deferral = this.timingDeferral(staged);
+    // 择机投递（spec 5.7-03）：自动排程那一路先问「此刻该不该递」；但带 `unattended` 的执行器是在
+    // **一次性授权单范围内**逐岗推进（工时窗、岗位集合、版本都已由用户写死），择机规则的「等对方回复」
+    // 会与授权模型互斥（首投永远等不到回复）。所以授权下的执行器跳过这一步，仍受授权/额度/频控/风控约束。
+    const deferral = staged.unattended ? null : this.timingDeferral(staged);
     if (deferral) {
       throw new AppError('OUTBOUND_DELIVER_DEFERRED', deferral.reason, 'outbound.deliver', {
         jobId,

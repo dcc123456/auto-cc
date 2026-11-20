@@ -1,12 +1,21 @@
-10.6-05 一键停用 活体读数（V 半边）
-采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
+10.6-05 一键停用 ≤1 秒 活体读数（可见窗口）
+采集：2026-11-20 · 可见前台窗口的隔离实例（独立 userData、CDP 10300、渲染层 dist）+ 本地仿站；真实平台零访问。
 
-按 journey-auth-stop-toggle 后 entitlement.gate.outboundStatus()：
+开跑即按停用（entitlement.gate.setOutboundStopped(true)）：
 {
-  "stopped": true,
-  "updatedAt": 1795165968431
+  "grantStatus": "active",
+  "stopFlag": {
+    "stopped": true,
+    "updatedAt": 1795172698918
+  },
+  "stopFlagMs": 9,
+  "finalStatus": "stopped",
+  "completedBeforeStop": 0,
+  "inFlightUnknown": 0,
+  "ledgerBeforeStop": 1,
+  "ledgerAtStop": 1,
+  "ledgerAfterWait": 1
 }
 
-结论：停用位即时为 true，入口在授权卡常驻可见处（U 例覆盖「停用后同一毫秒起判定即拒」）。
-缺口（记 [!]）：应用内还没有无人值守执行器，造不出「在飞一笔」去验证「≤1 秒停住 / 未知结局先对账」；
-这一格留到执行器落地那片补活体。
+结论：停用位 9ms 内生效；执行器转 stopped，停用后账本 1→1→1（等待 1.5s 仍不增）。
+缺口（本片仍记 [!]）：停用发生在首笔发送之前，没有造出「在飞一笔」的未知结局场景；U 例覆盖停用判定与未知结局对账，活体竞态留待可稳定制造在飞窗口时补。
