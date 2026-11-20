@@ -852,12 +852,14 @@ describe('对话骨架的业务边界（1.11-14 / 1.11-15）', () => {
 });
 
 describe('档位的默认值、回落与变更审计（spec 5.3-02 / 05）', () => {
-  it('装配不给 defaultAutonomy：schema 补出来的就是产品目标形态的全自动档', () => {
+  it('装配不给 defaultAutonomy：schema 补出来的就是最保守的「只建议」档（plan §13.2 裁定）', () => {
     // 5.3-02 的验证操作是「删配置 → 断言档位为缺省值」。2026-10-26（片三）用户裁定
     // 「对话页默认全自动」，缺省因此从最保守档改成 `auto`：这一步只是把档位摆好，
     // 真跑起来还要那份一次性授权（8.10-01），四道红线也不因缺省变宽。
+    // **2026-11-21 改回 `suggest`**（plan §13.2 的 PMO 裁定）：新手走查实测干净实例首启为全自动，
+    // 与首屏隐私声明「默认最保守」直接打架，涉及外发的风险表态必须一致。历史那一段保留不改写。
     // `cordis.yml` 的 `chat` 条目本来就没写它——这条断言读的是真实装配，不是想象中的装配。
-    expect(chatConfigSchema.parse({}).defaultAutonomy).toBe('auto');
+    expect(chatConfigSchema.parse({}).defaultAutonomy).toBe('suggest');
     const cordisYml = readFileSync(join(fileURLToPath(new URL('.', import.meta.url)), '../../../cordis.yml'), 'utf8');
     const chatEntryBlock = cordisYml.match(/\n {2}- id: chat\n[\s\S]*?(?=\n {2}- id: )/)?.[0] ?? '';
     // 注释行要剔掉再判：装配文件里写着「这一行为什么不给」的说明，那不是配置键本身。

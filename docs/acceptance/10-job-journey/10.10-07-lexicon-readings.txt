@@ -1,0 +1,8 @@
+10.10-07 术语白话 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+「每天最多投几个岗位」出现在授权卡：true
+「用 Office-cc 排版（可选）」出现在简历卡：true
+首屏文本含 cron：false
+未做：JD/回执/抓取三类术语的首现白话注解（本轮只改了两处），见状态位
+证据图：10.10-07-lexicon.png

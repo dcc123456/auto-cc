@@ -1,0 +1,11 @@
+10.10-04 默认档位口径（2026-11-21 裁定） 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+干净实例首启对话档位胶囊："只建议"
+底栏档位："档位\n只建议"
+隐私声明里的默认档位原话（语言包 privacy.keyPromiseDetail）：默认档位是最保守的「只建议」
+三处逐字一致性：胶囊/底栏/隐私声明均出现「只建议」
+授权单读数（干净实例）："none" → 底栏仍报档位名，未出现「已授权」
+状态转移 U：packages/renderer/src/deskStatus.test.ts 三例（无授权单→档位名；active→已授权 N 岗；撤权/停用→退回档位名）
+未取到：授权单生效后的底栏 V 读数（需 fixture/真站授权后取），见 10.10-04 状态位
+证据图：10.10-04-autonomy.png

@@ -73,6 +73,7 @@ export function ResumeFormPage({
           disabled={busy}
           disabledReason={busyReason}
           disabledReasonLabel={busyReasonLabel}
+          tip={t('resume.cardOfficeHint')}
           onClick={onHandoff}
         >
           <Maximize2 size={12} />

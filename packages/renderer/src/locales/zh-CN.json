@@ -194,7 +194,9 @@
       }
     },
     "platformName": {
-      "boss": "BOSS 直聘"
+      "boss": "BOSS 直聘",
+      "fixture": "本机仿站",
+      "fixture-alt": "本机仿站（备用）"
     },
     "language": {
       "switchTo": "English"
@@ -222,9 +224,54 @@
       "authValue": "已登录 {{active}} / 共 {{total}}",
       "authNone": "未配置平台",
       "authExpired": "{{platform}} 刚失效",
+      "authOne": "{{platform}} · {{state}}",
+      "unattended": "无人值守：已授权 {{count}} 岗",
       "quotaValue": "{{action}} 剩 {{count}}",
       "quotaUnlimited": "本地不限",
       "quotaDenied": "{{action}} 已用完"
+    },
+    "guide": {
+      "focus": "去这一步",
+      "chat": {
+        "here": "我在哪：工作台 · 对话（第 0 步）",
+        "next": "下一步：说一句你想找的工作，或点上面三颗入口",
+        "exit": "出口：左栏切到岗位 / 简历"
+      },
+      "resume": {
+        "here": "我在哪：第 1 步 / 共 6 步 · 导入简历",
+        "next": "下一步：导入一份简历，它会成为母版",
+        "exit": "出口：回对话"
+      },
+      "jobs": {
+        "here": "我在哪：第 2 步 / 共 6 步 · 搜岗",
+        "next": "下一步：填关键词与城市，点「搜索并入库」",
+        "exit": "出口：去简历页选母版"
+      },
+      "deliver": {
+        "here": "我在哪：第 5 步 · 投递",
+        "next": "下一步：选文件（或留空用设置里那一份）",
+        "exit": "出口：回到上面挑岗位"
+      },
+      "auth": {
+        "here": "我在哪：第 5 步 / 共 6 步 · 授权",
+        "next": "下一步：勾岗位、填每天上限，开授权单",
+        "exit": "出口：收回授权或一键停用"
+      },
+      "tracking": {
+        "here": "我在哪：第 6 步 / 共 6 步 · 追踪",
+        "next": "下一步：把收到的回复记进来，或登记约面",
+        "exit": "出口：去统计看漏斗"
+      },
+      "usage": {
+        "here": "我在哪：第 6 步 · 统计",
+        "next": "下一步：换时间区间再看一遍，或刷新读数",
+        "exit": "出口：回对话"
+      },
+      "privacy": {
+        "here": "我在哪：第 1 步 · 隐私与条款",
+        "next": "下一步：读完点「我已阅读并同意」",
+        "exit": "出口：收起这一屏，随时可从顶栏重开"
+      }
     },
     "desk": {
       "reveal": "在{{target}}中显示",
@@ -342,6 +389,9 @@
     },
     "session": {
       "heading": "内置内核会话（分区与登录态）",
+      "goLogin": "去登录",
+      "demoToggle": "开发者选项：本机仿站会话",
+      "demoHint": "这些是本机仿站（127.0.0.1）的演示会话，不是你的真实账号；只有自动化验收才用。",
       "refresh": "重新读取会话状态",
       "empty": "会话列表为空：cordis.yml 里没有登记平台，或 sessions 插件未挂载",
       "none": "无",
@@ -405,7 +455,7 @@
       "criteriaHeading": "搜索条件",
       "platformLabel": "在哪个平台搜",
       "keywordPlaceholder": "关键词，如「前端」",
-      "cityPlaceholder": "城市名或城市码，如「上海」或 101020100（可空）",
+      "cityPlaceholder": "城市，如「上海」（可空）",
       "experiencePlaceholder": "经验要求，如「3-5 年」（可空）",
       "limitPlaceholder": "本次目标条数",
       "captureButton": "搜索并入库",
@@ -428,7 +478,7 @@
       "filterApply": "筛选",
       "filterClear": "清空",
       "filterSummary": "库内 {{total}} 条 · 命中 {{matched}} 条 · 当前显示 {{shown}} 条",
-      "filterEmpty": "没有符合筛选条件的岗位；换个条件或清空筛选再看看",
+      "filterEmpty": "这次没有符合条件的岗位：换个关键词或城市，或点「清空」再看",
       "filterMore": "加载更多（已显示 {{shown}} / {{matched}} 条）",
       "greetReceiptHeading": "最近一次打招呼的回执",
       "greetReceiptPage": "页面回读：{{reason}}",
@@ -469,7 +519,7 @@
       "skippedEmpty": "本轮没有跳过任何条目",
       "skippedRow": "{{title}} · {{reason}} · {{sourceUrl}}",
       "listHeading": "挑岗位",
-      "listIdle": "尚未读取库内清单",
+      "listIdle": "还没搜过：填上面的关键词，点「搜索并入库」",
       "rowMain": "#{{id}} {{title}} · {{company}} · {{salary}}（原文「{{salaryText}}」）",
       "rowMeta": "{{city}} / {{experience}} / {{education}} · 发布 {{postedAt}} · 摘要入库 {{capturedAt}} · 详情 {{detailCapturedAt}} · 正文 {{descriptionLength}} 字",
       "rowReplied": "对方已回 {{inbound}} 条",
@@ -584,7 +634,11 @@
       "hint": "在下面挑一行点「投递简历」才会走到这一格，这里不会自己开始。",
       "pipeline": "一份投递走五步：查额度 → 等频控 → 要你点头 → 到页面上真点一次 → 记一行账。",
       "tiers": "半自动档会挂在这一格等你在卡片上表态；建议档只把文件准备好，一条都不会发出去。",
-      "resumePathPlaceholder": "简历 PDF 的路径（留空用设置里那一份）",
+      "pickFile": "选择文件",
+      "pickFileTitle": "选择要投递的简历 PDF",
+      "pickFileFilter": "PDF 文件",
+      "pickFileNone": "还没选：留空就用设置里那一份",
+      "pickFileChosen": "已选：{{name}}",
       "rowButton": "投递简历",
       "action": "向「{{title}}」投递简历",
       "pendingHeading": "等你点头的投递单",
@@ -720,7 +774,8 @@
       "deleteError": "删除失败（{{code}}）：{{message}}",
       "deleted": "已删掉这一份：{{entities}} 段素材 · {{chunks}} 条索引 · {{snapshots}} 个版本 · {{imports}} 条来路",
       "importError": "导入失败（{{code}}）：{{message}}",
-      "pendingCount": "{{count}} 处没读准，导出前自己看一眼",
+      "pendingCount": "{{count}} 份简历有要核对的地方",
+      "pendingOpen": "去处理",
       "pendingRow": "{{name}} · {{issueCount}} 处 · {{time}}",
       "statusImported": "已入库",
       "statusScanned": "疑似扫描件，只读到 {{chars}} 字",
@@ -754,7 +809,8 @@
       "cardEdit": "编辑表单",
       "cardPreview": "预览",
       "cardGenerate": "按 JD 生成",
-      "cardOffice": "交给 Office-cc",
+      "cardOffice": "用 Office-cc 排版（可选）",
+      "cardOfficeHint": "Office-cc 是同类产品里的 Office 文档助手：把这份简历交给它做精排，改完再导回来。",
       "backToList": "返回简历列表",
       "formPageTitle": "编辑 {{doc}}",
       "generatePageTitle": "按岗位生成简历 · {{target}}",
@@ -770,7 +826,7 @@
       "previewReady": "已是最新",
       "previewFailed": "这一张没排出来",
       "previewError": "预览失败：{{message}}",
-      "pendingBadge": "{{count}} 处待确认",
+      "pendingBadge": "待核对 {{count}}",
       "refresh": "重新读取"
     },
     "shelf": {
@@ -1149,6 +1205,10 @@
       "modelNone": "还没配对话模型",
       "modelMenu": "对话模型",
       "modelConfig": "模型配置",
+      "modelConfigMissing": "去配模型",
+      "startImportResume": "导入简历",
+      "startFindJobs": "看匹配岗位",
+      "startAuthorizeDeliver": "授权投递",
       "modelEmpty": "还没有可选的模型：先去模型配置里添加并勾选",
       "settings": {
         "title": "对话设置",
@@ -1283,7 +1343,7 @@
     "agent": {
       "autonomy": {
         "section": "agent 替你做主到哪一步",
-        "suggest": "建议模式",
+        "suggest": "只建议",
         "semi": "半自动",
         "auto": "全自动",
         "why": {
@@ -2079,6 +2139,18 @@
       "reasonNoDoc": "还没有选择母版简历",
       "reasonBusy": "上一条动作还没回来",
       "reasonNoIntent": "先读取求职意向",
+      "guideHere": "我在哪：第 2 步 / 共 6 步 · 求职主链（母版 → 意向 → 搜岗 → 选岗 → 定制 → 授权投递）",
+      "guideNext": "下一步：选一份母版简历，点「读取求职意向」",
+      "guideExit": "出口：回对话问一句，或去别的页",
+      "guideExitChat": "回对话",
+      "goResume": "去简历页选母版",
+      "loginHint": "{{platform}} 还没登录：搜岗要在它的页面上跑，先登录。",
+      "goLogin": "去登录 {{platform}}",
+      "gapsTitle": "还缺：{{fields}}",
+      "gapUnknown": "未填的「{{field}}」",
+      "actionSaveIntent": "保存意向",
+      "intentSaveHint": "改完点保存；材料里的版本会跟着母版一起变。",
+      "intentSaveNoop": "四格都没改，不用保存",
       "intentLine": "期望岗位 {{role}} · 城市 {{city}} · 母版 {{version}}",
       "missingFields": "未填：{{fields}}",
       "none": "未填",
@@ -2110,7 +2182,7 @@
         "expired": "已过期",
         "revoked": "已收回"
       },
-      "dailyLimitLabel": "日限额（岗）",
+      "dailyLimitLabel": "每天最多投几个岗位",
       "versionLine": "母版 {{master}} · 定制 {{tailored}} · 回执 {{receipt}}",
       "none": "无",
       "noTargets": "先搜岗，再从这里勾选授权岗位。",
@@ -2129,8 +2201,8 @@
       },
       "reasonNoTailor": "先对选中岗位定制并过事实校验，才能授权",
       "reasonNoTargets": "先勾选至少一个岗位",
-      "reasonLimit": "日限额必须是 1–10 的整数",
-      "reasonOverLimit": "勾选岗位数不能超过日限额 {{limit}}",
+      "reasonLimit": "每天最多投几个岗位：填 1–10 的整数",
+      "reasonOverLimit": "勾选的岗位数不能超过每天上限 {{limit}} 个",
       "reasonBusy": "上一个动作还没结束",
       "reasonNoAuth": "当前没有授权单可收回",
       "runStart": "开始无人值守",

@@ -11,7 +11,12 @@
  * 通知入口只有 `report*` 那几只，别处再写一套就长出第二个真相（§2.5）。
  */
 import { useEffect, useState } from 'react';
-import type { AutonomyLevel, GateDecisionView, SessionPlatformView } from '@auto-cc/shared';
+import type {
+  AutonomyLevel,
+  GateDecisionView,
+  SessionPlatformView,
+  UnattendedAuthorizationView,
+} from '@auto-cc/shared';
 
 /**
  * 状态条能报出来的读数。
@@ -27,6 +32,11 @@ export interface DeskStatusReading {
   quota?: Record<string, GateDecisionView>;
   /** 当前会话的自治档位（`chat.session.current()` 里的 `session.autonomy`） */
   tier?: AutonomyLevel;
+  /**
+   * 当前有效的无人值守授权单（`outbound.authorization.current()`，没有时为 null）。
+   * 状态条据此把它报成「无人值守：已授权 N 岗」而不是只报档位名的第二份说法（plan §13.2 裁定）。
+   */
+  authorization?: { active: boolean; targetCount: number } | null;
 }
 
 let current: DeskStatusReading = {};
@@ -75,6 +85,29 @@ export function reportDeskQuota(quota: Record<string, GateDecisionView> | undefi
 export function reportDeskTier(tier: AutonomyLevel): void {
   report({ tier });
 }
+
+/**
+ * 报当前授权单的读数。
+ * @param view 授权单视图；null = 现在没有生效的授权单（撤权/停用之后状态条要能退回「只建议」）
+ */
+export function reportDeskAuthorization(view: UnattendedAuthorizationView | null): void {
+  report({ authorization: view ? { active: view.status === 'active', targetCount: view.targets.length } : null });
+}
+
+/**
+ * 状态条「档位」那一格该报什么：单纯档位名，还是「无人值守：已授权 N 岗」。
+ *
+ * 抽成纯函数是因为 plan §13.2 的裁定是一条**状态转移**判据（授权生效→报授权；撤权/停用→退回档位名），
+ * 而真实授权单要连平台才能开出来。这里把三种转移钉进单测，界面那一格只负责按读数取译文。
+ * @param tier 当前会话档位
+ * @param authorization 授权单读数；`null` = 没有生效中的授权单
+ * @returns 有生效授权时 `{kind:'unattended', count}`；否则 `{kind:'tier', tier}`
+ */
+export const deskTierReading = (
+  tier: AutonomyLevel | undefined,
+  authorization: { active: boolean; targetCount: number } | null | undefined,
+): { kind: 'unattended'; count: number } | { kind: 'tier'; tier: AutonomyLevel | undefined } =>
+  authorization?.active === true ? { kind: 'unattended', count: authorization.targetCount } : { kind: 'tier', tier };
 
 /** 状态条那一格要报的「最紧的一只额度」。 */
 export interface TightestQuota {

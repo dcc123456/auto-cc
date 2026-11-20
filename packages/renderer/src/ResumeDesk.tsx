@@ -17,7 +17,7 @@ import { ResumeFormPage } from './ResumeFormPage';
 import { ResumeGeneratePage } from './ResumeGeneratePage';
 import { ResumePreviewModal } from './ResumePreviewModal';
 import { Banner, DeskButton, DeskSelect, Tag } from './ui/controls';
-import { DeskExplainer } from './ui/disclosure';
+import { DeskExplainer, DeskPathGuide } from './ui/disclosure';
 import { Modal } from './ui/overlays';
 import { useBridgeAction } from './useBridgeAction';
 import { useViewTrail } from './viewTrail';
@@ -228,6 +228,9 @@ export function ResumeDesk() {
     });
 
   /** 待确认按 docId 索引：卡片上的徽标与顶部清单共用这一份读数。 */
+  /** 这份简历在 `resume.parse.pending()` 里有几行（徽标那个数只从这里来）。 */
+  const pendingForDoc = useCallback((docId: string) => pending.filter((row) => row.docId === docId).length, [pending]);
+
   const pendingByDoc = useMemo(() => {
     const index = new Map<string, PendingImportRowView>();
     for (const row of pending) index.set(row.docId, row);
@@ -437,6 +440,14 @@ export function ResumeDesk() {
     <>
       {page.kind === 'list' || (page.kind === 'form' && formDoc === undefined) ? (
         <div className="flex min-w-0 flex-col gap-3" data-testid="resume-list">
+          <DeskPathGuide
+            testid="resume-path-guide"
+            here={t('guide.resume.here')}
+            next={t('guide.resume.next')}
+            exit={t('guide.resume.exit')}
+            focusSelector='[data-action="resume-import-many"]'
+            focusLabel={t('guide.focus')}
+          />
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <DeskButton
               action="resume-import-many"
@@ -609,8 +620,27 @@ export function ResumeDesk() {
                         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-100">
                           <span className="truncate">{doc.name ?? t('resume.pendingUnnamed')}</span>
                           {isVariant && <Tag>{t('resume.docVariantTag')}</Tag>}
+                          {/* 一张卡只报**一个**待核对数（spec 10.10-06）：原先徽标写 `17 处待确认`、下面又写
+                              `1 处没读准`，两个数一个数问题一个数文档，人分不清哪个算数。这里统一按
+                              `resume.parse.pending()` 的**行数**报（每份简历一行），细目留给「去处理」。 */}
                           {pendingRow && (
-                            <Tag tone="amber">{t('resume.pendingBadge', { count: pendingRow.issues.length })}</Tag>
+                            <Tag tone="amber">{t('resume.pendingBadge', { count: pendingForDoc(doc.id) })}</Tag>
+                          )}
+                          {pendingRow && (
+                            <DeskButton
+                              action={`resume-pending-open-${doc.id}`}
+                              variant="line"
+                              compact
+                              markers={{ testid: 'resume-pending-open', 'doc-id': doc.id }}
+                              onClick={() => {
+                                // 「去处理」把待核对那一段带进视口：它长在下面，点完立刻能看到细目。
+                                document
+                                  .querySelector('[data-section="resume.pending-issues"]')
+                                  ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                              }}
+                            >
+                              {t('resume.pendingOpen')}
+                            </DeskButton>
                           )}
                         </p>
                         <p className="mt-0.5 truncate text-[11px] text-slate-500">
@@ -674,6 +704,7 @@ export function ResumeDesk() {
                           disabledReason={busyReason}
                           disabledReasonLabel={reasonLabel(busyReason)}
                           markers={{ docId: doc.id }}
+                          tip={t('resume.cardOfficeHint')}
                           onClick={() => handOff(doc.id)}
                         >
                           <Maximize2 size={12} />

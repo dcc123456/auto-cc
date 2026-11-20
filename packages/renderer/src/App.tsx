@@ -35,7 +35,7 @@ import { UsagePanel } from './UsagePanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
-import { tightestQuota, useDeskStatus } from './deskStatus';
+import { deskTierReading, tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton, DeskTab, DeskViewTrail, NarrowLabel } from './ui/controls';
 import { Toast } from './ui/overlays';
 /**
@@ -46,6 +46,8 @@ import { Toast } from './ui/overlays';
  * 所以来回切不丢滚动位置也不丢状态（spec 1.10-01）——形态⑥ 的「返回时滚动位置不变」靠的正是这一条。
  */
 import { clearViewTrail, useViewTrail, type TopView } from './viewTrail';
+import { isLocalSessionUrl } from './platform-choice';
+import { platformLabel } from './platform-label';
 
 const otherLanguage = (current: string): SupportedLanguage => (current === 'zh-CN' ? 'en' : 'zh-CN');
 
@@ -124,15 +126,23 @@ export function App() {
   const { live } = useWorkflowRun();
   // 其余三项各自由拥有它的面板报进汇流（`deskStatus.ts`）：状态条只读这一份，不自己去问第二遍（§2.5）。
   const desk = useDeskStatus();
-  const activePlatformCount = desk.platforms?.filter((platform) => platform.auth === 'active').length ?? 0;
+  // 状态条只报真实平台（spec 10.10-10）：本机仿站是给开发/测试看的，摊在底栏会让人以为「我有三个账号」。
+  const realPlatforms = (desk.platforms ?? []).filter((platform) => !isLocalSessionUrl(platform.startUrl));
+  const activePlatformCount = realPlatforms.filter((platform) => platform.auth === 'active').length;
+  const soleRealPlatform = realPlatforms.length === 1 ? realPlatforms[0] : undefined;
   // 掉线优先于计数：这一格先说出的必须是「哪一只刚掉线」，计数等下一次快照自己补齐（朱砂那一档）。
   const authValue = desk.expiredPlatform
-    ? t('statusbar.authExpired', { platform: desk.expiredPlatform })
+    ? t('statusbar.authExpired', { platform: platformLabel(t, desk.expiredPlatform) })
     : !desk.platforms
       ? t('status.none')
-      : desk.platforms.length === 0
+      : realPlatforms.length === 0
         ? t('statusbar.authNone')
-        : t('statusbar.authValue', { active: activePlatformCount, total: desk.platforms.length });
+        : soleRealPlatform
+          ? t('statusbar.authOne', {
+              platform: platformLabel(t, soleRealPlatform.id),
+              state: t(`session.auth.${soleRealPlatform.auth}`),
+            })
+          : t('statusbar.authValue', { active: activePlatformCount, total: realPlatforms.length });
   const authState: DeskSlotState = desk.expiredPlatform ? 'warn' : activePlatformCount > 0 ? 'ok' : 'none';
   const quota = tightestQuota(desk.quota);
   const quotaValue = !quota
@@ -143,9 +153,25 @@ export function App() {
         ? t('statusbar.quotaUnlimited')
         : t('statusbar.quotaValue', { action: quota.action, count: quota.remaining });
   const quotaState: DeskSlotState = !quota ? 'none' : quota.isDenied ? 'warn' : 'ok';
-  const tierValue = desk.tier ? t(`agent.autonomy.${desk.tier}`) : t('status.none');
+  // 授权单生效时才报「无人值守：已授权 N 岗」（plan §13.2 的 2026-11-21 裁定）；
+  // 撤权/停用后授权单不再是 active，这一格自动退回档位名——两处说法因此不会各说一套。
+  const tierReading = deskTierReading(desk.tier, desk.authorization);
+  const tierValue =
+    tierReading.kind === 'unattended'
+      ? t('statusbar.unattended', { count: tierReading.count })
+      : tierReading.tier
+        ? t(`agent.autonomy.${tierReading.tier}`)
+        : t('status.none');
   // 档位的点色按「谁替谁做主」：全自动=外发不再逐步问人（朱砂），半自动=每一步等表态（琥珀），建议=只出主意（灰）。
-  const tierState: DeskSlotState = desk.tier === 'auto' ? 'warn' : desk.tier === 'semi' ? 'ask' : 'none';
+  // 授权生效那一格不是档位读数，涂琥珀（等授权窗口），与「有人替你在发」的朱砂区分开。
+  const tierState: DeskSlotState =
+    tierReading.kind === 'unattended'
+      ? 'ask'
+      : tierReading.tier === 'auto'
+        ? 'warn'
+        : tierReading.tier === 'semi'
+          ? 'ask'
+          : 'none';
   // 11 片：布局模式启动时读一次（切换靠 reload 整体生效，不许两态同屏各握一份几何事实）。
   const kernelMode = readKernelViewMode();
   // 右栏那一槽位默认不占位（裁定⑱）：只有主进程的内核视图装着真实站点时它才存在，收起时那一条宽度还给主区。

@@ -1,0 +1,6 @@
+10.10-17 四态原因与恢复（未完成） 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+本轮取到的只有空态：搜岗库内为空 → "还没搜过：填上面的关键词，点「搜索并入库」"；未搜索时不出现「没有符合筛选条件」：false
+未做：逐屏造加载/失败/风控三态。风控态要 fixture 的风控开关与整轮暂停读数（10.6-04 口径），本轮没有起 fixture 实例造这三态。
+状态位按「未验」记 [!]；补做办法：隔离 fixture 实例（platform-boss=fixture）上逐屏造四态，读数首行标注 fixture。

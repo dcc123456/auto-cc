@@ -194,7 +194,9 @@
       }
     },
     "platformName": {
-      "boss": "BOSS Zhipin"
+      "boss": "BOSS Zhipin",
+      "fixture": "Local fixture site",
+      "fixture-alt": "Local fixture site (spare)"
     },
     "language": {
       "switchTo": "中文"
@@ -222,9 +224,54 @@
       "authValue": "{{active}} of {{total}} signed in",
       "authNone": "No platform",
       "authExpired": "{{platform}} session just expired",
+      "authOne": "{{platform}} · {{state}}",
+      "unattended": "Unattended: {{count}} job(s) authorized",
       "quotaValue": "{{action}} left {{count}}",
       "quotaUnlimited": "Unlimited locally",
       "quotaDenied": "{{action}} exhausted"
+    },
+    "guide": {
+      "focus": "Go to this step",
+      "chat": {
+        "here": "Where you are: workspace · chat (step 0)",
+        "next": "Next: say what kind of job you want, or use the three entries above",
+        "exit": "Exit: switch to Jobs / Resume in the left rail"
+      },
+      "resume": {
+        "here": "Where you are: step 1 of 6 · import a resume",
+        "next": "Next: import a resume; it becomes your master",
+        "exit": "Exit: back to chat"
+      },
+      "jobs": {
+        "here": "Where you are: step 2 of 6 · search jobs",
+        "next": "Next: type a keyword and a city, then press Search and store",
+        "exit": "Exit: pick a master on the resume page"
+      },
+      "deliver": {
+        "here": "Where you are: step 5 · delivery",
+        "next": "Next: choose a file (or leave empty to use the one in settings)",
+        "exit": "Exit: go back up and pick a job"
+      },
+      "auth": {
+        "here": "Where you are: step 5 of 6 · authorize",
+        "next": "Next: tick jobs, set the daily cap, create the authorization",
+        "exit": "Exit: revoke the authorization or hit stop"
+      },
+      "tracking": {
+        "here": "Where you are: step 6 of 6 · tracking",
+        "next": "Next: record a reply, or register an interview",
+        "exit": "Exit: open stats and read the funnel"
+      },
+      "usage": {
+        "here": "Where you are: step 6 · stats",
+        "next": "Next: change the range and read again, or refresh",
+        "exit": "Exit: back to chat"
+      },
+      "privacy": {
+        "here": "Where you are: step 1 · privacy and terms",
+        "next": "Next: read it, then press I have read and agree",
+        "exit": "Exit: dismiss this screen; reopen it from the top bar anytime"
+      }
     },
     "desk": {
       "reveal": "Show in {{target}}",
@@ -342,6 +389,9 @@
     },
     "session": {
       "heading": "Embedded kernel sessions (partition & login state)",
+      "goLogin": "Sign in",
+      "demoToggle": "Developer options: local fixture sessions",
+      "demoHint": "These are local fixture sessions (127.0.0.1), not your real accounts; only automated acceptance uses them.",
       "refresh": "Reload session state",
       "empty": "No sessions listed: cordis.yml registers no platform, or the sessions plugin is not mounted",
       "none": "none",
@@ -405,7 +455,7 @@
       "criteriaHeading": "Search criteria",
       "platformLabel": "Platform to search",
       "keywordPlaceholder": "Keyword, e.g. \"frontend\"",
-      "cityPlaceholder": "City name or code, e.g. \"Shanghai\" or 101020100 (optional)",
+      "cityPlaceholder": "City, e.g. \"Shanghai\" (optional)",
       "experiencePlaceholder": "Experience, e.g. \"3-5 years\" (optional)",
       "limitPlaceholder": "Target count for this run",
       "captureButton": "Search and store",
@@ -428,7 +478,7 @@
       "filterApply": "Filter",
       "filterClear": "Clear",
       "filterSummary": "{{total}} rows in store · {{matched}} matched · {{shown}} shown",
-      "filterEmpty": "No jobs match these filters; change them or clear the filters",
+      "filterEmpty": "No jobs this time: change the keyword or city, or press Clear",
       "filterMore": "Load more ({{shown}} / {{matched}} shown)",
       "greetReceiptHeading": "Last greeting receipt",
       "greetReceiptPage": "Page readback: {{reason}}",
@@ -469,7 +519,7 @@
       "skippedEmpty": "Nothing was skipped this round",
       "skippedRow": "{{title}} · {{reason}} · {{sourceUrl}}",
       "listHeading": "Pick a job",
-      "listIdle": "Stored list not read yet",
+      "listIdle": "Nothing searched yet: type a keyword above and press Search and store",
       "rowMain": "#{{id}} {{title}} · {{company}} · {{salary}} (raw \"{{salaryText}}\")",
       "rowMeta": "{{city}} / {{experience}} / {{education}} · posted {{postedAt}} · summary at {{capturedAt}} · detail {{detailCapturedAt}} · body {{descriptionLength}} chars",
       "rowReplied": "{{inbound}} replies from recruiter",
@@ -584,7 +634,11 @@
       "hint": "This starts only when you press the deliver button on a row below - it never begins on its own.",
       "pipeline": "One delivery walks five steps: check quota, wait for the throttle, ask you, click the real page, write one ledger row.",
       "tiers": "Semi-auto parks the job here until you answer on the card; suggest only stages the file and sends nothing.",
-      "resumePathPlaceholder": "Path to the resume PDF (blank uses the one in settings)",
+      "pickFile": "Choose a file",
+      "pickFileTitle": "Choose the resume PDF to send",
+      "pickFileFilter": "PDF files",
+      "pickFileNone": "Nothing chosen: leave empty to use the one in settings",
+      "pickFileChosen": "Chosen: {{name}}",
       "rowButton": "Deliver resume",
       "action": "Deliver resume to \"{{title}}\"",
       "pendingHeading": "Deliveries waiting for your call",
@@ -720,7 +774,8 @@
       "deleteError": "Delete failed ({{code}}): {{message}}",
       "deleted": "Deleted this resume: {{entities}} material entries · {{chunks}} indexes · {{snapshots}} snapshots · {{imports}} provenance rows",
       "importError": "Import failed ({{code}}): {{message}}",
-      "pendingCount": "{{count}} items were not read well — take a look before exporting",
+      "pendingCount": "{{count}} resume(s) have things to check",
+      "pendingOpen": "Review",
       "pendingRow": "{{name}} · {{issueCount}} items · {{time}}",
       "statusImported": "imported",
       "statusScanned": "likely a scan — only {{chars}} characters read",
@@ -754,7 +809,8 @@
       "cardEdit": "Edit form",
       "cardPreview": "Preview",
       "cardGenerate": "Generate from JD",
-      "cardOffice": "Open in Office-cc",
+      "cardOffice": "Lay out in Office-cc (optional)",
+      "cardOfficeHint": "Office-cc is an Office document assistant: send this resume there for fine layout, then import it back.",
       "backToList": "Back to resume list",
       "formPageTitle": "Editing {{doc}}",
       "generatePageTitle": "Generate resume from JD · {{target}}",
@@ -770,7 +826,7 @@
       "previewReady": "Up to date",
       "previewFailed": "This sheet failed to render",
       "previewError": "Preview failed: {{message}}",
-      "pendingBadge": "{{count}} to confirm",
+      "pendingBadge": "To check {{count}}",
       "refresh": "Read again"
     },
     "shelf": {
@@ -1149,6 +1205,10 @@
       "modelNone": "No chat model configured",
       "modelMenu": "Chat model",
       "modelConfig": "Model settings",
+      "modelConfigMissing": "Set up a model",
+      "startImportResume": "Import a resume",
+      "startFindJobs": "See matching jobs",
+      "startAuthorizeDeliver": "Authorize delivery",
       "modelEmpty": "No models yet: add and tick some in Model settings first",
       "settings": {
         "title": "Chat settings",
@@ -2079,6 +2139,18 @@
       "reasonNoDoc": "No master resume selected yet",
       "reasonBusy": "The previous action has not returned yet",
       "reasonNoIntent": "Read the job intent first",
+      "guideHere": "Where you are: step 2 of 6 · job chain (master → intent → search → pick → tailor → authorize)",
+      "guideNext": "Next: pick a master resume, then press Read job intent",
+      "guideExit": "Exit: go back to the chat, or open another page",
+      "guideExitChat": "Back to chat",
+      "goResume": "Pick a master on the resume page",
+      "loginHint": "{{platform}} is not signed in: searching runs on its pages, sign in first.",
+      "goLogin": "Sign in to {{platform}}",
+      "gapsTitle": "Still missing: {{fields}}",
+      "gapUnknown": "missing \"{{field}}\"",
+      "actionSaveIntent": "Save intent",
+      "intentSaveHint": "Save after editing; versions in your material follow the master.",
+      "intentSaveNoop": "Nothing changed, no need to save",
       "intentLine": "Target role {{role}} · city {{city}} · master {{version}}",
       "missingFields": "Missing: {{fields}}",
       "none": "not set",
@@ -2110,7 +2182,7 @@
         "expired": "expired",
         "revoked": "revoked"
       },
-      "dailyLimitLabel": "Daily limit (jobs)",
+      "dailyLimitLabel": "Max jobs per day",
       "versionLine": "Master {{master}} · Tailored {{tailored}} · Receipt {{receipt}}",
       "none": "none",
       "noTargets": "Search jobs first, then pick the jobs to authorize here.",

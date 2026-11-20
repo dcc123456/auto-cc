@@ -122,6 +122,14 @@ export interface DeskSectionProps {
   /** 挂在段容器上的附加 `data-*`（harness 常按 testid 找那一格）。 */
   markers?: Record<string, string>;
   /**
+   * 段被展开/收起时通知调用方（`true` = 刚展开）。
+   *
+   * 正文收起时是**卸载**的：只靠组件挂载那一刻读一次快照的面板，会在"内容变了但组件早挂过了"的场合
+   * 一直显示旧数据（本片 10.10-02 的根因：导入简历后岗位页仍写着「知识库里还没有简历」）。
+   * 展开是"人现在要读这一格"的唯一可靠时机，所以把它作为重读信号暴露出来，而不是让每个面板自己猜。
+   */
+  onOpenChange?: (open: boolean) => void;
+  /**
    * 只在**收起态**出现在段头之后的那一行（裁定㉖ 第 2 条「把导入提到段头」的落点）。
    *
    * 为什么是段头的**兄弟行**而不是塞进段头里：段头本身就是一颗 `<button>`，而嵌套交互元素会被浏览器
@@ -160,10 +168,16 @@ export function DeskSection({
   markers,
   headExtra,
   actions,
+  onOpenChange,
   className = '',
   children,
 }: DeskSectionProps) {
-  const [open, toggle] = useSectionOpen(id, defaultOpen, openSignal);
+  const [open, toggleOpen] = useSectionOpen(id, defaultOpen, openSignal);
+  /** 切换并把新状态报给调用方：只在这一颗段头按钮上挂，段内别的按钮不受影响。 */
+  const toggle = useCallback(() => {
+    toggleOpen();
+    onOpenChange?.(!open);
+  }, [toggleOpen, onOpenChange, open]);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <section
@@ -420,4 +434,94 @@ export function DeskActionRow({ children, className = '' }: DeskActionRowProps) 
   // `[&>*]:shrink-0` 挂在行上而不是每颗键上：这一族的承诺就是"成员永远保有自己的宽度"，
   // 由容器统一保证才不会靠调用方记得给每一格补 class（§2.2 抽到第二次就抽公共层）。
   return <div className={`flex min-w-0 flex-wrap items-center gap-1.5 [&>*]:shrink-0 ${className}`}>{children}</div>;
+}
+
+/**
+ * 一屏的三问条（spec 10.10-16）：「我在哪 / 下一步 / 出口」。
+ *
+ * 为什么单开一只原件而不是各屏各写一行灰字：新手走查里最伤人的不是某一屏长什么样，
+ * 而是**每一屏都要自己猜现在到哪一步、下一步该点哪、想退出往哪走**（10.9-01 报告 K1–K3 的共性）。
+ * 三问的形状在全 app 一样，文字由调用方翻好传进来（§5.7：组件不拼句子），
+ * `data-guide` 三个锚点让逐屏读数能机检「这一屏有没有三问」。
+ * 出口与下一步都是**可点**的成员（`DeskButton`），不是一句说明——"看得到点不到"等于没指路。
+ */
+export interface DeskPathGuideProps {
+  /** 「我在哪」那句（已翻译），例如「第 3 步 / 共 6 步：按意向搜岗」。 */
+  here: string;
+  /** 「下一步」那句（已翻译），说清下一个动作是什么。 */
+  next: string;
+  /** 「下一步」那颗可点的键（通常是 `DeskButton`）。 */
+  nextAction?: ReactNode;
+  /** 「出口」那句（已翻译）：想退出这一屏该点哪。 */
+  exit: string;
+  /** 「出口」那颗可点的键。 */
+  exitAction?: ReactNode;
+  /**
+   * 「下一步」那颗键要送去的那只控件（CSS 选择器）。
+   * 有些屏的下一步就是本屏已有的那颗键或那只输入框，再画一颗同名按钮会出现两个入口；
+   * 给选择器让本组件画一颗「去这一步」，点了滚到那只控件并聚焦它——可点、可机检、不复制业务逻辑。
+   */
+  focusSelector?: string;
+  /** 上面那颗键的文案（已翻译），默认「去这一步」。 */
+  focusLabel?: string;
+  /** 追加 class（只放外边）。 */
+  className?: string;
+  /** 机检锚点：默认 `path-guide`。 */
+  testid?: string;
+}
+
+/** 三问条里那颗「去这一步」的画法：与页内文字链同一档，但带描边（它是一颗键，不是说明）。 */
+const GUIDE_FOCUS_CLASS =
+  'rounded-control border border-line-strong px-1.5 py-0.5 text-[11px] text-celadon-ink ' +
+  'hover:bg-ink-800 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-celadon/70';
+
+/**
+ * 画一屏的三问条。
+ * @param props 见 `DeskPathGuideProps`
+ * @returns 一条可换行的说明行：三问各占一格，动作键跟在各自那句后面
+ */
+export function DeskPathGuide({
+  here,
+  next,
+  nextAction,
+  exit,
+  exitAction,
+  focusSelector,
+  focusLabel,
+  className = '',
+  testid = 'path-guide',
+}: DeskPathGuideProps) {
+  return (
+    <div
+      data-testid={testid}
+      className={`flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-line bg-ink-900/60 px-3 py-1.5 text-[11px] text-slate-400 ${className}`}
+    >
+      <span data-guide="here" className="min-w-0">
+        {here}
+      </span>
+      <span data-guide="next" className="flex min-w-0 items-center gap-1.5">
+        {next}
+        {nextAction}
+        {focusSelector && focusLabel ? (
+          <button
+            type="button"
+            data-action="path-guide-focus"
+            data-focus-target={focusSelector}
+            onClick={() => {
+              const node = document.querySelector<HTMLElement>(focusSelector);
+              node?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              node?.focus();
+            }}
+            className={GUIDE_FOCUS_CLASS}
+          >
+            {focusLabel}
+          </button>
+        ) : null}
+      </span>
+      <span data-guide="exit" className="flex min-w-0 items-center gap-1.5">
+        {exit}
+        {exitAction}
+      </span>
+    </div>
+  );
 }

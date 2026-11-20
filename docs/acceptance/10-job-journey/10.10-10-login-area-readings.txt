@@ -1,0 +1,8 @@
+10.10-10 登录区只显示真实平台 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+默认会话列表文本："BOSS 直聘\n未登录\n持久分区 · 过期时间 无期限\n去登录\n探测登录态\n退出登录"
+默认列表含 fixture：false
+整页文本（含收起状态的开发者选项）含 fixture：true（演示会话已改名「本机仿站」，只在「开发者选项」里）
+底栏登录态："登录态\nBOSS 直聘 · 未登录"（不再有「共 3」）
+演示会话入口存在（默认收起）：true

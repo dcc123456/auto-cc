@@ -13,7 +13,7 @@ import {
 } from '@auto-cc/shared';
 import { AuditSection } from './AuditSection';
 import { Banner, DeskButton, HAIRLINE_ROW_CLASS } from './ui/controls';
-import { DeskSection } from './ui/disclosure';
+import { DeskPathGuide, DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskQuota } from './deskStatus';
 
@@ -130,6 +130,16 @@ export function UsagePanel() {
         </DeskButton>
       }
     >
+      <DeskPathGuide
+        testid="usage-path-guide"
+        className="mb-2"
+        here={t('guide.usage.here')}
+        next={t('guide.usage.next')}
+        exit={t('guide.usage.exit')}
+        focusSelector='[data-action="refresh"]'
+        focusLabel={t('guide.focus')}
+      />
+
       {notice && (
         <Banner tone={noticeTone} size="compact" markers={{ testid: 'usage-notice' }}>
           {notice}

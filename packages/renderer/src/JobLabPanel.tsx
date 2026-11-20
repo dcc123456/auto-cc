@@ -46,7 +46,7 @@ import {
   DeskSelect,
   Tag,
 } from './ui/controls';
-import { DeskActionRow, DeskExplainer, DeskSection } from './ui/disclosure';
+import { DeskActionRow, DeskExplainer, DeskPathGuide, DeskSection } from './ui/disclosure';
 import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -126,7 +126,7 @@ export function JobLabPanel() {
    * 而 `read` 在同一个闭包里跑——state 还没提交时它会拿旧筛选条件把刚筛好的清单覆盖掉。
    */
   const [filterKeyword, setFilterKeyword] = useState('');
-  const [filterCity, setFilterCity] = useState('');
+  /** 库内筛选不再单列城市格（10.10-08）：城市只在搜索条件那一只框里填，库内仍按关键词/经验/已回复筛。 */
   const [filterExperience, setFilterExperience] = useState('');
   const [filterReplied, setFilterReplied] = useState(false);
   const activeFilterRef = useRef<JobListFilterView>({});
@@ -335,11 +335,11 @@ export function JobLabPanel() {
    */
   const draftFilter = (): JobListFilterView => {
     const keyword = filterKeyword.trim();
-    const city = filterCity.trim();
     const experience = filterExperience.trim();
+    // 城市不再是库里单独那一格（10.10-08）：搜索条件那只城市框已经决定了入库的城市，
+    // 库内再筛一次只会让人以为“要填两遍城市”，服务端那份 city 条件因此不从这里出。
     return {
       ...(keyword === '' ? {} : { keyword }),
-      ...(city === '' ? {} : { city }),
       ...(experience === '' ? {} : { experience }),
       ...(filterReplied ? { replied: true } : {}),
     };
@@ -356,7 +356,6 @@ export function JobLabPanel() {
   /** 清空筛选：输入框与生效条件一起复位，回到全库第一页。 */
   const clearFilter = () => {
     setFilterKeyword('');
-    setFilterCity('');
     setFilterExperience('');
     setFilterReplied(false);
     activeFilterRef.current = {};
@@ -532,6 +531,15 @@ export function JobLabPanel() {
   }));
   return (
     <div className="flex flex-col gap-4" data-testid="job-lab">
+      {/* 搜岗这一屏的三问（spec 10.10-16）：下一步那颗键把焦点送到关键词框，出口去简历页。 */}
+      <DeskPathGuide
+        testid="jobs-path-guide"
+        here={t('guide.jobs.here')}
+        next={t('guide.jobs.next')}
+        exit={t('guide.jobs.exit')}
+        focusSelector='[data-action="jd-keyword"]'
+        focusLabel={t('guide.focus')}
+      />
       <section className="rounded-xl border border-line bg-ink-900/60 p-4">
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
@@ -725,20 +733,13 @@ export function JobLabPanel() {
         <h3 className="text-xs font-semibold text-slate-300">{t('jd.listHeading')}</h3>
         {/* 库内筛选（spec 9.2-01）：条件在服务端生效，`total/matched/shown` 三只读数同时上屏，
             避免「库里有、界面却一条不见」被读成数据丢了。 */}
-        <div className="mt-2 grid min-w-0 gap-2 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <div className="mt-2 grid min-w-0 gap-2 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <DeskField
             action="jd-filter-keyword"
             data-testid="jd-filter-keyword"
             value={filterKeyword}
             onValueChange={setFilterKeyword}
             placeholder={t('jd.filterKeywordPlaceholder')}
-          />
-          <DeskField
-            action="jd-filter-city"
-            data-testid="jd-filter-city"
-            value={filterCity}
-            onValueChange={setFilterCity}
-            placeholder={t('jd.filterCityPlaceholder')}
           />
           <DeskField
             action="jd-filter-experience"
@@ -793,6 +794,12 @@ export function JobLabPanel() {
         </div>
         {!jobList ? (
           <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-list-idle">
+            {t('jd.listIdle')}
+          </p>
+        ) : jobList.rows.length === 0 && jobList.total === 0 ? (
+          // 库内一条都没有 ≠ 筛选没筛到（spec 10.10-08）：干净实例首进这一屏，先说的话必须是「还没搜过」，
+          // 而不是「没有符合筛选条件」——后者会让新手以为自己的条件把岗位筛没了，可他从没搜过。
+          <p className="mt-2 text-[11px] text-slate-500" data-testid="jd-list-idle">
             {t('jd.listIdle')}
           </p>
         ) : jobList.rows.length === 0 ? (
@@ -1057,14 +1064,42 @@ export function JobLabPanel() {
           <span data-testid="deliver-summary">{t('deliver.summary', { pending: pendingApprovals.length })}</span>
         }
       >
-        <DeskField
-          action="deliver-resume-path"
-          data-testid="deliver-resume-path"
-          value={resumePathDraft}
-          onValueChange={setResumePathDraft}
-          placeholder={t('deliver.resumePathPlaceholder')}
-          className="w-full"
+        <DeskPathGuide
+          testid="deliver-path-guide"
+          className="mb-2"
+          here={t('guide.deliver.here')}
+          next={t('guide.deliver.next')}
+          exit={t('guide.deliver.exit')}
+          focusSelector='[data-testid="deliver-pick-file"]'
+          focusLabel={t('guide.focus')}
         />
+        {/* 投递不再让人手打文件路径（spec 10.10-11）：给「选择文件」，选中的文件名显示在旁边。
+            留空时仍由主进程用 `outbound.deliver` 配置里那一份，这条兜底写在提示里而不是输入框里。 */}
+        <DeskActionRow>
+          <DeskButton
+            action="deliver-pick-file"
+            variant="line"
+            compact
+            markers={{ testid: 'deliver-pick-file' }}
+            onClick={() => {
+              void (async () => {
+                const picked = await bridge?.shell['selectFile']({
+                  title: t('deliver.pickFileTitle'),
+                  filters: [{ name: t('deliver.pickFileFilter'), extensions: ['pdf'] }],
+                  multiple: false,
+                });
+                if (picked?.ok && picked.value.filePath) setResumePathDraft(picked.value.filePath);
+              })();
+            }}
+          >
+            {t('deliver.pickFile')}
+          </DeskButton>
+          <span className="min-w-0 break-all text-[11px] text-slate-400" data-testid="deliver-resume-path">
+            {resumePathDraft === ''
+              ? t('deliver.pickFileNone')
+              : t('deliver.pickFileChosen', { name: resumePathDraft.split('/').pop() ?? resumePathDraft })}
+          </span>
+        </DeskActionRow>
 
         <h4 className="mt-3 text-[11px] font-semibold text-slate-300">{t('deliver.pendingHeading')}</h4>
         {pendingApprovals.length === 0 ? (

@@ -21,6 +21,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatClock } from './format';
 import { BLOCK_EDGE_CLASS, BLOCK_SURFACE_CLASS, DeskButton } from './ui/controls';
+import { DeskPathGuide } from './ui/disclosure';
 import { Modal } from './ui/overlays';
 
 /** 确认标记键：与 `auto-cc.lang` 同一份 localStorage，前缀同为 `auto-cc.`。 */
@@ -177,6 +178,15 @@ export function PrivacyNotice({ onClose, isReopened }: PrivacyNoticeProps) {
       }
     >
       <p className="text-[11px] text-slate-500">{t('privacy.intro')}</p>
+      <DeskPathGuide
+        testid="privacy-path-guide"
+        className="mt-2"
+        here={t('guide.privacy.here')}
+        next={t('guide.privacy.next')}
+        exit={t('guide.privacy.exit')}
+        focusSelector='[data-action="privacy-acknowledge"]'
+        focusLabel={t('guide.focus')}
+      />
 
       <div className={`mt-3 rounded-md border px-3 py-2 ${BLOCK_EDGE_CLASS.jade} ${BLOCK_SURFACE_CLASS}`}>
         <p className="text-[11px] font-semibold text-jade">{t('privacy.keyPromise')}</p>

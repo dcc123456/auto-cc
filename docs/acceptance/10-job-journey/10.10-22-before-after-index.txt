@@ -1,0 +1,16 @@
+10.10-22 改造前后对照索引（复测归萌新走查，本轮只备对照）
+
+| 卡点 | 改造前证据 | 改造后证据 |
+| --- | --- | --- |
+| K1 对话入口三重门 | 10.9-01-02-workspace-empty.png | 10.10-01-chat-entry.png |
+| K2 导入后到处看不到 | 10.9-01-08-journey-stale-empty.png | 10.10-02-resume-visible.png |
+| K3 意向缺口英文键名 | 10.9-01-09-intent-raw-keys.png | 10.10-03-intent-gaps.png |
+| K4 首屏无开始入口 | 10.9-01-02-workspace-empty.png | 10.10-05-first-screen.png |
+| K5 两个待确认数 | 10.9-01-04-resume-imported.png | 10.10-07-lexicon.png（同页简历卡） |
+| K7 空态说反 | 10.9-01-05-jobs-empty.png | 10.10-08 读数（同屏） |
+| K8 结果在视口外 | 10.9-01-09-intent-raw-keys.png | 10.10-09-intent-inview.png |
+| K9 登录区三个平台 | 10.9-01-10-tracking-empty.png | 10.10-10 读数（trust 屏） |
+| K10 手打路径 | 10.9-01-05-jobs-empty.png | 10.10-11 读数（投递区） |
+
+同批 md5 去重：本片 10 张改造后截图 md5 全互异（`md5 -q tmp/g8/shots/*.png | sort | uniq -c` 全为 1）。
+复测（同一人同路径重走、逐条填「已消除/仍存在/未做」）未做，留给萌新在 10.10-21/22。

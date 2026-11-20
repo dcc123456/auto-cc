@@ -9,9 +9,11 @@
  */
 import {
   ArrowUp,
+  Briefcase,
   Check,
   ChevronDown,
   Copy,
+  FileUp,
   Gauge,
   ListOrdered,
   LoaderCircle,
@@ -44,7 +46,7 @@ import { TakeoverBanner } from './TakeoverBanner';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { Banner, DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
-import { DeskHint } from './ui/disclosure';
+import { DeskActionRow, DeskHint, DeskPathGuide } from './ui/disclosure';
 import { MarkdownBody } from './ui/markdown';
 import { DeskPopover, Drawer } from './ui/overlays';
 import { formatClock } from './format';
@@ -554,19 +556,19 @@ export function ChatPanel() {
    * **流式不再是一支原因码**——那条话现在进队列而不是被拒（1.11-16），按下去就是排上的意思。
    * 原因码进 `data-disabled-reason`，同一句话的人话版走语言包（6.2-06：禁用必须说得出为什么）。
    *
-   * 全自动档少了那份一次性授权时排在最前：那不是"输入有毛病"，而是整条链路此刻不能开跑
-   * （判定口会以 `FULL_AUTO_CONSENT_REQUIRED` 拒掉每一步），所以要让人先看见那句话与那颗按键。
+   * 2026-11-21 去掉「先签全自动」那道门（spec 10.10-01）：说一句话是对话，不是外发，
+   * 没必要先答应全自动；全自动档仍要那份一次性明示，但它约束的是循环（判定口拒每一步），
+   * 不是输入框。缺模型时也不拦发送，而是在输入卡里摆一颗看得见的「去配模型」（见 `modelMissing`）。
+   */
+  const sendReason = busy !== undefined ? 'BUSY' : draft.trim() === '' ? 'INPUT_EMPTY' : undefined;
+  const isSendDisabled = sendReason !== undefined;
+  /** 对话通道还没绑模型：这一格不拦发送，但要在输入卡上给出直达配置的入口（spec 10.10-01）。 */
+  const modelMissing = chatModel === undefined;
+  /**
+   * 全自动档还没做过那一次明示：这句话仍然要摆出来（它说的是"这一档会自己发"），
+   * 但它**不再挡发送**（spec 10.10-01）——说一句话是对话，不是外发。
    */
   const needsFullAutoConsent = snapshot?.session.autonomy === 'auto' && fullAutoConsent?.acknowledgedAt === null;
-  const sendReason =
-    busy !== undefined
-      ? 'BUSY'
-      : needsFullAutoConsent
-        ? 'FULL_AUTO_CONSENT_REQUIRED'
-        : draft.trim() === ''
-          ? 'INPUT_EMPTY'
-          : undefined;
-  const isSendDisabled = sendReason !== undefined;
 
   /**
    * 人在明示卡上按下「我了解，开始全自动」：登记进库（一次性，跨重启有效）后读数立刻更新。
@@ -729,6 +731,16 @@ export function ChatPanel() {
         onRelease={() => void takeover.release()}
       />
 
+      <DeskPathGuide
+        testid="chat-path-guide"
+        className="mx-4 mt-2"
+        here={t('guide.chat.here')}
+        next={t('guide.chat.next')}
+        exit={t('guide.chat.exit')}
+        focusSelector='[data-view-scroll="chat"]'
+        focusLabel={t('guide.focus')}
+      />
+
       <CareerJourneyPrototype visible={isJourneyOpen} onClose={() => setIsJourneyOpen(false)} />
 
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
@@ -744,10 +756,65 @@ export function ChatPanel() {
         {turns.length === 0 && !agentRun.run && !workflowRunView && agentRun.notice === undefined ? (
           // 空会话那句提示原先贴在流顶（py-6 之后就是一大片空白），看起来像"内容没加载出来"；
           // 让它占满流内剩余高度、垂直居中，空屏才读成"等你开口"而不是"上面还有东西"。
-          <div className="flex flex-1 items-center justify-center">
+          // 2026-11-21（spec 10.10-05）：空屏再给三颗入口键——新手走查的 K4 是「找不到从哪开始」，
+          // 而首屏此前只有主题、语言、隐私三颗与找工作无关的键。三颗都走既有的跨视图推进，不新增菜单。
+          <div className="flex flex-1 flex-col items-center justify-center gap-3" data-testid="chat-start-entries">
             <p className="py-6 text-center text-xs text-slate-400" data-testid="chat-empty">
               {t('chat.empty')}
             </p>
+            <DeskActionRow className="justify-center">
+              <DeskButton
+                action="start-import-resume"
+                variant="solid"
+                compact
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: 'resume',
+                    targetTitle: t('desk.resume.title'),
+                    targetDetail: t('chat.startImportResume'),
+                  })
+                }
+              >
+                <FileUp size={12} />
+                {t('chat.startImportResume')}
+              </DeskButton>
+              <DeskButton
+                action="start-find-jobs"
+                variant="line"
+                compact
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: 'jobs',
+                    targetTitle: t('desk.jobs.title'),
+                    targetDetail: t('chat.startFindJobs'),
+                  })
+                }
+              >
+                <Briefcase size={12} />
+                {t('chat.startFindJobs')}
+              </DeskButton>
+              <DeskButton
+                action="start-authorize-deliver"
+                variant="line"
+                compact
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: 'jobs',
+                    targetTitle: t('desk.jobs.title'),
+                    targetDetail: t('chat.startAuthorizeDeliver'),
+                  })
+                }
+              >
+                <Gauge size={12} />
+                {t('chat.startAuthorizeDeliver')}
+              </DeskButton>
+            </DeskActionRow>
           </div>
         ) : (
           // 消息之间的一条虚线（稿 `.divide`）替掉了原先的气泡与卡片外框：两侧都是通栏文本，
@@ -1094,6 +1161,28 @@ export function ChatPanel() {
                 </div>
               )}
             </DeskPopover>
+            {/* 缺模型时摆一颗**看得见**的入口（spec 10.10-01）：原先只有 pill 上那半句「还没配对话模型」，
+                而发送箭头的禁用理由写的是「先签全自动」——人既不知道真正缺什么，也没有一步能走到修的地方。 */}
+            {modelMissing ? (
+              <DeskButton
+                action="chat-model-missing-config"
+                variant="line"
+                compact
+                markers={{ testid: 'chat-model-missing' }}
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: 'models',
+                    targetTitle: t('desk.models.title'),
+                    targetDetail: t('models.defaults.heading'),
+                  })
+                }
+              >
+                <Settings2 size={11} />
+                {t('chat.modelConfigMissing')}
+              </DeskButton>
+            ) : null}
             {/* 发送与停止合成**一颗**键（2026-11-02 用户裁定）：没在回复时是发送圆片，
                 正在回复时变成停止图标档。流式期间仍然可以用 Enter 把下一句排进队列（spec 1.11-16）。 */}
             <DeskButton

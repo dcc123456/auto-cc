@@ -1,0 +1,11 @@
+10.10-03 意向缺口中文四格 + 登录指路 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+缺口文案："还缺：期望岗位、期望城市、期望薪资、到岗时间"
+四格控件（label 由 DeskField 渲染，页面文本里为中文）：["journey-intent-expectRole","journey-intent-expectCity","journey-intent-expectSalary","journey-intent-expectStart"]
+DOM 是否出现裸键 expectRole/expectCity/expectSalary/expectStart：false
+缺口数（保存前）："4"
+填「期望岗位=后端开发」并保存后：缺口数 "3"；文案 "还缺：期望城市、期望薪资、到岗时间"
+保存后意向行："期望岗位 后端开发 · 城市 未填 · 母版 doc:resume-27fddbbd11bd:1a9e2789409d\n\n还缺：期望城市、期望薪资、到岗时间\n\n期望岗位\n期望城市\n期望薪资\n到岗时间\n保存意向\n改完点保存；材料里的版本会跟着母版一起变。"
+「先登录 BOSS」指路："BOSS 直聘 还没登录：搜岗要在它的页面上跑，先登录。\n去登录 BOSS 直聘"
+证据图：10.10-03-intent-gaps.png

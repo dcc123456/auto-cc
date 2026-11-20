@@ -1,0 +1,6 @@
+10.10-20 窄窗不溢出 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+620px：{"scrollWidth":620,"clientWidth":620,"overflow":false,"statusbarVisible":true,"navVisible":true,"sendVisible":true}
+486px：{"scrollWidth":486,"clientWidth":486,"overflow":false,"statusbarVisible":true,"navVisible":true,"sendVisible":true}
+证据图：10.10-20-narrow.png（620 档；486 图见 tmp/g8/shots/narrow-486.png）

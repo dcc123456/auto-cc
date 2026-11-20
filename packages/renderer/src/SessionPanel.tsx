@@ -22,6 +22,8 @@ import {
 import { DeskExplainer, DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 import { reportDeskPlatforms } from './deskStatus';
+import { isLocalSessionUrl } from './platform-choice';
+import { platformLabel } from './platform-label';
 import { formatClock } from './format';
 
 /** 失效事件最多留几条：面板是验收入口，不是历史库。 */
@@ -243,68 +245,98 @@ export function SessionPanel() {
         {/* 一个平台一行：名字与状态在左、动作组贴右，元信息跟在名字后面。
             旧版把落盘路径与 cookie 名摊在行里（一条 percent-encoded 长串 + 十几个 cookie 名），
             三行灰字比平台名还显眼——那是取证明细，不是决策信息，挪到下面那一格按需展开。 */}
+        {/* 默认只列真实平台（spec 10.10-10）：走查人在「内置内核会话」里看到 fixture / fixture-alt / boss
+            三行全「未登录」，以为自己有三个账号。本机仿站是开发与验收用的，收进下面的「开发者选项」。 */}
         <ul className="mt-2 flex flex-col" data-testid="session-list">
-          {(snapshot?.platforms ?? []).map((platform) => (
-            <li key={platform.id} data-session-id={platform.id} className={HAIRLINE_ROW_CLASS}>
-              <span className="font-mono text-xs text-slate-200">{platform.id}</span>
-              <Tag tone={AUTH_TONE[platform.auth]}>{t(`session.auth.${platform.auth}`)}</Tag>
-              <span className="text-[11px] text-slate-500">
-                {platform.isPersistent ? t('session.persistent') : t('session.inMemory')}
-                {' · '}
-                {/* `unknown` 没有期限可报：写成「无期限」会把"证据不够"谎报成"永远有效"（spec 8.2-01）。 */}
-                {platform.auth === 'unknown'
-                  ? t('session.unknownHint')
-                  : t('session.expiresAt', { time: formatClock(platform.expiresAt, t('session.noExpiry')) })}
-              </span>
-              <span className="ml-auto flex items-center gap-1.5">
-                <DeskButton
-                  action="open"
-                  variant="solid"
-                  compact
-                  disabled={!!busy}
-                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                  result={resultOf(actionLabel.open(platform.id))}
-                  doneLabel={t('desk.done.opened')}
-                  onClick={() => open(platform.id)}
-                >
-                  <KeyRound size={12} />
-                  {t('session.open')}
-                </DeskButton>
-                <DeskButton
-                  action="probe"
-                  variant="line"
-                  compact
-                  disabled={!!busy}
-                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                  result={resultOf(actionLabel.probe(platform.id))}
-                  doneLabel={t('desk.done.probed')}
-                  onClick={() => probe(platform.id)}
-                >
-                  <Radar size={12} />
-                  {t('session.probe')}
-                </DeskButton>
-                {/* 退出登录清的是本机那份会话，动完就回不去——朱砂那一档正是"风险/不可逆"。 */}
-                <DeskButton
-                  action="logout"
-                  variant="seal"
-                  compact
-                  disabled={!!busy}
-                  disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
-                  disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
-                  result={resultOf(actionLabel.logout(platform.id))}
-                  doneLabel={t('desk.done.loggedOut')}
-                  onClick={() => logout(platform.id)}
-                >
-                  <LogOut size={12} />
-                  {t('session.logout')}
-                </DeskButton>
-              </span>
-            </li>
-          ))}
-          {(snapshot?.platforms.length ?? 0) === 0 && <li className="text-xs text-slate-400">{t('session.empty')}</li>}
+          {(snapshot?.platforms ?? [])
+            .filter((platform) => !isLocalSessionUrl(platform.startUrl))
+            .map((platform) => (
+              <li key={platform.id} data-session-id={platform.id} className={HAIRLINE_ROW_CLASS}>
+                <span className="font-mono text-xs text-slate-200">{platformLabel(t, platform.id)}</span>
+                <Tag tone={AUTH_TONE[platform.auth]}>{t(`session.auth.${platform.auth}`)}</Tag>
+                <span className="text-[11px] text-slate-500">
+                  {platform.isPersistent ? t('session.persistent') : t('session.inMemory')}
+                  {' · '}
+                  {/* `unknown` 没有期限可报：写成「无期限」会把"证据不够"谎报成"永远有效"（spec 8.2-01）。 */}
+                  {platform.auth === 'unknown'
+                    ? t('session.unknownHint')
+                    : t('session.expiresAt', { time: formatClock(platform.expiresAt, t('session.noExpiry')) })}
+                </span>
+                <span className="ml-auto flex items-center gap-1.5">
+                  <DeskButton
+                    action="open"
+                    variant="solid"
+                    compact
+                    disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.open(platform.id))}
+                    doneLabel={t('desk.done.opened')}
+                    onClick={() => open(platform.id)}
+                  >
+                    <KeyRound size={12} />
+                    {platform.auth === 'active' ? t('session.open') : t('session.goLogin')}
+                  </DeskButton>
+                  <DeskButton
+                    action="probe"
+                    variant="line"
+                    compact
+                    disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.probe(platform.id))}
+                    doneLabel={t('desk.done.probed')}
+                    onClick={() => probe(platform.id)}
+                  >
+                    <Radar size={12} />
+                    {t('session.probe')}
+                  </DeskButton>
+                  {/* 退出登录清的是本机那份会话，动完就回不去——朱砂那一档正是"风险/不可逆"。 */}
+                  <DeskButton
+                    action="logout"
+                    variant="seal"
+                    compact
+                    disabled={!!busy}
+                    disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+                    disabledReasonLabel={busy !== undefined ? t('session.reasonBusy') : undefined}
+                    result={resultOf(actionLabel.logout(platform.id))}
+                    doneLabel={t('desk.done.loggedOut')}
+                    onClick={() => logout(platform.id)}
+                  >
+                    <LogOut size={12} />
+                    {t('session.logout')}
+                  </DeskButton>
+                </span>
+              </li>
+            ))}
+          {(snapshot?.platforms ?? []).filter((platform) => !isLocalSessionUrl(platform.startUrl)).length === 0 && (
+            <li className="text-xs text-slate-400">{t('session.empty')}</li>
+          )}
         </ul>
+
+        {/* 演示会话收进开发者选项：默认不可见，展开仍能读到（验收要读它们），但不再冒充「我的账号」。 */}
+        {(snapshot?.platforms ?? []).some((platform) => isLocalSessionUrl(platform.startUrl)) ? (
+          <DeskExplainer className="mt-2" id="trust.sessions.demo" label={t('session.demoToggle')}>
+            <p className="text-[11px] text-slate-400">{t('session.demoHint')}</p>
+            <ul className="mt-1 flex flex-col gap-1" data-testid="session-demo-list">
+              {(snapshot?.platforms ?? [])
+                .filter((platform) => isLocalSessionUrl(platform.startUrl))
+                .map((platform) => (
+                  <li
+                    key={platform.id}
+                    data-demo-session-id={platform.id}
+                    className="break-all font-mono text-[11px] text-slate-400"
+                  >
+                    {platformLabel(t, platform.id)}
+                    {' · '}
+                    {t(`session.auth.${platform.auth}`)}
+                    {' · '}
+                    {t('session.partition', { name: platform.partition })}
+                  </li>
+                ))}
+            </ul>
+          </DeskExplainer>
+        ) : null}
 
         {(snapshot?.platforms.length ?? 0) > 0 && (
           <DeskExplainer className="mt-2" id="trust.sessions.detail" label={t('session.detailToggle')}>

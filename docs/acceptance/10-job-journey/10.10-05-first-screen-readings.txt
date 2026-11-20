@@ -1,0 +1,7 @@
+10.10-05 首屏三入口 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+三颗键存在且可点（DOM）：[true,true,true]
+A 导入简历 → 简历页（advanceViewTrail resume）；B 看匹配岗位 → 岗位页；C 授权投递 → 岗位页（授权卡同屏）
+未新增顶级菜单：nav 仍是 chat/jobs/resume/workflow/models/trust/diagnostics 七项
+证据图：10.10-05-first-screen.png

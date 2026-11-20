@@ -1,0 +1,8 @@
+10.10-02 导入即母版、不重启可见 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+导入回执：{"ok":true,"docId":"resume-27fddbbd11bd","status":"imported"}
+导入后不重启，岗位页母版下拉：[{"value":"resume-27fddbbd11bd","text":"张一鸣（母版）","selected":true}]
+主链摘要："母版 1 份"（重启前后读数应一致，这里是不重启的一次）
+无母版时的可点下一步（本次导入后已不出现，读数取 10.10-02 二次展开前）："我在哪：第 2 步 / 共 6 步 · 求职主链（母版 → 意向 → 搜岗 → 选岗 → 定制 → 授权投递）\n下一步：选一份母版简历，点「读取求职意向」\n出口：回对话问一句，或去别的页\n回对话"
+证据图：10.10-02-resume-visible.png

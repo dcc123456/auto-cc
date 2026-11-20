@@ -27,3 +27,22 @@ export const resolveCapturePlatform = (platforms: string[], preferred: string, d
   if (preferred !== '' && platforms.includes(preferred)) return preferred;
   return platforms[0] ?? '';
 };
+
+/**
+ * 这一条会话是不是本机仿站（演示平台）。
+ *
+ * 新手界面上只该出现真实平台（spec 10.10-10）：干净实例里同时列出 `fixture` / `fixture-alt` / `boss`
+ * 三行，走查人以为"我有三个账号"。判据用会话自己的 `startUrl` 主机名，而不是把平台 id 写死成名单——
+ * 换一台机器的仿站端口或再加一只演示平台都不用改这里。
+ * @param startUrl 会话的起始地址（`sessions.status()` 里那一份）
+ * @returns 主机是本机回环地址时为 true；空串/形状不可解析时按"不是演示"处理（宁可多显示一行，也不藏掉真平台）
+ */
+export const isLocalSessionUrl = (startUrl: string | undefined): boolean => {
+  if (!startUrl) return false;
+  try {
+    const host = new URL(startUrl).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+};

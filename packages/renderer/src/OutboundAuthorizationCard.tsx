@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { JourneyJobMatchView, UnattendedAuthorizationView, UnattendedRunView } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskCheck, DeskField } from './ui/controls';
+import { DeskPathGuide } from './ui/disclosure';
+import { reportDeskAuthorization } from './deskStatus';
 import { useBridgeAction } from './useBridgeAction';
 
 /** 授权卡需要的三要素来源与可勾选岗位（都来自本轮已读出的主链读数）。 */
@@ -56,7 +58,11 @@ export function OutboundAuthorizationCard({
       bridge?.outbound['authorization.current'](),
       bridge?.entitlement['gate.outboundStatus'](),
     ]);
-    if (authReply?.ok) setAuth(authReply.value);
+    if (authReply?.ok) {
+      setAuth(authReply.value);
+      // 状态条那一格跟着这份读数走（plan §13.2：授权生效才显示「无人值守：已授权 N 岗」）。
+      reportDeskAuthorization(authReply.value);
+    }
     if (stopReply?.ok) setStopped(stopReply.value.stopped);
   }, [bridge]);
 
@@ -170,6 +176,15 @@ export function OutboundAuthorizationCard({
 
   return (
     <div className="mt-3 rounded-md border border-line bg-ink-900/50 px-2 py-2" data-testid="journey-auth">
+      <DeskPathGuide
+        testid="auth-path-guide"
+        className="mb-2"
+        here={t('guide.auth.here')}
+        next={t('guide.auth.next')}
+        exit={t('guide.auth.exit')}
+        focusSelector='[data-action="journey-auth-limit"]'
+        focusLabel={t('guide.focus')}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 text-[11px] text-slate-200">
           <Stamp size={12} />
@@ -426,6 +441,20 @@ export function OutboundAuthorizationCard({
         </DeskButton>
         <span className="text-[11px] text-slate-500">{t('journeyAuth.hint')}</span>
       </div>
+      {/* 开单键按不动时把原因写在明面（spec 10.10-18）：只在悬停气泡里说，等于让新手以为按钮坏了。 */}
+      {!canGrant || busy ? (
+        <p className="mt-1 text-[11px] text-amber" data-testid="journey-auth-grant-reason">
+          {reasonNoTailor
+            ? t('journeyAuth.reasonNoTailor')
+            : targets.length === 0
+              ? t('journeyAuth.reasonNoTargets')
+              : !limitValid
+                ? t('journeyAuth.reasonLimit')
+                : targets.length > limit
+                  ? t('journeyAuth.reasonOverLimit', { limit })
+                  : t('journeyAuth.reasonBusy')}
+        </p>
+      ) : null}
     </div>
   );
 }

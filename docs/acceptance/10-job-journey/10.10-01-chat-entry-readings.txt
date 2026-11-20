@@ -1,0 +1,9 @@
+10.10-01 对话入口 读数（干净实例 · 界面来自工作树 vite 5173）
+环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
+命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
+发送键禁用原因："INPUT_EMPTY"（不是 FULL_AUTO_CONSENT_REQUIRED）
+缺模型可见入口 chat-model-missing：true
+首屏三入口 start-import-resume/start-find-jobs/start-authorize-deliver：[true,true,true]
+档位胶囊："只建议"；底栏档位："档位\n只建议"
+隐私屏同意键在视口内：true；工作台可见性："visible"
+证据图：10.10-01-chat-entry.png

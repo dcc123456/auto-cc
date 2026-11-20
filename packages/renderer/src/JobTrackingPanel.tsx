@@ -18,7 +18,7 @@ import {
   type JobTrackingView,
 } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskField, DeskSelect, HAIRLINE_ROW_CLASS } from './ui/controls';
-import { DeskSection } from './ui/disclosure';
+import { DeskPathGuide, DeskSection } from './ui/disclosure';
 
 /** 近 7 天（含今天），与看板的「近 7 天」同一口径。 */
 const rangeOf = (): FunnelRange => ({
@@ -111,6 +111,15 @@ export function JobTrackingPanel() {
       title={t('metrics.trackHeading')}
       summary={<span data-testid="tracking-summary">{t('metrics.trackSummary', { jobs: trackings.length })}</span>}
     >
+      <DeskPathGuide
+        testid="tracking-path-guide"
+        className="mb-2"
+        here={t('guide.tracking.here')}
+        next={t('guide.tracking.next')}
+        exit={t('guide.tracking.exit')}
+        focusSelector='[data-action="interview-job"]'
+        focusLabel={t('guide.focus')}
+      />
       <div className="mb-2 flex justify-end">
         <DeskButton action="tracking-refresh" variant="line" compact onClick={() => void read()}>
           {t('metrics.refresh')}
