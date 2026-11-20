@@ -23,6 +23,9 @@ import {
   type OutboundAttemptKey,
   type ResumeDocSummaryView,
   type RiskSignalEvent,
+  type UnattendedAuthorizationStatus,
+  type UnattendedAuthorizationView,
+  type UnattendedGrantInput,
 } from '@auto-cc/shared';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -43,45 +46,23 @@ export const UNATTENDED_DAILY_LIMIT_MAX = 10;
 /** 同岗 24 小时上限的窗口宽度（spec 10.6-08：同岗同动作 24 小时内最多一次，换版本也不叠加）。 */
 export const SAME_JOB_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/** 授权单状态：`active` 是唯一会放行的状态，其余四种都要求人先做一件事。 */
-export type UnattendedAuthorizationStatus = 'active' | 'paused' | 'restart-required' | 'expired' | 'revoked';
+/** 开一张授权单的入参：跨进程形状来自 `@auto-cc/shared`，这里只多一个可注入的判定时刻。 */
+export type UnattendedGrantRequest = UnattendedGrantInput & {
+  /** 判定基准（毫秒）；省略取当前时间。界面不给它，用例靠它造跨日。 */
+  nowMs?: number;
+};
 
-/** 授权单的跨进程视图（界面与测试只读它，不读裸行）。 */
-export interface UnattendedAuthorizationView {
-  readonly id: number;
-  readonly platform: string;
-  /** 授权所属的本地自然日键（`YYYY-MM-DD`）；与当前日键不等即窗口关闭。 */
-  readonly dayKey: string;
-  /** 本轮允许推进的岗位数（1–10）；与 `entitlement.gate` 的按动作日上限取小。 */
-  readonly dailyLimit: number;
-  /** 显式勾选的岗位集合；集合外的一律不放行。 */
-  readonly targets: readonly string[];
-  /** 母版简历版本（事实校验回执指向的那一份）。 */
-  readonly masterResumeVersion: string;
-  /** 本轮绑定的定制简历版本（必须是母版的变体）。 */
-  readonly resumeVersion: string;
-  /** 生成时那条事实校验回执；查无或不通过时授权单根本开不出来。 */
-  readonly factCheckReceiptId: string;
-  readonly status: UnattendedAuthorizationStatus;
-  /** 暂停原因原文（风控命中时是信号原文）；未暂停为 null。 */
-  readonly pauseReason: string | null;
-  /** 今日还剩几个岗位名额（按账本现算，不重复扣）；窗口外或作废的单为 0。 */
-  readonly remaining: number;
-  /** 本轮还没推进的岗位（按账本现算）——重启/暂停后「未完成岗位转待办」读的就是这一格。 */
-  readonly pendingTargets: readonly string[];
-  readonly updatedAt: number;
-}
-
-/** 开一张授权单的入参（界面/编排层给，本服务在边界上逐项校验）。 */
-export interface UnattendedGrantInput {
-  readonly platform: string;
-  readonly dailyLimit: number;
-  readonly targets: readonly string[];
-  readonly masterResumeVersion: string;
-  readonly resumeVersion: string;
-  readonly factCheckReceiptId: string;
-  /** 判定基准（毫秒）；省略取当前时间。 */
-  readonly nowMs?: number;
+/**
+ * 从版本串里取 doc id：`journey.*` 的版本口径是 `doc:<id>:<hash>`，内部调用也可以直接给 doc id。
+ * @param version 版本串或 doc id
+ * @returns doc id；空串返回 null
+ */
+function docIdOf(version: string): string | null {
+  const raw = version.trim();
+  if (raw === '') return null;
+  const [prefix, id] = raw.split(':');
+  if (raw.includes(':') && prefix === 'doc' && id !== undefined && id.trim() !== '') return id.trim();
+  return raw;
 }
 
 /** 事实校验回执的只读口（`resume.generate.receiptOf` 的窄形状；本包不 import 简历包）。 */
@@ -181,7 +162,7 @@ export class OutboundAuthorizationService extends Service {
    * @throws `INVALID_ARGUMENT` 三要素形状不合法；`AUTHORIZATION_EVIDENCE_MISSING` / `AUTHORIZATION_FACT_CHECK_FAILED` /
    *         `AUTHORIZATION_VERSION_NOT_BOUND` 证据对不上——这三种都是「先去重新生成/定制」，不是改入参能过的
    */
-  grant = (input: UnattendedGrantInput): UnattendedAuthorizationView => {
+  grant = (input: UnattendedGrantRequest): UnattendedAuthorizationView => {
     const nowMs = input.nowMs ?? Date.now();
     const platform = input.platform.trim();
     if (platform === '') throw new AppError('INVALID_ARGUMENT', '授权单缺少平台，不能开跑', 'outbound.authorization');
@@ -252,7 +233,7 @@ export class OutboundAuthorizationService extends Service {
    * @returns 整数日限额与去重后的岗位集合
    * @throws `INVALID_ARGUMENT`：非整数、越界、空集合、超限额、重复项或空岗位名
    */
-  private validateElements(input: UnattendedGrantInput): { dailyLimit: number; targets: string[] } {
+  private validateElements(input: UnattendedGrantRequest): { dailyLimit: number; targets: string[] } {
     const dailyLimit = input.dailyLimit;
     if (
       !Number.isInteger(dailyLimit) ||
@@ -329,7 +310,17 @@ export class OutboundAuthorizationService extends Service {
         { receiptId, outcome: receipt.outcome },
       );
     }
-    if (receipt.docId !== masterResumeVersion) {
+    const masterDocId = docIdOf(masterResumeVersion);
+    const tailoredDocId = docIdOf(resumeVersion);
+    if (masterDocId === null || tailoredDocId === null) {
+      throw new AppError(
+        'AUTHORIZATION_VERSION_NOT_BOUND',
+        '授权单的简历版本串解析不出 doc id：应为 doc:<id>:<hash> 或 doc id 本身',
+        'outbound.authorization',
+        { masterResumeVersion, resumeVersion },
+      );
+    }
+    if (receipt.docId !== masterDocId) {
       throw new AppError(
         'AUTHORIZATION_VERSION_NOT_BOUND',
         `生成回执 ${receiptId} 属于母版 ${receipt.docId}，与授权单绑定的 ${masterResumeVersion} 对不上`,
@@ -337,8 +328,8 @@ export class OutboundAuthorizationService extends Service {
         { receiptId, receiptDocId: receipt.docId, masterResumeVersion },
       );
     }
-    const variant = docs.list().find((doc) => doc.id === resumeVersion);
-    if (!variant || variant.parentDocId !== masterResumeVersion) {
+    const variant = docs.list().find((doc) => doc.id === tailoredDocId);
+    if (!variant || variant.parentDocId !== masterDocId) {
       throw new AppError(
         'AUTHORIZATION_VERSION_NOT_BOUND',
         `定制版本 ${resumeVersion} 不是母版 ${masterResumeVersion} 的变体，授权单不能拿它当外发版本`,
@@ -498,14 +489,14 @@ export class OutboundAuthorizationService extends Service {
       platform: row.platform,
       dayKey: row.day_key,
       dailyLimit: Number(row.daily_limit),
-      targets,
+      targets: [...targets],
       masterResumeVersion: row.master_resume_version,
       resumeVersion: row.resume_version,
       factCheckReceiptId: row.fact_check_receipt,
       status: row.status,
       pauseReason: row.pause_reason,
       remaining,
-      pendingTargets: targets.filter((target) => !advanced.has(target)),
+      pendingTargets: [...targets.filter((target) => !advanced.has(target))],
       updatedAt: Number(row.updated_at),
     };
   };
@@ -571,6 +562,7 @@ export class OutboundAuthorizationService extends Service {
     this.store.db
       .prepare(`UPDATE outbound_authorizations SET status = 'paused', pause_reason = ?, updated_at = ? WHERE id = ?`)
       .run(reason, event.at, row.id);
+    this.ctx.emit('outbound/authorization-paused', { platform: row.platform, reason, at: event.at });
     this.ctx.logger.warn(`无人值守投递已整轮暂停：${reason}`);
   };
 

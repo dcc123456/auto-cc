@@ -1,0 +1,10 @@
+10.6-04 风控整轮暂停 活体读数（V 半边）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
+
+仿站 /api/risk-mode=captcha → 内核视图导航 /boss（200 安全验证页）：
+  status=paused
+  data-reason="命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发"
+  横幅文本="整轮已暂停：命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发需要你来确认续跑"
+
+截图：10.6-04-risk-pause.png（400×1135）。
+说明：命中后状态转 paused、后续 dispatch 全拒（U 例覆盖）、不自动恢复；托盘/系统通知的代码已接（shell 订阅 outbound/authorization-paused），但托盘是原生层，本轮未拍到位图证据，故不标 [x]。

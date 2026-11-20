@@ -11,6 +11,7 @@ import type {
   AgentRunView,
   AppErrorPayload,
   AutonomyLevel,
+  AuthorizationPausedEvent,
   ChatDeltaEvent,
   ChatMessageView,
   ChatQueuedView,
@@ -75,6 +76,7 @@ export type {
   AgentStepView,
   AppErrorPayload,
   AutonomyLevel,
+  AuthorizationPausedEvent,
   ChatCompactionView,
   ChatDeltaEvent,
   ChatFactCard,
@@ -263,6 +265,11 @@ export const RENDERER_ALLOWLIST = [
   'journey.search',
   'journey.tailor',
   'journey.interview',
+  // 10.6 / plan §12.2 的无人值守授权单：四只口都只由人按（开单 / 读当前单 / 确认续跑 / 收回）。
+  'outbound.authorization.current',
+  'outbound.authorization.grant',
+  'outbound.authorization.reconfirm',
+  'outbound.authorization.revoke',
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
   'outbound.greet.perform',
@@ -743,6 +750,8 @@ export type JourneyTailorView = {
   jdVersion: string;
   resumeVersion: string;
   tailoredResumeVersion: string | null;
+  /** 接受那一刻的事实校验回执 id（无人值守授权单要用它核「这一版过过校验」）。 */
+  factCheckReceiptId: string | null;
   appliedRewrites: number;
   checks: { ok: boolean; violationCount: number };
   greeting: {
@@ -797,6 +806,50 @@ export type OutboundAttemptView = OutboundAttemptKey & {
 
 /** 一键停用的持久化读数；历史账本与投递记录不因开关变化而删除。 */
 export type OutboundControlView = { stopped: boolean; updatedAt: number };
+
+/** 无人值守授权单的状态（spec 10.6 / plan §12.2）：`active` 是唯一会放行的状态。 */
+export type UnattendedAuthorizationStatus = 'active' | 'paused' | 'restart-required' | 'expired' | 'revoked';
+
+/** 授权单的跨进程视图：界面只读它，不读主进程的裸行。 */
+export type UnattendedAuthorizationView = {
+  id: number;
+  platform: string;
+  /** 授权所属本地自然日键（`YYYY-MM-DD`）。 */
+  dayKey: string;
+  /** 本轮允许推进的岗位数（1–10）。 */
+  dailyLimit: number;
+  /** 显式勾选的岗位集合。 */
+  targets: string[];
+  /** 母版简历版本（`doc:<id>:<hash>`）。 */
+  masterResumeVersion: string;
+  /** 本轮绑定的定制简历版本（必须过事实校验、且是母版的变体）。 */
+  resumeVersion: string;
+  /** 生成时那条事实校验回执。 */
+  factCheckReceiptId: string;
+  status: UnattendedAuthorizationStatus;
+  /** 暂停原因原文；未暂停为 null。 */
+  pauseReason: string | null;
+  /** 今日剩余岗位名额（按账本现算）。 */
+  remaining: number;
+  /** 本轮还没推进的岗位（重启/暂停后即「待办」）。 */
+  pendingTargets: string[];
+  updatedAt: number;
+};
+
+/**
+ * 开一张授权单的入参（界面/编排层给）：三要素 + 两份证据。
+ *
+ * `masterResumeVersion` / `resumeVersion` 用 `doc:<id>:<hash>` 的版本串（与 `journey.*` 同一口径），
+ * 主进程从串里取 doc id 去核血缘；`factCheckReceiptId` 由 `journey.tailor` 原样回传。
+ */
+export type UnattendedGrantInput = {
+  platform: string;
+  dailyLimit: number;
+  targets: string[];
+  masterResumeVersion: string;
+  resumeVersion: string;
+  factCheckReceiptId: string;
+};
 
 /** 只读对账的结局；只有 `not-sent` 允许之后重新发起，未知与冲突都必须继续停手。 */
 export type OutboundReconcileView = {
@@ -2747,6 +2800,14 @@ export interface BridgeSignatures {
     returns: JourneyInterviewView;
   };
   /**
+   * 无人值守授权单的四只口（spec 10.6 / plan §12.2）：只由人从界面按。
+   * 开单要求三要素与事实校验回执齐备；`reconfirm` 是重启/跨日/风控暂停后**唯一**能续跑的入口。
+   */
+  'outbound.authorization.current': { args: []; returns: UnattendedAuthorizationView | null };
+  'outbound.authorization.grant': { args: [input: UnattendedGrantInput]; returns: UnattendedAuthorizationView };
+  'outbound.authorization.reconfirm': { args: []; returns: UnattendedAuthorizationView };
+  'outbound.authorization.revoke': { args: []; returns: UnattendedAuthorizationView | null };
+  /**
    * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。
    *
    * `range` 是**含头不含尾**的毫秒区间，日界由发起方按本地时区算（决策十七）——主进程不猜"近 7 天"
@@ -3470,6 +3531,8 @@ export const RENDERER_EVENTS = [
   'outbound/approval-requested',
   // 风控信号（spec 2.7-01）：暂停由 `workflow.runner` 在主进程做，界面只负责把「卡在哪、为什么」说出来。
   'browser/risk-signal',
+  // 无人值守因此暂停（spec 10.6-04）：横幅与托盘订这一条，不拿观测事件当暂停结论。
+  'outbound/authorization-paused',
   // 页面「在谁手里」变了（spec 5.5-01 / 02）：接管条与那两只按钮由它驱动，载荷就是 `browser.takeover.held()`
   // 那份读数——不另包一层，免得渲染层再推一次「现在到底谁在操作」（§2.7 禁的第二份事实）。
   'browser/takeover-changed',
@@ -3503,6 +3566,7 @@ export interface RendererEventSignatures {
   'resume/generate-progress': GenerateProgressEvent;
   'outbound/approval-requested': DeliverApprovalView;
   'browser/risk-signal': RiskSignalEvent;
+  'outbound/authorization-paused': AuthorizationPausedEvent;
   'browser/takeover-changed': TakeoverStateView;
   'kb/entities-changed': KbEntitiesChangedEvent;
   'workflow/plans-changed': WorkflowPlansChangedEvent;

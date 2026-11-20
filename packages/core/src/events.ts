@@ -87,6 +87,21 @@ export interface RiskSignalEvent {
 }
 
 /**
+ * 无人值守授权单被风控暂停时的通知载荷（spec 10.6-04 / plan §12.2.4）。
+ *
+ * 只带平台、原因原文与时刻：同一份事实同时喂给三条消费方——界面常驻横幅、托盘/系统通知、
+ * 以及「用户确认后先对账再续跑」的入口；不带页面正文、cookie 或任何可回放的页面内容（AGENTS.md §8.5）。
+ */
+export interface AuthorizationPausedEvent {
+  /** 被暂停的那家平台。 */
+  platform: string;
+  /** 拒绝原因原文（界面与通知直接显示，不做二次翻译）。 */
+  reason: string;
+  /** 暂停时刻（毫秒）。 */
+  at: number;
+}
+
+/**
  * 接管态的类型（spec 5.5-01 / 02 / 09）住在下面 `TakeoverReason` 那一节，
  * 与 `WorkflowTakeoverView` 相邻——那里是唯一的一份，这里不再另起一张。
  */
@@ -1975,6 +1990,13 @@ declare module 'cordis' {
      * 于是「暂停」只需要在一处订阅（plan §14.3 第 1 条），而界面只拿到判定数据、自己组句子。
      */
     'browser/risk-signal'(event: RiskSignalEvent): void;
+    /**
+     * 无人值守授权单被风控信号整轮暂停时由 `outbound.authorization` 发出（spec 10.6-04）。
+     *
+     * 与 `browser/risk-signal` 分开：前者是「页面看起来被拦了」的观测事实（可能发生在手动浏览里），
+     * 后者是「我们的无人值守运行因此停了」的授权事实。界面横幅与托盘订这一条，不拿观测事件当暂停结论。
+     */
+    'outbound/authorization-paused'(event: AuthorizationPausedEvent): void;
     /**
      * 页面「在谁手里」这件事发生变化时由 `browser.takeover` 发出（spec 5.5-01 / 02 / 09）。
      *

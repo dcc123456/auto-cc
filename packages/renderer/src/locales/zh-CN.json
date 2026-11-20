@@ -2062,6 +2062,42 @@
       "introLine": "自我介绍：{{text}}",
       "qaRow": "第 {{index}} 问：{{question}}",
       "checklistLine": "准备：{{items}}"
+    },
+    "journeyAuth": {
+      "heading": "无人值守投递授权",
+      "hint": "只对勾选的岗位与本自然日有效；停用与风控暂停后，需要你确认才能继续。",
+      "statusLine": "状态：{{status}} · 今日剩余 {{remaining}} 岗 · 待办 {{pending}} 岗",
+      "status": {
+        "none": "未授权",
+        "active": "进行中",
+        "paused": "风控暂停",
+        "restart-required": "需重新确认",
+        "expired": "已过期",
+        "revoked": "已收回"
+      },
+      "dailyLimitLabel": "日限额（岗）",
+      "versionLine": "母版 {{master}} · 定制 {{tailored}} · 回执 {{receipt}}",
+      "none": "无",
+      "noTargets": "先搜岗，再从这里勾选授权岗位。",
+      "targetRow": "{{title}} · {{company}}",
+      "actionGrant": "授权并开跑",
+      "actionStop": "一键停用",
+      "actionRestore": "恢复外发",
+      "actionReconfirm": "确认续跑",
+      "actionRevoke": "收回授权",
+      "pausedBanner": "整轮已暂停：{{reason}}",
+      "needsYou": "需要你来",
+      "unknownReason": "原因未知",
+      "needsConfirm": {
+        "restart-required": "上次运行留下的授权单：未完成岗位已转待办，确认后从断点继续。",
+        "expired": "授权单已跨日失效：重新确认后按今天重新计算名额。"
+      },
+      "reasonNoTailor": "先对选中岗位定制并过事实校验，才能授权",
+      "reasonNoTargets": "先勾选至少一个岗位",
+      "reasonLimit": "日限额必须是 1–10 的整数",
+      "reasonOverLimit": "勾选岗位数不能超过日限额 {{limit}}",
+      "reasonBusy": "上一个动作还没结束",
+      "reasonNoAuth": "当前没有授权单可收回"
     }
   }
 }

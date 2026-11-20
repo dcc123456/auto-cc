@@ -17,7 +17,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ResumeDocSummaryView } from '@auto-cc/shared';
-import { OutboundAuthorizationService, type UnattendedGrantInput } from './authorization.js';
+import { OutboundAuthorizationService, type UnattendedGrantRequest } from './authorization.js';
 
 const sandboxes: string[] = [];
 const fibers: Fiber[] = [];
@@ -157,7 +157,7 @@ async function boot(
 }
 
 /** 三要素齐备的授权单入参（用例按需覆盖其中一维）。 */
-function grantInput(overrides: Partial<UnattendedGrantInput> = {}): UnattendedGrantInput {
+function grantInput(overrides: Partial<UnattendedGrantRequest> = {}): UnattendedGrantRequest {
   return {
     platform: PLATFORM,
     dailyLimit: 2,

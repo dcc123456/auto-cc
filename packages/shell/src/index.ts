@@ -5,13 +5,20 @@ import {
   dialog,
   Menu,
   nativeImage,
+  Notification,
   shell as electronShell,
   Tray,
   WebContentsView,
   type WebContents,
 } from 'electron';
 import { AppError, Service, type Context } from '@auto-cc/core';
-import { APP_PARTITION, type KernelViewLoadError, type KernelViewRect, type ShellStatus } from '@auto-cc/shared';
+import {
+  APP_PARTITION,
+  type AuthorizationPausedEvent,
+  type KernelViewLoadError,
+  type KernelViewRect,
+  type ShellStatus,
+} from '@auto-cc/shared';
 import { z } from 'zod';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
@@ -390,6 +397,21 @@ export class ShellService extends Service {
     throw new Error('deliberate main-process failure');
   };
 
+  /**
+   * 无人值守被风控暂停时在托盘与系统通知里各留一条（spec 10.6-04）。
+   *
+   * 系统通知不可用（未授权、平台不支持）不构成静默放行：托盘提示与 tooltip 仍然改，界面横幅照常出现；
+   * 这里只负责「人回到桌面先看到哪一句」，不参与任何外发判定。
+   * @param event 授权服务发来的暂停载荷（平台 + 原因原文 + 时刻）
+   */
+  private notifyAuthorizationPaused(event: AuthorizationPausedEvent): void {
+    const title = '无人值守投递已暂停';
+    this.tray?.setToolTip(`auto-cc · ${title}：${event.reason}`);
+    // macOS 的托盘文字位能挂一个字，Windows/Linux 没有这个概念，所以只在 darwin 上设。
+    if (process.platform === 'darwin') this.tray?.setTitle('!');
+    if (Notification.isSupported()) new Notification({ title, body: event.reason }).show();
+  }
+
   /** 把主窗口唤到前台（单实例锁下第二次启动时调用）。 */
   focusMainWindow = (): void => {
     const win = this.mainWindow;
@@ -415,6 +437,12 @@ export class ShellService extends Service {
     await app.whenReady();
     this.createWindow();
     this.createTray();
+    // 无人值守被风控暂停时，托盘与系统通知各留一条（spec 10.6-04 的「托盘可见」）：
+    // 界面横幅由渲染层订阅同一条事件，两处读的是同一份原因原文，不各写一句（§2.7）。
+    const offAuthorizationPaused = this.ctx.on('outbound/authorization-paused', (event) =>
+      this.notifyAuthorizationPaused(event),
+    );
+    this.ctx.effect(() => offAuthorizationPaused, 'shell.authorization-paused');
     // 单实例锁由 main 入口持有；这里只负责把第二次启动引到已有窗口上。
     app.on('second-instance', () => this.focusMainWindow());
     app.on('before-quit', () => {

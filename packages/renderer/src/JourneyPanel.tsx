@@ -10,6 +10,7 @@ import type {
   ResumeDocSummaryView,
 } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskSelect, HAIRLINE_ROW_CLASS } from './ui/controls';
+import { OutboundAuthorizationCard } from './OutboundAuthorizationCard';
 import { DeskSection } from './ui/disclosure';
 import { useBridgeAction } from './useBridgeAction';
 
@@ -355,6 +356,14 @@ export function JourneyPanel() {
           </p>
         </div>
       )}
+
+      <OutboundAuthorizationCard
+        platform={tailor?.platform ?? search?.platform ?? ''}
+        masterVersion={tailor?.resumeVersion ?? intent?.resumeVersion ?? ''}
+        tailoredVersion={tailor?.tailoredResumeVersion ?? ''}
+        factCheckReceiptId={tailor?.factCheckReceiptId ?? ''}
+        jobs={search?.jobs ?? []}
+      />
     </DeskSection>
   );
 }

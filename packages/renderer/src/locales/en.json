@@ -2062,6 +2062,42 @@
       "introLine": "Self-intro: {{text}}",
       "qaRow": "Q{{index}}: {{question}}",
       "checklistLine": "Prepare: {{items}}"
+    },
+    "journeyAuth": {
+      "heading": "Unattended delivery authorization",
+      "hint": "Valid only for the checked jobs and the current day. After a stop or a risk pause, you must confirm before it continues.",
+      "statusLine": "Status: {{status}} · {{remaining}} job slots left today · {{pending}} pending",
+      "status": {
+        "none": "not authorized",
+        "active": "running",
+        "paused": "paused by risk signal",
+        "restart-required": "reconfirmation required",
+        "expired": "expired",
+        "revoked": "revoked"
+      },
+      "dailyLimitLabel": "Daily limit (jobs)",
+      "versionLine": "Master {{master}} · Tailored {{tailored}} · Receipt {{receipt}}",
+      "none": "none",
+      "noTargets": "Search jobs first, then pick the jobs to authorize here.",
+      "targetRow": "{{title}} · {{company}}",
+      "actionGrant": "Authorize and start",
+      "actionStop": "Stop all outbound",
+      "actionRestore": "Resume outbound",
+      "actionReconfirm": "Confirm and continue",
+      "actionRevoke": "Revoke authorization",
+      "pausedBanner": "The whole run is paused: {{reason}}",
+      "needsYou": "Needs you",
+      "unknownReason": "reason unknown",
+      "needsConfirm": {
+        "restart-required": "This authorization is from a previous run: unfinished jobs are pending. Confirm to continue from the breakpoint.",
+        "expired": "This authorization expired at midnight. Confirm to restart with today's slots."
+      },
+      "reasonNoTailor": "Tailor and pass the fact check for the selected job before authorizing",
+      "reasonNoTargets": "Pick at least one job",
+      "reasonLimit": "Daily limit must be an integer from 1 to 10",
+      "reasonOverLimit": "Selected jobs exceed the daily limit {{limit}}",
+      "reasonBusy": "The previous action is still running",
+      "reasonNoAuth": "There is no authorization to revoke"
     }
   }
 }

@@ -1,0 +1,8 @@
+10.6-05 一键停用 活体读数（V 半边）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
+
+界面按 journey-auth-stop-toggle 后 entitlement.gate.outboundStatus()：
+  {"stopped":true,"updatedAt":1795165067155}
+
+说明：入口在授权卡常驻可见处、点击后停用位立即为 true（同一进程内下一次判定即拒，U 例 10.6-05 覆盖）。
+「≤1 秒不再发起新外发」与「在飞一笔按未知结局处理」的活体竞态本轮未取证（无人值守执行器在后续片），故不标 [x]。
