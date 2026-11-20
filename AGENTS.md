@@ -554,6 +554,15 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   顺带一条取证形状：真实简历的过程截图上有姓名/手机/邮箱，位图无法脱敏，按 §8.5 **不入库**，这一格只能写成
   "逐字界面读数 + 台账查库"，不是漏做 V。
 
+- **实测（2026-11-20，P10 第 1 片清场）pnpm 10.12.1 的默认 store 落工作区本地**：`pnpm store path` 返回
+  `<repo>/.pnpm-store/v11`（在 `/tmp` 里也返回 `./.pnpm-store/v11`，与仓库配置无关）；而本仓 `node_modules` 是
+  旧口径用全局 `~/Library/pnpm/store/v10` 装的，仓内 store 只有包文件、没有索引，于是**裸** `pnpm licenses list`
+  报 `ERR_PNPM_MISSING_PACKAGE_INDEX_FILE`（缺 `cordis@4.0.0-rc.10` 等），`pnpm lint` 链上的 `check-licenses.ts`
+  跟着崩（`Cannot read properties of undefined (reading 'localeCompare')`）。修法不是加环境变量，而是按锁文件
+  `pnpm install --frozen-lockfile` 重装一次把本地 store 补全（本机 51.7s；它会问"从头重建 modules"，非交互要加
+  `--config.confirm-modules-purge=false`）。重装后 `node_modules/.modules.yaml` 的 `storeDir` 指向仓内 store，
+  裸 `pnpm licenses list --json --prod` 与裸 `pnpm lint` 都是 EXIT=0。`.pnpm-store/` 已在 `.gitignore`。
+
 ---
 
 ## 10. 机检落地状态（避免误以为规则已被工具强制执行）
