@@ -7,6 +7,8 @@ build/app/
 .DS_Store
 coverage/
 .vite/
+.trae/
+.pnpm-store/
 research-repos/
 .research-repos/
 docs/acceptance/**/tmp/
