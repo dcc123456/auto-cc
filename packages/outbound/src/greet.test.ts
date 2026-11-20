@@ -208,6 +208,7 @@ const request = (
     text: string;
     workflowRunId: string | null;
     resumeVersion: string;
+    unattended: boolean;
   }> = {},
 ) => ({
   platform: 'boss',
@@ -216,6 +217,7 @@ const request = (
   text: over.text ?? '您好，看到贵司在招前端工程师，想进一步沟通。',
   workflowRunId: over.workflowRunId ?? null,
   ...(over.resumeVersion === undefined ? {} : { resumeVersion: over.resumeVersion }),
+  ...(over.unattended === undefined ? {} : { unattended: over.unattended }),
   nowMs: T0,
 });
 
@@ -239,6 +241,16 @@ describe('outbound.greet 的编排顺序与不落账的失败（spec 2.5-02…13
       code: 'OUTBOUND_CHANNEL_MISSING',
       details: { platform: 'boss', greetable: [] },
     });
+    expect(ledger.count()).toBe(0);
+  });
+
+  it('unattended 标记但授权服务没挂载：一步都不走、不落账（10.6-01 的接线面）', async () => {
+    const hand = fakeChannel();
+    const { greet, ledger } = await boot({ channel: hand.channel });
+    await expect(greet.perform(request({ unattended: true }))).rejects.toMatchObject({
+      code: 'UNATTENDED_NOT_AUTHORIZED',
+    });
+    expect(hand.calls).toEqual([]);
     expect(ledger.count()).toBe(0);
   });
 

@@ -492,8 +492,10 @@ const fixtureJobs: FixtureJob[] = [
     experience: '3-5 年',
     education: '本科',
     posted: '刚刚发布',
+    // 真实 JD 形态（含可拆解要求行）：让 4.4 的词面通道能拆出 TypeScript / React / Electron 三条要求。
     description:
-      '负责桌面端应用的渲染层与主进程功能开发；参与浏览器自动化、会话管理与打包发布链路。示例文本，虚构内容。',
+      '负责桌面端应用的渲染层与主进程功能开发；参与浏览器自动化、会话管理与打包发布链路。\n' +
+      '岗位要求：熟悉 TypeScript 与 React；了解 Electron 主进程与渲染进程通信；能独立排查打包问题。示例文本，虚构内容。',
     requirement: '三年及以上 TypeScript 经验；熟悉 Electron 主进程与渲染进程通信；能独立排查打包问题',
   },
   {
@@ -505,7 +507,10 @@ const fixtureJobs: FixtureJob[] = [
     experience: '5-10 年',
     education: '本科',
     posted: '1 小时前',
-    description: '负责数据可视化控制台的组件库与图表交互；与后端约定接口形状并推动前端工程化。示例文本，虚构内容。',
+    // 同上：把要求写成真实 JD 的样子，词面通道才拆得出 React / TypeScript。
+    description:
+      '负责数据可视化控制台的组件库与图表交互；与后端约定接口形状并推动前端工程化。\n' +
+      '岗位要求：三年以上 React 与 TypeScript 经验；熟悉数据可视化与图表交互；能推动前端工程化。示例文本，虚构内容。',
     requirement: '五年及以上 React 经验；熟悉 TypeScript 与状态管理；带过两人以上小团队',
   },
   {
@@ -517,7 +522,10 @@ const fixtureJobs: FixtureJob[] = [
     experience: '经验不限',
     education: '大专',
     posted: '3 天前',
-    description: '从前端页面到 Node 服务端接口一起负责，参与内部工具的设计与实现。示例文本，虚构内容。',
+    // 同上：Node.js / SQL 是可拆解要求。
+    description:
+      '从前端页面到 Node 服务端接口一起负责，参与内部工具的设计与实现。\n' +
+      '岗位要求：熟悉 Node.js 与 SQL；有 React 页面经验优先；能独立交付完整功能。示例文本，虚构内容。',
     requirement: '熟悉 Node.js 与关系型数据库；能独立交付一个完整功能；有前端页面经验优先',
   },
   {

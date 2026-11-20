@@ -2,9 +2,24 @@
 采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
 
 仿站 /api/risk-mode=captcha → 内核视图导航 /boss（200 安全验证页）：
-  status=paused
-  data-reason="命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发"
-  横幅文本="整轮已暂停：命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发需要你来确认续跑"
+{
+  "bannerText": "整轮已暂停：命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发需要你来确认续跑",
+  "reason": "命中风控（page-text：安全验证），整轮已暂停，需要你来确认；在此之前不再外发",
+  "status": "paused",
+  "pausedAt": null
+}
 
-截图：10.6-04-risk-pause.png（400×1135）。
-说明：命中后状态转 paused、后续 dispatch 全拒（U 例覆盖）、不自动恢复；托盘/系统通知的代码已接（shell 订阅 outbound/authorization-paused），但托盘是原生层，本轮未拍到位图证据，故不标 [x]。
+暂停期间外发负对照（真实外发入口 + unattended 标记）：
+{
+  "code": "OUTBOUND_RISK_PAUSED",
+  "ledgerBefore": 1,
+  "ledgerAfter": 1
+}
+
+托盘/系统通知的进程侧读数（原生层拿不到像素，按 PMO 允许的退路）：
+[
+  "[shell] 授权暂停通知：platform=boss · tray=created · tooltip=set · notification=shown"
+]
+
+结论：通过。命中后状态 paused、原因原文可见、后续外发 OUTBOUND_RISK_PAUSED 且账本零增行；
+托盘已创建、tooltip 已写、系统通知已发出（进程侧读数，非像素证据）。截图：10.6-04-risk-pause.png。

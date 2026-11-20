@@ -2,12 +2,15 @@
 采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
 
 界面读数：
-  jobId=1003
-  母版版本=doc:resume-7793ba5c901e:1087889f9b2b
-  JD 版本=234702462639
-  定制变体=doc:resume-3b3b930b5371:1f2949b3cc0e
-  事实违规=0
-  打招呼来源=template
-  招呼原文="招呼：您好！看到贵司「灯塔智能」的「全栈工程师（Node + React）」，我有「Node.js」这段经历，想向您请教岗位的具体要求，方便的话希望进一步沟通，谢谢！ · 来源 kb-21f299d646738f0e"
+{
+  "jobId": "1003",
+  "resumeVersion": "doc:resume-7793ba5c901e:1087889f9b2b",
+  "jdVersion": "9ea6a6e0a105",
+  "tailoredVersion": "doc:resume-7e3039caf174:ac163587351a",
+  "violations": 0,
+  "greetingOrigin": "template",
+  "greetingText": "招呼：您好！看到贵司「灯塔智能」的「全栈工程师（Node + React）」，我有「Node.js」这段经历，想向您请教岗位的具体要求，方便的话希望进一步沟通，谢谢！ · 来源 kb-21f299d646738f0e, kb-82045a756709420c"
+}
 
-结论：通过。定制变体与母版、JD 版本三元组一致，事实违规 0；招呼由既有话术服务回落模板并带证据来源（kb-…）。截图：10.3-02-tailor.png（400×1012）。
+结论：通过。定制变体与母版、JD 版本三元组一致，事实违规 0；招呼由既有话术服务回落模板并带两条证据来源。
+截图：10.3-02-tailor.png。

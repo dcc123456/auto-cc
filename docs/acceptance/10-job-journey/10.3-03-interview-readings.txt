@@ -1,0 +1,47 @@
+10.3-03 面试材料 活体读数（V 半边）
+采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
+
+界面读数（data-testid=journey-interview，逐条带来源）：
+{
+  "ok": true,
+  "qaCount": 8,
+  "checklistCount": 3,
+  "qa": [
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    },
+    {
+      "factIds": "kb-0ea8d70a020df563",
+      "requirementIds": "9ea6a6e0a105:R1"
+    }
+  ]
+}
+
+结论：通过。8 条问答 + 3 项准备清单，每条问答都带 resumeFactIds 与 requirementIds，可回指所选 JD 与简历事实。
+通道说明：本轮走本地 fixture 的 /v1/chat/completions 面试通道（system 含「面试教练」），不是真实模型调用；
+真实模型下的同样判据留到用户在场/有模型订阅时补。截图：10.3-03-interview.png。

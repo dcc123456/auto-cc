@@ -487,3 +487,24 @@ interface JourneyContext {
 - **证据**：`docs/acceptance/10-job-journey/10.3-01-journey-search.png`、`10.3-02-tailor.png`、
   `10.6-01-authorization.png`、`10.6-02-restart.png`、`10.6-04-risk-pause.png` 与同前缀的 `*-readings.txt`；
   同批截图已跑 `md5 -q | sort | uniq -c` 去重（五张互异）。
+
+**第 4 片第 2 轮更正与复证（2026-11-20；上一轮记录原文保留，被推翻的两点按此为准）**
+
+- **更正一（10.3-01 不再记 `[!]`，修在代码里）**：`journey.search` 的可解释门槛此前只数岗位数，把 0 条 requirement 行的
+  岗位也算进 `MIN_MATCHES`；现已改成「每个返回岗位至少 1 条可回指 requirement 行」，不足 3 个仍报
+  `JOURNEY_MATCH_INSUFFICIENT` 并带 `captured/eligible/unexplainable` 读数（不补样例）。单测锁死「0 行岗位不计入」。
+- **靶场真实化（不是改判据）**：仿站 1001–1003 的 JD 正文补上「岗位要求：熟悉 React/TypeScript/Node.js…」这类真实 JD
+  形态，使 4.4 词面通道能拆出要求行；判据、词表与门槛一条没改。
+- **更正二（10.3-03 旧读数作废）**：上一轮「fixture 不产生面试 JSON」是误判——`scripts/fixture-server.ts` 的
+  `/v1/chat/completions` 已有 `readInterviewRequest` 分支。按 §9 重启 fixture 进程、把隔离实例 llm 指到
+  `http://127.0.0.1:10233/v1`（`AUTO_CC_LLM_API_KEY` 兜底）后，`journey.interview` 产出 **8 问答 + 3 项准备**，每条带
+  `resumeFactIds` 与 `requirementIds`；证据注明「本地 fixture 通道，非真实模型」。
+- **接线一处（让越权能做活体）**：`outbound.greet.perform` / `outbound.deliver.perform` 新增可选 `unattended` 入参，为真时
+  先过 `outbound.authorization.authorize()`；默认不带，手动路径与既有节点行为一字不变。
+- **本轮活体结果**：`10.3-01` 3/3 岗位可回指、V 通过；`10.3-02` 违规 0、三元组一致；`10.3-03` 8+3 通过（fixture 通道）；
+  `10.6-01` 撤权后从真实外发入口发起 → `UNATTENDED_NOT_AUTHORIZED`、页面 0、账本零增行；`10.6-02` 重启转待办 3 岗 →
+  确认后 active、账本 1→1；`10.6-04` captcha 命中后 paused、暂停期间外发 `OUTBOUND_RISK_PAUSED`、账本零增行，托盘以
+  进程侧读数（tray=created · tooltip=set · notification=shown）留证（非像素）。`10.6-05` 的应用内缺口不变：还没有无人值守
+  执行器，造不出「在飞一笔」，该条保持 `[!]`，等执行器落地那片补。
+- **证据**：`docs/acceptance/10-job-journey/10.3-01-*`、`10.3-02-*`、`10.3-03-interview-*`、`10.6-01-*`、`10.6-02-*`、
+  `10.6-04-*`、`10.6-05-stop-readings.txt`；同批截图 `md5 -q | sort | uniq -c` 已去重。

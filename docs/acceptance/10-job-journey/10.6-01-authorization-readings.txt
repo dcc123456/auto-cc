@@ -1,16 +1,26 @@
-10.6-01 授权单三要素 活体读数（V 半边）
+10.6-01 授权单三要素与未授权不得外发 活体读数（V 半边）
 采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
 
-界面读数（data-testid=journey-auth-status / journey-auth-versions）：
-  status=active
-  day=2026-11-20
-  remaining=3
-  pending=3
-  文本="状态：进行中 · 今日剩余 3 岗 · 待办 3 岗"
-  母版=doc:resume-7793ba5c901e:1087889f9b2b
-  定制=doc:resume-3b3b930b5371:1f2949b3cc0e
-  事实校验回执=gen-2d203476-0ce4-444d-a299-16462aff6eb1
-  勾选岗位数=3
+开单后界面读数：
+{
+  "status": "active",
+  "day": "2026-11-20",
+  "remaining": 3,
+  "pending": 3,
+  "text": "状态：进行中 · 今日剩余 3 岗 · 待办 3 岗",
+  "master": "doc:resume-7793ba5c901e:1087889f9b2b",
+  "tailored": "doc:resume-7e3039caf174:ac163587351a",
+  "receipt": "gen-01f21626-d1fb-4dfd-9394-bb4c99c81ddb",
+  "checkedTargets": 3
+}
 
-截图：10.6-01-authorization.png（366×364）。
-说明：三要素（日限额 3 岗、显式勾选 3 岗、已过事实校验的定制版本 + 回执）在界面可读、开单成功；「未授权不得外发」的活体断言本轮未做（U 用例覆盖），故状态位不标 [x]。
+撤权越权负对照（收回授权后从真实外发入口 outbound.greet.perform 带 unattended 标记发起）：
+{
+  "status": "revoked",
+  "code": "UNATTENDED_NOT_AUTHORIZED",
+  "ledgerBefore": 1,
+  "ledgerAfter": 1
+}
+
+结论：通过。三要素（日限额 3 岗、显式勾选 3 岗、已过事实校验的定制版本+回执）活体可读；
+收回授权后外发被 UNATTENDED_NOT_AUTHORIZED 拒绝，页面动作 0、账本零增行。截图：10.6-01-authorization.png。

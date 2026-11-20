@@ -21,6 +21,7 @@ import {
   consentGateOf,
   executorRegistryOf,
   greetChannelsOf,
+  maybeService,
   Service,
   sleep,
   type WorkflowNodeExecutor,
@@ -99,6 +100,11 @@ const greetRequestSchema = z
     workflowRunId: z.string().min(1).nullish(),
     /** 去重第四维；未绑定简历的纯打招呼统一回落为 `unversioned`。 */
     resumeVersion: z.string().min(1).optional(),
+    /**
+     * 无人值守入口标记（spec 10.6 / plan §12.2）：为真时先过 `outbound.authorization` 的那张授权单。
+     * 不给默认值：手动路径（界面现场点、工作流节点的人表态）保持既有行为，只有无人值守执行器会带上它。
+     */
+    unattended: z.boolean().optional(),
     nowMs: z.number().int().positive().optional(),
   })
   .superRefine((request, ctx) => {
@@ -224,6 +230,20 @@ export class OutboundGreetService extends Service {
     // 界面显示的是同一个目标。岗位类站点上 `conversationTarget` 一路是 undefined（仿站知识包有
     // `targetParam`），于是仍旧等于原来的 `jobId`，行为一字不变。
     const targetKey = greetTargetLabel({ jobId, conversationTarget });
+
+    // 无人值守入口先过授权闸门（范围/窗口/风控暂停/停用/24h 都在那一处判）：它必须排在页面动作与花费之前，
+    // 被拒的这一次连话术都不生成。手动路径不带 `unattended`，行为一字不变（PMO 2026-11-20 裁定）。
+    if (parsed.data.unattended === true) {
+      const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
+      if (!authorization) {
+        throw new AppError(
+          'UNATTENDED_NOT_AUTHORIZED',
+          '无人值守外发需要授权服务，但它没有挂载；这次一步都不走',
+          'outbound.greet',
+        );
+      }
+      authorization.authorize('greet', { platform, targetId: targetKey, resumeVersion, workflowRunId: runId, nowMs });
+    }
 
     // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
     // 界面那条确认卡片只是第一道，工作流节点与 agent 工具这两条入口都从这里出去，漏了就是静默绕过。
@@ -481,6 +501,20 @@ export class OutboundGreetService extends Service {
       `打招呼编排就绪：额度键 ${GREET_ACTION} · 当前可打招呼平台 ${greetable.join(' / ') || '（平台层尚未登记带 chat 的适配器）'} · 节点执行器${registry ? `已登记 ${GREET_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
+}
+
+/** 授权闸门的窄形状（本包不 import 服务类，按名字现问，§2.7/§9 的 2.5 实测条）。 */
+interface UnattendedAuthorizer {
+  authorize(
+    action: 'greet' | 'deliver',
+    context: {
+      platform: string;
+      targetId: string;
+      resumeVersion: string;
+      workflowRunId: string | null;
+      nowMs: number;
+    },
+  ): void;
 }
 
 declare module '@auto-cc/core' {

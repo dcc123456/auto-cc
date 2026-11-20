@@ -2,18 +2,23 @@
 采集：2026-11-20 · 隔离 Electron 实例（独立 userData、CDP 10299、渲染层 dist）+ 本地仿站 10233；不访问真实平台。
 
 重启后（同一 userData、新进程）：
-  status=restart-required
-  pending=3
-  remaining=3
-  文本="状态：需重新确认 · 今日剩余 3 岗 · 待办 3 岗"
-  待办横幅="上次运行留下的授权单：未完成岗位已转待办，确认后从断点继续。需要你来确认续跑"
-  账本总行=1
+{
+  "status": "restart-required",
+  "pending": 3,
+  "remaining": 3,
+  "text": "状态：需重新确认 · 今日剩余 3 岗 · 待办 3 岗",
+  "needsConfirm": "上次运行留下的授权单：未完成岗位已转待办，确认后从断点继续。需要你来确认续跑",
+  "ledgerTotal": 1
+}
 
 点「确认续跑」后：
-  status=active
-  pending=3
-  remaining=3
-  文本="状态：进行中 · 今日剩余 3 岗 · 待办 3 岗"
-  账本总行=1（与重启前相等 = 零增行）
+{
+  "status": "active",
+  "pending": 3,
+  "remaining": 3,
+  "text": "状态：进行中 · 今日剩余 3 岗 · 待办 3 岗",
+  "ledgerTotal": 1
+}
 
-截图：10.6-02-restart.png。
+结论：通过。重启把上一张单转 restart-required、未完成 3 岗转待办，只有人的确认能回到 active；
+确认前后账本总行相等（1→1），没有重复扣。截图：10.6-02-restart.png。

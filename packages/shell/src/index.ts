@@ -409,7 +409,19 @@ export class ShellService extends Service {
     this.tray?.setToolTip(`auto-cc · ${title}：${event.reason}`);
     // macOS 的托盘文字位能挂一个字，Windows/Linux 没有这个概念，所以只在 darwin 上设。
     if (process.platform === 'darwin') this.tray?.setTitle('!');
-    if (Notification.isSupported()) new Notification({ title, body: event.reason }).show();
+    const notificationSupported = Notification.isSupported();
+    if (notificationSupported) new Notification({ title, body: event.reason }).show();
+    // 进程侧读数（spec 10.6-04 的 V 取证退路）：托盘是原生层，截不到像素时至少要能证明
+    // 「托盘已建、tooltip 已写、通知通道被调用」这三件事发生过——日志里如实带平台与是否支持通知。
+    this.ctx.logger.info(
+      `授权暂停通知：platform=${event.platform} · tray=${this.tray ? 'created' : 'missing'} · ` +
+        `tooltip=set · notification=${notificationSupported ? 'shown' : 'unsupported'}`,
+    );
+    // 同一份读数再写一行 console：托盘属于原生层，V 取证拿不到像素时只能读进程侧输出（spec 10.6-04 的退路）。
+    console.info(
+      `[shell] 授权暂停通知：platform=${event.platform} · tray=${this.tray ? 'created' : 'missing'} · ` +
+        `tooltip=set · notification=${notificationSupported ? 'shown' : 'unsupported'}`,
+    );
   }
 
   /** 把主窗口唤到前台（单实例锁下第二次启动时调用）。 */

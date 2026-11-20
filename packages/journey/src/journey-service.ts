@@ -206,13 +206,22 @@ export class JourneyService extends Service {
       const report: GapReportView = await this.gap.report(row.description, { sourceDocId: input.docId });
       matches.push(matchJob(row, report));
     }
-    const sorted = sortMatches(matches);
+    // 可解释门槛：**每个返回岗位至少 1 条可回指要求行**。「有岗位但 0 条理由」不算可解释——
+    // 否则判据「每个匹配理由可追溯到简历事实和 JD 要求」在空数组上恒真，三个岗位全是空理由也能过（10.3-01 缺陷）。
+    const explainable = matches.filter((match) => match.requirements.length > 0);
+    const sorted = sortMatches(explainable);
     if (sorted.length < MIN_MATCHES) {
       throw new AppError(
         'JOURNEY_MATCH_INSUFFICIENT',
-        `按意向「${intent.criteria.keyword}」只得到 ${String(sorted.length)} 个可解释岗位（<${String(MIN_MATCHES)}），不补样例`,
+        `按意向「${intent.criteria.keyword}」只得到 ${String(sorted.length)} 个可解释岗位（<${String(MIN_MATCHES)}）：` +
+          `抓取 ${String(capturedIds.length)} 个，其中 ${String(matches.length - explainable.length)} 个没有任何可回指要求行`,
         'journey',
-        { captured: capturedIds.length, eligible: sorted.length, keyword: intent.criteria.keyword },
+        {
+          captured: capturedIds.length,
+          eligible: sorted.length,
+          unexplainable: matches.length - explainable.length,
+          keyword: intent.criteria.keyword,
+        },
       );
     }
     this.ctx.logger.info(

@@ -27,6 +27,7 @@ import {
   deliverChannelsOf,
   executorRegistryOf,
   jdReplyStatusOf,
+  maybeService,
   PendingChannel,
   Service,
   sleep,
@@ -142,6 +143,8 @@ const deliverRequestSchema = z
     /** 这次用的是哪一版导出产物（`resume_snapshots.snapshot_id`）；省略表示只给了文件、没有导出上下文（spec 3.7-02） */
     snapshotId: z.string().min(1).optional(),
     workflowRunId: z.string().min(1).nullish(),
+    /** 无人值守入口标记（spec 10.6 / plan §12.2）：为真时先过 `outbound.authorization`；手动路径不带。 */
+    unattended: z.boolean().optional(),
     nowMs: z.number().int().positive().optional(),
   })
   .superRefine((request, ctx) => {
@@ -169,6 +172,8 @@ export type StagedDelivery = {
   company: string;
   attachment: ResumeAttachment;
   workflowRunId: string | null;
+  /** 这次调用是否来自无人值守入口（授权闸门据此在 stage 之后、审批与发送之前先判）。 */
+  unattended: boolean;
   /** 判定与落账的基准毫秒，冻结在 stage 那一刻：commit 侧不再读当前时间，等间隔才算得准 */
   nowMs: number;
   /** 账本 `source`：`resume:<sha256 前 12 位>@<文件名>`（spec 2.6-05，复用已有的 `source` 列） */
@@ -394,6 +399,7 @@ export class OutboundDeliverService extends Service {
       company: company ?? '',
       attachment,
       workflowRunId: runId,
+      unattended: parsed.data.unattended === true,
       nowMs,
       // spec 2.6-05：hash 取前 12 位就够对上了——完整的 64 位串在账本里没人读，而 3.7 的 diff 按前缀能join。
       source: `resume:${attachment.sha256.slice(0, 12)}@${attachment.fileName}`,
@@ -580,6 +586,24 @@ export class OutboundDeliverService extends Service {
    */
   perform = async (raw: unknown, signal?: AbortSignal): Promise<DeliverReceiptView> => {
     const staged = this.stage(raw);
+    // 无人值守入口先过授权闸门（范围/窗口/风控暂停/停用/24h 都在那一处判）；手动路径不带这个标记。
+    if (staged.unattended) {
+      const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
+      if (!authorization) {
+        throw new AppError(
+          'UNATTENDED_NOT_AUTHORIZED',
+          '无人值守外发需要授权服务，但它没有挂载；这次一步都不走',
+          'outbound.deliver',
+        );
+      }
+      authorization.authorize('deliver', {
+        platform: staged.platform,
+        targetId: greetTargetLabel(staged),
+        resumeVersion: staged.resumeVersion,
+        workflowRunId: staged.workflowRunId,
+        nowMs: staged.nowMs,
+      });
+    }
     if (this.config.autonomy === 'suggest') {
       // 「仅辅助」的意思就是到此为止：界面上摆出要递什么，那一下由用户自己点（spec 2.6-06）。
       return {
@@ -920,6 +944,20 @@ export class OutboundDeliverService extends Service {
       `投递编排就绪：额度键 ${DELIVER_ACTION} · 档位 ${this.config.autonomy} · 确认超时 ${String(this.config.approveTimeoutMs)}ms · 当前可投递平台 ${deliverable.join(' / ') || '（平台层尚未登记带 sendResume 的适配器）'} · 节点执行器${registry ? `已登记 ${DELIVER_NODE_KIND} / ${CUSTOMIZE_NODE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
+}
+
+/** 授权闸门的窄形状（同 greet 那份；本包不 import 服务类，按名字现问）。 */
+interface UnattendedAuthorizer {
+  authorize(
+    action: 'greet' | 'deliver',
+    context: {
+      platform: string;
+      targetId: string;
+      resumeVersion: string;
+      workflowRunId: string | null;
+      nowMs: number;
+    },
+  ): void;
 }
 
 declare module '@auto-cc/core' {

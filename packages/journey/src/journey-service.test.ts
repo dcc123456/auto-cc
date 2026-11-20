@@ -181,7 +181,18 @@ class FakeGapService extends Service {
   constructor(ctx: Context) {
     super(ctx, 'kb.gap');
   }
-  report = (_jdText: string, _filter?: unknown, _nowMs?: number) => Promise.resolve(reportOf());
+  /**
+   * 让前 N 次 report 回「0 条要求行」的空报告（演「岗位抓到了但拆不出任何可回指要求」）。
+   * 搜索按 JD 库行序逐个问报告，所以这个计数是确定性的。
+   */
+  blankReports = 0;
+  report = (_jdText: string, _filter?: unknown, _nowMs?: number) => {
+    if (this.blankReports > 0) {
+      this.blankReports -= 1;
+      return Promise.resolve({ ...reportOf(), items: [], rows: [] });
+    }
+    return Promise.resolve(reportOf());
+  };
 }
 
 /** 生成替身：默认成功；`tampered` 时返回违规，证明服务整份失败且不生成招呼。 */
@@ -335,6 +346,7 @@ async function boot() {
   fibers.push(await ctx.plugin(JourneyService, journeySchema.parse({})));
   return {
     journey: asApp(ctx).journey,
+    gap: ctx.get('kb.gap') as unknown as FakeGapService,
     llm: ctx.get('llm.chat') as unknown as FakeLlmService,
     gen: ctx.get('resume.generate') as unknown as FakeGenerateService,
     capture: ctx.get('jd.capture') as unknown as FakeCaptureService,
@@ -382,6 +394,15 @@ describe('按意向搜岗与可解释匹配（10.3-01）', () => {
     });
     expect(first.requirements[2]).toMatchObject({ state: 'missing', factIds: [] });
     expect(view.jobs.every((job) => job.jdVersion === jdVersionOf(JD))).toBe(true);
+  });
+
+  it('0 条要求行的岗位不算可解释：三个抓取里一个空理由即不足三，明确失败并给出读数', async () => {
+    const { journey, gap } = await boot();
+    gap.blankReports = 1;
+    await expect(journey.search({ docId: DOC_ID })).rejects.toMatchObject({
+      code: 'JOURNEY_MATCH_INSUFFICIENT',
+      details: { captured: 3, eligible: 2, unexplainable: 1 },
+    });
   });
 
   it('不足三个可解释岗位时明确失败，不补样例', async () => {
