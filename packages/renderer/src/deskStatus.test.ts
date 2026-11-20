@@ -26,4 +26,11 @@ describe('状态条档位读数（spec 10.10-04）', () => {
       tier: 'suggest',
     });
   });
+
+  it('一键停用（授权单仍 active、停用位为真）：也退回档位名', () => {
+    expect(deskTierReading('suggest', { active: true, targetCount: 1, stopped: true })).toEqual({
+      kind: 'tier',
+      tier: 'suggest',
+    });
+  });
 });

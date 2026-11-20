@@ -61,7 +61,7 @@ export function OutboundAuthorizationCard({
     if (authReply?.ok) {
       setAuth(authReply.value);
       // 状态条那一格跟着这份读数走（plan §13.2：授权生效才显示「无人值守：已授权 N 岗」）。
-      reportDeskAuthorization(authReply.value);
+      reportDeskAuthorization(authReply.value, stopReply?.ok === true && stopReply.value.stopped);
     }
     if (stopReply?.ok) setStopped(stopReply.value.stopped);
   }, [bridge]);
@@ -337,6 +337,18 @@ export function OutboundAuthorizationCard({
         >
           {t('journeyAuth.runStop')}
         </DeskButton>
+        {/* 「停用」按不动时写原因：此刻没有在跑的一轮（spec 10.10-18）。 */}
+        {runView?.status !== 'running' ? (
+          <span className="text-[11px] text-slate-400" data-testid="journey-unattended-stop-reason">
+            {t('journeyAuth.reasonNotRunning')}
+          </span>
+        ) : null}
+        {/* 「开始」按不动时把原因写在明面（spec 10.10-18）：授权没开单 / 已经在跑 / 上一条没回来。 */}
+        {auth?.status !== 'active' && runView?.status !== 'running' ? (
+          <span className="text-[11px] text-amber" data-testid="journey-unattended-start-reason">
+            {t('journeyAuth.reasonRunNeedsAuth')}
+          </span>
+        ) : null}
         <span
           className="text-[11px] text-slate-400"
           data-testid="journey-unattended-status"
@@ -441,6 +453,12 @@ export function OutboundAuthorizationCard({
         </DeskButton>
         <span className="text-[11px] text-slate-500">{t('journeyAuth.hint')}</span>
       </div>
+      {/* 停用/收回按不动时同样写出原因：没有授权单时这三颗键一起灰，只给悬停气泡等于没解释。 */}
+      {auth === null ? (
+        <p className="mt-1 text-[11px] text-amber" data-testid="journey-auth-controls-reason">
+          {t('journeyAuth.reasonNoAuth')}
+        </p>
+      ) : null}
       {/* 开单键按不动时把原因写在明面（spec 10.10-18）：只在悬停气泡里说，等于让新手以为按钮坏了。 */}
       {!canGrant || busy ? (
         <p className="mt-1 text-[11px] text-amber" data-testid="journey-auth-grant-reason">

@@ -244,9 +244,31 @@ export function JobTrackingPanel() {
           onValueChange={setInterviewSource}
           className="w-40"
         />
-        <DeskButton action="interview-register" variant="jade" compact onClick={registerInterview}>
+        <DeskButton
+          action="interview-register"
+          variant="jade"
+          compact
+          disabled={interviewJob.trim() === '' || interviewAt === ''}
+          disabledReason={
+            interviewJob.trim() === '' ? 'INTERVIEW_JOB_EMPTY' : interviewAt === '' ? 'INTERVIEW_AT_EMPTY' : undefined
+          }
+          disabledReasonLabel={
+            interviewJob.trim() === ''
+              ? t('metrics.interviewJobEmpty')
+              : interviewAt === ''
+                ? t('metrics.interviewAtEmpty')
+                : undefined
+          }
+          onClick={registerInterview}
+        >
           {t('metrics.interviewRegister')}
         </DeskButton>
+        {/* 键按不动时把原因写在旁边（spec 10.10-18）。 */}
+        {interviewJob.trim() === '' || interviewAt === '' ? (
+          <span className="text-[11px] text-amber" data-testid="interview-register-reason">
+            {interviewJob.trim() === '' ? t('metrics.interviewJobEmpty') : t('metrics.interviewAtEmpty')}
+          </span>
+        ) : null}
       </div>
     </DeskSection>
   );

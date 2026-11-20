@@ -341,6 +341,7 @@
       "panel": {
         "newTitle": "新增 {{provider}} 实例",
         "save": "保存",
+        "saveReasonIncomplete": "先填名称与接口地址，保存才知道存到哪一家。",
         "saved": "{{label}} 已保存",
         "delete": "删除实例",
         "modelSearchPlaceholder": "搜索模型…",
@@ -459,6 +460,8 @@
       "experiencePlaceholder": "经验要求，如「3-5 年」（可空）",
       "limitPlaceholder": "本次目标条数",
       "captureButton": "搜索并入库",
+      "captureHint": "搜索入库（抓取）：把站点的岗位读进本地库，之后才筛得到。",
+      "goLogin": "去登录",
       "listButton": "读库内清单",
       "actionRun": "抓取「{{keyword}}」",
       "actionList": "读取库内清单",
@@ -480,7 +483,7 @@
       "filterSummary": "库内 {{total}} 条 · 命中 {{matched}} 条 · 当前显示 {{shown}} 条",
       "filterEmpty": "这次没有符合条件的岗位：换个关键词或城市，或点「清空」再看",
       "filterMore": "加载更多（已显示 {{shown}} / {{matched}} 条）",
-      "greetReceiptHeading": "最近一次打招呼的回执",
+      "greetReceiptHeading": "最近一次打招呼的回执（回执＝站点返回的那句送达结果）",
       "greetReceiptPage": "页面回读：{{reason}}",
       "greetReceiptWait": "频控等了 {{waitedMs}} 毫秒",
       "greetProgressHeading": "打招呼进度",
@@ -1954,6 +1957,8 @@
       },
       "interviewSource": "来源引用",
       "interviewRegister": "登记约面",
+      "interviewJobEmpty": "先填岗位 id，约面才挂得到那个岗位上",
+      "interviewAtEmpty": "先填约面时间，漏斗里那一格才有时刻可读",
       "stage": {
         "none": "未追踪",
         "captured": "已抓取",
@@ -2127,7 +2132,7 @@
     "journeyMain": {
       "heading": "求职主链：意向匹配与材料",
       "summary": "母版 {{docs}} 份",
-      "hint": "从母版求职意向自动搜岗，逐岗列出可回指的匹配理由；定制复用既有生成与事实校验，面试材料逐条带来源。",
+      "hint": "从母版求职意向自动搜岗，逐岗列出可回指的匹配理由；定制复用既有生成与事实校验，面试材料逐条带来源。（JD 就是岗位要求：岗位上写明的职责与门槛。）",
       "docLabel": "母版简历",
       "noDocs": "知识库里还没有简历",
       "masterOption": "{{name}}（母版）",

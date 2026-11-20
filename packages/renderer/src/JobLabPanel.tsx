@@ -558,6 +558,10 @@ export function JobLabPanel() {
           </div>
         </div>
 
+        {/* 「抓取」这个词第一次出现时就给白话（spec 10.10-07）：不进设置页也能知道这一屏在做什么。 */}
+        <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-capture-gloss">
+          {t('jd.captureHint')}
+        </p>
         <p className="mt-2 text-[11px] text-slate-500" data-testid="jd-config">
           {t('jd.config', {
             targetCount: captureStatus?.targetCount ?? '-',
@@ -676,6 +680,37 @@ export function JobLabPanel() {
             </DeskButton>
           </div>
         </div>
+
+        {/* 搜索键按不动时把原因写在明面，并给邻接动作（spec 10.10-18）：没填关键词 → 提示去填；
+            没有平台 → 直接给「去登录」入口（它才是这颗键按不动的真正原因）。 */}
+        {captureBlockedReason !== undefined ? (
+          <div
+            className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-amber"
+            data-testid="jd-capture-reason"
+          >
+            <span>
+              {captureBlockedReason === 'KEYWORD_EMPTY' ? t('jd.reasonKeywordEmpty') : t('jd.reasonNoPlatform')}
+            </span>
+            {captureBlockedReason === 'NO_SEARCH_PLATFORM' ? (
+              <DeskButton
+                action="jd-go-login"
+                variant="line"
+                compact
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'jobs',
+                    sourceTitle: t('nav.jobs'),
+                    targetView: 'trust',
+                    targetTitle: t('desk.trust.title'),
+                    targetDetail: t('jd.reasonNoPlatform'),
+                  })
+                }
+              >
+                {t('jd.goLogin')}
+              </DeskButton>
+            ) : null}
+          </div>
+        ) : null}
 
         {notice && (
           <Banner tone={noticeTone} markers={{ testid: 'jd-notice' }} className="mt-2">

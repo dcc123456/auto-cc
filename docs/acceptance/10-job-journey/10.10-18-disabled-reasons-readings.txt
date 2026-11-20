@@ -1,8 +1,15 @@
-10.10-18 禁用控件的可见原因 读数（干净实例 · 界面来自工作树 vite 5173）
-环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
-命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
-搜岗前「按意向搜岗」的可见原因："先读取求职意向"（journey-search-reason）
-无母版时的可点下一步："去简历页选母版"（journey-no-doc-next / guide 的下一步键）
-未登录时的「去登录 BOSS」入口："BOSS 直聘 还没登录：搜岗要在它的页面上跑，先登录。\n去登录 BOSS 直聘"
-授权卡开单键的可见原因："先对选中岗位定制并过事实校验，才能授权"
-其余抽样控件（发送/导入/探测/模型保存等）：本轮仍只有悬停气泡文案，没有逐颗补可见说明；见 10.10-18 状态位。
+10.10-18 禁用控件的可见原因（补） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
+环境：全新 userData（tmp/g8b/userdata）、独立 CDP 10330、platform-boss=fixture、帧率控制与本地模型都指 127.0.0.1:10233。
+命令：node tmp/g8b/fixture-evidence.mjs → tmp/g8b/fixture-readings.json
+抽样 10 颗，其中此刻禁用 9 颗；缺可见原因：[]
+· journey-doc：present=true disabled=true 原因码="JOURNEY_NO_DOC" 可见原因="还没有选择母版简历去简历页选母版"
+· journey-intent：present=true disabled=true 原因码="JOURNEY_DOC_EMPTY" 可见原因="还没有选择母版简历去简历页选母版"
+· journey-search：present=true disabled=true 原因码="JOURNEY_DOC_EMPTY" 可见原因="还没有选择母版简历去简历页选母版"
+· journey-auth-grant：present=true disabled=true 原因码="JOURNEY_AUTH_NO_TAILOR" 可见原因="先对选中岗位定制并过事实校验，才能授权"
+· journey-unattended-stop：present=true disabled=true 原因码="JOURNEY_NOT_RUNNING" 可见原因="当前没有在跑的一轮"
+· journey-auth-revoke：present=true disabled=true 原因码="JOURNEY_AUTH_NONE" 可见原因="当前没有授权单可收回"
+· journey-unattended-start：present=true disabled=true 原因码="JOURNEY_AUTH_NOT_ACTIVE" 可见原因="先让授权单处于进行中，才能开跑"
+· capture：present=true disabled=true 原因码="KEYWORD_EMPTY" 可见原因="先写关键词，抓取才知道搜什么"
+· interview-register：present=true disabled=true 原因码="INTERVIEW_JOB_EMPTY" 可见原因="先填岗位 id，约面才挂得到那个岗位上"
+· models-save：present=false disabled=false 原因码=null 可见原因=null
+未取到的一颗：models-save（模型保存键）——本轮脚本打开模型表单那一步没生效，表单没出现过；该颗的可见原因代码已加（`models-save-reason`），等表单打开即可读。

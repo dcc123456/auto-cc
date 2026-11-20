@@ -1,8 +1,7 @@
-10.10-07 术语白话 读数（干净实例 · 界面来自工作树 vite 5173）
-环境：全新 userData（tmp/g8/userdata，首启动自己跑迁移）、独立 CDP 10320、macOS arm64；只读本机数据，未点任何会访问真实平台的按钮。
-命令：node tmp/g8/clean-evidence.mjs → tmp/g8/clean-readings.json
-「每天最多投几个岗位」出现在授权卡：true
-「用 Office-cc 排版（可选）」出现在简历卡：true
-首屏文本含 cron：false
-未做：JD/回执/抓取三类术语的首现白话注解（本轮只改了两处），见状态位
-证据图：10.10-07-lexicon.png
+10.10-07 术语白话（补） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
+环境：全新 userData（tmp/g8b/userdata）、独立 CDP 10330、platform-boss=fixture、帧率控制与本地模型都指 127.0.0.1:10233。
+命令：node tmp/g8b/fixture-evidence.mjs → tmp/g8b/fixture-readings.json
+JD 首现白话（求职主链提示行）：true
+抓取首现白话（搜岗屏）：true
+回执白话：文案已改（「最近一次打招呼的回执（回执＝站点返回的那句送达结果）」），但本轮 V 读数没取到——那一行只在面板自己发过一次招呼之后才上屏，脚本走的是桥接口，回执行没挂出来。
+召接口打招呼结果：{"ok":true,"code":null}

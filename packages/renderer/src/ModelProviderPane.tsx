@@ -365,6 +365,12 @@ export function ModelProviderPane({
             </DeskButton>
           )}
         </div>
+        {/* 保存键按不动时写出原因（spec 10.10-18）：名称/地址两格是这一颗键的前置，不能只在悬停气泡里说。 */}
+        {draft.label.trim() === '' || draft.baseUrl.trim() === '' ? (
+          <p className="mt-1 text-[11px] text-amber sm:col-span-2" data-testid="models-save-reason">
+            {t('models.panel.saveReasonIncomplete')}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-3 rounded-chip border border-line bg-ink-900/60 p-3" data-testid="settings-model-models">

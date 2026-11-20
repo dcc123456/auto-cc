@@ -36,7 +36,7 @@ export interface DeskStatusReading {
    * 当前有效的无人值守授权单（`outbound.authorization.current()`，没有时为 null）。
    * 状态条据此把它报成「无人值守：已授权 N 岗」而不是只报档位名的第二份说法（plan §13.2 裁定）。
    */
-  authorization?: { active: boolean; targetCount: number } | null;
+  authorization?: { active: boolean; targetCount: number; stopped: boolean } | null;
 }
 
 let current: DeskStatusReading = {};
@@ -88,10 +88,13 @@ export function reportDeskTier(tier: AutonomyLevel): void {
 
 /**
  * 报当前授权单的读数。
- * @param view 授权单视图；null = 现在没有生效的授权单（撤权/停用之后状态条要能退回「只建议」）
+ * @param view 授权单视图；null = 现在没有生效的授权单
+ * @param stopped 一键停用是否生效（停用位在 `outbound_control`，与授权单不是同一行）
  */
-export function reportDeskAuthorization(view: UnattendedAuthorizationView | null): void {
-  report({ authorization: view ? { active: view.status === 'active', targetCount: view.targets.length } : null });
+export function reportDeskAuthorization(view: UnattendedAuthorizationView | null, stopped = false): void {
+  report({
+    authorization: view ? { active: view.status === 'active', targetCount: view.targets.length, stopped } : null,
+  });
 }
 
 /**
@@ -105,9 +108,11 @@ export function reportDeskAuthorization(view: UnattendedAuthorizationView | null
  */
 export const deskTierReading = (
   tier: AutonomyLevel | undefined,
-  authorization: { active: boolean; targetCount: number } | null | undefined,
+  authorization: { active: boolean; targetCount: number; stopped?: boolean } | null | undefined,
 ): { kind: 'unattended'; count: number } | { kind: 'tier'; tier: AutonomyLevel | undefined } =>
-  authorization?.active === true ? { kind: 'unattended', count: authorization.targetCount } : { kind: 'tier', tier };
+  authorization?.active === true && authorization.stopped !== true
+    ? { kind: 'unattended', count: authorization.targetCount }
+    : { kind: 'tier', tier };
 
 /** 状态条那一格要报的「最紧的一只额度」。 */
 export interface TightestQuota {

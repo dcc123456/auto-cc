@@ -165,6 +165,8 @@ type RiskMode = 'off' | 'captcha' | 'blocked';
 let riskMode: RiskMode = 'off';
 /** 投递延迟（毫秒，仅测试靶站用；0 = 不延迟）。 */
 let deliverDelayMs = 0;
+/** 搜岗列表接口的人为延迟（仅本机靶站）：用来稳定制造「搜索进行中」的加载态，供 10.10-17 逐屏取证。 */
+let captureDelayMs = 0;
 
 /** 一张最朴素的人机验证页：标题与正文都带「安全验证」，正好落进知识包 `risk.riskPattern` 的判据里。 */
 const RISK_CAPTCHA_HTML =
@@ -1397,6 +1399,33 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   // 投递延迟开关（10.6-05 在飞竞态取证用）：只影响本地仿站的 /api/deliver 收讫时序。
+  if (url.pathname === '/api/capture-delay' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    const next = Number(body['delayMs']);
+    if (!Number.isInteger(next) || next < 0 || next > 60_000) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'delayMs 只接受 0–60000 的整数' }));
+      return;
+    }
+    captureDelayMs = next;
+    console.log(`[fixture] 搜岗延迟切换为 ${String(next)}ms`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: captureDelayMs }));
+    return;
+  }
+  if (url.pathname === '/api/capture-delay' && request.method === 'DELETE') {
+    captureDelayMs = 0;
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: 0 }));
+    return;
+  }
+  if (url.pathname === '/api/capture-delay') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ delayMs: captureDelayMs }));
+    return;
+  }
+
   if (url.pathname === '/api/deliver-delay' && request.method === 'POST') {
     const body = await readJson(request, response);
     if (body === null) return;
@@ -1716,6 +1745,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   if (url.pathname === '/api/jobs') {
+    if (captureDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, captureDelayMs));
     // 分页读数由服务端说了算：`hasMore` 为 false 时页面不再长出新卡片，
     // 抓取编排因此能观察到「无新内容」这个停止条件（spec 2.3-06）。
     const matched = filterJobs(
