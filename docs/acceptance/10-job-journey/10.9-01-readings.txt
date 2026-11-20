@@ -1,0 +1,65 @@
+# 10.9-01 首次使用走查 · 机器读数与时间线（2026-11-20/21，干净实例）
+
+## 实例
+- 命令：Electron packages/main/dist/main.cjs --remote-debugging-port=10245
+        --user-data-dir=tmp/10.9-01-clean-userdata --no-sandbox --disable-features=CalculateNativeWinOcclusion
+        环境 ELECTRON_RENDERER_URL=http://127.0.0.1:5173
+- userData：空目录起步（首启自建库）；未复用任何既有会话/账号
+- 注：本机 DSH 沙箱内 Electron 自带 sandbox 起不来（"sandbox initialization failed: Operation not permitted"），
+  故加 --no-sandbox；这是取证环境约束，不是产品行为（与 plan 第 4 片 V 取证的记法一致）
+- 平台注册表读数（window.autoCC.platform.registry.list()）：
+  {"id":"boss","displayName":"BOSS 直聘","startUrl":"https://www.zhipin.com/","origins":["https://www.zhipin.com"],
+   "capabilities":["search","detail","chat","sendResume","readReplies"],"minLayoutWidth":1224}
+  → 干净实例里唯一平台是真实 BOSS，本片未对其发起任何搜索/投递
+
+## 时间线（我这边含截图取证；Asia/Shanghai）
+23:58:42  首屏：隐私声明弹层（正文一屏放不下，同意按钮在底部）
+23:58:5x  点「我已阅读并同意，进入工作台」→ 对话页空态
+23:59:23  左栏「简历」→ "库里还没有简历，先导入一份"
+23:59:3x  点「导入简历（可多选）」→ 系统文件选择框（截不到）
+00:04:37  resume.parse.fromFile 回执：status=imported, docId=resume-27fddbbd11bd, format=docx, textLength=326,
+          sections=5(custom/experience/education/skills)；回执 issues 见下
+00:04:5x  切「对话」→「简历」后卡片才出现（张一鸣 / 17 处待确认）
+00:06:37  左栏「岗位」→ 搜索条件、挑岗位、把简历递出去、抓取进度、求职主链、打招呼话术候选（全部折叠）
+00:09:5x  展开「求职主链：意向匹配与材料」
+          - 卡片标题：母版 0 份
+          - 母版简历下拉：唯一选项「知识库里还没有简历」，value=""
+          - 「读取求职意向」：aria-disabled=true，data-disabled-reason=JOURNEY_DOC_EMPTY，title="还没有选择母版简历"
+          - 点击后页面无任何变化（无 toast、无滚动、无红字）
+00:10:04  仍无变化，判定为死路
+00:12:0x  重启渲染层（Page.reload）后再进「岗位」并展开同一张卡
+          - 卡片标题：母版 1 份
+          - 母版简历下拉：[「张一鸣（母版）」]，value=resume-27fddbbd11bd（自动选中）
+00:12:21  点「读取求职意向」→ 页面显示：
+          "读取求职意向：成功"
+          "期望岗位 未填 · 城市 未填 · 母版 doc:resume-27fddbbd11bd:2f1d49d33a0d 未填：
+           expectRole, expectCity, expectSalary, expectStart"
+          → 界面上没有"期望岗位/期望城市"的输入框，也没有"去登录 BOSS"的入口
+00:13:22  左栏「运行记录」：会话 fixture / fixture-alt / boss 全"未登录"；内核视图地址显示 data:text/html...
+          指标看板：2026-11-15~11-22，五级漏斗全 0，页面自述"这里的 0 是「还没发生」，不是转化率为 0"
+00:14:0x  左栏「对话」：输入框下"还没配对话模型"；发送按钮 aria-disabled=true，
+          data-disabled-reason=FULL_AUTO_CONSENT_REQUIRED，title="先在上方那句全自动明示上点一次「我了解」发送"
+
+## 关键状态读数
+- 对话会话（window.autoCC.chat["session.current"]()）：autonomy = "auto" ← 干净实例默认就是全自动
+  与首屏隐私声明原文冲突：声明写"默认档位是最保守的「只建议」，外发动作一个都不会自己出手"
+- 底栏同时显示："档位 全自动"（橙色圆点）
+- 简历导入的待确认条目（resume.parse.pending()）：共 17 条
+  missing-field × 8（company ×5、achievement ×5、period ×6 等）+ unparsable-field × 8 + sensitive-redacted × 1（email）
+  但简历页折叠行写"1 处没读准，导出前自己看一眼" → 同一张卡上出现 17 / 1 两个数
+- 岗位页搜索按钮：「搜索并入库」data-disabled-reason=KEYWORD_EMPTY（未填关键词即禁用，无可见提示）
+- 打招呼话术候选：「生成候选」data-disabled-reason=NO_TARGET
+- 流程页：计划 boss-basic（3 节点）/ boss-deliver（2 节点）/ boss-e2e（5 节点），另有 cron 表达式与算子图入口
+- 设置页：只有"应用版本 44.4.5"与"更新"两块，没有任何简历/平台/档位设置
+
+## 本片没取到的读数（如实记，不冒充）
+- 搜岗 / 选岗 / 定制 / 授权 / 投递 / 追踪 / 统计 的活体读数：需要真实 BOSS 登录，按纪律未由自动化发起
+- 导入简历的系统文件选择框：原生面板，Page.captureScreenshot 拍不到；本片用 resume.parse.fromFile(路径)
+  交接了"用户已选中文件"这一步，随后 UI 的"重新读取/切页刷新"按真实用户路径点击
+
+## 复现路径（给 QA）
+1. 用空 userData 起实例（端口自定），同意隐私声明
+2. 简历页导入任意 docx（或先跑一次 bridge 的 resume.parse.fromFile）
+3. **不要重启**，直接切到岗位页 → 展开「求职主链：意向匹配与材料」→ 观察母版 0 份 + 意向按钮禁用（K2）
+4. 重启后再看同一张卡 → 母版 1 份；点「读取求职意向」→ 出现 expectRole/expectCity 等英文键名（K3）
+5. 对话页观察发送按钮的 FULL_AUTO_CONSENT_REQUIRED 与底栏"档位 全自动"（K1）
