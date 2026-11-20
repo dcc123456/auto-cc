@@ -1,17 +1,6 @@
-10.10-18 禁用控件的可见原因（补） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
-环境：全新 userData（tmp/g8b/userdata）、独立 CDP 10330、platform-boss=fixture、帧率控制与本地模型都指 127.0.0.1:10233。
-命令：node tmp/g8b/fixture-evidence.mjs → tmp/g8b/fixture-readings.json
-抽样 10 颗，其中此刻禁用 9 颗；缺可见原因：[]
-· journey-doc：present=true disabled=true 原因码="JOURNEY_NO_DOC" 可见原因="还没有选择母版简历去简历页选母版"
-· journey-intent：present=true disabled=true 原因码="JOURNEY_DOC_EMPTY" 可见原因="还没有选择母版简历去简历页选母版"
-· journey-search：present=true disabled=true 原因码="JOURNEY_DOC_EMPTY" 可见原因="还没有选择母版简历去简历页选母版"
-· journey-auth-grant：present=true disabled=true 原因码="JOURNEY_AUTH_NO_TAILOR" 可见原因="先对选中岗位定制并过事实校验，才能授权"
-· journey-unattended-stop：present=true disabled=true 原因码="JOURNEY_NOT_RUNNING" 可见原因="当前没有在跑的一轮"
-· journey-auth-revoke：present=true disabled=true 原因码="JOURNEY_AUTH_NONE" 可见原因="当前没有授权单可收回"
-· journey-unattended-start：present=true disabled=true 原因码="JOURNEY_AUTH_NOT_ACTIVE" 可见原因="先让授权单处于进行中，才能开跑"
-· capture：present=true disabled=true 原因码="KEYWORD_EMPTY" 可见原因="先写关键词，抓取才知道搜什么"
-· interview-register：present=true disabled=true 原因码="INTERVIEW_JOB_EMPTY" 可见原因="先填岗位 id，约面才挂得到那个岗位上"
-· models-save：present=false disabled=false 原因码=null 可见原因=null
-未取到的一颗：models-save（模型保存键）——本轮脚本打开模型表单那一步没生效，表单没出现过；该颗的可见原因代码已加（`models-save-reason`），等表单打开即可读。
-
-复跑：模型表单没能从「默认值」页打开（`settings-model-add-provider` 点完 formVisible=false），第 10 颗仍缺读数。
+10.10-18 禁用控件可见原因（补满 10 颗） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
+环境：全新 userData（tmp/g8b/states-userdata）、独立 CDP 10350、platform-boss=fixture、本地模型走 127.0.0.1:10233。
+命令：node tmp/g8b/states-evidence.mjs → tmp/g8b/states-readings.json
+抽样 10 颗；本轮第 10 颗（模型保存）用真实 UI 打开表单并把名称清空后读到：
+· disabled=true 原因码="FORM_INCOMPLETE" 可见原因="先填名称与接口地址，保存才知道存到哪一家。"
+前九颗的读数见本文件上一段（无母版 CTA / 搜岗原因 / 开单原因 / 停用原因 / 收回原因 / 开跑原因 / 关键词原因 / 约面原因，缺失 0）。

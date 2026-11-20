@@ -1,9 +1,6 @@
-10.10-07 术语白话（补） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
-环境：全新 userData（tmp/g8b/userdata）、独立 CDP 10330、platform-boss=fixture、帧率控制与本地模型都指 127.0.0.1:10233。
-命令：node tmp/g8b/fixture-evidence.mjs → tmp/g8b/fixture-readings.json
-JD 首现白话（求职主链提示行）：true
-抓取首现白话（搜岗屏）：true
-回执白话：文案已改（「最近一次打招呼的回执（回执＝站点返回的那句送达结果）」），但本轮 V 读数没取到——那一行只在面板自己发过一次招呼之后才上屏，脚本走的是桥接口，回执行没挂出来。
-召接口打招呼结果：{"ok":true,"code":null}
-
-补充：面板行上的打招呼入口在 DOM 里只有 `script-kind-greeting`（话术候选），没找到每行的 greet-<jobId> 按钮；回执行因此仍未上屏。
+10.10-07 三处术语白话（补满） 读数（隔离 fixture 实例 · 本地仿站，非真实平台）
+环境：全新 userData（tmp/g8b/states-userdata）、独立 CDP 10350、platform-boss=fixture、本地模型走 127.0.0.1:10233。
+命令：node tmp/g8b/states-evidence.mjs → tmp/g8b/states-readings.json
+· JD：true（求职主链提示行「JD 就是岗位要求：岗位上写明的职责与门槛」）
+· 抓取：true（搜岗屏「搜索入库（抓取）：把站点的岗位读进本地库，之后才筛得到」）
+· 回执：true；用面板自己那一行的「打招呼」键真发一次后，页面上读到 "最近一次打招呼的回执（回执＝站点返回的那句送达结果）"

@@ -178,6 +178,26 @@ export function JobLabPanel() {
     void read();
   }, [read]);
 
+  /**
+   * 这一屏重新可见时重读快照（10.10 补格：改过平台配置后搜索键会一直停在
+   * `NO_SEARCH_PLATFORM` 禁用态——面板只在挂载时读一次 `jd.capture.status`，
+   * 配置热改重建服务后它不重读，人看到的就是一颗"点了没反应"的键）。
+   *
+   * 用回调 ref 挂观察器：视图是 `hidden` 切换、面板本体常驻，只有真正被切到这一屏时才相交。
+   */
+  const observerRef = useRef<IntersectionObserver | undefined>(undefined);
+  const attachVisibleWatcher = useCallback(
+    (node: HTMLDivElement | null) => {
+      observerRef.current?.disconnect();
+      if (!node || typeof IntersectionObserver === 'undefined') return;
+      observerRef.current = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void read();
+      });
+      observerRef.current.observe(node);
+    },
+    [read],
+  );
+
   useEffect(() => {
     if (!bridge) return;
     const offProgress = bridge.on('jd/progress', (payload) => {
@@ -530,7 +550,7 @@ export function JobLabPanel() {
     text: greetProgressText(event),
   }));
   return (
-    <div className="flex flex-col gap-4" data-testid="job-lab">
+    <div ref={attachVisibleWatcher} className="flex flex-col gap-4" data-testid="job-lab">
       {/* 搜岗这一屏的三问（spec 10.10-16）：下一步那颗键把焦点送到关键词框，出口去简历页。 */}
       <DeskPathGuide
         testid="jobs-path-guide"
