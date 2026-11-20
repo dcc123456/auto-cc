@@ -9,7 +9,7 @@
 import { Ban, Play, ShieldAlert, Stamp } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { JourneyJobMatchView, UnattendedAuthorizationView } from '@auto-cc/shared';
+import type { JourneyJobMatchView, UnattendedAuthorizationView, UnattendedRunView } from '@auto-cc/shared';
 import { Banner, DeskButton, DeskCheck, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 
@@ -45,6 +45,7 @@ export function OutboundAuthorizationCard({
   const [stopped, setStopped] = useState(false);
   const [dailyLimit, setDailyLimit] = useState('5');
   const [targets, setTargets] = useState<string[]>([]);
+  const [runView, setRunView] = useState<UnattendedRunView | null>(null);
 
   /**
    * 重读授权单与停用位：动作之后一律重建读数，不自己猜主进程当下的状态。
@@ -59,14 +60,29 @@ export function OutboundAuthorizationCard({
     if (stopReply?.ok) setStopped(stopReply.value.stopped);
   }, [bridge]);
 
+  const reloadRun = useCallback(async () => {
+    const reply = await bridge?.journey['unattended.status']();
+    if (reply?.ok) setRunView(reply.value);
+  }, [bridge]);
+
   useEffect(() => {
     void reload();
+    void reloadRun();
     // 风控暂停由主进程推过来：横幅与读数是同一份事实，事件到了就重读（不轮询）。
     const off = bridge?.on('outbound/authorization-paused', () => {
       void reload();
     });
     return () => off?.();
-  }, [bridge, reload]);
+  }, [bridge, reload, reloadRun]);
+
+  // 运行中每 800ms 读一次进度（执行器在主进程里跑，界面不推第二条状态）。
+  useEffect(() => {
+    if (runView?.status !== 'running') return;
+    const timer = window.setInterval(() => {
+      void reloadRun();
+    }, 800);
+    return () => window.clearInterval(timer);
+  }, [runView?.status, reloadRun]);
 
   const { busy, notice, noticeTone, run } = useBridgeAction(reload);
   const limit = Number(dailyLimit);
@@ -117,6 +133,27 @@ export function OutboundAuthorizationCard({
    * @returns 无返回值
    */
   const revoke = () => void run(t('journeyAuth.actionRevoke'), () => bridge?.outbound['authorization.revoke']());
+
+  /** 从母版版本串里取 doc id（执行器要的是文档 id，不是版本串）。 */
+  const masterDocId = masterVersion.startsWith('doc:') ? (masterVersion.split(':')[1] ?? '') : masterVersion;
+
+  /**
+   * 开始一轮无人值守；执行器自己按授权单顺序跑，界面只轮询进度。
+   * @returns 无返回值
+   */
+  const startRun = () =>
+    void run(t('journeyAuth.runStart'), () => bridge?.journey['unattended.start']({ docId: masterDocId }), {
+      apply: (value) => setRunView(value),
+    });
+
+  /**
+   * 请求执行器停止（真正的外发停止仍由停用位保证）。
+   * @returns 无返回值
+   */
+  const stopRun = () =>
+    void run(t('journeyAuth.runStop'), () => bridge?.journey['unattended.stop'](), {
+      apply: (value) => setRunView(value),
+    });
 
   const reasonNoTailor = tailoredVersion === '' || factCheckReceiptId === '' ? 'JOURNEY_AUTH_NO_TAILOR' : undefined;
   const grantReason =
@@ -237,6 +274,71 @@ export function OutboundAuthorizationCard({
           <span className="text-[11px] text-amber-ink">{t('journeyAuth.needsYou')}</span>
         </Banner>
       ) : null}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="journey-unattended">
+        <DeskButton
+          action="journey-unattended-start"
+          variant="jade"
+          compact
+          busy={!!busy}
+          disabled={!!busy || auth?.status !== 'active' || runView?.status === 'running'}
+          disabledReason={
+            auth?.status !== 'active'
+              ? 'JOURNEY_AUTH_NOT_ACTIVE'
+              : runView?.status === 'running'
+                ? 'JOURNEY_RUNNING'
+                : busy
+                  ? 'ACTION_BUSY'
+                  : undefined
+          }
+          disabledReasonLabel={
+            auth?.status !== 'active'
+              ? t('journeyAuth.reasonRunNeedsAuth')
+              : runView?.status === 'running'
+                ? t('journeyAuth.reasonRunning')
+                : busy
+                  ? t('journeyAuth.reasonBusy')
+                  : undefined
+          }
+          onClick={startRun}
+        >
+          {t('journeyAuth.runStart')}
+        </DeskButton>
+        <DeskButton
+          action="journey-unattended-stop"
+          variant="line"
+          compact
+          busy={!!busy}
+          disabled={!!busy || runView?.status !== 'running'}
+          disabledReason={runView?.status !== 'running' ? 'JOURNEY_NOT_RUNNING' : busy ? 'ACTION_BUSY' : undefined}
+          disabledReasonLabel={
+            runView?.status !== 'running'
+              ? t('journeyAuth.reasonNotRunning')
+              : busy
+                ? t('journeyAuth.reasonBusy')
+                : undefined
+          }
+          onClick={stopRun}
+        >
+          {t('journeyAuth.runStop')}
+        </DeskButton>
+        <span
+          className="text-[11px] text-slate-400"
+          data-testid="journey-unattended-status"
+          data-status={runView?.status ?? 'idle'}
+          data-completed={String(runView?.completed.length ?? 0)}
+          data-failed={String(runView?.failed.length ?? 0)}
+          data-pending={String(runView?.pending.length ?? 0)}
+          data-current={runView?.currentTarget ?? ''}
+        >
+          {t('journeyAuth.runLine', {
+            status: t(`journeyAuth.runStatus.${runView?.status ?? 'idle'}`),
+            completed: runView?.completed.length ?? 0,
+            failed: runView?.failed.length ?? 0,
+            pending: runView?.pending.length ?? 0,
+          })}
+        </span>
+      </div>
 
       {notice && (
         <Banner tone={noticeTone} size="compact" markers={{ testid: 'journey-auth-notice' }} className="mt-2">

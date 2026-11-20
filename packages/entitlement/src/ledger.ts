@@ -563,6 +563,24 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 同一平台同一岗位的招呼与投递是否都成功过（无人值守执行器的「这岗推完了」口径，spec 10.6 第 5 片）。
+   *
+   * 不看简历版本：执行器逐岗定制出的变体版本各不相同，完成口径按**岗位**算；版本维仍由四元组去重各自把关。
+   * @param platform 平台标识
+   * @param targetId 岗位/会话目标
+   * @returns 两种动作各有至少一条 succeeded 尝试时为 true
+   */
+  hasCompletedJob = (platform: string, targetId: string): boolean => {
+    const row = this.store.db
+      .prepare(
+        `SELECT COUNT(DISTINCT action) AS n FROM outbound_attempts
+         WHERE platform = ? AND target_id = ? AND status = 'succeeded' AND action IN ('greet', 'deliver')`,
+      )
+      .get(platform, targetId) as { n?: number | bigint };
+    return Number(row?.n ?? 0) >= 2;
+  };
+
+  /**
    * 同平台、同岗位、同动作在 `sinceMs` 之后是否有过「可能已经发生过」的尝试（spec 10.6-08 的同岗 24 小时上限）。
    *
    * 只排除 `failed`：那是页面只读对账确认「没发出去」的唯一状态；`in-flight` / `unknown` / `succeeded`

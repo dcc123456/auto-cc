@@ -145,6 +145,11 @@ const deliverRequestSchema = z
     workflowRunId: z.string().min(1).nullish(),
     /** 无人值守入口标记（spec 10.6 / plan §12.2）：为真时先过 `outbound.authorization`；手动路径不带。 */
     unattended: z.boolean().optional(),
+    /**
+     * 显式指定去重与授权用的简历版本串。无人值守执行器逐岗定制后传授权母版下的变体版本
+     * （`doc:<id>:<hash>`）；不传时仍按快照/文件 hash 现算（手动路径行为不变）。
+     */
+    resumeVersion: z.string().min(1).optional(),
     nowMs: z.number().int().positive().optional(),
   })
   .superRefine((request, ctx) => {
@@ -384,9 +389,9 @@ export class OutboundDeliverService extends Service {
     }
     const attachment = this.readAttachment(filePath);
 
-    const resumeVersion = parsed.data.snapshotId
-      ? `${parsed.data.snapshotId}:${attachment.sha256}`
-      : `sha256:${attachment.sha256}`;
+    const resumeVersion =
+      parsed.data.resumeVersion ??
+      (parsed.data.snapshotId ? `${parsed.data.snapshotId}:${attachment.sha256}` : `sha256:${attachment.sha256}`);
     // 对账要读取旧尝试，只有真正的新外发才在这里拒绝成功重放与未知结局。
     if (!forReconciliation) {
       this.gate.assertOutboundFresh(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion });
@@ -517,7 +522,9 @@ export class OutboundDeliverService extends Service {
     // 不在这里问一句，被暂停的那一步仍会把简历递出去。
     assertNotYielded(signal, 'outbound.deliver', '投递简历');
 
-    if (this.config.autonomy !== 'auto') {
+    // 无人值守：一次性授权单本身就是「人已经表过态」，不再长逐笔确认卡片（plan §12.2：范围内视为已确认）。
+    // 手动路径仍按档位走审批，行为不变。
+    if (this.config.autonomy !== 'auto' && !staged.unattended) {
       await this.awaitApproval(staged, waitedMs, signal);
     }
 

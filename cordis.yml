@@ -709,6 +709,11 @@ plugins:
   - id: journey
     dependsOn: [agent, resume-doc, kb-profile, kb-gap, kb-generate, jd-capture, jd-store, outbound-script, llm]
 
+  # 无人值守执行器（第 5 片 / spec 10.6）：只按授权单顺序调 journey.tailor 与既有外发入口，
+  # 不持有计划库、不建第二张运行表。摘掉它，界面上的「开始无人值守」以服务缺失失败，手动路径不受影响。
+  - id: journey-unattended
+    dependsOn: [journey, outbound-authorization, outbound-greet, outbound-deliver, outbound-throttle, usage]
+
   - id: schedule
     dependsOn: [store, workflow]
     config:

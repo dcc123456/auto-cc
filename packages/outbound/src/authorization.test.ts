@@ -143,6 +143,8 @@ async function boot(
     { id: MASTER, parentDocId: null, jdId: null },
     { id: VARIANT, parentDocId: MASTER, jdId: 'jd-1' },
     { id: VARIANT_2, parentDocId: MASTER, jdId: 'jd-1' },
+    { id: 'resume-job1', parentDocId: MASTER, jdId: 'job-1' },
+    { id: 'resume-job2', parentDocId: MASTER, jdId: 'job-2' },
   ]);
   return {
     auth: app['outbound.authorization'],
@@ -362,6 +364,30 @@ describe('10.6-06 越权外发为 0（五种情形逐一拒绝）', () => {
     const page = pageAction();
     await expect(
       auth.dispatch('greet', outboundContext({ resumeVersion: 'resume-other' }), page.task),
+    ).rejects.toMatchObject({ code: 'OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED' });
+    expect(page.calls()).toBe(0);
+    expect(countRows(db, 'usage_ledger')).toBe(0);
+  });
+
+  it('③b 授权母版下、JD 归因为本岗的定制变体放行（批量执行器逐岗定制）', async () => {
+    const { auth, db } = await boot();
+    auth.grant(grantInput());
+    const page = pageAction();
+    await auth.dispatch('greet', outboundContext({ resumeVersion: 'doc:resume-job1:abc123456789' }), page.task);
+    expect(page.calls()).toBe(1);
+    expect(countRows(db, 'usage_ledger')).toBe(1);
+  });
+
+  it('③c 变体 JD 归因不是本岗：仍按越权拒绝', async () => {
+    const { auth, db } = await boot();
+    auth.grant(grantInput());
+    const page = pageAction();
+    await expect(
+      auth.dispatch(
+        'greet',
+        outboundContext({ targetId: 'job-2', resumeVersion: 'doc:resume-job1:abc123456789' }),
+        page.task,
+      ),
     ).rejects.toMatchObject({ code: 'OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED' });
     expect(page.calls()).toBe(0);
     expect(countRows(db, 'usage_ledger')).toBe(0);

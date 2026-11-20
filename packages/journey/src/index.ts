@@ -38,3 +38,5 @@ export {
   type InterviewRequirement,
   type PromptMessage,
 } from './prompts.js';
+// 无人值守执行器（第 5 片）：只按授权单顺序调既有服务，不建第二套 runner/存储/计数。
+export * from './unattended.js';

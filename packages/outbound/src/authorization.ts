@@ -412,14 +412,28 @@ export class OutboundAuthorizationService extends Service {
     if (!targets.includes(targetId)) {
       this.deny(action, context, nowMs, 'OUTBOUND_TARGET_NOT_AUTHORIZED', `岗位 ${targetId} 不在本次授权集合里`);
     }
+    // 版本维度：授权单上那一版直接放行；批量执行器逐岗定制出的**同一母版变体**也放行，
+    // 但必须满足两个可核条件——血缘指回授权母版、JD 归因正好是本笔的岗位（否则就是拿别的岗位的稿子套这单）。
+    // 它来自 generate.accept 的产物，事实校验已在生成/接受那一步把门（10.3-02），这里不重复跑模型。
     if (row.resume_version !== resumeVersion) {
-      this.deny(
-        action,
-        context,
-        nowMs,
-        'OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED',
-        `简历版本 ${resumeVersion} 未在本次授权单上（授权的是 ${row.resume_version}）`,
-      );
+      const docs = maybeService<ResumeDocSource>(this.ctx, 'resume.doc');
+      const masterDocId = docIdOf(row.master_resume_version);
+      const variantDocId = docIdOf(resumeVersion);
+      const variant =
+        docs === undefined || masterDocId === null || variantDocId === null
+          ? undefined
+          : docs.list().find((doc) => doc.id === variantDocId);
+      const derivedForTarget =
+        variant !== undefined && variant.parentDocId === masterDocId && variant.jdId === targetId;
+      if (!derivedForTarget) {
+        this.deny(
+          action,
+          context,
+          nowMs,
+          'OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED',
+          `简历版本 ${resumeVersion} 未在本次授权单上，也不是授权母版为岗位 ${targetId} 定制的变体`,
+        );
+      }
     }
     // 岗位名额按账本现算（不是本表自己记数）：同一岗位的打招呼与投递共享一个名额。
     const advanced = new Set(this.ledger.advancedTargetsSince(platform, startOfDay(nowMs)));

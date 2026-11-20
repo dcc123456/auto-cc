@@ -2097,7 +2097,22 @@
       "reasonLimit": "Daily limit must be an integer from 1 to 10",
       "reasonOverLimit": "Selected jobs exceed the daily limit {{limit}}",
       "reasonBusy": "The previous action is still running",
-      "reasonNoAuth": "There is no authorization to revoke"
+      "reasonNoAuth": "There is no authorization to revoke",
+      "runStart": "Start unattended run",
+      "runStop": "Stop this run",
+      "reasonRunNeedsAuth": "The authorization must be active first",
+      "reasonRunning": "A run is already going",
+      "reasonNotRunning": "No run is going",
+      "runLine": "Executor: {{status}} · {{completed}} done · {{failed}} failed · {{pending}} pending",
+      "runStatus": {
+        "idle": "idle",
+        "running": "running",
+        "paused": "paused",
+        "stopped": "stopped",
+        "blocked": "blocked by quota",
+        "failed": "failed",
+        "done": "done"
+      }
     }
   }
 }

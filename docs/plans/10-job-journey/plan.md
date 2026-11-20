@@ -508,3 +508,24 @@ interface JourneyContext {
   执行器，造不出「在飞一笔」，该条保持 `[!]`，等执行器落地那片补。
 - **证据**：`docs/acceptance/10-job-journey/10.3-01-*`、`10.3-02-*`、`10.3-03-interview-*`、`10.6-01-*`、`10.6-02-*`、
   `10.6-04-*`、`10.6-05-stop-readings.txt`；同批截图 `md5 -q | sort | uniq -c` 已去重。
+
+**第 5 片落地与受阻记录（2026-11-20，无人值守执行器）**
+
+- **落点**：`packages/journey/src/unattended.ts` 的 `journey.unattended`（清单 id `journey-unattended`）。它不是第二套
+  runner：没有计划库、没有运行表、没有第二套计数——一次运行的范围/窗口/状态读 `outbound.authorization.current()`，
+  「推到哪了」由账本 `attemptFor`/`hasCompletedJob` 现算，成败只看 greet/deliver 自己的 `ledgerId`。进程退出后内存态即失，
+  断点靠授权单转 `restart-required` + 账本成功位恢复。
+- **顺序**：每岗 `journey.tailor`（生成/接受/事实校验）→ `outbound.greet.perform`（带 `unattended`）→
+  `resume.export.toPdf` → `outbound.deliver.perform`（带 `unattended`）。每岗开始与每笔发送前都过一次守卫：
+  取消标记 / 停用位 / 授权单 active 与平台覆盖。单步有上限 `stepTimeoutMs`（默认 120s）防页面动作把整轮无声挂住；
+  单岗失败记 `failed` 后继续下一岗，授权/停用/风控/额度/事实违规则整轮停。
+- **版本口径的一处必要放宽（待 PMO 确认）**：授权单绑定的是一版定制简历，而批量执行逐岗定制会产生新变体。本片把
+  版本判定从「必须等于授权单那一版」放宽为「**同一授权母版下、JD 归因正好是本岗的变体**」（血缘与 JD 归因都现查
+  `resume.doc.list()`，事实校验仍由生成/接受那一步把门）。否则「逐岗定制」与「单版本授权」互斥。若 PMO 要维持单版本，
+  执行器应改为复用授权版、不再逐岗定制——这是产品口径，先在这记一笔。
+- **U 证据**：`packages/journey/src/unattended.test.ts` 6 例（批量顺序、额度用尽、停用、风控暂停、断点续跑、起跑前置），
+  四门禁通过。
+- **仿站活体受阻（如实记 `[!]`）**：隔离实例在无头环境里窗口 `hidden`，页面动作（打招呼的会话切换、投递的上传/点击）
+  不落页——本轮实测执行器停在 `1001` 的首笔页面动作上（日志停在 tailor/greet 开始，90s 无返回；既有 §9 的 hidden 实测条
+  同源）。因此「≥2 岗批量 + 投递双落账」的活体读数没拿到；10.6-03/05/06/07/08 的 V 仍按缺口记 `[!]`，待用户在场或前台
+  窗口下补。执行器的逻辑面已由 U 例覆盖，且它与页面动作的接线沿用既有 greet/deliver 通道，没有另造一条。

@@ -270,6 +270,10 @@ export const RENDERER_ALLOWLIST = [
   'outbound.authorization.grant',
   'outbound.authorization.reconfirm',
   'outbound.authorization.revoke',
+  // 第 5 片：无人值守执行器。三只口都只由人按（开跑 / 读进度 / 停止）；真正的外发仍走 greet/deliver。
+  'journey.unattended.start',
+  'journey.unattended.status',
+  'journey.unattended.stop',
   'outbound.sample.send',
   // 2.5-e 的打招呼编排（闸门→幂等→黑名单→频控→发送→落账都在主进程一侧，界面拿不到绕过路径）。
   'outbound.greet.perform',
@@ -750,6 +754,8 @@ export type JourneyTailorView = {
   jdVersion: string;
   resumeVersion: string;
   tailoredResumeVersion: string | null;
+  /** 变体文档 id（投递导 PDF 要用它；与「版本串」不是同一个东西）。 */
+  tailoredDocId: string | null;
   /** 接受那一刻的事实校验回执 id（无人值守授权单要用它核「这一版过过校验」）。 */
   factCheckReceiptId: string | null;
   appliedRewrites: number;
@@ -849,6 +855,30 @@ export type UnattendedGrantInput = {
   masterResumeVersion: string;
   resumeVersion: string;
   factCheckReceiptId: string;
+};
+
+/** 无人值守执行器的一次运行状态（第 5 片）：只有 `running` 会自动推进。 */
+export type UnattendedRunState = 'idle' | 'running' | 'paused' | 'stopped' | 'blocked' | 'failed' | 'done';
+
+/** 执行器的只读视图；界面轮询它，不自己推状态（§2.7 不存第二份事实）。 */
+export type UnattendedRunView = {
+  status: UnattendedRunState;
+  runId: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  currentTarget: string | null;
+  completed: { jobId: string; greetLedgerId: number; deliverLedgerId: number }[];
+  failed: { jobId: string; code: string; message: string }[];
+  /** 授权单里还没被推进的岗位（按账本成功位现算）。 */
+  pending: string[];
+  lastError: string | null;
+};
+
+/** 开始一次无人值守的入参：母版必给，平台/运行 id 可省略。 */
+export type UnattendedStartInput = {
+  docId: string;
+  platform?: string;
+  runId?: string;
 };
 
 /** 只读对账的结局；只有 `not-sent` 允许之后重新发起，未知与冲突都必须继续停手。 */
@@ -2807,6 +2837,10 @@ export interface BridgeSignatures {
   'outbound.authorization.grant': { args: [input: UnattendedGrantInput]; returns: UnattendedAuthorizationView };
   'outbound.authorization.reconfirm': { args: []; returns: UnattendedAuthorizationView };
   'outbound.authorization.revoke': { args: []; returns: UnattendedAuthorizationView | null };
+  /** 无人值守执行器（第 5 片）：在有效授权单内按序推进岗位；停止不绕开闸门。 */
+  'journey.unattended.start': { args: [input: UnattendedStartInput]; returns: UnattendedRunView };
+  'journey.unattended.status': { args: []; returns: UnattendedRunView };
+  'journey.unattended.stop': { args: []; returns: UnattendedRunView };
   /**
    * 漏斗五级 + 额度三量的一次只读聚合（spec 5.8-01 / 03 / 04 / 07 / 08，plan §7.6.2 决策十六）。
    *

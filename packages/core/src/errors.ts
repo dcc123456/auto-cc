@@ -45,6 +45,8 @@ export type AppErrorCode =
   | 'AUTHORIZATION_EVIDENCE_MISSING'
   | 'AUTHORIZATION_FACT_CHECK_FAILED'
   | 'AUTHORIZATION_VERSION_NOT_BOUND'
+  // 无人值守执行器的单步上限（第 5 片）：页面动作卡死时按超时收尾，不重试、不自动恢复。
+  | 'UNATTENDED_STEP_TIMEOUT'
   // 首次启用自动化的风险确认（spec 2.7-06）：这个平台还没有一份签字记录。
   // 与 `QUOTA_EXCEEDED` 分开，是因为额度到量是「今天别再发了」，而这一条是「你还没承认风险」——
   // 前者等一天自己就好，后者必须由用户点一次确认，界面给的按钮完全不同。

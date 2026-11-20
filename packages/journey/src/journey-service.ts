@@ -320,6 +320,7 @@ export class JourneyService extends Service {
       jdVersion: jdVersionOf(row.description),
       resumeVersion: base.resumeVersion,
       tailoredResumeVersion: variant.resumeVersion,
+      tailoredDocId: accepted.docId,
       factCheckReceiptId: view.receipt.id,
       appliedRewrites: accepted.appliedRewrites,
       checks: { ok: true, violationCount: 0 },

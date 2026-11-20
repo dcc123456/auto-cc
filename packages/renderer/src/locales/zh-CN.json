@@ -2097,7 +2097,22 @@
       "reasonLimit": "日限额必须是 1–10 的整数",
       "reasonOverLimit": "勾选岗位数不能超过日限额 {{limit}}",
       "reasonBusy": "上一个动作还没结束",
-      "reasonNoAuth": "当前没有授权单可收回"
+      "reasonNoAuth": "当前没有授权单可收回",
+      "runStart": "开始无人值守",
+      "runStop": "停止本轮",
+      "reasonRunNeedsAuth": "先让授权单处于进行中，才能开跑",
+      "reasonRunning": "已有一轮在跑",
+      "reasonNotRunning": "当前没有在跑的一轮",
+      "runLine": "执行器：{{status}} · 完成 {{completed}} 岗 · 失败 {{failed}} 岗 · 待办 {{pending}} 岗",
+      "runStatus": {
+        "idle": "空闲",
+        "running": "推进中",
+        "paused": "已暂停",
+        "stopped": "已停止",
+        "blocked": "额度阻断",
+        "failed": "失败",
+        "done": "已完成"
+      }
     }
   }
 }
