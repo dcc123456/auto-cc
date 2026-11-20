@@ -167,11 +167,11 @@ async function boot(options: { tier: AutonomyLevel; exempt: boolean; seedGreetUs
   await mount(ctx.plugin(EntitlementGateService, ONE_GREET_PER_DAY));
   await mount(ctx.plugin(LlmChatService, llmSchema.parse({})));
   await mount(ctx.plugin(OutboundScriptService, outboundScriptSchema.parse({})));
-  // 频控区间收成 0：本片判的是三道闸门，等间隔那件事在 2.5-05 自己判过。
+  // 本片判的是三道闸门，等间隔那件事在 2.5-05 自己判过；10.6-03 起区间不得为 0，压到 1ms。
   await mount(
     ctx.plugin(
       OutboundThrottleService,
-      throttleSchema.parse({ minGapMs: 0, maxGapMs: 0, scrollMinGapMs: 0, scrollMaxGapMs: 0 }),
+      throttleSchema.parse({ minGapMs: 1, maxGapMs: 1, scrollMinGapMs: 1, scrollMaxGapMs: 1 }),
     ),
   );
   await mount(ctx.plugin(FakePlatformRegistryService, {}));

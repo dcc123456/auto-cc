@@ -544,6 +544,52 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 某平台在 `sinceMs` 之后已经推进过哪些岗位（spec 10.6-01/02 的「日限额按岗位计」唯一读数口）。
+   *
+   * 读 43 号 `outbound_attempts` 的 `succeeded` 行而不是 `usage_ledger`：平台维只在那张表上
+   * （账本行不带平台），而「推进」= 该岗位至少一笔打招呼或投递成功——同一岗位两种动作只占一个名额。
+   * @param platform 平台标识
+   * @param sinceMs 起算时刻（毫秒，通常取本地日界）
+   * @returns 去重后的岗位 id 列表；顺序不保证，调用方只用来判集合与数量
+   */
+  advancedTargetsSince = (platform: string, sinceMs: number): string[] => {
+    const rows = this.store.db
+      .prepare(
+        `SELECT DISTINCT target_id FROM outbound_attempts
+         WHERE platform = ? AND status = 'succeeded' AND updated_at >= ?`,
+      )
+      .all(platform, sinceMs) as unknown as { target_id: string }[];
+    return rows.map((row) => row.target_id);
+  };
+
+  /**
+   * 同平台、同岗位、同动作在 `sinceMs` 之后是否有过「可能已经发生过」的尝试（spec 10.6-08 的同岗 24 小时上限）。
+   *
+   * 只排除 `failed`：那是页面只读对账确认「没发出去」的唯一状态；`in-flight` / `unknown` / `succeeded`
+   * 都必须按「可能已发生」计，否则一次崩溃就能把 24 小时上限绕过去。
+   * @param platform 平台标识
+   * @param targetId 岗位/会话目标
+   * @param action greet/deliver
+   * @param sinceMs 窗口起点（毫秒）
+   * @returns 窗口内有过就 true
+   */
+  hasAttemptSince = (
+    platform: string,
+    targetId: string,
+    action: OutboundAttemptKey['action'],
+    sinceMs: number,
+  ): boolean => {
+    const row = this.store.db
+      .prepare(
+        `SELECT 1 AS hit FROM outbound_attempts
+         WHERE platform = ? AND target_id = ? AND action = ? AND status <> 'failed' AND updated_at >= ?
+         LIMIT 1`,
+      )
+      .get(platform, targetId, action, sinceMs) as { hit?: number } | undefined;
+    return row?.hit === 1;
+  };
+
+  /**
    * 账本总行数（spec 2.3-11 的对照读数：抓取在闸门任务内部前后各读一次，两值必须相等，
    * 因为本轮那条 `search` 是在任务返回之后才落的账，见 2.7-03 对 2.3-11 的更正）。
    *

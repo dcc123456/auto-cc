@@ -170,8 +170,9 @@ async function boot(options: BootOptions = {}) {
   // 投递记录（spec 3.7-02）先挂：`outbound.deliver` 把它列为硬依赖，摘掉它投递连同进不了装配。
   await ctx.plugin(DeliveryRecordService, {});
   await ctx.plugin(EntitlementGateService, options.gate ?? { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS });
-  const gap = options.gapMs ?? 0;
-  const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 0, scrollMaxGapMs: 0 };
+  // 10.6-03 起四个值都不得为 0：测试要「立刻发」就把区间压到 1ms，而不是关掉节奏。
+  const gap = Math.max(1, options.gapMs ?? 0);
+  const throttleConfig: OutboundThrottleConfig = { minGapMs: gap, maxGapMs: gap, scrollMinGapMs: 1, scrollMaxGapMs: 1 };
   await ctx.plugin(OutboundThrottleService, throttleConfig);
   await ctx.plugin(FakePlatformRegistryService, {});
   await ctx.plugin(FakeSessionsService, {});

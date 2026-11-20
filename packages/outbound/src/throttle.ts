@@ -24,14 +24,17 @@ import { gapRemainingMs } from './deliver-timing.js';
  * 合成一组就会要么把抓取拖成分钟级、要么让打招呼像机器。
  * `min <= max` 是配置边界（`cordis.yml` 用户可改），交给 schema 在挂载前拒掉，
  * 而不是在取数时悄悄把区间翻转——那样界面会显示一个从没生效过的区间。
+ *
+ * 四个值一律 `>= 1`（spec 10.6-03 / plan §12.2.3）：把区间配成 0 等于关掉节奏，机器节拍一眼可辨；
+ * 「闸门可以关」这句话只存在于手动模式的审批档位里，不存在于节奏这一层。
  */
 export const throttleSchema = z
   .strictObject({
-    minGapMs: z.number().int().min(0).default(45000),
-    maxGapMs: z.number().int().min(0).default(150000),
+    minGapMs: z.number().int().min(1).default(45000),
+    maxGapMs: z.number().int().min(1).default(150000),
     /** 抓取滚一轮之后的停顿下界（毫秒）；原来是 `jd.capture` 自己的定值 300，2.7-04 归位到这里。 */
-    scrollMinGapMs: z.number().int().min(0).default(300),
-    scrollMaxGapMs: z.number().int().min(0).default(900),
+    scrollMinGapMs: z.number().int().min(1).default(300),
+    scrollMaxGapMs: z.number().int().min(1).default(900),
   })
   .refine((gap) => gap.minGapMs <= gap.maxGapMs, {
     message: 'minGapMs 不能大于 maxGapMs',

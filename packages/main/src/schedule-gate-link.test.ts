@@ -143,10 +143,10 @@ async function boot(options: { gate: GateConfig; gapMs: number }) {
     ctx.plugin(
       OutboundThrottleService,
       throttleSchema.parse({
-        minGapMs: options.gapMs,
-        maxGapMs: options.gapMs,
-        scrollMinGapMs: 0,
-        scrollMaxGapMs: 0,
+        minGapMs: Math.max(1, options.gapMs),
+        maxGapMs: Math.max(1, options.gapMs),
+        scrollMinGapMs: 1,
+        scrollMaxGapMs: 1,
       }),
     ),
   );

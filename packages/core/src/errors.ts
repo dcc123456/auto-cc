@@ -29,6 +29,22 @@ export type AppErrorCode =
   // 择机投递（spec 5.7-03）：无人值守那一路被时机规则判成「此刻不该递」。它与上面三个码都不合并——
   // 那三个是「试了没成」，这一条是「压根没试」：不落账、不进被拒流水、下一次计划点照跑。
   | 'OUTBOUND_DELIVER_DEFERRED'
+  // 无人值守投递授权（spec 10.6-01～10.6-08 / plan §12.2）。这些码不合并，因为每一种要人做的事不同：
+  // 没有有效授权单=去开一张；来自上一次进程=人再确认一次；风控暂停=人来处理并确认；跨日=重新授权或确认；
+  // 岗位/版本越权=改授权范围；额度用尽=等明天；同岗 24 小时=换岗位，不是重试。
+  | 'UNATTENDED_NOT_AUTHORIZED'
+  | 'AUTHORIZATION_RECONFIRM_REQUIRED'
+  | 'OUTBOUND_RISK_PAUSED'
+  | 'AUTHORIZATION_WINDOW_CLOSED'
+  | 'OUTBOUND_TARGET_NOT_AUTHORIZED'
+  | 'OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED'
+  | 'AUTHORIZATION_QUOTA_EXHAUSTED'
+  | 'OUTBOUND_SAME_JOB_WINDOW'
+  // 授权单的证据面（spec 10.6-01）：事实校验回执查无、没过校验，或母版/变体血缘对不上。
+  // 与 `INVALID_ARGUMENT` 分开，是因为处置是「先重新生成或重新定制」，改入参改不出来。
+  | 'AUTHORIZATION_EVIDENCE_MISSING'
+  | 'AUTHORIZATION_FACT_CHECK_FAILED'
+  | 'AUTHORIZATION_VERSION_NOT_BOUND'
   // 首次启用自动化的风险确认（spec 2.7-06）：这个平台还没有一份签字记录。
   // 与 `QUOTA_EXCEEDED` 分开，是因为额度到量是「今天别再发了」，而这一条是「你还没承认风险」——
   // 前者等一天自己就好，后者必须由用户点一次确认，界面给的按钮完全不同。

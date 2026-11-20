@@ -92,6 +92,12 @@ plugins:
       scrollMinGapMs: 300
       scrollMaxGapMs: 900
 
+  # 无人值守授权闸门（spec 10.6 / plan §12.2）：一次性授权单把「逐笔点头」换成「范围授权」。
+  # 它只判「这一笔合不合法」，额度/账本/去重/停用仍归 `entitlement`——摘掉这一行，无人值守入口会
+  # 以「没有授权服务」失败，而手动模式不受影响（手动外发本来就不走这张单）。
+  - id: outbound-authorization
+    dependsOn: [usage, entitlement]
+
   # IPC 网关（spec 1.4-01）：全应用唯一的跨进程通道，所以排在 shell 之前——
   # 窗口由 shell 创建，界面能发起调用时处理器必须已经在位。
   - id: ipc

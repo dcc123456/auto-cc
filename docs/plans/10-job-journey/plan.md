@@ -439,3 +439,35 @@ interface JourneyContext {
 3. **重启后不自动续跑**：安全优先的取舍，可能牺牲「关掉电脑第二天继续」的期待。→ 首轮用户测试问一句「你上次没跑完会怎么办」，按回答决定是否做「第二天一次性确认」。
 4. **同岗 24 小时上限**：防连发，可能挡住「对方回了、想当天补发简历」的合理场景。→ 用回复事件作为例外条件做一次用户测试，未验证前不放宽。
 5. **约面登记负担**：登记是约面唯一来源，用户可能不愿手填。→ 首轮观察登记率与放弃原因；若负担过高，再评估从会话消息一键带入（仍须用户确认，不自动判定）。
+
+### 12.9 第 3 片落地记录（2026-11-20，无人值守授权闸门 · U 半边）
+
+**服务落点**：`packages/outbound/src/authorization.ts` 的 `outbound.authorization`（清单 id `outbound-authorization`，
+`dependsOn: [usage, entitlement]`）。它只做一件事——判「这一笔外发现在合不合法」；放行仍走
+`entitlement.gate.performOutbound`，所以四元组去重、停用、未知结局、原子落账没有第二份实现。
+
+- **表**：`outbound_authorizations`（迁移 **44**；44 的两条声明形状动手前都核过零命中）。一行 = 一张授权单：
+  平台、`day_key`、日限额、母版/定制版本、事实校验回执、岗位集合、状态与暂停原因。同一时刻最多一张
+  处于 `active/paused/restart-required`，开新单会把上一张标 `revoked`。
+- **三要素的证据面**：`grant()` 用 `resume.generate.receiptOf()` 核「回执存在且不是 `rejected`、违规 0」，
+  再用 `resume.doc.list()` 核「定制版是母版的变体、JD 归因与回执一致」；两只服务任一只没挂载就拒绝开单
+  （「核不了」不等于「没问题」）。
+- **窗口与重启**：`day_key` 与当前本地日不等即 `expired`；`[Service.init]` 把上一次进程留下的
+  `active/paused` 行改成 `restart-required`——没有任何代码路径自动改回 `active`，只有 `reconfirm()`（人的入口）会。
+  未完成岗位因此转待办，续跑按账本现算名额，不重复扣。
+- **风控**：订阅既有的 `browser/risk-signal`，命中即整轮 `paused` 并记原因原文；不重试、不识别、不自动恢复。
+- **一键停用**：`authorize()` 在页面动作之前读 `usage.ledger.outboundStatus()`，停用后同一毫秒起就拒；
+  历史与成功账一字不动，恢复不自动补账。
+- **越权五种情形**：岗位不在集合 / 超授权日限额 / 版本不匹配 / 跨日窗口 / 无有效单（含重启未确认）——
+  五条都走同一个 `authorize()`，被拒先写 `usage_denials` 再抛结构化错误。
+- **去重两层**：精确四元组的重放仍由闸门报 `OUTBOUND_ALREADY_SENT` / `OUTBOUND_RECONCILIATION_REQUIRED`
+  （不在这里编第二种说法）；授权闸门只在「同岗同动作、换了版本」时按 `OUTBOUND_SAME_JOB_WINDOW` 补刀。
+- **节奏**：`outbound.throttle` 的四个区间一律 `>= 1`（10.6-03：不可为 0、不可 min>max），挂载即拒。
+- **U 证据**：`packages/outbound/src/authorization.test.ts` 20 例（真 SQLite + 真闸门 + 真账本）；
+  每条负对照都断言页面动作 0 次、`usage_ledger` / `outbound_attempts` 零增行。
+- **状态位仍是 `[ ]`**：10.6 的 V 半边（常驻横幅 + 托盘提示、活体三要素读数、在飞竞态）还没取证，
+  按 §7.4 ③ 不许自己标 `[x]`。
+- **一处待裁定（本轮按保守口径落地）**：同岗 24 小时上限目前只落在**无人值守**路径上——手动模式仍按
+  四元组 + 审批执行。理由：这条判据写在 10.6（无人值守）一节，而手动模式是「人正在现场表态」，
+  被授权模型拦下会与 §5.5 的「人的决定不被规则改写」冲突。若产品要它对全局生效，改一处判断位置即可，
+  但会改变手动重发的已有行为，先等用户表态再改。

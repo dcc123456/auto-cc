@@ -130,6 +130,8 @@ declare module '@auto-cc/core' {
 export * from './script.js';
 // 频控间隔是第三个：它是外发的性质不是平台的性质（plan §12.3），所以不放适配器里。
 export * from './throttle.js';
+// 无人值守授权单（spec 10.6 / plan §12.2）：把「逐笔点头」换成「范围授权」的那张单，判定之外全部复用既有闸门。
+export * from './authorization.js';
 // 打招呼编排是第四个：把上面三个加上闸门串成唯一的外发入口（plan §12.3 的「发送编排」那一行）。
 export * from './greet.js';
 // 投递编排是第五个：与打招呼共用闸门/账本/频控，多出「等人确认」这一段（plan §13.3 第 1 条）。

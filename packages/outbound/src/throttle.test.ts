@@ -163,9 +163,14 @@ describe('outbound.throttle 的频控预检（spec 5.7-08：调度侧起跑前�
     expect(throttle.checkGap('greet', { nowMs: LAST_AT }).allowed).toBe(true);
   });
 
-  it('区间收成 0 时恒放行（测试装配与"不要频控"的配置取值都落到这一支）', async () => {
-    const { throttle, ledger } = await readyWithLedger({ minGapMs: 0, maxGapMs: 0 });
-    ledger.record({ action: 'greet', targetId: 'job-1', nowMs: LAST_AT });
-    expect(throttle.checkGap('greet', { nowMs: LAST_AT })).toEqual({ allowed: true, remainingMs: 0, reason: null });
+  it('区间配成 0 在挂载当场被拒（10.6-03：节奏不可关闭、不可为 0）', () => {
+    expect(() =>
+      throttleSchema.parse({ minGapMs: 0, maxGapMs: 150000, scrollMinGapMs: 300, scrollMaxGapMs: 900 }),
+    ).toThrow();
+    expect(() =>
+      throttleSchema.parse({ minGapMs: 45000, maxGapMs: 150000, scrollMinGapMs: 0, scrollMaxGapMs: 900 }),
+    ).toThrow();
+    // 倒挂的区间同样挂载即拒，而不是在取数时悄悄翻转。
+    expect(() => throttleSchema.parse({ ...BASE, minGapMs: 60_000, maxGapMs: 45_000 })).toThrow();
   });
 });
