@@ -18,3 +18,7 @@ tmp/
 # 尚未决定是否作为应用素材入库（AGENTS.md §7.5 只允许 docs/acceptance 与 resources 两类图片），
 # 先忽略以免脏区卡住 §1.6 的 status:check；要入库时删掉这条即可。
 .chromatic/
+# 渲染层目录下反复出现的 pdfjs/字体资源副本（约 10MB、207 个文件同一秒写入、全仓源码零引用）。
+# 它由仓库源码之外的构建/取证命令写进来，生成方应把 outDir 指向 tmp/；eslint 与 prettier 早已忽略，
+# 这里补齐 git 侧，否则共享工作树里它会持续占住 git status、卡住 AGENTS.md §1.6 的收尾检查。
+packages/renderer/dummy-non-existing-folder/
