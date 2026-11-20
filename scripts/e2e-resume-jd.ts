@@ -93,6 +93,15 @@ const GENERATE_TIMEOUT_MS = Number(flag('generate-timeout-ms', '900000'));
  * 覆盖只写内存、重启即失（§9 的 5.3-b），用于搜索"该把发货值定在哪一档"。
  */
 const MODEL_TIMEOUT_OVERRIDE = overrideFlag('model-timeout-ms');
+/**
+ * 把模型通道指到本地 fixture（`--llm-fixture`）。
+ *
+ * 用途是**在没有可用外部模型订阅时仍能验收生成链**：fixture 的 `/v1/chat/completions` 会把待改写清单
+ * 原样回填并追加一个过得了事实校验的哨兵（`scripts/fixture-server.ts` 的 rewrite 档），
+ * 与仓库 4.5 的 V 类取证同一口径。不给这个开关就仍按 userData 里的真实 provider 跑。
+ */
+const llmFixture = process.argv.includes('--llm-fixture');
+const fixtureLlmEnv = llmFixture ? { AUTO_CC_LLM_API_KEY: 'fixture-e2e-key' } : {};
 const MODEL_MAX_TOKENS_OVERRIDE = overrideFlag('model-max-tokens');
 const MAX_REWRITE_CHARS_OVERRIDE = overrideFlag('max-rewrite-chars');
 const CAPTURE_TIMEOUT_MS = Number(flag('capture-timeout-ms', '180000'));
@@ -547,7 +556,7 @@ async function main(): Promise<void> {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
       // 刻意不给 ELECTRON_RENDERER_URL：`packages/shell` 里那条判据是"给了就 loadURL，否则 loadFile"。
-      env: { ...process.env, ELECTRON_RENDERER_URL: undefined },
+      env: { ...process.env, ELECTRON_RENDERER_URL: undefined, ...fixtureLlmEnv },
     });
     say(`· 会话来源：自己的 Electron 实例 + ${built ? '刚构建的' : '已有的'}渲染层产物（dist，无 HMR）`);
   } else {
@@ -557,7 +566,7 @@ async function main(): Promise<void> {
       ? spawn(resolveElectron(), electronArgs, {
           cwd: repoRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl },
+          env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl, ...fixtureLlmEnv },
         })
       : spawn('npx', ['tsx', 'scripts/dev.ts'], {
           cwd: repoRoot,
@@ -566,6 +575,7 @@ async function main(): Promise<void> {
             ...process.env,
             AUTO_CC_CDP_PORT: String(cdpPort),
             AUTO_CC_USER_DATA_DIR: userdataDest,
+            ...fixtureLlmEnv,
           },
         });
     say(
@@ -700,6 +710,23 @@ async function main(): Promise<void> {
       `maxRewriteChars=${String(generateConfig.values.maxRewriteChars)} · ` +
       `modelTemperature=${String(generateConfig.values.modelTemperature)}`,
   );
+  if (llmFixture) {
+    // `saveConfig` 是替换而非合并：整份生效配置抄过去，只改端点与绑定。
+    await callBridge(bridge, 'plugins.saveConfig', [
+      'llm',
+      {
+        ...llmConfig.values,
+        providerId: null,
+        baseUrl: `http://127.0.0.1:${String(fixturePort)}/v1`,
+        model: 'fixture-generate-model',
+        keyEnv: 'AUTO_CC_LLM_API_KEY',
+        timeoutMs: 60_000,
+      },
+    ]);
+    say(
+      `· 运行时覆盖：llm → http://127.0.0.1:${String(fixturePort)}/v1 · fixture-generate-model（不落盘，并重建注入 llm 的下游）`,
+    );
+  }
   if (MODEL_TIMEOUT_OVERRIDE !== undefined) {
     // 交的是**整份**生效配置加一个键：`saveConfig` 是替换而非合并，漏抄的键会掉回 Schema 缺省。
     await callBridge(bridge, 'plugins.saveConfig', ['llm', { ...llmConfig.values, timeoutMs: MODEL_TIMEOUT_OVERRIDE }]);
@@ -779,12 +806,14 @@ async function main(): Promise<void> {
     `· 接受读数：写入改写 ${String(accepted.appliedRewrites)} 处 重排=${String(accepted.reorderApplied)} ` +
       `移动区块 ${String(accepted.movedSections)} 条目 ${String(accepted.movedEntries)}`,
   );
-  const after = await callBridge<ExportReceipt>(bridge, 'resume.export.toPdf', [imported.docId], 120_000);
+  // 裁定㉜ 之后接受写入的是「(母版, 这段 JD)」那一支变体，不是导入的母版：
+  // 定制后的产物必须导**变体**，否则拿母版去比字节永远是同一个 hash（本轮实测过，见 4.5-17 前后的读数）。
+  const after = await callBridge<ExportReceipt>(bridge, 'resume.export.toPdf', [accepted.docId], 120_000);
   say(
-    `· 定制后产物：${after.path} ${String(after.pages)} 页 ${String(after.bytes)} 字节 hash=${after.hash.slice(0, 12)} ` +
+    `· 定制后产物（变体 ${accepted.docId}）：${after.path} ${String(after.pages)} 页 ${String(after.bytes)} 字节 hash=${after.hash.slice(0, 12)} ` +
       `快照=${after.snapshotId}`,
   );
-  const preview = await callBridge<string>(bridge, 'resume.export.preview', [imported.docId]);
+  const preview = await callBridge<string>(bridge, 'resume.export.preview', [accepted.docId]);
   const jdTokens = chosen.requirements.slice(0, 3);
   const hitTokens = jdTokens.filter((token) => preview.includes(token));
   say(
