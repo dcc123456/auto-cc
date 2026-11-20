@@ -13,3 +13,5 @@
 · interview-register：present=true disabled=true 原因码="INTERVIEW_JOB_EMPTY" 可见原因="先填岗位 id，约面才挂得到那个岗位上"
 · models-save：present=false disabled=false 原因码=null 可见原因=null
 未取到的一颗：models-save（模型保存键）——本轮脚本打开模型表单那一步没生效，表单没出现过；该颗的可见原因代码已加（`models-save-reason`），等表单打开即可读。
+
+复跑：模型表单没能从「默认值」页打开（`settings-model-add-provider` 点完 formVisible=false），第 10 颗仍缺读数。

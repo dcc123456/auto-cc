@@ -167,6 +167,8 @@ let riskMode: RiskMode = 'off';
 let deliverDelayMs = 0;
 /** 搜岗列表接口的人为延迟（仅本机靶站）：用来稳定制造「搜索进行中」的加载态，供 10.10-17 逐屏取证。 */
 let captureDelayMs = 0;
+/** 搜岗页 HTML 的延迟（仅本机靶站）：抓取的第一次导航落在这里，加载态由此兜得住。 */
+let pageDelayMs = 0;
 
 /** 一张最朴素的人机验证页：标题与正文都带「安全验证」，正好落进知识包 `risk.riskPattern` 的判据里。 */
 const RISK_CAPTCHA_HTML =
@@ -1399,6 +1401,33 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   // 投递延迟开关（10.6-05 在飞竞态取证用）：只影响本地仿站的 /api/deliver 收讫时序。
+  if (url.pathname === '/api/page-delay' && request.method === 'POST') {
+    const body = await readJson(request, response);
+    if (body === null) return;
+    const next = Number(body['delayMs']);
+    if (!Number.isInteger(next) || next < 0 || next > 60_000) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: false, error: 'delayMs 只接受 0–60000 的整数' }));
+      return;
+    }
+    pageDelayMs = next;
+    console.log(`[fixture] 搜岗页延迟切换为 ${String(next)}ms`);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: pageDelayMs }));
+    return;
+  }
+  if (url.pathname === '/api/page-delay' && request.method === 'DELETE') {
+    pageDelayMs = 0;
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, delayMs: 0 }));
+    return;
+  }
+  if (url.pathname === '/api/page-delay') {
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ delayMs: pageDelayMs }));
+    return;
+  }
+
   if (url.pathname === '/api/capture-delay' && request.method === 'POST') {
     const body = await readJson(request, response);
     if (body === null) return;
@@ -1780,6 +1809,8 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
 
   if (url.pathname === '/boss') {
+    // 页面级慢响应（仅本机靶站）：抓取的第一次导航就落在这里，用来稳定制造「搜索进行中」的加载态。
+    if (pageDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, pageDelayMs));
     // 风控靶页（spec 2.7-01）：抓取的第一次导航就落在这里，所以两种拦下形态都能在工作流运行中被撞见。
     if (riskMode === 'blocked') {
       console.log('[fixture] 风控靶页：403 访问受限');
