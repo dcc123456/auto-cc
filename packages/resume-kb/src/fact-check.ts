@@ -150,19 +150,25 @@ function isDemonstrativeReference(candidate: string): boolean {
  * @param proposedText 生成结果散文
  * @param knownNames 基线文档的已知具名实体集合（归一化）
  * @param jdText JD 原文（其中出现过的名字不算虚构）
+ * @param baselineText 基线文档的全部可改写散文（可选）：模型只是复述原文里已有的组织名时不算虚构。
+ *        只查 `company` / `school` 两个字段不够——用户简历里常把合作方写在业绩正文里
+ *        （实测：`与华发房地产公司签订 100 万合同`），按"字段里没有"判就会把逐字复述也拦下。
  * @returns 找不到出处的候选列表（原文，由调用方决定是否脱敏）
  */
 export function findUnknownEntityCandidates(
   proposedText: string,
   knownNames: ReadonlySet<string>,
   jdText: string,
+  baselineText = '',
 ): string[] {
   const normalizedJd = normalizeEntityText(jdText);
+  const normalizedBaseline = normalizeEntityText(baselineText);
   const unknown: string[] = [];
   for (const match of proposedText.matchAll(ORG_CANDIDATE_RUN)) {
     const candidate = match[0];
     const normalized = normalizeEntityText(candidate);
-    // 放行条件三条：包含一个已知名（"主导了星桥科技"）、被某个已知名包含、或本就在 JD 原文里。
+    // 放行条件四条：包含一个已知名（"主导了星桥科技"）、被某个已知名包含、本就在 JD 原文里，
+    // 或本就在基线散文里（逐字复述不是虚构）。
     let known = false;
     for (const name of knownNames) {
       if (normalized.includes(name) || name.includes(normalized)) {
@@ -171,7 +177,13 @@ export function findUnknownEntityCandidates(
       }
     }
     if (known) continue;
-    if (normalizedJd.includes(normalized) || normalized.includes(normalizedJd)) continue;
+    if (normalizedJd !== '' && (normalizedJd.includes(normalized) || normalized.includes(normalizedJd))) continue;
+    if (
+      normalizedBaseline !== '' &&
+      (normalizedBaseline.includes(normalized) || normalized.includes(normalizedBaseline))
+    ) {
+      continue;
+    }
     const prefix = normalized.replace(
       /(公司|集团|大学|学院|研究院|研究所|实验室|银行|证券|事务所|医院|事业部|社区)$/,
       '',
@@ -252,6 +264,9 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
   const numberFindings: NumberFinding[] = [];
   const entityFindings: EntityFinding[] = [];
   const knownNames = collectKnownNames(input.original);
+  // 基线散文一次拼好：具名回查要放行"原文里本来就有的组织名"，只认 company/school 两个字段会误伤
+  // 业绩正文里的合作方（实测：`与华发房地产公司签订 100 万合同` 被当成虚构实体整轮拒绝）。
+  const baselineProse = [...baselineByKey.values()].join('\n');
   for (const field of generationEditableFields(input.proposed, editableKeys)) {
     const location = `${field.sectionId}#${field.entryId}#${field.fieldKey}`;
     const originalText = baselineByKey.get(location);
@@ -274,7 +289,7 @@ export function verifyGeneration(input: GenerationCheckInput): GenerationCheckRe
         added,
       });
     }
-    for (const candidate of findUnknownEntityCandidates(strippedProposed, knownNames, input.jdText)) {
+    for (const candidate of findUnknownEntityCandidates(strippedProposed, knownNames, input.jdText, baselineProse)) {
       entityFindings.push({ sectionId: field.sectionId, entryId: field.entryId, fieldKey: field.fieldKey, candidate });
     }
   }

@@ -155,6 +155,24 @@ describe('4.5-07 具名候选回查（启发式补刀，强保证在结构面）
   it('库里没有、JD 里也没有的学校名被拦下', () => {
     expect(findUnknownEntityCandidates('毕业于南方财经大学。', known, JD_TEXT)).toEqual(['毕业于南方财经大学']);
   });
+
+  it('基线散文里已有的组织名被逐字复述时不报（合作方常写在业绩正文而不是 company 字段）', () => {
+    const baselineText = '与华发房地产公司签订 100 万合同，为公司创造显著经济效益。';
+    expect(
+      findUnknownEntityCandidates(
+        `${baselineText}【定制】这段做法可按岗位要求逐条核对，事实与指标保持原样。`,
+        known,
+        JD_TEXT,
+        baselineText,
+      ),
+    ).toEqual([]);
+  });
+
+  it('基线散文里没有、JD 也没有的组织名仍被拦下', () => {
+    expect(
+      findUnknownEntityCandidates('与蓝海云计算公司合作。', known, JD_TEXT, '与华发房地产公司签订 100 万合同。'),
+    ).toEqual(['与蓝海云计算公司']);
+  });
 });
 
 describe('4.5-03 / 04 字段原样引用', () => {
