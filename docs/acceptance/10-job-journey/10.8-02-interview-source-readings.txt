@@ -1,0 +1,18 @@
+10.8-02 约面唯一来源 活体读数
+采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+用户登记两条同岗约面（video/phone，各带来源引用）：
+{
+  "id": 1,
+  "platform": "boss",
+  "jobId": "1003",
+  "scheduledAt": 1795173587628,
+  "mode": "video",
+  "sourceRef": "msg:interview-1",
+  "createdAt": 1795169987629
+}
+
+同一区间一次 funnel.query 的 interview 级：count=1（同岗两条仍为 1）
+另两个未登记岗位不计入：漏斗 interview 仍为 1。
+
+结论：通过。约面只认用户登记；一岗多条按岗位计 1；未登记不补 0；登记服务未挂载时给 unavailableReason（U 例，见 funnel.test 的「约面服务摘掉」）。

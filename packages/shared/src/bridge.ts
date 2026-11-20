@@ -523,6 +523,16 @@ export const RENDERER_ALLOWLIST = [
   // 刻意**不登记为 agent 工具**：看板是给人核对用的读数，模型若能自己按"近 7 天转化率低"去凑数，
   // 就可能为了把数字做上去自己触发抓取（§8.3 的频控红线不该由一只读口引出来）。
   'funnel.query',
+  // 10.4 / 10.8：岗位八态追踪、约面登记（唯一来源）与按日趋势。全部只由人按。
+  'journey.tracking.current',
+  'journey.tracking.list',
+  'journey.tracking.record',
+  'journey.tracking.close',
+  'journey.tracking.reopen',
+  'journey.tracking.events',
+  'journey.tracking.registerInterview',
+  'journey.tracking.interviews',
+  'funnel.trend',
   // 更新通道（spec 5.9-03）：四条口全是**人按下去才有动作**的一问一答——`status` 只读内存里上一次读数、
   // `check` 只在被点时发一次元数据请求、`download` 与 `install` 只在上一态成立时才动手。
   // 刻意不登记为 agent 工具：模型若能自己触发检查/下载，"零首启动下载"就变成"模型想下就下"。
@@ -998,6 +1008,86 @@ export type FunnelView = {
   levels: FunnelLevelView[];
   quota: FunnelQuotaView;
   tookMs: number;
+};
+
+/** 八态岗位状态（plan §12.4.1；顺序即状态机的推进方向，`closed` 是唯一例外）。 */
+export const JOB_STAGES = [
+  'captured',
+  'matched',
+  'tailored',
+  'greeted',
+  'replied',
+  'delivered',
+  'interviewed',
+  'closed',
+] as const;
+
+/** 岗位状态名。 */
+export type JobStage = (typeof JOB_STAGES)[number];
+
+/** 一次岗位状态迁移的只读记录（谁、从哪个态、到哪个态、凭什么）。 */
+export type JobStatusEventView = {
+  id: number;
+  when: number;
+  from: JobStage | null;
+  to: JobStage;
+  sourceRef: string;
+  reason: string | null;
+};
+
+/** 一个岗位的当前追踪读数。 */
+export type JobTrackingView = {
+  platform: string;
+  jobId: string;
+  /** 当前态；从没记录过事件时为 null（不替它猜 captured）。 */
+  state: JobStage | null;
+  updatedAt: number | null;
+  /** 结束时必须给出的原因（`JOB_CLOSE_REASONS` 之一）；未结束为 null。 */
+  closedReason: string | null;
+  closedAt: number | null;
+  /** `closed` 已重开过的次数（只允许一次）。 */
+  reopenCount: number;
+};
+
+/** 结束原因（plan §12.4.2 的四种）。 */
+export const JOB_CLOSE_REASONS = ['rejected', 'no_reply', 'gave_up', 'offline'] as const;
+
+/** 结束原因字面量。 */
+export type JobCloseReason = (typeof JOB_CLOSE_REASONS)[number];
+
+/** 约面方式（plan §12.4.3 的三种）。 */
+export const INTERVIEW_MODES = ['phone', 'video', 'onsite'] as const;
+
+/** 约面方式字面量。 */
+export type InterviewMode = (typeof INTERVIEW_MODES)[number];
+
+/** 一条用户登记的约面记录（约面的唯一来源）。 */
+export type InterviewRecordView = {
+  id: number;
+  platform: string;
+  jobId: string;
+  scheduledAt: number;
+  mode: InterviewMode;
+  /** 来源引用：平台消息 id，或用户口述的登记依据（不填就不计入漏斗）。 */
+  sourceRef: string;
+  createdAt: number;
+};
+
+/** 趋势的一天：五级 + 外发成功数 + 失败原因 Top3。 */
+export type FunnelTrendDay = {
+  /** 本地自然日键（`YYYY-MM-DD`）。 */
+  day: string;
+  levels: { level: FunnelLevel; count: number | null; unavailableReason: string | null }[];
+  /** 当天成功外发数（打招呼 + 投递）；账本缺席为 null。 */
+  sends: number | null;
+  /** 当天被拒原因 Top3（按次数降序）；账本缺席时 null。 */
+  failures: { code: string; count: number }[] | null;
+};
+
+/** 趋势读数：与 `funnel.query` 同源、同区间口径，按本地自然日切。 */
+export type FunnelTrendView = {
+  range: FunnelRange;
+  days: FunnelTrendDay[];
 };
 
 /**
@@ -2849,6 +2939,30 @@ export interface BridgeSignatures {
    * `context.nowMs` 只影响「今日已用/剩余」那一块，省略则取主进程当前时间。
    */
   'funnel.query': { args: [range: FunnelRange, context?: { nowMs?: number }]; returns: FunnelView };
+  /** 岗位状态机的四只口：记录推进、读当前、列清单、读事件；结束与重开是人的动作。 */
+  'journey.tracking.current': { args: [platform: string, jobId: string]; returns: JobTrackingView };
+  'journey.tracking.list': { args: [platform?: string]; returns: JobTrackingView[] };
+  'journey.tracking.record': {
+    args: [input: { platform: string; jobId: string; to: JobStage; sourceRef: string }];
+    returns: JobTrackingView;
+  };
+  'journey.tracking.close': {
+    args: [input: { platform: string; jobId: string; reason: JobCloseReason; sourceRef: string }];
+    returns: JobTrackingView;
+  };
+  'journey.tracking.reopen': {
+    args: [input: { platform: string; jobId: string; reason: string; sourceRef: string }];
+    returns: JobTrackingView;
+  };
+  'journey.tracking.events': { args: [platform: string, jobId: string]; returns: JobStatusEventView[] };
+  /** 约面登记（唯一来源）：一岗多条按岗位计 1；未登记不计入。 */
+  'journey.tracking.registerInterview': {
+    args: [input: { platform: string; jobId: string; scheduledAt: number; mode: InterviewMode; sourceRef: string }];
+    returns: InterviewRecordView;
+  };
+  'journey.tracking.interviews': { args: [range: FunnelRange]; returns: InterviewRecordView[] };
+  /** 按日趋势：与 `funnel.query` 同源同区间口径，渲染层不自算。 */
+  'funnel.trend': { args: [range: FunnelRange, context?: { nowMs?: number }]; returns: FunnelTrendView };
   /** 更新通道四条口（spec 5.9-03）：`status` 只读上一次读数，其余三条只在人按下去时动作。 */
   'update.status': { args: []; returns: UpdateView };
   /** 向配置里的更新源问一次版本号；没有配置更新源时返回 `no-feed`，一条请求都不发。 */

@@ -258,6 +258,12 @@ interface JourneyContext {
 
 **名额口径**：日限额按**岗位**计，不按动作计。同一岗位一次授权内最多 1 次打招呼 + 1 次投递，两者共享同一个名额；三类动作的既有日上限（搜索/打招呼/投递）仍然是另一道闸，两者取小。
 
+**2026-11-20 PMO 裁定（逐岗变体的准入护栏；表内「简历版本」一行按此执行）**：授权单绑定**母版**；批量执行器为每岗
+生成定制变体时，该变体必须同时满足三条——①同一授权母版血缘（`parentDocId` = 授权母版）②JD 归因命中本岗
+（变体的 `jdId` = 本笔 target）③事实校验通过（变体只能经 `resume.generate.accept` 产生，违规时不产生变体）。
+缺任一条按越权拒绝（`OUTBOUND_RESUME_VERSION_NOT_AUTHORIZED`）。原文「简历版本必须是本轮已生成并通过事实校验的
+`tailoredResumeVersion`」不改写：本裁定说明的是「一轮多岗各自定制的变体」如何满足它，而不是把版本维放开成任意值。
+
 #### 12.2.2 生效、失效与停点
 
 1. 授权单与「本自然日 + 本次无人值守运行」绑定；运行结束、用户停用、应用退出即失效。
@@ -529,3 +535,23 @@ interface JourneyContext {
   不落页——本轮实测执行器停在 `1001` 的首笔页面动作上（日志停在 tailor/greet 开始，90s 无返回；既有 §9 的 hidden 实测条
   同源）。因此「≥2 岗批量 + 投递双落账」的活体读数没拿到；10.6-03/05/06/07/08 的 V 仍按缺口记 `[!]`，待用户在场或前台
   窗口下补。执行器的逻辑面已由 U 例覆盖，且它与页面动作的接线沿用既有 greet/deliver 通道，没有另造一条。
+
+**2026-11-20 PMO 对第 5 片版本口径的裁定（记于 §12.2.1 的护栏条）**：同意放宽为「授权母版 + 每岗变体」，但以
+①同母版血缘 ②JD 归因命中本岗 ③事实校验通过 三条为硬护栏；缺一条即越权拒绝。执行器与授权闸门已按此实现
+（`outbound.authorization.authorize()` 现查 `resume.doc.list()` 核血缘与 JD 归因；事实校验由接受那一步把门）。
+
+**第 7 片（10.4 / 10.8 追踪与统计）落地记录（2026-11-20）**
+
+- **落点**：`packages/journey/src/tracking.ts` 的 `journey.tracking`（迁移 **45**，两张表：`job_status_events` 只追加、
+  `interview_records` 用户登记）+ `funnel` 服务新增 `trend()` 与面试级接线；桥接 9 只口；看板新增独立
+  `JobTrackingPanel`（不塞进只读 MetricsPanel，避免破坏 5.8-02 的「只允许 funnel.query」机检）。
+- **八态状态机**：按事件推进、幂等、只进不退、跳级必须有 `sourceRef`、`closed` 只能重开一次并留痕；关闭原因四种。
+  搜岗/定制已自动记录 captured/matched/tailored（旁路失败不改写主链结局），greet/deliver 的 greeted/delivered 接线留待
+  前台窗口验证时补。
+- **约面唯一来源**：用户登记（岗位+时间+方式+来源引用）；同岗多条按岗位计 1；未登记不计、服务缺席给 unavailableReason。
+- **漏斗/趋势**：五级仍由一次 `funnel.query` 出去；趋势 `funnel.trend` 按本地自然日切，逐日调同一套 `levels()`，
+  外加外发成功数与失败 Top3（账本 `denialTop`）。渲染层不自己分桶。
+- **活体实读（隔离仿站，无头窗口）**：状态 captured→matched→tailored 自动推进且来源可回指；同岗两条约面后
+  `funnel.query` 的 interview=1（一次读数：search=3 / greet=0 / reply=0 / deliver=0 / interview=1）；趋势今日
+  search=3、interview=1，界面逐岗状态与趋势行可读。greet/reply/deliver 段与跨两天趋势需要前台窗口/真实发一笔，本轮未造，
+  按 `[!]` 记录；10.8-05 的逐条抽样脚本未落地，同样 `[!]`。

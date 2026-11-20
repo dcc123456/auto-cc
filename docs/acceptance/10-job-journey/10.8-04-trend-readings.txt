@@ -1,0 +1,192 @@
+10.8-04 按日趋势 活体读数
+采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+funnel.trend（同一区间、本地自然日）：
+[
+  {
+    "day": "2026-11-14",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-15",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-16",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-17",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-18",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-19",
+    "levels": [
+      {
+        "level": "search",
+        "count": 0
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 0
+      }
+    ],
+    "sends": 0
+  },
+  {
+    "day": "2026-11-20",
+    "levels": [
+      {
+        "level": "search",
+        "count": 3
+      },
+      {
+        "level": "greet",
+        "count": 0
+      },
+      {
+        "level": "reply",
+        "count": 0
+      },
+      {
+        "level": "deliver",
+        "count": 0
+      },
+      {
+        "level": "interview",
+        "count": 1
+      }
+    ],
+    "sends": 0
+  }
+]
+
+界面趋势行（可见面板刷新后）：[{"day":"2026-11-20","interview":"1"}]
+
+结论：趋势与漏斗同源同区间，按本地日切；今日 search=3、interview=1，界面读数一致。跨两天的活体数据未造（本轮只有当天数据），这一条按缺口记 [!]，U 例已覆盖逐日与单片漏斗相等。

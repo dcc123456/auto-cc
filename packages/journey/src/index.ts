@@ -40,3 +40,5 @@ export {
 } from './prompts.js';
 // 无人值守执行器（第 5 片）：只按授权单顺序调既有服务，不建第二套 runner/存储/计数。
 export * from './unattended.js';
+// 岗位八态追踪与约面唯一来源（10.4 / 10.8）：只追加事件 + 用户登记，不另建数据体系。
+export * from './tracking.js';

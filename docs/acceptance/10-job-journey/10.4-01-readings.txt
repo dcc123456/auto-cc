@@ -1,0 +1,9 @@
+10.4-01 岗位状态与约面贯通 活体读数
+采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+一岗（1003）从搜索推进到约面：
+状态事件：["null→captured (capture:9ea6a6e0a105)","captured→matched (match:9ea6a6e0a105)","matched→tailored (generation:gen-f7c66045-ccba-4c0a-853b-3024e2ccd8a9)"]
+约面记录：{"id":1,"platform":"boss","jobId":"1003","scheduledAt":1795173587628,"mode":"video","sourceRef":"msg:interview-1","createdAt":1795169987629}
+漏斗（一次查询）：[{"level":"search","count":3,"reason":null},{"level":"greet","count":0,"reason":null},{"level":"reply","count":0,"reason":null},{"level":"deliver","count":0,"reason":null},{"level":"interview","count":1,"reason":null}]
+
+结论：状态、约面、漏斗三处贯通；本轮无真实外发，账本与去重为 0 行（无账可对），因此本条按部分取证记 [!]，待前台窗口跑一笔真实招呼/投递后补三方对账。

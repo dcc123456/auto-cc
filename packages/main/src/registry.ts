@@ -25,7 +25,7 @@ import {
   PlatformRegistryService,
 } from '@auto-cc/plugin-browser';
 import { ConfigService } from '@auto-cc/plugin-config';
-import { JourneyService, JourneyUnattendedService } from '@auto-cc/plugin-journey';
+import { JobTrackingService, JourneyService, JourneyUnattendedService } from '@auto-cc/plugin-journey';
 import { DevtoolsService } from '@auto-cc/plugin-devtools';
 import { EntitlementGateService, UsageLedgerService } from '@auto-cc/plugin-entitlement';
 import { IpcGatewayService } from '@auto-cc/plugin-ipc';
@@ -139,6 +139,8 @@ export const REGISTRY: Registry = {
   journey: JourneyService,
   // 无人值守执行器（第 5 片）：与 journey 同包，单独一个 id 以便装配面板单独摘掉。
   'journey-unattended': JourneyUnattendedService,
+  // 岗位八态追踪与约面登记（10.4 / 10.8）：与 journey 同包，单独 id 便于装配面板摘掉。
+  'journey-tracking': JobTrackingService,
   // 平台登记处（spec 2.2-07）：适配器实例只在这里流通，渲染层只拿得到 `platform.registry.list`。
   'platform-registry': PlatformRegistryService,
   // BOSS 适配器（spec 2.2-06）：它在自己的 init 里把自己登记进上一行，`browser` 一行都不认识它。

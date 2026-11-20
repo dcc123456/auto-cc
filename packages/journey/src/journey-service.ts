@@ -12,7 +12,16 @@
  * 版本口径（spec 10.3-01 的「同一版本上下文」）：`resumeVersion = doc:<docId>:<内容哈希前 12 位>`，
  * `jdVersion = sha256(JD 正文) 前 12 位`；两者原样进匹配行、定制回执与面试材料，任何一步换版本都会看得见。
  */
-import { AppError, Service, asApp, executorRegistryOf, registerAgentTools, toolResult, agentTool } from '@auto-cc/core';
+import {
+  AppError,
+  Service,
+  asApp,
+  executorRegistryOf,
+  maybeService,
+  registerAgentTools,
+  toolResult,
+  agentTool,
+} from '@auto-cc/core';
 import type { Context, WorkflowNodeExecutor } from '@auto-cc/core';
 import { contentHash, type ResumeDocService } from '@auto-cc/plugin-resume-doc';
 import type {
@@ -114,6 +123,11 @@ export class JourneyService extends Service {
   }
 
   /** 抓取编排：按意向搜岗的唯一入口（本服务不直连适配器）。 */
+  /** 追踪旁路（10.4/10.8）：没挂载时整条主链照跑，状态机不在就少一份旁路事实。 */
+  private tracking(): { record(input: Record<string, unknown>): unknown } | undefined {
+    return maybeService<{ record(input: Record<string, unknown>): unknown }>(this.ctx, 'journey.tracking');
+  }
+
   private get capture(): JdCaptureService {
     return asApp(this.ctx)['jd.capture'];
   }
@@ -224,6 +238,22 @@ export class JourneyService extends Service {
         },
       );
     }
+    // 状态机旁路：抓取算 captured、可解释匹配算 matched（同一份 JD 版本做来源，重复搜索幂等）。
+    const tracking = this.tracking();
+    if (tracking !== undefined) {
+      for (const match of sorted) {
+        for (const [to, sourceRef] of [
+          ['captured', `capture:${match.jdVersion}`],
+          ['matched', `match:${match.jdVersion}`],
+        ] as const) {
+          try {
+            tracking.record({ platform, jobId: match.jobId, to, sourceRef });
+          } catch {
+            // 旁路失败不改写主链结局：搜索仍然是只读动作，状态机在下一片再收紧。
+          }
+        }
+      }
+    }
     this.ctx.logger.info(
       `按意向搜岗：简历 ${input.docId} · 关键词「${intent.criteria.keyword}」· 抓取 ${String(capturedIds.length)} 个 · ` +
         `可解释 ${String(sorted.length)} 个 · 版本 ${intent.resumeVersion}`,
@@ -313,6 +343,16 @@ export class JourneyService extends Service {
       `定制与招呼：岗位 ${row.jobId} · 母版 ${base.resumeVersion} · 变体 ${variant.resumeVersion} · ` +
         `JD ${jdVersionOf(row.description)} · 改写 ${String(accepted.appliedRewrites)} 处 · 违规 0 · 草稿来源 ${draft.origin}`,
     );
+    try {
+      this.tracking()?.record({
+        platform,
+        jobId: row.jobId,
+        to: 'tailored',
+        sourceRef: `generation:${accepted.receiptId}`,
+      });
+    } catch {
+      // 旁路失败不改写生成/接受的结局（事实校验才是这条链的硬门）。
+    }
     return {
       docId: input.docId,
       platform,

@@ -51,6 +51,11 @@ const SEED = {
   greet: 7,
   repliedJobs: 3,
   deliveries: 2,
+  interviews: 2,
+  failures: [
+    { code: 'QUOTA_EXCEEDED', count: 2 },
+    { code: 'OUTBOUND_DISABLED', count: 1 },
+  ],
   todayUsed: { search: 5, greet: 7, deliver: 2 } as Record<QuotaAction, number>,
   limits: { search: 40, greet: 20, deliver: 10 } as Record<QuotaAction, number>,
 };
@@ -121,6 +126,16 @@ class FakeLedgerService extends Service {
     this.todaySeen.push(nowMs);
     return this.todayCounts[action] ?? 0;
   }
+
+  /**
+   * 失败原因 Top N（趋势用）。
+   * @param _range 半开区间毫秒（替身不解释它）
+   * @param limit 取前几条
+   * @returns `SEED.failures` 的前 limit 条
+   */
+  denialTop(_range: FunnelRange, limit: number): { code: string; count: number }[] {
+    return SEED.failures.slice(0, limit);
+  }
 }
 
 /** `conversation.store.repliedJobCount()` 的替身。 */
@@ -166,6 +181,29 @@ class FakeDeliveryService extends Service {
   count(range: FunnelRange): number {
     this.ranges.push(range);
     return this.deliveries;
+  }
+}
+
+/** `journey.tracking.interviewedJobCount()` 的替身（约面唯一来源）。 */
+class FakeTrackingService extends Service {
+  static provide = 'journey.tracking';
+  static Config = EMPTY_CONFIG;
+
+  readonly ranges: FunnelRange[] = [];
+  interviews = SEED.interviews;
+
+  constructor(ctx: Context, _options: z.output<typeof EMPTY_CONFIG>) {
+    super(ctx, 'journey.tracking');
+  }
+
+  /**
+   * 按区间数已登记约面的岗位数。
+   * @param range 半开区间毫秒（替身不解释它，只记下）
+   * @returns 初始种子数
+   */
+  interviewedJobCount(range: FunnelRange): number {
+    this.ranges.push(range);
+    return this.interviews;
   }
 }
 
@@ -216,6 +254,7 @@ const OWNERS = [
   ['usage.ledger', FakeLedgerService],
   ['conversation.store', FakeConversationService],
   ['outbound.deliveries', FakeDeliveryService],
+  ['journey.tracking', FakeTrackingService],
   ['entitlement.gate', FakeGateService],
 ] as const;
 
@@ -256,7 +295,7 @@ function seedOwners(owners: Map<string, Service>): void {
   if (jd) jd.captured = SEED.captured;
   const ledger = owners.get('usage.ledger') as FakeLedgerService | undefined;
   if (ledger) {
-    ledger.actionCounts = { greet: SEED.greet };
+    ledger.actionCounts = { greet: SEED.greet, deliver: SEED.deliveries };
     ledger.todayCounts = { ...SEED.todayUsed };
   }
   const conversation = owners.get('conversation.store') as FakeConversationService | undefined;
@@ -294,7 +333,7 @@ function setTodayUsed(owners: Map<string, Service>, action: QuotaAction, used: n
 }
 
 describe('五级读数的形状与归属（spec 5.8-01）', () => {
-  it('五级按漏斗顺序各给一条，前四级是真数、第五级给那句无源原话', async () => {
+  it('五级按漏斗顺序各给一条，五级都从各自归属服务取数', async () => {
     const { funnel } = await bootMetrics();
     const view = funnel.query(RANGE, { nowMs: NOW_MS });
     expect(view.levels.map((item) => item.level)).toEqual([...FUNNEL_LEVELS]);
@@ -307,10 +346,9 @@ describe('五级读数的形状与归属（spec 5.8-01）', () => {
       unavailableReason: null,
     });
     const interview = levelOf(view.levels, 'interview');
-    // 决策十五：这一级没有可数的东西，说清「不是 0」比给一个 0 有用——它挡的是「漏斗末端零转化」这个假象。
-    expect(interview.count).toBeNull();
-    expect(interview.unavailableReason).toContain('没有面试字段');
-    expect(interview.unavailableReason).toContain('不是 0');
+    // 10.8：约面级现在有主人（用户登记），有数就该给数；服务缺席才给原因。
+    expect(interview.count).toBe(SEED.interviews);
+    expect(interview.unavailableReason).toBeNull();
   });
 
   it('每一级要么有数要么有原因，两者必有其一且只有一', async () => {
@@ -475,5 +513,35 @@ describe('入参校验与只读性（spec 5.8-04 / 5.8-02 的服务半边）', (
     const view = funnel.query(RANGE, { nowMs: NOW_MS });
     expect(Number.isFinite(view.tookMs)).toBe(true);
     expect(view.tookMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('趋势按日同源同区间（10.8-04）', () => {
+  it('每天五级与同日漏斗逐级相等，外发成功数与失败 Top3 来自账本', async () => {
+    const { funnel } = await bootMetrics();
+    // 趋势区间由发起方按本地自然日对齐（决策十七）：这里给一个 7 天对齐区间。
+    const aligned = { fromMs: new Date(2023, 10, 15).getTime(), toMs: new Date(2023, 10, 22).getTime() };
+    const trend = funnel.trend(aligned);
+    expect(trend.days).toHaveLength(7);
+    for (const day of trend.days) {
+      const parts = day.day.split('-').map(Number);
+      const year = parts[0] ?? 1970;
+      const month = parts[1] ?? 1;
+      const date = parts[2] ?? 1;
+      const dayStart = new Date(year, month - 1, date).getTime();
+      const dayEnd = new Date(year, month - 1, date + 1).getTime();
+      const single = funnel.query({ fromMs: dayStart, toMs: dayEnd });
+      expect(day.levels).toEqual(single.levels);
+      expect(day.sends).toBe(SEED.greet + SEED.deliveries);
+      expect(day.failures).toEqual(SEED.failures);
+    }
+  });
+
+  it('约面服务摘掉时该级给不可用原因，不降级 0', async () => {
+    const { funnel } = await bootMetrics(['journey.tracking']);
+    const interview = levelOf(funnel.query(RANGE).levels, 'interview');
+    expect(interview.count).toBeNull();
+    expect(interview.unavailableReason).toContain('journey.tracking');
+    expect(interview.count).not.toBe(0);
   });
 });

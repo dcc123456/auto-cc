@@ -1876,7 +1876,42 @@
       "remaining": "剩余 {{count}}",
       "remainingNoGate": "剩余未知：闸门未挂载",
       "took": "本次聚合 {{ms}} ms",
-      "readOnly": "只读聚合，无任何外发口"
+      "readOnly": "只读聚合，无任何外发口",
+      "trendHeading": "按日趋势（7 / 30 天，与漏斗同源）",
+      "trendSends": "外发成功 {{count}}",
+      "trendFailures": "失败 Top3：{{top}}",
+      "trackHeading": "岗位进度与约面登记",
+      "trackEmpty": "还没有岗位进入追踪（抓到/匹配后会出现在这里）",
+      "trackClose": "结束…",
+      "trackReopen": "重开",
+      "interviewJob": "岗位 id",
+      "interviewAt": "约面时间",
+      "interviewMode": "方式",
+      "interviewModes": {
+        "phone": "电话",
+        "video": "视频",
+        "onsite": "现场"
+      },
+      "interviewSource": "来源引用",
+      "interviewRegister": "登记约面",
+      "stage": {
+        "none": "未追踪",
+        "captured": "已抓取",
+        "matched": "已匹配",
+        "tailored": "已定制",
+        "greeted": "已招呼",
+        "replied": "已回复",
+        "delivered": "已投递",
+        "interviewed": "已约面",
+        "closed": "已结束"
+      },
+      "closeReason": {
+        "rejected": "对方拒绝",
+        "no_reply": "无回音",
+        "gave_up": "我放弃",
+        "offline": "岗位下架"
+      },
+      "trackSummary": "{{jobs}} 个岗位在追"
     },
     "update": {
       "reason": {

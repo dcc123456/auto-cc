@@ -544,6 +544,23 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 区间内被拒原因 Top N（spec 10.8-04 的趋势失败榜，按次数降序；同次数按 code 升序保证稳定）。
+   * @param range 半开区间毫秒（含头不含尾）
+   * @param limit 取前几条（0 表示不取）
+   * @returns `{code,count}` 数组；区间内没有拒绝记录为空数组
+   */
+  denialTop = (range: FunnelRange, limit: number): { code: string; count: number }[] => {
+    if (limit <= 0) return [];
+    const rows = this.store.db
+      .prepare(
+        `SELECT code, COUNT(*) AS n FROM usage_denials WHERE ts >= ? AND ts < ?
+         GROUP BY code ORDER BY n DESC, code ASC LIMIT ?`,
+      )
+      .all(range.fromMs, range.toMs, limit) as unknown as { code: string; n: number | bigint }[];
+    return rows.map((row) => ({ code: row.code, count: Number(row.n) }));
+  };
+
+  /**
    * 某平台在 `sinceMs` 之后已经推进过哪些岗位（spec 10.6-01/02 的「日限额按岗位计」唯一读数口）。
    *
    * 读 43 号 `outbound_attempts` 的 `succeeded` 行而不是 `usage_ledger`：平台维只在那张表上

@@ -1,0 +1,36 @@
+10.8-03 漏斗五级单读数 活体读数
+采集：2026-11-20 · 隔离 Electron 实例（CDP 10301、独立 userData、渲染层 dist）+ 本地仿站；真实平台零访问。
+
+一次 funnel.query（近 7 天区间）逐字：
+{
+  "levels": [
+    {
+      "level": "search",
+      "count": 3,
+      "reason": null
+    },
+    {
+      "level": "greet",
+      "count": 0,
+      "reason": null
+    },
+    {
+      "level": "reply",
+      "count": 0,
+      "reason": null
+    },
+    {
+      "level": "deliver",
+      "count": 0,
+      "reason": null
+    },
+    {
+      "level": "interview",
+      "count": 1,
+      "reason": null
+    }
+  ],
+  "tookMs": 0
+}
+
+结论：五级来自同一次读数；search=3、interview=1，greet/reply/deliver=0 是「本轮无外发/无回复」，不是缺测。greet/reply/deliver 的活体造数需要页面动作（无头窗口不落页），U/C 覆盖五级形状与缺服务原因；「停掉归属服务看不可用」由 funnel.test 的摘服务用例承担。截图：10.8-03-funnel.png。

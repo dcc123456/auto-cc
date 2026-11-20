@@ -22,10 +22,14 @@
 import { AppError, maybeService, Service, type Context } from '@auto-cc/core';
 import {
   QUOTA_ACTIONS,
+  dayKey,
+  startOfDay,
   type FunnelLevel,
   type FunnelLevelView,
   type FunnelQuotaView,
   type FunnelRange,
+  type FunnelTrendDay,
+  type FunnelTrendView,
   type FunnelView,
   type GateDecisionView,
   type GateQuotaView,
@@ -54,20 +58,20 @@ type LedgerCountReader = {
 /** `outbound.deliveries.count()` 里本口要用的那一只手。 */
 type DeliveryCountReader = { count(range: FunnelRange): number };
 
+/** `journey.tracking` 里本口要用的那一只手（约面唯一来源：用户登记）。 */
+type InterviewCountReader = { interviewedJobCount(range: FunnelRange): number };
+
+/** `usage.ledger` 里趋势要用的那一只手（失败原因 Top3）。 */
+type DenialTopReader = {
+  countAction(action: string, range: FunnelRange): number;
+  denialTop(range: FunnelRange, limit: number): { code: string; count: number }[];
+};
+
 /** `entitlement.gate` 里本口要用的那两只手（模式/上限从配置侧读，剩余从判定侧读）。 */
 type GateQuotaReader = {
   quota(): GateQuotaView;
   check(action: QuotaAction, context?: { nowMs?: number }): GateDecisionView;
 };
-
-/**
- * 第五级（约面）的确定读数原话（plan §7.6.2 决策十五，由用户裁定）。
- *
- * 全仓没有任何面试字段、状态枚举或时间列（§7.6.1 F11），所以这一级**没有可数的东西**；
- * 按 `LIKE '%面试%'` 粗筛招聘方消息会把"聊到面试"当"约了面试"，那是 §8.4 事实锁定禁的猜测，
- * 而新建一张人工标记表是新功能、不该塞进一个只读看板。三条路都不通向数字，于是这里只给一句话。
- */
-const INTERVIEW_NO_SOURCE = 'app 目前不记录约面这件事：库里没有面试字段或状态源，所以这一级没有可数的东西（不是 0）';
 
 /**
  * 校验区间入参（唯一的校验处）。
@@ -134,6 +138,35 @@ export class FunnelQueryService extends Service {
   };
 
   /**
+   * 按日趋势（spec 10.8-04 / plan §12.4.5）：与 `query` 同一批归属服务、同一区间口径，逐本地自然日切。
+   *
+   * 渲染层不许自己按天分桶（决策十七）；这里按本地日界切，每天调同一套 `levels()`，
+   * 于是「某天的漏斗」与「同一天单片漏斗」逐级相等。区间内没有数据的那天是 0，不是缺测。
+   * @param range 半开区间毫秒（含头不含尾），由发起方按本地自然日对齐
+   * @returns 每天一行：五级 + 外发成功数 + 失败原因 Top3（账本缺席时 sends/failures 为 null）
+   * @throws 区间不合法时 `FUNNEL_RANGE_INVALID`
+   */
+  trend = (range: FunnelRange): FunnelTrendView => {
+    const checked = requireRange(range);
+    const days: FunnelTrendDay[] = [];
+    let dayStart = startOfDay(checked.fromMs);
+    while (dayStart < checked.toMs) {
+      const date = new Date(dayStart);
+      const nextStart = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+      const slice: FunnelRange = { fromMs: dayStart, toMs: nextStart };
+      const ledger = maybeService<DenialTopReader>(this.ctx, 'usage.ledger');
+      days.push({
+        day: dayKey(dayStart),
+        levels: this.levels(slice),
+        sends: ledger === undefined ? null : ledger.countAction('greet', slice) + ledger.countAction('deliver', slice),
+        failures: ledger === undefined ? null : ledger.denialTop(slice, 3),
+      });
+      dayStart = nextStart;
+    }
+    return { range: checked, days };
+  };
+
+  /**
    * 五级读数（顺序即主计划里的漏斗顺序，界面按数组画、不自己排）。
    * @param range 已校验的半开区间
    * @returns 五级各一条；归属服务缺席的那一级带 `unavailableReason` 而不是 0
@@ -150,8 +183,10 @@ export class FunnelQueryService extends Service {
       this.countLevel('deliver', '投递记录', 'outbound.deliveries', range, (owner: DeliveryCountReader) =>
         owner.count(range),
       ),
-      // 第五级没有主人可问：给它编一个数就是把"没做这件事"显示成"这件事零转化"。
-      { level: 'interview', count: null, unavailableReason: INTERVIEW_NO_SOURCE },
+      // 第五级：约面的唯一来源是用户登记（`journey.tracking`）。服务缺席时给不可用原因，不降级成 0。
+      this.countLevel('interview', '约面登记', 'journey.tracking', range, (owner: InterviewCountReader) =>
+        owner.interviewedJobCount(range),
+      ),
     ];
   }
 

@@ -714,6 +714,11 @@ plugins:
   - id: journey-unattended
     dependsOn: [journey, outbound-authorization, outbound-greet, outbound-deliver, outbound-throttle, usage]
 
+  # 岗位八态追踪与约面唯一来源（10.4 / 10.8）：两张表挂进同一条 store 连接；摘掉它，漏斗约面级
+  # 与岗位进度清单会如实显示「未挂载」，不会降级成 0。
+  - id: journey-tracking
+    dependsOn: [journey, store]
+
   - id: schedule
     dependsOn: [store, workflow]
     config:

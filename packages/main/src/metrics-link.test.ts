@@ -173,12 +173,13 @@ describe('5.8-01 五级从真库数得出', () => {
     ).toBe(app['usage.ledger'].countToday('greet', AS_OF_MS));
   });
 
-  it('聚合口在真装配里给出五级：四个真数 + 面试级那句无源原话', async () => {
+  it('聚合口在真装配里给出五级：四个真数 + 面试级（追踪服务缺席时给不可用原因）', async () => {
     const { funnel } = await bootMetricsAssembly();
     const view = funnel.query(WINDOW, { nowMs: AS_OF_MS });
     expect(view.levels.map((item) => item.level)).toEqual([...FUNNEL_LEVELS]);
     expect(view.levels.map((item) => item.count)).toEqual([2, 3, 2, 2, null]);
-    expect(view.levels[4]?.unavailableReason).toContain('没有面试字段');
+    // 约面级在 10.8 起改由 `journey.tracking` 提供；本装配没有装它，所以给的是「没有挂载」而不是 0。
+    expect(view.levels[4]?.unavailableReason).toContain('journey.tracking');
     // 读数必须是纯数据：它要过 IPC 的结构化克隆，带函数或不可克隆成员的形状到进程边界才丢。
     expect(structuredClone(view)).toEqual(view);
   });
@@ -251,10 +252,11 @@ describe('5.8-04 网关切得动这条路径（白名单与界面在 5.8-b）', 
     expect(app['jd.store'].countCaptured(WINDOW)).toBe(2);
   });
 
-  it('白名单里只有这一条 `funnel.*`，且它正是网关切出来的那一对（5.8-b 的界面口）', () => {
+  it('白名单里的 `funnel.*` 只有查询与趋势两条，且都能被网关切出来（5.8-b / 10.8-04）', () => {
     // preload 按同一条名单生成 `window.autoCC`，所以「网关切得出路径」与「界面调得到」之间
     // 缺的就是登记这一步；这一条把它钉成用例，免得界面写完才发现 403 式的未登记。
-    expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('funnel.'))).toEqual(['funnel.query']);
+    expect(RENDERER_ALLOWLIST.filter((id) => id.startsWith('funnel.'))).toEqual(['funnel.query', 'funnel.trend']);
+    expect(isAllowedCall('funnel.trend')).toBe(true);
     expect(isAllowedCall('funnel.query')).toBe(true);
     // 抄错的两种形状必须进不来：带点的方法名（`funnel.query.all`）与整名小写。
     expect(isAllowedCall('funnel.query.all')).toBe(false);

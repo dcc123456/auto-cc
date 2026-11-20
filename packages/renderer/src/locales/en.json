@@ -1876,7 +1876,42 @@
       "remaining": "{{count}} left",
       "remainingNoGate": "Remaining unknown: gate not mounted",
       "took": "Aggregation took {{ms}} ms",
-      "readOnly": "Read-only aggregate, no outbound calls"
+      "readOnly": "Read-only aggregate, no outbound calls",
+      "trendHeading": "Daily trend (7 / 30 days, same source as funnel)",
+      "trendSends": "{{count}} sent",
+      "trendFailures": "Top failures: {{top}}",
+      "trackHeading": "Job progress & interview registration",
+      "trackEmpty": "No jobs tracked yet (they appear after capture/match)",
+      "trackClose": "Close…",
+      "trackReopen": "Reopen",
+      "interviewJob": "Job id",
+      "interviewAt": "Interview time",
+      "interviewMode": "Mode",
+      "interviewModes": {
+        "phone": "Phone",
+        "video": "Video",
+        "onsite": "On-site"
+      },
+      "interviewSource": "Source reference",
+      "interviewRegister": "Register interview",
+      "stage": {
+        "none": "untracked",
+        "captured": "captured",
+        "matched": "matched",
+        "tailored": "tailored",
+        "greeted": "greeted",
+        "replied": "replied",
+        "delivered": "delivered",
+        "interviewed": "interviewed",
+        "closed": "closed"
+      },
+      "closeReason": {
+        "rejected": "rejected",
+        "no_reply": "no reply",
+        "gave_up": "gave up",
+        "offline": "job offline"
+      },
+      "trackSummary": "{{jobs}} jobs tracked"
     },
     "update": {
       "reason": {
