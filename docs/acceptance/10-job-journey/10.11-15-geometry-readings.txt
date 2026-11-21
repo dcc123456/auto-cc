@@ -1,8 +1,12 @@
-10.11-15 几何不重叠（fixture 视图 · noexcept 断言通过）
+10.11-15 几何不重叠（fixture 视图 · loopback 断言通过 · 三态）
 
-内核视图 URL："http://127.0.0.1:10233/"（loopback 断言通过后才继续）
-kernelViewBounds：{"x": 541, "y": 53, "width": 659, "height": 689}；visible=true
-面板 rect：{"x": 208, "y": 53, "w": 331.6015625, "h": 688.6796875}；胶囊 rect：{"x": 1018, "y": 10, "w": 57, "h": 32}
-交集面积：panel=0、capsule=0（均为 0）
-面板右沿 539.6 ≤ 视图左沿 541
-未读：站点隐藏、站点全屏两态（同一实例上未切）。
+一、站点分栏可见（面板展开）
+  URL："http://127.0.0.1:10233/"；bounds：{"x": 541, "y": 53, "width": 659, "height": 689}；visible=true
+  面板 rect：{"x": 208, "y": 53, "w": 331.6015625, "h": 688.6796875}；胶囊 rect：{"x": 1018, "y": 10, "w": 57, "h": 32}
+  交集：panel=0、capsule=0（均 0）；面板右沿 ≤ 视图左沿。
+二、站点隐藏（sessions.close 后）
+  kernelViewVisible=false（视图不在界面上，交集判据不适用）；bounds 仍是上一帧：{"x": 541, "y": 53, "width": 659, "height": 689}
+  面板回到整宽：{"x": 780, "y": 53, "w": 420, "h": 688.6796875}。
+三、站点全屏（点既有「全屏」键）
+  bounds={"x": 185, "y": 53, "width": 1015, "height": 689}；助手面板未挂载（deskMain 让位）：mounted=false
+  胶囊仍在顶栏（顶栏在原生视图矩形之外）。
