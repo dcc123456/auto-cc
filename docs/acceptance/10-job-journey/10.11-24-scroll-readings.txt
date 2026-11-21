@@ -1,0 +1,15 @@
+10.11-24 Home 滚到底时底栏不压内容（修复前后对照）
+环境：干净 userData、独立 CDP 10372、dist 构建；把 Home 滚到底并展开「最近 N 笔外发」。
+命令：node tmp/g11/scroll/verify.mjs before|after
+
+① 底栏 rect 与 Home 内容交集
+  修复前：29593（Home 底 967.4 > 底栏顶 741.7）
+  修复后：0（Home 底 721.4 ≤ 底栏顶 741.7）
+② 滚动发生在格子内（section.scrollHeight > clientHeight）
+  修复前：914 > 689（true）——但内容仍溢到底栏上方，因为格子自己没有 overflow
+  修复后：934 > 689（true），且底栏不再被覆盖
+③ 状态条四项 rect 互不相交
+  1600 宽：修复前 0 对相交；修复后 0 对
+  1024×720：{"scrollWidth": 1024, "clientWidth": 1024, "overflow": false, "itemOverlaps": []}
+④ 截图：10.11-24-scroll-before.png / 10.11-24-scroll-after.png（md5 互异）
+根因：`App.tsx` 的 `data-view-scroll="chat"` section 缺 `overflow-y-auto`（其余六个 workspace 都有），Home 一长就溢出到 footer 上方；底栏同时补了整项换行与 shrink-0，窄窗不挤字。

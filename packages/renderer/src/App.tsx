@@ -101,7 +101,12 @@ const STATUS_DOT_CLASS: Record<DeskSlotState, string> = {
  */
 function statusSlot(item: string, label: string, value: string, state: DeskSlotState) {
   return (
-    <span className="flex items-center gap-1.5" data-testid="statusbar-item" data-item={item} data-state={state}>
+    <span
+      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap"
+      data-testid="statusbar-item"
+      data-item={item}
+      data-state={state}
+    >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[state]}`} aria-hidden="true" />
       <span className="text-slate-400">{label}</span>
       <span>{value}</span>
@@ -269,7 +274,7 @@ export function App() {
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <section
           data-view-scroll="chat"
-          className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
+          className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-5`}
         >
           <HomePanel />
         </section>
@@ -381,7 +386,7 @@ export function App() {
           其余三项由 `SessionPanel` / `UsagePanel` / `ChatPanel` 各自重读后报进 `deskStatus` 汇流——这里零条定时器。 */}
       <footer
         data-testid="statusbar"
-        className="flex items-center gap-4 border-t border-line bg-ink-950 px-4 py-1.5 font-mono text-[10.5px] text-slate-500"
+        className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-line bg-ink-950 px-4 py-1.5 font-mono text-[10.5px] text-slate-500"
       >
         {statusSlot('run', t('statusbar.run'), live?.message ?? t('statusbar.idle'), live ? 'live' : 'none')}
         {live?.stepId ? <span className="text-slate-600">{live.stepId}</span> : null}
