@@ -469,6 +469,33 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 站点代发了一条默认问候（应用没发正文）：把这笔尝试标成 `site-default`，**不落账、不扣额度**。
+   *
+   * 与 `unknown` 的区别是它有明确的「已经发生的站点行为 + 可核摘要」，所以允许人确认后继续；
+   * 与 `succeeded` 的区别是应用没发正文，账本里不该有这一发。`receipt_id` 保持 NULL——
+   * 那一列在四方对账里代表应用自己发出的回执 id，页面摘要进 `evidence_summary`。
+   * @param key 完整去重键
+   * @param evidenceSummary 页面默认问候的脱敏摘要（原文片段 + 页面上读到的时间等；禁止写 cookie/路径）
+   * @param nowMs 记录时刻（毫秒）
+   * @returns 更新后的尝试；原记录不存在时为 null
+   */
+  markAttemptSiteDefault = (
+    key: OutboundAttemptKey,
+    evidenceSummary: string | null,
+    nowMs = Date.now(),
+  ): OutboundAttemptView | null => {
+    this.store.db
+      .prepare(
+        `UPDATE outbound_attempts
+           SET status = 'site-default', reason = 'SITE_DEFAULT_GREETING', receipt_id = NULL,
+               evidence_summary = ?, updated_at = ?
+         WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ? AND status = 'in-flight'`,
+      )
+      .run(evidenceSummary?.slice(0, 500) ?? null, nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+    return this.attemptFor(key);
+  };
+
+  /**
    * 只读对账明确证明页面没有这次外发后，允许显式重试；这不是自动失败重放。
    * @param key 完整去重键
    * @param nowMs 对账时刻（毫秒）
