@@ -443,6 +443,17 @@
       "idle": "尚未读取"
     },
     "kernel": {
+      "address": {
+        "placeholder": "输入网址，回车打开",
+        "go": "打开",
+        "reload": "刷新",
+        "back": "后退",
+        "backUnavailable": "内核视图没有开放历史后退口，只能用地址栏或顶栏的收起/展开",
+        "reasonUrlEmpty": "先填网址",
+        "reasonBusy": "上一条动作还没回来",
+        "reasonNoCurrent": "还没有打开过页面",
+        "navigate": "打开网址"
+      },
       "heading": "网页窗口",
       "hint": "这一格直接画着真实网页，不在界面这张图里。",
       "expand": "全屏",

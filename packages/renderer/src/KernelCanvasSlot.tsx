@@ -2,6 +2,7 @@ import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen } from 'lucide-re
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, NarrowLabel } from './ui/controls';
+import { KernelAddressBar } from './KernelAddressBar';
 import { SplitHandle, useSplitWidth } from './ui/split';
 import type { KernelSlotLayout } from './KernelViewSlot';
 import {
@@ -122,6 +123,8 @@ export function KernelCanvasSlot({ layout }: { layout: KernelSlotLayout }) {
           layout.isExpanded ? 'min-w-0 flex-1' : `shrink-0 ${CANVAS_RIGHT_WIDTH_CLASS}`
         } flex min-h-0 flex-col border-l border-line bg-ink-900`}
       >
+        {/* 地址栏落在**测量槽位之上**：上报矩形只取下面那个 div，所以原生视图不会盖住它（10.11-27）。 */}
+        <KernelAddressBar />
         {/* 这一块的矩形就是原生视图的落位处：文字只在视图还没盖上来（首帧、或摆位被拒）时露出来。
             控制键不在这里，而在顶栏（上报矩形之外）——盖在下面的渲染层节点点不动。 */}
         <div ref={slotRef} data-testid="kernel-canvas-slot" data-zoom-source="pending" className="min-h-0 flex-1 p-4">

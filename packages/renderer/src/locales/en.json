@@ -443,6 +443,17 @@
       "idle": "Not read yet"
     },
     "kernel": {
+      "address": {
+        "placeholder": "Type a URL and press Enter",
+        "go": "Open",
+        "reload": "Reload",
+        "back": "Back",
+        "backUnavailable": "The kernel view exposes no history-back port; use the address bar or the hide/expand controls",
+        "reasonUrlEmpty": "Type a URL first",
+        "reasonBusy": "The previous action has not returned yet",
+        "reasonNoCurrent": "No page has been opened yet",
+        "navigate": "Open URL"
+      },
       "heading": "Web page view",
       "hint": "This slot shows the real web page, painted above the desk.",
       "expand": "Fullscreen",

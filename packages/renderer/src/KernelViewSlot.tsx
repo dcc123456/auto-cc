@@ -2,6 +2,7 @@ import { Maximize2, Minimize2, PanelRight, PanelRightClose } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, NarrowLabel } from './ui/controls';
+import { KernelAddressBar } from './KernelAddressBar';
 import { SplitHandle, useSplitWidth } from './ui/split';
 
 /**
@@ -207,6 +208,7 @@ export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayo
         </div>
 
         {/* 这一块的矩形就是原生视图的落位处：文字只在视图还没盖上来（首帧、或摆位被拒）时露出来。 */}
+        <KernelAddressBar />
         <div ref={slotRef} data-testid="kernel-view-slot" className="min-h-0 flex-1 p-4">
           <p className="text-[11px] leading-relaxed text-slate-500">{t('kernel.hint')}</p>
         </div>
