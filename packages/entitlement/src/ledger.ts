@@ -58,7 +58,7 @@ export const OUTBOUND_STATE_MIGRATION_VERSION = 43;
 export const OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46;
 
 /** 重建 `outbound_attempts`：CHECK 扩到 `site-default`，新增 `confirmed_at`。 */
-const outboundAttemptsSiteDefaultMigration = {
+export const outboundAttemptsSiteDefaultMigration = {
   version: OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION,
   up: (db: DatabaseSync) => {
     db.exec('BEGIN');
