@@ -45,7 +45,10 @@ export function KernelAddressBar() {
   const reason = busy !== undefined ? 'ACTION_BUSY' : urlEmpty ? 'URL_EMPTY' : undefined;
 
   return (
-    <div className="flex shrink-0 flex-col gap-1 border-b border-line px-2 pt-1 pb-0.5" data-testid="kernel-address-bar">
+    <div
+      className="flex h-10 shrink-0 flex-col justify-center border-b border-line px-2"
+      data-testid="kernel-address-bar"
+    >
       <div className="flex min-w-0 items-center gap-1">
         <DeskButton
           action="kernel-address-back"

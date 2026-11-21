@@ -1,0 +1,21 @@
+10.11-27 地址栏与内嵌浏览器（隔离 fixture 实例 · dist 构建）
+
+环境：全新 userData（tmp/g11/ab/userdata）、独立 CDP 10375；内核视图开的是 fixture 平台，并在继续前断言 kernelViewUrl 是 loopback。
+命令：node tmp/g11/ab-evidence.mjs --no-snap → tmp/g11/ab/readings.json
+
+① 内核视图是真实页面而不是占位
+   kernelViewUrl = http://127.0.0.1:10233/（loopback 断言通过）；visible=true
+② 地址栏落在上报矩形之外（交集严格为 0）
+   地址栏 rect：{x:540.6, y:53, w:659.4, h:40}（高度固定 h-10）
+   kernelViewBounds：{x:541, y:93, width:659, height:648}
+   交集：bar × bounds = 0（修复前为 98px²，一条 0.15px 亚像素带；按 PMO 定论改成上报侧取整：
+   x/y 上取整、right/bottom 下取整，见 packages/renderer/src/kernel-bounds.ts 与其单测）
+③ 手输网址只走既有导航口
+   输入 http://127.0.0.1:10233/alt → 点击「打开」后 shell.getStatus().kernelViewUrl = http://127.0.0.1:10233/alt
+   （走的仍是 browser.page.navigate，没有第二套通道）
+
+缺陷记录（[!] 依据）：browser.page.snapshot().url 在**导航前**也是 null，导航后仍 null——
+不是地址栏的锅，是快照口本身当前拿不到 URL。按 PMO 口径主证据用 shell.getStatus().kernelViewUrl；
+快照那条单列缺陷，不复测到硬超时。
+
+证据图：10.11-27-addressbar-before.png / -after.png（md5 b91cc9d… / 7b6c303… 互异）

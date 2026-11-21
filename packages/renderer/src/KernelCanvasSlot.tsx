@@ -2,6 +2,7 @@ import { Maximize2, Minimize2, PanelRightClose, PanelRightOpen } from 'lucide-re
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, NarrowLabel } from './ui/controls';
+import { quantizeKernelViewRect } from './kernel-bounds';
 import { KernelAddressBar } from './KernelAddressBar';
 import { SplitHandle, useSplitWidth } from './ui/split';
 import type { KernelSlotLayout } from './KernelViewSlot';
@@ -83,12 +84,8 @@ export function KernelCanvasSlot({ layout }: { layout: KernelSlotLayout }) {
     // 分栏行的宽只用于读数：左栏宽 = 行宽 − 右栏宽（把手用负外边距叠在左栏右缘，不占行内宽度）。
     const stageWidth = node.parentElement?.getBoundingClientRect().width;
     node.dataset.canvasStageWidth = stageWidth === undefined ? '' : String(Math.round(stageWidth));
-    void bridge?.shell.setKernelViewBounds({
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-    });
+    // 上报侧取整：保证视图从上一块底边的上取整开始，不与地址栏产生亚像素重叠（10.11-27）。
+    void bridge?.shell.setKernelViewBounds(quantizeKernelViewRect(rect));
     void bridge?.shell.setKernelViewZoomFactor(zoom);
   }, [bridge]);
 

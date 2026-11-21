@@ -2,6 +2,7 @@ import { Maximize2, Minimize2, PanelRight, PanelRightClose } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, NarrowLabel } from './ui/controls';
+import { quantizeKernelViewRect } from './kernel-bounds';
 import { KernelAddressBar } from './KernelAddressBar';
 import { SplitHandle, useSplitWidth } from './ui/split';
 
@@ -104,12 +105,8 @@ export function KernelViewSlot({ layout, viewVisible }: { layout: KernelSlotLayo
       return;
     }
     setMeasured(`${Math.round(rect.width)}×${Math.round(rect.height)}`);
-    void bridge?.shell.setKernelViewBounds({
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-    });
+    // 上报侧取整：保证视图从上一块底边的上取整开始，不与地址栏产生亚像素重叠（10.11-27）。
+    void bridge?.shell.setKernelViewBounds(quantizeKernelViewRect(rect));
   }, [bridge]);
 
   // 尺寸变化由 ResizeObserver 推：改宽度、拖把手、展开、缩窗口都会让槽位重新布局，收起时量到 0 自然跳过。
