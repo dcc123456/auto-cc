@@ -16,7 +16,9 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { switchLanguage, type SupportedLanguage } from './i18n';
 import { useDeskTheme } from './theme';
-import { ChatPanel } from './ChatPanel';
+import { HomePanel } from './HomePanel';
+import { AssistantCapsule, AssistantDock, type AssistantState } from './AssistantDock';
+import { pushDeskToast } from './deskToast';
 import { JobLabPanel } from './JobLabPanel';
 import { JourneyPanel } from './JourneyPanel';
 import { KernelCanvasControls, KernelCanvasSlot } from './KernelCanvasSlot';
@@ -121,6 +123,11 @@ export function App() {
   }, [trail]);
   // 5.9-06：首屏隐私声明。首启动由 localStorage 判定，之后靠标题栏那颗按钮重开，两处共用同一份状态。
   const privacy = usePrivacyNotice();
+  /**
+   * 全局助手的三态（plan §14.2）：收起不动布局，展开/最小化占主区右沿一条宽度。
+   * 为什么状态在壳层：快捷键是全局的，站点全屏时要先退全屏再开面板——这两件事都只有壳层知道。
+   */
+  const [assistant, setAssistant] = useState<AssistantState>('closed');
   const [theme, toggleTheme] = useDeskTheme();
   // 「进行中运行」这一格由既有订阅推来（跑到哪一步、说什么），状态条不新开一条轮询（spec 6.3-05）。
   const { live } = useWorkflowRun();
@@ -182,6 +189,39 @@ export function App() {
   const kernelExpanded = kernelViewVisible && kernelLayout.isExpanded;
 
   /**
+   * 打开/收起助手。站点全屏时先退出全屏：面板要落在主区里，全屏态主区是被让位的。
+   * @returns 无返回值
+   */
+  const toggleAssistant = (): void => {
+    setAssistant((current) => (current === 'open' ? 'closed' : 'open'));
+    if (kernelExpanded) {
+      kernelLayout.toggleExpanded();
+      pushDeskToast({ action: 'assistant-exit-fullscreen', tone: 'jade', message: t('assistant.toastExitFullscreen') });
+    }
+    // 展开后把焦点送进输入卡（10.11-13）：等一帧，面板那一支此时刚挂上。
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>('[data-testid="chat-input"]')?.focus();
+    });
+  };
+
+  // 快捷键：Ctrl/⌘+J 呼出；Esc 收起并把焦点还给胶囊（非模态，Esc 只在助手开着时接管）。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && (event.key === 'j' || event.key === 'J')) {
+        event.preventDefault();
+        toggleAssistant();
+        return;
+      }
+      if (event.key === 'Escape' && assistant === 'open') {
+        setAssistant('closed');
+        document.querySelector<HTMLButtonElement>('[data-action="assistant-capsule"]')?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
+  /**
    * 一张工作台的容器：标题 + 说明 + 面板堆。
    * @param target 该容器承载的视图
    * @returns section 元素，隐藏时用 `hidden` 而不是不渲染（1.10-01）
@@ -225,18 +265,23 @@ export function App() {
    * 不新增长第二套视图（§2.5）。
    */
   const deskMain = (
-    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <section
-        data-view-scroll="chat"
-        className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
-      >
-        <ChatPanel />
-      </section>
-      {(['jobs', 'resume', 'workflow', 'models', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
+    <main className="relative flex min-h-0 min-w-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <section
+          data-view-scroll="chat"
+          className={`${view === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col p-5`}
+        >
+          <HomePanel />
+        </section>
+        {(['jobs', 'resume', 'workflow', 'models', 'trust', 'diagnostics'] as TopView[]).map(workspace)}
 
-      {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，七张视图切来切去都只有这一只通道，
-          各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
-      <Toast />
+        {/* 09 稿形态① 1-B 的左下角 toast：挂在主区这一层，七张视图切来切去都只有这一只通道，
+            各面板不许再各自长一份（同一时刻只允许一只由 deskToast 汇流自己保证）。 */}
+        <Toast />
+      </div>
+      {/* 助手面板占主区右沿的一条宽度：内核站点在 `main` 之外，由它自己的 ResizeObserver 上报让位，
+          所以「DOM 悬在原生视图上」这件事根本不会发生（plan §14.6 的几何判据）。 */}
+      <AssistantDock state={assistant} onMinimize={() => setAssistant('open')} onClose={() => setAssistant('closed')} />
     </main>
   );
 
@@ -273,6 +318,7 @@ export function App() {
               sidebar 回滚态仍由 `KernelViewSlot` 工具行上的两键承担（旧代码整段保留）。 */}
           {kernelMode === 'canvas' ? <KernelCanvasControls layout={kernelLayout} visible={kernelViewVisible} /> : null}
           {/* 5.9-06 的重入口：首屏那一层收起后必须还能一眼找回，否则"读过就再也看不见"是合规上的空洞 */}
+          <AssistantCapsule state={assistant} onToggle={toggleAssistant} />
           <DeskButton action="privacy-open" variant="line" title={t('privacy.entry')} onClick={privacy.open}>
             <ShieldCheck size={13} />
             <NarrowLabel>{t('privacy.entry')}</NarrowLabel>

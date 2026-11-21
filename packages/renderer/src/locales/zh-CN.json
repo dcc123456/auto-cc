@@ -191,7 +191,7 @@
       "switchTo": "English"
     },
     "nav": {
-      "chat": "对话",
+      "chat": "首页",
       "jobs": "岗位",
       "resume": "简历",
       "workflow": "流程",
@@ -260,6 +260,68 @@
         "here": "我在哪：第 1 步 · 隐私与条款",
         "next": "下一步：读完点「我已阅读并同意」",
         "exit": "出口：收起这一屏，随时可从顶栏重开"
+      }
+    },
+    "home": {
+      "heading": "首页",
+      "rangeLine": "下面这些数字是近 {{days}} 天的读数（只读既有服务，不自己算比率）",
+      "refresh": "刷新",
+      "askAssistant": "问助手",
+      "cell": {
+        "quota": "今日额度",
+        "progress": "岗位进度",
+        "sends": "投递成功",
+        "todo": "待办"
+      },
+      "caption": {
+        "quota": "剩余 {{remaining}} · 已用 {{used}} / 上限 {{limit}}",
+        "quotaEmpty": "额度服务没挂载，读不到上限",
+        "progress": "已投递 {{delivered}} · 已约面 {{interview}}",
+        "sends": "近 {{days}} 天成功笔数 · 最近一笔 {{last}} {{target}}",
+        "todo": "授权 {{count}} 岗 · 已完成 {{completed}}",
+        "todoEmpty": "还没有授权单"
+      },
+      "status": {
+        "unattended": "无人值守：{{value}}",
+        "run": "执行器：{{status}} · 当前 {{current}} · 完成 {{completed}} · 待办 {{pending}}"
+      },
+      "trend": {
+        "title": "趋势（逐日成功外发 + 五级漏斗）"
+      },
+      "window": {
+        "7": "近 7 天",
+        "30": "近 30 天"
+      },
+      "retry": "重试",
+      "unavailable": "这一块读不到：{{reason}}",
+      "unavailable.noBridge": "桥接不可用",
+      "recent": {
+        "title": "最近 {{count}} 笔外发"
+      },
+      "next": {
+        "title": "接下来",
+        "login": "先登录 {{platform}}",
+        "resume": "导入一份简历当母版",
+        "reason": "看执行器暂停的原因",
+        "resumeRun": "已授权：继续跑没跑完的岗位",
+        "jobs": "看匹配岗位",
+        "tracking": "看追踪与统计",
+        "more": "还有 {{count}} 条（展开）",
+        "platformFallback": "招聘平台"
+      }
+    },
+    "assistant": {
+      "capsule": "助手",
+      "panelTitle": "智能助手",
+      "minimize": "最小化",
+      "expand": "展开",
+      "close": "关闭助手",
+      "minimizedLine": "助手在下面：点「展开」接着聊，草稿还在",
+      "toastExitFullscreen": "呼出助手前先把站点收回分栏，站点内容没有被动过",
+      "badge": {
+        "needs": "需要你：{{count}} 件",
+        "running": "助手在跑",
+        "blocked": "被风控拦下"
       }
     },
     "desk": {

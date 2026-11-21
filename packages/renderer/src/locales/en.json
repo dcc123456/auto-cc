@@ -191,7 +191,7 @@
       "switchTo": "中文"
     },
     "nav": {
-      "chat": "Chat",
+      "chat": "Home",
       "jobs": "Jobs",
       "resume": "Resume",
       "workflow": "Flows",
@@ -260,6 +260,68 @@
         "here": "Where you are: step 1 · privacy and terms",
         "next": "Next: read it, then press I have read and agree",
         "exit": "Exit: dismiss this screen; reopen it from the top bar anytime"
+      }
+    },
+    "home": {
+      "heading": "Home",
+      "rangeLine": "These numbers cover the last {{days}} days (read from existing services, no ratios computed here)",
+      "refresh": "Refresh",
+      "askAssistant": "Ask assistant",
+      "cell": {
+        "quota": "Today's quota",
+        "progress": "Job progress",
+        "sends": "Delivered",
+        "todo": "To do"
+      },
+      "caption": {
+        "quota": "Remaining {{remaining}} · used {{used}} / limit {{limit}}",
+        "quotaEmpty": "Quota service is not mounted, no limit to read",
+        "progress": "Delivered {{delivered}} · Interviewed {{interview}}",
+        "sends": "Successful sends in {{days}} days · latest {{last}} {{target}}",
+        "todo": "Authorized {{count}} jobs · done {{completed}}",
+        "todoEmpty": "No authorization yet"
+      },
+      "status": {
+        "unattended": "Unattended: {{value}}",
+        "run": "Runner: {{status}} · current {{current}} · done {{completed}} · pending {{pending}}"
+      },
+      "trend": {
+        "title": "Trend (daily sends + five-level funnel)"
+      },
+      "window": {
+        "7": "Last 7 days",
+        "30": "Last 30 days"
+      },
+      "retry": "Retry",
+      "unavailable": "This block is unavailable: {{reason}}",
+      "unavailable.noBridge": "Bridge unavailable",
+      "recent": {
+        "title": "Latest {{count}} sends"
+      },
+      "next": {
+        "title": "Next",
+        "login": "Sign in to {{platform}} first",
+        "resume": "Import a resume as the master",
+        "reason": "Look at why the runner paused",
+        "resumeRun": "Authorized: continue the unfinished jobs",
+        "jobs": "See matching jobs",
+        "tracking": "See tracking and stats",
+        "more": "{{count}} more (expand)",
+        "platformFallback": "the job platform"
+      }
+    },
+    "assistant": {
+      "capsule": "Assistant",
+      "panelTitle": "Assistant",
+      "minimize": "Minimize",
+      "expand": "Expand",
+      "close": "Close assistant",
+      "minimizedLine": "Assistant is minimized: expand to keep chatting, your draft stays",
+      "toastExitFullscreen": "Left full-screen before opening the assistant; the site itself was untouched",
+      "badge": {
+        "needs": "Needs you: {{count}}",
+        "running": "Assistant is running",
+        "blocked": "Blocked by risk control"
       }
     },
     "desk": {

@@ -52,6 +52,7 @@ import { pushDeskToast } from './deskToast';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
+import { reportAssistantStatus } from './assistantStatus';
 import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
@@ -390,6 +391,18 @@ export function ChatPanel() {
   // 界面不再存一份「我按过接管」的本地标志——按了却没生效的那一条就是谎报。
   // 把当前 run 的 id 跟着递进 `begin`，审计里那一条才说得出「这次接管按住的是哪条 run」（spec 5.5-09）。
   const takeover = useTakeover(agentRun.run?.runId);
+
+  /**
+   * 把「在跑 / 需要你 / 被拦」三类事实报给顶栏那颗助手胶囊（spec 10.11-11）。
+   * 口径照 plan §14.2：需要你只计待确认计划 + 逐条批准 + 投递待确认，普通未读不亮。
+   */
+  useEffect(() => {
+    reportAssistantStatus({
+      running: agentRun.run?.status === 'running',
+      needsYou: (agentPause.pending?.length ?? 0) + (agentRun.run?.status === 'proposed' ? 1 : 0),
+      blocked: takeover.state?.isHeld === true && takeover.state.reason === 'risk',
+    });
+  }, [agentRun.run, agentPause.pending, takeover.state]);
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
