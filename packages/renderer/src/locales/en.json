@@ -264,6 +264,11 @@
     },
     "home": {
       "heading": "Home",
+      "guide": {
+        "here": "Where you are: Home overview (numbers and trends read existing services)",
+        "next": "Next: follow the primary action, or open the assistant and ask",
+        "exit": "Exit: jump to Jobs / Resume / Records in the left rail"
+      },
       "rangeLine": "These numbers cover the last {{days}} days (read from existing services, no ratios computed here)",
       "refresh": "Refresh",
       "askAssistant": "Ask assistant",

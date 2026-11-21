@@ -22,7 +22,7 @@ import type {
   UsageSummaryView,
 } from '@auto-cc/shared';
 import { DeskButton, DeskSegmented } from './ui/controls';
-import { DeskSection } from './ui/disclosure';
+import { DeskPathGuide, DeskSection } from './ui/disclosure';
 import { advanceViewTrail } from './viewTrail';
 import { isLocalSessionUrl } from './platform-choice';
 import { platformLabel } from './platform-label';
@@ -145,9 +145,11 @@ export function HomePanel() {
 
   /** 趋势块：14 天柱 + 五级漏斗（区间合计）+ 最近 5 笔。 */
   const loadTrend = useCallback(async (): Promise<HomeTrend | { error: string }> => {
+    // 柱图固定 14 天（10.11-05：14 天柱）；7/30 两档切的是漏斗与口径区间。
+    const barRange = { fromMs: nowMs - 14 * 86_400_000, toMs: nowMs };
     const range = { fromMs: nowMs - windowDays * 86_400_000, toMs: nowMs };
     const [trendReply, funnelReply, summaryReply] = await Promise.all([
-      bridge?.funnel.trend(range),
+      bridge?.funnel.trend(barRange),
       bridge?.funnel.query(range),
       bridge?.usage['ledger.summary'](5),
     ]);
@@ -215,6 +217,14 @@ export function HomePanel() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="home-panel">
+      <DeskPathGuide
+        testid="home-path-guide"
+        here={t('home.guide.here')}
+        next={t('home.guide.next')}
+        exit={t('home.guide.exit')}
+        focusSelector='[data-action="assistant-capsule"]'
+        focusLabel={t('guide.focus')}
+      />
       {/* ① 页首：招呼 + 一句区间读数 + 刷新 + 问助手 + 单一动态主行动 */}
       <section className="rounded-xl border border-line bg-ink-900/60 p-4" data-testid="home-head">
         <div className="flex flex-wrap items-baseline gap-2">
@@ -396,7 +406,7 @@ export function HomePanel() {
             <ul className="flex flex-wrap gap-3 text-[11px] text-slate-400" data-testid="home-funnel">
               {trendValue?.funnel.levels.map((level) => (
                 <li key={level.level} data-level={level.level}>
-                  {t(`funnel.level.${level.level}`)} {level.count === null ? '—' : level.count}
+                  {t(`metrics.level.${level.level}`)} {level.count === null ? '—' : level.count}
                 </li>
               ))}
             </ul>

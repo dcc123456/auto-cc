@@ -41,6 +41,7 @@ export function AssistantCapsule({ state, onToggle }: AssistantCapsuleProps) {
       action="assistant-capsule"
       variant={isOpen ? 'solid' : 'line'}
       compact
+      className="h-8"
       aria-expanded={isOpen}
       aria-controls="assistant-panel"
       aria-keyshortcuts="Control+J Meta+J"
