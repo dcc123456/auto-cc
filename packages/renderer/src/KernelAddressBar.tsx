@@ -33,6 +33,12 @@ export function KernelAddressBar() {
 
   useEffect(() => {
     void read();
+    // 地址栏挂载时内核视图可能刚被挂上、`shell.getStatus()` 还回占位 URL；补一次短延迟重读，
+    // 让输入框里出现真实地址（否则「刷新」会因为没有当前地址而按不动）。
+    const timer = window.setTimeout(() => {
+      void read();
+    }, 1_200);
+    return () => window.clearTimeout(timer);
   }, [read]);
 
   const { busy, notice, noticeTone, run } = useBridgeAction(read);

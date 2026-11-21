@@ -1,0 +1,16 @@
+10.11-29 地址栏的刷新/回退与无会话恢复（隔离 fixture 实例 · dist 构建）
+
+环境：全新 userData（tmp/g11/ab/ud-reload）、独立 CDP 10377；内核视图开 fixture 平台（loopback）。
+命令：node tmp/g11/ab-reload.mjs → tmp/g11/ab/reload.json
+
+① 回退：置灰并写明原因（不加 IPC）
+   aria-disabled=true；data-disabled-reason=HISTORY_UNAVAILABLE；
+   可见文案「内核视图没有开放历史后退口，只能用地址栏或顶栏的收起/展开」
+② 刷新：走既有 browser.page.navigate 重导航当前 URL
+   刷新前输入框与 shell 的 URL 均为 http://127.0.0.1:10233/
+   点「刷新」后提示「刷新：成功」，URL 仍为 http://127.0.0.1:10233/（未新建通道）
+③ 无会话态（10.11-29 的⑤）：地址栏在视图挂载且 URL 为 data:/空时显示
+   「还没有打开站点：内核视图现在是占位页，先到运行记录里打开会话。」+「去打开站点」（viewTrail 到运行记录）
+   注：干净实例「从未显示右栏」时不渲染槽位（裁定⑱），需先点顶栏「显示网页」把右栏调出再观察，本轮未取该切换读数。
+
+未取：刷新前后页面内容的持久读数（如页面自身时间戳）——本轮只读到成功率与 URL 稳定，按 [!] 记，不写成通过。
