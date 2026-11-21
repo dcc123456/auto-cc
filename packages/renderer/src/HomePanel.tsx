@@ -150,7 +150,8 @@ export function HomePanel() {
   const loadTrend = useCallback(async (): Promise<HomeTrend | { error: string }> => {
     const nowMs = nowRef.current;
     // 柱图固定 14 天（10.11-05：14 天柱）；7/30 两档切的是漏斗与口径区间。
-    const barRange = { fromMs: nowMs - 14 * 86_400_000, toMs: nowMs };
+    // 14 天柱：起点取 13 天前，闭区间正好 14 个自然日（原先按 14 天算会多出一根 = 15 点）。
+    const barRange = { fromMs: nowMs - 13 * 86_400_000, toMs: nowMs };
     const range = { fromMs: nowMs - windowDays * 86_400_000, toMs: nowMs };
     const [trendReply, funnelReply, summaryReply] = await Promise.all([
       bridge?.funnel.trend(barRange),

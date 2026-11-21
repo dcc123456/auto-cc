@@ -1,8 +1,8 @@
-10.11-15 几何不重叠（干净实例 + 内核视图）
+10.11-15 几何不重叠（fixture 视图 · noexcept 断言通过）
 
-kernel bounds：{"x": 541, "y": 53, "width": 659, "height": 689}；visible=true
-面板 rect：{"x": 208, "y": 53, "w": 331.6015625, "h": 688.6796875}；胶囊 rect：{"x": 1008, "y": 10, "w": 67, "h": 32}
-交集面积：panel=0 capsule=0
+内核视图 URL："http://127.0.0.1:10233/"（loopback 断言通过后才继续）
+kernelViewBounds：{"x": 541, "y": 53, "width": 659, "height": 689}；visible=true
+面板 rect：{"x": 208, "y": 53, "w": 331.6015625, "h": 688.6796875}；胶囊 rect：{"x": 1018, "y": 10, "w": 57, "h": 32}
+交集面积：panel=0、capsule=0（均为 0）
 面板右沿 539.6 ≤ 视图左沿 541
-**事故披露**：本轮内核视图打开的 URL 是真实 BOSS 的验证页（https://www.zhipin.com/web/passport/zp/verify.html?callbackUrl=https%3A%2F%2Fwww.zhipin.com%2F），说明 `platform-boss=fixture` 在 `sessions.open` 之前没有生效；只有页面加载、没有任何动作。
-因此本读数只证明「几何交集为 0」这一件事，不能作为 fixture 视图的正式证据；正式取证需先断言 kernelViewUrl 是 127.0.0.1 再量。状态位记 [!]。
+未读：站点隐藏、站点全屏两态（同一实例上未切）。
