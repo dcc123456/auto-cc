@@ -558,6 +558,9 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
         // 若站点会自动发默认问候，必须在点「立即沟通」之前停下，否则应用账本永远对不上那一发。
         const detailUrl = new URL(`/job_detail/${jobId}`, pack.startUrl).href;
         await page.navigate(detailUrl);
+        // 真站实测（2026-11-21）：按钮可见且未被遮挡，但 `act.click` 内部的 clickable 稳定性判定会先跑
+        // `waitForTimeoutMs`（默认 5000）——先等它出现再点，别让一次「页面还没长完」直接耗光那 5 秒。
+        await act.waitFor({ kind: 'appear', spec: startSpec });
         try {
           await act.click(startSpec);
         } catch (error) {
