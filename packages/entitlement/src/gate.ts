@@ -309,7 +309,15 @@ export class EntitlementGateService extends Service {
       return { value: outcome.value, ledgerId: completed.ledgerId };
     } catch (error) {
       const reason = error instanceof AppError ? error.code : 'OUTBOUND_UNKNOWN_ERROR';
-      this.ledger.markAttemptUnknown(key, reason, context.nowMs);
+      if (reason === 'OUTBOUND_UNTRACKED_SITE_GREETING') {
+        // 站点代发了默认问候（应用没发正文）：这一发有可核的页面证据，标 site-default 而不是 unknown，
+        // 人确认后才允许继续；仍然从这里抛出「停」，绝不在写完后自动重发（spec 10.11-26）。
+        const details = error instanceof AppError ? (error.details as Record<string, unknown> | undefined) : undefined;
+        const summary = typeof details?.['evidenceSummary'] === 'string' ? details['evidenceSummary'] : null;
+        this.ledger.markAttemptSiteDefault(key, summary, context.nowMs);
+      } else {
+        this.ledger.markAttemptUnknown(key, reason, context.nowMs);
+      }
       throw error;
     }
   };
