@@ -321,7 +321,8 @@
         "tracking": "看追踪与统计",
         "more": "还有 {{count}} 条（展开）",
         "platformFallback": "招聘平台"
-      }
+      },
+      "unavailable.timeout": "读取超时（8 秒没有回来）"
     },
     "assistant": {
       "capsule": "助手",

@@ -62,11 +62,15 @@ const dayStartMs = (nowMs: number): number => {
  * @param load 读取函数（成功返回整块读数）
  * @returns 这一块的读数状态与 `reload`（供「重试」用）
  */
-function useBlock<T>(load: () => Promise<T | { error: string }>): [BlockState<T>, () => void] {
+function useBlock<T>(load: () => Promise<T | { error: string }>, timeoutReason: string): [BlockState<T>, () => void] {
   const [state, setState] = useState<BlockState<T>>({ state: 'loading' });
   const run = useCallback(() => {
     setState({ state: 'loading' });
-    void load()
+    // 服务被摘掉后桥调用可能**永不返回**（下游 PENDING），界面不能停在骨架上：超时落「不可用 + 原因」。
+    const timedOut = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutReason)), 8_000);
+    });
+    void Promise.race([load(), timedOut])
       .then((value) => {
         if (value && typeof value === 'object' && 'error' in value) setState({ state: 'failed', reason: value.error });
         else setState({ state: 'ready', value });
@@ -75,7 +79,7 @@ function useBlock<T>(load: () => Promise<T | { error: string }>): [BlockState<T>
         // 服务挂掉/桥接抛错时必须落到「不可用 + 原因」，不能停在骨架上（spec 10.11-08）。
         setState({ state: 'failed', reason: error instanceof Error ? error.message : String(error) });
       });
-  }, [load]);
+  }, [load, timeoutReason]);
   useEffect(() => {
     run();
   }, [run]);
@@ -186,6 +190,8 @@ export function HomePanel() {
       bridge?.outbound['authorization.current'](),
       bridge?.journey['unattended.view'](),
     ]);
+    const failure = [sessionsReply, docsReply, authReply, runReply].find((reply) => !reply?.ok);
+    if (failure) throw new Error(failure.error?.message ?? t('home.unavailable.noBridge'));
     return {
       platforms: sessionsReply?.ok ? sessionsReply.value.platforms : [],
       docs: docsReply?.ok ? docsReply.value : [],
@@ -194,9 +200,10 @@ export function HomePanel() {
     };
   }, [bridge]);
 
-  const [numbers, reloadNumbers] = useBlock(loadNumbers);
-  const [trend, reloadTrend] = useBlock(loadTrend);
-  const [next, reloadNext] = useBlock(loadNext);
+  const timeoutReason = t('home.unavailable.timeout');
+  const [numbers, reloadNumbers] = useBlock(loadNumbers, timeoutReason);
+  const [trend, reloadTrend] = useBlock(loadTrend, timeoutReason);
+  const [next, reloadNext] = useBlock(loadNext, timeoutReason);
 
   /** 「接下来」的六条（按阻断优先），并按当前状态算出哪几条该出现。 */
   const steps = useMemo(() => {
@@ -530,9 +537,12 @@ export function HomePanel() {
           </details>
         ) : null}
         {next.state === 'failed' ? (
-          <DeskButton action="home-next-retry" variant="line" compact onClick={reloadNext}>
-            {t('home.retry')}
-          </DeskButton>
+          <p className="mt-1 text-[11px] text-amber" data-testid="home-next-unavailable">
+            {t('home.unavailable', { reason: next.reason })}
+            <DeskButton action="home-next-retry" variant="line" compact onClick={reloadNext}>
+              {t('home.retry')}
+            </DeskButton>
+          </p>
         ) : null}
         {numbers.state === 'failed' ? (
           <DeskButton action="home-numbers-retry" variant="line" compact onClick={reloadNumbers}>

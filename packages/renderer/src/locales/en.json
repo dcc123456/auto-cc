@@ -321,7 +321,8 @@
         "tracking": "See tracking and stats",
         "more": "{{count}} more (expand)",
         "platformFallback": "the job platform"
-      }
+      },
+      "unavailable.timeout": "Read timed out (nothing in 8s)"
     },
     "assistant": {
       "capsule": "Assistant",

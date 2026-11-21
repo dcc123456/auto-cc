@@ -1,0 +1,13 @@
+10.11-09 一块失败只坏一块（隔离实例 · dist 构建 · 停 resume-doc）
+
+环境：全新 userData（tmp/g11/stop/ud）、独立 CDP 10376；命令 node tmp/g11/stop-probe.mjs。
+做法：plugins.stop('resume-doc') → 点「刷新」→ 等 9s 读三块。下游 resume-editor/resume-parse/resume-snapshot 随之 PENDING 是 cordis 正常行为。
+
+① 原始桥信封：界面侧收到 `服务未挂载：resume`（resume.doc.list 失败的原因原文）；
+   脚本直调在 15s 内没有返回（PENDING 下游把调用挂住），这一点如实记，不当成功读数。
+② 「接下来」块：显示「这一块读不到：服务未挂载：resume」+ 可点的「重试」（data-testid=home-next-unavailable）。
+   同时新增的 8s 超时兜底生效（否则该块会永远停在骨架、不给原因）。
+③ 数字块仍出数：今日额度/岗位进度/投递成功/待办 四格照常渲染（读数见 JSON）；
+④ 趋势块仍出数：home-trend-body 存在；骨架数为 0（没有卡在加载态）。
+
+证据图：10.11-09-degrade.png
