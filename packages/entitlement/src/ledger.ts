@@ -52,7 +52,8 @@ export const OUTBOUND_STATE_MIGRATION_VERSION = 43;
  *
  * 为什么必须重建表而不是改 43 号的建表语句：43 已记进 `schema_migrations`，老库不会重跑；
  * 而 `status` 上有 CHECK，SQLite 改不了，只能新表 + 搬数据。
- * 同时把 `confirmed_at` 一并加上（spec 10.11-26：只由人在界面按一次才写），不紧跟着再来第二个迁移。
+ * 同时把 `confirmed_at`（只由人在界面按一次才写）与 `evidence_summary`（站点默认问候的脱敏摘要）
+ * 一并加上，不紧跟着再来第二个迁移。摘要**不塞进 `receipt_id`**：那一列在四方对账里代表应用自己发出的回执 id。
  * 搬数据时**原样保留**已有的 unknown 行（它们正是历史解锁的对象），四元组唯一约束在重建后仍然生效。
  */
 export const OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46;
@@ -76,11 +77,12 @@ export const outboundAttemptsSiteDefaultMigration = {
         reason TEXT,
         updated_at INTEGER NOT NULL,
         confirmed_at INTEGER,
+        evidence_summary TEXT,
         UNIQUE (platform, target_id, action, resume_version)
       )`);
       db.exec(`INSERT INTO outbound_attempts_next
-        (id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at)
-        SELECT id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, NULL
+        (id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at, evidence_summary)
+        SELECT id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, NULL, NULL
         FROM outbound_attempts`);
       db.exec('DROP TABLE outbound_attempts');
       db.exec('ALTER TABLE outbound_attempts_next RENAME TO outbound_attempts');

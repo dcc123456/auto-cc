@@ -65,6 +65,7 @@ describe('迁移 46：尝试台账扩宽（site-default + confirmed_at）', () =
       expect(rows.map((row) => row['target_id'])).toEqual(['job-a', 'job-b', 'job-c', 'job-d', 'job-e']);
       expect(rows.filter((row) => row['status'] === 'unknown')).toHaveLength(4);
       expect(rows.every((row) => row['confirmed_at'] === null)).toBe(true);
+      expect(rows.every((row) => row['evidence_summary'] === null)).toBe(true);
       expect(rows.find((row) => row['target_id'] === 'job-e')?.['ledger_id']).toBe(7);
       // 新状态可写
       db.prepare(
