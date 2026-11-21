@@ -281,7 +281,12 @@ export function App() {
       </div>
       {/* 助手面板占主区右沿的一条宽度：内核站点在 `main` 之外，由它自己的 ResizeObserver 上报让位，
           所以「DOM 悬在原生视图上」这件事根本不会发生（plan §14.6 的几何判据）。 */}
-      <AssistantDock state={assistant} onMinimize={() => setAssistant('open')} onClose={() => setAssistant('closed')} />
+      <AssistantDock
+        state={assistant}
+        onMinimize={() => setAssistant('minimized')}
+        onExpand={() => setAssistant('open')}
+        onClose={() => setAssistant('closed')}
+      />
     </main>
   );
 

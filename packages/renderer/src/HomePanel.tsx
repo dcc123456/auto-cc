@@ -9,7 +9,7 @@
  *    不用一个 `Promise.all` 把整页绑死。
  * 3. 空态三态：真没有「—」+ 一句 + 入口；不可用「—」+ 原因原文 + 重试；读取中给与终态等高的骨架。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   FunnelTrendView,
@@ -110,11 +110,14 @@ export function HomePanel() {
   const { t } = useTranslation();
   const bridge = window.autoCC;
   const [windowDays, setWindowDays] = useState<TrendWindow>(7);
-  const nowMs = Date.now();
-  const todayStart = dayStartMs(nowMs);
+  // 读数用的「此刻」只在**读的那一刻**取：写进渲染期会让 loader 身份每次渲染都变，
+  // effect 跟着无限重跑（本轮实测直接打满渲染进程、CDP 都超时）。刷新时再推进一次。
+  const nowRef = useRef(Date.now());
 
   /** 数字块：额度、追踪、投递成功数、最近一笔、授权数与执行器完成数（逐口读，缺一不影响别的格）。 */
   const loadNumbers = useCallback(async (): Promise<HomeNumbers> => {
+    const nowMs = nowRef.current;
+    const todayStart = dayStartMs(nowMs);
     const [funnelReply, trackingReply, summaryReply, authReply, runReply] = await Promise.all([
       bridge?.funnel.query({ fromMs: todayStart, toMs: nowMs }),
       bridge?.journey['tracking.list'](),
@@ -141,10 +144,11 @@ export function HomePanel() {
       authorizedJobs: authReply?.ok ? (authReply.value?.targets.length ?? 0) : null,
       runCompleted: runReply?.ok ? runReply.value.completed.length : null,
     };
-  }, [bridge, nowMs, todayStart]);
+  }, [bridge]);
 
   /** 趋势块：14 天柱 + 五级漏斗（区间合计）+ 最近 5 笔。 */
   const loadTrend = useCallback(async (): Promise<HomeTrend | { error: string }> => {
+    const nowMs = nowRef.current;
     // 柱图固定 14 天（10.11-05：14 天柱）；7/30 两档切的是漏斗与口径区间。
     const barRange = { fromMs: nowMs - 14 * 86_400_000, toMs: nowMs };
     const range = { fromMs: nowMs - windowDays * 86_400_000, toMs: nowMs };
@@ -161,7 +165,7 @@ export function HomePanel() {
       funnel: funnelReply.value,
       recent: summaryReply?.ok ? summaryReply.value.recent : [],
     };
-  }, [bridge, nowMs, t, windowDays]);
+  }, [bridge, t, windowDays]);
 
   /** 接下来那块：登录态 / 简历 / 授权单 / 执行器（阻断优先排序用它）。 */
   const loadNext = useCallback(async (): Promise<HomeNext> => {

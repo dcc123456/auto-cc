@@ -85,6 +85,8 @@ export interface AssistantDockProps {
   state: AssistantState;
   /** 最小化（保留 48px 状态条） */
   onMinimize: () => void;
+  /** 从最小化恢复展开（与最小化分开：两颗键做的是两件事，不能共用一个回调） */
+  onExpand: () => void;
   /** 关闭（收起，不卸载） */
   onClose: () => void;
 }
@@ -97,59 +99,49 @@ export interface AssistantDockProps {
  * @param props 见 `AssistantDockProps`
  * @returns aside（展开/最小化两态）+ 收起时的零高度占位
  */
-export function AssistantDock({ state, onMinimize, onClose }: AssistantDockProps) {
+export function AssistantDock({ state, onMinimize, onExpand, onClose }: AssistantDockProps) {
   const { t } = useTranslation();
-  if (state === 'closed') {
-    // 收起时主区拿回整条宽度；面板本体仍挂载（`display:none`），状态不丢。
-    return (
-      <aside id="assistant-panel" data-testid="assistant-panel" data-state="closed" className="hidden">
-        <ChatPanel />
-      </aside>
-    );
-  }
-  if (state === 'minimized') {
-    return (
-      <aside
-        id="assistant-panel"
-        data-testid="assistant-panel"
-        data-state="minimized"
-        className="flex w-[min(420px,100%-24px)] shrink-0 flex-col border-l border-line bg-ink-900/80"
-      >
-        <div className="flex h-12 items-center gap-2 px-3" data-testid="assistant-minimized-bar">
-          <MessageCircle size={13} className="shrink-0 text-slate-400" />
-          <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{t('assistant.minimizedLine')}</span>
-          <DeskButton action="assistant-expand" variant="ghost" compact onClick={onMinimize}>
-            {t('assistant.expand')}
-          </DeskButton>
-          <DeskButton action="assistant-close-min" variant="ghost" compact onClick={onClose}>
-            <X size={12} />
-            <span className="sr-only">{t('assistant.close')}</span>
-          </DeskButton>
-        </div>
-      </aside>
-    );
-  }
+  const isOpen = state === 'open';
+  const isMin = state === 'minimized';
   return (
     <aside
       id="assistant-panel"
       data-testid="assistant-panel"
-      data-state="open"
+      data-state={state}
       aria-label={t('assistant.panelTitle')}
-      className="flex w-[min(420px,100%-24px)] min-h-0 shrink-0 flex-col border-l border-line bg-ink-950/80"
+      className={`${state === 'closed' ? 'hidden' : 'flex'} w-[min(420px,100%-24px)] shrink-0 flex-col border-l border-line bg-ink-950/80 ${isMin ? 'h-12 self-start' : 'min-h-0'}`}
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-2">
+      {/* 三态共用一条顶栏：最小化时它就是那 48px 的状态条，两个键换成「展开/关闭」。 */}
+      <div
+        data-testid={isMin ? 'assistant-minimized-bar' : undefined}
+        className={`flex shrink-0 items-center gap-2 border-b border-line px-2 ${isMin ? 'h-12' : 'h-9'}`}
+      >
         <MessageCircle size={13} className="shrink-0 text-slate-400" />
-        <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{t('assistant.panelTitle')}</span>
-        <DeskButton action="assistant-minimize" variant="ghost" compact onClick={onMinimize}>
-          <Minus size={12} />
-          <span className="sr-only">{t('assistant.minimize')}</span>
-        </DeskButton>
-        <DeskButton action="assistant-close" variant="ghost" compact onClick={onClose}>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">
+          {isMin ? t('assistant.minimizedLine') : t('assistant.panelTitle')}
+        </span>
+        {isMin ? (
+          <DeskButton action="assistant-expand" variant="ghost" compact onClick={onExpand}>
+            {t('assistant.expand')}
+          </DeskButton>
+        ) : (
+          <DeskButton action="assistant-minimize" variant="ghost" compact onClick={onMinimize}>
+            <Minus size={12} />
+            <span className="sr-only">{t('assistant.minimize')}</span>
+          </DeskButton>
+        )}
+        <DeskButton
+          action={isMin ? 'assistant-close-min' : 'assistant-close'}
+          variant="ghost"
+          compact
+          onClick={onClose}
+        >
           <X size={12} />
           <span className="sr-only">{t('assistant.close')}</span>
         </DeskButton>
       </div>
-      <div className="min-h-0 flex-1">
+      {/* 对话本体常驻挂载、只在最小化/收起时藏起来：草稿与 run 订阅都不许因为换态而丢（10.11-12）。 */}
+      <div className={`${isOpen ? 'flex' : 'hidden'} min-h-0 flex-1 flex-col`}>
         <ChatPanel />
       </div>
     </aside>
