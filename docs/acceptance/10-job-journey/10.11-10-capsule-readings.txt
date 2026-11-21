@@ -1,0 +1,6 @@
+10.11-10 读数（干净实例 · 构建产物 dist/index.html 加载）
+环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
+命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+
+胶囊：{"present": true, "height": 24, "width": 57, "ariaExpanded": "false", "ariaControls": "assistant-panel", "ariaKeyshortcuts": "Control+J Meta+J", "badge": null, "panelDisplay": "none"}
+注：本轮读数为修复前构建（height=24）；h-8（32px）已在 cff6ac3 提交，重拍时实例脚本挂住，待重取。

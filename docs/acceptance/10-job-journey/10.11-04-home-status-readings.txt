@@ -1,0 +1,7 @@
+10.11-04 读数（干净实例 · 构建产物 dist/index.html 加载）
+环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
+命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+
+无人值守："无人值守：只建议"
+执行器："执行器：idle · 当前 — · 完成 0 · 待办 0"
+未取到：已授权 / 暂停 两态。

@@ -1,0 +1,7 @@
+10.11-12 读数（干净实例 · 构建产物 dist/index.html 加载）
+环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
+命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+
+收起：state="closed" display="none" 仍挂载=true
+展开：state="open" rect={"x": 780, "y": 51, "w": 420, "h": 691}
+未取到：最小化态与「收起后草稿仍在」。

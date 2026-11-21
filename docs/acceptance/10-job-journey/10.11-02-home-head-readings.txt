@@ -1,0 +1,8 @@
+10.11-02 读数（干净实例 · 构建产物 dist/index.html 加载）
+环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
+命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+
+页首文本："首页\n下面这些数字是近 7 天的读数（只读既有服务，不自己算比率）\n刷新\n问助手\n先登录 BOSS 直聘"
+主行动颗数：1（只有一颗）；当前 step="login"（未登录 → 先登录）
+区间读数："下面这些数字是近 7 天的读数（只读既有服务，不自己算比率）"
+未取到：无简历状态的第二读数。

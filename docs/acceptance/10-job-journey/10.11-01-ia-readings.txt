@@ -1,0 +1,6 @@
+10.11-01 读数（干净实例 · 构建产物 dist/index.html 加载）
+环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
+命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+
+导航项数：7；第一项："nav-chat"（key 仍是 chat）；标签：["首页", "岗位", "简历", "流程", "模型", "运行记录", "设置"]
+助手不在导航里：true；Home 面板存在：true；旧对话面板此刻不可见（在收起的面板里）：true
