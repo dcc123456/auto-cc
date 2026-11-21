@@ -239,8 +239,9 @@ function toAttemptView(row: OutboundAttemptRow): OutboundAttemptView {
     receiptId: row.receipt_id,
     reason: row.reason,
     updatedAt: Number(row.updated_at),
-    confirmedAt: row.confirmed_at === null ? null : Number(row.confirmed_at),
-    evidenceSummary: row.evidence_summary,
+    // `== null` 同时兜住 null 与「这一列还没读到」（undefined）：后者曾被 Number(undefined) 变成 NaN。
+    confirmedAt: row.confirmed_at == null ? null : Number(row.confirmed_at),
+    evidenceSummary: row.evidence_summary ?? null,
   };
 }
 
