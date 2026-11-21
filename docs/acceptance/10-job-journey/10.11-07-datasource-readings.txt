@@ -1,0 +1,8 @@
+10.11-07 数据源白名单与零自算（静态扫描 + 读数）
+
+HomePanel 里的 bridge 调用全集（grep）：
+bridge?.funnel.query / bridge?.funnel.trend / bridge?.journey['tracking.list'] / bridge?.journey['unattended.view'] /
+bridge?.outbound['authorization.current'] / bridge?.resume['doc.list'] / bridge?.sessions.status / bridge?.usage['ledger.summary']
+全部落在 plan §14.3.2 的白名单里，没有新口。
+4 数字的口径读数：[{"cell": "quota", "value": "0/10", "caption": "剩余 10 · 已用 0 / 上限 10"}, {"cell": "progress", "value": "0", "caption": "已投递 0 · 已约面 0"}, {"cell": "sends", "value": "0", "caption": "近 7 天成功笔数 · 最近一笔 — —"}, {"cell": "todo", "value": "0", "caption": "授权 0 岗 · 已完成 0"}]
+静态扫描：`转化率|回复率|约面率` 零命中；`reduce(` 零命中；`setInterval` 零命中（不加轮询）。

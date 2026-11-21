@@ -1,0 +1,5 @@
+10.11-20 双语与无裸 key（dist 构建）
+
+中文 DOM 裸 key（funnel.level.*）：false（修复后为 false）
+切英文：导航 ["Home", "Jobs", "Resume", "Flows", "Models", "Records", "Settings"]；胶囊 "Assistant"；裸 key false
+两份语言包扁平化 key 数一致（脚本对比 zh-only/en-only 均为空），新增 home.* 与 assistant.* 双语同批。

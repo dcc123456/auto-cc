@@ -1,7 +1,7 @@
-10.11-12 读数（干净实例 · 构建产物 dist/index.html 加载）
-环境：全新 userData（tmp/g11/userdata）、独立 CDP 10370、macOS arm64；只读本机服务，未开任何站点视图。
-命令：node tmp/g11/shell-evidence.mjs → tmp/g11/shell-readings.json
+10.11-12 面板三态（干净实例 · dist 构建 · 修复后）
 
-收起：state="closed" display="none" 仍挂载=true
-展开：state="open" rect={"x": 780, "y": 51, "w": 420, "h": 691}
-未取到：最小化态与「收起后草稿仍在」。
+最小化：{"state": "minimized", "height": 48, "bar": true}（height=48、状态条在）
+草稿：最小化前输入 "草稿保留测试"；切到岗位页再展开后 "草稿保留测试"（草稿保留、run 未断）
+收起：state=closed；display=none；面板仍挂载（见 10.11-13 读数）
+展开 rect：{"x": 208, "y": 53, "w": 331.6015625, "h": 688.6796875}（面板完整落在主区内）
+未读：非模态（无遮罩 / Tab 不被吞 / 背景可滚可点）三小项。
