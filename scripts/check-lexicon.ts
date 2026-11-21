@@ -8,7 +8,10 @@
  *
  * 三条判据：
  * 1. **全仓跟踪的文本文件不许出现被禁的字**（码位 U+817F；本文件用 `String.fromCharCode` 写它，
- *    免得判据本体把自己判红）。豁免只允许两处，且必须是"禁令的点名现场"：`AGENTS.md`
+ *    免得判据本体把自己判红）。
+ *    **2026-11-22 收窄**：只放行「跑腿」「火腿」两个完整词内部的该字（见 `ALLOWED_WORDS`），
+ *    因为这些是常用词、不是被禁的比喻说法；词外任何位置的该字照旧判红，规则本意不变。
+ *    豁免只允许两处，且必须是"禁令的点名现场"：`AGENTS.md`
  *    （规则要点名禁什么）与本脚本；豁免里的命中数照样打印在收尾行，不做静默放行。
  * 2. **页面文案不许把这个说法翻译成英文**：`packages/renderer/src/locales/*.json` 的**值**里
  *    不许出现 `leg` / `legs` 一词（键名不算——`settings.model.leg.*` 与 `data-model-leg`、
@@ -53,6 +56,62 @@ const VALUE_LINE = /^\s*"[^"]+"\s*:\s*"(.*)"\s*,?\s*$/;
 const BANNED_EN = /\b(?:leg|legs)\b/i;
 
 /**
+ * 词级放行清单（2026-11-22 用户裁定收窄 §4.6）。
+ *
+ * 机检按字（U+817F）扫全仓，会把「代跑腿」「火腿」这类**常用词**一起判红——那是检查器过宽，不是规则本意。
+ * 只放行这两个完整词内部的该字，词外任何位置照旧判红；新增放行词必须按 dated 裁定流程登记，不许就地加。
+ */
+const ALLOWED_WORDS: readonly string[] = ['跑腿', '火腿'];
+
+/**
+ * 统计一段文本里「不被任何放行词覆盖」的该字出现次数与行号。
+ * @param text 待检文本
+ * @param banned 被禁的字（本文件用码位构造，避免判据本体自红）
+ * @param allowedWords 放行词；该字落在一个完整放行词的字符区间内即不计
+ * @returns hits 未覆盖的出现次数；lines 命中行号（1 起）
+ */
+function scanBanned(text: string, banned: string, allowedWords: readonly string[]): { hits: number; lines: number[] } {
+  const covered: { start: number; end: number }[] = [];
+  for (const word of allowedWords) {
+    if (!word.includes(banned)) continue;
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(word, from);
+      if (at < 0) break;
+      covered.push({ start: at, end: at + word.length });
+      from = at + 1;
+    }
+  }
+  const lines: number[] = [];
+  let hits = 0;
+  let at = text.indexOf(banned);
+  while (at >= 0) {
+    if (!covered.some((span) => at >= span.start && at < span.end)) {
+      hits += 1;
+      lines.push(text.slice(0, at).split('\n').length);
+    }
+    at = text.indexOf(banned, at + 1);
+  }
+  return { hits, lines };
+}
+
+/**
+ * 判据 1 收窄后的自检：放行词内的该字不计、词外仍计。每次运行都跑（两段内存字符串，代价可忽略），
+ * 白名单写错的提交会在这里立刻判红，而不是等下一个撞上常用词的人来发现。
+ * @returns 两条用例的结论；任一条不符即视为检查器坏了
+ */
+function selfCheck(): string[] {
+  const banned = BANNED_CHAR;
+  const allowed = scanBanned(`代跑${banned}`, banned, ALLOWED_WORDS);
+  const blocked = scanBanned(`这条${banned}`, banned, ALLOWED_WORDS);
+  const verdicts = [
+    `代跑腿（放行词内）→ hits=${String(allowed.hits)}（期望 0）`,
+    `这条腿（词外）→ hits=${String(blocked.hits)}（期望 1）`,
+  ];
+  return allowed.hits === 0 && blocked.hits === 1 ? [] : verdicts;
+}
+
+/**
  * 反向验证的口（与 `check-dashboard-readonly.ts` 同形）：命令行实参换成被检文件。
  * 违规副本只能落在被忽略的 `tmp/`（AGENTS.md §7.5），不能为做实验去动真文件——何况真文件一旦变脏，
  * 下面的延后机制就会把它接住，实验永远只拿到 EXIT=0。所以指定实参时**延后与豁免都不启用**，
@@ -81,20 +140,20 @@ let exemptHits = 0;
 const deferred: string[] = [];
 const probing = PROBE_TARGETS.length > 0;
 
+/** 自检失败的唯一原因就是检查器坏了，与仓内容无关，所以单独成一条 problem。 */
+const selfCheckFailures = selfCheck();
+
 for (const relPath of probing ? PROBE_TARGETS : tracked) {
   if (!TEXT_EXT.test(relPath) || !existsSync(relPath)) continue;
   const text = readFileSync(relPath, 'utf8');
 
   const exempt = probing ? undefined : EXEMPT.find((entry) => entry.path === relPath);
-  const hits = text.split(BANNED_CHAR).length - 1;
+  const rawHits = text.split(BANNED_CHAR).length - 1;
+  const { hits, lines: hitLines } = scanBanned(text, BANNED_CHAR, ALLOWED_WORDS);
   if (exempt) {
-    exemptHits += hits;
+    exemptHits += rawHits;
   } else if (hits > 0) {
-    const lines = text.split(/\r?\n/);
-    const marked: string[] = [];
-    lines.forEach((line, index) => {
-      if (line.includes(BANNED_CHAR)) marked.push(`${relPath}:${String(index + 1)}`);
-    });
+    const marked = hitLines.map((line) => `${relPath}:${String(line)}`);
     if (!probing && DEFFER_WHILE_DIRTY && dirty.has(relPath)) {
       deferred.push(`${relPath}（${String(hits)} 处，脏区中）`);
     } else {
@@ -130,10 +189,21 @@ if (!probing && (scannedTextFiles === 0 || scannedLocaleFiles === 0)) {
   );
 }
 
+if (selfCheckFailures.length > 0) {
+  problems.push(`检查器自检失败：${selfCheckFailures.join('；')}（词级放行清单写坏了，先修检查器）`);
+}
+
 if (problems.length) {
   console.error('✖ 术语禁令静态检查未通过（用户裁定 2026-10-12 / AGENTS.md §4.6）：');
   for (const problem of problems) console.error(`  - ${problem}`);
   process.exit(1);
+}
+
+if (process.argv.includes('--self-check')) {
+  console.log('✔ 词级放行自检：');
+  for (const line of [`代跑${BANNED_CHAR}（放行词内）→ 期望 hits=0`, `这条${BANNED_CHAR}（词外）→ 期望 hits=1`])
+    console.log(`  - ${line}`);
+  console.log(`  - 实际：${selfCheck().length === 0 ? '两条均符合' : selfCheck().join('；')}`);
 }
 
 if (probing) {
@@ -147,6 +217,7 @@ console.log(
   `✔ 术语禁令保持（扫描 ${String(scannedTextFiles)} 个跟踪文本文件、${String(scannedLocaleFiles)} 份语言包的值：` +
     `被禁的字在已进主干的内容里 0 处；` +
     `脏区延后 ${String(deferred.length)} 份${deferred.length > 0 ? `（${deferred.join('、')}）—— 落地即判，本窗不替它们清` : ''}；` +
+    `放行词 ${String(ALLOWED_WORDS.length)} 个（${ALLOWED_WORDS.join('、')}，词级；自检 2/2 通过）；` +
     `豁免 ${String(EXEMPT.length)} 处（${EXEMPT.map((entry) => `${entry.path}——${entry.why}`).join('；')}）` +
     `内共 ${String(exemptHits)} 处，逐处都是禁令本体；二进制与素材文件不在扫描面内，见 plan §3.32 登记的边界）`,
 );
