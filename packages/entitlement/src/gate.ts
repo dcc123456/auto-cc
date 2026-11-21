@@ -128,6 +128,7 @@ export class EntitlementGateService extends Service {
         },
       );
     }
+    if (attempt.status === 'site-default' && attempt.confirmedAt !== null) return;
     if (attempt.status !== 'failed') {
       throw new AppError(
         'OUTBOUND_RECONCILIATION_REQUIRED',
@@ -346,6 +347,14 @@ export class EntitlementGateService extends Service {
         inspection.status === 'absent' ||
         (before.receiptId !== null && inspection.receiptId !== undefined && inspection.receiptId !== before.receiptId);
       return { status: differs ? 'conflict' : 'already-succeeded', canResume: false, attempt: before };
+    }
+    if (before.status === 'site-default') {
+      // 站点默认问候：只有人确认过才允许续发；确认后仍不落账、不扣额（spec 10.11-26）。
+      return {
+        status: before.confirmedAt === null ? 'unknown' : 'not-sent',
+        canResume: before.confirmedAt !== null,
+        attempt: before,
+      };
     }
     if (inspection.status === 'unknown') return { status: 'unknown', canResume: false, attempt: before };
     if (inspection.status === 'absent') {

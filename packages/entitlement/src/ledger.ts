@@ -495,6 +495,32 @@ export class UsageLedgerService extends Service {
   };
 
   /**
+   * 人确认「站点默认问候」这件事：写 `confirmed_at`，同目标同一天只允许一次。
+   *
+   * 幂等口径：已经确认过的行原样返回、`confirmed_at` 不变（第二次确认不再写入）。
+   * 历史遗留的 `unknown` 与 `site-default` 都走这一口：确认后统一改判为 `site-default`，
+   * 闸门据此放行；`unknown` 本身不会被自动当成 `site-default` 放行（只有人确认过的才会变）。
+   * @param key 完整去重键
+   * @param nowMs 确认时刻（毫秒，只有人按钮那一刻传）
+   * @returns 更新后的尝试；原记录不存在或状态不可确认时为 null/原值
+   */
+  confirmAttemptSiteDefault = (key: OutboundAttemptKey, nowMs = Date.now()): OutboundAttemptView | null => {
+    const before = this.attemptFor(key);
+    if (!before) return null;
+    if (before.status !== 'site-default' && before.status !== 'unknown') return before;
+    if (before.confirmedAt !== null) return before;
+    this.store.db
+      .prepare(
+        `UPDATE outbound_attempts
+           SET status = 'site-default', confirmed_at = ?, updated_at = ?
+         WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ?
+           AND status IN ('site-default', 'unknown') AND confirmed_at IS NULL`,
+      )
+      .run(nowMs, nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
+    return this.attemptFor(key);
+  };
+
+  /**
    * 只读对账明确证明页面没有这次外发后，允许显式重试；这不是自动失败重放。
    * @param key 完整去重键
    * @param nowMs 对账时刻（毫秒）
