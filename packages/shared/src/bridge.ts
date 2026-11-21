@@ -813,11 +813,16 @@ export type OutboundAttemptKey = {
 /** 持久化外发尝试：成功、未知与已在仿站确认未发生都可区分，不靠进程内记忆。 */
 export type OutboundAttemptView = OutboundAttemptKey & {
   workflowRunId: string | null;
-  status: 'in-flight' | 'succeeded' | 'unknown' | 'failed';
+  status: 'in-flight' | 'succeeded' | 'unknown' | 'failed' | 'site-default';
   ledgerId: number | null;
+  /** 应用自己发出的回执 id；`site-default` 行恒为 null（页面摘要另存 `evidenceSummary`） */
   receiptId: string | null;
   reason: string | null;
   updatedAt: number;
+  /** 人确认过站点默认问候的时刻（毫秒）；只由人在界面按一次写入 */
+  confirmedAt: number | null;
+  /** 站点默认问候的脱敏摘要（原文片段与页面上的时间等） */
+  evidenceSummary: string | null;
 };
 
 /** 一键停用的持久化读数；历史账本与投递记录不因开关变化而删除。 */

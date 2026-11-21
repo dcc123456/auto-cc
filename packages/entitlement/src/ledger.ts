@@ -223,6 +223,8 @@ type OutboundAttemptRow = {
   receipt_id: string | null;
   reason: string | null;
   updated_at: number | bigint;
+  confirmed_at: number | bigint | null;
+  evidence_summary: string | null;
 };
 
 /**
@@ -242,6 +244,8 @@ function toAttemptView(row: OutboundAttemptRow): OutboundAttemptView {
     receiptId: row.receipt_id,
     reason: row.reason,
     updatedAt: Number(row.updated_at),
+    confirmedAt: row.confirmed_at === null ? null : Number(row.confirmed_at),
+    evidenceSummary: row.evidence_summary,
   };
 }
 
