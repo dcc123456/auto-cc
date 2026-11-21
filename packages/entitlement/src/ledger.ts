@@ -505,11 +505,36 @@ export class UsageLedgerService extends Service {
    * @param nowMs 确认时刻（毫秒，只有人按钮那一刻传）
    * @returns 更新后的尝试；原记录不存在或状态不可确认时为 null/原值
    */
-  confirmAttemptSiteDefault = (key: OutboundAttemptKey, nowMs = Date.now()): OutboundAttemptView | null => {
-    const before = this.attemptFor(key);
-    if (!before) return null;
-    if (before.status !== 'site-default' && before.status !== 'unknown') return before;
-    if (before.confirmedAt !== null) return before;
+  confirmAttemptSiteDefault = (
+    key: OutboundAttemptKey,
+    nowMs = Date.now(),
+  ): { attempt: OutboundAttemptView; matchedCount: number } | null => {
+    // 宽口径：界面上人看到的是「这个岗位有一条站点代发的问候」，没人知道也不该知道当时的 resume_version。
+    // 先按精确四元组找；找不到就按 platform+target+action 找阻塞行（site-default/unknown 且未确认），
+    // 命中多行时取 updated_at 最新的一条改判，其余保持，并把命中条数回给界面。
+    const blocking = this.store.db
+      .prepare(
+        `SELECT platform, target_id, action, resume_version
+           FROM outbound_attempts
+          WHERE platform = ? AND target_id = ? AND action = ?
+            AND status IN ('site-default', 'unknown') AND confirmed_at IS NULL
+          ORDER BY updated_at DESC`,
+      )
+      .all(key.platform, key.targetId, key.action) as {
+      platform: string;
+      target_id: string;
+      action: OutboundAttemptKey['action'];
+      resume_version: string;
+    }[];
+    const exact = blocking.find((row) => row.resume_version === key.resumeVersion);
+    const chosen = exact ?? blocking[0];
+    if (!chosen) return null;
+    const chosenKey: OutboundAttemptKey = {
+      platform: chosen.platform,
+      targetId: chosen.target_id,
+      action: chosen.action,
+      resumeVersion: chosen.resume_version,
+    };
     this.store.db
       .prepare(
         `UPDATE outbound_attempts
@@ -517,8 +542,35 @@ export class UsageLedgerService extends Service {
          WHERE platform = ? AND target_id = ? AND action = ? AND resume_version = ?
            AND status IN ('site-default', 'unknown') AND confirmed_at IS NULL`,
       )
-      .run(nowMs, nowMs, key.platform, key.targetId, key.action, key.resumeVersion);
-    return this.attemptFor(key);
+      .run(nowMs, nowMs, chosenKey.platform, chosenKey.targetId, chosenKey.action, chosenKey.resumeVersion);
+    const attempt = this.attemptFor(chosenKey);
+    return attempt ? { attempt, matchedCount: blocking.length } : null;
+  };
+
+  /**
+   * 宽口径反查：同平台 + 目标 + 动作下仍阻塞的尝试（`site-default` 或未确认的 `unknown`）。
+   * 对账口在精确四元组查不到历史行时用它——界面层看不到 `resume_version` 的历史差异。
+   * @param platform 平台标识
+   * @param targetId 目标岗位或会话坐标
+   * @param action greet / deliver
+   * @returns 最新的阻塞行；没有则 null
+   */
+  blockingAttemptFor = (
+    platform: string,
+    targetId: string,
+    action: OutboundAttemptKey['action'],
+  ): OutboundAttemptView | null => {
+    const row = this.store.db
+      .prepare(
+        `SELECT platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at, evidence_summary
+           FROM outbound_attempts
+          WHERE platform = ? AND target_id = ? AND action = ?
+            AND status IN ('site-default', 'unknown') AND confirmed_at IS NULL
+          ORDER BY updated_at DESC
+          LIMIT 1`,
+      )
+      .get(platform, targetId, action) as OutboundAttemptRow | undefined;
+    return row ? toAttemptView(row) : null;
   };
 
   /**

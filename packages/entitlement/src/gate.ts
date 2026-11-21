@@ -338,7 +338,8 @@ export class EntitlementGateService extends Service {
     writeDelivery?: (ledgerId: number) => void,
   ): OutboundReconcileView => {
     const key = this.keyOf(action, context);
-    const before = this.ledger.attemptFor(key);
+    // 宽口径：历史站点默认问候的 `resume_version` 与当前版本不同，精确查不到时按平台+目标+动作反查阻塞行。
+    const before = this.ledger.attemptFor(key) ?? this.ledger.blockingAttemptFor(key.platform, key.targetId, action);
     if (!before) {
       return { status: inspection.status === 'confirmed' ? 'conflict' : 'not-found', canResume: false, attempt: null };
     }
