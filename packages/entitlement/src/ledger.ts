@@ -47,6 +47,56 @@ export const DENIAL_MIGRATION_VERSION = 19;
  */
 export const OUTBOUND_STATE_MIGRATION_VERSION = 43;
 
+/**
+ * 尝试台账的「站点默认问候」扩宽迁移：**46**（本工作树已核到 45：44 授权、45 追踪；46 的常量与字面声明均零命中）。
+ *
+ * 为什么必须重建表而不是改 43 号的建表语句：43 已记进 `schema_migrations`，老库不会重跑；
+ * 而 `status` 上有 CHECK，SQLite 改不了，只能新表 + 搬数据。
+ * 同时把 `confirmed_at` 一并加上（spec 10.11-26：只由人在界面按一次才写），不紧跟着再来第二个迁移。
+ * 搬数据时**原样保留**已有的 unknown 行（它们正是历史解锁的对象），四元组唯一约束在重建后仍然生效。
+ */
+export const OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46;
+
+/** 重建 `outbound_attempts`：CHECK 扩到 `site-default`，新增 `confirmed_at`。 */
+const outboundAttemptsSiteDefaultMigration = {
+  version: OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION,
+  up: (db: DatabaseSync) => {
+    db.exec('BEGIN');
+    try {
+      db.exec(`CREATE TABLE outbound_attempts_next (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('greet', 'deliver')),
+        resume_version TEXT NOT NULL,
+        workflow_run_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('in-flight', 'succeeded', 'unknown', 'failed', 'site-default')),
+        ledger_id INTEGER,
+        receipt_id TEXT,
+        reason TEXT,
+        updated_at INTEGER NOT NULL,
+        confirmed_at INTEGER,
+        UNIQUE (platform, target_id, action, resume_version)
+      )`);
+      db.exec(`INSERT INTO outbound_attempts_next
+        (id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at)
+        SELECT id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, NULL
+        FROM outbound_attempts`);
+      db.exec('DROP TABLE outbound_attempts');
+      db.exec('ALTER TABLE outbound_attempts_next RENAME TO outbound_attempts');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_outbound_attempts_status ON outbound_attempts (status, updated_at)');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  },
+  down: (db: DatabaseSync) => {
+    // 不回退：状态语义扩宽后回退会丢 site-default 行与确认时间，代价大于收益。
+    void db;
+  },
+};
+
 /** 外发控制与尝试台账：去重不含工作流 id，跨入口、跨运行、跨重启都不得重放。 */
 const outboundStateMigration = {
   version: OUTBOUND_STATE_MIGRATION_VERSION,
@@ -256,7 +306,12 @@ export class UsageLedgerService extends Service {
    */
   private ensureSchema(): void {
     const { migrations } = this.store;
-    for (const migration of [ledgerMigration, denialMigration, outboundStateMigration]) {
+    for (const migration of [
+      ledgerMigration,
+      denialMigration,
+      outboundStateMigration,
+      outboundAttemptsSiteDefaultMigration,
+    ]) {
       if (!migrations.some((item) => item.version === migration.version)) {
         migrations.push(migration);
       }
