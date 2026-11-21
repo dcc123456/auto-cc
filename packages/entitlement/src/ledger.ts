@@ -62,36 +62,31 @@ export const OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46;
 export const outboundAttemptsSiteDefaultMigration = {
   version: OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION,
   up: (db: DatabaseSync) => {
-    db.exec('BEGIN');
-    try {
-      db.exec(`CREATE TABLE outbound_attempts_next (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        platform TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK (action IN ('greet', 'deliver')),
-        resume_version TEXT NOT NULL,
-        workflow_run_id TEXT,
-        status TEXT NOT NULL CHECK (status IN ('in-flight', 'succeeded', 'unknown', 'failed', 'site-default')),
-        ledger_id INTEGER,
-        receipt_id TEXT,
-        reason TEXT,
-        updated_at INTEGER NOT NULL,
-        confirmed_at INTEGER,
-        evidence_summary TEXT,
-        UNIQUE (platform, target_id, action, resume_version)
-      )`);
-      db.exec(`INSERT INTO outbound_attempts_next
-        (id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at, evidence_summary)
-        SELECT id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, NULL, NULL
-        FROM outbound_attempts`);
-      db.exec('DROP TABLE outbound_attempts');
-      db.exec('ALTER TABLE outbound_attempts_next RENAME TO outbound_attempts');
-      db.exec('CREATE INDEX IF NOT EXISTS idx_outbound_attempts_status ON outbound_attempts (status, updated_at)');
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+    // 事务由 `runMigrations` 统一开（它已把每支迁移包在 BEGIN/COMMIT 里）；
+    // 这里再开一层会报「cannot start a transaction within a transaction」（本片实测踩到）。
+    db.exec(`CREATE TABLE outbound_attempts_next (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('greet', 'deliver')),
+      resume_version TEXT NOT NULL,
+      workflow_run_id TEXT,
+      status TEXT NOT NULL CHECK (status IN ('in-flight', 'succeeded', 'unknown', 'failed', 'site-default')),
+      ledger_id INTEGER,
+      receipt_id TEXT,
+      reason TEXT,
+      updated_at INTEGER NOT NULL,
+      confirmed_at INTEGER,
+      evidence_summary TEXT,
+      UNIQUE (platform, target_id, action, resume_version)
+    )`);
+    db.exec(`INSERT INTO outbound_attempts_next
+      (id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at, evidence_summary)
+      SELECT id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, NULL, NULL
+      FROM outbound_attempts`);
+    db.exec('DROP TABLE outbound_attempts');
+    db.exec('ALTER TABLE outbound_attempts_next RENAME TO outbound_attempts');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_outbound_attempts_status ON outbound_attempts (status, updated_at)');
   },
   down: (db: DatabaseSync) => {
     // 不回退：状态语义扩宽后回退会丢 site-default 行与确认时间，代价大于收益。

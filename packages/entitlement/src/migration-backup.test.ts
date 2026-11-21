@@ -137,7 +137,8 @@ describe('43 号迁移的备份与隔离恢复（10.2-04）', () => {
     expect(successMount.ledgerFiber).not.toBeNull();
     expect(fiberState(successMount.ledgerFiber!.state)).toBe('active');
     const migrated = digestOf(successMount.store.db);
-    expect(migrated.version).toBe(OUTBOUND_STATE_MIGRATION_VERSION);
+    // 46 是尝试台账的重建迁移（10.11-26）：43 之后紧跟 46，水位跟着走到 46。
+    expect(migrated.version).toBe(46);
     for (const [table, before] of Object.entries(baseline.tables)) {
       if (table === 'schema_migrations') continue;
       expect(migrated.tables[table], `旧表 ${table} 的行数/主键/全行哈希必须不变`).toEqual(before);
@@ -145,7 +146,7 @@ describe('43 号迁移的备份与隔离恢复（10.2-04）', () => {
     const versions = successMount.store.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as {
       version: number;
     }[];
-    expect(versions.map((row) => row.version)).toEqual([1, 9, 19, 27, 35, 42, 43]);
+    expect(versions.map((row) => row.version)).toEqual([1, 9, 19, 27, 35, 42, 43, 46]);
     expect(migrated.tables.outbound_control).toMatchObject({ rows: 1, primaryKey: ['id'] });
     expect(migrated.tables.outbound_attempts).toMatchObject({ rows: 0, primaryKey: ['id'] });
     expect(createHash('sha256').update(readFileSync(sourcePath)).digest('hex')).toBe(sourceHashBefore);
