@@ -1,0 +1,21 @@
+10.11-08 空态读数（干净 userData 首启 · dist 构建）
+命令：node tmp/g11/scroll/empty08.mjs
+
+① 整页空态（无简历 / 无岗位 / 账本 0 行）：卡片=True，步骤=['resume', 'jobs', 'authorize']
+   卡片文本：三步开张：先有简历，再搜岗位，最后授权一次投递
+
+这一步只做三件事，做完首页的数字才会有内容。
+
+1
+① 导入一份简历（它会成为母版）
+去做
+2
+② 搜第一轮岗位（至少 3 个）
+去做
+3
+③ 授权一次投递（最小 1 岗）
+去做
+   4 数字块隐藏=True；趋势块隐藏=True；页面出现「最近 0 笔外发」=False
+② 三态：读取中给等高骨架（home-number-skeleton，h-[76px]）；不可用给「—」+ 原因 + 重试（home-numbers-unavailable / home-numbers-retry）。
+   本轮未取到「不可用」的活体读数：用 plugins.stop('usage') 制造停服后，数字块仍读到值（服务没真正不可用），没有变成预期的原因条；按 rules 不把没造出来的态写成已过。
+③ 截图：10.11-08-empty-first.png（与 10.11-24-scroll-after.png 的「4 个 0 + 空坐标轴」构成前后对照，md5 互异）。

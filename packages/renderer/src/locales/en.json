@@ -263,6 +263,14 @@
       }
     },
     "home": {
+      "empty": {
+        "title": "Three steps to start: resume, jobs, then authorize one delivery",
+        "hint": "Only three things to do here; the numbers fill in once they are done.",
+        "step1": "1. Import a resume (it becomes the master)",
+        "step2": "2. Search the first round of jobs (at least 3)",
+        "step3": "3. Authorize one delivery (1 job is enough)",
+        "go": "Do it"
+      },
       "heading": "Home",
       "guide": {
         "here": "Where you are: Home overview (numbers and trends read existing services)",

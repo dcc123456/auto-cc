@@ -66,10 +66,15 @@ function useBlock<T>(load: () => Promise<T | { error: string }>): [BlockState<T>
   const [state, setState] = useState<BlockState<T>>({ state: 'loading' });
   const run = useCallback(() => {
     setState({ state: 'loading' });
-    void load().then((value) => {
-      if (value && typeof value === 'object' && 'error' in value) setState({ state: 'failed', reason: value.error });
-      else setState({ state: 'ready', value });
-    });
+    void load()
+      .then((value) => {
+        if (value && typeof value === 'object' && 'error' in value) setState({ state: 'failed', reason: value.error });
+        else setState({ state: 'ready', value });
+      })
+      .catch((error: unknown) => {
+        // 服务挂掉/桥接抛错时必须落到「不可用 + 原因」，不能停在骨架上（spec 10.11-08）。
+        setState({ state: 'failed', reason: error instanceof Error ? error.message : String(error) });
+      });
   }, [load]);
   useEffect(() => {
     run();
@@ -125,6 +130,11 @@ export function HomePanel() {
       bridge?.outbound['authorization.current'](),
       bridge?.journey['unattended.view'](),
     ]);
+    const firstFailure = [funnelReply, trackingReply, summaryReply, authReply, runReply].find((reply) => !reply?.ok);
+    if (firstFailure) {
+      // 抛错交给 useBlock 落成 failed：读数块只坏这一块，另外两块照常（spec 10.11-09 的同一机制）。
+      throw new Error(firstFailure.error?.message ?? t('home.unavailable.noBridge'));
+    }
     const quotaAction = funnelReply?.ok
       ? funnelReply.value.quota.actions.find((row) => row.action === 'deliver')
       : undefined;
@@ -217,6 +227,13 @@ export function HomePanel() {
   const tracked = numbersValue?.tracked ?? [];
   const delivered = tracked.filter((row) => row.state === 'delivered').length;
   const interviewed = tracked.filter((row) => row.state === 'interviewed').length;
+  const wholeEmpty =
+    numbers.state === 'ready' &&
+    next.state === 'ready' &&
+    next.value.docs.length === 0 &&
+    tracked.length === 0 &&
+    (numbersValue?.deliverCount ?? 0) === 0 &&
+    numbersValue?.lastSend === null;
   const trendValue = trend.state === 'ready' ? trend.value : undefined;
   const maxSends = Math.max(1, ...(trendValue?.trend.days.map((day) => day.sends ?? 0) ?? [0]));
 
@@ -283,8 +300,51 @@ export function HomePanel() {
         ) : null}
       </section>
 
+      {/* 整页空态：零数据首启不画 4 个 0 与空坐标轴（spec 10.11-08），只给「三步开张」卡。 */}
+      {wholeEmpty ? (
+        <section className="rounded-xl border border-line bg-ink-900/60 p-4" data-testid="home-empty-card">
+          <h3 className="text-sm font-semibold text-slate-100">{t('home.empty.title')}</h3>
+          <p className="mt-1 text-[11px] text-slate-400">{t('home.empty.hint')}</p>
+          <ol className="mt-3 flex flex-col gap-2">
+            {(
+              [
+                ['resume', t('home.empty.step1'), t('home.next.resume')],
+                ['jobs', t('home.empty.step2'), t('home.next.jobs')],
+                ['authorize', t('home.empty.step3'), t('home.next.resumeRun')],
+              ] as [string, string, string][]
+            ).map(([id, text, detail], index) => (
+              <li key={id} className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300" data-step={id}>
+                <span className="grid size-5 shrink-0 place-items-center rounded-full border border-line-strong font-mono text-[10px] text-slate-400">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1">{text}</span>
+                <DeskButton
+                  action={`home-empty-${id}`}
+                  variant="line"
+                  compact
+                  onClick={() =>
+                    advanceViewTrail({
+                      sourceView: 'chat',
+                      sourceTitle: t('nav.chat'),
+                      targetView: id === 'resume' ? 'resume' : 'jobs',
+                      targetTitle: t(`desk.${id === 'resume' ? 'resume' : 'jobs'}.title`),
+                      targetDetail: detail,
+                    })
+                  }
+                >
+                  {t('home.empty.go')}
+                </DeskButton>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
       {/* ② 4 数字：每格带口径 */}
-      <section className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4" data-testid="home-numbers">
+      <section
+        className={`grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4 ${wholeEmpty ? 'hidden' : ''}`}
+        data-testid="home-numbers"
+      >
         {(
           [
             [
@@ -367,7 +427,13 @@ export function HomePanel() {
       </section>
 
       {/* ④ 趋势：14 天柱（逐日 sends）+ 五级漏斗；最近 5 笔折叠在块底 */}
-      <DeskSection id="home.trend" defaultOpen markers={{ testid: 'home-trend' }} title={t('home.trend.title')}>
+      <DeskSection
+        id="home.trend"
+        defaultOpen
+        markers={{ testid: 'home-trend' }}
+        title={t('home.trend.title')}
+        className={wholeEmpty ? 'hidden' : ''}
+      >
         <div className="mb-2 flex items-center gap-2">
           <DeskSegmented
             action="home-window"
