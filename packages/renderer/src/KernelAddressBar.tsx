@@ -9,6 +9,7 @@
  * 这里不擅自新增 IPC，按钮置灰并把原因写在可见处。
  */
 import { ArrowLeft, CornerDownLeft, RefreshCw } from 'lucide-react';
+import { advanceViewTrail } from './viewTrail';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, DeskField } from './ui/controls';
@@ -41,6 +42,9 @@ export function KernelAddressBar() {
     void run(t('kernel.address.navigate'), () => bridge?.browser['page.navigate'](url));
   };
 
+  // 还没有打开过站点：内核视图停在 data: 占位页或 URL 为空。给「为什么没有 + 怎么起来」，
+  // 不留一张空白页（spec 10.11-29）；恢复入口就是既有会话屏，不新开页面。
+  const noSession = currentUrl === '' || currentUrl.startsWith('data:');
   const urlEmpty = draft.trim() === '';
   const reason = busy !== undefined ? 'ACTION_BUSY' : urlEmpty ? 'URL_EMPTY' : undefined;
 
@@ -114,6 +118,30 @@ export function KernelAddressBar() {
           <span className="sr-only">{t('kernel.address.reload')}</span>
         </DeskButton>
       </div>
+      {noSession ? (
+        <p
+          className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-slate-400"
+          data-testid="kernel-address-no-session"
+        >
+          {t('kernel.address.noSession')}
+          <DeskButton
+            action="kernel-address-open-session"
+            variant="line"
+            compact
+            onClick={() =>
+              advanceViewTrail({
+                sourceView: 'chat',
+                sourceTitle: t('nav.chat'),
+                targetView: 'trust',
+                targetTitle: t('desk.trust.title'),
+                targetDetail: t('kernel.address.noSession'),
+              })
+            }
+          >
+            {t('kernel.address.openSession')}
+          </DeskButton>
+        </p>
+      ) : null}
       {notice ? (
         <p
           className={`text-[10.5px] ${noticeTone === 'seal' ? 'text-seal-ink' : 'text-slate-400'}`}

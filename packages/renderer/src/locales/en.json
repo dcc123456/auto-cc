@@ -453,7 +453,9 @@
         "reasonUrlEmpty": "Type a URL first",
         "reasonBusy": "The previous action has not returned yet",
         "reasonNoCurrent": "No page has been opened yet",
-        "navigate": "Open URL"
+        "navigate": "Open URL",
+        "noSession": "No site is open yet: the kernel view is a placeholder. Open a session from Records first.",
+        "openSession": "Open a site"
       },
       "heading": "Web page view",
       "hint": "This slot shows the real web page, painted above the desk.",
