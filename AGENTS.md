@@ -282,6 +282,17 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   **35 是 `packages/outbound/src/delivery-record-store.ts` 给 `delivery_records` 加的同名列（8.5-D / spec 8.5-05）**，
   **36 是 `packages/resume-doc/src/doc-store.ts` 的 `resume_preferences` 表（界面偏好键值表，目前只有
   `defaultTemplateId` 一支；2026-10-09 简历轨整测那轮，取号 36 而不是回填 34，理由见上一条）**。
+
+  **2026-11-21 登记（第 11 片，号段推进到 46）：37～42 各由既有窗口陆续占用（本清单未逐条展开，占号前仍按两条通道核）；
+  43 是 `packages/entitlement/src/ledger.ts` 的 `outbound_attempts`（10.2-02），44 是
+  `packages/outbound/src/authorization.ts` 的 `outbound_authorizations`（10.6），45 是
+  `packages/journey/src/tracking.ts` 的岗位追踪表（10.8），**46 是 `packages/entitlement/src/ledger.ts` 的
+  `outbound_attempts` 重建迁移**——`status` 的 CHECK 扩为含 `site-default`（站点代发默认问候，spec 10.11-26），
+  同一次重建里加 `confirmed_at INTEGER`；原 4 条 `unknown` 原样搬迁，四元组
+  `UNIQUE (platform, target_id, action, resume_version)` 与 `idx_outbound_attempts_status` 随新表重建；
+  `down` 明确不回退（回退会丢 `site-default` 行与确认时间）。号段来源：`schema_migrations` 最高 45，
+  常量声明 `OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46` 全仓唯一；本仓迁移多用常量式声明，
+  字面 `version: 46` 零命中属正常，核号时以「常量声明 + 台账最高值」两条一起看。
   原先这条写的是"当前到 17"和"最高已用到 29"（`packages/workflow/src/run-store.ts:123` 的
   `WORKFLOW_NODE_OUTPUT_MIGRATION_VERSION`），那是 5.3-a / 7.2-a 窗口的读数，此后 21～29 九支已陆续落地。
   **30 已被 plan §8.3 预留给 3.6 的草稿表，但裁定⑨ 判的是"只拦不存"，所以 30 当前未启用**——占号前先看这份清单，别撞号）。
@@ -303,6 +314,7 @@ fix(ipc): 修复渲染层调用未白名单 service 时主进程崩溃而非返�
   `REFERENCES … ON DELETE CASCADE`，`resume_docs` / `kb_entities` / `kb_chunks` 一个都没有。
   结论一字不变（删父行必须同事务显式删子表），但**不要去加 `PRAGMA foreign_keys = ON`"修"一个不存在的问题**；
   读数已固化成断言，见 `packages/resume-kb/src/profile-service.test.ts` 的 `foreignKeyFootprint`。
+
 - **实测（2.5）harness 的三条使用约束**：① eval 脚本不支持顶层 `await`，整段包进
   `(async () => { … })()`；② 默认 CDP target 可能是内嵌内核视图（那里没有 `window.autoCC`），
   打应用页必须显式 `--url 5173`；③ `shot --reveal <css>` 只在顶层文档里找元素，同源 iframe

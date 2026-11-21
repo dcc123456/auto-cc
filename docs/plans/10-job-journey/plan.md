@@ -963,3 +963,21 @@ interface JourneyContext {
 | 靠换账号/换岗位绕过 | 掩盖缺陷，下一轮还会撞上 |
 
 **结论口径**：真实链路仍未通过，10.7-02 继续 `[!]`；本轮不因「搜岗与定制成功」而升格。解除条件：10.11-25a/b 修完并在下一次用户在场窗口跑通七步。
+
+### 14.12 迁移 46 登记：`outbound_attempts` 重建 + `confirmed_at`（2026-11-21）
+
+**号段归账**：46 号由 `packages/entitlement/src/ledger.ts` 的 `OUTBOUND_ATTEMPTS_SITE_DEFAULT_MIGRATION_VERSION = 46` 占用。
+来源核法按 AGENTS.md §9 的两条一起看：`schema_migrations` 台账最高 45（44 无人值守授权、45 岗位追踪），
+常量声明全仓唯一；本仓迁移多用常量式声明，字面 `version: 46` 零命中属正常。已同步登记进 AGENTS.md §9 的号段清单。
+
+**这次重建做了什么**（判据落 spec 10.11-26）：
+
+- `outbound_attempts.status` 的 CHECK 扩为 `('in-flight','succeeded','unknown','failed','site-default')`；
+- 同一次重建里加 `confirmed_at INTEGER`（不另起第二个迁移）；
+- 新表 → `INSERT ... SELECT` 原样搬迁，**原有 4 条 `unknown` 必须保留**（它们正是历史解锁的对象），`confirmed_at` 搬后为 `NULL`；
+- 四元组 `UNIQUE (platform, target_id, action, resume_version)` 与 `idx_outbound_attempts_status` 随新表重建；
+- 整个重建包在 `BEGIN/COMMIT`，失败 `ROLLBACK`；`down` 明确**不回退**（回退会丢 `site-default` 行与确认时间）。
+
+**验收断言（缺一不可）**：① 迁移前后行数与全行内容不变；② 重建后插入重复四元组被拒；③ 用一份含 4 条 `unknown` 的旧 schema 库跑迁移，搬完 4 行原样、`confirmed_at` 为 `NULL`——不允许只在空库上验。
+
+**不做**：不给 `unknown` 加「迁移即放行」的旁路（未确认的仍 `canResume:false`）；不把 `confirmed_at` 拆成第二个迁移；不在重建时顺手清理历史尝试行（审计要留）。
