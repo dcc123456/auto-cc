@@ -3,17 +3,6 @@
     "title": "auto-cc 桌面工作台",
     "subtitle": "搜岗位 · 生成话术 · 按岗位优化简历 · 由你确认后投递",
     "journey": {
-      "prototype": {
-        "entry": "求职主链",
-        "title": "求职主链原型",
-        "sampleBadge": "本地样例 · 不外发",
-        "sampleOnly": "虚构样例",
-        "fixtureJob": "本地样例岗位",
-        "subtitle": "用同一份简历与 JD 走通六步，只验证交互与上下文，不触达招聘平台",
-        "reset": "重置样例",
-        "close": "返回对话",
-        "disclaimer": "本原型中的岗位、简历事实、约面草稿、操作记录与面试材料均为虚构样例，不是正式账本或真实结果。正式能力须在后续里程碑单独验收。"
-      },
       "context": {
         "resume": "母版简历版本",
         "jd": "当前 JD 版本",

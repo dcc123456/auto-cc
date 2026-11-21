@@ -3,17 +3,6 @@
     "title": "auto-cc desktop workspace",
     "subtitle": "Search jobs · draft messages · tailor the resume per job · deliver once you confirm",
     "journey": {
-      "prototype": {
-        "entry": "Job journey",
-        "title": "Job journey prototype",
-        "sampleBadge": "Local sample · no outbound",
-        "sampleOnly": "Fictional sample",
-        "fixtureJob": "Local sample job",
-        "subtitle": "Walk six steps with one resume and JD. This checks interaction and context only; no recruitment platform is contacted.",
-        "reset": "Reset sample",
-        "close": "Back to chat",
-        "disclaimer": "Jobs, resume facts, interview drafts, operation entries, and preparation materials in this prototype are fictional samples, not a formal ledger or real results. Production capabilities require separate acceptance in later milestones."
-      },
       "context": {
         "resume": "Master resume version",
         "jd": "Current JD version",
