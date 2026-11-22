@@ -222,7 +222,10 @@ export class JourneyUnattendedService extends Service {
     void this.run(input.docId, platform).catch((error: unknown) => {
       this.finish('failed', error instanceof Error ? error.message : String(error));
     });
-    return this.view(nowMs);
+    const view = this.view(nowMs);
+    // 状态变了就推一条（裁定 C）：角标的第三类来源靠它刷新，界面不轮询。
+    this.ctx.emit('journey/unattended-changed', { status: view.status, pendingCount: view.pending.length });
+    return view;
   };
 
   /**
@@ -239,6 +242,10 @@ export class JourneyUnattendedService extends Service {
       this.cancelRequested = true;
       this.status = 'stopping';
       this.ctx.logger.info(`无人值守收到停止请求：运行 ${String(this.runId)}，等下一个检查点收尾`);
+      const view = this.view(nowMs);
+      // 「停止」必须在界面立刻看得见（裁定 B/C）：状态先推出去，循环收尾后再推一条终态。
+      this.ctx.emit('journey/unattended-changed', { status: view.status, pendingCount: view.pending.length });
+      return view;
     }
     return this.view(nowMs);
   };
@@ -459,6 +466,11 @@ export class JourneyUnattendedService extends Service {
       `无人值守收尾：${state} · 完成 ${String(this.completed.length)} 岗 · 失败 ${String(this.failed.length)} 岗` +
         (error === null ? '' : ` · 原因 ${error}`),
     );
+    // 终态也推一条：停止到 stopped 之间可能隔了岗间睡眠（最长 150s），界面上「正在停止」要能变成「已停止」。
+    this.ctx.emit('journey/unattended-changed', {
+      status: this.status,
+      pendingCount: this.pending.length,
+    });
   }
 
   [Service.init](): void {

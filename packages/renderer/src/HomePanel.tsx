@@ -47,6 +47,16 @@ type BlockState<T> =
 const BLOCK_TIMEOUT_MS = 8_000;
 
 /**
+ * 从一份失败回执里取原因原文；没有结构化错误（或根本没回执）时给回落句。
+ * @param reply 可能是 undefined / ok:true / ok:false 三态
+ * @param fallback 取不到原因时的回落文案
+ * @returns 可读的原因
+ */
+function failureReasonOf(reply: { ok: boolean; error?: { message: string } } | undefined, fallback: string): string {
+  return reply !== undefined && reply.ok === false && reply.error !== undefined ? reply.error.message : fallback;
+}
+
+/**
  * 把一次失败落成「一块的失败态」，并把**超时**与**读不到**分开（2026-11-22 裁定 / QA 的 F2）。
  * @param error 读取函数抛出的东西；超时那一路带 `timedOut: true`（由 `useBlock` 的计时器标记）
  * @returns 原因原文 + 是不是超时（界面据此给不同的那句话与 `data-timeout`）
@@ -150,7 +160,10 @@ interface HomeNumbers {
 interface HomeTrend {
   trend: FunnelTrendView;
   funnel: FunnelView;
-  recent: UsageSummaryView['recent'];
+  /** 最近 5 笔：账本读不到时为 null——**不许**当成「0 笔」画（裁定 D：同一块里漏斗给「—」、这里写 0 是两套口径）。 */
+  recent: UsageSummaryView['recent'] | null;
+  /** 账本读不到时的原因原文（recent 为 null 时才用）。 */
+  recentError: string | null;
 }
 
 /** 接下来那一块所需的读数。 */
@@ -187,10 +200,25 @@ export function HomePanel() {
       bridge?.outbound['authorization.current'](),
       bridge?.journey['unattended.view'](),
     ]);
-    const firstFailure = [funnelReply, trackingReply, summaryReply, authReply, runReply].find((reply) => !reply?.ok);
+    // 读数口与调用成对列出来：失败时把**是哪一条读数**一起报出去（裁定 E）——
+    // 只报「服务未挂载：outbound」看不出根因在闸门/账本，加上读数口才能顺着依赖链找。
+    const calls = [
+      ['funnel.query', funnelReply],
+      ['journey.tracking.list', trackingReply],
+      ['usage.ledger.summary', summaryReply],
+      ['outbound.authorization.current', authReply],
+      ['journey.unattended.view', runReply],
+    ] as const;
+    const firstFailure = calls.find(([, reply]) => !reply?.ok);
     if (firstFailure) {
       // 抛错交给 useBlock 落成 failed：读数块只坏这一块，另外两块照常（spec 10.11-09 的同一机制）。
-      throw new Error(firstFailure.error?.message ?? t('home.unavailable.noBridge'));
+      const [call, reply] = firstFailure;
+      throw new Error(
+        t('home.unavailableAtCall', {
+          reason: failureReasonOf(reply, t('home.unavailable.noBridge')),
+          call,
+        }),
+      );
     }
     const quotaAction = funnelReply?.ok
       ? funnelReply.value.quota.actions.find((row) => row.action === 'deliver')
@@ -231,7 +259,8 @@ export function HomePanel() {
     return {
       trend: trendReply.value,
       funnel: funnelReply.value,
-      recent: summaryReply?.ok ? summaryReply.value.recent : [],
+      recent: summaryReply?.ok ? summaryReply.value.recent : null,
+      recentError: summaryReply?.ok ? null : (summaryReply?.error.message ?? t('home.unavailable.noBridge')),
     };
   }, [bridge, t, windowDays]);
 
@@ -243,8 +272,23 @@ export function HomePanel() {
       bridge?.outbound['authorization.current'](),
       bridge?.journey['unattended.view'](),
     ]);
-    const failure = [sessionsReply, docsReply, authReply, runReply].find((reply) => !reply?.ok);
-    if (failure) throw new Error(failure.error?.message ?? t('home.unavailable.noBridge'));
+    // 同一条口径（裁定 E）：报出是哪一条读数失败，而不是只报下游服务名。
+    const calls = [
+      ['sessions.status', sessionsReply],
+      ['resume.doc.list', docsReply],
+      ['outbound.authorization.current', authReply],
+      ['journey.unattended.view', runReply],
+    ] as const;
+    const failure = calls.find(([, reply]) => !reply?.ok);
+    if (failure) {
+      const [call, reply] = failure;
+      throw new Error(
+        t('home.unavailableAtCall', {
+          reason: failureReasonOf(reply, t('home.unavailable.noBridge')),
+          call,
+        }),
+      );
+    }
     return {
       platforms: sessionsReply?.ok ? sessionsReply.value.platforms : [],
       docs: docsReply?.ok ? docsReply.value : [],
@@ -343,6 +387,8 @@ export function HomePanel() {
     trendValue !== undefined &&
     trendValue.trend.days.every((day) => (day.sends ?? 0) === 0) &&
     trendValue.funnel.levels.every((level) => level.count === 0) &&
+    // 账本读不到（null）不算「真没有」：那是读不到，不是没有。
+    trendValue.recent !== null &&
     trendValue.recent.length === 0;
 
   return (
@@ -679,16 +725,23 @@ export function HomePanel() {
                 </li>
               ))}
             </ul>
-            <details className="text-[11px] text-slate-400" data-testid="home-recent">
-              <summary>{t('home.recent.title', { count: trendValue?.recent.length ?? 0 })}</summary>
-              <ul className="mt-1 flex flex-col gap-0.5">
-                {trendValue?.recent.map((row) => (
-                  <li key={row.id}>
-                    {new Date(row.ts).toLocaleTimeString()} · {row.action} · {row.targetId}
-                  </li>
-                ))}
-              </ul>
-            </details>
+            {trendValue?.recent === null ? (
+              <p className="text-[11px] text-amber" data-testid="home-recent-unavailable">
+                — {t('home.unavailable', { reason: trendValue.recentError ?? '' })}
+              </p>
+            ) : null}
+            {trendValue?.recent !== null ? (
+              <details className="text-[11px] text-slate-400" data-testid="home-recent">
+                <summary>{t('home.recent.title', { count: trendValue?.recent?.length ?? 0 })}</summary>
+                <ul className="mt-1 flex flex-col gap-0.5">
+                  {(trendValue?.recent ?? []).map((row) => (
+                    <li key={row.id}>
+                      {new Date(row.ts).toLocaleTimeString()} · {row.action} · {row.targetId}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
           </div>
         )}
       </DeskSection>

@@ -3710,6 +3710,8 @@ export const RENDERER_EVENTS = [
   'shell/assistant-toggle',
   // 任意网页模式里点了外链：一律 deny，但要让人看见原因（spec 10.11-30 裁定 (b)）。载荷是被拦的地址。
   'shell/web-popup-blocked',
+  // 执行器状态变了（2026-11-22 裁定 C）：角标第三类来源靠这条刷新，界面不轮询。
+  'journey/unattended-changed',
   'workflow/progress',
   'chat/delta',
   // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
@@ -3754,6 +3756,7 @@ export interface RendererEventSignatures {
   'shell/kernel-view-url': string;
   'shell/assistant-toggle': true;
   'shell/web-popup-blocked': string;
+  'journey/unattended-changed': { status: string; pendingCount: number };
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;

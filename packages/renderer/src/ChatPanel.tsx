@@ -443,6 +443,16 @@ export function ChatPanel() {
     };
     // 与另外两类同源刷新：run 动、表态单动，执行器状态也可能跟着动，一次读把几样对齐。
   }, [bridge, agentRun.run, agentPause.pending]);
+  // 执行器状态变了就更新（裁定 C，2026-11-22）：靠主进程那条推送，不加轮询；
+  // 窗口长期开着时「停止后需要你」也要亮，不能等重载渲染层。
+  useEffect(() => {
+    const bridge = window.autoCC;
+    if (!bridge) return;
+    return bridge.on('journey/unattended-changed', (reading) => {
+      setExecutor({ status: reading.status, pending: reading.pendingCount });
+    });
+  }, []);
+
   /** 执行器此刻是不是在等人（口径与负对照都在 `executorNeedsYou` 那个纯函数里）。 */
   const executorAsks = executorNeedsYou({ status: executor.status, authorizationStatus });
 

@@ -342,7 +342,8 @@
         "failed": "失败",
         "done": "已完成",
         "unknown": "还没读到"
-      }
+      },
+      "unavailableAtCall": "{{reason}}（读数口 {{call}}）"
     },
     "assistant": {
       "capsule": "助手",

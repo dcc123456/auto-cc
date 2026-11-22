@@ -11,3 +11,18 @@
 ④ 趋势块仍出数：home-trend-body 存在；骨架数为 0（没有卡在加载态）。
 
 证据图：10.11-09-degrade.png
+
+④ 裁定 D/E（2026-11-22，本轮补）：停 `usage` 后（`node tmp/g11/batch/pde.mjs`）。
+   - **D**：趋势块「最近 5 笔」不再写「最近 0 笔外发」——账本读不到时该行整块不画，
+     改出 `[data-testid="home-recent-unavailable"]`：「— 这一块读不到：服务未挂载：usage」。
+     读数：`recent=null`（details 不存在）、`recentUnavailable` 如上；同块漏斗仍是「—」，两处口径一致了。
+   - **E**：失败原因带上**是哪一条读数**失败，顺着依赖链能看出根因：
+     数字块「— 这一块读不到：服务未挂载：usage（读数口 usage.ledger.summary）」+ 重试；
+     接下来块「这一块读不到：服务未挂载：outbound（读数口 outbound.authorization.current）」+ 重试。
+     （原来只写「服务未挂载：outbound」，看不出根因在闸门/账本。）
+
+⑤ 裁定 C（2026-11-22，本轮补）：执行器状态变化现在会推 `journey/unattended-changed`
+   （起点：`packages/journey/src/unattended.ts` 的 start / stop / finish 三处），
+   载荷只带 `{status, pendingCount}`；`ChatPanel` 订阅它更新角标，**没有加轮询**。
+   单测：`unattended.test.ts` 新增一例断言 start→running、stop→stopping、收尾→stopped 各推一条。
+   活体「窗口不重载、停止后 ≤3s 亮起」由 QA 复验。

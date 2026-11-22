@@ -342,7 +342,8 @@
         "failed": "failed",
         "done": "done",
         "unknown": "not read yet"
-      }
+      },
+      "unavailableAtCall": "{{reason}} (reading: {{call}})"
     },
     "assistant": {
       "capsule": "Assistant",

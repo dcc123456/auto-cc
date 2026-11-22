@@ -179,8 +179,14 @@ async function boot() {
   // 两个假外发入口把成功位写回假账本：否则执行器的「这岗推完了」永远读不到。
   greet.ledger = ledger;
   deliver.ledger = ledger;
+  // 裁定 C：执行器状态变化必须推一条，角标靠它刷新（不是轮询）。这里记下来给用例断言。
+  const changed: { status: string; pendingCount: number }[] = [];
+  ctx.on('journey/unattended-changed', (reading: { status: string; pendingCount: number }) => {
+    changed.push(reading);
+  });
   return {
     executor: app['journey.unattended'],
+    changed,
     auth: ctx.get('outbound.authorization') as unknown as FakeAuthorizationService,
     ledger,
     journey: ctx.get('journey') as unknown as FakeJourneyService,
@@ -246,6 +252,17 @@ describe('无人值守执行器（10.6 / plan §12.2）', () => {
     expect(greet.calls).toEqual(['job-1']);
     expect(deliver.calls).toEqual([]);
     expect(executor.view(NOW).completed).toEqual([]);
+  });
+
+  it('执行器状态变了会推 journey/unattended-changed（角标靠它刷新，不轮询）', async () => {
+    const { executor, changed } = await boot();
+    executor.start({ docId: DOC_ID, nowMs: NOW });
+    expect(changed.at(-1)?.status).toBe('running');
+    expect(changed.at(-1)?.pendingCount).toBeGreaterThan(0);
+    executor.stop(NOW + 1);
+    expect(changed.at(-1)?.status).toBe('stopping');
+    expect(await settled(executor)).toBe('stopped');
+    expect(changed.at(-1)?.status).toBe('stopped');
   });
 
   it('按停止后状态立刻落到 stopping（不许还是 running），循环收尾再落 stopped', async () => {
