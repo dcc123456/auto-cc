@@ -1,0 +1,26 @@
+10.11-23 新壳改动前后对照索引
+
+本片的「改动前」= 旧对话页 + 旧右栏形态（`10.9-01-*` 走查截图与 `10.11-*` 本片早期读数），
+「改动后」= 本片已入库的截图。成对列在下面；同批 `md5` 全互异（见末尾）。
+
+| 主题 | 改动前证据 | 改动后证据 |
+| --- | --- | --- |
+| Home 空态（4 个 0 + 空坐标轴 → 三步开张卡） | `10.11-24-scroll-before.png`（4 个 0） | `10.11-08-empty-first.png`（三步卡） |
+| Home 数字块三态 | `10.11-08-blocker-fresh.png`（骨架/零值同屏） | `10.11-08-block-zero.png`、`10.11-08-unavailable.png` |
+| 前置缺失阻断条 | `10.9-01-02-workspace-empty.png`（无阻断条） | `10.11-08-blocker-fresh.png`（一条琥珀条 + 直达键） |
+| 站点全屏时呼出助手 | `10.11-14-hotkey.png`（退全屏 + toast） | `10.11-14-keyboard-from-kernel.png`（内核视图 target 派发） |
+| 口径不一致（账本读不到写 0 笔） | （无旧图，缺陷以读数记） | `10.11-09-degrade.png`（`home-recent-unavailable`） |
+| 助手角标三态 | （旧版只有气泡，无角标） | `10.11-11-badge-{needs,running,blocked}.png` |
+| 接管横幅全局常驻 | `10.11-19-assistant-legacy.png`（仅在面板内） | `10.11-19-takeover-global.png`（岗位页上仍在） |
+| 地址栏 | `10.11-27-addressbar-before.png` | `10.11-27-addressbar-after.png` |
+| 无会话原因与恢复 | `10.11-29-no-session.png` | `10.11-29-no-session-recovered.png`、`10.11-29-url-event-*.png` |
+| 任意网页模式 | （旧：平台名单直接拒） | `10.11-30-web-mode.png`、`10.11-30-web-popup-and-hint.png` |
+| 三档形态 | `10.11-23-state-default.png`（默认） | `10.11-23-state-site-fullscreen.png`、`10.11-23-state-narrow-1024.png` |
+
+**同批 md5 去重**（`md5 -q docs/acceptance/10-job-journey/10.11-*.png | sort | uniq -c`）：26+3 张全部只出现 1 次。
+
+**两档的读数**（`node tmp/g11/batch/p23.mjs`，10426 + owner 文件，空库起步）：
+- 站点全屏：点顶栏「全屏」后 `kernel-canvas-expand` 的 title = 「退出全屏」，助手面板 `data-state=null`（全屏态左栏让位）；
+- 窄窗 1024×720（**视口模拟**，`Emulation.setDeviceMetricsOverride`）：`innerWidth=1024`、`scrollWidth=1024`、`clientWidth=1024`（不横向溢出），截图 1024×720；
+- **200% 这一档本轮没取到有效画面**：`Emulation.setPageScaleFactor(2)` 之后 `visualViewport.scale` 仍是 1、截图与默认态无法区分，
+  按「不摆拍」口径已把那张删掉。200% 与真实窗口那几张留给 PM 与用户在前台同一时段补拍。
