@@ -21,7 +21,7 @@ import type {
   UnattendedRunView,
   UsageSummaryView,
 } from '@auto-cc/shared';
-import { DeskButton, DeskSegmented } from './ui/controls';
+import { Banner, DeskButton, DeskSegmented } from './ui/controls';
 import { DeskPathGuide, DeskSection } from './ui/disclosure';
 import { advanceViewTrail } from './viewTrail';
 import { isLocalSessionUrl } from './platform-choice';
@@ -84,6 +84,27 @@ function useBlock<T>(load: () => Promise<T | { error: string }>, timeoutReason: 
     run();
   }, [run]);
   return [state, run];
+}
+
+/**
+ * 首页前置缺失的三类（spec 10.11-08：一条阻断条、同时最多 1 条）。
+ */
+export type HomeBlockerId = 'login' | 'resume' | 'model';
+
+/**
+ * 按「未登录 → 无简历 → 无模型」的优先级挑出**唯一**一条阻断。
+ * @param input 三项前置各自是否已满足（模型那项由既有 `llm.settings.read` 的生成通道给）
+ * @returns 最前面那条缺失；三样齐时 null——挑成两条就是判据说的「堆红字」
+ */
+export function pickHomeBlocker(input: {
+  isLoggedIn: boolean;
+  hasDocs: boolean;
+  modelMissing: boolean;
+}): HomeBlockerId | null {
+  if (!input.isLoggedIn) return 'login';
+  if (!input.hasDocs) return 'resume';
+  if (input.modelMissing) return 'model';
+  return null;
 }
 
 /** 4 数字所需的读数（每格来自唯一口，缺哪个就只让那一格降级）。 */
@@ -200,10 +221,21 @@ export function HomePanel() {
     };
   }, [bridge]);
 
+  /** 模型配置（阻断条用）：读既有 `llm.settings.read` 的 `missing`，不新开读取通道、不自己探 key。 */
+  const loadModel = useCallback(async (): Promise<{ missing: string[] }> => {
+    const reply = await bridge?.llm['settings.read']();
+    if (!reply?.ok) throw new Error(reply?.error.message ?? t('home.unavailable.noBridge'));
+    // 只看生成通道（`chat`）：向量那条只服务检索，缺它不影响定制与打招呼。
+    const chatLeg = reply.value.legs.find((row) => row.leg === 'chat');
+    return { missing: chatLeg?.missing ?? ['baseUrl', 'model', 'apiKey'] };
+  }, [bridge, t]);
+
   const timeoutReason = t('home.unavailable.timeout');
   const [numbers, reloadNumbers] = useBlock(loadNumbers, timeoutReason);
   const [trend, reloadTrend] = useBlock(loadTrend, timeoutReason);
   const [next, reloadNext] = useBlock(loadNext, timeoutReason);
+  // 模型这一格失败（例如 llm-settings 没挂载）时只表示「不知道」，不能让首页长出一条假的阻断条。
+  const [model, reloadModel] = useBlock(loadModel, timeoutReason);
 
   /** 「接下来」的六条（按阻断优先），并按当前状态算出哪几条该出现。 */
   const steps = useMemo(() => {
@@ -244,6 +276,33 @@ export function HomePanel() {
   const trendValue = trend.state === 'ready' ? trend.value : undefined;
   const maxSends = Math.max(1, ...(trendValue?.trend.days.map((day) => day.sends ?? 0) ?? [0]));
 
+  /**
+   * 前置缺失的那一条阻断条（spec 10.11-08）：未登录 → 无简历 → 无模型，只报最前面一条。
+   * 数据全部来自本页已有的三块读数与模型格，不另开读取；读数没到或那格失败时宁可不报。
+   */
+  const blocker = useMemo((): { id: HomeBlockerId; text: string; to: 'trust' | 'resume' | 'models' } | null => {
+    const value = next.state === 'ready' ? next.value : undefined;
+    if (!value) return null;
+    const real = value.platforms.filter((row) => !isLocalSessionUrl(row.startUrl));
+    const id = pickHomeBlocker({
+      isLoggedIn: real.some((row) => row.auth === 'active'),
+      hasDocs: value.docs.length > 0,
+      modelMissing: model.state === 'ready' && model.value.missing.length > 0,
+    });
+    if (id === null) return null;
+    const platformName = real[0] ? platformLabel(t, real[0].id) : t('home.next.platformFallback');
+    if (id === 'login') return { id, text: t('home.blocker.login', { platform: platformName }), to: 'trust' };
+    if (id === 'resume') return { id, text: t('home.blocker.resume'), to: 'resume' };
+    return { id, text: t('home.blocker.model'), to: 'models' };
+  }, [next, model, t]);
+
+  /** 趋势块「真没有」：区间零外发、漏斗各级都是 0（不是读不到）、最近 5 笔为空。 */
+  const trendNone =
+    trendValue !== undefined &&
+    trendValue.trend.days.every((day) => (day.sends ?? 0) === 0) &&
+    trendValue.funnel.levels.every((level) => level.count === 0) &&
+    trendValue.recent.length === 0;
+
   return (
     <div className="flex flex-col gap-4" data-testid="home-panel">
       <DeskPathGuide
@@ -270,6 +329,7 @@ export function HomePanel() {
                 reloadNumbers();
                 reloadTrend();
                 reloadNext();
+                reloadModel();
               }}
             >
               {t('home.refresh')}
@@ -306,6 +366,36 @@ export function HomePanel() {
           </div>
         ) : null}
       </section>
+
+      {/* 前置缺失：只有一条阻断条（琥珀描边 + 一行原因 + 直达键），同时最多 1 条（spec 10.11-08）。 */}
+      {blocker ? (
+        // 语气洗底只许由 `src/ui/**` 的原件持有（spec 6.2-20），所以这里交语气档名、不自己拼 class。
+        <Banner
+          tone="amber"
+          size="compact"
+          markers={{ testid: 'home-blocker', blocker: blocker.id }}
+          actions={
+            <DeskButton
+              action="home-blocker-go"
+              variant="line"
+              compact
+              onClick={() =>
+                advanceViewTrail({
+                  sourceView: 'chat',
+                  sourceTitle: t('nav.chat'),
+                  targetView: blocker.to,
+                  targetTitle: t(`desk.${blocker.to}.title`),
+                  targetDetail: blocker.text,
+                })
+              }
+            >
+              {t('home.blocker.go')}
+            </DeskButton>
+          }
+        >
+          {blocker.text}
+        </Banner>
+      ) : null}
 
       {/* 整页空态：零数据首启不画 4 个 0 与空坐标轴（spec 10.11-08），只给「三步开张」卡。 */}
       {wholeEmpty ? (
@@ -514,6 +604,27 @@ export function HomePanel() {
                 </li>
               ))}
             </ul>
+            {trendNone ? (
+              <p className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400" data-testid="home-trend-none">
+                {t('home.trendNone')}
+                <DeskButton
+                  action="home-trend-none-go"
+                  variant="line"
+                  compact
+                  onClick={() =>
+                    advanceViewTrail({
+                      sourceView: 'chat',
+                      sourceTitle: t('nav.chat'),
+                      targetView: 'jobs',
+                      targetTitle: t('desk.jobs.title'),
+                      targetDetail: t('home.trendNone'),
+                    })
+                  }
+                >
+                  {t('home.trendNoneGo')}
+                </DeskButton>
+              </p>
+            ) : null}
             <ul className="flex flex-wrap gap-3 text-[11px] text-slate-400" data-testid="home-funnel">
               {trendValue?.funnel.levels.map((level) => (
                 <li key={level.level} data-level={level.level}>

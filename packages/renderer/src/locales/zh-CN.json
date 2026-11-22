@@ -322,7 +322,15 @@
         "more": "还有 {{count}} 条（展开）",
         "platformFallback": "招聘平台"
       },
-      "unavailable.timeout": "读取超时（8 秒没有回来）"
+      "unavailable.timeout": "读取超时（8 秒没有回来）",
+      "blocker": {
+        "login": "还没有登录 {{platform}}：登录后首页才读得到真实进度",
+        "resume": "还没有导入简历：没有母版就无从定制与投递",
+        "model": "还没有配置模型：定制简历与打招呼语要用它",
+        "go": "去处理"
+      },
+      "trendNone": "— 这段时间还没有成功外发",
+      "trendNoneGo": "去搜岗位"
     },
     "assistant": {
       "capsule": "助手",

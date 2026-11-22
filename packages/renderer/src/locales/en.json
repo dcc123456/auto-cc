@@ -322,7 +322,15 @@
         "more": "{{count}} more (expand)",
         "platformFallback": "the job platform"
       },
-      "unavailable.timeout": "Read timed out (nothing in 8s)"
+      "unavailable.timeout": "Read timed out (nothing in 8s)",
+      "blocker": {
+        "login": "Not signed in to {{platform}} yet: sign in so Home can read real progress",
+        "resume": "No resume imported yet: without a master there is nothing to tailor or send",
+        "model": "No model configured yet: tailored resumes and greetings need one",
+        "go": "Fix it"
+      },
+      "trendNone": "— No successful outreach in this period yet",
+      "trendNoneGo": "Find jobs"
     },
     "assistant": {
       "capsule": "Assistant",

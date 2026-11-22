@@ -43,3 +43,22 @@
    这两条不是取证不到位，是还没写，等 PM 裁口径后补。
 
 同批截图 md5：`10.11-08-empty-first.png` 0d64cc3e… / `10.11-08-block-zero.png` 48def238… / `10.11-08-unavailable.png` bcbc6469…（三张互异）。
+
+⑥ 前置缺失阻断条（本轮补，`node tmp/g11/empty08d.mjs`，1200×772）：
+   - 首启（无会话/无简历/无模型）与「有简历+有追踪行、账本 0 行」两种状态都只出现**一条**：
+     `document.querySelectorAll('[data-testid="home-blocker"]').length = 1`，`data-blocker="login"`，
+     文案「还没有登录 BOSS 直聘：登录后首页才读得到真实进度」+ 直达键「去处理」（宽 51px）；
+     rect `{x:204,y:237,w:976,h:34}`，描边 `border-top-color = oklab(0.561 0.029 0.104 / 0.45)`（`Banner tone="amber"` 原件给的琥珀描边+洗底，面板不自己拼 class，spec 6.2-20）。
+   - 点击「去处理」：视图切到「运行记录」（`view-tabs` 当前项文本 = 运行记录），页面出现「内置内核会话」段
+     —— 走的是既有 `viewTrail`，没有新开跳转通道。
+   - 优先级「未登录 → 无简历 → 无模型」由纯函数 `pickHomeBlocker` 钉住，
+     单测 `packages/renderer/src/HomePanel.blocker.test.ts` 四例（三档各一 + 全齐不报）。三类里只有
+     「未登录」这一档能在活体上造出来：自动化只打本地仿站（§7.2），真登录要走真站、由用户在场。
+   - 模型那条只读既有 `llm.settings.read` 的 `chat` 通道（`legs[].missing`），没有新开读取通道；
+     该格读不到时按「不知道」处理，不长出一条假阻断。
+   - 证据图：`10.11-08-blocker-fresh.png`（md5 9f445c16…）、`10.11-08-blocker-with-data.png`（md5 7a4c5706…）。
+
+⑦ 趋势块「真没有」（本轮补）：账本 0 行、漏斗各级都是 0（不是读不到）、最近 5 笔为空时，
+   在 14 天柱与五级漏斗**之下**补一行 `[data-testid="home-trend-none"]`：「— 这段时间还没有成功外发」+ 直达键「去搜岗位」（62px）。
+   读数：`trendNone` 文本如上，`trendBars=14`、漏斗五项仍为 0/0/0/0/0 —— 10.11-05 的柱与漏斗读数不因此翻案，
+   这一行是**加在下面的一句人话 + 入口**，不是把柱图换掉。
