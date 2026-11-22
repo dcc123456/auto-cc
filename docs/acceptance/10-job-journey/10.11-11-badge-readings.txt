@@ -1,0 +1,22 @@
+10.11-11 助手角标三态读数（干净 userData · dist 构建 · 本地仿站与本地模型桩）
+
+命令：`node tmp/g11/batch/p11.mjs`（needs / blocked / 普通未读）、`node tmp/g11/batch/p11b.mjs`（running，50ms 观察器）
+注意：本轮所有对话与计划都打本地 fixture（`/v1/chat/completions` 桩，`AUTO_CC_LLM_API_KEY=fixture-key`），没有一次真实平台请求。
+
+① 什么都不亮（基线）：`[data-testid="assistant-badge"]` 不存在（`null`）——没有 run、没有待表态。
+② 普通未读不亮（负对照）：助手收起时发一句 `chat.session.send`，回复落到会话里（`chat-messages` 有 2 条），
+   角标仍是 `null`。助手不做消息中心，这一格只认三类事实。
+③ 需要你（琥珀计数）：半自动档下 `agent.loop.propose` 出一张计划卡 → 角标
+   `{kind:'needs', text:'1', rect:{w:16,h:16}, animation:'none'}`（圆底 `bg-amber`、字色 `text-ink-900`，16×16 的计数芯片）。
+④ 进行中（青瓷点）：全自动档下 `agent.loop.confirm` 之后同一轮里读到 `kind:'running'`，随即截图；
+   读数是 `kind=running`（点，不带数字）。这一档只活很短：本轮那条 run 随后 `failed`（核心里 `jd.capture.run` 没有内核会话），
+   所以证据只取到「曾经在跑」这一帧，不把失败原因混进角标实现里。
+⑤ 被拦（朱砂点）：用既有 `browser.takeover.begin({actor:'system', reason:'risk'})` 造一次风控接管（同一条服务、同一份读数，
+   不是伪造状态）→ 角标 `{kind:'blocked', rect:{w:6,h:6}, animation:'none'}`，闭眼时换成 needs/running 也不抢位。
+⑥ 无脉冲动画：五档读数的 `getComputedStyle(...).animationName` 全是 `none`。
+
+**缺口（如实记）**：`needsYou` 现在只算「待确认计划 + 逐条批准」两项（`agentPause.pending` + run.status==='proposed'），
+判据里的第三项「执行器待办」没有计入——那个事实在 `journey.unattended.view` 上，助手面板目前不读它。这条没做，不写成已过。
+
+证据图：`10.11-11-badge-needs.png`（md5 96352966…）、`10.11-11-badge-running.png`（f9752a7c…）、
+`10.11-11-badge-blocked.png`（54b4e565…），三张互异。

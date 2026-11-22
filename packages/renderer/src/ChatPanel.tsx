@@ -22,6 +22,7 @@ import {
   Square,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import type {
   AutonomyLevel,
@@ -41,6 +42,7 @@ import { ChatSessionBar } from './ChatSessionBar';
 import { FullAutoConsentNotice } from './FullAutoConsentNotice';
 import { SedimentCard } from './SedimentCard';
 import { TakeoverBanner } from './TakeoverBanner';
+import { TAKEOVER_SLOT_ID } from './takeoverSlot';
 import { ToolCard } from './ToolCard';
 import { WorkflowRunCard } from './WorkflowRunCard';
 import { Banner, DeskButton, DeskSegmented, DeskTextarea } from './ui/controls';
@@ -392,6 +394,24 @@ export function ChatPanel() {
   // 把当前 run 的 id 跟着递进 `begin`，审计里那一条才说得出「这次接管按住的是哪条 run」（spec 5.5-09）。
   const takeover = useTakeover(agentRun.run?.runId);
 
+  /** 横幅本体（两处摆法共用同一份 props，见下面那段注释）。 */
+  const takeoverBanner = (
+    <TakeoverBanner
+      state={takeover.state}
+      elapsedMs={takeover.elapsedMs}
+      busy={takeover.busy}
+      notice={takeover.notice}
+      onHold={() => void takeover.hold()}
+      onRelease={() => void takeover.release()}
+    />
+  );
+
+  /** 全局横幅槽位：App 在顶栏之下摆了它（spec 10.11-19）。取不到时横幅不画，绝不在别处再画一份。 */
+  const [takeoverSlot, setTakeoverSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setTakeoverSlot(document.getElementById(TAKEOVER_SLOT_ID));
+  }, []);
+
   /**
    * 把「在跑 / 需要你 / 被拦」三类事实报给顶栏那颗助手胶囊（spec 10.11-11）。
    * 口径照 plan §14.2：需要你只计待确认计划 + 逐条批准 + 投递待确认，普通未读不亮。
@@ -716,17 +736,28 @@ export function ChatPanel() {
         }
       />
 
-      {/* 接管横幅压在顶栏之下、消息流之上，并收成**一行**（spec 5.5-01；用户 2026-10-19 裁定）：
-          它说的是「这块页面此刻在谁手里」，与档位（授权范围）和卡片（某一步的等待）都不是一件事，
-          塞进任何一张卡里都会让人漏看它——但它自己不该再占成一条 36px 的带。 */}
-      <TakeoverBanner
-        state={takeover.state}
-        elapsedMs={takeover.elapsedMs}
-        busy={takeover.busy}
-        notice={takeover.notice}
-        onHold={() => void takeover.hold()}
-        onRelease={() => void takeover.release()}
-      />
+      {/* 接管横幅收成**一行**（spec 5.5-01；用户 2026-10-19 裁定），并**提到全局槽位**（spec 10.11-19）：
+          它说的是「这块页面此刻在谁手里」，与档位、与某一步的等待都不是一件事，塞进任何一张卡里都会漏看。
+          用 portal 而不是再画一份：助手面板收起后 `ChatPanel` 仍然挂载，于是横幅在任何一个视图上都在，
+          而读数、按钮与审计归属（`useTakeover` 那一条 run）依旧只有这一处（AGENTS.md §2.5）。 */}
+      {/* 两处摆法、一份实现：**接管中**走全局槽位（任何视图上都看得见），**未接管**时那一行
+          「页面在谁手里 + 我来接管」仍留在面板里——若把它也提到全局，那条 33px 的带会常驻，
+          把内核视图从 `y=93/h=648` 挤成 `y=127/h=614`（10.11-27/15 的既有读数就会翻）。 */}
+      {takeover.state?.isHeld
+        ? takeoverSlot
+          ? createPortal(
+              <TakeoverBanner
+                state={takeover.state}
+                elapsedMs={takeover.elapsedMs}
+                busy={takeover.busy}
+                notice={takeover.notice}
+                onHold={() => void takeover.hold()}
+                onRelease={() => void takeover.release()}
+              />,
+              takeoverSlot,
+            )
+          : null
+        : takeoverBanner}
 
       <DeskPathGuide
         testid="chat-path-guide"

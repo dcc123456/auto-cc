@@ -1,0 +1,15 @@
+10.11-22 刷新与性能读数（干净 userData · dist 构建）
+
+命令：`node tmp/g11/batch/p11.mjs`（在 11 那轮里顺手取的句柄读数）
+
+① 进页读一次 + 既有事件推送 + 手动刷新：Home 的每块 `useBlock` 在挂载时读一次，
+   「刷新」键重跑三块 + 模型格（`reloadNumbers/reloadTrend/reloadNext/reloadModel`），
+   其余变化靠既有事件（`shell/kernel-view-visible`、`shell/kernel-view-url`、`agent/run-progress` …）推进。
+② 不新增轮询定时器：`grep -c setInterval packages/renderer/src/HomePanel.tsx` → **0**；
+   全文件桥调用共 9 处，全是既有只读口（`funnel.query/trend`、`journey.tracking.list`、`journey.unattended.view`、
+   `usage.ledger.summary`、`outbound.authorization.current`、`sessions.status`、`resume.doc.list`、`llm.settings.read`）。
+③ 进程句柄不增多（≤ 基线）：`plugins.status().metrics.activeResources`
+   基线 **1** → 来回切视图 2 轮（首页↔岗位）+ 手动刷新 3 次 + 静置 5s 之后仍是 **1**。
+   （判据按「不许变多」读，不是「等于基线」：它是全进程指标，别处的定时器也在进出。）
+
+结论：②③ 两条都成立，① 是既有实现的口径复述（每次读都走同一条桥、没有新开轮询）。

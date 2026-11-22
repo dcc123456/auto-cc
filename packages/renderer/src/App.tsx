@@ -37,6 +37,7 @@ import { UsagePanel } from './UsagePanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { useWorkflowRun } from './useWorkflowRun';
 import { useKernelViewVisible } from './useKernelViewVisible';
+import { TAKEOVER_SLOT_ID } from './takeoverSlot';
 import { deskTierReading, tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton, DeskTab, DeskViewTrail, NarrowLabel } from './ui/controls';
 import { Toast } from './ui/overlays';
@@ -335,6 +336,10 @@ export function App() {
           </DeskButton>
         </div>
       </header>
+
+      {/* 接管横幅的全局槽位（spec 10.11-19）：`ChatPanel` 往这里 portal，横幅因此在任何视图上都常驻；
+          助手面板收起后 `ChatPanel` 仍挂载，所以这份读数不会因为收起而消失。 */}
+      <div id={TAKEOVER_SLOT_ID} data-testid="takeover-slot" className="shrink-0" />
 
       <div className="flex min-h-0 flex-1">
         <nav

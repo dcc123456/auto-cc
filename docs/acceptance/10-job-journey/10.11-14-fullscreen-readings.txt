@@ -1,0 +1,20 @@
+10.11-14 站点全屏时呼出助手读数（干净 userData · dist 构建 · 本地仿站）
+
+命令：`node tmp/g11/batch/p14.mjs`（⚠ 一次只发一次 Ctrl+J：上一轮我发了 window + document 两份，
+等于按两下，结果「退出全屏→又回全屏」，差点把假缺陷写进证据。这一条也记在这里。）
+
+① 基线（助手收起、分栏态）：`shell.getStatus().kernelViewBounds = {x:541,y:93,width:659,height:648}`，
+   顶栏那颗键 `title=全屏`，`[data-testid="assistant-panel"]` 的 `data-state=closed`、rect 全 0。
+② 站点全屏：点顶栏「全屏」→ bounds `{x:185,y:93,width:1015,height:648}`（主区整条让给站点），
+   键的 `title` 变成「退出全屏」；此时 `assistant-panel` 不在 DOM 里（全屏态左栏让位，节点不销毁但不上屏）。
+③ Ctrl+J 呼出（判据的三条一次读齐）：
+   - 先退全屏：`bounds` 回到 `{x:541,y:93,width:659,height:648}`，键的 `title` 回到「全屏」；
+   - 一条 toast：`{data-action:'assistant-exit-fullscreen', data-toast:'jade',
+     文案:'呼出助手前先把站点收回分栏，站点内容没有被动过'}`（复用的是既有 `toggleExpanded`，没有第二条退全屏通道）；
+   - 面板随即有落脚处：`data-state=open`，rect `{x:208,y:53,w:332,h:689}`，完整落在主区内。
+④ 不反向自动回全屏：点胶囊收起助手 → `data-state=closed`、rect 全 0，而 `bounds` 仍是
+   `{x:541,y:93,width:659,height:648}`（没有自己弹回 1015 宽）；键的 `title` 仍是「全屏」。
+
+观感（动画、过渡）留前台由人验；本条目只读能测的三样：bounds、面板落脚、toast 文案。
+
+证据图：`10.11-14-hotkey.png`（cd179927…）、`10.11-14-after-close.png`（5a2f4773…），两张互异。

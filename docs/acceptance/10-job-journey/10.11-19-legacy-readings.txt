@@ -1,0 +1,23 @@
+10.11-19 旧对话信息安置读数（干净 userData · dist 构建 · 本地仿站与本地模型桩）
+
+命令：`node tmp/g11/batch/p14.mjs`（接管横幅全局常驻）、`node tmp/g11/batch/p11.mjs`（助手面板里的旧对话能力）
+
+① 接管横幅全局常驻（本轮改的地方）：横幅原来只在 `ChatPanel` 里，助手收起时任何视图都看不到。
+   现在用 portal 提到 `App` 顶栏之下的全局槽位 `#takeover-slot`，**只有「接管中」才走全局**——
+   未接管那一行仍留在面板里，否则那条 33px 的带会常驻，把内核视图从 `y=93/h=648` 挤成 `y=127/h=614`
+   （10.11-27 / 10.11-15 的既有读数就会翻）。
+   读数：`browser.takeover.begin({actor:'user',reason:'manual'})` → 助手收起（`data-state=closed`）、
+   切到「岗位」页 → 槽位仍显示「已人工接管 / 由你按下「我来接管」/ 已接管 0:02 / 交还页面」，槽高 33px；
+   `takeover.end` 之后槽高回 0、`bounds` 回 `{x:541,y:93,width:659,height:648}`。
+② 旧对话能力在助手面板里（半自动档跑过一轮之后）：`chat-panel` 在、消息流 5 条（含计划卡那一轮）、
+   `chat-input` 在、`agent-run-panel` 在（计划卡）、档位读数「半自动」（`chat-autonomy-current`）。
+③ M1 原型退役：`grep -rn CareerJourneyPrototype packages/ --include=*.tsx --include=*.ts` → 0 命中。
+④ 全自动明示在 Home：`home-status-unattended` 行在（未授权时「只建议」，授权后按 `statusbar.unattended` 报目标数）。
+⑤ 运行记录页保留详细审计：`trust` 视图仍在（「内置内核会话」段 + `session-detail` 展开），10.11-29 的取证里点过。
+
+**缺口（如实记）**：判据里逐项列的「压缩提示」「沉淀卡」「会话历史列表」这三样本轮没有造出来——
+它们各要一次长对话压缩、一次沉淀落盘、一次历史会话列表展开；`pauseCards` 也是 0（那一轮 run 停在计划卡、
+没有走到逐步批准）。这四样不是没安置（组件都在 `ChatPanel` 里按状态渲染），是**本轮没有取到活体读数**，
+留给 QA 按各自构造手法复验。
+
+证据图：`10.11-19-takeover-global.png`（8d271fa7…）、`10.11-19-assistant-legacy.png`（d1941a1b…），两张互异。
