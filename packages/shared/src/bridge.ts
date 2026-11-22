@@ -81,6 +81,8 @@ export type {
   ChatDeltaEvent,
   ChatFactCard,
   ChatMessageView,
+  ChatNavigatePart,
+  ChatNoticePart,
   ChatPart,
   ChatQueuedView,
   ChatSessionView,

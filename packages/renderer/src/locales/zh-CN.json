@@ -367,7 +367,16 @@
         "route_unknown": "没听懂这句。你可以这样说：「今天投了几份」「带我去看追踪」「准备一轮投递」「有什么要处理的」。",
         "route_refused": "听懂了，但不允许：{{code}}。",
         "navigateButton": "去{{page}}",
-        "navigatePrompt": "助手带你去{{page}}"
+        "navigatePrompt": "助手带你去{{page}}",
+        "authState": {
+          "active": "有效",
+          "paused": "已暂停",
+          "restart-required": "要你重新确认",
+          "expired": "已过期",
+          "revoked": "已收回",
+          "none": "没有"
+        },
+        "reminderReason": "要你处理的：待表态 {{pauses}} 件、执行器 {{runStatus}}（待办 {{pending}} 岗）、授权单 {{authorization}}；暂停原因：{{pauseReason}}。"
       }
     },
     "desk": {

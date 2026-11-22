@@ -462,11 +462,13 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
   });
 
   it('发消息得到分片增量，字数一片比一片多（1.11-03）', async () => {
+    // 普通句现在由意图路由直接出回执（10.11-16），流式那一段仍由 `/tool` 这条路产生。
     const { chat, deltas } = await boot({ chunkChars: 8, chunkIntervalMs: 5 });
-    const started = chat.send('你好');
+    const started = chat.send('/tool demo.echo {}');
     expect(started).toMatchObject({ isStreaming: true });
     await settle(300);
-    const pieces = deltas.filter((delta) => !delta.done);
+    // 工具卡片那一条 delta 的 text 是空的（只带 tool 载荷），单调性只看文本片。
+    const pieces = deltas.filter((delta) => !delta.done && delta.text !== '');
     expect(pieces.length).toBeGreaterThan(2);
     const cumulative: number[] = [];
     let seen = 0;
@@ -492,7 +494,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(chat.current().messages.filter((message) => message.isStreaming)).toHaveLength(0);
   });
 
-  it('跑完之后用户与助手各一行，助手文本是完整的模板回复（1.11-02）', async () => {
+  it('跑完之后用户与助手各一行；认不出来的话给「没听懂」回执（1.11-02 + 10.11-16）', async () => {
     const { chat } = await boot();
     chat.send('帮我看看这个岗位');
     await settle(120);
@@ -501,7 +503,8 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
     expect(snapshot.messages.every((message) => !message.isStreaming)).toBe(true);
     expect(snapshot.session.messageCount).toBe(2);
     const first = snapshot.messages[1]?.parts[0];
-    expect(first?.kind === 'text' && first.text).toContain('帮我看看这个岗位');
+    // 认不出来时不再回落到开发向的骨架文本，而是给 `route_unknown` 回执（渲染层配示例）。
+    expect(first).toMatchObject({ kind: 'notice', code: 'route_unknown' });
   });
 
   it('/tool 指名未登记的工具：卡片失败态，原因写着未注册，id 是用户点的那只（1.11-06 + 09）', async () => {
@@ -549,7 +552,7 @@ describe('chat.session 会话与流式（1.11-02 / 03 / 08 / 13）', () => {
 
   it('流式途中停止：已产出的部分如实落库，不留下「永远在流式」的行（1.11-13）', async () => {
     const { chat, deltas } = await boot({ chunkChars: 4, chunkIntervalMs: 20 });
-    chat.send('这是一段比较长的输入，用来确保停止时还有内容没吐完');
+    chat.send('/tool demo.echo {}');
     await settle(50);
     const stopped = chat.stop();
     expect(stopped).not.toBeNull();

@@ -1145,17 +1145,17 @@ describe('摘掉工具面之后的反向验证（5.2-13）', () => {
     expect(calls).toEqual([]);
   });
 
-  it('注册表为空不波及纯对话：普通消息照常出文本回复，回复里一条工具段也没有', async () => {
+  it('注册表为空不波及纯对话：普通消息照常得到一条回复，且没有任何工具段', async () => {
     const { chat, tools } = await bootLoop();
     tools.unregister('demo.tick');
     chat.send('帮我按这个 JD 优化简历');
     await sleep(120);
     const last = chat.current().messages.at(-1);
     expect(last?.isStreaming).toBe(false);
+    // 10.11-16 起：认不出来的话走「没听懂」回执（notice），不再回落那句开发向的骨架文本。
     expect(last?.parts).toHaveLength(1);
-    const firstPart = last?.parts[0];
-    expect(firstPart?.kind).toBe('text');
-    expect(firstPart?.kind === 'text' ? firstPart.text : '').toContain('已收到');
+    expect(last?.parts[0]?.kind).toBe('notice');
+    expect(last?.parts.some((part) => part.kind === 'tool')).toBe(false);
   });
 
   it('表空着而模型硬要动手：每一步都拒在 TOOL_UNAVAILABLE，零副作用、run 记 failed', async () => {

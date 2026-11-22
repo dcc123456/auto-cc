@@ -24,3 +24,23 @@
 
 **未取到的活体**：explain（解释）、draft_plan（起草计划）、reminder（值守提醒）三类的活体回执要造出
 「库里有实体 / 能起草 / 有暂停与待办」的前置，本轮只验到分类与处理器单测层面；下一轮补。
+
+⑨ 2026-11-22 QA 复验发现四条假实现，本轮修（H/I/J/G）：
+   - **H**：`routePorts().propose` 把 async 的 `agent.loop.propose` 当同步用，`run.plan.length` 抛 TypeError →
+     回执落 `route_refused: ROUTE_FAILED`。改为真 `await`；没有 code 的错误也不再被吞成 ROUTE_FAILED
+     （有 `code` 就用 `code`，没有才兜底）。
+   - **I**：`kbSearch` 没 `await` async 的 `kb.profile.search`（`result.hits` 恒 undefined → 命中恒 0）；
+     `trackingCurrent` 直接写死 `{jobId:null,state:null}`。改为真 await，并把投递端口换成真读数
+     （`journey.tracking.list()` 取最近更新的一条；没有就如实 null，不编）。
+   - **J**：提醒回执把英文枚举甩进中文句。现在 `runStatus` 与 `authorization` 先在渲染层换成语言包说法
+     （`home.runState.*` / `assistant.notice.authState.*`），并带上 `pauseReason` 原文；
+     有/没有暂停原因分成两条文案，避免出现「暂停原因：」后面空着。
+   - **G**：`route_unknown` 文案原先全仓零引用（认不出来的话回落到开发向骨架文本）。现在 unknown 直接出
+     「没听懂」回执（带两三个示例），不再回落到那句骨架文本；两条既有流式用例改用 `/tool` 触发流式，
+     `5.2-13` 的「纯对话不出工具段」改成断言 notice 段。
+
+⑩ **本轮读数整批作废，须重跑**：QA 报的协作事故——我把实例起在 10417（=QA 的端口段），
+   他的 CDP 探针落进了我的库；反过来我这一轮从 `authorization.current()` 读到的也是不属于我这份 userData 的
+   种子值（我的 `ud-1718b/store.db` 里 `outbound_authorizations` 是 0 行）。
+   按 2026-11-22 裁定①：开发改用 **10420–10439**，起实例前写 `tmp/ports/<port>.owner`；
+   重跑前 `SELECT COUNT(*)` 记空库、跑后复读同一文件核对，读数与库对得上才入库。

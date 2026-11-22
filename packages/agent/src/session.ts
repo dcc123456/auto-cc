@@ -1128,9 +1128,18 @@ export class ChatSessionService extends Service {
         }
       : undefined;
     const { reading } = await routeIntent(userText, model);
-    // 分类不出来就走原来的本地骨架回复（那段文本本身就是「没听懂」的口径，也保住既有流式行为）；
-    // 只有**分类成功**的那几类才由路由出回执。
-    if (reading.intent === 'unknown') return false;
+    // 这条消息是带着一个空的文本段起的头（流式那一格）；路由出回执时把它去掉，
+    // 否则界面上会多画一个空段落、按 parts[0] 读回执的人也读不到（QA 报的 parts[0] 是空 text）。
+    if (message.parts.length === 1 && message.parts[0]?.kind === 'text' && message.parts[0].text === '') {
+      message.parts.length = 0;
+    }
+    if (reading.intent === 'unknown') {
+      // 「没听懂」现在就出回执（2026-11-22 裁定 G）：文案 key 是 `route_unknown`，渲染层给示例。
+      // 不再回落到那句开发向的骨架回复——用户看到「没听懂」比看到「演示工具卡片」有用得多。
+      message.parts.push({ kind: 'notice', code: 'route_unknown' });
+      this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: false });
+      return true;
+    }
     try {
       const parts = await runRoute(reading, userText, this.routePorts());
       if (parts === null) {
@@ -1169,20 +1178,24 @@ export class ChatSessionService extends Service {
       this.ctx,
       'usage.ledger',
     );
-    const kb = maybeService<{ search: (query: string) => { rows?: unknown[]; hits?: unknown[] } }>(
-      this.ctx,
-      'kb.profile',
-    );
+    // 检索是 async 的：不 await 就永远读到 undefined（QA 的 I：命中恒 0 的假读数就是这么来的）。
+    const kb = maybeService<{
+      search: (query: string) => Promise<{ hits?: { chunkId?: string }[]; rows?: { id?: string }[] }>;
+    }>(this.ctx, 'kb.profile');
+    const tracking = maybeService<{
+      list: (platform?: string) => Promise<{ platform: string; jobId: string; state: string; updatedAt: number }[]>;
+    }>(this.ctx, 'journey.tracking');
     const pause = maybeService<{ pending: () => unknown[] }>(this.ctx, 'agent.pause');
     const unattended = maybeService<{ view: () => { status: string; pending: string[] } }>(
       this.ctx,
       'journey.unattended',
     );
-    const authorization = maybeService<{ current: () => { status: string } | null }>(
+    const authorization = maybeService<{ current: () => { status: string; pauseReason?: string | null } | null }>(
       this.ctx,
       'outbound.authorization',
     );
-    const loop = maybeService<{ propose: (goal: string) => { runId: string; plan: unknown[] } }>(
+    // 起草也是 async 的：上一版当同步用，`run.plan.length` 直接 TypeError（QA 的 H）。
+    const loop = maybeService<{ propose: (goal: string) => Promise<{ runId: string; plan: unknown[] }> }>(
       this.ctx,
       'agent.loop',
     );
@@ -1205,14 +1218,20 @@ export class ChatSessionService extends Service {
         const view = ledger.summary(5);
         return Promise.resolve({ total: view.total, lastSendAt: view.recent[0]?.ts ?? null });
       },
-      kbSearch: (query: string) => {
-        if (!kb) return Promise.resolve({ hits: 0 });
-        const result = kb.search(query);
+      kbSearch: async (query: string) => {
+        if (!kb) return { hits: 0 };
+        const result = await kb.search(query);
         const docs = result.hits ?? result.rows ?? [];
-        const first = docs[0] as { chunkId?: string; id?: string } | undefined;
-        return Promise.resolve({ hits: docs.length, ref: first?.chunkId ?? first?.id });
+        const first = (docs[0] ?? {}) as { chunkId?: string; id?: string };
+        return { hits: docs.length, ref: first.chunkId ?? first.id };
       },
-      trackingCurrent: () => Promise.resolve({ jobId: null, state: null }),
+      trackingCurrent: async () => {
+        // 真读数：取最近更新的一条岗位追踪（没有就是「还没有追踪」，不编 id/状态）。
+        if (!tracking) return { jobId: null, state: null };
+        const rows = await tracking.list();
+        const first = [...rows].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        return { jobId: first?.jobId ?? null, state: first?.state ?? null };
+      },
       pausePending: () => Promise.resolve(pause ? pause.pending().length : 0),
       unattendedView: () => {
         if (!unattended) return Promise.resolve({ status: 'idle', pending: 0 });
@@ -1220,10 +1239,10 @@ export class ChatSessionService extends Service {
         return Promise.resolve({ status: view.status, pending: view.pending.length });
       },
       authorizationCurrent: () => Promise.resolve(authorization ? authorization.current() : null),
-      propose: (goal: string) => {
-        if (!loop) return Promise.reject(new AppError('AGENT_PLANNER_UNAVAILABLE', '计划器未挂载', 'chat.session'));
-        const run = loop.propose(goal);
-        return Promise.resolve({ runId: run.runId, steps: run.plan.length });
+      propose: async (goal: string) => {
+        if (!loop) throw new AppError('AGENT_PLANNER_UNAVAILABLE', '计划器未挂载', 'chat.session');
+        const run = await loop.propose(goal);
+        return { runId: run.runId, steps: run.plan.length };
       },
     };
   }

@@ -24,9 +24,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type {
   AutonomyLevel,
   ChatMessageView,
+  ChatNoticePart,
   ChatPart,
   ChatSnapshotView,
   ChatToolPart,
@@ -238,6 +240,21 @@ function MessageActions({ message }: { message: ChatMessageView }) {
  * @param toolMetas 注册表读数按 id 建的索引，卡片用它显示副作用分级
  * @returns 消息流里的一格
  */
+/**
+ * 回执的成句：枚举先换成人话再插值（不许把 `paused`/`restart-required` 这种英文枚举甩进中文句）。
+ * 提醒那一条还分「有暂停原因 / 没有」两句，免得出现「暂停原因：」后面空着。
+ */
+function noticeText(t: TFunction, part: ChatNoticePart): string {
+  if (part.code !== 'reminder') return String(t(`assistant.notice.${part.code}`, part.params ?? {}));
+  const reason = String(part.params?.pauseReason ?? '');
+  const params = {
+    ...part.params,
+    runStatus: t(`home.runState.${String(part.params?.runStatus ?? 'idle')}`),
+    authorization: t(`assistant.notice.authState.${String(part.params?.authorization ?? 'none')}`),
+  };
+  return String(t(reason === '' ? 'assistant.notice.reminder' : 'assistant.notice.reminderReason', params));
+}
+
 function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, ToolDescriptorView> }) {
   const { t } = useTranslation();
   const isUser = turn.role === 'user';
@@ -280,7 +297,7 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
                 data-part-kind="notice"
                 data-notice-code={part.code}
               >
-                {t(`assistant.notice.${part.code}`, part.params ?? {})}
+                {noticeText(t, part)}
               </p>
             ) : (
               // 跳转回执：**点才跳**，消息本身不产生导航副作用（走既有 viewTrail）。

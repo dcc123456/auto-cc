@@ -367,7 +367,16 @@
         "route_unknown": "I did not get that. Try: \"how many did I send today\", \"take me to tracking\", \"draft a round\", \"what needs me\".",
         "route_refused": "Understood, but not allowed: {{code}}.",
         "navigateButton": "Go to {{page}}",
-        "navigatePrompt": "The assistant takes you to {{page}}"
+        "navigatePrompt": "The assistant takes you to {{page}}",
+        "authState": {
+          "active": "active",
+          "paused": "paused",
+          "restart-required": "needs your re-confirm",
+          "expired": "expired",
+          "revoked": "revoked",
+          "none": "none"
+        },
+        "reminderReason": "Waiting on you: {{pauses}} approvals, runner {{runStatus}} ({{pending}} pending), authorization {{authorization}}; pause reason: {{pauseReason}}."
       }
     },
     "desk": {

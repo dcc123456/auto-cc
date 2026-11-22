@@ -22,8 +22,8 @@ export interface RoutePorts {
   pausePending: () => Promise<number>;
   /** 执行器现况（`journey.unattended.view`）。 */
   unattendedView: () => Promise<{ status: string; pending: number }>;
-  /** 授权单现况（`outbound.authorization.current`）。 */
-  authorizationCurrent: () => Promise<{ status: string } | null>;
+  /** 授权单现况（`outbound.authorization.current`）；`pauseReason` 是暂停原因原文（没有就是 null）。 */
+  authorizationCurrent: () => Promise<{ status: string; pauseReason?: string | null } | null>;
   /** 起草计划（`agent.loop.propose`）——只起草，**不确认**。 */
   propose: (goal: string) => Promise<{ runId: string; steps: number }>;
 }
@@ -94,6 +94,8 @@ export async function runRoute(reading: RouteReading, text: string, ports: Route
             runStatus: run.status,
             pending: run.pending,
             authorization: auth?.status ?? 'none',
+            // 暂停原因原文（16⑥ 要「能读到暂停原因」）：没有暂停原因时给空串，渲染层按空处理。
+            pauseReason: auth?.pauseReason ?? '',
           },
         },
       ];
