@@ -233,8 +233,11 @@ export class OutboundGreetService extends Service {
 
     // 无人值守入口先过授权闸门（范围/窗口/风控暂停/停用/24h 都在那一处判）：它必须排在页面动作与花费之前，
     // 被拒的这一次连话术都不生成。手动路径不带 `unattended`，行为一字不变（PMO 2026-11-20 裁定）。
-    const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
+    // 2026-11-22 回退：手动路径**不**查授权单的目标集合——2026-11-20 的裁定是
+    // 「手动模式保持四元组 + 现场审批，不受后台规则改写」，给手动发送加后台规则正好违背它。
+    // 越权判定仍然只在无人值守那一条入口上（它自带 `unattended: true`）。
     if (parsed.data.unattended === true) {
+      const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
       if (!authorization) {
         throw new AppError(
           'UNATTENDED_NOT_AUTHORIZED',
@@ -243,21 +246,6 @@ export class OutboundGreetService extends Service {
         );
       }
       authorization.authorize('greet', { platform, targetId: targetKey, resumeVersion, workflowRunId: runId, nowMs });
-    } else if (authorization) {
-      // **越权判定先于渠道判定**（2026-11-22 裁定）：手动路径若有一份生效中的授权单，
-      // 目标不在集合里就该报「无权」，而不是因为平台没渠道报「渠道缺失」——语义上传输可用性排在权限之后。
-      // 没有授权单时行为一字不变（仍由额度闸门与风险确认守着）。
-      const single = authorization.current(nowMs);
-      if (single && single.status === 'active') {
-        const allowed = single.platform === platform && single.targets.includes(targetKey);
-        if (!allowed) {
-          throw new AppError(
-            'OUTBOUND_TARGET_NOT_AUTHORIZED',
-            `岗位 ${targetKey} 不在本次授权集合里（授权单覆盖 ${single.platform} 的 ${String(single.targets.length)} 个岗）`,
-            'outbound.greet',
-          );
-        }
-      }
     }
 
     // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
@@ -520,12 +508,6 @@ export class OutboundGreetService extends Service {
 
 /** 授权闸门的窄形状（本包不 import 服务类，按名字现问，§2.7/§9 的 2.5 实测条）。 */
 interface UnattendedAuthorizer {
-  /** 现读当前授权单（没有就是 null）——手动路径要用它判「目标是否在授权集合里」。 */
-  current(nowMs?: number): {
-    platform: string;
-    targets: string[];
-    status: string;
-  } | null;
   authorize(
     action: 'greet' | 'deliver',
     context: {

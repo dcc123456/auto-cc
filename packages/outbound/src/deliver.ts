@@ -386,20 +386,8 @@ export class OutboundDeliverService extends Service {
     // **越权/去重先于渠道**（2026-11-22 裁定，与打招呼同一条）：传输可用性不得掩盖权限问题。
     // 对账要读取旧尝试，只有真正的新外发才在这里拒绝成功重放与未知结局。
     if (!forReconciliation) {
-      const authorization = maybeService<{
-        current(nowMs?: number): { platform: string; targets: string[]; status: string } | null;
-      }>(this.ctx, 'outbound.authorization');
-      const single = authorization?.current(nowMs) ?? null;
-      if (single && single.status === 'active') {
-        const allowed = single.platform === platform && single.targets.includes(targetKey);
-        if (!allowed) {
-          throw new AppError(
-            'OUTBOUND_TARGET_NOT_AUTHORIZED',
-            `岗位 ${targetKey} 不在本次授权集合里（授权单覆盖 ${single.platform} 的 ${String(single.targets.length)} 个岗）`,
-            'outbound.deliver',
-          );
-        }
-      }
+      // 手动/界面路径不查授权单目标（2026-11-20 裁定：手动路径不被后台规则改写）；
+      // 越权判定只在无人值守入口上（见 `authorize('deliver', …)` 那段）。
       this.gate.assertOutboundFresh(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion });
     }
 
