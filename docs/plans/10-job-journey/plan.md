@@ -1040,3 +1040,15 @@ interface JourneyContext {
 **不做**：不在平台模式放开跨源；不把任意网页设为默认；不共用登录态/分区；不允许助手在不可信页面执行点击/定位/抓取/外发；不把任意网页的内容抓取入库（那会让「不可信」与「已入库事实」混在一起）。
 
 **判据与环境**：spec 10.11-30（P0）；证据 `10.11-30-any-web-{open,readonly,platform-return,isolated-session}-readings.txt` 与 `10.11-30-any-web.png`，截图裁到证据区、不含个人数据，同批 `md5` 互异。
+
+### 14.16 第 11 片收口裁定（角标语义、停止状态、任意网页三问，2026-11-22）
+
+**A. 「需要你」角标只算真的在等你的状态**（PMO 2026-11-22 裁定）：`paused` / `stopped` / `blocked`，以及授权单 `restart-required`。`idle` 时有授权单不算、跑到一半也不算——QA 复验时看到「授权后未起跑就亮 2 件、跑完才灭」，那是把「未完成岗位数」当成了「需要你」，用户点进去找不到对应入口。
+
+**B. 停止状态必须立刻落地**：用户按停止后 **≤1s** 内 `journey.unattended.view().status` 不得再是 `running`（落 `stopped` 或显式 `stopping` 均可）；取消在下一个检查点生效、期间不发新外发（这条本来就有，缺的是状态先落地）。QA 实测最长约 150s 仍显示 `running`，属界面误报。
+
+**C. 任意网页三问（PMO 同日裁定）**：**(a)** web 模式跳到平台域名**不自动切模式**，给一条「这是 BOSS 域名，点此回到平台模式」的提示条——自动切会在导航中途重建会话/视图，风险大于收益；**(b)** `window.open`/`target=_blank` 继续 deny，但要有可见原因（toast 或地址栏一行「外链被拦截」），不能点了没反应；**(c)** 拒绝码沿用 `WEB_MODE_READ_ONLY` / `WEB_MODE_URL_REJECTED`（已进 `AppErrorCode`），渲染层不许拼字符串。
+
+**D. 记错的一处事实（10.11-27）**：原文写「本仓没有 `URL_EMPTY`/`ACTION_BUSY` 这两个码」不准确——它们不是 `AppErrorCode`，但作为**界面原因码**大量存在于 `KernelAddressBar.tsx`、`ScriptPanel.tsx`、`UsagePanel.tsx`；spec 已按 QA 实测更正，避免被当成死码删掉。
+
+**判据**：A/B → spec 10.11-11 表后 dated 注；C → spec 10.11-30 表后 dated 注；D → spec 10.11-27 行内更正 + dated 注。
