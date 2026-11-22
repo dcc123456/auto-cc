@@ -141,6 +141,26 @@ export function pickHomeBlocker(input: {
 }
 
 /**
+ * 外发时刻的写法：**当天只给时间、非当天给「MM-DD 时间」**（QA 的 P3，2026-11-22）。
+ *
+ * 为什么必须带日期：前几天那几行原来只渲染时分秒，和今天的行长得一模一样，
+ * 用户会把几天前的发送读成刚发的。判据只按**本地自然日**比，不做「几小时前」这类相对量——
+ * 相对量会随时间自己变，截图与读数就对不上了。
+ * @param ts 外发时刻（毫秒）
+ * @param nowMs 判定基准的「此刻」（毫秒）；渲染时传当下，测试里可固定
+ * @returns `HH:mm:ss`（当天）或 `MM-DD HH:mm:ss`（非当天）
+ */
+export function recentStamp(ts: number, nowMs: number): string {
+  const at = new Date(ts);
+  const now = new Date(nowMs);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+  const sameDay =
+    at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate();
+  return sameDay ? time : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
+}
+
+/**
  * 「无人值守」那一行的值：按授权单状态各给一句人话（不把暂停/失效折叠成「只建议」）。
  * @param t 翻译函数
  * @param next 「接下来」那一块的读数状态（未就绪时按「还没读到」）
@@ -627,7 +647,7 @@ export function HomePanel() {
                   : String(numbersValue.deliverCount),
                 t('home.caption.sends', {
                   days: windowDays,
-                  last: numbersValue?.lastSend ? new Date(numbersValue.lastSend.ts).toLocaleTimeString() : '—',
+                  last: numbersValue?.lastSend ? recentStamp(numbersValue.lastSend.ts, nowRef.current) : '—',
                   target: numbersValue?.lastSend?.targetId ?? '—',
                 }),
               ],
@@ -772,7 +792,7 @@ export function HomePanel() {
                 <ul className="mt-1 flex flex-col gap-0.5">
                   {(trendValue?.recent ?? []).map((row) => (
                     <li key={row.id}>
-                      {new Date(row.ts).toLocaleTimeString()} · {row.action} · {row.targetId}
+                      {recentStamp(row.ts, nowRef.current)} · {row.action} · {row.targetId}
                     </li>
                   ))}
                 </ul>
