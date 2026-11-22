@@ -254,6 +254,15 @@
 > 任意网页是另一个**显式模式**（独立分区 `persist:web` + 助手只读 + 标记与「回到平台」出口）；平台模式下 `NAVIGATE_URL_REJECTED` / `CONSENT_REQUIRED` 原样生效。
 > 「不把内核视图做成共用登录态的自由浏览器」这条立场不变；用户要的是能看任意网页，不是把招聘平台的登录态带到不可信站点。
 
+> **2026-11-22 dated 注（10.11-18 回退：手动路径不受后台规则改写；越权按平台范围收口）**：上一条裁定里「手动路径若存在生效授权单，目标不在集合里就先抛 `OUTBOUND_TARGET_NOT_AUTHORIZED`」**回退**——
+> 它把后台授权单的规则加到人身上，与 2026-11-20 的「手动模式保持四元组 + 现场审批，**不受后台规则改写**」冲突；为了让 `9999` 出码去改语义，等于用判据反向塑造产品。保留的只有手动路径内 `consent → duplicate → channel` 的排序改善（对手动行为无变化）。
+> 越权判据因此收口为两条：**① 平台范围（活体）**——执行器带 `unattended:true` 用授权单外的平台跑，必须得到 `OUTBOUND_TARGET_NOT_AUTHORIZED` 的平台分支（实测 `lastError=授权单不覆盖平台 boss`，账本 0→0）；
+> **② 目标范围（单测）**——执行器的待办只来自授权单 `targets`（`pendingOf`），手动 `/tool` 与界面按钮都不带 `unattended`，没有任何入口会带 `unattended:true` 去推授权外目标，所以「目标分支无活体入口」是**结构事实**、不算活体缺项；单测覆盖，证据须注明引用行号（`packages/outbound/src/greet.ts` 的授权校验段，QA 实测 237–249 行）。
+
+> **2026-11-22 dated 注（10.11-23 的 200% 档只走前台）**：两个替代口都不成立——`Emulation.setPageScaleFactor(2)` 只作用于渲染进程视口，对内核视图无效（实测 `visualViewport.scale` 仍为 1、截图与默认态像素不可区分，那张已删不入库）；
+> `shell.setKernelViewZoomFactor(2)` 的契约是 `(0,1]`（`packages/shell/src/slot-bounds.ts:45-48` 的 `clampZoomFactor` 对 `>1` 返回 null 并抛 `KERNEL_VIEW_ZOOM_INVALID`），它是「装不下时缩小」的口，不是放大口。
+> 所以 200% 只走**前台**：用户把系统显示缩放调到 200%（或真机高分屏）后拍，与「真实窗口那几张留给前台」同一时段；**不加 `shell.setAppZoom` 这类新对外能力**。取到前 10.11-23 保持 `[!]`。
+
 > **2026-11-22 dated 注（10.11-18 越权判定先于渠道判定，PMO 裁定）**：原实现 `greet.perform` **先取渠道、取不到就抛**，于是「没渠道」盖过了「无权」——fixture 上跑 `9999` 永远得到 `OUTBOUND_CHANNEL_MISSING`，`OUTBOUND_TARGET_NOT_AUTHORIZED` 根本轮不上；真站在未签字时同理先报 `CONSENT_REQUIRED`。
 > 裁定：判定顺序改为**先过 `entitlement.gate`（授权单 / 额度 / 目标 / 版本 / 四元组去重），再取渠道**。三条理由：① 越权判定必须先于传输可用性，否则「越权外发为 0」这条红线在缺渠道时无法被证明；② 真站也会先报无权、再报其他原因，用户看到的原因更接近根因；③ 不为此给 fixture 造第二个平台适配器——那是第二套平台集成，违反不变式。
 > 验收口径：`sessions.open('fixture')` 后跑 `/tool outbound.greet.perform {platform:'fixture', jobId:'9999'}` 必须得到 **`OUTBOUND_TARGET_NOT_AUTHORIZED`**（不是 `OUTBOUND_CHANNEL_MISSING`），且账本前后 0；**这一格取到后 18 才可判 `[x]`**。

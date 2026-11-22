@@ -1057,6 +1057,12 @@ interface JourneyContext {
 
 **I. 16/17/18 复验的四条必修与三条口径（PMO 2026-11-22 裁定）**：QA 在 `cdd51f7` 上确认 16 只有 3/6 类通过，其中 H（`propose` 没 await，计划卡出不来）、I（`kbSearch` 没 await、`trackingCurrent` 写死）、J（提醒句甩英文枚举）、G（`route_unknown` 没接）四条是假实现、必修；I 同时是 17 第 4 条不成立的原因。另三条口径：`/tool` 不属 18 计划卡射程（显式人工命令可直跑，但必须过闸门与风险确认，不豁免）；越权负对照用 fixture 平台跑（回环免签字，真平台越权留用户在场）；18 的模型通道可指本地 fixture（证据标 `fixture-model`，不当真实模型结论，真 key 在用户实例上验）。
 
+**M. 手动路径的授权校验回退（PMO 2026-11-22 裁定）**：`c188d9c` 里「手动 `/tool` 带生效授权单时也查目标集合」那部分**回退**——手动模式保持「四元组 + 现场审批」，不受后台规则改写（2026-11-20 裁定）；为让 `9999` 出码而改语义等于判据反向塑造产品。保留 `consent → duplicate → channel` 的排序改善（对手动行为无变化）。
+
+**N. 18 的越权判据收口（PMO 2026-11-22 裁定）**：**平台范围**用活体（执行器用授权单外的平台跑 → `OUTBOUND_TARGET_NOT_AUTHORIZED` 平台分支、账本 0→0）；**目标范围**保留单测——执行器待办只来自授权单 `targets`，没有任何入口会带 `unattended:true` 推授权外目标，故「目标分支无活体入口」是结构事实、不算活体缺项。
+
+**O. 23 的 200% 只走前台（PMO 2026-11-22 裁定）**：`Emulation.setPageScaleFactor` 对内核视图无效（只作用渲染进程视口）；`shell.setKernelViewZoomFactor` 契约是 `(0,1]` 缩小口（`slot-bounds.ts` 的 `clampZoomFactor` 对 `>1` 抛 `KERNEL_VIEW_ZOOM_INVALID`）。200% 由用户在系统显示缩放 200%（或真机高分屏）下在同一时段拍；不加 `shell.setAppZoom` 这类新对外能力。
+
 **L. 越权判定先于渠道判定（PMO 2026-11-22 裁定，行为变更）**：`greet.perform` 原先先取渠道、取不到就抛，导致「没渠道」盖过「无权」——fixture 上 `9999` 只能得到 `OUTBOUND_CHANNEL_MISSING`。改为**先过 `entitlement.gate`（授权单 / 额度 / 目标 / 版本 / 四元组去重），再取渠道**：越权判定必须先于传输可用性，否则「越权外发为 0」在缺渠道时无法被证明；真站也会先报无权再报其他原因。不为此给 fixture 造第二个适配器（第二套平台集成）。验收：`sessions.open('fixture')` 后 `9999` 须回 `OUTBOUND_TARGET_NOT_AUTHORIZED`、账本前后 0；取到后 18 才可判 `[x]`。
 
 **K. 16/17 判绿、18 留一格（2026-11-22）**：`10.11-16` 与 `10.11-17` 按 **QA 独立复跑**判 `[x]`（引 `10.11-16-qa-router-readings.txt`、`10.11-17-qa-redline-readings.txt`），不是开发自证；`10.11-18` 仍 `[!]`——半自动两张确认卡与 `PAUSE_TIMEOUT` 负对照已成立，只差越权 `9999`：要先 `sessions.open('fixture')` 登记渠道，再读到 `OUTBOUND_TARGET_NOT_AUTHORIZED` 而非渠道缺失，账本前后 0。
