@@ -27,3 +27,19 @@
    - **正向落卡没造出来**：要一次**成功步**才 `canSediment:true`。本机这条链上 `jd.capture.run` 一直 `TOOL_FAILED`，
      我试过把 fixture 会话的 `startUrl` 改到 `/boss` 列表页也一样。这一格仍欠，不写成已具备。
    - 证据图：`10.11-19-sediment-card.png`（判据文案那张）。
+
+⑥ 正向沉淀再试两条（2026-11-22，端口 10435/10436）：结论是**结构上取不到**，两条路都被判据层按设计挡住。
+   - 用 `browser.page.snapshot` 当成功步（给 fixture 计划器临时加了一条只读分支，试完已还原）：
+     run **completed**、该步 `status=ok`、证据 1 条；`sediment.preview` 仍 `canSediment:false`，原因
+     「工具 browser.page.snapshot 没有声明对应的可跑节点（它的产物是给用户读的，不是工作流的一步）」。
+     这是 spec 5.4-02 的设计，不是缺陷。
+   - 用 `jd.capture.run` 当成功步：该步 `failed / TOOL_FAILED`，`observation` 只有「fixture 回声：连通正常」，
+     **没有结构化错误码**；于是 sediment 按「含失败步的段落不能沉淀」拒绝。
+     → 这条是**搜岗主链的工具在本地仿站上失败且不报真码**，我把它当缺陷单开一条（下面 ⑦）。
+   - 所以正向落卡要成立，必须先有一个「既有可跑节点、又能在本机成功执行」的步；当前工具面上没有这样的组合。
+     这不是取证手法问题，是结构问题——要补就是修 `jd.capture.run` 在 fixture 上的执行（缺陷），
+     或给某只只读工具补一个可跑节点（产品增量，需裁定）。
+
+⑦ **缺陷（P2，本轮新发现）**：`jd.capture.run` 在 fixture 平台上执行失败，步状态 `failed / TOOL_FAILED`，
+   `observation` 只有「fixture 回声：连通正常」，**没有结构化错误码**——读不出是选择器、登录态、风控确认还是平台包缺失。
+   它是搜岗主链的工具，建议单列一条查（不是 19 的取证缺口，是工具本身的失败可读性问题）。
