@@ -254,6 +254,10 @@
 > 任意网页是另一个**显式模式**（独立分区 `persist:web` + 助手只读 + 标记与「回到平台」出口）；平台模式下 `NAVIGATE_URL_REJECTED` / `CONSENT_REQUIRED` 原样生效。
 > 「不把内核视图做成共用登录态的自由浏览器」这条立场不变；用户要的是能看任意网页，不是把招聘平台的登录态带到不可信站点。
 
+> **2026-11-22 dated 注（10.11-18 越权判定先于渠道判定，PMO 裁定）**：原实现 `greet.perform` **先取渠道、取不到就抛**，于是「没渠道」盖过了「无权」——fixture 上跑 `9999` 永远得到 `OUTBOUND_CHANNEL_MISSING`，`OUTBOUND_TARGET_NOT_AUTHORIZED` 根本轮不上；真站在未签字时同理先报 `CONSENT_REQUIRED`。
+> 裁定：判定顺序改为**先过 `entitlement.gate`（授权单 / 额度 / 目标 / 版本 / 四元组去重），再取渠道**。三条理由：① 越权判定必须先于传输可用性，否则「越权外发为 0」这条红线在缺渠道时无法被证明；② 真站也会先报无权、再报其他原因，用户看到的原因更接近根因；③ 不为此给 fixture 造第二个平台适配器——那是第二套平台集成，违反不变式。
+> 验收口径：`sessions.open('fixture')` 后跑 `/tool outbound.greet.perform {platform:'fixture', jobId:'9999'}` 必须得到 **`OUTBOUND_TARGET_NOT_AUTHORIZED`**（不是 `OUTBOUND_CHANNEL_MISSING`），且账本前后 0；**这一格取到后 18 才可判 `[x]`**。
+
 > **2026-11-22 dated 注（10.11-16 / 10.11-17 判绿依据与 10.11-18 剩余一格）**：两格按 **QA 独立复跑**判 `[x]`，不是开发自证——`10.11-16` 引 `10.11-16-qa-router-readings.txt`（`7307462` 复验：H 出 `plan_drafted{steps:2}`、I 带 `hits:1, ref:chunk-qa-frontend`、J 无英文枚举且带暂停原因原文、G 出 `route_unknown` 示例；六类全部有活体回执）；
 > `10.11-17` 引 `10.11-17-qa-redline-readings.txt`（结构性五条 + 第 4 条「编读数」随 I 修好重验通过）。**`10.11-18` 仍记 `[!]`**：半自动逐步批准与 `PAUSE_TIMEOUT` 负对照已通过，只差越权 `9999` 那一格——须先 `sessions.open('fixture')` 让渠道表登记，要读到 `OUTBOUND_TARGET_NOT_AUTHORIZED` 而不是 `OUTBOUND_CHANNEL_MISSING`，且账本前后 0。
 
