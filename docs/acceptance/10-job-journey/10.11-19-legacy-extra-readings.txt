@@ -17,3 +17,13 @@
 
 **库—DOM 成对**：①的分母是 `chat_compaction` 行数（0→1），②的分母是 `chat_session` 行数（3=3 行）；
 两张截图 `10.11-19-compaction-history.png`、`10.11-19-history-drawer.png` 与既有 10.11-19 那两张 md5 互异。
+
+⑤ **沉淀卡（`SedimentCard`）本轮取到的是「卡 + 判据」，不是正向落卡**（端口 10431/10433/10434 + owner）：
+   - 卡片本身会挂：有 run 时 `[data-testid="sediment-card"]` 在、`[data-action="sediment-open"]` 可点；
+     点开后有 `[data-testid="sediment-verdict"]`、名字输入（`sediment-name`）与保存键（`sediment-save`）。
+   - 判据层按 spec 5.4-02 正确拒绝：一次「无步骤」的 run → 预览「这次任务一步都没跑过，没有可沉淀的内容」；
+     一次「有失败步」的 run（`jd.capture.run` → `TOOL_FAILED`）→ 预览「第 1 步的状态是 failed，不是成功
+     （含失败步的段落不能沉淀）」；`agent.sediment.save` 同步以 `INVALID_ARGUMENT` 拒绝并带回逐格读数。
+   - **正向落卡没造出来**：要一次**成功步**才 `canSediment:true`。本机这条链上 `jd.capture.run` 一直 `TOOL_FAILED`，
+     我试过把 fixture 会话的 `startUrl` 改到 `/boss` 列表页也一样。这一格仍欠，不写成已具备。
+   - 证据图：`10.11-19-sediment-card.png`（判据文案那张）。
