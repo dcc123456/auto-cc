@@ -1,0 +1,26 @@
+10.11-29 无会话态读数（干净 userData · dist 构建）
+
+命令：`node tmp/g11/ab-persist.mjs`（面板先展开，会话后开）、`node tmp/g11/natural29.mjs`（会话先开，面板自己回来）
+
+① 先展开面板、还没有任何会话时（`data-testid=kernel-address-bar` 已挂载）：
+   - 原因文案（`data-testid=kernel-address-no-session`）：
+     「还没有打开站点：内核视图现在是占位页，先到运行记录里打开会话。」+ 同一行右侧「去打开站点」键（宽 73px、可点）；
+   - 地址栏输入框里是占位页本身（`data:text/html;…Embedded kernel view placeholder (WebContentsView)`）——
+     不是空白页，原因与恢复路径都写在可见处；
+   - 后退休止原因 `HISTORY_UNAVAILABLE`（与有会话时同一条口径）。
+   - 视图读数：`shell.getStatus()` 的 `kernelViewVisible=true`、`kernelViewUrl=data:` 占位页、
+     `kernelViewBounds={x:541,y:93,width:659,height:648}`（与 10.11-27 的取整后矩形一致）。
+   - 证据图：`10.11-29-no-session.png`（md5 0fdde2ec…）。
+
+② 恢复路径（自然顺序：面板还没展开时就开会话）：
+   - `sessions.open('fixture')` 之后 `shell.getStatus()`：`kernelViewVisible=true`、`kernelViewUrl=http://127.0.0.1:10233/`
+     —— 裁定⑱「只有装着真实站点才展示」把右栏自己带回来了，无需人去顶栏点。
+   - 地址栏此时挂载即读到真实地址：`urlValue=http://127.0.0.1:10233/`、
+     `noSessionText=null`（原因消失）、刷新键可用、后退休止原因仍 `HISTORY_UNAVAILABLE`。
+   - 证据图：`10.11-29-no-session-recovered.png`（md5 27eef6c7…）。
+
+③ 没做到的一条（如实记）：判据写「点一次把会话起来」，本轮是用既有 `sessions.open` 桥调用把会话开起来的，
+   没有走「点『去打开站点』→ 运行记录页 → 点打开会话」这条完整点击链；按钮存在、可点、宽度与文案已读。
+   这条要补就是一次 UI 点击链取证，不是代码缺口。
+
+④ 同批 md5：`10.11-29-no-session.png` 0fdde2ec… / `10.11-29-no-session-recovered.png` 27eef6c7…（互异）。

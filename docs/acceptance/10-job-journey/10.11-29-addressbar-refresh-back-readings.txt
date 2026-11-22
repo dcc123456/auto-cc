@@ -1,0 +1,32 @@
+10.11-29 地址栏刷新与回退读数（干净 userData · dist 构建 · 本地仿站 127.0.0.1:10233）
+
+命令：`node tmp/g11/ab-persist.mjs`（先展开面板再开会话：刷新与回退）、
+`node tmp/g11/natural29.mjs`（先开会话再展开面板：无会话原因恢复）
+
+① 刷新（复用的仍是既有导航口 `browser.page.navigate`，没有新 IPC）：
+   - 视图自己的 CDP target 上读持久量（不是只读「成功」两个字）：
+     刷新前 `{ timeOrigin: 1795305790221.8, readyState: 'complete', title: 'auto-cc 会话实验台 · 分区 A',
+                partitionTag: 'A', navType: 'navigate' }`
+     刷新后 `{ timeOrigin: 1795305793253.6, readyState: 'complete', title: 'auto-cc 会话实验台 · 分区 A',
+                partitionTag: 'A', navType: 'navigate' }`
+     → `timeOrigin` 前移 3031.8ms（文档真的重载了），分区标记与标题不变（还是同一分区、同一页）。
+   - 界面侧：提示行 = 「刷新：成功」；`shell.getStatus().kernelViewUrl` 刷新前后都是 `http://127.0.0.1:10233/`（同页刷新，没开新通道）。
+   - 证据图：`10.11-29-refresh.png`（md5 ef65d8ec…）。
+
+② 回退：`aria-disabled=true`、`data-disabled-reason=HISTORY_UNAVAILABLE`，
+   可见文案「内核视图没有开放历史后退口，只能用地址栏或顶栏的收起/展开」——按口径置灰 + 写明原因，不新增 IPC。
+   （与 `f0ea156` 同一份读数；本轮在两次独立启动里各读一次，值一致。）
+
+③ 本轮抓到的真缺陷（已修）：面板已经展开、之后会话才被打开时，地址栏停在挂载时读到的占位 `data:` 页，
+   按「刷新」被协议闸拒：`刷新 失败：不允许的协议 data:（只允许 http/https）`。
+   根因：地址栏只在挂载时读一次 + 1.2s 补读一次，而「面板已开着时打开会话」没有任何推送会告诉我们地址变了
+   （事件白名单里没有内核视图导航事件）。修法（`KernelAddressBar.tsx`）：
+   - 刷新键改成**先现读一次地址再导航**（读不到 http/https 地址就不发注定被拒的导航，落一行原因）；
+   - 订阅既有 `shell/kernel-view-visible`、并监听窗口回到前台，两处各重读一次；
+   - 输入框只在「人没改过」时跟着主进程的地址走，不抢人的草稿。
+   修后同一路径：`刷新：成功`，`timeOrigin` 跳变，`kernelViewUrl` 稳定。
+   **残留限制（如实记）**：面板已开着 → 直接开会话、且窗口不失去焦点时，输入框仍显示占位地址，
+   要等按一次刷新 / 切走再回来 / 窗口焦点回来才更新（刷新已经能正确工作）。彻底收口需要一条
+   「内核视图地址变了」的推送，属新增事件、要 PM 裁定，本轮没加。
+
+④ 证据图 md5：`10.11-29-refresh.png` ef65d8ec…

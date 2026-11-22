@@ -10,10 +10,13 @@
  */
 import { ArrowLeft, CornerDownLeft, RefreshCw } from 'lucide-react';
 import { advanceViewTrail } from './viewTrail';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DeskButton, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
+
+/** 可刷新的地址：协议闸只放 http/https，占位页（`data:`）与空串都不是。 */
+const isRefreshableUrl = (url: string): boolean => /^https?:/i.test(url);
 
 /** 地址栏本体的读数：当前地址与忙碌态。 */
 export function KernelAddressBar() {
@@ -21,14 +24,21 @@ export function KernelAddressBar() {
   const bridge = window.autoCC;
   const [draft, setDraft] = useState('');
   const [currentUrl, setCurrentUrl] = useState('');
+  // 上一次从主进程读到的地址：输入框只在「人没改过」时跟着它走，人打过字就不抢人的草稿。
+  const lastReadUrl = useRef('');
 
-  /** 读一次内核视图当前 URL（只读，不触发导航）。 */
-  const read = useCallback(async () => {
+  /**
+   * 读一次内核视图当前 URL（只读，不触发导航）。
+   * @returns 主进程此刻报的地址（读不到时为空串）；调用方按它决定能不能刷新
+   */
+  const read = useCallback(async (): Promise<string> => {
     const reply = await bridge?.shell['getStatus']();
-    if (reply?.ok) {
-      setCurrentUrl(reply.value.kernelViewUrl);
-      setDraft((previous) => (previous === '' ? reply.value.kernelViewUrl : previous));
-    }
+    if (!reply?.ok) return '';
+    const url = reply.value.kernelViewUrl;
+    setCurrentUrl(url);
+    setDraft((previous) => (previous === '' || previous === lastReadUrl.current ? url : previous));
+    lastReadUrl.current = url;
+    return url;
   }, [bridge]);
 
   useEffect(() => {
@@ -41,11 +51,37 @@ export function KernelAddressBar() {
     return () => window.clearTimeout(timer);
   }, [read]);
 
-  const { busy, notice, noticeTone, run } = useBridgeAction(read);
+  // 站点视图显隐、窗口回到前台都重读一次：会话有可能是在「面板已经开着」的时候才被打开的，
+  // 那时没有任何推送会告诉我们地址变了（事件白名单里没有导航事件），只靠挂载那一次会一直停在占位 URL。
+  useEffect(() => {
+    if (!bridge) return;
+    const offVisible = bridge.on('shell/kernel-view-visible', () => void read());
+    const onFocus = (): void => void read();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      offVisible?.();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [bridge, read]);
+
+  const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
   const navigate = () => {
     const url = draft.trim();
     if (url === '') return;
     void run(t('kernel.address.navigate'), () => bridge?.browser['page.navigate'](url));
+  };
+
+  /**
+   * 刷新：**先现读一次地址再导航**。挂载时读到的可能是占位 `data:` 页，拿它去导航会被协议闸拒
+   * （实测提示「刷新 失败：不允许的协议 data:」），而这正是「面板开着时站点才被打开」的那条路径。
+   */
+  const reload = async (): Promise<void> => {
+    const url = await read();
+    if (!isRefreshableUrl(url)) {
+      setNotice(t('kernel.address.reasonNoCurrent'), 'seal');
+      return;
+    }
+    await run(t('kernel.address.reload'), () => bridge?.browser['page.navigate'](url));
   };
 
   // 还没有打开过站点：内核视图停在 data: 占位页或 URL 为空。给「为什么没有 + 怎么起来」，
@@ -118,7 +154,7 @@ export function KernelAddressBar() {
                 ? t('kernel.address.reasonBusy')
                 : undefined
           }
-          onClick={() => void run(t('kernel.address.reload'), () => bridge?.browser['page.navigate'](currentUrl))}
+          onClick={() => void reload()}
         >
           <RefreshCw size={12} />
           <span className="sr-only">{t('kernel.address.reload')}</span>
