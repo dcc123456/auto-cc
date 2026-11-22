@@ -1144,7 +1144,10 @@ export class ChatSessionService extends Service {
       return true;
     } catch (error) {
       // 「听懂了，但不允许」：原始错误码原样透出，不二次包装成一句话（裁定①）。
-      const code = error instanceof AppError ? error.code : 'ROUTE_FAILED';
+      // 有 code 就用 code（跨包实例判断在打包后可能失手）；没有才落 ROUTE_FAILED。
+      const code = (error as { code?: string } | null)?.code ?? 'ROUTE_FAILED';
+      const detail = error instanceof Error ? error.message : String(error);
+      this.ctx.logger.warn(`路由处理器拒绝（${code}）：${detail}`);
       message.parts.push({ kind: 'notice', code: 'route_refused', params: { code } });
       this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: false });
       return true;
@@ -1205,7 +1208,9 @@ export class ChatSessionService extends Service {
       kbSearch: (query: string) => {
         if (!kb) return Promise.resolve({ hits: 0 });
         const result = kb.search(query);
-        return Promise.resolve({ hits: result.rows?.length ?? result.hits?.length ?? 0 });
+        const docs = result.hits ?? result.rows ?? [];
+        const first = docs[0] as { chunkId?: string; id?: string } | undefined;
+        return Promise.resolve({ hits: docs.length, ref: first?.chunkId ?? first?.id });
       },
       trackingCurrent: () => Promise.resolve({ jobId: null, state: null }),
       pausePending: () => Promise.resolve(pause ? pause.pending().length : 0),

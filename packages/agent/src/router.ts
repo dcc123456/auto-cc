@@ -67,6 +67,43 @@ const VIEW_WORDS: { word: string; view: RouteView }[] = [
 ];
 
 /**
+ * 解释类要查的那几个词：把提问的框子去掉，只留主题（否则整句丢进检索一条都命不中）。
+ * 词表只去疑问/招呼成分，不删用户真正在问的名词。
+ */
+const EXPLAIN_STOPWORDS = [
+  '解释',
+  '说明',
+  '一下',
+  '为什么',
+  '为啥',
+  '这个',
+  '那个',
+  '岗位',
+  '匹配',
+  '理由',
+  '的',
+  '是',
+  '吗',
+  '呢',
+  '？',
+  '?',
+  '。',
+  '，',
+];
+
+/**
+ * 从一句「为什么匹配」里取检索词（纯函数，单测可断言）。
+ * @param text 用户原话
+ * @returns 去掉框子后的检索词；全被去掉时退回原句（宁可查原句，也别查空串）
+ */
+export function explainQuery(text: string): string {
+  let rest = text;
+  for (const word of EXPLAIN_STOPWORDS) rest = rest.split(word).join(' ');
+  const trimmed = rest.replace(/\s+/g, ' ').trim();
+  return trimmed === '' ? text.trim() : trimmed;
+}
+
+/**
  * 关键词回落：不调模型也能把六类里的大多数认出来。
  * @param text 用户原文（已去空）
  * @returns 分类结果；一条都不中时是 `unknown`（不猜）

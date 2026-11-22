@@ -360,7 +360,7 @@
       },
       "notice": {
         "summary": "Used {{used}}/{{limit}} deliveries today, {{delivered}} delivered, last one at {{lastSend}}.",
-        "explain": "Here is what the library supports: {{hits}} rows matched; current job {{jobId}} ({{state}}). I will not invent what is missing.",
+        "explain": "{{hits}} library rows matched (ref {{ref}}); current job {{jobId}} ({{state}}). I will not invent what is missing.",
         "plan_drafted": "Drafted a plan ({{steps}} steps). It will not run by itself — confirm first; anything beyond your authorization is blocked by the gate.",
         "act_need_tool": "Understood, but executing needs a tool id. Say /tool <id>, or press the button in the right workspace.",
         "reminder": "Waiting on you: {{pauses}} approvals, runner {{runStatus}} ({{pending}} pending), authorization {{authorization}}.",

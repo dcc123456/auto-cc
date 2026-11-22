@@ -3,7 +3,7 @@
  * 判据重心：六类各一条 + 三条负对照（无关话题不调业务口、模型不可用仍回落、低置信不猜）。
  */
 import { describe, expect, it } from 'vitest';
-import { classifyByKeywords, routeIntent, ROUTE_MIN_CONFIDENCE } from './router.js';
+import { classifyByKeywords, explainQuery, routeIntent, ROUTE_MIN_CONFIDENCE } from './router.js';
 
 describe('classifyByKeywords：六类各一条', () => {
   it('explain：「这个岗位为什么匹配」', () => {
@@ -71,5 +71,15 @@ describe('负对照', () => {
     const fallback = await routeIntent('今天投了几份', extra);
     expect(fallback.via).toBe('keywords');
     expect(ROUTE_MIN_CONFIDENCE).toBeGreaterThan(0);
+  });
+});
+
+describe('explainQuery：去掉提问框子，只留主题', () => {
+  it('「解释一下前端方向这个岗位为什么匹配」→ 留「前端方向」', () => {
+    expect(explainQuery('解释一下前端方向这个岗位为什么匹配')).toBe('前端方向');
+  });
+
+  it('全是框子时退回原句（宁可查原句，不查空串）', () => {
+    expect(explainQuery('为什么匹配')).toBe('为什么匹配');
   });
 });

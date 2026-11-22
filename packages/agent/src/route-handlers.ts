@@ -6,7 +6,7 @@
  * 处理器绝不发起外发：执行类（act）不在这里，它沿用既有的 `/tool` 解析器与审批门禁。
  */
 import type { ChatNoticePart, ChatNavigatePart } from '@auto-cc/core';
-import type { RouteReading } from './router.js';
+import { explainQuery, type RouteReading } from './router.js';
 
 /** 处理器要用的既有读数口（全是只读；没有外发口）。 */
 export interface RoutePorts {
@@ -14,8 +14,8 @@ export interface RoutePorts {
   funnelQuery: () => Promise<{ quota: { used: number; limit: number | null }; delivered: number }>;
   /** 账本汇总（`usage.ledger.summary`）。 */
   ledgerSummary: () => Promise<{ total: number; lastSendAt: number | null }>;
-  /** 知识库检索（`kb.profile.search`）。 */
-  kbSearch: (query: string) => Promise<{ hits: number }>;
+  /** 知识库检索（`kb.profile.search`）；`ref` 是首条命中的可回指 id（没有命中时缺省）。 */
+  kbSearch: (query: string) => Promise<{ hits: number; ref?: string }>;
   /** 岗位追踪现况（`journey.tracking.current`）。 */
   trackingCurrent: () => Promise<{ jobId: string | null; state: string | null }>;
   /** 待表态单（`agent.pause.pending`）。 */
@@ -59,7 +59,8 @@ export async function runRoute(reading: RouteReading, text: string, ports: Route
       ];
     }
     case 'explain': {
-      const subject = reading.target?.subject ?? text;
+      // 检索词：模型给了 subject 就用它；没有就把提问框子去掉（整句丢进检索一条都命不中）。
+      const subject = reading.target?.subject ?? explainQuery(text);
       const [kb, tracking] = await Promise.all([ports.kbSearch(subject), ports.trackingCurrent()]);
       return [
         {
@@ -67,6 +68,7 @@ export async function runRoute(reading: RouteReading, text: string, ports: Route
           code: 'explain',
           params: {
             hits: kb.hits,
+            ref: kb.ref ?? '—',
             jobId: tracking.jobId ?? '—',
             state: tracking.state ?? '—',
           },
