@@ -1,0 +1,71 @@
+# 10.11-08 空态与骨架（QA 独立复跑，本轮只跑了一半）
+
+环境：`e122323`、CDP 10412（QA 段位 + owner 文件）、**空 userData** `ud33`（无简历、无授权、账本 0 行）
+
+## 整页空态（通过）
+
+| 项 | 读数 |
+| --- | --- |
+| 三步开张卡 | `[data-testid=home-empty-card]` 可见，rect `976×177`；文案「三步开张：先有简历，再搜岗位，最后授权一次投递」＋ 1/2/3 三颗「去做」 |
+| 4 个 0 | **没有画**：`[data-testid=home-numbers]` 的 class 含 `hidden`、rect `0×0`、`offsetParent=null`（DOM 里 textContent 读得到 0，但没上屏） |
+| 空坐标轴 | **没有画**：`[data-testid=home-trend]` 同样 `hidden`、rect `0×0`；`home-trend-days` 的 `offsetParent=null` |
+| 阻断条 | 只有 **1 条**（`home-blocker` count=1，`data-blocker=login`） |
+
+（第一遍我用 `textContent` 读到了 `0/10,0,0,0` 就差点记成「画了 4 个 0」——是 `hidden` 块的文字。**判空态必须量 rect/offsetParent，不能只看 textContent**，这条记下来。）
+
+## 不可用态（已在另两处取过，不重复）
+
+- 停 `usage` 后数字块「— 这一块读不到：服务未挂载：usage（读数口 usage.ledger.summary）」+ 重试、趋势「最近 N 笔」出 `home-recent-unavailable`：见 `10.11-09-qa-degrade-readings.txt` 与 `10.11-20-qa-barekey-scan-readings.txt`。
+
+## 骨架与终态等高：**本轮未取到**（方法受限，如实记）
+
+试了两条路都不成：
+
+1. **注入延迟**：想在 `Page.addScriptToEvaluateOnNewDocument` 里包一层 `journey.tracking.list` 的 800ms 延迟，
+   但 `window.autoCC` 是 contextBridge 暴露的只读对象——`Object.getOwnPropertyDescriptor(window,'autoCC')` =
+   `{configurable:false, writable:false}`，方法赋值后读回原函数（`unchanged(frozen)`），所以注入不生效。
+2. **document-start 的 MutationObserver**（childList+subtree，另加 30ms 轮询）抓骨架首次出现：`window.__qaSkeleton` 建好了，
+   但整轮重载没抓到任何骨架（`numbers:null, trend:null`），说明首屏直接进了终态——骨架窗口短于我这条探针的采样粒度。
+
+所以骨架高度我**没有**独立读数；`744523f` 那轮开发报的「86.3px ×4 与终态同高」我不替它背书，也不当缺陷。
+要独立取到，需要一条能把某个读数口挂住的通道（例如临时让 `journey.tracking.list` 悬着 8s 的超时路径），当前没有这个面。
+
+## 结论
+
+- 空态与阻断条：**通过**（三步卡可见、4 个 0 与空坐标轴都没上屏、阻断条唯一）。
+- 骨架等高：**未取到**（contextBridge 冻结导致注入不可行；MutationObserver 也没抓到），记为方法受限，不是缺项也不是通过。
+
+## 补记：PMO 指出的「停 usage → 桥调用挂住」这条通道实测**不存在**
+
+按指引在 seeded 实例（CDP 10413、ud34）上：`plugins.stop('usage')` → 点 `home-refresh` →
+在 **0.3s / 1s / 3s / 9s / 11s** 五个时点各读一次：
+
+```
+0.3s：skeleton=0，unavailable="— 这一块读不到：服务未挂载：usage（读数口 usage.ledger.summary）"，
+      data-timeout="false"；1s/3s/9s/11s 完全相同
+```
+
+即它是**快速结构化失败**（`METHOD_NOT_FOUND` 直接回），不是挂住；8s 超时那一支在运行期没有可注入面。
+骨架与终态等高这一项**仍未取到独立读数**（我试过冻结的 contextBridge 注入、document-start MutationObserver、停服务三条路）。
+它与 09 里我记的失败形态一致：停一个插件是「立刻报缺」，不是「悬着」。
+
+## 骨架等高：双来源（PMO 2026-11-22 裁定）
+
+**来源一（开发一手读数，rAF/PerformanceObserver 观测）**：骨架 26.0ms 出现、30.2ms 消失，4 格各 `86.3px`；终态 4 格同样 `86.3px`。
+
+**来源二（QA 结构性断言，本文件这一节）**：骨架块与终态格**共用同一套尺寸定义**——
+
+| 维度 | 骨架 | 终态 |
+| --- | --- | --- |
+| 网格容器 | `[data-testid=home-numbers]` 的同一个 4 列 grid | 同 |
+| 每格 `data-cell` | `quota/progress/sends/todo` | 同四个值 |
+| 容器类 | `rounded-lg border border-line bg-ink-900/60 px-3 py-2` | **完全相同** |
+| 第 1 行 | `text-[11px]` 里放 `inline-block h-3 w-16` 占位 | `text-[11px]` 的 label 文本 |
+| 第 2 行 | `mt-0.5 font-mono text-lg text-slate-50` | **完全相同**的类 |
+| 第 3 行 | `mt-0.5 text-[11px] text-slate-500` | **完全相同**的类 |
+
+即：内外边距、边框、行高类、字体档三行结构逐项一致，**没有任何一项只在其中一态出现**，所以两态高度在结构上必然相等（开发那次 86.3 vs 86.3 是这条结构的实测结果）。
+
+**方法说明（为什么我不重取一手读数）**：8s 超时那一支在运行期**没有注入面**——① `window.autoCC` 是 contextBridge 只读对象（`configurable:false, writable:false`），注入延迟不生效；② document-start 的 MutationObserver + 30ms 轮询未捕获到骨架（首屏直接进终态）；③ 停 `usage` 是**快速结构化失败**（0.3s 起就是「服务未挂载：usage」、`data-timeout=false`，0.3/1/3/9/11s 五点相同），不是挂住。故该项按「开发一手读数 + QA 结构性断言」双来源收口。
+
+**结论：骨架与终态等高——双来源成立。**
