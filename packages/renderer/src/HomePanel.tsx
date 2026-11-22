@@ -347,67 +347,100 @@ export function HomePanel() {
         </section>
       ) : null}
 
-      {/* ② 4 数字：每格带口径 */}
+      {/* ② 4 数字：每格带口径；三态按 spec 10.11-08——读取中给与终态同高的骨架、不可用给「—」+ 原因原文 + 重试。 */}
       <section
         className={`grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4 ${wholeEmpty ? 'hidden' : ''}`}
         data-testid="home-numbers"
       >
-        {(
-          [
-            [
-              'quota',
-              t('home.cell.quota'),
-              numbersValue?.quota ? `${numbersValue.quota.used}/${numbersValue.quota.limit ?? '—'}` : '—',
-              t('home.caption.quota', {
-                used: numbersValue?.quota?.used ?? '—',
-                limit: numbersValue?.quota?.limit ?? '—',
-                remaining: numbersValue?.quota?.remaining ?? '—',
-              }),
-            ],
-            [
-              'progress',
-              t('home.cell.progress'),
-              String(tracked.length),
-              t('home.caption.progress', { delivered, interview: interviewed }),
-            ],
-            [
-              'sends',
-              t('home.cell.sends'),
-              numbersValue?.deliverCount === null || numbersValue?.deliverCount === undefined
-                ? '—'
-                : String(numbersValue.deliverCount),
-              t('home.caption.sends', {
-                days: windowDays,
-                last: numbersValue?.lastSend ? new Date(numbersValue.lastSend.ts).toLocaleTimeString() : '—',
-                target: numbersValue?.lastSend?.targetId ?? '—',
-              }),
-            ],
-            [
-              'todo',
-              t('home.cell.todo'),
-              String(numbersValue?.authorizedJobs ?? '—'),
-              t('home.caption.todo', {
-                count: numbersValue?.authorizedJobs ?? 0,
-                completed: numbersValue?.runCompleted ?? '—',
-              }),
-            ],
-          ] as [NumberCell, string, string, string][]
-        ).map(([cell, label, value, caption]) => (
+        {numbers.state === 'loading' ? (
+          (['quota', 'progress', 'sends', 'todo'] as NumberCell[]).map((cell) => (
+            // 骨架的行结构与就绪态逐行对应（同一套字号/行高类），高度因此由同一份排版决定，不靠手填像素。
+            <div
+              key={cell}
+              data-testid="home-number-skeleton"
+              data-cell={cell}
+              className="rounded-lg border border-line bg-ink-900/60 px-3 py-2"
+              aria-busy="true"
+            >
+              <p className="text-[11px] text-slate-400">
+                <span className="inline-block h-3 w-16 animate-pulse rounded bg-ink-800" />
+              </p>
+              <p className="mt-0.5 font-mono text-lg text-slate-50">
+                <span className="inline-block h-5 w-20 animate-pulse rounded bg-ink-800" />
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                <span className="inline-block h-3 w-24 animate-pulse rounded bg-ink-800" />
+              </p>
+            </div>
+          ))
+        ) : numbers.state === 'failed' ? (
           <div
-            key={cell}
-            data-testid="home-number"
-            data-cell={cell}
-            className="rounded-lg border border-line bg-ink-900/60 px-3 py-2"
+            data-testid="home-numbers-unavailable"
+            className="col-span-full flex flex-wrap items-center gap-2 rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[11px] text-amber"
           >
-            <p className="text-[11px] text-slate-400">{label}</p>
-            <p className="mt-0.5 font-mono text-lg text-slate-50" data-testid="home-number-value">
-              {value}
-            </p>
-            <p className="mt-0.5 text-[11px] text-slate-500" data-testid="home-number-caption">
-              {caption}
-            </p>
+            <span>— {t('home.unavailable', { reason: numbers.reason })}</span>
+            <DeskButton action="home-numbers-retry" variant="line" compact onClick={reloadNumbers}>
+              {t('home.retry')}
+            </DeskButton>
           </div>
-        ))}
+        ) : (
+          (
+            [
+              [
+                'quota',
+                t('home.cell.quota'),
+                numbersValue?.quota ? `${numbersValue.quota.used}/${numbersValue.quota.limit ?? '—'}` : '—',
+                t('home.caption.quota', {
+                  used: numbersValue?.quota?.used ?? '—',
+                  limit: numbersValue?.quota?.limit ?? '—',
+                  remaining: numbersValue?.quota?.remaining ?? '—',
+                }),
+              ],
+              [
+                'progress',
+                t('home.cell.progress'),
+                String(tracked.length),
+                t('home.caption.progress', { delivered, interview: interviewed }),
+              ],
+              [
+                'sends',
+                t('home.cell.sends'),
+                numbersValue?.deliverCount === null || numbersValue?.deliverCount === undefined
+                  ? '—'
+                  : String(numbersValue.deliverCount),
+                t('home.caption.sends', {
+                  days: windowDays,
+                  last: numbersValue?.lastSend ? new Date(numbersValue.lastSend.ts).toLocaleTimeString() : '—',
+                  target: numbersValue?.lastSend?.targetId ?? '—',
+                }),
+              ],
+              [
+                'todo',
+                t('home.cell.todo'),
+                String(numbersValue?.authorizedJobs ?? '—'),
+                t('home.caption.todo', {
+                  count: numbersValue?.authorizedJobs ?? 0,
+                  completed: numbersValue?.runCompleted ?? '—',
+                }),
+              ],
+            ] as [NumberCell, string, string, string][]
+          ).map(([cell, label, value, caption]) => (
+            <div
+              key={cell}
+              data-testid="home-number"
+              data-cell={cell}
+              className="rounded-lg border border-line bg-ink-900/60 px-3 py-2"
+            >
+              <p className="text-[11px] text-slate-400">{label}</p>
+              <p className="mt-0.5 font-mono text-lg text-slate-50" data-testid="home-number-value">
+                {value}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500" data-testid="home-number-caption">
+                {caption}
+              </p>
+            </div>
+          ))
+        )}
       </section>
 
       {/* ③ 2 状态行 */}
@@ -543,11 +576,6 @@ export function HomePanel() {
               {t('home.retry')}
             </DeskButton>
           </p>
-        ) : null}
-        {numbers.state === 'failed' ? (
-          <DeskButton action="home-numbers-retry" variant="line" compact onClick={reloadNumbers}>
-            {t('home.retry')}
-          </DeskButton>
         ) : null}
       </DeskSection>
     </div>

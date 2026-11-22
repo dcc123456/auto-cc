@@ -1,21 +1,45 @@
-10.11-08 空态读数（干净 userData 首启 · dist 构建）
-命令：node tmp/g11/scroll/empty08.mjs
+10.11-08 空态三态 + 整页空态读数（干净 userData · dist 构建 · 1200×772）
 
-① 整页空态（无简历 / 无岗位 / 账本 0 行）：卡片=True，步骤=['resume', 'jobs', 'authorize']
-   卡片文本：三步开张：先有简历，再搜岗位，最后授权一次投递
+> 上一版这份文件里写过「读取中给等高骨架（home-number-skeleton，h-[76px]）；不可用给 home-numbers-unavailable」，
+> 而那两个 `data-testid` 当时全仓零命中——数字块的三态并没有落地，那段是没兑现的读数。本版据实重写，
+> 并先把三态补成真的（`packages/renderer/src/HomePanel.tsx`：骨架 4 格 + `—`/原因原文/重试）。
 
-这一步只做三件事，做完首页的数字才会有内容。
+命令：`node tmp/g11/empty08b.mjs`（整页空态）、`node tmp/g11/empty08c.mjs`（块级真没有 / 不可用）、
+`node tmp/g11/skeleton-window.mjs`（读取中骨架的时刻与高度，页面内 rAF 观测，不吃 CDP 往返时延）
 
-1
-① 导入一份简历（它会成为母版）
-去做
-2
-② 搜第一轮岗位（至少 3 个）
-去做
-3
-③ 授权一次投递（最小 1 岗）
-去做
-   4 数字块隐藏=True；趋势块隐藏=True；页面出现「最近 0 笔外发」=False
-② 三态：读取中给等高骨架（home-number-skeleton，h-[76px]）；不可用给「—」+ 原因 + 重试（home-numbers-unavailable / home-numbers-retry）。
-   本轮未取到「不可用」的活体读数：用 plugins.stop('usage') 制造停服后，数字块仍读到值（服务没真正不可用），没有变成预期的原因条；按 rules 不把没造出来的态写成已过。
-③ 截图：10.11-08-empty-first.png（与 10.11-24-scroll-after.png 的「4 个 0 + 空坐标轴」构成前后对照，md5 互异）。
+① 整页空态（无简历 / 无岗位 / 账本 0 行）：卡片=`true`，步骤=`['resume','jobs','authorize']`，
+   4 数字块 `hidden=true`、趋势块 `hidden=true`，页面不出现「最近 0 笔外发」。
+   证据图：`10.11-08-empty-first.png`（与 10.11-24 的「4 个 0 + 空坐标轴」构成前后对照，md5 互异）。
+
+② 块级「真没有」（库里有一条追踪行、账本仍 0 行，所以整页空态不成立）：
+   `numbersHidden=false`，四格逐格读数（视口 1200×772、`sm:grid-cols-2`）：
+   - quota `0/10`，口径「剩余 10 · 已用 0 / 上限 10」
+   - progress `1`，口径「已投递 0 · 已约面 0」
+   - sends `0`，口径「近 7 天成功笔数 · 最近一笔 — —」
+   - todo `0`，口径「授权 0 岗 · 已完成 0」
+   入口那半边：`data-action="home-primary"` = 「先登录 BOSS 直聘」，「接下来」四条（登录/导入简历/看匹配岗位/看追踪统计）。
+   证据图：`10.11-08-block-zero.png`（md5 48def238…）。
+   **口径说明**：现实现的「真没有」是「该格写 0 或 —，口径句把那 0 解释掉，入口在页首主行动与接下来」，
+   没有一格外挂的独立「一句人话 + 一个入口」；判据原文要求的是后者，这一条由 PM 裁（见末尾缺口）。
+
+③ 读取中（骨架）：页面内 rAF 观测（`skeleton-window.mjs`）——骨架出现 `26.0ms`、消失 `30.2ms`，
+   **窗口 4.2ms**，四格骨架高度 `86.3 / 86.3 / 86.3 / 86.3 px`、`aria-busy=true`。
+   同一视口下就绪态四格高度 `86.3 / 86.3 / 86.3 / 86.3 px` → **等高成立**（骨架与终态同一套字号/行高，靠排版而非手填像素）。
+   截图取不到：4.2ms 窗口短于一次 CDP 往返（约 5–10ms），按「不摆拍」口径不拿别的态冒充；
+   这一条的证据是 DOM 断言（高度 + `aria-busy`），不是截图。
+
+④ 不可用：`plugins.stop('journey-tracking')` → 点「刷新」→ 2.5s 后读数
+   （`10.11-08-unavailable.png`，md5 bcbc6469…）：
+   - 数字块：`— 这一块读不到：服务上没有可调用的方法：journey.tracking.list` + 可点「重试」
+     （`data-testid=home-numbers-unavailable`、`data-action=home-numbers-retry`），四格节点数 0；
+   - 趋势块 `home-trend-body` 仍在、无不可用行；「接下来」四条仍在、无不可用行 → 只坏一块（与 10.11-09 同一机制）。
+   - 另一次（`empty08b.mjs` 停 `usage`）：数字块与「接下来」同时坏（cordis 下游 PENDING）、趋势照常，
+     说明「坏几块」取决于停哪一只，不是三块绑死。
+
+⑤ 未实现、如实记：
+   - 判据里的「真没有：该格「—」+ 一句人话 + 入口」没有做成独立形态（现为 0/「—」+ 口径句 + 页首/接下来入口）；
+   - 判据里的「前置缺失只有一条阻断条（琥珀描边 + 一行 + 直达键，同时最多 1 条）」在 Home 上没有实现——
+     页面上没有这条阻断条，缺失前置是靠「接下来」列表逐条列出的。
+   这两条不是取证不到位，是还没写，等 PM 裁口径后补。
+
+同批截图 md5：`10.11-08-empty-first.png` 0d64cc3e… / `10.11-08-block-zero.png` 48def238… / `10.11-08-unavailable.png` bcbc6469…（三张互异）。
