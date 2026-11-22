@@ -1,0 +1,19 @@
+10.11-19 旧对话四样的活体读数（干净 userData · dist 构建 · 端口 10429/10430 + owner 文件 · 库与 DOM 成对）
+
+命令：`node tmp/g11/batch/p19.mjs`（压缩）、`node tmp/g11/batch/p19b.mjs`（会话历史）
+
+① **压缩提示**（`ChatCompactionBanner`）：把 `chat.compactTriggerTokens` 压到 40 后连发 6 条长消息 →
+   `[data-testid="chat-compaction-banner"]` 出现，文案「较早的 4 条消息已折成一行摘要，原文一条都没删 /
+   压缩后留下的关键事实」；库读数：`chat_compaction` **0 → 1**、`chat_message` 12 行（原文没删）。
+② **会话历史列表**（`ChatHistoryDrawer`）：再建两条会话后点 `[data-action="chat-history"]` → 抽屉打开，
+   `[data-testid="chat-history-list"]` 有 **3 行**，每行「对话 <id> · 时间 · N 条消息 · 继续/删除」，
+   当前那条标「当前」；库读数 `chat_session` = **3**，与行数一致。
+③ **逐步批准卡**：本片已在 `10.11-18` 取到（QA 复跑：`confirm` 后 253ms 出第一张
+   `outbound.greet.perform`、批准后出第二张 `outbound.deliver.perform`，两张之间账本都是 0；
+   无人表态 → `PAUSE_TIMEOUT` 按未确认收）。这里**不重复造**，引用那份读数。
+④ **沉淀卡**（`agent.sediment.*`）：**本轮没取到**。它要一个「有证据的 run」当输入
+   （`agent.sediment.preview(runId)` 的入参是 runId），而本轮没有可沉淀的 run；
+   下一轮用 fixture-model 起草一轮带证据的计划再落一次卡，DOM 与库读数成对补上。
+
+**库—DOM 成对**：①的分母是 `chat_compaction` 行数（0→1），②的分母是 `chat_session` 行数（3=3 行）；
+两张截图 `10.11-19-compaction-history.png`、`10.11-19-history-drawer.png` 与既有 10.11-19 那两张 md5 互异。

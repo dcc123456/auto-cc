@@ -8,7 +8,7 @@
 | 时点 | `shell.getStatus().kernelViewUrl` | `browser.page.snapshot()` 的 `url` | `readyState` |
 | --- | --- | --- | --- |
 | 导航前（fixture `/`） | `http://127.0.0.1:10233/` | `http://127.0.0.1:10233/` | `complete` |
-| 导航后（fixture `/alt`） | `http://127.0.0.1:10233/alt` | `http://127.0.0.1:10233/alt` | `complete` |
+| 导航后（`sessions.open("fixture-alt")` 打开 `/alt`） | `http://127.0.0.1:10233/alt` | `http://127.0.0.1:10233/alt` | `complete` |
 
 另附同轮读数：`title` 分别为「auto-cc 会话实验台 · 分区 A / B」，`elementCount=25`，`bodyText` 正常；
 `partition` 都是 `persist:fixture`。
@@ -20,3 +20,13 @@
 
 请 PM 裁：① 按「未复现 / 调用侧读数错误」收口并保留本条三读数；② 若仍要修，请给 10.11-27 那轮取 null 的原始命令
 （我按它复跑一次，能复现就修根因）。
+
+**动作名更正（2026-11-22，QA 指出）**：上表「导航后」那一步**不是** `browser.page.navigate('/alt')`——平台模式下
+`page.navigate` 对 fixture 会先被 `NAVIGATE_URL_REJECTED` 拒（可导航源来自适配器知识包，`allowedOrigins` 只有
+`https://www.zhipin.com`）；fixture 的 `/alt` 是 `sessions.open('fixture-alt')` 按 `startUrl` 自己开的。
+原表没写清动作名，照表复跑会先撞一个与 28 无关的拒绝码，这里补准。
+
+**读到空值的真实位置（QA 定位）**：四条生命周期路径上 `snapshot().url` 都正常（未开会话→`NO_KERNEL_SESSION`、
+开会话后→地址、导航中→地址、任意网页模式→`WEB_MODE_READ_ONLY`）；唯一读到空值的是
+`shell.getStatus().kernelViewUrl`：`closeWebPage()` 刚返回的约 1.5s 内是**空串**（不是 null），1.5s 后恢复。
+所以 10.11-28 大概率**指错了对象**——这与地址栏「切模式后输入框空白、补 1.2s 再读」是同一个窗口。
