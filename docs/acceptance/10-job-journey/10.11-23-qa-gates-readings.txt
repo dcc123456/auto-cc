@@ -1,0 +1,15 @@
+# 第 11 片四门禁：QA 独立跑的一份（不是引用开发日志）
+
+环境：隔离副本 `/tmp/qa-11/tree` @ `e122323`（与主干同 hash 的 fetch，不是共享工作树），
+日志在 `/tmp/qa-11/qa13-{typecheck,lint,format,test}.log`（每份末尾带 `*_EXIT=`），未入库。
+
+| 门禁 | 命令 | 结果 |
+| --- | --- | --- |
+| 类型 | `pnpm typecheck` | `TYPECHECK_EXIT=0`（各包 `tsc --noEmit` 全 Done） |
+| 规范 | `pnpm lint` | `LINT_EXIT=0`（含路由层外发机检、术语禁令：1089 个跟踪文本文件、禁令 0 处、放行词自检 2/2） |
+| 格式 | `pnpm format:check` | `FORMAT_EXIT=0`（`All matched files use Prettier code style!`） |
+| 全量测试 | `pnpm test` | `TEST_EXIT=0`；**25 个包套件、2789 例全过** |
+
+测试日志里唯一一行含 `failed` 字样的是 entitlement 的迁移备份读数（`"failedCopyUnchanged":true`），是断言内容不是失败。
+
+结论：**四门禁在我这份独立副本上全绿**，与开发报的 2789 例一致。

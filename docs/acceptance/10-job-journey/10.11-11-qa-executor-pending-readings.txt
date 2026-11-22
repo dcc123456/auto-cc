@@ -1,0 +1,43 @@
+10.11-11 角标第三类「执行器待办」活体读数（QA 独立复跑 · seeded 授权单）
+
+环境：HEAD e8a3a33 的干净快照（复制到 /tmp/qa-11/tree 后 git checkout -- .，与开发在飞的工作树隔离），
+pnpm app:build 产物（BUILD_EXIT=0），全新 userData /tmp/qa-11/ud-badge，CDP 10410，无模型配置、无站点会话。
+做法：只读探针 /tmp/qa-11/cdp.mjs（自建 CDP 客户端），表达式在 /tmp/qa-11/expr-*.mjs；不引用 tmp/g11/*。
+
+构造（seeded，非用户走出来）：向隔离实例的 store.db 插一行授权单
+  INSERT INTO outbound_authorizations(platform, day_key, daily_limit, master_resume_version,
+    resume_version, fact_check_receipt, targets_json, status, pause_reason, created_at, updated_at)
+  VALUES('fixture','2026-11-22',2,'doc:qa1:hash','doc:qa1:hash','qa-receipt','["1001","1002"]','active',NULL,ms,ms);
+seeded 只代替「授权单已在库里」这一步；角标读的仍是真实 `journey.unattended.view().pending`（账本现算），
+没有桩、没有改 window.autoCC。完整「授权→起跑」链的判据归 10.6-01/02。
+
+① 授权单在、执行器 idle（未起跑）——reload 后读：
+   view.pending = ["1001","1002"]、view.status = "idle"
+   badge = {kind:"needs", text:"2", aria:"需要你：2 件"}、capsule data-needs="2"
+
+② 真起跑（journey.unattended.start({docId:"qa1"})）后 +1.2s：
+   start.status="running"、pending 仍是 ["1001","1002"]
+   view.status="running"、view.failed=["KB_SOURCE_MISSING"]（本实例无该简历文档，单岗失败、不拖整轮）
+   badge 仍 {kind:"needs", text:"2"}；usage.ledger.summary(5).recent 长度 0 → 本轮零外发
+
+③ 点停（journey.unattended.stop()）后 +1.5s 与 +21.5s 两次读：
+   stop 的返回值 status="running"；view.status 两次都仍是 "running"；badge 仍 2
+   原因（代码）：岗间 `await sleep(throttle.nextGapMs())` 不可中断，取消只在下一个 `guard()` 才生效；
+   cordis.yml 的 minGapMs/maxGapMs = 45000/150000 → 最长约 150 秒后才变 stopped。
+   guard 本身先查 cancelRequested（unattended.ts:390），所以这期间不会发起新外发——
+   是「状态呈现滞后」，不是「停不住外发」。
+
+结论：
+- 第三类来源已接入且活体可见（2 次读数一致），`10.11-11` 的「执行器待办」这一格由 QA 侧补齐开局；
+  但 **11 仍不能记 [x]**：见下面两条待裁问题。
+- 问题 A（P2，语义误报）：授权后「未起跑」就亮「需要你 2 件」，跑到一半仍是 2，两个未完成岗都推完才灭。
+  这两个状态下没有要人确认的动作，琥珀数会被读成「有 2 件事等我」，属于把「未完成岗位数」当成了「需要你」。
+  建议方向：只在 run.status ∈ paused/stopped/blocked 或授权单 restart-required 时计入；idle/running 不计。
+- 问题 B（P2，状态滞后）：点「停止执行器」后 view.status 最长约 150 秒仍报 running，界面「执行器：running」
+  与按钮读数不一致；stop() 立即返回 running 也不给「已收到停止」的可读反馈。建议 stop 时立刻落
+  stopped/stopping 或把 sleep 改成可中断（取消检查放在 sleep 内部）。
+
+复现命令：
+  node /tmp/qa-11/cdp.mjs 10410 auto-cc /tmp/qa-11/expr-badge.mjs     # ①基线/授权后
+  node /tmp/qa-11/cdp.mjs 10410 auto-cc /tmp/qa-11/expr-start.mjs     # ②起跑
+  node /tmp/qa-11/cdp.mjs 10410 auto-cc /tmp/qa-11/expr-stop.mjs      # ③停止

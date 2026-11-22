@@ -1,0 +1,26 @@
+10.11-14 键盘呼出复验（QA 独立复跑 · 从内核视图 target 派发）
+
+环境：HEAD d45408b 的干净快照（隔离副本 /tmp/qa-11/tree，非共享工作树），pnpm app:build（BUILD_EXIT=0），
+全新 userData /tmp/qa-11/ud-keyboard，CDP 10411，无模型、无站点会话；内核视图是启动占位页（data:text/html）。
+做法：自建 CDP 探针 /tmp/qa-11/cdp.mjs（读 DOM）与 /tmp/qa-11/key.mjs（向指定 target 发 rawKeyDown+keyUp），
+不引用 tmp/g11/*。按开发同轮记录的坑，只用 rawKeyDown（keyDown 走字符合成路径，before-input-event 不触发）。
+
+读数（每步都读 [data-testid=assistant-panel] 的 data-state 与胶囊 aria-expanded）：
+① 派发前：panel=closed、aria-expanded=false
+② **往内核视图 target** 派 Ctrl+J：panel=open、aria-expanded=true  ← 阻塞项要的那一条
+③ 同一内核 target 派 Esc（负对照）：panel 仍 open —— 壳层没有截走站点的 Esc，符合裁定
+④ 同一内核 target 派裸 j（无修饰键，负对照）：panel 仍 open —— 不误触
+⑤ 往主窗口 target 派 Ctrl+J：panel=closed —— 只切一次，说明壳层与渲染层没有各处理一遍（不会按一下切两下）
+⑥ 再往内核 target 派 Ctrl+J：panel=open —— toggle 正确
+
+结论：`Ctrl/⌘+J` 在键盘焦点归内核视图 webContents 时可用，P1 阻塞项（「任一页面可呼出（含键盘）」）
+按这三条负对照（Esc 不截、裸 j 不触、双入口不双切）判为通过。
+射程注：本轮内核视图是启动占位页（同一个 webContents、同一份 before-input-event）；真实站点页
+与全屏态下的同一按法留到有 fixture 会话的那一轮补一次，避免把占位页读数当成站点页读数。
+
+复现命令：
+  node /tmp/qa-11/key.mjs 10411 "data:text/html" j ctrl
+  node /tmp/qa-11/cdp.mjs 10411 "dist/index.html" /tmp/qa-11/expr-panel.mjs
+  node /tmp/qa-11/key.mjs 10411 "data:text/html" esc none
+  node /tmp/qa-11/key.mjs 10411 "data:text/html" j none
+  node /tmp/qa-11/key.mjs 10411 "dist/index.html" j ctrl
