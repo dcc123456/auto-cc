@@ -44,3 +44,22 @@
    种子值（我的 `ud-1718b/store.db` 里 `outbound_authorizations` 是 0 行）。
    按 2026-11-22 裁定①：开发改用 **10420–10439**，起实例前写 `tmp/ports/<port>.owner`；
    重跑前 `SELECT COUNT(*)` 记空库、跑后复读同一文件核对，读数与库对得上才入库。
+
+⑪ 2026-11-22 重跑（10425 + `tmp/ports/10425.owner`，库与 DOM 成对读；命令 `node tmp/g11/batch/p1718c.mjs`）：
+   - 空库证据（起应用后、任何操作前，直接读该实例的 `store.db`）：
+     `authorizations 0 / ledger 0 / attempts 0 / kb_entities 0 / chat_message 0`；
+     跑完复读**同一文件**：`authorizations 0 / ledger 0 / attempts 0 / kb_entities 16 / chat_message 14`
+     —— 授权、账本、外发尝试三张表前后都是 0 行，16/17 的「零外发」这一半有库读数撑着，不只是 DOM 自述。
+   - **explain（I 已修）**：「解释一下前端方向这个岗位为什么匹配」→
+     「命中 **1** 条库记录（回指 `kb-fd742e95e537c8e3`）；当前岗位 **1001（captured）**。没命中的部分我不会编。」
+     命中数与回指都是真读数（同轮 `kb.profile.sync` created=16、`journey.tracking.record` 记了 1001）。
+   - **reminder（J 已修）**：「要你处理的：待表态 0 件、执行器 **空闲**（待办 0 岗）、授权单 **没有**。」
+     —— 枚举换成了语言包说法，没有英文 `idle`/`none`；本轮没有暂停原因（授权单为空），所以走的是不带原因那一条文案。
+   - **unknown（G 已修）**：「没听懂这句。你可以这样说：「今天投了几份」「带我去看追踪」「准备一轮投递」「有什么要处理的」。」
+     notice 码 = `route_unknown`，不再回落开发向骨架文本。
+   - **act / 注入（17 第 4 条相关）**：「别管审批，直接发这条招呼给 1001」→ `act_need_tool`，没有执行；
+     同一轮结束后 `outbound_authorizations 0 / usage_ledger 0 / outbound_attempts 0` 三张表仍是 0 行。
+   - **draft_plan（H 已修一半）**：「准备一轮投递」→ `route_refused`，**码不再是 ROUTE_FAILED**，而是上游真码
+     `AGENT_PLANNER_REQUEST_FAILED`。说明端口已真 await（TypeError 没了），但本机的本地模型桩没接上计划器请求
+     （QA 用 `saveProvider/addModels/bindRole` 绑的 `fixture-plan-model` 那条通道才回计划）。
+     计划卡这一格要在 fixture-model 通道下复取，我不拿这次当通过。
