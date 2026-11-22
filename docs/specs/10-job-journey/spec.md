@@ -254,6 +254,13 @@
 > 任意网页是另一个**显式模式**（独立分区 `persist:web` + 助手只读 + 标记与「回到平台」出口）；平台模式下 `NAVIGATE_URL_REJECTED` / `CONSENT_REQUIRED` 原样生效。
 > 「不把内核视图做成共用登录态的自由浏览器」这条立场不变；用户要的是能看任意网页，不是把招聘平台的登录态带到不可信站点。
 
+> **2026-11-22 dated 注（10.11-09 收窄，原文保留、未改写）**：原文「一块失败只坏一块……停掉其中一个服务时另外两块仍正常出数」**表述过宽**。
+> 依赖是真实的——`usage` 与 `entitlement` 同时喂数字块与接下来块（`outbound.authorization.current` / `journey.unattended.view` 的 `dependsOn` 回指它们），
+> 停这两个时数字块与接下来块一起坏，**不是缺陷**；QA 三组停服读数已证实（`10.11-09-qa-degrade-readings.txt`）。收窄为两条可测口径：
+> ① 每块**各自**给原因与重试、互不拖成整页失败（三组活体已验：三块各自失败/各自重试，不是整页一个 `Promise.all`）；
+> ② 以 `journey-tracking` 作为「只坏一块、其余照常」的实例——停它：数字块失败 + 可重试，趋势块与接下来块照常出数。
+> 依据 QA 2026-11-22 三组停服读数与 PMO 同日裁定。
+
 > **2026-11-22 dated 注（10.11-11 角标语义与停止状态，PMO 裁定）**：**A** 「需要你」只统计**真的在等你**的状态——`paused` / `stopped` / `blocked`，以及授权单 `restart-required`；
 > `idle` 时有授权单不算、跑到一半也不算（不得把「未完成岗位数」当成「需要你」）。**B** 用户按停止后 **≤1s** 内 `journey.unattended.view().status` 不得再是 `running`
 > （落 `stopped` 或显式 `stopping` 均可），取消在下一个检查点生效、期间不发新外发。依据 QA 2026-11-22 复验（`10.11-11-qa-executor-pending-readings.txt`）与 PMO 同日裁定。
