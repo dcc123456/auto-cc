@@ -1,0 +1,32 @@
+# 10.11-07 数据源白名单与零自算
+
+环境：`e122323`、CDP 10411（同 03/05 的 seeded 实例）
+
+## 逐格指回唯一口（活体对账见 `10.11-03/05` 两份）
+
+| 数字 | 唯一口 |
+| --- | --- |
+| 今日额度 | `funnel.query`（deliver 项 usedToday/dailyLimit） |
+| 岗位进度 | `journey.tracking.list`（计数与状态） |
+| 最近外发 | `funnel.trend`（区间成功笔数）+ `usage.ledger.summary(5)`（最近一笔） |
+| 待办 | `outbound.authorization.current` + `journey.unattended.view` |
+
+## 零自算（静态）
+
+`packages/renderer/src/HomePanel.tsx` 里唯一的算术是柱高取档：
+
+```ts
+const ratio = maxSends <= 0 ? 0 : Math.min(1, sends / maxSends);
+const index = Math.min(BAR_HEIGHT_CLASSES.length - 1, Math.round(ratio * (BAR_HEIGHT_CLASSES.length - 1)));
+```
+
+它只把「当日 sends / 区间峰值」映射到 8 个固定高度类，**不产生也不显示任何比率数字**，也不是跨服务的求和。
+全文件没有 `reduce`、没有对多口读数做加总；四格数字都是直接取口里的字段或长度。
+
+## 比率字样的覆盖
+
+全页 `率` 只命中 1 处：页首说明句「只读既有服务，不自己算比率」；`转化率/回复率/约面率` 零命中。
+
+## 结论
+
+07 **通过**：每格能指回唯一口、界面零比率零自算（唯一的比值只用于选高度档）。

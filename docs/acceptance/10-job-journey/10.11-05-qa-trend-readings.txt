@@ -1,0 +1,20 @@
+seeded —— 同 `10.11-03-qa-numbers-readings.txt` 的构造态（ledger 6 行、追踪事件 2 条）。
+
+# 10.11-05 趋势块：14 柱 / 五级 / 最近 5 笔 / 无第二张图
+
+环境：`e122323`、CDP 10411、userData `ud32`
+
+## 读数与对账
+
+- **14 柱**：`[data-testid=home-trend-days] > li` = **14**；高度档位与 `funnel.trend.days[].sends` 一一对应：
+  sends `3`（今天）→ `74.8px`；sends `1`（11-19、11-20）→ `30.8px`；sends `0`（其余 11 天）→ `22.8px`。
+  逐日 sends：`[0×10, 1, 1, 0, 3]`，与柱高序列 `[22.8×10, 30.8, 30.8, 22.8, 74.8]` 一致。
+- **五级漏斗**：`搜索到岗位 0 / 打招呼 1 / 招聘方回复 0 / 投递成功 0 / 约面 0`，与同次 `funnel.query().levels` 逐项相等。
+- **最近 5 笔**：DOM 顺序 `1001 deliver / 1002 deliver / 1001 greet / 1003 deliver / 1004 greet` = `usage.ledger.summary(5).recent` 的顺序 ✔。
+- **无第二张图**：`canvas` **0 个**；`home-trend-days` 只有 1 个；无其它图表容器（页面里的 `svg` 是 lucide 图标）。
+- **无 inline 柱宽**：`home-trend-days` 子树里带 `style*="width"` 的元素 **0 个**（`inlineWidthCount: 0`），柱高全部走 Tailwind 档位类。
+- 7/30 切档：漏斗与最近笔数的区间口径随档变（最近笔数的「近 N 天」写在 03 的第 3 格口径里），14 柱固定 14 天不变——与 05 的「柱 14 天固定」一致。
+
+## 结论
+
+05 **通过**（14 柱逐日对得上 sends、五级对上 funnel、最近 5 笔顺序对上账本、零画布、零 inline 宽度）。

@@ -1,0 +1,29 @@
+seeded —— ledger / 追踪事件是直接写进 `store.db` 的构造态（2 条今日 deliver + 1 greet + 前 2/3 天各 1 条；`job_status_events` 2 条：1001 delivered、1002 interview），不是用户走出来的。
+
+# 10.11-03 Home 4 数字：逐格对账 + 7/30 切档 + 等宽
+
+环境：`e122323` 隔离副本、CDP 10411（QA 段位 + owner 文件）、userData `ud32`
+
+## 读数（7 天档）
+
+| 格 | 值 | 口径 | 对照的既有口 |
+| --- | --- | --- | --- |
+| 今日额度 | `2/10` | 剩余 8 · 已用 2 / 上限 10 | `funnel.query` 的 deliver 项 `usedToday:2 / dailyLimit:10` ✔ |
+| 岗位进度 | `2` | 已投递 1 · 已约面 0 | `journey.tracking.list` 2 条（1001 delivered、1002 interview）；「已投递」按 delivered 计 ✔；「已约面」0 与 `interview_records` 空一致（我的构造只写了状态、没写约面记录） |
+| 最近外发 | `0` | 近 7 天成功笔数 · 最近一笔 11:51:42 1001 | 计数来自 `funnel.trend.days[].sends`（我这条 seed 只写 ledger、没写 attempts，所以 sends 为 0）；「最近一笔」来自 `usage.ledger.summary(5).recent[0]` ✔ |
+| 待办 | `0` | 授权 0 岗 · 已完成 0 | 没有授权单 → `authorization.current` 为 null ✔ |
+
+切到 30 天后：**只有第 3 格口径变**——`近 30 天成功笔数 · 最近一笔 11:51:42 1001`；切回 7 天恢复。另三格口径不随档变（与 03 的「口径随 7/30 切换变化」一致）。
+
+等宽：`[data-testid=home-number-value]` 的 `font-family` = `"IBM Plex Mono", SFMono-Regular, Menlo, Consolas, monospace`，
+`class` 含 `font-mono`；`font-variant-numeric` 是 `normal`（靠等宽字体而不是 `tabular-nums` 实现），**等宽成立**。
+
+「率」扫描：全页只有 1 处，是页首那句 **「只读既有服务，不自己算比率」** 的说明词，不是展示出来的比率指标；`转化率/回复率/约面率` 零命中。
+
+## 发现（P3，非阻断）
+
+「最近 5 笔外发」里，**前一天及更早的行只渲染时分秒、不渲染日期**：我播种的 1003（前 2 天）与 1004（前 3 天）在列表里显示成 `11:51:43 · deliver · 1003`，与今天那几条长得一模一样。逐笔的 `ts` 在 `summary.recent` 里是全的（`1795146703764` / `1795060303764`），是渲染层只取了 `toLocaleTimeString`。用户会把几天前的发送读成今天的。
+
+## 结论
+
+03 的四格与口径 **通过**（逐格能与唯一口对上、7/30 只动对应口径、等宽成立、无比率指标）；附带一条 P3（老记录的日期缺失）。
