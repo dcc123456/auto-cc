@@ -56,6 +56,14 @@ import { judgeAuth, sessionExpiredReason, summarizeCookies, type AuthVerdict } f
 type KernelHost = Pick<ShellService, 'mountKernelSite' | 'unmountKernelSite' | 'getStatus'>;
 
 /**
+ * 全应用**唯一**的浏览分区（用户裁定 2026-11-22：不要「站点 / 任意网页」之分，内嵌的就是一个真实浏览器）。
+ *
+ * 一个分区 = 一个浏览器：登录态跨重启保留、不同源 cookie 按源隔离（浏览器自带），
+ * 平台不再是分区维度，只剩「打开哪个 startUrl」这一层归属。
+ */
+const BROWSER_PARTITION = partitionFor('browser');
+
+/**
  * 一个平台的会话配置。
  *
  * 登录判定用的是**信号族**（8.2-01）：真实站点上登录态是一族 cookie，而仿站只发一枚，
@@ -226,9 +234,11 @@ export class SessionsService extends Service implements ConsentGate {
    */
   open = async (platform: string): Promise<SessionsStatusView> => {
     const config = this.platformOrThrow(platform);
-    const partition = partitionFor(config.id);
-    this.host.mountKernelSite(partition, config.startUrl);
-    this.ctx.logger.info(`内核视图已挂载会话：平台 ${config.id} · 分区 ${partition}`);
+    // 第一次打开前把旧的分平台登录态并进来（只 boss/fixture，web 不并）。
+    await this.mergeLegacyPartitions();
+    // 一个浏览器分区：平台只决定「打开哪个地址」，不再各开一份登录态（2026-11-22 裁定）。
+    this.host.mountKernelSite(BROWSER_PARTITION, config.startUrl);
+    this.ctx.logger.info(`内核视图已挂载会话：平台 ${config.id} · 分区 ${BROWSER_PARTITION} · ${config.startUrl}`);
     return this.status();
   };
 
@@ -278,7 +288,7 @@ export class SessionsService extends Service implements ConsentGate {
     // 带 origin：`storages: ['cookies']` 已经把范围收到 cookie，但作用域是整个分区；
     // 将来同一分区可能承载同站的其他主机（登录页 / SSO 子域），「退出登录」只该忘记本平台那一份。
     await session
-      .fromPartition(partitionFor(config.id))
+      .fromPartition(BROWSER_PARTITION)
       .clearStorageData({ storages: ['cookies'], origin: new URL(config.startUrl).origin });
     this.ctx.logger.info(`已清除会话 cookie：平台 ${config.id}`);
     return (await this.read(config)).view;
@@ -304,23 +314,34 @@ export class SessionsService extends Service implements ConsentGate {
    */
   observeMainFrameResponses = async (listener: (reading: MainFrameResponseReading) => void): Promise<() => void> => {
     await app.whenReady();
-    const unbinds = this.platforms.map((platform) => {
-      const platformSession = session.fromPartition(partitionFor(platform.id));
-      platformSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, (details) => {
-        listener({
-          platform: platform.id,
-          url: details.url,
-          statusCode: details.statusCode,
-          statusLine: details.statusLine,
-          at: Date.now(),
-        });
+    // 只有**一个**分区了（2026-11-22 裁定），所以只挂一次；同一个 session 的同名事件只有一个 handler，
+    // 按平台循环注册会互相覆盖（§9 的实测），平台归属改成按响应的 origin 反查。
+    const browserSession = session.fromPartition(BROWSER_PARTITION);
+    const origins = this.platforms.map((platform) => ({ id: platform.id, origin: new URL(platform.startUrl).origin }));
+    browserSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, (details) => {
+      let origin: string;
+      try {
+        origin = new URL(details.url).origin;
+      } catch {
+        return;
+      }
+      const owner = origins.find((row) => row.origin === origin);
+      // 未登记来源的响应不交给风控判定：它不是任何平台的会话，归错平台会把别的站点算到平台头上。
+      if (!owner) return;
+      listener({
+        platform: owner.id,
+        url: details.url,
+        statusCode: details.statusCode,
+        statusLine: details.statusLine,
+        at: Date.now(),
       });
-      // 摘除用的还是同一个 filter 对象：`onResponseStarted(filter, null)` 实测不抛错且此后零回调。
-      return () => platformSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, null);
     });
-    this.ctx.logger.info(`主框架响应观测已挂载：${String(unbinds.length)} 个分区`);
+    this.ctx.logger.info(
+      `主框架响应观测已挂载：分区 ${BROWSER_PARTITION}（按 origin 归属 ${String(origins.length)} 个平台）`,
+    );
     return () => {
-      for (const unbind of unbinds) unbind();
+      // 摘除用的还是同一个 filter 对象：`onResponseStarted(filter, null)` 实测不抛错且此后零回调。
+      browserSession.webRequest.onResponseStarted(MAIN_FRAME_FILTER, null);
     };
   };
 
@@ -340,10 +361,63 @@ export class SessionsService extends Service implements ConsentGate {
    * @param config 平台配置
    * @returns 界面读数与判定依据
    */
+  /** 迁移只跑一次（每次进程一遍）：cookie 逐条比对后复制，天然幂等。 */
+  private legacyPartitionsMerged = false;
+
+  /**
+   * 把**旧的分平台分区**里的 cookie 并进单一浏览分区（2026-11-22 裁定）。
+   *
+   * 三条硬边界：
+   * 1. **只并 `persist:boss` / `persist:fixture`**；`persist:web`（任意网页模式那套）**绝不并入**——
+   *    不可信来源的 cookie 不该进主浏览器分区；
+   * 2. 幂等：目标分区里已有「同名 + 同域 + 同路径」的 cookie 就跳过，所以重复跑只是空转；
+   * 3. 旧分区**保留不删**（只读回滚点）。`localStorage` / IndexedDB 迁不了（Electron 没有跨分区导出 API），
+   *    依赖它们的站点会要求重新登录——这条写进日志，不装成无缝迁移。
+   */
+  private async mergeLegacyPartitions(): Promise<void> {
+    if (this.legacyPartitionsMerged) return;
+    this.legacyPartitionsMerged = true;
+    const target = session.fromPartition(BROWSER_PARTITION);
+    const present = new Set((await target.cookies.get({})).map((row) => `${row.name}|${row.domain}|${row.path}`));
+    let copied = 0;
+    for (const legacy of ['boss', 'fixture'] as const) {
+      const source = session.fromPartition(partitionFor(legacy));
+      for (const row of await source.cookies.get({})) {
+        // domain 在 Electron 的类型里可缺省（宿主 cookie）；缺了就跳过——没有域就写不回目标分区。
+        if (row.domain === undefined) continue;
+        const key = `${row.name}|${row.domain}|${row.path}`;
+        if (present.has(key)) continue;
+        try {
+          await target.cookies.set({
+            url: `${row.secure ? 'https' : 'http'}://${row.domain.replace(/^\./u, '')}${row.path}`,
+            name: row.name,
+            value: row.value,
+            domain: row.domain,
+            path: row.path,
+            secure: row.secure,
+            httpOnly: row.httpOnly,
+            ...(row.expirationDate === undefined ? {} : { expirationDate: row.expirationDate }),
+            ...(row.sameSite === undefined ? {} : { sameSite: row.sameSite }),
+          });
+          present.add(key);
+          copied += 1;
+        } catch (error) {
+          this.ctx.logger.warn(
+            `旧分区 cookie 迁移跳过一条（${legacy}/${row.name}）：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+    this.ctx.logger.info(
+      `浏览分区迁移完成：并进 ${String(copied)} 条 cookie（来源 boss/fixture；web 分区不并、localStorage 不迁）`,
+    );
+  }
+
   private async read(config: SessionsConfig['platforms'][number]): Promise<PlatformReading> {
-    const partition = partitionFor(config.id);
+    const partition = BROWSER_PARTITION;
     const platformSession = session.fromPartition(partition);
-    const cookies = summarizeCookies(await platformSession.cookies.get({}));
+    // 共用一个分区之后，登录态必须**按该平台自己的源**读：不带 url 会把别的站点的 cookie 算进来。
+    const cookies = summarizeCookies(await platformSession.cookies.get({ url: new URL(config.startUrl).origin }));
     const verdict = judgeAuth(
       cookies,
       {

@@ -1,0 +1,23 @@
+10.11-30 改造第 ④ 步：单一浏览分区 + 旧分区迁移 + 02/06 判据口径（2026-11-22）
+
+背景：用户裁定撤掉「站点 / 任意网页」二分——内嵌的就是一个真实浏览器，记录登录态、不需要切模式。
+
+① 分区合并：`sessions.open(platform)` 不再按平台开分区，**全应用一个** `partitionFor('browser')`
+   （`sessions/src/index.ts` 的 `BROWSER_PARTITION`）；平台只剩「打开哪个 startUrl」这一层归属。
+② 登录态判定改按源：`read()` 在同一分区里用 `cookies.get({ url: <该平台 origin> })` 取——
+   共用一个分区后，不按源取会把别的站点 cookie 算到这个平台头上（这正是 02/06 要判的「真实平台 origin 上有登录态」）。
+   `logout` 也改成同一分区 + 按 origin 清，退出一个平台不影响别的站点。
+③ 迁移：`mergeLegacyPartitions()` 把 `persist:boss` / `persist:fixture` 的 cookie 并进
+   `persist:browser`；**`persist:web` 绝不并入**（不可信来源 cookie 不进主分区）；幂等（同名+同域+同路径即跳过）；
+   旧分区保留为只读回滚点；**localStorage / IndexedDB 迁不了**（Electron 无跨分区导出 API），
+   依赖它们的站点会要求重新登录——这条写进日志，不装无缝。
+④ 风控观测：一个分区只挂一次监听（同 session 同名事件只有一个 handler），平台归属改成按响应 origin 反查；
+   未登记来源的响应**不交给风控判定**（归错平台会误伤）。
+⑤ 信任页/Home 的登录判据：数据层已按 origin 返回 `auth` 与 cookie 名集合；渲染层仍按「非回环 startUrl」筛真实平台，
+   口径与 02/06 一致，没有第二套判定。
+
+门禁：`typecheck` / `lint` / `format:check` / 全量 `test` **2799 例** 四个 `EXIT=0`；sessions 包 28 例全过。
+
+尚未做（按裁定顺序的后续小片）：② 导航策略放开（任意 http/https、仍挡 javascript:/data:）；
+③ 未登记来源的写动作走既有 `agent.pause` 确认（读类允许、入库需确认）；⑤ 退役 web 模式表面与证据重写；
+另按 Q 的裁定，QA 第 ⑥ 条「注入负对照」提前到导航放开之后立刻验。
