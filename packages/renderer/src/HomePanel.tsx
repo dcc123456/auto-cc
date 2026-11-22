@@ -158,7 +158,7 @@ export function unattendedValue(
 /**
  * 授权单状态 → 该用哪条文案（纯函数，单测直接钉住「暂停不许回落成只建议」）。
  * @param value 「接下来」那块里与授权有关的两位
- * @returns 文案 key 与插值参数（暂停没写原因时给 `noReason` 那条 key，由渲染层再翻一次）
+ * @returns 文案 key 与插值参数（暂停没写原因时直接换成 `pausedNoReason` 那条 key，不把 key 塞进参数）
  */
 export function unattendedStatusKey(value: {
   authorization: HomeNext['authorization'] | { status: string; targets: string[]; pauseReason?: string | null };
@@ -169,10 +169,11 @@ export function unattendedStatusKey(value: {
     return { key: 'home.unattendedValue.active', params: { count: authorization.targets.length } };
   }
   if (authorization.status === 'paused') {
-    return {
-      key: 'home.unattendedValue.paused',
-      params: { reason: authorization.pauseReason ?? 'home.unattendedValue.noReason' },
-    };
+    // 没写原因时换**另一条 key**，绝不把 key 当插值参数传（那会把 `home.…` 原样画到界面上，QA 报的裸 key）。
+    if (authorization.pauseReason === null || authorization.pauseReason === undefined) {
+      return { key: 'home.unattendedValue.pausedNoReason' };
+    }
+    return { key: 'home.unattendedValue.paused', params: { reason: authorization.pauseReason } };
   }
   return { key: `home.unattendedValue.${authorization.status}` };
 }

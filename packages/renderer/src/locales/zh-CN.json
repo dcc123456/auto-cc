@@ -352,7 +352,7 @@
         "revoked": "已收回",
         "suggest": "只建议",
         "unknown": "还没读到",
-        "noReason": "没有写原因"
+        "pausedNoReason": "已暂停：未写原因"
       }
     },
     "assistant": {

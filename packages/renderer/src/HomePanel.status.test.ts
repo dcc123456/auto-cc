@@ -1,54 +1,53 @@
 /**
- * Home「无人值守」那一行的取值（2026-11-22 裁定，QA 的 04）：
- * 暂停必须带原因原文，不许回落成「只建议」；只有真的没有授权单时才说「只建议」。
+ * Home「无人值守」那一行的取值与**渲染结果**（2026-11-22 裁定，QA 的 04）：
+ * 暂停必须带原因原文，不许回落成「只建议」；没写原因时给「未写原因」而不是裸 key。
+ * 判据刻意压在**渲染出来的字符串**上：只断言 `params.reason` 等于某个 key，正是上一版漏掉裸 key 的原因。
  */
 import { describe, expect, it } from 'vitest';
 import type { TFunction } from 'i18next';
-import { unattendedStatusKey } from './HomePanel';
+import zh from './locales/zh-CN.json';
+import { unattendedStatusKey, unattendedValue } from './HomePanel';
 
-/** 只做插值记录的假 t：返回 `key|params`，方便断言用了哪条文案。 */
-const fakeT = ((key: string, params?: Record<string, unknown>) =>
-  `${key}|${JSON.stringify(params ?? {})}`) as unknown as TFunction;
+/** 从语言包里按 key 取文案并插值的迷你 t（与运行时同一份语言包，才能测出裸 key）。 */
+const miniT = ((key: string, params?: Record<string, string | number>) => {
+  // 语言包的根是 `shell`（i18next 的 ns 也是它），key 里不带 ns 前缀。
+  const value = key
+    .split('.')
+    .reduce<unknown>(
+      (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+      (zh as unknown as { shell: unknown }).shell,
+    );
+  if (typeof value !== 'string') return key;
+  return value.replace(/\{\{(\w+)\}\}/g, (_match: string, name: string) => String(params?.[name] ?? `{{${name}}}`));
+}) as unknown as TFunction;
 
-describe('unattendedStatusKey', () => {
-  it('没有授权单：才说「只建议」', () => {
-    expect(unattendedStatusKey({ authorization: null })).toEqual({ key: 'home.unattendedValue.suggest' });
+/** 一份「接下来」块的读数壳（只填这一行用得到的两位）。 */
+const ready = (authorization: unknown) => ({ state: 'ready' as const, value: { authorization } as never });
+
+describe('unattendedValue：渲染结果不含裸 key', () => {
+  it('暂停且写了原因：出现原因原文，且整个字符串里没有 `home.` 这类 key', () => {
+    const text = unattendedValue(miniT, ready({ status: 'paused', targets: ['1001'], pauseReason: '页面出现验证码' }));
+    expect(text).toBe('已暂停：页面出现验证码');
+    expect(text).not.toMatch(/home\.[a-zA-Z]/);
   });
 
-  it('生效中：报「已授权 N 岗」，不含第二层「无人值守：」前缀', () => {
-    const reading = unattendedStatusKey({
-      authorization: { status: 'active', targets: ['1001', '1002'], pauseReason: null },
-    });
-    expect(reading).toEqual({ key: 'home.unattendedValue.active', params: { count: 2 } });
+  it('暂停但没写原因：给「未写原因」，**不是**裸 key', () => {
+    const text = unattendedValue(miniT, ready({ status: 'paused', targets: [], pauseReason: null }));
+    expect(text).toBe('已暂停：未写原因');
+    expect(text).not.toMatch(/home\.[a-zA-Z]/);
   });
 
-  it('暂停：报「已暂停」并带原因原文（不许回落成只建议）', () => {
-    const reading = unattendedStatusKey({
-      authorization: { status: 'paused', targets: ['1001'], pauseReason: '页面出现验证码，已暂停' },
-    });
-    expect(reading).toEqual({ key: 'home.unattendedValue.paused', params: { reason: '页面出现验证码，已暂停' } });
+  it('已授权 / 没有授权单 / 失效：都不含裸 key', () => {
+    expect(unattendedValue(miniT, ready({ status: 'active', targets: ['1', '2'], pauseReason: null }))).toBe(
+      '已授权 2 岗',
+    );
+    expect(unattendedValue(miniT, ready(null))).toBe('只建议');
+    expect(unattendedValue(miniT, ready({ status: 'revoked', targets: [] }))).toBe('已收回');
   });
 
-  it('暂停但没有原因：仍报暂停，原因写「没有写原因」而不是省略', () => {
-    const reading = unattendedStatusKey({
-      authorization: { status: 'paused', targets: [], pauseReason: null },
-    });
-    expect(reading).toEqual({
-      key: 'home.unattendedValue.paused',
-      params: { reason: 'home.unattendedValue.noReason' },
+  it('纯函数本身：暂停无原因返回的是 `pausedNoReason` 那条 key，参数里没有 key 字符串', () => {
+    expect(unattendedStatusKey({ authorization: { status: 'paused', targets: [], pauseReason: null } })).toEqual({
+      key: 'home.unattendedValue.pausedNoReason',
     });
   });
-
-  it('失效/收回：按状态给各自的人话', () => {
-    expect(unattendedStatusKey({ authorization: { status: 'revoked', targets: [] } })).toEqual({
-      key: 'home.unattendedValue.revoked',
-    });
-  });
-
-  expectUnused(fakeT);
 });
-
-/** 假 t 只在上面用于类型自检时被引用一次；这里留一个显式调用免得 lint 抱怨未使用。 */
-function expectUnused(t: TFunction): void {
-  expect(typeof t).toBe('function');
-}

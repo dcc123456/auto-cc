@@ -352,7 +352,7 @@
         "revoked": "Revoked",
         "suggest": "suggest only",
         "unknown": "not read yet",
-        "noReason": "no reason recorded"
+        "pausedNoReason": "Paused: no reason recorded"
       }
     },
     "assistant": {
