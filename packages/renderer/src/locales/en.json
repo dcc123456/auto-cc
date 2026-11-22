@@ -501,7 +501,7 @@
         "reload": "Reload",
         "back": "Back",
         "backUnavailable": "The kernel view exposes no history-back port; use the address bar or the hide/expand controls",
-        "reasonUrlEmpty": "Type a URL first",
+        "reasonUrlEmpty": "Please enter a URL",
         "reasonBusy": "The previous action has not returned yet",
         "reasonNoCurrent": "No page has been opened yet",
         "navigate": "Open URL",
