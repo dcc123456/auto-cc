@@ -1,0 +1,32 @@
+# 10.11-28 独立复现尝试：四条生命周期路径（QA）
+
+环境：`efbb271` 隔离副本（与 `2f859e2` 代码相同，后者只改文档）、CDP 10416（QA 段位 + owner 文件）、空 userData `ud28`、本地 fixture 10233
+
+## 四路径读数（每条都先读 `shell.getStatus()` 再读 `snapshot()`）
+
+| 路径 | `shell.getStatus().kernelViewUrl` | `snapshot()` | `readyState` |
+| --- | --- | --- | --- |
+| 未开会话（占位页） | `data:text/html…placeholder…` | `{code:"NO_KERNEL_SESSION", message:"内核视图尚未挂载任何平台，先打开一个会话再操作页面"}` | — |
+| `sessions.open('fixture')` 后 | `http://127.0.0.1:10233/` | `http://127.0.0.1:10233/` | `complete` |
+| 导航中（`page.navigate` 未返回时取快照） | 同上 | 同上 | `complete` |
+| 任意网页模式（`openWebPage`） | `http://127.0.0.1:10233/boss`（`persist:web`） | `{code:"WEB_MODE_READ_ONLY", …}` | — |
+| `closeWebPage()` 刚返回 | **`""`（空串，约 1.5s）** | `http://127.0.0.1:10233/` | `complete` |
+| `closeWebPage()` 后 1.5s | `http://127.0.0.1:10233/` | 同上 | `complete` |
+
+## 结论
+
+- `snapshot().url` 在**这四条路径上都不是 null**：要么正常回地址，要么是结构化错误（`NO_KERNEL_SESSION` / `WEB_MODE_READ_ONLY`）；与开发在 `2f859e2` 的结论一致。
+- 唯一读到空值的是 **`shell.getStatus().kernelViewUrl` 在模式切换刚返回的那 1.5s 内**（`""`，不是 null）——这与地址栏此前的「切模式后输入框空白」同源，正是那句「模式变化后 1.2s 再读」要处理的窗口。**若 10.11-27 那轮读到的是这个口，那么「snapshot().url 恒 null」的描述就指错了对象。**
+
+## 另一条要提醒的（关于 `2f859e2` 那张表）
+
+`2f859e2` 的三读数表写「导航后 `/alt`」。但在平台模式下，`browser.page.navigate('http://127.0.0.1:10233/alt')` 在当前代码上**直接被拒**：
+
+```
+{ code: "NAVIGATE_URL_REJECTED", message: "目标源 http://127.0.0.1:10233 不属于任何已登记平台",
+  details: { url: "http://127.0.0.1:10233/alt", allowedOrigins: ["https://www.zhipin.com"] } }
+```
+
+（`resolveNavigableUrl` 的可导航源来自适配器知识包，目前只有 BOSS 的 `https://www.zhipin.com`；fixture 的视图是 `sessions.open` 按 `startUrl` 自己开的，不走这条导航口。）
+
+所以那张表的「导航后」不可能来自 `page.navigate`——大概率是 `sessions.open('fixture-alt')` 开出来的。表里没写清这一步，下一个人照着复跑会先撞 `NAVIGATE_URL_REJECTED`。建议在 28 的证据里把这一步的动作名写准（是开会话还是导航）。
