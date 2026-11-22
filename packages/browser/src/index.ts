@@ -37,7 +37,7 @@ import {
   toScrollReading,
   toSnapshotReading,
 } from './page-script.js';
-import { resolveNavigableUrl } from './navigate-policy.js';
+import { resolveNavigableUrl, withLoopbackSessionOrigins } from './navigate-policy.js';
 import type { PlatformRegistryService } from './platform-registry.js';
 
 /**
@@ -46,7 +46,7 @@ import type { PlatformRegistryService } from './platform-registry.js';
  * 与 `sessions` 用 `Pick` 收 `shell` 同一条路：把「跨包能做什么」在类型上收成有限集，
  * 想加能力就得先改这一行，改动就会被看见（AGENTS.md §4.1 的分层方向）。
  */
-type ConsentRegistry = Pick<SessionsService, 'hasConsent'>;
+type ConsentRegistry = Pick<SessionsService, 'hasConsent' | 'status'>;
 
 export const browserPageSchema = z.strictObject({
   /** 一次导航等待页面装载完成的上限（毫秒）；超时不报错，由快照读数如实反映 `readyState`。 */
@@ -115,9 +115,11 @@ export class BrowserPageService extends Service {
     const contents = requireKernelContents(this.host, 'browser.page');
     // 名单现问现取：登记处由平台包在自己的 init 里往里塞，缓存一份本地副本会在热改配置后变空表
     // （AGENTS.md §9 的 2.5 实测条）。没挂登记处时拿到空名单，于是任何地址都进不去——宁可全拒。
-    const platforms = this.registry
-      .list()
-      .platforms.map((platform) => ({ id: platform.id, origins: platform.origins }));
+    let platforms = this.registry.list().platforms.map((platform) => ({ id: platform.id, origins: platform.origins }));
+    // 回环会话自己的源也并进来（2026-11-22 裁定）：地址栏显示着 127.0.0.1，就必须能刷新与手输。
+    // 只并回环源；非回环仍只来自知识包 + 签字。
+    const sessions = (await this.sessions.status()).platforms.map((row) => ({ id: row.id, startUrl: row.startUrl }));
+    platforms = withLoopbackSessionOrigins(platforms, sessions);
     const consented = platforms
       .filter((platform) => this.sessions.hasConsent(platform.id))
       .map((platform) => platform.id);
@@ -309,7 +311,7 @@ export class BrowserPageService extends Service {
   }
 
   /**
-   * 会话服务的签字面（见 `ConsentRegistry` 注释：只问「这个平台签过字没有」，不碰分区）。
+   * 会话服务的签字面与平台清单（`ConsentRegistry`：问签字 + 读 startUrl 判回环，不碰分区）。
    * @returns sessions 服务实例
    */
   private get sessions(): ConsentRegistry {

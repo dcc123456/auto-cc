@@ -34,6 +34,39 @@ export function isLoopbackHost(hostname: string): boolean {
 }
 
 /**
+ * 把「已登记会话自己的回环源」并进可导航名单（2026-11-22 裁定）。
+ *
+ * 为什么需要这一条：地址栏显示着 `http://127.0.0.1:10233/`（那是 `sessions.open` 按 `startUrl`
+ * 直接打开的），却既不能刷新自己、也不能手输到 `/alt`——因为可导航源只来自适配器知识包，
+ * 而本机装配里 `platform-boss` 可能用的是真实包（只有 zhipin）。回环本来就不需要风险签字，
+ * 把它并进来只让本地验收面自洽；**非回环源一点不放松**：仍必须由已登记平台包声明、且签字。
+ * @param platforms 适配器知识包声明的平台与源
+ * @param sessions 会话读数里的平台与 startUrl（`sessions.status()` 那份）
+ * @returns 合并后的名单（同一 origin 去重，session 只贡献回环源）
+ */
+export function withLoopbackSessionOrigins(
+  platforms: NavigablePlatform[],
+  sessions: { id: string; startUrl: string }[],
+): NavigablePlatform[] {
+  const merged = platforms.map((platform) => ({ id: platform.id, origins: [...platform.origins] }));
+  for (const session of sessions) {
+    let origin: string;
+    try {
+      const parsed = new URL(session.startUrl);
+      if (!NAVIGABLE_PROTOCOLS.has(parsed.protocol) || !isLoopbackHost(parsed.hostname)) continue;
+      origin = parsed.origin;
+    } catch {
+      continue;
+    }
+    const owner = merged.find((platform) => platform.origins.includes(origin));
+    if (owner) continue;
+    // 用会话自己的 id 当平台名：这样 `hasConsent` 查到的也是它自己的签字（回环免签，不查也过）。
+    merged.push({ id: session.id, origins: [origin] });
+  }
+  return merged;
+}
+
+/**
  * 校验并解析一次导航目标。
  * @param rawUrl 渲染层/调用方给出的地址（不可信）
  * @param platforms 已登记平台及其声明的可导航源（`platform.registry.list()` 的投影，知识包是唯一来源）

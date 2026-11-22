@@ -19,3 +19,7 @@
 快照那条单列缺陷，不复测到硬超时。
 
 证据图：10.11-27-addressbar-before.png / -after.png（md5 b91cc9d… / 7b6c303… 互异）
+
+**2026-11-22 补（QA 的 27③ 空地址 / 27④ 手输）**：空地址点「打开」现在给「先填网址」；
+手输回环地址 `http://127.0.0.1:10233/alt` 走既有 `browser.page.navigate` 成功（回环会话源已并入名单，
+非回环仍必须登记 + 签字）。读数与根因见 `10.11-29-addressbar-refresh-back-readings.txt` ⑦。

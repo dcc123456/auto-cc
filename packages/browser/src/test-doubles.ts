@@ -425,6 +425,16 @@ export class FakeSessionsService extends Service {
    */
   hasConsent = (platform: string): boolean => this.consented.has(platform);
 
+  /** 用例可写的会话清单（`sessions.status()` 的形状里导航名单只读 `platforms[].id/startUrl`）。 */
+  readonly platforms: { id: string; startUrl: string }[] = [];
+
+  /**
+   * 与真实现同形的会话读数：`browser.page.navigate` 要拿它判「这是不是一条回环会话」。
+   * @returns 只含 `platforms` 的最小快照（其余字段这条判据用不到）
+   */
+  status = (): Promise<{ platforms: { id: string; startUrl: string }[] }> =>
+    Promise.resolve({ platforms: this.platforms });
+
   /**
    * 与真实现同形的观测口：只留最后一次挂进来的 listener，摘除时清空。
    * @param listener 主框架响应读数回调

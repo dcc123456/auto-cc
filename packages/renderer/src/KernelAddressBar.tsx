@@ -115,7 +115,11 @@ export function KernelAddressBar() {
    */
   const open = (rawUrl: string): void => {
     const url = rawUrl.trim();
-    if (url === '') return;
+    if (url === '') {
+      // 空地址必须有人话（2026-11-22 裁定，QA 的 27③）：原来直接 return，点了「打开」什么都不发生。
+      setNotice(t('kernel.address.reasonUrlEmpty'), 'seal');
+      return;
+    }
     // 两条通道的返回类型不同（快照 vs 壳层状态），这里只关心 ok/error，所以按 unknown 收口。
     const call = async (): Promise<BridgeReply<unknown>> =>
       mode === 'web' ? await bridge!.shell.openWebPage(url) : await bridge!.browser['page.navigate'](url);
@@ -188,7 +192,8 @@ export function KernelAddressBar() {
           variant="solid"
           compact
           busy={busy !== undefined}
-          disabled={reason !== undefined}
+          // 空地址**不再禁用**：禁用的键点不动、也就给不出「先填网址」这句人话（2026-11-22 裁定）。
+          disabled={busy !== undefined}
           disabledReason={reason}
           disabledReasonLabel={
             reason === 'ACTION_BUSY'

@@ -177,10 +177,12 @@ describe('导航许可的名单来源（spec 8.1-05）', () => {
     capabilities: ['search'],
   };
 
-  it('会话里登记着回环地址也不作数：许可名单只认平台登记处声明的源', async () => {
-    // 这条正是换口径的证明：旧口径读 `sessions.status()` 的 startUrl，这个地址当时是放行的。
-    const { page } = await boot(fakeView(null, []));
-    await expect(page.navigate('http://127.0.0.1:10233/boss')).rejects.toMatchObject({
+  it('回环会话自己的源可导航，非回环会话的源仍不作数（2026-11-22 裁定）', async () => {
+    // 地址栏显示着回环地址，就必须能刷新与手输；非回环仍只认知识包 + 签字。
+    const { page, sessions } = await boot(fakeView(null, []));
+    sessions.platforms.push({ id: 'fixture', startUrl: 'http://127.0.0.1:10233/' });
+    sessions.platforms.push({ id: 'stray', startUrl: 'https://example.com/' });
+    await expect(page.navigate('https://example.com/x')).rejects.toMatchObject({
       code: 'NAVIGATE_URL_REJECTED',
     });
   });

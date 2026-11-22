@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveNavigableUrl } from './navigate-policy.js';
+import { resolveNavigableUrl, withLoopbackSessionOrigins } from './navigate-policy.js';
 
 /**
  * 已登记平台及其声明的可导航源（P8 8.1-05 的新口径：名单来自知识包的 `origins`，不再是 startUrl 的源）。
@@ -95,5 +95,41 @@ describe('导航许可判定（spec 2.1-03 / 2.1-04 / 8.1-05）', () => {
     expect(errorCode(() => resolveNavigableUrl('https://www.zhipin.com/web/geek/jobs', PLATFORMS, ['fixture']))).toBe(
       'CONSENT_REQUIRED',
     );
+  });
+});
+
+describe('withLoopbackSessionOrigins（2026-11-22 裁定：回环会话自己的源可导航）', () => {
+  it('回环会话的源并进名单，非回环会话的源不并', () => {
+    const merged = withLoopbackSessionOrigins(
+      [{ id: 'boss', origins: ['https://www.zhipin.com'] }],
+      [
+        { id: 'fixture', startUrl: 'http://127.0.0.1:10233/' },
+        { id: 'stray', startUrl: 'https://example.com/' },
+      ],
+    );
+    expect(merged.flatMap((platform) => platform.origins)).toEqual([
+      'https://www.zhipin.com',
+      'http://127.0.0.1:10233',
+    ]);
+  });
+
+  it('知识包已经声明过同一个回环源时不重复登记', () => {
+    const merged = withLoopbackSessionOrigins(
+      [{ id: 'boss', origins: ['http://127.0.0.1:10233'] }],
+      [{ id: 'fixture', startUrl: 'http://127.0.0.1:10233/boss' }],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.origins).toEqual(['http://127.0.0.1:10233']);
+  });
+
+  it('startUrl 解析不了或不是 http(s)：跳过，不抛', () => {
+    const merged = withLoopbackSessionOrigins(
+      [],
+      [
+        { id: 'broken', startUrl: 'not-a-url' },
+        { id: 'weird', startUrl: 'file:///tmp/x' },
+      ],
+    );
+    expect(merged).toEqual([]);
   });
 });
