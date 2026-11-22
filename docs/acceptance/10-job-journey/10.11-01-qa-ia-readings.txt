@@ -1,0 +1,14 @@
+# 10.11-01 信息架构不变式
+
+环境：`cc62325` 隔离副本、CDP 10414（QA 段位 + owner 文件）、userData `ud35`
+
+```
+tabs: [nav-chat 首页(selected), nav-jobs 岗位, nav-resume 简历, nav-workflow 流程,
+       nav-models 模型, nav-trust 运行记录, nav-diagnostics 设置]
+tabCount: 7
+navHasAssistant: false        ← 导航里没有任何通往助手的项
+home-panel 元素存在
+assistant-panel 元素存在（未展开时 rect 0×0，存在性满足「两个 testid 可区分」）
+```
+
+判定：**通过**——7 项、第一项仍是 `nav-chat` 只改标签为「首页」、助手不进导航、两个 testid 都在。

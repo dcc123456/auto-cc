@@ -1,0 +1,18 @@
+# 10.11-21 窄窗（1024×720）与胶囊/面板/底栏互不压
+
+环境：`cc62325`、CDP 10414、userData `ud35`；1024×720 用同会话 `Emulation.setDeviceMetricsOverride`
+
+```
+viewport: 1024×720
+docScroll: scrollWidth 1024 / clientWidth 1024   → 无横向滚动
+nav: 宽 56（左轨收窄到 56px）
+capsule: 31×32 @ (932,10)
+panel（展开）: 420×637 @ (604,53)
+footer: 1024×30 @ (0,690)
+面板×底栏 交集 0；面板×胶囊 0；胶囊×底栏 0
+```
+
+发送键：`[data-action=send]` 在面板里**有 3 个**——两个在收起容器里是 `0×0`（`UL/LI` 链全 0），**真正那颗是 32×32 @ (966,636)、`disabled=false`、可见**。
+（踩坑记录：`querySelector('[data-action=send]')` 会先命中 0×0 那颗，和 AGENTS §9 的⑦同一形态——量之前要挑可见那颗。）
+
+判定：**1024 档通过**；200% 那档按裁定留前台（同 `23`），不在本轮。

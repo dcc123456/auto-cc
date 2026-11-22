@@ -1,0 +1,32 @@
+# 10.11-10 助手胶囊：几何 / 断点 / 七屏可见 / aria
+
+环境：`cc62325`、CDP 10414、userData `ud35`（视口用同一条 CDP 会话里的 `Emulation.setDeviceMetricsOverride`）
+
+## 几何与 aria
+
+| 读数 | 值 |
+| --- | --- |
+| 胶囊 rect | `57×32`（1200 宽下）——**高 32** |
+| `aria-expanded` | `"false"`（收起）/ `"true"`（展开时） |
+| `aria-controls` | `"assistant-panel"` |
+| `aria-keyshortcuts` | `"Control+J Meta+J"` |
+| 可读名 | `aria-label="助手"` |
+
+## 断点：1120 有字 / 1119 只图标
+
+| 视口 | 胶囊宽 | 文本 span |
+| --- | --- | --- |
+| 1120 | 57 | `display:block`、22×18 → **有字** |
+| 1119 | 31 | `display:none`、0×0 → **只图标** |
+
+（胶囊里有两个同名 span：外层 `relative flex items-center gap-1` 是图标容器，文本那个是 `hidden min-[1120px]:inline`。）
+
+## 七屏可见
+
+`chat / jobs / resume / workflow / models / trust / diagnostics` 逐屏读 `[data-action=assistant-capsule]`：
+**七屏都是 57×32（1119 下 31×32）、`visible=true`**。
+
+## 结论
+
+10 **通过**（32px、断点 1120 切换文案、七屏可见可点、aria 三件套齐）。
+全屏态与 56px 窄窗下的同一点留 `23/21` 那两档一起读（本轮 21 只跑了 1024）。
