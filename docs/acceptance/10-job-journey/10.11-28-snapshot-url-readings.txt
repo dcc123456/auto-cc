@@ -1,0 +1,22 @@
+10.11-28 快照地址缺陷：复现尝试与三读数（干净 userData · dist 构建 · 本地仿站 · 端口 10428 + owner 文件）
+
+背景：10.11-28 记的是「`browser.page.snapshot().url` 恒为 null」——导航前后都空。
+本轮按条目要求取「导航前 / 导航后 / readyState」三读数，结果**在当前主干上不复现**：
+
+命令：`node tmp/g11/batch/p28.mjs`（空库起步；README 口径：`sessions.open('fixture')` 后逐次读）
+
+| 时点 | `shell.getStatus().kernelViewUrl` | `browser.page.snapshot()` 的 `url` | `readyState` |
+| --- | --- | --- | --- |
+| 导航前（fixture `/`） | `http://127.0.0.1:10233/` | `http://127.0.0.1:10233/` | `complete` |
+| 导航后（fixture `/alt`） | `http://127.0.0.1:10233/alt` | `http://127.0.0.1:10233/alt` | `complete` |
+
+另附同轮读数：`title` 分别为「auto-cc 会话实验台 · 分区 A / B」，`elementCount=25`，`bodyText` 正常；
+`partition` 都是 `persist:fixture`。
+
+**结论：不是只读口的缺陷，至少在这条路径上不是。** 快照脚本 `page-script.ts:46` 用的是 `location.href`，
+`toSnapshotReading` 对非字符串一律收口成空串而不是 null；桥信封是 `{ok,value}`，所以
+「读到 null」最可能来自**调用侧读错了层**（把 `reply.url` 当成了 `reply.value.url`，undefined 在 `JSON.stringify` 里会被整个丢掉，
+看起来就像 null）。10.11-27 那轮探针的写法我没保留下来，无法进一步定位到具体那一行。
+
+请 PM 裁：① 按「未复现 / 调用侧读数错误」收口并保留本条三读数；② 若仍要修，请给 10.11-27 那轮取 null 的原始命令
+（我按它复跑一次，能复现就修根因）。
