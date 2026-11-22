@@ -109,8 +109,8 @@ export function KernelAddressBar() {
 
   /**
    * 打开一份地址：按当下模式分流。
-   * - 平台模式：仍走 `browser.page.navigate`（平台名单与签字判据一字不动）；
-   * - 任意网页模式：走 `shell.openWebPage`（独立分区 `persist:web`，不过平台名单——正因如此助手只读）。
+   * - 平台模式：走 `browser.page.navigate`（该口自 2026-11-22 裁定后只校验协议，任意 http(s) 可达）；
+   * - 任意网页模式：走 `shell.openWebPage`（独立分区 `persist:web`——正因如此助手对那份视图只读）。
    * @param rawUrl 输入框里的地址（不可信输入；协议校验在壳层那一口做）
    */
   const open = (rawUrl: string): void => {
@@ -227,7 +227,7 @@ export function KernelAddressBar() {
           <span className="sr-only">{t('kernel.address.reload')}</span>
         </DeskButton>
         {/* 模式标记与模式入口（spec 10.11-30）：web 模式下写明「助手只读」并给「回到平台」出口；
-            平台模式下这里就是切进「任意网页」的显式入口——两条通道分开，平台名单判据一字不动。 */}
+            平台模式下这里就是切进「任意网页」的显式入口——两条通道分开，差别只在分区。 */}
         {mode === 'web' ? (
           <span
             data-testid="kernel-address-web-mode"
@@ -267,7 +267,7 @@ export function KernelAddressBar() {
             variant="line"
             compact
             onClick={() => {
-              // 人按的才算切换：先回到平台分区，再按平台名单导航到这条地址（判据一字不动）。
+              // 人按的才算切换：先回到平台分区，再把这条地址交给导航口。
               void run(t('kernel.web.switchPlatform'), async (): Promise<BridgeReply<unknown>> => {
                 const back = await bridge!.shell.closeWebPage();
                 if (!back.ok) return back;

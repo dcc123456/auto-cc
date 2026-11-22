@@ -45,10 +45,13 @@ const fibers: Fiber[] = [];
 
 /**
  * 起一套「shell / sessions / platform.registry 替身 + 真页面服务」。
+ *
+ * 后两个替身是照真装配铺的：页面服务自 2026-11-22 起只依赖 `shell`，但 app 里那两个服务一定在，
+ * 铺着才能保证「哪天有人往服务里再加一条跨包依赖」时用例立刻表现为注入失败，而不是悄悄变绿。
  * @param view 内核视图替身；null 表示还没有挂载会话
  * @param overrides 只覆盖要测的那一两个配置项，其余用默认值
  * @param withTools 是否先挂注册表替身（spec 2.8-08 的登记用例要它，其余用例不需要）
- * @returns 真的 `browser.page` 实例、它的 fiber，以及两个替身（导航许可要现写清单与签字）
+ * @returns 真的 `browser.page` 实例、它的 fiber，以及工具注册表替身
  */
 async function boot(view: WebContents | null = null, overrides: Partial<BrowserPageConfig> = {}, withTools = false) {
   const ctx = new Context();
@@ -64,8 +67,6 @@ async function boot(view: WebContents | null = null, overrides: Partial<BrowserP
   return {
     page: ctx.get('browser.page') as BrowserPageService,
     pageFiber,
-    registry: ctx.get('platform.registry') as unknown as FakePlatformRegistryService,
-    sessions: ctx.get('sessions') as unknown as FakeSessionsService,
     tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
@@ -160,62 +161,63 @@ describe('截图前遮罩（spec 2.7-07）', () => {
 });
 
 /**
- * 导航许可的名单来源（spec 8.1-05）。
- *
- * 只演「拦下来」这一侧：判定放行之后要真走到内核装载，那是 harness 打 fixture 站点的 V 类条目
- * （spec 2.1），在替身视图上演成功分支只会断言替身自己回的值（本文件头部的取舍）。
- * 而「码是 CONSENT_REQUIRED / NAVIGATE_URL_REJECTED」这件事本身就证明了没碰内核——
- * 替身视图根本没有 `loadURL`，真往下走拿到的是 TypeError。
+ * 造一块能脚本化 `loadURL` 与快照的本地视图；不发任何网络请求。
+ * @param loadURL 装载实现（用例在里面记地址、或按第几次调用决定拒绝）
+ * @returns 可直接交给 `boot` 的视图替身
  */
-describe('导航许可的名单来源（spec 8.1-05）', () => {
-  /** 一个把真域名声明进 `origins` 的平台读数（形状取自 `platform.registry.list()`）。 */
-  const realPlatform = {
-    id: 'boss',
-    displayName: 'BOSS 直聘',
-    startUrl: 'https://www.zhipin.com/',
-    origins: ['https://www.zhipin.com'],
-    capabilities: ['search'],
-  };
-
-  it('回环会话自己的源可导航，非回环会话的源仍不作数（2026-11-22 裁定）', async () => {
-    // 地址栏显示着回环地址，就必须能刷新与手输；非回环仍只认知识包 + 签字。
-    const { page, sessions } = await boot(fakeView(null, []));
-    sessions.platforms.push({ id: 'fixture', startUrl: 'http://127.0.0.1:10233/' });
-    sessions.platforms.push({ id: 'stray', startUrl: 'https://example.com/' });
-    await expect(page.navigate('https://example.com/x')).rejects.toMatchObject({
-      code: 'NAVIGATE_URL_REJECTED',
+const viewWithLoad = (loadURL: (url: string) => Promise<void>): WebContents => {
+  const contents = fakeView(fakeFrame('http://127.0.0.1:10233/boss', { value: {} }));
+  contents.loadURL = loadURL;
+  contents.executeJavaScript = () =>
+    Promise.resolve({
+      title: '仿站搜索页',
+      url: 'http://127.0.0.1:10233/boss?query=frontend',
+      readyState: 'complete',
+      elementCount: 3,
+      textLength: 0,
+      bodyText: '',
+      headings: [],
     });
+  return contents;
+};
+
+/**
+ * 导航许可（spec 2.1-03 / 2.1-04；2026-11-22 裁定：内嵌的就是一个真实浏览器）。
+ *
+ * 名单与签字退役后，这里只剩两件事要钉住：① 任何 http(s) 地址都能走到内核装载；
+ * ② 协议红线还在——`javascript:` 一个字节都不许进内核。放行之后的真实装载仍归 harness
+ * 打 fixture 站点验收（spec 2.1 的 V 类条目），这里只演「交给内核的那一帧」。
+ */
+describe('导航许可（2026-11-22 裁定：只剩协议一道）', () => {
+  it('未登记来源照旧走到内核装载（名单退役后没有「不属于已登记平台」这条路）', async () => {
+    const urls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      urls.push(url);
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return Promise.resolve();
+    });
+    const { page } = await boot(contents);
+    await expect(page.navigate('https://other.example/jd/1')).resolves.toMatchObject({
+      readyState: 'complete',
+      url: 'http://127.0.0.1:10233/boss?query=frontend',
+    });
+    expect(urls).toEqual(['https://other.example/jd/1']);
   });
 
-  it('真源已登记但平台没签字：以 CONSENT_REQUIRED 失败，签字集合空着就是空着', async () => {
-    const { page, registry, sessions } = await boot(fakeView(null, []));
-    registry.platforms.push(realPlatform);
-    await expect(page.navigate('https://www.zhipin.com/web/geek/jobs')).rejects.toMatchObject({
-      code: 'CONSENT_REQUIRED',
-      details: { platform: 'boss' },
-    });
-    expect(sessions.consented.size).toBe(0);
+  it('非 http(s) 协议仍被拦下，一次也没碰到内核', async () => {
+    const urls: string[] = [];
+    const { page } = await boot(
+      viewWithLoad((url) => {
+        urls.push(url);
+        return Promise.resolve();
+      }),
+    );
+    await expect(page.navigate('javascript:alert(1)')).rejects.toMatchObject({ code: 'NAVIGATE_URL_REJECTED' });
+    expect(urls).toEqual([]);
   });
 });
 
 describe('导航在途竞态（9.2-08 / 10.2-01）', () => {
-  /** 造一块能脚本化 loadURL 与快照的本地视图；不发任何网络请求。 */
-  const viewWithLoad = (loadURL: (url: string) => Promise<void>): WebContents => {
-    const contents = fakeView(fakeFrame('http://127.0.0.1:10233/boss', { value: {} }));
-    contents.loadURL = loadURL;
-    contents.executeJavaScript = () =>
-      Promise.resolve({
-        title: '仿站搜索页',
-        url: 'http://127.0.0.1:10233/boss?query=frontend',
-        readyState: 'complete',
-        elementCount: 3,
-        textLength: 0,
-        bodyText: '',
-        headings: [],
-      });
-    return contents;
-  };
-
   it('第一次遇 (-3) loading：先等原导航落定，再重试一次并回完整快照', async () => {
     const calls: string[] = [];
     const contents = viewWithLoad((url) => {
@@ -225,14 +227,7 @@ describe('导航在途竞态（9.2-08 / 10.2-01）', () => {
         ? Promise.reject(new Error("UNKNOWN / (-3) loading 'http://127.0.0.1:10233/boss'"))
         : Promise.resolve();
     });
-    const { page, registry } = await boot(contents);
-    registry.platforms.push({
-      id: 'fixture',
-      displayName: '本地仿站',
-      startUrl: 'http://127.0.0.1:10233/boss',
-      origins: ['http://127.0.0.1:10233'],
-      capabilities: ['search'],
-    });
+    const { page } = await boot(contents);
     await expect(page.navigate('http://127.0.0.1:10233/boss?query=frontend')).resolves.toMatchObject({
       readyState: 'complete',
       url: 'http://127.0.0.1:10233/boss?query=frontend',
@@ -247,14 +242,7 @@ describe('导航在途竞态（9.2-08 / 10.2-01）', () => {
       calls.push(url);
       return Promise.reject(new Error('ERR_CONNECTION_REFUSED'));
     });
-    const { page, registry } = await boot(contents);
-    registry.platforms.push({
-      id: 'fixture',
-      displayName: '本地仿站',
-      startUrl: 'http://127.0.0.1:10233/boss',
-      origins: ['http://127.0.0.1:10233'],
-      capabilities: ['search'],
-    });
+    const { page } = await boot(contents);
     await expect(page.navigate('http://127.0.0.1:10233/boss?query=frontend')).rejects.toThrow('ERR_CONNECTION_REFUSED');
     expect(calls).toHaveLength(1);
   });
@@ -276,11 +264,11 @@ describe('agent 工具登记（spec 2.8-08）', () => {
     ]);
   });
 
-  it('从工具路径导航到未登记平台的源被许可判定拦下，一次也没碰到内核', async () => {
+  it('从工具路径传非 http(s) 协议仍被许可判定拦下，一次也没碰到内核', async () => {
     // 视图替身没有 `loadURL`：真走到内核那一步拿到的是 TypeError 而不是这个错误码，
     // 所以「码是 NAVIGATE_URL_REJECTED」这件事本身就证明了对话侧的字符串没能驱动内核。
     const { tools } = await boot(fakeView(null, []), {}, true);
-    await expect(tools?.call('browser.page.navigate', { url: 'https://example.com/jd' })).rejects.toMatchObject({
+    await expect(tools?.call('browser.page.navigate', { url: 'javascript:alert(1)' })).rejects.toMatchObject({
       code: 'NAVIGATE_URL_REJECTED',
       path: 'browser',
     });

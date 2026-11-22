@@ -11,12 +11,12 @@
  * 第二套同类基础设施（AGENTS.md §2.5）。所以本包只**取用** shell 交出来的视图句柄。
  *
  * 两条边界：
- * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（只允许已登记平台声明的源，且真源要签字）；
+ * 1. 导航目标是不可信输入，一律过 `resolveNavigableUrl`（2026-11-22 裁定后只剩协议红线：任意
+ *    http/https 可达，`javascript:`/`data:`/`file:` 仍拒）；
  * 2. 页面内容只在页面里读（注入脚本），主进程不解析 HTML 字符串，因此不引入第二套 DOM 实现。
  */
 import { Service, asApp, AppError, agentTool, registerAgentTools, toolResult, type Context } from '@auto-cc/core';
 import type { ExtractRequest, ExtractResultView, KernelPageSnapshotView, PageScrollReading } from '@auto-cc/shared';
-import type { SessionsService } from '@auto-cc/plugin-sessions';
 import type { NativeImage, WebContents } from 'electron';
 import { z } from 'zod';
 import {
@@ -37,16 +37,7 @@ import {
   toScrollReading,
   toSnapshotReading,
 } from './page-script.js';
-import { resolveNavigableUrl, withLoopbackSessionOrigins } from './navigate-policy.js';
-import type { PlatformRegistryService } from './platform-registry.js';
-
-/**
- * 本包对 `sessions` 的全部诉求：**这个平台有没有一份自动化风险确认**（导航许可的第二道闸门）。
- *
- * 与 `sessions` 用 `Pick` 收 `shell` 同一条路：把「跨包能做什么」在类型上收成有限集，
- * 想加能力就得先改这一行，改动就会被看见（AGENTS.md §4.1 的分层方向）。
- */
-type ConsentRegistry = Pick<SessionsService, 'hasConsent' | 'status'>;
+import { resolveNavigableUrl } from './navigate-policy.js';
 
 export const browserPageSchema = z.strictObject({
   /** 一次导航等待页面装载完成的上限（毫秒）；超时不报错，由快照读数如实反映 `readyState`。 */
@@ -94,7 +85,7 @@ export type PageScreenshotView = {
 export class BrowserPageService extends Service {
   static provide = 'browser.page';
   static Config = browserPageSchema;
-  static inject = ['shell', 'sessions', 'platform.registry'];
+  static inject = ['shell'];
 
   constructor(
     ctx: Context,
@@ -104,26 +95,15 @@ export class BrowserPageService extends Service {
   }
 
   /**
-   * 让内核视图导航到已登记平台内的新地址，并在装载结束（或超时）后回一份快照。
-   * @param url 目标地址（不可信输入）；协议必须 http/https，源必须出自该平台知识包的 `origins`，
-   *        且非回环源要求该平台已签过 `automation:<platform>` 风险确认
+   * 让内核视图导航到任意 http(s) 地址，并在装载结束（或超时）后回一份快照。
+   * @param url 目标地址（不可信输入）；只校验协议（http/https），不再要求出自平台名单——
+   *        内嵌视图就是一个真实浏览器（2026-11-22 用户裁定）
    * @returns 导航落定后的页面快照
-   * @throws 目标被许可判定拒绝时 `NAVIGATE_URL_REJECTED`；源已登记但没签字时 `CONSENT_REQUIRED`；
-   *         没有已挂载会话时 `NO_KERNEL_SESSION`
+   * @throws 协议不允许或地址解析失败时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
    */
   navigate = async (url: string): Promise<KernelPageSnapshotView> => {
     const contents = requireKernelContents(this.host, 'browser.page');
-    // 名单现问现取：登记处由平台包在自己的 init 里往里塞，缓存一份本地副本会在热改配置后变空表
-    // （AGENTS.md §9 的 2.5 实测条）。没挂登记处时拿到空名单，于是任何地址都进不去——宁可全拒。
-    let platforms = this.registry.list().platforms.map((platform) => ({ id: platform.id, origins: platform.origins }));
-    // 回环会话自己的源也并进来（2026-11-22 裁定）：地址栏显示着 127.0.0.1，就必须能刷新与手输。
-    // 只并回环源；非回环仍只来自知识包 + 签字。
-    const sessions = (await this.sessions.status()).platforms.map((row) => ({ id: row.id, startUrl: row.startUrl }));
-    platforms = withLoopbackSessionOrigins(platforms, sessions);
-    const consented = platforms
-      .filter((platform) => this.sessions.hasConsent(platform.id))
-      .map((platform) => platform.id);
-    const target = resolveNavigableUrl(url, platforms, consented);
+    const target = resolveNavigableUrl(url);
     let settled = settleLoad(contents, this.config.navigateTimeoutMs);
     let outcome: 'loaded' | 'failed' | 'timeout';
     try {
@@ -311,22 +291,6 @@ export class BrowserPageService extends Service {
   }
 
   /**
-   * 会话服务的签字面与平台清单（`ConsentRegistry`：问签字 + 读 startUrl 判回环，不碰分区）。
-   * @returns sessions 服务实例
-   */
-  private get sessions(): ConsentRegistry {
-    return asApp(this.ctx).sessions;
-  }
-
-  /**
-   * 平台登记处：导航许可名单的唯一来源（`meta.origins`，出自各平台的知识包）。
-   * @returns platform.registry 服务实例
-   */
-  private get registry(): Pick<PlatformRegistryService, 'list'> {
-    return asApp(this.ctx)['platform.registry'];
-  }
-
-  /**
    * 在页面里执行读取脚本并补上分区信息。
    * @param contents 目标视图句柄
    * @param maxChars 正文取回上限（字符），先钳到配置上限，避免一次调用要回整站内存
@@ -357,7 +321,7 @@ export class BrowserPageService extends Service {
       agentTool({
         id: 'browser.page.navigate',
         titleKey: 'agent.tool.labels.pageNavigate',
-        description: '让内嵌内核视图导航到已登记平台的同源地址，并回一份页面快照',
+        description: '让内嵌内核视图导航到指定地址（任意 http/https），并回一份页面快照',
         input: z.strictObject({ url: z.url() }),
         effect: 'read',
         requiresConfirmation: false,

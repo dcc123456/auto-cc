@@ -189,8 +189,8 @@ export class ShellService extends Service {
   /**
    * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
    *
-   * 与 `browser.page.navigate` 分开是刻意的：那条口只放行已登记平台声明的源（`NAVIGATE_URL_REJECTED`），
-   * 这个口是用户显式切到「任意网页」模式后才走的，**不过平台名单**——正因如此，进模式之后助手对它只读
+   * 与 `browser.page.navigate` 分开是刻意的：那条口在**既有会话视图**里翻页，这个口按 `persist:web`
+   * 重新挂一版视图（自 2026-11-22 裁定后导航口不再按平台名单拦地址，差别只剩分区）；进这个模式之后助手对它只读
    * （点击/定位/抓取/外发一律拒绝，见 `requireKernelContents` 的那道闸）。
    * @param url 目标地址；不是 http/https 时抛 `WEB_MODE_URL_REJECTED`（含 `javascript:` 与 `file:`）
    * @returns 换完之后的壳层状态（`kernelViewMode: 'web'`）

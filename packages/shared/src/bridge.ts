@@ -2784,8 +2784,9 @@ export interface BridgeSignatures {
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
   /**
    * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
-   * 与平台导航分开是这个口存在的前提：它**不**过 `resolveNavigableUrl` 的平台名单，
-   * 也正因为如此，进这个模式之后助手对它只读（`browser.act` / `locate` / `extract` / `page.navigate` 全拒）。
+   * 与平台导航分开是这个口存在的前提：它按 `persist:web` 重新挂一版视图，而平台导航在既有会话视图里翻页。
+   * 自 2026-11-22 裁定后 `browser.page.navigate` 已不按平台名单拦地址（只剩协议红线），本口的存在理由
+   * 只剩「独立分区」这一条；进这个模式之后助手对它只读（`browser.act` / `locate` / `extract` / `page.navigate` 全拒）。
    * @param url 目标地址；协议不是 http/https 时 `WEB_MODE_URL_REJECTED`
    * @returns 壳层状态（含 `kernelViewMode: 'web'`）
    */

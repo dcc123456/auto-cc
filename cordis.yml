@@ -195,10 +195,10 @@ plugins:
   # 页面操作入口（spec 2.1）：导航与快照，2.2 起在同一条注入通道上加点击/输入/定位。
   # 排在 sessions 之后：它不拥有分区，只在「会话已经打开」的那块视图上做事（未打开时结构化失败）。
   # 服务名是 `browser.page`（`域.能力` 约定），清单 id 用短名 `browser`——与 usage/entitlement 同一种关系。
-  # 自 P8 8.1-05 起还要 `platform.registry`：导航许可的名单来源从「sessions 那条 startUrl 的源」
-  # 换成「适配器知识包声明的 origins」，于是摘掉登记处 = 名单为空 = 任何地址都进不去（宁可全拒）。
+  # 导航许可自 2026-11-22 用户裁定后只剩协议一道（任意 http/https 可达），因此**不再**依赖
+  # `platform.registry`：名单与签字随「站点 / 任意网页」两分法一起退役，摘掉登记处也不会挡住翻页。
   - id: browser
-    dependsOn: [sessions, platform-registry]
+    dependsOn: [sessions]
     config:
       navigateTimeoutMs: 10000
       snapshotTextLimit: 4000

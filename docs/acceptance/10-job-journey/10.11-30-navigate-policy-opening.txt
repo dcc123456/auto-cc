@@ -1,0 +1,42 @@
+10.11-30 改造第 ② 步：导航策略放开（2026-11-22）
+
+背景：用户裁定撤掉「站点 / 任意网页」二分——内嵌的就是一个真实浏览器，记录登录态、不需要切模式。
+第 ① 步（单一分区 + 迁移 + 02/06 判据）已落 `964dbc3`；本步只做导航这一道，③④ 未动（管理员的顺序：
+注入负对照不过，后面都是沉没成本）。
+
+① `resolveNavigableUrl(rawUrl)` 只剩协议判定：http/https 放行，`javascript:` / `data:` / `file:` 一律
+   `NAVIGATE_URL_REJECTED`（details 里带被拒原文，界面照原文显示）。地址解析不了同样以这个码失败。
+② 平台名单退役：`withLoopbackSessionOrigins()`、`NavigablePlatform`、`isLoopbackHost()` 三个导出删除
+   （它们唯一的调用点就是导航口；留着就是两套判定并存）。`browser.page` 的 `inject` 从
+   `['shell', 'sessions', 'platform.registry']` 收成 `['shell']`，`ConsentRegistry` 类型与两个私有
+   getter 一并删掉；`cordis.yml` 的 `dependsOn: [sessions, platform-registry]` 改 `[sessions]`。
+   没有「回环特例」了：回环只是一个普通可导航源，不再需要豁免。
+③ `CONSENT_REQUIRED` 只留在外发面：导航口不再有第二道签字闸门。签字判定仍在 `jd-capture.ts:240` 的
+   `ensureConsent`（抓取）与 `outbound/{greet,deliver}`、`sessions.ensureConsent` 上，一个字都没改。
+   这是本步的**行为变化**：以前「未签字的真源连打开都不许」，现在能打开（读页面），但抓取/外发仍要先签字。
+④ 未登记来源上的动作边界**仍靠旧的那道 `requireKernelContents` 闸**（`kernelViewMode==='web'` → 只读），
+   那是 ④ 步要换掉的东西，本步刻意不碰——先让 QA 的注入负对照量出「只有分区合并、没有按来源确认」时
+   到底漏不漏，再决定 ③ 的具体形状。
+
+门禁（本机，`tmp/g11/` 下日志）：
+- `pnpm typecheck` → `TYPECHECK_EXIT=0`（`typecheck-s2.log`）
+- `pnpm lint` → `LINT_EXIT=0`（`lint-s2.log`）
+- `pnpm format:check` → `FORMAT_EXIT=0`（`format-s2.log`）
+- `pnpm test` → `TEST_EXIT=0`，**2791 例全过**（`test-s2.log`）；比第 ① 步少 8 例，是导航用例收窄：
+  `navigate-policy.test.ts` 从 13 例降到 5 例（跨源拒绝、签字、回环豁免三类随名单退役一起删），
+  `page-service.test.ts` 的许可用例由 2 例改为 2 例（「未登记来源照旧走到内核装载」+「`javascript:` 仍不碰内核」）。
+  浏览器包单跑 `322 passed (322)`。
+
+连带改的注释（都是「说了假话」的那种）：
+- `packages/browser/src/index.ts` 文件头第 1 条边界、`navigate()` 的 JSDoc、`browser.page.navigate` 的
+  agent 工具 description（原写「已登记平台的同源地址」）。
+- `packages/shared/src/bridge.ts` 的 `shell.openWebPage` 注释：原写「导航口只放行已登记平台的源」，
+  现在不成立，改成「差别只剩分区」。
+- `packages/shell/src/index.ts` 的 `openWebPage` 注释同上。
+- `packages/renderer/src/KernelAddressBar.tsx` 两处「平台名单与签字判据一字不动」。
+  （web 模式那套界面表面本身按计划留到 ④ 步退役，本步不改行为。）
+
+尚未做：③ 未登记来源写动作确认（`agent.pause`，读类允许、入库需确认、落库带 origin）；④ 退役 web 模式表面
+（`shell.openWebPage/closeWebPage`、`kernelViewMode`、`kernelViewPlatformHint`、`WEB_MODE_READ_ONLY`、地址栏模式标记）；
+⑤ 证据与 dated 判据重写（QA 的七条负对照另跑）。spec 2.1-03 / 2.1-04 里「只能去已登记平台声明的源」这句
+已与本步不符，归 PM 的文档改写，开发不在本提交里动 spec/plan。
