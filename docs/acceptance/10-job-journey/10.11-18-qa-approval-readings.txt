@@ -59,3 +59,102 @@ sessions.grantConsent('fixture') -> { acknowledgedAt:1795316869392 }   ← 只�
 - 半自动：**逐步批准成立**（两步两张卡、确认前账本 0）；无人表态按 `PAUSE_TIMEOUT` 拒绝、账本 0。
 - 越权 9999：**未取到**目标级拒绝码（被渠道缺失挡在前面），留下一轮补；本轮零外发。
 - `/tool` 不属计划卡射程（PMO 裁定），本轮 `/tool` 读数只用于验证闸门，不计入 18 的卡判据。
+
+## 越权 `9999` 第二轮：两条路都被更早的一层挡住（结构结论）
+
+PMO 裁定「用 fixture 平台跑 9999（回环免签字）」。按此再取一次：
+
+```
+sessions.grantConsent('fixture') -> { granted:true, acknowledgedAt:1795316983163 }   （只对本地 fixture 签字）
+sessions.open('fixture')        -> 打开成功；shell.getStatus().kernelViewUrl = "http://127.0.0.1:10233/"
+browser.page.navigate(...)      -> NAVIGATE_URL_REJECTED（平台模式的名单只有 https://www.zhipin.com；
+                                   fixture 的视图是 sessions.open 按 startUrl 自己开的，不走这条导航口）
+/tool outbound.greet.perform {request:{platform:"fixture", jobId:"9999"}}
+  -> TOOL_FAILED：平台 fixture 现在没有可用的打招呼渠道           ← OUTBOUND_CHANNEL_MISSING
+  -> ledger 0 -> 0
+```
+
+**为什么 fixture 上永远走不到目标越权判定**：打招呼渠道来自 `platform.registry.greetChannel`（`packages/browser/src/platform-registry.ts:95`），
+它要求该平台**登记过适配器且声明 `chat` 能力**；而本仓只有一处登记——`packages/platform-boss/src/index.ts:125`
+`this.registry.register(createBossAdapter(...))`，即**只有 `boss` 有适配器，`fixture` 没有**。
+`packages/outbound/src/greet.ts:256` 先取渠道、取不到就抛 `OUTBOUND_CHANNEL_MISSING`，这一步排在额度/目标校验之前。
+
+换 `boss` 平台再试一次（适配器存在，但未签真实风险确认，我不签）：
+
+```
+sessions.consentStatus('boss') -> { granted:false, acknowledgedAt:null }
+/tool outbound.greet.perform {request:{platform:"boss", jobId:"9999", …}}
+  -> TOOL_FAILED：平台 boss 还没有一份自动化风险确认记录，先确认承担该风险   ← CONSENT_REQUIRED
+  -> ledger 0 -> 0
+```
+
+**结论：这一格在当前实现下取不到活体。**
+
+- 走 `fixture` → 没有适配器 → `OUTBOUND_CHANNEL_MISSING`（目标校验在它后面）；
+- 走 `boss` → 需要真实平台的风险确认签字 → 按红线我不签（签了才是真问题）。
+
+要取到 `OUTBOUND_TARGET_NOT_AUTHORIZED`，只有两条路，都要人裁：
+1. **给 fixture 登记一个 `chat` 能力的适配器**（回环站点用）——这是产品改动，也会顺带解锁「自动打招呼」在本地仿站上的活体验收；当前自动化 greet 只能靠单测替身，这也是本轮撞墙的根因。
+2. 接受这一格只用**单元/替身层**证据（`outbound.greet` / `entitlement.gate` 的目标越权用例），并在 spec 里写明「活体取不到的原因」。
+
+本轮账本前后均为 0，无越权外发发生。
+
+## 越权 `9999` 的第三条路：能活体取到 `OUTBOUND_TARGET_NOT_AUTHORIZED` 的真实入口是 unattended
+
+读代码（`packages/outbound/src/greet.ts`，`6c40038`）：
+
+- `perform` 里那个授权校验是 `if (parsed.data.unattended === true) { authorization.authorize(...) }`（237–249 行），
+  而且**它已经排在 consent 与 channel 之前**；手动路径（`/tool`、界面按钮）**根本不带 `unattended`**，从不走这一段。
+- agent 工具那条路也是 `run: async ({ request }) => this.perform(request)`（约 485 行），没有 `unattended`。
+- 所以「把 gate 挪到渠道前面」**不会改变手动 `/tool … 9999` 的读数**：fixture 仍 `OUTBOUND_CHANNEL_MISSING`、boss 仍 `CONSENT_REQUIRED`；
+  这条顺序改动真正影响的是手动路径里 **额度/去重（`gate.enforce` / `assertOutboundFresh`）与 consent/channel 的先后**。
+
+**能活体取到该错误码的入口是无人值守执行器**（它自己带 `unattended: true`）。实测（同隔离副本，CDP 10414，seeded 授权单 `fixture/1001,1002`）：
+
+```
+authorization.reconfirm()        -> status active, platform fixture, targets [1001,1002]
+journey.unattended.start({docId:"qa1", platform:"boss"})   ← 平台在授权单范围之外
+  -> 起跑视图 { status:"paused", pending:[1001,1002] }
+  -> view 2.5s 后 { status:"paused", lastError:"授权单不覆盖平台 boss", failed:[] }
+  -> usage.ledger.summary(5).total  0 -> 0
+```
+
+即 `OUTBOUND_TARGET_NOT_AUTHORIZED`（`unattended.ts` 的 `authorization.platform !== platform` 分支）**可活体取到**，且账本前后 0。
+
+**目标维度（jobId `9999`）为什么活体取不到**：执行器的待办列表 `pendingOf` 永远来自授权单自己的 `targets`，
+它不可能去推一个授权单里没有的岗位；`OUTBOUND_TARGET_NOT_AUTHORIZED` 的 target 分支只能由「带 `unattended:true` 却给出授权外目标」的调用触发，
+而当前**没有任何入口**会这么调（工具与界面都不带那个标志）。它是一道防御性余量，只有单测/替身能覆盖。
+
+**给 PMO 的两条可判口径**（二选一或都收）：
+1. **平台范围越权**：`unattended.start(platform 不在授权单内)` → `paused` + `lastError:"授权单不覆盖平台 boss"` + 账本 0 —— 本文件已取到，可作 18「越权外发 0」的活体判据；
+2. **目标范围越权**：保留为单测层证据，并在 spec 写明「执行器只按授权单 targets 推进，目标分支无活体入口」的原因，不把它当成活体缺项。
+
+## 结论收口（PMO 2026-11-22 回退裁定后）
+
+### 越权判据改为「平台范围」活体 + 「目标范围」结构说明
+
+**① 平台范围（活体，已取）**：seeded 授权单 `fixture/1001,1002` → `reconfirm` 到 `active` →
+`journey.unattended.start({docId:"qa1", platform:"boss"})`（平台在授权单之外）
+
+```
+起跑视图 { status:"paused", pending:["1001","1002"] }
+2.5s 后 view { status:"paused", lastError:"授权单不覆盖平台 boss", failed:[] }
+usage.ledger.summary(5).total  0 -> 0
+```
+
+代码路径：`packages/journey/src/unattended.ts:411`（`authorization.platform !== platform` → `OUTBOUND_TARGET_NOT_AUTHORIZED`）。
+**这条路径与回退无关**：`git diff --stat 7307462..c188d9c -- packages/journey/src/unattended.ts` → **空**（该文件两笔之间一字未改），
+回退只动 `packages/outbound/src/*` 的手动路径校验，所以上面的读数对回退后的构建同样成立。
+
+**② 目标范围（结构上无活体入口，单测覆盖）**：
+
+- 全仓把 `unattended` 置真的调用点只有两处，都在执行器里：`packages/journey/src/unattended.ts:319`（打招呼）与 `:336`（投递）。
+- `packages/outbound/src/greet.ts` 里那段授权校验只在 `if (parsed.data.unattended === true)` 时执行（237–249 行；回退后该处的注释写明「越权判定仍然只在无人值守那一条入口上」）。
+- 执行器的待办来自授权单自己的 `targets`：`unattended.ts:217` / `:260` 的 `pendingOf(...)`，它不可能生成授权单之外的目标。
+- 因此「带 `unattended:true` 却给出授权外目标」这个调用**没有任何入口能写出来**——目标分支是一道防御性余量，只能由单测/替身覆盖。
+
+**③ 手动路径的 9999 不再作为判据**：2026-11-20 裁定「手动模式保持四元组 + 现场审批、不受后台规则改写」。
+回退后的手动路径读数回到：`fixture` → `OUTBOUND_CHANNEL_MISSING`、`boss` → `CONSENT_REQUIRED`（这两条在 `7307462` 上已实测，见本文件前文），
+它们不是「越权被拒」，因为手动调用本来就不受授权单约束。
+
+**由此 18 的判据**：半自动逐步批准（两步两张卡、确认前账本 0、无人表态按 `PAUSE_TIMEOUT` 拒）+ 平台范围越权活体（上面①）+ 目标范围结构说明（②）。

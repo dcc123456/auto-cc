@@ -1065,7 +1065,7 @@ interface JourneyContext {
 
 **L. 越权判定先于渠道判定（PMO 2026-11-22 裁定，行为变更）**：`greet.perform` 原先先取渠道、取不到就抛，导致「没渠道」盖过「无权」——fixture 上 `9999` 只能得到 `OUTBOUND_CHANNEL_MISSING`。改为**先过 `entitlement.gate`（授权单 / 额度 / 目标 / 版本 / 四元组去重），再取渠道**：越权判定必须先于传输可用性，否则「越权外发为 0」在缺渠道时无法被证明；真站也会先报无权再报其他原因。不为此给 fixture 造第二个适配器（第二套平台集成）。验收：`sessions.open('fixture')` 后 `9999` 须回 `OUTBOUND_TARGET_NOT_AUTHORIZED`、账本前后 0；取到后 18 才可判 `[x]`。
 
-**K. 16/17 判绿、18 留一格（2026-11-22）**：`10.11-16` 与 `10.11-17` 按 **QA 独立复跑**判 `[x]`（引 `10.11-16-qa-router-readings.txt`、`10.11-17-qa-redline-readings.txt`），不是开发自证；`10.11-18` 仍 `[!]`——半自动两张确认卡与 `PAUSE_TIMEOUT` 负对照已成立，只差越权 `9999`：要先 `sessions.open('fixture')` 登记渠道，再读到 `OUTBOUND_TARGET_NOT_AUTHORIZED` 而非渠道缺失，账本前后 0。
+**K. 16/17 判绿、18 留一格（2026-11-22）**：`10.11-16` 与 `10.11-17` 按 **QA 独立复跑**判 `[x]`（引 `10.11-16-qa-router-readings.txt`、`10.11-17-qa-redline-readings.txt`），不是开发自证；`10.11-18` 同日稍后按 QA 的**平台范围活体**（执行器带 `unattended:true` 跑授权外平台 → `lastError=授权单不覆盖平台 boss`、账本 0→0）与**目标范围结构说明**（无活体入口、单测覆盖）判 `[x]`；手动路径的 `9999` 不作为判据（见 M 的回退裁定）。
 
 **J. 实例隔离口径（2026-11-22，QA/开发撞端口事故后定）**：端口分段、`tmp/ports/<port>.owner`、被占换号不抢、跑前 `SELECT COUNT(*)` 跑后复读同一库文件这五条，已按 PMO 裁定登记进 **`AGENTS.md` §9**（2026-11-22 那条），本片只留指向，不再复述。
 
