@@ -357,6 +357,17 @@
         "needs": "需要你：{{count}} 件",
         "running": "助手在跑",
         "blocked": "被风控拦下"
+      },
+      "notice": {
+        "summary": "今天已用 {{used}}/{{limit}} 笔额度，投递成功 {{delivered}} 笔，最近一笔 {{lastSend}}。",
+        "explain": "这件事我按库里能查到的说：命中 {{hits}} 条库记录；当前岗位 {{jobId}}（{{state}}）。没命中的部分我不会编。",
+        "plan_drafted": "已起草一轮计划（{{steps}} 步）。它不会自己跑——确认后才执行，越权的那一类会被闸门拦住。",
+        "act_need_tool": "听懂了，但执行要先知道用哪只工具。你可以直接说 /tool <工具id>，或者到对应工作台按按钮。",
+        "reminder": "要你处理的：待表态 {{pauses}} 件、执行器 {{runStatus}}（待办 {{pending}} 岗）、授权单 {{authorization}}。",
+        "route_unknown": "没听懂这句。你可以这样说：「今天投了几份」「带我去看追踪」「准备一轮投递」「有什么要处理的」。",
+        "route_refused": "听懂了，但不允许：{{code}}。",
+        "navigateButton": "去{{page}}",
+        "navigatePrompt": "助手带你去{{page}}"
       }
     },
     "desk": {

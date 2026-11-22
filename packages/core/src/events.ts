@@ -1241,7 +1241,30 @@ export type ChatToolPart = {
 };
 
 /** 消息内容的一段：文本或工具卡片，顺序即渲染顺序。 */
-export type ChatPart = ChatTextPart | ChatToolPart;
+/**
+ * 一条消息里的「回执」片段（spec 10.11-16 / 2026-11-22 路由裁定）：只带**文案 key 与参数**，
+ * 由渲染层走 i18n 渲染——主进程不写界面文案（§5.5）。
+ * `code` 是固定的几种：`summary` / `explain` / `plan_drafted` / `act_need_tool` / `reminder` /
+ * `route_unknown` / `route_refused`。
+ */
+export type ChatNoticePart = {
+  kind: 'notice';
+  code: string;
+  /** 插值参数（数字与名字）；渲染层按自己的语言包组句。 */
+  params?: Record<string, string | number>;
+};
+
+/**
+ * 一条消息里的「跳转」片段：落点页 + 面包屑标题 key。
+ * 点了才跳（走渲染层既有 `advanceViewTrail`），消息本身不产生导航副作用。
+ */
+export type ChatNavigatePart = {
+  kind: 'navigate';
+  /** 七个工作台之一（与左轨同一套 key）。 */
+  view: string;
+};
+
+export type ChatPart = ChatTextPart | ChatToolPart | ChatNoticePart | ChatNavigatePart;
 
 /** 一条已落库（或正在流式追加）的消息（spec 1.11-02 / 03 / 06 / 08）。 */
 export type ChatMessageView = {

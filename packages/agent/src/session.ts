@@ -44,6 +44,9 @@ import type { StoreService } from '@auto-cc/plugin-store';
  */
 import { QUOTA_ACTIONS, type GateDecisionView, type QuotaAction, type UsageSummaryView } from '@auto-cc/shared';
 import { randomUUID } from 'node:crypto';
+import { routeIntent } from './router.js';
+import { buildRouteMessages } from './prompts.js';
+import { runRoute, type RoutePorts } from './route-handlers.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -994,6 +997,12 @@ export class ChatSessionService extends Service {
    */
   private async pump(message: ChatMessageView, userText: string, rawText: string): Promise<void> {
     const controller = this.controller;
+    // 意图路由（spec 10.11-16）：把一句话分到六类之一，六类里五类在这里出回执；
+    // `act` 不吃这一路，仍走下面既有的 `/tool` 解析器（注册表 + 审批门禁）。
+    if (!userText.startsWith(TOOL_DEMO_PREFIX) && (await this.routeUserText(message, userText))) {
+      this.finalize(message);
+      return;
+    }
     const reply = this.fakeReplyFor(userText);
     for (let cursor = 0; cursor < reply.length; cursor += this.config.chunkChars) {
       const piece = reply.slice(cursor, cursor + this.config.chunkChars);
@@ -1084,6 +1093,134 @@ export class ChatSessionService extends Service {
     // 仍然会依次发出去：那是人明确打出来并确认排上的话，替他扔掉比多等几秒贵得多。
     this.drainPending();
     return { ...message, isStreaming: false };
+  }
+
+  /**
+   * 意图路由的执行侧（spec 10.11-16 / 2026-11-22 裁定）：分类 → 跑处理器 → 把回执片段挂到这条消息上。
+   *
+   * 边界：这里只**读**既有服务与起草计划；执行类（act）不在这里发生——它走既有 `/tool` 那条路。
+   * 分类失败与「听懂了但不允许」是两种回执：前者 `route_unknown`，后者 `route_refused` 并**透出原始错误码**。
+   * @param message 正在生成的那条助手消息
+   * @param userText 用户原文（已去空）
+   * @returns 是否已经由路由处理（true = 不再走本地骨架回复）
+   */
+  private async routeUserText(message: ChatMessageView, userText: string): Promise<boolean> {
+    const llm = maybeService<{
+      complete: (request: {
+        messages: { role: 'system' | 'user'; content: string }[];
+        maxTokens?: number | null;
+        temperature?: number | null;
+        timeoutMs?: number | null;
+      }) => Promise<{ text: string }>;
+    }>(this.ctx, 'llm.chat');
+    const model = llm
+      ? {
+          complete: async (_systemPrompt: string, userText: string, timeoutMs: number): Promise<string> =>
+            (
+              await llm.complete({
+                // 消息字面量只在注册表里造（spec 4.6-09），这里只把用户原话递进去。
+                messages: buildRouteMessages(userText),
+                maxTokens: 120,
+                temperature: 0,
+                timeoutMs,
+              })
+            ).text,
+        }
+      : undefined;
+    const { reading } = await routeIntent(userText, model);
+    // 分类不出来就走原来的本地骨架回复（那段文本本身就是「没听懂」的口径，也保住既有流式行为）；
+    // 只有**分类成功**的那几类才由路由出回执。
+    if (reading.intent === 'unknown') return false;
+    try {
+      const parts = await runRoute(reading, userText, this.routePorts());
+      if (parts === null) {
+        // act：不在这里执行。说清「要用哪个工具」，把动作交回 `/tool` 那条有审批的路。
+        message.parts.push({ kind: 'notice', code: 'act_need_tool' });
+        this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: false });
+        return true;
+      }
+      message.parts.push(...parts);
+      this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: false });
+      return true;
+    } catch (error) {
+      // 「听懂了，但不允许」：原始错误码原样透出，不二次包装成一句话（裁定①）。
+      const code = error instanceof AppError ? error.code : 'ROUTE_FAILED';
+      message.parts.push({ kind: 'notice', code: 'route_refused', params: { code } });
+      this.ctx.emit('chat/delta', { sessionId: message.sessionId, messageId: message.id, text: '', done: false });
+      return true;
+    }
+  }
+
+  /**
+   * 把既有服务接成处理器要的读端口（缺哪只就按「读不到」收口，不猜）。
+   * @returns 六个处理器共用的只读端口
+   */
+  private routePorts(): RoutePorts {
+    const funnel = maybeService<{
+      query: (range: { fromMs: number; toMs: number }) => {
+        quota: { actions: { action: string; usedToday: number; dailyLimit: number | null }[] };
+        levels: { level: string; count: number | null }[];
+      };
+    }>(this.ctx, 'funnel');
+    const ledger = maybeService<{ summary: (recentLimit?: number) => { total: number; recent: { ts: number }[] } }>(
+      this.ctx,
+      'usage.ledger',
+    );
+    const kb = maybeService<{ search: (query: string) => { rows?: unknown[]; hits?: unknown[] } }>(
+      this.ctx,
+      'kb.profile',
+    );
+    const pause = maybeService<{ pending: () => unknown[] }>(this.ctx, 'agent.pause');
+    const unattended = maybeService<{ view: () => { status: string; pending: string[] } }>(
+      this.ctx,
+      'journey.unattended',
+    );
+    const authorization = maybeService<{ current: () => { status: string } | null }>(
+      this.ctx,
+      'outbound.authorization',
+    );
+    const loop = maybeService<{ propose: (goal: string) => { runId: string; plan: unknown[] } }>(
+      this.ctx,
+      'agent.loop',
+    );
+    // 六个口都是「现读既有服务」：服务可能没挂（返回 null），此时按读不到收口，不猜。
+    return {
+      funnelQuery: () => {
+        if (!funnel) return Promise.resolve({ quota: { used: 0, limit: null }, delivered: 0 });
+        const now = Date.now();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const view = funnel.query({ fromMs: start.getTime(), toMs: now });
+        const deliver = view.quota.actions.find((row) => row.action === 'deliver');
+        return Promise.resolve({
+          quota: { used: deliver?.usedToday ?? 0, limit: deliver?.dailyLimit ?? null },
+          delivered: view.levels.find((row) => row.level === 'deliver')?.count ?? 0,
+        });
+      },
+      ledgerSummary: () => {
+        if (!ledger) return Promise.resolve({ total: 0, lastSendAt: null });
+        const view = ledger.summary(5);
+        return Promise.resolve({ total: view.total, lastSendAt: view.recent[0]?.ts ?? null });
+      },
+      kbSearch: (query: string) => {
+        if (!kb) return Promise.resolve({ hits: 0 });
+        const result = kb.search(query);
+        return Promise.resolve({ hits: result.rows?.length ?? result.hits?.length ?? 0 });
+      },
+      trackingCurrent: () => Promise.resolve({ jobId: null, state: null }),
+      pausePending: () => Promise.resolve(pause ? pause.pending().length : 0),
+      unattendedView: () => {
+        if (!unattended) return Promise.resolve({ status: 'idle', pending: 0 });
+        const view = unattended.view();
+        return Promise.resolve({ status: view.status, pending: view.pending.length });
+      },
+      authorizationCurrent: () => Promise.resolve(authorization ? authorization.current() : null),
+      propose: (goal: string) => {
+        if (!loop) return Promise.reject(new AppError('AGENT_PLANNER_UNAVAILABLE', '计划器未挂载', 'chat.session'));
+        const run = loop.propose(goal);
+        return Promise.resolve({ runId: run.runId, steps: run.plan.length });
+      },
+    };
   }
 
   /**

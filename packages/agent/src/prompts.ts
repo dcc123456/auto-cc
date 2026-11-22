@@ -84,3 +84,37 @@ export function buildObservationMessages(
     { role: 'user', content: input },
   ];
 }
+
+/** 一条待发给模型的消息（与 `llm.chat` 的 `messages` 同形）。 */
+export type PromptMessage = { readonly role: 'system' | 'user'; readonly content: string };
+
+/** 意图路由的提示词版本（spec 4.6-09：版本常量与提示词同处一份注册表）。 */
+export const ROUTE_PROMPT_VERSION = 'agent-route-v1';
+
+/**
+ * 意图路由的分类提示词：只讲六类定义与输出格式，不带任何业务规则。
+ * 放在注册表里而不是 router.ts：发给模型的字面量只允许有这一个落点（spec 4.6-09）。
+ */
+export const ROUTE_PROMPT = [
+  '你是意图分类器。把用户这一句分到下列之一，只输出 JSON，不要解释：',
+  'explain（解释岗位/简历为什么匹配、为什么是这个结果）',
+  'navigate（要求跳到某个工作台）',
+  'summary（问今天投了几份、还剩多少额度、进度统计）',
+  'draft_plan（要求起草一轮投递计划）',
+  'act（要求立刻执行某个动作，如打招呼、投递）',
+  'reminder（问有什么需要自己处理的、有没有卡住/暂停）',
+  'unknown（都不是）',
+  'JSON 形状：{"intent":"...","confidence":0到1,"target":{"view":"chat|jobs|resume|workflow|models|trust|diagnostics"|省略,"subject":"..."|省略}}',
+].join('\n');
+
+/**
+ * 拼「分类这一趟」的消息序列（system 是上面的分类提示词，user 是用户原话）。
+ * @param userText 用户原话（已去空）
+ * @returns system + user 两条消息（与 `llm.chat` 的 messages 同形）
+ */
+export function buildRouteMessages(userText: string): PromptMessage[] {
+  return [
+    { role: 'system', content: ROUTE_PROMPT },
+    { role: 'user', content: userText },
+  ];
+}

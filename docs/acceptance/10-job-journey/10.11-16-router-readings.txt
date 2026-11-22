@@ -1,0 +1,26 @@
+10.11-16 六类职责的意图路由读数（干净 userData · dist 构建 · 无模型通道 → 关键词回落）
+
+背景：本轮先取到的坏消息是「chat 是 P1 确定性骨架，六类里五类没有通道」（见上一轮报告）。
+按 2026-11-22 裁定补了路由：只分类、六个处理器只读既有口、执行类交回既有 `/tool`。
+
+命令：`node tmp/g11/batch/pr16.mjs`（关键词回落路径，未配置模型）
+
+① summary（只读汇总）：「今天投了几份」→ `data-part-kind="notice" data-notice-code="summary"`，
+   文案「今天已用 0/10 笔额度，投递成功 0 笔，最近一笔 —。」——三个数与 `funnel.query` 的 deliver 额度、
+   漏斗 deliver 计数、`usage.ledger.summary` 的最近一笔逐项一致（同一轮读数为 0/10、0、—）。
+② navigate（跳转）：「带我去看追踪与统计」→ `data-part-kind="navigate" data-nav-view="trust"`，
+   按钮「去运行记录」；点它 → `view-tabs` 当前项变成「运行记录」（走既有 `advanceViewTrail`，消息本身不导航）。
+③ act（执行既有动作）：「帮我打招呼」→ `data-notice-code="act_need_tool"`：
+   「听懂了，但执行要先知道用哪只工具。你可以直接说 /tool <工具id>…」——**没有执行任何东西**，
+   同一轮 `usage.ledger.summary(5).total` 前后都是 **0**；`act` 处理器返回 null，走的是既有 `/tool` 那条带审批的路。
+④ unknown（没听懂）：「今天天气怎么样」→ 不产 notice，回落到原有的本地骨架文本
+   ——与 ③ 的「听懂了但不允许」是两种回执，不会混成一句。
+⑤ 分类器与处理器的判据在单测里：`packages/agent/src/router.test.ts`（六类各一条 + 四条负对照：
+   无关话题 unknown、模型抛错回落、模型低置信/乱回回落、模型高置信按模型走）；
+   `packages/agent/src/route-handlers.test.ts`（每类各调哪个口、act 不执行、处理器拒绝时原样抛错）。
+⑥ 路由层零外发的机检：`scripts/check-router-no-outbound.ts`（已进 `pnpm lint` 链）——
+   `router.ts` / `route-handlers.ts` 不许出现 `outbound.greet`/`outbound.deliver`、不许 import 外发包、
+   不许出现 `confirm`；授权单只许**读**（`authorization.current` 供值守提醒用），写口 `grant/revoke/reconfirm` 也拦。
+
+**未取到的活体**：explain（解释）、draft_plan（起草计划）、reminder（值守提醒）三类的活体回执要造出
+「库里有实体 / 能起草 / 有暂停与待办」的前置，本轮只验到分类与处理器单测层面；下一轮补。

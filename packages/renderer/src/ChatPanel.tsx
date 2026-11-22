@@ -59,7 +59,7 @@ import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
 import { useWorkflowRun } from './useWorkflowRun';
-import { advanceViewTrail } from './viewTrail';
+import { advanceViewTrail, type TopView } from './viewTrail';
 
 /**
  * 自治档位的三个入口。
@@ -239,6 +239,7 @@ function MessageActions({ message }: { message: ChatMessageView }) {
  * @returns 消息流里的一格
  */
 function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, ToolDescriptorView> }) {
+  const { t } = useTranslation();
   const isUser = turn.role === 'user';
   return (
     <li data-turn-role={turn.role} className="flex flex-col gap-2 py-2.5">
@@ -269,8 +270,39 @@ function MessageTurn({ turn, toolMetas }: { turn: Turn; toolMetas: Map<string, T
                   <MarkdownBody text={part.text} />
                 </div>
               )
-            ) : (
+            ) : part.kind === 'tool' ? (
               <ToolCard key={`${message.id}-tool-${String(index)}`} part={part} meta={toolMetas.get(part.toolId)} />
+            ) : part.kind === 'notice' ? (
+              // 路由回执：主进程只给 key 与参数，句子由这里按语言包组（§5.5：主进程不写界面文案）。
+              <p
+                key={`${message.id}-notice-${String(index)}`}
+                className="rounded-md border border-line bg-ink-900/60 px-3 py-2 text-[12px] leading-relaxed text-slate-300"
+                data-part-kind="notice"
+                data-notice-code={part.code}
+              >
+                {t(`assistant.notice.${part.code}`, part.params ?? {})}
+              </p>
+            ) : (
+              // 跳转回执：**点才跳**，消息本身不产生导航副作用（走既有 viewTrail）。
+              <DeskButton
+                key={`${message.id}-nav-${String(index)}`}
+                action="chat-navigate"
+                variant="line"
+                compact
+                data-part-kind="navigate"
+                data-nav-view={part.view}
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: part.view as TopView,
+                    targetTitle: t(`desk.${part.view}.title`),
+                    targetDetail: t(`assistant.notice.navigatePrompt`, { page: t(`desk.${part.view}.title`) }),
+                  })
+                }
+              >
+                {t('assistant.notice.navigateButton', { page: t(`desk.${part.view}.title`) })}
+              </DeskButton>
             ),
           )}
           {!isUser && message.createdAt > 0 ? <MessageActions message={message} /> : null}
