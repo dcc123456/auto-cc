@@ -194,8 +194,9 @@ async function settled(executor: JourneyUnattendedService, timeoutMs = 3_000): P
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const state = executor.view(NOW).status;
-    if (state !== 'running') return state;
-    if (Date.now() > deadline) throw new Error('执行器一直停在 running');
+    // `stopping` 也是「还在收尾」：它不是终态，要一直等到 stopped/done/… 才算落定。
+    if (state !== 'running' && state !== 'stopping') return state;
+    if (Date.now() > deadline) throw new Error(`执行器一直停在 ${state}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -245,6 +246,17 @@ describe('无人值守执行器（10.6 / plan §12.2）', () => {
     expect(greet.calls).toEqual(['job-1']);
     expect(deliver.calls).toEqual([]);
     expect(executor.view(NOW).completed).toEqual([]);
+  });
+
+  it('按停止后状态立刻落到 stopping（不许还是 running），循环收尾再落 stopped', async () => {
+    const { executor } = await boot();
+    executor.start({ docId: DOC_ID, nowMs: NOW });
+    // 起跑后立刻按停止：界面拿到的第一份读数就必须是 stopping，不能是 running
+    expect(executor.stop(NOW + 1).status).toBe('stopping');
+    // 再按一次也不许把状态改回 running
+    expect(executor.stop(NOW + 2).status).toBe('stopping');
+    // 循环在下一个检查点退出，终态仍是 stopped（finish 允许从 stopping 收尾）
+    expect(await settled(executor)).toBe('stopped');
   });
 
   it('风控暂停：授权单转 paused 后整轮停手，终态 paused', async () => {

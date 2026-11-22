@@ -26,3 +26,20 @@
 
 证据图：`10.11-11-badge-needs.png`（md5 96352966…）、`10.11-11-badge-running.png`（f9752a7c…）、
 `10.11-11-badge-blocked.png`（54b4e565…），三张互异。
+
+⑧ 裁定 A（2026-11-22，QA 报的语义误报）：`needsYou` 里的「执行器待办」只在**真的在等人**时计入——
+   `paused` / `stopped` / `blocked`，或授权单 `restart-required`；`idle` 时有授权单不算、`running` 时也不算
+   （那是「未完成岗位数」，不是「需要你」）。
+   - 实现：纯函数 `executorNeedsYou`（`assistantStatus.ts`）+ 三例单测（idle/running 不算、三态都算、
+     restart-required 一律算）；面板按执行器状态与授权单状态各读一次既有口（`journey.unattended.view` /
+     `outbound.authorization.current`），不新开通道。
+   - 判定权仍在 QA 的活体上：QA 那份 seeded 授权单读数（idle 时 `needs:2`）在本轮改动后应当**不再亮**；
+     这一条要 QA 复跑确认，我不拿单测当活体。
+
+⑨ 裁定 B（2026-11-22，QA 报的停止状态滞后）：`stop()` 立刻把状态落到 `stopping`（不是 `running`），
+   循环在下一个检查点收尾时再落 `stopped`；`finish` 允许从 `stopping` 收尾，`start` 在 `running|stopping` 下都拒绝
+   （防止旧循环还在睡眠里时就开第二轮、把完成/失败记到新账上）。
+   - 单测：`packages/journey/src/unattended.test.ts` 新增一例——起跑后立刻 `stop()` 读到 `stopping`、
+     再按一次仍是 `stopping`、最终 `stopped`。
+   - 界面上执行器状态改走语言包（`home.runState.*`，含「正在停止」），不再把英文枚举甩到页面上。
+   - 活体 ≤1s 读数由 QA 用 seeded 授权单复跑；本轮我没造那条链。

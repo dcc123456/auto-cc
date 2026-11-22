@@ -30,3 +30,16 @@
 补了「模式变化后 1.2s 再读一次」，并在 `shell/kernel-view-url` 事件里统一走 `read()`（地址与模式同一份读数）。
 
 证据图：`10.11-30-web-mode.png`。
+
+⑤ 裁定 (a)：web 模式里落在**平台域名**上——不自动切模式，只给一条可点的提示（`node tmp/g11/batch/pweb2.mjs`）。
+   - 读数：`kernelViewMode=web`、`kernelViewPlatformHint=http://127.0.0.1:10233/alt`；
+     地址栏出现 `[data-testid="kernel-web-platform-hint"]`：
+     「这条地址在 127.0.0.1:10233 的平台上：助手在这里同样只读」+「回到平台模式」键（`kernel-web-switch-platform`），
+     模式标记仍是「任意网页（助手只读）」——**没有自己切**。
+   - 点那颗键之后：`kernelViewMode=platform`、`kernelViewPartition=persist:fixture`、
+     `kernelViewUrl=http://127.0.0.1:10233/alt`（先回平台分区、再走平台名单导航），提示条消失（`hint=null`）。
+⑥ 裁定 (b)：web 模式里页面自己调 `window.open`——继续 deny，但要看得见原因。
+   - 在 web 模式的 `/newtab` 页里执行 `window.open('https://example.com/x','_blank')` →
+     出现 toast：`{ data-action:'web-popup-blocked', data-toast:'seal',
+       文案:'外链被拦截：example.com（任意网页模式下不新开窗口）' }`；窗口没有被打开。
+   - 证据图：`10.11-30-web-popup-and-hint.png`。

@@ -331,7 +331,18 @@
       },
       "trendNone": "— 这段时间还没有成功外发",
       "trendNoneGo": "去搜岗位",
-      "timedOut": "这一块 {{seconds}} 秒没有回音：读取超时，可以重试"
+      "timedOut": "这一块 {{seconds}} 秒没有回音：读取超时，可以重试",
+      "runState": {
+        "idle": "空闲",
+        "running": "运行中",
+        "stopping": "正在停止",
+        "paused": "已暂停",
+        "stopped": "已停止",
+        "blocked": "被额度拦住",
+        "failed": "失败",
+        "done": "已完成",
+        "unknown": "还没读到"
+      }
     },
     "assistant": {
       "capsule": "助手",
@@ -478,7 +489,10 @@
         "marker": "任意网页（助手只读）",
         "back": "回到平台",
         "enter": "任意网页",
-        "reasonEmpty": "先填网址"
+        "reasonEmpty": "先填网址",
+        "platformHint": "这条地址在 {{host}} 的平台上：助手在这里同样只读",
+        "switchPlatform": "回到平台模式",
+        "popupBlocked": "外链被拦截：{{host}}（任意网页模式下不新开窗口）"
       }
     },
     "session": {

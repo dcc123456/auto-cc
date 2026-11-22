@@ -162,6 +162,7 @@ export class ShellService extends Service {
       // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
       kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
       kernelViewMode: this.kernelViewMode,
+      kernelViewPlatformHint: this.webPlatformHint(),
       kernelViewUrl: contents?.getURL() ?? '',
       // 用户实际看到的是栈顶那一个：harness 用它证明接管发生（此时 `kernelViewUrl` 仍停在被盖住的父页）。
       activeKernelViewUrl: this.activeKernelContents()?.getURL() ?? '',
@@ -684,6 +685,25 @@ export class ShellService extends Service {
    * 只在 `keyDown`（且非自动重复）上接；**Esc 不接**：站点自己的 Esc 有用，我们不去抢。
    * @param contents 要监听的页面句柄（主窗口、内核视图、接管子视图各挂一份）
    */
+  /**
+   * 「任意网页」模式下当前地址是否落在平台域名上（spec 10.11-30 裁定 (a)）。
+   *
+   * 命中时**不自动切模式**——会话与视图在导航中途重建的风险大于收益；只把地址交出去，
+   * 由地址栏给一条「点此回到平台模式」的提示，切换仍由人按。
+   * @returns 命中的地址；平台模式、没有平台挂载记录、或同原点比较失败时为 null
+   */
+  private webPlatformHint(): string | null {
+    if (this.kernelViewMode !== 'web' || this.lastPlatformMount === null) return null;
+    const current = this.kernelView?.webContents.getURL() ?? '';
+    if (current === '') return null;
+    try {
+      if (new URL(current).origin === new URL(this.lastPlatformMount.url).origin) return current;
+    } catch {
+      // 地址不可解析（data: 占位页等）：这不是「平台域名」，不提示。
+    }
+    return null;
+  }
+
   private observeAssistantHotkey(contents: WebContents): void {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown' || input.isAutoRepeat) return;
@@ -711,6 +731,8 @@ export class ShellService extends Service {
       this.attachTakeoverView(decision.targetUrl.href);
       this.ctx.logger.info(`新标签已接管进会话分区 ${this.kernelViewPartition}：${decision.targetUrl.href}`);
     } else {
+      // 任意网页模式里点了外链：继续 deny，但要让人看见（spec 10.11-30 裁定 (b)）。
+      if (this.kernelViewMode === 'web') this.ctx.emit('shell/web-popup-blocked', rawUrl);
       console.warn(`[shell] 已拒绝新窗口：${rawUrl}（${decision.reason}）`);
     }
     return { action: 'deny' };

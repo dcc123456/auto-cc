@@ -16,6 +16,19 @@ import { DeskButton, DeskField } from './ui/controls';
 import { useBridgeAction } from './useBridgeAction';
 import type { BridgeReply } from '@auto-cc/shared';
 
+/**
+ * 从一条地址里取出主机名用于提示文案；解析不了就原样给出（不吞掉那条地址，人还得看得到它）。
+ * @param url 待解析的地址
+ * @returns 主机名（含端口）或原字符串
+ */
+const safeHost = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
 /** 可刷新的地址：协议闸只放 http/https，占位页（`data:`）与空串都不是。 */
 const isRefreshableUrl = (url: string): boolean => /^https?:/i.test(url);
 
@@ -27,6 +40,8 @@ export function KernelAddressBar() {
   const [currentUrl, setCurrentUrl] = useState('');
   /** 内核视图当下的模式（spec 10.11-30）：`web` 时这里多一个标记与「回到平台」出口，且助手对它只读。 */
   const [mode, setMode] = useState<'platform' | 'web'>('platform');
+  /** 任意网页模式下落在平台域名上的那条地址（裁定 (a)：不自动切模式，只给一条可点的提示）。 */
+  const [platformHint, setPlatformHint] = useState<string | null>(null);
   // 上一次从主进程读到的地址：输入框只在「人没改过」时跟着它走，人打过字就不抢人的草稿。
   const lastReadUrl = useRef('');
 
@@ -52,6 +67,7 @@ export function KernelAddressBar() {
     if (!reply?.ok) return '';
     applyUrl(reply.value.kernelViewUrl);
     setMode(reply.value.kernelViewMode);
+    setPlatformHint(reply.value.kernelViewPlatformHint);
     return reply.value.kernelViewUrl;
   }, [bridge, applyUrl]);
 
@@ -235,6 +251,29 @@ export function KernelAddressBar() {
           </DeskButton>
         )}
       </div>
+      {platformHint ? (
+        <p
+          className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-amber"
+          data-testid="kernel-web-platform-hint"
+        >
+          {t('kernel.web.platformHint', { host: safeHost(platformHint) })}
+          <DeskButton
+            action="kernel-web-switch-platform"
+            variant="line"
+            compact
+            onClick={() => {
+              // 人按的才算切换：先回到平台分区，再按平台名单导航到这条地址（判据一字不动）。
+              void run(t('kernel.web.switchPlatform'), async (): Promise<BridgeReply<unknown>> => {
+                const back = await bridge!.shell.closeWebPage();
+                if (!back.ok) return back;
+                return await bridge!.browser['page.navigate'](platformHint);
+              });
+            }}
+          >
+            {t('kernel.web.switchPlatform')}
+          </DeskButton>
+        </p>
+      ) : null}
       {noSession ? (
         <p
           className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-slate-400"

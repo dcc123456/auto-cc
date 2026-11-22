@@ -590,7 +590,8 @@ export function HomePanel() {
         </p>
         <p data-testid="home-status-run">
           {t('home.status.run', {
-            status: next.state === 'ready' ? (next.value.run?.status ?? 'idle') : 'unknown',
+            // 状态名走语言包（`stopping` 也必须有人话，不能把英文枚举甩到界面上）
+            status: t(`home.runState.${next.state === 'ready' ? (next.value.run?.status ?? 'idle') : 'unknown'}`),
             current: next.state === 'ready' ? (next.value.run?.currentTarget ?? '—') : '—',
             completed: next.state === 'ready' ? String(next.value.run?.completed.length ?? 0) : '—',
             pending: next.state === 'ready' ? String(next.value.run?.pending.length ?? 0) : '—',

@@ -2036,6 +2036,12 @@ declare module 'cordis' {
      */
     'shell/assistant-toggle'(requested: true): void;
     /**
+     * 「任意网页」模式里点了 `window.open` / target=_blank（spec 10.11-30 裁定 (b), 2026-11-22）：
+     * 外链**继续 deny**（外部页面不许自己开窗口），但不能再「点了没反应」——界面据这条给一行可见原因。
+     * 载荷是被拦下的地址。
+     */
+    'shell/web-popup-blocked'(url: string): void;
+    /**
      * 工作流每推进一次（起步 / 步骤开始 / 步骤结束 / 暂停 / 续跑）由 `workflow.runner` 发出
      * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
      */

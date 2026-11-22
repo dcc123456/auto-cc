@@ -210,6 +210,21 @@ export function App() {
     });
   };
 
+  // 任意网页模式里点了外链：壳层一律 deny，这里给一行可见原因（spec 10.11-30 裁定 (b)）。
+  useEffect(() => {
+    const bridge = window.autoCC;
+    if (!bridge) return;
+    return bridge.on('shell/web-popup-blocked', (url) => {
+      let host = url;
+      try {
+        host = new URL(url).host;
+      } catch {
+        // 解析不了就原样显示：人至少知道是哪条被拦了。
+      }
+      pushDeskToast({ action: 'web-popup-blocked', tone: 'seal', message: t('kernel.web.popupBlocked', { host }) });
+    });
+  });
+
   // 快捷键：Ctrl/⌘+J 呼出——**由壳层接住再推上来**（`shell/assistant-toggle`，2026-11-22 阻塞项）：
   // 主窗口、内核视图与接管子视图的 `before-input-event` 各挂一份，所以焦点在站点里时也收得到；
   // 渲染层自己不再处理 Ctrl+J（两处都处理就是按一下切两下，等于没反应）。

@@ -36,6 +36,20 @@ export function mixNeedsYou(input: { pauseCards: number; proposedPlan: number; e
   return Number.isFinite(total) && total > 0 ? total : 0;
 }
 
+/**
+ * 执行器那一类该不该算进「需要你」（2026-11-22 裁定 A）。
+ *
+ * 只算**真的在等你**的状态：`paused` / `stopped` / `blocked`，或授权单 `restart-required`。
+ * `idle` 时有授权单不算、`running` 时也不算——那是「未完成岗位数」，把它当「需要你」会让人
+ * 看到琥珀数字点进助手，却找不到对应的待办。
+ * @param input 执行器状态与授权单状态（都为 null/缺省时按不算计）
+ * @returns 该不该把待办数计入角标
+ */
+export function executorNeedsYou(input: { status?: string | null; authorizationStatus?: string | null }): boolean {
+  if (input.authorizationStatus === 'restart-required') return true;
+  return input.status === 'paused' || input.status === 'stopped' || input.status === 'blocked';
+}
+
 let current: AssistantStatusReading = {};
 
 const statusListeners = new Set<() => void>();

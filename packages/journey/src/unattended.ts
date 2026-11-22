@@ -180,8 +180,8 @@ export class JourneyUnattendedService extends Service {
    *         `UNATTENDED_NOT_AUTHORIZED` 授权单不在可跑状态（重启、跨日、被收回）
    */
   start = (input: UnattendedStartRequest): UnattendedRunView => {
-    if (this.status === 'running') {
-      throw new AppError('INVALID_ARGUMENT', '已有一轮无人值守在跑，先等它结束或停用', 'journey.unattended', {
+    if (this.status === 'running' || this.status === 'stopping') {
+      throw new AppError('INVALID_ARGUMENT', '已有一轮无人值守在跑（或正在停止），先等它结束', 'journey.unattended', {
         runId: this.runId,
       });
     }
@@ -226,15 +226,19 @@ export class JourneyUnattendedService extends Service {
   };
 
   /**
-   * 主动请求停止：只置取消标记，由循环在下一个检查点退出；真正的「立即停止后续外发」仍由
-   * `entitlement.gate` 的停用位保证（本函数不绕开它）。
+   * 主动请求停止：置取消标记并**立刻**把状态落到 `stopping`，由循环在下一个检查点退出。
+   *
+   * 为什么状态必须先落地（2026-11-22 裁定）：岗与岗之间的节流睡眠不可中断（最长 150s），
+   * 只置标记会让界面在这段时间里一直显示「运行中」，用户以为没停。真正停下来的那一刻由
+   * `finish('stopped')` 收尾；「立即停止后续外发」仍由 `entitlement.gate` 的停用位与每步的守卫保证。
    * @param nowMs 请求时刻（毫秒）
-   * @returns 请求后的视图（仍在 `running`，等循环收尾）
+   * @returns 请求后的视图（`stopping`；循环收尾后是 `stopped`）
    */
   stop = (nowMs = Date.now()): UnattendedRunView => {
     if (this.status === 'running') {
       this.cancelRequested = true;
-      this.ctx.logger.info(`无人值守收到停止请求：运行 ${String(this.runId)}`);
+      this.status = 'stopping';
+      this.ctx.logger.info(`无人值守收到停止请求：运行 ${String(this.runId)}，等下一个检查点收尾`);
     }
     return this.view(nowMs);
   };
@@ -445,7 +449,8 @@ export class JourneyUnattendedService extends Service {
 
   /** 收尾：写终态与结束时刻（幂等，重复调用不覆盖第一次的终态）。 */
   private finish(state: UnattendedRunState, error: string | null): void {
-    if (this.status !== 'running') return;
+    // `stopping` 也必须能收尾：状态已经先落地给界面了，循环在检查点退出时把它落到终态。
+    if (this.status !== 'running' && this.status !== 'stopping') return;
     this.status = state;
     this.finishedAt = Date.now();
     this.currentTarget = null;

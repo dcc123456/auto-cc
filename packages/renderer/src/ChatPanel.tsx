@@ -54,7 +54,7 @@ import { pushDeskToast } from './deskToast';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
-import { mixNeedsYou, reportAssistantStatus } from './assistantStatus';
+import { executorNeedsYou, mixNeedsYou, reportAssistantStatus } from './assistantStatus';
 import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
@@ -416,20 +416,35 @@ export function ChatPanel() {
    * 把「在跑 / 需要你 / 被拦」三类事实报给顶栏那颗助手胶囊（spec 10.11-11）。
    * 口径照 plan §14.2：需要你只计待确认计划 + 逐条批准 + 投递待确认，普通未读不亮。
    */
-  /** 执行器待办（`journey.unattended.view` 的 pending 条数）：角标第三类事实，读不到按 0。 */
-  const [executorPending, setExecutorPending] = useState(0);
+  /**
+   * 执行器那一类事实：运行状态、待办数，以及授权单要不要人重新确认。
+   * 角标只在**真的在等你**的时候算它（2026-11-22 裁定 A）：`paused` / `stopped` / `blocked`，
+   * 或授权单 `restart-required`；`idle` 时有授权单不算、跑到一半也不算——那是「未完成岗位数」，
+   * 不是「需要你」。
+   */
+  const [executor, setExecutor] = useState<{ status: string; pending: number }>({ status: 'idle', pending: 0 });
+  const [authorizationStatus, setAuthorizationStatus] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const reply = await bridge?.journey['unattended.view']();
+      const [runReply, authReply] = await Promise.all([
+        bridge?.journey['unattended.view'](),
+        bridge?.outbound['authorization.current'](),
+      ]);
       if (cancelled) return;
-      setExecutorPending(reply?.ok ? reply.value.pending.length : 0);
+      setExecutor({
+        status: runReply?.ok ? runReply.value.status : 'idle',
+        pending: runReply?.ok ? runReply.value.pending.length : 0,
+      });
+      setAuthorizationStatus(authReply?.ok ? (authReply.value?.status ?? null) : null);
     })();
     return () => {
       cancelled = true;
     };
-    // 与另外两类同源刷新：run 动、表态单动，待办也可能跟着动，一次读把三样对齐。
+    // 与另外两类同源刷新：run 动、表态单动，执行器状态也可能跟着动，一次读把几样对齐。
   }, [bridge, agentRun.run, agentPause.pending]);
+  /** 执行器此刻是不是在等人（口径与负对照都在 `executorNeedsYou` 那个纯函数里）。 */
+  const executorAsks = executorNeedsYou({ status: executor.status, authorizationStatus });
 
   useEffect(() => {
     reportAssistantStatus({
@@ -437,11 +452,11 @@ export function ChatPanel() {
       needsYou: mixNeedsYou({
         pauseCards: agentPause.pending?.length ?? 0,
         proposedPlan: agentRun.run?.status === 'proposed' ? 1 : 0,
-        executorPending,
+        executorPending: executorAsks ? executor.pending : 0,
       }),
       blocked: takeover.state?.isHeld === true && takeover.state.reason === 'risk',
     });
-  }, [agentRun.run, agentPause.pending, executorPending, takeover.state]);
+  }, [agentRun.run, agentPause.pending, executor, executorAsks, takeover.state]);
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();

@@ -331,7 +331,18 @@
       },
       "trendNone": "— No successful outreach in this period yet",
       "trendNoneGo": "Find jobs",
-      "timedOut": "No answer from this block within {{seconds}}s: read timed out, you can retry"
+      "timedOut": "No answer from this block within {{seconds}}s: read timed out, you can retry",
+      "runState": {
+        "idle": "idle",
+        "running": "running",
+        "stopping": "stopping",
+        "paused": "paused",
+        "stopped": "stopped",
+        "blocked": "blocked on quota",
+        "failed": "failed",
+        "done": "done",
+        "unknown": "not read yet"
+      }
     },
     "assistant": {
       "capsule": "Assistant",
@@ -478,7 +489,10 @@
         "marker": "Any web page (assistant read-only)",
         "back": "Back to platform",
         "enter": "Any web page",
-        "reasonEmpty": "Enter a URL first"
+        "reasonEmpty": "Enter a URL first",
+        "platformHint": "This address is on {{host}}: the assistant is read-only here too",
+        "switchPlatform": "Back to platform mode",
+        "popupBlocked": "External link blocked: {{host}} (no new windows in any-web-page mode)"
       }
     },
     "session": {

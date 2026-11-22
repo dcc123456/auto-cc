@@ -601,6 +601,11 @@ export type ShellStatus = {
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
   kernelViewPartition: string;
   /**
+   * 「任意网页」模式下，当前地址恰好落在**平台域名**上时给出的那一条（spec 10.11-30 裁定 (a)）：
+   * 值是那条地址；不自动切模式，只让界面提示「点此回到平台模式」。平台模式或不是平台域名时为 null。
+   */
+  kernelViewPlatformHint: string | null;
+  /**
    * 内核视图当下是什么模式（spec 10.11-30，2026-11-22 裁定「任意网页」）：
    * - `platform`：装着招聘平台站点，助手可定位/点击/抓取，外发走闸门；
    * - `web`：用户在**独立分区** `persist:web` 里打开的任意 http(s) 页面，助手对它**只读**
@@ -882,7 +887,12 @@ export type UnattendedGrantInput = {
 };
 
 /** 无人值守执行器的一次运行状态（第 5 片）：只有 `running` 会自动推进。 */
-export type UnattendedRunState = 'idle' | 'running' | 'paused' | 'stopped' | 'blocked' | 'failed' | 'done';
+/**
+ * 执行器状态。`stopping` 是 2026-11-22 裁定补的：人按了停止之后，循环可能还在岗间睡眠里
+ * （不可中断，最长 150s），界面必须立刻显示「正在停止」而不是继续 `running`；
+ * 真正停下来的那一刻才落到 `stopped`。
+ */
+export type UnattendedRunState = 'idle' | 'running' | 'stopping' | 'paused' | 'stopped' | 'blocked' | 'failed' | 'done';
 
 /** 执行器的只读视图；界面轮询它，不自己推状态（§2.7 不存第二份事实）。 */
 export type UnattendedRunView = {
@@ -3698,6 +3708,8 @@ export const RENDERER_EVENTS = [
   'shell/kernel-view-url',
   // Ctrl/⌘+J 由壳层接住后回推（见 `packages/core/src/events.ts` 的同名声明）：站点视图里也收得到。
   'shell/assistant-toggle',
+  // 任意网页模式里点了外链：一律 deny，但要让人看见原因（spec 10.11-30 裁定 (b)）。载荷是被拦的地址。
+  'shell/web-popup-blocked',
   'workflow/progress',
   'chat/delta',
   // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
@@ -3741,6 +3753,7 @@ export interface RendererEventSignatures {
   'shell/kernel-view-visible': boolean;
   'shell/kernel-view-url': string;
   'shell/assistant-toggle': true;
+  'shell/web-popup-blocked': string;
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;
