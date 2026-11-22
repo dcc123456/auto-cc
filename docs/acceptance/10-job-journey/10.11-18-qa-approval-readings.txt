@@ -1,0 +1,61 @@
+seeded —— 库是构造态：授权单一行（`fixture` / 目标 `1001`,`1002` / 当日，先 `reconfirm` 到 `active`）、`jobs` 一行（`fixture/1001` 前端工程师）、`kb_chunks` 一行（`chunk-qa-frontend`）；模型通道指本地 fixture `/v1/chat/completions`（证据标 **fixture-model**，不是真实模型结论）。
+
+# 10.11-18 审批门禁独立复验（半自动逐步批准 + 无人表态）
+
+日期：2026-11-22　执行：刁钻的QA（只读数，不改代码）
+
+## 环境
+
+- 代码 `7307462`（H/I/J/G 修复）；隔离副本 `/tmp/qa-11/tree`，`pnpm app:build` → `BUILD_EXIT=0`
+- 实例：CDP **10412**（QA 段位，起前写了 `tmp/ports/10412.owner`），userData `/tmp/qa-11/ud19`
+- 模型：`llm.settings.saveProvider{custom → http://127.0.0.1:10233/v1}` + `bindRole(chat: fixture-plan-model)`
+- 计量：每条读数前后各读 `usage.ledger.summary(5)`；`outbound_attempts` 由库侧复读
+
+## 手法坑（本轮踩到两次，都会造假读数）
+
+1. **旧主进程产物**：`pnpm app:build` 只写 `build/app/main.cjs`，不写 `packages/main/dist/main.cjs`。我第一轮拿着 10:48 的旧 bundle 去测 10:57 的代码，四条读数全是旧行为（`ROUTE_FAILED`、骨架文本）。换成新 bundle 后同一输入立刻变 `plan_drafted` / `route_unknown`。
+2. **`agent.loop.confirm` 是阻塞的**：它会等到这一轮 settle（含暂停单超时，约 2 分钟）才返回。所以「确认后立刻找暂停卡」必须**不 await confirm、并发轮询 `agent.pause.pending()`**；按顺序 await 再轮询，只会读到已经超时清掉的单子——我第一版就是这样，还差点把 `PAUSE_TIMEOUT` 误记成「没出卡」。
+
+## 半自动逐步批准（正向）
+
+```
+propose('准备一轮投递') -> { runId:"99872643-…", plan:["outbound.greet.perform","outbound.deliver.perform"] }
+confirm(runId) 不 await；250ms 轮询 pause.pending()
+  +253ms: { tool:"outbound.greet.perform", kind:"approval",
+            reason:"这一步是「outbound」级动作，要先由你批准（…半自动档下也可把这只手加进免确认白名单…）" }
+          此时 ledgerTotal = 0        ← 确认前零外发
+pause.respond(greet 单, approve)
+  +1.5s:  { tool:"outbound.deliver.perform", kind:"approval", … }   ← 下一步立刻又一张卡
+          ledgerTotal 仍 0             ← 批准上一步不等于批准下一步
+```
+
+判定：**逐步批准成立**——每个外发步各一张确认卡（同一轮里两张，工具不同），确认前账本 0。
+
+## 无人表态 ≠ 同意（负对照，来自第一版探针的真实结局）
+
+第一版按顺序 await confirm、没去批准，库里留下的结局：
+
+```
+agent_step: { tool:"outbound.greet.perform", status:"refused", code:"PAUSE_TIMEOUT",
+  observation:"确认单 3baea2dc-… 等到 1795316576700 无人表态：超时按未确认收，这一步不执行（不是人拒绝了它）" }
+ledger 0 笔
+```
+
+判定：**超时按未确认收**，账本不增——与 plan 的「没人表态永远不等于同意」一致。
+
+## 越权目标 `9999`（fixture 平台，未取到目标级拒绝）
+
+```
+sessions.grantConsent('fixture') -> { acknowledgedAt:1795316869392 }   ← 只对本地 fixture 签字
+/tool outbound.greet.perform {"request":{"platform":"fixture","jobId":"9999","text":"你好"}}
+  -> tool 卡 failed：TOOL_FAILED：平台 fixture 现在没有可用的打招呼渠道（OUTBOUND_CHANNEL_MISSING）
+  -> ledger 0 -> 0
+```
+
+**没走到 `OUTBOUND_TARGET_NOT_AUTHORIZED`**：外发在更早的一层（打招呼渠道表为空）就被拦下。渠道表要等内核会话打开 fixture 站点才登记（AGENTS §9 的 2.5 实测：改配置会重建下游、把渠道表清空）。所以「越权目标」这条要下一轮**先 `sessions.open('fixture')` 再跑**；本轮只能记「渠道缺失时同样零外发」。
+
+## 结论
+
+- 半自动：**逐步批准成立**（两步两张卡、确认前账本 0）；无人表态按 `PAUSE_TIMEOUT` 拒绝、账本 0。
+- 越权 9999：**未取到**目标级拒绝码（被渠道缺失挡在前面），留下一轮补；本轮零外发。
+- `/tool` 不属计划卡射程（PMO 裁定），本轮 `/tool` 读数只用于验证闸门，不计入 18 的卡判据。

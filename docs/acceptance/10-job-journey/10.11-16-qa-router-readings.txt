@@ -1,0 +1,94 @@
+seeded —— 库是构造态：`outbound_authorizations` 一行（`fixture` / 目标 2 个 / 当日），不是用户从界面走出来的；`reminder` 那条另外把该行改成 `status='paused'`、`pause_reason='页面出现验证码，本轮暂停等人确认'` 并标注。
+
+# 10.11-16 助手六类职责独立复验（QA 自建注入句，不用开发夹具）
+
+日期：2026-11-22　执行：刁钻的QA（只读数，不改代码）
+
+## 环境
+
+- 代码：`e594461`（路由实现）+ `5e631e5`（只含文档）的隔离副本 `/tmp/qa-11/tree`；`pnpm app:build` → `BUILD_EXIT=0`
+- 实例：Electron 44.4.5，CDP **10431**，userData `/tmp/qa-11/ud16b`；无模型通道（`llm.chat` 缺 baseUrl/model/apiKey），因此全部走**关键词回落**
+- 手法：`chat.session.send(text)` → 轮询 `chat.session.current()` 直到末尾 assistant 消息 `isStreaming=false` → 读 `parts`；数字类读数同一次取 `funnel.query` / `usage.ledger.summary(5)` 对账
+
+### 手法坑（必须先记）
+
+我第一轮把实例起在 **10417**，而开发同一时刻也在 10417 起了一个 `user-data-dir=…/tmp/g11/batch/ud-1718b` 的实例——端口被我的实例占住，**他的 CDP 探针落进了我的库**：我的会话里出现两条不是我发的 `"/tool outbound.greet.perform {}"`、`"/tool outbound.authorization.grant {}"`（10:41:02 / 10:41:05），且 autonomy 在我两次发问之间从 `suggest` 变成 `semi`。第一轮读数因此作废，全部改用 **10431** 重跑；本文件所有读数出自 10431 干净实例。**开发的 17 运行期读数如果也是那一刻取的，需要复核 userData。**
+
+## 六类逐条读数
+
+| 类 | 我的输入 | 回执（parts） | 用户看到的那句话 | 判定 |
+| --- | --- | --- | --- | --- |
+| ③ 只读汇总 | 「今天投了几份」 | `notice:summary` `{used:0, limit:10, delivered:0, lastSend:"—"}` | 今天已用 0/10 笔额度，投递成功 0 笔，最近一笔 —。 | **通过**：与同次 `funnel`（deliver 0/10）和账本（total 0、recent 0）逐项一致 |
+| ② 跳转 | 「带我去看追踪与统计」 | `navigate{view:"trust"}`；按钮「去运行记录」 | — | **通过**：点按钮后 `[data-action=nav-trust]` 变 `data-selected=true` / `aria-current=page`，面包屑 `[data-action=trail-chat-to-trust-back]` 文案「返回首页」 |
+| ⑤ 执行既有动作 | 「帮我打招呼」 | `notice:act_need_tool` | 听懂了，但执行要先知道用哪只工具… | **通过**：账本 0→0、`outbound_attempts` 0 行、无工具卡 |
+| ① 解释 | 「为什么这个岗位匹配」 | `notice:explain` `{hits:0, jobId:"—", state:"—"}` | 这件事我按库里能查到的说：命中 0 条库记录；当前岗位 —（—）。没命中的部分我不会编。 | **不通过（P1）**：两个读数都不是真读数，见下 |
+| ④ 起草计划 | 「准备一轮投递」 | `notice:route_refused {code:"ROUTE_FAILED"}` | 听懂了，但不允许：ROUTE_FAILED。 | **不通过（P1）**：没有计划卡，也没有原因；见下 |
+| ⑥ 值守提醒 | 「有什么要我处理」（先 seeded 暂停） | `notice:reminder` `{pauses:0, runStatus:"idle", pending:2, authorization:"paused"}` | 要你处理的：待表态 0 件、执行器 idle（待办 2 岗）、授权单 paused。 | **不通过（P2）**：无暂停原因、英文枚举直接进中文句；见下 |
+| 负对照：无关话题 | 「今天天气怎么样」 | 无 notice，回落本地骨架文本 | 已收到：「今天天气怎么样」。这是对话骨架的本地确定性回复——…按 2.8-10 经额度闸门与账本… | **不通过（P2）**：见下 G |
+
+## 发现
+
+### H（P1）：`draft_plan` 结构上出不来计划卡——`agent.loop.propose` 是 async，端口按同步取
+
+`packages/agent/src/session.ts` 的 `routePorts().propose`：
+`const run = loop.propose(goal); return Promise.resolve({ runId: run.runId, steps: run.plan.length });`
+`agent.loop.propose` 是 async（`loop.test.ts` 全部 `await loop.propose(...)`），`run` 是 Promise → `run.plan` 为 `undefined` → `.length` 抛 `TypeError`。活体复现：`route_refused: ROUTE_FAILED`；而桥口直调同一个计划器给的是结构化错误 `AGENT_PLANNER_UNAVAILABLE：模型通道未配置，缺 baseUrl / model / apiKey：先在「信任」工作台里配齐对话通道`——**真正的原因被吞成 `ROUTE_FAILED`**，既不是「不允许」也不给出口。即使配齐模型，按这段代码也仍会抛 TypeError，计划卡永远出不来。
+
+### I（P1）：`explain` 的两个读数都是假的——`kb.search` 是 async、`trackingCurrent` 是硬编码
+
+- `routePorts().kbSearch`：`const result = kb.search(query); … result.rows?.length ?? 0`；而 `packages/resume-kb/src/profile-service.ts:1561` 是 `async search(query): Promise<KbSearchResult>` → `result.rows` 恒为 `undefined` → **命中数恒为 0**，库里有没有行都一样。
+- `routePorts().trackingCurrent`：`() => Promise.resolve({ jobId: null, state: null })` —— **写死 null**，没有读任何追踪口（设计里写的是 `journey.tracking.current`）。
+- 两条合起来：`explain` 永远说「命中 0 条、当前岗位 —」，不可能兑现判据要求的「可回指的库行」。这同时是 17 第 4 条「编读数」的结构性缺口（它不是编一个数，而是把读不到画成 0/—）。
+
+### J（P2）：`reminder` 不带暂停原因，且把英文枚举甩进中文句子
+
+seeded 的 `pause_reason`（「页面出现验证码，本轮暂停等人确认」）在回执里**一个字都没有**；`runStatus`/`authorization` 直接渲染成 `idle`/`paused`。判据 16⑥ 要求「能读到暂停原因与待办」——待办（2）有，原因没有。修法建议：`reminder` 的 params 补 `pauseReason`（授权单/执行器各自的原文），文案里状态走语言包（`home.runState.*` 已有）。
+
+### G（P2）：`unknown` 回执没走「没听懂 + 示例」，落回开发骨架文本；`route_unknown` 文案零引用
+
+`session.ts:1133` 在 `reading.intent === 'unknown'` 时 `return false`，于是走 `fakeReplyFor()` 的骨架句：里面写着「这是对话骨架的本地确定性回复」「按 2.8-10 经额度闸门与账本」「想演示工具卡片，把消息以 /tool 开头再发一次」——用户看到的是开发说明与 spec 编号。而语言包里 `assistant.notice.route_unknown`（「没听懂这句。你可以这样说：…」）**全仓零代码引用**（`grep -rn route_unknown packages --include=*.ts` 只命中注释与 locale）。PM 裁的「没听懂」与「听懂了但不允许」两种回执，目前只有后者生效。
+
+## 结论
+
+16 六类里 **3 类通过**（汇总 / 跳转 / 执行-要工具）、**3 类不通过**（解释 P1 / 起草 P1 / 提醒 P2），另加一条 unknown 回执偏差（P2）。H、I 两条是结构性的（读的是 async 接口却当同步、写死 null），不是夹具缺失；**16 不建议判绿**。
+
+## 复验于开发修复提交 `cdd51f7`（同日 10:42，自述「解释类带可回指行、拒绝码不再被吞成 ROUTE_FAILED」）
+
+同一套探针、新构建（`BUILD_EXIT=0`，端口 10441）：
+
+```
+「为什么这个岗位匹配」→ notice:explain {hits:0, ref:"—", jobId:"—", state:"—"}
+                         句面：「命中 0 条库记录（回指 —）；当前岗位 —（—）。没命中的部分我不会编。」
+「准备一轮投递」      → notice:route_refused {code:"ROUTE_FAILED"}
+                         句面：「听懂了，但不允许：ROUTE_FAILED。」
+```
+
+两笔修复都被**上游的 async 端口 bug** 抵消：
+- `cdd51f7` 只给 `kbSearch` 加了「取第一条命中当回指」，没改 `const result = kb.search(query)` 这一行——`kb.search` 仍是 `async`，`result.hits/rows` 恒 `undefined`，于是 `docs=[]`、`hits=0`、`ref=undefined`；
+- 拒绝码提取改成「有 `code` 就用 `code`」也救不了起草类：那里抛的是 `run.plan.length` 的 **TypeError（无 code）**，仍然落 `ROUTE_FAILED`。
+修法只有一处入口：`routePorts()` 里 `kbSearch` / `propose`（以及 `trackingCurrent`）改成真正 `await` 既有 async 口，`trackingCurrent` 换成读 `journey.tracking` 的现况口。
+
+## 把模型通道接上本地 fixture 后的复验（PMO 批准，证据标 `fixture-model`）
+
+- 通道：`llm.settings.saveProvider{presetId:'custom', baseUrl:'http://127.0.0.1:10233/v1', apiKey:'fixture-key'}` → `addModels(['fixture-plan-model'])` → `bindRole{leg:'chat', model:'fixture-plan-model'}`，`llm.settings.read` 读出 `chat: fixture-plan-model`。**这不是真实模型的结论**，只证明「端口有没有 await」。
+- **计划器本身是好的**：`agent.loop.propose('带我找前端岗位并打招呼')` → `runId=b811d637… / status=proposed / plan 1 步（jd.capture.run）`。
+- **路由的 draft_plan 仍然坏**：同一个实例、同一模型通道下，发「准备一轮投递」→ `notice:route_refused {code:"ROUTE_FAILED"}`。这排除了「没模型」这个解释：`routePorts().propose` 把 async 的 `loop.propose` 当同步取 `run.plan.length`，必然 `TypeError`。**H 是端口 bug，与模型无关。**
+
+## 18 的半自动读数（同实例，fixture-model）
+
+- `autonomy=semi` + `loop.confirm(runId)`（计划只有 `jd.capture.run` 一步）→ 立即 `failed`，`agent.pause.pending` 为 0：计划里没有外发/副作用工具时不会出暂停单（与「只拦有副作用的那一步」一致），所以**这一步不是门禁缺陷**。
+- 要取「逐步批准」，计划里必须出现 `outbound.greet.perform` / `outbound.deliver.perform`：fixture 计划器只在**库内已有岗位**且目标里含「打招呼/投递」时才生成外发步（`scripts/fixture-server.ts` 的 `fixturePlanFor`）。本实例 `jd` 库为空 → 只出搜索步。**下一轮需要先 seeded 一条岗位**（构造态，标 seeded）再取这条读数。
+
+## 7307462 复验（H/I/J/G 修完，2026-11-22）
+
+环境：隔离副本 `7307462` 重建；**先换主进程产物**（`build/app/main.cjs` → `packages/main/dist/main.cjs`，本轮第一次忘了换，四条读数全是旧行为，作废重跑）；CDP 10412（QA 段位 + owner 文件）；userData `ud19` 里 seeded：授权单 `fixture/1001,1002`、`jobs` 一行 `fixture/1001`、`kb_chunks` 一行 `chunk-qa-frontend`；模型通道指本地 fixture `/v1/chat/completions`（**fixture-model**）。
+
+| 类 | 输入 | 读数 | 判定 |
+| --- | --- | --- | --- |
+| ④ 起草计划（H） | 准备一轮投递 | `notice:plan_drafted {steps:2}`；句面「已起草一轮计划（2 步）。它不会自己跑——确认后才执行…」；计划 = `outbound.greet.perform` + `outbound.deliver.perform` | **通过** |
+| ① 解释（I） | 解释一下前端这个岗位为什么匹配 | `notice:explain {hits:1, ref:"chunk-qa-frontend", jobId:"—", state:"—"}`；句面「命中 1 条库记录（回指 chunk-qa-frontend）…」 | **通过**（回指真出现；`jobId/state` 为 `—` 是因为库里没有追踪行，属如实 null） |
+| ① 解释（无主语） | 为什么这个岗位匹配 | `hits:0, ref:"—"` | 符合口径：提问里没有被检索的主语，不编 |
+| ⑥ 提醒（J） | 有什么要我处理（授权单 seeded 为 `paused` + `pause_reason`） | `notice:reminder {pauses:0, runStatus:"idle", pending:2, authorization:"paused", pauseReason:"页面出现验证码，本轮暂停等人确认"}`；句面「…执行器 空闲（待办 2 岗）、授权单 已暂停；暂停原因：页面出现验证码，本轮暂停等人确认。」 | **通过**（英文枚举已走语言包、原因带出） |
+| 负对照（G） | 今天天气怎么样 | `notice:route_unknown`；句面「没听懂这句。你可以这样说：「今天投了几份」…」 | **通过** |
+
+结论：**H/I/J/G 四条在 7307462 上均通过**；`17` 第 4 条（编读数）随 I 一起重验——`explain` 不再恒 0，`summary` 仍报真实读数，可判通过。
