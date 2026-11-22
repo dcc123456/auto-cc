@@ -1,0 +1,39 @@
+seeded —— 授权单是直接写进 `store.db` 的构造态（`fixture` / 目标 `1001,1002` / 日限额 2 / 当日），不是用户从界面开的。
+
+# 10.11-04 Home 2 状态行：三态 + 执行器 idle/running
+
+环境：`efbb271` 隔离副本、CDP 10415、userData `ud22`；授权单经 DB 播种，读前点 `home-refresh`（10.11-22 口径）
+
+## 读数
+
+| 状态 | `home-status-unattended` | `home-status-run` |
+| --- | --- | --- |
+| 未授权（库内 0 行） | `无人值守：只建议` | `执行器：空闲 · 当前 — · 完成 0 · 待办 0` |
+| 已授权（`active`，2 岗） | **`无人值守：无人值守：已授权 2 岗`** | `执行器：空闲 · 当前 — · 完成 0 · 待办 2` |
+| 暂停（`paused` + `pause_reason='页面出现验证码，本轮暂停等人确认'`） | **`无人值守：只建议`** | `执行器：空闲 · 当前 — · 完成 0 · 待办 2` |
+
+## 发现
+
+### P1：暂停态不显示暂停原因，反而退回「只建议」
+
+`HomePanel.tsx` 的状态行只判 `authorization?.status === 'active'`，否则渲染 `agent.autonomy.suggest`：
+
+```ts
+t('home.status.unattended', {
+  value: next.value.authorization?.status === 'active'
+    ? t('statusbar.unattended', { count: … })
+    : t('agent.autonomy.suggest'),
+})
+```
+
+于是 `paused` 落到「只建议」——用户看不出「被风控暂停/等确认」，与 10.11-04 要求的「暂停原因原文」直接冲突；这也让首页在风控暂停时给出误导性的结论（看起来像没配置授权）。
+
+### P2：已授权态文案重影「无人值守：无人值守：已授权 2 岗」
+
+`home.status.unattended` = `无人值守：{{value}}`（zh-CN.json:298），而喂进去的 `statusbar.unattended` = `无人值守：已授权 {{count}} 岗`（zh-CN.json:217）——两层前缀叠在一起。en 语言包同形状，需一起改。
+
+## 结论
+
+- 未授权 / 已授权两态**能读到**，但已授权态有 P2 文案重影；
+- **暂停态 P1 不成立**（没有原因原文，退回「只建议」）；执行器 idle 可读，running 本轮未取（授权单被置 paused，起跑会被闸门拒）。
+- 04 不建议判绿：先修暂停态与重影。

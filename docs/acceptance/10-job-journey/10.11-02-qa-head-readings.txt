@@ -1,0 +1,35 @@
+seeded —— 登录态是构造的（在 `persist:fixture` 分区里写 `autocc_session=fixture-token`，再用 `sessions.probe` 读到 `active`），不是用户从界面登录得来的。
+
+# 10.11-02 Home 页首：未登录 / 无简历两态
+
+日期：2026-11-22　执行：刁钻的QA　环境：`efbb271` 隔离副本、CDP 10415（QA 段位 + owner 文件）、空 userData `ud22`
+
+## 未登录
+
+```
+head: "首页下面这些数字是近 7 天的读数（只读既有服务，不自己算比率）刷新问助手先登录 BOSS 直聘"
+primaryCount: 1
+primary: [{ text: "先登录 BOSS 直聘", action: "home-primary" }]
+blocker: { text: "还没有登录 BOSS 直聘：登录后首页才读得到真实进度去处理", kind: "login" }
+status: { unattended: "无人值守：只建议", run: "执行器：空闲 · 当前 — · 完成 0 · 待办 0" }
+nextFirst: "先登录 BOSS 直聘"（4 条）
+```
+
+判定：**主行动恰好 1 颗、随阻断变化、无并列**；阻断条唯一且 `data-blocker=login`。
+
+## 无简历 —— 本机构造不到（不是没取，是结构上取不到）
+
+Home 的登录判据只看**真实平台**：`packages/renderer/src/HomePanel.tsx:329 / 372` 的
+`real = platforms.filter((row) => !isLocalSessionUrl(row.startUrl))`，`isLoggedIn = real.some(row => row.auth === 'active')`。
+于是：
+
+- 我按 seeded 方式在 `persist:fixture` 写了 `autocc_session`，`sessions.probe('fixture') → auth:"active"`（读得到 cookie），
+  但 Home 仍显示 `blocker.kind="login"`（因为 fixture 是本地平台、被过滤掉）；
+- 要让 `isLoggedIn=true` 必须让 **boss** 分区的 `auth=active`，而写 boss 分区 cookie 需要把内核视图开到真站 —— 按群规则禁止自动化访问真实平台。
+
+所以「无简历」态**只能等用户本人在场登录 BOSS 后取**；本轮不造假读数，此态记 BLOCKED。
+
+## 结论
+
+- 未登录态：**通过**。
+- 无简历态：**BLOCKED**（需要真实 BOSS 登录态；Home 的登录判据过滤本地平台，seeded 构造不可行）。

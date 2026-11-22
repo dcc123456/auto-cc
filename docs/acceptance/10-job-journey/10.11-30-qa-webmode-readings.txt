@@ -1,0 +1,51 @@
+# 10.11-30「任意网页」三条负对照
+
+环境：`efbb271` 隔离副本、CDP 10415、userData `ud22`；fixture 站点由本机 `scripts/fixture-server.ts` 提供（10233），未访问任何真实平台
+
+## ① 助手只读（web 模式）
+
+`shell.openWebPage('http://127.0.0.1:10233/alt')` → `shell.getStatus()`：
+
+```
+{ kernelViewMode:"web", kernelViewPartition:"persist:web", kernelViewUrl:"http://127.0.0.1:10233/alt" }
+```
+
+| 调用（都是白名单口） | 返回 |
+| --- | --- |
+| `browser.act.click(spec)`（合法 `LocateSpec`） | `WEB_MODE_READ_ONLY`：「当前是「任意网页」模式：助手对这块页面只读，定位、点击、抓取与导航都不执行；要操作平台请先「回到平台」」 |
+| `browser.act.type(spec, "你好")` | 同上 `WEB_MODE_READ_ONLY` |
+| `browser.locate.find(spec)` | 同上 `WEB_MODE_READ_ONLY` |
+| `browser.page.extract({fields:[]})` | 同上 `WEB_MODE_READ_ONLY` |
+| `browser.page.navigate('http://127.0.0.1:10233/boss')` | 同上 `WEB_MODE_READ_ONLY` |
+| `browser.page.navigate('javascript:alert(1)')` | 同上 `WEB_MODE_READ_ONLY`（先被只读闸拦下，未到协议判定） |
+
+地址栏：`kernel-web-back` 在、`kernel-web-enter` 不在、平台域名提示条文案「这条地址在 127.0.0.1:10233 的平台上：助手在这里同样只读回到平台模式」。
+
+**手法坑（我的探针错，不是产品缺陷）**：`browser.act.click` 第一次我给的是 `{text:'登录'}`（不是合法 `LocateSpec`），结果回 `UNKNOWN / Cannot read properties of undefined (reading 'length')`；
+换成合法 spec（`{description, cardinality:'single', candidates:[{strategy:'text',value:'登录'}]}`）后立刻是 `WEB_MODE_READ_ONLY`。
+顺带一条 P3：对不合法的 `LocateSpec`，`act.click` 只回 `UNKNOWN`（TypeError 上浮），没有结构化 `INVALID_ARGUMENT`，agent 工具那条路（`TOOL_INPUT_INVALID`）反而更清楚。
+
+## ② 回到平台后登录态仍在
+
+`shell.closeWebPage()`：
+
+```
+before: { mode:"web",      partition:"persist:web",     url:"http://127.0.0.1:10233/alt" }
+after:  { mode:"platform", partition:"persist:fixture", url:"http://127.0.0.1:10233/" }
+sessions.status -> fixture: { auth:"active", partition:"persist:fixture", cookieNames:["autocc_session"] }
+地址栏：kernel-web-back 消失、kernel-web-enter 出现、平台提示条消失
+```
+
+判定：**登录态未丢**（`auth:"active"`），出口与标记切换正确。
+
+## ③ 同一地址两模式不串会话
+
+- 分区：web = `persist:web`，platform = `persist:fixture`（`shell.getStatus().kernelViewPartition` 两次读数）。
+- cookie：在 web 模式里给 `http://127.0.0.1:10233/alt` 写 `qa_web_marker=web-only`（`document.cookie` 读回该值）；
+  回到平台模式后读 `http://127.0.0.1:10233/` 的 `document.cookie` 只有 `autocc_session=fixture-token`，**没有** `qa_web_marker`。
+
+判定：**分区与 cookie 集合都不同，不串会话**。
+
+## 结论
+
+三条负对照 **全部通过**。（另记 P3：不合法 `LocateSpec` 回 `UNKNOWN` 而非结构化错误。）

@@ -1,0 +1,21 @@
+# 10.11-12 面板非模态三小项（无遮罩 / Tab 不被吞 / 背景可点可滚）
+
+环境：`efbb271` 隔离副本、CDP 10415、userData `ud22`；隐私提示已点「我已阅读并同意」后再测（否则全屏遮罩会吃掉一切命中，见 AGENTS §9 ⑬）
+
+## 读数
+
+面板打开后：`[data-testid=assistant-panel]` rect `{x:208, y:86, w:332, h:656}`，
+胶囊 `aria-expanded="true"` / `aria-controls="assistant-panel"`。
+
+| 小项 | 读数 | 判定 |
+| --- | --- | --- |
+| 无遮罩 | 去掉隐私提示后，全仓 `position:fixed; inset:0` 且非面板的元素 **0 个**；`elementFromPoint(面板中心)` 命中面板内部的 `P`（`inside=true`） | 通过 |
+| 背景可命中 | `elementFromPoint(面板左侧 120px 处)` 命中面板外的 `SPAN`（`insidePanel=false`），说明背景没被盖住 | 通过 |
+| Tab 不被吞 | 焦点从 `chat-input` 起，Tab-1…Tab-5 依次到 `chat-hint`/`chat-autonomy-pill`/`chat-model-pill`/`chat-model-missing`；**Tab-6 焦点离开面板**落到 `kernel-canvas-resize-handle`（`inPanel=false`），Tab-30 落在 `home-blocker` 里的按钮上 | 通过（无焦点陷阱） |
+| 背景可滚 | 面板开着时滚背景容器：`scrollTop 0 → 320`；第二次 `795 → 1115`（`scrollHeight 3771 / clientHeight 656`） | 通过 |
+
+## 结论
+
+三小项 **全部通过**；面板非模态、焦点可自由离开、背景可点可滚。
+
+注：面板收起后再点胶囊会重新打开（我的第一版探针把「已开」又点成了「关」，rect 变 0×0——记下来免得下一个人当成缺陷）。
