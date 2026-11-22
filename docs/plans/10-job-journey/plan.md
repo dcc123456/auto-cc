@@ -1052,3 +1052,5 @@ interface JourneyContext {
 **D. 记错的一处事实（10.11-27）**：原文写「本仓没有 `URL_EMPTY`/`ACTION_BUSY` 这两个码」不准确——它们不是 `AppErrorCode`，但作为**界面原因码**大量存在于 `KernelAddressBar.tsx`、`ScriptPanel.tsx`、`UsagePanel.tsx`；spec 已按 QA 实测更正，避免被当成死码删掉。
 
 **判据**：A/B → spec 10.11-11 表后 dated 注；C → spec 10.11-30 表后 dated 注；D → spec 10.11-27 行内更正 + dated 注。
+
+**E. 六类职责由意图路由承载（PMO 2026-11-22 裁定，补 §14.4.1 的落地口径）**：实测对话侧五类职责无通道，chat 仍是 P1 骨架；裁定补意图路由，但**路由只做分类、不判业务**——复用既有 `llm` 分类到六类（模型不可用时关键词回落），六个处理器只用既有读数（`viewTrail`/`funnel`/账本/`agent.loop.propose`/`/tool`/暂停与待办），不新开服务与执行通道；执行类仍一律 `agent.loop` 审批、确认前零外发。判据见 spec 10.11-16 表后 dated 注。
