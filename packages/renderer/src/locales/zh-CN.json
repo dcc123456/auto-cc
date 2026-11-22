@@ -473,7 +473,13 @@
       "hide": "收起",
       "show": "展开网页窗口",
       "resizeHandle": "拖动改宽度；双击回到最窄",
-      "canvasResizeHandle": "拖动改分栏宽度；双击回到 65%"
+      "canvasResizeHandle": "拖动改分栏宽度；双击回到 65%",
+      "web": {
+        "marker": "任意网页（助手只读）",
+        "back": "回到平台",
+        "enter": "任意网页",
+        "reasonEmpty": "先填网址"
+      }
     },
     "session": {
       "heading": "内置内核会话（分区与登录态）",

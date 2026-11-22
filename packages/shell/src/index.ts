@@ -14,6 +14,7 @@ import {
 import { AppError, Service, type Context } from '@auto-cc/core';
 import {
   APP_PARTITION,
+  partitionFor,
   type AuthorizationPausedEvent,
   type KernelViewLoadError,
   type KernelViewRect,
@@ -55,6 +56,13 @@ const rendererIndexPath = app.isPackaged
   ? path.join(__dirname, 'renderer', 'index.html')
   : path.join(repoRoot, 'packages', 'renderer', 'dist', 'index.html');
 /** 内核视图占位页：P1 用一行说明文字，P2 起替换为真实站点视图。 */
+/**
+ * 「任意网页」模式的分区（spec 10.11-30，2026-11-22 裁定）。
+ * 独立分区是这个模式成立的前提：招聘平台的 cookie / 存储绝不带过去，登录态不串。
+ * 名字经 `partitionFor` 拼（分区只允许有那一个定义处，spec 2.7-02 的红线机检守着），不手搓字面量。
+ */
+const WEB_MODE_PARTITION = partitionFor('web');
+
 const kernelViewPlaceholder =
   'data:text/html;charset=utf-8,' +
   encodeURIComponent(
@@ -122,6 +130,10 @@ export class ShellService extends Service {
   private lastError: string | undefined;
   /** 上一次已经推给界面的内核视图地址；只用于「变了才发」，不当作读数来源（读数永远是 `getURL()`）。 */
   private pushedKernelViewUrl = '';
+  /** 内核视图当下是平台模式还是「任意网页」模式；重建视图时按分区重算，不单独记一份地址。 */
+  private kernelViewMode: 'platform' | 'web' = 'platform';
+  /** 最近一次挂过的平台视图（分区 + 起始地址）：退出「任意网页」时按它重建，登录态仍在。 */
+  private lastPlatformMount: { partition: string; url: string } | null = null;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -149,6 +161,7 @@ export class ShellService extends Service {
       // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
       // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
       kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
+      kernelViewMode: this.kernelViewMode,
       kernelViewUrl: contents?.getURL() ?? '',
       // 用户实际看到的是栈顶那一个：harness 用它证明接管发生（此时 `kernelViewUrl` 仍停在被盖住的父页）。
       activeKernelViewUrl: this.activeKernelContents()?.getURL() ?? '',
@@ -170,6 +183,46 @@ export class ShellService extends Service {
    */
   mountKernelSite = (partition: string, url: string): void => {
     this.createKernelView(partition, url);
+  };
+
+  /**
+   * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
+   *
+   * 与 `browser.page.navigate` 分开是刻意的：那条口只放行已登记平台声明的源（`NAVIGATE_URL_REJECTED`），
+   * 这个口是用户显式切到「任意网页」模式后才走的，**不过平台名单**——正因如此，进模式之后助手对它只读
+   * （点击/定位/抓取/外发一律拒绝，见 `requireKernelContents` 的那道闸）。
+   * @param url 目标地址；不是 http/https 时抛 `WEB_MODE_URL_REJECTED`（含 `javascript:` 与 `file:`）
+   * @returns 换完之后的壳层状态（`kernelViewMode: 'web'`）
+   */
+  openWebPage = (url: string): ShellStatus => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new AppError('WEB_MODE_URL_REJECTED', `「任意网页」模式只接受 http/https：${url}`, 'shell.openWebPage');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new AppError(
+        'WEB_MODE_URL_REJECTED',
+        `「任意网页」模式只接受 http/https：${parsed.protocol}`,
+        'shell.openWebPage',
+      );
+    }
+    this.createKernelView(WEB_MODE_PARTITION, parsed.href);
+    this.applyKernelViewVisible(true);
+    return this.getStatus();
+  };
+
+  /**
+   * 退出「任意网页」模式，回到最近一次挂过的平台视图（spec 10.11-30 的「回到平台」出口）。
+   *
+   * 按原分区重建，所以平台登录态还在；从未挂过平台时退回占位页（也就自然收起了视图）。
+   * @returns 换完之后的壳层状态（`kernelViewMode: 'platform'`）
+   */
+  closeWebPage = (): ShellStatus => {
+    if (this.lastPlatformMount) this.createKernelView(this.lastPlatformMount.partition, this.lastPlatformMount.url);
+    else this.createKernelView();
+    return this.getStatus();
   };
 
   /**
@@ -565,6 +618,11 @@ export class ShellService extends Service {
     // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
     // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
     this.kernelViewPartition = partition ?? '';
+    // 模式由分区决定：`persist:web` 之外都算平台模式（含占位页）。重建视图就是换模式，不另存一个标志位。
+    this.kernelViewMode = partition === WEB_MODE_PARTITION ? 'web' : 'platform';
+    if (partition !== undefined && partition !== WEB_MODE_PARTITION) {
+      this.lastPlatformMount = { partition, url };
+    }
     this.kernelViewError = null;
     win.contentView.addChildView(view);
     // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。

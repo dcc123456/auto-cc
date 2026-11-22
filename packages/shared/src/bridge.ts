@@ -180,6 +180,8 @@ export type {
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
+  'shell.openWebPage',
+  'shell.closeWebPage',
   'shell.setKernelViewBounds',
   'shell.setKernelViewZoomFactor',
   'shell.revealInFolder',
@@ -598,6 +600,13 @@ export type ShellStatus = {
   kernelViewZoomFactor: number;
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
   kernelViewPartition: string;
+  /**
+   * 内核视图当下是什么模式（spec 10.11-30，2026-11-22 裁定「任意网页」）：
+   * - `platform`：装着招聘平台站点，助手可定位/点击/抓取，外发走闸门；
+   * - `web`：用户在**独立分区** `persist:web` 里打开的任意 http(s) 页面，助手对它**只读**
+   *   （点击/定位/抓取/外发一律拒绝，`WEB_MODE_READ_ONLY`）。两个模式不共享 cookie 与存储。
+   */
+  kernelViewMode: 'platform' | 'web';
   /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
   kernelViewUrl: string;
   /**
@@ -2761,6 +2770,20 @@ export type LlmCheckView = {
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
+  /**
+   * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
+   * 与平台导航分开是这个口存在的前提：它**不**过 `resolveNavigableUrl` 的平台名单，
+   * 也正因为如此，进这个模式之后助手对它只读（`browser.act` / `locate` / `extract` / `page.navigate` 全拒）。
+   * @param url 目标地址；协议不是 http/https 时 `WEB_MODE_URL_REJECTED`
+   * @returns 壳层状态（含 `kernelViewMode: 'web'`）
+   */
+  'shell.openWebPage': { args: [url: string]; returns: ShellStatus };
+  /**
+   * 退出「任意网页」模式，回到最近一次挂过的平台视图（spec 10.11-30 的「回到平台」出口）。
+   * 平台视图按原分区重建，所以登录态还在；从未挂过平台时回到占位页。
+   * @returns 壳层状态（含 `kernelViewMode: 'platform'`）
+   */
+  'shell.closeWebPage': { args: []; returns: ShellStatus };
   /**
    * 报一次槽位的实测几何（spec 8.8-01）。返回值就是 `shell.getStatus()` 的那份快照，
    * 让渲染层不用再追一次读——摆位有没有落地，调用方当场就能核对。

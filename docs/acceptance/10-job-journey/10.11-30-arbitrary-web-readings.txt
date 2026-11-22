@@ -1,0 +1,32 @@
+10.11-30 「任意网页」模式读数（干净 userData · dist 构建 · 本地仿站；没有任何真实平台请求）
+
+背景：用户报「打开网址 失败：目标源 https://www.baidu.com 不属于任何已登记平台」，希望打开任意网页。
+形状按 2026-11-22 裁定限死：独立分区 `persist:web`、助手只读、地址栏标记 + 回到平台；
+平台名单判据（`NAVIGATE_URL_REJECTED` / `CONSENT_REQUIRED`）在平台模式下**一字未动**。
+
+命令：`node tmp/g11/batch/pweb.mjs`（走界面：地址栏输入 → 点「任意网页」；回到平台也点按钮）
+
+① 独立分区（不串会话）：
+   - 平台模式：`kernelViewPartition=persist:fixture`，页面侧 `document.cookie` =
+     `autocc_session=fixture-token`、正文「登录态：已登录」；
+   - 切到任意网页模式后同一个地址 `/alt`：`kernelViewPartition=persist:web`、`document.cookie` 空、
+     正文「登录态：未登录」、服务端读数 `{"loggedIn":false,"cookieNames":[]}`；
+   - 回到平台：分区回 `persist:fixture`、cookie 仍是 `autocc_session=fixture-token`、正文「登录态：已登录」
+     —— 登录态没被带走也没被弄丢。
+② 助手只读（负对照三条，全部 `WEB_MODE_READ_ONLY`）：
+   - `browser.act.click({strategy:'css', value:'body'})` → `WEB_MODE_READ_ONLY`；
+   - `browser.page.extract(...)` → `WEB_MODE_READ_ONLY`；
+   - `browser.page.navigate('http://127.0.0.1:10233/')` → `WEB_MODE_READ_ONLY`。
+   闸只有一处：`requireKernelContents`（定位/点击/抓取/导航/外发脚本都要从这里取句柄）。
+   另有协议负对照：`shell.openWebPage('javascript:alert(1)')` → `WEB_MODE_URL_REJECTED`。
+③ 地址栏标记与出口：web 模式下 `[data-testid="kernel-address-web-mode"]` =
+   「任意网页（助手只读）」+「回到平台」（`data-action=kernel-web-back`），输入框显示真实地址
+   `http://127.0.0.1:10233/alt`；回到平台后标记消失、「任意网页」入口（`kernel-web-enter`）回来。
+④ 平台模式判据不变：平台模式下仍走 `browser.page.navigate`，非平台地址照旧被名单拒
+   （本轮 `browser.page.navigate('http://127.0.0.1:10233/alt')` 在 `persist:fixture` 上是合法同源，正常通过；
+   名单拒绝由既有 `navigate-policy.test.ts` 的用例守着，本模式没有改动那一条口）。
+
+一处实现细节（本轮踩到并修）：切模式时视图是新建的，`getStatus` 那一瞬地址为空，输入框会空白一阵；
+补了「模式变化后 1.2s 再读一次」，并在 `shell/kernel-view-url` 事件里统一走 `read()`（地址与模式同一份读数）。
+
+证据图：`10.11-30-web-mode.png`。

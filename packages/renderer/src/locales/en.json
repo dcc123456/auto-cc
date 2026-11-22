@@ -473,7 +473,13 @@
       "hide": "Hide",
       "show": "Show the web page view",
       "resizeHandle": "Drag to change the width; double-click goes back to the narrowest",
-      "canvasResizeHandle": "Drag to change the split width; double-click goes back to 65%"
+      "canvasResizeHandle": "Drag to change the split width; double-click goes back to 65%",
+      "web": {
+        "marker": "Any web page (assistant read-only)",
+        "back": "Back to platform",
+        "enter": "Any web page",
+        "reasonEmpty": "Enter a URL first"
+      }
     },
     "session": {
       "heading": "Embedded kernel sessions (partition & login state)",
