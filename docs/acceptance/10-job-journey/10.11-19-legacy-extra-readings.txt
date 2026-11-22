@@ -43,3 +43,25 @@
 ⑦ **缺陷（P2，本轮新发现）**：`jd.capture.run` 在 fixture 平台上执行失败，步状态 `failed / TOOL_FAILED`，
    `observation` 只有「fixture 回声：连通正常」，**没有结构化错误码**——读不出是选择器、登录态、风控确认还是平台包缺失。
    它是搜岗主链的工具，建议单列一条查（不是 19 的取证缺口，是工具本身的失败可读性问题）。
+
+⑧ **正向落卡已通**（2026-11-22，端口 10438）：先修 `jd.capture.run` 的签字误判（见 ⑨），再跑：
+   - 计划 `jd.capture.run` 一步；半自动档 `confirm` 后出确认卡并批准；该步跑到 `ok`。
+   - `sediment.preview` → 卡片判据显示「**这一段 1 步全部跑通，可以沉淀**」；
+     `agent.sediment.save(runId, 'qa-sediment-card')` → `{ok:true, id:'plan-fb7dadadae01', nodeCount:1,
+     sourceRunId:'d3f324a9…', fingerprint:'b9832d3b'}`。
+   - **库—DOM 成对**：落卡前 `workflow_plans` 0 行，落卡后 **1 行**；界面上 `sediment-verdict` 从
+     「不能沉淀」变成「可以沉淀」，`sediment-name` / `sediment-save` 都在。
+   - 截图：`10.11-19-sediment-saved.png`（与 10.11-19 既有三张 md5 互异）。
+
+⑨ **`jd.capture.run` 在 fixture 上失败的根因与修法**（P2，本轮修）：
+   - 根因不是选择器、也不是登录态，是 **`CONSENT_REQUIRED`**：抓取按适配器声明的平台 `boss` 要一份
+     **真实平台**自动化风险确认，而 `fixture` 包的源全是回环地址（`http://127.0.0.1:10233`）——
+     拿回环包去要真实签字，会把本地取证永远卡死。
+   - 修法：`jd.capture` 只对**真实站点**要签字——新增纯函数 `requiresRealSiteConsent(origins)`：
+     全回环源放行、含任一非回环源（或不可解析的源）才 `ensureConsent`。按适配器现声明的 `origins` 判，
+     不写死平台 id。三例单测（全回环 / 真实 / 混合）。
+   - 原有的四条「签字判据」用例改成用 **real 包**跑（行为变了，但判据本身不变：真实站点仍必须签字，
+     且签字判据排在额度闸门之前、签字前零导航零落账）。platform-boss 包 193 例全过。
+   - 残留一条 P3：失败步在 `agent.loop.read` 的步步读数里 `code` 只有 `TOOL_FAILED`，
+     工具自己的结构化码（如 `CONSENT_REQUIRED`）只出现在 observation 里——读视图看不出口径，
+     建议单列一条（不影响本次修复的正确性）。

@@ -40,6 +40,7 @@ import {
   draftFromDetail,
   draftFromSummary,
   type JdCaptureConfig,
+  requiresRealSiteConsent,
 } from './jd-capture.js';
 import { JdStoreService } from './jd-store.js';
 import {
@@ -100,6 +101,7 @@ async function boot(
   pacerGapMs = 0,
   gate: GateConfig = { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS },
   agentTools = false,
+  pack: 'fixture' | 'real' = 'fixture',
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-jd-capture-'));
   sandboxes.push(dir);
@@ -130,7 +132,7 @@ async function boot(
   fibers.push(await ctx.plugin(EntitlementGateService, gate));
   fibers.push(await ctx.plugin(JdStoreService, {}));
   // 真实适配器：`browser.page` 那一步取到的是上面那只替身。
-  fibers.push(await ctx.plugin(BossPlatformService, { pack: 'fixture' }));
+  fibers.push(await ctx.plugin(BossPlatformService, { pack }));
   const captureFiber = await ctx.plugin(JdCaptureService, captureConfig(config));
   fibers.push(captureFiber);
 
@@ -662,7 +664,15 @@ describe('接管后重新读页面（spec 2.8-11 的 C 半边）', () => {
 
 describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', () => {
   it('没签过字：CONSENT_REQUIRED，一次页面调用都不发、一条额度也不扣', async () => {
-    const { capture, sessions, gate, fake, ledger, events } = await boot(twoScreenScript(['1001', '1002']));
+    // 签字只对真实站点（2026-11-22 裁定）：fixture 是回环包，不再要真实风险确认；这里用 real 包验签字判据。
+    const { capture, sessions, gate, fake, ledger, events } = await boot(
+      twoScreenScript(['1001', '1002']),
+      {},
+      0,
+      { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS },
+      false,
+      'real',
+    );
     sessions.revoke('boss');
     await expect(capture.run({ keyword: '前端' })).rejects.toMatchObject({
       code: 'CONSENT_REQUIRED',
@@ -683,6 +693,8 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', (
       { targetCount: 3 },
       0,
       gateConfig,
+      false,
+      'real',
     );
     await capture.run({ keyword: '前端' });
     expect(gate.check('search')).toMatchObject({ allowed: false, remaining: 0 });
@@ -694,9 +706,14 @@ describe('首次启用自动化的风险确认（spec 2.7-06 的抓取侧）', (
   });
 
   it('补上签字之后同一条链路走得通：一次 run 只问一次签字', async () => {
-    const { capture, sessions, fake, ledger } = await boot(twoScreenScript(['1001', '1002', '1003']), {
-      targetCount: 3,
-    });
+    const { capture, sessions, fake, ledger } = await boot(
+      twoScreenScript(['1001', '1002', '1003']),
+      { targetCount: 3 },
+      0,
+      { mode: 'unlimited', dailyLimits: DEFAULT_DAILY_LIMITS },
+      false,
+      'real',
+    );
     sessions.revoke('boss');
     await expect(capture.run({ keyword: '前端' })).rejects.toMatchObject({ code: 'CONSENT_REQUIRED' });
     sessions.grant('boss');
@@ -749,12 +766,14 @@ describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10�
   });
 
   it('对话入口调抓取：没签过字被 CONSENT_REQUIRED 拦下，一次导航都不发也不落账（2.8-10）', async () => {
+    // 同一条裁定：签字只对真实站点。用 real 包验「工具入口也会被签字拦下」。
     const { tools, sessions, fake, ledger } = await boot(
       twoScreenScript(['1001', '1002', '1003']),
       { targetCount: 3 },
       0,
       undefined,
       true,
+      'real',
     );
     sessions.revoke('boss');
     await expect(tools?.call('jd.capture.run', { criteria: { keyword: '前端' } })).rejects.toMatchObject({
@@ -781,5 +800,20 @@ describe('agent 工具路径上的抓取闸门与账本（spec 2.8-08 / 2.8-10�
     expect(tools?.removed).toEqual(['jd.capture.run']);
     // 摘回的只有自己那一条：`jd.store` 还在，它那只只读手必须留在清单里。
     expect(tools?.list().map((tool) => tool.id)).toEqual(['jd.store.list']);
+  });
+});
+
+describe('requiresRealSiteConsent（2026-11-22 裁定：签字只对真实站点）', () => {
+  it('全回环源：不需要真实站点签字（fixture 包不该卡在这）', () => {
+    expect(requiresRealSiteConsent(['http://127.0.0.1:10233'])).toBe(false);
+    expect(requiresRealSiteConsent(['http://localhost:10233'])).toBe(false);
+  });
+
+  it('真实源：需要签字', () => {
+    expect(requiresRealSiteConsent(['https://www.zhipin.com'])).toBe(true);
+  });
+
+  it('混着回环与真实源：按真实站点对待', () => {
+    expect(requiresRealSiteConsent(['http://127.0.0.1:10233', 'https://www.zhipin.com'])).toBe(true);
   });
 });

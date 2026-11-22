@@ -234,7 +234,10 @@ export class JdCaptureService extends Service {
         { platform: targetPlatform, capabilities: adapter.meta.capabilities },
       );
     }
-    consentGateOf(this.ctx).ensureConsent(targetPlatform);
+    // **只对真实站点要自动化风险签字**（2026-11-22 裁定）：fixture 包的源全是回环地址，
+    // 它不是真实平台、也没有真实账号可被自动化，拿它去要一份「真实平台风险确认」会把本地取证永远卡死。
+    // 判据用适配器声明的 `origins` 现判，不写死平台 id——换端口、再加一只演示包都不用改这里。
+    if (requiresRealSiteConsent(adapter.meta.origins)) consentGateOf(this.ctx).ensureConsent(targetPlatform);
     const gate = asApp(this.ctx)['entitlement.gate'];
     const { value } = await gate.perform('search', { targetId: criteria.keyword }, () =>
       this.runOnce(criteria, signal, adapter),
@@ -449,6 +452,27 @@ export class JdCaptureService extends Service {
       `JD 抓取编排就绪：平台 ${this.config.platform} · 目标 ${String(this.config.targetCount)} 条 · 上限 ${String(this.config.maxRounds)} 轮 · 轮间停顿由 outbound.throttle 随机给出 · 节点执行器${registry ? `已登记 ${JD_CAPTURE_KIND}` : '未登记（工作流未挂载）'} · agent 工具登记 ${String(tools)} 个${tools === 0 ? '（注册表未挂载）' : ''}`,
     );
   }
+}
+
+/**
+ * 这份适配器声明的源里有没有**真实站点**（非本机回环）。
+ *
+ * 自动化风险确认是给真实平台的：`fixture` 包指向 `127.0.0.1`，它不是真实平台、没有真实账号风险，
+ * 因此不该被「请先签一份真实平台风险确认」挡住（2026-11-22 裁定：`jd.capture.run` 在 fixture 上
+ * 曾因此恒 `CONSENT_REQUIRED`，搜岗主链在本地取证里根本跑不通）。
+ * @param origins 适配器 `meta.origins`（完整 origin 列表）
+ * @returns 至少有一个非回环源时为 true（按真实站点对待）
+ */
+export function requiresRealSiteConsent(origins: readonly string[]): boolean {
+  return origins.some((origin) => {
+    try {
+      const host = new URL(origin).hostname;
+      return !(host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]');
+    } catch {
+      // 解析不了的源按真实站点处理：宁可多要一次签字，也不放行一个看不懂的地址。
+      return true;
+    }
+  });
 }
 
 declare module '@auto-cc/core' {
