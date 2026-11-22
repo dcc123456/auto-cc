@@ -1057,6 +1057,8 @@ interface JourneyContext {
 
 **I. 16/17/18 复验的四条必修与三条口径（PMO 2026-11-22 裁定）**：QA 在 `cdd51f7` 上确认 16 只有 3/6 类通过，其中 H（`propose` 没 await，计划卡出不来）、I（`kbSearch` 没 await、`trackingCurrent` 写死）、J（提醒句甩英文枚举）、G（`route_unknown` 没接）四条是假实现、必修；I 同时是 17 第 4 条不成立的原因。另三条口径：`/tool` 不属 18 计划卡射程（显式人工命令可直跑，但必须过闸门与风险确认，不豁免）；越权负对照用 fixture 平台跑（回环免签字，真平台越权留用户在场）；18 的模型通道可指本地 fixture（证据标 `fixture-model`，不当真实模型结论，真 key 在用户实例上验）。
 
+**S. 裸 key 检查要盖插值参数路径（PMO 2026-11-22 裁定）**：`paused` 无原因时界面出裸 key `home.unattendedValue.noReason`——纯函数把 key 当插值参数传、`t()` 不二次翻译参数，而单测断言的是参数形状（`params.reason === '…noReason'`），所以测试绿、活体红。要求：裸 key 检查必须覆盖插值参数路径；单测断言**渲染结果**不含 `home.` / `chat.` / `assistant.` 这类 key；修后由 QA 复扫全页，扫到即不可判 `[x]`。10.11-20 因此暂记 `[!]`。
+
 **Q. 28 的定位更正（QA 2026-11-22）**：读到空值的是 **`shell.getStatus().kernelViewUrl`**——`closeWebPage()` 后约 1.5s 内空串、随后恢复，`snapshot().url` 同期一直正确；四条生命周期路径上快照都不为 null。另：`2f859e2` 表里「导航后 `/alt`」实际是 `sessions.open('fixture-alt')`，不是 `page.navigate`（平台模式对 fixture 会 `NAVIGATE_URL_REJECTED`，`allowedOrigins` 只有 zhipin）。28 仍记 `[!]`。
 
 **R. 04 修复与待复跑（2026-11-22）**：`744523f` 用 `unattendedStatusKey` 纯函数覆盖六态（无单→只建议、active→已授权 N 岗且内层不带前缀、paused→已暂停+原因原文且无原因也明说、expired/revoked/restart-required 各一句），两份语言包同步；等 QA 复跑「暂停态原因」「已授权单层前缀」两格后才判绿。
