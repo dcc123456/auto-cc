@@ -28,18 +28,28 @@ export function KernelAddressBar() {
   const lastReadUrl = useRef('');
 
   /**
+   * 把一份地址落到本栏的两个 state：输入框只在「人没改过」时跟随，人的草稿不抢。
+   * @param url 主进程给的地址（可能是占位页）
+   */
+  const applyUrl = useCallback((url: string): void => {
+    // 先把「上一次的地址」取出来再改 ref：函数式 updater 是稍后跑的，那时 ref 已经是新值，
+    // 拿它去比会把刚读到的地址自己判成"人改过"而丢掉（本轮实测：事件到了、输入框还停在占位页）。
+    const previousUrl = lastReadUrl.current;
+    lastReadUrl.current = url;
+    setCurrentUrl(url);
+    setDraft((previous) => (previous === '' || previous === previousUrl ? url : previous));
+  }, []);
+
+  /**
    * 读一次内核视图当前 URL（只读，不触发导航）。
    * @returns 主进程此刻报的地址（读不到时为空串）；调用方按它决定能不能刷新
    */
   const read = useCallback(async (): Promise<string> => {
     const reply = await bridge?.shell['getStatus']();
     if (!reply?.ok) return '';
-    const url = reply.value.kernelViewUrl;
-    setCurrentUrl(url);
-    setDraft((previous) => (previous === '' || previous === lastReadUrl.current ? url : previous));
-    lastReadUrl.current = url;
-    return url;
-  }, [bridge]);
+    applyUrl(reply.value.kernelViewUrl);
+    return reply.value.kernelViewUrl;
+  }, [bridge, applyUrl]);
 
   useEffect(() => {
     void read();
@@ -51,18 +61,20 @@ export function KernelAddressBar() {
     return () => window.clearTimeout(timer);
   }, [read]);
 
-  // 站点视图显隐、窗口回到前台都重读一次：会话有可能是在「面板已经开着」的时候才被打开的，
-  // 那时没有任何推送会告诉我们地址变了（事件白名单里没有导航事件），只靠挂载那一次会一直停在占位 URL。
+  // 地址变了由主进程推（`shell/kernel-view-url`，2026-11-22 裁定②：只在值真的变了时发）；
+  // 显隐与窗口回前台再各补读一次，兜住「推送错过一次也还在」——读数仍以主进程那份为准。
   useEffect(() => {
     if (!bridge) return;
+    const offUrl = bridge.on('shell/kernel-view-url', (url) => applyUrl(url));
     const offVisible = bridge.on('shell/kernel-view-visible', () => void read());
     const onFocus = (): void => void read();
     window.addEventListener('focus', onFocus);
     return () => {
+      offUrl?.();
       offVisible?.();
       window.removeEventListener('focus', onFocus);
     };
-  }, [bridge, read]);
+  }, [bridge, read, applyUrl]);
 
   const { busy, notice, noticeTone, run, setNotice } = useBridgeAction(read);
   const navigate = () => {

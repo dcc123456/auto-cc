@@ -2020,6 +2020,14 @@ declare module 'cordis' {
      */
     'shell/kernel-view-visible'(visible: boolean): void;
     /**
+     * 内嵌内核视图的地址变化时由 `shell` 发出（spec 10.11-29⑤ / 2026-11-22 裁定②）。
+     * 为什么必须有一条推送：地址栏在「右栏已经展开、站点后来才被打开」时既等不到可见性变化（值没变）、
+     * 也不会失去焦点，只能停在挂载时读到的占位 `data:` 页上，按刷新会被协议闸拒（本轮实测）。
+     * 载荷就是新地址；**只在值真的变了时发**（去重判据见 `packages/shell/src/kernel-view-url.ts`，
+     * 同值重发会把界面刷成事件风暴）。
+     */
+    'shell/kernel-view-url'(url: string): void;
+    /**
      * 工作流每推进一次（起步 / 步骤开始 / 步骤结束 / 暂停 / 续跑）由 `workflow.runner` 发出
      * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
      */

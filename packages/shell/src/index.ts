@@ -27,6 +27,7 @@ import {
   resolveCompanionCommand,
 } from './companion-editor.js';
 import { decideOpenPicker, decideSavePicker } from './file-picker.js';
+import { markKernelViewUrl } from './kernel-view-url.js';
 import { resolveRevealTarget } from './reveal-target.js';
 import { clampSlotRect, clampZoomFactor } from './slot-bounds.js';
 import { decideTakeover, topmostAlive } from './view-takeover.js';
@@ -119,6 +120,8 @@ export class ShellService extends Service {
   private zoomFactor = 1;
   private quitting = false;
   private lastError: string | undefined;
+  /** 上一次已经推给界面的内核视图地址；只用于「变了才发」，不当作读数来源（读数永远是 `getURL()`）。 */
+  private pushedKernelViewUrl = '';
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -571,6 +574,7 @@ export class ShellService extends Service {
     this.applyZoomFactor();
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
     this.observeLoadFailure(view.webContents);
+    this.observeKernelViewUrl(view);
     view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
     void view.webContents.loadURL(url);
   }
@@ -590,6 +594,26 @@ export class ShellService extends Service {
       this.ctx.emit('shell/view-error', this.kernelViewError);
       this.noteError(`内核视图加载失败 ${code} ${description} @ ${failedUrl}`);
     });
+  }
+
+  /**
+   * 监听内核视图主帧的地址变化，变了才推 `shell/kernel-view-url`（spec 10.11-29⑤）。
+   *
+   * 为什么需要它：地址栏在「面板已经开着、站点后来才被打开」时，既收不到 `kernel-view-visible`（值没变），
+   * 也不会失去焦点，于是停在占位 `data:` 页上，按刷新被协议闸拒（本轮实测）。去重判据单独成函数并有负对照，
+   * 免得同一次装载连发几条把界面刷成事件风暴。
+   * @param view 刚建好的内核视图（接管子视图不在这里：它是父页之上的一层，不改变地址栏指向的地址）
+   */
+  private observeKernelViewUrl(view: WebContentsView): void {
+    const push = (next: string): void => {
+      if (view !== this.kernelView) return;
+      const decision = markKernelViewUrl(this.pushedKernelViewUrl, next);
+      this.pushedKernelViewUrl = decision.previous;
+      if (decision.emit) this.ctx.emit('shell/kernel-view-url', next);
+    };
+    // 主帧导航与页内导航（hash / history.pushState）都算地址变化；子帧不算。
+    view.webContents.on('did-navigate', (_event, url) => push(url));
+    view.webContents.on('did-navigate-in-page', (_event, url) => push(url));
   }
 
   /**

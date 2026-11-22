@@ -3670,6 +3670,9 @@ export const RENDERER_EVENTS = [
   'shell/view-error',
   // 内核视图可见性（裁定⑱）：默认收起的那一栏要随主进程的挂载/收回自己长回来，界面不轮询。
   'shell/kernel-view-visible',
+  // 内核视图地址变了（spec 10.11-29 裁定②）：地址栏在「面板已开着、站点后来才开」时没有别的信号可用；
+  // **只在值真的变了时发**（负对照见 `packages/shell/src/kernel-view-url.ts`），载荷就是新地址。
+  'shell/kernel-view-url',
   'workflow/progress',
   'chat/delta',
   // 自愈重定位成功（spec 2.2-05）：选择器腐化要被看见，而不是藏在日志里。
@@ -3711,6 +3714,7 @@ export interface RendererEventSignatures {
   'shell/view-error': KernelViewLoadError;
   /** 载荷就是 `ShellStatus.kernelViewVisible` 那一个布尔，不另包一层（§2.7）。 */
   'shell/kernel-view-visible': boolean;
+  'shell/kernel-view-url': string;
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;
   'locator/relocated': LocatorRelocatedEvent;
