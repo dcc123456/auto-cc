@@ -378,23 +378,38 @@ export class OutboundDeliverService extends Service {
     const targetKey = greetTargetLabel({ jobId, conversationTarget });
     const filePath = this.resolveResumePath(parsed.data.filePath, targetKey);
 
-    // 渠道在准备工作里就问（同打招呼的理由）：平台名写错要在**读文件、算 hash 之前**就失败，
-    // 而不是让人在界面上确认完一份永远递不出去的简历。
+    const attachment = this.readAttachment(filePath);
+
+    const resumeVersion =
+      parsed.data.resumeVersion ??
+      (parsed.data.snapshotId ? `${parsed.data.snapshotId}:${attachment.sha256}` : `sha256:${attachment.sha256}`);
+    // **越权/去重先于渠道**（2026-11-22 裁定，与打招呼同一条）：传输可用性不得掩盖权限问题。
+    // 对账要读取旧尝试，只有真正的新外发才在这里拒绝成功重放与未知结局。
+    if (!forReconciliation) {
+      const authorization = maybeService<{
+        current(nowMs?: number): { platform: string; targets: string[]; status: string } | null;
+      }>(this.ctx, 'outbound.authorization');
+      const single = authorization?.current(nowMs) ?? null;
+      if (single && single.status === 'active') {
+        const allowed = single.platform === platform && single.targets.includes(targetKey);
+        if (!allowed) {
+          throw new AppError(
+            'OUTBOUND_TARGET_NOT_AUTHORIZED',
+            `岗位 ${targetKey} 不在本次授权集合里（授权单覆盖 ${single.platform} 的 ${String(single.targets.length)} 个岗）`,
+            'outbound.deliver',
+          );
+        }
+      }
+      this.gate.assertOutboundFresh(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion });
+    }
+
+    // 渠道排在越权/去重之后（同上）：平台名写错仍要在话术与页面动作之前失败，只是不许抢在权限前面。
     const sources = deliverChannelsOf(this.ctx);
     if (!sources?.deliverChannel(platform)) {
       throw new AppError('OUTBOUND_CHANNEL_MISSING', `平台 ${platform} 现在没有可用的投递渠道`, 'outbound.deliver', {
         platform,
         deliverable: sources?.deliverablePlatforms() ?? [],
       });
-    }
-    const attachment = this.readAttachment(filePath);
-
-    const resumeVersion =
-      parsed.data.resumeVersion ??
-      (parsed.data.snapshotId ? `${parsed.data.snapshotId}:${attachment.sha256}` : `sha256:${attachment.sha256}`);
-    // 对账要读取旧尝试，只有真正的新外发才在这里拒绝成功重放与未知结局。
-    if (!forReconciliation) {
-      this.gate.assertOutboundFresh(DELIVER_ACTION, { platform, targetId: targetKey, resumeVersion });
     }
     return {
       platform,

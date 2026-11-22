@@ -233,8 +233,8 @@ export class OutboundGreetService extends Service {
 
     // 无人值守入口先过授权闸门（范围/窗口/风控暂停/停用/24h 都在那一处判）：它必须排在页面动作与花费之前，
     // 被拒的这一次连话术都不生成。手动路径不带 `unattended`，行为一字不变（PMO 2026-11-20 裁定）。
+    const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
     if (parsed.data.unattended === true) {
-      const authorization = maybeService<UnattendedAuthorizer>(this.ctx, 'outbound.authorization');
       if (!authorization) {
         throw new AppError(
           'UNATTENDED_NOT_AUTHORIZED',
@@ -243,6 +243,21 @@ export class OutboundGreetService extends Service {
         );
       }
       authorization.authorize('greet', { platform, targetId: targetKey, resumeVersion, workflowRunId: runId, nowMs });
+    } else if (authorization) {
+      // **越权判定先于渠道判定**（2026-11-22 裁定）：手动路径若有一份生效中的授权单，
+      // 目标不在集合里就该报「无权」，而不是因为平台没渠道报「渠道缺失」——语义上传输可用性排在权限之后。
+      // 没有授权单时行为一字不变（仍由额度闸门与风险确认守着）。
+      const single = authorization.current(nowMs);
+      if (single && single.status === 'active') {
+        const allowed = single.platform === platform && single.targets.includes(targetKey);
+        if (!allowed) {
+          throw new AppError(
+            'OUTBOUND_TARGET_NOT_AUTHORIZED',
+            `岗位 ${targetKey} 不在本次授权集合里（授权单覆盖 ${single.platform} 的 ${String(single.targets.length)} 个岗）`,
+            'outbound.greet',
+          );
+        }
+      }
     }
 
     // 风险确认问在**最前面**（早于渠道、早于话术生成）：没签过字就不该花一次 LLM、更不该碰页面（spec 2.7-06）。
@@ -250,9 +265,15 @@ export class OutboundGreetService extends Service {
     this.progress(platform, targetKey, 'consent', 1);
     consentGateOf(this.ctx).ensureConsent(platform);
 
-    // 渠道放在第一步问（不是发送前才问）：平台名写错时要在**花钱生成话术之前**就失败，
-    // 而不是等 LLM 写完一段发不出去的文案。现问现取，所以本服务不持有任何平台状态。
-    this.progress(platform, targetKey, 'channel', 2);
+    // 重复防护读 43 号持久化尝试：四元组不含 run 维，跨入口/跨运行/跨重启都不能重放。
+    const gate = asApp(this.ctx)['entitlement.gate'];
+    const ledger = asApp(this.ctx)['usage.ledger'];
+    this.progress(platform, targetKey, 'duplicate', 2);
+    gate.assertOutboundFresh(GREET_ACTION, { platform, targetId: targetKey, resumeVersion });
+
+    // 渠道排在授权/越权/去重之后（2026-11-22 裁定：传输可用性不得掩盖权限问题），
+    // 但仍早于话术生成——平台名写错不该等 LLM 写完一段发不出去的文案。
+    this.progress(platform, targetKey, 'channel', 3);
     const sources = greetChannelsOf(this.ctx);
     const channel = sources?.greetChannel(platform) ?? null;
     if (!channel) {
@@ -261,12 +282,6 @@ export class OutboundGreetService extends Service {
         greetable: sources?.greetablePlatforms() ?? [],
       });
     }
-
-    // 重复防护读 43 号持久化尝试：四元组不含 run 维，跨入口/跨运行/跨重启都不能重放。
-    const gate = asApp(this.ctx)['entitlement.gate'];
-    const ledger = asApp(this.ctx)['usage.ledger'];
-    this.progress(platform, targetKey, 'duplicate', 3);
-    gate.assertOutboundFresh(GREET_ACTION, { platform, targetId: targetKey, resumeVersion });
 
     const scriptService = asApp(this.ctx)['outbound.script'];
     let finalText: string;
@@ -505,6 +520,12 @@ export class OutboundGreetService extends Service {
 
 /** 授权闸门的窄形状（本包不 import 服务类，按名字现问，§2.7/§9 的 2.5 实测条）。 */
 interface UnattendedAuthorizer {
+  /** 现读当前授权单（没有就是 null）——手动路径要用它判「目标是否在授权集合里」。 */
+  current(nowMs?: number): {
+    platform: string;
+    targets: string[];
+    status: string;
+  } | null;
   authorize(
     action: 'greet' | 'deliver',
     context: {

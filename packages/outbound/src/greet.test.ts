@@ -546,10 +546,12 @@ describe('打招呼的界面进度（spec 2.5-16）', () => {
     const events: GreetProgressEvent[] = [];
     ctx.on('outbound/greet-progress', (event) => events.push(event));
     const receipt = await greet.perform(request());
+    // 2026-11-22 裁定：越权/去重判定排在渠道之前（传输可用性不得掩盖权限问题），
+    // 所以这里 `duplicate` 在 `channel` 前面；九个阶段的总数与步号不变。
     expect(events.map((event) => event.phase)).toEqual([
       'consent',
-      'channel',
       'duplicate',
+      'channel',
       'content',
       'blacklist',
       'quota',
