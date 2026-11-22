@@ -62,3 +62,15 @@
    在 14 天柱与五级漏斗**之下**补一行 `[data-testid="home-trend-none"]`：「— 这段时间还没有成功外发」+ 直达键「去搜岗位」（62px）。
    读数：`trendNone` 文本如上，`trendBars=14`、漏斗五项仍为 0/0/0/0/0 —— 10.11-05 的柱与漏斗读数不因此翻案，
    这一行是**加在下面的一句人话 + 入口**，不是把柱图换掉。
+
+⑧ F2 修正（2026-11-22 裁定）：「慢」与「挂」不再是同一句话。
+   - 实现：`useBlock` 的 8s 计时器给错误打 `timedOut:true`；失败态变成 `{reason, timedOut}`，
+     三处文案分叉为「这一块读不到：<原因原文>」与「这一块 8 秒没有回音：读取超时，可以重试」，
+     并在 DOM 上带 `data-timeout="true|false"` 供机器读。
+   - 活体（`node tmp/g11/batch/pf2.mjs`）：停 `journey-tracking`（快失败）→ 数字块
+     「— 这一块读不到：服务上没有可调用的方法：journey.tracking.list」+ `data-timeout=false`；
+     另有「重试」可点。
+   - **慢返回那一支本轮取不到活体**：本机没有一个可控的慢口子——停 `resume-doc`/`journey` 都是**快失败**
+     （`服务未挂载`），contextBridge 暴露的对象是冻结的，注入延迟改不动 `window.autoCC`。
+     这一支由纯函数单测钉住：`HomePanel.timeout.test.ts` 三例（超时=true / 读不到=false / 非 Error 收口）。
+     QA 若也注入不了，这条就按「单测 + 代码路径」判，别按「活体造不出来」记缺陷。

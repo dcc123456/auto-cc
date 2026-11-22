@@ -33,8 +33,28 @@ type NumberCell = 'quota' | 'progress' | 'sends' | 'todo';
 /** 趋势区间的两档（7/30 天）；天数只影响 `funnel.trend` 的窗口，不影响口径本身。 */
 type TrendWindow = 7 | 30;
 
-/** 一块的加载态：`loading` 时画等高骨架，`ready` 后才有数字。 */
-type BlockState<T> = { state: 'loading' } | { state: 'failed'; reason: string } | { state: 'ready'; value: T };
+/**
+ * 一块的加载态：`loading` 时画等高骨架，`ready` 后才有数字。
+ *
+ * `failed` 带一个 `timedOut`：**「慢」与「挂」必须是两种结果**（2026-11-22 裁定，QA 的 F2）。
+ * 服务被摘掉（桥调用永不返回）与读得慢（>8s）都会走到超时，但前者是「读不到」、
+ * 后者是「这次没答上来、可能下一次就来」——压成同一句话会让人以为服务坏了。
+ */
+type BlockState<T> =
+  { state: 'loading' } | { state: 'failed'; reason: string; timedOut: boolean } | { state: 'ready'; value: T };
+
+/** 一块读数的等待上限（毫秒）；超时只说明「这一次没答上来」，不等于服务不存在。 */
+const BLOCK_TIMEOUT_MS = 8_000;
+
+/**
+ * 把一次失败落成「一块的失败态」，并把**超时**与**读不到**分开（2026-11-22 裁定 / QA 的 F2）。
+ * @param error 读取函数抛出的东西；超时那一路带 `timedOut: true`（由 `useBlock` 的计时器标记）
+ * @returns 原因原文 + 是不是超时（界面据此给不同的那句话与 `data-timeout`）
+ */
+export function blockFailureState(error: unknown): { reason: string; timedOut: boolean } {
+  const timedOut = (error as { timedOut?: boolean } | null)?.timedOut === true;
+  return { reason: error instanceof Error ? error.message : String(error), timedOut };
+}
 
 /** 柱高的固定档位：Tailwind 只生成源码里出现过的类名，所以按 8 档映射，不写内联 style。 */
 const BAR_HEIGHT_CLASSES = ['h-1', 'h-2', 'h-3', 'h-4', 'h-6', 'h-8', 'h-10', 'h-14'] as const;
@@ -66,18 +86,20 @@ function useBlock<T>(load: () => Promise<T | { error: string }>, timeoutReason: 
   const [state, setState] = useState<BlockState<T>>({ state: 'loading' });
   const run = useCallback(() => {
     setState({ state: 'loading' });
-    // 服务被摘掉后桥调用可能**永不返回**（下游 PENDING），界面不能停在骨架上：超时落「不可用 + 原因」。
+    // 服务被摘掉后桥调用可能**永不返回**（下游 PENDING），界面不能停在骨架上：超时落「读取超时 + 重试」。
+    // 与「读不到」共用一次 `setState`，但 `timedOut` 标出来，文案与 `data-timeout` 因此能分开读。
     const timedOut = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(timeoutReason)), 8_000);
+      setTimeout(() => reject(Object.assign(new Error(timeoutReason), { timedOut: true })), BLOCK_TIMEOUT_MS);
     });
     void Promise.race([load(), timedOut])
       .then((value) => {
-        if (value && typeof value === 'object' && 'error' in value) setState({ state: 'failed', reason: value.error });
-        else setState({ state: 'ready', value });
+        if (value && typeof value === 'object' && 'error' in value) {
+          setState({ state: 'failed', reason: value.error, timedOut: false });
+        } else setState({ state: 'ready', value });
       })
       .catch((error: unknown) => {
-        // 服务挂掉/桥接抛错时必须落到「不可用 + 原因」，不能停在骨架上（spec 10.11-08）。
-        setState({ state: 'failed', reason: error instanceof Error ? error.message : String(error) });
+        // 服务挂掉/桥接抛错落到「读不到 + 原因」；超时落到「读取超时」（两者文案与 data-timeout 不同）。
+        setState({ state: 'failed', ...blockFailureState(error) });
       });
   }, [load, timeoutReason]);
   useEffect(() => {
@@ -107,7 +129,14 @@ export function pickHomeBlocker(input: {
   return null;
 }
 
-/** 4 数字所需的读数（每格来自唯一口，缺哪个就只让那一格降级）。 */
+/**
+ * 4 数字所需的读数。
+ *
+ * 口径澄清（2026-11-22，QA 的 F1）：这一块的**粒度是「块」不是「格」**——五个只读口在一个
+ * `Promise.all` 里取齐，任一失败就把整块落成「不可用 + 原因 + 重试」。原来那句「缺哪个就只让哪一格降级」
+ * 与实现不符，删掉：真按格降级要么四份超时各管各的、要么容忍半格「—」混着 0 显示，两种都会让
+ * 「这一格是真没有还是没读到」读不出来。
+ */
 interface HomeNumbers {
   quota: { used: number; limit: number | null; remaining: number | null } | null;
   tracked: JobTrackingView[] | null;
@@ -144,7 +173,10 @@ export function HomePanel() {
   // effect 跟着无限重跑（本轮实测直接打满渲染进程、CDP 都超时）。刷新时再推进一次。
   const nowRef = useRef(Date.now());
 
-  /** 数字块：额度、追踪、投递成功数、最近一笔、授权数与执行器完成数（逐口读，缺一不影响别的格）。 */
+  /**
+   * 数字块：额度、追踪、投递成功数、最近一笔、授权数与执行器完成数，**一块读齐**。
+   * 五个口任一失败 → 整块不可用（口径见 `HomeNumbers` 的注释；不是逐格降级）。
+   */
   const loadNumbers = useCallback(async (): Promise<HomeNumbers> => {
     const nowMs = nowRef.current;
     const todayStart = dayStartMs(nowMs);
@@ -229,6 +261,16 @@ export function HomePanel() {
     const chatLeg = reply.value.legs.find((row) => row.leg === 'chat');
     return { missing: chatLeg?.missing ?? ['baseUrl', 'model', 'apiKey'] };
   }, [bridge, t]);
+
+  /**
+   * 一块失败时的那句话：**超时与读不到分开**（2026-11-22 裁定 / QA 的 F2）。
+   * @param state 失败的那一块（`timedOut` 由 `useBlock` 标）
+   * @returns 超时说「N 秒没有回音」，读不到说原因原文
+   */
+  const failureText = (state: { reason: string; timedOut: boolean }): string =>
+    state.timedOut
+      ? t('home.timedOut', { seconds: BLOCK_TIMEOUT_MS / 1000 })
+      : t('home.unavailable', { reason: state.reason });
 
   const timeoutReason = t('home.unavailable.timeout');
   const [numbers, reloadNumbers] = useBlock(loadNumbers, timeoutReason);
@@ -468,7 +510,7 @@ export function HomePanel() {
             data-testid="home-numbers-unavailable"
             className="col-span-full flex flex-wrap items-center gap-2 rounded-lg border border-line bg-ink-900/60 px-3 py-2 text-[11px] text-amber"
           >
-            <span>— {t('home.unavailable', { reason: numbers.reason })}</span>
+            <span data-timeout={String(numbers.timedOut)}>— {failureText(numbers)}</span>
             <DeskButton action="home-numbers-retry" variant="line" compact onClick={reloadNumbers}>
               {t('home.retry')}
             </DeskButton>
@@ -583,8 +625,12 @@ export function HomePanel() {
         {trend.state === 'loading' ? (
           <div className="h-40 animate-pulse rounded bg-ink-800" data-testid="home-trend-skeleton" />
         ) : trend.state === 'failed' ? (
-          <p className="text-[11px] text-amber" data-testid="home-trend-unavailable">
-            {t('home.unavailable', { reason: trend.reason })}
+          <p
+            className="text-[11px] text-amber"
+            data-testid="home-trend-unavailable"
+            data-timeout={String(trend.timedOut)}
+          >
+            {failureText(trend)}
           </p>
         ) : (
           <div className="flex flex-col gap-3" data-testid="home-trend-body">
@@ -681,8 +727,12 @@ export function HomePanel() {
           </details>
         ) : null}
         {next.state === 'failed' ? (
-          <p className="mt-1 text-[11px] text-amber" data-testid="home-next-unavailable">
-            {t('home.unavailable', { reason: next.reason })}
+          <p
+            className="mt-1 text-[11px] text-amber"
+            data-testid="home-next-unavailable"
+            data-timeout={String(next.timedOut)}
+          >
+            {failureText(next)}
             <DeskButton action="home-next-retry" variant="line" compact onClick={reloadNext}>
               {t('home.retry')}
             </DeskButton>

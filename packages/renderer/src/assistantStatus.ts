@@ -23,6 +23,19 @@ export interface AssistantStatusReading {
   blocked?: boolean;
 }
 
+/**
+ * 「需要你」的计数口径（spec 10.11-11）：待确认计划 + 逐条批准 + **执行器待办**，三样相加。
+ *
+ * 为什么单独成函数：这三项来自三个不同的读数（`agent.loop` 的 proposed、`agent.pause.pending` 的条数、
+ * `journey.unattended.view` 的 pending），相加的规则要是散在面板里，加第四类时没人知道该改哪。
+ * @param input 三项各自的条数（读不到的按 0，别让缺读数长出一个假的「需要你」）
+ * @returns 角标要显示的条数；负数按 0 收口（脏读数不制造负角标）
+ */
+export function mixNeedsYou(input: { pauseCards: number; proposedPlan: number; executorPending: number }): number {
+  const total = input.pauseCards + input.proposedPlan + input.executorPending;
+  return Number.isFinite(total) && total > 0 ? total : 0;
+}
+
 let current: AssistantStatusReading = {};
 
 const statusListeners = new Set<() => void>();

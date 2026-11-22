@@ -330,7 +330,8 @@
         "go": "去处理"
       },
       "trendNone": "— 这段时间还没有成功外发",
-      "trendNoneGo": "去搜岗位"
+      "trendNoneGo": "去搜岗位",
+      "timedOut": "这一块 {{seconds}} 秒没有回音：读取超时，可以重试"
     },
     "assistant": {
       "capsule": "助手",

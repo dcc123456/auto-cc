@@ -330,7 +330,8 @@
         "go": "Fix it"
       },
       "trendNone": "— No successful outreach in this period yet",
-      "trendNoneGo": "Find jobs"
+      "trendNoneGo": "Find jobs",
+      "timedOut": "No answer from this block within {{seconds}}s: read timed out, you can retry"
     },
     "assistant": {
       "capsule": "Assistant",

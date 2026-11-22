@@ -15,8 +15,14 @@
    不是伪造状态）→ 角标 `{kind:'blocked', rect:{w:6,h:6}, animation:'none'}`，闭眼时换成 needs/running 也不抢位。
 ⑥ 无脉冲动画：五档读数的 `getComputedStyle(...).animationName` 全是 `none`。
 
-**缺口（如实记）**：`needsYou` 现在只算「待确认计划 + 逐条批准」两项（`agentPause.pending` + run.status==='proposed'），
-判据里的第三项「执行器待办」没有计入——那个事实在 `journey.unattended.view` 上，助手面板目前不读它。这条没做，不写成已过。
+⑦ 执行器待办（2026-11-22 裁定，本轮补）：`needsYou` 现在是三项相加——
+   待确认计划（`agentRun.run.status==='proposed'`）+ 逐条批准（`agentPause.pending.length`）+
+   **执行器待办**（`journey.unattended.view().pending.length`，读不到按 0）。
+   相加规则抽成纯函数 `mixNeedsYou`，四例单测（全空=0 / 三项相加 / 只有执行器待办也算 / 脏读数收口到 0）。
+   助手面板按「run 动、表态单动」同源重读这一口，不新开轮询、不新开读取通道。
+
+**仍未取到的活体**：执行器 `pending > 0` 那一态要一整条「授权 → 起跑」的链才造得出来（本轮没跑），
+所以这一类的**读数**只有单测 + 接线，不是活体读数；11 因此保持 `[!]`，等 QA 用 fixture 构造 pending>0 复验。
 
 证据图：`10.11-11-badge-needs.png`（md5 96352966…）、`10.11-11-badge-running.png`（f9752a7c…）、
 `10.11-11-badge-blocked.png`（54b4e565…），三张互异。

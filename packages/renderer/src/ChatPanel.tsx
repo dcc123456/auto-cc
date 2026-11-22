@@ -54,7 +54,7 @@ import { pushDeskToast } from './deskToast';
 import { useAgentPause } from './useAgentPause';
 import { useAgentRun } from './useAgentRun';
 import { useBridgeAction } from './useBridgeAction';
-import { reportAssistantStatus } from './assistantStatus';
+import { mixNeedsYou, reportAssistantStatus } from './assistantStatus';
 import { reportDeskTier } from './deskStatus';
 import { useSediment } from './useSediment';
 import { useTakeover } from './useTakeover';
@@ -416,13 +416,32 @@ export function ChatPanel() {
    * 把「在跑 / 需要你 / 被拦」三类事实报给顶栏那颗助手胶囊（spec 10.11-11）。
    * 口径照 plan §14.2：需要你只计待确认计划 + 逐条批准 + 投递待确认，普通未读不亮。
    */
+  /** 执行器待办（`journey.unattended.view` 的 pending 条数）：角标第三类事实，读不到按 0。 */
+  const [executorPending, setExecutorPending] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const reply = await bridge?.journey['unattended.view']();
+      if (cancelled) return;
+      setExecutorPending(reply?.ok ? reply.value.pending.length : 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 与另外两类同源刷新：run 动、表态单动，待办也可能跟着动，一次读把三样对齐。
+  }, [bridge, agentRun.run, agentPause.pending]);
+
   useEffect(() => {
     reportAssistantStatus({
       running: agentRun.run?.status === 'running',
-      needsYou: (agentPause.pending?.length ?? 0) + (agentRun.run?.status === 'proposed' ? 1 : 0),
+      needsYou: mixNeedsYou({
+        pauseCards: agentPause.pending?.length ?? 0,
+        proposedPlan: agentRun.run?.status === 'proposed' ? 1 : 0,
+        executorPending,
+      }),
       blocked: takeover.state?.isHeld === true && takeover.state.reason === 'risk',
     });
-  }, [agentRun.run, agentPause.pending, takeover.state]);
+  }, [agentRun.run, agentPause.pending, executorPending, takeover.state]);
 
   const read = useCallback(async () => {
     const reply = await bridge?.chat['session.current']();
