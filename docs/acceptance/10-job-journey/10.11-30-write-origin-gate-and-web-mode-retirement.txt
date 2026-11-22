@@ -1,0 +1,68 @@
+10.11-30 改造第 ③ 步（未登记来源的写动作闸口 + 来源标记）与第 ④ 步（web 模式表面退役）（2026-11-22）
+
+背景：QA 第 ⑥ 条在 `37e3271` 上不通过——未登记来源页面上的点击真的执行了（`__qaClicks` 0→1→2），
+`agent.pause.pending()` 全程 0。原因写实：第 ② 步只放开了导航，唯一的动作闸门仍是旧的
+`kernelViewMode === 'web'` 只读判定，而合并分区后未登记页面归 `platform`，那道闸根本不触发。
+
+【③ 动作闸口】
+① 判据面：`platform.registry.isRegisteredOrigin(origin)`（新增）——归一化到 `URL.origin` 后
+   与各适配器 `meta.origins` 比；登记表为空或地址解析不了**恒 false**（判不准就不认）。
+   真源清单是知识包的 `origins`（不是 `sessions` 的 `startUrl`：一个平台常有登录域与主域两个源）。
+② 闸口位置：`browser.act` 服务层，`perform()`（click / type / select）与 `upload()` 取到视图之后、
+   等待与定位之前。判的是**顶层页面**的源（`contents.getURL()`）——用户眼前那块页面才是信任单元，
+   已登记站点内嵌的第三方帧仍属于这次访问；未登记页面里的任何一帧都不许动手。
+③ 拒绝形状：`WRITE_ORIGIN_UNREGISTERED`，details = `{ url, action, origin }`，人读原话里直接写
+   「助手不在上面做「click」，一个动作都没有派发」。**拒绝时一个脚本都不发**，所以页面自记的动作计数必然为 0。
+④ 覆盖范围：渲染层直调、工作流节点、外发适配器走的都是同一道闸（闸在服务里，不查「谁在调」，
+   只查「脚下这块页面是谁的」）。
+
+【③ 的行为变化：比用户裁定更严，这条要 PMO 裁】
+用户裁定的口径是「未登记来源的写动作要**先问一次**，确认才做」。当前落地是**一律不执行**：
+拒绝时连确认卡都不开。原因不是省事，而是**没有不可伪造的批准凭据**：
+- `agent.pause` 的确认单以「run 里的某一步」为单位（载荷有 runId / planStepIndex / toolId），
+  循环之外（渲染层直调、工作流节点）开不出这张单；
+- 若把「已批准」做成工具入参里的一位，那它来自模型草案，等于让模型给自己放行（5.3-04 防的正是这个）；
+- 若做成服务层的第二个布尔参数，任何调用方都能填 true，闸门就只剩装饰。
+因此本轮选择 fail-closed，并把「确认后放行」留给一次契约决定（要么给 agent 工具调用加一层
+不可伪造的执行上下文，要么给 `agent.pause` 加一个按来源记账的批准口）。QA 的负对照 ④「确认后放行」
+因此**当前无法通过**，不是没跑。
+
+【③ 来源标记（QA 第 ② 条：未登记页面的文字不得驱动已登记来源上的写动作）】
+① 实施点：`agent.loop`。每步工具**成功返回**之后看读数里的地址（`url` / `frames[].url`），
+   落在未登记来源上就给这条 run 打 `untrustedPageRead`。
+② 生效方式：此后每一步 `effect !== 'read'` 的步骤，即便策略已经放行（`auto` 档「不再逐步确认」），
+   也会被升级成一次确认（`CONFIRMATION_REQUIRED` → 既有 `agent.pause` 卡片），卡上写明
+   「这条任务已经读过未登记来源页面的内容（页面里的文字不等于你的指令）」。
+③ 为什么判「读过什么」而不判「此刻在哪」：注入文本可以指使助手先导航到已登记平台再动手，
+   那一刻脚下页面合法、闸口放行，而驱使它的是上一页读进来的字。
+④ 边界（写实）：标记只活在内存里的 run 作用域上；服务被重建（改配置 / 重启）后这条 run 本来也不在跑，
+   重建出来的作用域不带标记——丢的方向是「回到普通档位规则」，不是「自动放行」。
+   登记处缺席时按「判不出 ⇒ 都算未登记」处理（方向是多问一句）。
+
+【④ web 模式表面退役】
+删除：`shell.openWebPage` / `shell.closeWebPage`（含白名单两条、桥接签名两条）、`WEB_MODE_PARTITION`、
+`ShellStatus.kernelViewMode` 与 `kernelViewPlatformHint`、`shell.webPlatformHint()`、`lastPlatformMount`、
+错误码 `WEB_MODE_URL_REJECTED` / `WEB_MODE_READ_ONLY`、`frame-channel.ts` 里按模式只读的那道闸、
+`web-mode.test.ts`、地址栏的模式标记 /「任意网页」入口 /「回到平台」出口 / 落在平台域名上的提示条、
+以及语言包 `kernel.web.*` 七个键。
+保留并改通用：外链仍一律 deny（AGENTS.md §8.1），事件 `shell/web-popup-blocked` 改名
+`shell/popup-blocked`，文案 `kernel.popup.blocked`「外链被拦截：{{host}}（不会新开窗口）」双语。
+`browser.page.navigate` 仍是唯一导航口（只校验协议），地址栏不再有第二条分流。
+
+【门禁】
+- `pnpm typecheck` → `TYPECHECK_EXIT=0`
+- `pnpm lint` → `LINT_EXIT=0`（含 `check-agent-model-authority.ts`：判定口实参仍是
+  `const decision = this.policy.decide({ tier, planConfirmed, toolId })` 那一处、字段恰好三个，
+  来源升级写在它之后单独一句，没有把页面或模型产出的名字塞进判定口）
+- `pnpm format:check` → `FORMAT_EXIT=0`
+- `pnpm test` → `TEST_EXIT=0`，**2800 例全过**；`@auto-cc/plugin-browser` 327 例、
+  `@auto-cc/plugin-agent` 266 例。
+  新增用例：`act-service.test.ts` 五条（四类写动作各被拒且页面零脚本、登记后放行、地址解析不了按未登记）、
+  `platform-registry.test.ts` 三条（归一化比中 / 没声明的源 / 空表与坏地址）、
+  `loop.test.ts` 四条（未登记来源读后写动作要确认且拒绝后零副作用、批准后真的执行、已登记来源不加戏、
+  没有登记处时按未登记处理）。
+  删除用例：`web-mode.test.ts` 三条（随模式一起退役）。
+
+【尚未做】
+⑤ 十项负对照的活体复跑（本片继续做，见随后同一 ID 的证据文件）；QA 的 ⑥ 复跑；
+`04`「确认后放行」待 PMO 裁定（本文件已写清为什么当前卡住）。

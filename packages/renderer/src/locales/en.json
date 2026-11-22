@@ -516,14 +516,8 @@
       "show": "Show the web page view",
       "resizeHandle": "Drag to change the width; double-click goes back to the narrowest",
       "canvasResizeHandle": "Drag to change the split width; double-click goes back to 65%",
-      "web": {
-        "marker": "Any web page (assistant read-only)",
-        "back": "Back to platform",
-        "enter": "Any web page",
-        "reasonEmpty": "Enter a URL first",
-        "platformHint": "This address is on {{host}}: the assistant is read-only here too",
-        "switchPlatform": "Back to platform mode",
-        "popupBlocked": "External link blocked: {{host}} (no new windows in any-web-page mode)"
+      "popup": {
+        "blocked": "External link blocked: {{host}} (no new window opens)"
       }
     },
     "session": {

@@ -288,6 +288,36 @@ describe('平台登记处（spec 2.2-07）', () => {
   });
 });
 
+/**
+ * 按来源判动作的判据面（2026-11-22 裁定③）。
+ *
+ * `browser.act` 的写动作闸口只问这一件事：**脚下这块页面是不是某个已登记平台声明的源**。
+ * 所以这里要钉住三件事：归一化后能比中、没声明的源恒 false、解析不了的一律算未登记。
+ */
+describe('已登记来源的判定（2026-11-22 裁定③）', () => {
+  it('声明的源能比中，尾斜杠与深层路径都归一化之后比', async () => {
+    const registry = await boot();
+    registry.register(fakeAdapter('boss', { origins: ['https://www.zhipin.com/'] }));
+    expect(registry.isRegisteredOrigin('https://www.zhipin.com')).toBe(true);
+    expect(registry.isRegisteredOrigin('https://www.zhipin.com/web/geek/jobs')).toBe(true);
+  });
+
+  it('没声明的源（含只差端口的同主机）恒 false', async () => {
+    const registry = await boot();
+    registry.register(fakeAdapter('fixture', { origins: ['http://127.0.0.1:10233'] }));
+    expect(registry.isRegisteredOrigin('http://127.0.0.1:10234')).toBe(false);
+    expect(registry.isRegisteredOrigin('https://example.com')).toBe(false);
+    expect(registry.isRegisteredOrigin('http://127.0.0.1:10234/injection')).toBe(false);
+  });
+
+  it('登记表为空或地址解析不了时恒 false（判不准就不动手）', async () => {
+    const registry = await boot();
+    expect(registry.isRegisteredOrigin('https://www.zhipin.com')).toBe(false);
+    expect(registry.isRegisteredOrigin('about:blank')).toBe(false);
+    expect(registry.isRegisteredOrigin('not a url')).toBe(false);
+  });
+});
+
 describe('渲染层拿不到适配器（spec 2.2-07 的边界）', () => {
   it('白名单里只有 platform.registry.list，取回实例与登记都不过进程边界', () => {
     expect(isAllowedCall('platform.registry.list')).toBe(true);

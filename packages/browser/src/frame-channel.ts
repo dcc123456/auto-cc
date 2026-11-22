@@ -10,6 +10,10 @@
  *
  * 这里同时放着「拿视图」和「等装载落定」两个小工具：页面操作和风控观测都要它们，
  * 前者在 spec 2.1 就已经收过一轮，后者是同一份等待逻辑的第二个使用者（AGENTS.md §2.2）。
+ *
+ * **按模式只读的那道闸已经退役**（2026-11-22 用户裁定：内嵌的就是一个真实浏览器，没有模式切换）：
+ * 现在「这块页面能不能动手」由动作服务按**来源**判（`browser.act` 的 `requireWritePermitted`），
+ * 取句柄这一步只回答「有没有一块页面」——一个入口只做一件事，判来源的那一处也只有一处。
  */
 import { AppError } from '@auto-cc/core';
 import type { WebContents, WebFrameMain } from 'electron';
@@ -31,18 +35,6 @@ export type KernelHost = Pick<ShellService, 'kernelContents' | 'getStatus'>;
  * @throws 视图不存在或已销毁时 `NO_KERNEL_SESSION`（先 `sessions.open(platform)` 再说页面）
  */
 export function requireKernelContents(host: KernelHost, scope: string): WebContents {
-  const status = host.getStatus();
-  // 「任意网页」模式（spec 10.11-30）：助手对这块页面**只读**。
-  // 闸设在这里而不是每个服务各写一遍：定位、点击、抓取、导航、外发脚本最终都要从这里取句柄，
-  // 挡住这一处，就没有第二条路能把手伸进那块不可信页面（AGENTS.md §2.5 的同一逻辑只留一个入口）。
-  if (status.kernelViewMode === 'web') {
-    throw new AppError(
-      'WEB_MODE_READ_ONLY',
-      '当前是「任意网页」模式：助手对这块页面只读，定位、点击、抓取与导航都不执行；要操作平台请先「回到平台」',
-      scope,
-      { url: status.kernelViewUrl },
-    );
-  }
   const contents = host.kernelContents();
   if (!contents) {
     throw new AppError('NO_KERNEL_SESSION', '内核视图尚未挂载任何平台，先打开一个会话再操作页面', scope, {

@@ -18,6 +18,7 @@ import {
   asApp,
   Context,
   fiberState,
+  Service,
   sleep,
   toolResult,
   type AgentPauseAnswer,
@@ -136,6 +137,7 @@ async function bootLoop(
   tier: AutonomyLevel = 'auto',
   pauseTimeoutMs = BASE_PAUSE_TIMEOUT_MS,
   withTakeover = true,
+  registeredOrigins: string[] | null = null,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'auto-cc-loop-'));
   dirs.push(dir);
@@ -161,6 +163,13 @@ async function bootLoop(
     const takeoverFiber = ctx.plugin(FakeTakeoverService, {});
     await takeoverFiber;
     takeoverFibers.push(takeoverFiber);
+  }
+  // 来源标记的判据面（2026-11-22 裁定）：`platform.registry` 在循环里是**软取**（见 `platforms` 的注释），
+  // 所以台架默认不挂它——不挂即「判不出 ⇒ 按未登记处理」；要验「已登记来源不会被误标」的用例显式给清单。
+  if (registeredOrigins !== null) {
+    const registryFiber = ctx.plugin(FakeRegisteredOrigins, { origins: registeredOrigins });
+    await registryFiber;
+    opened.push(registryFiber);
   }
   const policyFiber = ctx.plugin(AgentPolicyService, {});
   await policyFiber;
@@ -280,6 +289,62 @@ function makeTickTool(calls: string[]): AgentTool<{ n: number }> {
         toolResult(
           { n: params.n },
           { summary: `已执行第 ${String(params.n)} 次`, evidenceRefs: [`tick:${String(params.n)}`] },
+        ),
+      );
+    },
+  };
+}
+
+/**
+ * 已登记来源的替身（`platform.registry` 的窄面，2026-11-22 裁定的来源标记要用）。
+ *
+ * 只实现 `isRegisteredOrigin`：循环软取这一口，问的是「这个源算不算已登记平台」，
+ * 其余登记/取回能力与这条判据无关，替身里一概没有——多写一份就成了另一套登记处。
+ */
+class FakeRegisteredOrigins extends Service {
+  static provide = 'platform.registry';
+  static Config = z.strictObject({ origins: z.array(z.string()) });
+
+  constructor(
+    ctx: Context,
+    private readonly config: { origins: string[] },
+  ) {
+    super(ctx, 'platform.registry');
+  }
+
+  /**
+   * @param origin 待判的源
+   * @returns 是否在台架给的清单里（按 `URL.origin` 归一化之后比）
+   */
+  isRegisteredOrigin = (origin: string): boolean => {
+    try {
+      const target = new URL(origin).origin;
+      return this.config.origins.some((declared) => new URL(declared).origin === target);
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
+ * 一只「读页面」的假手：读数里带页面地址（来源标记认的就是这个字段）。
+ * @param reads 每读一次追加一条地址，用例据此断言读了几次
+ * @returns 合规声明：`read` 级、无入参要求批准
+ */
+function makePageReadTool(reads: string[]): AgentTool<{ url: string }> {
+  return {
+    id: 'demo.pageRead',
+    titleKey: 'agent.tool.labels.demoPageRead',
+    description: '读一页并交回它的地址与正文',
+    input: z.strictObject({ url: z.string() }),
+    effect: 'read',
+    requiresConfirmation: false,
+    run: (params) => {
+      reads.push(params.url);
+      return Promise.resolve(
+        toolResult(
+          { url: params.url, text: '这一页的正文' },
+          { summary: `已读取 ${params.url}`, evidenceRefs: [`page:${params.url}`] },
         ),
       );
     },
@@ -2007,5 +2072,81 @@ describe('求职意向进计划器上下文（plan 2026-10-26 §3.4）', () => {
     // 旧读数（只有实体数组）不知道意向：不许替它编一句「没填」。
     expect(profileContextLines([{ kind: 'skill', payload: { name: 'React' } }]).lines).toEqual(['- skill: React']);
     expect(profileContextLines('不是对象')).toEqual({ entityCount: 0, lines: [] });
+  });
+});
+
+/**
+ * 来源标记：读过未登记来源的页面之后，改页面的动作一律要人点头（2026-11-22 裁定，QA 第 ⑥ 条的第 2 条）。
+ *
+ * 为什么这条不能只靠页面动作那一侧的来源闸口：注入文本可以让助手「导航到已登记平台」再动手——
+ * 那一刻脚下的页面是合法的，闸口放行，而驱使它的是上一页读进来的字。所以这里判的是**这条 run 读过什么**，
+ * 不是它此刻站在哪。判据落点只看全自动档：半自动档本来每一步都要问，这一条真正改的只有「一次授权不许
+ * 跨来源复用」。
+ */
+describe('来源标记（2026-11-22 裁定：未登记来源的读文本不得驱动已登记来源上的写动作）', () => {
+  /** 台账：这只手读过的页面地址（判「读没读、读了几次」）。 */
+  const readGoal = (url: string) => `demo.pageRead {"url":"${url}"} 然后 demo.write {"n":1}`;
+
+  it('读过未登记来源之后，全自动档也会停下来问：卡片写着原因，拒绝之后这一步一次都没动', async () => {
+    const rig = await bootLoop({}, 'auto', BASE_PAUSE_TIMEOUT_MS, true, ['http://127.0.0.1:10233']);
+    const reads: string[] = [];
+    rig.tools.register(makePageReadTool(reads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'deny' }));
+    const finished = await rig.loop.confirm(
+      (await rig.loop.propose(readGoal('http://127.0.0.1:10234/injection'))).runId,
+    );
+    expect(reads).toEqual(['http://127.0.0.1:10234/injection']);
+    // 一张卡，问的是那只**会改页面**的手，原因里写清「页面里的文字不等于你的指令」这条来源事实。
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'approval', toolId: 'demo.write' });
+    expect(cards[0]?.reason).toContain('未登记来源');
+    expect(finished.steps[1]).toMatchObject({ status: 'refused' });
+    // 判据的实质：拒绝之后副作用清单是空的。
+    expect(rig.calls).toEqual([]);
+  });
+
+  it('批准之后那一步才真的动：卡片不是走过场', async () => {
+    const rig = await bootLoop({}, 'auto', BASE_PAUSE_TIMEOUT_MS, true, ['http://127.0.0.1:10233']);
+    const reads: string[] = [];
+    rig.tools.register(makePageReadTool(reads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'approve' }));
+    const finished = await rig.loop.confirm(
+      (await rig.loop.propose(readGoal('http://127.0.0.1:10234/injection'))).runId,
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.decision).toBe('approve');
+    expect(rig.calls).toEqual(['write:1']);
+    expect(finished.status).toBe('completed');
+  });
+
+  it('读的是已登记来源就不加戏：全自动档一张卡都不开', async () => {
+    const rig = await bootLoop({}, 'auto', BASE_PAUSE_TIMEOUT_MS, true, ['http://127.0.0.1:10233']);
+    const reads: string[] = [];
+    rig.tools.register(makePageReadTool(reads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'approve' }));
+    const finished = await rig.loop.confirm((await rig.loop.propose(readGoal('http://127.0.0.1:10233/boss'))).runId);
+    expect(cards).toEqual([]);
+    expect(rig.calls).toEqual(['write:1']);
+    expect(finished.status).toBe('completed');
+  });
+
+  it('装配里没有登记处时不假装已登记：带地址的读数一律打标记、写动作一律先问', async () => {
+    // 台架默认就是「没挂 platform.registry」这一态（循环软取它）。判不准的方向定成「多问一句」。
+    const rig = await bootLoop();
+    const reads: string[] = [];
+    rig.tools.register(makePageReadTool(reads));
+    rig.tools.register(makeWriteTool(rig.calls));
+    const cards = watchPauses(rig.ctx, rig.pause, () => ({ decision: 'deny' }));
+    // 全自动档会给一份一次性授权；这里照样要求人点头，因为来源判不出。
+    const finished = await rig.loop.confirm(
+      (await rig.loop.propose(readGoal('https://www.zhipin.com/web/geek/jobs'))).runId,
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.reason).toContain('未登记来源');
+    expect(rig.calls).toEqual([]);
+    expect(finished.status).toBe('failed');
   });
 });

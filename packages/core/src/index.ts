@@ -19,6 +19,7 @@ import type {
   JdKeySource,
   JdReplyStatusSource,
   PagePacer,
+  RegisteredOriginSource,
   ResumeChannelSource,
   TakeoverStateSource,
   WorkflowExecutorRegistry,
@@ -266,6 +267,19 @@ export function consentGateOf(ctx: Context): ConsentGate {
  */
 export function takeoverStateOf(ctx: Context): TakeoverStateSource {
   return ctx.get('browser.takeover') as TakeoverStateSource;
+}
+
+/**
+ * 取「已登记来源」的询问面（2026-11-22 裁定③），实现方是 `platform.registry`。
+ *
+ * 与 `takeoverStateOf` 同一条理由做**硬依赖**：要它的是动作层的写动作闸口与循环的来源标记，
+ * 两者都把 `platform.registry` 写进了 `static inject`，装配没满足时它们根本不会 init。
+ * 做成「拿不到就当已登记」的软降级恰好是这条边界要防的那件事——**判不准就动手**。
+ * @param ctx 调用方的上下文
+ * @returns 已登记来源的窄询问面（只有一个判定方法，没有登记：登记是平台包自己的事）
+ */
+export function registeredOriginsOf(ctx: Context): RegisteredOriginSource {
+  return ctx.get('platform.registry') as RegisteredOriginSource;
 }
 
 /**

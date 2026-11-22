@@ -516,14 +516,8 @@
       "show": "展开网页窗口",
       "resizeHandle": "拖动改宽度；双击回到最窄",
       "canvasResizeHandle": "拖动改分栏宽度；双击回到 65%",
-      "web": {
-        "marker": "任意网页（助手只读）",
-        "back": "回到平台",
-        "enter": "任意网页",
-        "reasonEmpty": "先填网址",
-        "platformHint": "这条地址在 {{host}} 的平台上：助手在这里同样只读",
-        "switchPlatform": "回到平台模式",
-        "popupBlocked": "外链被拦截：{{host}}（任意网页模式下不新开窗口）"
+      "popup": {
+        "blocked": "外链被拦截：{{host}}（不会新开窗口）"
       }
     },
     "session": {

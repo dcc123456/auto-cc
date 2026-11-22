@@ -182,8 +182,6 @@ export type {
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
-  'shell.openWebPage',
-  'shell.closeWebPage',
   'shell.setKernelViewBounds',
   'shell.setKernelViewZoomFactor',
   'shell.revealInFolder',
@@ -602,18 +600,6 @@ export type ShellStatus = {
   kernelViewZoomFactor: number;
   /** 内核视图当前所占的会话分区；未挂载站点时是占位页的分区。 */
   kernelViewPartition: string;
-  /**
-   * 「任意网页」模式下，当前地址恰好落在**平台域名**上时给出的那一条（spec 10.11-30 裁定 (a)）：
-   * 值是那条地址；不自动切模式，只让界面提示「点此回到平台模式」。平台模式或不是平台域名时为 null。
-   */
-  kernelViewPlatformHint: string | null;
-  /**
-   * 内核视图当下是什么模式（spec 10.11-30，2026-11-22 裁定「任意网页」）：
-   * - `platform`：装着招聘平台站点，助手可定位/点击/抓取，外发走闸门；
-   * - `web`：用户在**独立分区** `persist:web` 里打开的任意 http(s) 页面，助手对它**只读**
-   *   （点击/定位/抓取/外发一律拒绝，`WEB_MODE_READ_ONLY`）。两个模式不共享 cookie 与存储。
-   */
-  kernelViewMode: 'platform' | 'web';
   /** 内核视图当前 URL（占位页会以 `data:` 原样出现）。 */
   kernelViewUrl: string;
   /**
@@ -2783,21 +2769,6 @@ export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
   /**
-   * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
-   * 与平台导航分开是这个口存在的前提：它按 `persist:web` 重新挂一版视图，而平台导航在既有会话视图里翻页。
-   * 自 2026-11-22 裁定后 `browser.page.navigate` 已不按平台名单拦地址（只剩协议红线），本口的存在理由
-   * 只剩「独立分区」这一条；进这个模式之后助手对它只读（`browser.act` / `locate` / `extract` / `page.navigate` 全拒）。
-   * @param url 目标地址；协议不是 http/https 时 `WEB_MODE_URL_REJECTED`
-   * @returns 壳层状态（含 `kernelViewMode: 'web'`）
-   */
-  'shell.openWebPage': { args: [url: string]; returns: ShellStatus };
-  /**
-   * 退出「任意网页」模式，回到最近一次挂过的平台视图（spec 10.11-30 的「回到平台」出口）。
-   * 平台视图按原分区重建，所以登录态还在；从未挂过平台时回到占位页。
-   * @returns 壳层状态（含 `kernelViewMode: 'platform'`）
-   */
-  'shell.closeWebPage': { args: []; returns: ShellStatus };
-  /**
    * 报一次槽位的实测几何（spec 8.8-01）。返回值就是 `shell.getStatus()` 的那份快照，
    * 让渲染层不用再追一次读——摆位有没有落地，调用方当场就能核对。
    */
@@ -3711,8 +3682,8 @@ export const RENDERER_EVENTS = [
   'shell/kernel-view-url',
   // Ctrl/⌘+J 由壳层接住后回推（见 `packages/core/src/events.ts` 的同名声明）：站点视图里也收得到。
   'shell/assistant-toggle',
-  // 任意网页模式里点了外链：一律 deny，但要让人看见原因（spec 10.11-30 裁定 (b)）。载荷是被拦的地址。
-  'shell/web-popup-blocked',
+  // 页面里点了外链：一律 deny，但要让人看见原因（2026-11-22 裁定后通用，不再分模式）。载荷是被拦的地址。
+  'shell/popup-blocked',
   // 执行器状态变了（2026-11-22 裁定 C）：角标第三类来源靠这条刷新，界面不轮询。
   'journey/unattended-changed',
   'workflow/progress',
@@ -3758,7 +3729,7 @@ export interface RendererEventSignatures {
   'shell/kernel-view-visible': boolean;
   'shell/kernel-view-url': string;
   'shell/assistant-toggle': true;
-  'shell/web-popup-blocked': string;
+  'shell/popup-blocked': string;
   'journey/unattended-changed': { status: string; pendingCount: number };
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;

@@ -14,7 +14,6 @@ import {
 import { AppError, Service, type Context } from '@auto-cc/core';
 import {
   APP_PARTITION,
-  partitionFor,
   type AuthorizationPausedEvent,
   type KernelViewLoadError,
   type KernelViewRect,
@@ -56,12 +55,6 @@ const rendererIndexPath = app.isPackaged
   ? path.join(__dirname, 'renderer', 'index.html')
   : path.join(repoRoot, 'packages', 'renderer', 'dist', 'index.html');
 /** 内核视图占位页：P1 用一行说明文字，P2 起替换为真实站点视图。 */
-/**
- * 「任意网页」模式的分区（spec 10.11-30，2026-11-22 裁定）。
- * 独立分区是这个模式成立的前提：招聘平台的 cookie / 存储绝不带过去，登录态不串。
- * 名字经 `partitionFor` 拼（分区只允许有那一个定义处，spec 2.7-02 的红线机检守着），不手搓字面量。
- */
-const WEB_MODE_PARTITION = partitionFor('web');
 
 const kernelViewPlaceholder =
   'data:text/html;charset=utf-8,' +
@@ -130,10 +123,6 @@ export class ShellService extends Service {
   private lastError: string | undefined;
   /** 上一次已经推给界面的内核视图地址；只用于「变了才发」，不当作读数来源（读数永远是 `getURL()`）。 */
   private pushedKernelViewUrl = '';
-  /** 内核视图当下是平台模式还是「任意网页」模式；重建视图时按分区重算，不单独记一份地址。 */
-  private kernelViewMode: 'platform' | 'web' = 'platform';
-  /** 最近一次挂过的平台视图（分区 + 起始地址）：退出「任意网页」时按它重建，登录态仍在。 */
-  private lastPlatformMount: { partition: string; url: string } | null = null;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -161,8 +150,6 @@ export class ShellService extends Service {
       // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
       // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
       kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
-      kernelViewMode: this.kernelViewMode,
-      kernelViewPlatformHint: this.webPlatformHint(),
       kernelViewUrl: contents?.getURL() ?? '',
       // 用户实际看到的是栈顶那一个：harness 用它证明接管发生（此时 `kernelViewUrl` 仍停在被盖住的父页）。
       activeKernelViewUrl: this.activeKernelContents()?.getURL() ?? '',
@@ -184,46 +171,6 @@ export class ShellService extends Service {
    */
   mountKernelSite = (partition: string, url: string): void => {
     this.createKernelView(partition, url);
-  };
-
-  /**
-   * 在**独立分区** `persist:web` 里打开任意 http(s) 页面（spec 10.11-30）。
-   *
-   * 与 `browser.page.navigate` 分开是刻意的：那条口在**既有会话视图**里翻页，这个口按 `persist:web`
-   * 重新挂一版视图（自 2026-11-22 裁定后导航口不再按平台名单拦地址，差别只剩分区）；进这个模式之后助手对它只读
-   * （点击/定位/抓取/外发一律拒绝，见 `requireKernelContents` 的那道闸）。
-   * @param url 目标地址；不是 http/https 时抛 `WEB_MODE_URL_REJECTED`（含 `javascript:` 与 `file:`）
-   * @returns 换完之后的壳层状态（`kernelViewMode: 'web'`）
-   */
-  openWebPage = (url: string): ShellStatus => {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new AppError('WEB_MODE_URL_REJECTED', `「任意网页」模式只接受 http/https：${url}`, 'shell.openWebPage');
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new AppError(
-        'WEB_MODE_URL_REJECTED',
-        `「任意网页」模式只接受 http/https：${parsed.protocol}`,
-        'shell.openWebPage',
-      );
-    }
-    this.createKernelView(WEB_MODE_PARTITION, parsed.href);
-    this.applyKernelViewVisible(true);
-    return this.getStatus();
-  };
-
-  /**
-   * 退出「任意网页」模式，回到最近一次挂过的平台视图（spec 10.11-30 的「回到平台」出口）。
-   *
-   * 按原分区重建，所以平台登录态还在；从未挂过平台时退回占位页（也就自然收起了视图）。
-   * @returns 换完之后的壳层状态（`kernelViewMode: 'platform'`）
-   */
-  closeWebPage = (): ShellStatus => {
-    if (this.lastPlatformMount) this.createKernelView(this.lastPlatformMount.partition, this.lastPlatformMount.url);
-    else this.createKernelView();
-    return this.getStatus();
   };
 
   /**
@@ -619,11 +566,6 @@ export class ShellService extends Service {
     // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
     // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
     this.kernelViewPartition = partition ?? '';
-    // 模式由分区决定：`persist:web` 之外都算平台模式（含占位页）。重建视图就是换模式，不另存一个标志位。
-    this.kernelViewMode = partition === WEB_MODE_PARTITION ? 'web' : 'platform';
-    if (partition !== undefined && partition !== WEB_MODE_PARTITION) {
-      this.lastPlatformMount = { partition, url };
-    }
     this.kernelViewError = null;
     win.contentView.addChildView(view);
     // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。
@@ -685,25 +627,6 @@ export class ShellService extends Service {
    * 只在 `keyDown`（且非自动重复）上接；**Esc 不接**：站点自己的 Esc 有用，我们不去抢。
    * @param contents 要监听的页面句柄（主窗口、内核视图、接管子视图各挂一份）
    */
-  /**
-   * 「任意网页」模式下当前地址是否落在平台域名上（spec 10.11-30 裁定 (a)）。
-   *
-   * 命中时**不自动切模式**——会话与视图在导航中途重建的风险大于收益；只把地址交出去，
-   * 由地址栏给一条「点此回到平台模式」的提示，切换仍由人按。
-   * @returns 命中的地址；平台模式、没有平台挂载记录、或同原点比较失败时为 null
-   */
-  private webPlatformHint(): string | null {
-    if (this.kernelViewMode !== 'web' || this.lastPlatformMount === null) return null;
-    const current = this.kernelView?.webContents.getURL() ?? '';
-    if (current === '') return null;
-    try {
-      if (new URL(current).origin === new URL(this.lastPlatformMount.url).origin) return current;
-    } catch {
-      // 地址不可解析（data: 占位页等）：这不是「平台域名」，不提示。
-    }
-    return null;
-  }
-
   private observeAssistantHotkey(contents: WebContents): void {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown' || input.isAutoRepeat) return;
@@ -731,8 +654,8 @@ export class ShellService extends Service {
       this.attachTakeoverView(decision.targetUrl.href);
       this.ctx.logger.info(`新标签已接管进会话分区 ${this.kernelViewPartition}：${decision.targetUrl.href}`);
     } else {
-      // 任意网页模式里点了外链：继续 deny，但要让人看见（spec 10.11-30 裁定 (b)）。
-      if (this.kernelViewMode === 'web') this.ctx.emit('shell/web-popup-blocked', rawUrl);
+      // 外链继续 deny，但要让人看见（2026-11-22 裁定后不再分模式）：界面据这条给一行通用原因。
+      this.ctx.emit('shell/popup-blocked', rawUrl);
       console.warn(`[shell] 已拒绝新窗口：${rawUrl}（${decision.reason}）`);
     }
     return { action: 'deny' };

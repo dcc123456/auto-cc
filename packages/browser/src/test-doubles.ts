@@ -489,6 +489,50 @@ export class FakePlatformRegistryService extends Service {
 
   /** @returns 替身当前那份可写清单（与真实现同形：只读投影、不含选择器） */
   list = (): PlatformRegistryView => ({ platforms: this.platforms });
+
+  /**
+   * 与真实现同名同语义：某个源是否由清单里某个平台声明（2026-11-22 裁定③的闸口靠它）。
+   *
+   * 默认清单**故意为空**：替身替的是「哪个平台登记进来了」这件事，替用例假设「本地回环天然可写」
+   * 会让未登记来源的用例全都假绿。所以要用写动作的用例必须显式 `registerOrigins()`，
+   * 这也正好让「忘了声明源」在用例里表现为动作被拒，而不是静默放行。
+   * @param origin 待判的源
+   * @returns 任一清单项声明了它时为 true
+   */
+  isRegisteredOrigin = (origin: string): boolean => {
+    let target: string;
+    try {
+      target = new URL(origin).origin;
+    } catch {
+      return false;
+    }
+    return this.platforms.some((platform) =>
+      platform.origins.some((declared) => {
+        try {
+          return new URL(declared).origin === target;
+        } catch {
+          return false;
+        }
+      }),
+    );
+  };
+
+  /**
+   * 登记一个声明了这些源的平台（用例里让「本地仿站算已登记」的写法）。
+   * @param origins 该平台声明的源
+   * @param id 平台标识（默认 `fixture`）
+   * @returns 本替身（便于链式写）
+   */
+  registerOrigins = (origins: string[], id = 'fixture'): this => {
+    this.platforms.push({
+      id,
+      displayName: id,
+      startUrl: origins[0] ?? '',
+      origins,
+      capabilities: ['chat'],
+    });
+    return this;
+  };
 }
 
 /**

@@ -77,6 +77,7 @@ import {
   type AgentStepView,
   type AutonomyLevel,
   type Context,
+  type RegisteredOriginSource,
   type TakeoverStateSource,
   type ToolEffect,
   type ToolResult,
@@ -98,7 +99,7 @@ import {
   type PlannerToolBrief,
 } from './model.js';
 import { pauseKindLabel, type AgentPauseService } from './pause.js';
-import type { AgentPolicyService } from './policy.js';
+import type { AgentPolicyService, PolicyDecision } from './policy.js';
 
 /** 迁移号段 16（plan §7.2 的 5.2-a 落点）：`agent_run` + `agent_step` 同一次迁移建出。 */
 export const AGENT_RUN_MIGRATION_VERSION = 16;
@@ -250,7 +251,40 @@ type RunScope = {
   freshRead: FreshPageRead | null;
   /** 已经用掉的重规划次数（5.5-04 的自转保险丝，只活在内存：重建服务时这条 run 本来也没在跑）。 */
   replanUsed: number;
+  /**
+   * 这条 run 是否读过**未登记来源**页面的内容（2026-11-22 裁定：来源标记）。
+   *
+   * 为什么要它：合并成一个真实浏览器之后，「页面里的文字」与「用户的指令」走的是同一条上下文。
+   * 未登记页面上写一句「去给 1001 打招呼」，模型完全可能照做，而在已登记来源上动手本身是合法的。
+   * 这个标记只做一件事：此后每一步**改页面**的动作都必须过人一次，全自动档也不替你跳过。
+   * 只活在内存里：它描述的是「这一条 run 读进来过什么」，重建服务时这条 run 本来也不在跑。
+   */
+  untrustedPageRead: boolean;
 };
+
+/**
+ * 取一份工具读数里「这段话是从哪些页面读来的」。
+ *
+ * 认两个字段：`url`（快照/导航这类单页读数）与 `frames[].url`（批量抽取那种逐帧读数）。
+ * 只认这两个是因为它们由读数自己携带：现问当前视图会把「这一步读的时候在哪」与「现在在哪」混成一件事，
+ * 而来源标记要回答的是前者。其余读数（知识库、账本、计划）不带地址，也就不参与来源判定。
+ * @param value 工具交回的结构化读数（不可信输入，按字段现取）
+ * @returns 去重后的地址表；没有可判来源的字段时为空数组
+ */
+function pageSourceUrlsOf(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const record = value as Record<string, unknown>;
+  const urls: string[] = [];
+  if (typeof record.url === 'string' && record.url !== '') urls.push(record.url);
+  if (Array.isArray(record.frames)) {
+    for (const frame of record.frames) {
+      if (typeof frame !== 'object' || frame === null) continue;
+      const frameUrl = (frame as { url?: unknown }).url;
+      if (typeof frameUrl === 'string' && frameUrl !== '') urls.push(frameUrl);
+    }
+  }
+  return [...new Set(urls)];
+}
 
 /** `agent_run` 的一行原始读数。 */
 type RunRow = {
@@ -621,6 +655,82 @@ export class AgentLoopService extends Service {
     return asApp(this.ctx)['agent.policy'];
   }
 
+  /**
+   * 平台登记处的窄询问面（2026-11-22 裁定：来源标记用它问「这个源算不算已登记平台」）。
+   *
+   * 这里刻意是**软取**而不是 `static inject`：本模块是 L3 对话层，`platform.registry` 属于浏览器层，
+   * 把整只登记处写进 inject 会让「摘掉浏览器那一行装配」连带把对话循环降成 PENDING——
+   * 而对话循环在只有知识库的装配里本来是该能跑的。软取的方向定成**判不出就按未登记处理**：
+   * 拿不到登记处时，任何带地址的页面读数都会给这条 run 打上来源标记，写动作因此一律要人点头。
+   * 判不准时选择「多问一句」，与这条边界要防的「判不准就动手」正好相反。
+   * @returns 登记处的询问面；未装配时为 null
+   */
+  private get platforms(): RegisteredOriginSource | null {
+    return maybeService<RegisteredOriginSource>(this.ctx, 'platform.registry') ?? null;
+  }
+
+  /**
+   * 这一步的读数如果来自未登记来源，就给这条 run 打上不可信标记（2026-11-22 裁定：来源标记）。
+   *
+   * 取的是工具交回的那份**读数**里的地址，而不是现问当前视图：视图在这之后可能已经被导航走了，
+   * 而「这段话是从哪读来的」是那一次读数自己的属性。没有 `url` / `frames` 的读数（例如纯本地计算）
+   * 一律不动标记——判不出来就不加戏。
+   * @param scope 本次 run 的作用域（标记写在它上面，只活在这条 run 里）
+   * @param value 工具交回的结构化读数（不可信输入，按字段现取）
+   */
+  private notePageSource(scope: RunScope, value: unknown): void {
+    if (scope.untrustedPageRead) return;
+    const urls = pageSourceUrlsOf(value);
+    if (urls.length === 0) return;
+    if (urls.every((url) => this.isRegisteredPageUrl(url))) return;
+    scope.untrustedPageRead = true;
+    // 记一行就够：这条日志的用途是「为什么后面每一步都在问人」，不是内容审计。
+    this.ctx.logger.warn(
+      `run ${scope.runId} 读到了未登记来源的页面内容（${urls.find((url) => !this.isRegisteredPageUrl(url)) ?? '未知地址'}）：此后每一步改页面的动作都要人点头`,
+    );
+  }
+
+  /**
+   * 不可信来源的升级判定：读过未登记来源的页面之后，**改页面**的动作一律要求人点头。
+   *
+   * 只在策略已经放行时才升级（`canRun === true`）：只读档与「这只手不在开放面上」问人也问不出结果，
+   * 把它们也翻成确认卡等于让人按一个按下去还是不动。半自动档本来就要问，这一条真正改的是
+   * **全自动档**：注入文本不许借用「已一次性授权」把动作直接执行掉。
+   * @param scope 本次 run 的作用域
+   * @param step 计划里的那一步
+   * @param decision 策略原本的判定
+   * @returns 原判定，或在读过不可信内容后升级成 `CONFIRMATION_REQUIRED`
+   */
+  private escalateUntrustedSource(scope: RunScope, step: AgentPlanStepView, decision: PolicyDecision): PolicyDecision {
+    if (!decision.canRun || !scope.untrustedPageRead) return decision;
+    const descriptor = this.registry.list().find((entry) => entry.id === step.toolId);
+    if (!descriptor || descriptor.effect === 'read') return decision;
+    return {
+      canRun: false,
+      code: 'CONFIRMATION_REQUIRED',
+      message: `这条任务已经读过未登记来源页面的内容（页面里的文字不等于你的指令）：第 ${String(
+        step.planStepIndex + 1,
+      )} 步「${step.toolId}」会改动页面，要先由你点头才做——批准就按卡片上的确认，拒绝则这一步不执行`,
+    };
+  }
+
+  /**
+   * 一个地址是否属于已登记平台。
+   * @param url 完整地址或源（不可信输入）
+   * @returns 解析得出源且该源由某个已登记适配器声明时为 true；解析不了为 false（判不准就不认）
+   */
+  private isRegisteredPageUrl(url: string): boolean {
+    let origin: string;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      return false;
+    }
+    const source = this.platforms;
+    // 判不出（没有登记处）按未登记处理：见 `platforms` 的注释，方向是「多问一句」。
+    return source === null ? false : source.isRegisteredOrigin(origin);
+  }
+
   /** 暂停通道（5.3-c）：开单等人用的那一条，循环自己不持有任何等待状态。 */
   private get pause(): AgentPauseService {
     return asApp(this.ctx)['agent.pause'];
@@ -874,6 +984,7 @@ export class AgentLoopService extends Service {
       planConfirmed: false,
       controller: new AbortController(),
       freshRead: null,
+      untrustedPageRead: false,
       replanUsed: 0,
     });
     return this.read(runId);
@@ -1180,25 +1291,28 @@ export class AgentLoopService extends Service {
         planConfirmed: scope.planConfirmed,
         toolId: step.toolId,
       });
-      if (!decision.canRun) {
+      // 来源标记的升级排在这一处之后（2026-11-22 裁定）：判定口只看档位与工具，不看页面；
+      // 这一句把「这条 run 读过未登记来源」翻成一次追问，改不动判定口本身的契约。
+      const effective = this.escalateUntrustedSource(scope, step, decision);
+      if (!effective.canRun) {
         // 接管中：**不落 refused 步行、不开确认单**，只停在安全点、游标不动（文件头第 6 条）。
         // 不落步行等于把这一步判死——恢复后它再也不会被走一遍，人交还页面看到的还是「这一步没做」；
         // 开确认单则是骗他再按一次「批准」，而此刻真正缺的那一句话不在卡片上，在他的手上。
         // 游标不动是 `resume` 能接上的全部凭据：那一格没有步行，`ensureScope` 重建出的游标就是它。
         // 接管这段账本身在号段 21 的 `takeover_events` 里（谁、何时、因为什么），这里不重复记。
-        if (decision.code === TAKEOVER_HELD) {
+        if (effective.code === TAKEOVER_HELD) {
           this.finish(scope, 'paused', TAKEOVER_HELD);
           return;
         }
         // 只有 `CONFIRMATION_REQUIRED` 是「等人一句话就能继续」的拒因：档位只读与「这只手不在开放面上」
         // 问人也问不出结果，照 5.2-02 的结局直接落 refused。把这两种情形也做成卡片，等于在一条用户
         // 根本批不了的路上让他按「批准」——那张按钮按下去还是不动，那就是骗他点一下。
-        if (decision.code !== 'CONFIRMATION_REQUIRED') {
-          this.writeStep(scope, step, 'refused', decision.message, [], null, decision.code);
+        if (effective.code !== 'CONFIRMATION_REQUIRED') {
+          this.writeStep(scope, step, 'refused', effective.message, [], null, effective.code);
           this.finish(scope, 'failed', 'POLICY_REFUSED');
           return;
         }
-        const approved = await this.awaitStepApproval(scope, step, decision.message);
+        const approved = await this.awaitStepApproval(scope, step, effective.message);
         if (!approved.ok) {
           this.refuseStep(scope, step, approved.rejection);
           return;
@@ -1221,6 +1335,9 @@ export class AgentLoopService extends Service {
       const reading = reply.ok ? reply.result.summary : `${reply.code}：${reply.message}`;
       // 恢复或重规划时那份**新**页面读数只在这一行落一次账：引用进 `evidence_refs`、原话进观察，
       // 用完就地清空（下一步要现状就再问一次，而不是把这一次读数当现状带着跑完整条 run，5.5-03）。
+      // 来源标记（2026-11-22 裁定）：这一步的读数如果来自**未登记来源**的页面，就把这条 run 记上。
+      // 排在观察摘要之前：摘要那一步会把正文裁短，那时再判断来源就会漏掉帧地址。
+      if (reply.ok) this.notePageSource(scope, reply.result.value);
       const fresh = scope.freshRead;
       scope.freshRead = null;
       const evidenceRefs = reply.ok
@@ -1819,6 +1936,11 @@ export class AgentLoopService extends Service {
       // 也不把一份不知道还算不算数的旧快照当成现状（5.5-03 的反面形态）。
       freshRead: null,
       replanUsed: 0,
+      // 重建出来的作用域**丢掉**来源标记：它描述的是「这一条 run 内读进来过什么」，而重建意味着
+      // 那一段内存已经随服务销毁。丢的方向是「回到普通档位规则」，不是「自动放行」——已登记来源上的
+      // 写动作本来就受档位规则管（半自动要人点头）；只有全自动档会因此少一层额外追问，
+      // 而全自动档本身要一份一次性的库内明示。这条限制写在这里，不假装标记能跨重启。
+      untrustedPageRead: false,
     };
     this.scopes.set(runId, scope);
     return scope;

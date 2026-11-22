@@ -9,7 +9,7 @@ import { AppError, Context, NO_CONFIG, type Fiber } from '@auto-cc/core';
 import type { LocateSpec } from '@auto-cc/shared';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BrowserActService, type BrowserActConfig } from './act-service.js';
-import { FakeLocateService, FakePageService, FakeShellService } from './test-doubles.js';
+import { FakeLocateService, FakePageService, FakePlatformRegistryService, FakeShellService } from './test-doubles.js';
 
 /** 动作服务配置：全部取默认节奏，本文件只关心校验，不关心等待时长。 */
 const ACT_CONFIG: BrowserActConfig = {
@@ -37,6 +37,9 @@ async function bootActWithoutSession(): Promise<BrowserActService> {
     await ctx.plugin(FakeShellService, NO_CONFIG),
     await ctx.plugin(FakePageService, NO_CONFIG),
     await ctx.plugin(FakeLocateService, NO_CONFIG),
+    // 动作服务现在还要 `platform.registry`（未登记来源的写动作闸口）；本文件不带会话视图，
+    // 校验顺序的判据不会走到那道闸，但注入缺失会让服务挂不上。
+    await ctx.plugin(FakePlatformRegistryService, NO_CONFIG),
   );
   fibers.push(await ctx.plugin(BrowserActService, ACT_CONFIG));
   return ctx.get('browser.act') as BrowserActService;

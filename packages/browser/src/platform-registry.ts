@@ -36,6 +36,19 @@ import type { PlatformAdapter } from './platform-contract.js';
  */
 export const platformRegistrySchema = z.strictObject({});
 
+/**
+ * 把一段地址或源归一到 `URL.origin`。
+ * @param raw 知识包里声明的源，或页面 `getURL()` 给出的完整地址
+ * @returns 归一化后的源；解析不了为 null（调用方据此判「不认」）
+ */
+function normalizeOrigin(raw: string): string | null {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
 export class PlatformRegistryService extends Service implements GreetChannelSource, ResumeChannelSource {
   static provide = 'platform.registry';
   static Config = platformRegistrySchema;
@@ -68,6 +81,24 @@ export class PlatformRegistryService extends Service implements GreetChannelSour
   list = (): PlatformRegistryView => ({
     platforms: [...this.adapters.values()].map((adapter): PlatformMetaView => adapter.meta),
   });
+
+  /**
+   * 判定一个源是否由某个已登记平台声明（2026-11-22 裁定③的「按来源」边界）。
+   *
+   * 为什么问登记处而不是问 `sessions`：会话清单里每个平台都只有一条 `startUrl`（首屏地址），
+   * 而真实平台常有登录域与主域两个源；**登记的真相在知识包的 `origins`**，会话行只是其中一条。
+   * 归一化后再比：知识包写 `https://www.zhipin.com/`、页面 `getURL()` 给 `https://www.zhipin.com/x`，
+   * 字符串直接比会漏。解析不了的一律算「未登记」——判不准就不动手。
+   * @param origin 待判的源（通常来自 `contents.getURL()` 的 `origin`）
+   * @returns 任一已登记适配器声明了这个源时为 true；空登记表恒 false
+   */
+  isRegisteredOrigin = (origin: string): boolean => {
+    const target = normalizeOrigin(origin);
+    if (target === null) return false;
+    return [...this.adapters.values()].some((adapter) =>
+      adapter.meta.origins.some((declared) => normalizeOrigin(declared) === target),
+    );
+  };
 
   /**
    * 按平台名取回适配器实例。

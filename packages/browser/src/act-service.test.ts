@@ -17,6 +17,7 @@ import {
   FakeAgentToolsService,
   FakeLocateService,
   FakePageService,
+  FakePlatformRegistryService,
   FakeShellService,
   errorDetails,
   fakeDebuggerView,
@@ -91,6 +92,11 @@ async function boot(config: Partial<BrowserActConfig> = {}, view: WebContents | 
     await ctx.plugin(FakePageService, NO_CONFIG),
     await ctx.plugin(FakeLocateService, NO_CONFIG),
   );
+  // 登记处替身默认把本地仿站那条源登记上（用例里所有页面都在 127.0.0.1:10233）：
+  // 未登记来源的用例各自换成别的源，见文末那一组。
+  const registry = await ctx.plugin(FakePlatformRegistryService, NO_CONFIG);
+  fibers.push(registry);
+  (ctx.get('platform.registry') as unknown as FakePlatformRegistryService).registerOrigins([`http://127.0.0.1:10233`]);
   const actFiber = await ctx.plugin(BrowserActService, { ...DEFAULT_ACT_CONFIG, ...config });
   fibers.push(actFiber);
   const shell = ctx.get('shell') as unknown as FakeShellService;
@@ -101,6 +107,7 @@ async function boot(config: Partial<BrowserActConfig> = {}, view: WebContents | 
     page: ctx.get('browser.page') as unknown as FakePageService,
     shell,
     actFiber,
+    registry: ctx.get('platform.registry') as unknown as FakePlatformRegistryService,
     tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
@@ -710,5 +717,75 @@ describe('agent 工具登记（spec 2.8-08 / plan §15.7 落点 4）', () => {
     await actFiber.dispose();
     expect(tools?.removed).toEqual(['browser.act.click', 'browser.act.type']);
     expect(tools?.list()).toEqual([]);
+  });
+});
+
+/**
+ * 未登记来源的写动作（2026-11-22 裁定③：「按来源判」的唯一落点）。
+ *
+ * 为什么这组必须存在：全应用合并成一个真实浏览器之后，平台页面与任意站点共用一个会话视图，
+ * 页面里的文字只需一句「去点那个按钮」就能让助手在可见页面上动手。点击一旦真发出去，
+ * 页面自记的动作计数就不是 0 了——而那个计数是负对照里唯一买不到的读数（助手说自己没点不算数）。
+ * 所以这里的判据是双重的：**错误码对**，且**页面里一个脚本都没跑**。
+ */
+describe('未登记来源的写动作（2026-11-22 裁定③）', () => {
+  /** 一块「未登记来源」的视图：顶层地址与帧都在 10234（没有平台声明这个源）。 */
+  const strayView = () => {
+    const calls: string[] = [];
+    const main = fakeFrame('http://127.0.0.1:10234/injection', { scripts: readyScripts, calls });
+    return { ...fakeDebuggerView({ main, subtree: [main], url: 'http://127.0.0.1:10234/injection' }), calls };
+  };
+
+  it('点击被拒：WRITE_ORIGIN_UNREGISTERED 带 url / 动作 / 来源，且页面里一个脚本都没发', async () => {
+    const view = strayView();
+    const { act } = await boot({}, view.contents);
+    await expect(act.click(spec)).rejects.toMatchObject({
+      code: 'WRITE_ORIGIN_UNREGISTERED',
+      path: 'browser.act',
+      details: { url: 'http://127.0.0.1:10234/injection', action: 'click', origin: 'http://127.0.0.1:10234' },
+    });
+    expect(view.calls).toEqual([]);
+    expect(view.log.commands).toEqual([]);
+  });
+
+  it('输入与下拉同样被拒（同一个闸口，不按动作各写一遍）', async () => {
+    for (const action of ['type', 'select'] as const) {
+      const view = strayView();
+      const { act } = await boot({}, view.contents);
+      const call = action === 'type' ? act.type(spec, '你好') : act.select(spec, 'v1');
+      await expect(call).rejects.toMatchObject({
+        code: 'WRITE_ORIGIN_UNREGISTERED',
+        details: { action },
+      });
+      expect(view.calls).toEqual([]);
+    }
+  });
+
+  it('文件注入也被拒，且排在读文件之前：不会被一个坏路径顶成 INVALID_ARGUMENT', async () => {
+    const view = strayView();
+    const { act } = await boot({}, view.contents);
+    await expect(act.upload(spec, '/不存在/的文件.pdf')).rejects.toMatchObject({
+      code: 'WRITE_ORIGIN_UNREGISTERED',
+      details: { action: 'upload' },
+    });
+    expect(view.calls).toEqual([]);
+  });
+
+  it('登记处把那个源登记进来之后同一块页面就能动手（闸口判的是来源，不是画面）', async () => {
+    const view = strayView();
+    const { act, registry, locate } = await boot({}, view.contents);
+    // 先证明这块页面此刻是被拒的。
+    await expect(act.click(spec)).rejects.toMatchObject({ code: 'WRITE_ORIGIN_UNREGISTERED' });
+    registry.registerOrigins(['http://127.0.0.1:10234']);
+    // 登记之后闸口放行；定位替身没预设结局，于是下一个结局必须是定位没过线，而不是来源拒绝。
+    locate.result = matched({ frameUrl: 'http://127.0.0.1:10234/injection' });
+    await expect(act.click(spec)).resolves.toMatchObject({ status: 'done' });
+  });
+
+  it('地址解析不了的视图按未登记处理（判不准就不动手）', async () => {
+    const view = fakeDebuggerView({ url: 'about:blank' });
+    const { act } = await boot({}, view.contents);
+    await expect(act.click(spec)).rejects.toMatchObject({ code: 'WRITE_ORIGIN_UNREGISTERED' });
+    expect(view.log.commands).toEqual([]);
   });
 });

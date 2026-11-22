@@ -210,18 +210,19 @@ export function App() {
     });
   };
 
-  // 任意网页模式里点了外链：壳层一律 deny，这里给一行可见原因（spec 10.11-30 裁定 (b)）。
+  // 页面里点了外链（或 target=_blank）：壳层一律 deny，这里给一行可见原因。
+  // 2026-11-22 裁定后不再分「模式」，文案也就不用再解释「你现在在哪一档」——只说这条被拦了。
   useEffect(() => {
     const bridge = window.autoCC;
     if (!bridge) return;
-    return bridge.on('shell/web-popup-blocked', (url) => {
+    return bridge.on('shell/popup-blocked', (url) => {
       let host = url;
       try {
         host = new URL(url).host;
       } catch {
         // 解析不了就原样显示：人至少知道是哪条被拦了。
       }
-      pushDeskToast({ action: 'web-popup-blocked', tone: 'seal', message: t('kernel.web.popupBlocked', { host }) });
+      pushDeskToast({ action: 'popup-blocked', tone: 'seal', message: t('kernel.popup.blocked', { host }) });
     });
   });
 

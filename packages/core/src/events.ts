@@ -283,6 +283,24 @@ export interface TakeoverStateSource {
 }
 
 /**
+ * 「这个源算不算已登记平台」的询问面（2026-11-22 裁定③的「按来源判」与来源标记），
+ * 实现方是 `platform.registry`。
+ *
+ * 形状声明在 L0 的理由与 `TakeoverStateSource` 完全相同：要用它的是动作层（L2）与循环（L3），
+ * 而「哪个平台声明了哪些源」的真相在内核的登记处（`platform.registry`，同样 L2，但归属另一包）。
+ * agent 层 import 浏览器包会被 eslint 的 `AGENT_CAPABILITY` 拦掉，所以 core 只声明这一口，
+ * 由实现方结构上满足。**只有读**：登记是平台包自己的 init 里做的事，判定口与循环都不许往名单里加源。
+ */
+export interface RegisteredOriginSource {
+  /**
+   * 判定一个源是否由某个已登记平台声明。
+   * @param origin 待判的源（通常是页面 `getURL()` 的 `origin`）
+   * @returns 任一已登记适配器声明了它时为 true；解析不了或登记表为空时为 false（判不准就不认）
+   */
+  isRegisteredOrigin(origin: string): boolean;
+}
+
+/**
  * 一次 run 的完整可序列化状态（spec 1.10-03 / 1.10-05）。
  *
  * 刻意做成普通数据而不是解释器内部状态：界面读数、事件载荷、P2 落库共用同一形状，
@@ -2059,11 +2077,12 @@ declare module 'cordis' {
      */
     'shell/assistant-toggle'(requested: true): void;
     /**
-     * 「任意网页」模式里点了 `window.open` / target=_blank（spec 10.11-30 裁定 (b), 2026-11-22）：
-     * 外链**继续 deny**（外部页面不许自己开窗口），但不能再「点了没反应」——界面据这条给一行可见原因。
+     * 页面里点了 `window.open` / target=_blank 而**没有**被接管成同分区子视图（2026-11-22 裁定后通用）：
+     * 外链**继续 deny**（外部页面不许自己开窗口，AGENTS.md §8.1），但不能「点了没反应」——
+     * 界面据这条给一行可见原因，文案不再分「模式」。
      * 载荷是被拦下的地址。
      */
-    'shell/web-popup-blocked'(url: string): void;
+    'shell/popup-blocked'(url: string): void;
     /**
      * 无人值守执行器的状态变了（spec 10.11-11 裁定 C, 2026-11-22）：起跑、停止请求、收尾各推一条。
      * 为什么要有它：角标的第三类来源（执行器待办）原来只靠挂载读一次，窗口长期开着时

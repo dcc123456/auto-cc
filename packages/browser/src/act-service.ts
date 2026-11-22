@@ -55,6 +55,7 @@ import { locateSpecSchema } from './platform-contract.js';
 import { assertSpecValid } from './locator-spec.js';
 import type { BrowserLocateService } from './locate-service.js';
 import type { BrowserPageService } from './index.js';
+import type { PlatformRegistryService } from './platform-registry.js';
 
 export const browserActSchema = z.strictObject({
   /** 一次动作前的等待上限（毫秒）；超时即结构化失败，不静默继续（spec 2.2-04）。 */
@@ -153,7 +154,8 @@ export class BrowserActService extends Service {
   static Config = browserActSchema;
   /** 动作必经定位：同一份打分与阈值只此一处（AGENTS.md §2.5）。 */
   /** `browser.page` 也必须声明：等不到可点时那条结构化失败要带快照，漏了就会以 TypeError 顶掉 WAIT_TIMEOUT。 */
-  static inject = ['shell', 'browser.locate', 'browser.page'];
+  /** `platform.registry` 是「这个源算不算已登记」的唯一真相（2026-11-22 裁定③），不在本包另存一份。 */
+  static inject = ['shell', 'browser.locate', 'browser.page', 'platform.registry'];
 
   constructor(
     ctx: Context,
@@ -213,6 +215,7 @@ export class BrowserActService extends Service {
    */
   upload = async (spec: LocateSpec, filePath: string): Promise<ActResultView> => {
     const contents = requireKernelContents(this.host, 'browser.act');
+    this.requireWritePermitted(contents, 'upload');
     const startedAt = Date.now();
     const file = readUploadableFile(filePath);
     if (!(await this.waitSatisfied(spec, 'appear'))) {
@@ -287,6 +290,39 @@ export class BrowserActService extends Service {
   };
 
   /**
+   * 未登记来源上的写动作一律不执行（2026-11-22 用户裁定的「按来源判」边界）。
+   *
+   * 判的是**顶层页面的源**（`contents.getURL()`），不是某一帧：用户眼前那块页面才是信任单元，
+   * 已登记站点内嵌的第三方帧仍属于这次访问；反过来，未登记页面里的任何一帧都不许动手。
+   *
+   * 为什么闸设在服务层而不是只设在外发侧：合并成一个真实浏览器之后，平台页面与任意站点共用一个
+   * 会话视图，页面里的文字只需一句「去点那个按钮」就能让助手在可见页面上动手。所以这条不查「谁在调」，
+   * 只查「脚下这块页面是谁的」——渲染层直调、工作流节点、外发适配器走的都是同一道闸。
+   *
+   * 拒绝时**一个脚本都不发**（调用点排在等待与定位之前），因此页面自记的动作计数必然为 0：
+   * 这正是 QA 第 ⑥ 条负对照要的形态。
+   * @param contents 当前内核视图句柄
+   * @param action 动作名（`click` / `type` / `select` / `upload`），写进结构化错误的 details
+   * @throws 源未由任何已登记平台声明时 `WRITE_ORIGIN_UNREGISTERED`（带 url、动作与源）
+   */
+  private requireWritePermitted(contents: WebContents, action: 'click' | 'type' | 'select' | 'upload'): void {
+    const url = contents.getURL();
+    let origin: string | null = null;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      origin = null;
+    }
+    if (origin !== null && this.platforms.isRegisteredOrigin(origin)) return;
+    throw new AppError(
+      'WRITE_ORIGIN_UNREGISTERED',
+      `当前页面 ${origin ?? url} 不是任何已登记平台声明的源：助手不在上面做「${action}」，一个动作都没有派发。要在平台上做事，先把这个页面导航到平台的地址`,
+      'browser.act',
+      { url, action, origin },
+    );
+  }
+
+  /**
    * 动作的公共骨架：等待 → 定位 → 滚进画面 → 折算坐标 → 下发 → 回读。
    *
    * 「滚进画面」排在折算坐标之前，因为坐标是派发那一条通道唯一的语言：目标在本帧视口之外时
@@ -307,6 +343,8 @@ export class BrowserActService extends Service {
     // 五秒后会以 WAIT_TIMEOUT 报出，把调用方引向「页面不可点」这个错方向（plan §16.3）。
     assertSpecValid(spec, 'browser.act');
     const contents = requireKernelContents(this.host, 'browser.act');
+    // 闸口排在「等待可点」之前：未登记来源上一个脚本都不发，也就没有别的路径能从中漏出去。
+    this.requireWritePermitted(contents, action);
     const startedAt = Date.now();
     if (!(await this.waitSatisfied(spec, 'clickable'))) {
       throw await this.waitTimeout(spec, 'clickable', Date.now() - startedAt, contents);
@@ -676,6 +714,14 @@ export class BrowserActService extends Service {
   /** 壳层的视图宿主句柄。 */
   private get host(): KernelHost {
     return asApp(this.ctx).shell;
+  }
+
+  /**
+   * 平台登记处：只问「这个源是不是已登记平台声明的」这一件事（`isRegisteredOrigin`）。
+   * @returns platform.registry 服务实例
+   */
+  private get platforms(): Pick<PlatformRegistryService, 'isRegisteredOrigin'> {
+    return asApp(this.ctx)['platform.registry'];
   }
 
   /** 定位服务的读取面（动作先定位再下发，判定口径不在此重复）。 */
