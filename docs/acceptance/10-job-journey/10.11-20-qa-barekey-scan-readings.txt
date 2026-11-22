@@ -1,0 +1,44 @@
+# 10.11-20 裸 i18n key 扫描（含插值参数路径）
+
+环境：`744523f` 隔离副本、CDP 10419（QA 段位 + owner 文件）、空 userData `ud30`
+
+## 方法（不是正则猜，是拿语言包真 key 集合比对）
+
+1. 把 `packages/renderer/src/locales/zh-CN.json` 与 `en.json` 展平成 key 集合——**注意语言包的根是 `shell`**，
+   即页面里 `t('home.unattendedValue.active')` 对应的是 `shell.home.unattendedValue.active`；扫描器两种写法都认。
+2. 页面侧取两份语料：`document.body.innerText` + 所有 `[aria-label]/[title]/[placeholder]/[alt]`（属性也会漏文案）。
+3. 用命名空间前缀正则抓候选 token，再与真 key 集合求交；只有**真的能翻出来的 key** 计入 `hits`，
+   像 `outbound.authorization.current` 这种「读数口名字」不会被误报。
+4. 扫描脚本 `/tmp/qa-11/scan.mjs`（QA 临时目录，不入库）。
+
+## 覆盖与结果
+
+| 场景 | 候选 | 命中 |
+| --- | --- | --- |
+| Home（默认 / 未授权） | — | 0 |
+| 7 个视图（岗位 / 简历 / 流程 / 模型 / 运行记录 / 设置 / 首页） | — | 0 |
+| 助手面板打开 / 会话历史抽屉 | — | 0 |
+| Home + 服务不可用态（`plugins.stop('usage')` 后刷新；数字块与趋势「最近 N 笔」都是不可用文案） | `outbound.authorization.current`（读数口名） | 0 |
+| **Home + 授权单 `paused` 且 `pause_reason` 为空** | `home.unattendedValue.noReason` | **1** |
+
+## 结论
+
+- 全站目前**只有一处裸 key**：`paused` 没有写原因时，状态行渲染成 `无人值守：已暂停：home.unattendedValue.noReason`。
+  根因不是「key 不存在」（`shell.home.unattendedValue.noReason` 存在），而是 `HomePanel.tsx` 把 **key 字符串当成插值参数**：
+  `params: { reason: authorization.pauseReason ?? 'home.unattendedValue.noReason' }`，而 `unattendedValue` 只翻外层一次。
+- 其余 7 视图、面板、历史抽屉、服务不可用态都没有裸 key。
+- **待办**：开发修完后用同一脚本复扫，期望 `hits: []`；并把单测从「断言 `params.reason` 是某个字符串」改成「断言渲染结果不含裸 key」。
+
+## 修后复扫（开发提交 `e122323`，同日）
+
+同一脚本、同一覆盖（Home / 7 视图 / 助手面板 / 会话历史抽屉 / 服务不可用态），语言包已换成新版：
+
+| 场景 | 候选 | 命中 |
+| --- | --- | --- |
+| **Home + 授权单 `paused` 且未写原因** | — | **0** |
+| Home 默认 / 7 视图 / 助手面板 / 历史抽屉 | — | 0 |
+
+- `paused` 未写原因现在渲染为 **`无人值守：已暂停：未写原因`**（新 key `home.unattendedValue.pausedNoReason`，中英同步），参数里不再出现任何 key 字符串。
+- 单测也按你的要求改了：断言**渲染结果**等于「已暂停：页面出现验证码」/「已暂停：未写原因」，并显式 `expect(text).not.toMatch(/home\.[a-zA-Z]/)`；旧的「只断言 `params.reason` 等于某字符串」已删除（`HomePanel.status.test.ts:30-37`、`:48-50`）。
+
+**结论：全页扫描命中 0，10.11-20 的「无裸文案」这条恢复成立。**

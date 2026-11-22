@@ -37,3 +37,55 @@ t('home.status.unattended', {
 - 未授权 / 已授权两态**能读到**，但已授权态有 P2 文案重影；
 - **暂停态 P1 不成立**（没有原因原文，退回「只建议」）；执行器 idle 可读，running 本轮未取（授权单被置 paused，起跑会被闸门拒）。
 - 04 不建议判绿：先修暂停态与重影。
+
+## 复验（开发修复提交 `744523f`，同日）
+
+环境：隔离副本 `744523f`（`pnpm app:build` → `BUILD_EXIT=0`，主进程产物已换成新 bundle）、CDP 10418（QA 段位 + owner 文件）、userData `ud29`；授权单经 DB 播种，每次改完点 `home-refresh` 再读。
+
+| 授权单状态 | `home-status-unattended` | 判定 |
+| --- | --- | --- |
+| 无（0 行） | `无人值守：只建议` | 通过 |
+| `active`（2 岗） | **`无人值守：已授权 2 岗`** | 通过（P2 双层前缀已修） |
+| `paused` + 原因原文 | **`无人值守：已暂停：页面出现验证码，本轮暂停等人确认`** | 通过（P1 已修，原因原文出来了） |
+| `paused` 无原因 | **`无人值守：已暂停：home.unattendedValue.noReason`** | **不通过：裸 i18n key 泄漏到界面** |
+| `restart-required` | `无人值守：要你重新确认（上一轮的授权单已失效）` | 通过 |
+| `expired` | `无人值守：已过期` | 通过 |
+| `revoked` | `无人值守：已收回` | 通过 |
+
+### 残留缺陷（P2，且撞上「无裸 i18n key」这条片级门槛）
+
+`packages/renderer/src/HomePanel.tsx` 的 `unattendedStatusKey`：
+
+```ts
+params: { reason: authorization.pauseReason ?? 'home.unattendedValue.noReason' },
+```
+
+把**文案 key 当成插值参数**塞进去了；`unattendedValue` 只翻外层那一次（`t(reading.key, reading.params)`），
+`params.reason` 是 key 字符串、不会再被翻译，于是界面直接显示 `home.unattendedValue.noReason`。
+
+而且单测把错形状钉住了——`packages/renderer/src/HomePanel.status.test.ts:36-39`：
+
+```ts
+expect(reading).toEqual({ key: 'home.unattendedValue.paused', params: { reason: 'home.unattendedValue.noReason' } });
+```
+
+所以它绿着、活体才是裸 key。修法二选一：`unattendedValue` 里对 `reason` 再做一次 `t()`（缺省时翻 `noReason`），
+或让 `unattendedStatusKey` 返回 `reasonKey` 由渲染层翻；单测跟着改成断言「渲染结果不含裸 key」。
+
+## 结论（复验后）
+
+- 04 的两个必修点：**已授权态不叠前缀 ✓、暂停态出原因 ✓**；六种状态里**五种**文案正确。
+- 新增残留 **P2**：`paused` 无原因时界面显示裸 key `home.unattendedValue.noReason`——这条同时违反 10.11-20 的「无裸 i18n key」。
+- 04 建议「两格主判据通过、但等这条裸 key 修完再判 `[x]`」。
+
+## 复验二（`e122323`，裸 key 修完后）
+
+| 授权单状态 | `home-status-unattended` | 判定 |
+| --- | --- | --- |
+| `paused` + 原因原文 | `无人值守：已暂停：页面出现验证码，本轮暂停等人确认` | 通过 |
+| `paused` 无原因 | **`无人值守：已暂停：未写原因`** | 通过（裸 key 已消除） |
+| `active`（2 岗） | **`无人值守：已授权 2 岗`** | 通过（单层前缀） |
+
+执行器行同轮：`执行器：空闲 · 当前 — · 完成 0 · 待办 2`。
+
+**结论：04 的三格全部通过**（暂停态出原因、暂停无原因给出「未写原因」、已授权单层前缀）。
