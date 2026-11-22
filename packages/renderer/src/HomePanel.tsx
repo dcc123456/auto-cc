@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type {
   FunnelTrendView,
   FunnelView,
@@ -137,6 +138,43 @@ export function pickHomeBlocker(input: {
   if (!input.hasDocs) return 'resume';
   if (input.modelMissing) return 'model';
   return null;
+}
+
+/**
+ * 「无人值守」那一行的值：按授权单状态各给一句人话（不把暂停/失效折叠成「只建议」）。
+ * @param t 翻译函数
+ * @param next 「接下来」那一块的读数状态（未就绪时按「还没读到」）
+ * @returns 供 `home.status.unattended` 插值的那一段
+ */
+export function unattendedValue(
+  t: TFunction,
+  next: { state: 'loading' } | { state: 'failed'; reason: string } | { state: 'ready'; value: HomeNext },
+): string {
+  if (next.state !== 'ready') return t('home.unattendedValue.unknown');
+  const reading = unattendedStatusKey(next.value);
+  return t(reading.key, reading.params ?? {});
+}
+
+/**
+ * 授权单状态 → 该用哪条文案（纯函数，单测直接钉住「暂停不许回落成只建议」）。
+ * @param value 「接下来」那块里与授权有关的两位
+ * @returns 文案 key 与插值参数（暂停没写原因时给 `noReason` 那条 key，由渲染层再翻一次）
+ */
+export function unattendedStatusKey(value: {
+  authorization: HomeNext['authorization'] | { status: string; targets: string[]; pauseReason?: string | null };
+}): { key: string; params?: Record<string, string | number> } {
+  const authorization = value.authorization;
+  if (authorization === null) return { key: 'home.unattendedValue.suggest' };
+  if (authorization.status === 'active') {
+    return { key: 'home.unattendedValue.active', params: { count: authorization.targets.length } };
+  }
+  if (authorization.status === 'paused') {
+    return {
+      key: 'home.unattendedValue.paused',
+      params: { reason: authorization.pauseReason ?? 'home.unattendedValue.noReason' },
+    };
+  }
+  return { key: `home.unattendedValue.${authorization.status}` };
 }
 
 /**
@@ -627,12 +665,9 @@ export function HomePanel() {
         data-testid="home-status"
       >
         <p data-testid="home-status-unattended">
-          {t('home.status.unattended', {
-            value:
-              next.state === 'ready' && next.value.authorization?.status === 'active'
-                ? t('statusbar.unattended', { count: next.value.authorization.targets.length })
-                : t('agent.autonomy.suggest'),
-          })}
+          {/* 暂停/失效不再回落成「只建议」（2026-11-22 裁定，QA 的 04）：那等于把风控暂停藏起来。
+              每种状态给一句自己的人话，暂停必须带原因原文——没写原因也不许省掉这一格。 */}
+          {t('home.status.unattended', { value: unattendedValue(t, next) })}
         </p>
         <p data-testid="home-status-run">
           {t('home.status.run', {

@@ -343,7 +343,17 @@
         "done": "已完成",
         "unknown": "还没读到"
       },
-      "unavailableAtCall": "{{reason}}（读数口 {{call}}）"
+      "unavailableAtCall": "{{reason}}（读数口 {{call}}）",
+      "unattendedValue": {
+        "active": "已授权 {{count}} 岗",
+        "paused": "已暂停：{{reason}}",
+        "restart-required": "要你重新确认（上一轮的授权单已失效）",
+        "expired": "已过期",
+        "revoked": "已收回",
+        "suggest": "只建议",
+        "unknown": "还没读到",
+        "noReason": "没有写原因"
+      }
     },
     "assistant": {
       "capsule": "助手",

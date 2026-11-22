@@ -343,7 +343,17 @@
         "done": "done",
         "unknown": "not read yet"
       },
-      "unavailableAtCall": "{{reason}} (reading: {{call}})"
+      "unavailableAtCall": "{{reason}} (reading: {{call}})",
+      "unattendedValue": {
+        "active": "Authorized {{count}} jobs",
+        "paused": "Paused: {{reason}}",
+        "restart-required": "Needs your re-confirm (the previous authorization expired)",
+        "expired": "Expired",
+        "revoked": "Revoked",
+        "suggest": "suggest only",
+        "unknown": "not read yet",
+        "noReason": "no reason recorded"
+      }
     },
     "assistant": {
       "capsule": "Assistant",
