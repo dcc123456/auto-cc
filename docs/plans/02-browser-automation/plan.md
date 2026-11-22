@@ -61,7 +61,13 @@ packages/
    归属因此是三方而不是两方：`shell` 拥有视图（借出 `kernelContents()` / `mountKernelSite()`）、
    `sessions` 拥有分区与登录态、`browser` 只拥有页面。
 2. **`browser.page` 的两个系统边界守卫**（不是防御性编程，是真实入口）：
-   `navigate` 只允许落在**已登记平台 startUrl 的 origin** 上（`NAVIGATE_URL_REJECTED`），
+   `navigate` 只允许落在**已登记平台 startUrl 的 origin** 上（`NAVIGATE_URL_REJECTED`）——
+   **2026-11-22 dated 更正（P10 第 11 片改造，原句保留）**：这条已不成立。用户裁定内嵌的就是一个真实浏览器，
+   导航许可**只剩协议这一道**（任意 http/https 可达，`javascript:` / `data:` / `file:` 仍 `NAVIGATE_URL_REJECTED`），
+   平台名单与「回环特例」一起退役；`CONSENT_REQUIRED` 只保留在抓取（`jd-capture` 的 `ensureConsent`）与外发面。
+   同片另一条：**「每个平台独立 `persist:<platform>` 分区」也被单一 `persist:browser` 分区取代**（登录态按 origin 判读），
+   对应 spec 2.1-04 的原文按历史结论读。起因见 `docs/specs/10-job-journey/spec.md` 10.11-30 的 dated 更正，
+   守卫的替代面是「未登记来源的写动作需人确认 + 外发只走平台适配器」，不是不要守卫。
    `snapshot` 对页面回读的一切值做钳制（长度截断、非字符串归空、未知 readyState 归 `complete`）——
    外部页面的读数不可信，直接进界面文案会把面板变成页面想说什么都行。
 
