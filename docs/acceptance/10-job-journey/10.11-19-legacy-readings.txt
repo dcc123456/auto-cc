@@ -13,7 +13,12 @@
    `chat-input` 在、`agent-run-panel` 在（计划卡）、档位读数「半自动」（`chat-autonomy-current`）。
 ③ M1 原型退役：`grep -rn CareerJourneyPrototype packages/ --include=*.tsx --include=*.ts` → 0 命中。
 ④ 全自动明示在 Home：`home-status-unattended` 行在（未授权时「只建议」，授权后按 `statusbar.unattended` 报目标数）。
-⑤ 运行记录页保留详细审计：`trust` 视图仍在（「内置内核会话」段 + `session-detail` 展开），10.11-29 的取证里点过。
+⑤ 运行记录页仍保留（**这条上一版写成假读数，已据实重写**）：上一版说「`session-detail` 展开、10.11-29 里点过」，
+   而 `grep -rn session-detail packages` → 0 命中，`10.11-29-*.txt` 里也没有这回事。真实的凭据是：
+   运行记录页（`trust` 视图）里 `[data-testid="session-list"]` 列真实平台行、`[data-testid="session-demo-list"]`
+   收本机仿站行，下面的「分区、落盘位置与 cookie 名」是 `[data-explainer="trust.sessions.detail"]`
+   （展开键 `[data-action="trust.sessions.detail-toggle"]`、状态 `data-open=true|false`）。
+   本轮读到的：`view-tabs` 当前项=运行记录、页面出现「内置内核会话」、`session-list` 在。
 
 **缺口（如实记）**：判据里逐项列的「压缩提示」「沉淀卡」「会话历史列表」这三样本轮没有造出来——
 它们各要一次长对话压缩、一次沉淀落盘、一次历史会话列表展开；`pauseCards` 也是 0（那一轮 run 停在计划卡、

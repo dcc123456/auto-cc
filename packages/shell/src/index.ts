@@ -528,6 +528,7 @@ export class ShellService extends Service {
       return { action: 'deny' };
     });
     win.webContents.on('did-fail-load', (_e, code, description) => this.noteError(`${code} ${description}`));
+    this.observeAssistantHotkey(win.webContents);
 
     const devUrl = process.env.ELECTRON_RENDERER_URL;
     if (devUrl) void win.loadURL(devUrl);
@@ -575,6 +576,7 @@ export class ShellService extends Service {
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
     this.observeLoadFailure(view.webContents);
     this.observeKernelViewUrl(view);
+    this.observeAssistantHotkey(view.webContents);
     view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
     void view.webContents.loadURL(url);
   }
@@ -617,6 +619,24 @@ export class ShellService extends Service {
   }
 
   /**
+   * 让人在**任何一块页面**上按 Ctrl/⌘+J 都能呼出助手（spec 10.11-13 / 14，2026-11-22 阻塞项）。
+   *
+   * 为什么在壳层接：内核站点是独立的 `WebContentsView`，用户一点进站点（滚动、看岗位），键盘焦点就归它，
+   * 渲染层挂在主窗口 `window` 上的 `keydown` 收不到——而「站点全屏时呼出助手」恰恰是最需要这个键的时刻。
+   * 只在 `keyDown`（且非自动重复）上接；**Esc 不接**：站点自己的 Esc 有用，我们不去抢。
+   * @param contents 要监听的页面句柄（主窗口、内核视图、接管子视图各挂一份）
+   */
+  private observeAssistantHotkey(contents: WebContents): void {
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || input.isAutoRepeat) return;
+      if (!(input.control || input.meta) || input.key.toLowerCase() !== 'j') return;
+      // 拦下来再回推：不 preventDefault 的话站点自己也会收到这个组合键（真实站点里 Ctrl+J 是下载）。
+      event.preventDefault();
+      this.ctx.emit('shell/assistant-toggle', true);
+    });
+  }
+
+  /**
    * 处理内核视图（及其接管子视图）里的 `window.open` / target=_blank。
    *
    * 一律 deny（AGENTS.md §8.1：外部页面不许自己开窗口），同源的那一个改由同分区子视图承载——
@@ -655,6 +675,7 @@ export class ShellService extends Service {
         nodeIntegration: false,
       },
     });
+    this.observeAssistantHotkey(view.webContents);
     // 先入表再上窗口：表是「有几个接管视图」的唯一读数来源（getStatus.kernelViewTakeoverCount）。
     this.takeoverViews.push(view);
     // 追加到 contentView 末尾 = 叠在内核视图之上，正好是「新标签在前台」的语义。

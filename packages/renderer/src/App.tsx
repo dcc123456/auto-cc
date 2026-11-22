@@ -210,14 +210,18 @@ export function App() {
     });
   };
 
-  // 快捷键：Ctrl/⌘+J 呼出；Esc 收起并把焦点还给胶囊（非模态，Esc 只在助手开着时接管）。
+  // 快捷键：Ctrl/⌘+J 呼出——**由壳层接住再推上来**（`shell/assistant-toggle`，2026-11-22 阻塞项）：
+  // 主窗口、内核视图与接管子视图的 `before-input-event` 各挂一份，所以焦点在站点里时也收得到；
+  // 渲染层自己不再处理 Ctrl+J（两处都处理就是按一下切两下，等于没反应）。
+  // Esc 仍留在渲染层：它只在助手开着且由本窗口收到时才接管，站点里的 Esc 归站点自己。
+  useEffect(() => {
+    const bridge = window.autoCC;
+    if (!bridge) return;
+    return bridge.on('shell/assistant-toggle', () => toggleAssistant());
+  });
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && (event.key === 'j' || event.key === 'J')) {
-        event.preventDefault();
-        toggleAssistant();
-        return;
-      }
       if (event.key === 'Escape' && assistant === 'open') {
         setAssistant('closed');
         document.querySelector<HTMLButtonElement>('[data-action="assistant-capsule"]')?.focus();

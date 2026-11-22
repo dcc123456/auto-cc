@@ -2028,6 +2028,14 @@ declare module 'cordis' {
      */
     'shell/kernel-view-url'(url: string): void;
     /**
+     * 人按了 Ctrl/⌘+J（spec 10.11-13 / 10.11-14，2026-11-22 阻塞项）。
+     * 为什么由主进程发：内核站点是独立的 `WebContentsView`，焦点在它里面时渲染层 `window` 上的
+     * `keydown` 根本收不到——而「站点全屏时呼出助手」正是最需要这个键的时刻。
+     * 壳层在主窗口、内核视图与接管子视图的 `before-input-event` 上一起接住它，再交给渲染层 toggle；
+     * **Esc 不接**（站点自己的 Esc 有用，别抢）。
+     */
+    'shell/assistant-toggle'(requested: true): void;
+    /**
      * 工作流每推进一次（起步 / 步骤开始 / 步骤结束 / 暂停 / 续跑）由 `workflow.runner` 发出
      * （spec 1.10-04）。载荷是整份 run 状态，界面不自己推导。
      */

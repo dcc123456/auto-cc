@@ -18,3 +18,18 @@
 观感（动画、过渡）留前台由人验；本条目只读能测的三样：bounds、面板落脚、toast 文案。
 
 证据图：`10.11-14-hotkey.png`（cd179927…）、`10.11-14-after-close.png`（5a2f4773…），两张互异。
+
+⑤ 键盘从**站点里**呼出（2026-11-22 阻塞项，本轮修）：QA 指出 `Ctrl/⌘+J` 原来只在主窗口有焦点时有效——
+   内核站点是独立的 `WebContentsView`，用户一点进站点，焦点就归它，渲染层 `window` 上的 `keydown` 收不到。
+   修法（限死形状）：shell 在**主窗口、内核视图、接管子视图**的 `before-input-event` 上各挂一份，命中 Ctrl/⌘+J 就
+   `preventDefault` 并用既有 `cordis:event` 推 `shell/assistant-toggle`；渲染层订阅它 toggle 助手；
+   **Esc 不接**（站点自己的 Esc 有用）。渲染层不再自己处理 Ctrl+J（两处都处理 = 按一下切两下）。
+   读数（`node tmp/g11/batch/pkey2.mjs`，往**内核视图 target** 的 `Input.dispatchKeyEvent` 派发）：
+   - 派发前 `capsule aria-expanded=false`、`panel data-state=closed`；
+   - 往内核视图派 **Ctrl+J** → `aria-expanded=true`、`data-state=open`（修前这一条必然不动）；
+   - 同一视图里派 **Esc** → 仍是 `open`（负对照：我们不抢站点的 Esc）；
+   - 再派一次 Ctrl+J → 回到 `closed`（toggle 正确，不是只开不关）；
+   - 主窗口里派 Ctrl+J → 同样 `open`（同一个事件通路，不依赖渲染层 keydown）。
+   - 派发手法：CDP 的 `Input.dispatchKeyEvent` 必须用 `rawKeyDown`；用 `keyDown` 走字符合成路径，
+     `before-input-event` 不触发（本轮先踩了一次，读数 `ev:[]`，换 `rawKeyDown` 后 `ev:[1]` 且面板打开）。
+   - 证据图：`10.11-14-keyboard-from-kernel.png`。
