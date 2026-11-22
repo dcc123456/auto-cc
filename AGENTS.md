@@ -582,6 +582,13 @@ sessionCookieName / auth / expiresAt`——**平台名在 `id`、登录态在 `a
   `--config.confirm-modules-purge=false`）。重装后 `node_modules/.modules.yaml` 的 `storeDir` 指向仓内 store，
   裸 `pnpm licenses list --json --prod` 与裸 `pnpm lint` 都是 EXIT=0。`.pnpm-store/` 已在 `.gitignore`。
 
+- **实测（2026-11-22，第 11 片）共享工作树里并行起实例必须分段占端口**：同一天 QA 与开发同时把实例起在 **10417**，
+  端口被 QA 的实例占住、开发的 CDP 探针落进了 QA 的库——读到的授权单是对方的 seed（`doc:qa1:hash`），开发自己库里是 0 行，
+  一整批读数因此不可归因、整批作废重跑。定死三条：① 端口分段——**QA 用 `10400–10419`，开发用 `10420–10439`，前台真站用 `10440+`**；
+  ② 起实例前先写 `tmp/ports/<port>.owner`（写清谁、干什么），用完 release 并删掉；③ 端口被占就**换号，不许抢**，
+  也不要用「看起来空着」当证据（`lsof -nP -iTCP:<port> -sTCP:LISTEN` 现查）。配套一条读数纪律：只贴 DOM 不看库，撞了实例也发现不了——
+  跑前 `SELECT COUNT(*)` 记空库、跑后复读同一个 `store.db` 文件核对，两边对得上才算数。
+
 ---
 
 ## 10. 机检落地状态（避免误以为规则已被工具强制执行）
