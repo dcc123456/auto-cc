@@ -1,0 +1,115 @@
+seeded —— 本文件用的库是**构造态**（`outbound_authorizations` 一行 `platform=fixture` / `targets=["1001","1002"]` / `dailyLimit=2` / 当日 / `doc:qa1:hash`；台账 `outbound_attempts` 0 行），不是用户从界面走出来的。
+
+# 10.11-09「一块失败只坏一块」独立复跑（三次停服务）
+
+日期：2026-11-22　执行：刁钻的QA（只读数，不改代码）
+
+## 环境与手法
+
+- 提交 `9f244fe`（isolated copy `/tmp/qa-11/tree`），`pnpm app:build` → `BUILD_EXIT=0`
+- 实例：CDP `10414`，userData `/tmp/qa-11/ud09*`（seeded 库副本，删 Singleton*）；运行时入口同 10.11-11 那份配方（`build/app/main.cjs` 拷到 `packages/main/dist/`）
+- 停服务：走白名单口 **`plugins.stop(id)`**（返回 `{state:"disposed"}`），恢复走 `plugins.start(id)`；每次停/起后点 Home 页首的 `home-refresh`（`[data-action=home-refresh]`）再读 DOM —— 因为 10.11-22 定的是「进页读一次 + 手动刷新」，停服务本身不会推事件
+- 读数锚：`home-number-value` / `home-numbers-unavailable` / `[data-action=home-numbers-retry]`、`home-trend-body` / `home-trend-days > li` / `home-funnel > li` / `home-recent` / `[data-action=home-trend-retry]`、`home-next-list > li` / `home-next-unavailable` / `[data-action=home-next-retry]`、`home-status-run`
+
+### 手法坑（判据只能这么取）
+
+直接改 `cordis.yml` 注掉 `usage` 再启动：进程活着、**零 renderer 目标**（`/json/list` 为 `[]`，主进程挂在 `mount()` 的 `await` 上——`outbound` / `outbound-authorization` / `journey-unattended` 的 `dependsOn` 指回 `usage`，依赖永不就位）。所以「停账本/停闸门」不能用清单摘除来取，只能用运行时 `plugins.stop`。注掉 `journey-tracking` 反而能起（无下游依赖），这一条与下面读数里的依赖链一致。
+
+## 读数
+
+### ① 停 `journey-tracking`（追踪）
+
+```
+stop -> { ok:true, value:{ id:"journey-tracking", state:"disposed", dependsOn:["journey","store"] } }
+（停后未刷新：三块都还是旧值 —— 符合「进页读一次 + 手动刷新」）
+home-refresh 之后：
+numbers: { values:[], unavailable:"— 这一块读不到：服务上没有可调用的方法：journey.tracking.list重试", retry:true }
+trend:   { body:true, days:14, unavailable:null, funnel:["搜索到岗位 0","打招呼 0","招聘方回复 0","投递成功 0","约面 —"] }
+next:    { items:4, unavailable:null }
+plugin start -> numbers 仍失败（不自动恢复，预期）；点 home-numbers-retry -> values:["0/10","0","0","2"]
+```
+
+判定：**2/3 块正常出数**（趋势 14 柱 + 5 级、接下来 4 条），失败的数字块带原因原文与重试，重试可恢复。`data-timeout` 读数 = `"false"`（「读不到」那一支，不是 8s 超时支）。
+
+### ② 停 `usage`（账本）
+
+```
+stop -> { ok:true, value:{ id:"usage", state:"disposed", dependsOn:["store"] } }
+home-refresh 之后：
+numbers: { values:[], unavailable:"— 这一块读不到：服务未挂载：usage重试", retry:true }
+trend:   { body:true, days:14, unavailable:null,
+           funnel:["搜索到岗位 0","打招呼 —","招聘方回复 0","投递成功 0","约面 0"],
+           recent:"最近 0 笔外发" }
+next:    { items:4, unavailable:"这一块读不到：服务未挂载：outbound重试" }
+page 状态行: "执行器：还没读到 · 当前 — · 完成 — · 待办 —"
+usage start 后：numbers 仍失败（不自动恢复）；点重试 -> numbers 回到 ["0/10","0","0","2"]；
+next 仍 "服务未挂载：outbound"（起回 usage 不会级联起回下游）。
+```
+
+判定：**1/3 块正常出数** —— 只有趋势块还在；数字块与接下来块同时落失败（两块都读 `outbound.authorization.current` / `journey.unattended.view`，而 `outbound`、`journey-unattended` 都依赖 `usage`）。
+
+### ③ 停 `entitlement`（闸门）
+
+```
+stop -> { ok:true, value:{ id:"entitlement", state:"disposed", dependsOn:["usage"] } }
+home-refresh 之后：
+numbers: { values:[], unavailable:"— 这一块读不到：服务未挂载：outbound重试", retry:true }
+trend:   { body:true, days:14, unavailable:null }
+next:    { items:4, unavailable:"这一块读不到：服务未挂载：outbound重试" }
+```
+
+判定：**1/3 块正常出数**，与 ② 同形（原因原文同样只报下游 `outbound`）。
+
+## 结构读数（「不是一个 Promise.all 绑死」这半句）
+
+三块各自是独立的 `useBlock` + 独立 loader + 独立重试：`loadNumbers` / `loadTrend` / `loadNext`（`packages/renderer/src/HomePanel.tsx`），`home-numbers-retry` / `home-trend-retry` / `home-next-retry` 三个口由各自的 `reloadX` 接。数字块**内部**仍是 5 个只读口一个 `Promise.all`（这是 F1 裁定的「粒度是块不是格」，不重复计缺陷）。所以 09 的这半句**成立**。
+
+## 发现
+
+### D（P2，新）：账本读不到时，趋势块的「最近 N 笔外发」静默画成「最近 0 笔外发」
+
+`loadTrend` 里 `recent: summaryReply?.ok ? summaryReply.value.recent : []`——`usage.ledger.summary` 失败被兜成空数组，于是折叠区显示 `最近 0 笔外发`。同一块里五级漏斗的「打招呼」已经如实显示 `—`（`funnel` 服务的 `unavailableReason`），两处口径不一致。后果：用户会把「账本挂了」读成「最近确实没外发」，正是 F1/F2 同一类「把读不到画成 0」的问题，只是换了个块。
+建议：`recent` 缺失时给「— + 原因」，或让趋势块对 `summary` 失败也落该子项的不可用态；不要用 `[]`。
+
+### E（P3，新）：失败原因只报下游服务名，用户看不出根因
+
+停 `usage`/`entitlement` 时，数字块与接下来块的原因原文都是「服务未挂载：**outbound**」。`outbound` 只是第一个取不到句柄的消费者，根因在闸门/账本。用户按提示去查 `outbound` 会查错方向。建议在桥的 `METHOD_NOT_FOUND` / 未挂载文案里带上「因上游 X 未就位」这一层（或至少 Home 侧把首个失败口映射成人话），这是诊断口径，不是判据。
+
+### F（判据冲突，需 PM 裁）：09 的「停闸门/账本 → 另外两块仍正常出数」在当前依赖链下不可达
+
+- `outbound-authorization`：`dependsOn: [usage, entitlement]`
+- `journey-unattended`：`dependsOn: [journey, outbound-authorization, outbound-greet, outbound-deliver, outbound-throttle, usage]`
+- Home 的数字块读 `outbound.authorization.current` 与 `journey.unattended.view`；接下来块读同样的两口
+
+于是停 `usage` 或 `entitlement` 时，数字块与接下来块**同生共死**，「另外两块仍出数」只剩趋势一块；只有停 `journey-tracking` 能满足原句（2/3）。实测三组已在上面。
+两条出路，请裁定其中一条：
+1. **收窄判据**（同 ⑤ 的做法）：09 以 `journey-tracking` 为唯一可判服务，另两个服务的失败形态改记「一块失败不连坐整页」（本次实测为真），并写 dated 注；
+2. **改实现**：让数字块/接下来块对 `outbound.authorization.current`、`journey.unattended.view` 做块内降级——但这与 F1 已裁定的「粒度是块不是格、任一失败整块不可用」直接冲突，必须一起重裁。
+
+## 结论
+
+- 09 的「三块各自读、各自重试、不是全页一个 Promise.all」：**成立**（结构读数 + 三组活体一致）。
+- 「停任一个服务另外两块仍正常出数」：只在停追踪时成立；停账本/闸门时数字块与接下来块一起失败，**判据需按 F 收窄或改实现**。
+- 新增 **D（P2）**：趋势块把账本读不到静默画成「最近 0 笔外发」。
+- 新增 **E（P3）**：失败原因只报下游 `outbound`，不指向根因服务。
+- 09 本片**不建议直接升 `[x]`**，等 F 裁定；D 应修。
+
+## D/E 复验（开发修复提交 `2edb360`，同日）
+
+- 实例：CDP `10416`，userData `/tmp/qa-11/ud09f`（seeded 副本；`plugins.stop('usage')` → 点 `home-refresh` → 读 DOM → `plugins.start('usage')` + 刷新）
+- **D（账本读不到不许写 0 笔）**
+  - 停 `usage` 前（账本在、0 行）：`[data-testid=home-recent]` = 「最近 0 笔外发」，`home-recent-unavailable` 不存在 —— 「真没有」仍是 0 笔
+  - 停 `usage` + 刷新：`home-recent` **不存在**，`home-recent-unavailable` = 「— 这一块读不到：服务未挂载：usage」；同块漏斗「打招呼 —」——两处口径一致
+  - `start('usage')` + 刷新：恢复「最近 0 笔外发」、漏斗五级全值
+  - 判定：**D 通过**（「真没有」与「读不到」已分开）
+- **E（原因要带读数口）**
+  - 数字块：「— 这一块读不到：服务未挂载：usage（读数口 `usage.ledger.summary`）」+ 重试
+  - 接下来块：「这一块读不到：服务未挂载：outbound（读数口 `outbound.authorization.current`）」+ 重试
+  - 判定：**E 通过**（从原因能顺着读数口找到根因在账本/闸门，不再只有下游服务名）
+- 遗留 **P3（新）**：账本读不到时「最近 5 笔」子项**没有就近重试**——趋势块自身不是 `failed`，`home-trend-retry` 只在 `trend.state==='failed'` 时出现，所以这一行只能靠页首 `home-refresh` 或切 7/30 档重读。不影响 09 的新口径（「每块各自给原因与重试」指的是块），下一版可考虑给子项一枚重试。
+
+## 按收窄后判据（裁定 F）的结论
+
+- 口径①「每块各自给原因与重试、互不拖成整页失败」：**成立**——停 `usage` 时数字块与接下来块各自落「原因 + 读数口 + 重试」，趋势块照常出 14 柱/5 级，整页不是一片失败。
+- 口径②「以 `journey-tracking` 为『只坏一块、其余照常』的实例」：**成立**——停追踪时数字块失败带原因与重试，趋势块（约面 `—`）与接下来块（4 条）照常。
+- 加上本节 D/E 的复验，09 按新口径可判通过。

@@ -1,0 +1,87 @@
+seeded —— 本文件里的授权单是**构造态**（直接写进 `store.db` 的 `outbound_authorizations` 一行：`platform=fixture`、`targets=["1001","1002"]`、`dailyLimit=2`、当日、`resume_version=doc:qa1:hash`），不是用户从界面走出来的；台账 `outbound_attempts` 0 行。
+
+# 10.11-11 角标：裁定 A（需要你只算等你）/ 裁定 B（停止立刻落地）独立复跑
+
+日期：2026-11-22　执行：刁钻的QA（QA 只读数，不改代码）
+
+## 环境与构建
+
+- 仓库提交：`9f244fe`（isolated copy `/tmp/qa-11/tree`，`git fetch <repo> main && git checkout FETCH_HEAD` 后同 hash）
+- 构建：`pnpm app:build` → `BUILD_EXIT=0`（`/tmp/qa-11/build-ab.log`）
+- 实例：Electron 44.4.5，CDP `10412`，userData `/tmp/qa-11/ud-ab4`（由 seeded 库副本复制，删 Singleton*）
+- 桥口：`journey.unattended.start/view/stop`、`outbound.authorization.current/reconfirm`、`plugins.*`（全部走 `window.autoCC` 白名单，未 import 主进程模块）
+
+## 手法坑（必须记下，否则下一人会把旧产物当新读数）
+
+`pnpm app:build` 只产出 **`build/app/main.cjs`**，**不更新** `packages/main/dist/main.cjs`（后者是本机 dev 脚本的产物）。我第一轮起的是 `packages/main/dist/main.cjs`（当时仍停在 `d45408b`），`stop()` 读到 `running`——那是**旧构建**，不是缺陷。
+直跑 `build/app/main.cjs` 也不行：`packages/main/src/index.ts` 的 `manifestRoot()` 在非打包态上溯三层，从 `build/app/` 上溯落到 `/tmp/qa-11`，找不到 `cordis.yml`，进程活着但零 renderer 目标（`/json/list` 为 `[]`）。
+可用配方：`cp build/app/main.cjs build/app/preload.cjs packages/main/dist/` 后再起（`__dirname` 上溯三层 = 仓库根），本文件全部读数都出自这一份 9f244fe 产物（`grep -c stopping packages/main/dist/main.cjs` → `5`）。
+
+## A：`needsYou` 里的执行器待办只在「真的在等你」时计
+
+同一份 seeded 库、同一实例，逐态读 `[data-testid=assistant-badge]` 的 `data-kind`/文案/`aria-label` 与胶囊 `data-needs`：
+
+| 步骤 | 执行器状态（`unattended.view().status`） | 授权单（`authorization.current().status`） | 角标 DOM | 胶囊 `data-needs` | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| 冷启动（重启后未确认） | `idle` | `restart-required` | `{kind:"needs", text:"2", aria:"需要你：2 件"}` | `2` | 该亮（裁定 A 第 4 条：`restart-required` 一律算） |
+| `authorization.reconfirm()` 后重载渲染层 | `idle` | `active` | `null`（无角标节点） | `0` | **该不亮，符合裁定 A** |
+| `unattended.start({docId:"qa1"})` 后重载渲染层 | `running`（`pending:["1001","1002"]`、`failed:["KB_SOURCE_MISSING"]`） | `active` | `null` | `0` | 该不亮（running 不算），符合 |
+| `unattended.stop()` 后立即 | `stopping` | `active` | `null` | `0` | 该不亮（`stopping` 不在三态里） |
+| 收尾后（停止请求 +75s）**不重载** | `stopped` | `active` | `null` | — | **该亮却没亮 → 见下方发现 C** |
+| 收尾后重载渲染层一次 | `stopped` | `active` | `{kind:"needs", text:"2", aria:"需要你：2 件"}` | `2` | 该亮，符合裁定 A |
+
+对照上一版（`d45408b` 之前）我记在 `10.11-11-qa-executor-pending-readings.txt` 的读数：`idle` + 有授权单 → `needs:2`。**本次同一构造在 `idle`+`active` 下已不亮，A 的语义改动属实、可判通过。**
+
+## B：按停止后 ≤1s 状态不再 `running`
+
+同实例，执行器在岗间节流睡眠中（`throttle.minGapMs=45000 / maxGapMs=150000`）时按停止：
+
+```
+{ "stopReturned": "stopping", "statusAfterStop": "stopping", "stopMs": 0, "readMs": 1, "badge": null }
+```
+
+（`stopMs` = `stop()` 往返、`readMs` = 紧接的 `view()` 往返，均毫秒；`stop()` 返回值本身已是 `stopping`。）
+
+收尾时间线（每 5s 轮询一次）：
+
+```
+{ "transitions": [ { "at": 0, "status": "stopping" }, { "at": 75, "status": "stopped" } ],
+  "final": { "status": "stopped", "pending": ["1001","1002"], "failed": ["KB_SOURCE_MISSING"] } }
+```
+
+即：按停止 **0ms 后**状态已是 `stopping`（不再是 `running`），循环在下一个检查点（本例为岗间睡眠结束，75s）把状态落到 `stopped`；期间 `pending` 未变、`failed` 未增，账本仍 0 笔。**B 判通过。**
+
+## 发现 C（P2，新）：角标不跟随执行器状态变化刷新，`stopped` 那一格在长开窗口里永远不亮
+
+`packages/renderer/src/ChatPanel.tsx` 的执行器读数 effect 依赖 `[bridge, agentRun.run, agentPause.pending]`——只有 **agent run / 逐条批准卡** 变化或组件重挂（面板/窗口重载）时才重读 `journey.unattended.view`。没有推送、也没有在 `stopping→stopped` 时触发重读。
+实测：停止后 75s 已经 `status: "stopped"`、`pending: 2`（直接读桥），角标仍 `null`；`location.reload()` 一次后立刻 `needs 2`。
+后果：用户开着窗口、无人值守在后台被停止/收尾之后，**「需要你」这一格不会出现**，除非恰好有别的事件把 ChatPanel 的 effect 撞一次。与 10.11-22「不新增轮询」并不冲突——缺的是一条推送（unattended 状态变化事件）或让 Home 状态行的既有读数顺带报一次。
+影响面：10.11-11 的第三类来源（执行器待办）在活体上只能靠刷新看见；SEMantica 对（A）已对，可见性未达。
+
+## 结论
+
+- 裁定 A：**通过**——`idle`（`active` 授权单）与 `running` 都不亮，`restart-required` 与 `stopped` 亮且计数 2。
+- 裁定 B：**通过**——`stop()` 当场返回 `stopping`，≤1s 内 `status` 不是 `running`；收尾落 `stopped`。
+- 新增 **C（P2）**：角标不随执行器状态变化刷新（无推送），需补一条刷新触发；不修则 11 的第三类活体只能靠刷新复现。
+
+## C 复验（开发修复提交 `2edb360`，同日）
+
+**判据（PMO 改判后）**：① 窗口**不重载**，进入 counted 状态（`stopped` / `paused` / `blocked`）后 ≤3s 角标亮；② 负对照：`stopping` 期间**不亮**。
+
+- 构建：`2edb360`，`pnpm app:build` → `BUILD_EXIT=0`；入口同前（`build/app/main.cjs` 拷到 `packages/main/dist/`）
+- 实例：CDP `10415`，userData `/tmp/qa-11/ud-ab5`（seeded 授权单，`reconfirm()` 后 `active`）
+- 探针：`/tmp/qa-11/expr-badge-timeline.mjs`——按停止后每 **500ms** 采一次 `(journey.unattended.view().status, [data-testid=assistant-badge])`，上限 200s；**全程零重载**
+- 读数（原样）：
+
+```
+{ "stopReturned": "stopping", "stopLatencyMs": 1,
+  "stoppingSamples": 228, "badgeDuringStopping": 0,
+  "transitions": [ { "at": 0.001, "status": "stopping" }, { "at": 114.61, "status": "stopped" } ],
+  "firstCounted": { "at": 114.61, "status": "stopped", "badge": { "kind": "needs", "text": "2" }, "capsuleNeeds": "2" },
+  "firstBadge":   { "at": 114.61, "status": "stopped", "badge": { "kind": "needs", "text": "2" }, "capsuleNeeds": "2" },
+  "badgeLagFromCountedSec": 0 }
+```
+
+- 判定：`stopping` 持续 114.6s、228 个样本**角标全是 null**（负对照成立）；首次读到 `stopped` 的**同一采样**里角标已是「需要你：2 件」、胶囊 `data-needs=2`，滞后 <0.5s（≤3s）；全程未重载渲染层。对照修复前同一构造（`9f244fe`：`stopped` 已 75s 角标仍 null、重载后才亮），**C 通过**。
+- 推送形状核对：`journey/unattended-changed` 只在 `unattended.ts:227/247/470`（start/stop/finish）各发一次，载荷 `{status, pendingCount}`；渲染层唯一的订阅者在 `ChatPanel.tsx`（`bridge.on`），白名单见 `bridge.ts:3714`——无第二套通道、无轮询。
+- 反向也通（同一实例、同样不重载）：`stopped` + 角标 `2` → 再 `unattended.start({docId:"qa1"})` → 1.8s 后 `status:"running"`、角标 `null`、胶囊 `data-needs=0`，即推送能把计数清掉，不是只增不减。
