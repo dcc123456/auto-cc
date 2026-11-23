@@ -1,0 +1,92 @@
+# 10.11-32：反自关 + 计数的真站 A/B（`253279c`），以及与无守卫版本的对照
+
+构建 `253279c`（隔离树 `/tmp/qa-11/tree`：`git archive 253279c` 取出后 esbuild 重打 `packages/main/dist/main.cjs`、
+`vite build` 重打 renderer dist）、实例 `ud-onsite4`（真实 profile 副本）、CDP 10410、2026-11-23 20:58–21:07 本地。
+页面：真站 BOSS 搜索页（`city=101020100`、`query=前端`）。**未投递、未打招呼、未发消息、未改简历。**
+
+## 一、零点击装载循环（6 轮 × 15 秒，全程不附着页面 target）
+
+每轮：`sessions.close()` → 地址栏导航（走 `ensureBrowser` 建新视图）→ 15 秒内只读 `shell.getStatus()`，每 3 秒一次。
+
+| 轮 | 新会话建立 | 导航后 `visible` | `closeAttempts` | `recoveries` | 15 秒内是否销毁 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 13:02:30 | true（5 个采样点全 true） | 0 | 0 | 否 |
+| 2 | 13:02:47 | true | 0 | 0 | 否 |
+| 3 | 13:03:04 | true | 0 | 0 | 否 |
+| 4 | 13:03:21 | true | 0 | 0 | 否 |
+| 5 | 13:03:37 | true | 0 | 0 | 否 |
+| 6 | 13:03:54 | true | 0 | 0 | 否 |
+
+**6/6 存活、`closeAttempts` 恒 0。** 注意这条的边界：它说明「纯装载 + 不点 + 不附着」不会被关，
+**不能**当成「站点自关已修」——`closeAttempts` 是 0，说明这几轮里站点根本没有尝试关窗。
+
+## 二、带页面附着的对照（5 轮，复刻 A 组的条件）
+
+每轮：`sessions.close()` → 地址栏导航 → 3 秒后**连上页面 target 读一次 DOM**（标题 / `li[ka]` 数 / 守卫标志）→ 再观察 12 秒。
+
+| 轮 | 页面读数 | `visible` 4 个采样点 | `closeAttempts` |
+| --- | --- | --- | --- |
+| 1–5 | 标题「上海招聘」、`li[ka]=66`、`window.__autoCCCloseGuard=true` | 全部 true | 恒为 1（见下面的手工基线） |
+
+**5/5 存活。** 附着本身不会打死视图（与上一轮 A/B 结论一致）。
+
+## 三、守卫的**人工触发**测试（证明它不是空转）
+
+在内核视图就是真站搜索页的前提下，从页面里直接调 `window.close()`：
+
+| 读数 | 值 |
+| --- | --- |
+| `typeof window.close` 是否被替换 | `guardInstalled:true` |
+| `window.__autoCCCloseGuard` | `true` |
+| `window.close()` 返回值 | `undefined` |
+| 调用后 `visible` / `url` | **true / 仍是搜索页，未变** |
+| `kernelViewCloseAttempts` | **0 → 1** |
+| `kernelViewRecoveries` / `lastError` | 0 / `null` |
+| 页面 target 数 | 仍在（未消失） |
+
+**这条是硬的**：真站页面上调 `window.close()` 被拦下、被计数、视图没死。所以「守卫能不能挡」这个问题已经有答案了。
+
+## 四、决定性 A/B：同一套 10 轮点击，两个构建
+
+同一份脚本 `tmp/qa-11/click10b.mjs`（城市 / 行业栏交替，每轮点后读 `visible` / `closeAttempts` / `recoveries`）：
+
+| 构建 | 轮数 | 视图被销毁 | `closeAttempts` | `recoveries` | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| `64061ec`（无守卫） | 10 | **5 轮**（第 2/3/7/8/10），另第 9 轮点「清空」也打死 = **6 次** | 无此字段 | 无此字段 | 见 `10.11-32-qa-boss-view-close-armA.txt` |
+| `253279c`（有守卫） | 10 | **0 轮** | **1 → 11，每轮 +1** | 0 | 本轮 |
+
+守卫版本的逐轮读数（起点 1 是第三节那次手工调用留下的）：
+
+```
+#1 v=True a=2 rec=0   #2 v=True a=3   #3 v=True a=4   #4 v=True a=5   #5 v=True a=6
+#6 v=True a=7         #7 v=True a=8   #8 v=True a=9   #9 v=True a=10  #10 v=True a=11
+```
+
+并且同一批轮次里 CDP 反复报页面要卸载：
+
+```
+{"code":-32000,"message":"Inspected target navigated or closed"}     ← 清空/点击时 target 报告已关闭
+click={"error":"no-city-head"} / {"error":"no-industry-head"}        ← 下一步查 DOM 时下拉头已经不在
+```
+
+**判读：站点在「点筛选」这条路上确实试图把页面关掉（target 报 closed、DOM 头消失），守卫把它拦下并计数；
+视图 0 次销毁、`recoveries` 0（因为视图根本没死，恢复通道没被触发）。**
+按管理员定的口径（「打挂归零 + 计数 >0」= 定性成功），**这一条定性成立**。
+
+## 五、必须写清的三个边界（不许当全绿）
+
+1. **`recoveries` 恒 0**：限流恢复在真站上**一次都没被触发**（视图没死）。它的正确性目前只有开发那 5 条单测
+   （两次允许、第三次拒、滑出窗口放开、记录裁剪）作证，**没有真站/仿站的活体读数**。所以「恢复能用」仍是未证。
+2. **两次历史零点击销毁（`12:23:15`、`12:32:15`）没有复现**：本轮 11 次新装载（6 零点击 + 5 附着）一次都没销毁。
+   它们是站点心跳还是别的通道，仍是空的——不能因为「这次没复现」就说已解决。
+3. **本轮 A/B 的轮次构造与 A 组不完全同构**：A 组每轮从「视图已经死了」的状态重建；本轮每轮是主动
+   `sessions.close()` 后重建。两者都走 `ensureBrowser → mountKernelSite → createKernelView`，但前者的旧视图
+   已销毁、后者是主动关。**建议**开发补一条「先人为销毁再立刻重建」的重复循环，把 A 组那个条件也覆盖到。
+
+## 复现命令
+
+```
+node tmp/qa-11/zcloop2.mjs 10410 6 15000     # 零点击装载循环 + 手工 close 触发
+node tmp/qa-11/zcloop3.mjs 10410 5           # 带页面附着的对照
+node tmp/qa-11/click10b.mjs 10410 10 /private/tmp/qa-11/click10b-guard.jsonl   # 与 A 组同一套点击
+```
