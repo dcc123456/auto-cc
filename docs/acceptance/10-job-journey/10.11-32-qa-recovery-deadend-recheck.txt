@@ -1,0 +1,64 @@
+# 10.11-32 恢复死路复验（`42b6d39` 三条修复）：② 生效，①③ **被 ② 挡成不可达**
+
+构建 `42b6d39`（隔离树 `git archive` + esbuild 重打 `main.cjs` + `vite build` 重打 renderer）、
+实例 `ud-onsite4`、CDP 10410、2026-11-23 21:40–21:47 本地。内核视图停在**本机仿站**
+`http://127.0.0.1:10233/boss`（未碰真站）；杀视图用 CDP `Target.closeTarget`。
+
+## 一、能过的部分（前两次杀 + 拒绝幽灵可见）
+
+| 步骤 | `visible` | `url` | `partition` | `recoveries` | 判 |
+| --- | --- | --- | --- | --- | --- |
+| 起手导航 | true | `…:10233/boss` | `persist:browser` | 0 | 就位 |
+| 杀 1 | true | `…:10233/boss`（**同一 URL**） | `persist:browser` | **1** | 按原地址接回 |
+| 杀 2 | true | 同上 | 同上 | **2** | 第二次也接回 |
+| 杀 3 | **false** | `""` | `""` | 2（不再重建） | 限流生效 |
+| 幽灵负对照：上限态调 `setKernelViewVisible(true)` | 返回 **`{kernelViewVisible:false}`**，状态仍 `visible:false / partition:""` | | | | **修复② 生效** |
+
+- 「不许幽灵可见态」这条**成立**：上限之后 `visible` 是 false、`partition` 空、`url` 空，跟上一轮的
+  「`visible:true` + `bounds 0×0` + `partition:""`」完全不同了。
+
+## 二、不过的部分（P1 仍在）：① 真控件与 ③ 地址栏自建**都够不着**
+
+上限态下的三条用户路径，逐条读完数：
+
+| 用户会做什么 | 读数 | 判 |
+| --- | --- | --- |
+| 找「重新打开」按钮 | `document.querySelector('[data-action=kernel-address-recover]')` → **null**（`noButton:true`）；DOM 里只剩提示条那只 `kernel-view-recovery` | **够不着** |
+| 点提示条本身 | 提示是 `pushDeskToast` 推的被动消息（`App.tsx:234-250`，只有 `message`/`tone`，没有 `onClick`），点它没有任何反应；文案却仍写着「请点「重试」」 | 指向一个够不着的控件 |
+| 点「展开网页窗口」(`kernel-canvas-toggle`) | `visible` 仍是 **false**（`KernelCanvasSlot.tsx:197` 只做 `setKernelViewVisible(!visible)`，被修复②正确拒绝），`url`/`partition` 仍空 | 无出口 |
+| 用地址栏输网址点 go | 地址栏输入框**根本没渲染**（`inputs: []`，`noInput:true`） | **够不着** |
+
+## 三、成因（代码级，三条修复互相抵消）
+
+1. 修复② 上线后，上限态 `kernelViewVisible` 恒为 `false` 且**拒绝置真**——这是对的；
+2. 但画布连同地址栏只在 `kernelViewVisible` 为真时渲染：`packages/renderer/src/App.tsx:423`
+   `{kernelViewVisible ? <KernelCanvasSlot layout={kernelLayout} /> : null}`；
+3. 「重新打开」这只按钮渲染在地址栏的 `noSession` 分支里（`KernelAddressBar.tsx:197-204`），
+   于是**它随地址栏一起被卸载**；
+4. 顶栏那只能展开视图的键只翻旗标（`KernelCanvasSlot.tsx:197`），不建视图 → 永远进不去「可见」→ 按钮永远出不来。
+
+**结论：修复②把修复①③关在了门外。** 上一轮是「哪儿都没有按钮」，这一轮是「按钮存在、但只在用户进不去的状态里渲染」。
+
+## 四、改法（任一条即可破环，建议第一条）
+
+1. **让「展开网页窗口」在没有活视图时调 `shell.recoverKernelView()`**（而不是只翻旗标）：
+   这样它就是出口，且复用已经做好的重挂载逻辑；
+2. 或者把「重新打开」渲染到**画布之外**（顶栏或提示条里），不要依赖 `kernelViewVisible`；
+3. 或者给提示条加行动（`pushDeskToast` 带 `onClick → recoverKernelView`）。
+
+判据（复验用）：上限态下**点得到**这只控件、点完 `visible:true`、`url` 回到**最后已知地址**、`recoveries` 归 0。
+
+## 五、一处方法学提醒（给开发复跑）
+
+开发那轮本地读数说「点『重新打开』→ 回到原 URL」是能过的。差别在于**进入那个状态的路径**：
+只要地址栏还在（画布可见），按钮就点得到；一旦走到「连杀 3 次」的上限态，画布就被卸了。
+所以这条的复现步骤必须写死为：**连杀 3 次 → 等 2.6 秒让状态落定 → 再找按钮**，
+在那之前点按钮测的是另一种状态。
+
+## 复现命令
+
+```
+node /private/tmp/qa-11/recovery3.mjs          # 导航 → 连杀 3 次 → 幽灵负对照 → 找按钮/地址栏
+node cdp.mjs 10410 auto-cc /tmp/qa11-exitpath.mjs   # 上限态点「展开网页窗口」之后的读数
+node cdp.mjs 10410 auto-cc /tmp/qa11-bar.mjs        # 上限态的 DOM：inputs 空、只剩 kernel-view-recovery
+```
