@@ -715,16 +715,10 @@
         "greeted": "Greeted",
         "delivered": "Delivered",
         "replied": "Replied",
-        "summaryOnly": "Summary only"
+        "summaryOnly": "Summary only",
+        "none": "Not delivered"
       },
       "detailClose": "Close",
-      "matchReason": "This list was fetched with your filters: {{conditions}}",
-      "conditionKeyword": "keyword {{value}}",
-      "conditionExperience": "experience {{value}}",
-      "conditionCity": "city {{value}}",
-      "conditionPlatform": "platform {{value}}",
-      "conditionReplied": "replied only",
-      "conditionNone": "no filters (everything in the library)",
       "filterAny": "Any",
       "filterLabel": {
         "district": "City district",
@@ -733,8 +727,23 @@
         "scale": "Company size",
         "jobType": "Job type",
         "stage": "Funding stage",
-        "industry": "Industry"
-      }
+        "industry": "Industry",
+        "experience": "Experience",
+        "city": "City",
+        "fallback": "Filter"
+      },
+      "matchNone": "No explainable match for this row (it was already in the library)",
+      "matchHits": "Matched: {{hits}}",
+      "matchHit": {
+        "keywordTitle": "Title contains “{{value}}”",
+        "keywordBody": "JD text contains “{{value}}”",
+        "city": "City matches “{{value}}”",
+        "district": "District matches “{{value}}”",
+        "experience": "Experience matches “{{value}}”",
+        "degree": "Education matches “{{value}}”",
+        "salary": "Salary range overlaps (this job: {{actual}}, filter: {{value}})"
+      },
+      "matchJoin": "; "
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",

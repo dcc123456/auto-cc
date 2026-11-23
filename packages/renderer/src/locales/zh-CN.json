@@ -715,16 +715,10 @@
         "greeted": "已打招呼",
         "delivered": "已投递",
         "replied": "已回复",
-        "summaryOnly": "只抓到摘要"
+        "summaryOnly": "只抓到摘要",
+        "none": "未投递"
       },
       "detailClose": "关闭",
-      "matchReason": "这一屏按你的筛选条件取回：{{conditions}}",
-      "conditionKeyword": "关键词 {{value}}",
-      "conditionExperience": "经验 {{value}}",
-      "conditionCity": "城市 {{value}}",
-      "conditionPlatform": "平台 {{value}}",
-      "conditionReplied": "只看已回复",
-      "conditionNone": "没有加筛选（库内全部）",
       "filterAny": "不限",
       "filterLabel": {
         "district": "城市二级区",
@@ -733,8 +727,23 @@
         "scale": "公司规模",
         "jobType": "求职类型",
         "stage": "融资阶段",
-        "industry": "公司行业"
-      }
+        "industry": "公司行业",
+        "experience": "经验要求",
+        "city": "城市",
+        "fallback": "筛选"
+      },
+      "matchNone": "这一行没有命中可解释的条件（库内原有岗位）",
+      "matchHits": "命中：{{hits}}",
+      "matchHit": {
+        "keywordTitle": "标题含「{{value}}」",
+        "keywordBody": "JD 正文含「{{value}}」",
+        "city": "城市命中「{{value}}」",
+        "district": "区域命中「{{value}}」",
+        "experience": "经验命中「{{value}}」",
+        "degree": "学历命中「{{value}}」",
+        "salary": "薪资区间相交（本岗位 {{actual}}，条件 {{value}}）"
+      },
+      "matchJoin": "；"
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",

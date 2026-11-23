@@ -22,6 +22,7 @@ import {
 import { z } from 'zod';
 import { isViewLive, liveWebContentsOf } from './view-liveness.js';
 import { recoveryVerdict, withRecovery } from './recovery-budget.js';
+import { DEFAULT_WINDOW_SIZE, parseWindowSize } from './window-size.js';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
   launchCompanion,
@@ -562,9 +563,18 @@ export class ShellService extends Service {
 
   /** 创建主窗口并挂载内嵌内核视图。 */
   private createWindow() {
+    // 启动尺寸可由 `AUTO_CC_WINDOW_SIZE`（如 `1024x768`）指定：31 的三档取证必须走真实窗口，
+    // 而 CDP 的 Emulation 改的是页面视口、不是窗口（用它判「视图与页面同步」等于自证）。非法值退回默认。
+    const requested = parseWindowSize(process.env.AUTO_CC_WINDOW_SIZE);
+    if (process.env.AUTO_CC_WINDOW_SIZE !== undefined && requested === null) {
+      this.ctx.logger.warn(
+        `AUTO_CC_WINDOW_SIZE 非法（${process.env.AUTO_CC_WINDOW_SIZE}），按默认 ${String(DEFAULT_WINDOW_SIZE.width)}×${String(DEFAULT_WINDOW_SIZE.height)} 起窗口`,
+      );
+    }
+    const size = requested ?? DEFAULT_WINDOW_SIZE;
     const win = new BrowserWindow({
-      width: 1200,
-      height: 800,
+      width: size.width,
+      height: size.height,
       show: false,
       title: 'auto-cc',
       webPreferences: {

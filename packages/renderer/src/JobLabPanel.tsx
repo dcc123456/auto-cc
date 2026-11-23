@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { SEARCH_FILTER_DIMENSIONS, type SearchFilterDimension } from '@auto-cc/shared';
 import type {
   AppErrorPayload,
   BridgeReply,
@@ -48,6 +49,7 @@ import {
 } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskPathGuide, DeskSection } from './ui/disclosure';
 import { Modal } from './ui/overlays';
+import { matchHits, type MatchCriteria } from './jobMatch';
 import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -59,6 +61,37 @@ const PROGRESS_LIMIT = 4;
 /** 库内清单一次画多少行：默认 100 条，按 `filter-more` 每次再加 100（服务端上限 500）。 */
 const ROW_DISPLAY_LIMIT = 100;
 const ROW_PAGE_STEP = 100;
+
+/**
+ * 筛选维度的标签 key（**显式映射表**，2026-11-23 的 P1 就是从这里漏出去的）。
+ *
+ * 上一轮写成 `t(\`jd.filterLabel.${dimension}\`)`：维度是运行期拼的，语言包缺 `experience` 时
+ * 界面直接把 `jd.filterLabel.experience` 画给用户看，而机检只看得到写死的 `t(…)` 的字符串实参。
+ * 现在改成 `Record<SearchFilterDimension, string>`：**少一个维度就编译不过**；
+ * 每个 key 又是字面量，机检与单测都能核到语言包里有没有。
+ */
+const FILTER_LABEL_KEY: Record<SearchFilterDimension, string> = {
+  district: 'jd.filterLabel.district',
+  experience: 'jd.filterLabel.experience',
+  degree: 'jd.filterLabel.degree',
+  salary: 'jd.filterLabel.salary',
+  scale: 'jd.filterLabel.scale',
+  jobType: 'jd.filterLabel.jobType',
+  stage: 'jd.filterLabel.stage',
+  industry: 'jd.filterLabel.industry',
+  city: 'jd.filterLabel.city',
+};
+
+/**
+ * 取某个维度的标签 key；知识包若给出清单之外的维度（不该发生），退回「筛选」而不是画一个裸 key。
+ * @param dimension 维度名（来自平台知识包，不可信输入）
+ * @returns 语言包里的 key 或兜底 key
+ */
+function filterLabelKey(dimension: string): string {
+  return (SEARCH_FILTER_DIMENSIONS as readonly string[]).includes(dimension)
+    ? FILTER_LABEL_KEY[dimension as SearchFilterDimension]
+    : 'jd.filterLabel.fallback';
+}
 
 /**
  * 把界面上选中的附加筛选摊成抓取入参的字段（2026-11-23 实测的 9 维）。
@@ -165,6 +198,11 @@ export function JobLabPanel() {
    * 界面自己拼码就等于把站点知识抄进渲染层）。空串表示这一维「不限」。
    */
   const [extraFilters, setExtraFilters] = useState<Record<string, string>>({});
+  /**
+   * 本次真正发出去的搜索条件：弹窗里的「匹配理由」按它推。
+   * 与库内筛选的 `activeFilterRef` 同一口径——只认已发出的那一份，不认输入框草稿。
+   */
+  const [lastCriteria, setLastCriteria] = useState<MatchCriteria>({});
   /**
    * 当前平台**真正能发**的筛选维度与取值（来自 `platform.registry.list()` 的 `searchFilters`）。
    *
@@ -393,6 +431,15 @@ export function JobLabPanel() {
                 if (!opened.ok) return { ok: false, error: opened.error };
               }
             }
+            const criteria: MatchCriteria = {
+              keyword,
+              city: cityDraft.trim() || undefined,
+              cityDistrict: extraFilters.district || undefined,
+              experience: (declaresExperience ? (extraFilters.experience ?? '') : experienceDraft.trim()) || undefined,
+              degree: extraFilters.degree || undefined,
+              salary: extraFilters.salary || undefined,
+            };
+            setLastCriteria(criteria);
             return bridge.jd['capture.run'](
               {
                 keyword,
@@ -666,22 +713,6 @@ export function JobLabPanel() {
 
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
   const selectedRow = jobList?.rows.find((row) => rowKey(row) === selectedRowKey);
-  /**
-   * 生效中的筛选条件那句人话（弹窗里「为什么这一岗在这一屏」只说这一句）。
-   *
-   * 取值来源是 `activeFilterRef`（上一次真发给服务的那份），不是输入框草稿：人改了草稿还没按「应用」时，
-   * 清单仍是旧条件取回的，拿草稿去解释就会说反。全空时说「没有加筛选」。
-   */
-  const activeConditionLabel = ((): string => {
-    const active = activeFilterRef.current;
-    const parts: string[] = [];
-    if (active.keyword) parts.push(t('jd.conditionKeyword', { value: active.keyword }));
-    if (active.experience) parts.push(t('jd.conditionExperience', { value: active.experience }));
-    if (active.city) parts.push(t('jd.conditionCity', { value: active.city }));
-    if (active.platform) parts.push(t('jd.conditionPlatform', { value: active.platform }));
-    if (active.replied === true) parts.push(t('jd.conditionReplied'));
-    return parts.length === 0 ? t('jd.conditionNone') : parts.join(' · ');
-  })();
   /** 选中行的打招呼坐标：流水只挂回它自己的那一行，换行后不会伪装成新一行的进度。 */
   const selectedGreetTarget = selectedRow === undefined ? '' : `${selectedRow.platform}:${selectedRow.jobId}`;
   /**
@@ -829,7 +860,7 @@ export function JobLabPanel() {
                   key={filter.dimension}
                   action={`jd-filter-${filter.dimension}`}
                   data-testid={`jd-filter-${filter.dimension}`}
-                  label={t(`jd.filterLabel.${filter.dimension}`)}
+                  label={t(filterLabelKey(filter.dimension))}
                   value={extraFilters[filter.dimension] ?? ''}
                   onValueChange={(value) => setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))}
                   className="w-full"
@@ -1079,31 +1110,36 @@ export function JobLabPanel() {
                         </span>
                       </span>
                       <span className="min-w-0 truncate text-[11px] text-slate-400">{row.company}</span>
-                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-slate-500">
-                        {row.city ? <span>{row.city}</span> : null}
-                        {row.experience ? <span>{row.experience}</span> : null}
-                        {row.education ? <span>{row.education}</span> : null}
+                      {/* 等高（2026-11-23 裁定）：这三行都**不换行**（truncate），行数固定，同档同行自然等高。
+                          上一版用 flex-wrap，长城市名/长标题折成两行，于是同排出现 129 与 148 两种高度。 */}
+                      <span className="flex min-w-0 items-center gap-x-2 overflow-hidden text-[10.5px] text-slate-500">
+                        {row.city ? <span className="truncate">{row.city}</span> : null}
+                        {row.experience ? <span className="shrink-0">{row.experience}</span> : null}
+                        {row.education ? <span className="shrink-0">{row.education}</span> : null}
                       </span>
                       {/* 状态点：只画**真读得到**的那几种。三个点各自独立，不合成一个「进度条」——
                           合成之后人分不清「定制了但没打招呼」与「都没做」。 */}
-                      <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pt-1 text-[10.5px]">
-                        {dots.map((dot) => (
-                          <span
-                            key={dot.label}
-                            data-card-dot={dot.label}
-                            className={
-                              dot.on ? 'flex items-center gap-1 text-jade' : 'flex items-center gap-1 text-slate-600'
-                            }
-                          >
-                            <span
-                              aria-hidden
-                              className={
-                                dot.on ? 'h-1.5 w-1.5 rounded-full bg-jade' : 'h-1.5 w-1.5 rounded-full bg-slate-700'
-                              }
-                            />
-                            {t(`jd.cardDot.${dot.label}`)}
+                      {/* 状态**只写真的达成的**（2026-11-23 裁定）：258 个灰点配四行字会被读成「都投过了」。
+                          一条都没达成时只写一句「未投递」，不列四个空状态。 */}
+                      <span className="mt-auto flex min-w-0 items-center gap-x-2 overflow-hidden pt-1 text-[10.5px]">
+                        {dots.every((dot) => !dot.on) ? (
+                          <span className="text-slate-600" data-card-dot="none">
+                            {t('jd.cardDot.none')}
                           </span>
-                        ))}
+                        ) : (
+                          dots
+                            .filter((dot) => dot.on)
+                            .map((dot) => (
+                              <span
+                                key={dot.label}
+                                data-card-dot={dot.label}
+                                className="flex items-center gap-1 text-jade"
+                              >
+                                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-jade" />
+                                {t(`jd.cardDot.${dot.label}`)}
+                              </span>
+                            ))
+                        )}
                         {row.detailCapturedAt === null ? (
                           <span className="text-amber" data-card-dot="summary-only">
                             {t('jd.cardDot.summaryOnly')}
@@ -1211,7 +1247,13 @@ export function JobLabPanel() {
                   {/* 「匹配理由」这一格只说**有据可查**的那一句：这一屏的清单是按生效中的筛选条件取回来的，
                       命中条件就是它在这里的原因。本仓没有匹配打分，不编「匹配度 92%」那种数（8.10-04 同一口径）。 */}
                   <p className="mt-1 break-all text-[11px] text-slate-400" data-testid="jd-detail-why">
-                    {t('jd.matchReason', { conditions: activeConditionLabel })}
+                    {matchHits(selectedRow, lastCriteria).length === 0
+                      ? t('jd.matchNone')
+                      : t('jd.matchHits', {
+                          hits: matchHits(selectedRow, lastCriteria)
+                            .map((hit) => t(`jd.matchHit.${hit.kind}`, { value: hit.value, actual: hit.extra }))
+                            .join(t('jd.matchJoin')),
+                        })}
                   </p>
                   <p className="mt-1 break-all text-[11px] text-slate-500" data-testid="jd-detail-meta">
                     {t('jd.rowMeta', {

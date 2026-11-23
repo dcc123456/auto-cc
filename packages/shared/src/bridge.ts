@@ -3930,6 +3930,28 @@ export interface ActResultView {
 }
 
 /** 平台元信息（适配器自我声明，不含选择器）。 */
+/**
+ * 附加筛选维度的**唯一清单**（2026-11-23）。
+ *
+ * 为什么放在 shared：它同时被平台适配器（决定发哪些参数）、注册处（`searchFilters`）与渲染层
+ * （标签映射）使用。渲染层用 `Record<SearchFilterDimension, string>` 做映射表——**少一个维度就编译不过**，
+ * 这正是上一轮 `jd.filterLabel.experience` 裸 key 的根因（维度是动态拼的，缺键没人发现）。
+ */
+export const SEARCH_FILTER_DIMENSIONS = [
+  'district',
+  'experience',
+  'degree',
+  'salary',
+  'scale',
+  'jobType',
+  'stage',
+  'industry',
+  'city',
+] as const;
+
+/** 附加筛选维度名。 */
+export type SearchFilterDimension = (typeof SEARCH_FILTER_DIMENSIONS)[number];
+
 export interface PlatformMetaView {
   id: string;
   displayName: string;
