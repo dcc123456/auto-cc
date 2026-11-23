@@ -132,6 +132,16 @@ export class ShellService extends Service {
    * （QA 复验时看到的就是这个假告警：视图健康，`lastError` 里还写着「页面被销毁」）。
    */
   private kernelViewGone: string | null = null;
+  /**
+   * 正在换视图（`createKernelView` 进行中）。
+   *
+   * 为什么需要它（2026-11-23 的间歇销毁）：换视图时我们会主动 `close()` 旧 webContents，
+   * 旧视图的 `destroyed` 一定会来一发；而那一刻 `this.kernelView` 还**指在旧视图上**
+   * （赋值在新视图建好之后），于是「只有当前视图被销毁才算故障」那道判据分不出
+   * 「正常替换」与「真的被销毁」，还会在重建中途把记位清掉（`reapDeadKernelView`）。
+   * 这个标记就是分界线：换视图期间收到 destroyed 一律当正常替换。
+   */
+  private remounting = false;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -562,10 +572,19 @@ export class ShellService extends Service {
     const previous = this.kernelView;
     const previousContents = liveWebContentsOf<WebContents>(previous);
     if (previous && previousContents) {
-      win.contentView.removeChildView(previous);
-      // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
-      // harness 与 devtools.status() 就会数到一个看不见的僵尸目标（1.6-06 的对照会错位）。
-      previousContents.close();
+      // 摘旧视图这一步**不许中断重建**：它抛了也要继续把新视图建起来并指过去，
+      // 否则场上会留一个「引用还在、webContents 已死」的坑（之后每次读状态都踩它）。
+      this.remounting = true;
+      try {
+        win.contentView.removeChildView(previous);
+        // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
+        // harness 与 devtools.status() 就会数到一个看不见的僵尸目标（1.6-06 的对照会错位）。
+        previousContents.close();
+      } catch (error) {
+        this.ctx.logger.warn(
+          `摘旧内核视图时出错（继续重建新视图）：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     const view = new WebContentsView({
       webPreferences: {
@@ -577,6 +596,8 @@ export class ShellService extends Service {
       },
     });
     this.kernelView = view;
+    // 新视图已经就位：此后旧视图再来的 destroyed 走不到「当前视图」那条判据，标记也可以落了。
+    this.remounting = false;
     // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
     // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
     this.kernelViewPartition = partition ?? '';
@@ -612,14 +633,18 @@ export class ShellService extends Service {
     const contents = liveWebContentsOf<WebContents>(view);
     if (!contents) return;
     contents.on('destroyed', () => {
-      // 只有**当前**视图被销毁才算故障：换视图时旧视图的 destroyed 一定会来一发，
-      // 那是正常替换，不是「右栏坏了」（P2 的假告警就是它）。
+      // 换视图期间的 destroyed 一律是正常替换（见 `remounting` 的注释）。
+      if (this.remounting) return;
+      // 其余情况只有**当前**视图被销毁才算故障（旧视图迟到的 destroyed 也不算）。
       if (this.kernelView !== view) return;
       this.kernelViewGone = '内核视图的页面被销毁';
-      this.ctx.logger.warn(this.kernelViewGone);
+      // 调用栈是这条偶发缺陷唯一能定位根因的读数：真站上同一个动作时灵时不灵，
+      // 不看栈就只能猜「可能是重入」——那正是 2026-11-23 这一轮在原地打转的原因。
+      this.ctx.logger.warn(`${this.kernelViewGone}｜${new Error('kernel-view-destroyed').stack ?? '（无栈）'}`);
       this.reapDeadKernelView();
     });
     contents.on('render-process-gone', (_event, details) => {
+      if (this.remounting) return;
       if (this.kernelView !== view) return;
       this.kernelViewGone = `内核视图的渲染进程退出：reason=${details.reason} exitCode=${String(details.exitCode)}`;
       this.ctx.logger.error(this.kernelViewGone);

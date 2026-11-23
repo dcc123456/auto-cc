@@ -1,0 +1,37 @@
+10.11-32 补：城市码落地 + 间歇销毁的两处护栏（2026-11-23）
+
+**城市码（QA 实测，不是猜的）**：`boss.json` 的 `search.cities` 现为
+上海 `101020100`、北京 `101010100`、深圳 `101280600`、杭州 `101210100`；
+二级区仍只有徐汇 `310104`（`search.enums.district`）。**其余城市继续结构化拒绝**
+（`resolveCityParam` 查不到就停），不拿人话当码。
+
+**间歇销毁：这一轮修的是「可疑的两处」，还没有证明根因**
+QA 的读数：点城市「北京」→ zhipin target 消失、`getStatus()` 给结构化读数、
+`lastError:"内核视图的页面被销毁（view=true）"`；再导航一次视图自己回来了；
+之后连切三次没再挂。也就是**同一动作时灵时不灵**。
+
+本轮落地两处（都是真实存在的风险，与复现率无关）：
+① **换视图期间不把 destroyed 当故障**：`createKernelView` 会主动 `close()` 旧 webContents，
+而那一刻 `this.kernelView` 还指在旧视图上（赋值在新视图建好之后），所以上一轮那条
+「只有当前视图被销毁才算故障」的判据**分不出正常替换**，还会在重建中途 `reapDeadKernelView()`
+把记位清掉。新增 `remounting` 标记：换视图期间收到 `destroyed` / `render-process-gone` 一律当正常替换。
+② **摘旧视图失败不许中断重建**：`removeChildView` / `close()` 任一步抛异常，原先会让
+`this.kernelView = view` 执行不到（留下「引用还在、webContents 已死」的坑）。现在整段包在
+try/catch 里，只记一条 warn，继续把新视图建起来并指过去。
+③ 另外**只做记录、不改行为**：当前视图真的被销毁时，日志里带一行 `new Error(...).stack`。
+真站上同一个动作时灵时不灵，不看栈就只能猜——这一行是为了下一次复现能直接点名调用方。
+
+**还没有的读数（写实，不装已修）**：
+- 管理员要的「循环点筛选 ≥20 次、统计复现率、修后 0 次」这组读数**必须在真站上点**，
+  我这边不能点（真实页面操作不代做）。所以复现率与「修后 0 次」两项**尚未取得**。
+- 本轮的护栏只覆盖「重入/正常替换误判」这一类；是不是它导致的，只能等 QA 用新构建跑那 20 次、
+  把 `kernel-view-destroyed` 那行栈贴回来才能定。若栈显示销毁发生在 `createKernelView` 的
+  `close()` 之外（例如站点自己 `window.close()` 或 Electron 内部），那就是第二种成因，本轮护栏不背这个结论。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2814 例全过**。
+
+**给 QA 的复现要求**（照它跑就能定位）：新构建 → 打开同一搜索页 → 城市/行业栏交替点 ≥20 次
+（每次记录「点哪栏、点前 URL、点后 URL、`getStatus()` 的 visible/url/partition、是否出现销毁行」）→
+把 `内核视图的页面被销毁｜<stack>` 那几行原样贴回。有栈 = 能点名调用方；没栈 = 说明不是我们代码里
+显式的 `close()`，要往 Electron 侧查。
