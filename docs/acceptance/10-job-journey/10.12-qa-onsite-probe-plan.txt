@@ -1,0 +1,155 @@
+# 10.12 在场会话：QA 探针与证据模板（今晚备，明早按序跑）
+
+目标：明早一次 40 分钟的在场会话里，把剩下 8 条判据取成**可逐条核对的读数**，而不是「看起来对」。
+每条写死三样：**读什么**（具体命令/字段/选择器）、**判据**（什么算过）、**失败即停**（什么情况立刻停）。
+统一环境：`c15c449` 起（开发重打后如有新提交，以当日 HEAD 为准，并记下 sha）；CDP 端口按 QA 自己的号段；
+真站只由**用户本人**操作登录/验证码/最后确认那一笔；我们只读、只取证、不代做。
+
+三条全局红线（任一触发就整轮停，不重试、不绕过）：
+
+1. 出现验证码 / 风控页 → 停，存页面原文与截图，不改 UA、不重试、不刷新；
+2. 四方对账任一笔对不上 → 停后续外发，先对账；
+3. 越权面出现（授权范围外的外发、助手在未登记来源上写动作未被拦）→ 停并上报。
+
+---
+
+## 1. 登录三态与「接下来」（`10.11-02` / `10.11-06`）
+
+**读什么**
+- `window.autoCC.sessions.status()` 每行取 `id / partition / auth / expiresAt / cookieNames.length`；
+- Home 三块：`[data-testid=home-status-unattended]`、`home-status-run`、`journey.unattended.view()`；
+- 阻断条数量：`document.querySelectorAll('[data-testid^=home-blocker]').length`；
+- 主行动：页首那颗 `[data-action]` 的 `textContent` 与 `disabled`；
+- 「接下来」六条：`[data-testid=home-next]` 下的行，逐条 `textContent` + 落点 `data-action`。
+
+**判据**
+- 三态只出现一种，且与事实一致：`active`（BOSS 有效会话）/ `expired`（过期）/ `unknown`（判不准，**不发** `session/expired`）；
+- 已登录时阻断条 **0**、主行动唯一且可点；未登录时阻断条 ≥1 且文案指向登录；
+- 「接下来」六条顺序固定、每条落点存在（点得动）。
+
+**失败即停**：`auth` 与页面实际状态矛盾（页面已登录但 `auth=expired` 之类）→ 停，记两边原文。
+
+**证据**：`docs/acceptance/10-job-journey/10.11-02-qa-login-states-readings.txt`（含脱敏后的 auth 行，不带 cookie 值）。
+
+## 2. 前台焦点环（`10.11-13`）
+
+**读什么**
+- 窗口必须在前台（`document.hasFocus() === true`，先读一次确认）；
+- 依次 Tab 过 6 个可聚焦元素，每次读 `document.activeElement` 的 `data-action` 与 `matches(':focus-visible')`；
+- 取该元素的 `outline-color / outline-width / box-shadow`（焦点环是不是真的画出来了）。
+
+**判据**：`:focus-visible` 为真且可见的焦点环存在（`outline-width ≥ 1px` 或 `box-shadow` 非 none）；
+Tab 顺序自然（不自造 tabindex 跳跃）；`Esc` 回到胶囊（`[data-action=assistant-capsule]`）。
+
+**失败即停**：窗口抢不到前台（`hasFocus()` 为 false）→ 这一条记 `[!]` 并说明「需前台窗口」，**不拿后台读数冒充**。
+
+**证据**：`10.11-13-qa-focus-ring-readings.txt`。
+
+## 3. 200% 系统缩放（`10.11-23`）
+
+**读什么**
+- `window.devicePixelRatio`（200% 时应为 2）；
+- 三档视口下 `document.documentElement.scrollWidth <= clientWidth`；
+- Home 三块与岗位卡的 `getBoundingClientRect()` 是否互相重叠（两两交集判据）；
+- 三张截图（100% 前 / 200% 后 / 收窄后），`md5 -q` 互异。
+
+**判据**：`devicePixelRatio=2` 下无横向溢出、无裁切、无重叠；截图三张互异。
+
+**失败即停**：系统缩放改不了（需要用户手动改设置）→ 记 `[!]`，**不用 `Emulation.setDeviceMetricsOverride` 冒充**（那改的是页面视口，不是系统缩放）。
+
+**证据**：`10.11-23-qa-zoom200-readings.txt` + `10.11-23-qa-zoom200-{before,after,narrow}.png`。
+
+## 4. `site-default` 未确认被拒 vs 确认后账本只增 1（`10.11-25` / `10.11-26`）
+
+**读什么**（三只口，读的都是真相不是界面文案）
+- `usage.ledger.recentAttempts(20)`：每行的四元组 `platform+target+action+resumeVersion`、`status`、账本 id、页面回执；
+- `usage.ledger.summary()`：`today`、`byAction`、`recent`、`recentDenials`（被拒的不进 totaL，只进这里）；
+- `outbound.authorization.current()`：授权单的 `targets` 与 `status`。
+
+**判据**
+- 未确认的 `site-default`：**被拒**（`recentDenials` 出现一条，带结构化原因），且 `summary.today` **不变**；
+- 用户确认后同一条再发：成功一次，`summary.today` **只增 1**（不是 2）；
+- 同日第二次确认同一笔：**被拒**（去重按四元组），账本**不增**。
+
+**失败即停**：出现任何「页面回执成功但账本没动」或「账本增了但四元组没有对应行」→ 停，先对账。
+
+**证据**：`10.11-25-qa-site-default-readings.txt`（含三条的 `recentDenials` 原文与 `today` 前后值）。
+
+## 5. 优雅退出后 cookie 落盘（`10.11-30` 的 ⑧⑨）
+
+**读什么**
+- 退出前：`sessions.status()` 的 `cookieNames` 逐平台 + 主分区 cookie 表行数（只读 `<userData>/Partitions/*/Cookies` 的 `COUNT(*)`，**不导 cookie 值**）；
+- 用**正常退出**（托盘退出/`app.quit()`，不是关窗强杀），等进程退净；
+- 重启后：再读同样的两份；确认 `fixture`/`zhipin` 分区在、`persist:web` 标记不在、旧目录仍留。
+
+**判据**：重启前后**同一分区的 cookie 行数不减少**；`auth` 重启后仍 `active`；分区目录结构没有被迁移清掉。
+
+**失败即停**：重启后 cookie 清零 → 停，这是「登录态丢失」，比任何功能缺陷都严重。
+
+**证据**：`10.11-30-qa-cookie-persist-readings.txt`（只写行数与分区名，不写 cookie 名以外的任何值）。
+
+## 6. 真实输入法组字（`10.11-32` 的组字项）
+
+**读什么**
+- 我起一个观察脚本，每 200ms 采样：城市选择器搜索框的 `value`、列表行数、是否出现「没有匹配」；
+- 用户在搜索框用**真实输入法**打「shanghai」，停 3 秒再上屏；
+- 同时读一次 `compositionstart`/`compositionend` 的时间戳（页面里挂一次性监听）。
+
+**判据**：组字期间列表**行数不变**、不出现「没有匹配」；上屏「上海」后列表变成 1 条。
+
+**失败即停**：组字期间列表清空 → 记录当时的 `value` 与采样时间线，停这一条（后面继续）。
+
+**证据**：`10.11-32-qa-real-ime-readings.txt`（采样时间线原样贴）。
+
+## 7. 1600 真档（`10.11-31`）
+
+**读什么**：大屏或 1600 物理可容纳的机器上，`AUTO_CC_WINDOW_SIZE=1600x900` 起实例，读
+`shell.getStatus().kernelViewBounds` 与内核页面 `window.innerWidth`、`documentElement.scrollWidth/clientWidth`；拍一张。
+
+**判据**：`bounds.width === innerWidth`（差 0）；无横向滚动；地址栏/胶囊与视图交集 0。
+
+**失败即停**：屏幕仍夹到 1512 → 记 `[!]`（环境受阻），**不冒充 1600**。
+
+**证据**：`10.11-31-viewport-resize-1600-real-readings.txt`。
+
+## 8. 真实链路（本轮主目标，`10.7` 全 `[x]`/`[!]`）
+
+**读什么**：四方逐笔（列名已按真实 schema 核对过，**不是猜的**）——
+1. **页面回执**：`browser.page.snapshot()` 的对话页文本 + 投递确认后的页面状态；
+2. **账本**：`usage.ledger.summary()`（`today`/`byAction`/`recent`/`recentDenials`）+ `usage.ledger.recentAttempts(20)`；
+3. **投递记录**：只读 SQLite `delivery_records`，真实列是 **`ledger_id, platform, job_id, snapshot_id, ts, conversation_target`**
+   （**没有** `action` / `resume_version`）；
+4. **四元组**：`outbound_attempts` 表——真实列 **`id, platform, target_id, action, resume_version, workflow_run_id, status, ledger_id, receipt_id, reason, updated_at, confirmed_at, evidence_summary`**。
+   它和 `delivery_records` 用 **`ledger_id`** 关联，`usage_ledger`（`id, action, target_id, workflow_run_id, ts, source, remote_ref`）是那本账。
+
+**对账表的正确连法（给 PM 的表也用这个）**：
+`usage_ledger.id` ←→ `outbound_attempts.ledger_id`（四元组 + 状态 + 回执 id）←→ `delivery_records.ledger_id`（投递凭据 + `snapshot_id`）。
+一行一笔 = 一个 `ledger_id`；页面回执用 `receipt_id` / `remote_ref` 对，**不要**拿 `delivery_records` 去对 action/version（它没有这两列）。
+
+**判据**
+- 同一条外发在四方里是**同一笔**（时间、目标、动作、简历版本一致）；
+- 账本增量 == 页面回执成功次数 == 投递记录新增行数（逐笔 1:1）；
+- 同日重复发同一四元组 → 被拒且四方都不增。
+
+**失败即停**：任一笔四方不一致 → 停外发、先对账、把三份读数原样贴出。
+
+**证据**：`10.12-onsite-4way-recon.txt`（PM 的对账表逐行填）+ 脱敏截图。
+
+---
+
+## 证据脱敏与去重检查表（每条证据提交前跑）
+
+1. 截图里不得出现：真实姓名 / 手机号 / 邮箱 / 身份证 / 简历正文 / 头像；需要时裁到证据区（`Page.captureScreenshot` 带 `clip`）；
+2. 读数字段里不得出现 cookie 值、token、完整 URL 的查询串（域名可以留）；
+3. 同批截图 `md5 -q … | sort | uniq -c`，每张各 1 次；
+4. 证据只写进 `docs/acceptance/10-job-journey/<条目ID>-*`；脚本与中间产物只写 `tmp/qa12/`；
+5. 每条证据首行写：构建 sha、实例 userData、时间、**本条是否触及真站**。
+
+## 今晚就位的探针（`tmp/qa12/`，不入库）
+
+| 脚本 | 用途 |
+| --- | --- |
+| `recon4way.mjs` | 四方对账取数：`usage.ledger.summary` + `recentAttempts` + `delivery_records`（只读 SQLite）+ 页面回执 |
+| `cookieexit.mjs` | 退出前后各分区 cookie 行数与 `auth` 三态（只读 `Partitions/*/Cookies` 的 COUNT） |
+| `focusring.mjs` | Tab 顺序、`:focus-visible`、焦点环样式、Esc 回胶囊 |
+| 既有可复用 | `tmp/qa-11/vp31.mjs`（31 三档）、`/tmp/qa-11/ime.mjs`（组字对照）、`tmp/qa-11/recovery*`（恢复链） |
