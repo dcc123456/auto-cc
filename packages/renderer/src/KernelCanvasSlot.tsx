@@ -199,16 +199,19 @@ export function KernelCanvasControls({ layout, visible }: { layout: KernelSlotLa
         title={t(visible ? 'kernel.hide' : 'kernel.show')}
         onClick={() => {
           if (!bridge) return;
-          if (!visible) {
-            void (async () => {
-              const status = await bridge.shell.getStatus();
-              const hasView = status.ok && status.value.kernelViewPartition !== '';
-              // 有会话但被收起 → 只是显示；没有视图（part 空）→ 重建回最后已知地址。
-              await (hasView ? bridge.shell.setKernelViewVisible(true) : bridge.shell.recoverKernelView());
-            })();
+          if (visible) {
+            void bridge.shell.setKernelViewVisible(false);
             return;
           }
-          void bridge.shell.setKernelViewVisible(false);
+          void (async () => {
+            // 先按「显示」处理（2026-11-23 第 9 轮裁定）：启动时壳层已经建了一块**占位视图**，
+            // 分区为空只代表「还没打开站点」，不代表「视图没了」。把它当成「恢复」会调
+            // `recoverKernelView()`，而它没有历史地址就直接返回——那就是首启点了没反应。
+            const shown = await bridge.shell.setKernelViewVisible(true);
+            if (shown.ok && shown.value.kernelViewVisible) return;
+            // 真被拒绝（视图确实不在了，例如被站点关过）：再按最后已知地址恢复一次。
+            await bridge.shell.recoverKernelView();
+          })();
         }}
       >
         {visible ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
