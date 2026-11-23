@@ -205,6 +205,7 @@ export class ShellService extends Service {
    * @param url 站点起始地址
    */
   mountKernelSite = (partition: string, url: string): void => {
+    this.recordLifecycle(`mountKernelSite partition=${partition} ← ${this.stackBrief(4)}`);
     this.createKernelView(partition, url);
   };
 
@@ -216,6 +217,7 @@ export class ShellService extends Service {
    * 接管进来的新标签属于这个站点页面，一并关掉——否则「关」之后它们还是活的视图目标。
    */
   unmountKernelSite = (): void => {
+    this.recordLifecycle(`unmountKernelSite ← ${this.stackBrief(4)}`);
     this.createKernelView();
   };
 
@@ -618,7 +620,10 @@ export class ShellService extends Service {
       // 摘旧视图这一步**不许中断重建**：它抛了也要继续把新视图建起来并指过去，
       // 否则场上会留一个「引用还在、webContents 已死」的坑（之后每次读状态都踩它）。
       this.remounting = true;
-      this.recordLifecycle('closing previous kernel view');
+      // 调用点栈（2026-11-23，QA 的要求）：`destroyed` 监听器里的栈只有两帧，指不出调用方；
+      // 真正有用的是**关旧视图这一刻**的栈——它带着 `createKernelView` 的调用者
+      // （`mountKernelSite` / `unmountKernelSite` / `sessions.open` / `ensureBrowser`）。
+      this.recordLifecycle(`closing previous kernel view ← ${this.stackBrief(5)}`);
       try {
         win.contentView.removeChildView(previous);
         // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
