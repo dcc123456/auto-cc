@@ -1,0 +1,86 @@
+# 10.11-32 恢复出口复验（`2f121e6`）：两条出口都通；但**首次启动/重启后打不开网页窗口**（新 P1）
+
+构建 `2f121e6`（隔离树 `git archive` + esbuild 重打 `main.cjs` + `vite build`）、实例 `ud-onsite4`、CDP 10410、
+2026-11-23 21:50–21:58 本地。内核视图停在**本机仿站** `http://127.0.0.1:10233/boss`，关闭方式 CDP `Target.closeTarget`。
+复现步骤按 QA 自己写死的：**连杀 3 次 → 等 2.6 秒让状态落定 → 再找出口**。
+
+## 一、两条出口：都通（上一轮那条「够不着」已修好）
+
+| 步骤 | `visible` | `url` | `partition` | `recoveries` | 可达性读数 |
+| --- | --- | --- | --- | --- | --- |
+| 起手（地址栏导航到 `/boss`） | true | `…:10233/boss` | `persist:browser` | 0 | — |
+| 杀 1 | true | `…/boss`（同址接回） | `persist:browser` | **1** | 顶栏键在 |
+| 杀 2 | true | 同上 | 同上 | **2** | 顶栏键在；地址栏「重新打开」此刻也在 |
+| 杀 3（等 2.6s） | **false** | `""` | `""` | 2 | **顶栏键在**（`hasToggle:true`）；toast 上出现 **`kernel-view-recovery-act`**；地址栏与 `kernel-address-recover` 卸载（**符合预期**，它们挂在可见性条件里） |
+
+**出口 A —— 顶栏「展开网页窗口」**（唯一常驻的那只键）：
+
+| 动作 | 结果 |
+| --- | --- |
+| 点它 | `visible:true`、`url` 回到 **`http://127.0.0.1:10233/boss`**、`partition` 回到 `persist:browser`、**`recoveries` 归 0** |
+
+**出口 B —— toast 上的「重新打开」**（先再连杀 3 次回到上限态）：
+
+| 动作 | 结果 |
+| --- | --- |
+| 再连杀 3 次 | 杀 1/2 自动接回（`recoveries 1→2`）、杀 3 回到 `visible:false` 上限态 |
+| 点 toast 里的 `kernel-view-recovery-act`（62×21 的真按钮） | `visible:true`、`url` 回 **`…/boss`**、**`recoveries` 归 0** |
+
+- 两条出口都能把 `recoveries` 清 0（下一次自动恢复的预算重新给足），与开发的说法一致。
+- 「地址栏 go 在无视图时自建」这条现在**不适用**：无视图时地址栏整个不渲染，用户拿不到那个输入框——出口就是上面两只。
+
+## 二、新 P1：**重启之后打不开网页窗口（首次启动同样）**
+
+同一次启动、还没走过任何导航时的读数：
+
+| 动作 | `visible` | `url` | `partition` | 地址栏输入框 |
+| --- | --- | --- | --- | --- |
+| 启动后初始态 | false | placeholder（`data:`） | `""` | 不存在 |
+| 点顶栏「展开网页窗口」 | **false（没变）** | placeholder | `""` | **仍不存在** |
+| 再点一次 | false | placeholder | `""` | 不存在 |
+
+成因（代码级）：
+
+```tsx
+// packages/renderer/src/KernelCanvasSlot.tsx:200-208
+onClick={() => { … 
+  if (!visible) { …
+    const hasView = status.value.kernelViewPartition !== '';
+    await (hasView ? bridge.shell.setKernelViewVisible(true) : bridge.shell.recoverKernelView());
+```
+
+```ts
+// packages/shell/src/index.ts:816-822
+recoverKernelView = (): ShellStatus => {
+  const url = this.lastKernelUrl;
+  const partition = this.lastKernelPartition;
+  if (url === '' || partition === '') { this.ctx.logger.warn('没有可回去的地址：不重建…'); return this.getStatus(); }
+```
+
+- 启动时 `kernelViewPartition` 是 `''`（占位视图不挂会话），所以走 `recoverKernelView()`；
+- 而 `lastKernelUrl` / `lastKernelPartition` 是**进程内**记的，刚启动时都是空的 → 该函数直接 `return`，什么都不做；
+- 于是 `visible` 永远进不去 true，`App.tsx:426` 的可见性条件不成立，**地址栏连带「输网址」那条能力一起不可达**。
+
+**影响面**：
+1. 每次启动/重启后，用户没有任何办法主动打开内嵌浏览器（除非先走抓取、打开岗位详情这类会自己导航的流程）；
+2. `10.11-27/29`（无会话时手输网址、自动建 `persist:browser` 会话）那条已验证过的能力，从界面入口上被切断；
+3. 上一轮修的「按钮够不着」在这一条上**换了个位置重现**：出口是常驻的，但它在「没有历史地址」这件事上不干活。
+
+**改法（任一条，最小改动是第一条）**：
+1. `KernelCanvasSlot.tsx:206` 那个分支再分一层：`partition === ''` 且 `lastKernelUrl === ''` 时**退回 `setKernelViewVisible(true)`**（显示占位视图 + 地址栏，用户就能输网址）；
+2. 或让 `recoverKernelView()` 在没有历史地址时也**建一个占位视图**（`createKernelView()` 无参），把「没有可回去的地址」变成「回到空白页」；
+3. 或让顶栏键在无视图时直接 `sessions.ensureBrowser()` + 打开一个默认入口页（改动更大，不推荐）。
+
+判据：重启后点顶栏键 → `visible:true`、地址栏出现、输入 `http://127.0.0.1:10233/boss` 能导航过去。
+
+## 三、结论
+
+- 恢复出口：**通过**（顶栏键 + toast 按钮两条，点完回原 URL、`recoveries` 归 0、无幽灵可见态）。
+- 首次启动/重启入口：**不通过（新 P1）**。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa11-slotshow.mjs   # 重启后点顶栏键：visible 不变、无地址栏
+node /private/tmp/qa-11/exit3.mjs                   # 连杀 3 次 + 2.6s → 顶栏出口 / toast 出口
+```
