@@ -52,3 +52,25 @@ node tmp/g12/recon.mjs <cdpPort> <userDataDir> docs/acceptance/10-job-journey/10
 node tmp/g12/shot-clip.mjs <cdpPort> '<selector>' <out.png> [urlFilter]
 ```
 recon 会同时产出 `*-table.md`（行键 `ledger_id`，列：四元组 / 状态 / 账本 / 投递记录 / 四元组唯一 / 页面回执留空待填）。
+
+## 第 11 轮口径落地：行键改四元组（2026-11-23 夜，QA 的发现）
+
+QA 在同一份数据上把我那只 `recon.mjs` 和他那只 `recon4way.mjs` 对了一遍：数字完全一致
+（`outbound_attempts` 4、`delivery_records` 0、`usage_ledger` 10、四元组逐行一致、重复 0），
+但揪出一个会让表**丢行**的判据：那 4 行 `outbound_attempts` 的 `ledger_id` **4/4 为 null**——
+被闸门拦下的那笔根本不落账本，只进 `usage_denials`。按 `ledger_id` 做行键，失败笔整行消失，
+而失败笔正是「闸门真拦住了」的证据。
+
+**已按裁定改掉（只改取证脚本 `tmp/g12/recon.mjs`，源码仍冻结在 `c15c449`）**：
+- 行键 = `platform|target_id|action|resume_version`，空版本归一 `unversioned`；
+- `ledger_id` 降为**列**：成功笔填号，失败笔填「无」；
+- 失败笔占一行，列里给 `status` / `attempt.reason` 或 `usage_denials.reason`（`usage_denials` 真实列为
+  `id, action, target_id, workflow_run_id, ts, code, reason`，**没有 platform**，所以按 `action + target_id` 就近挂）；
+- 表头改成 `# / 四元组 / 状态 / ledger_id / 账本 / 投递记录 / 四元组唯一 / 原因 / 页面回执`。
+
+**纯库冒烟（不连实例，`tmp/g12/seed-schema-smoke.mjs` + `schema-smoke.mjs`）**：造一笔成功（连账本 + 投递记录）
+与一笔失败（无账本 + 一条 denial），判定输出
+`boss|1001|greet|v1`（`ledgerId:1`、账本有、投递有）与 `boss|1002|greet|unversioned`（`ledgerId:null`、
+原因「日额度已用尽」），末尾 `SCHEMA_SMOKE_OK`——失败笔确实占了一行，没有再被丢掉。
+
+明早仍以我这只的产出入表，QA 那只只做同一时刻独立复核；不一致才停。
