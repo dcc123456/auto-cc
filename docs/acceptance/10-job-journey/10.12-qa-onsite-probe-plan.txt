@@ -191,3 +191,31 @@ Tab 顺序自然（不自造 tabindex 跳跃）；`Esc` 回到胶囊（`[data-ac
 
 判据不变：成功笔必须满足「页面回执 ⇔ 账本恰增 1 ⇔ deliver 恰增 1 条投递记录」；
 失败笔必须满足「四方都不增 + 有一条结构化原因」。
+
+## 附三：第 11 轮裁定与现场脚本对一遍（按源码，不按消息里的描述）
+
+第 11 轮裁定「行键=四元组、`ledger_id` 降为列、失败笔占行」。核对开发那只 `tmp/g12/recon.mjs` 的**源码**：
+
+| 裁定项 | 脚本实现 | 是否一致 |
+| --- | --- | --- |
+| 行键 = `platform|target_id|action|resume_version` | `quadrupleOf()`：`row.resume_version === null ? 'unversioned' : String(...)`（第 111-121 行） | 一致 |
+| `ledger_id` 是列不是键 | 行对象里 `ledgerId: a.ledger_id`，注释写明「成功笔有值，失败笔为 null」 | 一致 |
+| 失败笔占一行 | 遍历的是 `outbound_attempts`（含被拒/未决），不是账本 | 一致 |
+| 失败笔给结构化原因 | 行对象 `reason: a.reason ?? denial?.reason`、`denialCode`；**表头**最后几列是 `… | 四元组唯一 | 原因（attempt/denial） | 页面回执（现场填）` | 一致 |
+
+**一句要澄清的**：开发在群里的描述是「同时产出以 `ledger_id` 为行键的表」，与它自己的源码不符——源码是四元组行键。
+明早以**源码 + 表头**为准，PM 的 §1 不需要照着那句再改一次。
+
+**`usage_denials` 的真实列**：`id, action, target_id, workflow_run_id, ts, code, reason`——**没有 `platform` 列**，
+所以脚本按 `action + target_id` 就近挂到行上是正确做法（我核过）。
+
+**本轮实测的失败笔原因（4 行，供明早对照）**：
+
+| attempt id | status | reason |
+| --- | --- | --- |
+| 1 | unknown | `OUTBOUND_UNTRACKED_SITE_GREETING` |
+| 2 | unknown | `OUTBOUND_UNTRACKED_SITE_GREETING` |
+| 3 | unknown | `OUTBOUND_UNTRACKED_SITE_GREETING` |
+| 4 | unknown | `WAIT_TIMEOUT` |
+
+四行 `ledger_id` 全为 `null`——正是「失败笔没有账本号」的实证：它们证明了上一轮为什么不能用 `ledger_id` 当行键。
