@@ -1,0 +1,46 @@
+# 10.11-31（窗口三档自适应）本环境的取证路径与阻断读数
+
+结论先说：**这条判据要的「拖窗口 1024 / 1280 / 1600」，在本机自动化里做不到**。下面是我试过的三条路与它们的原始报错，
+以及「绕过去会得到假读数」的实测证明。开发那轮给的 1200 / 900 / 1200 三档确实**档位不符**，但补齐档位不是 QA 这边能自动完成的。
+
+## 一、三条路都不通
+
+| 通道 | 尝试 | 原始返回 |
+| --- | --- | --- |
+| CDP `Browser` 域（最标准） | `Browser.getWindowForTarget` / `Browser.getWindowBounds` | `{"code":-32601,"message":"'Browser.getWindowForTarget' wasn't found"}`（Electron 没有这个域） |
+| 系统级改窗口尺寸 | `osascript -e 'tell application "System Events" to tell process "Electron" to get size of front window'` | `execution error: "System Events"遇到一个错误："osascript"不允许辅助访问。(-1719)` |
+| 应用自带入口 | 全仓 `packages/shared/src/bridge.ts` 的 `shell.*` 只有 `getStatus / setKernelViewVisible / setKernelViewBounds / setKernelViewZoomFactor` 等，**没有窗口尺寸口**；`packages/shell/src/index.ts:565` 的 `new BrowserWindow({ width: 1200, height: 800 })` 是硬编码，没有读配置也没有读上次尺寸 | 无入口 |
+
+所以「换一个窗口尺寸」只能改产品代码或在有辅助功能权限的机器上做，两者都不在 QA 的射程内。
+
+## 二、用 `Emulation.setDeviceMetricsOverride` 绕过会得到**自相矛盾**的读数（这就是不能用的理由）
+
+同一实例、内核视图停在 `http://127.0.0.1:10233/`（取证前已断言是本机地址）：
+
+| 造出来的视口 | `kernelViewBounds` | 视图右沿 | 内核页面 `innerWidth` | 地址栏 x/宽 |
+| --- | --- | --- | --- | --- |
+| 1024 | `396,93,628,676` | 1024 | **1224** | 404 / 612 |
+| 1280 | `569,93,631,676` | **1200**（被真实客户区夹住） | **1086** | 577 / 695 |
+| 1600 | `681,93,519,676` | **1200**（被夹住） | **691** | 689 / 903 |
+
+两处对不上，且都不是产品缺陷：
+
+1. 1280 / 1600 档的右沿**卡在 1200**——因为真实客户区就是 1200 宽，`clampSlotRect` 把报上来的槽位夹住了。
+   真窗口在 1600 时本来不该夹，所以这两档的几何是**被环境造出来的**。
+2. 页面 `innerWidth` 与 `bounds.width` 完全不成比例（628 → 1224、631 → 1086、519 → 691），
+   说明原生视图尺寸与页面视口在这条路上不同步。而「视图矩形与页面 `innerWidth` 同步」**正是 31 判据本身**——
+   用一条自己不同步的通道去判同步，等于自己造了个假缺陷。
+
+## 三、能确认与不能确认的
+
+- 能确认：槽位一变，`kernelViewBounds` 会跟着变（`1024 → 396,93,628,676`），且**被夹在真实客户区内不外溢**（右沿 1200）；
+  内核页面确实会按新宽度重排（`scrollWidth == clientWidth`，三档都是）。
+- 不能确认：真窗口 1024 / 1280 / 1600 下的 `kernelViewBounds`、页面 `innerWidth`、无黑边、无裁切，以及三档截图。
+
+## 四、建议的闭合路径（需要开发或用户在场，二者之一）
+
+1. 开发加一只**仅测试用**的窗口尺寸口（`shell.setWindowSize`，白名单内），QA 就能自己跑三档 + 截图；
+2. 或者开发在 1024 / 1280 / 1600 三个尺寸下各起一次实例（`BrowserWindow` 尺寸临时传入），逐次交读数与截图；
+3. 或者用户在场手动拖三次，QA 现场读 `kernelViewBounds` 与页面 `innerWidth`（这是最省事、也最接近真实验收的一条）。
+
+在任一条落地前，31 应保持 `[ ]`，**不能用 1200/900/1200 的三档读数顶替**。
