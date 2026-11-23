@@ -182,6 +182,7 @@ export type {
 export const RENDERER_ALLOWLIST = [
   'shell.getStatus',
   'shell.setKernelViewVisible',
+  'shell.recoverKernelView',
   'shell.setKernelViewBounds',
   'shell.setKernelViewZoomFactor',
   'shell.revealInFolder',
@@ -2793,6 +2794,11 @@ export type LlmCheckView = {
 export interface BridgeSignatures {
   'shell.getStatus': { args: []; returns: ShellStatus };
   'shell.setKernelViewVisible': { args: [visible: boolean]; returns: { kernelViewVisible: boolean } };
+  /**
+   * 人工「重新打开」：按最近一次已知地址重建内核视图（2026-11-23 裁定②）。
+   * 不受自动恢复的 60 秒 2 次限流约束——限流防的是自动无限循环，不是让人在上限后无路可走。
+   */
+  'shell.recoverKernelView': { args: []; returns: ShellStatus };
   /**
    * 报一次槽位的实测几何（spec 8.8-01）。返回值就是 `shell.getStatus()` 的那份快照，
    * 让渲染层不用再追一次读——摆位有没有落地，调用方当场就能核对。

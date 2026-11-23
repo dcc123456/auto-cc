@@ -94,7 +94,13 @@ export function KernelAddressBar() {
       setNotice(t('kernel.address.reasonUrlEmpty'), 'seal');
       return;
     }
-    void run(t('kernel.address.navigate'), () => bridge!.browser['page.navigate'](url));
+    // 应急重建（2026-11-23 的 P1 死路）：视图被站点关掉、恢复预算也用尽之后，
+    // `browser.page.navigate` 在「幽灵态」下曾哑掉。这里先确保有一块视图：没有就先人工重建一次。
+    void run(t('kernel.address.navigate'), async () => {
+      const status = await bridge!.shell.getStatus();
+      if (status.ok && status.value.kernelViewPartition === '') await bridge!.shell.recoverKernelView();
+      return await bridge!.browser['page.navigate'](url);
+    });
   };
   const navigate = () => open(draft);
 
@@ -194,6 +200,15 @@ export function KernelAddressBar() {
           data-testid="kernel-address-no-session"
         >
           {t('kernel.address.noSession')}
+          <DeskButton
+            action="kernel-address-recover"
+            variant="line"
+            compact
+            busy={busy !== undefined}
+            onClick={() => void run(t('kernel.address.recover'), () => bridge!.shell.recoverKernelView())}
+          >
+            {t('kernel.address.recoverButton')}
+          </DeskButton>
           <DeskButton
             action="kernel-address-open-session"
             variant="line"

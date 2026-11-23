@@ -433,6 +433,14 @@ export class ShellService extends Service {
    * @param visible 目标可见性
    */
   private applyKernelViewVisible = (visible: boolean): void => {
+    // 没有活视图时**不许**把「可见」置真（2026-11-23 的 P1）：否则状态读数变成
+    // `visible:true / url:"" / partition:""` 的幽灵态，用户点「展开网页窗口」只会看到一片空白，
+    // 而地址栏据此以为有页面。可见性的事实只能跟着视图走。
+    if (visible && liveWebContentsOf<WebContents>(this.kernelView) === null) {
+      this.ctx.logger.warn('没有活着的内核视图：拒绝把视图置为可见（避免幽灵可见态）');
+      this.kernelViewVisible = false;
+      return;
+    }
     const changed = this.kernelViewVisible !== visible;
     this.kernelViewVisible = visible;
     this.kernelView?.setVisible(visible);
@@ -796,6 +804,27 @@ export class ShellService extends Service {
     this.ctx.logger.warn(`内核视图被站点关掉，按原地址重建（本窗口第 ${String(attempt)} 次）：${url}`);
     this.createKernelView(this.lastKernelPartition, url);
     this.ctx.emit('shell/kernel-view-recovery', { status: 'recovered', url, attempt });
+  };
+
+  /**
+   * 人工「重新打开」：把视图按最近一次已知地址重建一次（2026-11-23 裁定②：上限态必须给真控件）。
+   *
+   * 与自动恢复的区别：这条由人按，所以**不受 60 秒 2 次的限流约束**——限流是为了防自动无限循环，
+   * 不是为了让用户在上限后无路可走。按下即清空限流窗口，并把视图按原地址接回来。
+   * @returns 重建之后的壳层状态；没有可回去的地址时什么都不做（调用方按读数判断）
+   */
+  recoverKernelView = (): ShellStatus => {
+    const url = this.lastKernelUrl;
+    const partition = this.lastKernelPartition;
+    if (url === '' || partition === '') {
+      this.ctx.logger.warn('没有可回去的地址：不重建（先打开一个会话或输一个网址）');
+      return this.getStatus();
+    }
+    this.recoveries = [];
+    this.recordLifecycle(`manual recover by user → ${url}`);
+    this.ctx.logger.info(`用户点了「重新打开」：按原地址重建内核视图 ${url}`);
+    this.createKernelView(partition, url);
+    return this.getStatus();
   };
 
   /**

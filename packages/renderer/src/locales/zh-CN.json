@@ -506,7 +506,9 @@
         "reasonNoCurrent": "还没有打开过页面",
         "navigate": "打开网址",
         "noSession": "还没有打开站点：内核视图现在是占位页，先到运行记录里打开会话。",
-        "openSession": "去打开站点"
+        "openSession": "去打开站点",
+        "recoverButton": "重新打开",
+        "recover": "重新打开网页"
       },
       "heading": "网页窗口",
       "hint": "这一格直接画着真实网页，不在界面这张图里。",

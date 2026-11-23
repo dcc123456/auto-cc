@@ -506,7 +506,9 @@
         "reasonNoCurrent": "No page has been opened yet",
         "navigate": "Open URL",
         "noSession": "No site is open yet: the kernel view is a placeholder. Open a session from Records first.",
-        "openSession": "Open a site"
+        "openSession": "Open a site",
+        "recoverButton": "Reopen",
+        "recover": "Reopen page"
       },
       "heading": "Web page view",
       "hint": "This slot shows the real web page, painted above the desk.",

@@ -1,0 +1,37 @@
+10.11-32 补：恢复上限后的死路（P1）三条一起修（2026-11-23 第 6 轮裁定）
+
+**QA 的读数（`dbe720b`）**：连杀 3 次 target → 第 1、2 次自动接回原 URL（`recoveries 0→1→2`），
+第 3 次停住（`visible:false`、url 空）并提示「请点重试」——**但那个「重试」不存在**：
+唯一像它的是提示条自己（`data-action=kernel-view-recovery`，内部 button 数 0），点了没反应；
+再点「展开网页窗口」得到 `visible:true / url:"" / partition:"" / bounds 0×0` 的**幽灵可见态**；
+地址栏 go / Enter 也都哑掉。用户只能重启。
+
+**三条一起修（缺一条不算修好）**
+
+① **真控件**：`shell.recoverKernelView()` 新增为桥接口（白名单 + 签名），语义是「按最近一次已知地址重建」。
+   它不是自动恢复——**不受 60 秒 2 次限流约束**（限流防的是自动无限循环，不是让人在上限后无路可走），
+   按下即清空限流窗口。界面在地址栏「还没有打开站点」那一行加了一颗 **「重新打开」**（`data-action=kernel-address-recover`）。
+② **不许幽灵可见**：`applyKernelViewVisible(true)` 在没有活 `webContents` 时**直接拒绝**并记一行 warn，
+   可见性保持 false。事实只有一条：可见性跟着视图走。
+③ **地址栏在无视图时能自己重建**：`open()` 先看 `shell.getStatus().kernelViewPartition`，
+   为空就先 `shell.recoverKernelView()` 再 `browser.page.navigate(url)`——不再依赖「碰巧有块视图」。
+
+**本地全链读数（fixture，`tmp/g11/batch/p42-recovery-deadend.mjs`，不碰真站）**
+
+| 步骤 | `visible` | `url` | `partition` | `recoveries` | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| baseline | true | `…:10233/` | `persist:browser` | 0 | 正常态 |
+| kill-1（CDP 关 target） | true | **同一 URL** | `persist:browser` | **1** | 自动接回 |
+| kill-2 | true | 同一 URL | `persist:browser` | **2** | 自动接回 |
+| kill-3 | **false** | **`""`** | **`""`** | 2 | 上限：**没有幽灵可见态**，`lastError` 写清原因 |
+| 幽灵负对照：`setKernelViewVisible(true)` | 返回 `kernelViewVisible:false` | — | — | — | 无活视图时置可见被拒 |
+| 人工「重新打开」 | **true** | **回到原 URL** | `persist:browser` | **0**（限流窗口清空） | 死路打通 |
+| 再杀一次 + 人工重开 + `page.navigate('/alt')` | true | `…:10233/alt` | `persist:browser` | 0 | 地址栏那条路在重建后照常可用 |
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2829 例全过**。
+
+**边界（写实）**
+- 这一轮是**本地 fixture + CDP 关 target** 的读数（等价「站点把自己关了」），不是真站；真站那次由 QA 用新构建复跑。
+- 「重新打开」按的是**最近一次已知地址**（`did-navigate` 维护）；如果视图从没成功导航过，它会如实什么都不做。
+- 自动恢复仍受 60 秒 2 次限流（5 条单测 + 本轮活体各一次）；上限之后不再尝试自动重建，只等人工。
