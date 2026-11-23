@@ -153,3 +153,41 @@ Tab 顺序自然（不自造 tabindex 跳跃）；`Esc` 回到胶囊（`[data-ac
 | `cookieexit.mjs` | 退出前后各分区 cookie 行数与 `auth` 三态（只读 `Partitions/*/Cookies` 的 COUNT） |
 | `focusring.mjs` | Tab 顺序、`:focus-visible`、焦点环样式、Esc 回胶囊 |
 | 既有可复用 | `tmp/qa-11/vp31.mjs`（31 三档）、`/tmp/qa-11/ime.mjs`（组字对照）、`tmp/qa-11/recovery*`（恢复链） |
+
+---
+
+## 附：今晚交叉核对两只对账脚本（防「两套口径在现场打架」）
+
+同一份数据（`ud-onsite4`、CDP 10410、2026-11-23 22:15）上分别跑开发那只 `tmp/g12/recon.mjs` 与我这只 `tmp/qa12/recon4way.mjs`：
+
+| 量 | 开发那只 | 我这只 | 一致 |
+| --- | --- | --- | --- |
+| `outbound_attempts` 行数 | 4 | 4 | 是 |
+| `delivery_records` 行数 | 0 | 0 | 是 |
+| `usage_ledger` 行数 | 10 | 10（`total`） | 是 |
+| 四元组逐行 | 4 行，`boss|2ce8f258…|greet|unversioned` 等 | 同样 4 条（`platform/target_id/action/resume_version`） | 是 |
+| 重复四元组 | `duplicates: 0` | 同（`quadrupleUnique: true`） | 是 |
+
+**两处命名差异（不是数据分歧，但会被误读成对不上）**：
+1. 我那只打印的是 `ledgerToday: 5`（当天条数），开发那只打印的是 `ledger: 10`（总行数）——同一本账的两个字段；
+2. `resume_version` 为空时，开发那只归一成字符串 `unversioned`，我这只保留 `null`。
+
+**口径结论**：明日**只以开发那只 `recon.mjs` 的产出作为入表读数**（它带「页面回执留现场填」的列骨架）；
+我这只只用作**同一时刻的独立复核**，复核不一致才停。两只都不许各自往同一张表里填。
+
+## 附二：**行键用 `ledger_id` 会丢「失败笔」**（明早对账表必须避开）
+
+实测 `outbound_attempts` 4 行里，`ledger_id` **全是 null**（0/4 有账本号）——因为它们都是被拒/未决的 `unknown`。
+这不是脏数据，而是结构决定的：**只有真正发出的那一笔才会先落账本拿到 `ledger_id`**；被闸门拒掉、`WAIT_TIMEOUT`、
+`site-default` 未确认这些**根本不会产生账本行**（它们进的是 `usage_denials`，不是 `usage_ledger`）。
+
+所以对账表的行键**不能只用 `ledger_id`**：
+
+- 若行键 = `ledger_id`：所有「失败笔」都没有键，而 PM 的 §1 又要求「失败笔也占一行、结论写『未发生』」——**失败笔会被挤掉**，
+  而失败笔恰恰是最需要留证的那一类（它证明「没发生」，也证明闸门真的拦住了）。
+- 建议口径：**行键用四元组**（`platform|target_id|action|resume_version`，空版本归一成 `unversioned`），
+  `ledger_id` 作为**列**（成功笔填账本号，失败笔填「无」并另给 `status/reason` 与 `usage_denials` 里的那条原因）。
+  这样一笔一行、失败笔在位、成功笔还能用 `ledger_id` 连到 `delivery_records`。
+
+判据不变：成功笔必须满足「页面回执 ⇔ 账本恰增 1 ⇔ deliver 恰增 1 条投递记录」；
+失败笔必须满足「四方都不增 + 有一条结构化原因」。
