@@ -1,0 +1,32 @@
+第 12 片准备（2026-11-23 夜，**不碰真站**，HEAD `c15c449`）
+
+**构建**：`pnpm exec tsx tmp/g11/build-main.mjs` → `BUNDLE_OK`（`packages/main/dist/main.cjs` 22:07 重打）；
+`pnpm --filter @auto-cc/renderer build` → 成功。两者都按 `c15c449` 出的，明早不改代码就直接起。
+
+**干净 userData**：`tmp/g12/userdata-clean`（空目录，**不含任何已登录会话**；登录必须用户本人做，
+不用开发会话冒充新手）。冒烟用的是另建的 `tmp/g12/userdata-smoke` / `userdata-shot`，验完即弃。
+
+**四方对账脚本**：`tmp/g12/recon.mjs <cdpPort> <userDataDir> [out.json]`
+- 桥接口读：`usage.ledger.summary`、`usage.ledger.recentAttempts`、`outbound.authorization.current`、
+  `journey.tracking.list`、`agent.pause.pending`、`shell.getStatus`；
+- `node:sqlite` **只读**打开 `store.db`，读 `usage_ledger` / `outbound_attempts` / `delivery_records`；
+- 四元组重复：`GROUP BY platform,target_id,action,resume_version HAVING COUNT(*)>1`；
+- 未决暂停单：`agent_pause_requests WHERE resolved_at IS NULL`；
+- 输出 JSON + `*-table.md`（一笔一行，最后一列「页面回执」留现场填）。
+
+**冒烟读数（本地仿站，不碰真站）**
+- 抓 3 条入库（`stored:3`）后跑 recon：`exit 0`，`counts {ledger:1, attempts:0, deliveries:0}`、`rows 0`、`duplicates 0`——
+  表骨架正常产出（这一轮没有外发，所以尝试/投递是空的，符合预期）。
+- 第一次跑挂过一次：我按想当然的列名写 SQL（`usage_ledger.platform`、`delivery_records.target_id` 都不存在），
+  冒烟立刻报 `no such column: platform`。照真实 DDL 改成
+  `usage_ledger(id, action, target_id, workflow_run_id, ts, source, remote_ref)`、
+  `delivery_records(ledger_id, platform, job_id, snapshot_id, ts, conversation_target)` 之后通过。
+  **这条写在这里的原因**：明早现场不许再拿想当然的列名去对账。
+
+**截图脚本**：`tmp/g12/shot-clip.mjs <cdpPort> <selector> <out.png> [urlFilter]`
+- 按元素 `getBoundingClientRect()` 裁剪 + `captureBeyondViewport`，打印 `md5`；
+- 内核视图内容要拍它**自己的 target**（app 页截不到原生子视图，脚本会如实报错而不是给白图）；
+- 冒烟：拍地址栏 `659×40` → `md5 801101e314…`；拍顶栏键 `67×30` → `md5 8250e9c91f…`，两张互异 → 裁剪与去重都可用。
+
+**明早顺序**：照 `docs/plans/10-job-journey/plan.md` §14.26 runbook 走；遇验证码/风控整轮停、存页面原文、标 `[!]`，
+不识别不规避；截图只落证据区、npm 自动化不碰真站。
