@@ -720,7 +720,17 @@
       "conditionCity": "city {{value}}",
       "conditionPlatform": "platform {{value}}",
       "conditionReplied": "replied only",
-      "conditionNone": "no filters (everything in the library)"
+      "conditionNone": "no filters (everything in the library)",
+      "filterAny": "Any",
+      "filterLabel": {
+        "district": "City district",
+        "degree": "Education",
+        "salary": "Salary",
+        "scale": "Company size",
+        "jobType": "Job type",
+        "stage": "Funding stage",
+        "industry": "Industry"
+      }
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",

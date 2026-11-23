@@ -720,7 +720,17 @@
       "conditionCity": "城市 {{value}}",
       "conditionPlatform": "平台 {{value}}",
       "conditionReplied": "只看已回复",
-      "conditionNone": "没有加筛选（库内全部）"
+      "conditionNone": "没有加筛选（库内全部）",
+      "filterAny": "不限",
+      "filterLabel": {
+        "district": "城市二级区",
+        "degree": "学历",
+        "salary": "薪资",
+        "scale": "公司规模",
+        "jobType": "求职类型",
+        "stage": "融资阶段",
+        "industry": "公司行业"
+      }
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",

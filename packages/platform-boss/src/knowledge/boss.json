@@ -440,20 +440,51 @@
     "list": {
       "container": "jobCard",
       "fields": [
-        { "name": "title", "locator": "jobTitle", "required": true },
-        { "name": "company", "locator": "jobCompany" },
-        { "name": "salary", "locator": "jobSalary" },
-        { "name": "city", "locator": "jobCity" },
-        { "name": "experience", "locator": "jobExperience" },
-        { "name": "education", "locator": "jobEducation" },
-        { "name": "detailHref", "locator": "jobTitle", "attribute": "href", "required": true }
+        {
+          "name": "title",
+          "locator": "jobTitle",
+          "required": true
+        },
+        {
+          "name": "company",
+          "locator": "jobCompany"
+        },
+        {
+          "name": "salary",
+          "locator": "jobSalary"
+        },
+        {
+          "name": "city",
+          "locator": "jobCity"
+        },
+        {
+          "name": "experience",
+          "locator": "jobExperience"
+        },
+        {
+          "name": "education",
+          "locator": "jobEducation"
+        },
+        {
+          "name": "detailHref",
+          "locator": "jobTitle",
+          "attribute": "href",
+          "required": true
+        }
       ]
     },
     "detail": {
       "container": "detailRoot",
       "fields": [
-        { "name": "description", "locator": "detailDescription", "required": true },
-        { "name": "requirement", "locator": "detailRequirement" }
+        {
+          "name": "description",
+          "locator": "detailDescription",
+          "required": true
+        },
+        {
+          "name": "requirement",
+          "locator": "detailRequirement"
+        }
       ]
     }
   },
@@ -461,10 +492,44 @@
     "entryPath": "/web/geek/jobs",
     "params": {
       "keyword": "query",
-      "city": "city"
+      "city": "city",
+      "district": "multiBusinessDistrict",
+      "experience": "experience",
+      "degree": "degree",
+      "salary": "salary",
+      "scale": "scale",
+      "jobType": "jobType",
+      "stage": "stage",
+      "industry": "industry"
     },
     "cities": {
       "上海": "101020100"
+    },
+    "enums": {
+      "district": {
+        "徐汇区": "310104"
+      },
+      "experience": {
+        "3-5年": "105"
+      },
+      "degree": {
+        "本科": "203"
+      },
+      "salary": {
+        "10-20K": "405"
+      },
+      "scale": {
+        "100-499人": "303"
+      },
+      "jobType": {
+        "全职": "1901"
+      },
+      "stage": {
+        "A轮": "803"
+      },
+      "industry": {
+        "互联网": "100020"
+      }
     }
   },
   "chat": {

@@ -147,6 +147,15 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     startUrl: pack.startUrl,
     // 导航许可的唯一来源（spec 8.1-05）：知识包声明的源集合，不是 startUrl 那一行的源。
     origins: [...pack.origins],
+    // 只把「既有参数名、又有标签表」的维度交给界面：两者缺一就说明这一维发不出去，
+    // 上屏等于做一个按了没反应的控件（2026-11-23 判据）。
+    searchFilters: Object.entries(pack.search.params)
+      .filter(([dimension]) => dimension !== 'keyword' && dimension !== 'city')
+      .map(([dimension, param]) => ({
+        dimension,
+        labels: param === undefined ? [] : Object.keys(pack.search.enums[dimension] ?? {}),
+      }))
+      .filter((entry) => entry.labels.length > 0),
     // 拷一份：登记表面向渲染层，不能让界面读数跟着知识包对象的后续修改漂移。
     capabilities: [...pack.capabilities],
     // 11-04 的缩放分母：知识包没声明就省略，渲染层据此如实标「未适配」而不是猜一个数。
@@ -232,20 +241,54 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     // 这里不再原样塞值——原样塞会被站点静默忽略参数，"筛了上海"就成了谎话。
     const cityParam = resolveCityParam(criteria.city, pack.search.cities, pack.platform);
     if (cityParam !== undefined) target.searchParams.set(pack.search.params.city, cityParam);
-    // 经验这一维不是每个站都有查询参数（真 BOSS 把它做成页面上的筛选控件，不在地址里，证据 8.0-03）。
-    // 包里没登记参数名时**不许静默丢弃**（2026-11-23）：丢掉会让界面显示「已按 3-5 年筛」而页面其实没筛，
-    // 那是「筛了但没筛」的谎报。既然这一维发不出去，就如实拒绝，并把「哪一维、为什么」带回去。
-    if (criteria.experience) {
-      const param = pack.search.params.experience;
+    // 其余 7 维（区 / 学历 / 薪资 / 规模 / 求职类型 / 融资 / 行业）：参数名与码表都来自知识包，
+    // 逐维按同一套规则写进地址——没声明参数名、或取值不在码表里，都是**结构化拒绝**，不静默丢弃
+    // （2026-11-23 的判据：界面显示「已筛」而页面没筛，就是这句谎话要堵的那一头）。
+    const dimensionParams = pack.search.params as Record<string, string | undefined>;
+    const dimensionEnums = pack.search.enums as Record<string, Record<string, string> | undefined>;
+    const filters: [keyof JobSearchCriteria, string | undefined][] = [
+      ['cityDistrict', criteria.cityDistrict],
+      ['experience', criteria.experience],
+      ['degree', criteria.degree],
+      ['salary', criteria.salary],
+      ['companyScale', criteria.companyScale],
+      ['jobType', criteria.jobType],
+      ['financingStage', criteria.financingStage],
+      ['industry', criteria.industry],
+    ];
+    // 契约里的字段名与知识包里的维度名不是一套（`cityDistrict`/`companyScale`/`financingStage` 更可读），
+    // 对应关系写死在这张表里，比在两处各改一次名字稳。
+    const dimensionNames: Record<string, string> = {
+      cityDistrict: 'district',
+      companyScale: 'scale',
+      financingStage: 'stage',
+    };
+    for (const [field, value] of filters) {
+      if (value === undefined || value === '') continue;
+      const dimension = dimensionNames[String(field)] ?? String(field);
+      const param = dimensionParams[dimension];
       if (!param) {
         throw new AppError(
           'SEARCH_FILTER_UNSUPPORTED',
-          `平台 ${pack.platform} 的知识包没有声明「经验」这一维的参数名：这一条筛选发不出去，因此这一步没有执行（不静默丢弃）`,
+          `平台 ${pack.platform} 的知识包没有声明「${dimension}」这一维的参数名：这一条筛选发不出去，因此这一步没有执行（不静默丢弃）`,
           'platform.boss',
-          { filter: 'experience', value: criteria.experience, platform: pack.platform },
+          { filter: dimension, value, platform: pack.platform, reason: 'no-param' },
         );
       }
-      target.searchParams.set(param, criteria.experience);
+      const table = dimensionEnums[dimension];
+      const code = table === undefined ? value : table[value];
+      if (code === undefined) {
+        // 有码表但没这个取值：不猜码、也不拿人话当码塞进去——把可选项原样告诉调用方。
+        throw new AppError(
+          'SEARCH_FILTER_UNSUPPORTED',
+          `平台 ${pack.platform} 的「${dimension}」不认识取值「${value}」：知识包里没有它的码（不猜），可用的取值是 ${
+            Object.keys(table ?? {}).join(' / ') || '（一个都还没登记）'
+          }`,
+          'platform.boss',
+          { filter: dimension, value, platform: pack.platform, reason: 'no-code', allowed: Object.keys(table ?? {}) },
+        );
+      }
+      target.searchParams.set(param, code);
     }
     return target.href;
   };

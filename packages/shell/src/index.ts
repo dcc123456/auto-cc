@@ -124,6 +124,14 @@ export class ShellService extends Service {
   private lastError: string | undefined;
   /** 上一次已经推给界面的内核视图地址；只用于「变了才发」，不当作读数来源（读数永远是 `getURL()`）。 */
   private pushedKernelViewUrl = '';
+  /**
+   * 当前内核视图「自己没了」的原因原文（2026-11-23 的 P2）。
+   *
+   * 与 `lastError` **分开**：`lastError` 是给人看的当前故障，而这条描述的是某一刻发生过的事；
+   * 视图后来重建好了它就该消失，混进 `lastError` 会让一条早已过去的销毁一直挂在状态条上
+   * （QA 复验时看到的就是这个假告警：视图健康，`lastError` 里还写着「页面被销毁」）。
+   */
+  private kernelViewGone: string | null = null;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -160,7 +168,8 @@ export class ShellService extends Service {
       // 接管子视图的个数：与 `devtools.status().targetCount` 的增量对照，就是 2.1-11 的泄漏判据。
       kernelViewTakeoverCount: this.takeoverViews.length,
       kernelViewLoadError: this.kernelViewError,
-      lastError: this.lastError,
+      // 视图活着时这条恒为 null（`createKernelView` 会清）；视图没了的这一刻它才是该给人看的那句话。
+      lastError: contents === null && this.kernelViewGone !== null ? this.kernelViewGone : this.lastError,
     };
   };
 
@@ -572,6 +581,8 @@ export class ShellService extends Service {
     // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
     this.kernelViewPartition = partition ?? '';
     this.kernelViewError = null;
+    // 新视图建起来 = 上一次的「视图没了」已经过去了；那条读数不能跟着新视图继续显示（P2）。
+    this.kernelViewGone = null;
     win.contentView.addChildView(view);
     // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。
     // 规则写在视图的拥有者这里，而不是让每个挂载方各补一句 `setKernelViewVisible(true)`（§2.5）。
@@ -601,11 +612,17 @@ export class ShellService extends Service {
     const contents = liveWebContentsOf<WebContents>(view);
     if (!contents) return;
     contents.on('destroyed', () => {
-      this.noteError(`内核视图的页面被销毁（view=${String(this.kernelView === view)}）`);
+      // 只有**当前**视图被销毁才算故障：换视图时旧视图的 destroyed 一定会来一发，
+      // 那是正常替换，不是「右栏坏了」（P2 的假告警就是它）。
+      if (this.kernelView !== view) return;
+      this.kernelViewGone = '内核视图的页面被销毁';
+      this.ctx.logger.warn(this.kernelViewGone);
       this.reapDeadKernelView();
     });
     contents.on('render-process-gone', (_event, details) => {
-      this.noteError(`内核视图的渲染进程退出：reason=${details.reason} exitCode=${String(details.exitCode)}`);
+      if (this.kernelView !== view) return;
+      this.kernelViewGone = `内核视图的渲染进程退出：reason=${details.reason} exitCode=${String(details.exitCode)}`;
+      this.ctx.logger.error(this.kernelViewGone);
       this.reapDeadKernelView();
     });
   }

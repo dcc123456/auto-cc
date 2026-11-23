@@ -3930,6 +3930,13 @@ export interface PlatformMetaView {
    * 未声明时为 undefined，渲染层按 zoom=1 并如实提示未适配，绝不猜一个数。
    */
   minLayoutWidth?: number;
+  /**
+   * 这个平台**真正能发的**筛选维度与取值（人话标签），来自知识包 `search.params` + `search.enums`。
+   *
+   * 渲染层据此画下拉：**只有出现在这里的维度才上屏**（2026-11-23 的判据：映射补齐前不许出现
+   * 「看起来能筛」的控件）。空对象表示这家平台一个附加维度都没登记——界面就只留关键词与城市。
+   */
+  searchFilters?: { dimension: string; labels: string[] }[];
 }
 
 /** `platform.registry` 的只读清单。 */
@@ -4205,7 +4212,15 @@ export interface CaptureStatusView {
 export interface JobSearchCriteriaView {
   keyword: string;
   city?: string;
+  /** 城市二级区（人话，如「徐汇区」）；码表在平台知识包里，界面不拼码 */
+  cityDistrict?: string;
   experience?: string;
+  degree?: string;
+  salary?: string;
+  companyScale?: string;
+  jobType?: string;
+  financingStage?: string;
+  industry?: string;
   limit?: number;
 }
 

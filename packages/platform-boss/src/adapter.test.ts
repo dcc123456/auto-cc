@@ -111,6 +111,9 @@ describe('BOSS 适配器的自我声明（spec 2.2-06）', () => {
       // 导航许可的唯一来源是知识包登记的 origins（P8 8.1-05），不是 startUrl 折算出来的那一个源。
       origins: ['http://127.0.0.1:10233'],
       capabilities: ['search', 'detail', 'chat', 'sendResume', 'readReplies'],
+      // 仿站包只声明了 keyword/city/experience 三个参数名、没有码表，所以「能发的附加维度」是空的：
+      // 界面据此不画下拉（2026-11-23 判据：没映射的维度不上屏）。
+      searchFilters: [],
     });
   });
 
@@ -143,18 +146,59 @@ describe('搜索与列表读取（spec 2.3-01 / 2.3-02）', () => {
   });
 
   /**
-   * 真站包只登记了 `query` / `city` 两个参数名，「经验」这一维发不出去。
-   * 这里要钉住的是**不许静默丢弃**（2026-11-23）：丢掉之后界面显示「已按经验筛」而页面其实没筛，
-   * 那就是「筛了但没筛」的谎报。判据两条——结构化拒绝 + 一次导航都没发生。
+   * 真站包的 9 维映射（2026-11-23 在真站上逐维点击采出来的码）。
+   * 判据是「URL 里带的是码，不是人话」——人话塞进参数会被站点静默忽略，那就成了「筛了但没筛」。
    */
-  it('真站包没声明「经验」的参数名：结构化拒绝，不静默丢掉这一维', async () => {
+  it('9 维筛选按知识包的码表转成站点的码：URL 里带的是码，不是人话', async () => {
     const fakePage = createFakePage(standardScript());
     const adapter = createBossAdapter(realPack, fakePage, createFakeAct({}));
-    await expect(adapter.search({ keyword: '前端工程师', experience: '3-5 年' })).rejects.toMatchObject({
+    await adapter.search({
+      keyword: '前端',
+      city: '上海',
+      cityDistrict: '徐汇区',
+      experience: '3-5年',
+      degree: '本科',
+      salary: '10-20K',
+      companyScale: '100-499人',
+      jobType: '全职',
+      financingStage: 'A轮',
+      industry: '互联网',
+    });
+    const params = new URL(fakePage.navigated[0]!).searchParams;
+    expect(params.get('city')).toBe('101020100');
+    expect(params.get('multiBusinessDistrict')).toBe('310104');
+    expect(params.get('experience')).toBe('105');
+    expect(params.get('degree')).toBe('203');
+    expect(params.get('salary')).toBe('405');
+    expect(params.get('scale')).toBe('303');
+    expect(params.get('jobType')).toBe('1901');
+    expect(params.get('stage')).toBe('803');
+    expect(params.get('industry')).toBe('100020');
+  });
+
+  it('取值不在码表里：结构化拒绝并带上可用取值，绝不拿人话当码塞进 URL', async () => {
+    const fakePage = createFakePage(standardScript());
+    const adapter = createBossAdapter(realPack, fakePage, createFakeAct({}));
+    await expect(adapter.search({ keyword: '前端', experience: '3-5 年' })).rejects.toMatchObject({
       code: 'SEARCH_FILTER_UNSUPPORTED',
-      details: { filter: 'experience', value: '3-5 年', platform: 'boss' },
+      details: { filter: 'experience', value: '3-5 年', platform: 'boss', reason: 'no-code', allowed: ['3-5年'] },
     });
     expect(fakePage.navigated).toEqual([]);
+  });
+
+  it('知识包没声明这一维的参数名：结构化拒绝，不静默丢掉这一维', async () => {
+    const fakePage = createFakePage(standardScript());
+    const adapter = createBossAdapter(realPack, fakePage, createFakeAct({}));
+    // 真站包没有 `position` 这一维（职位类型是二级行业分类，不在本片范围）：用我们的行业字段反证一次
+    // ——拿一个码表里不存在的维度名，等于「知识包没声明」。
+    await expect(adapter.search({ keyword: '前端', cityDistrict: '' }).then(() => 'ok')).resolves.toBe('ok');
+    const fixturePage = createFakePage(standardScript());
+    const fixtureAdapter = createBossAdapter(pack, fixturePage, createFakeAct({}));
+    await expect(fixtureAdapter.search({ keyword: '前端', industry: '互联网' })).rejects.toMatchObject({
+      code: 'SEARCH_FILTER_UNSUPPORTED',
+      details: { filter: 'industry', platform: 'boss', reason: 'no-param' },
+    });
+    expect(fixturePage.navigated).toEqual([]);
   });
 
   it('只给关键词时不拼空的筛选参数（拼进去等于把站点默认的筛选条件改掉）', async () => {

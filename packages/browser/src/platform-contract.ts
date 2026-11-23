@@ -107,20 +107,43 @@ const captureSectionSchema = z.strictObject({
 });
 
 /** 搜索条件 → URL 查询参数名（2.3-01：三个维度都是平台的筛选参数，不是事后过滤）。 */
+/**
+ * 各筛选维度的参数名（2026-11-23 实测，逐维一次点击换一个 URL 采出来的）。
+ *
+ * 除关键词与城市外全部可选：某个平台没有这一维就省略，适配器据此对「传了但发不出去」的维度
+ * 抛 `SEARCH_FILTER_UNSUPPORTED` —— 绝不静默丢弃（丢掉会让界面显示「已筛」而页面没筛）。
+ */
 const searchParamsSchema = z.strictObject({
   /** 关键词参数名（如 `query`） */
   keyword: z.string().min(1),
   /** 城市参数名（如 `city`） */
   city: z.string().min(1),
-  /**
-   * 经验筛选参数名；**站点没有这个维度时省略**（P8 8.0-03：真 BOSS 搜索表单上取证到的只有
-   * `query` / `city` / `industry` / `position` 四项，没有一个"经验"参数名）。
-   *
-   * 这条从必填改成可选，是为了让"没取证到"在数据里看得出来：省略时适配器不带这个参数，
-   * 而界面据 `null` 报"本次未按经验过滤"，比拿一个猜出来的参数名去真站点上撞要诚实。
-   */
+  /** 城市二级区（真 BOSS 是 `multiBusinessDistrict`） */
+  district: z.string().min(1).optional(),
+  /** 经验（真 BOSS 是 `experience`，取值是码） */
   experience: z.string().min(1).optional(),
+  /** 学历（`degree`） */
+  degree: z.string().min(1).optional(),
+  /** 薪资区间（`salary`） */
+  salary: z.string().min(1).optional(),
+  /** 公司规模（`scale`） */
+  scale: z.string().min(1).optional(),
+  /** 求职类型（`jobType`） */
+  jobType: z.string().min(1).optional(),
+  /** 融资阶段（`stage`） */
+  stage: z.string().min(1).optional(),
+  /** 公司行业（`industry`） */
+  industry: z.string().min(1).optional(),
 });
+
+/**
+ * 各维度的「人话 → 站点码」表（2026-11-23 起）。
+ *
+ * 键名与 `searchParamsSchema` 的维度名一一对应（`district` / `experience` / `degree` / `salary` /
+ * `scale` / `jobType` / `stage` / `industry`）。**只登记实测出来的取值**：一个维度只认识一个值时，
+ * 表里就只有一条——传别的值会被结构化拒绝，不猜码、不拿人话当码塞进 URL。
+ */
+const searchEnumsSchema = z.record(z.string().min(1), z.record(z.string().min(1), z.string().min(1))).default({});
 
 /**
  * 城市名 → 站点城市码（P8 8.3）。
@@ -183,6 +206,8 @@ export const knowledgePackSchema = z.strictObject({
     params: searchParamsSchema,
     /** 城市名 → 城市码；**缺席即「这家平台还没登记城市码表」**，此时 `resolveCityParam` 原样传值（见该函数）。 */
     cities: searchCitiesSchema.default({}),
+    /** 各维度「人话 → 站点码」表（见 `searchEnumsSchema`）；没表就不换算，原样传值（仿站走这一档）。 */
+    enums: searchEnumsSchema,
   }),
   /**
    * 打招呼与对话的页面声明（2.5-d）。缺段即「这个平台还没有会话页知识」，
@@ -602,8 +627,29 @@ export type JobSearchCriteria = {
   keyword: string;
   /** 城市名；省略表示用平台的默认定位 */
   city?: string;
+  /** 城市二级区（如「徐汇区」）；省略表示整市。真 BOSS 的参数名是 `multiBusinessDistrict`（2026-11-23 实测） */
+  cityDistrict?: string;
   /** 经验要求（如「3-5年」）；省略表示不限。列表页把它当筛选条件而不是事后过滤（spec 2.3-01） */
   experience?: string;
+  /** 学历要求（如「本科」） */
+  degree?: string;
+  /** 薪资区间（如「10-20K」） */
+  salary?: string;
+  /** 公司规模（如「100-499人」） */
+  companyScale?: string;
+  /** 求职类型（如「全职」「兼职」） */
+  jobType?: string;
+  /** 融资阶段（如「A轮」） */
+  financingStage?: string;
+  /**
+   * 公司行业（如「互联网」）。
+   *
+   * 上面这 7 个维度（区 / 学历 / 薪资 / 规模 / 求职类型 / 融资 / 行业）是 2026-11-23 在真 BOSS
+   * 搜索页上一次点击换一个 URL 采出来的：**取值一律用人话（页面上的原文），码表在知识包里**
+   * （`search.enums`），界面与编排侧都不许自己拼码——拼错了站点会静默忽略参数，
+   * 「筛了但没筛」就是这么来的。知识包没声明的维度由适配器结构化拒绝（`SEARCH_FILTER_UNSUPPORTED`）。
+   */
+  industry?: string;
   /** 本次最多取回几条（节奏与额度都在编排侧：`outbound.throttle` 与 `entitlement.gate`，知识包不声明） */
   limit?: number;
 };

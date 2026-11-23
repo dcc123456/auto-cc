@@ -61,6 +61,28 @@ const ROW_DISPLAY_LIMIT = 100;
 const ROW_PAGE_STEP = 100;
 
 /**
+ * 把界面上选中的附加筛选摊成抓取入参的字段（2026-11-23 实测的 9 维）。
+ *
+ * 知识包里的维度名与契约字段名不是一套（`district` / `scale` / `stage` 更短），换算写在这一处；
+ * 空串表示「不限」，**不传**而不是传空串（传空串会让站点把这一维当成已筛且筛空）。
+ * @param selected 维度名 → 人话标签
+ * @returns 只含已选维度的契约字段
+ */
+function extraCriteria(selected: Record<string, string>): Record<string, string> {
+  const fieldOf: Record<string, string> = {
+    district: 'cityDistrict',
+    scale: 'companyScale',
+    stage: 'financingStage',
+  };
+  const out: Record<string, string> = {};
+  for (const [dimension, label] of Object.entries(selected)) {
+    if (label === '') continue;
+    out[fieldOf[dimension] ?? dimension] = label;
+  }
+  return out;
+}
+
+/**
  * 卡片上那三个状态点（2026-11-23 用户裁定①）：「已定制 / 已打招呼 / 已投递」各自独立。
  *
  * 判据只取**库里真有的**那一列状态（`journey.tracking.list` 的 `state`）与「对方回过话」那一位：
@@ -136,6 +158,22 @@ export function JobLabPanel() {
   const [experienceDraft, setExperienceDraft] = useState('');
   /** 本次目标条数（`criteria.limit`）：填了就压过配置的 `targetCount`，让 2.3-06 的「达目标即停」能在界面上演示。 */
   const [limitDraft, setLimitDraft] = useState('');
+  /**
+   * 附加筛选（2026-11-23）：维度名 → 界面上选中的**人话标签**（如 `experience: '3-5年'`）。
+   *
+   * 界面只存人话、不存码：码表在平台知识包里，换算在适配器一侧（2026-11-23 实测 9 维，
+   * 界面自己拼码就等于把站点知识抄进渲染层）。空串表示这一维「不限」。
+   */
+  const [extraFilters, setExtraFilters] = useState<Record<string, string>>({});
+  /**
+   * 当前平台**真正能发**的筛选维度与取值（来自 `platform.registry.list()` 的 `searchFilters`）。
+   *
+   * 「能发」的判据在知识包：既有参数名、又有标签表。没登记的维度不上屏——
+   * 否则就是一个按了没反应的控件，正是「看起来能筛」那种谎话。
+   */
+  const [searchFilters, setSearchFilters] = useState<{ dimension: string; labels: string[] }[]>([]);
+  /** 平台是否声明了「经验」这一维（声明了就用下拉，自由文本与码表会打架）。 */
+  const declaresExperience = searchFilters.some((filter) => filter.dimension === 'experience');
   /** 简历 PDF 的绝对路径：留空则由主进程用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口）。 */
   const [resumePathDraft, setResumePathDraft] = useState('');
   /** 最近一次打招呼的回执（`GreetReceiptView`）：闸门拒了就没有回执，界面上只剩结构化错误（spec 2.5-02）。 */
@@ -359,7 +397,10 @@ export function JobLabPanel() {
               {
                 keyword,
                 city: cityDraft.trim() || undefined,
-                experience: experienceDraft.trim() || undefined,
+                // 平台声明了「经验」维度时以那一格下拉为准；没声明才走自由文本（仿站那一档）。
+                experience:
+                  (declaresExperience ? (extraFilters.experience ?? '') : experienceDraft.trim()) || undefined,
+                ...extraCriteria(extraFilters),
                 limit: Number.isInteger(limit) && limit > 0 ? limit : undefined,
               },
               effectivePlatform === '' ? undefined : effectivePlatform,
@@ -383,6 +424,26 @@ export function JobLabPanel() {
       );
     });
   };
+
+  /**
+   * 读一次「这个平台能发哪些筛选维度」（`platform.registry.list()` 的 `searchFilters`）。
+   *
+   * 跟随当前在跑的平台：换平台后下拉里那一组标签也要跟着换（两个站点的枚举本来就不一样）。
+   * 读不到就交空数组：界面退回「只有关键词与城市」，不是一个按了没反应的控件。
+   */
+  useEffect(() => {
+    const client = window.autoCC;
+    if (!client || effectivePlatform === '') {
+      setSearchFilters([]);
+      return;
+    }
+    void (async () => {
+      const reply = await client.platform['registry.list']();
+      if (!reply.ok) return;
+      const platform = reply.value.platforms.find((item) => item.id === effectivePlatform);
+      setSearchFilters(platform?.searchFilters ?? []);
+    })();
+  }, [effectivePlatform]);
 
   /**
    * 读一次岗位跟踪态，投影成 `平台|岗位 → 状态` 的表（卡片上的状态点用它）。
@@ -734,14 +795,16 @@ export function JobLabPanel() {
               placeholder={t('jd.cityPlaceholder')}
               className="flex-1"
             />
-            <DeskField
-              action="jd-experience"
-              data-testid="jd-experience"
-              value={experienceDraft}
-              onValueChange={setExperienceDraft}
-              placeholder={t('jd.experiencePlaceholder')}
-              className="flex-1"
-            />
+            {declaresExperience ? null : (
+              <DeskField
+                action="jd-experience"
+                data-testid="jd-experience"
+                value={experienceDraft}
+                onValueChange={setExperienceDraft}
+                placeholder={t('jd.experiencePlaceholder')}
+                className="flex-1"
+              />
+            )}
             <DeskField
               action="jd-limit"
               type="number"
@@ -753,6 +816,34 @@ export function JobLabPanel() {
               className="w-24"
             />
           </div>
+          {/* 附加筛选（2026-11-23 实测 9 维）：**只有知识包声明了参数名与标签表的维度才上屏**。
+              这样界面不会长出「看起来能筛」的控件；传了站上不存在的取值由适配器结构化拒绝。 */}
+          {searchFilters.length > 0 ? (
+            <div
+              className="grid grid-cols-1 gap-2 @2xl:grid-cols-2 @4xl:grid-cols-4"
+              data-testid="jd-search-filters"
+              data-filter-count={searchFilters.length}
+            >
+              {searchFilters.map((filter) => (
+                <DeskSelect
+                  key={filter.dimension}
+                  action={`jd-filter-${filter.dimension}`}
+                  data-testid={`jd-filter-${filter.dimension}`}
+                  label={t(`jd.filterLabel.${filter.dimension}`)}
+                  value={extraFilters[filter.dimension] ?? ''}
+                  onValueChange={(value) => setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))}
+                  className="w-full"
+                >
+                  <option value="">{t('jd.filterAny')}</option>
+                  {filter.labels.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                </DeskSelect>
+              ))}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2">
             {/* 抓取走实心（它是这一屏的主操作，效果档是读）；外发那两只才是朱砂 */}
             <DeskButton

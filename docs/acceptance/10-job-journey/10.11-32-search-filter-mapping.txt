@@ -1,0 +1,38 @@
+10.11-32 收口一半：9 维筛选落进契约与知识包 + 一条假告警的修法（2026-11-23）
+
+**来源（单一来源，写实）**：9 个码全部来自 QA 在真站上「点一次看一次 URL」（`c45539f` 那一轮复验），
+分别是 `city=101020100`（上海）、`multiBusinessDistrict=310104`（徐汇区）、`experience=105`（3-5年）、
+`degree=203`（本科）、`salary=405`（10-20K）、`scale=303`（100-499人）、`jobType=1901`（全职）、
+`stage=803`（A轮）、`industry=100020`（互联网）。
+**我这边没有独立交叉验证到**：我挂的只读 URL 监听只记到 `START ?query=前端`，之后一条变化都没有
+（那一轮实例随后进入坏态）。所以这是**单来源读数**，不是双来源；我不拿它去推别的取值。
+
+**改了什么**
+① `JobSearchCriteria` 扩到 9 维（新增 `cityDistrict` / `degree` / `salary` / `companyScale` /
+   `jobType` / `financingStage` / `industry`）：入参一律收**人话**（页面原文），不收码。
+② 知识包 `search.params` 补 9 个参数名、`search.enums` 新增「人话 → 码」表（**只登记实测出来的那一个值**）、
+   `search.cities` 保留上海一条。
+③ 适配器 `searchUrl()` 逐维换算：没声明参数名 → `SEARCH_FILTER_UNSUPPORTED { reason:'no-param' }`；
+   声明了但取值不在码表里 → `{ reason:'no-code', allowed:[…] }`；两种都**一次导航都不发生**。
+   绝不拿人话当码塞进 URL（那是「筛了但没筛」的成因）。
+④ 界面只画知识包声明过的维度：`PlatformMetaView.searchFilters` 透出「有参数名且标签表非空」的维度，
+   岗位屏据此画下拉；平台声明了「经验」维度时，原来那个自由文本框让位给下拉（两个同时存在会互相打架）。
+   `district`/`scale`/`stage` 三个短名在渲染层换成契约字段名，换算只写了一处。
+
+**假告警（P2）的修法**：`lastError` 里那条「内核视图的页面被销毁（view=false）」是**换视图时旧视图的
+`destroyed` 事件**写进去的，视图后来一直健康。改法不是「每次 getStatus 都清 lastError」（那会把别的真错误
+一起抹掉），而是：视图消失的原因单独存 `kernelViewGone`，**只有当前视图被销毁/崩溃时才写**；
+`createKernelView` 建起新视图时清空；`getStatus()` 只在**当前确实没有活视图**时才把它当 `lastError` 交出去。
+于是视图健康时这条读数恒为 null，视图真没了的那一屏仍能看到原因。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2814 例全过**（`@auto-cc/plugin-platform-boss` 196 例，新增 3 条：
+9 维逐项转码、未知取值拒绝并带 `allowed`、没声明参数名的维度拒绝）。
+
+**还欠什么（不装已收口）**
+- **北京 / 深圳 / 杭州的城市码**没有：等 QA 再点一轮城市栏。码表里现在只有上海；传别的城市会走
+  `resolveCityParam` 的「查不到就停」那条（结构化拒绝），不会拿人话当码。
+- 每个维度目前只认识**一个取值**（实测到的那个），所以界面上的下拉每组只有一项 +「不限」。
+  这不是最终形态：再多点几个选项就能把枚举补厚，代码不用改，只改 `boss.json`。
+- 「筛了真的筛了」的**最终验证**（同关键词下 `experience=105` 加与不加、条数必须不同、URL 带 param）归 QA；
+  本文件只证明「这条链路发得出、发出去的是码」。
