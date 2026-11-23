@@ -428,6 +428,25 @@ export class FakeSessionsService extends Service {
   /** 用例可写的会话清单（`sessions.status()` 的形状里导航名单只读 `platforms[].id/startUrl`）。 */
   readonly platforms: { id: string; startUrl: string }[] = [];
 
+  /** `ensureBrowser` 被调用的次数（2026-11-23 裁定：无会话时导航要自己把浏览器起起来）。 */
+  ensureCalls = 0;
+
+  /**
+   * 起会话那一刻的副作用：用例把它设成「把视图挂上去」，才演得出自动建会话的完整路径。
+   * 默认 null = 起来之后仍然没有视图，用来验「起不成时如实报 NO_KERNEL_SESSION 而不是假装成功」。
+   */
+  onEnsure: (() => void) | null = null;
+
+  /**
+   * 契约见真实现的 `ensureBrowser`：没有会话时挂一块视图；已经有会话时什么都不做。
+   * @returns 与 `status()` 同形的会话快照（本替身只给 `platforms` 那一项）
+   */
+  ensureBrowser = (): Promise<{ platforms: { id: string; startUrl: string }[] }> => {
+    this.ensureCalls += 1;
+    this.onEnsure?.();
+    return Promise.resolve({ platforms: this.platforms });
+  };
+
   /**
    * 与真实现同形的会话读数：`browser.page.navigate` 要拿它判「这是不是一条回环会话」。
    * @returns 只含 `platforms` 的最小快照（其余字段这条判据用不到）

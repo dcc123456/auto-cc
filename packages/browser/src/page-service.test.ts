@@ -63,10 +63,13 @@ async function boot(view: WebContents | null = null, overrides: Partial<BrowserP
   fibers.push(registryFiber, sessionsFiber);
   const pageFiber = await ctx.plugin(BrowserPageService, { ...DEFAULT_PAGE_CONFIG, ...overrides });
   fibers.push(pageFiber);
-  (ctx.get('shell') as unknown as FakeShellService).contents = view;
+  const shell = ctx.get('shell') as unknown as FakeShellService;
+  shell.contents = view;
   return {
     page: ctx.get('browser.page') as BrowserPageService,
     pageFiber,
+    shell,
+    sessions: ctx.get('sessions') as unknown as FakeSessionsService,
     tools: withTools ? (ctx.get('agent.tools') as unknown as FakeAgentToolsService) : null,
   };
 }
@@ -245,6 +248,53 @@ describe('导航在途竞态（9.2-08 / 10.2-01）', () => {
     const { page } = await boot(contents);
     await expect(page.navigate('http://127.0.0.1:10233/boss?query=frontend')).rejects.toThrow('ERR_CONNECTION_REFUSED');
     expect(calls).toHaveLength(1);
+  });
+});
+
+/**
+ * 地址栏的第一入口：没有会话时自己起会话（2026-11-23 用户裁定）。
+ *
+ * 用户实测的现象不是「被拦」而是「点了没反应」：地址栏走 `browser.page.navigate`，它第一步要一块
+ * 已挂载的视图，而视图停在占位页，于是直接 `NO_KERNEL_SESSION`。对「一个真实浏览器」的心智来说这是缺陷——
+ * 用户不该先知道要「打开会话」才能输网址。判据两条：① 无会话时自己起来并真的导航过去；
+ * ② 已有会话时**一个字都不动**（重建视图会丢页面与登录态现场）。
+ */
+describe('没有会话时自己起会话（2026-11-23 裁定）', () => {
+  it('无会话时先起会话、再导航，落定后回完整快照', async () => {
+    const urls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      urls.push(url);
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return Promise.resolve();
+    });
+    const rig = await boot(null);
+    rig.sessions.onEnsure = () => {
+      rig.shell.contents = contents;
+    };
+    await expect(rig.page.navigate('https://other.example/jd/1')).resolves.toMatchObject({ readyState: 'complete' });
+    expect(rig.sessions.ensureCalls).toBe(1);
+    expect(urls).toEqual(['https://other.example/jd/1']);
+  });
+
+  it('已有会话时不动会话：会话一个都不起，导航走原来那条路', async () => {
+    const urls: string[] = [];
+    const contents = viewWithLoad((url) => {
+      urls.push(url);
+      setTimeout(() => fireViewEvent(contents, 'did-finish-load'), 0);
+      return Promise.resolve();
+    });
+    const rig = await boot(contents);
+    await expect(rig.page.navigate('https://other.example/jd/2')).resolves.toMatchObject({ readyState: 'complete' });
+    expect(rig.sessions.ensureCalls).toBe(0);
+    expect(urls).toEqual(['https://other.example/jd/2']);
+  });
+
+  it('会话起完仍然拿不到视图时如实报 NO_KERNEL_SESSION，不假装导航成功', async () => {
+    const rig = await boot(null);
+    await expect(rig.page.navigate('https://other.example/jd/3')).rejects.toMatchObject({
+      code: 'NO_KERNEL_SESSION',
+    });
+    expect(rig.sessions.ensureCalls).toBe(1);
   });
 });
 

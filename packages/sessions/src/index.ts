@@ -64,6 +64,14 @@ type KernelHost = Pick<ShellService, 'mountKernelSite' | 'unmountKernelSite' | '
 const BROWSER_PARTITION = partitionFor('browser');
 
 /**
+ * 「先把浏览器开起来」时挂的空白页（2026-11-23 裁定）。
+ *
+ * 为什么不是某个平台的 startUrl：地址栏拿到的是**用户自己输的地址**，把它顶掉等于替用户导航。
+ * 为什么不挂占位页：占位页属于壳层的占位态（分区为空），这里要的是一块真视图，好让下一次导航有地方落。
+ */
+const BROWSER_BLANK_PAGE = 'about:blank';
+
+/**
  * 一个平台的会话配置。
  *
  * 登录判定用的是**信号族**（8.2-01）：真实站点上登录态是一族 cookie，而仿站只发一枚，
@@ -225,6 +233,25 @@ export class SessionsService extends Service implements ConsentGate {
       // 活动平台按分区现读，而不是自己记一份状态：窗口销毁重建后读数会自动回到「没有活动平台」。
       activePlatform: readings.find((reading) => reading.view.partition === currentPartition)?.view.id ?? null,
     };
+  };
+
+  /**
+   * 起那唯一一个浏览器会话（2026-11-23 裁定：地址栏输网址不该先让人去「运行记录」点开会话）。
+   *
+   * 与 `open(platform)` 的分工：那是「去某个平台的起始页」，这条是「先把浏览器开起来」——
+   * 地址栏拿到的是用户自己输的地址，不该被任何平台的 `startUrl` 顶掉，所以这里只挂一块空白页，
+   * 真正的地址由调用方紧接着经**唯一那条导航口**（`browser.page.navigate`）过去。
+   * 已经有会话时**什么都不做**：重建视图会丢掉页面上正在进行的一切（占位页那一态除外，
+   * 它的分区是空串，本来就没有页面）。
+   * @returns 起好之后的会话快照
+   */
+  ensureBrowser = async (): Promise<SessionsStatusView> => {
+    if (this.host.getStatus().kernelViewPartition !== '') return this.status();
+    // 与 `open` 同一个理由先迁移：起会话这一刻正是「新代码第一次碰这份 userData」的时刻。
+    await this.mergeLegacyPartitions();
+    this.host.mountKernelSite(BROWSER_PARTITION, BROWSER_BLANK_PAGE);
+    this.ctx.logger.info(`已起单一浏览器会话（分区 ${BROWSER_PARTITION} · 空白页），等待调用方导航`);
+    return this.status();
   };
 
   /**

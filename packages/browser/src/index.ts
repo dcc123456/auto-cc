@@ -37,6 +37,7 @@ import {
   toScrollReading,
   toSnapshotReading,
 } from './page-script.js';
+import type { SessionsService } from '@auto-cc/plugin-sessions';
 import { resolveNavigableUrl } from './navigate-policy.js';
 
 export const browserPageSchema = z.strictObject({
@@ -85,7 +86,8 @@ export type PageScreenshotView = {
 export class BrowserPageService extends Service {
   static provide = 'browser.page';
   static Config = browserPageSchema;
-  static inject = ['shell'];
+  /** `sessions` 只用一件事：还没有会话时先起那唯一一个浏览器会话（2026-11-23 裁定）。 */
+  static inject = ['shell', 'sessions'];
 
   constructor(
     ctx: Context,
@@ -102,8 +104,10 @@ export class BrowserPageService extends Service {
    * @throws 协议不允许或地址解析失败时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
    */
   navigate = async (url: string): Promise<KernelPageSnapshotView> => {
-    const contents = requireKernelContents(this.host, 'browser.page');
     const target = resolveNavigableUrl(url);
+    // 地址栏是用户的第一入口：还没开过会话时自己把浏览器起起来，别让人先去「运行记录」点一下
+    // （2026-11-23 用户实测：无会话时输 baidu 表现为「点了没反应」，其实是 NO_KERNEL_SESSION）。
+    const contents = await this.ensurePage();
     let settled = settleLoad(contents, this.config.navigateTimeoutMs);
     let outcome: 'loaded' | 'failed' | 'timeout';
     try {
@@ -121,6 +125,20 @@ export class BrowserPageService extends Service {
     this.ctx.logger.info(`内核视图已导航：${target.href}（装载 ${outcome}）`);
     return this.readSnapshot(contents);
   };
+
+  /**
+   * 取页面句柄；还没有会话时先起那唯一一个浏览器会话（2026-11-23 裁定）。
+   *
+   * 落在这里而不是渲染层：开会话的唯一通道是 `sessions`，渲染层复制一份就成了两个入口（§2.5）。
+   * 已有会话时一个字都不动——视图重建会丢掉页面上正在进行的一切，也包括那份登录态所依赖的现场。
+   * @returns 可直接导航/读取的视图句柄
+   * @throws 起完会话仍然拿不到视图时 `NO_KERNEL_SESSION`（窗口已销毁这类结构性原因，不猜）
+   */
+  private async ensurePage(): Promise<WebContents> {
+    if (this.host.kernelContents()) return requireKernelContents(this.host, 'browser.page');
+    await this.sessions.ensureBrowser();
+    return requireKernelContents(this.host, 'browser.page');
+  }
 
   /**
    * 读取当前内核视图所在页面的快照。
@@ -288,6 +306,14 @@ export class BrowserPageService extends Service {
    */
   private get host(): KernelHost {
     return asApp(this.ctx).shell;
+  }
+
+  /**
+   * 会话服务：只取「还没有页面时把浏览器起起来」这一件事（`ensureBrowser`）。
+   * @returns sessions 服务的窄投影
+   */
+  private get sessions(): Pick<SessionsService, 'ensureBrowser'> {
+    return asApp(this.ctx).sessions;
   }
 
   /**

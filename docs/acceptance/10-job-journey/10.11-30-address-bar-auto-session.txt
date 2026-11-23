@@ -1,0 +1,33 @@
+10.11-30 补片：地址栏打开网址时自己起浏览器会话（2026-11-23，用户实测缺陷）
+
+**现象**：用户在窗口里输 `https://www.baidu.com/` 表现为「点了没反应」。实测不是被拦——地址栏走
+`browser.page.navigate`，它第一步就要一块已挂载的视图，而视图还停在占位页，于是直接
+`NO_KERNEL_SESSION：「内核视图尚未挂载任何平台，先打开一个会话再操作页面」`。
+对「内嵌的就是一个真实浏览器」这个心智来说这是缺陷：**用户不该先知道要「打开会话」才能输网址**。
+
+**修法（一条通道，不在渲染层复制）**：
+① `sessions.ensureBrowser()`（新增）：内核视图分区为空时，先 `mergeLegacyPartitions()`，再按
+   单一分区 `persist:browser` 挂一块**空白页**（`about:blank`）——不是任何平台的 `startUrl`，
+   否则就成了「替用户导航到平台」；已经分区不为空时**什么都不做**（重建视图会丢掉页面上正在进行的一切）。
+② `browser.page.navigate()`：解析完目标地址后先 `ensurePage()`——已有视图就直接用，没有就
+   `await this.sessions.ensureBrowser()` 再取句柄，然后照原路 `loadURL` + 落定 + 回快照。
+   开会话的唯一通道因此仍是 `sessions`，渲染层一个字都没改。
+
+**活体读数**（隔离 userData `tmp/g11/batch/ud-31`、CDP 10431、`tmp/ports/10431.owner` 已建已删；
+目标站点用本机第二个回环端口 10234 当「用户手输的任意站点」，不碰真实平台、不出网；脚本 `tmp/g11/batch/p31.mjs`）：
+
+| 断言 | 读数 |
+| --- | --- |
+| ① 无会话时输网址能打开 | `shell.getStatus().kernelViewPartition` 开跑前是 **空串**（占位页）；`browser.page.navigate('http://127.0.0.1:10234/')` → `ok:true`，`value.partition='persist:browser'`、`url` 同目标、`readyState=complete`；随后 `kernelViewUrl` 与 `snapshot().url` 都是 `http://127.0.0.1:10234/` |
+| ② 已有会话时行为不变（不重建、不丢现场） | 先 `sessions.open('fixture')` 建立会话（`kernelViewUrl=http://127.0.0.1:10233/`），记下 `sessions.status()`；再 `navigate('http://127.0.0.1:10234/')` → `ok:true`、`readyState=complete`；前后对比：`partitionSame:true`、**`sessions.status()` 逐字节相等**（三个平台的 `auth` 与 `cookieNames` 都没变）、`kernelViewUrl` 落在目标地址而不是被拉回 `startUrl`——重建视图才会把它拉回去，所以这一条同时证明「没有重建」。 |
+
+**单测（新增 3 例，`page-service.test.ts`）**：无会话时 `ensureBrowser` 恰好被调 1 次并真的导航过去；
+已有会话时一次都不调；会话起完仍拿不到视图时如实报 `NO_KERNEL_SESSION`（不假装成功）。
+替身 `FakeSessionsService.ensureBrowser` 与 `onEnsure` 钩子同批加上（默认 `onEnsure=null`，
+于是「起不成」也是一条可演的路径）。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；
+`pnpm format:check` → `FORMAT_EXIT=0`；`pnpm test` → `TEST_EXIT=0`，**2803 例全过**（比上一片多 3 例）。
+
+**留给 QA 复验的两格**（与 PMO 裁定一致）：干净实例、无会话、地址栏输真实站点 → 页面真的打开；
+已登录 BOSS 会话在时输任意站点 → 会话不重建、`cookieNames` 不变。真站那一格要用户在场，自动化不碰。
