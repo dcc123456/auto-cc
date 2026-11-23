@@ -35,3 +35,23 @@ try/catch 里，只记一条 warn，继续把新视图建起来并指过去。
 （每次记录「点哪栏、点前 URL、点后 URL、`getStatus()` 的 visible/url/partition、是否出现销毁行」）→
 把 `内核视图的页面被销毁｜<stack>` 那几行原样贴回。有栈 = 能点名调用方；没栈 = 说明不是我们代码里
 显式的 `close()`，要往 Electron 侧查。
+
+## 附：本地「换视图/导航」压力测试（2026-11-23，`3895630`）
+
+脚本 `tmp/g11/batch/p40-remount-stress.mjs`（不入库，不碰真站）：隔离实例 + 本地仿站 10233，
+20 轮、三种节奏交替——① `sessions.open` → 250ms → `navigate`；② **两个调用同时发、不 await**
+（把重入压出来）；③ `navigate` → `sessions.open`。每轮读 `shell.getStatus()` 记
+`visible / url / partition / lastError`。
+
+读数：`{ cycles: 20, dead: 0, emptyUrl: 0, elapsedMs: 15053 }`，末态
+`{ visible: true, url: 'http://127.0.0.1:10233/boss?page=a20', partition: 'persist:browser', lastError: null }`。
+
+**这组读数的意义要说清**：
+- 它证明**我们自己的重建路径**（含并发重入）在 20 轮里一次都没把视图打死，`lastError` 也保持 null
+  （P2 那条假告警同时被确认为已消失）。
+- 但它**不能**证明本轮护栏修掉了真站上那次销毁：我没有修复前的同一组读数（这条压力测试是这轮才写的），
+  所以这是「风险已移除」而不是「根因已修」。真站上「点城市栏偶发销毁」仍在等 QA 那 20 次点击的栈。
+
+**如果栈显示销毁来自 `createKernelView` 之外**（例如站点自己 `window.close()`、或 Electron 内部回收），
+本轮两处护栏都管不到它。那时要做的决定是「禁止页面自关（拦住站点行为）」还是「接受并恢复（自动重建回原 URL）」——
+后者被管理员按「没有崩溃证据、做了就是给假问题写代码」否掉了，所以真出现那种栈时要重新裁一次，不能默认恢复。
