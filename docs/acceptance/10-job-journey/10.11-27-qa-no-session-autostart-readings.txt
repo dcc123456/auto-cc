@@ -1,0 +1,59 @@
+# 「展开网页窗口 + 手输网址」在无会话时的失败基线（用户 2026-11-23 报告）
+
+环境：隔离副本 `874ad08`（代码同 `470fafd`）、CDP 10416（QA 段位 + owner 文件）、**全新空 userData** `ud41`；
+浏览目标 `https://www.baidu.com/`（用户报告里用的就是百度；不是招聘平台，不触碰真站）。
+
+## 失败基线（修前）
+
+```
+展开前：kernelViewVisible=false、kernelViewUrl=data: 占位页
+点「展开网页窗口」后：kernelViewVisible=true，**仍是占位页**（无会话）
+地址栏输入 https://www.baidu.com/ → 点「打开」
+  → kernel-address-notice = 「打开网址 失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面」   （NO_KERNEL_SESSION）
+  → kernelViewUrl 不变（仍是 data: 占位页）、kernelViewPartition 为空
+  同区域另有提示条：「还没有打开站点：内核视图现在是占位页，先到运行记录里打开会话。去打开站点」
+```
+
+即：无会话时手输网址**不会建会话**，必须先去「运行记录」点一次——对一个「真实浏览器」的心智，这是缺陷；用户看到的就是「点了没反应」。
+
+## 修好后的复验判据（两条，我会用同一探针跑）
+
+| 场景 | 判据 |
+| --- | --- |
+| ① 干净实例、无会话、地址栏输 `https://www.baidu.com/` | 自动建立单一浏览器会话（`kernelViewPartition=persist:browser`）并**真的打开页面**：`browser.page.snapshot().readyState='complete'`、`snapshot().url` 为该地址 |
+| ② 已有会话（带登录 cookie）时输任意站点 | **不重建会话**：`kernelViewPartition` 不变、`sessions.probe('boss').cookieNames` 前后一致、`auth` 仍为 `active`；目标页 `readyState=complete` |
+
+判据②要用「前后两次读数成对」的方式写证据，避免把「碰巧还能用」当成没重建。
+
+## 修后复验（开发提交 `2c2713a`，2026-11-23）
+
+同一探针、同一条流程，前后并排：
+
+| 读数 | 修前（`874ad08`/空实例） | 修后（`2c2713a`/空实例） |
+| --- | --- | --- |
+| 展开后分区 | `""`（占位页） | `""`（占位页） |
+| 地址栏输 `https://www.baidu.com/` 后 notice | 「打开网址 失败：内核视图尚未挂载任何平台，先打开一个会话再操作页面」 | **「打开网址：成功」** |
+| `kernelViewPartition` | `""`（不变） | **`persist:browser`**（自动建的单一分区） |
+| `kernelViewUrl` | `data:text/html…`（不变） | **`https://www.baidu.com/`** |
+| `snapshot()` | 读不到（`NO_KERNEL_SESSION`） | **`{ url:"https://www.baidu.com/", readyState:"complete", title:"百度一下，你就知道" }`** |
+
+判据① **通过**：干净实例、无会话、地址栏输网址 → 自动起单一浏览器会话并真的打开页面（`readyState=complete`）。
+
+### 判据②：已有会话时导航不重建（真实 profile 副本 + 迁移后的登录态）
+
+用户Data 是真实 profile 的副本（`persist:boss` 有 11 条 cookie），`sessions.open('fixture')` 触发迁移后 `boss.auth=active`（10 条 cookie：`wt2/bst/zp_at/__a/__zp_stoken__/ab_guid/isOHPC/lastCity/wbg/Hm_lvt…`）。
+随后地址栏导航到 `https://www.baidu.com/`：
+
+```
+sessions.status() 前后逐字节相等：statusEqual = true
+partition: persist:browser → persist:browser（不变）
+boss: auth=active、cookieNames 仍 10 条（不变）
+navigatedTo: url=https://www.baidu.com/（落在目标，没有被拉回 fixture 的 startUrl）
+snapshot: { url:"https://www.baidu.com/", readyState:"complete", title:"百度一下，你就知道" }
+```
+
+判据② **通过**：导航**没有重建会话**（重建会把视图拉回 `startUrl`，这里落在目标地址；三个平台的 `auth`/`cookieNames` 前后完全一致，登录态没丢）。
+
+## 结论
+
+「展开网页窗口 + 手输网址」在无会话时现在**直接可用**；已有登录会话时导航不会重建、不会丢登录态。修前/修后两组读数并排保存在本节。
