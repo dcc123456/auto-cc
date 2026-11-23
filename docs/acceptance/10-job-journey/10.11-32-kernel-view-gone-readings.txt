@@ -1,0 +1,45 @@
+10.11-32 附带 P1：内核视图消失后只读口抛原生异常（2026-11-23，QA 在真站上撞到）
+
+**QA 的复现**：BOSS 搜索页一切正常 → 点「公司行业」的下拉头 → zhipin 的页面 target 从 `/json/list` 消失
+→ `shell.getStatus()` 与 `sessions.status()` 抛 `Cannot read properties of undefined (reading 'isDestroyed')`
+（`code: UNKNOWN`），右栏与地址栏一起失效。两次都撞上。
+
+**根因形状（这一半已确证，改的就是它）**：Electron 的 `WebContentsView.webContents` 在视图销毁后
+**可能变成 `undefined`**，而壳层原先到处写 `view.webContents.isDestroyed()`——可选链只护住 `view` 这一层，
+`webContents` 为 undefined 时**那一行自己就是抛异常的地方**。`sessions.status()` 的同一个异常来自它对
+`shell.getStatus()` 的依赖，不是两处独立的 bug。
+
+**改法**
+① 新增 `packages/shell/src/view-liveness.ts`：`liveWebContentsOf(view)` / `isViewLive(view)` 是「这块视图
+   还活着吗」的**唯一判据**（`isDestroyed` 自己抛也按不活处理，异常绝不穿到只读口）。
+② 壳层所有 `view.webContents.isDestroyed()` 全换成它：`getStatus`、`createKernelView` 换旧视图、
+   `detachTakeoverView`、`activeTakeoverView`、`activeKernelContents`、`applyZoomFactor`。
+③ `getStatus()` 第一句先 `reapDeadKernelView()`：视图真的死了就清掉记位（`kernelView` 置空、分区置空、
+   可见性 false、缩放回 1、接管子视图一并摘掉），于是**返回的是「没有视图」的读数**：
+   `kernelViewVisible:false`、`kernelViewUrl:''`、`kernelViewPartition:''`，不抛。
+   自愈也在这里：清掉记位之后，下一次导航会经 `sessions.ensureBrowser()` 自己重开一个浏览器会话
+   （这正是 2026-11-23 上午那条修的同一口），右栏跟着回来。
+④ 给新视图挂 `observeKernelViewGone()`：`destroyed` 与 `render-process-gone` 两条入口都接，
+   把**原因**（`reason` / `exitCode`）写进 `lastError` 与日志——这是下一次复现时唯一能定位
+   「为什么视图会消失」的读数，不再吞掉。
+
+**负对照（新增 6 例，`view-liveness.test.ts`）**：活着回原句柄；已销毁 → null 不抛；
+`webContents` 是 `undefined`（真站上撞到的形态）→ null 不抛；视图本身 null / undefined → null 不抛；
+`isDestroyed()` 自己抛 → 按不活处理、异常不外泄；没有 `isDestroyed` 方法的怪句柄 → 按不活处理。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2812 例全过**（`@auto-cc/shell` 81 例）。
+
+**还没定位的那一半（写实，不装已解）**：**为什么点「公司行业」下拉头会让视图消失**，目前只有两种候选，
+本轮的插桩能在一次复现里区分：
+(a) 页面自己把它的 webContents 关掉了（`destroyed` 事件，日志会写「页面被销毁」）；
+(b) 渲染进程退出（`render-process-gone`，日志会带 `reason` / `exitCode`，最常见的是 `oom` / `crashed`）。
+(b) 尤其像：BOSS 的行业下拉是二级列表（静止态我读到 145 个锚点都在这一块里），展开时一次性铺很多节点，
+在 `--disable-gpu` 的取证环境里容易把渲染进程顶到内存上限。
+- 如果是 (b) 且 `reason=oom`：那是**站的页面太重**，我们能做的是限制取证环境的并发视图、并在崩溃后自愈
+  （本轮已做后者），不该为了它去伪造根因。
+- 如果是 (a)：要看页面在什么条件下自己关自己（例如某个 `window.close()` / 被 deny 的弹窗后继行为）。
+
+**下一步（QA）**：用新构建复现同一个动作，把那一行 `内核视图的渲染进程退出：reason=… exitCode=…`
+或 `内核视图的页面被销毁` 报回来——这一条读数一到，根因就能定。若视图仍消失但接口不再抛错，
+那是「防御成功、根因未修」，必须照实记，不能当已修。

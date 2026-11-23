@@ -20,6 +20,7 @@ import {
   type ShellStatus,
 } from '@auto-cc/shared';
 import { z } from 'zod';
+import { isViewLive, liveWebContentsOf } from './view-liveness.js';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
   launchCompanion,
@@ -136,7 +137,10 @@ export class ShellService extends Service {
   /** 渲染层 `shell.getStatus` 的实现：返回当前窗口与内核视图状态。 */
   getStatus = (): ShellStatus => {
     const win = this.mainWindow;
-    const contents = this.kernelView?.webContents;
+    // 视图可能已经没了（真站上点一个下拉就能触发，2026-11-23 的 P1）：先收尸，再按「没有视图」回读数。
+    // 只读口一律不许抛原生异常——上层（`sessions.status` / 地址栏 / 状态条）到处在用这两条口。
+    this.reapDeadKernelView();
+    const contents = liveWebContentsOf<WebContents>(this.kernelView);
     const bounds = this.kernelView?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 };
     return {
       appVersion: app.getVersion(),
@@ -149,7 +153,7 @@ export class ShellService extends Service {
       kernelViewZoomFactor: this.zoomFactor,
       // 视图销毁后读不到 session，因此分区名取自本服务记下的那份；占位页阶段就是空串。
       // 接管子视图与父视图**共用同一个分区**（创建时传的就是这份），所以这里不需要另立读数。
-      kernelViewPartition: this.kernelView?.webContents.isDestroyed() ? '' : this.kernelViewPartition,
+      kernelViewPartition: contents === null ? '' : this.kernelViewPartition,
       kernelViewUrl: contents?.getURL() ?? '',
       // 用户实际看到的是栈顶那一个：harness 用它证明接管发生（此时 `kernelViewUrl` 仍停在被盖住的父页）。
       activeKernelViewUrl: this.activeKernelContents()?.getURL() ?? '',
@@ -547,11 +551,12 @@ export class ShellService extends Service {
     // 接管子视图挂在旧页面之上：旧页面一换，它们就无处可依，必须一起收掉（2.1-11 的泄漏口径）。
     [...this.takeoverViews].forEach((view) => this.detachTakeoverView(view));
     const previous = this.kernelView;
-    if (previous && !previous.webContents.isDestroyed()) {
+    const previousContents = liveWebContentsOf<WebContents>(previous);
+    if (previous && previousContents) {
       win.contentView.removeChildView(previous);
       // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
       // harness 与 devtools.status() 就会数到一个看不见的僵尸目标（1.6-06 的对照会错位）。
-      previous.webContents.close();
+      previousContents.close();
     }
     const view = new WebContentsView({
       webPreferences: {
@@ -575,12 +580,56 @@ export class ShellService extends Service {
     this.layoutKernelView();
     this.applyZoomFactor();
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
+    this.observeKernelViewGone(view);
     this.observeLoadFailure(view.webContents);
     this.observeKernelViewUrl(view);
     this.observeAssistantHotkey(view.webContents);
     view.webContents.setWindowOpenHandler(({ url }) => this.handleWindowOpen(view.webContents, url));
     void view.webContents.loadURL(url);
   }
+
+  /**
+   * 盯住「内核视图自己没了」这件事（2026-11-23 的 P1）：
+   * 真站在筛选下拉上点一下就能让这个页面从 CDP 目标表里消失，而壳层还握着它的记位。
+   *
+   * 两条入口都接：`destroyed`（页面被关闭/被销毁）与 `render-process-gone`（渲染进程崩了）。
+   * 收到就**立刻收尸 + 记一行原因**：原因（`reason` / `exitCode`）是下次复现时唯一能定位根因的读数，
+   * 所以随日志与 `lastError` 一起留下，不吞。
+   * @param view 刚建好的内核视图
+   */
+  private observeKernelViewGone(view: WebContentsView): void {
+    const contents = liveWebContentsOf<WebContents>(view);
+    if (!contents) return;
+    contents.on('destroyed', () => {
+      this.noteError(`内核视图的页面被销毁（view=${String(this.kernelView === view)}）`);
+      this.reapDeadKernelView();
+    });
+    contents.on('render-process-gone', (_event, details) => {
+      this.noteError(`内核视图的渲染进程退出：reason=${details.reason} exitCode=${String(details.exitCode)}`);
+      this.reapDeadKernelView();
+    });
+  }
+
+  /**
+   * 收掉已经死掉的内核视图记位（2026-11-23 的 P1 的**自愈**那一半）。
+   *
+   * 视图死了之后如果还把 `kernelView` 与分区名留着，下一次导航会拿到「没有句柄」的洞：
+   * 地址栏照旧的页面地址、`sessions.ensureBrowser()` 又因为在「已有会话」而提前返回，
+   * 用户看到的就是「右栏废了、输网址也不动」。所以这里把记位清成「没有视图」：
+   * 下一次导航会自己起一个新浏览器会话（`sessions.ensureBrowser`），右栏跟着回来。
+   * 只在真的死了的时候动手；活着时是零副作用的判空。
+   */
+  private reapDeadKernelView = (): void => {
+    if (!this.kernelView) return;
+    if (isViewLive(this.kernelView)) return;
+    this.ctx.logger.warn('内核视图已失效（页面销毁或进程退出）：清掉视图记位，下一次导航会重开一个');
+    this.kernelView = undefined;
+    this.kernelViewPartition = '';
+    this.kernelViewVisible = false;
+    this.zoomFactor = 1;
+    for (const view of [...this.takeoverViews]) this.detachTakeoverView(view);
+    this.ctx.emit('shell/kernel-view-visible', false);
+  };
 
   /**
    * 监听一个视图主帧的装载失败，记进当前挂载的失败读数并推 `shell/view-error`。
@@ -708,7 +757,7 @@ export class ShellService extends Service {
     this.takeoverViews.splice(index, 1);
     this.mainWindow?.contentView.removeChildView(view);
     // destroyed 路径里页面已经没了，再 close() 就是对死句柄动手；只有主动关闭这一条还需要它。
-    if (!view.webContents.isDestroyed()) view.webContents.close();
+    liveWebContentsOf<WebContents>(view)?.close();
   }
 
   /**
@@ -716,7 +765,7 @@ export class ShellService extends Service {
    * @returns 活动子视图；无接管视图或全部已销毁时为 null（调用方回落到内核视图本身）
    */
   private activeTakeoverView(): WebContentsView | null {
-    return topmostAlive(this.takeoverViews, (view) => !view.webContents.isDestroyed());
+    return topmostAlive(this.takeoverViews, (view) => isViewLive(view));
   }
 
   /**
@@ -726,8 +775,9 @@ export class ShellService extends Service {
    * @returns 活动页面的 `WebContents`；两个候选都不可用（视图未创建或已销毁）时为 null
    */
   private activeKernelContents(): WebContents | null {
-    const candidate = this.activeTakeoverView()?.webContents ?? this.kernelView?.webContents;
-    return candidate && !candidate.isDestroyed() ? candidate : null;
+    const candidate =
+      liveWebContentsOf<WebContents>(this.activeTakeoverView()) ?? liveWebContentsOf<WebContents>(this.kernelView);
+    return candidate;
   }
 
   /**
@@ -737,11 +787,8 @@ export class ShellService extends Service {
    * 子视图创建时也会补一次（见 `attachTakeoverView`）。
    */
   private applyZoomFactor = () => {
-    const contents = this.kernelView?.webContents;
-    if (contents && !contents.isDestroyed()) contents.setZoomFactor(this.zoomFactor);
-    for (const view of this.takeoverViews) {
-      if (!view.webContents.isDestroyed()) view.webContents.setZoomFactor(this.zoomFactor);
-    }
+    liveWebContentsOf<WebContents>(this.kernelView)?.setZoomFactor(this.zoomFactor);
+    for (const view of this.takeoverViews) liveWebContentsOf<WebContents>(view)?.setZoomFactor(this.zoomFactor);
   };
 
   /**
