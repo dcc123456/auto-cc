@@ -30,3 +30,25 @@
 
 **明早顺序**：照 `docs/plans/10-job-journey/plan.md` §14.26 runbook 走；遇验证码/风控整轮停、存页面原文、标 `[!]`，
 不识别不规避；截图只落证据区、npm 自动化不碰真站。
+
+## 冻结声明与 schema 对齐（2026-11-23 22:0x，管理员令：冻结代码，只许补证据与文档）
+
+**冻结基线**：源码停在 `c15c449`（`git rev-parse --short HEAD`），构建也停在它上面——
+`packages/main/dist/main.cjs` 与 `packages/renderer/dist/index.html` 的时间戳都是 **22:07**；
+工作树我这边 0 条未提交改动。明早不重打、不改源码，除非 P0。
+
+**schema 对齐（与 QA 同一条结论，两份脚本口径一致）**：
+- 四元组只在 `outbound_attempts`（`platform, target_id, action, resume_version, status, ledger_id, receipt_id, reason, confirmed_at`）；
+- `usage_ledger` 是账本（`id, action, target_id, workflow_run_id, ts, source, remote_ref`）；
+- `delivery_records` 只用来验「deliver 是否有对应记录」（`ledger_id, platform, job_id, snapshot_id, ts, conversation_target`）——
+  **它没有 `action` / `resume_version`**，拿它去对四元组一定对不上。
+- 三张表的连法是 **`ledger_id`**：`outbound_attempts.ledger_id → usage_ledger.id`，
+  `delivery_records.ledger_id → usage_ledger.id`（我方脚本已按这条写：`inLedger` 查 `ledger_id` 命中、
+  `inDelivery` 查 `ledger_id + platform + job_id===target_id` 三者同时相等，不用 `delivery_records` 比 action/version）。
+
+**明早我这边两条命令（原样，可直接复跑）**
+```
+node tmp/g12/recon.mjs <cdpPort> <userDataDir> docs/acceptance/10-job-journey/10.12-recon-<stage>.json
+node tmp/g12/shot-clip.mjs <cdpPort> '<selector>' <out.png> [urlFilter]
+```
+recon 会同时产出 `*-table.md`（行键 `ledger_id`，列：四元组 / 状态 / 账本 / 投递记录 / 四元组唯一 / 页面回执留空待填）。
