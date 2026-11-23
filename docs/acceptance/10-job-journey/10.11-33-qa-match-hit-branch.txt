@@ -1,0 +1,37 @@
+# 10.11-33 ③ 匹配理由的「命中分支」活体读数（`67dbaad`）
+
+上一轮只测到未命中分支（`这一行没有命中可解释的条件（库内原有岗位）`）。本轮把命中构造出来了。
+
+## 怎么构造的
+
+`matchHits(row, lastCriteria)`（`packages/renderer/src/jobMatch.ts`）的 `lastCriteria` 只由**真正发出去的那次搜索**写入
+（`JobLabPanel.tsx:434-442`）。所以必须让界面真跑一次抓取，且**不能打真站**：
+
+1. 把 `platform-boss` 的 `pack` 从 `real` 换成 `fixture`（`plugins.saveConfig('platform-boss', {pack:'fixture'})`，
+   只写内存、重启即失）：`readConfig` 前后读数 `{pack:"real"} → {pack:"fixture"}`，`platform.registry.list()` 仍是 `["boss"]`；
+2. 界面里填 `关键词=前端`、`城市=上海`，点「抓取」→ `jd.capture.run` 打到本机仿站 `127.0.0.1:10233`（**stored 4 条**）；
+3. 打开一条「标题含前端 + 城市上海」的行，读 `[data-testid=jd-detail-why]`。
+
+## 读数
+
+| 项 | 值 |
+| --- | --- |
+| 抓取平台 | 本机仿站（`pack:fixture`），`stored:4`，`error:null` |
+| 库内行数 / 命中构造用的行数 | 60 / 35 条满足「标题含前端 + 城市以上海开头」 |
+| 打开的行 | `jobId 1008`、标题 `前端架构师`、城市 `上海 · 静安区`、经验 `5-10 年`、学历 `硕士` |
+| **匹配理由原文** | **`命中：标题含「前端」；城市命中「上海」`** |
+
+- 命中项是**可逐项核对**的两条（关键词在标题、城市前缀相同），没有分数、没有模型措辞。
+- 与未命中分支并排看：同一格在无条件时写 `这一行没有命中可解释的条件（库内原有岗位）`，有条件命中时写上面那句，
+  两条分支都有活体读数了。
+- 边界：这轮只验证了 `keywordTitle` 与 `city` 两种命中；`keywordBody`/`district`/`experience`/`degree`/`salary`
+  五种命中按同一函数推导（`jobMatch.ts` 的 `matchHits`），本轮没有逐个构造。
+- 副作用记录：这次抓取往 `ud-onsite4` 的副本库里**新增 4 条仿站岗位**（`platform=fixture`）；`platform-boss` 的
+  `pack` 保持 `fixture`（更安全：这个实例再跑抓取只会打 127.0.0.1），重启即回 `real`。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa11-switch.mjs   # 把 pack 切到 fixture
+node cdp.mjs 10410 auto-cc /tmp/qa11-hit.mjs      # 填条件 → 抓取 → 开行 → 读 jd-detail-why
+```

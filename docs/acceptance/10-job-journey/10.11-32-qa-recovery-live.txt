@@ -1,0 +1,46 @@
+# 10.11-32 兜底恢复的活体读数（`67dbaad`）：限流生效，但**上限之后是死路**（P1）
+
+构建 `67dbaad`、实例 `ud-onsite4`、CDP 10410、2026-11-23 21:17–21:22 本地。
+内核视图停在**本机仿站** `http://127.0.0.1:10233/boss`（未碰真站）。
+杀视图的方式：CDP `Target.closeTarget({targetId})`（等价于站点把页面关掉），连杀 3 次。
+
+## 一、三次连杀：限流规则完全对上
+
+| 次 | 关闭结果 | `visible` | 恢复后 URL | `recoveries` | 界面提示原文 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `success:true` | true | `http://127.0.0.1:10233/boss`（**同一个 URL**） | 0 → **1** | `网页被站点关闭了一次，已自动接回原页面（127.0.0.1:10233，本分钟第 1 次）` |
+| 2 | `success:true` | true | 同上 | 1 → **2** | `网页被站点关闭了一次，已自动接回原页面（127.0.0.1:10233，本分钟第 2 次）` |
+| 3 | `success:true` | **false** | `""`（不再重建） | 2（不变） | `网页被站点关闭，自动恢复已达上限：请点「重试」（127.0.0.1:10233）` |
+
+- 「按当时的地址栏 URL 重建」成立：两次都回到 `…/boss`，不是回到空白页。
+- 「60 秒内最多 2 次」成立：第 3 次不再重建。
+- 全程 `kernelViewCloseAttempts` 恒 0（这几次是外部关闭，不是页面调 `window.close()`，与守卫那条不冲突）。
+
+## 二、**上限之后接不回来**（P1）：提示点名的按钮不存在，地址栏也失效
+
+第 3 次之后的状态与自救尝试（原样读数）：
+
+| 尝试 | 读数 | 判 |
+| --- | --- | --- |
+| 找「重试」控件 | 页面上唯一像重试的元素是**提示条自己**：`data-action="kernel-view-recovery"`、420×50，文本就是那句提示；它内部 `button` 数 **0**，点它**没有任何反应** | 提示指向一个不存在的按钮 |
+| 点「展开网页窗口」(`kernel-canvas-toggle`) | `visible:true`，但 `url:""`、`partition:""`、`kernelViewBounds:{0,0,0,0}`、`lastError:"内核视图的页面被销毁"` | **状态自相矛盾**：旗标说「可见」，实际没有 webContents |
+| 再关再开一次 | 与上一步相同（`visible` 真假翻转，`bounds` 恒 `0×0`） | 无效 |
+| 地址栏输入 + 点「go」(`kernel-address-go`，30×18) | `visible:true` / `url` 仍是 `""` / `err` 仍是「内核视图的页面被销毁」 | **地址栏这条逃生路也失效** |
+| 地址栏输入 + `Enter` | 同上（输入框 `navigate-url` 的值是输入的网址，但视图 URL 不跟） | 无效 |
+
+**后果（用户视角）**：右栏一片空白，提示叫他点「重试」，但界面上没有这个按钮、地址栏也输入不动——只能重启应用。
+这是我从「恢复上限」这条规则里读出来的**真实终态**：限流规则本身对，但它把用户留在了没有出口的状态。
+
+## 三、改进方向（不代替开发写实现）
+
+1. **给一个真的重试控件**：把 `kernel-view-recovery` 提示条上的行动接上「重挂载 + 导航到最后已知 URL」，或另放一只「重试」按钮（判据：点完 `visible:true` 且 `url` 回到最后已知地址）。
+2. **上限态不许置 `visible:true`**：`applyKernelViewVisible` 在没有活 webContents 时应拒绝置真，`getStatus` 也不该出现「`visible:true` + `bounds 0×0` + `partition:""`」这种组合。
+3. **地址栏 go 在无视图时应触发重建**：现在正常态能建（走 `ensureBrowser → mountKernelSite`），只在「旗标为真、实际无视图」这个组合下哑掉。
+
+## 复现命令
+
+```
+node /private/tmp/qa-11/recovery.mjs        # 连杀 3 次，逐次记 visible/url/recoveries/提示原文
+node cdp.mjs 10410 auto-cc /tmp/qa11-deadend.mjs   # 上限后：toggle 前后状态一致性
+node cdp.mjs 10410 auto-cc /tmp/qa11-recover3.mjs  # 上限后：地址栏 Enter / go 的读数
+```
