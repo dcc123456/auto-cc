@@ -588,6 +588,8 @@ export class FakePageService extends Service {
       url: 'http://127.0.0.1:10233/boss',
       readyState: 'complete',
       elementCount: 1,
+      // 替身默认「布局宽等于常见桌面页」：适配那条判据在渲染层用例里，这里只需字段齐。
+      layoutWidth: 1280,
       textLength: 0,
       bodyText: '',
       headings: [],

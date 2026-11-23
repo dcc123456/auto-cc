@@ -19,6 +19,14 @@ export type PageSnapshotReading = {
   url: string;
   readyState: 'loading' | 'interactive' | 'complete';
   elementCount: number;
+  /**
+   * 页面文档的**布局宽**（`documentElement.scrollWidth`，CSS px）。
+   *
+   * 用途只有一个：给「按窗口适配」当分母（2026-11-23 用户实测：普通站点没有平台声明的
+   * `minLayoutWidth`，于是按 100% 渲染、在窄格里横向溢出）。取 `scrollWidth` 而不是
+   * `clientWidth`：后者恒等于当前视口，缩过之后会自己跟着变，拿它当分母就成了恒等 1。
+   */
+  layoutWidth: number;
   /** 截断前的正文长度，用于判断「取回的是不是一小段」。 */
   textLength: number;
   /** 截断后的正文文本。 */
@@ -46,6 +54,7 @@ export function buildSnapshotScript(maxChars: number, headingLimit: number): str
       url: location.href,
       readyState: document.readyState,
       elementCount: document.querySelectorAll('*').length,
+      layoutWidth: document.documentElement ? document.documentElement.scrollWidth : 0,
       textLength: bodyText.length,
       bodyText: bodyText.slice(0, ${String(maxChars)}),
       headings,
@@ -66,6 +75,7 @@ export function toSnapshotReading(raw: unknown): PageSnapshotReading {
     url: typeof value.url === 'string' ? value.url : '',
     readyState: value.readyState === 'loading' || value.readyState === 'interactive' ? value.readyState : 'complete',
     elementCount: typeof value.elementCount === 'number' ? value.elementCount : 0,
+    layoutWidth: typeof value.layoutWidth === 'number' && Number.isFinite(value.layoutWidth) ? value.layoutWidth : 0,
     textLength: typeof value.textLength === 'number' ? value.textLength : 0,
     bodyText: typeof value.bodyText === 'string' ? value.bodyText : '',
     headings: Array.isArray(value.headings)

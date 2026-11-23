@@ -215,6 +215,7 @@ describe('文案判据的取材面（statusLine / title / bodyText 三处都找�
     url: BOSS_URL,
     readyState: 'complete',
     elementCount: 1,
+    layoutWidth: 1280,
     textLength: 0,
     bodyText: '',
     headings: [],

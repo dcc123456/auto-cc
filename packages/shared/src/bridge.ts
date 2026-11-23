@@ -671,6 +671,13 @@ export type KernelPageSnapshotView = {
   readyState: 'loading' | 'interactive' | 'complete';
   /** 元素总数，用来和截图对照「页面确实渲染了东西」。 */
   elementCount: number;
+  /**
+   * 页面文档的布局宽（`documentElement.scrollWidth`，CSS px；读不到为 0）。
+   *
+   * 渲染层拿它当「按窗口适配」的缩放分母：`zoom = min(1, 视图宽 / 布局宽)`，只缩不放。
+   * 平台知识包声明了 `minLayoutWidth` 时以声明为准（站点自己更清楚它的版面宽度）。
+   */
+  layoutWidth: number;
   /** 截断前的正文长度（字符）。 */
   textLength: number;
   /** 正文节选。 */

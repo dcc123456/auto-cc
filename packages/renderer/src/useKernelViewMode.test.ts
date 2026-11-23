@@ -82,3 +82,25 @@ describe('分栏两栏宽度（spec 11-03 / 11-06）', () => {
     expect(canvasColumnWidths(1225, Number.NaN)).toEqual({ right: 0, left: 1225 });
   });
 });
+
+/**
+ * 「按窗口适配」的分母（2026-11-23 用户实测缺口）。
+ *
+ * 现象：普通站点没有平台声明的 `minLayoutWidth`，于是 `zoom=1`、宽页面在窄格里横向溢出，
+ * 看着就是「页面没随窗口适配」。修法是拿页面自己量到的布局宽当分母（只缩不放）。
+ * 这两条钉住算术本身；读数来源（`snapshot().layoutWidth`）在活体上取，见
+ * `docs/acceptance/10-job-journey/10.11-30-page-fit-to-pane.txt`。
+ */
+describe('用页面自己量到的布局宽做适配（2026-11-23）', () => {
+  it('布局宽 1400 落在 659 宽的格里：缩到刚好装下，不再横向溢出', () => {
+    const zoom = canvasZoom(659, 1400);
+    expect(zoom).toBeCloseTo(0.4707, 4);
+    // 缩过之后的 CSS 视口宽（视图宽 ÷ zoom）不小于页面布局宽，正是「装得下」的定义。
+    expect(659 / zoom).toBeGreaterThanOrEqual(1400);
+  });
+
+  it('响应式页面（布局宽小于格子）不被放大：恒为 1', () => {
+    expect(canvasZoom(900, 640)).toBe(1);
+    expect(canvasZoom(659, 659)).toBe(1);
+  });
+});

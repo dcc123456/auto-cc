@@ -139,6 +139,7 @@ export function snapshotOf(url: string): KernelPageSnapshotView {
     url,
     readyState: 'complete',
     elementCount: 24,
+    layoutWidth: 1280,
     textLength: 120,
     bodyText: '示例正文',
     headings: ['资深前端工程师'],

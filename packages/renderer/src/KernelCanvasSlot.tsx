@@ -36,6 +36,13 @@ export function KernelCanvasSlot({ layout }: { layout: KernelSlotLayout }) {
   const bridge = window.autoCC;
   /** 本次挂载读到的最小布局宽；未适配为 undefined。 */
   const minLayoutWidthRef = useRef<number | undefined>(undefined);
+  /**
+   * 页面自己量到的布局宽（`documentElement.scrollWidth`，CSS px）；没读到为 null。
+   *
+   * 读的时机是**导航之后**（`shell/kernel-view-url`）与视图重新可见时，不是每次 resize：
+   * 缩放一变页面的 CSS 视口就变，用 resize 去驱动会变成自激；而布局宽本身在缩放后是稳定的。
+   */
+  const pageLayoutWidthRef = useRef<number | null>(null);
   // 分栏态的宽度整件事（拖拽、键盘、双击、持久化、写 CSS 变量）复用 `ui/split.tsx`，
   // 与简历纸栏同源（§2.7）；这里只给它这一栏的配置与落点。
   // 组件随「视图隐藏」整块卸载，重新挂载时 `useSplitWidth` 会把持久宽度写回变量（`active` 默认 true）。
@@ -76,10 +83,15 @@ export function KernelCanvasSlot({ layout }: { layout: KernelSlotLayout }) {
     if (!node) return;
     const rect = node.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
-    const minWidth = minLayoutWidthRef.current;
+    // 适配的分母：平台知识包声明的优先（站点更清楚自己的版面宽，如 BOSS 的 1224）；
+    // 没声明的站点用**页面自己量到的布局宽**（2026-11-23 用户实测：普通站点按 100% 渲染，
+    // 宽页面在窄格里横向溢出，看着就是「没适配窗口」）。两个都没有才退回 1（不缩）。
+    const declared = minLayoutWidthRef.current;
+    const measured = pageLayoutWidthRef.current;
+    const minWidth = declared ?? (measured !== null && measured > 0 ? measured : undefined);
     const zoom = canvasZoom(rect.width, minWidth);
     node.dataset.zoomReading = String(Math.round(zoom * 1000) / 1000);
-    node.dataset.zoomSource = minWidth === undefined ? 'unadapted' : 'platform';
+    node.dataset.zoomSource = declared !== undefined ? 'platform' : minWidth === undefined ? 'unadapted' : 'page';
     node.dataset.canvasRightWidth = String(Math.round(rect.width));
     // 分栏行的宽只用于读数：左栏宽 = 行宽 − 右栏宽（把手用负外边距叠在左栏右缘，不占行内宽度）。
     const stageWidth = node.parentElement?.getBoundingClientRect().width;
@@ -88,6 +100,29 @@ export function KernelCanvasSlot({ layout }: { layout: KernelSlotLayout }) {
     void bridge?.shell.setKernelViewBounds(quantizeKernelViewRect(rect));
     void bridge?.shell.setKernelViewZoomFactor(zoom);
   }, [bridge]);
+
+  // 导航之后量一次页面自己的布局宽，供缩放当分母（2026-11-23 适配缺口）。
+  // 只读「一帧快照的布局宽」：`snapshot(1)` 把正文截到 1 字，避免为了一次量宽把整页正文搬过进程边界。
+  useEffect(() => {
+    if (!bridge) return;
+    const measure = (): void => {
+      void bridge.browser['page.snapshot'](1).then((reply) => {
+        if (!reply.ok) return;
+        const width = reply.value.layoutWidth;
+        // 0 表示页面还没布局好（或读不到）：保留上一份，不拿 0 当分母。
+        if (typeof width !== 'number' || !(width > 0)) return;
+        pageLayoutWidthRef.current = width;
+        report();
+      });
+    };
+    measure();
+    const offUrl = bridge.on('shell/kernel-view-url', () => measure());
+    const offVisible = bridge.on('shell/kernel-view-visible', () => measure());
+    return () => {
+      offUrl?.();
+      offVisible?.();
+    };
+  }, [bridge, report]);
 
   // 尺寸变化由 ResizeObserver 推：拖把手、键盘微调、窗口 resize、左轨 1120 换档、全屏往返
   // 都会让这一栏重新布局。全屏态也进依赖：那是同一块节点换了一种 flex 档位，重报一次不留旧几何。

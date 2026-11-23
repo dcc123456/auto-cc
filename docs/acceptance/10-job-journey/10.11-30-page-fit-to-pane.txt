@@ -1,0 +1,49 @@
+10.11-30 补片：页面随窗口适配（2026-11-23 用户实测）
+
+**用户原话**：「虽然现在可以显示普通网页了，但是页面没有随窗口大小来适配」。
+
+**先分清两件事（三段实测，隔离实例 `tmp/g11/batch/ud-32`、CDP 10432，目标用本机第二个回环端口 10234
+上的「宽 1400 的任意站点」，不碰真实平台；脚本 `tmp/g11/batch/p32.mjs`，读数 `tmp/g11/batch/p32.json`）**：
+
+| 状态 | 槽位（渲染层） | 壳层 `kernelViewBounds` | 内核页 `innerWidth` | 缩放读数 |
+| --- | --- | --- | --- | --- |
+| 初始 1200×772 | 659×649 @ (541,93) | 659×648 @ (541,93) | 659 | 修前 `zoom=1 / unadapted` |
+| 视口压到 900×640 | 548×517 @ (352,93) | 547×516 @ (353,93) | 547 | 修前 `zoom=1 / unadapted` |
+| 恢复 1200×772 | 659×649 @ (541,93) | 659×648 @ (541,93) | 659 | 修前 `zoom=1 / unadapted` |
+
+所以**视图确实跟着窗口走**（`ResizeObserver` 有重报、`setKernelViewBounds` 没有被节流或缓存挡住），
+断的是**内容适配**：只有知识包声明了 `minLayoutWidth` 的平台（BOSS 1224）才享 `zoom = 视图宽 / 1224`，
+普通站点没有这个数 → `zoomSource:"unadapted"`、按 100% 渲染，于是宽页面在窄格里横向溢出
+（该页 `scrollWidth` 恒为 1416 而视口只有 659）。
+
+**修法**：把「适配的分母」补上最后一个来源——**页面自己量到的布局宽**。
+① `snapshot` 读数新增 `layoutWidth`（`document.documentElement.scrollWidth`，CSS px）；
+   取 `scrollWidth` 而不是 `clientWidth`，因为后者恒等于当前视口，缩过之后会跟着变，拿它当分母就是恒等 1。
+② 渲染层在**导航之后**（`shell/kernel-view-url`）与视图重新可见时量一次，存进 `pageLayoutWidthRef`；
+   量的时候用 `snapshot(1)` 把正文截到 1 字，不为量一次宽把整页正文搬过进程边界。
+③ `report()` 的分母改为 `平台声明的 minLayoutWidth ?? 页面量到的 layoutWidth ?? 不缩`，
+   `zoom = min(1, 视图宽 / 分母)`，**只缩不放**——响应式站点（布局宽小于格子）恒为 1，不会被无故缩小。
+   读数上加 `data-zoom-source="page"` 区分来源（`platform` / `page` / `unadapted` 三档）。
+④ 只在导航后量、不在 resize 时量：缩放一变页面的 CSS 视口就变，用 resize 驱动会自激；布局宽在缩放后是稳定的。
+
+**修后同一探针读数**：
+
+| 状态 | 槽位宽 | `zoom` | 来源 | 内核页 `innerWidth` | `scrollWidth` |
+| --- | --- | --- | --- | --- | --- |
+| 初始 | 659 | **0.466** | **page** | 1415 | 1416 |
+| 压到 900×640 | 548 | **0.387** | **page** | 1414 | 1415 |
+| 恢复 | 659 | **0.466** | **page** | 1415 | 1416 |
+
+即：窄格里页面整幅装下（`innerWidth` 被撑到 ≈ 页面布局宽，横向溢出从 757px 降到 ~1px 的取整误差），
+窗口一变缩放跟着重算。判据「拖窗口三档后 `kernelViewBounds` 与页面 `innerWidth` 同步变化、无黑边无裁切」
+在 659 / 548 / 659 三档上成立。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；
+`pnpm format:check` → `FORMAT_EXIT=0`；`pnpm test` → `TEST_EXIT=0`，**2805 例全过**
+（新增 2 例：布局宽 1400 落在 659 格里缩到装下、响应式页面不被放大）。
+
+**已知限制（写实，不装无缝）**：
+① 侧栏回滚模式（`KernelViewSlot`，非默认）本来就不发 `setKernelViewZoomFactor`，这一档没有适配；
+② 平台声明了 `minLayoutWidth` 时以声明为准（BOSS 1224），页面实测值不覆盖它——站点自己更清楚自己的版面；
+③ 取 `scrollWidth` 是「整页最宽那一块」的口径，页面上有横向轮播/超宽浮层时会被它带着缩，
+   这是「整幅装下」的代价；要改成按可视内容宽适配得先有「哪一块算内容」的判据，本片不做。
