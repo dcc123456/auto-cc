@@ -142,6 +142,21 @@ describe('搜索与列表读取（spec 2.3-01 / 2.3-02）', () => {
     expect(params.get('experience')).toBe('3-5 年');
   });
 
+  /**
+   * 真站包只登记了 `query` / `city` 两个参数名，「经验」这一维发不出去。
+   * 这里要钉住的是**不许静默丢弃**（2026-11-23）：丢掉之后界面显示「已按经验筛」而页面其实没筛，
+   * 那就是「筛了但没筛」的谎报。判据两条——结构化拒绝 + 一次导航都没发生。
+   */
+  it('真站包没声明「经验」的参数名：结构化拒绝，不静默丢掉这一维', async () => {
+    const fakePage = createFakePage(standardScript());
+    const adapter = createBossAdapter(realPack, fakePage, createFakeAct({}));
+    await expect(adapter.search({ keyword: '前端工程师', experience: '3-5 年' })).rejects.toMatchObject({
+      code: 'SEARCH_FILTER_UNSUPPORTED',
+      details: { filter: 'experience', value: '3-5 年', platform: 'boss' },
+    });
+    expect(fakePage.navigated).toEqual([]);
+  });
+
   it('只给关键词时不拼空的筛选参数（拼进去等于把站点默认的筛选条件改掉）', async () => {
     const { adapter, page } = withScript(standardScript());
     await adapter.search({ keyword: '前端工程师' });

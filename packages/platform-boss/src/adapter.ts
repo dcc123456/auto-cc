@@ -232,10 +232,20 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     // 这里不再原样塞值——原样塞会被站点静默忽略参数，"筛了上海"就成了谎话。
     const cityParam = resolveCityParam(criteria.city, pack.search.cities, pack.platform);
     if (cityParam !== undefined) target.searchParams.set(pack.search.params.city, cityParam);
-    // 经验这一维不是每个站都有查询参数（真 BOSS 把它做成页面上的筛选控件，不在地址里，证据 8.0-03）：
-    // 包里没登记参数名时，这一维就不进 URL，而不是编一个假的出来。
-    if (criteria.experience && pack.search.params.experience) {
-      target.searchParams.set(pack.search.params.experience, criteria.experience);
+    // 经验这一维不是每个站都有查询参数（真 BOSS 把它做成页面上的筛选控件，不在地址里，证据 8.0-03）。
+    // 包里没登记参数名时**不许静默丢弃**（2026-11-23）：丢掉会让界面显示「已按 3-5 年筛」而页面其实没筛，
+    // 那是「筛了但没筛」的谎报。既然这一维发不出去，就如实拒绝，并把「哪一维、为什么」带回去。
+    if (criteria.experience) {
+      const param = pack.search.params.experience;
+      if (!param) {
+        throw new AppError(
+          'SEARCH_FILTER_UNSUPPORTED',
+          `平台 ${pack.platform} 的知识包没有声明「经验」这一维的参数名：这一条筛选发不出去，因此这一步没有执行（不静默丢弃）`,
+          'platform.boss',
+          { filter: 'experience', value: criteria.experience, platform: pack.platform },
+        );
+      }
+      target.searchParams.set(param, criteria.experience);
     }
     return target.href;
   };

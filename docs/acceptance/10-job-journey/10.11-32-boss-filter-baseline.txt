@@ -1,0 +1,55 @@
+10.11-32 基线：BOSS 搜索页筛选条的真实读数（2026-11-23，一次性只读真站，管理员授权）
+
+**授权与边界**（写在这里，供以后核对）：管理员当日授权「一次只读真站」，范围是**只读 DOM**、
+不导航、不点击、不输入。本轮实际执行的三次探针（`tmp/g11/batch/p34..p38-*.mjs`，均未入库，只发
+`Runtime.evaluate`）全部只读；页面由 QA 在 `10410` 实例里按流程打开（`ud-onsite4`，用户 profile 副本）。
+隐私同意层这次**动作未发生**（QA 记录 `no-consent`：执行时该层已不存在），所以本轮没有代点记录。
+
+**页面**：`https://www.zhipin.com/web/geek/jobs?query=前端`（`query=前端` 是唯一参数），
+`readyState=complete`，title「「上海招聘」-2026年上海招聘信息 - BOSS直聘」，正文 1401 字。
+
+**筛选条（静止态读到的原文，按页面顺序）**
+
+| 栏位 | 控件形态 | 取值（页面原文，逐字） | 是否二级 |
+| --- | --- | --- | --- |
+| 城市（当前「上海」） | 文本 + 展开层 | 城市和区域 / 地铁；区域：不限、崇明区、黄浦区、虹口区、杨浦区、徐汇区、长宁区、静安区、普陀区、金山区、松江区、青浦区、闵行区、宝山区、嘉定区、浦东新区… | 区域是城市的**二级** |
+| 工作区域 | 同上（城市块内的二级） | 同上那组区域 | 是（挂在城市下） |
+| 职位类型 | `div.condition-position-select` | 不限、互联网/AI、电子/电气/通信、产品、客服/运营、销售、人力/行政/法务、财务/审计/税务、技工/普工、生…（列表被截断） | 可能二级（行业细分） |
+| 求职类型 | `div.condition-filter-select` | 不限、全职、兼职 | 否 |
+| 薪资待遇 | `div.condition-filter-select` | 不限、3K以下、3K-5K、5K-10K、10K-20K、20K-50K、50K以上 | 否 |
+| 工作经验 | `div.condition-filter-select` | 不限、在校生、应届生、经验不限、1年以内、1-3年、3-5年、5-10年、10年以上 | 否 |
+| 学历要求 | `div.condition-filter-select` | 不限、初中及以下、中专/中技、高中、大专、本科、硕士、博士 | 否 |
+| 公司行业 | `div.condition-industry-select` | 互联网/AI、互联网电子商务、计算机软件、生活服务(O2O)、企业服务、医疗健康、游戏、社交网络与媒体、人工智能、云计算、在线教育… | 是（行业有二级） |
+| 公司规模 | `div.condition-filter-select` | 不限、0-20人、20-99人、100-499人、500-999人、1000-9999人、10000人以上 | 否 |
+| 融资阶段 | `div.condition-filter-select` | 不限、未融资、天使轮、A轮、B轮、C轮、D轮及以上、已上市、不需要融资 | 否 |
+
+末尾另有「清空」一枚。
+
+**关键发现：param 名与取值码在静止 DOM 里读不到（这是结论，不是没查）**
+
+1. 筛选项全是 `li`（例如 `li[ka=sel-business-0]`），**没有 `href`、也没有 `data-value`**——只有展示文字。
+2. 整页含 `/web/geek/jobs` 的锚点只有 1 个（导航「职位」）；
+   城市/行业那两块的 146 / 145 个锚点是**岗位卡片**，它们的参数只有 `from / id / pcSource / recordcode / securityId / type`，
+   与筛选无关（`allParamKeys` 全集就是这 6 个）。
+3. 页面没有 `__INITIAL_STATE__ / __NUXT__ / __NEXT_DATA__ / __APP_STATE__` 这类初始化数据（全 `undefined`）；
+   8 段内联脚本里也搜不到 `salary / experience / degree / scale / stage / jobType / industry` 的取值表。
+4. 因此**要拿到 param 名与取值码，只能让 URL 变一次**（人点一下某栏某个选项）。
+   点击属于「真实页面操作」，按 plan §14.19 不代做；用户当轮也未点。**所以这一列我留空，不猜。**
+
+**顺带修掉的一处真缺陷（本轮唯一代码改动）**
+
+`packages/platform-boss/src/adapter.ts` 的 `searchUrl()` 原先写的是「包里没登记参数名时，这一维就不进 URL」——
+而真站包 `boss.json` 的 `search.params` 只有 `query` 与 `city`，于是**界面传了 `experience` 也被静默丢弃**：
+界面显示「按 3-5 年筛」，页面其实没筛。这与 10.11-32 判据里那条「传 BOSS 上不存在的取值必须给结构化拒绝，
+不许静默丢弃」直接冲突。改为：传了没声明的维度就抛 `SEARCH_FILTER_UNSUPPORTED`（带 `filter / value / platform`），
+并且**一次导航都不发生**。新增错误码进 `AppErrorCode`；用例两条（真站包传经验 → 拒绝且零导航；只给关键词 →
+仍只带 `query`）。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2806 例全过**（`@auto-cc/plugin-platform-boss` 194 例）。
+
+**下一步要什么（交给 PMO 定）**
+① 若要补齐 param 映射，需要**每栏一次**真实点击后的地址栏 URL（或同意让 QA 在只读监听下点一次，
+点击仍归用户/QA 的页面操作通道，不由开发代做）；
+② 在那之前，界面与入参里**只能保留已证明能发的维度**（当前是 `query`、`city`——`city` 的码表也只有上海一条），
+其余维度按上面的结构化拒绝走，不做「看起来能筛」的控件。
