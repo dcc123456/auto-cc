@@ -704,7 +704,23 @@
       "yes": "yes",
       "no": "no",
       "none": "n/a",
-      "detailMissing": "summary only"
+      "detailMissing": "summary only",
+      "cardOpenHint": "Open details",
+      "cardDot": {
+        "tailored": "Tailored",
+        "greeted": "Greeted",
+        "delivered": "Delivered",
+        "replied": "Replied",
+        "summaryOnly": "Summary only"
+      },
+      "detailClose": "Close",
+      "matchReason": "This list was fetched with your filters: {{conditions}}",
+      "conditionKeyword": "keyword {{value}}",
+      "conditionExperience": "experience {{value}}",
+      "conditionCity": "city {{value}}",
+      "conditionPlatform": "platform {{value}}",
+      "conditionReplied": "replied only",
+      "conditionNone": "no filters (everything in the library)"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",

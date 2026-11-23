@@ -6,7 +6,6 @@ import {
   FileSearch,
   FileText,
   FileUp,
-  MessageSquare,
   RefreshCw,
   ScrollText,
   Search,
@@ -29,6 +28,7 @@ import type {
   JobListFilterView,
   JobListResultView,
   JobRowView,
+  JobStage,
   SalaryView,
 } from '@auto-cc/shared';
 import { formatClock } from './format';
@@ -38,15 +38,16 @@ import { ConsentOverlay, ConsentStatusRow } from './ConsentModal';
 import {
   Banner,
   BLOCK_EDGE_CLASS,
-  BLOCK_SELECTED_CLASS,
   BLOCK_SURFACE_CLASS,
   DeskButton,
   DeskCheck,
   DeskField,
   DeskSelect,
+  DeskTile,
   Tag,
 } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskPathGuide, DeskSection } from './ui/disclosure';
+import { Modal } from './ui/overlays';
 import { DeskProgressLog, type DeskProgressEntry } from './ui/progress-log';
 import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
@@ -58,6 +59,40 @@ const PROGRESS_LIMIT = 4;
 /** 库内清单一次画多少行：默认 100 条，按 `filter-more` 每次再加 100（服务端上限 500）。 */
 const ROW_DISPLAY_LIMIT = 100;
 const ROW_PAGE_STEP = 100;
+
+/**
+ * 卡片上那三个状态点（2026-11-23 用户裁定①）：「已定制 / 已打招呼 / 已投递」各自独立。
+ *
+ * 判据只取**库里真有的**那一列状态（`journey.tracking.list` 的 `state`）与「对方回过话」那一位：
+ * - 已定制：状态到过 `tailored` 及其之后（定制过就一直是定制过，后面不会退回去）；
+ * - 已打招呼：到过 `greeted` 及其之后；
+ * - 已投递：到过 `delivered` 及其之后（`interviewed` 同样算投递过）；
+ * - 已回复：`jobs` 行上的 `replied`（会话里有招聘者方向的消息），与状态列正交——有人回话但没记录过状态也成立。
+ * 状态未知（`state === null`，从没记录过事件）时前三个点全灭：不替它猜「captured」。
+ * @param stage 该岗位当前跟踪态；null 表示没记录过
+ * @param replied 对方是否回过话
+ * @returns 有序的状态点（标签用于 i18n key 与 `data-card-dot`）
+ */
+function cardStatusDots(
+  stage: JobStage | null,
+  replied: boolean,
+): { label: 'tailored' | 'greeted' | 'delivered' | 'replied'; on: boolean }[] {
+  const reached = (target: JobStage): boolean => {
+    if (stage === null) return false;
+    const order: JobStage[] = ['captured', 'matched', 'tailored', 'greeted', 'replied', 'delivered', 'interviewed'];
+    const at = order.indexOf(stage);
+    const want = order.indexOf(target);
+    // `closed` 不在推进序列里（它是终态）：关掉的岗位按「关之前到过哪儿」判不了，于是三点按未达成画，
+    // 让「已关闭」那一位由追踪面板去说，卡片上不编。
+    return at >= 0 && want >= 0 && at >= want;
+  };
+  return [
+    { label: 'tailored', on: reached('tailored') },
+    { label: 'greeted', on: reached('greeted') },
+    { label: 'delivered', on: reached('delivered') },
+    { label: 'replied', on: replied },
+  ];
+}
 
 /**
  * JD 抓取实验台：把「搜索 → 滚动收集 → 逐条读详情 → 落库」这条不碰外发的链路的结局画到界面上
@@ -129,6 +164,22 @@ export function JobLabPanel() {
   /** 库内筛选不再单列城市格（10.10-08）：城市只在搜索条件那一只框里填，库内仍按关键词/经验/已回复筛。 */
   const [filterExperience, setFilterExperience] = useState('');
   const [filterReplied, setFilterReplied] = useState(false);
+  /**
+   * 详情弹窗是否开着（2026-11-23 用户裁定：岗位卡片平铺，点开用弹窗看详情）。
+   * 与 `selectedRowKey` 分开：选中态决定"弹窗里画哪一条"，这个布尔决定"弹窗开不开"——
+   * 关掉弹窗不该把选中态一起丢掉，否则重开时又得当没选过。
+   */
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  /**
+   * 岗位跟踪态（`journey.tracking.list` 的投影）：卡片上的「已定制 / 已打招呼 / 已投递」三个点靠它。
+   *
+   * 为什么现读而不是从 `jobList` 的行里取：`jobs` 表没有这几列（那是追踪域的事实，spec 10.8-01），
+   * 在渲染层拼一份就成了第二份真相。读失败时保持空表：卡片少一个点，不影响任何动作。
+   */
+  const [trackingByJob, setTrackingByJob] = useState<Map<string, JobStage | null>>(new Map());
+  /** 让跟踪态重读一次的信号（打招呼/投递之后点会变）。 */
+  const [trackingTick, setTrackingTick] = useState(0);
   const activeFilterRef = useRef<JobListFilterView>({});
   const listLimitRef = useRef(ROW_DISPLAY_LIMIT);
   const bridge = window.autoCC;
@@ -334,6 +385,24 @@ export function JobLabPanel() {
   };
 
   /**
+   * 读一次岗位跟踪态，投影成 `平台|岗位 → 状态` 的表（卡片上的状态点用它）。
+   *
+   * 读失败就保持上一份：这一格只是卡片上的三个小点，不该因为追踪服务没挂载就把整屏标红。
+   * 重读时机是清单换了、或打过招呼/投递之后（`trackingTick`）——不轮询。
+   */
+  useEffect(() => {
+    const client = window.autoCC;
+    if (!client) return;
+    void (async () => {
+      const reply = await client.journey['tracking.list']();
+      if (!reply.ok) return;
+      const next = new Map<string, JobStage | null>();
+      for (const row of reply.value) next.set(`${row.platform}|${row.jobId}`, row.state);
+      setTrackingByJob(next);
+    })();
+  }, [trackingTick, jobList]);
+
+  /**
    * 读库内清单（`jd.store.list`），用来证明重启后行还在、幂等没有翻倍（spec 2.3-04）。
    * @param filter 生效中的筛选条件（默认取 ref 里那一份，保证动作后重读仍按同一条件）
    * @param limit 本次画多少行（默认取当前分页档）
@@ -453,6 +522,8 @@ export function JobLabPanel() {
           apply: (receipt) => {
             setBridgeError(undefined);
             setLastGreet(receipt);
+            // 打过招呼之后卡片上那个点要亮起来：代码里没有别的事件会说「状态变了」，只能现读一次。
+            setTrackingTick((tick) => tick + 1);
           },
           onError: (error) => {
             setLastGreet(undefined);
@@ -486,6 +557,7 @@ export function JobLabPanel() {
           apply: (receipt) => {
             setBridgeError(undefined);
             setLastDeliver(receipt);
+            setTrackingTick((tick) => tick + 1);
           },
           onError: (error) => {
             setLastDeliver(undefined);
@@ -530,8 +602,25 @@ export function JobLabPanel() {
       : undefined;
   /** 一行的稳定标识：列表 key 与选中态共用这一处来源，不让两处各拼一遍。 */
   const rowKey = (row: JobRowView): string => `${row.platform}-${String(row.id)}`;
+
   /** 此刻指向的那一行：从 `jobList` 现取；清单换过一批取不到时按"没选"处理，详情与动作段一起收起。 */
   const selectedRow = jobList?.rows.find((row) => rowKey(row) === selectedRowKey);
+  /**
+   * 生效中的筛选条件那句人话（弹窗里「为什么这一岗在这一屏」只说这一句）。
+   *
+   * 取值来源是 `activeFilterRef`（上一次真发给服务的那份），不是输入框草稿：人改了草稿还没按「应用」时，
+   * 清单仍是旧条件取回的，拿草稿去解释就会说反。全空时说「没有加筛选」。
+   */
+  const activeConditionLabel = ((): string => {
+    const active = activeFilterRef.current;
+    const parts: string[] = [];
+    if (active.keyword) parts.push(t('jd.conditionKeyword', { value: active.keyword }));
+    if (active.experience) parts.push(t('jd.conditionExperience', { value: active.experience }));
+    if (active.city) parts.push(t('jd.conditionCity', { value: active.city }));
+    if (active.platform) parts.push(t('jd.conditionPlatform', { value: active.platform }));
+    if (active.replied === true) parts.push(t('jd.conditionReplied'));
+    return parts.length === 0 ? t('jd.conditionNone') : parts.join(' · ');
+  })();
   /** 选中行的打招呼坐标：流水只挂回它自己的那一行，换行后不会伪装成新一行的进度。 */
   const selectedGreetTarget = selectedRow === undefined ? '' : `${selectedRow.platform}:${selectedRow.jobId}`;
   /**
@@ -863,161 +952,100 @@ export function JobLabPanel() {
           </p>
         ) : (
           <>
-            <div className="mt-2 grid min-w-0 gap-3 @2xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-              {/* 第一段：清单。行只负责"指向"，不带动作键（spec 6.4-04）；选中态走 celadon 不走 jade——
-                jade 是"已核"，而"人挑了这一行"只是当前指向，与 ScriptPanel 候选行同一套画法。 */}
-              <ul className="flex min-w-0 flex-col gap-1" data-testid="jd-rows">
-                {jobList.rows.map((row) => {
-                  const isRowSelected = selectedRowKey === rowKey(row);
-                  return (
-                    <li
-                      key={rowKey(row)}
-                      // 08 稿那行：单击=选中并让中栏换内容，双击=直接跳简历区并带上该岗位（形态⑥，带面包屑）。
-                      // `select-none` 是因为双击默认会把那一行文字选中，跳过去之后岗位屏上还挂着一块蓝。
-                      className={`select-none rounded-md border px-2 py-1.5 ${
-                        isRowSelected ? BLOCK_SELECTED_CLASS : 'border-line bg-ink-950/60 hover:bg-ink-850'
-                      }`}
-                      data-job-selected={isRowSelected ? 'true' : 'false'}
-                      data-replied={row.replied ? 'true' : 'false'}
-                      data-job-trail={row.jobId}
-                      onDoubleClick={() => {
+            {/* 卡片平铺（2026-11-23 用户裁定：岗位要平铺、点开用弹窗看详情）。
+                列数按**这一段自己的宽度**走（容器查询），不按视口：右栏网页窗口展开时这一列会变窄，
+                按视口判会得到「窗口很宽、卡片却挤成一条」。一列到四列，任何宽度都不横向滚动。 */}
+            <ul
+              className="mt-2 grid min-w-0 grid-cols-1 gap-2 @md:grid-cols-2 @2xl:grid-cols-3 @5xl:grid-cols-4"
+              data-testid="jd-cards"
+              data-card-count={jobList.rows.length}
+            >
+              {jobList.rows.map((row) => {
+                const stage = trackingByJob.get(`${row.platform}|${row.jobId}`) ?? null;
+                const dots = cardStatusDots(stage, row.replied);
+                return (
+                  <li key={rowKey(row)} className="min-w-0">
+                    {/* 整张卡是一个按钮：点哪儿都开详情，不用瞄准某一小块（新手最容易点空的那种形状）。
+                        焦点环与 Esc/遮罩关闭由 `<Modal>` 那一层统一管，焦点回位也归它（回的就是这颗按钮）。 */}
+                    <DeskTile
+                      action={`jd-card-${row.jobId}`}
+                      selected={selectedRowKey === rowKey(row)}
+                      markers={{
+                        'job-card': row.jobId,
+                        'job-replied': row.replied ? 'true' : 'false',
+                      }}
+                      onClick={() => {
                         setSelectedRowKey(rowKey(row));
-                        advanceViewTrail({
-                          sourceView: 'jobs',
-                          sourceTitle: t('desk.jobs.title'),
-                          sourceDetail: row.title,
-                          targetView: 'resume',
-                          targetTitle: t('desk.resume.title'),
-                          targetDetail: t('generate.heading'),
-                          // 只抓到摘要的行没有正文可带（`detailCapturedAt` 为 null），跳过这一格即可，
-                          // 不拿空字符串去把人已经打好的正文擦掉。
-                          seedJdText: row.description.length > 0 ? row.description : undefined,
-                        });
+                        setDetailOpen(true);
                       }}
                     >
-                      <label className="flex items-start gap-2">
-                        <DeskCheck
-                          action={`jd-row-${row.jobId}`}
-                          type="radio"
-                          name="jd-row"
-                          checked={isRowSelected}
-                          onCheckedChange={() => setSelectedRowKey(rowKey(row))}
-                          data-jd-row={row.jobId}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-all text-[11px] text-slate-200">
-                            {t('jd.rowMain', {
-                              id: row.id,
-                              title: row.title,
-                              company: row.company,
-                              salary: salaryLabel(row.salary),
-                              salaryText: row.salaryText,
-                            })}
-                          </span>
-                          <span
-                            className={
-                              row.replied
-                                ? 'mt-0.5 flex items-center gap-1 text-[11px] text-jade'
-                                : 'mt-0.5 flex items-center gap-1 text-[11px] text-slate-500'
-                            }
-                            data-testid={`jd-row-replied-${row.jobId}`}
-                            data-inbound={row.inboundCount}
-                          >
-                            <MessageSquare size={12} />
-                            {row.replied ? t('jd.rowReplied', { inbound: row.inboundCount }) : t('jd.rowNotReplied')}
-                          </span>
+                      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-slate-100">
+                          {row.title}
                         </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+                        <span className="shrink-0 font-mono text-[11px] text-amber">
+                          {row.salaryText || t('agent.tool.jobs.salaryUnknown')}
+                        </span>
+                      </span>
+                      <span className="min-w-0 truncate text-[11px] text-slate-400">{row.company}</span>
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-slate-500">
+                        {row.city ? <span>{row.city}</span> : null}
+                        {row.experience ? <span>{row.experience}</span> : null}
+                        {row.education ? <span>{row.education}</span> : null}
+                      </span>
+                      {/* 状态点：只画**真读得到**的那几种。三个点各自独立，不合成一个「进度条」——
+                          合成之后人分不清「定制了但没打招呼」与「都没做」。 */}
+                      <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pt-1 text-[10.5px]">
+                        {dots.map((dot) => (
+                          <span
+                            key={dot.label}
+                            data-card-dot={dot.label}
+                            className={
+                              dot.on ? 'flex items-center gap-1 text-jade' : 'flex items-center gap-1 text-slate-600'
+                            }
+                          >
+                            <span
+                              aria-hidden
+                              className={
+                                dot.on ? 'h-1.5 w-1.5 rounded-full bg-jade' : 'h-1.5 w-1.5 rounded-full bg-slate-700'
+                              }
+                            />
+                            {t(`jd.cardDot.${dot.label}`)}
+                          </span>
+                        ))}
+                        {row.detailCapturedAt === null ? (
+                          <span className="text-amber" data-card-dot="summary-only">
+                            {t('jd.cardDot.summaryOnly')}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-[10.5px] text-slate-600">{t('jd.cardOpenHint')}</span>
+                    </DeskTile>
+                  </li>
+                );
+              })}
+            </ul>
 
-              {/* 第二、三段：详情与动作区。没选中就整段不出现——外发那两只键在没人指定目标时压根不该上屏，
-                比"摆出来但按不动"更守 §8.3。 */}
-              {!selectedRow ? (
-                <p
-                  className="self-start rounded-md border border-line bg-ink-950/60 px-3 py-2 text-[11px] text-slate-500"
-                  data-testid="jd-detail-idle"
-                >
-                  {t('jd.detailIdle')}
-                </p>
-              ) : (
-                <div className="min-w-0 rounded-md border border-line bg-ink-950/70 p-3" data-testid="jd-detail">
-                  <p className="text-[11px] text-slate-500" data-testid="jd-detail-captured">
-                    {t('jd.detailCaptured', {
-                      platform: selectedRow.platform,
-                      capturedAt: formatClock(selectedRow.capturedAt, t('jd.none')),
-                    })}
-                  </p>
-                  <h4 className="mt-0.5 break-all text-sm font-semibold text-slate-100">{selectedRow.title}</h4>
-                  <p className="mt-0.5 break-all text-[11px] text-slate-300">
-                    {t('jd.detailByline', {
-                      company: selectedRow.company,
-                      city: selectedRow.city,
-                      experience: selectedRow.experience,
-                      education: selectedRow.education,
-                      salary: salaryLabel(selectedRow.salary),
-                    })}
-                  </p>
-                  <p className="mt-1 break-all text-[11px] text-slate-500" data-testid="jd-detail-meta">
-                    {t('jd.rowMeta', {
-                      city: selectedRow.city,
-                      experience: selectedRow.experience,
-                      education: selectedRow.education,
-                      postedAt: formatClock(selectedRow.postedAt, selectedRow.postedText),
-                      capturedAt: formatClock(selectedRow.capturedAt, t('jd.none')),
-                      detailCapturedAt: formatClock(selectedRow.detailCapturedAt, t('jd.detailMissing')),
-                      descriptionLength: selectedRow.description.length,
-                    })}
-                  </p>
-                  {selectedRow.detailCapturedAt === null && (
-                    <p className="mt-1 text-[11px] text-amber" data-testid="jd-detail-partial">
-                      {t('jd.detailPartial')}
-                    </p>
-                  )}
-
-                  <h5 className="mt-2 border-t border-line pt-2 text-[11px] font-semibold text-slate-300">
-                    {t('jd.detailDescriptionHeading')}
-                  </h5>
-                  <p
-                    className="mt-1 max-h-44 overflow-y-auto whitespace-pre-line break-all text-[11px] leading-relaxed text-slate-200"
-                    data-testid="jd-detail-description"
-                  >
-                    {selectedRow.description.length === 0 ? t('jd.detailDescriptionEmpty') : selectedRow.description}
-                  </p>
-
-                  <h5 className="mt-2 border-t border-line pt-2 text-[11px] font-semibold text-slate-300">
-                    {t('jd.detailRequirementsHeading', { count: selectedRow.requirements.length })}
-                  </h5>
-                  {selectedRow.requirements.length === 0 ? (
-                    <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-detail-requirements-empty">
-                      {t('jd.detailRequirementsEmpty')}
-                    </p>
-                  ) : (
-                    <ul className="mt-1 flex flex-col gap-0.5" data-testid="jd-detail-requirements">
-                      {selectedRow.requirements.map((requirement, index) => (
-                        <li
-                          className="break-all text-[11px] text-slate-300"
-                          key={`${selectedRow.jobId}-${String(index)}`}
-                        >
-                          {requirement}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="mt-2 break-all text-[11px] text-slate-500" data-testid="jd-detail-source-url">
-                    {t('jd.detailSourceUrl', { url: selectedRow.sourceUrl })}
-                  </p>
-
-                  {/* 第三段：动作区跟着选中的那一行走，两只键的 data-action 与换装前逐字相同。
-                    它们仍是朱砂——都是会离开这台机器的动作（曾经一只涂青瓷、一只涂琥珀，读起来像"一个安全
-                    一个只写本机"，正是要避免的误读，§8.3 的界面表达）。 */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line-strong pt-2">
-                    <span
-                      className="min-w-0 flex-1 break-all text-[11px] text-slate-400"
-                      data-testid="jd-action-target"
-                    >
+            {/* 详情弹窗（2026-11-23 裁定②）：完整 JD、命中说明与三个动作入口都在这一层。
+                Esc / 点遮罩关闭、焦点回原卡片、窄窗铺满可滚都由 `<Modal>` 那一层负责——
+                与简历预览用的是同一只浮层，不另开一套。 */}
+            <Modal
+              action="jd-detail"
+              open={detailOpen && selectedRow !== undefined}
+              title={selectedRow === undefined ? t('jd.listHeading') : selectedRow.title}
+              onClose={() => setDetailOpen(false)}
+              width="960"
+              dismissOnScrim
+              testId="jd-detail-modal"
+              closeLabel={t('jd.detailClose')}
+              footer={
+                selectedRow === undefined ? (
+                  <DeskButton action="jd-detail-close" variant="line" compact onClick={() => setDetailOpen(false)}>
+                    {t('jd.detailClose')}
+                  </DeskButton>
+                ) : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" data-testid="jd-action-target">
                       {t('jd.actionTarget', { title: selectedRow.title, company: selectedRow.company })}
                     </span>
                     <DeskButton
@@ -1068,9 +1096,81 @@ export function JobLabPanel() {
                       <FileUp size={12} />
                       {t('deliver.rowButton')}
                     </DeskButton>
-                  </div>
-                  {/* 打招呼不是"点一下就好"：频控可能要等几十秒、页面发送还要回读状态。
-                      这一块把主进程推来的九步流水摆出来，最新一条就是此刻所在的那一步（spec 2.5-16）。 */}
+                  </>
+                )
+              }
+            >
+              {selectedRow === undefined ? null : (
+                <div className="min-w-0" data-testid="jd-detail">
+                  <p className="text-[11px] text-slate-500" data-testid="jd-detail-captured">
+                    {t('jd.detailCaptured', {
+                      platform: selectedRow.platform,
+                      capturedAt: formatClock(selectedRow.capturedAt, t('jd.none')),
+                    })}
+                  </p>
+                  <p className="mt-0.5 break-all text-[11px] text-slate-300">
+                    {t('jd.detailByline', {
+                      company: selectedRow.company,
+                      city: selectedRow.city,
+                      experience: selectedRow.experience,
+                      education: selectedRow.education,
+                      salary: salaryLabel(selectedRow.salary),
+                    })}
+                  </p>
+                  {/* 「匹配理由」这一格只说**有据可查**的那一句：这一屏的清单是按生效中的筛选条件取回来的，
+                      命中条件就是它在这里的原因。本仓没有匹配打分，不编「匹配度 92%」那种数（8.10-04 同一口径）。 */}
+                  <p className="mt-1 break-all text-[11px] text-slate-400" data-testid="jd-detail-why">
+                    {t('jd.matchReason', { conditions: activeConditionLabel })}
+                  </p>
+                  <p className="mt-1 break-all text-[11px] text-slate-500" data-testid="jd-detail-meta">
+                    {t('jd.rowMeta', {
+                      city: selectedRow.city,
+                      experience: selectedRow.experience,
+                      education: selectedRow.education,
+                      postedAt: formatClock(selectedRow.postedAt, selectedRow.postedText),
+                      capturedAt: formatClock(selectedRow.capturedAt, t('jd.none')),
+                      detailCapturedAt: formatClock(selectedRow.detailCapturedAt, t('jd.detailMissing')),
+                      descriptionLength: selectedRow.description.length,
+                    })}
+                  </p>
+                  {selectedRow.detailCapturedAt === null && (
+                    <p className="mt-1 text-[11px] text-amber" data-testid="jd-detail-partial">
+                      {t('jd.detailPartial')}
+                    </p>
+                  )}
+
+                  <h5 className="mt-2 border-t border-line pt-2 text-[11px] font-semibold text-slate-300">
+                    {t('jd.detailDescriptionHeading')}
+                  </h5>
+                  <p
+                    className="mt-1 max-h-[38vh] overflow-y-auto whitespace-pre-line break-all text-[11px] leading-relaxed text-slate-200"
+                    data-testid="jd-detail-description"
+                  >
+                    {selectedRow.description.length === 0 ? t('jd.detailDescriptionEmpty') : selectedRow.description}
+                  </p>
+
+                  <h5 className="mt-2 border-t border-line pt-2 text-[11px] font-semibold text-slate-300">
+                    {t('jd.detailRequirementsHeading', { count: selectedRow.requirements.length })}
+                  </h5>
+                  {selectedRow.requirements.length === 0 ? (
+                    <p className="mt-1 text-[11px] text-slate-500" data-testid="jd-detail-requirements-empty">
+                      {t('jd.detailRequirementsEmpty')}
+                    </p>
+                  ) : (
+                    <ul className="mt-1 flex flex-col gap-0.5" data-testid="jd-detail-requirements">
+                      {selectedRow.requirements.map((requirement, index) => (
+                        <li
+                          className="break-all text-[11px] text-slate-300"
+                          key={`${selectedRow.jobId}-${String(index)}`}
+                        >
+                          {requirement}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-2 break-all text-[11px] text-slate-500" data-testid="jd-detail-source-url">
+                    {t('jd.detailSourceUrl', { url: selectedRow.sourceUrl })}
+                  </p>
                   {greetProgressEntries.length > 0 && greetTargetKey === selectedGreetTarget && (
                     <div
                       className="mt-2 rounded-md border border-line bg-ink-900/40 p-2"
@@ -1082,7 +1182,7 @@ export function JobLabPanel() {
                   )}
                 </div>
               )}
-            </div>
+            </Modal>
             {jobList.rows.length < jobList.matched && (
               <div className="mt-2 flex justify-end">
                 <DeskButton

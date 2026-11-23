@@ -627,6 +627,65 @@ export const BLOCK_SURFACE_CLASS = 'bg-ink-850';
 export const BLOCK_SELECTED_CLASS = 'border-slate-300/70 bg-ink-800';
 
 /**
+ * 可点卡片的画法（`DeskTile` 用）。**必须写成完整字面量**——Tailwind 只扫源码里出现的字符串。
+ *
+ * 与 `segmentCellClass` 同一条理由收成函数：机检（`check-renderer-conventions.ts` 第 13 节）要求
+ * `hover:` 由归档位函数持有，不许在 JSX 站点里现拼——否则「按不动的元素不许长 hover」那条判据看不住。
+ * @param selected 是否是当前指向的那一块（选中档不挂 hover，读起来才不是"可以再点亮一次"）
+ * @returns 该块的 class 串；选中档里不含任何 `hover:`
+ */
+const tileClass = (selected: boolean): string =>
+  `flex h-full w-full min-w-0 flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors ${
+    selected ? BLOCK_SELECTED_CLASS : 'border-line bg-ink-950/60 hover:border-line-strong hover:bg-ink-850'
+  }`;
+
+/**
+ * 可点的**整块卡片**（2026-11-23 用户裁定：岗位卡片平铺，点开用弹窗）。
+ *
+ * 为什么不是「在某处直接写一只 `<button>`」：渲染层的控件只许出自 `src/ui/**`（6.2-14 的机检项），
+ * 而卡片这种"整块可点"的形状原先没有原件——`DeskButton` 是行内小按钮（自带内边距与单行布局），
+ * 把卡片塞进它就得用 `className` 去反覆盖它自己的排版，那是更脆的做法。所以补这一只原件：
+ * 一行一个入口，选中态与悬停态沿用 `BLOCK_SELECTED_CLASS` 与列表行同一套画法。
+ * @param action harness 的点击凭据（必填：每只可点控件都要有 `data-action`）
+ * @param selected 是否是当前指向的那一块（描边高亮，与列表行同一档）
+ * @param markers 额外的 `data-*` 读数（卡片上要挂岗位 id、回复状态这类锚点）
+ * @param onClick 点整块卡片的动作
+ * @param className 追加类（调用方只加排版，不加边框/底色）
+ * @param children 卡片内容
+ */
+export function DeskTile({
+  action,
+  selected = false,
+  markers,
+  onClick,
+  className = '',
+  children,
+}: {
+  action: string;
+  selected?: boolean;
+  markers?: Record<string, string | number>;
+  onClick: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const markerAttrs = Object.fromEntries(
+    Object.entries(markers ?? {}).map(([name, value]) => [`data-${name}`, value]),
+  ) as Record<string, string | number>;
+  return (
+    <button
+      type="button"
+      data-action={action}
+      data-selected={selected ? 'true' : 'false'}
+      {...markerAttrs}
+      onClick={onClick}
+      className={`${tileClass(selected)} ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
  * 面板内「一行一条读数」的画法：左右出血到卡片描边、行间只留一根发丝线、首行不画线。
  *
  * 抽到原件层是因为同一个形状在一次改版里出现了四次（会话行、闸门行、漏斗行、额度行）——

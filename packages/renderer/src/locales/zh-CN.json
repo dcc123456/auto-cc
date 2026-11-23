@@ -704,7 +704,23 @@
       "yes": "是",
       "no": "否",
       "none": "—",
-      "detailMissing": "只有摘要"
+      "detailMissing": "只有摘要",
+      "cardOpenHint": "点开看详情",
+      "cardDot": {
+        "tailored": "已定制",
+        "greeted": "已打招呼",
+        "delivered": "已投递",
+        "replied": "已回复",
+        "summaryOnly": "只抓到摘要"
+      },
+      "detailClose": "关闭",
+      "matchReason": "这一屏按你的筛选条件取回：{{conditions}}",
+      "conditionKeyword": "关键词 {{value}}",
+      "conditionExperience": "经验 {{value}}",
+      "conditionCity": "城市 {{value}}",
+      "conditionPlatform": "平台 {{value}}",
+      "conditionReplied": "只看已回复",
+      "conditionNone": "没有加筛选（库内全部）"
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",
