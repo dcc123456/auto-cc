@@ -588,6 +588,22 @@ export function Toast() {
           {revealLabel}
         </DeskButton>
       ) : null}
+      {/* 带行动的那一只（2026-11-23 第 7 轮裁定②）：提示条自己就是按钮，不再把用户指去一个
+          够不着的控件（`kernel-address-recover` 在上限态随画布一起卸载）。点了按原地址重建。 */}
+      {toast.onAction ? (
+        <DeskButton
+          action={`${toast.action}-act`}
+          variant="line"
+          compact
+          className="shrink-0"
+          onClick={() => {
+            toast.onAction?.();
+            clearDeskToast();
+          }}
+        >
+          {t('desk.toast.retry')}
+        </DeskButton>
+      ) : null}
     </div>
   );
 }

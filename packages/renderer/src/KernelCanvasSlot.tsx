@@ -190,11 +190,26 @@ export function KernelCanvasControls({ layout, visible }: { layout: KernelSlotLa
           <NarrowLabel>{t(layout.isExpanded ? 'kernel.collapse' : 'kernel.expand')}</NarrowLabel>
         </DeskButton>
       ) : null}
+      {/* 没有活视图时这只键就是**出口**（2026-11-23 第 7 轮裁定①）：视图被站点关掉、自动恢复预算
+          也用尽之后，`kernelViewVisible` 被正确压成 false，而地址栏与画布都随之卸载——这只键是用户
+          永远够得着的那一个。所以此时它不再翻旗标（翻了也没用），而是直接按原地址重建。 */}
       <DeskButton
         action="kernel-canvas-toggle"
         variant="line"
         title={t(visible ? 'kernel.hide' : 'kernel.show')}
-        onClick={() => void bridge?.shell.setKernelViewVisible(!visible)}
+        onClick={() => {
+          if (!bridge) return;
+          if (!visible) {
+            void (async () => {
+              const status = await bridge.shell.getStatus();
+              const hasView = status.ok && status.value.kernelViewPartition !== '';
+              // 有会话但被收起 → 只是显示；没有视图（part 空）→ 重建回最后已知地址。
+              await (hasView ? bridge.shell.setKernelViewVisible(true) : bridge.shell.recoverKernelView());
+            })();
+            return;
+          }
+          void bridge.shell.setKernelViewVisible(false);
+        }}
       >
         {visible ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
         <NarrowLabel>{t(visible ? 'kernel.hide' : 'kernel.show')}</NarrowLabel>

@@ -35,3 +35,34 @@
 - 这一轮是**本地 fixture + CDP 关 target** 的读数（等价「站点把自己关了」），不是真站；真站那次由 QA 用新构建复跑。
 - 「重新打开」按的是**最近一次已知地址**（`did-navigate` 维护）；如果视图从没成功导航过，它会如实什么都不做。
 - 自动恢复仍受 60 秒 2 次限流（5 条单测 + 本轮活体各一次）；上限之后不再尝试自动重建，只等人工。
+
+## 附：第 7 轮——出口必须常驻（QA 复验发现「按钮够不着」）
+
+QA 在 `42b6d39` 上发现修②把死路从「没按钮」变成「按钮够不着」：地址栏与画布都挂在
+`App.tsx:426` 的 `{kernelViewVisible ? <KernelCanvasSlot/> : null}` 里，上限态 `visible` 被正确压成 false，
+于是「重新打开」和输入框**一起被卸载**（`[data-action=kernel-address-recover]` → null、`inputs: []`）。
+
+**三条一起做（本轮）**
+① **顶栏「展开网页窗口」（`kernel-canvas-toggle`）在没有活视图时改调 `shell.recoverKernelView()`**：
+   这只键渲染在顶栏（`App.tsx:377` 的 `KernelCanvasControls`），不随画布卸载，用户永远够得着。
+   判据是 `kernelViewPartition`：有分区只是被收起 → 只显示；分区为空（视图没了）→ 重建回最后已知地址。
+② **上限态那只 toast 装成真按钮**：`DeskToastReading` 新增 `onAction`，「恢复预算用尽」那一只点了就重建；
+   `Toast` 原件在有 `onAction` 时长出 `…-act` 键（与既有的 `…-reveal` 同一套画法，不另开通道）。
+③ **文案不再指向不存在的控件**：改成「点下面的『重新打开』或顶栏『展开网页窗口』」。
+
+**本地全链读数（fixture + CDP 关 target，`tmp/g11/batch/p42-recovery-deadend.mjs`，含 QA 要求的 2.6 秒等待）**
+
+| 步骤 | visible | url | partition | recoveries |
+| --- | --- | --- | --- | --- |
+| baseline | true | `…:10233/` | `persist:browser` | 0 |
+| kill-1 / kill-2 | true | 同一 URL | `persist:browser` | 1 / 2 |
+| kill-3（上限） | **false** | `""` | `""` | 2（`lastError` 写清原因，无幽灵 true） |
+| 上限态可达性（等 2.6s 后） | `toastRetry:true` · `topToggle:true` · `addressRecover:false` | — | — | — |
+| 点**顶栏「展开网页窗口」** | **true** | **回原 URL** | `persist:browser` | **0** |
+| 再连杀 3 次 → 点 **toast 上的「重新打开」** | **true** | **回原 URL** | `persist:browser` | **0** |
+| 再杀 + 手动重开 + `page.navigate('/alt')` | true | `…:10233/alt` | `persist:browser` | 0 |
+
+`addressRecover:false` 是预期：地址栏仍在画布内、上限态不渲染——这正是为什么要给顶栏键与 toast 键，
+而不是只把按钮留在地址栏里。实测点了顶栏键与 toast 键都能回原地址、`recoveries` 归 0。
+
+**边界**：这一轮仍是本地 fixture 读数（等价「站点把自己关掉」）；真站那次由 QA 用新构建复跑。

@@ -25,6 +25,12 @@ export interface DeskToastReading {
    * 给一颗经常失败的按钮就是 6.2-06 那条"要说话"的反面，见 plan §3.10）。
    */
   revealPath?: string;
+  /**
+   * 这只 toast 被点时的动作（2026-11-23 第 7 轮裁定②）：提示条不许把用户指去一个不存在的按钮。
+   * 只给「有明确下一步」的提示用——现在只有「内核视图被站点关掉、自动恢复预算用尽」这一条，
+   * 点了就按原地址重建。
+   */
+  onAction?: () => void;
 }
 
 let current: DeskToastReading | undefined;

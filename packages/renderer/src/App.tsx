@@ -239,13 +239,16 @@ export function App() {
           return payload.url;
         }
       })();
+      const exhausted = payload.status === 'exhausted';
       pushDeskToast({
         action: 'kernel-view-recovery',
-        tone: payload.status === 'recovered' ? 'jade' : 'seal',
-        message:
-          payload.status === 'recovered'
-            ? t('kernel.recovery.recovered', { host, attempt: payload.attempt })
-            : t('kernel.recovery.exhausted', { host }),
+        tone: exhausted ? 'seal' : 'jade',
+        message: exhausted
+          ? t('kernel.recovery.exhausted', { host })
+          : t('kernel.recovery.recovered', { host, attempt: payload.attempt }),
+        // 上限态这只 toast 自带出口（2026-11-23 第 7 轮裁定②③）：点了按原地址重建，
+        // 不再写「请点重试」却把用户指去一个不存在的按钮。
+        ...(exhausted ? { onAction: () => void window.autoCC?.shell.recoverKernelView() } : {}),
       });
     });
   });

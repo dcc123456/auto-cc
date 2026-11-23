@@ -441,6 +441,9 @@
       "diagnostics": {
         "title": "Settings",
         "hint": "App version and update check; you do not need this daily"
+      },
+      "toast": {
+        "retry": "Reopen"
       }
     },
     "models": {
@@ -523,7 +526,7 @@
       },
       "recovery": {
         "recovered": "The site closed this page; it has been restored ({{host}}, #{{attempt}} this minute)",
-        "exhausted": "The site keeps closing this page; auto-restore hit its limit. Please press Retry ({{host}})"
+        "exhausted": "The site keeps closing this page and auto-restore hit its limit: use “Reopen” below or “Show web window” in the top bar ({{host}})"
       }
     },
     "session": {
