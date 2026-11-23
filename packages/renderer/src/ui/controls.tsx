@@ -867,6 +867,11 @@ export interface DeskSelectProps
   value: string;
   /** 选中回调（收人话签名）。 */
   onValueChange: (value: string) => void;
+  /**
+   * 同时给**原生** `disabled`（一般不用：本项目按不动走 `aria-disabled` 三件套，原生禁用会吃掉 `title`）。
+   * 只有「能展开、能点、点了又被弹回」那一格才用它——那种「点了没反应」比「点不动」更难懂（区县 2026-11-23）。
+   */
+  hardDisabled?: boolean;
 }
 
 /**
@@ -890,6 +895,7 @@ export function DeskSelect({
   disabled,
   disabledReason,
   disabledReasonLabel,
+  hardDisabled,
   children,
   ...rest
 }: DeskSelectProps) {
@@ -902,6 +908,9 @@ export function DeskSelect({
         if (!dead.isDead) onValueChange(event.target.value);
       }}
       className={`${fieldClass(isInvalid === true)} ${dead.deadClass}${className}`}
+      // 原生 `disabled` 只在**点了会被弹回**的那一格用（2026-11-23 区县）：本项目一般只给
+      // `aria-disabled`（原生禁用会吃掉 title 提示），但「能展开、能点、点了没反应」比「点不动」更难懂。
+      {...(hardDisabled === true ? { disabled: true } : {})}
       {...dead.attrs}
       {...rest}
     >
@@ -1777,6 +1786,7 @@ export function DeskFilterField({
   disabledReasonLabel,
   unknown,
   onOpen,
+  testid,
 }: {
   action: string;
   label: string;
@@ -1787,6 +1797,8 @@ export function DeskFilterField({
   disabledReasonLabel?: string;
   unknown?: string;
   onOpen: () => void;
+  /** 额外的 `data-testid`（2026-11-23 裁定：城市那格的 `jd-city` 锚点必须与 `data-action` 并存）。 */
+  testid?: string;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
@@ -1794,6 +1806,7 @@ export function DeskFilterField({
         type="button"
         data-action={action}
         data-filter-open="true"
+        {...(testid === undefined ? {} : { 'data-testid': testid })}
         {...(disabled === true ? { 'aria-disabled': 'true' } : {})}
         {...(disabledReason === undefined ? {} : { 'data-disabled-reason': disabledReason })}
         {...(disabled === true ? { title: disabledReasonLabel } : {})}

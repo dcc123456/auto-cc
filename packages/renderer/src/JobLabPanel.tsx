@@ -901,6 +901,7 @@ export function JobLabPanel() {
               <div className="min-w-0 flex-1">
                 <DeskFilterField
                   action="jd-city"
+                  testid="jd-city"
                   label={t('jd.filterLabel.city')}
                   value={cityDraft}
                   placeholder={t('jd.cityPlaceholder')}
@@ -967,6 +968,9 @@ export function JobLabPanel() {
                         {...(districtBlocked
                           ? {
                               disabled: true,
+                              // 原生禁用也一起给（2026-11-23 第 10 轮裁定②）：北京态下原本能展开、能点、
+                              // 被组件弹回，「点了没反应」比「点不动」更难懂。
+                              hardDisabled: true,
                               disabledReason: 'DISTRICT_CITY_MISMATCH',
                               disabledReasonLabel: t('jd.districtUnavailable', { city: districtCity ?? '—' }),
                             }

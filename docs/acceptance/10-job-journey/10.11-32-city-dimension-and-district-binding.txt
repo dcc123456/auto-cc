@@ -23,3 +23,14 @@
 
 **待 QA 活体（我不代点）**：搜「上海」「杭州」→ 回填触发行；打错城市 → amber；切北京 → 区县清空并禁用、
 说明可见；切回上海 → 区县恢复可用；窄窗单列；Esc 只关选择器不动助手。
+
+## 附：第 10 轮两条 P2（放行前置）
+
+① **`data-testid="jd-city"` 锚点补回**：城市触发行改 `DeskFilterField` 时只留了 `data-action`，
+   QA 的探针（按 testid 找城市那格）被迫改用 `data-action`。现在 `DeskFilterField` 支持透传 `testid`，
+   城市那一格**两个锚点并存**（`data-action="jd-city"` + `data-testid="jd-city"`）。
+② **区县加原生 `disabled`**：北京态原先只有 `aria-disabled`，下拉**能展开、能点、被组件弹回**——
+   「点了没反应」比「点不动」更难懂。`DeskSelect` 新增 `hardDisabled`（只在「点了会被弹回」那一格用），
+   区县禁用时同时给原生 `disabled` + `aria-disabled` + 原因码 + 说明文案。
+   为什么不做成全局：本项目按不动一律走 `aria-disabled` 三件套（原生禁用会吃掉 `title` 提示），
+   这一处是特意破例，理由是「弹回」这种形态比「禁用」更费解，注释写在原件上。
