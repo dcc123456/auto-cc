@@ -226,6 +226,30 @@ export function App() {
     });
   });
 
+  // 内核视图被站点关掉之后的处置（2026-11-23 裁定）：恢复成功给一行「已接回来」，
+  // 预算用尽给一行「请点重试」——右栏不能无声地空掉，也不能无声地反复重建。
+  useEffect(() => {
+    const bridge = window.autoCC;
+    if (!bridge) return;
+    return bridge.on('shell/kernel-view-recovery', (payload) => {
+      const host = (() => {
+        try {
+          return new URL(payload.url).host;
+        } catch {
+          return payload.url;
+        }
+      })();
+      pushDeskToast({
+        action: 'kernel-view-recovery',
+        tone: payload.status === 'recovered' ? 'jade' : 'seal',
+        message:
+          payload.status === 'recovered'
+            ? t('kernel.recovery.recovered', { host, attempt: payload.attempt })
+            : t('kernel.recovery.exhausted', { host }),
+      });
+    });
+  });
+
   // 快捷键：Ctrl/⌘+J 呼出——**由壳层接住再推上来**（`shell/assistant-toggle`，2026-11-22 阻塞项）：
   // 主窗口、内核视图与接管子视图的 `before-input-event` 各挂一份，所以焦点在站点里时也收得到；
   // 渲染层自己不再处理 Ctrl+J（两处都处理就是按一下切两下，等于没反应）。

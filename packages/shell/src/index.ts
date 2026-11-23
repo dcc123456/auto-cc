@@ -21,6 +21,7 @@ import {
 } from '@auto-cc/shared';
 import { z } from 'zod';
 import { isViewLive, liveWebContentsOf } from './view-liveness.js';
+import { recoveryVerdict, withRecovery } from './recovery-budget.js';
 import {
   COMPANION_EDITOR_DEFAULT_BIN,
   launchCompanion,
@@ -152,6 +153,14 @@ export class ShellService extends Service {
   private kernelLifecycle: string[] = [];
   /** 当前视图消失那一刻的现场（栈 + 尾迹）；视图健在时为 null。 */
   private kernelViewGoneStack: string | null = null;
+  /** 站点试图关掉视图的次数（反自关注入的哨兵计数，2026-11-23）。 */
+  private closeAttempts = 0;
+  /** 自动恢复过的时刻（限流用，只保留窗口内的那些）。 */
+  private recoveries: number[] = [];
+  /** 最近一次已知的视图地址与分区：站点把页面关掉之后要按它重建（`destroyed` 时已读不到 getURL）。 */
+  private lastKernelUrl = '';
+  /** 最近一次已知的分区名（同上）。 */
+  private lastKernelPartition = '';
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -192,6 +201,8 @@ export class ShellService extends Service {
       lastError: contents === null && this.kernelViewGone !== null ? this.kernelViewGone : this.lastError,
       // 销毁现场（栈 + 尾迹）随读数一起交出去：日志文件在 userData 下，读数却是随手可取的（2026-11-23）。
       kernelViewGoneStack: contents === null ? this.kernelViewGoneStack : null,
+      kernelViewCloseAttempts: this.closeAttempts,
+      kernelViewRecoveries: this.recoveries.length,
     };
   };
 
@@ -651,6 +662,7 @@ export class ShellService extends Service {
     // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
     // 所以分区名由创建处记下；视图重建必然带上新值，读数不会停在旧分区。
     this.kernelViewPartition = partition ?? '';
+    if (partition !== undefined && partition !== '') this.lastKernelPartition = partition;
     this.kernelViewError = null;
     // 新视图建起来 = 上一次的「视图没了」已经过去了；那条读数不能跟着新视图继续显示（P2）。
     this.kernelViewGone = null;
@@ -664,6 +676,7 @@ export class ShellService extends Service {
     this.applyZoomFactor();
     // 失败读数与窗口打开的处理对父视图和接管子视图是同一条，收进两个小方法里（AGENTS.md §2.2）。
     this.observeKernelViewGone(view);
+    this.installCloseGuard(view);
     this.observeLoadFailure(view.webContents);
     this.observeKernelViewUrl(view);
     this.observeAssistantHotkey(view.webContents);
@@ -694,7 +707,10 @@ export class ShellService extends Service {
       this.kernelViewGone = '内核视图的页面被销毁';
       console.error('[shell] kernel view destroyed:', this.kernelViewGoneStack);
       this.ctx.logger.warn(`${this.kernelViewGone}｜${this.kernelViewGoneStack}`);
+      const urlBeforeGone = this.lastKernelUrl;
       this.reapDeadKernelView();
+      // 兜底恢复（限流）：站点把页面关了之后按原地址接回来，用户不至于看到右栏突然空掉。
+      this.attemptRecovery(urlBeforeGone);
     });
     contents.on('render-process-gone', (_event, details) => {
       if (this.remounting) return;
@@ -706,6 +722,71 @@ export class ShellService extends Service {
       this.reapDeadKernelView();
     });
   }
+
+  /**
+   * 反自关：把站点自己的 `window.close()` / `self.close()` 换成空操作，并记一次计数。
+   *
+   * 为什么是我们做（2026-11-23 管理员裁定）：视图是我们这扇窗，宿主有权决定它不被页面关掉；
+   * 注入只跑在**我们自己的**内核视图里，不挂 preload、不动 `contextIsolation` / `sandbox`，
+   * 也不代表站点做任何动作——它是「别关我这扇窗」，不是「替你点按钮」。
+   *
+   * 计数走**哨兵日志**：页面里被拦下时打一条 `[auto-cc:close-blocked]`，主进程按这条消息累加。
+   * 这样计数不需要渲染层配合，也不会因为页面上下文刷新而丢（每次导航都会重新注入）。
+   * @param view 刚建好的内核视图
+   */
+  private installCloseGuard(view: WebContentsView): void {
+    const contents = liveWebContentsOf<WebContents>(view);
+    if (!contents) return;
+    const script = `(() => {
+      if (window.__autoCCCloseGuard) return true;
+      window.__autoCCCloseGuard = true;
+      const block = () => { try { console.warn('[auto-cc:close-blocked]'); } catch {} };
+      try { window.close = block; } catch {}
+      try { self.close = block; } catch {}
+      return true;
+    })()`;
+    const inject = (): void => {
+      void contents.executeJavaScript(script, true).catch(() => {
+        // 注入失败不是故障：站点 CSP 极少数会拦，页面照常可用，只是反自关不生效。
+      });
+    };
+    contents.on('dom-ready', inject);
+    contents.on('did-navigate', inject);
+    contents.on('console-message', (event) => {
+      const message = typeof event?.message === 'string' ? event.message : '';
+      if (!message.includes('[auto-cc:close-blocked]')) return;
+      this.closeAttempts += 1;
+      this.recordLifecycle(`close-blocked ×${String(this.closeAttempts)}`);
+    });
+  }
+
+  /**
+   * 视图被站点关掉之后的兜底恢复（2026-11-23 裁定）：按当时的地址栏 URL 重建一次，限流 ≤2 次/60s。
+   *
+   * 为什么恢复不能替代根因：它是「右栏突然空了」的体验兜底，不是修好站点行为；
+   * 反自关是否真能挡住，由 A/B 的 `kernelViewCloseAttempts` 读数判。
+   * 为什么必须限流：站点可能一加载就再关一次，不限流就是重建→再关→再重建的无限循环。
+   * @param url 站点关掉页面之前的那条地址（`destroyed` 之后 `getURL()` 已读不到，用最近一次记录）
+   */
+  private attemptRecovery = (url: string): void => {
+    const now = Date.now();
+    const verdict = recoveryVerdict(this.recoveries, now);
+    if (!verdict.allowed) {
+      this.ctx.logger.warn(`恢复预算用尽（${String(verdict.usedInWindow)} 次/窗口）：不再重建，等用户点重试`);
+      this.ctx.emit('shell/kernel-view-recovery', { status: 'exhausted', url, attempt: verdict.usedInWindow });
+      return;
+    }
+    if (url === '' || this.lastKernelPartition === '') {
+      // 没有可回去的地址：什么都不做，让界面显示「没有视图」（这是之前的既有行为）。
+      return;
+    }
+    this.recoveries = withRecovery(this.recoveries, now);
+    const attempt = this.recoveries.length;
+    this.recordLifecycle(`recover view after site close → ${url}`);
+    this.ctx.logger.warn(`内核视图被站点关掉，按原地址重建（本窗口第 ${String(attempt)} 次）：${url}`);
+    this.createKernelView(this.lastKernelPartition, url);
+    this.ctx.emit('shell/kernel-view-recovery', { status: 'recovered', url, attempt });
+  };
 
   /**
    * 收掉已经死掉的内核视图记位（2026-11-23 的 P1 的**自愈**那一半）。
@@ -764,6 +845,7 @@ export class ShellService extends Service {
   private observeKernelViewUrl(view: WebContentsView): void {
     const push = (next: string): void => {
       if (view !== this.kernelView) return;
+      this.lastKernelUrl = next;
       const decision = markKernelViewUrl(this.pushedKernelViewUrl, next);
       this.pushedKernelViewUrl = decision.previous;
       if (decision.emit) this.ctx.emit('shell/kernel-view-url', next);

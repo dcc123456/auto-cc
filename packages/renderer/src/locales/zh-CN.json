@@ -518,6 +518,10 @@
       "canvasResizeHandle": "拖动改分栏宽度；双击回到 65%",
       "popup": {
         "blocked": "外链被拦截：{{host}}（不会新开窗口）"
+      },
+      "recovery": {
+        "recovered": "网页被站点关闭了一次，已自动接回原页面（{{host}}，本分钟第 {{attempt}} 次）",
+        "exhausted": "网页被站点关闭，自动恢复已达上限：请点「重试」（{{host}}）"
       }
     },
     "session": {

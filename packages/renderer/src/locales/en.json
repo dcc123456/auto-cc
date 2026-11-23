@@ -518,6 +518,10 @@
       "canvasResizeHandle": "Drag to change the split width; double-click goes back to 65%",
       "popup": {
         "blocked": "External link blocked: {{host}} (no new window opens)"
+      },
+      "recovery": {
+        "recovered": "The site closed this page; it has been restored ({{host}}, #{{attempt}} this minute)",
+        "exhausted": "The site keeps closing this page; auto-restore hit its limit. Please press Retry ({{host}})"
       }
     },
     "session": {

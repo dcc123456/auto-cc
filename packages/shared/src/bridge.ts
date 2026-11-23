@@ -619,6 +619,16 @@ export type ShellStatus = {
    * 换视图、是不是刚 `unmount`。所以这一格把两者一起交出来，让读到它的人不必再去翻日志文件。
    */
   kernelViewGoneStack: string | null;
+  /**
+   * 站点试图关掉内核视图的次数（2026-11-23 的反自关注入统计）。
+   *
+   * 计数来源：注入把 `window.close` / `self.close` 换成空操作，被拦下时打一条哨兵日志，
+   * 主进程按哨兵计数。**计数 > 0 且销毁归零**就证明「打挂」确实是站点自关——
+   * 这是这条 P1 的定性读数，不是猜测。
+   */
+  kernelViewCloseAttempts: number;
+  /** 视图被站点关掉之后自动恢复过几次（限流窗口内，见 `recovery-budget`）。 */
+  kernelViewRecoveries: number;
   lastError: string | undefined;
 };
 
@@ -3699,6 +3709,8 @@ export const RENDERER_EVENTS = [
   'shell/assistant-toggle',
   // 页面里点了外链：一律 deny，但要让人看见原因（2026-11-22 裁定后通用，不再分模式）。载荷是被拦的地址。
   'shell/popup-blocked',
+  // 内核视图被站点关掉之后的处置（恢复成功 / 预算用尽），界面据此给一行提示。
+  'shell/kernel-view-recovery',
   // 执行器状态变了（2026-11-22 裁定 C）：角标第三类来源靠这条刷新，界面不轮询。
   'journey/unattended-changed',
   'workflow/progress',
@@ -3745,6 +3757,7 @@ export interface RendererEventSignatures {
   'shell/kernel-view-url': string;
   'shell/assistant-toggle': true;
   'shell/popup-blocked': string;
+  'shell/kernel-view-recovery': { status: 'recovered' | 'exhausted'; url: string; attempt: number };
   'journey/unattended-changed': { status: string; pendingCount: number };
   'workflow/progress': WorkflowProgressEvent;
   'chat/delta': ChatDeltaEvent;

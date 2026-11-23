@@ -2084,6 +2084,13 @@ declare module 'cordis' {
      */
     'shell/popup-blocked'(url: string): void;
     /**
+     * 内核视图「被站点关掉」之后的处置（2026-11-23 裁定）：恢复成功，或恢复预算用尽。
+     *
+     * `status === 'recovered'` 时 `attempt` 是本次窗口内的第几次（≤2）；
+     * `status === 'exhausted'` 时说「页面被站点关闭，请点重试」——**不再重建**，避免无限循环。
+     */
+    'shell/kernel-view-recovery'(payload: { status: 'recovered' | 'exhausted'; url: string; attempt: number }): void;
+    /**
      * 无人值守执行器的状态变了（spec 10.11-11 裁定 C, 2026-11-22）：起跑、停止请求、收尾各推一条。
      * 为什么要有它：角标的第三类来源（执行器待办）原来只靠挂载读一次，窗口长期开着时
      * 「停止后需要你」永远不亮——只能刷新页面才看见。载荷就是 `view()` 那份读数，界面不另推导。

@@ -1,0 +1,44 @@
+10.11-32 补：反自关注入 + 计数读数 + 限流恢复（2026-11-23，按 PMO 裁定实现）
+
+**定性依据（先写清楚这条是按什么做的）**：QA 在 `64061ec` 上的 `kernelViewGoneStack` 尾迹里，
+最后一次 `closing previous kernel view` 的调用点栈是 `ensureBrowser → mountKernelSite → createKernelView`
+（那是我们自己建视图）；真正销毁发生在之后很久，尾迹里**没有新的 `closing`、也没有 `mount`**。
+按开发自己写进证据的三种判读，这属于「**外部/站点侧**把 webContents 终止了」。复现率：同动作 5 轮 4 次被销毁，
+且 `64061ec` 那一轮视图在**点击前**就被关掉。仓库里另有实测「渲染层 `window.close()` 不吃 close 的 preventDefault，
+窗口会被真销毁」——所以按「站点自己关页面」这条查。
+
+**① 反自关 + 计数（`kernelViewCloseAttempts`）**
+- 注入时机：新视图挂上时注册 `dom-ready` 与 `did-navigate`，用 `executeJavaScript` 覆盖
+  `window.close` / `self.close` 为空操作，并把 `window.__autoCCCloseGuard` 置位（重复注入直接返回）。
+- 计数通道：被拦下时页面打一条哨兵日志 `[auto-cc:close-blocked]`，主进程在 `console-message` 里按哨兵累加，
+  读数经 `shell.getStatus().kernelViewCloseAttempts` 交出。
+- 边界：只跑在**我们自己的**内核视图里，不挂 preload、不动 `contextIsolation` / `sandbox`；
+  它是「别关我这扇窗」（宿主对自己那扇窗的策略），**不是**代做站点动作。
+
+**本地验证（仿站，`tmp/g11/batch/p41-close-guard.mjs`，不碰真站）**
+| 读数 | 值 |
+| --- | --- |
+| `window.__autoCCCloseGuard` | `true`（注入生效） |
+| 页面里执行 `window.close()` | 返回 `"called"`（调用确实发生了） |
+| 调用之后内核 target 是否还在 | **在**（`kernelStillThere:true`），`url` 仍是 `http://127.0.0.1:10233/` |
+| `kernelViewCloseAttempts` | **0 → 1**（哨兵计数生效） |
+| `kernelViewRecoveries` | `0`（守卫挡住了，没触发重建） |
+| `lastError` | `null` |
+
+**② 限流恢复（兜底，不替代根因）**
+- 触发：当前视图被销毁时，取**最近一次已知地址**（`lastKernelUrl`，由 `did-navigate` 维护——`destroyed` 之后
+  `getURL()` 已读不到）按同一分区重建一次，并发 `shell/kernel-view-recovery { status:'recovered', url, attempt }`，
+  界面弹一行「网页被站点关闭了一次，已自动接回原页面」。
+- 限流：`packages/shell/src/recovery-budget.ts` 纯函数，**60 秒内最多 2 次**，滑窗；超限**不再重建**，
+  发 `{ status:'exhausted' }`，界面提示「请点重试」。5 条单测钉住：两次允许、第三次拒、窗口滑出后恢复、记录会裁剪。
+- 为什么必须限流：站点可能一加载就再关一次，不限流就是「重建→再关→再重建」的无限循环。
+- 为什么恢复不算修好：它是「右栏突然空了」的体验兜底；站点行为有没有被挡住，看的是 ① 的计数与 A/B 结果。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2819 例全过**（shell 86，含恢复预算 5 例）。
+
+**还没证明的两件事（写实）**
+1. **真站 A/B 未跑**：注入后「点城市栏」是否还挂、`kernelViewCloseAttempts` 是否 >0，要 QA 在真站上取
+   （两组各 10 次点击）。这是「站点自关」这一定性的**唯一硬证据**，本地仿站证明不了。
+2. 若 A/B 出现「计数仍是 0、销毁照旧」，说明 BOSS 不是用 `window.close()` 关的（例如别的手段让页面消失），
+   那这条注入就是 no-op，得按新读数重新裁——**不许把它当成已修**挂在绿格里。
