@@ -1,0 +1,66 @@
+# 10.11-32 放行前最后一轮：四组读数（最终构建 `5f78a24`）
+
+构建 `5f78a24`（隔离树 `git archive` + esbuild 重打 `main.cjs` + `vite build`）、实例 `ud-onsite4`、CDP 10410、
+2026-11-23 22:00–22:07 本地。门禁在**同一份隔离树**上独立跑（不是共享工作树、不是别人的读数）。
+
+## ① 首启 → 顶栏键 → 地址栏 → 输网址导航
+
+| 步骤 | `visible` | `url` | `partition` | 地址栏输入框 |
+| --- | --- | --- | --- | --- |
+| 启动初始（无任何导航） | false | placeholder（`data:`） | `""` | **不存在** |
+| 点顶栏「展开网页窗口」 | **true** | placeholder | `""` | **出现** |
+| 地址栏输 `http://127.0.0.1:10233/boss` 并点 go | true | **`http://127.0.0.1:10233/boss`** | **`persist:browser`** | 在 |
+
+- 「点顶栏键 → 地址栏出现 → 输网址 → 导航成功」全链成立；
+- `partition` 从 `""` 变成 `persist:browser`，即 `10.11-27/29` 的「无会话手输网址自动建分区」**从入口上恢复可达**。
+
+## ② 城市组
+
+| 项 | 读数 | 判 |
+| --- | --- | --- |
+| 城市控件 | `BUTTON`（触发行为） | 单一写口 |
+| 展开 | `data-option-picker="jd-picker-city"`、`position: static`、`z-index: auto`、**373 行** | 原地面板 |
+| 搜「上海」 | 1 条（`上海`）→ 触发行 `城市上海` | 通过 |
+| 搜「杭州」 | 1 条（`杭州`）→ 触发行 `城市杭州` | 通过 |
+| 打错（`不存在的城市`） | 0 行 + `没有匹配` | 不再静默 |
+| 区县（城市=上海） | `disabled:false`、`aria-disabled` 空；能选 `徐汇区`（`value="徐汇区"`） | 可用 |
+| 切杭州 | 区县 `value` **清空**、`disabled:true`、`aria-disabled="true"`、`data-disabled-reason="DISTRICT_CITY_MISMATCH"`、`title="该城市暂无区县码（现有区县码属于上海）"` | 清空+原生禁用+说明 |
+| 切北京 | 同上（`disabled:true`） | 通过 |
+| 北京态强行选区县 | 改 `value` + 派 `change` 后 `value` 仍 `""` | **点不动/改不动**，不会把上海区码配给北京 |
+| 切回上海 | 区县 `disabled:false`、`aria-disabled` 空、`value=""`（不记旧选择） | 恢复可用 |
+| 窄窗单列 | 收起网页视图后：900 → 面板 246 宽／1024 → 370／1280 → 498，**三档都 1 列**、行高 26、面板宽==触发行宽、列表 `sw==cw`、文档 `sw==cw` | 单列不横滚 |
+| Esc 分层 | 选择器开 + 助手面板 689 → Esc 后 **选择器关、助手仍 689** | 只关最近一层 |
+
+> 读数条件说明：第一次窄窗是在**网页视图展开**时测的，面板只剩 ~280、选择器 115/159 宽（城市名会截断）；
+> 那是「面板被网页窗口挤窄」的正常表现，不是窄窗判据的档位。收起视图后重测，上表是那一次的数。
+
+## ③ 两个锚点都在
+
+| 断言 | 读数 |
+| --- | --- |
+| `[data-action=jd-city]` | 存在 |
+| `[data-testid=jd-city]` | **存在** |
+| 指向同一节点 | **是**（`byAction === byTestid`） |
+
+## ④ 最终 HEAD 上独立复跑四门禁（隔离树 `git archive 5f78a24`）
+
+| 门禁 | 命令 | EXIT |
+| --- | --- | --- |
+| 类型 | `pnpm typecheck` | **0** |
+| 规范 | `pnpm lint`（含术语禁令、路由外发机检、工具契约） | **0** |
+| 格式 | `pnpm format:check` | **0** |
+| 测试 | `pnpm test` | **0**（**25 个包套件 / 2830 例全过**，0 失败） |
+
+## 结论
+
+四组全过：首启入口恢复、城市选择器可用且四层级正确（上海可用 / 杭州北京禁用并说明 / 强行选被拒 / 切回恢复）、
+两个锚点同一节点、最终 HEAD 四门禁全绿。`10.11-32` 的放行读数至此齐了。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa11-firstrun.mjs      # ① 首启 → 顶栏 → 地址栏 → 导航
+node cdp.mjs 10410 auto-cc /tmp/qa11-final4.mjs       # ② 城市全项 + ③ 锚点 + 区县四层级
+node /private/tmp/qa-11/narrow2.mjs                    # ② 窄窗（收起网页视图后 900/1024/1280）
+cd /private/tmp/qa-11/tree && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test   # ④
+```
