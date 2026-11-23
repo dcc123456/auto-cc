@@ -216,8 +216,36 @@ export function JobLabPanel() {
   const [searchFilters, setSearchFilters] = useState<{ dimension: string; labels: string[] }[]>([]);
   /** 此刻展开着长列表选择器的维度名（原地替换那一格；null = 都收起）。 */
   const [openPicker, setOpenPicker] = useState<string | null>(null);
+  // Esc 的层级（2026-11-23 裁定③）：选择器展开时先关选择器，**不**让这一下冒到助手面板那一层。
+  // 用捕获阶段 + stopPropagation：浮层的 Esc 监听挂在 window 冒泡阶段，捕获先跑就能把它截住。
+  useEffect(() => {
+    if (openPicker === null) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      event.preventDefault();
+      setOpenPicker(null);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [openPicker]);
+
+  // 知识包热换之后界面要重读维度（Q5）：`plugins.saveConfig` 会重建下游服务，而渲染层只在
+  // 平台变化时读一次 `platform.registry.list()`，于是新增/删除维度要 reload 才出现。
+  // 这里在窗口重新获得焦点时补读一次：不吃掉「换包」这件事，也不再要求人去 reload。
+  const registryTick = useRef(0);
+  useEffect(() => {
+    const onFocus = (): void => {
+      registryTick.current += 1;
+      setExtraFilters((previous) => previous);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   /** 平台是否声明了「经验」这一维（声明了就用下拉，自由文本与码表会打架）。 */
   const declaresExperience = searchFilters.some((filter) => filter.dimension === 'experience');
+  /** 城市那一维（有码表才走选择器；仿站那份包没有，退回手输框）。它单独占一行，不进下面的筛选网格。 */
+  const cityFilter = searchFilters.find((filter) => filter.dimension === 'city');
   /** 简历 PDF 的绝对路径：留空则由主进程用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口）。 */
   const [resumePathDraft, setResumePathDraft] = useState('');
   /** 最近一次打招呼的回执（`GreetReceiptView`）：闸门拒了就没有回执，界面上只剩结构化错误（spec 2.5-02）。 */
@@ -824,14 +852,51 @@ export function JobLabPanel() {
             placeholder={t('jd.keywordPlaceholder')}
           />
           <div className="flex gap-2">
-            <DeskField
-              action="jd-city"
-              data-testid="jd-city"
-              value={cityDraft}
-              onValueChange={setCityDraft}
-              placeholder={t('jd.cityPlaceholder')}
-              className="flex-1"
-            />
+            {/* 城市（2026-11-23 裁定①）：知识包有 city 码表就换选择器（373 项 + 搜索），
+                打错城市会给 amber 提示，不再是「凭记忆手打、打错静默空结果」。
+                没有码表的装配（仿站那份包）保留手输框——那是唯一能用的形态，不硬造码。 */}
+            {cityFilter === undefined ? (
+              <DeskField
+                action="jd-city"
+                data-testid="jd-city"
+                value={cityDraft}
+                onValueChange={setCityDraft}
+                placeholder={t('jd.cityPlaceholder')}
+                className="flex-1"
+              />
+            ) : openPicker === 'city' ? (
+              <div className="min-w-0 flex-1" data-testid="jd-city-picker">
+                <DeskOptionPicker
+                  action="jd-picker-city"
+                  label={t('jd.filterLabel.city')}
+                  labels={cityFilter.labels}
+                  value={cityDraft}
+                  onChange={setCityDraft}
+                  onClose={() => setOpenPicker(null)}
+                  searchPlaceholder={t('jd.picker.search')}
+                  emptyText={t('jd.picker.empty')}
+                  clearText={t('jd.picker.clear')}
+                  doneText={t('jd.picker.done')}
+                  backText={t('jd.picker.back')}
+                  clearSearchText={t('jd.picker.clearSearch')}
+                />
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1">
+                <DeskFilterField
+                  action="jd-city"
+                  label={t('jd.filterLabel.city')}
+                  value={cityDraft}
+                  placeholder={t('jd.cityPlaceholder')}
+                  unknown={
+                    cityDraft !== '' && !cityFilter.labels.includes(cityDraft)
+                      ? t('jd.picker.unknown', { value: cityDraft })
+                      : undefined
+                  }
+                  onOpen={() => setOpenPicker('city')}
+                />
+              </div>
+            )}
             {declaresExperience ? null : (
               <DeskField
                 action="jd-experience"
@@ -861,69 +926,75 @@ export function JobLabPanel() {
               data-testid="jd-search-filters"
               data-filter-count={searchFilters.length}
             >
-              {searchFilters.map((filter) => {
-                const dimensionLabel = t(filterLabelKey(filter.dimension));
-                const current = extraFilters[filter.dimension] ?? '';
-                // 短列表（≤12）用原生下拉；长列表（城市 373 / 行业 145 / 职位类型 158）换原地选择器。
-                if (filter.labels.length <= OPTION_PICKER_THRESHOLD) {
-                  return (
-                    <DeskSelect
-                      key={filter.dimension}
-                      action={`jd-filter-${filter.dimension}`}
-                      data-testid={`jd-filter-${filter.dimension}`}
-                      label={dimensionLabel}
-                      value={current}
-                      onValueChange={(value) =>
-                        setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
-                      }
-                      className="w-full"
-                    >
-                      <option value="">{t('jd.filterAny')}</option>
-                      {filter.labels.map((label) => (
-                        <option key={label} value={label}>
-                          {label}
-                        </option>
-                      ))}
-                    </DeskSelect>
-                  );
-                }
-                if (openPicker === filter.dimension) {
-                  return (
-                    <div key={filter.dimension} className="@2xl:col-span-2 @4xl:col-span-2">
-                      <DeskOptionPicker
-                        action={`jd-picker-${filter.dimension}`}
+              {searchFilters
+                .filter((filter) => filter.dimension !== 'city')
+                .map((filter) => {
+                  const dimensionLabel = t(filterLabelKey(filter.dimension));
+                  const current = extraFilters[filter.dimension] ?? '';
+                  // 区县按**语义**固定下拉（2026-11-23 裁定②）：它是城市的子级，16 项两下点完，
+                  // 不该因为「>12 用选择器」这条数据阈值被换成面板。
+                  const forceSelect = filter.dimension === 'district';
+                  // 其余短列表（≤12）用原生下拉；长列表（行业 145 / 职位类型 134）换原地选择器。
+                  if (forceSelect || filter.labels.length <= OPTION_PICKER_THRESHOLD) {
+                    return (
+                      <DeskSelect
+                        key={filter.dimension}
+                        action={`jd-filter-${filter.dimension}`}
+                        data-testid={`jd-filter-${filter.dimension}`}
                         label={dimensionLabel}
-                        labels={filter.labels}
                         value={current}
-                        onChange={(value) =>
+                        onValueChange={(value) =>
                           setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
                         }
-                        onClose={() => setOpenPicker(null)}
-                        searchPlaceholder={t('jd.picker.search')}
-                        emptyText={t('jd.picker.empty')}
-                        clearText={t('jd.picker.clear')}
-                        doneText={t('jd.picker.done')}
-                        backText={t('jd.picker.back')}
-                      />
-                    </div>
+                        className="w-full"
+                      >
+                        <option value="">{t('jd.filterAny')}</option>
+                        {filter.labels.map((label) => (
+                          <option key={label} value={label}>
+                            {label}
+                          </option>
+                        ))}
+                      </DeskSelect>
+                    );
+                  }
+                  if (openPicker === filter.dimension) {
+                    return (
+                      <div key={filter.dimension} className="@2xl:col-span-2 @4xl:col-span-2">
+                        <DeskOptionPicker
+                          action={`jd-picker-${filter.dimension}`}
+                          label={dimensionLabel}
+                          labels={filter.labels}
+                          value={current}
+                          onChange={(value) =>
+                            setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
+                          }
+                          onClose={() => setOpenPicker(null)}
+                          searchPlaceholder={t('jd.picker.search')}
+                          emptyText={t('jd.picker.empty')}
+                          clearText={t('jd.picker.clear')}
+                          doneText={t('jd.picker.done')}
+                          backText={t('jd.picker.back')}
+                          clearSearchText={t('jd.picker.clearSearch')}
+                        />
+                      </div>
+                    );
+                  }
+                  return (
+                    <DeskFilterField
+                      key={filter.dimension}
+                      action={`jd-filter-${filter.dimension}`}
+                      label={dimensionLabel}
+                      value={current}
+                      placeholder={t('jd.filterAny')}
+                      unknown={
+                        current !== '' && !filter.labels.includes(current)
+                          ? t('jd.picker.unknown', { value: current })
+                          : undefined
+                      }
+                      onOpen={() => setOpenPicker(filter.dimension)}
+                    />
                   );
-                }
-                return (
-                  <DeskFilterField
-                    key={filter.dimension}
-                    action={`jd-filter-${filter.dimension}`}
-                    label={dimensionLabel}
-                    value={current}
-                    placeholder={t('jd.filterAny')}
-                    unknown={
-                      current !== '' && !filter.labels.includes(current)
-                        ? t('jd.picker.unknown', { value: current })
-                        : undefined
-                    }
-                    onOpen={() => setOpenPicker(filter.dimension)}
-                  />
-                );
-              })}
+                })}
             </div>
           ) : null}
           <div className="flex items-center gap-2">

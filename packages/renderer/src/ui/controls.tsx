@@ -1846,6 +1846,7 @@ export function DeskOptionPicker({
   clearText,
   doneText,
   backText,
+  clearSearchText,
 }: {
   action: string;
   label: string;
@@ -1858,6 +1859,8 @@ export function DeskOptionPicker({
   clearText: string;
   doneText: string;
   backText: string;
+  /** 搜不到时的出口文案（「清空搜索」）：与「清除」（清已选值）不是同一只控件。 */
+  clearSearchText: string;
 }) {
   const [query, setQuery] = useState('');
   /** 组字中：输入法还没上屏时不过滤（否则列表会在打字中途被清空成「没有匹配」）。 */
@@ -1900,9 +1903,18 @@ export function DeskOptionPicker({
       </div>
       <div className="max-h-56 overflow-y-auto px-1 pb-1" data-option-picker-list="true">
         {shown.length === 0 ? (
-          <p className="px-2 py-2 text-[11px] text-slate-500" data-option-picker-empty="true">
-            {emptyText}
-          </p>
+          <div className="px-2 py-2" data-option-picker-empty="true">
+            <p className="text-[11px] text-slate-500">{emptyText}</p>
+            {/* 空态必须有自己的出口（2026-11-23 裁定④）：只给「清除」会把「清搜索词」与「清已选值」混成一件事。 */}
+            <button
+              type="button"
+              data-action={`${action}-clear-search`}
+              onClick={() => setQuery('')}
+              className={PICKER_LINK_CLASS}
+            >
+              {clearSearchText}
+            </button>
+          </div>
         ) : (
           shown.map((entry) => (
             <button

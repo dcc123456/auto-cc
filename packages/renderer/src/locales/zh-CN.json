@@ -753,7 +753,8 @@
         "clear": "清除",
         "done": "完成",
         "back": "返回",
-        "unknown": "当前值「{{value}}」不在码表里：这一维不会被发送"
+        "unknown": "当前值「{{value}}」不在码表里：这一维不会被发送",
+        "clearSearch": "清空搜索"
       }
     },
     "consent": {
