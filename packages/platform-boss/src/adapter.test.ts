@@ -181,7 +181,14 @@ describe('搜索与列表读取（spec 2.3-01 / 2.3-02）', () => {
     const adapter = createBossAdapter(realPack, fakePage, createFakeAct({}));
     await expect(adapter.search({ keyword: '前端', experience: '3-5 年' })).rejects.toMatchObject({
       code: 'SEARCH_FILTER_UNSUPPORTED',
-      details: { filter: 'experience', value: '3-5 年', platform: 'boss', reason: 'no-code', allowed: ['3-5年'] },
+      // 码表现在是全量（8 个经验档），所以只断言「3-5年 在可选项里」而不是整张表相等。
+      details: {
+        filter: 'experience',
+        value: '3-5 年',
+        platform: 'boss',
+        reason: 'no-code',
+        allowed: expect.arrayContaining(['3-5年']),
+      },
     });
     expect(fakePage.navigated).toEqual([]);
   });

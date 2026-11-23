@@ -3946,6 +3946,7 @@ export const SEARCH_FILTER_DIMENSIONS = [
   'jobType',
   'stage',
   'industry',
+  'position',
   'city',
 ] as const;
 
@@ -4264,6 +4265,8 @@ export interface JobSearchCriteriaView {
   jobType?: string;
   financingStage?: string;
   industry?: string;
+  /** 职位类型（如「前端/移动开发」）；158 个子项由知识包码表给出 */
+  position?: string;
   limit?: number;
 }
 

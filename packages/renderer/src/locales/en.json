@@ -730,7 +730,8 @@
         "industry": "Industry",
         "experience": "Experience",
         "city": "City",
-        "fallback": "Filter"
+        "fallback": "Filter",
+        "position": "Job category"
       },
       "matchNone": "No explainable match for this row (it was already in the library)",
       "matchHits": "Matched: {{hits}}",
@@ -743,7 +744,15 @@
         "degree": "Education matches “{{value}}”",
         "salary": "Salary range overlaps (this job: {{actual}}, filter: {{value}})"
       },
-      "matchJoin": "; "
+      "matchJoin": "; ",
+      "picker": {
+        "search": "Search…",
+        "empty": "No match — try another word or Clear",
+        "clear": "Clear",
+        "done": "Done",
+        "back": "Back",
+        "unknown": "“{{value}}” is not in the code table; this filter will not be sent"
+      }
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",

@@ -255,6 +255,7 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
       ['jobType', criteria.jobType],
       ['financingStage', criteria.financingStage],
       ['industry', criteria.industry],
+      ['position', criteria.position],
     ];
     // 契约里的字段名与知识包里的维度名不是一套（`cityDistrict`/`companyScale`/`financingStage` 更可读），
     // 对应关系写死在这张表里，比在两处各改一次名字稳。

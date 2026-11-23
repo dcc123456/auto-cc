@@ -730,7 +730,8 @@
         "industry": "公司行业",
         "experience": "经验要求",
         "city": "城市",
-        "fallback": "筛选"
+        "fallback": "筛选",
+        "position": "职位类型"
       },
       "matchNone": "这一行没有命中可解释的条件（库内原有岗位）",
       "matchHits": "命中：{{hits}}",
@@ -743,7 +744,15 @@
         "degree": "学历命中「{{value}}」",
         "salary": "薪资区间相交（本岗位 {{actual}}，条件 {{value}}）"
       },
-      "matchJoin": "；"
+      "matchJoin": "；",
+      "picker": {
+        "search": "搜索…",
+        "empty": "没有匹配项，换个词或点「清除」",
+        "clear": "清除",
+        "done": "完成",
+        "back": "返回",
+        "unknown": "当前值「{{value}}」不在码表里：这一维不会被发送"
+      }
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",

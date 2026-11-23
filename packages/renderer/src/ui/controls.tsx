@@ -1,4 +1,4 @@
-import { BadgeCheck, CircleAlert, Info, LoaderCircle, Send, Stamp, TriangleAlert } from 'lucide-react';
+import { BadgeCheck, ChevronDown, CircleAlert, Info, LoaderCircle, Send, Stamp, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes,
@@ -1728,5 +1728,201 @@ export function DeskSwatch({
         />
       ))}
     </span>
+  );
+}
+
+/** 筛选触发器的画法（具名档位：渲染层规范要求 JSX 里不许内联整串 class，spec 6.2-37）。 */
+const filterFieldClass = (disabled: boolean): string =>
+  `flex min-h-8 min-w-0 items-center gap-2 rounded-md border border-line bg-ink-950/60 px-2 py-1 text-left text-[11px] transition-colors ${
+    disabled ? 'opacity-40' : 'hover:border-line-strong hover:bg-ink-850'
+  }`;
+
+/** 选择器面板里一颗选项的画法（选中的那一格实底，其余悬停提亮）。 */
+const optionRowClass = (selected: boolean): string =>
+  `flex w-full min-w-0 items-center gap-1 rounded px-2 py-1 text-left text-[11px] ${
+    selected ? 'bg-ink-750 text-celadon' : 'text-slate-300 hover:bg-ink-800 hover:text-slate-100'
+  }`;
+
+/** 面板头部那几颗文字键的画法（← 返回 / 清除 / 完成）。 */
+const PICKER_LINK_CLASS = 'shrink-0 text-[11px] text-slate-400 hover:text-slate-100';
+
+/** 面板底部「完成」那颗键的画法（青瓷色，与头部的灰字区分）。 */
+const PICKER_DONE_CLASS = 'text-[11px] text-celadon hover:text-slate-100';
+
+/** 长列表选择器的阈值（设计口径 2026-11-23：≤12 用原生下拉，>12 换原地选择器）。 */
+export const OPTION_PICKER_THRESHOLD = 12;
+
+/**
+ * 筛选触发器：一格「标签：当前值」，点开长列表选择器（原地替换，不弹浮层）。
+ *
+ * 为什么不用 `DeskSelect`：城市 373 / 行业 145 / 职位类型 158 塞进原生下拉既不能搜、也没法分组。
+ * 为什么不用 `DeskPopover`：它 `bottom-full` 往上弹，落在筛选行会盖住页面标题（设计口径 §3）。
+ * @param action harness 点击凭据
+ * @param label 维度名（已翻译）
+ * @param value 当前选中的标签；空串表示「不限」
+ * @param placeholder 「不限」那句人话
+ * @param disabled 维度没填码时禁用（按不动要给原因）
+ * @param disabledReason 原因码
+ * @param disabledReasonLabel 原因人话
+ * @param unknown 当前值不在码表里时的提示（amber；不许静默吞）
+ * @param onOpen 点开选择器
+ */
+export function DeskFilterField({
+  action,
+  label,
+  value,
+  placeholder,
+  disabled,
+  disabledReason,
+  disabledReasonLabel,
+  unknown,
+  onOpen,
+}: {
+  action: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  disabledReasonLabel?: string;
+  unknown?: string;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <button
+        type="button"
+        data-action={action}
+        data-filter-open="true"
+        {...(disabled === true ? { 'aria-disabled': 'true' } : {})}
+        {...(disabledReason === undefined ? {} : { 'data-disabled-reason': disabledReason })}
+        {...(disabled === true ? { title: disabledReasonLabel } : {})}
+        onClick={() => {
+          if (disabled !== true) onOpen();
+        }}
+        className={filterFieldClass(disabled === true)}
+      >
+        <span className="shrink-0 text-slate-500">{label}</span>
+        <span className={`min-w-0 flex-1 truncate ${value === '' ? 'text-slate-500' : 'text-slate-100'}`}>
+          {value === '' ? placeholder : value}
+        </span>
+        <ChevronDown size={12} className="shrink-0 text-slate-500" />
+      </button>
+      {unknown === undefined ? null : (
+        <span className="text-[10.5px] text-amber" data-filter-unknown="true">
+          {unknown}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 长列表选择器：原地替换筛选块那一格（300–400 项也能搜）。
+ *
+ * 三条刻意的口径（设计 §5）：
+ * ① 搜索是**子串匹配、忽略大小写**，不排序（中文按码点排会得到随机名单，按知识包顺序更可预期）；
+ * ② 中文组字期间**不过滤**（`isComposing` 为真不更新查询串，否则打「shang」时列表会被清空成「没有匹配」）；
+ * ③ 不进 `overlayLayers`：它不是视口级浮层，Esc 归上层（助手面板/弹窗）管，勾选状态由调用方持有。
+ * @param action 每颗选项的 `data-action` 前缀
+ * @param label 维度名（已翻译）
+ * @param labels 可选项（知识包顺序）
+ * @param value 当前值；空串表示不限
+ * @param onChange 选中（空串 = 清除）
+ * @param onClose 收起（完成）
+ * @param searchPlaceholder 搜索框占位
+ * @param emptyText 无匹配时那句人话
+ * @param clearText / doneText / backText 三颗键的文案
+ */
+export function DeskOptionPicker({
+  action,
+  label,
+  labels,
+  value,
+  onChange,
+  onClose,
+  searchPlaceholder,
+  emptyText,
+  clearText,
+  doneText,
+  backText,
+}: {
+  action: string;
+  label: string;
+  labels: string[];
+  value: string;
+  onChange: (next: string) => void;
+  onClose: () => void;
+  searchPlaceholder: string;
+  emptyText: string;
+  clearText: string;
+  doneText: string;
+  backText: string;
+}) {
+  const [query, setQuery] = useState('');
+  /** 组字中：输入法还没上屏时不过滤（否则列表会在打字中途被清空成「没有匹配」）。 */
+  const [composing, setComposing] = useState(false);
+  const needle = composing ? '' : query.trim().toLowerCase();
+  const shown = needle === '' ? labels : labels.filter((entry) => entry.toLowerCase().includes(needle));
+  return (
+    <div className="min-w-0 rounded-md border border-line-strong bg-ink-900" data-option-picker={action}>
+      <div className="flex min-w-0 items-center gap-2 border-b border-line px-2 py-1">
+        <button type="button" data-action={`${action}-back`} onClick={onClose} className={PICKER_LINK_CLASS}>
+          ← {backText}
+        </button>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-200">{label}</span>
+        <button
+          type="button"
+          data-action={`${action}-clear`}
+          onClick={() => onChange('')}
+          className={PICKER_LINK_CLASS}
+        >
+          {clearText}
+        </button>
+      </div>
+      <div className="px-2 py-1">
+        <input
+          data-action={`${action}-search`}
+          value={query}
+          placeholder={searchPlaceholder}
+          onChange={(event) => {
+            // 组字期间不更新：见上；
+            if (composing) return;
+            setQuery(event.target.value);
+          }}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={(event) => {
+            setComposing(false);
+            setQuery(event.currentTarget.value);
+          }}
+          className="w-full rounded border border-line bg-ink-950 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-celadon"
+        />
+      </div>
+      <div className="max-h-56 overflow-y-auto px-1 pb-1" data-option-picker-list="true">
+        {shown.length === 0 ? (
+          <p className="px-2 py-2 text-[11px] text-slate-500" data-option-picker-empty="true">
+            {emptyText}
+          </p>
+        ) : (
+          shown.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              data-action={`${action}-${entry}`}
+              data-option-selected={entry === value ? 'true' : 'false'}
+              onClick={() => onChange(entry)}
+              className={optionRowClass(entry === value)}
+            >
+              <span className="min-w-0 flex-1 truncate">{entry}</span>
+            </button>
+          ))
+        )}
+      </div>
+      <div className="flex justify-end border-t border-line px-2 py-1">
+        <button type="button" data-action={`${action}-done`} onClick={onClose} className={PICKER_DONE_CLASS}>
+          {doneText}
+        </button>
+      </div>
+    </div>
   );
 }

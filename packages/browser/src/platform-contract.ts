@@ -134,6 +134,8 @@ const searchParamsSchema = z.strictObject({
   stage: z.string().min(1).optional(),
   /** 公司行业（`industry`） */
   industry: z.string().min(1).optional(),
+  /** 职位类型（`position`，真 BOSS 158 个子项） */
+  position: z.string().min(1).optional(),
 });
 
 /**
@@ -650,6 +652,8 @@ export type JobSearchCriteria = {
    * 「筛了但没筛」就是这么来的。知识包没声明的维度由适配器结构化拒绝（`SEARCH_FILTER_UNSUPPORTED`）。
    */
   industry?: string;
+  /** 职位类型（如「前端/移动开发」）：158 个子项，比「求职类型」细一层 */
+  position?: string;
   /** 本次最多取回几条（节奏与额度都在编排侧：`outbound.throttle` 与 `entitlement.gate`，知识包不声明） */
   limit?: number;
 };

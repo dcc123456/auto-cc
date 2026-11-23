@@ -44,7 +44,10 @@ import {
   DeskCheck,
   DeskField,
   DeskSelect,
+  DeskFilterField,
+  DeskOptionPicker,
   DeskTile,
+  OPTION_PICKER_THRESHOLD,
   Tag,
 } from './ui/controls';
 import { DeskActionRow, DeskExplainer, DeskPathGuide, DeskSection } from './ui/disclosure';
@@ -79,6 +82,7 @@ const FILTER_LABEL_KEY: Record<SearchFilterDimension, string> = {
   jobType: 'jd.filterLabel.jobType',
   stage: 'jd.filterLabel.stage',
   industry: 'jd.filterLabel.industry',
+  position: 'jd.filterLabel.position',
   city: 'jd.filterLabel.city',
 };
 
@@ -210,6 +214,8 @@ export function JobLabPanel() {
    * 否则就是一个按了没反应的控件，正是「看起来能筛」那种谎话。
    */
   const [searchFilters, setSearchFilters] = useState<{ dimension: string; labels: string[] }[]>([]);
+  /** 此刻展开着长列表选择器的维度名（原地替换那一格；null = 都收起）。 */
+  const [openPicker, setOpenPicker] = useState<string | null>(null);
   /** 平台是否声明了「经验」这一维（声明了就用下拉，自由文本与码表会打架）。 */
   const declaresExperience = searchFilters.some((filter) => filter.dimension === 'experience');
   /** 简历 PDF 的绝对路径：留空则由主进程用 `outbound.deliver` 配置里的 `resumeFile`（P3 之前的临时入口）。 */
@@ -855,24 +861,69 @@ export function JobLabPanel() {
               data-testid="jd-search-filters"
               data-filter-count={searchFilters.length}
             >
-              {searchFilters.map((filter) => (
-                <DeskSelect
-                  key={filter.dimension}
-                  action={`jd-filter-${filter.dimension}`}
-                  data-testid={`jd-filter-${filter.dimension}`}
-                  label={t(filterLabelKey(filter.dimension))}
-                  value={extraFilters[filter.dimension] ?? ''}
-                  onValueChange={(value) => setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))}
-                  className="w-full"
-                >
-                  <option value="">{t('jd.filterAny')}</option>
-                  {filter.labels.map((label) => (
-                    <option key={label} value={label}>
-                      {label}
-                    </option>
-                  ))}
-                </DeskSelect>
-              ))}
+              {searchFilters.map((filter) => {
+                const dimensionLabel = t(filterLabelKey(filter.dimension));
+                const current = extraFilters[filter.dimension] ?? '';
+                // 短列表（≤12）用原生下拉；长列表（城市 373 / 行业 145 / 职位类型 158）换原地选择器。
+                if (filter.labels.length <= OPTION_PICKER_THRESHOLD) {
+                  return (
+                    <DeskSelect
+                      key={filter.dimension}
+                      action={`jd-filter-${filter.dimension}`}
+                      data-testid={`jd-filter-${filter.dimension}`}
+                      label={dimensionLabel}
+                      value={current}
+                      onValueChange={(value) =>
+                        setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
+                      }
+                      className="w-full"
+                    >
+                      <option value="">{t('jd.filterAny')}</option>
+                      {filter.labels.map((label) => (
+                        <option key={label} value={label}>
+                          {label}
+                        </option>
+                      ))}
+                    </DeskSelect>
+                  );
+                }
+                if (openPicker === filter.dimension) {
+                  return (
+                    <div key={filter.dimension} className="@2xl:col-span-2 @4xl:col-span-2">
+                      <DeskOptionPicker
+                        action={`jd-picker-${filter.dimension}`}
+                        label={dimensionLabel}
+                        labels={filter.labels}
+                        value={current}
+                        onChange={(value) =>
+                          setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
+                        }
+                        onClose={() => setOpenPicker(null)}
+                        searchPlaceholder={t('jd.picker.search')}
+                        emptyText={t('jd.picker.empty')}
+                        clearText={t('jd.picker.clear')}
+                        doneText={t('jd.picker.done')}
+                        backText={t('jd.picker.back')}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <DeskFilterField
+                    key={filter.dimension}
+                    action={`jd-filter-${filter.dimension}`}
+                    label={dimensionLabel}
+                    value={current}
+                    placeholder={t('jd.filterAny')}
+                    unknown={
+                      current !== '' && !filter.labels.includes(current)
+                        ? t('jd.picker.unknown', { value: current })
+                        : undefined
+                    }
+                    onOpen={() => setOpenPicker(filter.dimension)}
+                  />
+                );
+              })}
             </div>
           ) : null}
           <div className="flex items-center gap-2">
