@@ -142,6 +142,16 @@ export class ShellService extends Service {
    * 这个标记就是分界线：换视图期间收到 destroyed 一律当正常替换。
    */
   private remounting = false;
+  /**
+   * 最近若干条壳层生命周期事件（带时间戳），只为「视图没了」那一刻的现场用。
+   *
+   * 为什么需要（2026-11-23）：销毁栈只有两帧，看不出是谁动手；而壳层自己动视图的动作是有限的
+   * （建视图 / 关旧视图 / 收回 / 收尸），留一条环形尾迹就能把「我们干的」与「外部的」分开——
+   * 尾迹最后一条是「关旧视图」= 我们重建；最后一条是很久以前的事 = 外部干的。
+   */
+  private kernelLifecycle: string[] = [];
+  /** 当前视图消失那一刻的现场（栈 + 尾迹）；视图健在时为 null。 */
+  private kernelViewGoneStack: string | null = null;
 
   /** 启动窗口/托盘；入站通道由 `ipc` 网关注册，这里只负责界面侧。 */
   constructor(
@@ -180,6 +190,8 @@ export class ShellService extends Service {
       kernelViewLoadError: this.kernelViewError,
       // 视图活着时这条恒为 null（`createKernelView` 会清）；视图没了的这一刻它才是该给人看的那句话。
       lastError: contents === null && this.kernelViewGone !== null ? this.kernelViewGone : this.lastError,
+      // 销毁现场（栈 + 尾迹）随读数一起交出去：日志文件在 userData 下，读数却是随手可取的（2026-11-23）。
+      kernelViewGoneStack: contents === null ? this.kernelViewGoneStack : null,
     };
   };
 
@@ -464,6 +476,36 @@ export class ShellService extends Service {
   };
 
   /** 记录主进程侧最近一次错误，供渲染层展示可见错误态。 */
+  /**
+   * 取一段短栈（只留前若干帧），用于把「谁销毁了视图」这条线索送到看得见的地方。
+   *
+   * 为什么要把栈塞进 `lastError` 而不只打日志：2026-11-23 的压测里 QA 的 `lastError` 明明有值，
+   * 日志里却一条都没有——说明「日志通道」和「读数通道」不是同一条，靠日志等根因会白等。
+   * 栈经过 `getStatus().lastError` 回来时，一定能到读数的人手里。
+   * @param limit 最多保留几帧（默认 8：够认出调用方，又不至于把日志冲成一片）
+   * @returns 单行化后的栈；取不到时给占位
+   */
+  private recordLifecycle = (what: string): void => {
+    this.kernelLifecycle.push(`${new Date().toISOString()} ${what}`);
+    if (this.kernelLifecycle.length > 12) this.kernelLifecycle.shift();
+  };
+
+  /**
+   * 把「销毁栈 + 销毁前壳层做了什么」拼成一段可读现场。
+   * @returns 单行现场文本（栈 + `before:` 尾迹）
+   */
+  private goneScene = (): string => `${this.stackBrief()}｜before: ${this.kernelLifecycle.join(' > ') || '（无记录）'}`;
+
+  private stackBrief = (limit = 8): string => {
+    const stack = new Error('kernel-view-gone').stack ?? '';
+    const frames = stack
+      .split('\n')
+      .slice(1, limit + 1)
+      .map((line) => line.trim())
+      .join(' <- ');
+    return frames === '' ? '（无栈）' : frames;
+  };
+
   private noteError = (error: unknown): void => {
     this.lastError = error instanceof Error ? error.message : String(error);
     console.error('[shell] main-process error:', this.lastError);
@@ -567,6 +609,7 @@ export class ShellService extends Service {
   private createKernelView(partition?: string, url = kernelViewPlaceholder) {
     const win = this.mainWindow;
     if (!win) return;
+    this.recordLifecycle(`createKernelView partition=${partition ?? '(placeholder)'}`);
     // 接管子视图挂在旧页面之上：旧页面一换，它们就无处可依，必须一起收掉（2.1-11 的泄漏口径）。
     [...this.takeoverViews].forEach((view) => this.detachTakeoverView(view));
     const previous = this.kernelView;
@@ -575,6 +618,7 @@ export class ShellService extends Service {
       // 摘旧视图这一步**不许中断重建**：它抛了也要继续把新视图建起来并指过去，
       // 否则场上会留一个「引用还在、webContents 已死」的坑（之后每次读状态都踩它）。
       this.remounting = true;
+      this.recordLifecycle('closing previous kernel view');
       try {
         win.contentView.removeChildView(previous);
         // `close()` 而不是 `forceUnload()`：后者只停页面，webContents 仍留在 Electron 的目标表里，
@@ -596,6 +640,7 @@ export class ShellService extends Service {
       },
     });
     this.kernelView = view;
+    this.recordLifecycle('new kernel view assigned');
     // 新视图已经就位：此后旧视图再来的 destroyed 走不到「当前视图」那条判据，标记也可以落了。
     this.remounting = false;
     // Electron 44 的 `Session` 类型上没有 partition 读取口（只有构造时的 `webPreferences.partition`），
@@ -604,6 +649,7 @@ export class ShellService extends Service {
     this.kernelViewError = null;
     // 新视图建起来 = 上一次的「视图没了」已经过去了；那条读数不能跟着新视图继续显示（P2）。
     this.kernelViewGone = null;
+    this.kernelViewGoneStack = null;
     win.contentView.addChildView(view);
     // 「需要时才展示」的判据就这一条：装的是真实站点就展示，装的是占位页就收起。
     // 规则写在视图的拥有者这里，而不是让每个挂载方各补一句 `setKernelViewVisible(true)`（§2.5）。
@@ -637,16 +683,20 @@ export class ShellService extends Service {
       if (this.remounting) return;
       // 其余情况只有**当前**视图被销毁才算故障（旧视图迟到的 destroyed 也不算）。
       if (this.kernelView !== view) return;
+      // 栈既进 lastError（读数通道）、又打 console（日志通道）：本轮实测两条通道不是同一条，
+      // 只打日志会出现「lastError 有值、日志为空」，那就永远等不到根因。
+      this.kernelViewGoneStack = this.goneScene();
       this.kernelViewGone = '内核视图的页面被销毁';
-      // 调用栈是这条偶发缺陷唯一能定位根因的读数：真站上同一个动作时灵时不灵，
-      // 不看栈就只能猜「可能是重入」——那正是 2026-11-23 这一轮在原地打转的原因。
-      this.ctx.logger.warn(`${this.kernelViewGone}｜${new Error('kernel-view-destroyed').stack ?? '（无栈）'}`);
+      console.error('[shell] kernel view destroyed:', this.kernelViewGoneStack);
+      this.ctx.logger.warn(`${this.kernelViewGone}｜${this.kernelViewGoneStack}`);
       this.reapDeadKernelView();
     });
     contents.on('render-process-gone', (_event, details) => {
       if (this.remounting) return;
       if (this.kernelView !== view) return;
+      this.kernelViewGoneStack = `reason=${details.reason} exitCode=${String(details.exitCode)}｜${this.goneScene()}`;
       this.kernelViewGone = `内核视图的渲染进程退出：reason=${details.reason} exitCode=${String(details.exitCode)}`;
+      console.error('[shell] kernel view crashed:', this.kernelViewGoneStack);
       this.ctx.logger.error(this.kernelViewGone);
       this.reapDeadKernelView();
     });
@@ -664,6 +714,14 @@ export class ShellService extends Service {
   private reapDeadKernelView = (): void => {
     if (!this.kernelView) return;
     if (isViewLive(this.kernelView)) return;
+    this.recordLifecycle('reapDeadKernelView');
+    // 走到这里说明「当前视图的 webContents 已不可用」。如果是从 `destroyed` 事件进来的，
+    // `kernelViewGone` 里已经有栈；如果是 `getStatus()` 这一侧先发现（事件没来、句柄直接变 undefined），
+    // 就在这儿补一条栈——这是唯一还能拿到调用方的地方。
+    if (this.kernelViewGone === null) {
+      this.kernelViewGone = `内核视图的 webContents 已不可用｜${this.stackBrief()}`;
+      console.error('[shell] kernel view vanished:', this.kernelViewGone);
+    }
     this.ctx.logger.warn('内核视图已失效（页面销毁或进程退出）：清掉视图记位，下一次导航会重开一个');
     this.kernelView = undefined;
     this.kernelViewPartition = '';

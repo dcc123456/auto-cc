@@ -611,6 +611,14 @@ export type ShellStatus = {
   kernelViewTakeoverCount: number;
   /** 最近一次加载失败；成功加载后为 null，因此它总是「关于当前这个 URL」的。 */
   kernelViewLoadError: KernelViewLoadError | null;
+  /**
+   * 当前视图**已经没了**时，那条销毁现场的原文（栈 + 销毁前壳层做了什么）；视图健在时为 null。
+   *
+   * 为什么单独给一格（2026-11-23）：监听器里取的栈只有两帧（监听器 + `EventEmitter.emit`），
+   * 指不出调用方；真正能指认的是「销毁前我们自己的生命周期尾迹」——是不是正在 `createKernelView`
+   * 换视图、是不是刚 `unmount`。所以这一格把两者一起交出来，让读到它的人不必再去翻日志文件。
+   */
+  kernelViewGoneStack: string | null;
   lastError: string | undefined;
 };
 

@@ -55,3 +55,20 @@ try/catch 里，只记一条 warn，继续把新视图建起来并指过去。
 **如果栈显示销毁来自 `createKernelView` 之外**（例如站点自己 `window.close()`、或 Electron 内部回收），
 本轮两处护栏都管不到它。那时要做的决定是「禁止页面自关（拦住站点行为）」还是「接受并恢复（自动重建回原 URL）」——
 后者被管理员按「没有崩溃证据、做了就是给假问题写代码」否掉了，所以真出现那种栈时要重新裁一次，不能默认恢复。
+
+## 附二：把销毁现场放进读数（2026-11-23 深夜）
+
+QA 的更正推翻了我上一轮的一个前提：**监听器里取的栈只有两帧**（`WebContents.<anonymous>` + `emit`），
+因为 `new Error()` 是在 `destroyed` 回调里构造的，栈顶必然是它自己。所以「有栈就能点名调用方」不成立。
+
+改法：`shell.getStatus()` 新增 **`kernelViewGoneStack`**（视图健在时为 `null`），内容 = 销毁栈 +
+**销毁前壳层生命周期尾迹**（`createKernelView` → `closing previous kernel view` → `new kernel view assigned`
+→ 可能的 `reapDeadKernelView`，各带时间戳，环形保留 12 条）。
+
+读法（QA 直接发我这一格即可，不用翻日志文件）：
+- 尾迹最后一条是 `closing previous kernel view` → **是我们自己在换视图**，销毁属于正常替换被误判；
+- 尾迹最后一条是很久以前的 `new kernel view assigned`（或干脆没有）→ **是外部/站点侧杀的**，
+  那种情况本轮护栏管不到，要重新裁「禁止页面自关」还是「接受并恢复」；
+- 尾迹里出现 `reapDeadKernelView` 而前面没有 `closing` → 说明事件没来、句柄是直接变 undefined 的。
+
+栈本身保留在同一个字段里，写实说明它的局限（两帧），不假装它能点名。
