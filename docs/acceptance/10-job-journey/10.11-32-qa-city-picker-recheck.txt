@@ -1,0 +1,77 @@
+# 10.11-32 城市选择器复验（`c344191`）：②③④ 过，① **分支是死代码、P1 原样在**
+
+构建 `c344191`（隔离树 `git archive` + esbuild 重打 `main.cjs` + `vite build`）、实例 `ud-onsite4`、CDP 10410、
+2026-11-23 21:42–21:46 本地。`platform-boss` 的 `pack` 是 **`real`**（重启后回到配置默认），
+所以 `boss.json` 里的 373 个城市码是**在的**；内核视图未参与这轮（选择器是渲染层自己的界面）。
+
+## 一、① 城市换选择器：**没生效**
+
+| 断言 | 读数 | 判 |
+| --- | --- | --- |
+| 城市那格是什么控件 | `<input data-testid="jd-city" data-action="jd-city">`，838×28 | **仍是手输框** |
+| 有没有城市选择器 | `document.querySelector('[data-option-picker="jd-picker-city"]')` → **null**（点它也不展开） | **没有** |
+| 打错城市有没有 amber 提示 | 输入 `不存在的城市` 后，该字段的父容器 `innerText` 为 **空**、内部**没有任何 amber 元素** | **静默** |
+
+### 成因（代码级，两条一对就死）
+
+```ts
+// packages/platform-boss/src/adapter.ts:152-158
+searchFilters: Object.entries(pack.search.params)
+  .filter(([dimension]) => dimension !== 'keyword' && dimension !== 'city')   // ← city 被这里剔掉
+  .map(([dimension, param]) => ({ dimension, labels: Object.keys(pack.search.enums[dimension] ?? {}) }))
+
+// packages/renderer/src/JobLabPanel.tsx:248
+const cityFilter = searchFilters.find((filter) => filter.dimension === 'city');  // ← 永远是 undefined
+```
+
+`searchFilters` 里永远没有 `city` 这一维，所以 `cityFilter === undefined` **恒成立**，
+`JobLabPanel.tsx:858` 的手输框分支恒真，`:867`（选择器）与 `:884`（带 `unknown` 提示的触发器）**两段都是死代码**。
+实测 `platform.registry.list()` 的九维是 `district/experience/degree/salary/scale/jobType/stage/industry/position`——
+**没有 city**，与此一致。
+
+**改法（二选一）**：
+1. 适配器不再把 `city` 从 `searchFilters` 剔掉（让城市作为一维带 `labels` 暴露，373 项），渲染层现有分支立刻活；
+2. 或渲染层改读知识包里那份城市码表（`pack.search.cities` / `enums.city`），不依赖 `searchFilters`。
+
+判据：城市那格渲染成 `data-option-picker="jd-picker-city"`；搜「上海」「杭州」各有结果；打错挂 amber；选中回填触发行；窄窗单列。
+
+## 二、② 区县固定下拉：**过**
+
+| 读数 | 值 |
+| --- | --- |
+| `[data-action=jd-filter-district]` | **`SELECT`**，`options.length = 17`（16 个区 + 「不限」） |
+| 是否被数据阈值换成选择器 | 否（`[data-option-picker="jd-picker-district"]` 不存在） |
+
+## 三、③ Esc 分层：**过**
+
+| 步骤 | 读数 |
+| --- | --- |
+| 展开行业选择器 + 打开助手 | 选择器在、助手面板高 **689** |
+| 第 1 次 `Esc` | 选择器 **关**（true → false），助手面板仍 **689**（不动） |
+| 第 2 次 `Esc` | 助手面板 **689 → 0**（这时才轮到它） |
+
+「Esc 先关最近一层」成立：选择器展开时吃捕获阶段的 Esc 并 `stopPropagation`，浮层收不到。
+
+## 四、④ 空态「清空搜索」：**过**
+
+| 步骤 | 读数 |
+| --- | --- |
+| 行业选择器搜 `zzz` | 选项行 **0**、「没有匹配」文案在、`[data-action=jd-picker-industry-clear-search]` **在** |
+| 点「清空搜索」 | 输入框 `value` → `""`，选项行回到 **145** |
+
+「清空搜索」与「清除（清已选值）」是两只不同控件，与设计口径对齐。
+
+## 五、结论
+
+- `①` 城市：**不通过**（P1 仍在，成因是适配器把 city 从 `searchFilters` 剔掉，渲染层那段是死代码）。
+- `②③④`：**通过**（区县 17 项下拉、Esc 两层分明、空态有清空搜索）。
+- `32` 继续不翻绿：城市选择器是它的前置。
+
+## 复现命令
+
+```
+node cdp.mjs 10410 auto-cc /tmp/qa11-city1.mjs     # 城市控件形态 + 是否展开选择器
+node cdp.mjs 10410 auto-cc /tmp/qa11-cityreg.mjs   # registry.list() 的九维（确认无 city）
+node cdp.mjs 10410 auto-cc /tmp/qa11-cityarea.mjs  # 打错城市后父容器的 amber 读数
+node cdp.mjs 10410 auto-cc /tmp/qa11-234.mjs       # 区县下拉 / 空态清空搜索 / Esc 两层
+```
