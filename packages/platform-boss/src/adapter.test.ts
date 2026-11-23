@@ -117,6 +117,24 @@ describe('BOSS 适配器的自我声明（spec 2.2-06）', () => {
     });
   });
 
+  /**
+   * 城市必须作为一维出现在 `searchFilters` 里（2026-11-23 的 P1）。
+   *
+   * 这条曾经红过的形态：适配器把 `city` 从 `searchFilters` 剔掉，渲染层的 `cityFilter` 恒空，
+   * 城市选择器与 amber 提示都成了死代码——373 个城市码入库却一个也用不上。
+   * 钉住两件事：city 在清单里且标签齐全；区县码声明的归属城市是上海（不与城市绑定就会串码）。
+   */
+  it('城市作为一维出现在 searchFilters 里，区县码声明归属城市', () => {
+    const real = createBossAdapter(realPack, createFakePage(standardScript()), createFakeAct({}));
+    const city = real.meta.searchFilters?.find((entry) => entry.dimension === 'city');
+    expect(city?.labels.length).toBe(373);
+    expect(city?.labels).toContain('上海');
+    expect(real.meta.searchDistrictCity).toBe('上海');
+    // 长列表都在：行业 145、职位类型 134。
+    expect(real.meta.searchFilters?.find((entry) => entry.dimension === 'industry')?.labels.length).toBe(145);
+    expect(real.meta.searchFilters?.find((entry) => entry.dimension === 'position')?.labels.length).toBe(134);
+  });
+
   it('meta.capabilities 是拷贝，知识包对象后续被改也不影响已登记的读数', () => {
     pack.capabilities.push('search');
     expect(adapter.meta.capabilities).toHaveLength(5);

@@ -3987,6 +3987,11 @@ export interface PlatformMetaView {
    * 「看起来能筛」的控件）。空对象表示这家平台一个附加维度都没登记——界面就只留关键词与城市。
    */
   searchFilters?: { dimension: string; labels: string[] }[];
+  /**
+   * `searchFilters` 里 `district` 那一维的区县码属于哪个城市（2026-11-23 裁定②）。
+   * 界面据此决定：城市不是它时，区县清空 + 禁用 + 说明「该城市暂无区县码」。
+   */
+  searchDistrictCity?: string;
 }
 
 /** `platform.registry` 的只读清单。 */

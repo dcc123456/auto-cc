@@ -214,6 +214,8 @@ export function JobLabPanel() {
    * 否则就是一个按了没反应的控件，正是「看起来能筛」那种谎话。
    */
   const [searchFilters, setSearchFilters] = useState<{ dimension: string; labels: string[] }[]>([]);
+  /** 区县码表属于哪个城市（知识包声明；与城市不符时区县清空+禁用，2026-11-23 裁定②）。 */
+  const [districtCity, setDistrictCity] = useState<string | undefined>(undefined);
   /** 此刻展开着长列表选择器的维度名（原地替换那一格；null = 都收起）。 */
   const [openPicker, setOpenPicker] = useState<string | null>(null);
   // Esc 的层级（2026-11-23 裁定③）：选择器展开时先关选择器，**不**让这一下冒到助手面板那一层。
@@ -242,7 +244,20 @@ export function JobLabPanel() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
-  /** 平台是否声明了「经验」这一维（声明了就用下拉，自由文本与码表会打架）。 */
+  /**
+   * 区县这一维此刻能不能用（2026-11-23 裁定②）：只有「城市 == 知识包声明的 districtCity」才放行。
+   * 现在那份区县表全是上海的码；切到北京还留着「徐汇区」，等于把上海区码塞给北京——
+   * 「界面说筛了、实际筛错」比没筛更糟，所以其余情况清空 + 禁用 + 说明。
+   */
+  const districtEnabled = districtCity !== undefined && cityDraft.trim() === districtCity;
+  // 城市一变：新的城市没有区县码时，把已选的区县清掉（否则会带着上海的「徐汇区」去搜北京）。
+  useEffect(() => {
+    if (districtEnabled) return;
+    setExtraFilters((previous) =>
+      previous.district === undefined || previous.district === '' ? previous : { ...previous, district: '' },
+    );
+  }, [districtEnabled]);
+
   const declaresExperience = searchFilters.some((filter) => filter.dimension === 'experience');
   /** 城市那一维（有码表才走选择器；仿站那份包没有，退回手输框）。它单独占一行，不进下面的筛选网格。 */
   const cityFilter = searchFilters.find((filter) => filter.dimension === 'city');
@@ -523,6 +538,7 @@ export function JobLabPanel() {
       if (!reply.ok) return;
       const platform = reply.value.platforms.find((item) => item.id === effectivePlatform);
       setSearchFilters(platform?.searchFilters ?? []);
+      setDistrictCity(platform?.searchDistrictCity);
     })();
   }, [effectivePlatform]);
 
@@ -934,6 +950,7 @@ export function JobLabPanel() {
                   // 区县按**语义**固定下拉（2026-11-23 裁定②）：它是城市的子级，16 项两下点完，
                   // 不该因为「>12 用选择器」这条数据阈值被换成面板。
                   const forceSelect = filter.dimension === 'district';
+                  const districtBlocked = filter.dimension === 'district' && !districtEnabled;
                   // 其余短列表（≤12）用原生下拉；长列表（行业 145 / 职位类型 134）换原地选择器。
                   if (forceSelect || filter.labels.length <= OPTION_PICKER_THRESHOLD) {
                     return (
@@ -947,6 +964,13 @@ export function JobLabPanel() {
                           setExtraFilters((previous) => ({ ...previous, [filter.dimension]: value }))
                         }
                         className="w-full"
+                        {...(districtBlocked
+                          ? {
+                              disabled: true,
+                              disabledReason: 'DISTRICT_CITY_MISMATCH',
+                              disabledReasonLabel: t('jd.districtUnavailable', { city: districtCity ?? '—' }),
+                            }
+                          : {})}
                       >
                         <option value="">{t('jd.filterAny')}</option>
                         {filter.labels.map((label) => (

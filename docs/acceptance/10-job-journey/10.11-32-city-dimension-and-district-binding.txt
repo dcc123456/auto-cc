@@ -1,0 +1,25 @@
+10.11-32 补：城市作为一维真正暴露 + 区县与城市绑定（2026-11-23 第 8 轮裁定）
+
+**QA 的定位（准）**：`adapter.ts` 的 `searchFilters` 里写了 `.filter(([d]) => d !== 'keyword' && d !== 'city')`，
+把 `city` 剔掉了；于是渲染层 `cityFilter = searchFilters.find(d => d === 'city')` **恒为 undefined**，
+城市选择器与 amber 提示两段都是**死代码**——373 个码白入。QA 的实测也一致：`platform.registry.list()`
+的九维里**确实没有 city**。这是「改了界面、条件永不成立」那类缺陷，不是接线小错。
+
+**改法（两条裁定）**
+
+① **城市作为一维暴露**：适配器只剔 `keyword`（那是搜索词，界面自有输入框），**保留 city**，让它带着
+   373 个标签进 `searchFilters`；渲染层从此只有**一条写口**——城市选择器（`jd-city` 锚点挂在触发行上）。
+   没有城市码表的装配（仿站那份包）仍退回手输框：那是唯一可用形态，不硬造码。
+② **区县与城市绑定**：知识包新增 `search.districtCity`（本包声明为「上海」），经 `PlatformMetaView.searchDistrictCity`
+   透给界面。规则：**城市 == 声明的那个城市**时区县可用；否则**清空 + 禁用 + 说明「该城市暂无区县码」**。
+   原因写实：现在那 16 个区县码全是上海的，切到北京还留着「徐汇区」就是把上海区码塞给北京——
+   这种「界面说筛了、实际筛错」比没筛更糟。
+
+**防回归（新增 1 例）**：`adapter.test.ts` 钉住「city 在 `searchFilters` 里且 373 个标签、`searchDistrictCity==='上海'`、
+行业 145、职位类型 134」。这条用例在上一版会直接红——那正是这次漏掉的形状。
+
+**门禁**：`pnpm typecheck` → `TYPECHECK_EXIT=0`；`pnpm lint` → `LINT_EXIT=0`；`pnpm format:check` → `FORMAT_EXIT=0`；
+`pnpm test` → `TEST_EXIT=0`，**2829 例全过**（platform-boss 197）。
+
+**待 QA 活体（我不代点）**：搜「上海」「杭州」→ 回填触发行；打错城市 → amber；切北京 → 区县清空并禁用、
+说明可见；切回上海 → 区县恢复可用；窄窗单列；Esc 只关选择器不动助手。

@@ -210,6 +210,14 @@ export const knowledgePackSchema = z.strictObject({
     cities: searchCitiesSchema.default({}),
     /** 各维度「人话 → 站点码」表（见 `searchEnumsSchema`）；没表就不换算，原样传值（仿站走这一档）。 */
     enums: searchEnumsSchema,
+    /**
+     * `enums.district` 这张区县码表**属于哪个城市**（2026-11-23 裁定②）。
+     *
+     * 现在只有上海 16 个区县的码；切到北京/深圳还留着「徐汇区」就是把上海区码塞给北京，
+     * 「界面说筛了、实际筛错」比没筛更糟。所以区县这一维只在城市等于这里声明的城市时放行，
+     * 其余城市清空 + 禁用 + 说明「该城市暂无区县码」。
+     */
+    districtCity: z.string().min(1).optional(),
   }),
   /**
    * 打招呼与对话的页面声明（2.5-d）。缺段即「这个平台还没有会话页知识」，

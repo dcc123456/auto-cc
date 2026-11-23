@@ -758,7 +758,8 @@
         "back": "返回",
         "unknown": "当前值「{{value}}」不在码表里：这一维不会被发送",
         "clearSearch": "清空搜索"
-      }
+      },
+      "districtUnavailable": "该城市暂无区县码（现有区县码属于{{city}}）"
     },
     "consent": {
       "heading": "首次启用 {{platform}} 的自动化：先确认风险",

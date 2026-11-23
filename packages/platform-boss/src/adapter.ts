@@ -150,12 +150,16 @@ export function createBossAdapter(pack: KnowledgePack, page: BossPageHand, act: 
     // 只把「既有参数名、又有标签表」的维度交给界面：两者缺一就说明这一维发不出去，
     // 上屏等于做一个按了没反应的控件（2026-11-23 判据）。
     searchFilters: Object.entries(pack.search.params)
-      .filter(([dimension]) => dimension !== 'keyword' && dimension !== 'city')
+      // `keyword` 不是「筛选维度」（它是搜索词，界面上自有输入框）；**city 必须留**——
+      // 2026-11-23 的 P1 就是这里把 city 剔掉，导致渲染层 `cityFilter` 恒空、城市选择器成了死代码。
+      .filter(([dimension]) => dimension !== 'keyword')
       .map(([dimension, param]) => ({
         dimension,
         labels: param === undefined ? [] : Object.keys(pack.search.enums[dimension] ?? {}),
       }))
       .filter((entry) => entry.labels.length > 0),
+    // 区县码表属于哪个城市（见契约里的说明）：界面据此决定区县这一维能不能用。
+    ...(pack.search.districtCity === undefined ? {} : { searchDistrictCity: pack.search.districtCity }),
     // 拷一份：登记表面向渲染层，不能让界面读数跟着知识包对象的后续修改漂移。
     capabilities: [...pack.capabilities],
     // 11-04 的缩放分母：知识包没声明就省略，渲染层据此如实标「未适配」而不是猜一个数。

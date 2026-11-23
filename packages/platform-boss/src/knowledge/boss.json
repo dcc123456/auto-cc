@@ -1235,7 +1235,8 @@
         "中山": "101281700",
         "昭通": "101290700"
       }
-    }
+    },
+    "districtCity": "上海"
   },
   "chat": {
     "entryPath": "/web/geek/chat",

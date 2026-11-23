@@ -758,7 +758,8 @@
         "back": "Back",
         "unknown": "“{{value}}” is not in the code table; this filter will not be sent",
         "clearSearch": "Clear search"
-      }
+      },
+      "districtUnavailable": "No district codes for this city yet (current district codes belong to {{city}})"
     },
     "consent": {
       "heading": "First time automating {{platform}}: acknowledge the risk",
