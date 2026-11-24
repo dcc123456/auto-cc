@@ -40,6 +40,7 @@ import { useKernelViewVisible } from './useKernelViewVisible';
 import { TAKEOVER_SLOT_ID } from './takeoverSlot';
 import { deskTierReading, tightestQuota, useDeskStatus } from './deskStatus';
 import { DeskButton, DeskTab, DeskViewTrail, NarrowLabel } from './ui/controls';
+import { DeskHint } from './ui/disclosure';
 import { Toast } from './ui/overlays';
 /**
  * 顶层视图的名字由 `viewTrail.ts` own：跨视图推进（09 稿形态⑥）是全 app 唯一一处要同时认识
@@ -158,13 +159,25 @@ export function App() {
           : t('statusbar.authValue', { active: activePlatformCount, total: realPlatforms.length });
   const authState: DeskSlotState = desk.expiredPlatform ? 'warn' : activePlatformCount > 0 ? 'ok' : 'none';
   const quota = tightestQuota(desk.quota);
+  // K11 / 10.10-13：动作名是用户语言，不把 deliver/greet 这类内部枚举直接摆到底栏。
+  const quotaActionLabel = quota
+    ? t(
+        quota.action === 'deliver'
+          ? 'statusbar.actionDeliver'
+          : quota.action === 'greet'
+            ? 'statusbar.actionGreet'
+            : quota.action === 'search'
+              ? 'statusbar.actionSearch'
+              : 'statusbar.actionOther',
+      )
+    : t('status.none');
   const quotaValue = !quota
     ? t('status.none')
     : quota.isDenied
-      ? t('statusbar.quotaDenied', { action: quota.action })
+      ? t('statusbar.quotaDenied', { action: quotaActionLabel })
       : quota.remaining === null
         ? t('statusbar.quotaUnlimited')
-        : t('statusbar.quotaValue', { action: quota.action, count: quota.remaining });
+        : t('statusbar.quotaValue', { action: quotaActionLabel, count: quota.remaining });
   const quotaState: DeskSlotState = !quota ? 'none' : quota.isDenied ? 'warn' : 'ok';
   // 授权单生效时才报「无人值守：已授权 N 岗」（plan §13.2 的 2026-11-21 裁定）；
   // 撤权/停用后授权单不再是 active，这一格自动退回档位名——两处说法因此不会各说一套。
@@ -445,6 +458,14 @@ export function App() {
         {statusSlot('auth', t('statusbar.auth'), authValue, authState)}
         {statusSlot('quota', t('statusbar.quota'), quotaValue, quotaState)}
         {statusSlot('tier', t('statusbar.tier'), tierValue, tierState)}
+        <DeskHint
+          id="statusbar-tier-help"
+          iconOnly
+          label={t('statusbar.tierHelp')}
+          markers={{ testid: 'statusbar-tier-help' }}
+        >
+          <p>{t('statusbar.tierHelpBody')}</p>
+        </DeskHint>
       </footer>
 
       {/* 5.9-06：首屏隐私声明是盖在工作台上的覆盖层（fixed），首启动不表态就进不去；

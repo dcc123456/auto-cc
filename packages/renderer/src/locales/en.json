@@ -217,7 +217,13 @@
       "unattended": "Unattended: {{count}} job(s) authorized",
       "quotaValue": "{{action}} left {{count}}",
       "quotaUnlimited": "Unlimited locally",
-      "quotaDenied": "{{action}} exhausted"
+      "quotaDenied": "{{action}} exhausted",
+      "actionDeliver": "deliver",
+      "actionGreet": "greet",
+      "actionSearch": "search",
+      "actionOther": "current action",
+      "tierHelp": "What this mode means",
+      "tierHelpBody": "Suggest: steps only; Semi: asks before writes; Auto: sends by itself, still bounded by authorization, quota and risk controls"
     },
     "guide": {
       "focus": "Go to this step",
@@ -826,7 +832,11 @@
       "acknowledge": "I have read and agree, enter the workspace",
       "close": "Back to the workspace",
       "acknowledgedRow": "This machine acknowledged this statement at {{time}}",
-      "never": "no timestamp"
+      "never": "no timestamp",
+      "summaryData": "Where data lives: resumes and jobs stay on this computer under your control",
+      "summaryNetwork": "When it goes online: only when you search, deliver, or configure a model",
+      "summaryResume": "When a resume is sent: only after your authorization, to the chosen job; stop anytime",
+      "details": "Read the full privacy and terms"
     },
     "deliver": {
       "heading": "Send your resume",
@@ -858,7 +868,10 @@
       "receiptIds": "job {{jobId}} · ledger row {{ledgerId}} · source {{source}} · {{sizeBytes}} bytes · digest {{sha}}",
       "stateCommitted": "Sent",
       "stateStaged": "Not out of this machine yet",
-      "noLedger": "no ledger row"
+      "noLedger": "no ledger row",
+      "useSample": "Generate and use sample PDF",
+      "useSampleAction": "Generate sample PDF",
+      "useSampleDone": "Sample PDF generated ({{pages}} pages); this delivery will use it"
     },
     "action": {
       "noBridge": "Bridge unavailable: not running inside the Electron host",
@@ -1028,7 +1041,20 @@
       "previewFailed": "This sheet failed to render",
       "previewError": "Preview failed: {{message}}",
       "pendingBadge": "To check {{count}}",
-      "refresh": "Read again"
+      "refresh": "Read again",
+      "pasteEntry": "Paste resume text",
+      "sampleEntry": "Use fictional sample",
+      "sampleHint": "For evaluation only; entirely fictional and can be deleted anytime",
+      "pasteAction": "Import pasted text",
+      "sampleAction": "Use fictional sample",
+      "pasteDone": "Resume imported and synced to the knowledge base",
+      "sampleDone": "A fictional sample is ready to tailor or export",
+      "pasteHint": "Paste the resume body here; it is parsed locally and never uploaded",
+      "pastePlaceholder": "Paste name, contact, experience and skills…",
+      "pasteSubmit": "Import this text",
+      "pasteCancel": "Keep draft for now",
+      "pasteEmpty": "Paste the resume body first",
+      "generateNoDocs": "No resume to tailor yet: paste text or use the fictional sample first"
     },
     "shelf": {
       "heading": "Template shelf",
@@ -1132,7 +1158,7 @@
       "heading": "Job-hunting workflow (plan-driven node pipeline)",
       "refresh": "Reload workflow state",
       "loading": "Reading the workflow state from the main process…",
-      "start": "Start",
+      "start": "Run one round",
       "pause": "Pause",
       "resume": "Resume",
       "retry": "Retry",
@@ -1385,7 +1411,9 @@
         "NOT_PAUSED": "Nothing is paused right now, so there is nothing to resume",
         "NO_RUN_TO_ABORT": "There is no in-flight run to abort",
         "NO_RUN_TO_RESUME": "No run on this screen: neither memory nor the store holds a row that can be resumed"
-      }
+      },
+      "simpleHint": "Run one round by default; plan library, schedules and the graph live under Advanced",
+      "advanced": "Advanced: plans / schedules / graph"
     },
     "chat": {
       "empty": "No messages yet: say what kind of role you want",
@@ -1539,7 +1567,9 @@
         "none": "no timestamp",
         "untitled": "This reference carries no title line",
         "hollow": "The main process returned neither a body nor a reason — this read-back is incomplete; please report the reference above as a clue"
-      }
+      },
+      "manualPath": "Skip the assistant and follow the steps manually",
+      "modelMissingBanner": "The assistant has no chat model yet; configure one, or follow the page steps manually"
     },
     "agent": {
       "autonomy": {
@@ -2008,7 +2038,8 @@
         "NO_PREVIEW": "Run a generation first — there is nothing to accept yet",
         "OUTCOME_REJECTED": "This run failed the fact check, so there is nothing to write — see the violation list",
         "NOTHING_SELECTED": "Tick at least one rewrite, or tick “apply reorder”"
-      }
+      },
+      "noDocsBack": "Back to resume preparation"
     },
     "script": {
       "reason": {

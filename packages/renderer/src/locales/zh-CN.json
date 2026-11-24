@@ -217,7 +217,13 @@
       "unattended": "无人值守：已授权 {{count}} 岗",
       "quotaValue": "{{action}} 剩 {{count}}",
       "quotaUnlimited": "本地不限",
-      "quotaDenied": "{{action}} 已用完"
+      "quotaDenied": "{{action}} 已用完",
+      "actionDeliver": "投递",
+      "actionGreet": "打招呼",
+      "actionSearch": "搜岗",
+      "actionOther": "当前动作",
+      "tierHelp": "档位是什么意思",
+      "tierHelpBody": "建议：只给步骤；半自动：写动作先问你；全自动：会自己发，但仍受授权、额度与风控约束"
     },
     "guide": {
       "focus": "去这一步",
@@ -826,7 +832,11 @@
       "acknowledge": "我已阅读并同意，进入工作台",
       "close": "回到工作台",
       "acknowledgedRow": "本机已在 {{time}} 确认过这份声明",
-      "never": "无时刻"
+      "never": "无时刻",
+      "summaryData": "资料在哪：简历与岗位数据只存本机，可在这台电脑上管理",
+      "summaryNetwork": "何时出网：只有你发起搜岗、投递或配置模型时才会连接对应服务",
+      "summaryResume": "简历何时才发：只有你确认授权后才发给目标岗位，随时可停用",
+      "details": "查看完整隐私与条款"
     },
     "deliver": {
       "heading": "把简历递出去",
@@ -858,7 +868,10 @@
       "receiptIds": "岗位 {{jobId}} · 账本行 {{ledgerId}} · 来源 {{source}} · {{sizeBytes}} 字节 · 指纹 {{sha}}",
       "stateCommitted": "已发送",
       "stateStaged": "还没送出本机",
-      "noLedger": "不落账"
+      "noLedger": "不落账",
+      "useSample": "生成并使用样例 PDF",
+      "useSampleAction": "生成样例 PDF",
+      "useSampleDone": "样例 PDF 已生成（{{pages}} 页），本屏投递将使用它"
     },
     "action": {
       "noBridge": "桥接不可用：当前不在 Electron 宿主内",
@@ -1028,7 +1041,20 @@
       "previewFailed": "这一张没排出来",
       "previewError": "预览失败：{{message}}",
       "pendingBadge": "待核对 {{count}}",
-      "refresh": "重新读取"
+      "refresh": "重新读取",
+      "pasteEntry": "粘贴简历文字",
+      "sampleEntry": "使用虚构样例",
+      "sampleHint": "仅用于体验，内容全部虚构，可随时删除",
+      "pasteAction": "粘贴导入",
+      "sampleAction": "使用虚构样例",
+      "pasteDone": "简历已导入并同步到知识库",
+      "sampleDone": "已放入一份虚构样例，可直接定制或导出体验",
+      "pasteHint": "把简历正文粘贴到这里；只在本机解析，不上传",
+      "pastePlaceholder": "粘贴姓名、联系方式、经历与技能…",
+      "pasteSubmit": "导入这段文字",
+      "pasteCancel": "先不收起草稿",
+      "pasteEmpty": "先粘贴简历正文",
+      "generateNoDocs": "还没有可定制的简历：先粘贴正文或使用虚构样例"
     },
     "shelf": {
       "heading": "模板架",
@@ -1132,7 +1158,7 @@
       "heading": "求职工作流（计划驱动的节点流水线）",
       "refresh": "重新读取工作流状态",
       "loading": "正在读取主进程的工作流状态…",
-      "start": "开始",
+      "start": "一键跑一轮",
       "pause": "暂停",
       "resume": "续跑",
       "retry": "重试",
@@ -1385,7 +1411,9 @@
         "NOT_PAUSED": "当前不是暂停态，没有可续跑的流程",
         "NO_RUN_TO_ABORT": "没有在途流程可中止",
         "NO_RUN_TO_RESUME": "屏幕上没有这次 run：内存和库里都没有可续的那一行"
-      }
+      },
+      "simpleHint": "默认一键跑一轮；计划库、定时任务和算子图收在「进阶」里",
+      "advanced": "进阶：计划库 / 定时 / 算子图"
     },
     "chat": {
       "empty": "还没有消息：说说你想找什么样的岗位",
@@ -1539,7 +1567,9 @@
         "none": "无时刻",
         "untitled": "这条引用没有标题行",
         "hollow": "主进程既没给正文也没给原因——这条回看不完整，请把上面那行引用当作线索报上去"
-      }
+      },
+      "manualPath": "先不用助手，手动按步骤走",
+      "modelMissingBanner": "助手还没配对话模型；你可以去配模型，也可以先按页面步骤手动完成"
     },
     "agent": {
       "autonomy": {
@@ -2008,7 +2038,8 @@
         "NO_PREVIEW": "先生成一次，界面上才有可以接受的改写",
         "OUTCOME_REJECTED": "这次没过事实校验，没有可以写入的内容——先看违规清单",
         "NOTHING_SELECTED": "至少勾一条改写，或者勾上「应用重排」"
-      }
+      },
+      "noDocsBack": "返回准备简历"
     },
     "script": {
       "reason": {

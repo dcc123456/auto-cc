@@ -573,3 +573,26 @@ describe('resume.parse 的 agent 工具面（spec 5.1-07 的建档）', () => {
     expect(input.safeParse({ filePath: 'C:/x.md', nowMs: NOW_MS }).success).toBe(false);
   });
 });
+
+describe('粘贴文字导入（第 15 片 B1）', () => {
+  it('正文走既有解析与入库链：可读回工作副本，同文重复粘贴仍是一行', async () => {
+    const { parse, doc, db } = await boot();
+    const first = await parse.fromText(RESUME_MD, NOW_MS);
+    expect(first.status).toBe('imported');
+    expect(first.isNew).toBe(true);
+    expect(doc.load(first.docId).status).toBe('found');
+    const second = await parse.fromText(RESUME_MD, LATER_MS);
+    expect(second.isNew).toBe(false);
+    expect(second.docId).toBe(first.docId);
+    expect(rowCount(db)).toBe(1);
+  });
+
+  it('空内容与超上限都在系统边界结构化拒绝，不写库', async () => {
+    const { parse, db } = await boot();
+    await expect(parse.fromText(' \n ')).rejects.toMatchObject({ code: 'RESUME_IMPORT_FAILED' });
+    expect(rowCount(db)).toBe(0);
+    const limited = await boot(tempDir(), 1024);
+    await expect(limited.parse.fromText(RESUME_MD.repeat(20))).rejects.toMatchObject({ code: 'RESUME_IMPORT_FAILED' });
+    expect(rowCount(limited.db)).toBe(0);
+  });
+});

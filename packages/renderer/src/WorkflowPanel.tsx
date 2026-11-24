@@ -19,6 +19,7 @@ import { useBridgeAction } from './useBridgeAction';
 import { useConsent } from './useConsent';
 import { useWorkflowRun } from './useWorkflowRun';
 import { Banner, DeskButton } from './ui/controls';
+import { DeskExplainer } from './ui/disclosure';
 import { NodeEvidenceSection } from './WorkflowEvidence';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { WorkflowPlansSection } from './WorkflowPlans';
@@ -166,6 +167,10 @@ export function WorkflowPanel() {
         </DeskButton>
       </div>
 
+      <p className="mt-2 text-[11px] text-slate-500" data-testid="workflow-simple-hint">
+        {t('workflow.simpleHint')}
+      </p>
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <DeskButton
           action="start"
@@ -223,17 +228,6 @@ export function WorkflowPanel() {
           <Ban size={12} />
           {t('workflow.abort')}
         </DeskButton>
-        {/* 画布开关放在动作行末尾而不是新起一行：它切换的是同一批节点的另一种画法，不是又一个 runner 动作。 */}
-        <DeskButton
-          action="canvas-toggle"
-          variant="solid"
-          compact
-          aria-pressed={isCanvasOpen}
-          onClick={() => setIsCanvasOpen((open) => !open)}
-        >
-          <Network size={12} />
-          {t(isCanvasOpen ? 'workflow.canvas.close' : 'workflow.canvas.open')}
-        </DeskButton>
         {current ? (
           <span className="ml-auto text-[11px] text-slate-500" data-testid="workflow-state">
             {t(`workflow.status.${current.status}`)}
@@ -245,10 +239,39 @@ export function WorkflowPanel() {
         ) : null}
       </div>
 
-      <WorkflowPlansSection selectedId={selectedPlanId} onSelect={setSelectedPlanId} />
-
-      {/* 定时任务紧跟计划库（spec 5.7-05）：一条任务就是"这条已保存计划 + 这个时刻"，隔开放要跨面板对计划名。 */}
-      <ScheduleSection />
+      {/* K13 / 10.10-15：默认只留「一键跑一轮」与当前运行。计划库、cron 与算子图同属进阶编排，
+          收进同一只既有折叠原件；首屏不再让新手先读 cron 表达式。 */}
+      <DeskExplainer
+        id="workflow.advanced"
+        label={t('workflow.advanced')}
+        markers={{ testid: 'workflow-advanced' }}
+        className="mt-3"
+      >
+        <div className="flex flex-col gap-2" data-testid="workflow-advanced-body">
+          <div>
+            <DeskButton
+              action="canvas-toggle"
+              variant="solid"
+              compact
+              aria-pressed={isCanvasOpen}
+              onClick={() => setIsCanvasOpen((open) => !open)}
+            >
+              <Network size={12} />
+              {t(isCanvasOpen ? 'workflow.canvas.close' : 'workflow.canvas.open')}
+            </DeskButton>
+          </div>
+          <WorkflowPlansSection selectedId={selectedPlanId} onSelect={setSelectedPlanId} />
+          {/* 定时任务紧跟计划库：一条任务就是「这条计划 + 这个时刻」，两者仍在同一进阶区里。 */}
+          <ScheduleSection />
+          {isCanvasOpen ? (
+            <WorkflowCanvas
+              steps={current?.steps ?? []}
+              planId={selectedPlanId}
+              isReadOnly={status === 'running' || status === 'paused'}
+            />
+          ) : null}
+        </div>
+      </DeskExplainer>
 
       <ConsentOverlay consent={consent} />
       {planPlatforms.map((platform) => (
@@ -389,18 +412,6 @@ export function WorkflowPanel() {
           {t('workflow.loading')}
         </p>
       )}
-
-      {/* 按需挂载（裁定一）：收起就是卸载，画布那套 resize/pan 观察者跟着一起走，不留残留句柄。
-          运行态数据仍取 current.steps——画布是同一份运行读数的第二种画法，不是第二个状态源。
-          5.10-c 起放开「没有 run 也要能开画布」：摆算子、填参数是编辑态的事，不该等一次执行。 */}
-      {isCanvasOpen ? (
-        <WorkflowCanvas
-          steps={current?.steps ?? []}
-          planId={selectedPlanId}
-          // 5.10-11 的运行时只读：判据在父层（它握着 run 状态），画布不自己去问 runner
-          isReadOnly={status === 'running' || status === 'paused'}
-        />
-      ) : null}
     </section>
   );
 }

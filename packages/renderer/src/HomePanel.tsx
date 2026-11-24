@@ -141,6 +141,25 @@ export function pickHomeBlocker(input: {
 }
 
 /**
+ * Home 判「登录这一前置」的口径。
+ *
+ * 只有**真实平台**在场时才谈登录（与状态条同一口径：本机仿站不是「你有几个账号」）；
+ * 一个真实平台都没登记时要说「登录不适用」——否则仅用本机仿站的验收环境里，首屏第一步永远是
+ * 「先登录 BOSS 直聘」，点过去是一堵登录墙，新手既走不下去也不该去走。
+ * @param platforms 会话读数里的平台清单
+ * @param isLocal 判某个 `startUrl` 是否本机地址（`platform-choice` 的那一份）
+ * @returns 需要先登录时为 true；没有真实平台时恒 false
+ */
+export function loginFirstApplies(
+  platforms: readonly { startUrl: string; auth: string }[],
+  isLocal: (startUrl: string) => boolean,
+): boolean {
+  const real = platforms.filter((row) => !isLocal(row.startUrl));
+  if (real.length === 0) return false;
+  return !real.some((row) => row.auth === 'active');
+}
+
+/**
  * 外发时刻的写法：**当天只给时间、非当天给「MM-DD 时间」**（QA 的 P3，2026-11-22）。
  *
  * 为什么必须带日期：前几天那几行原来只渲染时分秒，和今天的行长得一模一样，
@@ -386,13 +405,16 @@ export function HomePanel() {
   const steps = useMemo(() => {
     const value = next.state === 'ready' ? next.value : undefined;
     const real = (value?.platforms ?? []).filter((row) => !isLocalSessionUrl(row.startUrl));
-    const loggedIn = real.some((row) => row.auth === 'active');
+    // 只有真实平台在场时才把「先登录」排到第一步；只有本机仿站的环境里，登录这一前置不适用（见 loginFirstApplies）。
+    const loginNeeded = loginFirstApplies(value?.platforms ?? [], isLocalSessionUrl);
     const platformName = real[0] ? platformLabel(t, real[0].id) : t('home.next.platformFallback');
     const hasDocs = (value?.docs.length ?? 0) > 0;
     const authActive = value?.authorization?.status === 'active';
     const runStatus = value?.run?.status ?? 'idle';
     const all = [
-      !loggedIn ? { id: 'login', text: t('home.next.login', { platform: platformName }), to: 'trust' as const } : null,
+      loginNeeded
+        ? { id: 'login', text: t('home.next.login', { platform: platformName }), to: 'trust' as const }
+        : null,
       !hasDocs ? { id: 'resume', text: t('home.next.resume'), to: 'resume' as const } : null,
       runStatus === 'paused' || runStatus === 'failed'
         ? { id: 'reason', text: t('home.next.reason'), to: 'jobs' as const }
@@ -430,7 +452,7 @@ export function HomePanel() {
     if (!value) return null;
     const real = value.platforms.filter((row) => !isLocalSessionUrl(row.startUrl));
     const id = pickHomeBlocker({
-      isLoggedIn: real.some((row) => row.auth === 'active'),
+      isLoggedIn: !loginFirstApplies(value.platforms, isLocalSessionUrl),
       hasDocs: value.docs.length > 0,
       modelMissing: model.state === 'ready' && model.value.missing.length > 0,
     });

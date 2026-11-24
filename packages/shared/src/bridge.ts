@@ -459,6 +459,8 @@ export const RENDERER_ALLOWLIST = [
   // 所以入参是**绝对路径**（同 `outbound.deliver` 的 `resumeFile` 口径）；回执只带区块计数与待确认清单，
   // 文档正文留在主进程侧的库里（spec 4.1-09 / 4.1-10 的边界）。
   'resume.parse.fromFile',
+  // 第 15 片 B1：无文件可选手也能粘贴正文；仍走同一条解析与幂等入库链，正文不写日志。
+  'resume.parse.fromText',
   'resume.parse.pending',
   // 4.1-14 / 裁定㉖ 的来路通道：候选列表要说清"这份简历是哪份文件导入的"。只读，且 `pending()` 回答不了
   // 这件事——那一条按 4.1-04 只回带未处理条目的行，干净导入的简历同样有来路。
@@ -3512,6 +3514,8 @@ export interface BridgeSignatures {
    * 而是 `status: 'scanned'` 的正常回执（spec 4.1-05）。
    */
   'resume.parse.fromFile': { args: [filePath: string]; returns: ImportReceiptView };
+  /** 粘贴简历正文：空内容/超上限由主进程结构化拒绝；返回与文件导入同一形状。 */
+  'resume.parse.fromText': { args: [text: string]; returns: ImportReceiptView };
   /**
    * 列出还带着未处理条目的导入记录（spec 4.1-04 的待确认清单）：按更新时间倒序，
    * issues 已清空的历史记录不出现。

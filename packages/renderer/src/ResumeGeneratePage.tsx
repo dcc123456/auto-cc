@@ -2,7 +2,7 @@ import { ArrowLeft, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { GenerationRunRowView, ResumeDocSummaryView } from '@auto-cc/shared';
 import { GeneratePanel } from './GeneratePanel';
-import { DeskButton } from './ui/controls';
+import { Banner, DeskButton } from './ui/controls';
 
 /**
  * 按岗位生成简历的整屏子页面（spec 9.3-02）：岗位页的「用这份 JD 生成简历」与简历列表的「按 JD 生成」
@@ -51,6 +51,20 @@ export function ResumeGeneratePage({
           {t('resume.generatePageTitle', { target: targetName })}
         </h3>
       </header>
+
+      {docs.length === 0 ? (
+        <Banner
+          tone="amber"
+          markers={{ testid: 'generate-no-docs' }}
+          actions={
+            <DeskButton action="generate-no-docs-back" variant="line" compact onClick={onBack}>
+              {t('generate.noDocsBack')}
+            </DeskButton>
+          }
+        >
+          {t('generate.reason.NO_DOC')}
+        </Banner>
+      ) : null}
 
       <GeneratePanel
         docs={docs}

@@ -5,7 +5,7 @@
  * 自动化只打本地仿站（§7.2），所以用纯函数把「先报哪条、绝不报两条」钉住，活体只证外观与入口。
  */
 import { describe, expect, it } from 'vitest';
-import { pickHomeBlocker } from './HomePanel';
+import { loginFirstApplies, pickHomeBlocker } from './HomePanel';
 
 describe('pickHomeBlocker', () => {
   it('三样都没满足：先报未登录（不在首页堆三条红字）', () => {
@@ -22,5 +22,23 @@ describe('pickHomeBlocker', () => {
 
   it('三样都齐：一条都不报', () => {
     expect(pickHomeBlocker({ isLoggedIn: true, hasDocs: true, modelMissing: false })).toBeNull();
+  });
+});
+
+describe('loginFirstApplies', () => {
+  it('只有本机仿站时不要求登录（验收环境第一步落到简历准备）', () => {
+    expect(
+      loginFirstApplies([{ startUrl: 'http://127.0.0.1:10233/', auth: 'expired' }], (url) => url.includes('127.0.0.1')),
+    ).toBe(false);
+    expect(loginFirstApplies([], () => false)).toBe(false);
+  });
+
+  it('有真实平台且未登录时要求先登录', () => {
+    expect(
+      loginFirstApplies([{ startUrl: 'https://www.zhipin.com/', auth: 'expired' }], (url) => url.includes('127.0.0.1')),
+    ).toBe(true);
+    expect(
+      loginFirstApplies([{ startUrl: 'https://www.zhipin.com/', auth: 'active' }], (url) => url.includes('127.0.0.1')),
+    ).toBe(false);
   });
 });

@@ -1,4 +1,14 @@
-import { Eye, FileText, FolderOpen, Maximize2, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import {
+  ClipboardPaste,
+  Eye,
+  FileText,
+  FlaskConical,
+  FolderOpen,
+  Maximize2,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -6,8 +16,10 @@ import type {
   BridgeReply,
   GenerationRunRowView,
   ImportProvenanceRowView,
+  ImportReceiptView,
   PendingImportRowView,
   ResumeDocSummaryView,
+  ResumeSeedView,
   ResumeLocaleView,
   ResumeTemplateSummaryView,
 } from '@auto-cc/shared';
@@ -16,7 +28,7 @@ import { formatClock } from './format';
 import { ResumeFormPage } from './ResumeFormPage';
 import { ResumeGeneratePage } from './ResumeGeneratePage';
 import { ResumePreviewModal } from './ResumePreviewModal';
-import { Banner, DeskButton, DeskSelect, Tag } from './ui/controls';
+import { Banner, DeskButton, DeskSelect, DeskTextarea, Tag } from './ui/controls';
 import { DeskExplainer, DeskPathGuide } from './ui/disclosure';
 import { Modal } from './ui/overlays';
 import { useBridgeAction } from './useBridgeAction';
@@ -93,6 +105,9 @@ export function ResumeDesk() {
   const [pendingDelete, setPendingDelete] = useState<string>();
   const [deleteError, setDeleteError] = useState<AppErrorPayload>();
   const [page, setPage] = useState<ResumePage>({ kind: 'list' });
+  /** 粘贴入口只收本地草稿；提交前不出面板、不入库，取消再打开仍保留草稿。 */
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
   const [previewDocId, setPreviewDocId] = useState<string>();
   const [previewHtml, setPreviewHtml] = useState<string>();
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -182,10 +197,17 @@ export function ResumeDesk() {
 
   /** 岗位页跳进来（09 稿形态⑥）：直接落在生成子页面，JD 正文由 `GeneratePanel` 自己消费。 */
   const trailRequestId = trail?.targetView === 'resume' ? trail.requestId : undefined;
+  const trailSourceView = trail?.sourceView;
   useEffect(() => {
     if (trailRequestId === undefined) return;
-    setPage({ kind: 'generate', docId: mastersRef.current[0]?.id ?? '' });
-  }, [trailRequestId]);
+    // 第 15 片 B1：Home 与助手空屏的「准备/导入简历」不是定制请求。只有岗位页带来的那一跳才进生成；
+    // 其余一律落简历列表，否则用户手上还没有母版就先看见一个禁用的「生成定制版」。
+    if (trailSourceView === 'jobs') {
+      setPage({ kind: 'generate', docId: mastersRef.current[0]?.id ?? '' });
+    } else {
+      setPage({ kind: 'list' });
+    }
+  }, [trailRequestId, trailSourceView]);
 
   /** 那一跳被收起（人手动切视图或按面包屑返回）时回列表；否则再点「简历」还会停在生成页上。 */
   const previousTrailRequestIdRef = useRef<number | undefined>(undefined);
@@ -426,9 +448,64 @@ export function ResumeDesk() {
     setPendingDelete(targetDocId);
   };
 
-  /** 打开生成子页面；省略 docId 时默认拿第一份母版。 */
-  const openGenerate = (targetDocId?: string) =>
+  /**
+   * 粘贴正文入库，并同步既有知识库。
+   *
+   * 服务仍只有 `resume.parse.fromText` 这一条新入口；解析、哈希幂等与工作副本全走既有管线。
+   * 同步失败不假装成功：界面会把结构化错误留在原位，草稿保留供修正后重试。
+   */
+  const pasteResume = () => {
+    const text = pasteText;
+    void run(
+      t('resume.pasteAction'),
+      () => {
+        if (!bridge) return undefined;
+        return (async (): Promise<BridgeReply<ImportReceiptView>> => {
+          const parsed = await bridge.resume['parse.fromText'](text);
+          if (!parsed.ok || parsed.value.status !== 'imported') return parsed;
+          const synced = await bridge.kb['profile.sync'](parsed.value.docId);
+          if (!synced.ok) return synced;
+          return { ok: true, value: parsed.value };
+        })();
+      },
+      {
+        apply: () => {
+          setImportError(undefined);
+          setPasteText('');
+          setPasteOpen(false);
+        },
+        describe: () => t('resume.pasteDone'),
+        onError: setImportError,
+      },
+    );
+  };
+
+  /** 使用既有虚构样例：落 `resume-demo` 后立刻走既有 KB 同步，不给新手一份「只能看不能定制」的样例。 */
+  const useSampleResume = () =>
+    void run(
+      t('resume.sampleAction'),
+      () => {
+        if (!bridge) return undefined;
+        return (async (): Promise<BridgeReply<ResumeSeedView>> => {
+          const seeded = await bridge.resume['export.seedDemo']('base');
+          if (!seeded.ok) return seeded;
+          const synced = await bridge.kb['profile.sync'](seeded.value.docId);
+          if (!synced.ok) return synced;
+          return { ok: true, value: seeded.value };
+        })();
+      },
+      { describe: () => t('resume.sampleDone'), onError: setImportError },
+    );
+
+  /** 打开生成子页面；没有母版时留在列表并说明先准备简历，不把用户送进一页全禁用的表单。 */
+  const openGenerate = (targetDocId?: string) => {
+    if (docGroups.masters.length === 0) {
+      setPage({ kind: 'list' });
+      setNotice(t('resume.generateNoDocs'), 'amber');
+      return;
+    }
     setPage({ kind: 'generate', docId: targetDocId ?? docGroups.masters[0]?.id ?? '' });
+  };
 
   const formDoc = page.kind === 'form' ? docs.find((doc) => doc.id === page.docId) : undefined;
   const generateDocId = page.kind === 'generate' ? page.docId || docGroups.masters[0]?.id || '' : '';
@@ -460,6 +537,32 @@ export function ResumeDesk() {
             >
               <FolderOpen size={13} />
               {t('resume.importMany')}
+            </DeskButton>
+            <DeskButton
+              action="resume-paste-open"
+              variant="line"
+              compact
+              disabled={!!busy}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
+              onClick={() => setPasteOpen((open) => !open)}
+            >
+              <ClipboardPaste size={12} />
+              {t('resume.pasteEntry')}
+            </DeskButton>
+            <DeskButton
+              action="resume-sample"
+              variant="line"
+              compact
+              busy={busy === t('resume.sampleAction')}
+              disabled={!!busy}
+              disabledReason={busyReason}
+              disabledReasonLabel={reasonLabel(busyReason)}
+              tip={t('resume.sampleHint')}
+              onClick={useSampleResume}
+            >
+              <FlaskConical size={12} />
+              {t('resume.sampleEntry')}
             </DeskButton>
             <DeskButton action="resume-generate-open" variant="line" compact onClick={() => openGenerate()}>
               <Sparkles size={12} />
@@ -595,6 +698,43 @@ export function ResumeDesk() {
               </ul>
             </DeskExplainer>
           )}
+
+          {pasteOpen ? (
+            <section
+              className="flex flex-col gap-2 rounded-xl border border-line bg-ink-900/60 p-3"
+              data-testid="resume-paste-panel"
+            >
+              <p className="text-[11px] text-slate-400">{t('resume.pasteHint')}</p>
+              <DeskTextarea
+                action="resume-paste-text"
+                data-testid="resume-paste-text"
+                rows={8}
+                value={pasteText}
+                onValueChange={setPasteText}
+                placeholder={t('resume.pastePlaceholder')}
+                className="w-full"
+              />
+              <div className="flex items-center gap-2">
+                <DeskButton
+                  action="resume-paste-submit"
+                  variant="solid"
+                  compact
+                  busy={busy === t('resume.pasteAction')}
+                  disabled={busy !== undefined || pasteText.trim() === ''}
+                  disabledReason={busyReason ?? (pasteText.trim() === '' ? 'INPUT_EMPTY' : undefined)}
+                  disabledReasonLabel={
+                    busyReason ? reasonLabel(busyReason) : pasteText.trim() === '' ? t('resume.pasteEmpty') : undefined
+                  }
+                  onClick={pasteResume}
+                >
+                  {t('resume.pasteSubmit')}
+                </DeskButton>
+                <DeskButton action="resume-paste-cancel" variant="ghost" compact onClick={() => setPasteOpen(false)}>
+                  {t('resume.pasteCancel')}
+                </DeskButton>
+              </div>
+            </section>
+          ) : null}
 
           {docs.length === 0 ? (
             <p className="text-[11px] text-slate-500" data-testid="resume-empty">

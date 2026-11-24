@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SEARCH_FILTER_DIMENSIONS, type SearchFilterDimension } from '@auto-cc/shared';
+import { DEMO_RESUME_DOC_ID, SEARCH_FILTER_DIMENSIONS, type SearchFilterDimension } from '@auto-cc/shared';
 import type {
   AppErrorPayload,
   BridgeReply,
@@ -762,6 +762,22 @@ export function JobLabPanel() {
   };
 
   /**
+   * 用既有导出口生成虚构样例的 PDF，并把回执路径交给本屏的投递动作。
+   *
+   * 这是 10.10-11 允许的「用刚生成的 PDF」那条路：无本地文件的人不必再被系统文件面板挡住。
+   * 样例不存在时由导出服务结构化失败，界面保留原文，不伪造一个路径。
+   */
+  const useSamplePdf = () =>
+    void run(t('deliver.useSampleAction'), () => bridge?.resume['export.toPdf'](DEMO_RESUME_DOC_ID), {
+      apply: (receipt) => {
+        setBridgeError(undefined);
+        setResumePathDraft(receipt.path);
+      },
+      describe: (receipt) => t('deliver.useSampleDone', { pages: receipt.pages }),
+      onError: setBridgeError,
+    });
+
+  /**
    * 把确认卡片上那句表态送回主进程（spec 2.6-01）。
    *
    * 单子已经在等待期间定局过（超时、或上一次点击已生效）会以 `APPROVAL_NOT_FOUND` 上浮，
@@ -833,10 +849,7 @@ export function JobLabPanel() {
             {t('jd.heading')}
           </h2>
           <div className="flex items-center gap-2">
-            <DeskButton action="jd-generate-resume" variant="line" compact onClick={() => generateResume()}>
-              <FileText size={12} />
-              {t('jd.generateResume')}
-            </DeskButton>
+            {/* K12 / 10.10-14：首层只留本页动作；定制仍由详情弹窗的「这一行」入口承担，不跨页抢注意力。 */}
             <DeskButton action="refresh" variant="line" compact busy={!!busy} onClick={() => void read()}>
               <RefreshCw size={12} />
               {t('jd.refresh')}
@@ -1621,6 +1634,18 @@ export function JobLabPanel() {
             }}
           >
             {t('deliver.pickFile')}
+          </DeskButton>
+          <DeskButton
+            action="deliver-use-sample"
+            variant="line"
+            compact
+            busy={busy === t('deliver.useSampleAction')}
+            disabled={busy !== undefined}
+            disabledReason={busy !== undefined ? 'ACTION_BUSY' : undefined}
+            disabledReasonLabel={busy !== undefined ? t('jd.reasonBusy') : undefined}
+            onClick={useSamplePdf}
+          >
+            {t('deliver.useSample')}
           </DeskButton>
           <span className="min-w-0 break-all text-[11px] text-slate-400" data-testid="deliver-resume-path">
             {resumePathDraft === ''

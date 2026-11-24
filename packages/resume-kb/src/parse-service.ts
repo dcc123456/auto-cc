@@ -292,16 +292,50 @@ export class ResumeParseService extends Service {
    */
   async fromFile(filePath: string, nowMs = Date.now()): Promise<ImportReceipt> {
     const bytes = readBoundedFile(filePath, { maxBytes: this.options.maxBytes, code: 'RESUME_IMPORT_FAILED' });
-    // 顺序是硬约束：pdf.js 会移交（detach）传入的 ArrayBuffer，抽取之后再算哈希就是空壳。
-    const sourceHash = sourceHashOf(bytes);
-    const docId = docIdOf(sourceHash);
     // 只记**文件名**，不记整条路径（§8.5 的默认脱敏：目录结构是"这份文件放在我哪块盘上"，
     // 对简历库的读数没有增益，却会在备份导出与界面里跟人一辈子）。
-    const sourceName = basename(filePath);
+    return await this.importBytes(bytes, basename(filePath), nowMs);
+  }
+
+  /**
+   * 导入用户直接粘贴的简历文字（第 15 片 B1：没有简历文件的人也该能开始）。
+   *
+   * 与 `fromFile` 共用 `parseResumeSource` 与 `persist`，不另造解析/入库链；正文只在主进程内使用，
+   * 不写日志。哈希仍按原文 UTF-8 字节计算，同一段文字重复粘贴只落到同一文档。
+   * @param text 用户粘贴的原文；全空白不导入
+   * @param nowMs 入库时间戳（毫秒），由调用方注入以便测试断言
+   * @returns 与文件导入相同的入库读数
+   * @throws `RESUME_IMPORT_FAILED`：空内容或超过 `maxBytes`
+   */
+  async fromText(text: string, nowMs = Date.now()): Promise<ImportReceipt> {
+    if (typeof text !== 'string' || text.trim() === '') {
+      throw new AppError('RESUME_IMPORT_FAILED', '粘贴内容为空：请粘贴简历正文后再导入');
+    }
+    const bytes = new TextEncoder().encode(text);
+    if (bytes.length > this.options.maxBytes) {
+      throw new AppError(
+        'RESUME_IMPORT_FAILED',
+        `粘贴内容过大：${String(bytes.length)} 字节，超过单次上限 ${String(this.options.maxBytes)} 字节`,
+      );
+    }
+    // 出处名用中性的固定文件名，界面与备份里不会把正文或用户目录当来源名。
+    return await this.importBytes(bytes, 'pasted-resume.txt', nowMs);
+  }
+
+  /**
+   * 字节入库的公共段：哈希 → 解析 → 幂等落库。
+   * @param bytes 待解析字节；哈希必须先于任何可能移交 ArrayBuffer 的解析库计算
+   * @param sourceName 界面出处名（只到文件名/固定来源名，不含目录）
+   * @param nowMs 入库时间戳（毫秒）
+   * @returns 已入库的读数；文本过短时按既有 `scanned` 结论返回
+   */
+  private async importBytes(bytes: Uint8Array, sourceName: string, nowMs: number): Promise<ImportReceipt> {
+    const sourceHash = sourceHashOf(bytes);
+    const docId = docIdOf(sourceHash);
     const parsed = await parseResumeSource(bytes, docId, nowMs);
 
     if (parsed.status === 'failed') {
-      throw new AppError('RESUME_IMPORT_FAILED', `这份文件读不出内容：${parsed.reason}`, undefined, {
+      throw new AppError('RESUME_IMPORT_FAILED', `这份内容读不出有效简历：${parsed.reason}`, undefined, {
         code: parsed.code,
         sourceHash,
       });

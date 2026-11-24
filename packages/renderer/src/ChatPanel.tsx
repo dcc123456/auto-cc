@@ -862,6 +862,47 @@ export function ChatPanel() {
         focusLabel={t('guide.focus')}
       />
 
+      {/* 缺模型提示必须在消息流之前就可见：原先只在输入卡底部放「去配模型」，窄面板里要滚到底才碰得到，
+          对新手等同没有出口。手动路径是合法退出：不用助手也能按 Home 的步骤继续。 */}
+      {modelMissing ? (
+        <Banner
+          tone="amber"
+          markers={{ testid: 'chat-model-missing' }}
+          className="mx-4 mt-2"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <DeskButton
+                action="chat-model-missing-config"
+                variant="line"
+                compact
+                onClick={() =>
+                  advanceViewTrail({
+                    sourceView: 'chat',
+                    sourceTitle: t('nav.chat'),
+                    targetView: 'models',
+                    targetTitle: t('desk.models.title'),
+                    targetDetail: t('models.defaults.heading'),
+                  })
+                }
+              >
+                <Settings2 size={11} />
+                {t('chat.modelConfigMissing')}
+              </DeskButton>
+              <DeskButton
+                action="chat-manual-path"
+                variant="ghost"
+                compact
+                onClick={() => document.querySelector<HTMLButtonElement>('[data-action="assistant-capsule"]')?.click()}
+              >
+                {t('chat.manualPath')}
+              </DeskButton>
+            </div>
+          }
+        >
+          {t('chat.modelMissingBanner')}
+        </Banner>
+      ) : null}
+
       {/* 滚动位置在这一层（外层 section 是 h-full 永不溢出），testid 是 harness 比对换视图前后读数的抓手。
           消息流留 120px 地板：5.7-d 那条实测（737px 高的窗口里没有地板时流会被挤成 24px 的一条缝）
           说的就是这一层，如今流上方只剩顶栏与那一行接管读数，地板照留。
@@ -1280,28 +1321,6 @@ export function ChatPanel() {
                 </div>
               )}
             </DeskPopover>
-            {/* 缺模型时摆一颗**看得见**的入口（spec 10.10-01）：原先只有 pill 上那半句「还没配对话模型」，
-                而发送箭头的禁用理由写的是「先签全自动」——人既不知道真正缺什么，也没有一步能走到修的地方。 */}
-            {modelMissing ? (
-              <DeskButton
-                action="chat-model-missing-config"
-                variant="line"
-                compact
-                markers={{ testid: 'chat-model-missing' }}
-                onClick={() =>
-                  advanceViewTrail({
-                    sourceView: 'chat',
-                    sourceTitle: t('nav.chat'),
-                    targetView: 'models',
-                    targetTitle: t('desk.models.title'),
-                    targetDetail: t('models.defaults.heading'),
-                  })
-                }
-              >
-                <Settings2 size={11} />
-                {t('chat.modelConfigMissing')}
-              </DeskButton>
-            ) : null}
             {/* 发送与停止合成**一颗**键（2026-11-02 用户裁定）：没在回复时是发送圆片，
                 正在回复时变成停止图标档。流式期间仍然可以用 Enter 把下一句排进队列（spec 1.11-16）。 */}
             <DeskButton
