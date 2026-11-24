@@ -5,7 +5,7 @@
  * 「回落」就是假的）、对端非 2xx 与空回复都要变成结构化错误（否则下游会把空文案发出去）。
  * 网络一律用存根，不打真实模型端点（AGENTS.md §7.2）。
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asApp, Context, NO_CONFIG } from '@auto-cc/core';
@@ -357,8 +357,21 @@ describe('llm.chat 的失败形态（全部结构化，不许静默）', () => {
  * 旧实现 init 期 `status()` → 读 `llm_providers` → `no such table` → 整个服务挂载失败，
  * 连带 outbound-greet / journey 一起 PENDING、工具面只剩 17 只。
  */
+describe('冷启动：init 不许读表（源码级回归）', () => {
+  it('[Service.init] 里不出现读表调用，就绪读数只在用时现问', () => {
+    // 行为用例（下面那条）证明「顺序反了不炸」；这条钉的是**根因位**：init 里只要再出现一次 `this.status()`，
+    // 空库首启就会重新把 llm 及其下游拖进 PENDING。源码断言比行为断言更直接，也更容易被下一个人看懂。
+    const source = readFileSync(join(import.meta.dirname, 'index.ts'), 'utf8');
+    const initStart = source.indexOf('[Service.init]()');
+    expect(initStart).toBeGreaterThan(0);
+    const initBody = source.slice(initStart, source.indexOf('\n  }', initStart));
+    expect(initBody).not.toContain('this.status()');
+    expect(initBody).not.toContain('providerRowOf');
+  });
+});
+
 describe('冷启动：建表插件排在后面也不炸', () => {
-  it('空库上先挂 llm.chat、后挂建表插件：前者正常挂载，status 不抛且报不可用', async () => {
+  it('空库上先挂 llm.chat、后挂建表插件：前者正常挂载，status 不抛且按配置回落', async () => {
     process.env[KEY_ENV] = 'sk-test-abcdef';
     const dir = mkdtempSync(join(tmpdir(), 'auto-cc-llm-coldstart-'));
     const ctx = new Context();

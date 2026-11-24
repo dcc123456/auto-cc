@@ -26,3 +26,14 @@
 
 判据对照：本条要的「首启 22 只 + 含 greet/journey + llm 不是 PENDING」三项全部由首启（非二次启动）取到；
 `llm` 的挂载错误在 `plugins.status().errors` 里为 0 条。
+
+## 测试补强（同片收尾）
+
+冷启动不再只靠活体读数，测试里有两条：
+
+1. `冷启动：init 不许读表（源码级回归） > [Service.init] 里不出现读表调用，就绪读数只在用时现问`
+   ——读 `packages/llm/src/index.ts` 的 init 段，断言没有 `this.status()` 与 `providerRowOf`，把根因位钉死。
+2. `冷启动：建表插件排在后面也不炸 > 空库上先挂 llm.chat、后挂建表插件：前者正常挂载，status 不抛且按配置回落`
+   ——空库上故意反序挂载，断言服务正常挂载、`status()` 不抛、按通道配置回落；再挂建表插件后仍是一句读数。
+
+行为用例证明「顺序反了不炸」，源码断言防的是「init 里又把读表写回去」。`pnpm --filter @auto-cc/plugin-llm test` → **71 例全过**。
