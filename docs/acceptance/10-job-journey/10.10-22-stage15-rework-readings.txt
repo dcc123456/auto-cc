@@ -177,3 +177,66 @@ Home「岗位进度 0」，与账本 1 笔自相矛盾。
    「还没选简历文件：先点上面的「选择文件」，或用「生成并使用样例 PDF」备一份」，
    导览 `guide.deliver.next` 改为「下一步：选一份简历文件（这一步必须在表单里选，不能留空）」。
    服务侧的配置兜底（`resumeFile`）继续只服务无人值守路径，不再对界面承诺。
+
+十、授权格死路：三个真根因都在界面层（2026-11-25 01:0x · 新包 dmg `7d9d6150…` / asar `f43d1b02…`）
+----------------------------------------------------------------------------
+QA 在 `513bbeb2` 上的读数「点『先定制这一岗』后整组永久 `aria-disabled`、卡片仍『定制 无 · 回执 无』」，
+我按代码逐条排掉，**不是一个原因，是三个叠在一起**：
+
+1. **忙碌态遇「被拒绝的 Promise」永不收尾**（`useBridgeAction.run`）：旧写法先 `setBusy(label)`，然后
+   `await call()`——如果这次调用是以 reject 结束（IPC 侧 structuredClone 失败、handler 崩、宿主关闭都是这种形状），
+   函数在那一行就断了，`setBusy(undefined)` 永远执行不到，整组按钮被 `!!busy` 连坐成永久禁用。
+   修：`try/catch/finally`，任何结局都撤 busy；异常收成一行原话进 `seal` 档提示（不外抛）。
+2. **卡片三要素读的是 props 快照**：卡上定制成功后 `localTailor` 有值，但版本那一行与 `canGrant`
+   用的是调用方传进来的 `tailoredVersion` / `factCheckReceiptId`（`journey.search` 那条链的读数），
+   干净实例上它们永远是空 → 卡片照旧「定制 无」、`授权并开跑` 永远禁用。修：读**生效值**
+   （`effectiveTailored` / `effectiveReceipt` / `effectivePlatform`），平台也从卡上那次定制结果里取
+   （`journey.tailor` 会回 `platform`）。
+3. **「授权并开跑」只开单、不跑**：全仓渲染层**没有任何一处**调 `journey.unattended.start`，
+   授权单开完停在 `active`，执行器一步不动。修：开单成功后接着 `journey.unattended.start({docId, platform})`，
+   失败照原话上浮（授权单保留，人可以再点）。
+
+同时按管理员要求把这一步做成**三态可恢复**：
+- 进行中：`[data-testid="journey-auth-tailor-state"][data-phase="running"]`，正文「正在定制这一岗：已用 N 秒（最多等 120 秒…）」，`data-elapsed-seconds` 每秒刷新；
+- 失败：`data-phase="failed"`，正文带 `data-error-code` + 原话，下面一颗「重试定制」（`journey-auth-tailor-retry`）；
+- 成功：`data-phase="done"`，正文写「定制完成：岗位 · 版本 · 回执 N」，卡片三要素立刻变成
+  「母版 resume-demo · 定制 doc:… · 回执 gen-…」，`授权并开跑` 解除禁用；
+- 收尾：120 秒无回执自动落 `failed`（`journeyAuth.tailorTimeout`），**不留永久 busy**（超时后再回来也不改写这一格）。
+
+活体读数（干净 userData、`pack=fixture`、全程界面点击，未跑 `journey.search`）：
+- 抓 3 条 → 求职主链段展开 → 候选 `["journey-auth-target-1003","…-1002","…-1001"]`
+- 勾选 1003 → 点「先定制这一岗」→ 三态采样 `["done|0||定制完成：岗位 1003 · 版本 doc:resume-f3f3ec8b7fba:48ab8e137c84 · 回执 gen-44bff783-…"]`
+- 卡片：`母版 resume-demo · 定制 doc:resume-… · 回执 gen-…`，`data-checked=true`，**`grantDisabled=null`**（开跑键已解锁）
+- 点「授权并开跑」→ `journey.unattended.view` = `{"status":"running","runId":"unattended-1795540579996","currentTarget":"1003","pending":["1003"],"lastError":null}`；
+  `outbound.authorization.current` = `{"status":"active","dailyLimit":5,"targets":["1003"],"resumeVersion":"doc:resume-39fc47493f76:…","factCheckReceiptId":"gen-e0a52ca3-…","remaining":5}`
+  → **授权与执行器都真的动起来了**（此前这里是死路）。
+
+十一、窗口闸的可复跑机器读数（`pnpm verify:window-gate`）
+------------------------------------------------------
+脚本：`scripts/verify-window-gate.ts`（`package.json` 里 `verify:window-gate`）。只连本机仿站、用全新 userData。
+造法：CDP `Page.setWebLifecycleState({state:'frozen'})` 冻住内核视图那一页 —— 页面层
+`document.visibilityState` 立刻 `hidden`，而窗口对象与视图挂载**一字不变**，正是那道闸判的形状；
+不再依赖 `osascript`（本机三次尝试都造不出稳定 hidden）。顺序是「先可见态发一次 → 再冻结断言 → 再调投递」，
+避免依赖「解冻后窗口还得被带回前台」这类与本闸无关的环境条件。
+
+一次实跑（成品包 `f43d1b02…`）：
+```
+PASS · 可见态同一份请求发得出去：committed=true · ledgerId=2
+PASS · 投递后追踪到位：["1003=delivered"]
+PASS · 冻结前页面可见：document.visibilityState=visible · kernelViewPageVisible=true
+PASS · 冻结后页面层断言：document.visibilityState=hidden（必须是 hidden）
+PASS · 冻结后 getStatus：windowVisible=true kernelViewVisible=true kernelViewPageVisible=false
+PASS · 页面 hidden 时投递被拒：code=OUTBOUND_WINDOW_NOT_VISIBLE · details={"windowVisible":true,"windowPageVisible":true,"kernelViewVisible":true,"kernelViewPageVisible":false}
+PASS · 隐藏态零 attempt：attempts 1 → 1
+PASS · 隐藏态零账本：账本 2 → 2
+窗口闸结论：通过（8 条判据）
+```
+复跑命令：`pnpm fixture`（另开一个终端）→ `pnpm verify:window-gate`；可加 `--exe <可执行文件>`、
+`--cdp-port <端口>`、`--fixture-port <端口>`。任一判据不成立即非零退出。
+
+十二、本片当时那一轮的门禁与产物（`f43d1b02…`）
+--------------------------------------------
+`TYPECHECK=0` / `LINT=0` / `FORMAT_CHECK=0` / `TEST=0`（**2871 例**，本轮未新增用例——改的是界面状态机，
+渲染层没有组件测试框架，读数以活体为准）；`dist:mac` EXIT=0；
+dmg **157780017 B / `7d9d6150736ce547…`**、asar **`f43d1b02b27c5a97…`**；
+`smoke:dist --exe dist/mac-arm64/...` → **六步全过**。

@@ -2484,7 +2484,19 @@
       "reasonTailorNeedsSelect": "Tick this job first, then tailor it",
       "reloadTargets": "Reload library jobs",
       "targetsHint": "Search and capture jobs on the Jobs page, then come back to pick them.",
-      "targetsReadFailed": "Could not read library jobs: {{message}}"
+      "targetsReadFailed": "Could not read library jobs: {{message}}",
+      "tailorRunning": "Tailoring this job: {{seconds}}s elapsed (up to 120s, then it fails and you can retry)",
+      "tailorDoneLine": "Tailored: job {{jobId}} · version {{version}} · receipt {{receipt}}",
+      "tailorFailedLine": "Tailoring failed: job {{jobId}} · {{code}} · {{message}}",
+      "tailorFailedNoCode": "(no error code)",
+      "tailorRetry": "Retry tailoring",
+      "tailorTimeout": "No receipt after 120s: treated as failed, you can retry",
+      "tailorNoVersion": "The service reported success but returned no tailored version or receipt; it cannot be authorized",
+      "tailorNoBridge": "No bridge channel in this environment, so tailoring cannot start",
+      "tailorDoneNotice": "Tailored: the card now has a version and receipt, authorization is unlocked",
+      "tailorFailedNotice": "Tailoring did not succeed: see the reason below and retry",
+      "reasonTailorRunning": "This job is being tailored; wait for it to finish or time out",
+      "grantStarted": "Authorization opened and the runner started; see the status line above"
     }
   }
 }

@@ -64,7 +64,27 @@ export function OutboundAuthorizationCard({
    * 于是卡上永远「定制 无」、`JOURNEY_AUTH_NO_TAILOR` 恒现。这里允许人在卡上对**勾选的库内岗位**
    * 直接触发 `journey.tailor`，定制完成后同一张卡即可开单。
    */
-  const [localTailor, setLocalTailor] = useState<{ jobId: string; version: string; receipt: string } | null>(null);
+  const [localTailor, setLocalTailor] = useState<{
+    jobId: string;
+    platform: string;
+    version: string;
+    receipt: string;
+  } | null>(null);
+  /**
+   * 卡上定制这一步的**三态**（2026-11-24 QA 的授权格死路）：
+   * `running` 带已用秒数、`failed` 给原因码与原话并给「重试」、`done` 把版本与回执写进卡片并解锁授权。
+   * 这组状态必须自己收尾——不依赖 `useBridgeAction` 的 `busy`：那一路是「动作跑完才撤」，
+   * 而定制可能永远不回来（模型卡住/宿主关掉），界面上就成了整组永久 `aria-disabled` 的死路。
+   */
+  const [tailorState, setTailorState] = useState<{
+    jobId: string;
+    phase: 'running' | 'failed' | 'done';
+    startedAt: number;
+    errorCode?: string;
+    errorText?: string;
+  } | null>(null);
+  /** 让「已用 N 秒」每秒走一格；只在 running 期间挂定时器。 */
+  const [tailorNow, setTailorNow] = useState(Date.now());
   /** 母版 doc id：优先取传入的版本串，其次现读库内第一份母版（卡上定制需要它）。 */
   const [fallbackDocId, setFallbackDocId] = useState('');
   useEffect(() => {
@@ -126,10 +146,13 @@ export function OutboundAuthorizationCard({
     localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.version : tailoredVersion;
   const effectiveReceipt =
     localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.receipt : factCheckReceiptId;
+  /** 生效的平台：卡上刚定制出来的那一份优先（与生效版本/回执同一条口径）。 */
+  const effectivePlatform =
+    localTailor !== null && targets.includes(localTailor.jobId) ? localTailor.platform : platform;
   const limit = Number(dailyLimit);
   const limitValid = Number.isInteger(limit) && limit >= 1 && limit <= 10;
   const canGrant =
-    platform !== '' &&
+    effectivePlatform !== '' &&
     masterDocIdValue !== '' &&
     effectiveTailored !== '' &&
     effectiveReceipt !== '' &&
@@ -142,15 +165,28 @@ export function OutboundAuthorizationCard({
    * @returns 无返回值
    */
   const grant = () =>
-    void run(t('journeyAuth.actionGrant'), () =>
-      bridge?.outbound['authorization.grant']({
-        platform,
-        dailyLimit: limit,
-        targets,
-        masterResumeVersion: masterVersion !== '' ? masterVersion : `doc:${masterDocIdValue}`,
-        resumeVersion: effectiveTailored,
-        factCheckReceiptId: effectiveReceipt,
-      }),
+    void run(
+      t('journeyAuth.actionGrant'),
+      () => {
+        if (!bridge) return undefined;
+        // 这颗键的字面承诺是**授权并开跑**（2026-11-24 萌新「勾选授权岗位 → 授权并开跑」那条路）。
+        // 旧实现只开了授权单就结束：界面上再也没有任何地方调 `journey.unattended.start`，
+        // 于是人开完单看着「已授权」干等，执行器一步都不跑——这也是那格死路的一部分。
+        // 现在两步连起来：开单成功就立刻把执行器带起来（开始失败照原话上浮，授权单保留，人可以再点）。
+        return (async () => {
+          const granted = await bridge.outbound['authorization.grant']({
+            platform: effectivePlatform,
+            dailyLimit: limit,
+            targets,
+            masterResumeVersion: masterVersion !== '' ? masterVersion : `doc:${masterDocIdValue}`,
+            resumeVersion: effectiveTailored,
+            factCheckReceiptId: effectiveReceipt,
+          });
+          if (!granted.ok) return granted;
+          return bridge.journey['unattended.start']({ docId: masterDocIdValue, platform: effectivePlatform });
+        })();
+      },
+      { describe: () => t('journeyAuth.grantStarted') },
     );
 
   /**
@@ -201,20 +237,91 @@ export function OutboundAuthorizationCard({
    * @param jobId 要定制的岗位 id
    * @returns 无返回值；失败时提示行给出原文
    */
+  /** 卡上定制的收尾上限（毫秒）：没有回执就落失败 + 重试，绝不留永久进行中。 */
+  const TAILOR_TIMEOUT_MS = 120_000;
+
+  /**
+   * 对勾选的岗位做一次定制，并把**三种落点**都画出来（进行中 / 失败+重试 / 成功并解锁授权）。
+   *
+   * 与其它按钮不同，这里不走 `useBridgeAction.run`：它把「正在做」交给那一个 `busy` 标签，
+   * 而这一步最长可能永远不返回，一旦不返回整张卡的所有键都被 `disabled` 连坐（QA 复现的死路）。
+   * 所以这里自己的状态机 + 120 秒收尾：超时落失败，人点「重试」再来一次。
+   * @param jobId 勾选中的库内岗位
+   * @returns 无返回值（结果落在 `tailorState` 与 `localTailor` 上）
+   */
   const tailorJob = (jobId: string): void => {
     if (masterDocIdValue === '') {
       setNotice(t('journeyAuth.reasonNoMaster'), 'amber');
       return;
     }
-    void run(t('journeyAuth.actionTailor'), () => bridge?.journey.tailor({ docId: masterDocIdValue, jobId }), {
-      apply: (view) => {
-        const version = view.tailoredResumeVersion;
-        const receipt = view.factCheckReceiptId;
-        if (version === null || receipt === null || receipt === '') return;
-        setLocalTailor({ jobId, version, receipt });
-      },
-    });
+    if (!bridge) {
+      setNotice(t('journeyAuth.tailorNoBridge'), 'amber');
+      return;
+    }
+    const startedAt = Date.now();
+    setTailorState({ jobId, phase: 'running', startedAt });
+    setTailorNow(startedAt);
+    void (async () => {
+      /** 120 秒没回执就按失败收尾；底层调用即使后来回来了也不再改写这一格（人已经看到失败并可以重试）。 */
+      let timer: number | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(t('journeyAuth.tailorTimeout'))), TAILOR_TIMEOUT_MS);
+      });
+      try {
+        const reply = await Promise.race([bridge.journey.tailor({ docId: masterDocIdValue, jobId }), timeout]);
+        if (!reply.ok) {
+          setTailorState({
+            jobId,
+            phase: 'failed',
+            startedAt,
+            errorCode: reply.error.code,
+            errorText: reply.error.message,
+          });
+          setNotice(t('journeyAuth.tailorFailedNotice'), 'seal');
+          return;
+        }
+        const version = reply.value.tailoredResumeVersion;
+        const receipt = reply.value.factCheckReceiptId;
+        if (version === null || receipt === null || receipt === '') {
+          // 服务回了成功但没给定制版本/回执：这一份不能用来开授权，如实摆在卡上。
+          setTailorState({ jobId, phase: 'failed', startedAt, errorText: t('journeyAuth.tailorNoVersion') });
+          setNotice(t('journeyAuth.tailorFailedNotice'), 'seal');
+          return;
+        }
+        // 平台跟着这一份定制结果一起记下来：卡上定制是**唯一**能让三要素齐的一步，
+        // 而调用方传进来的 `platform` 来自「按意向搜岗」的读数——没搜过岗就是空串，
+        // 空串会让「授权并开跑」永远禁用（2026-11-24 QA 的授权格死路第二半）。
+        setLocalTailor({ jobId, platform: reply.value.platform, version, receipt });
+        setTailorState({ jobId, phase: 'done', startedAt });
+        setNotice(t('journeyAuth.tailorDoneNotice'), 'celadon');
+        await reload();
+      } catch (error) {
+        setTailorState({
+          jobId,
+          phase: 'failed',
+          startedAt,
+          errorText: error instanceof Error ? error.message : String(error),
+        });
+        setNotice(t('journeyAuth.tailorFailedNotice'), 'seal');
+      } finally {
+        if (timer !== undefined) window.clearTimeout(timer);
+      }
+    })();
   };
+
+  /** running 期间每秒刷新「已用 N 秒」。 */
+  useEffect(() => {
+    if (tailorState?.phase !== 'running') return;
+    const timer = window.setInterval(() => setTailorNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [tailorState?.phase, tailorState?.startedAt]);
+
+  /** 这一格已用的整秒数（非进行中时为 0）。 */
+  const tailorElapsedSeconds =
+    tailorState?.phase === 'running' ? Math.max(0, Math.floor((tailorNow - tailorState.startedAt) / 1000)) : 0;
+
+  /** 定制这一步是否正占着这一岗（其余岗位的键跟着禁用，避免同一时刻两个定制在飞）。 */
+  const tailorRunning = tailorState?.phase === 'running';
 
   const reasonNoTailor = effectiveTailored === '' || effectiveReceipt === '' ? 'JOURNEY_AUTH_NO_TAILOR' : undefined;
   const grantReason =
@@ -428,6 +535,52 @@ export function OutboundAuthorizationCard({
         </Banner>
       )}
 
+      {/* 卡上定制的三种落点（2026-11-24 QA 死路的修法）：进行中有秒数、失败给原因码+原话+重试、
+          成功把版本与回执写进卡片并解锁「授权并开跑」。**任何一态都不许把整组键钉在禁用上**：
+          进行中最多 120 秒，超时自动落失败。 */}
+      {tailorState === null ? null : (
+        <div
+          className="mt-2 rounded-md border border-line bg-ink-900/40 px-2 py-1.5"
+          data-testid="journey-auth-tailor-state"
+          data-phase={tailorState.phase}
+          data-job-id={tailorState.jobId}
+          data-elapsed-seconds={String(tailorElapsedSeconds)}
+          data-error-code={tailorState.errorCode ?? ''}
+        >
+          <p className="break-all text-[11px] text-slate-300">
+            {tailorState.phase === 'running'
+              ? t('journeyAuth.tailorRunning', { seconds: tailorElapsedSeconds })
+              : tailorState.phase === 'done'
+                ? t('journeyAuth.tailorDoneLine', {
+                    jobId: tailorState.jobId,
+                    version: localTailor?.version ?? '',
+                    receipt: localTailor?.receipt ?? '',
+                  })
+                : t('journeyAuth.tailorFailedLine', {
+                    jobId: tailorState.jobId,
+                    code: tailorState.errorCode ?? t('journeyAuth.tailorFailedNoCode'),
+                    message: tailorState.errorText ?? '',
+                  })}
+          </p>
+          {tailorState.phase === 'failed' ? (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <DeskButton
+                action="journey-auth-tailor-retry"
+                variant="line"
+                compact
+                busy={!!busy}
+                disabled={!!busy || tailorRunning}
+                disabledReason={tailorRunning ? 'JOURNEY_AUTH_TAILOR_RUNNING' : undefined}
+                disabledReasonLabel={tailorRunning ? t('journeyAuth.reasonTailorRunning') : undefined}
+                onClick={() => tailorJob(tailorState.jobId)}
+              >
+                {t('journeyAuth.tailorRetry')}
+              </DeskButton>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <div className="mt-2 flex flex-wrap items-end gap-2">
         <DeskField
           action="journey-auth-limit"
@@ -446,14 +599,17 @@ export function OutboundAuthorizationCard({
         <span
           className="text-[11px] text-slate-400"
           data-testid="journey-auth-versions"
-          data-master-version={masterVersion}
-          data-tailored-version={tailoredVersion}
-          data-receipt={factCheckReceiptId}
+          data-master-version={masterDocIdValue}
+          data-tailored-version={effectiveTailored}
+          data-receipt={effectiveReceipt}
         >
+          {/* 三要素读的是**生效值**（含卡上刚定制出来的那一份），不是调用方传进来的快照：
+              旧写法在这里读 props，于是卡上定制成功后卡片仍写「定制 无 · 回执 无」，
+              人看到的就是"点了没反应"（2026-11-24 QA 的授权格死路读数之一）。 */}
           {t('journeyAuth.versionLine', {
-            master: masterVersion || t('journeyAuth.none'),
-            tailored: tailoredVersion || t('journeyAuth.none'),
-            receipt: factCheckReceiptId || t('journeyAuth.none'),
+            master: masterDocIdValue === '' ? t('journeyAuth.none') : masterDocIdValue,
+            tailored: effectiveTailored || t('journeyAuth.none'),
+            receipt: effectiveReceipt || t('journeyAuth.none'),
           })}
         </span>
       </div>
@@ -509,9 +665,15 @@ export function OutboundAuthorizationCard({
                     action={`journey-auth-tailor-${match.jobId}`}
                     variant="ghost"
                     compact
-                    busy={!!busy}
-                    disabled={!!busy || !targets.includes(match.jobId)}
-                    disabledReason={!targets.includes(match.jobId) ? 'JOURNEY_AUTH_NOT_SELECTED' : undefined}
+                    busy={tailorState?.phase === 'running' && tailorState.jobId === match.jobId}
+                    disabled={!!busy || !targets.includes(match.jobId) || tailorRunning}
+                    disabledReason={
+                      !targets.includes(match.jobId)
+                        ? 'JOURNEY_AUTH_NOT_SELECTED'
+                        : tailorRunning
+                          ? 'JOURNEY_AUTH_TAILOR_RUNNING'
+                          : undefined
+                    }
                     disabledReasonLabel={
                       !targets.includes(match.jobId) ? t('journeyAuth.reasonTailorNeedsSelect') : undefined
                     }

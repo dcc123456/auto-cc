@@ -19,6 +19,16 @@ export interface BridgeActionHooks<T> {
 }
 
 /**
+ * 把抛出来的错误收成一行人能读的原文。
+ * @param error 任何被 reject 出来的东西
+ * @returns 错误消息；不是 Error 就转字符串（绝不返回空串，否则提示行会变成一片空白）
+ */
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message === '' ? error.name : error.message;
+  return String(error);
+}
+
+/**
  * 面板动作的公共外壳：忙碌态、结果态、提示行，以及「动作跑完一律重读快照」。
  *
  * 这些面板是 app 的自测入口，所以失败原因必须留在界面上而不是弹窗——
@@ -62,17 +72,27 @@ export function useBridgeAction(read: () => Promise<unknown>) {
       setBusy(label);
       // 上一次的结果先撤掉：seal 那一档「不自动回落」的判据是「等人再动一次」，而这一次就是那一下。
       clearResult();
-      const reply = await call();
-      setBusy(undefined);
-      if (!reply) setNotice(t('action.noBridge'), 'amber');
-      else if (reply.ok) {
-        markDone(label);
-        hooks.apply?.(reply.value);
-        setNotice(hooks.describe?.(reply.value) ?? t('action.ok', { action: label }));
-      } else {
+      // **忙碌态必须收尾**（2026-11-24 QA 的授权格死路）：调用可能以「拒绝的 Promise」而不是
+      // `{ok:false}` 回来（IPC 侧的 structuredClone 失败、handler 崩掉、宿主关闭都是这种形状），
+      // 旧写法在这里直接跳到下一行之后就没有下一行了——`busy` 永远不撤，整组按钮永久 `aria-disabled`，
+      // 界面上既没有原因也没有重试。所以统一 try/finally：无论怎么结束，busy 一定撤。
+      try {
+        const reply = await call();
+        if (!reply) setNotice(t('action.noBridge'), 'amber');
+        else if (reply.ok) {
+          markDone(label);
+          hooks.apply?.(reply.value);
+          setNotice(hooks.describe?.(reply.value) ?? t('action.ok', { action: label }));
+        } else {
+          markFailed(label);
+          hooks.onError?.(reply.error);
+          setNotice(t('action.failed', { action: label, message: reply.error.message }), 'seal');
+        }
+      } catch (error) {
         markFailed(label);
-        hooks.onError?.(reply.error);
-        setNotice(t('action.failed', { action: label, message: reply.error.message }), 'seal');
+        setNotice(t('action.failed', { action: label, message: errorText(error) }), 'seal');
+      } finally {
+        setBusy(undefined);
       }
       await read();
     },
