@@ -32,7 +32,8 @@
     "e2e:resume-jd": "tsx scripts/e2e-resume-jd.ts",
     "e2e:resume-chunks": "tsx scripts/e2e-resume-chunks.ts",
     "smoke:dist": "tsx scripts/smoke-dist.ts",
-    "verify:window-gate": "tsx scripts/verify-window-gate.ts"
+    "verify:window-gate": "tsx scripts/verify-window-gate.ts",
+    "verify:real-preflight": "tsx scripts/real-run-preflight.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
