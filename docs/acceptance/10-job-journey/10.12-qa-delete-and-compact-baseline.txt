@@ -56,10 +56,14 @@
 
 | 文件 | md5 |
 | --- | --- |
-| `tmp/qa12/before-900.png` | `30ec7947ec94147b4c007ddead8f2ffb` |
-| `tmp/qa12/before-1024.png` | `47bea3ad8b4ca158801b031b0bf70e3e` |
-| `tmp/qa12/before-1280.png` | `3dc4e4efce1831b34a4eb5ed81c40275` |
-| `tmp/qa12/before-1600.png` | `8b8ef1a2fa78b5522c0f92d67e8077e1` |
+| `tmp/qa12/before-900.png` | `8b8ef1a2fa78b5522c0f92d67e8077e1` |
+| `tmp/qa12/before-1024.png` | `30ec7947ec94147b4c007ddead8f2ffb` |
+| `tmp/qa12/before-1280.png` | `47bea3ad8b4ca158801b031b0bf70e3e` |
+| `tmp/qa12/before-1600.png` | `3dc4e4efce1831b34a4eb5ed81c40275` |
+
+> **2026-11-24 更正（同批 md5 与文件名错位一档）**：上面这四行原先把 md5 按「900/1024/1280/1600」的顺序填，
+> 而 `md5 -q before-*.png` 是按**文件名**排序输出的（1024/1280/1600/900），于是整列错位了一档。
+> 已按 `md5 -q` 逐文件重取更正；四张仍然互异，结论不变。做前后对照时以本表为准。
 
 （改造后我会用同一脚本拍 `after-*`，把两批 md5 与读数并列进 `10.12-qa-delete-and-compact-after.txt`。）
 
