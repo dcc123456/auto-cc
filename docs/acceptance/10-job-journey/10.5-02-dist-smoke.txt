@@ -1,0 +1,83 @@
+10.5-02 构建与发布冒烟（2026-11-24，macOS arm64）
+
+## 构建输入与命令
+
+- HEAD：`6cd7b7cdc37a159b286820a58e6317d1a9d02ccb`（含第 13 片全部修复）。
+- 宿主：Darwin **arm64**，macOS 15.6.1，Node v24.19.0，Electron 44.4.5。
+- 命令：`pnpm dist:mac > tmp/g14-build.log 2>&1` → **DIST_MAC_EXIT=0**。
+- 实际执行：`pnpm app:build`（主进程/preload esbuild、renderer vite、CSP 注入、staging 外置依赖）→ `electron-builder --mac --publish never`。
+- 未使用 dev server；冒烟启动前显式删除 `ELECTRON_RUN_AS_NODE` 与 `ELECTRON_RENDERER_URL`。
+
+## 产物路径 / 大小 / SHA256
+
+| 产物 | bytes | SHA256 |
+| --- | ---: | --- |
+| `dist/auto-cc-0.1.0-mac-arm64.dmg` | 157789770 | `e83354382de2862ec12dfee4a697a30e769da993c8317ae20c0acb2d61c676d8` |
+| `dist/auto-cc-0.1.0-mac-arm64.zip` | 155114640 | `6f1ef164708d1939a5fd035f126c9006a52238f7e50d732aa46c86b4e65d640d` |
+| `dist/auto-cc-0.1.0-mac-x64.dmg` | 161474787 | `09eb51463b849430a480156fd8b6dbc6f7dc8dac35fe348740081054d882b189` |
+| `dist/auto-cc-0.1.0-mac-x64.zip` | 158844240 | `61aea23a547b7212a382b525ebff4473bb191e8a6e11796184028dc379138596` |
+| `dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc`（冒烟实际启动） | 33968 | `e06891704834df56f24489e1f971428161ae17312143624af13736255cc0ab34` |
+
+随包文件核对：`Contents/Resources/app-update.yml`、`LICENSES.md`、`THIRD-PARTY-NOTICES.txt` 均在；`app.asar` 23 MiB。
+签名：构建日志明确「0 valid identities found」并跳过 macOS 签名；本轮**不声称已签名/已公证**。
+
+## 发布冒烟命令与读数
+
+命令：
+`pnpm smoke:dist --exe dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc --cdp-port 10428 --out tmp/g14/smoke-final-clean.txt`
+→ **SMOKE_EXIT=0**。
+
+- 隔离 userData：`tmp/smoke-dist/userdata-2026-11-24T07-45-53`；未设 `ELECTRON_RENDERER_URL`。
+- 首启 Home 可见，隐私首屏出现后确认进入主界面。
+- 首启 `agent.tools.list()` = **22 只**，含 `outbound.greet.perform`、`outbound.deliver.perform`、`journey.search`、`journey.tailor`；`plugins.status().errorCount=0`。
+- 悬浮助手打开后输入框可见，关闭后胶囊 `data-state=closed` 且面板高度 0。
+- fixture guard：`platform-boss.pack=fixture`；登记来源 `boss:http://127.0.0.1:10233`；内核 URL `http://127.0.0.1:10233/`，只打回环。
+- 内置 `boss-basic` 三节点工作流 `done`：`jd-capture=done / jd-list=done / flaky=done`。
+- 本地仿站搜岗入库并出卡，岗位详情弹窗可打开、可关闭；最终 `plugins.errorCount=0`、`shell.lastError=undefined`。
+- `Browser.close` 后产物自行退出 `code=0`；冒烟脚本也正常 `EXIT=0`，没有残留 CDP/应用进程。
+
+## 本轮修掉的冒烟脚本缺陷（不是产品功能扩展）
+
+1. 启动产物前删除继承来的 `ELECTRON_RUN_AS_NODE` / `ELECTRON_RENDERER_URL`。首次基线因此从 `bad option` / `code=9` 修为真 Electron 启动。
+2. 首屏检查从旧「对话页」对齐为 **Home + 全局助手**；助手与弹窗都按**可见尺寸**判，不再把常驻隐藏 DOM 当可见。
+3. 新增 22 只工具与插件错误读数；`sessions.open` 改开本机 `fixture` 会话，避免真站 startUrl 被自动化闸正确拦截后还继续跑。
+4. 弹窗关闭判据接受「节点已卸载」；修正 mac 的 `app.asar` 读取路径。
+5. 成功后显式退出脚本：进程内 fixture 是长驻服务器，不退出会把已全过的冒烟挂住。
+
+## 截图与脱敏
+
+- `10.5-02-home-dist.png`：真包 Home；只有导航、空态和本地状态读数，无个人数据。
+- `10.5-02-job-modal-dist.png`：真包岗位弹窗；岗位与公司均为本地仿站虚构数据，来源地址为回环，无个人数据。
+- md5：Home `4dc235c409dffc203d9536e72c5bd4f9`；岗位弹窗 `e090041346a0d2ade8922ef79e0aefc6`。同批各 1 次，无重复。
+
+## 四门禁
+
+`pnpm typecheck` → **TYPECHECK_EXIT=0**；`pnpm lint` → **LINT_EXIT=0**；
+`pnpm format:check` → **FORMAT_EXIT=0**；`pnpm test` → **TEST_EXIT=0**，**2854 例全过**。
+
+## 遗留与环境受阻
+
+- Windows / Linux：本机不能启动其安装产物，标 **[!] 环境受阻**；未虚构通过。
+- macOS x64：已构建并留指纹，但本轮只在 arm64 真包上跑冒烟，x64 运行记 **未验**。
+- 真站链路不在本片：本轮零真实平台自动化、零外发；真站仍等用户本人在场的最后一片。
+
+## 冒烟原始日志
+
+auto-cc 发布冒烟 · 2026-11-24T07:45:53.252Z
+平台=darwin · 产物=/Users/dcc/deepseek-harness-workspece/auto-cc/dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc · userData=/Users/dcc/deepseek-harness-workspece/auto-cc/tmp/smoke-dist/userdata-2026-11-24T07-45-53 · CDP=10428 · 计划=boss-basic
+PASS · 冒烟 1/6 产物存在
+产物指纹：33968 bytes · SHA256=e06891704834df56f24489e1f971428161ae17312143624af13736255cc0ab34
+PASS · 冒烟 1/6 随包文件齐 —— app-update.yml:在 / LICENSES.md:在 / THIRD-PARTY-NOTICES.txt:在
+PASS · 冒烟 2/6 fixture 站点可用 —— 本轮新起 http://127.0.0.1:10233/boss（零出网）
+PASS · 冒烟 3/6 产物已启动并进渲染层 —— target 里出现 app.asar 页面
+PASS · 冒烟 4/6 首屏 Home 与主界面都在 —— 隐私首屏=true · 视图切换口=true · Home 可见=true
+PASS · 冒烟 4/6 首启工具面与插件状态自洽 —— 工具=22 只 · 必需项齐=true · 插件错误=0
+PASS · 冒烟 4/6 助手可呼出 / 可关闭
+PASS · 冒烟 4/6 fixture guard：platform-boss.pack=fixture；自动化面只在 loopback
+PASS · 冒烟 5/6 内置计划 boss-basic 在册；内核 URL=http://127.0.0.1:10233/
+PASS · 冒烟 5/6 占位工作流 status=done，jd-capture/jd-list/flaky 全 done
+PASS · 冒烟 5/6 本地仿站搜岗入库并出卡、岗位弹窗可打开
+PASS · 冒烟 5/6 关键链无报错 —— 弹窗已关=true · 插件错误=0 · shell.lastError=undefined
+PASS · 冒烟 6/6 干净退出 —— Browser.close 后进程自行退出 code=0
+附读：app.asar 23 MiB
+冒烟结论：六步全过，产物可发。

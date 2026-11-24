@@ -17,7 +17,8 @@
  * 用法：`pnpm smoke:dist`（可加 `--exe <路径>` `--cdp-port` `--fixture-port` `--plan` `--out`）。
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { CdpSession, listTargets } from '../packages/testing/src/cdp.js';
@@ -107,6 +108,30 @@ async function waitForSelector(bridge: CdpSession, selector: string, timeoutMs =
   while (Date.now() < deadline) {
     const present = await bridge.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(selector)})`);
     if (present) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
+/**
+ * 等一个元素**可见**（不只是存在于 DOM）。
+ *
+ * 助手面板与岗位弹窗都有「常驻但隐藏」的形态，只查 `querySelector` 会把收起态误判成已打开。
+ * @param bridge CDP 会话
+ * @param selector CSS 选择器
+ * @param timeoutMs 上限
+ * @returns 是否在时限内出现非零尺寸
+ */
+async function waitForVisible(bridge: CdpSession, selector: string, timeoutMs = 20_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const visible = await bridge.evaluate<boolean>(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    })()`);
+    if (visible) return true;
     await sleep(250);
   }
   return false;
@@ -213,6 +238,8 @@ async function main(): Promise<void> {
 
   // ① 产物与随包文件：5.9-c 的许可记账、5.9-b 的 app-update.yml、5.9-d 的首屏都要求"真的在安装包里"。
   requireStep('冒烟 1/6 产物存在', existsSync(exe), exe);
+  const exeSha256 = createHash('sha256').update(readFileSync(exe)).digest('hex');
+  say(`产物指纹：${exe} · ${String(statSync(exe).size)} bytes · SHA256=${exeSha256}`);
   const resourcesDir =
     process.platform === 'darwin'
       ? path.join(path.dirname(exe), '..', 'Resources')
@@ -240,6 +267,11 @@ async function main(): Promise<void> {
   }
 
   // ③ 启动产物：全新 userData（不抢用户正在装的那份，§9）+ CDP 端口。
+  // 打包产物必须从干净环境起：取证宿主若带着 `ELECTRON_RUN_AS_NODE=1`，Electron 会把这些参数当 Node 参数
+  // 直接 `bad option` 退出；`ELECTRON_RENDERER_URL` 则会把装机版偷换成 dev 页面，两个都必须删掉。
+  const appEnv = { ...process.env };
+  delete appEnv.ELECTRON_RUN_AS_NODE;
+  delete appEnv.ELECTRON_RENDERER_URL;
   const app = spawn(
     exe,
     [
@@ -249,6 +281,7 @@ async function main(): Promise<void> {
     ],
     {
       cwd: repoRoot,
+      env: appEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -268,19 +301,51 @@ async function main(): Promise<void> {
   const sawPrivacy = await waitForSelector(bridge, '[data-testid="privacy-notice"]', 10_000);
   if (sawPrivacy) await bridge.click({ selector: '[data-action="privacy-acknowledge"]' });
   const tabsReady = await waitForSelector(bridge, '[data-view="chat"]');
+  const homeReady = await waitForVisible(bridge, '[data-testid="home-panel"]');
   requireStep(
-    '冒烟 4/6 首屏与主界面都在',
-    tabsReady,
-    `隐私首屏出现过=${String(sawPrivacy)} · 视图切换口出现=${String(tabsReady)}`,
+    '冒烟 4/6 首屏 Home 与主界面都在',
+    tabsReady && homeReady,
+    `隐私首屏出现过=${String(sawPrivacy)} · 视图切换口=${String(tabsReady)} · Home 可见=${String(homeReady)}`,
   );
-  await bridge.click({ selector: '[data-view="chat"]' });
-  const chatVisible = await waitForSelector(bridge, '[data-testid="chat-panel"] [data-testid="chat-input"]');
-  requireStep('冒烟 4/6 进对话', chatVisible, `对话输入框可见=${String(chatVisible)}`);
+  await bridge.screenshot(path.join(repoRoot, 'docs/acceptance/10-job-journey/10.5-02-home-dist.png'));
+
+  // 冷启动的工具面与插件错误必须在产物里同样成立（10.12-11 的发布侧对照，不借 dev 读数）。
+  const tools = await callBridge<{ id: string }[]>(bridge, 'agent.tools.list');
+  const toolIds = tools.map((tool) => tool.id);
+  const requiredTools = ['outbound.greet.perform', 'outbound.deliver.perform', 'journey.search', 'journey.tailor'];
+  const pluginStatus = await callBridge<{ errorCount: number }>(bridge, 'plugins.status');
+  requireStep(
+    '冒烟 4/6 首启工具面与插件状态自洽',
+    toolIds.length === 22 && requiredTools.every((id) => toolIds.includes(id)) && pluginStatus.errorCount === 0,
+    `工具=${String(toolIds.length)} 只 · 必需项齐=${String(requiredTools.every((id) => toolIds.includes(id)))} · 插件错误=${String(pluginStatus.errorCount)}`,
+  );
+
+  // 对话已经迁到全局悬浮助手：打开它看输入框，再收起并确认面板真正不可见。
+  await bridge.click({ selector: '[data-action="assistant-capsule"]' });
+  const assistantVisible = await waitForVisible(
+    bridge,
+    '[data-testid="assistant-panel"][data-state="open"] [data-testid="chat-input"]',
+  );
+  requireStep('冒烟 4/6 助手可呼出', assistantVisible, `助手输入框可见=${String(assistantVisible)}`);
+  await bridge.click({ selector: '[data-action="assistant-close"]' });
+  const assistantClosed = await bridge.evaluate<boolean>(`(() => {
+    const capsule = document.querySelector('[data-action="assistant-capsule"]');
+    const panel = document.querySelector('[data-testid="assistant-panel"]');
+    return capsule?.getAttribute('data-state') === 'closed' && panel?.getBoundingClientRect().height === 0;
+  })()`);
+  requireStep('冒烟 4/6 助手可关闭', assistantClosed, `收起后面板高度 0=${String(assistantClosed)}`);
 
   // ④.5 把适配器切回**仿站**知识包（P8 8.1-07）：随包发布的 `platform.boss` 从 8.1 起缺省是真站点那一份，
   // 而冒烟是自动化面，按 §7.2 只许打本机 fixture。配置只写内存、重启即失（§9 的 5.3-b），
   // 所以这一步既不动产物载荷，也不留下任何落盘痕迹。紧跟着把登记源读回来当一条机检判据。
   await callBridge(bridge, 'plugins.saveConfig', ['platform-boss', { pack: 'fixture' }]);
+  // 取证 guard 先钉装配包：不是 fixture 就立即中止，后面的会话/抓取一步都不许走（10.12-10 的脚本侧前置）。
+  const bossConfig = await callBridge<{ values: { pack?: string } }>(bridge, 'plugins.readConfig', ['platform-boss']);
+  requireStep(
+    '冒烟 4/6 fixture guard：装配包正确',
+    bossConfig.values.pack === 'fixture',
+    `platform-boss.pack=${String(bossConfig.values.pack)}`,
+  );
   const registered = await callBridge<{ platforms: { id: string; startUrl: string; origins?: string[] }[] }>(
     bridge,
     'platform.registry.list',
@@ -303,7 +368,15 @@ async function main(): Promise<void> {
     plans.map((plan) => `${plan.id}(${String(plan.nodeCount)})`).join(', '),
   );
   await callBridge(bridge, 'sessions.grantConsent', ['boss']);
-  await callBridge(bridge, 'sessions.open', ['boss']);
+  // 会话也必须挂本机仿站：`sessions.open('boss')` 的真站 startUrl 会被自动化闸正确拦住，不能拿它当 fixture。
+  await callBridge(bridge, 'sessions.open', ['fixture']);
+  const kernelSnapshot = await callBridge<{ url: string }>(bridge, 'browser.page.snapshot');
+  const kernelHost = new URL(kernelSnapshot.url).hostname;
+  requireStep(
+    '冒烟 5/6 内核只在回环',
+    ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(kernelHost),
+    `内核 URL=${kernelSnapshot.url}`,
+  );
   const started = await callBridge<RunView>(bridge, 'workflow.runner.start', [planId]);
   say(`· 起跑 runId=${started.runId} status=${started.status}`);
   const deadline = Date.now() + runTimeoutMs;
@@ -319,6 +392,31 @@ async function main(): Promise<void> {
     '冒烟 5/6 占位工作流跑通',
     view.status === 'done' && !view.requiresHuman,
     `status=${view.status} requiresHuman=${String(view.requiresHuman)} 节点=${stepReading || '无步骤读数'}`,
+  );
+
+  // ⑤.5 岗位卡与弹窗：工作流刚抓到的库内岗位必须能在产物界面打开，不停在「库里有了、界面看不着」。
+  await bridge.click({ selector: '[data-action="nav-jobs"]' });
+  await waitForVisible(bridge, '[data-testid="job-lab"]');
+  await bridge.click({ selector: '[data-action="list"]' });
+  const cardVisible = await waitForVisible(bridge, '[data-testid="jd-cards"] [data-job-card]');
+  requireStep('冒烟 5/6 本地仿站搜岗入库并出卡', cardVisible, `岗位卡可见=${String(cardVisible)}`);
+  await bridge.click({ selector: '[data-testid="jd-cards"] [data-job-card]' });
+  const modalVisible = await waitForVisible(bridge, '[data-testid="jd-detail-modal"]');
+  requireStep('冒烟 5/6 岗位弹窗可打开', modalVisible, `详情弹窗可见=${String(modalVisible)}`);
+  await bridge.screenshot(path.join(repoRoot, 'docs/acceptance/10-job-journey/10.5-02-job-modal-dist.png'));
+  await bridge.click({ selector: '[data-action="jd-detail-close"]' });
+  await sleep(300);
+  const modalClosed = await bridge.evaluate<boolean>(`(() => {
+    const modal = document.querySelector('[data-testid="jd-detail-modal"]');
+    // 关闭后组件会卸载：节点不存在就是关掉了；仍挂在 DOM 里时才看尺寸。
+    return !modal || modal.getBoundingClientRect().height === 0;
+  })()`);
+  const finalPlugins = await callBridge<{ errorCount: number }>(bridge, 'plugins.status');
+  const shellStatus = await callBridge<{ lastError?: string }>(bridge, 'shell.getStatus');
+  requireStep(
+    '冒烟 5/6 关键链无报错',
+    modalClosed && finalPlugins.errorCount === 0 && shellStatus.lastError === undefined,
+    `弹窗已关=${String(modalClosed)} · 插件错误=${String(finalPlugins.errorCount)} · shell.lastError=${String(shellStatus.lastError)}`,
   );
 
   // ⑥ 干净退出：走 CDP 的 `Browser.close`（不是 kill），产物进程自己收摊。
@@ -342,7 +440,7 @@ async function main(): Promise<void> {
     exited ? `Browser.close 后进程自行退出 code=${String(appExitCode)}` : '15s 内没退出，已 kill',
   );
 
-  const asarHeader = path.join(path.dirname(exe), 'resources', 'app.asar');
+  const asarHeader = path.join(resourcesDir, 'app.asar');
   say(
     `· 附读：app.asar ${existsSync(asarHeader) ? `${String(Math.round(readFileSync(asarHeader).byteLength / 1024 / 1024))} MiB` : '不在'}`,
   );
@@ -365,3 +463,6 @@ try {
   process.exit(1);
 }
 writeFileSync(logFile, `${lines.join('\n')}\n`, 'utf8');
+// 成功也要显式收摊：fixture 是在本进程里 listen 的长驻服务器，单写 `process.exitCode` 不会释放事件循环。
+// 产物此刻已经通过 Browser.close 自行退出，这里结束的是冒烟脚本与它自己的本机靶站。
+process.exit(0);

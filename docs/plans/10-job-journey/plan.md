@@ -1551,3 +1551,10 @@ interface JourneyContext {
 不要为它新增第二套计划器（违反 AGENTS.md §2 的「不新增第二套同类基础设施」）。
 
 **桩的边界（2026-11-24 裁定，不许扩）**：`StubLoopModel` 只按**逐字点名的工具 id** 出步骤，**不产参数**。所以批准之后停在「补信息」卡是**预期行为**（闸门还挡着，账本零增），不是缺陷；要验「批准后恰一次外发」就走真实路径——在「补信息」卡里把 `jobId` 等参数填齐 → 继续 → 账本与 `attempts` 各恰增 1，若该步是 deliver 再验 `delivery_records` 恰增 1 且 `ledger_id` 相同。**不要为了测试好写去扩展桩让它产参数**，那是给测试造第二套行为。
+
+### 14.33 第 14 片：构建与发布冒烟（2026-11-24）
+
+- **构建**：`pnpm dist:mac` → EXIT=0；macOS arm64 / x64 的 dmg+zip 均已产出并逐份记录大小与 SHA256，详见 `docs/acceptance/10-job-journey/10.5-02-dist-smoke.txt`。冒烟实际启动 `dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc`，不是 dev 或旧 bundle。
+- **产物冒烟**：`scripts/smoke-dist.ts` 在隔离 userData 中启动真包；首屏 Home、22 只工具、助手开合、fixture guard、本地仿站工作流、岗位卡与弹窗、关键链零插件错误、干净退出全部 PASS，冒烟 EXIT=0。
+- **脚本侧修正**：启动前删除 `ELECTRON_RUN_AS_NODE` 与 `ELECTRON_RENDERER_URL`；对齐 Home/悬浮助手；以可见尺寸判助手与弹窗；会话开 `fixture`；修正弹窗卸载判据与 mac 的 asar 路径；成功后显式收掉进程内 fixture。
+- **受阻**：Windows/Linux 在本机不能运行，标 `[!]`；macOS x64 只构建未运行；未签名/公证，不宣称可正式分发。真站不在本片，仍由用户本人在场的最后一片承担。
