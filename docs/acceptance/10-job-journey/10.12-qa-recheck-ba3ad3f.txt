@@ -58,3 +58,19 @@ node /tmp/qa12-w.mjs 900|1024|1280|1600|299    # 容器宽/内容盒/轨道/块�
 node cdp.mjs 10410 auto-cc /tmp/qa12-d5new.mjs  # D5 提示 + footer 指标 + 标签基线
 node cdp.mjs 10410 auto-cc /tmp/qa12-d1new.mjs  # 武装/取消 + 城市标签文本
 ```
+
+## 附：删除链在本版（`ba3ad3f`）重跑一次，不再引用上一版的 D2–D4
+
+上一条结论里 D2–D4/D6/D7 引的是 `6b067a3` 的读数。为了让整条删除链归到当前版本，在这版上再用
+**一条带投递态的岗位**（`1007`，跟踪态 `delivered`、卡片三个点全亮）跑一遍：
+
+| 步骤 | 读数 |
+| --- | --- |
+| 删前 | `jobs 66`、`usage_ledger 10`、`delivery_records 0`、`outbound_attempts 4`、`job_status_events 14`、`conversation_messages 0` |
+| 详情卡 | `keepsShown:true`（D5 提示在）、三点点亮 |
+| 确认删除（详情 footer 的 `jd-remove` → `jd-remove-confirm`） | 卡片 **66 → 65**、弹窗自动关、`jd-card-1007` 不在列表、`jobs` 里该行 **0** |
+| 删后 | `usage_ledger 10`、`delivery_records 0`、`outbound_attempts 4`、`conversation_messages 0` —— **逐项不变** |
+| 删后追踪 | `job_status_events` **14 不变**，该岗位的 `delivered` 事件**仍在** |
+
+**结论**：删除链（D1 武装/取消、D2 确认消失、D3 审计不动、D4 追踪不动、D6 列表同步、D7 幂等、
+D5 保留提示）在 `ba3ad3f` 上是**完整通过**的；剩下的 ③④ 是纯界面审美项，等下一版复拍。
