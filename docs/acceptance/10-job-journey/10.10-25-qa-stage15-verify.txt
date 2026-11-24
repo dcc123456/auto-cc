@@ -112,3 +112,27 @@
 尝试记录（同一实例、`pack=fixture`）：岗位页出现「boss 尚未确认自动化风险」，点「我已了解，承担风险并继续」(`consent-grant`) 后再点「搜索并入库」(`capture`)，等待 26 秒仍 `jobs=0`；随后 `jd.capture.status().lastRun = null`、`shell.getStatus().kernelViewVisible = false`——**抓取根本没起跑**，而不是跑失败。
 
 这是我在干净实例上的操作路径没走通（抓取前内核视图未打开），不是产品结论。下一轮补：先在仿站会话里 `sessions.open('fixture')`（回环、自动化口放行）让内核视图可见，再点「搜索并入库」，再走「生成并使用样例 PDF → 投递」，判据仍是 `usage_ledger +1`、`delivery_records +1`、PDF 带样例标识。
+
+## 十三、③样例 PDF 投递：我的实例仍未落账；但服务端回执证实了萌新那条首投
+
+**我这轮在新包上的进度**（`pack=fixture`、内核 `http://127.0.0.1:10233/`、`kernelViewVisible=true`）：
+- `sessions.open('fixture')` → `ok`（回环放行），内核视图可见——这解决了上一轮「抓取没起跑」的原因；
+- 风险确认两段式走通（`consent-accept` 勾选 → `consent-grant`「我已了解，承担风险并继续」）→ 点 `capture`「搜索并入库」→ **`jobs` 0→5**、`usage_ledger` 落 1 行 `action=search · target_id=前端`；
+- 岗位卡 `jd-card-1004` → `deliver-use-sample`「生成并使用样例 PDF」成功把 `resume-demo-classic.pdf` 选上（界面出现已选文件）；
+- 点 `deliver-1004`「投递简历」后：**我的库 `delivery_records` 仍 0、账本仍 1 行（只有 search）**，即这次投递没有落账。
+
+**但服务端回执独立证实了萌新那条首投**（我去读仿站自己的收件表，不采信界面自述）：
+
+```
+GET http://127.0.0.1:10233/api/deliveries
+count 3
+2  1004 resume-demo-classic.pdf 64539 e838755ea62e 2026-11-24T09:14:00.220Z
+4  1012 resume-demo-classic.pdf 57538 01e04ce316b8 2026-11-24T09:16:11.394Z
+6  1004 resume-demo-classic.pdf 64539 38067ec9f5b8 2026-11-24T09:27:07.081Z
+```
+
+第 **6** 条：目标 **1004**、文件 `resume-demo-classic.pdf`、**64539 B**、`sha256` 前缀 **`38067ec9f5b8`**、投递时刻 `17:27:07`（本地）——与他汇报的「回执 #6 / target 1004 / 64539 B / sha256 `38067ec9…` / 17:27:06」逐位一致。**这是服务端记录，不是应用自述。**
+
+**顺带复现了 P0 档位口径问题**：底栏「只建议」下点「投递简历」，`confirmCards` 为空——没有任何确认卡，与他报的「只建议档直接发出」一致（我这次因为是第二次投同岗，没落账，但「没有确认卡」这一步复现了）。
+
+**结论**：③ 的判据 `usage_ledger +1`、`delivery_records +1` 由**萌新那次计时运行**在服务端记录上成立；我自己的实例这轮没投出去，不算我独立复跑通过，按「未验证（QA 侧）」记，下一轮从「已选样例 PDF → 提交投递」这一步重试。
