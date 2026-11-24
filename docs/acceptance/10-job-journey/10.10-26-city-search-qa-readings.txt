@@ -84,3 +84,20 @@ usage_ledger 1（未增） / delivery_records 0
 ### 最终 HEAD 四门禁（隔离树独立复跑，`aa0da04`）
 
 `TYPECHECK_EXIT=0`、`LINT_EXIT=0`、`FORMAT_EXIT=0`、`TEST_EXIT=0`；**25 个包套件 / 2859 例全过、零失败**（`grep -cE "FAIL |failed [0-9]"` → 0）。
+
+## 五、再改包 `ba657b0`（dmg `4122aebe…`、157772085 B、asar `83d1169d…`）初验
+
+实例：`--remote-debugging-port=10450`、`--user-data-dir=/private/tmp/qa18-ud`、`settings.json` 只有 `pack=fixture`、窗口 `visibilityState=visible`。
+
+| 项 | 读数 | 结论 |
+| --- | --- | --- |
+| 授权格勾选控件（N2 UI） | `journey-auth-target-{1001,1002,1003,1004,1005,1007…1012}` **11 个**、`journey-auth-tailor-*` **11 个**（每岗「先定制这一岗」）、`journey-auth-reload`「重新读取库内岗位」都在 | **UI 面已落地**；「勾选 → 授权并开跑」端到端本轮未走 |
+| 未选文件点提交的可见原因（N6） | 提交后 amber：「还没选简历文件：先点「选择文件」，或用「生成并使用样例 PDF」备一份，再投递」 | **过** |
+| `deliver-submit` 可见性 | 表单**收起**时不存在；点开 `deliver.form-toggle` 后 `deliver-submit`「提交投递」与 `deliver-pick-file`/`deliver-use-sample`/`deliver.how-toggle` 同时出现；再点目标、点样例之后仍存在 | 存在，但**收起态完全没有**——新手若没展开就看不到任何提交口（与「点了没反应」同族） |
+| 只建议档拦截 + 「切到半自动并重发」 | **未取到**：提交被判在更前面的前置条件「还没选简历文件」上（amber 文案），从未走到档位拦截那一格 | 未验证 |
+| 「生成并使用样例 PDF」 | 点后等 30 秒以上仍**没有**「已选 xxx.pdf」，也没有秒数进度文案；表单底部始终是「还没选：留空就用设置里那一份」+ amber | **我这边没生成成功**，后续投递/追踪/同帧全部堵在这一格 |
+| 窗口闸（页面判据） | 本轮未测（asar 内 `OUTBOUND_WINDOW_NOT_VISIBLE` 命中 1） | 未验证 |
+| 投递后三处同帧（N3/N4） | 未投出，无法验 | 未验证 |
+| ETA / 样例 PDF 秒数 | 抓取阶段读到「第 4 轮 · 整轮结束 · 已入库 11/20 条」但**无秒数**；PDF 生成未成，也读不到秒数 | 未验证 |
+
+**卡点（要开发确认）**：在干净 `pack=fixture` 实例上点「生成并使用样例 PDF」，30 秒以上既无「已选 …pdf」也无进度秒数——请确认这条路是否需要先有母版简历、是否需要窗口前台/内核视图可见；我这边窗口是 `visible`、内核会话已开。另请确认「留空就用设置里那一份」是否能直接在无文件时提交（表单这么说，但 amber 又把提交挡回来，两句话互相矛盾）。
