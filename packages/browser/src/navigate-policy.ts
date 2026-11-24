@@ -13,10 +13,41 @@
  * `agent.pause` 审批）；外发仍只走平台适配器 + 授权单 + 额度闸门。两者都不再靠「能不能打开
  * 这个地址」来挡，所以名单不在这里复活。
  */
-import { AppError } from '@auto-cc/core';
+import { AppError, isLoopbackHost } from '@auto-cc/core';
 
 /** 可导航的协议：`javascript:` 与 `data:` 在页面上下文里就是脚本执行，不能当导航目标。 */
 const NAVIGABLE_PROTOCOLS = new Set(['http:', 'https:']);
+
+/**
+ * 回环主机名（2026-11-24 红线事故后的默认许可面）。
+ *
+ * 事故经过：一份副本实例的 `platform-boss.pack` 仍是 `real`，取证脚本一次 `jd.capture.run`
+ * 就把自动化导航带到了真实招聘站点并抓了一屏。规则一直写着「自动化永不访问真实平台」，但它只靠人记住。
+ * 所以默认许可面收成回环地址：**自动化**只能在本机靶站上跑，真实站点由人自己在视图里点。
+ */
+/**
+ * 自动化导航的目标判定：非回环地址一律拒绝，除非装配侧显式放行。
+ *
+ * 为什么闸在导航这一处：抓取、打招呼、投递、工作流节点全部要先把内核视图导到目标页，
+ * 这里是自动化唯一绕不过去的咽喉；放在每个能力包里就要各写一遍，早晚漏一处。
+ * @param rawUrl 自动化给出的地址（不可信输入）
+ * @param allowRealHosts 装配侧的显式放行（人工在场时才该为 true）
+ * @returns 允许导航的目标 URL
+ * @throws `NAVIGATE_URL_REJECTED` 协议/解析不合；`REAL_PLATFORM_AUTOMATION_BLOCKED` 非回环且未放行
+ */
+export { isLoopbackHost };
+
+export function resolveAutomationUrl(rawUrl: string, allowRealHosts: boolean): URL {
+  const parsed = resolveNavigableUrl(rawUrl);
+  if (allowRealHosts || isLoopbackHost(parsed.hostname)) return parsed;
+  throw new AppError(
+    'REAL_PLATFORM_AUTOMATION_BLOCKED',
+    `自动化不导航到非本机地址：${parsed.href}（host ${parsed.hostname}）。真实平台只由人自己在视图里操作；` +
+      '确需人工在场跑自动化，先由装配侧显式打开 allowRealAutomation',
+    'browser',
+    { url: parsed.href, host: parsed.hostname },
+  );
+}
 
 /**
  * 校验并解析一次导航目标。

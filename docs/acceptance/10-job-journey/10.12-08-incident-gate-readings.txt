@@ -1,0 +1,62 @@
+10.12-08 红线事故后的产品级 fail-closed 闸（2026-11-24，开发侧）
+
+事故：一份副本实例的 `platform-boss.pack` 仍是 `real`，取证脚本一次 `jd.capture.run` 就把自动化导航带到
+真实站点并抓了一屏（外发 0）。根因不是某条代码错，而是「自动化永不访问真实平台」这条规则**只靠人记住**。
+
+**闸落在哪**
+- `packages/browser/src/navigate-policy.ts` 新增 `resolveAutomationUrl(url, allowRealHosts)`：
+  非回环主机一律抛 `REAL_PLATFORM_AUTOMATION_BLOCKED`（`details` 带 `url` 与 `host`）。
+- `packages/browser/src/index.ts` 的 `navigate(url, source = 'automation')`：来源只分两类——
+  **人**在地址栏/会话面板/岗位卡里给的地址（`source: 'user'`）放行；**其余一律按自动化算**（缺省即最严）。
+- 为什么闸在这里：抓取、打招呼、投递、工作流导航节点全部要先经 `browser.page.navigate`，
+  这是自动化唯一绕不过去的咽喉（`grep` 核过：adapter 的 `page.navigate` 与 `node-executors` 都走它）。
+- 显式例外：`browser.page` 的配置键 `allowRealAutomation`（缺省 `false`）。人工在场的真实链路才开，用完即关。
+
+**活体读数（默认装配包先跑 fixture，再切回 real）**
+
+| 步 | 读数 |
+| --- | --- |
+| `pack = fixture` + `jd.capture.run` | `ok:true`，`containers:1 / stored:1 / captured jobId 1001`，快照 URL `http://127.0.0.1:10233/boss/detail?jobId=1001` |
+| 切 `pack = real` | `plugins.readConfig('platform-boss').values.pack = "real"` |
+| 自动化导航到真实站点 | `ok:false`、**`REAL_PLATFORM_AUTOMATION_BLOCKED`**，`details { url: "https://www.zhipin.com/web/geek/jobs?query=…", host: "www.zhipin.com" }` |
+| 同一次真站装配下 `jd.capture.run` | `ok:false`、**`CONSENT_REQUIRED`**（该实例未签 boss 风险确认）——**一次导航都没发生** |
+| `usage_ledger` | 1 → **1**（零增）；`outbound_attempts` 0 |
+| 导航之后快照 | 仍是 `http://127.0.0.1:10233/boss/detail?jobId=1001`（视图没有被带走） |
+
+说明一句：那条 `jd.capture.run` 停在 `CONSENT_REQUIRED` 是**更前面的一道闸**（这台实例没签过 boss）。
+签过之后它会走到 `browser.page.navigate`，也就是上面那条 `REAL_PLATFORM_AUTOMATION_BLOCKED` 的同一条路——
+我**没有**在 real 装配上签那份确认去复验，因为一旦闸有缝就会真的打到真实站点；这一条改用单元判据钉：
+`navigate-policy.test.ts` 的四个用例（回环放行 / 真实域名拒 / 显式放行才过 / 协议闸在前）。
+
+**取证脚本的前置断言（从这轮起写死）**
+```js
+// 起手第一件事：装配必须是 fixture，内核必须在回环
+const pack = (await bridge('plugins.readConfig', ['platform-boss']))?.value?.values?.pack;
+if (pack !== 'fixture') throw new Error(`ABORT: pack=${pack}，取证只许 fixture`);
+const url = (await bridge('browser.page.snapshot', []))?.value?.url ?? '';
+const host = new URL(url).hostname;
+if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error(`ABORT: 内核不在回环（${host}）`);
+```
+判据：任一条不成立就**退出非 0**，不拍图、不写证据。
+
+
+## 补：会话挂载那条入口也拦（2026-11-24 补窗）
+
+事故里五个接触点有**两条是「会话挂载」**（`内核视图已挂载会话：平台 boss · https://www.zhipin.com/`），
+它不经导航却照样把真站 startUrl 装进视图——只拦 `browser.page.navigate` 等于留一条后门。
+
+- 闸：`packages/sessions/src/index.ts` 的 `open(platform, source = 'automation')`——非回环 startUrl 只在
+  `source:'user'`（人在会话面板里点）这条路上放行；其余一律 `REAL_PLATFORM_AUTOMATION_BLOCKED`，
+  `details { pack, host, action: 'mount' }`。装配侧开关 `sessions.allowRealAutomation`（`cordis.yml` 显式 `false`）。
+- 回环判定抽到 `@auto-cc/core` 的 `isLoopbackHost`（导航与挂载共用一处，§2.2 不留第二份）。
+
+**活体负对照（同一实例：先 fixture 跑通，再切 real）**
+
+| 步 | 读数 |
+| --- | --- |
+| `pack=real` + `sessions.open('boss')`（自动化） | **`REAL_PLATFORM_AUTOMATION_BLOCKED`**、`details { pack:"boss", host:"www.zhipin.com", action:"mount" }` |
+| 同一步前后 `usage_ledger` | 1 → **1**（零增） |
+| `pack=real` + `browser.page.navigate(真实列表页)` | 同上码，`details { url, host }` |
+| `pack=real` + `jd.capture.run` | `CONSENT_REQUIRED`（该实例未签 boss，更前面一道闸），**零导航** |
+| 视图快照 | 仍是 `http://127.0.0.1:10233/boss/detail?jobId=1001`（没有被带到真站） |
+| `pack=fixture` + `jd.capture.run` | `ok:true`、`containers:1 / stored:1`（本地靶站照常放行） |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveNavigableUrl } from './navigate-policy.js';
+import { isLoopbackHost, resolveAutomationUrl, resolveNavigableUrl } from './navigate-policy.js';
 
 /**
  * 跑一次许可判定并取回结构化错误的码。
@@ -50,5 +50,31 @@ describe('导航许可判定（spec 2.1-03 / 2.1-04，2026-11-22 裁定：真实
     expect(errorCode(() => resolveNavigableUrl('boss/detail'))).toBe('NAVIGATE_URL_REJECTED');
     expect(() => resolveNavigableUrl('boss/detail')).toThrow(/无法解析/);
     expect(errorCode(() => resolveNavigableUrl(''))).toBe('NAVIGATE_URL_REJECTED');
+  });
+});
+
+describe('自动化导航的 fail-closed 闸（2026-11-24 红线事故）', () => {
+  it('回环地址照常放行，真实域名一律拒，码是 REAL_PLATFORM_AUTOMATION_BLOCKED', () => {
+    expect(resolveAutomationUrl('http://127.0.0.1:10233/chat?targetId=1001', false).hostname).toBe('127.0.0.1');
+    expect(resolveAutomationUrl('http://localhost:10233/', false).hostname).toBe('localhost');
+    expect(errorCode(() => resolveAutomationUrl('https://www.zhipin.com/web/geek/jobs?query=前端', false))).toBe(
+      'REAL_PLATFORM_AUTOMATION_BLOCKED',
+    );
+  });
+
+  it('装配侧显式放行时才让真实域名过去（人工在场的例外）', () => {
+    expect(resolveAutomationUrl('https://www.zhipin.com/web/geek/jobs', true).hostname).toBe('www.zhipin.com');
+  });
+
+  it('协议闸仍然在前：data:/javascript: 连「放行」都不该过', () => {
+    expect(errorCode(() => resolveAutomationUrl('javascript:alert(1)', true))).toBe('NAVIGATE_URL_REJECTED');
+  });
+
+  it('回环判定覆盖 localhost 与 IPv6 回环，公网域名与内网地址都不算', () => {
+    expect(isLoopbackHost('127.0.0.1')).toBe(true);
+    expect(isLoopbackHost('localhost')).toBe(true);
+    expect(isLoopbackHost('::1')).toBe(true);
+    expect(isLoopbackHost('www.zhipin.com')).toBe(false);
+    expect(isLoopbackHost('192.168.1.10')).toBe(false);
   });
 });

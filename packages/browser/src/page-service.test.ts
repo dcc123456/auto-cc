@@ -34,6 +34,8 @@ import {
  */
 const DEFAULT_PAGE_CONFIG: BrowserPageConfig = {
   navigateTimeoutMs: 1_000,
+  // 自动化只跑本机靶站（2026-11-24 红线事故后的缺省）；要演真实域名才在单个用例里改这一格。
+  allowRealAutomation: false,
   snapshotTextLimit: 4_000,
   extractRowLimit: 12,
   extractTextLimit: 4_000,
@@ -200,11 +202,11 @@ describe('导航许可（2026-11-22 裁定：只剩协议一道）', () => {
       return Promise.resolve();
     });
     const { page } = await boot(contents);
-    await expect(page.navigate('https://other.example/jd/1')).resolves.toMatchObject({
+    await expect(page.navigate('http://127.0.0.1:10233/boss/detail?jobId=1001')).resolves.toMatchObject({
       readyState: 'complete',
       url: 'http://127.0.0.1:10233/boss?query=frontend',
     });
-    expect(urls).toEqual(['https://other.example/jd/1']);
+    expect(urls).toEqual(['http://127.0.0.1:10233/boss/detail?jobId=1001']);
   });
 
   it('非 http(s) 协议仍被拦下，一次也没碰到内核', async () => {
@@ -271,9 +273,11 @@ describe('没有会话时自己起会话（2026-11-23 裁定）', () => {
     rig.sessions.onEnsure = () => {
       rig.shell.contents = contents;
     };
-    await expect(rig.page.navigate('https://other.example/jd/1')).resolves.toMatchObject({ readyState: 'complete' });
+    await expect(rig.page.navigate('http://127.0.0.1:10233/boss/detail?jobId=1001')).resolves.toMatchObject({
+      readyState: 'complete',
+    });
     expect(rig.sessions.ensureCalls).toBe(1);
-    expect(urls).toEqual(['https://other.example/jd/1']);
+    expect(urls).toEqual(['http://127.0.0.1:10233/boss/detail?jobId=1001']);
   });
 
   it('已有会话时不动会话：会话一个都不起，导航走原来那条路', async () => {
@@ -284,14 +288,16 @@ describe('没有会话时自己起会话（2026-11-23 裁定）', () => {
       return Promise.resolve();
     });
     const rig = await boot(contents);
-    await expect(rig.page.navigate('https://other.example/jd/2')).resolves.toMatchObject({ readyState: 'complete' });
+    await expect(rig.page.navigate('http://127.0.0.1:10233/boss/detail?jobId=1002')).resolves.toMatchObject({
+      readyState: 'complete',
+    });
     expect(rig.sessions.ensureCalls).toBe(0);
-    expect(urls).toEqual(['https://other.example/jd/2']);
+    expect(urls).toEqual(['http://127.0.0.1:10233/boss/detail?jobId=1002']);
   });
 
   it('会话起完仍然拿不到视图时如实报 NO_KERNEL_SESSION，不假装导航成功', async () => {
     const rig = await boot(null);
-    await expect(rig.page.navigate('https://other.example/jd/3')).rejects.toMatchObject({
+    await expect(rig.page.navigate('http://127.0.0.1:10233/boss/detail?jobId=1003')).rejects.toMatchObject({
       code: 'NO_KERNEL_SESSION',
     });
     expect(rig.sessions.ensureCalls).toBe(1);

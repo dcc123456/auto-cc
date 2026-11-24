@@ -84,6 +84,10 @@ export type AppErrorCode =
   // 与 `NAVIGATE_URL_REJECTED` 分开：那个码说的是「这个地址不让去」（还能换个地址），
   // 这个说的是「这块页面上助手不动手」，两者在界面上的下一步指引完全不同。
   | 'WRITE_ORIGIN_UNREGISTERED'
+  // 真实平台上的自动化（2026-11-24 红线事故后的 fail-closed 闸）：非回环地址上的**自动化**导航/抓取一律拒绝，
+  // 只有装配侧显式打开 `allowRealAutomation`（人工在场时才开）才放行。与 `NAVIGATE_URL_REJECTED` 分开：
+  // 那个码说的是「这个地址不让去」，这个说的是「这个地址人可以开、自动化不许开」。
+  | 'REAL_PLATFORM_AUTOMATION_BLOCKED'
   | 'NO_KERNEL_SESSION'
   // 人工接管（spec 5.5-01）：界面上那只「我来接手」收的是一句人写的理由，超长就结构化失败，
   // 不静默截断——截断等于把人写的话改成我们想听的样子，而这句话是审计里那条接管的原文。

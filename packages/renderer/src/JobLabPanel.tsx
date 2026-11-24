@@ -477,7 +477,7 @@ export function JobLabPanel() {
               const status = await bridge.sessions.status();
               if (!status.ok) return { ok: false, error: status.error };
               if (status.value.activePlatform !== effectivePlatform) {
-                const opened = await bridge.sessions.open(effectivePlatform);
+                const opened = await bridge.sessions.open(effectivePlatform, 'user');
                 if (!opened.ok) return { ok: false, error: opened.error };
               }
             }
@@ -663,9 +663,9 @@ export function JobLabPanel() {
       () => {
         if (!bridge) return undefined;
         return (async () => {
-          const opened = await bridge.sessions.open(row.platform);
+          const opened = await bridge.sessions.open(row.platform, 'user');
           if (!opened.ok) return opened;
-          return await bridge.browser['page.navigate'](row.sourceUrl);
+          return await bridge.browser['page.navigate'](row.sourceUrl, 'user');
         })();
       },
       {

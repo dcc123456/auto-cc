@@ -2859,7 +2859,7 @@ export interface BridgeSignatures {
   /** 会话总览：分区、落盘路径、cookie 名与登录判定（spec 1.8-01 / 1.8-04）。 */
   'sessions.status': { args: []; returns: SessionsStatusView };
   /** 让内核视图按该平台的分区打开起始地址（spec 1.8-02 / 1.8-08）。 */
-  'sessions.open': { args: [platform: string]; returns: SessionsStatusView };
+  'sessions.open': { args: [platform: string, source?: 'user' | 'automation']; returns: SessionsStatusView };
   /** 只读 cookie 判登录态，不发站点请求；失效时顺带推 `session/expired`（spec 1.8-06）。 */
   'sessions.probe': { args: [platform: string]; returns: SessionPlatformView };
   /** 清掉该平台分区的 cookie，用于验收「退出登录即清除」（spec 1.8-04）。 */
@@ -2877,7 +2877,7 @@ export interface BridgeSignatures {
    */
   'sessions.grantConsent': { args: [platform: string]; returns: SessionConsentView };
   /** 导航到已登记平台的同源地址，装载落定后回一份页面快照（spec 2.1-03）。 */
-  'browser.page.navigate': { args: [url: string]; returns: KernelPageSnapshotView };
+  'browser.page.navigate': { args: [url: string, source?: 'user' | 'automation']; returns: KernelPageSnapshotView };
   /** 读取当前页面快照；可选参数是本次正文上限（字符），上限受服务配置钳制。 */
   'browser.page.snapshot': { args: [maxChars?: number]; returns: KernelPageSnapshotView };
   /** 2.3-01：按「容器 + 字段声明」批量读一页，一次调用读完 N 个容器 × M 个字段。 */

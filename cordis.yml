@@ -170,6 +170,9 @@ plugins:
   - id: sessions
     dependsOn: [shell]
     config:
+      # 会话挂载同一条红线（事故里两条接触点就是挂载）：自动化不许把非回环 startUrl 装进内核视图，
+      # 人自己点会话面板那一路走 `source:'user'`。与 `browser.allowRealAutomation` 是两道独立门，缺一不可。
+      allowRealAutomation: false
       platforms:
         - id: fixture
           startUrl: http://127.0.0.1:10233/
@@ -201,6 +204,10 @@ plugins:
     dependsOn: [sessions]
     config:
       navigateTimeoutMs: 10000
+      # 自动化只许跑本机靶站（2026-11-24 红线事故的 fail-closed 闸）：非回环地址上的**自动化**导航一律
+      # `REAL_PLATFORM_AUTOMATION_BLOCKED`；人在地址栏/会话面板里给的地址走 `source:'user'`，不受这条限制。
+      # 人工在场跑真实链路时才改动这一格，用完即关。
+      allowRealAutomation: false
       snapshotTextLimit: 4000
       # 批量抽取的两道上限（spec 2.3-01）：一屏回传多少张卡、每个字段带回多少字。
       # 写成配置是为了在装配面板上把 `extractRowLimit` 调到 3，看界面如何如实报告「被截断」。

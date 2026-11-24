@@ -22,6 +22,7 @@ import { app, session, type WebRequestFilter } from 'electron';
 import {
   AppError,
   asApp,
+  isLoopbackHost,
   Service,
   agentTool,
   registerAgentTools,
@@ -93,6 +94,14 @@ const platformSchema = z.strictObject({
 
 export const sessionsSchema = z.strictObject({
   platforms: z.array(platformSchema).min(1),
+  /**
+   * 允不允许**自动化**把内核视图挂到非本机地址（2026-11-24 红线事故）。
+   *
+   * 事故里两条接触点是**会话挂载**（`sessions.open` 直接把真站 startUrl 装进视图），只拦导航挡不住它。
+   * 缺省 false：自动化只能挂本机靶站，真实站点由人在会话面板里自己点（那条路走 `source:'user'`）。
+   * 人工在场跑真实链路时才显式打开，用完即关。
+   */
+  allowRealAutomation: z.boolean().default(false),
 });
 
 /** 校验后的配置形状（调用点与测试引用它，而不是手写一遍 zod 推断）。 */
@@ -138,7 +147,11 @@ export class SessionsService extends Service implements ConsentGate {
     super(ctx, 'sessions');
     // 必须接住第二个实参：cordis 传的是校验后的配置，只声明一个参数会让调用点报 TS2345。
     this.platforms = options.platforms;
+    this.allowRealAutomation = options.allowRealAutomation;
   }
+
+  /** 自动化能不能把视图挂到非回环 startUrl（装配侧显式例外，缺省关）。 */
+  private readonly allowRealAutomation: boolean;
 
   /**
    * 壳层的视图宿主句柄。
@@ -259,8 +272,20 @@ export class SessionsService extends Service implements ConsentGate {
    * @param platform 平台标识，必须在 `cordis.yml` 的 `sessions.platforms` 里
    * @returns 挂载后的会话快照
    */
-  open = async (platform: string): Promise<SessionsStatusView> => {
+  open = async (platform: string, source: 'user' | 'automation' = 'automation'): Promise<SessionsStatusView> => {
     const config = this.platformOrThrow(platform);
+    // 会话挂载也是一条「自动化把真站装进视图」的路（2026-11-24 事故里两周接触点就是它）：
+    // 非回环 startUrl 只在**人**点的这条路上放行，其余一律 fail-closed，除非装配侧显式打开 allowRealAutomation。
+    const startHost = new URL(config.startUrl).hostname;
+    if (source !== 'user' && !isLoopbackHost(startHost) && !this.allowRealAutomation) {
+      throw new AppError(
+        'REAL_PLATFORM_AUTOMATION_BLOCKED',
+        `自动化不把内核视图挂到非本机地址：${config.startUrl}（host ${startHost}）。` +
+          '真实平台只由人自己在会话面板里打开；确需人工在场跑自动化，先由装配侧显式打开 allowRealAutomation',
+        'sessions',
+        { pack: config.id, host: startHost, action: 'mount' },
+      );
+    }
     // 第一次打开前把旧的分平台登录态并进来（只 boss/fixture，web 不并）。
     await this.mergeLegacyPartitions();
     // 一个浏览器分区：平台只决定「打开哪个地址」，不再各开一份登录态（2026-11-22 裁定）。

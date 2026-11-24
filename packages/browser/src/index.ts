@@ -38,11 +38,18 @@ import {
   toSnapshotReading,
 } from './page-script.js';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
-import { resolveNavigableUrl } from './navigate-policy.js';
+import { resolveAutomationUrl, resolveNavigableUrl } from './navigate-policy.js';
 
 export const browserPageSchema = z.strictObject({
   /** 一次导航等待页面装载完成的上限（毫秒）；超时不报错，由快照读数如实反映 `readyState`。 */
   navigateTimeoutMs: z.number().int().min(500).max(30_000).default(10_000),
+  /**
+   * 允不允许**自动化**把内核视图导航到非本机地址（2026-11-24 红线事故）。
+   *
+   * 缺省 false 是刻意的 fail-closed：自动化只跑本机靶站，真实站点由人自己在视图里点。
+   * 只有人工在场的真实链路取证才该把它打开，用完就关——它不是「默认值」，是一次显式例外。
+   */
+  allowRealAutomation: z.boolean().default(false),
   /** 单次快照取回的正文上限（字符）。 */
   snapshotTextLimit: z.number().int().min(200).max(50_000).default(SNAPSHOT_TEXT_LIMIT),
   /** 一次批量抽取最多回传多少个容器（条）。 */
@@ -103,8 +110,11 @@ export class BrowserPageService extends Service {
    * @returns 导航落定后的页面快照
    * @throws 协议不允许或地址解析失败时 `NAVIGATE_URL_REJECTED`；没有已挂载会话时 `NO_KERNEL_SESSION`
    */
-  navigate = async (url: string): Promise<KernelPageSnapshotView> => {
-    const target = resolveNavigableUrl(url);
+  navigate = async (url: string, source: 'user' | 'automation' = 'automation'): Promise<KernelPageSnapshotView> => {
+    // 来源只分两类：**人在地址栏/会话面板里给的地址**（user）与**自动化驱动**（其余一律按 automation 算，缺省即最严）。
+    // 真实站点上自动化会被 `resolveAutomationUrl` 拒掉，除非装配侧显式放行（人工在场）。
+    const target =
+      source === 'user' ? resolveNavigableUrl(url) : resolveAutomationUrl(url, this.config.allowRealAutomation);
     // 地址栏是用户的第一入口：还没开过会话时自己把浏览器起起来，别让人先去「运行记录」点一下
     // （2026-11-23 用户实测：无会话时输 baidu 表现为「点了没反应」，其实是 NO_KERNEL_SESSION）。
     const contents = await this.ensurePage();
