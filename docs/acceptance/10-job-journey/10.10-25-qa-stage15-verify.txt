@@ -94,3 +94,21 @@
 1. **样例 PDF 投递**（③）：本轮仍未走通——新包实例里没有可投岗位，且批量探针后半段渲染层卡住（`evalTimedOut`），读数不可用。需要在仿站造一条可投岗位后重跑：生成样例 PDF → 投递 → `usage_ledger +1`、`delivery_records +1`、PDF 带样例标识。
 2. **真实平台方向阻断**（④）：`pack=real` 下登记处读数已确认——`origins:["https://www.zhipin.com"]`、内核仍 placeholder、未点登录未导航；但首屏「接下来」区在我这次刷新后为空（疑似仍在加载），**「有真实平台且未登录时仍出现登录步」这一点本轮未取到有效读数**，标未验证。
 3. 另：短文本粘贴的误导文案已由 `fa43cb4` 修掉，但**该提交不在本包内**（本包 asar 17:14）；若计时路径撞上「粘贴不到 100 字」，按旧文案处理并单独重跑该步。
+
+## 十一、④真实平台方向阻断（已取到，两个方向都成立）
+
+同一构建、同一实例，只读不点不导航：
+
+| pack | 登记处 origins | 首屏主行动 | 「接下来」首条 | `data-blocker` | 内核视图 |
+| --- | --- | --- | --- | --- | --- |
+| `fixture` | `["http://127.0.0.1:10233"]` | 导入一份简历当母版 | 导入一份简历当母版 | `resume` | placeholder |
+| `real` | `["https://www.zhipin.com"]` | **先登录 BOSS 直聘** | **先登录 BOSS 直聘** | **`login`** | 仍 placeholder（未挂载） |
+
+- 切到 `real` 只做了 `plugins.saveConfig` + 刷新渲染层，**没有点登录按钮、没有调用任何导航**；内核视图全程是 placeholder。
+- 结论：改动没有把真实平台的登录阻断弄丢——真实平台在场且未登录时，首屏阻断条变 `login`、主行动回到「先登录 BOSS 直聘」；纯仿站时退回 `resume`。
+
+## 十二、③样例 PDF 投递：本轮仍未取到（按未验证报）
+
+尝试记录（同一实例、`pack=fixture`）：岗位页出现「boss 尚未确认自动化风险」，点「我已了解，承担风险并继续」(`consent-grant`) 后再点「搜索并入库」(`capture`)，等待 26 秒仍 `jobs=0`；随后 `jd.capture.status().lastRun = null`、`shell.getStatus().kernelViewVisible = false`——**抓取根本没起跑**，而不是跑失败。
+
+这是我在干净实例上的操作路径没走通（抓取前内核视图未打开），不是产品结论。下一轮补：先在仿站会话里 `sessions.open('fixture')`（回环、自动化口放行）让内核视图可见，再点「搜索并入库」，再走「生成并使用样例 PDF → 投递」，判据仍是 `usage_ledger +1`、`delivery_records +1`、PDF 带样例标识。
