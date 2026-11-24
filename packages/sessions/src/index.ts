@@ -307,6 +307,13 @@ export class SessionsService extends Service implements ConsentGate {
   openFromUser = async (platform: string): Promise<SessionsStatusView> => {
     assertUserCall('sessions.openFromUser');
     const config = this.platformOrThrow(platform);
+    // 审计（2026-11-24 PMO 要求）：人这一路允许把真站挂进视图，但每一次都要留一条可数的读数。
+    const startHost = new URL(config.startUrl).hostname;
+    if (!isLoopbackHost(startHost)) {
+      this.ctx.logger.info(
+        `人这一路把内核视图挂到非回环主机：source=user platform=${config.id} host=${startHost} at=${String(Date.now())}`,
+      );
+    }
     await this.mergeLegacyPartitions();
     this.host.mountKernelSite(BROWSER_PARTITION, config.startUrl);
     this.ctx.logger.info(

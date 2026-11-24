@@ -81,3 +81,13 @@ PMO 指出的洞：原先 `navigate(url, source)` / `open(platform, source)` 的
   `navigateFromUser` 在没有网关标时 → `INVALID_ARGUMENT`）。
 - 活体复验（重构后重跑）：`pack=real` 下 `sessions.open('boss')` 仍 `REAL_PLATFORM_AUTOMATION_BLOCKED`
   （`details {pack, host, action:'mount'}`）、`browser.page.navigate(真实列表页)` 同码、账本 1→1、视图仍在本机。
+
+## 补：人那一路的真站接触审计（2026-11-24）
+
+两条 `…FromUser` 只要目标是非回环主机，就在主进程日志里各记一条 INFO：
+
+- `browser.page.navigateFromUser`：`人这一路导航到非回环主机：source=user host=<host> origin=<origin> at=<毫秒时刻>`；
+- `sessions.openFromUser`：`人这一路把内核视图挂到非回环主机：source=user platform=<平台> host=<host> at=<毫秒时刻>`。
+
+只记 `host` / `origin`，不写带查询串的完整地址（查询串可能有搜索词等个人数据）。回环目标不记（本地靶站不属于这条账）。
+这两行就是以后数「人这一路碰了几次真站」的唯一依据；不在取证脚本里调用 `…FromUser`，也不拿真站去验这条审计。

@@ -38,7 +38,7 @@ import {
   toSnapshotReading,
 } from './page-script.js';
 import type { SessionsService } from '@auto-cc/plugin-sessions';
-import { assertUserCall } from '@auto-cc/core';
+import { assertUserCall, isLoopbackHost } from '@auto-cc/core';
 import { resolveAutomationUrl, resolveNavigableUrl } from './navigate-policy.js';
 
 export const browserPageSchema = z.strictObject({
@@ -158,7 +158,15 @@ export class BrowserPageService extends Service {
    */
   navigateFromUser = async (url: string): Promise<KernelPageSnapshotView> => {
     assertUserCall('browser.page.navigateFromUser');
-    return await this.loadPage(resolveNavigableUrl(url));
+    const target = resolveNavigableUrl(url);
+    // 审计（2026-11-24 PMO 要求）：人这一路允许碰真站，但**得数得清碰了几次**。
+    // 只记 host 与 origin，不记带查询串的完整地址（那里可能有搜索词之类的个人数据）。
+    if (!isLoopbackHost(target.hostname)) {
+      this.ctx.logger.info(
+        `人这一路导航到非回环主机：source=user host=${target.hostname} origin=${target.origin} at=${String(Date.now())}`,
+      );
+    }
+    return await this.loadPage(target);
   };
 
   /**
