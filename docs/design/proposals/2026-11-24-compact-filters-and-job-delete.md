@@ -168,7 +168,7 @@
 
 ## 11. 视觉复核（2026-11-24，开发交版后）
 
-**复核对象**：`6b067a3` 之上的工作树（含未提交的 `@xs/@2xl` 类名与「已投递先提示」）。**方法**：独立实例（userData 副本 `tmp/design-review-1124/ud`、CDP 10430、未动开发在跑的那个），renderer 由同一个 vite（5173）服务；几何用 `Runtime.evaluate` 量、画面用 CDP 按元素裁剪拍。
+**复核对象**：`ba3ad3f`（列数按容器宽分档 + 已投递先提示，已提交）。**方法**：独立实例（userData 副本 `tmp/design-review-1124/ud`、CDP 10430、未动开发在跑的那个），renderer 由同一个 vite（5173）服务；几何用 `Runtime.evaluate` 量、画面用 CDP 按元素裁剪拍。
 
 ### 11.1 读数（结构这一层：过）
 
