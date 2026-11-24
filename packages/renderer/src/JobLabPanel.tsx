@@ -1394,8 +1394,18 @@ export function JobLabPanel() {
                     </ArmButton>
                     {/* 删除与主行动之间一道 1px 竖线：它们不是同一类动作，挨着排会被读成「一起按」 */}
                     <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-line-strong" />
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" data-testid="jd-action-target">
-                      {t('jd.actionTarget', { title: selectedRow.title, company: selectedRow.company })}
+                    {/* 目标句拆成两段（2026-11-24 设计师 §12 收尾项）：**说明可截、岗位身份不可截**。
+                        en 下四只按钮更宽，整句 + 中文岗位名装不进 293px；原先整段 truncate 会把「全栈工程师…」
+                        截掉，等于告诉人「这些动作只作用于某一行」却不说是哪一行。所以说明占可压缩的那一半，
+                        岗位身份 shrink-0 保持完整；真窄到身份也放不下时它自己截，不把按钮挤出去。 */}
+                    <span
+                      className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-slate-400"
+                      data-testid="jd-action-target"
+                    >
+                      <span className="min-w-0 truncate">{t('jd.actionTargetNote')}</span>
+                      <span className="shrink-0 max-w-full truncate text-slate-300">
+                        {t('jd.actionTargetSubject', { title: selectedRow.title, company: selectedRow.company })}
+                      </span>
                     </span>
                     <DeskButton
                       action="jd-open-page"

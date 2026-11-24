@@ -1,0 +1,24 @@
+10.12-09 footer 目标句拆段：说明可截、岗位身份不可截（2026-11-24，开发侧）
+
+**为什么拆**：footer 现在有删除 + 打开 + 生成 + 打招呼 + 投递五只按钮，en 下留给目标句只有 293px。
+原先整段 `truncate`，先被截掉的正是**岗位名**——界面在说「这些动作只作用于某一行」，却把「哪一行」吃掉。
+所以拆成两段：说明占可压缩的那一半（`truncate`），岗位身份 `shrink-0`，真窄到身份也放不下时它自己截、
+不把按钮挤出去。
+
+**改动**
+- `packages/renderer/src/JobLabPanel.tsx`：`jd-action-target` 由一段 `truncate` 改成 flex 两段
+  （说明 / 身份），`data-testid` 留在外层（读 `textContent` 的既有探针行为不变）。
+- 语言包拆键（zh/en 同步）：`jd.actionTargetNote`（说明句）、`jd.actionTargetSubject`（`{{title}} · {{company}}`）；
+  旧键 `jd.actionTarget` 删除，不留死键。
+
+**活体读数（1024×1000，fixture 岗位「React 前端工程师 · 云栖数据」）**
+
+| 语言 | footer 高 | 说明段 | 身份段 | 判 |
+| --- | --- | --- | --- | --- |
+| zh | **55** | 154 / 154，未截 | 145 / 145，未截 | 整句完整 |
+| en | **55** | 139 可见 / 需 215 → **截**（省略号） | 145 / 145，**未截** | 身份完整，说明让位 |
+
+说明：`w` 是渲染宽、`scrollW` 是自然宽；`clipped = scrollW > clientWidth + 1`。
+en 那 139 vs 215 就是「Every action here applie…」——这句被截是**设计要的结果**，岗位名必须留着。
+
+**截图**：`10.12-09-footer-en-splitspan.png`（en 1024：说明省略号收尾，`React 前端工程师 · 云栖数据` 完整）。

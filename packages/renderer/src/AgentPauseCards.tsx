@@ -335,11 +335,17 @@ export function AgentPauseCards({
     >
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <ShieldQuestion size={14} />
-        <h3 className="text-xs font-semibold text-slate-200">{t('agent.pause.heading')}</h3>
-        <span className="text-[10px] text-slate-400" data-pause-pending-count={String(count)}>
+        {/* 三个标签里只有最后那句说明是「可省的」：窄面板（助手停靠）下不钉住前两格，
+            汉字会一个字一行地竖着排（本轮活体截图 1540×920 里「等人表态」整列拆开就是这条）。
+            所以标题与单数 nowrap 不缩，说明占剩下的宽度、放不下就截。 */}
+        <h3 className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-200">{t('agent.pause.heading')}</h3>
+        <span
+          className="shrink-0 whitespace-nowrap text-[10px] text-slate-400"
+          data-pause-pending-count={String(count)}
+        >
           {t('agent.pause.pendingCount', { total: count })}
         </span>
-        <span className="ml-auto text-[10px] text-slate-500">{t('agent.pause.hint')}</span>
+        <span className="ml-auto min-w-0 truncate text-[10px] text-slate-500">{t('agent.pause.hint')}</span>
       </header>
       <div className="px-3 pb-2">
         {count === 0 ? (

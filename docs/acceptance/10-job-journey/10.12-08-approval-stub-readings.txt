@@ -1,0 +1,45 @@
+10.12-08 助手审批卡的确定性桩与三条活体读数（2026-11-24，开发侧）
+
+结论先说：**没有新增第二套桩**。agent loop 本来就有确定性计划器，本轮只是把它在现场打开，
+并证明它能走到安全点、把 `pause-approve / pause-deny / stop-run` 三只控件画出来。
+
+**桩在哪一层**
+- 实现：`packages/agent/src/loop/model.ts` 的 `StubLoopModel`（`LoopModel` 的桩实现；`draftPlan` 按
+  `findNamedTools(goal, knownToolIds)` 只认**逐字点名**的已注册工具 id，不猜意图、不造名字）。
+- 选择点：`packages/agent/src/loop/loop.ts` 的 `agent.loop` 构造器——`config.planner === 'stub'` 取桩，
+  否则取 `LmLoopModel`（真计划器，失败抛 `AGENT_PLANNER_*`，不回落成桩）。
+- 配置键：`agent-loop` 插件的 `planner`，取值 `'llm' | 'stub'`，schema **缺省 `stub`**（单测与「模型没配也
+  能看计划卡」的既有判据靠它）；应用装配 `cordis.yml` 显式写成 `planner: llm`，所以**产品里默认关**。
+
+**怎么开（仅测试/取证）**
+1. 现场改这一格：`window.autoCC.plugins.saveConfig('agent-loop', { planner: 'stub' })`
+   （装配面板/桥接口同一条口，写的是运行期内存层，**重启即失**——不会把桩带进产品）；
+   读回 `plugins.readConfig('agent-loop').values.planner` 核一遍。
+2. 档位换成半自动：`chat.session.setAutonomy('semi')`。**建议档 `suggest` 一步都不执行、根本不开确认单**
+   （判定口回 `TIER_SUGGEST_READ_ONLY`），所以取审批卡活体必须在 `semi`（或 `auto` 已做过一次性明示，但那时不再逐步问）。
+3. 起草走既有入口：助手输入框 `/plan outbound.greet.perform {"jobId":2}` → 发送 → 计划卡 →
+   按「确认并执行」（`confirm-run`）→ 循环在第一个安全点开确认单。
+
+**活体读数（fixture 装配，`AUTO_CC_WINDOW_SIZE=1280x900`，全程只打本机仿站）**
+
+| 读点 | 读数 |
+| --- | --- |
+| `planner` 改前 → 改后 | `llm` → `stub`（`plugins.readConfig('agent-loop').values.planner`） |
+| 计划卡 | `confirm-run` 可见；计划一步 `outbound.greet.perform`，effect `outbound` |
+| 确认后待决单 | `agent.pause.pending()` 1 张，`kind:"approval"`、`toolId:"outbound.greet.perform"`、`round:1` |
+| 三只控件 | `pause-approve` **57×24**、`pause-deny` **56×24**、`stop-run` **66×30**（`agent-run-panel` 在） |
+| 点「拒绝」 | run → `failed` / `PAUSE_DENIED`；待决单归 0；抬头文案「确认单已按你的表态收掉（第 1 轮）拒绝这一步：成功」 |
+| 点「停止」（另一条 run，单还开着） | 待决单归 0；抬头文案「确认单因这条任务让出而收掉（第 1 轮）：没人表过态，这一步没有执行」 |
+
+两条都是「没人批准 → 动作没发」，与本片「越权外发 0」同一向。
+
+**一条方法学坑（写下来省下一轮）**：从桥接口直接 `agent.loop.propose` 起的 run，面板**画得出来**，
+但按 `stop-run` 是空操作——`useAgentRun` 的 `runIdRef` 只在**界面自己** propose/confirm 的回调里赋值，
+桥接口绕过去的那条 run 界面不认。所以取「停止」活体必须走 `/plan` 那条界面路径（本轮第一次就是这么假阴性的）。
+
+**顺手修的一处**：确认单抬头在窄面板（助手停靠）里汉字会**一个字一行**竖着排（第一版截图里
+「等人表态」整列拆开）。改法：抬头标题与单数 `shrink-0 whitespace-nowrap`，说明那一句 `truncate`
+（它是三个标签里唯一可省的）。改后抬头一行、说明按省略号收尾。
+
+**截图**：`10.12-08-approval-card-stub.png`（确认单本体 + 批准/拒绝两颗键）、
+`10.12-08-run-panel-stub.png`（运行面板上的「立即停止」那一颗）。
