@@ -241,6 +241,14 @@
 >
 > 开发侧读数（**仅交叉印证，不作判绿**）：隐私 `summaryLines=3`、同意键在视口内、详情默认收起；Home 首步落简历页；三入口齐全；样例落库 `resume-demo`；助手两出口均在；仿站搜岗 11 张卡；首次外发 `usage_ledger 1→2`、`delivery_records 0→1`、对端 `count=1`（`resume-demo-classic.pdf`、57538 B）；内核只打 `127.0.0.1:10233`、日志 `zhipin` 命中 0。开发自报的「11 秒」是**机器时间**，不是人工上手计时，**不能当作 ≤10 分钟的证据**。
 
+> **2026-11-24 dated 注（验收中发现返工：窗口不可见闸在真包上退化；`deliver-submit` 走不到）**：最终包 `aa0da04`（dmg `51a6a365…`、157779934 B）上 QA 把应用隐藏成 `document.visibilityState="hidden"` 后半自动档投递，**没有**抛 `OUTBOUND_WINDOW_NOT_VISIBLE`，而是真去跑页面、失败成 `OUTBOUND_NOT_DELIVERED`，并落了一条脏行：`outbound_attempts { id:1, target_id:"1001", action:"deliver", status:"unknown", ledger_id:null, reason:"OUTBOUND_NOT_DELIVERED" }`（账本未增）。
+>
+> **为什么叫返工而不是新缺陷**：旧构建 `350cfd1` 那次能拦住，是因为当时内核会话没开、`kernelViewVisible=false` 让闸成立；闸的条件是 `!windowVisible || !kernelViewVisible`，而 `windowVisible` 取自 `BrowserWindow.isVisible()`——**macOS 上应用被隐藏或被完全遮挡时它仍返回 true**，页面自己的 `visibilityState` 却已是 hidden。本次内核视图开着，两个条件同时不成立，闸就漏了。**旧构建的「拦住」是另一条件兜住的，不是判据成立**。
+>
+> **判据钉死（隐藏态零 attempt 才算过）**：闸改成**页面层判据优先**——读内核视图 `webContents` 的 `document.visibilityState`（或 `getVisibilityState()`），叠加 `kernelViewVisible`；`hidden` 一律拒绝并抛同一个 `OUTBOUND_WINDOW_NOT_VISIBLE`，**`outbound_attempts` / `usage_ledger` / `delivery_records` 三表零增**。可见态正常发出。这条与 10.6-07「失败不写成功账、异常先对账」同向：闸没兜住等于凭空制造一条未知结局，正是它要防的东西。
+>
+> **另一项待确认（不判绿）**：`deliver-submit` 在「岗位卡 → 展开投递表单」这条路径下**始终没出现**（DOM 只有 `deliver-<jobId>` 与 `deliver.form-toggle`），因此「样例 PDF → 提交 → 账本 +1 / 投递记录 +1」以及依赖它的 N3（追踪同步）、N4 / N7（自动刷新）、N6（未选文件提示）、N2（授权格）**均未验**，一律不判绿。开发需回答该键在哪个容器/条件下渲染，并改成「展开表单即可见（禁用时写明原因）」。
+
 ## 10.11 新壳：Home 总览与全局助手（2026-11-21 裁定；实施落第 11 片）
 
 > 依据：plan §14 与三份提案（`docs/design/proposals/2026-11-21-home-assistant-{product,visual}.md` 及开发 spike）。

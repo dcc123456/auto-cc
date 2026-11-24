@@ -810,6 +810,21 @@ interface JourneyContext {
 
 **修完的判据顺序**：先给「只建议不直发、授权能勾选并开跑、投递后追踪与 Home 同帧更新、未选文件有明确提示」四条活体读数，再由 QA 独立复验，最后萌新在同一指纹上复测；三者齐了第 15 片才谈放行。
 
+#### 最终包 `aa0da04` 复验：两处通过、一处返工、五项未验（2026-11-24 夜）
+
+| 项               | 读数                                                                                                                                                                                                       | 判定                                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| 城市四项         | `pack=real`：点开 `activeElement` 是搜索框、373→1、回填「杭州」、关闭回焦 `jd-city`                                                                                                                        | **通过**（`pack=fixture` 仍走手输 INPUT）   |
+| 只建议档不直发   | `suggest` + 窗口可见投未投过的 `1001` → `ok:true, committed:false`「已备好 qa-sample.pdf，未发送」，三表零增                                                                                               | **通过**                                    |
+| 窗口不可见闸     | 应用隐藏（`visibilityState=hidden`，但 `isVisible()` 仍 true）后半自动投递 → **未抛 `OUTBOUND_WINDOW_NOT_VISIBLE`**，真跑页面失败并落 `unknown / OUTBOUND_NOT_DELIVERED` 脏行（`attempts id=1`、账本未增） | **返工（P0）**                              |
+| `deliver-submit` | 「岗位卡 → 展开投递表单」路径下始终不出现（DOM 只有 `deliver-<jobId>`、`deliver.form-toggle`）                                                                                                             | **待确认**，N3/N4/N7/N6/N2 因此未验，不判绿 |
+
+**返工定性（为什么不是新缺陷）**：闸条件为 `!windowVisible || !kernelViewVisible`，`windowVisible` 取自 `BrowserWindow.isVisible()`；macOS 上应用被隐藏或完全遮挡时它仍返回 true，而页面 `visibilityState` 已是 hidden。旧构建 `350cfd1` 能拦住，是因为当时内核会话没开、`kernelViewVisible=false` 兜住了——**旧构建的「拦住」不是判据成立**。这是「防脏数据」的闸没兜住，正好制造了它要防的那条 `unknown`。
+
+**修法与判据**：闸改为页面层判据优先——读内核视图 `webContents` 的 `document.visibilityState`（或 `getVisibilityState()`）并叠加 `kernelViewVisible`；`hidden` 一律拒绝、抛同一码，**三表零增（零 attempt）才算过**；可见态正常发出。与 10.6-07「失败不写成功账、异常先对账」同向。
+
+**下一轮必须补齐的读数**：① 隐藏态拒绝且零 attempt；② 可见态提交 +1 且 `delivery_records +1`；③ 依赖提交键的 N2/N3/N4/N6/N7 各一条。
+
 **证据与边界**：开发读数 `10.10-22-stage15-readings.txt`（干净实例全链、仿站 11 张卡、首次外发 `ledger 1→2` / `deliveries 0→1`、`zhipin` 命中 0）；新产物 dmg `e4ad41a1…`（157780863 B）、zip `ce5c6084…`，真包冒烟 `SMOKE_EXIT=0` 六步全过，四门禁 2858 例。
 **这些全是开发自证**：不构成 `10.10-01/02/05/18` 与 K10–K13 的判绿依据；开发自报的「11 秒」是机器时间，不是人工上手计时。
 下一轮要验证的假设是「无文件入口 + 无模型手动出口 + 状态化路由足以消除死路」，由 QA 独立复验与萌新复测共同回答，不预写通过结论。
