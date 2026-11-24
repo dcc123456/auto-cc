@@ -106,3 +106,63 @@ no such table: llm_providers
 - 定性：**不是闸的缺陷**。闸拦的是自动化口（`sessions.open` / `browser.page.navigate`），两条都拦住了；`…FromUser` 按设计只认渲染层，而 CDP 直连渲染层等同于「人自己点」。这条是我取证方法越界，不是产品漏。
 - 纪律修正（即刻生效）：取证脚本**禁止调用任何 `…FromUser` 口**；`pack=real` 的负对照只许调自动化口。人那一路的「放行」不再用真站验，只留单测与代码读数为凭。
 - 处置：实例当场停（`curl :10412` → `000`），该 userData 不再使用。
+
+## 八、最终 HEAD 复验（`f8e4060` 构建，全新空 userData，**首启**一次跑完）
+
+取树 `git archive f8e4060`，主进程与渲染层均由该树重建（`packages/main/dist/main.cjs` 与 `packages/renderer/dist`）。
+实例：`--remote-debugging-port=10413`、`--user-data-dir=/private/tmp/qa13-first-ud`（删库删目录后由应用自建，**第一次启动**，未重启）。
+
+### ① 首启工具表与挂载态
+
+| 读点 | 读数 |
+| --- | --- |
+| `agent.tools.list()` | **22**（含 `outbound.greet.perform`、`outbound.deliver.perform`、`journey.search/tailor/interview`） |
+| `plugins.status().errorCount` | **0**，`errors: []` |
+| `metrics.registrySize` | 61 |
+| 内核树挂载态 | `llm` / `llm-settings` / `outbound-greet` / `journey` / `journey-unattended` 全部 **active**（无 PENDING） |
+| `journey.unattended.view` | ok（不再是 `SERVICE_NOT_FOUND`） |
+
+与 2026-11-24 早些时候在 `c9b121f` 上的首启读数（17 只、`journey` 未挂载、`llm: no such table: llm_providers`）对照：冷启动缺陷已修，且是**首启**直接达标，不是靠二次启动。
+
+### ② 首启批准链（含首启隐私条款这一步）
+
+路径：隐私条款「已读并同意」→ `/plan outbound.greet.perform` → 确认并执行 → 批准卡 → 三格（SELECT 平台 / INPUT 岗位 id / TEXTAREA 文案）→ 提交。guard 断言：`{"pack":"fixture","url":"http://127.0.0.1:10233/chat?targetId=1001","host":"127.0.0.1:10233"}`。
+
+| 表 | 之前 | 之后 | 新行 |
+| --- | --- | --- | --- |
+| `usage_ledger` | 0 | **1** | `id=1 · action=greet · target_id=1001 · source=manual:1001` |
+| `outbound_attempts` | 0 | **1** | `id=1 · status=succeeded · ledger_id=1 · receipt_id="1"` |
+| `delivery_records` | 0 | 0 | — |
+
+- run `6482e14d-3a4b-4ffc-be5c-31273032e6b3` → `completed / COMPLETED`
+- step 原文：「已向 boss 的 1001 发出打招呼（账本第 1 行 · 内容来源 manual）」
+- 页面侧：`/api/outbox` → `{"count":1,…,"receivedAt":1795502845669}`
+- 实例日志 `zhipin` 命中 **0**
+
+重放（同四元组 `boss|1001|greet|unversioned`）：`ledger 1→1`、`attempts 1→1`、`outbox count 1→1`；run `d0a61b32…` → `failed`，step 原文「同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送」。
+
+### ③ 自动化闸两条负对照（同一最终构建，`pack=real`，只用自动化口，未调用任何 `…FromUser`）
+
+| 自动化口 | 结果 | details | 内核视图 |
+| --- | --- | --- | --- |
+| `sessions.open('boss')` | `REAL_PLATFORM_AUTOMATION_BLOCKED` | `{pack:"boss", host:"www.zhipin.com", action:"mount"}` | 仍是 placeholder，未挂载 |
+| `browser.page.navigate('https://www.zhipin.com/web/geek/jobs')` | 同码 | `{url:"…", host:"www.zhipin.com"}` | 未导航 |
+
+账本前后 `ledger 0 / attempts 0 / deliveries 0` → 不变。
+
+### ④ 冷启动用例独立复跑
+
+`pnpm exec vitest run packages/llm/src/llm.test.ts` → `COLD_TEST_EXIT=0`，18 例全过，其中两条：
+- `冷启动：init 不许读表（源码级回归） > [Service.init] 里不出现读表调用，就绪读数只在用时现问`
+- `冷启动：建表插件排在后面也不炸 > 空库上先挂 llm.chat、后挂建表插件：前者正常挂载，status 不抛且按配置回落`
+
+`10.12-12` 的「人路真站接触审计」可复跑测试在 `f8e4060` 上**尚未落地**（`packages/browser/src/*.test.ts`、`packages/sessions/src/*.test.ts` 里没有 `source=user` / 非回环审计用例），故该项待开发补测后复跑。
+
+### ⑤ 最终 HEAD 四门禁（隔离树独立复跑）
+
+`TYPECHECK_EXIT=0`、`LINT_EXIT=0`、`FORMAT_EXIT=0`、`TEST_EXIT=0`；**25 个包套件、184 个测试文件、2847 例全过、零失败**（日志里唯一一处 `failed` 字样是迁移备份读数里的字段名 `failedCopyUnchanged`，不是用例失败）。
+
+### 遗留
+
+1. `10.12-12` 审计测试落地后，需在最终 HEAD 独立复跑（判据：非回环记 1 条脱敏 INFO、回环不记、无网关标 `INVALID_ARGUMENT`），全程零真实网络。
+2. 首启「窗口在后台」时外发会等到超时并落 `unknown / OUTBOUND_NOT_DELIVERED`（本轮实测一次，输入框回读 0 字/发出 15 字），属既登记的 R13-9 一族（in-flight 缺超时收口）；本轮未作为新缺陷重复立项，建议并入 R13-9 处理。
