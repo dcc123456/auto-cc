@@ -56,3 +56,33 @@ node cdp.mjs 10410 auto-cc /tmp/qa13-view.mjs     # propose 的完整视图（ru
 node /private/tmp/qa-11/card4.mjs deny            # 不 await confirm、轮询可见控件、点「放弃」
 sqlite: SELECT id,status,stop_reason FROM agent_run ORDER BY created_at DESC LIMIT 3
 ```
+
+---
+
+## 第二轮尝试（2026-11-24 13:1x）：走界面 `/plan` 路径，仍未产出卡
+
+按开发给的两条前提先就位：`agent-loop.planner` 读回 **`stub`**（`before:"llm" → after:"stub"`）、
+`chat['session.setAutonomy']('semi')` 返回 **`true`**、`chat['session.current']()` 读回 **`autonomy:"semi"`**。
+
+然后在悬浮助手里走界面路径：`chat-input` 填入 `/plan outbound.greet.perform {"jobId":2}` →
+点**可见的** `[data-action=send]` → 等 `confirm-run` 可见后点它 → 轮询三只审批控件。
+
+| 读数 | 值 |
+| --- | --- |
+| 探针返回 | **空**（evaluate 未返回值，页内那段没有走完/抛在早段） |
+| 计划卡 | 未观测到（`confirmSeen` 没拿到） |
+| 审批控件 | 未观测到（三只都没有可见矩形） |
+| 账本 | `usage_ledger 13`、`outbound_attempts 7`、`delivery_records 0` —— **与开始前一致** |
+
+**结论：这轮没取到读数，不是「通过」也不是「拦死」**。原因分两层：
+
+1. **我的探针还没找准界面入口**：`/plan …` 这条命令是不是要在助手的输入框里以「命令菜单」选中、
+   `send` 三个同名键里哪一个才是真发送（此前记录里有两个 0×0），我这次没有先验证就一把梭，
+   结果页面侧那段没返回——**这是我的方法问题**，不是产品结论。
+2. **开发自己报的三只控件读数（`pause-approve 57×24 / pause-deny 56×24 / stop-run 66×30`、
+   拒绝 → `PAUSE_DENIED`、叫停 → 待决单归 0）我还没有独立复现**；而管理员的 D1–D3 三条（全自动档无批准键、
+   放弃偶发留 `running`、`confirm` 阻塞 120s）**修复还没进主线**（当前 HEAD `a4da993`，`aacc2ee` 是拆 span 与抬头竖排那条）。
+
+所以这三条我留给修复后的构建，用「先验入口、再点一次」的稳做法重取：
+先把 `chat-input` 与三个 `[data-action=send]` 的可见性、`/plan` 是否带命令菜单各读一次，
+确认「发出去之后确实长出 `confirm-run`」再继续；否则测的仍是「我没点对」而不是产品行为。
