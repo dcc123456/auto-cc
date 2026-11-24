@@ -1458,7 +1458,11 @@ interface JourneyContext {
 
 **处置（正经实现，不再猜）**：按工具 schema 生成结构化字段——`platform` 下拉（取已知平台）、`jobId` 从当前上下文/岗位带入（可改可空）、`text` 文本域；提交时由面板按字段名组装 `{request:{…}}`（这层由代码拼，**不让用户填 JSON**）；校验前置、错误就地提示到具体字段；JSON 只做内部交换格式。
 
-责任：世界级开发程序员（实现）→ 刁钻的QA（用同一路径复验）。判据：批准 → 填三格 → 继续 → `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 与 `ledger_id` 相同）。
+**实现已落（`6d4c6fe`，2026-11-24）**：字段**不由 zod 内省**（`_def` 不是稳定 API，界面不该长在库的内部结构上），改由**工具登记方声明**——`packages/core/src/events.ts` 新增 `ToolSupplyField { path, labelKey, kind: text|textarea|select, optional?, options, optionsFrom? }`，`agent.tools.list()` 把它带进 `ToolDescriptorView.supply`；`outbound.greet.perform` 声明三格：`request.platform`（下拉，取值现问 `platform.registry.list()`）、`request.jobId`（文本、可选）、`request.text`（文本域）；没声明的工具退回旧文本域形态。**提交组装**：`assembleSupply()` 按点路径建嵌套对象，`{request:{…}}` 这层由**代码拼**，人只填三个值；可选项留空即整格不写（写空串会被 `min(1)` 判红）；交回主进程仍走既有 `supply` 文本通道（JSON 只做交换格式），校验仍只有 `agent.tools.validateInput` 一处。
+
+**复验前置（2026-11-24，必写进证据，别让人以为同意记录天生就有）**：开发自测已通过 schema（原文「入参经人补充 1 轮，实际使用：`{"request":{"platform":"boss","jobId":"1","text":…}}`」，无 `Unrecognized key`），但随后落 `TOOL_FAILED：平台 boss 还没有一份自动化风险确认记录，先确认承担该风险`——**这是闸门在拦、形状已经对了**，零外发。所以 QA 复验前要在**副本实例**上做一次 `sessions.grantConsent('boss')`（只影响副本库），并在证据里注明这是**测试前置**。
+
+责任：世界级开发程序员（实现，已落）→ 刁钻的QA（用同一路径复验）。判据：`/plan outbound.greet.perform` → 确认 → 批准 → 填三格（platform 下拉选 boss / jobId / text）→ 提交 → `usage_ledger` 与 `outbound_attempts` 各恰增 1（deliver 再验 `delivery_records` 与 `ledger_id` 相同），全程只打本机仿站。
 
 > **2026-11-24 dated 注（QA 自纠留档，结论以本条为准）**：QA 曾据单条 run 推「界面路径拒绝无效、桥接口有效」的通道差异假说，被 `agent_run` 全量数据推翻——拒绝并非无效，而是**常被忽略后靠超时收尾**，真正生效的两次也用了 86/118 秒。自纠原文保留在 `10.12-qa-approval-three-actions.txt` 的「更正上一节」，不抹掉。
 
