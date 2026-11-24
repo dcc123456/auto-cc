@@ -1,0 +1,65 @@
+# 独立安全回归（最终 HEAD `a6c03fd` / 代码 `c0cb27c`）：通过项与遗留项
+
+环境：隔离树内容取自 `git archive c0cb27c`（`@xs:grid-cols-2 @2xl:grid-cols-3` 与 `jd-remove-keeps` 都在，
+确认树内容 = `c0cb27c`）、userData 副本 `/tmp/qa12-ud-del`、CDP 10410、2026-11-24 12:20–12:40。
+**全程把 `platform-boss` 的 `pack` 切成 `fixture`（读回 `{pack:"fixture"}`），任何被放行的外发都只打 `127.0.0.1:10233`，真站外发 0。**
+
+## 一、通过项
+
+| # | 断言 | 读数 | 判定 |
+| --- | --- | --- | --- |
+| S1 | 授权单过期 fail-closed | `unattended.start` 在授权单 `status:"restart-required"` 时返回 `AUTHORIZATION_RECONFIRM_REQUIRED`（「先确认续跑，再开始执行器」），ledger/attempts/denials **零增** | 通过 |
+| S2 | 平台越权拦死 | 授权单 `platform:"boss"`，`unattended.start({platform:'fixture'})` → `lastError:"授权单不覆盖平台 fixture"`；三方计数**零增**（13/7/1 不变） | 通过 |
+| S3 | 未登记平台拦死 | `greet perforem(platform:'unknown-platform')` → `PLATFORM_NOT_CONFIGURED`（`known: fixture/fixture-alt/boss`），**零增** | 通过 |
+| S4 | 目标范围不变式 | 授权单 `targets:["13c159cd…"]`；执行器视野 `current + pending + completed` = `["13c159cd…"]`，**outside = []** | 通过 |
+| S5 | 超额度拦死 | 把 `entitlement.dailyLimits.greet` 压到 **1**（当日已用尽）后发新目标 → `QUOTA_EXCEEDED：动作 greet 今日 1 次额度已用完`；ledger **13 不变**、attempts 不变、**`usage_denials` 0 → 1**（被拒留痕） | 通过 |
+| S6 | 重放拦死 | 对已成功的四元组 `boss|job-A|greet` 再发 → `OUTBOUND_ALREADY_SENT`（「不再扣额或发送」）；ledger 13、attempts 7 **都不变** | 通过 |
+| S7 | 四门禁（最终树内容） | `TYPECHECK_EXIT=0`、`LINT_EXIT=0`、`FORMAT_EXIT=0`、`TEST_EXIT=0`，**25 个包套件 / 2832 例全过**（日志里唯一含 `failed` 的行是迁移备份的字段名 `failedCopyUnchanged:true`，不是失败） | 通过 |
+
+## 二、遗留项（不写成通过）
+
+| # | 遗留 | 原因与还缺什么 |
+| --- | --- | --- |
+| R1 | **助手审批门禁没有活体读数** | `agent.loop.propose('帮我把这一屏的岗位打招呼')` → `AGENT_PLANNER_REQUEST_FAILED：计划器请求失败：模型返回空回复`——这个副本实例没配 LLM。所以「计划 → 确认 → 停在逐步审批点（`pause-approve`）→ 库不动」这条链**没有活体读数**，审批控件 `pause-approve/pause-deny/stop-run` 也都没渲染（`false`）。要么配 LLM/确定性桩，要么接受只有单测覆盖（现有 2832 例含 agent gate 用例）。**在补读数前，R1 不能算通过。** |
+| R2 | **一键停用没走到 `stopping → stopped`** | 启动后执行器立刻 `done`（授权单只有 1 个目标、该岗位已从 `jobs` 删除、greet 额度也已耗尽），`stop()` 返回 `state:"done"`，8 秒后 `status:"done"`。要验「stop 当场回 `stopping`、若干秒后 `stopped`」需要一个**真在岗间跑**的 run（多目标 + 有额度），本环境构造不出来。 |
+| R3 | **`10.12` 这批证据在 spec/plan 里没有对应条目** | `grep -c "10\.12" docs/specs/10-job-journey/spec.md` → **0**；plan → **0**；而 `docs/acceptance/10-job-journey/` 下有 **16 份 `10.12-*`**。违反「证据只放 `<条目ID>-*`、逐条对应 spec」的纪律：要么补 dated 条目，要么把证据并入 `10.11-*`。 |
+
+## 三、一条口径必须写清（否则上面的读数会被误读）
+
+我早期两次读数里「目标外」「超额度」都**成功了**（`greet job-OUTSIDE` → `ledgerId:11`、`greet job-B` → `ledgerId:13`）。
+那不是越权，而是**我把两条通道混成了一条**：
+
+- **手动发送**（`outbound.greet.perform`，界面上人点的那颗键）**不经过「授权单 targets」**——授权单是**无人值守**的范围；
+  手动发送只经过额度 / 频控 / 四元组去重。所以「授权单外目标」在手动通道上是合法的，我那个用例的前提就错了。
+- **无人值守通道**（`journey.unattended.start` → 执行器）才受授权单约束：S2（平台）、S4（目标集合）就是这条通道的证据；
+  「越权外发 0」这条判据针对的也是**无人值守**这条路。
+
+**我这两次探针的实际后果**（写在明处，不藏）：在 `pack=fixture` 下往 `127.0.0.1:10233` 发了 3 次手动 greet
+（`job-A`、`job-OUTSIDE`、`job-B`），副本库 `ledger 10→13`、`attempts 4→7`、`denials 0→1`。
+**真站外发 0**（pack 全程 fixture，`platform.registry.list()` 只有 `boss` 且其适配器指向 10233）。
+
+## 四、证据复核
+
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| 同批截图 md5 去重 | `md5 -q docs/acceptance/10-job-journey/10.12-*.png | sort | uniq -c` | **无一张重复**（每张 1 次） |
+| 手机号（11 位） | `grep -rEo "\b1[3-9][0-9]{9}\b" …/10.12-*` | **零命中** |
+| 邮箱 | `grep -rEo "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" …/10.12-*` | **零命中** |
+| 宽正则误命中说明 | 用 `1[3-9][0-9]{9}` 不锚定时会命中 `1795492323450` | 那是**13 位毫秒时间戳**，不是手机号；换成 11 位锚定后零命中 |
+| 条目对应 | `grep -c "10\.12" spec.md` | **0** → 见遗留 R3 |
+
+## 五、结论
+
+- **通过**：平台越权、未登记平台、目标范围不变式、超额度、重放、授权单过期 fail-closed，六条都拦死且**审计口径零增**
+  （唯一增的是 `usage_denials` 那 1 行——被拒本该留痕）；四门禁在最终树内容上 EXIT=0、2832 例全过。
+- **遗留**：R1 助手门禁无活体（缺 LLM）、R2 一键停用未走到 stopping→stopped、R3 `10.12` 证据缺 spec 条目。
+- 真站外发 **0**；三次手动 greet 全部打在 `127.0.0.1:10233`，并已在上文逐笔写明。
+
+## 复现命令
+
+```
+node /private/tmp/qa-11/sec3.mjs   # 超额度 + 重放（先把 greet 日限压到 1）
+node /private/tmp/qa-11/sec4.mjs   # 授权单 reconfirm → 平台越权 → 启停
+node /private/tmp/qa-11/sec5.mjs   # 目标范围不变式 + 助手 propose
+cd <tree> && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
+```
