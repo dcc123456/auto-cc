@@ -1,0 +1,59 @@
+# 干净副本 + `jobId=1001` 跑批准链：外发落 `unknown / OUTBOUND_UNKNOWN_ERROR`，账本零增
+
+按管理员口径重做，不再换目标碰运气：
+
+## 一、环境（全部在**我自己的**副本上，标 seeded）
+
+- 副本 `/tmp/qa13-clean`：从上一份副本复制，**清空** `usage_ledger` / `outbound_attempts` / `delivery_records` / `usage_denials`（seeded），
+  清空后四表 `0 / 0 / 0 / 0`，`jobs 65`；
+- `agent-loop.planner` 读回 **`stub`**、`chat['session.setAutonomy']('semi')`、`sessions['grantConsent']('boss')` → `platform:"boss"`（**测试前置**，非库里天生）；
+- 内核视图导航 `http://127.0.0.1:10233/chat?targetId=1001`（`1001` = 桌面端前端工程师（Electron）/ 星桥科技，库里既有）。
+
+**仿站那条链路在（DOM 读数）**：外层页面同源 iframe `data-testid=chat-frame`，帧内
+`/chat/frame?targetId=1001` 有 `TEXTAREA[data-testid=chat-input]`（placeholder「输入打招呼文案（含中文与 emoji）」）
+与 `BUTTON[data-testid=chat-send]`「发送打招呼」，帧内状态「待发送」。
+
+## 二、跑的结果
+
+`/plan outbound.greet.perform` → 计划卡「确认并执行」→ 待批准卡「批准」→ 结构化三格
+（`-platform` 选 `boss` / `-jobId` 填 `1001` / `-text` 填文案）→ 提交（待决单 1 → 0）→ 执行。
+
+| 项 | 读数 |
+| --- | --- |
+| `usage_ledger` | **0 → 0**（零增） |
+| `outbound_attempts` | **0 → 1**（新行 `id 10`、`boss / 1001 / greet`） |
+| 该 attempt | **`status:"unknown"`、`reason:"OUTBOUND_UNKNOWN_ERROR"`、`ledger_id:null`** |
+| run | `failed`、`stop_reason:"STEP_UNSUCCESSFUL"` |
+| `usage_denials` | 0（不是闸门拒，是执行层报未知） |
+| 日志时间线 | `05:43:24.136` 开 `approval` 单 → `05:43:24.388` 开 `elicitation` 单 → 提交后执行 → `STEP_UNSUCCESSFUL` |
+
+## 三、判读（这是新读数，不是上次那两种）
+
+- 这次**不是**「页面在等」（上一轮 `in-flight`、run 仍 `running`），也**不是**去重拦截；
+- 是**执行层返回未知**：`OUTBOUND_UNKNOWN_ERROR` 按设计**不记账**（外发结果不可判定时宁可不落账，fail-safe），
+  run 因此 `failed / STEP_UNSUCCESSFUL`；
+- 与开发那条 `succeeded / ledger_id=2` 的差别在**实例环境**（他那边先跑过 `jd.capture.run` 抓回 1001 并让页面对上），
+  我这份干净副本没有那一步，页面在但适配器没能确认发出。
+
+**给开发/PMO 的判据输入**：`attempts +1 而 ledger 零增` 在真实使用里有**两种**形态，spec 现在只写了「页面在等」一种：
+① 页面在等（`in-flight`、run 仍 `running`）；② **执行层未知**（`status:"unknown"`、`reason:"OUTBOUND_UNKNOWN_ERROR"`、run 已 `failed`）。
+第二种是**终态**，不是过程态，读表口径要分开写，否则对账时会把「未知」当成「还在跑」。
+
+## 四、结论
+
+- 批准链这条仍**没有拿到**「账本与 attempts 各恰增 1、`status=succeeded`」的干净读数：
+  本次落在 `unknown / OUTBOUND_UNKNOWN_ERROR`（零账、attempt 一行、run 失败），原因指向**我这侧实例的仿站路径没跑通**，
+  不是审批门禁的问题（门禁四步都正常：计划卡、批准、三格、待决单 1→0）。
+- 下一轮我会先在**同一个副本**上跑一次 `jd.capture.run`（打本机仿站抓回 1001），再走批准链，把环境对齐到开发那条。
+
+## 复现命令
+
+```
+# 干净副本（外发四表清空，seeded）
+node -e "…DELETE FROM usage_ledger/outbound_attempts/delivery_records/usage_denials…"
+node /private/tmp/qa-11/prep-clean.mjs       # planner=stub / autonomy=semi / consent boss / 导航 chat?targetId=1001
+node /private/tmp/qa-11/pagecheck.mjs        # 外层页面 DOM
+node /private/tmp/qa-11/framecheck.mjs       # 帧内 chat-input / chat-send
+node /private/tmp/qa-11/chain3.mjs 1001      # /plan→确认→批准→三格→提交
+sqlite: SELECT status,reason,ledger_id FROM outbound_attempts ORDER BY id DESC LIMIT 1
+```
