@@ -61,3 +61,36 @@
 - 同一构建：`dist/mac-arm64/auto-cc.app`（dmg `157780863 B`）；`10.10-24-qa-env-prep-and-checklist.txt` 里的启动命令。
 - 环境准备只有 `settings.json` 的 `pack=fixture`（本轮已重置为只含这一个文件的全新目录）。
 - 已知的一条 P1 会让他在首屏看到「先登录 BOSS 直聘」主行动：**请按「三步开张」的 ① 去做**，不要点那颗登录键。
+
+## 八、更正（2026-11-24 17:2x）：P1 撤回——它测的是 17:02 旧包
+
+**撤回**：本文件第三节「Home 主行动仍是先登录 BOSS 直聘（P1）」作废。那条读数取自 17:02 打出的旧包；开发在 `5c33413`（`fix(home): 真实平台改按登记处 origins 判`）之后于 17:14/17:15 重打了包，我测的实例先于重打。
+
+**新包读数**（`dist/mac-arm64/auto-cc.app`，asar 17:14，dmg 17:15、157780911 B、sha256 前缀 `128f025e…`；HEAD `97febec`）：
+
+| 读点 | 读数 |
+| --- | --- |
+| `platform-boss.pack` | `fixture` |
+| `platform.registry.list()` | `[{ id:"boss", startUrl:"http://127.0.0.1:10233/boss", origins:["http://127.0.0.1:10233"] }]`（登记处跟着 pack 走，全回环） |
+| 首屏主行动 | **「导入一份简历当母版」**（`data-action=home-primary`、`data-step=resume`） |
+| 首屏阻断条 | `data-testid=home-blocker`、`data-blocker=resume`，文案「还没有导入简历：没有母版就无从定制与投递」 |
+| 「接下来」清单 | 导入一份简历当母版 / 看匹配岗位 / 看追踪与统计——**没有「先登录 BOSS 直聘」** |
+| 内核视图 | 仍是 placeholder，未挂真站 |
+| 工具表 | 22 只 |
+
+## 九、新包上的逐项复核（17:2x）
+
+| 项 | 新包读数 | 结论 |
+| --- | --- | --- |
+| K10 隐私 | 三行摘要命中 3/3；「查看完整隐私与条款」`aria-expanded=false` | 已消除 |
+| B1 粘贴 | 269 字 → `resume_docs 0→1`（`resume_imports 1`），卡片出现 | 已消除 |
+| B2 助手 | 横幅「还没配对话模型」命中；`chat-model-missing-config`、`chat-manual-path` 都在；三个快捷入口 `start-import-resume` / `start-find-jobs` / `start-authorize-deliver` 都在 | 已消除 |
+| K11 底栏 | 「运行 / 登录态 BOSS 直聘 · 未登录 / 额度 投递 剩 10 / 档位 只建议 / 档位是什么意思」，档位说明开关在 | 已消除 |
+| K12 岗位首层 | 首层动作清单无 `jd-generate-resume` | 已消除 |
+| K13 流程页 | `一键跑一轮`(`start`) 在首层、`workflow.advanced-toggle` 在、cron/定时动作首层不可见 | 已消除 |
+
+## 十、仍欠的两项（不判绿）
+
+1. **样例 PDF 投递**（③）：本轮仍未走通——新包实例里没有可投岗位，且批量探针后半段渲染层卡住（`evalTimedOut`），读数不可用。需要在仿站造一条可投岗位后重跑：生成样例 PDF → 投递 → `usage_ledger +1`、`delivery_records +1`、PDF 带样例标识。
+2. **真实平台方向阻断**（④）：`pack=real` 下登记处读数已确认——`origins:["https://www.zhipin.com"]`、内核仍 placeholder、未点登录未导航；但首屏「接下来」区在我这次刷新后为空（疑似仍在加载），**「有真实平台且未登录时仍出现登录步」这一点本轮未取到有效读数**，标未验证。
+3. 另：短文本粘贴的误导文案已由 `fa43cb4` 修掉，但**该提交不在本包内**（本包 asar 17:14）；若计时路径撞上「粘贴不到 100 字」，按旧文案处理并单独重跑该步。
