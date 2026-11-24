@@ -1,0 +1,80 @@
+# 10.10 QA 一次性仿站环境准备 + 第 15 片复测清单
+
+- 日期：2026-11-24
+- 执行人：刁钻的QA
+- 适用对象：第 15 片「萌新用户上手复测」（打包 app + 全新 userData）
+- 定性：本文件记录的都是**验收环境准备**，不是产品缺陷、也不是产品配置改动；环境准备在计时之前完成，**不计入上手耗时**
+
+## 一、环境准备（一次性，可复现）
+
+### 1. 交接用的全新 userData
+
+- 目录：`/private/tmp/qa15-novice-ud`
+- 内容**只有**一个文件：
+
+```json
+{ "platform-boss": { "pack": "fixture" } }
+```
+
+- 为什么用预置文件而不是界面保存：`pack` 没有界面落盘通道（`ConfigService.setPersisted` 在本仓**没有任何调用方**，且键白名单里没有它），改运行期 `plugins.saveConfig` 又只在内存、重启即失。持久层层级是 `default < file(cordis.yml) < persisted(settings.json) < env < runtime`，所以把 `pack` 写进 `settings.json` 是唯一「重启后仍然是仿站」的干净做法。
+- 交接目录保持**首次启动状态**：我验证机制用的是另一个一次性目录 `/private/tmp/qa15-envcheck-ud`，验证完即弃；`qa15-novice-ud` 里没有 `store.db`、没有会话分区、没有隐私确认痕迹。
+
+### 2. 本地仿站
+
+- 进程：`packages/main` 同仓脚本 `tsx scripts/fixture-server.ts`，监听 `127.0.0.1:10233`
+- 就绪判据：`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:10233/boss` → `200`
+- 该站点**只有回环地址**，不产生任何真站请求
+
+### 3. 启动方式（萌新用同一条命令）
+
+```
+env -u ELECTRON_RUN_AS_NODE \
+  /Users/dcc/deepseek-harness-workspece/auto-cc/dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc \
+  --remote-debugging-port=<自有端口> \
+  --user-data-dir=/private/tmp/qa15-novice-ud \
+  --disable-features=CalculateNativeWinOcclusion
+```
+
+> 注意：本机 shell 常带 `ELECTRON_RUN_AS_NODE=1`，不 `env -u` 会让 Electron 以纯 Node 跑、`app.isPackaged` 直接报错（本轮踩过一次，表现是 CDP 端口不监听）。
+
+### 4. 环境自证（在一次性目录上做的读数，非交接目录）
+
+| 读点 | 读数 |
+| --- | --- |
+| `plugins.readConfig('platform-boss').pack` | **fixture** |
+| `shell.getStatus().kernelViewUrl` | `data:text/html…Embedded kernel view placeholder`（**未挂真站**） |
+| `agent.tools.list()` | 22 只，含 `outbound.greet.perform` / `journey.*` |
+| `settings.json` | 启动后未被改写，仍是那一个键 |
+
+## 二、交给萌新的复测清单（他本人只点界面）
+
+1. 起手：确认 `http://127.0.0.1:10233/boss` 为 200（若不对**只记卡点，不自行修环境**）。
+2. 用上面那条命令启动；看到首屏的瞬间记为 `T0`。
+3. 只走界面：简历准备（粘贴文字 / 虚构样例 / 文件面板任一路）→ 搜岗（本地仿站）→ 定制或打招呼 → 授权 → 仿站首次成功外发；外发成功那一刻记为 `T1`，判据 `T1 − T0 ≤ 10 分钟`。
+4. **禁止**：调桥接服务、改数据库、预置登录态/授权、改配置、用开发脚本替步骤、走「开发者选项：本机仿站会话」。
+5. 卡点必须 ≤3，每条写：看到什么、试了什么、为什么走不下去，附截图（截图只截证据区、不含个人数据）。
+6. 顺带核：有无裸 i18n key、有无死路（点了没有任何反应/没有下一步）。
+
+## 三、开发提交后我要独立验的项（同一构建）
+
+| 项 | 判据 |
+| --- | --- |
+| B1 简历入口 | 无简历时 Home 第①步落到**简历准备**（不是 JD 定制）；可见入口含「粘贴简历文字」「使用虚构样例」，两者都能真实推进；「生成简历」空态给出真实原因与下一步 |
+| B2 助手无模型 | 出现「去配模型」直达现有模型设置；有「先不用助手，手动按步骤走」出口；快捷入口要么真实跳转要么禁用并写明原因，**禁止无反应** |
+| 首步错路由 | Home 第①步不再落到「按 JD 定制」子视图，不需要先「返回简历列表」 |
+| K10 | 隐私声明三行摘要、同意键首屏可见 |
+| K11 | 底栏文案中文可懂 |
+| K12 | 岗位首层不再有跨页「生成简历」 |
+| K13 | 流程页默认引导态，cron 折进高级区 |
+| 回归 | 四门禁独立复跑；首启 22 只工具、`pack=fixture`、内核不挂真站保持不变 |
+
+全部通过后，把**同一个构建 + 同一个准备命令**交给萌新复测，我不替他做任何环境切换。
+
+## 四、环境动作留档
+
+| 时间 | 动作 | 命令/读数 |
+| --- | --- | --- |
+| 2026-11-24 16:11 | 建交接 userData | `mkdir -p /private/tmp/qa15-novice-ud` → 写入 `settings.json`（37 字节，仅 `platform-boss.pack=fixture`） |
+| 16:11 | 起仿站 | `tsx scripts/fixture-server.ts` → `/boss` = 200 |
+| 16:11 | 一次性验证（非交接目录） | 起打包 app（10415）→ `pack=fixture`、内核 placeholder、22 只工具；随后杀实例、删 `/private/tmp/qa15-envcheck-ud` |
+| 16:12 | 重置交接目录 | `rm -rf /private/tmp/qa15-novice-ud` 后重建 → `ls` 只有 `settings.json` |
