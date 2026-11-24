@@ -44,3 +44,17 @@
 
 `pnpm typecheck` / `pnpm lint` / `pnpm format:check` → 三个 EXIT=0；`pnpm test` → EXIT=0，**2858 例**。
 `pdf-edit` 的「嵌 Courier」首跑红了一次、单包与整仓复跑均绿（R13-1 既有偶发，未改该包）。
+
+## 重新打包与产物冒烟（含本轮代码）
+
+代码改动后重新出包：`pnpm dist:mac` → **DIST_MAC_EXIT=0**。
+
+| 产物 | bytes | SHA256 |
+| --- | ---: | --- |
+| `dist/auto-cc-0.1.0-mac-arm64.dmg` | 157780863 | `e4ad41a11c1b9cfd4b1df2e444e3c2f2356d158686bb834e481550f8294d26fc` |
+| `dist/auto-cc-0.1.0-mac-arm64.zip` | 155119696 | `ce5c6084fe81839f541f643620917c33c4447a68a1a8bae38d7db838d2697a6f` |
+| `dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc` | 33968 | `e06891704834df56f24489e1f971428161ae17312143624af13736255cc0ab34` |
+
+发布冒烟（`pnpm smoke:dist --exe dist/mac-arm64/auto-cc.app/Contents/MacOS/auto-cc --cdp-port 10430`）→ **SMOKE_EXIT=0**，六步全过：
+产物与随包文件齐、首屏 Home、22 只工具、助手开合、fixture guard、回环内核、`boss-basic` 三节点 `done`、
+岗位卡与弹窗、关键链零插件错误、`Browser.close` 后自行退出 `code=0`。
