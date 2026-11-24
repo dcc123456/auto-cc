@@ -1,0 +1,87 @@
+# 10.12-08 QA 独立读数：全新空库的批准链「各恰增 1」与重放零增
+
+- 日期：2026-11-24
+- 取值人：刁钻的QA（独立实例，不借用开发读数）
+- 取树：`git archive c9b121f`（隔离树 `/private/tmp/qa-11/tree`，主进程与渲染层均由该树重建）
+- 实例：`--remote-debugging-port=10411`、`--user-data-dir=/private/tmp/qa13-chain-ud`（与共享 10222/5173 实例完全隔离）
+- 仿站：`scripts/fixture-server.ts` 起在 `127.0.0.1:10233`（每次取证前重启，对端收件计数从 0 起）
+- 库：`/private/tmp/qa13-chain-ud/store.db`（删库后由应用自建，seed 标记：外发三表全 0、`jobs` 0 行）
+- 前置断言（每轮起手执行，`tmp/qa13/guard-fixture.mjs`）：`pack === 'fixture'` 且内核视图 host 属于 `127.0.0.1:10233` / `localhost:10233`，不成立即 `GUARD_ABORT` 非 0 退出。本轮两次读数都打印了 guard 结果：`{"pack":"fixture","url":"http://127.0.0.1:10233/chat?targetId=1001","host":"127.0.0.1:10233"}`
+
+## 一、冷启动缺陷（首启即坏，二次启动才好）——两次独立复现
+
+删掉 `store.db` 后第一次启动，同一份 `c9b121f` 构建：
+
+| 读数 | 首启 | 二次启动（同一份库） |
+| --- | --- | --- |
+| `agent.tools.list()` 只数 | **17** | **22** |
+| 含 `outbound.greet.perform` | **否** | 是 |
+| 含 `journey.search/tailor/interview` | **否** | 是 |
+| `journey.unattended.view` | `SERVICE_NOT_FOUND`「服务未挂载：journey」 | ok |
+| 首页招聘平台块文案 | 「服务未挂载：journey（读数口 journey.unattended.view）」 | 正常 |
+
+首启时 `plugins.status()` 的 `errors` 原文（`id: "llm"`）：
+
+```
+no such table: llm_providers
+    at providerRowOf (.../main.cjs)
+    at resolveLeg (...)
+    at LlmChatService.resolve (...)
+    at LlmChatService.status (...)
+    at [cordis.init] (...)
+    at KernelService.attach / assemble / mount
+```
+
+根因链（代码位置）：
+
+1. `packages/llm/src/index.ts:344` 的 `[Service.init]` 调 `this.status()`，内部走到 `providerRowOf` 读 `llm_providers`（`packages/llm/src/provider-pool.ts:174`）。
+2. `llm_providers` / `llm_models` 两张表由 `packages/llm/src/settings.ts:511` 的 `ensureSchema()` 建（迁移 31 / 32）。
+3. `cordis.yml` 的挂载顺序里 `llm` 是第 35 行、`llm-settings` 是第 56 行——建表的插件排在读表的插件之后。
+4. 于是空库首启 `llm` 的 init 抛错、`llm` 挂载失败；`outbound-script dependsOn [llm]`（第 140–141 行）连带 PENDING，`outbound-greet dependsOn […, outbound-script, …]`（第 301 行）随之 PENDING，`journey dependsOn […, llm]`（第 718 行）也 PENDING。
+5. 二次启动时 31 / 32 已被 `llm-settings` 建过（`schema_migrations` 有 31、32），于是 `llm` 正常挂载、工具表补齐到 22 只。
+
+判定：这是**新人首启**路径上的阻塞缺陷（P1，已单独立项 `10.12-11`），不是环境噪声；「第二次启动好」不能当作首启通过。
+
+## 二、批准链「各恰增 1」（空库 + 首启后修好的同一实例）
+
+操作路径：界面 `/plan outbound.greet.perform` → 确认并执行 → 批准卡 → 结构化补信息三格（SELECT 平台 / INPUT 岗位 id / TEXTAREA 文案）→ 提交。
+入参原文：`{"request":{"platform":"boss","jobId":"1001","text":"你好，看到贵司在招前端，想聊聊"}}`
+
+| 表 | 之前 | 之后 | 新行 |
+| --- | --- | --- | --- |
+| `usage_ledger` | 0 | **1** | `id=1 · action=greet · target_id=1001 · source=manual:1001` |
+| `outbound_attempts` | 0 | **1** | `id=1 · target_id=1001 · status=succeeded · ledger_id=1 · receipt_id="1"` |
+| `delivery_records` | 0 | 0 | — |
+
+- run：`946bada1-f592-49c8-9fd6-cf6970df9e51` → `completed / COMPLETED`
+- step 观察原文：「第 1 步 outbound.greet.perform → ok：已向 boss 的 1001 发出打招呼（账本第 1 行 · 内容来源 manual）｜入参经人补充 1 轮，实际使用：{…}」
+- 页面侧回执（不采信应用自述）：`GET http://127.0.0.1:10233/api/outbox` → `{"count":1,…,"receivedAt":1795501441514}`，线程 `/api/threads?targetId=1001` 同步 1 条
+- 实例日志里 `zhipin` 命中 **0** 次：本轮零真站接触
+
+## 三、同四元组重放：零增且明确拒绝
+
+同一目标再走一遍完整批准链（同一 `boss|1001|greet|unversioned`）：
+
+| 读数 | 之前 | 之后 |
+| --- | --- | --- |
+| `usage_ledger` | 1 | **1** |
+| `outbound_attempts` | 1 | **1** |
+| 仿站对端 `count` | 1 | **1** |
+
+- run：`42f1cefd-1450-417d-9e6d-56f3f8911788` → `failed / STEP_UNSUCCESSFUL`
+- step 观察原文：「第 1 步 outbound.greet.perform → failed：TOOL_FAILED：工具 outbound.greet.perform 执行失败：同一平台、目标、动作与简历版本已经成功外发，本次重放不再扣额或发送｜入参经人补充 1 轮，实际使用：{…}」
+
+判定：去重闸门在**真实执行路径**上生效（不是没跑到），页面侧也没有第二次收件。
+
+## 四、顺带取到的两条闸门读数（同一实例，均为应当拒绝且零增）
+
+| 触发 | 结果 | 零增 |
+| --- | --- | --- |
+| 档位停在「建议」直接确认执行 | `refused / TIER_SUGGEST_READ_ONLY`，原文「当前档位「建议模式」只出计划不执行任何动作」 | 是 |
+| 半自动档但平台 boss 未签自动化风险确认 | `failed / TOOL_FAILED`，原文「平台 boss 还没有一份自动化风险确认记录，先确认承担该风险」 | 是 |
+
+## 五、遗留（待最终 HEAD 补）
+
+1. 本文件读数取自 `c9b121f`；冷启动修复与闸门重构（`7102a19` / `b3589e9` 及后续）落地后，需在**全新空库首启**上复跑：首启工具表 22 只、首启即走通本文件第二节、重放零增。
+2. 闸的三条负对照（`pack=real` 自动化挂载/导航被 `REAL_PLATFORM_AUTOMATION_BLOCKED`、主进程直调 `…FromUser` 得 `INVALID_ARGUMENT`）尚未在本文件记录，等最终构建后补。
+3. 最终 HEAD 四门禁独立复跑读数同样待补。
