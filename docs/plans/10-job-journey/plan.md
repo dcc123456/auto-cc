@@ -1442,7 +1442,7 @@ interface JourneyContext {
 
 **处置栏新增待办（2026-11-24，PMO 派给开发）**：确认单上的 `pause-approve` / `pause-deny` 与 band 容器补 `data-pause-request-id="<requestId>"`——现在按钮上没有这个属性，脚本和人都只能靠「哪只可见」猜，同一时刻多张单时仍会点错，这是 `APPROVAL_NOT_FOUND` 与「点了等于没点」的成因之一。补完后复跑改为「先核属性再点」。
 
-**判绿条件（不放松）**：拒绝 3/3（257/258/257ms、`PAUSE_DENIED`）与任务级叫停 3/3（255～256ms、`paused`/`PAUSE_CANCELLED`）均已过、账本零增；剩两条：**R13-8 结构化补信息卡落地** + **批准链恰一次**（账本与 `attempts` 各恰增 1，deliver 再验 `delivery_records` 与 `ledger_id`）。两条都过本条才转绿。
+**判绿条件（不放松）**：拒绝 3/3（257/258/257ms、`PAUSE_DENIED`）与任务级叫停 3/3（255～256ms、`paused`/`PAUSE_CANCELLED`）均已过、账本零增；**R13-8 结构化卡**已由 QA 复验通过（死路解除）；**最终 HEAD 四门禁独立复跑全绿**（隔离树 `488a91b`：`typecheck`/`lint`/`format:check`/`test` 四个 `EXIT=0`，25 套件 2834 例零失败）。**只剩「批准链恰一次」待补**：QA 两次换目标都停在 `in-flight`，因其目标在仿站上没有对应会话页——判为**夹具缺口**（不是产品缺陷，也不是去重）；开发端那条 `ledger 1→2 / attempts 0→1 / ledger_id=2 / succeeded` 只作交叉印证，**开发自证不作判绿依据**。补齐路径：QA 用全新副本库 + 已知可发的 `jobId=1001` 路径复跑；若仍 `in-flight`，由开发补仿站夹具后再判。这条取到干净读数本条才转绿。
 
 **R13-6（缺陷，P1，2026-11-24 登记）：`agent.loop.confirm` 阻塞到暂停超时（120 秒）。** 现象：`confirm` 调用要等到 `pauseTimeoutMs` 到期才返回，渲染层在这两分钟里卡住。处置：`confirm` 立即返回（发起执行、把暂停态交给既有暂停读数），渲染层靠 `agent.pause.pending` 轮询拿状态，不靠一次调用的返回值。责任：世界级开发程序员；复跑：读 `confirm` 的返回耗时（应远小于暂停窗）+ 期间界面仍可交互。
 
@@ -1452,7 +1452,7 @@ interface JourneyContext {
 
 **R13-7（风险，P2，2026-11-24 登记）：将来出现第二个调用方会踩 150 秒阻塞。** 主进程 `confirm` 仍会等到整条循环（含最长 150 秒暂停窗）才返回终态；现在只有渲染层一条调用方且已非阻塞。触发条件：新增任何 `await agent.loop.confirm(...)` 的调用方（新界面、助手第二入口、脚本化流程）。处置：新调用方一律 fire-and-forget + 读 `agent.pause.pending`/`agent/run-progress`；若要长期消除，再单独立项改契约并重写那 65 个用例，不在本片做。
 
-**R13-9（缺陷，P2，2026-11-24 登记，不阻塞第 13 片）：外发卡在页面等待时，`outbound_attempts` 停在 `in-flight` 且无人收尾。** 读数：QA 轮 1 新 attempt `id 8` 为 `status:'in-flight'`、`ledger_id:null`、run 仍 `running`（页面在等，尚未真发出）；用户叫停后这条 attempt **没有超时收尾**，会长期留在审计表里。危害：审计表出现永久性未终态行，「查不到回执的账行判对账异常」这条判据在它身上永远悬着，对账时会被当成异常笔。处置（二选一或并用）：① 给 `in-flight` 设超时——同一 attempt 超过 N 分钟无终态就置 `failed` 并写 `reason=TIMEOUT`；② 叫停/停止时把未终态的 attempt 一并收尾。排期：第 14 片带，不在本片阻塞；判据落地时另开 spec 条目。
+**R13-9（缺陷，P2，2026-11-24 登记，不阻塞第 13 片）：外发卡在页面等待时，`outbound_attempts` 停在 `in-flight` 且无人收尾。** 读数：QA 轮 1 新 attempt `id 8` 为 `status:'in-flight'`、`ledger_id:null`、run 仍 `running`（页面在等，尚未真发出）；用户叫停后这条 attempt **没有超时收尾**，会长期留在审计表里。危害：审计表出现永久性未终态行，「查不到回执的账行判对账异常」这条判据在它身上永远悬着，对账时会被当成异常笔。处置（二选一或并用）：① 给 `in-flight` 设超时——同一 attempt 超过 N 分钟无终态就置 `failed` 并写 `reason=TIMEOUT`；② 叫停/停止时把未终态的 attempt 一并收尾。排期：第 14 片带，不在本片阻塞；判据落地时另开 spec 条目。**与夹具缺口区分（2026-11-24）**：QA 两次 `job-QA`/`job-QA2` 停在 `in-flight` 是**仿站没有对应会话页**（无打招呼入口/发送键），属夹具缺口；R13-9 说的是**产品**在 in-flight 上缺少超时/叫停收尾。两件事分开登记、分开修。
 
 **R13-8（缺陷，P1，2026-11-24 登记、当日由 P2 升级）：补信息卡只给 JSON 文本框，人无法完成审批链。**
 
